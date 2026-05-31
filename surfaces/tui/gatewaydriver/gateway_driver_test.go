@@ -18,6 +18,7 @@ import (
 
 	coreconfig "github.com/OnslaughtSnail/caelis/core/config"
 	coremodel "github.com/OnslaughtSnail/caelis/core/model"
+	coreruntime "github.com/OnslaughtSnail/caelis/core/runtime"
 	coresession "github.com/OnslaughtSnail/caelis/core/session"
 	appservices "github.com/OnslaughtSnail/caelis/internal/app/services"
 	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
@@ -45,6 +46,49 @@ func encryptCodeFreeAPIKeyForRuntimeTest(t *testing.T, apiKey string) string {
 
 func ptrRuntimeMessage(message model.Message) *model.Message {
 	return &message
+}
+
+type gatewayDriverTestTurn struct {
+	ref    coresession.Ref
+	events chan appviewmodel.SessionEventEnvelope
+}
+
+func newGatewayDriverTestTurn(ref coresession.Ref) *gatewayDriverTestTurn {
+	events := make(chan appviewmodel.SessionEventEnvelope)
+	close(events)
+	return &gatewayDriverTestTurn{ref: coresession.NormalizeRef(ref), events: events}
+}
+
+func (t *gatewayDriverTestTurn) HandleID() string {
+	return "handle"
+}
+
+func (t *gatewayDriverTestTurn) RunID() string {
+	return "run"
+}
+
+func (t *gatewayDriverTestTurn) TurnID() string {
+	return "turn"
+}
+
+func (t *gatewayDriverTestTurn) SessionRef() coresession.Ref {
+	return t.ref
+}
+
+func (t *gatewayDriverTestTurn) SessionEvents() <-chan appviewmodel.SessionEventEnvelope {
+	return t.events
+}
+
+func (t *gatewayDriverTestTurn) Submit(context.Context, coreruntime.Submission) error {
+	return nil
+}
+
+func (t *gatewayDriverTestTurn) Cancel() coreruntime.CancelResult {
+	return coreruntime.CancelResult{Status: coreruntime.CancelAlreadyCancelled}
+}
+
+func (t *gatewayDriverTestTurn) Close() error {
+	return nil
 }
 
 func closeGatewayDriverTestTurn(t *testing.T, turn Turn) {
@@ -201,12 +245,17 @@ func TestGatewayDriverSubmitRoutesActiveSessionInputToActiveTurn(t *testing.T) {
 			TurnID:     "turn-1",
 		}},
 	}
+	var activeSubmits []SubmitActiveTurnRequest
 	driver, err := NewGatewayDriver(ctx, &DriverStack{
 		GatewayFn:       func() GatewayService { return gw },
 		Workspace:       session.WorkspaceRef{Key: "ws", CWD: activeSession.CWD},
 		SandboxStatusFn: func() SandboxStatus { return SandboxStatus{RequestedBackend: "host"} },
 		StartSessionFn: func(context.Context, string, string) (coresession.Session, error) {
 			return coreSessionFromPort(activeSession), nil
+		},
+		SubmitActiveTurnFn: func(_ context.Context, req SubmitActiveTurnRequest) error {
+			activeSubmits = append(activeSubmits, req)
+			return nil
 		},
 	}, activeSession.SessionID, "surface", "")
 	if err != nil {
@@ -220,14 +269,14 @@ func TestGatewayDriverSubmitRoutesActiveSessionInputToActiveTurn(t *testing.T) {
 	if turn != nil {
 		t.Fatalf("Submit() turn = %#v, want nil for active-turn guidance", turn)
 	}
-	if gw.beginCalls != 0 {
-		t.Fatalf("BeginTurn calls = %d, want 0", gw.beginCalls)
-	}
-	if got, want := len(gw.activeSubmits), 1; got != want {
+	if got, want := len(activeSubmits), 1; got != want {
 		t.Fatalf("active submits = %d, want %d", got, want)
 	}
-	if got := gw.activeSubmits[0].Text; got != "steer next step" {
+	if got := activeSubmits[0].Submission.Text; got != "steer next step" {
 		t.Fatalf("active submit text = %q, want trimmed guidance", got)
+	}
+	if got := activeSubmits[0].SessionRef.SessionID; got != activeSession.SessionRef.SessionID {
+		t.Fatalf("active submit session = %q, want %q", got, activeSession.SessionRef.SessionID)
 	}
 }
 
@@ -468,12 +517,28 @@ func TestGatewayDriverSubmitDoesNotRouteParticipantActiveTurnInputToActiveTurn(t
 			TurnID:     "turn-1",
 		}},
 	}
+	var activeSubmits []SubmitActiveTurnRequest
+	var beginCalls int
 	driver, err := NewGatewayDriver(ctx, &DriverStack{
 		GatewayFn:       func() GatewayService { return gw },
 		Workspace:       session.WorkspaceRef{Key: "ws", CWD: activeSession.CWD},
 		SandboxStatusFn: func() SandboxStatus { return SandboxStatus{RequestedBackend: "host"} },
 		StartSessionFn: func(context.Context, string, string) (coresession.Session, error) {
 			return coreSessionFromPort(activeSession), nil
+		},
+		SubmitActiveTurnFn: func(_ context.Context, req SubmitActiveTurnRequest) error {
+			activeSubmits = append(activeSubmits, req)
+			return nil
+		},
+		BeginTurnFn: func(_ context.Context, req BeginTurnRequest) (BeginTurnResult, error) {
+			beginCalls++
+			if req.Input != "main prompt after side run" {
+				t.Fatalf("BeginTurn input = %q, want trimmed main prompt", req.Input)
+			}
+			return BeginTurnResult{
+				Session: coreSessionFromPort(activeSession),
+				Turn:    newGatewayDriverTestTurn(coreRefFromPort(activeSession.SessionRef)),
+			}, nil
 		},
 	}, activeSession.SessionID, "surface", "")
 	if err != nil {
@@ -484,11 +549,11 @@ func TestGatewayDriverSubmitDoesNotRouteParticipantActiveTurnInputToActiveTurn(t
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	if got := len(gw.activeSubmits); got != 0 {
+	if got := len(activeSubmits); got != 0 {
 		t.Fatalf("active submits = %d, want 0 for participant active turn", got)
 	}
-	if gw.beginCalls != 1 {
-		t.Fatalf("BeginTurn calls = %d, want 1 fallback main turn attempt", gw.beginCalls)
+	if beginCalls != 1 {
+		t.Fatalf("BeginTurn calls = %d, want 1 core main turn attempt", beginCalls)
 	}
 }
 
@@ -3103,19 +3168,7 @@ func TestGatewayDriverStatusIncludesPermissionGrantSummary(t *testing.T) {
 }
 
 type activeSubmitGatewayService struct {
-	active        []kernel.ActiveTurnState
-	activeSubmits []kernel.SubmitActiveTurnRequest
-	beginCalls    int
-}
-
-func (g *activeSubmitGatewayService) BeginTurn(context.Context, kernel.BeginTurnRequest) (kernel.BeginTurnResult, error) {
-	g.beginCalls++
-	return kernel.BeginTurnResult{}, nil
-}
-
-func (g *activeSubmitGatewayService) SubmitActiveTurn(_ context.Context, req kernel.SubmitActiveTurnRequest) error {
-	g.activeSubmits = append(g.activeSubmits, req)
-	return nil
+	active []kernel.ActiveTurnState
 }
 
 func (g *activeSubmitGatewayService) Interrupt(context.Context, kernel.InterruptRequest) error {
@@ -3140,10 +3193,6 @@ func (g *activeSubmitGatewayService) HandoffController(context.Context, kernel.H
 
 func (g *activeSubmitGatewayService) AttachParticipant(context.Context, kernel.AttachParticipantRequest) (session.Session, error) {
 	return session.Session{}, nil
-}
-
-func (g *activeSubmitGatewayService) PromptParticipant(context.Context, kernel.PromptParticipantRequest) (kernel.BeginTurnResult, error) {
-	return kernel.BeginTurnResult{}, nil
 }
 
 func (g *activeSubmitGatewayService) DetachParticipant(context.Context, kernel.DetachParticipantRequest) (session.Session, error) {

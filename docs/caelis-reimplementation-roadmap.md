@@ -1414,8 +1414,10 @@ be migrated before retiring the old stack:
      consumes the ACP schema content shape, with old protocol content converted
      only at the legacy gateway boundary.
    - Migrated baseline: TUI active-turn submission now uses
-     `core/runtime.Submission`; old `kernel.SubmitRequest` conversion is
-     contained in the gatewaydriver compatibility boundary.
+     `core/runtime.Submission` through an explicit core hook. The old
+     `GatewayService` turn/active-submit/participant-prompt compatibility
+     surface and `kernel.SubmitRequest` conversion have been removed from
+     `surfaces/tui/gatewaydriver`.
    - Migrated baseline: the TUI driver session contract now returns
      `core/session` session/ref values; old `ports/session` session conversion
      is contained in the gatewaydriver compatibility boundary.
@@ -1451,13 +1453,13 @@ be migrated before retiring the old stack:
      settings panels, and live remote ACP process reconnect/lifecycle behavior
      still have old driver/app assumptions or missing service-native feature
      parity, so the old TUI stack cannot be removed yet.
-   - Still pending: `surfaces/tui/gatewaydriver` still carries a small old
-     `kernel.TurnHandle` wrapper for the legacy `GatewayService` adapter, and
-     `surfaces/tui/app` still imports old gateway event/protocol types for
-     transcript renderer compatibility, terminal/tool formatting, and
-     participant projections. Retiring those imports requires moving the
-     remaining TUI bridge protocol to `core/runtime`, `core/session`, and
-     `internal/app/viewmodel`.
+   - Still pending: `surfaces/tui/gatewaydriver` still keeps old
+     `GatewayService` control-plane/session-list/session-resume adapters for
+     the current TUI shell, and `surfaces/tui/app` still imports old gateway
+     event/protocol types for transcript renderer compatibility,
+     terminal/tool formatting, and participant projections. Retiring those
+     imports requires moving the remaining TUI bridge protocol to
+     `core/runtime`, `core/session`, and `internal/app/viewmodel`.
 
 3. Future APP surface
    - Migrated baseline: `internal/app/viewmodel.StatusView` and

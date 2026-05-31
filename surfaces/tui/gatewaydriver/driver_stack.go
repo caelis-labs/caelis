@@ -17,15 +17,12 @@ import (
 )
 
 type GatewayService interface {
-	BeginTurn(context.Context, kernel.BeginTurnRequest) (kernel.BeginTurnResult, error)
-	SubmitActiveTurn(context.Context, kernel.SubmitActiveTurnRequest) error
 	Interrupt(context.Context, kernel.InterruptRequest) error
 	ResumeSession(context.Context, kernel.ResumeSessionRequest) (session.LoadedSession, error)
 	ListSessions(context.Context, kernel.ListSessionsRequest) (session.SessionList, error)
 	ControlPlaneState(context.Context, kernel.ControlPlaneStateRequest) (kernel.ControlPlaneState, error)
 	HandoffController(context.Context, kernel.HandoffControllerRequest) (session.Session, error)
 	AttachParticipant(context.Context, kernel.AttachParticipantRequest) (session.Session, error)
-	PromptParticipant(context.Context, kernel.PromptParticipantRequest) (kernel.BeginTurnResult, error)
 	DetachParticipant(context.Context, kernel.DetachParticipantRequest) (session.Session, error)
 	ActiveTurns() []kernel.ActiveTurnState
 }

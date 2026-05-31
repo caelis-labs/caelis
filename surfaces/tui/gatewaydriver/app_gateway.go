@@ -36,24 +36,6 @@ func newAppServiceGateway(svc appservices.Services) *appServiceGateway {
 	}
 }
 
-func (g *appServiceGateway) BeginTurn(ctx context.Context, req kernel.BeginTurnRequest) (kernel.BeginTurnResult, error) {
-	result, err := g.BeginCoreTurn(ctx, BeginTurnRequest{
-		SessionRef:   coreRefFromPort(req.SessionRef),
-		Input:        req.Input,
-		ContentParts: coremodel.CloneContentParts(req.ContentParts),
-		Model:        req.ModelHint,
-		Surface:      req.Surface,
-		Meta:         maps.Clone(req.Metadata),
-	})
-	if err != nil {
-		return kernel.BeginTurnResult{}, err
-	}
-	return kernel.BeginTurnResult{
-		Session: portSessionFromCore(result.Session),
-		Handle:  kernelTurnHandleCompat{turn: result.Turn},
-	}, nil
-}
-
 func (g *appServiceGateway) BeginCoreTurn(ctx context.Context, req BeginTurnRequest) (BeginTurnResult, error) {
 	ref := coresession.NormalizeRef(req.SessionRef)
 	snapshot, err := g.services.Sessions().Load(ctx, ref)
@@ -82,19 +64,6 @@ func (g *appServiceGateway) BeginCoreTurn(ctx context.Context, req BeginTurnRequ
 	}, nil
 }
 
-func (g *appServiceGateway) SubmitActiveTurn(ctx context.Context, req kernel.SubmitActiveTurnRequest) error {
-	return g.SubmitCoreActiveTurn(ctx, SubmitActiveTurnRequest{
-		SessionRef: coreRefFromPort(req.SessionRef),
-		Submission: coreSubmissionFromKernelSubmit(kernel.SubmitRequest{
-			Kind:         req.Kind,
-			Text:         req.Text,
-			ContentParts: coremodel.CloneContentParts(req.ContentParts),
-			Metadata:     maps.Clone(req.Metadata),
-			Approval:     req.Approval,
-		}),
-	})
-}
-
 func (g *appServiceGateway) SubmitCoreActiveTurn(ctx context.Context, req SubmitActiveTurnRequest) error {
 	handle := g.activeForSession(req.SessionRef.SessionID)
 	if handle == nil {
@@ -112,25 +81,6 @@ func (g *appServiceGateway) SubmitCoreActiveTurn(ctx context.Context, req Submit
 		}
 	}
 	return handle.Submit(ctx, cloneCoreSubmission(req.Submission))
-}
-
-func coreSubmissionFromKernelSubmit(req kernel.SubmitRequest) coreruntime.Submission {
-	out := coreruntime.Submission{
-		Kind:         coreruntime.SubmissionConversation,
-		Text:         req.Text,
-		ContentParts: coremodel.CloneContentParts(req.ContentParts),
-		Meta:         maps.Clone(req.Metadata),
-	}
-	if req.Kind == kernel.SubmissionKindApproval && req.Approval != nil {
-		out.Kind = coreruntime.SubmissionApproval
-		out.Approval = &coreruntime.ApprovalDecision{
-			Outcome:  strings.TrimSpace(req.Approval.Outcome),
-			OptionID: strings.TrimSpace(req.Approval.OptionID),
-			Approved: req.Approval.Approved,
-			Reason:   strings.TrimSpace(req.Approval.Reason),
-		}
-	}
-	return out
 }
 
 func (g *appServiceGateway) Interrupt(ctx context.Context, req kernel.InterruptRequest) error {
@@ -228,23 +178,6 @@ func (g *appServiceGateway) AttachParticipant(ctx context.Context, req kernel.At
 	snapshot.Events = append(snapshot.Events, event)
 	snapshot.Session.Participants = participantsFromCoreSnapshot(snapshot)
 	return portSessionFromCore(snapshot.Session), nil
-}
-
-func (g *appServiceGateway) PromptParticipant(ctx context.Context, req kernel.PromptParticipantRequest) (kernel.BeginTurnResult, error) {
-	result, err := g.PromptCoreParticipant(ctx, PromptParticipantRequest{
-		SessionRef:    coreRefFromPort(req.SessionRef),
-		ParticipantID: req.ParticipantID,
-		Input:         req.Input,
-		ContentParts:  coremodel.CloneContentParts(req.ContentParts),
-		Source:        req.Source,
-	})
-	if err != nil {
-		return kernel.BeginTurnResult{}, err
-	}
-	return kernel.BeginTurnResult{
-		Session: portSessionFromCore(result.Session),
-		Handle:  kernelTurnHandleCompat{turn: result.Turn},
-	}, nil
 }
 
 func (g *appServiceGateway) PromptCoreParticipant(ctx context.Context, req PromptParticipantRequest) (BeginTurnResult, error) {
@@ -390,96 +323,6 @@ func cloneCoreSubmission(in coreruntime.Submission) coreruntime.Submission {
 		out.Approval = &approval
 	}
 	return out
-}
-
-type kernelTurnHandleCompat struct {
-	turn Turn
-}
-
-func (h kernelTurnHandleCompat) HandleID() string {
-	if h.turn == nil {
-		return ""
-	}
-	return h.turn.HandleID()
-}
-
-func (h kernelTurnHandleCompat) RunID() string {
-	if h.turn == nil {
-		return ""
-	}
-	return h.turn.RunID()
-}
-
-func (h kernelTurnHandleCompat) TurnID() string {
-	if h.turn == nil {
-		return ""
-	}
-	return h.turn.TurnID()
-}
-
-func (h kernelTurnHandleCompat) SessionRef() portsession.SessionRef {
-	if h.turn == nil {
-		return portsession.SessionRef{}
-	}
-	return portRefFromCore(h.turn.SessionRef())
-}
-
-func (h kernelTurnHandleCompat) CreatedAt() time.Time {
-	if h.turn == nil {
-		return time.Time{}
-	}
-	if created, ok := h.turn.(interface{ CreatedAt() time.Time }); ok {
-		return created.CreatedAt()
-	}
-	return time.Time{}
-}
-
-func (h kernelTurnHandleCompat) Events() <-chan kernel.EventEnvelope {
-	out := make(chan kernel.EventEnvelope)
-	close(out)
-	return out
-}
-
-func (h kernelTurnHandleCompat) EventsAfter(cursor string) ([]kernel.EventEnvelope, string, error) {
-	return nil, strings.TrimSpace(cursor), nil
-}
-
-func (h kernelTurnHandleCompat) SessionEvents() <-chan appviewmodel.SessionEventEnvelope {
-	if h.turn == nil {
-		return nil
-	}
-	if appTurn, ok := h.turn.(interface {
-		SessionEvents() <-chan appviewmodel.SessionEventEnvelope
-	}); ok {
-		return appTurn.SessionEvents()
-	}
-	return nil
-}
-
-func (h kernelTurnHandleCompat) Submit(ctx context.Context, req kernel.SubmitRequest) error {
-	if h.turn == nil {
-		return nil
-	}
-	return h.turn.Submit(ctx, coreSubmissionFromKernelSubmit(req))
-}
-
-func (h kernelTurnHandleCompat) Cancel() kernel.CancelResult {
-	if h.turn == nil {
-		return kernel.CancelResult{Status: kernel.CancelStatusAlreadyCancelled}
-	}
-	result := h.turn.Cancel()
-	status := kernel.CancelStatusAlreadyCancelled
-	if result.Status == coreruntime.CancelCancelled {
-		status = kernel.CancelStatusCancelled
-	}
-	return kernel.CancelResult{Status: status, Err: result.Err}
-}
-
-func (h kernelTurnHandleCompat) Close() error {
-	if h.turn == nil {
-		return nil
-	}
-	return h.turn.Close()
 }
 
 func (h *appServiceTurnHandle) Cancel() coreruntime.CancelResult {

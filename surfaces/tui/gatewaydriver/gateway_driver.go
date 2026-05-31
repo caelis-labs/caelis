@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 	"net/url"
 	"strings"
 	"sync"
@@ -385,13 +384,7 @@ func (d *GatewayDriver) Submit(ctx context.Context, submission Submission) (Turn
 				Submission: coreSub,
 			})
 		} else {
-			err = gw.SubmitActiveTurn(ctx, kernel.SubmitActiveTurnRequest{
-				SessionRef:   activeSession.SessionRef,
-				Kind:         kernel.SubmissionKindConversation,
-				Text:         input,
-				ContentParts: contentParts,
-				Metadata:     maps.Clone(coreSub.Meta),
-			})
+			err = ErrMigrationPending
 		}
 		if err == nil {
 			return nil, nil
@@ -420,27 +413,7 @@ func (d *GatewayDriver) Submit(ctx context.Context, submission Submission) (Turn
 		d.mu.Unlock()
 		return result.Turn, nil
 	}
-	result, err := gw.BeginTurn(ctx, kernel.BeginTurnRequest{
-		SessionRef:   activeSession.SessionRef,
-		Input:        input,
-		ContentParts: contentParts,
-		Surface:      d.bindingKey,
-		Metadata: map[string]any{
-			"submission_mode": string(submission.Mode),
-			"display_text":    strings.TrimSpace(submission.DisplayText),
-		},
-	})
-	if err != nil {
-		return nil, err
-	}
-	d.mu.Lock()
-	d.session = result.Session
-	d.hasSession = true
-	d.mu.Unlock()
-	if result.Handle == nil {
-		return nil, nil
-	}
-	return gatewayTurn{handle: result.Handle}, nil
+	return nil, ErrMigrationPending
 }
 
 func activeKernelTurnForSession(active []kernel.ActiveTurnState, ref session.SessionRef) bool {
@@ -705,10 +678,6 @@ func (d *GatewayDriver) ContinueSubagent(ctx context.Context, handle string, pro
 	if err != nil {
 		return nil, err
 	}
-	gw, err := d.gateway()
-	if err != nil {
-		return nil, err
-	}
 	if d.stack != nil && d.stack.PromptParticipantFn != nil {
 		result, err := d.stack.PromptParticipantFn(ctx, PromptParticipantRequest{
 			SessionRef:    coreRefFromPort(activeSession.SessionRef),
@@ -728,21 +697,7 @@ func (d *GatewayDriver) ContinueSubagent(ctx context.Context, handle string, pro
 		}
 		return result.Turn, nil
 	}
-	result, err := gw.PromptParticipant(ctx, kernel.PromptParticipantRequest{
-		SessionRef:    activeSession.SessionRef,
-		BindingKey:    d.bindingKey,
-		ParticipantID: participantID,
-		Input:         prompt,
-		ContentParts:  contentParts,
-		Source:        "user_side_agent",
-	})
-	if err != nil {
-		return nil, err
-	}
-	if result.Handle == nil {
-		return nil, nil
-	}
-	return gatewayTurn{handle: result.Handle}, nil
+	return nil, ErrMigrationPending
 }
 
 func validateConnectConfig(tpl providerTemplate, cfg ConnectConfig) error {
@@ -790,63 +745,6 @@ func isXiaomiTokenPlanProvider(provider string) bool {
 
 func isXiaomiTokenPlanBaseURL(baseURL string) bool {
 	return appservices.IsXiaomiTokenPlanBaseURL(baseURL)
-}
-
-type gatewayTurn struct {
-	handle kernel.TurnHandle
-}
-
-type sessionEventTurnHandle interface {
-	SessionEvents() <-chan appviewmodel.SessionEventEnvelope
-}
-
-type coreSubmissionTurnHandle interface {
-	SubmitCore(context.Context, coreruntime.Submission) error
-}
-
-func (t gatewayTurn) HandleID() string            { return t.handle.HandleID() }
-func (t gatewayTurn) RunID() string               { return t.handle.RunID() }
-func (t gatewayTurn) TurnID() string              { return t.handle.TurnID() }
-func (t gatewayTurn) SessionRef() coresession.Ref { return coreRefFromPort(t.handle.SessionRef()) }
-func (t gatewayTurn) SessionEvents() <-chan appviewmodel.SessionEventEnvelope {
-	if handle, ok := t.handle.(sessionEventTurnHandle); ok {
-		return handle.SessionEvents()
-	}
-	return nil
-}
-func (t gatewayTurn) Submit(ctx context.Context, submission coreruntime.Submission) error {
-	if handle, ok := t.handle.(coreSubmissionTurnHandle); ok {
-		return handle.SubmitCore(ctx, submission)
-	}
-	return t.handle.Submit(ctx, kernelSubmitRequestFromCoreSubmission(submission))
-}
-func (t gatewayTurn) Cancel() coreruntime.CancelResult {
-	result := t.handle.Cancel()
-	status := coreruntime.CancelAlreadyCancelled
-	if result.Status == kernel.CancelStatusCancelled {
-		status = coreruntime.CancelCancelled
-	}
-	return coreruntime.CancelResult{Status: status, Err: result.Err}
-}
-func (t gatewayTurn) Close() error { return t.handle.Close() }
-
-func kernelSubmitRequestFromCoreSubmission(in coreruntime.Submission) kernel.SubmitRequest {
-	out := kernel.SubmitRequest{
-		Kind:         kernel.SubmissionKindConversation,
-		Text:         in.Text,
-		ContentParts: model.CloneContentParts(in.ContentParts),
-		Metadata:     maps.Clone(in.Meta),
-	}
-	if in.Kind == coreruntime.SubmissionApproval && in.Approval != nil {
-		out.Kind = kernel.SubmissionKindApproval
-		out.Approval = &kernel.ApprovalDecision{
-			Outcome:  strings.TrimSpace(in.Approval.Outcome),
-			OptionID: strings.TrimSpace(in.Approval.OptionID),
-			Approved: in.Approval.Approved,
-			Reason:   strings.TrimSpace(in.Approval.Reason),
-		}
-	}
-	return out
 }
 
 func firstNonEmpty(values ...string) string {
