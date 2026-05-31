@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/impl/session/memory"
 	"github.com/OnslaughtSnail/caelis/ports/agent"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
@@ -1336,16 +1335,12 @@ func TestPersistApprovalReviewUsageUsesSessionStateNotHistory(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
-	activeSession, err := sessions.StartSession(ctx, session.StartSessionRequest{
-		AppName:            "caelis",
-		UserID:             "u",
-		Workspace:          session.WorkspaceRef{Key: "ws"},
-		PreferredSessionID: "s1",
-	})
-	if err != nil {
-		t.Fatalf("StartSession() error = %v", err)
+	activeSession := session.Session{
+		SessionRef: session.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+		},
 	}
+	sessions := &recordingSessionService{sessionResult: activeSession}
 	gw := &Gateway{
 		sessions: sessions,
 		clock:    time.Now,
@@ -2107,6 +2102,7 @@ type recordingSessionService struct {
 	listErr            error
 	sessionErr         error
 	eventsErr          error
+	state              map[string]any
 }
 
 func (s *recordingSessionService) StartSession(_ context.Context, req session.StartSessionRequest) (session.Session, error) {
@@ -2169,14 +2165,19 @@ func (s *recordingSessionService) SnapshotState(context.Context, session.Session
 	if s.snapshotErr != nil {
 		return nil, s.snapshotErr
 	}
-	return map[string]any{}, nil
+	return cloneMap(s.state), nil
 }
 
 func (s *recordingSessionService) ReplaceState(context.Context, session.SessionRef, map[string]any) error {
 	return nil
 }
 
-func (s *recordingSessionService) UpdateState(context.Context, session.SessionRef, func(map[string]any) (map[string]any, error)) error {
+func (s *recordingSessionService) UpdateState(_ context.Context, _ session.SessionRef, update func(map[string]any) (map[string]any, error)) error {
+	next, err := update(cloneMap(s.state))
+	if err != nil {
+		return err
+	}
+	s.state = cloneMap(next)
 	return nil
 }
 

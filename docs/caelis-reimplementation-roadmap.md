@@ -1073,6 +1073,14 @@ The completed work is intentionally limited to the reusable skeleton:
   orphaned old `impl/tool/builtin`, `impl/tool/registry`, and
   `impl/tool/internal/argparse` packages were deleted instead of being kept as a
   parallel tool runtime.
+- Legacy orphaned implementation removal: after settings, prompt assembly,
+  canonical stores, task journals, approval review, and built-in permission
+  policy moved onto the new app/engine/adapter stack, the unused old
+  `impl/config/file`, `impl/prompt/static`, `impl/session/{file,memory}`,
+  `impl/task/file`, `impl/stream/memory`, `impl/approval/*`, and
+  `impl/policy/*` implementations were deleted. The remaining old
+  `ports/*`/`kernel` contracts are now only retained where TUI bridge code still
+  needs them.
 - Architecture lint rules for the new package boundaries.
 - End-to-end skeleton test covering plugin resources, SQLite, ACP server,
   OpenAI-compatible provider mock, shell tool execution, canonical reload, and
@@ -1700,6 +1708,10 @@ be migrated before retiring the old stack:
      mutating filesystem calls on the model-backed review path, and leaves
      unknown plugin tools to explicit extension policy instead of importing the
      old `ports/policy` preset registry.
+   - Migrated baseline: the orphaned old approval adapters and policy preset
+     implementations have been removed; the only approval path for the local
+     stack is now the core-native engine policy chain plus app-service approval
+     submission.
    - Migrated baseline: approval review prompts now persist a cumulative
      validated reusable prefix and event cursor in canonical approval metadata.
      Later review calls replay the prior approved review messages, then submit
@@ -2009,6 +2021,10 @@ be migrated before retiring the old stack:
     - Migrated baseline: TUI resume/reload replay now restores canonical plan
       updates alongside durable user and final assistant messages, while still
       filtering transient chunks and process-level tool trace events.
+    - Migrated baseline: the old `impl/session/{file,memory}` session stores and
+      `impl/task/file` task store have been removed; new product paths use
+      `core/session.Store` adapters and core-native task journals instead of
+      retaining a parallel old persistence implementation.
     - Still pending: current on-disk legacy session layout migration and
       remaining reload UX polish are not implemented.
 
@@ -2021,8 +2037,8 @@ Recommended sequence:
    controller process lifecycle, and settings/diagnostics panel parity.
 2. Close the remaining provider-specific behavior gaps in core-native adapters
    without reintroducing a parallel provider factory/catalog stack.
-3. Port sandbox router/backends and permission policy before moving mutating
-   tools.
+3. Finish sandbox router/backend cleanup and remaining permission-policy
+   diagnostics without reintroducing the removed preset/tool stacks.
 4. Finish durable async SPAWN task control and durable task runtime behavior
    behind `core/tool.Registry` and `internal/engine/tasks`; the shared
    app-service history projection is now a baseline, so this milestone should
