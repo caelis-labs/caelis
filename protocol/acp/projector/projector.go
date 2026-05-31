@@ -9,6 +9,7 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/core/model"
 	"github.com/OnslaughtSnail/caelis/core/session"
+	coretool "github.com/OnslaughtSnail/caelis/core/tool"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
@@ -284,25 +285,27 @@ func toolMeta(tool session.ToolEvent) map[string]any {
 	}
 	if _, ok := meta["terminal_info"]; !ok {
 		info := map[string]any{"terminal_id": terminalID}
-		if taskID := firstNonEmpty(anyString(tool.Output["task_id"]), anyString(runtimeTaskValue(tool.Meta, "task_id"))); taskID != "" {
+		if taskID := firstNonEmpty(anyString(tool.Output["task_id"]), anyString(coretool.RuntimeTaskValue(tool.Meta, "task_id"))); taskID != "" {
 			info["task_id"] = taskID
 		}
 		if name := strings.TrimSpace(tool.Name); name != "" {
 			info["tool"] = name
 		}
-		if command := firstNonEmpty(anyString(tool.Input["command"]), anyString(tool.Output["command"])); command != "" {
+		if command := firstNonEmpty(anyString(tool.Input["command"]), anyString(tool.Output["command"]), anyString(coretool.RuntimeTaskValue(tool.Meta, "command"))); command != "" {
 			info["command"] = command
 		}
-		if cwd := firstNonEmpty(anyString(tool.Input["cwd"]), anyString(tool.Input["workdir"])); cwd != "" {
+		if cwd := firstNonEmpty(anyString(tool.Input["cwd"]), anyString(tool.Input["workdir"]), anyString(tool.Output["cwd"]), anyString(coretool.RuntimeTaskValue(tool.Meta, "cwd"))); cwd != "" {
 			info["cwd"] = cwd
 		}
 		meta["terminal_info"] = info
 	}
 	if output := terminalOutputText(tool); output != "" {
-		meta["terminal_output"] = map[string]any{
+		outputMeta := map[string]any{
 			"terminal_id": terminalID,
 			"data":        output,
 		}
+		addTerminalOutputHint(outputMeta, tool)
+		meta["terminal_output"] = outputMeta
 	}
 	if exitCode, ok := terminalExitCode(tool); ok {
 		meta["terminal_exit"] = map[string]any{
@@ -323,9 +326,9 @@ func terminalIDFromTool(tool session.ToolEvent) string {
 	}
 	return firstNonEmpty(
 		anyString(tool.Output["terminal_id"]),
+		anyString(coretool.RuntimeTaskValue(tool.Meta, "terminal_id")),
 		anyString(tool.Output["task_id"]),
-		anyString(runtimeTaskValue(tool.Meta, "terminal_id")),
-		anyString(runtimeTaskValue(tool.Meta, "task_id")),
+		anyString(coretool.RuntimeTaskValue(tool.Meta, "task_id")),
 	)
 }
 
@@ -345,27 +348,63 @@ func terminalOutputText(tool session.ToolEvent) string {
 			parts = append(parts, text)
 		}
 	}
+	if len(parts) == 0 {
+		if text := coretool.RuntimeTaskOutputText(tool.Meta); text != "" {
+			parts = append(parts, text)
+		}
+	}
 	return strings.Join(parts, "\n")
+}
+
+func addTerminalOutputHint(out map[string]any, tool session.ToolEvent) {
+	for _, key := range []string{"stdout_cursor", "stderr_cursor", "stdout_dropped_bytes", "stderr_dropped_bytes", "output_truncated"} {
+		if value, ok := firstTerminalHintValue(tool.Output[key], coretool.RuntimeTaskValue(tool.Meta, key)); ok {
+			out[key] = value
+		}
+	}
+}
+
+func firstTerminalHintValue(values ...any) (any, bool) {
+	for _, value := range values {
+		switch typed := value.(type) {
+		case nil:
+			continue
+		case string:
+			if strings.TrimSpace(typed) != "" {
+				return typed, true
+			}
+		case int:
+			if typed != 0 {
+				return typed, true
+			}
+		case int64:
+			if typed != 0 {
+				return typed, true
+			}
+		case float64:
+			if typed != 0 {
+				return typed, true
+			}
+		case json.Number:
+			if strings.TrimSpace(typed.String()) != "" && typed.String() != "0" {
+				return typed, true
+			}
+		case bool:
+			if typed {
+				return typed, true
+			}
+		default:
+			return typed, true
+		}
+	}
+	return nil, false
 }
 
 func terminalExitCode(tool session.ToolEvent) (int, bool) {
 	if code, ok := anyInt(tool.Output["exit_code"]); ok {
 		return code, true
 	}
-	return anyInt(runtimeTaskValue(tool.Meta, "exit_code"))
-}
-
-func runtimeTaskValue(meta map[string]any, key string) any {
-	if len(meta) == 0 {
-		return nil
-	}
-	caelis, _ := meta["caelis"].(map[string]any)
-	runtimeMeta, _ := caelis["runtime"].(map[string]any)
-	task, _ := runtimeMeta["task"].(map[string]any)
-	if len(task) == 0 {
-		return nil
-	}
-	return task[strings.TrimSpace(key)]
+	return anyInt(coretool.RuntimeTaskValue(tool.Meta, "exit_code"))
 }
 
 func anyString(value any) string {

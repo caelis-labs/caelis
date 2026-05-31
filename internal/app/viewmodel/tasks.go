@@ -31,6 +31,8 @@ type TaskItem struct {
 	RemoteSessionID string    `json:"remote_session_id,omitempty"`
 	StdoutCursor    int64     `json:"stdout_cursor,omitempty"`
 	StderrCursor    int64     `json:"stderr_cursor,omitempty"`
+	OutputPreview   string    `json:"output_preview,omitempty"`
+	OutputTruncated bool      `json:"output_truncated,omitempty"`
 	EventID         string    `json:"event_id,omitempty"`
 	TurnID          string    `json:"turn_id,omitempty"`
 	ExitCode        int       `json:"exit_code,omitempty"`
@@ -51,6 +53,7 @@ type TaskOutputView struct {
 
 func TaskItemFromSnapshot(snapshot sandbox.SessionSnapshot) TaskItem {
 	meta := snapshot.Metadata
+	outputPreview, outputTruncated, stdoutCursor, stderrCursor := taskSnapshotOutputPreview(snapshot.OutputPreview)
 	kind := firstTaskSnapshotString(meta, "task_kind", "kind")
 	if kind == "" {
 		if strings.HasPrefix(strings.ToUpper(strings.TrimSpace(snapshot.Command)), "SPAWN") {
@@ -82,13 +85,46 @@ func TaskItemFromSnapshot(snapshot sandbox.SessionSnapshot) TaskItem {
 		TerminalID:      strings.TrimSpace(snapshot.Terminal.ID),
 		Agent:           firstTaskSnapshotString(meta, "agent"),
 		RemoteSessionID: firstTaskSnapshotString(meta, "remote_session_id"),
-		StdoutCursor:    firstTaskSnapshotInt64(meta, "stdout_cursor"),
-		StderrCursor:    firstTaskSnapshotInt64(meta, "stderr_cursor"),
+		StdoutCursor:    firstNonZeroInt64(stdoutCursor, firstTaskSnapshotInt64(meta, "stdout_cursor")),
+		StderrCursor:    firstNonZeroInt64(stderrCursor, firstTaskSnapshotInt64(meta, "stderr_cursor")),
+		OutputPreview:   outputPreview,
+		OutputTruncated: outputTruncated,
 		ExitCode:        snapshot.ExitCode,
 		Error:           strings.TrimSpace(snapshot.Error),
 		StartedAt:       snapshot.StartedAt,
 		UpdatedAt:       snapshot.UpdatedAt,
 	}
+}
+
+func taskSnapshotOutputPreview(output *sandbox.OutputSnapshot) (string, bool, int64, int64) {
+	if output == nil {
+		return "", false, 0, 0
+	}
+	preview := joinTaskOutputStreams(output.Stdout, output.Stderr)
+	truncated := output.StdoutDroppedBytes > 0 || output.StderrDroppedBytes > 0
+	return preview, truncated, output.Cursor.Stdout, output.Cursor.Stderr
+}
+
+func joinTaskOutputStreams(stdout string, stderr string) string {
+	switch {
+	case stdout == "":
+		return stderr
+	case stderr == "":
+		return stdout
+	case strings.HasSuffix(stdout, "\n") || strings.HasPrefix(stderr, "\n"):
+		return stdout + stderr
+	default:
+		return stdout + "\n" + stderr
+	}
+}
+
+func firstNonZeroInt64(values ...int64) int64 {
+	for _, value := range values {
+		if value != 0 {
+			return value
+		}
+	}
+	return 0
 }
 
 func TaskOutputFromSnapshot(snapshot sandbox.SessionSnapshot, output sandbox.OutputSnapshot) TaskOutputView {

@@ -54,25 +54,29 @@ func SessionResult(ctx context.Context, call tool.Call, name string, action stri
 }
 
 func sessionPayload(action string, snapshot sandbox.SessionSnapshot, output sandbox.OutputSnapshot) map[string]any {
-	state := snapshot.State
-	if state == "" {
-		if snapshot.Running {
-			state = sandbox.SessionRunning
-		} else if snapshot.ExitCode == 0 {
-			state = sandbox.SessionCompleted
-		} else {
-			state = sandbox.SessionFailed
-		}
-	}
+	state := normalizedSessionState(snapshot)
 	payload := map[string]any{
-		"action":        strings.TrimSpace(action),
-		"state":         string(state),
-		"running":       snapshot.Running,
-		"task_id":       snapshot.Ref.ID,
-		"backend":       string(snapshot.Ref.Backend),
-		"terminal_id":   snapshot.Terminal.ID,
-		"stdout_cursor": output.Cursor.Stdout,
-		"stderr_cursor": output.Cursor.Stderr,
+		"action":         strings.TrimSpace(action),
+		"state":          string(state),
+		"running":        snapshot.Running,
+		"task_id":        snapshot.Ref.ID,
+		"backend":        string(snapshot.Ref.Backend),
+		"terminal_id":    snapshot.Terminal.ID,
+		"supports_input": snapshot.SupportsInput,
+		"stdout_cursor":  output.Cursor.Stdout,
+		"stderr_cursor":  output.Cursor.Stderr,
+	}
+	if command := strings.TrimSpace(snapshot.Command); command != "" {
+		payload["command"] = command
+	}
+	if cwd := strings.TrimSpace(snapshot.Dir); cwd != "" {
+		payload["cwd"] = cwd
+	}
+	if !snapshot.StartedAt.IsZero() {
+		payload["started_at"] = snapshot.StartedAt
+	}
+	if !snapshot.UpdatedAt.IsZero() {
+		payload["updated_at"] = snapshot.UpdatedAt
 	}
 	if output.Stdout != "" {
 		payload["stdout"] = output.Stdout
@@ -104,15 +108,38 @@ func sessionPayload(action string, snapshot sandbox.SessionSnapshot, output sand
 func sessionMeta(action string, snapshot sandbox.SessionSnapshot, output sandbox.OutputSnapshot, session sandbox.Session) map[string]any {
 	task := map[string]any{
 		"action":        strings.TrimSpace(action),
-		"state":         string(snapshot.State),
+		"state":         string(normalizedSessionState(snapshot)),
 		"running":       snapshot.Running,
 		"task_id":       snapshot.Ref.ID,
 		"terminal_id":   snapshot.Terminal.ID,
 		"stdout_cursor": output.Cursor.Stdout,
 		"stderr_cursor": output.Cursor.Stderr,
 	}
+	if backend := strings.TrimSpace(string(snapshot.Ref.Backend)); backend != "" {
+		task["backend"] = backend
+	}
+	if command := strings.TrimSpace(snapshot.Command); command != "" {
+		task["command"] = command
+	}
+	if cwd := strings.TrimSpace(snapshot.Dir); cwd != "" {
+		task["cwd"] = cwd
+	}
+	task["supports_input"] = snapshot.SupportsInput
+	if !snapshot.StartedAt.IsZero() {
+		task["started_at"] = snapshot.StartedAt
+	}
+	if !snapshot.UpdatedAt.IsZero() {
+		task["updated_at"] = snapshot.UpdatedAt
+	}
 	if !snapshot.Running {
 		task["exit_code"] = snapshot.ExitCode
+	}
+	if errText := strings.TrimSpace(snapshot.Error); errText != "" {
+		task["error"] = errText
+	}
+	addRuntimeTaskPreview(task, output, "output_text", false)
+	if snapshot.OutputPreview != nil {
+		addRuntimeTaskPreview(task, *snapshot.OutputPreview, "", true)
 	}
 	for key, value := range snapshot.Metadata {
 		key = strings.TrimSpace(key)
@@ -128,18 +155,43 @@ func sessionMeta(action string, snapshot sandbox.SessionSnapshot, output sandbox
 			}
 		}
 	}
-	return map[string]any{
+	return tool.WithRuntimeTaskMeta(map[string]any{
 		"task_id":       snapshot.Ref.ID,
-		"state":         string(snapshot.State),
+		"state":         string(normalizedSessionState(snapshot)),
 		"running":       snapshot.Running,
 		"stdout_cursor": output.Cursor.Stdout,
 		"stderr_cursor": output.Cursor.Stderr,
-		"caelis": map[string]any{
-			"version": 1,
-			"runtime": map[string]any{
-				"task": task,
-			},
-		},
+	}, task)
+}
+
+func normalizedSessionState(snapshot sandbox.SessionSnapshot) sandbox.SessionState {
+	if snapshot.State != "" {
+		return snapshot.State
+	}
+	if snapshot.Running {
+		return sandbox.SessionRunning
+	}
+	if snapshot.ExitCode == 0 {
+		return sandbox.SessionCompleted
+	}
+	return sandbox.SessionFailed
+}
+
+func addRuntimeTaskPreview(task map[string]any, output sandbox.OutputSnapshot, textKey string, replace bool) {
+	preview := tool.RuntimeTaskPreview(output.Stdout, output.Stderr, output.StdoutDroppedBytes, output.StderrDroppedBytes, output.Cursor.Stdout, output.Cursor.Stderr)
+	for key, value := range preview {
+		if replace {
+			task[key] = value
+			continue
+		}
+		if _, exists := task[key]; !exists {
+			task[key] = value
+		}
+	}
+	if textKey != "" {
+		if text := tool.JoinRuntimeTaskStreams(output.Stdout, output.Stderr); text != "" {
+			task[textKey] = text
+		}
 	}
 }
 

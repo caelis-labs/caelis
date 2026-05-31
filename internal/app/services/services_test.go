@@ -3708,6 +3708,10 @@ func TestTaskServiceListsLiveAndDurableTaskHistory(t *testing.T) {
 			StartedAt:     now,
 			UpdatedAt:     now.Add(4 * time.Second),
 			Terminal:      sandbox.TerminalRef{ID: "term-1", SessionID: "task-1"},
+			OutputPreview: &sandbox.OutputSnapshot{
+				Stdout: "final output\n",
+				Cursor: sandbox.OutputCursor{Stdout: 42, Stderr: 6},
+			},
 		},
 	}
 	liveOnly := &recordingTaskSession{
@@ -3754,6 +3758,9 @@ func TestTaskServiceListsLiveAndDurableTaskHistory(t *testing.T) {
 	}
 	if task.Source != "live" || task.State != string(sandbox.SessionCompleted) || task.StdoutCursor != 42 || task.StderrCursor != 6 || task.Action != "tail" || task.TerminalID != "term-1" {
 		t.Fatalf("task-1 = %#v, want live state merged with durable cursors", task)
+	}
+	if !strings.Contains(task.OutputPreview, "final output") {
+		t.Fatalf("task-1 = %#v, want live terminal preview", task)
 	}
 	spawn, ok := findTaskItem(list.Tasks, "spawn-1")
 	if !ok {

@@ -118,6 +118,10 @@ func TestTaskToolListsAndTailsAsyncCommand(t *testing.T) {
 	if stdout, _ := startPayload["stdout"].(string); !strings.Contains(stdout, "one") {
 		t.Fatalf("start stdout = %q, want first chunk", stdout)
 	}
+	startTaskMeta := runtimeTaskMeta(t, start.Meta)
+	if preview, _ := startTaskMeta["output_preview"].(string); !strings.Contains(preview, "one") {
+		t.Fatalf("start runtime task meta = %#v, want output preview", startTaskMeta)
+	}
 
 	list := callTool(t, taskTool, map[string]any{
 		"action": "list",
@@ -134,6 +138,9 @@ func TestTaskToolListsAndTailsAsyncCommand(t *testing.T) {
 	taskEntry, ok := tasks[0].(map[string]any)
 	if !ok || taskEntry["task_id"] != taskID {
 		t.Fatalf("task entry = %#v, want task id %q", taskEntry, taskID)
+	}
+	if preview, _ := taskEntry["output_preview"].(string); !strings.Contains(preview, "one") {
+		t.Fatalf("task entry = %#v, want durable output preview", taskEntry)
 	}
 
 	stdoutCursor, _ := startPayload["stdout_cursor"].(float64)
@@ -305,6 +312,23 @@ func taskListContains(payload map[string]any, taskID string) bool {
 func stringValue(value any) string {
 	out, _ := value.(string)
 	return out
+}
+
+func runtimeTaskMeta(t *testing.T, meta map[string]any) map[string]any {
+	t.Helper()
+	caelis, ok := meta["caelis"].(map[string]any)
+	if !ok {
+		t.Fatalf("meta = %#v, missing caelis", meta)
+	}
+	runtimeMeta, ok := caelis["runtime"].(map[string]any)
+	if !ok {
+		t.Fatalf("meta = %#v, missing runtime", meta)
+	}
+	taskMeta, ok := runtimeMeta["task"].(map[string]any)
+	if !ok {
+		t.Fatalf("meta = %#v, missing runtime task", meta)
+	}
+	return taskMeta
 }
 
 type resolverOnly struct {

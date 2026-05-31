@@ -664,6 +664,10 @@ replaced the old `app/gatewayapp` stack for current entrypoints:
   `sandbox_permissions=require_escalated` contract for host execution.
 - `internal/adapters/tools/task`: core-native wait/write/cancel control for
   yielded sandbox sessions.
+- `core/sandbox.SessionSnapshot` and `core/tool`: shared bounded terminal
+  preview and `caelis.runtime.task` metadata contracts used by shell/TASK/SPAWN
+  tools, ACP projection, and app-service task view models without TUI-only
+  transcript caches.
 - `internal/adapters/tools/filesystem`: core-native file read/list/glob/search,
   exact write, and patch tools built on `core/sandbox.FileSystem`.
 - `internal/adapters/tools/plan`: core-native `update_plan` tool that feeds
@@ -740,8 +744,8 @@ replaced the old `app/gatewayapp` stack for current entrypoints:
   updates and permission requests. It now also projects core-native
   sandbox/task terminal markers plus `_meta.terminal_info`,
   `_meta.terminal_output`, and `_meta.terminal_exit` from canonical tool
-  events, so the ACP server no longer depends on the deleted old ACP runtime
-  projector for terminal display hints.
+  events and runtime task previews, so the ACP server no longer depends on the
+  deleted old ACP runtime projector for terminal display hints.
 - `internal/surface/acpserver`: ACP JSON-RPC server over the new runtime engine.
 - `internal/e2e`: new-architecture end-to-end harness that exercises local
   composition, ACP stdio serving, plugin resource loading, registry aliases,
@@ -761,6 +765,8 @@ The current verification path covers:
   reload
 - model tool call -> shell tool -> host sandbox -> tool result -> model
   continuation
+- host/SPAWN async task snapshot -> bounded terminal preview -> shell/TASK
+  runtime metadata -> shared task view model and ACP terminal projection
 - configured local stack -> built-in shell tool -> host sandbox -> model
   continuation
 - approval-aware tool execution -> canonical pending/decision events ->
@@ -1919,6 +1925,12 @@ be migrated before retiring the old stack:
      `SPAWN` is now recoverable through shared app-service history projection
      from canonical `session.ToolEvent` / subagent participant events, so
      task-panel reload does not depend on TUI-only caches.
+   - Migrated baseline: bounded terminal previews are now part of the shared
+     runtime contracts. Host async sessions and SPAWN journals persist
+     `SessionSnapshot.OutputPreview`; shell/TASK results emit the canonical
+     `caelis.runtime.task` preview metadata; task lists, app view models, and
+     ACP projection consume that same contract instead of guessing from
+     stdout/stderr payloads.
    - Migrated baseline: `SPAWN` now has a core-native tool declaration and is
      executed by the runtime loop through an explicit spawner interface. The
      default local stack can expose registered external ACP agents as SPAWN
@@ -2139,8 +2151,8 @@ be migrated before retiring the old stack:
       a recovered read-only session, continue reading output from the inherited
       stream files, wait for completion, and cancel the recovered process by
       pid/process group.
-    - Still pending: richer persisted terminal preview metadata and richer
-      remote controller lifecycle diagnostics remain incomplete.
+    - Still pending: richer remote controller lifecycle diagnostics remain
+      incomplete.
 
 11. Task runtime and async work
     - Migrated baseline: host async command sessions now implement the
@@ -2201,8 +2213,12 @@ be migrated before retiring the old stack:
       and pid-backed recovery across local runtime restarts. Reopened live host
       sessions are read-only for stdin, but can still be tailed, waited, listed,
       and cancelled through the same `core/sandbox.Session` and TASK paths.
-    - Still pending: richer persisted terminal previews and richer visual
-      TUI/APP task panels remain incomplete.
+    - Migrated baseline: live and restored host/SPAWN task snapshots now carry
+      bounded terminal preview data with cursors and truncation state, and the
+      model-facing TASK output plus shared app task views consume the same
+      runtime preview contract.
+    - Still pending: richer visual TUI/APP task panels and task lifecycle
+      stores beyond local journals remain incomplete.
 
 12. Compaction and replay validation
     - Migrated baseline: manual TUI compaction through `internal/app/services`
@@ -2345,9 +2361,9 @@ Recommended sequence:
    diagnostics, and visual settings/diagnostics editors.
 2. Finish sandbox backend cleanup and Windows async-session cross-platform
    validation without reintroducing the removed router/preset/tool stacks.
-3. Finish richer durable task metadata and terminal preview behavior behind
-   `core/tool.Registry`; host process and SPAWN continuation are now baseline
-   runtime capabilities.
+3. Finish richer task lifecycle stores and visual task-panel behavior behind
+   shared app/view-model contracts; host process recovery, SPAWN continuation,
+   and bounded terminal preview metadata are now baseline runtime capabilities.
 4. Port the remaining TUI panels and richer interactive flows to
    `internal/app/services`, especially richer `/connect`, task, and visual
    settings panels, preserving existing rendering as surface-local code.

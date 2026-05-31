@@ -52,6 +52,8 @@ type spawnTaskSession struct {
 	updatedAt       time.Time
 }
 
+const spawnTaskOutputPreviewCap = 16 * 1024
+
 func newSpawnTaskManager(store session.Store, configs []acpexternal.Config, stateDir string) *spawnTaskManager {
 	if len(configs) == 0 {
 		return nil
@@ -744,7 +746,8 @@ func (s *spawnTaskSession) snapshotLocked() sandbox.SessionSnapshot {
 			ID:        "spawn-" + s.taskID,
 			SessionID: s.taskID,
 		},
-		Metadata: metadata,
+		OutputPreview: spawnTaskOutputPreview(s.output, spawnTaskOutputPreviewCap),
+		Metadata:      metadata,
 	}
 }
 
@@ -812,6 +815,25 @@ func outputSince(text string, cursor int64) ([]byte, int64, int64) {
 		start = len(data)
 	}
 	return append([]byte(nil), data[start:]...), total, 0
+}
+
+func spawnTaskOutputPreview(text string, limit int) *sandbox.OutputSnapshot {
+	data := []byte(text)
+	total := int64(len(data))
+	if total == 0 {
+		return nil
+	}
+	dropped := int64(0)
+	if limit > 0 && len(data) > limit {
+		drop := len(data) - limit
+		data = append([]byte(nil), data[drop:]...)
+		dropped = int64(drop)
+	}
+	return &sandbox.OutputSnapshot{
+		Stdout:             string(data),
+		Cursor:             sandbox.OutputCursor{Stdout: total},
+		StdoutDroppedBytes: dropped,
+	}
 }
 
 func contextErr(ctx context.Context) error {

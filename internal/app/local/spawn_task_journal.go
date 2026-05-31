@@ -232,6 +232,9 @@ func normalizeSpawnTaskJournalRecord(record spawnTaskJournalRecord) spawnTaskJou
 	if record.StdoutTotalBytes <= 0 {
 		record.StdoutTotalBytes = int64(len([]byte(record.Stdout)))
 	}
+	if record.Snapshot.OutputPreview == nil {
+		record.Snapshot.OutputPreview = spawnTaskOutputPreview(record.Stdout, spawnTaskOutputPreviewCap)
+	}
 	return record
 }
 

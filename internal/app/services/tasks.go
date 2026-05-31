@@ -11,6 +11,7 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/core/sandbox"
 	"github.com/OnslaughtSnail/caelis/core/session"
+	coretool "github.com/OnslaughtSnail/caelis/core/tool"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 )
 
@@ -393,6 +394,10 @@ func durableTaskItemFromToolEvent(event session.Event) (appviewmodel.TaskItem, b
 		stringFromAny(tool.Input["command"]),
 		stringFromAny(tool.Input["cmd"]),
 	)
+	outputPreview := firstNonEmpty(
+		coretool.RuntimeTaskOutputText(tool.Meta),
+		coretool.JoinRuntimeTaskStreams(stringFromAny(tool.Output["stdout"]), stringFromAny(tool.Output["stderr"])),
+	)
 	return appviewmodel.TaskItem{
 		ID:              taskID,
 		Kind:            kind,
@@ -410,6 +415,8 @@ func durableTaskItemFromToolEvent(event session.Event) (appviewmodel.TaskItem, b
 		RemoteSessionID: firstNonEmpty(stringFromAny(taskMeta["remote_session_id"]), stringFromAny(tool.Meta["remote_session_id"]), stringFromAny(tool.Output["remote_session_id"])),
 		StdoutCursor:    firstInt64(taskMeta["stdout_cursor"], tool.Meta["stdout_cursor"], tool.Output["stdout_cursor"]),
 		StderrCursor:    firstInt64(taskMeta["stderr_cursor"], tool.Meta["stderr_cursor"], tool.Output["stderr_cursor"]),
+		OutputPreview:   outputPreview,
+		OutputTruncated: boolFromAny(taskMeta["output_truncated"]),
 		EventID:         strings.TrimSpace(event.ID),
 		TurnID:          eventTurnID(event),
 		ExitCode:        firstInt(taskMeta["exit_code"], tool.Output["exit_code"]),
@@ -454,11 +461,7 @@ func durableTaskItemFromParticipantEvent(event session.Event) (appviewmodel.Task
 }
 
 func taskRuntimeMeta(meta map[string]any) map[string]any {
-	values, ok := mapAny(nestedAny(meta, "caelis", "runtime", "task"))
-	if !ok {
-		return nil
-	}
-	return values
+	return coretool.RuntimeTaskMeta(meta)
 }
 
 func mergeTaskItemSlices(items []appviewmodel.TaskItem, next []appviewmodel.TaskItem) []appviewmodel.TaskItem {
@@ -504,6 +507,10 @@ func mergeTaskItem(base appviewmodel.TaskItem, next appviewmodel.TaskItem) appvi
 	out.TerminalID = firstNonEmpty(next.TerminalID, out.TerminalID)
 	out.Agent = firstNonEmpty(next.Agent, out.Agent)
 	out.RemoteSessionID = firstNonEmpty(next.RemoteSessionID, out.RemoteSessionID)
+	if next.OutputPreview != "" && (out.OutputPreview == "" || !next.UpdatedAt.Before(out.UpdatedAt)) {
+		out.OutputPreview = next.OutputPreview
+	}
+	out.OutputTruncated = out.OutputTruncated || next.OutputTruncated
 	if next.StdoutCursor > out.StdoutCursor {
 		out.StdoutCursor = next.StdoutCursor
 	}

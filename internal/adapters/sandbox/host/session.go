@@ -16,7 +16,10 @@ import (
 	"github.com/OnslaughtSnail/caelis/internal/adapters/sandbox/internal/procutil"
 )
 
-const sessionOutputBufferCap = 1024 * 1024
+const (
+	sessionOutputBufferCap  = 1024 * 1024
+	sessionOutputPreviewCap = 16 * 1024
+)
 
 var sessionSeq atomic.Uint64
 
@@ -418,6 +421,7 @@ func (s *commandSession) snapshotLocked() sandbox.SessionSnapshot {
 	if s.files.enabled() {
 		metadata["durable_output"] = true
 	}
+	outputPreview := outputPreviewFromBuffers(s.stdout, s.stderr, sessionOutputPreviewCap)
 	return sandbox.SessionSnapshot{
 		Ref:           s.ref,
 		Command:       s.command,
@@ -430,6 +434,7 @@ func (s *commandSession) snapshotLocked() sandbox.SessionSnapshot {
 		StartedAt:     s.startedAt,
 		UpdatedAt:     s.updatedAt,
 		Terminal:      s.terminal,
+		OutputPreview: outputPreview,
 		Metadata:      metadata,
 	}
 }
@@ -573,6 +578,64 @@ func (b *sessionOutputBuffer) snapshot() ([]byte, int64, int64) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	return append([]byte(nil), b.data...), b.total, b.dropped
+}
+
+func (b *sessionOutputBuffer) snapshotLimit(limit int) ([]byte, int64, int64) {
+	if b == nil {
+		return nil, 0, 0
+	}
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	data := append([]byte(nil), b.data...)
+	total := b.total
+	dropped := b.dropped
+	if limit > 0 && len(data) > limit {
+		drop := len(data) - limit
+		data = append([]byte(nil), data[drop:]...)
+		dropped += int64(drop)
+	}
+	return data, total, dropped
+}
+
+func outputPreviewFromBuffers(stdout *sessionOutputBuffer, stderr *sessionOutputBuffer, limit int) *sandbox.OutputSnapshot {
+	stdoutData, stdoutTotal, stdoutDropped := stdout.snapshotLimit(limit)
+	stderrData, stderrTotal, stderrDropped := stderr.snapshotLimit(limit)
+	return outputPreviewFromValues(string(stdoutData), string(stderrData), stdoutTotal, stderrTotal, stdoutDropped, stderrDropped)
+}
+
+func outputPreviewFromJournalRecord(record sessionJournalRecord, limit int) *sandbox.OutputSnapshot {
+	stdout, stdoutTotal, stdoutDropped := outputPreviewString(record.Stdout, record.StdoutTotalBytes, record.StdoutDroppedBytes, limit)
+	stderr, stderrTotal, stderrDropped := outputPreviewString(record.Stderr, record.StderrTotalBytes, record.StderrDroppedBytes, limit)
+	return outputPreviewFromValues(stdout, stderr, stdoutTotal, stderrTotal, stdoutDropped, stderrDropped)
+}
+
+func outputPreviewString(text string, total int64, dropped int64, limit int) (string, int64, int64) {
+	data := []byte(text)
+	if total <= 0 {
+		total = int64(len(data))
+	}
+	if limit > 0 && len(data) > limit {
+		drop := len(data) - limit
+		data = append([]byte(nil), data[drop:]...)
+		dropped += int64(drop)
+	}
+	return string(data), total, dropped
+}
+
+func outputPreviewFromValues(stdout string, stderr string, stdoutTotal int64, stderrTotal int64, stdoutDropped int64, stderrDropped int64) *sandbox.OutputSnapshot {
+	if stdout == "" && stderr == "" && stdoutTotal == 0 && stderrTotal == 0 && stdoutDropped == 0 && stderrDropped == 0 {
+		return nil
+	}
+	return &sandbox.OutputSnapshot{
+		Stdout: stdout,
+		Stderr: stderr,
+		Cursor: sandbox.OutputCursor{
+			Stdout: stdoutTotal,
+			Stderr: stderrTotal,
+		},
+		StdoutDroppedBytes: stdoutDropped,
+		StderrDroppedBytes: stderrDropped,
+	}
 }
 
 var _ sandbox.Session = (*commandSession)(nil)

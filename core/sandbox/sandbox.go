@@ -269,18 +269,19 @@ type OutputSnapshot struct {
 }
 
 type SessionSnapshot struct {
-	Ref           SessionRef     `json:"ref,omitempty"`
-	Command       string         `json:"command,omitempty"`
-	Dir           string         `json:"dir,omitempty"`
-	State         SessionState   `json:"state,omitempty"`
-	Running       bool           `json:"running,omitempty"`
-	SupportsInput bool           `json:"supports_input,omitempty"`
-	ExitCode      int            `json:"exit_code,omitempty"`
-	Error         string         `json:"error,omitempty"`
-	StartedAt     time.Time      `json:"started_at,omitempty"`
-	UpdatedAt     time.Time      `json:"updated_at,omitempty"`
-	Terminal      TerminalRef    `json:"terminal,omitempty"`
-	Metadata      map[string]any `json:"metadata,omitempty"`
+	Ref           SessionRef      `json:"ref,omitempty"`
+	Command       string          `json:"command,omitempty"`
+	Dir           string          `json:"dir,omitempty"`
+	State         SessionState    `json:"state,omitempty"`
+	Running       bool            `json:"running,omitempty"`
+	SupportsInput bool            `json:"supports_input,omitempty"`
+	ExitCode      int             `json:"exit_code,omitempty"`
+	Error         string          `json:"error,omitempty"`
+	StartedAt     time.Time       `json:"started_at,omitempty"`
+	UpdatedAt     time.Time       `json:"updated_at,omitempty"`
+	Terminal      TerminalRef     `json:"terminal,omitempty"`
+	OutputPreview *OutputSnapshot `json:"output_preview,omitempty"`
+	Metadata      map[string]any  `json:"metadata,omitempty"`
 }
 
 type SessionListQuery struct {

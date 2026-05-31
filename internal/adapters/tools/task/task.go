@@ -207,6 +207,18 @@ func (t *Tool) list(ctx context.Context, call tool.Call, in input) (tool.Result,
 		if errText := strings.TrimSpace(snapshot.Error); errText != "" {
 			task["error"] = errText
 		}
+		if snapshot.OutputPreview != nil {
+			for key, value := range tool.RuntimeTaskPreview(
+				snapshot.OutputPreview.Stdout,
+				snapshot.OutputPreview.Stderr,
+				snapshot.OutputPreview.StdoutDroppedBytes,
+				snapshot.OutputPreview.StderrDroppedBytes,
+				snapshot.OutputPreview.Cursor.Stdout,
+				snapshot.OutputPreview.Cursor.Stderr,
+			) {
+				task[key] = value
+			}
+		}
 		for key, value := range snapshot.Metadata {
 			key = strings.TrimSpace(key)
 			if key != "" {

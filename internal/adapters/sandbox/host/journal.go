@@ -319,6 +319,7 @@ func (j *sessionJournal) withFileOutput(record sessionJournalRecord) sessionJour
 		record.StderrTotalBytes = stderrTotal
 		record.StderrDroppedBytes = stderrDropped
 	}
+	record.Snapshot.OutputPreview = outputPreviewFromJournalRecord(record, sessionOutputPreviewCap)
 	return record
 }
 

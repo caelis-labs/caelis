@@ -146,6 +146,9 @@ func TestRuntimeReopensArchivedAsyncSessionFromStateDir(t *testing.T) {
 	if snapshot.Running || snapshot.State != sandbox.SessionCompleted || snapshot.Ref.ID != ref.ID {
 		t.Fatalf("archived snapshot = %#v, want completed session %q", snapshot, ref.ID)
 	}
+	if snapshot.OutputPreview == nil || !strings.Contains(snapshot.OutputPreview.Stdout, "durable") || snapshot.OutputPreview.Cursor.Stdout == 0 {
+		t.Fatalf("archived snapshot preview = %#v, want durable stdout preview", snapshot.OutputPreview)
+	}
 	output, err := archived.Read(context.Background(), sandbox.OutputCursor{})
 	if err != nil {
 		t.Fatal(err)
@@ -162,6 +165,10 @@ func TestRuntimeReopensArchivedAsyncSessionFromStateDir(t *testing.T) {
 	}
 	if !hasSessionSnapshot(listed, ref.ID) {
 		t.Fatalf("archived session %q missing from list: %#v", ref.ID, listed)
+	}
+	listedSnapshot := findSessionSnapshot(listed, ref.ID)
+	if listedSnapshot.OutputPreview == nil || !strings.Contains(listedSnapshot.OutputPreview.Stdout, "durable") {
+		t.Fatalf("listed snapshot preview = %#v, want durable stdout preview", listedSnapshot.OutputPreview)
 	}
 }
 
@@ -281,10 +288,14 @@ func TestRuntimeFileSystemUsesConfiguredRootPolicy(t *testing.T) {
 }
 
 func hasSessionSnapshot(items []sandbox.SessionSnapshot, id string) bool {
+	return findSessionSnapshot(items, id).Ref.ID != ""
+}
+
+func findSessionSnapshot(items []sandbox.SessionSnapshot, id string) sandbox.SessionSnapshot {
 	for _, item := range items {
 		if item.Ref.ID == id {
-			return true
+			return item
 		}
 	}
-	return false
+	return sandbox.SessionSnapshot{}
 }
