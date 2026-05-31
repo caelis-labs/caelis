@@ -91,7 +91,27 @@ func Discover(ctx context.Context, req Request) (Catalog, error) {
 	if err := discoverAgentFiles(ctx, homeDir, workspaceDir, &catalog); err != nil {
 		return Catalog{}, err
 	}
-	if err := discoverSkills(ctx, SkillRoots(homeDir, workspaceDir, req.SkillDirs), &catalog); err != nil {
+	skillRoots := SkillRoots(homeDir, workspaceDir, req.SkillDirs)
+	if systemRoot := systemSkillRoot(homeDir); systemRoot != "" {
+		if err := ensureSystemSkills(homeDir); err != nil {
+			addDiagnostic(&catalog, Diagnostic{
+				Severity: DiagnosticWarning,
+				Kind:     "skill_root",
+				Path:     systemRoot,
+				Message:  "system skills unavailable",
+				Meta:     map[string]string{"error": err.Error()},
+			})
+			skillRoots = removeSkillRoot(skillRoots, systemRoot)
+		} else {
+			addDiagnostic(&catalog, Diagnostic{
+				Severity: DiagnosticInfo,
+				Kind:     "skill_root",
+				Path:     systemRoot,
+				Message:  "system skills materialized",
+			})
+		}
+	}
+	if err := discoverSkills(ctx, skillRoots, &catalog); err != nil {
 		return Catalog{}, err
 	}
 	sortCatalog(&catalog)

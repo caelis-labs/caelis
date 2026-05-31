@@ -1,18 +1,33 @@
-package system
+package resources
 
 import (
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/OnslaughtSnail/caelis/internal/testenv"
 )
 
-func TestEnsureRejectsSystemRootSymlink(t *testing.T) {
+func TestEnsureSystemSkillsMaterializesEmbeddedSkills(t *testing.T) {
 	home := t.TempDir()
-	testenv.SetHome(t, home)
-	root := filepath.Join(home, ".caelis", "skills", ".system")
+	if err := ensureSystemSkills(home); err != nil {
+		t.Fatalf("ensureSystemSkills() error = %v", err)
+	}
+	root := systemSkillRoot(home)
+	for _, path := range []string{
+		filepath.Join(root, "skill-creator", "SKILL.md"),
+		filepath.Join(root, "skill-creator", "scripts", "init_skill.py"),
+		filepath.Join(root, "skill-installer", "SKILL.md"),
+		filepath.Join(root, "skill-installer", "scripts", "install-skill-from-github.py"),
+	} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("materialized skill asset %s: %v", path, err)
+		}
+	}
+}
+
+func TestEnsureSystemSkillsRejectsSystemRootSymlink(t *testing.T) {
+	home := t.TempDir()
+	root := systemSkillRoot(home)
 	outside := filepath.Join(t.TempDir(), "outside")
 	if err := os.MkdirAll(filepath.Dir(root), 0o755); err != nil {
 		t.Fatalf("mkdir root parent: %v", err)
@@ -22,19 +37,18 @@ func TestEnsureRejectsSystemRootSymlink(t *testing.T) {
 	}
 	symlinkDirOrSkip(t, outside, root)
 
-	_, err := Ensure()
+	err := ensureSystemSkills(home)
 	if err == nil || !strings.Contains(err.Error(), "linked path") {
-		t.Fatalf("Ensure() error = %v, want linked path refusal", err)
+		t.Fatalf("ensureSystemSkills() error = %v, want linked path refusal", err)
 	}
 	if _, err := os.Stat(filepath.Join(outside, "skill-creator")); !os.IsNotExist(err) {
 		t.Fatalf("outside skill stat err = %v, want not created", err)
 	}
 }
 
-func TestEnsureRejectsSystemSkillSymlink(t *testing.T) {
+func TestEnsureSystemSkillsRejectsSystemSkillSymlink(t *testing.T) {
 	home := t.TempDir()
-	testenv.SetHome(t, home)
-	root := filepath.Join(home, ".caelis", "skills", ".system")
+	root := systemSkillRoot(home)
 	outside := filepath.Join(t.TempDir(), "outside")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatalf("mkdir root: %v", err)
@@ -44,9 +58,9 @@ func TestEnsureRejectsSystemSkillSymlink(t *testing.T) {
 	}
 	symlinkDirOrSkip(t, outside, filepath.Join(root, "skill-creator"))
 
-	_, err := Ensure()
+	err := ensureSystemSkills(home)
 	if err == nil || !strings.Contains(err.Error(), "linked path") {
-		t.Fatalf("Ensure() error = %v, want linked path refusal", err)
+		t.Fatalf("ensureSystemSkills() error = %v, want linked path refusal", err)
 	}
 	if _, err := os.Stat(filepath.Join(outside, "SKILL.md")); !os.IsNotExist(err) {
 		t.Fatalf("outside SKILL.md stat err = %v, want not created", err)

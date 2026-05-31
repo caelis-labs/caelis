@@ -51,7 +51,6 @@ func TestDiscoverIndexesPluginsAgentsAndSkills(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeSkill(t, filepath.Join(home, ".agents", "skills", "echo"), "echo", "home echo")
-	writeSkill(t, filepath.Join(home, ".caelis", "skills", ".system", "builtin"), "builtin", "system skill")
 	writeSkill(t, filepath.Join(workspace, ".agents", "skills", "echo"), "echo", "workspace echo")
 	writeSkill(t, filepath.Join(workspace, "skills", "local"), "local", "local skill")
 
@@ -95,7 +94,7 @@ func TestDiscoverIndexesPluginsAgentsAndSkills(t *testing.T) {
 		t.Fatalf("workspace prompt = %#v", catalog.Prompts[2])
 	}
 	names := skillNames(catalog.Skills)
-	for _, name := range []string{"builtin", "echo", "local", "review-skill"} {
+	for _, name := range []string{"echo", "local", "review-skill", "skill-creator", "skill-installer"} {
 		if !slices.Contains(names, name) {
 			t.Fatalf("skills = %#v, missing %q", catalog.Skills, name)
 		}
@@ -118,6 +117,7 @@ func TestDiscoverIndexesPluginsAgentsAndSkills(t *testing.T) {
 		{Kind: "plugin", ID: "disabled", Message: "plugin disabled"},
 		{Kind: "plugin", ID: "reviewer", Message: "plugin loaded"},
 		{Kind: "agent_file", ID: "agents.workspace", Message: "agent instruction file loaded"},
+		{Kind: "skill_root", Path: filepath.Join(home, ".caelis", "skills", ".system"), Message: "system skills materialized"},
 		{Kind: "skill", ID: "echo", Message: "skill overrides earlier discovery"},
 		{Kind: "skill_root", Path: filepath.Join(workspace, ".agents", "skills"), Message: "skill root scanned"},
 	} {

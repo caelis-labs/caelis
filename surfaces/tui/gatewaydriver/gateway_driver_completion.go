@@ -83,14 +83,15 @@ func (d *GatewayDriver) CompleteSkill(ctx context.Context, query string, limit i
 		if !ok {
 			continue
 		}
-		pathHint := displayPathHint(workspace, skill.Path)
+		skillPath := firstNonEmpty(skill.Paths...)
+		pathHint := displayPathHint(workspace, skillPath)
 		detail := strings.Join(compactNonEmpty([]string{strings.TrimSpace(skill.Description), pathHint}), " · ")
 		scored = append(scored, scoredCompletion{
 			candidate: CompletionCandidate{
 				Value:   strings.TrimSpace(skill.Name),
 				Display: strings.TrimSpace(skill.Name),
 				Detail:  strings.TrimSpace(detail),
-				Path:    strings.TrimSpace(skill.Path),
+				Path:    strings.TrimSpace(skillPath),
 			},
 			score: score,
 		})

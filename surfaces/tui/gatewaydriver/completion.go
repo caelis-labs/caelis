@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/OnslaughtSnail/caelis/core/plugin"
 	appservices "github.com/OnslaughtSnail/caelis/internal/app/services"
 	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/ports/skill"
 )
 
 const (
@@ -292,11 +292,12 @@ func scoreResumeCandidate(query string, candidate ResumeCandidate) (int, bool) {
 	)
 }
 
-func scoreSkillMeta(query string, meta skill.Meta, workspace string) (int, bool) {
+func scoreSkillMeta(query string, meta plugin.SkillDescriptor, workspace string) (int, bool) {
+	path := firstNonEmpty(meta.Paths...)
 	return fuzzyMatchScore(query,
 		meta.Name,
 		meta.Description,
-		displayPathHint(workspace, meta.Path),
+		displayPathHint(workspace, path),
 	)
 }
 

@@ -7,13 +7,13 @@ import (
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/core/model"
+	"github.com/OnslaughtSnail/caelis/core/plugin"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/compact"
 	"github.com/OnslaughtSnail/caelis/ports/controller"
 	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/ports/skill"
 	"github.com/OnslaughtSnail/caelis/ports/stream"
 )
 
@@ -225,7 +225,7 @@ type DriverStack struct {
 	ReasoningLevelsForModelFn            func(string, string) []string
 	EnsureCodeFreeAuthFn                 func(context.Context, CodeFreeAuthRequest) error
 	EnsureCodeFreeModelSelectionAuthFn   func(context.Context, CodeFreeAuthRequest) error
-	DiscoverSkillsFn                     func(context.Context, string) ([]skill.Meta, error)
+	DiscoverSkillsFn                     func(context.Context, string) ([]plugin.SkillDescriptor, error)
 	ListBuiltinACPAgentAddOptionsFn      func() []ACPAgentAddOption
 	ListInstallableACPAgentOptionsFn     func() []ACPAgentAddOption
 	ListACPAgentsFn                      func() []ACPAgentInfo
@@ -548,7 +548,7 @@ func (s *DriverStack) EnsureCodeFreeModelSelectionAuth(ctx context.Context, req 
 	return s.EnsureCodeFreeModelSelectionAuthFn(ctx, req)
 }
 
-func (s *DriverStack) DiscoverSkills(ctx context.Context, workspaceDir string) ([]skill.Meta, error) {
+func (s *DriverStack) DiscoverSkills(ctx context.Context, workspaceDir string) ([]plugin.SkillDescriptor, error) {
 	if s == nil || s.DiscoverSkillsFn == nil {
 		return nil, fmt.Errorf("surfaces/tui/gatewaydriver: skill discovery dependency is unavailable")
 	}

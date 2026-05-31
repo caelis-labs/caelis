@@ -592,8 +592,10 @@ replaced the old `app/gatewayapp` stack for current entrypoints:
   `plugin.json` manifests, plugin prompt/skill/ACP-agent/renderer descriptors,
   workspace/global `AGENTS.md`, and skill metadata. Plugin-declared ACP agents
   are normalized with plugin-relative working directories and command paths.
-  Manifests can also declare provider/store/sandbox/tool factory aliases using
-  `name -> uses` bindings.
+  It also materializes bundled system skills into the managed Caelis system
+  skill root with symlink/reparse-point safety checks. Manifests can also
+  declare provider/store/sandbox/tool factory aliases using `name -> uses`
+  bindings.
 - `internal/app/registry`: deterministic `core/plugin.Registry`
   implementation for model provider, store, sandbox, tool, ACP agent, prompt,
   skill, and renderer contributions. The local composition root now resolves
@@ -1081,6 +1083,11 @@ The completed work is intentionally limited to the reusable skeleton:
   `impl/policy/*` implementations were deleted. The remaining old
   `ports/*`/`kernel` contracts are now only retained where TUI bridge code still
   needs them.
+- Legacy skill discovery removal: bundled system skills, skill root discovery,
+  and `$skill` completion now run through `internal/app/resources` and
+  `core/plugin.SkillDescriptor`, allowing the old `impl/skill` implementation
+  packages and the unused `ports/skill` / `ports/prompt` contracts to be
+  deleted.
 - Architecture lint rules for the new package boundaries.
 - End-to-end skeleton test covering plugin resources, SQLite, ACP server,
   OpenAI-compatible provider mock, shell tool execution, canonical reload, and
@@ -1963,6 +1970,11 @@ be migrated before retiring the old stack:
       skill override decisions. `ResourceService` and the shared status view
       expose those diagnostics with severity counters for TUI and future APP
       consumers.
+    - Migrated baseline: `internal/app/resources` now owns bundled system skill
+      materialization and discovery. The old `impl/skill/{fs,system}` packages
+      were removed, and TUI `$skill` completion consumes
+      `core/plugin.SkillDescriptor` directly instead of the old `ports/skill`
+      metadata DTO.
     - Migrated baseline: diagnostic display/repair intent now has a shared
       settings-panel contract. Resource diagnostics and sandbox setup/fallback
       status are projected as surface-neutral `SettingsPanelDiagnostic` rows with
