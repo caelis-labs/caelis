@@ -20,18 +20,18 @@ terminal UI and a future peer APP surface.
 
 ## Current Findings
 
-The codebase already points in the right direction with `core`, `internal/app`,
-`internal/engine`, `protocol`, `surfaces`, and replaceable adapters. Earlier
-layers such as `kernel`, broad `ports`, and the old `impl` taxonomy still need
-to be reduced where they mirror newer contracts or keep compatibility-shaped
-glue alive.
+The codebase now points in the target direction with `core`, `internal/app`,
+`internal/engine`, `protocol`, `surfaces`, and replaceable adapters. The former
+`app/gatewayapp`, top-level `kernel`, broad `ports`, and old `impl` taxonomy
+have been retired where they duplicated newer contracts. Remaining cleanup
+should keep that shape from reappearing inside large surface or service files.
 
 Key issues:
 
-- `kernel/` is mostly a public alias facade over `internal/kernel`, which makes
-  the public contract inherit the internal implementation shape.
-- `ports/*` is split by many nouns, producing many global interfaces that are
-  hard to keep minimal and local to their actual consumers.
+- Historical: `kernel/` was a public alias facade over `internal/kernel`, and
+  broad `ports/*` packages produced global interfaces that were hard to keep
+  minimal. Those packages have been deleted; new public contracts should stay
+  in focused `core/*` packages or local app/engine interfaces.
 - The old `app/gatewayapp` composition root had become a second kernel: config,
   model registry, sandbox routing, prompt assembly, runtime rebuild, ACP agent
   management, and app services all lived together. That package is now deleted;
@@ -1104,9 +1104,9 @@ The completed work is intentionally limited to the reusable skeleton:
   policy moved onto the new app/engine/adapter stack, the unused old
   `impl/config/file`, `impl/prompt/static`, `impl/session/{file,memory}`,
   `impl/task/file`, `impl/stream/memory`, `impl/approval/*`, and
-  `impl/policy/*` implementations were deleted. The remaining old
-  `ports/*`/`kernel` contracts are now only retained where TUI bridge code still
-  needs them.
+  `impl/policy/*` implementations were deleted. The later TUI/gatewaydriver
+  cleanup removed the final broad `ports/*` and `kernel` compatibility packages
+  instead of keeping them as dormant extension points.
 - Legacy skill discovery removal: bundled system skills, skill root discovery,
   and `$skill` completion now run through `internal/app/resources` and
   `core/plugin.SkillDescriptor`, allowing the old `impl/skill` implementation
@@ -1448,11 +1448,12 @@ be migrated before retiring the old stack:
      `core/runtime` approval decisions. The shared approval view model carries
      command, sandbox-permission, justification, risk, and option data so TUI
      and the future APP can render the same prompt without `kernel.ApprovalPayload`.
-   - Migrated baseline: production TUI app and gatewaydriver packages no
-     longer import the old public `kernel` facade or broad `ports/*` contracts.
-     The production `cmd/caelis` dependency graph no longer pulls in
-     `kernel/internal/kernel`; the remaining old production dependency is the
-     explicitly tracked non-host sandbox adapter path.
+   - Migrated baseline: production TUI app and gatewaydriver packages, plus
+     their test fixtures, no longer import the old public `kernel` facade or
+     broad `ports/*` contracts. The old `kernel`, `internal/kernel`, and
+     remaining broad `ports/{agent,approval,assembly,delegation,model,session,tool}`
+     packages have been deleted. TUI transcript and gatewaydriver tests now
+     enter through core-session/app-viewmodel events directly.
    - Migrated baseline: TUI status no longer has a parallel legacy
      `ports/session` usage replay parser in gatewaydriver. Session usage shown
      by the app-service path comes from the shared core-session status
@@ -1470,11 +1471,6 @@ be migrated before retiring the old stack:
      settings panels, and live remote ACP process reconnect/lifecycle behavior
      still have old driver/app assumptions or missing service-native feature
      parity, so the old TUI stack cannot be removed yet.
-   - Still pending: `surfaces/tui/app` still has residual tests named around
-     gateway events, but those tests now enter through test-only projection
-     fixtures. The remaining product migration target is to replace those
-     fixtures with direct core-session/app-viewmodel event cases and then
-     delete the old gateway-event test vocabulary entirely.
 
 3. Future APP surface
    - Migrated baseline: `internal/app/viewmodel.StatusView` and
@@ -2291,10 +2287,10 @@ Recommended sequence:
 7. Migrate compaction, task runtime, subagent lifecycle, and controller handoff
    to canonical events.
 8. Add full store round-trip and ACP projection parity tests for product flows.
-9. Continue deleting residual old `kernel`, broad `ports`, `impl`, and
-   surface-compatibility runtime paths once each has a service/core-native
-   replacement. The former `app/gatewayapp` runtime stack has already been
-   deleted.
+9. Continue deleting residual surface-compatibility runtime paths once each has
+   a service/core-native replacement. The former `app/gatewayapp`, old
+   `kernel`/`internal/kernel`, broad `ports`, and old `impl` runtime stacks have
+   already been deleted.
 
 ## Validation Gates
 

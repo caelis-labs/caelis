@@ -129,6 +129,8 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 		return "production packages must not import the retired impl taxonomy"
 	case pathIn(target, "ports/sandbox"):
 		return "production packages must use core/sandbox instead of retired ports/sandbox"
+	case pathIn(target, "kernel", "internal/kernel") || strings.HasPrefix(target, "ports/"):
+		return "production packages must use core/app/engine contracts instead of retired kernel or broad ports taxonomy"
 	case strings.HasPrefix(rel, "core/"):
 		if startsWithAny(target, "app/", "impl/", "internal/", "kernel/", "ports/", "surfaces/") {
 			return "core must not depend on app, impl, internal, kernel, ports, or surfaces"

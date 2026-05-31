@@ -8,8 +8,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/OnslaughtSnail/caelis/kernel"
-	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/tuikit"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -571,7 +569,7 @@ func TestPromptRequestWithoutChoicesStillRendersModal(t *testing.T) {
 	}
 }
 
-func TestPromptRequestKeepsGatewayToolContentVisible(t *testing.T) {
+func TestPromptRequestKeepsTranscriptToolContentVisible(t *testing.T) {
 	model := NewModel(Config{
 		AppName:   "CAELIS",
 		Version:   "dev",
@@ -582,19 +580,7 @@ func TestPromptRequestKeepsGatewayToolContentVisible(t *testing.T) {
 
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
 	m := updated.(*Model)
-	updated, _ = m.Update(gatewayEventMsg(kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind:       kernel.EventKindToolCall,
-			SessionRef: session.SessionRef{SessionID: "root-session"},
-			Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session"},
-			ToolCall: &kernel.ToolCallPayload{
-				CallID:   "call-1",
-				ToolName: "READ",
-				RawInput: map[string]any{"path": "/tmp/demo.txt"},
-				Status:   "running",
-				Scope:    kernel.EventScopeMain,
-			},
-		}}))
+	updated, _ = m.Update(modelToolCallTranscriptMsg("call-1", "READ", map[string]any{"path": "/tmp/demo.txt"}, transcriptToolStatusRunning))
 
 	m = updated.(*Model)
 	updated, _ = m.Update(PromptRequestMsg{
@@ -618,7 +604,7 @@ func TestPromptRequestKeepsGatewayToolContentVisible(t *testing.T) {
 	}
 }
 
-func TestRunningGatewayToolCallIsVisibleBeforeTaskCompletes(t *testing.T) {
+func TestRunningTranscriptToolCallIsVisibleBeforeTaskCompletes(t *testing.T) {
 	model := NewModel(Config{
 		AppName:   "CAELIS",
 		Version:   "dev",
@@ -631,19 +617,7 @@ func TestRunningGatewayToolCallIsVisibleBeforeTaskCompletes(t *testing.T) {
 	m := updated.(*Model)
 	updated, _ = m.Update(SetRunningMsg{Running: true})
 	m = updated.(*Model)
-	updated, _ = m.Update(gatewayEventMsg(kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind:       kernel.EventKindToolCall,
-			SessionRef: session.SessionRef{SessionID: "root-session"},
-			Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session"},
-			ToolCall: &kernel.ToolCallPayload{
-				CallID:   "call-1",
-				ToolName: "RUN_COMMAND",
-				RawInput: map[string]any{"command": `echo "hi"`},
-				Status:   "running",
-				Scope:    kernel.EventScopeMain,
-			},
-		}}))
+	updated, _ = m.Update(modelToolCallTranscriptMsg("call-1", "RUN_COMMAND", map[string]any{"command": `echo "hi"`}, transcriptToolStatusRunning))
 
 	m = updated.(*Model)
 
@@ -653,7 +627,7 @@ func TestRunningGatewayToolCallIsVisibleBeforeTaskCompletes(t *testing.T) {
 	}
 }
 
-func TestPendingGatewayToolCallIsVisibleBeforeTaskCompletes(t *testing.T) {
+func TestPendingTranscriptToolCallIsVisibleBeforeTaskCompletes(t *testing.T) {
 	model := NewModel(Config{
 		AppName:   "CAELIS",
 		Version:   "dev",
@@ -666,19 +640,7 @@ func TestPendingGatewayToolCallIsVisibleBeforeTaskCompletes(t *testing.T) {
 	m := updated.(*Model)
 	updated, _ = m.Update(SetRunningMsg{Running: true})
 	m = updated.(*Model)
-	updated, _ = m.Update(gatewayEventMsg(kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind:       kernel.EventKindToolCall,
-			SessionRef: session.SessionRef{SessionID: "root-session"},
-			Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session"},
-			ToolCall: &kernel.ToolCallPayload{
-				CallID:   "call-1",
-				ToolName: "LIST",
-				RawInput: map[string]any{"path": `/tmp/workspace`},
-				Status:   "pending",
-				Scope:    kernel.EventScopeMain,
-			},
-		}}))
+	updated, _ = m.Update(modelToolCallTranscriptMsg("call-1", "LIST", map[string]any{"path": `/tmp/workspace`}, "pending"))
 
 	m = updated.(*Model)
 
@@ -686,4 +648,15 @@ func TestPendingGatewayToolCallIsVisibleBeforeTaskCompletes(t *testing.T) {
 	if !strings.Contains(view, "LIST") {
 		t.Fatalf("view = %q, want pending tool call before task result", view)
 	}
+}
+
+func modelToolCallTranscriptMsg(callID string, toolName string, rawInput map[string]any, status string) TranscriptEventsMsg {
+	return TranscriptEventsMsg{Events: []TranscriptEvent{projectTranscriptToolCall(transcriptToolProjection{
+		Scope:    ACPProjectionMain,
+		ScopeID:  "root-session",
+		CallID:   callID,
+		ToolName: toolName,
+		Status:   status,
+		RawInput: rawInput,
+	})}}
 }

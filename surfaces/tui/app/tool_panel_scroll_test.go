@@ -8,7 +8,7 @@ import (
 )
 
 func TestTerminalToolPanelShowsTailWithoutInternalScroll(t *testing.T) {
-	model := newGatewayEventTestModel()
+	model := newTranscriptEventTestModel()
 	ctx := BlockRenderContext{Width: 110, TermWidth: 110, Theme: model.theme}
 
 	for _, toolName := range []string{"RUN_COMMAND", "SPAWN"} {
@@ -55,7 +55,7 @@ func TestTerminalToolPanelShowsTailWithoutInternalScroll(t *testing.T) {
 }
 
 func TestCompletedTerminalToolStaysExpandedWhenTurnCompletes(t *testing.T) {
-	model := newGatewayEventTestModel()
+	model := newTranscriptEventTestModel()
 	ctx := BlockRenderContext{Width: 110, TermWidth: 110, Theme: model.theme}
 	block := NewMainACPTurnBlock("session-1")
 	lines := make([]string, 0, 12)
@@ -110,7 +110,7 @@ func TestCompletedTerminalToolStaysExpandedWhenTurnCompletes(t *testing.T) {
 }
 
 func TestTerminalToolPanelPreservesLineBreaks(t *testing.T) {
-	model := newGatewayEventTestModel()
+	model := newTranscriptEventTestModel()
 	ctx := BlockRenderContext{Width: 110, TermWidth: 110, Theme: model.theme}
 	block := NewMainACPTurnBlock("session-1")
 	output := strings.Join([]string{"calculator", "demo-caelis.exe", "go.mod", "main.go"}, "\n")
@@ -134,7 +134,7 @@ func TestTerminalToolPanelPreservesLineBreaks(t *testing.T) {
 }
 
 func TestSpawnTerminalPanelCleansMessySubagentPreview(t *testing.T) {
-	model := newGatewayEventTestModel()
+	model := newTranscriptEventTestModel()
 	ctx := BlockRenderContext{Width: 120, TermWidth: 120, Theme: model.theme}
 
 	t.Run("running filters protocol noise and duplicate progress", func(t *testing.T) {
@@ -203,7 +203,7 @@ func TestSpawnTerminalPanelCleansMessySubagentPreview(t *testing.T) {
 }
 
 func TestACPGenericToolUsesStandardPanelTemplateAndSummarizesFinalOutput(t *testing.T) {
-	model := newGatewayEventTestModel()
+	model := newTranscriptEventTestModel()
 	ctx := BlockRenderContext{Width: 120, TermWidth: 120, Theme: model.theme}
 	block := NewParticipantTurnBlock("codex-001", "codex-001")
 	output := strings.Join([]string{
@@ -267,7 +267,7 @@ func TestACPGenericToolUsesStandardPanelTemplateAndSummarizesFinalOutput(t *test
 }
 
 func TestMutationToolPanelClickTogglesDetails(t *testing.T) {
-	model := newGatewayEventTestModel()
+	model := newTranscriptEventTestModel()
 	ctx := BlockRenderContext{Width: 100, TermWidth: 100, Theme: model.theme}
 	block := NewMainACPTurnBlock("session-1")
 	diff := strings.Join([]string{
@@ -310,7 +310,7 @@ func TestMutationToolPanelClickTogglesDetails(t *testing.T) {
 }
 
 func TestDefaultCollapsedReadClickTokensMatchDetails(t *testing.T) {
-	model := newGatewayEventTestModel()
+	model := newTranscriptEventTestModel()
 	ctx := BlockRenderContext{Width: 100, TermWidth: 100, Theme: model.theme}
 
 	t.Run("empty output is not clickable", func(t *testing.T) {
@@ -351,7 +351,7 @@ func TestDefaultCollapsedReadClickTokensMatchDetails(t *testing.T) {
 }
 
 func TestShortToolOutputDoesNotCollapseOnClick(t *testing.T) {
-	model := newGatewayEventTestModel()
+	model := newTranscriptEventTestModel()
 	ctx := BlockRenderContext{Width: 100, TermWidth: 100, Theme: model.theme}
 	block := NewParticipantTurnBlock("codex-001", "codex-001")
 	block.UpdateToolWithMeta("custom-1", "lookup_weather", `"Shanghai"`, "sunny\n24C", true, false, ToolUpdateMeta{
@@ -396,7 +396,7 @@ func TestShortToolOutputDoesNotCollapseOnClick(t *testing.T) {
 }
 
 func TestTerminalToolPanelCapsWrappedRows(t *testing.T) {
-	model := newGatewayEventTestModel()
+	model := newTranscriptEventTestModel()
 	ctx := BlockRenderContext{Width: 28, TermWidth: 28, Theme: model.theme}
 	longLine := strings.Repeat("0123456789", 20)
 
@@ -407,7 +407,7 @@ func TestTerminalToolPanelCapsWrappedRows(t *testing.T) {
 }
 
 func TestSubagentPanelShowsLiveTailAndCompletedFinalAnswer(t *testing.T) {
-	model := newGatewayEventTestModel()
+	model := newTranscriptEventTestModel()
 	ctx := BlockRenderContext{Width: 110, TermWidth: 110, Theme: model.theme}
 	panel := NewSubagentPanelBlock("spawn-1", "", "helper", "spawn-call-1")
 
@@ -445,7 +445,7 @@ func TestSubagentPanelShowsLiveTailAndCompletedFinalAnswer(t *testing.T) {
 }
 
 func TestCompletedSubagentPanelShowsFinalMessageOnly(t *testing.T) {
-	model := newGatewayEventTestModel()
+	model := newTranscriptEventTestModel()
 	ctx := BlockRenderContext{Width: 110, TermWidth: 110, Theme: model.theme}
 	panel := NewSubagentPanelBlock("spawn-1", "", "helper", "spawn-call-1")
 	panel.AppendStreamChunk(SEAssistant, "I will run tests.")
@@ -466,7 +466,7 @@ func TestCompletedSubagentPanelShowsFinalMessageOnly(t *testing.T) {
 }
 
 func TestCompletedSubagentPanelPreservesToolOnlyOutput(t *testing.T) {
-	model := newGatewayEventTestModel()
+	model := newTranscriptEventTestModel()
 	ctx := BlockRenderContext{Width: 110, TermWidth: 110, Theme: model.theme}
 	panel := NewSubagentPanelBlock("spawn-1", "", "helper", "spawn-call-1")
 	panel.Events = append(panel.Events, SubagentEvent{

@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -24,10 +25,6 @@ import (
 	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/internal/testenv"
-	"github.com/OnslaughtSnail/caelis/kernel"
-	"github.com/OnslaughtSnail/caelis/ports/assembly"
-	"github.com/OnslaughtSnail/caelis/ports/model"
-	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
 func encryptCodeFreeAPIKeyForRuntimeTest(t *testing.T, apiKey string) string {
@@ -44,9 +41,23 @@ func encryptCodeFreeAPIKeyForRuntimeTest(t *testing.T, apiKey string) string {
 	return base64.StdEncoding.EncodeToString(out)
 }
 
-func ptrRuntimeMessage(message model.Message) *model.Message {
+func ptrRuntimeMessage(message coremodel.Message) *coremodel.Message {
 	return &message
 }
+
+func testCoreTextMessage(role coremodel.Role, text string) coremodel.Message {
+	return coremodel.Message{Role: role, Parts: []coremodel.Part{coremodel.NewTextPart(text)}}
+}
+
+func cloneTestState(state map[string]any) map[string]any {
+	next := maps.Clone(state)
+	if next == nil {
+		next = map[string]any{}
+	}
+	return next
+}
+
+var errGatewayDriverTestActiveRunConflict = errors.New("active participant run already in progress")
 
 type gatewayDriverTestTurn struct {
 	ref    coresession.Ref
@@ -135,7 +146,7 @@ func TestGatewayDriverKeepsServiceRuntimeUsableAfterSandboxUpdate(t *testing.T) 
 		},
 		Model: ModelConfig{
 			Provider: "ollama",
-			API:      model.APIOllama,
+			API:      coremodel.APIOllama,
 			Model:    "llama3",
 		},
 	})
@@ -181,10 +192,9 @@ func TestGatewayDriverDefersBlankSessionUntilFirstSubmission(t *testing.T) {
 		WorkspaceKey:   workspace,
 		WorkspaceCWD:   workspace,
 		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
 		Model: ModelConfig{
 			Provider: "ollama",
-			API:      model.APIOllama,
+			API:      coremodel.APIOllama,
 			Model:    "llama3",
 		},
 	})
@@ -202,12 +212,7 @@ func TestGatewayDriverDefersBlankSessionUntilFirstSubmission(t *testing.T) {
 	if status.SessionID != "" {
 		t.Fatalf("Status().SessionID = %q, want empty before first submission", status.SessionID)
 	}
-	before, err := stack.Gateway.ListSessions(ctx, kernel.ListSessionsRequest{
-		AppName:      stack.AppName,
-		UserID:       stack.UserID,
-		WorkspaceKey: stack.Workspace.Key,
-		Limit:        10,
-	})
+	before, err := stack.ListSessions(ctx, stack.Workspace.Key, 10)
 	if err != nil {
 		t.Fatalf("ListSessions(before) error = %v", err)
 	}
@@ -220,12 +225,7 @@ func TestGatewayDriverDefersBlankSessionUntilFirstSubmission(t *testing.T) {
 		t.Fatalf("Submit() error = %v", err)
 	}
 	closeGatewayDriverTestTurn(t, turn)
-	after, err := stack.Gateway.ListSessions(ctx, kernel.ListSessionsRequest{
-		AppName:      stack.AppName,
-		UserID:       stack.UserID,
-		WorkspaceKey: stack.Workspace.Key,
-		Limit:        10,
-	})
+	after, err := stack.ListSessions(ctx, stack.Workspace.Key, 10)
 	if err != nil {
 		t.Fatalf("ListSessions(after) error = %v", err)
 	}
@@ -236,14 +236,14 @@ func TestGatewayDriverDefersBlankSessionUntilFirstSubmission(t *testing.T) {
 
 func TestGatewayDriverSubmitRoutesActiveSessionInputToActiveTurn(t *testing.T) {
 	ctx := context.Background()
-	activeSession := session.Session{
-		SessionRef: session.SessionRef{
+	activeSession := coresession.Session{
+		Ref: coresession.Ref{
 			AppName: "caelis", UserID: "user-1", SessionID: "active-session", WorkspaceKey: "ws",
 		},
-		CWD: t.TempDir(),
+		Workspace: coresession.Workspace{Key: "ws", CWD: t.TempDir()},
 	}
 	active := []ActiveTurnState{{
-		SessionRef: coreRefFromPort(activeSession.SessionRef),
+		SessionRef: activeSession.Ref,
 		Kind:       ActiveTurnKindKernel,
 		HandleID:   "handle-1",
 		RunID:      "run-1",
@@ -251,11 +251,11 @@ func TestGatewayDriverSubmitRoutesActiveSessionInputToActiveTurn(t *testing.T) {
 	}}
 	var activeSubmits []SubmitActiveTurnRequest
 	driver, err := NewGatewayDriver(ctx, &DriverStack{
-		Workspace:       coresession.Workspace{Key: "ws", CWD: activeSession.CWD},
+		Workspace:       activeSession.Workspace,
 		SandboxStatusFn: func() SandboxStatus { return SandboxStatus{RequestedBackend: "host"} },
 		ActiveTurnsFn:   func() []ActiveTurnState { return active },
 		StartSessionFn: func(context.Context, string, string) (coresession.Session, error) {
-			return coreSessionFromPort(activeSession), nil
+			return activeSession, nil
 		},
 		SubmitActiveTurnFn: func(_ context.Context, req SubmitActiveTurnRequest) error {
 			activeSubmits = append(activeSubmits, req)
@@ -279,8 +279,8 @@ func TestGatewayDriverSubmitRoutesActiveSessionInputToActiveTurn(t *testing.T) {
 	if got := activeSubmits[0].Submission.Text; got != "steer next step" {
 		t.Fatalf("active submit text = %q, want trimmed guidance", got)
 	}
-	if got := activeSubmits[0].SessionRef.SessionID; got != activeSession.SessionRef.SessionID {
-		t.Fatalf("active submit session = %q, want %q", got, activeSession.SessionRef.SessionID)
+	if got := activeSubmits[0].SessionRef.SessionID; got != activeSession.Ref.SessionID {
+		t.Fatalf("active submit session = %q, want %q", got, activeSession.Ref.SessionID)
 	}
 }
 
@@ -353,20 +353,20 @@ func TestGatewayDriverExecuteCommandRoutesThroughStackAndAdoptsReturnedSession(t
 func TestGatewayDriverStartupDoesNotQuerySandboxStatus(t *testing.T) {
 	ctx := context.Background()
 	statusCalls := 0
-	activeSession := session.Session{
-		SessionRef: session.SessionRef{
+	activeSession := coresession.Session{
+		Ref: coresession.Ref{
 			AppName: "caelis", UserID: "user-1", SessionID: "startup-session", WorkspaceKey: "ws",
 		},
-		CWD: t.TempDir(),
+		Workspace: coresession.Workspace{Key: "ws", CWD: t.TempDir()},
 	}
 	driver, err := NewGatewayDriver(ctx, &DriverStack{
-		Workspace: coresession.Workspace{Key: "ws", CWD: activeSession.CWD},
+		Workspace: activeSession.Workspace,
 		SandboxStatusFn: func() SandboxStatus {
 			statusCalls++
 			return SandboxStatus{RequestedBackend: "windows", ResolvedBackend: "windows"}
 		},
 		StartSessionFn: func(context.Context, string, string) (coresession.Session, error) {
-			return coreSessionFromPort(activeSession), nil
+			return activeSession, nil
 		},
 	}, activeSession.SessionID, "surface", "")
 	if err != nil {
@@ -419,21 +419,21 @@ func TestGatewayDriverLightweightStatusSkipsSandboxDiagnostics(t *testing.T) {
 func TestGatewayDriverStatusCanUseSharedAppStatusView(t *testing.T) {
 	ctx := context.Background()
 	workspace := t.TempDir()
-	activeSession := session.Session{
-		SessionRef: session.SessionRef{
+	activeSession := coresession.Session{
+		Ref: coresession.Ref{
 			AppName:      "caelis",
 			UserID:       "user-1",
 			SessionID:    "app-status-session",
 			WorkspaceKey: "repo",
 		},
-		CWD: workspace,
+		Workspace: coresession.Workspace{Key: "repo", CWD: workspace},
 	}
 	var seenRef coresession.Ref
 	statusCalls := 0
 	driver, err := NewGatewayDriver(ctx, &DriverStack{
-		Workspace: coresession.Workspace{Key: "repo", CWD: workspace},
+		Workspace: activeSession.Workspace,
 		StartSessionFn: func(context.Context, string, string) (coresession.Session, error) {
-			return coreSessionFromPort(activeSession), nil
+			return activeSession, nil
 		},
 		AppStatusViewFn: func(_ context.Context, ref coresession.Ref) (appviewmodel.StatusView, error) {
 			statusCalls++
@@ -506,14 +506,14 @@ func TestGatewayDriverStatusCanUseSharedAppStatusView(t *testing.T) {
 
 func TestGatewayDriverSubmitDoesNotRouteParticipantActiveTurnInputToActiveTurn(t *testing.T) {
 	ctx := context.Background()
-	activeSession := session.Session{
-		SessionRef: session.SessionRef{
+	activeSession := coresession.Session{
+		Ref: coresession.Ref{
 			AppName: "caelis", UserID: "user-1", SessionID: "active-session", WorkspaceKey: "ws",
 		},
-		CWD: t.TempDir(),
+		Workspace: coresession.Workspace{Key: "ws", CWD: t.TempDir()},
 	}
 	active := []ActiveTurnState{{
-		SessionRef: coreRefFromPort(activeSession.SessionRef),
+		SessionRef: activeSession.Ref,
 		Kind:       ActiveTurnKindParticipant,
 		HandleID:   "handle-1",
 		RunID:      "run-1",
@@ -522,11 +522,11 @@ func TestGatewayDriverSubmitDoesNotRouteParticipantActiveTurnInputToActiveTurn(t
 	var activeSubmits []SubmitActiveTurnRequest
 	var beginCalls int
 	driver, err := NewGatewayDriver(ctx, &DriverStack{
-		Workspace:       coresession.Workspace{Key: "ws", CWD: activeSession.CWD},
+		Workspace:       activeSession.Workspace,
 		SandboxStatusFn: func() SandboxStatus { return SandboxStatus{RequestedBackend: "host"} },
 		ActiveTurnsFn:   func() []ActiveTurnState { return active },
 		StartSessionFn: func(context.Context, string, string) (coresession.Session, error) {
-			return coreSessionFromPort(activeSession), nil
+			return activeSession, nil
 		},
 		SubmitActiveTurnFn: func(_ context.Context, req SubmitActiveTurnRequest) error {
 			activeSubmits = append(activeSubmits, req)
@@ -538,8 +538,8 @@ func TestGatewayDriverSubmitDoesNotRouteParticipantActiveTurnInputToActiveTurn(t
 				t.Fatalf("BeginTurn input = %q, want trimmed main prompt", req.Input)
 			}
 			return BeginTurnResult{
-				Session: coreSessionFromPort(activeSession),
-				Turn:    newGatewayDriverTestTurn(coreRefFromPort(activeSession.SessionRef)),
+				Session: activeSession,
+				Turn:    newGatewayDriverTestTurn(activeSession.Ref),
 			}, nil
 		},
 	}, activeSession.SessionID, "surface", "")
@@ -569,29 +569,19 @@ func TestGatewayDriverListSessionsSkipsUntitledSessions(t *testing.T) {
 		WorkspaceKey:   workspace,
 		WorkspaceCWD:   workspace,
 		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
 		Model: ModelConfig{
 			Provider: "ollama",
-			API:      model.APIOllama,
+			API:      coremodel.APIOllama,
 			Model:    "llama3",
 		},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	if _, err := stack.Gateway.StartSession(ctx, kernel.StartSessionRequest{
-		AppName:   stack.AppName,
-		UserID:    stack.UserID,
-		Workspace: stack.Workspace,
-	}); err != nil {
+	if _, err := stack.StartSession(ctx, "", ""); err != nil {
 		t.Fatalf("StartSession(blank) error = %v", err)
 	}
-	titled, err := stack.Gateway.StartSession(ctx, kernel.StartSessionRequest{
-		AppName:   stack.AppName,
-		UserID:    stack.UserID,
-		Workspace: stack.Workspace,
-		Title:     "visible prompt",
-	})
+	titled, err := stack.StartSessionWithTitle(ctx, "", "", "visible prompt")
 	if err != nil {
 		t.Fatalf("StartSession(titled) error = %v", err)
 	}
@@ -634,10 +624,9 @@ func TestGatewayDriverCompleteSlashArgConnectFlowUsesLegacyCommands(t *testing.T
 		WorkspaceKey:   t.TempDir(),
 		WorkspaceCWD:   t.TempDir(),
 		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
 		Model: ModelConfig{
 			Provider: "ollama",
-			API:      model.APIOllama,
+			API:      coremodel.APIOllama,
 			Model:    "llama3",
 		},
 	})
@@ -729,10 +718,9 @@ func TestGatewayDriverCompleteSlashArgUsesRealModelAliases(t *testing.T) {
 		WorkspaceKey:   t.TempDir(),
 		WorkspaceCWD:   t.TempDir(),
 		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
 		Model: ModelConfig{
 			Provider: "ollama",
-			API:      model.APIOllama,
+			API:      coremodel.APIOllama,
 			Model:    "llama3",
 		},
 	})
@@ -861,10 +849,9 @@ func TestGatewayDriverCompletesAndPersistsModelReasoningLevel(t *testing.T) {
 		WorkspaceKey:   t.TempDir(),
 		WorkspaceCWD:   t.TempDir(),
 		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
 		Model: ModelConfig{
 			Provider: "deepseek",
-			API:      model.APIDeepSeek,
+			API:      coremodel.APIDeepSeek,
 			Model:    "deepseek-v4-pro",
 		},
 	})
@@ -897,7 +884,7 @@ func TestGatewayDriverCompletesAndPersistsModelReasoningLevel(t *testing.T) {
 	if !ok {
 		t.Fatal("driver has no current session")
 	}
-	state, err := stack.Sessions.SnapshotState(ctx, portRefFromCore(activeSession.Ref))
+	state, err := stack.Sessions.SnapshotState(ctx, activeSession.Ref)
 	if err != nil {
 		t.Fatalf("SnapshotState() error = %v", err)
 	}
@@ -916,7 +903,6 @@ func TestGatewayDriverConnectPersistsDeepSeekModelDefaults(t *testing.T) {
 		WorkspaceKey:   t.TempDir(),
 		WorkspaceCWD:   t.TempDir(),
 		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
@@ -1049,7 +1035,6 @@ func TestGatewayDriverConnectWithTokenEnvDoesNotPersistTokenValue(t *testing.T) 
 		WorkspaceKey:   t.TempDir(),
 		WorkspaceCWD:   t.TempDir(),
 		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
@@ -1107,10 +1092,9 @@ func TestGatewayDriverCodeFreeModelHasNoReasoningLevels(t *testing.T) {
 		WorkspaceKey:   t.TempDir(),
 		WorkspaceCWD:   t.TempDir(),
 		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
 		Model: ModelConfig{
 			Provider: "codefree",
-			API:      model.APICodeFree,
+			API:      coremodel.APICodeFree,
 			Model:    "GLM-5.1",
 		},
 	})
@@ -1156,10 +1140,9 @@ func TestGatewayDriverConnectCodeFreeUsesExistingOAuthCache(t *testing.T) {
 		WorkspaceKey:   t.TempDir(),
 		WorkspaceCWD:   t.TempDir(),
 		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
 		Model: ModelConfig{
 			Provider: "ollama",
-			API:      model.APIOllama,
+			API:      coremodel.APIOllama,
 			Model:    "llama3",
 		},
 	})
@@ -1195,10 +1178,9 @@ func TestGatewayDriverStatusIncludesContextUsageSnapshot(t *testing.T) {
 		WorkspaceKey:   t.TempDir(),
 		WorkspaceCWD:   t.TempDir(),
 		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
 		Model: ModelConfig{
 			Provider:            "ollama",
-			API:                 model.APIOllama,
+			API:                 coremodel.APIOllama,
 			Model:               "llama3",
 			ContextWindowTokens: 88000,
 		},
@@ -1214,29 +1196,23 @@ func TestGatewayDriverStatusIncludesContextUsageSnapshot(t *testing.T) {
 	if !ok {
 		t.Fatal("expected active session")
 	}
-	if _, err := stack.Sessions.AppendEvent(ctx, session.AppendEventRequest{
-		SessionRef: portRefFromCore(activeSession.Ref),
-		Event: &session.Event{
-			Message: ptrRuntimeMessage(model.NewTextMessage(model.RoleUser, "hello")),
-			Text:    "hello",
-		},
+	if _, err := stack.Sessions.AppendEvent(ctx, activeSession.Ref, coresession.Event{
+		Type:    coresession.EventUser,
+		Message: ptrRuntimeMessage(testCoreTextMessage(coremodel.RoleUser, "hello")),
 	}); err != nil {
 		t.Fatalf("AppendEvent(user) error = %v", err)
 	}
-	if _, err := stack.Sessions.AppendEvent(ctx, session.AppendEventRequest{
-		SessionRef: portRefFromCore(activeSession.Ref),
-		Event: &session.Event{
-			Message: ptrRuntimeMessage(model.NewTextMessage(model.RoleAssistant, "world")),
-			Text:    "world",
-			Meta: map[string]any{
-				"provider":            "ollama",
-				"model":               "llama3",
-				"prompt_tokens":       12600,
-				"cached_input_tokens": 9000,
-				"completion_tokens":   200,
-				"reasoning_tokens":    50,
-				"total_tokens":        12800,
-			},
+	if _, err := stack.Sessions.AppendEvent(ctx, activeSession.Ref, coresession.Event{
+		Type:    coresession.EventAssistant,
+		Message: ptrRuntimeMessage(testCoreTextMessage(coremodel.RoleAssistant, "world")),
+		Meta: map[string]any{
+			"provider":            "ollama",
+			"model":               "llama3",
+			"prompt_tokens":       12600,
+			"cached_input_tokens": 9000,
+			"completion_tokens":   200,
+			"reasoning_tokens":    50,
+			"total_tokens":        12800,
 		},
 	}); err != nil {
 		t.Fatalf("AppendEvent(assistant) error = %v", err)
@@ -1269,10 +1245,9 @@ func TestGatewayDriverDeleteModelRemovesConfiguredAlias(t *testing.T) {
 		WorkspaceKey:   t.TempDir(),
 		WorkspaceCWD:   t.TempDir(),
 		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
 		Model: ModelConfig{
 			Provider: "ollama",
-			API:      model.APIOllama,
+			API:      coremodel.APIOllama,
 			Model:    "llama3",
 		},
 	})
@@ -1319,7 +1294,6 @@ func TestGatewayDriverDeleteOnlyModelClearsAliasCandidatesAndStatus(t *testing.T
 		WorkspaceKey:   t.TempDir(),
 		WorkspaceCWD:   t.TempDir(),
 		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
@@ -1362,10 +1336,9 @@ func TestGatewayDriverUseModelResolvesCaseInsensitiveAlias(t *testing.T) {
 		WorkspaceKey:   t.TempDir(),
 		WorkspaceCWD:   t.TempDir(),
 		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
 		Model: ModelConfig{
 			Provider: "ollama",
-			API:      model.APIOllama,
+			API:      coremodel.APIOllama,
 			Model:    "llama3",
 		},
 	})
@@ -1404,23 +1377,22 @@ func TestGatewayDriverAgentRegistryAndControllerUse(t *testing.T) {
 		WorkspaceKey:   workdir,
 		WorkspaceCWD:   workdir,
 		PermissionMode: "default",
-		Assembly: assembly.ResolvedAssembly{
-			Agents: []assembly.AgentConfig{{
-				Name:        "copilot",
-				Description: "ACP sidecar agent.",
-				Command:     "go",
-				Args:        []string{"run", "./internal/acpe2eagent"},
-				WorkDir:     repo,
-				Env: map[string]string{
-					"SDK_ACP_STUB_REPLY":   "driver acp ok",
-					"SDK_ACP_SESSION_ROOT": filepath.Join(root, "agent-sessions"),
-					"SDK_ACP_TASK_ROOT":    filepath.Join(root, "agent-tasks"),
-				},
-			}},
-		},
+		ExternalACPAgents: []gatewayDriverTestACPAgent{{
+			AgentID:     "copilot",
+			AgentName:   "copilot",
+			Description: "ACP sidecar agent.",
+			Command:     "go",
+			Args:        []string{"run", "./internal/acpe2eagent"},
+			WorkDir:     repo,
+			Env: []string{
+				"SDK_ACP_STUB_REPLY=driver acp ok",
+				"SDK_ACP_SESSION_ROOT=" + filepath.Join(root, "agent-sessions"),
+				"SDK_ACP_TASK_ROOT=" + filepath.Join(root, "agent-tasks"),
+			},
+		}},
 		Model: ModelConfig{
 			Provider: "ollama",
-			API:      model.APIOllama,
+			API:      coremodel.APIOllama,
 			Model:    "llama3",
 		},
 	})
@@ -1582,11 +1554,7 @@ func TestGatewayDriverDynamicAgentCommandDoesNotPersistParticipantOnPromptConfli
 		}},
 		Invokers: map[string]appservices.AgentInvoker{
 			"copilot": appservices.AgentInvokerFunc(func(context.Context, appservices.AgentInvokeRequest) (appservices.AgentInvokeResult, error) {
-				return appservices.AgentInvokeResult{}, &kernel.Error{
-					Kind:    kernel.KindConflict,
-					Code:    kernel.CodeActiveRunConflict,
-					Message: "active participant run already in progress",
-				}
+				return appservices.AgentInvokeResult{}, errGatewayDriverTestActiveRunConflict
 			}),
 		},
 	})
@@ -1612,8 +1580,7 @@ func TestGatewayDriverDynamicAgentCommandDoesNotPersistParticipantOnPromptConfli
 	if err == nil {
 		t.Fatal("ExecuteCommand(/copilot) error = nil, want active run conflict")
 	}
-	var gwErr *kernel.Error
-	if !kernel.As(err, &gwErr) || gwErr.Code != kernel.CodeActiveRunConflict {
+	if !errors.Is(err, errGatewayDriverTestActiveRunConflict) {
 		t.Fatalf("ExecuteCommand(/copilot) error = %v, want active run conflict", err)
 	}
 	status, err := driver.AgentStatus(ctx)
@@ -1639,14 +1606,13 @@ func TestGatewayDriverStatusUsesPersistedDefaultAliasOnStartup(t *testing.T) {
 		WorkspaceKey:   workdir,
 		WorkspaceCWD:   workdir,
 		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
 	if _, err := stack.Connect(ModelConfig{
 		Provider: "deepseek",
-		API:      model.APIDeepSeek,
+		API:      coremodel.APIDeepSeek,
 		Model:    "deepseek-v4-pro",
 		Token:    "secret",
 	}); err != nil {
@@ -1660,7 +1626,6 @@ func TestGatewayDriverStatusUsesPersistedDefaultAliasOnStartup(t *testing.T) {
 		WorkspaceKey:   workdir,
 		WorkspaceCWD:   workdir,
 		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack(reloaded) error = %v", err)
@@ -1687,7 +1652,6 @@ func TestGatewayDriverStartupUsesRequestedSessionID(t *testing.T) {
 		WorkspaceKey:   t.TempDir(),
 		WorkspaceCWD:   t.TempDir(),
 		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
@@ -1724,7 +1688,6 @@ func TestGatewayDriverStartupBindsRequestedSessionInsteadOfFreshOne(t *testing.T
 		WorkspaceKey:   t.TempDir(),
 		WorkspaceCWD:   t.TempDir(),
 		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
@@ -1750,7 +1713,7 @@ func TestGatewayDriverStartupBindsRequestedSessionInsteadOfFreshOne(t *testing.T
 	if status.SessionID == stale.SessionID {
 		t.Fatalf("startup session = %q, want sticky-session instead of stale bound session", status.SessionID)
 	}
-	current, ok := stack.Gateway.CurrentSession("surface")
+	current, ok := stack.CurrentSession("surface")
 	if !ok {
 		t.Fatal("expected surface binding to exist after startup")
 	}
@@ -1768,7 +1731,6 @@ func TestGatewayDriverStartupReusesExistingRequestedSession(t *testing.T) {
 		WorkspaceKey:   t.TempDir(),
 		WorkspaceCWD:   t.TempDir(),
 		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
@@ -1800,7 +1762,6 @@ func TestGatewayDriverCycleSessionModeUsesStartupSession(t *testing.T) {
 		WorkspaceKey:   t.TempDir(),
 		WorkspaceCWD:   t.TempDir(),
 		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
@@ -1830,18 +1791,18 @@ func TestGatewayDriverCycleSessionModeUsesStartupSession(t *testing.T) {
 
 func TestGatewayDriverSetSessionModeUpdatesRemoteACPControllerMode(t *testing.T) {
 	ctx := context.Background()
-	ref := session.SessionRef{AppName: "caelis", UserID: "u", SessionID: "parent", WorkspaceKey: "ws"}
-	activeSession := session.Session{
-		SessionRef: ref,
-		CWD:        t.TempDir(),
-		Controller: session.ControllerBinding{
-			Kind:            session.ControllerKindACP,
+	ref := coresession.Ref{AppName: "caelis", UserID: "u", SessionID: "parent", WorkspaceKey: "ws"}
+	activeSession := coresession.Session{
+		Ref:       ref,
+		Workspace: coresession.Workspace{Key: "ws", CWD: t.TempDir()},
+		Controller: coresession.ControllerBinding{
+			Kind:            coresession.ControllerACP,
 			AgentName:       "codex",
 			RemoteSessionID: "remote-1",
 		},
 	}
 	remoteStatus := appviewmodel.ControllerStatus{
-		SessionRef: coreRefFromPort(activeSession.SessionRef),
+		SessionRef: activeSession.Ref,
 		Agent:      "codex",
 		Model:      "remote-model",
 		Mode:       "auto-review",
@@ -1854,7 +1815,7 @@ func TestGatewayDriverSetSessionModeUpdatesRemoteACPControllerMode(t *testing.T)
 	var setRemoteMode string
 	driver := &GatewayDriver{
 		stack: &DriverStack{
-			Workspace: coresession.Workspace{CWD: activeSession.CWD},
+			Workspace: activeSession.Workspace,
 			SessionRuntimeStateFn: func(context.Context, coresession.Ref) (SessionRuntimeState, error) {
 				return SessionRuntimeState{ModelAlias: "local/model", SessionMode: "auto-review"}, nil
 			},
@@ -1874,7 +1835,7 @@ func TestGatewayDriverSetSessionModeUpdatesRemoteACPControllerMode(t *testing.T)
 				return remoteStatus, nil
 			},
 		},
-		session:            coreSessionFromPort(activeSession),
+		session:            activeSession,
 		hasSession:         true,
 		bindingKey:         "surface",
 		defaultSessionMode: "auto-review",
@@ -1900,18 +1861,18 @@ func TestGatewayDriverSetSessionModeUpdatesRemoteACPControllerMode(t *testing.T)
 
 func TestGatewayDriverCycleSessionModeUpdatesRemoteACPControllerMode(t *testing.T) {
 	ctx := context.Background()
-	ref := session.SessionRef{AppName: "caelis", UserID: "u", SessionID: "parent", WorkspaceKey: "ws"}
-	activeSession := session.Session{
-		SessionRef: ref,
-		CWD:        t.TempDir(),
-		Controller: session.ControllerBinding{
-			Kind:            session.ControllerKindACP,
+	ref := coresession.Ref{AppName: "caelis", UserID: "u", SessionID: "parent", WorkspaceKey: "ws"}
+	activeSession := coresession.Session{
+		Ref:       ref,
+		Workspace: coresession.Workspace{Key: "ws", CWD: t.TempDir()},
+		Controller: coresession.ControllerBinding{
+			Kind:            coresession.ControllerACP,
 			AgentName:       "codex",
 			RemoteSessionID: "remote-1",
 		},
 	}
 	remoteStatus := appviewmodel.ControllerStatus{
-		SessionRef: coreRefFromPort(activeSession.SessionRef),
+		SessionRef: activeSession.Ref,
 		Agent:      "codex",
 		Model:      "remote-model",
 		Mode:       "ask",
@@ -1924,7 +1885,7 @@ func TestGatewayDriverCycleSessionModeUpdatesRemoteACPControllerMode(t *testing.
 	var setRemoteMode string
 	driver := &GatewayDriver{
 		stack: &DriverStack{
-			Workspace: coresession.Workspace{CWD: activeSession.CWD},
+			Workspace: activeSession.Workspace,
 			SessionRuntimeStateFn: func(context.Context, coresession.Ref) (SessionRuntimeState, error) {
 				return SessionRuntimeState{ModelAlias: "local/model", SessionMode: "auto-review"}, nil
 			},
@@ -1944,7 +1905,7 @@ func TestGatewayDriverCycleSessionModeUpdatesRemoteACPControllerMode(t *testing.
 				return remoteStatus, nil
 			},
 		},
-		session:            coreSessionFromPort(activeSession),
+		session:            activeSession,
 		hasSession:         true,
 		bindingKey:         "surface",
 		defaultSessionMode: "auto-review",
@@ -2013,19 +1974,19 @@ func TestACPControllerModeDisplayPrefersDeclaredName(t *testing.T) {
 
 func TestGatewayDriverACPStatusPrefersRemoteModeOverLocalSessionMode(t *testing.T) {
 	ctx := context.Background()
-	ref := session.SessionRef{AppName: "caelis", UserID: "u", SessionID: "parent", WorkspaceKey: "ws"}
-	activeSession := session.Session{
-		SessionRef: ref,
-		CWD:        t.TempDir(),
-		Controller: session.ControllerBinding{
-			Kind:            session.ControllerKindACP,
+	ref := coresession.Ref{AppName: "caelis", UserID: "u", SessionID: "parent", WorkspaceKey: "ws"}
+	activeSession := coresession.Session{
+		Ref:       ref,
+		Workspace: coresession.Workspace{Key: "ws", CWD: t.TempDir()},
+		Controller: coresession.ControllerBinding{
+			Kind:            coresession.ControllerACP,
 			AgentName:       "opencode",
 			RemoteSessionID: "remote-1",
 		},
 	}
 	driver := &GatewayDriver{
 		stack: &DriverStack{
-			Workspace:           coresession.Workspace{CWD: activeSession.CWD},
+			Workspace:           activeSession.Workspace,
 			DefaultModelAliasFn: func() string { return "local/model" },
 			SessionRuntimeStateFn: func(context.Context, coresession.Ref) (SessionRuntimeState, error) {
 				return SessionRuntimeState{ModelAlias: "local/model", SessionMode: "local-default"}, nil
@@ -2040,7 +2001,7 @@ func TestGatewayDriverACPStatusPrefersRemoteModeOverLocalSessionMode(t *testing.
 				}, true, nil
 			},
 		},
-		session:            coreSessionFromPort(activeSession),
+		session:            activeSession,
 		hasSession:         true,
 		defaultSessionMode: "local-default",
 		sessionMode:        "local-default",
@@ -2069,7 +2030,6 @@ func TestGatewayDriverACPStatusKeepsAgentFallbackWithoutRemoteModel(t *testing.T
 		WorkspaceKey:   t.TempDir(),
 		WorkspaceCWD:   t.TempDir(),
 		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
 		Model: ModelConfig{
 			Provider: "minimax",
 			Model:    "MiniMax-M2",
@@ -2082,14 +2042,11 @@ func TestGatewayDriverACPStatusKeepsAgentFallbackWithoutRemoteModel(t *testing.T
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
 	}
-	activeSession, err = stack.Sessions.BindController(ctx, session.BindControllerRequest{
-		SessionRef: activeSession.SessionRef,
-		Binding: session.ControllerBinding{
-			Kind:            session.ControllerKindACP,
-			ControllerID:    "codex",
-			Label:           "Codex ACP",
-			RemoteSessionID: "remote-1",
-		},
+	activeSession, err = stack.Sessions.BindController(ctx, activeSession.Ref, coresession.ControllerBinding{
+		Kind:            coresession.ControllerACP,
+		ID:              "codex",
+		Label:           "Codex ACP",
+		RemoteSessionID: "remote-1",
 	})
 	if err != nil {
 		t.Fatalf("BindController() error = %v", err)
@@ -2097,7 +2054,7 @@ func TestGatewayDriverACPStatusKeepsAgentFallbackWithoutRemoteModel(t *testing.T
 
 	driver := &GatewayDriver{
 		stack:              gatewayDriverTestRuntimeStack(stack),
-		session:            coreSessionFromPort(activeSession),
+		session:            activeSession,
 		hasSession:         true,
 		bindingKey:         "surface",
 		defaultSessionMode: "default",
@@ -2126,7 +2083,6 @@ func TestGatewayDriverIgnoresStaleSessionAliasOutsideConfiguredModels(t *testing
 		WorkspaceKey:   t.TempDir(),
 		WorkspaceCWD:   t.TempDir(),
 		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
@@ -2139,8 +2095,8 @@ func TestGatewayDriverIgnoresStaleSessionAliasOutsideConfiguredModels(t *testing
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
-	if err := stack.Sessions.UpdateState(ctx, portRefFromCore(activeSession.Ref), func(state map[string]any) (map[string]any, error) {
-		next := session.CloneState(state)
+	if err := stack.Sessions.UpdateState(ctx, activeSession.Ref, func(state map[string]any) (map[string]any, error) {
+		next := cloneTestState(state)
 		if next == nil {
 			next = map[string]any{}
 		}
@@ -2176,10 +2132,9 @@ func TestGatewayDriverCompleteSlashArgUsesPrefixMatching(t *testing.T) {
 		WorkspaceKey:   t.TempDir(),
 		WorkspaceCWD:   t.TempDir(),
 		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
 		Model: ModelConfig{
 			Provider: "ollama",
-			API:      model.APIOllama,
+			API:      coremodel.APIOllama,
 			Model:    "llama3",
 		},
 	})
@@ -2231,10 +2186,9 @@ func TestGatewayDriverCompleteSlashArgAgentRootOrder(t *testing.T) {
 		WorkspaceKey:   t.TempDir(),
 		WorkspaceCWD:   t.TempDir(),
 		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
 		Model: ModelConfig{
 			Provider: "ollama",
-			API:      model.APIOllama,
+			API:      coremodel.APIOllama,
 			Model:    "llama3",
 		},
 	})
@@ -2281,10 +2235,9 @@ func TestGatewayDriverInterruptCancelsAgentInstall(t *testing.T) {
 		WorkspaceKey:   t.TempDir(),
 		WorkspaceCWD:   t.TempDir(),
 		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
 		Model: ModelConfig{
 			Provider: "ollama",
-			API:      model.APIOllama,
+			API:      coremodel.APIOllama,
 			Model:    "llama3",
 		},
 	})
@@ -2339,7 +2292,6 @@ func TestGatewayDriverConnectPersistsMultipleProviders(t *testing.T) {
 		WorkspaceKey:   workdir,
 		WorkspaceCWD:   workdir,
 		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
@@ -2409,8 +2361,8 @@ func TestFindProviderTemplateSupportsXiaomiTokenPlanCN(t *testing.T) {
 	if tpl.Provider != "xiaomi" {
 		t.Fatalf("provider = %q, want xiaomi", tpl.Provider)
 	}
-	if tpl.API != model.APIMimo {
-		t.Fatalf("api = %q, want %q", tpl.API, model.APIMimo)
+	if tpl.API != coremodel.APIMimo {
+		t.Fatalf("api = %q, want %q", tpl.API, coremodel.APIMimo)
 	}
 	if tpl.DefaultBaseURL != connectXiaomiTokenPlanCNBaseURL {
 		t.Fatalf("defaultBaseURL = %q, want %q", tpl.DefaultBaseURL, connectXiaomiTokenPlanCNBaseURL)
@@ -2454,7 +2406,6 @@ func TestGatewayDriverConnectXiaomiTokenPlanCNStoresXiaomiProvider(t *testing.T)
 		WorkspaceKey:   t.TempDir(),
 		WorkspaceCWD:   t.TempDir(),
 		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
@@ -2523,7 +2474,6 @@ func TestGatewayDriverConnectXiaomiEndpointsCoexistUnderVisibleAlias(t *testing.
 		WorkspaceKey:   t.TempDir(),
 		WorkspaceCWD:   t.TempDir(),
 		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
@@ -2601,7 +2551,6 @@ func TestGatewayDriverConnectReusesExistingEndpointAuth(t *testing.T) {
 		WorkspaceKey:   t.TempDir(),
 		WorkspaceCWD:   t.TempDir(),
 		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
@@ -2699,7 +2648,6 @@ func TestGatewayDriverCompleteFileUsesRelativePathsAndSkipsNoise(t *testing.T) {
 		WorkspaceKey:   workspace,
 		WorkspaceCWD:   workspace,
 		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
@@ -2758,7 +2706,6 @@ func TestGatewayDriverCompleteSkillDiscoversGlobalAndWorkspaceSkills(t *testing.
 		WorkspaceKey:   workspace,
 		WorkspaceCWD:   workspace,
 		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
@@ -2799,7 +2746,6 @@ func TestGatewayDriverCompleteMentionReturnsACPSidecarsOnly(t *testing.T) {
 		WorkspaceKey:   t.TempDir(),
 		WorkspaceCWD:   t.TempDir(),
 		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
@@ -2812,59 +2758,47 @@ func TestGatewayDriverCompleteMentionReturnsACPSidecarsOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ensureSession() error = %v", err)
 	}
-	if _, err := stack.Sessions.PutParticipant(ctx, session.PutParticipantRequest{
-		SessionRef: portRefFromCore(activeSession.Ref),
-		Binding: session.ParticipantBinding{
-			ID:           "side-1",
-			Kind:         session.ParticipantKindACP,
-			Role:         session.ParticipantRoleSidecar,
-			AgentName:    "codex",
-			Label:        "@jeff",
-			SessionID:    "child-1",
-			Source:       "custom_codex",
-			DelegationID: "task-side",
-		},
+	if _, err := stack.Sessions.PutParticipant(ctx, activeSession.Ref, coresession.ParticipantBinding{
+		ID:           "side-1",
+		Kind:         coresession.ParticipantACP,
+		Role:         coresession.ParticipantSidecar,
+		AgentName:    "codex",
+		Label:        "@jeff",
+		SessionID:    "child-1",
+		Source:       "custom_codex",
+		DelegationID: "task-side",
 	}); err != nil {
 		t.Fatalf("PutParticipant(side) error = %v", err)
 	}
-	if _, err := stack.Sessions.PutParticipant(ctx, session.PutParticipantRequest{
-		SessionRef: portRefFromCore(activeSession.Ref),
-		Binding: session.ParticipantBinding{
-			ID:           "legacy-side-1",
-			Kind:         session.ParticipantKindSubagent,
-			Role:         session.ParticipantRoleSidecar,
-			AgentName:    "legacy",
-			Label:        "@jill",
-			SessionID:    "legacy-child-1",
-			DelegationID: "task-legacy",
-		},
+	if _, err := stack.Sessions.PutParticipant(ctx, activeSession.Ref, coresession.ParticipantBinding{
+		ID:           "legacy-side-1",
+		Kind:         coresession.ParticipantSubagent,
+		Role:         coresession.ParticipantSidecar,
+		AgentName:    "legacy",
+		Label:        "@jill",
+		SessionID:    "legacy-child-1",
+		DelegationID: "task-legacy",
 	}); err != nil {
 		t.Fatalf("PutParticipant(legacy-side) error = %v", err)
 	}
-	if _, err := stack.Sessions.PutParticipant(ctx, session.PutParticipantRequest{
-		SessionRef: portRefFromCore(activeSession.Ref),
-		Binding: session.ParticipantBinding{
-			ID:           "task-1",
-			Kind:         session.ParticipantKindSubagent,
-			Role:         session.ParticipantRoleDelegated,
-			Label:        "@jude",
-			SessionID:    "child-2",
-			DelegationID: "task-1",
-		},
+	if _, err := stack.Sessions.PutParticipant(ctx, activeSession.Ref, coresession.ParticipantBinding{
+		ID:           "task-1",
+		Kind:         coresession.ParticipantSubagent,
+		Role:         coresession.ParticipantDelegated,
+		Label:        "@jude",
+		SessionID:    "child-2",
+		DelegationID: "task-1",
 	}); err != nil {
 		t.Fatalf("PutParticipant(delegated) error = %v", err)
 	}
-	if _, err := stack.Sessions.PutParticipant(ctx, session.PutParticipantRequest{
-		SessionRef: portRefFromCore(activeSession.Ref),
-		Binding: session.ParticipantBinding{
-			ID:           "self-001",
-			Kind:         session.ParticipantKindSubagent,
-			Role:         session.ParticipantRoleDelegated,
-			AgentName:    "self",
-			Label:        "@jude",
-			SessionID:    "self-child-1",
-			DelegationID: "task-self",
-		},
+	if _, err := stack.Sessions.PutParticipant(ctx, activeSession.Ref, coresession.ParticipantBinding{
+		ID:           "self-001",
+		Kind:         coresession.ParticipantSubagent,
+		Role:         coresession.ParticipantDelegated,
+		AgentName:    "self",
+		Label:        "@jude",
+		SessionID:    "self-child-1",
+		DelegationID: "task-self",
 	}); err != nil {
 		t.Fatalf("PutParticipant(self) error = %v", err)
 	}
@@ -2897,40 +2831,27 @@ func TestGatewayDriverCompleteResumeIncludesMetadataAndRecentFirst(t *testing.T)
 		WorkspaceKey:   workspace,
 		WorkspaceCWD:   workspace,
 		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	first, err := stack.Gateway.StartSession(ctx, kernel.StartSessionRequest{
-		AppName:    stack.AppName,
-		UserID:     stack.UserID,
-		Workspace:  stack.Workspace,
-		Title:      "First Task",
-		BindingKey: "first-binding",
-	})
+	first, err := stack.StartSessionWithTitle(ctx, "", "first-binding", "First Task")
 	if err != nil {
 		t.Fatalf("StartSession(first) error = %v", err)
 	}
-	if err := stack.Sessions.UpdateState(ctx, first.SessionRef, func(state map[string]any) (map[string]any, error) {
-		next := session.CloneState(state)
+	if err := stack.Sessions.UpdateState(ctx, first.Ref, func(state map[string]any) (map[string]any, error) {
+		next := cloneTestState(state)
 		next[appservices.StateCurrentModelID] = "openai/gpt-4o-mini"
 		return next, nil
 	}); err != nil {
 		t.Fatalf("UpdateState(first) error = %v", err)
 	}
-	second, err := stack.Gateway.StartSession(ctx, kernel.StartSessionRequest{
-		AppName:    stack.AppName,
-		UserID:     stack.UserID,
-		Workspace:  stack.Workspace,
-		Title:      "Second Task",
-		BindingKey: "second-binding",
-	})
+	second, err := stack.StartSessionWithTitle(ctx, "", "second-binding", "Second Task")
 	if err != nil {
 		t.Fatalf("StartSession(second) error = %v", err)
 	}
-	if err := stack.Sessions.UpdateState(ctx, second.SessionRef, func(state map[string]any) (map[string]any, error) {
-		next := session.CloneState(state)
+	if err := stack.Sessions.UpdateState(ctx, second.Ref, func(state map[string]any) (map[string]any, error) {
+		next := cloneTestState(state)
 		next[appservices.StateCurrentModelID] = "deepseek/deepseek-v4-flash"
 		return next, nil
 	}); err != nil {
@@ -2965,10 +2886,9 @@ func TestGatewayDriverDeleteModelRejectsUnknownAlias(t *testing.T) {
 		WorkspaceKey:   t.TempDir(),
 		WorkspaceCWD:   t.TempDir(),
 		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
 		Model: ModelConfig{
 			Provider: "ollama",
-			API:      model.APIOllama,
+			API:      coremodel.APIOllama,
 			Model:    "llama3",
 		},
 	})
@@ -2993,10 +2913,9 @@ func TestGatewayDriverConnectModelCandidatesIncludeConfiguredProviderModels(t *t
 		WorkspaceKey:   t.TempDir(),
 		WorkspaceCWD:   t.TempDir(),
 		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
 		Model: ModelConfig{
 			Provider: "ollama",
-			API:      model.APIOllama,
+			API:      coremodel.APIOllama,
 			Model:    "llama3",
 		},
 	})
@@ -3040,7 +2959,6 @@ func TestGatewayDriverConnectRejectsMissingAPIKeyWithActionableError(t *testing.
 		WorkspaceKey:   t.TempDir(),
 		WorkspaceCWD:   t.TempDir(),
 		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
@@ -3066,7 +2984,6 @@ func TestGatewayDriverConnectRejectsInvalidBaseURL(t *testing.T) {
 		WorkspaceKey:   t.TempDir(),
 		WorkspaceCWD:   t.TempDir(),
 		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
@@ -3096,7 +3013,6 @@ func TestGatewayDriverStatusIncludesDoctorDiagnostics(t *testing.T) {
 		WorkspaceKey:   workdir,
 		WorkspaceCWD:   workdir,
 		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
@@ -3135,7 +3051,7 @@ func TestGatewayDriverStatusIncludesDoctorDiagnostics(t *testing.T) {
 
 func TestGatewayDriverStatusIncludesPermissionGrantSummary(t *testing.T) {
 	ctx := context.Background()
-	activeSession := session.Session{SessionRef: session.SessionRef{SessionID: "grant-session"}}
+	activeSession := coresession.Session{Ref: coresession.Ref{SessionID: "grant-session"}}
 	driver := &GatewayDriver{
 		stack: &DriverStack{
 			Workspace: coresession.Workspace{CWD: "/workspace"},
@@ -3148,7 +3064,7 @@ func TestGatewayDriverStatusIncludesPermissionGrantSummary(t *testing.T) {
 				}, nil
 			},
 		},
-		session:    coreSessionFromPort(activeSession),
+		session:    activeSession,
 		hasSession: true,
 	}
 	status, err := driver.Status(ctx)

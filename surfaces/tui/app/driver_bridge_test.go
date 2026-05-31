@@ -15,8 +15,6 @@ import (
 	"github.com/OnslaughtSnail/caelis/core/sandbox"
 	coresession "github.com/OnslaughtSnail/caelis/core/session"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
-	"github.com/OnslaughtSnail/caelis/kernel"
-	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/driver"
 )
 
@@ -394,7 +392,7 @@ func TestSlashResumeClearsHistoryBeforeReplay(t *testing.T) {
 		if log, ok := msg.(LogChunkMsg); ok && (strings.Contains(log.Chunk, "resumed session") || strings.Contains(log.Chunk, "replayed")) {
 			t.Fatalf("slashResume() emitted noisy resume notice: %#v", log)
 		}
-		if _, ok := msg.(kernel.EventEnvelope); ok {
+		if legacyKernelEnvelopeMsg(msg) {
 			t.Fatalf("slashResume() must batch historical replay, got per-envelope msg: %#v", msg)
 		}
 		if batch, ok := msg.(TranscriptEventsMsg); ok {
@@ -1165,8 +1163,8 @@ func TestFormatAgentStatusSnapshotShowsDelegatedParticipants(t *testing.T) {
 				ID:        "side-001",
 				Label:     "@codex",
 				AgentName: "codex",
-				Kind:      string(session.ParticipantKindACP),
-				Role:      string(session.ParticipantRoleSidecar),
+				Kind:      string(coresession.ParticipantACP),
+				Role:      string(coresession.ParticipantSidecar),
 				SessionID: "side-session",
 			},
 		},
@@ -1175,16 +1173,16 @@ func TestFormatAgentStatusSnapshotShowsDelegatedParticipants(t *testing.T) {
 				ID:        "self-001",
 				Label:     "@jude",
 				AgentName: "self",
-				Kind:      string(session.ParticipantKindSubagent),
-				Role:      string(session.ParticipantRoleDelegated),
+				Kind:      string(coresession.ParticipantSubagent),
+				Role:      string(coresession.ParticipantDelegated),
 				SessionID: "self-session",
 			},
 			{
 				ID:        "codex-001",
 				Label:     "@kate",
 				AgentName: "codex",
-				Kind:      string(session.ParticipantKindSubagent),
-				Role:      string(session.ParticipantRoleDelegated),
+				Kind:      string(coresession.ParticipantSubagent),
+				Role:      string(coresession.ParticipantDelegated),
 				SessionID: "codex-session",
 			},
 		},
@@ -1395,10 +1393,6 @@ func TestDynamicAgentSlashStreamsParticipantTurnOutput(t *testing.T) {
 			if transcriptEventsContainText(typed.Events, "copilot 子代理") {
 				return
 			}
-		case kernel.EventEnvelope:
-			if transcriptEventsContainText(ProjectGatewayEventToTranscriptEvents(typed.Event), "copilot 子代理") {
-				return
-			}
 		}
 	}
 	t.Fatal("dynamic slash emitted no participant output")
@@ -1422,14 +1416,6 @@ func TestDynamicAgentSlashDoesNotRenderRunningOutputPreviewAsAssistantText(t *te
 				t.Fatalf("running output preview was rendered as assistant text: %#v", transcript)
 			}
 			if transcriptEventsContainText(transcript.Events, "上海今天阴有小雨") {
-				return
-			}
-		case kernel.EventEnvelope:
-			events := ProjectGatewayEventToTranscriptEvents(transcript.Event)
-			if transcriptEventsContainText(events, "Searching the Web") {
-				t.Fatalf("running output preview was rendered as assistant text: %#v", transcript)
-			}
-			if transcriptEventsContainText(events, "上海今天阴有小雨") {
 				return
 			}
 		}
@@ -1484,10 +1470,6 @@ func TestDynamicAgentSlashParticipantTurnCompletionKeepsDivider(t *testing.T) {
 			if transcriptEventsContainText(typed.Events, "上海今天阴有小雨") {
 				foundOutput = true
 			}
-		case kernel.EventEnvelope:
-			if transcriptEventsContainText(ProjectGatewayEventToTranscriptEvents(typed.Event), "上海今天阴有小雨") {
-				foundOutput = true
-			}
 		}
 	}
 	if !foundOutput {
@@ -1533,7 +1515,7 @@ func TestDynamicAgentSlashPrefersStructuredParticipantEvents(t *testing.T) {
 	}
 }
 
-func TestDynamicAgentSlashParticipantTurnEmitsGatewayNarrative(t *testing.T) {
+func TestDynamicAgentSlashParticipantTurnEmitsTranscriptNarrative(t *testing.T) {
 	driver := &bridgeTestDriver{
 		agentList:   []tuidriver.AgentCandidate{{Name: "copilot"}},
 		commandView: dynamicAgentCommandView("copilot", participantAssistantCoreEvent("task-1", "@mike", "fallback side output")),
@@ -1549,10 +1531,6 @@ func TestDynamicAgentSlashParticipantTurnEmitsGatewayNarrative(t *testing.T) {
 		case msg := <-msgs:
 			transcript, ok := msg.(TranscriptEventsMsg)
 			if ok && transcriptEventsContainText(transcript.Events, "fallback side output") {
-				return
-			}
-			env, ok := msg.(kernel.EventEnvelope)
-			if ok && transcriptEventsContainText(ProjectGatewayEventToTranscriptEvents(env.Event), "fallback side output") {
 				return
 			}
 		case <-deadline:
@@ -1804,6 +1782,10 @@ func transcriptEventsContainText(events []TranscriptEvent, text string) bool {
 		}
 	}
 	return false
+}
+
+func legacyKernelEnvelopeMsg(msg tea.Msg) bool {
+	return strings.Contains(fmt.Sprintf("%T", msg), "kernel.EventEnvelope")
 }
 
 func noticeMessagesContain(messages []tea.Msg, text string) bool {
