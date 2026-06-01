@@ -1,6 +1,7 @@
 package tuiapp
 
 import (
+	"errors"
 	"runtime"
 	"strings"
 	"testing"
@@ -150,6 +151,138 @@ func TestImagePasteWhileRunningShowsFeedback(t *testing.T) {
 	if !strings.Contains(m.hint, "image") && !strings.Contains(m.hint, "running") {
 		t.Fatalf("model hint = %q, want image/running feedback", m.hint)
 	}
+}
+
+func TestWindowsCtrlVFallsBackToImageWhenTextClipboardEmpty(t *testing.T) {
+	withClipboardPlatform(t, "windows")
+	model := NewModel(Config{
+		ReadClipboardText: func() (string, error) {
+			return "", nil
+		},
+		PasteClipboardImage: func() ([]string, string, error) {
+			return []string{"shot.png"}, "shot.png", nil
+		},
+	})
+	model.keys = defaultKeyMapForPlatform("windows", false)
+
+	updated, _ := model.handleKey(tea.KeyPressMsg(tea.Key{Code: 'v', Mod: tea.ModCtrl}))
+	m := updated.(*Model)
+	if got := m.textarea.Value(); got != "" {
+		t.Fatalf("textarea value = %q, want empty image-only paste", got)
+	}
+	if len(m.inputAttachments) != 1 || m.inputAttachments[0].Name != "shot.png" {
+		t.Fatalf("input attachments = %#v, want pasted image", m.inputAttachments)
+	}
+}
+
+func TestWindowsCtrlVPrefersTextClipboardOverImageFallback(t *testing.T) {
+	withClipboardPlatform(t, "windows")
+	imageCalled := false
+	model := NewModel(Config{
+		ReadClipboardText: func() (string, error) {
+			return "hello", nil
+		},
+		PasteClipboardImage: func() ([]string, string, error) {
+			imageCalled = true
+			return []string{"shot.png"}, "shot.png", nil
+		},
+	})
+	model.keys = defaultKeyMapForPlatform("windows", false)
+
+	updated, _ := model.handleKey(tea.KeyPressMsg(tea.Key{Code: 'v', Mod: tea.ModCtrl}))
+	m := updated.(*Model)
+	if imageCalled {
+		t.Fatal("PasteClipboardImage should not run when text paste succeeds")
+	}
+	if got := m.textarea.Value(); got != "hello" {
+		t.Fatalf("textarea value = %q, want text paste", got)
+	}
+	if len(m.inputAttachments) != 0 {
+		t.Fatalf("input attachments = %#v, want none", m.inputAttachments)
+	}
+}
+
+func TestWindowsCtrlVFallsBackToImageWhenTextClipboardErrors(t *testing.T) {
+	withClipboardPlatform(t, "windows")
+	model := NewModel(Config{
+		ReadClipboardText: func() (string, error) {
+			return "", errors.New("clipboard has no text")
+		},
+		PasteClipboardImage: func() ([]string, string, error) {
+			return []string{"shot.png"}, "shot.png", nil
+		},
+	})
+	model.keys = defaultKeyMapForPlatform("windows", false)
+
+	updated, _ := model.handleKey(tea.KeyPressMsg(tea.Key{Code: 'v', Mod: tea.ModCtrl}))
+	m := updated.(*Model)
+	if m.hint != "" {
+		t.Fatalf("model hint = %q, want no text paste error after image fallback", m.hint)
+	}
+	if len(m.inputAttachments) != 1 || m.inputAttachments[0].Name != "shot.png" {
+		t.Fatalf("input attachments = %#v, want pasted image", m.inputAttachments)
+	}
+}
+
+func TestWindowsCtrlVDoesNotFallbackToImageWhileRunning(t *testing.T) {
+	withClipboardPlatform(t, "windows")
+	imageCalled := false
+	model := NewModel(Config{
+		ReadClipboardText: func() (string, error) {
+			return "", nil
+		},
+		PasteClipboardImage: func() ([]string, string, error) {
+			imageCalled = true
+			return []string{"shot.png"}, "shot.png", nil
+		},
+	})
+	model.running = true
+	model.keys = defaultKeyMapForPlatform("windows", false)
+
+	updated, _ := model.handleKey(tea.KeyPressMsg(tea.Key{Code: 'v', Mod: tea.ModCtrl}))
+	m := updated.(*Model)
+	if imageCalled {
+		t.Fatal("PasteClipboardImage should not run while model is running")
+	}
+	if len(m.inputAttachments) != 0 {
+		t.Fatalf("input attachments = %#v, want none", m.inputAttachments)
+	}
+}
+
+func TestWindowsCtrlShiftVDoesNotUseImageFallback(t *testing.T) {
+	withClipboardPlatform(t, "windows")
+	imageCalled := false
+	model := NewModel(Config{
+		ReadClipboardText: func() (string, error) {
+			return "", nil
+		},
+		PasteClipboardImage: func() ([]string, string, error) {
+			imageCalled = true
+			return []string{"shot.png"}, "shot.png", nil
+		},
+	})
+	model.keys = defaultKeyMapForPlatform("windows", false)
+
+	updated, _ := model.handleKey(tea.KeyPressMsg(tea.Key{Code: 'v', Mod: tea.ModCtrl | tea.ModShift}))
+	m := updated.(*Model)
+	if imageCalled {
+		t.Fatal("PasteClipboardImage should not run for Ctrl+Shift+V text paste")
+	}
+	if got := m.textarea.Value(); got != "" {
+		t.Fatalf("textarea value = %q, want empty", got)
+	}
+	if len(m.inputAttachments) != 0 {
+		t.Fatalf("input attachments = %#v, want none", m.inputAttachments)
+	}
+}
+
+func withClipboardPlatform(t *testing.T, goos string) {
+	t.Helper()
+	oldGOOS := clipboardGOOS
+	clipboardGOOS = goos
+	t.Cleanup(func() {
+		clipboardGOOS = oldGOOS
+	})
 }
 
 func TestModeToggleRunsWhileRunning(t *testing.T) {

@@ -746,22 +746,12 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				clearAfter:     systemHintDuration,
 			})
 		}
-		oldAttachmentCount := len(m.inputAttachments)
-		if m.cfg.PasteClipboardImage != nil {
-			names, _, err := m.cfg.PasteClipboardImage()
-			if err != nil {
-				return m, m.reportClipboardError("paste image", err)
-			}
-			if len(names) > 0 {
-				added := names
-				if oldAttachmentCount < len(names) {
-					added = names[oldAttachmentCount:]
-				}
-				m.insertAttachmentsAtCursor(added)
-				m.dismissVisibleHint()
-				m.syncTextareaChrome()
-				return m, nil
-			}
+		pastedImage, err := m.pasteClipboardImage()
+		if err != nil {
+			return m, m.reportClipboardError("paste image", err)
+		}
+		if pastedImage {
+			return m, nil
 		}
 		pasted, err := m.pasteClipboardText()
 		if err != nil {
@@ -773,9 +763,18 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case key.Matches(msg, m.keys.TextPaste):
-		pasted, err := m.pasteClipboardText()
-		if err != nil {
-			return m, m.reportClipboardError("paste", err)
+		pasted, textErr := m.pasteClipboardText()
+		if textErr == nil && pasted {
+			return m, nil
+		}
+		if !m.running && m.shouldFallbackTextPasteToImage(msg) {
+			pastedImage, imageErr := m.pasteClipboardImage()
+			if imageErr == nil && pastedImage {
+				return m, nil
+			}
+		}
+		if textErr != nil {
+			return m, m.reportClipboardError("paste", textErr)
 		}
 		if pasted {
 			return m, nil
@@ -836,6 +835,38 @@ func (m *Model) insertComposerText(text string) {
 	m.inputAttachments = adjustAttachmentOffsetsForTextEdit(m.inputAttachments, before, m.textarea.Value())
 	m.syncAttachmentSummary()
 	m.syncInputFromTextarea()
+}
+
+func (m *Model) pasteClipboardImage() (bool, error) {
+	if m == nil || m.cfg.PasteClipboardImage == nil {
+		return false, nil
+	}
+	oldAttachmentCount := len(m.inputAttachments)
+	names, _, err := m.cfg.PasteClipboardImage()
+	if err != nil {
+		return false, err
+	}
+	if len(names) == 0 {
+		return false, nil
+	}
+	added := names
+	if oldAttachmentCount < len(names) {
+		added = names[oldAttachmentCount:]
+	}
+	m.insertAttachmentsAtCursor(added)
+	m.dismissVisibleHint()
+	m.syncTextareaChrome()
+	return len(added) > 0, nil
+}
+
+func (m *Model) shouldFallbackTextPasteToImage(msg tea.KeyMsg) bool {
+	if msg.String() != "ctrl+v" {
+		return false
+	}
+	if strings.EqualFold(clipboardGOOS, "windows") {
+		return true
+	}
+	return isWSL()
 }
 
 func (m *Model) submitLine(line string) (tea.Model, tea.Cmd) {
