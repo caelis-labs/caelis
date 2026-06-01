@@ -2,6 +2,7 @@ package chat
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -157,7 +158,8 @@ func warningToolCall(call model.ToolCall, index int) model.ToolCall {
 func invalidToolCallWarningText(call model.ToolCall, err error) string {
 	toolName := strings.TrimSpace(call.Name)
 	if toolName == "" {
-		if typed, ok := err.(invalidToolCallError); ok {
+		var typed invalidToolCallError
+		if errors.As(err, &typed) {
 			toolName = strings.TrimSpace(typed.Tool)
 		}
 	}
@@ -169,7 +171,8 @@ func invalidToolCallWarningText(call model.ToolCall, err error) string {
 }
 
 func invalidToolCallReason(err error) string {
-	if typed, ok := err.(invalidToolCallError); ok {
+	var typed invalidToolCallError
+	if errors.As(err, &typed) {
 		if reason := strings.TrimSpace(typed.Reason); reason != "" {
 			return reason
 		}
