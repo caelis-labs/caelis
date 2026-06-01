@@ -389,6 +389,9 @@ func TestEnsureWritesManifestAndIsIdempotent(t *testing.T) {
 			t.Fatalf("sandbox env dir %q missing ACL entries = %#v/%v, want repaired", dir, missing, err)
 		}
 	}
+	if _, err := os.Stat(filepath.Join(first.SandboxEnvRoot, "home")); !os.IsNotExist(err) {
+		t.Fatalf("sandbox fake home stat error = %v, want not created", err)
+	}
 	if _, err := os.Stat(filepath.Join(workspace, ".caelis-sandbox")); !os.IsNotExist(err) {
 		t.Fatalf("workspace sandbox env stat error = %v, want not created", err)
 	}
@@ -411,24 +414,77 @@ func TestEnsureWritesManifestAndIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestSandboxEnvironmentKeepsHomeSandboxedAndExposesHostSkillRoot(t *testing.T) {
-	hostHome := t.TempDir()
+func TestSandboxEnvironmentPreservesHostUserDirsAndRedirectsToolCaches(t *testing.T) {
+	envRoot := filepath.Join(t.TempDir(), "sandbox-env")
+	hostHome := filepath.Join(t.TempDir(), "host-home")
+	hostAppData := filepath.Join(hostHome, "AppData", "Roaming")
+	hostLocalAppData := filepath.Join(hostHome, "AppData", "Local")
+	hostDrive := filepath.VolumeName(hostHome)
+	hostPath := strings.TrimPrefix(strings.TrimPrefix(hostHome, hostDrive), string(filepath.Separator))
+	if hostPath != "" {
+		hostPath = string(filepath.Separator) + hostPath
+	}
+	hostPythonPath := filepath.Join(t.TempDir(), "host-python")
+	extraPythonPath := filepath.Join(t.TempDir(), "extra-python")
 	testenv.SetHome(t, hostHome)
-	envRoot := filepath.Join(t.TempDir(), "env")
+	t.Setenv("APPDATA", hostAppData)
+	t.Setenv("LOCALAPPDATA", hostLocalAppData)
+	t.Setenv("PYTHONPATH", hostPythonPath)
 
-	env, err := sandboxEnvironment(workspacePolicy{SandboxEnvRoot: envRoot}, nil)
+	env, err := sandboxEnvironment(workspacePolicy{SandboxEnvRoot: envRoot}, map[string]string{
+		"PYTHONPATH": extraPythonPath,
+	})
 	if err != nil {
 		t.Fatalf("sandboxEnvironment() error = %v", err)
 	}
-	sandboxHome := filepath.Join(envRoot, "home")
-	if got := envValue(env, "HOME"); got != sandboxHome {
-		t.Fatalf("HOME = %q, want sandbox home %q", got, sandboxHome)
+
+	envRoot = pathutil.Normalize(envRoot)
+	tempRoot := sandboxTempRoot(envRoot)
+	cacheRoot := sandboxCacheRoot(envRoot)
+	for key, want := range map[string]string{
+		"HOME":                      hostHome,
+		"USERPROFILE":               hostHome,
+		"APPDATA":                   hostAppData,
+		"LOCALAPPDATA":              hostLocalAppData,
+		"HOMEDRIVE":                 hostDrive,
+		"HOMEPATH":                  hostPath,
+		"CAELIS_SKILLS_DIR":         filepath.Join(hostHome, ".caelis", "skills"),
+		"TEMP":                      tempRoot,
+		"TMP":                       tempRoot,
+		"GOTMPDIR":                  tempRoot,
+		"CAELIS_SANDBOX_TEMP":       tempRoot,
+		"GOCACHE":                   filepath.Join(cacheRoot, "go-build"),
+		"GOMODCACHE":                filepath.Join(cacheRoot, "go-mod"),
+		"PIP_CACHE_DIR":             filepath.Join(cacheRoot, "pip"),
+		"npm_config_cache":          filepath.Join(cacheRoot, "npm"),
+		"PSModuleAnalysisCachePath": filepath.Join(sandboxPowerShellCacheDir(envRoot), "PowerShell_AnalysisCache"),
+		"PYTHONPATH":                prependEnvPath(sandboxPythonSiteDir(envRoot), extraPythonPath),
+	} {
+		if got, ok := envValue(env, key); !ok || got != want {
+			t.Fatalf("env[%s] = %q/%v, want %q", key, got, ok, want)
+		}
 	}
-	if got := envValue(env, "USERPROFILE"); got != sandboxHome {
-		t.Fatalf("USERPROFILE = %q, want sandbox home %q", got, sandboxHome)
+	if got, ok := envValue(env, "CAELIS_SANDBOX_HOME"); ok {
+		t.Fatalf("env[CAELIS_SANDBOX_HOME] = %q, want absent", got)
 	}
-	if got := envValue(env, "CAELIS_SKILLS_DIR"); got != filepath.Join(hostHome, ".caelis", "skills") {
-		t.Fatalf("CAELIS_SKILLS_DIR = %q, want host skill root", got)
+	if _, err := os.Stat(filepath.Join(envRoot, "home")); !os.IsNotExist(err) {
+		t.Fatalf("sandbox fake home stat error = %v, want not created", err)
+	}
+	for _, dir := range []string{
+		tempRoot,
+		filepath.Join(cacheRoot, "go-build"),
+		filepath.Join(cacheRoot, "go-mod"),
+		filepath.Join(cacheRoot, "npm"),
+		filepath.Join(cacheRoot, "pip"),
+		sandboxPythonSiteDir(envRoot),
+	} {
+		info, err := os.Stat(dir)
+		if err != nil {
+			t.Fatalf("sandbox cache dir %q stat error = %v", dir, err)
+		}
+		if !info.IsDir() {
+			t.Fatalf("sandbox cache path %q is not a directory", dir)
+		}
 	}
 }
 
@@ -527,6 +583,21 @@ func TestRepairCurrentWorkspaceACLsCleansStaleManifestACLs(t *testing.T) {
 	}
 	if containsPath(manifest.WriteRoots, staleRoot) {
 		t.Fatalf("manifest WriteRoots = %#v, did not expect stale root %q", manifest.WriteRoots, staleRoot)
+	}
+}
+
+func TestUnsafeWritableRootReasonRejectsHostSSHOverlap(t *testing.T) {
+	home := t.TempDir()
+	sshDir := filepath.Join(home, ".ssh")
+	project := filepath.Join(home, "project")
+
+	for _, root := range []string{home, sshDir, filepath.Join(sshDir, "keys")} {
+		if reason := unsafeWritableRootReason(root, home); reason == "" {
+			t.Fatalf("unsafeWritableRootReason(%q, %q) = empty, want rejection", root, home)
+		}
+	}
+	if reason := unsafeWritableRootReason(project, home); reason != "" {
+		t.Fatalf("unsafeWritableRootReason(%q, %q) = %q, want allowed", project, home, reason)
 	}
 }
 
@@ -807,12 +878,15 @@ func containsPath(paths []string, want string) bool {
 	return false
 }
 
-func envValue(env []string, name string) string {
-	prefix := strings.ToUpper(name) + "="
+func envValue(env []string, key string) (string, bool) {
 	for _, item := range env {
-		if strings.HasPrefix(strings.ToUpper(item), prefix) {
-			return item[len(prefix):]
+		name, value, ok := strings.Cut(item, "=")
+		if !ok {
+			continue
+		}
+		if strings.EqualFold(name, key) {
+			return value, true
 		}
 	}
-	return ""
+	return "", false
 }

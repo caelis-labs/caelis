@@ -763,6 +763,9 @@ func existingWritableRoots(roots []string) ([]string, error) {
 		if root == "" {
 			continue
 		}
+		if err := rejectUnsafeWritableRoot(root); err != nil {
+			return nil, err
+		}
 		info, err := os.Stat(root)
 		if err != nil {
 			if os.IsNotExist(err) {
@@ -776,6 +779,31 @@ func existingWritableRoots(roots []string) ([]string, error) {
 		out = append(out, root)
 	}
 	return pathutil.Dedupe(out), nil
+}
+
+func rejectUnsafeWritableRoot(root string) error {
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return nil
+	}
+	if reason := unsafeWritableRootReason(root, home); reason != "" {
+		return fmt.Errorf("impl/sandbox/windows: writable root %s is unsafe: %s", root, reason)
+	}
+	return nil
+}
+
+func unsafeWritableRootReason(root string, userHome string) string {
+	sshDir := filepath.Join(strings.TrimSpace(userHome), ".ssh")
+	if strings.TrimSpace(root) == "" || strings.TrimSpace(userHome) == "" {
+		return ""
+	}
+	if pathutil.IsUnder(sshDir, root) {
+		return "it would grant sandbox capability ACL inheritance to the host user's .ssh directory"
+	}
+	if pathutil.IsUnder(root, sshDir) {
+		return "it overlaps the host user's .ssh directory"
+	}
+	return ""
 }
 
 func (r *runtime) prepareSandboxEnvRoot(workspaceRoot string, create bool) (string, error) {
@@ -798,19 +826,43 @@ func sandboxEnvDirs(envRoot string) []string {
 	if envRoot == "" {
 		return nil
 	}
-	homeRoot := filepath.Join(envRoot, "home")
-	localAppData := filepath.Join(homeRoot, "AppData", "Local")
-	roamingAppData := filepath.Join(homeRoot, "AppData", "Roaming")
-	psCacheDir := filepath.Join(localAppData, "Microsoft", "Windows", "PowerShell", "CommandAnalysis")
+	cacheRoot := sandboxCacheRoot(envRoot)
 	return pathutil.Dedupe([]string{
 		envRoot,
-		filepath.Join(envRoot, "tmp"),
-		homeRoot,
-		localAppData,
-		roamingAppData,
-		psCacheDir,
+		sandboxTempRoot(envRoot),
+		cacheRoot,
+		filepath.Join(cacheRoot, "go-build"),
+		filepath.Join(cacheRoot, "go-mod"),
+		filepath.Join(cacheRoot, "npm"),
+		filepath.Join(cacheRoot, "pip"),
+		filepath.Join(envRoot, "powershell"),
+		sandboxPowerShellCacheDir(envRoot),
 		sandboxPythonSiteDir(envRoot),
 	})
+}
+
+func sandboxTempRoot(envRoot string) string {
+	envRoot = pathutil.Normalize(envRoot)
+	if envRoot == "" {
+		return ""
+	}
+	return filepath.Join(envRoot, "tmp")
+}
+
+func sandboxCacheRoot(envRoot string) string {
+	envRoot = pathutil.Normalize(envRoot)
+	if envRoot == "" {
+		return ""
+	}
+	return filepath.Join(envRoot, "cache")
+}
+
+func sandboxPowerShellCacheDir(envRoot string) string {
+	envRoot = pathutil.Normalize(envRoot)
+	if envRoot == "" {
+		return ""
+	}
+	return filepath.Join(envRoot, "powershell", "CommandAnalysis")
 }
 
 func sandboxPythonSiteDir(envRoot string) string {
@@ -1683,11 +1735,10 @@ func sandboxEnvironment(policy workspacePolicy, extra map[string]string) ([]stri
 	if envRoot == "" {
 		return nil, fmt.Errorf("impl/sandbox/windows: sandbox environment root is required")
 	}
-	tempRoot := filepath.Join(envRoot, "tmp")
-	homeRoot := filepath.Join(envRoot, "home")
-	localAppData := filepath.Join(homeRoot, "AppData", "Local")
-	roamingAppData := filepath.Join(homeRoot, "AppData", "Roaming")
-	psCacheDir := filepath.Join(localAppData, "Microsoft", "Windows", "PowerShell", "CommandAnalysis")
+	envRoot = pathutil.Normalize(envRoot)
+	tempRoot := sandboxTempRoot(envRoot)
+	cacheRoot := sandboxCacheRoot(envRoot)
+	psCacheDir := sandboxPowerShellCacheDir(envRoot)
 	pythonSiteDir := sandboxPythonSiteDir(envRoot)
 	for _, dir := range sandboxEnvDirs(envRoot) {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -1700,23 +1751,18 @@ func sandboxEnvironment(policy workspacePolicy, extra map[string]string) ([]stri
 	forced := map[string]string{
 		"TEMP":                        tempRoot,
 		"TMP":                         tempRoot,
-		"HOME":                        homeRoot,
-		"USERPROFILE":                 homeRoot,
-		"HOMEDRIVE":                   filepath.VolumeName(homeRoot),
-		"HOMEPATH":                    strings.TrimPrefix(strings.TrimPrefix(homeRoot, filepath.VolumeName(homeRoot)), string(filepath.Separator)),
-		"CAELIS_SANDBOX_HOME":         homeRoot,
+		"GOTMPDIR":                    tempRoot,
 		"CAELIS_SANDBOX_TEMP":         tempRoot,
-		"LOCALAPPDATA":                localAppData,
-		"APPDATA":                     roamingAppData,
+		"GOCACHE":                     filepath.Join(cacheRoot, "go-build"),
+		"GOMODCACHE":                  filepath.Join(cacheRoot, "go-mod"),
+		"PIP_CACHE_DIR":               filepath.Join(cacheRoot, "pip"),
+		"npm_config_cache":            filepath.Join(cacheRoot, "npm"),
 		"PYTHONPATH":                  prependEnvPath(pythonSiteDir, commandEnvValue(extra, "PYTHONPATH")),
 		"PSModuleAnalysisCachePath":   filepath.Join(psCacheDir, "PowerShell_AnalysisCache"),
 		"POWERSHELL_TELEMETRY_OPTOUT": "1",
 	}
 	if skillsDir := hostUserSkillsDir(); skillsDir != "" {
 		forced["CAELIS_SKILLS_DIR"] = skillsDir
-	}
-	if forced["HOMEPATH"] != "" {
-		forced["HOMEPATH"] = string(filepath.Separator) + forced["HOMEPATH"]
 	}
 	if strings.TrimSpace(forced["SystemRoot"]) == "" {
 		if systemRoot := strings.TrimSpace(os.Getenv("SystemRoot")); systemRoot != "" {
