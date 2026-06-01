@@ -529,6 +529,30 @@ func TestGatewaySettledExplorationStepsStayInSingleExploredGroup(t *testing.T) {
 	}
 }
 
+func TestGatewayLiveExplorationKeepsCompletedPrefixCollapsed(t *testing.T) {
+	model := newGatewayEventTestModel()
+	block := NewMainACPTurnBlock("root-session")
+	block.Events = append(block.Events,
+		SubagentEvent{Kind: SEReasoning, Text: `I need to inspect the session store before editing.`},
+		SubagentEvent{Kind: SEToolCall, CallID: "read-store", Name: "READ", Args: "internal/adapters/store/memory/store_test.go", Output: "package memory", Done: true},
+		SubagentEvent{Kind: SEToolCall, CallID: "search-store", Name: "SEARCH", Args: `"StoreExerciseR03"`},
+	)
+
+	rows := block.Render(BlockRenderContext{Width: 96, Height: 20, TermWidth: 96, Theme: model.theme})
+	joined := strings.Join(renderedPlainRows(rows), "\n")
+	if !strings.Contains(joined, "• Explored") || !strings.Contains(joined, "Read store_test.go") {
+		t.Fatalf("rendered rows = %q, want completed exploration prefix collapsed", joined)
+	}
+	if !strings.Contains(joined, `SEARCH "StoreExerciseR03"`) {
+		t.Fatalf("rendered rows = %q, want live exploration tool visible", joined)
+	}
+	for _, forbidden := range []string{"I need to inspect the session store", "package memory", "✓ READ"} {
+		if strings.Contains(joined, forbidden) {
+			t.Fatalf("rendered rows = %q, completed exploration prefix should remain collapsed", joined)
+		}
+	}
+}
+
 func TestGatewayFailedExplorationToolStaysInCompactSummary(t *testing.T) {
 	model := newGatewayEventTestModel()
 	block := NewMainACPTurnBlock("root-session")

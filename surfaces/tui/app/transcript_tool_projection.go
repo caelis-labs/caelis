@@ -74,7 +74,9 @@ func projectTranscriptToolResult(input transcriptToolProjection, defaultSuccessS
 	status := strings.TrimSpace(input.Status)
 	toolErr := input.Error
 	if status == "" {
-		if toolErr {
+		if inferred, ok := inferFinalStatusFromRawOutput(input.RawOutput); ok {
+			status = inferred
+		} else if toolErr {
 			status = string(kernel.ToolStatusFailed)
 		} else {
 			status = strings.TrimSpace(defaultSuccessStatus)
@@ -161,4 +163,29 @@ func projectTranscriptToolResult(input transcriptToolProjection, defaultSuccessS
 		ToolTaskTargetKind:  toolDisplayTaskTargetKind(rawInput, displayOutput, input.Event.Meta),
 		Final:               transcriptToolStatusFinal(status, toolErr),
 	}, true
+}
+
+func inferFinalStatusFromRawOutput(rawOutput map[string]any) (string, bool) {
+	if len(rawOutput) == 0 {
+		return "", false
+	}
+	if state := strings.ToLower(strings.TrimSpace(asString(rawOutput["state"]))); state != "" {
+		switch state {
+		case "completed", "failed", "interrupted", "cancelled", "canceled":
+			if state == "canceled" {
+				return string(kernel.ToolStatusCancelled), true
+			}
+			return state, true
+		case "terminated", "timed_out", "timeout":
+			return string(kernel.ToolStatusInterrupted), true
+		}
+	}
+	exitCode := displayInt(rawOutput["exit_code"])
+	if exitCode < 0 {
+		return "", false
+	}
+	if exitCode == 0 {
+		return string(kernel.ToolStatusCompleted), true
+	}
+	return string(kernel.ToolStatusFailed), true
 }

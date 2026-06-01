@@ -44,6 +44,16 @@ func TestToolDisplayArgsHidesMetadataOnlyListArgs(t *testing.T) {
 	}
 }
 
+func TestToolTitleDisplayArgsCompactsMutationPaths(t *testing.T) {
+	t.Parallel()
+
+	title := "Edit /home/xueyongzhi/WorkDir/code/caelis/internal/adapters/store/memory/store_test.go, /home/xueyongzhi/WorkDir/code/caelis/internal/adapters/store/sqlite/store_test.go"
+	got := toolTitleDisplayArgs("PATCH", "edit", title)
+	if want := "store_test.go, store_test.go"; got != want {
+		t.Fatalf("toolTitleDisplayArgs() = %q, want %q", got, want)
+	}
+}
+
 func TestToolDisplayResultHeaderCompactsWindowsReadPath(t *testing.T) {
 	t.Parallel()
 

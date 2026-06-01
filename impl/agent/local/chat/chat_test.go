@@ -384,6 +384,132 @@ func TestChatAgentRunsMinimalToolLoop(t *testing.T) {
 	}
 }
 
+func TestChatAgentRetriesInvalidModelToolCallWithoutPersistingIt(t *testing.T) {
+	t.Parallel()
+
+	testModel := &invalidThenValidToolModel{}
+	invocations := 0
+	echoTool := tool.NamedTool{
+		Def: tool.Definition{
+			Name:        "ECHO",
+			Description: "echo input",
+			InputSchema: map[string]any{"type": "object"},
+		},
+		Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
+			invocations++
+			var payload map[string]any
+			if err := json.Unmarshal(call.Input, &payload); err != nil {
+				t.Fatalf("tool input = %q, want valid JSON: %v", string(call.Input), err)
+			}
+			return tool.Result{
+				ID:      call.ID,
+				Name:    call.Name,
+				Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{"value": payload["value"]}))},
+			}, nil
+		},
+	}
+	chatAgent, err := NewWithTools("chat", testModel, []tool.Tool{echoTool}, "Use tools when needed.")
+	if err != nil {
+		t.Fatalf("NewWithTools() error = %v", err)
+	}
+	ctx := agent.NewContext(agent.ContextSpec{
+		Context: context.Background(),
+		Session: session.Session{SessionRef: session.SessionRef{SessionID: "sess-invalid-tool"}},
+		Events: []*session.Event{{
+			Type:    session.EventTypeUser,
+			Message: ptrMessage(model.NewTextMessage(model.RoleUser, "say pong")),
+			Text:    "say pong",
+		}},
+	})
+
+	var events []*session.Event
+	for event, runErr := range chatAgent.Run(ctx) {
+		if runErr != nil {
+			t.Fatalf("Run() error = %v", runErr)
+		}
+		events = append(events, event)
+	}
+
+	if got, want := len(testModel.requests), 3; got != want {
+		t.Fatalf("len(requests) = %d, want retry plus final", got)
+	}
+	if got, want := invocations, 1; got != want {
+		t.Fatalf("tool invocations = %d, want %d", got, want)
+	}
+	if got, want := canonicalMessagesJSON(t, testModel.requests[1].Messages), canonicalMessagesJSON(t, testModel.requests[0].Messages); got != want {
+		t.Fatalf("retry request changed canonical input\nfirst: %s\nretry: %s", want, got)
+	}
+	var canonicalEvents []*session.Event
+	var invalidWarning *session.Event
+	for _, event := range events {
+		if event.Visibility == session.VisibilityUIOnly {
+			if event.Type == session.EventTypeToolResult && event.Tool != nil && event.Tool.Status == "failed" {
+				invalidWarning = event
+			}
+			continue
+		}
+		canonicalEvents = append(canonicalEvents, event)
+	}
+	warningText := ""
+	if invalidWarning != nil && invalidWarning.Tool != nil {
+		warningText, _ = invalidWarning.Tool.Output["error"].(string)
+	}
+	if invalidWarning == nil || !strings.Contains(warningText, "decode tool call input for ECHO") {
+		t.Fatalf("invalid warning event = %+v, want ui-only decode warning", invalidWarning)
+	}
+	if got, want := len(canonicalEvents), 3; got != want {
+		t.Fatalf("len(canonicalEvents) = %d, want only valid tool call/result/final", got)
+	}
+	calls := canonicalEvents[0].Message.ToolCalls()
+	if len(calls) != 1 || calls[0].Args != `{"value":"pong"}` {
+		t.Fatalf("persisted tool calls = %#v, want only canonical valid args", calls)
+	}
+	if strings.Contains(canonicalMessagesJSON(t, testModel.requests[1].Messages), `{"value":"pong"`) {
+		t.Fatalf("repair request replayed invalid assistant tool call: %s", canonicalMessagesJSON(t, testModel.requests[1].Messages))
+	}
+	if strings.Contains(canonicalMessagesJSON(t, testModel.requests[2].Messages), "invalid tool call") {
+		t.Fatalf("post-tool request retained transient repair prompt: %s", canonicalMessagesJSON(t, testModel.requests[2].Messages))
+	}
+	if strings.Contains(canonicalMessagesJSON(t, testModel.requests[2].Messages), "All checks pass") {
+		t.Fatalf("post-tool request retained invalid attempt text: %s", canonicalMessagesJSON(t, testModel.requests[2].Messages))
+	}
+	replayed := append([]*session.Event{{
+		Type:    session.EventTypeUser,
+		Message: ptrMessage(model.NewTextMessage(model.RoleUser, "say pong")),
+		Text:    "say pong",
+	}}, canonicalEvents[:2]...)
+	replayedMessages := messagesFromContext(agent.NewContext(agent.ContextSpec{
+		Context: context.Background(),
+		Session: session.Session{SessionRef: session.SessionRef{SessionID: "sess-invalid-tool"}},
+		Events:  replayed,
+	}))
+	if got, want := canonicalMessagesJSON(t, testModel.requests[2].Messages), canonicalMessagesJSON(t, replayedMessages); got != want {
+		t.Fatalf("post-tool live request diverged from persisted replay\nrequest: %s\nreplay:  %s", got, want)
+	}
+}
+
+func TestCanonicalizeAssistantToolCallsPreservesNumericArgumentLexemes(t *testing.T) {
+	t.Parallel()
+
+	rawArgs := `{"id":9007199254740993,"amount":0.12345678901234567890}`
+	message := model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
+		ID:   "call-precise",
+		Name: "ECHO",
+		Args: rawArgs,
+	}}, "")
+
+	canonical, calls, err := canonicalizeAssistantToolCalls(message)
+	if err != nil {
+		t.Fatalf("canonicalizeAssistantToolCalls() error = %v", err)
+	}
+	if len(calls) != 1 || calls[0].Args != rawArgs {
+		t.Fatalf("calls = %#v, want raw args preserved", calls)
+	}
+	if got := canonical.ToolCalls()[0].Args; got != rawArgs {
+		t.Fatalf("canonical message args = %q, want %q", got, rawArgs)
+	}
+}
+
 func TestChatAgentExecutesSameStepToolCallsConcurrently(t *testing.T) {
 	t.Parallel()
 
@@ -935,6 +1061,54 @@ func TestMessagesFromContextDropsIncompleteToolCallRun(t *testing.T) {
 	}
 	if got := messages[1].TextContent(); got != "next turn" {
 		t.Fatalf("final user text = %q, want next turn", got)
+	}
+}
+
+func TestMessagesFromContextDropsInvalidToolCallRun(t *testing.T) {
+	t.Parallel()
+
+	invalidAssistant := model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
+		ID:   "command-1",
+		Name: "RUN_COMMAND",
+		Args: `{"command":"git status"`,
+	}}, "I will check status.")
+	ctx := agent.NewContext(agent.ContextSpec{
+		Context: context.Background(),
+		Session: session.Session{SessionRef: session.SessionRef{SessionID: "sess-invalid-history"}},
+		Events: []*session.Event{
+			{
+				Type:    session.EventTypeUser,
+				Message: ptrMessage(model.NewTextMessage(model.RoleUser, "continue")),
+				Text:    "continue",
+			},
+			{
+				Type:    session.EventTypeToolCall,
+				Message: &invalidAssistant,
+				Text:    invalidAssistant.TextContent(),
+				Tool: &session.EventTool{
+					ID:     "command-1",
+					Name:   "RUN_COMMAND",
+					Status: "pending",
+				},
+			},
+			persistedToolResultEvent("command-1", "RUN_COMMAND", map[string]any{}, map[string]any{"error": "decode failed"}),
+			{
+				Type:    session.EventTypeUser,
+				Message: ptrMessage(model.NewTextMessage(model.RoleUser, "try again")),
+				Text:    "try again",
+			},
+		},
+	})
+
+	messages := messagesFromContext(ctx)
+	if got, want := len(messages), 2; got != want {
+		t.Fatalf("len(messages) = %d, want only user messages: %#v", got, messages)
+	}
+	if got := messages[0].TextContent(); got != "continue" {
+		t.Fatalf("messages[0] text = %q", got)
+	}
+	if got := messages[1].TextContent(); got != "try again" {
+		t.Fatalf("messages[1] text = %q", got)
 	}
 }
 
@@ -2041,6 +2215,68 @@ func (m *toolLoopModel) Generate(_ context.Context, req *model.Request) iter.Seq
 				FinishReason: model.FinishReasonStop,
 			},
 		}, nil)
+	}
+}
+
+type invalidThenValidToolModel struct {
+	requests []model.Request
+}
+
+func (m *invalidThenValidToolModel) Name() string { return "invalid-then-valid-tool" }
+
+func (m *invalidThenValidToolModel) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
+	if req != nil {
+		cp := *req
+		cp.Messages = model.CloneMessages(req.Messages)
+		cp.Instructions = model.CloneParts(req.Instructions)
+		cp.Tools = append([]model.ToolSpec(nil), req.Tools...)
+		m.requests = append(m.requests, cp)
+	}
+	index := len(m.requests)
+	return func(yield func(*model.StreamEvent, error) bool) {
+		switch index {
+		case 1:
+			yield(&model.StreamEvent{
+				Type: model.StreamEventTurnDone,
+				Response: &model.Response{
+					Message: model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
+						ID:   "call-invalid",
+						Name: "ECHO",
+						Args: `{"value":"pong"`,
+					}}, "All checks pass. Now let me commit."),
+					TurnComplete: true,
+					StepComplete: true,
+					Status:       model.ResponseStatusCompleted,
+					FinishReason: model.FinishReasonToolCalls,
+				},
+			}, nil)
+		case 2:
+			yield(&model.StreamEvent{
+				Type: model.StreamEventTurnDone,
+				Response: &model.Response{
+					Message: model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
+						ID:   "call-valid",
+						Name: "ECHO",
+						Args: `{"value":"pong"}`,
+					}}, ""),
+					TurnComplete: true,
+					StepComplete: true,
+					Status:       model.ResponseStatusCompleted,
+					FinishReason: model.FinishReasonToolCalls,
+				},
+			}, nil)
+		default:
+			yield(&model.StreamEvent{
+				Type: model.StreamEventTurnDone,
+				Response: &model.Response{
+					Message:      model.NewTextMessage(model.RoleAssistant, "pong"),
+					TurnComplete: true,
+					StepComplete: true,
+					Status:       model.ResponseStatusCompleted,
+					FinishReason: model.FinishReasonStop,
+				},
+			}, nil)
+		}
 	}
 }
 

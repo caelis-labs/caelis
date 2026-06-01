@@ -587,9 +587,9 @@ func mutationPanelTextIsHeaderOnly(ev SubagentEvent, text string) bool {
 }
 
 func mutationLifecycleHeader(ev SubagentEvent, err bool) string {
-	name := strings.ToUpper(strings.TrimSpace(ev.Name))
+	name := strings.ToUpper(strings.TrimSpace(toolSemanticName(ev.Name, ev.ToolKind)))
 	args := strings.TrimSpace(ev.Args)
-	if args == "" {
+	if args == "" && name != "WRITE" && name != "PATCH" {
 		args = strings.ToLower(name)
 	}
 	switch name {

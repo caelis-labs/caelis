@@ -18,7 +18,7 @@ func TestFormatToolContentRendersStandardDiffWithHunkHeader(t *testing.T) {
 		NewText: "context-a\ncontext-b\nnew line\ncontext-c\n",
 	}})
 
-	for _, want := range []string{"@@ -3,1 +3,1 @@", "-old line", "+new line"} {
+	for _, want := range []string{"demo.txt +1 -1", "@@ -3,1 +3,1 @@", "-old line", "+new line"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("formatted diff = %q, want %q", got, want)
 		}
@@ -54,6 +54,9 @@ func TestFormatToolContentRendersAppendDiffWithActualNewStart(t *testing.T) {
 	if !strings.Contains(got, "@@ -10,0 +11,2 @@") {
 		t.Fatalf("formatted diff = %q, want append hunk starting at new line 11", got)
 	}
+	if !strings.Contains(got, "demo.txt +2 -0") {
+		t.Fatalf("formatted diff = %q, want concise file change header", got)
+	}
 }
 
 func TestFormatToolContentPreservesUnchangedLinesBetweenEdits(t *testing.T) {
@@ -75,6 +78,27 @@ func TestFormatToolContentPreservesUnchangedLinesBetweenEdits(t *testing.T) {
 	for _, forbidden := range []string{"-shared middle", "+shared middle"} {
 		if strings.Contains(got, forbidden) {
 			t.Fatalf("formatted diff = %q, unchanged middle line should be context not %q", got, forbidden)
+		}
+	}
+}
+
+func TestFormatToolContentCountsSignedContentLines(t *testing.T) {
+	t.Parallel()
+
+	oldText := "plain\n---\n"
+	got := FormatToolContent([]session.ProtocolToolCallContent{{
+		Type:    "diff",
+		Path:    "/workspace/demo.md",
+		OldText: &oldText,
+		NewText: "plain\n++foo\n",
+	}})
+
+	if !strings.Contains(got, "demo.md +1 -1") {
+		t.Fatalf("formatted diff = %q, want signed content lines counted in header", got)
+	}
+	for _, want := range []string{"+++foo", "----"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("formatted diff = %q, want %q", got, want)
 		}
 	}
 }

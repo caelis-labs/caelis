@@ -58,6 +58,10 @@ func collectExplorationStage(events []SubagentEvent, idx int, status string, inc
 		}
 		settled := isTerminalACPTranscriptStatus(status) || (step.allDone && hasLaterTranscriptStep(events, step.end+1))
 		if !settled {
+			if prefix, prefixEnd := settledExplorationPrefixWithinLiveStep(events, step); len(prefix) > 0 {
+				stage = append(stage, prefix...)
+				end = prefixEnd
+			}
 			if includeLiveTail && len(stage) == 0 {
 				stage = append(stage, events[step.start:step.end+1]...)
 				end = step.end
@@ -69,6 +73,28 @@ func collectExplorationStage(events []SubagentEvent, idx int, status string, inc
 		i = step.end + 1
 	}
 	return stage, end
+}
+
+func settledExplorationPrefixWithinLiveStep(events []SubagentEvent, step transcriptStep) ([]SubagentEvent, int) {
+	if !step.allExploration || step.allDone || step.start < 0 || step.end >= len(events) || step.start > step.end {
+		return nil, -1
+	}
+	prefixEnd := -1
+	for i := step.start; i <= step.end; i++ {
+		ev := events[i]
+		if ev.Kind == SEToolCall && !ev.Done {
+			break
+		}
+		prefixEnd = i
+	}
+	if prefixEnd < step.start || prefixEnd >= step.end {
+		return nil, -1
+	}
+	prefix := events[step.start : prefixEnd+1]
+	if !compactExplorationStageHasSummary(prefix) {
+		return nil, -1
+	}
+	return prefix, prefixEnd
 }
 
 type transcriptStep struct {

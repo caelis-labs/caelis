@@ -44,7 +44,45 @@ func toolDiffText(item session.ProtocolToolCallContent) string {
 	if len(lines) == 0 {
 		return ""
 	}
+	if header := toolDiffHeader(item.Path, lines); header != "" {
+		return header + "\n" + strings.Join(lines, "\n")
+	}
 	return strings.Join(lines, "\n")
+}
+
+func toolDiffHeader(path string, lines []string) string {
+	path = diffDisplayPath(path)
+	if path == "" {
+		return ""
+	}
+	added, removed := 0, 0
+	for _, line := range lines {
+		switch {
+		case strings.HasPrefix(line, "+"):
+			added++
+		case strings.HasPrefix(line, "-"):
+			removed++
+		}
+	}
+	if added == 0 && removed == 0 {
+		return path
+	}
+	return fmt.Sprintf("%s +%d -%d", path, added, removed)
+}
+
+func diffDisplayPath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	path = strings.TrimRight(path, `/\`)
+	if path == "" {
+		return ""
+	}
+	if idx := strings.LastIndexAny(path, `/\`); idx >= 0 && idx+1 < len(path) {
+		return path[idx+1:]
+	}
+	return path
 }
 
 func toolContentText(raw any) string {

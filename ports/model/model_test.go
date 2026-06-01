@@ -73,3 +73,27 @@ func TestMessageFromToolCallsPreservesValidJSONUsingRawInputKey(t *testing.T) {
 		t.Fatalf("ToolCalls()[0].Args = %q, want %q", got, rawArgs)
 	}
 }
+
+func TestParseToolCallArgsRawPreservesNumericLexemes(t *testing.T) {
+	rawArgs := `{"id":9007199254740993,"amount":0.12345678901234567890}`
+
+	got, err := ParseToolCallArgsRaw(rawArgs)
+	if err != nil {
+		t.Fatalf("ParseToolCallArgsRaw() error = %v", err)
+	}
+	if string(got) != rawArgs {
+		t.Fatalf("ParseToolCallArgsRaw() = %q, want original numeric lexemes %q", string(got), rawArgs)
+	}
+}
+
+func TestParseToolCallArgsRawUnwrapsFencedJSON(t *testing.T) {
+	rawArgs := "```json\n{\"id\":9007199254740993}\n```"
+
+	got, err := ParseToolCallArgsRaw(rawArgs)
+	if err != nil {
+		t.Fatalf("ParseToolCallArgsRaw() error = %v", err)
+	}
+	if want := `{"id":9007199254740993}`; string(got) != want {
+		t.Fatalf("ParseToolCallArgsRaw() = %q, want %q", string(got), want)
+	}
+}

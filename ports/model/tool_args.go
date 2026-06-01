@@ -3,6 +3,7 @@ package model
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 )
 
@@ -14,19 +15,8 @@ func ParseToolCallArgs(raw string) (map[string]any, error) {
 		return map[string]any{}, nil
 	}
 
-	candidates := []string{
-		trimmed,
-		stripCodeFence(trimmed),
-	}
-
-	// Try unquoted JSON string wrapper: "{\"k\":\"v\"}".
-	if unquoted, ok := unquoteJSON(trimmed); ok {
-		candidates = append(candidates, strings.TrimSpace(unquoted))
-		candidates = append(candidates, stripCodeFence(strings.TrimSpace(unquoted)))
-	}
-
 	var lastErr error
-	for _, c := range candidates {
+	for _, c := range toolCallArgCandidates(trimmed) {
 		if c == "" {
 			continue
 		}
@@ -43,6 +33,47 @@ func ParseToolCallArgs(raw string) (map[string]any, error) {
 	return nil, lastErr
 }
 
+// ParseToolCallArgsRaw parses tool-call argument JSON and returns valid object
+// JSON without decoding numbers through float64. It accepts the same
+// compatibility wrappers as ParseToolCallArgs.
+func ParseToolCallArgsRaw(raw string) (json.RawMessage, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return json.RawMessage(`{}`), nil
+	}
+
+	var lastErr error
+	for _, c := range toolCallArgCandidates(trimmed) {
+		if c == "" {
+			continue
+		}
+		parsed, err := decodeJSONObjectRaw(c)
+		if err == nil {
+			return parsed, nil
+		}
+		lastErr = err
+	}
+
+	if lastErr == nil {
+		lastErr = fmt.Errorf("invalid tool arguments")
+	}
+	return nil, lastErr
+}
+
+func toolCallArgCandidates(trimmed string) []string {
+	candidates := []string{
+		trimmed,
+		stripCodeFence(trimmed),
+	}
+
+	// Try unquoted JSON string wrapper: "{\"k\":\"v\"}".
+	if unquoted, ok := unquoteJSON(trimmed); ok {
+		candidates = append(candidates, strings.TrimSpace(unquoted))
+		candidates = append(candidates, stripCodeFence(strings.TrimSpace(unquoted)))
+	}
+	return candidates
+}
+
 func decodeJSONObject(input string) (map[string]any, error) {
 	var out map[string]any
 	if err := json.Unmarshal([]byte(input), &out); err != nil {
@@ -52,6 +83,30 @@ func decodeJSONObject(input string) (map[string]any, error) {
 		return map[string]any{}, nil
 	}
 	return out, nil
+}
+
+func decodeJSONObjectRaw(input string) (json.RawMessage, error) {
+	trimmed := strings.TrimSpace(input)
+	decoder := json.NewDecoder(strings.NewReader(trimmed))
+	decoder.UseNumber()
+	var decoded any
+	if err := decoder.Decode(&decoded); err != nil {
+		return nil, err
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return nil, fmt.Errorf("invalid tool arguments: multiple JSON values")
+		}
+		return nil, err
+	}
+	if decoded == nil {
+		return json.RawMessage(`{}`), nil
+	}
+	if _, ok := decoded.(map[string]any); !ok {
+		return nil, fmt.Errorf("json: cannot unmarshal %T into Go value of type map[string]interface {}", decoded)
+	}
+	return json.RawMessage(trimmed), nil
 }
 
 func unquoteJSON(input string) (string, bool) {

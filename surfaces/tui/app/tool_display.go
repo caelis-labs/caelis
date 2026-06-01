@@ -244,7 +244,7 @@ func toolTitleDisplayArgs(name string, kind string, title string) string {
 		}
 		return title
 	case "WRITE", "PATCH":
-		return prefixedTitleDetail(title, "Write", "Edit", "Patch", "Delete", "Move")
+		return compactMutationTitleDetail(prefixedTitleDetail(title, "Write", "Edit", "Patch", "Delete", "Move"))
 	}
 	switch strings.ToLower(strings.TrimSpace(kind)) {
 	case "execute":
@@ -262,8 +262,53 @@ func toolTitleDisplayArgs(name string, kind string, title string) string {
 		if detail := prefixedTitleDetail(title, "Fetch", "Searching for:"); detail != "" {
 			return fmt.Sprintf("%q", detail)
 		}
+	case "edit", "delete", "move":
+		return compactMutationTitleDetail(prefixedTitleDetail(title, "Write", "Edit", "Patch", "Delete", "Move"))
 	}
 	return title
+}
+
+func compactMutationTitleDetail(detail string) string {
+	detail = strings.TrimSpace(detail)
+	if detail == "" {
+		return ""
+	}
+	parts := strings.Split(detail, ",")
+	if len(parts) > 1 {
+		out := make([]string, 0, len(parts))
+		changed := false
+		for _, part := range parts {
+			trimmed := strings.TrimSpace(part)
+			compacted := compactMutationTitleDetail(trimmed)
+			if compacted != trimmed {
+				changed = true
+			}
+			if compacted != "" {
+				out = append(out, compacted)
+			}
+		}
+		if changed && len(out) > 0 {
+			return strings.Join(out, ", ")
+		}
+		return detail
+	}
+	pathPart, rest, ok, tagged := splitLeadingPathHeaderParts(detail)
+	if !ok {
+		if isLikelyDisplayPath(detail) {
+			if base := displayPathBase(detail); base != "" {
+				return base
+			}
+		}
+		return detail
+	}
+	base := displayPathBase(pathPart)
+	if base == "" || base == pathPart {
+		if tagged {
+			return pathPart + rest
+		}
+		return detail
+	}
+	return base + rest
 }
 
 func prefixedSearchTitleDetail(title string) string {

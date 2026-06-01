@@ -81,6 +81,7 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 	return func(yield func(*session.Event, error) bool) {
 		messages := messagesFromContext(ctx)
 		stream := a.request.StreamEnabled(false)
+		invalidToolCallRepairAttempts := 0
 		for {
 			request := &model.Request{
 				Messages:  messages,
@@ -99,8 +100,21 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 				return
 			}
 
-			assistantMessage := model.CloneMessage(final.Message)
-			calls := assistantMessage.ToolCalls()
+			assistantMessage, calls, err := canonicalizeAssistantToolCalls(final.Message)
+			if err != nil {
+				if invalidToolCallRepairAttempts >= maxInvalidToolCallRepairAttempts {
+					yield(nil, err)
+					return
+				}
+				invalidToolCallRepairAttempts++
+				for _, event := range invalidToolCallWarningEvents(final.Message, err, !stream) {
+					if !yield(event, nil) {
+						return
+					}
+				}
+				continue
+			}
+			invalidToolCallRepairAttempts = 0
 			if len(calls) == 0 {
 				assistantEvent := modelResponseEvent(assistantMessage, final)
 				if !yield(assistantEvent, nil) {

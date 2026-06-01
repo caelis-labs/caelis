@@ -197,6 +197,14 @@ func normalizeToolCallHistory(messages []model.Message) []model.Message {
 		if len(required) == 0 {
 			continue
 		}
+		if !toolCallsHaveValidArgs(calls) {
+			next := i + 1
+			for next < len(messages) && len(messages[next].ToolResults()) > 0 {
+				next++
+			}
+			i = next - 1
+			continue
+		}
 		run := []model.Message{messages[i]}
 		next := i + 1
 		valid := true

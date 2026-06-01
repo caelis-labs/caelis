@@ -1257,6 +1257,104 @@ func TestProjectGatewayEventACPExecuteFinalDisplaysNoOutputPlaceholder(t *testin
 	}
 }
 
+func TestProjectGatewayEventACPExecuteInfersFinalNoOutputFromExitCode(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectGatewayEventToTranscriptEvents(kernel.Event{
+		Kind: kernel.EventKindToolResult,
+		Protocol: &session.EventProtocol{
+			UpdateType: string(session.ProtocolUpdateTypeToolUpdate),
+			Update: &session.ProtocolUpdate{
+				SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate),
+				ToolCallID:    "acp-empty-no-status",
+				Kind:          "execute",
+				Title:         "Terminal",
+				RawInput:      map[string]any{"command": "git diff --check"},
+				RawOutput:     map[string]any{"exit_code": 0},
+			},
+		},
+	})
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one protocol tool event", events)
+	}
+	if got := events[0].ToolStatus; got != string(kernel.ToolStatusCompleted) {
+		t.Fatalf("ToolStatus = %q, want completed", got)
+	}
+	if got := events[0].ToolOutput; got != "(no output)" {
+		t.Fatalf("ToolOutput = %q, want no-output placeholder", got)
+	}
+	if !events[0].ToolOutputSynthetic {
+		t.Fatalf("ToolOutputSynthetic = false, want synthetic placeholder")
+	}
+}
+
+func TestProjectGatewayEventACPToolUpdateMapsTerminatedStateToFinalStatus(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectGatewayEventToTranscriptEvents(kernel.Event{
+		Kind: kernel.EventKindToolResult,
+		Protocol: &session.EventProtocol{
+			UpdateType: string(session.ProtocolUpdateTypeToolUpdate),
+			Update: &session.ProtocolUpdate{
+				SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate),
+				ToolCallID:    "acp-terminated",
+				Kind:          "execute",
+				Title:         "Terminal",
+				RawInput:      map[string]any{"command": "sleep 10"},
+				RawOutput:     map[string]any{"state": "terminated"},
+			},
+		},
+	})
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one protocol tool event", events)
+	}
+	if got := events[0].ToolStatus; got != string(kernel.ToolStatusInterrupted) {
+		t.Fatalf("ToolStatus = %q, want interrupted", got)
+	}
+	if !events[0].Final {
+		t.Fatalf("Final = false, want terminated raw state to project as final")
+	}
+}
+
+func TestProjectGatewayEventACPDiffCompactsEditTitleAndFileHeader(t *testing.T) {
+	t.Parallel()
+
+	oldText := "old line\n"
+	events := ProjectGatewayEventToTranscriptEvents(kernel.Event{
+		Kind: kernel.EventKindToolResult,
+		Protocol: &session.EventProtocol{
+			UpdateType: string(session.ProtocolUpdateTypeToolUpdate),
+			Update: &session.ProtocolUpdate{
+				SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate),
+				ToolCallID:    "edit-1",
+				Kind:          "edit",
+				Title:         "Edit /home/xueyongzhi/WorkDir/code/caelis/internal/adapters/store/memory/store_test.go",
+				Status:        "completed",
+				Content: []session.ProtocolToolCallContent{{
+					Type:    "diff",
+					Path:    "/home/xueyongzhi/WorkDir/code/caelis/internal/adapters/store/memory/store_test.go",
+					OldText: &oldText,
+					NewText: "new line\n",
+				}},
+			},
+		},
+	})
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one protocol tool event", events)
+	}
+	if got := events[0].ToolArgs; got != "store_test.go +1 -1" {
+		t.Fatalf("ToolArgs = %q, want compact diff header", got)
+	}
+	if strings.Contains(events[0].ToolOutput, "/home/xueyongzhi/") {
+		t.Fatalf("ToolOutput leaked absolute path: %q", events[0].ToolOutput)
+	}
+	for _, want := range []string{"store_test.go +1 -1", "@@ -1,1 +1,1 @@", "-old line", "+new line"} {
+		if !strings.Contains(events[0].ToolOutput, want) {
+			t.Fatalf("ToolOutput = %q, want %q", events[0].ToolOutput, want)
+		}
+	}
+}
+
 func TestProjectGatewayEventTerminalReferenceFinalDisplaysNoOutputPlaceholder(t *testing.T) {
 	t.Parallel()
 
