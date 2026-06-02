@@ -125,6 +125,33 @@ func TestViewportHeightChangeDoesNotInvalidateGenericBlockCache(t *testing.T) {
 	}
 }
 
+func TestViewportHeightChangeInvalidatesActiveACPReasoningBudget(t *testing.T) {
+	m := NewModel(Config{NoColor: true})
+	m.theme = tuikit.ResolveThemeFromOptions(true, colorprofile.NoTTY)
+	m.viewport.SetWidth(96)
+	m.viewport.SetHeight(12)
+	block := NewMainACPTurnBlock("session-1")
+	block.Events = append(block.Events, SubagentEvent{Kind: SEReasoning, Text: numberedReasoningLines(30)})
+	m.doc.Append(block)
+
+	m.syncViewportContent()
+	initialReasoningRows := countRenderCacheRowsContaining(m.viewportPlainLines, "reasoning line ")
+	if initialReasoningRows != liveReasoningRowBudget(m.blockRenderContext(96))-1 {
+		t.Fatalf("initial reasoning rows = %d, lines = %#v", initialReasoningRows, m.viewportPlainLines)
+	}
+
+	m.viewport.SetHeight(24)
+	m.syncViewportContent()
+
+	expandedReasoningRows := countRenderCacheRowsContaining(m.viewportPlainLines, "reasoning line ")
+	if expandedReasoningRows != liveReasoningRowBudget(m.blockRenderContext(96))-1 {
+		t.Fatalf("expanded reasoning rows = %d, lines = %#v", expandedReasoningRows, m.viewportPlainLines)
+	}
+	if expandedReasoningRows <= initialReasoningRows {
+		t.Fatalf("reasoning budget did not refresh after height change: initial=%d expanded=%d lines=%#v", initialReasoningRows, expandedReasoningRows, m.viewportPlainLines)
+	}
+}
+
 func TestViewportMouseWheelUsesReadableScrollStep(t *testing.T) {
 	m := NewModel(Config{})
 	m.viewport.SetWidth(40)
@@ -212,6 +239,16 @@ func indexPlainLineContaining(lines []string, needle string) int {
 		}
 	}
 	return -1
+}
+
+func countRenderCacheRowsContaining(lines []string, needle string) int {
+	count := 0
+	for _, line := range lines {
+		if strings.Contains(line, needle) {
+			count++
+		}
+	}
+	return count
 }
 
 func hasBlankLineBetween(lines []string, start int, end int) bool {

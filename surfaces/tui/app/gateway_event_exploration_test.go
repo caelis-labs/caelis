@@ -468,6 +468,39 @@ func TestGatewayLongExplorationHandoffBudgetKeepsSummaryAndNewStreamVisible(t *t
 	}
 }
 
+func TestGatewayLiveReasoningBudgetKeepsExploredPrefixVisible(t *testing.T) {
+	model := newGatewayEventTestModel()
+	block := NewMainACPTurnBlock("root-session")
+	block.Events = append(block.Events,
+		SubagentEvent{Kind: SEReasoning, Text: "Inspect the existing file first."},
+		SubagentEvent{
+			Kind:   SEToolCall,
+			CallID: "read-config",
+			Name:   "READ",
+			Args:   "internal/config.go",
+			Output: "package config",
+			Done:   true,
+		},
+		SubagentEvent{Kind: SEReasoning, Text: numberedReasoningLines(30)},
+	)
+	ctx := BlockRenderContext{Width: 96, Height: 12, TermWidth: 96, Theme: model.theme}
+
+	plain := renderedPlainRows(block.Render(ctx))
+	joined := strings.Join(plain, "\n")
+	if !strings.Contains(joined, "earlier reasoning lines") {
+		t.Fatalf("rendered rows = %q, want live reasoning omitted marker", joined)
+	}
+	if countExplorationRowsContaining(plain, "reasoning line ") > liveReasoningRowBudget(ctx) {
+		t.Fatalf("rendered rows = %#v, live reasoning exceeded viewport budget", plain)
+	}
+	tail := strings.Join(tailPlainRows(plain, ctx.Height), "\n")
+	if !strings.Contains(tail, "• Explored") ||
+		!strings.Contains(tail, "Read config.go") ||
+		!strings.Contains(tail, "reasoning line 30") {
+		t.Fatalf("visible tail = %q, want Explored prefix and latest reasoning visible", tail)
+	}
+}
+
 func TestGatewayLiveExplorationCompactsAtTurnCompletion(t *testing.T) {
 	model := newGatewayEventTestModel()
 	block := NewMainACPTurnBlock("root-session")
@@ -1488,4 +1521,22 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 			}
 		})
 	}
+}
+
+func numberedReasoningLines(count int) string {
+	lines := make([]string, 0, count)
+	for i := 1; i <= count; i++ {
+		lines = append(lines, fmt.Sprintf("reasoning line %02d", i))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func countExplorationRowsContaining(lines []string, needle string) int {
+	count := 0
+	for _, line := range lines {
+		if strings.Contains(line, needle) {
+			count++
+		}
+	}
+	return count
 }

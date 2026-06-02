@@ -484,11 +484,11 @@ func (m *Model) markCompactHeightBudgetBlocksDirty() {
 	for _, block := range m.doc.Blocks() {
 		switch b := block.(type) {
 		case *MainACPTurnBlock:
-			if b.compactHeightBudget.heightSensitive() {
+			if b.compactHeightBudget.heightSensitive() || hasHeightSensitiveLiveReasoning(b.Events, b.Status) {
 				m.markViewportBlockDirty(b.BlockID())
 			}
 		case *ParticipantTurnBlock:
-			if b.compactHeightBudget.heightSensitive() {
+			if b.compactHeightBudget.heightSensitive() || hasHeightSensitiveLiveReasoning(b.Events, b.Status) {
 				m.markViewportBlockDirty(b.BlockID())
 			}
 		}

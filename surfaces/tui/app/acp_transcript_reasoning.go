@@ -1,6 +1,7 @@
 package tuiapp
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -17,6 +18,11 @@ func reasoningExpanded(opts acpTranscriptRenderOptions, key string) bool {
 	}
 	return opts.ReasoningExpanded(key)
 }
+
+const (
+	acpLiveReasoningMinRows = 4
+	acpLiveReasoningMaxRows = 8
+)
 
 func reasoningShouldFold(events []SubagentEvent, idx int, status string) bool {
 	if idx < 0 || idx >= len(events) || events[idx].Kind != SEReasoning {
@@ -109,6 +115,14 @@ func collectConsecutiveReasoning(events []SubagentEvent, idx int) (string, int) 
 	return collapseRepeatedNarrativeText(text), end
 }
 
+func renderACPReasoningNarrativeRows(blockID string, text string, width int, ctx BlockRenderContext, active bool) []RenderedRow {
+	rows := renderParticipantTurnNarrativeRows(blockID, text, tuikit.LineStyleReasoning, width, ctx, active)
+	if !active {
+		return rows
+	}
+	return limitLiveReasoningRows(blockID, rows, ctx)
+}
+
 func renderACPReasoningSummaryRow(blockID string, ev SubagentEvent, idx int, width int, ctx BlockRenderContext, expanded bool) RenderedRow {
 	marker := "›"
 	preview := reasoningPreviewText(ev.Text, width)
@@ -118,6 +132,74 @@ func renderACPReasoningSummaryRow(blockID string, ev SubagentEvent, idx int, wid
 		styled += ctx.Theme.ReasoningStyle().Render(" " + preview)
 	}
 	return StyledPlainClickableRow(blockID, plain, styled, acpReasoningClickToken(reasoningFoldKey(idx)))
+}
+
+func limitLiveReasoningRows(blockID string, rows []RenderedRow, ctx BlockRenderContext) []RenderedRow {
+	budget := liveReasoningRowBudget(ctx)
+	if budget <= 0 || len(rows) <= budget {
+		return rows
+	}
+	if budget == 1 {
+		return []RenderedRow{liveReasoningOmittedRow(blockID, len(rows), ctx)}
+	}
+	tailRows := maxInt(1, budget-1)
+	if tailRows >= len(rows) {
+		return rows
+	}
+	omitted := len(rows) - tailRows
+	marker := liveReasoningOmittedRow(blockID, omitted, ctx)
+	out := make([]RenderedRow, 0, budget)
+	out = append(out, marker)
+	out = append(out, rows[len(rows)-tailRows:]...)
+	return out
+}
+
+func liveReasoningRowBudget(ctx BlockRenderContext) int {
+	if ctx.Height <= 0 {
+		return 0
+	}
+	budget := minInt(acpLiveReasoningMaxRows, maxInt(acpLiveReasoningMinRows, ctx.Height/3))
+	return minInt(ctx.Height, budget)
+}
+
+func hasHeightSensitiveLiveReasoning(events []SubagentEvent, status string) bool {
+	if isTerminalACPTranscriptStatus(status) {
+		return false
+	}
+	visible := visibleNarrativeEvents(events, status)
+	for i := 0; i < len(visible); i++ {
+		if visible[i].Kind != SEReasoning {
+			continue
+		}
+		text, end := collectConsecutiveReasoning(visible, i)
+		if strings.TrimSpace(text) == "" {
+			i = end
+			continue
+		}
+		if reasoningShouldFold(visible, i, status) {
+			i = end
+			continue
+		}
+		if participantNarrativeEventActive(visible, end, status) {
+			return true
+		}
+		i = end
+	}
+	return false
+}
+
+func liveReasoningOmittedRow(blockID string, omitted int, ctx BlockRenderContext) RenderedRow {
+	if omitted < 1 {
+		omitted = 1
+	}
+	plain := fmt.Sprintf("› … %d earlier reasoning lines", omitted)
+	styled := ctx.Theme.ReasoningStyle().Render("›") + ctx.Theme.HelpHintTextStyle().Render(fmt.Sprintf(" … %d earlier reasoning lines", omitted))
+	return RenderedRow{
+		Styled:     styled,
+		Plain:      plain,
+		BlockID:    blockID,
+		PreWrapped: true,
+	}
 }
 
 func reasoningPreviewText(text string, width int) string {
