@@ -600,6 +600,52 @@ func TestSkillCompletionFetchesBeyondVisibleWindowAndScrolls(t *testing.T) {
 	}
 }
 
+func TestSkillCompletionLoadsNextPageAtBottomThenWrapsWhenExhausted(t *testing.T) {
+	var limits []int
+	model := NewModel(Config{
+		Commands: DefaultCommands(),
+		SkillComplete: func(query string, limit int) ([]CompletionCandidate, error) {
+			limits = append(limits, limit)
+			return numberedCompletionCandidates("skill", minInt(limit, 65)), nil
+		},
+	})
+
+	model.setInputText("$")
+	model.syncTextareaFromInput()
+	model.refreshSkill()
+	if len(model.skillCandidates) != completionCandidateFetchLimit {
+		t.Fatalf("skillCandidates = %d, want initial page of %d", len(model.skillCandidates), completionCandidateFetchLimit)
+	}
+
+	model.skillIndex = len(model.skillCandidates) - 1
+	handled, _ := model.handleSkillKey(keyPress("down"))
+	if !handled {
+		t.Fatal("handleSkillKey(down) = false, want true")
+	}
+	if want := completionCandidateFetchLimit * 2; limits[len(limits)-1] != want {
+		t.Fatalf("SkillComplete second limit = %d, want %d", limits[len(limits)-1], want)
+	}
+	if len(model.skillCandidates) != 65 {
+		t.Fatalf("skillCandidates after paging = %d, want 65", len(model.skillCandidates))
+	}
+	if model.skillIndex != completionCandidateFetchLimit {
+		t.Fatalf("skillIndex after paging = %d, want %d", model.skillIndex, completionCandidateFetchLimit)
+	}
+
+	callCount := len(limits)
+	model.skillIndex = len(model.skillCandidates) - 1
+	handled, _ = model.handleSkillKey(keyPress("down"))
+	if !handled {
+		t.Fatal("handleSkillKey(down exhausted) = false, want true")
+	}
+	if len(limits) != callCount {
+		t.Fatalf("SkillComplete called after exhausted page: %v", limits)
+	}
+	if model.skillIndex != 0 {
+		t.Fatalf("skillIndex after exhausted down = %d, want wrap to 0", model.skillIndex)
+	}
+}
+
 func TestSkillCompletionListKeepsRowsCompact(t *testing.T) {
 	model := NewModel(Config{})
 	longDetail := "This skill should be used when the user asks to generate a very detailed report with many phases and validation requirements. · ~/.agents/skills/report/SKILL.md"
@@ -749,6 +795,54 @@ func TestFileCompletionFetchesBeyondVisibleWindowAndScrolls(t *testing.T) {
 	}
 }
 
+func TestFileCompletionLoadsNextPageAtBottomThenWrapsWhenExhausted(t *testing.T) {
+	var limits []int
+	model := NewModel(Config{
+		MentionComplete: func(query string, limit int) ([]CompletionCandidate, error) {
+			return nil, nil
+		},
+		FileComplete: func(query string, limit int) ([]CompletionCandidate, error) {
+			limits = append(limits, limit)
+			return numberedCompletionCandidates("file", minInt(limit, 65)), nil
+		},
+	})
+
+	model.setInputText("#")
+	model.syncTextareaFromInput()
+	model.refreshMention()
+	if len(model.mentionCandidates) != completionCandidateFetchLimit {
+		t.Fatalf("mentionCandidates = %d, want initial page of %d", len(model.mentionCandidates), completionCandidateFetchLimit)
+	}
+
+	model.mentionIndex = len(model.mentionCandidates) - 1
+	handled, _ := model.handleMentionKey(keyPress("down"))
+	if !handled {
+		t.Fatal("handleMentionKey(down) = false, want true")
+	}
+	if want := completionCandidateFetchLimit * 2; limits[len(limits)-1] != want {
+		t.Fatalf("FileComplete second limit = %d, want %d", limits[len(limits)-1], want)
+	}
+	if len(model.mentionCandidates) != 65 {
+		t.Fatalf("mentionCandidates after paging = %d, want 65", len(model.mentionCandidates))
+	}
+	if model.mentionIndex != completionCandidateFetchLimit {
+		t.Fatalf("mentionIndex after paging = %d, want %d", model.mentionIndex, completionCandidateFetchLimit)
+	}
+
+	callCount := len(limits)
+	model.mentionIndex = len(model.mentionCandidates) - 1
+	handled, _ = model.handleMentionKey(keyPress("down"))
+	if !handled {
+		t.Fatal("handleMentionKey(down exhausted) = false, want true")
+	}
+	if len(limits) != callCount {
+		t.Fatalf("FileComplete called after exhausted page: %v", limits)
+	}
+	if model.mentionIndex != 0 {
+		t.Fatalf("mentionIndex after exhausted down = %d, want wrap to 0", model.mentionIndex)
+	}
+}
+
 func TestMentionCompletionFetchesBeyondVisibleWindowAndScrolls(t *testing.T) {
 	var gotLimit int
 	model := NewModel(Config{
@@ -783,6 +877,51 @@ func TestMentionCompletionFetchesBeyondVisibleWindowAndScrolls(t *testing.T) {
 	}
 	if !strings.Contains(rendered, "earlier") {
 		t.Fatalf("renderMentionList() = %q, want earlier-page indicator", rendered)
+	}
+}
+
+func TestMentionCompletionLoadsNextPageAtBottomThenWrapsWhenExhausted(t *testing.T) {
+	var limits []int
+	model := NewModel(Config{
+		MentionComplete: func(query string, limit int) ([]CompletionCandidate, error) {
+			limits = append(limits, limit)
+			return numberedCompletionCandidates("agent", minInt(limit, 65)), nil
+		},
+	})
+
+	model.setInputText("@")
+	model.syncTextareaFromInput()
+	model.refreshMention()
+	if len(model.mentionCandidates) != completionCandidateFetchLimit {
+		t.Fatalf("mentionCandidates = %d, want initial page of %d", len(model.mentionCandidates), completionCandidateFetchLimit)
+	}
+
+	model.mentionIndex = len(model.mentionCandidates) - 1
+	handled, _ := model.handleMentionKey(keyPress("down"))
+	if !handled {
+		t.Fatal("handleMentionKey(down) = false, want true")
+	}
+	if want := completionCandidateFetchLimit * 2; limits[len(limits)-1] != want {
+		t.Fatalf("MentionComplete second limit = %d, want %d", limits[len(limits)-1], want)
+	}
+	if len(model.mentionCandidates) != 65 {
+		t.Fatalf("mentionCandidates after paging = %d, want 65", len(model.mentionCandidates))
+	}
+	if model.mentionIndex != completionCandidateFetchLimit {
+		t.Fatalf("mentionIndex after paging = %d, want %d", model.mentionIndex, completionCandidateFetchLimit)
+	}
+
+	callCount := len(limits)
+	model.mentionIndex = len(model.mentionCandidates) - 1
+	handled, _ = model.handleMentionKey(keyPress("down"))
+	if !handled {
+		t.Fatal("handleMentionKey(down exhausted) = false, want true")
+	}
+	if len(limits) != callCount {
+		t.Fatalf("MentionComplete called after exhausted page: %v", limits)
+	}
+	if model.mentionIndex != 0 {
+		t.Fatalf("mentionIndex after exhausted down = %d, want wrap to 0", model.mentionIndex)
 	}
 }
 

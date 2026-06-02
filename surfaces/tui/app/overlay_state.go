@@ -30,12 +30,14 @@ type OverlayState struct {
 	mentionIndex      int
 	mentionStart      int
 	mentionEnd        int
+	mentionLimit      int
 
 	skillQuery      string
 	skillCandidates []CompletionCandidate
 	skillIndex      int
 	skillStart      int
 	skillEnd        int
+	skillLimit      int
 
 	slashCandidates []string
 	slashIndex      int

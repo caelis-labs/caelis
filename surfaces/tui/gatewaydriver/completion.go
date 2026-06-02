@@ -17,7 +17,7 @@ import (
 
 const (
 	defaultCompletionLimit  = 8
-	maxCompletionLimit      = 50
+	maxCompletionLimit      = 1000
 	fileCompletionMaxDepth  = 5
 	fileCompletionTimeout   = 150 * time.Millisecond
 	skillCompletionTimeout  = 120 * time.Millisecond

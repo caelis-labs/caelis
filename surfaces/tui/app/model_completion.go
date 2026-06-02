@@ -127,6 +127,7 @@ func (m *Model) refreshCompletionOverlaysNow() {
 
 const (
 	completionCandidateFetchLimit = 50
+	completionCandidateMaxLimit   = 1000
 	completionOverlayVisibleItems = 8
 )
 
@@ -137,11 +138,17 @@ func (m *Model) clearMention() {
 	m.mentionIndex = 0
 	m.mentionStart = 0
 	m.mentionEnd = 0
+	m.mentionLimit = 0
 }
 
 func (m *Model) refreshMention() {
+	m.refreshMentionWithLimit(0)
+}
+
+func (m *Model) refreshMentionWithLimit(limit int) {
 	previousQuery := m.mentionQuery
 	previousPrefix := m.mentionPrefix
+	previousLimit := m.mentionLimit
 	previousSelected := CompletionCandidate{}
 	if m.mentionIndex >= 0 && m.mentionIndex < len(m.mentionCandidates) {
 		previousSelected = m.mentionCandidates[m.mentionIndex]
@@ -154,6 +161,7 @@ func (m *Model) refreshMention() {
 	if !ok {
 		return
 	}
+	limit = nextCompletionRefreshLimit(limit, previousLimit, query == previousQuery && prefix == previousPrefix)
 	begin := time.Now()
 	var (
 		candidates []CompletionCandidate
@@ -164,9 +172,9 @@ func (m *Model) refreshMention() {
 		if m.cfg.FileComplete == nil {
 			return
 		}
-		candidates, err = m.cfg.FileComplete(query, completionCandidateFetchLimit)
+		candidates, err = m.cfg.FileComplete(query, limit)
 	default:
-		candidates, err = m.cfg.MentionComplete(query, completionCandidateFetchLimit)
+		candidates, err = m.cfg.MentionComplete(query, limit)
 	}
 	latency := time.Since(begin)
 	m.diag.LastMentionLatency = latency
@@ -178,6 +186,7 @@ func (m *Model) refreshMention() {
 	m.mentionCandidates = append([]CompletionCandidate(nil), candidates...)
 	m.mentionStart = start
 	m.mentionEnd = end
+	m.mentionLimit = limit
 	m.mentionIndex = preservedCompletionIndex(previousQuery, query, previousPrefix, prefix, previousSelected, candidates)
 }
 
@@ -215,7 +224,7 @@ func (m *Model) handleMentionKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 		return true, nil
 	case key.Matches(msg, m.keys.ChooseNext):
 		if len(m.mentionCandidates) > 0 {
-			m.mentionIndex = wrapSelectionIndex(m.mentionIndex, len(m.mentionCandidates), 1)
+			m.advanceMentionSelection()
 		}
 		return true, nil
 	case key.Matches(msg, m.keys.Accept), key.Matches(msg, m.keys.Complete):
@@ -225,6 +234,50 @@ func (m *Model) handleMentionKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 	default:
 		return false, nil
 	}
+}
+
+func (m *Model) advanceMentionSelection() {
+	if len(m.mentionCandidates) == 0 {
+		return
+	}
+	if m.mentionIndex < len(m.mentionCandidates)-1 {
+		m.mentionIndex++
+		return
+	}
+	oldLen := len(m.mentionCandidates)
+	if m.loadMoreMentionCandidates() && len(m.mentionCandidates) > oldLen {
+		m.mentionIndex = oldLen
+		return
+	}
+	m.mentionIndex = 0
+}
+
+func (m *Model) loadMoreMentionCandidates() bool {
+	oldLen := len(m.mentionCandidates)
+	if !shouldLoadMoreCompletionCandidates(oldLen, m.mentionLimit) {
+		return false
+	}
+	limit := nextCompletionPageLimit(m.mentionLimit, oldLen)
+	if limit <= m.mentionLimit {
+		return false
+	}
+	previousQuery := m.mentionQuery
+	previousPrefix := m.mentionPrefix
+	previousCandidates := append([]CompletionCandidate(nil), m.mentionCandidates...)
+	previousIndex := m.mentionIndex
+	previousStart := m.mentionStart
+	previousEnd := m.mentionEnd
+	m.refreshMentionWithLimit(limit)
+	if len(m.mentionCandidates) == 0 {
+		m.mentionQuery = previousQuery
+		m.mentionPrefix = previousPrefix
+		m.mentionCandidates = previousCandidates
+		m.mentionIndex = previousIndex
+		m.mentionStart = previousStart
+		m.mentionEnd = previousEnd
+		m.mentionLimit = limit
+	}
+	return len(m.mentionCandidates) > oldLen
 }
 
 // ---------------------------------------------------------------------------
@@ -237,10 +290,16 @@ func (m *Model) clearSkill() {
 	m.skillIndex = 0
 	m.skillStart = 0
 	m.skillEnd = 0
+	m.skillLimit = 0
 }
 
 func (m *Model) refreshSkill() {
+	m.refreshSkillWithLimit(0)
+}
+
+func (m *Model) refreshSkillWithLimit(limit int) {
 	previousQuery := m.skillQuery
+	previousLimit := m.skillLimit
 	previousSelected := CompletionCandidate{}
 	if m.skillIndex >= 0 && m.skillIndex < len(m.skillCandidates) {
 		previousSelected = m.skillCandidates[m.skillIndex]
@@ -257,7 +316,8 @@ func (m *Model) refreshSkill() {
 	if !ok {
 		return
 	}
-	candidates, err := m.cfg.SkillComplete(query, completionCandidateFetchLimit)
+	limit = nextCompletionRefreshLimit(limit, previousLimit, query == previousQuery)
+	candidates, err := m.cfg.SkillComplete(query, limit)
 	if err != nil || len(candidates) == 0 {
 		return
 	}
@@ -265,6 +325,7 @@ func (m *Model) refreshSkill() {
 	m.skillCandidates = append([]CompletionCandidate(nil), candidates...)
 	m.skillStart = start
 	m.skillEnd = end
+	m.skillLimit = limit
 	m.skillIndex = preservedCompletionIndex(previousQuery, query, "", "", previousSelected, candidates)
 }
 
@@ -298,7 +359,7 @@ func (m *Model) handleSkillKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 		return true, nil
 	case key.Matches(msg, m.keys.ChooseNext):
 		if len(m.skillCandidates) > 0 {
-			m.skillIndex = wrapSelectionIndex(m.skillIndex, len(m.skillCandidates), 1)
+			m.advanceSkillSelection()
 		}
 		return true, nil
 	case key.Matches(msg, m.keys.Accept), key.Matches(msg, m.keys.Complete):
@@ -308,6 +369,48 @@ func (m *Model) handleSkillKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 	default:
 		return false, nil
 	}
+}
+
+func (m *Model) advanceSkillSelection() {
+	if len(m.skillCandidates) == 0 {
+		return
+	}
+	if m.skillIndex < len(m.skillCandidates)-1 {
+		m.skillIndex++
+		return
+	}
+	oldLen := len(m.skillCandidates)
+	if m.loadMoreSkillCandidates() && len(m.skillCandidates) > oldLen {
+		m.skillIndex = oldLen
+		return
+	}
+	m.skillIndex = 0
+}
+
+func (m *Model) loadMoreSkillCandidates() bool {
+	oldLen := len(m.skillCandidates)
+	if !shouldLoadMoreCompletionCandidates(oldLen, m.skillLimit) {
+		return false
+	}
+	limit := nextCompletionPageLimit(m.skillLimit, oldLen)
+	if limit <= m.skillLimit {
+		return false
+	}
+	previousQuery := m.skillQuery
+	previousCandidates := append([]CompletionCandidate(nil), m.skillCandidates...)
+	previousIndex := m.skillIndex
+	previousStart := m.skillStart
+	previousEnd := m.skillEnd
+	m.refreshSkillWithLimit(limit)
+	if len(m.skillCandidates) == 0 {
+		m.skillQuery = previousQuery
+		m.skillCandidates = previousCandidates
+		m.skillIndex = previousIndex
+		m.skillStart = previousStart
+		m.skillEnd = previousEnd
+		m.skillLimit = limit
+	}
+	return len(m.skillCandidates) > oldLen
 }
 
 // renderSkillList renders the $skill candidates as an overlay list.
@@ -767,6 +870,31 @@ func preservedCompletionIndex(previousQuery string, query string, previousPrefix
 		}
 	}
 	return 0
+}
+
+func nextCompletionRefreshLimit(requested int, previous int, sameQuery bool) int {
+	if requested <= 0 {
+		requested = completionCandidateFetchLimit
+		if sameQuery && previous > requested {
+			requested = previous
+		}
+	}
+	if requested > completionCandidateMaxLimit {
+		return completionCandidateMaxLimit
+	}
+	return requested
+}
+
+func shouldLoadMoreCompletionCandidates(loaded int, limit int) bool {
+	return loaded > 0 && limit > 0 && loaded >= limit && limit < completionCandidateMaxLimit
+}
+
+func nextCompletionPageLimit(limit int, loaded int) int {
+	next := maxInt(limit, loaded) + completionCandidateFetchLimit
+	if next > completionCandidateMaxLimit {
+		return completionCandidateMaxLimit
+	}
+	return next
 }
 
 func completionWindowRange(index int, total int, visible int) (int, int) {
