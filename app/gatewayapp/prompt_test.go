@@ -50,6 +50,7 @@ func TestBuildSystemPromptIncludesPromptAssets(t *testing.T) {
 		"## Shell Tool Permissions",
 		"sandbox_permissions",
 		"use RUN_COMMAND for shell work",
+		"set the `workdir` parameter instead of prefixing commands with `cd ... &&`",
 		"Run normal inspection, builds, tests, and workspace file edits with default sandbox permissions.",
 		"<user_custom_instructions>",
 		"Workspace rule.",

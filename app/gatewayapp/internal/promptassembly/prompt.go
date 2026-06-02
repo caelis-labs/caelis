@@ -148,6 +148,7 @@ func builtInCapabilityGuidancePrompt(agents []delegation.Agent) string {
 		"## Capability Guidance",
 		"",
 		"- Inspect with READ, SEARCH, GLOB, and LIST; edit with WRITE or PATCH; use RUN_COMMAND for shell work and TASK for yielded async work.",
+		"- RUN_COMMAND starts in the session cwd by default; when a different directory is needed, set the `workdir` parameter instead of prefixing commands with `cd ... &&`.",
 		"- Load a skill only when its description clearly matches the task; read only the needed parts of its `SKILL.md`.",
 		"- Obey the active approval mode; treat auto-review denials as concrete feedback to narrow or adjust the next step.",
 	}

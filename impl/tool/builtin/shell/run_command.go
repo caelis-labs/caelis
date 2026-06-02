@@ -51,8 +51,14 @@ func (t *RunCommandTool) Definition() tool.Definition {
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"command": map[string]any{"type": "string", "description": "Command to execute."},
-				"workdir": map[string]any{"type": "string", "description": "Working directory."},
+				"command": map[string]any{
+					"type":        "string",
+					"description": "Command to execute.",
+				},
+				"workdir": map[string]any{
+					"type":        "string",
+					"description": "Working directory for the command; defaults to the session cwd.",
+				},
 				"yield_time_ms": map[string]any{
 					"type":        "integer",
 					"description": "Wait before yielding async control.",

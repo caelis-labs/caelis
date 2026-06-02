@@ -139,7 +139,10 @@ func excludeRulesFromPatterns(patterns []string) []pathExcludeRule {
 		if pattern == "" {
 			continue
 		}
-		rules = append(rules, pathExcludeRule{pattern: pattern})
+		rules = append(rules, pathExcludeRule{
+			pattern:   pattern,
+			recursive: !strings.Contains(pattern, "/"),
+		})
 	}
 	return rules
 }
@@ -268,7 +271,7 @@ func normalizeRelativeMatchPath(value string) string {
 }
 
 func hasPathGlobMeta(pattern string) bool {
-	return strings.ContainsAny(pattern, "*?[")
+	return strings.ContainsAny(pattern, "*?[") || hasPathBraceExpansion(pattern)
 }
 
 func pathGlobMatch(pattern, rel string) bool {
@@ -277,7 +280,93 @@ func pathGlobMatch(pattern, rel string) bool {
 	if pattern == "" {
 		return rel == ""
 	}
-	return matchPathGlobSegments(splitPathSegments(pattern), splitPathSegments(rel))
+	relParts := splitPathSegments(rel)
+	for _, expanded := range expandPathBraceAlternates(pattern) {
+		if matchPathGlobSegments(splitPathSegments(expanded), relParts) {
+			return true
+		}
+	}
+	return false
+}
+
+const maxPathBraceAlternates = 128
+
+func hasPathBraceExpansion(pattern string) bool {
+	_, _, _, ok := firstPathBraceExpansion(pattern)
+	return ok
+}
+
+func expandPathBraceAlternates(pattern string) []string {
+	return expandPathBraceAlternatesLimited(pattern, maxPathBraceAlternates)
+}
+
+func expandPathBraceAlternatesLimited(pattern string, limit int) []string {
+	if limit <= 0 {
+		return nil
+	}
+	start, end, parts, ok := firstPathBraceExpansion(pattern)
+	if !ok {
+		return []string{pattern}
+	}
+	out := make([]string, 0, len(parts))
+	prefix := pattern[:start]
+	suffix := pattern[end+1:]
+	for _, part := range parts {
+		for _, expanded := range expandPathBraceAlternatesLimited(prefix+part+suffix, limit-len(out)) {
+			out = append(out, expanded)
+			if len(out) >= limit {
+				return out
+			}
+		}
+	}
+	return out
+}
+
+func firstPathBraceExpansion(pattern string) (int, int, []string, bool) {
+	depth := 0
+	start := -1
+	partStart := 0
+	sawComma := false
+	inClass := false
+	escaped := false
+	parts := []string{}
+	for i := 0; i < len(pattern); i++ {
+		switch ch := pattern[i]; {
+		case escaped:
+			escaped = false
+		case ch == '\\':
+			escaped = true
+		case inClass:
+			if ch == ']' {
+				inClass = false
+			}
+		case ch == '[':
+			inClass = true
+		case ch == '{':
+			if depth == 0 {
+				start = i
+				partStart = i + 1
+				sawComma = false
+				parts = parts[:0]
+			}
+			depth++
+		case ch == '}' && depth > 0:
+			depth--
+			if depth == 0 {
+				if !sawComma {
+					start = -1
+					continue
+				}
+				parts = append(parts, pattern[partStart:i])
+				return start, i, parts, true
+			}
+		case ch == ',' && depth == 1:
+			sawComma = true
+			parts = append(parts, pattern[partStart:i])
+			partStart = i + 1
+		}
+	}
+	return 0, 0, nil, false
 }
 
 func splitPathSegments(value string) []string {

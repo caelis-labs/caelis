@@ -35,7 +35,7 @@ func TestRunCommandDefinitionExposesMinimalArguments(t *testing.T) {
 	properties, _ := definition.InputSchema["properties"].(map[string]any)
 	wantDescriptions := map[string]string{
 		"command":             "Command to execute.",
-		"workdir":             "Working directory.",
+		"workdir":             "Working directory for the command; defaults to the session cwd.",
 		"yield_time_ms":       "Wait before yielding async control.",
 		"sandbox_permissions": "Sandbox mode for this command.",
 		"justification":       "Short approval question for require_escalated.",

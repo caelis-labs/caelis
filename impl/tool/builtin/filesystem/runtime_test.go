@@ -83,6 +83,32 @@ func TestGitignoreExcludePatternsHonorNegatedRules(t *testing.T) {
 	}
 }
 
+func TestExcludeRulesFromPatternsMatchBarePatternsRecursively(t *testing.T) {
+	root := t.TempDir()
+	patterns := excludeRulesFromPatterns([]string{"*_test.go"})
+
+	if !shouldExcludePath(root, filepath.Join(root, "root_test.go"), false, patterns) {
+		t.Fatal("root test file was not excluded")
+	}
+	if !shouldExcludePath(root, filepath.Join(root, "pkg", "nested_test.go"), false, patterns) {
+		t.Fatal("nested test file was not excluded")
+	}
+	if shouldExcludePath(root, filepath.Join(root, "pkg", "nested.go"), false, patterns) {
+		t.Fatal("non-test file was excluded")
+	}
+}
+
+func TestPathGlobMatchSupportsBraceExpansion(t *testing.T) {
+	for _, rel := range []string{"main.go", "docs/readme.md", "pkg/service.go"} {
+		if !pathGlobMatch("**/*.{go,md}", rel) {
+			t.Fatalf("pathGlobMatch() did not match %q", rel)
+		}
+	}
+	if pathGlobMatch("**/*.{go,md}", "notes/todo.txt") {
+		t.Fatal("pathGlobMatch() matched a non-brace alternative")
+	}
+}
+
 type fakeRuntime struct {
 	defaultFS sandbox.FileSystem
 	hostFS    sandbox.FileSystem
