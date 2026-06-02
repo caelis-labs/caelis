@@ -55,7 +55,7 @@ func participantNarrativeEventActive(events []SubagentEvent, idx int, status str
 }
 
 func renderParticipantTurnNarrativeRows(blockID string, raw string, lineStyle tuikit.LineStyle, width int, ctx BlockRenderContext, active bool) []RenderedRow {
-	rolePrefix, _ := narrativeLinePrefixes(lineStyle)
+	rolePrefix, continuationPrefix := narrativeLinePrefixes(lineStyle)
 	mode := RenderFinal
 	policy := MarkdownFull
 	if active {
@@ -65,7 +65,7 @@ func renderParticipantTurnNarrativeRows(blockID string, raw string, lineStyle tu
 	if lineStyle == tuikit.LineStyleReasoning {
 		policy = MarkdownNone
 	}
-	return RenderTextWithContext(ctx, TextRenderRequest{
+	rows := RenderTextWithContext(ctx, TextRenderRequest{
 		Kind:           textKindForLineStyle(lineStyle),
 		Mode:           mode,
 		MarkdownPolicy: policy,
@@ -75,6 +75,30 @@ func renderParticipantTurnNarrativeRows(blockID string, raw string, lineStyle tu
 		BlockID:        blockID,
 		LineStyle:      lineStyle,
 	}).Rows
+	return alignParticipantNarrativeContinuationRows(rows, continuationPrefix)
+}
+
+func alignParticipantNarrativeContinuationRows(rows []RenderedRow, continuationPrefix string) []RenderedRow {
+	if len(rows) <= 1 || continuationPrefix == "" {
+		return rows
+	}
+	out := append([]RenderedRow(nil), rows...)
+	seenContent := false
+	for i := range out {
+		if strings.TrimSpace(out[i].Plain) == "" {
+			continue
+		}
+		if !seenContent {
+			seenContent = true
+			continue
+		}
+		if strings.HasPrefix(out[i].Plain, continuationPrefix) {
+			continue
+		}
+		out[i].Plain = continuationPrefix + out[i].Plain
+		out[i].Styled = continuationPrefix + out[i].Styled
+	}
+	return out
 }
 
 func renderParticipantTurnToolRows(blockID string, ev SubagentEvent, width int, ctx BlockRenderContext) []RenderedRow {

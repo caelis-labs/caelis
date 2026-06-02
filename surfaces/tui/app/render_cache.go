@@ -114,6 +114,20 @@ func (m *Model) wrapRenderedRowsForViewport(block Block, rawRows []RenderedRow, 
 				continue
 			}
 		}
+		if isACPTranscriptBlockKind(block.Kind()) {
+			sourcePlain := strings.TrimRight(row.Plain, " ")
+			if strings.TrimSpace(sourcePlain) == "" {
+				sourcePlain = plainLine
+			}
+			if wrappedPlain, wrappedStyled, ok := wrapACPTranscriptNarrativeForViewport(sourcePlain, styledLine, wrapWidth, ctx); ok {
+				styledLines = append(styledLines, wrappedStyled...)
+				plainLines = append(plainLines, wrappedPlain...)
+				for range wrappedStyled {
+					clickTokens = append(clickTokens, row.ClickToken)
+				}
+				continue
+			}
+		}
 
 		var wrappedStyled string
 		var plainParts []string
@@ -163,6 +177,82 @@ func (m *Model) wrapRenderedRowsForViewport(block Block, rawRows []RenderedRow, 
 
 func isACPTranscriptBlockKind(kind BlockKind) bool {
 	return kind == BlockMainACPTurn || kind == BlockParticipantTurn
+}
+
+func wrapACPTranscriptNarrativeForViewport(plain string, styled string, width int, ctx BlockRenderContext) ([]string, []string, bool) {
+	if width <= 0 {
+		width = 1
+	}
+	prefix, lineStyle, ok := splitACPTranscriptNarrativePrefix(plain)
+	if !ok || strings.TrimSpace(strings.TrimPrefix(plain, prefix)) == "" || graphemeWidth(plain) <= width {
+		return nil, nil, false
+	}
+	continuationPrefix := strings.Repeat(" ", displayColumns(prefix))
+	bodyWidth := maxInt(1, width-displayColumns(prefix))
+	body := strings.ReplaceAll(strings.ReplaceAll(strings.TrimPrefix(plain, prefix), "\r\n", "\n"), "\r", "\n")
+	styledBody := styledACPTranscriptNarrativeBody(styled, displayColumns(prefix), body)
+	bodyStyledSegments := wrapStyledACPTranscriptNarrativeBody(styledBody, bodyWidth)
+	bodyPlainSegments := deriveViewportPlainLines(nil, bodyStyledSegments)
+	plainLines := make([]string, 0, len(bodyPlainSegments))
+	styledLines := make([]string, 0, len(bodyStyledSegments))
+	prefixStyled := styleACPTranscriptNarrativePrefix(ctx, prefix, lineStyle)
+	for i, segment := range bodyStyledSegments {
+		linePrefix := prefix
+		linePrefixStyled := prefixStyled
+		if i > 0 {
+			linePrefix = continuationPrefix
+			linePrefixStyled = continuationPrefix
+		}
+		plainLines = append(plainLines, linePrefix+bodyPlainSegments[i])
+		styledLines = append(styledLines, linePrefixStyled+segment)
+	}
+	if len(plainLines) < 2 {
+		return nil, nil, false
+	}
+	return plainLines, styledLines, true
+}
+
+func styledACPTranscriptNarrativeBody(styled string, prefixWidth int, fallbackPlain string) string {
+	styled = strings.ReplaceAll(strings.ReplaceAll(styled, "\r\n", "\n"), "\r", "\n")
+	body := strings.TrimRight(ansi.Cut(styled, prefixWidth, ansi.StringWidth(styled)), " ")
+	if strings.TrimSpace(ansi.Strip(body)) != "" {
+		return body
+	}
+	return fallbackPlain
+}
+
+func wrapStyledACPTranscriptNarrativeBody(styledBody string, bodyWidth int) []string {
+	if bodyWidth <= 0 {
+		bodyWidth = 1
+	}
+	wrapped := ansi.Wrap(styledBody, bodyWidth, " ")
+	segments := strings.Split(wrapped, "\n")
+	if len(segments) == 0 {
+		return []string{styledBody}
+	}
+	return segments
+}
+
+func splitACPTranscriptNarrativePrefix(plain string) (string, tuikit.LineStyle, bool) {
+	switch {
+	case strings.HasPrefix(plain, "› "):
+		return "› ", tuikit.LineStyleReasoning, true
+	case strings.HasPrefix(plain, "· "):
+		return "· ", tuikit.LineStyleAssistant, true
+	default:
+		return "", tuikit.LineStyleDefault, false
+	}
+}
+
+func styleACPTranscriptNarrativePrefix(ctx BlockRenderContext, prefix string, lineStyle tuikit.LineStyle) string {
+	switch lineStyle {
+	case tuikit.LineStyleReasoning:
+		return ctx.Theme.ReasoningStyle().Render(prefix)
+	case tuikit.LineStyleAssistant:
+		return ctx.Theme.AssistantStyle().Render(prefix)
+	default:
+		return ctx.Theme.TextStyle().Render(prefix)
+	}
 }
 
 func wrapACPTranscriptHeaderForViewport(plain string, width int, ctx BlockRenderContext) ([]string, []string, bool) {

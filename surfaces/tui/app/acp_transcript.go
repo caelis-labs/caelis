@@ -93,7 +93,8 @@ func renderACPTranscriptRows(blockID string, events []SubagentEvent, status stri
 				}
 				if !shouldFoldReasoning {
 					rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupNarrative, false)
-					rows = append(rows, renderACPReasoningNarrativeRows(blockID, text, width, ctx, participantNarrativeEventActive(visible, reasoningEnd, status))...)
+					active := participantNarrativeEventActive(visible, reasoningEnd, status)
+					rows = append(rows, renderACPReasoningNarrativeRows(blockID, text, width, ctx, active)...)
 				} else {
 					rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupNarrative, false)
 					rows = append(rows, renderACPReasoningExpandedRows(blockID, text, i, width, ctx, participantNarrativeEventActive(visible, reasoningEnd, status))...)

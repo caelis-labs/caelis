@@ -487,8 +487,8 @@ func TestGatewayLiveReasoningBudgetKeepsExploredPrefixVisible(t *testing.T) {
 
 	plain := renderedPlainRows(block.Render(ctx))
 	joined := strings.Join(plain, "\n")
-	if !strings.Contains(joined, "earlier reasoning lines") {
-		t.Fatalf("rendered rows = %q, want live reasoning omitted marker", joined)
+	if !strings.Contains(joined, "› reasoning line 01") || !strings.Contains(joined, "... +26 lines") {
+		t.Fatalf("rendered rows = %q, want first reasoning line and omitted marker", joined)
 	}
 	if countExplorationRowsContaining(plain, "reasoning line ") > liveReasoningRowBudget(ctx) {
 		t.Fatalf("rendered rows = %#v, live reasoning exceeded viewport budget", plain)
@@ -498,6 +498,94 @@ func TestGatewayLiveReasoningBudgetKeepsExploredPrefixVisible(t *testing.T) {
 		!strings.Contains(tail, "Read config.go") ||
 		!strings.Contains(tail, "reasoning line 30") {
 		t.Fatalf("visible tail = %q, want Explored prefix and latest reasoning visible", tail)
+	}
+}
+
+func TestGatewayLiveReasoningBudgetUsesFallbackBeforeViewportHeight(t *testing.T) {
+	model := newGatewayEventTestModel()
+	block := NewMainACPTurnBlock("root-session")
+	block.Events = append(block.Events, SubagentEvent{Kind: SEReasoning, Text: numberedReasoningLines(30)})
+	ctx := BlockRenderContext{Width: 96, TermWidth: 96, Theme: model.theme}
+
+	plain := renderedPlainRows(block.Render(ctx))
+	joined := strings.Join(plain, "\n")
+	if !strings.Contains(joined, "› reasoning line 01") || !strings.Contains(joined, "... +26 lines") {
+		t.Fatalf("rendered rows = %q, want stable head/omitted/tail preview before viewport height is known", joined)
+	}
+	if strings.Contains(joined, "reasoning line 02") || strings.Contains(joined, "reasoning line 27") {
+		t.Fatalf("rendered rows = %q, should hide middle reasoning lines", joined)
+	}
+	if got := countExplorationRowsContaining(plain, "reasoning line "); got != 4 {
+		t.Fatalf("visible reasoning rows = %d, want head+tail budget 4; rows = %#v", got, plain)
+	}
+	for _, want := range []string{"reasoning line 28", "reasoning line 29", "reasoning line 30"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("rendered rows = %q, want latest reasoning tail %q visible", joined, want)
+		}
+	}
+}
+
+func TestGatewayLiveReasoningUsesHeadOmittedTailPreview(t *testing.T) {
+	model := newGatewayEventTestModel()
+	block := NewMainACPTurnBlock("root-session")
+	block.Events = append(block.Events, SubagentEvent{Kind: SEReasoning, Text: numberedReasoningLines(8)})
+	ctx := BlockRenderContext{Width: 96, Height: 20, TermWidth: 96, Theme: model.theme}
+
+	plain := renderedPlainRows(block.Render(ctx))
+	joined := strings.Join(plain, "\n")
+	wantRows := []string{
+		"› reasoning line 01",
+		"  ... +4 lines",
+		"  reasoning line 06",
+		"  reasoning line 07",
+		"  reasoning line 08",
+	}
+	for _, want := range wantRows {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("rendered rows = %q, want preview row %q", joined, want)
+		}
+	}
+	for _, hidden := range []string{"reasoning line 02", "reasoning line 03", "reasoning line 04", "reasoning line 05"} {
+		if strings.Contains(joined, hidden) {
+			t.Fatalf("rendered rows = %q, should hide middle reasoning row %q", joined, hidden)
+		}
+	}
+	if got := len(plain); got != len(wantRows) {
+		t.Fatalf("rendered row count = %d, want %d; rows = %#v", got, len(wantRows), plain)
+	}
+}
+
+func TestGatewayLiveReasoningShortStreamKeepsFinalShape(t *testing.T) {
+	model := newGatewayEventTestModel()
+	block := NewMainACPTurnBlock("root-session")
+	block.Events = append(block.Events, SubagentEvent{Kind: SEReasoning, Text: "checking config"})
+	ctx := BlockRenderContext{Width: 96, Height: 20, TermWidth: 96, Theme: model.theme}
+
+	joined := strings.Join(renderedPlainRows(block.Render(ctx)), "\n")
+	if !strings.Contains(joined, "› checking config") {
+		t.Fatalf("rendered rows = %q, want short live reasoning to keep final row shape", joined)
+	}
+	if strings.Contains(joined, "\n  checking config") {
+		t.Fatalf("rendered rows = %q, short live reasoning should not move content to a second line", joined)
+	}
+}
+
+func TestGatewayLiveReasoningTinyViewportKeepsHeadAnchor(t *testing.T) {
+	model := newGatewayEventTestModel()
+	block := NewMainACPTurnBlock("root-session")
+	block.Events = append(block.Events, SubagentEvent{Kind: SEReasoning, Text: numberedReasoningLines(8)})
+	ctx := BlockRenderContext{Width: 96, Height: 2, TermWidth: 96, Theme: model.theme}
+
+	plain := renderedPlainRows(block.Render(ctx))
+	joined := strings.Join(plain, "\n")
+	if len(plain) != 2 {
+		t.Fatalf("rendered rows = %#v, want tiny preview to fit height budget", plain)
+	}
+	if !strings.Contains(joined, "› reasoning line 01") || !strings.Contains(joined, "  ... +7 lines") {
+		t.Fatalf("rendered rows = %q, want head anchor and omitted row", joined)
+	}
+	if strings.Contains(joined, "reasoning line 08") {
+		t.Fatalf("rendered rows = %q, tiny preview should prioritize head anchor over tail", joined)
 	}
 }
 

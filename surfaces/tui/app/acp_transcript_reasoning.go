@@ -20,8 +20,9 @@ func reasoningExpanded(opts acpTranscriptRenderOptions, key string) bool {
 }
 
 const (
-	acpLiveReasoningMinRows = 4
-	acpLiveReasoningMaxRows = 8
+	acpLiveReasoningHeadRows    = 1
+	acpLiveReasoningTailRows    = 3
+	acpLiveReasoningPreviewRows = acpLiveReasoningHeadRows + 1 + acpLiveReasoningTailRows
 )
 
 func reasoningShouldFold(events []SubagentEvent, idx int, status string) bool {
@@ -120,7 +121,7 @@ func renderACPReasoningNarrativeRows(blockID string, text string, width int, ctx
 	if !active {
 		return rows
 	}
-	return limitLiveReasoningRows(blockID, rows, ctx)
+	return renderLiveReasoningRows(blockID, rows, ctx)
 }
 
 func renderACPReasoningSummaryRow(blockID string, ev SubagentEvent, idx int, width int, ctx BlockRenderContext, expanded bool) RenderedRow {
@@ -134,32 +135,34 @@ func renderACPReasoningSummaryRow(blockID string, ev SubagentEvent, idx int, wid
 	return StyledPlainClickableRow(blockID, plain, styled, acpReasoningClickToken(reasoningFoldKey(idx)))
 }
 
-func limitLiveReasoningRows(blockID string, rows []RenderedRow, ctx BlockRenderContext) []RenderedRow {
+func renderLiveReasoningRows(blockID string, rows []RenderedRow, ctx BlockRenderContext) []RenderedRow {
+	if len(rows) == 0 {
+		return rows
+	}
 	budget := liveReasoningRowBudget(ctx)
 	if budget <= 0 || len(rows) <= budget {
 		return rows
 	}
-	if budget == 1 {
-		return []RenderedRow{liveReasoningOmittedRow(blockID, len(rows), ctx)}
+	headRows := minInt(acpLiveReasoningHeadRows, budget)
+	if budget == headRows {
+		return rows[:headRows]
 	}
-	tailRows := maxInt(1, budget-1)
-	if tailRows >= len(rows) {
-		return rows
+	tailRows := minInt(acpLiveReasoningTailRows, maxInt(0, budget-headRows-1))
+	hidden := len(rows) - headRows - tailRows
+	out := make([]RenderedRow, 0, headRows+1+tailRows)
+	out = append(out, rows[:headRows]...)
+	out = append(out, liveReasoningOmittedRow(blockID, hidden, ctx))
+	if tailRows > 0 {
+		out = append(out, rows[len(rows)-tailRows:]...)
 	}
-	omitted := len(rows) - tailRows
-	marker := liveReasoningOmittedRow(blockID, omitted, ctx)
-	out := make([]RenderedRow, 0, budget)
-	out = append(out, marker)
-	out = append(out, rows[len(rows)-tailRows:]...)
 	return out
 }
 
 func liveReasoningRowBudget(ctx BlockRenderContext) int {
 	if ctx.Height <= 0 {
-		return 0
+		return acpLiveReasoningPreviewRows
 	}
-	budget := minInt(acpLiveReasoningMaxRows, maxInt(acpLiveReasoningMinRows, ctx.Height/3))
-	return minInt(ctx.Height, budget)
+	return minInt(ctx.Height, acpLiveReasoningPreviewRows)
 }
 
 func hasHeightSensitiveLiveReasoning(events []SubagentEvent, status string) bool {
@@ -188,12 +191,10 @@ func hasHeightSensitiveLiveReasoning(events []SubagentEvent, status string) bool
 	return false
 }
 
-func liveReasoningOmittedRow(blockID string, omitted int, ctx BlockRenderContext) RenderedRow {
-	if omitted < 1 {
-		omitted = 1
-	}
-	plain := fmt.Sprintf("› … %d earlier reasoning lines", omitted)
-	styled := ctx.Theme.ReasoningStyle().Render("›") + ctx.Theme.HelpHintTextStyle().Render(fmt.Sprintf(" … %d earlier reasoning lines", omitted))
+func liveReasoningOmittedRow(blockID string, hidden int, ctx BlockRenderContext) RenderedRow {
+	_, continuation := narrativeLinePrefixes(tuikit.LineStyleReasoning)
+	plain := continuation + fmt.Sprintf("... +%d lines", maxInt(1, hidden))
+	styled := continuation + ctx.Theme.HelpHintTextStyle().Render(strings.TrimPrefix(plain, continuation))
 	return RenderedRow{
 		Styled:     styled,
 		Plain:      plain,

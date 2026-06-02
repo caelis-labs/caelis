@@ -80,6 +80,30 @@ func TestModelUpdateConsumesGatewayAssistantEventIntoMainTurnBlock(t *testing.T)
 	}
 }
 
+func TestGatewayAssistantNarrativeBodyAlignsAfterMarker(t *testing.T) {
+	model := newGatewayEventTestModel()
+	block := NewMainACPTurnBlock("root-session")
+	block.Status = "completed"
+	block.Events = append(block.Events, SubagentEvent{
+		Kind: SEAssistant,
+		Text: "All clean. Here is the complete review.\n\n版本审查报告\n\n概要",
+		Done: true,
+	})
+	ctx := BlockRenderContext{Width: 100, TermWidth: 100, Theme: model.theme}
+
+	plain := renderedPlainRows(block.Render(ctx))
+	joined := strings.Join(plain, "\n")
+	if !strings.Contains(joined, "· All clean. Here is the complete review.") {
+		t.Fatalf("rendered rows = %q, want assistant marker on first narrative line", joined)
+	}
+	if strings.Contains(joined, "\n版本审查报告") || strings.Contains(joined, "\n概要") {
+		t.Fatalf("rendered rows = %q, narrative continuation rows should not start in the marker column", joined)
+	}
+	if !strings.Contains(joined, "\n  版本审查报告") || !strings.Contains(joined, "\n  概要") {
+		t.Fatalf("rendered rows = %q, want continuation rows aligned to the body column", joined)
+	}
+}
+
 func TestGatewayReasoningStreamPreservesWhitespaceOnlyDeltas(t *testing.T) {
 	model := NewModel(Config{NoColor: true, StreamTickInterval: 16 * time.Millisecond})
 	model.viewport.SetWidth(80)

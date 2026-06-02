@@ -105,6 +105,62 @@ func TestACPHeaderViewportWrapSupportsDynamicToolNames(t *testing.T) {
 	}
 }
 
+func TestACPReasoningSummaryViewportWrapAlignsContinuation(t *testing.T) {
+	m := NewModel(Config{NoColor: true})
+	m.theme = tuikit.ResolveThemeFromOptions(true, colorprofile.NoTTY)
+	block := NewMainACPTurnBlock("session-1")
+	width := 34
+	ctx := m.blockRenderContext(width)
+	plain := "› Good, no whitespace issues. Now let me compile the comprehensive review."
+	styled := ctx.Theme.ReasoningStyle().Render("›") + ctx.Theme.ReasoningStyle().Render(" Good, no whitespace issues. Now let me compile the comprehensive review.")
+	row := StyledPlainClickableRow(block.BlockID(), plain, styled, "acp_reasoning:0")
+
+	_, plainLines, clickTokens := m.wrapRenderedRowsForViewport(block, []RenderedRow{row}, width, ctx)
+
+	if len(plainLines) < 2 {
+		t.Fatalf("reasoning summary did not wrap: %#v", plainLines)
+	}
+	if !strings.HasPrefix(plainLines[0], "› ") {
+		t.Fatalf("first summary line = %q, want marker prefix", plainLines[0])
+	}
+	if !strings.HasPrefix(plainLines[1], "  ") || strings.HasPrefix(plainLines[1], "›") {
+		t.Fatalf("summary continuation = %q, want body-column indentation\nall lines=%#v", plainLines[1], plainLines)
+	}
+	for i, token := range clickTokens {
+		if token != "acp_reasoning:0" {
+			t.Fatalf("click token %d = %q, want propagated reasoning token", i, token)
+		}
+	}
+}
+
+func TestACPAssistantNarrativeViewportWrapPreservesStyledBody(t *testing.T) {
+	m := NewModel(Config{ColorProfile: colorprofile.TrueColor})
+	block := NewMainACPTurnBlock("session-1")
+	width := 24
+	ctx := m.blockRenderContext(width)
+	plain := "· Keep formatted assistant text visible after wrapping"
+	styledBody := "\x1b[38;5;201mKeep formatted assistant text visible after wrapping\x1b[0m"
+	styled := ctx.Theme.AssistantStyle().Render("· ") + styledBody
+	row := StyledPlainClickableRow(block.BlockID(), plain, styled, "assistant:0")
+
+	styledLines, plainLines, clickTokens := m.wrapRenderedRowsForViewport(block, []RenderedRow{row}, width, ctx)
+
+	if len(plainLines) < 2 {
+		t.Fatalf("assistant narrative did not wrap: %#v", plainLines)
+	}
+	if !strings.Contains(strings.Join(styledLines, "\n"), "\x1b[38;5;201m") {
+		t.Fatalf("wrapped styled lines lost body ANSI style: %#v", styledLines)
+	}
+	if !strings.HasPrefix(plainLines[1], "  ") || strings.HasPrefix(plainLines[1], "·") {
+		t.Fatalf("assistant continuation = %q, want body-column indentation\nall lines=%#v", plainLines[1], plainLines)
+	}
+	for i, token := range clickTokens {
+		if token != "assistant:0" {
+			t.Fatalf("click token %d = %q, want propagated assistant token", i, token)
+		}
+	}
+}
+
 func TestViewportHeightChangeDoesNotInvalidateGenericBlockCache(t *testing.T) {
 	m := NewModel(Config{NoColor: true})
 	m.theme = tuikit.ResolveThemeFromOptions(true, colorprofile.NoTTY)
@@ -129,7 +185,7 @@ func TestViewportHeightChangeInvalidatesActiveACPReasoningBudget(t *testing.T) {
 	m := NewModel(Config{NoColor: true})
 	m.theme = tuikit.ResolveThemeFromOptions(true, colorprofile.NoTTY)
 	m.viewport.SetWidth(96)
-	m.viewport.SetHeight(12)
+	m.viewport.SetHeight(3)
 	block := NewMainACPTurnBlock("session-1")
 	block.Events = append(block.Events, SubagentEvent{Kind: SEReasoning, Text: numberedReasoningLines(30)})
 	m.doc.Append(block)
@@ -140,7 +196,7 @@ func TestViewportHeightChangeInvalidatesActiveACPReasoningBudget(t *testing.T) {
 		t.Fatalf("initial reasoning rows = %d, lines = %#v", initialReasoningRows, m.viewportPlainLines)
 	}
 
-	m.viewport.SetHeight(24)
+	m.viewport.SetHeight(5)
 	m.syncViewportContent()
 
 	expandedReasoningRows := countRenderCacheRowsContaining(m.viewportPlainLines, "reasoning line ")
