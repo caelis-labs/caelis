@@ -9,9 +9,15 @@ func (m *Model) renderMentionList() string {
 	if len(m.mentionCandidates) == 0 {
 		return ""
 	}
-	maxItems := minInt(8, len(m.mentionCandidates))
+	maxItems := minInt(completionOverlayVisibleItems, len(m.mentionCandidates))
+	start, end := completionWindowRange(m.mentionIndex, len(m.mentionCandidates), maxItems)
 	var lines []string
-	for i := range maxItems {
+	if start > 0 {
+		lines = append(lines, m.theme.HelpHintTextStyle().Render(
+			fmt.Sprintf("  … and %d earlier", start),
+		))
+	}
+	for i := start; i < end; i++ {
 		prefix := "  "
 		display := completionCandidateDisplay(m.mentionCandidates[i])
 		if m.mentionPrefix != "#" {
@@ -36,9 +42,9 @@ func (m *Model) renderMentionList() string {
 			lines = append(lines, line)
 		}
 	}
-	if len(m.mentionCandidates) > maxItems {
+	if end < len(m.mentionCandidates) {
 		lines = append(lines, m.theme.HelpHintTextStyle().Render(
-			fmt.Sprintf("  … and %d more", len(m.mentionCandidates)-maxItems),
+			fmt.Sprintf("  … and %d more", len(m.mentionCandidates)-end),
 		))
 	}
 	title := "Agents"

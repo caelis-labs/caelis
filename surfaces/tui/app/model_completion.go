@@ -125,6 +125,11 @@ func (m *Model) refreshCompletionOverlaysNow() {
 // @Mention completion
 // ---------------------------------------------------------------------------
 
+const (
+	completionCandidateFetchLimit = 50
+	completionOverlayVisibleItems = 8
+)
+
 func (m *Model) clearMention() {
 	m.mentionQuery = ""
 	m.mentionPrefix = ""
@@ -159,9 +164,9 @@ func (m *Model) refreshMention() {
 		if m.cfg.FileComplete == nil {
 			return
 		}
-		candidates, err = m.cfg.FileComplete(query, 8)
+		candidates, err = m.cfg.FileComplete(query, completionCandidateFetchLimit)
 	default:
-		candidates, err = m.cfg.MentionComplete(query, 8)
+		candidates, err = m.cfg.MentionComplete(query, completionCandidateFetchLimit)
 	}
 	latency := time.Since(begin)
 	m.diag.LastMentionLatency = latency
@@ -252,7 +257,7 @@ func (m *Model) refreshSkill() {
 	if !ok {
 		return
 	}
-	candidates, err := m.cfg.SkillComplete(query, 8)
+	candidates, err := m.cfg.SkillComplete(query, completionCandidateFetchLimit)
 	if err != nil || len(candidates) == 0 {
 		return
 	}
@@ -311,15 +316,21 @@ func (m *Model) renderSkillList() string {
 		return ""
 	}
 	contentWidth := maxInt(24, m.promptModalInnerWidth())
-	maxItems := minInt(8, len(m.skillCandidates))
+	maxItems := minInt(completionOverlayVisibleItems, len(m.skillCandidates))
+	start, end := completionWindowRange(m.skillIndex, len(m.skillCandidates), maxItems)
 	var lines []string
-	for i := 0; i < maxItems; i++ {
+	if start > 0 {
+		lines = append(lines, m.theme.HelpHintTextStyle().Render(
+			fmt.Sprintf("  … and %d earlier", start),
+		))
+	}
+	for i := start; i < end; i++ {
 		selected := i == m.skillIndex
 		lines = append(lines, m.renderSkillCandidateLine(m.skillCandidates[i], selected, contentWidth))
 	}
-	if len(m.skillCandidates) > maxItems {
+	if end < len(m.skillCandidates) {
 		lines = append(lines, m.theme.HelpHintTextStyle().Render(
-			fmt.Sprintf("  … and %d more", len(m.skillCandidates)-maxItems),
+			fmt.Sprintf("  … and %d more", len(m.skillCandidates)-end),
 		))
 	}
 	return m.renderCompletionOverlay("Skills", lines)
@@ -756,6 +767,30 @@ func preservedCompletionIndex(previousQuery string, query string, previousPrefix
 		}
 	}
 	return 0
+}
+
+func completionWindowRange(index int, total int, visible int) (int, int) {
+	if total <= 0 || visible <= 0 {
+		return 0, 0
+	}
+	if visible > total {
+		visible = total
+	}
+	if index < 0 {
+		index = 0
+	}
+	if index >= total {
+		index = total - 1
+	}
+	start := 0
+	if index >= visible {
+		start = index - visible + 1
+	}
+	maxStart := maxInt(0, total-visible)
+	if start > maxStart {
+		start = maxStart
+	}
+	return start, minInt(total, start+visible)
 }
 
 func completionCandidateStableKey(candidate CompletionCandidate) string {

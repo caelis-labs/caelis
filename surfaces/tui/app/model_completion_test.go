@@ -1,6 +1,7 @@
 package tuiapp
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -561,6 +562,44 @@ func TestSkillCompletionRendersMetadataAndUsesCandidateValue(t *testing.T) {
 	}
 }
 
+func TestSkillCompletionFetchesBeyondVisibleWindowAndScrolls(t *testing.T) {
+	var gotLimit int
+	model := NewModel(Config{
+		Commands: DefaultCommands(),
+		SkillComplete: func(query string, limit int) ([]CompletionCandidate, error) {
+			gotLimit = limit
+			return numberedCompletionCandidates("skill", 12), nil
+		},
+	})
+
+	model.setInputText("$")
+	model.syncTextareaFromInput()
+	model.refreshSkill()
+	if gotLimit != completionCandidateFetchLimit {
+		t.Fatalf("SkillComplete limit = %d, want %d", gotLimit, completionCandidateFetchLimit)
+	}
+	if len(model.skillCandidates) != 12 {
+		t.Fatalf("skillCandidates = %d, want 12", len(model.skillCandidates))
+	}
+	for i := 0; i < 10; i++ {
+		handled, _ := model.handleSkillKey(keyPress("down"))
+		if !handled {
+			t.Fatal("handleSkillKey(down) = false, want true")
+		}
+	}
+
+	rendered := ansi.Strip(model.renderSkillList())
+	if !strings.Contains(rendered, "skill-10") {
+		t.Fatalf("renderSkillList() = %q, want selected skill-10 visible", rendered)
+	}
+	if strings.Contains(rendered, "skill-00") {
+		t.Fatalf("renderSkillList() = %q, should have scrolled past skill-00", rendered)
+	}
+	if !strings.Contains(rendered, "earlier") {
+		t.Fatalf("renderSkillList() = %q, want earlier-page indicator", rendered)
+	}
+}
+
 func TestSkillCompletionListKeepsRowsCompact(t *testing.T) {
 	model := NewModel(Config{})
 	longDetail := "This skill should be used when the user asks to generate a very detailed report with many phases and validation requirements. · ~/.agents/skills/report/SKILL.md"
@@ -667,6 +706,83 @@ func TestFileCompletionListHidesPrefixAndTypeDetail(t *testing.T) {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("renderMentionList() = %q, want %q", rendered, want)
 		}
+	}
+}
+
+func TestFileCompletionFetchesBeyondVisibleWindowAndScrolls(t *testing.T) {
+	var gotLimit int
+	model := NewModel(Config{
+		MentionComplete: func(query string, limit int) ([]CompletionCandidate, error) {
+			return nil, nil
+		},
+		FileComplete: func(query string, limit int) ([]CompletionCandidate, error) {
+			gotLimit = limit
+			return numberedCompletionCandidates("file", 12), nil
+		},
+	})
+
+	model.setInputText("#")
+	model.syncTextareaFromInput()
+	model.refreshMention()
+	if gotLimit != completionCandidateFetchLimit {
+		t.Fatalf("FileComplete limit = %d, want %d", gotLimit, completionCandidateFetchLimit)
+	}
+	if len(model.mentionCandidates) != 12 {
+		t.Fatalf("mentionCandidates = %d, want 12", len(model.mentionCandidates))
+	}
+	for i := 0; i < 9; i++ {
+		handled, _ := model.handleMentionKey(keyPress("down"))
+		if !handled {
+			t.Fatal("handleMentionKey(down) = false, want true")
+		}
+	}
+
+	rendered := ansi.Strip(model.renderMentionList())
+	if !strings.Contains(rendered, "file-09") {
+		t.Fatalf("renderMentionList() = %q, want selected file-09 visible", rendered)
+	}
+	if strings.Contains(rendered, "file-00") {
+		t.Fatalf("renderMentionList() = %q, should have scrolled past file-00", rendered)
+	}
+	if !strings.Contains(rendered, "earlier") {
+		t.Fatalf("renderMentionList() = %q, want earlier-page indicator", rendered)
+	}
+}
+
+func TestMentionCompletionFetchesBeyondVisibleWindowAndScrolls(t *testing.T) {
+	var gotLimit int
+	model := NewModel(Config{
+		MentionComplete: func(query string, limit int) ([]CompletionCandidate, error) {
+			gotLimit = limit
+			return numberedCompletionCandidates("agent", 12), nil
+		},
+	})
+
+	model.setInputText("@")
+	model.syncTextareaFromInput()
+	model.refreshMention()
+	if gotLimit != completionCandidateFetchLimit {
+		t.Fatalf("MentionComplete limit = %d, want %d", gotLimit, completionCandidateFetchLimit)
+	}
+	if len(model.mentionCandidates) != 12 {
+		t.Fatalf("mentionCandidates = %d, want 12", len(model.mentionCandidates))
+	}
+	for i := 0; i < 9; i++ {
+		handled, _ := model.handleMentionKey(keyPress("down"))
+		if !handled {
+			t.Fatal("handleMentionKey(down) = false, want true")
+		}
+	}
+
+	rendered := ansi.Strip(model.renderMentionList())
+	if !strings.Contains(rendered, "@agent-09") {
+		t.Fatalf("renderMentionList() = %q, want selected @agent-09 visible", rendered)
+	}
+	if strings.Contains(rendered, "@agent-00") {
+		t.Fatalf("renderMentionList() = %q, should have scrolled past @agent-00", rendered)
+	}
+	if !strings.Contains(rendered, "earlier") {
+		t.Fatalf("renderMentionList() = %q, want earlier-page indicator", rendered)
 	}
 }
 
@@ -792,6 +908,18 @@ func TestModelActionPrefixTypingFiltersCandidatesAfterSlashThenBatchedTail(t *te
 
 func keyPress(key string) tea.KeyMsg {
 	return tea.KeyPressMsg(tea.Key{Text: key})
+}
+
+func numberedCompletionCandidates(prefix string, count int) []CompletionCandidate {
+	out := make([]CompletionCandidate, 0, count)
+	for i := 0; i < count; i++ {
+		value := fmt.Sprintf("%s-%02d", prefix, i)
+		out = append(out, CompletionCandidate{
+			Value:   value,
+			Display: value,
+		})
+	}
+	return out
 }
 
 func runCompletionCmd(t *testing.T, model *Model, cmd tea.Cmd) {
