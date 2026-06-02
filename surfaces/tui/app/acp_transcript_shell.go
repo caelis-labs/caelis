@@ -1,6 +1,7 @@
 package tuiapp
 
 import (
+	"image/color"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -50,28 +51,37 @@ func styleShellCommandText(ctx BlockRenderContext, text string) string {
 }
 
 func shellTokenStyle(ctx BlockRenderContext, class shellTokenClass) lipgloss.Style {
+	palette := tuikit.SyntaxPaletteForTheme(ctx.Theme)
 	switch class {
 	case shellTokenCommand:
-		return lipgloss.NewStyle().Foreground(ctx.Theme.Success).Bold(true)
+		return shellSyntaxStyle(palette.Function).Bold(true)
 	case shellTokenKeyword:
-		return lipgloss.NewStyle().Foreground(ctx.Theme.Focus).Bold(true)
+		return shellSyntaxStyle(palette.Keyword).Bold(true)
 	case shellTokenEnv:
-		return lipgloss.NewStyle().Foreground(ctx.Theme.Accent)
+		return shellSyntaxStyle(palette.Variable)
 	case shellTokenFlag:
-		return lipgloss.NewStyle().Foreground(ctx.Theme.Warning)
+		return shellSyntaxStyle(palette.Number)
 	case shellTokenOperator:
-		return ctx.Theme.TranscriptMetaStyle()
+		return shellSyntaxStyle(palette.Operator)
 	case shellTokenRedirect:
-		return lipgloss.NewStyle().Foreground(ctx.Theme.Warning)
+		return shellSyntaxStyle(palette.Number)
 	case shellTokenPath:
-		return lipgloss.NewStyle().Foreground(ctx.Theme.LinkFg)
+		return shellSyntaxStyle(palette.Path)
 	case shellTokenVariable:
-		return lipgloss.NewStyle().Foreground(ctx.Theme.Accent)
+		return shellSyntaxStyle(palette.Variable)
 	case shellTokenQuoted:
-		return lipgloss.NewStyle().Foreground(ctx.Theme.Warning)
+		return shellSyntaxStyle(palette.String)
 	default:
 		return ctx.Theme.ToolArgsStyle()
 	}
+}
+
+func shellSyntaxStyle(fg color.Color) lipgloss.Style {
+	style := lipgloss.NewStyle()
+	if fg != nil {
+		style = style.Foreground(fg)
+	}
+	return style
 }
 
 func shellCommandTokens(text string) []shellCommandToken {

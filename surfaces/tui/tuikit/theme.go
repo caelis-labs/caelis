@@ -231,6 +231,7 @@ func resolveTheme(opts themeResolveOptions) Theme {
 		theme.ComposerBorderFocus = lipgloss.Color(accent)
 		theme.LinkFg = lipgloss.Color(accent)
 	}
+	applyCatppuccinCodeColors(&theme)
 	if opts.noColor {
 		theme = stripThemeColors(theme)
 	}

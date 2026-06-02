@@ -50,6 +50,28 @@ func TestGlamourNarrativeRendererCacheUsesFullThemeKey(t *testing.T) {
 	}
 }
 
+func TestNarrativeInlineCodeUsesCompactStyle(t *testing.T) {
+	raw := "Use `shell` now."
+	theme := tuikit.ResolveThemeWithState(true, false, colorprofile.TrueColor)
+	style := narrativeStyleConfig(theme, tuikit.LineStyleAssistant)
+
+	if style.Code.Prefix != "" || style.Code.Suffix != "" {
+		t.Fatalf("inline code padding prefix=%q suffix=%q, want none", style.Code.Prefix, style.Code.Suffix)
+	}
+	if got, want := ptrString(style.Code.BackgroundColor), ptrString(styleBackgroundToAnsiPtr(theme.MarkdownInlineCodeStyle())); got != want {
+		t.Fatalf("inline code background = %q, want %q", got, want)
+	}
+
+	rendered := glamourRenderNarrative(raw, 80, theme, tuikit.LineStyleAssistant)
+	plain := ansi.Strip(rendered)
+	if !strings.Contains(plain, "Use shell now.") {
+		t.Fatalf("rendered inline code should not add extra spaces\nplain=%q\nstyled=%q", plain, rendered)
+	}
+	if strings.Contains(plain, "Use  shell  now.") {
+		t.Fatalf("rendered inline code added padding spaces\nplain=%q\nstyled=%q", plain, rendered)
+	}
+}
+
 func TestNarrativeInlineCodeStyleScopesAfterCJKText(t *testing.T) {
 	raw := "- **事实优先**：比起猜测，我更倾向于读取仓库中的真实代码。在编辑之前先读或搜索，用 `shell` 验证结果。"
 	theme := tuikit.ResolveThemeWithState(false, false, colorprofile.TrueColor)
@@ -451,23 +473,50 @@ func TestNarrativeChromaClearsDefaultErrorBackground(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			style := narrativeStyleConfig(tt.theme, tt.role)
-			if style.CodeBlock.Chroma == nil {
-				t.Fatal("expected narrative style to configure Chroma")
+			if style.CodeBlock.Theme != catppuccinCodeBlockTheme(tt.theme) {
+				t.Fatalf("code block theme = %q, want %q", style.CodeBlock.Theme, catppuccinCodeBlockTheme(tt.theme))
 			}
-			codeBg := ptrString(styleBackgroundToAnsiPtr(tt.theme.MarkdownCodeBlockStyle()))
-			for token, got := range map[string]string{
-				"error":            ptrString(style.CodeBlock.Chroma.Error.BackgroundColor),
-				"generic_deleted":  ptrString(style.CodeBlock.Chroma.GenericDeleted.BackgroundColor),
-				"generic_inserted": ptrString(style.CodeBlock.Chroma.GenericInserted.BackgroundColor),
-			} {
-				if isDefaultChromaRedBackground(got) {
-					t.Fatalf("%s inherited default red background %q", token, got)
-				}
-				if got != codeBg {
-					t.Fatalf("%s background = %q, want code block background %q", token, got, codeBg)
-				}
+			if style.CodeBlock.Chroma != nil {
+				t.Fatalf("expected direct Catppuccin Chroma theme, got custom Chroma config")
+			}
+			rendered := glamourRenderNarrative("```diff\n-old\n+new\n```", 80, tt.theme, tt.role)
+			if containsForbiddenRedBackground(rendered) {
+				t.Fatalf("rendered diff code block contains forbidden red background ANSI:\n%q", rendered)
 			}
 		})
+	}
+}
+
+func TestNarrativeCodeBlockUsesCatppuccinThemeForTerminalBackground(t *testing.T) {
+	tests := []struct {
+		name  string
+		theme tuikit.Theme
+		want  string
+	}{
+		{
+			name:  "dark uses mocha",
+			theme: tuikit.ResolveThemeWithState(true, false, colorprofile.TrueColor),
+			want:  "catppuccin-mocha",
+		},
+		{
+			name:  "light uses latte",
+			theme: tuikit.ResolveThemeWithState(false, false, colorprofile.TrueColor),
+			want:  "catppuccin-latte",
+		},
+	}
+
+	for _, tt := range tests {
+		for _, role := range []tuikit.LineStyle{tuikit.LineStyleAssistant, tuikit.LineStyleReasoning} {
+			t.Run(tt.name+"/"+fmt.Sprint(role), func(t *testing.T) {
+				style := narrativeStyleConfig(tt.theme, role)
+				if style.CodeBlock.Theme != tt.want {
+					t.Fatalf("code block Chroma theme = %q, want %q", style.CodeBlock.Theme, tt.want)
+				}
+				if style.CodeBlock.Chroma != nil {
+					t.Fatalf("expected direct Chroma theme, got custom Chroma config")
+				}
+			})
+		}
 	}
 }
 
@@ -607,15 +656,6 @@ func ptrString(value *string) string {
 		return ""
 	}
 	return *value
-}
-
-func isDefaultChromaRedBackground(value string) bool {
-	switch strings.ToLower(value) {
-	case "#f05b5b", "#ff5555":
-		return true
-	default:
-		return false
-	}
 }
 
 func containsForbiddenRedBackground(styled string) bool {

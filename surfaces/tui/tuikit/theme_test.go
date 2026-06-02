@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"testing"
 
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/colorprofile"
 	xansi "github.com/charmbracelet/x/ansi"
 )
@@ -172,8 +173,14 @@ func TestDefaultLightDarkPalettesExposeModernSemanticColors(t *testing.T) {
 	if got := stringifyColor(dark.Focus); got != "#5bb8d7" {
 		t.Fatalf("dark focus = %q", got)
 	}
-	if got := stringifyColor(dark.CodeBlockBg); got != "#12161d" {
+	if got := stringifyColor(dark.CodeBlockFg); got != "#cdd6f4" {
+		t.Fatalf("dark code block fg = %q", got)
+	}
+	if got := stringifyColor(dark.CodeBlockBg); got != "#1e1e2e" {
 		t.Fatalf("dark code block bg = %q", got)
+	}
+	if got := stringifyColor(dark.CodeBg); got != "#181825" {
+		t.Fatalf("dark inline code bg = %q", got)
 	}
 
 	light := ResolveThemeWithState(false, false, colorprofile.TrueColor)
@@ -183,7 +190,13 @@ func TestDefaultLightDarkPalettesExposeModernSemanticColors(t *testing.T) {
 	if got := stringifyColor(light.ToolFg); got != "#2f8faf" {
 		t.Fatalf("light tool fg = %q", got)
 	}
-	if got := stringifyColor(light.CodeBg); got != "#eef1f5" {
+	if got := stringifyColor(light.CodeBlockFg); got != "#4c4f69" {
+		t.Fatalf("light code block fg = %q", got)
+	}
+	if got := stringifyColor(light.CodeBlockBg); got != "#eff1f5" {
+		t.Fatalf("light code block bg = %q", got)
+	}
+	if got := stringifyColor(light.CodeBg); got != "#eff1f5" {
 		t.Fatalf("light inline code bg = %q", got)
 	}
 }
@@ -194,7 +207,10 @@ func TestTokensIncludeToolAndMarkdownSemantics(t *testing.T) {
 	if got := stringifyColor(tokens.ToolName.GetForeground()); got != "#5bb8d7" {
 		t.Fatalf("tool name token foreground = %q", got)
 	}
-	if got := stringifyColor(tokens.MarkdownInlineCode.GetBackground()); got != "#1b222d" {
+	if got := stringifyColor(tokens.MarkdownInlineCode.GetForeground()); got != "#cdd6f4" {
+		t.Fatalf("inline code token foreground = %q", got)
+	}
+	if got := stringifyColor(tokens.MarkdownInlineCode.GetBackground()); got != "#181825" {
 		t.Fatalf("inline code token background = %q", got)
 	}
 	if got := stringifyColor(tokens.MarkdownTableEdge.GetForeground()); got != "#4c5868" {
@@ -202,6 +218,20 @@ func TestTokensIncludeToolAndMarkdownSemantics(t *testing.T) {
 	}
 	if got := stringifyColor(tokens.TextSecondary.GetForeground()); got != "#a4adbb" {
 		t.Fatalf("secondary text token foreground = %q", got)
+	}
+}
+
+func TestInlineCodeBackgroundFallsBackToForegroundOnlyForLimitedColorProfiles(t *testing.T) {
+	for _, profile := range []colorprofile.Profile{colorprofile.ANSI256, colorprofile.ANSI} {
+		t.Run(fmt.Sprint(profile), func(t *testing.T) {
+			theme := ResolveThemeWithState(true, false, profile)
+			if got := theme.MarkdownInlineCodeStyle().GetBackground(); colorIsPresent(got) {
+				t.Fatalf("inline code background = %v, want nil for limited color profile", got)
+			}
+			if got := theme.MarkdownInlineCodeStyle().GetForeground(); !colorIsPresent(got) {
+				t.Fatal("inline code should keep a foreground color for limited color profile")
+			}
+		})
 	}
 }
 
@@ -273,7 +303,7 @@ func TestResolveThemeWithBackgroundColorBlendsAdaptiveSurfaces(t *testing.T) {
 	if got := stringifyColor(light.UserBg); got != "#f6f6f6" {
 		t.Fatalf("light user bg = %q", got)
 	}
-	if got := stringifyColor(light.CodeBg); got != "#f1f1f1" {
+	if got := stringifyColor(light.CodeBg); got != "#eff1f5" {
 		t.Fatalf("light code bg = %q", got)
 	}
 }
@@ -303,4 +333,14 @@ func stringifyColor(value interface{}) string {
 		return fmt.Sprintf("#%02x%02x%02x", c.R, c.G, c.B)
 	}
 	return fmt.Sprint(value)
+}
+
+func colorIsPresent(value color.Color) bool {
+	if value == nil {
+		return false
+	}
+	if _, ok := value.(lipgloss.NoColor); ok {
+		return false
+	}
+	return true
 }

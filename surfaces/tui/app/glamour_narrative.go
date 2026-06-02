@@ -272,8 +272,8 @@ func narrativeStyleConfig(theme tuikit.Theme, roleStyle tuikit.LineStyle) gansi.
 	// ---------------------------------------------------------------
 	// Inline code — background highlight with padding (crush style)
 	// ---------------------------------------------------------------
-	style.Code.Prefix = " "
-	style.Code.Suffix = " "
+	style.Code.Prefix = ""
+	style.Code.Suffix = ""
 	style.Code.Color = styleForegroundToAnsiPtr(theme.MarkdownInlineCodeStyle())
 	style.Code.BackgroundColor = styleBackgroundToAnsiPtr(theme.MarkdownInlineCodeStyle())
 
@@ -286,19 +286,8 @@ func narrativeStyleConfig(theme tuikit.Theme, roleStyle tuikit.LineStyle) gansi.
 	style.CodeBlock.Indent = &cbIndent
 	style.CodeBlock.Color = styleForegroundToAnsiPtr(theme.MarkdownCodeBlockStyle())
 	style.CodeBlock.BackgroundColor = styleBackgroundToAnsiPtr(theme.MarkdownCodeBlockStyle())
-	if style.CodeBlock.Chroma == nil {
-		style.CodeBlock.Chroma = &gansi.Chroma{}
-	}
-	style.CodeBlock.Chroma.Text.Color = styleForegroundToAnsiPtr(theme.MarkdownCodeBlockStyle())
-	style.CodeBlock.Chroma.Background.BackgroundColor = styleBackgroundToAnsiPtr(theme.MarkdownCodeBlockStyle())
-	style.CodeBlock.Chroma.Background.Color = styleForegroundToAnsiPtr(theme.MarkdownCodeBlockStyle())
-	style.CodeBlock.Chroma.Comment.Color = styleForegroundToAnsiPtr(theme.MutedTextStyle())
-	style.CodeBlock.Chroma.Keyword.Color = headingHex
-	style.CodeBlock.Chroma.KeywordType.Color = colorToAnsiPtr(theme.Success)
-	style.CodeBlock.Chroma.NameFunction.Color = colorToAnsiPtr(theme.Success)
-	style.CodeBlock.Chroma.LiteralString.Color = colorToAnsiPtr(theme.Warning)
-	style.CodeBlock.Chroma.LiteralNumber.Color = colorToAnsiPtr(theme.Warning)
-	style.CodeBlock.Chroma.Operator.Color = colorToAnsiPtr(theme.Error)
+	style.CodeBlock.Theme = catppuccinCodeBlockTheme(theme)
+	style.CodeBlock.Chroma = nil
 
 	// ---------------------------------------------------------------
 	// Blockquotes
@@ -362,126 +351,17 @@ func narrativeStyleConfig(theme tuikit.Theme, roleStyle tuikit.LineStyle) gansi.
 		style.Table.Color = reasoningHex
 		style.Code.Color = reasoningHex
 		style.CodeBlock.Color = reasoningHex
-		style.CodeBlock.Chroma.Text.Color = reasoningHex
-		style.CodeBlock.Chroma.Comment.Color = mutedHex
-		style.CodeBlock.Chroma.Keyword.Color = reasoningHex
-		style.CodeBlock.Chroma.KeywordType.Color = reasoningHex
-		style.CodeBlock.Chroma.NameFunction.Color = reasoningHex
-		style.CodeBlock.Chroma.LiteralString.Color = reasoningHex
-		style.CodeBlock.Chroma.LiteralNumber.Color = reasoningHex
-		style.CodeBlock.Chroma.Operator.Color = reasoningHex
 		style.HorizontalRule.Color = mutedHex
 	}
-
-	normalizeNarrativeChromaStyle(style.CodeBlock.Chroma, theme, roleStyle)
 
 	return style
 }
 
-func normalizeNarrativeChromaStyle(chroma *gansi.Chroma, theme tuikit.Theme, roleStyle tuikit.LineStyle) {
-	if chroma == nil {
-		return
+func catppuccinCodeBlockTheme(theme tuikit.Theme) string {
+	if theme.NoColor {
+		return ""
 	}
-	codeFg := styleForegroundToAnsiPtr(theme.MarkdownCodeBlockStyle())
-	codeBg := styleBackgroundToAnsiPtr(theme.MarkdownCodeBlockStyle())
-	textFg := styleForegroundToAnsiPtr(theme.TextStyle())
-	mutedFg := styleForegroundToAnsiPtr(theme.MutedTextStyle())
-	headingFg := styleForegroundToAnsiPtr(theme.MarkdownHeadingStyle())
-	linkFg := styleForegroundToAnsiPtr(theme.MarkdownLinkStyle())
-	successFg := colorToAnsiPtr(theme.Success)
-	warningFg := colorToAnsiPtr(theme.Warning)
-	errorFg := colorToAnsiPtr(theme.Error)
-	diffAddFg := colorToAnsiPtr(theme.DiffAddFg)
-	diffRemoveFg := colorToAnsiPtr(theme.DiffRemoveFg)
-
-	if roleStyle == tuikit.LineStyleReasoning {
-		reasoningFg := colorToAnsiPtr(theme.ReasoningFg)
-		codeFg = firstAnsiPtr(reasoningFg, codeFg)
-		textFg = firstAnsiPtr(reasoningFg, textFg)
-		headingFg = firstAnsiPtr(reasoningFg, headingFg)
-		linkFg = firstAnsiPtr(reasoningFg, linkFg)
-		successFg = firstAnsiPtr(reasoningFg, successFg)
-		warningFg = firstAnsiPtr(reasoningFg, warningFg)
-		errorFg = firstAnsiPtr(reasoningFg, errorFg)
-		diffAddFg = firstAnsiPtr(reasoningFg, diffAddFg)
-		diffRemoveFg = firstAnsiPtr(reasoningFg, diffRemoveFg)
-	}
-
-	all := []*gansi.StylePrimitive{
-		&chroma.Text,
-		&chroma.Error,
-		&chroma.Comment,
-		&chroma.CommentPreproc,
-		&chroma.Keyword,
-		&chroma.KeywordReserved,
-		&chroma.KeywordNamespace,
-		&chroma.KeywordType,
-		&chroma.Operator,
-		&chroma.Punctuation,
-		&chroma.Name,
-		&chroma.NameBuiltin,
-		&chroma.NameTag,
-		&chroma.NameAttribute,
-		&chroma.NameClass,
-		&chroma.NameConstant,
-		&chroma.NameDecorator,
-		&chroma.NameException,
-		&chroma.NameFunction,
-		&chroma.NameOther,
-		&chroma.Literal,
-		&chroma.LiteralNumber,
-		&chroma.LiteralDate,
-		&chroma.LiteralString,
-		&chroma.LiteralStringEscape,
-		&chroma.GenericDeleted,
-		&chroma.GenericEmph,
-		&chroma.GenericInserted,
-		&chroma.GenericStrong,
-		&chroma.GenericSubheading,
-		&chroma.Background,
-	}
-	for _, primitive := range all {
-		primitive.BackgroundColor = codeBg
-	}
-
-	chroma.Text.Color = firstAnsiPtr(codeFg, textFg)
-	chroma.Background.Color = firstAnsiPtr(codeFg, textFg)
-	chroma.Comment.Color = firstAnsiPtr(mutedFg, codeFg, textFg)
-	chroma.CommentPreproc.Color = firstAnsiPtr(mutedFg, codeFg, textFg)
-	chroma.Keyword.Color = firstAnsiPtr(headingFg, codeFg, textFg)
-	chroma.KeywordReserved.Color = firstAnsiPtr(headingFg, codeFg, textFg)
-	chroma.KeywordNamespace.Color = firstAnsiPtr(headingFg, codeFg, textFg)
-	chroma.KeywordType.Color = firstAnsiPtr(successFg, headingFg, codeFg, textFg)
-	chroma.Operator.Color = firstAnsiPtr(errorFg, headingFg, codeFg, textFg)
-	chroma.Punctuation.Color = firstAnsiPtr(mutedFg, codeFg, textFg)
-	chroma.Name.Color = firstAnsiPtr(codeFg, textFg)
-	chroma.NameBuiltin.Color = firstAnsiPtr(linkFg, codeFg, textFg)
-	chroma.NameTag.Color = firstAnsiPtr(headingFg, codeFg, textFg)
-	chroma.NameAttribute.Color = firstAnsiPtr(linkFg, codeFg, textFg)
-	chroma.NameClass.Color = firstAnsiPtr(successFg, codeFg, textFg)
-	chroma.NameConstant.Color = firstAnsiPtr(warningFg, codeFg, textFg)
-	chroma.NameDecorator.Color = firstAnsiPtr(linkFg, codeFg, textFg)
-	chroma.NameException.Color = firstAnsiPtr(errorFg, codeFg, textFg)
-	chroma.NameFunction.Color = firstAnsiPtr(successFg, codeFg, textFg)
-	chroma.NameOther.Color = firstAnsiPtr(codeFg, textFg)
-	chroma.Literal.Color = firstAnsiPtr(warningFg, codeFg, textFg)
-	chroma.LiteralNumber.Color = firstAnsiPtr(warningFg, codeFg, textFg)
-	chroma.LiteralDate.Color = firstAnsiPtr(warningFg, codeFg, textFg)
-	chroma.LiteralString.Color = firstAnsiPtr(warningFg, codeFg, textFg)
-	chroma.LiteralStringEscape.Color = firstAnsiPtr(headingFg, warningFg, codeFg, textFg)
-	chroma.Error.Color = firstAnsiPtr(errorFg, codeFg, textFg)
-	chroma.GenericDeleted.Color = firstAnsiPtr(diffRemoveFg, errorFg, codeFg, textFg)
-	chroma.GenericInserted.Color = firstAnsiPtr(diffAddFg, successFg, codeFg, textFg)
-	chroma.GenericSubheading.Color = firstAnsiPtr(headingFg, codeFg, textFg)
-}
-
-func firstAnsiPtr(values ...*string) *string {
-	for _, value := range values {
-		if value != nil {
-			return value
-		}
-	}
-	return nil
+	return tuikit.SyntaxPaletteForTheme(theme).ChromaTheme
 }
 
 // colorToAnsiPtr converts an image/color.Color to a hex "#rrggbb" pointer

@@ -1,9 +1,11 @@
 package tuiapp
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/OnslaughtSnail/caelis/surfaces/tui/tuikit"
 	"github.com/charmbracelet/colorprofile"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -53,6 +55,50 @@ func TestRanHeaderShellCommandUsesDistinctTokenStyles(t *testing.T) {
 	}
 	if operatorStyle == redirectStyle {
 		t.Fatalf("shell operators and redirects should not share the same style: %q", operatorStyle)
+	}
+}
+
+func TestShellCommandStylesUseCatppuccinSyntaxPalette(t *testing.T) {
+	tests := []struct {
+		name    string
+		isDark  bool
+		command string
+		want    string
+	}{
+		{name: "dark command", isDark: true, command: "git", want: "38;2;137;180;250"},
+		{name: "dark keyword", isDark: true, command: "if", want: "38;2;203;166;247"},
+		{name: "dark flag", isDark: true, command: "-la", want: "38;2;250;179;135"},
+		{name: "dark path", isDark: true, command: "/tmp/demo", want: "38;2;137;180;250"},
+		{name: "dark quoted", isDark: true, command: `"hello"`, want: "38;2;166;227;161"},
+		{name: "light command", isDark: false, command: "git", want: "38;2;30;102;245"},
+		{name: "light keyword", isDark: false, command: "if", want: "38;2;136;57;239"},
+		{name: "light flag", isDark: false, command: "-la", want: "38;2;254;100;11"},
+		{name: "light path", isDark: false, command: "/tmp/demo", want: "38;2;30;102;245"},
+		{name: "light quoted", isDark: false, command: `"hello"`, want: "38;2;64;160;43"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			theme := tuikit.ResolveThemeWithState(tt.isDark, false, colorprofile.TrueColor)
+			ctx := BlockRenderContext{Width: 80, TermWidth: 80, Theme: theme}
+			var class shellTokenClass
+			switch {
+			case strings.Contains(tt.name, "keyword"):
+				class = shellTokenKeyword
+			case strings.Contains(tt.name, "flag"):
+				class = shellTokenFlag
+			case strings.Contains(tt.name, "path"):
+				class = shellTokenPath
+			case strings.Contains(tt.name, "quoted"):
+				class = shellTokenQuoted
+			default:
+				class = shellTokenCommand
+			}
+			rendered := shellTokenStyle(ctx, class).Render(tt.command)
+			if !strings.Contains(rendered, tt.want) {
+				t.Fatalf("rendered %q missing Catppuccin SGR %q", fmt.Sprintf("%q", rendered), tt.want)
+			}
+		})
 	}
 }
 
