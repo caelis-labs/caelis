@@ -12,7 +12,7 @@ GOTMPDIR ?= $(CACHE_ROOT)/gotmp
 GOLANGCI_LINT_CACHE ?= $(CACHE_ROOT)/golangci-lint
 XDG_CACHE_HOME ?= $(CACHE_ROOT)/xdg
 export GOMODCACHE GOCACHE GOTMPDIR GOLANGCI_LINT_CACHE XDG_CACHE_HOME
-.PHONY: arch-lint bench-regression bench-threshold build build-cli cache-dirs eval-smoke fmt fmt-check install lint quality regression size-report test tui-golden tui-interaction tui-bench vet release-dry-run
+.PHONY: arch-lint bench-regression bench-threshold build build-cli cache-dirs command-regression eval-smoke fmt fmt-check install lint quality regression size-report test tui-golden tui-interaction tui-bench vet release-dry-run
 
 cache-dirs:
 	mkdir -p "$(GOMODCACHE)" "$(GOCACHE)" "$(GOTMPDIR)" "$(GOLANGCI_LINT_CACHE)" "$(XDG_CACHE_HOME)"
@@ -47,7 +47,7 @@ size-report:
 
 quality: fmt-check lint vet test build
 
-regression: eval-smoke tui-golden tui-interaction
+regression: eval-smoke tui-golden tui-interaction command-regression
 
 eval-smoke: cache-dirs
 	go test ./eval -run 'TestRegression'
@@ -57,6 +57,9 @@ tui-golden: cache-dirs
 
 tui-interaction: cache-dirs
 	go test ./surfaces/tui/app -run 'TestRegression(Resize|NoWelcome|TerminalOutput|FollowTail|Slash|Approval)'
+
+command-regression: cache-dirs
+	go test ./surfaces/tui/gatewaydriver -run 'TestRegression(Command|Slash)'
 
 tui-bench: cache-dirs
 	CAELIS_BENCH_REGRESSION=1 go test ./surfaces/tui/app -run 'TestRegressionBenchThresholds' -v
