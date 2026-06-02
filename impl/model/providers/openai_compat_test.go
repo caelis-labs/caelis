@@ -117,7 +117,7 @@ func TestOpenAICompatStreamFirstEventTimeoutRetriesBeforeEmission(t *testing.T) 
 			gotErr = err
 			continue
 		}
-		if event != nil && event.Response != nil && event.Response.TurnComplete {
+		if event != nil && event.Response != nil && event.TurnComplete {
 			finalText = event.Response.Message.TextContent()
 		}
 	}

@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/internal/evalharness"
 	filestore "github.com/OnslaughtSnail/caelis/impl/session/file"
+	"github.com/OnslaughtSnail/caelis/internal/evalharness"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/tool"
