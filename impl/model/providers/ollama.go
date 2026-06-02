@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"iter"
@@ -25,6 +26,7 @@ type ollamaLLM struct {
 	baseURL             string
 	client              *http.Client
 	requestTimeout      time.Duration
+	firstEventTimeout   time.Duration
 	maxOutputTok        int
 	contextWindowTokens int
 }
@@ -81,6 +83,7 @@ func newOllama(cfg Config, _ string) model.LLM {
 		baseURL:             baseURL,
 		client:              coalesceHTTPClient(cfg.HTTPClient),
 		requestTimeout:      cfg.Timeout,
+		firstEventTimeout:   normalizeStreamFirstEventTimeout(cfg.StreamFirstEventTimeout),
 		maxOutputTok:        cfg.MaxOutputTok,
 		contextWindowTokens: cfg.ContextWindowTokens,
 	}
@@ -176,23 +179,15 @@ func (l *ollamaLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 			return
 		}
 
-		dec := json.NewDecoder(resp.Body)
 		acc := ollamaAccumulator{
 			toolCalls: []model.ToolCall{},
 		}
 		var (
 			usage   model.Usage
 			modelID = l.name
+			stopped bool
 		)
-		for {
-			var chunk ollamaChatResponse
-			if err := dec.Decode(&chunk); err != nil {
-				if err == io.EOF {
-					break
-				}
-				yield(nil, err)
-				return
-			}
+		if err := readOllamaStreamWithFirstEventTimeout(resp.Body, l.firstEventTimeout, func(chunk ollamaChatResponse) error {
 			if strings.TrimSpace(chunk.Model) != "" {
 				modelID = chunk.Model
 			}
@@ -205,7 +200,8 @@ func (l *ollamaLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 					Type:      model.StreamEventPartDelta,
 					PartDelta: &model.PartDelta{Kind: model.PartKindReasoning, TextDelta: text},
 				}, nil) {
-					return
+					stopped = true
+					return errStopSSE
 				}
 			}
 			if text := chunk.Message.Content; text != "" {
@@ -214,17 +210,24 @@ func (l *ollamaLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 					Type:      model.StreamEventPartDelta,
 					PartDelta: &model.PartDelta{Kind: model.PartKindText, TextDelta: text},
 				}, nil) {
-					return
+					stopped = true
+					return errStopSSE
 				}
 			}
 			if len(chunk.Message.ToolCalls) > 0 {
 				calls, err := ollamaToolCallsToKernel(chunk.Message.ToolCalls)
 				if err != nil {
-					yield(nil, err)
-					return
+					return err
 				}
 				acc.toolCalls = append(acc.toolCalls, calls...)
 			}
+			return nil
+		}); err != nil {
+			if stopped && errors.Is(err, errStopSSE) {
+				return
+			}
+			yield(nil, err)
+			return
 		}
 
 		yield(&model.StreamEvent{
@@ -246,6 +249,65 @@ type ollamaAccumulator struct {
 	text      strings.Builder
 	reasoning strings.Builder
 	toolCalls []model.ToolCall
+}
+
+func readOllamaStreamWithFirstEventTimeout(reader io.Reader, timeout time.Duration, onChunk func(ollamaChatResponse) error) error {
+	if timeout <= 0 {
+		return readOllamaStream(reader, onChunk)
+	}
+	errCh := make(chan error, 1)
+	firstEventCh := make(chan struct{}, 1)
+	seenFirstEvent := false
+	go func() {
+		errCh <- readOllamaStream(reader, func(chunk ollamaChatResponse) error {
+			if !seenFirstEvent {
+				seenFirstEvent = true
+				select {
+				case firstEventCh <- struct{}{}:
+				default:
+				}
+			}
+			return onChunk(chunk)
+		})
+	}()
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	for {
+		select {
+		case err := <-errCh:
+			return err
+		case <-firstEventCh:
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			return <-errCh
+		case <-timer.C:
+			if closer, ok := reader.(interface{ Close() error }); ok {
+				_ = closer.Close()
+			}
+			return newStreamFirstEventTimeoutError(timeout)
+		}
+	}
+}
+
+func readOllamaStream(reader io.Reader, onChunk func(ollamaChatResponse) error) error {
+	dec := json.NewDecoder(reader)
+	for {
+		var chunk ollamaChatResponse
+		if err := dec.Decode(&chunk); err != nil {
+			if err == io.EOF {
+				return nil
+			}
+			return err
+		}
+		if err := onChunk(chunk); err != nil {
+			return err
+		}
+	}
 }
 
 func (l *ollamaLLM) fromKernelMessages(instructions []model.Part, messages []model.Message) []ollamaChatMessage {

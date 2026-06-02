@@ -5,6 +5,8 @@ import (
 	"io"
 	"testing"
 	"time"
+
+	"github.com/OnslaughtSnail/caelis/ports/model"
 )
 
 func TestReadSSEWithFirstEventTimeout(t *testing.T) {
@@ -80,5 +82,32 @@ func TestReadSSEWithFirstEventTimeout_AllowsSilenceAfterFirstEvent(t *testing.T)
 		}
 	default:
 		t.Fatal("second event was not observed")
+	}
+}
+
+func TestStreamFirstEventTimeoutErrorIsRetryable(t *testing.T) {
+	t.Parallel()
+
+	err := newStreamFirstEventTimeoutError(5 * time.Minute)
+	if !errors.Is(err, errStreamFirstEventTimeout) {
+		t.Fatalf("errors.Is(%v, errStreamFirstEventTimeout) = false", err)
+	}
+	var retryable model.RetryableError
+	if !errors.As(err, &retryable) {
+		t.Fatalf("error %T does not implement model.RetryableError", err)
+	}
+	if !retryable.Retryable() {
+		t.Fatal("Retryable() = false, want true")
+	}
+}
+
+func TestNormalizeStreamFirstEventTimeoutDefault(t *testing.T) {
+	t.Parallel()
+
+	if got := normalizeStreamFirstEventTimeout(0); got != 5*time.Minute {
+		t.Fatalf("normalizeStreamFirstEventTimeout(0) = %s, want 5m", got)
+	}
+	if got := normalizeStreamFirstEventTimeout(-1); got != 0 {
+		t.Fatalf("normalizeStreamFirstEventTimeout(-1) = %s, want disabled zero", got)
 	}
 }

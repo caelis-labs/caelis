@@ -22,6 +22,7 @@ type openRouterLLM struct {
 	headers             map[string]string
 	client              *http.Client
 	requestTimeout      time.Duration
+	firstEventTimeout   time.Duration
 	maxOutputTok        int
 	contextWindowTokens int
 	options             openAICompatOptions
@@ -123,6 +124,7 @@ func newOpenRouter(cfg Config, token string) model.LLM {
 		headers:             cloneHeaders(cfg.Headers),
 		client:              coalesceHTTPClient(cfg.HTTPClient),
 		requestTimeout:      cfg.Timeout,
+		firstEventTimeout:   normalizeStreamFirstEventTimeout(cfg.StreamFirstEventTimeout),
 		maxOutputTok:        cfg.MaxOutputTok,
 		contextWindowTokens: cfg.ContextWindowTokens,
 		options:             defaultOpenAICompatOptions(),
@@ -253,7 +255,7 @@ func (l *openRouterLLM) Generate(ctx context.Context, req *model.Request) iter.S
 		var usage model.Usage
 		finishReason := model.FinishReasonUnknown
 		stopped := false
-		if err := readSSEWithFirstEventTimeout(resp.Body, defaultStreamFirstEventTimeout, func(data []byte) error {
+		if err := readSSEWithFirstEventTimeout(resp.Body, l.firstEventTimeout, func(data []byte) error {
 			var chunk openRouterStreamChunk
 			if err := json.Unmarshal(data, &chunk); err != nil {
 				return err

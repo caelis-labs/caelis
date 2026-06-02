@@ -196,6 +196,7 @@ func (l *modelLookup) ResolveModel(ctx context.Context, alias string, contextWin
 		BaseURL:                   cfg.BaseURL,
 		HTTPClient:                cfg.HTTPClient,
 		Timeout:                   cfg.Timeout,
+		StreamFirstEventTimeout:   cfg.StreamFirstEventTimeout,
 		MaxOutputTok:              cfg.MaxOutputTok,
 		ContextWindowTokens:       effectiveContextWindow,
 		ReasoningLevels:           append([]string(nil), cfg.ReasoningLevels...),

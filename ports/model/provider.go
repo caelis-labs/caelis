@@ -1,6 +1,9 @@
 package model
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // APIType identifies the model-provider protocol dialect for one configured
 // endpoint.
@@ -35,11 +38,12 @@ const (
 type Client = LLM
 
 type ProviderConfig struct {
-	ID       string
-	Alias    string
-	Model    string
-	BaseURL  string
-	Metadata map[string]any
+	ID                      string
+	Alias                   string
+	Model                   string
+	BaseURL                 string
+	StreamFirstEventTimeout time.Duration
+	Metadata                map[string]any
 }
 
 type ModelRef struct {

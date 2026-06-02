@@ -3,7 +3,9 @@ package providers
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/OnslaughtSnail/caelis/ports/model"
 )
@@ -37,10 +39,11 @@ func (p Provider) NewClient(ctx context.Context, cfg model.ProviderConfig) (mode
 		factory = NewFactory()
 	}
 	providerCfg := Config{
-		Alias:   alias,
-		API:     p.apiFor(cfg),
-		Model:   cfg.Model,
-		BaseURL: cfg.BaseURL,
+		Alias:                   alias,
+		API:                     p.apiFor(cfg),
+		Model:                   cfg.Model,
+		BaseURL:                 cfg.BaseURL,
+		StreamFirstEventTimeout: cfg.StreamFirstEventTimeout,
 	}
 	if providerCfg.Model == "" {
 		providerCfg.Model = alias
@@ -53,6 +56,12 @@ func (p Provider) NewClient(ctx context.Context, cfg model.ProviderConfig) (mode
 	}
 	if authType, ok := metadataString(cfg.Metadata, "auth_type"); ok {
 		providerCfg.Auth.Type = AuthType(authType)
+	}
+	if timeout, ok := metadataDuration(cfg.Metadata, "stream_first_event_timeout"); ok {
+		providerCfg.StreamFirstEventTimeout = timeout
+	}
+	if timeout, ok := metadataDurationSeconds(cfg.Metadata, "stream_first_event_timeout_seconds"); ok {
+		providerCfg.StreamFirstEventTimeout = timeout
 	}
 	if err := factory.Register(providerCfg); err != nil {
 		return nil, err
@@ -189,6 +198,59 @@ func metadataString(values map[string]any, key string) (string, bool) {
 	text, ok := value.(string)
 	text = strings.TrimSpace(text)
 	return text, ok && text != ""
+}
+
+func metadataDuration(values map[string]any, key string) (time.Duration, bool) {
+	if len(values) == 0 {
+		return 0, false
+	}
+	value, ok := values[key]
+	if !ok {
+		return 0, false
+	}
+	switch typed := value.(type) {
+	case time.Duration:
+		return typed, typed > 0
+	case string:
+		duration, err := time.ParseDuration(strings.TrimSpace(typed))
+		return duration, err == nil && duration > 0
+	case int:
+		return time.Duration(typed), typed > 0
+	case int64:
+		return time.Duration(typed), typed > 0
+	case float64:
+		return time.Duration(typed), typed > 0
+	default:
+		return 0, false
+	}
+}
+
+func metadataDurationSeconds(values map[string]any, key string) (time.Duration, bool) {
+	if len(values) == 0 {
+		return 0, false
+	}
+	value, ok := values[key]
+	if !ok {
+		return 0, false
+	}
+	switch typed := value.(type) {
+	case time.Duration:
+		return typed, typed > 0
+	case string:
+		seconds, err := strconv.Atoi(strings.TrimSpace(typed))
+		if err != nil || seconds <= 0 {
+			return 0, false
+		}
+		return time.Duration(seconds) * time.Second, true
+	case int:
+		return time.Duration(typed) * time.Second, typed > 0
+	case int64:
+		return time.Duration(typed) * time.Second, typed > 0
+	case float64:
+		return time.Duration(typed * float64(time.Second)), typed > 0
+	default:
+		return 0, false
+	}
 }
 
 func firstNonEmptyPortValue(values ...string) string {

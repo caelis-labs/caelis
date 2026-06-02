@@ -69,6 +69,7 @@ type codeFreeLLM struct {
 	baseURL             string
 	client              *http.Client
 	requestTimeout      time.Duration
+	firstEventTimeout   time.Duration
 	maxOutputTok        int
 	contextWindowTokens int
 	options             openAICompatOptions
@@ -86,6 +87,7 @@ func newCodeFree(cfg Config) model.LLM {
 		baseURL:             strings.TrimSpace(cfg.BaseURL),
 		client:              coalesceCodeFreeChatHTTPClient(cfg.HTTPClient),
 		requestTimeout:      cfg.Timeout,
+		firstEventTimeout:   normalizeStreamFirstEventTimeout(cfg.StreamFirstEventTimeout),
 		maxOutputTok:        cfg.MaxOutputTok,
 		contextWindowTokens: cfg.ContextWindowTokens,
 		options:             openAICompatOptionsForProfile(codeFreeCompatProfile),
@@ -213,7 +215,7 @@ func (l *codeFreeLLM) generateOnce(
 	finishReason := model.FinishReasonUnknown
 	emitted := false
 	stopped := false
-	if err := readSSEWithFirstEventTimeout(bodyReader, defaultStreamFirstEventTimeout, func(data []byte) error {
+	if err := readSSEWithFirstEventTimeout(bodyReader, l.firstEventTimeout, func(data []byte) error {
 		if err := codeFreeResponseError(data, resp.Header.Get("Content-Type")); err != nil {
 			return err
 		}

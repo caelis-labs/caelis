@@ -203,7 +203,7 @@ func (p gatewayACPSurface) PromptCapabilities(context.Context) (acp.PromptCapabi
 func (p gatewayACPSurface) AvailableCommands(context.Context, string) ([]acp.AvailableCommand, error) {
 	return []acp.AvailableCommand{
 		{Name: "agent", Description: "Manage ACP agents", Input: commandInput("use|add|install|list|remove")},
-		{Name: "connect", Description: "Configure a model provider", Input: commandInput("provider model [base-url] [timeout] [token] [context] [max-output] [reasoning-levels]")},
+		{Name: "connect", Description: "Configure a model provider", Input: commandInput("provider model [base-url] [timeout] [token] [context] [max-output] [reasoning-levels] [first-event-timeout]")},
 		{Name: "model", Description: "Switch or inspect models", Input: commandInput("use <alias> [reasoning]")},
 		{Name: "approval", Description: "Switch approval mode", Input: commandInput("auto-review|manual")},
 		{Name: "status", Description: "Show current runtime status", Input: nil},

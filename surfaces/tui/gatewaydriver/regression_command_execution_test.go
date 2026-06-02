@@ -307,7 +307,7 @@ func TestRegressionCommandExecConnectNewProvider(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Logf("connected model not in candidates (may use different alias scheme): %v", candidates)
+		t.Fatalf("connected model not in candidates: %v", candidates)
 	}
 }
 
@@ -338,7 +338,7 @@ func TestRegressionCommandExecConnectInvalidArgs(t *testing.T) {
 		Model:    "",
 	})
 	if err == nil {
-		t.Log("Connect(empty) succeeded; provider may accept empty args as wizard trigger")
+		t.Fatal("Connect(empty) should return error")
 	}
 }
 
@@ -530,23 +530,31 @@ func TestRegressionCommandExecModelAliasLifecycle(t *testing.T) {
 
 func TestRegressionCommandExecConnectFullConfig(t *testing.T) {
 	t.Parallel()
-	driver, _ := newCommandExecDriver(t, defaultOllamaModelCfg())
+	driver, stack := newCommandExecDriver(t, defaultOllamaModelCfg())
 	ctx := context.Background()
 
 	status, err := driver.Connect(ctx, ConnectConfig{
-		Provider:            "ollama",
-		Model:               "custom-model",
-		TimeoutSeconds:      120,
-		ContextWindowTokens: 128000,
-		MaxOutputTokens:     4096,
-		ReasoningEffort:     "medium",
-		ReasoningLevels:     []string{"low", "medium", "high"},
+		Provider:                       "ollama",
+		Model:                          "custom-model",
+		TimeoutSeconds:                 120,
+		StreamFirstEventTimeoutSeconds: 300,
+		ContextWindowTokens:            128000,
+		MaxOutputTokens:                4096,
+		ReasoningEffort:                "medium",
+		ReasoningLevels:                []string{"low", "medium", "high"},
 	})
 	if err != nil {
 		t.Fatalf("Connect(full config) error = %v", err)
 	}
 	if status.Model == "" {
 		t.Fatal("Connect(full config) status.Model empty")
+	}
+	cfg, ok := stack.ModelConfig("ollama/custom-model")
+	if !ok {
+		t.Fatal("ModelConfig(ollama/custom-model) not found")
+	}
+	if got := cfg.StreamFirstEventTimeout.Seconds(); got != 300 {
+		t.Fatalf("StreamFirstEventTimeout = %.0fs, want 300s", got)
 	}
 }
 
@@ -630,7 +638,7 @@ func TestRegressionCommandExecModelReasoningCompletion(t *testing.T) {
 		Sandbox:        gatewayapp.SandboxConfig{RequestedType: "host"},
 		Model: gatewayapp.ModelConfig{
 			Provider:        "ollama",
-		API:             providers.APIOllama,
+			API:             providers.APIOllama,
 			Model:           "llama3",
 			ReasoningLevels: []string{"low", "medium", "high"},
 		},

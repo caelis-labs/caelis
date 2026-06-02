@@ -155,18 +155,19 @@ type AgentAddOptions struct {
 }
 
 type ConnectConfig struct {
-	Provider            string
-	EndpointID          string
-	Model               string
-	BaseURL             string
-	TimeoutSeconds      int
-	APIKey              string
-	TokenEnv            string
-	AuthType            string
-	ContextWindowTokens int
-	MaxOutputTokens     int
-	ReasoningEffort     string
-	ReasoningLevels     []string
+	Provider                       string
+	EndpointID                     string
+	Model                          string
+	BaseURL                        string
+	TimeoutSeconds                 int
+	StreamFirstEventTimeoutSeconds int
+	APIKey                         string
+	TokenEnv                       string
+	AuthType                       string
+	ContextWindowTokens            int
+	MaxOutputTokens                int
+	ReasoningEffort                string
+	ReasoningLevels                []string
 }
 
 type Turn interface {

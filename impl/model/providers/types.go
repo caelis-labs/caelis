@@ -66,6 +66,7 @@ type Config struct {
 	Headers                   map[string]string
 	HTTPClient                *http.Client
 	Timeout                   time.Duration
+	StreamFirstEventTimeout   time.Duration
 	MaxOutputTok              int
 	ContextWindowTokens       int
 	ReasoningLevels           []string

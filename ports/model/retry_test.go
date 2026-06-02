@@ -179,6 +179,15 @@ func TestWithRetryReturnsNonRetryableErrorUnwrapped(t *testing.T) {
 	}
 }
 
+func TestIsRetryableLLMErrorTreatsStreamFirstEventTimeoutAsTransient(t *testing.T) {
+	t.Parallel()
+
+	err := errors.New("providers: stream first event timeout after 5m0s")
+	if !IsRetryableLLMError(err) {
+		t.Fatalf("IsRetryableLLMError(%q) = false, want true", err)
+	}
+}
+
 func TestIsBackpressureLLMErrorTreatsProviderOverloadAsBackpressure(t *testing.T) {
 	t.Parallel()
 

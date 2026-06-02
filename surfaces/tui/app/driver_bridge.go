@@ -907,6 +907,11 @@ func parseConnectArgs(args string) tuidriver.ConnectConfig {
 	if len(parts) >= 8 {
 		cfg.ReasoningLevels = parseReasoningLevels(parts[7])
 	}
+	if len(parts) >= 9 {
+		if timeout, err := strconv.Atoi(dashAsEmpty(parts[8])); err == nil {
+			cfg.StreamFirstEventTimeoutSeconds = timeout
+		}
+	}
 	if len(parts) == 4 && cfg.TimeoutSeconds == 0 && cfg.APIKey == "" && cfg.TokenEnv == "" {
 		cfg.TokenEnv = dashAsEmpty(parts[3])
 	}

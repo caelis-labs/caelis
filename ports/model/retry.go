@@ -336,6 +336,7 @@ func isLikelyNetworkError(err error) bool {
 		"i/o timeout",
 		"tls handshake timeout",
 		"timeout awaiting response headers",
+		"stream first event timeout",
 		"temporary failure",
 	} {
 		if strings.Contains(text, phrase) {

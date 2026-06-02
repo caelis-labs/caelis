@@ -47,7 +47,7 @@ size-report:
 
 quality: fmt-check lint vet test build
 
-regression: eval-smoke tui-golden tui-interaction command-regression
+regression: eval-smoke tui-golden tui-interaction command-regression command-execution-regression
 
 eval-smoke: cache-dirs
 	go test ./eval -run 'TestRegression'
@@ -59,7 +59,7 @@ tui-interaction: cache-dirs
 	go test ./surfaces/tui/app -run 'TestRegression(Resize|NoWelcome|TerminalOutput|FollowTail|Slash|Approval)'
 
 command-regression: cache-dirs
-	go test ./surfaces/tui/gatewaydriver -run 'TestRegression(Command|Slash)'
+	go test ./surfaces/tui/gatewaydriver -run 'TestRegression(Command(Status|Workspace|List|Agent|Parse|Connect|NewDriver)|Slash)'
 
 command-execution-regression: cache-dirs
 	go test ./surfaces/tui/gatewaydriver -run 'TestRegressionCommandExec'

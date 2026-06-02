@@ -24,31 +24,33 @@ type Config struct {
 	Token      string            `json:"token,omitempty"`
 	TokenEnv   string            `json:"token_env,omitempty"`
 
-	PersistToken           bool               `json:"persist_token,omitempty"`
-	AuthType               providers.AuthType `json:"auth_type,omitempty"`
-	HeaderKey              string             `json:"header_key,omitempty"`
-	ContextWindowTokens    int                `json:"context_window_tokens,omitempty"`
-	ReasoningEffort        string             `json:"reasoning_effort,omitempty"`
-	DefaultReasoningEffort string             `json:"default_reasoning_effort,omitempty"`
-	ReasoningLevels        []string           `json:"reasoning_levels,omitempty"`
-	ReasoningMode          string             `json:"reasoning_mode,omitempty"`
-	MaxOutputTok           int                `json:"max_output_tokens,omitempty"`
-	Timeout                time.Duration      `json:"timeout,omitempty"`
+	PersistToken            bool               `json:"persist_token,omitempty"`
+	AuthType                providers.AuthType `json:"auth_type,omitempty"`
+	HeaderKey               string             `json:"header_key,omitempty"`
+	ContextWindowTokens     int                `json:"context_window_tokens,omitempty"`
+	ReasoningEffort         string             `json:"reasoning_effort,omitempty"`
+	DefaultReasoningEffort  string             `json:"default_reasoning_effort,omitempty"`
+	ReasoningLevels         []string           `json:"reasoning_levels,omitempty"`
+	ReasoningMode           string             `json:"reasoning_mode,omitempty"`
+	MaxOutputTok            int                `json:"max_output_tokens,omitempty"`
+	Timeout                 time.Duration      `json:"timeout,omitempty"`
+	StreamFirstEventTimeout time.Duration      `json:"stream_first_event_timeout,omitempty"`
 }
 
 type ProfileConfig struct {
-	ID           string             `json:"id,omitempty"`
-	Provider     string             `json:"provider,omitempty"`
-	EndpointID   string             `json:"endpoint_id,omitempty"`
-	API          providers.APIType  `json:"api,omitempty"`
-	BaseURL      string             `json:"base_url,omitempty"`
-	HTTPClient   *http.Client       `json:"-"`
-	Token        string             `json:"token,omitempty"`
-	TokenEnv     string             `json:"token_env,omitempty"`
-	PersistToken bool               `json:"persist_token,omitempty"`
-	AuthType     providers.AuthType `json:"auth_type,omitempty"`
-	HeaderKey    string             `json:"header_key,omitempty"`
-	Timeout      time.Duration      `json:"timeout,omitempty"`
+	ID                      string             `json:"id,omitempty"`
+	Provider                string             `json:"provider,omitempty"`
+	EndpointID              string             `json:"endpoint_id,omitempty"`
+	API                     providers.APIType  `json:"api,omitempty"`
+	BaseURL                 string             `json:"base_url,omitempty"`
+	HTTPClient              *http.Client       `json:"-"`
+	Token                   string             `json:"token,omitempty"`
+	TokenEnv                string             `json:"token_env,omitempty"`
+	PersistToken            bool               `json:"persist_token,omitempty"`
+	AuthType                providers.AuthType `json:"auth_type,omitempty"`
+	HeaderKey               string             `json:"header_key,omitempty"`
+	Timeout                 time.Duration      `json:"timeout,omitempty"`
+	StreamFirstEventTimeout time.Duration      `json:"stream_first_event_timeout,omitempty"`
 }
 
 type Choice struct {
@@ -128,18 +130,19 @@ func NormalizeProfileConfig(profile ProfileConfig) ProfileConfig {
 func ProfileFromConfig(cfg Config) ProfileConfig {
 	cfg = NormalizeConfig(cfg)
 	return NormalizeProfileConfig(ProfileConfig{
-		ID:           cfg.ProfileID,
-		Provider:     cfg.Provider,
-		EndpointID:   cfg.EndpointID,
-		API:          cfg.API,
-		BaseURL:      cfg.BaseURL,
-		HTTPClient:   cfg.HTTPClient,
-		Token:        cfg.Token,
-		TokenEnv:     cfg.TokenEnv,
-		PersistToken: cfg.PersistToken,
-		AuthType:     cfg.AuthType,
-		HeaderKey:    cfg.HeaderKey,
-		Timeout:      cfg.Timeout,
+		ID:                      cfg.ProfileID,
+		Provider:                cfg.Provider,
+		EndpointID:              cfg.EndpointID,
+		API:                     cfg.API,
+		BaseURL:                 cfg.BaseURL,
+		HTTPClient:              cfg.HTTPClient,
+		Token:                   cfg.Token,
+		TokenEnv:                cfg.TokenEnv,
+		PersistToken:            cfg.PersistToken,
+		AuthType:                cfg.AuthType,
+		HeaderKey:               cfg.HeaderKey,
+		Timeout:                 cfg.Timeout,
+		StreamFirstEventTimeout: cfg.StreamFirstEventTimeout,
 	})
 }
 
@@ -153,7 +156,8 @@ func ConfigCarriesProfileFields(cfg Config) bool {
 		cfg.HTTPClient != nil ||
 		cfg.API != "" ||
 		cfg.AuthType != "" ||
-		cfg.Timeout > 0
+		cfg.Timeout > 0 ||
+		cfg.StreamFirstEventTimeout > 0
 }
 
 func ConfigCarriesProfileAuth(cfg Config) bool {
@@ -180,6 +184,9 @@ func MergeConfigProfile(cfg Config, profile ProfileConfig) Config {
 	cfg.HeaderKey = firstNonEmpty(profile.HeaderKey, cfg.HeaderKey)
 	if profile.Timeout > 0 {
 		cfg.Timeout = profile.Timeout
+	}
+	if profile.StreamFirstEventTimeout > 0 {
+		cfg.StreamFirstEventTimeout = profile.StreamFirstEventTimeout
 	}
 	return NormalizeConfig(cfg)
 }
@@ -254,6 +261,7 @@ func SanitizePersistedConfig(cfg Config) Config {
 		cfg.AuthType = ""
 		cfg.HeaderKey = ""
 		cfg.Timeout = 0
+		cfg.StreamFirstEventTimeout = 0
 	}
 	if !cfg.PersistToken {
 		cfg.Token = ""

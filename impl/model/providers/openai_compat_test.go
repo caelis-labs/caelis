@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -54,6 +55,80 @@ func TestOpenAICompatStream_PropagatesSSEErrorsWithoutTurnComplete(t *testing.T)
 	}
 	if turnComplete {
 		t.Fatalf("did not expect turn_complete on stream error")
+	}
+}
+
+func TestOpenAICompatStreamFirstEventTimeoutRetriesBeforeEmission(t *testing.T) {
+	t.Parallel()
+
+	requests := 0
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requests++
+		if requests == 1 {
+			reader, writer := io.Pipe()
+			t.Cleanup(func() {
+				_ = writer.Close()
+			})
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+				Body:       reader,
+				Request:    req,
+			}, nil
+		}
+		body := strings.Join([]string{
+			`data: {"model":"test-model","choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}`,
+			``,
+			`data: [DONE]`,
+			``,
+		}, "\n")
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Request:    req,
+		}, nil
+	})}
+
+	llm := model.WithRetry(newOpenAICompat(Config{
+		Provider:                "openai-compatible",
+		Model:                   "test-model",
+		BaseURL:                 "http://provider.test",
+		HTTPClient:              client,
+		StreamFirstEventTimeout: 20 * time.Millisecond,
+	}, "token"), model.RetryConfig{
+		MaxRetries:          1,
+		BaseDelay:           time.Nanosecond,
+		MaxDelay:            time.Nanosecond,
+		RateLimitMaxRetries: 1,
+		RateLimitBaseDelay:  time.Nanosecond,
+		RateLimitMaxDelay:   time.Nanosecond,
+	})
+
+	var (
+		gotErr    error
+		finalText string
+	)
+	for event, err := range llm.Generate(context.Background(), &model.Request{
+		Messages: []model.Message{model.NewTextMessage(model.RoleUser, "hi")},
+		Stream:   true,
+	}) {
+		if err != nil {
+			gotErr = err
+			continue
+		}
+		if event != nil && event.Response != nil && event.Response.TurnComplete {
+			finalText = event.Response.Message.TextContent()
+		}
+	}
+	if gotErr != nil {
+		t.Fatalf("Generate() error = %v, want retry to recover", gotErr)
+	}
+	if requests != 2 {
+		t.Fatalf("requests = %d, want stalled request plus retry", requests)
+	}
+	if finalText != "ok" {
+		t.Fatalf("final text = %q, want ok", finalText)
 	}
 }
 

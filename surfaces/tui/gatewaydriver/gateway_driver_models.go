@@ -68,6 +68,7 @@ func (d *GatewayDriver) Connect(ctx context.Context, cfg ConnectConfig) (StatusS
 	if cfg.TimeoutSeconds <= 0 {
 		timeout = 60 * time.Second
 	}
+	firstEventTimeout := time.Duration(cfg.StreamFirstEventTimeoutSeconds) * time.Second
 	authType := defaultConnectAuthType(tpl.provider)
 	if strings.TrimSpace(cfg.AuthType) != "" {
 		authType = authTypeFromString(strings.TrimSpace(cfg.AuthType))
@@ -79,21 +80,22 @@ func (d *GatewayDriver) Connect(ctx context.Context, cfg ConnectConfig) (StatusS
 	reasoningLevels := normalizeReasoningLevels(cfg.ReasoningLevels)
 	defaultReasoningEffort := strings.TrimSpace(cfg.ReasoningEffort)
 	alias, err := d.stack.Connect(ModelConfig{
-		Provider:               strings.TrimSpace(cfg.Provider),
-		EndpointID:             strings.TrimSpace(cfg.EndpointID),
-		API:                    api,
-		Model:                  cfg.Model,
-		BaseURL:                baseURL,
-		Token:                  cfg.APIKey,
-		TokenEnv:               cfg.TokenEnv,
-		PersistToken:           persistToken,
-		AuthType:               authType,
-		ContextWindowTokens:    cfg.ContextWindowTokens,
-		DefaultReasoningEffort: defaultReasoningEffort,
-		ReasoningEffort:        defaultReasoningEffort,
-		ReasoningLevels:        reasoningLevels,
-		MaxOutputTok:           cfg.MaxOutputTokens,
-		Timeout:                timeout,
+		Provider:                strings.TrimSpace(cfg.Provider),
+		EndpointID:              strings.TrimSpace(cfg.EndpointID),
+		API:                     api,
+		Model:                   cfg.Model,
+		BaseURL:                 baseURL,
+		Token:                   cfg.APIKey,
+		TokenEnv:                cfg.TokenEnv,
+		PersistToken:            persistToken,
+		AuthType:                authType,
+		ContextWindowTokens:     cfg.ContextWindowTokens,
+		DefaultReasoningEffort:  defaultReasoningEffort,
+		ReasoningEffort:         defaultReasoningEffort,
+		ReasoningLevels:         reasoningLevels,
+		MaxOutputTok:            cfg.MaxOutputTokens,
+		Timeout:                 timeout,
+		StreamFirstEventTimeout: firstEventTimeout,
 	})
 	if err != nil {
 		return StatusSnapshot{}, err

@@ -33,27 +33,28 @@ type GatewayService interface {
 }
 
 type ModelConfig struct {
-	ID                     string
-	Alias                  string
-	Provider               string
-	ProfileID              string
-	EndpointID             string
-	API                    model.APIType
-	Model                  string
-	BaseURL                string
-	HTTPClient             *http.Client
-	Token                  string
-	TokenEnv               string
-	PersistToken           bool
-	AuthType               model.AuthType
-	HeaderKey              string
-	ContextWindowTokens    int
-	ReasoningEffort        string
-	DefaultReasoningEffort string
-	ReasoningLevels        []string
-	ReasoningMode          string
-	MaxOutputTok           int
-	Timeout                time.Duration
+	ID                      string
+	Alias                   string
+	Provider                string
+	ProfileID               string
+	EndpointID              string
+	API                     model.APIType
+	Model                   string
+	BaseURL                 string
+	HTTPClient              *http.Client
+	Token                   string
+	TokenEnv                string
+	PersistToken            bool
+	AuthType                model.AuthType
+	HeaderKey               string
+	ContextWindowTokens     int
+	ReasoningEffort         string
+	DefaultReasoningEffort  string
+	ReasoningLevels         []string
+	ReasoningMode           string
+	MaxOutputTok            int
+	Timeout                 time.Duration
+	StreamFirstEventTimeout time.Duration
 }
 
 type ModelCapabilityInfo struct {
