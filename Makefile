@@ -12,7 +12,7 @@ GOTMPDIR ?= $(CACHE_ROOT)/gotmp
 GOLANGCI_LINT_CACHE ?= $(CACHE_ROOT)/golangci-lint
 XDG_CACHE_HOME ?= $(CACHE_ROOT)/xdg
 export GOMODCACHE GOCACHE GOTMPDIR GOLANGCI_LINT_CACHE XDG_CACHE_HOME
-.PHONY: arch-lint build build-cli cache-dirs fmt fmt-check install lint quality size-report test vet release-dry-run
+.PHONY: arch-lint bench-regression build build-cli cache-dirs eval-smoke fmt fmt-check install lint quality regression size-report test tui-golden vet release-dry-run
 
 cache-dirs:
 	mkdir -p "$(GOMODCACHE)" "$(GOCACHE)" "$(GOTMPDIR)" "$(GOLANGCI_LINT_CACHE)" "$(XDG_CACHE_HOME)"
@@ -46,6 +46,17 @@ size-report:
 	bash scripts/size_report.sh
 
 quality: fmt-check lint vet test build
+
+regression: eval-smoke tui-golden
+
+eval-smoke: cache-dirs
+	go test ./eval -run 'TestRegression'
+
+tui-golden: cache-dirs
+	go test ./surfaces/tui/app -run 'TestRegression.*Golden'
+
+bench-regression: cache-dirs
+	go test ./surfaces/tui/app -run '^$$' -bench 'Benchmark(ViewportSyncLongTranscript|AssistantTailIncrementalSync|AssistantStablePrefixTailMarkdownStream|ToolOutputStream10kChunks|VisibleSelectionRenderLongTranscript)' -benchmem
 
 test: cache-dirs
 	go test ./...
