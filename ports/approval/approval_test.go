@@ -33,6 +33,7 @@ func TestPayloadFromRuntimeRequestUsesProtocolApprovalFirst(t *testing.T) {
 	payload := PayloadFromRuntimeRequest(req)
 	if payload == nil {
 		t.Fatal("PayloadFromRuntimeRequest() = nil, want payload")
+		return
 	}
 	if payload.ToolCallID != "call-from-protocol" || payload.ToolName != "RUN_COMMAND" {
 		t.Fatalf("payload tool = %q/%q, want protocol call RUN_COMMAND", payload.ToolCallID, payload.ToolName)
@@ -59,6 +60,7 @@ func TestPayloadFromRuntimeRequestFallsBackToCallInput(t *testing.T) {
 
 	if payload == nil {
 		t.Fatal("PayloadFromRuntimeRequest() = nil, want payload")
+		return
 	}
 	if payload.RawInput["command"] != "git status --short" {
 		t.Fatalf("payload raw input = %#v, want decoded call input", payload.RawInput)

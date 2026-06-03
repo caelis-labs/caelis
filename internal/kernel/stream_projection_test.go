@@ -409,6 +409,7 @@ func TestStreamFrameEventsProjectSubagentClosedFrameAsCleanFinalToolResult(t *te
 	payload := events[0].Event.ToolResult
 	if payload == nil {
 		t.Fatalf("event = %#v, want tool result", events[0].Event)
+		return
 	}
 	if payload.Status != ToolStatusCompleted || payload.Error {
 		t.Fatalf("status/error = %q/%v, want completed false", payload.Status, payload.Error)

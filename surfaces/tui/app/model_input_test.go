@@ -273,6 +273,7 @@ func TestComposerUsesBarCursorToAvoidCoveringEditedText(t *testing.T) {
 	cursor := model.regularInputCursor()
 	if cursor == nil {
 		t.Fatal("regular input cursor = nil")
+		return
 	}
 	if cursor.Shape != tea.CursorBar {
 		t.Fatalf("cursor shape = %v, want bar cursor", cursor.Shape)

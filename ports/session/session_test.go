@@ -198,6 +198,7 @@ func TestCloneEventPreservesTextWhitespace(t *testing.T) {
 	cloned := CloneEvent(event)
 	if cloned == nil {
 		t.Fatal("CloneEvent() = nil")
+		return
 	}
 	if got := cloned.Text; got != event.Text {
 		t.Fatalf("cloned.Text = %q, want exact source text %q", got, event.Text)
