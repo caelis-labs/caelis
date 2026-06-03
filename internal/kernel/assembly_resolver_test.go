@@ -92,7 +92,7 @@ func TestAssemblyResolverAppliesAssemblyStateAndModelDefaults(t *testing.T) {
 	if got := meta["reasoning_budget_tokens"]; got != 64 {
 		t.Fatalf("reasoning_budget_tokens = %#v", got)
 	}
-	if got := meta["policy_mode"]; got != "workspace_write" {
+	if got := meta["policy_mode"]; got != "workspace-write" {
 		t.Fatalf("policy_mode = %#v", got)
 	}
 }
@@ -180,8 +180,8 @@ func TestAssemblyResolverControllerTurnPreservesPolicyMetadataWithoutModelLookup
 		t.Fatalf("model lookup calls = %d, want 0", modelCalls)
 	}
 	meta := turn.RunRequest.AgentSpec.Metadata
-	if got := meta["policy_mode"]; got != "manual" {
-		t.Fatalf("policy_mode = %#v, want session policy mode", got)
+	if got := meta["policy_mode"]; got != "workspace-write" {
+		t.Fatalf("policy_mode = %#v, want default workspace-write profile", got)
 	}
 	if got := meta["system_prompt"]; got != "controller prompt" {
 		t.Fatalf("system_prompt = %#v, want assembly metadata", got)
@@ -264,7 +264,8 @@ func TestCurrentSessionModeUsesSessionModeKey(t *testing.T) {
 	}{
 		{name: "empty defaults to auto-review", state: map[string]any{}, want: "auto-review"},
 		{name: "sandbox mode key ignored", state: map[string]any{StateCurrentSandboxMode: "manual"}, want: "auto-review"},
-		{name: "session mode key wins", state: map[string]any{StateCurrentSandboxMode: "manual", StateCurrentSessionMode: "manual"}, want: "manual"},
+		{name: "legacy session mode key wins", state: map[string]any{StateCurrentSandboxMode: "manual", StateCurrentSessionMode: "manual"}, want: "manual"},
+		{name: "approval mode key wins", state: map[string]any{StateCurrentSessionMode: "manual", StateCurrentApprovalMode: "auto-review"}, want: "auto-review"},
 	}
 
 	for _, tt := range tests {
@@ -288,7 +289,8 @@ func TestCurrentApprovalModeIgnoresLegacySandboxState(t *testing.T) {
 		{name: "empty defaults to auto-review", state: map[string]any{}, want: ApprovalModeAutoReview},
 		{name: "legacy sandbox mode key ignored", state: map[string]any{StateCurrentSandboxMode: "manual"}, want: ApprovalModeAutoReview},
 		{name: "unknown session mode defaults to auto-review", state: map[string]any{StateCurrentSessionMode: "unknown"}, want: ApprovalModeAutoReview},
-		{name: "session mode key wins", state: map[string]any{StateCurrentSandboxMode: "manual", StateCurrentSessionMode: "manual"}, want: ApprovalModeManual},
+		{name: "legacy session mode key wins", state: map[string]any{StateCurrentSandboxMode: "manual", StateCurrentSessionMode: "manual"}, want: ApprovalModeManual},
+		{name: "approval mode key wins", state: map[string]any{StateCurrentSessionMode: "manual", StateCurrentApprovalMode: "auto-review"}, want: ApprovalModeAutoReview},
 	}
 
 	for _, tt := range tests {
@@ -296,6 +298,33 @@ func TestCurrentApprovalModeIgnoresLegacySandboxState(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := CurrentApprovalMode(tt.state); got != tt.want {
 				t.Fatalf("CurrentApprovalMode(%#v) = %q, want %q", tt.state, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCurrentApprovalModeOrDefaultUsesFallbackOnlyWithoutOverride(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		state map[string]any
+		want  ApprovalMode
+	}{
+		{name: "empty uses manual fallback", state: map[string]any{}, want: ApprovalModeManual},
+		{name: "sandbox legacy does not override fallback", state: map[string]any{StateCurrentSandboxMode: "auto-review"}, want: ApprovalModeManual},
+		{name: "explicit approval mode overrides fallback", state: map[string]any{StateCurrentApprovalMode: "auto-review"}, want: ApprovalModeAutoReview},
+		{name: "legacy session mode overrides fallback", state: map[string]any{StateCurrentSessionMode: "auto-review"}, want: ApprovalModeAutoReview},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			if got := CurrentApprovalModeOrDefault(tt.state, ApprovalModeManual); got != tt.want {
+				t.Fatalf("CurrentApprovalModeOrDefault(%#v, manual) = %q, want %q", tt.state, got, tt.want)
+			}
+			if got := CurrentSessionModeOrDefault(tt.state, string(ApprovalModeManual)); got != string(tt.want) {
+				t.Fatalf("CurrentSessionModeOrDefault(%#v, manual) = %q, want %q", tt.state, got, tt.want)
 			}
 		})
 	}

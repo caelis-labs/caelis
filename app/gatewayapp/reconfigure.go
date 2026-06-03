@@ -79,7 +79,7 @@ func (s *Stack) rebuildGateway() error {
 	if err != nil {
 		return err
 	}
-	effectivePolicyMode := policyMode(runtimeCfg.PermissionMode)
+	effectivePolicyProfile := policyProfile(runtimeCfg.PolicyProfile)
 	effectiveBaseMetadata := cloneMap(runtimeCfg.BaseMetadata)
 	sandboxStatus := sandbox.SelectionStatus(sandboxRuntime)
 	if sandboxStatus.FallbackToHost {
@@ -107,7 +107,7 @@ func (s *Stack) rebuildGateway() error {
 	rt, err := local.New(local.Config{
 		Sessions:          s.Sessions,
 		AgentFactory:      chat.Factory{},
-		DefaultPolicyMode: effectivePolicyMode,
+		DefaultPolicyMode: effectivePolicyProfile,
 		Compaction:        compactionCfg,
 		Assembly:          runtimeCfg.Assembly,
 		TaskStore:         s.taskStore,
@@ -155,10 +155,11 @@ func (s *Stack) rebuildGateway() error {
 		return err
 	}
 	gw, err := kernel.New(kernel.Config{
-		Sessions:         s.Sessions,
-		Runtime:          rt,
-		Resolver:         resolver,
-		ApprovalApprover: agentreview.Approver{Reviewer: newModelApprovalReviewer(s.Sessions)},
+		Sessions:            s.Sessions,
+		Runtime:             rt,
+		Resolver:            resolver,
+		DefaultApprovalMode: kernel.NormalizeApprovalMode(runtimeCfg.ApprovalMode),
+		ApprovalApprover:    agentreview.Approver{Reviewer: newModelApprovalReviewer(s.Sessions)},
 	})
 	if err != nil {
 		_ = sandboxRuntime.Close()

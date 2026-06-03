@@ -21,9 +21,15 @@ const (
 	// StateCurrentSandboxMode is the legacy durable session-state key used by
 	// older TUI builds before session mode and sandbox backend were split.
 	StateCurrentSandboxMode = "gateway.current_sandbox_mode"
-	// StateCurrentSessionMode is the durable session-state key for a per-session
-	// policy mode override selected by the TUI.
+	// StateCurrentSessionMode is the legacy durable session-state key for a
+	// per-session approval mode override selected by the TUI.
 	StateCurrentSessionMode = "gateway.current_session_mode"
+	// StateCurrentApprovalMode is the durable session-state key for a
+	// per-session approval routing override selected by the TUI.
+	StateCurrentApprovalMode = "gateway.current_approval_mode"
+	// StateCurrentPolicyProfile is the durable session-state key for a
+	// per-session policy profile override.
+	StateCurrentPolicyProfile = "gateway.current_policy_profile"
 	// StateCurrentReasoningEffort is the durable session-state key for a
 	// per-session reasoning effort override selected by the TUI.
 	StateCurrentReasoningEffort = "gateway.current_reasoning_effort"
@@ -323,10 +329,10 @@ func resolveMetadataWith(baseMetadata map[string]any, resolved assembly.Resolved
 	if err := applyAssemblySelections(metadata, resolved, strings.TrimSpace(intent.ModeName), state); err != nil {
 		return nil, err
 	}
-	if sessionMode, explicit := currentSessionModeOverride(state); explicit {
-		metadata["policy_mode"] = sessionMode
+	if policyProfile := CurrentPolicyProfile(state); policyProfile != "" {
+		metadata["policy_mode"] = policyProfile
 	} else if stringMetadata(metadata, "policy_mode") == "" {
-		metadata["policy_mode"] = CurrentSessionMode(state)
+		metadata["policy_mode"] = defaultPolicyProfile
 	}
 	if reasoning := firstNonEmptyString(
 		CurrentReasoningEffort(state),
@@ -372,30 +378,51 @@ func CurrentSandboxMode(state map[string]any) string {
 	return strings.TrimSpace(value)
 }
 
-// CurrentSessionMode returns the normalized per-session execution mode.
+// CurrentSessionMode returns the normalized per-session approval routing mode.
 func CurrentSessionMode(state map[string]any) string {
-	if state == nil {
-		return string(ApprovalModeAutoReview)
-	}
-	if value, _ := state[StateCurrentSessionMode].(string); strings.TrimSpace(value) != "" {
-		return normalizeSessionMode(value)
-	}
-	return string(ApprovalModeAutoReview)
+	return string(CurrentApprovalMode(state))
 }
 
-func currentSessionModeOverride(state map[string]any) (string, bool) {
+func CurrentSessionModeOrDefault(state map[string]any, fallback string) string {
+	return string(CurrentApprovalModeOrDefault(state, NormalizeApprovalMode(fallback)))
+}
+
+func CurrentPolicyProfile(state map[string]any) string {
 	if state == nil {
-		return "", false
+		return ""
 	}
-	value, _ := state[StateCurrentSessionMode].(string)
-	if strings.TrimSpace(value) == "" {
-		return "", false
+	value, _ := state[StateCurrentPolicyProfile].(string)
+	return normalizePolicyProfile(value)
+}
+
+func currentApprovalModeOverride(state map[string]any) (ApprovalMode, bool) {
+	if state == nil {
+		return ApprovalModeAutoReview, false
 	}
-	return normalizeSessionMode(value), true
+	if value, _ := state[StateCurrentApprovalMode].(string); strings.TrimSpace(value) != "" {
+		return NormalizeApprovalMode(value), true
+	}
+	if value, _ := state[StateCurrentSessionMode].(string); strings.TrimSpace(value) != "" {
+		return NormalizeApprovalMode(value), true
+	}
+	return ApprovalModeAutoReview, false
 }
 
 func normalizeSessionMode(mode string) string {
 	return string(NormalizeApprovalMode(mode))
+}
+
+const defaultPolicyProfile = "workspace-write"
+
+func normalizePolicyProfile(profile string) string {
+	switch strings.ToLower(strings.TrimSpace(profile)) {
+	case "", "manual", "auto", "auto-review", "auto_review", "autoreview":
+		return ""
+	case "default", "plan", "full_control", "full_access", "workspace-write", "workspace_write", "workspacewrite":
+		return defaultPolicyProfile
+	default:
+		return strings.TrimSpace(profile)
+	}
 }
 
 func applyAssemblySelections(metadata map[string]any, resolved assembly.ResolvedAssembly, requestedMode string, state map[string]any) error {
@@ -525,8 +552,8 @@ func applyRuntimeOverrides(metadata map[string]any, overrides assembly.RuntimeOv
 	if metadata == nil {
 		return
 	}
-	if trimmed := strings.TrimSpace(overrides.PolicyMode); trimmed != "" {
-		metadata["policy_mode"] = trimmed
+	if profile := normalizePolicyProfile(overrides.PolicyMode); profile != "" {
+		metadata["policy_mode"] = profile
 	}
 	if trimmed := strings.TrimSpace(overrides.SystemPrompt); trimmed != "" {
 		metadata["system_prompt"] = trimmed

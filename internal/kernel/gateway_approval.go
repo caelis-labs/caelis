@@ -32,10 +32,7 @@ func (g *Gateway) resolveApprovalRequest(
 	}
 	mode, modeErr := g.currentApprovalMode(turnCtx, req.SessionRef)
 	if modeErr != nil {
-		mode = ApprovalModeManual
-	}
-	if NormalizeApprovalMode(req.Mode) == ApprovalModeManual {
-		mode = ApprovalModeManual
+		return agent.ApprovalResponse{}, modeErr
 	}
 	if mode == ApprovalModeManual {
 		wait := handle.publishApproval(req)
@@ -61,20 +58,6 @@ func (g *Gateway) resolveApprovalRequest(
 			ToolName: strings.TrimSpace(firstNonEmpty(req.Tool.Name, req.Call.Name)),
 			Status:   ApprovalStatusPending,
 		}
-	}
-	if mode == ApprovalModeManual {
-		result, err := turnManualApprover{
-			turnCtx: turnCtx,
-			handle:  handle,
-		}.Decide(approvalCtx, ApprovalReviewRequest{
-			SessionRef:     req.SessionRef,
-			RunID:          req.RunID,
-			TurnID:         req.TurnID,
-			Mode:           mode,
-			Approval:       cloneApprovalPayload(payload),
-			RuntimeRequest: *req,
-		})
-		return approval.RuntimeResponseFromReview(payload, result), err
 	}
 
 	reviewID := handle.nextApprovalReviewID()
@@ -246,11 +229,11 @@ func (g *Gateway) approvalReviewModel(ctx context.Context, ref session.SessionRe
 
 func (g *Gateway) currentApprovalMode(ctx context.Context, ref session.SessionRef) (ApprovalMode, error) {
 	if g == nil || g.sessions == nil {
-		return ApprovalModeManual, fmt.Errorf("gateway: sessions service unavailable")
+		return ApprovalModeAutoReview, fmt.Errorf("gateway: sessions service unavailable")
 	}
 	state, err := g.sessions.SnapshotState(ctx, ref)
 	if err != nil {
-		return ApprovalModeManual, wrapSessionError(err)
+		return ApprovalModeAutoReview, wrapSessionError(err)
 	}
-	return CurrentApprovalMode(state), nil
+	return CurrentApprovalModeOrDefault(state, g.defaultApprovalMode), nil
 }

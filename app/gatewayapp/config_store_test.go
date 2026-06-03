@@ -223,6 +223,65 @@ func TestAppConfigStoreLoadsManualSandboxNetworkDisabled(t *testing.T) {
 	}
 }
 
+func TestAppConfigStoreNormalizesRuntimeConfig(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatalf("MkdirAll(root) error = %v", err)
+	}
+	raw := `{"runtime":{"approval_mode":"auto","policy_profile":"workspace_write"}}`
+	if err := os.WriteFile(filepath.Join(root, "config.json"), []byte(raw), 0o600); err != nil {
+		t.Fatalf("WriteFile(config.json) error = %v", err)
+	}
+
+	store := newAppConfigStore(root)
+	doc, err := store.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if doc.Runtime.ApprovalMode != "auto-review" {
+		t.Fatalf("Runtime.ApprovalMode = %q, want auto-review", doc.Runtime.ApprovalMode)
+	}
+	if doc.Runtime.PolicyProfile != "workspace-write" {
+		t.Fatalf("Runtime.PolicyProfile = %q, want workspace-write", doc.Runtime.PolicyProfile)
+	}
+
+	doc.Runtime = RuntimeConfig{ApprovalMode: "manual", PolicyProfile: "auto-review"}
+	if err := store.Save(doc); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	persisted := readConfigFileForTest(t, root)
+	if !strings.Contains(persisted, `"approval_mode": "manual"`) {
+		t.Fatalf("config = %s, want manual approval mode retained", persisted)
+	}
+	if strings.Contains(persisted, `"policy_profile": "auto-review"`) {
+		t.Fatalf("config = %s, want legacy approval mode removed from policy profile", persisted)
+	}
+}
+
+func TestAppConfigStoreDefaultsRuntimeApprovalModeToAutoReview(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := newAppConfigStore(root)
+	if err := store.Save(AppConfig{}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	doc, err := store.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if doc.Runtime.ApprovalMode != "auto-review" {
+		t.Fatalf("Runtime.ApprovalMode = %q, want auto-review", doc.Runtime.ApprovalMode)
+	}
+	raw := readConfigFileForTest(t, root)
+	if !strings.Contains(raw, `"approval_mode": "auto-review"`) {
+		t.Fatalf("config = %s, want explicit auto-review runtime default", raw)
+	}
+}
+
 func TestAppConfigStoreIgnoresIntermediateConnectionsConfig(t *testing.T) {
 	t.Parallel()
 

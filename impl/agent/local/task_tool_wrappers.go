@@ -259,7 +259,6 @@ func (r subagentApprovalRequester) RequestSubagentApproval(
 	resp, err := r.requester.RequestApproval(ctx, agent.ApprovalRequest{
 		SessionRef: r.sessionRef,
 		Session:    session.CloneSession(r.session),
-		Mode:       strings.TrimSpace(req.Mode),
 		Tool: tool.Definition{
 			Name: toolName,
 		},

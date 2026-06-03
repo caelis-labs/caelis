@@ -109,8 +109,8 @@ func applyRuntimeOverrides(spec *agent.AgentSpec, overrides assembly.RuntimeOver
 	if spec.Metadata == nil {
 		spec.Metadata = map[string]any{}
 	}
-	if trimmed := strings.TrimSpace(overrides.PolicyMode); trimmed != "" {
-		spec.Metadata["policy_mode"] = trimmed
+	if profile := normalizePolicyProfileOverride(overrides.PolicyMode); profile != "" {
+		spec.Metadata["policy_mode"] = profile
 	}
 	if trimmed := strings.TrimSpace(overrides.SystemPrompt); trimmed != "" {
 		spec.Metadata["system_prompt"] = trimmed
@@ -126,6 +126,15 @@ func applyRuntimeOverrides(spec *agent.AgentSpec, overrides assembly.RuntimeOver
 	}
 	if len(overrides.ExtraWriteRoots) > 0 {
 		spec.Metadata["policy_extra_write_roots"] = mergeStringSliceMetadata(spec.Metadata["policy_extra_write_roots"], overrides.ExtraWriteRoots)
+	}
+}
+
+func normalizePolicyProfileOverride(profile string) string {
+	switch strings.ToLower(strings.TrimSpace(profile)) {
+	case "", "manual", "auto", "auto-review", "auto_review", "autoreview":
+		return ""
+	default:
+		return normalizePolicyMode(profile)
 	}
 }
 

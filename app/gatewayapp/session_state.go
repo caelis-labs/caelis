@@ -9,7 +9,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
-// SetSessionMode persists one per-session execution mode override for
+// SetSessionMode persists one per-session approval routing mode override for
 // subsequent turns and returns the normalized display label.
 func (s *Stack) SetSessionMode(ctx context.Context, ref session.SessionRef, mode string) (string, error) {
 	if s == nil || s.Sessions == nil {
@@ -27,7 +27,8 @@ func (s *Stack) SetSessionMode(ctx context.Context, ref session.SessionRef, mode
 		if next == nil {
 			next = map[string]any{}
 		}
-		next[kernel.StateCurrentSessionMode] = normalized
+		next[kernel.StateCurrentApprovalMode] = normalized
+		delete(next, kernel.StateCurrentSessionMode)
 		delete(next, kernel.StateCurrentSandboxMode)
 		return next, nil
 	})
@@ -69,7 +70,8 @@ func (s *Stack) SessionRuntimeState(ctx context.Context, ref session.SessionRef)
 		ModelID:         modelID,
 		ModelAlias:      modelAlias,
 		ReasoningEffort: kernel.CurrentReasoningEffort(state),
-		SessionMode:     kernel.CurrentSessionMode(state),
+		SessionMode:     kernel.CurrentSessionModeOrDefault(state, s.runtime.ApprovalMode),
+		PolicyProfile:   firstNonEmpty(kernel.CurrentPolicyProfile(state), policyProfile(s.runtime.PolicyProfile)),
 		SandboxMode:     kernel.CurrentSandboxMode(state),
 	}, nil
 }

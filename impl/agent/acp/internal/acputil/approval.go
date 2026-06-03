@@ -6,18 +6,6 @@ import (
 	"github.com/OnslaughtSnail/caelis/protocol/acp/client"
 )
 
-func AutoApproveAllOnce(
-	mode string,
-	agent string,
-	req client.RequestPermissionRequest,
-) (client.RequestPermissionResponse, bool) {
-	trimmedAgent := strings.TrimSpace(agent)
-	if strings.EqualFold(trimmedAgent, "self") {
-		return client.RequestPermissionResponse{}, false
-	}
-	return client.ResolveApproveAllOnce(mode, trimmedAgent, req).AutoResponse()
-}
-
 func SelectedOutcome(
 	outcome string,
 	optionID string,

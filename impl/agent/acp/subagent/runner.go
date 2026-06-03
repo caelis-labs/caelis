@@ -331,9 +331,6 @@ func (r *Runner) permissionCallback(spawn subagent.SpawnContext, cfg AgentConfig
 		return r.permissionHandler
 	}
 	return func(ctx context.Context, req client.RequestPermissionRequest) (client.RequestPermissionResponse, error) {
-		if auto, ok := acputil.AutoApproveAllOnce(spawn.Mode, cfg.Name, req); ok {
-			return auto, nil
-		}
 		if spawn.ApprovalRequester != nil {
 			resp, err := spawn.ApprovalRequester.RequestSubagentApproval(ctx, translateApprovalRequest(spawn, cfg, agentID, req))
 			if err != nil {

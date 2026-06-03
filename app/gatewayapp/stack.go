@@ -18,11 +18,14 @@ import (
 )
 
 type Config struct {
-	AppName        string
-	UserID         string
-	StoreDir       string
-	WorkspaceKey   string
-	WorkspaceCWD   string
+	AppName       string
+	UserID        string
+	StoreDir      string
+	WorkspaceKey  string
+	WorkspaceCWD  string
+	ApprovalMode  string
+	PolicyProfile string
+	// PermissionMode is a legacy approval-mode input kept for compatibility.
 	PermissionMode string
 	ContextWindow  int
 	SystemPrompt   string
@@ -67,6 +70,7 @@ type SessionRuntimeState struct {
 	ModelAlias      string
 	ReasoningEffort string
 	SessionMode     string
+	PolicyProfile   string
 	SandboxMode     string
 }
 
@@ -129,9 +133,25 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 			return nil, err
 		}
 	}
+	effectiveApprovalMode := approvalMode(firstNonEmpty(cfg.ApprovalMode, cfg.PermissionMode, doc.Runtime.ApprovalMode))
+	effectivePolicyProfile := policyProfile(firstNonEmpty(cfg.PolicyProfile, doc.Runtime.PolicyProfile))
 	baseAssembly := assembly.CloneResolvedAssembly(cfg.Assembly)
 	cfg.Assembly = withConfiguredACPAgents(cfg.Assembly, doc.Agents, defaultSelfACPAgent(defaultSelfACPAgentConfig{
-		Config:       cfg,
+		Config: Config{
+			AppName:        cfg.AppName,
+			UserID:         cfg.UserID,
+			StoreDir:       storeDir,
+			WorkspaceKey:   workspaceKey,
+			WorkspaceCWD:   workspaceCWD,
+			ApprovalMode:   effectiveApprovalMode,
+			PolicyProfile:  effectivePolicyProfile,
+			PermissionMode: cfg.PermissionMode,
+			ContextWindow:  cfg.ContextWindow,
+			SystemPrompt:   cfg.SystemPrompt,
+			Assembly:       cfg.Assembly,
+			Model:          cfg.Model,
+			Sandbox:        cfg.Sandbox,
+		},
 		AppName:      appName,
 		UserID:       userID,
 		StoreDir:     storeDir,
@@ -176,6 +196,8 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		storeDir:  storeDir,
 		taskStore: taskStore,
 		runtime: stackRuntimeConfig{
+			ApprovalMode:   effectiveApprovalMode,
+			PolicyProfile:  effectivePolicyProfile,
 			PermissionMode: cfg.PermissionMode,
 			ContextWindow:  cfg.ContextWindow,
 			Model:          cfg.Model,

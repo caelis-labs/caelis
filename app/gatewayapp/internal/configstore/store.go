@@ -18,6 +18,7 @@ type AppConfig struct {
 	Agents         []AgentConfig         `json:"agents,omitempty"`
 	AgentProviders []AgentProviderConfig `json:"agent_providers,omitempty"`
 	Sandbox        SandboxConfig         `json:"sandbox,omitempty"`
+	Runtime        RuntimeConfig         `json:"runtime,omitempty"`
 }
 
 type AgentConfig struct {
@@ -37,6 +38,11 @@ type SandboxConfig struct {
 	WritableRoots    []string `json:"writable_roots,omitempty"`
 	ReadOnlySubpaths []string `json:"read_only_subpaths,omitempty"`
 	NetworkEnabled   *bool    `json:"network_enabled,omitempty"`
+}
+
+type RuntimeConfig struct {
+	ApprovalMode  string `json:"approval_mode,omitempty"`
+	PolicyProfile string `json:"policy_profile,omitempty"`
 }
 
 type AgentProviderConfig struct {
@@ -112,6 +118,7 @@ func (s *Store) loadUnlocked() (AppConfig, error) {
 		doc.Models.Configs = dedupeModelConfigs(doc.Models.Configs)
 		doc.Agents = DedupeAgentConfigs(doc.Agents)
 		doc.Sandbox = NormalizeSandboxConfig(doc.Sandbox)
+		doc.Runtime = NormalizeRuntimeConfig(doc.Runtime)
 		return doc, nil
 	}
 	if !os.IsNotExist(err) {
@@ -131,6 +138,7 @@ func (s *Store) Save(doc AppConfig) error {
 	doc.Models.Profiles = dedupeModelProfilesForSave(doc.Models.Profiles)
 	doc.Agents = DedupeAgentConfigs(doc.Agents)
 	doc.Sandbox = DefaultSandboxConfig(doc.Sandbox)
+	doc.Runtime = NormalizeRuntimeConfig(doc.Runtime)
 	dir := filepath.Dir(s.path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
@@ -399,6 +407,34 @@ func NormalizeSandboxConfig(cfg SandboxConfig) SandboxConfig {
 		cfg.NetworkEnabled = &value
 	}
 	return cfg
+}
+
+func NormalizeRuntimeConfig(cfg RuntimeConfig) RuntimeConfig {
+	cfg.ApprovalMode = normalizeApprovalMode(cfg.ApprovalMode)
+	cfg.PolicyProfile = normalizePolicyProfile(cfg.PolicyProfile)
+	return cfg
+}
+
+func normalizeApprovalMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "manual":
+		return "manual"
+	case "", "auto", "auto-review", "auto_review", "autoreview":
+		return "auto-review"
+	default:
+		return "auto-review"
+	}
+}
+
+func normalizePolicyProfile(profile string) string {
+	switch strings.ToLower(strings.TrimSpace(profile)) {
+	case "", "manual", "auto", "auto-review", "auto_review", "autoreview":
+		return ""
+	case "default", "plan", "full_control", "full_access", "workspace-write", "workspace_write", "workspacewrite":
+		return "workspace-write"
+	default:
+		return strings.TrimSpace(profile)
+	}
 }
 
 func DefaultSandboxConfig(cfg SandboxConfig) SandboxConfig {

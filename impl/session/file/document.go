@@ -53,7 +53,9 @@ func (s *Store) readDocumentAt(path string) (persistedDocument, error) {
 	}
 	doc.Session = session.CloneSession(doc.Session)
 	doc.Events = session.CloneEvents(doc.Events)
-	doc.State = cloneState(doc.State)
+	if doc.State != nil {
+		doc.State = cloneState(doc.State)
+	}
 	return doc, nil
 }
 

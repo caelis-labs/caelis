@@ -411,10 +411,16 @@ func (s *Store) SnapshotState(
 	defer s.mu.Unlock()
 
 	var out map[string]any
-	if err := s.withRootReadLock(func() error {
+	if err := s.withRootWriteLock(func() error {
 		doc, err := s.readDocumentForRef(ref)
 		if err != nil {
 			return err
+		}
+		if doc.State == nil {
+			doc.State = map[string]any{}
+			if err := s.writeDocument(doc); err != nil {
+				return err
+			}
 		}
 		out = cloneState(doc.State)
 		return nil

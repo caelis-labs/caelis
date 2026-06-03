@@ -153,6 +153,8 @@ const (
 	StateCurrentModelAlias      = kernelimpl.StateCurrentModelAlias
 	StateCurrentSandboxMode     = kernelimpl.StateCurrentSandboxMode
 	StateCurrentSessionMode     = kernelimpl.StateCurrentSessionMode
+	StateCurrentApprovalMode    = kernelimpl.StateCurrentApprovalMode
+	StateCurrentPolicyProfile   = kernelimpl.StateCurrentPolicyProfile
 	StateCurrentReasoningEffort = kernelimpl.StateCurrentReasoningEffort
 	StateUsageAccounting        = kernelimpl.StateUsageAccounting
 )
@@ -267,10 +269,13 @@ var New = kernelimpl.New
 var NewAssemblyResolver = kernelimpl.NewAssemblyResolver
 var NormalizeApprovalMode = kernelimpl.NormalizeApprovalMode
 var CurrentApprovalMode = kernelimpl.CurrentApprovalMode
+var CurrentApprovalModeOrDefault = kernelimpl.CurrentApprovalModeOrDefault
 var CurrentModelAlias = kernelimpl.CurrentModelAlias
 var CurrentReasoningEffort = kernelimpl.CurrentReasoningEffort
 var CurrentSandboxMode = kernelimpl.CurrentSandboxMode
 var CurrentSessionMode = kernelimpl.CurrentSessionMode
+var CurrentSessionModeOrDefault = kernelimpl.CurrentSessionModeOrDefault
+var CurrentPolicyProfile = kernelimpl.CurrentPolicyProfile
 var ClassifySurface = kernelimpl.ClassifySurface
 var EventError = kernelimpl.EventError
 var As = kernelimpl.As

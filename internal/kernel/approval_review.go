@@ -25,13 +25,14 @@ func NormalizeApprovalMode(mode string) ApprovalMode {
 }
 
 func CurrentApprovalMode(state map[string]any) ApprovalMode {
-	if state == nil {
-		return ApprovalModeAutoReview
+	return CurrentApprovalModeOrDefault(state, ApprovalModeAutoReview)
+}
+
+func CurrentApprovalModeOrDefault(state map[string]any, fallback ApprovalMode) ApprovalMode {
+	if mode, ok := currentApprovalModeOverride(state); ok {
+		return mode
 	}
-	if value, _ := state[StateCurrentSessionMode].(string); strings.TrimSpace(value) != "" {
-		return NormalizeApprovalMode(value)
-	}
-	return ApprovalModeAutoReview
+	return NormalizeApprovalMode(string(fallback))
 }
 
 type ApprovalReviewRequest = approval.Request

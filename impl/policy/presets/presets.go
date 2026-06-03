@@ -15,22 +15,26 @@ import (
 )
 
 const (
+	ModeWorkspaceWrite = "workspace-write"
+
+	// ModeAutoReview and ModeManual are legacy policy names kept for callers
+	// that still import them. They normalize to ModeWorkspaceWrite.
 	ModeAutoReview = "auto-review"
 	ModeManual     = "manual"
 
 	// ModeDefault is the built-in fallback policy for omitted, legacy, or
 	// otherwise unresolved local policy configuration.
-	ModeDefault = ModeAutoReview
+	ModeDefault = ModeWorkspaceWrite
 )
 
 func NormalizeModeName(mode string) string {
 	trimmed := strings.TrimSpace(mode)
 	switch strings.ToLower(trimmed) {
-	case "":
+	case "", "workspace-write", "workspace_write", "workspacewrite":
+		return ModeDefault
+	case "auto", "auto-review", "auto_review", "autoreview", "default", "plan", "full_control", "full_access":
 		return ModeDefault
 	case "manual":
-		return ModeManual
-	case "auto", "auto-review", "auto_review", "autoreview", "default", "plan", "full_control", "full_access":
 		return ModeDefault
 	default:
 		return trimmed
@@ -39,14 +43,13 @@ func NormalizeModeName(mode string) string {
 
 func NewRegistry() (*policy.MemoryRegistry, error) {
 	return policy.NewMemory(
-		AutoReviewMode(),
-		ManualMode(),
+		WorkspaceWriteMode(),
 	)
 }
 
-func AutoReviewMode() policy.Mode {
+func WorkspaceWriteMode() policy.Mode {
 	return policy.NamedMode{
-		ID: ModeAutoReview,
+		ID: ModeWorkspaceWrite,
 		Decide: func(_ context.Context, input policy.ToolContext) (policy.Decision, error) {
 			def := baseStrictConstraints(input.Options)
 			switch toolName(input) {
@@ -62,38 +65,20 @@ func AutoReviewMode() policy.Mode {
 			case "TASK":
 				return allow(def), nil
 			case "RUN_COMMAND":
-				return decideCommand(input, def, "auto-review mode")
+				return decideCommand(input, def, "workspace-write policy")
 			default:
-				return deny(fmt.Sprintf("tool %q is not allowed in auto-review mode", input.Tool.Name)), nil
+				return deny(fmt.Sprintf("tool %q is not allowed in workspace-write policy", input.Tool.Name)), nil
 			}
 		},
 	}
 }
 
+func AutoReviewMode() policy.Mode {
+	return WorkspaceWriteMode()
+}
+
 func ManualMode() policy.Mode {
-	return policy.NamedMode{
-		ID: ModeManual,
-		Decide: func(_ context.Context, input policy.ToolContext) (policy.Decision, error) {
-			def := baseStrictConstraints(input.Options)
-			switch toolName(input) {
-			case "PLAN", "SPAWN":
-				return allow(def), nil
-			case "READ", "SEARCH", "LIST", "GLOB":
-				return allow(filesystemReadConstraints(def)), nil
-			case "WRITE", "PATCH":
-				if err := ensureWritePathsWithinRoots(input); err != nil {
-					return policyErrorOrDeny(err)
-				}
-				return allow(def), nil
-			case "TASK":
-				return allow(def), nil
-			case "RUN_COMMAND":
-				return decideCommand(input, def, "manual mode")
-			default:
-				return deny(fmt.Sprintf("tool %q is not allowed in manual mode", input.Tool.Name)), nil
-			}
-		},
-	}
+	return WorkspaceWriteMode()
 }
 
 func decideCommand(input policy.ToolContext, def sandbox.Constraints, modeName string) (policy.Decision, error) {
@@ -168,7 +153,7 @@ func askApproval(reason string, constraints sandbox.Constraints, input policy.To
 }
 
 func askEscalationApproval(input policy.ToolContext, req commandSandboxRequest) (policy.Decision, error) {
-	reason := "host execution requires user approval"
+	reason := "host execution requires approval"
 	decision, err := askApproval(reason, hostExecutionConstraints(), input)
 	if err != nil {
 		return policy.Decision{}, err
@@ -178,13 +163,13 @@ func askEscalationApproval(input policy.ToolContext, req commandSandboxRequest) 
 }
 
 func askDestructiveCommandApproval(input policy.ToolContext, def sandbox.Constraints, req commandSandboxRequest) (policy.Decision, error) {
-	reason := "destructive filesystem command requires user approval"
+	reason := "destructive filesystem command requires approval"
 	constraints := def
 	metadata := req.approvalMetadata(reason)
 	metadata["destructive_command"] = true
 	switch req.SandboxPermissions {
 	case commandSandboxPermissionRequireEscalated:
-		reason = "destructive host command requires user approval"
+		reason = "destructive host command requires approval"
 		constraints = hostExecutionConstraints()
 		metadata = req.approvalMetadata(reason)
 		metadata["destructive_command"] = true

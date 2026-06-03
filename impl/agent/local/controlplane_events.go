@@ -157,7 +157,6 @@ func (r controllerApprovalRequester) RequestControllerApproval(ctx context.Conte
 		Session:    session.CloneSession(r.session),
 		RunID:      strings.TrimSpace(r.runID),
 		TurnID:     strings.TrimSpace(r.turnID),
-		Mode:       strings.TrimSpace(req.Mode),
 		Tool: tool.Definition{
 			Name:        toolName,
 			Description: firstNonEmpty(req.ToolCall.Title, req.ToolCall.Kind, "ACP controller requested permission"),

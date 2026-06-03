@@ -77,7 +77,7 @@ func (r *Runtime) policyForName(ctx context.Context, modeName string) (string, p
 			return normalized, mode
 		}
 	}
-	return presets.ModeDefault, presets.AutoReviewMode()
+	return presets.ModeDefault, presets.WorkspaceWriteMode()
 }
 
 func (t policyWrappedTool) Definition() tool.Definition {
@@ -136,7 +136,6 @@ func (t policyWrappedTool) requestApproval(
 		Session:    session.CloneSession(t.session),
 		RunID:      strings.TrimSpace(t.approval.runID),
 		TurnID:     strings.TrimSpace(t.approval.turnID),
-		Mode:       t.mode,
 		Tool:       t.tool.Definition(),
 		Call:       tool.CloneCall(call),
 		Approval:   cloneApproval(decision.Approval),

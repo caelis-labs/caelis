@@ -14,24 +14,26 @@ import (
 )
 
 type Config struct {
-	Sessions         session.Service
-	Runtime          agent.Runtime
-	Resolver         TurnResolver
-	RequestPolicy    RequestPolicy
-	ApprovalApprover approval.Approver
-	ApprovalReviewer ApprovalReviewer
-	Clock            func() time.Time
+	Sessions            session.Service
+	Runtime             agent.Runtime
+	Resolver            TurnResolver
+	RequestPolicy       RequestPolicy
+	DefaultApprovalMode ApprovalMode
+	ApprovalApprover    approval.Approver
+	ApprovalReviewer    ApprovalReviewer
+	Clock               func() time.Time
 }
 
 type Gateway struct {
-	sessions         session.Service
-	runtime          agent.Runtime
-	control          agent.SessionControlPlane
-	resolver         TurnResolver
-	request          RequestPolicy
-	approvalApprover approval.Approver
-	approvalReviewer ApprovalReviewer
-	clock            func() time.Time
+	sessions            session.Service
+	runtime             agent.Runtime
+	control             agent.SessionControlPlane
+	resolver            TurnResolver
+	request             RequestPolicy
+	defaultApprovalMode ApprovalMode
+	approvalApprover    approval.Approver
+	approvalReviewer    ApprovalReviewer
+	clock               func() time.Time
 
 	mu       sync.Mutex
 	active   map[string]*turnHandle
@@ -81,16 +83,17 @@ func New(cfg Config) (*Gateway, error) {
 		cfg.ApprovalReviewer = approval.ApproverAdapter{Approver: cfg.ApprovalApprover}
 	}
 	return &Gateway{
-		sessions:         cfg.Sessions,
-		runtime:          cfg.Runtime,
-		control:          resolveControlPlane(cfg.Runtime),
-		resolver:         cfg.Resolver,
-		request:          cfg.RequestPolicy,
-		approvalApprover: cfg.ApprovalApprover,
-		approvalReviewer: cfg.ApprovalReviewer,
-		clock:            cfg.Clock,
-		active:           map[string]*turnHandle{},
-		bindings:         map[string]sessionBinding{},
+		sessions:            cfg.Sessions,
+		runtime:             cfg.Runtime,
+		control:             resolveControlPlane(cfg.Runtime),
+		resolver:            cfg.Resolver,
+		request:             cfg.RequestPolicy,
+		defaultApprovalMode: NormalizeApprovalMode(string(cfg.DefaultApprovalMode)),
+		approvalApprover:    cfg.ApprovalApprover,
+		approvalReviewer:    cfg.ApprovalReviewer,
+		clock:               cfg.Clock,
+		active:              map[string]*turnHandle{},
+		bindings:            map[string]sessionBinding{},
 	}, nil
 }
 

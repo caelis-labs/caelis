@@ -24,6 +24,9 @@ type GatewayAgentConfig struct {
 }
 
 type SurfaceRequest struct {
+	// Modes are ACP client-visible app/session modes. When UseFallbackModes is
+	// true they may be assembly-owned values such as "default" or "plan"; they
+	// must not be used as approval-routing modes.
 	Modes            acp.ModeProvider
 	UseFallbackModes bool
 	Config           acp.ConfigProvider
@@ -57,6 +60,11 @@ func NewGatewayAgent(cfg GatewayAgentConfig) (*RuntimeAgent, error) {
 		UseFallbackModes: len(cfg.Assembly.Modes) > 0,
 		Config:           configs,
 	})
+	approvalSurface := cfg.SurfaceBuilder(SurfaceRequest{
+		Modes:            nil,
+		UseFallbackModes: false,
+		Config:           nil,
+	})
 	return New(Config{
 		Runtime:  cfg.Runtime,
 		Sessions: cfg.Sessions,
@@ -75,6 +83,7 @@ func NewGatewayAgent(cfg GatewayAgentConfig) (*RuntimeAgent, error) {
 			return resolved.RunRequest.AgentSpec, nil
 		},
 		Modes:                 surface,
+		ApprovalModes:         approvalSurface,
 		Config:                surface,
 		Models:                surface,
 		Commands:              surface,

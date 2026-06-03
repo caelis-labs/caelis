@@ -746,6 +746,62 @@ func TestServiceLoadSessionReadsOneDocumentSnapshot(t *testing.T) {
 	}
 }
 
+func TestStoreSnapshotStateRepairsMissingDocumentState(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	at := time.Date(2026, time.April, 19, 11, 22, 33, 0, time.UTC)
+	ref := session.SessionRef{
+		AppName:      "caelis",
+		UserID:       "user-1",
+		SessionID:    "sess-1",
+		WorkspaceKey: "ws-1",
+	}
+	docPath := rolloutDocumentPath(root, "ws-1", at, "sess-1")
+	if err := os.MkdirAll(filepath.Dir(docPath), 0o700); err != nil {
+		t.Fatalf("MkdirAll(doc dir) error = %v", err)
+	}
+	data, err := json.MarshalIndent(map[string]any{
+		"kind":    documentKind,
+		"version": documentVersion,
+		"session": session.Session{
+			SessionRef: ref,
+			CreatedAt:  at,
+			UpdatedAt:  at,
+		},
+	}, "", "  ")
+	if err != nil {
+		t.Fatalf("MarshalIndent() error = %v", err)
+	}
+	if err := os.WriteFile(docPath, append(data, '\n'), 0o600); err != nil {
+		t.Fatalf("WriteFile(doc) error = %v", err)
+	}
+
+	store := NewStore(Config{
+		RootDir: root,
+		Clock:   func() time.Time { return at.Add(time.Minute) },
+	})
+	state, err := store.SnapshotState(context.Background(), ref)
+	if err != nil {
+		t.Fatalf("SnapshotState() error = %v", err)
+	}
+	if state == nil || len(state) != 0 {
+		t.Fatalf("SnapshotState() = %#v, want repaired empty state", state)
+	}
+
+	repairedData, err := os.ReadFile(docPath)
+	if err != nil {
+		t.Fatalf("ReadFile(repaired doc) error = %v", err)
+	}
+	var repaired persistedDocument
+	if err := json.Unmarshal(repairedData, &repaired); err != nil {
+		t.Fatalf("Unmarshal(repaired doc) error = %v", err)
+	}
+	if repaired.State == nil || len(repaired.State) != 0 {
+		t.Fatalf("repaired State = %#v, want empty map", repaired.State)
+	}
+}
+
 func TestStoreWriteDocumentUsesSecurePermissions(t *testing.T) {
 	t.Parallel()
 

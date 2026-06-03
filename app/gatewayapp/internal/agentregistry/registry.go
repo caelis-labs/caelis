@@ -16,6 +16,8 @@ type RuntimeConfig struct {
 	StoreDir       string
 	WorkspaceKey   string
 	WorkspaceCWD   string
+	ApprovalMode   string
+	PolicyProfile  string
 	PermissionMode string
 	ContextWindow  int
 	Model          modelregistry.Config
@@ -120,7 +122,8 @@ func DefaultSelfAgent(cfg DefaultSelfConfig) assembly.AgentConfig {
 			"-store-dir", strings.TrimSpace(cfg.StoreDir),
 			"-workspace-key", strings.TrimSpace(cfg.WorkspaceKey),
 			"-workspace-cwd", strings.TrimSpace(cfg.WorkspaceCWD),
-			"-permission-mode", strings.TrimSpace(cfg.Config.PermissionMode),
+			"-approval-mode", strings.TrimSpace(cfg.Config.ApprovalMode),
+			"-policy-profile", strings.TrimSpace(cfg.Config.PolicyProfile),
 		}, args...),
 		Env: env,
 	}

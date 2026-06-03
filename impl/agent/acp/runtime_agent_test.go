@@ -583,7 +583,7 @@ func TestRuntimeAgentPromptAutoReviewUsesReviewerInsteadOfClientPermission(t *te
 		Runtime:  runtime,
 		Sessions: sessions,
 		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
-			return agent.AgentSpec{Name: "chat", Metadata: map[string]any{"policy_mode": "auto-review"}}, nil
+			return agent.AgentSpec{Name: "chat", Metadata: map[string]any{"policy_mode": "workspace-write"}}, nil
 		},
 		AppName:               "caelis",
 		UserID:                "user-1",
@@ -632,10 +632,11 @@ func TestRuntimeAgentPromptManualModeUsesClientPermission(t *testing.T) {
 		Runtime:  runtime,
 		Sessions: sessions,
 		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
-			return agent.AgentSpec{Name: "chat", Metadata: map[string]any{"policy_mode": "manual"}}, nil
+			return agent.AgentSpec{Name: "chat", Metadata: map[string]any{"policy_mode": "workspace-write"}}, nil
 		},
 		AppName:               "caelis",
 		UserID:                "user-1",
+		Modes:                 staticApprovalModeProvider{current: "manual"},
 		ApprovalReviewer:      reviewer,
 		ApprovalModelResolver: staticApprovalModelResolver{model: runtimeAgentTestModel{text: "review"}},
 	})
@@ -661,6 +662,48 @@ func TestRuntimeAgentPromptManualModeUsesClientPermission(t *testing.T) {
 	}
 	if !runtime.response.Approved || runtime.response.OptionID != acp.PermAllowOnce {
 		t.Fatalf("approval response = %#v, want approved allow_once", runtime.response)
+	}
+}
+
+func TestRuntimeAgentPromptUsesDedicatedApprovalModes(t *testing.T) {
+	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	runtime := &approvalReviewRuntime{}
+	reviewer := &recordingApprovalReviewer{}
+	agent, err := runtimeacp.New(runtimeacp.Config{
+		Runtime:  runtime,
+		Sessions: sessions,
+		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
+			return agent.AgentSpec{Name: "chat", Metadata: map[string]any{"policy_mode": "workspace-write"}}, nil
+		},
+		AppName:               "caelis",
+		UserID:                "user-1",
+		Modes:                 staticApprovalModeProvider{current: "plan"},
+		ApprovalModes:         staticApprovalModeProvider{current: "manual"},
+		ApprovalReviewer:      reviewer,
+		ApprovalModelResolver: staticApprovalModelResolver{model: runtimeAgentTestModel{text: "review"}},
+	})
+	if err != nil {
+		t.Fatalf("runtimeacp.New() error = %v", err)
+	}
+	sessionResp, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatalf("NewSession() error = %v", err)
+	}
+	if sessionResp.Modes == nil || sessionResp.Modes.CurrentModeID != "plan" {
+		t.Fatalf("NewSession().Modes = %#v, want client-visible plan mode", sessionResp.Modes)
+	}
+	cb := &permissionCountingCallbacks{}
+	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{
+		SessionID: sessionResp.SessionID,
+		Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"clean workspace"}`)},
+	}, cb); err != nil {
+		t.Fatalf("Prompt() error = %v", err)
+	}
+	if cb.permissions != 1 {
+		t.Fatalf("client permission requests = %d, want 1 from dedicated manual approval mode", cb.permissions)
+	}
+	if reviewer.calls != 0 {
+		t.Fatalf("reviewer calls = %d, want 0 when dedicated approval mode is manual", reviewer.calls)
 	}
 }
 
@@ -693,12 +736,13 @@ func newRuntimeAgentWithSessionsAndConfig(t *testing.T, sessions session.Service
 			Name:    "caelis-sdk",
 			Version: "0.1.0",
 		},
-		Loader:     override.Loader,
-		Modes:      override.Modes,
-		Config:     override.Config,
-		Models:     override.Models,
-		Commands:   override.Commands,
-		PromptCaps: override.PromptCaps,
+		Loader:        override.Loader,
+		Modes:         override.Modes,
+		ApprovalModes: override.ApprovalModes,
+		Config:        override.Config,
+		Models:        override.Models,
+		Commands:      override.Commands,
+		PromptCaps:    override.PromptCaps,
 	}
 	if override.AgentInfo != nil {
 		cfg.AgentInfo = override.AgentInfo
@@ -738,6 +782,28 @@ func (testModeProvider) SessionModes(context.Context, session.Session) (*acp.Ses
 }
 
 func (testModeProvider) SetSessionMode(context.Context, acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error) {
+	return acp.SetSessionModeResponse{}, nil
+}
+
+type staticApprovalModeProvider struct {
+	current string
+}
+
+func (p staticApprovalModeProvider) SessionModes(context.Context, session.Session) (*acp.SessionModeState, error) {
+	current := strings.TrimSpace(p.current)
+	if current == "" {
+		current = "auto-review"
+	}
+	return &acp.SessionModeState{
+		AvailableModes: []acp.SessionMode{
+			{ID: "auto-review", Name: "Auto Review"},
+			{ID: "manual", Name: "Manual"},
+		},
+		CurrentModeID: current,
+	}, nil
+}
+
+func (p staticApprovalModeProvider) SetSessionMode(context.Context, acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error) {
 	return acp.SetSessionModeResponse{}, nil
 }
 

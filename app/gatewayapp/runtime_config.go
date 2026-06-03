@@ -14,6 +14,8 @@ import (
 )
 
 type stackRuntimeConfig struct {
+	ApprovalMode                string
+	PolicyProfile               string
 	PermissionMode              string
 	ContextWindow               int
 	Model                       ModelConfig
@@ -127,15 +129,27 @@ func dedupeNonEmptyStrings(values []string) []string {
 	return out
 }
 
-func policyMode(raw string) string {
+func approvalMode(raw string) string {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "manual":
-		return presets.ModeManual
+		return string(kernel.ApprovalModeManual)
 	case "", "auto", "auto-review", "auto_review", "autoreview", "default", "plan", "full_control", "full_access":
-		return presets.ModeAutoReview
+		return string(kernel.ApprovalModeAutoReview)
 	default:
+		return string(kernel.ApprovalModeAutoReview)
+	}
+}
+
+func policyMode(raw string) string {
+	return policyProfile(raw)
+}
+
+func policyProfile(raw string) string {
+	normalized := presets.NormalizeModeName(raw)
+	if strings.TrimSpace(normalized) == "" {
 		return presets.ModeDefault
 	}
+	return normalized
 }
 
 func firstNonEmpty(values ...string) string {

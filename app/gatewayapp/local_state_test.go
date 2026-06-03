@@ -82,18 +82,65 @@ func TestPolicyModeDefaultsUnknownAndLegacyValues(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]string{
-		"":             "auto-review",
-		"default":      "auto-review",
-		"plan":         "auto-review",
-		"full_access":  "auto-review",
-		"full_control": "auto-review",
-		"manual":       "manual",
-		"unknown":      "auto-review",
+		"":                "workspace-write",
+		"default":         "workspace-write",
+		"plan":            "workspace-write",
+		"full_access":     "workspace-write",
+		"full_control":    "workspace-write",
+		"manual":          "workspace-write",
+		"auto-review":     "workspace-write",
+		"workspace_write": "workspace-write",
+		"unknown":         "unknown",
 	}
 	for input, want := range tests {
 		if got := policyMode(input); got != want {
 			t.Fatalf("policyMode(%q) = %q, want %q", input, got, want)
 		}
+	}
+}
+
+func TestNewLocalStackUsesRuntimeConfigApprovalAndPolicyProfile(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workdir := t.TempDir()
+	store := newAppConfigStore(root)
+	if err := store.Save(AppConfig{
+		Runtime: RuntimeConfig{
+			ApprovalMode:  "manual",
+			PolicyProfile: "workspace_write",
+		},
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	stack, err := newGatewayAppTestStack(t, Config{
+		AppName:      "caelis",
+		UserID:       "runtime-config-test",
+		StoreDir:     root,
+		WorkspaceKey: workdir,
+		WorkspaceCWD: workdir,
+		Assembly:     assembly.ResolvedAssembly{},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+	if stack.runtime.ApprovalMode != "manual" {
+		t.Fatalf("runtime ApprovalMode = %q, want manual", stack.runtime.ApprovalMode)
+	}
+	if stack.runtime.PolicyProfile != "workspace-write" {
+		t.Fatalf("runtime PolicyProfile = %q, want workspace-write", stack.runtime.PolicyProfile)
+	}
+	session, err := stack.StartSession(context.Background(), "runtime config session", "surface-runtime-config")
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	state, err := stack.SessionRuntimeState(context.Background(), session.SessionRef)
+	if err != nil {
+		t.Fatalf("SessionRuntimeState() error = %v", err)
+	}
+	if state.SessionMode != "manual" {
+		t.Fatalf("SessionRuntimeState().SessionMode = %q, want configured manual default", state.SessionMode)
 	}
 }
 

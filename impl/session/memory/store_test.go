@@ -90,6 +90,65 @@ func TestStoreUpdateState(t *testing.T) {
 	}
 }
 
+func TestStoreStateOperationsRepairNilState(t *testing.T) {
+	t.Parallel()
+
+	store := NewStore(Config{
+		SessionIDGenerator: func() string { return "sess-1" },
+	})
+	ctx := context.Background()
+	createdSession, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+		AppName: "caelis",
+		UserID:  "user-1",
+	})
+	if err != nil {
+		t.Fatalf("GetOrCreate() error = %v", err)
+	}
+
+	store.mu.Lock()
+	store.sessions[createdSession.SessionID].state = nil
+	store.mu.Unlock()
+
+	state, err := store.SnapshotState(ctx, createdSession.SessionRef)
+	if err != nil {
+		t.Fatalf("SnapshotState() error = %v", err)
+	}
+	if state == nil || len(state) != 0 {
+		t.Fatalf("SnapshotState() = %#v, want repaired empty state", state)
+	}
+
+	store.mu.Lock()
+	store.sessions[createdSession.SessionID].state = nil
+	store.mu.Unlock()
+	if err := store.UpdateState(ctx, createdSession.SessionRef, func(state map[string]any) (map[string]any, error) {
+		if state == nil {
+			t.Fatal("UpdateState() received nil state, want empty map")
+		}
+		state["mode"] = "chat"
+		return state, nil
+	}); err != nil {
+		t.Fatalf("UpdateState() error = %v", err)
+	}
+	state, err = store.SnapshotState(ctx, createdSession.SessionRef)
+	if err != nil {
+		t.Fatalf("SnapshotState(after update) error = %v", err)
+	}
+	if got := state["mode"]; got != "chat" {
+		t.Fatalf("state[mode] = %v, want chat", got)
+	}
+
+	if err := store.ReplaceState(ctx, createdSession.SessionRef, nil); err != nil {
+		t.Fatalf("ReplaceState(nil) error = %v", err)
+	}
+	state, err = store.SnapshotState(ctx, createdSession.SessionRef)
+	if err != nil {
+		t.Fatalf("SnapshotState(after replace nil) error = %v", err)
+	}
+	if state == nil || len(state) != 0 {
+		t.Fatalf("state after ReplaceState(nil) = %#v, want empty map", state)
+	}
+}
+
 func TestStoreControllerAndParticipantBindings(t *testing.T) {
 	t.Parallel()
 

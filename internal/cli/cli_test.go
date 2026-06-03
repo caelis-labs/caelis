@@ -80,8 +80,9 @@ func TestRunHelpReturnsNil(t *testing.T) {
 		t.Fatalf("stdout = %q, want empty", stdout.String())
 	}
 	if got := stderr.String(); !strings.Contains(got, "Usage of caelis:") ||
-		!strings.Contains(got, "Permission mode: auto-review|manual") {
-		t.Fatalf("stderr = %q, want help usage with permission mode", got)
+		!strings.Contains(got, "Approval mode: auto-review|manual") ||
+		!strings.Contains(got, "Policy profile: workspace-write") {
+		t.Fatalf("stderr = %q, want help usage with approval mode and policy profile", got)
 	}
 }
 

@@ -706,7 +706,7 @@ Blocker: normal prompt overflowed after the tool denial result
 Next action: resume from the compact checkpoint and return the final answer
 
 ## Current Progress
-- the ECHO tool result was denied by auto-review policy
+- the ECHO tool result was denied by workspace-write policy
 
 ## Next Actions
 1. resume from the compact checkpoint and return the final answer`
@@ -728,7 +728,7 @@ Next action: resume from the compact checkpoint and return the final answer
 		}
 	}
 	for _, text := range requestMessageTexts(req) {
-		if strings.Contains(text, "CONTEXT CHECKPOINT") && strings.Contains(strings.ToLower(text), "auto-review policy") {
+		if strings.Contains(text, "CONTEXT CHECKPOINT") && strings.Contains(strings.ToLower(text), "workspace-write policy") {
 			m.sawCheckpointOnRetry = true
 			return func(yield func(*model.StreamEvent, error) bool) {
 				yield(&model.StreamEvent{

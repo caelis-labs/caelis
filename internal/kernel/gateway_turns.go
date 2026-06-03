@@ -115,6 +115,7 @@ func (g *Gateway) runTurn(
 	if len(runReq.ContentParts) == 0 && len(req.ContentParts) > 0 {
 		runReq.ContentParts = append([]model.ContentPart(nil), req.ContentParts...)
 	}
+	normalizeRunRequestPolicyProfile(&runReq)
 	runReq.ApprovalRequester = approvalRequesterFunc(func(approvalCtx context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
 		return g.resolveApprovalRequest(ctx, approvalCtx, handle, &req, runReq.AgentSpec.Model)
 	})
@@ -155,6 +156,22 @@ func (g *Gateway) runTurn(
 		handle.publishSessionEvent(event)
 		g.noteSessionCursor(session.SessionID, event.ID)
 	}
+}
+
+func normalizeRunRequestPolicyProfile(req *agent.RunRequest) {
+	if req == nil || len(req.AgentSpec.Metadata) == 0 {
+		return
+	}
+	raw, ok := req.AgentSpec.Metadata["policy_mode"].(string)
+	if !ok {
+		return
+	}
+	profile := normalizePolicyProfile(raw)
+	if profile == "" {
+		delete(req.AgentSpec.Metadata, "policy_mode")
+		return
+	}
+	req.AgentSpec.Metadata["policy_mode"] = profile
 }
 
 func (g *Gateway) runParticipantTurn(

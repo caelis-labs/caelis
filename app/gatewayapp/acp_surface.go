@@ -47,7 +47,7 @@ func (p gatewayACPSurface) SessionModes(ctx context.Context, session session.Ses
 		CurrentModeID: normalizeSessionModeOrDefault(state.SessionMode),
 		AvailableModes: []acp.SessionMode{
 			{ID: "auto-review", Name: "Auto Review", Description: "Use automatic AI approval review for sensitive requests."},
-			{ID: "manual", Name: "Manual", Description: "Prompt for user approval for sensitive requests."},
+			{ID: "manual", Name: "Manual", Description: "Prompt the client for sensitive approval requests."},
 		},
 	}, nil
 }
@@ -223,8 +223,8 @@ func (p gatewayACPSurface) modeConfigOption(ctx context.Context, session session
 	return acp.SessionConfigOption{
 		Type:         "select",
 		ID:           acpConfigModeID,
-		Name:         "Approval Preset",
-		Description:  "Choose an approval and sandboxing preset for this session",
+		Name:         "Approval Mode",
+		Description:  "Choose how approval requests are resolved for this session",
 		Category:     "mode",
 		CurrentValue: modes.CurrentModeID,
 		Options:      modeSelectOptions(modes.AvailableModes),

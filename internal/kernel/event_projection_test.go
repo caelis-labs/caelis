@@ -93,7 +93,7 @@ func TestCanonicalApprovalPayloadTableDriven(t *testing.T) {
 					Input: json.RawMessage(`{"command":"make generate"}`),
 				},
 				Metadata: map[string]any{
-					"approval_reason":     "host execution requires user approval",
+					"approval_reason":     "host execution requires approval",
 					"sandbox_permissions": "require_escalated",
 					"justification":       "Do you want to run this command on the host?",
 				},
@@ -103,7 +103,7 @@ func TestCanonicalApprovalPayloadTableDriven(t *testing.T) {
 				if payload == nil {
 					t.Fatal("canonicalApprovalPayload() = nil, want payload")
 				}
-				if payload.Reason != "host execution requires user approval" {
+				if payload.Reason != "host execution requires approval" {
 					t.Fatalf("payload.Reason = %q", payload.Reason)
 				}
 				if payload.Justification != "Do you want to run this command on the host?" {

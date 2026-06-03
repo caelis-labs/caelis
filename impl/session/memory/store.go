@@ -269,11 +269,18 @@ func (s *Store) SnapshotState(
 	_ context.Context,
 	ref session.SessionRef,
 ) (map[string]any, error) {
-	record, ok := s.lookup(ref)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	record, ok := s.lookupLocked(ref)
 	if !ok {
 		return nil, session.ErrSessionNotFound
 	}
-	return session.CloneState(record.state), nil
+	if record.state == nil {
+		record.state = map[string]any{}
+		record.session.UpdatedAt = s.now()
+	}
+	return cloneState(record.state), nil
 }
 
 func (s *Store) ReplaceState(
@@ -288,7 +295,7 @@ func (s *Store) ReplaceState(
 	if !ok {
 		return session.ErrSessionNotFound
 	}
-	record.state = session.CloneState(state)
+	record.state = cloneState(state)
 	record.session.UpdatedAt = s.now()
 	return nil
 }
@@ -309,11 +316,11 @@ func (s *Store) UpdateState(
 	if !ok {
 		return session.ErrSessionNotFound
 	}
-	next, err := update(session.CloneState(record.state))
+	next, err := update(cloneState(record.state))
 	if err != nil {
 		return err
 	}
-	record.state = session.CloneState(next)
+	record.state = cloneState(next)
 	record.session.UpdatedAt = s.now()
 	return nil
 }
@@ -503,6 +510,14 @@ func existingEventIDSet(events []*session.Event) map[string]struct{} {
 		if id := strings.TrimSpace(event.ID); id != "" {
 			out[id] = struct{}{}
 		}
+	}
+	return out
+}
+
+func cloneState(state map[string]any) map[string]any {
+	out := session.CloneState(state)
+	if out == nil {
+		return map[string]any{}
 	}
 	return out
 }

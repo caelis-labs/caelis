@@ -35,6 +35,7 @@ type DoctorReport struct {
 	ConfigPermissionsSecure         bool                     `json:"config_permissions_secure,omitempty"`
 	SessionID                       string                   `json:"session_id,omitempty"`
 	SessionMode                     string                   `json:"session_mode,omitempty"`
+	PolicyProfile                   string                   `json:"policy_profile,omitempty"`
 	ActiveModelAlias                string                   `json:"active_model_alias,omitempty"`
 	ActiveProvider                  string                   `json:"active_provider,omitempty"`
 	ActiveModel                     string                   `json:"active_model,omitempty"`
@@ -103,7 +104,8 @@ func (s *Stack) Doctor(ctx context.Context, req DoctorRequest) (DoctorReport, er
 	ref := s.resolveDoctorSessionRef(ctx, req)
 	report.SessionID = strings.TrimSpace(ref.SessionID)
 	s.mu.RLock()
-	report.SessionMode = policyMode(s.runtime.PermissionMode)
+	report.SessionMode = approvalMode(s.runtime.ApprovalMode)
+	report.PolicyProfile = policyProfile(s.runtime.PolicyProfile)
 	s.mu.RUnlock()
 	alias := ""
 	modelRef := ""
@@ -114,6 +116,9 @@ func (s *Stack) Doctor(ctx context.Context, req DoctorRequest) (DoctorReport, er
 		}
 		if strings.TrimSpace(state.SessionMode) != "" {
 			report.SessionMode = strings.TrimSpace(state.SessionMode)
+		}
+		if strings.TrimSpace(state.PolicyProfile) != "" {
+			report.PolicyProfile = strings.TrimSpace(state.PolicyProfile)
 		}
 		alias = strings.TrimSpace(state.ModelAlias)
 		modelRef = strings.TrimSpace(firstNonEmpty(state.ModelID, state.ModelAlias))
@@ -217,6 +222,7 @@ func FormatDoctorText(report DoctorReport) string {
 		fmt.Sprintf("config_file_mode: %s", firstNonEmpty(strings.TrimSpace(report.ConfigFileMode), "-")),
 		fmt.Sprintf("session_id: %s", firstNonEmpty(strings.TrimSpace(report.SessionID), "-")),
 		fmt.Sprintf("session_mode: %s", firstNonEmpty(strings.TrimSpace(report.SessionMode), "auto-review")),
+		fmt.Sprintf("policy_profile: %s", firstNonEmpty(strings.TrimSpace(report.PolicyProfile), "workspace-write")),
 		fmt.Sprintf("active_model_alias: %s", firstNonEmpty(strings.TrimSpace(report.ActiveModelAlias), "-")),
 		fmt.Sprintf("active_provider: %s", firstNonEmpty(strings.TrimSpace(report.ActiveProvider), "-")),
 		fmt.Sprintf("active_model: %s", firstNonEmpty(strings.TrimSpace(report.ActiveModel), "-")),

@@ -9,6 +9,7 @@ import (
 type AppConfig = configstore.AppConfig
 type AgentConfig = configstore.AgentConfig
 type SandboxConfig = configstore.SandboxConfig
+type RuntimeConfig = configstore.RuntimeConfig
 type AgentProviderConfig = configstore.AgentProviderConfig
 type persistedModelConfig = configstore.PersistedModelConfig
 

@@ -820,9 +820,6 @@ func (m *Manager) permissionHandler(
 ) func(context.Context, client.RequestPermissionRequest) (client.RequestPermissionResponse, error) {
 	return func(ctx context.Context, req client.RequestPermissionRequest) (client.RequestPermissionResponse, error) {
 		trimmedAgent := strings.TrimSpace(agent)
-		if auto, ok := acputil.AutoApproveAllOnce(mode, trimmedAgent, req); ok {
-			return auto, nil
-		}
 		if requester != nil {
 			resp, err := requester.RequestControllerApproval(ctx, translateApprovalRequest(session, trimmedAgent, mode, req))
 			if err != nil {
@@ -846,9 +843,6 @@ func (r *controllerRun) permissionHandler(ctx context.Context, req client.Reques
 	requester := r.approvalRequester
 	agent := strings.TrimSpace(r.agent)
 	r.mu.Unlock()
-	if auto, ok := acputil.AutoApproveAllOnce(mode, agent, req); ok {
-		return auto, nil
-	}
 	if requester != nil {
 		resp, err := requester.RequestControllerApproval(ctx, translateApprovalRequest(activeSession, agent, mode, req))
 		if err != nil {
@@ -1285,9 +1279,6 @@ func (r *participantRun) permissionHandler(ctx context.Context, req client.Reque
 	requester := r.approvalRequester
 	agent := strings.TrimSpace(r.agent)
 	r.mu.Unlock()
-	if auto, ok := acputil.AutoApproveAllOnce(mode, agent, req); ok {
-		return auto, nil
-	}
 	if requester != nil {
 		resp, err := requester.RequestControllerApproval(ctx, translateApprovalRequest(activeSession, agent, mode, req))
 		if err != nil {

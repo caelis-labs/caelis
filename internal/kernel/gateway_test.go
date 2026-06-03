@@ -848,8 +848,8 @@ func TestBeginTurnSkipsResolverForACPControllerSession(t *testing.T) {
 	if rt.lastReq.Input != "hello controller" || rt.lastReq.SessionRef.SessionID != "s1" {
 		t.Fatalf("runtime request = %+v, want controller turn input/session", rt.lastReq)
 	}
-	if got := rt.lastReq.AgentSpec.Metadata["policy_mode"]; got != "manual" {
-		t.Fatalf("runtime policy_mode = %#v, want preserved controller policy metadata", got)
+	if _, ok := rt.lastReq.AgentSpec.Metadata["policy_mode"]; ok {
+		t.Fatalf("runtime policy_mode = %#v, want legacy approval mode removed from policy metadata", rt.lastReq.AgentSpec.Metadata["policy_mode"])
 	}
 }
 
@@ -1177,7 +1177,102 @@ func TestBeginTurnBridgesApprovalRequestsIntoHandleEvents(t *testing.T) {
 	}
 }
 
-func TestBeginTurnRequestModeManualBypassesDefaultAutoReview(t *testing.T) {
+func TestBeginTurnDefaultManualApprovalModePromptsClient(t *testing.T) {
+	t.Parallel()
+
+	activeSession := session.Session{
+		SessionRef: session.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+		},
+	}
+	rt := &approvalRuntime{session: activeSession}
+	gw, err := New(Config{
+		Sessions: staticSessionService{
+			session: activeSession,
+			state:   map[string]any{},
+		},
+		Runtime:             rt,
+		Resolver:            staticResolver{resolved: ResolvedTurn{RunRequest: agent.RunRequest{}}},
+		DefaultApprovalMode: ApprovalModeManual,
+		ApprovalReviewer: staticApprovalReviewer{
+			result: ApprovalReviewResult{Approved: true},
+		},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	result, err := gw.BeginTurn(context.Background(), BeginTurnRequest{
+		SessionRef: activeSession.SessionRef,
+		Input:      "hello",
+	})
+	if err != nil {
+		t.Fatalf("BeginTurn() error = %v", err)
+	}
+	first := <-result.Handle.Events()
+	if first.Event.Kind != EventKindApprovalRequested {
+		t.Fatalf("first event kind = %q, want approval_requested from default manual mode", first.Event.Kind)
+	}
+	if err := result.Handle.Submit(context.Background(), SubmitRequest{
+		Kind: SubmissionKindApproval,
+		Approval: &ApprovalDecision{
+			Approved: true,
+			Outcome:  "approved",
+		},
+	}); err != nil {
+		t.Fatalf("Submit(approval) error = %v", err)
+	}
+	got := collectHandleEvents(t, result.Handle)
+	if len(got) == 0 {
+		t.Fatal("collectHandleEvents() = empty, want completion event stream")
+	}
+}
+
+func TestBeginTurnSessionApprovalModeOverridesDefaultManual(t *testing.T) {
+	t.Parallel()
+
+	activeSession := session.Session{
+		SessionRef: session.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+		},
+	}
+	rt := &approvalRuntime{session: activeSession}
+	gw, err := New(Config{
+		Sessions: staticSessionService{
+			session: activeSession,
+			state:   map[string]any{StateCurrentApprovalMode: string(ApprovalModeAutoReview)},
+		},
+		Runtime:             rt,
+		Resolver:            staticResolver{resolved: ResolvedTurn{RunRequest: agent.RunRequest{}}},
+		DefaultApprovalMode: ApprovalModeManual,
+		ApprovalReviewer: staticApprovalReviewer{
+			result: ApprovalReviewResult{Approved: true},
+		},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	result, err := gw.BeginTurn(context.Background(), BeginTurnRequest{
+		SessionRef: activeSession.SessionRef,
+		Input:      "hello",
+	})
+	if err != nil {
+		t.Fatalf("BeginTurn() error = %v", err)
+	}
+	first := <-result.Handle.Events()
+	if first.Event.Kind != EventKindApprovalReview {
+		t.Fatalf("first event kind = %q, want approval_review from session auto-review override", first.Event.Kind)
+	}
+	got := collectHandleEvents(t, result.Handle)
+	for _, env := range append([]EventEnvelope{first}, got...) {
+		if env.Event.Kind == EventKindApprovalRequested {
+			t.Fatal("got approval_requested, want session auto-review override to beat default manual")
+		}
+	}
+}
+
+func TestBeginTurnRequestModeManualIgnoredUnderAutoReview(t *testing.T) {
 	t.Parallel()
 
 	activeSession := session.Session{
@@ -1209,25 +1304,21 @@ func TestBeginTurnRequestModeManualBypassesDefaultAutoReview(t *testing.T) {
 		t.Fatalf("BeginTurn() error = %v", err)
 	}
 	first := <-result.Handle.Events()
-	if first.Event.Kind != EventKindApprovalRequested {
-		t.Fatalf("first event kind = %q, want manual approval_requested", first.Event.Kind)
-	}
-	if err := result.Handle.Submit(context.Background(), SubmitRequest{
-		Kind: SubmissionKindApproval,
-		Approval: &ApprovalDecision{
-			Approved: true,
-			Outcome:  "approved",
-		},
-	}); err != nil {
-		t.Fatalf("Submit(approval) error = %v", err)
+	if first.Event.Kind != EventKindApprovalReview {
+		t.Fatalf("first event kind = %q, want auto approval_review", first.Event.Kind)
 	}
 	got := collectHandleEvents(t, result.Handle)
 	if len(got) == 0 {
-		t.Fatal("collectHandleEvents() = empty, want completion event stream")
+		t.Fatal("collectHandleEvents() = empty, want terminal approval review event")
+	}
+	for _, env := range append([]EventEnvelope{first}, got...) {
+		if env.Event.Kind == EventKindApprovalRequested {
+			t.Fatal("got manual approval_requested, want request mode ignored under auto-review")
+		}
 	}
 }
 
-func TestBeginTurnApprovalModeSnapshotErrorFailsClosed(t *testing.T) {
+func TestBeginTurnApprovalModeSnapshotErrorFailsTurn(t *testing.T) {
 	t.Parallel()
 
 	activeSession := session.Session{
@@ -1259,14 +1350,8 @@ func TestBeginTurnApprovalModeSnapshotErrorFailsClosed(t *testing.T) {
 		t.Fatalf("BeginTurn() error = %v", err)
 	}
 	first := <-result.Handle.Events()
-	if first.Event.Kind != EventKindApprovalRequested {
-		t.Fatalf("first event kind = %q, want manual approval request on state read failure", first.Event.Kind)
-	}
-	if err := result.Handle.Submit(context.Background(), SubmitRequest{
-		Kind:     SubmissionKindApproval,
-		Approval: &ApprovalDecision{Approved: false, Outcome: string(ApprovalStatusRejected)},
-	}); err != nil {
-		t.Fatalf("Submit(approval) error = %v", err)
+	if first.Event.Kind != EventKindLifecycle || first.Err == nil {
+		t.Fatalf("first event = %+v, want lifecycle error on state read failure", first)
 	}
 	for range result.Handle.Events() {
 	}

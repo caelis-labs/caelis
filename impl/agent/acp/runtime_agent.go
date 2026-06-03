@@ -30,12 +30,16 @@ type ApprovalModelResolver = approval.ModelResolver
 
 // Config configures one runtime-backed ACP agent adapter.
 type Config struct {
-	Runtime               agent.Runtime
-	Sessions              session.Service
-	BuildAgentSpec        BuildAgentSpecFunc
-	Projector             projector.Projector
-	Loader                acp.SessionLoader
-	Modes                 acp.ModeProvider
+	Runtime        agent.Runtime
+	Sessions       session.Service
+	BuildAgentSpec BuildAgentSpecFunc
+	Projector      projector.Projector
+	Loader         acp.SessionLoader
+	Modes          acp.ModeProvider
+	// ApprovalModes is the dedicated approval-routing mode source. Do not point
+	// this at app-owned assembly modes; those are client-visible session modes,
+	// while approval routing is restricted to manual/auto-review.
+	ApprovalModes         acp.ModeProvider
 	Config                acp.ConfigProvider
 	Models                acp.ModelProvider
 	Commands              acp.CommandProvider
@@ -56,6 +60,7 @@ type RuntimeAgent struct {
 	projector             projector.Projector
 	loader                acp.SessionLoader
 	modes                 acp.ModeProvider
+	approvalModes         acp.ModeProvider
 	config                acp.ConfigProvider
 	models                acp.ModelProvider
 	commands              acp.CommandProvider
@@ -105,6 +110,10 @@ func New(cfg Config) (*RuntimeAgent, error) {
 			Config:    cfg.Config,
 		})}
 	}
+	approvalModes := cfg.ApprovalModes
+	if approvalModes == nil {
+		approvalModes = cfg.Modes
+	}
 	return &RuntimeAgent{
 		runtime:               cfg.Runtime,
 		sessions:              cfg.Sessions,
@@ -112,6 +121,7 @@ func New(cfg Config) (*RuntimeAgent, error) {
 		projector:             eventProjector,
 		loader:                sessionLoader,
 		modes:                 cfg.Modes,
+		approvalModes:         approvalModes,
 		config:                cfg.Config,
 		models:                cfg.Models,
 		commands:              cfg.Commands,
@@ -347,6 +357,20 @@ func (a *RuntimeAgent) AvailableCommands(ctx context.Context, sessionID string) 
 	return a.commands.AvailableCommands(ctx, sessionID)
 }
 
+func (a *RuntimeAgent) promptApprovalMode(ctx context.Context, activeSession session.Session) (approval.Mode, error) {
+	if a == nil || a.approvalModes == nil {
+		return approval.ModeAutoReview, nil
+	}
+	modes, err := a.approvalModes.SessionModes(ctx, activeSession)
+	if err != nil {
+		return approval.ModeAutoReview, err
+	}
+	if modes == nil {
+		return approval.ModeAutoReview, nil
+	}
+	return approval.NormalizeMode(modes.CurrentModeID), nil
+}
+
 func (a *RuntimeAgent) Prompt(ctx context.Context, req acp.PromptRequest, cb acp.PromptCallbacks) (acp.PromptResponse, error) {
 	activeSession, err := a.session(ctx, req.SessionID)
 	if err != nil {
@@ -371,6 +395,11 @@ func (a *RuntimeAgent) Prompt(ctx context.Context, req acp.PromptRequest, cb acp
 	defer a.clearCancel(req.SessionID)
 	defer cancel()
 
+	approvalMode, err := a.promptApprovalMode(ctx, activeSession)
+	if err != nil {
+		return acp.PromptResponse{}, err
+	}
+
 	result, err := a.runtime.Run(runCtx, agent.RunRequest{
 		SessionRef:   ref,
 		Input:        input,
@@ -380,6 +409,7 @@ func (a *RuntimeAgent) Prompt(ctx context.Context, req acp.PromptRequest, cb acp
 			callbacks:     cb,
 			reviewer:      a.approvalReviewer,
 			modelResolver: a.approvalModelResolver,
+			mode:          approvalMode,
 		},
 		AgentSpec: spec,
 	})
@@ -1086,13 +1116,14 @@ type approvalRequester struct {
 	callbacks     acp.PromptCallbacks
 	reviewer      approval.Reviewer
 	modelResolver ApprovalModelResolver
+	mode          approval.Mode
 }
 
 func (r approvalRequester) RequestApproval(
 	ctx context.Context,
 	req agent.ApprovalRequest,
 ) (agent.ApprovalResponse, error) {
-	if r.reviewer != nil && approval.NormalizeMode(req.Mode) != approval.ModeManual {
+	if r.reviewer != nil && r.mode != approval.ModeManual {
 		return r.reviewApproval(ctx, req)
 	}
 	return r.requestClientPermission(ctx, req)
@@ -1108,7 +1139,7 @@ func (r approvalRequester) reviewApproval(ctx context.Context, req agent.Approva
 		SessionRef:     req.SessionRef,
 		RunID:          strings.TrimSpace(req.RunID),
 		TurnID:         strings.TrimSpace(req.TurnID),
-		Mode:           approval.NormalizeMode(req.Mode),
+		Mode:           r.mode,
 		ReviewID:       approval.ReviewID("acp-approval-review", payload),
 		Model:          reviewModel,
 		Approval:       approval.ClonePayload(payload),

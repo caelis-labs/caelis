@@ -902,7 +902,7 @@ func TestRuntimeRecoversFromContextOverflowByCompactingMidTurn(t *testing.T) {
 	for _, event := range loaded.Events {
 		if event != nil && event.Type == session.EventTypeCompact {
 			sawCompact = true
-			if !strings.Contains(strings.ToLower(session.EventText(event)), "auto-review policy") {
+			if !strings.Contains(strings.ToLower(session.EventText(event)), "workspace-write policy") {
 				t.Fatalf("compact event text = %q, want retained tool result summary", session.EventText(event))
 			}
 		}
@@ -922,7 +922,7 @@ func TestRuntimeRecoversFromContextOverflowByCompactingMidTurn(t *testing.T) {
 		t.Fatalf("compact source event count = %d, want > 0", data.SourceEventCount)
 	}
 	promptEvents := compact.PromptEventsFromLatestCompact(loaded.Events)
-	if len(promptEvents) == 0 || !strings.Contains(strings.ToLower(session.EventText(promptEvents[0])), "auto-review policy") {
+	if len(promptEvents) == 0 || !strings.Contains(strings.ToLower(session.EventText(promptEvents[0])), "workspace-write policy") {
 		t.Fatalf("prompt events after compact = %+v, want tool result continuity in checkpoint overlay", promptEvents)
 	}
 }

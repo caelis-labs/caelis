@@ -1488,8 +1488,8 @@ func TestRuntimeRunAppliesAssemblyModeAndConfigOverridesFromSessionState(t *test
 		t.Fatalf("factory specs len = %d, want %d", got, want)
 	}
 	spec := specs[0]
-	if got := strings.TrimSpace(spec.Metadata["policy_mode"].(string)); got != "plan" {
-		t.Fatalf("policy_mode = %q, want %q", got, "plan")
+	if got := strings.TrimSpace(spec.Metadata["policy_mode"].(string)); got != "workspace-write" {
+		t.Fatalf("policy_mode = %q, want %q", got, "workspace-write")
 	}
 	if got := strings.TrimSpace(spec.Metadata["system_prompt"].(string)); got != "mode-plan-marker" {
 		t.Fatalf("system_prompt = %q, want %q", got, "mode-plan-marker")
@@ -2306,8 +2306,8 @@ func TestRuntimePolicyUnknownModeFallsBackToDefaultPolicy(t *testing.T) {
 		t.Fatalf("result.IsError = false, want policy denial")
 	}
 	payload := testToolResultPayload(t, result)
-	if got := payload["policy_mode"]; got != presets.ModeAutoReview {
-		t.Fatalf("result policy_mode = %v, want %s", got, presets.ModeAutoReview)
+	if got := payload["policy_mode"]; got != presets.ModeDefault {
+		t.Fatalf("result policy_mode = %v, want %s", got, presets.ModeDefault)
 	}
 }
 
@@ -2315,16 +2315,17 @@ func TestNormalizePolicyModeHandlesDefaultAliasesAndPreservesCustomNames(t *test
 	t.Parallel()
 
 	tests := map[string]string{
-		"":             "auto-review",
-		"auto":         "auto-review",
-		"auto_review":  "auto-review",
-		"manual":       "manual",
-		"default":      "auto-review",
-		"plan":         "auto-review",
-		"full_access":  "auto-review",
-		"full_control": "auto-review",
-		"locked-down":  "locked-down",
-		"TeamStrict":   "TeamStrict",
+		"":                "workspace-write",
+		"auto":            "workspace-write",
+		"auto_review":     "workspace-write",
+		"manual":          "workspace-write",
+		"default":         "workspace-write",
+		"plan":            "workspace-write",
+		"full_access":     "workspace-write",
+		"full_control":    "workspace-write",
+		"workspace_write": "workspace-write",
+		"locked-down":     "locked-down",
+		"TeamStrict":      "TeamStrict",
 	}
 	for input, want := range tests {
 		if got := normalizePolicyMode(input); got != want {

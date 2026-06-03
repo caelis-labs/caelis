@@ -94,7 +94,7 @@ func New(cfg Config) (*Runtime, error) {
 		r.policies = reg
 	}
 	if r.defaultPolicyMode == "" {
-		r.defaultPolicyMode = presets.ModeAutoReview
+		r.defaultPolicyMode = presets.ModeDefault
 	}
 	r.defaultPolicyMode = normalizePolicyMode(r.defaultPolicyMode)
 	if err := validateControlPlaneConfig(cfg); err != nil {
