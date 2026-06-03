@@ -448,7 +448,126 @@ func themeColorCacheKey(c color.Color) string {
 func normalizeGlamourMarkdown(raw string) string {
 	raw = strings.ReplaceAll(raw, "\r\n", "\n")
 	raw = normalizeTerminalMarkdown(raw)
-	return normalizeIndentedCodeFences(raw)
+	raw = normalizeIndentedCodeFences(raw)
+	return escapeMultilineInlineCodeSpans(raw)
+}
+
+// Glamour/CommonMark allows code spans to cross newlines. The streaming tail
+// renderer intentionally treats inline code as line-local, so keep the stable
+// Glamour prefix on the same visual contract to avoid large transient
+// background spans while text is still arriving.
+func escapeMultilineInlineCodeSpans(raw string) string {
+	if raw == "" || !strings.Contains(raw, "`") {
+		return raw
+	}
+
+	var out strings.Builder
+	var segment strings.Builder
+	inFence := false
+	fencePrefix := ""
+	flushSegment := func() {
+		if segment.Len() == 0 {
+			return
+		}
+		out.WriteString(escapeMultilineInlineCodeSpansInSegment(segment.String()))
+		segment.Reset()
+	}
+
+	for _, line := range strings.SplitAfter(raw, "\n") {
+		lineText := strings.TrimSuffix(line, "\n")
+		trimmed := strings.TrimSpace(lineText)
+		if isFenceDelimiter(trimmed) {
+			if !inFence {
+				flushSegment()
+				inFence = true
+				fencePrefix = extractFencePrefix(trimmed)
+				out.WriteString(line)
+				continue
+			}
+			if isClosingFence(trimmed, fencePrefix) {
+				out.WriteString(line)
+				inFence = false
+				fencePrefix = ""
+				continue
+			}
+		}
+		if inFence {
+			out.WriteString(line)
+			continue
+		}
+		segment.WriteString(line)
+	}
+	flushSegment()
+	return out.String()
+}
+
+type inlineDelimiterRange struct {
+	start int
+	end   int
+}
+
+func escapeMultilineInlineCodeSpansInSegment(segment string) string {
+	if segment == "" || !strings.Contains(segment, "`") || !strings.Contains(segment, "\n") {
+		return segment
+	}
+	var ranges []inlineDelimiterRange
+	for i := 0; i < len(segment); {
+		if segment[i] != '`' || isEscapedInlineBacktick(segment, i) {
+			i++
+			continue
+		}
+		run := countInlineMarkerRun(segment, i, '`')
+		closing := findInlineCodeSpanClosingDelimiter(segment, i+run, run)
+		if closing < 0 {
+			i += run
+			continue
+		}
+		if strings.Contains(segment[i+run:closing], "\n") {
+			ranges = append(ranges,
+				inlineDelimiterRange{start: i, end: i + run},
+				inlineDelimiterRange{start: closing, end: closing + run},
+			)
+		}
+		i = closing + run
+	}
+	if len(ranges) == 0 {
+		return segment
+	}
+	var out strings.Builder
+	last := 0
+	for _, r := range ranges {
+		out.WriteString(segment[last:r.start])
+		for i := r.start; i < r.end; i++ {
+			out.WriteByte('\\')
+			out.WriteByte(segment[i])
+		}
+		last = r.end
+	}
+	out.WriteString(segment[last:])
+	return out.String()
+}
+
+func findInlineCodeSpanClosingDelimiter(text string, from int, run int) int {
+	for i := from; i < len(text); {
+		if text[i] != '`' {
+			i++
+			continue
+		}
+		found := countInlineMarkerRun(text, i, '`')
+		if found == run {
+			return i
+		}
+		i += found
+	}
+	return -1
+}
+
+func isEscapedInlineBacktick(text string, idx int) bool {
+	backslashes := 0
+	for i := idx - 1; i >= 0 && text[i] == '\\'; i-- {
+		backslashes++
+	}
+	return backslashes%2 == 1
 }
 
 func normalizeIndentedCodeFences(raw string) string {
@@ -572,7 +691,7 @@ func glamourStreamingNarrativeRowsObserved(blockID, raw, rolePrefix string, role
 }
 
 const streamingStableTailMinRunes = 96
-const streamingNarrativeRendererVersion = "stream-md-v3"
+const streamingNarrativeRendererVersion = "stream-md-v4"
 
 func renderStreamingNarrativeTailRows(blockID, raw, rolePrefix string, roleStyle tuikit.LineStyle, width int, theme tuikit.Theme) []RenderedRow {
 	raw = strings.ReplaceAll(strings.ReplaceAll(raw, "\r\n", "\n"), "\r", "\n")

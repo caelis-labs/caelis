@@ -290,6 +290,35 @@ func TestNarrativeInlineCodeStyleScopesShortCJKListAcronym(t *testing.T) {
 	}
 }
 
+func TestActiveMarkdownStreamDoesNotStyleMultilineInlineCodeAcrossStablePrefix(t *testing.T) {
+	theme := tuikit.ResolveThemeWithState(false, false, colorprofile.TrueColor)
+	stable := strings.Join([]string{
+		strings.Repeat("stable intro ", 12) + "`partial",
+		"ordinary text should not receive inline code background",
+		"more ordinary text should also stay body styled` after",
+		"",
+		"",
+	}, "\n")
+	tail := strings.Repeat("tail text remains long enough for stable-prefix promotion. ", 4)
+	raw := stable + tail
+	stableRaw, tailRaw := splitStableStreamingMarkdown(raw)
+	if strings.TrimSpace(stableRaw) == "" || strings.TrimSpace(tailRaw) == "" {
+		t.Fatalf("test setup did not split stable prefix and tail\nstable=%q\ntail=%q", stableRaw, tailRaw)
+	}
+
+	rows := renderActiveNarrativeBufferTestRows("block-1", raw, "· ", tuikit.LineStyleAssistant, 120, theme)
+	styled := joinRenderedStyled(rows)
+	bgText := normalizeInlineStyleText(textWithSGRBackground(styled, sgrBackgroundCode(t, theme.MarkdownInlineCodeStyle().GetBackground())))
+	for _, notWant := range []string{
+		"ordinary text should not receive inline code background",
+		"more ordinary text should also stay body styled",
+	} {
+		if strings.Contains(bgText, notWant) {
+			t.Fatalf("multiline inline-code background leaked onto ordinary text %q\nbgText=%q\nplain=%q\nstyled=%q", notWant, bgText, joinRenderedPlain(rows), styled)
+		}
+	}
+}
+
 func TestGlamourListStrongDoesNotStealToolCodeColor(t *testing.T) {
 	raw := strings.Join([]string{
 		"可用工具",
