@@ -2,6 +2,7 @@ package gatewaydriver
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -23,25 +24,56 @@ func workspaceStatusDisplay(ctx context.Context, cwd string) string {
 	}
 	status, ok := readGitWorkspaceStatus(ctx, cwd)
 	if !ok {
-		return cwd
+		return compactHomePath(cwd, userHomeDir())
 	}
 	return formatWorkspaceStatusDisplay(cwd, status)
 }
 
 func formatWorkspaceStatusDisplay(cwd string, status gitWorkspaceStatus) string {
+	return formatWorkspaceStatusDisplayWithHome(cwd, status, userHomeDir())
+}
+
+func formatWorkspaceStatusDisplayWithHome(cwd string, status gitWorkspaceStatus, home string) string {
 	cwd = strings.TrimSpace(cwd)
+	displayPath := compactHomePath(cwd, home)
 	branch := strings.TrimSpace(status.Branch)
 	if cwd == "" || branch == "" {
-		return cwd
+		return displayPath
 	}
-	if strings.Contains(cwd, " [⎇ ") && strings.HasSuffix(cwd, "]") {
-		return cwd
+	if strings.Contains(displayPath, " [⎇ ") && strings.HasSuffix(displayPath, "]") {
+		return displayPath
 	}
-	out := cwd + " [⎇ " + branch
+	out := displayPath + " [⎇ " + branch
 	if status.Dirty {
 		out += "*"
 	}
 	return out + "]"
+}
+
+func compactHomePath(path string, home string) string {
+	path = strings.TrimSpace(path)
+	home = strings.TrimRight(strings.TrimSpace(home), `/\`)
+	if path == "" || home == "" || home == "/" {
+		return path
+	}
+	if path == home {
+		return "~"
+	}
+	for _, sep := range []string{"/", "\\"} {
+		prefix := home + sep
+		if strings.HasPrefix(path, prefix) {
+			return "~" + strings.TrimPrefix(path, home)
+		}
+	}
+	return path
+}
+
+func userHomeDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return home
 }
 
 func readGitWorkspaceStatus(ctx context.Context, cwd string) (gitWorkspaceStatus, bool) {

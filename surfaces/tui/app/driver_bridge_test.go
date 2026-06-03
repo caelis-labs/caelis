@@ -1249,12 +1249,12 @@ func TestFormatStatusSnapshotUsesFriendlyThemeableLines(t *testing.T) {
 		SessionReasoningTokens:   50,
 		SessionTotalTokens:       12800,
 	})
-	for _, forbidden := range []string{"Status", "Tokens", "Warnings", "status:", "provider:", "model:", "alias:", "Provider:", "Store:", "\n  Reason:", "Session"} {
+	for _, forbidden := range []string{"Status", "Tokens", "Warnings", "status:", "provider:", "model:", "alias:", "Provider:", "Store:", "\n  Reason:"} {
 		if strings.Contains(got, forbidden) {
 			t.Fatalf("formatStatusSnapshot() = %q, should not contain log-style label %q", got, forbidden)
 		}
 	}
-	for _, want := range []string{"  Model:", "  Mode:", "  Sandbox:", "  Workspace:", "  Scope", "-----", "total", "12,800", "main", "10,150", "sub-agent", "2,040", "auto-review", "610", "Warning:", "API key is missing"} {
+	for _, want := range []string{"  Model:", "  Mode:", "  Sandbox:", "  Workspace:", "  Session:", "sess-1", "  Scope", "-----", "total", "12,800", "main", "10,150", "sub-agent", "2,040", "auto-review", "610", "Warning:", "API key is missing"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("formatStatusSnapshot() = %q, want substring %q", got, want)
 		}
@@ -1285,7 +1285,7 @@ func TestFormatStatusSnapshotOmitsSetupReasonDetails(t *testing.T) {
 		SandboxWorkspaceSetupReason: "workspace ACL manifest is stale and will be repaired lazily",
 		SandboxSetupMarkerReason:    "stale sandbox setup marker",
 	})
-	for _, forbidden := range []string{"Status", "Tokens", "\n  Reason:", "workspace ACL manifest", "stale sandbox setup marker", "Store:", "Provider:", "Session"} {
+	for _, forbidden := range []string{"Status", "Tokens", "\n  Reason:", "workspace ACL manifest", "stale sandbox setup marker", "Store:", "Provider:"} {
 		if strings.Contains(got, forbidden) {
 			t.Fatalf("formatStatusSnapshot() = %q, should omit %q", got, forbidden)
 		}
@@ -1701,12 +1701,12 @@ func TestSlashStatusShowsGuidanceAndWarnings(t *testing.T) {
 	if !ok {
 		t.Fatalf("slashStatus() msg = %#v, want LogChunkMsg", msgs[0])
 	}
-	for _, want := range []string{"  Model:", "/connect", "Warning:", "API key is missing", "Commands may run on the host", "Auto-Review remains enabled"} {
+	for _, want := range []string{"  Model:", "  Session:", "sess-1", "/connect", "Warning:", "API key is missing", "Commands may run on the host", "Auto-Review remains enabled"} {
 		if !strings.Contains(log.Chunk, want) {
 			t.Fatalf("slashStatus() chunk = %q, want substring %q", log.Chunk, want)
 		}
 	}
-	for _, forbidden := range []string{"Status", "Tokens", "Warnings", "warn:", "/tmp/.caelis", "Store:", "Provider:", "Session", "\n  Reason:"} {
+	for _, forbidden := range []string{"Status", "Tokens", "Warnings", "warn:", "/tmp/.caelis", "Store:", "Provider:", "\n  Reason:"} {
 		if strings.Contains(log.Chunk, forbidden) {
 			t.Fatalf("slashStatus() chunk = %q, should omit %q", log.Chunk, forbidden)
 		}

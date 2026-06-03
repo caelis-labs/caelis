@@ -2,6 +2,20 @@ package gatewaydriver
 
 import "testing"
 
+func TestFormatWorkspaceStatusDisplayCompactsHomePrefix(t *testing.T) {
+	t.Parallel()
+
+	got := formatWorkspaceStatusDisplayWithHome(
+		"/Users/xueyongzhi/WorkDir/xueyongzhi/demo",
+		gitWorkspaceStatus{Branch: "main", Dirty: true},
+		"/Users/xueyongzhi",
+	)
+	want := "~/WorkDir/xueyongzhi/demo [⎇ main*]"
+	if got != want {
+		t.Fatalf("formatWorkspaceStatusDisplayWithHome() = %q, want %q", got, want)
+	}
+}
+
 func TestFormatWorkspaceStatusDisplayAddsBranch(t *testing.T) {
 	t.Parallel()
 
