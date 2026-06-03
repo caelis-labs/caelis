@@ -207,11 +207,23 @@ func TestTokensIncludeToolAndMarkdownSemantics(t *testing.T) {
 	if got := stringifyColor(tokens.ToolName.GetForeground()); got != "#5bb8d7" {
 		t.Fatalf("tool name token foreground = %q", got)
 	}
+	if got, want := stringifyColor(tokens.MarkdownHeading.GetForeground()), stringifyColor(theme.TextPrimary); got != want {
+		t.Fatalf("markdown heading token foreground = %q, want body text %q", got, want)
+	}
+	if got := tokens.MarkdownHeading.GetBackground(); colorIsPresent(got) {
+		t.Fatalf("markdown heading token background = %v, want none", got)
+	}
 	if got := stringifyColor(tokens.MarkdownInlineCode.GetForeground()); got != "#cdd6f4" {
 		t.Fatalf("inline code token foreground = %q", got)
 	}
 	if got := stringifyColor(tokens.MarkdownInlineCode.GetBackground()); got != "#181825" {
 		t.Fatalf("inline code token background = %q", got)
+	}
+	if got, want := stringifyColor(tokens.MarkdownTableHead.GetForeground()), stringifyColor(theme.TextPrimary); got != want {
+		t.Fatalf("markdown table header token foreground = %q, want body text %q", got, want)
+	}
+	if got := tokens.MarkdownTableHead.GetBackground(); colorIsPresent(got) {
+		t.Fatalf("markdown table header token background = %v, want none", got)
 	}
 	if got := stringifyColor(tokens.MarkdownTableEdge.GetForeground()); got != "#4c5868" {
 		t.Fatalf("table edge token foreground = %q", got)

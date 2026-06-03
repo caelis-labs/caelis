@@ -546,6 +546,10 @@ func (m *Model) renderStreamViewportLines(ctx BlockRenderContext) ([]string, []s
 	}
 
 	wrapWidth := maxInt(1, ctx.Width)
+	if rows, ok := m.renderStreamViewportNarrativeRows(ctx, wrapWidth); ok {
+		return renderedRowsToViewportLineSlices(rows)
+	}
+
 	var styledLines []string
 	var plainLines []string
 	var blockIDs []string
@@ -555,56 +559,9 @@ func (m *Model) renderStreamViewportLines(ctx BlockRenderContext) ([]string, []s
 	for _, sl := range streamLines {
 		style := tuikit.DetectLineStyleWithContext(sl, prevStyle)
 
-		var wrappedStyled string
-		var plainParts []string
-		switch style {
-		case tuikit.LineStyleReasoning:
-			rows := RenderTextWithContext(ctx, TextRenderRequest{
-				Kind:           TextReasoning,
-				Mode:           RenderPlain,
-				MarkdownPolicy: MarkdownNone,
-				Raw:            sl,
-				Width:          wrapWidth,
-				LineStyle:      style,
-			}).Rows
-			if len(rows) == 0 {
-				wrappedStyled = ""
-				plainParts = []string{""}
-			} else {
-				styledParts := make([]string, 0, len(rows))
-				plainParts = make([]string, 0, len(rows))
-				for _, row := range rows {
-					styledParts = append(styledParts, row.Styled)
-					plainParts = append(plainParts, row.Plain)
-				}
-				wrappedStyled = strings.Join(styledParts, "\n")
-			}
-		case tuikit.LineStyleAssistant:
-			rows := RenderTextWithContext(ctx, TextRenderRequest{
-				Kind:           TextAssistant,
-				Mode:           RenderInlineOnly,
-				MarkdownPolicy: MarkdownInline,
-				Raw:            sl,
-				Width:          wrapWidth,
-				LineStyle:      style,
-			}).Rows
-			if len(rows) == 0 {
-				wrappedStyled = ""
-				plainParts = []string{""}
-			} else {
-				styledParts := make([]string, 0, len(rows))
-				plainParts = make([]string, 0, len(rows))
-				for _, row := range rows {
-					styledParts = append(styledParts, row.Styled)
-					plainParts = append(plainParts, row.Plain)
-				}
-				wrappedStyled = strings.Join(styledParts, "\n")
-			}
-		default:
-			colored := tuikit.ColorizeLogLine(sl, style, m.theme)
-			wrappedStyled = hardWrapDisplayLine(colored, wrapWidth)
-			plainParts = normalizeWrappedPlainSegments(graphemeHardWrap(sl, wrapWidth))
-		}
+		colored := tuikit.ColorizeLogLine(sl, style, m.theme)
+		wrappedStyled := hardWrapDisplayLine(colored, wrapWidth)
+		plainParts := normalizeWrappedPlainSegments(graphemeHardWrap(sl, wrapWidth))
 
 		if wrappedStyled == "" {
 			styledLines = append(styledLines, "")
@@ -625,6 +582,56 @@ func (m *Model) renderStreamViewportLines(ctx BlockRenderContext) ([]string, []s
 		prevStyle = style
 	}
 
+	return styledLines, plainLines, blockIDs
+}
+
+func (m *Model) renderStreamViewportNarrativeRows(ctx BlockRenderContext, width int) ([]RenderedRow, bool) {
+	if m == nil || strings.TrimSpace(m.streamLine) == "" {
+		return nil, false
+	}
+	firstLine := m.streamLine
+	if idx := strings.IndexByte(firstLine, '\n'); idx >= 0 {
+		firstLine = firstLine[:idx]
+	}
+	style := tuikit.DetectLineStyleWithContext(firstLine, m.lastCommittedStyle)
+	switch style {
+	case tuikit.LineStyleAssistant:
+		rows := RenderTextWithContext(ctx, TextRenderRequest{
+			Kind:           TextAssistant,
+			Mode:           RenderStream,
+			MarkdownPolicy: MarkdownStableTail,
+			Raw:            m.streamLine,
+			Width:          width,
+			LineStyle:      tuikit.LineStyleAssistant,
+		}).Rows
+		return rows, true
+	case tuikit.LineStyleReasoning:
+		rows := RenderTextWithContext(ctx, TextRenderRequest{
+			Kind:           TextReasoning,
+			Mode:           RenderPlain,
+			MarkdownPolicy: MarkdownNone,
+			Raw:            m.streamLine,
+			Width:          width,
+			LineStyle:      tuikit.LineStyleReasoning,
+		}).Rows
+		return rows, true
+	default:
+		return nil, false
+	}
+}
+
+func renderedRowsToViewportLineSlices(rows []RenderedRow) ([]string, []string, []string) {
+	if len(rows) == 0 {
+		return nil, nil, nil
+	}
+	styledLines := make([]string, 0, len(rows))
+	plainLines := make([]string, 0, len(rows))
+	blockIDs := make([]string, 0, len(rows))
+	for _, row := range rows {
+		styledLines = append(styledLines, row.Styled)
+		plainLines = append(plainLines, row.Plain)
+		blockIDs = append(blockIDs, "")
+	}
 	return styledLines, plainLines, blockIDs
 }
 

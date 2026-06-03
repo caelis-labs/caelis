@@ -11,7 +11,6 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/glamour"
 	gansi "github.com/charmbracelet/glamour/ansi"
-	"github.com/charmbracelet/glamour/styles"
 	xansi "github.com/charmbracelet/x/ansi"
 
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/tuikit"
@@ -222,10 +221,7 @@ func storeGlamourRenderer(key glamourRendererKey, renderer *glamour.TermRenderer
 // ---------------------------------------------------------------------------
 
 func narrativeStyleConfig(theme tuikit.Theme, roleStyle tuikit.LineStyle) gansi.StyleConfig {
-	style := styles.DarkStyleConfig
-	if !theme.IsDark {
-		style = styles.LightStyleConfig
-	}
+	var style gansi.StyleConfig
 
 	// No document-level margin; our layout handles outer spacing.
 	zero := uint(0)
@@ -237,8 +233,8 @@ func narrativeStyleConfig(theme tuikit.Theme, roleStyle tuikit.LineStyle) gansi.
 	style.Paragraph.Color = bodyHex
 
 	// ---------------------------------------------------------------
-	// Headings — crush-style: H1 gets background pill, H2+ keep
-	// markdown prefix for scannability.
+	// Headings — light prose style: no decorative background and no
+	// markdown prefix once the markdown has been parsed.
 	// ---------------------------------------------------------------
 	headingHex := styleForegroundToAnsiPtr(theme.MarkdownHeadingStyle())
 
@@ -246,10 +242,9 @@ func narrativeStyleConfig(theme tuikit.Theme, roleStyle tuikit.LineStyle) gansi.
 	style.Heading.Color = headingHex
 	style.Heading.Bold = boolPtr(true)
 
-	style.H1.Prefix = " "
-	style.H1.Suffix = " "
-	style.H1.Color = styleForegroundToAnsiPtr(theme.TextStyle())
-	style.H1.BackgroundColor = styleBackgroundToAnsiPtr(theme.MarkdownCodeBlockStyle())
+	style.H1.Prefix = ""
+	style.H1.Suffix = ""
+	style.H1.Color = headingHex
 	style.H1.Bold = boolPtr(true)
 	style.H1.Underline = boolPtr(false)
 

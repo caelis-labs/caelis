@@ -229,6 +229,49 @@ func BenchmarkACPMainStablePrefixTailMarkdownStream(b *testing.B) {
 	}
 }
 
+func BenchmarkCanonicalStablePrefixRenderParity(b *testing.B) {
+	m := newPerfTestModel()
+	raw := stablePrefixTailBenchmarkInitialText()
+	stableRaw, tailRaw := splitStableStreamingMarkdown(raw)
+	if strings.TrimSpace(stableRaw) == "" || strings.TrimSpace(tailRaw) == "" {
+		b.Fatalf("benchmark setup did not produce stable prefix and tail")
+	}
+	ctx := m.blockRenderContext(80)
+	request := TextRenderRequest{
+		Kind:           TextAssistant,
+		Mode:           RenderStream,
+		MarkdownPolicy: MarkdownStableTail,
+		Raw:            raw,
+		Prefix:         "· ",
+		Width:          80,
+		BlockID:        "bench-block",
+		LineStyle:      tuikit.LineStyleAssistant,
+	}
+	finalPrefixRows := glamourNarrativeRows("bench-block", stableRaw, "· ", tuikit.LineStyleAssistant, 80, m.theme)
+	if len(finalPrefixRows) == 0 {
+		b.Fatal("expected final Glamour prefix rows")
+	}
+	streamRows := RenderTextWithContext(ctx, request).Rows
+	if len(streamRows) < len(finalPrefixRows) {
+		b.Fatalf("stream rows = %d, want at least final prefix rows %d", len(streamRows), len(finalPrefixRows))
+	}
+	beforeGlamour := m.diag.GlamourRenderCalls
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		rows := RenderTextWithContext(ctx, request).Rows
+		if len(rows) < len(finalPrefixRows) {
+			b.Fatalf("stream rows = %d, want at least final prefix rows %d", len(rows), len(finalPrefixRows))
+		}
+	}
+	b.StopTimer()
+
+	if m.diag.GlamourRenderCalls != beforeGlamour {
+		b.Fatalf("cached stable prefix re-rendered with Glamour: got %d, want %d", m.diag.GlamourRenderCalls, beforeGlamour)
+	}
+}
+
 func BenchmarkACPMainStreamWhileScrolledHistory(b *testing.B) {
 	m := newPerfTestModel()
 	seedLongTranscript(m, 4000)

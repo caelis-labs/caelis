@@ -166,12 +166,12 @@ func resolveTokens(t Theme) Tokens {
 		ToolOutput: quietStyle(t, t.TextSecondary),
 
 		// Markdown / prose
-		MarkdownHeading:    fgStyle(t.Accent).Bold(true),
+		MarkdownHeading:    fgStyle(t.TextPrimary).Bold(true),
 		MarkdownLink:       fgStyle(t.LinkFg).Underline(true),
 		MarkdownInlineCode: withBg(fgStyle(t.CodeFg), t.CodeBg),
 		MarkdownCodeBlock:  withBg(fgStyle(t.CodeBlockFg), t.CodeBlockBg),
 		MarkdownQuote:      quietStyle(t, t.ReasoningFg).Italic(true),
-		MarkdownTableHead:  withBg(fgStyle(t.TextPrimary), t.TableHeaderBg).Bold(true),
+		MarkdownTableHead:  fgStyle(t.TextPrimary).Bold(true),
 		MarkdownTableEdge:  fgStyle(t.TableBorder),
 		MarkdownRule:       quietStyle(t, t.MutedText),
 	}

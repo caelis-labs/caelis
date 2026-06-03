@@ -127,6 +127,22 @@ func TestNarrativeInlineCodeStyleScopesAfterCJKText(t *testing.T) {
 	})
 }
 
+func TestFinalMarkdownDoesNotDecorateProseWithBackground(t *testing.T) {
+	raw := markdownBackgroundScopeFixture()
+	theme := tuikit.ResolveThemeWithState(true, false, colorprofile.TrueColor)
+
+	rendered := glamourRenderNarrative(raw, 160, theme, tuikit.LineStyleAssistant)
+	assertMarkdownBackgroundScope(t, rendered, []string{"git status", "console.log(\"hello\")"})
+}
+
+func TestStreamingTailMarkdownDoesNotDecorateProseWithBackground(t *testing.T) {
+	raw := markdownBackgroundScopeFixture()
+	theme := tuikit.ResolveThemeWithState(true, false, colorprofile.TrueColor)
+
+	rows := renderStreamingNarrativeTailRows("block-1", raw, "", tuikit.LineStyleAssistant, 160, theme)
+	assertMarkdownBackgroundScope(t, joinRenderedStyled(rows), []string{"git status", "console.log(\"hello\")"})
+}
+
 func TestNarrativeInlineCodeStyleScopesToolNamesInCJKLists(t *testing.T) {
 	raw := strings.Join([]string{
 		"我的工作方式：",
@@ -666,6 +682,84 @@ func TestActiveStreamingTailStyleDoesNotJumpAcrossLegacyLengthThreshold(t *testi
 	}
 }
 
+func TestStreamingStablePrefixMatchesFinalGlamourRows(t *testing.T) {
+	theme := tuikit.ResolveThemeWithState(true, false, colorprofile.TrueColor)
+	raw := stablePrefixFinalParityMarkdown()
+	stableRaw, tailRaw := splitStableStreamingMarkdown(raw)
+	if strings.TrimSpace(stableRaw) == "" || strings.TrimSpace(tailRaw) == "" {
+		t.Fatalf("test setup did not produce stable prefix and tail\nstable=%q\ntail=%q", stableRaw, tailRaw)
+	}
+
+	ctx := BlockRenderContext{Width: 96, Theme: theme, ThemeKey: themeRenderCacheKey(theme)}
+	finalPrefixRows := glamourNarrativeRows("block-1", stableRaw, "· ", tuikit.LineStyleAssistant, 96, theme)
+	streamRows := RenderTextWithContext(ctx, TextRenderRequest{
+		Kind:           TextAssistant,
+		Mode:           RenderStream,
+		MarkdownPolicy: MarkdownStableTail,
+		Raw:            raw,
+		Prefix:         "· ",
+		BlockID:        "block-1",
+		LineStyle:      tuikit.LineStyleAssistant,
+	}).Rows
+
+	assertRenderedRowsPrefixEqual(t, streamRows, finalPrefixRows)
+}
+
+func TestFinalizingActiveStreamPreservesCanonicalStablePrefixRows(t *testing.T) {
+	theme := tuikit.ResolveThemeWithState(true, false, colorprofile.TrueColor)
+	raw := stablePrefixFinalParityMarkdown()
+	stableRaw, tailRaw := splitStableStreamingMarkdown(raw)
+	if strings.TrimSpace(stableRaw) == "" || strings.TrimSpace(tailRaw) == "" {
+		t.Fatalf("test setup did not produce stable prefix and tail\nstable=%q\ntail=%q", stableRaw, tailRaw)
+	}
+
+	ctx := BlockRenderContext{Width: 96, Theme: theme, ThemeKey: themeRenderCacheKey(theme)}
+	streamRows := RenderTextWithContext(ctx, TextRenderRequest{
+		Kind:           TextAssistant,
+		Mode:           RenderStream,
+		MarkdownPolicy: MarkdownStableTail,
+		Raw:            raw,
+		Prefix:         "· ",
+		BlockID:        "block-1",
+		LineStyle:      tuikit.LineStyleAssistant,
+	}).Rows
+	finalRows := RenderTextWithContext(ctx, TextRenderRequest{
+		Kind:           TextAssistant,
+		Mode:           RenderFinal,
+		MarkdownPolicy: MarkdownFull,
+		Raw:            raw,
+		Prefix:         "· ",
+		BlockID:        "block-1",
+		LineStyle:      tuikit.LineStyleAssistant,
+	}).Rows
+	finalPrefixRows := glamourNarrativeRows("block-1", stableRaw, "· ", tuikit.LineStyleAssistant, 96, theme)
+
+	assertRenderedRowsPrefixEqual(t, streamRows, finalPrefixRows)
+	assertRenderedRowsPrefixEqual(t, finalRows, finalPrefixRows)
+}
+
+func TestViewportStreamLineUsesCanonicalAssistantRenderer(t *testing.T) {
+	m := NewModel(Config{ColorProfile: colorprofile.TrueColor})
+	m.viewport.SetWidth(96)
+	m.viewport.SetHeight(20)
+	m.streamLine = stablePrefixFinalParityMarkdown()
+	m.lastCommittedStyle = tuikit.LineStyleAssistant
+
+	ctx := m.blockRenderContext(96)
+	styledLines, plainLines, _ := m.renderStreamViewportLines(ctx)
+	canonical := RenderTextWithContext(ctx, TextRenderRequest{
+		Kind:           TextAssistant,
+		Mode:           RenderStream,
+		MarkdownPolicy: MarkdownStableTail,
+		Raw:            m.streamLine,
+		Width:          96,
+		BlockID:        "",
+		LineStyle:      tuikit.LineStyleAssistant,
+	}).Rows
+
+	assertRenderedLineSlicesEqualRows(t, styledLines, plainLines, canonical)
+}
+
 func renderActiveNarrativeBufferTestRows(blockID, raw, rolePrefix string, roleStyle tuikit.LineStyle, width int, theme tuikit.Theme) []RenderedRow {
 	buffer := &activeNarrativeBuffer{}
 	buffer.SetText(raw)
@@ -673,6 +767,109 @@ func renderActiveNarrativeBufferTestRows(blockID, raw, rolePrefix string, roleSt
 		Width: width,
 		Theme: theme,
 	})
+}
+
+func stablePrefixFinalParityMarkdown() string {
+	stable := strings.Join([]string{
+		"# 一级标题：Markdown 格式展示",
+		"",
+		"二级标题：文本样式",
+		"",
+		"这是普通文本，这是 **粗体文字**，这是 *斜体文字*，这是 `go test ./...`。",
+		"",
+		"> 💡 这是一段引用，用来强调重要信息或提示。",
+		"",
+		"- **事实优先**：读取仓库中的真实代码。",
+		"- 使用 `Shell` 验证结果。",
+		"",
+	}, "\n")
+	tail := strings.Repeat("尾部内容仍在 stream 中追加，保持轻量渲染直到段落稳定。", 12)
+	return stable + tail
+}
+
+func markdownBackgroundScopeFixture() string {
+	return strings.Join([]string{
+		"# Markdown 格式大全 — Rich Formatting Demo",
+		"",
+		"> **作者**: Caelis · **日期**: 2025-01-15 · **版本**: v1.0",
+		"",
+		"---",
+		"",
+		"## 1. 文本样式",
+		"",
+		"| 样式 | 语法 | 示例 |",
+		"| --- | --- | --- |",
+		"| **粗体** | `**text**` | **这是粗体文字** |",
+		"| `行内代码` | `` `text` `` | `console.log(\"hello\")` |",
+		"",
+		"正文使用 `git status` 查看状态。",
+		"",
+		"### 无序列表",
+		"",
+		"- 🍎 苹果",
+		"- 红富士",
+	}, "\n")
+}
+
+func assertMarkdownBackgroundScope(t *testing.T, styled string, wantBackgroundText []string) {
+	t.Helper()
+	backgroundText := normalizeInlineStyleText(textWithAnySGRBackground(styled))
+	for _, want := range wantBackgroundText {
+		if !strings.Contains(backgroundText, want) {
+			t.Fatalf("background text missing expected code span %q\nbackground=%q\nplain=%q\nstyled=%q", want, backgroundText, ansi.Strip(styled), styled)
+		}
+	}
+	for _, notWant := range []string{
+		"Markdown 格式大全",
+		"作者",
+		"日期",
+		"版本",
+		"1. 文本样式",
+		"样式",
+		"语法",
+		"示例",
+		"粗体",
+		"这是粗体文字",
+		"正文使用",
+		"查看状态",
+		"无序列表",
+		"苹果",
+		"红富士",
+	} {
+		if strings.Contains(backgroundText, notWant) {
+			t.Fatalf("markdown prose %q should not receive a background\nbackground=%q\nplain=%q\nstyled=%q", notWant, backgroundText, ansi.Strip(styled), styled)
+		}
+	}
+}
+
+func assertRenderedRowsPrefixEqual(t *testing.T, got []RenderedRow, want []RenderedRow) {
+	t.Helper()
+	if len(want) == 0 {
+		t.Fatal("want prefix rows is empty")
+	}
+	if len(got) < len(want) {
+		t.Fatalf("got %d rows, want at least %d\n got plain:\n%s\nwant plain:\n%s", len(got), len(want), joinRenderedPlain(got), joinRenderedPlain(want))
+	}
+	for i := range want {
+		if got[i].Plain != want[i].Plain || got[i].Styled != want[i].Styled {
+			t.Fatalf("row %d mismatch\n got plain: %q\nwant plain: %q\n got styled: %q\nwant styled: %q\n got all:\n%s\nwant all:\n%s",
+				i, got[i].Plain, want[i].Plain, got[i].Styled, want[i].Styled, joinRenderedPlain(got[:len(want)]), joinRenderedPlain(want))
+		}
+	}
+}
+
+func assertRenderedLineSlicesEqualRows(t *testing.T, styledLines []string, plainLines []string, rows []RenderedRow) {
+	t.Helper()
+	if len(styledLines) != len(rows) || len(plainLines) != len(rows) {
+		t.Fatalf("line count mismatch styled=%d plain=%d rows=%d\nstyled=%q\nplain=%q\nrows=%q",
+			len(styledLines), len(plainLines), len(rows), strings.Join(styledLines, "\n"), strings.Join(plainLines, "\n"), joinRenderedPlain(rows))
+	}
+	for i := range rows {
+		if styledLines[i] != rows[i].Styled || plainLines[i] != rows[i].Plain {
+			t.Fatalf("line %d mismatch\n got plain: %q\nwant plain: %q\n got styled: %q\nwant styled: %q",
+				i, plainLines[i], rows[i].Plain, styledLines[i], rows[i].Styled)
+		}
+	}
 }
 
 func TestMainACPTurnActiveMarkdownStreamUsesTailRenderer(t *testing.T) {
@@ -820,6 +1017,36 @@ func textWithSGRBackground(styled, inlineBG string) string {
 	return out.String()
 }
 
+func textWithAnySGRBackground(styled string) string {
+	var out strings.Builder
+	active := false
+	for i := 0; i < len(styled); {
+		if styled[i] == '\x1b' && i+1 < len(styled) && styled[i+1] == '[' {
+			end := i + 2
+			for end < len(styled) && styled[end] != 'm' {
+				end++
+			}
+			if end < len(styled) {
+				params := styled[i+2 : end]
+				if resetsSGRBackground(params) {
+					active = false
+				}
+				if sgrSetsBackground(params) {
+					active = true
+				}
+				i = end + 1
+				continue
+			}
+		}
+		r, size := utf8.DecodeRuneInString(styled[i:])
+		if active {
+			out.WriteRune(r)
+		}
+		i += size
+	}
+	return out.String()
+}
+
 func textWithSGRForeground(styled, foreground string) string {
 	var out strings.Builder
 	active := false
@@ -936,6 +1163,21 @@ func sgrSetsForeground(params string) bool {
 		switch part {
 		case "30", "31", "32", "33", "34", "35", "36", "37",
 			"90", "91", "92", "93", "94", "95", "96", "97":
+			return true
+		}
+	}
+	return false
+}
+
+func sgrSetsBackground(params string) bool {
+	parts := strings.Split(params, ";")
+	for i, part := range parts {
+		if part == "48" && i+1 < len(parts) && (parts[i+1] == "2" || parts[i+1] == "5") {
+			return true
+		}
+		switch part {
+		case "40", "41", "42", "43", "44", "45", "46", "47",
+			"100", "101", "102", "103", "104", "105", "106", "107":
 			return true
 		}
 	}
