@@ -40,24 +40,25 @@ func NewSearch(runtime sandbox.Runtime) (*SearchTool, error) {
 func (t *SearchTool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        SearchToolName,
-		Description: "Search text in files.",
+		Description: "Search for text or regex matches in one file or directory and return matching lines. Use it to locate symbols, strings, error messages, config keys, or references before reading files. By default query is plain text with | alternatives; set regex=true only for regular expressions.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"path":           map[string]any{"type": "string", "description": "File or directory path."},
-				"query":          map[string]any{"type": "string", "description": "Text or regex; use | for alternatives unless regex=true."},
-				"limit":          map[string]any{"type": "integer", "description": "Max results."},
+				"path":           map[string]any{"type": "string", "minLength": 1, "description": "File or directory path."},
+				"query":          map[string]any{"type": "string", "minLength": 1, "description": "Text or regex; use | for alternatives unless regex=true."},
+				"limit":          map[string]any{"type": "integer", "minimum": 1, "maximum": 200, "description": "Max results."},
 				"case_sensitive": map[string]any{"type": "boolean", "description": "Case-sensitive match."},
 				"regex":          map[string]any{"type": "boolean", "description": "Treat query as regex."},
 				"exclude": map[string]any{
 					"type":        "array",
 					"description": "Relative exclude globs.",
-					"items":       map[string]any{"type": "string"},
+					"items":       map[string]any{"type": "string", "minLength": 1},
 				},
 			},
 			"required":             []string{"path", "query"},
 			"additionalProperties": false,
 		},
+		Metadata: toolutil.AnnotationMetadata(true, false, true, false),
 	}
 }
 

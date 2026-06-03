@@ -49,17 +49,18 @@ func NewRead(cfg ReadConfig, runtime sandbox.Runtime) (*ReadTool, error) {
 func (t *ReadTool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        ReadToolName,
-		Description: "Read a text file slice.",
+		Description: "Read a slice of one text file and return numbered lines plus cursor metadata. Use this after LIST/GLOB/SEARCH identifies a relevant file, or when exact text is needed before editing. Prefer small offsets and limits; if has_more is true, continue from next_offset. Use revision as if_revision for WRITE or PATCH stale-edit guards.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"path":   map[string]any{"type": "string", "description": "File path."},
-				"offset": map[string]any{"type": "integer", "description": "Zero-based start line."},
-				"limit":  map[string]any{"type": "integer", "description": "Max lines."},
+				"path":   map[string]any{"type": "string", "minLength": 1, "description": "File path."},
+				"offset": map[string]any{"type": "integer", "minimum": 0, "description": "Zero-based start line."},
+				"limit":  map[string]any{"type": "integer", "minimum": 1, "maximum": t.cfg.MaxLimit, "description": "Max lines."},
 			},
 			"required":             []string{"path"},
 			"additionalProperties": false,
 		},
+		Metadata: toolutil.AnnotationMetadata(true, false, true, false),
 	}
 }
 

@@ -29,8 +29,10 @@ func TestRunCommandDefinitionExposesMinimalArguments(t *testing.T) {
 	if definition.Name != RunCommandToolName {
 		t.Fatalf("Name = %q, want %q", definition.Name, RunCommandToolName)
 	}
-	if definition.Description != "Run a shell command in the session workspace." {
-		t.Fatalf("Description = %q", definition.Description)
+	for _, required := range []string{"specified workdir", "tests, builds", "require_escalated"} {
+		if !strings.Contains(definition.Description, required) {
+			t.Fatalf("Description missing %q: %q", required, definition.Description)
+		}
 	}
 	properties, _ := definition.InputSchema["properties"].(map[string]any)
 	wantDescriptions := map[string]string{
@@ -51,6 +53,14 @@ func TestRunCommandDefinitionExposesMinimalArguments(t *testing.T) {
 		if got, _ := property["description"].(string); got != want {
 			t.Fatalf("%s description = %q, want %q", key, got, want)
 		}
+	}
+	commandProperty, _ := properties["command"].(map[string]any)
+	if got := commandProperty["minLength"]; got != 1 {
+		t.Fatalf("command minLength = %#v, want 1", got)
+	}
+	yieldProperty, _ := properties["yield_time_ms"].(map[string]any)
+	if got := yieldProperty["minimum"]; got != 0 {
+		t.Fatalf("yield_time_ms minimum = %#v, want 0", got)
 	}
 	sandboxProperty, _ := properties["sandbox_permissions"].(map[string]any)
 	enumValues, _ := sandboxProperty["enum"].([]string)

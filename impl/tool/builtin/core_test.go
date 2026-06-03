@@ -71,6 +71,70 @@ func TestCoreToolSchemasDisallowUnknownRootProperties(t *testing.T) {
 	}
 }
 
+func TestCoreToolSchemasExposeGuidanceBoundsAndAnnotations(t *testing.T) {
+	t.Parallel()
+
+	rt, err := host.New(host.Config{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatalf("host.New() error = %v", err)
+	}
+	tools, err := BuildCoreTools(CoreToolsConfig{Runtime: rt})
+	if err != nil {
+		t.Fatalf("BuildCoreTools() error = %v", err)
+	}
+	defs := map[string]tool.Definition{}
+	for _, one := range tools {
+		def := one.Definition()
+		defs[def.Name] = def
+	}
+
+	requireStringMinLength(t, defs[filesystem.ReadToolName], "path", 1)
+	requireIntegerBounds(t, defs[filesystem.ReadToolName], "offset", 0, nil)
+	requireIntegerBounds(t, defs[filesystem.ReadToolName], "limit", 1, ptrAny(400))
+	requireDescriptionContains(t, defs[filesystem.ReadToolName], "has_more", "revision", "if_revision")
+	requireAnnotations(t, defs[filesystem.ReadToolName], true, false, true, false)
+
+	requireIntegerBounds(t, defs[filesystem.ListToolName], "limit", 1, ptrAny(1000))
+	requireDescriptionContains(t, defs[filesystem.ListToolName], "not recursive", "metadata")
+	requireAnnotations(t, defs[filesystem.ListToolName], true, false, true, false)
+
+	requireStringMinLength(t, defs[filesystem.GlobToolName], "pattern", 1)
+	requireArrayItemMinLength(t, defs[filesystem.GlobToolName], "exclude", 1)
+	requireIntegerBounds(t, defs[filesystem.GlobToolName], "limit", 1, ptrAny(1000))
+	requireAnnotations(t, defs[filesystem.GlobToolName], true, false, true, false)
+
+	requireStringMinLength(t, defs[filesystem.SearchToolName], "path", 1)
+	requireStringMinLength(t, defs[filesystem.SearchToolName], "query", 1)
+	requireArrayItemMinLength(t, defs[filesystem.SearchToolName], "exclude", 1)
+	requireIntegerBounds(t, defs[filesystem.SearchToolName], "limit", 1, ptrAny(200))
+	requireDescriptionContains(t, defs[filesystem.SearchToolName], "locate symbols", "regex")
+	requireAnnotations(t, defs[filesystem.SearchToolName], true, false, true, false)
+
+	requireStringMinLength(t, defs[filesystem.WriteToolName], "path", 1)
+	requireNoMinLength(t, defs[filesystem.WriteToolName], "content")
+	requireDescriptionContains(t, defs[filesystem.WriteToolName], "Prefer PATCH", "if_revision")
+	requireAnnotations(t, defs[filesystem.WriteToolName], false, true, true, false)
+
+	requireStringMinLength(t, defs[filesystem.PatchToolName], "path", 1)
+	requirePatchEditSchema(t, defs[filesystem.PatchToolName])
+	requireDescriptionContains(t, defs[filesystem.PatchToolName], "surgical edits", "if_revision")
+	requireAnnotations(t, defs[filesystem.PatchToolName], false, true, true, false)
+
+	requireStringMinLength(t, defs[shell.RunCommandToolName], "command", 1)
+	requireIntegerBounds(t, defs[shell.RunCommandToolName], "yield_time_ms", 0, nil)
+	requireDescriptionContains(t, defs[shell.RunCommandToolName], "workdir", "require_escalated")
+	requireAnnotations(t, defs[shell.RunCommandToolName], false, true, false, true)
+
+	requireStringMinLength(t, defs[task.ToolName], "task_id", 1)
+	requireIntegerBounds(t, defs[task.ToolName], "yield_time_ms", 0, nil)
+	requireDescriptionContains(t, defs[task.ToolName], "Always wait")
+	requireAnnotations(t, defs[task.ToolName], false, true, false, true)
+
+	requirePlanSchema(t, defs[plan.ToolName])
+	requireDescriptionContains(t, defs[plan.ToolName], "skip it for trivial")
+	requireAnnotations(t, defs[plan.ToolName], false, false, true, false)
+}
+
 func TestEnsureCoreToolsRejectsReservedBuiltinNames(t *testing.T) {
 	t.Parallel()
 
@@ -287,4 +351,128 @@ func runToolJSON(t *testing.T, targetTool tool.Tool, args map[string]any) map[st
 		t.Fatalf("json.Unmarshal(result) error = %v", err)
 	}
 	return out
+}
+
+func requireDescriptionContains(t *testing.T, def tool.Definition, wants ...string) {
+	t.Helper()
+	for _, want := range wants {
+		if !strings.Contains(def.Description, want) {
+			t.Fatalf("%s description missing %q: %q", def.Name, want, def.Description)
+		}
+	}
+}
+
+func requireStringMinLength(t *testing.T, def tool.Definition, prop string, want int) {
+	t.Helper()
+	schemaProp := schemaProperty(t, def, prop)
+	if got := schemaProp["type"]; got != "string" {
+		t.Fatalf("%s.%s type = %#v, want string", def.Name, prop, got)
+	}
+	if got := schemaProp["minLength"]; got != want {
+		t.Fatalf("%s.%s minLength = %#v, want %d", def.Name, prop, got, want)
+	}
+}
+
+func requireNoMinLength(t *testing.T, def tool.Definition, prop string) {
+	t.Helper()
+	schemaProp := schemaProperty(t, def, prop)
+	if _, ok := schemaProp["minLength"]; ok {
+		t.Fatalf("%s.%s minLength present: %#v", def.Name, prop, schemaProp["minLength"])
+	}
+}
+
+func requireIntegerBounds(t *testing.T, def tool.Definition, prop string, minimum int, maximum *any) {
+	t.Helper()
+	schemaProp := schemaProperty(t, def, prop)
+	if got := schemaProp["type"]; got != "integer" {
+		t.Fatalf("%s.%s type = %#v, want integer", def.Name, prop, got)
+	}
+	if got := schemaProp["minimum"]; got != minimum {
+		t.Fatalf("%s.%s minimum = %#v, want %d", def.Name, prop, got, minimum)
+	}
+	if maximum != nil {
+		if got := schemaProp["maximum"]; got != *maximum {
+			t.Fatalf("%s.%s maximum = %#v, want %#v", def.Name, prop, got, *maximum)
+		}
+	}
+}
+
+func requireArrayItemMinLength(t *testing.T, def tool.Definition, prop string, want int) {
+	t.Helper()
+	schemaProp := schemaProperty(t, def, prop)
+	items, _ := schemaProp["items"].(map[string]any)
+	if len(items) == 0 {
+		t.Fatalf("%s.%s items missing: %#v", def.Name, prop, schemaProp)
+	}
+	if got := items["minLength"]; got != want {
+		t.Fatalf("%s.%s.items minLength = %#v, want %d", def.Name, prop, got, want)
+	}
+}
+
+func requirePatchEditSchema(t *testing.T, def tool.Definition) {
+	t.Helper()
+	edits := schemaProperty(t, def, "edits")
+	items, _ := edits["items"].(map[string]any)
+	if got := items["additionalProperties"]; got != false {
+		t.Fatalf("PATCH edits item additionalProperties = %#v, want false", got)
+	}
+	props, _ := items["properties"].(map[string]any)
+	oldProp, _ := props["old"].(map[string]any)
+	newProp, _ := props["new"].(map[string]any)
+	expectedProp, _ := props["expected_replacements"].(map[string]any)
+	if got := oldProp["minLength"]; got != 1 {
+		t.Fatalf("PATCH edits.old minLength = %#v, want 1", got)
+	}
+	if _, ok := newProp["minLength"]; ok {
+		t.Fatalf("PATCH edits.new minLength present: %#v", newProp["minLength"])
+	}
+	if got := expectedProp["minimum"]; got != 1 {
+		t.Fatalf("PATCH edits.expected_replacements minimum = %#v, want 1", got)
+	}
+}
+
+func requirePlanSchema(t *testing.T, def tool.Definition) {
+	t.Helper()
+	entries := schemaProperty(t, def, "entries")
+	items, _ := entries["items"].(map[string]any)
+	props, _ := items["properties"].(map[string]any)
+	contentProp, _ := props["content"].(map[string]any)
+	if got := contentProp["minLength"]; got != 1 {
+		t.Fatalf("PLAN entries.content minLength = %#v, want 1", got)
+	}
+}
+
+func requireAnnotations(t *testing.T, def tool.Definition, readOnly, destructive, idempotent, openWorld bool) {
+	t.Helper()
+	annotations, _ := def.Metadata["annotations"].(map[string]any)
+	if len(annotations) == 0 {
+		t.Fatalf("%s annotations missing: %#v", def.Name, def.Metadata)
+	}
+	for key, want := range map[string]bool{
+		"readOnlyHint":    readOnly,
+		"destructiveHint": destructive,
+		"idempotentHint":  idempotent,
+		"openWorldHint":   openWorld,
+	} {
+		if got := annotations[key]; got != want {
+			t.Fatalf("%s annotations[%s] = %#v, want %v", def.Name, key, got, want)
+		}
+	}
+}
+
+func schemaProperty(t *testing.T, def tool.Definition, prop string) map[string]any {
+	t.Helper()
+	props, _ := def.InputSchema["properties"].(map[string]any)
+	if len(props) == 0 {
+		t.Fatalf("%s schema properties missing", def.Name)
+	}
+	schemaProp, _ := props[prop].(map[string]any)
+	if len(schemaProp) == 0 {
+		t.Fatalf("%s.%s schema property missing: %#v", def.Name, prop, props[prop])
+	}
+	return schemaProp
+}
+
+func ptrAny(value any) *any {
+	return &value
 }

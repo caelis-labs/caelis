@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/ports/model"
+	porttool "github.com/OnslaughtSnail/caelis/ports/tool"
 )
 
 func TestOpenAICompatStream_PropagatesSSEErrorsWithoutTurnComplete(t *testing.T) {
@@ -345,6 +346,119 @@ func TestOpenAICompatNonStream_UsesStrictStructuredOutputOnlyForClosedRequiredSc
 	}
 }
 
+func TestOpenAICompatNonStream_IncludesStrictFunctionToolOnlyWhenCompatible(t *testing.T) {
+	var payload map[string]any
+	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode request payload: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"model":"test-model","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`)
+	}))
+	defer server.Close()
+
+	llm := newOpenAICompat(Config{
+		Provider:   "openai-compatible",
+		Model:      "test-model",
+		BaseURL:    server.URL,
+		HTTPClient: server.Client(),
+		Timeout:    2 * time.Second,
+	}, "token")
+	for _, err := range llm.Generate(context.Background(), &model.Request{
+		Messages: []model.Message{model.NewTextMessage(model.RoleUser, "use tools")},
+		Tools: []model.ToolSpec{
+			{
+				Kind: model.ToolSpecKindFunction,
+				Function: &model.FunctionToolSpec{
+					Name:        "closed",
+					Description: "closed strict tool",
+					Strict:      true,
+					Parameters: map[string]any{
+						"type":                 "object",
+						"additionalProperties": false,
+						"properties": map[string]any{
+							"path": map[string]any{"type": "string"},
+						},
+						"required": []any{"path"},
+					},
+				},
+			},
+			{
+				Kind: model.ToolSpecKindFunction,
+				Function: &model.FunctionToolSpec{
+					Name:        "optional",
+					Description: "requested strict with nullable optional field",
+					Strict:      true,
+					Parameters: map[string]any{
+						"type":                 "object",
+						"additionalProperties": false,
+						"properties": map[string]any{
+							"path":  map[string]any{"type": "string"},
+							"limit": map[string]any{"type": "integer"},
+							"mode":  map[string]any{"type": "string", "enum": []string{"fast", "safe"}},
+						},
+						"required": []any{"path"},
+					},
+				},
+			},
+			{
+				Kind: model.ToolSpecKindFunction,
+				Function: &model.FunctionToolSpec{
+					Name:        "open",
+					Description: "requested strict but schema is open",
+					Strict:      true,
+					Parameters: map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"path": map[string]any{"type": "string"},
+						},
+						"required": []any{"path"},
+					},
+				},
+			},
+		},
+	}) {
+		if err != nil {
+			t.Fatalf("Generate() error = %v", err)
+		}
+	}
+
+	tools, _ := payload["tools"].([]any)
+	if len(tools) != 3 {
+		t.Fatalf("tools len = %d, want 3: %#v", len(tools), payload["tools"])
+	}
+	closedFunction := tools[0].(map[string]any)["function"].(map[string]any)
+	if got := closedFunction["strict"]; got != true {
+		t.Fatalf("closed function strict = %#v, want true", got)
+	}
+	optionalFunction := tools[1].(map[string]any)["function"].(map[string]any)
+	if got := optionalFunction["strict"]; got != true {
+		t.Fatalf("optional function strict = %#v, want true", got)
+	}
+	optionalParams := optionalFunction["parameters"].(map[string]any)
+	required, _ := optionalParams["required"].([]any)
+	if got := strings.Join(stringSliceFromProviderAny(required), ","); got != "limit,mode,path" {
+		t.Fatalf("optional required = %#v, want limit,mode,path", required)
+	}
+	optionalProps := optionalParams["properties"].(map[string]any)
+	limitType, _ := optionalProps["limit"].(map[string]any)["type"].([]any)
+	if got := strings.Join(stringSliceFromProviderAny(limitType), ","); got != "integer,null" {
+		t.Fatalf("optional limit type = %#v, want integer,null", limitType)
+	}
+	modeEnum, _ := optionalProps["mode"].(map[string]any)["enum"].([]any)
+	if len(modeEnum) != 3 || modeEnum[0] != "fast" || modeEnum[1] != "safe" || modeEnum[2] != nil {
+		t.Fatalf("optional mode enum = %#v, want fast/safe/null", modeEnum)
+	}
+	openFunction := tools[2].(map[string]any)["function"].(map[string]any)
+	if _, ok := openFunction["strict"]; ok {
+		t.Fatalf("open function strict present for open schema: %#v", openFunction["strict"])
+	}
+}
+
 func TestOpenAICompatNonStream_PropagatesFinishReason(t *testing.T) {
 	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/chat/completions" {
@@ -622,6 +736,69 @@ func TestOpenRouterRequest_DoesNotForceStrictForOptionalStructuredOutput(t *test
 	jsonSchema, _ := responseFormat["json_schema"].(map[string]any)
 	if _, ok := jsonSchema["strict"]; ok {
 		t.Fatalf("json_schema.strict is present for optional OpenRouter schema: %#v", jsonSchema["strict"])
+	}
+}
+
+func TestOpenRouterRequest_UsesStrictFunctionToolsFromRuntimeToolSpecs(t *testing.T) {
+	var payload map[string]any
+	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode request payload: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"model":"openrouter/test","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`)
+	}))
+	defer server.Close()
+
+	llm := newOpenRouter(Config{
+		Provider:   "openrouter",
+		API:        APIOpenRouter,
+		Model:      "openrouter/test",
+		BaseURL:    server.URL,
+		HTTPClient: server.Client(),
+		Timeout:    2 * time.Second,
+	}, "token")
+	for _, err := range llm.Generate(context.Background(), &model.Request{
+		Messages: []model.Message{model.NewTextMessage(model.RoleUser, "use tool")},
+		Tools: porttool.ModelSpecs([]porttool.Tool{porttool.NamedTool{Def: porttool.Definition{
+			Name:        "lookup",
+			Description: "lookup closed schema",
+			InputSchema: map[string]any{
+				"type":                 "object",
+				"additionalProperties": false,
+				"properties": map[string]any{
+					"query": map[string]any{"type": "string"},
+					"limit": map[string]any{"type": "integer"},
+				},
+				"required": []any{"query"},
+			},
+		}}}),
+	}) {
+		if err != nil {
+			t.Fatalf("Generate() error = %v", err)
+		}
+	}
+	tools, _ := payload["tools"].([]any)
+	if len(tools) != 1 {
+		t.Fatalf("tools = %#v, want one tool", payload["tools"])
+	}
+	function := tools[0].(map[string]any)["function"].(map[string]any)
+	if got := function["strict"]; got != true {
+		t.Fatalf("function.strict = %#v, want true", got)
+	}
+	parameters := function["parameters"].(map[string]any)
+	required, _ := parameters["required"].([]any)
+	if got := strings.Join(stringSliceFromProviderAny(required), ","); got != "limit,query" {
+		t.Fatalf("required = %#v, want limit,query", required)
+	}
+	properties := parameters["properties"].(map[string]any)
+	limitType, _ := properties["limit"].(map[string]any)["type"].([]any)
+	if got := strings.Join(stringSliceFromProviderAny(limitType), ","); got != "integer,null" {
+		t.Fatalf("limit type = %#v, want integer,null", limitType)
 	}
 }
 

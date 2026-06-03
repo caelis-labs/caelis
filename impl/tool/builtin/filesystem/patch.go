@@ -25,11 +25,11 @@ func NewPatch(runtime sandbox.Runtime) (*PatchTool, error) {
 func (t *PatchTool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        PatchToolName,
-		Description: "Apply exact text replacements in one file.",
+		Description: "Apply one or more exact text replacements to a single file atomically. Use this for surgical edits after READ provides the exact old text. Include if_revision when available to guard against stale edits.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"path": map[string]any{"type": "string", "description": "Target file."},
+				"path": map[string]any{"type": "string", "minLength": 1, "description": "Target file."},
 				"edits": map[string]any{
 					"type":        "array",
 					"description": "Exact replacements to apply atomically.",
@@ -37,11 +37,12 @@ func (t *PatchTool) Definition() tool.Definition {
 					"items": map[string]any{
 						"type": "object",
 						"properties": map[string]any{
-							"old":         map[string]any{"type": "string", "description": "Exact text to replace."},
+							"old":         map[string]any{"type": "string", "minLength": 1, "description": "Exact text to replace."},
 							"new":         map[string]any{"type": "string", "description": "Replacement text."},
 							"replace_all": map[string]any{"type": "boolean", "description": "Replace all matches."},
 							"expected_replacements": map[string]any{
 								"type":        "integer",
+								"minimum":     1,
 								"description": "Required replacement count. Required when replace_all is true.",
 							},
 						},
@@ -57,6 +58,7 @@ func (t *PatchTool) Definition() tool.Definition {
 			"required":             []string{"path", "edits"},
 			"additionalProperties": false,
 		},
+		Metadata: toolutil.AnnotationMetadata(false, true, true, false),
 	}
 }
 

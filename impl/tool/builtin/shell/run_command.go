@@ -47,12 +47,13 @@ func NewRunCommand(cfg RunCommandConfig) (*RunCommandTool, error) {
 func (t *RunCommandTool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        RunCommandToolName,
-		Description: "Run a shell command in the session workspace.",
+		Description: "Run a shell command from the session workspace or a specified workdir. Use this for repository inspection, tests, builds, formatting checks, git status/diff inspection, and commands that cannot be expressed by file tools. Do not prefix with cd; set workdir instead. Use yield_time_ms for long-running commands and sandbox_permissions=require_escalated only for the specific operation that needs escalation.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"command": map[string]any{
 					"type":        "string",
+					"minLength":   1,
 					"description": "Command to execute.",
 				},
 				"workdir": map[string]any{
@@ -61,6 +62,7 @@ func (t *RunCommandTool) Definition() tool.Definition {
 				},
 				"yield_time_ms": map[string]any{
 					"type":        "integer",
+					"minimum":     0,
 					"description": "Wait before yielding async control.",
 				},
 				"sandbox_permissions": map[string]any{
@@ -76,6 +78,7 @@ func (t *RunCommandTool) Definition() tool.Definition {
 			"required":             []string{"command"},
 			"additionalProperties": false,
 		},
+		Metadata: toolutil.AnnotationMetadata(false, true, false, true),
 	}
 }
 

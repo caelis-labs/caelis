@@ -34,12 +34,12 @@ func NewList(runtime sandbox.Runtime) (*ListTool, error) {
 func (t *ListTool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        ListToolName,
-		Description: "List one directory.",
+		Description: "List the immediate entries of one directory; this is not recursive. Use it to understand local structure before choosing files to read, search, or edit. Set metadata=true only when size, mode, or modification time matters.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"path":  map[string]any{"type": "string", "description": "Directory path. Defaults to cwd."},
-				"limit": map[string]any{"type": "integer", "description": "Max entries."},
+				"path":  map[string]any{"type": "string", "minLength": 1, "description": "Directory path. Defaults to cwd."},
+				"limit": map[string]any{"type": "integer", "minimum": 1, "maximum": maxListLimit, "description": "Max entries."},
 				"metadata": map[string]any{
 					"type":        "boolean",
 					"description": "Include size, mode, and mtime.",
@@ -47,6 +47,7 @@ func (t *ListTool) Definition() tool.Definition {
 			},
 			"additionalProperties": false,
 		},
+		Metadata: toolutil.AnnotationMetadata(true, false, true, false),
 	}
 }
 

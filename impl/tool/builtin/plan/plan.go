@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/internal/toolutil"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/tool"
 )
@@ -37,7 +38,7 @@ func New() tool.Tool { return Tool{} }
 func (Tool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        ToolName,
-		Description: "Replace the current execution plan.",
+		Description: "Replace the visible execution plan with the complete current plan. Use it for multi-step, risky, or ambiguous tasks, and skip it for trivial one-step work. Keep entries short, outcome-oriented, and statused with at most one in_progress entry.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -51,7 +52,7 @@ func (Tool) Definition() tool.Definition {
 					"items": map[string]any{
 						"type": "object",
 						"properties": map[string]any{
-							"content": map[string]any{"type": "string"},
+							"content": map[string]any{"type": "string", "minLength": 1},
 							"status": map[string]any{
 								"type": "string",
 								"enum": []string{string(StatusPending), string(StatusInProgress), string(StatusCompleted)},
@@ -65,6 +66,7 @@ func (Tool) Definition() tool.Definition {
 			"required":             []string{"entries"},
 			"additionalProperties": false,
 		},
+		Metadata: toolutil.AnnotationMetadata(false, false, true, false),
 	}
 }
 

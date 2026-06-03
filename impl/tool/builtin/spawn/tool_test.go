@@ -18,6 +18,27 @@ func TestDefinitionDoesNotExposeYieldTimeMS(t *testing.T) {
 	if _, ok := props["yield_time_ms"]; ok {
 		t.Fatalf("SPAWN properties include yield_time_ms: %#v", props)
 	}
+	promptProp, _ := props["prompt"].(map[string]any)
+	if got := promptProp["minLength"]; got != 1 {
+		t.Fatalf("prompt minLength = %#v, want 1", got)
+	}
+}
+
+func TestDefinitionExposesOpenWorldAnnotations(t *testing.T) {
+	t.Parallel()
+
+	def := New([]delegation.Agent{{Name: "codex"}}).Definition()
+	annotations, _ := def.Metadata["annotations"].(map[string]any)
+	for key, want := range map[string]bool{
+		"readOnlyHint":    false,
+		"destructiveHint": true,
+		"idempotentHint":  false,
+		"openWorldHint":   true,
+	} {
+		if got := annotations[key]; got != want {
+			t.Fatalf("annotation %s = %#v, want %v; metadata=%#v", key, got, want, def.Metadata)
+		}
+	}
 }
 
 func TestDefinitionPreservesAgentDescriptions(t *testing.T) {

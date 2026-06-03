@@ -328,6 +328,31 @@ func TestPatchToolRequiresExpectedCountForReplaceAll(t *testing.T) {
 	}
 }
 
+func TestPatchToolTreatsNullExpectedCountAsMissingForReplaceAll(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "replace-all-null.txt")
+	if err := os.WriteFile(path, []byte("x\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	patchTool := newTestPatchTool(t, dir)
+
+	err := callPatch(patchTool, map[string]any{
+		"path": "replace-all-null.txt",
+		"edits": []map[string]any{
+			{
+				"old":                   "x",
+				"new":                   "y",
+				"replace_all":           true,
+				"expected_replacements": nil,
+			},
+		},
+	})
+	requireToolErrorCode(t, err, tool.ErrorCodeInvalidInput)
+	if got, want := readTestFile(t, path), "x\n"; got != want {
+		t.Fatalf("content changed after failed PATCH: %q", got)
+	}
+}
+
 func TestPatchToolRejectsOverlappingBatchEdits(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "overlap.txt")

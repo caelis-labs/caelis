@@ -463,6 +463,7 @@ type FunctionToolSpec struct {
 	Name        string         `json:"name,omitempty"`
 	Description string         `json:"description,omitempty"`
 	Parameters  map[string]any `json:"parameters,omitempty"`
+	Strict      bool           `json:"strict,omitempty"`
 }
 
 type ProviderDefinedToolSpec struct {
@@ -512,7 +513,11 @@ func ToolSpecsFromDefinitions(defs []ToolDefinition) []ToolSpec {
 	}
 	out := make([]ToolSpec, 0, len(defs))
 	for _, def := range defs {
-		out = append(out, NewFunctionToolSpec(def.Name, def.Description, def.Parameters))
+		spec := NewFunctionToolSpec(def.Name, def.Description, def.Parameters)
+		if spec.Function != nil {
+			spec.Function.Strict = def.Strict
+		}
+		out = append(out, spec)
 	}
 	return out
 }
@@ -530,6 +535,7 @@ func FunctionToolDefinitions(specs []ToolSpec) []ToolDefinition {
 			Name:        spec.Function.Name,
 			Description: spec.Function.Description,
 			Parameters:  cloneAnyMap(spec.Function.Parameters),
+			Strict:      spec.Function.Strict,
 		})
 	}
 	return out

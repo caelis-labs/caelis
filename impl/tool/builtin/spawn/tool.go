@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/internal/toolutil"
 	"github.com/OnslaughtSnail/caelis/ports/delegation"
 	"github.com/OnslaughtSnail/caelis/ports/tool"
 )
@@ -35,6 +36,7 @@ func (t Tool) Definition() tool.Definition {
 		},
 		"prompt": map[string]any{
 			"type":        "string",
+			"minLength":   1,
 			"description": "Specific self-contained sub-task.",
 		},
 	}
@@ -43,13 +45,14 @@ func (t Tool) Definition() tool.Definition {
 	}
 	return tool.Definition{
 		Name:        ToolName,
-		Description: "Start a delegated child session.",
+		Description: "Start a bounded delegated child session for work that can proceed independently. Use it for parallel investigation, isolated review, or a clearly scoped subtask, not for final integration or user-facing judgment. The prompt must be self-contained with goal, scope, constraints, expected output, and whether edits are allowed.",
 		InputSchema: map[string]any{
 			"type":                 "object",
 			"properties":           props,
 			"required":             []string{"prompt"},
 			"additionalProperties": false,
 		},
+		Metadata: toolutil.AnnotationMetadata(false, true, false, true),
 	}
 }
 

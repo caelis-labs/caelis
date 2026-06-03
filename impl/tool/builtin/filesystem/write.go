@@ -29,11 +29,11 @@ func NewWrite(runtime sandbox.Runtime) (*WriteTool, error) {
 func (t *WriteTool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        WriteToolName,
-		Description: "Overwrite or create one file.",
+		Description: "Create a new file or intentionally replace the full contents of one file. Prefer PATCH for localized edits to existing files because WRITE overwrites the entire target. Include if_revision when replacing a file previously read.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"path":    map[string]any{"type": "string", "description": "Target file."},
+				"path":    map[string]any{"type": "string", "minLength": 1, "description": "Target file."},
 				"content": map[string]any{"type": "string", "description": "Full new contents."},
 				"if_revision": map[string]any{
 					"type":        "string",
@@ -43,6 +43,7 @@ func (t *WriteTool) Definition() tool.Definition {
 			"required":             []string{"path", "content"},
 			"additionalProperties": false,
 		},
+		Metadata: toolutil.AnnotationMetadata(false, true, true, false),
 	}
 }
 

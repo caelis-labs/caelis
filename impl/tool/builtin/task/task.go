@@ -3,6 +3,7 @@ package task
 import (
 	"context"
 
+	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/internal/toolutil"
 	"github.com/OnslaughtSnail/caelis/ports/tool"
 )
 
@@ -18,7 +19,7 @@ func New() Tool {
 func (Tool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        ToolName,
-		Description: "Control a yielded shell or SPAWN task.",
+		Description: "Control an async task returned by RUN_COMMAND or SPAWN. Use action=wait to collect progress or completion, action=write to send stdin to an interactive process, and action=cancel to stop work that is no longer needed. Always wait for a task before relying on its result.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -29,6 +30,7 @@ func (Tool) Definition() tool.Definition {
 				},
 				"task_id": map[string]any{
 					"type":        "string",
+					"minLength":   1,
 					"description": "Yielded task handle.",
 				},
 				"input": map[string]any{
@@ -37,12 +39,14 @@ func (Tool) Definition() tool.Definition {
 				},
 				"yield_time_ms": map[string]any{
 					"type":        "integer",
+					"minimum":     0,
 					"description": "Wait before returning.",
 				},
 			},
 			"required":             []string{"action", "task_id"},
 			"additionalProperties": false,
 		},
+		Metadata: toolutil.AnnotationMetadata(false, true, false, true),
 	}
 }
 

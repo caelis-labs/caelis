@@ -98,13 +98,88 @@ func ModelSpecs(tools []Tool) []model.ToolSpec {
 	}
 	out := make([]model.ToolSpec, 0, len(definitions))
 	for _, def := range definitions {
-		out = append(out, model.NewFunctionToolSpec(
+		spec := model.NewFunctionToolSpec(
 			strings.TrimSpace(def.Name),
 			strings.TrimSpace(def.Description),
 			maps.Clone(def.InputSchema),
-		))
+		)
+		if spec.Function != nil {
+			spec.Function.Strict = inferStrictFunctionSchema(def.InputSchema)
+		}
+		out = append(out, spec)
 	}
 	return out
+}
+
+func inferStrictFunctionSchema(schema map[string]any) bool {
+	if len(schema) == 0 {
+		return false
+	}
+	return strictCompatibleSchema(schema)
+}
+
+func strictCompatibleSchema(schema map[string]any) bool {
+	if len(schema) == 0 {
+		return false
+	}
+	switch schemaPrimaryType(schema["type"]) {
+	case "object":
+		if additionalProperties, ok := schema["additionalProperties"].(bool); !ok || additionalProperties {
+			return false
+		}
+		properties, _ := schema["properties"].(map[string]any)
+		for _, value := range properties {
+			nested, _ := value.(map[string]any)
+			if len(nested) == 0 || !strictCompatibleSchema(nested) {
+				return false
+			}
+		}
+		return true
+	case "array":
+		items, ok := schema["items"]
+		if !ok || items == nil {
+			return true
+		}
+		nested, _ := items.(map[string]any)
+		return len(nested) > 0 && strictCompatibleSchema(nested)
+	case "string", "integer", "number", "boolean", "null":
+		return true
+	default:
+		return false
+	}
+}
+
+func schemaPrimaryType(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return strings.ToLower(strings.TrimSpace(typed))
+	case []string:
+		return primaryTypeFromStrings(typed)
+	case []any:
+		values := make([]string, 0, len(typed))
+		for _, item := range typed {
+			text, _ := item.(string)
+			values = append(values, text)
+		}
+		return primaryTypeFromStrings(values)
+	default:
+		return ""
+	}
+}
+
+func primaryTypeFromStrings(values []string) string {
+	primary := ""
+	for _, value := range values {
+		value = strings.ToLower(strings.TrimSpace(value))
+		if value == "" || value == "null" {
+			continue
+		}
+		if primary != "" && primary != value {
+			return ""
+		}
+		primary = value
+	}
+	return primary
 }
 
 // CloneDefinition returns one deep copy of one definition.

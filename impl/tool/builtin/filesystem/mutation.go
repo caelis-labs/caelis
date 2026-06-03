@@ -208,7 +208,7 @@ func parsePatchEdits(args map[string]any) ([]patchEdit, error) {
 		}
 		expectedProvided := false
 		expected := 1
-		if _, ok := item["expected_replacements"]; ok {
+		if rawExpected, ok := item["expected_replacements"]; ok && rawExpected != nil {
 			expectedProvided = true
 			expected, err = argparse.Int(item, "expected_replacements", 1)
 			if err != nil {

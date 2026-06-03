@@ -17,7 +17,8 @@ func TestDefinitionsAndModelSpecsCloneStableToolContracts(t *testing.T) {
 				Name:        "inspect",
 				Description: "Inspect session state",
 				InputSchema: map[string]any{
-					"type": "object",
+					"type":                 "object",
+					"additionalProperties": false,
 					"properties": map[string]any{
 						"path": map[string]any{"type": "string"},
 					},
@@ -46,6 +47,9 @@ func TestDefinitionsAndModelSpecsCloneStableToolContracts(t *testing.T) {
 	if got := specs[0].Kind; got != model.ToolSpecKindFunction {
 		t.Fatalf("specs[0].Kind = %q, want %q", got, model.ToolSpecKindFunction)
 	}
+	if !specs[0].Function.Strict {
+		t.Fatal("specs[0].Function.Strict = false, want strict inferred from closed schema")
+	}
 
 	defs[0].InputSchema["type"] = "array"
 	specs[0].Function.Parameters["type"] = "array"
@@ -53,6 +57,31 @@ func TestDefinitionsAndModelSpecsCloneStableToolContracts(t *testing.T) {
 	clone := Definitions(tools)
 	if got := clone[0].InputSchema["type"]; got != "object" {
 		t.Fatalf("clone[0].InputSchema[type] = %v, want object", got)
+	}
+}
+
+func TestModelSpecsDoesNotInferStrictForOpenSchema(t *testing.T) {
+	t.Parallel()
+
+	specs := ModelSpecs([]Tool{
+		NamedTool{
+			Def: Definition{
+				Name:        "open",
+				Description: "open schema",
+				InputSchema: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"path": map[string]any{"type": "string"},
+					},
+				},
+			},
+		},
+	})
+	if len(specs) != 1 || specs[0].Function == nil {
+		t.Fatalf("specs = %#v, want one function spec", specs)
+	}
+	if specs[0].Function.Strict {
+		t.Fatal("Function.Strict = true, want false for open schema")
 	}
 }
 

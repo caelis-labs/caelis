@@ -33,6 +33,28 @@ func TestMessageFromToolCallsNormalizesInvalidToolInputForJSONPersistence(t *tes
 	}
 }
 
+func TestToolSpecsFromDefinitionsPreservesStrictCapability(t *testing.T) {
+	t.Parallel()
+
+	specs := ToolSpecsFromDefinitions([]ToolDefinition{{
+		Name:        "closed",
+		Description: "closed strict tool",
+		Strict:      true,
+		Parameters:  map[string]any{"type": "object"},
+	}})
+	if len(specs) != 1 || specs[0].Function == nil {
+		t.Fatalf("specs = %#v, want one function spec", specs)
+	}
+	if !specs[0].Function.Strict {
+		t.Fatalf("Function.Strict = false, want true")
+	}
+
+	defs := FunctionToolDefinitions(specs)
+	if len(defs) != 1 || !defs[0].Strict {
+		t.Fatalf("FunctionToolDefinitions() = %#v, want strict preserved", defs)
+	}
+}
+
 func TestMessageFromToolCallsKeepsValidJSONToolInput(t *testing.T) {
 	rawArgs := `{"query":"gm_license"}`
 	msg := MessageFromToolCalls(RoleAssistant, []ToolCall{{

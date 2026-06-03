@@ -35,21 +35,22 @@ func NewGlob(runtime sandbox.Runtime) (*GlobTool, error) {
 func (t *GlobTool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        GlobToolName,
-		Description: "Find files by glob.",
+		Description: "Find filesystem paths matching a glob pattern, respecting workspace ignore rules. Use it when a filename, extension, directory shape, or path pattern is known but the exact path is not. This does not inspect file contents; use SEARCH for text and READ for exact context.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"pattern": map[string]any{"type": "string", "description": "Glob pattern."},
+				"pattern": map[string]any{"type": "string", "minLength": 1, "description": "Glob pattern."},
 				"exclude": map[string]any{
 					"type":        "array",
 					"description": "Relative exclude globs.",
-					"items":       map[string]any{"type": "string"},
+					"items":       map[string]any{"type": "string", "minLength": 1},
 				},
-				"limit": map[string]any{"type": "integer", "description": "Max matches."},
+				"limit": map[string]any{"type": "integer", "minimum": 1, "maximum": maxGlobLimit, "description": "Max matches."},
 			},
 			"required":             []string{"pattern"},
 			"additionalProperties": false,
 		},
+		Metadata: toolutil.AnnotationMetadata(true, false, true, false),
 	}
 }
 

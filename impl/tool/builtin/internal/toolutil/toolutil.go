@@ -10,6 +10,19 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/tool"
 )
 
+// AnnotationMetadata returns advisory tool hints. Sandbox, approval, and
+// runtime validation remain the enforcement boundary.
+func AnnotationMetadata(readOnly, destructive, idempotent, openWorld bool) map[string]any {
+	return map[string]any{
+		"annotations": map[string]any{
+			"readOnlyHint":    readOnly,
+			"destructiveHint": destructive,
+			"idempotentHint":  idempotent,
+			"openWorldHint":   openWorld,
+		},
+	}
+}
+
 func DecodeArgs(call tool.Call) (map[string]any, error) {
 	call = tool.CloneCall(call)
 	if len(call.Input) == 0 {

@@ -361,8 +361,7 @@ func openAICompatStrictSchema(schema map[string]any) bool {
 	if len(schema) == 0 {
 		return false
 	}
-	typ, _ := schema["type"].(string)
-	switch strings.ToLower(strings.TrimSpace(typ)) {
+	switch openAICompatSchemaPrimaryType(schema["type"]) {
 	case "object":
 		if additionalProperties, ok := schema["additionalProperties"].(bool); !ok || additionalProperties {
 			return false
@@ -391,6 +390,203 @@ func openAICompatStrictSchema(schema map[string]any) bool {
 		return true
 	default:
 		return true
+	}
+}
+
+func openAICompatSchemaPrimaryType(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return strings.ToLower(strings.TrimSpace(typed))
+	case []string:
+		return openAICompatPrimaryTypeFromStrings(typed)
+	case []any:
+		values := make([]string, 0, len(typed))
+		for _, item := range typed {
+			text, _ := item.(string)
+			values = append(values, text)
+		}
+		return openAICompatPrimaryTypeFromStrings(values)
+	default:
+		return ""
+	}
+}
+
+func openAICompatPrimaryTypeFromStrings(values []string) string {
+	primary := ""
+	for _, value := range values {
+		value = strings.ToLower(strings.TrimSpace(value))
+		if value == "" || value == "null" {
+			continue
+		}
+		if primary != "" && primary != value {
+			return ""
+		}
+		primary = value
+	}
+	return primary
+}
+
+func openAICompatStrictToolParameters(schema map[string]any) (map[string]any, bool) {
+	converted, ok := openAICompatStrictCompatibleSchema(schema)
+	if !ok || !openAICompatStrictSchema(converted) {
+		return nil, false
+	}
+	return converted, true
+}
+
+func openAICompatStrictCompatibleSchema(schema map[string]any) (map[string]any, bool) {
+	if len(schema) == 0 {
+		return nil, false
+	}
+	out := openAICompatCloneSchemaMap(schema)
+	switch openAICompatSchemaPrimaryType(out["type"]) {
+	case "object":
+		if additionalProperties, ok := out["additionalProperties"].(bool); !ok || additionalProperties {
+			return nil, false
+		}
+		properties, _ := out["properties"].(map[string]any)
+		if len(properties) == 0 {
+			return out, true
+		}
+		required := map[string]struct{}{}
+		for _, key := range stringSliceFromProviderAny(out["required"]) {
+			required[key] = struct{}{}
+		}
+		keys := make([]string, 0, len(properties))
+		nextProperties := make(map[string]any, len(properties))
+		for key, value := range properties {
+			propSchema, _ := value.(map[string]any)
+			if len(propSchema) == 0 {
+				return nil, false
+			}
+			converted, ok := openAICompatStrictCompatibleSchema(propSchema)
+			if !ok {
+				return nil, false
+			}
+			if _, ok := required[key]; !ok {
+				converted = openAICompatNullableSchema(converted)
+			}
+			nextProperties[key] = converted
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		out["properties"] = nextProperties
+		out["required"] = keys
+		return out, true
+	case "array":
+		items, _ := out["items"].(map[string]any)
+		if len(items) == 0 {
+			return out, true
+		}
+		converted, ok := openAICompatStrictCompatibleSchema(items)
+		if !ok {
+			return nil, false
+		}
+		out["items"] = converted
+		return out, true
+	case "string", "integer", "number", "boolean", "null":
+		return out, true
+	default:
+		return nil, false
+	}
+}
+
+func openAICompatNullableSchema(schema map[string]any) map[string]any {
+	out := openAICompatCloneSchemaMap(schema)
+	out["type"] = openAICompatNullableType(out["type"])
+	switch enumValues := out["enum"].(type) {
+	case []any:
+		if !openAICompatEnumHasNull(enumValues) {
+			out["enum"] = append(enumValues, nil)
+		}
+	case []string:
+		out["enum"] = openAICompatNullableEnumStrings(enumValues)
+	}
+	return out
+}
+
+func openAICompatNullableType(value any) any {
+	switch typed := value.(type) {
+	case string:
+		if strings.EqualFold(strings.TrimSpace(typed), "null") {
+			return "null"
+		}
+		return []any{typed, "null"}
+	case []string:
+		out := make([]any, 0, len(typed)+1)
+		hasNull := false
+		for _, item := range typed {
+			if strings.EqualFold(strings.TrimSpace(item), "null") {
+				hasNull = true
+			}
+			out = append(out, item)
+		}
+		if !hasNull {
+			out = append(out, "null")
+		}
+		return out
+	case []any:
+		out := append([]any(nil), typed...)
+		hasNull := false
+		for _, item := range out {
+			text, _ := item.(string)
+			if strings.EqualFold(strings.TrimSpace(text), "null") {
+				hasNull = true
+				break
+			}
+		}
+		if !hasNull {
+			out = append(out, "null")
+		}
+		return out
+	default:
+		return value
+	}
+}
+
+func openAICompatEnumHasNull(values []any) bool {
+	for _, value := range values {
+		if value == nil {
+			return true
+		}
+	}
+	return false
+}
+
+func openAICompatNullableEnumStrings(values []string) []any {
+	out := make([]any, 0, len(values)+1)
+	for _, value := range values {
+		out = append(out, value)
+	}
+	out = append(out, nil)
+	return out
+}
+
+func openAICompatCloneSchemaMap(in map[string]any) map[string]any {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(in))
+	for key, value := range in {
+		out[key] = openAICompatCloneSchemaValue(value)
+	}
+	return out
+}
+
+func openAICompatCloneSchemaValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return openAICompatCloneSchemaMap(typed)
+	case []any:
+		out := make([]any, len(typed))
+		for i, item := range typed {
+			out[i] = openAICompatCloneSchemaValue(item)
+		}
+		return out
+	case []string:
+		return append([]string(nil), typed...)
+	default:
+		return typed
 	}
 }
 
@@ -450,6 +646,7 @@ type openAICompatFunctionDecl struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description,omitempty"`
 	Parameters  map[string]any `json:"parameters,omitempty"`
+	Strict      bool           `json:"strict,omitempty"`
 }
 
 type openAICompatToolCall struct {
@@ -570,12 +767,21 @@ func (l *openAICompatLLM) fromKernelMessages(instructions []model.Part, messages
 func fromKernelTools(tools []model.ToolDefinition) []openAICompatTool {
 	out := make([]openAICompatTool, 0, len(tools))
 	for _, t := range tools {
+		parameters := t.Parameters
+		strict := false
+		if t.Strict {
+			if converted, ok := openAICompatStrictToolParameters(t.Parameters); ok {
+				parameters = converted
+				strict = true
+			}
+		}
 		out = append(out, openAICompatTool{
 			Type: "function",
 			Function: openAICompatFunctionDecl{
 				Name:        t.Name,
 				Description: t.Description,
-				Parameters:  t.Parameters,
+				Parameters:  parameters,
+				Strict:      strict,
 			},
 		})
 	}
