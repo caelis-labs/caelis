@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	ModeWorkspaceWrite = "workspace-write"
+	ModeWorkspaceWrite = policy.ProfileWorkspaceWrite
 
 	// ModeAutoReview and ModeManual are legacy policy names kept for callers
 	// that still import them. They normalize to ModeWorkspaceWrite.
@@ -28,22 +28,18 @@ const (
 )
 
 func NormalizeModeName(mode string) string {
-	trimmed := strings.TrimSpace(mode)
-	switch strings.ToLower(trimmed) {
-	case "", "workspace-write", "workspace_write", "workspacewrite":
+	normalized := policy.NormalizeProfileName(mode)
+	if strings.TrimSpace(normalized) == "" {
 		return ModeDefault
-	case "auto", "auto-review", "auto_review", "autoreview", "default", "plan", "full_control", "full_access":
-		return ModeDefault
-	case "manual":
-		return ModeDefault
-	default:
-		return trimmed
 	}
+	return normalized
 }
 
 func NewRegistry() (*policy.MemoryRegistry, error) {
 	return policy.NewMemory(
 		WorkspaceWriteMode(),
+		workspaceWriteAliasMode(ModeAutoReview),
+		workspaceWriteAliasMode(ModeManual),
 	)
 }
 
@@ -56,7 +52,10 @@ func WorkspaceWriteMode() policy.Mode {
 			case "PLAN", "SPAWN":
 				return allow(def), nil
 			case "READ", "SEARCH", "LIST", "GLOB":
-				return allow(filesystemReadConstraints(def)), nil
+				if err := ensureReadPathsOutsideDefaultHiddenRoots(input); err != nil {
+					return policyErrorOrDeny(err)
+				}
+				return allow(filesystemReadToolConstraints(def)), nil
 			case "WRITE", "PATCH":
 				if err := ensureWritePathsWithinRoots(input); err != nil {
 					return policyErrorOrDeny(err)
@@ -79,6 +78,14 @@ func AutoReviewMode() policy.Mode {
 
 func ManualMode() policy.Mode {
 	return WorkspaceWriteMode()
+}
+
+func workspaceWriteAliasMode(id string) policy.Mode {
+	base := WorkspaceWriteMode()
+	return policy.NamedMode{
+		ID:     strings.TrimSpace(id),
+		Decide: base.DecideTool,
+	}
 }
 
 func decideCommand(input policy.ToolContext, def sandbox.Constraints, modeName string) (policy.Decision, error) {
@@ -272,7 +279,7 @@ func defaultNetworkPolicy(opts policy.ModeOptions) sandbox.Network {
 	return sandbox.NetworkEnabled
 }
 
-func filesystemReadConstraints(in sandbox.Constraints) sandbox.Constraints {
+func filesystemReadToolConstraints(in sandbox.Constraints) sandbox.Constraints {
 	if len(in.PathRules) == 0 {
 		return in
 	}
@@ -285,6 +292,14 @@ func filesystemReadConstraints(in sandbox.Constraints) sandbox.Constraints {
 	}
 	in.PathRules = rules
 	return in
+}
+
+func ensureReadPathsOutsideDefaultHiddenRoots(input policy.ToolContext) error {
+	paths, err := candidatePaths(input)
+	if err != nil {
+		return err
+	}
+	return ensurePathsOutsideDefaultHiddenRoots(paths, approvedOverrideRoots(input.Options), "read")
 }
 
 func toolName(input policy.ToolContext) string {

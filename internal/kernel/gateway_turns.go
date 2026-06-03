@@ -8,6 +8,7 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/ports/agent"
 	"github.com/OnslaughtSnail/caelis/ports/model"
+	policyapi "github.com/OnslaughtSnail/caelis/ports/policy"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
@@ -162,16 +163,25 @@ func normalizeRunRequestPolicyProfile(req *agent.RunRequest) {
 	if req == nil || len(req.AgentSpec.Metadata) == 0 {
 		return
 	}
-	raw, ok := req.AgentSpec.Metadata["policy_mode"].(string)
+	if raw, ok := req.AgentSpec.Metadata[policyapi.MetadataPolicyProfile].(string); ok {
+		profile := policyapi.NormalizeProfileName(raw)
+		if profile == "" {
+			delete(req.AgentSpec.Metadata, policyapi.MetadataPolicyProfile)
+			return
+		}
+		req.AgentSpec.Metadata[policyapi.MetadataPolicyProfile] = profile
+		return
+	}
+	raw, ok := req.AgentSpec.Metadata[policyapi.MetadataLegacyPolicyMode].(string)
 	if !ok {
 		return
 	}
-	profile := normalizePolicyProfile(raw)
+	profile := policyapi.NormalizeProfileName(raw)
+	delete(req.AgentSpec.Metadata, policyapi.MetadataLegacyPolicyMode)
 	if profile == "" {
-		delete(req.AgentSpec.Metadata, "policy_mode")
 		return
 	}
-	req.AgentSpec.Metadata["policy_mode"] = profile
+	req.AgentSpec.Metadata[policyapi.MetadataPolicyProfile] = profile
 }
 
 func (g *Gateway) runParticipantTurn(

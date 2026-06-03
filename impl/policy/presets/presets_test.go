@@ -34,6 +34,31 @@ func TestAutoReviewModeAllowsWorkspaceWrites(t *testing.T) {
 	}
 }
 
+func TestNewRegistryResolvesLegacyPolicyModeAliases(t *testing.T) {
+	t.Parallel()
+
+	registry, err := NewRegistry()
+	if err != nil {
+		t.Fatalf("NewRegistry() error = %v", err)
+	}
+	for _, name := range []string{ModeWorkspaceWrite, ModeAutoReview, ModeManual} {
+		mode, ok, err := registry.Lookup(context.Background(), name)
+		if err != nil {
+			t.Fatalf("Lookup(%q) error = %v", name, err)
+		}
+		if !ok || mode == nil {
+			t.Fatalf("Lookup(%q) = nil/%v, want workspace-write compatible mode", name, ok)
+		}
+		decision, err := mode.DecideTool(context.Background(), writeCtx(filepath.Join(testWorkspaceRoot(), "notes.md")))
+		if err != nil {
+			t.Fatalf("%s DecideTool() error = %v", name, err)
+		}
+		if decision.Action != policy.ActionAllow {
+			t.Fatalf("%s action = %q, want allow", name, decision.Action)
+		}
+	}
+}
+
 func TestDefaultModeRestrictsWriteRoots(t *testing.T) {
 	t.Parallel()
 
@@ -96,7 +121,7 @@ func TestDefaultModeAllowsUserConfigReadsButRequiresWriteGrant(t *testing.T) {
 	}
 }
 
-func TestDefaultModeReadConstraintsDoNotAddDefaultReadableRoots(t *testing.T) {
+func TestDefaultModeReadToolsDoNotRequireExplicitReadableRootsForOrdinaryReads(t *testing.T) {
 	home := t.TempDir()
 	setHomeForPresetsTest(t, home)
 	configPath := filepath.Join(home, ".config", "ghostty", "config")
@@ -145,20 +170,38 @@ func TestDefaultModeCommandConstraintsKeepExtraReadRoots(t *testing.T) {
 	}
 }
 
-func TestDefaultModeAllowsSensitiveUserConfigReadsByDefault(t *testing.T) {
+func TestDefaultModeDeniesSensitiveUserConfigReadsByDefault(t *testing.T) {
 	home := t.TempDir()
 	setHomeForPresetsTest(t, home)
-	secretPath := filepath.Join(home, ".config", "gh", "hosts.yml")
 
-	decision, err := AutoReviewMode().DecideTool(context.Background(), readCtx(secretPath))
+	for _, secretPath := range []string{
+		filepath.Join(home, ".ssh", "id_rsa"),
+		filepath.Join(home, ".config", "gh", "hosts.yml"),
+	} {
+		decision, err := AutoReviewMode().DecideTool(context.Background(), readCtx(secretPath))
+		if err != nil {
+			t.Fatalf("READ DecideTool(%q) error = %v", secretPath, err)
+		}
+		if decision.Action != policy.ActionDeny {
+			t.Fatalf("READ action for %q = %q, want deny", secretPath, decision.Action)
+		}
+	}
+}
+
+func TestDefaultModeAllowsExplicitSensitiveUserConfigReadRoot(t *testing.T) {
+	home := t.TempDir()
+	setHomeForPresetsTest(t, home)
+	ghRoot := filepath.Join(home, ".config", "gh")
+	secretPath := filepath.Join(ghRoot, "hosts.yml")
+	input := readCtx(secretPath)
+	input.Options.ExtraReadRoots = []string{ghRoot}
+
+	decision, err := AutoReviewMode().DecideTool(context.Background(), input)
 	if err != nil {
 		t.Fatalf("READ DecideTool() error = %v", err)
 	}
 	if decision.Action != policy.ActionAllow {
-		t.Fatalf("READ action = %q, want allow (reason=%q)", decision.Action, decision.Reason)
-	}
-	if hasPathRule(decision.Constraints.PathRules, filepath.Join(home, ".config", "gh"), sandbox.PathAccessHidden) {
-		t.Fatalf("PathRules = %#v, did not expect hidden rule for default read", decision.Constraints.PathRules)
+		t.Fatalf("READ action = %q, want allow with explicit read root (reason=%q)", decision.Action, decision.Reason)
 	}
 }
 

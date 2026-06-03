@@ -12,7 +12,11 @@ import (
 
 func (r *Runtime) policyMode(spec agent.AgentSpec) string {
 	mode := strings.TrimSpace(r.defaultPolicyMode)
-	if raw, ok := spec.Metadata["policy_mode"].(string); ok {
+	if raw, ok := spec.Metadata[policy.MetadataPolicyProfile].(string); ok {
+		if trimmed := strings.TrimSpace(raw); trimmed != "" {
+			mode = trimmed
+		}
+	} else if raw, ok := spec.Metadata[policy.MetadataLegacyPolicyMode].(string); ok {
 		if trimmed := strings.TrimSpace(raw); trimmed != "" {
 			mode = trimmed
 		}
@@ -32,10 +36,10 @@ func modeOptionsFromSession(activeSession session.Session, spec agent.AgentSpec)
 	if opts.WorkspaceRoot == "" {
 		opts.WorkspaceRoot = activeSession.CWD
 	}
-	if values, ok := stringSliceMetadata(spec.Metadata, "policy_extra_read_roots"); ok {
+	if values, ok := stringSliceMetadata(spec.Metadata, policy.MetadataExtraReadRoots); ok {
 		opts.ExtraReadRoots = values
 	}
-	if values, ok := stringSliceMetadata(spec.Metadata, "policy_extra_write_roots"); ok {
+	if values, ok := stringSliceMetadata(spec.Metadata, policy.MetadataExtraWriteRoots); ok {
 		opts.ExtraWriteRoots = values
 	}
 	if value, ok := boolMetadata(spec.Metadata, "policy_network_enabled"); ok {

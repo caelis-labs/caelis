@@ -1488,8 +1488,8 @@ func TestRuntimeRunAppliesAssemblyModeAndConfigOverridesFromSessionState(t *test
 		t.Fatalf("factory specs len = %d, want %d", got, want)
 	}
 	spec := specs[0]
-	if got := strings.TrimSpace(spec.Metadata["policy_mode"].(string)); got != "workspace-write" {
-		t.Fatalf("policy_mode = %q, want %q", got, "workspace-write")
+	if got := strings.TrimSpace(spec.Metadata[policy.MetadataPolicyProfile].(string)); got != policy.ProfileWorkspaceWrite {
+		t.Fatalf("policy_profile = %q, want %q", got, policy.ProfileWorkspaceWrite)
 	}
 	if got := strings.TrimSpace(spec.Metadata["system_prompt"].(string)); got != "mode-plan-marker" {
 		t.Fatalf("system_prompt = %q, want %q", got, "mode-plan-marker")
@@ -2284,7 +2284,7 @@ func TestRuntimePolicyUnknownModeFallsBackToDefaultPolicy(t *testing.T) {
 		},
 	}
 	wrapped := runtime.wrapToolsForPolicy(activeSession, activeSession.SessionRef, nil, agent.AgentSpec{
-		Metadata: map[string]any{"policy_mode": "unknown-policy"},
+		Metadata: map[string]any{policy.MetadataPolicyProfile: "unknown-policy"},
 		Tools:    []tool.Tool{targetTool},
 	}, approvalContext{
 		ctx:        context.Background(),

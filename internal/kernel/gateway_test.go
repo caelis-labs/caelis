@@ -11,6 +11,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/impl/session/memory"
 	"github.com/OnslaughtSnail/caelis/ports/agent"
 	"github.com/OnslaughtSnail/caelis/ports/model"
+	policyapi "github.com/OnslaughtSnail/caelis/ports/policy"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/tool"
 )
@@ -850,6 +851,58 @@ func TestBeginTurnSkipsResolverForACPControllerSession(t *testing.T) {
 	}
 	if _, ok := rt.lastReq.AgentSpec.Metadata["policy_mode"]; ok {
 		t.Fatalf("runtime policy_mode = %#v, want legacy approval mode removed from policy metadata", rt.lastReq.AgentSpec.Metadata["policy_mode"])
+	}
+	if _, ok := rt.lastReq.AgentSpec.Metadata[policyapi.MetadataPolicyProfile]; ok {
+		t.Fatalf("runtime policy_profile = %#v, want legacy approval mode omitted from policy metadata", rt.lastReq.AgentSpec.Metadata[policyapi.MetadataPolicyProfile])
+	}
+}
+
+func TestBeginTurnNormalizesControllerPolicyProfileMetadata(t *testing.T) {
+	t.Parallel()
+
+	activeSession := session.Session{
+		SessionRef: session.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+		},
+		Controller: session.ControllerBinding{
+			Kind:         session.ControllerKindACP,
+			ControllerID: "acp-main",
+			EpochID:      "epoch-1",
+		},
+	}
+	rt := &recordingRuntime{
+		session: activeSession,
+		result:  agent.RunResult{Session: activeSession},
+	}
+	resolver := &recordingControllerResolver{
+		controllerResolved: ResolvedTurn{RunRequest: agent.RunRequest{
+			AgentSpec: agent.AgentSpec{Metadata: map[string]any{policyapi.MetadataPolicyProfile: "workspace_write"}},
+		}},
+	}
+	gw, err := New(Config{
+		Sessions: staticSessionService{session: activeSession},
+		Runtime:  rt,
+		Resolver: resolver,
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	result, err := gw.BeginTurn(context.Background(), BeginTurnRequest{
+		SessionRef: activeSession.SessionRef,
+		Input:      "hello controller",
+		Surface:    "cli-tui",
+	})
+	if err != nil {
+		t.Fatalf("BeginTurn() error = %v", err)
+	}
+	_ = collectHandleEvents(t, result.Handle)
+
+	if got := rt.lastReq.AgentSpec.Metadata[policyapi.MetadataPolicyProfile]; got != policyapi.ProfileWorkspaceWrite {
+		t.Fatalf("runtime policy_profile = %#v, want workspace-write", got)
+	}
+	if _, ok := rt.lastReq.AgentSpec.Metadata[policyapi.MetadataLegacyPolicyMode]; ok {
+		t.Fatalf("runtime policy_mode = %#v, want legacy key removed", rt.lastReq.AgentSpec.Metadata[policyapi.MetadataLegacyPolicyMode])
 	}
 }
 

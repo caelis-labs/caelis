@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/modelregistry"
+	policyapi "github.com/OnslaughtSnail/caelis/ports/policy"
 )
 
 type AppConfig struct {
@@ -411,7 +412,7 @@ func NormalizeSandboxConfig(cfg SandboxConfig) SandboxConfig {
 
 func NormalizeRuntimeConfig(cfg RuntimeConfig) RuntimeConfig {
 	cfg.ApprovalMode = normalizeApprovalMode(cfg.ApprovalMode)
-	cfg.PolicyProfile = normalizePolicyProfile(cfg.PolicyProfile)
+	cfg.PolicyProfile = policyapi.NormalizeProfileName(cfg.PolicyProfile)
 	return cfg
 }
 
@@ -423,17 +424,6 @@ func normalizeApprovalMode(mode string) string {
 		return "auto-review"
 	default:
 		return "auto-review"
-	}
-}
-
-func normalizePolicyProfile(profile string) string {
-	switch strings.ToLower(strings.TrimSpace(profile)) {
-	case "", "manual", "auto", "auto-review", "auto_review", "autoreview":
-		return ""
-	case "default", "plan", "full_control", "full_access", "workspace-write", "workspace_write", "workspacewrite":
-		return "workspace-write"
-	default:
-		return strings.TrimSpace(profile)
 	}
 }
 

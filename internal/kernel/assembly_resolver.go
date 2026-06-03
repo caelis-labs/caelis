@@ -9,6 +9,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/agent"
 	"github.com/OnslaughtSnail/caelis/ports/assembly"
 	"github.com/OnslaughtSnail/caelis/ports/model"
+	policyapi "github.com/OnslaughtSnail/caelis/ports/policy"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/tool"
 )
@@ -330,9 +331,14 @@ func resolveMetadataWith(baseMetadata map[string]any, resolved assembly.Resolved
 		return nil, err
 	}
 	if policyProfile := CurrentPolicyProfile(state); policyProfile != "" {
-		metadata["policy_mode"] = policyProfile
-	} else if stringMetadata(metadata, "policy_mode") == "" {
-		metadata["policy_mode"] = defaultPolicyProfile
+		metadata[policyapi.MetadataPolicyProfile] = policyProfile
+		delete(metadata, policyapi.MetadataLegacyPolicyMode)
+	} else if profile := metadataPolicyProfile(metadata); profile != "" {
+		metadata[policyapi.MetadataPolicyProfile] = profile
+		delete(metadata, policyapi.MetadataLegacyPolicyMode)
+	} else {
+		metadata[policyapi.MetadataPolicyProfile] = policyapi.ProfileWorkspaceWrite
+		delete(metadata, policyapi.MetadataLegacyPolicyMode)
 	}
 	if reasoning := firstNonEmptyString(
 		CurrentReasoningEffort(state),
@@ -392,7 +398,7 @@ func CurrentPolicyProfile(state map[string]any) string {
 		return ""
 	}
 	value, _ := state[StateCurrentPolicyProfile].(string)
-	return normalizePolicyProfile(value)
+	return policyapi.NormalizeProfileName(value)
 }
 
 func currentApprovalModeOverride(state map[string]any) (ApprovalMode, bool) {
@@ -410,19 +416,6 @@ func currentApprovalModeOverride(state map[string]any) (ApprovalMode, bool) {
 
 func normalizeSessionMode(mode string) string {
 	return string(NormalizeApprovalMode(mode))
-}
-
-const defaultPolicyProfile = "workspace-write"
-
-func normalizePolicyProfile(profile string) string {
-	switch strings.ToLower(strings.TrimSpace(profile)) {
-	case "", "manual", "auto", "auto-review", "auto_review", "autoreview":
-		return ""
-	case "default", "plan", "full_control", "full_access", "workspace-write", "workspace_write", "workspacewrite":
-		return defaultPolicyProfile
-	default:
-		return strings.TrimSpace(profile)
-	}
 }
 
 func applyAssemblySelections(metadata map[string]any, resolved assembly.ResolvedAssembly, requestedMode string, state map[string]any) error {
@@ -552,8 +545,9 @@ func applyRuntimeOverrides(metadata map[string]any, overrides assembly.RuntimeOv
 	if metadata == nil {
 		return
 	}
-	if profile := normalizePolicyProfile(overrides.PolicyMode); profile != "" {
-		metadata["policy_mode"] = profile
+	if profile := policyapi.NormalizeProfileName(overrides.PolicyMode); profile != "" {
+		metadata[policyapi.MetadataPolicyProfile] = profile
+		delete(metadata, policyapi.MetadataLegacyPolicyMode)
 	}
 	if trimmed := strings.TrimSpace(overrides.SystemPrompt); trimmed != "" {
 		metadata["system_prompt"] = trimmed
@@ -601,6 +595,13 @@ func mergeStringSliceMetadata(existing any, values []string) []string {
 		appendOne(one)
 	}
 	return out
+}
+
+func metadataPolicyProfile(metadata map[string]any) string {
+	if profile := policyapi.NormalizeProfileName(stringMetadata(metadata, policyapi.MetadataPolicyProfile)); profile != "" {
+		return profile
+	}
+	return policyapi.NormalizeProfileName(stringMetadata(metadata, policyapi.MetadataLegacyPolicyMode))
 }
 
 func stringMetadata(metadata map[string]any, key string) string {

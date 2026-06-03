@@ -43,6 +43,11 @@ const (
 
 var modifyFileDACL = acl.ModifyFileDACL
 
+type appliedWriteGrant struct {
+	path string
+	sid  string
+}
+
 func newRuntime(cfg Config) (sandbox.Runtime, error) {
 	cfg = sandbox.NormalizeConfig(cfg)
 	stateRoot, err := resolveStateRoot(cfg.StateDir)
@@ -625,7 +630,8 @@ func (r *runtime) ensureForRequest(ctx context.Context, req sandbox.CommandReque
 	}
 	policy = r.applyPolicyACLsBestEffort(policy)
 	if err := r.writeManifest(policy); err != nil {
-		return policy, nil
+		r.recordWorkspaceSetupError(err)
+		return policy, err
 	}
 	r.clearWorkspaceSetupError()
 	return policy, nil
@@ -771,6 +777,9 @@ func existingWritableRoots(roots []string) ([]string, error) {
 		}
 		info, err := os.Stat(root)
 		if err != nil {
+			if !os.IsNotExist(err) {
+				return nil, fmt.Errorf("impl/sandbox/windows: inspect writable root %s: %w", root, err)
+			}
 			continue
 		}
 		if !info.IsDir() {
@@ -991,16 +1000,22 @@ func (r *runtime) applyPolicyACLs(policy workspacePolicy) error {
 func (r *runtime) applyPolicyACLsBestEffort(policy workspacePolicy) workspacePolicy {
 	keptRoots := make([]string, 0, len(policy.WriteRoots))
 	failedDenyPaths := make([]string, 0, len(policy.DenyWritePaths))
+	appliedGrants := make([]appliedWriteGrant, 0, len(policy.WriteRoots)+len(sandboxEnvDirs(policy.SandboxEnvRoot)))
 	for _, root := range policy.WriteRoots {
-		if r.applyWritableRootACL(root, policy.sidForWriteRoot(root)) {
+		sid := policy.sidForWriteRoot(root)
+		if r.applyWritableRootACL(root, sid) {
 			keptRoots = append(keptRoots, root)
+			appliedGrants = append(appliedGrants, appliedWriteGrant{path: root, sid: sid})
 		}
 	}
 	for _, path := range sandboxEnvDirs(policy.SandboxEnvRoot) {
 		if pathListContains(policy.WriteRoots, path) {
 			continue
 		}
-		_ = r.applyWritableRootACL(path, policy.sidForWriteRoot(policy.SandboxEnvRoot))
+		sid := policy.sidForWriteRoot(policy.SandboxEnvRoot)
+		if r.applyWritableRootACL(path, sid) {
+			appliedGrants = append(appliedGrants, appliedWriteGrant{path: path, sid: sid})
+		}
 	}
 	for _, path := range policy.DenyWritePaths {
 		if r.applyDenyWriteACL(path, policy.CapabilitySIDs) {
@@ -1009,6 +1024,7 @@ func (r *runtime) applyPolicyACLsBestEffort(policy workspacePolicy) workspacePol
 		failedDenyPaths = append(failedDenyPaths, path)
 	}
 	if len(failedDenyPaths) > 0 {
+		revokeWriteGrantsCovering(appliedGrants, failedDenyPaths)
 		keptRoots = removeWriteRootsCovering(keptRoots, failedDenyPaths)
 	}
 	return policy.withWriteRoots(keptRoots)
@@ -1037,24 +1053,38 @@ func (r *runtime) applyDenyWriteACL(path string, sids []string) bool {
 	return modifyFileDACL(path, denyEntries(sids)...) == nil
 }
 
+func revokeWriteGrantsCovering(grants []appliedWriteGrant, blocked []string) {
+	if len(grants) == 0 || len(blocked) == 0 {
+		return
+	}
+	for _, grant := range grants {
+		if !pathOverlapsAny(grant.path, blocked) {
+			continue
+		}
+		_ = modifyFileDACL(grant.path, revokeEntries(grant.sid)...)
+	}
+}
+
 func removeWriteRootsCovering(roots []string, blocked []string) []string {
 	if len(roots) == 0 || len(blocked) == 0 {
 		return pathutil.Dedupe(roots)
 	}
 	out := make([]string, 0, len(roots))
 	for _, root := range roots {
-		covered := false
-		for _, path := range blocked {
-			if pathutil.IsUnder(path, root) || pathutil.IsUnder(root, path) {
-				covered = true
-				break
-			}
-		}
-		if !covered {
+		if !pathOverlapsAny(root, blocked) {
 			out = append(out, root)
 		}
 	}
 	return pathutil.Dedupe(out)
+}
+
+func pathOverlapsAny(root string, blocked []string) bool {
+	for _, path := range blocked {
+		if pathutil.IsUnder(path, root) || pathutil.IsUnder(root, path) {
+			return true
+		}
+	}
+	return false
 }
 
 func diagnoseACLWriteFailure(path string, err error) error {
@@ -1150,6 +1180,17 @@ func denyEntries(sids []string) []acl.Entry {
 		})
 	}
 	return entries
+}
+
+func revokeEntries(sid string) []acl.Entry {
+	sid = strings.TrimSpace(sid)
+	if sid == "" {
+		return nil
+	}
+	return []acl.Entry{{
+		Principal: sid,
+		Mode:      acl.Revoke,
+	}}
 }
 
 func (r *runtime) readManifest() (workspaceManifest, error) {

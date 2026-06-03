@@ -66,42 +66,6 @@ func (denyingApprovalApprover) Decide(_ context.Context, req ApprovalReviewReque
 	}, nil
 }
 
-type turnManualApprover struct {
-	turnCtx context.Context
-	handle  *turnHandle
-}
-
-func (a turnManualApprover) Decide(ctx context.Context, req ApprovalReviewRequest) (ApprovalReviewResult, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if a.turnCtx == nil {
-		a.turnCtx = context.Background()
-	}
-	if a.handle == nil {
-		return ApprovalReviewResult{}, nil
-	}
-	runtimeReq := req.RuntimeRequest
-	wait := a.handle.publishApproval(&runtimeReq)
-	select {
-	case decision := <-wait:
-		return ApprovalReviewResult{
-			Approved:       decision.Approved,
-			Outcome:        decision.Outcome,
-			OptionID:       decision.OptionID,
-			Rationale:      decision.Reason,
-			DisplayText:    decision.ReviewText,
-			DecisionSource: string(ApprovalModeManual),
-		}, nil
-	case <-ctx.Done():
-		return ApprovalReviewResult{}, ctx.Err()
-	case <-a.turnCtx.Done():
-		return ApprovalReviewResult{}, a.turnCtx.Err()
-	}
-}
-
-var _ ApprovalApprover = turnManualApprover{}
-
 var FormatApprovalReviewText = approval.FormatReviewText
 
 func approvalReviewTerminalStatus(result ApprovalReviewResult) ApprovalReviewStatus {

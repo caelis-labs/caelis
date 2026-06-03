@@ -560,7 +560,7 @@ func (a *RuntimeAgent) runSideACPCommand(
 		SessionRef: ref,
 		Agent:      side.agent,
 		Role:       session.ParticipantRoleSidecar,
-		Source:     "slash_" + side.agent,
+		Source:     sideACPSource(side.agent),
 		Label:      label,
 	})
 	if err != nil {
@@ -568,14 +568,18 @@ func (a *RuntimeAgent) runSideACPCommand(
 	}
 	participantID, err := sideACPParticipantID(updated, side.agent, label)
 	if err != nil {
-		return agent.RunResult{}, err
+		_, detachErr := control.DetachACPParticipant(context.WithoutCancel(ctx), agent.DetachACPParticipantRequest{
+			SessionRef: updated.SessionRef,
+			Source:     "side_agent_attach_rollback",
+		})
+		return agent.RunResult{}, errors.Join(err, detachErr)
 	}
 	result, err := control.PromptACPParticipant(ctx, agent.PromptACPParticipantRequest{
 		SessionRef:    updated.SessionRef,
 		ParticipantID: participantID,
 		Input:         side.prompt,
 		ContentParts:  side.contentParts,
-		Source:        "slash_" + side.agent,
+		Source:        sideACPSource(side.agent),
 		Stream:        true,
 		ApprovalRequester: approvalRequester{
 			callbacks:     cb,
@@ -593,6 +597,10 @@ func (a *RuntimeAgent) runSideACPCommand(
 		return agent.RunResult{}, errors.Join(err, detachErr)
 	}
 	return result, nil
+}
+
+func sideACPSource(agentName string) string {
+	return "slash_" + strings.TrimSpace(agentName)
 }
 
 func sideACPLabel(activeSession session.Session, agentName string) string {

@@ -717,6 +717,46 @@ func TestEnsureForRequestDropsParentRootWhenDenyCarveoutACLFailure(t *testing.T)
 	}
 }
 
+func TestEnsureForRequestRevokesWorkspaceRootGrantWhenDenyCarveoutACLFailure(t *testing.T) {
+	workspace := t.TempDir()
+	gitDir := filepath.Join(workspace, ".git")
+	if err := os.MkdirAll(gitDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll(.git) error = %v", err)
+	}
+	rt, err := New(sandbox.Config{CWD: workspace, StateDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer rt.Close()
+	windowsRT := rt.(*runtime)
+
+	var revoked []string
+	oldModify := modifyFileDACL
+	defer func() { modifyFileDACL = oldModify }()
+	modifyFileDACL = func(path string, entries ...acl.Entry) error {
+		for _, entry := range entries {
+			if entry.Mode == acl.Revoke {
+				revoked = append(revoked, path)
+			}
+			if pathutil.Key(path) == pathutil.Key(gitDir) && entry.Mode == acl.Deny {
+				return syscall.ERROR_ACCESS_DENIED
+			}
+		}
+		return oldModify(path, entries...)
+	}
+
+	policy, err := windowsRT.ensureForRequest(context.Background(), sandbox.CommandRequest{Dir: workspace})
+	if err != nil {
+		t.Fatalf("ensureForRequest() error = %v, want deny ACL failure skipped", err)
+	}
+	if containsPath(policy.WriteRoots, workspace) {
+		t.Fatalf("WriteRoots = %#v, want parent workspace root removed when .git deny ACL fails", policy.WriteRoots)
+	}
+	if !containsPath(revoked, workspace) {
+		t.Fatalf("revoked paths = %#v, want workspace root grant revoked after .git deny ACL failure", revoked)
+	}
+}
+
 func TestEnsureForRequestDropsChildRootWhenDenyCarveoutACLFailure(t *testing.T) {
 	workspace := t.TempDir()
 	gitDir := filepath.Join(workspace, ".git")
@@ -746,6 +786,39 @@ func TestEnsureForRequestDropsChildRootWhenDenyCarveoutACLFailure(t *testing.T) 
 	}
 	if containsPath(policy.WriteRoots, hooksDir) {
 		t.Fatalf("WriteRoots = %#v, want child .git/hooks root removed when .git deny ACL fails", policy.WriteRoots)
+	}
+}
+
+func TestEnsureForRequestReturnsManifestWriteError(t *testing.T) {
+	workspace := t.TempDir()
+	rt, err := New(sandbox.Config{CWD: workspace, StateDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer rt.Close()
+	windowsRT := rt.(*runtime)
+
+	manifestPath := windowsRT.manifestPath()
+	if err := os.MkdirAll(manifestPath, 0o700); err != nil {
+		t.Fatalf("MkdirAll(manifest path) error = %v", err)
+	}
+
+	_, err = windowsRT.ensureForRequest(context.Background(), sandbox.CommandRequest{Dir: workspace})
+	if err == nil {
+		t.Fatal("ensureForRequest() error = nil, want manifest write error")
+	}
+	if setupErr := windowsRT.workspaceSetupError(); setupErr == "" {
+		t.Fatal("workspaceSetupError() = empty, want recorded manifest write error")
+	}
+}
+
+func TestExistingWritableRootsReturnsUnexpectedStatErrors(t *testing.T) {
+	_, err := existingWritableRoots([]string{string([]rune{0})})
+	if err == nil {
+		t.Fatal("existingWritableRoots() error = nil, want unexpected stat error")
+	}
+	if !strings.Contains(err.Error(), "inspect writable root") {
+		t.Fatalf("existingWritableRoots() error = %v, want path inspection detail", err)
 	}
 }
 

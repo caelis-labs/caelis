@@ -8,6 +8,7 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/ports/assembly"
 	"github.com/OnslaughtSnail/caelis/ports/model"
+	policyapi "github.com/OnslaughtSnail/caelis/ports/policy"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
@@ -92,8 +93,8 @@ func TestAssemblyResolverAppliesAssemblyStateAndModelDefaults(t *testing.T) {
 	if got := meta["reasoning_budget_tokens"]; got != 64 {
 		t.Fatalf("reasoning_budget_tokens = %#v", got)
 	}
-	if got := meta["policy_mode"]; got != "workspace-write" {
-		t.Fatalf("policy_mode = %#v", got)
+	if got := meta[policyapi.MetadataPolicyProfile]; got != policyapi.ProfileWorkspaceWrite {
+		t.Fatalf("policy_profile = %#v", got)
 	}
 }
 
@@ -180,14 +181,14 @@ func TestAssemblyResolverControllerTurnPreservesPolicyMetadataWithoutModelLookup
 		t.Fatalf("model lookup calls = %d, want 0", modelCalls)
 	}
 	meta := turn.RunRequest.AgentSpec.Metadata
-	if got := meta["policy_mode"]; got != "workspace-write" {
-		t.Fatalf("policy_mode = %#v, want default workspace-write profile", got)
+	if got := meta[policyapi.MetadataPolicyProfile]; got != policyapi.ProfileWorkspaceWrite {
+		t.Fatalf("policy_profile = %#v, want default workspace-write profile", got)
 	}
 	if got := meta["system_prompt"]; got != "controller prompt" {
 		t.Fatalf("system_prompt = %#v, want assembly metadata", got)
 	}
-	if roots, _ := meta["policy_extra_read_roots"].([]string); len(roots) != 1 || roots[0] != "/tmp/read" {
-		t.Fatalf("policy_extra_read_roots = %#v, want assembly roots", meta["policy_extra_read_roots"])
+	if roots, _ := meta[policyapi.MetadataExtraReadRoots].([]string); len(roots) != 1 || roots[0] != "/tmp/read" {
+		t.Fatalf("policy_extra_read_roots = %#v, want assembly roots", meta[policyapi.MetadataExtraReadRoots])
 	}
 	if turn.RunRequest.AgentSpec.Model != nil {
 		t.Fatalf("controller AgentSpec.Model = %#v, want nil without model resolution", turn.RunRequest.AgentSpec.Model)
