@@ -108,6 +108,7 @@ func TestACPSurfaceAvailableCommandsExposeRegisteredACPAgents(t *testing.T) {
 	helper := acpCommandForToolTest(commands, "helper")
 	if helper == nil {
 		t.Fatalf("AvailableCommands() = %#v, want helper ACP agent command", commands)
+		return
 	}
 	if helper.Description != "bounded ACP helper" {
 		t.Fatalf("helper description = %q, want assembly description", helper.Description)

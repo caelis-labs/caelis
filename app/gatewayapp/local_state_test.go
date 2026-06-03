@@ -396,6 +396,7 @@ func TestACPSurfaceUsesStableModelIDsForDuplicateAliases(t *testing.T) {
 	}
 	if models == nil {
 		t.Fatal("SessionModels() = nil, want models")
+		return
 	}
 	if models.CurrentModelID != tokenPlanID {
 		t.Fatalf("CurrentModelID = %q, want %q", models.CurrentModelID, tokenPlanID)

@@ -1876,6 +1876,7 @@ func TestChatAgentEmitsToolProgressWhileCallIsRunning(t *testing.T) {
 		case event := <-eventsCh:
 			if event == nil {
 				t.Fatal("Run() ended before tool progress")
+				continue
 			}
 			if event.Type == session.EventTypeToolResult && event.Tool != nil && event.Tool.Status == "running" {
 				progress = event

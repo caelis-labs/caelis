@@ -281,6 +281,7 @@ func (m *historyReplayModel) Generate(_ context.Context, req *model.Request) ite
 	m.calls++
 	if req == nil {
 		m.t.Fatal("Generate() request = nil")
+		return nil
 	}
 	got := make([]string, 0, len(req.Messages))
 	for _, message := range req.Messages {
@@ -1104,6 +1105,7 @@ func mustFindTaskID(t *testing.T, req *model.Request) string {
 	t.Helper()
 	if req == nil {
 		t.Fatal("request = nil")
+		return ""
 	}
 	for _, message := range req.Messages {
 		for _, result := range message.ToolResults() {
