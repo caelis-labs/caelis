@@ -35,6 +35,7 @@ type openAICompatOptions struct {
 	EmitEmptyReasoningForAssistant bool
 	ApplyReasoning                 func(*openAICompatRequest, model.ReasoningConfig)
 	StructuredOutput               openAICompatStructuredOutput
+	StrictFunctionTools            bool
 }
 
 type openAICompatProfile struct {
@@ -74,13 +75,24 @@ func newOpenAICompat(cfg Config, token string) *openAICompatLLM {
 		contextWindowTokens: cfg.ContextWindowTokens,
 		options:             defaultOpenAICompatOptions(),
 	}
+	applyOpenAICompatCapabilities(&llm.options, cfg)
 	return llm
 }
 
 func newOpenAICompatWithProfile(cfg Config, token string, profile openAICompatProfile) *openAICompatLLM {
 	llm := newOpenAICompat(cfg, token)
 	llm.options = openAICompatOptionsForProfile(profile)
+	applyOpenAICompatCapabilities(&llm.options, cfg)
 	return llm
+}
+
+func applyOpenAICompatCapabilities(options *openAICompatOptions, cfg Config) {
+	// Only the official OpenAI API is known to accept wire-level function.strict.
+	// Generic OpenAI-compatible providers may expose the same route shape while
+	// using different tool-call parsers.
+	if cfg.API == APIOpenAI {
+		options.StrictFunctionTools = true
+	}
 }
 
 func openAICompatOptionsForProfile(profile openAICompatProfile) openAICompatOptions {
@@ -120,7 +132,7 @@ func (l *openAICompatLLM) Generate(ctx context.Context, req *model.Request) iter
 		payload := openAICompatRequest{
 			Model:     l.name,
 			Messages:  l.fromKernelMessages(req.Instructions, req.Messages),
-			Tools:     fromKernelTools(model.FunctionToolDefinitions(req.Tools)),
+			Tools:     fromKernelTools(model.FunctionToolDefinitions(req.Tools), l.options.StrictFunctionTools),
 			Stream:    req.Stream,
 			MaxTokens: l.maxOutputTok,
 		}
@@ -764,12 +776,12 @@ func (l *openAICompatLLM) fromKernelMessages(instructions []model.Part, messages
 	return out
 }
 
-func fromKernelTools(tools []model.ToolDefinition) []openAICompatTool {
+func fromKernelTools(tools []model.ToolDefinition, strictFunctionTools bool) []openAICompatTool {
 	out := make([]openAICompatTool, 0, len(tools))
 	for _, t := range tools {
 		parameters := t.Parameters
 		strict := false
-		if t.Strict {
+		if strictFunctionTools && t.Strict {
 			if converted, ok := openAICompatStrictToolParameters(t.Parameters); ok {
 				parameters = converted
 				strict = true

@@ -618,6 +618,80 @@ func TestOpenAICompatProviderSpecificStructuredOutputStrategy(t *testing.T) {
 	}
 }
 
+func TestOpenAICompatProviderSpecificStrictToolStrategy(t *testing.T) {
+	closedTool := model.ToolDefinition{
+		Name:        "lookup",
+		Description: "lookup closed schema",
+		Strict:      true,
+		Parameters: map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+			"properties": map[string]any{
+				"query": map[string]any{"type": "string"},
+			},
+			"required": []any{"query"},
+		},
+	}
+	tests := []struct {
+		name       string
+		llm        *openAICompatLLM
+		wantStrict bool
+	}{
+		{
+			name: "deepseek",
+			llm: newDeepSeek(Config{
+				Provider: "deepseek",
+				Model:    "deepseek-v4-pro",
+			}, "token").(*openAICompatLLM),
+			wantStrict: false,
+		},
+		{
+			name: "mimo",
+			llm: newMimo(Config{
+				Provider: "xiaomi",
+				Model:    "mimo-v2-pro",
+			}, "token").(*openAICompatLLM),
+			wantStrict: false,
+		},
+		{
+			name: "volcengine",
+			llm: newVolcengine(Config{
+				Provider: "volcengine",
+				Model:    "doubao-seed",
+			}, "token").(*openAICompatLLM),
+			wantStrict: false,
+		},
+		{
+			name: "openai-compatible",
+			llm: newOpenAICompat(Config{
+				Provider: "openai-compatible",
+				Model:    "gpt-compatible",
+			}, "token"),
+			wantStrict: false,
+		},
+		{
+			name: "openai",
+			llm: newOpenAICompat(Config{
+				Provider: "openai",
+				API:      APIOpenAI,
+				Model:    "gpt-5",
+			}, "token"),
+			wantStrict: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tools := fromKernelTools([]model.ToolDefinition{closedTool}, tc.llm.options.StrictFunctionTools)
+			if len(tools) != 1 {
+				t.Fatalf("tools len = %d, want 1", len(tools))
+			}
+			if tools[0].Function.Strict != tc.wantStrict {
+				t.Fatalf("Function.Strict = %v, want %v", tools[0].Function.Strict, tc.wantStrict)
+			}
+		})
+	}
+}
+
 func TestDeepSeekThinkingPayload_IncludesEmptyReasoningForPlainAssistantHistory(t *testing.T) {
 	llm := newDeepSeek(Config{
 		Provider: "deepseek",

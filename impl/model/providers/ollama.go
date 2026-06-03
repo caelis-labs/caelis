@@ -111,7 +111,7 @@ func (l *ollamaLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 		payload := ollamaChatRequest{
 			Model:    l.name,
 			Messages: l.fromKernelMessages(req.Instructions, req.Messages),
-			Tools:    fromKernelTools(model.FunctionToolDefinitions(req.Tools)),
+			Tools:    fromKernelTools(model.FunctionToolDefinitions(req.Tools), false),
 			Stream:   req.Stream,
 		}
 		if think := ollamaThinkValue(req.Reasoning); think != nil {

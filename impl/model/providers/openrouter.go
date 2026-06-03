@@ -116,6 +116,8 @@ func applyOpenRouterOutput(payload *openRouterRequest, output *model.OutputSpec,
 }
 
 func newOpenRouter(cfg Config, token string) model.LLM {
+	options := defaultOpenAICompatOptions()
+	options.StrictFunctionTools = true
 	return &openRouterLLM{
 		name:                cfg.Model,
 		provider:            cfg.Provider,
@@ -127,7 +129,7 @@ func newOpenRouter(cfg Config, token string) model.LLM {
 		firstEventTimeout:   normalizeStreamFirstEventTimeout(cfg.StreamFirstEventTimeout),
 		maxOutputTok:        cfg.MaxOutputTok,
 		contextWindowTokens: cfg.ContextWindowTokens,
-		options:             defaultOpenAICompatOptions(),
+		options:             options,
 		config:              cloneOpenRouterConfig(cfg.OpenRouter),
 	}
 }
@@ -155,7 +157,7 @@ func (l *openRouterLLM) Generate(ctx context.Context, req *model.Request) iter.S
 			Models:     normalizeOpenRouterModelIDs(l.config.Models),
 			Route:      strings.TrimSpace(l.config.Route),
 			Messages:   l.fromKernelMessages(req.Instructions, req.Messages),
-			Tools:      fromKernelTools(model.FunctionToolDefinitions(req.Tools)),
+			Tools:      fromKernelTools(model.FunctionToolDefinitions(req.Tools), l.options.StrictFunctionTools),
 			Stream:     req.Stream,
 			MaxTokens:  l.maxOutputTok,
 			Transforms: cloneStringSlice(l.config.Transforms),

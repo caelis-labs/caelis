@@ -136,7 +136,7 @@ func (l *codeFreeLLM) Generate(ctx context.Context, req *model.Request) iter.Seq
 		payload := openAICompatRequest{
 			Model:       l.name,
 			Messages:    l.fromKernelMessages(req.Instructions, req.Messages),
-			Tools:       fromKernelTools(model.FunctionToolDefinitions(req.Tools)),
+			Tools:       fromKernelTools(model.FunctionToolDefinitions(req.Tools), l.options.StrictFunctionTools),
 			Stream:      req.Stream,
 			MaxTokens:   l.maxOutputTok,
 			Temperature: codeFreeFloat64Ptr(0),

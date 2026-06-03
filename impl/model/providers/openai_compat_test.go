@@ -362,7 +362,8 @@ func TestOpenAICompatNonStream_IncludesStrictFunctionToolOnlyWhenCompatible(t *t
 	defer server.Close()
 
 	llm := newOpenAICompat(Config{
-		Provider:   "openai-compatible",
+		Provider:   "openai",
+		API:        APIOpenAI,
 		Model:      "test-model",
 		BaseURL:    server.URL,
 		HTTPClient: server.Client(),
