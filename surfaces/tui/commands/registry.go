@@ -25,7 +25,6 @@ func DefaultSpecs() []CommandSpec {
 		{Name: "agent", Usage: "/agent <action>", Description: "Manage ACP agents and controller switching", LocalDuringACP: true, Details: []string{"actions: list, add <builtin>, install <adapter>, use <agent|local>, remove <agent>"}, ArgCandidates: agentRootCandidates(), DynamicCompleter: true},
 		{Name: "connect", Usage: "/connect", Description: "Open the guided model/provider setup wizard", DynamicCompleter: true},
 		{Name: "model", Usage: "/model <action>", Description: "Switch or delete a configured model alias", LocalDuringACP: true, Details: []string{"actions: use <alias>, del <alias>"}, ArgCandidates: modelRootCandidates(), DynamicCompleter: true},
-		{Name: "approval", Usage: "/approval [mode]", Description: "Inspect or change approval review mode", LocalDuringACP: true, Details: []string{"modes: auto-review, manual"}, ArgCandidates: approvalCandidates()},
 		{Name: "status", Usage: "/status", Description: "Show current provider, model, session, sandbox, and store info", LocalDuringACP: true},
 		{Name: "doctor", Usage: "/doctor [fix]", Description: "Diagnose provider, model, session store, and sandbox readiness", LocalDuringACP: true, Details: []string{"fix: run explicit Windows sandbox ACL repair"}, ArgCandidates: doctorCandidates()},
 		{Name: "new", Usage: "/new", Description: "Start a fresh session"},
@@ -184,13 +183,6 @@ func modelRootCandidates() []driver.SlashArgCandidate {
 	return []driver.SlashArgCandidate{
 		{Value: "use", Display: "use", Detail: "Switch current model alias"},
 		{Value: "del", Display: "del", Detail: "Delete stored model alias"},
-	}
-}
-
-func approvalCandidates() []driver.SlashArgCandidate {
-	return []driver.SlashArgCandidate{
-		{Value: "auto-review", Display: "auto-review", Detail: "Use automatic AI approval review"},
-		{Value: "manual", Display: "manual", Detail: "Prompt before sensitive requests"},
 	}
 }
 

@@ -201,15 +201,28 @@ func (p gatewayACPSurface) PromptCapabilities(context.Context) (acp.PromptCapabi
 }
 
 func (p gatewayACPSurface) AvailableCommands(context.Context, string) ([]acp.AvailableCommand, error) {
-	return []acp.AvailableCommand{
+	commands := []acp.AvailableCommand{
 		{Name: "agent", Description: "Manage ACP agents", Input: commandInput("use|add|install|list|remove")},
 		{Name: "connect", Description: "Configure a model provider", Input: commandInput("provider model [base-url] [timeout] [token] [context] [max-output] [reasoning-levels] [first-event-timeout]")},
 		{Name: "model", Description: "Switch or inspect models", Input: commandInput("use <alias> [reasoning]")},
-		{Name: "approval", Description: "Switch approval mode", Input: commandInput("auto-review|manual")},
 		{Name: "status", Description: "Show current runtime status", Input: nil},
 		{Name: "resume", Description: "Resume a previous session", Input: commandInput("session id")},
 		{Name: "compact", Description: "Compact the current conversation", Input: nil},
-	}, nil
+	}
+	if p.stack != nil {
+		for _, agent := range p.stack.ListACPAgents() {
+			name := strings.TrimSpace(agent.Name)
+			if name == "" {
+				continue
+			}
+			commands = append(commands, acp.AvailableCommand{
+				Name:        name,
+				Description: firstNonEmpty(strings.TrimSpace(agent.Description), "Send a prompt to the registered ACP agent"),
+				Input:       commandInput("prompt"),
+			})
+		}
+	}
+	return commands, nil
 }
 
 func (p gatewayACPSurface) modeConfigOption(ctx context.Context, session session.Session) (acp.SessionConfigOption, error) {

@@ -45,8 +45,6 @@ func dispatchSlashCommandWithContext(ctx context.Context, driver tuidriver.Drive
 		return slashConnectWithContext(ctx, driver, send, args)
 	case "model":
 		return slashModelWithContext(ctx, driver, send, args)
-	case "approval":
-		return slashApprovalWithContext(ctx, driver, send, args)
 	case "compact":
 		return slashCompactWithContext(ctx, driver, send, args)
 	case "exit", "quit":
@@ -772,32 +770,6 @@ func slashModelWithContext(ctx context.Context, driver tuidriver.Driver, send fu
 func parseModelUseArgs(args string) (alias string, reasoning string) {
 	alias, rest := splitFirst(strings.TrimSpace(args))
 	return strings.TrimSpace(alias), strings.TrimSpace(rest)
-}
-
-func slashApprovalWithContext(ctx context.Context, driver tuidriver.Driver, send func(tea.Msg), args string) TaskResultMsg {
-	ctx = contextOrBackground(ctx)
-	mode := strings.TrimSpace(args)
-	if mode == "" {
-		status, err := driver.Status(ctx)
-		if err != nil {
-			return TaskResultMsg{Err: friendlyCommandError("approval", err)}
-		}
-		sendNotice(send, fmt.Sprintf("approval mode: %s", firstNonEmpty(strings.TrimSpace(status.SessionMode), "auto-review")))
-		return TaskResultMsg{SuppressTurnDivider: true}
-	}
-	switch strings.ToLower(mode) {
-	case "auto-review", "auto_review", "autoreview", "manual":
-	default:
-		sendNotice(send, "usage: /approval [auto-review|manual]")
-		return TaskResultMsg{SuppressTurnDivider: true}
-	}
-	status, err := driver.SetSessionMode(ctx, mode)
-	if err != nil {
-		return TaskResultMsg{Err: friendlyCommandError("approval", err)}
-	}
-	sendNotice(send, modeToggleHint(status))
-	sendStatusUpdate(send, status)
-	return TaskResultMsg{SuppressTurnDivider: true}
 }
 
 func slashCompact(driver tuidriver.Driver, send func(tea.Msg), args string) TaskResultMsg {

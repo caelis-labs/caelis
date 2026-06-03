@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"iter"
 	"strings"
 	"sync"
@@ -223,6 +224,98 @@ func TestRuntimeAgentListResumeAndCloseSession(t *testing.T) {
 
 	if _, err := agent.CloseSession(ctx, acp.CloseSessionRequest{SessionID: activeSession.SessionID}); err != nil {
 		t.Fatalf("CloseSession() error = %v", err)
+	}
+}
+
+func TestRuntimeAgentPromptSlashCommandRunsSideACPAndForwardsEvents(t *testing.T) {
+	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	runtime := &sideACPCommandRuntime{sessions: sessions}
+	agent, err := runtimeacp.New(runtimeacp.Config{
+		Runtime:  runtime,
+		Sessions: sessions,
+		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
+			return agent.AgentSpec{}, errors.New("main agent spec should not be built for side ACP slash command")
+		},
+		Commands: sideACPCommandProvider{{Name: "helper", Description: "bounded helper"}},
+		AppName:  "caelis",
+		UserID:   "user-1",
+		AgentInfo: &acp.Implementation{
+			Name:    "caelis-sdk",
+			Version: "0.1.0",
+		},
+	})
+	if err != nil {
+		t.Fatalf("runtimeacp.New() error = %v", err)
+	}
+	activeSession, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatalf("NewSession() error = %v", err)
+	}
+	cb := &recordingPromptCallbacks{}
+	resp, err := agent.Prompt(context.Background(), acp.PromptRequest{
+		SessionID: activeSession.SessionID,
+		Prompt: []json.RawMessage{
+			json.RawMessage(`{"type":"text","text":"/helper inspect the repo"}`),
+		},
+	}, cb)
+	if err != nil {
+		t.Fatalf("Prompt(/helper) error = %v", err)
+	}
+	if resp.StopReason != acp.StopReasonEndTurn {
+		t.Fatalf("StopReason = %q, want %q", resp.StopReason, acp.StopReasonEndTurn)
+	}
+	if runtime.runCalled {
+		t.Fatal("main runtime Run was called for side ACP slash command")
+	}
+	if runtime.attach.Agent != "helper" || runtime.attach.Source != "slash_helper" {
+		t.Fatalf("attach request = %#v, want helper slash attach", runtime.attach)
+	}
+	if runtime.prompt.Input != "inspect the repo" || runtime.prompt.Source != "slash_helper" {
+		t.Fatalf("prompt request = %#v, want trimmed side ACP prompt", runtime.prompt)
+	}
+	if got := firstAgentMessageChunk(cb.notifications); got != "side acp output" {
+		t.Fatalf("agent message updates = %#v, want side ACP output", cb.notifications)
+	}
+}
+
+func TestRuntimeAgentPromptSlashCommandPreservesRegisteredACPAgentName(t *testing.T) {
+	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	runtime := &sideACPCommandRuntime{sessions: sessions, expectedAgent: "MixedHelper"}
+	agent, err := runtimeacp.New(runtimeacp.Config{
+		Runtime:  runtime,
+		Sessions: sessions,
+		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
+			return agent.AgentSpec{}, errors.New("main agent spec should not be built for side ACP slash command")
+		},
+		Commands: sideACPCommandProvider{{Name: "MixedHelper", Description: "case-sensitive helper"}},
+		AppName:  "caelis",
+		UserID:   "user-1",
+		AgentInfo: &acp.Implementation{
+			Name:    "caelis-sdk",
+			Version: "0.1.0",
+		},
+	})
+	if err != nil {
+		t.Fatalf("runtimeacp.New() error = %v", err)
+	}
+	activeSession, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatalf("NewSession() error = %v", err)
+	}
+	resp, err := agent.Prompt(context.Background(), acp.PromptRequest{
+		SessionID: activeSession.SessionID,
+		Prompt: []json.RawMessage{
+			json.RawMessage(`{"type":"text","text":"/MixedHelper inspect the repo"}`),
+		},
+	}, &recordingPromptCallbacks{})
+	if err != nil {
+		t.Fatalf("Prompt(/MixedHelper) error = %v", err)
+	}
+	if resp.StopReason != acp.StopReasonEndTurn {
+		t.Fatalf("StopReason = %q, want %q", resp.StopReason, acp.StopReasonEndTurn)
+	}
+	if runtime.attach.Agent != "MixedHelper" {
+		t.Fatalf("attach agent = %q, want canonical registered name", runtime.attach.Agent)
 	}
 }
 
@@ -826,6 +919,12 @@ func (testConfigProvider) SetSessionConfigOption(context.Context, acp.SetSession
 	return acp.SetSessionConfigOptionResponse{}, nil
 }
 
+type sideACPCommandProvider []acp.AvailableCommand
+
+func (p sideACPCommandProvider) AvailableCommands(context.Context, string) ([]acp.AvailableCommand, error) {
+	return append([]acp.AvailableCommand(nil), p...), nil
+}
+
 type recordingPromptCallbacks struct {
 	notifications []acp.SessionNotification
 }
@@ -840,6 +939,114 @@ func (c *recordingPromptCallbacks) RequestPermission(context.Context, acp.Reques
 		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: acp.PermAllowOnce},
 	}, nil
 }
+
+func firstAgentMessageChunk(notifications []acp.SessionNotification) string {
+	for _, notification := range notifications {
+		chunk, ok := notification.Update.(acp.ContentChunk)
+		if !ok || chunk.SessionUpdate != acp.UpdateAgentMessage {
+			continue
+		}
+		content, ok := chunk.Content.(acp.TextContent)
+		if ok {
+			return content.Text
+		}
+	}
+	return ""
+}
+
+type sideACPCommandRuntime struct {
+	sessions      session.Service
+	expectedAgent string
+	runCalled     bool
+	attach        agent.AttachACPParticipantRequest
+	prompt        agent.PromptACPParticipantRequest
+}
+
+func (r *sideACPCommandRuntime) Run(context.Context, agent.RunRequest) (agent.RunResult, error) {
+	r.runCalled = true
+	return agent.RunResult{}, errors.New("main runtime should not run side ACP slash command")
+}
+
+func (r *sideACPCommandRuntime) RunState(context.Context, session.SessionRef) (agent.RunState, error) {
+	return agent.RunState{}, nil
+}
+
+func (r *sideACPCommandRuntime) AttachACPParticipant(ctx context.Context, req agent.AttachACPParticipantRequest) (session.Session, error) {
+	r.attach = req
+	if r.expectedAgent != "" && req.Agent != r.expectedAgent {
+		return session.Session{}, fmt.Errorf("agent %q not found", req.Agent)
+	}
+	activeSession, err := r.sessions.Session(ctx, req.SessionRef)
+	if err != nil {
+		return session.Session{}, err
+	}
+	role := req.Role
+	if role == "" {
+		role = session.ParticipantRoleSidecar
+	}
+	label := strings.TrimSpace(req.Label)
+	if label == "" {
+		label = "@" + strings.TrimSpace(req.Agent)
+	}
+	return r.sessions.PutParticipant(ctx, session.PutParticipantRequest{
+		SessionRef: activeSession.SessionRef,
+		Binding: session.ParticipantBinding{
+			ID:        "participant-1",
+			Kind:      session.ParticipantKindACP,
+			Role:      role,
+			AgentName: strings.TrimSpace(req.Agent),
+			Label:     label,
+			SessionID: "remote-helper",
+			Source:    strings.TrimSpace(req.Source),
+		},
+	})
+}
+
+func (r *sideACPCommandRuntime) PromptACPParticipant(ctx context.Context, req agent.PromptACPParticipantRequest) (agent.RunResult, error) {
+	r.prompt = req
+	activeSession, err := r.sessions.Session(ctx, req.SessionRef)
+	if err != nil {
+		return agent.RunResult{}, err
+	}
+	msg := model.NewTextMessage(model.RoleAssistant, "side acp output")
+	event := &session.Event{
+		SessionID:  activeSession.SessionID,
+		Type:       session.EventTypeAssistant,
+		Visibility: session.VisibilityCanonical,
+		Message:    &msg,
+		Text:       msg.TextContent(),
+		Protocol: &session.EventProtocol{
+			UpdateType: acp.UpdateAgentMessage,
+		},
+	}
+	return agent.RunResult{Session: activeSession, Handle: sideACPCommandRun{event: event}}, nil
+}
+
+func (r *sideACPCommandRuntime) DetachACPParticipant(context.Context, agent.DetachACPParticipantRequest) (session.Session, error) {
+	return session.Session{}, nil
+}
+
+func (r *sideACPCommandRuntime) HandoffController(context.Context, agent.HandoffControllerRequest) (session.Session, error) {
+	return session.Session{}, errors.New("handoff not implemented")
+}
+
+type sideACPCommandRun struct {
+	event *session.Event
+}
+
+func (r sideACPCommandRun) RunID() string { return "side-run-1" }
+
+func (r sideACPCommandRun) Events() iter.Seq2[*session.Event, error] {
+	return func(yield func(*session.Event, error) bool) {
+		yield(r.event, nil)
+	}
+}
+
+func (r sideACPCommandRun) Submit(agent.Submission) error { return nil }
+func (r sideACPCommandRun) Cancel() agent.CancelResult {
+	return agent.CancelResult{Status: agent.CancelStatusCancelled}
+}
+func (r sideACPCommandRun) Close() error { return nil }
 
 type permissionCountingCallbacks struct {
 	recordingPromptCallbacks

@@ -11,6 +11,7 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/impl/agent/acp/loader"
 	"github.com/OnslaughtSnail/caelis/impl/agent/acp/terminal"
+	"github.com/OnslaughtSnail/caelis/internal/agenthandle"
 	"github.com/OnslaughtSnail/caelis/internal/version"
 	"github.com/OnslaughtSnail/caelis/ports/agent"
 	"github.com/OnslaughtSnail/caelis/ports/approval"
@@ -376,10 +377,6 @@ func (a *RuntimeAgent) Prompt(ctx context.Context, req acp.PromptRequest, cb acp
 	if err != nil {
 		return acp.PromptResponse{}, err
 	}
-	spec, err := a.buildAgentSpec(ctx, activeSession, req)
-	if err != nil {
-		return acp.PromptResponse{}, err
-	}
 	input, contentParts, err := promptContent(req.Prompt)
 	if err != nil {
 		return acp.PromptResponse{}, err
@@ -396,6 +393,30 @@ func (a *RuntimeAgent) Prompt(ctx context.Context, req acp.PromptRequest, cb acp
 	defer cancel()
 
 	approvalMode, err := a.promptApprovalMode(ctx, activeSession)
+	if err != nil {
+		return acp.PromptResponse{}, err
+	}
+
+	if side, ok, err := a.sideACPCommand(ctx, activeSession.SessionID, input, contentParts); err != nil {
+		return acp.PromptResponse{}, err
+	} else if ok {
+		result, err := a.runSideACPCommand(runCtx, activeSession, ref, side, approvalMode, cb)
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
+			}
+			return acp.PromptResponse{}, err
+		}
+		if err := a.emitRunEvents(runCtx, ctx, cb, result.Handle); err != nil {
+			if errors.Is(err, context.Canceled) {
+				return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
+			}
+			return acp.PromptResponse{}, err
+		}
+		return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
+	}
+
+	spec, err := a.buildAgentSpec(ctx, activeSession, req)
 	if err != nil {
 		return acp.PromptResponse{}, err
 	}
@@ -419,14 +440,205 @@ func (a *RuntimeAgent) Prompt(ctx context.Context, req acp.PromptRequest, cb acp
 		}
 		return acp.PromptResponse{}, err
 	}
+	if err := a.emitRunEvents(runCtx, ctx, cb, result.Handle); err != nil {
+		if errors.Is(err, context.Canceled) {
+			return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
+		}
+		return acp.PromptResponse{}, err
+	}
+	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
+}
+
+type sideACPCommand struct {
+	agent        string
+	prompt       string
+	contentParts []model.ContentPart
+}
+
+func (a *RuntimeAgent) sideACPCommand(ctx context.Context, sessionID string, input string, contentParts []model.ContentPart) (sideACPCommand, bool, error) {
+	command, prompt, ok := splitSideACPSlash(input)
+	if !ok {
+		return sideACPCommand{}, false, nil
+	}
+	agentName, ok := a.availableSideACPCommand(ctx, sessionID, command)
+	if !ok {
+		return sideACPCommand{}, false, nil
+	}
+	parts := sideACPContentParts(contentParts, prompt)
+	if strings.TrimSpace(prompt) == "" && len(parts) == 0 {
+		return sideACPCommand{}, false, fmt.Errorf("impl/agent/acp: usage: /%s <prompt>", command)
+	}
+	return sideACPCommand{
+		agent:        agentName,
+		prompt:       strings.TrimSpace(prompt),
+		contentParts: parts,
+	}, true, nil
+}
+
+func splitSideACPSlash(input string) (string, string, bool) {
+	trimmed := strings.TrimSpace(input)
+	if !strings.HasPrefix(trimmed, "/") {
+		return "", "", false
+	}
+	head, rest, _ := strings.Cut(strings.TrimSpace(strings.TrimPrefix(trimmed, "/")), " ")
+	head = strings.ToLower(strings.TrimSpace(head))
+	if head == "" {
+		return "", "", false
+	}
+	return head, strings.TrimSpace(rest), true
+}
+
+func (a *RuntimeAgent) availableSideACPCommand(ctx context.Context, sessionID string, command string) (string, bool) {
+	if a == nil || a.commands == nil || reservedACPSlashCommand(command) {
+		return "", false
+	}
+	commands, err := a.commands.AvailableCommands(ctx, strings.TrimSpace(sessionID))
+	if err != nil {
+		return "", false
+	}
+	for _, candidate := range commands {
+		name := strings.TrimSpace(candidate.Name)
+		if strings.EqualFold(name, strings.TrimSpace(command)) {
+			return name, true
+		}
+	}
+	return "", false
+}
+
+func reservedACPSlashCommand(command string) bool {
+	switch strings.ToLower(strings.TrimSpace(command)) {
+	case "help", "agent", "connect", "model", "status", "doctor", "new", "resume", "compact", "exit", "quit":
+		return true
+	default:
+		return false
+	}
+}
+
+func sideACPContentParts(parts []model.ContentPart, prompt string) []model.ContentPart {
+	if len(parts) == 0 {
+		return nil
+	}
+	prompt = strings.TrimSpace(prompt)
+	out := make([]model.ContentPart, 0, len(parts)+1)
+	replacedText := false
+	for _, part := range parts {
+		if part.Type == model.ContentPartText && !replacedText {
+			replacedText = true
+			if prompt == "" {
+				continue
+			}
+			part.Text = prompt
+		}
+		out = append(out, part)
+	}
+	if !replacedText && prompt != "" {
+		out = append([]model.ContentPart{{
+			Type: model.ContentPartText,
+			Text: prompt,
+		}}, out...)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func (a *RuntimeAgent) runSideACPCommand(
+	ctx context.Context,
+	activeSession session.Session,
+	ref session.SessionRef,
+	side sideACPCommand,
+	approvalMode approval.Mode,
+	cb acp.PromptCallbacks,
+) (agent.RunResult, error) {
+	control, ok := a.runtime.(agent.SessionControlPlane)
+	if !ok || control == nil {
+		return agent.RunResult{}, fmt.Errorf("impl/agent/acp: side ACP commands require session control plane support")
+	}
+	label := sideACPLabel(activeSession, side.agent)
+	updated, err := control.AttachACPParticipant(ctx, agent.AttachACPParticipantRequest{
+		SessionRef: ref,
+		Agent:      side.agent,
+		Role:       session.ParticipantRoleSidecar,
+		Source:     "slash_" + side.agent,
+		Label:      label,
+	})
+	if err != nil {
+		return agent.RunResult{}, err
+	}
+	participantID, err := sideACPParticipantID(updated, side.agent, label)
+	if err != nil {
+		return agent.RunResult{}, err
+	}
+	result, err := control.PromptACPParticipant(ctx, agent.PromptACPParticipantRequest{
+		SessionRef:    updated.SessionRef,
+		ParticipantID: participantID,
+		Input:         side.prompt,
+		ContentParts:  side.contentParts,
+		Source:        "slash_" + side.agent,
+		Stream:        true,
+		ApprovalRequester: approvalRequester{
+			callbacks:     cb,
+			reviewer:      a.approvalReviewer,
+			modelResolver: a.approvalModelResolver,
+			mode:          approvalMode,
+		},
+	})
+	if err != nil {
+		_, detachErr := control.DetachACPParticipant(context.WithoutCancel(ctx), agent.DetachACPParticipantRequest{
+			SessionRef:    updated.SessionRef,
+			ParticipantID: participantID,
+			Source:        "side_agent_prompt_rollback",
+		})
+		return agent.RunResult{}, errors.Join(err, detachErr)
+	}
+	return result, nil
+}
+
+func sideACPLabel(activeSession session.Session, agentName string) string {
+	used := map[string]struct{}{}
+	for _, participant := range activeSession.Participants {
+		if label := agenthandle.Normalize(participant.Label); label != "" {
+			used[label] = struct{}{}
+		}
+	}
+	return "@" + agenthandle.Allocate(used, agentName)
+}
+
+func sideACPParticipantID(activeSession session.Session, agentName string, label string) (string, error) {
+	agentName = strings.TrimSpace(agentName)
+	label = strings.TrimSpace(label)
+	for i := len(activeSession.Participants) - 1; i >= 0; i-- {
+		participant := activeSession.Participants[i]
+		if participant.Role != session.ParticipantRoleSidecar {
+			continue
+		}
+		if !strings.EqualFold(strings.TrimSpace(participant.AgentName), agentName) {
+			continue
+		}
+		if label != "" && !strings.EqualFold(strings.TrimSpace(participant.Label), label) {
+			continue
+		}
+		if id := strings.TrimSpace(participant.ID); id != "" {
+			return id, nil
+		}
+	}
+	return "", fmt.Errorf("impl/agent/acp: side ACP participant %q was not attached", agentName)
+}
+
+func (a *RuntimeAgent) emitRunEvents(runCtx context.Context, bridgeCtx context.Context, cb acp.PromptCallbacks, handle agent.Runner) error {
+	if handle == nil {
+		return nil
+	}
+	defer handle.Close()
 	outboundFilter := newACPNarrativeFilter()
 	bridgedTerminals := map[string]struct{}{}
-	for event, seqErr := range result.Handle.Events() {
+	for event, seqErr := range handle.Events() {
 		if seqErr != nil {
 			if errors.Is(seqErr, context.Canceled) {
-				return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
+				return context.Canceled
 			}
-			return acp.PromptResponse{}, seqErr
+			return seqErr
 		}
 		if event == nil {
 			continue
@@ -435,19 +647,19 @@ func (a *RuntimeAgent) Prompt(ctx context.Context, req acp.PromptRequest, cb acp
 		if hasTerminalBridge {
 			a.rememberTerminalRef(event.SessionID, terminalBridge.displayTerminalID, terminalBridge.ref)
 			if terminalBridgeFinalStatus(terminalBridge.status) {
-				if _, err := a.emitTerminalBridgeSnapshot(context.WithoutCancel(ctx), cb, terminalBridge, bridgedTerminals); err != nil {
-					return acp.PromptResponse{}, err
+				if _, err := a.emitTerminalBridgeSnapshot(context.WithoutCancel(bridgeCtx), cb, terminalBridge, bridgedTerminals); err != nil {
+					return err
 				}
 			}
 		}
 		if err := a.emitEvent(runCtx, cb, event, outboundFilter, hasTerminalBridge); err != nil {
-			return acp.PromptResponse{}, err
+			return err
 		}
 		if hasTerminalBridge {
-			a.startTerminalBridge(context.WithoutCancel(ctx), cb, terminalBridge, bridgedTerminals)
+			a.startTerminalBridge(context.WithoutCancel(bridgeCtx), cb, terminalBridge, bridgedTerminals)
 		}
 	}
-	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
+	return nil
 }
 
 func (a *RuntimeAgent) Cancel(_ context.Context, req acp.CancelNotification) error {

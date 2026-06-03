@@ -13,7 +13,6 @@ func TestDefaultCommandsExposeCanonicalCoreCommandsOnly(t *testing.T) {
 		"agent",
 		"connect",
 		"model",
-		"approval",
 		"status",
 		"doctor",
 		"new",

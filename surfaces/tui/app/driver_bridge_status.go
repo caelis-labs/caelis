@@ -55,7 +55,7 @@ func formatStatusSnapshot(status tuidriver.StatusSnapshot) string {
 	}
 	if status.HostExecution || status.FullAccessMode {
 		warnings = append(warnings, "Commands may run on the host with reduced sandbox isolation")
-		warnings = append(warnings, "Auto-Review remains enabled and can approve host execution; use /approval manual for sensitive work")
+		warnings = append(warnings, "Auto-Review remains enabled and can approve host execution; switch approval mode to manual for sensitive work")
 	}
 	if globalSetupRequired {
 		if setupError != "" {

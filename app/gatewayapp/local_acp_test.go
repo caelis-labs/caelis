@@ -17,6 +17,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/assembly"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/tool"
+	"github.com/OnslaughtSnail/caelis/protocol/acp"
 )
 
 func TestLocalStackInjectsSpawnForSelfAndRegisteredACPAgents(t *testing.T) {
@@ -87,6 +88,32 @@ func TestLookupBuiltInACPAgentIncludesClaude(t *testing.T) {
 	}
 }
 
+func TestACPSurfaceAvailableCommandsExposeRegisteredACPAgents(t *testing.T) {
+	stack, session := newStackWithAssemblyForToolTest(t, assembly.ResolvedAssembly{
+		Agents: []assembly.AgentConfig{{
+			Name:        "helper",
+			Description: "bounded ACP helper",
+			Command:     "go",
+			Args:        []string{"run", "./internal/acpe2eagent"},
+			WorkDir:     repoRootForGatewayAppTest(t),
+		}},
+	})
+	commands, err := stack.ACPSurface(nil, false, nil).AvailableCommands(context.Background(), session.SessionID)
+	if err != nil {
+		t.Fatalf("AvailableCommands() error = %v", err)
+	}
+	if acpCommandForToolTest(commands, "approval") != nil {
+		t.Fatalf("AvailableCommands() = %#v, should not expose removed /approval command", commands)
+	}
+	helper := acpCommandForToolTest(commands, "helper")
+	if helper == nil {
+		t.Fatalf("AvailableCommands() = %#v, want helper ACP agent command", commands)
+	}
+	if helper.Description != "bounded ACP helper" {
+		t.Fatalf("helper description = %q, want assembly description", helper.Description)
+	}
+}
+
 func TestLookupBuiltInACPAgentIncludesNativeOpenCodeFamily(t *testing.T) {
 	for _, tt := range []struct {
 		name        string
@@ -121,6 +148,15 @@ func TestLookupBuiltInACPAgentIncludesNativeOpenCodeFamily(t *testing.T) {
 			}
 		})
 	}
+}
+
+func acpCommandForToolTest(commands []acp.AvailableCommand, name string) *acp.AvailableCommand {
+	for i := range commands {
+		if strings.EqualFold(strings.TrimSpace(commands[i].Name), strings.TrimSpace(name)) {
+			return &commands[i]
+		}
+	}
+	return nil
 }
 
 func TestNativeOpenCodeFamilyBuiltinOptionsAreAddOnly(t *testing.T) {

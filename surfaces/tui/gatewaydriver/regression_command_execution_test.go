@@ -239,7 +239,7 @@ func TestRegressionCommandExecDeleteUnknownAlias(t *testing.T) {
 	}
 }
 
-// --- /approval ---
+// --- approval mode ---
 
 func TestRegressionCommandExecApprovalMode(t *testing.T) {
 	t.Parallel()
