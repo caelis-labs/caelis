@@ -18,6 +18,8 @@ import (
 
 const maxInputBarRows = 4
 const ctrlCExitWindow = 2 * time.Second
+const terminalResponseGuardDuration = 1500 * time.Millisecond
+const terminalResponsePendingFlushDelay = 120 * time.Millisecond
 const runningHintRotateEveryTicks = 60
 const runningLightSpeed = 0.55
 const runningLightBandRadius = 5.5
@@ -320,6 +322,10 @@ type Model struct {
 	width   int
 	height  int
 	focused bool
+
+	terminalResponseGuardUntil time.Time
+	terminalResponsePending    string
+	terminalResponsePendingSeq uint64
 
 	// --- Document model (source of truth for viewport content) ---
 	doc *Document

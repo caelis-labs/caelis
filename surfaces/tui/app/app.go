@@ -62,7 +62,7 @@ func NewModel(cfg Config) *Model {
 	taStyles.Blurred.Text = theme.TextStyle()
 	taStyles.Blurred.Placeholder = theme.HelpHintTextStyle()
 	taStyles.Cursor.Color = theme.CursorFg
-	taStyles.Cursor.Shape = tea.CursorBlock
+	taStyles.Cursor.Shape = tea.CursorBar
 	taStyles.Cursor.Blink = true
 	ta.SetStyles(taStyles)
 	ta.Focus()
@@ -183,8 +183,8 @@ func (m *Model) Init() tea.Cmd {
 			return nil
 		})
 	}
-	if m.themeAuto {
-		cmds = append(cmds, requestBackgroundColorCmd())
+	if cmd := m.requestBackgroundColorIfAutoCmd(); cmd != nil {
+		cmds = append(cmds, cmd)
 	}
 	return tea.Batch(cmds...)
 }
@@ -295,6 +295,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case completionRefreshMsg:
 		return m.handleCompletionRefreshMsg(typed)
+
+	case terminalResponsePendingFlushMsg:
+		return m.handleTerminalResponsePendingFlush(typed)
 
 	case clearHintMsg:
 		m.removeHintByID(typed.id)
@@ -410,7 +413,15 @@ func (m *Model) requestBackgroundColorIfAutoCmd() tea.Cmd {
 	if m == nil || !m.themeAuto {
 		return nil
 	}
+	m.armTerminalResponseGuard()
 	return requestBackgroundColorCmd()
+}
+
+func (m *Model) armTerminalResponseGuard() {
+	if m == nil {
+		return
+	}
+	m.terminalResponseGuardUntil = time.Now().Add(terminalResponseGuardDuration)
 }
 
 func (m *Model) applyPaletteTheme(theme tuikit.Theme) {
@@ -434,7 +445,7 @@ func (m *Model) applyTextareaStyles(theme tuikit.Theme) {
 	styles.Blurred.Text = theme.TextStyle()
 	styles.Blurred.Placeholder = theme.HelpHintTextStyle()
 	styles.Cursor.Color = theme.CursorFg
-	styles.Cursor.Shape = tea.CursorBlock
+	styles.Cursor.Shape = tea.CursorBar
 	styles.Cursor.Blink = true
 	m.textarea.SetStyles(styles)
 }

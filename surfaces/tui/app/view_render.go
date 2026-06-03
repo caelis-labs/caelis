@@ -561,13 +561,16 @@ func (m *Model) discardDispatchedPendingPrompts() {
 }
 
 func (m *Model) renderInputBar() string {
+	var rendered string
 	if m.activePrompt != nil {
-		return insetRenderedBlock(m.renderPromptInputBar(), inputHorizontalInset)
+		rendered = insetRenderedBlock(m.renderPromptInputBar(), inputHorizontalInset)
+		return m.protectComposerWideCellRepaint(rendered)
 	}
 	if start, end, ok := normalizedSelectionRange(m.inputSelectionStart, m.inputSelectionEnd, len(m.inputPlainLines())); ok &&
 		(start.line != end.line || start.col != end.col) {
 		lines := m.inputPlainLines()
-		return insetRenderedBlock(strings.Join(renderSelectionOnLines(lines, start, end, m.theme.SelectionStyle()), "\n"), inputHorizontalInset)
+		rendered = insetRenderedBlock(strings.Join(renderSelectionOnLines(lines, start, end, m.theme.SelectionStyle()), "\n"), inputHorizontalInset)
+		return m.protectComposerWideCellRepaint(rendered)
 	}
 
 	prompt := m.theme.PromptStyle().Render("> ")
@@ -578,10 +581,16 @@ func (m *Model) renderInputBar() string {
 			if m.wizard.hideInput() {
 				inputVal = strings.Repeat("*", utf8.RuneCountInString(strings.TrimSpace(query)))
 			}
-			return insetRenderedBlock(renderMultilineInput(prompt, inputVal), inputHorizontalInset)
+			rendered = insetRenderedBlock(renderMultilineInput(prompt, inputVal), inputHorizontalInset)
+			return m.protectComposerWideCellRepaint(rendered)
 		}
 	}
-	return m.renderRegularInputBar()
+	rendered = m.renderRegularInputBar()
+	return m.protectComposerWideCellRepaint(rendered)
+}
+
+func (m *Model) protectComposerWideCellRepaint(text string) string {
+	return protectWideCellRepaintBlock(text, m.fixedRowWidth())
 }
 
 func (m *Model) syncTextareaChrome() {

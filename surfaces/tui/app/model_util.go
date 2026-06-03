@@ -733,6 +733,7 @@ func normalizeFullscreenFrameWithTopTrim(view string, width int, height int) (st
 			if pad := width - displayColumns(line); pad > 0 {
 				lines[i] = line + strings.Repeat(" ", pad)
 			}
+			lines[i] = protectWideCellRepaintLine(lines[i], width)
 		}
 	}
 	if height > 0 && len(lines) < height {
@@ -745,6 +746,55 @@ func normalizeFullscreenFrameWithTopTrim(view string, width int, height int) (st
 		}
 	}
 	return strings.Join(lines, "\n"), topTrim
+}
+
+const wideCellRendererSentinelURI = "caelis://wide-cell-render-sentinel"
+
+func protectWideCellRepaintBlock(text string, width int) string {
+	if text == "" || width <= 1 {
+		return text
+	}
+	lines := strings.Split(text, "\n")
+	changed := false
+	for idx, line := range lines {
+		next := protectWideCellRepaintLine(line, width)
+		if next != line {
+			lines[idx] = next
+			changed = true
+		}
+	}
+	if !changed {
+		return text
+	}
+	return strings.Join(lines, "\n")
+}
+
+func protectWideCellRepaintLine(line string, width int) string {
+	if line == "" || width <= 1 || !lineContainsWideCell(line) {
+		return line
+	}
+	lineWidth := displayColumns(line)
+	if lineWidth < width {
+		return line + strings.Repeat(" ", width-lineWidth-1) + wideCellRendererSentinel()
+	}
+	if lineWidth == width && strings.HasSuffix(line, " ") {
+		return strings.TrimSuffix(line, " ") + wideCellRendererSentinel()
+	}
+	return line
+}
+
+func wideCellRendererSentinel() string {
+	return ansi.SetHyperlink(wideCellRendererSentinelURI) + " " + ansi.ResetHyperlink()
+}
+
+func lineContainsWideCell(line string) bool {
+	plain := ansi.Strip(line)
+	for _, cluster := range splitGraphemeClusters(plain) {
+		if graphemeWidth(cluster) > 1 {
+			return true
+		}
+	}
+	return false
 }
 
 func percentileDuration(values []time.Duration, percentile float64) time.Duration {

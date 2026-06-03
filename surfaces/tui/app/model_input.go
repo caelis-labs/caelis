@@ -431,6 +431,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if _, ok := msg.(tea.KeyReleaseMsg); ok {
 		return m, nil
 	}
+	if handled, cmd := m.handleTerminalResponseGuardKey(msg); handled {
+		return m, cmd
+	}
 	// External prompt input takes priority.
 	if m.activePrompt != nil {
 		return m, m.handlePromptKey(msg)
@@ -808,6 +811,270 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, cmd
 	}
+}
+
+type terminalResponsePendingFlushMsg struct {
+	seq uint64
+}
+
+type terminalResponseFragmentMatch int
+
+const (
+	terminalResponseNoMatch terminalResponseFragmentMatch = iota
+	terminalResponsePrefix
+	terminalResponseComplete
+)
+
+func (m *Model) handleTerminalResponseGuardKey(msg tea.KeyMsg) (bool, tea.Cmd) {
+	if m == nil {
+		return false, nil
+	}
+	if m.terminalResponseGuardUntil.IsZero() || time.Now().After(m.terminalResponseGuardUntil) {
+		m.flushTerminalResponsePending()
+		return false, nil
+	}
+	keyEvent := msg.Key()
+	if keyEvent.Mod != 0 || keyEvent.Text == "" {
+		m.flushTerminalResponsePending()
+		return false, nil
+	}
+	text := keyEvent.Text
+	if strings.TrimSpace(text) == "" {
+		m.flushTerminalResponsePending()
+		return false, nil
+	}
+	if strings.ContainsAny(text, "\x1b\x9b\x9d") {
+		m.clearTerminalResponsePending()
+		return true, nil
+	}
+
+	if m.terminalResponsePending != "" {
+		candidate := m.terminalResponsePending + text
+		switch terminalResponseFragmentState(candidate) {
+		case terminalResponseComplete:
+			m.clearTerminalResponsePending()
+			return true, nil
+		case terminalResponsePrefix:
+			m.terminalResponsePending = candidate
+			return true, m.scheduleTerminalResponsePendingFlush()
+		default:
+			m.flushTerminalResponsePending()
+			return false, nil
+		}
+	}
+
+	switch terminalResponseFragmentState(text) {
+	case terminalResponseComplete:
+		m.clearTerminalResponsePending()
+		return true, nil
+	case terminalResponsePrefix:
+		m.terminalResponsePending = text
+		return true, m.scheduleTerminalResponsePendingFlush()
+	default:
+		return false, nil
+	}
+}
+
+func (m *Model) handleTerminalResponsePendingFlush(msg terminalResponsePendingFlushMsg) (tea.Model, tea.Cmd) {
+	if m == nil || msg.seq != m.terminalResponsePendingSeq || m.terminalResponsePending == "" {
+		return m, nil
+	}
+	m.flushTerminalResponsePending()
+	return m, m.requestCompletionRefresh()
+}
+
+func (m *Model) scheduleTerminalResponsePendingFlush() tea.Cmd {
+	if m == nil {
+		return nil
+	}
+	m.terminalResponsePendingSeq++
+	seq := m.terminalResponsePendingSeq
+	return tea.Tick(terminalResponsePendingFlushDelay, func(time.Time) tea.Msg {
+		return terminalResponsePendingFlushMsg{seq: seq}
+	})
+}
+
+func (m *Model) flushTerminalResponsePending() {
+	if m == nil || m.terminalResponsePending == "" {
+		return
+	}
+	pending := m.terminalResponsePending
+	m.clearTerminalResponsePending()
+	m.insertComposerText(pending)
+}
+
+func (m *Model) clearTerminalResponsePending() {
+	if m == nil {
+		return
+	}
+	if m.terminalResponsePending != "" {
+		m.terminalResponsePending = ""
+	}
+	m.terminalResponsePendingSeq++
+}
+
+func looksLikeTerminalResponseFragment(text string) bool {
+	return terminalResponseFragmentState(text) == terminalResponseComplete
+}
+
+func terminalResponseFragmentState(text string) terminalResponseFragmentMatch {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return terminalResponseNoMatch
+	}
+	if strings.ContainsAny(text, "\x1b\x9b\x9d") {
+		return terminalResponseComplete
+	}
+	if isRepeatedDAZeroTail(text) {
+		return terminalResponseComplete
+	}
+	if isRepeatedDAZeroTailPrefix(text) {
+		return terminalResponsePrefix
+	}
+	if isPrefixedTerminalNumericReport(text, "c") {
+		return terminalResponseComplete
+	}
+	if isPrefixedTerminalNumericReport(text, "u") {
+		return terminalResponseComplete
+	}
+	if isPrefixedTerminalNumericReport(text, "$y") {
+		return terminalResponseComplete
+	}
+	if isPrefixedTerminalNumericReportPrefix(text) {
+		return terminalResponsePrefix
+	}
+	if state := terminalColorReportState(text); state != terminalResponseNoMatch {
+		return state
+	}
+	return terminalResponseNoMatch
+}
+
+func isRepeatedDAZeroTail(text string) bool {
+	if len(text) < 2 || len(text)%2 != 0 {
+		return false
+	}
+	for i := 0; i < len(text); i += 2 {
+		if text[i:i+2] != "0c" {
+			return false
+		}
+	}
+	return true
+}
+
+func isRepeatedDAZeroTailPrefix(text string) bool {
+	if text == "" {
+		return false
+	}
+	for i := 0; i < len(text); i++ {
+		switch i % 2 {
+		case 0:
+			if text[i] != '0' {
+				return false
+			}
+		default:
+			if text[i] != 'c' {
+				return false
+			}
+		}
+	}
+	return len(text)%2 == 1
+}
+
+func isPrefixedTerminalNumericReport(text string, suffix string) bool {
+	if text == "" || suffix == "" || !strings.HasSuffix(text, suffix) {
+		return false
+	}
+	body := strings.TrimSuffix(text, suffix)
+	if body == "" {
+		return false
+	}
+	switch body[0] {
+	case '?', '>', '=':
+	default:
+		return false
+	}
+	body = body[1:]
+	if body == "" {
+		return false
+	}
+	hasDigit := false
+	for _, r := range body {
+		switch {
+		case r >= '0' && r <= '9':
+			hasDigit = true
+		case r == ';':
+		default:
+			return false
+		}
+	}
+	return hasDigit
+}
+
+func isPrefixedTerminalNumericReportPrefix(text string) bool {
+	if text == "" {
+		return false
+	}
+	switch text[0] {
+	case '?', '>', '=':
+	default:
+		return false
+	}
+	body := text[1:]
+	if body == "" {
+		return true
+	}
+	hasDigit := false
+	for idx, r := range body {
+		switch {
+		case r >= '0' && r <= '9':
+			hasDigit = true
+		case r == ';':
+		case r == '$' && hasDigit && idx == len(body)-1:
+			return true
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func terminalColorReportState(text string) terminalResponseFragmentMatch {
+	lower := strings.ToLower(text)
+	prefixes := []string{"10;rgb:", "11;rgb:", "12;rgb:"}
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(prefix, lower) {
+			return terminalResponsePrefix
+		}
+		if !strings.HasPrefix(lower, prefix) {
+			continue
+		}
+		body := strings.TrimPrefix(lower, prefix)
+		if body == "" {
+			return terminalResponsePrefix
+		}
+		parts := strings.Split(body, "/")
+		if len(parts) > 3 {
+			return terminalResponseNoMatch
+		}
+		for _, part := range parts {
+			if part == "" {
+				return terminalResponsePrefix
+			}
+			for _, r := range part {
+				if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+					return terminalResponseNoMatch
+				}
+			}
+		}
+		if len(parts) < 3 {
+			return terminalResponsePrefix
+		}
+		if len(parts[0]) >= 2 && len(parts[0]) == len(parts[1]) && len(parts[1]) == len(parts[2]) {
+			return terminalResponseComplete
+		}
+		return terminalResponsePrefix
+	}
+	return terminalResponseNoMatch
 }
 
 func (m *Model) handlePaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {

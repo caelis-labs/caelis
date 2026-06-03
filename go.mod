@@ -4,17 +4,18 @@ go 1.25.1
 
 require (
 	charm.land/bubbles/v2 v2.1.0
-	charm.land/bubbletea/v2 v2.0.6
+	charm.land/bubbletea/v2 v2.0.7
 	charm.land/lipgloss/v2 v2.0.3
 	github.com/anthropics/anthropic-sdk-go v1.27.1
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1
 	github.com/charmbracelet/colorprofile v0.4.3
 	github.com/charmbracelet/glamour v1.0.0
+	github.com/charmbracelet/ultraviolet v0.0.0-20260601155805-6cf7526a1b3f
 	github.com/charmbracelet/x/ansi v0.11.7
 	github.com/google/uuid v1.6.0
 	github.com/mattn/go-runewidth v0.0.23
 	github.com/rivo/uniseg v0.4.7
-	golang.org/x/sys v0.43.0
+	golang.org/x/sys v0.45.0
 	google.golang.org/genai v1.49.0
 )
 
@@ -27,7 +28,6 @@ require (
 	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/charmbracelet/harmonica v0.2.0 // indirect
 	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834 // indirect
-	github.com/charmbracelet/ultraviolet v0.0.0-20260416155717-489999b90468 // indirect
 	github.com/charmbracelet/x/cellbuf v0.0.15 // indirect
 	github.com/charmbracelet/x/exp/slice v0.0.0-20250327172914-2fdc97757edf // indirect
 	github.com/charmbracelet/x/term v0.2.2 // indirect

@@ -16,7 +16,6 @@ func (m *Model) View() tea.View {
 		view := tea.NewView("loading...")
 		view.AltScreen = true
 		view.MouseMode = tea.MouseModeCellMotion
-		view.KeyboardEnhancements.ReportEventTypes = true
 		return view
 	}
 
@@ -121,7 +120,6 @@ func (m *Model) View() tea.View {
 	frame.AltScreen = true
 	frame.MouseMode = m.desiredMouseMode()
 	frame.ReportFocus = true
-	frame.KeyboardEnhancements.ReportEventTypes = true
 	frame.WindowTitle = m.windowTitle()
 	if cursor := m.regularInputCursor(); cursor != nil {
 		cursor.X += m.mainColumnX()
