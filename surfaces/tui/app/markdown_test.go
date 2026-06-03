@@ -595,7 +595,17 @@ func TestStreamingNarrativeTailHidesFenceDelimiterAndAvoidsRedBackground(t *test
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rows := glamourStreamingNarrativeRows("block-1", tt.raw, "* ", tuikit.LineStyleAssistant, 80, theme)
+			rows := RenderText(TextRenderRequest{
+				Kind:           TextAssistant,
+				Mode:           RenderStream,
+				MarkdownPolicy: MarkdownStableTail,
+				Raw:            tt.raw,
+				Prefix:         "* ",
+				Width:          80,
+				BlockID:        "block-1",
+				Theme:          theme,
+				LineStyle:      tuikit.LineStyleAssistant,
+			}).Rows
 			if len(rows) == 0 {
 				t.Fatal("expected streaming rows")
 			}
@@ -614,8 +624,8 @@ func TestStreamingNarrativeTailHidesFenceDelimiterAndAvoidsRedBackground(t *test
 func TestActiveStreamingTailStyleDoesNotJumpAcrossLegacyLengthThreshold(t *testing.T) {
 	theme := tuikit.ResolveThemeWithState(true, false, colorprofile.TrueColor)
 	prefix := "```go\nfmt.Println(\"stable\")\n"
-	shortRows := renderActiveNarrativeTailRows("block-1", prefix+strings.Repeat("// x\n", 4), "* ", tuikit.LineStyleAssistant, 80, theme)
-	longRows := renderActiveNarrativeTailRows("block-1", prefix+strings.Repeat("// x\n", 40), "* ", tuikit.LineStyleAssistant, 80, theme)
+	shortRows := renderActiveNarrativeBufferTestRows("block-1", prefix+strings.Repeat("// x\n", 4), "* ", tuikit.LineStyleAssistant, 80, theme)
+	longRows := renderActiveNarrativeBufferTestRows("block-1", prefix+strings.Repeat("// x\n", 40), "* ", tuikit.LineStyleAssistant, 80, theme)
 
 	shortStyled := firstStyledRowContaining(shortRows, "fmt.Println")
 	longStyled := firstStyledRowContaining(longRows, "fmt.Println")
@@ -625,6 +635,15 @@ func TestActiveStreamingTailStyleDoesNotJumpAcrossLegacyLengthThreshold(t *testi
 	if shortStyled != longStyled {
 		t.Fatalf("shared code row style changed across stream length threshold\nshort=%q\n long=%q", shortStyled, longStyled)
 	}
+}
+
+func renderActiveNarrativeBufferTestRows(blockID, raw, rolePrefix string, roleStyle tuikit.LineStyle, width int, theme tuikit.Theme) []RenderedRow {
+	buffer := &activeNarrativeBuffer{}
+	buffer.SetText(raw)
+	return buffer.RenderRows(blockID, rolePrefix, roleStyle, BlockRenderContext{
+		Width: width,
+		Theme: theme,
+	})
 }
 
 func TestMainACPTurnActiveMarkdownStreamUsesTailRenderer(t *testing.T) {

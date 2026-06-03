@@ -193,6 +193,94 @@ func BenchmarkAssistantStablePrefixTailMarkdownStream(b *testing.B) {
 	}
 }
 
+func BenchmarkACPMainStablePrefixTailMarkdownStream(b *testing.B) {
+	m := newPerfTestModel()
+	seedLongTranscript(m, 2000)
+	m = applyACPMainNarrativeBenchmarkChunk(b, m, stablePrefixTailBenchmarkInitialText())
+	m = updateBenchmarkTick(b, m, frameTickViewportSync, time.Now())
+
+	if got := m.diag.GlamourRenderCalls; got != 1 {
+		b.Fatalf("stable prefix Glamour renders = %d, want 1", got)
+	}
+	beforeGlamour := m.diag.GlamourRenderCalls
+	beforeTranscriptRenders := m.diag.BlockRenderCallsByKind[BlockTranscript]
+	beforeFullSyncs := m.diag.ViewportFullSyncs
+	beforeIncrementalSyncs := m.diag.ViewportIncrementalSyncs
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		m = applyACPMainNarrativeBenchmarkChunk(b, m, " tail-token")
+		m = updateBenchmarkTick(b, m, frameTickViewportSync, time.Now())
+	}
+	b.StopTimer()
+
+	if m.diag.GlamourRenderCalls != beforeGlamour {
+		b.Fatalf("tail chunks re-rendered stable prefix with Glamour: got %d, want %d", m.diag.GlamourRenderCalls, beforeGlamour)
+	}
+	if m.diag.BlockRenderCallsByKind[BlockTranscript] != beforeTranscriptRenders {
+		b.Fatalf("tail chunks re-rendered completed transcript blocks: got %d, want %d", m.diag.BlockRenderCallsByKind[BlockTranscript], beforeTranscriptRenders)
+	}
+	if m.diag.ViewportFullSyncs != beforeFullSyncs {
+		b.Fatalf("tail chunks used full viewport syncs: got %d, want %d", m.diag.ViewportFullSyncs, beforeFullSyncs)
+	}
+	if m.diag.ViewportIncrementalSyncs == beforeIncrementalSyncs {
+		b.Fatal("tail chunks did not use incremental viewport sync")
+	}
+}
+
+func BenchmarkACPMainStreamWhileScrolledHistory(b *testing.B) {
+	m := newPerfTestModel()
+	seedLongTranscript(m, 4000)
+	m = applyACPMainNarrativeBenchmarkChunk(b, m, stablePrefixTailBenchmarkInitialText())
+	m = updateBenchmarkTick(b, m, frameTickViewportSync, time.Now())
+
+	maxPinnedOffset := maxInt(1, m.viewportMaxOffset()/2)
+	m.viewport.SetYOffset(maxPinnedOffset)
+	m.setViewportFollowState(viewportPinnedHistory)
+	if m.isViewportFollowTail() {
+		b.Fatal("benchmark setup failed: viewport should be pinned in history")
+	}
+
+	beforeGlamour := m.diag.GlamourRenderCalls
+	beforeTranscriptRenders := m.diag.BlockRenderCallsByKind[BlockTranscript]
+	beforeFullSyncs := m.diag.ViewportFullSyncs
+	beforeIncrementalSyncs := m.diag.ViewportIncrementalSyncs
+	beforeSetContent := m.diag.ViewportSetContentLines
+	beforeSkippedSyncs := m.diag.ViewportSkippedSyncs
+	now := time.Now()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		m = applyACPMainNarrativeBenchmarkChunk(b, m, " tail-token")
+		m.viewport.SetYOffset(1 + i%maxPinnedOffset)
+		m.setViewportFollowState(viewportPinnedHistory)
+		m = updateBenchmarkTick(b, m, frameTickOffscreen, now.Add(time.Duration(i)*time.Millisecond))
+		_ = m.renderViewportView()
+	}
+	b.StopTimer()
+
+	if m.diag.GlamourRenderCalls != beforeGlamour {
+		b.Fatalf("offscreen tail chunks rendered stable prefix with Glamour: got %d, want %d", m.diag.GlamourRenderCalls, beforeGlamour)
+	}
+	if m.diag.BlockRenderCallsByKind[BlockTranscript] != beforeTranscriptRenders {
+		b.Fatalf("offscreen tail chunks re-rendered completed transcript blocks: got %d, want %d", m.diag.BlockRenderCallsByKind[BlockTranscript], beforeTranscriptRenders)
+	}
+	if m.diag.ViewportFullSyncs != beforeFullSyncs {
+		b.Fatalf("offscreen stream used full viewport syncs: got %d, want %d", m.diag.ViewportFullSyncs, beforeFullSyncs)
+	}
+	if m.diag.ViewportIncrementalSyncs != beforeIncrementalSyncs {
+		b.Fatalf("offscreen stream used incremental viewport syncs: got %d, want %d", m.diag.ViewportIncrementalSyncs, beforeIncrementalSyncs)
+	}
+	if m.diag.ViewportSetContentLines != beforeSetContent {
+		b.Fatalf("offscreen stream reset viewport content: got %d, want %d", m.diag.ViewportSetContentLines, beforeSetContent)
+	}
+	if m.diag.ViewportSkippedSyncs == beforeSkippedSyncs {
+		b.Fatal("offscreen stream did not defer viewport syncs while pinned in history")
+	}
+}
+
 func BenchmarkToolOutputStream10kChunks(b *testing.B) {
 	m := newPerfTestModel()
 	block := m.ensureMainACPTurnBlock("session-1")
@@ -315,6 +403,33 @@ func stablePrefixTailBenchmarkInitialText() string {
 	}, "\n")
 	tail := strings.Repeat("Unstable tail text remains lightweight and should not promote during appends. ", 3)
 	return strings.Join([]string{stableIntro, "", stableList, "", stableCode, "", tail}, "\n")
+}
+
+func applyACPMainNarrativeBenchmarkChunk(b *testing.B, m *Model, text string) *Model {
+	b.Helper()
+	model, _ := m.handleTranscriptEventsMsg(TranscriptEventsMsg{Events: []TranscriptEvent{{
+		Kind:          TranscriptEventNarrative,
+		Scope:         ACPProjectionMain,
+		ScopeID:       "session-1",
+		NarrativeKind: TranscriptNarrativeAssistant,
+		Text:          text,
+		OccurredAt:    time.Now(),
+	}}})
+	next, ok := model.(*Model)
+	if !ok {
+		b.Fatalf("model = %T, want *Model", model)
+	}
+	return next
+}
+
+func updateBenchmarkTick(b *testing.B, m *Model, kind frameTickKind, at time.Time) *Model {
+	b.Helper()
+	model, _ := m.Update(perfTickAt(kind, at))
+	next, ok := model.(*Model)
+	if !ok {
+		b.Fatalf("model = %T, want *Model", model)
+	}
+	return next
 }
 
 func perfTickAt(kind frameTickKind, at time.Time) tea.Msg {

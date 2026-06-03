@@ -29,6 +29,10 @@ type SubagentEvent struct {
 	StartedAt time.Time
 	EndedAt   time.Time
 
+	// ActiveBuffer is transient UI state derived from Text for streaming
+	// narrative rendering. It is not canonical session data.
+	ActiveBuffer *activeNarrativeBuffer `json:"-"`
+
 	// ToolCall fields.
 	CallID          string
 	Name            string
@@ -97,6 +101,38 @@ func closeLatestReasoningTiming(events []SubagentEvent, occurredAt time.Time) {
 	}
 }
 
+func appendNarrativeEventChunk(ev *SubagentEvent, kind SubagentEventKind, chunk string, at time.Time, merge func(string, string) string) {
+	if ev == nil {
+		return
+	}
+	if merge == nil {
+		merge = appendDeltaStreamChunk
+	}
+	text := collapseRepeatedNarrativeText(merge(ev.Text, chunk))
+	ev.Kind = kind
+	ev.Text = text
+	if ev.ActiveBuffer == nil {
+		ev.ActiveBuffer = &activeNarrativeBuffer{}
+	}
+	ev.ActiveBuffer.SetText(text)
+	markNarrativeTiming(ev, at)
+}
+
+func newNarrativeEventChunk(kind SubagentEventKind, chunk string, at time.Time) SubagentEvent {
+	ev := SubagentEvent{Kind: kind}
+	appendNarrativeEventChunk(&ev, kind, chunk, at, appendDeltaStreamChunk)
+	return ev
+}
+
+func replaceNarrativeEventFinal(ev *SubagentEvent, text string, at time.Time) {
+	if ev == nil {
+		return
+	}
+	ev.Text = collapseRepeatedNarrativeText(text)
+	ev.ActiveBuffer = nil
+	markNarrativeTiming(ev, at)
+}
+
 type SubagentSessionState struct {
 	SpawnID   string
 	AttachID  string
@@ -132,14 +168,11 @@ func (s *SubagentSessionState) AppendStreamChunk(kind SubagentEventKind, chunk s
 	}
 	at := narrativeEventTime(occurredAt...)
 	if idx := latestNarrativeAppendTargetIndex(s.Events, kind); idx >= 0 {
-		s.Events[idx].Text = collapseRepeatedNarrativeText(mergeSubagentStreamChunk(s.Events[idx].Text, chunk))
-		markNarrativeTiming(&s.Events[idx], at)
+		appendNarrativeEventChunk(&s.Events[idx], kind, chunk, at, mergeSubagentStreamChunk)
 		s.eventsGen++
 		return
 	}
-	ev := SubagentEvent{Kind: kind, Text: collapseRepeatedNarrativeText(chunk)}
-	markNarrativeTiming(&ev, at)
-	s.Events = append(s.Events, ev)
+	s.Events = append(s.Events, newNarrativeEventChunk(kind, chunk, at))
 	s.eventsGen++
 }
 
@@ -153,15 +186,13 @@ func (s *SubagentSessionState) ReplaceFinalStreamChunk(kind SubagentEventKind, c
 	}
 	at := narrativeEventTime(occurredAt...)
 	if idx := latestNarrativeFinalTargetIndex(s.Events, kind); idx >= 0 {
-		s.Events[idx].Text = collapseRepeatedNarrativeText(chunk)
-		markNarrativeTiming(&s.Events[idx], at)
+		replaceNarrativeEventFinal(&s.Events[idx], chunk, at)
 		s.Events = pruneNarrativeEventsCoveredByFinal(s.Events, idx, kind)
 		s.eventsGen++
 		return
 	}
-	ev := SubagentEvent{Kind: kind, Text: collapseRepeatedNarrativeText(chunk)}
-	markNarrativeTiming(&ev, at)
-	s.Events = append(s.Events, ev)
+	s.Events = append(s.Events, newNarrativeEventChunk(kind, chunk, at))
+	s.Events[len(s.Events)-1].ActiveBuffer = nil
 	s.Events = pruneNarrativeEventsCoveredByFinal(s.Events, len(s.Events)-1, kind)
 	s.eventsGen++
 }

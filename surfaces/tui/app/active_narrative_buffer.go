@@ -20,6 +20,20 @@ type activeNarrativeBuffer struct {
 	cachedRows       []RenderedRow
 }
 
+func (b *activeNarrativeBuffer) SetText(text string) {
+	if b == nil {
+		return
+	}
+	text = strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n")
+	stableRaw, tailRaw := splitStableStreamingMarkdown(text)
+	if b.stablePrefixRaw == stableRaw && b.tailRaw == tailRaw {
+		return
+	}
+	b.stablePrefixRaw = stableRaw
+	b.tailRaw = tailRaw
+	b.version++
+}
+
 func (b *activeNarrativeBuffer) Append(text string) {
 	if b == nil || text == "" {
 		return
@@ -59,12 +73,18 @@ func (b *activeNarrativeBuffer) CacheKey() string {
 }
 
 func (b *activeNarrativeBuffer) RenderRows(blockID, rolePrefix string, roleStyle tuikit.LineStyle, ctx BlockRenderContext) []RenderedRow {
+	return b.RenderRowsAtWidth(blockID, rolePrefix, roleStyle, ctx.Width, ctx)
+}
+
+func (b *activeNarrativeBuffer) RenderRowsAtWidth(blockID, rolePrefix string, roleStyle tuikit.LineStyle, width int, ctx BlockRenderContext) []RenderedRow {
 	if b == nil || strings.TrimSpace(b.Text()) == "" {
 		return nil
 	}
-	width := ctx.Width
 	if width <= 0 {
-		width = 1
+		width = ctx.Width
+		if width <= 0 {
+			width = 1
+		}
 	}
 	themeKey := ctx.renderThemeKey()
 	if b.cachedRows != nil &&
@@ -108,18 +128,10 @@ func (b *activeNarrativeBuffer) renderRows(blockID, rolePrefix string, roleStyle
 	}).Rows
 }
 
-func renderActiveNarrativeTailRows(blockID, raw, rolePrefix string, roleStyle tuikit.LineStyle, width int, theme tuikit.Theme) []RenderedRow {
-	return RenderText(TextRenderRequest{
-		Kind:           textKindForLineStyle(roleStyle),
-		Mode:           RenderStream,
-		MarkdownPolicy: MarkdownStableTail,
-		Raw:            raw,
-		Prefix:         rolePrefix,
-		Width:          width,
-		BlockID:        blockID,
-		Theme:          theme,
-		LineStyle:      roleStyle,
-	}).Rows
+func renderActiveNarrativeTextRows(blockID, raw, rolePrefix string, roleStyle tuikit.LineStyle, ctx BlockRenderContext) []RenderedRow {
+	buffer := &activeNarrativeBuffer{}
+	buffer.SetText(raw)
+	return buffer.RenderRows(blockID, rolePrefix, roleStyle, ctx)
 }
 
 func (b *AssistantBlock) appendActiveDelta(text string) {

@@ -802,6 +802,11 @@ func writeSubagentEvents(builder *blockKeyBuilder, events []SubagentEvent, ctx B
 	for _, event := range events {
 		builder.addInt(int(event.Kind))
 		builder.addString(event.Text)
+		if event.ActiveBuffer != nil && !event.ActiveBuffer.Empty() {
+			builder.addString(event.ActiveBuffer.CacheKey())
+		} else {
+			builder.addString("")
+		}
 		builder.addTime(event.StartedAt)
 		builder.addTime(event.EndedAt)
 		builder.addString(event.CallID)

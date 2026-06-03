@@ -116,8 +116,19 @@ func collectConsecutiveReasoning(events []SubagentEvent, idx int) (string, int) 
 	return collapseRepeatedNarrativeText(text), end
 }
 
-func renderACPReasoningNarrativeRows(blockID string, text string, width int, ctx BlockRenderContext, active bool) []RenderedRow {
-	rows := renderParticipantTurnNarrativeRows(blockID, text, tuikit.LineStyleReasoning, width, ctx, active)
+func activeBufferForConsecutiveReasoning(events []SubagentEvent, idx int, end int, text string) *activeNarrativeBuffer {
+	if idx < 0 || idx >= len(events) || idx != end {
+		return nil
+	}
+	buffer := events[idx].ActiveBuffer
+	if buffer == nil || buffer.Empty() || buffer.Text() != text {
+		return nil
+	}
+	return buffer
+}
+
+func renderACPReasoningNarrativeRows(blockID string, text string, activeBuffer *activeNarrativeBuffer, width int, ctx BlockRenderContext, active bool) []RenderedRow {
+	rows := renderParticipantTurnNarrativeRowsWithBuffer(blockID, text, activeBuffer, tuikit.LineStyleReasoning, width, ctx, active)
 	if !active {
 		return rows
 	}
@@ -220,8 +231,8 @@ func reasoningExpandedBodyVisible(text string, width int) bool {
 	return normalized != reasoningPreviewText(text, width)
 }
 
-func renderACPReasoningExpandedRows(blockID string, text string, idx int, width int, ctx BlockRenderContext, active bool) []RenderedRow {
-	rows := renderParticipantTurnNarrativeRows(blockID, text, tuikit.LineStyleReasoning, width, ctx, active)
+func renderACPReasoningExpandedRows(blockID string, text string, activeBuffer *activeNarrativeBuffer, idx int, width int, ctx BlockRenderContext, active bool) []RenderedRow {
+	rows := renderParticipantTurnNarrativeRowsWithBuffer(blockID, text, activeBuffer, tuikit.LineStyleReasoning, width, ctx, active)
 	rows = applyClickTokenToRows(rows, acpReasoningClickToken(reasoningFoldKey(idx)))
 	if len(rows) == 0 {
 		return rows

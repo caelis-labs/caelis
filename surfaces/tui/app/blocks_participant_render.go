@@ -54,8 +54,16 @@ func participantNarrativeEventActive(events []SubagentEvent, idx int, status str
 	return narrativeEventActive(events, idx, participantTurnIsTerminal(status))
 }
 
-func renderParticipantTurnNarrativeRows(blockID string, raw string, lineStyle tuikit.LineStyle, width int, ctx BlockRenderContext, active bool) []RenderedRow {
+func renderParticipantTurnNarrativeEventRows(blockID string, ev SubagentEvent, lineStyle tuikit.LineStyle, width int, ctx BlockRenderContext, active bool) []RenderedRow {
+	return renderParticipantTurnNarrativeRowsWithBuffer(blockID, ev.Text, ev.ActiveBuffer, lineStyle, width, ctx, active)
+}
+
+func renderParticipantTurnNarrativeRowsWithBuffer(blockID string, raw string, activeBuffer *activeNarrativeBuffer, lineStyle tuikit.LineStyle, width int, ctx BlockRenderContext, active bool) []RenderedRow {
 	rolePrefix, continuationPrefix := narrativeLinePrefixes(lineStyle)
+	if active && activeBuffer != nil && !activeBuffer.Empty() {
+		rows := activeBuffer.RenderRowsAtWidth(blockID, rolePrefix, lineStyle, width, ctx)
+		return alignParticipantNarrativeContinuationRows(rows, continuationPrefix)
+	}
 	mode := RenderFinal
 	policy := MarkdownFull
 	if active {

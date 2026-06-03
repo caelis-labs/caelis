@@ -520,15 +520,6 @@ func trimLeadingIndent(line string, width int) string {
 // Streaming-safe glamour rendering
 // ---------------------------------------------------------------------------
 
-// glamourStreamingNarrativeRows renders an active narrative block with a
-// stable-prefix/full-Glamour plus unstable-tail/lightweight split. The tail
-// deliberately avoids Chroma because incomplete code and markdown can be
-// reclassified while tokens are still arriving.
-func glamourStreamingNarrativeRows(blockID, raw, rolePrefix string, roleStyle tuikit.LineStyle, width int, theme tuikit.Theme) []RenderedRow {
-	rows, _, _ := glamourStreamingNarrativeRowsObserved(blockID, raw, rolePrefix, roleStyle, width, theme, nil)
-	return rows
-}
-
 func glamourStreamingNarrativeRowsObserved(blockID, raw, rolePrefix string, roleStyle tuikit.LineStyle, width int, theme tuikit.Theme, observeGlamour func()) ([]RenderedRow, int, bool) {
 	if strings.TrimSpace(raw) == "" {
 		return nil, 0, false

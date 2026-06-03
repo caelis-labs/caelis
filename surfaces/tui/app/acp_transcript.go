@@ -94,10 +94,13 @@ func renderACPTranscriptRows(blockID string, events []SubagentEvent, status stri
 				if !shouldFoldReasoning {
 					rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupNarrative, false)
 					active := participantNarrativeEventActive(visible, reasoningEnd, status)
-					rows = append(rows, renderACPReasoningNarrativeRows(blockID, text, width, ctx, active)...)
+					activeBuffer := activeBufferForConsecutiveReasoning(visible, i, reasoningEnd, text)
+					rows = append(rows, renderACPReasoningNarrativeRows(blockID, text, activeBuffer, width, ctx, active)...)
 				} else {
 					rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupNarrative, false)
-					rows = append(rows, renderACPReasoningExpandedRows(blockID, text, i, width, ctx, participantNarrativeEventActive(visible, reasoningEnd, status))...)
+					active := participantNarrativeEventActive(visible, reasoningEnd, status)
+					activeBuffer := activeBufferForConsecutiveReasoning(visible, i, reasoningEnd, text)
+					rows = append(rows, renderACPReasoningExpandedRows(blockID, text, activeBuffer, i, width, ctx, active)...)
 				}
 				hasContent = true
 				lastGroup = acpTranscriptGroupNarrative
@@ -121,9 +124,8 @@ func renderACPTranscriptRows(blockID string, events []SubagentEvent, status stri
 				continue
 			}
 			if ev.Text != "" {
-				text := ev.Text
 				rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupNarrative, false)
-				rows = append(rows, renderParticipantTurnNarrativeRows(blockID, text, tuikit.LineStyleAssistant, width, ctx, participantNarrativeEventActive(visible, i, status))...)
+				rows = append(rows, renderParticipantTurnNarrativeEventRows(blockID, ev, tuikit.LineStyleAssistant, width, ctx, participantNarrativeEventActive(visible, i, status))...)
 				hasContent = true
 				lastGroup = acpTranscriptGroupNarrative
 			}

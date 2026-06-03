@@ -79,21 +79,16 @@ type narrativeBlockRenderCache struct {
 	themeKey   string
 	raw        string
 	rolePrefix string
-	streaming  bool
 	rows       []RenderedRow
 }
 
-func (c *narrativeBlockRenderCache) renderTextRows(blockID, raw, rolePrefix string, lineStyle tuikit.LineStyle, ctx BlockRenderContext, streaming bool) []RenderedRow {
+func (c *narrativeBlockRenderCache) renderTextRows(blockID, raw, rolePrefix string, lineStyle tuikit.LineStyle, ctx BlockRenderContext) []RenderedRow {
 	themeKey := ctx.renderThemeKey()
-	if cached := c.cachedRows(raw, rolePrefix, ctx.Width, themeKey, streaming); cached != nil {
+	if cached := c.cachedRows(raw, rolePrefix, ctx.Width, themeKey); cached != nil {
 		return cached
 	}
 	mode := RenderFinal
 	policy := MarkdownFull
-	if streaming {
-		mode = RenderStream
-		policy = MarkdownStableTail
-	}
 	if lineStyle == tuikit.LineStyleReasoning {
 		policy = MarkdownNone
 	}
@@ -110,19 +105,18 @@ func (c *narrativeBlockRenderCache) renderTextRows(blockID, raw, rolePrefix stri
 	c.themeKey = themeKey
 	c.raw = raw
 	c.rolePrefix = rolePrefix
-	c.streaming = streaming
 	c.rows = rows
 	return rows
 }
 
-func (c *narrativeBlockRenderCache) cachedRows(raw, rolePrefix string, width int, themeKey string, streaming bool) []RenderedRow {
+func (c *narrativeBlockRenderCache) cachedRows(raw, rolePrefix string, width int, themeKey string) []RenderedRow {
 	if c == nil || len(c.rows) == 0 {
 		return nil
 	}
 	if c.width != width || c.themeKey != themeKey {
 		return nil
 	}
-	if c.raw != raw || c.rolePrefix != rolePrefix || c.streaming != streaming {
+	if c.raw != raw || c.rolePrefix != rolePrefix {
 		return nil
 	}
 	return c.rows
@@ -154,8 +148,14 @@ func (b *AssistantBlock) BlockID() string { return b.id }
 func (b *AssistantBlock) Kind() BlockKind { return BlockAssistant }
 func (b *AssistantBlock) Render(ctx BlockRenderContext) []RenderedRow {
 	rolePrefix := "· " + assistantActorPrefix(b.Actor)
-	if b.Streaming && b.activeBuffer != nil && !b.activeBuffer.Empty() {
-		return b.activeBuffer.RenderRows(b.id, rolePrefix, tuikit.LineStyleAssistant, ctx)
+	if b.Streaming {
+		if b.activeBuffer != nil && !b.activeBuffer.Empty() {
+			return b.activeBuffer.RenderRows(b.id, rolePrefix, tuikit.LineStyleAssistant, ctx)
+		}
+		if strings.TrimSpace(b.Raw) != "" {
+			return renderActiveNarrativeTextRows(b.id, b.Raw, rolePrefix, tuikit.LineStyleAssistant, ctx)
+		}
+		return nil
 	}
 	return b.renderCache.renderTextRows(
 		b.id,
@@ -163,7 +163,6 @@ func (b *AssistantBlock) Render(ctx BlockRenderContext) []RenderedRow {
 		rolePrefix,
 		tuikit.LineStyleAssistant,
 		ctx,
-		b.Streaming,
 	)
 }
 
@@ -202,10 +201,16 @@ func (b *ReasoningBlock) Render(ctx BlockRenderContext) []RenderedRow {
 	if actor := strings.TrimSpace(b.Actor); actor != "" && !strings.EqualFold(actor, "assistant") {
 		prefix += actor + ": "
 	}
-	if b.Streaming && b.activeBuffer != nil && !b.activeBuffer.Empty() {
-		return b.activeBuffer.RenderRows(b.id, prefix, tuikit.LineStyleReasoning, ctx)
+	if b.Streaming {
+		if b.activeBuffer != nil && !b.activeBuffer.Empty() {
+			return b.activeBuffer.RenderRows(b.id, prefix, tuikit.LineStyleReasoning, ctx)
+		}
+		if strings.TrimSpace(b.Raw) != "" {
+			return renderActiveNarrativeTextRows(b.id, b.Raw, prefix, tuikit.LineStyleReasoning, ctx)
+		}
+		return nil
 	}
-	return b.renderCache.renderTextRows(b.id, b.Raw, prefix, tuikit.LineStyleReasoning, ctx, b.Streaming)
+	return b.renderCache.renderTextRows(b.id, b.Raw, prefix, tuikit.LineStyleReasoning, ctx)
 }
 
 // ---------------------------------------------------------------------------
@@ -248,13 +253,10 @@ func (b *MainACPTurnBlock) AppendStreamChunk(kind SubagentEventKind, chunk strin
 	}
 	at := narrativeEventTime(occurredAt...)
 	if idx := latestNarrativeAppendTargetIndex(b.Events, kind); idx >= 0 {
-		b.Events[idx].Text = collapseRepeatedNarrativeText(appendDeltaStreamChunk(b.Events[idx].Text, chunk))
-		markNarrativeTiming(&b.Events[idx], at)
+		appendNarrativeEventChunk(&b.Events[idx], kind, chunk, at, appendDeltaStreamChunk)
 		return
 	}
-	ev := SubagentEvent{Kind: kind, Text: collapseRepeatedNarrativeText(chunk)}
-	markNarrativeTiming(&ev, at)
-	b.Events = append(b.Events, ev)
+	b.Events = append(b.Events, newNarrativeEventChunk(kind, chunk, at))
 }
 
 func (b *MainACPTurnBlock) ReplaceFinalStreamChunk(kind SubagentEventKind, chunk string, occurredAt ...time.Time) {
@@ -274,8 +276,7 @@ func (b *MainACPTurnBlock) ReplaceFinalStreamChunk(kind SubagentEventKind, chunk
 		if strings.TrimSpace(chunk) == "" {
 			return
 		}
-		b.Events[idx].Text = chunk
-		markNarrativeTiming(&b.Events[idx], at)
+		replaceNarrativeEventFinal(&b.Events[idx], chunk, at)
 		b.Events = pruneNarrativeEventsCoveredByFinal(b.Events, idx, kind)
 		return
 	}
@@ -543,13 +544,10 @@ func (b *ParticipantTurnBlock) AppendStreamChunk(kind SubagentEventKind, chunk s
 	}
 	at := narrativeEventTime(occurredAt...)
 	if idx := latestNarrativeAppendTargetIndex(b.Events, kind); idx >= 0 {
-		b.Events[idx].Text = collapseRepeatedNarrativeText(appendDeltaStreamChunk(b.Events[idx].Text, chunk))
-		markNarrativeTiming(&b.Events[idx], at)
+		appendNarrativeEventChunk(&b.Events[idx], kind, chunk, at, appendDeltaStreamChunk)
 		return
 	}
-	ev := SubagentEvent{Kind: kind, Text: collapseRepeatedNarrativeText(chunk)}
-	markNarrativeTiming(&ev, at)
-	b.Events = append(b.Events, ev)
+	b.Events = append(b.Events, newNarrativeEventChunk(kind, chunk, at))
 }
 
 func (b *ParticipantTurnBlock) ReplaceFinalStreamChunk(kind SubagentEventKind, chunk string, occurredAt ...time.Time) {
@@ -569,8 +567,7 @@ func (b *ParticipantTurnBlock) ReplaceFinalStreamChunk(kind SubagentEventKind, c
 		if strings.TrimSpace(chunk) == "" {
 			return
 		}
-		b.Events[idx].Text = chunk
-		markNarrativeTiming(&b.Events[idx], at)
+		replaceNarrativeEventFinal(&b.Events[idx], chunk, at)
 		b.Events = pruneNarrativeEventsCoveredByFinal(b.Events, idx, kind)
 		return
 	}
