@@ -843,7 +843,7 @@ func (m *Model) handleTerminalResponseGuardKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 		m.flushTerminalResponsePending()
 		return false, nil
 	}
-	if strings.ContainsAny(text, "\x1b\x9b\x9d") {
+	if containsControlByte(text) {
 		m.clearTerminalResponsePending()
 		return true, nil
 	}
@@ -917,12 +917,24 @@ func looksLikeTerminalResponseFragment(text string) bool {
 	return terminalResponseFragmentState(text) == terminalResponseComplete
 }
 
+// containsControlByte reports whether s contains ESC (0x1B), CSI (0x9B), or OSC (0x9D).
+// These are terminal control-introducing bytes; checking bytes avoids invalid-UTF-8 lint warnings.
+func containsControlByte(s string) bool {
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case 0x1b, 0x9b, 0x9d:
+			return true
+		}
+	}
+	return false
+}
+
 func terminalResponseFragmentState(text string) terminalResponseFragmentMatch {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return terminalResponseNoMatch
 	}
-	if strings.ContainsAny(text, "\x1b\x9b\x9d") {
+	if containsControlByte(text) {
 		return terminalResponseComplete
 	}
 	if isRepeatedDAZeroTail(text) {
