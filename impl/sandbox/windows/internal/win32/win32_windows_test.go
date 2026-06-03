@@ -74,6 +74,26 @@ func TestRestrictingSIDAttributesIncludePowerShellCompatibilitySIDs(t *testing.T
 	}
 }
 
+func TestRestrictingSIDAttributesUsesNullSIDWhenNoWriteRootsRemain(t *testing.T) {
+	var token windows.Token
+	if err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY, &token); err != nil {
+		t.Fatalf("OpenProcessToken() error = %v", err)
+	}
+	defer token.Close()
+	nullSID, err := windows.CreateWellKnownSid(windows.WinNullSid)
+	if err != nil {
+		t.Fatalf("CreateWellKnownSid(null) error = %v", err)
+	}
+
+	attrs, _, err := restrictingSIDAttributes(token, nil)
+	if err != nil {
+		t.Fatalf("restrictingSIDAttributes(nil) error = %v", err)
+	}
+	if !sidAttrsContain(attrs, nullSID) {
+		t.Fatalf("restricting SIDs = %v, want null SID when no write roots remain", sidAttrsStrings(attrs))
+	}
+}
+
 func TestDecodeCodePageToUTF8(t *testing.T) {
 	gbkDate := []byte{0x32, 0x30, 0x32, 0x36, 0xc4, 0xea, 0x35, 0xd4, 0xc2, 0x31, 0x39, 0xc8, 0xd5, 0x20, 0x31, 0x37, 0x3a, 0x32, 0x31, 0x3a, 0x34, 0x34}
 	got, err := decodeCodePageToUTF8(936, gbkDate)

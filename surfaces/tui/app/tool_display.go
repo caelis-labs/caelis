@@ -67,10 +67,6 @@ func toolDisplayArgs(name string, raw map[string]any, fallback ...string) string
 		if command := terminalCommandDisplay(raw); command != "" {
 			return normalizeToolDisplayArg(command)
 		}
-	case "REQUEST_PERMISSIONS":
-		if summary := requestPermissionsDisplayArgs(raw); summary != "" {
-			return summary
-		}
 	}
 	if summary := genericToolArgs(raw); summary != "" {
 		return summary
@@ -501,68 +497,6 @@ func genericToolArgs(raw map[string]any) string {
 		return compactPathDisplay(toolPath(raw))
 	default:
 		return ""
-	}
-}
-
-func requestPermissionsDisplayArgs(raw map[string]any) string {
-	if summary := permissionGrantDisplay(raw); summary != "" {
-		return summary
-	}
-	permissions, _ := raw["permissions"].(map[string]any)
-	if len(permissions) == 0 {
-		return ""
-	}
-	return permissionGrantDisplay(permissions)
-}
-
-func permissionGrantDisplay(raw map[string]any) string {
-	if len(raw) == 0 {
-		return ""
-	}
-	parts := make([]string, 0, 3)
-	if values := stringListValue(raw["write"]); len(values) > 0 {
-		parts = append(parts, "write "+strings.Join(values, ", "))
-	}
-	if values := stringListValue(raw["read"]); len(values) > 0 {
-		parts = append(parts, "read "+strings.Join(values, ", "))
-	}
-	if fs, _ := raw["file_system"].(map[string]any); len(fs) > 0 {
-		if values := stringListValue(fs["write"]); len(values) > 0 {
-			parts = append(parts, "write "+strings.Join(values, ", "))
-		}
-		if values := stringListValue(fs["read"]); len(values) > 0 {
-			parts = append(parts, "read "+strings.Join(values, ", "))
-		}
-	}
-	if network, _ := raw["network"].(map[string]any); len(network) > 0 && displayBool(network["enabled"]) {
-		parts = append(parts, "network")
-	}
-	if displayBool(raw["network"]) {
-		parts = append(parts, "network")
-	}
-	return strings.Join(parts, "; ")
-}
-
-func stringListValue(raw any) []string {
-	switch typed := raw.(type) {
-	case []string:
-		out := make([]string, 0, len(typed))
-		for _, value := range typed {
-			if trimmed := strings.TrimSpace(value); trimmed != "" {
-				out = append(out, trimmed)
-			}
-		}
-		return out
-	case []any:
-		out := make([]string, 0, len(typed))
-		for _, value := range typed {
-			if trimmed := strings.TrimSpace(asString(value)); trimmed != "" && trimmed != "<nil>" {
-				out = append(out, trimmed)
-			}
-		}
-		return out
-	default:
-		return nil
 	}
 }
 

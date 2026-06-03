@@ -173,9 +173,6 @@ func decodeCodePageToUTF8(codePage uint32, data []byte) ([]byte, error) {
 }
 
 func restrictingSIDAttributes(token windows.Token, values []string) ([]windows.SIDAndAttributes, []*windows.SID, error) {
-	if len(values) == 0 {
-		return nil, nil, nil
-	}
 	restrictingSIDs := make([]*windows.SID, 0, len(values)+2)
 	seen := map[string]struct{}{}
 	appendSID := func(sid *windows.SID) {
@@ -201,7 +198,11 @@ func restrictingSIDAttributes(token windows.Token, values []string) ([]windows.S
 		appendSID(sid)
 	}
 	if len(restrictingSIDs) == 0 {
-		return nil, nil, nil
+		nullSID, err := windows.CreateWellKnownSid(windows.WinNullSid)
+		if err != nil {
+			return nil, nil, err
+		}
+		appendSID(nullSID)
 	}
 	// Windows PowerShell's CLR startup needs write access to session/global
 	// objects that are not ACLed for arbitrary synthetic SIDs. Keep these

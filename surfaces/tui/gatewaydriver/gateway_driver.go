@@ -312,9 +312,6 @@ func (d *GatewayDriver) status(ctx context.Context, includeDiagnostics bool) (St
 				status.MissingAPIKey = report.MissingAPIKey
 				status.HostExecution = report.HostExecution
 				status.FullAccessMode = report.FullAccessMode
-				status.PermissionGrantCount = report.PermissionGrantCount
-				status.PermissionReadRootCount = report.PermissionReadRootCount
-				status.PermissionWriteRootCount = report.PermissionWriteRootCount
 				status.SandboxRequestedBackend = firstNonEmpty(strings.TrimSpace(report.SandboxRequestedBackend), status.SandboxRequestedBackend)
 				status.SandboxResolvedBackend = firstNonEmpty(strings.TrimSpace(report.SandboxResolvedBackend), status.SandboxResolvedBackend)
 				status.Route = firstNonEmpty(strings.TrimSpace(report.SandboxRoute), status.Route)

@@ -19,9 +19,6 @@ func formatStatusSnapshot(status tuidriver.StatusSnapshot) string {
 	if usage := formatContextUsageStatus(status.TotalTokens, status.ContextWindowTokens); usage != "" {
 		appendStatusField(&lines, "Context", usage)
 	}
-	if status.PermissionGrantCount > 0 {
-		appendStatusField(&lines, "Grants", fmt.Sprintf("%d approved, read roots %d, write roots %d", status.PermissionGrantCount, status.PermissionReadRootCount, status.PermissionWriteRootCount))
-	}
 	if status.FallbackReason != "" {
 		appendStatusField(&lines, "Fallback", strings.TrimSpace(status.FallbackReason))
 	}

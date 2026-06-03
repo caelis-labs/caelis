@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -586,18 +587,162 @@ func TestRepairCurrentWorkspaceACLsCleansStaleManifestACLs(t *testing.T) {
 	}
 }
 
-func TestUnsafeWritableRootReasonRejectsHostSSHOverlap(t *testing.T) {
+func TestUnsafeWritableRootReasonRejectsBroadUserRoots(t *testing.T) {
 	home := t.TempDir()
-	sshDir := filepath.Join(home, ".ssh")
+	parent := filepath.Dir(home)
 	project := filepath.Join(home, "project")
 
-	for _, root := range []string{home, sshDir, filepath.Join(sshDir, "keys")} {
+	for _, root := range []string{home, parent} {
 		if reason := unsafeWritableRootReason(root, home); reason == "" {
 			t.Fatalf("unsafeWritableRootReason(%q, %q) = empty, want rejection", root, home)
 		}
 	}
+	if volume := filepath.VolumeName(home); volume != "" {
+		if reason := unsafeWritableRootReason(volume+string(filepath.Separator), home); reason == "" {
+			t.Fatalf("unsafeWritableRootReason(volume root, %q) = empty, want rejection", home)
+		}
+	}
 	if reason := unsafeWritableRootReason(project, home); reason != "" {
 		t.Fatalf("unsafeWritableRootReason(%q, %q) = %q, want allowed", project, home, reason)
+	}
+}
+
+func TestEnsureForRequestSkipsWritableRootACLFailure(t *testing.T) {
+	workspace := t.TempDir()
+	rt, err := New(sandbox.Config{CWD: workspace, StateDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer rt.Close()
+	windowsRT := rt.(*runtime)
+
+	oldModify := modifyFileDACL
+	defer func() { modifyFileDACL = oldModify }()
+	modifyFileDACL = func(path string, entries ...acl.Entry) error {
+		if pathutil.Key(path) == pathutil.Key(workspace) {
+			return syscall.ERROR_ACCESS_DENIED
+		}
+		return oldModify(path, entries...)
+	}
+
+	policy, err := windowsRT.ensureForRequest(context.Background(), sandbox.CommandRequest{Dir: workspace})
+	if err != nil {
+		t.Fatalf("ensureForRequest() error = %v, want ACL failure skipped", err)
+	}
+	if containsPath(policy.WriteRoots, workspace) {
+		t.Fatalf("WriteRoots = %#v, want failed workspace root skipped", policy.WriteRoots)
+	}
+	if len(policy.CapabilitySIDs) == 0 {
+		t.Fatalf("CapabilitySIDs empty, want restricted token SID retained")
+	}
+}
+
+func TestEnsureForRequestDropsParentRootWhenDenyCarveoutACLFailure(t *testing.T) {
+	workspace := t.TempDir()
+	gitDir := filepath.Join(workspace, ".git")
+	if err := os.MkdirAll(gitDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll(.git) error = %v", err)
+	}
+	rt, err := New(sandbox.Config{CWD: workspace, StateDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer rt.Close()
+	windowsRT := rt.(*runtime)
+
+	oldModify := modifyFileDACL
+	defer func() { modifyFileDACL = oldModify }()
+	modifyFileDACL = func(path string, entries ...acl.Entry) error {
+		if pathutil.Key(path) == pathutil.Key(gitDir) {
+			return syscall.ERROR_ACCESS_DENIED
+		}
+		return oldModify(path, entries...)
+	}
+
+	policy, err := windowsRT.ensureForRequest(context.Background(), sandbox.CommandRequest{Dir: workspace})
+	if err != nil {
+		t.Fatalf("ensureForRequest() error = %v, want deny ACL failure skipped", err)
+	}
+	if containsPath(policy.WriteRoots, workspace) {
+		t.Fatalf("WriteRoots = %#v, want parent workspace root removed when .git deny ACL fails", policy.WriteRoots)
+	}
+}
+
+func TestEnsureForRequestDropsChildRootWhenDenyCarveoutACLFailure(t *testing.T) {
+	workspace := t.TempDir()
+	gitDir := filepath.Join(workspace, ".git")
+	hooksDir := filepath.Join(gitDir, "hooks")
+	if err := os.MkdirAll(hooksDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll(.git/hooks) error = %v", err)
+	}
+	rt, err := New(sandbox.Config{CWD: workspace, StateDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer rt.Close()
+	windowsRT := rt.(*runtime)
+
+	oldModify := modifyFileDACL
+	defer func() { modifyFileDACL = oldModify }()
+	modifyFileDACL = func(path string, entries ...acl.Entry) error {
+		if pathutil.Key(path) == pathutil.Key(gitDir) {
+			return syscall.ERROR_ACCESS_DENIED
+		}
+		return oldModify(path, entries...)
+	}
+
+	policy, err := windowsRT.ensureForRequest(context.Background(), sandbox.CommandRequest{Dir: hooksDir})
+	if err != nil {
+		t.Fatalf("ensureForRequest() error = %v, want deny ACL failure skipped", err)
+	}
+	if containsPath(policy.WriteRoots, hooksDir) {
+		t.Fatalf("WriteRoots = %#v, want child .git/hooks root removed when .git deny ACL fails", policy.WriteRoots)
+	}
+}
+
+func TestPolicySkipsBroadWritableRootsInsteadOfFailing(t *testing.T) {
+	home := t.TempDir()
+	project := filepath.Join(home, "project")
+	if err := os.MkdirAll(project, 0o700); err != nil {
+		t.Fatalf("MkdirAll(project) error = %v", err)
+	}
+	testenv.SetHome(t, home)
+
+	state := t.TempDir()
+	rt, err := New(sandbox.Config{
+		CWD:           home,
+		StateDir:      state,
+		WritableRoots: []string{home, project},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer rt.Close()
+	windowsRT := rt.(*runtime)
+
+	policy, err := windowsRT.policyForRequest(sandbox.CommandRequest{
+		Dir: home,
+		Constraints: sandbox.Constraints{
+			Route:      sandbox.RouteSandbox,
+			Backend:    sandbox.BackendWindows,
+			Permission: sandbox.PermissionWorkspaceWrite,
+			PathRules: []sandbox.PathRule{
+				{Path: home, Access: sandbox.PathAccessReadWrite},
+				{Path: project, Access: sandbox.PathAccessReadWrite},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("policyForRequest() error = %v, want broad roots skipped", err)
+	}
+	if containsPath(policy.WriteRoots, home) {
+		t.Fatalf("WriteRoots = %#v, want broad home root skipped", policy.WriteRoots)
+	}
+	if !containsPath(policy.WriteRoots, project) {
+		t.Fatalf("WriteRoots = %#v, want project root retained", policy.WriteRoots)
+	}
+	if !containsPath(policy.WriteRoots, policy.SandboxEnvRoot) {
+		t.Fatalf("WriteRoots = %#v, want sandbox env root %q retained", policy.WriteRoots, policy.SandboxEnvRoot)
 	}
 }
 

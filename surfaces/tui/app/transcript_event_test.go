@@ -67,7 +67,7 @@ func TestProjectGatewayEventToTranscriptEvents_ProjectsTerminalAutomaticApproval
 		Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session"},
 		ApprovalPayload: &kernel.ApprovalPayload{
 			ToolCallID:     "perm-call-1",
-			ToolName:       "request_permissions",
+			ToolName:       "custom_tool",
 			RawInput:       map[string]any{"reason": "need access"},
 			ReviewStatus:   kernel.ApprovalReviewStatusApproved,
 			DecisionSource: "auto-review",
@@ -101,7 +101,7 @@ func TestProjectGatewayEventToTranscriptEvents_ProjectsTerminalAutomaticApproval
 		SessionRef: session.SessionRef{SessionID: "root-session"},
 		Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session"},
 		ApprovalPayload: &kernel.ApprovalPayload{
-			ToolName:       "request_permissions",
+			ToolName:       "custom_tool",
 			ReviewStatus:   kernel.ApprovalReviewStatusInProgress,
 			DecisionSource: "auto-review",
 		},

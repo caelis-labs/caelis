@@ -3127,33 +3127,6 @@ func TestGatewayDriverStatusIncludesDoctorDiagnostics(t *testing.T) {
 	}
 }
 
-func TestGatewayDriverStatusIncludesPermissionGrantSummary(t *testing.T) {
-	ctx := context.Background()
-	activeSession := session.Session{SessionRef: session.SessionRef{SessionID: "grant-session"}}
-	driver := &GatewayDriver{
-		stack: &DriverStack{
-			Workspace: session.WorkspaceRef{CWD: "/workspace"},
-			DoctorFn: func(context.Context, DoctorRequest) (DoctorReport, error) {
-				return DoctorReport{
-					SessionID:                "grant-session",
-					PermissionGrantCount:     2,
-					PermissionReadRootCount:  3,
-					PermissionWriteRootCount: 1,
-				}, nil
-			},
-		},
-		session:    activeSession,
-		hasSession: true,
-	}
-	status, err := driver.Status(ctx)
-	if err != nil {
-		t.Fatalf("Status() error = %v", err)
-	}
-	if status.PermissionGrantCount != 2 || status.PermissionReadRootCount != 3 || status.PermissionWriteRootCount != 1 {
-		t.Fatalf("permission grant summary = count:%d read:%d write:%d, want 2/3/1", status.PermissionGrantCount, status.PermissionReadRootCount, status.PermissionWriteRootCount)
-	}
-}
-
 type sideAgentRollbackGatewayService struct {
 	activeSubmitGatewayService
 	session    session.Session

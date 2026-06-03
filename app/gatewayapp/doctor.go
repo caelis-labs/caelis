@@ -74,9 +74,6 @@ type DoctorReport struct {
 	SandboxWorkspaceSetupUpdatedAt  time.Time                `json:"sandbox_workspace_setup_updated_at,omitempty"`
 	HostExecution                   bool                     `json:"host_execution,omitempty"`
 	FullAccessMode                  bool                     `json:"full_access_mode,omitempty"`
-	PermissionGrantCount            int                      `json:"permission_grant_count,omitempty"`
-	PermissionReadRootCount         int                      `json:"permission_read_root_count,omitempty"`
-	PermissionWriteRootCount        int                      `json:"permission_write_root_count,omitempty"`
 	HasActiveTurn                   bool                     `json:"has_active_turn,omitempty"`
 	ActiveTurnCount                 int                      `json:"active_turn_count,omitempty"`
 	ActiveTurnSessions              []string                 `json:"active_turn_sessions,omitempty"`
@@ -185,12 +182,6 @@ func (s *Stack) Doctor(ctx context.Context, req DoctorRequest) (DoctorReport, er
 	if report.SandboxWorkspaceSetupRequired && report.SandboxWorkspaceSetupReason != "" {
 		report.Warnings = append(report.Warnings, "Windows sandbox workspace setup required: "+report.SandboxWorkspaceSetupReason)
 	}
-	if s.engine != nil && strings.TrimSpace(ref.SessionID) != "" {
-		grants := s.engine.PermissionGrantSnapshot(ref)
-		report.PermissionGrantCount = grants.Count
-		report.PermissionReadRootCount = grants.ReadRootCount
-		report.PermissionWriteRootCount = grants.WriteRootCount
-	}
 	if report.MissingAPIKey {
 		report.Warnings = append(report.Warnings, "active model configuration is missing an API key")
 	}
@@ -264,9 +255,6 @@ func FormatDoctorText(report DoctorReport) string {
 		fmt.Sprintf("sandbox_workspace_setup_updated_at: %s", formatDoctorTime(report.SandboxWorkspaceSetupUpdatedAt)),
 		fmt.Sprintf("host_execution: %t", report.HostExecution),
 		fmt.Sprintf("full_access_mode: %t", report.FullAccessMode),
-		fmt.Sprintf("permission_grant_count: %d", report.PermissionGrantCount),
-		fmt.Sprintf("permission_read_root_count: %d", report.PermissionReadRootCount),
-		fmt.Sprintf("permission_write_root_count: %d", report.PermissionWriteRootCount),
 		fmt.Sprintf("has_active_turn: %t", report.HasActiveTurn),
 		fmt.Sprintf("active_turn_count: %d", report.ActiveTurnCount),
 		fmt.Sprintf("active_turn_sessions: %s", firstNonEmpty(strings.Join(report.ActiveTurnSessions, ", "), "-")),

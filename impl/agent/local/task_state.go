@@ -107,8 +107,6 @@ type runtimeToolContext struct {
 	approvalRequester agent.ApprovalRequester
 	runID             string
 	turnID            string
-	now               func() time.Time
-	grants            *permissionGrantStore
 }
 
 type StartSubagentOptions struct {

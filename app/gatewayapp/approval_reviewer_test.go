@@ -654,15 +654,15 @@ func approvalReviewerTestRequest(activeSession session.Session, llm model.LLM, r
 		TurnID:     "turn-test",
 		Model:      llm,
 		Approval: &kernel.ApprovalPayload{
-			ToolName: "request_permissions",
+			ToolName: "custom_tool",
 			RawInput: input,
 			Reason:   reason,
 			Status:   kernel.ApprovalStatusPending,
 		},
 		RuntimeRequest: agent.ApprovalRequest{
 			Mode: "auto-review",
-			Tool: tool.Definition{Name: "request_permissions"},
-			Call: tool.Call{Name: "request_permissions", Input: raw},
+			Tool: tool.Definition{Name: "custom_tool"},
+			Call: tool.Call{Name: "custom_tool", Input: raw},
 		},
 	}
 }

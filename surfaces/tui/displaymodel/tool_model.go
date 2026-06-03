@@ -70,8 +70,6 @@ func ToolEventDisplayName(name string) string {
 		return strings.ToUpper(name[:1]) + name[1:]
 	}
 	switch strings.ToUpper(strings.ReplaceAll(name, " ", "_")) {
-	case "REQUEST_PERMISSIONS":
-		return "Request permissions"
 	case "THINK":
 		return "Think"
 	default:

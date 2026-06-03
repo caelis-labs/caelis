@@ -230,9 +230,8 @@ func TestGatewayTaskControlsRenderActionDetailsWithoutTaskIDs(t *testing.T) {
 func TestAutomaticApprovalReviewUsesHintAndInlineTranscriptLocation(t *testing.T) {
 	model := newGatewayEventTestModel()
 	permissionInput := map[string]any{
+		"path":   "outside.txt",
 		"reason": "need directory access",
-		"read":   []any{"/tmp/outside"},
-		"write":  []any{"/tmp/outside"},
 	}
 
 	updated, _ := model.Update(kernel.EventEnvelope{
@@ -242,7 +241,7 @@ func TestAutomaticApprovalReviewUsesHintAndInlineTranscriptLocation(t *testing.T
 			Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session"},
 			ToolCall: &kernel.ToolCallPayload{
 				CallID:   "perm-1",
-				ToolName: "request_permissions",
+				ToolName: "custom_tool",
 				Status:   kernel.ToolStatusRunning,
 				RawInput: permissionInput,
 			},
@@ -256,7 +255,7 @@ func TestAutomaticApprovalReviewUsesHintAndInlineTranscriptLocation(t *testing.T
 			Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session"},
 			ApprovalPayload: &kernel.ApprovalPayload{
 				ToolCallID:     "perm-1",
-				ToolName:       "request_permissions",
+				ToolName:       "custom_tool",
 				RawInput:       map[string]any{"reason": "need directory access"},
 				ReviewStatus:   kernel.ApprovalReviewStatusInProgress,
 				DecisionSource: "auto-review",
@@ -264,7 +263,7 @@ func TestAutomaticApprovalReviewUsesHintAndInlineTranscriptLocation(t *testing.T
 		},
 	})
 	model = updated.(*Model)
-	if got := ansi.Strip(model.buildHintText()); !strings.Contains(got, "Reviewing approval request: request_permissions") {
+	if got := ansi.Strip(model.buildHintText()); !strings.Contains(got, "Reviewing approval request: custom_tool") {
 		t.Fatalf("approval hint = %q, want pending review hint", got)
 	}
 
@@ -276,10 +275,10 @@ func TestAutomaticApprovalReviewUsesHintAndInlineTranscriptLocation(t *testing.T
 			Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session"},
 			ToolResult: &kernel.ToolResultPayload{
 				CallID:    "perm-1",
-				ToolName:  "request_permissions",
+				ToolName:  "custom_tool",
 				Status:    kernel.ToolStatusCompleted,
 				RawInput:  permissionInput,
-				RawOutput: map[string]any{"approved": true, "granted": map[string]any{"read": []any{"/tmp/outside"}, "write": []any{"/tmp/outside"}}},
+				RawOutput: map[string]any{"summary": "custom tool completed"},
 			},
 		},
 	})
@@ -304,7 +303,7 @@ func TestAutomaticApprovalReviewUsesHintAndInlineTranscriptLocation(t *testing.T
 			Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session"},
 			ApprovalPayload: &kernel.ApprovalPayload{
 				ToolCallID:     "perm-1",
-				ToolName:       "request_permissions",
+				ToolName:       "custom_tool",
 				RawInput:       map[string]any{"reason": "need directory access"},
 				ReviewStatus:   kernel.ApprovalReviewStatusApproved,
 				DecisionSource: "auto-review",
@@ -325,8 +324,8 @@ func TestAutomaticApprovalReviewUsesHintAndInlineTranscriptLocation(t *testing.T
 	}
 	rows := block.Render(BlockRenderContext{Width: 120, TermWidth: 120, Theme: model.theme})
 	plain := strings.Join(renderedPlainRows(rows), "\n")
-	if !strings.Contains(plain, "▸ Request permissions write /tmp/outside; read /tmp/outside") {
-		t.Fatalf("rendered rows = %q, want request_permissions standard header", plain)
+	if !strings.Contains(plain, "custom_tool outside.txt") {
+		t.Fatalf("rendered rows = %q, want custom tool header", plain)
 	}
 	if !strings.Contains(plain, "• Automatic approval review approved (risk: medium, authorization: high)") {
 		t.Fatalf("rendered rows = %q, want compact approval review header", plain)
@@ -337,7 +336,7 @@ func TestAutomaticApprovalReviewUsesHintAndInlineTranscriptLocation(t *testing.T
 	if strings.Contains(plain, "⚠") {
 		t.Fatalf("rendered rows = %q, should not use warning prefix for approval review", plain)
 	}
-	toolIdx := strings.Index(plain, "▸ Request permissions write /tmp/outside; read /tmp/outside")
+	toolIdx := strings.Index(plain, "custom_tool outside.txt")
 	reviewIdx := strings.Index(plain, "• Automatic approval review approved")
 	assistantIdx := strings.Index(plain, "approval-dependent work finished")
 	if toolIdx < 0 || reviewIdx < 0 || assistantIdx < 0 || toolIdx >= reviewIdx || reviewIdx >= assistantIdx {
@@ -379,11 +378,7 @@ func TestAutomaticApprovalReviewUsesHintAndInlineTranscriptLocation(t *testing.T
 
 func TestDeniedAutomaticApprovalReviewRendersInline(t *testing.T) {
 	model := newGatewayEventTestModel()
-	permissionInput := map[string]any{
-		"permissions": map[string]any{
-			"file_system": map[string]any{"write": []string{"/tmp/outside"}},
-		},
-	}
+	permissionInput := map[string]any{"path": "outside.txt"}
 	for _, env := range []kernel.EventEnvelope{
 		{Event: kernel.Event{
 			Kind:       kernel.EventKindToolCall,
@@ -391,7 +386,7 @@ func TestDeniedAutomaticApprovalReviewRendersInline(t *testing.T) {
 			Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session"},
 			ToolCall: &kernel.ToolCallPayload{
 				CallID:   "perm-denied",
-				ToolName: "request_permissions",
+				ToolName: "custom_tool",
 				Status:   kernel.ToolStatusRunning,
 				RawInput: permissionInput,
 			},
@@ -402,11 +397,11 @@ func TestDeniedAutomaticApprovalReviewRendersInline(t *testing.T) {
 			Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session"},
 			ToolResult: &kernel.ToolResultPayload{
 				CallID:    "perm-denied",
-				ToolName:  "request_permissions",
+				ToolName:  "custom_tool",
 				Status:    kernel.ToolStatusFailed,
 				Error:     true,
 				RawInput:  permissionInput,
-				RawOutput: map[string]any{"approved": false, "error": "permission request was rejected"},
+				RawOutput: map[string]any{"error": "operation was rejected"},
 			},
 		}},
 		{Event: kernel.Event{
@@ -425,7 +420,7 @@ func TestDeniedAutomaticApprovalReviewRendersInline(t *testing.T) {
 			Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session"},
 			ApprovalPayload: &kernel.ApprovalPayload{
 				ToolCallID:     "perm-denied",
-				ToolName:       "request_permissions",
+				ToolName:       "custom_tool",
 				RawInput:       map[string]any{"reason": "need broad access"},
 				ReviewStatus:   kernel.ApprovalReviewStatusDenied,
 				DecisionSource: "auto-review",
@@ -454,7 +449,7 @@ func TestDeniedAutomaticApprovalReviewRendersInline(t *testing.T) {
 	if strings.Contains(plain, "⚠") {
 		t.Fatalf("rendered rows = %q, should not use warning prefix for denied review", plain)
 	}
-	toolIdx := strings.Index(plain, "Request permissions write /tmp/outside")
+	toolIdx := strings.Index(plain, "custom_tool outside.txt")
 	reviewIdx := strings.Index(plain, "• Automatic approval review denied")
 	assistantIdx := strings.Index(plain, "trying a safer path")
 	if toolIdx < 0 || reviewIdx < 0 || assistantIdx < 0 || toolIdx >= reviewIdx || reviewIdx >= assistantIdx {

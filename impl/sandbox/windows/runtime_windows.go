@@ -41,6 +41,8 @@ const (
 	windowsTerminateDrain    = 500 * time.Millisecond
 )
 
+var modifyFileDACL = acl.ModifyFileDACL
+
 func newRuntime(cfg Config) (sandbox.Runtime, error) {
 	cfg = sandbox.NormalizeConfig(cfg)
 	stateRoot, err := resolveStateRoot(cfg.StateDir)
@@ -608,11 +610,7 @@ func (r *runtime) ensureForRequest(ctx context.Context, req sandbox.CommandReque
 	manifest, manifestErr := r.readManifest()
 	if manifestErr == nil && manifestFresh(manifest, policy) {
 		missing, err := r.missingACLEntries(policy)
-		if err != nil {
-			r.recordWorkspaceSetupError(err)
-			return workspacePolicy{}, err
-		}
-		if len(missing) == 0 {
+		if err == nil && len(missing) == 0 {
 			r.clearWorkspaceSetupError()
 			return policy, nil
 		}
@@ -620,13 +618,9 @@ func (r *runtime) ensureForRequest(ctx context.Context, req sandbox.CommandReque
 	if manifestErr == nil {
 		r.cleanupStaleManifestACLs(manifest, policy)
 	}
-	if err := r.applyPolicyACLs(policy); err != nil {
-		r.recordWorkspaceSetupError(err)
-		return workspacePolicy{}, err
-	}
+	policy = r.applyPolicyACLsBestEffort(policy)
 	if err := r.writeManifest(policy); err != nil {
-		r.recordWorkspaceSetupError(err)
-		return workspacePolicy{}, err
+		return policy, nil
 	}
 	r.clearWorkspaceSetupError()
 	return policy, nil
@@ -712,19 +706,7 @@ func (r *runtime) policyForRequestWithBinding(req sandbox.CommandRequest, create
 		}
 	}
 	denyWrite = pathutil.Dedupe(denyWrite)
-	hash, err := hashJSON(struct {
-		WorkspaceRoot  string   `json:"workspace_root,omitempty"`
-		CommandDir     string   `json:"command_dir,omitempty"`
-		SandboxEnvRoot string   `json:"sandbox_env_root,omitempty"`
-		WriteRoots     []string `json:"write_roots,omitempty"`
-		DenyWritePaths []string `json:"deny_write_paths,omitempty"`
-	}{
-		WorkspaceRoot:  workspaceRoot,
-		CommandDir:     commandDir,
-		SandboxEnvRoot: envRoot,
-		WriteRoots:     writeRoots,
-		DenyWritePaths: denyWrite,
-	})
+	hash, err := hashWorkspacePolicyFields(workspaceRoot, commandDir, envRoot, writeRoots, denyWrite)
 	if err != nil {
 		return workspacePolicy{}, err
 	}
@@ -756,6 +738,22 @@ func effectiveWindowsSandboxNetwork(_ sandbox.Network) sandbox.Network {
 	return sandbox.NetworkEnabled
 }
 
+func hashWorkspacePolicyFields(workspaceRoot, commandDir, envRoot string, writeRoots, denyWrite []string) (string, error) {
+	return hashJSON(struct {
+		WorkspaceRoot  string   `json:"workspace_root,omitempty"`
+		CommandDir     string   `json:"command_dir,omitempty"`
+		SandboxEnvRoot string   `json:"sandbox_env_root,omitempty"`
+		WriteRoots     []string `json:"write_roots,omitempty"`
+		DenyWritePaths []string `json:"deny_write_paths,omitempty"`
+	}{
+		WorkspaceRoot:  workspaceRoot,
+		CommandDir:     commandDir,
+		SandboxEnvRoot: envRoot,
+		WriteRoots:     writeRoots,
+		DenyWritePaths: denyWrite,
+	})
+}
+
 func existingWritableRoots(roots []string) ([]string, error) {
 	out := make([]string, 0, len(roots))
 	for _, root := range roots {
@@ -763,47 +761,47 @@ func existingWritableRoots(roots []string) ([]string, error) {
 		if root == "" {
 			continue
 		}
-		if err := rejectUnsafeWritableRoot(root); err != nil {
-			return nil, err
+		if unsafeWritableRootReasonForCurrentUser(root) != "" {
+			continue
 		}
 		info, err := os.Stat(root)
 		if err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			return nil, fmt.Errorf("impl/sandbox/windows: inspect writable root %s: %w", root, err)
+			continue
 		}
 		if !info.IsDir() {
-			return nil, fmt.Errorf("impl/sandbox/windows: writable root %s is not a directory", root)
+			continue
 		}
 		out = append(out, root)
 	}
 	return pathutil.Dedupe(out), nil
 }
 
-func rejectUnsafeWritableRoot(root string) error {
+func unsafeWritableRootReasonForCurrentUser(root string) string {
 	home, err := os.UserHomeDir()
 	if err != nil || strings.TrimSpace(home) == "" {
-		return nil
+		return ""
 	}
-	if reason := unsafeWritableRootReason(root, home); reason != "" {
-		return fmt.Errorf("impl/sandbox/windows: writable root %s is unsafe: %s", root, reason)
-	}
-	return nil
+	return unsafeWritableRootReason(root, home)
 }
 
 func unsafeWritableRootReason(root string, userHome string) string {
-	sshDir := filepath.Join(strings.TrimSpace(userHome), ".ssh")
-	if strings.TrimSpace(root) == "" || strings.TrimSpace(userHome) == "" {
+	root = pathutil.Normalize(root)
+	userHome = pathutil.Normalize(userHome)
+	if root == "" || userHome == "" {
 		return ""
 	}
-	if pathutil.IsUnder(sshDir, root) {
-		return "it would grant sandbox capability ACL inheritance to the host user's .ssh directory"
+	switch {
+	case isUNCPath(root):
+		return "UNC roots are not supported by the Windows workspace-write sandbox"
+	case isVolumeRoot(root):
+		return "it is a volume root"
+	case pathutil.IsUnder(userHome, root):
+		return "it is the host user profile root or one of its ancestors"
+	case isKnownSystemPath(root):
+		return "it is under a Windows system or shared program data root"
+	default:
+		return ""
 	}
-	if pathutil.IsUnder(root, sshDir) {
-		return "it overlaps the host user's .ssh directory"
-	}
-	return ""
 }
 
 func (r *runtime) prepareSandboxEnvRoot(workspaceRoot string, create bool) (string, error) {
@@ -946,7 +944,7 @@ func (r *runtime) applyPolicyACLs(policy workspacePolicy) error {
 		if !info.IsDir() {
 			return fmt.Errorf("impl/sandbox/windows: writable root %s is not a directory", root)
 		}
-		if err := acl.ModifyFileDACL(root, allowEntries(policy.sidForWriteRoot(root))...); err != nil {
+		if err := modifyFileDACL(root, allowEntries(policy.sidForWriteRoot(root))...); err != nil {
 			return fmt.Errorf("impl/sandbox/windows: apply writable root ACL %s: %w", root, diagnoseACLWriteFailure(root, err))
 		}
 	}
@@ -966,7 +964,7 @@ func (r *runtime) applyPolicyACLs(policy workspacePolicy) error {
 			if !info.IsDir() {
 				return fmt.Errorf("impl/sandbox/windows: sandbox environment path %s is not a directory", path)
 			}
-			if err := acl.ModifyFileDACL(path, allowEntries(envSID)...); err != nil {
+			if err := modifyFileDACL(path, allowEntries(envSID)...); err != nil {
 				return fmt.Errorf("impl/sandbox/windows: apply sandbox environment ACL %s: %w", path, diagnoseACLWriteFailure(path, err))
 			}
 		}
@@ -978,11 +976,80 @@ func (r *runtime) applyPolicyACLs(policy workspacePolicy) error {
 			}
 			return fmt.Errorf("impl/sandbox/windows: inspect deny-write path %s: %w", path, err)
 		}
-		if err := acl.ModifyFileDACL(path, denyEntries(policy.CapabilitySIDs)...); err != nil {
+		if err := modifyFileDACL(path, denyEntries(policy.CapabilitySIDs)...); err != nil {
 			return fmt.Errorf("impl/sandbox/windows: apply deny-write ACL %s: %w", path, diagnoseACLWriteFailure(path, err))
 		}
 	}
 	return nil
+}
+
+func (r *runtime) applyPolicyACLsBestEffort(policy workspacePolicy) workspacePolicy {
+	keptRoots := make([]string, 0, len(policy.WriteRoots))
+	failedDenyPaths := make([]string, 0, len(policy.DenyWritePaths))
+	for _, root := range policy.WriteRoots {
+		if r.applyWritableRootACL(root, policy.sidForWriteRoot(root)) {
+			keptRoots = append(keptRoots, root)
+		}
+	}
+	for _, path := range sandboxEnvDirs(policy.SandboxEnvRoot) {
+		if pathListContains(policy.WriteRoots, path) {
+			continue
+		}
+		_ = r.applyWritableRootACL(path, policy.sidForWriteRoot(policy.SandboxEnvRoot))
+	}
+	for _, path := range policy.DenyWritePaths {
+		if r.applyDenyWriteACL(path, policy.CapabilitySIDs) {
+			continue
+		}
+		failedDenyPaths = append(failedDenyPaths, path)
+	}
+	if len(failedDenyPaths) > 0 {
+		keptRoots = removeWriteRootsCovering(keptRoots, failedDenyPaths)
+	}
+	return policy.withWriteRoots(keptRoots)
+}
+
+func (r *runtime) applyWritableRootACL(root string, sid string) bool {
+	root = strings.TrimSpace(root)
+	if root == "" || strings.TrimSpace(sid) == "" {
+		return false
+	}
+	info, err := os.Stat(root)
+	if err != nil || !info.IsDir() {
+		return false
+	}
+	return modifyFileDACL(root, allowEntries(sid)...) == nil
+}
+
+func (r *runtime) applyDenyWriteACL(path string, sids []string) bool {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return true
+	}
+	if _, err := os.Stat(path); err != nil {
+		return os.IsNotExist(err)
+	}
+	return modifyFileDACL(path, denyEntries(sids)...) == nil
+}
+
+func removeWriteRootsCovering(roots []string, blocked []string) []string {
+	if len(roots) == 0 || len(blocked) == 0 {
+		return pathutil.Dedupe(roots)
+	}
+	out := make([]string, 0, len(roots))
+	for _, root := range roots {
+		covered := false
+		for _, path := range blocked {
+			if pathutil.IsUnder(path, root) || pathutil.IsUnder(root, path) {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			out = append(out, root)
+		}
+	}
+	return pathutil.Dedupe(out)
 }
 
 func diagnoseACLWriteFailure(path string, err error) error {
@@ -1020,6 +1087,34 @@ func (p workspacePolicy) sidForWriteRoot(root string) string {
 		}
 	}
 	return ""
+}
+
+func (p workspacePolicy) withWriteRoots(roots []string) workspacePolicy {
+	roots = pathutil.Dedupe(roots)
+	out := p
+	out.WriteRoots = roots
+	out.WriteRootCapabilitySIDs = map[string]string{}
+	var sids []string
+	for _, root := range roots {
+		if sid := p.sidForWriteRoot(root); sid != "" {
+			normalized := pathutil.Normalize(root)
+			out.WriteRootCapabilitySIDs[normalized] = sid
+			sids = append(sids, sid)
+		}
+	}
+	if len(sids) == 0 {
+		if sid := p.sidForWriteRoot(p.SandboxEnvRoot); sid != "" {
+			sids = append(sids, sid)
+		}
+	}
+	out.CapabilitySIDs = dedupeStrings(sids)
+	if len(out.WriteRootCapabilitySIDs) == 0 {
+		out.WriteRootCapabilitySIDs = nil
+	}
+	if hash, err := hashWorkspacePolicyFields(out.WorkspaceRoot, out.CommandDir, out.SandboxEnvRoot, out.WriteRoots, out.DenyWritePaths); err == nil {
+		out.PolicyHash = hash
+	}
+	return out
 }
 
 func allowEntries(sid string) []acl.Entry {

@@ -26,7 +26,6 @@ type approvalContext struct {
 	sessionRef session.SessionRef
 	runID      string
 	turnID     string
-	grants     *permissionGrantStore
 }
 
 type policyWrappedTool struct {
@@ -38,7 +37,6 @@ type policyWrappedTool struct {
 	options    policy.ModeOptions
 	tool       tool.Tool
 	approval   approvalContext
-	grants     *permissionGrantStore
 }
 
 func (r *Runtime) wrapToolsForPolicy(
@@ -67,7 +65,6 @@ func (r *Runtime) wrapToolsForPolicy(
 			options:    policy.CloneModeOptions(options),
 			tool:       one,
 			approval:   approval,
-			grants:     approval.grants,
 		})
 	}
 	return out
@@ -88,7 +85,6 @@ func (t policyWrappedTool) Definition() tool.Definition {
 }
 
 func (t policyWrappedTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
-	options := t.effectiveOptions()
 	input := policy.ToolContext{
 		Session: t.session,
 		State:   session.CloneState(t.state),
@@ -96,13 +92,12 @@ func (t policyWrappedTool) Call(ctx context.Context, call tool.Call) (tool.Resul
 		Call:    tool.CloneCall(call),
 		Sandbox: t.describeSandbox(),
 		Mode:    t.mode,
-		Options: options,
+		Options: policy.CloneModeOptions(t.options),
 	}
 	decision, err := t.policy.DecideTool(ctx, input)
 	if err != nil {
 		return tool.Result{}, err
 	}
-	decision.Constraints = t.applyGrantConstraints(decision.Constraints)
 	switch decision.Action {
 	case policy.ActionAllow, "":
 		call = tool.CloneCall(call)
@@ -113,20 +108,6 @@ func (t policyWrappedTool) Call(ctx context.Context, call tool.Call) (tool.Resul
 	default:
 		return policyDecisionResult(call, t.tool.Definition(), t.mode, decision), nil
 	}
-}
-
-func (t policyWrappedTool) effectiveOptions() policy.ModeOptions {
-	if t.grants == nil {
-		return policy.CloneModeOptions(t.options)
-	}
-	return t.grants.applyToOptions(t.options)
-}
-
-func (t policyWrappedTool) applyGrantConstraints(constraints sandbox.Constraints) sandbox.Constraints {
-	if t.grants == nil {
-		return constraints
-	}
-	return t.grants.applyToConstraints(constraints)
 }
 
 func (t policyWrappedTool) requestApproval(

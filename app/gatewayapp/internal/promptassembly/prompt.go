@@ -166,7 +166,7 @@ func builtInPermissionBoundariesPrompt() string {
 		"",
 		"- Run normal inspection, builds, tests, and workspace file edits with default sandbox permissions.",
 		"- Git/VCS/control metadata writes, including `git add`, `git commit`, tags, merges, rebases, and writes under `.git` or similar control directories, must use `RUN_COMMAND` with `sandbox_permissions=require_escalated` and a concise justification.",
-		"- Do not repair permission or lock errors by deleting lock files, resetting state, changing ACLs/modes, or requesting write access to protected control directories. If the original operation is necessary, rerun only that operation with escalation.",
+		"- Do not repair permission or lock errors by deleting lock files, resetting state, or changing ACLs/modes. If the original operation is necessary outside the workspace or in control metadata, rerun only that operation with escalation.",
 	}, "\n")
 }
 

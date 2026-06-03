@@ -27,18 +27,12 @@ func (r *Runtime) wrapToolsForRuntime(activeSession session.Session, ref session
 	hasCommand := false
 	hasSpawn := false
 	hasTask := false
-	hasRequestPermissions := false
 	for _, one := range spec.Tools {
 		if one == nil {
 			continue
 		}
 		name := strings.ToUpper(strings.TrimSpace(one.Definition().Name))
 		switch name {
-		case strings.ToUpper(requestPermissionsToolName):
-			if !hasRequestPermissions {
-				hasRequestPermissions = true
-				out = append(out, runtimeRequestPermissionsTool(r.sessions, activeSession, ref, toolCtx))
-			}
 		case shell.RunCommandToolName:
 			hasCommand = true
 			if runtime, ok := sandboxRuntimeFromTool(one); ok {
@@ -79,24 +73,7 @@ func (r *Runtime) wrapToolsForRuntime(activeSession session.Session, ref session
 			tasks:      r.tasks,
 		})
 	}
-	if !hasRequestPermissions {
-		out = append(out, runtimeRequestPermissionsTool(r.sessions, activeSession, ref, toolCtx))
-	}
 	return out
-}
-
-func runtimeRequestPermissionsTool(sessions session.Service, activeSession session.Session, ref session.SessionRef, toolCtx runtimeToolContext) requestPermissionsTool {
-	return requestPermissionsTool{
-		session:    session.CloneSession(activeSession),
-		sessionRef: session.NormalizeSessionRef(ref),
-		sessions:   sessions,
-		mode:       strings.TrimSpace(toolCtx.mode),
-		runID:      strings.TrimSpace(toolCtx.runID),
-		turnID:     strings.TrimSpace(toolCtx.turnID),
-		now:        toolCtx.now,
-		approval:   toolCtx.approvalRequester,
-		grants:     toolCtx.grants,
-	}
 }
 
 func (tm *taskRuntime) registerSandboxRuntime(runtime sandbox.Runtime) {

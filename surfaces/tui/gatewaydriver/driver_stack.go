@@ -149,9 +149,6 @@ type DoctorReport struct {
 	SandboxWorkspaceSetupUpdatedAt  time.Time
 	HostExecution                   bool
 	FullAccessMode                  bool
-	PermissionGrantCount            int
-	PermissionReadRootCount         int
-	PermissionWriteRootCount        int
 	ConfigPermissionsSecure         bool
 	Warnings                        []string
 }

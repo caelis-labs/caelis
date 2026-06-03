@@ -39,17 +39,11 @@ func (r *Runtime) resolveAgent(
 	spec := r.applyAssemblySpec(state, req.AgentSpec)
 	spec.Request = req.Request.WithDefaults(spec.Request)
 	modeName, _ := r.policyForName(ctx, r.policyMode(spec))
-	grants := r.permissionGrantStoreForSession(ref)
-	if err := r.hydratePermissionGrantStore(ctx, ref, grants); err != nil {
-		return nil, err
-	}
 	spec.Tools = r.wrapToolsForRuntime(activeSession, ref, spec, runtimeToolContext{
 		mode:              modeName,
 		approvalRequester: req.ApprovalRequester,
 		runID:             strings.TrimSpace(runID),
 		turnID:            strings.TrimSpace(turnID),
-		now:               r.now,
-		grants:            grants,
 	})
 	spec.Tools = r.wrapToolsForPolicy(activeSession, ref, state, spec, approvalContext{
 		ctx:        ctx,
@@ -59,61 +53,8 @@ func (r *Runtime) resolveAgent(
 		sessionRef: session.NormalizeSessionRef(ref),
 		runID:      strings.TrimSpace(runID),
 		turnID:     strings.TrimSpace(turnID),
-		grants:     grants,
 	})
 	return r.agentFactory.NewAgent(ctx, spec)
-}
-
-func (r *Runtime) permissionGrantStoreForSession(ref session.SessionRef) *permissionGrantStore {
-	if r == nil {
-		return newPermissionGrantStore()
-	}
-	ref = session.NormalizeSessionRef(ref)
-	sessionID := strings.TrimSpace(ref.SessionID)
-	if sessionID == "" {
-		return newPermissionGrantStore()
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.permissionGrants == nil {
-		r.permissionGrants = map[string]*permissionGrantStore{}
-	}
-	store := r.permissionGrants[sessionID]
-	if store == nil {
-		store = newPermissionGrantStore()
-		r.permissionGrants[sessionID] = store
-	}
-	return store
-}
-
-func (r *Runtime) PermissionGrantSnapshot(ref session.SessionRef) PermissionGrantSnapshot {
-	if r == nil {
-		return PermissionGrantSnapshot{}
-	}
-	ref = session.NormalizeSessionRef(ref)
-	sessionID := strings.TrimSpace(ref.SessionID)
-	if sessionID == "" {
-		return PermissionGrantSnapshot{}
-	}
-	r.mu.RLock()
-	store := r.permissionGrants[sessionID]
-	r.mu.RUnlock()
-	if store == nil {
-		return PermissionGrantSnapshot{}
-	}
-	return store.snapshot()
-}
-
-func (r *Runtime) hydratePermissionGrantStore(ctx context.Context, ref session.SessionRef, store *permissionGrantStore) error {
-	if r == nil || r.sessions == nil || store == nil {
-		return nil
-	}
-	state, err := r.sessions.SnapshotState(ctx, ref)
-	if err != nil {
-		return err
-	}
-	store.hydrate(permissionGrantRecordsFromState(state[permissionGrantStateKey]))
-	return nil
 }
 
 func (r *Runtime) setRunState(sessionID string, state agent.RunState) {

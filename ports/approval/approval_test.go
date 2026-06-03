@@ -11,8 +11,8 @@ import (
 
 func TestPayloadFromRuntimeRequestUsesProtocolApprovalFirst(t *testing.T) {
 	req := agent.ApprovalRequest{
-		Tool: tool.Definition{Name: "request_permissions"},
-		Call: tool.Call{ID: "call-from-runtime", Name: "request_permissions"},
+		Tool: tool.Definition{Name: "custom_tool"},
+		Call: tool.Call{ID: "call-from-runtime", Name: "custom_tool"},
 		Approval: &session.ProtocolApproval{
 			ToolCall: session.ProtocolToolCall{
 				ID:   "call-from-protocol",

@@ -72,11 +72,6 @@ func toolResultDisplayText(name string, input map[string]any, output map[string]
 			}
 		}
 		return terminalResultText(output, status, isErr)
-	case "REQUEST_PERMISSIONS":
-		if isErr || !toolBool(output["approved"]) {
-			return firstNonEmpty(toolString(output["error"]), toolString(output["review_text"]), "denied")
-		}
-		return "completed"
 	default:
 		return genericResultText(output, isErr)
 	}

@@ -314,9 +314,6 @@ func toRuntimeDoctorReport(report gatewayapp.DoctorReport, err error) (DoctorRep
 		SandboxWorkspaceSetupUpdatedAt:  report.SandboxWorkspaceSetupUpdatedAt,
 		HostExecution:                   report.HostExecution,
 		FullAccessMode:                  report.FullAccessMode,
-		PermissionGrantCount:            report.PermissionGrantCount,
-		PermissionReadRootCount:         report.PermissionReadRootCount,
-		PermissionWriteRootCount:        report.PermissionWriteRootCount,
 		ConfigPermissionsSecure:         report.ConfigPermissionsSecure,
 		Warnings:                        append([]string(nil), report.Warnings...),
 	}, err

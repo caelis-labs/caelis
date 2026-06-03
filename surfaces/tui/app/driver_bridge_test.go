@@ -1248,16 +1248,13 @@ func TestFormatStatusSnapshotUsesFriendlyThemeableLines(t *testing.T) {
 		SessionOutputTokens:      200,
 		SessionReasoningTokens:   50,
 		SessionTotalTokens:       12800,
-		PermissionGrantCount:     2,
-		PermissionReadRootCount:  3,
-		PermissionWriteRootCount: 1,
 	})
 	for _, forbidden := range []string{"Status", "Tokens", "Warnings", "status:", "provider:", "model:", "alias:", "Provider:", "Store:", "\n  Reason:", "Session"} {
 		if strings.Contains(got, forbidden) {
 			t.Fatalf("formatStatusSnapshot() = %q, should not contain log-style label %q", got, forbidden)
 		}
 	}
-	for _, want := range []string{"  Model:", "  Mode:", "  Sandbox:", "  Workspace:", "  Scope", "-----", "total", "12,800", "main", "10,150", "sub-agent", "2,040", "auto-review", "610", "Grants:", "2 approved, read roots 3, write roots 1", "Warning:", "API key is missing"} {
+	for _, want := range []string{"  Model:", "  Mode:", "  Sandbox:", "  Workspace:", "  Scope", "-----", "total", "12,800", "main", "10,150", "sub-agent", "2,040", "auto-review", "610", "Warning:", "API key is missing"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("formatStatusSnapshot() = %q, want substring %q", got, want)
 		}
@@ -1265,13 +1262,12 @@ func TestFormatStatusSnapshotUsesFriendlyThemeableLines(t *testing.T) {
 	if strings.Contains(got, "Token usage:") || strings.Contains(got, "main usage:") || strings.Contains(got, "warn:") {
 		t.Fatalf("formatStatusSnapshot() = %q, should use table-style token usage", got)
 	}
-	grantsIdx := strings.Index(got, "Grants:")
 	warningIdx := strings.Index(got, "Warning:")
 	usageIdx := strings.Index(got, "  Scope")
-	if grantsIdx < 0 || warningIdx < 0 || usageIdx < 0 || grantsIdx >= warningIdx || warningIdx >= usageIdx {
-		t.Fatalf("formatStatusSnapshot() = %q, want grants and warnings before token usage table", got)
+	if warningIdx < 0 || usageIdx < 0 || warningIdx >= usageIdx {
+		t.Fatalf("formatStatusSnapshot() = %q, want warnings before token usage table", got)
 	}
-	if tail := got[usageIdx:]; strings.Contains(tail, "Grants:") || strings.Contains(tail, "Warning:") {
+	if tail := got[usageIdx:]; strings.Contains(tail, "Warning:") {
 		t.Fatalf("formatStatusSnapshot() = %q, token usage table should be the final section", got)
 	}
 	if !strings.Contains(got, "\n\n  Scope") {

@@ -58,7 +58,6 @@ type Runtime struct {
 	idCounter         atomic.Uint64
 	mu                sync.RWMutex
 	runStates         map[string]agent.RunState
-	permissionGrants  map[string]*permissionGrantStore
 	tasks             *taskRuntime
 	terminals         *streamService
 }
@@ -83,7 +82,6 @@ func New(cfg Config) (*Runtime, error) {
 		controllers:       cfg.Controllers,
 		subagents:         cfg.Subagents,
 		runStates:         map[string]agent.RunState{},
-		permissionGrants:  map[string]*permissionGrantStore{},
 	}
 	if r.clock == nil {
 		r.clock = time.Now

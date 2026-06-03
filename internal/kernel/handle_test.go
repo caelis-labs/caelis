@@ -139,7 +139,7 @@ func TestTurnHandleAnchorsSubagentApprovalToParentTool(t *testing.T) {
 		createdAt: time.Unix(100, 0),
 	})
 	handle.publishApprovalReviewPayload(&agent.ApprovalRequest{
-		Tool: tool.Definition{Name: "request_permissions"},
+		Tool: tool.Definition{Name: "custom_tool"},
 		Metadata: map[string]any{
 			"subagent":       true,
 			"scope_id":       "task-1",
@@ -147,7 +147,7 @@ func TestTurnHandleAnchorsSubagentApprovalToParentTool(t *testing.T) {
 			"parent_tool":    "SPAWN",
 		},
 	}, &ApprovalPayload{
-		ToolName:     "request_permissions",
+		ToolName:     "custom_tool",
 		ReviewStatus: ApprovalReviewStatusApproved,
 		ReviewText:   "Automatic approval review approved",
 	})

@@ -52,8 +52,6 @@ func AutoReviewMode() policy.Mode {
 			switch toolName(input) {
 			case "PLAN", "SPAWN":
 				return allow(def), nil
-			case "REQUEST_PERMISSIONS":
-				return decidePermissionRequest(input, def)
 			case "READ", "SEARCH", "LIST", "GLOB":
 				if err := ensureReadPathsWithinRoots(input); err != nil {
 					return policyErrorOrDeny(err)
@@ -83,8 +81,6 @@ func ManualMode() policy.Mode {
 			switch toolName(input) {
 			case "PLAN", "SPAWN":
 				return allow(def), nil
-			case "REQUEST_PERMISSIONS":
-				return decidePermissionRequest(input, def)
 			case "READ", "SEARCH", "LIST", "GLOB":
 				if err := ensureReadPathsWithinRoots(input); err != nil {
 					return policyErrorOrDeny(err)
@@ -124,22 +120,6 @@ func decideCommand(input policy.ToolContext, def sandbox.Constraints, modeName s
 	switch req.SandboxPermissions {
 	case commandSandboxPermissionRequireEscalated:
 		return askEscalationApproval(input, req)
-	}
-	return allow(def), nil
-}
-
-func decidePermissionRequest(input policy.ToolContext, def sandbox.Constraints) (policy.Decision, error) {
-	paths, err := permissionRequestWritePaths(input)
-	if err != nil {
-		return policy.Decision{}, err
-	}
-	for _, path := range paths {
-		if controlDir, ok := protectedControlDirInPath(path); ok {
-			return deny(fmt.Sprintf(
-				"write permission for protected control directory %q is not allowed; rerun the necessary VCS/control metadata operation with sandbox_permissions=require_escalated",
-				controlDir,
-			)), nil
-		}
 	}
 	return allow(def), nil
 }
@@ -408,7 +388,7 @@ func ensurePathsOutsideDefaultHiddenRoots(paths []string, approvedRoots []string
 			continue
 		}
 		if withinAnyRoot(target, defaultHiddenUserRoots()) {
-			return fmt.Errorf("%s target %q is under a sensitive user configuration path; request explicit permission for that path", action, one)
+			return fmt.Errorf("%s target %q is under a sensitive user configuration path; rerun the specific operation with sandbox_permissions=require_escalated if it is required", action, one)
 		}
 	}
 	return nil

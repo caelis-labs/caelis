@@ -541,7 +541,7 @@ func TestGatewayAnchoredSubagentApprovalAppendsToSpawnTailUntilFinal(t *testing.
 			},
 			ApprovalPayload: &kernel.ApprovalPayload{
 				ToolCallID:     "perm-1",
-				ToolName:       "request_permissions",
+				ToolName:       "custom_tool",
 				RawInput:       map[string]any{"path": "hello_claude.txt"},
 				ReviewStatus:   kernel.ApprovalReviewStatusApproved,
 				ReviewText:     "Automatic approval review approved (risk: low, authorization: high): creating the requested file is narrow and authorized.",
@@ -564,7 +564,7 @@ func TestGatewayAnchoredSubagentApprovalAppendsToSpawnTailUntilFinal(t *testing.
 		t.Fatalf("first block = %#v, want MainACPTurnBlock", model.doc.Blocks()[0])
 	}
 	joined := strings.Join(renderedPlainRows(block.Render(BlockRenderContext{Width: 140, TermWidth: 140, Theme: model.theme})), "\n")
-	for _, want := range []string{"• Spawned claude:", "Approval review approved request_permissions path: hello_claude.txt", "creating the requested file"} {
+	for _, want := range []string{"• Spawned claude:", "Approval review approved custom_tool path: hello_claude.txt", "creating the requested file"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("rendered rows = %q, want approval tail %q", joined, want)
 		}

@@ -63,9 +63,6 @@ type StatusSnapshot struct {
 	MissingAPIKey                   bool
 	HostExecution                   bool
 	FullAccessMode                  bool
-	PermissionGrantCount            int
-	PermissionReadRootCount         int
-	PermissionWriteRootCount        int
 	Surface                         string
 	PromptTokens                    int
 	CompletionTokens                int

@@ -51,11 +51,10 @@ func TestToolEventDisplayName(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]string{
-		"":                    "TOOL",
-		"execute":             "Execute",
-		"REQUEST_PERMISSIONS": "Request permissions",
-		"think":               "Think",
-		"custom tool":         "custom tool",
+		"":            "TOOL",
+		"execute":     "Execute",
+		"think":       "Think",
+		"custom tool": "custom tool",
 	}
 	for input, want := range tests {
 		input, want := input, want
