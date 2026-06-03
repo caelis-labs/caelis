@@ -278,6 +278,57 @@ func TestRuntimeAgentPromptSlashCommandRunsSideACPAndForwardsEvents(t *testing.T
 	}
 }
 
+func TestRuntimeAgentPromptSlashCommandAcceptsSplitTextParts(t *testing.T) {
+	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	runtime := &sideACPCommandRuntime{sessions: sessions}
+	agent, err := runtimeacp.New(runtimeacp.Config{
+		Runtime:  runtime,
+		Sessions: sessions,
+		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
+			return agent.AgentSpec{}, errors.New("main agent spec should not be built for side ACP slash command")
+		},
+		Commands: sideACPCommandProvider{{Name: "helper", Description: "bounded helper"}},
+		AppName:  "caelis",
+		UserID:   "user-1",
+	})
+	if err != nil {
+		t.Fatalf("runtimeacp.New() error = %v", err)
+	}
+	activeSession, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatalf("NewSession() error = %v", err)
+	}
+	resp, err := agent.Prompt(context.Background(), acp.PromptRequest{
+		SessionID: activeSession.SessionID,
+		Prompt: []json.RawMessage{
+			json.RawMessage(`{"type":"text","text":"/helper"}`),
+			json.RawMessage(`{"type":"text","text":"inspect the repo"}`),
+			json.RawMessage(`{"type":"image","mimeType":"image/png","data":"aW1n"}`),
+		},
+	}, &recordingPromptCallbacks{})
+	if err != nil {
+		t.Fatalf("Prompt(split /helper) error = %v", err)
+	}
+	if resp.StopReason != acp.StopReasonEndTurn {
+		t.Fatalf("StopReason = %q, want %q", resp.StopReason, acp.StopReasonEndTurn)
+	}
+	if runtime.runCalled {
+		t.Fatal("main runtime Run was called for split side ACP slash command")
+	}
+	if runtime.prompt.Input != "inspect the repo" {
+		t.Fatalf("prompt input = %q, want split prompt text", runtime.prompt.Input)
+	}
+	if got, want := len(runtime.prompt.ContentParts), 2; got != want {
+		t.Fatalf("len(ContentParts) = %d, want %d: %#v", got, want, runtime.prompt.ContentParts)
+	}
+	if part := runtime.prompt.ContentParts[0]; part.Type != model.ContentPartText || part.Text != "inspect the repo" {
+		t.Fatalf("ContentParts[0] = %#v, want rewritten prompt text", part)
+	}
+	if part := runtime.prompt.ContentParts[1]; part.Type != model.ContentPartImage || part.Data != "aW1n" {
+		t.Fatalf("ContentParts[1] = %#v, want original image", part)
+	}
+}
+
 func TestRuntimeAgentPromptSlashCommandPreservesRegisteredACPAgentName(t *testing.T) {
 	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
 	runtime := &sideACPCommandRuntime{sessions: sessions, expectedAgent: "MixedHelper"}

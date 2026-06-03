@@ -337,7 +337,6 @@ func resolveMetadataWith(baseMetadata map[string]any, resolved assembly.Resolved
 		metadata[policyapi.MetadataPolicyProfile] = profile
 		delete(metadata, policyapi.MetadataLegacyPolicyMode)
 	} else {
-		metadata[policyapi.MetadataPolicyProfile] = policyapi.ProfileWorkspaceWrite
 		delete(metadata, policyapi.MetadataLegacyPolicyMode)
 	}
 	if reasoning := firstNonEmptyString(

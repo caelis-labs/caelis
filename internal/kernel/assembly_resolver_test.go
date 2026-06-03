@@ -139,6 +139,33 @@ func TestAssemblyResolverSessionReasoningOverridesModeAndModelDefault(t *testing
 	}
 }
 
+func TestAssemblyResolverDoesNotInventPolicyProfile(t *testing.T) {
+	t.Parallel()
+
+	resolver, err := NewAssemblyResolver(AssemblyResolverConfig{
+		Sessions: snapshotStateFunc(func(context.Context, session.SessionRef) (map[string]any, error) {
+			return map[string]any{}, nil
+		}),
+		DefaultModelAlias: "mini",
+		ModelLookup: modelLookupFunc(func(context.Context, string, int) (ModelResolution, error) {
+			return ModelResolution{Model: fakeLLM{name: "mini"}}, nil
+		}),
+	})
+	if err != nil {
+		t.Fatalf("NewAssemblyResolver() error = %v", err)
+	}
+	turn, err := resolver.ResolveTurn(context.Background(), TurnIntent{
+		SessionRef: session.SessionRef{SessionID: "s1"},
+		Input:      "hello",
+	})
+	if err != nil {
+		t.Fatalf("ResolveTurn() error = %v", err)
+	}
+	if _, ok := turn.RunRequest.AgentSpec.Metadata[policyapi.MetadataPolicyProfile]; ok {
+		t.Fatalf("policy_profile = %#v, want runtime default policy to remain authoritative", turn.RunRequest.AgentSpec.Metadata[policyapi.MetadataPolicyProfile])
+	}
+}
+
 func TestAssemblyResolverControllerTurnPreservesPolicyMetadataWithoutModelLookup(t *testing.T) {
 	t.Parallel()
 
@@ -181,8 +208,8 @@ func TestAssemblyResolverControllerTurnPreservesPolicyMetadataWithoutModelLookup
 		t.Fatalf("model lookup calls = %d, want 0", modelCalls)
 	}
 	meta := turn.RunRequest.AgentSpec.Metadata
-	if got := meta[policyapi.MetadataPolicyProfile]; got != policyapi.ProfileWorkspaceWrite {
-		t.Fatalf("policy_profile = %#v, want default workspace-write profile", got)
+	if _, ok := meta[policyapi.MetadataPolicyProfile]; ok {
+		t.Fatalf("policy_profile = %#v, want legacy approval mode omitted from policy profile", meta[policyapi.MetadataPolicyProfile])
 	}
 	if got := meta["system_prompt"]; got != "controller prompt" {
 		t.Fatalf("system_prompt = %#v, want assembly metadata", got)

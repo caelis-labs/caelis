@@ -114,6 +114,31 @@ func TestACPSurfaceAvailableCommandsExposeRegisteredACPAgents(t *testing.T) {
 	}
 }
 
+func TestACPSurfaceAvailableCommandsHideReservedACPAgentNames(t *testing.T) {
+	stack, session := newStackWithAssemblyForToolTest(t, assembly.ResolvedAssembly{
+		Agents: []assembly.AgentConfig{{
+			Name:        "status",
+			Description: "reserved collision",
+			Command:     "go",
+			Args:        []string{"run", "./internal/acpe2eagent"},
+			WorkDir:     repoRootForGatewayAppTest(t),
+		}},
+	})
+	commands, err := stack.ACPSurface(nil, false, nil).AvailableCommands(context.Background(), session.SessionID)
+	if err != nil {
+		t.Fatalf("AvailableCommands() error = %v", err)
+	}
+	status := acpCommandForToolTest(commands, "status")
+	if status == nil {
+		t.Fatalf("AvailableCommands() = %#v, want built-in /status command", commands)
+	}
+	for _, command := range commands {
+		if strings.EqualFold(strings.TrimSpace(command.Name), "status") && command.Description == "reserved collision" {
+			t.Fatalf("AvailableCommands() exposed reserved ACP agent command: %#v", command)
+		}
+	}
+}
+
 func TestLookupBuiltInACPAgentIncludesNativeOpenCodeFamily(t *testing.T) {
 	for _, tt := range []struct {
 		name        string

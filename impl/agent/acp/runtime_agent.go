@@ -8,6 +8,7 @@ import (
 	"maps"
 	"strings"
 	"sync"
+	"unicode"
 
 	"github.com/OnslaughtSnail/caelis/impl/agent/acp/loader"
 	"github.com/OnslaughtSnail/caelis/impl/agent/acp/terminal"
@@ -480,7 +481,13 @@ func splitSideACPSlash(input string) (string, string, bool) {
 	if !strings.HasPrefix(trimmed, "/") {
 		return "", "", false
 	}
-	head, rest, _ := strings.Cut(strings.TrimSpace(strings.TrimPrefix(trimmed, "/")), " ")
+	body := strings.TrimSpace(strings.TrimPrefix(trimmed, "/"))
+	head := body
+	rest := ""
+	if idx := strings.IndexFunc(body, unicode.IsSpace); idx >= 0 {
+		head = body[:idx]
+		rest = body[idx+1:]
+	}
 	head = strings.ToLower(strings.TrimSpace(head))
 	if head == "" {
 		return "", "", false
@@ -520,18 +527,13 @@ func sideACPContentParts(parts []model.ContentPart, prompt string) []model.Conte
 	}
 	prompt = strings.TrimSpace(prompt)
 	out := make([]model.ContentPart, 0, len(parts)+1)
-	replacedText := false
 	for _, part := range parts {
-		if part.Type == model.ContentPartText && !replacedText {
-			replacedText = true
-			if prompt == "" {
-				continue
-			}
-			part.Text = prompt
+		if part.Type == model.ContentPartText {
+			continue
 		}
 		out = append(out, part)
 	}
-	if !replacedText && prompt != "" {
+	if prompt != "" {
 		out = append([]model.ContentPart{{
 			Type: model.ContentPartText,
 			Text: prompt,

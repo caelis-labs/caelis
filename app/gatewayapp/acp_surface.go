@@ -215,6 +215,9 @@ func (p gatewayACPSurface) AvailableCommands(context.Context, string) ([]acp.Ava
 			if name == "" {
 				continue
 			}
+			if reservedSlashCommandName(name) {
+				continue
+			}
 			commands = append(commands, acp.AvailableCommand{
 				Name:        name,
 				Description: firstNonEmpty(strings.TrimSpace(agent.Description), "Send a prompt to the registered ACP agent"),
