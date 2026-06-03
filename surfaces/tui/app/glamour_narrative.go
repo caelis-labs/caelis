@@ -80,22 +80,40 @@ func glamourNarrativeRowsWithWrapWidth(blockID, raw, rolePrefix string, roleStyl
 		styledRolePrefix = tuikit.ColorizeLogLine(rolePrefix, roleStyle, theme)
 	}
 
-	for i, sl := range styledLines {
-		plain := xansi.Strip(sl)
-		styled := sl
-		if i == 0 && rolePrefix != "" {
-			plain = rolePrefix + plain
-			styled = styledRolePrefix + styled
+	firstOutputLine := true
+	for _, sl := range styledLines {
+		for _, segment := range wrapGlamourNarrativeBodyLine(sl, wrapWidth) {
+			plain := xansi.Strip(segment)
+			styled := segment
+			if firstOutputLine && rolePrefix != "" {
+				plain = rolePrefix + plain
+				styled = styledRolePrefix + styled
+			}
+			firstOutputLine = false
+			rows = append(rows, RenderedRow{
+				Styled:     styled,
+				Plain:      plain,
+				BlockID:    blockID,
+				PreWrapped: true,
+			})
 		}
-		rows = append(rows, RenderedRow{
-			Styled:     styled,
-			Plain:      plain,
-			BlockID:    blockID,
-			PreWrapped: true,
-		})
 	}
 
 	return rows
+}
+
+func wrapGlamourNarrativeBodyLine(styled string, width int) []string {
+	if width <= 0 || styled == "" {
+		return []string{styled}
+	}
+	if graphemeWidth(xansi.Strip(styled)) <= width {
+		return []string{styled}
+	}
+	segments := strings.Split(hardWrapDisplayLine(styled, width), "\n")
+	if len(segments) == 0 {
+		return []string{styled}
+	}
+	return segments
 }
 
 // ---------------------------------------------------------------------------
@@ -554,7 +572,7 @@ func glamourStreamingNarrativeRowsObserved(blockID, raw, rolePrefix string, role
 }
 
 const streamingStableTailMinRunes = 96
-const streamingNarrativeRendererVersion = "stream-md-v2"
+const streamingNarrativeRendererVersion = "stream-md-v3"
 
 func renderStreamingNarrativeTailRows(blockID, raw, rolePrefix string, roleStyle tuikit.LineStyle, width int, theme tuikit.Theme) []RenderedRow {
 	raw = strings.ReplaceAll(strings.ReplaceAll(raw, "\r\n", "\n"), "\r", "\n")

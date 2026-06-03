@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/tuikit"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -290,6 +291,51 @@ func TestActiveSubagentNarrativeHonorsPanelContentWidth(t *testing.T) {
 	assertRenderedLinesWithinWidth(t, finalLines, contentWidth)
 }
 
+func TestACPActiveAndFinalNarrativeKeepStablePrefixBodyWidth(t *testing.T) {
+	m := newPerfTestModel()
+	width := 36
+	ctx := m.blockRenderContext(width)
+	text := cjkStablePrefixTailText()
+
+	active := NewMainACPTurnBlock("session-1")
+	active.AppendStreamChunk(SEAssistant, text)
+	activePlain := renderedPlainRows(active.Render(ctx))
+	assertNarrativeRowsKeepFixedPrefixBodyWidth(t, activePlain, width)
+
+	final := NewMainACPTurnBlock("session-1")
+	final.ReplaceFinalStreamChunk(SEAssistant, text)
+	final.SetStatus("completed", "", "", time.Now())
+	finalPlain := renderedPlainRows(final.Render(ctx))
+	assertNarrativeRowsKeepFixedPrefixBodyWidth(t, finalPlain, width)
+
+	activeBodies := narrativeBodies(activePlain)
+	finalBodies := narrativeBodies(finalPlain)
+	if len(activeBodies) != len(finalBodies) {
+		t.Fatalf("active/final narrative line count mismatch: active=%d final=%d\nactive=%q\nfinal=%q", len(activeBodies), len(finalBodies), strings.Join(activePlain, "\n"), strings.Join(finalPlain, "\n"))
+	}
+	for i := range activeBodies {
+		if activeBodies[i] != finalBodies[i] {
+			t.Fatalf("active/final narrative body line %d mismatch\nactive=%q\nfinal=%q\nactive all=%q\nfinal all=%q", i, activeBodies[i], finalBodies[i], strings.Join(activePlain, "\n"), strings.Join(finalPlain, "\n"))
+		}
+	}
+}
+
+func TestACPStreamFullFrameLinesStayWithinTerminalWidth(t *testing.T) {
+	m := NewModel(Config{NoColor: true})
+	model, _ := m.Update(tea.WindowSizeMsg{Width: 54, Height: 18})
+	m = model.(*Model)
+	seedLongTranscript(m, 40)
+	m.setViewportFollowState(viewportFollowTail)
+
+	m = applyTranscriptNarrativeTestChunk(m, ACPProjectionMain, "session-1", "", cjkStablePrefixTailText())
+	assertFullFrameLinesWithinTerminalWidth(t, m.View().Content, m.width)
+
+	for range 8 {
+		m = applyTranscriptNarrativeTestChunk(m, ACPProjectionMain, "session-1", "", "追加流式正文用于触发滚动与尾部重排。")
+		assertFullFrameLinesWithinTerminalWidth(t, m.View().Content, m.width)
+	}
+}
+
 func TestActiveTailViewportSyncDoesNotReplaceFullViewportContent(t *testing.T) {
 	m := newPerfTestModel()
 	seedLongTranscript(m, 120)
@@ -345,6 +391,16 @@ func TestActiveTailHitTestingUsesVisibleTailOffset(t *testing.T) {
 	}
 }
 
+func cjkStablePrefixTailText() string {
+	stableIntro := strings.Repeat("检查日志记录状态同步和渲染缓存确保每一步都有完整证据。", 6)
+	stableList := strings.Join([]string{
+		"- 检查活动缓冲区是否保持固定正文列",
+		"- 检查流式尾部是否按照同一个宽度换行",
+	}, "\n")
+	tail := strings.Repeat("尾部继续追加中文正文用于验证行宽稳定和滚动重绘。", 5)
+	return strings.Join([]string{stableIntro, "", stableList, "", tail}, "\n")
+}
+
 func applyTranscriptNarrativeTestChunk(m *Model, scope ACPProjectionScope, scopeID, actor, text string) *Model {
 	model, _ := m.handleTranscriptEventsMsg(TranscriptEventsMsg{Events: []TranscriptEvent{{
 		Kind:          TranscriptEventNarrative,
@@ -371,6 +427,56 @@ func activeBufferForEventKind(t *testing.T, events []SubagentEvent, kind Subagen
 	return nil
 }
 
+func assertNarrativeRowsKeepFixedPrefixBodyWidth(t *testing.T, rows []string, width int) {
+	t.Helper()
+	bodyWidth := width - displayColumns("· ")
+	if bodyWidth <= 0 {
+		t.Fatalf("width %d leaves no body column", width)
+	}
+	for _, line := range rows {
+		plain := strings.TrimRight(ansi.Strip(line), " ")
+		if strings.TrimSpace(plain) == "" {
+			continue
+		}
+		body, ok := stripNarrativePrefixColumn(plain)
+		if !ok {
+			t.Fatalf("narrative row missing fixed prefix column: %q\nall=%q", plain, strings.Join(rows, "\n"))
+		}
+		if got := displayColumns(body); got > bodyWidth {
+			t.Fatalf("narrative body width = %d, want <= %d\nline=%q\nall=%q", got, bodyWidth, plain, strings.Join(rows, "\n"))
+		}
+	}
+}
+
+func narrativeBodies(rows []string) []string {
+	var bodies []string
+	for _, line := range rows {
+		plain := strings.TrimRight(ansi.Strip(line), " ")
+		if strings.TrimSpace(plain) == "" {
+			continue
+		}
+		body, ok := stripNarrativePrefixColumn(plain)
+		if !ok {
+			continue
+		}
+		bodies = append(bodies, body)
+	}
+	return bodies
+}
+
+func stripNarrativePrefixColumn(line string) (string, bool) {
+	switch {
+	case strings.HasPrefix(line, "· "):
+		return strings.TrimRight(strings.TrimPrefix(line, "· "), " "), true
+	case strings.HasPrefix(line, "› "):
+		return strings.TrimRight(strings.TrimPrefix(line, "› "), " "), true
+	case strings.HasPrefix(line, "  "):
+		return strings.TrimRight(strings.TrimPrefix(line, "  "), " "), true
+	default:
+		return "", false
+	}
+}
+
 func assertRenderedLinesWithinWidth(t *testing.T, lines []string, width int) {
 	t.Helper()
 	for _, line := range lines {
@@ -379,6 +485,19 @@ func assertRenderedLinesWithinWidth(t *testing.T, lines []string, width int) {
 		}
 		if got := displayColumns(ansi.Strip(line)); got > width {
 			t.Fatalf("rendered line width = %d, want <= %d\nline=%q\nall=%q", got, width, ansi.Strip(line), strings.Join(lines, "\n"))
+		}
+	}
+}
+
+func assertFullFrameLinesWithinTerminalWidth(t *testing.T, frame string, width int) {
+	t.Helper()
+	for lineNo, line := range strings.Split(frame, "\n") {
+		plain := ansi.Strip(line)
+		if got := displayColumns(plain); got > width {
+			t.Fatalf("frame line %d display width = %d, want <= %d\nline=%q\nframe=%q", lineNo, got, width, plain, frame)
+		}
+		if got := ansi.StringWidthWc(plain); got > width {
+			t.Fatalf("frame line %d wc width = %d, want <= %d\nline=%q\nframe=%q", lineNo, got, width, plain, frame)
 		}
 	}
 }
