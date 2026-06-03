@@ -53,10 +53,7 @@ func AutoReviewMode() policy.Mode {
 			case "PLAN", "SPAWN":
 				return allow(def), nil
 			case "READ", "SEARCH", "LIST", "GLOB":
-				if err := ensureReadPathsWithinRoots(input); err != nil {
-					return policyErrorOrDeny(err)
-				}
-				return allow(readStrictConstraints(input.Options)), nil
+				return allow(filesystemReadConstraints(def)), nil
 			case "WRITE", "PATCH":
 				if err := ensureWritePathsWithinRoots(input); err != nil {
 					return policyErrorOrDeny(err)
@@ -82,10 +79,7 @@ func ManualMode() policy.Mode {
 			case "PLAN", "SPAWN":
 				return allow(def), nil
 			case "READ", "SEARCH", "LIST", "GLOB":
-				if err := ensureReadPathsWithinRoots(input); err != nil {
-					return policyErrorOrDeny(err)
-				}
-				return allow(readStrictConstraints(input.Options)), nil
+				return allow(filesystemReadConstraints(def)), nil
 			case "WRITE", "PATCH":
 				if err := ensureWritePathsWithinRoots(input); err != nil {
 					return policyErrorOrDeny(err)
@@ -293,34 +287,23 @@ func defaultNetworkPolicy(opts policy.ModeOptions) sandbox.Network {
 	return sandbox.NetworkEnabled
 }
 
-func readStrictConstraints(opts policy.ModeOptions) sandbox.Constraints {
-	out := baseStrictConstraints(opts)
-	for _, path := range defaultUserReadableRoots() {
-		out.PathRules = append(out.PathRules, sandbox.PathRule{Path: path, Access: sandbox.PathAccessReadOnly})
+func filesystemReadConstraints(in sandbox.Constraints) sandbox.Constraints {
+	if len(in.PathRules) == 0 {
+		return in
 	}
-	approvedRoots := approvedOverrideRoots(opts)
-	for _, path := range defaultHiddenUserRoots() {
-		if overlapsAnyRoot(path, approvedRoots) {
+	rules := make([]sandbox.PathRule, 0, len(in.PathRules))
+	for _, rule := range in.PathRules {
+		if rule.Access == sandbox.PathAccessReadOnly {
 			continue
 		}
-		out.PathRules = append(out.PathRules, sandbox.PathRule{Path: path, Access: sandbox.PathAccessHidden})
+		rules = append(rules, rule)
 	}
-	return out
+	in.PathRules = rules
+	return in
 }
 
 func toolName(input policy.ToolContext) string {
 	return strings.ToUpper(strings.TrimSpace(input.Tool.Name))
-}
-
-func ensureReadPathsWithinRoots(input policy.ToolContext) error {
-	paths, err := candidatePaths(input)
-	if err != nil {
-		return err
-	}
-	if err := ensurePathsOutsideDefaultHiddenRoots(paths, approvedOverrideRoots(input.Options), "read"); err != nil {
-		return err
-	}
-	return ensurePathsWithinRoots(paths, readableRoots(input.Options), "read")
 }
 
 func ensureWritePathsWithinRoots(input policy.ToolContext) error {
@@ -344,15 +327,6 @@ func ensurePathsWithinRoots(paths []string, roots []string, action string) error
 		}
 	}
 	return nil
-}
-
-func readableRoots(opts policy.ModeOptions) []string {
-	roots := make([]string, 0, 2+len(opts.ExtraReadRoots)+len(opts.ExtraWriteRoots))
-	roots = appendNonEmpty(roots, opts.WorkspaceRoot, opts.TempRoot)
-	roots = appendNonEmpty(roots, opts.ExtraWriteRoots...)
-	roots = appendNonEmpty(roots, opts.ExtraReadRoots...)
-	roots = appendNonEmpty(roots, defaultUserReadableRoots()...)
-	return roots
 }
 
 func writableRoots(opts policy.ModeOptions) []string {
@@ -394,27 +368,6 @@ func ensurePathsOutsideDefaultHiddenRoots(paths []string, approvedRoots []string
 	return nil
 }
 
-func defaultUserReadableRoots() []string {
-	home, err := os.UserHomeDir()
-	if err != nil || strings.TrimSpace(home) == "" {
-		return nil
-	}
-	roots := []string{
-		filepath.Join(home, ".config"),
-		filepath.Join(home, ".local", "share"),
-		filepath.Join(home, ".local", "state"),
-		filepath.Join(home, ".cache"),
-	}
-	if runtime.GOOS == "darwin" {
-		roots = append(roots,
-			filepath.Join(home, "Library", "Application Support"),
-			filepath.Join(home, "Library", "Preferences"),
-			filepath.Join(home, "Library", "Caches"),
-		)
-	}
-	return roots
-}
-
 func defaultHiddenUserRoots() []string {
 	home, err := os.UserHomeDir()
 	if err != nil || strings.TrimSpace(home) == "" {
@@ -444,25 +397,6 @@ func withinAnyRoot(target string, roots []string) bool {
 			continue
 		}
 		if target == root || strings.HasPrefix(target, root+string(filepath.Separator)) {
-			return true
-		}
-	}
-	return false
-}
-
-func overlapsAnyRoot(path string, roots []string) bool {
-	path = normalizeTarget(path)
-	if path == "" {
-		return true
-	}
-	for _, root := range roots {
-		root = normalizeTarget(root)
-		if root == "" {
-			continue
-		}
-		if path == root || root == path ||
-			strings.HasPrefix(path, root+string(filepath.Separator)) ||
-			strings.HasPrefix(root, path+string(filepath.Separator)) {
 			return true
 		}
 	}

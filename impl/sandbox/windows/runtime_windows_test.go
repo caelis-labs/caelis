@@ -320,6 +320,55 @@ func TestPolicyForRequestUsesOnlyWritableRootsAndDenyWriteCarveouts(t *testing.T
 	}
 }
 
+func TestFileSystemForIgnoresWindowsReadAndHiddenRoots(t *testing.T) {
+	workspace := t.TempDir()
+	extraRead := filepath.Join(t.TempDir(), "extra-read")
+	outside := filepath.Join(t.TempDir(), "outside")
+	hidden := filepath.Join(workspace, "secret")
+	gitDir := filepath.Join(workspace, ".git")
+	for _, dir := range []string{extraRead, outside, hidden, gitDir} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatalf("MkdirAll(%s) error = %v", dir, err)
+		}
+	}
+	outsideFile := filepath.Join(outside, "note.txt")
+	hiddenFile := filepath.Join(hidden, "token.txt")
+	for _, path := range []string{outsideFile, hiddenFile} {
+		if err := os.WriteFile(path, []byte("data"), 0o600); err != nil {
+			t.Fatalf("WriteFile(%s) error = %v", path, err)
+		}
+	}
+
+	rt, err := New(sandbox.Config{
+		CWD:           workspace,
+		StateDir:      t.TempDir(),
+		ReadableRoots: []string{extraRead},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer rt.Close()
+
+	fsys := rt.FileSystemFor(sandbox.Constraints{
+		Permission: sandbox.PermissionWorkspaceWrite,
+		PathRules: []sandbox.PathRule{
+			{Path: extraRead, Access: sandbox.PathAccessReadOnly},
+			{Path: hidden, Access: sandbox.PathAccessHidden},
+		},
+	})
+	for _, path := range []string{outsideFile, hiddenFile} {
+		if _, err := fsys.ReadFile(path); err != nil {
+			t.Fatalf("ReadFile(%s) error = %v, want Windows current-user readable path allowed", path, err)
+		}
+	}
+	if err := fsys.WriteFile(filepath.Join(hidden, "new.txt"), []byte("data"), 0o600); err != nil {
+		t.Fatalf("WriteFile(hidden workspace path) error = %v, want hidden rule ignored on Windows", err)
+	}
+	if err := fsys.WriteFile(filepath.Join(gitDir, "index.lock"), []byte("data"), 0o600); err == nil || !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("WriteFile(.git) error = %v, want deny-write carveout permission denied", err)
+	}
+}
+
 func TestPolicyRejectsUnsupportedPermissionMode(t *testing.T) {
 	rt, err := New(sandbox.Config{CWD: t.TempDir(), StateDir: t.TempDir()})
 	if err != nil {

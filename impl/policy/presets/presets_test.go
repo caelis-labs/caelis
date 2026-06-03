@@ -96,30 +96,56 @@ func TestDefaultModeAllowsUserConfigReadsButRequiresWriteGrant(t *testing.T) {
 	}
 }
 
-func TestDefaultModeReadConstraintsIncludeDefaultUserRootsWithExtraReadRoot(t *testing.T) {
+func TestDefaultModeReadConstraintsDoNotAddDefaultReadableRoots(t *testing.T) {
 	home := t.TempDir()
 	setHomeForPresetsTest(t, home)
 	configPath := filepath.Join(home, ".config", "ghostty", "config")
-	input := readCtx(configPath)
 	extraReadRoot := testExtraReadRoot()
+
+	cases := []policy.ToolContext{
+		readCtx(configPath),
+		listCtx(filepath.Dir(configPath)),
+		searchCtx(filepath.Dir(configPath), "theme"),
+		globCtx(filepath.Join(filepath.Dir(configPath), "*")),
+	}
+	for _, input := range cases {
+		input.Options.ExtraReadRoots = []string{extraReadRoot}
+		decision, err := AutoReviewMode().DecideTool(context.Background(), input)
+		if err != nil {
+			t.Fatalf("%s DecideTool() error = %v", input.Tool.Name, err)
+		}
+		if decision.Action != policy.ActionAllow {
+			t.Fatalf("%s action = %q, want allow (reason=%q)", input.Tool.Name, decision.Action, decision.Reason)
+		}
+		if hasPathRule(decision.Constraints.PathRules, extraReadRoot, sandbox.PathAccessReadOnly) {
+			t.Fatalf("%s PathRules = %#v, want no explicit read root for filesystem read tool", input.Tool.Name, decision.Constraints.PathRules)
+		}
+		if hasPathRule(decision.Constraints.PathRules, filepath.Join(home, ".config", "gh"), sandbox.PathAccessHidden) {
+			t.Fatalf("%s PathRules = %#v, want no sensitive user config hidden root", input.Tool.Name, decision.Constraints.PathRules)
+		}
+	}
+}
+
+func TestDefaultModeCommandConstraintsKeepExtraReadRoots(t *testing.T) {
+	t.Parallel()
+
+	extraReadRoot := testExtraReadRoot()
+	input := commandCtx("go test ./...", false)
 	input.Options.ExtraReadRoots = []string{extraReadRoot}
 
 	decision, err := AutoReviewMode().DecideTool(context.Background(), input)
 	if err != nil {
-		t.Fatalf("READ DecideTool() error = %v", err)
+		t.Fatalf("RUN_COMMAND DecideTool() error = %v", err)
 	}
 	if decision.Action != policy.ActionAllow {
-		t.Fatalf("READ action = %q, want allow (reason=%q)", decision.Action, decision.Reason)
+		t.Fatalf("RUN_COMMAND action = %q, want allow (reason=%q)", decision.Action, decision.Reason)
 	}
-	if !hasPathRule(decision.Constraints.PathRules, filepath.Join(home, ".config"), sandbox.PathAccessReadOnly) {
-		t.Fatalf("PathRules = %#v, want default user config read root", decision.Constraints.PathRules)
-	}
-	if !hasPathRule(decision.Constraints.PathRules, filepath.Join(home, ".config", "gh"), sandbox.PathAccessHidden) {
-		t.Fatalf("PathRules = %#v, want sensitive user config hidden root", decision.Constraints.PathRules)
+	if !hasPathRule(decision.Constraints.PathRules, extraReadRoot, sandbox.PathAccessReadOnly) {
+		t.Fatalf("PathRules = %#v, want command extra read root", decision.Constraints.PathRules)
 	}
 }
 
-func TestDefaultModeDeniesSensitiveUserConfigReadsWithoutExplicitGrant(t *testing.T) {
+func TestDefaultModeAllowsSensitiveUserConfigReadsByDefault(t *testing.T) {
 	home := t.TempDir()
 	setHomeForPresetsTest(t, home)
 	secretPath := filepath.Join(home, ".config", "gh", "hosts.yml")
@@ -128,21 +154,11 @@ func TestDefaultModeDeniesSensitiveUserConfigReadsWithoutExplicitGrant(t *testin
 	if err != nil {
 		t.Fatalf("READ DecideTool() error = %v", err)
 	}
-	if decision.Action != policy.ActionDeny {
-		t.Fatalf("READ action = %q, want deny for hidden path", decision.Action)
-	}
-
-	input := readCtx(secretPath)
-	input.Options.ExtraReadRoots = []string{filepath.Join(home, ".config", "gh")}
-	decision, err = AutoReviewMode().DecideTool(context.Background(), input)
-	if err != nil {
-		t.Fatalf("READ with grant DecideTool() error = %v", err)
-	}
 	if decision.Action != policy.ActionAllow {
-		t.Fatalf("READ with grant action = %q, want allow (reason=%q)", decision.Action, decision.Reason)
+		t.Fatalf("READ action = %q, want allow (reason=%q)", decision.Action, decision.Reason)
 	}
 	if hasPathRule(decision.Constraints.PathRules, filepath.Join(home, ".config", "gh"), sandbox.PathAccessHidden) {
-		t.Fatalf("PathRules = %#v, did not expect hidden rule for explicitly granted root", decision.Constraints.PathRules)
+		t.Fatalf("PathRules = %#v, did not expect hidden rule for default read", decision.Constraints.PathRules)
 	}
 }
 
@@ -447,7 +463,7 @@ func TestDefaultModeAllowsRelativeFilesystemPathsWithinWorkspace(t *testing.T) {
 	}
 }
 
-func TestDefaultModeDeniesRelativeFilesystemPathsOutsideWorkspace(t *testing.T) {
+func TestDefaultModeAllowsRelativeReadPathsOutsideWorkspace(t *testing.T) {
 	t.Parallel()
 
 	cases := []policy.ToolContext{
@@ -461,8 +477,8 @@ func TestDefaultModeDeniesRelativeFilesystemPathsOutsideWorkspace(t *testing.T) 
 		if err != nil {
 			t.Fatalf("%s DecideTool() error = %v", input.Tool.Name, err)
 		}
-		if decision.Action != policy.ActionDeny {
-			t.Fatalf("%s action = %q, want deny", input.Tool.Name, decision.Action)
+		if decision.Action != policy.ActionAllow {
+			t.Fatalf("%s action = %q, want allow (reason=%q)", input.Tool.Name, decision.Action, decision.Reason)
 		}
 	}
 }
