@@ -184,6 +184,7 @@ func TestApprovalReviewerRetriesInvalidJSONAssessment(t *testing.T) {
 	guardian.mu.Unlock()
 	if reviewSession == nil {
 		t.Fatal("review session not recorded")
+		return
 	}
 	reviewSession.mu.Lock()
 	reviewEvents := len(reviewSession.events)
@@ -218,6 +219,7 @@ func TestApprovalReviewerStopsAfterInvalidJSONAssessmentRetries(t *testing.T) {
 	guardian.mu.Unlock()
 	if reviewSession == nil {
 		t.Fatal("review session not recorded")
+		return
 	}
 	reviewSession.mu.Lock()
 	reviewEvents := len(reviewSession.events)
@@ -437,6 +439,7 @@ func TestApprovalReviewerConcurrentReviewsDoNotMutateParentSession(t *testing.T)
 	guardian.mu.Unlock()
 	if reviewSession == nil {
 		t.Fatal("review session not recorded")
+		return
 	}
 	reviewSession.mu.Lock()
 	reviewEvents := len(reviewSession.events)
