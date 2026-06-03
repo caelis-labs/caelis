@@ -213,6 +213,7 @@ func TestStreamFrameEventsProjectTaskClosedFrameWithoutText(t *testing.T) {
 	payload := events[0].Event.ToolResult
 	if payload == nil {
 		t.Fatalf("event = %#v, want tool result", events[0].Event)
+		return
 	}
 	if payload.CallID != "task-write-1" || payload.ToolName != "TASK" || payload.Status != ToolStatusCompleted {
 		t.Fatalf("payload = %+v, want completed TASK result", payload)

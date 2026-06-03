@@ -500,12 +500,14 @@ func TestRuntimePersistsInterruptedAssistantReplaySnapshot(t *testing.T) {
 	}
 	if replay == nil {
 		t.Fatalf("transcript events = %#v, want mirror replay snapshot", transcript)
+		return
 	}
 	if got := session.EventText(replay); got != "partial answer" {
 		t.Fatalf("mirror replay text = %q, want partial answer", got)
 	}
 	if replay.Message == nil {
 		t.Fatal("mirror replay message = nil, want durable assistant snapshot")
+		return
 	}
 	if got := replay.Message.TextContent(); got != "partial answer" {
 		t.Fatalf("mirror replay message text = %q, want partial answer", got)
@@ -1847,6 +1849,7 @@ func TestRuntimeRecoveryInterruptsOrphanedCommandTask(t *testing.T) {
 	}
 	if entry == nil {
 		t.Fatal("tasks.Get() returned nil entry")
+		return
 	}
 	if entry.Running {
 		t.Fatalf("entry.Running = %v, want false", entry.Running)

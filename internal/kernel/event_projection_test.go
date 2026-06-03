@@ -102,6 +102,7 @@ func TestCanonicalApprovalPayloadTableDriven(t *testing.T) {
 				t.Helper()
 				if payload == nil {
 					t.Fatal("canonicalApprovalPayload() = nil, want payload")
+					return
 				}
 				if payload.Reason != "host execution requires approval" {
 					t.Fatalf("payload.Reason = %q", payload.Reason)
