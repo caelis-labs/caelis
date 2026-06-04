@@ -99,6 +99,10 @@ func (m *Model) renderApprovalReviewHintText(text string) string {
 	if text == "" {
 		return ""
 	}
+	text = compactString(text, 0)
+	if m.width > 0 {
+		text = truncateTailDisplay(text, maxInt(1, m.fixedRowContentWidth()-2))
+	}
 	frame := strings.TrimSpace(ansi.Strip(m.spinner.View()))
 	if frame == "" {
 		frame = "⠋"

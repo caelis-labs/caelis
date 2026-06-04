@@ -3,6 +3,7 @@ package acputil
 import (
 	"strings"
 
+	"github.com/OnslaughtSnail/caelis/internal/displaypolicy"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/client"
 )
 
@@ -35,5 +36,18 @@ func ToolCallName(update client.ToolCallUpdate) string {
 			return strings.TrimSpace(name)
 		}
 	}
-	return "UNKNOWN"
+	if update.Kind != nil {
+		if name := displaypolicy.SemanticToolName("", *update.Kind); strings.TrimSpace(name) != "" {
+			return strings.TrimSpace(name)
+		}
+	}
+	if input, ok := update.RawInput.(map[string]any); ok {
+		if command, _ := input["command"].(string); strings.TrimSpace(command) != "" {
+			return "RUN_COMMAND"
+		}
+		if command, _ := input["cmd"].(string); strings.TrimSpace(command) != "" {
+			return "RUN_COMMAND"
+		}
+	}
+	return ""
 }

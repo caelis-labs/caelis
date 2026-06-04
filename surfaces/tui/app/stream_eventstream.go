@@ -60,8 +60,10 @@ func (m *Model) applyACPApprovalReviewHint(env eventstream.Envelope) tea.Cmd {
 	}
 	switch strings.ToLower(strings.TrimSpace(env.ApprovalReview.Status)) {
 	case "in_progress":
-		tool := firstNonEmpty(strings.TrimSpace(env.ApprovalReview.ToolName), "approval request")
-		msg := ApprovalReviewHintMsg{Text: "Reviewing approval request: " + tool, Pending: true}
+		msg := ApprovalReviewHintMsg{
+			Text:    approvalReviewPendingHint(env.ApprovalReview.ToolName, env.ApprovalReview.RawInput, 0),
+			Pending: true,
+		}
 		m.handleApprovalReviewHintMsg(msg)
 		return m.resumeRunningAnimationIfNeeded()
 	case "approved", "denied", "timed_out", "failed":

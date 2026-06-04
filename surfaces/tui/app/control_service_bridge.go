@@ -600,10 +600,8 @@ func approvalCommandPreview(raw map[string]any) string {
 	if len(raw) == 0 {
 		return ""
 	}
-	for _, key := range []string{"command", "cmd", "file_path", "path", "query", "url", "pattern", "text"} {
-		if value, ok := raw[key].(string); ok && strings.TrimSpace(value) != "" {
-			return compactString(strings.TrimSpace(key)+": "+value, 240)
-		}
+	if preview := approvalKnownInputPreview(raw); preview != "" {
+		return preview
 	}
 	data, err := json.Marshal(raw)
 	if err != nil {

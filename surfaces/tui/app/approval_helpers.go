@@ -2,6 +2,8 @@ package tuiapp
 
 import (
 	"strings"
+
+	"github.com/OnslaughtSnail/caelis/internal/displaypolicy"
 )
 
 const (
@@ -93,7 +95,62 @@ func approvalToolSummary(req *approvalPayload) (string, string) {
 	if req == nil {
 		return "", ""
 	}
-	return strings.TrimSpace(req.ToolName), approvalCommandPreview(req.RawInput)
+	return approvalToolDisplayLabel(req.ToolName), approvalCommandPreview(req.RawInput)
+}
+
+func approvalReviewPendingHint(toolName string, raw map[string]any, maxWidth int) string {
+	detail := firstNonEmpty(approvalKnownInputPreview(raw), approvalReviewToolName(toolName), approvalCommandPreview(raw), "approval request")
+	text := compactString("Reviewing approval request: "+detail, 0)
+	if maxWidth > 0 {
+		text = truncateTailDisplay(text, maxWidth)
+	}
+	return strings.TrimSpace(text)
+}
+
+func approvalKnownInputPreview(raw map[string]any) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	for _, key := range []string{"command", "cmd", "file_path", "path", "query", "url", "pattern", "text", "prompt", "input"} {
+		if value, ok := raw[key].(string); ok && strings.TrimSpace(value) != "" {
+			return compactString(strings.TrimSpace(key)+": "+value, 240)
+		}
+	}
+	return ""
+}
+
+func approvalReviewToolName(toolName string) string {
+	return approvalToolDisplayLabel(toolName)
+}
+
+func approvalToolDisplayLabel(toolName string) string {
+	semanticName := displaypolicy.SemanticToolName(toolName, toolName)
+	switch strings.ToUpper(strings.TrimSpace(semanticName)) {
+	case "":
+		return ""
+	case "UNKNOWN":
+		return ""
+	case "RUN_COMMAND":
+		return "Ran"
+	case "SPAWN":
+		return "Spawned"
+	case "TASK":
+		return "Task"
+	case "READ":
+		return "Read"
+	case "LIST":
+		return "List"
+	case "GLOB":
+		return "Glob"
+	case "SEARCH", "RG", "FIND":
+		return "Search"
+	case "WRITE":
+		return "Wrote"
+	case "PATCH":
+		return "Patched"
+	default:
+		return strings.TrimSpace(toolName)
+	}
 }
 
 func approvalActionLabel(req *approvalPayload) string {

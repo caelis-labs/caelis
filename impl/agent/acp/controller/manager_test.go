@@ -148,6 +148,9 @@ func TestTranslateApprovalRequestPreservesToolRawInput(t *testing.T) {
 	if req.ToolCall.RawInput["command"] != "pwd" {
 		t.Fatalf("ToolCall.RawInput[command] = %#v", req.ToolCall.RawInput["command"])
 	}
+	if req.ToolCall.Name != "RUN_COMMAND" {
+		t.Fatalf("ToolCall.Name = %q, want RUN_COMMAND", req.ToolCall.Name)
+	}
 	if req.ToolCall.RawInput["workdir"] != "/tmp/project" {
 		t.Fatalf("ToolCall.RawInput[workdir] = %#v", req.ToolCall.RawInput["workdir"])
 	}

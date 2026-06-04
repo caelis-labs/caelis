@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/OnslaughtSnail/caelis/ports/gateway"
@@ -455,6 +456,44 @@ func TestAutomaticApprovalReviewUsesHintAndInlineTranscriptLocation(t *testing.T
 		if strings.Contains(plain, forbidden) {
 			t.Fatalf("rendered rows = %q, should not contain %q", plain, forbidden)
 		}
+	}
+}
+
+func TestAutomaticApprovalReviewHintUsesRawInputAndFitsHintRow(t *testing.T) {
+	model := newGatewayEventTestModel()
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 54, Height: 24})
+	model = updated.(*Model)
+
+	updated, _ = model.Update(gatewayEventMsg(gateway.EventEnvelope{
+		Event: gateway.Event{
+			Kind:       gateway.EventKindApprovalReview,
+			SessionRef: session.SessionRef{SessionID: "root-session"},
+			Origin:     &gateway.EventOrigin{Scope: gateway.EventScopeMain, ScopeID: "root-session"},
+			ApprovalPayload: &gateway.ApprovalPayload{
+				ToolCallID:   "perm-raw-input",
+				ToolName:     "UNKNOWN",
+				ReviewStatus: gateway.ApprovalReviewStatusInProgress,
+				RawInput: map[string]any{
+					"command": "for i in $(seq 1 30); do echo $i; sleep 1; done",
+				},
+				DecisionSource: "auto-review",
+			},
+		}}))
+
+	model = updated.(*Model)
+	hint := ansi.Strip(model.buildHintText())
+	if !strings.Contains(hint, "command: for i") {
+		t.Fatalf("approval hint = %q, want command detail", hint)
+	}
+	if strings.Contains(hint, "UNKNOWN") {
+		t.Fatalf("approval hint = %q, should not expose UNKNOWN", hint)
+	}
+	row := model.hintRowText()
+	if strings.ContainsAny(row, "\r\n") {
+		t.Fatalf("hint row = %q, should stay single-line", row)
+	}
+	if width := displayColumns(row); width != model.fixedRowContentWidth() {
+		t.Fatalf("hint row width = %d, want fixed content width %d: %q", width, model.fixedRowContentWidth(), row)
 	}
 }
 
