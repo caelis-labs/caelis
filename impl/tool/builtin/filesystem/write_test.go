@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/OnslaughtSnail/caelis/ports/tool"
@@ -50,6 +51,34 @@ func TestWriteToolDoesNotCreateParentsOutsideWorkspace(t *testing.T) {
 	}
 	if _, statErr := os.Stat(filepath.Dir(outside)); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("outside parent stat error = %v, want not exist", statErr)
+	}
+}
+
+func TestWriteToolMissingTargetWithRevisionReportsCreationGuard(t *testing.T) {
+	dir := t.TempDir()
+	writeTool, err := NewWrite(fakeRuntime{defaultFS: hostFileSystem{cwd: dir}})
+	if err != nil {
+		t.Fatalf("NewWrite() error = %v", err)
+	}
+
+	err = callWrite(writeTool, map[string]any{
+		"path":        "new.txt",
+		"content":     "hello\n",
+		"if_revision": "sha256:abcdef",
+	})
+	var toolErr *tool.ToolError
+	if !errors.As(err, &toolErr) {
+		t.Fatalf("WRITE error = %T %v, want ToolError", err, err)
+	}
+	if toolErr.Code != tool.ErrorCodeNotFound {
+		t.Fatalf("WRITE error code = %s, want %s: %v", toolErr.Code, tool.ErrorCodeNotFound, err)
+	}
+	text := err.Error()
+	if !strings.Contains(text, "target does not exist") || !strings.Contains(text, "omit if_revision") {
+		t.Fatalf("WRITE error = %q, want missing-target creation guard guidance", text)
+	}
+	if strings.Contains(text, "changed since it was read") || strings.Contains(text, filepath.Join(dir, "new.txt")) {
+		t.Fatalf("WRITE error used stale-read wording or leaked path: %q", text)
 	}
 }
 

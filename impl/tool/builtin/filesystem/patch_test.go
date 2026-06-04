@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/OnslaughtSnail/caelis/ports/tool"
@@ -276,6 +277,30 @@ func TestPatchToolRejectsDuplicateMatchesWithoutReplaceAll(t *testing.T) {
 	requireToolErrorCode(t, err, tool.ErrorCodeTooManyMatches)
 	if got, want := readTestFile(t, path), "x + x\n"; got != want {
 		t.Fatalf("content changed after failed PATCH: %q", got)
+	}
+}
+
+func TestPatchToolMatchErrorsDoNotIncludeTargetPath(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "duplicates.txt")
+	if err := os.WriteFile(path, []byte("x + x + x\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	patchTool := newTestPatchTool(t, dir)
+
+	err := callPatch(patchTool, map[string]any{
+		"path": "duplicates.txt",
+		"edits": []map[string]any{
+			{"old": "x", "new": "y"},
+		},
+	})
+	requireToolErrorCode(t, err, tool.ErrorCodeTooManyMatches)
+	text := err.Error()
+	if !strings.Contains(text, "PATCH edit 0 requires exact single match, found 3") {
+		t.Fatalf("PATCH error = %q, want concise mismatch detail", text)
+	}
+	if strings.Contains(text, path) || strings.Contains(text, "duplicates.txt") {
+		t.Fatalf("PATCH mismatch error leaked target path: %q", text)
 	}
 }
 

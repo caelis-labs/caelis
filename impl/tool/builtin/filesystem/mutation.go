@@ -80,14 +80,14 @@ func planWriteMutation(fsys sandbox.FileSystem, args map[string]any) (fileMutati
 		before = string(raw)
 	case errors.Is(statErr, os.ErrNotExist):
 		if ifRevision != "" {
-			return fileMutationPlan{}, staleRevisionError(target)
+			return fileMutationPlan{}, missingWriteRevisionTargetError()
 		}
 		created = true
 	default:
 		return fileMutationPlan{}, statErr
 	}
 	if !revisionsMatchFile(ifRevision, before, info) {
-		return fileMutationPlan{}, staleRevisionError(target)
+		return fileMutationPlan{}, staleRevisionError()
 	}
 
 	return fileMutationPlan{
@@ -132,10 +132,7 @@ func planPatchMutation(fsys sandbox.FileSystem, args map[string]any) (fileMutati
 	}
 
 	if !fileExists {
-		if ifRevision != "" {
-			return fileMutationPlan{}, staleRevisionError(target)
-		}
-		err := tool.NewError(tool.ErrorCodeNotFound, fmt.Sprintf("tool: PATCH target %q does not exist; use WRITE to create files", target))
+		err := tool.NewError(tool.ErrorCodeNotFound, "tool: PATCH target does not exist; use WRITE to create files")
 		err.Retryable = true
 		return fileMutationPlan{}, err
 	}
@@ -146,10 +143,10 @@ func planPatchMutation(fsys sandbox.FileSystem, args map[string]any) (fileMutati
 	}
 	content := string(contentRaw)
 	if !revisionsMatchFile(ifRevision, content, fileInfo) {
-		return fileMutationPlan{}, staleRevisionError(target)
+		return fileMutationPlan{}, staleRevisionError()
 	}
 
-	replacements, err := collectPatchReplacements(target, content, edits)
+	replacements, err := collectPatchReplacements(content, edits)
 	if err != nil {
 		return fileMutationPlan{}, err
 	}
@@ -244,22 +241,22 @@ func requiredPatchEditString(args map[string]any, editIndex int, key string) (st
 	return value, nil
 }
 
-func collectPatchReplacements(path string, content string, edits []patchEdit) ([]patchReplacement, error) {
+func collectPatchReplacements(content string, edits []patchEdit) ([]patchReplacement, error) {
 	replacements := make([]patchReplacement, 0, len(edits))
 	for idx, edit := range edits {
 		matches := patchMatchRanges(content, edit.old)
 		count := len(matches)
 		if count == 0 {
-			err := tool.NewError(tool.ErrorCodeOldTextNotFound, fmt.Sprintf("tool: PATCH target %q edit %d did not contain an exact match for old", path, idx))
+			err := tool.NewError(tool.ErrorCodeOldTextNotFound, fmt.Sprintf("tool: PATCH edit %d did not contain an exact match for old", idx))
 			err.Hint = "READ the file again and retry PATCH with the current text."
 			err.Retryable = true
 			return nil, err
 		}
 		if edit.expectedProvided && count != edit.expected {
-			return nil, replacementCountError(path, idx, edit.expected, count)
+			return nil, replacementCountError(idx, edit.expected, count)
 		}
 		if !edit.replaceAll && count != 1 {
-			err := tool.NewError(tool.ErrorCodeTooManyMatches, fmt.Sprintf("tool: PATCH target %q edit %d requires exact single match, found %d", path, idx, count))
+			err := tool.NewError(tool.ErrorCodeTooManyMatches, fmt.Sprintf("tool: PATCH edit %d requires exact single match, found %d", idx, count))
 			err.Hint = "Use a more specific old text or set replace_all with expected_replacements."
 			err.Retryable = true
 			return nil, err
@@ -280,7 +277,7 @@ func collectPatchReplacements(path string, content string, edits []patchEdit) ([
 			}
 		}
 	}
-	if err := validatePatchReplacementRanges(path, replacements); err != nil {
+	if err := validatePatchReplacementRanges(replacements); err != nil {
 		return nil, err
 	}
 	return replacements, nil
@@ -415,7 +412,7 @@ func dominantPatchLineEnding(text string) string {
 	return "\r"
 }
 
-func validatePatchReplacementRanges(path string, replacements []patchReplacement) error {
+func validatePatchReplacementRanges(replacements []patchReplacement) error {
 	sort.Slice(replacements, func(i, j int) bool {
 		if replacements[i].start == replacements[j].start {
 			return replacements[i].end < replacements[j].end
@@ -426,7 +423,7 @@ func validatePatchReplacementRanges(path string, replacements []patchReplacement
 		prev := replacements[idx-1]
 		next := replacements[idx]
 		if next.start < prev.end {
-			err := tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("tool: PATCH target %q has overlapping edits %d and %d", path, prev.editIndex, next.editIndex))
+			err := tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("tool: PATCH has overlapping edits %d and %d", prev.editIndex, next.editIndex))
 			err.Hint = "Use non-overlapping old text in each edit."
 			err.Retryable = true
 			return err
@@ -449,8 +446,8 @@ func applyPatchReplacements(content string, replacements []patchReplacement) str
 	return out
 }
 
-func replacementCountError(path string, editIndex int, expected int, actual int) error {
-	err := tool.NewError(tool.ErrorCodeUnexpectedMatchCount, fmt.Sprintf("tool: PATCH target %q edit %d expected %d replacement(s), found %d", path, editIndex, expected, actual))
+func replacementCountError(editIndex int, expected int, actual int) error {
+	err := tool.NewError(tool.ErrorCodeUnexpectedMatchCount, fmt.Sprintf("tool: PATCH edit %d expected %d replacement(s), found %d", editIndex, expected, actual))
 	err.Hint = "READ the file again and retry PATCH with the current expected_replacements value."
 	err.Retryable = true
 	return err

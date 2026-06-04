@@ -58,9 +58,16 @@ func revisionsMatchFile(expected string, actualContent string, info os.FileInfo)
 	return revisionsMatch(expected, textRevision(actualContent))
 }
 
-func staleRevisionError(path string) error {
-	err := tool.NewError(tool.ErrorCodeStaleRevision, "tool: target "+path+" changed since it was read")
+func staleRevisionError() error {
+	err := tool.NewError(tool.ErrorCodeStaleRevision, "tool: target changed since it was read")
 	err.Hint = "READ the file again and retry with the current revision."
+	err.Retryable = true
+	return err
+}
+
+func missingWriteRevisionTargetError() error {
+	err := tool.NewError(tool.ErrorCodeNotFound, "tool: target does not exist; omit if_revision to create it")
+	err.Hint = "WRITE new files without if_revision, or READ an existing file and retry with its current revision."
 	err.Retryable = true
 	return err
 }
