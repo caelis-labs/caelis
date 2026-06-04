@@ -417,17 +417,18 @@ type Model struct {
 	runningTickerStyles       []lipgloss.Style
 	runningTickerThemeKey     string
 
-	statusModel           string
-	statusContext         string
-	statusModeLabel       string
-	statusView            StatusViewModel
-	statusRefreshInFlight bool
-	sandboxProgress       *sandboxProgressState
-	sandboxProgressBar    progress.Model
-	approvalReviewHint    string
-	hint                  string
-	hintEntries           []hintEntry
-	nextHintID            uint64
+	statusModel            string
+	statusContext          string
+	statusModeLabel        string
+	statusView             StatusViewModel
+	stableWorkspaceDisplay string
+	statusRefreshInFlight  bool
+	sandboxProgress        *sandboxProgressState
+	sandboxProgressBar     progress.Model
+	approvalReviewHint     string
+	hint                   string
+	hintEntries            []hintEntry
+	nextHintID             uint64
 
 	pendingInputAt            time.Time
 	inputLatencyWindow        []time.Duration

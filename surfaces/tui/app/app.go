@@ -122,6 +122,9 @@ func NewModel(cfg Config) *Model {
 	if cfg.ToggleMode == nil {
 		m.keys.Mode.SetEnabled(false)
 	}
+	if workspace := strings.TrimSpace(m.cfg.Workspace); workspace != "" {
+		m.setWorkspaceDisplay(workspace)
+	}
 
 	if cfg.RefreshStatus != nil {
 		m.observeControlStatusCall()
@@ -131,13 +134,15 @@ func NewModel(cfg Config) *Model {
 	}
 	if cfg.RefreshStatusView != nil {
 		m.statusView = cfg.RefreshStatusView()
+		m.normalizeStatusViewWorkspace()
 	}
 	m.refreshModeLabelFromConfig()
 	if cfg.RefreshWorkspace != nil {
 		if workspace := strings.TrimSpace(cfg.RefreshWorkspace()); workspace != "" {
-			m.cfg.Workspace = workspace
+			m.setWorkspaceDisplay(workspace)
 		}
 	}
+	m.normalizeStatusViewWorkspace()
 	m.setCommands(cfg.Commands)
 	m.syncTextareaChrome()
 	return m

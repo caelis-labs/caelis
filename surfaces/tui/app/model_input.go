@@ -499,7 +499,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if m.cfg.RefreshWorkspace != nil {
 			if workspace := strings.TrimSpace(m.cfg.RefreshWorkspace()); workspace != "" {
-				m.cfg.Workspace = workspace
+				m.setWorkspaceDisplay(workspace)
 			}
 		}
 		if m.cfg.RefreshStatus != nil {
@@ -509,6 +509,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if m.cfg.RefreshStatusView != nil {
 			m.statusView = m.cfg.RefreshStatusView()
+			m.normalizeStatusViewWorkspace()
 		}
 		m.refreshModeLabelFromConfig()
 		return m, m.showHint(hint, hintOptions{

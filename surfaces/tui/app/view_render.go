@@ -22,14 +22,35 @@ import (
 // ---------------------------------------------------------------------------
 
 func (m *Model) windowTitle() string {
-	title := "CAELIS"
-	if alias := strings.TrimSpace(m.statusModel); alias != "" {
-		title += " • " + alias
+	title := workspaceWindowTitle(m.headerWorkspaceText())
+	if title == "" {
+		title = "CAELIS"
 	}
 	if m.running {
-		title += " • running"
+		if frame := strings.TrimSpace(ansi.Strip(m.spinner.View())); frame != "" {
+			return frame + " " + title
+		}
+		return "loading " + title
 	}
 	return title
+}
+
+func workspaceWindowTitle(workspace string) string {
+	workspace = strings.TrimSpace(workspace)
+	if workspace == "" {
+		return ""
+	}
+	if path, _, _, ok := parseWorkspaceStatusDisplay(workspace); ok {
+		workspace = strings.TrimSpace(path)
+	}
+	workspace = strings.TrimRight(workspace, `/\`)
+	if workspace == "" {
+		return ""
+	}
+	if idx := strings.LastIndexAny(workspace, `/\`); idx >= 0 && idx < len(workspace)-1 {
+		return strings.TrimSpace(workspace[idx+1:])
+	}
+	return workspace
 }
 
 func (m *Model) buildHintText() string {

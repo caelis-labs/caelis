@@ -422,8 +422,7 @@ func (m *Model) handleSetRunningMsg(msg SetRunningMsg) tea.Model {
 func (m *Model) handleSetStatusMsg(msg SetStatusMsg) tea.Model {
 	welcomeMayChange := false
 	if workspace := strings.TrimSpace(msg.Workspace); workspace != "" {
-		if workspace != m.cfg.Workspace {
-			m.cfg.Workspace = workspace
+		if _, changed := m.setWorkspaceDisplay(workspace); changed {
 			welcomeMayChange = true
 		}
 	}
@@ -435,6 +434,9 @@ func (m *Model) handleSetStatusMsg(msg SetStatusMsg) tea.Model {
 	m.statusContext = strings.TrimSpace(msg.Context)
 	m.statusModeLabel = strings.TrimSpace(msg.ModeLabel)
 	m.statusView = msg.Status
+	if m.normalizeStatusViewWorkspace() {
+		welcomeMayChange = true
+	}
 	if welcomeMayChange && m.syncWelcomeCardBlock() {
 		m.syncViewportContent()
 	}
@@ -446,8 +448,7 @@ func (m *Model) handleStatusRefreshResultMsg(msg StatusRefreshResultMsg) tea.Mod
 	welcomeMayChange := false
 	if msg.HasWorkspace {
 		if workspace := strings.TrimSpace(msg.Workspace); workspace != "" {
-			if workspace != m.cfg.Workspace {
-				m.cfg.Workspace = workspace
+			if _, changed := m.setWorkspaceDisplay(workspace); changed {
 				welcomeMayChange = true
 			}
 		}
@@ -462,6 +463,9 @@ func (m *Model) handleStatusRefreshResultMsg(msg StatusRefreshResultMsg) tea.Mod
 	}
 	if msg.HasView {
 		m.statusView = msg.Status
+		if m.normalizeStatusViewWorkspace() {
+			welcomeMayChange = true
+		}
 	}
 	if msg.HasModeLabel {
 		m.statusModeLabel = strings.TrimSpace(msg.ModeLabel)

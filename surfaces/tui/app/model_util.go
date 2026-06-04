@@ -268,6 +268,93 @@ func (m *Model) renderWorkspacePath() string {
 	return strings.TrimSpace(m.cfg.Workspace)
 }
 
+func (m *Model) setWorkspaceDisplay(workspace string) (string, bool) {
+	workspace = strings.TrimSpace(workspace)
+	if m == nil || workspace == "" {
+		return workspace, false
+	}
+	previous := firstNonEmpty(strings.TrimSpace(m.stableWorkspaceDisplay), strings.TrimSpace(m.cfg.Workspace))
+	next := stabilizeWorkspaceDisplay(previous, workspace)
+	if next == "" {
+		return "", false
+	}
+	changed := next != strings.TrimSpace(m.cfg.Workspace)
+	m.cfg.Workspace = next
+	m.stableWorkspaceDisplay = next
+	return next, changed
+}
+
+func (m *Model) normalizeStatusViewWorkspace() bool {
+	if m == nil {
+		return false
+	}
+	workspace := strings.TrimSpace(m.statusView.Workspace)
+	if workspace == "" {
+		return false
+	}
+	next, cfgChanged := m.setWorkspaceDisplay(workspace)
+	viewChanged := next != workspace
+	m.statusView.Workspace = next
+	return cfgChanged || viewChanged
+}
+
+func stabilizeWorkspaceDisplay(previous string, next string) string {
+	previous = strings.TrimSpace(previous)
+	next = strings.TrimSpace(next)
+	if next == "" {
+		return ""
+	}
+	if _, branch, _, ok := parseWorkspaceStatusDisplay(next); ok && strings.TrimSpace(branch) != "" {
+		return next
+	}
+	if prevPath, _, _, ok := parseWorkspaceStatusDisplay(previous); ok && sameWorkspaceDisplayPath(prevPath, next) {
+		return previous
+	}
+	return next
+}
+
+func sameWorkspaceDisplayPath(left string, right string) bool {
+	leftKey := workspacePathCompareKey(left)
+	rightKey := workspacePathCompareKey(right)
+	return leftKey != "" && rightKey != "" && leftKey == rightKey
+}
+
+func workspacePathCompareKey(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	if strings.HasPrefix(path, "~") {
+		if home, err := os.UserHomeDir(); err == nil {
+			home = strings.TrimRight(strings.TrimSpace(home), `/\`)
+			switch {
+			case path == "~":
+				path = home
+			case strings.HasPrefix(path, "~/") || strings.HasPrefix(path, `~\`):
+				path = home + path[1:]
+			}
+		}
+	}
+	windowsPath := looksWindowsPath(path)
+	path = strings.ReplaceAll(path, "\\", "/")
+	path = strings.TrimRight(path, "/")
+	if path == "" {
+		return ""
+	}
+	if windowsPath {
+		path = strings.ToLower(path)
+	}
+	return path
+}
+
+func looksWindowsPath(path string) bool {
+	if strings.Contains(path, `\`) {
+		return true
+	}
+	return len(path) >= 2 && path[1] == ':' &&
+		((path[0] >= 'a' && path[0] <= 'z') || (path[0] >= 'A' && path[0] <= 'Z'))
+}
+
 func (m *Model) renderInlineMarkdown(text string, base lipgloss.Style) string {
 	m.observeInlineMarkdownRender()
 	return renderInlineMarkdown(text, base, m.theme)
