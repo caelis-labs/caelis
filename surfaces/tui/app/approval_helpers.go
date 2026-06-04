@@ -2,11 +2,43 @@ package tuiapp
 
 import (
 	"strings"
-
-	"github.com/OnslaughtSnail/caelis/kernel"
 )
 
-func approvalToPromptRequest(req *kernel.ApprovalPayload, response chan PromptResponse) PromptRequestMsg {
+const (
+	approvalStatusApproved = "approved"
+	approvalStatusRejected = "rejected"
+	approvalStatusSelected = "selected"
+
+	approvalReviewStatusApproved = "approved"
+	approvalReviewStatusDenied   = "denied"
+	approvalReviewStatusTimedOut = "timed_out"
+	approvalReviewStatusFailed   = "failed"
+)
+
+type approvalPayload struct {
+	ToolCallID         string
+	ToolName           string
+	RawInput           map[string]any
+	Reason             string
+	Justification      string
+	SandboxPermissions string
+	Status             string
+	Options            []approvalOption
+	ReviewID           string
+	ReviewStatus       string
+	ReviewText         string
+	Risk               string
+	Authorization      string
+	DecisionSource     string
+}
+
+type approvalOption struct {
+	ID   string
+	Name string
+	Kind string
+}
+
+func approvalToPromptRequest(req *approvalPayload, response chan PromptResponse) PromptRequestMsg {
 	toolName, command := approvalToolSummary(req)
 	msg := PromptRequestMsg{
 		Title:         "Approval Required",
@@ -57,14 +89,14 @@ func approvalToPromptRequest(req *kernel.ApprovalPayload, response chan PromptRe
 	return msg
 }
 
-func approvalToolSummary(req *kernel.ApprovalPayload) (string, string) {
+func approvalToolSummary(req *approvalPayload) (string, string) {
 	if req == nil {
 		return "", ""
 	}
 	return strings.TrimSpace(req.ToolName), approvalCommandPreview(req.RawInput)
 }
 
-func approvalActionLabel(req *kernel.ApprovalPayload) string {
+func approvalActionLabel(req *approvalPayload) string {
 	if req == nil {
 		return ""
 	}
@@ -85,7 +117,7 @@ func approvalActionLabel(req *kernel.ApprovalPayload) string {
 	}
 }
 
-func approvalRiskLabel(req *kernel.ApprovalPayload) string {
+func approvalRiskLabel(req *approvalPayload) string {
 	if req == nil {
 		return ""
 	}

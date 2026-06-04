@@ -53,16 +53,17 @@ func TestRegressionToolCallFrame120x32Golden(t *testing.T) {
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 120, Height: 32})
 	m := updated.(*Model)
 
-	updated, _ = m.Update(kernel.EventEnvelope{Event: kernel.Event{
+	updated, _ = m.Update(gatewayEventMsg(kernel.EventEnvelope{Event: kernel.Event{
 		SessionRef: session.SessionRef{SessionID: "sess-regression"},
 		Kind:       kernel.EventKindUserMessage,
 		Narrative: &kernel.NarrativePayload{
 			Role: kernel.NarrativeRoleUser,
 			Text: "run the smoke check",
 		},
-	}})
+	}}))
+
 	m = updated.(*Model)
-	updated, _ = m.Update(kernel.EventEnvelope{Event: kernel.Event{
+	updated, _ = m.Update(gatewayEventMsg(kernel.EventEnvelope{Event: kernel.Event{
 		SessionRef: session.SessionRef{SessionID: "sess-regression"},
 		Kind:       kernel.EventKindToolCall,
 		ToolCall: &kernel.ToolCallPayload{
@@ -79,9 +80,10 @@ func TestRegressionToolCallFrame120x32Golden(t *testing.T) {
 				Content: "ok\n",
 			}},
 		},
-	}})
+	}}))
+
 	m = updated.(*Model)
-	updated, _ = m.Update(kernel.EventEnvelope{Event: kernel.Event{
+	updated, _ = m.Update(gatewayEventMsg(kernel.EventEnvelope{Event: kernel.Event{
 		SessionRef: session.SessionRef{SessionID: "sess-regression"},
 		Kind:       kernel.EventKindToolResult,
 		ToolResult: &kernel.ToolResultPayload{
@@ -101,16 +103,18 @@ func TestRegressionToolCallFrame120x32Golden(t *testing.T) {
 				Content: "ok\nPASS\n",
 			}},
 		},
-	}})
+	}}))
+
 	m = updated.(*Model)
-	updated, _ = m.Update(kernel.EventEnvelope{Event: kernel.Event{
+	updated, _ = m.Update(gatewayEventMsg(kernel.EventEnvelope{Event: kernel.Event{
 		SessionRef: session.SessionRef{SessionID: "sess-regression"},
 		Kind:       kernel.EventKindAssistantMessage,
 		Narrative: &kernel.NarrativePayload{
 			Role: kernel.NarrativeRoleAssistant,
 			Text: "Smoke check passed.",
 		},
-	}})
+	}}))
+
 	m = updated.(*Model)
 
 	frame := evalharness.NormalizeFrame(m.View().Content)

@@ -80,17 +80,18 @@ func TestRegressionToolCallWithTerminalOutputGolden(t *testing.T) {
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	m = updated.(*Model)
 
-	updated, _ = m.Update(kernel.EventEnvelope{Event: kernel.Event{
+	updated, _ = m.Update(gatewayEventMsg(kernel.EventEnvelope{Event: kernel.Event{
 		SessionRef: session.SessionRef{SessionID: "sess-terminal"},
 		Kind:       kernel.EventKindUserMessage,
 		Narrative: &kernel.NarrativePayload{
 			Role: kernel.NarrativeRoleUser,
 			Text: "run ls",
 		},
-	}})
+	}}))
+
 	m = updated.(*Model)
 
-	updated, _ = m.Update(kernel.EventEnvelope{Event: kernel.Event{
+	updated, _ = m.Update(gatewayEventMsg(kernel.EventEnvelope{Event: kernel.Event{
 		SessionRef: session.SessionRef{SessionID: "sess-terminal"},
 		Kind:       kernel.EventKindToolCall,
 		ToolCall: &kernel.ToolCallPayload{
@@ -105,10 +106,11 @@ func TestRegressionToolCallWithTerminalOutputGolden(t *testing.T) {
 				Content: "total 0\ndrwxr-xr-x  2 user user  40 Jan  1 00:00 .\n",
 			}},
 		},
-	}})
+	}}))
+
 	m = updated.(*Model)
 
-	updated, _ = m.Update(kernel.EventEnvelope{Event: kernel.Event{
+	updated, _ = m.Update(gatewayEventMsg(kernel.EventEnvelope{Event: kernel.Event{
 		SessionRef: session.SessionRef{SessionID: "sess-terminal"},
 		Kind:       kernel.EventKindToolResult,
 		ToolResult: &kernel.ToolResultPayload{
@@ -124,17 +126,19 @@ func TestRegressionToolCallWithTerminalOutputGolden(t *testing.T) {
 				Content: "total 0\ndrwxr-xr-x  2 user user  40 Jan  1 00:00 .\ntotal 4\ndrwxr-xr-x  3 user user  60 Jan  1 00:00 ..\n",
 			}},
 		},
-	}})
+	}}))
+
 	m = updated.(*Model)
 
-	updated, _ = m.Update(kernel.EventEnvelope{Event: kernel.Event{
+	updated, _ = m.Update(gatewayEventMsg(kernel.EventEnvelope{Event: kernel.Event{
 		SessionRef: session.SessionRef{SessionID: "sess-terminal"},
 		Kind:       kernel.EventKindAssistantMessage,
 		Narrative: &kernel.NarrativePayload{
 			Role: kernel.NarrativeRoleAssistant,
 			Text: "Listed directory contents.",
 		},
-	}})
+	}}))
+
 	m = updated.(*Model)
 
 	frame := evalharness.NormalizeFrame(m.View().Content)
@@ -231,17 +235,18 @@ func TestRegressionApprovalModalGolden(t *testing.T) {
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	m = updated.(*Model)
 
-	updated, _ = m.Update(kernel.EventEnvelope{Event: kernel.Event{
+	updated, _ = m.Update(gatewayEventMsg(kernel.EventEnvelope{Event: kernel.Event{
 		SessionRef: session.SessionRef{SessionID: "sess-approval"},
 		Kind:       kernel.EventKindUserMessage,
 		Narrative: &kernel.NarrativePayload{
 			Role: kernel.NarrativeRoleUser,
 			Text: "delete temp files",
 		},
-	}})
+	}}))
+
 	m = updated.(*Model)
 
-	updated, _ = m.Update(kernel.EventEnvelope{Event: kernel.Event{
+	updated, _ = m.Update(gatewayEventMsg(kernel.EventEnvelope{Event: kernel.Event{
 		SessionRef: session.SessionRef{SessionID: "sess-approval"},
 		Kind:       kernel.EventKindToolCall,
 		ToolCall: &kernel.ToolCallPayload{
@@ -252,10 +257,11 @@ func TestRegressionApprovalModalGolden(t *testing.T) {
 			Status:    kernel.ToolStatusWaitingApproval,
 			RawInput:  map[string]any{"command": "rm -rf /tmp/demo"},
 		},
-	}})
+	}}))
+
 	m = updated.(*Model)
 
-	updated, _ = m.Update(kernel.EventEnvelope{Event: kernel.Event{
+	updated, _ = m.Update(gatewayEventMsg(kernel.EventEnvelope{Event: kernel.Event{
 		SessionRef: session.SessionRef{SessionID: "sess-approval"},
 		Kind:       kernel.EventKindApprovalRequested,
 		ApprovalPayload: &kernel.ApprovalPayload{
@@ -264,7 +270,8 @@ func TestRegressionApprovalModalGolden(t *testing.T) {
 			Status:     kernel.ApprovalStatusPending,
 			RawInput:   map[string]any{"command": "rm -rf /tmp/demo"},
 		},
-	}})
+	}}))
+
 	m = updated.(*Model)
 
 	frame := evalharness.NormalizeFrame(m.View().Content)

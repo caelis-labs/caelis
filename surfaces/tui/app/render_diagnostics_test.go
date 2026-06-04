@@ -78,9 +78,9 @@ func TestRenderDiagnosticsCountsMarkdownGlamourAndStatusCallbacks(t *testing.T) 
 	m.viewport.SetWidth(80)
 	m.viewport.SetHeight(20)
 
-	statusBefore := m.diag.DriverStatusCalls
+	statusBefore := m.diag.ControlStatusCalls
 	m.handleStatusTickMsg()
-	if got := m.diag.DriverStatusCalls; got <= statusBefore {
+	if got := m.diag.ControlStatusCalls; got <= statusBefore {
 		t.Fatalf("driver status callback calls = %d, want > %d", got, statusBefore)
 	}
 

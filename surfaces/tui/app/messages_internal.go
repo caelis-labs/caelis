@@ -5,11 +5,11 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/OnslaughtSnail/caelis/surfaces/tui/driver"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/control"
 )
 
 type bootstrapMsg struct {
-	status tuidriver.StatusSnapshot
+	status control.StatusSnapshot
 	err    error
 }
 

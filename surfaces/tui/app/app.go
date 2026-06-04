@@ -124,7 +124,7 @@ func NewModel(cfg Config) *Model {
 	}
 
 	if cfg.RefreshStatus != nil {
-		m.observeDriverStatusCall()
+		m.observeControlStatusCall()
 		modelText, contextText := cfg.RefreshStatus()
 		m.statusModel = normalizeStatusModel(modelText)
 		m.statusContext = strings.TrimSpace(contextText)

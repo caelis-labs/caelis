@@ -13,7 +13,9 @@ import (
 	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/surfaces/tui/driver"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/control"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
 func TestProgramSenderDropsAfterClose(t *testing.T) {
@@ -30,6 +32,95 @@ func TestProgramSenderDropsAfterClose(t *testing.T) {
 	if got := sender.DroppedAfterClose(); got != 1 {
 		t.Fatalf("DroppedAfterClose = %d, want 1", got)
 	}
+}
+
+func requireACPEnvelope(t *testing.T, msg tea.Msg) eventstream.Envelope {
+	t.Helper()
+	env, ok := msg.(eventstream.Envelope)
+	if !ok {
+		t.Fatalf("msg = %#v, want eventstream.Envelope", msg)
+	}
+	return env
+}
+
+func requireACPText(t *testing.T, msg tea.Msg, updateType string) string {
+	t.Helper()
+	env := requireACPEnvelope(t, msg)
+	if env.Kind != eventstream.KindSessionUpdate {
+		t.Fatalf("kind = %q, want %q", env.Kind, eventstream.KindSessionUpdate)
+	}
+	chunk, ok := env.Update.(schema.ContentChunk)
+	if !ok {
+		t.Fatalf("update = %#v, want ContentChunk", env.Update)
+	}
+	if got := strings.TrimSpace(chunk.SessionUpdate); got != updateType {
+		t.Fatalf("sessionUpdate = %q, want %q", got, updateType)
+	}
+	return protocolTextContent(chunk.Content)
+}
+
+func requireACPToolCall(t *testing.T, msg tea.Msg) schema.ToolCall {
+	t.Helper()
+	env := requireACPEnvelope(t, msg)
+	if env.Kind != eventstream.KindSessionUpdate {
+		t.Fatalf("kind = %q, want %q", env.Kind, eventstream.KindSessionUpdate)
+	}
+	call, ok := env.Update.(schema.ToolCall)
+	if !ok {
+		t.Fatalf("update = %#v, want ToolCall", env.Update)
+	}
+	return call
+}
+
+func transcriptEventsFromMsg(msg tea.Msg) []TranscriptEvent {
+	switch typed := msg.(type) {
+	case TranscriptEventsMsg:
+		return typed.Events
+	case eventstream.Envelope:
+		return ProjectACPEventToTranscriptEvents(typed)
+	case kernel.EventEnvelope:
+		return ProjectGatewayEventToTranscriptEvents(typed.Event)
+	default:
+		return nil
+	}
+}
+
+func acpUpdateTerminalText(update schema.Update) string {
+	var content []schema.ToolCallContent
+	switch typed := update.(type) {
+	case schema.ToolCall:
+		content = typed.Content
+	case schema.ToolCallUpdate:
+		content = typed.Content
+	default:
+		return ""
+	}
+	for _, item := range content {
+		if !strings.EqualFold(strings.TrimSpace(item.Type), "terminal") {
+			continue
+		}
+		if text := protocolTextContent(item.Content); text != "" {
+			return text
+		}
+	}
+	return ""
+}
+
+func projectKernelTestEvents(events []kernel.EventEnvelope) []eventstream.Envelope {
+	out := make([]eventstream.Envelope, 0, len(events))
+	for _, env := range events {
+		out = append(out, kernel.ProjectACPEventEnvelope(env)...)
+	}
+	return out
+}
+
+func requireProjectedACPEvent(t *testing.T, env kernel.EventEnvelope) eventstream.Envelope {
+	t.Helper()
+	events := kernel.ProjectACPEventEnvelope(env)
+	if len(events) == 0 {
+		t.Fatalf("ProjectACPEventEnvelope(%#v) returned no events", env)
+	}
+	return events[0]
 }
 
 func TestProgramSenderCancelActiveRunsCancelsRunContext(t *testing.T) {
@@ -74,8 +165,8 @@ func TestDiagnosticsReportsProgramSenderDropsAfterClose(t *testing.T) {
 
 func TestSlashNewClearsHistoryBeforeNotice(t *testing.T) {
 	driver := &bridgeTestDriver{
-		status:     tuidriver.StatusSnapshot{Model: "gpt-4o", ModeLabel: "default"},
-		newSession: session.Session{SessionRef: session.SessionRef{SessionID: "new-session"}},
+		status:     control.StatusSnapshot{Model: "gpt-4o", ModeLabel: "default"},
+		newSession: control.SessionSnapshot{SessionID: "new-session"},
 	}
 	var msgs []tea.Msg
 	slashNew(driver, func(msg tea.Msg) { msgs = append(msgs, msg) })
@@ -108,25 +199,25 @@ func TestSlashHelpListsMinimalCoreCommands(t *testing.T) {
 }
 
 func TestModeToggleHintUsesRemoteACPModeLabel(t *testing.T) {
-	got := modeToggleHint(tuidriver.StatusSnapshot{SessionMode: "review", ModeLabel: "Review"})
+	got := modeToggleHint(control.StatusSnapshot{SessionMode: "review", ModeLabel: "Review"})
 	if got != "Review mode enabled" {
 		t.Fatalf("modeToggleHint() = %q, want Review mode enabled", got)
 	}
 }
 
-func TestConfigFromDriverRefreshStatusUsesLightweightStatus(t *testing.T) {
+func TestConfigFromControlServiceRefreshStatusUsesLightweightStatus(t *testing.T) {
 	driver := &bridgeLightweightStatusDriver{
 		bridgeTestDriver: bridgeTestDriver{
-			status: tuidriver.StatusSnapshot{Model: "full-model", ModeLabel: "full-mode"},
+			status: control.StatusSnapshot{Model: "full-model", ModeLabel: "full-mode"},
 		},
-		lightweightStatus: tuidriver.StatusSnapshot{
+		lightweightStatus: control.StatusSnapshot{
 			Model:               "light-model",
 			ModeLabel:           "light-mode",
 			TotalTokens:         12,
 			ContextWindowTokens: 100,
 		},
 	}
-	cfg := ConfigFromDriver(driver, nil, Config{})
+	cfg := ConfigFromControlService(driver, nil, Config{})
 	model, contextText := cfg.RefreshStatus()
 	if model != "light-model" {
 		t.Fatalf("RefreshStatus model = %q, want lightweight model", model)
@@ -147,12 +238,12 @@ func TestGatewayTerminalBatcherMergesRunningFrames(t *testing.T) {
 	send := func(msg tea.Msg) {
 		sent = append(sent, msg)
 	}
-	var batcher gatewayTerminalBatcher
+	var batcher eventStreamTerminalBatcher
 
-	if !batcher.enqueue(testTerminalFrame("hello ", 1), send) {
+	if !batcher.enqueue(requireProjectedACPEvent(t, testTerminalFrame("hello ", 1)), send) {
 		t.Fatal("first running frame was not accepted for batching")
 	}
-	if !batcher.enqueue(testTerminalFrame("world", 2), send) {
+	if !batcher.enqueue(requireProjectedACPEvent(t, testTerminalFrame("world", 2)), send) {
 		t.Fatal("second running frame was not accepted for batching")
 	}
 	if len(sent) != 0 {
@@ -163,15 +254,19 @@ func TestGatewayTerminalBatcherMergesRunningFrames(t *testing.T) {
 	if len(sent) != 1 {
 		t.Fatalf("flush sent %d messages, want 1", len(sent))
 	}
-	env, ok := sent[0].(kernel.EventEnvelope)
+	env, ok := sent[0].(eventstream.Envelope)
 	if !ok {
 		t.Fatalf("sent msg = %#v, want EventEnvelope", sent[0])
 	}
-	if got, _ := gatewayTerminalContent(env); got != "hello world" {
+	update, ok := env.Update.(schema.ToolCallUpdate)
+	if !ok {
+		t.Fatalf("update = %#v, want ToolCallUpdate", env.Update)
+	}
+	if got, _ := acpTerminalContent(update); got != "hello world" {
 		t.Fatalf("merged text = %q, want hello world", got)
 	}
-	if len(env.Event.ToolResult.RawOutput) != 0 {
-		t.Fatalf("raw output = %#v, want terminal content only", env.Event.ToolResult.RawOutput)
+	if rawOutput := acpRawMap(update.RawOutput); len(rawOutput) != 0 {
+		t.Fatalf("raw output = %#v, want terminal content only", rawOutput)
 	}
 }
 
@@ -180,12 +275,12 @@ func TestGatewayTerminalBatcherMergesCumulativeRunningFrames(t *testing.T) {
 	send := func(msg tea.Msg) {
 		sent = append(sent, msg)
 	}
-	var batcher gatewayTerminalBatcher
+	var batcher eventStreamTerminalBatcher
 
-	if !batcher.enqueue(testTerminalFrameForTool("SPAWN", "Let me write the script.", 1), send) {
+	if !batcher.enqueue(requireProjectedACPEvent(t, testTerminalFrameForTool("SPAWN", "Let me write the script.", 1)), send) {
 		t.Fatal("first running frame was not accepted for batching")
 	}
-	if !batcher.enqueue(testTerminalFrameForTool("SPAWN", "Let me write the script. Now let me run the script.", 2), send) {
+	if !batcher.enqueue(requireProjectedACPEvent(t, testTerminalFrameForTool("SPAWN", "Let me write the script. Now let me run the script.", 2)), send) {
 		t.Fatal("second running frame was not accepted for batching")
 	}
 
@@ -193,12 +288,16 @@ func TestGatewayTerminalBatcherMergesCumulativeRunningFrames(t *testing.T) {
 	if len(sent) != 1 {
 		t.Fatalf("flush sent %d messages, want 1", len(sent))
 	}
-	env, ok := sent[0].(kernel.EventEnvelope)
+	env, ok := sent[0].(eventstream.Envelope)
 	if !ok {
 		t.Fatalf("sent msg = %#v, want EventEnvelope", sent[0])
 	}
 	want := "Let me write the script. Now let me run the script."
-	if got, _ := gatewayTerminalContent(env); got != want {
+	update, ok := env.Update.(schema.ToolCallUpdate)
+	if !ok {
+		t.Fatalf("update = %#v, want ToolCallUpdate", env.Update)
+	}
+	if got, _ := acpTerminalContent(update); got != want {
 		t.Fatalf("merged text = %q, want %q", got, want)
 	}
 }
@@ -208,12 +307,12 @@ func TestGatewayTerminalBatcherPreservesCommandPrefixDeltas(t *testing.T) {
 	send := func(msg tea.Msg) {
 		sent = append(sent, msg)
 	}
-	var batcher gatewayTerminalBatcher
+	var batcher eventStreamTerminalBatcher
 
-	if !batcher.enqueue(testTerminalFrame("abc", 1), send) {
+	if !batcher.enqueue(requireProjectedACPEvent(t, testTerminalFrame("abc", 1)), send) {
 		t.Fatal("first running frame was not accepted for batching")
 	}
-	if !batcher.enqueue(testTerminalFrame("abcdef", 2), send) {
+	if !batcher.enqueue(requireProjectedACPEvent(t, testTerminalFrame("abcdef", 2)), send) {
 		t.Fatal("second running frame was not accepted for batching")
 	}
 
@@ -221,11 +320,15 @@ func TestGatewayTerminalBatcherPreservesCommandPrefixDeltas(t *testing.T) {
 	if len(sent) != 1 {
 		t.Fatalf("flush sent %d messages, want 1", len(sent))
 	}
-	env, ok := sent[0].(kernel.EventEnvelope)
+	env, ok := sent[0].(eventstream.Envelope)
 	if !ok {
 		t.Fatalf("sent msg = %#v, want EventEnvelope", sent[0])
 	}
-	if got, _ := gatewayTerminalContent(env); got != "abcabcdef" {
+	update, ok := env.Update.(schema.ToolCallUpdate)
+	if !ok {
+		t.Fatalf("update = %#v, want ToolCallUpdate", env.Update)
+	}
+	if got, _ := acpTerminalContent(update); got != "abcabcdef" {
 		t.Fatalf("merged RUN_COMMAND text = %q, want both byte deltas preserved", got)
 	}
 }
@@ -235,12 +338,12 @@ func TestGatewayNarrativeBatcherSyncsProtocolUpdateContent(t *testing.T) {
 	send := func(msg tea.Msg) {
 		sent = append(sent, msg)
 	}
-	var batcher gatewayNarrativeBatcher
+	var batcher eventStreamNarrativeBatcher
 
-	if !batcher.enqueue(testNarrativeFrame("hello "), send) {
+	if !batcher.enqueue(requireProjectedACPEvent(t, testNarrativeFrame("hello ")), send) {
 		t.Fatal("first narrative frame was not accepted for batching")
 	}
-	if !batcher.enqueue(testNarrativeFrame("world"), send) {
+	if !batcher.enqueue(requireProjectedACPEvent(t, testNarrativeFrame("world")), send) {
 		t.Fatal("second narrative frame was not accepted for batching")
 	}
 
@@ -248,20 +351,18 @@ func TestGatewayNarrativeBatcherSyncsProtocolUpdateContent(t *testing.T) {
 	if len(sent) != 1 {
 		t.Fatalf("flush sent %d messages, want 1", len(sent))
 	}
-	env, ok := sent[0].(kernel.EventEnvelope)
+	env, ok := sent[0].(eventstream.Envelope)
 	if !ok {
 		t.Fatalf("sent msg = %#v, want EventEnvelope", sent[0])
 	}
-	if got := env.Event.Narrative.Text; got != "hello world" {
+	update, ok := env.Update.(schema.ContentChunk)
+	if !ok {
+		t.Fatalf("update = %#v, want ContentChunk", env.Update)
+	}
+	if got := protocolTextContent(update.Content); got != "hello world" {
 		t.Fatalf("narrative text = %q, want merged text", got)
 	}
-	if env.Event.Protocol == nil || env.Event.Protocol.Update == nil {
-		t.Fatalf("protocol = %#v, want protocol update", env.Event.Protocol)
-	}
-	if got := protocolTextContent(env.Event.Protocol.Update.Content); got != "hello world" {
-		t.Fatalf("protocol content = %q, want merged text", got)
-	}
-	events := ProjectGatewayEventToTranscriptEvents(env.Event)
+	events := ProjectACPEventToTranscriptEvents(env)
 	if len(events) != 1 || events[0].Text != "hello world" {
 		t.Fatalf("projected events = %#v, want protocol-first merged text", events)
 	}
@@ -325,8 +426,8 @@ func TestDefaultCommandsStayInHelpText(t *testing.T) {
 
 func TestDefaultCommandsAreRecognizedByDispatch(t *testing.T) {
 	driver := &bridgeTestDriver{
-		status:     tuidriver.StatusSnapshot{},
-		newSession: session.Session{SessionRef: session.SessionRef{SessionID: "new-session"}},
+		status:     control.StatusSnapshot{},
+		newSession: control.SessionSnapshot{SessionID: "new-session"},
 	}
 	for _, command := range DefaultCommands() {
 		var msgs []tea.Msg
@@ -348,8 +449,8 @@ func TestDefaultCommandsAreRecognizedByDispatch(t *testing.T) {
 
 func TestSlashResumeClearsHistoryBeforeReplay(t *testing.T) {
 	driver := &bridgeTestDriver{
-		status:         tuidriver.StatusSnapshot{Model: "gpt-4o", ModeLabel: "default"},
-		resumedSession: session.Session{SessionRef: session.SessionRef{SessionID: "resumed-session"}},
+		status:         control.StatusSnapshot{Model: "gpt-4o", ModeLabel: "default"},
+		resumedSession: control.SessionSnapshot{SessionID: "resumed-session"},
 		replay: []kernel.EventEnvelope{
 			{
 				Event: kernel.Event{
@@ -444,8 +545,8 @@ func TestSlashResumeClearsHistoryBeforeReplay(t *testing.T) {
 
 func TestSlashResumeReplaysSideACPFinalDialogueWithoutProcessTrace(t *testing.T) {
 	driver := &bridgeTestDriver{
-		status:         tuidriver.StatusSnapshot{Model: "gpt-4o", ModeLabel: "default"},
-		resumedSession: session.Session{SessionRef: session.SessionRef{SessionID: "resumed-session"}},
+		status:         control.StatusSnapshot{Model: "gpt-4o", ModeLabel: "default"},
+		resumedSession: control.SessionSnapshot{SessionID: "resumed-session"},
 		replay: []kernel.EventEnvelope{
 			{
 				Event: kernel.Event{
@@ -554,8 +655,8 @@ func TestSlashResumeReplaysSideACPFinalDialogueWithoutProcessTrace(t *testing.T)
 
 func TestSlashResumeReplaysProcessEventsForInterruptedTurn(t *testing.T) {
 	driver := &bridgeTestDriver{
-		status:         tuidriver.StatusSnapshot{Model: "gpt-4o", ModeLabel: "default"},
-		resumedSession: session.Session{SessionRef: session.SessionRef{SessionID: "resumed-session"}},
+		status:         control.StatusSnapshot{Model: "gpt-4o", ModeLabel: "default"},
+		resumedSession: control.SessionSnapshot{SessionID: "resumed-session"},
 		replay: []kernel.EventEnvelope{
 			{
 				Event: kernel.Event{
@@ -633,15 +734,15 @@ func TestExecuteLineViaDriverStreamsGatewayEventsDirectly(t *testing.T) {
 
 	driver := &bridgeSubmitDriver{turn: turn}
 	var msgs []tea.Msg
-	result := executeLineViaDriver(driver, &ProgramSender{Send: func(msg tea.Msg) { msgs = append(msgs, msg) }}, Submission{Text: "hello"})
+	result := executeLineViaControlService(driver, &ProgramSender{Send: func(msg tea.Msg) { msgs = append(msgs, msg) }}, Submission{Text: "hello"})
 	if result.Err != nil {
-		t.Fatalf("executeLineViaDriver() err = %v", result.Err)
+		t.Fatalf("executeLineViaControlService() err = %v", result.Err)
 	}
 	if len(msgs) != 1 {
-		t.Fatalf("executeLineViaDriver() emitted %d msgs, want 1", len(msgs))
+		t.Fatalf("executeLineViaControlService() emitted %d msgs, want 1", len(msgs))
 	}
-	if _, ok := msgs[0].(kernel.EventEnvelope); !ok {
-		t.Fatalf("first msg = %#v, want kernel.EventEnvelope", msgs[0])
+	if got := requireACPText(t, msgs[0], schema.UpdateAgentMessage); got != "direct gateway event" {
+		t.Fatalf("first ACP text = %q, want direct gateway event", got)
 	}
 }
 
@@ -680,23 +781,19 @@ func TestExecuteLineViaDriverCoalescesUIOnlyReasoningBeforeToolEvent(t *testing.
 
 	driver := &bridgeSubmitDriver{turn: turn}
 	var msgs []tea.Msg
-	result := executeLineViaDriver(driver, &ProgramSender{Send: func(msg tea.Msg) { msgs = append(msgs, msg) }}, Submission{Text: "hello"})
+	result := executeLineViaControlService(driver, &ProgramSender{Send: func(msg tea.Msg) { msgs = append(msgs, msg) }}, Submission{Text: "hello"})
 	if result.Err != nil {
-		t.Fatalf("executeLineViaDriver() err = %v", result.Err)
+		t.Fatalf("executeLineViaControlService() err = %v", result.Err)
 	}
 	if got := len(msgs); got != 2 {
-		t.Fatalf("executeLineViaDriver() emitted %d msgs, want 2: %#v", got, msgs)
+		t.Fatalf("executeLineViaControlService() emitted %d msgs, want 2: %#v", got, msgs)
 	}
-	reasoning, ok := msgs[0].(kernel.EventEnvelope)
-	if !ok || reasoning.Event.Narrative == nil {
-		t.Fatalf("first msg = %#v, want coalesced reasoning EventEnvelope", msgs[0])
-	}
-	if got := reasoning.Event.Narrative.ReasoningText; got != "think fast now" {
+	if got := requireACPText(t, msgs[0], schema.UpdateAgentThought); got != "think fast now" {
 		t.Fatalf("coalesced reasoning = %q, want %q", got, "think fast now")
 	}
-	tool, ok := msgs[1].(kernel.EventEnvelope)
-	if !ok || tool.Event.Kind != kernel.EventKindToolCall {
-		t.Fatalf("second msg = %#v, want tool event after reasoning flush", msgs[1])
+	tool := requireACPEnvelope(t, msgs[1])
+	if update, ok := tool.Update.(schema.ToolCall); !ok || update.ToolCallID != "call-1" {
+		t.Fatalf("second update = %#v, want tool event after reasoning flush", tool.Update)
 	}
 }
 
@@ -723,18 +820,14 @@ func TestExecuteLineViaDriverCoalescesUIOnlyReasoningPreservesLeadingSpaces(t *t
 
 	driver := &bridgeSubmitDriver{turn: turn}
 	var msgs []tea.Msg
-	result := executeLineViaDriver(driver, &ProgramSender{Send: func(msg tea.Msg) { msgs = append(msgs, msg) }}, Submission{Text: "hello"})
+	result := executeLineViaControlService(driver, &ProgramSender{Send: func(msg tea.Msg) { msgs = append(msgs, msg) }}, Submission{Text: "hello"})
 	if result.Err != nil {
-		t.Fatalf("executeLineViaDriver() err = %v", result.Err)
+		t.Fatalf("executeLineViaControlService() err = %v", result.Err)
 	}
 	if got := len(msgs); got != 1 {
-		t.Fatalf("executeLineViaDriver() emitted %d msgs, want 1: %#v", got, msgs)
+		t.Fatalf("executeLineViaControlService() emitted %d msgs, want 1: %#v", got, msgs)
 	}
-	reasoning, ok := msgs[0].(kernel.EventEnvelope)
-	if !ok || reasoning.Event.Narrative == nil {
-		t.Fatalf("first msg = %#v, want coalesced reasoning EventEnvelope", msgs[0])
-	}
-	if got := reasoning.Event.Narrative.ReasoningText; got != "Now let me verify the DDL matches" {
+	if got := requireACPText(t, msgs[0], schema.UpdateAgentThought); got != "Now let me verify the DDL matches" {
 		t.Fatalf("coalesced reasoning = %q, want boundary spaces preserved", got)
 	}
 }
@@ -773,29 +866,27 @@ func TestExecuteLineViaDriverDoesNotCoalesceReasoningWithAnswerDelta(t *testing.
 
 	driver := &bridgeSubmitDriver{turn: turn}
 	var msgs []tea.Msg
-	result := executeLineViaDriver(driver, &ProgramSender{Send: func(msg tea.Msg) { msgs = append(msgs, msg) }}, Submission{Text: "hello"})
+	result := executeLineViaControlService(driver, &ProgramSender{Send: func(msg tea.Msg) { msgs = append(msgs, msg) }}, Submission{Text: "hello"})
 	if result.Err != nil {
-		t.Fatalf("executeLineViaDriver() err = %v", result.Err)
+		t.Fatalf("executeLineViaControlService() err = %v", result.Err)
 	}
 	if got := len(msgs); got != 2 {
-		t.Fatalf("executeLineViaDriver() emitted %d msgs, want 2: %#v", got, msgs)
+		t.Fatalf("executeLineViaControlService() emitted %d msgs, want 2: %#v", got, msgs)
 	}
-	first := msgs[0].(kernel.EventEnvelope)
-	second := msgs[1].(kernel.EventEnvelope)
-	if first.Event.Narrative == nil || first.Event.Narrative.ReasoningText != "think" {
-		t.Fatalf("first narrative = %#v, want reasoning", first.Event.Narrative)
+	if got := requireACPText(t, msgs[0], schema.UpdateAgentThought); got != "think" {
+		t.Fatalf("first ACP text = %q, want reasoning", got)
 	}
-	if second.Event.Narrative == nil || second.Event.Narrative.Text != "answer" {
-		t.Fatalf("second narrative = %#v, want answer", second.Event.Narrative)
+	if got := requireACPText(t, msgs[1], schema.UpdateAgentMessage); got != "answer" {
+		t.Fatalf("second ACP text = %q, want answer", got)
 	}
 }
 
 func TestExecuteLineViaDriverTreatsUnknownSlashAsUserMessage(t *testing.T) {
 	driver := &bridgeSubmitDriver{}
 	text := "/rbac/inner/workflow/switch Query 参数"
-	result := executeLineViaDriver(driver, &ProgramSender{Send: func(tea.Msg) {}}, Submission{Text: text})
+	result := executeLineViaControlService(driver, &ProgramSender{Send: func(tea.Msg) {}}, Submission{Text: text})
 	if result.Err != nil {
-		t.Fatalf("executeLineViaDriver() err = %v", result.Err)
+		t.Fatalf("executeLineViaControlService() err = %v", result.Err)
 	}
 	if driver.submitCalls != 1 {
 		t.Fatalf("Submit() calls = %d, want 1", driver.submitCalls)
@@ -851,19 +942,19 @@ func TestExecuteLineViaDriverForwardsTerminalStreamEvents(t *testing.T) {
 
 	driver := &bridgeSubmitDriver{turn: turn, terminalEvents: terminalEvents}
 	var msgs []tea.Msg
-	result := executeLineViaDriver(driver, &ProgramSender{Send: func(msg tea.Msg) { msgs = append(msgs, msg) }}, Submission{Text: "hello"})
+	result := executeLineViaControlService(driver, &ProgramSender{Send: func(msg tea.Msg) { msgs = append(msgs, msg) }}, Submission{Text: "hello"})
 	if result.Err != nil {
-		t.Fatalf("executeLineViaDriver() err = %v", result.Err)
+		t.Fatalf("executeLineViaControlService() err = %v", result.Err)
 	}
 	deadline := time.After(2 * time.Second)
 	for {
 		var sawStream bool
 		for _, msg := range msgs {
-			env, ok := msg.(kernel.EventEnvelope)
-			if !ok || env.Event.ToolResult == nil {
+			env, ok := msg.(eventstream.Envelope)
+			if !ok {
 				continue
 			}
-			if text, _ := gatewayTerminalContent(env); text == "streamed\n" {
+			if text := acpUpdateTerminalText(env.Update); text == "streamed\n" {
 				sawStream = true
 			}
 		}
@@ -884,8 +975,8 @@ func TestExecuteLineViaDriverForwardsTerminalStreamEvents(t *testing.T) {
 
 func TestSlashResumeReplaysGatewayEventsDirectly(t *testing.T) {
 	driver := &bridgeTestDriver{
-		status:         tuidriver.StatusSnapshot{Model: "gpt-4o", ModeLabel: "default"},
-		resumedSession: session.Session{SessionRef: session.SessionRef{SessionID: "resumed-session"}},
+		status:         control.StatusSnapshot{Model: "gpt-4o", ModeLabel: "default"},
+		resumedSession: control.SessionSnapshot{SessionID: "resumed-session"},
 		replay: []kernel.EventEnvelope{{
 			Event: kernel.Event{
 				Kind:       kernel.EventKindAssistantMessage,
@@ -918,8 +1009,8 @@ func TestSlashResumeReplaysGatewayEventsDirectly(t *testing.T) {
 
 func TestSlashConnectCallsDriverAndUpdatesStatus(t *testing.T) {
 	driver := &bridgeTestDriver{
-		status:        tuidriver.StatusSnapshot{Model: "minimax/MiniMax-M1", ModeLabel: "default", Workspace: "/tmp/ws"},
-		connectStatus: tuidriver.StatusSnapshot{Model: "minimax/MiniMax-M2", ModeLabel: "default", Workspace: "/tmp/ws"},
+		status:        control.StatusSnapshot{Model: "minimax/MiniMax-M1", ModeLabel: "default", Workspace: "/tmp/ws"},
+		connectStatus: control.StatusSnapshot{Model: "minimax/MiniMax-M2", ModeLabel: "default", Workspace: "/tmp/ws"},
 	}
 	var msgs []tea.Msg
 	slashConnect(driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "minimax MiniMax-M2 - 60 sk-test 204800 8192 low,medium")
@@ -957,15 +1048,15 @@ func TestFormatContextUsageStatus(t *testing.T) {
 
 func TestSlashAgentDispatchesPrimarySubcommands(t *testing.T) {
 	driver := &bridgeTestDriver{
-		agentList: []tuidriver.AgentCandidate{{
+		agentList: []control.AgentCandidate{{
 			Name:        "copilot",
 			Description: "ACP sidecar",
 		}},
-		agentStatus: tuidriver.AgentStatusSnapshot{
+		agentStatus: control.AgentStatusSnapshot{
 			SessionID:       "sess-1",
 			ControllerKind:  "acp",
 			ControllerLabel: "copilot",
-			Participants: []tuidriver.AgentParticipantSnapshot{{
+			Participants: []control.AgentParticipantSnapshot{{
 				ID:    "participant-1",
 				Label: "copilot",
 				Role:  "sidecar",
@@ -990,11 +1081,11 @@ func TestSlashAgentDispatchesPrimarySubcommands(t *testing.T) {
 
 func TestACPControllerSlashCommandsUseRemoteSurface(t *testing.T) {
 	driver := &bridgeTestDriver{
-		agentList: []tuidriver.AgentCandidate{{
+		agentList: []control.AgentCandidate{{
 			Name:        "copilot",
 			Description: "local ACP agent",
 		}},
-		agentStatus: tuidriver.AgentStatusSnapshot{
+		agentStatus: control.AgentStatusSnapshot{
 			ControllerKind:     "acp",
 			ControllerCommands: []string{"search", "/draft"},
 		},
@@ -1022,7 +1113,7 @@ func TestACPControllerSlashCommandsUseRemoteSurface(t *testing.T) {
 
 func TestSlashModelDeleteDisabledForACPController(t *testing.T) {
 	driver := &bridgeTestDriver{
-		agentStatus: tuidriver.AgentStatusSnapshot{ControllerKind: "acp"},
+		agentStatus: control.AgentStatusSnapshot{ControllerKind: "acp"},
 	}
 	var msgs []tea.Msg
 	slashModelWithContext(context.Background(), driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "del minimax/MiniMax-M1")
@@ -1089,7 +1180,7 @@ func TestSlashAgentAddCustomPassesConfig(t *testing.T) {
 func TestSlashAgentInstallFailureEmitsRunCommandToolResult(t *testing.T) {
 	driver := &bridgeTestDriver{
 		addAgentErr: fmt.Errorf("gatewayapp: install ACP agent %q: exit status 7\nnpm ERR install failed", "claude"),
-		slashArgCandidates: map[string][]tuidriver.SlashArgCandidate{
+		slashArgCandidates: map[string][]control.SlashArgCandidate{
 			"agent install": {{
 				Value:  "claude",
 				Detail: "npm install --prefix /tmp/caelis/acp-agents/npm @agentclientprotocol/claude-agent-acp@latest",
@@ -1103,24 +1194,21 @@ func TestSlashAgentInstallFailureEmitsRunCommandToolResult(t *testing.T) {
 	}
 	var sawCall, sawResult bool
 	for _, msg := range msgs {
-		env, ok := msg.(kernel.EventEnvelope)
+		env, ok := msg.(eventstream.Envelope)
 		if !ok {
 			continue
 		}
-		switch {
-		case env.Event.ToolCall != nil:
-			call := env.Event.ToolCall
-			if call.ToolName == "RUN_COMMAND" &&
-				call.Status == kernel.ToolStatusRunning &&
-				strings.Contains(fmt.Sprint(call.RawInput["command"]), "npm install --prefix") {
+		switch update := env.Update.(type) {
+		case schema.ToolCall:
+			if update.Kind == "RUN_COMMAND" &&
+				update.Status == schema.ToolStatusInProgress &&
+				strings.Contains(fmt.Sprint(acpRawMap(update.RawInput)["command"]), "npm install --prefix") {
 				sawCall = true
 			}
-		case env.Event.ToolResult != nil:
-			toolResult := env.Event.ToolResult
-			if toolResult.ToolName == "RUN_COMMAND" &&
-				toolResult.Status == kernel.ToolStatusFailed &&
-				toolResult.Error &&
-				strings.Contains(fmt.Sprint(toolResult.RawOutput["stderr"]), "npm ERR install failed") {
+		case schema.ToolCallUpdate:
+			if stringFromPtr(update.Kind) == "RUN_COMMAND" &&
+				stringFromPtr(update.Status) == schema.ToolStatusFailed &&
+				strings.Contains(fmt.Sprint(acpRawMap(update.RawOutput)["stderr"]), "npm ERR install failed") {
 				sawResult = true
 			}
 		}
@@ -1175,12 +1263,12 @@ func TestSlashAgentHelpAndRecovery(t *testing.T) {
 }
 
 func TestFormatAgentStatusSnapshotShowsDelegatedParticipants(t *testing.T) {
-	status := tuidriver.AgentStatusSnapshot{
+	status := control.AgentStatusSnapshot{
 		SessionID:       "session-1",
 		ControllerKind:  "kernel",
 		ControllerLabel: "local",
 		HasActiveTurn:   true,
-		Participants: []tuidriver.AgentParticipantSnapshot{
+		Participants: []control.AgentParticipantSnapshot{
 			{
 				ID:        "side-001",
 				Label:     "@codex",
@@ -1190,7 +1278,7 @@ func TestFormatAgentStatusSnapshotShowsDelegatedParticipants(t *testing.T) {
 				SessionID: "side-session",
 			},
 		},
-		DelegatedParticipants: []tuidriver.AgentParticipantSnapshot{
+		DelegatedParticipants: []control.AgentParticipantSnapshot{
 			{
 				ID:        "self-001",
 				Label:     "@jude",
@@ -1226,7 +1314,7 @@ func TestFormatAgentStatusSnapshotShowsDelegatedParticipants(t *testing.T) {
 }
 
 func TestFormatStatusSnapshotUsesFriendlyThemeableLines(t *testing.T) {
-	got := formatStatusSnapshot(tuidriver.StatusSnapshot{
+	got := formatStatusSnapshot(control.StatusSnapshot{
 		SessionID:                "sess-1",
 		Provider:                 "acp",
 		ModelName:                "gpt-5.5",
@@ -1239,10 +1327,10 @@ func TestFormatStatusSnapshotUsesFriendlyThemeableLines(t *testing.T) {
 		MissingAPIKey:            true,
 		HostExecution:            true,
 		FullAccessMode:           true,
-		SessionUsageTotal:        kernel.UsageSnapshot{PromptTokens: 12600, CachedInputTokens: 9000, CompletionTokens: 200, ReasoningTokens: 50, TotalTokens: 12800},
-		SessionUsageMain:         kernel.UsageSnapshot{PromptTokens: 10000, CachedInputTokens: 7000, CompletionTokens: 150, ReasoningTokens: 30, TotalTokens: 10150},
-		SessionUsageSubagents:    kernel.UsageSnapshot{PromptTokens: 2000, CachedInputTokens: 1800, CompletionTokens: 40, ReasoningTokens: 15, TotalTokens: 2040},
-		SessionUsageAutoReview:   kernel.UsageSnapshot{PromptTokens: 600, CachedInputTokens: 200, CompletionTokens: 10, ReasoningTokens: 5, TotalTokens: 610},
+		SessionUsageTotal:        control.UsageSnapshot{PromptTokens: 12600, CachedInputTokens: 9000, CompletionTokens: 200, ReasoningTokens: 50, TotalTokens: 12800},
+		SessionUsageMain:         control.UsageSnapshot{PromptTokens: 10000, CachedInputTokens: 7000, CompletionTokens: 150, ReasoningTokens: 30, TotalTokens: 10150},
+		SessionUsageSubagents:    control.UsageSnapshot{PromptTokens: 2000, CachedInputTokens: 1800, CompletionTokens: 40, ReasoningTokens: 15, TotalTokens: 2040},
+		SessionUsageAutoReview:   control.UsageSnapshot{PromptTokens: 600, CachedInputTokens: 200, CompletionTokens: 10, ReasoningTokens: 5, TotalTokens: 610},
 		SessionInputTokens:       12600,
 		SessionCachedInputTokens: 9000,
 		SessionOutputTokens:      200,
@@ -1276,7 +1364,7 @@ func TestFormatStatusSnapshotUsesFriendlyThemeableLines(t *testing.T) {
 }
 
 func TestFormatStatusSnapshotOmitsSetupReasonDetails(t *testing.T) {
-	got := formatStatusSnapshot(tuidriver.StatusSnapshot{
+	got := formatStatusSnapshot(control.StatusSnapshot{
 		Model:                       "mimo-v2.5-pro [high]",
 		ModeLabel:                   "auto-review",
 		SandboxResolvedBackend:      "windows",
@@ -1298,15 +1386,15 @@ func TestFormatStatusSnapshotOmitsSetupReasonDetails(t *testing.T) {
 }
 
 func TestFormatStatusSnapshotShowsExplicitSandboxRepairFailure(t *testing.T) {
-	got := formatStatusSnapshot(tuidriver.StatusSnapshot{
+	got := formatStatusSnapshot(control.StatusSnapshot{
 		Model:                  "mimo-v2.5-pro [high]",
 		ModeLabel:              "auto-review",
 		SandboxResolvedBackend: "windows",
 		Route:                  "sandbox",
 		Workspace:              "D:\\xue\\code\\cmpctl",
-		SandboxSetup: sandbox.SetupStatus{Checks: []sandbox.SetupCheck{{
+		SandboxSetup: control.SandboxSetupStatus{Checks: []control.SandboxSetupCheck{{
 			Name:     "workspace",
-			Scope:    sandbox.SetupScopeWorkspace,
+			Scope:    "workspace",
 			Required: true,
 			Error:    "acl: write D:\\xue\\code\\cmpctl DACL: Access is denied.",
 		}}},
@@ -1324,9 +1412,9 @@ func TestFormatStatusSnapshotShowsExplicitSandboxRepairFailure(t *testing.T) {
 }
 
 func TestFormatSessionTokenUsageStatusOmitsEmptyBreakdownBuckets(t *testing.T) {
-	got := formatSessionTokenUsageStatus(tuidriver.StatusSnapshot{
-		SessionUsageTotal: kernel.UsageSnapshot{PromptTokens: 100, CachedInputTokens: 20, CompletionTokens: 10, TotalTokens: 110},
-		SessionUsageMain:  kernel.UsageSnapshot{PromptTokens: 100, CachedInputTokens: 20, CompletionTokens: 10, TotalTokens: 110},
+	got := formatSessionTokenUsageStatus(control.StatusSnapshot{
+		SessionUsageTotal: control.UsageSnapshot{PromptTokens: 100, CachedInputTokens: 20, CompletionTokens: 10, TotalTokens: 110},
+		SessionUsageMain:  control.UsageSnapshot{PromptTokens: 100, CachedInputTokens: 20, CompletionTokens: 10, TotalTokens: 110},
 	})
 	for _, want := range []string{"Scope", "Total", "Cached", "total", "main", "110", "100", "20"} {
 		if !strings.Contains(got, want) {
@@ -1345,7 +1433,7 @@ func TestFormatSessionTokenUsageStatusOmitsEmptyBreakdownBuckets(t *testing.T) {
 
 func TestDynamicAgentSlashAndHandleContinuation(t *testing.T) {
 	driver := &bridgeTestDriver{
-		agentList:    []tuidriver.AgentCandidate{{Name: "copilot"}},
+		agentList:    []control.AgentCandidate{{Name: "copilot"}},
 		subagentTurn: bridgeTurnWithEvents(participantAssistantEnvelope("task-1", "@jeff", "child ok")),
 	}
 	var msgs []tea.Msg
@@ -1356,14 +1444,14 @@ func TestDynamicAgentSlashAndHandleContinuation(t *testing.T) {
 	if driver.lastStartedAgent != "copilot" || driver.lastStartedPrompt != "inspect" {
 		t.Fatalf("started agent=%q prompt=%q", driver.lastStartedAgent, driver.lastStartedPrompt)
 	}
-	result = executeLineViaDriver(driver, &ProgramSender{Send: func(msg tea.Msg) { msgs = append(msgs, msg) }}, Submission{Text: "@jeff continue"})
+	result = executeLineViaControlService(driver, &ProgramSender{Send: func(msg tea.Msg) { msgs = append(msgs, msg) }}, Submission{Text: "@jeff continue"})
 	if result.Err != nil {
 		t.Fatalf("handle continuation error = %v", result.Err)
 	}
 	if driver.lastContinuedHandle != "jeff" || driver.lastContinuedPrompt != "continue" {
 		t.Fatalf("continued handle=%q prompt=%q", driver.lastContinuedHandle, driver.lastContinuedPrompt)
 	}
-	result = executeLineViaDriver(driver, &ProgramSender{Send: func(msg tea.Msg) { msgs = append(msgs, msg) }}, Submission{
+	result = executeLineViaControlService(driver, &ProgramSender{Send: func(msg tea.Msg) { msgs = append(msgs, msg) }}, Submission{
 		Text:        "/copilot see this",
 		Attachments: []Attachment{{Name: "shot.png", Offset: len([]rune("/copilot see "))}},
 	})
@@ -1373,7 +1461,7 @@ func TestDynamicAgentSlashAndHandleContinuation(t *testing.T) {
 	if len(driver.lastStartedAttachments) != 1 || driver.lastStartedAttachments[0].Name != "shot.png" || driver.lastStartedAttachments[0].Offset != len([]rune("see ")) {
 		t.Fatalf("started attachments = %#v, want prompt-relative image attachment", driver.lastStartedAttachments)
 	}
-	result = executeLineViaDriver(driver, &ProgramSender{Send: func(msg tea.Msg) { msgs = append(msgs, msg) }}, Submission{
+	result = executeLineViaControlService(driver, &ProgramSender{Send: func(msg tea.Msg) { msgs = append(msgs, msg) }}, Submission{
 		Text:        "@jeff continue",
 		Attachments: []Attachment{{Name: "follow.png", Offset: len([]rune("@jeff continue"))}},
 	})
@@ -1390,7 +1478,7 @@ func TestDynamicAgentSlashAndHandleContinuation(t *testing.T) {
 
 func TestDynamicAgentSlashStreamsParticipantTurnOutput(t *testing.T) {
 	driver := &bridgeTestDriver{
-		agentList:    []tuidriver.AgentCandidate{{Name: "copilot"}},
+		agentList:    []control.AgentCandidate{{Name: "copilot"}},
 		subagentTurn: bridgeTurnWithEvents(participantAssistantEnvelope("task-1", "@mike", "我是 copilot 子代理")),
 	}
 	msgs := make(chan tea.Msg, 16)
@@ -1406,12 +1494,8 @@ func TestDynamicAgentSlashStreamsParticipantTurnOutput(t *testing.T) {
 		switch typed := msg.(type) {
 		case SubagentStartMsg:
 			t.Fatalf("dynamic slash emitted SPAWN panel start message: %#v", typed)
-		case TranscriptEventsMsg:
-			if transcriptEventsContainText(typed.Events, "copilot 子代理") {
-				return
-			}
-		case kernel.EventEnvelope:
-			if transcriptEventsContainText(ProjectGatewayEventToTranscriptEvents(typed.Event), "copilot 子代理") {
+		default:
+			if transcriptEventsContainText(transcriptEventsFromMsg(msg), "copilot 子代理") {
 				return
 			}
 		}
@@ -1421,7 +1505,7 @@ func TestDynamicAgentSlashStreamsParticipantTurnOutput(t *testing.T) {
 
 func TestDynamicAgentSlashDoesNotRenderRunningOutputPreviewAsAssistantText(t *testing.T) {
 	driver := &bridgeTestDriver{
-		agentList:    []tuidriver.AgentCandidate{{Name: "codex"}},
+		agentList:    []control.AgentCandidate{{Name: "codex"}},
 		subagentTurn: bridgeTurnWithEvents(participantAssistantEnvelope("task-1", "@iris", "上海今天阴有小雨。")),
 	}
 	msgs := make(chan tea.Msg, 16)
@@ -1431,22 +1515,12 @@ func TestDynamicAgentSlashDoesNotRenderRunningOutputPreviewAsAssistantText(t *te
 	}
 	close(msgs)
 	for msg := range msgs {
-		switch transcript := msg.(type) {
-		case TranscriptEventsMsg:
-			if transcriptEventsContainText(transcript.Events, "Searching the Web") {
-				t.Fatalf("running output preview was rendered as assistant text: %#v", transcript)
-			}
-			if transcriptEventsContainText(transcript.Events, "上海今天阴有小雨") {
-				return
-			}
-		case kernel.EventEnvelope:
-			events := ProjectGatewayEventToTranscriptEvents(transcript.Event)
-			if transcriptEventsContainText(events, "Searching the Web") {
-				t.Fatalf("running output preview was rendered as assistant text: %#v", transcript)
-			}
-			if transcriptEventsContainText(events, "上海今天阴有小雨") {
-				return
-			}
+		events := transcriptEventsFromMsg(msg)
+		if transcriptEventsContainText(events, "Searching the Web") {
+			t.Fatalf("running output preview was rendered as assistant text: %#v", msg)
+		}
+		if transcriptEventsContainText(events, "上海今天阴有小雨") {
+			return
 		}
 	}
 	t.Fatal("final participant output was not rendered")
@@ -1454,7 +1528,7 @@ func TestDynamicAgentSlashDoesNotRenderRunningOutputPreviewAsAssistantText(t *te
 
 func TestDynamicAgentSlashCompletedTurnKeepsDivider(t *testing.T) {
 	driver := &bridgeTestDriver{
-		agentList:    []tuidriver.AgentCandidate{{Name: "codex"}},
+		agentList:    []control.AgentCandidate{{Name: "codex"}},
 		subagentTurn: bridgeTurnWithEvents(participantAssistantEnvelope("task-1", "@kate", "上海今天阴有小雨。")),
 	}
 	msgs := make(chan tea.Msg, 8)
@@ -1476,7 +1550,7 @@ func TestDynamicAgentSlashCompletedTurnKeepsDivider(t *testing.T) {
 
 func TestDynamicAgentSlashParticipantTurnCompletionKeepsDivider(t *testing.T) {
 	driver := &bridgeTestDriver{
-		agentList:    []tuidriver.AgentCandidate{{Name: "codex"}},
+		agentList:    []control.AgentCandidate{{Name: "codex"}},
 		subagentTurn: bridgeTurnWithEvents(participantAssistantEnvelope("task-1:1", "@kate", "上海今天阴有小雨。")),
 	}
 	msgs := make(chan tea.Msg, 8)
@@ -1494,15 +1568,8 @@ func TestDynamicAgentSlashParticipantTurnCompletionKeepsDivider(t *testing.T) {
 	close(msgs)
 	foundOutput := false
 	for msg := range msgs {
-		switch typed := msg.(type) {
-		case TranscriptEventsMsg:
-			if transcriptEventsContainText(typed.Events, "上海今天阴有小雨") {
-				foundOutput = true
-			}
-		case kernel.EventEnvelope:
-			if transcriptEventsContainText(ProjectGatewayEventToTranscriptEvents(typed.Event), "上海今天阴有小雨") {
-				foundOutput = true
-			}
+		if transcriptEventsContainText(transcriptEventsFromMsg(msg), "上海今天阴有小雨") {
+			foundOutput = true
 		}
 	}
 	if !foundOutput {
@@ -1530,7 +1597,7 @@ func TestDynamicAgentSlashPrefersStructuredParticipantEvents(t *testing.T) {
 		},
 	}
 	driver := &bridgeTestDriver{
-		agentList:    []tuidriver.AgentCandidate{{Name: "copilot"}},
+		agentList:    []control.AgentCandidate{{Name: "copilot"}},
 		subagentTurn: bridgeTurnWithEvents(env),
 	}
 	msgs := make(chan tea.Msg, 16)
@@ -1542,18 +1609,19 @@ func TestDynamicAgentSlashPrefersStructuredParticipantEvents(t *testing.T) {
 	for {
 		select {
 		case msg := <-msgs:
-			if transcript, ok := msg.(TranscriptEventsMsg); ok && transcriptEventsContainText(transcript.Events, "working") {
-				t.Fatalf("structured frame emitted fallback transcript text: %#v", transcript)
+			if transcriptEventsContainText(transcriptEventsFromMsg(msg), "working") {
+				t.Fatalf("structured frame emitted fallback transcript text: %#v", msg)
 			}
-			envMsg, ok := msg.(kernel.EventEnvelope)
+			envMsg, ok := msg.(eventstream.Envelope)
 			if !ok {
 				continue
 			}
-			if envMsg.Event.ToolCall == nil || envMsg.Event.ToolCall.ToolName != "RUN_COMMAND" {
+			call, ok := envMsg.Update.(schema.ToolCall)
+			if !ok || call.Kind != "RUN_COMMAND" {
 				t.Fatalf("event envelope = %#v, want RUN_COMMAND tool call", envMsg)
 			}
-			if envMsg.Event.Origin == nil || envMsg.Event.Origin.Scope != kernel.EventScopeParticipant {
-				t.Fatalf("event origin = %#v, want dynamic side ACP participant scope", envMsg.Event.Origin)
+			if envMsg.Scope != eventstream.ScopeParticipant {
+				t.Fatalf("event scope = %#v, want dynamic side ACP participant scope", envMsg.Scope)
 			}
 			return
 		case <-deadline:
@@ -1564,7 +1632,7 @@ func TestDynamicAgentSlashPrefersStructuredParticipantEvents(t *testing.T) {
 
 func TestDynamicAgentSlashParticipantTurnEmitsGatewayNarrative(t *testing.T) {
 	driver := &bridgeTestDriver{
-		agentList:    []tuidriver.AgentCandidate{{Name: "copilot"}},
+		agentList:    []control.AgentCandidate{{Name: "copilot"}},
 		subagentTurn: bridgeTurnWithEvents(participantAssistantEnvelope("task-1", "@mike", "fallback side output")),
 	}
 	msgs := make(chan tea.Msg, 16)
@@ -1576,12 +1644,7 @@ func TestDynamicAgentSlashParticipantTurnEmitsGatewayNarrative(t *testing.T) {
 	for {
 		select {
 		case msg := <-msgs:
-			transcript, ok := msg.(TranscriptEventsMsg)
-			if ok && transcriptEventsContainText(transcript.Events, "fallback side output") {
-				return
-			}
-			env, ok := msg.(kernel.EventEnvelope)
-			if ok && transcriptEventsContainText(ProjectGatewayEventToTranscriptEvents(env.Event), "fallback side output") {
+			if transcriptEventsContainText(transcriptEventsFromMsg(msg), "fallback side output") {
 				return
 			}
 		case <-deadline:
@@ -1592,7 +1655,7 @@ func TestDynamicAgentSlashParticipantTurnEmitsGatewayNarrative(t *testing.T) {
 
 func TestSlashConnectParsesEnvironmentVariableSecret(t *testing.T) {
 	driver := &bridgeTestDriver{
-		connectStatus: tuidriver.StatusSnapshot{Model: "openai/gpt-4o"},
+		connectStatus: control.StatusSnapshot{Model: "openai/gpt-4o"},
 	}
 	slashConnect(driver, func(tea.Msg) {}, "openai gpt-4o - 60 env:OPENAI_API_KEY")
 	if got := driver.lastConnect.TokenEnv; got != "OPENAI_API_KEY" {
@@ -1605,8 +1668,8 @@ func TestSlashConnectParsesEnvironmentVariableSecret(t *testing.T) {
 
 func TestSlashModelUseCallsDriverAndUpdatesStatus(t *testing.T) {
 	driver := &bridgeTestDriver{
-		status:         tuidriver.StatusSnapshot{Model: "minimax/MiniMax-M1", ModeLabel: "default", Workspace: "/tmp/ws"},
-		useModelStatus: tuidriver.StatusSnapshot{Model: "minimax/MiniMax-M2", ModeLabel: "default", Workspace: "/tmp/ws"},
+		status:         control.StatusSnapshot{Model: "minimax/MiniMax-M1", ModeLabel: "default", Workspace: "/tmp/ws"},
+		useModelStatus: control.StatusSnapshot{Model: "minimax/MiniMax-M2", ModeLabel: "default", Workspace: "/tmp/ws"},
 	}
 	var msgs []tea.Msg
 	slashModel(driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "use minimax/MiniMax-M2")
@@ -1626,8 +1689,8 @@ func TestSlashModelUseCallsDriverAndUpdatesStatus(t *testing.T) {
 
 func TestSlashModelUsePassesReasoningLevel(t *testing.T) {
 	driver := &bridgeTestDriver{
-		status:         tuidriver.StatusSnapshot{Model: "deepseek/deepseek-v4-pro", ModeLabel: "default", Workspace: "/tmp/ws"},
-		useModelStatus: tuidriver.StatusSnapshot{Model: "deepseek/deepseek-v4-pro [high]", ModeLabel: "default", Workspace: "/tmp/ws"},
+		status:         control.StatusSnapshot{Model: "deepseek/deepseek-v4-pro", ModeLabel: "default", Workspace: "/tmp/ws"},
+		useModelStatus: control.StatusSnapshot{Model: "deepseek/deepseek-v4-pro [high]", ModeLabel: "default", Workspace: "/tmp/ws"},
 	}
 	slashModel(driver, func(tea.Msg) {}, "use deepseek/deepseek-v4-pro high")
 	if driver.useModelCalls != 1 {
@@ -1643,7 +1706,7 @@ func TestSlashModelUsePassesReasoningLevel(t *testing.T) {
 
 func TestSlashModelDeleteCallsDriverAndRefreshesStatus(t *testing.T) {
 	driver := &bridgeTestDriver{
-		status: tuidriver.StatusSnapshot{Model: "minimax/MiniMax-M1", ModeLabel: "default", Workspace: "/tmp/ws"},
+		status: control.StatusSnapshot{Model: "minimax/MiniMax-M1", ModeLabel: "default", Workspace: "/tmp/ws"},
 	}
 	var msgs []tea.Msg
 	slashModel(driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "del minimax/MiniMax-M1")
@@ -1660,7 +1723,7 @@ func TestSlashModelDeleteCallsDriverAndRefreshesStatus(t *testing.T) {
 
 func TestSlashModelDeleteClearsStatusWhenNoModelRemains(t *testing.T) {
 	driver := &bridgeTestDriver{
-		status: tuidriver.StatusSnapshot{Workspace: "/tmp/ws"},
+		status: control.StatusSnapshot{Workspace: "/tmp/ws"},
 	}
 	var msgs []tea.Msg
 	slashModel(driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "del codefree/glm-5.1")
@@ -1679,7 +1742,7 @@ func TestSlashModelDeleteClearsStatusWhenNoModelRemains(t *testing.T) {
 
 func TestSlashStatusShowsGuidanceAndWarnings(t *testing.T) {
 	driver := &bridgeTestDriver{
-		status: tuidriver.StatusSnapshot{
+		status: control.StatusSnapshot{
 			SessionID:               "sess-1",
 			StoreDir:                "/tmp/.caelis",
 			Workspace:               "/tmp/ws",
@@ -1715,7 +1778,7 @@ func TestSlashStatusShowsGuidanceAndWarnings(t *testing.T) {
 
 func TestSlashDoctorShowsReadinessChecklist(t *testing.T) {
 	driver := &bridgeTestDriver{
-		status: tuidriver.StatusSnapshot{
+		status: control.StatusSnapshot{
 			SessionID:               "sess-1",
 			Provider:                "openai",
 			ModelName:               "gpt-5.5",
@@ -1748,7 +1811,7 @@ func TestSlashDoctorShowsReadinessChecklist(t *testing.T) {
 
 func TestSlashDoctorFixRepairsSandbox(t *testing.T) {
 	driver := &bridgeTestDriver{
-		status: tuidriver.StatusSnapshot{
+		status: control.StatusSnapshot{
 			SandboxRequestedBackend: "windows",
 			SandboxResolvedBackend:  "windows",
 			Route:                   "sandbox",
@@ -1823,11 +1886,11 @@ func sandboxProgressMessagesContain(messages []tea.Msg, text string) bool {
 }
 
 type bridgeTestDriver struct {
-	status                   tuidriver.StatusSnapshot
-	connectStatus            tuidriver.StatusSnapshot
-	useModelStatus           tuidriver.StatusSnapshot
-	newSession               session.Session
-	resumedSession           session.Session
+	status                   control.StatusSnapshot
+	connectStatus            control.StatusSnapshot
+	useModelStatus           control.StatusSnapshot
+	newSession               control.SessionSnapshot
+	resumedSession           control.SessionSnapshot
 	replay                   []kernel.EventEnvelope
 	connectCalls             int
 	useModelCalls            int
@@ -1841,30 +1904,30 @@ type bridgeTestDriver struct {
 	repairSandboxCalls       int
 	resetSandboxCalls        int
 	compactCalls             int
-	lastConnect              tuidriver.ConnectConfig
+	lastConnect              control.ConnectConfig
 	lastModelAlias           string
 	lastReasoningEffort      string
 	lastDeletedAlias         string
 	lastAddedAgent           string
-	lastAddOptions           tuidriver.AgentAddOptions
+	lastAddOptions           control.AgentAddOptions
 	lastRemovedAgent         string
 	lastHandoffAgent         string
 	lastStartedAgent         string
 	lastStartedPrompt        string
-	lastStartedAttachments   []tuidriver.Attachment
+	lastStartedAttachments   []control.Attachment
 	lastContinuedHandle      string
 	lastContinuedPrompt      string
-	lastContinuedAttachments []tuidriver.Attachment
-	subagentTurn             tuidriver.Turn
-	agentList                []tuidriver.AgentCandidate
-	agentStatus              tuidriver.AgentStatusSnapshot
+	lastContinuedAttachments []control.Attachment
+	subagentTurn             control.Turn
+	agentList                []control.AgentCandidate
+	agentStatus              control.AgentStatusSnapshot
 	addAgentErr              error
-	slashArgCandidates       map[string][]tuidriver.SlashArgCandidate
+	slashArgCandidates       map[string][]control.SlashArgCandidate
 }
 
 type bridgeLightweightStatusDriver struct {
 	bridgeTestDriver
-	lightweightStatus      tuidriver.StatusSnapshot
+	lightweightStatus      control.StatusSnapshot
 	statusCalls            int
 	lightweightStatusCalls int
 }
@@ -1876,19 +1939,25 @@ type bridgeTestTurn struct {
 func (t *bridgeTestTurn) HandleID() string { return "handle-1" }
 func (t *bridgeTestTurn) RunID() string    { return "run-1" }
 func (t *bridgeTestTurn) TurnID() string   { return "turn-1" }
-func (t *bridgeTestTurn) SessionRef() session.SessionRef {
-	return session.SessionRef{SessionID: "root-session"}
+func (t *bridgeTestTurn) Events() <-chan eventstream.Envelope {
+	out := make(chan eventstream.Envelope, 8)
+	go func() {
+		defer close(out)
+		for env := range t.events {
+			for _, projected := range kernel.ProjectACPEventEnvelope(env) {
+				out <- projected
+			}
+		}
+	}()
+	return out
 }
-func (t *bridgeTestTurn) Events() <-chan kernel.EventEnvelope { return t.events }
-func (t *bridgeTestTurn) Submit(context.Context, kernel.SubmitRequest) error {
+func (t *bridgeTestTurn) SubmitApproval(context.Context, control.ApprovalDecision) error {
 	return nil
 }
-func (t *bridgeTestTurn) Cancel() kernel.CancelResult {
-	return kernel.CancelResult{Status: kernel.CancelStatusAlreadyCancelled}
-}
+func (t *bridgeTestTurn) Cancel()      {}
 func (t *bridgeTestTurn) Close() error { return nil }
 
-func bridgeTurnWithEvents(envs ...kernel.EventEnvelope) tuidriver.Turn {
+func bridgeTurnWithEvents(envs ...kernel.EventEnvelope) control.Turn {
 	events := make(chan kernel.EventEnvelope, len(envs))
 	for _, env := range envs {
 		events <- env
@@ -1897,11 +1966,11 @@ func bridgeTurnWithEvents(envs ...kernel.EventEnvelope) tuidriver.Turn {
 	return &bridgeTestTurn{events: events}
 }
 
-func cloneTUIDriverAttachments(items []tuidriver.Attachment) []tuidriver.Attachment {
+func cloneTUIDriverAttachments(items []control.Attachment) []control.Attachment {
 	if len(items) == 0 {
 		return nil
 	}
-	return append([]tuidriver.Attachment(nil), items...)
+	return append([]control.Attachment(nil), items...)
 }
 
 func participantAssistantEnvelope(scopeID string, actor string, text string) kernel.EventEnvelope {
@@ -1924,146 +1993,155 @@ func participantAssistantEnvelope(scopeID string, actor string, text string) ker
 }
 
 type bridgeSubmitDriver struct {
-	turn                   tuidriver.Turn
+	turn                   control.Turn
 	terminalEvents         <-chan kernel.EventEnvelope
 	terminalSubscribeCalls int
 	submitCalls            int
-	lastSubmission         tuidriver.Submission
+	lastSubmission         control.Submission
 }
 
-func (d *bridgeSubmitDriver) Status(context.Context) (tuidriver.StatusSnapshot, error) {
-	return tuidriver.StatusSnapshot{}, nil
+func (d *bridgeSubmitDriver) Status(context.Context) (control.StatusSnapshot, error) {
+	return control.StatusSnapshot{}, nil
 }
 func (d *bridgeSubmitDriver) WorkspaceDir() string { return "" }
-func (d *bridgeSubmitDriver) Submit(_ context.Context, sub tuidriver.Submission) (tuidriver.Turn, error) {
+func (d *bridgeSubmitDriver) Submit(_ context.Context, sub control.Submission) (control.Turn, error) {
 	d.submitCalls++
 	d.lastSubmission = sub
 	return d.turn, nil
 }
-func (d *bridgeSubmitDriver) SubscribeStream(context.Context, kernel.EventEnvelope) (<-chan kernel.EventEnvelope, bool) {
+func (d *bridgeSubmitDriver) SubscribeStream(context.Context, eventstream.Envelope) (<-chan eventstream.Envelope, bool) {
 	d.terminalSubscribeCalls++
 	if d.terminalEvents == nil {
 		return nil, false
 	}
-	return d.terminalEvents, true
+	out := make(chan eventstream.Envelope, 8)
+	go func() {
+		defer close(out)
+		for env := range d.terminalEvents {
+			for _, projected := range kernel.ProjectACPEventEnvelope(env) {
+				out <- projected
+			}
+		}
+	}()
+	return out, true
 }
 func (d *bridgeSubmitDriver) Interrupt(context.Context) error { return nil }
-func (d *bridgeSubmitDriver) NewSession(context.Context) (session.Session, error) {
-	return session.Session{}, nil
+func (d *bridgeSubmitDriver) NewSession(context.Context) (control.SessionSnapshot, error) {
+	return control.SessionSnapshot{}, nil
 }
-func (d *bridgeSubmitDriver) ResumeSession(context.Context, string) (session.Session, error) {
-	return session.Session{}, nil
+func (d *bridgeSubmitDriver) ResumeSession(context.Context, string) (control.SessionSnapshot, error) {
+	return control.SessionSnapshot{}, nil
 }
-func (d *bridgeSubmitDriver) ListSessions(context.Context, int) ([]tuidriver.ResumeCandidate, error) {
+func (d *bridgeSubmitDriver) ListSessions(context.Context, int) ([]control.ResumeCandidate, error) {
 	return nil, nil
 }
-func (d *bridgeSubmitDriver) ReplayEvents(context.Context) ([]kernel.EventEnvelope, error) {
+func (d *bridgeSubmitDriver) ReplayEvents(context.Context) ([]eventstream.Envelope, error) {
 	return nil, nil
 }
 func (d *bridgeSubmitDriver) Compact(context.Context) error { return nil }
-func (d *bridgeSubmitDriver) Connect(context.Context, tuidriver.ConnectConfig) (tuidriver.StatusSnapshot, error) {
-	return tuidriver.StatusSnapshot{}, nil
+func (d *bridgeSubmitDriver) Connect(context.Context, control.ConnectConfig) (control.StatusSnapshot, error) {
+	return control.StatusSnapshot{}, nil
 }
-func (d *bridgeSubmitDriver) UseModel(context.Context, string, ...string) (tuidriver.StatusSnapshot, error) {
-	return tuidriver.StatusSnapshot{}, nil
+func (d *bridgeSubmitDriver) UseModel(context.Context, string, ...string) (control.StatusSnapshot, error) {
+	return control.StatusSnapshot{}, nil
 }
 func (d *bridgeSubmitDriver) DeleteModel(context.Context, string) error { return nil }
-func (d *bridgeSubmitDriver) CycleSessionMode(context.Context) (tuidriver.StatusSnapshot, error) {
-	return tuidriver.StatusSnapshot{}, nil
+func (d *bridgeSubmitDriver) CycleSessionMode(context.Context) (control.StatusSnapshot, error) {
+	return control.StatusSnapshot{}, nil
 }
-func (d *bridgeSubmitDriver) SetSandboxBackend(context.Context, string) (tuidriver.StatusSnapshot, error) {
-	return tuidriver.StatusSnapshot{}, nil
+func (d *bridgeSubmitDriver) SetSandboxBackend(context.Context, string) (control.StatusSnapshot, error) {
+	return control.StatusSnapshot{}, nil
 }
-func (d *bridgeSubmitDriver) PrepareSandbox(context.Context) (tuidriver.StatusSnapshot, error) {
-	return tuidriver.StatusSnapshot{}, nil
+func (d *bridgeSubmitDriver) PrepareSandbox(context.Context) (control.StatusSnapshot, error) {
+	return control.StatusSnapshot{}, nil
 }
-func (d *bridgeSubmitDriver) RepairSandbox(context.Context) (tuidriver.StatusSnapshot, error) {
-	return tuidriver.StatusSnapshot{}, nil
+func (d *bridgeSubmitDriver) RepairSandbox(context.Context) (control.StatusSnapshot, error) {
+	return control.StatusSnapshot{}, nil
 }
-func (d *bridgeSubmitDriver) SetSessionMode(context.Context, string) (tuidriver.StatusSnapshot, error) {
-	return tuidriver.StatusSnapshot{}, nil
+func (d *bridgeSubmitDriver) SetSessionMode(context.Context, string) (control.StatusSnapshot, error) {
+	return control.StatusSnapshot{}, nil
 }
-func (d *bridgeSubmitDriver) ListAgents(context.Context, int) ([]tuidriver.AgentCandidate, error) {
+func (d *bridgeSubmitDriver) ListAgents(context.Context, int) ([]control.AgentCandidate, error) {
 	return nil, nil
 }
-func (d *bridgeSubmitDriver) AgentStatus(context.Context) (tuidriver.AgentStatusSnapshot, error) {
-	return tuidriver.AgentStatusSnapshot{}, nil
+func (d *bridgeSubmitDriver) AgentStatus(context.Context) (control.AgentStatusSnapshot, error) {
+	return control.AgentStatusSnapshot{}, nil
 }
-func (d *bridgeSubmitDriver) AddAgent(context.Context, string) (tuidriver.AgentStatusSnapshot, error) {
-	return tuidriver.AgentStatusSnapshot{}, nil
+func (d *bridgeSubmitDriver) AddAgent(context.Context, string) (control.AgentStatusSnapshot, error) {
+	return control.AgentStatusSnapshot{}, nil
 }
-func (d *bridgeSubmitDriver) AddAgentWithOptions(context.Context, string, tuidriver.AgentAddOptions) (tuidriver.AgentStatusSnapshot, error) {
-	return tuidriver.AgentStatusSnapshot{}, nil
+func (d *bridgeSubmitDriver) AddAgentWithOptions(context.Context, string, control.AgentAddOptions) (control.AgentStatusSnapshot, error) {
+	return control.AgentStatusSnapshot{}, nil
 }
-func (d *bridgeSubmitDriver) RemoveAgent(context.Context, string) (tuidriver.AgentStatusSnapshot, error) {
-	return tuidriver.AgentStatusSnapshot{}, nil
+func (d *bridgeSubmitDriver) RemoveAgent(context.Context, string) (control.AgentStatusSnapshot, error) {
+	return control.AgentStatusSnapshot{}, nil
 }
-func (d *bridgeSubmitDriver) HandoffAgent(context.Context, string) (tuidriver.AgentStatusSnapshot, error) {
-	return tuidriver.AgentStatusSnapshot{}, nil
+func (d *bridgeSubmitDriver) HandoffAgent(context.Context, string) (control.AgentStatusSnapshot, error) {
+	return control.AgentStatusSnapshot{}, nil
 }
-func (d *bridgeSubmitDriver) StartAgentSubagent(context.Context, string, string, []tuidriver.Attachment) (tuidriver.Turn, error) {
+func (d *bridgeSubmitDriver) StartAgentSubagent(context.Context, string, string, []control.Attachment) (control.Turn, error) {
 	return nil, nil
 }
-func (d *bridgeSubmitDriver) ContinueSubagent(context.Context, string, string, []tuidriver.Attachment) (tuidriver.Turn, error) {
+func (d *bridgeSubmitDriver) ContinueSubagent(context.Context, string, string, []control.Attachment) (control.Turn, error) {
 	return nil, nil
 }
-func (d *bridgeSubmitDriver) CompleteMention(context.Context, string, int) ([]tuidriver.CompletionCandidate, error) {
+func (d *bridgeSubmitDriver) CompleteMention(context.Context, string, int) ([]control.CompletionCandidate, error) {
 	return nil, nil
 }
-func (d *bridgeSubmitDriver) CompleteFile(context.Context, string, int) ([]tuidriver.CompletionCandidate, error) {
+func (d *bridgeSubmitDriver) CompleteFile(context.Context, string, int) ([]control.CompletionCandidate, error) {
 	return nil, nil
 }
-func (d *bridgeSubmitDriver) CompleteSkill(context.Context, string, int) ([]tuidriver.CompletionCandidate, error) {
+func (d *bridgeSubmitDriver) CompleteSkill(context.Context, string, int) ([]control.CompletionCandidate, error) {
 	return nil, nil
 }
-func (d *bridgeSubmitDriver) CompleteResume(context.Context, string, int) ([]tuidriver.ResumeCandidate, error) {
+func (d *bridgeSubmitDriver) CompleteResume(context.Context, string, int) ([]control.ResumeCandidate, error) {
 	return nil, nil
 }
-func (d *bridgeSubmitDriver) CompleteSlashArg(context.Context, string, string, int) ([]tuidriver.SlashArgCandidate, error) {
+func (d *bridgeSubmitDriver) CompleteSlashArg(context.Context, string, string, int) ([]control.SlashArgCandidate, error) {
 	return nil, nil
 }
 
-var _ tuidriver.Turn = (*bridgeTestTurn)(nil)
-var _ tuidriver.Driver = (*bridgeSubmitDriver)(nil)
+var _ control.Turn = (*bridgeTestTurn)(nil)
+var _ control.Service = (*bridgeSubmitDriver)(nil)
 
 var _ = time.Time{}
 
-func (d *bridgeTestDriver) Status(context.Context) (tuidriver.StatusSnapshot, error) {
+func (d *bridgeTestDriver) Status(context.Context) (control.StatusSnapshot, error) {
 	return d.status, nil
 }
 
-func (d *bridgeLightweightStatusDriver) Status(ctx context.Context) (tuidriver.StatusSnapshot, error) {
+func (d *bridgeLightweightStatusDriver) Status(ctx context.Context) (control.StatusSnapshot, error) {
 	d.statusCalls++
 	return d.bridgeTestDriver.Status(ctx)
 }
 
-func (d *bridgeLightweightStatusDriver) LightweightStatus(context.Context) (tuidriver.StatusSnapshot, error) {
+func (d *bridgeLightweightStatusDriver) LightweightStatus(context.Context) (control.StatusSnapshot, error) {
 	d.lightweightStatusCalls++
 	return d.lightweightStatus, nil
 }
 
 func (d *bridgeTestDriver) WorkspaceDir() string { return "" }
-func (d *bridgeTestDriver) Submit(context.Context, tuidriver.Submission) (tuidriver.Turn, error) {
+func (d *bridgeTestDriver) Submit(context.Context, control.Submission) (control.Turn, error) {
 	return nil, nil
 }
 func (d *bridgeTestDriver) Interrupt(context.Context) error { return nil }
-func (d *bridgeTestDriver) NewSession(context.Context) (session.Session, error) {
+func (d *bridgeTestDriver) NewSession(context.Context) (control.SessionSnapshot, error) {
 	return d.newSession, nil
 }
-func (d *bridgeTestDriver) ResumeSession(context.Context, string) (session.Session, error) {
+func (d *bridgeTestDriver) ResumeSession(context.Context, string) (control.SessionSnapshot, error) {
 	return d.resumedSession, nil
 }
-func (d *bridgeTestDriver) ListSessions(context.Context, int) ([]tuidriver.ResumeCandidate, error) {
+func (d *bridgeTestDriver) ListSessions(context.Context, int) ([]control.ResumeCandidate, error) {
 	return nil, nil
 }
-func (d *bridgeTestDriver) ReplayEvents(context.Context) ([]kernel.EventEnvelope, error) {
-	return d.replay, nil
+func (d *bridgeTestDriver) ReplayEvents(context.Context) ([]eventstream.Envelope, error) {
+	return projectKernelTestEvents(d.replay), nil
 }
 func (d *bridgeTestDriver) Compact(context.Context) error {
 	d.compactCalls++
 	return nil
 }
-func (d *bridgeTestDriver) Connect(_ context.Context, cfg tuidriver.ConnectConfig) (tuidriver.StatusSnapshot, error) {
+func (d *bridgeTestDriver) Connect(_ context.Context, cfg control.ConnectConfig) (control.StatusSnapshot, error) {
 	d.connectCalls++
 	d.lastConnect = cfg
 	if d.connectStatus.Model != "" || d.connectStatus.Workspace != "" || d.connectStatus.ModeLabel != "" {
@@ -2071,7 +2149,7 @@ func (d *bridgeTestDriver) Connect(_ context.Context, cfg tuidriver.ConnectConfi
 	}
 	return d.status, nil
 }
-func (d *bridgeTestDriver) UseModel(_ context.Context, alias string, reasoningEffort ...string) (tuidriver.StatusSnapshot, error) {
+func (d *bridgeTestDriver) UseModel(_ context.Context, alias string, reasoningEffort ...string) (control.StatusSnapshot, error) {
 	d.useModelCalls++
 	d.lastModelAlias = alias
 	if len(reasoningEffort) > 0 {
@@ -2087,13 +2165,13 @@ func (d *bridgeTestDriver) DeleteModel(_ context.Context, alias string) error {
 	d.lastDeletedAlias = alias
 	return nil
 }
-func (d *bridgeTestDriver) CycleSessionMode(context.Context) (tuidriver.StatusSnapshot, error) {
+func (d *bridgeTestDriver) CycleSessionMode(context.Context) (control.StatusSnapshot, error) {
 	return d.status, nil
 }
-func (d *bridgeTestDriver) SetSandboxBackend(context.Context, string) (tuidriver.StatusSnapshot, error) {
+func (d *bridgeTestDriver) SetSandboxBackend(context.Context, string) (control.StatusSnapshot, error) {
 	return d.status, nil
 }
-func (d *bridgeTestDriver) PrepareSandbox(ctx context.Context) (tuidriver.StatusSnapshot, error) {
+func (d *bridgeTestDriver) PrepareSandbox(ctx context.Context) (control.StatusSnapshot, error) {
 	d.prepareSandboxCalls++
 	sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{
 		Message: "preparing current workspace ACL policy",
@@ -2106,7 +2184,7 @@ func (d *bridgeTestDriver) PrepareSandbox(ctx context.Context) (tuidriver.Status
 	})
 	return d.status, nil
 }
-func (d *bridgeTestDriver) RepairSandbox(ctx context.Context) (tuidriver.StatusSnapshot, error) {
+func (d *bridgeTestDriver) RepairSandbox(ctx context.Context) (control.StatusSnapshot, error) {
 	d.repairSandboxCalls++
 	sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{
 		Message: "repairing current workspace ACL policy",
@@ -2115,7 +2193,7 @@ func (d *bridgeTestDriver) RepairSandbox(ctx context.Context) (tuidriver.StatusS
 	})
 	return d.status, nil
 }
-func (d *bridgeTestDriver) ResetSandbox(ctx context.Context) (tuidriver.StatusSnapshot, error) {
+func (d *bridgeTestDriver) ResetSandbox(ctx context.Context) (control.StatusSnapshot, error) {
 	d.resetSandboxCalls++
 	sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{
 		Message: "removing Windows sandbox ACL state",
@@ -2128,40 +2206,40 @@ func (d *bridgeTestDriver) ResetSandbox(ctx context.Context) (tuidriver.StatusSn
 	})
 	return d.status, nil
 }
-func (d *bridgeTestDriver) SetSessionMode(context.Context, string) (tuidriver.StatusSnapshot, error) {
+func (d *bridgeTestDriver) SetSessionMode(context.Context, string) (control.StatusSnapshot, error) {
 	return d.status, nil
 }
-func (d *bridgeTestDriver) ListAgents(context.Context, int) ([]tuidriver.AgentCandidate, error) {
+func (d *bridgeTestDriver) ListAgents(context.Context, int) ([]control.AgentCandidate, error) {
 	d.listAgentCalls++
 	return d.agentList, nil
 }
-func (d *bridgeTestDriver) AgentStatus(context.Context) (tuidriver.AgentStatusSnapshot, error) {
+func (d *bridgeTestDriver) AgentStatus(context.Context) (control.AgentStatusSnapshot, error) {
 	d.agentStatusCalls++
 	return d.agentStatus, nil
 }
-func (d *bridgeTestDriver) AddAgent(_ context.Context, target string) (tuidriver.AgentStatusSnapshot, error) {
-	return d.AddAgentWithOptions(context.Background(), target, tuidriver.AgentAddOptions{})
+func (d *bridgeTestDriver) AddAgent(_ context.Context, target string) (control.AgentStatusSnapshot, error) {
+	return d.AddAgentWithOptions(context.Background(), target, control.AgentAddOptions{})
 }
-func (d *bridgeTestDriver) AddAgentWithOptions(_ context.Context, target string, opts tuidriver.AgentAddOptions) (tuidriver.AgentStatusSnapshot, error) {
+func (d *bridgeTestDriver) AddAgentWithOptions(_ context.Context, target string, opts control.AgentAddOptions) (control.AgentStatusSnapshot, error) {
 	d.addAgentCalls++
 	d.lastAddedAgent = target
 	d.lastAddOptions = opts
 	if d.addAgentErr != nil {
-		return tuidriver.AgentStatusSnapshot{}, d.addAgentErr
+		return control.AgentStatusSnapshot{}, d.addAgentErr
 	}
 	return d.agentStatus, nil
 }
-func (d *bridgeTestDriver) RemoveAgent(_ context.Context, target string) (tuidriver.AgentStatusSnapshot, error) {
+func (d *bridgeTestDriver) RemoveAgent(_ context.Context, target string) (control.AgentStatusSnapshot, error) {
 	d.removeAgentCalls++
 	d.lastRemovedAgent = target
 	return d.agentStatus, nil
 }
-func (d *bridgeTestDriver) HandoffAgent(_ context.Context, target string) (tuidriver.AgentStatusSnapshot, error) {
+func (d *bridgeTestDriver) HandoffAgent(_ context.Context, target string) (control.AgentStatusSnapshot, error) {
 	d.handoffAgentCalls++
 	d.lastHandoffAgent = target
 	return d.agentStatus, nil
 }
-func (d *bridgeTestDriver) StartAgentSubagent(_ context.Context, agent string, prompt string, attachments []tuidriver.Attachment) (tuidriver.Turn, error) {
+func (d *bridgeTestDriver) StartAgentSubagent(_ context.Context, agent string, prompt string, attachments []control.Attachment) (control.Turn, error) {
 	d.lastStartedAgent = agent
 	d.lastStartedPrompt = prompt
 	d.lastStartedAttachments = cloneTUIDriverAttachments(attachments)
@@ -2170,7 +2248,7 @@ func (d *bridgeTestDriver) StartAgentSubagent(_ context.Context, agent string, p
 	}
 	return bridgeTurnWithEvents(), nil
 }
-func (d *bridgeTestDriver) ContinueSubagent(_ context.Context, handle string, prompt string, attachments []tuidriver.Attachment) (tuidriver.Turn, error) {
+func (d *bridgeTestDriver) ContinueSubagent(_ context.Context, handle string, prompt string, attachments []control.Attachment) (control.Turn, error) {
 	d.lastContinuedHandle = handle
 	d.lastContinuedPrompt = prompt
 	d.lastContinuedAttachments = cloneTUIDriverAttachments(attachments)
@@ -2179,19 +2257,19 @@ func (d *bridgeTestDriver) ContinueSubagent(_ context.Context, handle string, pr
 	}
 	return bridgeTurnWithEvents(), nil
 }
-func (d *bridgeTestDriver) CompleteMention(context.Context, string, int) ([]tuidriver.CompletionCandidate, error) {
+func (d *bridgeTestDriver) CompleteMention(context.Context, string, int) ([]control.CompletionCandidate, error) {
 	return nil, nil
 }
-func (d *bridgeTestDriver) CompleteFile(context.Context, string, int) ([]tuidriver.CompletionCandidate, error) {
+func (d *bridgeTestDriver) CompleteFile(context.Context, string, int) ([]control.CompletionCandidate, error) {
 	return nil, nil
 }
-func (d *bridgeTestDriver) CompleteSkill(context.Context, string, int) ([]tuidriver.CompletionCandidate, error) {
+func (d *bridgeTestDriver) CompleteSkill(context.Context, string, int) ([]control.CompletionCandidate, error) {
 	return nil, nil
 }
-func (d *bridgeTestDriver) CompleteResume(context.Context, string, int) ([]tuidriver.ResumeCandidate, error) {
+func (d *bridgeTestDriver) CompleteResume(context.Context, string, int) ([]control.ResumeCandidate, error) {
 	return nil, nil
 }
-func (d *bridgeTestDriver) CompleteSlashArg(_ context.Context, command string, _ string, _ int) ([]tuidriver.SlashArgCandidate, error) {
+func (d *bridgeTestDriver) CompleteSlashArg(_ context.Context, command string, _ string, _ int) ([]control.SlashArgCandidate, error) {
 	if d.slashArgCandidates != nil {
 		return d.slashArgCandidates[strings.TrimSpace(command)], nil
 	}

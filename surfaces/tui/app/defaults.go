@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	tuicommands "github.com/OnslaughtSnail/caelis/surfaces/tui/commands"
+	controlcommands "github.com/OnslaughtSnail/caelis/protocol/acp/control/commands"
 )
 
 // defaults.go provides DefaultCommands and DefaultWizards for the TUI shell.
@@ -41,8 +41,8 @@ var connectWizardTokenEnvByEndpoint = map[string]string{
 	"volcengine|https://ark.cn-beijing.volces.com/api/coding/v3": "VOLCENGINE_API_KEY",
 }
 
-func lookupSlashCommandSpec(name string) (tuicommands.CommandSpec, bool) {
-	return tuicommands.Lookup(name)
+func lookupSlashCommandSpec(name string) (controlcommands.CommandSpec, bool) {
+	return controlcommands.Lookup(name)
 }
 
 func defaultHelpText() string {
@@ -50,7 +50,7 @@ func defaultHelpText() string {
 }
 
 func helpTextForCommands(commands []string) string {
-	return tuicommands.HelpText(commands) + "\n\n" + shortcutHelpTextForPlatform(runtime.GOOS, isWSL())
+	return controlcommands.HelpText(commands) + "\n\n" + shortcutHelpTextForPlatform(runtime.GOOS, isWSL())
 }
 
 type shortcutHelpRow struct {
@@ -183,7 +183,7 @@ func joinNonEmpty(parts []string, sep string) string {
 
 // DefaultCommands returns the set of slash commands available in the TUI.
 func DefaultCommands() []string {
-	return tuicommands.DefaultNames()
+	return controlcommands.DefaultNames()
 }
 
 // DefaultWizards returns the set of multi-step wizard flows for the TUI.
@@ -395,11 +395,11 @@ func connectWizardProviderHasBaseURLStep(provider string) bool {
 }
 
 func buildConnectWizardPayload(state map[string]string) string {
-	return tuicommands.ConnectWizardStateFromMap(state).EncodeCompletionPayload()
+	return controlcommands.ConnectWizardStateFromMap(state).EncodeCompletionPayload()
 }
 
 func connectWizardTimeout() string {
-	return strconv.Itoa(tuicommands.DefaultConnectTimeoutSeconds)
+	return strconv.Itoa(controlcommands.DefaultConnectTimeoutSeconds)
 }
 
 func emptyAsDash(value string) string {

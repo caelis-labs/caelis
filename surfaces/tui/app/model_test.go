@@ -582,7 +582,7 @@ func TestPromptRequestKeepsGatewayToolContentVisible(t *testing.T) {
 
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
 	m := updated.(*Model)
-	updated, _ = m.Update(kernel.EventEnvelope{
+	updated, _ = m.Update(gatewayEventMsg(kernel.EventEnvelope{
 		Event: kernel.Event{
 			Kind:       kernel.EventKindToolCall,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -594,8 +594,8 @@ func TestPromptRequestKeepsGatewayToolContentVisible(t *testing.T) {
 				Status:   "running",
 				Scope:    kernel.EventScopeMain,
 			},
-		},
-	})
+		}}))
+
 	m = updated.(*Model)
 	updated, _ = m.Update(PromptRequestMsg{
 		Title:    "Approval Required",
@@ -631,7 +631,7 @@ func TestRunningGatewayToolCallIsVisibleBeforeTaskCompletes(t *testing.T) {
 	m := updated.(*Model)
 	updated, _ = m.Update(SetRunningMsg{Running: true})
 	m = updated.(*Model)
-	updated, _ = m.Update(kernel.EventEnvelope{
+	updated, _ = m.Update(gatewayEventMsg(kernel.EventEnvelope{
 		Event: kernel.Event{
 			Kind:       kernel.EventKindToolCall,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -643,8 +643,8 @@ func TestRunningGatewayToolCallIsVisibleBeforeTaskCompletes(t *testing.T) {
 				Status:   "running",
 				Scope:    kernel.EventScopeMain,
 			},
-		},
-	})
+		}}))
+
 	m = updated.(*Model)
 
 	view := ansi.Strip(m.View().Content)
@@ -666,7 +666,7 @@ func TestPendingGatewayToolCallIsVisibleBeforeTaskCompletes(t *testing.T) {
 	m := updated.(*Model)
 	updated, _ = m.Update(SetRunningMsg{Running: true})
 	m = updated.(*Model)
-	updated, _ = m.Update(kernel.EventEnvelope{
+	updated, _ = m.Update(gatewayEventMsg(kernel.EventEnvelope{
 		Event: kernel.Event{
 			Kind:       kernel.EventKindToolCall,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -678,8 +678,8 @@ func TestPendingGatewayToolCallIsVisibleBeforeTaskCompletes(t *testing.T) {
 				Status:   "pending",
 				Scope:    kernel.EventScopeMain,
 			},
-		},
-	})
+		}}))
+
 	m = updated.(*Model)
 
 	view := m.View().Content

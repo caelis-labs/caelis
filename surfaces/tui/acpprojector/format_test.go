@@ -3,15 +3,13 @@ package acpprojector
 import (
 	"strings"
 	"testing"
-
-	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
 func TestFormatToolContentRendersStandardDiffWithHunkHeader(t *testing.T) {
 	t.Parallel()
 
 	oldText := "context-a\ncontext-b\nold line\ncontext-c\n"
-	got := FormatToolContent([]session.ProtocolToolCallContent{{
+	got := FormatToolContent([]ToolContent{{
 		Type:    "diff",
 		Path:    "/workspace/demo.txt",
 		OldText: &oldText,
@@ -44,7 +42,7 @@ func TestFormatToolContentRendersAppendDiffWithActualNewStart(t *testing.T) {
 		"line 10",
 	}, "\n") + "\n"
 	newText := oldText + "line 11\nline 12\n"
-	got := FormatToolContent([]session.ProtocolToolCallContent{{
+	got := FormatToolContent([]ToolContent{{
 		Type:    "diff",
 		Path:    "/workspace/demo.txt",
 		OldText: &oldText,
@@ -63,7 +61,7 @@ func TestFormatToolContentPreservesUnchangedLinesBetweenEdits(t *testing.T) {
 	t.Parallel()
 
 	oldText := "line 1\nold a\nshared middle\nold b\nline 5\n"
-	got := FormatToolContent([]session.ProtocolToolCallContent{{
+	got := FormatToolContent([]ToolContent{{
 		Type:    "diff",
 		Path:    "/workspace/demo.txt",
 		OldText: &oldText,
@@ -86,7 +84,7 @@ func TestFormatToolContentCountsSignedContentLines(t *testing.T) {
 	t.Parallel()
 
 	oldText := "plain\n---\n"
-	got := FormatToolContent([]session.ProtocolToolCallContent{{
+	got := FormatToolContent([]ToolContent{{
 		Type:    "diff",
 		Path:    "/workspace/demo.md",
 		OldText: &oldText,
@@ -107,7 +105,7 @@ func TestFormatToolContentSkipsEmptyDiff(t *testing.T) {
 	t.Parallel()
 
 	text := "same\n"
-	got := FormatToolContent([]session.ProtocolToolCallContent{{
+	got := FormatToolContent([]ToolContent{{
 		Type:    "diff",
 		Path:    "/workspace/demo.txt",
 		OldText: &text,
@@ -122,10 +120,10 @@ func TestFormatToolContentSkipsEmptyDiff(t *testing.T) {
 func TestFormatToolContentDoesNotRenderTerminalContentBodies(t *testing.T) {
 	t.Parallel()
 
-	got := FormatToolContent([]session.ProtocolToolCallContent{{
+	got := FormatToolContent([]ToolContent{{
 		Type:       "terminal",
 		TerminalID: "call-1",
-		Content:    session.ProtocolTextContent("terminal output\n"),
+		Content:    map[string]any{"type": "text", "text": "terminal output\n"},
 	}})
 
 	if got != "" {

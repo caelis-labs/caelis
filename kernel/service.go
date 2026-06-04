@@ -284,6 +284,7 @@ var StreamFrameEvent = kernelimpl.StreamFrameEvent
 var StreamFrameEvents = kernelimpl.StreamFrameEvents
 var CleanSubagentFinalOutput = kernelimpl.CleanSubagentFinalOutput
 var ProjectSessionEvent = kernelimpl.ProjectSessionEvent
+var ProjectACPEventEnvelope = kernelimpl.ProjectACPEventEnvelope
 var EventMetaString = kernelimpl.EventMetaString
 var EventMetaBool = kernelimpl.EventMetaBool
 var FormatApprovalReviewText = kernelimpl.FormatApprovalReviewText

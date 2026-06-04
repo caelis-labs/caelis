@@ -7,6 +7,7 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
 )
 
 func TestRenderSchedulerCoalescesAssistantFramesToOneMutation(t *testing.T) {
@@ -35,8 +36,8 @@ func TestRenderSchedulerCoalescesAssistantFramesToOneMutation(t *testing.T) {
 	}
 }
 
-func schedulerAssistantFrame(text string) kernel.EventEnvelope {
-	return kernel.EventEnvelope{
+func schedulerAssistantFrame(text string) eventstream.Envelope {
+	env := kernel.EventEnvelope{
 		Event: kernel.Event{
 			Kind:       kernel.EventKindAssistantMessage,
 			HandleID:   "handle-1",
@@ -52,6 +53,11 @@ func schedulerAssistantFrame(text string) kernel.EventEnvelope {
 			},
 		},
 	}
+	events := kernel.ProjectACPEventEnvelope(env)
+	if len(events) == 0 {
+		return eventstream.Envelope{}
+	}
+	return events[0]
 }
 
 func TestRenderSchedulerCoalescesLogChunksToOneDrainItem(t *testing.T) {

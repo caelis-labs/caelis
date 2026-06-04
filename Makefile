@@ -59,10 +59,10 @@ tui-interaction: cache-dirs
 	go test ./surfaces/tui/app -run 'TestRegression(Resize|NoWelcome|TerminalOutput|FollowTail|Slash|Approval)'
 
 command-regression: cache-dirs
-	go test ./surfaces/tui/gatewaydriver -run 'TestRegression(Command(Status|Workspace|List|Agent|Parse|Connect|NewDriver)|Slash)'
+	go test ./app/gatewayapp/controladapter -run 'TestRegression(Command(Status|Workspace|List|Agent|Parse|Connect|NewDriver)|Slash)'
 
 command-execution-regression: cache-dirs
-	go test ./surfaces/tui/gatewaydriver -run 'TestRegressionCommandExec'
+	go test ./app/gatewayapp/controladapter -run 'TestRegressionCommandExec'
 
 tui-bench: cache-dirs
 	CAELIS_BENCH_REGRESSION=1 go test ./surfaces/tui/app -run 'TestRegressionBenchThresholds' -v

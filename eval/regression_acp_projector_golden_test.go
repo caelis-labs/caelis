@@ -249,7 +249,7 @@ func TestRegressionACPProjectorGoldenAssistantMessage(t *testing.T) {
 func TestRegressionACPProjectorTUIFormatGolden(t *testing.T) {
 	t.Parallel()
 
-	got := acpprojector.FormatToolContent([]session.ProtocolToolCallContent{{
+	got := acpprojector.FormatToolContent([]acpprojector.ToolContent{{
 		Type:    "content",
 		Content: session.ProtocolTextContent("some output text"),
 	}})
@@ -258,7 +258,7 @@ func TestRegressionACPProjectorTUIFormatGolden(t *testing.T) {
 	}
 
 	oldText := "old line\n"
-	got = acpprojector.FormatToolContent([]session.ProtocolToolCallContent{{
+	got = acpprojector.FormatToolContent([]acpprojector.ToolContent{{
 		Type:    "diff",
 		Path:    "/workspace/file.go",
 		OldText: &oldText,

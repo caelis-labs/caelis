@@ -12,7 +12,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/colorprofile"
 
-	"github.com/OnslaughtSnail/caelis/surfaces/tui/driver"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/control"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/tuikit"
 )
 
@@ -91,7 +91,7 @@ type Diagnostics struct {
 	StreamSmoothingFlushReason    map[string]uint64
 	GlamourRenderCalls            uint64
 	InlineMarkdownCalls           uint64
-	DriverStatusCalls             uint64
+	ControlStatusCalls            uint64
 	RunningTickerAnimatedRenders  uint64
 	RunningTickerStaticRenders    uint64
 	RunningTickerStyleCacheMisses uint64
@@ -124,7 +124,7 @@ type Config struct {
 	InitialLogs            []string
 	Commands               []string
 	Wizards                []WizardDef
-	Driver                 tuidriver.Driver
+	ControlService         control.Service
 	ProgramSender          *ProgramSender
 	OnStart                func()
 	ExecuteLine            func(Submission) TaskResultMsg

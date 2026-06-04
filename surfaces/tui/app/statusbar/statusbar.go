@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/surfaces/tui/driver"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/control"
 )
 
 type ViewModel struct {
@@ -21,7 +21,7 @@ type ViewModel struct {
 	Running         bool
 }
 
-func FromSnapshot(status tuidriver.StatusSnapshot) ViewModel {
+func FromSnapshot(status control.StatusSnapshot) ViewModel {
 	model := firstNonEmpty(strings.TrimSpace(status.Model), strings.TrimSpace(status.ModelName), "not configured")
 	provider := firstNonEmpty(strings.TrimSpace(status.Provider), deriveProviderFromAlias(status.Model), "not configured")
 	sandbox := firstNonEmpty(strings.TrimSpace(status.SandboxResolvedBackend), strings.TrimSpace(status.SandboxType), strings.TrimSpace(status.SandboxRequestedBackend), "auto")

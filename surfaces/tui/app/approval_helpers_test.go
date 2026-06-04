@@ -1,21 +1,17 @@
 package tuiapp
 
-import (
-	"testing"
-
-	"github.com/OnslaughtSnail/caelis/kernel"
-)
+import "testing"
 
 func TestApprovalToPromptRequestIncludesSandboxDetails(t *testing.T) {
 	t.Parallel()
 
-	msg := approvalToPromptRequest(&kernel.ApprovalPayload{
+	msg := approvalToPromptRequest(&approvalPayload{
 		ToolName:           "RUN_COMMAND",
 		RawInput:           map[string]any{"command": "git fetch"},
 		Reason:             "host execution requires user approval",
 		Justification:      "Do you want to run git fetch on the host?",
 		SandboxPermissions: "require_escalated",
-		Options: []kernel.ApprovalOption{
+		Options: []approvalOption{
 			{ID: "allow_once", Name: "Allow once", Kind: "allow_once"},
 		},
 	}, make(chan PromptResponse, 1))

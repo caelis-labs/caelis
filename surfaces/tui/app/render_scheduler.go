@@ -5,7 +5,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/OnslaughtSnail/caelis/kernel"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
 )
 
 type pendingRenderEvent struct {
@@ -39,21 +39,21 @@ func (m *Model) shouldEnqueueRenderEvent(msg tea.Msg, policy renderEventPolicy) 
 	switch typed := msg.(type) {
 	case LogChunkMsg:
 		return typed.Chunk != ""
-	case kernel.EventEnvelope:
-		return gatewayEnvelopeShouldEnqueueForRenderDrain(typed)
+	case eventstream.Envelope:
+		return eventStreamEnvelopeShouldEnqueueForRenderDrain(typed)
 	default:
 		return false
 	}
 }
 
-func gatewayEnvelopeShouldEnqueueForRenderDrain(env kernel.EventEnvelope) bool {
+func eventStreamEnvelopeShouldEnqueueForRenderDrain(env eventstream.Envelope) bool {
 	if env.Err != nil {
 		return false
 	}
-	if _, ok := gatewayNarrativeBatchKey(env); ok {
+	if _, ok := eventStreamNarrativeBatchKey(env); ok {
 		return true
 	}
-	if _, ok := gatewayTerminalBatchKey(env); ok {
+	if _, ok := eventStreamTerminalBatchKey(env); ok {
 		return true
 	}
 	return false
@@ -76,12 +76,12 @@ func (m *Model) enqueueRenderEvent(msg tea.Msg, lane renderEventLane) tea.Cmd {
 
 func clonePendingRenderMsg(msg tea.Msg) tea.Msg {
 	switch typed := msg.(type) {
-	case kernel.EventEnvelope:
-		if _, ok := gatewayTerminalBatchKey(typed); ok {
-			return cloneGatewayTerminalEnvelope(typed)
+	case eventstream.Envelope:
+		if _, ok := eventStreamTerminalBatchKey(typed); ok {
+			return cloneEventStreamTerminalEnvelope(typed)
 		}
-		if _, ok := gatewayNarrativeBatchKey(typed); ok {
-			return cloneGatewayNarrativeEnvelope(typed)
+		if _, ok := eventStreamNarrativeBatchKey(typed); ok {
+			return cloneEventStreamNarrativeEnvelope(typed)
 		}
 		return typed
 	default:
@@ -102,21 +102,21 @@ func mergePendingRenderEvent(dst *pendingRenderEvent, src pendingRenderEvent) bo
 		left.Chunk += right.Chunk
 		dst.msg = left
 		return true
-	case kernel.EventEnvelope:
-		right, ok := src.msg.(kernel.EventEnvelope)
+	case eventstream.Envelope:
+		right, ok := src.msg.(eventstream.Envelope)
 		if !ok {
 			return false
 		}
-		if leftKey, ok := gatewayTerminalBatchKey(left); ok {
-			if rightKey, rightOK := gatewayTerminalBatchKey(right); rightOK && rightKey == leftKey {
-				mergeGatewayTerminalEnvelope(&left, right)
+		if leftKey, ok := eventStreamTerminalBatchKey(left); ok {
+			if rightKey, rightOK := eventStreamTerminalBatchKey(right); rightOK && rightKey == leftKey {
+				mergeEventStreamTerminalEnvelope(&left, right)
 				dst.msg = left
 				return true
 			}
 		}
-		if leftKey, ok := gatewayNarrativeBatchKey(left); ok {
-			if rightKey, rightOK := gatewayNarrativeBatchKey(right); rightOK && rightKey == leftKey {
-				mergeGatewayNarrativeEnvelope(&left, right)
+		if leftKey, ok := eventStreamNarrativeBatchKey(left); ok {
+			if rightKey, rightOK := eventStreamNarrativeBatchKey(right); rightOK && rightKey == leftKey {
+				mergeEventStreamNarrativeEnvelope(&left, right)
 				dst.msg = left
 				return true
 			}
@@ -140,8 +140,8 @@ func (m *Model) shouldFlushPendingRenderEventsBefore(msg tea.Msg, policy renderE
 	switch typed := msg.(type) {
 	case frameTickMsg:
 		return typed.kind != frameTickRenderDrain
-	case kernel.EventEnvelope:
-		return !gatewayEnvelopeShouldEnqueueForRenderDrain(typed)
+	case eventstream.Envelope:
+		return !eventStreamEnvelopeShouldEnqueueForRenderDrain(typed)
 	case LogChunkMsg:
 		return false
 	default:
@@ -170,8 +170,8 @@ func (m *Model) drainPendingRenderEvents(time.Time) tea.Cmd {
 				m = next
 			}
 			cmds = append(cmds, cmd)
-		case kernel.EventEnvelope:
-			model, cmd := m.handleGatewayEventEnvelope(typed)
+		case eventstream.Envelope:
+			model, cmd := m.handleACPEventEnvelope(typed)
 			if next, ok := model.(*Model); ok {
 				m = next
 			}

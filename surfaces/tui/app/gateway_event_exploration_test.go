@@ -14,7 +14,7 @@ import (
 func TestGatewayCompletedExplorationToolDefaultsCollapsedWithoutHeaderClick(t *testing.T) {
 	model := newGatewayEventTestModel()
 
-	updated, _ := model.Update(kernel.EventEnvelope{
+	updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
 		Event: kernel.Event{
 			Kind:       kernel.EventKindToolCall,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -25,10 +25,10 @@ func TestGatewayCompletedExplorationToolDefaultsCollapsedWithoutHeaderClick(t *t
 				Status:   kernel.ToolStatusRunning,
 				Scope:    kernel.EventScopeMain,
 			},
-		},
-	})
+		}}))
+
 	model = updated.(*Model)
-	updated, _ = model.Update(kernel.EventEnvelope{
+	updated, _ = model.Update(gatewayEventMsg(kernel.EventEnvelope{
 		Event: kernel.Event{
 			Kind:       kernel.EventKindToolResult,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -41,8 +41,8 @@ func TestGatewayCompletedExplorationToolDefaultsCollapsedWithoutHeaderClick(t *t
 				Status:    kernel.ToolStatusCompleted,
 				Scope:     kernel.EventScopeMain,
 			},
-		},
-	})
+		}}))
+
 	model = updated.(*Model)
 
 	block, ok := model.doc.Blocks()[0].(*MainACPTurnBlock)
@@ -82,7 +82,7 @@ func TestGatewayCompletedExplorationToolsRenderAsCompactSummary(t *testing.T) {
 		case "PATCH", "WRITE":
 			rawInput = map[string]any{"path": args}
 		}
-		updated, _ := model.Update(kernel.EventEnvelope{
+		updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
 			Event: kernel.Event{
 				Kind:       kernel.EventKindToolCall,
 				SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -93,10 +93,10 @@ func TestGatewayCompletedExplorationToolsRenderAsCompactSummary(t *testing.T) {
 					Status:   kernel.ToolStatusRunning,
 					Scope:    kernel.EventScopeMain,
 				},
-			},
-		})
+			}}))
+
 		model = updated.(*Model)
-		updated, _ = model.Update(kernel.EventEnvelope{
+		updated, _ = model.Update(gatewayEventMsg(kernel.EventEnvelope{
 			Event: kernel.Event{
 				Kind:       kernel.EventKindToolResult,
 				SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -109,12 +109,12 @@ func TestGatewayCompletedExplorationToolsRenderAsCompactSummary(t *testing.T) {
 					Status:    kernel.ToolStatusCompleted,
 					Scope:     kernel.EventScopeMain,
 				},
-			},
-		})
+			}}))
+
 		model = updated.(*Model)
 	}
 	sendReasoning := func(text string) {
-		updated, _ := model.Update(kernel.EventEnvelope{
+		updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
 			Event: kernel.Event{
 				Kind:       kernel.EventKindAssistantMessage,
 				SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -124,8 +124,8 @@ func TestGatewayCompletedExplorationToolsRenderAsCompactSummary(t *testing.T) {
 					Final:         true,
 					Scope:         kernel.EventScopeMain,
 				},
-			},
-		})
+			}}))
+
 		model = updated.(*Model)
 	}
 	sendReasoning("Now let me explore more to understand the project structure - specifically:\n1. The service layer for config.\n2. The rbac remote client.")
@@ -209,7 +209,7 @@ func TestGatewayCompletedExplorationSummaryCompactsAbsoluteWorkspacePaths(t *tes
 
 	model := newGatewayEventTestModel()
 	sendTool := func(id string, name string, rawInput map[string]any) {
-		updated, _ := model.Update(kernel.EventEnvelope{
+		updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
 			Event: kernel.Event{
 				Kind:       kernel.EventKindToolCall,
 				SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -220,10 +220,10 @@ func TestGatewayCompletedExplorationSummaryCompactsAbsoluteWorkspacePaths(t *tes
 					Status:   kernel.ToolStatusRunning,
 					Scope:    kernel.EventScopeMain,
 				},
-			},
-		})
+			}}))
+
 		model = updated.(*Model)
-		updated, _ = model.Update(kernel.EventEnvelope{
+		updated, _ = model.Update(gatewayEventMsg(kernel.EventEnvelope{
 			Event: kernel.Event{
 				Kind:       kernel.EventKindToolResult,
 				SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -235,8 +235,8 @@ func TestGatewayCompletedExplorationSummaryCompactsAbsoluteWorkspacePaths(t *tes
 					Status:   kernel.ToolStatusCompleted,
 					Scope:    kernel.EventScopeMain,
 				},
-			},
-		})
+			}}))
+
 		model = updated.(*Model)
 	}
 
@@ -266,7 +266,7 @@ func TestGatewayCompletedExplorationSummaryUsesReadRangesAndBasenames(t *testing
 	path := filepath.Join("internal", "task", "cluster", "sync_cluster.go")
 	sendRead := func(id string, offset int, start int, end int) {
 		rawInput := map[string]any{"path": path, "offset": offset, "limit": 50}
-		updated, _ := model.Update(kernel.EventEnvelope{
+		updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
 			Event: kernel.Event{
 				Kind:       kernel.EventKindToolCall,
 				SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -277,10 +277,10 @@ func TestGatewayCompletedExplorationSummaryUsesReadRangesAndBasenames(t *testing
 					Status:   kernel.ToolStatusRunning,
 					Scope:    kernel.EventScopeMain,
 				},
-			},
-		})
+			}}))
+
 		model = updated.(*Model)
-		updated, _ = model.Update(kernel.EventEnvelope{
+		updated, _ = model.Update(gatewayEventMsg(kernel.EventEnvelope{
 			Event: kernel.Event{
 				Kind:       kernel.EventKindToolResult,
 				SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -296,8 +296,8 @@ func TestGatewayCompletedExplorationSummaryUsesReadRangesAndBasenames(t *testing
 					Status: kernel.ToolStatusCompleted,
 					Scope:  kernel.EventScopeMain,
 				},
-			},
-		})
+			}}))
+
 		model = updated.(*Model)
 	}
 
@@ -322,7 +322,7 @@ func TestGatewayCompletedExplorationSummaryUsesReadRangesAndBasenames(t *testing
 func TestGatewaySingleExplorationStepSettlesOnNextAssistantNarrative(t *testing.T) {
 	model := newGatewayEventTestModel()
 	sendReasoning := func(text string) {
-		updated, _ := model.Update(kernel.EventEnvelope{Event: kernel.Event{
+		updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{Event: kernel.Event{
 			Kind:       kernel.EventKindAssistantMessage,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
 			Narrative: &kernel.NarrativePayload{
@@ -331,12 +331,13 @@ func TestGatewaySingleExplorationStepSettlesOnNextAssistantNarrative(t *testing.
 				Final:         true,
 				Scope:         kernel.EventScopeMain,
 			},
-		}})
+		}}))
+
 		model = updated.(*Model)
 	}
 	sendRead := func(id string, path string) {
 		rawInput := map[string]any{"path": path}
-		updated, _ := model.Update(kernel.EventEnvelope{Event: kernel.Event{
+		updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{Event: kernel.Event{
 			Kind:       kernel.EventKindToolCall,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
 			ToolCall: &kernel.ToolCallPayload{
@@ -346,9 +347,10 @@ func TestGatewaySingleExplorationStepSettlesOnNextAssistantNarrative(t *testing.
 				Status:   kernel.ToolStatusRunning,
 				Scope:    kernel.EventScopeMain,
 			},
-		}})
+		}}))
+
 		model = updated.(*Model)
-		updated, _ = model.Update(kernel.EventEnvelope{Event: kernel.Event{
+		updated, _ = model.Update(gatewayEventMsg(kernel.EventEnvelope{Event: kernel.Event{
 			Kind:       kernel.EventKindToolResult,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
 			ToolResult: &kernel.ToolResultPayload{
@@ -360,7 +362,8 @@ func TestGatewaySingleExplorationStepSettlesOnNextAssistantNarrative(t *testing.
 				Status:    kernel.ToolStatusCompleted,
 				Scope:     kernel.EventScopeMain,
 			},
-		}})
+		}}))
+
 		model = updated.(*Model)
 	}
 
@@ -953,7 +956,7 @@ func TestGatewayACPExplorationNamedToolsCanRenderExploredGroup(t *testing.T) {
 		if strings.EqualFold(name, "SEARCH") {
 			rawInput = map[string]any{"query": args}
 		}
-		updated, _ := model.Update(kernel.EventEnvelope{
+		updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
 			Event: kernel.Event{
 				Kind:       kernel.EventKindToolCall,
 				SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -965,10 +968,10 @@ func TestGatewayACPExplorationNamedToolsCanRenderExploredGroup(t *testing.T) {
 					Status:   kernel.ToolStatusRunning,
 					Scope:    kernel.EventScopeMain,
 				},
-			},
-		})
+			}}))
+
 		model = updated.(*Model)
-		updated, _ = model.Update(kernel.EventEnvelope{
+		updated, _ = model.Update(gatewayEventMsg(kernel.EventEnvelope{
 			Event: kernel.Event{
 				Kind:       kernel.EventKindToolResult,
 				SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -981,14 +984,14 @@ func TestGatewayACPExplorationNamedToolsCanRenderExploredGroup(t *testing.T) {
 					Status:   kernel.ToolStatusCompleted,
 					Scope:    kernel.EventScopeMain,
 				},
-			},
-		})
+			}}))
+
 		model = updated.(*Model)
 	}
 
 	sendACPTool("read-1", "READ", "internal/kernel/types.go", "type Event struct{}")
 	sendACPTool("search-1", "SEARCH", "EventKind", "42 matches")
-	updated, _ := model.Update(kernel.EventEnvelope{Event: kernel.Event{
+	updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{Event: kernel.Event{
 		Kind:       kernel.EventKindAssistantMessage,
 		SessionRef: session.SessionRef{SessionID: "root-session"},
 		Narrative: &kernel.NarrativePayload{
@@ -997,7 +1000,8 @@ func TestGatewayACPExplorationNamedToolsCanRenderExploredGroup(t *testing.T) {
 			Final:         true,
 			Scope:         kernel.EventScopeMain,
 		},
-	}})
+	}}))
+
 	model = updated.(*Model)
 
 	block, ok := model.doc.Blocks()[0].(*MainACPTurnBlock)
@@ -1024,7 +1028,7 @@ func TestGatewayACPExplorationNamedToolsCanRenderExploredGroup(t *testing.T) {
 func TestGatewayACPExplorationStatusOnlyCompletedDoesNotBecomeDetail(t *testing.T) {
 	model := newGatewayEventTestModel()
 	sendRead := func(id string) {
-		updated, _ := model.Update(kernel.EventEnvelope{Event: kernel.Event{
+		updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{Event: kernel.Event{
 			Kind:       kernel.EventKindToolCall,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
 			Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session", Source: "acp"},
@@ -1034,9 +1038,10 @@ func TestGatewayACPExplorationStatusOnlyCompletedDoesNotBecomeDetail(t *testing.
 				Status:   kernel.ToolStatusRunning,
 				Scope:    kernel.EventScopeMain,
 			},
-		}})
+		}}))
+
 		model = updated.(*Model)
-		updated, _ = model.Update(kernel.EventEnvelope{Event: kernel.Event{
+		updated, _ = model.Update(gatewayEventMsg(kernel.EventEnvelope{Event: kernel.Event{
 			Kind:       kernel.EventKindToolResult,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
 			Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session", Source: "acp"},
@@ -1047,13 +1052,14 @@ func TestGatewayACPExplorationStatusOnlyCompletedDoesNotBecomeDetail(t *testing.
 				Status:   kernel.ToolStatusCompleted,
 				Scope:    kernel.EventScopeMain,
 			},
-		}})
+		}}))
+
 		model = updated.(*Model)
 	}
 
 	sendRead("read-1")
 	sendRead("read-2")
-	updated, _ := model.Update(kernel.EventEnvelope{Event: kernel.Event{
+	updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{Event: kernel.Event{
 		Kind:       kernel.EventKindAssistantMessage,
 		SessionRef: session.SessionRef{SessionID: "root-session"},
 		Narrative: &kernel.NarrativePayload{
@@ -1062,7 +1068,8 @@ func TestGatewayACPExplorationStatusOnlyCompletedDoesNotBecomeDetail(t *testing.
 			Final:         true,
 			Scope:         kernel.EventScopeMain,
 		},
-	}})
+	}}))
+
 	model = updated.(*Model)
 
 	block, ok := model.doc.Blocks()[0].(*MainACPTurnBlock)
@@ -1082,7 +1089,7 @@ func TestGatewayACPClaudeReadLifecycleKeepsIncrementalInput(t *testing.T) {
 	model := newGatewayEventTestModel()
 	path := "/Users/xueyongzhi/WorkDir/xueyongzhi/demo/a.py"
 	sendUpdate := func(update session.ProtocolUpdate) {
-		updated, _ := model.Update(kernel.EventEnvelope{Event: kernel.Event{
+		updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{Event: kernel.Event{
 			Kind:       kernel.EventKindToolCall,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
 			Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session", Source: "acp"},
@@ -1090,7 +1097,8 @@ func TestGatewayACPClaudeReadLifecycleKeepsIncrementalInput(t *testing.T) {
 				UpdateType: update.SessionUpdate,
 				Update:     &update,
 			},
-		}})
+		}}))
+
 		model = updated.(*Model)
 	}
 
@@ -1157,7 +1165,7 @@ func TestGatewayACPClaudeReadLifecycleKeepsIncrementalInput(t *testing.T) {
 func TestGatewayACPThinkToolUsesTitleCaseDisplayName(t *testing.T) {
 	model := newGatewayEventTestModel()
 	prompt := "Quickly scan the project at /Users/xueyongzhi/WorkDir/xueyongzhi/demo and report directories and Python files."
-	updated, _ := model.Update(kernel.EventEnvelope{Event: kernel.Event{
+	updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{Event: kernel.Event{
 		Kind:       kernel.EventKindToolCall,
 		SessionRef: session.SessionRef{SessionID: "root-session"},
 		Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session", Source: "acp"},
@@ -1172,9 +1180,10 @@ func TestGatewayACPThinkToolUsesTitleCaseDisplayName(t *testing.T) {
 			Status: kernel.ToolStatusRunning,
 			Scope:  kernel.EventScopeMain,
 		},
-	}})
+	}}))
+
 	model = updated.(*Model)
-	updated, _ = model.Update(kernel.EventEnvelope{Event: kernel.Event{
+	updated, _ = model.Update(gatewayEventMsg(kernel.EventEnvelope{Event: kernel.Event{
 		Kind:       kernel.EventKindToolResult,
 		SessionRef: session.SessionRef{SessionID: "root-session"},
 		Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session", Source: "acp"},
@@ -1190,7 +1199,8 @@ func TestGatewayACPThinkToolUsesTitleCaseDisplayName(t *testing.T) {
 			Status:  kernel.ToolStatusCompleted,
 			Scope:   kernel.EventScopeMain,
 		},
-	}})
+	}}))
+
 	model = updated.(*Model)
 
 	block, ok := model.doc.Blocks()[0].(*MainACPTurnBlock)
@@ -1591,25 +1601,25 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			model := newGatewayEventTestModel()
-			updated, _ := model.Update(kernel.EventEnvelope{
+			updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
 				Event: kernel.Event{
 					Kind:       kernel.EventKindToolCall,
 					SessionRef: session.SessionRef{SessionID: "root-session"},
 					ToolCall:   tt.call,
-				},
-			})
+				}}))
+
 			model = updated.(*Model)
-			updated, _ = model.Update(kernel.EventEnvelope{
+			updated, _ = model.Update(gatewayEventMsg(kernel.EventEnvelope{
 				Event: kernel.Event{
 					Kind:       kernel.EventKindToolResult,
 					SessionRef: session.SessionRef{SessionID: "root-session"},
 					Meta:       tt.meta,
 					ToolResult: tt.result,
-				},
-			})
+				}}))
+
 			model = updated.(*Model)
 			if tt.settleStep {
-				updated, _ = model.Update(kernel.EventEnvelope{
+				updated, _ = model.Update(gatewayEventMsg(kernel.EventEnvelope{
 					Event: kernel.Event{
 						Kind:       kernel.EventKindAssistantMessage,
 						SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -1619,8 +1629,8 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 							Final: true,
 							Scope: kernel.EventScopeMain,
 						},
-					},
-				})
+					}}))
+
 				model = updated.(*Model)
 			}
 			block, ok := model.doc.Blocks()[0].(*MainACPTurnBlock)

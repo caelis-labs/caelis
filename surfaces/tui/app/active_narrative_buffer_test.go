@@ -105,7 +105,7 @@ func TestScheduledReasoningStreamPreservesWhitespaceOnlyDeltas(t *testing.T) {
 
 	now := time.Now()
 	for _, text := range []string{"The", " ", "sandbox"} {
-		updated, _ := m.Update(perfGatewayReasoningFrame(text))
+		updated, _ := m.Update(gatewayEventMsg(perfGatewayReasoningFrame(text)))
 		m = updated.(*Model)
 		updated, _ = m.Update(frameTickMsg{kind: frameTickRenderDrain, at: now})
 		m = updated.(*Model)

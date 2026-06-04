@@ -299,7 +299,7 @@ func TestTranscriptSnapshots(t *testing.T) {
 		{
 			name: "assistant streaming",
 			run: func(m *Model) *Model {
-				updated, _ := m.Update(kernel.EventEnvelope{
+				updated, _ := m.Update(gatewayEventMsg(kernel.EventEnvelope{
 					Event: kernel.Event{
 						Kind:       kernel.EventKindAssistantMessage,
 						SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -309,10 +309,10 @@ func TestTranscriptSnapshots(t *testing.T) {
 							Text:  "hello ",
 							Final: false,
 						},
-					},
-				})
+					}}))
+
 				m = updated.(*Model)
-				updated, _ = m.Update(kernel.EventEnvelope{
+				updated, _ = m.Update(gatewayEventMsg(kernel.EventEnvelope{
 					Event: kernel.Event{
 						Kind:       kernel.EventKindAssistantMessage,
 						SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -322,8 +322,8 @@ func TestTranscriptSnapshots(t *testing.T) {
 							Text:  "hello world",
 							Final: true,
 						},
-					},
-				})
+					}}))
+
 				return updated.(*Model)
 			},
 			want: "Main(session=root-session,status=running)\n  assistant:hello world",
@@ -331,7 +331,7 @@ func TestTranscriptSnapshots(t *testing.T) {
 		{
 			name: "tool call output result",
 			run: func(m *Model) *Model {
-				updated, _ := m.Update(kernel.EventEnvelope{
+				updated, _ := m.Update(gatewayEventMsg(kernel.EventEnvelope{
 					Event: kernel.Event{
 						Kind:       kernel.EventKindToolCall,
 						SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -342,10 +342,10 @@ func TestTranscriptSnapshots(t *testing.T) {
 							RawInput: map[string]any{"command": `echo "hi"`},
 							Status:   kernel.ToolStatusRunning,
 						},
-					},
-				})
+					}}))
+
 				m = updated.(*Model)
-				updated, _ = m.Update(kernel.EventEnvelope{
+				updated, _ = m.Update(gatewayEventMsg(kernel.EventEnvelope{
 					Event: kernel.Event{
 						Kind:       kernel.EventKindToolResult,
 						SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -358,10 +358,10 @@ func TestTranscriptSnapshots(t *testing.T) {
 							Content:   testTerminalContent("line 1"),
 							Status:    kernel.ToolStatusRunning,
 						},
-					},
-				})
+					}}))
+
 				m = updated.(*Model)
-				updated, _ = m.Update(kernel.EventEnvelope{
+				updated, _ = m.Update(gatewayEventMsg(kernel.EventEnvelope{
 					Event: kernel.Event{
 						Kind:       kernel.EventKindToolResult,
 						SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -374,8 +374,8 @@ func TestTranscriptSnapshots(t *testing.T) {
 							Content:   testTerminalContent("done"),
 							Status:    kernel.ToolStatusCompleted,
 						},
-					},
-				})
+					}}))
+
 				return updated.(*Model)
 			},
 			want: "Main(session=root-session,status=running)\n  tool(call-1,RUN_COMMAND,done,args=echo \"hi\",output=done)",
@@ -383,7 +383,7 @@ func TestTranscriptSnapshots(t *testing.T) {
 		{
 			name: "terminal contentless final preserves streamed output",
 			run: func(m *Model) *Model {
-				updated, _ := m.Update(kernel.EventEnvelope{
+				updated, _ := m.Update(gatewayEventMsg(kernel.EventEnvelope{
 					Event: kernel.Event{
 						Kind:       kernel.EventKindToolCall,
 						SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -394,10 +394,10 @@ func TestTranscriptSnapshots(t *testing.T) {
 							RawInput: map[string]any{"command": `printf hi`},
 							Status:   kernel.ToolStatusRunning,
 						},
-					},
-				})
+					}}))
+
 				m = updated.(*Model)
-				updated, _ = m.Update(kernel.EventEnvelope{
+				updated, _ = m.Update(gatewayEventMsg(kernel.EventEnvelope{
 					Event: kernel.Event{
 						Kind:       kernel.EventKindToolResult,
 						SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -409,10 +409,10 @@ func TestTranscriptSnapshots(t *testing.T) {
 							Content:  testTerminalContent("hi"),
 							Status:   kernel.ToolStatusRunning,
 						},
-					},
-				})
+					}}))
+
 				m = updated.(*Model)
-				updated, _ = m.Update(kernel.EventEnvelope{
+				updated, _ = m.Update(gatewayEventMsg(kernel.EventEnvelope{
 					Event: kernel.Event{
 						Kind:       kernel.EventKindToolResult,
 						SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -430,8 +430,8 @@ func TestTranscriptSnapshots(t *testing.T) {
 							RawInput: map[string]any{"command": `printf hi`},
 							Status:   kernel.ToolStatusCompleted,
 						},
-					},
-				})
+					}}))
+
 				return updated.(*Model)
 			},
 			want: "Main(session=root-session,status=running)\n  tool(call-1,RUN_COMMAND,done,args=printf hi,output=hi)",
@@ -439,7 +439,7 @@ func TestTranscriptSnapshots(t *testing.T) {
 		{
 			name: "terminal contentless final with no prior output shows placeholder",
 			run: func(m *Model) *Model {
-				updated, _ := m.Update(kernel.EventEnvelope{
+				updated, _ := m.Update(gatewayEventMsg(kernel.EventEnvelope{
 					Event: kernel.Event{
 						Kind:       kernel.EventKindToolCall,
 						SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -450,10 +450,10 @@ func TestTranscriptSnapshots(t *testing.T) {
 							RawInput: map[string]any{"command": `true`},
 							Status:   kernel.ToolStatusRunning,
 						},
-					},
-				})
+					}}))
+
 				m = updated.(*Model)
-				updated, _ = m.Update(kernel.EventEnvelope{
+				updated, _ = m.Update(gatewayEventMsg(kernel.EventEnvelope{
 					Event: kernel.Event{
 						Kind:       kernel.EventKindToolResult,
 						SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -465,8 +465,8 @@ func TestTranscriptSnapshots(t *testing.T) {
 							RawOutput: map[string]any{"state": "completed", "exit_code": 0},
 							Status:    kernel.ToolStatusCompleted,
 						},
-					},
-				})
+					}}))
+
 				return updated.(*Model)
 			},
 			want: "Main(session=root-session,status=running)\n  tool(call-1,RUN_COMMAND,done,args=true,output=(no output))",
@@ -474,7 +474,7 @@ func TestTranscriptSnapshots(t *testing.T) {
 		{
 			name: "terminal contentless failed final shows failure",
 			run: func(m *Model) *Model {
-				updated, _ := m.Update(kernel.EventEnvelope{
+				updated, _ := m.Update(gatewayEventMsg(kernel.EventEnvelope{
 					Event: kernel.Event{
 						Kind:       kernel.EventKindToolCall,
 						SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -485,10 +485,10 @@ func TestTranscriptSnapshots(t *testing.T) {
 							RawInput: map[string]any{"command": `false`},
 							Status:   kernel.ToolStatusRunning,
 						},
-					},
-				})
+					}}))
+
 				m = updated.(*Model)
-				updated, _ = m.Update(kernel.EventEnvelope{
+				updated, _ = m.Update(gatewayEventMsg(kernel.EventEnvelope{
 					Event: kernel.Event{
 						Kind:       kernel.EventKindToolResult,
 						SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -500,8 +500,8 @@ func TestTranscriptSnapshots(t *testing.T) {
 							Status:   kernel.ToolStatusFailed,
 							Error:    true,
 						},
-					},
-				})
+					}}))
+
 				return updated.(*Model)
 			},
 			want: "Main(session=root-session,status=running)\n  tool(call-1,RUN_COMMAND,failed,args=false,output=failed)",
@@ -509,7 +509,7 @@ func TestTranscriptSnapshots(t *testing.T) {
 		{
 			name: "approval overlay is not transcript",
 			run: func(m *Model) *Model {
-				updated, _ := m.Update(kernel.EventEnvelope{
+				updated, _ := m.Update(gatewayEventMsg(kernel.EventEnvelope{
 					Event: kernel.Event{
 						Kind:       kernel.EventKindApprovalRequested,
 						SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -519,8 +519,8 @@ func TestTranscriptSnapshots(t *testing.T) {
 							RawInput: map[string]any{"command": "rm -rf /tmp/demo"},
 							Status:   kernel.ApprovalStatusPending,
 						},
-					},
-				})
+					}}))
+
 				return updated.(*Model)
 			},
 			want: "",
@@ -528,7 +528,7 @@ func TestTranscriptSnapshots(t *testing.T) {
 		{
 			name: "participant and subagent lanes",
 			run: func(m *Model) *Model {
-				updated, _ := m.Update(kernel.EventEnvelope{
+				updated, _ := m.Update(gatewayEventMsg(kernel.EventEnvelope{
 					Event: kernel.Event{
 						Kind:       kernel.EventKindAssistantMessage,
 						SessionRef: session.SessionRef{SessionID: "participant-session"},
@@ -538,10 +538,10 @@ func TestTranscriptSnapshots(t *testing.T) {
 							Text:  "participant answer",
 							Final: true,
 						},
-					},
-				})
+					}}))
+
 				m = updated.(*Model)
-				updated, _ = m.Update(kernel.EventEnvelope{
+				updated, _ = m.Update(gatewayEventMsg(kernel.EventEnvelope{
 					Event: kernel.Event{
 						Kind:       kernel.EventKindLifecycle,
 						SessionRef: session.SessionRef{SessionID: "participant-session"},
@@ -549,10 +549,10 @@ func TestTranscriptSnapshots(t *testing.T) {
 						Lifecycle: &kernel.LifecyclePayload{
 							Status: kernel.LifecycleStatusCompleted,
 						},
-					},
-				})
+					}}))
+
 				m = updated.(*Model)
-				updated, _ = m.Update(kernel.EventEnvelope{
+				updated, _ = m.Update(gatewayEventMsg(kernel.EventEnvelope{
 					Event: kernel.Event{
 						Kind:       kernel.EventKindAssistantMessage,
 						SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -562,8 +562,8 @@ func TestTranscriptSnapshots(t *testing.T) {
 							Text:  "subagent answer",
 							Final: true,
 						},
-					},
-				})
+					}}))
+
 				m = updated.(*Model)
 				updated, _ = m.Update(SubagentStatusMsg{SpawnID: "spawn-1", State: "completed"})
 				return updated.(*Model)
@@ -599,7 +599,7 @@ func TestTranscriptSnapshots(t *testing.T) {
 						},
 					},
 				} {
-					updated, _ := m.Update(env)
+					updated, _ := m.Update(gatewayEventMsg(env))
 					m = updated.(*Model)
 				}
 				return m
@@ -609,7 +609,7 @@ func TestTranscriptSnapshots(t *testing.T) {
 		{
 			name: "interrupted turn",
 			run: func(m *Model) *Model {
-				updated, _ := m.Update(kernel.EventEnvelope{
+				updated, _ := m.Update(gatewayEventMsg(kernel.EventEnvelope{
 					Event: kernel.Event{
 						Kind:       kernel.EventKindToolCall,
 						SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -620,10 +620,10 @@ func TestTranscriptSnapshots(t *testing.T) {
 							RawInput: map[string]any{"path": "/tmp/demo"},
 							Status:   kernel.ToolStatusRunning,
 						},
-					},
-				})
+					}}))
+
 				m = updated.(*Model)
-				updated, _ = m.Update(kernel.EventEnvelope{
+				updated, _ = m.Update(gatewayEventMsg(kernel.EventEnvelope{
 					Event: kernel.Event{
 						Kind:       kernel.EventKindLifecycle,
 						SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -631,8 +631,8 @@ func TestTranscriptSnapshots(t *testing.T) {
 						Lifecycle: &kernel.LifecyclePayload{
 							Status: kernel.LifecycleStatusInterrupted,
 						},
-					},
-				})
+					}}))
+
 				return updated.(*Model)
 			},
 			want: "Main(session=root-session,status=interrupted)\n  tool(call-1,READ,running,args=/tmp/demo,output=)",
@@ -640,7 +640,7 @@ func TestTranscriptSnapshots(t *testing.T) {
 		{
 			name: "failed tool call",
 			run: func(m *Model) *Model {
-				updated, _ := m.Update(kernel.EventEnvelope{
+				updated, _ := m.Update(gatewayEventMsg(kernel.EventEnvelope{
 					Event: kernel.Event{
 						Kind:       kernel.EventKindToolCall,
 						SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -651,10 +651,10 @@ func TestTranscriptSnapshots(t *testing.T) {
 							RawInput: map[string]any{"command": "false"},
 							Status:   kernel.ToolStatusRunning,
 						},
-					},
-				})
+					}}))
+
 				m = updated.(*Model)
-				updated, _ = m.Update(kernel.EventEnvelope{
+				updated, _ = m.Update(gatewayEventMsg(kernel.EventEnvelope{
 					Event: kernel.Event{
 						Kind:       kernel.EventKindToolResult,
 						SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -668,8 +668,8 @@ func TestTranscriptSnapshots(t *testing.T) {
 							Status:    kernel.ToolStatusFailed,
 							Error:     true,
 						},
-					},
-				})
+					}}))
+
 				return updated.(*Model)
 			},
 			want: "Main(session=root-session,status=running)\n  tool(call-1,RUN_COMMAND,failed,args=false,output=exit 1)",
@@ -723,7 +723,7 @@ func TestStructuredSubagentGatewayToolRendersThroughTranscriptModel(t *testing.T
 			},
 		}},
 	} {
-		updated, _ := model.Update(env)
+		updated, _ := model.Update(gatewayEventMsg(env))
 		model = updated.(*Model)
 	}
 

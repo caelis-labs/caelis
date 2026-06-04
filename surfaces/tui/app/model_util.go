@@ -112,11 +112,11 @@ func (m *Model) observeInlineMarkdownRender() {
 	m.diag.InlineMarkdownCalls++
 }
 
-func (m *Model) observeDriverStatusCall() {
+func (m *Model) observeControlStatusCall() {
 	if m == nil {
 		return
 	}
-	m.diag.DriverStatusCalls++
+	m.diag.ControlStatusCalls++
 }
 
 func (m *Model) observeRender(duration time.Duration, bytes int, redrawMode string) {

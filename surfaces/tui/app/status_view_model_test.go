@@ -4,11 +4,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/surfaces/tui/driver"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/control"
 )
 
 func TestStatusViewModelFooterOmitsActiveJobs(t *testing.T) {
-	vm := statusViewModelFromSnapshot(tuidriver.StatusSnapshot{
+	vm := statusViewModelFromSnapshot(control.StatusSnapshot{
 		TotalTokens:         42000,
 		ContextWindowTokens: 128000,
 		ActiveJobs:          3,
@@ -35,7 +35,7 @@ func TestFormatStatusContextDisplayStripsLegacyCtxPrefix(t *testing.T) {
 }
 
 func TestStatusViewModelFooterModeOmitsSandboxRuntimeDetails(t *testing.T) {
-	vm := statusViewModelFromSnapshot(tuidriver.StatusSnapshot{
+	vm := statusViewModelFromSnapshot(control.StatusSnapshot{
 		ModeLabel:              "auto-review",
 		SandboxResolvedBackend: "bwrap",
 		Route:                  "sandbox",
@@ -54,7 +54,7 @@ func TestStatusViewModelFooterModeOmitsSandboxRuntimeDetails(t *testing.T) {
 }
 
 func TestStatusViewModelHeaderDoesNotPrefixACPControllerProvider(t *testing.T) {
-	vm := statusViewModelFromSnapshot(tuidriver.StatusSnapshot{
+	vm := statusViewModelFromSnapshot(control.StatusSnapshot{
 		Model:           "opencode/deepseek-v4-flash-free [low]",
 		Provider:        "acp",
 		ReasoningEffort: "low",

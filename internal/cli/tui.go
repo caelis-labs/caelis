@@ -9,21 +9,21 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
+	"github.com/OnslaughtSnail/caelis/app/gatewayapp/controladapter/local"
 	"github.com/OnslaughtSnail/caelis/internal/version"
 	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/app"
-	"github.com/OnslaughtSnail/caelis/surfaces/tui/gatewaydriver/local"
 )
 
 func runTUI(ctx context.Context, stack *gatewayapp.Stack, sessionID string, modelText string, stdin io.Reader, stdout io.Writer) error {
-	driver, err := local.NewLocalDriver(ctx, stack, strings.TrimSpace(sessionID), "cli-tui", strings.TrimSpace(modelText))
+	driver, err := local.NewLocalAdapter(ctx, stack, strings.TrimSpace(sessionID), "cli-tui", strings.TrimSpace(modelText))
 	if err != nil {
 		return err
 	}
 	programCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	sender := &tuiapp.ProgramSender{}
-	cfg := tuiapp.ConfigFromDriver(driver, sender, tuiapp.Config{
+	cfg := tuiapp.ConfigFromControlService(driver, sender, tuiapp.Config{
 		Context:         programCtx,
 		AppName:         "CAELIS",
 		Version:         version.String(),

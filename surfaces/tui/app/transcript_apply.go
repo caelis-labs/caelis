@@ -31,7 +31,7 @@ func (m *Model) applyTranscriptEvent(event TranscriptEvent) (tea.Model, tea.Cmd)
 	case TranscriptEventNarrative:
 		return m.applyTranscriptNarrative(event)
 	case TranscriptEventNotice:
-		return m.appendGatewayTranscript(event.Text)
+		return m.appendEventStreamTranscriptText(event.Text)
 	case TranscriptEventPlan:
 		return m.applyTranscriptPlan(event)
 	case TranscriptEventTool:
@@ -62,7 +62,7 @@ func (m *Model) applyTranscriptNarrative(event TranscriptEvent) (tea.Model, tea.
 	case TranscriptNarrativeUser:
 		return m.handleUserMessageMsg(UserMessageMsg{Text: event.Text}), nil
 	case TranscriptNarrativeSystem, TranscriptNarrativeNotice:
-		return m.appendGatewayTranscript(event.Text)
+		return m.appendEventStreamTranscriptText(event.Text)
 	}
 
 	m.prepareForTranscriptScope(event.Scope)

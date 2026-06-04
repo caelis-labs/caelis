@@ -54,7 +54,7 @@ func tailPlainRows(lines []string, height int) []string {
 func TestModelUpdateConsumesGatewayAssistantEventIntoMainTurnBlock(t *testing.T) {
 	model := newGatewayEventTestModel()
 
-	updated, _ := model.Update(kernel.EventEnvelope{
+	updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
 		Event: kernel.Event{
 			Kind:       kernel.EventKindAssistantMessage,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -64,8 +64,8 @@ func TestModelUpdateConsumesGatewayAssistantEventIntoMainTurnBlock(t *testing.T)
 				Final: true,
 				Scope: kernel.EventScopeMain,
 			},
-		},
-	})
+		}}))
+
 	m := updated.(*Model)
 
 	if got := len(m.doc.Blocks()); got != 1 {
@@ -111,7 +111,7 @@ func TestGatewayReasoningStreamPreservesWhitespaceOnlyDeltas(t *testing.T) {
 
 	now := time.Now()
 	for _, text := range []string{"The", " ", "sandbox"} {
-		updated, _ := model.Update(kernel.EventEnvelope{
+		updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
 			Event: kernel.Event{
 				Kind:       kernel.EventKindAssistantMessage,
 				SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -123,8 +123,8 @@ func TestGatewayReasoningStreamPreservesWhitespaceOnlyDeltas(t *testing.T) {
 					UpdateType:    string(session.ProtocolUpdateTypeAgentThought),
 					Scope:         kernel.EventScopeMain,
 				},
-			},
-		})
+			}}))
+
 		model = updated.(*Model)
 		updated, _ = model.Update(frameTickMsg{kind: frameTickRenderDrain, at: now})
 		model = updated.(*Model)
@@ -143,7 +143,7 @@ func TestGatewayReasoningStreamPreservesWhitespaceOnlyDeltas(t *testing.T) {
 func TestGatewayContextCanceledRendersUserInterrupt(t *testing.T) {
 	model := newGatewayEventTestModel()
 
-	updated, _ := model.Update(kernel.EventEnvelope{
+	updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
 		Event: kernel.Event{
 			Kind:       kernel.EventKindAssistantMessage,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -153,15 +153,15 @@ func TestGatewayContextCanceledRendersUserInterrupt(t *testing.T) {
 				Final: false,
 				Scope: kernel.EventScopeMain,
 			},
-		},
-	})
+		}}))
+
 	m := updated.(*Model)
-	updated, _ = m.Update(kernel.EventEnvelope{
+	updated, _ = m.Update(gatewayEventMsg(kernel.EventEnvelope{
 		Err: &kernel.Error{
 			Message: "providers: sse scanner: context canceled",
 			Cause:   context.Canceled,
-		},
-	})
+		}}))
+
 	m = updated.(*Model)
 
 	var sawErrorText bool
@@ -198,7 +198,7 @@ func TestGatewayContextCanceledRendersUserInterrupt(t *testing.T) {
 func TestModelUpdateConsumesGatewayToolEventsWithoutTranscriptRecovery(t *testing.T) {
 	model := newGatewayEventTestModel()
 
-	updated, _ := model.Update(kernel.EventEnvelope{
+	updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
 		Event: kernel.Event{
 			Kind:       kernel.EventKindToolCall,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -209,10 +209,10 @@ func TestModelUpdateConsumesGatewayToolEventsWithoutTranscriptRecovery(t *testin
 				Status:   "running",
 				Scope:    kernel.EventScopeMain,
 			},
-		},
-	})
+		}}))
+
 	m := updated.(*Model)
-	updated, _ = m.Update(kernel.EventEnvelope{
+	updated, _ = m.Update(gatewayEventMsg(kernel.EventEnvelope{
 		Event: kernel.Event{
 			Kind:       kernel.EventKindToolResult,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -225,8 +225,8 @@ func TestModelUpdateConsumesGatewayToolEventsWithoutTranscriptRecovery(t *testin
 				Status:    "completed",
 				Scope:     kernel.EventScopeMain,
 			},
-		},
-	})
+		}}))
+
 	m = updated.(*Model)
 
 	if got := len(m.doc.Blocks()); got != 1 {
@@ -253,7 +253,7 @@ func TestModelUpdateConsumesGatewayToolEventsWithoutTranscriptRecovery(t *testin
 func TestGatewayRunningToolResultStreamsOutputWithoutFinalizing(t *testing.T) {
 	model := newGatewayEventTestModel()
 
-	updated, _ := model.Update(kernel.EventEnvelope{
+	updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
 		Event: kernel.Event{
 			Kind:       kernel.EventKindToolCall,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -264,10 +264,10 @@ func TestGatewayRunningToolResultStreamsOutputWithoutFinalizing(t *testing.T) {
 				Status:   kernel.ToolStatusRunning,
 				Scope:    kernel.EventScopeMain,
 			},
-		},
-	})
+		}}))
+
 	model = updated.(*Model)
-	updated, _ = model.Update(kernel.EventEnvelope{
+	updated, _ = model.Update(gatewayEventMsg(kernel.EventEnvelope{
 		Event: kernel.Event{
 			Kind:       kernel.EventKindToolResult,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -280,8 +280,8 @@ func TestGatewayRunningToolResultStreamsOutputWithoutFinalizing(t *testing.T) {
 				Status:    kernel.ToolStatusRunning,
 				Scope:     kernel.EventScopeMain,
 			},
-		},
-	})
+		}}))
+
 	model = updated.(*Model)
 
 	block, ok := model.doc.Blocks()[0].(*MainACPTurnBlock)
@@ -333,7 +333,7 @@ func TestToolGroupsUseActionColorAndBlankSeparation(t *testing.T) {
 func TestGatewayAssistantFinalFoldsReasoningAndTogglesInline(t *testing.T) {
 	model := newGatewayEventTestModel()
 
-	updated, _ := model.Update(kernel.EventEnvelope{
+	updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
 		Event: kernel.Event{
 			Kind:       kernel.EventKindAssistantMessage,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -343,10 +343,10 @@ func TestGatewayAssistantFinalFoldsReasoningAndTogglesInline(t *testing.T) {
 				Final:         false,
 				Scope:         kernel.EventScopeMain,
 			},
-		},
-	})
+		}}))
+
 	m := updated.(*Model)
-	updated, _ = m.Update(kernel.EventEnvelope{
+	updated, _ = m.Update(gatewayEventMsg(kernel.EventEnvelope{
 		Event: kernel.Event{
 			Kind:       kernel.EventKindAssistantMessage,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -357,8 +357,8 @@ func TestGatewayAssistantFinalFoldsReasoningAndTogglesInline(t *testing.T) {
 				Final:         true,
 				Scope:         kernel.EventScopeMain,
 			},
-		},
-	})
+		}}))
+
 	m = updated.(*Model)
 
 	block, ok := m.doc.Blocks()[0].(*MainACPTurnBlock)
@@ -452,7 +452,7 @@ func TestGatewayReasoningFoldsAfterAttentionToolLoopAndTogglesInline(t *testing.
 			},
 		}},
 	} {
-		updated, _ := model.Update(env)
+		updated, _ := model.Update(gatewayEventMsg(env))
 		model = updated.(*Model)
 	}
 
@@ -532,7 +532,7 @@ func TestGatewayExpandedReasoningReplacesFoldedPreviewInPlace(t *testing.T) {
 			},
 		}},
 	} {
-		updated, _ := model.Update(env)
+		updated, _ := model.Update(gatewayEventMsg(env))
 		model = updated.(*Model)
 	}
 
@@ -644,7 +644,7 @@ func TestGatewayReasoningFoldUsesTimedDurationWhenAvailable(t *testing.T) {
 			},
 		}},
 	} {
-		updated, _ := model.Update(env)
+		updated, _ := model.Update(gatewayEventMsg(env))
 		model = updated.(*Model)
 	}
 
