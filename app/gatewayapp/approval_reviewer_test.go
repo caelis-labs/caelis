@@ -99,6 +99,25 @@ func TestApprovalReviewerUsesRequestModelAndSessionContext(t *testing.T) {
 	}
 }
 
+func TestGuardianPolicyPromptUsesGeneralRecoveryBoundary(t *testing.T) {
+	t.Parallel()
+
+	prompt := guardianPolicyPrompt()
+	for _, want := range []string{
+		"Broad cleanup, reset, recursive delete, or state-discarding actions are high or critical",
+		"Permission or lock recovery does not authorize broader cleanup, reset, delete, ACL, or mode changes",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("guardian policy prompt missing %q:\n%s", want, prompt)
+		}
+	}
+	for _, forbidden := range []string{"git clean", "git reset", "git checkout"} {
+		if strings.Contains(prompt, forbidden) {
+			t.Fatalf("guardian policy prompt includes scenario-specific command %q:\n%s", forbidden, prompt)
+		}
+	}
+}
+
 func TestApprovalReviewerReusesStablePrefixAndSendsTranscriptDelta(t *testing.T) {
 	ctx := context.Background()
 	service, activeSession := newApprovalReviewerTestSession(t, ctx)

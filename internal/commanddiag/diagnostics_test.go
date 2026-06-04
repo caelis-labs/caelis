@@ -90,6 +90,55 @@ func TestBestDoesNotLabelOrdinaryTLSCertificateFailure(t *testing.T) {
 	}
 }
 
+func TestBestDetectsGitIndexLockSandboxDenied(t *testing.T) {
+	input := sandboxInput()
+	input.Command = "git add ."
+	input.Stderr = "fatal: Unable to create '/workspace/.git/index.lock': Read-only file system"
+
+	got, ok := Best(input)
+	if !ok {
+		t.Fatal("Best() ok = false, want Git index lock diagnostic")
+	}
+	if got.Code != CodeGitIndexLockSandboxDenied {
+		t.Fatalf("Code = %q, want %q", got.Code, CodeGitIndexLockSandboxDenied)
+	}
+	if got.Hint != hintGitIndexLockSandbox {
+		t.Fatalf("Hint = %q, want short precise hint %q", got.Hint, hintGitIndexLockSandbox)
+	}
+}
+
+func TestBestDoesNotHintGitIndexLockWithoutPermissionEvidence(t *testing.T) {
+	input := sandboxInput()
+	input.Command = "git add ."
+	input.Stderr = "fatal: Unable to create '/workspace/.git/index.lock': File exists."
+
+	if got, ok := Best(input); ok {
+		t.Fatalf("Best() = %+v, want no diagnostic for lock contention without permission evidence", got)
+	}
+}
+
+func TestBestDoesNotHintPermissionDeniedWithoutGitIndexLock(t *testing.T) {
+	input := sandboxInput()
+	input.Command = "touch notes.txt"
+	input.Stderr = "touch: notes.txt: Permission denied"
+
+	if got, ok := Best(input); ok {
+		t.Fatalf("Best() = %+v, want no diagnostic without Git index lock evidence", got)
+	}
+}
+
+func TestBestDoesNotHintGitIndexLockOutsideSandbox(t *testing.T) {
+	input := sandboxInput()
+	input.Route = sandbox.RouteHost
+	input.Backend = sandbox.BackendHost
+	input.Command = "git add ."
+	input.Stderr = "fatal: Unable to create '/workspace/.git/index.lock': Permission denied"
+
+	if got, ok := Best(input); ok {
+		t.Fatalf("Best() = %+v, want no diagnostic outside sandbox execution", got)
+	}
+}
+
 func windowsSandboxInput() Input {
 	return Input{
 		Command:  "go build ./...",
@@ -97,5 +146,13 @@ func windowsSandboxInput() Input {
 		Route:    sandbox.RouteSandbox,
 		Backend:  sandbox.BackendWindows,
 		GOOS:     "windows",
+	}
+}
+
+func sandboxInput() Input {
+	return Input{
+		ExitCode: 1,
+		Route:    sandbox.RouteSandbox,
+		Backend:  sandbox.BackendLandlock,
 	}
 }

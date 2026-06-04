@@ -359,13 +359,47 @@ func TestDefaultModeAllowsConfigToDisableSandboxNetwork(t *testing.T) {
 	}
 }
 
-func TestDefaultModeDoesNotGrantGitMetadataWriteRules(t *testing.T) {
+func TestDefaultModeAllowsReadOnlyGitCommands(t *testing.T) {
+	t.Parallel()
+
+	tests := []string{
+		"git status --short",
+		"git diff -- README.md",
+		"git log --oneline -3",
+		"git clean -n -fd",
+		"git clean -nfd",
+		"git -C repo status",
+	}
+	for _, command := range tests {
+		command := command
+		t.Run(command, func(t *testing.T) {
+			t.Parallel()
+
+			decision, err := AutoReviewMode().DecideTool(context.Background(), commandCtx(command, false))
+			if err != nil {
+				t.Fatalf("DecideTool() error = %v", err)
+			}
+			if decision.Action != policy.ActionAllow {
+				t.Fatalf("Action = %q, want allow (reason=%q)", decision.Action, decision.Reason)
+			}
+		})
+	}
+}
+
+func TestDefaultModeRequiresEscalationForGitControlMetadataCommands(t *testing.T) {
 	t.Parallel()
 
 	tests := []string{
 		"git add .",
 		"git commit -m update",
 		"git tag v1.2.3",
+		"git merge feature",
+		"git rebase main",
+		"git cherry-pick abc123",
+		"git stash push",
+		"git reset HEAD README.md",
+		"git restore --staged README.md",
+		"git checkout main",
 		"git add . && git commit -m update",
 		"git push origin main",
 		"git add . && git push origin main",
@@ -378,6 +412,13 @@ func TestDefaultModeDoesNotGrantGitMetadataWriteRules(t *testing.T) {
 		"PATH=.:$PATH git add .",
 		"env PATH=.:$PATH git add .",
 		"git add . && ./git commit -m update",
+		"sh -c 'git add .'",
+		"bash -lc 'git commit -m update'",
+		"cmd /c git add .",
+		"powershell -Command git add .",
+		"sudo -E git add .",
+		"sudo -u root git add .",
+		"sudo --user root git add .",
 	}
 	for _, command := range tests {
 		command := command
@@ -388,8 +429,100 @@ func TestDefaultModeDoesNotGrantGitMetadataWriteRules(t *testing.T) {
 			if err != nil {
 				t.Fatalf("DecideTool() error = %v", err)
 			}
+			if decision.Action != policy.ActionDeny {
+				t.Fatalf("Action = %q, want deny", decision.Action)
+			}
+			if !strings.Contains(decision.Reason, "require_escalated") {
+				t.Fatalf("Reason = %q, want escalation guidance", decision.Reason)
+			}
 			if hasPathRule(decision.Constraints.PathRules, testWorkspaceGitRoot(), sandbox.PathAccessReadWrite) {
 				t.Fatalf("PathRules = %#v, did not expect .git write grant for command %q", decision.Constraints.PathRules, command)
+			}
+		})
+	}
+
+	for _, command := range []string{"git add .", "git push origin main", "sh -c 'git add .'", "sudo -E git add ."} {
+		command := command
+		t.Run(command+" escalated", func(t *testing.T) {
+			t.Parallel()
+
+			decision, err := AutoReviewMode().DecideTool(context.Background(), commandCtx(command, true))
+			if err != nil {
+				t.Fatalf("DecideTool() error = %v", err)
+			}
+			if decision.Action != policy.ActionAskApproval {
+				t.Fatalf("Action = %q, want ask_approval", decision.Action)
+			}
+			if decision.Constraints.Route != sandbox.RouteHost {
+				t.Fatalf("Constraints.Route = %q, want host", decision.Constraints.Route)
+			}
+			if got := decision.Metadata["sandbox_permissions"]; got != "require_escalated" {
+				t.Fatalf("Metadata[sandbox_permissions] = %#v", got)
+			}
+		})
+	}
+}
+
+func TestDefaultModeDeniesDangerousGitCommands(t *testing.T) {
+	t.Parallel()
+
+	tests := []string{
+		"git clean -fd",
+		"git clean -xfd",
+		"git reset --hard",
+		"git checkout -- .",
+		"git checkout .",
+		"git restore .",
+		"git push --force origin main",
+		"git push -f origin main",
+		"sh -c 'git reset --hard'",
+		"bash -lc 'git clean -fd'",
+		"sudo -E git reset --hard",
+		"sudo -Eu root git reset --hard",
+	}
+	for _, command := range tests {
+		command := command
+		t.Run(command, func(t *testing.T) {
+			t.Parallel()
+
+			decision, err := AutoReviewMode().DecideTool(context.Background(), commandCtx(command, false))
+			if err != nil {
+				t.Fatalf("DecideTool() error = %v", err)
+			}
+			if decision.Action != policy.ActionDeny {
+				t.Fatalf("Action = %q, want deny", decision.Action)
+			}
+		})
+	}
+
+	decision, err := AutoReviewMode().DecideTool(context.Background(), commandCtx("git clean -fd", true))
+	if err != nil {
+		t.Fatalf("DecideTool() error = %v", err)
+	}
+	if decision.Action != policy.ActionDeny {
+		t.Fatalf("Escalated git clean action = %q, want deny", decision.Action)
+	}
+}
+
+func TestDefaultModeDoesNotClassifyCommandTextAsDangerous(t *testing.T) {
+	t.Parallel()
+
+	for _, command := range []string{
+		"echo git clean -fd",
+		"echo git reset --hard",
+		"echo rm -rf /tmp/caelis-gocache",
+		"sh -c 'echo git reset --hard'",
+	} {
+		command := command
+		t.Run(command, func(t *testing.T) {
+			t.Parallel()
+
+			decision, err := AutoReviewMode().DecideTool(context.Background(), commandCtx(command, false))
+			if err != nil {
+				t.Fatalf("DecideTool() error = %v", err)
+			}
+			if decision.Action != policy.ActionAllow {
+				t.Fatalf("Action = %q, want allow for command text (reason=%q)", decision.Action, decision.Reason)
 			}
 		})
 	}
@@ -554,7 +687,7 @@ func TestFullAccessBlocksDangerousCommands(t *testing.T) {
 	}
 }
 
-func TestScopedRecursiveDeleteRequiresApproval(t *testing.T) {
+func TestRecursiveDeleteCommandsAreDenied(t *testing.T) {
 	t.Parallel()
 
 	for _, mode := range []struct {
@@ -568,29 +701,31 @@ func TestScopedRecursiveDeleteRequiresApproval(t *testing.T) {
 		t.Run(mode.name, func(t *testing.T) {
 			t.Parallel()
 
-			decision, err := mode.mode.DecideTool(context.Background(), commandCtx("rm -rf /tmp/caelis-gocache", false))
-			if err != nil {
-				t.Fatalf("DecideTool() error = %v", err)
-			}
-			if decision.Action != policy.ActionAskApproval {
-				t.Fatalf("Action = %q, want ask_approval", decision.Action)
-			}
-			if decision.Approval == nil {
-				t.Fatal("Approval = nil, want protocol approval payload")
-			}
-			if !strings.Contains(decision.Reason, "destructive") {
-				t.Fatalf("Reason = %q, want destructive approval reason", decision.Reason)
-			}
-			if got, _ := decision.Metadata["destructive_command"].(bool); !got {
-				t.Fatalf("Metadata[destructive_command] = %#v, want true", decision.Metadata["destructive_command"])
-			}
-
-			decision, err = mode.mode.DecideTool(context.Background(), commandCtx("rm /tmp/caelis-gocache -rf", false))
-			if err != nil {
-				t.Fatalf("DecideTool() trailing flags error = %v", err)
-			}
-			if decision.Action != policy.ActionAskApproval {
-				t.Fatalf("Trailing flags action = %q, want ask_approval", decision.Action)
+			for _, command := range []string{
+				"rm -rf /tmp/caelis-gocache",
+				"rm /tmp/caelis-gocache -rf",
+				"rm -r /tmp/caelis-gocache",
+				"sh -c 'rm -rf /tmp/caelis-gocache'",
+				"bash -lc 'rm -r /tmp/caelis-gocache'",
+				"sudo -u root rm -rf /tmp/caelis-gocache",
+				"sudo -Eu root rm -rf /tmp/caelis-gocache",
+				"Remove-Item -Recurse -Force .\\tmp",
+				"powershell -Command Remove-Item -Recurse -Force .\\tmp",
+				"del /s /q tmp",
+				"del /s/q tmp",
+				"rmdir /s /q tmp",
+				"rmdir /S/Q tmp",
+				"rd /s/q tmp",
+				"cmd /c rmdir /s/q tmp",
+			} {
+				command := command
+				decision, err := mode.mode.DecideTool(context.Background(), commandCtx(command, false))
+				if err != nil {
+					t.Fatalf("DecideTool(%q) error = %v", command, err)
+				}
+				if decision.Action != policy.ActionDeny {
+					t.Fatalf("%q action = %q, want deny", command, decision.Action)
+				}
 			}
 		})
 	}

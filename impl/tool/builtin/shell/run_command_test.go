@@ -482,6 +482,39 @@ func TestRunCommandCallDoesNotHintNativeOpenSSHPublicKeyFailure(t *testing.T) {
 	}
 }
 
+func TestRunCommandCallAddsGitIndexLockSandboxHint(t *testing.T) {
+	t.Parallel()
+
+	rt := sandboxPermissionRuntime{result: sandbox.CommandResult{
+		Stderr:   "fatal: Unable to create '/workspace/.git/index.lock': Read-only file system\n",
+		ExitCode: 128,
+		Route:    sandbox.RouteSandbox,
+		Backend:  sandbox.BackendLandlock,
+	}, err: fmt.Errorf("exit status 128")}
+	runCommandTool, err := NewRunCommand(RunCommandConfig{Runtime: rt})
+	if err != nil {
+		t.Fatalf("NewRunCommand() error = %v", err)
+	}
+	raw, err := json.Marshal(map[string]any{"command": "git add ."})
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	result, err := runCommandTool.Call(context.Background(), tool.Call{Name: RunCommandToolName, Input: raw})
+	if err != nil {
+		t.Fatalf("Call() error = %v, want structured tool result", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
+		t.Fatalf("json.Unmarshal(result) error = %v", err)
+	}
+	if got, _ := payload["hint_code"].(string); got != commanddiag.CodeGitIndexLockSandboxDenied {
+		t.Fatalf("hint_code = %q, want %q", got, commanddiag.CodeGitIndexLockSandboxDenied)
+	}
+	if got, _ := payload["hint"].(string); got != "Git index write is blocked by sandbox permissions; retry the original Git command with escalation." {
+		t.Fatalf("hint = %q, want short Git index sandbox guidance", got)
+	}
+}
+
 func TestRunCommandCallAddsWindowsSChannelNoCredentialsHint(t *testing.T) {
 	t.Parallel()
 

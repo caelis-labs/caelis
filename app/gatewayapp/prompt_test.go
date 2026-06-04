@@ -117,11 +117,14 @@ func TestBuildSystemPromptPermissionBoundariesAreRuntimeAgnostic(t *testing.T) {
 		"## Shell Tool Permissions",
 		"",
 		"- Run normal inspection, builds, tests, and workspace file edits with default sandbox permissions.",
-		"- Git/VCS/control metadata writes, including `git add`, `git commit`, tags, merges, rebases, and writes under `.git` or similar control directories, must use `RUN_COMMAND` with `sandbox_permissions=require_escalated` and a concise justification.",
-		"- Do not repair permission or lock errors by deleting lock files, resetting state, or changing ACLs/modes. If the original operation is necessary outside the workspace or in control metadata, rerun only that operation with escalation.",
+		"- VCS/control metadata writes, including staging, commits, refs, history, remote updates, and control-directory writes, must use `RUN_COMMAND` with `sandbox_permissions=require_escalated` and a concise justification.",
+		"- When permission or lock errors occur, do not substitute broader cleanup, reset, delete, ACL, or mode changes for the failed operation; retry only the necessary original operation with the narrowest permissions, or stop for user input.",
 	}, "\n")
 	if !strings.Contains(prompt, expected) {
 		t.Fatalf("prompt missing exact permission block:\n%s", prompt)
+	}
+	if strings.Contains(prompt, "git clean") || strings.Contains(prompt, "git reset") || strings.Contains(prompt, "git checkout") {
+		t.Fatalf("prompt includes scenario-specific Git cleanup commands:\n%s", prompt)
 	}
 	for _, forbidden := range []string{
 		"Default permission mode:",
