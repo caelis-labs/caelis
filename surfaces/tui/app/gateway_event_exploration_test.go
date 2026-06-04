@@ -468,6 +468,45 @@ func TestGatewayLongExplorationHandoffBudgetKeepsSummaryAndNewStreamVisible(t *t
 	}
 }
 
+func TestGatewayDeferredExplorationDoesNotReexpandSettledReasoning(t *testing.T) {
+	model := newGatewayEventTestModel()
+	block := NewMainACPTurnBlock("root-session")
+	block.Events = append(block.Events,
+		SubagentEvent{Kind: SEReasoning, Text: numberedReasoningLines(12)},
+		SubagentEvent{Kind: SEAssistant, Text: "Let me fix the mock properly."},
+		SubagentEvent{
+			Kind:   SEToolCall,
+			CallID: "read-test",
+			Name:   "READ",
+			Args:   "internal/service/ebs_utils_test.go",
+			Output: "package service",
+			Done:   true,
+		},
+	)
+	ctx := BlockRenderContext{Width: 96, Height: 20, TermWidth: 96, Theme: model.theme}
+
+	livePlain := renderedPlainRows(block.Render(ctx))
+	live := strings.Join(livePlain, "\n")
+	if strings.Contains(live, "Explored") {
+		t.Fatalf("live rows = %q, should still defer exploration compaction before the next step", live)
+	}
+	if got := countExplorationRowsContaining(livePlain, "reasoning line "); got != 1 {
+		t.Fatalf("live reasoning rows = %d, want folded single-line preview; rows = %#v", got, livePlain)
+	}
+	if !strings.Contains(live, "Let me fix the mock properly.") {
+		t.Fatalf("live rows = %q, want assistant handoff text visible", live)
+	}
+
+	block.Events = append(block.Events, SubagentEvent{Kind: SEReasoning, Text: "Now continue with the patch."})
+	settled := strings.Join(renderedPlainRows(block.Render(ctx)), "\n")
+	if !strings.Contains(settled, "Explored") || !strings.Contains(settled, "Now continue with the patch.") {
+		t.Fatalf("settled rows = %q, want deferred exploration to compact when the next step arrives", settled)
+	}
+	if strings.Contains(settled, "reasoning line 01") || strings.Contains(settled, "Let me fix the mock properly.") {
+		t.Fatalf("settled rows = %q, compacted exploration should hide prior narrative", settled)
+	}
+}
+
 func TestGatewayLiveReasoningBudgetKeepsExploredPrefixVisible(t *testing.T) {
 	model := newGatewayEventTestModel()
 	block := NewMainACPTurnBlock("root-session")

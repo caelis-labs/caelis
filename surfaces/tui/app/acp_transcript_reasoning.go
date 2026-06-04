@@ -33,7 +33,7 @@ func reasoningShouldFold(events []SubagentEvent, idx int, status string) bool {
 	if strings.TrimSpace(text) == "" {
 		return false
 	}
-	if liveTailHasPotentialDeferredCompactStage(events, idx, status) {
+	if liveTailHasPotentialDeferredCompactStage(events, idx, status) && participantNarrativeEventActive(events, end, status) {
 		return false
 	}
 	for i := end + 1; i < len(events); i++ {
