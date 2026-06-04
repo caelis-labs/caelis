@@ -182,10 +182,11 @@ func TestActiveMarkdownStreamUsesIncrementalSyncWithoutPerChunkGlamour(t *testin
 
 func TestACPNarrativeStreamsUseActiveBufferFastPath(t *testing.T) {
 	cases := []struct {
-		name      string
-		apply     func(*Model, string) *Model
-		active    func(*testing.T, *Model) *activeNarrativeBuffer
-		blockKind BlockKind
+		name               string
+		apply              func(*Model, string) *Model
+		active             func(*testing.T, *Model) *activeNarrativeBuffer
+		blockKind          BlockKind
+		wantInitialGlamour uint64
 	}{
 		{
 			name: "main",
@@ -200,7 +201,8 @@ func TestACPNarrativeStreamsUseActiveBufferFastPath(t *testing.T) {
 				}
 				return activeBufferForEventKind(t, block.Events, SEAssistant)
 			},
-			blockKind: BlockMainACPTurn,
+			blockKind:          BlockMainACPTurn,
+			wantInitialGlamour: 1,
 		},
 		{
 			name: "participant",
@@ -215,7 +217,8 @@ func TestACPNarrativeStreamsUseActiveBufferFastPath(t *testing.T) {
 				}
 				return activeBufferForEventKind(t, block.Events, SEAssistant)
 			},
-			blockKind: BlockParticipantTurn,
+			blockKind:          BlockParticipantTurn,
+			wantInitialGlamour: 1,
 		},
 		{
 			name: "subagent",
@@ -230,7 +233,8 @@ func TestACPNarrativeStreamsUseActiveBufferFastPath(t *testing.T) {
 				}
 				return activeBufferForEventKind(t, block.Events, SEAssistant)
 			},
-			blockKind: BlockSubagent,
+			blockKind:          BlockSubagent,
+			wantInitialGlamour: 0,
 		},
 	}
 
@@ -243,8 +247,8 @@ func TestACPNarrativeStreamsUseActiveBufferFastPath(t *testing.T) {
 			if buffer := tc.active(t, m); buffer == nil || buffer.Empty() {
 				t.Fatal("ACP narrative stream did not keep an active buffer")
 			}
-			if got := m.diag.GlamourRenderCalls; got != 1 {
-				t.Fatalf("initial stable prefix Glamour renders = %d, want 1", got)
+			if got := m.diag.GlamourRenderCalls; got != tc.wantInitialGlamour {
+				t.Fatalf("initial stable prefix Glamour renders = %d, want %d", got, tc.wantInitialGlamour)
 			}
 			beforeGlamour := m.diag.GlamourRenderCalls
 			beforeTranscriptRenders := m.diag.BlockRenderCallsByKind[BlockTranscript]

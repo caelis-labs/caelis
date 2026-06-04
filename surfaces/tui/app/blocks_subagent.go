@@ -541,11 +541,15 @@ func renderSubagentPanelLines(panel *SubagentPanelBlock, ctx BlockRenderContext)
 		baseWidth = 80
 	}
 	boxWidth := maxInt(20, baseWidth-4)
-	_, lines, _ := subagentPanelRenderLines(panel, ctx, boxWidth)
-	if panel.Terminal {
-		lines = subagentTerminalPreviewStyledLines(lines, panel.previewLines(), strings.EqualFold(strings.TrimSpace(panel.Status), "completed"))
-	} else {
-		lines = tailNonEmptyStyledLines(lines, panel.previewLines())
+	contentWidth := maxInt(1, boxWidth-4)
+	lines := renderSubagentTailPreviewLines(panel, ctx, contentWidth, subagentTailPreviewLineLimit(panel))
+	if len(lines) == 0 {
+		_, lines, _ = subagentPanelRenderLines(panel, ctx, boxWidth)
+		if panel.Terminal {
+			lines = subagentTerminalPreviewStyledLines(lines, panel.previewLines(), strings.EqualFold(strings.TrimSpace(panel.Status), "completed"))
+		} else {
+			lines = tailNonEmptyStyledLines(lines, panel.previewLines())
+		}
 	}
 	vm := PanelViewModel{
 		Variant: tuikit.PanelShellVariantDrawer,

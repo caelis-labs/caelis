@@ -505,6 +505,7 @@ func TestSandboxEnvironmentPreservesHostUserDirsAndRedirectsToolCaches(t *testin
 		"CAELIS_SANDBOX_TEMP":       tempRoot,
 		"GOCACHE":                   filepath.Join(cacheRoot, "go-build"),
 		"GOMODCACHE":                filepath.Join(cacheRoot, "go-mod"),
+		"GOTELEMETRY":               "off",
 		"PIP_CACHE_DIR":             filepath.Join(cacheRoot, "pip"),
 		"npm_config_cache":          filepath.Join(cacheRoot, "npm"),
 		"PSModuleAnalysisCachePath": filepath.Join(sandboxPowerShellCacheDir(envRoot), "PowerShell_AnalysisCache"),

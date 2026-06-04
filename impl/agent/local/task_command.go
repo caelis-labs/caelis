@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/shell"
+	"github.com/OnslaughtSnail/caelis/internal/commanddiag"
 	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	taskapi "github.com/OnslaughtSnail/caelis/ports/task"
@@ -195,6 +196,22 @@ func (tm *taskRuntime) completeCommandTaskWithStatus(ctx context.Context, task *
 		task.result["error"] = strings.TrimSpace(resultErr.Error())
 		if code, _ := tool.ErrorPayload(resultErr)["error_code"].(string); code != "" {
 			task.result["error_code"] = code
+		}
+	}
+	if diag, ok := commanddiag.Best(commanddiag.Input{
+		ToolName: shell.RunCommandToolName,
+		Command:  task.command,
+		Stdout:   result.Stdout,
+		Stderr:   result.Stderr,
+		Error:    firstNonEmpty(strings.TrimSpace(result.Error), errorText(resultErr)),
+		ExitCode: result.ExitCode,
+		Route:    result.Route,
+		Backend:  result.Backend,
+	}); ok {
+		task.result["hint_code"] = diag.Code
+		task.result["hint"] = diag.Hint
+		if strings.TrimSpace(diag.Severity) != "" {
+			task.result["hint_severity"] = diag.Severity
 		}
 	}
 	snapshot := task.snapshotLocked(status)
@@ -440,6 +457,13 @@ func rehydratedCommandOutput(entry *taskapi.Entry) (string, bool) {
 		return "", true
 	}
 	return text, true
+}
+
+func errorText(err error) string {
+	if err == nil {
+		return ""
+	}
+	return strings.TrimSpace(err.Error())
 }
 
 func (t *commandTask) entrySnapshot(now time.Time) *taskapi.Entry {

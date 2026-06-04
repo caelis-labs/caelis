@@ -9,6 +9,7 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/internal/toolutil"
 	"github.com/OnslaughtSnail/caelis/impl/tool/internal/argparse"
+	"github.com/OnslaughtSnail/caelis/internal/commanddiag"
 	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 	"github.com/OnslaughtSnail/caelis/ports/tool"
 )
@@ -136,7 +137,7 @@ func (t *RunCommandTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 			Constraints: constraints,
 		})
 	}
-	payload := runCommandPayload(result, err)
+	payload := runCommandPayloadForCommand(command, result, err)
 	out, resultErr := toolutil.JSONResult(RunCommandToolName, payload)
 	if result.Route != "" {
 		if out.Metadata == nil {
@@ -229,6 +230,10 @@ func defaultRunCommandConstraints(runtime sandbox.Runtime) sandbox.Constraints {
 }
 
 func runCommandPayload(result sandbox.CommandResult, err error) map[string]any {
+	return runCommandPayloadForCommand("", result, err)
+}
+
+func runCommandPayloadForCommand(command string, result sandbox.CommandResult, err error) map[string]any {
 	merged := runCommandMergedOutput(result.Stdout, result.Stderr)
 	payload := map[string]any{}
 	if err != nil || result.ExitCode != 0 {
@@ -250,7 +255,39 @@ func runCommandPayload(result sandbox.CommandResult, err error) map[string]any {
 	if commandExitCodeAvailable(result.ExitCode, err) {
 		payload["exit_code"] = result.ExitCode
 	}
+	if diag, ok := commanddiag.Best(commanddiag.Input{
+		ToolName: RunCommandToolName,
+		Command:  command,
+		Stdout:   result.Stdout,
+		Stderr:   result.Stderr,
+		Error:    firstNonEmptyString(result.Error, errorString(err)),
+		ExitCode: result.ExitCode,
+		Route:    result.Route,
+		Backend:  result.Backend,
+	}); ok {
+		payload["hint_code"] = diag.Code
+		payload["hint"] = diag.Hint
+		if strings.TrimSpace(diag.Severity) != "" {
+			payload["hint_severity"] = diag.Severity
+		}
+	}
 	return payload
+}
+
+func errorString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func runCommandMergedOutput(stdout string, stderr string) string {

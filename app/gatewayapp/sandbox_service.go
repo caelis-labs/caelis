@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"runtime"
 	"strings"
 
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/sandboxpolicy"
@@ -301,20 +300,6 @@ func shouldUseCurrentSandboxLifecycle(exec sandbox.Runtime) bool {
 	status := sandbox.SelectionStatus(exec)
 	return normalizeWindowsBackend(status.ResolvedBackend) == sandbox.BackendWindows ||
 		normalizeWindowsBackend(status.RequestedBackend) == sandbox.BackendWindows
-}
-
-func windowsSandboxTLSNoteEnabled(status sandbox.Status) bool {
-	return windowsSandboxTLSNoteEnabledForGOOS(status, runtime.GOOS)
-}
-
-func windowsSandboxTLSNoteEnabledForGOOS(status sandbox.Status, goos string) bool {
-	if !strings.EqualFold(strings.TrimSpace(goos), "windows") {
-		return false
-	}
-	if status.FallbackToHost {
-		return false
-	}
-	return normalizeWindowsBackend(status.ResolvedBackend) == sandbox.BackendWindows
 }
 
 func normalizeWindowsBackend(backend sandbox.Backend) sandbox.Backend {

@@ -23,6 +23,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/shell"
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/spawn"
 	tasktool "github.com/OnslaughtSnail/caelis/impl/tool/builtin/task"
+	"github.com/OnslaughtSnail/caelis/internal/commanddiag"
 	"github.com/OnslaughtSnail/caelis/ports/agent"
 	"github.com/OnslaughtSnail/caelis/ports/assembly"
 	"github.com/OnslaughtSnail/caelis/ports/controller"
@@ -3236,6 +3237,62 @@ func TestRuntimeTaskWaitReturnsTailWhileRunningAndFullWhenCompleted(t *testing.T
 	}
 	if _, exists := completedPayload["latest_output"]; exists {
 		t.Fatalf("completed payload[latest_output] = %#v, want omitted", completedPayload["latest_output"])
+	}
+}
+
+func TestRuntimeTaskWaitAddsWindowsMSYSSSHSignalPipeHintWhenCompleted(t *testing.T) {
+	t.Parallel()
+
+	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
+	fakeSession := newYieldProbeSandboxSession()
+	fake := &yieldProbeSandboxRuntime{session: fakeSession}
+	runCommandTool := runtimeCommandTool{
+		base:       mustRuntimeRunCommandTool(t, fake),
+		session:    session.CloneSession(activeSession),
+		sessionRef: activeSession.SessionRef,
+		tasks:      runtime.tasks,
+	}
+	runCommandResult := callRuntimeRunCommandTool(t, runCommandTool, map[string]any{
+		"command":       "go build ./...",
+		"workdir":       activeSession.CWD,
+		"yield_time_ms": 0,
+	})
+	taskID, _ := testToolResultRuntimeMeta(t, runCommandResult, "task")["task_id"].(string)
+	if strings.TrimSpace(taskID) == "" {
+		t.Fatalf("command result metadata = %#v, want task_id", runCommandResult.Metadata)
+	}
+
+	completed := false
+	fakeSession.statusRunning = &completed
+	sshFailure := `      0 [main] ssh (17912) D:\xue\Git\usr\bin\ssh.exe: *** fatal error - couldn't create signal pipe, Win32 error 5
+fatal: Could not read from remote repository.`
+	fakeSession.result = sandbox.CommandResult{
+		Stderr:   sshFailure,
+		ExitCode: 128,
+		Route:    sandbox.RouteSandbox,
+		Backend:  sandbox.BackendWindows,
+	}
+	fakeSession.resultErr = fmt.Errorf("exit status 128")
+
+	taskTool := runtimeTaskTool{
+		base:       tasktool.New(),
+		sessionRef: activeSession.SessionRef,
+		tasks:      runtime.tasks,
+	}
+	completedResult := callRuntimeTaskTool(t, taskTool, map[string]any{
+		"action":        "wait",
+		"task_id":       taskID,
+		"yield_time_ms": 12000,
+	})
+	payload := testToolResultPayload(t, completedResult)
+	if text, _ := payload["result"].(string); !strings.Contains(text, "couldn't create signal pipe") {
+		t.Fatalf("result = %q, want original ssh diagnostic", text)
+	}
+	if got, _ := payload["hint_code"].(string); got != commanddiag.CodeWindowsMSYSSSHSignalPipe {
+		t.Fatalf("hint_code = %q, want %q", got, commanddiag.CodeWindowsMSYSSSHSignalPipe)
+	}
+	if got, _ := payload["hint"].(string); !strings.Contains(got, "GIT_SSH_COMMAND=C:/Windows/System32/OpenSSH/ssh.exe") {
+		t.Fatalf("hint = %q, want native OpenSSH guidance", got)
 	}
 }
 

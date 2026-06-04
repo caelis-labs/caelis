@@ -418,8 +418,8 @@ func TestSubagentPanelShowsLiveTailAndCompletedFinalAnswer(t *testing.T) {
 	rows := panel.Render(ctx)
 	plain := renderedPlainRows(rows)
 	joined := strings.Join(plain, "\n")
-	if got := countRowsContaining(plain, "progress "); got != subagentOutputPreviewLines {
-		t.Fatalf("visible subagent rows = %d, want %d\n%s", got, subagentOutputPreviewLines, joined)
+	if got := countRowsContaining(plain, "progress "); got != acpTerminalPanelMaxLines {
+		t.Fatalf("visible subagent rows = %d, want %d\n%s", got, acpTerminalPanelMaxLines, joined)
 	}
 	if strings.Contains(joined, "progress 01") || strings.Contains(joined, "progress 08") {
 		t.Fatalf("live subagent panel should hide old progress, got\n%s", joined)
@@ -485,8 +485,77 @@ func TestCompletedSubagentPanelPreservesToolOnlyOutput(t *testing.T) {
 	if strings.Contains(joined, "waiting for subagent output") {
 		t.Fatalf("completed tool-only panel rendered placeholder, got\n%s", joined)
 	}
-	if !strings.Contains(joined, "READ") || !strings.Contains(joined, "README.md") {
+	if !strings.Contains(joined, "Read") || !strings.Contains(joined, "README.md") {
 		t.Fatalf("completed tool-only panel dropped tool output, got\n%s", joined)
+	}
+}
+
+func TestSubagentPanelPreviewShowsToolAfterNarrative(t *testing.T) {
+	model := newGatewayEventTestModel()
+	ctx := BlockRenderContext{Width: 140, TermWidth: 140, Theme: model.theme}
+	panel := NewSubagentPanelBlock("spawn-1", "", "helper", "spawn-call-1")
+	panel.Events = append(panel.Events,
+		SubagentEvent{Kind: SEReasoning, Text: "I will search the repository."},
+		SubagentEvent{
+			Kind:   SEToolCall,
+			CallID: "search-1",
+			Name:   "SEARCH",
+			Args:   `SEARCH "type PermissionGroup struct" in internal/repository/entity/sfs completed`,
+			Output: "completed",
+			Done:   true,
+		},
+	)
+
+	rows := panel.Render(ctx)
+	plain := renderedPlainRows(rows)
+	joined := strings.Join(plain, "\n")
+	if !strings.Contains(joined, `Search "type PermissionGroup struct" in sfs`) {
+		t.Fatalf("subagent preview missing latest search activity:\n%s", joined)
+	}
+	if strings.Contains(joined, "I will search the repository.") {
+		t.Fatalf("subagent preview showed stale narrative instead of latest tool:\n%s", joined)
+	}
+}
+
+func TestSubagentPanelPreviewCompactsWindowsSearchToolTail(t *testing.T) {
+	model := newGatewayEventTestModel()
+	ctx := BlockRenderContext{Width: 180, TermWidth: 180, Theme: model.theme}
+	panel := NewSubagentPanelBlock("spawn-1", "", "helper", "spawn-call-1")
+	searchRoot := `D:\xue\code\storage\internal\repository\entity\sfs`
+	for i, query := range []string{
+		"type PermissionGroup struct",
+		"type PermissionGroupRule struct",
+		"type MountPoint struct",
+	} {
+		panel.Events = append(panel.Events, SubagentEvent{
+			Kind:   SEToolCall,
+			CallID: fmt.Sprintf("search-%d", i+1),
+			Name:   "SEARCH",
+			Args:   fmt.Sprintf(`SEARCH %s %q in %s completed`, searchRoot, query, searchRoot),
+			Output: "completed",
+			Done:   true,
+		})
+	}
+
+	rows := panel.Render(ctx)
+	plain := renderedPlainRows(rows)
+	joined := strings.Join(plain, "\n")
+	if strings.Contains(joined, `D:\xue\code\storage`) {
+		t.Fatalf("subagent preview leaked absolute path:\n%s", joined)
+	}
+	if strings.Contains(strings.ToLower(joined), "completed") {
+		t.Fatalf("subagent preview leaked status-only completion:\n%s", joined)
+	}
+	if got := countRowsContaining(plain, "Search "); got != 1 {
+		t.Fatalf("subagent preview search rows = %d, want 1\n%s", got, joined)
+	}
+	for _, want := range []string{
+		`Search "type PermissionGroupRule struct" in sfs`,
+		`(+1 more)`,
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("subagent preview missing %q:\n%s", want, joined)
+		}
 	}
 }
 

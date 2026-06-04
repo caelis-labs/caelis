@@ -1896,6 +1896,7 @@ func sandboxEnvironment(policy workspacePolicy, extra map[string]string) ([]stri
 		"CAELIS_SANDBOX_TEMP":         tempRoot,
 		"GOCACHE":                     filepath.Join(cacheRoot, "go-build"),
 		"GOMODCACHE":                  filepath.Join(cacheRoot, "go-mod"),
+		"GOTELEMETRY":                 "off",
 		"PIP_CACHE_DIR":               filepath.Join(cacheRoot, "pip"),
 		"npm_config_cache":            filepath.Join(cacheRoot, "npm"),
 		"PYTHONPATH":                  prependEnvPath(pythonSiteDir, commandEnvValue(extra, "PYTHONPATH")),
