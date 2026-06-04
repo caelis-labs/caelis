@@ -20,8 +20,8 @@ import (
 	"github.com/OnslaughtSnail/caelis/impl/model/providers"
 	"github.com/OnslaughtSnail/caelis/internal/agenthandle"
 	"github.com/OnslaughtSnail/caelis/internal/testenv"
-	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/assembly"
+	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/stream"
@@ -198,7 +198,7 @@ func TestAdapterDefersBlankSessionUntilFirstSubmission(t *testing.T) {
 	if status.SessionID != "" {
 		t.Fatalf("Status().SessionID = %q, want empty before first submission", status.SessionID)
 	}
-	before, err := stack.Gateway.ListSessions(ctx, kernel.ListSessionsRequest{
+	before, err := stack.Kernel().ListSessions(ctx, gateway.ListSessionsRequest{
 		AppName:      stack.AppName,
 		UserID:       stack.UserID,
 		WorkspaceKey: stack.Workspace.Key,
@@ -216,7 +216,7 @@ func TestAdapterDefersBlankSessionUntilFirstSubmission(t *testing.T) {
 		t.Fatalf("Submit() error = %v", err)
 	}
 	closeAdapterTestTurn(t, turn)
-	after, err := stack.Gateway.ListSessions(ctx, kernel.ListSessionsRequest{
+	after, err := stack.Kernel().ListSessions(ctx, gateway.ListSessionsRequest{
 		AppName:      stack.AppName,
 		UserID:       stack.UserID,
 		WorkspaceKey: stack.Workspace.Key,
@@ -239,9 +239,9 @@ func TestAdapterSubmitRoutesActiveSessionInputToActiveTurn(t *testing.T) {
 		CWD: t.TempDir(),
 	}
 	gw := &activeSubmitGatewayService{
-		active: []kernel.ActiveTurnState{{
+		active: []gateway.ActiveTurnState{{
 			SessionRef: activeSession.SessionRef,
-			Kind:       kernel.ActiveTurnKindKernel,
+			Kind:       gateway.ActiveTurnKindKernel,
 			HandleID:   "handle-1",
 			RunID:      "run-1",
 			TurnID:     "turn-1",
@@ -352,9 +352,9 @@ func TestAdapterSubmitDoesNotRouteParticipantActiveTurnInputToActiveTurn(t *test
 		CWD: t.TempDir(),
 	}
 	gw := &activeSubmitGatewayService{
-		active: []kernel.ActiveTurnState{{
+		active: []gateway.ActiveTurnState{{
 			SessionRef: activeSession.SessionRef,
-			Kind:       kernel.ActiveTurnKindParticipant,
+			Kind:       gateway.ActiveTurnKindParticipant,
 			HandleID:   "handle-1",
 			RunID:      "run-1",
 			TurnID:     "turn-1",
@@ -404,14 +404,14 @@ func TestAdapterListSessionsSkipsUntitledSessions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	if _, err := stack.Gateway.StartSession(ctx, kernel.StartSessionRequest{
+	if _, err := stack.Kernel().StartSession(ctx, gateway.StartSessionRequest{
 		AppName:   stack.AppName,
 		UserID:    stack.UserID,
 		Workspace: stack.Workspace,
 	}); err != nil {
 		t.Fatalf("StartSession(blank) error = %v", err)
 	}
-	titled, err := stack.Gateway.StartSession(ctx, kernel.StartSessionRequest{
+	titled, err := stack.Kernel().StartSession(ctx, gateway.StartSessionRequest{
 		AppName:   stack.AppName,
 		UserID:    stack.UserID,
 		Workspace: stack.Workspace,
@@ -726,7 +726,7 @@ func TestAdapterCompletesAndPersistsModelReasoningLevel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SnapshotState() error = %v", err)
 	}
-	if got := strings.TrimSpace(state[kernel.StateCurrentReasoningEffort].(string)); got != "high" {
+	if got := strings.TrimSpace(state[gateway.StateCurrentReasoningEffort].(string)); got != "high" {
 		t.Fatalf("reasoning state = %q, want high", got)
 	}
 	cfg, ok := stack.ModelConfig("deepseek/deepseek-v4-pro")
@@ -1193,7 +1193,7 @@ func TestAdapterSessionTokenUsageBreakdownIncludesSelfSubagentAndAutoReview(t *t
 		if next == nil {
 			next = map[string]any{}
 		}
-		next[kernel.StateUsageAccounting] = map[string]any{
+		next[gateway.StateUsageAccounting] = map[string]any{
 			"auto_review": map[string]any{
 				"prompt_tokens":       7,
 				"cached_input_tokens": 1,
@@ -1550,9 +1550,9 @@ func TestAdapterStartAgentSubagentRollsBackAttachmentOnPromptConflict(t *testing
 	}
 	gw := &sideAgentRollbackGatewayService{
 		session: activeSession,
-		promptErr: &kernel.Error{
-			Kind:    kernel.KindConflict,
-			Code:    kernel.CodeActiveRunConflict,
+		promptErr: &gateway.Error{
+			Kind:    gateway.KindConflict,
+			Code:    gateway.CodeActiveRunConflict,
 			Message: "active participant run already in progress",
 		},
 	}
@@ -1584,8 +1584,8 @@ func TestAdapterStartAgentSubagentRollsBackAttachmentOnPromptConflict(t *testing
 	if err == nil {
 		t.Fatal("StartAgentSubagent() error = nil, want active run conflict")
 	}
-	var gwErr *kernel.Error
-	if !kernel.As(err, &gwErr) || gwErr.Code != kernel.CodeActiveRunConflict {
+	var gwErr *gateway.Error
+	if !gateway.As(err, &gwErr) || gwErr.Code != gateway.CodeActiveRunConflict {
 		t.Fatalf("StartAgentSubagent() error = %v, want active run conflict", err)
 	}
 	if len(gw.attachReqs) != 1 {
@@ -1737,10 +1737,11 @@ func TestAdapterStartupBindsRequestedSessionInsteadOfFreshOne(t *testing.T) {
 	if status.SessionID == stale.SessionID {
 		t.Fatalf("startup session = %q, want sticky-session instead of stale bound session", status.SessionID)
 	}
-	current, ok := stack.Gateway.CurrentSession("surface")
-	if !ok {
-		t.Fatal("expected surface binding to exist after startup")
+	binding, err := stack.Kernel().LookupBinding(gateway.BindingStateRequest{BindingKey: "surface"})
+	if err != nil {
+		t.Fatalf("LookupBinding(surface) error = %v", err)
 	}
+	current := binding.SessionRef
 	if current.SessionID != status.SessionID {
 		t.Fatalf("current binding session = %q, want %q", current.SessionID, status.SessionID)
 	}
@@ -2135,7 +2136,7 @@ func TestAdapterIgnoresStaleSessionAliasOutsideConfiguredModels(t *testing.T) {
 		if next == nil {
 			next = map[string]any{}
 		}
-		next["kernel.current_model_alias"] = "minimax/minimax-m2.7-highspeed"
+		next["gateway.current_model_alias"] = "minimax/minimax-m2.7-highspeed"
 		return next, nil
 	}); err != nil {
 		t.Fatalf("UpdateState() error = %v", err)
@@ -2896,7 +2897,7 @@ func TestAdapterCompleteResumeIncludesMetadataAndRecentFirst(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	first, err := stack.Gateway.StartSession(ctx, kernel.StartSessionRequest{
+	first, err := stack.Kernel().StartSession(ctx, gateway.StartSessionRequest{
 		AppName:    stack.AppName,
 		UserID:     stack.UserID,
 		Workspace:  stack.Workspace,
@@ -2908,12 +2909,12 @@ func TestAdapterCompleteResumeIncludesMetadataAndRecentFirst(t *testing.T) {
 	}
 	if err := stack.Sessions.UpdateState(ctx, first.SessionRef, func(state map[string]any) (map[string]any, error) {
 		next := session.CloneState(state)
-		next[kernel.StateCurrentModelAlias] = "openai/gpt-4o-mini"
+		next[gateway.StateCurrentModelAlias] = "openai/gpt-4o-mini"
 		return next, nil
 	}); err != nil {
 		t.Fatalf("UpdateState(first) error = %v", err)
 	}
-	second, err := stack.Gateway.StartSession(ctx, kernel.StartSessionRequest{
+	second, err := stack.Kernel().StartSession(ctx, gateway.StartSessionRequest{
 		AppName:    stack.AppName,
 		UserID:     stack.UserID,
 		Workspace:  stack.Workspace,
@@ -2925,7 +2926,7 @@ func TestAdapterCompleteResumeIncludesMetadataAndRecentFirst(t *testing.T) {
 	}
 	if err := stack.Sessions.UpdateState(ctx, second.SessionRef, func(state map[string]any) (map[string]any, error) {
 		next := session.CloneState(state)
-		next[kernel.StateCurrentModelAlias] = "deepseek/deepseek-v4-flash"
+		next[gateway.StateCurrentModelAlias] = "deepseek/deepseek-v4-flash"
 		return next, nil
 	}); err != nil {
 		t.Fatalf("UpdateState(second) error = %v", err)
@@ -3131,15 +3132,15 @@ type sideAgentRollbackGatewayService struct {
 	activeSubmitGatewayService
 	session    session.Session
 	promptErr  error
-	attachReqs []kernel.AttachParticipantRequest
-	promptReqs []kernel.PromptParticipantRequest
-	detachReqs []kernel.DetachParticipantRequest
+	attachReqs []gateway.AttachParticipantRequest
+	promptReqs []gateway.PromptParticipantRequest
+	detachReqs []gateway.DetachParticipantRequest
 }
 
-func (g *sideAgentRollbackGatewayService) ControlPlaneState(context.Context, kernel.ControlPlaneStateRequest) (kernel.ControlPlaneState, error) {
-	participants := make([]kernel.ParticipantState, 0, len(g.session.Participants))
+func (g *sideAgentRollbackGatewayService) ControlPlaneState(context.Context, gateway.ControlPlaneStateRequest) (gateway.ControlPlaneState, error) {
+	participants := make([]gateway.ParticipantState, 0, len(g.session.Participants))
 	for _, participant := range g.session.Participants {
-		participants = append(participants, kernel.ParticipantState{
+		participants = append(participants, gateway.ParticipantState{
 			ID:             participant.ID,
 			Kind:           participant.Kind,
 			Role:           participant.Role,
@@ -3154,9 +3155,9 @@ func (g *sideAgentRollbackGatewayService) ControlPlaneState(context.Context, ker
 			ControllerRef:  participant.ControllerRef,
 		})
 	}
-	return kernel.ControlPlaneState{
+	return gateway.ControlPlaneState{
 		SessionRef: g.session.SessionRef,
-		Controller: kernel.ControllerState{
+		Controller: gateway.ControllerState{
 			Kind:            g.session.Controller.Kind,
 			ControllerID:    g.session.Controller.ControllerID,
 			AgentName:       g.session.Controller.AgentName,
@@ -3171,7 +3172,7 @@ func (g *sideAgentRollbackGatewayService) ControlPlaneState(context.Context, ker
 	}, nil
 }
 
-func (g *sideAgentRollbackGatewayService) AttachParticipant(_ context.Context, req kernel.AttachParticipantRequest) (session.Session, error) {
+func (g *sideAgentRollbackGatewayService) AttachParticipant(_ context.Context, req gateway.AttachParticipantRequest) (session.Session, error) {
 	g.attachReqs = append(g.attachReqs, req)
 	g.session.Participants = append(g.session.Participants, session.ParticipantBinding{
 		ID:        "side-new",
@@ -3185,12 +3186,12 @@ func (g *sideAgentRollbackGatewayService) AttachParticipant(_ context.Context, r
 	return session.CloneSession(g.session), nil
 }
 
-func (g *sideAgentRollbackGatewayService) PromptParticipant(_ context.Context, req kernel.PromptParticipantRequest) (kernel.BeginTurnResult, error) {
+func (g *sideAgentRollbackGatewayService) PromptParticipant(_ context.Context, req gateway.PromptParticipantRequest) (gateway.BeginTurnResult, error) {
 	g.promptReqs = append(g.promptReqs, req)
-	return kernel.BeginTurnResult{}, g.promptErr
+	return gateway.BeginTurnResult{}, g.promptErr
 }
 
-func (g *sideAgentRollbackGatewayService) DetachParticipant(_ context.Context, req kernel.DetachParticipantRequest) (session.Session, error) {
+func (g *sideAgentRollbackGatewayService) DetachParticipant(_ context.Context, req gateway.DetachParticipantRequest) (session.Session, error) {
 	g.detachReqs = append(g.detachReqs, req)
 	kept := g.session.Participants[:0]
 	for _, participant := range g.session.Participants {
@@ -3204,61 +3205,61 @@ func (g *sideAgentRollbackGatewayService) DetachParticipant(_ context.Context, r
 }
 
 type activeSubmitGatewayService struct {
-	active        []kernel.ActiveTurnState
-	activeSubmits []kernel.SubmitActiveTurnRequest
+	active        []gateway.ActiveTurnState
+	activeSubmits []gateway.SubmitActiveTurnRequest
 	beginCalls    int
 }
 
 func (g *activeSubmitGatewayService) Streams() stream.Service { return nil }
 
-func (g *activeSubmitGatewayService) BeginTurn(context.Context, kernel.BeginTurnRequest) (kernel.BeginTurnResult, error) {
+func (g *activeSubmitGatewayService) BeginTurn(context.Context, gateway.BeginTurnRequest) (gateway.BeginTurnResult, error) {
 	g.beginCalls++
-	return kernel.BeginTurnResult{}, nil
+	return gateway.BeginTurnResult{}, nil
 }
 
-func (g *activeSubmitGatewayService) SubmitActiveTurn(_ context.Context, req kernel.SubmitActiveTurnRequest) error {
+func (g *activeSubmitGatewayService) SubmitActiveTurn(_ context.Context, req gateway.SubmitActiveTurnRequest) error {
 	g.activeSubmits = append(g.activeSubmits, req)
 	return nil
 }
 
-func (g *activeSubmitGatewayService) Interrupt(context.Context, kernel.InterruptRequest) error {
+func (g *activeSubmitGatewayService) Interrupt(context.Context, gateway.InterruptRequest) error {
 	return nil
 }
 
-func (g *activeSubmitGatewayService) ResumeSession(context.Context, kernel.ResumeSessionRequest) (session.LoadedSession, error) {
+func (g *activeSubmitGatewayService) ResumeSession(context.Context, gateway.ResumeSessionRequest) (session.LoadedSession, error) {
 	return session.LoadedSession{}, nil
 }
 
-func (g *activeSubmitGatewayService) ListSessions(context.Context, kernel.ListSessionsRequest) (session.SessionList, error) {
+func (g *activeSubmitGatewayService) ListSessions(context.Context, gateway.ListSessionsRequest) (session.SessionList, error) {
 	return session.SessionList{}, nil
 }
 
-func (g *activeSubmitGatewayService) ReplayEvents(context.Context, kernel.ReplayEventsRequest) (kernel.ReplayEventsResult, error) {
-	return kernel.ReplayEventsResult{}, nil
+func (g *activeSubmitGatewayService) ReplayEvents(context.Context, gateway.ReplayEventsRequest) (gateway.ReplayEventsResult, error) {
+	return gateway.ReplayEventsResult{}, nil
 }
 
-func (g *activeSubmitGatewayService) ControlPlaneState(context.Context, kernel.ControlPlaneStateRequest) (kernel.ControlPlaneState, error) {
-	return kernel.ControlPlaneState{}, nil
+func (g *activeSubmitGatewayService) ControlPlaneState(context.Context, gateway.ControlPlaneStateRequest) (gateway.ControlPlaneState, error) {
+	return gateway.ControlPlaneState{}, nil
 }
 
-func (g *activeSubmitGatewayService) HandoffController(context.Context, kernel.HandoffControllerRequest) (session.Session, error) {
+func (g *activeSubmitGatewayService) HandoffController(context.Context, gateway.HandoffControllerRequest) (session.Session, error) {
 	return session.Session{}, nil
 }
 
-func (g *activeSubmitGatewayService) AttachParticipant(context.Context, kernel.AttachParticipantRequest) (session.Session, error) {
+func (g *activeSubmitGatewayService) AttachParticipant(context.Context, gateway.AttachParticipantRequest) (session.Session, error) {
 	return session.Session{}, nil
 }
 
-func (g *activeSubmitGatewayService) PromptParticipant(context.Context, kernel.PromptParticipantRequest) (kernel.BeginTurnResult, error) {
-	return kernel.BeginTurnResult{}, nil
+func (g *activeSubmitGatewayService) PromptParticipant(context.Context, gateway.PromptParticipantRequest) (gateway.BeginTurnResult, error) {
+	return gateway.BeginTurnResult{}, nil
 }
 
-func (g *activeSubmitGatewayService) DetachParticipant(context.Context, kernel.DetachParticipantRequest) (session.Session, error) {
+func (g *activeSubmitGatewayService) DetachParticipant(context.Context, gateway.DetachParticipantRequest) (session.Session, error) {
 	return session.Session{}, nil
 }
 
-func (g *activeSubmitGatewayService) ActiveTurns() []kernel.ActiveTurnState {
-	return append([]kernel.ActiveTurnState(nil), g.active...)
+func (g *activeSubmitGatewayService) ActiveTurns() []gateway.ActiveTurnState {
+	return append([]gateway.ActiveTurnState(nil), g.active...)
 }
 
 func repoRootForAdapterTest(t *testing.T) string {

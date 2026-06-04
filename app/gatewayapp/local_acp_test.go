@@ -13,8 +13,8 @@ import (
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/spawn"
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/task"
 	"github.com/OnslaughtSnail/caelis/internal/testenv"
-	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/assembly"
+	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/tool"
 	"github.com/OnslaughtSnail/caelis/protocol/acp"
@@ -31,7 +31,7 @@ func TestLocalStackInjectsSpawnForSelfAndRegisteredACPAgents(t *testing.T) {
 			WorkDir:     repoRootForGatewayAppTest(t),
 		}},
 	})
-	resolved, err := withAgents.Gateway.Resolver().ResolveTurn(ctx, kernel.TurnIntent{SessionRef: session.SessionRef})
+	resolved, err := withAgents.currentGateway().Resolver().ResolveTurn(ctx, gateway.TurnIntent{SessionRef: session.SessionRef})
 	if err != nil {
 		t.Fatalf("ResolveTurn(with agents) error = %v", err)
 	}
@@ -47,7 +47,7 @@ func TestLocalStackInjectsSpawnForSelfAndRegisteredACPAgents(t *testing.T) {
 	}
 
 	withoutAgents, session := newStackWithAssemblyForToolTest(t, assembly.ResolvedAssembly{})
-	resolved, err = withoutAgents.Gateway.Resolver().ResolveTurn(ctx, kernel.TurnIntent{SessionRef: session.SessionRef})
+	resolved, err = withoutAgents.currentGateway().Resolver().ResolveTurn(ctx, gateway.TurnIntent{SessionRef: session.SessionRef})
 	if err != nil {
 		t.Fatalf("ResolveTurn(without agents) error = %v", err)
 	}
@@ -450,19 +450,19 @@ func TestRegisterBuiltinACPAgentInstallFailureDoesNotUpdateConfig(t *testing.T) 
 func TestLocalStackAgentRegistryUpdatesWithoutRuntimeRebuild(t *testing.T) {
 	ctx := context.Background()
 	stack, session := newStackWithAssemblyForToolTest(t, assembly.ResolvedAssembly{})
-	oldGateway := stack.Gateway
+	oldGateway := stack.currentGateway()
 	oldEngine := stack.engine
 
 	if err := stack.RegisterBuiltinACPAgent("codex"); err != nil {
 		t.Fatalf("RegisterBuiltinACPAgent(codex) error = %v", err)
 	}
-	if stack.Gateway != oldGateway {
+	if stack.currentGateway() != oldGateway {
 		t.Fatal("RegisterBuiltinACPAgent rebuilt gateway")
 	}
 	if stack.engine != oldEngine {
 		t.Fatal("RegisterBuiltinACPAgent rebuilt runtime engine")
 	}
-	resolved, err := stack.Gateway.Resolver().ResolveTurn(ctx, kernel.TurnIntent{SessionRef: session.SessionRef})
+	resolved, err := stack.currentGateway().Resolver().ResolveTurn(ctx, gateway.TurnIntent{SessionRef: session.SessionRef})
 	if err != nil {
 		t.Fatalf("ResolveTurn(after register) error = %v", err)
 	}
@@ -473,13 +473,13 @@ func TestLocalStackAgentRegistryUpdatesWithoutRuntimeRebuild(t *testing.T) {
 	if err := stack.UnregisterACPAgent("codex"); err != nil {
 		t.Fatalf("UnregisterACPAgent(codex) error = %v", err)
 	}
-	if stack.Gateway != oldGateway {
+	if stack.currentGateway() != oldGateway {
 		t.Fatal("UnregisterACPAgent rebuilt gateway")
 	}
 	if stack.engine != oldEngine {
 		t.Fatal("UnregisterACPAgent rebuilt runtime engine")
 	}
-	resolved, err = stack.Gateway.Resolver().ResolveTurn(ctx, kernel.TurnIntent{SessionRef: session.SessionRef})
+	resolved, err = stack.currentGateway().Resolver().ResolveTurn(ctx, gateway.TurnIntent{SessionRef: session.SessionRef})
 	if err != nil {
 		t.Fatalf("ResolveTurn(after unregister) error = %v", err)
 	}
@@ -491,7 +491,7 @@ func TestLocalStackAgentRegistryUpdatesWithoutRuntimeRebuild(t *testing.T) {
 func TestRegisterCustomACPAgentUpdatesConfigAndRuntimeRegistry(t *testing.T) {
 	ctx := context.Background()
 	stack, session := newStackWithAssemblyForToolTest(t, assembly.ResolvedAssembly{})
-	oldGateway := stack.Gateway
+	oldGateway := stack.currentGateway()
 	oldEngine := stack.engine
 
 	cfg := AgentConfig{
@@ -506,7 +506,7 @@ func TestRegisterCustomACPAgentUpdatesConfigAndRuntimeRegistry(t *testing.T) {
 	if err := stack.RegisterACPAgent(ctx, cfg); err != nil {
 		t.Fatalf("RegisterACPAgent(helper) error = %v", err)
 	}
-	if stack.Gateway != oldGateway {
+	if stack.currentGateway() != oldGateway {
 		t.Fatal("RegisterACPAgent rebuilt gateway")
 	}
 	if stack.engine != oldEngine {
@@ -529,7 +529,7 @@ func TestRegisterCustomACPAgentUpdatesConfigAndRuntimeRegistry(t *testing.T) {
 	if got, want := agent.Env["HELPER_MODE"], "test"; got != want {
 		t.Fatalf("stored env HELPER_MODE = %q, want %q", got, want)
 	}
-	resolved, err := stack.Gateway.Resolver().ResolveTurn(ctx, kernel.TurnIntent{SessionRef: session.SessionRef})
+	resolved, err := stack.currentGateway().Resolver().ResolveTurn(ctx, gateway.TurnIntent{SessionRef: session.SessionRef})
 	if err != nil {
 		t.Fatalf("ResolveTurn(after custom register) error = %v", err)
 	}
@@ -555,7 +555,7 @@ func TestRegisterCustomACPAgentUpdatesConfigAndRuntimeRegistry(t *testing.T) {
 	if err := stack.UnregisterACPAgent("helper"); err != nil {
 		t.Fatalf("UnregisterACPAgent(helper) error = %v", err)
 	}
-	resolved, err = stack.Gateway.Resolver().ResolveTurn(ctx, kernel.TurnIntent{SessionRef: session.SessionRef})
+	resolved, err = stack.currentGateway().Resolver().ResolveTurn(ctx, gateway.TurnIntent{SessionRef: session.SessionRef})
 	if err != nil {
 		t.Fatalf("ResolveTurn(after custom unregister) error = %v", err)
 	}

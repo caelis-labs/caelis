@@ -10,7 +10,7 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/modelregistry"
 	"github.com/OnslaughtSnail/caelis/impl/model/providers"
-	"github.com/OnslaughtSnail/caelis/kernel"
+	kernelimpl "github.com/OnslaughtSnail/caelis/internal/kernel"
 )
 
 var errAmbiguousModelAlias = errors.New("ambiguous model alias")
@@ -161,24 +161,24 @@ func (l *modelLookup) ListProviderModels(provider string) []string {
 	return dedupeNonEmptyStrings(models)
 }
 
-func (l *modelLookup) ResolveModel(ctx context.Context, alias string, contextWindow int) (kernel.ModelResolution, error) {
+func (l *modelLookup) ResolveModel(ctx context.Context, alias string, contextWindow int) (kernelimpl.ModelResolution, error) {
 	if l == nil {
-		return kernel.ModelResolution{}, fmt.Errorf("gatewayapp: model lookup is nil")
+		return kernelimpl.ModelResolution{}, fmt.Errorf("gatewayapp: model lookup is nil")
 	}
 	l.mu.RLock()
 	ref := firstNonEmpty(strings.TrimSpace(alias), l.defaultID)
 	if ref == "" || len(l.configs) == 0 {
 		l.mu.RUnlock()
-		return kernel.ModelResolution{}, fmt.Errorf("gatewayapp: no model configured; use /connect")
+		return kernelimpl.ModelResolution{}, fmt.Errorf("gatewayapp: no model configured; use /connect")
 	}
 	cfg, ok, resolveErr := l.resolveConfigLocked(ref)
 	fallbackContextWindow := l.contextWindow
 	l.mu.RUnlock()
 	if resolveErr != nil {
-		return kernel.ModelResolution{}, resolveErr
+		return kernelimpl.ModelResolution{}, resolveErr
 	}
 	if !ok {
-		return kernel.ModelResolution{}, fmt.Errorf("gatewayapp: unknown model alias %q", alias)
+		return kernelimpl.ModelResolution{}, fmt.Errorf("gatewayapp: unknown model alias %q", alias)
 	}
 	effectiveContextWindow := fallbackContextWindow
 	if cfg.ContextWindowTokens > 0 {
@@ -212,13 +212,13 @@ func (l *modelLookup) ResolveModel(ctx context.Context, alias string, contextWin
 		},
 	}
 	if err := factory.Register(record); err != nil {
-		return kernel.ModelResolution{}, err
+		return kernelimpl.ModelResolution{}, err
 	}
 	llm, err := factory.NewByAlias(cfg.ID)
 	if err != nil {
-		return kernel.ModelResolution{}, err
+		return kernelimpl.ModelResolution{}, err
 	}
-	return kernel.ModelResolution{
+	return kernelimpl.ModelResolution{
 		Model:                  llm,
 		ReasoningEffort:        cfg.ReasoningEffort,
 		DefaultReasoningEffort: cfg.DefaultReasoningEffort,

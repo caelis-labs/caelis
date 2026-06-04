@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
-	"github.com/OnslaughtSnail/caelis/kernel"
+	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/surfaces/headless"
 )
@@ -91,7 +91,7 @@ func TestLocalStackClaudeACPMainResumeOrNewE2E(t *testing.T) {
 		t.Fatalf("StartSession() error = %v", err)
 	}
 	registerClaudeACPAgentForE2E(ctx, t, stack)
-	updated, err := stack.Gateway.HandoffController(ctx, kernel.HandoffControllerRequest{
+	updated, err := stack.Kernel().HandoffController(ctx, gateway.HandoffControllerRequest{
 		SessionRef: activeSession.SessionRef,
 		Kind:       session.ControllerKindACP,
 		Agent:      "claude",
@@ -109,7 +109,7 @@ func TestLocalStackClaudeACPMainResumeOrNewE2E(t *testing.T) {
 	const marker = "caelis claude acp resume e2e"
 	const wantFirst = marker + " first ok"
 	prompt := "Reply with exactly this text and no markdown: " + wantFirst
-	result, err := headless.RunOnce(ctx, stack.Gateway, kernel.BeginTurnRequest{
+	result, err := headless.RunOnce(ctx, stack.Kernel(), gateway.BeginTurnRequest{
 		SessionRef: activeSession.SessionRef,
 		Input:      prompt,
 		Surface:    "headless-claude-acp-resume-e2e",
@@ -121,7 +121,7 @@ func TestLocalStackClaudeACPMainResumeOrNewE2E(t *testing.T) {
 		t.Fatalf("RunOnce(first Claude turn) output = %q, want marker %q", result.Output, marker)
 	}
 
-	resumed, err := stack.Gateway.HandoffController(ctx, kernel.HandoffControllerRequest{
+	resumed, err := stack.Kernel().HandoffController(ctx, gateway.HandoffControllerRequest{
 		SessionRef: activeSession.SessionRef,
 		Kind:       session.ControllerKindACP,
 		Agent:      "claude",
@@ -140,7 +140,7 @@ func TestLocalStackClaudeACPMainResumeOrNewE2E(t *testing.T) {
 	}
 
 	const wantSecond = marker + " second ok"
-	result, err = headless.RunOnce(ctx, stack.Gateway, kernel.BeginTurnRequest{
+	result, err = headless.RunOnce(ctx, stack.Kernel(), gateway.BeginTurnRequest{
 		SessionRef: activeSession.SessionRef,
 		Input:      "Reply with exactly this text and no markdown: " + wantSecond,
 		Surface:    "headless-claude-acp-resume-e2e",

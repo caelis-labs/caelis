@@ -7,7 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/OnslaughtSnail/caelis/internal/evalharness"
-	"github.com/OnslaughtSnail/caelis/kernel"
+	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
@@ -53,25 +53,25 @@ func TestRegressionToolCallFrame120x32Golden(t *testing.T) {
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 120, Height: 32})
 	m := updated.(*Model)
 
-	updated, _ = m.Update(gatewayEventMsg(kernel.EventEnvelope{Event: kernel.Event{
+	updated, _ = m.Update(gatewayEventMsg(gateway.EventEnvelope{Event: gateway.Event{
 		SessionRef: session.SessionRef{SessionID: "sess-regression"},
-		Kind:       kernel.EventKindUserMessage,
-		Narrative: &kernel.NarrativePayload{
-			Role: kernel.NarrativeRoleUser,
+		Kind:       gateway.EventKindUserMessage,
+		Narrative: &gateway.NarrativePayload{
+			Role: gateway.NarrativeRoleUser,
 			Text: "run the smoke check",
 		},
 	}}))
 
 	m = updated.(*Model)
-	updated, _ = m.Update(gatewayEventMsg(kernel.EventEnvelope{Event: kernel.Event{
+	updated, _ = m.Update(gatewayEventMsg(gateway.EventEnvelope{Event: gateway.Event{
 		SessionRef: session.SessionRef{SessionID: "sess-regression"},
-		Kind:       kernel.EventKindToolCall,
-		ToolCall: &kernel.ToolCallPayload{
+		Kind:       gateway.EventKindToolCall,
+		ToolCall: &gateway.ToolCallPayload{
 			CallID:    "call-1",
 			ToolName:  "RUN_COMMAND",
 			ToolKind:  "execute",
 			ToolTitle: "go test ./surfaces/tui/app",
-			Status:    kernel.ToolStatusRunning,
+			Status:    gateway.ToolStatusRunning,
 			RawInput: map[string]any{
 				"command": "go test ./surfaces/tui/app",
 			},
@@ -83,15 +83,15 @@ func TestRegressionToolCallFrame120x32Golden(t *testing.T) {
 	}}))
 
 	m = updated.(*Model)
-	updated, _ = m.Update(gatewayEventMsg(kernel.EventEnvelope{Event: kernel.Event{
+	updated, _ = m.Update(gatewayEventMsg(gateway.EventEnvelope{Event: gateway.Event{
 		SessionRef: session.SessionRef{SessionID: "sess-regression"},
-		Kind:       kernel.EventKindToolResult,
-		ToolResult: &kernel.ToolResultPayload{
+		Kind:       gateway.EventKindToolResult,
+		ToolResult: &gateway.ToolResultPayload{
 			CallID:    "call-1",
 			ToolName:  "RUN_COMMAND",
 			ToolKind:  "execute",
 			ToolTitle: "go test ./surfaces/tui/app",
-			Status:    kernel.ToolStatusCompleted,
+			Status:    gateway.ToolStatusCompleted,
 			RawInput: map[string]any{
 				"command": "go test ./surfaces/tui/app",
 			},
@@ -106,11 +106,11 @@ func TestRegressionToolCallFrame120x32Golden(t *testing.T) {
 	}}))
 
 	m = updated.(*Model)
-	updated, _ = m.Update(gatewayEventMsg(kernel.EventEnvelope{Event: kernel.Event{
+	updated, _ = m.Update(gatewayEventMsg(gateway.EventEnvelope{Event: gateway.Event{
 		SessionRef: session.SessionRef{SessionID: "sess-regression"},
-		Kind:       kernel.EventKindAssistantMessage,
-		Narrative: &kernel.NarrativePayload{
-			Role: kernel.NarrativeRoleAssistant,
+		Kind:       gateway.EventKindAssistantMessage,
+		Narrative: &gateway.NarrativePayload{
+			Role: gateway.NarrativeRoleAssistant,
 			Text: "Smoke check passed.",
 		},
 	}}))

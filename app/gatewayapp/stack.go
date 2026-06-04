@@ -10,9 +10,10 @@ import (
 	"github.com/OnslaughtSnail/caelis/impl/agent/local"
 	sessionfile "github.com/OnslaughtSnail/caelis/impl/session/file"
 	taskfile "github.com/OnslaughtSnail/caelis/impl/task/file"
-	"github.com/OnslaughtSnail/caelis/kernel"
+	kernelimpl "github.com/OnslaughtSnail/caelis/internal/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/agent"
 	"github.com/OnslaughtSnail/caelis/ports/assembly"
+	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
@@ -38,8 +39,12 @@ type ModelConfig = modelregistry.Config
 type ModelProfileConfig = modelregistry.ProfileConfig
 type ModelChoice = modelregistry.Choice
 
+type GatewayRuntime interface {
+	gateway.Service
+	gateway.StreamProvider
+}
+
 type Stack struct {
-	Gateway       *kernel.Gateway
 	Sessions      session.Service
 	AppName       string
 	UserID        string
@@ -54,15 +59,24 @@ type Stack struct {
 	exec          sandbox.Runtime
 	engine        *local.Runtime
 	taskStore     *taskfile.Store
+	gateway       *kernelimpl.Gateway
 }
 
-func (s *Stack) CurrentGateway() *kernel.Gateway {
+func (s *Stack) CurrentGateway() GatewayRuntime {
+	gw := s.currentGateway()
+	if gw == nil {
+		return nil
+	}
+	return gw
+}
+
+func (s *Stack) currentGateway() *kernelimpl.Gateway {
 	if s == nil {
 		return nil
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.Gateway
+	return s.gateway
 }
 
 type SessionRuntimeState struct {

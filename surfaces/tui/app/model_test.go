@@ -8,7 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/OnslaughtSnail/caelis/kernel"
+	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/tuikit"
 	"github.com/charmbracelet/x/ansi"
@@ -582,17 +582,17 @@ func TestPromptRequestKeepsGatewayToolContentVisible(t *testing.T) {
 
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
 	m := updated.(*Model)
-	updated, _ = m.Update(gatewayEventMsg(kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind:       kernel.EventKindToolCall,
+	updated, _ = m.Update(gatewayEventMsg(gateway.EventEnvelope{
+		Event: gateway.Event{
+			Kind:       gateway.EventKindToolCall,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session"},
-			ToolCall: &kernel.ToolCallPayload{
+			Origin:     &gateway.EventOrigin{Scope: gateway.EventScopeMain, ScopeID: "root-session"},
+			ToolCall: &gateway.ToolCallPayload{
 				CallID:   "call-1",
 				ToolName: "READ",
 				RawInput: map[string]any{"path": "/tmp/demo.txt"},
 				Status:   "running",
-				Scope:    kernel.EventScopeMain,
+				Scope:    gateway.EventScopeMain,
 			},
 		}}))
 
@@ -631,17 +631,17 @@ func TestRunningGatewayToolCallIsVisibleBeforeTaskCompletes(t *testing.T) {
 	m := updated.(*Model)
 	updated, _ = m.Update(SetRunningMsg{Running: true})
 	m = updated.(*Model)
-	updated, _ = m.Update(gatewayEventMsg(kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind:       kernel.EventKindToolCall,
+	updated, _ = m.Update(gatewayEventMsg(gateway.EventEnvelope{
+		Event: gateway.Event{
+			Kind:       gateway.EventKindToolCall,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session"},
-			ToolCall: &kernel.ToolCallPayload{
+			Origin:     &gateway.EventOrigin{Scope: gateway.EventScopeMain, ScopeID: "root-session"},
+			ToolCall: &gateway.ToolCallPayload{
 				CallID:   "call-1",
 				ToolName: "RUN_COMMAND",
 				RawInput: map[string]any{"command": `echo "hi"`},
 				Status:   "running",
-				Scope:    kernel.EventScopeMain,
+				Scope:    gateway.EventScopeMain,
 			},
 		}}))
 
@@ -666,17 +666,17 @@ func TestPendingGatewayToolCallIsVisibleBeforeTaskCompletes(t *testing.T) {
 	m := updated.(*Model)
 	updated, _ = m.Update(SetRunningMsg{Running: true})
 	m = updated.(*Model)
-	updated, _ = m.Update(gatewayEventMsg(kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind:       kernel.EventKindToolCall,
+	updated, _ = m.Update(gatewayEventMsg(gateway.EventEnvelope{
+		Event: gateway.Event{
+			Kind:       gateway.EventKindToolCall,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session"},
-			ToolCall: &kernel.ToolCallPayload{
+			Origin:     &gateway.EventOrigin{Scope: gateway.EventScopeMain, ScopeID: "root-session"},
+			ToolCall: &gateway.ToolCallPayload{
 				CallID:   "call-1",
 				ToolName: "LIST",
 				RawInput: map[string]any{"path": `/tmp/workspace`},
 				Status:   "pending",
-				Scope:    kernel.EventScopeMain,
+				Scope:    gateway.EventScopeMain,
 			},
 		}}))
 

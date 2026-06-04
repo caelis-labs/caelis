@@ -1,21 +1,22 @@
-package kernel
+package projector
 
 import (
 	"testing"
 
+	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
-func TestProjectACPEventEnvelopeProjectsGatewayToolResult(t *testing.T) {
-	events := ProjectACPEventEnvelope(EventEnvelope{Event: Event{
-		Kind:       EventKindToolResult,
+func TestProjectGatewayEventEnvelopeProjectsGatewayToolResult(t *testing.T) {
+	events := ProjectGatewayEventEnvelope(gateway.EventEnvelope{Event: gateway.Event{
+		Kind:       gateway.EventKindToolResult,
 		SessionRef: session.SessionRef{SessionID: "session-1"},
-		ToolResult: &ToolResultPayload{
+		ToolResult: &gateway.ToolResultPayload{
 			CallID:    "call-1",
 			ToolName:  "RUN_COMMAND",
-			Status:    ToolStatusRunning,
+			Status:    gateway.ToolStatusRunning,
 			RawOutput: map[string]any{"running": true},
 		},
 		Meta: map[string]any{
@@ -27,7 +28,7 @@ func TestProjectACPEventEnvelopeProjectsGatewayToolResult(t *testing.T) {
 		},
 	}})
 	if len(events) != 1 {
-		t.Fatalf("ProjectACPEventEnvelope() returned %d events, want 1: %#v", len(events), events)
+		t.Fatalf("ProjectGatewayEventEnvelope() returned %d events, want 1: %#v", len(events), events)
 	}
 	env := events[0]
 	if env.Kind != eventstream.KindSessionUpdate {
@@ -48,9 +49,9 @@ func TestProjectACPEventEnvelopeProjectsGatewayToolResult(t *testing.T) {
 	}
 }
 
-func TestProjectACPEventEnvelopeProjectsProtocolPermission(t *testing.T) {
-	events := ProjectACPEventEnvelope(EventEnvelope{Event: Event{
-		Kind:       EventKindApprovalRequested,
+func TestProjectGatewayEventEnvelopeProjectsProtocolPermission(t *testing.T) {
+	events := ProjectGatewayEventEnvelope(gateway.EventEnvelope{Event: gateway.Event{
+		Kind:       gateway.EventKindApprovalRequested,
 		SessionRef: session.SessionRef{SessionID: "session-1"},
 		Protocol: &session.EventProtocol{Permission: &session.ProtocolApproval{
 			ToolCall: session.ProtocolToolCall{
@@ -68,7 +69,7 @@ func TestProjectACPEventEnvelopeProjectsProtocolPermission(t *testing.T) {
 		}},
 	}})
 	if len(events) != 1 {
-		t.Fatalf("ProjectACPEventEnvelope() returned %d events, want 1: %#v", len(events), events)
+		t.Fatalf("ProjectGatewayEventEnvelope() returned %d events, want 1: %#v", len(events), events)
 	}
 	env := events[0]
 	if env.Kind != eventstream.KindRequestPermission || env.Permission == nil {
@@ -82,19 +83,19 @@ func TestProjectACPEventEnvelopeProjectsProtocolPermission(t *testing.T) {
 	}
 }
 
-func TestProjectACPEventEnvelopeProjectsManualApprovalPayloadPermission(t *testing.T) {
-	events := ProjectACPEventEnvelope(EventEnvelope{Event: Event{
-		Kind:       EventKindApprovalRequested,
+func TestProjectGatewayEventEnvelopeProjectsManualApprovalPayloadPermission(t *testing.T) {
+	events := ProjectGatewayEventEnvelope(gateway.EventEnvelope{Event: gateway.Event{
+		Kind:       gateway.EventKindApprovalRequested,
 		SessionRef: session.SessionRef{SessionID: "session-1"},
-		ApprovalPayload: &ApprovalPayload{
+		ApprovalPayload: &gateway.ApprovalPayload{
 			ToolCallID:         "call-1",
 			ToolName:           "RUN_COMMAND",
 			RawInput:           map[string]any{"command": "go test ./..."},
 			Reason:             "needs execution",
 			Justification:      "requested by user",
 			SandboxPermissions: "host",
-			Status:             ApprovalStatusPending,
-			Options: []ApprovalOption{{
+			Status:             gateway.ApprovalStatusPending,
+			Options: []gateway.ApprovalOption{{
 				ID:   "allow_once",
 				Name: "Allow once",
 				Kind: "allow_once",
@@ -106,7 +107,7 @@ func TestProjectACPEventEnvelopeProjectsManualApprovalPayloadPermission(t *testi
 		},
 	}})
 	if len(events) != 1 {
-		t.Fatalf("ProjectACPEventEnvelope() returned %d events, want 1: %#v", len(events), events)
+		t.Fatalf("ProjectGatewayEventEnvelope() returned %d events, want 1: %#v", len(events), events)
 	}
 	env := events[0]
 	if env.Kind != eventstream.KindRequestPermission || env.Permission == nil {
@@ -140,9 +141,9 @@ func TestProjectACPEventEnvelopeProjectsManualApprovalPayloadPermission(t *testi
 	}
 }
 
-func TestProjectACPEventEnvelopeLeavesEmptyToolUpdateStatusUnset(t *testing.T) {
-	events := ProjectACPEventEnvelope(EventEnvelope{Event: Event{
-		Kind: EventKindToolResult,
+func TestProjectGatewayEventEnvelopeLeavesEmptyToolUpdateStatusUnset(t *testing.T) {
+	events := ProjectGatewayEventEnvelope(gateway.EventEnvelope{Event: gateway.Event{
+		Kind: gateway.EventKindToolResult,
 		Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
 			SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate),
 			ToolCallID:    "call-1",
@@ -151,7 +152,7 @@ func TestProjectACPEventEnvelopeLeavesEmptyToolUpdateStatusUnset(t *testing.T) {
 		}},
 	}})
 	if len(events) != 1 {
-		t.Fatalf("ProjectACPEventEnvelope() returned %d events, want 1: %#v", len(events), events)
+		t.Fatalf("ProjectGatewayEventEnvelope() returned %d events, want 1: %#v", len(events), events)
 	}
 	update, ok := events[0].Update.(schema.ToolCallUpdate)
 	if !ok {

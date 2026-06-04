@@ -5,29 +5,29 @@ import (
 	"testing"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/kernel"
+	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
 func TestRunOnceDrainsAssistantOutput(t *testing.T) {
 	t.Parallel()
 
-	handle := newFakeHandle([]kernel.EventEnvelope{
+	handle := newFakeHandle([]gateway.EventEnvelope{
 		{
 			Cursor: "e1",
-			Event: kernel.Event{
-				Kind: kernel.EventKindAssistantMessage,
-				Narrative: &kernel.NarrativePayload{
-					Role:  kernel.NarrativeRoleAssistant,
+			Event: gateway.Event{
+				Kind: gateway.EventKindAssistantMessage,
+				Narrative: &gateway.NarrativePayload{
+					Role:  gateway.NarrativeRoleAssistant,
 					Text:  "done",
 					Final: true,
 				},
-				Usage: &kernel.UsageSnapshot{PromptTokens: 11},
+				Usage: &gateway.UsageSnapshot{PromptTokens: 11},
 			},
 		},
 	})
 	gw := fakeStarter{
-		result: kernel.BeginTurnResult{
+		result: gateway.BeginTurnResult{
 			Session: session.Session{SessionRef: session.SessionRef{
 				AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
 			}},
@@ -35,7 +35,7 @@ func TestRunOnceDrainsAssistantOutput(t *testing.T) {
 		},
 	}
 
-	result, err := RunOnce(context.Background(), gw, kernel.BeginTurnRequest{
+	result, err := RunOnce(context.Background(), gw, gateway.BeginTurnRequest{
 		SessionRef: session.SessionRef{
 			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
 		},
@@ -55,19 +55,19 @@ func TestRunOnceDrainsAssistantOutput(t *testing.T) {
 func TestRunOnceAutoDeniesApprovalByDefault(t *testing.T) {
 	t.Parallel()
 
-	handle := newFakeHandle([]kernel.EventEnvelope{
+	handle := newFakeHandle([]gateway.EventEnvelope{
 		{
 			Cursor: "a1",
-			Event: kernel.Event{
-				Kind: kernel.EventKindApprovalRequested,
-				ApprovalPayload: &kernel.ApprovalPayload{
+			Event: gateway.Event{
+				Kind: gateway.EventKindApprovalRequested,
+				ApprovalPayload: &gateway.ApprovalPayload{
 					ToolName: "RUN_COMMAND",
 				},
 			},
 		},
 	})
 	gw := fakeStarter{
-		result: kernel.BeginTurnResult{
+		result: gateway.BeginTurnResult{
 			Session: session.Session{SessionRef: session.SessionRef{
 				AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
 			}},
@@ -75,7 +75,7 @@ func TestRunOnceAutoDeniesApprovalByDefault(t *testing.T) {
 		},
 	}
 
-	if _, err := RunOnce(context.Background(), gw, kernel.BeginTurnRequest{
+	if _, err := RunOnce(context.Background(), gw, gateway.BeginTurnRequest{
 		SessionRef: session.SessionRef{
 			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
 		},
@@ -86,7 +86,7 @@ func TestRunOnceAutoDeniesApprovalByDefault(t *testing.T) {
 	if len(handle.submissions) != 1 {
 		t.Fatalf("submissions = %d, want 1", len(handle.submissions))
 	}
-	if got := handle.submissions[0]; got.Kind != kernel.SubmissionKindApproval || got.Approval == nil || got.Approval.Approved {
+	if got := handle.submissions[0]; got.Kind != gateway.SubmissionKindApproval || got.Approval == nil || got.Approval.Approved {
 		t.Fatalf("approval submission = %+v, want auto-deny", got)
 	}
 }
@@ -94,24 +94,24 @@ func TestRunOnceAutoDeniesApprovalByDefault(t *testing.T) {
 func TestRunOnceIgnoresAutomaticApprovalReviewEvents(t *testing.T) {
 	t.Parallel()
 
-	handle := newFakeHandle([]kernel.EventEnvelope{
+	handle := newFakeHandle([]gateway.EventEnvelope{
 		{
 			Cursor: "r1",
-			Event: kernel.Event{
-				Kind: kernel.EventKindApprovalReview,
-				ApprovalPayload: &kernel.ApprovalPayload{
+			Event: gateway.Event{
+				Kind: gateway.EventKindApprovalReview,
+				ApprovalPayload: &gateway.ApprovalPayload{
 					ToolName:       "RUN_COMMAND",
-					ReviewStatus:   kernel.ApprovalReviewStatusInProgress,
+					ReviewStatus:   gateway.ApprovalReviewStatusInProgress,
 					DecisionSource: "auto-review",
 				},
 			},
 		},
 		{
 			Cursor: "r2",
-			Event: kernel.Event{
-				Kind: kernel.EventKindAssistantMessage,
-				Narrative: &kernel.NarrativePayload{
-					Role:  kernel.NarrativeRoleAssistant,
+			Event: gateway.Event{
+				Kind: gateway.EventKindAssistantMessage,
+				Narrative: &gateway.NarrativePayload{
+					Role:  gateway.NarrativeRoleAssistant,
 					Text:  "done",
 					Final: true,
 				},
@@ -119,7 +119,7 @@ func TestRunOnceIgnoresAutomaticApprovalReviewEvents(t *testing.T) {
 		},
 	})
 	gw := fakeStarter{
-		result: kernel.BeginTurnResult{
+		result: gateway.BeginTurnResult{
 			Session: session.Session{SessionRef: session.SessionRef{
 				AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
 			}},
@@ -127,7 +127,7 @@ func TestRunOnceIgnoresAutomaticApprovalReviewEvents(t *testing.T) {
 		},
 	}
 
-	result, err := RunOnce(context.Background(), gw, kernel.BeginTurnRequest{
+	result, err := RunOnce(context.Background(), gw, gateway.BeginTurnRequest{
 		SessionRef: session.SessionRef{
 			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
 		},
@@ -145,21 +145,21 @@ func TestRunOnceIgnoresAutomaticApprovalReviewEvents(t *testing.T) {
 }
 
 type fakeStarter struct {
-	result kernel.BeginTurnResult
+	result gateway.BeginTurnResult
 	err    error
 }
 
-func (f fakeStarter) BeginTurn(context.Context, kernel.BeginTurnRequest) (kernel.BeginTurnResult, error) {
+func (f fakeStarter) BeginTurn(context.Context, gateway.BeginTurnRequest) (gateway.BeginTurnResult, error) {
 	return f.result, f.err
 }
 
 type fakeHandle struct {
-	events      chan kernel.EventEnvelope
-	submissions []kernel.SubmitRequest
+	events      chan gateway.EventEnvelope
+	submissions []gateway.SubmitRequest
 }
 
-func newFakeHandle(events []kernel.EventEnvelope) *fakeHandle {
-	ch := make(chan kernel.EventEnvelope, len(events))
+func newFakeHandle(events []gateway.EventEnvelope) *fakeHandle {
+	ch := make(chan gateway.EventEnvelope, len(events))
 	for _, env := range events {
 		ch <- env
 	}
@@ -167,20 +167,20 @@ func newFakeHandle(events []kernel.EventEnvelope) *fakeHandle {
 	return &fakeHandle{events: ch}
 }
 
-func (h *fakeHandle) HandleID() string                    { return "h1" }
-func (h *fakeHandle) RunID() string                       { return "run-1" }
-func (h *fakeHandle) TurnID() string                      { return "turn-1" }
-func (h *fakeHandle) SessionRef() session.SessionRef      { return session.SessionRef{} }
-func (h *fakeHandle) CreatedAt() time.Time                { return time.Time{} }
-func (h *fakeHandle) Events() <-chan kernel.EventEnvelope { return h.events }
-func (h *fakeHandle) EventsAfter(string) ([]kernel.EventEnvelope, string, error) {
+func (h *fakeHandle) HandleID() string                     { return "h1" }
+func (h *fakeHandle) RunID() string                        { return "run-1" }
+func (h *fakeHandle) TurnID() string                       { return "turn-1" }
+func (h *fakeHandle) SessionRef() session.SessionRef       { return session.SessionRef{} }
+func (h *fakeHandle) CreatedAt() time.Time                 { return time.Time{} }
+func (h *fakeHandle) Events() <-chan gateway.EventEnvelope { return h.events }
+func (h *fakeHandle) EventsAfter(string) ([]gateway.EventEnvelope, string, error) {
 	return nil, "", nil
 }
-func (h *fakeHandle) Submit(_ context.Context, req kernel.SubmitRequest) error {
+func (h *fakeHandle) Submit(_ context.Context, req gateway.SubmitRequest) error {
 	h.submissions = append(h.submissions, req)
 	return nil
 }
-func (h *fakeHandle) Cancel() kernel.CancelResult {
-	return kernel.CancelResult{Status: kernel.CancelStatusCancelled}
+func (h *fakeHandle) Cancel() gateway.CancelResult {
+	return gateway.CancelResult{Status: gateway.CancelStatusCancelled}
 }
 func (h *fakeHandle) Close() error { return nil }

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/kernel"
+	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
@@ -54,15 +54,15 @@ func tailPlainRows(lines []string, height int) []string {
 func TestModelUpdateConsumesGatewayAssistantEventIntoMainTurnBlock(t *testing.T) {
 	model := newGatewayEventTestModel()
 
-	updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind:       kernel.EventKindAssistantMessage,
+	updated, _ := model.Update(gatewayEventMsg(gateway.EventEnvelope{
+		Event: gateway.Event{
+			Kind:       gateway.EventKindAssistantMessage,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			Narrative: &kernel.NarrativePayload{
-				Role:  kernel.NarrativeRoleAssistant,
+			Narrative: &gateway.NarrativePayload{
+				Role:  gateway.NarrativeRoleAssistant,
 				Text:  "gateway answer",
 				Final: true,
-				Scope: kernel.EventScopeMain,
+				Scope: gateway.EventScopeMain,
 			},
 		}}))
 
@@ -111,17 +111,17 @@ func TestGatewayReasoningStreamPreservesWhitespaceOnlyDeltas(t *testing.T) {
 
 	now := time.Now()
 	for _, text := range []string{"The", " ", "sandbox"} {
-		updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
-			Event: kernel.Event{
-				Kind:       kernel.EventKindAssistantMessage,
+		updated, _ := model.Update(gatewayEventMsg(gateway.EventEnvelope{
+			Event: gateway.Event{
+				Kind:       gateway.EventKindAssistantMessage,
 				SessionRef: session.SessionRef{SessionID: "root-session"},
-				Narrative: &kernel.NarrativePayload{
-					Role:          kernel.NarrativeRoleAssistant,
+				Narrative: &gateway.NarrativePayload{
+					Role:          gateway.NarrativeRoleAssistant,
 					ReasoningText: text,
 					Final:         false,
 					Visibility:    string(session.VisibilityUIOnly),
 					UpdateType:    string(session.ProtocolUpdateTypeAgentThought),
-					Scope:         kernel.EventScopeMain,
+					Scope:         gateway.EventScopeMain,
 				},
 			}}))
 
@@ -143,21 +143,21 @@ func TestGatewayReasoningStreamPreservesWhitespaceOnlyDeltas(t *testing.T) {
 func TestGatewayContextCanceledRendersUserInterrupt(t *testing.T) {
 	model := newGatewayEventTestModel()
 
-	updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind:       kernel.EventKindAssistantMessage,
+	updated, _ := model.Update(gatewayEventMsg(gateway.EventEnvelope{
+		Event: gateway.Event{
+			Kind:       gateway.EventKindAssistantMessage,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			Narrative: &kernel.NarrativePayload{
-				Role:  kernel.NarrativeRoleAssistant,
+			Narrative: &gateway.NarrativePayload{
+				Role:  gateway.NarrativeRoleAssistant,
 				Text:  "partial answer",
 				Final: false,
-				Scope: kernel.EventScopeMain,
+				Scope: gateway.EventScopeMain,
 			},
 		}}))
 
 	m := updated.(*Model)
-	updated, _ = m.Update(gatewayEventMsg(kernel.EventEnvelope{
-		Err: &kernel.Error{
+	updated, _ = m.Update(gatewayEventMsg(gateway.EventEnvelope{
+		Err: &gateway.Error{
 			Message: "providers: sse scanner: context canceled",
 			Cause:   context.Canceled,
 		}}))
@@ -198,32 +198,32 @@ func TestGatewayContextCanceledRendersUserInterrupt(t *testing.T) {
 func TestModelUpdateConsumesGatewayToolEventsWithoutTranscriptRecovery(t *testing.T) {
 	model := newGatewayEventTestModel()
 
-	updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind:       kernel.EventKindToolCall,
+	updated, _ := model.Update(gatewayEventMsg(gateway.EventEnvelope{
+		Event: gateway.Event{
+			Kind:       gateway.EventKindToolCall,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			ToolCall: &kernel.ToolCallPayload{
+			ToolCall: &gateway.ToolCallPayload{
 				CallID:   "call-1",
 				ToolName: "READ",
 				RawInput: map[string]any{"path": "/tmp/demo.txt"},
 				Status:   "running",
-				Scope:    kernel.EventScopeMain,
+				Scope:    gateway.EventScopeMain,
 			},
 		}}))
 
 	m := updated.(*Model)
-	updated, _ = m.Update(gatewayEventMsg(kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind:       kernel.EventKindToolResult,
+	updated, _ = m.Update(gatewayEventMsg(gateway.EventEnvelope{
+		Event: gateway.Event{
+			Kind:       gateway.EventKindToolResult,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			ToolResult: &kernel.ToolResultPayload{
+			ToolResult: &gateway.ToolResultPayload{
 				CallID:    "call-1",
 				ToolName:  "READ",
 				RawInput:  map[string]any{"path": "/tmp/demo.txt"},
 				RawOutput: map[string]any{"path": "/tmp/demo.txt"},
 				Content:   testToolContent("demo.txt"),
 				Status:    "completed",
-				Scope:     kernel.EventScopeMain,
+				Scope:     gateway.EventScopeMain,
 			},
 		}}))
 
@@ -253,32 +253,32 @@ func TestModelUpdateConsumesGatewayToolEventsWithoutTranscriptRecovery(t *testin
 func TestGatewayRunningToolResultStreamsOutputWithoutFinalizing(t *testing.T) {
 	model := newGatewayEventTestModel()
 
-	updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind:       kernel.EventKindToolCall,
+	updated, _ := model.Update(gatewayEventMsg(gateway.EventEnvelope{
+		Event: gateway.Event{
+			Kind:       gateway.EventKindToolCall,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			ToolCall: &kernel.ToolCallPayload{
+			ToolCall: &gateway.ToolCallPayload{
 				CallID:   "call-1",
 				ToolName: "RUN_COMMAND",
 				RawInput: map[string]any{"command": `go test ./kernel/...`},
-				Status:   kernel.ToolStatusRunning,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusRunning,
+				Scope:    gateway.EventScopeMain,
 			},
 		}}))
 
 	model = updated.(*Model)
-	updated, _ = model.Update(gatewayEventMsg(kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind:       kernel.EventKindToolResult,
+	updated, _ = model.Update(gatewayEventMsg(gateway.EventEnvelope{
+		Event: gateway.Event{
+			Kind:       gateway.EventKindToolResult,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			ToolResult: &kernel.ToolResultPayload{
+			ToolResult: &gateway.ToolResultPayload{
 				CallID:    "call-1",
 				ToolName:  "RUN_COMMAND",
 				RawInput:  map[string]any{"command": `go test ./kernel/...`},
 				RawOutput: map[string]any{"stdout": "stdout resolving packages"},
 				Content:   testTerminalContent("stdout resolving packages"),
-				Status:    kernel.ToolStatusRunning,
-				Scope:     kernel.EventScopeMain,
+				Status:    gateway.ToolStatusRunning,
+				Scope:     gateway.EventScopeMain,
 			},
 		}}))
 
@@ -333,29 +333,29 @@ func TestToolGroupsUseActionColorAndBlankSeparation(t *testing.T) {
 func TestGatewayAssistantFinalFoldsReasoningAndTogglesInline(t *testing.T) {
 	model := newGatewayEventTestModel()
 
-	updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind:       kernel.EventKindAssistantMessage,
+	updated, _ := model.Update(gatewayEventMsg(gateway.EventEnvelope{
+		Event: gateway.Event{
+			Kind:       gateway.EventKindAssistantMessage,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			Narrative: &kernel.NarrativePayload{
-				Role:          kernel.NarrativeRoleAssistant,
+			Narrative: &gateway.NarrativePayload{
+				Role:          gateway.NarrativeRoleAssistant,
 				ReasoningText: "thinking through the plan",
 				Final:         false,
-				Scope:         kernel.EventScopeMain,
+				Scope:         gateway.EventScopeMain,
 			},
 		}}))
 
 	m := updated.(*Model)
-	updated, _ = m.Update(gatewayEventMsg(kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind:       kernel.EventKindAssistantMessage,
+	updated, _ = m.Update(gatewayEventMsg(gateway.EventEnvelope{
+		Event: gateway.Event{
+			Kind:       gateway.EventKindAssistantMessage,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			Narrative: &kernel.NarrativePayload{
-				Role:          kernel.NarrativeRoleAssistant,
+			Narrative: &gateway.NarrativePayload{
+				Role:          gateway.NarrativeRoleAssistant,
 				ReasoningText: "thinking through the plan",
 				Text:          "final answer",
 				Final:         true,
-				Scope:         kernel.EventScopeMain,
+				Scope:         gateway.EventScopeMain,
 			},
 		}}))
 
@@ -404,46 +404,46 @@ func TestGatewayAssistantFinalFoldsReasoningAndTogglesInline(t *testing.T) {
 
 func TestGatewayReasoningFoldsAfterAttentionToolLoopAndTogglesInline(t *testing.T) {
 	model := newGatewayEventTestModel()
-	for _, env := range []kernel.EventEnvelope{
-		{Event: kernel.Event{
-			Kind:       kernel.EventKindAssistantMessage,
+	for _, env := range []gateway.EventEnvelope{
+		{Event: gateway.Event{
+			Kind:       gateway.EventKindAssistantMessage,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			Narrative: &kernel.NarrativePayload{
-				Role:          kernel.NarrativeRoleAssistant,
+			Narrative: &gateway.NarrativePayload{
+				Role:          gateway.NarrativeRoleAssistant,
 				ReasoningText: "thinking through the command choice",
 				Final:         true,
-				Scope:         kernel.EventScopeMain,
+				Scope:         gateway.EventScopeMain,
 			},
 		}},
-		{Event: kernel.Event{
-			Kind:       kernel.EventKindAssistantMessage,
+		{Event: gateway.Event{
+			Kind:       gateway.EventKindAssistantMessage,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			Narrative: &kernel.NarrativePayload{
-				Role:  kernel.NarrativeRoleAssistant,
+			Narrative: &gateway.NarrativePayload{
+				Role:  gateway.NarrativeRoleAssistant,
 				Text:  "I will run the test.",
 				Final: true,
-				Scope: kernel.EventScopeMain,
+				Scope: gateway.EventScopeMain,
 			},
 		}},
-		{Event: kernel.Event{
-			Kind:       kernel.EventKindToolCall,
+		{Event: gateway.Event{
+			Kind:       gateway.EventKindToolCall,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			ToolCall: &kernel.ToolCallPayload{
+			ToolCall: &gateway.ToolCallPayload{
 				CallID:   "command-1",
 				ToolName: "RUN_COMMAND",
-				Status:   kernel.ToolStatusRunning,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusRunning,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{"command": "go test ./surfaces/tui/..."},
 			},
 		}},
-		{Event: kernel.Event{
-			Kind:       kernel.EventKindToolResult,
+		{Event: gateway.Event{
+			Kind:       gateway.EventKindToolResult,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			ToolResult: &kernel.ToolResultPayload{
+			ToolResult: &gateway.ToolResultPayload{
 				CallID:   "command-1",
 				ToolName: "RUN_COMMAND",
-				Status:   kernel.ToolStatusCompleted,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusCompleted,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{"command": "go test ./surfaces/tui/..."},
 				RawOutput: map[string]any{
 					"stdout":    "ok github.com/OnslaughtSnail/caelis/surfaces/tui/app\n",
@@ -494,36 +494,36 @@ func TestGatewayReasoningFoldsAfterAttentionToolLoopAndTogglesInline(t *testing.
 func TestGatewayExpandedReasoningReplacesFoldedPreviewInPlace(t *testing.T) {
 	model := newGatewayEventTestModel()
 	reasoning := "Now let me verify the DDL matches every field in the entity.\nEntity field -> DDL column\nID -> id varchar(64) NOT NULL"
-	for _, env := range []kernel.EventEnvelope{
-		{Event: kernel.Event{
-			Kind:       kernel.EventKindAssistantMessage,
+	for _, env := range []gateway.EventEnvelope{
+		{Event: gateway.Event{
+			Kind:       gateway.EventKindAssistantMessage,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			Narrative: &kernel.NarrativePayload{
-				Role:          kernel.NarrativeRoleAssistant,
+			Narrative: &gateway.NarrativePayload{
+				Role:          gateway.NarrativeRoleAssistant,
 				ReasoningText: reasoning,
 				Final:         true,
-				Scope:         kernel.EventScopeMain,
+				Scope:         gateway.EventScopeMain,
 			},
 		}},
-		{Event: kernel.Event{
-			Kind:       kernel.EventKindToolCall,
+		{Event: gateway.Event{
+			Kind:       gateway.EventKindToolCall,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			ToolCall: &kernel.ToolCallPayload{
+			ToolCall: &gateway.ToolCallPayload{
 				CallID:   "command-1",
 				ToolName: "RUN_COMMAND",
-				Status:   kernel.ToolStatusRunning,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusRunning,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{"command": "go test ./..."},
 			},
 		}},
-		{Event: kernel.Event{
-			Kind:       kernel.EventKindToolResult,
+		{Event: gateway.Event{
+			Kind:       gateway.EventKindToolResult,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			ToolResult: &kernel.ToolResultPayload{
+			ToolResult: &gateway.ToolResultPayload{
 				CallID:   "command-1",
 				ToolName: "RUN_COMMAND",
-				Status:   kernel.ToolStatusCompleted,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusCompleted,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{"command": "go test ./..."},
 				RawOutput: map[string]any{
 					"stdout":    "ok\n",
@@ -582,61 +582,61 @@ func TestConsecutiveReasoningEventsFoldAsOnePreviewBeforeAttentionTool(t *testin
 func TestGatewayReasoningFoldUsesTimedDurationWhenAvailable(t *testing.T) {
 	model := newGatewayEventTestModel()
 	start := time.Date(2026, 4, 27, 10, 0, 0, 0, time.UTC)
-	for _, env := range []kernel.EventEnvelope{
-		{Event: kernel.Event{
-			Kind:       kernel.EventKindAssistantMessage,
+	for _, env := range []gateway.EventEnvelope{
+		{Event: gateway.Event{
+			Kind:       gateway.EventKindAssistantMessage,
 			OccurredAt: start,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			Narrative: &kernel.NarrativePayload{
-				Role:          kernel.NarrativeRoleAssistant,
+			Narrative: &gateway.NarrativePayload{
+				Role:          gateway.NarrativeRoleAssistant,
 				ReasoningText: "first ",
 				Final:         false,
-				Scope:         kernel.EventScopeMain,
+				Scope:         gateway.EventScopeMain,
 			},
 		}},
-		{Event: kernel.Event{
-			Kind:       kernel.EventKindAssistantMessage,
+		{Event: gateway.Event{
+			Kind:       gateway.EventKindAssistantMessage,
 			OccurredAt: start.Add(900 * time.Millisecond),
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			Narrative: &kernel.NarrativePayload{
-				Role:          kernel.NarrativeRoleAssistant,
+			Narrative: &gateway.NarrativePayload{
+				Role:          gateway.NarrativeRoleAssistant,
 				ReasoningText: "last",
 				Final:         false,
-				Scope:         kernel.EventScopeMain,
+				Scope:         gateway.EventScopeMain,
 			},
 		}},
-		{Event: kernel.Event{
-			Kind:       kernel.EventKindAssistantMessage,
+		{Event: gateway.Event{
+			Kind:       gateway.EventKindAssistantMessage,
 			OccurredAt: start.Add(1500 * time.Millisecond),
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			Narrative: &kernel.NarrativePayload{
-				Role:  kernel.NarrativeRoleAssistant,
+			Narrative: &gateway.NarrativePayload{
+				Role:  gateway.NarrativeRoleAssistant,
 				Text:  "done thinking",
 				Final: true,
-				Scope: kernel.EventScopeMain,
+				Scope: gateway.EventScopeMain,
 			},
 		}},
-		{Event: kernel.Event{
-			Kind:       kernel.EventKindToolCall,
+		{Event: gateway.Event{
+			Kind:       gateway.EventKindToolCall,
 			OccurredAt: start.Add(1600 * time.Millisecond),
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			ToolCall: &kernel.ToolCallPayload{
+			ToolCall: &gateway.ToolCallPayload{
 				CallID:   "command-1",
 				ToolName: "RUN_COMMAND",
-				Status:   kernel.ToolStatusRunning,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusRunning,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{"command": "echo ok"},
 			},
 		}},
-		{Event: kernel.Event{
-			Kind:       kernel.EventKindToolResult,
+		{Event: gateway.Event{
+			Kind:       gateway.EventKindToolResult,
 			OccurredAt: start.Add(1700 * time.Millisecond),
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			ToolResult: &kernel.ToolResultPayload{
+			ToolResult: &gateway.ToolResultPayload{
 				CallID:   "command-1",
 				ToolName: "RUN_COMMAND",
-				Status:   kernel.ToolStatusCompleted,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusCompleted,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{"command": "echo ok"},
 				RawOutput: map[string]any{
 					"stdout": "ok\n",

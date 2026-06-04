@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/controller"
+	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	controlcommands "github.com/OnslaughtSnail/caelis/protocol/acp/control/commands"
 )
@@ -21,7 +21,7 @@ func (d *Adapter) CompleteMention(ctx context.Context, query string, limit int) 
 	if err != nil {
 		return nil, err
 	}
-	state, err := gw.ControlPlaneState(ctx, kernel.ControlPlaneStateRequest{SessionRef: activeSession.SessionRef})
+	state, err := gw.ControlPlaneState(ctx, gateway.ControlPlaneStateRequest{SessionRef: activeSession.SessionRef})
 	if err != nil {
 		return nil, err
 	}
@@ -58,7 +58,7 @@ func (d *Adapter) CompleteMention(ctx context.Context, query string, limit int) 
 	return out, nil
 }
 
-func isUserSideParticipant(participant kernel.ParticipantState) bool {
+func isUserSideParticipant(participant gateway.ParticipantState) bool {
 	if participant.Role != session.ParticipantRoleSidecar {
 		return false
 	}
@@ -517,7 +517,7 @@ func (d *Adapter) completeAgentParticipants(ctx context.Context, query string, l
 	if err != nil {
 		return nil, err
 	}
-	state, err := gw.ControlPlaneState(ctx, kernel.ControlPlaneStateRequest{
+	state, err := gw.ControlPlaneState(ctx, gateway.ControlPlaneStateRequest{
 		SessionRef: activeSession.SessionRef,
 	})
 	if err != nil {
@@ -603,7 +603,7 @@ func (d *Adapter) resolveHandoffAgentName(ctx context.Context, ref session.Sessi
 	if err != nil {
 		return "", err
 	}
-	state, err := gw.ControlPlaneState(ctx, kernel.ControlPlaneStateRequest{SessionRef: ref})
+	state, err := gw.ControlPlaneState(ctx, gateway.ControlPlaneStateRequest{SessionRef: ref})
 	if err != nil {
 		return "", err
 	}
@@ -658,7 +658,7 @@ func (d *Adapter) resolveParticipantID(ctx context.Context, ref session.SessionR
 	if err != nil {
 		return "", err
 	}
-	state, err := gw.ControlPlaneState(ctx, kernel.ControlPlaneStateRequest{SessionRef: ref})
+	state, err := gw.ControlPlaneState(ctx, gateway.ControlPlaneStateRequest{SessionRef: ref})
 	if err != nil {
 		return "", err
 	}

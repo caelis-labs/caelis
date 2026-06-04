@@ -10,11 +10,12 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/OnslaughtSnail/caelis/kernel"
+	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/control"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
+	acpprojector "github.com/OnslaughtSnail/caelis/protocol/acp/projector"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
@@ -78,7 +79,7 @@ func transcriptEventsFromMsg(msg tea.Msg) []TranscriptEvent {
 		return typed.Events
 	case eventstream.Envelope:
 		return ProjectACPEventToTranscriptEvents(typed)
-	case kernel.EventEnvelope:
+	case gateway.EventEnvelope:
 		return ProjectGatewayEventToTranscriptEvents(typed.Event)
 	default:
 		return nil
@@ -106,19 +107,19 @@ func acpUpdateTerminalText(update schema.Update) string {
 	return ""
 }
 
-func projectKernelTestEvents(events []kernel.EventEnvelope) []eventstream.Envelope {
+func projectKernelTestEvents(events []gateway.EventEnvelope) []eventstream.Envelope {
 	out := make([]eventstream.Envelope, 0, len(events))
 	for _, env := range events {
-		out = append(out, kernel.ProjectACPEventEnvelope(env)...)
+		out = append(out, acpprojector.ProjectGatewayEventEnvelope(env)...)
 	}
 	return out
 }
 
-func requireProjectedACPEvent(t *testing.T, env kernel.EventEnvelope) eventstream.Envelope {
+func requireProjectedACPEvent(t *testing.T, env gateway.EventEnvelope) eventstream.Envelope {
 	t.Helper()
-	events := kernel.ProjectACPEventEnvelope(env)
+	events := acpprojector.ProjectGatewayEventEnvelope(env)
 	if len(events) == 0 {
-		t.Fatalf("ProjectACPEventEnvelope(%#v) returned no events", env)
+		t.Fatalf("ProjectGatewayEventEnvelope(%#v) returned no events", env)
 	}
 	return events[0]
 }
@@ -368,22 +369,22 @@ func TestGatewayNarrativeBatcherSyncsProtocolUpdateContent(t *testing.T) {
 	}
 }
 
-func testTerminalFrame(text string, cursor int64) kernel.EventEnvelope {
+func testTerminalFrame(text string, cursor int64) gateway.EventEnvelope {
 	return testTerminalFrameForTool("RUN_COMMAND", text, cursor)
 }
 
-func testNarrativeFrame(text string) kernel.EventEnvelope {
-	return kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind:       kernel.EventKindAssistantMessage,
+func testNarrativeFrame(text string) gateway.EventEnvelope {
+	return gateway.EventEnvelope{
+		Event: gateway.Event{
+			Kind:       gateway.EventKindAssistantMessage,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session"},
-			Narrative: &kernel.NarrativePayload{
-				Role:       kernel.NarrativeRoleAssistant,
+			Origin:     &gateway.EventOrigin{Scope: gateway.EventScopeMain, ScopeID: "root-session"},
+			Narrative: &gateway.NarrativePayload{
+				Role:       gateway.NarrativeRoleAssistant,
 				Text:       text,
 				Visibility: string(session.VisibilityUIOnly),
 				UpdateType: string(session.ProtocolUpdateTypeAgentMessage),
-				Scope:      kernel.EventScopeMain,
+				Scope:      gateway.EventScopeMain,
 			},
 			Protocol: &session.EventProtocol{
 				UpdateType: string(session.ProtocolUpdateTypeAgentMessage),
@@ -396,19 +397,19 @@ func testNarrativeFrame(text string) kernel.EventEnvelope {
 	}
 }
 
-func testTerminalFrameForTool(toolName string, text string, cursor int64) kernel.EventEnvelope {
+func testTerminalFrameForTool(toolName string, text string, cursor int64) gateway.EventEnvelope {
 	_ = cursor
-	return kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind:       kernel.EventKindToolResult,
+	return gateway.EventEnvelope{
+		Event: gateway.Event{
+			Kind:       gateway.EventKindToolResult,
 			HandleID:   "h1",
 			RunID:      "r1",
 			TurnID:     "t1",
 			SessionRef: session.SessionRef{SessionID: "s1"},
-			ToolResult: &kernel.ToolResultPayload{
+			ToolResult: &gateway.ToolResultPayload{
 				CallID:   "call-1",
 				ToolName: toolName,
-				Status:   kernel.ToolStatusRunning,
+				Status:   gateway.ToolStatusRunning,
 				Content:  testTerminalContentWithID(text, "term-1"),
 			},
 		},
@@ -451,34 +452,34 @@ func TestSlashResumeClearsHistoryBeforeReplay(t *testing.T) {
 	driver := &bridgeTestDriver{
 		status:         control.StatusSnapshot{Model: "gpt-4o", ModeLabel: "default"},
 		resumedSession: control.SessionSnapshot{SessionID: "resumed-session"},
-		replay: []kernel.EventEnvelope{
+		replay: []gateway.EventEnvelope{
 			{
-				Event: kernel.Event{
-					Kind:   kernel.EventKindUserMessage,
+				Event: gateway.Event{
+					Kind:   gateway.EventKindUserMessage,
 					TurnID: "turn-complete",
-					Narrative: &kernel.NarrativePayload{
-						Role: kernel.NarrativeRoleUser,
+					Narrative: &gateway.NarrativePayload{
+						Role: gateway.NarrativeRoleUser,
 						Text: "history prompt",
 					},
 				},
 			},
 			{
-				Event: kernel.Event{
-					Kind:   kernel.EventKindToolCall,
+				Event: gateway.Event{
+					Kind:   gateway.EventKindToolCall,
 					TurnID: "turn-complete",
-					ToolCall: &kernel.ToolCallPayload{
+					ToolCall: &gateway.ToolCallPayload{
 						CallID:   "command-1",
 						ToolName: "RUN_COMMAND",
-						Status:   kernel.ToolStatusRunning,
+						Status:   gateway.ToolStatusRunning,
 					},
 				},
 			},
 			{
-				Event: kernel.Event{
-					Kind:   kernel.EventKindAssistantMessage,
+				Event: gateway.Event{
+					Kind:   gateway.EventKindAssistantMessage,
 					TurnID: "turn-complete",
-					Narrative: &kernel.NarrativePayload{
-						Role:       kernel.NarrativeRoleAssistant,
+					Narrative: &gateway.NarrativePayload{
+						Role:       gateway.NarrativeRoleAssistant,
 						Text:       "stream chunk",
 						Final:      false,
 						Visibility: string(session.VisibilityUIOnly),
@@ -486,14 +487,14 @@ func TestSlashResumeClearsHistoryBeforeReplay(t *testing.T) {
 				},
 			},
 			{
-				Event: kernel.Event{
-					Kind:   kernel.EventKindAssistantMessage,
+				Event: gateway.Event{
+					Kind:   gateway.EventKindAssistantMessage,
 					TurnID: "turn-complete",
-					Narrative: &kernel.NarrativePayload{
-						Role:  kernel.NarrativeRoleAssistant,
+					Narrative: &gateway.NarrativePayload{
+						Role:  gateway.NarrativeRoleAssistant,
 						Text:  "history reply",
 						Final: true,
-						Scope: kernel.EventScopeMain,
+						Scope: gateway.EventScopeMain,
 					},
 				},
 			},
@@ -514,7 +515,7 @@ func TestSlashResumeClearsHistoryBeforeReplay(t *testing.T) {
 		if log, ok := msg.(LogChunkMsg); ok && (strings.Contains(log.Chunk, "resumed session") || strings.Contains(log.Chunk, "replayed")) {
 			t.Fatalf("slashResume() emitted noisy resume notice: %#v", log)
 		}
-		if _, ok := msg.(kernel.EventEnvelope); ok {
+		if _, ok := msg.(gateway.EventEnvelope); ok {
 			t.Fatalf("slashResume() must batch historical replay, got per-envelope msg: %#v", msg)
 		}
 		if batch, ok := msg.(TranscriptEventsMsg); ok {
@@ -547,77 +548,77 @@ func TestSlashResumeReplaysSideACPFinalDialogueWithoutProcessTrace(t *testing.T)
 	driver := &bridgeTestDriver{
 		status:         control.StatusSnapshot{Model: "gpt-4o", ModeLabel: "default"},
 		resumedSession: control.SessionSnapshot{SessionID: "resumed-session"},
-		replay: []kernel.EventEnvelope{
+		replay: []gateway.EventEnvelope{
 			{
-				Event: kernel.Event{
-					Kind:   kernel.EventKindUserMessage,
+				Event: gateway.Event{
+					Kind:   gateway.EventKindUserMessage,
 					TurnID: "participant-turn-1",
-					Origin: &kernel.EventOrigin{
+					Origin: &gateway.EventOrigin{
 						Source:  "acp_participant",
-						Scope:   kernel.EventScopeParticipant,
+						Scope:   gateway.EventScopeParticipant,
 						ScopeID: "participant-turn-1",
 						Actor:   "@codex",
 					},
-					Narrative: &kernel.NarrativePayload{
-						Role:  kernel.NarrativeRoleUser,
+					Narrative: &gateway.NarrativePayload{
+						Role:  gateway.NarrativeRoleUser,
 						Text:  "review this change",
-						Scope: kernel.EventScopeParticipant,
+						Scope: gateway.EventScopeParticipant,
 					},
 				},
 			},
 			{
-				Event: kernel.Event{
-					Kind:   kernel.EventKindToolCall,
+				Event: gateway.Event{
+					Kind:   gateway.EventKindToolCall,
 					TurnID: "participant-turn-1",
-					Origin: &kernel.EventOrigin{
+					Origin: &gateway.EventOrigin{
 						Source:  "acp_participant",
-						Scope:   kernel.EventScopeParticipant,
+						Scope:   gateway.EventScopeParticipant,
 						ScopeID: "participant-turn-1",
 						Actor:   "@codex",
 					},
-					ToolCall: &kernel.ToolCallPayload{
+					ToolCall: &gateway.ToolCallPayload{
 						CallID:   "side-command",
 						ToolName: "RUN_COMMAND",
-						Status:   kernel.ToolStatusCompleted,
-						Scope:    kernel.EventScopeParticipant,
+						Status:   gateway.ToolStatusCompleted,
+						Scope:    gateway.EventScopeParticipant,
 					},
 				},
 			},
 			{
-				Event: kernel.Event{
-					Kind:   kernel.EventKindAssistantMessage,
+				Event: gateway.Event{
+					Kind:   gateway.EventKindAssistantMessage,
 					TurnID: "participant-turn-1",
-					Origin: &kernel.EventOrigin{
+					Origin: &gateway.EventOrigin{
 						Source:  "acp_participant",
-						Scope:   kernel.EventScopeParticipant,
+						Scope:   gateway.EventScopeParticipant,
 						ScopeID: "participant-turn-1",
 						Actor:   "@codex",
 					},
-					Narrative: &kernel.NarrativePayload{
-						Role:  kernel.NarrativeRoleAssistant,
+					Narrative: &gateway.NarrativePayload{
+						Role:  gateway.NarrativeRoleAssistant,
 						Actor: "@codex",
 						Text:  "review final message",
 						Final: true,
-						Scope: kernel.EventScopeParticipant,
+						Scope: gateway.EventScopeParticipant,
 					},
 				},
 			},
 			{
-				Event: kernel.Event{
-					Kind:   kernel.EventKindAssistantMessage,
+				Event: gateway.Event{
+					Kind:   gateway.EventKindAssistantMessage,
 					TurnID: "participant-turn-1",
-					Origin: &kernel.EventOrigin{
+					Origin: &gateway.EventOrigin{
 						Source:  "side_subagent",
-						Scope:   kernel.EventScopeSubagent,
+						Scope:   gateway.EventScopeSubagent,
 						ScopeID: "participant-turn-1",
 						Actor:   "@reviewer",
 					},
-					Narrative: &kernel.NarrativePayload{
-						Role:  kernel.NarrativeRoleAssistant,
+					Narrative: &gateway.NarrativePayload{
+						Role:  gateway.NarrativeRoleAssistant,
 						Actor: "@reviewer",
 						Text:  "scoped final message",
 						Final: true,
-						Scope: kernel.EventScopeSubagent,
+						Scope: gateway.EventScopeSubagent,
 					},
 				},
 			},
@@ -657,38 +658,38 @@ func TestSlashResumeReplaysProcessEventsForInterruptedTurn(t *testing.T) {
 	driver := &bridgeTestDriver{
 		status:         control.StatusSnapshot{Model: "gpt-4o", ModeLabel: "default"},
 		resumedSession: control.SessionSnapshot{SessionID: "resumed-session"},
-		replay: []kernel.EventEnvelope{
+		replay: []gateway.EventEnvelope{
 			{
-				Event: kernel.Event{
-					Kind:   kernel.EventKindUserMessage,
+				Event: gateway.Event{
+					Kind:   gateway.EventKindUserMessage,
 					TurnID: "turn-interrupted",
-					Narrative: &kernel.NarrativePayload{
-						Role: kernel.NarrativeRoleUser,
+					Narrative: &gateway.NarrativePayload{
+						Role: gateway.NarrativeRoleUser,
 						Text: "history prompt",
 					},
 				},
 			},
 			{
-				Event: kernel.Event{
-					Kind:   kernel.EventKindToolCall,
+				Event: gateway.Event{
+					Kind:   gateway.EventKindToolCall,
 					TurnID: "turn-interrupted",
-					ToolCall: &kernel.ToolCallPayload{
+					ToolCall: &gateway.ToolCallPayload{
 						CallID:   "command-1",
 						ToolName: "RUN_COMMAND",
-						Status:   kernel.ToolStatusRunning,
+						Status:   gateway.ToolStatusRunning,
 					},
 				},
 			},
 			{
-				Event: kernel.Event{
-					Kind:   kernel.EventKindAssistantMessage,
+				Event: gateway.Event{
+					Kind:   gateway.EventKindAssistantMessage,
 					TurnID: "turn-interrupted",
-					Narrative: &kernel.NarrativePayload{
-						Role:       kernel.NarrativeRoleAssistant,
+					Narrative: &gateway.NarrativePayload{
+						Role:       gateway.NarrativeRoleAssistant,
 						Text:       "partial answer",
 						Final:      true,
 						Visibility: string(session.VisibilityMirror),
-						Scope:      kernel.EventScopeMain,
+						Scope:      gateway.EventScopeMain,
 					},
 				},
 			},
@@ -716,17 +717,17 @@ func TestSlashResumeReplaysProcessEventsForInterruptedTurn(t *testing.T) {
 
 func TestExecuteLineViaDriverStreamsGatewayEventsDirectly(t *testing.T) {
 	turn := &bridgeTestTurn{
-		events: make(chan kernel.EventEnvelope, 1),
+		events: make(chan gateway.EventEnvelope, 1),
 	}
-	turn.events <- kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind:       kernel.EventKindAssistantMessage,
+	turn.events <- gateway.EventEnvelope{
+		Event: gateway.Event{
+			Kind:       gateway.EventKindAssistantMessage,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			Narrative: &kernel.NarrativePayload{
-				Role:  kernel.NarrativeRoleAssistant,
+			Narrative: &gateway.NarrativePayload{
+				Role:  gateway.NarrativeRoleAssistant,
 				Text:  "direct gateway event",
 				Final: true,
-				Scope: kernel.EventScopeMain,
+				Scope: gateway.EventScopeMain,
 			},
 		},
 	}
@@ -748,32 +749,32 @@ func TestExecuteLineViaDriverStreamsGatewayEventsDirectly(t *testing.T) {
 
 func TestExecuteLineViaDriverCoalescesUIOnlyReasoningBeforeToolEvent(t *testing.T) {
 	turn := &bridgeTestTurn{
-		events: make(chan kernel.EventEnvelope, 4),
+		events: make(chan gateway.EventEnvelope, 4),
 	}
 	for _, text := range []string{"think ", "fast ", "now"} {
-		turn.events <- kernel.EventEnvelope{
-			Event: kernel.Event{
-				Kind:       kernel.EventKindAssistantMessage,
+		turn.events <- gateway.EventEnvelope{
+			Event: gateway.Event{
+				Kind:       gateway.EventKindAssistantMessage,
 				SessionRef: session.SessionRef{SessionID: "root-session"},
-				Narrative: &kernel.NarrativePayload{
-					Role:          kernel.NarrativeRoleAssistant,
+				Narrative: &gateway.NarrativePayload{
+					Role:          gateway.NarrativeRoleAssistant,
 					ReasoningText: text,
 					Visibility:    "ui_only",
 					UpdateType:    string(session.ProtocolUpdateTypeAgentThought),
-					Scope:         kernel.EventScopeMain,
+					Scope:         gateway.EventScopeMain,
 				},
 			},
 		}
 	}
-	turn.events <- kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind:       kernel.EventKindToolCall,
+	turn.events <- gateway.EventEnvelope{
+		Event: gateway.Event{
+			Kind:       gateway.EventKindToolCall,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			ToolCall: &kernel.ToolCallPayload{
+			ToolCall: &gateway.ToolCallPayload{
 				CallID:   "call-1",
 				ToolName: "READ",
-				Status:   kernel.ToolStatusRunning,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusRunning,
+				Scope:    gateway.EventScopeMain,
 			},
 		},
 	}
@@ -799,19 +800,19 @@ func TestExecuteLineViaDriverCoalescesUIOnlyReasoningBeforeToolEvent(t *testing.
 
 func TestExecuteLineViaDriverCoalescesUIOnlyReasoningPreservesLeadingSpaces(t *testing.T) {
 	turn := &bridgeTestTurn{
-		events: make(chan kernel.EventEnvelope, 7),
+		events: make(chan gateway.EventEnvelope, 7),
 	}
 	for _, text := range []string{"Now", " let", " me", " verify", " the", " DDL", " matches"} {
-		turn.events <- kernel.EventEnvelope{
-			Event: kernel.Event{
-				Kind:       kernel.EventKindAssistantMessage,
+		turn.events <- gateway.EventEnvelope{
+			Event: gateway.Event{
+				Kind:       gateway.EventKindAssistantMessage,
 				SessionRef: session.SessionRef{SessionID: "root-session"},
-				Narrative: &kernel.NarrativePayload{
-					Role:          kernel.NarrativeRoleAssistant,
+				Narrative: &gateway.NarrativePayload{
+					Role:          gateway.NarrativeRoleAssistant,
 					ReasoningText: text,
 					Visibility:    "ui_only",
 					UpdateType:    string(session.ProtocolUpdateTypeAgentThought),
-					Scope:         kernel.EventScopeMain,
+					Scope:         gateway.EventScopeMain,
 				},
 			},
 		}
@@ -834,31 +835,31 @@ func TestExecuteLineViaDriverCoalescesUIOnlyReasoningPreservesLeadingSpaces(t *t
 
 func TestExecuteLineViaDriverDoesNotCoalesceReasoningWithAnswerDelta(t *testing.T) {
 	turn := &bridgeTestTurn{
-		events: make(chan kernel.EventEnvelope, 2),
+		events: make(chan gateway.EventEnvelope, 2),
 	}
-	turn.events <- kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind:       kernel.EventKindAssistantMessage,
+	turn.events <- gateway.EventEnvelope{
+		Event: gateway.Event{
+			Kind:       gateway.EventKindAssistantMessage,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			Narrative: &kernel.NarrativePayload{
-				Role:          kernel.NarrativeRoleAssistant,
+			Narrative: &gateway.NarrativePayload{
+				Role:          gateway.NarrativeRoleAssistant,
 				ReasoningText: "think",
 				Visibility:    "ui_only",
 				UpdateType:    string(session.ProtocolUpdateTypeAgentThought),
-				Scope:         kernel.EventScopeMain,
+				Scope:         gateway.EventScopeMain,
 			},
 		},
 	}
-	turn.events <- kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind:       kernel.EventKindAssistantMessage,
+	turn.events <- gateway.EventEnvelope{
+		Event: gateway.Event{
+			Kind:       gateway.EventKindAssistantMessage,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			Narrative: &kernel.NarrativePayload{
-				Role:       kernel.NarrativeRoleAssistant,
+			Narrative: &gateway.NarrativePayload{
+				Role:       gateway.NarrativeRoleAssistant,
 				Text:       "answer",
 				Visibility: "ui_only",
 				UpdateType: string(session.ProtocolUpdateTypeAgentMessage),
-				Scope:      kernel.EventScopeMain,
+				Scope:      gateway.EventScopeMain,
 			},
 		},
 	}
@@ -898,17 +899,17 @@ func TestExecuteLineViaDriverTreatsUnknownSlashAsUserMessage(t *testing.T) {
 
 func TestExecuteLineViaDriverForwardsTerminalStreamEvents(t *testing.T) {
 	turn := &bridgeTestTurn{
-		events: make(chan kernel.EventEnvelope, 1),
+		events: make(chan gateway.EventEnvelope, 1),
 	}
-	turn.events <- kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind:       kernel.EventKindToolResult,
+	turn.events <- gateway.EventEnvelope{
+		Event: gateway.Event{
+			Kind:       gateway.EventKindToolResult,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			ToolResult: &kernel.ToolResultPayload{
+			ToolResult: &gateway.ToolResultPayload{
 				CallID:   "call-1",
 				ToolName: "RUN_COMMAND",
 				Content:  testTerminalContentWithID("seed\n", "terminal-1"),
-				Status:   kernel.ToolStatusRunning,
+				Status:   gateway.ToolStatusRunning,
 			},
 			Meta: map[string]any{
 				"caelis": map[string]any{
@@ -926,15 +927,15 @@ func TestExecuteLineViaDriverForwardsTerminalStreamEvents(t *testing.T) {
 		},
 	}
 	close(turn.events)
-	terminalEvents := make(chan kernel.EventEnvelope, 1)
-	terminalEvents <- kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind: kernel.EventKindToolResult,
-			ToolResult: &kernel.ToolResultPayload{
+	terminalEvents := make(chan gateway.EventEnvelope, 1)
+	terminalEvents <- gateway.EventEnvelope{
+		Event: gateway.Event{
+			Kind: gateway.EventKindToolResult,
+			ToolResult: &gateway.ToolResultPayload{
 				CallID:   "call-1",
 				ToolName: "RUN_COMMAND",
 				Content:  testTerminalContentWithID("streamed\n", "terminal-1"),
-				Status:   kernel.ToolStatusRunning,
+				Status:   gateway.ToolStatusRunning,
 			},
 		},
 	}
@@ -977,15 +978,15 @@ func TestSlashResumeReplaysGatewayEventsDirectly(t *testing.T) {
 	driver := &bridgeTestDriver{
 		status:         control.StatusSnapshot{Model: "gpt-4o", ModeLabel: "default"},
 		resumedSession: control.SessionSnapshot{SessionID: "resumed-session"},
-		replay: []kernel.EventEnvelope{{
-			Event: kernel.Event{
-				Kind:       kernel.EventKindAssistantMessage,
+		replay: []gateway.EventEnvelope{{
+			Event: gateway.Event{
+				Kind:       gateway.EventKindAssistantMessage,
 				SessionRef: session.SessionRef{SessionID: "root-session"},
-				Narrative: &kernel.NarrativePayload{
-					Role:  kernel.NarrativeRoleAssistant,
+				Narrative: &gateway.NarrativePayload{
+					Role:  gateway.NarrativeRoleAssistant,
 					Text:  "history reply",
 					Final: true,
-					Scope: kernel.EventScopeMain,
+					Scope: gateway.EventScopeMain,
 				},
 			},
 		}},
@@ -1578,21 +1579,21 @@ func TestDynamicAgentSlashParticipantTurnCompletionKeepsDivider(t *testing.T) {
 }
 
 func TestDynamicAgentSlashPrefersStructuredParticipantEvents(t *testing.T) {
-	env := kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind:       kernel.EventKindToolCall,
+	env := gateway.EventEnvelope{
+		Event: gateway.Event{
+			Kind:       gateway.EventKindToolCall,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			Origin: &kernel.EventOrigin{
-				Scope:   kernel.EventScopeParticipant,
+			Origin: &gateway.EventOrigin{
+				Scope:   gateway.EventScopeParticipant,
 				ScopeID: "child-1",
 				Actor:   "copilot",
 			},
-			ToolCall: &kernel.ToolCallPayload{
+			ToolCall: &gateway.ToolCallPayload{
 				CallID:   "call-1",
 				ToolName: "RUN_COMMAND",
 				RawInput: map[string]any{"command": "go test ./surfaces/tui/app/..."},
-				Status:   kernel.ToolStatusRunning,
-				Scope:    kernel.EventScopeParticipant,
+				Status:   gateway.ToolStatusRunning,
+				Scope:    gateway.EventScopeParticipant,
 			},
 		},
 	}
@@ -1891,7 +1892,7 @@ type bridgeTestDriver struct {
 	useModelStatus           control.StatusSnapshot
 	newSession               control.SessionSnapshot
 	resumedSession           control.SessionSnapshot
-	replay                   []kernel.EventEnvelope
+	replay                   []gateway.EventEnvelope
 	connectCalls             int
 	useModelCalls            int
 	deleteModelCalls         int
@@ -1933,7 +1934,7 @@ type bridgeLightweightStatusDriver struct {
 }
 
 type bridgeTestTurn struct {
-	events chan kernel.EventEnvelope
+	events chan gateway.EventEnvelope
 }
 
 func (t *bridgeTestTurn) HandleID() string { return "handle-1" }
@@ -1944,7 +1945,7 @@ func (t *bridgeTestTurn) Events() <-chan eventstream.Envelope {
 	go func() {
 		defer close(out)
 		for env := range t.events {
-			for _, projected := range kernel.ProjectACPEventEnvelope(env) {
+			for _, projected := range acpprojector.ProjectGatewayEventEnvelope(env) {
 				out <- projected
 			}
 		}
@@ -1957,8 +1958,8 @@ func (t *bridgeTestTurn) SubmitApproval(context.Context, control.ApprovalDecisio
 func (t *bridgeTestTurn) Cancel()      {}
 func (t *bridgeTestTurn) Close() error { return nil }
 
-func bridgeTurnWithEvents(envs ...kernel.EventEnvelope) control.Turn {
-	events := make(chan kernel.EventEnvelope, len(envs))
+func bridgeTurnWithEvents(envs ...gateway.EventEnvelope) control.Turn {
+	events := make(chan gateway.EventEnvelope, len(envs))
 	for _, env := range envs {
 		events <- env
 	}
@@ -1973,28 +1974,28 @@ func cloneTUIDriverAttachments(items []control.Attachment) []control.Attachment 
 	return append([]control.Attachment(nil), items...)
 }
 
-func participantAssistantEnvelope(scopeID string, actor string, text string) kernel.EventEnvelope {
-	return kernel.EventEnvelope{Event: kernel.Event{
-		Kind:       kernel.EventKindAssistantMessage,
+func participantAssistantEnvelope(scopeID string, actor string, text string) gateway.EventEnvelope {
+	return gateway.EventEnvelope{Event: gateway.Event{
+		Kind:       gateway.EventKindAssistantMessage,
 		SessionRef: session.SessionRef{SessionID: "root-session"},
-		Origin: &kernel.EventOrigin{
-			Scope:   kernel.EventScopeParticipant,
+		Origin: &gateway.EventOrigin{
+			Scope:   gateway.EventScopeParticipant,
 			ScopeID: scopeID,
 			Actor:   actor,
 		},
-		Narrative: &kernel.NarrativePayload{
-			Role:  kernel.NarrativeRoleAssistant,
+		Narrative: &gateway.NarrativePayload{
+			Role:  gateway.NarrativeRoleAssistant,
 			Actor: actor,
 			Text:  text,
 			Final: true,
-			Scope: kernel.EventScopeParticipant,
+			Scope: gateway.EventScopeParticipant,
 		},
 	}}
 }
 
 type bridgeSubmitDriver struct {
 	turn                   control.Turn
-	terminalEvents         <-chan kernel.EventEnvelope
+	terminalEvents         <-chan gateway.EventEnvelope
 	terminalSubscribeCalls int
 	submitCalls            int
 	lastSubmission         control.Submission
@@ -2018,7 +2019,7 @@ func (d *bridgeSubmitDriver) SubscribeStream(context.Context, eventstream.Envelo
 	go func() {
 		defer close(out)
 		for env := range d.terminalEvents {
-			for _, projected := range kernel.ProjectACPEventEnvelope(env) {
+			for _, projected := range acpprojector.ProjectGatewayEventEnvelope(env) {
 				out <- projected
 			}
 		}

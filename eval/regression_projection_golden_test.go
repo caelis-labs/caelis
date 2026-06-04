@@ -5,7 +5,8 @@ import (
 	"testing"
 
 	"github.com/OnslaughtSnail/caelis/internal/evalharness"
-	"github.com/OnslaughtSnail/caelis/kernel"
+	kernelimpl "github.com/OnslaughtSnail/caelis/internal/kernel"
+	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/tool"
@@ -24,7 +25,7 @@ type projectionTraceEntry struct {
 	ToolResultStatus string `json:"tool_result_status,omitempty"`
 }
 
-func projectionTrace(envs []kernel.EventEnvelope) []projectionTraceEntry {
+func projectionTrace(envs []gateway.EventEnvelope) []projectionTraceEntry {
 	out := make([]projectionTraceEntry, 0, len(envs))
 	for _, env := range envs {
 		entry := projectionTraceEntry{
@@ -74,9 +75,9 @@ func TestRegressionProjectionGoldenToolLoop(t *testing.T) {
 	}
 
 	ref := session.SessionRef{SessionID: "sess-proj-tool-loop"}
-	var envs []kernel.EventEnvelope
+	var envs []gateway.EventEnvelope
 	for _, event := range run.Events {
-		if env, ok := kernel.ProjectSessionEvent(ref, event); ok {
+		if env, ok := kernelimpl.ProjectSessionEvent(ref, event); ok {
 			envs = append(envs, env)
 		}
 	}
@@ -124,9 +125,9 @@ func TestRegressionProjectionGoldenReasoning(t *testing.T) {
 	}
 
 	ref := session.SessionRef{SessionID: "sess-proj-reasoning"}
-	var envs []kernel.EventEnvelope
+	var envs []gateway.EventEnvelope
 	for _, event := range run.Events {
-		if env, ok := kernel.ProjectSessionEvent(ref, event); ok {
+		if env, ok := kernelimpl.ProjectSessionEvent(ref, event); ok {
 			envs = append(envs, env)
 		}
 	}
@@ -187,9 +188,9 @@ func TestRegressionProjectionGoldenMultiTool(t *testing.T) {
 	}
 
 	ref := session.SessionRef{SessionID: "sess-proj-multi-tool"}
-	var envs []kernel.EventEnvelope
+	var envs []gateway.EventEnvelope
 	for _, event := range run.Events {
-		if env, ok := kernel.ProjectSessionEvent(ref, event); ok {
+		if env, ok := kernelimpl.ProjectSessionEvent(ref, event); ok {
 			envs = append(envs, env)
 		}
 	}

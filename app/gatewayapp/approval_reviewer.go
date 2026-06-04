@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/impl/agent/local/chat"
-	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/agent"
+	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
@@ -78,7 +78,7 @@ type guardianTranscriptEntry struct {
 // newModelApprovalReviewer keeps the historical constructor name used by local
 // stack setup and tests while the concrete implementation is now a no-tool
 // guardian agent.
-func newModelApprovalReviewer(sessions ...session.Service) kernel.ApprovalReviewer {
+func newModelApprovalReviewer(sessions ...session.Service) gateway.ApprovalReviewer {
 	var service session.Service
 	if len(sessions) > 0 {
 		service = sessions[0]
@@ -86,7 +86,7 @@ func newModelApprovalReviewer(sessions ...session.Service) kernel.ApprovalReview
 	return newGuardianApprovalReviewer(service)
 }
 
-func newGuardianApprovalReviewer(service session.Service) kernel.ApprovalReviewer {
+func newGuardianApprovalReviewer(service session.Service) gateway.ApprovalReviewer {
 	return &guardianApprovalReviewer{
 		sessions:         service,
 		factory:          chat.Factory{},
@@ -95,12 +95,12 @@ func newGuardianApprovalReviewer(service session.Service) kernel.ApprovalReviewe
 	}
 }
 
-func (r *guardianApprovalReviewer) ReviewApproval(ctx context.Context, req kernel.ApprovalReviewRequest) (kernel.ApprovalReviewResult, error) {
+func (r *guardianApprovalReviewer) ReviewApproval(ctx context.Context, req gateway.ApprovalReviewRequest) (gateway.ApprovalReviewResult, error) {
 	if req.Model == nil {
-		return kernel.ApprovalReviewResult{}, fmt.Errorf("approval reviewer requires the current session model")
+		return gateway.ApprovalReviewResult{}, fmt.Errorf("approval reviewer requires the current session model")
 	}
 	if r == nil || r.sessions == nil {
-		return kernel.ApprovalReviewResult{}, fmt.Errorf("approval reviewer requires session history")
+		return gateway.ApprovalReviewResult{}, fmt.Errorf("approval reviewer requires session history")
 	}
 	timeout := r.timeout
 	if timeout <= 0 {
@@ -111,27 +111,27 @@ func (r *guardianApprovalReviewer) ReviewApproval(ctx context.Context, req kerne
 
 	_, _, assistantEvent, parsed, err := r.runGuardianReview(ctx, req)
 	if err != nil {
-		return kernel.ApprovalReviewResult{}, err
+		return gateway.ApprovalReviewResult{}, err
 	}
 	approved := strings.EqualFold(strings.TrimSpace(parsed.Outcome), "allow")
 	risk := normalizeReviewLabel(parsed.RiskLevel, "unknown")
 	authorization := normalizeAuthorizationLabel(parsed.UserAuthorization, "unknown")
 	rationale := firstNonEmpty(parsed.Rationale, "approval reviewer returned no rationale")
-	return kernel.ApprovalReviewResult{
+	return gateway.ApprovalReviewResult{
 		Approved:       approved,
 		Outcome:        approvalOutcome(approved),
 		Risk:           risk,
 		Authorization:  authorization,
 		Rationale:      rationale,
-		DisplayText:    kernel.FormatApprovalReviewText(approved, risk, authorization, rationale),
+		DisplayText:    gateway.FormatApprovalReviewText(approved, risk, authorization, rationale),
 		DecisionSource: "auto-review",
-		Usage:          kernel.UsageSnapshotFromSessionEvent(assistantEvent),
+		Usage:          gateway.UsageSnapshotFromSessionEvent(assistantEvent),
 	}, nil
 }
 
 func (r *guardianApprovalReviewer) runGuardianReview(
 	ctx context.Context,
-	req kernel.ApprovalReviewRequest,
+	req gateway.ApprovalReviewRequest,
 ) (guardianPromptItems, *session.Event, *session.Event, guardianReviewModelOutput, error) {
 	activeSession, err := r.sessions.Session(ctx, req.SessionRef)
 	if err != nil {
@@ -170,7 +170,7 @@ func (r *guardianApprovalReviewer) runGuardianReview(
 	return promptItems, promptEvent, lastAssistantEvent, guardianReviewModelOutput{}, fmt.Errorf("approval reviewer failed to return a valid JSON assessment after %d attempts: %w", guardianAssessmentMaxAttempts, lastParseErr)
 }
 
-func (r *guardianApprovalReviewer) reviewSessionFor(req kernel.ApprovalReviewRequest, session session.Session) *guardianReviewSession {
+func (r *guardianApprovalReviewer) reviewSessionFor(req gateway.ApprovalReviewRequest, session session.Session) *guardianReviewSession {
 	key := strings.TrimSpace(req.SessionRef.SessionID)
 	if key == "" {
 		key = strings.TrimSpace(session.SessionID)
@@ -274,7 +274,7 @@ func guardianSessionForParent(parent session.Session) session.Session {
 func buildGuardianPromptItems(
 	parentEvents []*session.Event,
 	mode guardianPromptMode,
-	req kernel.ApprovalReviewRequest,
+	req gateway.ApprovalReviewRequest,
 ) (guardianPromptItems, error) {
 	entries, cursor := collectGuardianTranscriptEntries(parentEvents)
 	var selected []guardianTranscriptEntry
@@ -480,7 +480,7 @@ func isGuardianToolEntry(entry guardianTranscriptEntry) bool {
 	return strings.HasPrefix(strings.TrimSpace(entry.Kind), "tool ")
 }
 
-func guardianPlannedActionJSON(req kernel.ApprovalReviewRequest) (string, bool, error) {
+func guardianPlannedActionJSON(req gateway.ApprovalReviewRequest) (string, bool, error) {
 	action := map[string]any{}
 	toolName := ""
 	if req.Approval != nil {
@@ -786,9 +786,9 @@ func canonicalGuardianAuthorizationLabel(value string) (string, bool) {
 
 func approvalOutcome(approved bool) string {
 	if approved {
-		return string(kernel.ApprovalStatusApproved)
+		return string(gateway.ApprovalStatusApproved)
 	}
-	return string(kernel.ApprovalStatusRejected)
+	return string(gateway.ApprovalStatusRejected)
 }
 
 func normalizeReviewLabel(value string, fallback string) string {
@@ -955,5 +955,5 @@ func boolPtr(value bool) *bool {
 	return &value
 }
 
-var _ kernel.ApprovalReviewer = (*guardianApprovalReviewer)(nil)
+var _ gateway.ApprovalReviewer = (*guardianApprovalReviewer)(nil)
 var _ agent.AgentFactory = chat.Factory{}

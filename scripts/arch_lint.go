@@ -117,10 +117,16 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 	target := strings.TrimPrefix(importPath, modulePath+"/")
 	switch {
 	case strings.HasPrefix(rel, "kernel/"):
+		if target == "internal/kernel" || strings.HasPrefix(target, "internal/kernel/") {
+			return "kernel must not depend on internal/kernel"
+		}
 		if startsWithAny(target, "impl/", "surfaces/") {
 			return "kernel must not depend on impl or surfaces"
 		}
 	case strings.HasPrefix(rel, "ports/"):
+		if strings.HasPrefix(target, "internal/") {
+			return "ports must not depend on internal packages"
+		}
 		if startsWithAny(target, "impl/", "surfaces/") {
 			return "ports must not depend on impl or surfaces"
 		}

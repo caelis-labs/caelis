@@ -3,12 +3,12 @@ package headless
 import (
 	"context"
 
-	"github.com/OnslaughtSnail/caelis/kernel"
+	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
 type Starter interface {
-	BeginTurn(context.Context, kernel.BeginTurnRequest) (kernel.BeginTurnResult, error)
+	BeginTurn(context.Context, gateway.BeginTurnRequest) (gateway.BeginTurnResult, error)
 }
 
 type ApprovalPolicy string
@@ -20,7 +20,7 @@ const (
 
 type Options struct {
 	ApprovalPolicy  ApprovalPolicy
-	ResolveApproval func(context.Context, *kernel.ApprovalPayload) (kernel.ApprovalDecision, error)
+	ResolveApproval func(context.Context, *gateway.ApprovalPayload) (gateway.ApprovalDecision, error)
 }
 
 type Result struct {
@@ -30,7 +30,7 @@ type Result struct {
 	PromptTokens int
 }
 
-func RunOnce(ctx context.Context, starter Starter, req kernel.BeginTurnRequest, opts Options) (Result, error) {
+func RunOnce(ctx context.Context, starter Starter, req gateway.BeginTurnRequest, opts Options) (Result, error) {
 	result, err := starter.BeginTurn(ctx, req)
 	if err != nil {
 		return Result{}, err
@@ -46,35 +46,35 @@ func RunOnce(ctx context.Context, starter Starter, req kernel.BeginTurnRequest, 
 		if env.Err != nil {
 			return out, env.Err
 		}
-		if env.Event.Kind == kernel.EventKindApprovalRequested {
+		if env.Event.Kind == gateway.EventKindApprovalRequested {
 			decision, err := resolveApproval(ctx, opts, env.Event.ApprovalPayload)
 			if err != nil {
 				return out, err
 			}
-			if err := result.Handle.Submit(ctx, kernel.SubmitRequest{
-				Kind:     kernel.SubmissionKindApproval,
+			if err := result.Handle.Submit(ctx, gateway.SubmitRequest{
+				Kind:     gateway.SubmissionKindApproval,
 				Approval: &decision,
 			}); err != nil {
 				return out, err
 			}
 			continue
 		}
-		if text := kernel.AssistantText(env.Event); text != "" {
+		if text := gateway.AssistantText(env.Event); text != "" {
 			out.Output = text
 		}
-		if prompt := kernel.PromptTokens(env.Event); prompt > 0 {
+		if prompt := gateway.PromptTokens(env.Event); prompt > 0 {
 			out.PromptTokens = prompt
 		}
 	}
 	return out, nil
 }
 
-func resolveApproval(ctx context.Context, opts Options, req *kernel.ApprovalPayload) (kernel.ApprovalDecision, error) {
+func resolveApproval(ctx context.Context, opts Options, req *gateway.ApprovalPayload) (gateway.ApprovalDecision, error) {
 	if opts.ResolveApproval != nil {
 		return opts.ResolveApproval(ctx, req)
 	}
 	if opts.ApprovalPolicy == ApprovalPolicyApproveAll {
-		return kernel.ApprovalDecision{Approved: true, Outcome: string(kernel.ApprovalStatusApproved)}, nil
+		return gateway.ApprovalDecision{Approved: true, Outcome: string(gateway.ApprovalStatusApproved)}, nil
 	}
-	return kernel.ApprovalDecision{Approved: false, Outcome: string(kernel.ApprovalStatusRejected)}, nil
+	return gateway.ApprovalDecision{Approved: false, Outcome: string(gateway.ApprovalStatusRejected)}, nil
 }

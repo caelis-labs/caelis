@@ -6,9 +6,9 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/impl/model/catalog"
 	"github.com/OnslaughtSnail/caelis/impl/model/providers"
-	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/compact"
 	"github.com/OnslaughtSnail/caelis/ports/controller"
+	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/protocol/acp"
 )
@@ -67,7 +67,7 @@ func (s *Stack) ACPSurface(modes acp.ModeProvider, useFallbackModes bool, config
 	return newGatewayACPSurface(s, modes, useFallbackModes, configs)
 }
 
-func (s *Stack) Kernel() kernel.Service {
+func (s *Stack) Kernel() gateway.Service {
 	if s == nil {
 		return nil
 	}

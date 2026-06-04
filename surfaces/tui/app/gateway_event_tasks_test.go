@@ -1,12 +1,13 @@
 package tuiapp
 
 import (
+	"maps"
 	"strings"
 	"testing"
 
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/OnslaughtSnail/caelis/kernel"
+	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/stream"
 )
@@ -14,15 +15,15 @@ import (
 func TestGatewayTaskControlsMergeIntoTaskStage(t *testing.T) {
 	model := newGatewayEventTestModel()
 	sendReasoning := func(text string) {
-		updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
-			Event: kernel.Event{
-				Kind:       kernel.EventKindAssistantMessage,
+		updated, _ := model.Update(gatewayEventMsg(gateway.EventEnvelope{
+			Event: gateway.Event{
+				Kind:       gateway.EventKindAssistantMessage,
 				SessionRef: session.SessionRef{SessionID: "root-session"},
-				Narrative: &kernel.NarrativePayload{
-					Role:          kernel.NarrativeRoleAssistant,
+				Narrative: &gateway.NarrativePayload{
+					Role:          gateway.NarrativeRoleAssistant,
 					ReasoningText: text,
 					Final:         true,
-					Scope:         kernel.EventScopeMain,
+					Scope:         gateway.EventScopeMain,
 				},
 			}}))
 
@@ -44,29 +45,29 @@ func TestGatewayTaskControlsMergeIntoTaskStage(t *testing.T) {
 		if item.input != "" {
 			rawInput["input"] = item.input
 		}
-		updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
-			Event: kernel.Event{
-				Kind:       kernel.EventKindToolCall,
+		updated, _ := model.Update(gatewayEventMsg(gateway.EventEnvelope{
+			Event: gateway.Event{
+				Kind:       gateway.EventKindToolCall,
 				SessionRef: session.SessionRef{SessionID: "root-session"},
-				ToolCall: &kernel.ToolCallPayload{
+				ToolCall: &gateway.ToolCallPayload{
 					CallID:   item.callID,
 					ToolName: "TASK",
-					Status:   kernel.ToolStatusRunning,
-					Scope:    kernel.EventScopeMain,
+					Status:   gateway.ToolStatusRunning,
+					Scope:    gateway.EventScopeMain,
 					RawInput: rawInput,
 				},
 			}}))
 
 		model = updated.(*Model)
-		updated, _ = model.Update(gatewayEventMsg(kernel.EventEnvelope{
-			Event: kernel.Event{
-				Kind:       kernel.EventKindToolResult,
+		updated, _ = model.Update(gatewayEventMsg(gateway.EventEnvelope{
+			Event: gateway.Event{
+				Kind:       gateway.EventKindToolResult,
 				SessionRef: session.SessionRef{SessionID: "root-session"},
-				ToolResult: &kernel.ToolResultPayload{
+				ToolResult: &gateway.ToolResultPayload{
 					CallID:   item.callID,
 					ToolName: "TASK",
-					Status:   kernel.ToolStatusRunning,
-					Scope:    kernel.EventScopeMain,
+					Status:   gateway.ToolStatusRunning,
+					Scope:    gateway.EventScopeMain,
 					RawInput: rawInput,
 					RawOutput: map[string]any{
 						"running": true,
@@ -130,6 +131,87 @@ func TestGatewayTaskControlsMergeIntoTaskStage(t *testing.T) {
 	}
 }
 
+type testGatewayStreamRequest struct {
+	SessionRef session.SessionRef
+	CallID     string
+	ToolName   string
+	RawInput   map[string]any
+	Ref        stream.Ref
+	Scope      gateway.EventScope
+}
+
+func testGatewayStreamFrameEvents(req testGatewayStreamRequest, frame stream.Frame) []gateway.EventEnvelope {
+	if !strings.EqualFold(strings.TrimSpace(req.ToolName), "SPAWN") {
+		return nil
+	}
+	if frame.Closed {
+		return []gateway.EventEnvelope{testGatewayStreamFrameEvent(req, frame, gateway.ToolStatusCompleted, "content")}
+	}
+	if !frame.Running || frame.Text == "" {
+		return nil
+	}
+	if strings.TrimSpace(req.Ref.TaskID) != "" {
+		frame.Ref.TaskID = req.Ref.TaskID
+	}
+	return []gateway.EventEnvelope{testGatewayStreamFrameEvent(req, frame, gateway.ToolStatusRunning, "terminal")}
+}
+
+func testGatewayStreamFrameEvent(req testGatewayStreamRequest, frame stream.Frame, status gateway.ToolStatus, contentType string) gateway.EventEnvelope {
+	text := frame.Text
+	if status == gateway.ToolStatusCompleted {
+		text = "摘要\n- ool_demo_showcase.md 存在\n结论： 目录用于 SPAWN 演示"
+	}
+	content := []session.ProtocolToolCallContent{{
+		Type:    contentType,
+		Content: session.ProtocolTextContent(text),
+	}}
+	return gateway.EventEnvelope{Event: gateway.Event{
+		Kind:       gateway.EventKindToolResult,
+		SessionRef: req.SessionRef,
+		Meta: map[string]any{
+			gateway.EventMetaRoot: map[string]any{
+				gateway.EventMetaVersion: 1,
+				gateway.EventMetaRuntime: map[string]any{
+					gateway.EventMetaRuntimeTool: map[string]any{
+						gateway.EventMetaRuntimeToolName:           strings.TrimSpace(req.ToolName),
+						gateway.EventMetaRuntimeTargetID:           firstNonEmpty(strings.TrimSpace(req.Ref.TaskID), strings.TrimSpace(frame.Ref.TaskID)),
+						gateway.EventMetaRuntimeTargetKind:         "agent",
+						gateway.EventMetaRuntimeStreamParentTaskID: strings.TrimSpace(frame.Ref.TaskID),
+						"agent":  stringFromAny(req.RawInput["agent"]),
+						"prompt": stringFromAny(req.RawInput["prompt"]),
+					},
+				},
+			},
+		},
+		Protocol: &session.EventProtocol{
+			Method:     session.ProtocolMethodSessionUpdate,
+			UpdateType: string(session.ProtocolUpdateTypeToolUpdate),
+			Update: &session.ProtocolUpdate{
+				SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate),
+				ToolCallID:    strings.TrimSpace(req.CallID),
+				Kind:          strings.TrimSpace(req.ToolName),
+				Title:         strings.TrimSpace(req.ToolName),
+				Status:        string(status),
+				RawInput:      maps.Clone(req.RawInput),
+				Content:       content,
+			},
+		},
+		ToolResult: &gateway.ToolResultPayload{
+			CallID:   strings.TrimSpace(req.CallID),
+			ToolName: strings.TrimSpace(req.ToolName),
+			RawInput: maps.Clone(req.RawInput),
+			Content:  content,
+			Status:   status,
+			Scope:    req.Scope,
+		},
+	}}
+}
+
+func stringFromAny(value any) string {
+	text, _ := value.(string)
+	return strings.TrimSpace(text)
+}
+
 func TestGatewayTaskHandoffBudgetKeepsSummaryAndNewStreamVisible(t *testing.T) {
 	model := newGatewayEventTestModel()
 	block := NewMainACPTurnBlock("root-session")
@@ -190,15 +272,15 @@ func TestGatewayTaskControlsRenderActionDetailsWithoutTaskIDs(t *testing.T) {
 			},
 		},
 	} {
-		updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
-			Event: kernel.Event{
-				Kind:       kernel.EventKindToolCall,
+		updated, _ := model.Update(gatewayEventMsg(gateway.EventEnvelope{
+			Event: gateway.Event{
+				Kind:       gateway.EventKindToolCall,
 				SessionRef: session.SessionRef{SessionID: "root-session"},
-				ToolCall: &kernel.ToolCallPayload{
+				ToolCall: &gateway.ToolCallPayload{
 					CallID:   item.callID,
 					ToolName: "TASK",
-					Status:   kernel.ToolStatusRunning,
-					Scope:    kernel.EventScopeMain,
+					Status:   gateway.ToolStatusRunning,
+					Scope:    gateway.EventScopeMain,
 					RawInput: item.raw,
 				},
 			}}))
@@ -234,30 +316,30 @@ func TestAutomaticApprovalReviewUsesHintAndInlineTranscriptLocation(t *testing.T
 		"reason": "need directory access",
 	}
 
-	updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind:       kernel.EventKindToolCall,
+	updated, _ := model.Update(gatewayEventMsg(gateway.EventEnvelope{
+		Event: gateway.Event{
+			Kind:       gateway.EventKindToolCall,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session"},
-			ToolCall: &kernel.ToolCallPayload{
+			Origin:     &gateway.EventOrigin{Scope: gateway.EventScopeMain, ScopeID: "root-session"},
+			ToolCall: &gateway.ToolCallPayload{
 				CallID:   "perm-1",
 				ToolName: "custom_tool",
-				Status:   kernel.ToolStatusRunning,
+				Status:   gateway.ToolStatusRunning,
 				RawInput: permissionInput,
 			},
 		}}))
 
 	model = updated.(*Model)
-	updated, _ = model.Update(gatewayEventMsg(kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind:       kernel.EventKindApprovalReview,
+	updated, _ = model.Update(gatewayEventMsg(gateway.EventEnvelope{
+		Event: gateway.Event{
+			Kind:       gateway.EventKindApprovalReview,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session"},
-			ApprovalPayload: &kernel.ApprovalPayload{
+			Origin:     &gateway.EventOrigin{Scope: gateway.EventScopeMain, ScopeID: "root-session"},
+			ApprovalPayload: &gateway.ApprovalPayload{
 				ToolCallID:     "perm-1",
 				ToolName:       "custom_tool",
 				RawInput:       map[string]any{"reason": "need directory access"},
-				ReviewStatus:   kernel.ApprovalReviewStatusInProgress,
+				ReviewStatus:   gateway.ApprovalReviewStatusInProgress,
 				DecisionSource: "auto-review",
 			},
 		}}))
@@ -268,44 +350,44 @@ func TestAutomaticApprovalReviewUsesHintAndInlineTranscriptLocation(t *testing.T
 	}
 
 	reviewText := "Automatic approval review approved (risk: medium, authorization: high): user requested it."
-	updated, _ = model.Update(gatewayEventMsg(kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind:       kernel.EventKindToolResult,
+	updated, _ = model.Update(gatewayEventMsg(gateway.EventEnvelope{
+		Event: gateway.Event{
+			Kind:       gateway.EventKindToolResult,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session"},
-			ToolResult: &kernel.ToolResultPayload{
+			Origin:     &gateway.EventOrigin{Scope: gateway.EventScopeMain, ScopeID: "root-session"},
+			ToolResult: &gateway.ToolResultPayload{
 				CallID:    "perm-1",
 				ToolName:  "custom_tool",
-				Status:    kernel.ToolStatusCompleted,
+				Status:    gateway.ToolStatusCompleted,
 				RawInput:  permissionInput,
 				RawOutput: map[string]any{"summary": "custom tool completed"},
 			},
 		}}))
 
 	model = updated.(*Model)
-	updated, _ = model.Update(gatewayEventMsg(kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind:       kernel.EventKindAssistantMessage,
+	updated, _ = model.Update(gatewayEventMsg(gateway.EventEnvelope{
+		Event: gateway.Event{
+			Kind:       gateway.EventKindAssistantMessage,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session"},
-			Narrative: &kernel.NarrativePayload{
-				Role:  kernel.NarrativeRoleAssistant,
+			Origin:     &gateway.EventOrigin{Scope: gateway.EventScopeMain, ScopeID: "root-session"},
+			Narrative: &gateway.NarrativePayload{
+				Role:  gateway.NarrativeRoleAssistant,
 				Text:  "approval-dependent work finished",
 				Final: true,
 			},
 		}}))
 
 	model = updated.(*Model)
-	updated, _ = model.Update(gatewayEventMsg(kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind:       kernel.EventKindApprovalReview,
+	updated, _ = model.Update(gatewayEventMsg(gateway.EventEnvelope{
+		Event: gateway.Event{
+			Kind:       gateway.EventKindApprovalReview,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session"},
-			ApprovalPayload: &kernel.ApprovalPayload{
+			Origin:     &gateway.EventOrigin{Scope: gateway.EventScopeMain, ScopeID: "root-session"},
+			ApprovalPayload: &gateway.ApprovalPayload{
 				ToolCallID:     "perm-1",
 				ToolName:       "custom_tool",
 				RawInput:       map[string]any{"reason": "need directory access"},
-				ReviewStatus:   kernel.ApprovalReviewStatusApproved,
+				ReviewStatus:   gateway.ApprovalReviewStatusApproved,
 				DecisionSource: "auto-review",
 				ReviewText:     reviewText,
 				Risk:           "medium",
@@ -379,50 +461,50 @@ func TestAutomaticApprovalReviewUsesHintAndInlineTranscriptLocation(t *testing.T
 func TestDeniedAutomaticApprovalReviewRendersInline(t *testing.T) {
 	model := newGatewayEventTestModel()
 	permissionInput := map[string]any{"path": "outside.txt"}
-	for _, env := range []kernel.EventEnvelope{
-		{Event: kernel.Event{
-			Kind:       kernel.EventKindToolCall,
+	for _, env := range []gateway.EventEnvelope{
+		{Event: gateway.Event{
+			Kind:       gateway.EventKindToolCall,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session"},
-			ToolCall: &kernel.ToolCallPayload{
+			Origin:     &gateway.EventOrigin{Scope: gateway.EventScopeMain, ScopeID: "root-session"},
+			ToolCall: &gateway.ToolCallPayload{
 				CallID:   "perm-denied",
 				ToolName: "custom_tool",
-				Status:   kernel.ToolStatusRunning,
+				Status:   gateway.ToolStatusRunning,
 				RawInput: permissionInput,
 			},
 		}},
-		{Event: kernel.Event{
-			Kind:       kernel.EventKindToolResult,
+		{Event: gateway.Event{
+			Kind:       gateway.EventKindToolResult,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session"},
-			ToolResult: &kernel.ToolResultPayload{
+			Origin:     &gateway.EventOrigin{Scope: gateway.EventScopeMain, ScopeID: "root-session"},
+			ToolResult: &gateway.ToolResultPayload{
 				CallID:    "perm-denied",
 				ToolName:  "custom_tool",
-				Status:    kernel.ToolStatusFailed,
+				Status:    gateway.ToolStatusFailed,
 				Error:     true,
 				RawInput:  permissionInput,
 				RawOutput: map[string]any{"error": "operation was rejected"},
 			},
 		}},
-		{Event: kernel.Event{
-			Kind:       kernel.EventKindAssistantMessage,
+		{Event: gateway.Event{
+			Kind:       gateway.EventKindAssistantMessage,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session"},
-			Narrative: &kernel.NarrativePayload{
-				Role:  kernel.NarrativeRoleAssistant,
+			Origin:     &gateway.EventOrigin{Scope: gateway.EventScopeMain, ScopeID: "root-session"},
+			Narrative: &gateway.NarrativePayload{
+				Role:  gateway.NarrativeRoleAssistant,
 				Text:  "trying a safer path",
 				Final: true,
 			},
 		}},
-		{Event: kernel.Event{
-			Kind:       kernel.EventKindApprovalReview,
+		{Event: gateway.Event{
+			Kind:       gateway.EventKindApprovalReview,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session"},
-			ApprovalPayload: &kernel.ApprovalPayload{
+			Origin:     &gateway.EventOrigin{Scope: gateway.EventScopeMain, ScopeID: "root-session"},
+			ApprovalPayload: &gateway.ApprovalPayload{
 				ToolCallID:     "perm-denied",
 				ToolName:       "custom_tool",
 				RawInput:       map[string]any{"reason": "need broad access"},
-				ReviewStatus:   kernel.ApprovalReviewStatusDenied,
+				ReviewStatus:   gateway.ApprovalReviewStatusDenied,
 				DecisionSource: "auto-review",
 				ReviewText:     "Automatic approval review denied (risk: high, authorization: low): not narrow enough",
 				Risk:           "high",
@@ -489,30 +571,30 @@ func TestGatewayTaskStageCleansRawTaskFallbackRows(t *testing.T) {
 		{callID: "task-raw-4", input: map[string]any{"action": "wait", "task_id": "nora", "yield_time_ms": 3000}},
 		{callID: "task-raw-5", input: map[string]any{"action": "cancel", "task_id": "nora"}},
 	} {
-		updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
-			Event: kernel.Event{
-				Kind:       kernel.EventKindToolCall,
+		updated, _ := model.Update(gatewayEventMsg(gateway.EventEnvelope{
+			Event: gateway.Event{
+				Kind:       gateway.EventKindToolCall,
 				SessionRef: session.SessionRef{SessionID: "root-session"},
-				ToolCall: &kernel.ToolCallPayload{
+				ToolCall: &gateway.ToolCallPayload{
 					CallID:   item.callID,
 					ToolName: "TASK",
-					Status:   kernel.ToolStatusRunning,
-					Scope:    kernel.EventScopeMain,
+					Status:   gateway.ToolStatusRunning,
+					Scope:    gateway.EventScopeMain,
 					RawInput: item.input,
 				},
 			}}))
 
 		model = updated.(*Model)
 	}
-	updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind:       kernel.EventKindAssistantMessage,
+	updated, _ := model.Update(gatewayEventMsg(gateway.EventEnvelope{
+		Event: gateway.Event{
+			Kind:       gateway.EventKindAssistantMessage,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			Narrative: &kernel.NarrativePayload{
-				Role:  kernel.NarrativeRoleAssistant,
+			Narrative: &gateway.NarrativePayload{
+				Role:  gateway.NarrativeRoleAssistant,
 				Text:  "task controls settled",
 				Final: true,
-				Scope: kernel.EventScopeMain,
+				Scope: gateway.EventScopeMain,
 			},
 		}}))
 
@@ -540,27 +622,27 @@ func TestGatewayTaskStageCleansRawTaskFallbackRows(t *testing.T) {
 
 func TestGatewayTaskSnapshotDoesNotRefreshCommandPanelOutput(t *testing.T) {
 	model := newGatewayEventTestModel()
-	for _, env := range []kernel.EventEnvelope{
-		{Event: kernel.Event{
-			Kind:       kernel.EventKindToolCall,
+	for _, env := range []gateway.EventEnvelope{
+		{Event: gateway.Event{
+			Kind:       gateway.EventKindToolCall,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			ToolCall: &kernel.ToolCallPayload{
+			ToolCall: &gateway.ToolCallPayload{
 				CallID:   "command-1",
 				ToolName: "RUN_COMMAND",
-				Status:   kernel.ToolStatusRunning,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusRunning,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{"command": "for i in $(seq 1 30); do echo $i; sleep 1; done"},
 			},
 		}},
-		{Event: kernel.Event{
-			Kind:       kernel.EventKindToolResult,
+		{Event: gateway.Event{
+			Kind:       gateway.EventKindToolResult,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
 			Meta:       testRuntimeToolMeta(map[string]any{"target_id": "task-7"}),
-			ToolResult: &kernel.ToolResultPayload{
+			ToolResult: &gateway.ToolResultPayload{
 				CallID:   "command-1",
 				ToolName: "RUN_COMMAND",
-				Status:   kernel.ToolStatusRunning,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusRunning,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{"command": "for i in $(seq 1 30); do echo $i; sleep 1; done"},
 				RawOutput: map[string]any{
 					"running": true,
@@ -570,26 +652,26 @@ func TestGatewayTaskSnapshotDoesNotRefreshCommandPanelOutput(t *testing.T) {
 				Content: testTerminalContent("进度: 1/30\n"),
 			},
 		}},
-		{Event: kernel.Event{
-			Kind:       kernel.EventKindToolCall,
+		{Event: gateway.Event{
+			Kind:       gateway.EventKindToolCall,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			ToolCall: &kernel.ToolCallPayload{
+			ToolCall: &gateway.ToolCallPayload{
 				CallID:   "task-wait-1",
 				ToolName: "TASK",
-				Status:   kernel.ToolStatusRunning,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusRunning,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{"action": "wait", "task_id": "task-7", "yield_time_ms": 5000},
 			},
 		}},
-		{Event: kernel.Event{
-			Kind:       kernel.EventKindToolResult,
+		{Event: gateway.Event{
+			Kind:       gateway.EventKindToolResult,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
 			Meta:       testRuntimeToolMeta(map[string]any{"target_id": "task-7", "action": "wait"}),
-			ToolResult: &kernel.ToolResultPayload{
+			ToolResult: &gateway.ToolResultPayload{
 				CallID:   "task-wait-1",
 				ToolName: "TASK",
-				Status:   kernel.ToolStatusRunning,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusRunning,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{"action": "wait", "task_id": "task-7", "yield_time_ms": 5000},
 				RawOutput: map[string]any{
 					"running": true,
@@ -633,27 +715,27 @@ func TestGatewayTaskSnapshotDoesNotRefreshCommandPanelOutput(t *testing.T) {
 
 func TestGatewayTaskWaitCompletedShowsActionWithoutResultOutput(t *testing.T) {
 	model := newGatewayEventTestModel()
-	for _, env := range []kernel.EventEnvelope{
-		{Event: kernel.Event{
-			Kind:       kernel.EventKindToolCall,
+	for _, env := range []gateway.EventEnvelope{
+		{Event: gateway.Event{
+			Kind:       gateway.EventKindToolCall,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			ToolCall: &kernel.ToolCallPayload{
+			ToolCall: &gateway.ToolCallPayload{
 				CallID:   "task-wait-12",
 				ToolName: "TASK",
-				Status:   kernel.ToolStatusRunning,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusRunning,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{"action": "wait", "task_id": "task-7", "yield_time_ms": 12000},
 			},
 		}},
-		{Event: kernel.Event{
-			Kind:       kernel.EventKindToolResult,
+		{Event: gateway.Event{
+			Kind:       gateway.EventKindToolResult,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
 			Meta:       testRuntimeToolMeta(map[string]any{"target_id": "task-7", "action": "wait", "target_kind": "command"}),
-			ToolResult: &kernel.ToolResultPayload{
+			ToolResult: &gateway.ToolResultPayload{
 				CallID:   "task-wait-12",
 				ToolName: "TASK",
-				Status:   kernel.ToolStatusCompleted,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusCompleted,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{"action": "wait", "task_id": "task-7", "yield_time_ms": 12000},
 				RawOutput: map[string]any{
 					"state":  "completed",
@@ -687,15 +769,15 @@ func TestGatewayTerminalToolArgumentsRenderFullAndWrapIndented(t *testing.T) {
 	model.viewport.SetWidth(46)
 	model.viewport.SetHeight(20)
 	command := "printf '%s\\n' BRANCH && git branch --show-current && printf '%s\\n' TRACKED && echo TERMINAL_ARG_TAIL_MARKER"
-	updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind:       kernel.EventKindToolCall,
+	updated, _ := model.Update(gatewayEventMsg(gateway.EventEnvelope{
+		Event: gateway.Event{
+			Kind:       gateway.EventKindToolCall,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			ToolCall: &kernel.ToolCallPayload{
+			ToolCall: &gateway.ToolCallPayload{
 				CallID:   "command-full-args",
 				ToolName: "RUN_COMMAND",
-				Status:   kernel.ToolStatusRunning,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusRunning,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{"command": command},
 			},
 		}}))
@@ -723,15 +805,15 @@ func TestGatewayTerminalToolArgumentsRenderFullAndWrapIndented(t *testing.T) {
 func TestGatewaySpawnArgumentsRenderPromptPreviewAndExpandsFullPrompt(t *testing.T) {
 	model := newGatewayEventTestModel()
 	prompt := strings.Repeat("写一个完整参数展示测试。", 8) + "SPAWN_PROMPT_TAIL_MARKER"
-	updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind:       kernel.EventKindToolCall,
+	updated, _ := model.Update(gatewayEventMsg(gateway.EventEnvelope{
+		Event: gateway.Event{
+			Kind:       gateway.EventKindToolCall,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			ToolCall: &kernel.ToolCallPayload{
+			ToolCall: &gateway.ToolCallPayload{
 				CallID:   "spawn-full-args",
 				ToolName: "SPAWN",
-				Status:   kernel.ToolStatusRunning,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusRunning,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{
 					"agent":  "self",
 					"prompt": prompt,
@@ -781,31 +863,31 @@ func TestGatewaySpawnFinalResultReplacesRunningStreamAndCleansMarkdown(t *testin
 		"| `hello_from_spawn.txt` | **created** |",
 		"报告位于 `spawn_report.md`",
 	}, "\n")
-	for _, env := range []kernel.EventEnvelope{
-		{Event: kernel.Event{
-			Kind:       kernel.EventKindToolCall,
+	for _, env := range []gateway.EventEnvelope{
+		{Event: gateway.Event{
+			Kind:       gateway.EventKindToolCall,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			ToolCall: &kernel.ToolCallPayload{
+			ToolCall: &gateway.ToolCallPayload{
 				CallID:   "spawn-clean-final",
 				ToolName: "SPAWN",
-				Status:   kernel.ToolStatusRunning,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusRunning,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{"agent": "self", "prompt": prompt},
 			},
 		}},
-		{Event: kernel.Event{
-			Kind:       kernel.EventKindToolResult,
+		{Event: gateway.Event{
+			Kind:       gateway.EventKindToolResult,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
 			Meta: testRuntimeToolMeta(map[string]any{
 				"target_id": "jack",
 				"agent":     "self",
 				"prompt":    prompt,
 			}),
-			ToolResult: &kernel.ToolResultPayload{
+			ToolResult: &gateway.ToolResultPayload{
 				CallID:   "spawn-clean-final",
 				ToolName: "SPAWN",
-				Status:   kernel.ToolStatusRunning,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusRunning,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{"agent": "self", "prompt": prompt},
 				RawOutput: map[string]any{
 					"running": true,
@@ -816,19 +898,19 @@ func TestGatewaySpawnFinalResultReplacesRunningStreamAndCleansMarkdown(t *testin
 				Content: testTerminalContent("dirty process line\nls output that should not become final"),
 			},
 		}},
-		{Event: kernel.Event{
-			Kind:       kernel.EventKindToolResult,
+		{Event: gateway.Event{
+			Kind:       gateway.EventKindToolResult,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
 			Meta: testRuntimeToolMeta(map[string]any{
 				"target_id": "jack",
 				"agent":     "self",
 				"prompt":    prompt,
 			}),
-			ToolResult: &kernel.ToolResultPayload{
+			ToolResult: &gateway.ToolResultPayload{
 				CallID:   "spawn-clean-final",
 				ToolName: "SPAWN",
-				Status:   kernel.ToolStatusCompleted,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusCompleted,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{"agent": "self", "prompt": prompt},
 				RawOutput: map[string]any{
 					"running":       false,
@@ -880,32 +962,32 @@ func TestGatewaySpawnFinalResultReplacesRunningStreamAndCleansMarkdown(t *testin
 func TestGatewaySpawnRunningSnapshotUpgradesPromptAndHidesRawJSON(t *testing.T) {
 	model := newGatewayEventTestModel()
 	prompt := "创建一个 Python 脚本并运行"
-	for _, env := range []kernel.EventEnvelope{
-		{Event: kernel.Event{
-			Kind:       kernel.EventKindToolCall,
+	for _, env := range []gateway.EventEnvelope{
+		{Event: gateway.Event{
+			Kind:       gateway.EventKindToolCall,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			ToolCall: &kernel.ToolCallPayload{
+			ToolCall: &gateway.ToolCallPayload{
 				CallID:   "spawn-running-json",
 				ToolName: "SPAWN",
 				ToolKind: "execute",
-				Status:   kernel.ToolStatusRunning,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusRunning,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{"agent": "claude"},
 			},
 		}},
-		{Event: kernel.Event{
-			Kind:       kernel.EventKindToolResult,
+		{Event: gateway.Event{
+			Kind:       gateway.EventKindToolResult,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
 			Meta: testRuntimeToolMeta(map[string]any{
 				"agent":  "claude",
 				"prompt": prompt,
 			}),
-			ToolResult: &kernel.ToolResultPayload{
+			ToolResult: &gateway.ToolResultPayload{
 				CallID:   "spawn-running-json",
 				ToolName: "SPAWN",
 				ToolKind: "execute",
-				Status:   kernel.ToolStatusRunning,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusRunning,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{"agent": "claude"},
 				RawOutput: map[string]any{
 					"agent":       "claude",
@@ -940,30 +1022,30 @@ func TestGatewaySpawnRunningSnapshotUpgradesPromptAndHidesRawJSON(t *testing.T) 
 func TestGatewaySpawnRunningStreamPreservesChunkBoundarySpaces(t *testing.T) {
 	model := newGatewayEventTestModel()
 	prompt := "写分析报告"
-	start := kernel.EventEnvelope{Event: kernel.Event{
-		Kind:       kernel.EventKindToolCall,
+	start := gateway.EventEnvelope{Event: gateway.Event{
+		Kind:       gateway.EventKindToolCall,
 		SessionRef: session.SessionRef{SessionID: "root-session"},
-		ToolCall: &kernel.ToolCallPayload{
+		ToolCall: &gateway.ToolCallPayload{
 			CallID:   "spawn-space-stream",
 			ToolName: "SPAWN",
-			Status:   kernel.ToolStatusRunning,
-			Scope:    kernel.EventScopeMain,
+			Status:   gateway.ToolStatusRunning,
+			Scope:    gateway.EventScopeMain,
 			RawInput: map[string]any{"agent": "self", "prompt": prompt},
 		},
 	}}
 	updated, _ := model.Update(gatewayEventMsg(start))
 	model = updated.(*Model)
 
-	req := kernel.StreamRequest{
+	req := testGatewayStreamRequest{
 		SessionRef: session.SessionRef{SessionID: "root-session"},
 		CallID:     "spawn-space-stream",
 		ToolName:   "SPAWN",
 		RawInput:   map[string]any{"agent": "self", "prompt": prompt},
 		Ref:        stream.Ref{SessionID: "root-session", TaskID: "child-task"},
-		Scope:      kernel.EventScopeMain,
+		Scope:      gateway.EventScopeMain,
 	}
 	for _, chunk := range []string{"Now", " let", " me", " write", " the", " report."} {
-		for _, env := range kernel.StreamFrameEvents(req, stream.Frame{
+		for _, env := range testGatewayStreamFrameEvents(req, stream.Frame{
 			Ref:     stream.Ref{SessionID: "root-session", TaskID: "child-task"},
 			Text:    chunk,
 			Running: true,
@@ -993,29 +1075,29 @@ func TestGatewaySpawnRunningStreamPreservesChunkBoundarySpaces(t *testing.T) {
 func TestGatewaySpawnClosedStreamReplacesRunningOutputWithoutTaskWait(t *testing.T) {
 	model := newGatewayEventTestModel()
 	prompt := "分析当前目录"
-	start := kernel.EventEnvelope{Event: kernel.Event{
-		Kind:       kernel.EventKindToolCall,
+	start := gateway.EventEnvelope{Event: gateway.Event{
+		Kind:       gateway.EventKindToolCall,
 		SessionRef: session.SessionRef{SessionID: "root-session"},
-		ToolCall: &kernel.ToolCallPayload{
+		ToolCall: &gateway.ToolCallPayload{
 			CallID:   "spawn-stream-final",
 			ToolName: "SPAWN",
-			Status:   kernel.ToolStatusRunning,
-			Scope:    kernel.EventScopeMain,
+			Status:   gateway.ToolStatusRunning,
+			Scope:    gateway.EventScopeMain,
 			RawInput: map[string]any{"agent": "self", "prompt": prompt},
 		},
 	}}
 	updated, _ := model.Update(gatewayEventMsg(start))
 	model = updated.(*Model)
 
-	req := kernel.StreamRequest{
+	req := testGatewayStreamRequest{
 		SessionRef: session.SessionRef{SessionID: "root-session"},
 		CallID:     "spawn-stream-final",
 		ToolName:   "SPAWN",
 		RawInput:   map[string]any{"agent": "self", "prompt": prompt},
 		Ref:        stream.Ref{SessionID: "root-session", TaskID: "liam"},
-		Scope:      kernel.EventScopeMain,
+		Scope:      gateway.EventScopeMain,
 	}
-	for _, env := range kernel.StreamFrameEvents(req, stream.Frame{
+	for _, env := range testGatewayStreamFrameEvents(req, stream.Frame{
 		Ref:     stream.Ref{SessionID: "root-session", TaskID: "internal-task"},
 		Text:    "ool_demo_showcase*.md(x6版本迭代)|**总文件数**|~80+|",
 		Running: true,
@@ -1023,7 +1105,7 @@ func TestGatewaySpawnClosedStreamReplacesRunningOutputWithoutTaskWait(t *testing
 		updated, _ = model.Update(gatewayEventMsg(env))
 		model = updated.(*Model)
 	}
-	for _, env := range kernel.StreamFrameEvents(req, stream.Frame{
+	for _, env := range testGatewayStreamFrameEvents(req, stream.Frame{
 		Ref:     stream.Ref{SessionID: "root-session", TaskID: "internal-task"},
 		Text:    "### 摘要\n- `ool_demo_showcase.md` 存在\n**结论：** 目录用于 SPAWN 演示",
 		Closed:  true,
@@ -1054,33 +1136,33 @@ func TestGatewaySpawnClosedStreamReplacesRunningOutputWithoutTaskWait(t *testing
 
 func TestGatewayTaskWriteRendersOwnPanelAndAbsorbsContinuationSpawn(t *testing.T) {
 	model := newGatewayEventTestModel()
-	for _, env := range []kernel.EventEnvelope{
-		{Event: kernel.Event{
-			Kind:       kernel.EventKindToolCall,
+	for _, env := range []gateway.EventEnvelope{
+		{Event: gateway.Event{
+			Kind:       gateway.EventKindToolCall,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			ToolCall: &kernel.ToolCallPayload{
+			ToolCall: &gateway.ToolCallPayload{
 				CallID:   "spawn-continue",
 				ToolName: "SPAWN",
 				ToolKind: "execute",
-				Status:   kernel.ToolStatusRunning,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusRunning,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{"agent": "self", "prompt": "创建文件"},
 			},
 		}},
-		{Event: kernel.Event{
-			Kind:       kernel.EventKindToolResult,
+		{Event: gateway.Event{
+			Kind:       gateway.EventKindToolResult,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
 			Meta: testRuntimeToolMeta(map[string]any{
 				"target_id": "jack",
 				"agent":     "self",
 				"prompt":    "创建文件",
 			}),
-			ToolResult: &kernel.ToolResultPayload{
+			ToolResult: &gateway.ToolResultPayload{
 				CallID:   "spawn-continue",
 				ToolName: "SPAWN",
 				ToolKind: "execute",
-				Status:   kernel.ToolStatusCompleted,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusCompleted,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{"agent": "self", "prompt": "创建文件"},
 				RawOutput: map[string]any{
 					"running":       false,
@@ -1091,20 +1173,20 @@ func TestGatewayTaskWriteRendersOwnPanelAndAbsorbsContinuationSpawn(t *testing.T
 				Content: testToolContent("old final answer"),
 			},
 		}},
-		{Event: kernel.Event{
-			Kind:       kernel.EventKindToolResult,
+		{Event: gateway.Event{
+			Kind:       gateway.EventKindToolResult,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
 			Meta: testRuntimeToolMeta(map[string]any{
 				"action":      "wait",
 				"target_id":   "jack",
 				"target_kind": "subagent",
 			}),
-			ToolResult: &kernel.ToolResultPayload{
+			ToolResult: &gateway.ToolResultPayload{
 				CallID:   "task-wait-before-write",
 				ToolName: "TASK",
 				ToolKind: "execute",
-				Status:   kernel.ToolStatusCompleted,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusCompleted,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{"action": "wait", "task_id": "jack", "yield_time_ms": 5000},
 				RawOutput: map[string]any{
 					"action":      "wait",
@@ -1117,8 +1199,8 @@ func TestGatewayTaskWriteRendersOwnPanelAndAbsorbsContinuationSpawn(t *testing.T
 				Content: testToolContent("old final answer"),
 			},
 		}},
-		{Event: kernel.Event{
-			Kind:       kernel.EventKindToolResult,
+		{Event: gateway.Event{
+			Kind:       gateway.EventKindToolResult,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
 			Meta: testRuntimeToolMeta(map[string]any{
 				"action":      "write",
@@ -1126,12 +1208,12 @@ func TestGatewayTaskWriteRendersOwnPanelAndAbsorbsContinuationSpawn(t *testing.T
 				"target_kind": "subagent",
 				"input":       "检查刚才创建的文件",
 			}),
-			ToolResult: &kernel.ToolResultPayload{
+			ToolResult: &gateway.ToolResultPayload{
 				CallID:   "task-write-continue",
 				ToolName: "TASK",
 				ToolKind: "execute",
-				Status:   kernel.ToolStatusRunning,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusRunning,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{"action": "write", "task_id": "jack", "input": "检查刚才创建的文件"},
 				RawOutput: map[string]any{
 					"action":      "write",
@@ -1143,20 +1225,20 @@ func TestGatewayTaskWriteRendersOwnPanelAndAbsorbsContinuationSpawn(t *testing.T
 				Content: testTerminalContent("正在读取 hello_from_spawn.txt"),
 			},
 		}},
-		{Event: kernel.Event{
-			Kind:       kernel.EventKindToolResult,
+		{Event: gateway.Event{
+			Kind:       gateway.EventKindToolResult,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
 			Meta: testRuntimeToolMeta(map[string]any{
 				"target_id": "jack",
 				"agent":     "self",
 				"prompt":    "检查刚才创建的文件",
 			}),
-			ToolResult: &kernel.ToolResultPayload{
+			ToolResult: &gateway.ToolResultPayload{
 				CallID:   "spawn-continued-child",
 				ToolName: "SPAWN",
 				ToolKind: "execute",
-				Status:   kernel.ToolStatusRunning,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusRunning,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{"agent": "self", "prompt": "检查刚才创建的文件"},
 				RawOutput: map[string]any{
 					"running": true,
@@ -1186,20 +1268,20 @@ func TestGatewayTaskWriteRendersOwnPanelAndAbsorbsContinuationSpawn(t *testing.T
 		t.Fatalf("TASK write should render separately without a second SPAWN or grouped Write row:\n%s", joined)
 	}
 
-	updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{Event: kernel.Event{
-		Kind:       kernel.EventKindToolResult,
+	updated, _ := model.Update(gatewayEventMsg(gateway.EventEnvelope{Event: gateway.Event{
+		Kind:       gateway.EventKindToolResult,
 		SessionRef: session.SessionRef{SessionID: "root-session"},
 		Meta: testRuntimeToolMeta(map[string]any{
 			"target_id": "jack",
 			"agent":     "self",
 			"prompt":    "检查刚才创建的文件",
 		}),
-		ToolResult: &kernel.ToolResultPayload{
+		ToolResult: &gateway.ToolResultPayload{
 			CallID:   "spawn-continued-child",
 			ToolName: "SPAWN",
 			ToolKind: "execute",
-			Status:   kernel.ToolStatusCompleted,
-			Scope:    kernel.EventScopeMain,
+			Status:   gateway.ToolStatusCompleted,
+			Scope:    gateway.EventScopeMain,
 			RawInput: map[string]any{"agent": "self", "prompt": "检查刚才创建的文件"},
 			RawOutput: map[string]any{
 				"running":       false,
@@ -1240,26 +1322,26 @@ func TestGatewayTaskWriteRendersOwnPanelAndAbsorbsContinuationSpawn(t *testing.T
 
 func TestGatewayCommandTerminalDeltasPreserveLineBreaks(t *testing.T) {
 	model := newGatewayEventTestModel()
-	for _, env := range []kernel.EventEnvelope{
-		{Event: kernel.Event{
-			Kind:       kernel.EventKindToolCall,
+	for _, env := range []gateway.EventEnvelope{
+		{Event: gateway.Event{
+			Kind:       gateway.EventKindToolCall,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			ToolCall: &kernel.ToolCallPayload{
+			ToolCall: &gateway.ToolCallPayload{
 				CallID:   "command-1",
 				ToolName: "RUN_COMMAND",
-				Status:   kernel.ToolStatusRunning,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusRunning,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{"command": "for i in $(seq 1 10); do echo $i; done"},
 			},
 		}},
-		{Event: kernel.Event{
-			Kind:       kernel.EventKindToolResult,
+		{Event: gateway.Event{
+			Kind:       gateway.EventKindToolResult,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			ToolResult: &kernel.ToolResultPayload{
+			ToolResult: &gateway.ToolResultPayload{
 				CallID:   "command-1",
 				ToolName: "RUN_COMMAND",
-				Status:   kernel.ToolStatusRunning,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusRunning,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{"command": "for i in $(seq 1 10); do echo $i; done"},
 				RawOutput: map[string]any{
 					"running": true,
@@ -1271,14 +1353,14 @@ func TestGatewayCommandTerminalDeltasPreserveLineBreaks(t *testing.T) {
 				Content: testTerminalContent("[步骤 8/10] 正在处理... 09:05:53\n"),
 			},
 		}},
-		{Event: kernel.Event{
-			Kind:       kernel.EventKindToolResult,
+		{Event: gateway.Event{
+			Kind:       gateway.EventKindToolResult,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			ToolResult: &kernel.ToolResultPayload{
+			ToolResult: &gateway.ToolResultPayload{
 				CallID:   "command-1",
 				ToolName: "RUN_COMMAND",
-				Status:   kernel.ToolStatusRunning,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusRunning,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{"command": "for i in $(seq 1 10); do echo $i; done"},
 				RawOutput: map[string]any{
 					"running": true,
@@ -1327,34 +1409,34 @@ func TestGatewayPlanToolRendersOnlyPlanEntries(t *testing.T) {
 		"updated": true,
 		"entries": rawInput["entries"],
 	}
-	for _, env := range []kernel.EventEnvelope{
-		{Event: kernel.Event{
-			Kind:       kernel.EventKindToolCall,
+	for _, env := range []gateway.EventEnvelope{
+		{Event: gateway.Event{
+			Kind:       gateway.EventKindToolCall,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			ToolCall: &kernel.ToolCallPayload{
+			ToolCall: &gateway.ToolCallPayload{
 				CallID:   "plan-1",
 				ToolName: "PLAN",
-				Status:   kernel.ToolStatusRunning,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusRunning,
+				Scope:    gateway.EventScopeMain,
 				RawInput: rawInput,
 			},
 		}},
-		{Event: kernel.Event{
-			Kind:       kernel.EventKindToolResult,
+		{Event: gateway.Event{
+			Kind:       gateway.EventKindToolResult,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			ToolResult: &kernel.ToolResultPayload{
+			ToolResult: &gateway.ToolResultPayload{
 				CallID:    "plan-1",
 				ToolName:  "PLAN",
-				Status:    kernel.ToolStatusCompleted,
-				Scope:     kernel.EventScopeMain,
+				Status:    gateway.ToolStatusCompleted,
+				Scope:     gateway.EventScopeMain,
 				RawInput:  rawInput,
 				RawOutput: rawOutput,
 			},
 		}},
-		{Event: kernel.Event{
-			Kind:       kernel.EventKindPlanUpdate,
+		{Event: gateway.Event{
+			Kind:       gateway.EventKindPlanUpdate,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			Plan: &kernel.PlanPayload{Entries: []kernel.PlanEntryPayload{
+			Plan: &gateway.PlanPayload{Entries: []gateway.PlanEntryPayload{
 				{Content: "Inspect files", Status: "completed"},
 				{Content: "Run validation", Status: "in_progress"},
 			}},
@@ -1391,7 +1473,7 @@ func TestGatewayPlanToolRendersOnlyPlanEntries(t *testing.T) {
 func TestGatewayCommandPanelRendersACPTerminalContent(t *testing.T) {
 	tests := []struct {
 		name      string
-		status    kernel.ToolStatus
+		status    gateway.ToolStatus
 		isErr     bool
 		rawOutput map[string]any
 		content   string
@@ -1400,7 +1482,7 @@ func TestGatewayCommandPanelRendersACPTerminalContent(t *testing.T) {
 	}{
 		{
 			name:   "running preview",
-			status: kernel.ToolStatusRunning,
+			status: gateway.ToolStatusRunning,
 			rawOutput: map[string]any{
 				"running":        true,
 				"state":          "running",
@@ -1413,7 +1495,7 @@ func TestGatewayCommandPanelRendersACPTerminalContent(t *testing.T) {
 		},
 		{
 			name:   "failed stdout stderr",
-			status: kernel.ToolStatusFailed,
+			status: gateway.ToolStatusFailed,
 			isErr:  true,
 			rawOutput: map[string]any{
 				"stderr":    "permission denied\n",
@@ -1426,7 +1508,7 @@ func TestGatewayCommandPanelRendersACPTerminalContent(t *testing.T) {
 		},
 		{
 			name:   "failed stdout diagnostics",
-			status: kernel.ToolStatusFailed,
+			status: gateway.ToolStatusFailed,
 			isErr:  true,
 			rawOutput: map[string]any{
 				"stdout":    "dangerous command is blocked even in auto-review mode\n",
@@ -1440,7 +1522,7 @@ func TestGatewayCommandPanelRendersACPTerminalContent(t *testing.T) {
 		},
 		{
 			name:   "source normalized output content",
-			status: kernel.ToolStatusCompleted,
+			status: gateway.ToolStatusCompleted,
 			rawOutput: map[string]any{
 				"stdout":    "",
 				"stderr":    "",
@@ -1453,7 +1535,7 @@ func TestGatewayCommandPanelRendersACPTerminalContent(t *testing.T) {
 		},
 		{
 			name:   "successful empty output",
-			status: kernel.ToolStatusCompleted,
+			status: gateway.ToolStatusCompleted,
 			rawOutput: map[string]any{
 				"exit_code": 0,
 			},
@@ -1462,7 +1544,7 @@ func TestGatewayCommandPanelRendersACPTerminalContent(t *testing.T) {
 		},
 		{
 			name:   "successful stdout stderr",
-			status: kernel.ToolStatusCompleted,
+			status: gateway.ToolStatusCompleted,
 			rawOutput: map[string]any{
 				"stdout":    "line one\nline two\n",
 				"stderr":    "warning\n",
@@ -1479,15 +1561,15 @@ func TestGatewayCommandPanelRendersACPTerminalContent(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			model := newGatewayEventTestModel()
 			callID := "command-" + strings.ReplaceAll(tt.name, " ", "-")
-			updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
-				Event: kernel.Event{
-					Kind:       kernel.EventKindToolCall,
+			updated, _ := model.Update(gatewayEventMsg(gateway.EventEnvelope{
+				Event: gateway.Event{
+					Kind:       gateway.EventKindToolCall,
 					SessionRef: session.SessionRef{SessionID: "root-session"},
-					ToolCall: &kernel.ToolCallPayload{
+					ToolCall: &gateway.ToolCallPayload{
 						CallID:   callID,
 						ToolName: "RUN_COMMAND",
-						Status:   kernel.ToolStatusRunning,
-						Scope:    kernel.EventScopeMain,
+						Status:   gateway.ToolStatusRunning,
+						Scope:    gateway.EventScopeMain,
 						RawInput: map[string]any{"command": "for i in 1 2; do echo $i; done"},
 					},
 				}}))
@@ -1497,16 +1579,16 @@ func TestGatewayCommandPanelRendersACPTerminalContent(t *testing.T) {
 			if tt.content != "" {
 				content = testTerminalContent(tt.content)
 			}
-			updated, _ = model.Update(gatewayEventMsg(kernel.EventEnvelope{
-				Event: kernel.Event{
-					Kind:       kernel.EventKindToolResult,
+			updated, _ = model.Update(gatewayEventMsg(gateway.EventEnvelope{
+				Event: gateway.Event{
+					Kind:       gateway.EventKindToolResult,
 					SessionRef: session.SessionRef{SessionID: "root-session"},
-					ToolResult: &kernel.ToolResultPayload{
+					ToolResult: &gateway.ToolResultPayload{
 						CallID:    callID,
 						ToolName:  "RUN_COMMAND",
 						Status:    tt.status,
 						Error:     tt.isErr,
-						Scope:     kernel.EventScopeMain,
+						Scope:     gateway.EventScopeMain,
 						RawInput:  map[string]any{"command": "for i in 1 2; do echo $i; done"},
 						RawOutput: tt.rawOutput,
 						Content:   content,
@@ -1542,26 +1624,26 @@ func TestGatewayCommandPanelRendersACPTerminalContent(t *testing.T) {
 func TestGatewayBASHContentlessFinalPreservesStreamedTerminalOutput(t *testing.T) {
 	model := newGatewayEventTestModel()
 	callID := "command-stream-final-empty"
-	for _, env := range []kernel.EventEnvelope{
-		{Event: kernel.Event{
-			Kind:       kernel.EventKindToolCall,
+	for _, env := range []gateway.EventEnvelope{
+		{Event: gateway.Event{
+			Kind:       gateway.EventKindToolCall,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			ToolCall: &kernel.ToolCallPayload{
+			ToolCall: &gateway.ToolCallPayload{
 				CallID:   callID,
 				ToolName: "RUN_COMMAND",
-				Status:   kernel.ToolStatusRunning,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusRunning,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{"command": "git log --oneline -6"},
 			},
 		}},
-		{Event: kernel.Event{
-			Kind:       kernel.EventKindToolResult,
+		{Event: gateway.Event{
+			Kind:       gateway.EventKindToolResult,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			ToolResult: &kernel.ToolResultPayload{
+			ToolResult: &gateway.ToolResultPayload{
 				CallID:   callID,
 				ToolName: "RUN_COMMAND",
-				Status:   kernel.ToolStatusRunning,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusRunning,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{"command": "git log --oneline -6"},
 				RawOutput: map[string]any{
 					"running": true,
@@ -1571,14 +1653,14 @@ func TestGatewayBASHContentlessFinalPreservesStreamedTerminalOutput(t *testing.T
 				Content: testTerminalContent("stale streamed preview\n"),
 			},
 		}},
-		{Event: kernel.Event{
-			Kind:       kernel.EventKindToolResult,
+		{Event: gateway.Event{
+			Kind:       gateway.EventKindToolResult,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			ToolResult: &kernel.ToolResultPayload{
+			ToolResult: &gateway.ToolResultPayload{
 				CallID:    callID,
 				ToolName:  "RUN_COMMAND",
-				Status:    kernel.ToolStatusCompleted,
-				Scope:     kernel.EventScopeMain,
+				Status:    gateway.ToolStatusCompleted,
+				Scope:     gateway.EventScopeMain,
 				RawInput:  map[string]any{"command": "git log --oneline -6"},
 				RawOutput: map[string]any{"exit_code": 0},
 			},
@@ -1605,49 +1687,49 @@ func TestGatewayBASHContentlessFinalPreservesStreamedTerminalOutput(t *testing.T
 func TestGatewayParticipantBASHContentlessFinalPreservesStreamedTerminalOutput(t *testing.T) {
 	model := newGatewayEventTestModel()
 	callID := "participant-command-contentless-final"
-	origin := &kernel.EventOrigin{
+	origin := &gateway.EventOrigin{
 		Source:        "acp_participant",
-		Scope:         kernel.EventScopeParticipant,
+		Scope:         gateway.EventScopeParticipant,
 		ScopeID:       "codex-turn-1",
 		Actor:         "@codex",
 		ParticipantID: "codex-001",
 	}
-	for _, env := range []kernel.EventEnvelope{
-		{Event: kernel.Event{
-			Kind:       kernel.EventKindToolCall,
+	for _, env := range []gateway.EventEnvelope{
+		{Event: gateway.Event{
+			Kind:       gateway.EventKindToolCall,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
 			Origin:     origin,
-			ToolCall: &kernel.ToolCallPayload{
+			ToolCall: &gateway.ToolCallPayload{
 				CallID:   callID,
 				ToolName: "RUN_COMMAND",
-				Status:   kernel.ToolStatusRunning,
-				Scope:    kernel.EventScopeParticipant,
+				Status:   gateway.ToolStatusRunning,
+				Scope:    gateway.EventScopeParticipant,
 				RawInput: map[string]any{"command": "go test ./..."},
 			},
 		}},
-		{Event: kernel.Event{
-			Kind:       kernel.EventKindToolResult,
+		{Event: gateway.Event{
+			Kind:       gateway.EventKindToolResult,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
 			Origin:     origin,
-			ToolResult: &kernel.ToolResultPayload{
+			ToolResult: &gateway.ToolResultPayload{
 				CallID:   callID,
 				ToolName: "RUN_COMMAND",
-				Status:   kernel.ToolStatusRunning,
-				Scope:    kernel.EventScopeParticipant,
+				Status:   gateway.ToolStatusRunning,
+				Scope:    gateway.EventScopeParticipant,
 				RawInput: map[string]any{"command": "go test ./..."},
 				Content:  testTerminalContent("internal/service: missing mysql.default\n"),
 			},
 		}},
-		{Event: kernel.Event{
-			Kind:       kernel.EventKindToolResult,
+		{Event: gateway.Event{
+			Kind:       gateway.EventKindToolResult,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
 			Origin:     origin,
-			ToolResult: &kernel.ToolResultPayload{
+			ToolResult: &gateway.ToolResultPayload{
 				CallID:   callID,
 				ToolName: "RUN_COMMAND",
-				Status:   kernel.ToolStatusFailed,
+				Status:   gateway.ToolStatusFailed,
 				Error:    true,
-				Scope:    kernel.EventScopeParticipant,
+				Scope:    gateway.EventScopeParticipant,
 				RawInput: map[string]any{"command": "go test ./..."},
 			},
 		}},

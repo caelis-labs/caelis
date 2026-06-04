@@ -7,7 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/OnslaughtSnail/caelis/internal/evalharness"
-	"github.com/OnslaughtSnail/caelis/kernel"
+	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
@@ -80,26 +80,26 @@ func TestRegressionToolCallWithTerminalOutputGolden(t *testing.T) {
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	m = updated.(*Model)
 
-	updated, _ = m.Update(gatewayEventMsg(kernel.EventEnvelope{Event: kernel.Event{
+	updated, _ = m.Update(gatewayEventMsg(gateway.EventEnvelope{Event: gateway.Event{
 		SessionRef: session.SessionRef{SessionID: "sess-terminal"},
-		Kind:       kernel.EventKindUserMessage,
-		Narrative: &kernel.NarrativePayload{
-			Role: kernel.NarrativeRoleUser,
+		Kind:       gateway.EventKindUserMessage,
+		Narrative: &gateway.NarrativePayload{
+			Role: gateway.NarrativeRoleUser,
 			Text: "run ls",
 		},
 	}}))
 
 	m = updated.(*Model)
 
-	updated, _ = m.Update(gatewayEventMsg(kernel.EventEnvelope{Event: kernel.Event{
+	updated, _ = m.Update(gatewayEventMsg(gateway.EventEnvelope{Event: gateway.Event{
 		SessionRef: session.SessionRef{SessionID: "sess-terminal"},
-		Kind:       kernel.EventKindToolCall,
-		ToolCall: &kernel.ToolCallPayload{
+		Kind:       gateway.EventKindToolCall,
+		ToolCall: &gateway.ToolCallPayload{
 			CallID:    "call-ls",
 			ToolName:  "RUN_COMMAND",
 			ToolKind:  "execute",
 			ToolTitle: "ls -la",
-			Status:    kernel.ToolStatusRunning,
+			Status:    gateway.ToolStatusRunning,
 			RawInput:  map[string]any{"command": "ls -la"},
 			Content: []session.ProtocolToolCallContent{{
 				Type:    "terminal",
@@ -110,15 +110,15 @@ func TestRegressionToolCallWithTerminalOutputGolden(t *testing.T) {
 
 	m = updated.(*Model)
 
-	updated, _ = m.Update(gatewayEventMsg(kernel.EventEnvelope{Event: kernel.Event{
+	updated, _ = m.Update(gatewayEventMsg(gateway.EventEnvelope{Event: gateway.Event{
 		SessionRef: session.SessionRef{SessionID: "sess-terminal"},
-		Kind:       kernel.EventKindToolResult,
-		ToolResult: &kernel.ToolResultPayload{
+		Kind:       gateway.EventKindToolResult,
+		ToolResult: &gateway.ToolResultPayload{
 			CallID:    "call-ls",
 			ToolName:  "RUN_COMMAND",
 			ToolKind:  "execute",
 			ToolTitle: "ls -la",
-			Status:    kernel.ToolStatusCompleted,
+			Status:    gateway.ToolStatusCompleted,
 			RawInput:  map[string]any{"command": "ls -la"},
 			RawOutput: map[string]any{"exit_code": 0},
 			Content: []session.ProtocolToolCallContent{{
@@ -130,11 +130,11 @@ func TestRegressionToolCallWithTerminalOutputGolden(t *testing.T) {
 
 	m = updated.(*Model)
 
-	updated, _ = m.Update(gatewayEventMsg(kernel.EventEnvelope{Event: kernel.Event{
+	updated, _ = m.Update(gatewayEventMsg(gateway.EventEnvelope{Event: gateway.Event{
 		SessionRef: session.SessionRef{SessionID: "sess-terminal"},
-		Kind:       kernel.EventKindAssistantMessage,
-		Narrative: &kernel.NarrativePayload{
-			Role: kernel.NarrativeRoleAssistant,
+		Kind:       gateway.EventKindAssistantMessage,
+		Narrative: &gateway.NarrativePayload{
+			Role: gateway.NarrativeRoleAssistant,
 			Text: "Listed directory contents.",
 		},
 	}}))
@@ -235,39 +235,39 @@ func TestRegressionApprovalModalGolden(t *testing.T) {
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	m = updated.(*Model)
 
-	updated, _ = m.Update(gatewayEventMsg(kernel.EventEnvelope{Event: kernel.Event{
+	updated, _ = m.Update(gatewayEventMsg(gateway.EventEnvelope{Event: gateway.Event{
 		SessionRef: session.SessionRef{SessionID: "sess-approval"},
-		Kind:       kernel.EventKindUserMessage,
-		Narrative: &kernel.NarrativePayload{
-			Role: kernel.NarrativeRoleUser,
+		Kind:       gateway.EventKindUserMessage,
+		Narrative: &gateway.NarrativePayload{
+			Role: gateway.NarrativeRoleUser,
 			Text: "delete temp files",
 		},
 	}}))
 
 	m = updated.(*Model)
 
-	updated, _ = m.Update(gatewayEventMsg(kernel.EventEnvelope{Event: kernel.Event{
+	updated, _ = m.Update(gatewayEventMsg(gateway.EventEnvelope{Event: gateway.Event{
 		SessionRef: session.SessionRef{SessionID: "sess-approval"},
-		Kind:       kernel.EventKindToolCall,
-		ToolCall: &kernel.ToolCallPayload{
+		Kind:       gateway.EventKindToolCall,
+		ToolCall: &gateway.ToolCallPayload{
 			CallID:    "call-rm",
 			ToolName:  "RUN_COMMAND",
 			ToolKind:  "execute",
 			ToolTitle: "rm -rf /tmp/demo",
-			Status:    kernel.ToolStatusWaitingApproval,
+			Status:    gateway.ToolStatusWaitingApproval,
 			RawInput:  map[string]any{"command": "rm -rf /tmp/demo"},
 		},
 	}}))
 
 	m = updated.(*Model)
 
-	updated, _ = m.Update(gatewayEventMsg(kernel.EventEnvelope{Event: kernel.Event{
+	updated, _ = m.Update(gatewayEventMsg(gateway.EventEnvelope{Event: gateway.Event{
 		SessionRef: session.SessionRef{SessionID: "sess-approval"},
-		Kind:       kernel.EventKindApprovalRequested,
-		ApprovalPayload: &kernel.ApprovalPayload{
+		Kind:       gateway.EventKindApprovalRequested,
+		ApprovalPayload: &gateway.ApprovalPayload{
 			ToolName:   "RUN_COMMAND",
 			ToolCallID: "call-rm",
-			Status:     kernel.ApprovalStatusPending,
+			Status:     gateway.ApprovalStatusPending,
 			RawInput:   map[string]any{"command": "rm -rf /tmp/demo"},
 		},
 	}}))

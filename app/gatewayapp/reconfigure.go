@@ -9,8 +9,8 @@ import (
 	"github.com/OnslaughtSnail/caelis/impl/agent/local/chat"
 	"github.com/OnslaughtSnail/caelis/impl/approval/agentreview"
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin"
+	kernelimpl "github.com/OnslaughtSnail/caelis/internal/kernel"
 	"github.com/OnslaughtSnail/caelis/internal/sandboxrouter"
-	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
@@ -54,7 +54,7 @@ func (s *Stack) rebuildGateway() error {
 		return fmt.Errorf("gatewayapp: stack is unavailable")
 	}
 	s.mu.RLock()
-	oldGateway := s.Gateway
+	oldGateway := s.gateway
 	sandboxCfg := effectiveSandboxConfig(s.sandbox, s.Workspace.CWD)
 	runtimeCfg := s.runtime
 	s.mu.RUnlock()
@@ -113,7 +113,7 @@ func (s *Stack) rebuildGateway() error {
 		_ = sandboxRuntime.Close()
 		return err
 	}
-	resolver, err := kernel.NewAssemblyResolver(kernel.AssemblyResolverConfig{
+	resolver, err := kernelimpl.NewAssemblyResolver(kernelimpl.AssemblyResolverConfig{
 		Sessions:          s.Sessions,
 		Assembly:          runtimeCfg.Assembly,
 		DefaultModelAlias: s.lookup.DefaultID(),
@@ -121,7 +121,7 @@ func (s *Stack) rebuildGateway() error {
 		ModelLookup:       s.lookup,
 		Tools:             tools,
 		BaseMetadata:      cloneMap(effectiveBaseMetadata),
-		ToolAugmenter: func(ctx context.Context, req kernel.ToolAugmentContext) (kernel.ToolAugmentation, error) {
+		ToolAugmenter: func(ctx context.Context, req kernelimpl.ToolAugmentContext) (kernelimpl.ToolAugmentation, error) {
 			s.mu.RLock()
 			runtimeCfg := s.runtime
 			s.mu.RUnlock()
@@ -129,19 +129,19 @@ func (s *Stack) rebuildGateway() error {
 			if strings.TrimSpace(req.SessionRef.SessionID) != "" {
 				session, err := s.Sessions.Session(ctx, req.SessionRef)
 				if err != nil {
-					return kernel.ToolAugmentation{}, err
+					return kernelimpl.ToolAugmentation{}, err
 				}
 				participants = session.Participants
 			}
 			agents := delegationAgentsForSpawn(runtimeCfg.Assembly, participants)
 			if len(agents) == 0 {
-				return kernel.ToolAugmentation{}, nil
+				return kernelimpl.ToolAugmentation{}, nil
 			}
 			metadata := map[string]any{}
 			if systemPrompt := stringFromMap(effectiveBaseMetadata, "system_prompt"); systemPrompt != "" {
 				metadata["system_prompt"] = systemPromptWithDelegationGuidance(systemPrompt)
 			}
-			return kernel.ToolAugmentation{
+			return kernelimpl.ToolAugmentation{
 				Tools:    spawnTools(agents),
 				Metadata: metadata,
 			}, nil
@@ -151,11 +151,11 @@ func (s *Stack) rebuildGateway() error {
 		_ = sandboxRuntime.Close()
 		return err
 	}
-	gw, err := kernel.New(kernel.Config{
+	gw, err := kernelimpl.New(kernelimpl.Config{
 		Sessions:            s.Sessions,
 		Runtime:             rt,
 		Resolver:            resolver,
-		DefaultApprovalMode: kernel.NormalizeApprovalMode(runtimeCfg.ApprovalMode),
+		DefaultApprovalMode: kernelimpl.NormalizeApprovalMode(runtimeCfg.ApprovalMode),
 		ApprovalApprover:    agentreview.Approver{Reviewer: newModelApprovalReviewer(s.Sessions)},
 	})
 	if err != nil {
@@ -171,7 +171,7 @@ func (s *Stack) rebuildGateway() error {
 	currentRuntime := s.runtime
 	currentRuntime.EstimatedPromptPrefixTokens = estimatedPrefixTokens
 	s.runtime = currentRuntime
-	s.Gateway = gw
+	s.gateway = gw
 	s.exec = sandboxRuntime
 	s.engine = rt
 	s.mu.Unlock()

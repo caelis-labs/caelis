@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/kernel"
+	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/skill"
 )
@@ -272,7 +272,7 @@ func enrichResumeCandidate(ctx context.Context, sessions resumeSessionLoader, su
 	candidate.Title = firstNonEmpty(strings.TrimSpace(loaded.Session.Title), candidate.Title)
 	candidate.Prompt = firstNonEmpty(strings.TrimSpace(loaded.Session.Title), candidate.Prompt)
 	candidate.Workspace = firstNonEmpty(strings.TrimSpace(loaded.Session.CWD), candidate.Workspace)
-	candidate.Model = strings.TrimSpace(kernel.CurrentModelAlias(loaded.State))
+	candidate.Model = strings.TrimSpace(gateway.CurrentModelAlias(loaded.State))
 	return candidate
 }
 

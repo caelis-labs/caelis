@@ -7,9 +7,10 @@ import (
 	"strings"
 
 	"github.com/OnslaughtSnail/caelis/impl/policy/presets"
-	"github.com/OnslaughtSnail/caelis/kernel"
+	kernelimpl "github.com/OnslaughtSnail/caelis/internal/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/assembly"
 	"github.com/OnslaughtSnail/caelis/ports/delegation"
+	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
@@ -72,10 +73,10 @@ func (s *Stack) rejectReconfigureWhileActive(action string) error {
 	if s == nil {
 		return fmt.Errorf("gatewayapp: stack is unavailable")
 	}
-	return rejectReconfigureWithActiveTurns(s.CurrentGateway(), action)
+	return rejectReconfigureWithActiveTurns(s.currentGateway(), action)
 }
 
-func rejectReconfigureWithActiveTurns(gw *kernel.Gateway, action string) error {
+func rejectReconfigureWithActiveTurns(gw *kernelimpl.Gateway, action string) error {
 	if gw == nil {
 		return nil
 	}
@@ -132,11 +133,11 @@ func dedupeNonEmptyStrings(values []string) []string {
 func approvalMode(raw string) string {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "manual":
-		return string(kernel.ApprovalModeManual)
+		return string(gateway.ApprovalModeManual)
 	case "", "auto", "auto-review", "auto_review", "autoreview", "default", "plan", "full_control", "full_access":
-		return string(kernel.ApprovalModeAutoReview)
+		return string(gateway.ApprovalModeAutoReview)
 	default:
-		return string(kernel.ApprovalModeAutoReview)
+		return string(gateway.ApprovalModeAutoReview)
 	}
 }
 

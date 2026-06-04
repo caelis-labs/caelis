@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/kernel"
+	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
@@ -23,7 +23,7 @@ func (s *Stack) Connect(cfg ModelConfig) (string, error) {
 	if s.lookup == nil {
 		return "", fmt.Errorf("gatewayapp: model lookup unavailable")
 	}
-	gw := s.CurrentGateway()
+	gw := s.currentGateway()
 	if gw == nil {
 		return "", fmt.Errorf("gatewayapp: gateway is unavailable")
 	}
@@ -106,7 +106,7 @@ func (s *Stack) UseModel(ctx context.Context, ref session.SessionRef, alias stri
 			}
 		}
 		s.lookup.SetDefault(cfg.ID)
-		gw := s.CurrentGateway()
+		gw := s.currentGateway()
 		if gw == nil {
 			s.lookup.Restore(previousLookup, previousContextWindow)
 			return fmt.Errorf("gatewayapp: gateway is unavailable")
@@ -127,11 +127,11 @@ func (s *Stack) UseModel(ctx context.Context, ref session.SessionRef, alias stri
 		if next == nil {
 			next = map[string]any{}
 		}
-		next[kernel.StateCurrentModelAlias] = cfg.ID
+		next[gateway.StateCurrentModelAlias] = cfg.ID
 		if reasoning != "" {
-			next[kernel.StateCurrentReasoningEffort] = reasoning
+			next[gateway.StateCurrentReasoningEffort] = reasoning
 		} else {
-			delete(next, kernel.StateCurrentReasoningEffort)
+			delete(next, gateway.StateCurrentReasoningEffort)
 		}
 		return next, nil
 	})
@@ -167,7 +167,7 @@ func (s *Stack) DeleteModel(ctx context.Context, ref session.SessionRef, alias s
 		return err
 	}
 	hasDefault := strings.TrimSpace(s.lookup.DefaultID()) != ""
-	gw := s.CurrentGateway()
+	gw := s.currentGateway()
 	if gw == nil {
 		s.lookup.Restore(previousLookup, previousContextWindow)
 		return fmt.Errorf("gatewayapp: gateway is unavailable")
@@ -187,10 +187,10 @@ func (s *Stack) DeleteModel(ctx context.Context, ref session.SessionRef, alias s
 		if next == nil {
 			next = map[string]any{}
 		}
-		current, _ := next[kernel.StateCurrentModelAlias].(string)
+		current, _ := next[gateway.StateCurrentModelAlias].(string)
 		if alias == "" || strings.EqualFold(strings.TrimSpace(current), cfg.ID) || strings.EqualFold(strings.TrimSpace(current), cfg.Alias) || !hasDefault {
-			delete(next, kernel.StateCurrentModelAlias)
-			delete(next, kernel.StateCurrentReasoningEffort)
+			delete(next, gateway.StateCurrentModelAlias)
+			delete(next, gateway.StateCurrentReasoningEffort)
 		}
 		return next, nil
 	})
@@ -223,7 +223,7 @@ func (s *Stack) ListModelChoices(ctx context.Context, ref session.SessionRef) ([
 		if err != nil {
 			return nil, err
 		}
-		if modelRef := kernel.CurrentModelAlias(state); modelRef != "" {
+		if modelRef := gateway.CurrentModelAlias(state); modelRef != "" {
 			if cfg, ok := s.lookup.Config(modelRef); ok {
 				choices = append(choices, modelChoiceFromConfig(cfg))
 			}

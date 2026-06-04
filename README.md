@@ -1,13 +1,13 @@
 # caelis
 
 `caelis` is a terminal-first agent runtime. The active local path is:
-`cmd/caelis -> internal/cli -> app/gatewayapp -> kernel.Service`.
+`cmd/caelis -> internal/cli -> app/gatewayapp -> ports/gateway.Service`.
 
 The project treats a session workspace plus ACP-native event semantics as the
-stable product boundary. Public `kernel/` and `ports/*` packages name the core
-contract and extension points; `impl/*` packages hold concrete local
-implementations; surface adapters project the shared state into the Bubble Tea
-TUI, ACP stdio, and the headless one-shot runner.
+stable product boundary. Public `ports/*` packages name the core contract and
+extension points; `impl/*` packages hold concrete local implementations; surface
+adapters project the shared state into the Bubble Tea TUI, ACP stdio, and the
+headless one-shot runner.
 
 ## What It Does
 
@@ -35,20 +35,18 @@ TUI, ACP stdio, and the headless one-shot runner.
   internal CLI runner.
 - `internal/cli`: flat-flag CLI runner. It routes doctor, ACP stdio, headless,
   and interactive TUI modes through the local app stack.
-- `kernel/`: public product contract for sessions, turns, replay, active runs,
-  and control-plane operations.
 - `ports/`: public extension ports for agent orchestration, approval, assembly,
-  compaction, config, controller, delegation, model, policy, prompt, sandbox,
-  session storage, skill, stream, subagent, task, and tool contracts.
+  compaction, config, controller, delegation, gateway, model, policy, prompt,
+  sandbox, session storage, skill, stream, subagent, task, and tool contracts.
 - `impl/`: concrete implementations such as local agents, ACP-backed agents,
   session stores, model providers, sandbox backends, policy presets, tools,
   prompt/config/stream adapters, and approval strategies.
 - `internal/kernel`: concrete local kernel implementation for sessions, turns,
   replay, active runs, and control-plane operations.
-- `app/gatewayapp`: local composition root that wires runtime, kernel resolver,
+- `app/gatewayapp`: local composition root that wires runtime, gateway resolver,
   prompt assembly, config store, model catalog, sandbox, tools, approval, and
   session storage.
-- `surfaces/headless`: one-shot CLI surface over the public kernel contract.
+- `surfaces/headless`: one-shot CLI surface over the public gateway contract.
 - `surfaces/tui`: terminal UI surface facades for the app, gateway driver, and
   driver contract.
 - `protocol/acp`: ACP schema, JSON-RPC, client, server, transport, terminal, and

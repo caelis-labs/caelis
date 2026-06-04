@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
-	"github.com/OnslaughtSnail/caelis/kernel"
+	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
@@ -46,7 +46,7 @@ func TestGatewayProviderLiveReasoningBoundaryFromLocalConfigE2E(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
-	result, err := stack.Gateway.BeginTurn(ctx, kernel.BeginTurnRequest{
+	result, err := stack.Kernel().BeginTurn(ctx, gateway.BeginTurnRequest{
 		SessionRef: activeSession.SessionRef,
 		Input:      "介绍一下你自己。",
 		Surface:    "cli-tui",
@@ -82,12 +82,12 @@ type liveReasoningTrace struct {
 	firstOverlapLayer string
 }
 
-func (t *liveReasoningTrace) capture(env kernel.EventEnvelope) {
+func (t *liveReasoningTrace) capture(env gateway.EventEnvelope) {
 	if t == nil || env.Event.Narrative == nil {
 		return
 	}
 	payload := env.Event.Narrative
-	if payload.Role != kernel.NarrativeRoleAssistant {
+	if payload.Role != gateway.NarrativeRoleAssistant {
 		return
 	}
 	if payload.Visibility == string(session.VisibilityUIOnly) {

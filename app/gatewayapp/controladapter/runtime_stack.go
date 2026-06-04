@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/compact"
 	"github.com/OnslaughtSnail/caelis/ports/controller"
+	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 	"github.com/OnslaughtSnail/caelis/ports/session"
@@ -18,18 +18,18 @@ import (
 
 type GatewayService interface {
 	Streams() stream.Service
-	BeginTurn(context.Context, kernel.BeginTurnRequest) (kernel.BeginTurnResult, error)
-	SubmitActiveTurn(context.Context, kernel.SubmitActiveTurnRequest) error
-	Interrupt(context.Context, kernel.InterruptRequest) error
-	ResumeSession(context.Context, kernel.ResumeSessionRequest) (session.LoadedSession, error)
-	ListSessions(context.Context, kernel.ListSessionsRequest) (session.SessionList, error)
-	ReplayEvents(context.Context, kernel.ReplayEventsRequest) (kernel.ReplayEventsResult, error)
-	ControlPlaneState(context.Context, kernel.ControlPlaneStateRequest) (kernel.ControlPlaneState, error)
-	HandoffController(context.Context, kernel.HandoffControllerRequest) (session.Session, error)
-	AttachParticipant(context.Context, kernel.AttachParticipantRequest) (session.Session, error)
-	PromptParticipant(context.Context, kernel.PromptParticipantRequest) (kernel.BeginTurnResult, error)
-	DetachParticipant(context.Context, kernel.DetachParticipantRequest) (session.Session, error)
-	ActiveTurns() []kernel.ActiveTurnState
+	BeginTurn(context.Context, gateway.BeginTurnRequest) (gateway.BeginTurnResult, error)
+	SubmitActiveTurn(context.Context, gateway.SubmitActiveTurnRequest) error
+	Interrupt(context.Context, gateway.InterruptRequest) error
+	ResumeSession(context.Context, gateway.ResumeSessionRequest) (session.LoadedSession, error)
+	ListSessions(context.Context, gateway.ListSessionsRequest) (session.SessionList, error)
+	ReplayEvents(context.Context, gateway.ReplayEventsRequest) (gateway.ReplayEventsResult, error)
+	ControlPlaneState(context.Context, gateway.ControlPlaneStateRequest) (gateway.ControlPlaneState, error)
+	HandoffController(context.Context, gateway.HandoffControllerRequest) (session.Session, error)
+	AttachParticipant(context.Context, gateway.AttachParticipantRequest) (session.Session, error)
+	PromptParticipant(context.Context, gateway.PromptParticipantRequest) (gateway.BeginTurnResult, error)
+	DetachParticipant(context.Context, gateway.DetachParticipantRequest) (session.Session, error)
+	ActiveTurns() []gateway.ActiveTurnState
 }
 
 type ModelConfig struct {

@@ -15,8 +15,8 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/impl/model/providers"
 	"github.com/OnslaughtSnail/caelis/impl/session/memory"
-	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/agent"
+	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/tool"
@@ -469,7 +469,7 @@ func TestApprovalReviewerConcurrentReviewsDoNotMutateParentSession(t *testing.T)
 }
 
 func TestApprovalReviewerRejectsMissingRequestModel(t *testing.T) {
-	_, err := newModelApprovalReviewer(nil).ReviewApproval(context.Background(), kernel.ApprovalReviewRequest{})
+	_, err := newModelApprovalReviewer(nil).ReviewApproval(context.Background(), gateway.ApprovalReviewRequest{})
 	if err == nil || !strings.Contains(err.Error(), "current session model") {
 		t.Fatalf("ReviewApproval() error = %v, want current session model error", err)
 	}
@@ -477,7 +477,7 @@ func TestApprovalReviewerRejectsMissingRequestModel(t *testing.T) {
 
 func TestApprovalReviewerRejectsMissingSessionHistory(t *testing.T) {
 	testModel := &approvalReviewerFakeModel{responses: []string{`{"outcome":"allow"}`}}
-	_, err := newModelApprovalReviewer(nil).ReviewApproval(context.Background(), kernel.ApprovalReviewRequest{
+	_, err := newModelApprovalReviewer(nil).ReviewApproval(context.Background(), gateway.ApprovalReviewRequest{
 		Model: testModel,
 	})
 	if err == nil || !strings.Contains(err.Error(), "session history") {
@@ -666,20 +666,20 @@ func appendApprovalReviewerTextEvent(
 	}
 }
 
-func approvalReviewerTestRequest(activeSession session.Session, llm model.LLM, reason string, input map[string]any) kernel.ApprovalReviewRequest {
+func approvalReviewerTestRequest(activeSession session.Session, llm model.LLM, reason string, input map[string]any) gateway.ApprovalReviewRequest {
 	raw, _ := json.Marshal(input)
-	return kernel.ApprovalReviewRequest{
+	return gateway.ApprovalReviewRequest{
 		SessionRef: activeSession.SessionRef,
-		Mode:       kernel.ApprovalModeAutoReview,
+		Mode:       gateway.ApprovalModeAutoReview,
 		ReviewID:   "review-test",
 		RunID:      "run-test",
 		TurnID:     "turn-test",
 		Model:      llm,
-		Approval: &kernel.ApprovalPayload{
+		Approval: &gateway.ApprovalPayload{
 			ToolName: "custom_tool",
 			RawInput: input,
 			Reason:   reason,
-			Status:   kernel.ApprovalStatusPending,
+			Status:   gateway.ApprovalStatusPending,
 		},
 		RuntimeRequest: agent.ApprovalRequest{
 			Mode: "auto-review",

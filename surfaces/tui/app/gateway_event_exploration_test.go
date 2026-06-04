@@ -7,39 +7,39 @@ import (
 	"testing"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/kernel"
+	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
 func TestGatewayCompletedExplorationToolDefaultsCollapsedWithoutHeaderClick(t *testing.T) {
 	model := newGatewayEventTestModel()
 
-	updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind:       kernel.EventKindToolCall,
+	updated, _ := model.Update(gatewayEventMsg(gateway.EventEnvelope{
+		Event: gateway.Event{
+			Kind:       gateway.EventKindToolCall,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			ToolCall: &kernel.ToolCallPayload{
+			ToolCall: &gateway.ToolCallPayload{
 				CallID:   "call-1",
 				ToolName: "READ",
 				RawInput: map[string]any{"path": "internal/kernel/types.go"},
-				Status:   kernel.ToolStatusRunning,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusRunning,
+				Scope:    gateway.EventScopeMain,
 			},
 		}}))
 
 	model = updated.(*Model)
-	updated, _ = model.Update(gatewayEventMsg(kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind:       kernel.EventKindToolResult,
+	updated, _ = model.Update(gatewayEventMsg(gateway.EventEnvelope{
+		Event: gateway.Event{
+			Kind:       gateway.EventKindToolResult,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			ToolResult: &kernel.ToolResultPayload{
+			ToolResult: &gateway.ToolResultPayload{
 				CallID:    "call-1",
 				ToolName:  "READ",
 				RawInput:  map[string]any{"path": "internal/kernel/types.go"},
 				RawOutput: map[string]any{"text": "package core\n\ntype Event struct{}"},
 				Content:   testToolContent("types.go"),
-				Status:    kernel.ToolStatusCompleted,
-				Scope:     kernel.EventScopeMain,
+				Status:    gateway.ToolStatusCompleted,
+				Scope:     gateway.EventScopeMain,
 			},
 		}}))
 
@@ -82,47 +82,47 @@ func TestGatewayCompletedExplorationToolsRenderAsCompactSummary(t *testing.T) {
 		case "PATCH", "WRITE":
 			rawInput = map[string]any{"path": args}
 		}
-		updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
-			Event: kernel.Event{
-				Kind:       kernel.EventKindToolCall,
+		updated, _ := model.Update(gatewayEventMsg(gateway.EventEnvelope{
+			Event: gateway.Event{
+				Kind:       gateway.EventKindToolCall,
 				SessionRef: session.SessionRef{SessionID: "root-session"},
-				ToolCall: &kernel.ToolCallPayload{
+				ToolCall: &gateway.ToolCallPayload{
 					CallID:   id,
 					ToolName: name,
 					RawInput: rawInput,
-					Status:   kernel.ToolStatusRunning,
-					Scope:    kernel.EventScopeMain,
+					Status:   gateway.ToolStatusRunning,
+					Scope:    gateway.EventScopeMain,
 				},
 			}}))
 
 		model = updated.(*Model)
-		updated, _ = model.Update(gatewayEventMsg(kernel.EventEnvelope{
-			Event: kernel.Event{
-				Kind:       kernel.EventKindToolResult,
+		updated, _ = model.Update(gatewayEventMsg(gateway.EventEnvelope{
+			Event: gateway.Event{
+				Kind:       gateway.EventKindToolResult,
 				SessionRef: session.SessionRef{SessionID: "root-session"},
-				ToolResult: &kernel.ToolResultPayload{
+				ToolResult: &gateway.ToolResultPayload{
 					CallID:    id,
 					ToolName:  name,
 					RawInput:  rawInput,
 					RawOutput: map[string]any{"text": output},
 					Content:   testToolContent(toolResultLabel(name, rawInput)),
-					Status:    kernel.ToolStatusCompleted,
-					Scope:     kernel.EventScopeMain,
+					Status:    gateway.ToolStatusCompleted,
+					Scope:     gateway.EventScopeMain,
 				},
 			}}))
 
 		model = updated.(*Model)
 	}
 	sendReasoning := func(text string) {
-		updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
-			Event: kernel.Event{
-				Kind:       kernel.EventKindAssistantMessage,
+		updated, _ := model.Update(gatewayEventMsg(gateway.EventEnvelope{
+			Event: gateway.Event{
+				Kind:       gateway.EventKindAssistantMessage,
 				SessionRef: session.SessionRef{SessionID: "root-session"},
-				Narrative: &kernel.NarrativePayload{
-					Role:          kernel.NarrativeRoleAssistant,
+				Narrative: &gateway.NarrativePayload{
+					Role:          gateway.NarrativeRoleAssistant,
 					ReasoningText: text,
 					Final:         true,
-					Scope:         kernel.EventScopeMain,
+					Scope:         gateway.EventScopeMain,
 				},
 			}}))
 
@@ -209,31 +209,31 @@ func TestGatewayCompletedExplorationSummaryCompactsAbsoluteWorkspacePaths(t *tes
 
 	model := newGatewayEventTestModel()
 	sendTool := func(id string, name string, rawInput map[string]any) {
-		updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
-			Event: kernel.Event{
-				Kind:       kernel.EventKindToolCall,
+		updated, _ := model.Update(gatewayEventMsg(gateway.EventEnvelope{
+			Event: gateway.Event{
+				Kind:       gateway.EventKindToolCall,
 				SessionRef: session.SessionRef{SessionID: "root-session"},
-				ToolCall: &kernel.ToolCallPayload{
+				ToolCall: &gateway.ToolCallPayload{
 					CallID:   id,
 					ToolName: name,
 					RawInput: rawInput,
-					Status:   kernel.ToolStatusRunning,
-					Scope:    kernel.EventScopeMain,
+					Status:   gateway.ToolStatusRunning,
+					Scope:    gateway.EventScopeMain,
 				},
 			}}))
 
 		model = updated.(*Model)
-		updated, _ = model.Update(gatewayEventMsg(kernel.EventEnvelope{
-			Event: kernel.Event{
-				Kind:       kernel.EventKindToolResult,
+		updated, _ = model.Update(gatewayEventMsg(gateway.EventEnvelope{
+			Event: gateway.Event{
+				Kind:       gateway.EventKindToolResult,
 				SessionRef: session.SessionRef{SessionID: "root-session"},
-				ToolResult: &kernel.ToolResultPayload{
+				ToolResult: &gateway.ToolResultPayload{
 					CallID:   id,
 					ToolName: name,
 					RawInput: rawInput,
 					Content:  testToolContent(rawInput["path"].(string)),
-					Status:   kernel.ToolStatusCompleted,
-					Scope:    kernel.EventScopeMain,
+					Status:   gateway.ToolStatusCompleted,
+					Scope:    gateway.EventScopeMain,
 				},
 			}}))
 
@@ -266,25 +266,25 @@ func TestGatewayCompletedExplorationSummaryUsesReadRangesAndBasenames(t *testing
 	path := filepath.Join("internal", "task", "cluster", "sync_cluster.go")
 	sendRead := func(id string, offset int, start int, end int) {
 		rawInput := map[string]any{"path": path, "offset": offset, "limit": 50}
-		updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
-			Event: kernel.Event{
-				Kind:       kernel.EventKindToolCall,
+		updated, _ := model.Update(gatewayEventMsg(gateway.EventEnvelope{
+			Event: gateway.Event{
+				Kind:       gateway.EventKindToolCall,
 				SessionRef: session.SessionRef{SessionID: "root-session"},
-				ToolCall: &kernel.ToolCallPayload{
+				ToolCall: &gateway.ToolCallPayload{
 					CallID:   id,
 					ToolName: "READ",
 					RawInput: rawInput,
-					Status:   kernel.ToolStatusRunning,
-					Scope:    kernel.EventScopeMain,
+					Status:   gateway.ToolStatusRunning,
+					Scope:    gateway.EventScopeMain,
 				},
 			}}))
 
 		model = updated.(*Model)
-		updated, _ = model.Update(gatewayEventMsg(kernel.EventEnvelope{
-			Event: kernel.Event{
-				Kind:       kernel.EventKindToolResult,
+		updated, _ = model.Update(gatewayEventMsg(gateway.EventEnvelope{
+			Event: gateway.Event{
+				Kind:       gateway.EventKindToolResult,
 				SessionRef: session.SessionRef{SessionID: "root-session"},
-				ToolResult: &kernel.ToolResultPayload{
+				ToolResult: &gateway.ToolResultPayload{
 					CallID:   id,
 					ToolName: "READ",
 					RawInput: rawInput,
@@ -293,8 +293,8 @@ func TestGatewayCompletedExplorationSummaryUsesReadRangesAndBasenames(t *testing
 						"start_line": start,
 						"end_line":   end,
 					},
-					Status: kernel.ToolStatusCompleted,
-					Scope:  kernel.EventScopeMain,
+					Status: gateway.ToolStatusCompleted,
+					Scope:  gateway.EventScopeMain,
 				},
 			}}))
 
@@ -322,14 +322,14 @@ func TestGatewayCompletedExplorationSummaryUsesReadRangesAndBasenames(t *testing
 func TestGatewaySingleExplorationStepSettlesOnNextAssistantNarrative(t *testing.T) {
 	model := newGatewayEventTestModel()
 	sendReasoning := func(text string) {
-		updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{Event: kernel.Event{
-			Kind:       kernel.EventKindAssistantMessage,
+		updated, _ := model.Update(gatewayEventMsg(gateway.EventEnvelope{Event: gateway.Event{
+			Kind:       gateway.EventKindAssistantMessage,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			Narrative: &kernel.NarrativePayload{
-				Role:          kernel.NarrativeRoleAssistant,
+			Narrative: &gateway.NarrativePayload{
+				Role:          gateway.NarrativeRoleAssistant,
 				ReasoningText: text,
 				Final:         true,
-				Scope:         kernel.EventScopeMain,
+				Scope:         gateway.EventScopeMain,
 			},
 		}}))
 
@@ -337,30 +337,30 @@ func TestGatewaySingleExplorationStepSettlesOnNextAssistantNarrative(t *testing.
 	}
 	sendRead := func(id string, path string) {
 		rawInput := map[string]any{"path": path}
-		updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{Event: kernel.Event{
-			Kind:       kernel.EventKindToolCall,
+		updated, _ := model.Update(gatewayEventMsg(gateway.EventEnvelope{Event: gateway.Event{
+			Kind:       gateway.EventKindToolCall,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			ToolCall: &kernel.ToolCallPayload{
+			ToolCall: &gateway.ToolCallPayload{
 				CallID:   id,
 				ToolName: "READ",
 				RawInput: rawInput,
-				Status:   kernel.ToolStatusRunning,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusRunning,
+				Scope:    gateway.EventScopeMain,
 			},
 		}}))
 
 		model = updated.(*Model)
-		updated, _ = model.Update(gatewayEventMsg(kernel.EventEnvelope{Event: kernel.Event{
-			Kind:       kernel.EventKindToolResult,
+		updated, _ = model.Update(gatewayEventMsg(gateway.EventEnvelope{Event: gateway.Event{
+			Kind:       gateway.EventKindToolResult,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			ToolResult: &kernel.ToolResultPayload{
+			ToolResult: &gateway.ToolResultPayload{
 				CallID:    id,
 				ToolName:  "READ",
 				RawInput:  rawInput,
 				RawOutput: map[string]any{"text": "config contents"},
 				Content:   testToolContent("config.go"),
-				Status:    kernel.ToolStatusCompleted,
-				Scope:     kernel.EventScopeMain,
+				Status:    gateway.ToolStatusCompleted,
+				Scope:     gateway.EventScopeMain,
 			},
 		}}))
 
@@ -956,33 +956,33 @@ func TestGatewayACPExplorationNamedToolsCanRenderExploredGroup(t *testing.T) {
 		if strings.EqualFold(name, "SEARCH") {
 			rawInput = map[string]any{"query": args}
 		}
-		updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
-			Event: kernel.Event{
-				Kind:       kernel.EventKindToolCall,
+		updated, _ := model.Update(gatewayEventMsg(gateway.EventEnvelope{
+			Event: gateway.Event{
+				Kind:       gateway.EventKindToolCall,
 				SessionRef: session.SessionRef{SessionID: "root-session"},
-				Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session", Source: "acp"},
-				ToolCall: &kernel.ToolCallPayload{
+				Origin:     &gateway.EventOrigin{Scope: gateway.EventScopeMain, ScopeID: "root-session", Source: "acp"},
+				ToolCall: &gateway.ToolCallPayload{
 					CallID:   id,
 					ToolName: name,
 					RawInput: rawInput,
-					Status:   kernel.ToolStatusRunning,
-					Scope:    kernel.EventScopeMain,
+					Status:   gateway.ToolStatusRunning,
+					Scope:    gateway.EventScopeMain,
 				},
 			}}))
 
 		model = updated.(*Model)
-		updated, _ = model.Update(gatewayEventMsg(kernel.EventEnvelope{
-			Event: kernel.Event{
-				Kind:       kernel.EventKindToolResult,
+		updated, _ = model.Update(gatewayEventMsg(gateway.EventEnvelope{
+			Event: gateway.Event{
+				Kind:       gateway.EventKindToolResult,
 				SessionRef: session.SessionRef{SessionID: "root-session"},
-				Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session", Source: "acp"},
-				ToolResult: &kernel.ToolResultPayload{
+				Origin:     &gateway.EventOrigin{Scope: gateway.EventScopeMain, ScopeID: "root-session", Source: "acp"},
+				ToolResult: &gateway.ToolResultPayload{
 					CallID:   id,
 					ToolName: name,
 					RawInput: rawInput,
 					Content:  testToolContent(toolResultLabel(name, rawInput)),
-					Status:   kernel.ToolStatusCompleted,
-					Scope:    kernel.EventScopeMain,
+					Status:   gateway.ToolStatusCompleted,
+					Scope:    gateway.EventScopeMain,
 				},
 			}}))
 
@@ -991,14 +991,14 @@ func TestGatewayACPExplorationNamedToolsCanRenderExploredGroup(t *testing.T) {
 
 	sendACPTool("read-1", "READ", "internal/kernel/types.go", "type Event struct{}")
 	sendACPTool("search-1", "SEARCH", "EventKind", "42 matches")
-	updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{Event: kernel.Event{
-		Kind:       kernel.EventKindAssistantMessage,
+	updated, _ := model.Update(gatewayEventMsg(gateway.EventEnvelope{Event: gateway.Event{
+		Kind:       gateway.EventKindAssistantMessage,
 		SessionRef: session.SessionRef{SessionID: "root-session"},
-		Narrative: &kernel.NarrativePayload{
-			Role:          kernel.NarrativeRoleAssistant,
+		Narrative: &gateway.NarrativePayload{
+			Role:          gateway.NarrativeRoleAssistant,
 			ReasoningText: "Now I can continue.",
 			Final:         true,
-			Scope:         kernel.EventScopeMain,
+			Scope:         gateway.EventScopeMain,
 		},
 	}}))
 
@@ -1028,29 +1028,29 @@ func TestGatewayACPExplorationNamedToolsCanRenderExploredGroup(t *testing.T) {
 func TestGatewayACPExplorationStatusOnlyCompletedDoesNotBecomeDetail(t *testing.T) {
 	model := newGatewayEventTestModel()
 	sendRead := func(id string) {
-		updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{Event: kernel.Event{
-			Kind:       kernel.EventKindToolCall,
+		updated, _ := model.Update(gatewayEventMsg(gateway.EventEnvelope{Event: gateway.Event{
+			Kind:       gateway.EventKindToolCall,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session", Source: "acp"},
-			ToolCall: &kernel.ToolCallPayload{
+			Origin:     &gateway.EventOrigin{Scope: gateway.EventScopeMain, ScopeID: "root-session", Source: "acp"},
+			ToolCall: &gateway.ToolCallPayload{
 				CallID:   id,
 				ToolName: "READ",
-				Status:   kernel.ToolStatusRunning,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusRunning,
+				Scope:    gateway.EventScopeMain,
 			},
 		}}))
 
 		model = updated.(*Model)
-		updated, _ = model.Update(gatewayEventMsg(kernel.EventEnvelope{Event: kernel.Event{
-			Kind:       kernel.EventKindToolResult,
+		updated, _ = model.Update(gatewayEventMsg(gateway.EventEnvelope{Event: gateway.Event{
+			Kind:       gateway.EventKindToolResult,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session", Source: "acp"},
-			ToolResult: &kernel.ToolResultPayload{
+			Origin:     &gateway.EventOrigin{Scope: gateway.EventScopeMain, ScopeID: "root-session", Source: "acp"},
+			ToolResult: &gateway.ToolResultPayload{
 				CallID:   id,
 				ToolName: "READ",
 				Content:  testToolContent("completed"),
-				Status:   kernel.ToolStatusCompleted,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusCompleted,
+				Scope:    gateway.EventScopeMain,
 			},
 		}}))
 
@@ -1059,14 +1059,14 @@ func TestGatewayACPExplorationStatusOnlyCompletedDoesNotBecomeDetail(t *testing.
 
 	sendRead("read-1")
 	sendRead("read-2")
-	updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{Event: kernel.Event{
-		Kind:       kernel.EventKindAssistantMessage,
+	updated, _ := model.Update(gatewayEventMsg(gateway.EventEnvelope{Event: gateway.Event{
+		Kind:       gateway.EventKindAssistantMessage,
 		SessionRef: session.SessionRef{SessionID: "root-session"},
-		Narrative: &kernel.NarrativePayload{
-			Role:          kernel.NarrativeRoleAssistant,
+		Narrative: &gateway.NarrativePayload{
+			Role:          gateway.NarrativeRoleAssistant,
 			ReasoningText: "continue",
 			Final:         true,
-			Scope:         kernel.EventScopeMain,
+			Scope:         gateway.EventScopeMain,
 		},
 	}}))
 
@@ -1089,10 +1089,10 @@ func TestGatewayACPClaudeReadLifecycleKeepsIncrementalInput(t *testing.T) {
 	model := newGatewayEventTestModel()
 	path := "/Users/xueyongzhi/WorkDir/xueyongzhi/demo/a.py"
 	sendUpdate := func(update session.ProtocolUpdate) {
-		updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{Event: kernel.Event{
-			Kind:       kernel.EventKindToolCall,
+		updated, _ := model.Update(gatewayEventMsg(gateway.EventEnvelope{Event: gateway.Event{
+			Kind:       gateway.EventKindToolCall,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session", Source: "acp"},
+			Origin:     &gateway.EventOrigin{Scope: gateway.EventScopeMain, ScopeID: "root-session", Source: "acp"},
 			Protocol: &session.EventProtocol{
 				UpdateType: update.SessionUpdate,
 				Update:     &update,
@@ -1165,11 +1165,11 @@ func TestGatewayACPClaudeReadLifecycleKeepsIncrementalInput(t *testing.T) {
 func TestGatewayACPThinkToolUsesTitleCaseDisplayName(t *testing.T) {
 	model := newGatewayEventTestModel()
 	prompt := "Quickly scan the project at /Users/xueyongzhi/WorkDir/xueyongzhi/demo and report directories and Python files."
-	updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{Event: kernel.Event{
-		Kind:       kernel.EventKindToolCall,
+	updated, _ := model.Update(gatewayEventMsg(gateway.EventEnvelope{Event: gateway.Event{
+		Kind:       gateway.EventKindToolCall,
 		SessionRef: session.SessionRef{SessionID: "root-session"},
-		Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session", Source: "acp"},
-		ToolCall: &kernel.ToolCallPayload{
+		Origin:     &gateway.EventOrigin{Scope: gateway.EventScopeMain, ScopeID: "root-session", Source: "acp"},
+		ToolCall: &gateway.ToolCallPayload{
 			CallID:    "think-1",
 			ToolName:  "think",
 			ToolKind:  "think",
@@ -1177,17 +1177,17 @@ func TestGatewayACPThinkToolUsesTitleCaseDisplayName(t *testing.T) {
 			RawInput: map[string]any{
 				"prompt": prompt,
 			},
-			Status: kernel.ToolStatusRunning,
-			Scope:  kernel.EventScopeMain,
+			Status: gateway.ToolStatusRunning,
+			Scope:  gateway.EventScopeMain,
 		},
 	}}))
 
 	model = updated.(*Model)
-	updated, _ = model.Update(gatewayEventMsg(kernel.EventEnvelope{Event: kernel.Event{
-		Kind:       kernel.EventKindToolResult,
+	updated, _ = model.Update(gatewayEventMsg(gateway.EventEnvelope{Event: gateway.Event{
+		Kind:       gateway.EventKindToolResult,
 		SessionRef: session.SessionRef{SessionID: "root-session"},
-		Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session", Source: "acp"},
-		ToolResult: &kernel.ToolResultPayload{
+		Origin:     &gateway.EventOrigin{Scope: gateway.EventScopeMain, ScopeID: "root-session", Source: "acp"},
+		ToolResult: &gateway.ToolResultPayload{
 			CallID:    "think-1",
 			ToolName:  "think",
 			ToolKind:  "think",
@@ -1196,8 +1196,8 @@ func TestGatewayACPThinkToolUsesTitleCaseDisplayName(t *testing.T) {
 				"prompt": prompt,
 			},
 			Content: testToolContent(prompt),
-			Status:  kernel.ToolStatusCompleted,
-			Scope:   kernel.EventScopeMain,
+			Status:  gateway.ToolStatusCompleted,
+			Scope:   gateway.EventScopeMain,
 		},
 	}}))
 
@@ -1222,8 +1222,8 @@ func TestGatewayACPThinkToolUsesTitleCaseDisplayName(t *testing.T) {
 func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 	tests := []struct {
 		name        string
-		call        *kernel.ToolCallPayload
-		result      *kernel.ToolResultPayload
+		call        *gateway.ToolCallPayload
+		result      *gateway.ToolResultPayload
 		want        []string
 		forbidden   []string
 		expandPanel bool
@@ -1232,18 +1232,18 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 	}{
 		{
 			name: "read line range",
-			call: &kernel.ToolCallPayload{
+			call: &gateway.ToolCallPayload{
 				CallID:   "read-1",
 				ToolName: "READ",
-				Status:   kernel.ToolStatusRunning,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusRunning,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{"path": "/tmp/workspace/demo.py", "offset": 0, "limit": 100},
 			},
-			result: &kernel.ToolResultPayload{
+			result: &gateway.ToolResultPayload{
 				CallID:   "read-1",
 				ToolName: "READ",
-				Status:   kernel.ToolStatusCompleted,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusCompleted,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{"path": "/tmp/workspace/demo.py", "offset": 0, "limit": 100},
 				RawOutput: map[string]any{
 					"path":       "/tmp/workspace/demo.py",
@@ -1258,18 +1258,18 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 		},
 		{
 			name: "glob count",
-			call: &kernel.ToolCallPayload{
+			call: &gateway.ToolCallPayload{
 				CallID:   "glob-1",
 				ToolName: "GLOB",
-				Status:   kernel.ToolStatusRunning,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusRunning,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{"pattern": "**/*.py"},
 			},
-			result: &kernel.ToolResultPayload{
+			result: &gateway.ToolResultPayload{
 				CallID:   "glob-1",
 				ToolName: "GLOB",
-				Status:   kernel.ToolStatusCompleted,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusCompleted,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{"pattern": "**/*.py"},
 				RawOutput: map[string]any{
 					"pattern": "**/*.py",
@@ -1282,18 +1282,18 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 		},
 		{
 			name: "command terminal panel",
-			call: &kernel.ToolCallPayload{
+			call: &gateway.ToolCallPayload{
 				CallID:   "command-1",
 				ToolName: "RUN_COMMAND",
-				Status:   kernel.ToolStatusRunning,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusRunning,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{"command": `echo "hello"`},
 			},
-			result: &kernel.ToolResultPayload{
+			result: &gateway.ToolResultPayload{
 				CallID:   "command-1",
 				ToolName: "RUN_COMMAND",
-				Status:   kernel.ToolStatusCompleted,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusCompleted,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{"command": `echo "hello"`},
 				RawOutput: map[string]any{
 					"running":        false,
@@ -1311,20 +1311,20 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 		},
 		{
 			name: "acp execute terminal panel uses ran verb",
-			call: &kernel.ToolCallPayload{
+			call: &gateway.ToolCallPayload{
 				CallID:   "acp-exec-1",
 				ToolName: "git",
 				ToolKind: "execute",
-				Status:   kernel.ToolStatusRunning,
-				Scope:    kernel.EventScopeParticipant,
+				Status:   gateway.ToolStatusRunning,
+				Scope:    gateway.EventScopeParticipant,
 				RawInput: map[string]any{"cmd": "git diff --cached -- file.go"},
 			},
-			result: &kernel.ToolResultPayload{
+			result: &gateway.ToolResultPayload{
 				CallID:   "acp-exec-1",
 				ToolName: "git",
 				ToolKind: "execute",
-				Status:   kernel.ToolStatusCompleted,
-				Scope:    kernel.EventScopeParticipant,
+				Status:   gateway.ToolStatusCompleted,
+				Scope:    gateway.EventScopeParticipant,
 				RawInput: map[string]any{"cmd": "git diff --cached -- file.go"},
 				RawOutput: map[string]any{
 					"stdout":    "diff --git a/file.go b/file.go\n",
@@ -1338,18 +1338,18 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 		},
 		{
 			name: "spawn terminal panel",
-			call: &kernel.ToolCallPayload{
+			call: &gateway.ToolCallPayload{
 				CallID:   "spawn-1",
 				ToolName: "SPAWN",
-				Status:   kernel.ToolStatusRunning,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusRunning,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{"prompt": "write fibonacci"},
 			},
-			result: &kernel.ToolResultPayload{
+			result: &gateway.ToolResultPayload{
 				CallID:   "spawn-1",
 				ToolName: "SPAWN",
-				Status:   kernel.ToolStatusCompleted,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusCompleted,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{"prompt": "write fibonacci"},
 				RawOutput: map[string]any{
 					"agent":            "self",
@@ -1372,18 +1372,18 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 		},
 		{
 			name: "command task snapshot does not expose raw session json",
-			call: &kernel.ToolCallPayload{
+			call: &gateway.ToolCallPayload{
 				CallID:   "command-task-1",
 				ToolName: "RUN_COMMAND",
-				Status:   kernel.ToolStatusRunning,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusRunning,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{"command": `sleep 10`},
 			},
-			result: &kernel.ToolResultPayload{
+			result: &gateway.ToolResultPayload{
 				CallID:   "command-task-1",
 				ToolName: "RUN_COMMAND",
-				Status:   kernel.ToolStatusRunning,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusRunning,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{"command": `sleep 10`},
 				RawOutput: map[string]any{
 					"running":        true,
@@ -1399,18 +1399,18 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 		},
 		{
 			name: "task control panel",
-			call: &kernel.ToolCallPayload{
+			call: &gateway.ToolCallPayload{
 				CallID:   "task-1",
 				ToolName: "TASK",
-				Status:   kernel.ToolStatusRunning,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusRunning,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{"action": "wait", "task_id": "task-9", "yield_time_ms": 5000},
 			},
-			result: &kernel.ToolResultPayload{
+			result: &gateway.ToolResultPayload{
 				CallID:   "task-1",
 				ToolName: "TASK",
-				Status:   kernel.ToolStatusRunning,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusRunning,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{"action": "wait", "task_id": "task-9", "yield_time_ms": 5000},
 				RawOutput: map[string]any{
 					"running":        true,
@@ -1427,18 +1427,18 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 		},
 		{
 			name: "write rich diff panel",
-			call: &kernel.ToolCallPayload{
+			call: &gateway.ToolCallPayload{
 				CallID:   "write-1",
 				ToolName: "WRITE",
-				Status:   kernel.ToolStatusRunning,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusRunning,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{"path": "/tmp/workspace/tool_demo_summary.md", "content": "one\ntwo\n"},
 			},
-			result: &kernel.ToolResultPayload{
+			result: &gateway.ToolResultPayload{
 				CallID:   "write-1",
 				ToolName: "WRITE",
-				Status:   kernel.ToolStatusCompleted,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusCompleted,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{"path": "/tmp/workspace/tool_demo_summary.md", "content": "one\ntwo\n"},
 				RawOutput: map[string]any{
 					"path":          "/tmp/workspace/tool_demo_summary.md",
@@ -1454,18 +1454,18 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 		},
 		{
 			name: "failed write does not claim success",
-			call: &kernel.ToolCallPayload{
+			call: &gateway.ToolCallPayload{
 				CallID:   "write-failed-1",
 				ToolName: "WRITE",
-				Status:   kernel.ToolStatusRunning,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusRunning,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{"path": "/tmp/workspace/workflow.go", "content": "package workflow\n"},
 			},
-			result: &kernel.ToolResultPayload{
+			result: &gateway.ToolResultPayload{
 				CallID:    "write-failed-1",
 				ToolName:  "WRITE",
-				Status:    kernel.ToolStatusFailed,
-				Scope:     kernel.EventScopeMain,
+				Status:    gateway.ToolStatusFailed,
+				Scope:     gateway.EventScopeMain,
 				RawInput:  map[string]any{"path": "/tmp/workspace/workflow.go", "content": "package workflow\n"},
 				RawOutput: map[string]any{"error": "Sandbox permission denied. Use a writable workspace path or request elevated permissions."},
 				Content:   testToolContent("Sandbox permission denied. Use a writable workspace path or request elevated permissions."),
@@ -1476,18 +1476,18 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 		},
 		{
 			name: "failed patch preserves concrete error reason",
-			call: &kernel.ToolCallPayload{
+			call: &gateway.ToolCallPayload{
 				CallID:   "patch-failed-1",
 				ToolName: "PATCH",
-				Status:   kernel.ToolStatusRunning,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusRunning,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{"path": "/tmp/workspace/gm_license.go", "old": "licenseEntity.ESN", "new": "licenseEntity.Esn"},
 			},
-			result: &kernel.ToolResultPayload{
+			result: &gateway.ToolResultPayload{
 				CallID:    "patch-failed-1",
 				ToolName:  "PATCH",
-				Status:    kernel.ToolStatusFailed,
-				Scope:     kernel.EventScopeMain,
+				Status:    gateway.ToolStatusFailed,
+				Scope:     gateway.EventScopeMain,
 				RawInput:  map[string]any{"path": "/tmp/workspace/gm_license.go", "old": "licenseEntity.ESN", "new": "licenseEntity.Esn"},
 				RawOutput: map[string]any{"error": `tool: PATCH target "gm_license.go" did not contain an exact match for "old"`},
 				Content:   testToolContent(`tool: PATCH target "gm_license.go" did not contain an exact match for "old"`),
@@ -1498,18 +1498,18 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 		},
 		{
 			name: "patch rich diff panel",
-			call: &kernel.ToolCallPayload{
+			call: &gateway.ToolCallPayload{
 				CallID:   "patch-1",
 				ToolName: "PATCH",
-				Status:   kernel.ToolStatusRunning,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusRunning,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{"path": "/tmp/workspace/demo.py", "old": "old line", "new": "new line"},
 			},
-			result: &kernel.ToolResultPayload{
+			result: &gateway.ToolResultPayload{
 				CallID:   "patch-1",
 				ToolName: "PATCH",
-				Status:   kernel.ToolStatusCompleted,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusCompleted,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{"path": "/tmp/workspace/demo.py", "old": "old line", "new": "new line"},
 				RawOutput: map[string]any{
 					"path":          "/tmp/workspace/demo.py",
@@ -1525,18 +1525,18 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 		},
 		{
 			name: "patch replace all still renders old new diff",
-			call: &kernel.ToolCallPayload{
+			call: &gateway.ToolCallPayload{
 				CallID:   "patch-all-1",
 				ToolName: "PATCH",
-				Status:   kernel.ToolStatusRunning,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusRunning,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{"path": "/tmp/workspace/gm_license_repo.go", "old": "entity.GMLicense", "new": "entity.GmLicense", "replace_all": true},
 			},
-			result: &kernel.ToolResultPayload{
+			result: &gateway.ToolResultPayload{
 				CallID:   "patch-all-1",
 				ToolName: "PATCH",
-				Status:   kernel.ToolStatusCompleted,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusCompleted,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{"path": "/tmp/workspace/gm_license_repo.go", "old": "entity.GMLicense", "new": "entity.GmLicense", "replace_all": true},
 				RawOutput: map[string]any{
 					"path":          "/tmp/workspace/gm_license_repo.go",
@@ -1552,18 +1552,18 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 		},
 		{
 			name: "patch structured multi hunk diff panel",
-			call: &kernel.ToolCallPayload{
+			call: &gateway.ToolCallPayload{
 				CallID:   "patch-hunks-1",
 				ToolName: "PATCH",
-				Status:   kernel.ToolStatusRunning,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusRunning,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{"path": "/tmp/workspace/gm_license_repo.go", "old": "entity.GMLicense", "new": "entity.GmLicense", "replace_all": true},
 			},
-			result: &kernel.ToolResultPayload{
+			result: &gateway.ToolResultPayload{
 				CallID:   "patch-hunks-1",
 				ToolName: "PATCH",
-				Status:   kernel.ToolStatusCompleted,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusCompleted,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{"path": "/tmp/workspace/gm_license_repo.go", "old": "entity.GMLicense", "new": "entity.GmLicense", "replace_all": true},
 				RawOutput: map[string]any{
 					"path":         "/tmp/workspace/gm_license_repo.go",
@@ -1601,17 +1601,17 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			model := newGatewayEventTestModel()
-			updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
-				Event: kernel.Event{
-					Kind:       kernel.EventKindToolCall,
+			updated, _ := model.Update(gatewayEventMsg(gateway.EventEnvelope{
+				Event: gateway.Event{
+					Kind:       gateway.EventKindToolCall,
 					SessionRef: session.SessionRef{SessionID: "root-session"},
 					ToolCall:   tt.call,
 				}}))
 
 			model = updated.(*Model)
-			updated, _ = model.Update(gatewayEventMsg(kernel.EventEnvelope{
-				Event: kernel.Event{
-					Kind:       kernel.EventKindToolResult,
+			updated, _ = model.Update(gatewayEventMsg(gateway.EventEnvelope{
+				Event: gateway.Event{
+					Kind:       gateway.EventKindToolResult,
 					SessionRef: session.SessionRef{SessionID: "root-session"},
 					Meta:       tt.meta,
 					ToolResult: tt.result,
@@ -1619,15 +1619,15 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 
 			model = updated.(*Model)
 			if tt.settleStep {
-				updated, _ = model.Update(gatewayEventMsg(kernel.EventEnvelope{
-					Event: kernel.Event{
-						Kind:       kernel.EventKindAssistantMessage,
+				updated, _ = model.Update(gatewayEventMsg(gateway.EventEnvelope{
+					Event: gateway.Event{
+						Kind:       gateway.EventKindAssistantMessage,
 						SessionRef: session.SessionRef{SessionID: "root-session"},
-						Narrative: &kernel.NarrativePayload{
-							Role:  kernel.NarrativeRoleAssistant,
+						Narrative: &gateway.NarrativePayload{
+							Role:  gateway.NarrativeRoleAssistant,
 							Text:  "next step",
 							Final: true,
-							Scope: kernel.EventScopeMain,
+							Scope: gateway.EventScopeMain,
 						},
 					}}))
 

@@ -5,9 +5,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/kernel"
+	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
+	acpprojector "github.com/OnslaughtSnail/caelis/protocol/acp/projector"
 )
 
 func TestRenderSchedulerCoalescesAssistantFramesToOneMutation(t *testing.T) {
@@ -37,23 +38,23 @@ func TestRenderSchedulerCoalescesAssistantFramesToOneMutation(t *testing.T) {
 }
 
 func schedulerAssistantFrame(text string) eventstream.Envelope {
-	env := kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind:       kernel.EventKindAssistantMessage,
+	env := gateway.EventEnvelope{
+		Event: gateway.Event{
+			Kind:       gateway.EventKindAssistantMessage,
 			HandleID:   "handle-1",
 			RunID:      "run-1",
 			TurnID:     "turn-1",
 			SessionRef: session.SessionRef{SessionID: "session-1"},
-			Narrative: &kernel.NarrativePayload{
-				Role:       kernel.NarrativeRoleAssistant,
+			Narrative: &gateway.NarrativePayload{
+				Role:       gateway.NarrativeRoleAssistant,
 				Text:       text,
 				Visibility: string(session.VisibilityUIOnly),
 				UpdateType: string(session.ProtocolUpdateTypeAgentMessage),
-				Scope:      kernel.EventScopeMain,
+				Scope:      gateway.EventScopeMain,
 			},
 		},
 	}
-	events := kernel.ProjectACPEventEnvelope(env)
+	events := acpprojector.ProjectGatewayEventEnvelope(env)
 	if len(events) == 0 {
 		return eventstream.Envelope{}
 	}

@@ -3,11 +3,12 @@ package tuiapp
 import (
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/OnslaughtSnail/caelis/kernel"
+	"github.com/OnslaughtSnail/caelis/ports/gateway"
+	acpprojector "github.com/OnslaughtSnail/caelis/protocol/acp/projector"
 )
 
-func gatewayEventMsg(env kernel.EventEnvelope) tea.Msg {
-	projected := kernel.ProjectACPEventEnvelope(env)
+func gatewayEventMsg(env gateway.EventEnvelope) tea.Msg {
+	projected := acpprojector.ProjectGatewayEventEnvelope(env)
 	if len(projected) == 1 {
 		return projected[0]
 	}
@@ -18,9 +19,9 @@ func gatewayEventMsg(env kernel.EventEnvelope) tea.Msg {
 	return TranscriptEventsMsg{Events: events}
 }
 
-func ProjectGatewayEventToTranscriptEvents(ev kernel.Event) []TranscriptEvent {
+func ProjectGatewayEventToTranscriptEvents(ev gateway.Event) []TranscriptEvent {
 	out := make([]TranscriptEvent, 0, 4)
-	for _, env := range kernel.ProjectACPEventEnvelope(kernel.EventEnvelope{Event: ev}) {
+	for _, env := range acpprojector.ProjectGatewayEventEnvelope(gateway.EventEnvelope{Event: ev}) {
 		out = append(out, ProjectACPEventToTranscriptEvents(env)...)
 	}
 	return out

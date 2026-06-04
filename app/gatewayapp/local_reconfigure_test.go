@@ -9,8 +9,9 @@ import (
 	"testing"
 
 	"github.com/OnslaughtSnail/caelis/impl/model/providers"
-	"github.com/OnslaughtSnail/caelis/kernel"
+	kernelimpl "github.com/OnslaughtSnail/caelis/internal/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/agent"
+	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
@@ -29,7 +30,7 @@ func TestStackRejectsReconfigureWhileActiveTurn(t *testing.T) {
 	}
 
 	blocking := &blockingRuntime{session: session, release: make(chan struct{})}
-	gw, err := kernel.New(kernel.Config{
+	gw, err := kernelimpl.New(kernelimpl.Config{
 		Sessions: stack.Sessions,
 		Runtime:  blocking,
 		Resolver: blockingResolver{},
@@ -37,9 +38,9 @@ func TestStackRejectsReconfigureWhileActiveTurn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("kernel.New() error = %v", err)
 	}
-	stack.Gateway = gw
+	stack.gateway = gw
 
-	handle, err := stack.Gateway.BeginTurn(ctx, kernel.BeginTurnRequest{
+	handle, err := stack.currentGateway().BeginTurn(ctx, gateway.BeginTurnRequest{
 		SessionRef: session.SessionRef,
 		Input:      "hold active",
 	})
@@ -47,7 +48,7 @@ func TestStackRejectsReconfigureWhileActiveTurn(t *testing.T) {
 		t.Fatalf("BeginTurn() error = %v", err)
 	}
 	defer handle.Handle.Close()
-	if got := len(stack.Gateway.ActiveTurns()); got != 1 {
+	if got := len(stack.currentGateway().ActiveTurns()); got != 1 {
 		t.Fatalf("ActiveTurns() len = %d, want 1", got)
 	}
 
@@ -217,8 +218,8 @@ func poisonConfigStorePath(t *testing.T, stack *Stack) {
 
 type blockingResolver struct{}
 
-func (blockingResolver) ResolveTurn(context.Context, kernel.TurnIntent) (kernel.ResolvedTurn, error) {
-	return kernel.ResolvedTurn{RunRequest: agent.RunRequest{}}, nil
+func (blockingResolver) ResolveTurn(context.Context, gateway.TurnIntent) (gateway.ResolvedTurn, error) {
+	return gateway.ResolvedTurn{RunRequest: agent.RunRequest{}}, nil
 }
 
 type blockingRuntime struct {

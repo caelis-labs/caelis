@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
-	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/assembly"
+	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/surfaces/headless"
 )
@@ -57,7 +57,7 @@ func TestLocalStackGatewayACPMainE2E(t *testing.T) {
 		t.Fatalf("StartSession() error = %v", err)
 	}
 
-	updated, err := stack.Gateway.HandoffController(context.Background(), kernel.HandoffControllerRequest{
+	updated, err := stack.Kernel().HandoffController(context.Background(), gateway.HandoffControllerRequest{
 		SessionRef: activeSession.SessionRef,
 		Kind:       session.ControllerKindACP,
 		Agent:      "codex",
@@ -71,7 +71,7 @@ func TestLocalStackGatewayACPMainE2E(t *testing.T) {
 		t.Fatalf("controller kind = %q, want %q", updated.Controller.Kind, session.ControllerKindACP)
 	}
 
-	state, err := stack.Gateway.ControlPlaneState(context.Background(), kernel.ControlPlaneStateRequest{
+	state, err := stack.Kernel().ControlPlaneState(context.Background(), gateway.ControlPlaneStateRequest{
 		SessionRef: activeSession.SessionRef,
 	})
 	if err != nil {
@@ -104,7 +104,7 @@ func TestLocalStackGatewayACPMainE2E(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 
-	result, err := headless.RunOnce(ctx, stack.Gateway, kernel.BeginTurnRequest{
+	result, err := headless.RunOnce(ctx, stack.Kernel(), gateway.BeginTurnRequest{
 		SessionRef: activeSession.SessionRef,
 		Input:      "run through acp controller",
 		Surface:    "headless-acp-main-e2e",

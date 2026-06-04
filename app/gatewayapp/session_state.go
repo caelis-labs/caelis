@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/kernel"
+	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
@@ -27,9 +27,9 @@ func (s *Stack) SetSessionMode(ctx context.Context, ref session.SessionRef, mode
 		if next == nil {
 			next = map[string]any{}
 		}
-		next[kernel.StateCurrentApprovalMode] = normalized
-		delete(next, kernel.StateCurrentSessionMode)
-		delete(next, kernel.StateCurrentSandboxMode)
+		next[gateway.StateCurrentApprovalMode] = normalized
+		delete(next, gateway.StateCurrentSessionMode)
+		delete(next, gateway.StateCurrentSandboxMode)
 		return next, nil
 	})
 	if err != nil {
@@ -57,7 +57,7 @@ func (s *Stack) SessionRuntimeState(ctx context.Context, ref session.SessionRef)
 	if err != nil {
 		return SessionRuntimeState{}, err
 	}
-	modelRef := kernel.CurrentModelAlias(state)
+	modelRef := gateway.CurrentModelAlias(state)
 	modelID := ""
 	modelAlias := ""
 	if s.lookup != nil && modelRef != "" {
@@ -69,10 +69,10 @@ func (s *Stack) SessionRuntimeState(ctx context.Context, ref session.SessionRef)
 	return SessionRuntimeState{
 		ModelID:         modelID,
 		ModelAlias:      modelAlias,
-		ReasoningEffort: kernel.CurrentReasoningEffort(state),
-		SessionMode:     kernel.CurrentSessionModeOrDefault(state, s.runtime.ApprovalMode),
-		PolicyProfile:   firstNonEmpty(kernel.CurrentPolicyProfile(state), policyProfile(s.runtime.PolicyProfile)),
-		SandboxMode:     kernel.CurrentSandboxMode(state),
+		ReasoningEffort: gateway.CurrentReasoningEffort(state),
+		SessionMode:     gateway.CurrentSessionModeOrDefault(state, s.runtime.ApprovalMode),
+		PolicyProfile:   firstNonEmpty(gateway.CurrentPolicyProfile(state), policyProfile(s.runtime.PolicyProfile)),
+		SandboxMode:     gateway.CurrentSandboxMode(state),
 	}, nil
 }
 

@@ -1,20 +1,20 @@
-package kernel
+package projector
 
 import (
 	"maps"
 	"strings"
 
+	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
-	acpprojector "github.com/OnslaughtSnail/caelis/protocol/acp/projector"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
-// ProjectACPEventEnvelope projects the gateway runtime event envelope into the
+// ProjectGatewayEventEnvelope projects the gateway runtime event envelope into the
 // surface-facing ACP event stream. It is the compatibility bridge for current
 // runtime events while surfaces migrate away from consuming kernel.Event
 // directly.
-func ProjectACPEventEnvelope(env EventEnvelope) []eventstream.Envelope {
+func ProjectGatewayEventEnvelope(env gateway.EventEnvelope) []eventstream.Envelope {
 	if env.Err != nil {
 		return []eventstream.Envelope{eventstream.Error(env.Err)}
 	}
@@ -52,7 +52,7 @@ func ProjectACPEventEnvelope(env EventEnvelope) []eventstream.Envelope {
 	return out
 }
 
-func projectACPProtocolEvents(base eventstream.Envelope, ev Event) []eventstream.Envelope {
+func projectACPProtocolEvents(base eventstream.Envelope, ev gateway.Event) []eventstream.Envelope {
 	if ev.Protocol == nil {
 		return nil
 	}
@@ -65,7 +65,7 @@ func projectACPProtocolEvents(base eventstream.Envelope, ev Event) []eventstream
 	if ev.Narrative != nil {
 		sessionEvent.Text = ev.Narrative.Text
 	}
-	projector := acpprojector.EventProjector{}
+	projector := EventProjector{}
 	out := make([]eventstream.Envelope, 0, 2)
 	if permission, ok, err := projector.ProjectPermissionRequest(&sessionEvent); err != nil {
 		return []eventstream.Envelope{eventstream.Error(err)}
@@ -94,7 +94,7 @@ func projectACPProtocolEvents(base eventstream.Envelope, ev Event) []eventstream
 	return out
 }
 
-func acpEventBase(env EventEnvelope) eventstream.Envelope {
+func acpEventBase(env gateway.EventEnvelope) eventstream.Envelope {
 	ev := env.Event
 	scope := acpEventScope(ev)
 	scopeID := acpEventScopeID(ev)
@@ -114,46 +114,46 @@ func acpEventBase(env EventEnvelope) eventstream.Envelope {
 	}
 }
 
-func sessionTypeFromEventKind(kind EventKind) session.EventType {
+func sessionTypeFromEventKind(kind gateway.EventKind) session.EventType {
 	switch kind {
-	case EventKindUserMessage:
+	case gateway.EventKindUserMessage:
 		return session.EventTypeUser
-	case EventKindAssistantMessage:
+	case gateway.EventKindAssistantMessage:
 		return session.EventTypeAssistant
-	case EventKindPlanUpdate:
+	case gateway.EventKindPlanUpdate:
 		return session.EventTypePlan
-	case EventKindToolCall:
+	case gateway.EventKindToolCall:
 		return session.EventTypeToolCall
-	case EventKindToolResult:
+	case gateway.EventKindToolResult:
 		return session.EventTypeToolResult
-	case EventKindParticipant:
+	case gateway.EventKindParticipant:
 		return session.EventTypeParticipant
-	case EventKindHandoff:
+	case gateway.EventKindHandoff:
 		return session.EventTypeHandoff
-	case EventKindCompact:
+	case gateway.EventKindCompact:
 		return session.EventTypeCompact
-	case EventKindNotice:
+	case gateway.EventKindNotice:
 		return session.EventTypeNotice
-	case EventKindLifecycle, EventKindApprovalRequested, EventKindApprovalReview:
+	case gateway.EventKindLifecycle, gateway.EventKindApprovalRequested, gateway.EventKindApprovalReview:
 		return session.EventTypeLifecycle
-	case EventKindSystemMessage:
+	case gateway.EventKindSystemMessage:
 		return session.EventTypeSystem
 	default:
 		return session.EventTypeCustom
 	}
 }
 
-func inferACPEventsFromGatewayEvent(base eventstream.Envelope, ev Event) []eventstream.Envelope {
+func inferACPEventsFromGatewayEvent(base eventstream.Envelope, ev gateway.Event) []eventstream.Envelope {
 	switch ev.Kind {
-	case EventKindUserMessage:
+	case gateway.EventKindUserMessage:
 		text := ""
 		if ev.Narrative != nil {
 			text = ev.Narrative.Text
 		}
 		return singleTextACPUpdate(base, schema.UpdateUserMessage, text, true)
-	case EventKindAssistantMessage:
+	case gateway.EventKindAssistantMessage:
 		return inferACPEventsFromNarrative(base, ev)
-	case EventKindToolCall:
+	case gateway.EventKindToolCall:
 		if ev.ToolCall == nil {
 			return nil
 		}
@@ -171,7 +171,7 @@ func inferACPEventsFromGatewayEvent(base eventstream.Envelope, ev Event) []event
 			Meta:          acpMetaWithToolName(ev.Meta, ev.ToolCall.ToolName),
 		}
 		return []eventstream.Envelope{next}
-	case EventKindToolResult:
+	case gateway.EventKindToolResult:
 		if ev.ToolResult == nil {
 			return nil
 		}
@@ -193,7 +193,7 @@ func inferACPEventsFromGatewayEvent(base eventstream.Envelope, ev Event) []event
 			Meta:          acpMetaWithToolName(ev.Meta, ev.ToolResult.ToolName),
 		}
 		return []eventstream.Envelope{next}
-	case EventKindPlanUpdate:
+	case gateway.EventKindPlanUpdate:
 		if ev.Plan == nil {
 			return nil
 		}
@@ -212,13 +212,13 @@ func inferACPEventsFromGatewayEvent(base eventstream.Envelope, ev Event) []event
 		next.Kind = eventstream.KindSessionUpdate
 		next.Update = schema.PlanUpdate{SessionUpdate: schema.UpdatePlan, Entries: entries}
 		return []eventstream.Envelope{next}
-	case EventKindApprovalRequested:
+	case gateway.EventKindApprovalRequested:
 		if permission := acpPermissionEnvelopeFromApprovalPayload(base, ev.ApprovalPayload); permission != nil {
 			return []eventstream.Envelope{*permission}
 		}
 		return nil
-	case EventKindApprovalReview:
-		if ev.ApprovalPayload == nil || !strings.EqualFold(strings.TrimSpace(ev.ApprovalPayload.DecisionSource), string(ApprovalModeAutoReview)) {
+	case gateway.EventKindApprovalReview:
+		if ev.ApprovalPayload == nil || !strings.EqualFold(strings.TrimSpace(ev.ApprovalPayload.DecisionSource), string(gateway.ApprovalModeAutoReview)) {
 			return nil
 		}
 		next := base
@@ -233,7 +233,7 @@ func inferACPEventsFromGatewayEvent(base eventstream.Envelope, ev Event) []event
 			Authorization: strings.TrimSpace(ev.ApprovalPayload.Authorization),
 		}
 		return []eventstream.Envelope{next}
-	case EventKindParticipant:
+	case gateway.EventKindParticipant:
 		if ev.Participant == nil {
 			return nil
 		}
@@ -242,7 +242,7 @@ func inferACPEventsFromGatewayEvent(base eventstream.Envelope, ev Event) []event
 		next.Actor = acpEventActor(ev, ev.Participant.Actor)
 		next.Participant = &eventstream.Participant{State: strings.TrimSpace(string(ev.Participant.Action))}
 		return []eventstream.Envelope{next}
-	case EventKindLifecycle:
+	case gateway.EventKindLifecycle:
 		if ev.Lifecycle == nil {
 			return nil
 		}
@@ -254,7 +254,7 @@ func inferACPEventsFromGatewayEvent(base eventstream.Envelope, ev Event) []event
 			Reason: strings.TrimSpace(ev.Lifecycle.Reason),
 		}
 		return []eventstream.Envelope{next}
-	case EventKindNotice, EventKindSystemMessage:
+	case gateway.EventKindNotice, gateway.EventKindSystemMessage:
 		text := ""
 		if ev.Narrative != nil {
 			text = ev.Narrative.Text
@@ -271,7 +271,7 @@ func inferACPEventsFromGatewayEvent(base eventstream.Envelope, ev Event) []event
 	}
 }
 
-func acpPermissionEnvelopeFromApprovalPayload(base eventstream.Envelope, payload *ApprovalPayload) *eventstream.Envelope {
+func acpPermissionEnvelopeFromApprovalPayload(base eventstream.Envelope, payload *gateway.ApprovalPayload) *eventstream.Envelope {
 	if payload == nil {
 		return nil
 	}
@@ -299,7 +299,7 @@ func acpPermissionEnvelopeFromApprovalPayload(base eventstream.Envelope, payload
 	return &out
 }
 
-func acpPermissionOptionsFromApprovalPayload(payload *ApprovalPayload) []schema.PermissionOption {
+func acpPermissionOptionsFromApprovalPayload(payload *gateway.ApprovalPayload) []schema.PermissionOption {
 	if payload == nil || len(payload.Options) == 0 {
 		return nil
 	}
@@ -314,7 +314,7 @@ func acpPermissionOptionsFromApprovalPayload(payload *ApprovalPayload) []schema.
 	return options
 }
 
-func acpApprovalRawInput(payload *ApprovalPayload) map[string]any {
+func acpApprovalRawInput(payload *gateway.ApprovalPayload) map[string]any {
 	if payload == nil {
 		return nil
 	}
@@ -339,16 +339,16 @@ func putRawStringIfMissing(raw map[string]any, key string, value string) map[str
 	return raw
 }
 
-func inferACPEventsFromNarrative(base eventstream.Envelope, ev Event) []eventstream.Envelope {
+func inferACPEventsFromNarrative(base eventstream.Envelope, ev gateway.Event) []eventstream.Envelope {
 	if ev.Narrative == nil {
 		return nil
 	}
 	base.Actor = acpEventActor(ev, ev.Narrative.Actor)
 	base.Final = ev.Narrative.Final
 	switch ev.Narrative.Role {
-	case NarrativeRoleUser:
+	case gateway.NarrativeRoleUser:
 		return singleTextACPUpdate(base, schema.UpdateUserMessage, ev.Narrative.Text, true)
-	case NarrativeRoleAssistant:
+	case gateway.NarrativeRoleAssistant:
 		out := make([]eventstream.Envelope, 0, 2)
 		if ev.Narrative.ReasoningText != "" {
 			out = append(out, singleACPTextEvent(base, schema.UpdateAgentThought, ev.Narrative.ReasoningText))
@@ -357,7 +357,7 @@ func inferACPEventsFromNarrative(base eventstream.Envelope, ev Event) []eventstr
 			out = append(out, singleACPTextEvent(base, schema.UpdateAgentMessage, ev.Narrative.Text))
 		}
 		return out
-	case NarrativeRoleSystem, NarrativeRoleNotice:
+	case gateway.NarrativeRoleSystem, gateway.NarrativeRoleNotice:
 		if strings.TrimSpace(ev.Narrative.Text) == "" {
 			return nil
 		}
@@ -420,7 +420,7 @@ func normalizeACPToolStatus(status string) string {
 	}
 }
 
-func acpEventScope(ev Event) eventstream.Scope {
+func acpEventScope(ev gateway.Event) eventstream.Scope {
 	if ev.Origin != nil && ev.Origin.Scope != "" {
 		return eventstream.Scope(ev.Origin.Scope)
 	}
@@ -436,7 +436,7 @@ func acpEventScope(ev Event) eventstream.Scope {
 	return eventstream.ScopeMain
 }
 
-func acpEventScopeID(ev Event) string {
+func acpEventScopeID(ev gateway.Event) string {
 	if ev.Origin != nil && strings.TrimSpace(ev.Origin.ScopeID) != "" {
 		return strings.TrimSpace(ev.Origin.ScopeID)
 	}
@@ -446,7 +446,7 @@ func acpEventScopeID(ev Event) string {
 	return strings.TrimSpace(ev.TurnID)
 }
 
-func acpEventActor(ev Event, fallback string) string {
+func acpEventActor(ev gateway.Event, fallback string) string {
 	if ev.Origin != nil {
 		if actor := strings.TrimSpace(ev.Origin.Actor); actor != "" {
 			return actor
@@ -455,7 +455,7 @@ func acpEventActor(ev Event, fallback string) string {
 	return strings.TrimSpace(fallback)
 }
 
-func acpEventParticipantID(ev Event) string {
+func acpEventParticipantID(ev gateway.Event) string {
 	if ev.Origin != nil && strings.TrimSpace(ev.Origin.ParticipantID) != "" {
 		return strings.TrimSpace(ev.Origin.ParticipantID)
 	}
@@ -475,7 +475,7 @@ func acpEventParticipantID(ev Event) string {
 	}
 }
 
-func acpEventFinal(ev Event) bool {
+func acpEventFinal(ev gateway.Event) bool {
 	if ev.Narrative != nil {
 		return ev.Narrative.Final
 	}
@@ -507,9 +507,39 @@ func acpMetaWithToolName(meta map[string]any, toolName string) map[string]any {
 	if toolName == "" {
 		return maps.Clone(meta)
 	}
-	return withCaelisRuntimeSection(meta, EventMetaRuntimeTool, map[string]any{
-		EventMetaRuntimeToolName: toolName,
+	return withCaelisRuntimeSection(meta, gateway.EventMetaRuntimeTool, map[string]any{
+		gateway.EventMetaRuntimeToolName: toolName,
 	})
+}
+
+func withCaelisRuntimeSection(meta map[string]any, section string, values map[string]any) map[string]any {
+	out := maps.Clone(meta)
+	if out == nil {
+		out = map[string]any{}
+	}
+	caelis, _ := out[gateway.EventMetaRoot].(map[string]any)
+	caelis = maps.Clone(caelis)
+	if caelis == nil {
+		caelis = map[string]any{}
+	}
+	caelis[gateway.EventMetaVersion] = 1
+	runtime, _ := caelis[gateway.EventMetaRuntime].(map[string]any)
+	runtime = maps.Clone(runtime)
+	if runtime == nil {
+		runtime = map[string]any{}
+	}
+	sectionMap, _ := runtime[section].(map[string]any)
+	sectionMap = maps.Clone(sectionMap)
+	if sectionMap == nil {
+		sectionMap = map[string]any{}
+	}
+	for key, value := range values {
+		sectionMap[key] = value
+	}
+	runtime[section] = sectionMap
+	caelis[gateway.EventMetaRuntime] = runtime
+	out[gateway.EventMetaRoot] = caelis
+	return out
 }
 
 func stringPtrOrNil(value string) *string {

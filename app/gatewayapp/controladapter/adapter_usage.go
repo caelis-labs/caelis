@@ -6,26 +6,26 @@ import (
 	"maps"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/kernel"
+	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
-func (d *Adapter) sessionTokenUsage(ctx context.Context, ref session.SessionRef) (kernel.UsageSnapshot, error) {
+func (d *Adapter) sessionTokenUsage(ctx context.Context, ref session.SessionRef) (gateway.UsageSnapshot, error) {
 	breakdown, err := d.sessionTokenUsageBreakdown(ctx, ref)
 	if err != nil {
-		return kernel.UsageSnapshot{}, err
+		return gateway.UsageSnapshot{}, err
 	}
 	return breakdown.Total, nil
 }
 
 type sessionTokenUsageBreakdown struct {
-	Total      kernel.UsageSnapshot
-	Main       kernel.UsageSnapshot
-	Subagents  kernel.UsageSnapshot
-	AutoReview kernel.UsageSnapshot
+	Total      gateway.UsageSnapshot
+	Main       gateway.UsageSnapshot
+	Subagents  gateway.UsageSnapshot
+	AutoReview gateway.UsageSnapshot
 }
 
-func usageSnapshotFromKernel(usage kernel.UsageSnapshot) UsageSnapshot {
+func usageSnapshotFromKernel(usage gateway.UsageSnapshot) UsageSnapshot {
 	return UsageSnapshot{
 		PromptTokens:      usage.PromptTokens,
 		CachedInputTokens: usage.CachedInputTokens,
@@ -75,7 +75,7 @@ func sessionTokenUsageBreakdownFromEvents(events []*session.Event, fallbackCateg
 	lastToolCallUsageKey := ""
 	lastUsageWasToolCall := false
 	for _, event := range events {
-		one := kernel.UsageSnapshotFromSessionEvent(event)
+		one := gateway.UsageSnapshotFromSessionEvent(event)
 		if one == nil {
 			if session.EventTypeOf(event) != session.EventTypeToolCall {
 				lastToolCallUsageKey = ""
@@ -102,14 +102,14 @@ func sessionTokenUsageBreakdownFromEvents(events []*session.Event, fallbackCateg
 
 func sessionTokenUsageBreakdownFromState(state map[string]any) sessionTokenUsageBreakdown {
 	var breakdown sessionTokenUsageBreakdown
-	accounting := mapAnyValue(state[kernel.StateUsageAccounting])
-	if usage := kernel.UsageSnapshotFromMap(mapAnyValue(accounting[tokenUsageCategoryAutoReview])); usage != nil {
+	accounting := mapAnyValue(state[gateway.StateUsageAccounting])
+	if usage := gateway.UsageSnapshotFromMap(mapAnyValue(accounting[tokenUsageCategoryAutoReview])); usage != nil {
 		breakdown.add(tokenUsageCategoryAutoReview, *usage)
 	}
 	return breakdown
 }
 
-func (u *sessionTokenUsageBreakdown) add(category string, usage kernel.UsageSnapshot) {
+func (u *sessionTokenUsageBreakdown) add(category string, usage gateway.UsageSnapshot) {
 	if u == nil {
 		return
 	}
@@ -134,7 +134,7 @@ func (u *sessionTokenUsageBreakdown) addBreakdown(other sessionTokenUsageBreakdo
 	addUsageSnapshot(&u.AutoReview, other.AutoReview)
 }
 
-func addUsageSnapshot(total *kernel.UsageSnapshot, usage kernel.UsageSnapshot) {
+func addUsageSnapshot(total *gateway.UsageSnapshot, usage gateway.UsageSnapshot) {
 	if total == nil {
 		return
 	}
@@ -247,7 +247,7 @@ func (d *Adapter) selfSubagentSessionRefs(ctx context.Context, ref session.Sessi
 	return out
 }
 
-func usageSnapshotDedupeKey(usage kernel.UsageSnapshot) string {
+func usageSnapshotDedupeKey(usage gateway.UsageSnapshot) string {
 	if usage.PromptTokens == 0 && usage.CachedInputTokens == 0 && usage.CompletionTokens == 0 && usage.ReasoningTokens == 0 && usage.TotalTokens == 0 {
 		return ""
 	}

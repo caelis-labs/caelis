@@ -7,6 +7,7 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/ports/agent"
 	"github.com/OnslaughtSnail/caelis/ports/approval"
+	gatewayapi "github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
@@ -160,101 +161,19 @@ func sessionEventKind(event *session.Event) EventKind {
 }
 
 func usageSnapshotFromSessionEvent(event *session.Event) *UsageSnapshot {
-	if event == nil || event.Meta == nil {
-		return nil
-	}
-	raw, ok := event.Meta["usage"]
-	if ok {
-		payload, ok := raw.(map[string]any)
-		if !ok {
-			return nil
-		}
-		usage := usageSnapshotFromPayload(payload)
-		if usage == nil {
-			return nil
-		}
-		return usage
-	}
-	if raw := nestedAny(event.Meta, "caelis", "sdk", "usage"); raw != nil {
-		payload, ok := raw.(map[string]any)
-		if ok {
-			if usage := usageSnapshotFromPayload(payload); usage != nil {
-				return usage
-			}
-		}
-	}
-	return usageSnapshotFromPayload(event.Meta)
+	return gatewayapi.UsageSnapshotFromSessionEvent(event)
 }
 
 // UsageSnapshotFromSessionEvent projects provider token usage from a durable
 // session event into the canonical gateway usage contract.
 func UsageSnapshotFromSessionEvent(event *session.Event) *UsageSnapshot {
-	return usageSnapshotFromSessionEvent(event)
+	return gatewayapi.UsageSnapshotFromSessionEvent(event)
 }
 
 // UsageSnapshotFromMap projects one provider-style usage payload into the
 // canonical gateway usage contract.
 func UsageSnapshotFromMap(payload map[string]any) *UsageSnapshot {
-	return usageSnapshotFromPayload(payload)
-}
-
-func usageSnapshotFromPayload(payload map[string]any) *UsageSnapshot {
-	if payload == nil {
-		return nil
-	}
-	promptTokens := firstNonZeroInt(intValue(payload["prompt_tokens"]), intValue(payload["input_tokens"]))
-	completionTokens := firstNonZeroInt(intValue(payload["completion_tokens"]), intValue(payload["output_tokens"]))
-	totalTokens := intValue(payload["total_tokens"])
-	if totalTokens == 0 && (promptTokens != 0 || completionTokens != 0) {
-		totalTokens = promptTokens + completionTokens
-	}
-	usage := &UsageSnapshot{
-		PromptTokens:      promptTokens,
-		CachedInputTokens: cachedInputTokensFromPayload(payload),
-		CompletionTokens:  completionTokens,
-		ReasoningTokens:   reasoningTokensFromPayload(payload),
-		TotalTokens:       totalTokens,
-	}
-	if usage.PromptTokens == 0 && usage.CachedInputTokens == 0 && usage.CompletionTokens == 0 && usage.ReasoningTokens == 0 && usage.TotalTokens == 0 {
-		return nil
-	}
-	return usage
-}
-
-func cachedInputTokensFromPayload(payload map[string]any) int {
-	return firstNonZeroInt(
-		intValue(payload["cached_input_tokens"]),
-		intValue(payload["cached_prompt_tokens"]),
-		intValue(payload["cached_tokens"]),
-		intValue(payload["prompt_cache_hit_tokens"]),
-		intValue(payload["cache_read_input_tokens"]),
-		intValue(nestedAny(payload, "input_tokens_details", "cached_tokens")),
-		intValue(nestedAny(payload, "prompt_tokens_details", "cached_tokens")),
-	)
-}
-
-func reasoningTokensFromPayload(payload map[string]any) int {
-	return firstNonZeroInt(
-		intValue(payload["reasoning_tokens"]),
-		intValue(payload["reasoning_output_tokens"]),
-		intValue(payload["thinking_tokens"]),
-		intValue(payload["thinking_output_tokens"]),
-		intValue(payload["thoughts_token_count"]),
-		intValue(payload["thoughtsTokenCount"]),
-		intValue(nestedAny(payload, "completion_tokens_details", "reasoning_tokens")),
-		intValue(nestedAny(payload, "output_tokens_details", "reasoning_tokens")),
-		intValue(nestedAny(payload, "usage_metadata", "thoughts_token_count")),
-		intValue(nestedAny(payload, "usageMetadata", "thoughtsTokenCount")),
-	)
-}
-
-func firstNonZeroInt(values ...int) int {
-	for _, value := range values {
-		if value != 0 {
-			return value
-		}
-	}
-	return 0
+	return gatewayapi.UsageSnapshotFromMap(payload)
 }
 
 func nestedAny(values map[string]any, path ...string) any {
@@ -1112,36 +1031,5 @@ func canonicalLifecycleStatus(status string) LifecycleStatus {
 		return LifecycleStatusCompleted
 	default:
 		return LifecycleStatus(strings.TrimSpace(status))
-	}
-}
-
-func intValue(v any) int {
-	switch value := v.(type) {
-	case int:
-		return value
-	case int8:
-		return int(value)
-	case int16:
-		return int(value)
-	case int32:
-		return int(value)
-	case int64:
-		return int(value)
-	case uint:
-		return int(value)
-	case uint8:
-		return int(value)
-	case uint16:
-		return int(value)
-	case uint32:
-		return int(value)
-	case uint64:
-		return int(value)
-	case float64:
-		return int(value)
-	case float32:
-		return int(value)
-	default:
-		return 0
 	}
 }

@@ -5,17 +5,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/kernel"
+	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
 func TestGatewayStreamingNarrativeKeepsReasoningAnswerBoundaries(t *testing.T) {
 	model := newGatewayEventTestModel()
 
-	send := func(payload *kernel.NarrativePayload) *Model {
-		updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
-			Event: kernel.Event{
-				Kind:       kernel.EventKindAssistantMessage,
+	send := func(payload *gateway.NarrativePayload) *Model {
+		updated, _ := model.Update(gatewayEventMsg(gateway.EventEnvelope{
+			Event: gateway.Event{
+				Kind:       gateway.EventKindAssistantMessage,
 				SessionRef: session.SessionRef{SessionID: "root-session"},
 				Narrative:  payload,
 			}}))
@@ -24,29 +24,29 @@ func TestGatewayStreamingNarrativeKeepsReasoningAnswerBoundaries(t *testing.T) {
 		return model
 	}
 
-	send(&kernel.NarrativePayload{
-		Role:          kernel.NarrativeRoleAssistant,
+	send(&gateway.NarrativePayload{
+		Role:          gateway.NarrativeRoleAssistant,
 		ReasoningText: "think-1 ",
 		Final:         false,
-		Scope:         kernel.EventScopeMain,
+		Scope:         gateway.EventScopeMain,
 	})
-	send(&kernel.NarrativePayload{
-		Role:  kernel.NarrativeRoleAssistant,
+	send(&gateway.NarrativePayload{
+		Role:  gateway.NarrativeRoleAssistant,
 		Text:  "answer-1 ",
 		Final: false,
-		Scope: kernel.EventScopeMain,
+		Scope: gateway.EventScopeMain,
 	})
-	send(&kernel.NarrativePayload{
-		Role:          kernel.NarrativeRoleAssistant,
+	send(&gateway.NarrativePayload{
+		Role:          gateway.NarrativeRoleAssistant,
 		ReasoningText: "think-2 ",
 		Final:         false,
-		Scope:         kernel.EventScopeMain,
+		Scope:         gateway.EventScopeMain,
 	})
-	send(&kernel.NarrativePayload{
-		Role:  kernel.NarrativeRoleAssistant,
+	send(&gateway.NarrativePayload{
+		Role:  gateway.NarrativeRoleAssistant,
 		Text:  "answer-2",
 		Final: false,
-		Scope: kernel.EventScopeMain,
+		Scope: gateway.EventScopeMain,
 	})
 
 	block, ok := model.doc.Blocks()[0].(*MainACPTurnBlock)
@@ -69,22 +69,22 @@ func TestGatewayParticipantStreamingChunksAppendInsteadOfReplace(t *testing.T) {
 	model := newGatewayEventTestModel()
 
 	send := func(text string) {
-		updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
-			Event: kernel.Event{
-				Kind:       kernel.EventKindAssistantMessage,
+		updated, _ := model.Update(gatewayEventMsg(gateway.EventEnvelope{
+			Event: gateway.Event{
+				Kind:       gateway.EventKindAssistantMessage,
 				SessionRef: session.SessionRef{SessionID: "root-session"},
-				Origin: &kernel.EventOrigin{
-					Scope:         kernel.EventScopeParticipant,
+				Origin: &gateway.EventOrigin{
+					Scope:         gateway.EventScopeParticipant,
 					ScopeID:       "codex-001",
 					Actor:         "codex-001",
 					ParticipantID: "codex-001",
 				},
-				Narrative: &kernel.NarrativePayload{
-					Role:  kernel.NarrativeRoleAssistant,
+				Narrative: &gateway.NarrativePayload{
+					Role:  gateway.NarrativeRoleAssistant,
 					Actor: "codex-001",
 					Text:  text,
 					Final: false,
-					Scope: kernel.EventScopeParticipant,
+					Scope: gateway.EventScopeParticipant,
 				},
 			}}))
 
@@ -111,60 +111,60 @@ func TestGatewayParticipantFinalCumulativeMessagePreservesInterleavedTimeline(t 
 	model := newGatewayEventTestModel()
 
 	sendAssistant := func(text string, final bool) {
-		updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
-			Event: kernel.Event{
-				Kind:       kernel.EventKindAssistantMessage,
+		updated, _ := model.Update(gatewayEventMsg(gateway.EventEnvelope{
+			Event: gateway.Event{
+				Kind:       gateway.EventKindAssistantMessage,
 				SessionRef: session.SessionRef{SessionID: "root-session"},
-				Origin: &kernel.EventOrigin{
-					Scope:         kernel.EventScopeParticipant,
+				Origin: &gateway.EventOrigin{
+					Scope:         gateway.EventScopeParticipant,
 					ScopeID:       "codex-turn-1",
 					Actor:         "@codex",
 					ParticipantID: "codex-001",
 				},
-				Narrative: &kernel.NarrativePayload{
-					Role:  kernel.NarrativeRoleAssistant,
+				Narrative: &gateway.NarrativePayload{
+					Role:  gateway.NarrativeRoleAssistant,
 					Actor: "@codex",
 					Text:  text,
 					Final: final,
-					Scope: kernel.EventScopeParticipant,
+					Scope: gateway.EventScopeParticipant,
 				},
 			}}))
 
 		model = updated.(*Model)
 	}
-	sendTool := func(kind kernel.EventKind, status kernel.ToolStatus) {
-		event := kernel.Event{
+	sendTool := func(kind gateway.EventKind, status gateway.ToolStatus) {
+		event := gateway.Event{
 			Kind:       kind,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			Origin: &kernel.EventOrigin{
-				Scope:         kernel.EventScopeParticipant,
+			Origin: &gateway.EventOrigin{
+				Scope:         gateway.EventScopeParticipant,
 				ScopeID:       "codex-turn-1",
 				Actor:         "@codex",
 				ParticipantID: "codex-001",
 			},
 		}
-		if kind == kernel.EventKindToolCall {
-			event.ToolCall = &kernel.ToolCallPayload{
+		if kind == gateway.EventKindToolCall {
+			event.ToolCall = &gateway.ToolCallPayload{
 				CallID:   "call-1",
 				ToolName: "READ",
 				Status:   status,
-				Scope:    kernel.EventScopeParticipant,
+				Scope:    gateway.EventScopeParticipant,
 			}
 		} else {
-			event.ToolResult = &kernel.ToolResultPayload{
+			event.ToolResult = &gateway.ToolResultPayload{
 				CallID:   "call-1",
 				ToolName: "READ",
 				Status:   status,
-				Scope:    kernel.EventScopeParticipant,
+				Scope:    gateway.EventScopeParticipant,
 			}
 		}
-		updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{Event: event}))
+		updated, _ := model.Update(gatewayEventMsg(gateway.EventEnvelope{Event: event}))
 		model = updated.(*Model)
 	}
 
 	sendAssistant("I will inspect first.", false)
-	sendTool(kernel.EventKindToolCall, kernel.ToolStatusRunning)
-	sendTool(kernel.EventKindToolResult, kernel.ToolStatusCompleted)
+	sendTool(gateway.EventKindToolCall, gateway.ToolStatusRunning)
+	sendTool(gateway.EventKindToolResult, gateway.ToolStatusCompleted)
 	sendAssistant("The final answer is ready.", false)
 	sendAssistant("I will inspect first.\n\nThe final answer is ready.", true)
 
@@ -196,22 +196,22 @@ func TestGatewayParticipantFinalMarkdownWhitespaceReplacesSingleLiveSegment(t *t
 	model := newGatewayEventTestModel()
 
 	sendAssistant := func(text string, final bool) {
-		updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
-			Event: kernel.Event{
-				Kind:       kernel.EventKindAssistantMessage,
+		updated, _ := model.Update(gatewayEventMsg(gateway.EventEnvelope{
+			Event: gateway.Event{
+				Kind:       gateway.EventKindAssistantMessage,
 				SessionRef: session.SessionRef{SessionID: "root-session"},
-				Origin: &kernel.EventOrigin{
-					Scope:         kernel.EventScopeParticipant,
+				Origin: &gateway.EventOrigin{
+					Scope:         gateway.EventScopeParticipant,
 					ScopeID:       "codex-turn-1",
 					Actor:         "@codex",
 					ParticipantID: "codex-001",
 				},
-				Narrative: &kernel.NarrativePayload{
-					Role:  kernel.NarrativeRoleAssistant,
+				Narrative: &gateway.NarrativePayload{
+					Role:  gateway.NarrativeRoleAssistant,
 					Actor: "@codex",
 					Text:  text,
 					Final: final,
-					Scope: kernel.EventScopeParticipant,
+					Scope: gateway.EventScopeParticipant,
 				},
 			}}))
 
@@ -241,21 +241,21 @@ func TestGatewayParticipantPromptTurnsRenderAsSeparateBlocks(t *testing.T) {
 		model = updated.(*Model)
 	}
 	sendParticipant := func(scopeID string, text string) {
-		updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
-			Event: kernel.Event{
-				Kind:       kernel.EventKindAssistantMessage,
+		updated, _ := model.Update(gatewayEventMsg(gateway.EventEnvelope{
+			Event: gateway.Event{
+				Kind:       gateway.EventKindAssistantMessage,
 				SessionRef: session.SessionRef{SessionID: "root-session"},
-				Origin: &kernel.EventOrigin{
-					Scope:   kernel.EventScopeParticipant,
+				Origin: &gateway.EventOrigin{
+					Scope:   gateway.EventScopeParticipant,
 					ScopeID: scopeID,
 					Actor:   "@kate",
 				},
-				Narrative: &kernel.NarrativePayload{
-					Role:  kernel.NarrativeRoleAssistant,
+				Narrative: &gateway.NarrativePayload{
+					Role:  gateway.NarrativeRoleAssistant,
 					Actor: "codex-001",
 					Text:  text,
 					Final: false,
-					Scope: kernel.EventScopeParticipant,
+					Scope: gateway.EventScopeParticipant,
 				},
 			}}))
 
@@ -314,20 +314,20 @@ func TestGatewayParticipantUserMessageDoesNotDuplicateDisplayedPrompt(t *testing
 
 	updated, _ := model.Update(UserMessageMsg{Text: "/claude 总结一下工作"})
 	model = updated.(*Model)
-	updated, _ = model.Update(gatewayEventMsg(kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind:       kernel.EventKindUserMessage,
+	updated, _ = model.Update(gatewayEventMsg(gateway.EventEnvelope{
+		Event: gateway.Event{
+			Kind:       gateway.EventKindUserMessage,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			Origin: &kernel.EventOrigin{
-				Scope:         kernel.EventScopeParticipant,
+			Origin: &gateway.EventOrigin{
+				Scope:         gateway.EventScopeParticipant,
 				ScopeID:       "participant-turn-1",
 				ParticipantID: "participant-1",
 				Actor:         "@jeff",
 			},
-			Narrative: &kernel.NarrativePayload{
-				Role:  kernel.NarrativeRoleUser,
+			Narrative: &gateway.NarrativePayload{
+				Role:  gateway.NarrativeRoleUser,
 				Text:  "总结一下工作",
-				Scope: kernel.EventScopeParticipant,
+				Scope: gateway.EventScopeParticipant,
 			},
 		}}))
 
@@ -400,10 +400,10 @@ func TestEmptyTerminalParticipantTurnDoesNotRenderArrowOrZeroDurationFooter(t *t
 func TestGatewayInterleavedStreamingFinalReplacesMatchingNarrativeOnly(t *testing.T) {
 	model := newGatewayEventTestModel()
 
-	send := func(payload *kernel.NarrativePayload) *Model {
-		updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
-			Event: kernel.Event{
-				Kind:       kernel.EventKindAssistantMessage,
+	send := func(payload *gateway.NarrativePayload) *Model {
+		updated, _ := model.Update(gatewayEventMsg(gateway.EventEnvelope{
+			Event: gateway.Event{
+				Kind:       gateway.EventKindAssistantMessage,
 				SessionRef: session.SessionRef{SessionID: "root-session"},
 				Narrative:  payload,
 			}}))
@@ -412,36 +412,36 @@ func TestGatewayInterleavedStreamingFinalReplacesMatchingNarrativeOnly(t *testin
 		return model
 	}
 
-	send(&kernel.NarrativePayload{
-		Role:          kernel.NarrativeRoleAssistant,
+	send(&gateway.NarrativePayload{
+		Role:          gateway.NarrativeRoleAssistant,
 		ReasoningText: "r1",
 		Final:         false,
-		Scope:         kernel.EventScopeMain,
+		Scope:         gateway.EventScopeMain,
 	})
-	send(&kernel.NarrativePayload{
-		Role:  kernel.NarrativeRoleAssistant,
+	send(&gateway.NarrativePayload{
+		Role:  gateway.NarrativeRoleAssistant,
 		Text:  "a1",
 		Final: false,
-		Scope: kernel.EventScopeMain,
+		Scope: gateway.EventScopeMain,
 	})
-	send(&kernel.NarrativePayload{
-		Role:          kernel.NarrativeRoleAssistant,
+	send(&gateway.NarrativePayload{
+		Role:          gateway.NarrativeRoleAssistant,
 		ReasoningText: "r2-partial",
 		Final:         false,
-		Scope:         kernel.EventScopeMain,
+		Scope:         gateway.EventScopeMain,
 	})
-	send(&kernel.NarrativePayload{
-		Role:  kernel.NarrativeRoleAssistant,
+	send(&gateway.NarrativePayload{
+		Role:  gateway.NarrativeRoleAssistant,
 		Text:  "a2-partial",
 		Final: false,
-		Scope: kernel.EventScopeMain,
+		Scope: gateway.EventScopeMain,
 	})
-	send(&kernel.NarrativePayload{
-		Role:          kernel.NarrativeRoleAssistant,
+	send(&gateway.NarrativePayload{
+		Role:          gateway.NarrativeRoleAssistant,
 		ReasoningText: "r2-final",
 		Text:          "a2-final",
 		Final:         true,
-		Scope:         kernel.EventScopeMain,
+		Scope:         gateway.EventScopeMain,
 	})
 
 	block, ok := model.doc.Blocks()[0].(*MainACPTurnBlock)
@@ -462,23 +462,23 @@ func TestGatewayInterleavedStreamingFinalReplacesMatchingNarrativeOnly(t *testin
 
 func TestGatewayAnchoredSubagentNarrativeDoesNotCreateStandalonePanel(t *testing.T) {
 	model := newGatewayEventTestModel()
-	for _, env := range []kernel.EventEnvelope{
-		{Event: kernel.Event{
-			Kind:       kernel.EventKindToolCall,
+	for _, env := range []gateway.EventEnvelope{
+		{Event: gateway.Event{
+			Kind:       gateway.EventKindToolCall,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			ToolCall: &kernel.ToolCallPayload{
+			ToolCall: &gateway.ToolCallPayload{
 				CallID:   "spawn-1",
 				ToolName: "SPAWN",
-				Status:   kernel.ToolStatusRunning,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusRunning,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{"agent": "self", "prompt": "inspect"},
 			},
 		}},
-		{Event: kernel.Event{
-			Kind:       kernel.EventKindAssistantMessage,
+		{Event: gateway.Event{
+			Kind:       gateway.EventKindAssistantMessage,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			Origin: &kernel.EventOrigin{
-				Scope:   kernel.EventScopeSubagent,
+			Origin: &gateway.EventOrigin{
+				Scope:   gateway.EventScopeSubagent,
 				ScopeID: "jack",
 			},
 			Meta: map[string]any{
@@ -491,8 +491,8 @@ func TestGatewayAnchoredSubagentNarrativeDoesNotCreateStandalonePanel(t *testing
 					},
 				},
 			},
-			Narrative: &kernel.NarrativePayload{
-				Role: kernel.NarrativeRoleAssistant,
+			Narrative: &gateway.NarrativePayload{
+				Role: gateway.NarrativeRoleAssistant,
 				Text: "child output",
 			},
 		}},
@@ -509,23 +509,23 @@ func TestGatewayAnchoredSubagentNarrativeDoesNotCreateStandalonePanel(t *testing
 
 func TestGatewayAnchoredSubagentApprovalAppendsToSpawnTailUntilFinal(t *testing.T) {
 	model := newGatewayEventTestModel()
-	for _, env := range []kernel.EventEnvelope{
-		{Event: kernel.Event{
-			Kind:       kernel.EventKindToolCall,
+	for _, env := range []gateway.EventEnvelope{
+		{Event: gateway.Event{
+			Kind:       gateway.EventKindToolCall,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			ToolCall: &kernel.ToolCallPayload{
+			ToolCall: &gateway.ToolCallPayload{
 				CallID:   "spawn-approval",
 				ToolName: "SPAWN",
-				Status:   kernel.ToolStatusRunning,
-				Scope:    kernel.EventScopeMain,
+				Status:   gateway.ToolStatusRunning,
+				Scope:    gateway.EventScopeMain,
 				RawInput: map[string]any{"agent": "claude", "prompt": "create hello_claude.txt"},
 			},
 		}},
-		{Event: kernel.Event{
-			Kind:       kernel.EventKindApprovalReview,
+		{Event: gateway.Event{
+			Kind:       gateway.EventKindApprovalReview,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			Origin: &kernel.EventOrigin{
-				Scope:   kernel.EventScopeSubagent,
+			Origin: &gateway.EventOrigin{
+				Scope:   gateway.EventScopeSubagent,
 				ScopeID: "task-claude",
 				Actor:   "claude",
 			},
@@ -539,15 +539,15 @@ func TestGatewayAnchoredSubagentApprovalAppendsToSpawnTailUntilFinal(t *testing.
 					},
 				},
 			},
-			ApprovalPayload: &kernel.ApprovalPayload{
+			ApprovalPayload: &gateway.ApprovalPayload{
 				ToolCallID:     "perm-1",
 				ToolName:       "custom_tool",
 				RawInput:       map[string]any{"path": "hello_claude.txt"},
-				ReviewStatus:   kernel.ApprovalReviewStatusApproved,
+				ReviewStatus:   gateway.ApprovalReviewStatusApproved,
 				ReviewText:     "Automatic approval review approved (risk: low, authorization: high): creating the requested file is narrow and authorized.",
 				Risk:           "low",
 				Authorization:  "high",
-				DecisionSource: string(kernel.ApprovalModeAutoReview),
+				DecisionSource: string(gateway.ApprovalModeAutoReview),
 			},
 		}},
 	} {
@@ -570,14 +570,14 @@ func TestGatewayAnchoredSubagentApprovalAppendsToSpawnTailUntilFinal(t *testing.
 		}
 	}
 
-	updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{Event: kernel.Event{
-		Kind:       kernel.EventKindToolResult,
+	updated, _ := model.Update(gatewayEventMsg(gateway.EventEnvelope{Event: gateway.Event{
+		Kind:       gateway.EventKindToolResult,
 		SessionRef: session.SessionRef{SessionID: "root-session"},
-		ToolResult: &kernel.ToolResultPayload{
+		ToolResult: &gateway.ToolResultPayload{
 			CallID:   "spawn-approval",
 			ToolName: "SPAWN",
-			Status:   kernel.ToolStatusCompleted,
-			Scope:    kernel.EventScopeMain,
+			Status:   gateway.ToolStatusCompleted,
+			Scope:    gateway.EventScopeMain,
 			RawInput: map[string]any{"agent": "claude", "prompt": "create hello_claude.txt"},
 			RawOutput: map[string]any{
 				"state":         "completed",

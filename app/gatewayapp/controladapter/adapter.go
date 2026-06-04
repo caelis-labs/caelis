@@ -10,12 +10,14 @@ import (
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/internal/agenthandle"
-	"github.com/OnslaughtSnail/caelis/kernel"
+	kernelimpl "github.com/OnslaughtSnail/caelis/internal/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/controller"
+	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/stream"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
+	acpprojector "github.com/OnslaughtSnail/caelis/protocol/acp/projector"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
@@ -117,8 +119,8 @@ func (d *Adapter) SubscribeStream(ctx context.Context, env eventstream.Envelope)
 			if frame.Text == "" && frame.Event == nil && !frame.Closed {
 				continue
 			}
-			for _, env := range kernel.StreamFrameEvents(req, stream.CloneFrame(*frame)) {
-				for _, projected := range kernel.ProjectACPEventEnvelope(env) {
+			for _, env := range kernelimpl.StreamFrameEvents(req, stream.CloneFrame(*frame)) {
+				for _, projected := range acpprojector.ProjectGatewayEventEnvelope(env) {
 					select {
 					case out <- projected:
 					case <-ctx.Done():
@@ -131,46 +133,46 @@ func (d *Adapter) SubscribeStream(ctx context.Context, env eventstream.Envelope)
 	return out, true
 }
 
-func streamRequestFromACPEvent(env eventstream.Envelope) (kernel.StreamRequest, bool) {
+func streamRequestFromACPEvent(env eventstream.Envelope) (kernelimpl.StreamRequest, bool) {
 	update, ok := env.Update.(schema.ToolCallUpdate)
 	if !ok {
-		return kernel.StreamRequest{}, false
+		return kernelimpl.StreamRequest{}, false
 	}
 	status := strings.TrimSpace(stringFromPtr(update.Status))
 	if status != schema.ToolStatusInProgress {
-		return kernel.StreamRequest{}, false
+		return kernelimpl.StreamRequest{}, false
 	}
 	meta := mergeMeta(update.Meta, env.Meta)
 	toolName := strings.ToUpper(firstNonEmpty(
-		metaString(meta, kernel.EventMetaRoot, kernel.EventMetaRuntime, kernel.EventMetaRuntimeTool, kernel.EventMetaRuntimeToolName),
+		metaString(meta, gateway.EventMetaRoot, gateway.EventMetaRuntime, gateway.EventMetaRuntimeTool, gateway.EventMetaRuntimeToolName),
 		stringFromPtr(update.Title),
 		stringFromPtr(update.Kind),
 	))
 	if toolName != "RUN_COMMAND" && toolName != "SPAWN" {
-		return kernel.StreamRequest{}, false
+		return kernelimpl.StreamRequest{}, false
 	}
 	taskID := firstNonEmpty(
-		metaString(meta, kernel.EventMetaRoot, kernel.EventMetaRuntime, "task", "task_id"),
-		metaString(meta, kernel.EventMetaRoot, kernel.EventMetaRuntime, "task", "internal_task_id"),
+		metaString(meta, gateway.EventMetaRoot, gateway.EventMetaRuntime, "task", "task_id"),
+		metaString(meta, gateway.EventMetaRoot, gateway.EventMetaRuntime, "task", "internal_task_id"),
 	)
 	terminalID := firstNonEmpty(
 		acpTerminalID(update.Content),
-		metaString(meta, kernel.EventMetaRoot, kernel.EventMetaRuntime, "task", "terminal_id"),
+		metaString(meta, gateway.EventMetaRoot, gateway.EventMetaRuntime, "task", "terminal_id"),
 	)
 	if taskID == "" && terminalID == "" {
-		return kernel.StreamRequest{}, false
+		return kernelimpl.StreamRequest{}, false
 	}
-	scope := kernel.EventScope(env.Scope)
+	scope := gateway.EventScope(env.Scope)
 	if scope == "" {
-		scope = kernel.EventScopeMain
+		scope = gateway.EventScopeMain
 	}
-	req := kernel.StreamRequest{
+	req := kernelimpl.StreamRequest{
 		HandleID: strings.TrimSpace(env.HandleID),
 		RunID:    strings.TrimSpace(env.RunID),
 		TurnID:   strings.TrimSpace(env.TurnID),
 		SessionRef: session.SessionRef{SessionID: firstNonEmpty(
 			strings.TrimSpace(env.SessionID),
-			metaString(meta, kernel.EventMetaRoot, kernel.EventMetaRuntime, "task", "session_id"),
+			metaString(meta, gateway.EventMetaRoot, gateway.EventMetaRuntime, "task", "session_id"),
 		)},
 		CallID:   strings.TrimSpace(update.ToolCallID),
 		ToolName: toolName,
@@ -178,15 +180,15 @@ func streamRequestFromACPEvent(env eventstream.Envelope) (kernel.StreamRequest, 
 		Ref: stream.Ref{
 			SessionID: firstNonEmpty(
 				strings.TrimSpace(env.SessionID),
-				metaString(meta, kernel.EventMetaRoot, kernel.EventMetaRuntime, "task", "session_id"),
+				metaString(meta, gateway.EventMetaRoot, gateway.EventMetaRuntime, "task", "session_id"),
 			),
 			TaskID:     taskID,
 			TerminalID: terminalID,
 		},
 		Cursor: stream.Cursor{
-			Output: int64FromAny(metaAny(meta, kernel.EventMetaRoot, kernel.EventMetaRuntime, "task", "output_cursor")),
+			Output: int64FromAny(metaAny(meta, gateway.EventMetaRoot, gateway.EventMetaRuntime, "task", "output_cursor")),
 		},
-		Origin: &kernel.EventOrigin{
+		Origin: &gateway.EventOrigin{
 			Scope:         scope,
 			ScopeID:       strings.TrimSpace(env.ScopeID),
 			Actor:         strings.TrimSpace(env.Actor),
@@ -197,7 +199,7 @@ func streamRequestFromACPEvent(env eventstream.Envelope) (kernel.StreamRequest, 
 		ParticipantID: strings.TrimSpace(env.ParticipantID),
 	}
 	if req.SessionRef.SessionID == "" || req.Ref.SessionID == "" || req.CallID == "" || req.ToolName == "" {
-		return kernel.StreamRequest{}, false
+		return kernelimpl.StreamRequest{}, false
 	}
 	return req, true
 }
@@ -595,9 +597,9 @@ func (d *Adapter) Submit(ctx context.Context, submission Submission) (Turn, erro
 		return nil, err
 	}
 	if isBuiltInControllerSession(activeSession) && activeKernelTurnForSession(gw.ActiveTurns(), activeSession.SessionRef) {
-		err := gw.SubmitActiveTurn(ctx, kernel.SubmitActiveTurnRequest{
+		err := gw.SubmitActiveTurn(ctx, gateway.SubmitActiveTurnRequest{
 			SessionRef:   activeSession.SessionRef,
-			Kind:         kernel.SubmissionKindConversation,
+			Kind:         gateway.SubmissionKindConversation,
 			Text:         input,
 			ContentParts: contentParts,
 			Metadata: map[string]any{
@@ -612,7 +614,7 @@ func (d *Adapter) Submit(ctx context.Context, submission Submission) (Turn, erro
 			return nil, err
 		}
 	}
-	result, err := gw.BeginTurn(ctx, kernel.BeginTurnRequest{
+	result, err := gw.BeginTurn(ctx, gateway.BeginTurnRequest{
 		SessionRef:   activeSession.SessionRef,
 		Input:        input,
 		ContentParts: contentParts,
@@ -635,15 +637,15 @@ func (d *Adapter) Submit(ctx context.Context, submission Submission) (Turn, erro
 	return gatewayTurn{handle: result.Handle}, nil
 }
 
-func activeKernelTurnForSession(active []kernel.ActiveTurnState, ref session.SessionRef) bool {
+func activeKernelTurnForSession(active []gateway.ActiveTurnState, ref session.SessionRef) bool {
 	kind, ok := activeTurnKindForSession(active, ref)
 	if !ok {
 		return false
 	}
-	return kind == "" || strings.EqualFold(kind, string(kernel.ActiveTurnKindKernel))
+	return kind == "" || strings.EqualFold(kind, string(gateway.ActiveTurnKindKernel))
 }
 
-func activeTurnKindForSession(active []kernel.ActiveTurnState, ref session.SessionRef) (string, bool) {
+func activeTurnKindForSession(active []gateway.ActiveTurnState, ref session.SessionRef) (string, bool) {
 	sessionID := strings.TrimSpace(ref.SessionID)
 	if sessionID == "" {
 		return "", false
@@ -666,8 +668,8 @@ func isBuiltInControllerSession(activeSession session.Session) bool {
 }
 
 func isNoActiveRunError(err error) bool {
-	var gwErr *kernel.Error
-	return errors.As(err, &gwErr) && gwErr.Code == kernel.CodeNoActiveRun
+	var gwErr *gateway.Error
+	return errors.As(err, &gwErr) && gwErr.Code == gateway.CodeNoActiveRun
 }
 
 func (d *Adapter) Interrupt(ctx context.Context) error {
@@ -686,7 +688,7 @@ func (d *Adapter) Interrupt(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := gw.Interrupt(ctx, kernel.InterruptRequest{
+	if err := gw.Interrupt(ctx, gateway.InterruptRequest{
 		SessionRef: activeSession.SessionRef,
 		BindingKey: d.bindingKey,
 		Reason:     "tui interrupt",
@@ -746,13 +748,13 @@ func (d *Adapter) ResumeSession(ctx context.Context, sessionID string) (SessionS
 	if err != nil {
 		return SessionSnapshot{}, err
 	}
-	result, err := gw.ResumeSession(ctx, kernel.ResumeSessionRequest{
+	result, err := gw.ResumeSession(ctx, gateway.ResumeSessionRequest{
 		AppName:    d.stack.AppName,
 		UserID:     d.stack.UserID,
 		Workspace:  d.stack.Workspace,
 		SessionID:  strings.TrimSpace(sessionID),
 		BindingKey: d.bindingKey,
-		Binding: kernel.BindingDescriptor{
+		Binding: gateway.BindingDescriptor{
 			Surface: d.bindingKey,
 			Owner:   d.stack.AppName,
 		},
@@ -780,7 +782,7 @@ func (d *Adapter) ListSessions(ctx context.Context, limit int) ([]ResumeCandidat
 	if err != nil {
 		return nil, err
 	}
-	result, err := gw.ListSessions(ctx, kernel.ListSessionsRequest{
+	result, err := gw.ListSessions(ctx, gateway.ListSessionsRequest{
 		AppName:      d.stack.AppName,
 		UserID:       d.stack.UserID,
 		WorkspaceKey: d.stack.Workspace.Key,
@@ -809,7 +811,7 @@ func (d *Adapter) ReplayEvents(ctx context.Context) ([]eventstream.Envelope, err
 	if err != nil {
 		return nil, err
 	}
-	result, err := gw.ReplayEvents(ctx, kernel.ReplayEventsRequest{
+	result, err := gw.ReplayEvents(ctx, gateway.ReplayEventsRequest{
 		SessionRef: activeSession.SessionRef,
 		BindingKey: d.bindingKey,
 	})
@@ -818,7 +820,7 @@ func (d *Adapter) ReplayEvents(ctx context.Context) ([]eventstream.Envelope, err
 	}
 	out := make([]eventstream.Envelope, 0, len(result.Events))
 	for _, env := range result.Events {
-		out = append(out, kernel.ProjectACPEventEnvelope(env)...)
+		out = append(out, acpprojector.ProjectGatewayEventEnvelope(env)...)
 	}
 	return out, nil
 }
@@ -848,7 +850,7 @@ func (d *Adapter) AgentStatus(ctx context.Context) (AgentStatusSnapshot, error) 
 	if err != nil {
 		return AgentStatusSnapshot{}, err
 	}
-	state, err := gw.ControlPlaneState(ctx, kernel.ControlPlaneStateRequest{
+	state, err := gw.ControlPlaneState(ctx, gateway.ControlPlaneStateRequest{
 		SessionRef: activeSession.SessionRef,
 	})
 	if err != nil {
@@ -887,7 +889,7 @@ func (d *Adapter) AgentStatus(ctx context.Context) (AgentStatusSnapshot, error) 
 	return status, nil
 }
 
-func agentParticipantSnapshot(participant kernel.ParticipantState) AgentParticipantSnapshot {
+func agentParticipantSnapshot(participant gateway.ParticipantState) AgentParticipantSnapshot {
 	return AgentParticipantSnapshot{
 		ID:        strings.TrimSpace(participant.ID),
 		Label:     strings.TrimSpace(firstNonEmpty(participant.Label, participant.ID)),
@@ -944,7 +946,7 @@ func (d *Adapter) HandoffAgent(ctx context.Context, target string) (AgentStatusS
 		return AgentStatusSnapshot{}, err
 	}
 	target = strings.TrimSpace(target)
-	req := kernel.HandoffControllerRequest{
+	req := gateway.HandoffControllerRequest{
 		SessionRef: activeSession.SessionRef,
 		BindingKey: d.bindingKey,
 		Source:     "tui_agent_handoff",
@@ -997,7 +999,7 @@ func (d *Adapter) StartAgentSubagent(ctx context.Context, target string, prompt 
 	if err != nil {
 		return nil, err
 	}
-	updated, err := gw.AttachParticipant(ctx, kernel.AttachParticipantRequest{
+	updated, err := gw.AttachParticipant(ctx, gateway.AttachParticipantRequest{
 		SessionRef: activeSession.SessionRef,
 		BindingKey: d.bindingKey,
 		Agent:      agent,
@@ -1019,7 +1021,7 @@ func (d *Adapter) StartAgentSubagent(ctx context.Context, target string, prompt 
 		}
 		return nil, err
 	}
-	result, err := gw.PromptParticipant(ctx, kernel.PromptParticipantRequest{
+	result, err := gw.PromptParticipant(ctx, gateway.PromptParticipantRequest{
 		SessionRef:    updated.SessionRef,
 		BindingKey:    d.bindingKey,
 		ParticipantID: participantID,
@@ -1048,7 +1050,7 @@ func (d *Adapter) detachSideAgentAfterPromptFailure(ctx context.Context, ref ses
 	if err != nil {
 		return nil
 	}
-	updated, err := gw.DetachParticipant(context.WithoutCancel(ctx), kernel.DetachParticipantRequest{
+	updated, err := gw.DetachParticipant(context.WithoutCancel(ctx), gateway.DetachParticipantRequest{
 		SessionRef:    ref,
 		BindingKey:    d.bindingKey,
 		ParticipantID: participantID,
@@ -1067,7 +1069,7 @@ func (d *Adapter) detachSideAgentAfterPromptFailure(ctx context.Context, ref ses
 func (d *Adapter) allocateSideAgentLabel(ctx context.Context, ref session.SessionRef, agent string) string {
 	used := map[string]struct{}{}
 	if gw, err := d.gateway(); err == nil {
-		if state, err := gw.ControlPlaneState(ctx, kernel.ControlPlaneStateRequest{SessionRef: ref}); err == nil {
+		if state, err := gw.ControlPlaneState(ctx, gateway.ControlPlaneStateRequest{SessionRef: ref}); err == nil {
 			for _, participant := range state.Participants {
 				label := agenthandle.Normalize(participant.Label)
 				if label != "" {
@@ -1122,7 +1124,7 @@ func (d *Adapter) ContinueSubagent(ctx context.Context, handle string, prompt st
 	if err != nil {
 		return nil, err
 	}
-	result, err := gw.PromptParticipant(ctx, kernel.PromptParticipantRequest{
+	result, err := gw.PromptParticipant(ctx, gateway.PromptParticipantRequest{
 		SessionRef:    activeSession.SessionRef,
 		BindingKey:    d.bindingKey,
 		ParticipantID: participantID,
@@ -1240,7 +1242,7 @@ func isXiaomiTokenPlanBaseURL(baseURL string) bool {
 }
 
 type gatewayTurn struct {
-	handle kernel.TurnHandle
+	handle gateway.TurnHandle
 }
 
 func (t gatewayTurn) HandleID() string { return t.handle.HandleID() }
@@ -1252,7 +1254,7 @@ func (t gatewayTurn) Events() <-chan eventstream.Envelope {
 	go func() {
 		defer close(out)
 		for env := range events {
-			for _, projected := range kernel.ProjectACPEventEnvelope(env) {
+			for _, projected := range acpprojector.ProjectGatewayEventEnvelope(env) {
 				out <- projected
 			}
 		}
@@ -1260,9 +1262,9 @@ func (t gatewayTurn) Events() <-chan eventstream.Envelope {
 	return out
 }
 func (t gatewayTurn) SubmitApproval(ctx context.Context, decision ApprovalDecision) error {
-	return t.handle.Submit(ctx, kernel.SubmitRequest{
-		Kind: kernel.SubmissionKindApproval,
-		Approval: &kernel.ApprovalDecision{
+	return t.handle.Submit(ctx, gateway.SubmitRequest{
+		Kind: gateway.SubmissionKindApproval,
+		Approval: &gateway.ApprovalDecision{
 			Outcome:    strings.TrimSpace(decision.Outcome),
 			OptionID:   strings.TrimSpace(decision.OptionID),
 			Approved:   decision.Approved,

@@ -4,20 +4,20 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/kernel"
+	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
 func TestRenderEventPolicyForGatewayEnvelopeUsesStructuredToolLane(t *testing.T) {
-	policy, ok := renderEventPolicyFor(gatewayEventMsg(kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind: kernel.EventKindToolCall,
-			ToolCall: &kernel.ToolCallPayload{
+	policy, ok := renderEventPolicyFor(gatewayEventMsg(gateway.EventEnvelope{
+		Event: gateway.Event{
+			Kind: gateway.EventKindToolCall,
+			ToolCall: &gateway.ToolCallPayload{
 				CallID:   "call-1",
 				ToolName: "READ",
 				Status:   "running",
-				Scope:    kernel.EventScopeMain,
+				Scope:    gateway.EventScopeMain,
 			},
 		}}))
 
@@ -56,11 +56,11 @@ func TestRenderEventPolicyForACPEnvelopeUsesStructuredToolLane(t *testing.T) {
 }
 
 func TestRenderEventPolicyKeepsSmoothingForNonFinalNarrative(t *testing.T) {
-	policy, ok := renderEventPolicyFor(gatewayEventMsg(kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind: kernel.EventKindAssistantMessage,
-			Narrative: &kernel.NarrativePayload{
-				Role: kernel.NarrativeRoleAssistant,
+	policy, ok := renderEventPolicyFor(gatewayEventMsg(gateway.EventEnvelope{
+		Event: gateway.Event{
+			Kind: gateway.EventKindAssistantMessage,
+			Narrative: &gateway.NarrativePayload{
+				Role: gateway.NarrativeRoleAssistant,
 				Text: "chunk",
 			},
 		}}))

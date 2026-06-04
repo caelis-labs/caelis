@@ -13,8 +13,8 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
 	"github.com/OnslaughtSnail/caelis/impl/model/providers"
-	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/assembly"
+	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/surfaces/acpserver"
 	"github.com/OnslaughtSnail/caelis/surfaces/headless"
 )
@@ -225,7 +225,7 @@ func runHeadless(ctx context.Context, stack *gatewayapp.Stack, sessionID string,
 	if err != nil {
 		return err
 	}
-	result, err := headless.RunOnce(ctx, stack.Gateway, kernel.BeginTurnRequest{
+	result, err := headless.RunOnce(ctx, stack.Kernel(), gateway.BeginTurnRequest{
 		SessionRef: session.SessionRef,
 		Input:      input,
 		Surface:    "headless",
@@ -310,7 +310,7 @@ func renderConfiguredModelText(alias string, provider string, model string) stri
 	return provider + "/" + model
 }
 
-func streamHandle(ctx context.Context, handle kernel.TurnHandle, stdout io.Writer, stderr io.Writer) error {
+func streamHandle(ctx context.Context, handle gateway.TurnHandle, stdout io.Writer, stderr io.Writer) error {
 	if handle == nil {
 		return nil
 	}
@@ -320,16 +320,16 @@ func streamHandle(ctx context.Context, handle kernel.TurnHandle, stdout io.Write
 		if env.Err != nil {
 			return env.Err
 		}
-		if env.Event.Kind == kernel.EventKindApprovalRequested {
+		if env.Event.Kind == gateway.EventKindApprovalRequested {
 			fmt.Fprintln(stderr, "[approval] denied by default")
-			if err := handle.Submit(ctx, kernel.SubmitRequest{
-				Kind:     kernel.SubmissionKindApproval,
-				Approval: &kernel.ApprovalDecision{Approved: false, Outcome: string(kernel.ApprovalStatusRejected)},
+			if err := handle.Submit(ctx, gateway.SubmitRequest{
+				Kind:     gateway.SubmissionKindApproval,
+				Approval: &gateway.ApprovalDecision{Approved: false, Outcome: string(gateway.ApprovalStatusRejected)},
 			}); err != nil {
 				return err
 			}
 		}
-		if text := kernel.AssistantText(env.Event); text != "" {
+		if text := gateway.AssistantText(env.Event); text != "" {
 			fmt.Fprintln(stdout, text)
 		}
 	}

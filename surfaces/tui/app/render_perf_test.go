@@ -8,7 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/OnslaughtSnail/caelis/kernel"
+	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/tuikit"
 	"github.com/charmbracelet/colorprofile"
@@ -479,57 +479,57 @@ func perfTickAt(kind frameTickKind, at time.Time) tea.Msg {
 	return frameTickMsg{kind: kind, at: at}
 }
 
-func perfGatewayNarrativeFrame(text string) kernel.EventEnvelope {
-	return kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind:       kernel.EventKindAssistantMessage,
+func perfGatewayNarrativeFrame(text string) gateway.EventEnvelope {
+	return gateway.EventEnvelope{
+		Event: gateway.Event{
+			Kind:       gateway.EventKindAssistantMessage,
 			HandleID:   "handle-1",
 			RunID:      "run-1",
 			TurnID:     "turn-1",
 			SessionRef: session.SessionRef{SessionID: "session-1"},
-			Narrative: &kernel.NarrativePayload{
-				Role:       kernel.NarrativeRoleAssistant,
+			Narrative: &gateway.NarrativePayload{
+				Role:       gateway.NarrativeRoleAssistant,
 				Text:       text,
 				Visibility: string(session.VisibilityUIOnly),
 				UpdateType: string(session.ProtocolUpdateTypeAgentMessage),
-				Scope:      kernel.EventScopeMain,
+				Scope:      gateway.EventScopeMain,
 			},
 		},
 	}
 }
 
-func perfGatewayReasoningFrame(text string) kernel.EventEnvelope {
-	return kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind:       kernel.EventKindAssistantMessage,
+func perfGatewayReasoningFrame(text string) gateway.EventEnvelope {
+	return gateway.EventEnvelope{
+		Event: gateway.Event{
+			Kind:       gateway.EventKindAssistantMessage,
 			HandleID:   "handle-1",
 			RunID:      "run-1",
 			TurnID:     "turn-1",
 			SessionRef: session.SessionRef{SessionID: "session-1"},
-			Narrative: &kernel.NarrativePayload{
-				Role:          kernel.NarrativeRoleAssistant,
+			Narrative: &gateway.NarrativePayload{
+				Role:          gateway.NarrativeRoleAssistant,
 				ReasoningText: text,
 				Visibility:    string(session.VisibilityUIOnly),
 				UpdateType:    string(session.ProtocolUpdateTypeAgentThought),
-				Scope:         kernel.EventScopeMain,
+				Scope:         gateway.EventScopeMain,
 			},
 		},
 	}
 }
 
-func perfTerminalFrame(text string, cursor int64) kernel.EventEnvelope {
+func perfTerminalFrame(text string, cursor int64) gateway.EventEnvelope {
 	_ = cursor
-	return kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind:       kernel.EventKindToolResult,
+	return gateway.EventEnvelope{
+		Event: gateway.Event{
+			Kind:       gateway.EventKindToolResult,
 			HandleID:   "handle-1",
 			RunID:      "run-1",
 			TurnID:     "turn-1",
 			SessionRef: session.SessionRef{SessionID: "session-1"},
-			ToolResult: &kernel.ToolResultPayload{
+			ToolResult: &gateway.ToolResultPayload{
 				CallID:   "call-1",
 				ToolName: "RUN_COMMAND",
-				Status:   kernel.ToolStatusRunning,
+				Status:   gateway.ToolStatusRunning,
 				Content:  testTerminalContentWithID(text, "terminal-1"),
 			},
 		},

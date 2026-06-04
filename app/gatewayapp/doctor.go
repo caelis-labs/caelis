@@ -296,7 +296,7 @@ func (s *Stack) resolveDoctorSessionRef(ctx context.Context, req DoctorRequest) 
 		}
 	}
 	if strings.TrimSpace(req.BindingKey) != "" {
-		if gw := s.CurrentGateway(); gw != nil {
+		if gw := s.currentGateway(); gw != nil {
 			if ref, ok := gw.CurrentSession(req.BindingKey); ok {
 				return ref
 			}

@@ -13,9 +13,9 @@ import (
 	"testing"
 
 	"github.com/OnslaughtSnail/caelis/impl/model/providers"
-	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/assembly"
 	"github.com/OnslaughtSnail/caelis/ports/compact"
+	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/protocol/acp"
@@ -481,7 +481,7 @@ func TestSessionRuntimeStateIgnoresStaleModelAliasOutsideConfig(t *testing.T) {
 		if next == nil {
 			next = map[string]any{}
 		}
-		next["kernel.current_model_alias"] = "minimax/minimax-m2.7-highspeed"
+		next["gateway.current_model_alias"] = "minimax/minimax-m2.7-highspeed"
 		return next, nil
 	}); err != nil {
 		t.Fatalf("UpdateState() error = %v", err)
@@ -649,7 +649,7 @@ func TestLocalStackDefaultRuntimeAutoCompactionEnabled(t *testing.T) {
 	appendGatewayAppEvent(t, stack, activeSession.SessionRef, gatewayAppAssistantEvent("ack"))
 	appendGatewayAppEvent(t, stack, activeSession.SessionRef, gatewayAppUserEvent("Next action: verify the default app runtime invokes model-backed compact before the turn."))
 
-	if _, err := headless.RunOnce(ctx, stack.Gateway, kernel.BeginTurnRequest{
+	if _, err := headless.RunOnce(ctx, stack.Kernel(), gateway.BeginTurnRequest{
 		SessionRef: activeSession.SessionRef,
 		Input:      "continue after app auto compact",
 		Surface:    "headless-auto-compact-test",
@@ -707,7 +707,7 @@ func TestLocalStackAutoCompactCountsPromptPrefix(t *testing.T) {
 	}
 	appendGatewayAppEvent(t, stack, activeSession.SessionRef, gatewayAppUserEvent("Short durable event."))
 
-	if _, err := headless.RunOnce(ctx, stack.Gateway, kernel.BeginTurnRequest{
+	if _, err := headless.RunOnce(ctx, stack.Kernel(), gateway.BeginTurnRequest{
 		SessionRef: activeSession.SessionRef,
 		Input:      "continue after prefix pressure",
 		Surface:    "headless-auto-compact-prefix-test",

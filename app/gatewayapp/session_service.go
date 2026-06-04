@@ -8,10 +8,10 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/impl/agent/local"
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/spawn"
-	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/assembly"
 	"github.com/OnslaughtSnail/caelis/ports/compact"
 	"github.com/OnslaughtSnail/caelis/ports/delegation"
+	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/task"
 	"github.com/OnslaughtSnail/caelis/ports/tool"
@@ -25,13 +25,13 @@ func (s *Stack) StartSession(ctx context.Context, preferredSessionID string, bin
 	if gw == nil {
 		return session.Session{}, fmt.Errorf("gatewayapp: gateway is unavailable")
 	}
-	return gw.StartSession(ctx, kernel.StartSessionRequest{
+	return gw.StartSession(ctx, gateway.StartSessionRequest{
 		AppName:            s.AppName,
 		UserID:             s.UserID,
 		Workspace:          s.Workspace,
 		PreferredSessionID: strings.TrimSpace(preferredSessionID),
 		BindingKey:         strings.TrimSpace(bindingKey),
-		Binding: kernel.BindingDescriptor{
+		Binding: gateway.BindingDescriptor{
 			Surface: strings.TrimSpace(bindingKey),
 			Owner:   s.AppName,
 		},
@@ -115,7 +115,7 @@ func (s *Stack) CompactSession(ctx context.Context, ref session.SessionRef) erro
 	}
 	s.mu.RLock()
 	engine := s.engine
-	gw := s.Gateway
+	gw := s.gateway
 	s.mu.RUnlock()
 	if engine == nil {
 		return fmt.Errorf("gatewayapp: runtime is unavailable")
@@ -123,7 +123,7 @@ func (s *Stack) CompactSession(ctx context.Context, ref session.SessionRef) erro
 	if gw == nil || gw.Resolver() == nil {
 		return fmt.Errorf("gatewayapp: resolver is unavailable")
 	}
-	resolved, err := gw.Resolver().ResolveTurn(ctx, kernel.TurnIntent{SessionRef: ref})
+	resolved, err := gw.Resolver().ResolveTurn(ctx, gateway.TurnIntent{SessionRef: ref})
 	if err != nil {
 		return err
 	}
