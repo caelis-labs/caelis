@@ -2,13 +2,16 @@ package session
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"maps"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/ports/model"
+	"github.com/OnslaughtSnail/caelis/ports/tool"
 )
 
 var (
@@ -188,6 +191,33 @@ type LoadSessionRequest struct {
 type AppendEventRequest struct {
 	SessionRef SessionRef `json:"session_ref"`
 	Event      *Event     `json:"event"`
+}
+
+// EventValidationError reports a canonical session event that cannot be used to
+// rebuild model context safely.
+type EventValidationError struct {
+	Detail string
+}
+
+func (e *EventValidationError) Error() string {
+	detail := strings.TrimSpace(e.Detail)
+	if detail == "" {
+		return ErrInvalidEvent.Error()
+	}
+	return ErrInvalidEvent.Error() + ": " + detail
+}
+
+func (e *EventValidationError) Unwrap() error {
+	return ErrInvalidEvent
+}
+
+// EventValidationDetail returns the precise validation detail carried by err.
+func EventValidationDetail(err error) string {
+	var eventErr *EventValidationError
+	if errors.As(err, &eventErr) {
+		return strings.TrimSpace(eventErr.Detail)
+	}
+	return strings.TrimSpace(err.Error())
 }
 
 // EventsRequest lists events for one session.
@@ -529,6 +559,7 @@ func CanonicalizeEvent(event *Event) *Event {
 	if out.Type == "" {
 		out.Type = EventTypeOf(out)
 	}
+	ensureCoreMessage(out)
 	if out.Tool != nil {
 		removeToolProjectionProtocol(out)
 	}
@@ -538,6 +569,38 @@ func CanonicalizeEvent(event *Event) *Event {
 	}
 	ensureProtocolText(out)
 	return out
+}
+
+// ValidateDurableCoreEvent rejects persisted core facts that cannot faithfully
+// rebuild model-visible context. Runtime-only control information is allowed to
+// remain custom/lifecycle/protocol-shaped when it does not enter prompt history.
+func ValidateDurableCoreEvent(event *Event) error {
+	if event == nil || !IsCanonicalHistoryEvent(event) {
+		return nil
+	}
+	switch EventTypeOf(event) {
+	case EventTypeUser, EventTypeAssistant, EventTypeSystem:
+		if event.Message == nil {
+			return coreEventValidationError("model-visible event is missing durable Event.Message")
+		}
+	case EventTypeToolCall:
+		if event.Tool != nil {
+			return validateDurableCoreMeta(event.Meta)
+		}
+		if event.Message != nil && len(event.Message.ToolCalls()) > 0 {
+			return validateDurableCoreMeta(event.Meta)
+		}
+		if hasDurableUsageMetadata(event.Meta) {
+			return validateDurableCoreMeta(event.Meta)
+		}
+		if !hasProtocolToolExecutionPayload(event) {
+			return validateDurableCoreMeta(event.Meta)
+		}
+		return coreEventValidationError("tool call is missing durable Event.Tool or model tool-call payload")
+	case EventTypeToolResult:
+		return validateDurableCoreToolResult(event)
+	}
+	return nil
 }
 
 // IsTransient reports whether one event is runtime-transient only.
@@ -779,6 +842,127 @@ func removeToolProjectionProtocol(event *Event) {
 		return
 	}
 	event.Protocol = &protocol
+}
+
+func ensureCoreMessage(event *Event) {
+	if event == nil || event.Message != nil {
+		return
+	}
+	text := EventText(event)
+	if strings.TrimSpace(text) == "" {
+		return
+	}
+	var message model.Message
+	switch EventTypeOf(event) {
+	case EventTypeUser:
+		message = model.NewTextMessage(model.RoleUser, text)
+	case EventTypeAssistant:
+		if update := ProtocolUpdateOf(event); update != nil && strings.TrimSpace(update.SessionUpdate) == string(ProtocolUpdateTypeAgentThought) {
+			message = model.NewReasoningMessage(model.RoleAssistant, text, model.ReasoningVisibilityVisible)
+		} else {
+			message = model.NewTextMessage(model.RoleAssistant, text)
+		}
+	case EventTypeSystem:
+		message = model.NewTextMessage(model.RoleSystem, text)
+	case EventTypeCompact:
+		message = model.NewTextMessage(model.RoleUser, text)
+	default:
+		return
+	}
+	event.Message = &message
+}
+
+func validateDurableCoreToolResult(event *Event) error {
+	if event.Tool != nil {
+		if len(event.Tool.Output) > 0 {
+			if err := validateDurableCoreRawOutput(event.Tool.Output); err != nil {
+				return err
+			}
+		}
+		return validateDurableCoreMeta(event.Meta)
+	}
+	if event.Message != nil && len(event.Message.ToolResults()) > 0 {
+		return validateDurableCoreMeta(event.Meta)
+	}
+	if hasDurableUsageMetadata(event.Meta) {
+		return validateDurableCoreMeta(event.Meta)
+	}
+	if !hasProtocolToolExecutionPayload(event) {
+		return validateDurableCoreMeta(event.Meta)
+	}
+	return coreEventValidationError("tool result is missing durable Event.Tool or model tool-result payload")
+}
+
+func validateDurableCoreRawOutput(rawOutput map[string]any) error {
+	if _, err := json.Marshal(rawOutput); err != nil {
+		return coreEventValidationError(fmt.Sprintf("tool raw_output is not JSON-serializable: %v", err))
+	}
+	_, info := tool.TruncateMap(rawOutput, tool.DefaultTruncationPolicy())
+	if info.Truncated {
+		return coreEventValidationError(fmt.Sprintf("tool raw_output is not canonical-truncated (estimated %d tokens > %d tokens)", info.EstimatedTokens, info.MaxTokens))
+	}
+	return nil
+}
+
+func validateDurableCoreMeta(meta map[string]any) error {
+	for _, key := range []string{"stdout", "stderr", "result", "error", "exit_code"} {
+		if _, exists := meta[key]; exists {
+			return coreEventValidationError(fmt.Sprintf("tool output field %q is stored in event meta", key))
+		}
+	}
+	return nil
+}
+
+func coreEventValidationError(detail string) error {
+	return &EventValidationError{Detail: strings.TrimSpace(detail)}
+}
+
+func hasProtocolToolExecutionPayload(event *Event) bool {
+	update := ProtocolUpdateOf(event)
+	if update == nil {
+		return false
+	}
+	return strings.TrimSpace(update.ToolCallID) != "" ||
+		strings.TrimSpace(update.Title) != "" ||
+		strings.TrimSpace(update.Kind) != "" ||
+		strings.TrimSpace(update.Status) != "" ||
+		update.Content != nil ||
+		len(update.RawInput) > 0 ||
+		len(update.RawOutput) > 0 ||
+		len(update.Locations) > 0
+}
+
+func hasDurableUsageMetadata(meta map[string]any) bool {
+	if len(meta) == 0 {
+		return false
+	}
+	if _, ok := meta["usage"]; ok {
+		return true
+	}
+	for _, key := range []string{"prompt_tokens", "input_tokens", "completion_tokens", "output_tokens", "total_tokens"} {
+		if _, ok := meta[key]; ok {
+			return true
+		}
+	}
+	if nestedUsageMetadata(meta, "caelis", "sdk", "usage") != nil {
+		return true
+	}
+	if nestedUsageMetadata(meta, "caelis", "usage") != nil {
+		return true
+	}
+	return false
+}
+
+func nestedUsageMetadata(meta map[string]any, path ...string) any {
+	var current any = meta
+	for _, key := range path {
+		mapped, ok := current.(map[string]any)
+		if !ok {
+			return nil
+		}
+		current = mapped[key]
+	}
+	return current
 }
 
 // NormalizeSessionRef returns one normalized session ref.

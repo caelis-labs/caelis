@@ -236,6 +236,9 @@ func (s *Store) AppendEvent(
 		if normalized.Visibility == "" {
 			normalized.Visibility = session.VisibilityCanonical
 		}
+		if err := session.ValidateDurableCoreEvent(normalized); err != nil {
+			return err
+		}
 		if !shouldPersistEvent(normalized) {
 			out = session.CloneEvent(normalized)
 			return nil

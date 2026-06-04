@@ -12,7 +12,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
-func (r *Runtime) AttachACPParticipant(ctx context.Context, req agent.AttachACPParticipantRequest) (session.Session, error) {
+func (r *Runtime) AttachParticipant(ctx context.Context, req agent.AttachParticipantRequest) (session.Session, error) {
 	if r == nil || r.controllers == nil {
 		return session.Session{}, fmt.Errorf("impl/agent/local: ACP controller backend is not configured")
 	}
@@ -52,7 +52,7 @@ func (r *Runtime) AttachACPParticipant(ctx context.Context, req agent.AttachACPP
 	return r.sessions.Session(ctx, ref)
 }
 
-func (r *Runtime) DetachACPParticipant(ctx context.Context, req agent.DetachACPParticipantRequest) (session.Session, error) {
+func (r *Runtime) DetachParticipant(ctx context.Context, req agent.DetachParticipantRequest) (session.Session, error) {
 	if r == nil || r.controllers == nil {
 		return session.Session{}, fmt.Errorf("impl/agent/local: ACP controller backend is not configured")
 	}
@@ -92,7 +92,7 @@ func (r *Runtime) DetachACPParticipant(ctx context.Context, req agent.DetachACPP
 	return r.sessions.Session(ctx, ref)
 }
 
-func (r *Runtime) PromptACPParticipant(ctx context.Context, req agent.PromptACPParticipantRequest) (agent.RunResult, error) {
+func (r *Runtime) PromptParticipant(ctx context.Context, req agent.PromptParticipantRequest) (agent.RunResult, error) {
 	if r == nil || r.controllers == nil {
 		return agent.RunResult{}, fmt.Errorf("impl/agent/local: ACP controller backend is not configured")
 	}
@@ -129,7 +129,7 @@ func (r *Runtime) executeACPParticipantTurn(
 	ctx context.Context,
 	activeSession session.Session,
 	ref session.SessionRef,
-	req agent.PromptACPParticipantRequest,
+	req agent.PromptParticipantRequest,
 	binding session.ParticipantBinding,
 	contextPrelude string,
 	runID string,

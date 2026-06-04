@@ -72,10 +72,10 @@ type Runtime interface {
 	RunState(context.Context, session.SessionRef) (RunState, error)
 }
 
-// AttachACPParticipantRequest attaches one ACP participant without replacing
-// the active controller. This is the programmatic sidecar/delegation entrypoint
-// for app and gateway layers.
-type AttachACPParticipantRequest struct {
+// AttachParticipantRequest attaches one external participant without replacing
+// the active controller. Concrete runtimes may back the participant with ACP,
+// a built-in subagent, or another controller protocol.
+type AttachParticipantRequest struct {
 	SessionRef session.SessionRef      `json:"session_ref"`
 	Agent      string                  `json:"agent,omitempty"`
 	Role       session.ParticipantRole `json:"role,omitempty"`
@@ -83,15 +83,15 @@ type AttachACPParticipantRequest struct {
 	Label      string                  `json:"label,omitempty"`
 }
 
-// DetachACPParticipantRequest removes one attached ACP participant and releases
+// DetachParticipantRequest removes one attached participant and releases
 // any associated adapter-owned transport state.
-type DetachACPParticipantRequest struct {
+type DetachParticipantRequest struct {
 	SessionRef    session.SessionRef `json:"session_ref"`
 	ParticipantID string             `json:"participant_id,omitempty"`
 	Source        string             `json:"source,omitempty"`
 }
 
-type PromptACPParticipantRequest struct {
+type PromptParticipantRequest struct {
 	SessionRef        session.SessionRef  `json:"session_ref"`
 	ParticipantID     string              `json:"participant_id,omitempty"`
 	Input             string              `json:"input,omitempty"`
@@ -100,6 +100,15 @@ type PromptACPParticipantRequest struct {
 	Stream            bool                `json:"stream,omitempty"`
 	ApprovalRequester ApprovalRequester   `json:"-"`
 }
+
+// Deprecated: use AttachParticipantRequest.
+type AttachACPParticipantRequest = AttachParticipantRequest
+
+// Deprecated: use DetachParticipantRequest.
+type DetachACPParticipantRequest = DetachParticipantRequest
+
+// Deprecated: use PromptParticipantRequest.
+type PromptACPParticipantRequest = PromptParticipantRequest
 
 // HandoffControllerRequest switches the active controller for one session. The
 // request is app-owned and not exposed on the LLM-facing tool surface.
@@ -112,11 +121,11 @@ type HandoffControllerRequest struct {
 }
 
 // SessionControlPlane exposes optional session orchestration capabilities such
-// as ACP sidecar attachment and controller handoff.
+// as participant attachment and controller handoff.
 type SessionControlPlane interface {
-	AttachACPParticipant(context.Context, AttachACPParticipantRequest) (session.Session, error)
-	PromptACPParticipant(context.Context, PromptACPParticipantRequest) (RunResult, error)
-	DetachACPParticipant(context.Context, DetachACPParticipantRequest) (session.Session, error)
+	AttachParticipant(context.Context, AttachParticipantRequest) (session.Session, error)
+	PromptParticipant(context.Context, PromptParticipantRequest) (RunResult, error)
+	DetachParticipant(context.Context, DetachParticipantRequest) (session.Session, error)
 	HandoffController(context.Context, HandoffControllerRequest) (session.Session, error)
 }
 

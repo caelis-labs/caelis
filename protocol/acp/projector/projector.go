@@ -495,7 +495,11 @@ func toolCallUpdateFromProtocolUpdate(event *session.Event, update *session.Prot
 	} else if title := summarizeToolCallTitle(name, update.RawInput); title != "" {
 		out.Title = stringPtr(title)
 	}
-	if kind := firstNonEmpty(strings.TrimSpace(update.Kind), toolKindForName(name)); kind != "" {
+	kind := strings.TrimSpace(update.Kind)
+	if kind == "" && strings.TrimSpace(name) != "" {
+		kind = toolKindForName(name)
+	}
+	if kind != "" {
 		out.Kind = stringPtr(kind)
 	}
 	if status := acpToolStatus(update.Status); status != "" {

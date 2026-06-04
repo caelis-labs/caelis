@@ -150,9 +150,9 @@ type sidecarLifecycleRuntime struct {
 	attachWithoutParticipant bool
 	promptErr                error
 	runCalled                bool
-	attach                   agent.AttachACPParticipantRequest
-	prompt                   agent.PromptACPParticipantRequest
-	detach                   agent.DetachACPParticipantRequest
+	attach                   agent.AttachParticipantRequest
+	prompt                   agent.PromptParticipantRequest
+	detach                   agent.DetachParticipantRequest
 	detachCount              int
 }
 
@@ -165,7 +165,7 @@ func (r *sidecarLifecycleRuntime) RunState(context.Context, session.SessionRef) 
 	return agent.RunState{}, nil
 }
 
-func (r *sidecarLifecycleRuntime) AttachACPParticipant(ctx context.Context, req agent.AttachACPParticipantRequest) (session.Session, error) {
+func (r *sidecarLifecycleRuntime) AttachParticipant(ctx context.Context, req agent.AttachParticipantRequest) (session.Session, error) {
 	r.attach = req
 	activeSession, err := r.sessions.Session(ctx, req.SessionRef)
 	if err != nil {
@@ -196,7 +196,7 @@ func (r *sidecarLifecycleRuntime) AttachACPParticipant(ctx context.Context, req 
 	})
 }
 
-func (r *sidecarLifecycleRuntime) PromptACPParticipant(ctx context.Context, req agent.PromptACPParticipantRequest) (agent.RunResult, error) {
+func (r *sidecarLifecycleRuntime) PromptParticipant(ctx context.Context, req agent.PromptParticipantRequest) (agent.RunResult, error) {
 	r.prompt = req
 	if r.promptErr != nil {
 		return agent.RunResult{}, r.promptErr
@@ -219,7 +219,7 @@ func (r *sidecarLifecycleRuntime) PromptACPParticipant(ctx context.Context, req 
 	return agent.RunResult{Session: activeSession, Handle: singleEventSidecarRun{event: event}}, nil
 }
 
-func (r *sidecarLifecycleRuntime) DetachACPParticipant(ctx context.Context, req agent.DetachACPParticipantRequest) (session.Session, error) {
+func (r *sidecarLifecycleRuntime) DetachParticipant(ctx context.Context, req agent.DetachParticipantRequest) (session.Session, error) {
 	r.detach = req
 	r.detachCount++
 	return r.sessions.RemoveParticipant(ctx, session.RemoveParticipantRequest{

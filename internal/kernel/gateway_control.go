@@ -50,7 +50,7 @@ func (g *Gateway) AttachParticipant(ctx context.Context, req AttachParticipantRe
 	if err != nil {
 		return session.Session{}, err
 	}
-	activeSession, err := g.control.AttachACPParticipant(ctx, agent.AttachACPParticipantRequest{
+	activeSession, err := g.control.AttachParticipant(ctx, agent.AttachParticipantRequest{
 		SessionRef: ref,
 		Agent:      strings.TrimSpace(req.Agent),
 		Role:       req.Role,
@@ -77,7 +77,7 @@ func (g *Gateway) DetachParticipant(ctx context.Context, req DetachParticipantRe
 	if err != nil {
 		return session.Session{}, err
 	}
-	activeSession, err := g.control.DetachACPParticipant(ctx, agent.DetachACPParticipantRequest{
+	activeSession, err := g.control.DetachParticipant(ctx, agent.DetachParticipantRequest{
 		SessionRef:    ref,
 		ParticipantID: strings.TrimSpace(req.ParticipantID),
 		Source:        strings.TrimSpace(req.Source),

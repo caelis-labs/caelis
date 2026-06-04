@@ -173,6 +173,39 @@ func TestEventProjectorUsesDurableProtocolUpdateForTerminalToolCall(t *testing.T
 	}
 }
 
+func TestEventProjectorPreservesPartialProtocolToolUpdate(t *testing.T) {
+	updates, err := (EventProjector{}).ProjectEvent(&session.Event{
+		SessionID: "session-1",
+		Type:      session.EventTypeToolResult,
+		Protocol: &session.EventProtocol{
+			Update: &session.ProtocolUpdate{
+				SessionUpdate: UpdateToolCallInfo,
+				ToolCallID:    "call-1",
+				Status:        ToolStatusCompleted,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ProjectEvent() error = %v", err)
+	}
+	if len(updates) != 1 {
+		t.Fatalf("ProjectEvent() produced %d updates, want 1", len(updates))
+	}
+	update, ok := updates[0].(ToolCallUpdate)
+	if !ok {
+		t.Fatalf("update = %T, want ToolCallUpdate", updates[0])
+	}
+	if update.Title != nil {
+		t.Fatalf("title = %q, want nil for partial status update", *update.Title)
+	}
+	if update.Kind != nil {
+		t.Fatalf("kind = %q, want nil for partial status update", *update.Kind)
+	}
+	if update.Status == nil || *update.Status != ToolStatusCompleted {
+		t.Fatalf("status = %v, want %q", update.Status, ToolStatusCompleted)
+	}
+}
+
 func TestEventProjectorPreservesStandardDiffContent(t *testing.T) {
 	oldText := "old line\n"
 	updates, err := (EventProjector{}).ProjectEvent(&session.Event{

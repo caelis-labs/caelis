@@ -56,6 +56,17 @@ func TestStoreAppendAndListCanonicalEvents(t *testing.T) {
 	if got := events[0].Text; got != "hello" {
 		t.Fatalf("event text = %q, want %q", got, "hello")
 	}
+
+	allEvents, err := store.Events(ctx, session.EventsRequest{
+		SessionRef:       createdSession.SessionRef,
+		IncludeTransient: true,
+	})
+	if err != nil {
+		t.Fatalf("Events(include transient) error = %v", err)
+	}
+	if got, want := len(allEvents), 1; got != want {
+		t.Fatalf("len(allEvents) = %d, want %d; memory store must not persist transient notices", got, want)
+	}
 }
 
 func TestStoreUpdateState(t *testing.T) {

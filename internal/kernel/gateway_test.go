@@ -2142,11 +2142,11 @@ type controlPlaneRuntime struct {
 	runState    agent.RunState
 	handoffReq  agent.HandoffControllerRequest
 	handoffResp session.Session
-	attachReq   agent.AttachACPParticipantRequest
+	attachReq   agent.AttachParticipantRequest
 	attachResp  session.Session
-	promptReq   agent.PromptACPParticipantRequest
+	promptReq   agent.PromptParticipantRequest
 	promptResp  agent.RunResult
-	detachReq   agent.DetachACPParticipantRequest
+	detachReq   agent.DetachParticipantRequest
 	detachResp  session.Session
 }
 
@@ -2163,12 +2163,12 @@ func (r *controlPlaneRuntime) HandoffController(_ context.Context, req agent.Han
 	return r.handoffResp, nil
 }
 
-func (r *controlPlaneRuntime) AttachACPParticipant(_ context.Context, req agent.AttachACPParticipantRequest) (session.Session, error) {
+func (r *controlPlaneRuntime) AttachParticipant(_ context.Context, req agent.AttachParticipantRequest) (session.Session, error) {
 	r.attachReq = req
 	return r.attachResp, nil
 }
 
-func (r *controlPlaneRuntime) PromptACPParticipant(_ context.Context, req agent.PromptACPParticipantRequest) (agent.RunResult, error) {
+func (r *controlPlaneRuntime) PromptParticipant(_ context.Context, req agent.PromptParticipantRequest) (agent.RunResult, error) {
 	r.promptReq = req
 	if r.promptResp.Handle != nil || r.promptResp.Session.SessionID != "" {
 		return r.promptResp, nil
@@ -2176,7 +2176,7 @@ func (r *controlPlaneRuntime) PromptACPParticipant(_ context.Context, req agent.
 	return agent.RunResult{Session: r.attachResp}, nil
 }
 
-func (r *controlPlaneRuntime) DetachACPParticipant(_ context.Context, req agent.DetachACPParticipantRequest) (session.Session, error) {
+func (r *controlPlaneRuntime) DetachParticipant(_ context.Context, req agent.DetachParticipantRequest) (session.Session, error) {
 	r.detachReq = req
 	return r.detachResp, nil
 }

@@ -87,6 +87,38 @@ func TestStoreAppendAndPersistCanonicalEvents(t *testing.T) {
 	}
 }
 
+func TestStoreAppendRejectsProtocolOnlyCoreToolResult(t *testing.T) {
+	t.Parallel()
+
+	store := NewStore(Config{
+		RootDir:            t.TempDir(),
+		SessionIDGenerator: func() string { return "sess-1" },
+	})
+	ctx := context.Background()
+	createdSession, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+		AppName: "caelis",
+		UserID:  "user-1",
+	})
+	if err != nil {
+		t.Fatalf("GetOrCreate() error = %v", err)
+	}
+
+	_, err = store.AppendEvent(ctx, createdSession.SessionRef, &session.Event{
+		Type: session.EventTypeToolResult,
+		Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
+			SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate),
+			ToolCallID:    "call-1",
+			RawOutput:     map[string]any{"stdout": "ok"},
+		}},
+	})
+	if err == nil {
+		t.Fatal("AppendEvent() error = nil, want protocol-only core event rejection")
+	}
+	if detail := session.EventValidationDetail(err); !strings.Contains(detail, "missing durable Event.Tool") {
+		t.Fatalf("AppendEvent() error = %v, want durable Event.Tool validation detail", err)
+	}
+}
+
 func TestStoreAppendRegeneratesDuplicateEventIDAcrossProcesses(t *testing.T) {
 	t.Parallel()
 

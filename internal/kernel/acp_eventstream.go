@@ -6,6 +6,7 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
+	acpprojector "github.com/OnslaughtSnail/caelis/protocol/acp/projector"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
@@ -20,19 +21,7 @@ func ProjectACPEventEnvelope(env EventEnvelope) []eventstream.Envelope {
 	base := acpEventBase(env)
 	out := make([]eventstream.Envelope, 0, 3)
 	if env.Event.Protocol != nil {
-		protocol := session.CloneEventProtocol(*env.Event.Protocol)
-		if permission := acpPermissionEnvelope(base, protocol.Permission); permission != nil {
-			out = append(out, *permission)
-		}
-		if update := acpUpdateFromProtocol(protocol.Update); update != nil {
-			next := base
-			next.Kind = eventstream.KindSessionUpdate
-			next.Update = update
-			if protocol.Update != nil {
-				next.Meta = mergeACPEventMeta(protocol.Update.Meta, next.Meta)
-			}
-			out = append(out, next)
-		}
+		out = append(out, projectACPProtocolEvents(base, env.Event)...)
 	}
 	if len(out) == 0 {
 		out = append(out, inferACPEventsFromGatewayEvent(base, env.Event)...)
@@ -63,6 +52,48 @@ func ProjectACPEventEnvelope(env EventEnvelope) []eventstream.Envelope {
 	return out
 }
 
+func projectACPProtocolEvents(base eventstream.Envelope, ev Event) []eventstream.Envelope {
+	if ev.Protocol == nil {
+		return nil
+	}
+	protocol := session.CloneEventProtocol(*ev.Protocol)
+	sessionEvent := session.Event{
+		SessionID: base.SessionID,
+		Type:      sessionTypeFromEventKind(ev.Kind),
+		Protocol:  &protocol,
+	}
+	if ev.Narrative != nil {
+		sessionEvent.Text = ev.Narrative.Text
+	}
+	projector := acpprojector.EventProjector{}
+	out := make([]eventstream.Envelope, 0, 2)
+	if permission, ok, err := projector.ProjectPermissionRequest(&sessionEvent); err != nil {
+		return []eventstream.Envelope{eventstream.Error(err)}
+	} else if ok && permission != nil {
+		next := base
+		next.Kind = eventstream.KindRequestPermission
+		next.Permission = permission
+		out = append(out, next)
+	}
+	updates, err := projector.ProjectEvent(&sessionEvent)
+	if err != nil {
+		return []eventstream.Envelope{eventstream.Error(err)}
+	}
+	for _, update := range updates {
+		if update == nil {
+			continue
+		}
+		next := base
+		next.Kind = eventstream.KindSessionUpdate
+		next.Update = update
+		if protocol.Update != nil {
+			next.Meta = mergeACPEventMeta(protocol.Update.Meta, next.Meta)
+		}
+		out = append(out, next)
+	}
+	return out
+}
+
 func acpEventBase(env EventEnvelope) eventstream.Envelope {
 	ev := env.Event
 	scope := acpEventScope(ev)
@@ -83,39 +114,33 @@ func acpEventBase(env EventEnvelope) eventstream.Envelope {
 	}
 }
 
-func acpPermissionEnvelope(base eventstream.Envelope, permission *session.ProtocolApproval) *eventstream.Envelope {
-	if permission == nil {
-		return nil
+func sessionTypeFromEventKind(kind EventKind) session.EventType {
+	switch kind {
+	case EventKindUserMessage:
+		return session.EventTypeUser
+	case EventKindAssistantMessage:
+		return session.EventTypeAssistant
+	case EventKindPlanUpdate:
+		return session.EventTypePlan
+	case EventKindToolCall:
+		return session.EventTypeToolCall
+	case EventKindToolResult:
+		return session.EventTypeToolResult
+	case EventKindParticipant:
+		return session.EventTypeParticipant
+	case EventKindHandoff:
+		return session.EventTypeHandoff
+	case EventKindCompact:
+		return session.EventTypeCompact
+	case EventKindNotice:
+		return session.EventTypeNotice
+	case EventKindLifecycle, EventKindApprovalRequested, EventKindApprovalReview:
+		return session.EventTypeLifecycle
+	case EventKindSystemMessage:
+		return session.EventTypeSystem
+	default:
+		return session.EventTypeCustom
 	}
-	out := base
-	out.Kind = eventstream.KindRequestPermission
-	options := make([]schema.PermissionOption, 0, len(permission.Options))
-	for _, item := range permission.Options {
-		options = append(options, schema.PermissionOption{
-			OptionID: strings.TrimSpace(item.ID),
-			Name:     strings.TrimSpace(item.Name),
-			Kind:     strings.TrimSpace(item.Kind),
-		})
-	}
-	tool := permission.ToolCall
-	title := strings.TrimSpace(tool.Title)
-	kind := firstNonEmpty(strings.TrimSpace(tool.Kind), strings.TrimSpace(tool.Name))
-	status := strings.TrimSpace(tool.Status)
-	out.Permission = &schema.RequestPermissionRequest{
-		SessionID: base.SessionID,
-		ToolCall: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo,
-			ToolCallID:    strings.TrimSpace(tool.ID),
-			Title:         stringPtrOrNil(title),
-			Kind:          stringPtrOrNil(kind),
-			Status:        stringPtrOrNil(normalizeACPToolStatus(status)),
-			RawInput:      maps.Clone(tool.RawInput),
-			RawOutput:     maps.Clone(tool.RawOutput),
-			Content:       acpToolCallContent(tool.Content),
-		},
-		Options: options,
-	}
-	return &out
 }
 
 func inferACPEventsFromGatewayEvent(base eventstream.Envelope, ev Event) []eventstream.Envelope {
@@ -362,65 +387,6 @@ func singleACPTextEvent(base eventstream.Envelope, updateType string, text strin
 	return base
 }
 
-func acpUpdateFromProtocol(update *session.ProtocolUpdate) schema.Update {
-	if update == nil {
-		return nil
-	}
-	switch strings.TrimSpace(update.SessionUpdate) {
-	case string(session.ProtocolUpdateTypeUserMessage),
-		string(session.ProtocolUpdateTypeAgentMessage),
-		string(session.ProtocolUpdateTypeAgentThought):
-		return schema.ContentChunk{
-			SessionUpdate: strings.TrimSpace(update.SessionUpdate),
-			Content:       update.Content,
-		}
-	case string(session.ProtocolUpdateTypeToolCall):
-		return schema.ToolCall{
-			SessionUpdate: schema.UpdateToolCall,
-			ToolCallID:    strings.TrimSpace(update.ToolCallID),
-			Title:         firstNonEmpty(update.Title, update.Kind),
-			Kind:          strings.TrimSpace(update.Kind),
-			Status:        normalizeACPToolStatus(update.Status),
-			RawInput:      maps.Clone(update.RawInput),
-			RawOutput:     maps.Clone(update.RawOutput),
-			Content:       acpToolCallContent(session.ProtocolToolCallContentOf(update)),
-			Locations:     acpToolCallLocations(update.Locations),
-			Meta:          maps.Clone(update.Meta),
-		}
-	case string(session.ProtocolUpdateTypeToolUpdate):
-		title := strings.TrimSpace(update.Title)
-		kind := strings.TrimSpace(update.Kind)
-		status := ""
-		if strings.TrimSpace(update.Status) != "" {
-			status = normalizeACPToolStatus(update.Status)
-		}
-		return schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo,
-			ToolCallID:    strings.TrimSpace(update.ToolCallID),
-			Title:         stringPtrOrNil(title),
-			Kind:          stringPtrOrNil(kind),
-			Status:        stringPtrOrNil(status),
-			RawInput:      maps.Clone(update.RawInput),
-			RawOutput:     maps.Clone(update.RawOutput),
-			Content:       acpToolCallContent(session.ProtocolToolCallContentOf(update)),
-			Locations:     acpToolCallLocations(update.Locations),
-			Meta:          maps.Clone(update.Meta),
-		}
-	case string(session.ProtocolUpdateTypePlan):
-		entries := make([]schema.PlanEntry, 0, len(update.Entries))
-		for _, item := range update.Entries {
-			entries = append(entries, schema.PlanEntry{
-				Content:  strings.TrimSpace(item.Content),
-				Status:   strings.TrimSpace(item.Status),
-				Priority: strings.TrimSpace(item.Priority),
-			})
-		}
-		return schema.PlanUpdate{SessionUpdate: schema.UpdatePlan, Entries: entries}
-	default:
-		return nil
-	}
-}
-
 func acpToolCallContent(in []session.ProtocolToolCallContent) []schema.ToolCallContent {
 	if len(in) == 0 {
 		return nil
@@ -434,20 +400,6 @@ func acpToolCallContent(in []session.ProtocolToolCallContent) []schema.ToolCallC
 			Path:       strings.TrimSpace(item.Path),
 			OldText:    item.OldText,
 			NewText:    item.NewText,
-		})
-	}
-	return out
-}
-
-func acpToolCallLocations(in []session.ProtocolToolCallLocation) []schema.ToolCallLocation {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make([]schema.ToolCallLocation, 0, len(in))
-	for _, item := range in {
-		out = append(out, schema.ToolCallLocation{
-			Path: strings.TrimSpace(item.Path),
-			Line: item.Line,
 		})
 	}
 	return out

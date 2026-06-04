@@ -163,7 +163,6 @@ func (s *Store) AppendEvent(
 	}
 
 	normalized := session.CanonicalizeEvent(event)
-	s.ensureUniqueEventID(normalized, existingEventIDSet(record.events))
 	normalized.SessionID = record.session.SessionID
 	if normalized.Time.IsZero() {
 		normalized.Time = s.now()
@@ -174,6 +173,13 @@ func (s *Store) AppendEvent(
 	if normalized.Visibility == "" {
 		normalized.Visibility = session.VisibilityCanonical
 	}
+	if err := session.ValidateDurableCoreEvent(normalized); err != nil {
+		return nil, err
+	}
+	if !shouldPersistEvent(normalized) {
+		return session.CloneEvent(normalized), nil
+	}
+	s.ensureUniqueEventID(normalized, existingEventIDSet(record.events))
 	record.events = append(record.events, normalized)
 	record.session.UpdatedAt = normalized.Time
 	if record.session.Title == "" {
@@ -512,6 +518,10 @@ func existingEventIDSet(events []*session.Event) map[string]struct{} {
 		}
 	}
 	return out
+}
+
+func shouldPersistEvent(event *session.Event) bool {
+	return event != nil && !session.IsTransient(event)
 }
 
 func cloneState(state map[string]any) map[string]any {

@@ -193,7 +193,7 @@ func (g *Gateway) runParticipantTurn(
 	defer handle.finish()
 	defer g.releaseActive(session.SessionID, handle)
 
-	runReq := agent.PromptACPParticipantRequest{
+	runReq := agent.PromptParticipantRequest{
 		SessionRef:    session.SessionRef,
 		ParticipantID: strings.TrimSpace(req.ParticipantID),
 		Input:         strings.TrimSpace(req.Input),
@@ -205,7 +205,7 @@ func (g *Gateway) runParticipantTurn(
 		return g.resolveApprovalRequest(ctx, approvalCtx, handle, &req, nil)
 	})
 
-	result, err := g.control.PromptACPParticipant(ctx, runReq)
+	result, err := g.control.PromptParticipant(ctx, runReq)
 	if err != nil {
 		handle.publish(EventEnvelope{
 			Event: Event{

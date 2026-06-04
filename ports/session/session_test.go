@@ -1,6 +1,7 @@
 package session
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -276,6 +277,104 @@ func TestEventTypeOfProtocolPlan(t *testing.T) {
 	}
 	if got := event.Protocol.Approval.Options[0].ID; got != "allow_once" {
 		t.Fatalf("source approval option = %q, want %q", got, "allow_once")
+	}
+}
+
+func TestCanonicalizeEventBuildsCoreMessageFromProtocolText(t *testing.T) {
+	t.Parallel()
+
+	event := CanonicalizeEvent(&Event{
+		Type: EventTypeAssistant,
+		Protocol: &EventProtocol{Update: &ProtocolUpdate{
+			SessionUpdate: string(ProtocolUpdateTypeAgentMessage),
+			Content:       ProtocolTextContent("final answer"),
+		}},
+	})
+	if event == nil || event.Message == nil {
+		t.Fatal("CanonicalizeEvent() did not build durable Message")
+	}
+	if event.Message.Role != model.RoleAssistant || event.Message.TextContent() != "final answer" {
+		t.Fatalf("message = %#v, want assistant final answer", event.Message)
+	}
+	if event.Protocol != nil && event.Protocol.Update != nil && event.Protocol.Update.Content != nil {
+		t.Fatalf("protocol text content duplicated after canonicalization: %#v", event.Protocol.Update.Content)
+	}
+}
+
+func TestCanonicalizeEventPreservesProtocolTextWhitespaceInCoreMessage(t *testing.T) {
+	t.Parallel()
+
+	const text = "  final answer\n"
+	event := CanonicalizeEvent(&Event{
+		Type: EventTypeAssistant,
+		Protocol: &EventProtocol{Update: &ProtocolUpdate{
+			SessionUpdate: string(ProtocolUpdateTypeAgentMessage),
+			Content:       ProtocolTextContent(text),
+		}},
+	})
+	if event == nil || event.Message == nil {
+		t.Fatal("CanonicalizeEvent() did not build durable Message")
+	}
+	if got := event.Message.TextContent(); got != text {
+		t.Fatalf("message text = %q, want raw protocol text %q", got, text)
+	}
+}
+
+func TestValidateDurableCoreEventRejectsProtocolOnlyToolResult(t *testing.T) {
+	t.Parallel()
+
+	err := ValidateDurableCoreEvent(&Event{
+		Type:       EventTypeToolResult,
+		Visibility: VisibilityCanonical,
+		Protocol: &EventProtocol{Update: &ProtocolUpdate{
+			SessionUpdate: string(ProtocolUpdateTypeToolUpdate),
+			ToolCallID:    "call-1",
+			RawOutput:     map[string]any{"stdout": "ok"},
+		}},
+	})
+	if err == nil {
+		t.Fatal("ValidateDurableCoreEvent() error = nil, want protocol-only tool result rejection")
+	}
+	if detail := EventValidationDetail(err); !strings.Contains(detail, "missing durable Event.Tool") {
+		t.Fatalf("validation detail = %q, want durable Event.Tool rejection", detail)
+	}
+}
+
+func TestValidateDurableCoreEventAllowsUsageOnlyProtocolToolEvent(t *testing.T) {
+	t.Parallel()
+
+	err := ValidateDurableCoreEvent(&Event{
+		Type:       EventTypeToolCall,
+		Visibility: VisibilityCanonical,
+		Protocol: &EventProtocol{Update: &ProtocolUpdate{
+			SessionUpdate: string(ProtocolUpdateTypeToolCall),
+			ToolCallID:    "call-1",
+			Kind:          "RUN_COMMAND",
+			RawInput:      map[string]any{"command": "pwd"},
+		}},
+		Meta: map[string]any{
+			"caelis": map[string]any{
+				"sdk": map[string]any{
+					"usage": map[string]any{"prompt_tokens": 10, "completion_tokens": 2},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ValidateDurableCoreEvent() error = %v, want usage-only protocol tool event accepted", err)
+	}
+}
+
+func TestValidateDurableCoreEventAllowsTextOnlyToolPlaceholder(t *testing.T) {
+	t.Parallel()
+
+	err := ValidateDurableCoreEvent(&Event{
+		Type:       EventTypeToolResult,
+		Visibility: VisibilityCanonical,
+		Text:       "tool output shown only in transcript",
+	})
+	if err != nil {
+		t.Fatalf("ValidateDurableCoreEvent() error = %v, want text-only placeholder accepted", err)
 	}
 }
 

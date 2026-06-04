@@ -558,7 +558,7 @@ func (a *RuntimeAgent) runSideACPCommand(
 		return agent.RunResult{}, fmt.Errorf("impl/agent/acp: side ACP commands require session control plane support")
 	}
 	label := sideACPLabel(activeSession, side.agent)
-	updated, err := control.AttachACPParticipant(ctx, agent.AttachACPParticipantRequest{
+	updated, err := control.AttachParticipant(ctx, agent.AttachParticipantRequest{
 		SessionRef: ref,
 		Agent:      side.agent,
 		Role:       session.ParticipantRoleSidecar,
@@ -570,13 +570,13 @@ func (a *RuntimeAgent) runSideACPCommand(
 	}
 	participantID, err := sideACPParticipantID(updated, side.agent, label)
 	if err != nil {
-		_, detachErr := control.DetachACPParticipant(context.WithoutCancel(ctx), agent.DetachACPParticipantRequest{
+		_, detachErr := control.DetachParticipant(context.WithoutCancel(ctx), agent.DetachParticipantRequest{
 			SessionRef: updated.SessionRef,
 			Source:     "side_agent_attach_rollback",
 		})
 		return agent.RunResult{}, errors.Join(err, detachErr)
 	}
-	result, err := control.PromptACPParticipant(ctx, agent.PromptACPParticipantRequest{
+	result, err := control.PromptParticipant(ctx, agent.PromptParticipantRequest{
 		SessionRef:    updated.SessionRef,
 		ParticipantID: participantID,
 		Input:         side.prompt,
@@ -591,7 +591,7 @@ func (a *RuntimeAgent) runSideACPCommand(
 		},
 	})
 	if err != nil {
-		_, detachErr := control.DetachACPParticipant(context.WithoutCancel(ctx), agent.DetachACPParticipantRequest{
+		_, detachErr := control.DetachParticipant(context.WithoutCancel(ctx), agent.DetachParticipantRequest{
 			SessionRef:    updated.SessionRef,
 			ParticipantID: participantID,
 			Source:        "side_agent_prompt_rollback",

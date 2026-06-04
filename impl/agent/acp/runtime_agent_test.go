@@ -1009,8 +1009,8 @@ type sideACPCommandRuntime struct {
 	sessions      session.Service
 	expectedAgent string
 	runCalled     bool
-	attach        agent.AttachACPParticipantRequest
-	prompt        agent.PromptACPParticipantRequest
+	attach        agent.AttachParticipantRequest
+	prompt        agent.PromptParticipantRequest
 }
 
 func (r *sideACPCommandRuntime) Run(context.Context, agent.RunRequest) (agent.RunResult, error) {
@@ -1022,7 +1022,7 @@ func (r *sideACPCommandRuntime) RunState(context.Context, session.SessionRef) (a
 	return agent.RunState{}, nil
 }
 
-func (r *sideACPCommandRuntime) AttachACPParticipant(ctx context.Context, req agent.AttachACPParticipantRequest) (session.Session, error) {
+func (r *sideACPCommandRuntime) AttachParticipant(ctx context.Context, req agent.AttachParticipantRequest) (session.Session, error) {
 	r.attach = req
 	if r.expectedAgent != "" && req.Agent != r.expectedAgent {
 		return session.Session{}, fmt.Errorf("agent %q not found", req.Agent)
@@ -1053,7 +1053,7 @@ func (r *sideACPCommandRuntime) AttachACPParticipant(ctx context.Context, req ag
 	})
 }
 
-func (r *sideACPCommandRuntime) PromptACPParticipant(ctx context.Context, req agent.PromptACPParticipantRequest) (agent.RunResult, error) {
+func (r *sideACPCommandRuntime) PromptParticipant(ctx context.Context, req agent.PromptParticipantRequest) (agent.RunResult, error) {
 	r.prompt = req
 	activeSession, err := r.sessions.Session(ctx, req.SessionRef)
 	if err != nil {
@@ -1073,7 +1073,7 @@ func (r *sideACPCommandRuntime) PromptACPParticipant(ctx context.Context, req ag
 	return agent.RunResult{Session: activeSession, Handle: sideACPCommandRun{event: event}}, nil
 }
 
-func (r *sideACPCommandRuntime) DetachACPParticipant(context.Context, agent.DetachACPParticipantRequest) (session.Session, error) {
+func (r *sideACPCommandRuntime) DetachParticipant(context.Context, agent.DetachParticipantRequest) (session.Session, error) {
 	return session.Session{}, nil
 }
 

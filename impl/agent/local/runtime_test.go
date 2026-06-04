@@ -799,7 +799,7 @@ func TestRuntimeACPControllerTurnSendsUnsyncedSharedDialogue(t *testing.T) {
 	}
 }
 
-func TestRuntimePromptACPParticipantPersistsPublicDialogue(t *testing.T) {
+func TestRuntimePromptParticipantPersistsPublicDialogue(t *testing.T) {
 	t.Parallel()
 
 	sessions, activeSession := newTestSessionService(t, "sess-acp-side-dialogue")
@@ -892,14 +892,14 @@ func TestRuntimePromptACPParticipantPersistsPublicDialogue(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	updated, err := runtime.PromptACPParticipant(context.Background(), agent.PromptACPParticipantRequest{
+	updated, err := runtime.PromptParticipant(context.Background(), agent.PromptParticipantRequest{
 		SessionRef:    activeSession.SessionRef,
 		ParticipantID: "emma",
 		Input:         "刚才都做了什么？总结一下",
 		Source:        "tui_agent_ask",
 	})
 	if err != nil {
-		t.Fatalf("PromptACPParticipant() error = %v", err)
+		t.Fatalf("PromptParticipant() error = %v", err)
 	}
 	select {
 	case req := <-turnReqCh:
@@ -955,7 +955,7 @@ func TestRuntimePromptACPParticipantPersistsPublicDialogue(t *testing.T) {
 	}
 }
 
-func TestRuntimePromptACPParticipantRehydratesPersistedBinding(t *testing.T) {
+func TestRuntimePromptParticipantRehydratesPersistedBinding(t *testing.T) {
 	t.Parallel()
 
 	sessions, activeSession := newTestSessionService(t, "sess-acp-side-rehydrate")
@@ -1003,14 +1003,14 @@ func TestRuntimePromptACPParticipantRehydratesPersistedBinding(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	result, err := runtime.PromptACPParticipant(context.Background(), agent.PromptACPParticipantRequest{
+	result, err := runtime.PromptParticipant(context.Background(), agent.PromptParticipantRequest{
 		SessionRef:    activeSession.SessionRef,
 		ParticipantID: "codex-3",
 		Input:         "please inspect the local diff",
 		Source:        "tui_agent_ask",
 	})
 	if err != nil {
-		t.Fatalf("PromptACPParticipant() error = %v", err)
+		t.Fatalf("PromptParticipant() error = %v", err)
 	}
 	select {
 	case req := <-attachReqCh:
@@ -1048,7 +1048,7 @@ func TestRuntimePromptACPParticipantRehydratesPersistedBinding(t *testing.T) {
 	}
 }
 
-func TestRuntimePromptACPParticipantCancelCancelsControllerTurn(t *testing.T) {
+func TestRuntimePromptParticipantCancelCancelsControllerTurn(t *testing.T) {
 	t.Parallel()
 
 	sessions, activeSession := newTestSessionService(t, "sess-acp-side-cancel")
@@ -1086,14 +1086,14 @@ func TestRuntimePromptACPParticipantCancelCancelsControllerTurn(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	result, err := runtime.PromptACPParticipant(context.Background(), agent.PromptACPParticipantRequest{
+	result, err := runtime.PromptParticipant(context.Background(), agent.PromptParticipantRequest{
 		SessionRef:    activeSession.SessionRef,
 		ParticipantID: "emma",
 		Input:         "stop me",
 		Source:        "slash_claude",
 	})
 	if err != nil {
-		t.Fatalf("PromptACPParticipant() error = %v", err)
+		t.Fatalf("PromptParticipant() error = %v", err)
 	}
 	select {
 	case <-turnReqCh:
@@ -1101,7 +1101,7 @@ func TestRuntimePromptACPParticipantCancelCancelsControllerTurn(t *testing.T) {
 		t.Fatal("participant prompt request was not sent")
 	}
 	if result.Handle == nil {
-		t.Fatal("PromptACPParticipant() handle = nil")
+		t.Fatal("PromptParticipant() handle = nil")
 	}
 	if !result.Handle.Cancel().Cancelled() {
 		t.Fatal("participant handle Cancel().Cancelled() = false, want true")
