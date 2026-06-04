@@ -1153,6 +1153,80 @@ func TestSlashAgentInstallPassesOptions(t *testing.T) {
 	}
 }
 
+func TestSlashAgentInstallSuccessUsesLightweightFeedback(t *testing.T) {
+	driver := &bridgeTestDriver{
+		agentStatus: control.AgentStatusSnapshot{
+			SessionID:       "sess-1",
+			ControllerKind:  "kernel",
+			ControllerLabel: "local",
+			DelegatedParticipants: []control.AgentParticipantSnapshot{{
+				ID:        "self-001",
+				Label:     "@pavel",
+				AgentName: "self",
+			}},
+		},
+	}
+	var msgs []tea.Msg
+	result := slashAgentWithContext(context.Background(), driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "install claude")
+	if result.Err != nil {
+		t.Fatalf("slashAgentWithContext(install) error = %v", result.Err)
+	}
+	for _, want := range []string{
+		"claude is ready",
+		"/claude <prompt> starts a side ACP task",
+		"/agent use claude makes it the main controller",
+	} {
+		if !noticeMessagesContain(msgs, want) {
+			t.Fatalf("slashAgentWithContext(install) messages = %#v, want %q", msgs, want)
+		}
+	}
+	for _, forbidden := range []string{"Agent Controller", "Session", "Delegated tasks"} {
+		if noticeMessagesContain(msgs, forbidden) {
+			t.Fatalf("slashAgentWithContext(install) messages = %#v, should not contain %q", msgs, forbidden)
+		}
+	}
+}
+
+func TestSlashAgentAddSuccessUsesReadyHint(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		agent string
+	}{
+		{name: "builtin", input: "add copilot", agent: "copilot"},
+		{name: "custom", input: "add custom helper -- helper-acp --stdio --model test", agent: "helper"},
+		{name: "install flag", input: "add --install claude", agent: "claude"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			driver := &bridgeTestDriver{
+				agentStatus: control.AgentStatusSnapshot{
+					SessionID:       "sess-1",
+					ControllerKind:  "kernel",
+					ControllerLabel: "local",
+				},
+			}
+			var msgs []tea.Msg
+			result := slashAgentWithContext(context.Background(), driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, tt.input)
+			if result.Err != nil {
+				t.Fatalf("slashAgentWithContext(%s) error = %v", tt.input, result.Err)
+			}
+			for _, want := range []string{
+				tt.agent + " is ready",
+				"/" + tt.agent + " <prompt> starts a side ACP task",
+				"/agent use " + tt.agent + " makes it the main controller",
+			} {
+				if !noticeMessagesContain(msgs, want) {
+					t.Fatalf("slashAgentWithContext(%s) messages = %#v, want %q", tt.input, msgs, want)
+				}
+			}
+			if noticeMessagesContain(msgs, "Agent Controller") {
+				t.Fatalf("slashAgentWithContext(%s) messages = %#v, should not contain full status", tt.input, msgs)
+			}
+		})
+	}
+}
+
 func TestSlashAgentAddCustomPassesConfig(t *testing.T) {
 	driver := &bridgeTestDriver{}
 	var msgs []tea.Msg
@@ -1173,8 +1247,92 @@ func TestSlashAgentAddCustomPassesConfig(t *testing.T) {
 	if got, want := strings.Join(cfg.Args, " "), "--stdio --model test"; got != want {
 		t.Fatalf("custom args = %q, want %q", got, want)
 	}
-	if len(msgs) == 0 || !noticeMessagesContain(msgs, "custom agent registered: helper") {
-		t.Fatalf("slashAgentWithContext(add custom) messages = %#v, want registration notice", msgs)
+	if len(msgs) == 0 || !noticeMessagesContain(msgs, "helper is ready") {
+		t.Fatalf("slashAgentWithContext(add custom) messages = %#v, want ready notice", msgs)
+	}
+}
+
+func TestSlashAgentRemoveSuccessUsesLightweightFeedback(t *testing.T) {
+	driver := &bridgeTestDriver{
+		agentStatus: control.AgentStatusSnapshot{
+			SessionID:       "sess-1",
+			ControllerKind:  "kernel",
+			ControllerLabel: "local",
+			DelegatedParticipants: []control.AgentParticipantSnapshot{{
+				ID:        "self-001",
+				Label:     "@pavel",
+				AgentName: "self",
+			}},
+		},
+	}
+	var msgs []tea.Msg
+	result := slashAgentWithContext(context.Background(), driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "remove copilot")
+	if result.Err != nil {
+		t.Fatalf("slashAgentWithContext(remove) error = %v", result.Err)
+	}
+	for _, want := range []string{"copilot removed", "Next: /agent list shows remaining agents."} {
+		if !noticeMessagesContain(msgs, want) {
+			t.Fatalf("slashAgentWithContext(remove) messages = %#v, want %q", msgs, want)
+		}
+	}
+	for _, forbidden := range []string{"Agent Controller", "Session", "Delegated tasks"} {
+		if noticeMessagesContain(msgs, forbidden) {
+			t.Fatalf("slashAgentWithContext(remove) messages = %#v, should not contain %q", msgs, forbidden)
+		}
+	}
+}
+
+func TestSlashAgentUseSuccessUsesLightweightFeedback(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  []string
+	}{
+		{
+			name:  "agent",
+			input: "use copilot",
+			want: []string{
+				"copilot is now the main controller",
+				"Next: type a prompt normally. /agent use local returns to local control.",
+			},
+		},
+		{
+			name:  "local",
+			input: "use local",
+			want: []string{
+				"local control restored",
+				"Next: /agent use <agent> switches the main controller.",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			driver := &bridgeLightweightStatusDriver{
+				bridgeTestDriver: bridgeTestDriver{
+					agentStatus: control.AgentStatusSnapshot{
+						SessionID:       "sess-1",
+						ControllerKind:  "acp",
+						ControllerLabel: "copilot",
+					},
+				},
+			}
+			var msgs []tea.Msg
+			result := slashAgentWithContext(context.Background(), driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, tt.input)
+			if result.Err != nil {
+				t.Fatalf("slashAgentWithContext(%s) error = %v", tt.input, result.Err)
+			}
+			for _, want := range tt.want {
+				if !noticeMessagesContain(msgs, want) {
+					t.Fatalf("slashAgentWithContext(%s) messages = %#v, want %q", tt.input, msgs, want)
+				}
+			}
+			if noticeMessagesContain(msgs, "Agent Controller") {
+				t.Fatalf("slashAgentWithContext(%s) messages = %#v, should not contain full status", tt.input, msgs)
+			}
+			if driver.statusCalls != 1 {
+				t.Fatalf("Status calls = %d, want 1", driver.statusCalls)
+			}
+		})
 	}
 }
 

@@ -952,6 +952,25 @@ func formatAgentList(agents []control.AgentCandidate, status control.AgentStatus
 	return strings.Join(lines, "\n")
 }
 
+func formatAgentReadyNotice(agent string) string {
+	agent = strings.TrimSpace(agent)
+	command := agentSlashCommand(agent)
+	return fmt.Sprintf("%s is ready\nNext: %s <prompt> starts a side ACP task. /agent use %s makes it the main controller.", agent, command, agent)
+}
+
+func formatAgentRemovedNotice(agent string) string {
+	return fmt.Sprintf("%s removed\nNext: /agent list shows remaining agents.", strings.TrimSpace(agent))
+}
+
+func formatAgentUseNotice(target string, status control.AgentStatusSnapshot) string {
+	target = strings.TrimSpace(target)
+	if isLocalAgentTarget(target) {
+		return "local control restored\nNext: /agent use <agent> switches the main controller."
+	}
+	agent := firstNonEmpty(strings.TrimSpace(status.ControllerLabel), target)
+	return fmt.Sprintf("%s is now the main controller\nNext: type a prompt normally. /agent use local returns to local control.", agent)
+}
+
 func formatAgentStatusSnapshot(status control.AgentStatusSnapshot) string {
 	controller := firstNonEmpty(strings.TrimSpace(status.ControllerLabel), strings.TrimSpace(status.ControllerKind), "local kernel")
 	kind := firstNonEmpty(strings.TrimSpace(status.ControllerKind), "kernel")
@@ -1005,6 +1024,23 @@ func formatAgentControllerModel(status control.AgentStatusSnapshot) string {
 		return model
 	}
 	return model + " [" + effort + "]"
+}
+
+func agentSlashCommand(agent string) string {
+	agent = strings.TrimSpace(strings.TrimPrefix(agent, "/"))
+	if agent == "" || strings.ContainsAny(agent, " \t") {
+		return "/<agent>"
+	}
+	return "/" + agent
+}
+
+func isLocalAgentTarget(target string) bool {
+	switch strings.ToLower(strings.TrimSpace(target)) {
+	case "local", "kernel", "main":
+		return true
+	default:
+		return false
+	}
 }
 
 func agentPromptCommand(status control.AgentStatusSnapshot) string {

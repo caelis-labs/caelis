@@ -235,21 +235,14 @@ func slashAgentWithContext(ctx context.Context, service control.Service, send fu
 			sendNotice(send, "usage: /agent add <name> | /agent add custom <name> -- <command> [args...]")
 			return TaskResultMsg{SuppressTurnDivider: true}
 		}
-		status, err := service.AddAgentWithOptions(ctx, addArgs.Target, control.AgentAddOptions{
+		_, err := service.AddAgentWithOptions(ctx, addArgs.Target, control.AgentAddOptions{
 			Install: addArgs.Install,
 			Custom:  addArgs.Custom,
 		})
 		if err != nil {
 			return TaskResultMsg{Err: friendlyCommandError("agent add", err)}
 		}
-		if addArgs.Custom != nil {
-			sendNotice(send, fmt.Sprintf("custom agent registered: %s", addArgs.Target))
-		} else if addArgs.Install {
-			sendNotice(send, fmt.Sprintf("agent registered with local adapter: %s", addArgs.Target))
-		} else {
-			sendNotice(send, fmt.Sprintf("agent registered: %s", addArgs.Target))
-		}
-		sendNotice(send, formatAgentStatusSnapshot(status))
+		sendNotice(send, formatAgentReadyNotice(addArgs.Target))
 		refreshAgentSlashCommandsViaSendWithContext(ctx, service, send)
 		return TaskResultMsg{SuppressTurnDivider: true}
 	case "install":
@@ -260,7 +253,7 @@ func slashAgentWithContext(ctx context.Context, service control.Service, send fu
 		}
 		command := agentInstallCommandForDisplay(ctx, service, target)
 		callID := sendAgentInstallToolCall(send, target, command)
-		status, err := service.AddAgentWithOptions(ctx, target, control.AgentAddOptions{Install: true})
+		_, err := service.AddAgentWithOptions(ctx, target, control.AgentAddOptions{Install: true})
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
 				sendAgentInstallToolResult(send, callID, command, transcriptToolStatusInterrupted, false, agentInstallErrorOutput(err))
@@ -270,8 +263,7 @@ func slashAgentWithContext(ctx context.Context, service control.Service, send fu
 			return TaskResultMsg{Err: friendlyCommandError("agent install", err)}
 		}
 		sendAgentInstallToolResult(send, callID, command, schema.ToolStatusCompleted, false, "")
-		sendNotice(send, fmt.Sprintf("agent installed and registered: %s", target))
-		sendNotice(send, formatAgentStatusSnapshot(status))
+		sendNotice(send, formatAgentReadyNotice(target))
 		refreshAgentSlashCommandsViaSendWithContext(ctx, service, send)
 		return TaskResultMsg{SuppressTurnDivider: true}
 	case "remove":
@@ -280,12 +272,11 @@ func slashAgentWithContext(ctx context.Context, service control.Service, send fu
 			sendNotice(send, "usage: /agent remove <agent>\nrun /agent list to inspect registered agents")
 			return TaskResultMsg{SuppressTurnDivider: true}
 		}
-		status, err := service.RemoveAgent(ctx, target)
+		_, err := service.RemoveAgent(ctx, target)
 		if err != nil {
 			return TaskResultMsg{Err: friendlyCommandError("agent remove", err)}
 		}
-		sendNotice(send, fmt.Sprintf("agent unregistered: %s", target))
-		sendNotice(send, formatAgentStatusSnapshot(status))
+		sendNotice(send, formatAgentRemovedNotice(target))
 		refreshAgentSlashCommandsViaSendWithContext(ctx, service, send)
 		return TaskResultMsg{SuppressTurnDivider: true}
 	case "use":
@@ -298,7 +289,7 @@ func slashAgentWithContext(ctx context.Context, service control.Service, send fu
 		if err != nil {
 			return TaskResultMsg{Err: friendlyCommandError("agent use", err)}
 		}
-		sendNotice(send, formatAgentStatusSnapshot(status))
+		sendNotice(send, formatAgentUseNotice(target, status))
 		if current, err := service.Status(ctx); err == nil {
 			sendStatusUpdate(send, current)
 		}
