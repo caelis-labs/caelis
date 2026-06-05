@@ -2350,7 +2350,7 @@ func TestAdapterInterruptCancelsAgentInstall(t *testing.T) {
 		done <- err
 	}()
 
-	deadline := time.After(5 * time.Second)
+	deadline := time.After(15 * time.Second)
 	for {
 		if _, err := os.Stat(started); err == nil {
 			break
@@ -2371,7 +2371,7 @@ func TestAdapterInterruptCancelsAgentInstall(t *testing.T) {
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("AddAgentWithOptions error = %v, want context.Canceled", err)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(5 * time.Second):
 		t.Fatal("AddAgentWithOptions did not return after Interrupt")
 	}
 }

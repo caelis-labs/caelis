@@ -387,7 +387,11 @@ func (s *Stack) setConfiguredAgentsWithBase(base assembly.ResolvedAssembly, conf
 	engine := s.engine
 	s.mu.RUnlock()
 	runtimeCfg.BaseAssembly = assembly.CloneResolvedAssembly(base)
-	runtimeCfg.Assembly = s.configuredAssembly(runtimeCfg.BaseAssembly, configured, runtimeCfg)
+	resolvedAssembly, err := s.configuredAssembly(runtimeCfg.BaseAssembly, configured, runtimeCfg)
+	if err != nil {
+		return err
+	}
+	runtimeCfg.Assembly = resolvedAssembly
 	if engine == nil {
 		return fmt.Errorf("gatewayapp: runtime is unavailable")
 	}
@@ -403,7 +407,7 @@ func (s *Stack) setConfiguredAgentsWithBase(base assembly.ResolvedAssembly, conf
 	return nil
 }
 
-func (s *Stack) configuredAssembly(base assembly.ResolvedAssembly, configured []AgentConfig, runtimeCfg stackRuntimeConfig) assembly.ResolvedAssembly {
+func (s *Stack) configuredAssembly(base assembly.ResolvedAssembly, configured []AgentConfig, runtimeCfg stackRuntimeConfig) (assembly.ResolvedAssembly, error) {
 	resolved := withConfiguredACPAgents(base, configured, defaultSelfACPAgent(defaultSelfACPAgentConfig{
 		Config: Config{
 			AppName:        s.AppName,
@@ -427,18 +431,21 @@ func (s *Stack) configuredAssembly(base assembly.ResolvedAssembly, configured []
 	return s.withAgentProfileACPAgents(resolved, runtimeCfg)
 }
 
-func (s *Stack) withAgentProfileACPAgents(resolved assembly.ResolvedAssembly, runtimeCfg stackRuntimeConfig) assembly.ResolvedAssembly {
+func (s *Stack) withAgentProfileACPAgents(resolved assembly.ResolvedAssembly, runtimeCfg stackRuntimeConfig) (assembly.ResolvedAssembly, error) {
 	out := assembly.CloneResolvedAssembly(resolved)
 	if s == nil || s.store == nil {
-		return out
+		return out, nil
 	}
 	profileStatus, err := agentprofiles.LoadDirStatus(filepath.Join(s.storeDir, agentprofiles.DefaultAgentsDirName))
-	if err != nil || len(profileStatus.Profiles) == 0 {
-		return out
+	if err != nil {
+		return out, fmt.Errorf("gatewayapp: load agent profiles: %w", err)
+	}
+	if len(profileStatus.Profiles) == 0 {
+		return out, nil
 	}
 	doc, err := s.store.Load()
 	if err != nil {
-		return out
+		return out, fmt.Errorf("gatewayapp: load agent profile bindings: %w", err)
 	}
 	seen := map[string]struct{}{}
 	sourceAgents := map[string]assembly.AgentConfig{}
@@ -466,38 +473,44 @@ func (s *Stack) withAgentProfileACPAgents(resolved assembly.ResolvedAssembly, ru
 		if binding.Enabled != nil && !*binding.Enabled {
 			continue
 		}
-		agent, ok := s.agentProfileACPAgent(profile, binding, runtimeCfg, sourceAgents)
+		if err := agentprofile.ValidateBinding(binding); err != nil {
+			return out, fmt.Errorf("gatewayapp: materialize agent profile %q: %w", profile.ID, err)
+		}
+		agent, ok, err := s.agentProfileACPAgent(profile, binding, runtimeCfg, sourceAgents)
+		if err != nil {
+			return out, fmt.Errorf("gatewayapp: materialize agent profile %q: %w", profile.ID, err)
+		}
 		if !ok {
 			continue
 		}
 		out.Agents = append(out.Agents, agent)
 		seen[profile.ID] = struct{}{}
 	}
-	return out
+	return out, nil
 }
 
-func (s *Stack) agentProfileACPAgent(profile agentprofile.Profile, binding agentprofile.Binding, runtimeCfg stackRuntimeConfig, sourceAgents map[string]assembly.AgentConfig) (assembly.AgentConfig, bool) {
+func (s *Stack) agentProfileACPAgent(profile agentprofile.Profile, binding agentprofile.Binding, runtimeCfg stackRuntimeConfig, sourceAgents map[string]assembly.AgentConfig) (assembly.AgentConfig, bool, error) {
 	switch binding.Target {
 	case agentprofile.BindingTargetACP:
 		sourceName := strings.ToLower(strings.TrimSpace(binding.ACPAgent))
 		source, ok := sourceAgents[sourceName]
 		if !ok {
-			return assembly.AgentConfig{}, false
+			return assembly.AgentConfig{}, false, nil
 		}
 		agent := assembly.CloneAgentConfig(source)
 		agent.Name = profile.ID
 		agent.Description = firstNonEmpty(profile.Description, profile.Name, agent.Description)
 		agent.Env = withSubagentProfileEnv(agent.Env, profile.ID)
-		return agent, true
+		return agent, true, nil
 	case agentprofile.BindingTargetSelf, agentprofile.BindingTargetBuiltIn:
 		model := runtimeCfg.Model
 		if binding.Model != "" {
 			if s.lookup == nil {
-				return assembly.AgentConfig{}, false
+				return assembly.AgentConfig{}, false, fmt.Errorf("model lookup unavailable")
 			}
 			cfg, err := s.lookup.ResolveConfig(binding.Model)
 			if err != nil {
-				return assembly.AgentConfig{}, false
+				return assembly.AgentConfig{}, false, nil
 			}
 			model = cfg
 			if reasoning := strings.TrimSpace(binding.ReasoningEffort); reasoning != "" {
@@ -528,9 +541,9 @@ func (s *Stack) agentProfileACPAgent(profile agentprofile.Profile, binding agent
 		agent.Name = profile.ID
 		agent.Description = firstNonEmpty(profile.Description, profile.Name, agent.Description)
 		agent.Env = withSubagentProfileEnv(agent.Env, profile.ID)
-		return agent, true
+		return agent, true, nil
 	default:
-		return assembly.AgentConfig{}, false
+		return assembly.AgentConfig{}, false, fmt.Errorf("unsupported target %q", binding.Target)
 	}
 }
 

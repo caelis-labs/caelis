@@ -208,7 +208,11 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		},
 		sandbox: sandboxCfg,
 	}
-	stack.runtime.Assembly = stack.configuredAssembly(baseAssembly, doc.Agents, stack.runtime)
+	configuredAssembly, err := stack.configuredAssembly(baseAssembly, doc.Agents, stack.runtime)
+	if err != nil {
+		return nil, err
+	}
+	stack.runtime.Assembly = configuredAssembly
 	if err := stack.rebuildGateway(); err != nil {
 		return nil, err
 	}

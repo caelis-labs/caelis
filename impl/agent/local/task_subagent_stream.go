@@ -15,16 +15,27 @@ func (tm *taskRuntime) PublishStream(frame stream.Frame) {
 	taskID := strings.TrimSpace(frame.Ref.TaskID)
 	sessionID := strings.TrimSpace(frame.Ref.SessionID)
 	tm.mu.RLock()
-	task := tm.subagents[taskID]
-	if task == nil && sessionID != "" {
+	var task *subagentTask
+	if taskID != "" {
+		task = tm.subagents[taskID]
+	}
+	if task == nil && taskID == "" && sessionID != "" {
+		var matched *subagentTask
+		ambiguous := false
 		for _, candidate := range tm.subagents {
 			if candidate == nil {
 				continue
 			}
 			if strings.TrimSpace(candidate.anchor.SessionID) == sessionID {
-				task = candidate
-				break
+				if matched != nil {
+					ambiguous = true
+					break
+				}
+				matched = candidate
 			}
+		}
+		if !ambiguous {
+			task = matched
 		}
 	}
 	tm.mu.RUnlock()

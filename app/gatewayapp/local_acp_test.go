@@ -1028,6 +1028,53 @@ func TestAgentProfileStaleModelBindingDoesNotMaterializeDefaultAgent(t *testing.
 	}
 }
 
+func TestAgentProfileAssemblyReturnsProfileDirError(t *testing.T) {
+	stack, _ := newStackWithAssemblyForToolTest(t, assembly.ResolvedAssembly{})
+	agentsDir := filepath.Join(stack.storeDir, agentprofile.DefaultAgentsDirName)
+	if err := os.RemoveAll(agentsDir); err != nil {
+		t.Fatalf("RemoveAll(%s) error = %v", agentsDir, err)
+	}
+	if err := os.WriteFile(agentsDir, []byte("not a directory"), 0o600); err != nil {
+		t.Fatalf("WriteFile(%s) error = %v", agentsDir, err)
+	}
+
+	err := stack.setConfiguredAgents(nil)
+	if err == nil || !strings.Contains(err.Error(), "agent profiles") {
+		t.Fatalf("setConfiguredAgents() error = %v, want agent profile directory error", err)
+	}
+}
+
+func TestAgentProfileAssemblyReturnsConfigStoreLoadError(t *testing.T) {
+	stack, _ := newStackWithAssemblyForToolTest(t, assembly.ResolvedAssembly{})
+	poisonConfigStorePath(t, stack)
+
+	err := stack.setConfiguredAgents(nil)
+	if err == nil || !strings.Contains(err.Error(), "agent profile bindings") {
+		t.Fatalf("setConfiguredAgents() error = %v, want agent profile binding store error", err)
+	}
+}
+
+func TestAgentProfileAssemblyReturnsInvalidBindingTargetError(t *testing.T) {
+	stack, _ := newStackWithAssemblyForToolTest(t, assembly.ResolvedAssembly{})
+	doc, err := stack.store.Load()
+	if err != nil {
+		t.Fatalf("store.Load() error = %v", err)
+	}
+	doc.AgentBindings = agentprofile.BindingSet{Bindings: []agentprofile.Binding{{
+		ProfileID: "reviewer",
+		Target:    agentprofile.BindingTargetKind("unknown_target"),
+		Enabled:   boolPtr(true),
+	}}}
+	if err := stack.store.Save(doc); err != nil {
+		t.Fatalf("store.Save() error = %v", err)
+	}
+
+	err = stack.setConfiguredAgents(doc.Agents)
+	if err == nil || !strings.Contains(err.Error(), "unsupported target") {
+		t.Fatalf("setConfiguredAgents() error = %v, want invalid profile binding target error", err)
+	}
+}
+
 func TestAgentProfileBindGuardianModelDoesNotMaterializeACPAgent(t *testing.T) {
 	workdir := t.TempDir()
 	stack, err := NewLocalStack(Config{
