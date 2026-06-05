@@ -506,22 +506,16 @@ func truncateTextForJSONBudget(s string, budgetTokens int) (string, bool) {
 	if estimateTokensForJSONString(s) <= budgetTokens {
 		return s, true
 	}
-	best := ""
-	low, high := 0, min(estimateTextTokens(s), budgetTokens)
-	for low <= high {
-		mid := (low + high) / 2
-		candidate := ""
-		if mid > 0 {
-			candidate, _ = TruncateText(s, TruncationPolicy{MaxTokens: mid})
-		}
-		if estimateTokensForJSONString(candidate) <= budgetTokens {
-			best = candidate
-			low = mid + 1
-			continue
-		}
-		high = mid - 1
+	// Avoid binary search over full TruncateText passes on large multiline payloads:
+	// each pass is O(lines) and repeated probes can exceed interactive timeouts.
+	textBudget := max(budgetTokens*3/4, 1)
+	out, _ := TruncateText(s, TruncationPolicy{MaxTokens: textBudget})
+	for attempt := 0; attempt < 5 && estimateTokensForJSONString(out) > budgetTokens; attempt++ {
+		over := estimateTokensForJSONString(out) - budgetTokens
+		textBudget = max(textBudget-over, textBudget*7/10, 1)
+		out, _ = TruncateText(s, TruncationPolicy{MaxTokens: textBudget})
 	}
-	return best, estimateTokensForJSONString(best) <= budgetTokens
+	return out, estimateTokensForJSONString(out) <= budgetTokens
 }
 
 func truncateTextWithLinePrefix(original string, prefix string, body string, totalLines int, policy TruncationPolicy) (string, int) {

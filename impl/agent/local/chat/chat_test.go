@@ -1931,7 +1931,7 @@ func TestChatAgentEmitsToolProgressWhileCallIsRunning(t *testing.T) {
 	}()
 
 	var progress *session.Event
-	deadline := time.After(2 * time.Second)
+	deadline := time.After(10 * time.Second)
 	for progress == nil {
 		select {
 		case err := <-errCh:

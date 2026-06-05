@@ -201,6 +201,30 @@ func TestTruncateMapRecursesIntoJSONString(t *testing.T) {
 	}
 }
 
+func TestTruncateMapProgressPayloadCompletesPromptly(t *testing.T) {
+	t.Parallel()
+
+	large := strings.Repeat("progress line\n", DefaultTruncationPolicy().ByteBudget()/2)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, info := TruncateMap(map[string]any{
+			"task_id": "task-1",
+			"state":   "running",
+			"running": true,
+			"result":  large,
+		}, TruncationPolicy{MaxTokens: DefaultTruncationPolicy().MaxTokens})
+		if !info.Truncated {
+			t.Error("info.Truncated = false, want truncation")
+		}
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("TruncateMap() did not return promptly for running tool progress payload")
+	}
+}
+
 func TestTruncateLineUnitsLargeMultilineOutputCompletesPromptly(t *testing.T) {
 	t.Parallel()
 
