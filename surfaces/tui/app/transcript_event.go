@@ -224,9 +224,16 @@ func terminalToolOutputText(toolName string, toolKind string, rawOutput map[stri
 	return ""
 }
 
-func taskWaitControlResult(semanticName string, rawInput map[string]any, displayOutput map[string]any, meta map[string]any) bool {
-	return strings.EqualFold(strings.TrimSpace(semanticName), "TASK") &&
-		strings.EqualFold(toolDisplayTaskAction(rawInput, displayOutput, meta), "wait")
+func taskControlResult(semanticName string, rawInput map[string]any, displayOutput map[string]any, meta map[string]any) bool {
+	if !strings.EqualFold(strings.TrimSpace(semanticName), "TASK") {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(toolDisplayTaskAction(rawInput, displayOutput, meta))) {
+	case "wait", "cancel":
+		return true
+	default:
+		return false
+	}
 }
 
 func terminalTaskStillRunning(rawOutput map[string]any, meta map[string]any) bool {

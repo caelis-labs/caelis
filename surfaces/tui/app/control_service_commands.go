@@ -33,6 +33,8 @@ func dispatchSlashCommandWithContext(ctx context.Context, service control.Servic
 		return slashHelpWithContext(ctx, service, send)
 	case "agent":
 		return slashAgentWithContext(ctx, service, send, args)
+	case "subagent":
+		return slashSubagentWithContext(ctx, service, sender, args, argsStart, text, attachments)
 	case "new":
 		return slashNewWithContext(ctx, service, send)
 	case "resume":

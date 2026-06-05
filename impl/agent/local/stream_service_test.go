@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/OnslaughtSnail/caelis/ports/delegation"
 	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/stream"
@@ -303,6 +304,48 @@ func TestStreamReadSubagentCursorUsesStableRawOutput(t *testing.T) {
 	}
 	if got := streamFrameText(second.Frames); got != "def" {
 		t.Fatalf("second frame text = %q, want exact appended chunk", got)
+	}
+}
+
+func TestPublishStreamDoesNotRouteAmbiguousSharedChildSessionWithoutTaskID(t *testing.T) {
+	t.Parallel()
+
+	tm := newTaskRuntime(nil, nil)
+	tm.mu.Lock()
+	tm.subagents["task-a"] = &subagentTask{
+		ref:        taskapi.Ref{TaskID: "task-a"},
+		sessionRef: session.SessionRef{SessionID: "parent-session"},
+		anchor:     delegation.Anchor{SessionID: "shared-child-session"},
+		createdAt:  time.Now(),
+		state:      taskapi.StateRunning,
+		running:    true,
+	}
+	tm.subagents["task-b"] = &subagentTask{
+		ref:        taskapi.Ref{TaskID: "task-b"},
+		sessionRef: session.SessionRef{SessionID: "parent-session"},
+		anchor:     delegation.Anchor{SessionID: "shared-child-session"},
+		createdAt:  time.Now(),
+		state:      taskapi.StateRunning,
+		running:    true,
+	}
+	tm.mu.Unlock()
+
+	tm.PublishStream(stream.Frame{
+		Ref:     stream.Ref{SessionID: "shared-child-session"},
+		Text:    "unscoped child output\n",
+		Running: true,
+	})
+
+	taskA := tm.subagents["task-a"]
+	taskB := tm.subagents["task-b"]
+	taskA.mu.Lock()
+	taskAOut := taskA.stdout
+	taskA.mu.Unlock()
+	taskB.mu.Lock()
+	taskBOut := taskB.stdout
+	taskB.mu.Unlock()
+	if taskAOut != "" || taskBOut != "" {
+		t.Fatalf("ambiguous shared-session frame routed to task output: task-a=%q task-b=%q", taskAOut, taskBOut)
 	}
 }
 

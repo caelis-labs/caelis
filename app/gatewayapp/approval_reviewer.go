@@ -39,6 +39,11 @@ type guardianApprovalReviewer struct {
 	sessionsByParent map[string]*guardianReviewSession
 }
 
+type guardianBindingApprovalReviewer struct {
+	base    gateway.ApprovalReviewer
+	resolve func(context.Context, session.SessionRef) (model.LLM, error)
+}
+
 type guardianReviewSession struct {
 	mu       sync.Mutex
 	reuseKey string
@@ -93,6 +98,22 @@ func newGuardianApprovalReviewer(service session.Service) gateway.ApprovalReview
 		timeout:          defaultApprovalReviewTimeout,
 		sessionsByParent: map[string]*guardianReviewSession{},
 	}
+}
+
+func (r guardianBindingApprovalReviewer) ReviewApproval(ctx context.Context, req gateway.ApprovalReviewRequest) (gateway.ApprovalReviewResult, error) {
+	if r.resolve != nil {
+		llm, err := r.resolve(ctx, req.SessionRef)
+		if err != nil {
+			return gateway.ApprovalReviewResult{}, err
+		}
+		if llm != nil {
+			req.Model = llm
+		}
+	}
+	if r.base == nil {
+		return gateway.ApprovalReviewResult{}, fmt.Errorf("approval reviewer is unavailable")
+	}
+	return r.base.ReviewApproval(ctx, req)
 }
 
 func (r *guardianApprovalReviewer) ReviewApproval(ctx context.Context, req gateway.ApprovalReviewRequest) (gateway.ApprovalReviewResult, error) {

@@ -205,7 +205,11 @@ func mergeOpenToolEvent(ev *SubagentEvent, name, toolKind, args, fullArgs, outpu
 		ev.TaskTargetKind = taskTargetKind
 	}
 	if renderableTextHasContent(output) {
-		ev.Output = mergeSubagentStreamChunk(ev.Output, output)
+		if strings.EqualFold(semanticName, "RUN_COMMAND") {
+			ev.Output = mergeCommandStreamChunk(ev.Output, output)
+		} else {
+			ev.Output = mergeSubagentStreamChunk(ev.Output, output)
+		}
 		ev.OutputSynthetic = false
 	}
 }

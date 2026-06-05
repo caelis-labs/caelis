@@ -1054,6 +1054,75 @@ func TestProjectGatewayEventTaskWaitHidesSuccessfulOutput(t *testing.T) {
 	}
 }
 
+func TestProjectGatewayEventTaskControlsHideRawOutput(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		action  string
+		status  gateway.ToolStatus
+		output  map[string]any
+		content string
+		wantArg string
+	}{
+		{
+			name:   "failed wait",
+			action: "wait",
+			status: gateway.ToolStatusFailed,
+			output: map[string]any{
+				"state":     "failed",
+				"result":    "TASK_WAIT_FAILED_RAW_RESULT\n",
+				"error":     "TASK_WAIT_FAILED_RAW_ERROR",
+				"exit_code": 1,
+			},
+			content: "TASK_WAIT_FAILED_CONTENT\n",
+			wantArg: "Wait jeff",
+		},
+		{
+			name:   "cancel",
+			action: "cancel",
+			status: gateway.ToolStatusCancelled,
+			output: map[string]any{
+				"state":     "cancelled",
+				"result":    "TASK_CANCEL_RAW_RESULT\n",
+				"error":     "TASK_CANCEL_RAW_ERROR",
+				"exit_code": -1,
+			},
+			content: "TASK_CANCEL_CONTENT\n",
+			wantArg: "Cancel jeff",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			events := ProjectGatewayEventToTranscriptEvents(gateway.Event{
+				Kind: gateway.EventKindToolResult,
+				Meta: testRuntimeToolMeta(map[string]any{
+					"action":    tc.action,
+					"target_id": "jeff",
+				}),
+				ToolResult: &gateway.ToolResultPayload{
+					CallID:    "task-" + tc.action,
+					ToolName:  "TASK",
+					Status:    tc.status,
+					RawInput:  map[string]any{"action": tc.action, "task_id": "jeff"},
+					RawOutput: tc.output,
+					Content:   testToolContent(tc.content),
+				},
+			})
+			if len(events) != 1 {
+				t.Fatalf("events = %#v, want one tool event", events)
+			}
+			if got := events[0].ToolArgs; got != tc.wantArg {
+				t.Fatalf("ToolArgs = %q, want %q", got, tc.wantArg)
+			}
+			if got := events[0].ToolOutput; got != "" {
+				t.Fatalf("ToolOutput = %q, want no TASK control display output", got)
+			}
+		})
+	}
+}
+
 func TestProjectGatewayEventTaskResultShowsEffectiveWaitDuration(t *testing.T) {
 	t.Parallel()
 

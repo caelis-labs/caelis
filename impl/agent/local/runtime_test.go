@@ -115,6 +115,89 @@ func TestRuntimeRunPersistsMinimalChatTurn(t *testing.T) {
 	}
 }
 
+func TestRuntimePropagatesInvalidModelVisibleAppend(t *testing.T) {
+	t.Parallel()
+
+	baseSessions, activeSession := newTestSessionService(t, "sess-recover-invalid-append")
+	sessions := &invalidAppendSessionService{
+		Service:  baseSessions,
+		failType: session.EventTypeAssistant,
+	}
+	runtime, err := New(Config{
+		Sessions: sessions,
+		AgentFactory: chat.Factory{
+			SystemPrompt: "Be terse.",
+		},
+		RunIDGenerator: func() string { return "run-recover-invalid-append" },
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	result, err := runtime.Run(context.Background(), agent.RunRequest{
+		SessionRef: activeSession.SessionRef,
+		Input:      "hello",
+		AgentSpec: agent.AgentSpec{
+			Name:  "chat",
+			Model: staticModel{text: "world"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	events, err := drainRunnerEvents(t, result.Handle)
+	if !errors.Is(err, session.ErrInvalidEvent) {
+		t.Fatalf("runner error = %v, want ErrInvalidEvent; events=%#v", err, events)
+	}
+	state, err := runtime.RunState(context.Background(), activeSession.SessionRef)
+	if err != nil {
+		t.Fatalf("RunState() error = %v", err)
+	}
+	if state.Status != agent.RunLifecycleStatusFailed {
+		t.Fatalf("state.Status = %q, want %q", state.Status, agent.RunLifecycleStatusFailed)
+	}
+}
+
+func TestRuntimeRecoversInvalidNonModelVisibleAppend(t *testing.T) {
+	t.Parallel()
+
+	baseSessions, activeSession := newTestSessionService(t, "sess-recover-invalid-plan-append")
+	sessions := &invalidAppendSessionService{
+		Service:  baseSessions,
+		failType: session.EventTypePlan,
+	}
+	runtime, err := New(Config{
+		Sessions: sessions,
+		AgentFactory: chat.Factory{
+			SystemPrompt: "Be terse.",
+		},
+		RunIDGenerator: func() string { return "run-recover-invalid-plan-append" },
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	persisted, err := runtime.appendRuntimeEventOrLifecycle(context.Background(), activeSession, activeSession.SessionRef, "turn-1", &session.Event{
+		Type:       session.EventTypePlan,
+		Visibility: session.VisibilityCanonical,
+		PlanPayload: &session.EventPlanPayload{Entries: []session.EventPlanEntry{{
+			Content: "keep going",
+			Status:  "in_progress",
+		}}},
+	})
+	if err != nil {
+		t.Fatalf("appendRuntimeEventOrLifecycle() error = %v, want recovered lifecycle", err)
+	}
+	if persisted == nil || persisted.Type != session.EventTypeLifecycle || persisted.Lifecycle == nil {
+		t.Fatalf("persisted = %#v, want lifecycle recovery event", persisted)
+	}
+	if persisted.Lifecycle.Status != "recovered" {
+		t.Fatalf("lifecycle status = %q, want recovered", persisted.Lifecycle.Status)
+	}
+	if got, _ := persisted.Lifecycle.Meta["event_type"].(string); got != string(session.EventTypePlan) {
+		t.Fatalf("lifecycle meta = %#v, want plan event_type", persisted.Lifecycle.Meta)
+	}
+}
+
 func drainRunnerEvents(t *testing.T, handle agent.Runner) ([]*session.Event, error) {
 	t.Helper()
 	if handle == nil {
@@ -130,6 +213,20 @@ func drainRunnerEvents(t *testing.T, handle agent.Runner) ([]*session.Event, err
 		}
 	}
 	return events, nil
+}
+
+type invalidAppendSessionService struct {
+	session.Service
+	failType session.EventType
+	failed   bool
+}
+
+func (s *invalidAppendSessionService) AppendEvent(ctx context.Context, req session.AppendEventRequest) (*session.Event, error) {
+	if s != nil && !s.failed && req.Event != nil && session.EventTypeOf(req.Event) == s.failType {
+		s.failed = true
+		return nil, &session.EventValidationError{Detail: "forced invalid event"}
+	}
+	return s.Service.AppendEvent(ctx, req)
 }
 
 func lastAssistantText(events []*session.Event) string {
@@ -506,21 +603,18 @@ func TestRuntimePersistsInterruptedAssistantReplaySnapshot(t *testing.T) {
 	if got := session.EventText(replay); got != "partial answer" {
 		t.Fatalf("mirror replay text = %q, want partial answer", got)
 	}
-	if replay.Message == nil {
-		t.Fatal("mirror replay message = nil, want durable assistant snapshot")
-		return
+	replayMessage, ok := session.ModelMessageOf(replay)
+	if !ok {
+		t.Fatal("ModelMessageOf(replay) = false, want durable assistant snapshot projection")
 	}
-	if got := replay.Message.TextContent(); got != "partial answer" {
+	if got := replayMessage.TextContent(); got != "partial answer" {
 		t.Fatalf("mirror replay message text = %q, want partial answer", got)
 	}
-	if got := replay.Message.ReasoningText(); got != "partial thought" {
+	if got := replayMessage.ReasoningText(); got != "partial thought" {
 		t.Fatalf("mirror replay message reasoning = %q, want partial thought", got)
 	}
-	caelisMeta, _ := replay.Meta["caelis"].(map[string]any)
-	runtimeMeta, _ := caelisMeta["runtime"].(map[string]any)
-	replayMeta, _ := runtimeMeta["replay"].(map[string]any)
-	if got, _ := replayMeta["reasoning_text"].(string); got != "partial thought" {
-		t.Fatalf("mirror replay meta = %#v, want reasoning retained outside ACP content", replay.Meta)
+	if replay.Meta != nil {
+		t.Fatalf("mirror replay meta = %#v, want semantic replay without durable display meta", replay.Meta)
 	}
 	if session.IsInvocationVisibleEvent(replay) {
 		t.Fatalf("mirror replay snapshot must not be invocation-visible: %#v", replay)
@@ -2063,23 +2157,27 @@ func TestRuntimeRunPersistsToolLoopEvents(t *testing.T) {
 	if loaded.Events[1].Type != session.EventTypeToolCall {
 		t.Fatalf("loaded.Events[1].Type = %q, want tool_call", loaded.Events[1].Type)
 	}
-	if loaded.Events[1].Message == nil || len(loaded.Events[1].Message.ToolCalls()) != 1 {
-		t.Fatalf("loaded.Events[1].Message = %+v, want durable tool call message", loaded.Events[1].Message)
+	toolCallMessage, ok := session.ModelMessageOf(loaded.Events[1])
+	if !ok || len(toolCallMessage.ToolCalls()) != 1 {
+		t.Fatalf("ModelMessageOf(loaded.Events[1]) = %+v, %v; want durable tool call message projection", toolCallMessage, ok)
 	}
 	if loaded.Events[2].Type != session.EventTypeToolResult {
 		t.Fatalf("loaded.Events[2].Type = %q, want tool_result", loaded.Events[2].Type)
 	}
-	if loaded.Events[2].Tool == nil || loaded.Events[2].Tool.Name != "ECHO" || loaded.Events[2].Tool.Status == "" {
-		t.Fatalf("loaded.Events[2].Tool = %+v, want durable ECHO tool result payload", loaded.Events[2].Tool)
+	toolResultPayload := session.EventToolProjection(loaded.Events[2])
+	if toolResultPayload == nil || toolResultPayload.Name != "ECHO" || toolResultPayload.Status == "" {
+		t.Fatalf("EventToolProjection(loaded.Events[2]) = %+v, want durable ECHO tool result projection", toolResultPayload)
 	}
 	if got := session.EventText(loaded.Events[3]); got != "pong" {
 		t.Fatalf("final assistant text = %q, want %q", got, "pong")
 	}
-	if loaded.Events[0].Message == nil || loaded.Events[0].Message.TextContent() != "say pong" {
-		t.Fatalf("loaded.Events[0].Message = %+v, want durable user message", loaded.Events[0].Message)
+	userMessage, ok := session.ModelMessageOf(loaded.Events[0])
+	if !ok || userMessage.TextContent() != "say pong" {
+		t.Fatalf("ModelMessageOf(loaded.Events[0]) = %+v, %v; want durable user message projection", userMessage, ok)
 	}
-	if loaded.Events[3].Message == nil || loaded.Events[3].Message.TextContent() != "pong" {
-		t.Fatalf("loaded.Events[3].Message = %+v, want durable assistant message", loaded.Events[3].Message)
+	assistantMessage, ok := session.ModelMessageOf(loaded.Events[3])
+	if !ok || assistantMessage.TextContent() != "pong" {
+		t.Fatalf("ModelMessageOf(loaded.Events[3]) = %+v, %v; want durable assistant message projection", assistantMessage, ok)
 	}
 }
 
@@ -2138,10 +2236,11 @@ func TestRuntimeRunPersistsPlanLoopAndState(t *testing.T) {
 			break
 		}
 	}
-	if planEvent == nil || planEvent.Protocol == nil || planEvent.Protocol.Plan == nil {
-		t.Fatalf("plan event = %+v, want protocol plan payload", planEvent)
+	planPayload := session.PlanPayloadOf(planEvent)
+	if planEvent == nil || planPayload == nil {
+		t.Fatalf("plan event = %+v, want semantic plan payload", planEvent)
 	}
-	if got, want := len(planEvent.Protocol.Plan.Entries), 2; got != want {
+	if got, want := len(planPayload.Entries), 2; got != want {
 		t.Fatalf("len(plan entries) = %d, want %d", got, want)
 	}
 	state, err := sessions.SnapshotState(context.Background(), activeSession.SessionRef)
@@ -3384,6 +3483,43 @@ func TestTaskSnapshotToolResultKeepsRawStreamsAndConciseError(t *testing.T) {
 	}
 }
 
+func TestTaskControlSnapshotToolResultSimplifiesCancelPayload(t *testing.T) {
+	t.Parallel()
+
+	result := taskControlSnapshotToolResult(
+		tool.Call{ID: "task-cancel-1", Name: tasktool.ToolName, Input: mustJSONRaw(map[string]any{
+			"action":  "cancel",
+			"task_id": "task-1",
+		})},
+		tool.Definition{Name: tasktool.ToolName},
+		taskapi.Snapshot{
+			Ref:     taskapi.Ref{TaskID: "task-1", SessionID: "session-1"},
+			Kind:    taskapi.KindCommand,
+			State:   taskapi.StateCancelled,
+			Running: false,
+			Result: map[string]any{
+				"result":    "partial command output\n",
+				"error":     "context canceled",
+				"exit_code": -1,
+			},
+		},
+		"cancel",
+	)
+
+	payload := testToolResultPayload(t, result)
+	if got, _ := payload["task_id"].(string); got != "task-1" {
+		t.Fatalf("payload[task_id] = %q, want task-1", got)
+	}
+	if got, _ := payload["state"].(string); got != string(taskapi.StateCancelled) {
+		t.Fatalf("payload[state] = %q, want cancelled", got)
+	}
+	for _, key := range []string{"result", "latest_output", "output_preview", "final_message", "error", "exit_code"} {
+		if _, ok := payload[key]; ok {
+			t.Fatalf("payload contains %q: %#v", key, payload)
+		}
+	}
+}
+
 func TestTaskSnapshotToolResultTruncatesTerminalStreamsForDisplayAndModel(t *testing.T) {
 	t.Parallel()
 
@@ -3416,8 +3552,8 @@ func TestTaskSnapshotToolResultTruncatesTerminalStreamsForDisplayAndModel(t *tes
 	if len(gotText) > tool.DefaultTruncationPolicy().ByteBudget()+1024 {
 		t.Fatalf("payload result len = %d, want bounded", len(gotText))
 	}
-	if !strings.Contains(gotText, "tokens truncated") {
-		t.Fatalf("payload result = %q, want truncation marker", gotText)
+	if !strings.Contains(gotText, "lines omitted") {
+		t.Fatalf("payload result = %q, want omitted line marker", gotText)
 	}
 	if _, exists := result.Meta["text"]; exists {
 		t.Fatalf("result.Meta duplicated terminal text: %#v", result.Meta)

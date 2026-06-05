@@ -180,6 +180,22 @@ func (l *modelLookup) ResolveModel(ctx context.Context, alias string, contextWin
 	if !ok {
 		return kernelimpl.ModelResolution{}, fmt.Errorf("gatewayapp: unknown model alias %q", alias)
 	}
+	return resolveModelFromConfig(ctx, cfg, fallbackContextWindow, contextWindow)
+}
+
+func (l *modelLookup) ResolveModelConfig(ctx context.Context, cfg ModelConfig, contextWindow int) (kernelimpl.ModelResolution, error) {
+	if l == nil {
+		return kernelimpl.ModelResolution{}, fmt.Errorf("gatewayapp: model lookup is nil")
+	}
+	l.mu.RLock()
+	fallbackContextWindow := l.contextWindow
+	l.mu.RUnlock()
+	return resolveModelFromConfig(ctx, cfg, fallbackContextWindow, contextWindow)
+}
+
+func resolveModelFromConfig(ctx context.Context, cfg ModelConfig, fallbackContextWindow int, contextWindow int) (kernelimpl.ModelResolution, error) {
+	_ = ctx
+	cfg = normalizeModelConfig(cfg)
 	effectiveContextWindow := fallbackContextWindow
 	if cfg.ContextWindowTokens > 0 {
 		effectiveContextWindow = cfg.ContextWindowTokens

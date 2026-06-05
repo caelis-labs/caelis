@@ -2,8 +2,10 @@ package controladapter
 
 import (
 	"context"
+	"strings"
 
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
+	"github.com/OnslaughtSnail/caelis/ports/agentprofile"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
@@ -15,6 +17,7 @@ func gatewayAppStackForRuntimeTest(stack *gatewayapp.Stack) *RuntimeStack {
 	if stack == nil {
 		return nil
 	}
+	profiles := stack.AgentProfiles()
 	return &RuntimeStack{
 		GatewayFn: func() GatewayService { return stack.CurrentGateway() },
 		Sessions:  stack.Sessions,
@@ -85,6 +88,86 @@ func gatewayAppStackForRuntimeTest(stack *gatewayapp.Stack) *RuntimeStack {
 			return testRuntimeACPAgentAddOptions(stack.ListInstallableACPAgentOptions())
 		},
 		ListACPAgentsFn: func() []ACPAgentInfo { return testRuntimeACPAgents(stack.ListACPAgents()) },
+		AgentProfileStatusFn: func(ctx context.Context) (AgentProfileStatusSnapshot, error) {
+			return testRuntimeAgentProfileStatus(profiles.Status(ctx))
+		},
+		BindAgentProfileFn: func(ctx context.Context, cfg AgentProfileBindingConfig) (AgentProfileStatusSnapshot, error) {
+			return testRuntimeAgentProfileStatus(profiles.Bind(ctx, gatewayapp.AgentProfileBindingConfig{
+				ProfileID:       cfg.ProfileID,
+				Target:          agentprofile.BindingTargetKind(strings.TrimSpace(cfg.Target)),
+				Model:           cfg.Model,
+				ACPAgent:        cfg.ACPAgent,
+				ACPModel:        cfg.ACPModel,
+				ReasoningEffort: cfg.ReasoningEffort,
+			}))
+		},
+	}
+}
+
+func testRuntimeAgentProfileStatus(status gatewayapp.AgentProfileStatus, err error) (AgentProfileStatusSnapshot, error) {
+	if err != nil {
+		return AgentProfileStatusSnapshot{}, err
+	}
+	out := AgentProfileStatusSnapshot{}
+	for _, warning := range status.Warnings {
+		message := strings.TrimSpace(warning.Message)
+		if message == "" {
+			continue
+		}
+		if path := strings.TrimSpace(warning.Path); path != "" {
+			message = path + ": " + message
+		}
+		out.Warnings = append(out.Warnings, message)
+	}
+	for _, snapshot := range status.Profiles {
+		profile := agentprofile.NormalizeProfile(snapshot.Profile)
+		binding := agentprofile.NormalizeBinding(snapshot.Binding)
+		out.Profiles = append(out.Profiles, AgentProfileSnapshot{
+			ID:              profile.ID,
+			Name:            profile.Name,
+			Description:     profile.Description,
+			Capabilities:    append([]string(nil), profile.Capabilities...),
+			Path:            profile.Path,
+			Enabled:         binding.Enabled == nil || *binding.Enabled,
+			Target:          string(binding.Target),
+			Model:           binding.Model,
+			ACPAgent:        binding.ACPAgent,
+			ACPModel:        binding.ACPModel,
+			ReasoningEffort: binding.ReasoningEffort,
+			Status:          string(binding.Status),
+			Warning:         binding.Warning,
+			Source:          testRuntimeAgentProfileMetadataString(profile.Metadata, "source"),
+			BuiltIn:         testRuntimeAgentProfileMetadataBool(profile.Metadata, "built_in"),
+			SystemManaged:   testRuntimeAgentProfileMetadataBool(profile.Metadata, "system_managed"),
+		})
+	}
+	return out, nil
+}
+
+func testRuntimeAgentProfileMetadataString(metadata map[string]any, key string) string {
+	if len(metadata) == 0 {
+		return ""
+	}
+	value, _ := metadata[key].(string)
+	return strings.TrimSpace(value)
+}
+
+func testRuntimeAgentProfileMetadataBool(metadata map[string]any, key string) bool {
+	if len(metadata) == 0 {
+		return false
+	}
+	switch value := metadata[key].(type) {
+	case bool:
+		return value
+	case string:
+		switch strings.ToLower(strings.TrimSpace(value)) {
+		case "true", "yes", "1", "on":
+			return true
+		default:
+			return false
+		}
+	default:
+		return false
 	}
 }
 

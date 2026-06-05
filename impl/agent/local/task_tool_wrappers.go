@@ -349,8 +349,8 @@ func (t runtimeTaskTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 	if err != nil {
 		return tool.Result{}, err
 	}
-	result := taskSnapshotToolResult(call, t.base.Definition(), snapshot)
 	normalizedAction := strings.ToLower(strings.TrimSpace(action))
+	result := taskControlSnapshotToolResult(call, t.base.Definition(), snapshot, normalizedAction)
 	result.Metadata = taskToolResultEventMeta(result.Metadata, normalizedAction, input, yieldMS, yieldDefaulted, snapshot)
 	return result, nil
 }

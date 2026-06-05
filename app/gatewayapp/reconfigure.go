@@ -156,7 +156,7 @@ func (s *Stack) rebuildGateway() error {
 		Runtime:             rt,
 		Resolver:            resolver,
 		DefaultApprovalMode: kernelimpl.NormalizeApprovalMode(runtimeCfg.ApprovalMode),
-		ApprovalApprover:    agentreview.Approver{Reviewer: newModelApprovalReviewer(s.Sessions)},
+		ApprovalApprover:    agentreview.Approver{Reviewer: s.newModelApprovalReviewer()},
 	})
 	if err != nil {
 		_ = sandboxRuntime.Close()

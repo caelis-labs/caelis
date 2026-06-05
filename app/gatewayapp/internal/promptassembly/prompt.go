@@ -173,7 +173,7 @@ func builtInPermissionBoundariesPrompt() string {
 }
 
 func delegationGuidanceLine() string {
-	return "- Use SPAWN for bounded child ACP work that can run independently; use TASK wait, cancel, or write to control yielded work."
+	return "- Use SPAWN for bounded child-agent work that can run independently; use TASK wait, cancel, or write to control yielded work."
 }
 
 func builtInEnvironmentContextPrompt(workspaceDir string) string {

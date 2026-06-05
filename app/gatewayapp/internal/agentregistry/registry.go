@@ -20,6 +20,7 @@ type RuntimeConfig struct {
 	PolicyProfile  string
 	PermissionMode string
 	ContextWindow  int
+	SystemPrompt   string
 	Model          modelregistry.Config
 }
 
@@ -156,6 +157,7 @@ func SelfRuntimeInvocation(cfg RuntimeConfig) ([]string, map[string]string) {
 	}
 	appendFlag("-auth-type", string(model.AuthType))
 	appendFlag("-header-key", model.HeaderKey)
+	appendFlag("-system-prompt", cfg.SystemPrompt)
 	if cfg.ContextWindow > 0 {
 		args = append(args, "-context-window", fmt.Sprintf("%d", cfg.ContextWindow))
 	}
@@ -230,7 +232,7 @@ func LookupBuiltInAgent(name string) (assembly.AgentConfig, bool) {
 
 func ReservedSlashCommandName(name string) bool {
 	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "help", "agent", "connect", "model", "sandbox", "status", "doctor", "new", "resume", "compact", "exit", "quit":
+	case "help", "agent", "subagent", "connect", "model", "sandbox", "status", "doctor", "new", "resume", "compact", "exit", "quit":
 		return true
 	default:
 		return false

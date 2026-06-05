@@ -15,8 +15,9 @@ import (
 func toolResultEvent(call model.ToolCall, result tool.Result, message *model.Message, extraMeta ...map[string]any) *session.Event {
 	rawInput := mustObject(call.Args)
 	rawOutput := toolResultRawOutput(result)
-	metaParts := []map[string]any{toolMeta(call.Name), result.Metadata}
+	metaParts := []map[string]any{result.Metadata}
 	metaParts = append(metaParts, extraMeta...)
+	metaParts = append(metaParts, toolMeta(call.Name))
 	status := toolCallStatus(result, rawOutput)
 	meta := mergeEventMeta(metaParts...)
 	event := &session.Event{
@@ -59,8 +60,7 @@ func toolResultRawOutput(result tool.Result) map[string]any {
 func toolResultContent(call model.ToolCall, input map[string]any, output map[string]any, meta map[string]any, status string, isErr bool) []session.EventToolContent {
 	name := strings.ToUpper(strings.TrimSpace(call.Name))
 	displayOutput := toolResultDisplayOutput(name, output, meta)
-	if name == "TASK" && !isErr && !strings.EqualFold(strings.TrimSpace(status), "failed") &&
-		strings.EqualFold(displaypolicy.ToolTaskAction(input, displayOutput, meta), "wait") {
+	if name == "TASK" && suppressTaskControlContent(displaypolicy.ToolTaskAction(input, displayOutput, meta)) {
 		return nil
 	}
 	text := toolResultDisplayText(name, input, displayOutput, meta, status, isErr)
@@ -83,6 +83,15 @@ func toolResultContent(call model.ToolCall, input map[string]any, output map[str
 		item.TerminalID = toolResultTerminalID(call, displayOutput, meta)
 	}
 	return []session.EventToolContent{item}
+}
+
+func suppressTaskControlContent(action string) bool {
+	switch strings.ToLower(strings.TrimSpace(action)) {
+	case "wait", "cancel":
+		return true
+	default:
+		return false
+	}
 }
 
 func successfulEmptyTerminalResult(name string, status string, isErr bool) bool {

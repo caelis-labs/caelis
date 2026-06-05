@@ -5,6 +5,7 @@ import (
 	"iter"
 	"testing"
 
+	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/stream"
 )
 
@@ -56,6 +57,49 @@ func TestLocalTerminalAdapterOutputSuppressesNoOutputPlaceholder(t *testing.T) {
 	}
 	if resp.ExitStatus == nil || resp.ExitStatus.ExitCode == nil || *resp.ExitStatus.ExitCode != 0 {
 		t.Fatalf("ExitStatus = %#v, want exit code 0", resp.ExitStatus)
+	}
+}
+
+func TestRefFromEventUsesSemanticToolResultTaskMetadata(t *testing.T) {
+	t.Parallel()
+
+	event := session.CanonicalizeEvent(&session.Event{
+		SessionID:  "root-session",
+		Type:       session.EventTypeToolResult,
+		Visibility: session.VisibilityCanonical,
+		Tool: &session.EventTool{
+			ID:     "spawn-1",
+			Name:   "SPAWN",
+			Status: "running",
+			Output: map[string]any{"task_id": "reya", "state": "running"},
+			Content: []session.EventToolContent{{
+				Type:       "terminal",
+				TerminalID: "subagent-task-1",
+			}},
+		},
+		Meta: map[string]any{
+			"caelis": map[string]any{
+				"version": 1,
+				"runtime": map[string]any{
+					"tool": map[string]any{"name": "SPAWN"},
+					"task": map[string]any{
+						"task_id":     "reya",
+						"terminal_id": "subagent-task-1",
+						"running":     true,
+					},
+				},
+			},
+		},
+	})
+	if event.Meta != nil || event.Tool != nil || event.Protocol != nil {
+		t.Fatalf("canonical event kept legacy projections: tool=%#v protocol=%#v meta=%#v", event.Tool, event.Protocol, event.Meta)
+	}
+	ref, ok := RefFromEvent(event)
+	if !ok {
+		t.Fatal("RefFromEvent() ok = false, want semantic ref")
+	}
+	if ref.SessionID != "root-session" || ref.TaskID != "reya" || ref.TerminalID != "subagent-task-1" {
+		t.Fatalf("RefFromEvent() = %#v, want root-session/reya/subagent-task-1", ref)
 	}
 }
 

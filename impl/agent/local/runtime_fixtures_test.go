@@ -1352,8 +1352,8 @@ func mustSessionTaskID(t *testing.T, events []*session.Event) string {
 }
 
 func eventToolRawOutput(event *session.Event) map[string]any {
-	if event != nil && event.Tool != nil {
-		return event.Tool.Output
+	if toolPayload := session.EventToolProjection(event); toolPayload != nil {
+		return toolPayload.Output
 	}
 	if update := session.ProtocolUpdateOf(event); update != nil {
 		return update.RawOutput
@@ -1362,8 +1362,8 @@ func eventToolRawOutput(event *session.Event) map[string]any {
 }
 
 func eventToolRawInput(event *session.Event) map[string]any {
-	if event != nil && event.Tool != nil {
-		return event.Tool.Input
+	if toolPayload := session.EventToolProjection(event); toolPayload != nil {
+		return toolPayload.Input
 	}
 	if update := session.ProtocolUpdateOf(event); update != nil {
 		return update.RawInput

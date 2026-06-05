@@ -115,6 +115,243 @@ func TestModelUseExactAliasInputOpensReasoningPicker(t *testing.T) {
 	}
 }
 
+func TestSubagentBindSelectionOpensNestedPickers(t *testing.T) {
+	model := NewModel(Config{
+		Commands: DefaultCommands(),
+		SlashArgComplete: func(command string, query string, limit int) ([]SlashArgCandidate, error) {
+			switch command {
+			case "subagent":
+				return []SlashArgCandidate{
+					{Value: "list", Display: "list"},
+					{Value: "run", Display: "run"},
+					{Value: "bind", Display: "bind"},
+				}, nil
+			case "subagent bind":
+				return []SlashArgCandidate{{Value: "guardian", Display: "guardian"}}, nil
+			case "subagent bind guardian":
+				return []SlashArgCandidate{
+					{Value: "default", Display: "default"},
+					{Value: "model", Display: "model"},
+				}, nil
+			case "subagent bind guardian model":
+				return []SlashArgCandidate{{Value: "guardian-model", Display: "guardian-model"}}, nil
+			case "subagent bind guardian model guardian-model":
+				return []SlashArgCandidate{
+					{Value: "none", Display: "none"},
+					{Value: "high", Display: "high"},
+				}, nil
+			default:
+				return nil, nil
+			}
+		},
+	})
+
+	model.openSlashArgPicker("subagent")
+	model.slashArgIndex = 2
+	model.applySlashArgCompletion()
+	if got := string(model.input); got != "/subagent bind " {
+		t.Fatalf("input after bind action = %q, want /subagent bind ", got)
+	}
+	if got := model.slashArgCommand; got != "subagent bind" {
+		t.Fatalf("slashArgCommand = %q, want subagent bind", got)
+	}
+
+	model.applySlashArgCompletion()
+	if got := string(model.input); got != "/subagent bind guardian " {
+		t.Fatalf("input after guardian profile = %q, want /subagent bind guardian ", got)
+	}
+	if got := model.slashArgCommand; got != "subagent bind guardian" {
+		t.Fatalf("slashArgCommand = %q, want subagent bind guardian", got)
+	}
+
+	model.slashArgIndex = 1
+	model.applySlashArgCompletion()
+	if got := string(model.input); got != "/subagent bind guardian model " {
+		t.Fatalf("input after model target = %q, want /subagent bind guardian model ", got)
+	}
+	if got := model.slashArgCommand; got != "subagent bind guardian model" {
+		t.Fatalf("slashArgCommand = %q, want model alias picker", got)
+	}
+
+	model.applySlashArgCompletion()
+	if got := string(model.input); got != "/subagent bind guardian model guardian-model " {
+		t.Fatalf("input after model alias = %q, want alias plus trailing space", got)
+	}
+	if got := model.slashArgCommand; got != "subagent bind guardian model guardian-model" {
+		t.Fatalf("slashArgCommand = %q, want reasoning picker command", got)
+	}
+
+	model.slashArgIndex = 1
+	model.applySlashArgCompletion()
+	if got := string(model.input); got != "/subagent bind guardian model guardian-model high" {
+		t.Fatalf("input after reasoning = %q, want high reasoning", got)
+	}
+	if model.slashArgActive {
+		t.Fatal("slash arg picker should close after final reasoning selection")
+	}
+}
+
+func TestSubagentSlashTypingActivatesNestedCompletion(t *testing.T) {
+	model := NewModel(Config{
+		Commands: DefaultCommands(),
+		SlashArgComplete: func(command string, query string, limit int) ([]SlashArgCandidate, error) {
+			switch command {
+			case "subagent":
+				return []SlashArgCandidate{{Value: "bind", Display: "bind"}}, nil
+			case "subagent bind":
+				return []SlashArgCandidate{{Value: "guardian", Display: "guardian"}}, nil
+			case "subagent bind guardian":
+				return []SlashArgCandidate{{Value: "model", Display: "model"}}, nil
+			case "subagent bind guardian model":
+				return []SlashArgCandidate{{Value: "guardian-model", Display: "guardian-model"}}, nil
+			case "subagent bind guardian model guardian-model":
+				return []SlashArgCandidate{{Value: "high", Display: "high"}}, nil
+			default:
+				return nil, nil
+			}
+		},
+	})
+
+	tests := []struct {
+		input   string
+		command string
+		value   string
+	}{
+		{input: "/subagent bi", command: "subagent", value: "bind"},
+		{input: "/subagent bind gu", command: "subagent bind", value: "guardian"},
+		{input: "/subagent bind guardian mo", command: "subagent bind guardian", value: "model"},
+		{input: "/subagent bind guardian model guardian", command: "subagent bind guardian model", value: "guardian-model"},
+		{input: "/subagent bind guardian model guardian-model h", command: "subagent bind guardian model guardian-model", value: "high"},
+	}
+	for _, tt := range tests {
+		model.setInputText(tt.input)
+		model.syncTextareaFromInput()
+		model.syncSlashInputOverlays()
+		if got := model.slashArgCommand; got != tt.command {
+			t.Fatalf("slashArgCommand for %q = %q, want %q", tt.input, got, tt.command)
+		}
+		if len(model.slashArgCandidates) != 1 || model.slashArgCandidates[0].Value != tt.value {
+			t.Fatalf("slashArgCandidates for %q = %#v, want %q", tt.input, model.slashArgCandidates, tt.value)
+		}
+	}
+}
+
+func TestSubagentBindFinalCandidateEnterSubmitsCompletedInput(t *testing.T) {
+	var submitted string
+	model := NewModel(Config{
+		Commands: DefaultCommands(),
+		ExecuteLine: func(submission Submission) TaskResultMsg {
+			submitted = submission.Text
+			return TaskResultMsg{SuppressTurnDivider: true}
+		},
+		SlashArgComplete: func(command string, query string, limit int) ([]SlashArgCandidate, error) {
+			switch command {
+			case "subagent bind guardian":
+				return []SlashArgCandidate{{Value: "default", Display: "default"}}, nil
+			default:
+				return nil, nil
+			}
+		},
+	})
+	model.setInputText("/subagent bind guardian ")
+	model.syncTextareaFromInput()
+	model.syncSlashInputOverlays()
+	if got := model.slashArgCommand; got != "subagent bind guardian" {
+		t.Fatalf("slashArgCommand = %q, want subagent bind guardian", got)
+	}
+	if len(model.slashArgCandidates) != 1 || model.slashArgCandidates[0].Value != "default" {
+		t.Fatalf("slashArgCandidates = %#v, want default", model.slashArgCandidates)
+	}
+
+	handled, cmd := model.handleSlashArgKey(keyPress("enter"))
+	if !handled {
+		t.Fatal("handleSlashArgKey(enter) = false, want true")
+	}
+	if cmd == nil {
+		t.Fatalf("handleSlashArgKey(enter) command = nil, want submit command; input=%q active=%v command=%q candidates=%#v running=%v executeLineNil=%v", model.textarea.Value(), model.slashArgActive, model.slashArgCommand, model.slashArgCandidates, model.running, model.cfg.ExecuteLine == nil)
+	}
+	findAndRunTaskResult(cmd(), model)
+	if submitted != "/subagent bind guardian default" {
+		t.Fatalf("submitted input = %q, want /subagent bind guardian default", submitted)
+	}
+}
+
+func TestDestructiveSlashArgEnterCompletesBeforeSubmit(t *testing.T) {
+	tests := []struct {
+		name      string
+		command   string
+		input     string
+		candidate string
+		wantInput string
+	}{
+		{
+			name:      "model delete",
+			command:   "model del",
+			input:     "/model del ",
+			candidate: "stale-model",
+			wantInput: "/model del stale-model ",
+		},
+		{
+			name:      "agent remove",
+			command:   "agent remove",
+			input:     "/agent remove ",
+			candidate: "copilot",
+			wantInput: "/agent remove copilot",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var submitted []string
+			model := NewModel(Config{
+				Commands: DefaultCommands(),
+				ExecuteLine: func(submission Submission) TaskResultMsg {
+					submitted = append(submitted, submission.Text)
+					return TaskResultMsg{SuppressTurnDivider: true}
+				},
+				SlashArgComplete: func(command string, query string, limit int) ([]SlashArgCandidate, error) {
+					if command != tt.command {
+						return nil, nil
+					}
+					return []SlashArgCandidate{{Value: tt.candidate, Display: tt.candidate}}, nil
+				},
+			})
+
+			model.setInputText(tt.input)
+			model.syncTextareaFromInput()
+			model.syncSlashInputOverlays()
+			handled, cmd := model.handleSlashArgKey(keyPress("enter"))
+			if !handled {
+				t.Fatal("handleSlashArgKey(enter) = false, want true")
+			}
+			if cmd != nil {
+				t.Fatal("handleSlashArgKey(empty final arg) returned submit command, want completion only")
+			}
+			if len(submitted) != 0 {
+				t.Fatalf("submitted = %#v, want no submission", submitted)
+			}
+			if got := string(model.input); got != tt.wantInput {
+				t.Fatalf("input after completion = %q, want %q", got, tt.wantInput)
+			}
+
+			model.setInputText("/" + tt.command + " " + tt.candidate)
+			model.syncTextareaFromInput()
+			model.syncSlashInputOverlays()
+			handled, cmd = model.handleSlashArgKey(keyPress("enter"))
+			if !handled {
+				t.Fatal("handleSlashArgKey(exact enter) = false, want true")
+			}
+			if cmd == nil {
+				t.Fatal("handleSlashArgKey(exact enter) command = nil, want submit command")
+			}
+			findAndRunTaskResult(cmd(), model)
+			wantSubmitted := "/" + tt.command + " " + tt.candidate
+			if len(submitted) != 1 || submitted[0] != wantSubmitted {
+				t.Fatalf("submitted = %#v, want [%q]", submitted, wantSubmitted)
+			}
+		})
+	}
+}
+
 func TestSlashCommandSelectionMovesWithArrowKeys(t *testing.T) {
 	model := NewModel(Config{
 		Commands: DefaultCommands(),
@@ -155,6 +392,41 @@ func TestSlashCommandCompletionRefreshesBeforeAcceptingStaleCandidates(t *testin
 	runCompletionCmd(t, model, cmd)
 	if got := string(model.input); got != "/doctor " {
 		t.Fatalf("input after /do<Tab> = %q, want /doctor ", got)
+	}
+}
+
+func TestSlashCommandCompletionOpensSubagentArgPicker(t *testing.T) {
+	model := NewModel(Config{
+		Commands: DefaultCommands(),
+		SlashArgComplete: func(command string, query string, limit int) ([]SlashArgCandidate, error) {
+			if command != "subagent" {
+				return nil, nil
+			}
+			return []SlashArgCandidate{
+				{Value: "list", Display: "list"},
+				{Value: "run", Display: "run"},
+				{Value: "bind", Display: "bind"},
+			}, nil
+		},
+	})
+
+	model.setInputText("/sub")
+	model.syncTextareaFromInput()
+	model.refreshSlashCommands()
+	if len(model.slashCandidates) != 1 || model.slashCandidates[0] != "/subagent" {
+		t.Fatalf("slashCandidates = %#v, want only /subagent", model.slashCandidates)
+	}
+	model.applySlashCommandCompletion()
+	model.syncTextareaFromInput()
+
+	if got := string(model.input); got != "/subagent " {
+		t.Fatalf("input after /sub<Tab> = %q, want /subagent ", got)
+	}
+	if got := model.slashArgCommand; got != "subagent" {
+		t.Fatalf("slashArgCommand = %q, want subagent", got)
+	}
+	if len(model.slashArgCandidates) != 3 || model.slashArgCandidates[0].Value != "list" {
+		t.Fatalf("slashArgCandidates = %#v, want list/run/bind", model.slashArgCandidates)
 	}
 }
 

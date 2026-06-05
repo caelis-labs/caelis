@@ -30,7 +30,7 @@ func (e invalidToolCallError) Error() string {
 	return fmt.Sprintf("invalid model tool call for %s: %s", toolName, reason)
 }
 
-func canonicalizeAssistantToolCalls(message model.Message) (model.Message, []model.ToolCall, error) {
+func canonicalizeAssistantToolCalls(message model.Message, tools ...tool.Tool) (model.Message, []model.ToolCall, error) {
 	cloned := model.CloneMessage(message)
 	calls := cloned.ToolCalls()
 	if len(calls) == 0 {
@@ -44,6 +44,7 @@ func canonicalizeAssistantToolCalls(message model.Message) (model.Message, []mod
 		if strings.TrimSpace(call.Name) == "" {
 			return model.Message{}, nil, invalidToolCallError{Tool: call.Name, Reason: "missing tool name"}
 		}
+		call.Name = canonicalToolCallName(call.Name, tools)
 		raw, err := model.ParseToolCallArgsRaw(call.Args)
 		if err != nil {
 			return model.Message{}, nil, invalidToolCallError{Tool: call.Name, Reason: err.Error()}
@@ -59,10 +60,31 @@ func canonicalizeAssistantToolCalls(message model.Message) (model.Message, []mod
 		if callIndex >= len(canonical) {
 			break
 		}
+		cloned.Parts[i].ToolUse.Name = canonical[callIndex].Name
 		cloned.Parts[i].ToolUse.Input = json.RawMessage(canonical[callIndex].Args)
 		callIndex++
 	}
 	return cloned, canonical, nil
+}
+
+func canonicalToolCallName(name string, tools []tool.Tool) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ""
+	}
+	for _, item := range tools {
+		if item == nil {
+			continue
+		}
+		defined := strings.TrimSpace(item.Definition().Name)
+		if defined == "" {
+			continue
+		}
+		if strings.EqualFold(defined, name) {
+			return defined
+		}
+	}
+	return name
 }
 
 func toolCallsHaveValidArgs(calls []model.ToolCall) bool {

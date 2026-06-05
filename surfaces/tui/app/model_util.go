@@ -573,6 +573,88 @@ func slashArgQueryAtCursor(input []rune, cursor int) (string, string, bool) {
 			return "agent add --install", strings.TrimSpace(fields[3]), true
 		}
 		return "", "", false
+	case "subagent":
+		if len(fields) == 1 {
+			if !hasTrailingDelimiter {
+				return "", "", false
+			}
+			return command, "", true
+		}
+		action := strings.ToLower(strings.TrimSpace(fields[1]))
+		if len(fields) == 2 {
+			if hasTrailingDelimiter {
+				switch action {
+				case "run", "bind":
+					return "subagent " + action, "", true
+				case "list":
+					return "", "", false
+				default:
+					return "", "", false
+				}
+			}
+			if action == "" {
+				return "", "", false
+			}
+			switch action {
+			case "list", "run", "bind":
+			default:
+				return "subagent", action, true
+			}
+			return "subagent", action, true
+		}
+		switch action {
+		case "run":
+			if len(fields) == 3 && !hasTrailingDelimiter {
+				return "subagent run", strings.TrimSpace(fields[2]), true
+			}
+			return "", "", false
+		case "bind":
+		default:
+			return "", "", false
+		}
+		profileID := strings.TrimSpace(fields[2])
+		if profileID == "" {
+			return "", "", false
+		}
+		if len(fields) == 3 {
+			if hasTrailingDelimiter {
+				return "subagent bind " + profileID, "", true
+			}
+			return "subagent bind", profileID, true
+		}
+		target := strings.ToLower(strings.TrimSpace(fields[3]))
+		if len(fields) == 4 {
+			if hasTrailingDelimiter {
+				switch target {
+				case "model", "acp":
+					return "subagent bind " + profileID + " " + target, "", true
+				default:
+					return "", "", false
+				}
+			}
+			return "subagent bind " + profileID, target, true
+		}
+		switch target {
+		case "model":
+			modelAlias := strings.TrimSpace(fields[4])
+			if modelAlias == "" {
+				return "", "", false
+			}
+			if len(fields) == 5 {
+				if hasTrailingDelimiter {
+					return "subagent bind " + profileID + " model " + modelAlias, "", true
+				}
+				return "subagent bind " + profileID + " model", modelAlias, true
+			}
+			return "subagent bind " + profileID + " model " + modelAlias, strings.TrimSpace(strings.Join(fields[5:], " ")), true
+		case "acp":
+			if len(fields) == 5 && !hasTrailingDelimiter {
+				return "subagent bind " + profileID + " acp", strings.TrimSpace(fields[4]), true
+			}
+			return "", "", false
+		default:
+			return "", "", false
+		}
 	case "sandbox":
 		if len(fields) == 1 {
 			if !hasTrailingDelimiter {

@@ -15,16 +15,27 @@ func (tm *taskRuntime) PublishStream(frame stream.Frame) {
 	taskID := strings.TrimSpace(frame.Ref.TaskID)
 	sessionID := strings.TrimSpace(frame.Ref.SessionID)
 	tm.mu.RLock()
-	task := tm.subagents[taskID]
-	if task == nil && sessionID != "" {
+	var task *subagentTask
+	if taskID != "" {
+		task = tm.subagents[taskID]
+	}
+	if task == nil && taskID == "" && sessionID != "" {
+		var matched *subagentTask
+		ambiguous := false
 		for _, candidate := range tm.subagents {
 			if candidate == nil {
 				continue
 			}
 			if strings.TrimSpace(candidate.anchor.SessionID) == sessionID {
-				task = candidate
-				break
+				if matched != nil {
+					ambiguous = true
+					break
+				}
+				matched = candidate
 			}
+		}
+		if !ambiguous {
+			task = matched
 		}
 	}
 	tm.mu.RUnlock()
@@ -64,24 +75,7 @@ func (t *subagentTask) seedStreamFromResult(result delegation.Result) {
 
 func subagentFramesContainAssistantText(frames []stream.Frame) bool {
 	for _, frame := range frames {
-		if strings.TrimSpace(frame.Text) != "" {
-			return true
-		}
-		event := frame.Event
-		if event == nil || session.EventTypeOf(event) != session.EventTypeAssistant {
-			continue
-		}
-		if event.Message != nil && strings.TrimSpace(event.Message.TextContent()) != "" {
-			return true
-		}
-		updateType := ""
-		if event.Protocol != nil {
-			updateType = strings.TrimSpace(event.Protocol.UpdateType)
-		}
-		if updateType == string(session.ProtocolUpdateTypeAgentThought) {
-			continue
-		}
-		if strings.TrimSpace(event.Text) != "" {
+		if strings.TrimSpace(subagentFrameAssistantText(frame)) != "" {
 			return true
 		}
 	}
@@ -95,8 +89,15 @@ func (t *subagentTask) applyStreamFrames(frames []stream.Frame) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	for _, frame := range frames {
-		if frame.Event != nil || frame.Text != "" {
+		text := subagentFrameAssistantText(frame)
+		if text == "" {
+			text = frame.Text
+		}
+		if frame.Event != nil || text != "" {
 			cloned := stream.CloneFrame(frame)
+			if cloned.Text == "" {
+				cloned.Text = text
+			}
 			cloned.Ref.TaskID = firstNonEmpty(strings.TrimSpace(cloned.Ref.TaskID), strings.TrimSpace(t.ref.TaskID))
 			cloned.Ref.SessionID = firstNonEmpty(strings.TrimSpace(cloned.Ref.SessionID), strings.TrimSpace(t.sessionRef.SessionID))
 			cloned.Ref.TerminalID = firstNonEmpty(strings.TrimSpace(cloned.Ref.TerminalID), subagentTurnID(t.ref.TaskID, t.turnSeq))
@@ -108,7 +109,6 @@ func (t *subagentTask) applyStreamFrames(frames []stream.Frame) {
 			}
 			t.streamFrames = append(t.streamFrames, cloned)
 		}
-		text := frame.Text
 		if text == "" {
 			if frame.State != "" {
 				t.state = taskStateFromDelegation(delegation.State(frame.State))
@@ -128,6 +128,40 @@ func (t *subagentTask) applyStreamFrames(frames []stream.Frame) {
 		}
 		t.running = frame.Running
 	}
+}
+
+func subagentFrameAssistantText(frame stream.Frame) string {
+	if strings.TrimSpace(frame.Text) != "" {
+		return frame.Text
+	}
+	event := frame.Event
+	if event == nil || session.EventTypeOf(event) != session.EventTypeAssistant {
+		return ""
+	}
+	if update := session.ProtocolUpdateOf(event); update != nil &&
+		strings.TrimSpace(update.SessionUpdate) == string(session.ProtocolUpdateTypeAgentThought) {
+		return ""
+	}
+	if event.AssistantMessage != nil {
+		return subagentAssistantMessageText(*event.AssistantMessage)
+	}
+	if event.Message != nil {
+		return event.Message.TextContent()
+	}
+	return event.Text
+}
+
+func subagentAssistantMessageText(payload session.EventMessagePayload) string {
+	if len(payload.Parts) == 0 {
+		return ""
+	}
+	texts := make([]string, 0, len(payload.Parts))
+	for _, part := range payload.Parts {
+		if part.Text != "" {
+			texts = append(texts, part.Text)
+		}
+	}
+	return strings.Join(texts, "\n")
 }
 
 func (t *subagentTask) appendStreamLocked(text string) {

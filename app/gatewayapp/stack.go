@@ -1,6 +1,7 @@
 package gatewayapp
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -150,33 +151,18 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	effectiveApprovalMode := approvalMode(firstNonEmpty(cfg.ApprovalMode, cfg.PermissionMode, doc.Runtime.ApprovalMode))
 	effectivePolicyProfile := policyProfile(firstNonEmpty(cfg.PolicyProfile, doc.Runtime.PolicyProfile))
 	baseAssembly := assembly.CloneResolvedAssembly(cfg.Assembly)
-	cfg.Assembly = withConfiguredACPAgents(cfg.Assembly, doc.Agents, defaultSelfACPAgent(defaultSelfACPAgentConfig{
-		Config: Config{
-			AppName:        cfg.AppName,
-			UserID:         cfg.UserID,
-			StoreDir:       storeDir,
-			WorkspaceKey:   workspaceKey,
-			WorkspaceCWD:   workspaceCWD,
-			ApprovalMode:   effectiveApprovalMode,
-			PolicyProfile:  effectivePolicyProfile,
-			PermissionMode: cfg.PermissionMode,
-			ContextWindow:  cfg.ContextWindow,
-			SystemPrompt:   cfg.SystemPrompt,
-			Assembly:       cfg.Assembly,
-			Model:          cfg.Model,
-			Sandbox:        cfg.Sandbox,
-		},
-		AppName:      appName,
-		UserID:       userID,
-		StoreDir:     storeDir,
-		WorkspaceKey: workspaceKey,
-		WorkspaceCWD: workspaceCWD,
-	}))
 	sessions := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{
 		RootDir: filepath.Join(storeDir, "sessions"),
 	}))
 	taskStore := taskfile.NewStore(taskfile.Config{RootDir: filepath.Join(storeDir, "tasks")})
 	lookup, err := newModelLookup(configStore, cfg.Model, cfg.ContextWindow)
+	if err != nil {
+		return nil, err
+	}
+	if err := ensureBuiltInAgentProfiles(context.Background(), storeDir, configStore); err != nil {
+		return nil, err
+	}
+	doc, err = configStore.Load()
 	if err != nil {
 		return nil, err
 	}
@@ -214,13 +200,19 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 			PolicyProfile:  effectivePolicyProfile,
 			PermissionMode: cfg.PermissionMode,
 			ContextWindow:  cfg.ContextWindow,
+			SystemPrompt:   cfg.SystemPrompt,
 			Model:          cfg.Model,
 			BaseAssembly:   baseAssembly,
-			Assembly:       assembly.CloneResolvedAssembly(cfg.Assembly),
+			Assembly:       assembly.CloneResolvedAssembly(baseAssembly),
 			BaseMetadata:   cloneMap(baseMetadata),
 		},
 		sandbox: sandboxCfg,
 	}
+	configuredAssembly, err := stack.configuredAssembly(baseAssembly, doc.Agents, stack.runtime)
+	if err != nil {
+		return nil, err
+	}
+	stack.runtime.Assembly = configuredAssembly
 	if err := stack.rebuildGateway(); err != nil {
 		return nil, err
 	}

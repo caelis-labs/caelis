@@ -456,6 +456,20 @@ func mergeSubagentStreamChunk(existing string, incoming string) string {
 	return existing + incoming
 }
 
+func mergeCommandStreamChunk(existing string, incoming string) string {
+	incoming = normalizeSubagentChunkBoundary(existing, incoming)
+	if incoming == "" {
+		return existing
+	}
+	if existing == "" {
+		return incoming
+	}
+	if overlap := commandLineOverlap(existing, incoming); overlap > 0 {
+		return existing + incoming[overlap:]
+	}
+	return existing + incoming
+}
+
 func appendDeltaStreamChunk(existing string, incoming string) string {
 	incoming = normalizeSubagentChunkBoundary(existing, incoming)
 	if incoming == "" {
@@ -465,6 +479,28 @@ func appendDeltaStreamChunk(existing string, incoming string) string {
 		return incoming
 	}
 	return existing + incoming
+}
+
+func commandLineOverlap(existing string, incoming string) int {
+	maxOverlap := minInt(len(existing), len(incoming))
+	const maxSearch = 64 * 1024
+	if maxOverlap > maxSearch {
+		maxOverlap = maxSearch
+	}
+	start := len(existing) - maxOverlap
+	for i := start; i < len(existing); i++ {
+		if i > 0 && existing[i-1] != '\n' && existing[i-1] != '\r' {
+			continue
+		}
+		suffix := existing[i:]
+		if suffix == "" || (!strings.HasSuffix(suffix, "\n") && !strings.HasSuffix(suffix, "\r")) {
+			continue
+		}
+		if strings.HasPrefix(incoming, suffix) {
+			return len(suffix)
+		}
+	}
+	return 0
 }
 
 func normalizeSubagentChunkBoundary(existing string, incoming string) string {

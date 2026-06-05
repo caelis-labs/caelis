@@ -218,6 +218,8 @@ type RuntimeStack struct {
 	ListBuiltinACPAgentAddOptionsFn      func() []ACPAgentAddOption
 	ListInstallableACPAgentOptionsFn     func() []ACPAgentAddOption
 	ListACPAgentsFn                      func() []ACPAgentInfo
+	AgentProfileStatusFn                 func(context.Context) (AgentProfileStatusSnapshot, error)
+	BindAgentProfileFn                   func(context.Context, AgentProfileBindingConfig) (AgentProfileStatusSnapshot, error)
 }
 
 func (s *RuntimeStack) gateway() (GatewayService, error) {
@@ -500,4 +502,18 @@ func (s *RuntimeStack) ListACPAgents() []ACPAgentInfo {
 		return nil
 	}
 	return s.ListACPAgentsFn()
+}
+
+func (s *RuntimeStack) AgentProfileStatus(ctx context.Context) (AgentProfileStatusSnapshot, error) {
+	if s == nil || s.AgentProfileStatusFn == nil {
+		return AgentProfileStatusSnapshot{}, fmt.Errorf("app/gatewayapp/controladapter: agent profile dependency is unavailable")
+	}
+	return s.AgentProfileStatusFn(ctx)
+}
+
+func (s *RuntimeStack) BindAgentProfile(ctx context.Context, cfg AgentProfileBindingConfig) (AgentProfileStatusSnapshot, error) {
+	if s == nil || s.BindAgentProfileFn == nil {
+		return AgentProfileStatusSnapshot{}, fmt.Errorf("app/gatewayapp/controladapter: agent profile binding dependency is unavailable")
+	}
+	return s.BindAgentProfileFn(ctx, cfg)
 }

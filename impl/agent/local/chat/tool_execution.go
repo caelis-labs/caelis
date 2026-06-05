@@ -53,14 +53,16 @@ func (a *Agent) executeToolCallWithProgress(
 			if yieldProgress == nil {
 				continue
 			}
-			if !yieldProgress(session.MarkUIOnly(toolResultEvent(call, progress, nil))) {
+			canonical, truncationMeta := canonicalToolResult(progress)
+			if !yieldProgress(session.MarkUIOnly(toolResultEvent(call, canonical, nil, truncationMeta))) {
 				return model.Message{}, nil, context.Canceled
 			}
 		case done := <-doneCh:
 			for {
 				select {
 				case progress := <-progressCh:
-					if yieldProgress != nil && !yieldProgress(session.MarkUIOnly(toolResultEvent(call, progress, nil))) {
+					canonical, truncationMeta := canonicalToolResult(progress)
+					if yieldProgress != nil && !yieldProgress(session.MarkUIOnly(toolResultEvent(call, canonical, nil, truncationMeta))) {
 						return model.Message{}, nil, context.Canceled
 					}
 				default:
@@ -146,8 +148,8 @@ func toolResultMessageFromCanonical(call model.ToolCall, result tool.Result) mod
 		Parts: []model.Part{{
 			Kind: model.PartKindToolResult,
 			ToolResult: &model.ToolResultPart{
-				ToolUseID: strings.TrimSpace(firstNonEmpty(result.ID, call.ID)),
-				Name:      strings.TrimSpace(firstNonEmpty(result.Name, call.Name)),
+				ToolUseID: strings.TrimSpace(call.ID),
+				Name:      strings.TrimSpace(call.Name),
 				Content:   parts,
 				IsError:   result.IsError,
 			},

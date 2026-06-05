@@ -11,6 +11,7 @@ func TestDefaultCommandsExposeCanonicalCoreCommandsOnly(t *testing.T) {
 	want := []string{
 		"help",
 		"agent",
+		"subagent",
 		"connect",
 		"model",
 		"status",

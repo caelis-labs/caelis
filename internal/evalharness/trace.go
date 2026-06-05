@@ -60,19 +60,19 @@ func EventTrace(events []*session.Event) []EventTraceEntry {
 			Type:       string(event.Type),
 			Text:       strings.TrimSpace(session.EventText(event)),
 		}
-		if event.Message != nil {
-			entry.Role = string(event.Message.Role)
-			entry.Reasoning = strings.TrimSpace(reasoningText(*event.Message))
-			entry.MessageToolCalls = toolCallTrace(event.Message.ToolCalls())
+		if message, ok := session.ModelMessageOf(event); ok {
+			entry.Role = string(message.Role)
+			entry.Reasoning = strings.TrimSpace(reasoningText(message))
+			entry.MessageToolCalls = toolCallTrace(message.ToolCalls())
 		}
-		if event.Tool != nil {
+		if toolPayload := session.EventToolProjection(event); toolPayload != nil {
 			entry.Tool = &ToolTrace{
-				ID:      strings.TrimSpace(event.Tool.ID),
-				Name:    strings.TrimSpace(event.Tool.Name),
-				Status:  strings.TrimSpace(event.Tool.Status),
-				Input:   cloneAnyMap(event.Tool.Input),
-				Output:  cloneAnyMap(event.Tool.Output),
-				Content: contentTrace(event.Tool.Content),
+				ID:      strings.TrimSpace(toolPayload.ID),
+				Name:    strings.TrimSpace(toolPayload.Name),
+				Status:  strings.TrimSpace(toolPayload.Status),
+				Input:   cloneAnyMap(toolPayload.Input),
+				Output:  cloneAnyMap(toolPayload.Output),
+				Content: contentTrace(toolPayload.Content),
 			}
 		}
 		if notice, ok := session.NoticeOf(event); ok {
@@ -93,7 +93,7 @@ func CanonicalEvents(events []*session.Event) []*session.Event {
 		if event == nil || event.Visibility == session.VisibilityUIOnly {
 			continue
 		}
-		out = append(out, session.CloneEvent(event))
+		out = append(out, session.CanonicalizeEvent(event))
 	}
 	return out
 }

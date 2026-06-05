@@ -219,6 +219,39 @@ type AgentStatusSnapshot struct {
 	DelegatedParticipants     []AgentParticipantSnapshot
 }
 
+type AgentProfileSnapshot struct {
+	ID              string
+	Name            string
+	Description     string
+	Capabilities    []string
+	Path            string
+	Enabled         bool
+	Target          string
+	Model           string
+	ACPAgent        string
+	ACPModel        string
+	ReasoningEffort string
+	Status          string
+	Warning         string
+	Source          string
+	BuiltIn         bool
+	SystemManaged   bool
+}
+
+type AgentProfileStatusSnapshot struct {
+	Profiles []AgentProfileSnapshot
+	Warnings []string
+}
+
+type AgentProfileBindingConfig struct {
+	ProfileID       string
+	Target          string
+	Model           string
+	ACPAgent        string
+	ACPModel        string
+	ReasoningEffort string
+}
+
 type CustomAgentConfig struct {
 	Name        string
 	Description string

@@ -8,11 +8,13 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/OnslaughtSnail/caelis/impl/model/providers"
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/spawn"
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/task"
 	"github.com/OnslaughtSnail/caelis/internal/testenv"
+	"github.com/OnslaughtSnail/caelis/ports/agentprofile"
 	"github.com/OnslaughtSnail/caelis/ports/assembly"
 	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/session"
@@ -20,7 +22,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/protocol/acp"
 )
 
-func TestLocalStackInjectsSpawnForSelfAndRegisteredACPAgents(t *testing.T) {
+func TestLocalStackInjectsSpawnForSelfAndAgentProfiles(t *testing.T) {
 	ctx := context.Background()
 	withAgents, session := newStackWithAssemblyForToolTest(t, assembly.ResolvedAssembly{
 		Agents: []assembly.AgentConfig{{
@@ -41,8 +43,16 @@ func TestLocalStackInjectsSpawnForSelfAndRegisteredACPAgents(t *testing.T) {
 	if !toolSetHas(resolved.RunRequest.AgentSpec.Tools, task.ToolName) {
 		t.Fatalf("tools missing %s", task.ToolName)
 	}
+	for _, want := range []string{"self", "explorer", "reviewer"} {
+		if !spawnToolHasAgent(resolved.RunRequest.AgentSpec.Tools, want) {
+			t.Fatalf("SPAWN agent enum missing %q with profile agents", want)
+		}
+	}
+	if spawnToolHasAgent(resolved.RunRequest.AgentSpec.Tools, "helper") {
+		t.Fatalf("SPAWN agent enum includes raw external ACP helper")
+	}
 	systemPrompt, _ := resolved.RunRequest.AgentSpec.Metadata["system_prompt"].(string)
-	if !strings.Contains(systemPrompt, "SPAWN for bounded child ACP work") {
+	if !strings.Contains(systemPrompt, "SPAWN for bounded child-agent work") {
 		t.Fatalf("system prompt missing delegation guidance: %q", systemPrompt)
 	}
 
@@ -54,8 +64,13 @@ func TestLocalStackInjectsSpawnForSelfAndRegisteredACPAgents(t *testing.T) {
 	if !toolSetHas(resolved.RunRequest.AgentSpec.Tools, spawn.ToolName) {
 		t.Fatalf("tools missing %s for default self spawn", spawn.ToolName)
 	}
+	for _, want := range []string{"self", "explorer", "reviewer"} {
+		if !spawnToolHasAgent(resolved.RunRequest.AgentSpec.Tools, want) {
+			t.Fatalf("SPAWN agent enum missing %q for default profile agents", want)
+		}
+	}
 	systemPrompt, _ = resolved.RunRequest.AgentSpec.Metadata["system_prompt"].(string)
-	if !strings.Contains(systemPrompt, "SPAWN for bounded child ACP work") {
+	if !strings.Contains(systemPrompt, "SPAWN for bounded child-agent work") {
 		t.Fatalf("system prompt missing delegation guidance for default self spawn: %q", systemPrompt)
 	}
 	if !agentConfigSetHas(withoutAgents.runtime.Assembly.Agents, "self") {
@@ -112,6 +127,11 @@ func TestACPSurfaceAvailableCommandsExposeRegisteredACPAgents(t *testing.T) {
 	}
 	if helper.Description != "bounded ACP helper" {
 		t.Fatalf("helper description = %q, want assembly description", helper.Description)
+	}
+	for _, hidden := range []string{"explorer", "reviewer", "guardian"} {
+		if acpCommandForToolTest(commands, hidden) != nil {
+			t.Fatalf("AvailableCommands() exposed subagent profile command %q: %#v", hidden, commands)
+		}
 	}
 }
 
@@ -466,8 +486,15 @@ func TestLocalStackAgentRegistryUpdatesWithoutRuntimeRebuild(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveTurn(after register) error = %v", err)
 	}
-	if !spawnToolHasAgent(resolved.RunRequest.AgentSpec.Tools, "codex") {
-		t.Fatalf("SPAWN agent enum missing codex after registry update")
+	if spawnToolHasAgent(resolved.RunRequest.AgentSpec.Tools, "codex") {
+		t.Fatalf("SPAWN agent enum includes raw external ACP codex after registry update")
+	}
+	commands, err := stack.ACPSurface(nil, false, nil).AvailableCommands(ctx, session.SessionID)
+	if err != nil {
+		t.Fatalf("AvailableCommands(after codex register) error = %v", err)
+	}
+	if acpCommandForToolTest(commands, "codex") == nil {
+		t.Fatalf("AvailableCommands() = %#v, want /codex command after registry update", commands)
 	}
 
 	if err := stack.UnregisterACPAgent("codex"); err != nil {
@@ -485,6 +512,13 @@ func TestLocalStackAgentRegistryUpdatesWithoutRuntimeRebuild(t *testing.T) {
 	}
 	if spawnToolHasAgent(resolved.RunRequest.AgentSpec.Tools, "codex") {
 		t.Fatalf("SPAWN agent enum still includes codex after unregister")
+	}
+	commands, err = stack.ACPSurface(nil, false, nil).AvailableCommands(ctx, session.SessionID)
+	if err != nil {
+		t.Fatalf("AvailableCommands(after codex unregister) error = %v", err)
+	}
+	if acpCommandForToolTest(commands, "codex") != nil {
+		t.Fatalf("AvailableCommands() still exposes /codex after unregister: %#v", commands)
 	}
 }
 
@@ -533,8 +567,8 @@ func TestRegisterCustomACPAgentUpdatesConfigAndRuntimeRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveTurn(after custom register) error = %v", err)
 	}
-	if !spawnToolHasAgent(resolved.RunRequest.AgentSpec.Tools, "helper") {
-		t.Fatalf("SPAWN agent enum missing helper after custom registry update")
+	if spawnToolHasAgent(resolved.RunRequest.AgentSpec.Tools, "helper") {
+		t.Fatalf("SPAWN agent enum includes raw external ACP helper after custom registry update")
 	}
 
 	replacement := AgentConfig{Name: "helper", Command: "helper-v2", Args: []string{"--json"}}
@@ -561,6 +595,94 @@ func TestRegisterCustomACPAgentUpdatesConfigAndRuntimeRegistry(t *testing.T) {
 	}
 	if spawnToolHasAgent(resolved.RunRequest.AgentSpec.Tools, "helper") {
 		t.Fatalf("SPAWN agent enum still includes helper after unregister")
+	}
+}
+
+func TestAgentProfileBindACPAgentPreservesRegisteredName(t *testing.T) {
+	ctx := context.Background()
+	stack, session := newStackWithAssemblyForToolTest(t, assembly.ResolvedAssembly{})
+	if err := stack.RegisterACPAgent(ctx, AgentConfig{
+		Name:        "my_agent",
+		Description: "custom reviewer runtime",
+		Command:     "my-agent-acp",
+		Args:        []string{"--stdio"},
+	}); err != nil {
+		t.Fatalf("RegisterACPAgent(my_agent) error = %v", err)
+	}
+	status, err := stack.AgentProfiles().Bind(ctx, AgentProfileBindingConfig{
+		ProfileID: "reviewer",
+		Target:    agentprofile.BindingTargetACP,
+		ACPAgent:  "my_agent",
+	})
+	if err != nil {
+		t.Fatalf("AgentProfiles.Bind(reviewer acp my_agent) error = %v", err)
+	}
+	reviewerStatus, ok := agentProfileSnapshotForToolTest(status.Profiles, "reviewer")
+	if !ok {
+		t.Fatalf("reviewer profile missing from status: %#v", status.Profiles)
+	}
+	binding := agentprofile.NormalizeBinding(reviewerStatus.Binding)
+	if binding.Target != agentprofile.BindingTargetACP || binding.ACPAgent != "my_agent" {
+		t.Fatalf("reviewer binding = %#v, want ACP my_agent", binding)
+	}
+	reviewer, ok := agentConfigForToolTest(stack.runtime.Assembly.Agents, "reviewer")
+	if !ok {
+		t.Fatalf("reviewer profile agent missing from assembly: %#v", stack.runtime.Assembly.Agents)
+	}
+	if reviewer.Command != "my-agent-acp" || !slices.Contains(reviewer.Args, "--stdio") {
+		t.Fatalf("reviewer agent = %#v, want clone of my_agent", reviewer)
+	}
+	if reviewer.Env["CAELIS_SUBAGENT_PROFILE_ID"] != "reviewer" {
+		t.Fatalf("reviewer env = %#v, want reviewer profile marker", reviewer.Env)
+	}
+	resolved, err := stack.currentGateway().Resolver().ResolveTurn(ctx, gateway.TurnIntent{SessionRef: session.SessionRef})
+	if err != nil {
+		t.Fatalf("ResolveTurn(reviewer ACP binding) error = %v", err)
+	}
+	if !spawnToolHasAgent(resolved.RunRequest.AgentSpec.Tools, "reviewer") {
+		t.Fatalf("SPAWN agent enum missing reviewer profile binding")
+	}
+	if spawnToolHasAgent(resolved.RunRequest.AgentSpec.Tools, "my_agent") {
+		t.Fatalf("SPAWN agent enum includes raw external ACP my_agent")
+	}
+}
+
+func TestAgentProfileNameCollisionReportsStaleAndNotRunnable(t *testing.T) {
+	ctx := context.Background()
+	stack, session := newStackWithAssemblyForToolTest(t, assembly.ResolvedAssembly{
+		Agents: []assembly.AgentConfig{{
+			Name:        "reviewer",
+			Description: "raw reviewer runtime",
+			Command:     "go",
+			Args:        []string{"run", "./internal/acpe2eagent"},
+			WorkDir:     repoRootForGatewayAppTest(t),
+		}},
+	})
+	reviewerAgent, ok := agentConfigForToolTest(stack.runtime.Assembly.Agents, "reviewer")
+	if !ok {
+		t.Fatalf("reviewer agent missing from assembly: %#v", stack.runtime.Assembly.Agents)
+	}
+	if isSubagentProfileAgent(reviewerAgent) {
+		t.Fatalf("reviewer collision materialized as profile agent: %#v", reviewerAgent)
+	}
+	status, err := stack.AgentProfiles().Status(ctx)
+	if err != nil {
+		t.Fatalf("AgentProfiles.Status() error = %v", err)
+	}
+	reviewer, ok := agentProfileSnapshotForToolTest(status.Profiles, "reviewer")
+	if !ok {
+		t.Fatalf("reviewer profile missing from status: %#v", status.Profiles)
+	}
+	binding := agentprofile.NormalizeBinding(reviewer.Binding)
+	if binding.Status != agentprofile.BindingStatusStale || !strings.Contains(binding.Warning, "conflicts") {
+		t.Fatalf("reviewer binding = %#v, want stale conflict", binding)
+	}
+	resolved, err := stack.currentGateway().Resolver().ResolveTurn(ctx, gateway.TurnIntent{SessionRef: session.SessionRef})
+	if err != nil {
+		t.Fatalf("ResolveTurn(reviewer collision) error = %v", err)
+	}
+	if spawnToolHasAgent(resolved.RunRequest.AgentSpec.Tools, "reviewer") {
+		t.Fatalf("SPAWN agent enum includes conflicted reviewer profile")
 	}
 }
 
@@ -601,6 +723,411 @@ func TestLocalStackAgentRegistryUpdatesPreserveSelfModelArgs(t *testing.T) {
 		t.Fatalf("UnregisterACPAgent(codex) error = %v", err)
 	}
 	assertSelfAgentArgsForModel(t, stack.runtime.Assembly.Agents)
+}
+
+func TestAgentProfileDefaultModelAgentsRefreshAfterModelChanges(t *testing.T) {
+	ctx := context.Background()
+	stack, session := newStackWithAssemblyForToolTest(t, assembly.ResolvedAssembly{})
+	assertAgentArgsContain(t, stack.runtime.Assembly.Agents, "self", "-provider", "ollama", "-model", "llama3")
+	assertAgentArgsContain(t, stack.runtime.Assembly.Agents, "reviewer", "-provider", "ollama", "-model", "llama3")
+
+	alias, err := stack.Connect(ModelConfig{
+		Alias:    "review-model",
+		Provider: "deepseek",
+		API:      providers.APIDeepSeek,
+		Model:    "deepseek-reasoner",
+		TokenEnv: "DEEPSEEK_TEST_TOKEN",
+	})
+	if err != nil {
+		t.Fatalf("Connect(review-model) error = %v", err)
+	}
+	assertAgentArgsContain(t, stack.runtime.Assembly.Agents, "self", "-provider", "deepseek", "-model", "deepseek-reasoner")
+	assertAgentArgsContain(t, stack.runtime.Assembly.Agents, "reviewer", "-provider", "deepseek", "-model", "deepseek-reasoner")
+
+	if err := stack.DeleteModel(ctx, session.SessionRef, alias); err != nil {
+		t.Fatalf("DeleteModel(review-model) error = %v", err)
+	}
+	assertAgentArgsContain(t, stack.runtime.Assembly.Agents, "self", "-provider", "ollama", "-model", "llama3")
+	assertAgentArgsContain(t, stack.runtime.Assembly.Agents, "reviewer", "-provider", "ollama", "-model", "llama3")
+}
+
+func TestLocalStackMaterializesBuiltInAgentProfiles(t *testing.T) {
+	workdir := t.TempDir()
+	storeDir := t.TempDir()
+	stack, err := NewLocalStack(Config{
+		AppName:        "caelis",
+		UserID:         "profile-agent-test",
+		StoreDir:       storeDir,
+		WorkspaceKey:   workdir,
+		WorkspaceCWD:   workdir,
+		PermissionMode: "auto-review",
+		Sandbox:        SandboxConfig{RequestedType: "host"},
+		Model: ModelConfig{
+			Provider: "ollama",
+			Model:    "llama3",
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+	for _, name := range []string{"explorer", "reviewer"} {
+		agent, ok := agentConfigForToolTest(stack.runtime.Assembly.Agents, name)
+		if !ok {
+			t.Fatalf("%s profile agent missing from assembly: %#v", name, stack.runtime.Assembly.Agents)
+		}
+		if agent.Env["SDK_ACP_ENABLE_SPAWN"] != "0" || agent.Env["SDK_ACP_CHILD_NO_SPAWN"] != "1" {
+			t.Fatalf("%s env = %#v, want SPAWN disabled", name, agent.Env)
+		}
+		if !slices.Contains(agent.Args, "-system-prompt") {
+			t.Fatalf("%s args = %#v, want profile system prompt", name, agent.Args)
+		}
+		if _, err := os.Stat(filepath.Join(storeDir, "agents", name+".md")); err != nil {
+			t.Fatalf("%s profile file missing: %v", name, err)
+		}
+	}
+	if agentConfigSetHas(stack.runtime.Assembly.Agents, "guardian") {
+		t.Fatalf("guardian should not materialize as a SPAWN ACP agent: %#v", stack.runtime.Assembly.Agents)
+	}
+	if _, err := os.Stat(filepath.Join(storeDir, "agents", "guardian.md")); !os.IsNotExist(err) {
+		t.Fatalf("guardian profile file stat error = %v, want not exist", err)
+	}
+	status, err := stack.AgentProfiles().Status(context.Background())
+	if err != nil {
+		t.Fatalf("AgentProfiles.Status() error = %v", err)
+	}
+	if len(status.Profiles) != 3 {
+		t.Fatalf("profile count = %d, want 3: %#v", len(status.Profiles), status.Profiles)
+	}
+	guardian, ok := agentProfileSnapshotForToolTest(status.Profiles, "guardian")
+	if !ok {
+		t.Fatalf("guardian virtual profile missing from status: %#v", status.Profiles)
+	}
+	guardianProfile := agentprofile.NormalizeProfile(guardian.Profile)
+	guardianBinding := agentprofile.NormalizeBinding(guardian.Binding)
+	if guardianProfile.Path != "" {
+		t.Fatalf("guardian path = %q, want virtual profile without file path", guardianProfile.Path)
+	}
+	if value, _ := guardianProfile.Metadata["system_managed"].(bool); !value {
+		t.Fatalf("guardian metadata = %#v, want system_managed", guardianProfile.Metadata)
+	}
+	if guardianBinding.Enabled != nil && !*guardianBinding.Enabled {
+		t.Fatalf("guardian binding disabled: %#v", guardianBinding)
+	}
+	if guardianBinding.Model != "" {
+		t.Fatalf("guardian default model = %q, want session default", guardianBinding.Model)
+	}
+}
+
+func TestGuardianProfileStatusIgnoresLegacyDisabledACPBinding(t *testing.T) {
+	workdir := t.TempDir()
+	stack, err := NewLocalStack(Config{
+		AppName:        "caelis",
+		UserID:         "guardian-legacy-test",
+		StoreDir:       t.TempDir(),
+		WorkspaceKey:   workdir,
+		WorkspaceCWD:   workdir,
+		PermissionMode: "auto-review",
+		Sandbox:        SandboxConfig{RequestedType: "host"},
+		Model: ModelConfig{
+			Provider: "ollama",
+			Model:    "llama3",
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+	doc, err := stack.store.Load()
+	if err != nil {
+		t.Fatalf("store.Load() error = %v", err)
+	}
+	disabled := false
+	next, err := agentprofile.UpsertBinding(doc.AgentBindings, agentprofile.Binding{
+		ProfileID: "guardian",
+		Enabled:   &disabled,
+		Target:    agentprofile.BindingTargetACP,
+		ACPAgent:  "old-reviewer",
+		Status:    agentprofile.BindingStatusStale,
+		Warning:   "legacy disabled runtime",
+	}, time.Now())
+	if err != nil {
+		t.Fatalf("UpsertBinding(guardian legacy) error = %v", err)
+	}
+	doc.AgentBindings = next
+	if err := stack.store.Save(doc); err != nil {
+		t.Fatalf("store.Save() error = %v", err)
+	}
+
+	status, err := stack.AgentProfiles().Status(context.Background())
+	if err != nil {
+		t.Fatalf("AgentProfiles.Status() error = %v", err)
+	}
+	guardian, ok := agentProfileSnapshotForToolTest(status.Profiles, "guardian")
+	if !ok {
+		t.Fatalf("guardian virtual profile missing from status: %#v", status.Profiles)
+	}
+	binding := agentprofile.NormalizeBinding(guardian.Binding)
+	if binding.Enabled != nil && !*binding.Enabled {
+		t.Fatalf("guardian binding = %#v, want enabled virtual status", binding)
+	}
+	if binding.Target == agentprofile.BindingTargetACP || binding.ACPAgent != "" {
+		t.Fatalf("guardian binding = %#v, want session-default runtime", binding)
+	}
+	if binding.Status != agentprofile.BindingStatusOK || binding.Warning != "" {
+		t.Fatalf("guardian binding status = %s warning %q, want ok without legacy warning", binding.Status, binding.Warning)
+	}
+}
+
+func TestLocalStackIgnoresLegacyGuardianProfileFile(t *testing.T) {
+	workdir := t.TempDir()
+	storeDir := t.TempDir()
+	agentsDir := filepath.Join(storeDir, "agents")
+	if err := os.MkdirAll(agentsDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll(agents) error = %v", err)
+	}
+	legacyGuardian := agentprofile.FormatMarkdown(agentprofile.Profile{
+		ID:           "guardian",
+		Name:         "Legacy Guardian",
+		Description:  "Legacy file that should no longer materialize.",
+		Instructions: "Do not load this as a SPAWN agent.",
+	})
+	if err := os.WriteFile(filepath.Join(agentsDir, "guardian.md"), []byte(legacyGuardian), 0o600); err != nil {
+		t.Fatalf("WriteFile(guardian.md) error = %v", err)
+	}
+	stack, err := NewLocalStack(Config{
+		AppName:        "caelis",
+		UserID:         "guardian-file-test",
+		StoreDir:       storeDir,
+		WorkspaceKey:   workdir,
+		WorkspaceCWD:   workdir,
+		PermissionMode: "auto-review",
+		Sandbox:        SandboxConfig{RequestedType: "host"},
+		Model: ModelConfig{
+			Provider: "ollama",
+			Model:    "llama3",
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+	if agentConfigSetHas(stack.runtime.Assembly.Agents, "guardian") {
+		t.Fatalf("legacy guardian.md should not materialize as ACP agent: %#v", stack.runtime.Assembly.Agents)
+	}
+	status, err := stack.AgentProfiles().Status(context.Background())
+	if err != nil {
+		t.Fatalf("AgentProfiles.Status() error = %v", err)
+	}
+	count := 0
+	for _, snapshot := range status.Profiles {
+		if strings.EqualFold(snapshot.Profile.ID, "guardian") {
+			count++
+			if snapshot.Profile.Name != "Guardian" {
+				t.Fatalf("guardian profile name = %q, want virtual Guardian", snapshot.Profile.Name)
+			}
+		}
+	}
+	if count != 1 {
+		t.Fatalf("guardian profile count = %d, want exactly one virtual profile: %#v", count, status.Profiles)
+	}
+}
+
+func TestAgentProfileBindModelUpdatesACPAgentArgs(t *testing.T) {
+	workdir := t.TempDir()
+	stack, err := NewLocalStack(Config{
+		AppName:        "caelis",
+		UserID:         "profile-bind-test",
+		StoreDir:       t.TempDir(),
+		WorkspaceKey:   workdir,
+		WorkspaceCWD:   workdir,
+		PermissionMode: "auto-review",
+		Sandbox:        SandboxConfig{RequestedType: "host"},
+		Model: ModelConfig{
+			Provider: "ollama",
+			Model:    "llama3",
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+	if _, err := stack.Connect(ModelConfig{
+		Alias:    "review-model",
+		Provider: "deepseek",
+		API:      providers.APIDeepSeek,
+		Model:    "deepseek-reasoner",
+		TokenEnv: "DEEPSEEK_TEST_TOKEN",
+	}); err != nil {
+		t.Fatalf("Connect(review-model) error = %v", err)
+	}
+	if _, err := stack.AgentProfiles().Bind(context.Background(), AgentProfileBindingConfig{
+		ProfileID: "reviewer",
+		Target:    agentprofile.BindingTargetBuiltIn,
+		Model:     "review-model",
+	}); err != nil {
+		t.Fatalf("AgentProfiles.Bind(reviewer) error = %v", err)
+	}
+	reviewer, ok := agentConfigForToolTest(stack.runtime.Assembly.Agents, "reviewer")
+	if !ok {
+		t.Fatalf("reviewer profile agent missing from assembly: %#v", stack.runtime.Assembly.Agents)
+	}
+	for _, want := range []string{"-model-alias", "review-model", "-provider", "deepseek", "-model", "deepseek-reasoner", "-system-prompt"} {
+		if !slices.Contains(reviewer.Args, want) {
+			t.Fatalf("reviewer args = %#v, missing %q", reviewer.Args, want)
+		}
+	}
+	if !slices.Contains(reviewer.Args, "-system-prompt") || !profileSystemPromptArgContains(reviewer.Args, "code review subagent") {
+		t.Fatalf("reviewer args = %#v, want reviewer system prompt", reviewer.Args)
+	}
+	if reviewer.Env["SDK_ACP_ENABLE_SPAWN"] != "0" || reviewer.Env["SDK_ACP_CHILD_NO_SPAWN"] != "1" {
+		t.Fatalf("reviewer env = %#v, want SPAWN disabled", reviewer.Env)
+	}
+}
+
+func TestAgentProfileStaleModelBindingDoesNotMaterializeDefaultAgent(t *testing.T) {
+	ctx := context.Background()
+	stack, session := newStackWithAssemblyForToolTest(t, assembly.ResolvedAssembly{})
+	if _, err := stack.Connect(ModelConfig{
+		Alias:    "review-model",
+		Provider: "ollama",
+		Model:    "llama3:review",
+	}); err != nil {
+		t.Fatalf("Connect(review-model) error = %v", err)
+	}
+	if _, err := stack.AgentProfiles().Bind(ctx, AgentProfileBindingConfig{
+		ProfileID: "reviewer",
+		Target:    agentprofile.BindingTargetBuiltIn,
+		Model:     "review-model",
+	}); err != nil {
+		t.Fatalf("AgentProfiles.Bind(reviewer model) error = %v", err)
+	}
+	if !agentConfigSetHas(stack.runtime.Assembly.Agents, "reviewer") {
+		t.Fatalf("reviewer profile agent missing after model bind: %#v", stack.runtime.Assembly.Agents)
+	}
+	if err := stack.DeleteModel(ctx, session.SessionRef, "review-model"); err != nil {
+		t.Fatalf("DeleteModel(review-model) error = %v", err)
+	}
+	doc, err := stack.store.Load()
+	if err != nil {
+		t.Fatalf("store.Load() error = %v", err)
+	}
+	if err := stack.setConfiguredAgents(doc.Agents); err != nil {
+		t.Fatalf("setConfiguredAgents(after stale model) error = %v", err)
+	}
+	if agentConfigSetHas(stack.runtime.Assembly.Agents, "reviewer") {
+		t.Fatalf("reviewer profile agent materialized with stale model binding: %#v", stack.runtime.Assembly.Agents)
+	}
+	status, err := stack.AgentProfiles().Status(ctx)
+	if err != nil {
+		t.Fatalf("AgentProfiles.Status() error = %v", err)
+	}
+	reviewer, ok := agentProfileSnapshotForToolTest(status.Profiles, "reviewer")
+	if !ok {
+		t.Fatalf("reviewer profile missing from status: %#v", status.Profiles)
+	}
+	binding := agentprofile.NormalizeBinding(reviewer.Binding)
+	if binding.Status != agentprofile.BindingStatusStale {
+		t.Fatalf("reviewer binding status = %q, want stale: %#v", binding.Status, binding)
+	}
+}
+
+func TestAgentProfileAssemblyReturnsProfileDirError(t *testing.T) {
+	stack, _ := newStackWithAssemblyForToolTest(t, assembly.ResolvedAssembly{})
+	agentsDir := filepath.Join(stack.storeDir, agentprofile.DefaultAgentsDirName)
+	if err := os.RemoveAll(agentsDir); err != nil {
+		t.Fatalf("RemoveAll(%s) error = %v", agentsDir, err)
+	}
+	if err := os.WriteFile(agentsDir, []byte("not a directory"), 0o600); err != nil {
+		t.Fatalf("WriteFile(%s) error = %v", agentsDir, err)
+	}
+
+	err := stack.setConfiguredAgents(nil)
+	if err == nil || !strings.Contains(err.Error(), "agent profiles") {
+		t.Fatalf("setConfiguredAgents() error = %v, want agent profile directory error", err)
+	}
+}
+
+func TestAgentProfileAssemblyReturnsConfigStoreLoadError(t *testing.T) {
+	stack, _ := newStackWithAssemblyForToolTest(t, assembly.ResolvedAssembly{})
+	poisonConfigStorePath(t, stack)
+
+	err := stack.setConfiguredAgents(nil)
+	if err == nil || !strings.Contains(err.Error(), "agent profile bindings") {
+		t.Fatalf("setConfiguredAgents() error = %v, want agent profile binding store error", err)
+	}
+}
+
+func TestAgentProfileAssemblyReturnsInvalidBindingTargetError(t *testing.T) {
+	stack, _ := newStackWithAssemblyForToolTest(t, assembly.ResolvedAssembly{})
+	doc, err := stack.store.Load()
+	if err != nil {
+		t.Fatalf("store.Load() error = %v", err)
+	}
+	doc.AgentBindings = agentprofile.BindingSet{Bindings: []agentprofile.Binding{{
+		ProfileID: "reviewer",
+		Target:    agentprofile.BindingTargetKind("unknown_target"),
+		Enabled:   boolPtr(true),
+	}}}
+	if err := stack.store.Save(doc); err != nil {
+		t.Fatalf("store.Save() error = %v", err)
+	}
+
+	err = stack.setConfiguredAgents(doc.Agents)
+	if err == nil || !strings.Contains(err.Error(), "unsupported target") {
+		t.Fatalf("setConfiguredAgents() error = %v, want invalid profile binding target error", err)
+	}
+}
+
+func TestAgentProfileBindGuardianModelDoesNotMaterializeACPAgent(t *testing.T) {
+	workdir := t.TempDir()
+	stack, err := NewLocalStack(Config{
+		AppName:        "caelis",
+		UserID:         "guardian-bind-test",
+		StoreDir:       t.TempDir(),
+		WorkspaceKey:   workdir,
+		WorkspaceCWD:   workdir,
+		PermissionMode: "auto-review",
+		Sandbox:        SandboxConfig{RequestedType: "host"},
+		Model: ModelConfig{
+			Provider: "ollama",
+			Model:    "llama3",
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+	if _, err := stack.Connect(ModelConfig{
+		Alias:    "guardian-model",
+		Provider: "ollama",
+		Model:    "llama3:guardian",
+	}); err != nil {
+		t.Fatalf("Connect(guardian-model) error = %v", err)
+	}
+	status, err := stack.AgentProfiles().Bind(context.Background(), AgentProfileBindingConfig{
+		ProfileID:       "guardian",
+		Target:          agentprofile.BindingTargetBuiltIn,
+		Model:           "guardian-model",
+		ReasoningEffort: "",
+	})
+	if err != nil {
+		t.Fatalf("AgentProfiles.Bind(guardian model) error = %v", err)
+	}
+	if agentConfigSetHas(stack.runtime.Assembly.Agents, "guardian") {
+		t.Fatalf("guardian should not materialize as a SPAWN ACP agent: %#v", stack.runtime.Assembly.Agents)
+	}
+	guardian, ok := agentProfileSnapshotForToolTest(status.Profiles, "guardian")
+	if !ok {
+		t.Fatalf("guardian virtual profile missing from status: %#v", status.Profiles)
+	}
+	binding := agentprofile.NormalizeBinding(guardian.Binding)
+	if binding.Target != agentprofile.BindingTargetBuiltIn || binding.Model != "guardian-model" {
+		t.Fatalf("guardian binding = %#v, want built_in guardian-model", binding)
+	}
+	_, err = stack.AgentProfiles().Bind(context.Background(), AgentProfileBindingConfig{
+		ProfileID: "guardian",
+		Target:    agentprofile.BindingTargetACP,
+		ACPAgent:  "reviewer",
+	})
+	if err == nil || !strings.Contains(err.Error(), "guardian cannot bind to an external ACP agent") {
+		t.Fatalf("AgentProfiles.Bind(guardian acp) error = %v, want guardian ACP rejection", err)
+	}
 }
 
 func newStackWithAssemblyForToolTest(t *testing.T, assembly assembly.ResolvedAssembly) (*Stack, session.Session) {
@@ -688,6 +1215,15 @@ func agentConfigSetHas(agents []assembly.AgentConfig, name string) bool {
 	return ok
 }
 
+func agentProfileSnapshotForToolTest(profiles []agentprofile.Snapshot, id string) (agentprofile.Snapshot, bool) {
+	for _, profile := range profiles {
+		if strings.EqualFold(strings.TrimSpace(profile.Profile.ID), strings.TrimSpace(id)) {
+			return profile, true
+		}
+	}
+	return agentprofile.Snapshot{}, false
+}
+
 func agentConfigForToolTest(agents []assembly.AgentConfig, name string) (assembly.AgentConfig, bool) {
 	for _, agent := range agents {
 		if strings.EqualFold(strings.TrimSpace(agent.Name), strings.TrimSpace(name)) {
@@ -736,6 +1272,29 @@ func assertSelfAgentArgsForModel(t *testing.T, agents []assembly.AgentConfig) {
 			t.Fatalf("self args = %#v, missing %q", self.Args, want)
 		}
 	}
+}
+
+func assertAgentArgsContain(t *testing.T, agents []assembly.AgentConfig, name string, values ...string) {
+	t.Helper()
+	agent, ok := agentConfigForToolTest(agents, name)
+	if !ok {
+		t.Fatalf("%s agent missing from assembly: %#v", name, agents)
+	}
+	for _, want := range values {
+		if !slices.Contains(agent.Args, want) {
+			t.Fatalf("%s args = %#v, missing %q", name, agent.Args, want)
+		}
+	}
+}
+
+func profileSystemPromptArgContains(args []string, want string) bool {
+	for i, arg := range args {
+		if arg != "-system-prompt" || i+1 >= len(args) {
+			continue
+		}
+		return strings.Contains(args[i+1], want)
+	}
+	return false
 }
 
 func repoRootForGatewayAppTest(t *testing.T) string {

@@ -803,6 +803,106 @@ func TestGatewayTaskWaitCompletedShowsActionWithoutResultOutput(t *testing.T) {
 	}
 }
 
+func TestGatewayTaskControlResultsHideRawOutput(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name      string
+		callID    string
+		action    string
+		status    gateway.ToolStatus
+		rawOutput map[string]any
+		content   string
+		wantArg   string
+		forbidden []string
+	}{
+		{
+			name:   "failed wait",
+			callID: "task-wait-failed",
+			action: "wait",
+			status: gateway.ToolStatusFailed,
+			rawOutput: map[string]any{
+				"state":     "failed",
+				"result":    "TASK_WAIT_FAILED_RAW_RESULT\n",
+				"error":     "TASK_WAIT_FAILED_RAW_ERROR",
+				"exit_code": 1,
+			},
+			content:   "TASK_WAIT_FAILED_CONTENT\n",
+			wantArg:   "Wait 12s",
+			forbidden: []string{"TASK_WAIT_FAILED_RAW_RESULT", "TASK_WAIT_FAILED_RAW_ERROR", "TASK_WAIT_FAILED_CONTENT"},
+		},
+		{
+			name:   "cancel",
+			callID: "task-cancel-result",
+			action: "cancel",
+			status: gateway.ToolStatusCancelled,
+			rawOutput: map[string]any{
+				"state":     "cancelled",
+				"result":    "TASK_CANCEL_RAW_RESULT\n",
+				"error":     "TASK_CANCEL_RAW_ERROR",
+				"exit_code": -1,
+			},
+			content:   "TASK_CANCEL_CONTENT\n",
+			wantArg:   "Cancel",
+			forbidden: []string{"TASK_CANCEL_RAW_RESULT", "TASK_CANCEL_RAW_ERROR", "TASK_CANCEL_CONTENT"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			model := newGatewayEventTestModel()
+			rawInput := map[string]any{"action": tc.action, "task_id": "task-7"}
+			if tc.action == "wait" {
+				rawInput["yield_time_ms"] = 12000
+			}
+			for _, env := range []gateway.EventEnvelope{
+				{Event: gateway.Event{
+					Kind:       gateway.EventKindToolCall,
+					SessionRef: session.SessionRef{SessionID: "root-session"},
+					ToolCall: &gateway.ToolCallPayload{
+						CallID:   tc.callID,
+						ToolName: "TASK",
+						Status:   gateway.ToolStatusRunning,
+						Scope:    gateway.EventScopeMain,
+						RawInput: rawInput,
+					},
+				}},
+				{Event: gateway.Event{
+					Kind:       gateway.EventKindToolResult,
+					SessionRef: session.SessionRef{SessionID: "root-session"},
+					Meta:       testRuntimeToolMeta(map[string]any{"target_id": "task-7", "action": tc.action, "target_kind": "command"}),
+					ToolResult: &gateway.ToolResultPayload{
+						CallID:    tc.callID,
+						ToolName:  "TASK",
+						Status:    tc.status,
+						Scope:     gateway.EventScopeMain,
+						RawInput:  rawInput,
+						RawOutput: tc.rawOutput,
+						Content:   testTerminalContent(tc.content),
+					},
+				}},
+			} {
+				updated, _ := model.Update(gatewayEventMsg(env))
+				model = updated.(*Model)
+			}
+			block, ok := model.doc.Blocks()[0].(*MainACPTurnBlock)
+			if !ok {
+				t.Fatalf("first block = %#v, want MainACPTurnBlock", model.doc.Blocks()[0])
+			}
+			rows := block.Render(BlockRenderContext{Width: 110, TermWidth: 110, Theme: model.theme})
+			joined := strings.Join(renderedPlainRows(rows), "\n")
+			if !strings.Contains(joined, tc.wantArg) {
+				t.Fatalf("rendered rows = %q, want TASK control action %q", joined, tc.wantArg)
+			}
+			for _, forbidden := range tc.forbidden {
+				if strings.Contains(joined, forbidden) {
+					t.Fatalf("rendered rows = %q, should not render TASK control output %q", joined, forbidden)
+				}
+			}
+		})
+	}
+}
+
 func TestGatewayTerminalToolArgumentsRenderFullAndWrapIndented(t *testing.T) {
 	model := NewModel(Config{NoColor: true})
 	model.viewport.SetWidth(46)

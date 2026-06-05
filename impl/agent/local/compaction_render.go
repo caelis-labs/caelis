@@ -59,15 +59,15 @@ func renderCompactionEvent(event *session.Event) string {
 	case session.EventTypePlan:
 		return renderPlanEventForCompaction(event, text)
 	case session.EventTypeToolCall:
-		if event.Tool != nil {
-			return renderToolPayloadForCompaction("Tool Call", event, event.Tool.Input, 2000)
+		if toolPayload := session.EventToolProjection(event); toolPayload != nil {
+			return renderToolPayloadForCompaction("Tool Call", event, toolPayload.Input, 2000)
 		}
 		if update := session.ProtocolUpdateOf(event); update != nil {
 			return renderToolEventForCompaction("Tool Call", event, update, update.RawInput, 2000)
 		}
 	case session.EventTypeToolResult:
-		if event.Tool != nil {
-			return renderToolPayloadForCompaction("Tool Result", event, event.Tool.Output, 3500)
+		if toolPayload := session.EventToolProjection(event); toolPayload != nil {
+			return renderToolPayloadForCompaction("Tool Result", event, toolPayload.Output, 3500)
 		}
 		if update := session.ProtocolUpdateOf(event); update != nil {
 			return renderToolEventForCompaction("Tool Result", event, update, update.RawOutput, 3500)
@@ -126,14 +126,14 @@ func renderToolPayloadForCompaction(kind string, event *session.Event, payload m
 	if toolName != "" {
 		lines = append(lines, "- tool: "+toolName)
 	}
-	if event != nil && event.Tool != nil {
-		if title := strings.TrimSpace(event.Tool.Title); title != "" && !strings.EqualFold(title, toolName) {
+	if toolPayload := session.EventToolProjection(event); toolPayload != nil {
+		if title := strings.TrimSpace(toolPayload.Title); title != "" && !strings.EqualFold(title, toolName) {
 			lines = append(lines, "- title: "+title)
 		}
-		if status := strings.TrimSpace(event.Tool.Status); status != "" {
+		if status := strings.TrimSpace(toolPayload.Status); status != "" {
 			lines = append(lines, "- status: "+status)
 		}
-		if text := textFromEventToolContent(event.Tool.Content); text != "" {
+		if text := textFromEventToolContent(toolPayload.Content); text != "" {
 			lines = append(lines, "- content: "+compactText(text, 1200))
 		}
 	}
@@ -249,8 +249,8 @@ func toolNameForCompaction(event *session.Event, update *session.ProtocolUpdate)
 				return name
 			}
 		}
-		if event.Tool != nil {
-			if name := strings.TrimSpace(event.Tool.Name); name != "" {
+		if toolPayload := session.EventToolProjection(event); toolPayload != nil {
+			if name := strings.TrimSpace(toolPayload.Name); name != "" {
 				return name
 			}
 		}
@@ -294,7 +294,19 @@ func renderPlanEventForCompaction(event *session.Event, fallback string) string 
 }
 
 func planEntriesForCompaction(event *session.Event) []session.ProtocolPlanEntry {
-	if event == nil || event.Protocol == nil {
+	if event == nil {
+		return nil
+	}
+	if payload := session.PlanPayloadOf(event); payload != nil {
+		out := make([]session.ProtocolPlanEntry, 0, len(payload.Entries))
+		for _, entry := range payload.Entries {
+			out = append(out, session.ProtocolPlanEntry(entry))
+		}
+		if len(out) > 0 {
+			return out
+		}
+	}
+	if event.Protocol == nil {
 		return nil
 	}
 	if event.Protocol.Plan != nil && len(event.Protocol.Plan.Entries) > 0 {

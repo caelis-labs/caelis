@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/OnslaughtSnail/caelis/internal/testenv"
@@ -67,6 +68,9 @@ func TestDiscoverMetaMaterializesSystemSkillsAndDedupesByPriority(t *testing.T) 
 	}
 	if got := byName["skill-installer"].Path; got != filepath.Join(systemRoot, "skill-installer", "SKILL.md") {
 		t.Fatalf("skill-installer path = %q, want system skill", got)
+	}
+	if got := byName["subagent-creator"].Description; !strings.Contains(got, "create or edit a reusable subagent markdown profile") || strings.Contains(got, "/agents") || strings.Contains(got, ".caelis") {
+		t.Fatalf("subagent-creator description = %q, want clear trigger without storage paths", got)
 	}
 	if got := byName["shared"].Description; got != "private shared" {
 		t.Fatalf("shared description = %q, want private user skill over public .agents skill", got)

@@ -95,3 +95,43 @@ func withCaelisRuntimeSection(meta map[string]any, section string, values map[st
 	out[EventMetaRoot] = caelis
 	return out
 }
+
+func mergeEventMeta(base map[string]any, overlay map[string]any) map[string]any {
+	if len(base) == 0 {
+		return cloneEventMetaMap(overlay)
+	}
+	if len(overlay) == 0 {
+		return cloneEventMetaMap(base)
+	}
+	out := cloneEventMetaMap(base)
+	for key, value := range overlay {
+		if baseMap, ok := out[key].(map[string]any); ok {
+			if overlayMap, ok := value.(map[string]any); ok {
+				out[key] = mergeEventMeta(baseMap, overlayMap)
+				continue
+			}
+		}
+		out[key] = cloneEventMetaValue(value)
+	}
+	return out
+}
+
+func cloneEventMetaMap(values map[string]any) map[string]any {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(values))
+	for key, value := range values {
+		out[key] = cloneEventMetaValue(value)
+	}
+	return out
+}
+
+func cloneEventMetaValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return cloneEventMetaMap(typed)
+	default:
+		return value
+	}
+}

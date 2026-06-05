@@ -87,7 +87,7 @@ func TestStoreAppendAndPersistCanonicalEvents(t *testing.T) {
 	}
 }
 
-func TestStoreAppendRejectsProtocolOnlyCoreToolResult(t *testing.T) {
+func TestStoreAppendMigratesProtocolOnlyCoreToolResult(t *testing.T) {
 	t.Parallel()
 
 	store := NewStore(Config{
@@ -103,19 +103,122 @@ func TestStoreAppendRejectsProtocolOnlyCoreToolResult(t *testing.T) {
 		t.Fatalf("GetOrCreate() error = %v", err)
 	}
 
-	_, err = store.AppendEvent(ctx, createdSession.SessionRef, &session.Event{
+	appended, err := store.AppendEvent(ctx, createdSession.SessionRef, &session.Event{
 		Type: session.EventTypeToolResult,
 		Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
 			SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate),
 			ToolCallID:    "call-1",
+			Kind:          "RUN_COMMAND",
 			RawOutput:     map[string]any{"stdout": "ok"},
 		}},
 	})
-	if err == nil {
-		t.Fatal("AppendEvent() error = nil, want protocol-only core event rejection")
+	if err != nil {
+		t.Fatalf("AppendEvent() error = %v, want protocol-only tool result migrated", err)
 	}
-	if detail := session.EventValidationDetail(err); !strings.Contains(detail, "missing durable Event.Tool") {
-		t.Fatalf("AppendEvent() error = %v, want durable Event.Tool validation detail", err)
+	if appended == nil || appended.ToolResultPayload == nil {
+		t.Fatalf("AppendEvent() = %#v, want semantic tool_result payload", appended)
+	}
+	if appended.Message != nil || appended.Tool != nil || appended.Protocol != nil || appended.Meta != nil {
+		t.Fatalf("legacy projection persisted in append result: message=%#v tool=%#v protocol=%#v meta=%#v", appended.Message, appended.Tool, appended.Protocol, appended.Meta)
+	}
+	events, err := store.Events(ctx, session.EventsRequest{SessionRef: createdSession.SessionRef})
+	if err != nil {
+		t.Fatalf("Events() error = %v", err)
+	}
+	if len(events) != 1 || events[0].ToolResultPayload == nil {
+		t.Fatalf("Events() = %#v, want one semantic tool_result event", events)
+	}
+	message, ok := session.ModelMessageOf(events[0])
+	if !ok || len(message.ToolResults()) != 1 {
+		t.Fatalf("ModelMessageOf() = %#v, %v; want one tool result", message, ok)
+	}
+	result := message.ToolResults()[0]
+	if result.ToolUseID != "call-1" || result.Name != "RUN_COMMAND" {
+		t.Fatalf("tool result = %#v, want call-1/RUN_COMMAND", result)
+	}
+}
+
+func TestStoreLoadMigratesLegacyToolResultNameCaseMismatch(t *testing.T) {
+	t.Parallel()
+
+	store := NewStore(Config{
+		RootDir:            t.TempDir(),
+		SessionIDGenerator: func() string { return "s-hxiurg3hq57a" },
+	})
+	ctx := context.Background()
+	createdSession, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+		AppName: "caelis",
+		UserID:  "user-1",
+	})
+	if err != nil {
+		t.Fatalf("GetOrCreate() error = %v", err)
+	}
+
+	message := model.Message{
+		Role: model.RoleTool,
+		Parts: []model.Part{{
+			Kind: model.PartKindToolResult,
+			ToolResult: &model.ToolResultPart{
+				ToolUseID: "call-1",
+				Name:      "WRITE",
+				Content:   []model.Part{model.NewJSONPart([]byte(`{"result":"ok"}`))},
+			},
+		}},
+	}
+	legacy := &session.Event{
+		ID:         "event-55",
+		Type:       session.EventTypeToolResult,
+		Visibility: session.VisibilityCanonical,
+		Tool: &session.EventTool{
+			ID:     "call-1",
+			Name:   "Write",
+			Status: "completed",
+			Output: map[string]any{"result": "ok"},
+		},
+		Message: &message,
+		Meta: map[string]any{
+			"caelis": map[string]any{
+				"version": 1,
+				"runtime": map[string]any{
+					"tool": map[string]any{
+						"name": "WRITE",
+					},
+				},
+			},
+		},
+	}
+	path, err := store.resolveWritePath(createdSession)
+	if err != nil {
+		t.Fatalf("resolveWritePath() error = %v", err)
+	}
+	if err := store.appendEventLog(path, []*session.Event{legacy}); err != nil {
+		t.Fatalf("appendEventLog() error = %v", err)
+	}
+
+	loaded, err := NewService(store).LoadSession(ctx, session.LoadSessionRequest{SessionRef: createdSession.SessionRef})
+	if err != nil {
+		t.Fatalf("LoadSession() error = %v", err)
+	}
+	if len(loaded.Events) != 1 {
+		t.Fatalf("len(loaded.Events) = %d, want 1", len(loaded.Events))
+	}
+	event := loaded.Events[0]
+	if event.Schema != session.EventSchemaSemanticV2 || event.ToolResultPayload == nil {
+		t.Fatalf("loaded event = %#v, want v2 semantic tool_result", event)
+	}
+	if event.Message != nil || event.Tool != nil || event.Protocol != nil || event.Meta != nil {
+		t.Fatalf("legacy fields survived migration: message=%#v tool=%#v protocol=%#v meta=%#v", event.Message, event.Tool, event.Protocol, event.Meta)
+	}
+	if err := session.ValidateDurableCoreEvent(event); err != nil {
+		t.Fatalf("ValidateDurableCoreEvent() error = %v", err)
+	}
+	projected, ok := session.ModelMessageOf(event)
+	if !ok || len(projected.ToolResults()) != 1 {
+		t.Fatalf("ModelMessageOf() = %#v, %v; want one tool result", projected, ok)
+	}
+	result := projected.ToolResults()[0]
+	if result.ToolUseID != "call-1" || result.Name != "Write" {
+		t.Fatalf("projected tool result = %#v, want call-1/Write", result)
 	}
 }
 
