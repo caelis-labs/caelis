@@ -315,7 +315,7 @@ func mergeEventStreamTerminalEnvelope(dst *eventstream.Envelope, src eventstream
 			existing, existingTerminalID := acpTerminalContent(dstUpdate)
 			toolName := acpUpdateToolName(mergeTranscriptMeta(acpUpdateMeta(dstUpdate), dst.Meta), stringFromPtr(dstUpdate.Title), stringFromPtr(dstUpdate.Kind))
 			if strings.EqualFold(strings.TrimSpace(toolName), "RUN_COMMAND") {
-				text = appendDeltaStreamChunk(existing, text)
+				text = mergeCommandStreamChunk(existing, text)
 			} else {
 				text = mergeSubagentStreamChunk(existing, text)
 			}

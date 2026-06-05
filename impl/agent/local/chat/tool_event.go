@@ -15,8 +15,9 @@ import (
 func toolResultEvent(call model.ToolCall, result tool.Result, message *model.Message, extraMeta ...map[string]any) *session.Event {
 	rawInput := mustObject(call.Args)
 	rawOutput := toolResultRawOutput(result)
-	metaParts := []map[string]any{toolMeta(call.Name), result.Metadata}
+	metaParts := []map[string]any{result.Metadata}
 	metaParts = append(metaParts, extraMeta...)
+	metaParts = append(metaParts, toolMeta(call.Name))
 	status := toolCallStatus(result, rawOutput)
 	meta := mergeEventMeta(metaParts...)
 	event := &session.Event{

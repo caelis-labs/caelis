@@ -777,11 +777,14 @@ func (a *RuntimeAgent) terminalBridgePlan(event *session.Event) (terminalBridgeP
 	}
 	name := ""
 	displayTerminalID := ""
-	if event.Tool != nil {
-		name = strings.TrimSpace(event.Tool.Name)
-		displayTerminalID = strings.TrimSpace(event.Tool.ID)
-	} else if event.Protocol != nil && event.Protocol.ToolCall != nil {
+	if toolPayload := session.EventToolProjection(event); toolPayload != nil {
+		name = strings.TrimSpace(toolPayload.Name)
+		displayTerminalID = strings.TrimSpace(toolPayload.ID)
+	}
+	if name == "" && event.Protocol != nil && event.Protocol.ToolCall != nil {
 		name = strings.TrimSpace(event.Protocol.ToolCall.Name)
+	}
+	if displayTerminalID == "" && event.Protocol != nil && event.Protocol.ToolCall != nil {
 		displayTerminalID = strings.TrimSpace(event.Protocol.ToolCall.ID)
 	}
 	if !terminalBridgeEligibleTool(name) {

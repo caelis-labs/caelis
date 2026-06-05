@@ -334,6 +334,40 @@ func TestGatewayTerminalBatcherPreservesCommandPrefixDeltas(t *testing.T) {
 	}
 }
 
+func TestGatewayTerminalBatcherDropsCommandLineOverlap(t *testing.T) {
+	var sent []tea.Msg
+	send := func(msg tea.Msg) {
+		sent = append(sent, msg)
+	}
+	var batcher eventStreamTerminalBatcher
+	first := "步骤 1/5 - 21:53:13\n步骤 2/5 - 21:53:14\n步骤 3/5 - 21:53:15\n步骤 4/5 - 21:53:16\n"
+	tail := "步骤 4/5 - 21:53:16\n步骤 5/5 - 21:53:17\n"
+
+	if !batcher.enqueue(requireProjectedACPEvent(t, testTerminalFrame(first, 1)), send) {
+		t.Fatal("first running frame was not accepted for batching")
+	}
+	if !batcher.enqueue(requireProjectedACPEvent(t, testTerminalFrame(tail, 2)), send) {
+		t.Fatal("second running frame was not accepted for batching")
+	}
+
+	batcher.flush(send)
+	if len(sent) != 1 {
+		t.Fatalf("flush sent %d messages, want 1", len(sent))
+	}
+	env, ok := sent[0].(eventstream.Envelope)
+	if !ok {
+		t.Fatalf("sent msg = %#v, want EventEnvelope", sent[0])
+	}
+	update, ok := env.Update.(schema.ToolCallUpdate)
+	if !ok {
+		t.Fatalf("update = %#v, want ToolCallUpdate", env.Update)
+	}
+	want := first + "步骤 5/5 - 21:53:17\n"
+	if got, _ := acpTerminalContent(update); got != want {
+		t.Fatalf("merged RUN_COMMAND text = %q, want %q", got, want)
+	}
+}
+
 func TestGatewayNarrativeBatcherSyncsProtocolUpdateContent(t *testing.T) {
 	var sent []tea.Msg
 	send := func(msg tea.Msg) {

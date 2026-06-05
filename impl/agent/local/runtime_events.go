@@ -192,6 +192,14 @@ func planEntriesFromEvent(event *session.Event) ([]plan.Entry, string, bool) {
 		return nil, "", false
 	}
 	name := strings.TrimSpace(planToolNameFromEvent(event))
+	if name == "" {
+		if message, ok := session.ModelMessageOf(event); ok {
+			results := message.ToolResults()
+			if len(results) > 0 {
+				name = strings.TrimSpace(results[0].Name)
+			}
+		}
+	}
 	if name == "" && event.Message != nil {
 		if results := event.Message.ToolResults(); len(results) > 0 {
 			name = strings.TrimSpace(results[0].Name)
@@ -202,28 +210,47 @@ func planEntriesFromEvent(event *session.Event) ([]plan.Entry, string, bool) {
 	}
 
 	payload := map[string]any{}
-	if event.Tool != nil && len(event.Tool.Output) > 0 {
-		payload = maps.Clone(event.Tool.Output)
+	if toolPayload := session.EventToolProjection(event); toolPayload != nil && len(toolPayload.Output) > 0 {
+		payload = maps.Clone(toolPayload.Output)
 	}
 	if len(payload) == 0 {
 		if update := session.ProtocolUpdateOf(event); update != nil && len(update.RawOutput) > 0 {
 			payload = maps.Clone(update.RawOutput)
 		}
 	}
-	if len(payload) == 0 && event.Message != nil {
-		results := event.Message.ToolResults()
-		if len(results) == 0 {
-			return nil, "", false
+	if len(payload) == 0 {
+		message, ok := session.ModelMessageOf(event)
+		if !ok {
+			if event.Message != nil {
+				message = *event.Message
+				ok = true
+			}
 		}
-		result := results[0]
-		if len(result.Content) > 0 && result.Content[0].Kind == model.PartKindJSON && result.Content[0].JSON != nil {
-			_ = json.Unmarshal(result.Content[0].JSONValue(), &payload)
+		if ok {
+			results := message.ToolResults()
+			if len(results) == 0 {
+				return nil, "", false
+			}
+			result := results[0]
+			if len(result.Content) > 0 && result.Content[0].Kind == model.PartKindJSON && result.Content[0].JSON != nil {
+				_ = json.Unmarshal(result.Content[0].JSONValue(), &payload)
+			}
 		}
 	}
 	entries := planEntriesFromAny(payload["entries"])
 	explanation := strings.TrimSpace(stringValue(payload["explanation"]))
 	if len(entries) == 0 {
+		if toolResult := session.ToolResultPayloadOf(event); toolResult != nil {
+			entries = planEntriesFromAny(nestedValue(toolResult.Metadata, "caelis", "runtime", "tool", "entries"))
+		}
+	}
+	if len(entries) == 0 {
 		entries = planEntriesFromAny(nestedValue(event.Meta, "caelis", "runtime", "tool", "entries"))
+	}
+	if explanation == "" {
+		if toolResult := session.ToolResultPayloadOf(event); toolResult != nil {
+			explanation = nestedString(toolResult.Metadata, "caelis", "runtime", "tool", "explanation")
+		}
 	}
 	if explanation == "" {
 		explanation = nestedString(event.Meta, "caelis", "runtime", "tool", "explanation")
@@ -238,8 +265,8 @@ func planToolNameFromEvent(event *session.Event) string {
 	if name := nestedString(event.Meta, "caelis", "runtime", "tool", "name"); name != "" {
 		return name
 	}
-	if event.Tool != nil {
-		if name := strings.TrimSpace(event.Tool.Name); name != "" {
+	if toolPayload := session.EventToolProjection(event); toolPayload != nil {
+		if name := strings.TrimSpace(toolPayload.Name); name != "" {
 			return name
 		}
 	}

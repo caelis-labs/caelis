@@ -100,7 +100,7 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 				return
 			}
 
-			assistantMessage, calls, err := canonicalizeAssistantToolCalls(final.Message)
+			assistantMessage, calls, err := canonicalizeAssistantToolCalls(final.Message, a.tools...)
 			if err != nil {
 				if invalidToolCallRepairAttempts >= maxInvalidToolCallRepairAttempts {
 					yield(nil, err)

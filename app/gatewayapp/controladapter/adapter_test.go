@@ -19,12 +19,14 @@ import (
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
 	"github.com/OnslaughtSnail/caelis/impl/model/providers"
 	"github.com/OnslaughtSnail/caelis/internal/agenthandle"
+	kernelimpl "github.com/OnslaughtSnail/caelis/internal/kernel"
 	"github.com/OnslaughtSnail/caelis/internal/testenv"
 	"github.com/OnslaughtSnail/caelis/ports/assembly"
 	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/stream"
+	acpprojector "github.com/OnslaughtSnail/caelis/protocol/acp/projector"
 )
 
 func encryptCodeFreeAPIKeyForRuntimeTest(t *testing.T, apiKey string) string {
@@ -88,6 +90,60 @@ func closeAdapterTestTurn(t *testing.T, turn Turn) {
 			t.Fatal("turn did not close after cancel")
 		}
 	}
+}
+
+func TestStreamRequestFromProjectedSemanticSpawnRunningEvent(t *testing.T) {
+	t.Parallel()
+
+	event := session.CanonicalizeEvent(&session.Event{
+		SessionID:  "root-session",
+		Type:       session.EventTypeToolResult,
+		Visibility: session.VisibilityCanonical,
+		Tool: &session.EventTool{
+			ID:     "spawn-1",
+			Name:   "SPAWN",
+			Status: "running",
+			Input:  map[string]any{"agent": "explorer", "prompt": "inspect files"},
+			Output: map[string]any{"task_id": "reya", "state": "running"},
+			Content: []session.EventToolContent{{
+				Type:       "terminal",
+				TerminalID: "subagent-task-1",
+			}},
+		},
+		Meta: map[string]any{
+			"caelis": map[string]any{
+				"version": 1,
+				"runtime": map[string]any{
+					"tool": map[string]any{"name": "SPAWN"},
+					"task": map[string]any{
+						"task_id":       "reya",
+						"terminal_id":   "subagent-task-1",
+						"output_cursor": int64(0),
+						"running":       true,
+						"state":         "running",
+					},
+				},
+			},
+		},
+	})
+	gatewayEnv, ok := kernelimpl.ProjectSessionEvent(session.SessionRef{SessionID: "root-session"}, event)
+	if !ok {
+		t.Fatal("ProjectSessionEvent() ok = false, want gateway event")
+	}
+	for _, acpEnv := range acpprojector.ProjectGatewayEventEnvelope(gatewayEnv) {
+		req, ok := streamRequestFromACPEvent(acpEnv)
+		if !ok {
+			continue
+		}
+		if req.CallID != "spawn-1" || req.ToolName != "SPAWN" {
+			t.Fatalf("stream request identity = %#v, want spawn-1/SPAWN", req)
+		}
+		if req.Ref.SessionID != "root-session" || req.Ref.TaskID != "reya" || req.Ref.TerminalID != "subagent-task-1" {
+			t.Fatalf("stream request ref = %#v, want root-session/reya/subagent-task-1", req.Ref)
+		}
+		return
+	}
+	t.Fatalf("projected ACP envelopes did not produce stream request: %#v", acpprojector.ProjectGatewayEventEnvelope(gatewayEnv))
 }
 
 func newAdapterTestStack(t *testing.T, cfg gatewayapp.Config) (*gatewayapp.Stack, error) {

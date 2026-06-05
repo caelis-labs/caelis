@@ -148,8 +148,8 @@ func toolResultMessageFromCanonical(call model.ToolCall, result tool.Result) mod
 		Parts: []model.Part{{
 			Kind: model.PartKindToolResult,
 			ToolResult: &model.ToolResultPart{
-				ToolUseID: strings.TrimSpace(firstNonEmpty(result.ID, call.ID)),
-				Name:      strings.TrimSpace(firstNonEmpty(result.Name, call.Name)),
+				ToolUseID: strings.TrimSpace(call.ID),
+				Name:      strings.TrimSpace(call.Name),
 				Content:   parts,
 				IsError:   result.IsError,
 			},

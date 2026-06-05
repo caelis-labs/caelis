@@ -114,18 +114,18 @@ func RefFromEvent(event *session.Event) (stream.Ref, bool) {
 	ref := stream.Ref{
 		SessionID: strings.TrimSpace(event.SessionID),
 	}
-	if event.Meta != nil {
-		if taskID, _ := event.Meta["task_id"].(string); strings.TrimSpace(taskID) != "" {
+	for _, meta := range terminalEventMetadata(event) {
+		if taskID, _ := meta["task_id"].(string); strings.TrimSpace(taskID) != "" && ref.TaskID == "" {
 			ref.TaskID = strings.TrimSpace(taskID)
 		}
-		if terminalID, _ := event.Meta["terminal_id"].(string); strings.TrimSpace(terminalID) != "" {
+		if terminalID, _ := meta["terminal_id"].(string); strings.TrimSpace(terminalID) != "" && ref.TerminalID == "" {
 			ref.TerminalID = strings.TrimSpace(terminalID)
 		}
 		if ref.TaskID == "" {
-			ref.TaskID = nestedString(event.Meta, "caelis", "runtime", "task", "task_id")
+			ref.TaskID = nestedString(meta, "caelis", "runtime", "task", "task_id")
 		}
 		if ref.TerminalID == "" {
-			ref.TerminalID = nestedString(event.Meta, "caelis", "runtime", "task", "terminal_id")
+			ref.TerminalID = nestedString(meta, "caelis", "runtime", "task", "terminal_id")
 		}
 	}
 	if ref.TerminalID == "" && event.Protocol != nil && event.Protocol.ToolCall != nil {
@@ -133,6 +133,20 @@ func RefFromEvent(event *session.Event) (stream.Ref, bool) {
 			if terminalID := strings.TrimSpace(item.TerminalID); terminalID != "" {
 				ref.TerminalID = terminalID
 				break
+			}
+		}
+	}
+	if ref.TerminalID == "" {
+		toolPayload := session.EventToolProjection(event)
+		if toolPayload != nil {
+			for _, item := range toolPayload.Content {
+				if !strings.EqualFold(strings.TrimSpace(item.Type), "terminal") {
+					continue
+				}
+				if terminalID := strings.TrimSpace(item.TerminalID); terminalID != "" {
+					ref.TerminalID = terminalID
+					break
+				}
 			}
 		}
 	}
@@ -170,6 +184,23 @@ func RefFromEvent(event *session.Event) (stream.Ref, bool) {
 		return stream.Ref{}, false
 	}
 	return ref, true
+}
+
+func terminalEventMetadata(event *session.Event) []map[string]any {
+	if event == nil {
+		return nil
+	}
+	out := make([]map[string]any, 0, 4)
+	if len(event.Meta) > 0 {
+		out = append(out, event.Meta)
+	}
+	if event.ToolCallPayload != nil && len(event.ToolCallPayload.Metadata) > 0 {
+		out = append(out, event.ToolCallPayload.Metadata)
+	}
+	if event.ToolResultPayload != nil && len(event.ToolResultPayload.Metadata) > 0 {
+		out = append(out, event.ToolResultPayload.Metadata)
+	}
+	return out
 }
 
 func protocolTerminalMetaValue(meta map[string]any, key string) string {

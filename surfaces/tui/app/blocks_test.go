@@ -54,6 +54,38 @@ func TestMergeSubagentStreamChunkAcceptsCumulativeReplay(t *testing.T) {
 	}
 }
 
+func TestMergeCommandStreamChunkDropsRepeatedLineOverlap(t *testing.T) {
+	existing := "步骤 1/5 - 21:53:13\n步骤 2/5 - 21:53:14\n步骤 3/5 - 21:53:15\n步骤 4/5 - 21:53:16\n"
+	incoming := "步骤 4/5 - 21:53:16\n步骤 5/5 - 21:53:17\n"
+	want := existing + "步骤 5/5 - 21:53:17\n"
+	if got := mergeCommandStreamChunk(existing, incoming); got != want {
+		t.Fatalf("merged command chunk = %q, want %q", got, want)
+	}
+}
+
+func TestMergeCommandStreamChunkKeepsPrefixLikeDelta(t *testing.T) {
+	got := mergeCommandStreamChunk("abc", "abcdef")
+	if got != "abcabcdef" {
+		t.Fatalf("merged command chunk = %q, want exact appended delta", got)
+	}
+}
+
+func TestRUNCommandOverlappingRunningTailDoesNotDuplicateOutput(t *testing.T) {
+	block := NewMainACPTurnBlock("session-1")
+	first := "步骤 1/5 - 21:53:13\n步骤 2/5 - 21:53:14\n步骤 3/5 - 21:53:15\n步骤 4/5 - 21:53:16\n"
+	tail := "步骤 4/5 - 21:53:16\n步骤 5/5 - 21:53:17\n"
+	block.UpdateToolWithMeta("command-1", "RUN_COMMAND", "for i in 1 2 3 4 5", first, false, false, ToolUpdateMeta{TaskID: "task-1"})
+	block.UpdateToolWithMeta("command-1", "RUN_COMMAND", "for i in 1 2 3 4 5", tail, false, false, ToolUpdateMeta{TaskID: "task-1"})
+
+	if len(block.Events) != 1 {
+		t.Fatalf("events = %#v, want one RUN_COMMAND event", block.Events)
+	}
+	want := first + "步骤 5/5 - 21:53:17\n"
+	if got := block.Events[0].Output; got != want {
+		t.Fatalf("RUN_COMMAND output = %q, want %q", got, want)
+	}
+}
+
 func TestMainACPFinalCumulativeSuffixKeepsPreToolTextInPlace(t *testing.T) {
 	block := NewMainACPTurnBlock("session-1")
 	block.AppendStreamChunk(SEAssistant, "Before tool.")

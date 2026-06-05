@@ -126,9 +126,10 @@ func taskToolPayload(snapshot taskapi.Snapshot) map[string]any {
 
 func commandTaskToolPayload(snapshot taskapi.Snapshot) map[string]any {
 	visibleTaskID := taskVisibleID(snapshot)
-	payload := map[string]any{}
+	payload := map[string]any{
+		"task_id": visibleTaskID,
+	}
 	if snapshot.Running {
-		payload["task_id"] = visibleTaskID
 		payload["state"] = string(snapshot.State)
 		if latestOutput, _ := snapshot.Result["latest_output"].(string); taskOutputHasNonBlankLine(latestOutput) {
 			payload["latest_output"] = latestOutput

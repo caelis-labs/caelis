@@ -170,6 +170,50 @@ func TestProjectSessionEventPreservesMinimalCaelisMeta(t *testing.T) {
 	}
 }
 
+func TestProjectSessionEventProjectsSemanticToolResultTaskMeta(t *testing.T) {
+	t.Parallel()
+
+	event := session.CanonicalizeEvent(&session.Event{
+		ID:         "spawn-running",
+		Type:       session.EventTypeToolResult,
+		Visibility: session.VisibilityCanonical,
+		Tool: &session.EventTool{
+			ID:     "spawn-1",
+			Name:   "SPAWN",
+			Status: "running",
+			Output: map[string]any{"task_id": "reya", "state": "running"},
+		},
+		Meta: map[string]any{
+			"caelis": map[string]any{
+				"version": 1,
+				"runtime": map[string]any{
+					"tool": map[string]any{"name": "SPAWN"},
+					"task": map[string]any{
+						"task_id":       "reya",
+						"terminal_id":   "subagent-task-1",
+						"output_cursor": int64(0),
+						"running":       true,
+						"state":         "running",
+					},
+				},
+			},
+		},
+	})
+	if event.Meta != nil {
+		t.Fatalf("canonical event meta = %#v, want stripped projection", event.Meta)
+	}
+	env, ok := ProjectSessionEvent(session.SessionRef{SessionID: "root-session"}, event)
+	if !ok || env.Event.ToolResult == nil {
+		t.Fatalf("ProjectSessionEvent() = (%#v, %v), want tool result", env, ok)
+	}
+	if got := EventMetaString(env.Event.Meta, "caelis", "runtime", "task", "task_id"); got != "reya" {
+		t.Fatalf("projected task_id = %q, want reya in gateway meta %#v", got, env.Event.Meta)
+	}
+	if got := EventMetaString(env.Event.Meta, "caelis", "runtime", "task", "terminal_id"); got != "subagent-task-1" {
+		t.Fatalf("projected terminal_id = %q, want subagent-task-1 in gateway meta %#v", got, env.Event.Meta)
+	}
+}
+
 func TestProjectSessionEventParticipantPromptUsesTurnIDScope(t *testing.T) {
 	t.Parallel()
 

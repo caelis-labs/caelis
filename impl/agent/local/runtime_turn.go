@@ -2,6 +2,7 @@ package local
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -122,10 +123,7 @@ func (r *Runtime) runAttempt(
 	batch := make([]*session.Event, 0, 3)
 	inputPersisted := false
 	if pendingInput != nil {
-		persisted, appendErr := r.sessions.AppendEvent(ctx, session.AppendEventRequest{
-			SessionRef: ref,
-			Event:      pendingInput,
-		})
+		persisted, appendErr := r.appendRuntimeEventOrLifecycle(ctx, activeSession, ref, turnID, pendingInput)
 		if appendErr != nil {
 			return nil, false, false, appendErr
 		}
@@ -164,10 +162,7 @@ func (r *Runtime) runAttempt(
 		emitted = true
 		normalized := normalizeEvent(activeSession, turnID, event)
 		if session.IsCanonicalHistoryEvent(normalized) {
-			normalized, err = r.sessions.AppendEvent(ctx, session.AppendEventRequest{
-				SessionRef: ref,
-				Event:      normalized,
-			})
+			normalized, err = r.appendRuntimeEventOrLifecycle(ctx, activeSession, ref, turnID, normalized)
 			if err != nil {
 				return batch, emitted, inputPersisted, err
 			}
@@ -189,4 +184,79 @@ func (r *Runtime) runAttempt(
 		return batch, emitted, inputPersisted, err
 	}
 	return batch, emitted, inputPersisted, nil
+}
+
+func (r *Runtime) appendRuntimeEventOrLifecycle(
+	ctx context.Context,
+	activeSession session.Session,
+	ref session.SessionRef,
+	turnID string,
+	event *session.Event,
+) (*session.Event, error) {
+	persisted, err := r.sessions.AppendEvent(ctx, session.AppendEventRequest{
+		SessionRef: ref,
+		Event:      event,
+	})
+	if err == nil {
+		return persisted, nil
+	}
+	if !errors.Is(err, session.ErrInvalidEvent) {
+		return nil, err
+	}
+	if runtimeAppendEventIsModelVisible(event) {
+		return nil, err
+	}
+	lifecycle := recoverableRuntimeEvent(activeSession, turnID, event, err)
+	persisted, lifecycleErr := r.sessions.AppendEvent(ctx, session.AppendEventRequest{
+		SessionRef: ref,
+		Event:      lifecycle,
+	})
+	if lifecycleErr == nil {
+		return persisted, nil
+	}
+	if errors.Is(lifecycleErr, session.ErrInvalidEvent) {
+		return session.MarkUIOnly(lifecycle), nil
+	}
+	return nil, errors.Join(err, lifecycleErr)
+}
+
+func runtimeAppendEventIsModelVisible(event *session.Event) bool {
+	switch session.EventTypeOf(event) {
+	case session.EventTypeUser,
+		session.EventTypeAssistant,
+		session.EventTypeToolCall,
+		session.EventTypeToolResult,
+		session.EventTypeSystem,
+		session.EventTypeCompact:
+		return true
+	default:
+		return false
+	}
+}
+
+func recoverableRuntimeEvent(
+	activeSession session.Session,
+	turnID string,
+	event *session.Event,
+	err error,
+) *session.Event {
+	scope := defaultScope(activeSession, turnID)
+	eventType := ""
+	if event != nil {
+		eventType = string(session.EventTypeOf(event))
+	}
+	return &session.Event{
+		Type:       session.EventTypeLifecycle,
+		Visibility: session.VisibilityCanonical,
+		Actor:      session.ActorRef{Kind: session.ActorKindSystem, Name: "runtime"},
+		Scope:      &scope,
+		Lifecycle: &session.EventLifecycle{
+			Status: "recovered",
+			Reason: "recoverable_event_normalization_error",
+			Meta: map[string]any{
+				"event_type": eventType,
+				"error":      session.EventValidationDetail(err),
+			},
+		},
+	}
 }

@@ -594,6 +594,96 @@ func TestSubagentStreamsExposeStructuredEventFramesWithoutPreviewFallback(t *tes
 	}
 }
 
+func TestSubagentStreamsExposeSemanticAssistantEventText(t *testing.T) {
+	ctx := context.Background()
+	runner := &recordingSubagentRunner{
+		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
+		waitResult:  delegation.Result{State: delegation.StateRunning, Running: true},
+	}
+	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
+
+	started, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
+		Agent:  "helper",
+		Prompt: "list files",
+	})
+	if err != nil {
+		t.Fatalf("StartSubagent() error = %v", err)
+	}
+	runtime.tasks.PublishStream(stream.Frame{
+		Ref:     stream.Ref{TaskID: started.Ref.TaskID},
+		Running: true,
+		State:   string(delegation.StateRunning),
+		Event: &session.Event{
+			Type: session.EventTypeAssistant,
+			AssistantMessage: &session.EventMessagePayload{
+				Role: "assistant",
+				Parts: []session.EventPart{{
+					Kind: "text",
+					Text: "child output\n",
+				}},
+			},
+		},
+	})
+
+	snap, err := runtime.Streams().Read(ctx, stream.ReadRequest{
+		Ref: stream.Ref{SessionID: activeSession.SessionID, TaskID: started.Ref.TaskID},
+	})
+	if err != nil {
+		t.Fatalf("Read(subagent semantic stream) error = %v", err)
+	}
+	if got := streamFrameText(snap.Frames); got != "child output\n" {
+		t.Fatalf("semantic subagent frame text = %q, want child output", got)
+	}
+	if len(snap.Frames) != 1 || snap.Frames[0].Event == nil {
+		t.Fatalf("semantic subagent frames = %#v, want one frame preserving event", snap.Frames)
+	}
+}
+
+func TestSubagentStreamsDoNotExposeSemanticReasoningAsParentOutput(t *testing.T) {
+	ctx := context.Background()
+	runner := &recordingSubagentRunner{
+		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
+		waitResult:  delegation.Result{State: delegation.StateRunning, Running: true},
+	}
+	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
+
+	started, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
+		Agent:  "helper",
+		Prompt: "think",
+	})
+	if err != nil {
+		t.Fatalf("StartSubagent() error = %v", err)
+	}
+	runtime.tasks.PublishStream(stream.Frame{
+		Ref:     stream.Ref{TaskID: started.Ref.TaskID},
+		Running: true,
+		State:   string(delegation.StateRunning),
+		Event: &session.Event{
+			Type: session.EventTypeAssistant,
+			AssistantMessage: &session.EventMessagePayload{
+				Role: "assistant",
+				Parts: []session.EventPart{{
+					Kind:      "reasoning",
+					Reasoning: &session.EventReasoningPart{Text: "private thought"},
+				}},
+			},
+		},
+	})
+
+	snap, err := runtime.Streams().Read(ctx, stream.ReadRequest{
+		Ref: stream.Ref{SessionID: activeSession.SessionID, TaskID: started.Ref.TaskID},
+	})
+	if err != nil {
+		t.Fatalf("Read(subagent semantic reasoning stream) error = %v", err)
+	}
+	if len(snap.Frames) != 1 || snap.Frames[0].Event == nil {
+		t.Fatalf("semantic reasoning frames = %#v, want one structured event frame", snap.Frames)
+	}
+	if got := streamFrameText(snap.Frames); got != "" {
+		t.Fatalf("semantic reasoning parent output = %q, want empty", got)
+	}
+}
+
 func TestSubagentStructuredToolFramesStillSurfaceFinalResult(t *testing.T) {
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{

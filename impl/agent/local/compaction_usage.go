@@ -80,10 +80,11 @@ type providerTokenSnapshot struct {
 func latestProviderTokenSnapshot(events []*session.Event) (providerTokenSnapshot, bool) {
 	for i := len(events) - 1; i >= 0; i-- {
 		event := events[i]
-		if event == nil || event.Meta == nil {
+		meta := eventUsageMetadata(event)
+		if event == nil || len(meta) == 0 {
 			continue
 		}
-		baseline, includeSnapshotGroup, ok := providerPromptBaselineTokens(event.Meta)
+		baseline, includeSnapshotGroup, ok := providerPromptBaselineTokens(meta)
 		if !ok || baseline <= 0 {
 			continue
 		}
@@ -161,18 +162,19 @@ func providerSnapshotGroupStart(events []*session.Event, end int) int {
 }
 
 func providerSnapshotSignature(event *session.Event) string {
-	if event == nil || len(event.Meta) == 0 {
+	meta := eventUsageMetadata(event)
+	if event == nil || len(meta) == 0 {
 		return ""
 	}
-	prompt, _ := intFromAny(event.Meta["prompt_tokens"])
-	completion, _ := intFromAny(event.Meta["completion_tokens"])
-	total, _ := intFromAny(event.Meta["total_tokens"])
-	provider := strings.TrimSpace(stringifyAny(event.Meta["provider"]))
-	model := strings.TrimSpace(stringifyAny(event.Meta["model"]))
-	if sdkMeta := nestedMap(event.Meta, "caelis", "sdk"); len(sdkMeta) > 0 {
+	prompt, _ := intFromAny(meta["prompt_tokens"])
+	completion, _ := intFromAny(meta["completion_tokens"])
+	total, _ := intFromAny(meta["total_tokens"])
+	provider := strings.TrimSpace(stringifyAny(meta["provider"]))
+	model := strings.TrimSpace(stringifyAny(meta["model"]))
+	if sdkMeta := nestedMap(meta, "caelis", "sdk"); len(sdkMeta) > 0 {
 		provider = firstNonEmpty(provider, strings.TrimSpace(stringifyAny(sdkMeta["provider"])))
 		model = firstNonEmpty(model, strings.TrimSpace(stringifyAny(sdkMeta["model"])))
-		if usage := nestedMap(event.Meta, "caelis", "sdk", "usage"); len(usage) > 0 {
+		if usage := nestedMap(meta, "caelis", "sdk", "usage"); len(usage) > 0 {
 			if value, ok := intFromAny(usage["prompt_tokens"]); ok {
 				prompt = value
 			}
@@ -188,6 +190,26 @@ func providerSnapshotSignature(event *session.Event) string {
 		return ""
 	}
 	return fmt.Sprintf("%s|%s|%d|%d|%d", provider, model, prompt, completion, total)
+}
+
+func eventUsageMetadata(event *session.Event) map[string]any {
+	if event == nil {
+		return nil
+	}
+	switch {
+	case event.AssistantMessage != nil && len(event.AssistantMessage.Metadata) > 0:
+		return event.AssistantMessage.Metadata
+	case event.UserMessage != nil && len(event.UserMessage.Metadata) > 0:
+		return event.UserMessage.Metadata
+	case event.SystemContext != nil && len(event.SystemContext.Metadata) > 0:
+		return event.SystemContext.Metadata
+	case event.ToolCallPayload != nil && len(event.ToolCallPayload.Metadata) > 0:
+		return event.ToolCallPayload.Metadata
+	case event.ToolResultPayload != nil && len(event.ToolResultPayload.Metadata) > 0:
+		return event.ToolResultPayload.Metadata
+	default:
+		return event.Meta
+	}
 }
 
 func nestedMap(values map[string]any, path ...string) map[string]any {

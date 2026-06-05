@@ -31,25 +31,33 @@ func CachedInputTokens(event Event) int {
 // UsageSnapshotFromSessionEvent projects provider token usage from a durable
 // session event into the canonical gateway usage contract.
 func UsageSnapshotFromSessionEvent(event *session.Event) *UsageSnapshot {
-	if event == nil || event.Meta == nil {
+	if event == nil {
 		return nil
 	}
-	raw, ok := event.Meta["usage"]
-	if ok {
-		payload, ok := raw.(map[string]any)
-		if !ok {
-			return nil
+	for _, meta := range []map[string]any{semanticUsageMetadata(event), event.Meta} {
+		if len(meta) == 0 {
+			continue
 		}
-		return usageSnapshotFromPayload(payload)
-	}
-	if raw := nestedAny(event.Meta, "caelis", "sdk", "usage"); raw != nil {
-		if payload, ok := raw.(map[string]any); ok {
-			if usage := usageSnapshotFromPayload(payload); usage != nil {
-				return usage
+		raw, ok := meta["usage"]
+		if ok {
+			payload, ok := raw.(map[string]any)
+			if !ok {
+				return nil
+			}
+			return usageSnapshotFromPayload(payload)
+		}
+		if raw := nestedAny(meta, "caelis", "sdk", "usage"); raw != nil {
+			if payload, ok := raw.(map[string]any); ok {
+				if usage := usageSnapshotFromPayload(payload); usage != nil {
+					return usage
+				}
 			}
 		}
+		if usage := usageSnapshotFromPayload(meta); usage != nil {
+			return usage
+		}
 	}
-	return usageSnapshotFromPayload(event.Meta)
+	return nil
 }
 
 // UsageSnapshotFromMap projects one provider-style usage payload into the
@@ -79,6 +87,26 @@ func usageSnapshotFromPayload(payload map[string]any) *UsageSnapshot {
 		return nil
 	}
 	return usage
+}
+
+func semanticUsageMetadata(event *session.Event) map[string]any {
+	if event == nil {
+		return nil
+	}
+	switch {
+	case event.AssistantMessage != nil:
+		return event.AssistantMessage.Metadata
+	case event.UserMessage != nil:
+		return event.UserMessage.Metadata
+	case event.SystemContext != nil:
+		return event.SystemContext.Metadata
+	case event.ToolCallPayload != nil:
+		return event.ToolCallPayload.Metadata
+	case event.ToolResultPayload != nil:
+		return event.ToolResultPayload.Metadata
+	default:
+		return nil
+	}
 }
 
 func cachedInputTokensFromPayload(payload map[string]any) int {

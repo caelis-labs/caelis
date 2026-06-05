@@ -1634,7 +1634,11 @@ func TestToolResultEventUsesCanonicalTruncatedOutputForDisplayAndMessage(t *test
 	if event.Tool == nil {
 		t.Fatal("event.Tool = nil, want durable tool payload")
 	}
-	rawOutput := event.Tool.Output
+	toolPayload := session.EventToolProjection(event)
+	if toolPayload == nil {
+		t.Fatal("EventToolProjection(event) = nil, want tool result projection")
+	}
+	rawOutput := toolPayload.Output
 	resultText, _ := rawOutput["result"].(string)
 	if resultText == large {
 		t.Fatalf("raw result kept original huge output, want canonical truncated rawOutput")
@@ -1645,8 +1649,8 @@ func TestToolResultEventUsesCanonicalTruncatedOutputForDisplayAndMessage(t *test
 	if rawOutput["_tool_truncation"] != nil {
 		t.Fatalf("raw output = %#v, should not carry model truncation metadata", rawOutput)
 	}
-	if meta := nestedMap(event.Meta, "caelis", "runtime", "tool", "truncation"); meta == nil || meta["truncated"] != true {
-		t.Fatalf("event.Meta = %#v, want truncation metadata under caelis.runtime.tool.truncation", event.Meta)
+	if payload := session.ToolResultPayloadOf(session.CanonicalizeEvent(event)); payload == nil || payload.Truncation["truncated"] != true {
+		t.Fatalf("tool_result payload = %#v, want truncation metadata", payload)
 	}
 	results := event.Message.ToolResults()
 	if len(results) != 1 || len(results[0].Content) == 0 || results[0].Content[0].JSON == nil {
@@ -1666,15 +1670,23 @@ func TestToolResultEventUsesCanonicalTruncatedOutputForDisplayAndMessage(t *test
 	if payload["_tool_truncation"] != nil || payload["output_meta"] != nil {
 		t.Fatalf("payload = %#v, should not expose truncation metadata to model", payload)
 	}
-	if _, info := tool.TruncateMap(event.Tool.Output, tool.DefaultTruncationPolicy()); info.Truncated {
+	if _, info := tool.TruncateMap(toolPayload.Output, tool.DefaultTruncationPolicy()); info.Truncated {
 		t.Fatalf("event.Tool.Output still requires truncation: %#v", info)
 	}
 	normalized := session.CanonicalizeEvent(event)
 	if err := session.ValidateDurableCoreEvent(normalized); err != nil {
 		t.Fatalf("ValidateDurableCoreEvent() error = %v", err)
 	}
-	before := canonicalMessagesJSON(t, []model.Message{*event.Message})
-	after := canonicalMessagesJSON(t, []model.Message{*normalized.Message})
+	beforeMessage, ok := session.ModelMessageOf(event)
+	if !ok {
+		t.Fatal("ModelMessageOf(event) = false, want tool result message")
+	}
+	afterMessage, ok := session.ModelMessageOf(normalized)
+	if !ok {
+		t.Fatal("ModelMessageOf(normalized) = false, want tool result message")
+	}
+	before := canonicalMessagesJSON(t, []model.Message{beforeMessage})
+	after := canonicalMessagesJSON(t, []model.Message{afterMessage})
 	if before != after {
 		t.Fatalf("canonicalized tool result changed model-visible message\nbefore: %s\nafter:  %s", before, after)
 	}
