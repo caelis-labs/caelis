@@ -10,7 +10,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/agentprofiles"
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/agentregistry"
+	"github.com/OnslaughtSnail/caelis/ports/agentprofile"
 	"github.com/OnslaughtSnail/caelis/ports/assembly"
 	"github.com/OnslaughtSnail/caelis/ports/controller"
 	"github.com/OnslaughtSnail/caelis/ports/session"
@@ -26,6 +28,8 @@ type ACPAgentAddOption struct {
 	Display string
 	Detail  string
 }
+
+const subagentProfileEnvKey = "CAELIS_SUBAGENT_PROFILE_ID"
 
 type ACPControllerStatus = controller.ControllerStatus
 type ACPControllerCommand = controller.ControllerCommand
@@ -127,6 +131,7 @@ func agentRuntimeConfig(cfg Config) agentregistry.RuntimeConfig {
 		PolicyProfile:  cfg.PolicyProfile,
 		PermissionMode: cfg.PermissionMode,
 		ContextWindow:  cfg.ContextWindow,
+		SystemPrompt:   cfg.SystemPrompt,
 		Model:          cfg.Model,
 	}
 }
@@ -399,7 +404,7 @@ func (s *Stack) setConfiguredAgentsWithBase(base assembly.ResolvedAssembly, conf
 }
 
 func (s *Stack) configuredAssembly(base assembly.ResolvedAssembly, configured []AgentConfig, runtimeCfg stackRuntimeConfig) assembly.ResolvedAssembly {
-	return withConfiguredACPAgents(base, configured, defaultSelfACPAgent(defaultSelfACPAgentConfig{
+	resolved := withConfiguredACPAgents(base, configured, defaultSelfACPAgent(defaultSelfACPAgentConfig{
 		Config: Config{
 			AppName:        s.AppName,
 			UserID:         s.UserID,
@@ -410,6 +415,7 @@ func (s *Stack) configuredAssembly(base assembly.ResolvedAssembly, configured []
 			PolicyProfile:  runtimeCfg.PolicyProfile,
 			PermissionMode: runtimeCfg.PermissionMode,
 			ContextWindow:  runtimeCfg.ContextWindow,
+			SystemPrompt:   runtimeCfg.SystemPrompt,
 			Model:          runtimeCfg.Model,
 		},
 		AppName:      s.AppName,
@@ -418,6 +424,157 @@ func (s *Stack) configuredAssembly(base assembly.ResolvedAssembly, configured []
 		WorkspaceKey: s.Workspace.Key,
 		WorkspaceCWD: s.Workspace.CWD,
 	}))
+	return s.withAgentProfileACPAgents(resolved, runtimeCfg)
+}
+
+func (s *Stack) withAgentProfileACPAgents(resolved assembly.ResolvedAssembly, runtimeCfg stackRuntimeConfig) assembly.ResolvedAssembly {
+	out := assembly.CloneResolvedAssembly(resolved)
+	if s == nil || s.store == nil {
+		return out
+	}
+	profileStatus, err := agentprofiles.LoadDirStatus(filepath.Join(s.storeDir, agentprofiles.DefaultAgentsDirName))
+	if err != nil || len(profileStatus.Profiles) == 0 {
+		return out
+	}
+	doc, err := s.store.Load()
+	if err != nil {
+		return out
+	}
+	seen := map[string]struct{}{}
+	sourceAgents := map[string]assembly.AgentConfig{}
+	for _, agent := range out.Agents {
+		name := strings.ToLower(strings.TrimSpace(agent.Name))
+		if name == "" {
+			continue
+		}
+		seen[name] = struct{}{}
+		sourceAgents[name] = assembly.CloneAgentConfig(agent)
+	}
+	for _, profile := range profileStatus.Profiles {
+		profile = agentprofile.NormalizeProfile(profile)
+		if profile.ID == "" || profile.ID == guardianProfileID {
+			continue
+		}
+		if _, exists := seen[profile.ID]; exists {
+			continue
+		}
+		binding, ok := agentprofile.LookupBinding(doc.AgentBindings, profile.ID)
+		if !ok {
+			binding = defaultAgentProfileBinding(profile.ID)
+		}
+		binding = agentprofile.NormalizeBinding(binding)
+		if binding.Enabled != nil && !*binding.Enabled {
+			continue
+		}
+		agent, ok := s.agentProfileACPAgent(profile, binding, runtimeCfg, sourceAgents)
+		if !ok {
+			continue
+		}
+		out.Agents = append(out.Agents, agent)
+		seen[profile.ID] = struct{}{}
+	}
+	return out
+}
+
+func (s *Stack) agentProfileACPAgent(profile agentprofile.Profile, binding agentprofile.Binding, runtimeCfg stackRuntimeConfig, sourceAgents map[string]assembly.AgentConfig) (assembly.AgentConfig, bool) {
+	switch binding.Target {
+	case agentprofile.BindingTargetACP:
+		sourceName := strings.ToLower(strings.TrimSpace(binding.ACPAgent))
+		source, ok := sourceAgents[sourceName]
+		if !ok {
+			return assembly.AgentConfig{}, false
+		}
+		agent := assembly.CloneAgentConfig(source)
+		agent.Name = profile.ID
+		agent.Description = firstNonEmpty(profile.Description, profile.Name, agent.Description)
+		agent.Env = withSubagentProfileEnv(agent.Env, profile.ID)
+		return agent, true
+	case agentprofile.BindingTargetSelf, agentprofile.BindingTargetBuiltIn:
+		model := runtimeCfg.Model
+		if binding.Model != "" {
+			if s.lookup == nil {
+				return assembly.AgentConfig{}, false
+			}
+			cfg, err := s.lookup.ResolveConfig(binding.Model)
+			if err != nil {
+				return assembly.AgentConfig{}, false
+			}
+			model = cfg
+			if reasoning := strings.TrimSpace(binding.ReasoningEffort); reasoning != "" {
+				model.ReasoningEffort = reasoning
+				model.DefaultReasoningEffort = reasoning
+			}
+		}
+		agent := defaultSelfACPAgent(defaultSelfACPAgentConfig{
+			Config: Config{
+				AppName:        s.AppName,
+				UserID:         s.UserID,
+				StoreDir:       s.storeDir,
+				WorkspaceKey:   s.Workspace.Key,
+				WorkspaceCWD:   s.Workspace.CWD,
+				ApprovalMode:   runtimeCfg.ApprovalMode,
+				PolicyProfile:  runtimeCfg.PolicyProfile,
+				PermissionMode: runtimeCfg.PermissionMode,
+				ContextWindow:  runtimeCfg.ContextWindow,
+				SystemPrompt:   strings.Join(compactAgentProfilePrompts(runtimeCfg.SystemPrompt, agentProfileSystemPrompt(profile)), "\n\n"),
+				Model:          model,
+			},
+			AppName:      s.AppName,
+			UserID:       s.UserID,
+			StoreDir:     s.storeDir,
+			WorkspaceKey: s.Workspace.Key,
+			WorkspaceCWD: s.Workspace.CWD,
+		})
+		agent.Name = profile.ID
+		agent.Description = firstNonEmpty(profile.Description, profile.Name, agent.Description)
+		agent.Env = withSubagentProfileEnv(agent.Env, profile.ID)
+		return agent, true
+	default:
+		return assembly.AgentConfig{}, false
+	}
+}
+
+func agentProfileSystemPrompt(profile agentprofile.Profile) string {
+	profile = agentprofile.NormalizeProfile(profile)
+	parts := []string{}
+	if profile.Name != "" {
+		parts = append(parts, "Subagent profile: "+profile.Name)
+	}
+	if profile.Description != "" {
+		parts = append(parts, "Description: "+profile.Description)
+	}
+	if len(profile.Capabilities) > 0 {
+		parts = append(parts, "Capabilities: "+strings.Join(profile.Capabilities, ", "))
+	}
+	if instructions := strings.TrimSpace(profile.Instructions); instructions != "" {
+		parts = append(parts, "Instructions:\n"+instructions)
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+func withSubagentProfileEnv(env map[string]string, profileID string) map[string]string {
+	out := map[string]string{}
+	for key, value := range env {
+		out[key] = value
+	}
+	out[subagentProfileEnvKey] = strings.TrimSpace(profileID)
+	out["SDK_ACP_ENABLE_SPAWN"] = "0"
+	out["SDK_ACP_CHILD_NO_SPAWN"] = "1"
+	return out
+}
+
+func isSubagentProfileAgent(agent assembly.AgentConfig) bool {
+	return strings.TrimSpace(agent.Env[subagentProfileEnvKey]) != ""
+}
+
+func compactAgentProfilePrompts(values ...string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }
 
 func (s *Stack) ListBuiltinACPAgents() []ACPAgentInfo {
@@ -559,6 +716,9 @@ func (s *Stack) ListACPAgents() []ACPAgentInfo {
 			continue
 		}
 		if strings.EqualFold(name, "self") {
+			continue
+		}
+		if isSubagentProfileAgent(agent) {
 			continue
 		}
 		out = append(out, ACPAgentInfo{

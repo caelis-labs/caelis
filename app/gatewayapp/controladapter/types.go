@@ -41,6 +41,12 @@ type AgentParticipantSnapshot = control.AgentParticipantSnapshot
 
 type AgentStatusSnapshot = control.AgentStatusSnapshot
 
+type AgentProfileSnapshot = control.AgentProfileSnapshot
+
+type AgentProfileStatusSnapshot = control.AgentProfileStatusSnapshot
+
+type AgentProfileBindingConfig = control.AgentProfileBindingConfig
+
 type AgentAddOptions = control.AgentAddOptions
 
 type CustomAgentConfig = control.CustomAgentConfig

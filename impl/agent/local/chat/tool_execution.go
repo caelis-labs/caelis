@@ -53,14 +53,16 @@ func (a *Agent) executeToolCallWithProgress(
 			if yieldProgress == nil {
 				continue
 			}
-			if !yieldProgress(session.MarkUIOnly(toolResultEvent(call, progress, nil))) {
+			canonical, truncationMeta := canonicalToolResult(progress)
+			if !yieldProgress(session.MarkUIOnly(toolResultEvent(call, canonical, nil, truncationMeta))) {
 				return model.Message{}, nil, context.Canceled
 			}
 		case done := <-doneCh:
 			for {
 				select {
 				case progress := <-progressCh:
-					if yieldProgress != nil && !yieldProgress(session.MarkUIOnly(toolResultEvent(call, progress, nil))) {
+					canonical, truncationMeta := canonicalToolResult(progress)
+					if yieldProgress != nil && !yieldProgress(session.MarkUIOnly(toolResultEvent(call, canonical, nil, truncationMeta))) {
 						return model.Message{}, nil, context.Canceled
 					}
 				default:

@@ -378,6 +378,63 @@ func TestValidateDurableCoreEventAllowsTextOnlyToolPlaceholder(t *testing.T) {
 	}
 }
 
+func TestValidateDurableCoreEventAllowsMatchingToolMessageOutput(t *testing.T) {
+	t.Parallel()
+
+	message := model.Message{
+		Role: model.RoleTool,
+		Parts: []model.Part{{
+			Kind: model.PartKindToolResult,
+			ToolResult: &model.ToolResultPart{
+				ToolUseID: "call-1",
+				Name:      "RUN_COMMAND",
+				Content:   []model.Part{model.NewTextPart("ok")},
+			},
+		}},
+	}
+	err := ValidateDurableCoreEvent(&Event{
+		Type:       EventTypeToolResult,
+		Visibility: VisibilityCanonical,
+		Tool: &EventTool{
+			ID:     "call-1",
+			Name:   "RUN_COMMAND",
+			Output: map[string]any{"result": "ok"},
+		},
+		Message: &message,
+	})
+	if err != nil {
+		t.Fatalf("ValidateDurableCoreEvent() error = %v, want matching tool output accepted", err)
+	}
+}
+
+func TestValidateDurableCoreEventRejectsToolMessageOutputDivergence(t *testing.T) {
+	t.Parallel()
+
+	message := model.Message{
+		Role: model.RoleTool,
+		Parts: []model.Part{model.NewToolResultJSONPart("call-1", "RUN_COMMAND", map[string]any{
+			"result":    "raw",
+			"exit_code": 1,
+		}, true)},
+	}
+	err := ValidateDurableCoreEvent(&Event{
+		Type:       EventTypeToolResult,
+		Visibility: VisibilityCanonical,
+		Tool: &EventTool{
+			ID:     "call-1",
+			Name:   "RUN_COMMAND",
+			Output: map[string]any{"result": "canonical", "exit_code": 1},
+		},
+		Message: &message,
+	})
+	if err == nil {
+		t.Fatal("ValidateDurableCoreEvent() error = nil, want divergence rejection")
+	}
+	if detail := EventValidationDetail(err); !strings.Contains(detail, "diverges") {
+		t.Fatalf("validation detail = %q, want divergence detail", detail)
+	}
+}
+
 func ptrMessage(message model.Message) *model.Message {
 	return &message
 }

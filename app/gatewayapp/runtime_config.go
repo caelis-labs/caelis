@@ -19,6 +19,7 @@ type stackRuntimeConfig struct {
 	PolicyProfile               string
 	PermissionMode              string
 	ContextWindow               int
+	SystemPrompt                string
 	Model                       ModelConfig
 	BaseAssembly                assembly.ResolvedAssembly
 	Assembly                    assembly.ResolvedAssembly
@@ -29,6 +30,9 @@ type stackRuntimeConfig struct {
 func delegationAgentsFromAssembly(assembly assembly.ResolvedAssembly) []delegation.Agent {
 	out := make([]delegation.Agent, 0, len(assembly.Agents))
 	for _, one := range assembly.Agents {
+		if !isSpawnVisibleAgent(one) {
+			continue
+		}
 		agent := delegation.NormalizeAgent(delegation.Agent{
 			Name:        one.Name,
 			Description: one.Description,
@@ -48,10 +52,15 @@ func delegationAgentsForSpawn(assembly assembly.ResolvedAssembly, _ []session.Pa
 	return delegationAgentsFromAssembly(assembly)
 }
 
+func isSpawnVisibleAgent(agent assembly.AgentConfig) bool {
+	name := strings.TrimSpace(agent.Name)
+	return strings.EqualFold(name, "self") || isSubagentProfileAgent(agent)
+}
+
 func systemPromptWithDelegationGuidance(systemPrompt string) string {
 	systemPrompt = strings.TrimRight(strings.TrimSpace(systemPrompt), "\n")
-	guidance := "- Use SPAWN for bounded child ACP work that can run independently; use TASK wait, cancel, or write to control yielded work."
-	if strings.Contains(systemPrompt, "SPAWN for bounded child ACP work") {
+	guidance := "- Use SPAWN for bounded child-agent work that can run independently; use TASK wait, cancel, or write to control yielded work."
+	if strings.Contains(systemPrompt, "SPAWN for bounded child-agent work") || strings.Contains(systemPrompt, "SPAWN for bounded child ACP work") {
 		return systemPrompt
 	}
 	if systemPrompt == "" {

@@ -1396,7 +1396,7 @@ func TestToolResultEventPreservesTaskWriteACPContent(t *testing.T) {
 	}
 }
 
-func TestToolResultEventPreservesFailedTaskResultBeforeError(t *testing.T) {
+func TestToolResultEventSuppressesFailedTaskWaitACPContent(t *testing.T) {
 	t.Parallel()
 
 	event := toolResultEvent(model.ToolCall{
@@ -1421,17 +1421,37 @@ func TestToolResultEventPreservesFailedTaskResultBeforeError(t *testing.T) {
 		t.Fatalf("status = %q, want failed", got)
 	}
 	content := event.Tool.Content
-	if len(content) != 1 {
-		t.Fatalf("content = %#v, want one terminal content item", content)
-	}
-	if content[0].Type != "terminal" {
-		t.Fatalf("content type = %q, want terminal", content[0].Type)
-	}
-	if got := content[0].Text; got != "go: module internal registry: network unreachable\n" {
-		t.Fatalf("content text = %q, want failed task result", got)
+	if len(content) != 0 {
+		t.Fatalf("content = %#v, want no display content for failed TASK wait", content)
 	}
 	if got, _ := event.Tool.Output["error"].(string); got == "" {
 		t.Fatalf("raw output error = %q, want preserved error for model context", got)
+	}
+}
+
+func TestToolResultEventSuppressesTaskCancelACPContent(t *testing.T) {
+	t.Parallel()
+
+	event := toolResultEvent(model.ToolCall{
+		ID:   "task-cancel-1",
+		Name: "TASK",
+		Args: `{"action":"cancel","task_id":"command-task"}`,
+	}, tool.Result{
+		ID:   "task-cancel-1",
+		Name: "TASK",
+		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
+			"state":     "cancelled",
+			"result":    "cancelled command output\n",
+			"error":     "context canceled",
+			"exit_code": -1,
+		}))},
+	}, nil)
+
+	if event.Tool == nil {
+		t.Fatalf("event tool = nil, want tool update")
+	}
+	if content := event.Tool.Content; len(content) != 0 {
+		t.Fatalf("content = %#v, want no display content for TASK cancel", content)
 	}
 }
 
@@ -1619,8 +1639,8 @@ func TestToolResultEventUsesCanonicalTruncatedOutputForDisplayAndMessage(t *test
 	if resultText == large {
 		t.Fatalf("raw result kept original huge output, want canonical truncated rawOutput")
 	}
-	if !strings.Contains(resultText, "tokens truncated") {
-		t.Fatalf("raw result = %q, want truncation marker", resultText)
+	if !strings.Contains(resultText, "lines omitted") {
+		t.Fatalf("raw result = %q, want omitted line marker", resultText)
 	}
 	if rawOutput["_tool_truncation"] != nil {
 		t.Fatalf("raw output = %#v, should not carry model truncation metadata", rawOutput)
@@ -1645,6 +1665,18 @@ func TestToolResultEventUsesCanonicalTruncatedOutputForDisplayAndMessage(t *test
 	}
 	if payload["_tool_truncation"] != nil || payload["output_meta"] != nil {
 		t.Fatalf("payload = %#v, should not expose truncation metadata to model", payload)
+	}
+	if _, info := tool.TruncateMap(event.Tool.Output, tool.DefaultTruncationPolicy()); info.Truncated {
+		t.Fatalf("event.Tool.Output still requires truncation: %#v", info)
+	}
+	normalized := session.CanonicalizeEvent(event)
+	if err := session.ValidateDurableCoreEvent(normalized); err != nil {
+		t.Fatalf("ValidateDurableCoreEvent() error = %v", err)
+	}
+	before := canonicalMessagesJSON(t, []model.Message{*event.Message})
+	after := canonicalMessagesJSON(t, []model.Message{*normalized.Message})
+	if before != after {
+		t.Fatalf("canonicalized tool result changed model-visible message\nbefore: %s\nafter:  %s", before, after)
 	}
 }
 
@@ -1676,18 +1708,22 @@ func TestToolResultMessageCompactsLargeJSONPayloadForModel(t *testing.T) {
 		t.Fatalf("encoded payload len = %d, want <= %d", len(encoded), limit)
 	}
 	resultText, _ := payload["result"].(string)
-	if !strings.Contains(resultText, "tokens truncated") {
-		t.Fatalf("result = %q, want truncation marker", resultText)
+	if !strings.Contains(resultText, "lines omitted") {
+		t.Fatalf("result = %q, want omitted line marker", resultText)
 	}
 	if payload["_tool_truncation"] != nil || payload["output_meta"] != nil {
 		t.Fatalf("payload = %#v, should not expose truncation metadata to model", payload)
 	}
 }
 
-func TestToolResultContextCompactsRawOutput(t *testing.T) {
+func TestToolResultContextUsesCanonicalRawOutput(t *testing.T) {
 	t.Parallel()
 
 	large := strings.Repeat("x", tool.DefaultTruncationPolicy().ByteBudget()*2)
+	output, info := tool.TruncateMap(map[string]any{"result": large}, tool.DefaultTruncationPolicy())
+	if !info.Truncated {
+		t.Fatal("test fixture did not require truncation")
+	}
 	message, ok := messageFromDurableEvent(&session.Event{
 		Type: session.EventTypeToolResult,
 		Tool: &session.EventTool{
@@ -1695,7 +1731,7 @@ func TestToolResultContextCompactsRawOutput(t *testing.T) {
 			Name:   "RUN_COMMAND",
 			Title:  "RUN_COMMAND echo",
 			Status: "completed",
-			Output: map[string]any{"result": large},
+			Output: output,
 		},
 	})
 	if !ok {
@@ -1710,6 +1746,9 @@ func TestToolResultContextCompactsRawOutput(t *testing.T) {
 		t.Fatalf("json.Unmarshal(tool result payload) error = %v", err)
 	}
 	resultText, _ := payload["result"].(string)
+	if resultText != output["result"] {
+		t.Fatalf("result = %q, want canonical output %q", resultText, output["result"])
+	}
 	if !strings.Contains(resultText, "tokens truncated") {
 		t.Fatalf("result = %q, want truncation marker", resultText)
 	}
@@ -1751,10 +1790,19 @@ func TestToolResultContextUsesContentWhenRawOutputAbsent(t *testing.T) {
 	}
 }
 
-func TestToolResultContextTruncatesPersistedCommandFailureShape(t *testing.T) {
+func TestToolResultContextUsesCanonicalCommandFailureShape(t *testing.T) {
 	t.Parallel()
 
 	large := strings.Repeat("find: cannot delete /tmp/gomod/pkg: permission denied\n", tool.DefaultTruncationPolicy().ByteBudget()/4)
+	output, info := tool.TruncateMap(map[string]any{
+		"result":    "stderr:\n" + large,
+		"exit_code": 1,
+		"task_id":   "task-11",
+		"state":     "failed",
+	}, tool.DefaultTruncationPolicy())
+	if !info.Truncated {
+		t.Fatal("test fixture did not require truncation")
+	}
 	message, ok := messageFromDurableEvent(&session.Event{
 		Type: session.EventTypeToolResult,
 		Tool: &session.EventTool{
@@ -1762,12 +1810,7 @@ func TestToolResultContextTruncatesPersistedCommandFailureShape(t *testing.T) {
 			Name:   "RUN_COMMAND",
 			Title:  "RUN_COMMAND find /tmp/gomod -delete",
 			Status: "failed",
-			Output: map[string]any{
-				"result":    "stderr:\n" + large,
-				"exit_code": 1,
-				"task_id":   "task-11",
-				"state":     "failed",
-			},
+			Output: output,
 		},
 	})
 	if !ok {
@@ -1789,8 +1832,11 @@ func TestToolResultContextTruncatesPersistedCommandFailureShape(t *testing.T) {
 		t.Fatalf("payload lost task identity or exit code: %#v", payload)
 	}
 	resultText, _ := payload["result"].(string)
-	if !strings.Contains(resultText, "tokens truncated") {
-		t.Fatalf("result = %q, want truncation marker", resultText)
+	if resultText != output["result"] {
+		t.Fatalf("result = %q, want canonical output %q", resultText, output["result"])
+	}
+	if !strings.Contains(resultText, "lines omitted") {
+		t.Fatalf("result = %q, want omitted line marker", resultText)
 	}
 	if payload["_tool_truncation"] != nil || payload["output_meta"] != nil {
 		t.Fatalf("payload = %#v, should not expose truncation metadata to model", payload)
@@ -1803,6 +1849,7 @@ func TestChatAgentEmitsToolProgressWhileCallIsRunning(t *testing.T) {
 	testModel := &toolLoopModel{}
 	release := make(chan struct{})
 	progressReported := make(chan struct{})
+	largeProgress := strings.Repeat("progress line\n", tool.DefaultTruncationPolicy().ByteBudget()/2)
 	echoTool := tool.NamedTool{
 		Def: tool.Definition{
 			Name:        "ECHO",
@@ -1821,7 +1868,12 @@ func TestChatAgentEmitsToolProgressWhileCallIsRunning(t *testing.T) {
 					"state":   "running",
 					"running": true,
 				},
-				Content: []model.Part{model.NewJSONPart([]byte(`{"task_id":"task-1","state":"running","running":true}`))},
+				Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
+					"task_id": "task-1",
+					"state":   "running",
+					"running": true,
+					"result":  largeProgress,
+				}))},
 			})
 			close(progressReported)
 			<-release
@@ -1896,6 +1948,16 @@ func TestChatAgentEmitsToolProgressWhileCallIsRunning(t *testing.T) {
 	}
 	if got, _ := progress.Tool.Output["task_id"].(string); got != "task-1" {
 		t.Fatalf("progress task_id = %q, want task-1", got)
+	}
+	progressResult, _ := progress.Tool.Output["result"].(string)
+	if progressResult == largeProgress {
+		t.Fatal("progress result kept original huge output, want canonical truncation")
+	}
+	if !strings.Contains(progressResult, "lines omitted") {
+		t.Fatalf("progress result = %q, want omitted line marker", progressResult)
+	}
+	if _, info := tool.TruncateMap(progress.Tool.Output, tool.DefaultTruncationPolicy()); info.Truncated {
+		t.Fatalf("progress output still requires truncation: %#v", info)
 	}
 
 	close(release)

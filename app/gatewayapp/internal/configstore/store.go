@@ -11,15 +11,17 @@ import (
 	"sync"
 
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/modelregistry"
+	"github.com/OnslaughtSnail/caelis/ports/agentprofile"
 	policyapi "github.com/OnslaughtSnail/caelis/ports/policy"
 )
 
 type AppConfig struct {
-	Models         PersistedModelConfig  `json:"models,omitempty"`
-	Agents         []AgentConfig         `json:"agents,omitempty"`
-	AgentProviders []AgentProviderConfig `json:"agent_providers,omitempty"`
-	Sandbox        SandboxConfig         `json:"sandbox,omitempty"`
-	Runtime        RuntimeConfig         `json:"runtime,omitempty"`
+	Models         PersistedModelConfig    `json:"models,omitempty"`
+	Agents         []AgentConfig           `json:"agents,omitempty"`
+	AgentProviders []AgentProviderConfig   `json:"agent_providers,omitempty"`
+	AgentBindings  agentprofile.BindingSet `json:"agent_bindings,omitempty"`
+	Sandbox        SandboxConfig           `json:"sandbox,omitempty"`
+	Runtime        RuntimeConfig           `json:"runtime,omitempty"`
 }
 
 type AgentConfig struct {
@@ -118,6 +120,7 @@ func (s *Store) loadUnlocked() (AppConfig, error) {
 		doc.Models.Profiles = dedupeModelProfiles(doc.Models.Profiles)
 		doc.Models.Configs = dedupeModelConfigs(doc.Models.Configs)
 		doc.Agents = DedupeAgentConfigs(doc.Agents)
+		doc.AgentBindings = agentprofile.NormalizeBindingSet(doc.AgentBindings)
 		doc.Sandbox = NormalizeSandboxConfig(doc.Sandbox)
 		doc.Runtime = NormalizeRuntimeConfig(doc.Runtime)
 		return doc, nil
@@ -138,6 +141,7 @@ func (s *Store) Save(doc AppConfig) error {
 	doc.Models.Configs = dedupeModelConfigsForSave(doc.Models.Configs)
 	doc.Models.Profiles = dedupeModelProfilesForSave(doc.Models.Profiles)
 	doc.Agents = DedupeAgentConfigs(doc.Agents)
+	doc.AgentBindings = agentprofile.NormalizeBindingSet(doc.AgentBindings)
 	doc.Sandbox = DefaultSandboxConfig(doc.Sandbox)
 	doc.Runtime = NormalizeRuntimeConfig(doc.Runtime)
 	dir := filepath.Dir(s.path)

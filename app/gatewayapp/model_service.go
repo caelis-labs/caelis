@@ -57,6 +57,9 @@ func (s *Stack) Connect(cfg ModelConfig) (string, error) {
 		resolver.SetModelLookup(s.lookup, s.lookup.DefaultID())
 		return "", err
 	}
+	if err := s.refreshConfiguredAgentsFromStore(); err != nil {
+		return "", err
+	}
 	return modelID, nil
 }
 
@@ -121,6 +124,10 @@ func (s *Stack) UseModel(ctx context.Context, ref session.SessionRef, alias stri
 			}
 			return err
 		}
+		s.setRuntimeDefaultModelFromLookup()
+		if err := s.refreshConfiguredAgentsFromStore(); err != nil {
+			return err
+		}
 	}
 	return s.Sessions.UpdateState(ctx, ref, func(state map[string]any) (map[string]any, error) {
 		next := session.CloneState(state)
@@ -182,6 +189,10 @@ func (s *Stack) DeleteModel(ctx context.Context, ref session.SessionRef, alias s
 		}
 		return err
 	}
+	s.setRuntimeDefaultModelFromLookup()
+	if err := s.refreshConfiguredAgentsFromStore(); err != nil {
+		return err
+	}
 	return s.Sessions.UpdateState(ctx, ref, func(state map[string]any) (map[string]any, error) {
 		next := session.CloneState(state)
 		if next == nil {
@@ -194,6 +205,42 @@ func (s *Stack) DeleteModel(ctx context.Context, ref session.SessionRef, alias s
 		}
 		return next, nil
 	})
+}
+
+func (s *Stack) setRuntimeDefaultModelFromLookup() {
+	if s == nil || s.lookup == nil {
+		return
+	}
+	cfg := ModelConfig{}
+	if defaultID := s.lookup.DefaultID(); strings.TrimSpace(defaultID) != "" {
+		cfg, _ = s.lookup.Config(defaultID)
+	}
+	s.setRuntimeModel(cfg)
+}
+
+func (s *Stack) setRuntimeModel(cfg ModelConfig) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	runtimeCfg := s.runtime
+	runtimeCfg.Model = cfg
+	s.runtime = runtimeCfg
+	s.mu.Unlock()
+}
+
+func (s *Stack) refreshConfiguredAgentsFromStore() error {
+	if s == nil {
+		return fmt.Errorf("gatewayapp: stack is unavailable")
+	}
+	if s.store == nil {
+		return nil
+	}
+	doc, err := s.store.Load()
+	if err != nil {
+		return err
+	}
+	return s.setConfiguredAgents(doc.Agents)
 }
 
 // ListModelAliases returns the current session override plus resolver-known

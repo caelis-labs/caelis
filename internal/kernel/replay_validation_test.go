@@ -64,7 +64,7 @@ func TestValidateReplaySessionEventsRejectsOutputFieldsInMeta(t *testing.T) {
 func TestValidateReplaySessionEventsAllowsCanonicalEscapableOutput(t *testing.T) {
 	t.Parallel()
 
-	stdout := strings.Repeat("\n", tool.DefaultTruncationPolicy().ByteBudget()-16)
+	stdout := strings.Repeat("x", tool.DefaultTruncationPolicy().ByteBudget()-64)
 	if _, info := tool.TruncateMap(map[string]any{"stdout": stdout}, tool.DefaultTruncationPolicy()); info.Truncated {
 		t.Fatalf("test fixture unexpectedly exceeds truncation estimator: %#v", info)
 	}

@@ -59,8 +59,7 @@ func toolResultRawOutput(result tool.Result) map[string]any {
 func toolResultContent(call model.ToolCall, input map[string]any, output map[string]any, meta map[string]any, status string, isErr bool) []session.EventToolContent {
 	name := strings.ToUpper(strings.TrimSpace(call.Name))
 	displayOutput := toolResultDisplayOutput(name, output, meta)
-	if name == "TASK" && !isErr && !strings.EqualFold(strings.TrimSpace(status), "failed") &&
-		strings.EqualFold(displaypolicy.ToolTaskAction(input, displayOutput, meta), "wait") {
+	if name == "TASK" && suppressTaskControlContent(displaypolicy.ToolTaskAction(input, displayOutput, meta)) {
 		return nil
 	}
 	text := toolResultDisplayText(name, input, displayOutput, meta, status, isErr)
@@ -83,6 +82,15 @@ func toolResultContent(call model.ToolCall, input map[string]any, output map[str
 		item.TerminalID = toolResultTerminalID(call, displayOutput, meta)
 	}
 	return []session.EventToolContent{item}
+}
+
+func suppressTaskControlContent(action string) bool {
+	switch strings.ToLower(strings.TrimSpace(action)) {
+	case "wait", "cancel":
+		return true
+	default:
+		return false
+	}
 }
 
 func successfulEmptyTerminalResult(name string, status string, isErr bool) bool {

@@ -3,6 +3,7 @@ package controladapter
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
@@ -248,6 +249,40 @@ func TestRegressionSlashCompletionAgentRemove(t *testing.T) {
 	_ = candidates
 }
 
+func TestRegressionSlashCompletionSubagentRunExcludesGuardian(t *testing.T) {
+	t.Parallel()
+	driver, _ := newRegressionDriver(t)
+	ctx := context.Background()
+
+	candidates, err := driver.CompleteSlashArg(ctx, "subagent run", "", 10)
+	if err != nil {
+		t.Fatalf("CompleteSlashArg(subagent run) error = %v", err)
+	}
+	if !slashArgCandidateHasValue(candidates, "explorer") || !slashArgCandidateHasValue(candidates, "reviewer") {
+		t.Fatalf("CompleteSlashArg(subagent run) = %#v, want explorer and reviewer", candidates)
+	}
+	if slashArgCandidateHasValue(candidates, "guardian") {
+		t.Fatalf("CompleteSlashArg(subagent run) = %#v, want no guardian", candidates)
+	}
+}
+
+func TestRegressionSlashCompletionSubagentBindGuardianOmitsACP(t *testing.T) {
+	t.Parallel()
+	driver, _ := newRegressionDriver(t)
+	ctx := context.Background()
+
+	candidates, err := driver.CompleteSlashArg(ctx, "subagent bind guardian", "", 10)
+	if err != nil {
+		t.Fatalf("CompleteSlashArg(subagent bind guardian) error = %v", err)
+	}
+	if !slashArgCandidateHasValue(candidates, "default") || !slashArgCandidateHasValue(candidates, "model") {
+		t.Fatalf("CompleteSlashArg(subagent bind guardian) = %#v, want default and model", candidates)
+	}
+	if slashArgCandidateHasValue(candidates, "acp") {
+		t.Fatalf("CompleteSlashArg(subagent bind guardian) = %#v, want no acp target", candidates)
+	}
+}
+
 func TestRegressionSlashCompletionModelUseFiltered(t *testing.T) {
 	t.Parallel()
 	driver, _ := newRegressionDriver(t)
@@ -260,6 +295,15 @@ func TestRegressionSlashCompletionModelUseFiltered(t *testing.T) {
 	for _, c := range candidates {
 		_ = c
 	}
+}
+
+func slashArgCandidateHasValue(candidates []SlashArgCandidate, value string) bool {
+	for _, candidate := range candidates {
+		if strings.EqualFold(strings.TrimSpace(candidate.Value), strings.TrimSpace(value)) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestRegressionCommandWorkspaceStatusDisplay(t *testing.T) {

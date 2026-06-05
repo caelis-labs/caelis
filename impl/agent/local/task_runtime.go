@@ -51,7 +51,17 @@ func canonicalTaskResult(result map[string]any) map[string]any {
 }
 
 func taskSnapshotToolResult(call tool.Call, def tool.Definition, snapshot taskapi.Snapshot) tool.Result {
-	payload := taskToolPayload(snapshot)
+	return taskSnapshotToolResultWithPayload(call, def, snapshot, taskToolPayload(snapshot))
+}
+
+func taskControlSnapshotToolResult(call tool.Call, def tool.Definition, snapshot taskapi.Snapshot, action string) tool.Result {
+	if strings.EqualFold(strings.TrimSpace(action), "cancel") {
+		return taskSnapshotToolResultWithPayload(call, def, snapshot, taskCancelToolPayload(snapshot))
+	}
+	return taskSnapshotToolResult(call, def, snapshot)
+}
+
+func taskSnapshotToolResultWithPayload(call tool.Call, def tool.Definition, snapshot taskapi.Snapshot, payload map[string]any) tool.Result {
 	if payload == nil {
 		payload = map[string]any{}
 	}
@@ -63,6 +73,13 @@ func taskSnapshotToolResult(call tool.Call, def tool.Definition, snapshot taskap
 		Name:     strings.TrimSpace(def.Name),
 		Content:  []model.Part{model.NewJSONPart(raw)},
 		Metadata: meta,
+	}
+}
+
+func taskCancelToolPayload(snapshot taskapi.Snapshot) map[string]any {
+	return map[string]any{
+		"task_id": taskVisibleID(snapshot),
+		"state":   string(snapshot.State),
 	}
 }
 

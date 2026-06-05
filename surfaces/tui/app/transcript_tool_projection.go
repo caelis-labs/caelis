@@ -122,7 +122,7 @@ func projectTranscriptToolResult(input transcriptToolProjection, defaultSuccessS
 			toolOutputSynthetic = strings.TrimSpace(toolOutput) != ""
 		}
 	}
-	if taskWaitControlResult(semanticName, rawInput, displayOutput, input.Meta) && !toolErr {
+	if taskControlResult(semanticName, rawInput, displayOutput, input.Meta) {
 		toolOutput = ""
 		toolOutputSynthetic = false
 	}

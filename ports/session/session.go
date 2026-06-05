@@ -879,6 +879,9 @@ func validateDurableCoreToolResult(event *Event) error {
 				return err
 			}
 		}
+		if err := validateDurableCoreToolMessageOutput(event); err != nil {
+			return err
+		}
 		return validateDurableCoreMeta(event.Meta)
 	}
 	if event.Message != nil && len(event.Message.ToolResults()) > 0 {
@@ -902,6 +905,92 @@ func validateDurableCoreRawOutput(rawOutput map[string]any) error {
 		return coreEventValidationError(fmt.Sprintf("tool raw_output is not canonical-truncated (estimated %d tokens > %d tokens)", info.EstimatedTokens, info.MaxTokens))
 	}
 	return nil
+}
+
+func validateDurableCoreToolMessageOutput(event *Event) error {
+	if event == nil || event.Tool == nil || len(event.Tool.Output) == 0 || event.Message == nil {
+		return nil
+	}
+	results := event.Message.ToolResults()
+	if len(results) == 0 {
+		return nil
+	}
+	var matched *model.ToolResultPart
+	for idx := range results {
+		result := results[idx]
+		if event.Tool.ID == "" || strings.TrimSpace(result.ToolUseID) == "" || strings.TrimSpace(result.ToolUseID) == strings.TrimSpace(event.Tool.ID) {
+			matched = &result
+			break
+		}
+	}
+	if matched == nil {
+		return coreEventValidationError("tool message result does not match durable Event.Tool id")
+	}
+	if event.Tool.Name != "" && strings.TrimSpace(matched.Name) != "" && strings.TrimSpace(matched.Name) != strings.TrimSpace(event.Tool.Name) {
+		return coreEventValidationError("tool message result does not match durable Event.Tool name")
+	}
+	payload, err := toolMessageOutputPayload(*matched)
+	if err != nil {
+		return coreEventValidationError(err.Error())
+	}
+	if len(payload) == 0 {
+		return coreEventValidationError("tool message result is missing payload")
+	}
+	if !sameCanonicalJSON(event.Tool.Output, payload) {
+		return coreEventValidationError("tool message result diverges from durable Event.Tool output")
+	}
+	return nil
+}
+
+func toolMessageOutputPayload(result model.ToolResultPart) (map[string]any, error) {
+	for _, part := range result.Content {
+		raw := part.JSONValue()
+		if len(raw) == 0 {
+			continue
+		}
+		var decoded any
+		if err := json.Unmarshal(raw, &decoded); err != nil {
+			return nil, fmt.Errorf("tool message result is not JSON: %w", err)
+		}
+		if payload, ok := decoded.(map[string]any); ok {
+			return payload, nil
+		}
+		return map[string]any{"result": decoded}, nil
+	}
+	texts := make([]string, 0, len(result.Content))
+	for _, part := range result.Content {
+		if part.Text != nil {
+			texts = append(texts, part.Text.Text)
+		}
+	}
+	if len(texts) > 0 {
+		return map[string]any{"result": strings.Join(texts, "\n")}, nil
+	}
+	return nil, nil
+}
+
+func sameCanonicalJSON(left any, right any) bool {
+	leftRaw, err := canonicalJSONBytes(left)
+	if err != nil {
+		return false
+	}
+	rightRaw, err := canonicalJSONBytes(right)
+	if err != nil {
+		return false
+	}
+	return string(leftRaw) == string(rightRaw)
+}
+
+func canonicalJSONBytes(value any) ([]byte, error) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	var normalized any
+	if err := json.Unmarshal(raw, &normalized); err != nil {
+		return nil, err
+	}
+	return json.Marshal(normalized)
 }
 
 func validateDurableCoreMeta(meta map[string]any) error {

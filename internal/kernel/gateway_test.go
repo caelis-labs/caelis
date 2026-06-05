@@ -1514,7 +1514,7 @@ func TestPersistApprovalReviewUsageUsesSessionStateNotHistory(t *testing.T) {
 	}
 }
 
-func TestBeginTurnAutoReviewInterruptsAfterConsecutiveDenials(t *testing.T) {
+func TestBeginTurnAutoReviewRepeatedDenialsDoNotReplaceReviewerDecision(t *testing.T) {
 	t.Parallel()
 
 	activeSession := session.Session{
@@ -1522,7 +1522,7 @@ func TestBeginTurnAutoReviewInterruptsAfterConsecutiveDenials(t *testing.T) {
 			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
 		},
 	}
-	rt := &approvalRuntime{session: activeSession, requests: defaultAutoReviewMaxConsecutiveDenials}
+	rt := &approvalRuntime{session: activeSession, requests: 3}
 	gw, err := New(Config{
 		Sessions: staticSessionService{session: activeSession},
 		Runtime:  rt,
@@ -1547,11 +1547,25 @@ func TestBeginTurnAutoReviewInterruptsAfterConsecutiveDenials(t *testing.T) {
 		t.Fatalf("BeginTurn() error = %v", err)
 	}
 	events := collectHandleEvents(t, result.Handle)
-	if len(events) == 0 || events[len(events)-1].Err == nil {
-		t.Fatalf("events = %#v, want terminal lifecycle error after repeated denials", events)
+	if len(events) == 0 {
+		t.Fatalf("events = %#v, want approval review events", events)
 	}
-	if !strings.Contains(events[len(events)-1].Err.Message, "too many approval requests") {
-		t.Fatalf("terminal error = %#v, want denial circuit breaker", events[len(events)-1].Err)
+	if events[len(events)-1].Err != nil {
+		t.Fatalf("last event error = %#v, want repeated denials to stay normal reviewer decisions", events[len(events)-1].Err)
+	}
+	denials := 0
+	for _, env := range events {
+		payload := env.Event.ApprovalPayload
+		if payload == nil || payload.ReviewStatus != ApprovalReviewStatusDenied {
+			continue
+		}
+		denials++
+		if !strings.Contains(payload.ReviewText, "repeated unsafe request") {
+			t.Fatalf("review text = %q, want reviewer rationale", payload.ReviewText)
+		}
+	}
+	if denials != 3 {
+		t.Fatalf("denial events = %d, want 3: %#v", denials, events)
 	}
 }
 

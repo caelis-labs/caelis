@@ -8,7 +8,6 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/agent"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/ports/tool"
 )
 
 func messagesFromContext(ctx agent.Context) []model.Message {
@@ -312,18 +311,13 @@ func messageFromDurableEvent(event *session.Event) (model.Message, bool) {
 			Parts: []model.Part{model.NewToolResultJSONPart(
 				strings.TrimSpace(event.Tool.ID),
 				name,
-				truncatedToolOutputMap(toolResultContextPayload(event.Tool)),
+				toolResultContextPayload(event.Tool),
 				strings.EqualFold(strings.TrimSpace(event.Tool.Status), "failed"),
 			)},
 		}
 		return message, true
 	}
 	return model.Message{}, false
-}
-
-func truncatedToolOutputMap(values map[string]any) map[string]any {
-	out, _ := tool.TruncateMap(values, tool.DefaultTruncationPolicy())
-	return out
 }
 
 func toolResultContextPayload(toolPayload *session.EventTool) map[string]any {

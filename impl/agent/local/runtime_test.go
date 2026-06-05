@@ -3384,6 +3384,43 @@ func TestTaskSnapshotToolResultKeepsRawStreamsAndConciseError(t *testing.T) {
 	}
 }
 
+func TestTaskControlSnapshotToolResultSimplifiesCancelPayload(t *testing.T) {
+	t.Parallel()
+
+	result := taskControlSnapshotToolResult(
+		tool.Call{ID: "task-cancel-1", Name: tasktool.ToolName, Input: mustJSONRaw(map[string]any{
+			"action":  "cancel",
+			"task_id": "task-1",
+		})},
+		tool.Definition{Name: tasktool.ToolName},
+		taskapi.Snapshot{
+			Ref:     taskapi.Ref{TaskID: "task-1", SessionID: "session-1"},
+			Kind:    taskapi.KindCommand,
+			State:   taskapi.StateCancelled,
+			Running: false,
+			Result: map[string]any{
+				"result":    "partial command output\n",
+				"error":     "context canceled",
+				"exit_code": -1,
+			},
+		},
+		"cancel",
+	)
+
+	payload := testToolResultPayload(t, result)
+	if got, _ := payload["task_id"].(string); got != "task-1" {
+		t.Fatalf("payload[task_id] = %q, want task-1", got)
+	}
+	if got, _ := payload["state"].(string); got != string(taskapi.StateCancelled) {
+		t.Fatalf("payload[state] = %q, want cancelled", got)
+	}
+	for _, key := range []string{"result", "latest_output", "output_preview", "final_message", "error", "exit_code"} {
+		if _, ok := payload[key]; ok {
+			t.Fatalf("payload contains %q: %#v", key, payload)
+		}
+	}
+}
+
 func TestTaskSnapshotToolResultTruncatesTerminalStreamsForDisplayAndModel(t *testing.T) {
 	t.Parallel()
 
@@ -3416,8 +3453,8 @@ func TestTaskSnapshotToolResultTruncatesTerminalStreamsForDisplayAndModel(t *tes
 	if len(gotText) > tool.DefaultTruncationPolicy().ByteBudget()+1024 {
 		t.Fatalf("payload result len = %d, want bounded", len(gotText))
 	}
-	if !strings.Contains(gotText, "tokens truncated") {
-		t.Fatalf("payload result = %q, want truncation marker", gotText)
+	if !strings.Contains(gotText, "lines omitted") {
+		t.Fatalf("payload result = %q, want omitted line marker", gotText)
 	}
 	if _, exists := result.Meta["text"]; exists {
 		t.Fatalf("result.Meta duplicated terminal text: %#v", result.Meta)

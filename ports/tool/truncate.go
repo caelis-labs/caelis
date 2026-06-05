@@ -155,7 +155,7 @@ func TruncateJSON(raw json.RawMessage, policy TruncationPolicy) (json.RawMessage
 		out, mapInfo := TruncateMap(payload, policy)
 		return mustMarshalMap(out), mapInfo
 	}
-	totalTokens := estimateTokensForValue(parsed)
+	totalTokens := estimateTokensForJSONValue(parsed)
 	info.EstimatedTokens = totalTokens
 	info.EstimatedBytes = totalTokens * approxBytesPerToken
 	if totalTokens <= budgetTokens {
@@ -183,20 +183,14 @@ func TruncateMap(input map[string]any, policy TruncationPolicy) (map[string]any,
 	if input == nil || budgetTokens <= 0 {
 		return cloneMapValue(input), info
 	}
-	totalTokens := estimateTokensForValue(input)
+	totalTokens := estimateTokensForJSONValue(input)
 	info.EstimatedTokens = totalTokens
 	info.EstimatedBytes = totalTokens * approxBytesPerToken
 	if totalTokens <= budgetTokens {
 		return cloneMapValue(input), info
 	}
 
-	remaining := budgetTokens
-	state := &truncationState{}
-	truncated := truncateValue(input, &remaining, state)
-	out, _ := truncated.(map[string]any)
-	if out == nil {
-		out = map[string]any{}
-	}
+	out, state := truncateMapToJSONBudget(input, budgetTokens)
 	info.Truncated = true
 	info.OmittedItems = state.omitted
 	info.RemovedTokens = max(totalTokens-budgetTokens, 0)
@@ -231,41 +225,34 @@ func TruncateString(s string, policy TruncationPolicy) (string, int) {
 	if budgetBytes <= 0 || len(s) <= budgetBytes {
 		return s, 0
 	}
-	leftBudget := budgetBytes / 2
-	rightBudget := budgetBytes - leftBudget
-	prefixEnd, suffixStart := splitUTF8Bounds(s, leftBudget, rightBudget)
-	left := s[:prefixEnd]
-	right := s[suffixStart:]
-	removedBytes := len(s) - (len(left) + len(right))
-	removedTokens := approxTokensFromBytes(removedBytes)
-	marker := formatTruncationMarker(policy, removedTokens, removedBytes)
-	return left + marker + right, removedTokens
+	keepBudget := budgetBytes
+	var out string
+	var removedTokens int
+	for {
+		out, removedTokens = truncateStringWithKeepBudget(s, policy, keepBudget)
+		if estimateTextTokens(out) <= policy.tokenBudget() || keepBudget <= 0 {
+			return out, removedTokens
+		}
+		overBytes := max((estimateTextTokens(out)-policy.tokenBudget())*approxBytesPerToken, 1)
+		keepBudget = max(keepBudget-overBytes, 0)
+	}
 }
 
 // TruncateText truncates text and includes total line count when useful.
 func TruncateText(s string, policy TruncationPolicy) (string, int) {
 	if prefix, body, totalLines, ok := splitExistingTotalOutputHeader(s); ok {
-		prefixCost := estimateTextTokens(prefix)
-		if prefixCost >= policy.tokenBudget() && policy.tokenBudget() > 0 {
-			return TruncateString(s, policy)
-		}
-		bodyPolicy := subTruncationPolicy(policy, prefixCost, len(prefix))
-		truncatedBody, removed := TruncateString(body, bodyPolicy)
-		if removed == 0 {
-			return prefix + truncatedBody, removed
-		}
-		return fmt.Sprintf("Total output lines: %d\n\n%s", totalLines, truncatedBody), removed
+		return truncateTextWithLinePrefix(s, prefix, body, totalLines, policy)
 	}
 
-	truncated, removed := TruncateString(s, policy)
-	if removed == 0 {
-		return truncated, removed
+	if estimateTextTokens(s) <= policy.tokenBudget() || policy.tokenBudget() <= 0 {
+		return s, 0
 	}
 	if strings.Contains(s, "\n") {
 		lines := strings.Count(s, "\n") + 1
-		truncated = fmt.Sprintf("Total output lines: %d\n\n%s", lines, truncated)
+		prefix := fmt.Sprintf("Total output lines: %d\n\n", lines)
+		return truncateTextWithLinePrefix(s, prefix, s, lines, policy)
 	}
-	return truncated, removed
+	return TruncateString(s, policy)
 }
 
 type truncationState struct {
@@ -281,17 +268,25 @@ func truncateValue(value any, remaining *int, state *truncationState) any {
 	}
 	switch v := value.(type) {
 	case string:
-		cost := estimateTextTokens(v)
+		cost := estimateTokensForJSONString(v)
 		if cost <= *remaining {
 			*remaining -= cost
 			return v
 		}
 		if truncated, ok := truncateJSONText(v, *remaining, state); ok {
-			*remaining = 0
-			return truncated
+			if cost := estimateTokensForJSONString(truncated); cost <= *remaining {
+				*remaining -= cost
+				return truncated
+			}
 		}
-		truncated, _ := TruncateText(v, TruncationPolicy{MaxTokens: *remaining})
-		*remaining = 0
+		truncated, ok := truncateTextForJSONBudget(v, *remaining)
+		if !ok {
+			if state != nil {
+				state.omitted++
+			}
+			return nil
+		}
+		*remaining = max(*remaining-estimateTokensForJSONString(truncated), 0)
 		return truncated
 	case map[string]any:
 		keys := make([]string, 0, len(v))
@@ -299,8 +294,8 @@ func truncateValue(value any, remaining *int, state *truncationState) any {
 			keys = append(keys, key)
 		}
 		sort.Slice(keys, func(i, j int) bool {
-			leftCost := estimateTokensForValue(v[keys[i]])
-			rightCost := estimateTokensForValue(v[keys[j]])
+			leftCost := estimateTokensForJSONValue(v[keys[i]])
+			rightCost := estimateTokensForJSONValue(v[keys[j]])
 			if leftCost == rightCost {
 				return keys[i] < keys[j]
 			}
@@ -314,11 +309,15 @@ func truncateValue(value any, remaining *int, state *truncationState) any {
 				}
 				continue
 			}
-			keyCost := estimateTextTokens(key)
-			if keyCost < *remaining {
-				*remaining -= keyCost
+			keyCost := estimateTokensForJSONString(key)
+			if keyCost >= *remaining {
+				if state != nil {
+					state.omitted++
+				}
+				continue
 			}
-			valueCost := estimateTokensForValue(v[key])
+			*remaining -= keyCost
+			valueCost := estimateTokensForJSONValue(v[key])
 			remainingKeys := len(keys) - idx - 1
 			valueBudget := max(*remaining-remainingKeys, 1)
 			if valueCost > valueBudget {
@@ -354,8 +353,7 @@ func truncateValue(value any, remaining *int, state *truncationState) any {
 		}
 		return out
 	default:
-		text := fmt.Sprint(value)
-		cost := estimateTextTokens(text)
+		cost := estimateTokensForJSONValue(value)
 		if cost <= *remaining {
 			*remaining -= cost
 			return value
@@ -386,8 +384,12 @@ func truncateJSONText(s string, remaining int, state *truncationState) (string, 
 		return "", false
 	}
 	result := string(data)
-	if estimateTextTokens(result) > remaining {
-		result, _ = TruncateText(result, TruncationPolicy{MaxTokens: remaining})
+	if estimateTokensForJSONString(result) > remaining {
+		truncated, ok := truncateTextForJSONBudget(result, remaining)
+		if !ok {
+			return "", false
+		}
+		result = truncated
 	}
 	return result, true
 }
@@ -456,6 +458,22 @@ func estimateTokensForValue(value any) int {
 	}
 }
 
+func estimateTokensForJSONValue(value any) int {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return estimateTokensForValue(value)
+	}
+	return estimateTextTokens(string(data))
+}
+
+func estimateTokensForJSONString(value string) int {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return estimateTextTokens(value)
+	}
+	return estimateTextTokens(string(data))
+}
+
 func estimateTextTokens(s string) int {
 	if s == "" {
 		return 0
@@ -466,6 +484,201 @@ func estimateTextTokens(s string) int {
 		tokens++
 	}
 	return tokens
+}
+
+func truncateStringWithKeepBudget(s string, policy TruncationPolicy, keepBudget int) (string, int) {
+	keepBudget = max(keepBudget, 0)
+	leftBudget := keepBudget / 2
+	rightBudget := keepBudget - leftBudget
+	prefixEnd, suffixStart := splitUTF8Bounds(s, leftBudget, rightBudget)
+	left := s[:prefixEnd]
+	right := s[suffixStart:]
+	removedBytes := len(s) - (len(left) + len(right))
+	removedTokens := approxTokensFromBytes(removedBytes)
+	marker := formatTruncationMarker(policy, removedTokens, removedBytes)
+	return left + marker + right, removedTokens
+}
+
+func truncateTextForJSONBudget(s string, budgetTokens int) (string, bool) {
+	if budgetTokens <= 0 {
+		return "", false
+	}
+	if estimateTokensForJSONString(s) <= budgetTokens {
+		return s, true
+	}
+	best := ""
+	low, high := 0, min(estimateTextTokens(s), budgetTokens)
+	for low <= high {
+		mid := (low + high) / 2
+		candidate := ""
+		if mid > 0 {
+			candidate, _ = TruncateText(s, TruncationPolicy{MaxTokens: mid})
+		}
+		if estimateTokensForJSONString(candidate) <= budgetTokens {
+			best = candidate
+			low = mid + 1
+			continue
+		}
+		high = mid - 1
+	}
+	return best, estimateTokensForJSONString(best) <= budgetTokens
+}
+
+func truncateTextWithLinePrefix(original string, prefix string, body string, totalLines int, policy TruncationPolicy) (string, int) {
+	prefixCost := estimateTextTokens(prefix)
+	if prefixCost >= policy.tokenBudget() && policy.tokenBudget() > 0 {
+		return TruncateString(original, policy)
+	}
+	bodyPolicy := subTruncationPolicy(policy, prefixCost, len(prefix))
+	truncatedBody, removed := truncateLineUnits(body, totalLines, bodyPolicy)
+	if removed == 0 {
+		return prefix + truncatedBody, removed
+	}
+	return prefix + truncatedBody, removed
+}
+
+func truncateLineUnits(s string, totalLines int, policy TruncationPolicy) (string, int) {
+	budgetTokens := policy.tokenBudget()
+	if budgetTokens <= 0 || estimateTextTokens(s) <= budgetTokens {
+		return s, 0
+	}
+	if !strings.Contains(s, "\n") {
+		return TruncateString(s, policy)
+	}
+	lines := strings.Split(s, "\n")
+	lineBudget := max(min(budgetTokens/3, 1024), 8)
+	head, tail := 0, 0
+	best := buildLineTruncation(lines, head, tail, lineBudget)
+	for {
+		progressed := false
+		if head+tail < len(lines) {
+			candidate := buildLineTruncation(lines, head+1, tail, lineBudget)
+			if estimateTextTokens(candidate) <= budgetTokens {
+				head++
+				best = candidate
+				progressed = true
+			}
+		}
+		if head+tail < len(lines) {
+			candidate := buildLineTruncation(lines, head, tail+1, lineBudget)
+			if estimateTextTokens(candidate) <= budgetTokens {
+				tail++
+				best = candidate
+				progressed = true
+			}
+		}
+		if !progressed {
+			break
+		}
+	}
+	for estimateTextTokens(best) > budgetTokens && lineBudget > 1 {
+		lineBudget = max(lineBudget*8/10, 1)
+		best = buildLineTruncation(lines, head, tail, lineBudget)
+	}
+	if estimateTextTokens(best) > budgetTokens {
+		return TruncateString(s, policy)
+	}
+	removed := max(estimateTextTokens(s)-estimateTextTokens(best), 1)
+	return best, removed
+}
+
+func buildLineTruncation(lines []string, headCount int, tailCount int, lineBudget int) string {
+	if len(lines) == 0 {
+		return ""
+	}
+	if headCount+tailCount >= len(lines) {
+		parts := make([]string, 0, len(lines))
+		for _, line := range lines {
+			parts = append(parts, truncateLineUnit(line, lineBudget))
+		}
+		return strings.Join(parts, "\n")
+	}
+	parts := make([]string, 0, headCount+tailCount+1)
+	for i := 0; i < headCount && i < len(lines); i++ {
+		parts = append(parts, truncateLineUnit(lines[i], lineBudget))
+	}
+	omitted := len(lines) - headCount - tailCount
+	if omitted > 0 {
+		parts = append(parts, fmt.Sprintf("...%d lines omitted...", omitted))
+	}
+	tailStart := max(len(lines)-tailCount, headCount)
+	for i := tailStart; i < len(lines); i++ {
+		parts = append(parts, truncateLineUnit(lines[i], lineBudget))
+	}
+	return strings.Join(parts, "\n")
+}
+
+func truncateLineUnit(line string, budgetTokens int) string {
+	if budgetTokens <= 0 || estimateTextTokens(line) <= budgetTokens {
+		return line
+	}
+	out, _ := TruncateString(line, TruncationPolicy{MaxTokens: budgetTokens})
+	return out
+}
+
+func truncateMapToJSONBudget(input map[string]any, budgetTokens int) (map[string]any, *truncationState) {
+	target := budgetTokens
+	var last map[string]any
+	var lastState *truncationState
+	for attempt := 0; attempt < 8; attempt++ {
+		remaining := target
+		state := &truncationState{}
+		truncated := truncateValue(input, &remaining, state)
+		out, _ := truncated.(map[string]any)
+		if out == nil {
+			out = map[string]any{}
+		}
+		last = out
+		lastState = state
+		if estimateTokensForJSONValue(out) <= budgetTokens {
+			return out, state
+		}
+		over := estimateTokensForJSONValue(out) - budgetTokens
+		target = min(max(target-over-8, 1), max(target*9/10, 1))
+	}
+	if last == nil {
+		last = map[string]any{}
+	}
+	if lastState == nil {
+		lastState = &truncationState{}
+	}
+	if estimateTokensForJSONValue(last) > budgetTokens {
+		lastState.omitted++
+		return compactJSONMapFallback(input, budgetTokens), lastState
+	}
+	return last, lastState
+}
+
+func compactJSONMapFallback(input map[string]any, budgetTokens int) map[string]any {
+	if budgetTokens <= 0 {
+		return map[string]any{}
+	}
+	emptyCost := estimateTokensForJSONValue(map[string]any{"result": ""})
+	if emptyCost >= budgetTokens {
+		return map[string]any{}
+	}
+	raw, err := json.Marshal(input)
+	if err != nil {
+		raw = []byte(fmt.Sprint(input))
+	}
+	text, ok := truncateTextForJSONBudget(string(raw), budgetTokens-emptyCost)
+	if !ok {
+		return map[string]any{"result": ""}
+	}
+	out := map[string]any{"result": text}
+	for estimateTokensForJSONValue(out) > budgetTokens && text != "" {
+		nextBudget := max(estimateTokensForJSONString(text)-1, 0)
+		next, ok := truncateTextForJSONBudget(text, nextBudget)
+		if !ok || next == text {
+			return map[string]any{"result": ""}
+		}
+		text = next
+		out["result"] = text
+	}
+	if estimateTokensForJSONValue(out) > budgetTokens {
+		return map[string]any{}
+	}
+	return out
 }
 
 func approxTokensFromBytes(bytes int) int {
