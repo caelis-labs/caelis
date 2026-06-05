@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/OnslaughtSnail/caelis/ports/model"
 )
@@ -197,6 +198,28 @@ func TestTruncateMapRecursesIntoJSONString(t *testing.T) {
 	stderr, _ := decoded["stderr"].(string)
 	if !strings.Contains(stderr, "lines omitted") {
 		t.Fatalf("decoded stderr = %q, want omitted line marker", stderr)
+	}
+}
+
+func TestTruncateLineUnitsLargeMultilineOutputCompletesPromptly(t *testing.T) {
+	t.Parallel()
+
+	input := strings.Repeat("progress line\n", 5000)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		out, removed := TruncateText(input, TruncationPolicy{MaxTokens: 40})
+		if removed == 0 {
+			t.Error("removed = 0, want truncation")
+		}
+		if got := estimateTextTokens(out); got > 40 {
+			t.Errorf("truncated text estimated tokens = %d, want <= 40", got)
+		}
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("TruncateText() did not return promptly for large multiline output")
 	}
 }
 

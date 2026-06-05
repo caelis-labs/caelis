@@ -122,6 +122,9 @@ func (g *Gateway) resolveApprovalRequest(
 	handle.publishApprovalReviewPayloadWithUsage(req, terminal, result.Usage)
 	_ = g.persistApprovalReviewUsage(context.WithoutCancel(turnCtx), req, result.Usage, terminal.DecisionSource)
 
+	if handle.recordApprovalReviewDecision(result.Approved) {
+		return agent.ApprovalResponse{}, fmt.Errorf("automatic approval review rejected too many approval requests for this turn")
+	}
 	response.ReviewText = strings.TrimSpace(result.DisplayText)
 	return response, nil
 }

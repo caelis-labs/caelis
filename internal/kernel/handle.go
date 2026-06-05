@@ -47,7 +47,9 @@ type turnHandle struct {
 	allowPendingSubmissions bool
 	pendingApprovalCh       chan ApprovalDecision
 
-	approvalReviewSeq uint64
+	approvalReviewSeq              uint64
+	autoReviewConsecutiveDenials   int
+	autoReviewTotalDenials         int
 }
 
 func newTurnHandle(cfg turnHandleConfig) *turnHandle {
@@ -366,6 +368,19 @@ func (h *turnHandle) nextApprovalReviewID() string {
 	defer h.mu.Unlock()
 	h.approvalReviewSeq++
 	return fmt.Sprintf("%s-approval-review-%d", h.handleID, h.approvalReviewSeq)
+}
+
+func (h *turnHandle) recordApprovalReviewDecision(approved bool) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if approved {
+		h.autoReviewConsecutiveDenials = 0
+		return false
+	}
+	h.autoReviewConsecutiveDenials++
+	h.autoReviewTotalDenials++
+	return h.autoReviewConsecutiveDenials >= defaultAutoReviewMaxConsecutiveDenials ||
+		h.autoReviewTotalDenials >= defaultAutoReviewMaxTotalDenials
 }
 
 func (h *turnHandle) publish(env EventEnvelope) {

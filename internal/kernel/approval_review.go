@@ -15,6 +15,11 @@ const (
 	ApprovalModeManual     = approval.ModeManual
 )
 
+const (
+	defaultAutoReviewMaxConsecutiveDenials = 3
+	defaultAutoReviewMaxTotalDenials       = 5
+)
+
 func NormalizeApprovalMode(mode string) ApprovalMode {
 	return approval.NormalizeMode(mode)
 }

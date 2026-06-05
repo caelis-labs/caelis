@@ -547,32 +547,36 @@ func truncateLineUnits(s string, totalLines int, policy TruncationPolicy) (strin
 	}
 	lines := strings.Split(s, "\n")
 	lineBudget := max(min(budgetTokens/3, 1024), 8)
+	lineTok := make([]int, len(lines))
+	for i, line := range lines {
+		lineTok[i] = estimateTextTokens(truncateLineUnit(line, lineBudget))
+	}
 	head, tail := 0, 0
 	best := buildLineTruncation(lines, head, tail, lineBudget)
 	for {
 		progressed := false
 		if head+tail < len(lines) {
-			candidate := buildLineTruncation(lines, head+1, tail, lineBudget)
-			if estimateTextTokens(candidate) <= budgetTokens {
+			if estimateLineTruncationTokens(lineTok, head+1, tail) <= budgetTokens {
 				head++
-				best = candidate
 				progressed = true
 			}
 		}
 		if head+tail < len(lines) {
-			candidate := buildLineTruncation(lines, head, tail+1, lineBudget)
-			if estimateTextTokens(candidate) <= budgetTokens {
+			if estimateLineTruncationTokens(lineTok, head, tail+1) <= budgetTokens {
 				tail++
-				best = candidate
 				progressed = true
 			}
 		}
 		if !progressed {
 			break
 		}
+		best = buildLineTruncation(lines, head, tail, lineBudget)
 	}
 	for estimateTextTokens(best) > budgetTokens && lineBudget > 1 {
 		lineBudget = max(lineBudget*8/10, 1)
+		for i, line := range lines {
+			lineTok[i] = estimateTextTokens(truncateLineUnit(line, lineBudget))
+		}
 		best = buildLineTruncation(lines, head, tail, lineBudget)
 	}
 	if estimateTextTokens(best) > budgetTokens {
@@ -580,6 +584,39 @@ func truncateLineUnits(s string, totalLines int, policy TruncationPolicy) (strin
 	}
 	removed := max(estimateTextTokens(s)-estimateTextTokens(best), 1)
 	return best, removed
+}
+
+func estimateLineTruncationTokens(lineTok []int, headCount, tailCount int) int {
+	if len(lineTok) == 0 || headCount+tailCount == 0 {
+		return 0
+	}
+	if headCount+tailCount >= len(lineTok) {
+		sum := 0
+		for _, cost := range lineTok {
+			sum += cost
+		}
+		if len(lineTok) > 1 {
+			sum += approxTokensFromBytes(len(lineTok) - 1)
+		}
+		return sum
+	}
+	sum := 0
+	for i := 0; i < headCount && i < len(lineTok); i++ {
+		sum += lineTok[i]
+	}
+	tailStart := max(len(lineTok)-tailCount, headCount)
+	for i := tailStart; i < len(lineTok); i++ {
+		sum += lineTok[i]
+	}
+	omitted := len(lineTok) - headCount - tailCount
+	parts := headCount + tailCount + 1
+	if parts > 1 {
+		sum += approxTokensFromBytes(parts - 1)
+	}
+	if omitted > 0 {
+		sum += estimateTextTokens(fmt.Sprintf("...%d lines omitted...", omitted))
+	}
+	return sum
 }
 
 func buildLineTruncation(lines []string, headCount int, tailCount int, lineBudget int) string {
