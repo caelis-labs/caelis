@@ -69,6 +69,11 @@ intentionally narrower while Layer 4 is being closed:
 │  │  Agent 核心域：会话、模型、工具、Agent、Runner、            │ │
 │  │  沙箱、策略、技能、制品                                    │ │
 │  └─────────────────────────────────────────────────────────┘ │
+│  ┌─ Orchestration ─────────────────────────────────────────┐ │
+│  │  orchestrator/                                          │ │
+│  │  多Agent编排：SPAWN/AChild生命周期、ACP loopback、        │ │
+│  │  上下文可见性、权限桥接、流合并                             │ │
+│  └─────────────────────────────────────────────────────────┘ │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -153,6 +158,9 @@ caelis/
 │   └── workflow/               # 延迟：LoopAgent, ParallelAgent, SequentialAgent
 │
 ├── runner/                     # 一次 invocation 对一个 session 的完整执行
+
+├── orchestrator/               # 多Agent编排：SPAWN delegation, ACP child lifecycle,
+│                               # context visibility, permission bridge, stream merge
 │
 ├── sandbox/                    # 命令/文件系统执行
 │   ├── host/                   # Host（无沙箱）
@@ -238,7 +246,8 @@ access:
 | `artifact/` | stdlib | `session/`, `model/`, `tool/`, `agent/`, `runner/`, `gateway/`, `acp/`, `tui/`, `app/` |
 | `agent/` | `model/`, `session/`, `tool/`, stdlib | `runner/`, `gateway/`, `acp/`, `tui/`, `app/` |
 | `agent/llmagent/` | `agent/`, `model/`, `session/`, `tool/` | `runner/`, `gateway/`, `acp/`, `tui/`, `app/`, concrete sandbox backends |
-| `runner/` | `agent/`, `model/`, `session/`, `tool/`, `sandbox/`, `policy/`, `skill/`, optional `artifact/` | `tool/builtin/*`, `gateway/`, `acp/`, `tui/`, `app/` |
+| `runner/` | `agent/`, `model/`, `session/`, `tool/`, `sandbox/`, `policy/`, `skill/`, optional `artifact/` | `tool/builtin/*`, `gateway/`, `acp/`, `tui/`, `app/`, `orchestrator/` |
+| `orchestrator/` | `acp/`, `agent/`, `runner/`, `session/`, `tool/`, `policy/` | `gateway/`, `tui/`, `headless/`, `app/`, `cmd/`, `protocol/acp/` |
 
 Runner may depend on narrow domain contracts such as `agent.SpawnDelegator`,
 but must not import the built-in packages that implement model-visible tool
@@ -255,6 +264,7 @@ model/ ← session/      (session imports model types)
 model/ ← tool/          (tool imports model types)
 model+session+tool ← agent/     (agent imports all three)
 agent+session+model+tool+sandbox+policy+skill ← runner/
+acp+agent+runner+session+tool+policy ← orchestrator/
 ```
 
 `session/` 和 `model/` 是叶子包，不导入其他 Layer 4 域包。
@@ -318,7 +328,22 @@ preparation, agent dispatch, tool resolution, policy/approval/tool wrappers,
 compaction recovery, task/subagent execution, event persistence, and run state.
 
 Must not own: surface subscriptions, active-turn conflict policy, ACP request
-permission wire shape, TUI rendering, or CLI mode selection.
+permission wire shape, TUI rendering, CLI mode selection, or multi-agent
+orchestration (delegated to `orchestrator/`).
+
+#### `orchestrator/`
+
+Owns: multi-agent orchestration — agent registry/resolution, ACP child handle
+lifecycle, SPAWN delegation (including self/internal via ACP loopback),
+Wait/Continue/Cancel, sidecar participant attach/prompt/detach, context cursor
+tracking, context visibility builders (main/sidecar/delegated/parent-summary),
+approval bridging (child ACP permission → parent approval → response), and
+stream merge from child events to parent tool updates.
+
+Must not own: single-invocation execution (lives in `runner/`), session
+persistence mechanics (lives in `session/`), model invocation (lives in
+`agent/llmagent/`), ACP wire schema (lives in `acp/`), or surface-facing APIs
+(lives in `gateway/`).
 
 #### `sandbox/`
 

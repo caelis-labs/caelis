@@ -85,6 +85,7 @@ func CompactModelContext(msgs []model.Message, targetTokens int) ([]model.Messag
 	}
 
 	// Keep the last N messages that fit within target.
+	// Always keep at least the last message to ensure forward progress.
 	keepFrom := len(otherMsgs)
 	keptTokens := 0
 	for i := len(otherMsgs) - 1; i >= 0; i-- {
@@ -96,8 +97,13 @@ func CompactModelContext(msgs []model.Message, targetTokens int) ([]model.Messag
 		keepFrom = i
 	}
 
-	if keepFrom == 0 {
+	// If all non-system messages fit or we only have 1, nothing to compact.
+	if keepFrom == 0 && len(otherMsgs) <= 1 {
 		return msgs, false, ""
+	}
+	// Ensure we always keep at least the last message.
+	if keepFrom >= len(otherMsgs) {
+		keepFrom = len(otherMsgs) - 1
 	}
 
 	// Create summary message for the dropped portion.
@@ -128,19 +134,53 @@ func estimateTokens(msgs []model.Message) int {
 }
 
 // estimateMessageTokens estimates the token count of a single message.
+// Uses a rune-aware heuristic: CJK characters typically consume ~1 token each,
+// while ASCII/Latin characters average ~4 chars per token.
 func estimateMessageTokens(m model.Message) int {
 	total := 4 // role overhead
 	for _, p := range m.Content {
-		total += len(p.Text) / 4
+		total += estimateTextTokens(p.Text)
 		if p.ToolUse != nil {
-			total += len(p.ToolUse.Name) / 4
+			total += estimateTextTokens(p.ToolUse.Name)
 			total += 10 // args overhead
 		}
 		if p.ToolResult != nil {
-			total += len(p.ToolResult.Content) / 4
+			total += estimateTextTokens(p.ToolResult.Content)
 		}
 	}
 	return total
+}
+
+// estimateTextTokens estimates tokens for a text string using rune-aware
+// counting. CJK characters (Unicode ranges U+4E00-U+9FFF, U+3400-U+4DBF,
+// U+F900-U+FAFF) count as ~1 token each; other characters average ~4 per token.
+func estimateTextTokens(text string) int {
+	if text == "" {
+		return 0
+	}
+	tokens := 0
+	asciiCount := 0
+	for _, r := range text {
+		if isCJK(r) {
+			// Flush pending ASCII count.
+			tokens += asciiCount / 4
+			asciiCount = 0
+			tokens++ // CJK ≈ 1 token per character
+		} else {
+			asciiCount++
+		}
+	}
+	tokens += asciiCount / 4
+	return tokens
+}
+
+func isCJK(r rune) bool {
+	return (r >= 0x4E00 && r <= 0x9FFF) || // CJK Unified Ideographs
+		(r >= 0x3400 && r <= 0x4DBF) || // CJK Extension A
+		(r >= 0xF900 && r <= 0xFAFF) || // CJK Compatibility Ideographs
+		(r >= 0x2E80 && r <= 0x2EFF) || // CJK Radicals
+		(r >= 0x3000 && r <= 0x303F) || // CJK Symbols and Punctuation
+		(r >= 0xFF00 && r <= 0xFFEF) // Fullwidth Forms
 }
 
 func (r *Runner) compactForOverflowRetry(ctx context.Context, ref session.Ref, msgs []model.Message) ([]model.Message, bool, error) {

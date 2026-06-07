@@ -434,7 +434,11 @@ func (e *taskEntry) snapshotLocked(scope string) TaskSnapshot {
 		snap.Error = e.err.Error()
 	}
 	if len(e.stderr) > 0 {
-		snap.Error = string(e.stderr)
+		if snap.Error != "" {
+			snap.Error = snap.Error + "\n" + string(e.stderr)
+		} else {
+			snap.Error = string(e.stderr)
+		}
 	}
 	return snap
 }

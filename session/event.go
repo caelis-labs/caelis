@@ -104,18 +104,38 @@ type ActorRef struct {
 	Scope string `json:"scope,omitempty"`
 	// ScopeID is the specific agent/participant ID within the scope.
 	ScopeID string `json:"scope_id,omitempty"`
-	// Source identifies the origin: "user", "model", "tool", "agent_spawn".
+	// Source identifies the origin: "user", "model", "tool", "acp_agent",
+	// "acp_subagent", "acp_participant", "acp_loopback".
 	Source string `json:"source,omitempty"`
 	// ParticipantID identifies the ACP participant (if any).
 	ParticipantID string `json:"participant_id,omitempty"`
+	// ParticipantKind classifies the participant: "subagent", "participant".
+	ParticipantKind string `json:"participant_kind,omitempty"`
+	// DelegationID links to the delegation/task that created this participant.
+	DelegationID string `json:"delegation_id,omitempty"`
 }
 
 // Scope identifies the execution scope of an event.
 type Scope struct {
-	// Kind: "turn", "invocation", "subagent".
+	// Kind: "turn", "invocation", "subagent", "participant".
 	Kind string `json:"kind"`
 	// ID is the scope-specific identifier.
 	ID string `json:"id"`
 	// ParentID links to the parent scope (for nested subagents).
 	ParentID string `json:"parent_id,omitempty"`
+	// ControllerKind: "main", "sidecar", "delegated".
+	ControllerKind string `json:"controller_kind,omitempty"`
+	// ParticipantRole: "delegated", "sidecar", "controller".
+	ParticipantRole string `json:"participant_role,omitempty"`
+	// RemoteACPSessionID is the remote ACP session ID for this scope.
+	RemoteACPSessionID string `json:"remote_acp_session_id,omitempty"`
 }
+
+// Context cursor state keys for orchestration.
+const (
+	StateKeyParentLastEvent    = "orchestrator.parent_last_event"
+	StateKeyControllerEpoch    = "orchestrator.controller_epoch"
+	StateKeyParticipantCursor  = "orchestrator.participant_cursor."  // + participant_id
+	StateKeyACPRemoteSessionID = "orchestrator.acp_remote_session." // + delegation_id
+	StateKeyACPRemoteCursor    = "orchestrator.acp_remote_cursor."  // + delegation_id
+)

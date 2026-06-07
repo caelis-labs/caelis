@@ -9,67 +9,29 @@ import (
 	"sync"
 
 	"github.com/OnslaughtSnail/caelis/acp"
+	"github.com/OnslaughtSnail/caelis/acp/client"
 	"github.com/OnslaughtSnail/caelis/agent"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/client"
 	"github.com/OnslaughtSnail/caelis/session"
 )
 
 // ACPClient is the narrow client surface an ACP-backed agent needs.
-type ACPClient interface {
-	Initialize(context.Context) (client.InitializeResponse, error)
-	NewSession(context.Context, string, map[string]any) (client.NewSessionResponse, error)
-	Prompt(context.Context, string, string, map[string]any) (client.PromptResponse, error)
-	Cancel(context.Context, string) error
-	Close(context.Context) error
-}
+type ACPClient = client.ACPClient
 
 // ACPReusableClient can load an existing external ACP session for continuation.
-type ACPReusableClient interface {
-	LoadSession(context.Context, string, string, map[string]any) (client.LoadSessionResponse, error)
-}
+type ACPReusableClient = client.ACPReusableClient
 
 // ACPClientCallbacks are installed by ACPAgent so the transport can stream
 // remote updates and permission requests back into Layer 4 contracts.
-type ACPClientCallbacks struct {
-	OnUpdate            func(client.UpdateEnvelope)
-	OnPermissionRequest client.PermissionHandler
-}
+type ACPClientCallbacks = client.ACPClientCallbacks
 
 // ACPClientFactory creates one ACP client per agent run.
-type ACPClientFactory interface {
-	Start(context.Context, ACPClientCallbacks) (ACPClient, error)
-}
+type ACPClientFactory = client.ACPClientFactory
 
 // ProcessFactoryConfig configures a process-backed ACP client factory.
-type ProcessFactoryConfig struct {
-	Command    string
-	Args       []string
-	Env        map[string]string
-	WorkDir    string
-	ClientInfo *client.Implementation
-	Terminal   client.TerminalHandler
-	FileSystem client.FileSystemHandler
-}
+type ProcessFactoryConfig = client.ProcessFactoryConfig
 
-// ProcessFactory starts an ACP agent process through protocol/acp/client.
-type ProcessFactory struct {
-	Config ProcessFactoryConfig
-}
-
-// Start creates a process-backed ACP client.
-func (f ProcessFactory) Start(ctx context.Context, callbacks ACPClientCallbacks) (ACPClient, error) {
-	return client.Start(ctx, client.Config{
-		Command:             strings.TrimSpace(f.Config.Command),
-		Args:                append([]string(nil), f.Config.Args...),
-		Env:                 cloneStringMap(f.Config.Env),
-		WorkDir:             strings.TrimSpace(f.Config.WorkDir),
-		ClientInfo:          f.Config.ClientInfo,
-		Terminal:            f.Config.Terminal,
-		FileSystem:          f.Config.FileSystem,
-		OnUpdate:            callbacks.OnUpdate,
-		OnPermissionRequest: callbacks.OnPermissionRequest,
-	})
-}
+// ProcessFactory starts an ACP agent process through acp/client.
+type ProcessFactory = client.ProcessFactory
 
 // Config configures an ACP-backed remote agent.
 type Config struct {
@@ -150,7 +112,7 @@ func (a *ACPAgent) Run(inv agent.InvocationContext) iter.Seq2[session.Event, err
 			yield(session.Event{}, err)
 			return
 		}
-		defer remoteClient.Close(context.WithoutCancel(runCtx))
+		defer remoteClient.Close()
 		remoteState := &acpRunState{cancel: remoteClient.Cancel}
 
 		done := make(chan error, 1)
@@ -170,7 +132,7 @@ func (a *ACPAgent) Run(inv agent.InvocationContext) iter.Seq2[session.Event, err
 				<-runCtx.Done()
 				remoteState.cancelRemote(context.WithoutCancel(runCtx))
 			}()
-			_, err = remoteClient.Prompt(runCtx, remoteState.sessionID(), userText(inv), nil)
+			_, err = remoteClient.PromptText(runCtx, remoteState.sessionID(), userText(inv))
 			if runCtx.Err() != nil {
 				remoteState.cancelRemote(context.WithoutCancel(runCtx))
 			}
@@ -202,13 +164,17 @@ func (a *ACPAgent) ensureRemoteSession(ctx context.Context, remoteClient ACPClie
 			if !ok {
 				return "", fmt.Errorf("agent/remote: ACP client cannot load existing session %q", remoteSessionID)
 			}
-			if _, err := reusable.LoadSession(ctx, remoteSessionID, local.Workspace.Root, nil); err != nil {
+			if _, err := reusable.LoadSession(ctx, acp.LoadSessionRequest{
+				SessionID: remoteSessionID,
+			}); err != nil {
 				return "", err
 			}
 			return remoteSessionID, nil
 		}
 	}
-	newSession, err := remoteClient.NewSession(ctx, local.Workspace.Root, nil)
+	newSession, err := remoteClient.NewSession(ctx, acp.NewSessionRequest{
+		CWD: local.Workspace.Root,
+	})
 	if err != nil {
 		return "", err
 	}
@@ -333,12 +299,12 @@ func userText(inv agent.InvocationContext) string {
 	return b.String()
 }
 
-func toolCallName(call client.ToolCallUpdate) string {
-	if call.Title != nil && strings.TrimSpace(*call.Title) != "" {
-		return strings.TrimSpace(*call.Title)
+func toolCallName(call acp.ToolCallUpdate) string {
+	if strings.TrimSpace(call.Title) != "" {
+		return strings.TrimSpace(call.Title)
 	}
-	if call.Kind != nil && strings.TrimSpace(*call.Kind) != "" {
-		return strings.TrimSpace(*call.Kind)
+	if strings.TrimSpace(call.Kind) != "" {
+		return strings.TrimSpace(call.Kind)
 	}
 	return strings.TrimSpace(call.ToolCallID)
 }

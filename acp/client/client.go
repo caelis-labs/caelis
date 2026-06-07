@@ -155,6 +155,18 @@ func (c *Client) Prompt(ctx context.Context, req acp.PromptRequest) (acp.PromptR
 	return resp, err
 }
 
+// PromptText sends a plain text prompt to the agent (convenience wrapper).
+func (c *Client) PromptText(ctx context.Context, sessionID string, text string) (acp.PromptResponse, error) {
+	textJSON, err := json.Marshal(acp.TextContent{Type: "text", Text: text})
+	if err != nil {
+		return acp.PromptResponse{}, fmt.Errorf("marshal text content: %w", err)
+	}
+	return c.Prompt(ctx, acp.PromptRequest{
+		SessionID: sessionID,
+		Prompt:    []json.RawMessage{textJSON},
+	})
+}
+
 // Cancel sends a cancel notification (no response expected).
 func (c *Client) Cancel(ctx context.Context, sessionID string) error {
 	return c.notify(ctx, acp.MethodSessionCancel, acp.CancelNotification{

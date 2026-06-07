@@ -27,14 +27,17 @@
 - TUI and ACP clients consume the same ACP-native event stream and may decorate
   it, but must not invent a built-in-only protocol.
 ## Layer Boundaries
-- Public extension contracts live in `ports/*`; private glue lives in `internal/*`.
-- `internal/kernel` owns local turn/session orchestration, canonical projection,
-  replay validation, approvals, participants, and lifecycle coordination.
-- `impl/*` provides concrete ports and must not import surfaces or `internal/kernel`.
-- `protocol/acp` owns ACP schema, JSON-RPC, client/server, terminal, and projector code.
-- `surfaces/*` adapt UI/CLI/ACP interactions to kernel or app services and must
-  not own model, sandbox, tool, or persistence semantics.
-- `app/gatewayapp` is the default composition root for concrete implementations and config.
+- `acp/` is the single canonical ACP package (schema, client, server, projector, normalize).
+  `protocol/acp/` is a deprecated compatibility layer being absorbed into `acp/`.
+- `orchestrator/` owns multi-agent orchestration: SPAWN delegation, ACP child lifecycle,
+  context visibility, permission bridging, stream merge. Imports `acp/`, `agent/`, `runner/`,
+  `session/`, `tool/`, `policy/`. Must not import `gateway/`, `app/`, `tui/`, `headless/`.
+- `runner/` owns single invocation execution. Does not import `orchestrator/`; receives
+  orchestration interfaces via dependency injection.
+- `gateway/` is the surface-facing service contract (composition/config/API facade).
+  It does not own turn lifecycle or multi-agent orchestration.
+- `app/` is the composition root that wires `orchestrator/`, `runner/`, `gateway/`, and
+  all Layer 4 dependencies.
 - Before `v1.0.0`, prefer clean schema and boundary fixes over compatibility
   fallbacks or legacy replay guesses.
 ## Validation

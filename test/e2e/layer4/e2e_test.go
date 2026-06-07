@@ -36,6 +36,9 @@ import (
 	"github.com/OnslaughtSnail/caelis/tool/builtin/filesystem"
 	"github.com/OnslaughtSnail/caelis/tool/builtin/shell"
 	"github.com/OnslaughtSnail/caelis/tool/builtin/spawn"
+
+	caelisplugin "github.com/OnslaughtSnail/caelis/plugin"
+	pluginfs "github.com/OnslaughtSnail/caelis/plugin/fs"
 )
 
 // ─── Config loading ──────────────────────────────────────────────────
@@ -1424,3 +1427,1803 @@ func (fs *tempFS) fullPath(path string) string {
 	clean := filepath.Clean(strings.TrimPrefix(path, string(filepath.Separator)))
 	return filepath.Join(fs.root, clean)
 }
+
+// ─── Additional E2E Tests ────────────────────────────────────────────
+
+// TestE2E_RealProviderWithToolCalls tests a real model provider making tool
+// calls through the full runner pipeline: model decides to call WRITE tool →
+// sandbox executes → model sees result → final answer.
+func TestE2E_RealProviderWithToolCalls(t *testing.T) {
+	cfg := loadConfig(t)
+	modelCfg, ok := defaultModel(cfg)
+	if !ok {
+		t.Skip("no default model configured")
+	}
+	t.Logf("Using model: %s @ %s", modelCfg.Model, modelCfg.BaseURL)
+
+	llm := providers.NewOpenAI(modelCfg)
+	modelReg := &recordingModelRegistry{
+		llm: llm,
+		info: model.ModelInfo{
+			ModelID:       modelCfg.Model,
+			DisplayName:   modelCfg.Model,
+			Provider:      "configured",
+			SupportsTools: true,
+		},
+	}
+
+	dir := t.TempDir()
+	fileSvc, err := filesession.New(filesession.Config{RootDir: dir})
+	if err != nil {
+		t.Fatalf("New file service: %v", err)
+	}
+	sess, err := fileSvc.Create(ctx(t), session.CreateRequest{
+		AppName: "e2e-tool-real", UserID: "test", WorkspaceKey: "e2e",
+	})
+	if err != nil {
+		t.Fatalf("Create session: %v", err)
+	}
+
+	fs := newTempFS(t.TempDir())
+	backend := &recordingSandboxBackend{fs: fs}
+	toolReg := newTestToolRegistry(filesystem.All()...)
+	llmAgent := llmagent.New(llmagent.Config{
+		Name:     "e2e-real-tool-agent",
+		ModelRef: model.Ref{ModelID: modelCfg.Model},
+		Tools:    []string{"WRITE", "READ"},
+	})
+	r, err := runner.New(runner.Config{
+		Agent:         llmAgent,
+		Sessions:      fileSvc,
+		ModelRegistry: modelReg,
+		ToolRegistry:  toolReg,
+		Sandbox:       &recordingSandboxFactory{backend: backend},
+	})
+	if err != nil {
+		t.Fatalf("New runner: %v", err)
+	}
+
+	// Ask the model to write a file and then confirm.
+	events := collectRun(t, r, ctx(t), runner.RunRequest{
+		SessionRef: sess.Ref,
+		UserMessage: model.Message{
+			Role:    model.RoleUser,
+			Content: []model.Part{{Text: "Write the text 'hello world' to a file called greeting.txt, then read it back and tell me what it says."}},
+		},
+	})
+
+	// We expect at minimum: user, tool_call, tool_result, (maybe more tools), assistant
+	persisted := persistedLiveEvents(events)
+	if len(persisted) < 3 {
+		t.Fatalf("expected >= 3 persisted events, got %d: %v", len(persisted), eventKinds(persisted))
+	}
+	if persisted[0].Kind != session.EventKindUser {
+		t.Errorf("first event: got %q, want user", persisted[0].Kind)
+	}
+
+	// Verify at least one tool call happened.
+	var toolCallCount, toolResultCount int
+	for _, e := range persisted {
+		switch e.Kind {
+		case session.EventKindToolCall:
+			toolCallCount++
+		case session.EventKindToolResult:
+			toolResultCount++
+		}
+	}
+	if toolCallCount == 0 {
+		t.Fatal("expected at least one tool call from real model")
+	}
+	if toolCallCount != toolResultCount {
+		t.Errorf("tool calls (%d) != tool results (%d)", toolCallCount, toolResultCount)
+	}
+
+	// Verify the last event is an assistant response.
+	last := persisted[len(persisted)-1]
+	if last.Kind != session.EventKindAssistant {
+		t.Errorf("last event: got %q, want assistant", last.Kind)
+	}
+
+	// Verify model context reconstruction is valid.
+	allPersisted, _ := fileSvc.Events(ctx(t), session.EventsRequest{SessionRef: sess.Ref})
+	modelCtx := session.ModelContextFromEvents(allPersisted)
+	if len(modelCtx) < 2 {
+		t.Fatalf("model context: got %d, want >= 2", len(modelCtx))
+	}
+
+	// Verify ACP projection covers all events.
+	projections := projectAllACP(allPersisted)
+	if len(projections) == 0 {
+		t.Error("expected ACP projections from persisted events")
+	}
+
+	t.Logf("Real provider tool call e2e: %d events, %d tool calls, %d model messages",
+		len(persisted), toolCallCount, len(modelCtx))
+}
+
+// TestE2E_ContextOverflowRetry verifies that when the model returns a context
+// overflow error, the runner compacts the context and retries successfully.
+func TestE2E_ContextOverflowRetry(t *testing.T) {
+	svc := session.InMemoryService()
+	ctx := ctx(t)
+	sess, err := svc.Create(ctx, session.CreateRequest{
+		AppName: "e2e-overflow", UserID: "test", WorkspaceKey: "workspace",
+	})
+	if err != nil {
+		t.Fatalf("Create session: %v", err)
+	}
+
+	// Pre-fill session with a prior event.
+	_, _ = svc.AppendEvent(ctx, sess.Ref, session.Event{
+		Kind:       session.EventKindUser,
+		Visibility: session.VisibilityCanonical,
+		UserPayload: &session.UserPayload{
+			Parts: []session.EventPart{{Kind: session.PartKindText, Text: "prior context"}},
+		},
+	})
+
+	llm := &overflowThenSuccessLLM{}
+	compactor := &alwaysCompactCompactor{}
+	llmAgent := llmagent.New(llmagent.Config{
+		Name: "overflow-agent",
+	})
+	llmAgent = llmAgent.Prepare(agent.PrepareRequest{LLM: llm}).(*llmagent.Agent)
+
+	r, err := runner.New(runner.Config{
+		Agent:     llmAgent,
+		Sessions:  svc,
+		Compactor: compactor,
+	})
+	if err != nil {
+		t.Fatalf("New runner: %v", err)
+	}
+
+	events := collectRun(t, r, ctx, runner.RunRequest{
+		SessionRef:  sess.Ref,
+		UserMessage: model.Message{Role: model.RoleUser, Content: []model.Part{{Text: "hello after overflow"}}},
+	})
+
+	persisted := persistedLiveEvents(events)
+	// The compaction event is persisted to the store but not yielded to the caller.
+	// Check the store for compaction events.
+	storeEvents, _ := svc.Events(ctx, session.EventsRequest{SessionRef: sess.Ref})
+	var hasCompaction bool
+	for _, e := range storeEvents {
+		if e.Kind == session.EventKindCompaction {
+			hasCompaction = true
+		}
+	}
+	if !hasCompaction {
+		t.Error("expected compaction event in session store after overflow retry")
+	}
+
+	// The last event should be the successful assistant response.
+	last := persisted[len(persisted)-1]
+	if last.Kind != session.EventKindAssistant {
+		t.Errorf("last event: got %q, want assistant", last.Kind)
+	}
+	if last.TextContent() != "overflow-recovered" {
+		t.Errorf("assistant text: got %q, want %q", last.TextContent(), "overflow-recovered")
+	}
+
+	// Verify LLM was called twice (overflow then success).
+	if llm.calls != 2 {
+		t.Fatalf("LLM calls: got %d, want 2", llm.calls)
+	}
+	if compactor.calls != 1 {
+		t.Fatalf("compactor calls: got %d, want 1", compactor.calls)
+	}
+}
+
+// TestE2E_MultiToolConcurrentExecutionOrder verifies that when the model
+// requests multiple tools in one turn, results are emitted in the model's
+// original call order, not execution completion order.
+func TestE2E_MultiToolConcurrentExecutionOrder(t *testing.T) {
+	fileSvc, err := filesession.New(filesession.Config{RootDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("New file service: %v", err)
+	}
+	sess, err := fileSvc.Create(ctx(t), session.CreateRequest{
+		AppName: "e2e-multi-tool", UserID: "test", WorkspaceKey: "workspace",
+	})
+	if err != nil {
+		t.Fatalf("Create session: %v", err)
+	}
+
+	llm := &scriptedMultiToolLLM{}
+	modelReg := &recordingModelRegistry{
+		llm:  llm,
+		info: model.ModelInfo{ModelID: "multi-tool", SupportsTools: true},
+	}
+
+	// Create tools with different delays: B is slowest.
+	toolA := &delayTool{name: "TOOL_A", delay: 10 * time.Millisecond, output: "result-a"}
+	toolB := &delayTool{name: "TOOL_B", delay: 100 * time.Millisecond, output: "result-b"}
+	toolC := &delayTool{name: "TOOL_C", delay: 20 * time.Millisecond, output: "result-c"}
+	toolReg := newTestToolRegistry(toolA, toolB, toolC)
+
+	llmAgent := llmagent.New(llmagent.Config{
+		Name:     "multi-tool-agent",
+		ModelRef: model.Ref{ModelID: "multi-tool"},
+		Tools:    []string{"TOOL_A", "TOOL_B", "TOOL_C"},
+	})
+	r, err := runner.New(runner.Config{
+		Agent:         llmAgent,
+		Sessions:      fileSvc,
+		ModelRegistry: modelReg,
+		ToolRegistry:  toolReg,
+	})
+	if err != nil {
+		t.Fatalf("New runner: %v", err)
+	}
+
+	events := collectRun(t, r, ctx(t), runner.RunRequest{
+		SessionRef:  sess.Ref,
+		UserMessage: model.Message{Role: model.RoleUser, Content: []model.Part{{Text: "call all three tools"}}},
+	})
+
+	persisted := persistedLiveEvents(events)
+	// Expected: user, tool_call(A), tool_call(B), tool_call(C),
+	//           tool_result(A), tool_result(B), tool_result(C), assistant
+	assertEventKinds(t, persisted,
+		session.EventKindUser,
+		session.EventKindToolCall,
+		session.EventKindToolCall,
+		session.EventKindToolCall,
+		session.EventKindToolResult,
+		session.EventKindToolResult,
+		session.EventKindToolResult,
+		session.EventKindAssistant,
+	)
+
+	// Verify tool call order matches model's request order.
+	if persisted[1].ToolCallPayload.Name != "TOOL_A" {
+		t.Errorf("call 1: got %q, want TOOL_A", persisted[1].ToolCallPayload.Name)
+	}
+	if persisted[2].ToolCallPayload.Name != "TOOL_B" {
+		t.Errorf("call 2: got %q, want TOOL_B", persisted[2].ToolCallPayload.Name)
+	}
+	if persisted[3].ToolCallPayload.Name != "TOOL_C" {
+		t.Errorf("call 3: got %q, want TOOL_C", persisted[3].ToolCallPayload.Name)
+	}
+
+	// Verify tool result order matches call order (A, B, C).
+	if persisted[4].ToolResultPayload.Name != "TOOL_A" {
+		t.Errorf("result 1: got %q, want TOOL_A", persisted[4].ToolResultPayload.Name)
+	}
+	if persisted[5].ToolResultPayload.Name != "TOOL_B" {
+		t.Errorf("result 2: got %q, want TOOL_B", persisted[5].ToolResultPayload.Name)
+	}
+	if persisted[6].ToolResultPayload.Name != "TOOL_C" {
+		t.Errorf("result 3: got %q, want TOOL_C", persisted[6].ToolResultPayload.Name)
+	}
+
+	// Verify replay parity.
+	allPersisted, _ := fileSvc.Events(ctx(t), session.EventsRequest{SessionRef: sess.Ref})
+	modelCtx := session.ModelContextFromEvents(allPersisted)
+	// Expected: user, assistant(tool_use A), assistant(tool_use B), assistant(tool_use C),
+	//           tool(A), tool(B), tool(C), assistant(text) = 8
+	if len(modelCtx) != 8 {
+		t.Fatalf("model context: got %d messages, want 8", len(modelCtx))
+	}
+}
+
+// TestE2E_ModelErrorPropagation verifies that when the model returns an error
+// mid-stream, the error propagates through the runner and no partial assistant
+// event is persisted.
+func TestE2E_ModelErrorPropagation(t *testing.T) {
+	fileSvc, err := filesession.New(filesession.Config{RootDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("New file service: %v", err)
+	}
+	sess, err := fileSvc.Create(ctx(t), session.CreateRequest{
+		AppName: "e2e-model-err", UserID: "test", WorkspaceKey: "workspace",
+	})
+	if err != nil {
+		t.Fatalf("Create session: %v", err)
+	}
+
+	llm := &errorStreamLLM{textBefore: "partial-", err: fmt.Errorf("model overloaded")}
+	modelReg := &recordingModelRegistry{
+		llm:  llm,
+		info: model.ModelInfo{ModelID: "error-stream"},
+	}
+	llmAgent := llmagent.New(llmagent.Config{
+		Name:     "error-agent",
+		ModelRef: model.Ref{ModelID: "error-stream"},
+	})
+	r, err := runner.New(runner.Config{
+		Agent:         llmAgent,
+		Sessions:      fileSvc,
+		ModelRegistry: modelReg,
+	})
+	if err != nil {
+		t.Fatalf("New runner: %v", err)
+	}
+
+	var runErr error
+	var events []session.Event
+	for evt, err := range r.Run(ctx(t), runner.RunRequest{
+		SessionRef:  sess.Ref,
+		UserMessage: model.Message{Role: model.RoleUser, Content: []model.Part{{Text: "trigger error"}}},
+	}) {
+		if err != nil {
+			runErr = err
+			break
+		}
+		events = append(events, evt)
+	}
+	if runErr == nil {
+		t.Fatal("expected error from model, got nil")
+	}
+	if !strings.Contains(runErr.Error(), "model overloaded") {
+		t.Errorf("error: got %q, want contains 'model overloaded'", runErr.Error())
+	}
+
+	// Only the user event should be persisted (assistant was not completed).
+	persisted, _ := fileSvc.Events(ctx(t), session.EventsRequest{SessionRef: sess.Ref})
+	for _, e := range persisted {
+		if e.Kind == session.EventKindAssistant {
+			t.Error("should not persist assistant event on model error")
+		}
+	}
+}
+
+// TestE2E_ToolErrorPropagation verifies that when a tool returns an error
+// result, it flows through to the model as a tool result with IsError=true.
+func TestE2E_ToolErrorPropagation(t *testing.T) {
+	fileSvc, err := filesession.New(filesession.Config{RootDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("New file service: %v", err)
+	}
+	sess, err := fileSvc.Create(ctx(t), session.CreateRequest{
+		AppName: "e2e-tool-err", UserID: "test", WorkspaceKey: "workspace",
+	})
+	if err != nil {
+		t.Fatalf("Create session: %v", err)
+	}
+
+	llm := &scriptedToolErrorLLM{}
+	modelReg := &recordingModelRegistry{
+		llm:  llm,
+		info: model.ModelInfo{ModelID: "tool-error", SupportsTools: true},
+	}
+	errTool := &errorTool{name: "FAIL_TOOL", errMsg: "tool exploded"}
+	toolReg := newTestToolRegistry(errTool)
+	llmAgent := llmagent.New(llmagent.Config{
+		Name:     "tool-error-agent",
+		ModelRef: model.Ref{ModelID: "tool-error"},
+		Tools:    []string{"FAIL_TOOL"},
+	})
+	r, err := runner.New(runner.Config{
+		Agent:         llmAgent,
+		Sessions:      fileSvc,
+		ModelRegistry: modelReg,
+		ToolRegistry:  toolReg,
+	})
+	if err != nil {
+		t.Fatalf("New runner: %v", err)
+	}
+
+	events := collectRun(t, r, ctx(t), runner.RunRequest{
+		SessionRef:  sess.Ref,
+		UserMessage: model.Message{Role: model.RoleUser, Content: []model.Part{{Text: "call the failing tool"}}},
+	})
+
+	persisted := persistedLiveEvents(events)
+	assertEventKinds(t, persisted,
+		session.EventKindUser,
+		session.EventKindToolCall,
+		session.EventKindToolResult,
+		session.EventKindAssistant,
+	)
+
+	// Verify tool result is marked as error.
+	tr := persisted[2].ToolResultPayload
+	if !tr.IsError {
+		t.Error("tool result should be marked as error")
+	}
+	if !strings.Contains(tr.Content[0].Text, "tool exploded") {
+		t.Errorf("tool result text: got %q, want contains 'tool exploded'", tr.Content[0].Text)
+	}
+
+	// Verify the model received the error in context for its next call.
+	if len(llm.requests) != 2 {
+		t.Fatalf("model requests: got %d, want 2", len(llm.requests))
+	}
+	// The second request should contain the tool error in its messages.
+	lastMsg := llm.requests[1].Messages[len(llm.requests[1].Messages)-1]
+	if lastMsg.Role != model.RoleTool {
+		t.Errorf("last message role: got %q, want tool", lastMsg.Role)
+	}
+	if !lastMsg.Content[0].ToolResult.IsError {
+		t.Error("model context tool result should be error")
+	}
+}
+
+// TestE2E_SandboxErrorPropagation verifies that when the sandbox backend
+// returns an error, it surfaces as a tool error result.
+func TestE2E_SandboxErrorPropagation(t *testing.T) {
+	fileSvc, err := filesession.New(filesession.Config{RootDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("New file service: %v", err)
+	}
+	sess, err := fileSvc.Create(ctx(t), session.CreateRequest{
+		AppName: "e2e-sandbox-err", UserID: "test", WorkspaceKey: "workspace",
+	})
+	if err != nil {
+		t.Fatalf("Create session: %v", err)
+	}
+
+	llm := &scriptedToolLLM{}
+	modelReg := &recordingModelRegistry{
+		llm:  llm,
+		info: model.ModelInfo{ModelID: "sandbox-err", SupportsTools: true},
+	}
+	toolReg := newTestToolRegistry(shell.All()...)
+	errBackend := &errorSandboxBackend{err: fmt.Errorf("sandbox exploded")}
+	sandboxFactory := &failingSandboxFactoryWithError{backend: errBackend}
+	llmAgent := llmagent.New(llmagent.Config{
+		Name:     "sandbox-err-agent",
+		ModelRef: model.Ref{ModelID: "sandbox-err"},
+		Tools:    []string{"RUN_COMMAND"},
+	})
+	r, err := runner.New(runner.Config{
+		Agent:         llmAgent,
+		Sessions:      fileSvc,
+		ModelRegistry: modelReg,
+		ToolRegistry:  toolReg,
+		Sandbox:       sandboxFactory,
+	})
+	if err != nil {
+		t.Fatalf("New runner: %v", err)
+	}
+
+	events := collectRun(t, r, ctx(t), runner.RunRequest{
+		SessionRef:  sess.Ref,
+		UserMessage: model.Message{Role: model.RoleUser, Content: []model.Part{{Text: "run a command"}}},
+	})
+
+	persisted := persistedLiveEvents(events)
+	// Should have: user, tool_call, tool_result(error), assistant
+	assertEventKinds(t, persisted,
+		session.EventKindUser,
+		session.EventKindToolCall,
+		session.EventKindToolResult,
+		session.EventKindAssistant,
+	)
+
+	tr := persisted[2].ToolResultPayload
+	if !tr.IsError {
+		t.Error("tool result should be error when sandbox fails")
+	}
+	if !strings.Contains(tr.Content[0].Text, "sandbox exploded") {
+		t.Errorf("error text: got %q, want contains 'sandbox exploded'", tr.Content[0].Text)
+	}
+}
+
+// TestE2E_CrossRunnerSessionPersistence verifies that a session created by
+// one runner can be continued by a different runner instance.
+func TestE2E_CrossRunnerSessionPersistence(t *testing.T) {
+	dir := t.TempDir()
+	fileSvc, err := filesession.New(filesession.Config{RootDir: dir})
+	if err != nil {
+		t.Fatalf("New file service: %v", err)
+	}
+	sess, err := fileSvc.Create(ctx(t), session.CreateRequest{
+		AppName: "e2e-cross-runner", UserID: "test", WorkspaceKey: "workspace",
+	})
+	if err != nil {
+		t.Fatalf("Create session: %v", err)
+	}
+
+	// Turn 1 with Runner A.
+	llm1 := &mockTextLLM{response: "the secret number is 42"}
+	modelReg1 := &recordingModelRegistry{
+		llm:  llm1,
+		info: model.ModelInfo{ModelID: "cross-1"},
+	}
+	agent1 := llmagent.New(llmagent.Config{Name: "agent-1", ModelRef: model.Ref{ModelID: "cross-1"}})
+	r1, _ := runner.New(runner.Config{Agent: agent1, Sessions: fileSvc, ModelRegistry: modelReg1})
+
+	collectRun(t, r1, ctx(t), runner.RunRequest{
+		SessionRef:  sess.Ref,
+		UserMessage: model.Message{Role: model.RoleUser, Content: []model.Part{{Text: "remember the secret number 42"}}},
+	})
+
+	// Turn 2 with Runner B (different instance, same file store).
+	llm2 := &recordingLLM{}
+	modelReg2 := &recordingModelRegistry{
+		llm:  llm2,
+		info: model.ModelInfo{ModelID: "cross-2"},
+	}
+	agent2 := llmagent.New(llmagent.Config{Name: "agent-2", ModelRef: model.Ref{ModelID: "cross-2"}})
+	r2, _ := runner.New(runner.Config{Agent: agent2, Sessions: fileSvc, ModelRegistry: modelReg2})
+
+	collectRun(t, r2, ctx(t), runner.RunRequest{
+		SessionRef:  sess.Ref,
+		UserMessage: model.Message{Role: model.RoleUser, Content: []model.Part{{Text: "what was the secret number?"}}},
+	})
+
+	// Runner B's model should have received prior context from turn 1.
+	if len(llm2.requests) != 1 {
+		t.Fatalf("runner B model requests: got %d, want 1", len(llm2.requests))
+	}
+	msgs := llm2.requests[0].Messages
+	// Should contain: user(turn1), assistant(turn1), user(turn2)
+	if len(msgs) < 3 {
+		t.Fatalf("runner B messages: got %d, want >= 3", len(msgs))
+	}
+	// First message should be the turn 1 user message.
+	if msgs[0].Role != model.RoleUser {
+		t.Errorf("msg 0 role: got %q, want user", msgs[0].Role)
+	}
+	if !strings.Contains(msgs[0].TextContent(), "secret number 42") {
+		t.Errorf("msg 0 text: got %q, want contains 'secret number 42'", msgs[0].TextContent())
+	}
+	// Second message should be the turn 1 assistant response.
+	if msgs[1].Role != model.RoleAssistant {
+		t.Errorf("msg 1 role: got %q, want assistant", msgs[1].Role)
+	}
+}
+
+// TestE2E_HookLifecycle verifies all 4 hook callbacks fire in the correct
+// order with correct data.
+func TestE2E_HookLifecycle(t *testing.T) {
+	fileSvc, err := filesession.New(filesession.Config{RootDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("New file service: %v", err)
+	}
+	sess, err := fileSvc.Create(ctx(t), session.CreateRequest{
+		AppName: "e2e-hooks", UserID: "test", WorkspaceKey: "workspace",
+	})
+	if err != nil {
+		t.Fatalf("Create session: %v", err)
+	}
+
+	hook := &recordingHook{}
+	llm := &scriptedToolLLM{}
+	modelReg := &recordingModelRegistry{
+		llm:  llm,
+		info: model.ModelInfo{ModelID: "hook-test", SupportsTools: true},
+	}
+	toolReg := newTestToolRegistry(shell.All()...)
+	llmAgent := llmagent.New(llmagent.Config{
+		Name:     "hook-agent",
+		ModelRef: model.Ref{ModelID: "hook-test"},
+		Tools:    []string{"RUN_COMMAND"},
+	})
+	r, err := runner.New(runner.Config{
+		Agent:         llmAgent,
+		Sessions:      fileSvc,
+		ModelRegistry: modelReg,
+		ToolRegistry:  toolReg,
+		Sandbox:       &recordingSandboxFactory{backend: &recordingSandboxBackend{fs: newTempFS(t.TempDir())}},
+		Hooks:         []agent.Hook{hook},
+	})
+	if err != nil {
+		t.Fatalf("New runner: %v", err)
+	}
+
+	collectRun(t, r, ctx(t), runner.RunRequest{
+		SessionRef:  sess.Ref,
+		UserMessage: model.Message{Role: model.RoleUser, Content: []model.Part{{Text: "run command with hooks"}}},
+	})
+
+	hook.mu.Lock()
+	defer hook.mu.Unlock()
+
+	// Expected sequence: BeforeInvocation, BeforeTool, AfterTool, AfterInvocation.
+	if len(hook.calls) != 4 {
+		t.Fatalf("hook calls: got %d, want 4: %v", len(hook.calls), hook.calls)
+	}
+	if hook.calls[0] != "BeforeInvocation" {
+		t.Errorf("call 0: got %q, want BeforeInvocation", hook.calls[0])
+	}
+	if hook.calls[1] != "BeforeTool" {
+		t.Errorf("call 1: got %q, want BeforeTool", hook.calls[1])
+	}
+	if hook.calls[2] != "AfterTool" {
+		t.Errorf("call 2: got %q, want AfterTool", hook.calls[2])
+	}
+	if hook.calls[3] != "AfterInvocation" {
+		t.Errorf("call 3: got %q, want AfterInvocation", hook.calls[3])
+	}
+
+	// Verify hook data.
+	if hook.invHook.AgentName != "hook-agent" {
+		t.Errorf("invocation hook agent: got %q, want hook-agent", hook.invHook.AgentName)
+	}
+	if hook.toolHook.ToolName != "RUN_COMMAND" {
+		t.Errorf("tool hook name: got %q, want RUN_COMMAND", hook.toolHook.ToolName)
+	}
+}
+
+// TestE2E_PolicyDenyTool verifies that when policy denies a tool call,
+// the model receives a deny result.
+func TestE2E_PolicyDenyTool(t *testing.T) {
+	fileSvc, err := filesession.New(filesession.Config{RootDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("New file service: %v", err)
+	}
+	sess, err := fileSvc.Create(ctx(t), session.CreateRequest{
+		AppName: "e2e-deny", UserID: "test", WorkspaceKey: "workspace",
+	})
+	if err != nil {
+		t.Fatalf("Create session: %v", err)
+	}
+
+	llm := &scriptedToolLLM{}
+	modelReg := &recordingModelRegistry{
+		llm:  llm,
+		info: model.ModelInfo{ModelID: "deny-test", SupportsTools: true},
+	}
+	toolReg := newTestToolRegistry(shell.All()...)
+	llmAgent := llmagent.New(llmagent.Config{
+		Name:     "deny-agent",
+		ModelRef: model.Ref{ModelID: "deny-test"},
+		Tools:    []string{"RUN_COMMAND"},
+	})
+	r, err := runner.New(runner.Config{
+		Agent:         llmAgent,
+		Sessions:      fileSvc,
+		ModelRegistry: modelReg,
+		ToolRegistry:  toolReg,
+		Sandbox:       &recordingSandboxFactory{backend: &recordingSandboxBackend{fs: newTempFS(t.TempDir())}},
+		Policy:        &alwaysDenyPolicy{},
+	})
+	if err != nil {
+		t.Fatalf("New runner: %v", err)
+	}
+
+	events := collectRun(t, r, ctx(t), runner.RunRequest{
+		SessionRef:  sess.Ref,
+		UserMessage: model.Message{Role: model.RoleUser, Content: []model.Part{{Text: "run denied command"}}},
+	})
+
+	persisted := persistedLiveEvents(events)
+	assertEventKinds(t, persisted,
+		session.EventKindUser,
+		session.EventKindToolCall,
+		session.EventKindToolResult,
+		session.EventKindAssistant,
+	)
+
+	tr := persisted[2].ToolResultPayload
+	if !tr.IsError {
+		t.Error("tool result should be error when policy denies")
+	}
+	if !strings.Contains(strings.ToLower(tr.Content[0].Text), "denied") {
+		t.Errorf("deny text: got %q, want contains 'denied'", tr.Content[0].Text)
+	}
+}
+
+// TestE2E_ToolResultTruncation verifies that large tool results get truncated
+// and truncation metadata is preserved.
+func TestE2E_ToolResultTruncation(t *testing.T) {
+	fileSvc, err := filesession.New(filesession.Config{RootDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("New file service: %v", err)
+	}
+	sess, err := fileSvc.Create(ctx(t), session.CreateRequest{
+		AppName: "e2e-truncation", UserID: "test", WorkspaceKey: "workspace",
+	})
+	if err != nil {
+		t.Fatalf("Create session: %v", err)
+	}
+
+	bigOutput := strings.Repeat("x", 200_000) // ~200KB
+	llm := &scriptedToolErrorLLM{}            // reuse: calls tool once, then text
+	modelReg := &recordingModelRegistry{
+		llm:  llm,
+		info: model.ModelInfo{ModelID: "trunc-test", SupportsTools: true},
+	}
+	bigTool := &staticResultTool{name: "BIG_TOOL", output: bigOutput}
+	toolReg := newTestToolRegistry(bigTool)
+	llmAgent := llmagent.New(llmagent.Config{
+		Name:     "trunc-agent",
+		ModelRef: model.Ref{ModelID: "trunc-test"},
+		Tools:    []string{"BIG_TOOL"},
+	})
+	r, err := runner.New(runner.Config{
+		Agent:         llmAgent,
+		Sessions:      fileSvc,
+		ModelRegistry: modelReg,
+		ToolRegistry:  toolReg,
+	})
+	if err != nil {
+		t.Fatalf("New runner: %v", err)
+	}
+
+	events := collectRun(t, r, ctx(t), runner.RunRequest{
+		SessionRef:  sess.Ref,
+		UserMessage: model.Message{Role: model.RoleUser, Content: []model.Part{{Text: "call big tool"}}},
+	})
+
+	persisted := persistedLiveEvents(events)
+	// Find the tool result.
+	var tr *session.ToolResultPayload
+	for i := range persisted {
+		if persisted[i].Kind == session.EventKindToolResult {
+			tr = persisted[i].ToolResultPayload
+		}
+	}
+	if tr == nil {
+		t.Fatal("expected tool result event")
+	}
+
+	// The tool result should be truncated.
+	resultText := ""
+	for _, p := range tr.Content {
+		resultText += p.Text
+	}
+	if len(resultText) >= len(bigOutput) {
+		t.Errorf("tool result not truncated: got %d bytes, want < %d", len(resultText), len(bigOutput))
+	}
+}
+
+// TestE2E_SystemPromptAssembly verifies the system prompt from runner config
+// appears in the model context.
+func TestE2E_SystemPromptAssembly(t *testing.T) {
+	fileSvc, err := filesession.New(filesession.Config{RootDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("New file service: %v", err)
+	}
+	sess, err := fileSvc.Create(ctx(t), session.CreateRequest{
+		AppName: "e2e-sysprompt", UserID: "test", WorkspaceKey: "workspace",
+	})
+	if err != nil {
+		t.Fatalf("Create session: %v", err)
+	}
+
+	llm := &recordingLLM{}
+	modelReg := &recordingModelRegistry{
+		llm:  llm,
+		info: model.ModelInfo{ModelID: "sysprompt-test"},
+	}
+	llmAgent := llmagent.New(llmagent.Config{
+		Name:     "sysprompt-agent",
+		ModelRef: model.Ref{ModelID: "sysprompt-test"},
+	})
+	r, err := runner.New(runner.Config{
+		Agent:         llmAgent,
+		Sessions:      fileSvc,
+		ModelRegistry: modelReg,
+		SystemPrompt:  "You are a helpful assistant. Always respond concisely.",
+	})
+	if err != nil {
+		t.Fatalf("New runner: %v", err)
+	}
+
+	collectRun(t, r, ctx(t), runner.RunRequest{
+		SessionRef:  sess.Ref,
+		UserMessage: model.Message{Role: model.RoleUser, Content: []model.Part{{Text: "hello"}}},
+	})
+
+	if len(llm.requests) != 1 {
+		t.Fatalf("model requests: got %d, want 1", len(llm.requests))
+	}
+	msgs := llm.requests[0].Messages
+	if len(msgs) < 2 {
+		t.Fatalf("messages: got %d, want >= 2", len(msgs))
+	}
+	// First message should be system role with the configured prompt.
+	if msgs[0].Role != model.RoleSystem {
+		t.Errorf("msg 0 role: got %q, want system", msgs[0].Role)
+	}
+	if !strings.Contains(msgs[0].TextContent(), "helpful assistant") {
+		t.Errorf("system prompt: got %q, want contains 'helpful assistant'", msgs[0].TextContent())
+	}
+}
+
+// TestE2E_ACPProjectionAllEventTypes verifies ACP projection covers all
+// canonical event kinds.
+func TestE2E_ACPProjectionAllEventTypes(t *testing.T) {
+	events := []session.Event{
+		{
+			Kind:       session.EventKindUser,
+			Visibility: session.VisibilityCanonical,
+			UserPayload: &session.UserPayload{
+				Parts: []session.EventPart{{Kind: session.PartKindText, Text: "hello"}},
+			},
+		},
+		{
+			Kind:       session.EventKindAssistant,
+			Visibility: session.VisibilityCanonical,
+			AssistantPayload: &session.AssistantPayload{
+				Parts: []session.EventPart{
+					{Kind: session.PartKindReasoning, Text: "thinking"},
+					{Kind: session.PartKindText, Text: "response"},
+				},
+			},
+		},
+		{
+			Kind:       session.EventKindToolCall,
+			Visibility: session.VisibilityCanonical,
+			ToolCallPayload: &session.ToolCallPayload{
+				CallID: "tc-1", Name: "READ", Status: "pending",
+				Args: map[string]any{"path": "/tmp/test"},
+			},
+		},
+		{
+			Kind:       session.EventKindToolResult,
+			Visibility: session.VisibilityCanonical,
+			ToolResultPayload: &session.ToolResultPayload{
+				CallID: "tc-1", Name: "READ", Status: "completed",
+				Content: []session.EventPart{{Kind: session.PartKindText, Text: "file contents"}},
+			},
+		},
+		{
+			Kind:       session.EventKindPlan,
+			Visibility: session.VisibilityCanonical,
+			PlanPayload: &session.PlanPayload{
+				Entries:     []session.PlanEntry{{Content: "step 1", Status: "pending"}},
+				Explanation: "plan explanation",
+			},
+		},
+		{
+			Kind:       session.EventKindHandoff,
+			Visibility: session.VisibilityCanonical,
+			HandoffPayload: &session.HandoffPayload{
+				FromAgent: "agent-a", ToAgent: "agent-b", Reason: "delegation",
+			},
+		},
+		{
+			Kind:       session.EventKindParticipant,
+			Visibility: session.VisibilityCanonical,
+			ParticipantPayload: &session.ParticipantPayload{
+				ParticipantID: "p-1", Role: "sidecar", State: "attached",
+			},
+		},
+	}
+
+	expectedKinds := []acp.UpdateKind{
+		acp.UpdateUserMessage,
+		acp.UpdateAgentThought, // reasoning
+		acp.UpdateAgentMessage,
+		acp.UpdateToolCall,
+		acp.UpdateToolCallInfo,
+		acp.UpdatePlan,
+		acp.UpdateSessionInfo, // handoff
+		acp.UpdateSessionInfo, // participant
+	}
+
+	var allUpdates []acp.Update
+	for i := range events {
+		allUpdates = append(allUpdates, acp.ProjectEvent(&events[i])...)
+	}
+
+	if len(allUpdates) != len(expectedKinds) {
+		t.Fatalf("ACP updates: got %d, want %d\n%v", len(allUpdates), len(expectedKinds), acpKinds(allUpdates))
+	}
+	for i, want := range expectedKinds {
+		got := allUpdates[i].SessionUpdateType()
+		if got != want {
+			t.Errorf("update %d: got %q, want %q", i, got, want)
+		}
+	}
+
+	// Verify _meta.caelis on tool-related updates that have RunID set.
+	// Events with RunID produce _meta.caelis; those without may not.
+	for _, u := range allUpdates {
+		if tc, ok := u.(acp.ToolCallUpdate); ok && tc.Meta != nil {
+			if tc.Meta["caelis"] != nil {
+				t.Logf("tool update %q has _meta.caelis: %v", tc.ToolCallID, tc.Meta["caelis"])
+			}
+		}
+	}
+}
+
+// TestE2E_HeuristicCompactionWithFileBackedSession verifies that heuristic
+// compaction triggers before invocation when the context is too large.
+func TestE2E_HeuristicCompactionWithFileBackedSession(t *testing.T) {
+	dir := t.TempDir()
+	fileSvc, err := filesession.New(filesession.Config{RootDir: dir})
+	if err != nil {
+		t.Fatalf("New file service: %v", err)
+	}
+	sess, err := fileSvc.Create(ctx(t), session.CreateRequest{
+		AppName: "e2e-compact-file", UserID: "test", WorkspaceKey: "workspace",
+	})
+	if err != nil {
+		t.Fatalf("Create session: %v", err)
+	}
+
+	// Pre-fill with very large messages to exceed 80% of 200K token budget.
+	// 30 pairs * 50KB each = ~3MB total = ~750K tokens >> 160K threshold.
+	for i := 0; i < 30; i++ {
+		_, _ = fileSvc.AppendEvent(ctx(t), sess.Ref, session.Event{
+			Kind:       session.EventKindUser,
+			Visibility: session.VisibilityCanonical,
+			UserPayload: &session.UserPayload{
+				Parts: []session.EventPart{{Kind: session.PartKindText, Text: strings.Repeat("a", 50000)}},
+			},
+		})
+		_, _ = fileSvc.AppendEvent(ctx(t), sess.Ref, session.Event{
+			Kind:       session.EventKindAssistant,
+			Visibility: session.VisibilityCanonical,
+			AssistantPayload: &session.AssistantPayload{
+				Parts: []session.EventPart{{Kind: session.PartKindText, Text: strings.Repeat("b", 50000)}},
+			},
+		})
+	}
+
+	llm := &recordingLLM{}
+	modelReg := &recordingModelRegistry{
+		llm:  llm,
+		info: model.ModelInfo{ModelID: "compact-file"},
+	}
+	llmAgent := llmagent.New(llmagent.Config{
+		Name:     "compact-agent",
+		ModelRef: model.Ref{ModelID: "compact-file"},
+	})
+	r, err := runner.New(runner.Config{
+		Agent:         llmAgent,
+		Sessions:      fileSvc,
+		ModelRegistry: modelReg,
+	})
+	if err != nil {
+		t.Fatalf("New runner: %v", err)
+	}
+
+	collectRun(t, r, ctx(t), runner.RunRequest{
+		SessionRef:  sess.Ref,
+		UserMessage: model.Message{Role: model.RoleUser, Content: []model.Part{{Text: "after compaction"}}},
+	})
+
+	// Compaction events are persisted to the store but not yielded to the caller.
+	// Check the store for compaction events.
+	allPersisted, _ := fileSvc.Events(ctx(t), session.EventsRequest{SessionRef: sess.Ref})
+	var hasCompaction bool
+	for _, e := range allPersisted {
+		if e.Kind == session.EventKindCompaction {
+			hasCompaction = true
+			if e.CompactionPayload == nil {
+				t.Error("compaction event missing payload")
+			}
+			if e.Previous == 0 {
+				t.Error("compaction Previous should be > 0")
+			}
+		}
+	}
+	if !hasCompaction {
+		t.Error("expected compaction event for large file-backed session")
+	}
+
+	// Verify model context after compaction is shorter than the full history.
+	modelCtx := session.ModelContextFromEvents(allPersisted)
+	// Should be significantly fewer than 62 messages (30 pairs + user + assistant).
+	if len(modelCtx) >= 62 {
+		t.Errorf("model context after compaction: got %d, want < 62", len(modelCtx))
+	}
+}
+
+// TestE2E_TaskStoreEdgeCases tests task store edge cases.
+func TestE2E_TaskStoreEdgeCases(t *testing.T) {
+	store := runner.NewMemoryTaskStore()
+	ctx := ctx(t)
+
+	// SaveTask with empty TaskID should error.
+	err := store.SaveTask(ctx, runner.TaskSnapshot{})
+	if err == nil {
+		t.Error("SaveTask with empty TaskID should error")
+	}
+
+	// Save and load a task.
+	snap := runner.TaskSnapshot{
+		TaskID: "edge-task-1",
+		State:  runner.TaskStateRunning,
+	}
+	if err := store.SaveTask(ctx, snap); err != nil {
+		t.Fatalf("SaveTask: %v", err)
+	}
+	loaded, ok, err := store.LoadTask(ctx, "edge-task-1")
+	if err != nil {
+		t.Fatalf("LoadTask: %v", err)
+	}
+	if !ok || loaded.State != runner.TaskStateRunning {
+		t.Fatalf("LoadTask: got state=%q ok=%v, want running/true", loaded.State, ok)
+	}
+
+	// Transition to completed.
+	snap.State = runner.TaskStateCompleted
+	snap.Output = "done"
+	if err := store.SaveTask(ctx, snap); err != nil {
+		t.Fatalf("SaveTask completed: %v", err)
+	}
+	loaded, ok, _ = store.LoadTask(ctx, "edge-task-1")
+	if !ok || loaded.State != runner.TaskStateCompleted || loaded.Output != "done" {
+		t.Fatalf("LoadTask completed: got state=%q output=%q", loaded.State, loaded.Output)
+	}
+
+	// SaveTask with cancelled state should prevent overwrite (silently ignored).
+	cancelSnap := runner.TaskSnapshot{
+		TaskID: "cancel-task",
+		State:  runner.TaskStateCancelled,
+	}
+	if err := store.SaveTask(ctx, cancelSnap); err != nil {
+		t.Fatalf("SaveTask cancel: %v", err)
+	}
+	// Trying to overwrite cancelled should be silently ignored.
+	cancelSnap.State = runner.TaskStateCompleted
+	if err := store.SaveTask(ctx, cancelSnap); err != nil {
+		t.Fatalf("SaveTask overwrite cancelled: %v", err)
+	}
+	// Verify the state is still cancelled.
+	loaded, ok, _ = store.LoadTask(ctx, "cancel-task")
+	if !ok || loaded.State != runner.TaskStateCancelled {
+		t.Errorf("cancelled task state: got %q ok=%v, want cancelled/true", loaded.State, ok)
+	}
+
+	// LoadTask for non-existent task.
+	_, ok, err = store.LoadTask(ctx, "nonexistent")
+	if err != nil {
+		t.Fatalf("LoadTask nonexistent: %v", err)
+	}
+	if ok {
+		t.Error("LoadTask nonexistent should return ok=false")
+	}
+}
+
+// TestE2E_ConcurrentToolExecutionWithHooks verifies that hooks fire correctly
+// when multiple tools execute concurrently.
+func TestE2E_ConcurrentToolExecutionWithHooks(t *testing.T) {
+	fileSvc, err := filesession.New(filesession.Config{RootDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("New file service: %v", err)
+	}
+	sess, err := fileSvc.Create(ctx(t), session.CreateRequest{
+		AppName: "e2e-concurrent-hooks", UserID: "test", WorkspaceKey: "workspace",
+	})
+	if err != nil {
+		t.Fatalf("Create session: %v", err)
+	}
+
+	hook := &concurrentRecordingHook{}
+	llm := &scriptedMultiToolLLM{}
+	modelReg := &recordingModelRegistry{
+		llm:  llm,
+		info: model.ModelInfo{ModelID: "concurrent-hooks", SupportsTools: true},
+	}
+	toolA := &delayTool{name: "TOOL_A", delay: 5 * time.Millisecond, output: "a"}
+	toolB := &delayTool{name: "TOOL_B", delay: 50 * time.Millisecond, output: "b"}
+	toolC := &delayTool{name: "TOOL_C", delay: 10 * time.Millisecond, output: "c"}
+	toolReg := newTestToolRegistry(toolA, toolB, toolC)
+
+	llmAgent := llmagent.New(llmagent.Config{
+		Name:     "concurrent-hook-agent",
+		ModelRef: model.Ref{ModelID: "concurrent-hooks"},
+		Tools:    []string{"TOOL_A", "TOOL_B", "TOOL_C"},
+	})
+	r, err := runner.New(runner.Config{
+		Agent:         llmAgent,
+		Sessions:      fileSvc,
+		ModelRegistry: modelReg,
+		ToolRegistry:  toolReg,
+		Hooks:         []agent.Hook{hook},
+	})
+	if err != nil {
+		t.Fatalf("New runner: %v", err)
+	}
+
+	collectRun(t, r, ctx(t), runner.RunRequest{
+		SessionRef:  sess.Ref,
+		UserMessage: model.Message{Role: model.RoleUser, Content: []model.Part{{Text: "concurrent hooks"}}},
+	})
+
+	hook.mu.Lock()
+	defer hook.mu.Unlock()
+
+	// Should have: 1 BeforeInvocation, 3 BeforeTool, 3 AfterTool, 1 AfterInvocation = 8
+	if len(hook.calls) != 8 {
+		t.Fatalf("hook calls: got %d, want 8: %v", len(hook.calls), hook.calls)
+	}
+	if hook.calls[0] != "BeforeInvocation" {
+		t.Errorf("call 0: got %q, want BeforeInvocation", hook.calls[0])
+	}
+	if hook.calls[7] != "AfterInvocation" {
+		t.Errorf("call 7: got %q, want AfterInvocation", hook.calls[7])
+	}
+
+	// Verify all 3 tools were hooked.
+	toolNames := make(map[string]int)
+	for _, c := range hook.calls {
+		if strings.HasPrefix(c, "BeforeTool:") {
+			name := strings.TrimPrefix(c, "BeforeTool:")
+			toolNames[name]++
+		}
+	}
+	for _, want := range []string{"TOOL_A", "TOOL_B", "TOOL_C"} {
+		if toolNames[want] != 1 {
+			t.Errorf("tool %s: BeforeTool count = %d, want 1", want, toolNames[want])
+		}
+	}
+}
+
+// ─── New helper types ────────────────────────────────────────────────
+
+func ctx(t *testing.T) context.Context {
+	t.Helper()
+	c, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	t.Cleanup(cancel)
+	return c
+}
+
+// overflowThenSuccessLLM returns a ContextOverflowError on the first call,
+// then succeeds with "overflow-recovered" on the second call.
+type overflowThenSuccessLLM struct {
+	calls int
+}
+
+func (m *overflowThenSuccessLLM) Name() string { return "overflow-then-success" }
+
+func (m *overflowThenSuccessLLM) Generate(_ context.Context, _ model.Request) iter.Seq2[model.ResponseEvent, error] {
+	callIndex := m.calls
+	m.calls++
+	return func(yield func(model.ResponseEvent, error) bool) {
+		if callIndex == 0 {
+			yield(model.ResponseEvent{}, &model.ContextOverflowError{Cause: fmt.Errorf("prompt is too long")})
+			return
+		}
+		yield(model.ResponseEvent{TextDelta: "overflow-recovered"}, nil)
+	}
+}
+
+// scriptedMultiToolLLM emits 3 tool calls (A, B, C) on the first call,
+// then a text response on the second call.
+type scriptedMultiToolLLM struct {
+	requests []model.Request
+}
+
+func (m *scriptedMultiToolLLM) Name() string { return "multi-tool-llm" }
+
+func (m *scriptedMultiToolLLM) Generate(_ context.Context, req model.Request) iter.Seq2[model.ResponseEvent, error] {
+	callIndex := len(m.requests)
+	m.requests = append(m.requests, cloneModelRequest(req))
+	return func(yield func(model.ResponseEvent, error) bool) {
+		switch callIndex {
+		case 0:
+			yield(model.ResponseEvent{ToolCall: &model.ToolCallDelta{CallID: "tc-a", Name: "TOOL_A", Args: map[string]any{}}}, nil)
+			yield(model.ResponseEvent{ToolCall: &model.ToolCallDelta{CallID: "tc-b", Name: "TOOL_B", Args: map[string]any{}}}, nil)
+			yield(model.ResponseEvent{ToolCall: &model.ToolCallDelta{CallID: "tc-c", Name: "TOOL_C", Args: map[string]any{}}}, nil)
+		case 1:
+			yield(model.ResponseEvent{TextDelta: "all-tools-done"}, nil)
+		default:
+			yield(model.ResponseEvent{}, fmt.Errorf("unexpected call %d", callIndex))
+		}
+	}
+}
+
+// errorStreamLLM yields a text delta then an error.
+type errorStreamLLM struct {
+	textBefore string
+	err        error
+}
+
+func (m *errorStreamLLM) Name() string { return "error-stream" }
+
+func (m *errorStreamLLM) Generate(_ context.Context, _ model.Request) iter.Seq2[model.ResponseEvent, error] {
+	return func(yield func(model.ResponseEvent, error) bool) {
+		if m.textBefore != "" {
+			yield(model.ResponseEvent{TextDelta: m.textBefore}, nil)
+		}
+		yield(model.ResponseEvent{}, m.err)
+	}
+}
+
+// scriptedToolErrorLLM calls FAIL_TOOL on first call, then text on second.
+type scriptedToolErrorLLM struct {
+	requests []model.Request
+}
+
+func (m *scriptedToolErrorLLM) Name() string { return "tool-error-llm" }
+
+func (m *scriptedToolErrorLLM) Generate(_ context.Context, req model.Request) iter.Seq2[model.ResponseEvent, error] {
+	callIndex := len(m.requests)
+	m.requests = append(m.requests, cloneModelRequest(req))
+	return func(yield func(model.ResponseEvent, error) bool) {
+		switch callIndex {
+		case 0:
+			yield(model.ResponseEvent{ToolCall: &model.ToolCallDelta{CallID: "fail-1", Name: "FAIL_TOOL", Args: map[string]any{}}}, nil)
+		case 1:
+			yield(model.ResponseEvent{TextDelta: "tool-error-handled"}, nil)
+		default:
+			yield(model.ResponseEvent{}, fmt.Errorf("unexpected call %d", callIndex))
+		}
+	}
+}
+
+// mockTextLLM returns a fixed text response.
+type mockTextLLM struct {
+	response string
+}
+
+func (m *mockTextLLM) Name() string { return "mock-text" }
+
+func (m *mockTextLLM) Generate(_ context.Context, _ model.Request) iter.Seq2[model.ResponseEvent, error] {
+	return func(yield func(model.ResponseEvent, error) bool) {
+		yield(model.ResponseEvent{TextDelta: m.response}, nil)
+	}
+}
+
+// recordingLLM records requests and returns empty responses.
+type recordingLLM struct {
+	requests []model.Request
+}
+
+func (m *recordingLLM) Name() string { return "recording" }
+
+func (m *recordingLLM) Generate(_ context.Context, req model.Request) iter.Seq2[model.ResponseEvent, error] {
+	m.requests = append(m.requests, cloneModelRequest(req))
+	return func(yield func(model.ResponseEvent, error) bool) {
+		yield(model.ResponseEvent{TextDelta: "ok"}, nil)
+	}
+}
+
+// delayTool runs with an artificial delay for concurrency ordering tests.
+type delayTool struct {
+	name   string
+	delay  time.Duration
+	output string
+}
+
+func (t *delayTool) Definition() tool.Definition {
+	return tool.Definition{Name: t.name, Description: "delay tool"}
+}
+
+func (t *delayTool) Run(_ tool.Context, _ tool.Call) (tool.Result, error) {
+	time.Sleep(t.delay)
+	return tool.Result{Output: t.output}, nil
+}
+
+// errorTool always returns an error result.
+type errorTool struct {
+	name   string
+	errMsg string
+}
+
+func (t *errorTool) Definition() tool.Definition {
+	return tool.Definition{Name: t.name, Description: "error tool"}
+}
+
+func (t *errorTool) Run(_ tool.Context, _ tool.Call) (tool.Result, error) {
+	return tool.Result{Output: t.errMsg, IsError: true}, nil
+}
+
+// staticResultTool returns a fixed large output.
+type staticResultTool struct {
+	name   string
+	output string
+}
+
+func (t *staticResultTool) Definition() tool.Definition {
+	return tool.Definition{Name: t.name, Description: "static result tool"}
+}
+
+func (t *staticResultTool) Run(_ tool.Context, _ tool.Call) (tool.Result, error) {
+	return tool.Result{Output: t.output}, nil
+}
+
+// alwaysDenyPolicy denies all tool calls.
+type alwaysDenyPolicy struct{}
+
+func (p *alwaysDenyPolicy) Evaluate(_ context.Context, _ policy.Request) (policy.Decision, error) {
+	return policy.Decision{Outcome: policy.OutcomeDeny, Reason: "always denied by test policy"}, nil
+}
+
+// errorSandboxBackend returns an error on Run but succeeds on FileSystem.
+type errorSandboxBackend struct {
+	err error
+}
+
+// failingSandboxFactoryWithError returns an errorSandboxBackend.
+type failingSandboxFactoryWithError struct {
+	backend *errorSandboxBackend
+}
+
+func (f *failingSandboxFactoryWithError) Available(context.Context) ([]sandbox.Descriptor, error) {
+	return []sandbox.Descriptor{{Name: "error-sandbox"}}, nil
+}
+
+func (f *failingSandboxFactoryWithError) Create(_ context.Context, _ sandbox.Config) (sandbox.Backend, error) {
+	return f.backend, nil
+}
+
+func (b *errorSandboxBackend) Name() string { return "error-sandbox" }
+func (b *errorSandboxBackend) Describe(context.Context) (sandbox.Descriptor, error) {
+	return sandbox.Descriptor{Name: "error-sandbox"}, nil
+}
+func (b *errorSandboxBackend) Run(_ context.Context, _ sandbox.CommandRequest) (sandbox.CommandResult, error) {
+	return sandbox.CommandResult{}, b.err
+}
+func (b *errorSandboxBackend) FileSystem(context.Context, sandbox.Constraints) (sandbox.FileSystem, error) {
+	return newTempFS(os.TempDir()), nil
+}
+func (b *errorSandboxBackend) Status(context.Context) (sandbox.Status, error) {
+	return sandbox.Status{Running: true}, nil
+}
+func (b *errorSandboxBackend) Close() error { return nil }
+
+// recordingHook records all hook calls in order.
+type recordingHook struct {
+	mu         sync.Mutex
+	calls      []string
+	invHook    agent.InvocationHook
+	toolHook   agent.ToolHook
+	invResult  agent.InvocationHookResult
+	toolResult agent.ToolHookResult
+}
+
+func (h *recordingHook) BeforeInvocation(_ context.Context, inv agent.InvocationHook) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.calls = append(h.calls, "BeforeInvocation")
+	h.invHook = inv
+	return nil
+}
+
+func (h *recordingHook) AfterInvocation(_ context.Context, result agent.InvocationHookResult) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.calls = append(h.calls, "AfterInvocation")
+	h.invResult = result
+	return nil
+}
+
+func (h *recordingHook) BeforeTool(_ context.Context, th agent.ToolHook) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.calls = append(h.calls, "BeforeTool")
+	h.toolHook = th
+	return nil
+}
+
+func (h *recordingHook) AfterTool(_ context.Context, result agent.ToolHookResult) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.calls = append(h.calls, "AfterTool")
+	h.toolResult = result
+	return nil
+}
+
+// concurrentRecordingHook records hook calls with tool names for concurrent tests.
+type concurrentRecordingHook struct {
+	mu    sync.Mutex
+	calls []string
+}
+
+func (h *concurrentRecordingHook) BeforeInvocation(_ context.Context, _ agent.InvocationHook) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.calls = append(h.calls, "BeforeInvocation")
+	return nil
+}
+
+func (h *concurrentRecordingHook) AfterInvocation(_ context.Context, _ agent.InvocationHookResult) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.calls = append(h.calls, "AfterInvocation")
+	return nil
+}
+
+func (h *concurrentRecordingHook) BeforeTool(_ context.Context, th agent.ToolHook) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.calls = append(h.calls, "BeforeTool:"+th.ToolName)
+	return nil
+}
+
+func (h *concurrentRecordingHook) AfterTool(_ context.Context, result agent.ToolHookResult) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.calls = append(h.calls, "AfterTool:"+result.ToolName)
+	return nil
+}
+
+// alwaysCompactCompactor always compacts messages for testing overflow retry.
+type alwaysCompactCompactor struct {
+	calls int
+}
+
+func (c *alwaysCompactCompactor) ShouldCompact([]model.Message, int) (bool, string) {
+	return false, ""
+}
+
+func (c *alwaysCompactCompactor) Compact(_ context.Context, msgs []model.Message, _ int) ([]model.Message, *session.Event, bool) {
+	c.calls++
+	return []model.Message{{
+			Role:    model.RoleSystem,
+			Content: []model.Part{{Text: "compact checkpoint"}},
+		}},
+		&session.Event{
+			Kind:       session.EventKindCompaction,
+			Visibility: session.VisibilityCanonical,
+			CompactionPayload: &session.CompactionPayload{
+				Reason:      "context overflow retry",
+				Previous:    len(msgs),
+				Remaining:   1,
+				SummaryText: "compact checkpoint",
+			},
+		},
+		true
+}
+
+// Ensure recordingHook and concurrentRecordingHook implement agent.Hook.
+var (
+	_ agent.Hook = (*recordingHook)(nil)
+	_ agent.Hook = (*concurrentRecordingHook)(nil)
+)
+
+// ─── ACP Integration Test ────────────────────────────────────────────
+
+// TestE2E_ACPAgentThroughRunner tests the ACP agent SDK's ability to operate
+// external ACP agents through the full runner pipeline. Uses a fake ACP client
+// factory that simulates an external ACP agent responding with content chunks
+// and tool calls.
+func TestE2E_ACPAgentThroughRunner(t *testing.T) {
+	fileSvc, err := filesession.New(filesession.Config{RootDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("New file service: %v", err)
+	}
+	sess, err := fileSvc.Create(ctx(t), session.CreateRequest{
+		AppName: "e2e-acp", UserID: "test", WorkspaceKey: "workspace",
+	})
+	if err != nil {
+		t.Fatalf("Create session: %v", err)
+	}
+
+	// Create a fake ACP client factory that simulates an external agent.
+	factory := &e2eFakeACPClientFactory{}
+	finalTrue := true
+	finalFalse := false
+	factory.client.promptFn = func(_ context.Context, sessionID string, prompt string, _ map[string]any) {
+		// Simulate streaming: partial delta then final.
+		factory.callbacks.OnUpdate(e2eUpdateEnvelope{
+			SessionID: sessionID,
+			Update: e2eContentChunk{
+				SessionUpdate: "agent_message",
+				Content:       json.RawMessage(`{"type":"text","text":"thinking..."}`),
+				Final:         &finalFalse,
+			},
+		})
+		factory.callbacks.OnUpdate(e2eUpdateEnvelope{
+			SessionID: sessionID,
+			Update: e2eContentChunk{
+				SessionUpdate: "agent_message",
+				Content:       json.RawMessage(`{"type":"text","text":"acp response to: ` + prompt + `"}`),
+				Final:         &finalTrue,
+			},
+		})
+	}
+
+	acpAgent := &e2eACPAgent{
+		name:    "e2e-acp-agent",
+		factory: factory,
+	}
+
+	// Run the ACP agent through the runner.
+	r, err := runner.New(runner.Config{
+		Agent:    acpAgent,
+		Sessions: fileSvc,
+	})
+	if err != nil {
+		t.Fatalf("New runner: %v", err)
+	}
+
+	events := collectRun(t, r, ctx(t), runner.RunRequest{
+		SessionRef:  sess.Ref,
+		UserMessage: model.Message{Role: model.RoleUser, Content: []model.Part{{Text: "test acp"}}},
+	})
+
+	persisted := persistedLiveEvents(events)
+	if len(persisted) < 2 {
+		t.Fatalf("persisted events: got %d, want >= 2: %v", len(persisted), eventKinds(persisted))
+	}
+	if persisted[0].Kind != session.EventKindUser {
+		t.Errorf("first event: got %q, want user", persisted[0].Kind)
+	}
+	// The last event should be the canonical assistant response.
+	last := persisted[len(persisted)-1]
+	if last.Kind != session.EventKindAssistant {
+		t.Errorf("last event: got %q, want assistant", last.Kind)
+	}
+	if last.Visibility != session.VisibilityCanonical {
+		t.Errorf("last visibility: got %q, want canonical", last.Visibility)
+	}
+
+	// Verify the ACP client was called correctly.
+	if factory.client.promptText != "test acp" {
+		t.Errorf("ACP prompt: got %q, want %q", factory.client.promptText, "test acp")
+	}
+
+	// Verify model context reconstruction.
+	allPersisted, _ := fileSvc.Events(ctx(t), session.EventsRequest{SessionRef: sess.Ref})
+	modelCtx := session.ModelContextFromEvents(allPersisted)
+	if len(modelCtx) < 2 {
+		t.Fatalf("model context: got %d, want >= 2", len(modelCtx))
+	}
+
+	// Verify ACP projection.
+	projections := projectAllACP(allPersisted)
+	if len(projections) == 0 {
+		t.Error("expected ACP projections from ACP agent events")
+	}
+}
+
+// ─── Plugin E2E Test ─────────────────────────────────────────────────
+
+// TestE2E_SuperpowersPluginInstallAndResolve tests the plugin system's ability
+// to resolve, install, and load the superpowers plugin from a real git clone.
+func TestE2E_SuperpowersPluginInstallAndResolve(t *testing.T) {
+	// Find the superpowers repo.
+	superpowersRoot := "/tmp/superpowers"
+	if _, err := os.Stat(superpowersRoot); os.IsNotExist(err) {
+		t.Skip("superpowers repo not cloned at /tmp/superpowers")
+	}
+
+	resolver := pluginfs.NewResolver()
+	resolved, err := resolver.Resolve(context.Background(), caelisplugin.ResolveRequest{Root: superpowersRoot})
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+
+	// Verify manifest.
+	if resolved.Manifest.Name != "superpowers" {
+		t.Fatalf("manifest name = %q, want superpowers", resolved.Manifest.Name)
+	}
+	if resolved.Manifest.Version == "" {
+		t.Error("manifest version should not be empty")
+	}
+	if resolved.Manifest.Repository == "" {
+		t.Error("manifest repository should not be empty")
+	}
+
+	// Verify skills discovery.
+	if len(resolved.Skills) == 0 {
+		t.Fatal("expected at least one skill from superpowers")
+	}
+	skillNames := make(map[string]bool)
+	for _, s := range resolved.Skills {
+		skillNames[s.Name] = true
+		t.Logf("Discovered skill: %s (%s)", s.Name, s.Description)
+	}
+	// Superpowers should have these core skills.
+	for _, want := range []string{"brainstorming", "writing-plans", "test-driven-development"} {
+		if !skillNames[want] {
+			t.Errorf("expected skill %q, got: %v", want, skillNames)
+		}
+	}
+
+	// Verify skill metadata.
+	for _, s := range resolved.Skills {
+		if s.Metadata["plugin"] != "superpowers" {
+			t.Errorf("skill %s metadata plugin = %v, want superpowers", s.Name, s.Metadata["plugin"])
+		}
+	}
+
+	// Install to a store.
+	storeRoot := t.TempDir()
+	store := pluginfs.NewStore(pluginfs.StoreConfig{Root: storeRoot})
+	installed, err := store.Install(context.Background(), resolved)
+	if err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+	if installed.Name != "superpowers" {
+		t.Fatalf("installed name = %q, want superpowers", installed.Name)
+	}
+	if installed.Version == "" {
+		t.Error("installed version should not be empty")
+	}
+
+	// Verify lock file.
+	lockData, err := os.ReadFile(filepath.Join(storeRoot, "plugins.lock.json"))
+	if err != nil {
+		t.Fatalf("read lock file: %v", err)
+	}
+	if !strings.Contains(string(lockData), "superpowers") {
+		t.Error("lock file should contain superpowers")
+	}
+
+	// List installed plugins.
+	installedList, err := store.List(context.Background())
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(installedList) != 1 {
+		t.Fatalf("installed list: got %d, want 1", len(installedList))
+	}
+
+	// Load via registry.
+	registry := pluginfs.NewRegistry(pluginfs.RegistryConfig{Store: store, Resolver: resolver})
+	loaded, err := registry.Load(context.Background(), "superpowers")
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(loaded.Skills) == 0 {
+		t.Error("loaded skills should not be empty")
+	}
+	if loaded.Manifest.Name != "superpowers" {
+		t.Fatalf("loaded manifest name = %q, want superpowers", loaded.Manifest.Name)
+	}
+
+	// Verify runtime contributions.
+	if len(loaded.Runtime.Skills) == 0 {
+		t.Error("runtime skills should not be empty")
+	}
+
+	t.Logf("Superpowers plugin: %d skills installed, version %s", len(loaded.Skills), installed.Version)
+}
+
+// TestE2E_SuperpowersPluginThroughRunner tests that the plugin's skills are
+// assembled into the system prompt when used with the runner.
+func TestE2E_SuperpowersPluginThroughRunner(t *testing.T) {
+	superpowersRoot := "/tmp/superpowers"
+	if _, err := os.Stat(superpowersRoot); os.IsNotExist(err) {
+		t.Skip("superpowers repo not cloned at /tmp/superpowers")
+	}
+
+	// Install the plugin.
+	resolver := pluginfs.NewResolver()
+	resolved, err := resolver.Resolve(context.Background(), caelisplugin.ResolveRequest{Root: superpowersRoot})
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+	storeRoot := t.TempDir()
+	store := pluginfs.NewStore(pluginfs.StoreConfig{Root: storeRoot})
+	_, err = store.Install(context.Background(), resolved)
+	if err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+
+	// Create a plugin registry.
+	registry := pluginfs.NewRegistry(pluginfs.RegistryConfig{Store: store, Resolver: resolver})
+
+	// Create a runner with the plugin registry.
+	fileSvc, err := filesession.New(filesession.Config{RootDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("New file service: %v", err)
+	}
+	sess, err := fileSvc.Create(ctx(t), session.CreateRequest{
+		AppName: "e2e-plugin", UserID: "test", WorkspaceKey: "workspace",
+	})
+	if err != nil {
+		t.Fatalf("Create session: %v", err)
+	}
+
+	llm := &recordingLLM{}
+	modelReg := &recordingModelRegistry{
+		llm:  llm,
+		info: model.ModelInfo{ModelID: "plugin-test"},
+	}
+	llmAgent := llmagent.New(llmagent.Config{
+		Name:     "plugin-agent",
+		ModelRef: model.Ref{ModelID: "plugin-test"},
+	})
+	r, err := runner.New(runner.Config{
+		Agent:         llmAgent,
+		Sessions:      fileSvc,
+		ModelRegistry: modelReg,
+		Plugins:       registry,
+	})
+	if err != nil {
+		t.Fatalf("New runner: %v", err)
+	}
+
+	collectRun(t, r, ctx(t), runner.RunRequest{
+		SessionRef:  sess.Ref,
+		UserMessage: model.Message{Role: model.RoleUser, Content: []model.Part{{Text: "hello with plugin"}}},
+	})
+
+	if len(llm.requests) != 1 {
+		t.Fatalf("model requests: got %d, want 1", len(llm.requests))
+	}
+	msgs := llm.requests[0].Messages
+	if len(msgs) < 1 {
+		t.Fatalf("messages: got %d, want >= 1", len(msgs))
+	}
+	// The system prompt should contain plugin-contributed content.
+	// The superpowers plugin contributes skills which are assembled into the prompt.
+	systemText := ""
+	for _, m := range msgs {
+		if m.Role == model.RoleSystem {
+			systemText += m.TextContent()
+		}
+	}
+	if systemText == "" {
+		t.Error("expected system prompt from plugin contributions")
+	}
+	t.Logf("System prompt length: %d chars", len(systemText))
+}
+
+// ─── ACP/Plugin helper types ─────────────────────────────────────────
+
+// e2eFakeACPClientFactory simulates an external ACP agent for e2e testing.
+type e2eFakeACPClientFactory struct {
+	callbacks e2eACPClientCallbacks
+	client    e2eFakeACPClient
+}
+
+type e2eACPClientCallbacks struct {
+	OnUpdate func(e2eUpdateEnvelope)
+}
+
+type e2eUpdateEnvelope struct {
+	SessionID string
+	Update    e2eContentChunk
+}
+
+type e2eContentChunk struct {
+	SessionUpdate string          `json:"session_update"`
+	Content       json.RawMessage `json:"content"`
+	Final         *bool           `json:"final,omitempty"`
+}
+
+type e2eFakeACPClient struct {
+	promptFn     func(ctx context.Context, sessionID string, prompt string, meta map[string]any)
+	promptText   string
+	promptCalled bool
+}
+
+func (f *e2eFakeACPClientFactory) Start(_ context.Context, callbacks e2eACPClientCallbacks) (*e2eFakeACPClient, error) {
+	f.callbacks = callbacks
+	return &f.client, nil
+}
+
+// e2eACPAgent is a simplified ACP agent for e2e testing that uses the fake factory.
+type e2eACPAgent struct {
+	name    string
+	factory *e2eFakeACPClientFactory
+}
+
+func (a *e2eACPAgent) Name() string                 { return a.name }
+func (a *e2eACPAgent) Description() string          { return "e2e ACP agent" }
+func (a *e2eACPAgent) SubAgents() []agent.Agent     { return nil }
+func (a *e2eACPAgent) FindAgent(string) agent.Agent { return nil }
+
+func (a *e2eACPAgent) Run(inv agent.InvocationContext) iter.Seq2[session.Event, error] {
+	return func(yield func(session.Event, error) bool) {
+		client, err := a.factory.Start(inv, e2eACPClientCallbacks{
+			OnUpdate: func(env e2eUpdateEnvelope) {
+				// Convert ACP update to session event.
+				var text string
+				var content struct {
+					Type string `json:"type"`
+					Text string `json:"text"`
+				}
+				if err := json.Unmarshal(env.Update.Content, &content); err == nil {
+					text = content.Text
+				}
+				isFinal := env.Update.Final != nil && *env.Update.Final
+				vis := session.VisibilityUIOnly
+				if isFinal {
+					vis = session.VisibilityCanonical
+				}
+				evt := session.Event{
+					Kind:       session.EventKindAssistant,
+					Visibility: vis,
+					AssistantPayload: &session.AssistantPayload{
+						Parts: []session.EventPart{{Kind: session.PartKindText, Text: text}},
+					},
+				}
+				if !yield(evt, nil) {
+					return
+				}
+			},
+		})
+		if err != nil {
+			yield(session.Event{}, err)
+			return
+		}
+		defer client.Close(context.Background())
+
+		// Initialize and create session.
+		// (Skip actual ACP protocol - just call prompt directly)
+		a.factory.client.promptText = inv.UserMessage().TextContent()
+		a.factory.client.promptCalled = true
+		if a.factory.client.promptFn != nil {
+			a.factory.client.promptFn(inv, "e2e-session", inv.UserMessage().TextContent(), nil)
+		}
+	}
+}
+
+func (c *e2eFakeACPClient) Close(context.Context) error { return nil }

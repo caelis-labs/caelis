@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/agent"
@@ -11,6 +12,8 @@ import (
 	"github.com/OnslaughtSnail/caelis/session"
 	"github.com/OnslaughtSnail/caelis/tool"
 )
+
+var spawnCounter atomic.Int64
 
 type runnerSpawnDelegator struct {
 	cfg     Config
@@ -55,7 +58,7 @@ func (d *runnerSpawnDelegator) Spawn(ctx tool.Context, req agent.SpawnRequest) (
 	if err != nil {
 		return agent.SpawnResult{}, err
 	}
-	taskID := fmt.Sprintf("task-%d-spawn", time.Now().UnixNano())
+	taskID := fmt.Sprintf("task-%d-%d-spawn", time.Now().UnixNano(), spawnCounter.Add(1))
 	taskStore := d.cfg.TaskStore
 	if taskStore == nil {
 		taskStore = NewMemoryTaskStore()
@@ -75,14 +78,15 @@ func (d *runnerSpawnDelegator) Spawn(ctx tool.Context, req agent.SpawnRequest) (
 		childCancel()
 		return agent.SpawnResult{}, err
 	}
-	go d.runChildTask(childCtx, childCancel, taskStore, taskID, childSession, child, req.Prompt, started)
+	childBranch := firstNonEmpty(req.Branch, d.branch)
+	go d.runChildTask(childCtx, childCancel, taskStore, taskID, childSession, child, req.Prompt, started, childBranch)
 	return agent.SpawnResult{
 		HandleID:     taskID,
 		FinalMessage: "task started: " + taskID,
 	}, nil
 }
 
-func (d *runnerSpawnDelegator) runChildTask(ctx context.Context, cancel context.CancelFunc, taskStore TaskStore, taskID string, childSession session.Session, child agent.Agent, prompt string, started time.Time) {
+func (d *runnerSpawnDelegator) runChildTask(ctx context.Context, cancel context.CancelFunc, taskStore TaskStore, taskID string, childSession session.Session, child agent.Agent, prompt string, started time.Time, branch string) {
 	defer cancel()
 	defer unregisterTaskCancel(context.Background(), taskStore, taskID)
 	childCfg := d.cfg
@@ -103,7 +107,7 @@ func (d *runnerSpawnDelegator) runChildTask(ctx context.Context, cancel context.
 	var final string
 	for evt, err := range r.Run(ctx, RunRequest{
 		SessionRef: childSession.Ref,
-		Branch:     d.branch,
+		Branch:     branch,
 		UserMessage: model.Message{
 			Role:    model.RoleUser,
 			Content: []model.Part{{Text: prompt}},
@@ -186,7 +190,7 @@ func (d *runnerSpawnDelegator) WriteTask(ctx context.Context, taskID string, inp
 		childCancel()
 		return TaskSnapshot{}, err
 	}
-	go d.runChildTask(childCtx, childCancel, taskStore, taskID, childSession, child, input, started)
+	go d.runChildTask(childCtx, childCancel, taskStore, taskID, childSession, child, input, started, d.branch)
 	return running, nil
 }
 

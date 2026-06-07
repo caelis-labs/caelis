@@ -14,6 +14,7 @@ type SpawnRequest struct {
 	AgentName string
 	Prompt    string
 	RunID     string
+	Branch    string
 }
 
 // SpawnResult describes the child task handle returned to the model.

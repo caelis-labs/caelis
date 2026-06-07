@@ -575,7 +575,22 @@ func cloneAnyMap(in map[string]any) map[string]any {
 	}
 	out := make(map[string]any, len(in))
 	for key, value := range in {
-		out[key] = value
+		out[key] = cloneAnyValue(value)
 	}
 	return out
+}
+
+func cloneAnyValue(v any) any {
+	switch typed := v.(type) {
+	case map[string]any:
+		return cloneAnyMap(typed)
+	case []any:
+		cp := make([]any, len(typed))
+		for i, item := range typed {
+			cp[i] = cloneAnyValue(item)
+		}
+		return cp
+	default:
+		return typed
+	}
 }

@@ -177,6 +177,20 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 			target == "surfaces" || strings.HasPrefix(target, "surfaces/") {
 			return "runner must not depend on control or presentation packages"
 		}
+		if target == "orchestrator" || strings.HasPrefix(target, "orchestrator/") {
+			return "runner must not depend on orchestrator (use injected interfaces)"
+		}
+	case strings.HasPrefix(rel, "orchestrator/"):
+		if target == "protocol/acp" || strings.HasPrefix(target, "protocol/acp/") {
+			return "orchestrator must not depend on deprecated protocol/acp (use acp/)"
+		}
+		if target == "app" || strings.HasPrefix(target, "app/") ||
+			target == "gateway" || strings.HasPrefix(target, "gateway/") ||
+			target == "tui" || strings.HasPrefix(target, "tui/") ||
+			target == "headless" || strings.HasPrefix(target, "headless/") ||
+			target == "cmd" || strings.HasPrefix(target, "cmd/") {
+			return "orchestrator must not depend on control or presentation packages"
+		}
 	case strings.HasPrefix(rel, "sandbox/"):
 		if startsWithAny(target, "app/", "cmd/", "protocol/", "impl/", "surfaces/") {
 			return "sandbox must not depend on app, cmd, protocol, impl, or surfaces"

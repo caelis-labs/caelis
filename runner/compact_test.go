@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"fmt"
 	"iter"
 	"strings"
 	"testing"
@@ -205,5 +206,85 @@ func (m *summarizerTestLLM) Generate(_ context.Context, req model.Request) iter.
 	m.requests = append(m.requests, req)
 	return func(yield func(model.ResponseEvent, error) bool) {
 		yield(model.ResponseEvent{TextDelta: m.summary}, nil)
+	}
+}
+
+func TestIsContextOverflowErrorKeywords(t *testing.T) {
+	keywords := []string{
+		"context length exceeded",
+		"the context window is too large",
+		"prompt is too long for the model",
+		"too many tokens in the request",
+		"maximum context length reached",
+		"input is too long for this model",
+		"token limit exceeded",
+		"max context length exceeded",
+		"context overflow detected",
+	}
+	for _, kw := range keywords {
+		if !isContextOverflowError(fmt.Errorf("%s", kw)) {
+			t.Errorf("isContextOverflowError(%q) = false, want true", kw)
+		}
+	}
+}
+
+func TestIsContextOverflowErrorTyped(t *testing.T) {
+	err := &model.ContextOverflowError{Cause: fmt.Errorf("prompt is too long")}
+	if !isContextOverflowError(err) {
+		t.Error("isContextOverflowError(ContextOverflowError) = false, want true")
+	}
+	wrapped := fmt.Errorf("wrapped: %w", err)
+	if !isContextOverflowError(wrapped) {
+		t.Error("isContextOverflowError(wrapped ContextOverflowError) = false, want true")
+	}
+}
+
+func TestIsContextOverflowErrorNilAndNonMatching(t *testing.T) {
+	if isContextOverflowError(nil) {
+		t.Error("isContextOverflowError(nil) = true, want false")
+	}
+	if isContextOverflowError(fmt.Errorf("some other error")) {
+		t.Error("isContextOverflowError(non-matching) = true, want false")
+	}
+}
+
+func TestEstimateTextTokensCJK(t *testing.T) {
+	// CJK characters should be ~1 token each.
+	cjk := strings.Repeat("你", 100) // 100 CJK chars
+	tokens := estimateTextTokens(cjk)
+	if tokens < 90 || tokens > 110 {
+		t.Errorf("CJK tokens = %d, want ~100", tokens)
+	}
+
+	// ASCII should be ~4 chars per token.
+	ascii := strings.Repeat("a", 400) // 400 ASCII chars
+	tokens = estimateTextTokens(ascii)
+	if tokens < 90 || tokens > 110 {
+		t.Errorf("ASCII tokens = %d, want ~100", tokens)
+	}
+
+	// Mixed CJK + ASCII.
+	mixed := "hello你好world世界" // 5 ASCII + 2 CJK + 5 ASCII + 2 CJK = 14 chars
+	tokens = estimateTextTokens(mixed)
+	// Expect: 10 ASCII / 4 = 2, 4 CJK = 4, total = 6
+	if tokens < 4 || tokens > 8 {
+		t.Errorf("mixed tokens = %d, want ~6", tokens)
+	}
+}
+
+func TestCompactModelContextKeepsLastMessageWhenFirstExceedsBudget(t *testing.T) {
+	// One huge message that exceeds the budget.
+	msgs := []model.Message{
+		{Role: model.RoleUser, Content: []model.Part{{Text: strings.Repeat("x", 100000)}}},
+		{Role: model.RoleAssistant, Content: []model.Part{{Text: strings.Repeat("y", 100000)}}},
+		{Role: model.RoleUser, Content: []model.Part{{Text: "last"}}},
+	}
+	// Very small budget — should still keep at least the last message.
+	compacted, ok, _ := CompactModelContext(msgs, 10)
+	if !ok {
+		t.Error("expected compaction to occur even with tiny budget")
+	}
+	if len(compacted) < 2 {
+		t.Errorf("compacted = %d messages, want >= 2 (summary + last)", len(compacted))
 	}
 }
