@@ -8,6 +8,8 @@ import (
 	"github.com/OnslaughtSnail/caelis/policy"
 	"github.com/OnslaughtSnail/caelis/sandbox"
 	"github.com/OnslaughtSnail/caelis/tool"
+	"github.com/OnslaughtSnail/caelis/tool/builtin/spawn"
+	"github.com/OnslaughtSnail/caelis/trace"
 )
 
 // ─── Policy wrapper ──────────────────────────────────────────────────
@@ -160,6 +162,88 @@ func (w *observerWrappedTool) Run(ctx tool.Context, call tool.Call) (tool.Result
 	return result, err
 }
 
+// ─── Hook wrapper ────────────────────────────────────────────────────
+
+type hookWrappedTool struct {
+	inner tool.Tool
+	hooks []agent.Hook
+}
+
+func (w *hookWrappedTool) Definition() tool.Definition {
+	return w.inner.Definition()
+}
+
+func (w *hookWrappedTool) Run(ctx tool.Context, call tool.Call) (tool.Result, error) {
+	evt := toolHookEvent(ctx, call)
+	for _, hook := range w.hooks {
+		if hook == nil {
+			continue
+		}
+		if err := hook.BeforeTool(ctx, evt); err != nil {
+			return tool.Result{Output: fmt.Sprintf("tool hook before error: %v", err), IsError: true}, nil
+		}
+	}
+	result, err := w.inner.Run(ctx, call)
+	after := agent.ToolHookResult{
+		ToolHook: evt,
+		Result:   result,
+		Error:    err,
+	}
+	for _, hook := range w.hooks {
+		if hook == nil {
+			continue
+		}
+		if hookErr := hook.AfterTool(ctx, after); hookErr != nil {
+			return tool.Result{Output: fmt.Sprintf("tool hook after error: %v", hookErr), IsError: true}, nil
+		}
+	}
+	return result, err
+}
+
+func toolHookEvent(ctx tool.Context, call tool.Call) agent.ToolHook {
+	return agent.ToolHook{
+		AgentName:    ctx.AgentName(),
+		SessionID:    ctx.SessionRef(),
+		InvocationID: ctx.InvocationID(),
+		ToolName:     call.Name,
+		CallID:       call.CallID,
+		Args:         cloneAnyMap(call.Args),
+		Metadata:     cloneAnyMap(call.Metadata),
+	}
+}
+
+// ─── Trace wrapper ───────────────────────────────────────────────────
+
+type traceWrappedTool struct {
+	inner  tool.Tool
+	tracer trace.Tracer
+}
+
+func (w *traceWrappedTool) Definition() tool.Definition {
+	return w.inner.Definition()
+}
+
+func (w *traceWrappedTool) Run(ctx tool.Context, call tool.Call) (tool.Result, error) {
+	if w.tracer == nil {
+		return w.inner.Run(ctx, call)
+	}
+	_, span := w.tracer.Start(ctx, trace.SpanStart{
+		Name: "tool." + call.Name,
+		Attributes: map[string]any{
+			"tool.name":     call.Name,
+			"tool.call_id":  call.CallID,
+			"agent.name":    ctx.AgentName(),
+			"session.id":    ctx.SessionRef(),
+			"invocation.id": ctx.InvocationID(),
+		},
+	})
+	result, err := w.inner.Run(ctx, call)
+	if span != nil {
+		span.End(trace.SpanEnd{Error: err})
+	}
+	return result, err
+}
+
 // ─── Truncation wrapper ──────────────────────────────────────────────
 
 // truncationWrappedTool wraps a tool to truncate large results.
@@ -192,10 +276,14 @@ func (w *truncationWrappedTool) Run(ctx tool.Context, call tool.Call) (tool.Resu
 //   - Injects TASK tool when RUN_COMMAND or SPAWN is present
 //
 // Called before WrapTools to prepare the raw tool list.
-func AugmentTools(tools []tool.Tool, tm *TaskManager) []tool.Tool {
+func AugmentTools(tools []tool.Tool, tm *TaskManager, delegators ...spawn.Delegator) []tool.Tool {
 	hasRUN_COMMAND := false
 	hasSPAWN := false
 	hasTASK := false
+	var delegator spawn.Delegator
+	if len(delegators) > 0 {
+		delegator = delegators[0]
+	}
 
 	var result []tool.Tool
 	for _, t := range tools {
@@ -209,7 +297,11 @@ func AugmentTools(tools []tool.Tool, tm *TaskManager) []tool.Tool {
 			}
 		case "SPAWN":
 			hasSPAWN = true
-			result = append(result, t)
+			if delegator != nil {
+				result = append(result, spawn.New(delegator))
+			} else {
+				result = append(result, t)
+			}
 		case "TASK":
 			hasTASK = true
 			result = append(result, t)
@@ -239,6 +331,12 @@ func (t *taskAwareShellTool) Definition() tool.Definition {
 		def.Metadata = make(map[string]any)
 	}
 	def.Metadata["task_aware"] = true
+	if def.Schema.Properties != nil {
+		def.Schema.Properties["wait"] = tool.Schema{
+			Type:        "boolean",
+			Description: "Wait for the command to finish before returning. Set false to return a task handle.",
+		}
+	}
 	return def
 }
 
@@ -269,6 +367,19 @@ func (t *taskAwareShellTool) Run(ctx tool.Context, call tool.Call) (tool.Result,
 	taskID, err := t.manager.StartCommand(ctx, req)
 	if err != nil {
 		return tool.Result{Output: err.Error(), IsError: true}, nil
+	}
+	wait := true
+	if raw, ok := call.Args["wait"].(bool); ok {
+		wait = raw
+	}
+	if !wait {
+		return tool.Result{
+			Output: "task started: " + taskID,
+			Metadata: map[string]any{
+				"task_id": taskID,
+				"state":   TaskStateRunning,
+			},
+		}, nil
 	}
 
 	// Wait for completion.
@@ -345,7 +456,8 @@ func (t *taskTool) Run(ctx tool.Context, call tool.Call) (tool.Result, error) {
 			Output: snap.Output,
 			Metadata: map[string]any{
 				"task_id": snap.TaskID, "state": snap.State,
-				"exit_code": snap.ExitCode,
+				"exit_code":   snap.ExitCode,
+				"session_ref": snap.SessionRef,
 			},
 			IsError: snap.State == TaskStateFailed,
 		}, nil
@@ -367,13 +479,43 @@ func (t *taskTool) Run(ctx tool.Context, call tool.Call) (tool.Result, error) {
 
 // ─── Tool chain assembly ─────────────────────────────────────────────
 
+type toolWrapConfig struct {
+	hooks  []agent.Hook
+	tracer trace.Tracer
+}
+
+// ToolWrapOption configures runner-owned tool decorators.
+type ToolWrapOption func(*toolWrapConfig)
+
+// WithToolHooks adds lifecycle hooks to the tool execution chain.
+func WithToolHooks(hooks ...agent.Hook) ToolWrapOption {
+	return func(cfg *toolWrapConfig) {
+		cfg.hooks = append(cfg.hooks, hooks...)
+	}
+}
+
+// WithToolTracer adds tracing to the tool execution chain.
+func WithToolTracer(tracer trace.Tracer) ToolWrapOption {
+	return func(cfg *toolWrapConfig) {
+		cfg.tracer = tracer
+	}
+}
+
 // WrapTools applies the decorator chain to a list of tools.
 // Order (outermost → innermost):
 //  1. policy — authorization, constraint injection, approval
-//  2. observer — transient event callbacks
-//  3. truncation — result size limits
-//  4. base tool — actual execution
-func WrapTools(tools []tool.Tool, engine policy.Engine, approver agent.ApprovalRequester, observer tool.Observer) []tool.Tool {
+//  2. tracing — SDK span around approved tool calls
+//  3. hooks — SDK lifecycle callbacks
+//  4. observer — transient event callbacks
+//  5. truncation — result size limits
+//  6. base tool — actual execution
+func WrapTools(tools []tool.Tool, engine policy.Engine, approver agent.ApprovalRequester, observer tool.Observer, opts ...ToolWrapOption) []tool.Tool {
+	cfg := toolWrapConfig{}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&cfg)
+		}
+	}
 	wrapped := make([]tool.Tool, len(tools))
 	for i, t := range tools {
 		var w tool.Tool = t
@@ -382,6 +524,12 @@ func WrapTools(tools []tool.Tool, engine policy.Engine, approver agent.ApprovalR
 		// Middle: observer.
 		if observer != nil {
 			w = &observerWrappedTool{inner: w, observer: observer}
+		}
+		if len(cfg.hooks) > 0 {
+			w = &hookWrappedTool{inner: w, hooks: append([]agent.Hook(nil), cfg.hooks...)}
+		}
+		if cfg.tracer != nil {
+			w = &traceWrappedTool{inner: w, tracer: cfg.tracer}
 		}
 		// Outermost: policy.
 		if engine != nil {
@@ -394,4 +542,15 @@ func WrapTools(tools []tool.Tool, engine policy.Engine, approver agent.ApprovalR
 		wrapped[i] = w
 	}
 	return wrapped
+}
+
+func cloneAnyMap(in map[string]any) map[string]any {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
 }

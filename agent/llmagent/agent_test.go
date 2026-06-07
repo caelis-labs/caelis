@@ -4,12 +4,16 @@ import (
 	"context"
 	"fmt"
 	"iter"
+	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/OnslaughtSnail/caelis/agent"
 	"github.com/OnslaughtSnail/caelis/model"
 	"github.com/OnslaughtSnail/caelis/session"
 	"github.com/OnslaughtSnail/caelis/tool"
+	"github.com/OnslaughtSnail/caelis/trace"
 )
 
 // ─── Mock LLM ────────────────────────────────────────────────────────
@@ -63,6 +67,69 @@ func (t *echoTool) Run(_ tool.Context, call tool.Call) (tool.Result, error) {
 	return tool.Result{Output: "echo:" + text}, nil
 }
 
+type panicTool struct{}
+
+func (t *panicTool) Definition() tool.Definition {
+	return tool.Definition{Name: "ECHO", Schema: tool.Schema{Type: "object"}}
+}
+
+func (t *panicTool) Run(tool.Context, tool.Call) (tool.Result, error) {
+	panic("llmagent must not run tools directly")
+}
+
+type recordingExecutor struct {
+	calls []tool.Call
+}
+
+func (e *recordingExecutor) Execute(_ context.Context, call tool.Call) (tool.Result, error) {
+	e.calls = append(e.calls, tool.CloneCall(call))
+	text, _ := call.Args["text"].(string)
+	return tool.Result{Output: "executor:" + text}, nil
+}
+
+type concurrentExecutor struct {
+	mu        sync.Mutex
+	active    int
+	maxActive int
+	calls     []string
+}
+
+func (e *concurrentExecutor) Execute(ctx context.Context, call tool.Call) (tool.Result, error) {
+	e.mu.Lock()
+	e.active++
+	if e.active > e.maxActive {
+		e.maxActive = e.active
+	}
+	e.calls = append(e.calls, call.CallID)
+	e.mu.Unlock()
+
+	switch call.CallID {
+	case "c1":
+		select {
+		case <-time.After(40 * time.Millisecond):
+		case <-ctx.Done():
+			return tool.Result{}, ctx.Err()
+		}
+	case "c2":
+		select {
+		case <-time.After(5 * time.Millisecond):
+		case <-ctx.Done():
+			return tool.Result{}, ctx.Err()
+		}
+	}
+
+	e.mu.Lock()
+	e.active--
+	e.mu.Unlock()
+	return tool.Result{Output: "result:" + call.CallID}, nil
+}
+
+func (e *concurrentExecutor) MaxActive() int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.maxActive
+}
+
 // ─── Mock InvocationContext ───────────────────────────────────────────
 
 type mockInvCtx struct {
@@ -85,8 +152,10 @@ func (c *mockInvCtx) RunConfig() *agent.RunConfig {
 	}
 	return agent.DefaultRunConfig()
 }
-func (c *mockInvCtx) EndInvocation() { c.ended = true }
-func (c *mockInvCtx) Ended() bool    { return c.ended }
+func (c *mockInvCtx) Hooks() []agent.Hook  { return nil }
+func (c *mockInvCtx) Tracer() trace.Tracer { return nil }
+func (c *mockInvCtx) EndInvocation()       { c.ended = true }
+func (c *mockInvCtx) Ended() bool          { return c.ended }
 
 // ─── Helpers ──────────────────────────────────────────────────────────
 
@@ -153,7 +222,8 @@ func TestAgentToolCall(t *testing.T) {
 			}},
 			{text: "done"},
 		}},
-		Tools: []tool.Tool{&echoTool{}},
+		Tools:        []tool.Tool{&panicTool{}},
+		ToolExecutor: &recordingExecutor{},
 	})
 
 	var events []session.Event
@@ -178,6 +248,190 @@ func TestAgentToolCall(t *testing.T) {
 	if toolCalls != 1 || toolResults != 1 || assistants != 1 {
 		t.Errorf("got %d/%d/%d tool_call/tool_result/assistant, want 1/1/1",
 			toolCalls, toolResults, assistants)
+	}
+}
+
+func TestAgentBuildsToolSpecsFromCatalog(t *testing.T) {
+	llm := &scriptedLLM{responses: []scriptedResponse{
+		{toolCalls: []model.ToolCallDelta{
+			{CallID: "call-1", Name: "ECHO", Args: map[string]any{"text": "hi"}},
+		}},
+		{text: "done"},
+	}}
+	catalog := tool.NewMemoryRegistry()
+	catalog.Register(&panicTool{})
+	executor := &recordingExecutor{}
+	a := prepare(Config{Name: "test"}, agent.PrepareRequest{
+		LLM:          llm,
+		ToolCatalog:  catalog,
+		ToolExecutor: executor,
+	})
+
+	for _, err := range a.Run(newInvCtx(userMsg("use tool"))) {
+		if err != nil {
+			t.Fatalf("Run error: %v", err)
+		}
+	}
+	if len(llm.requests) == 0 || len(llm.requests[0].Tools) != 1 || llm.requests[0].Tools[0].Name != "ECHO" {
+		t.Fatalf("model tools = %#v, want ECHO from catalog", llm.requests[0].Tools)
+	}
+	if len(executor.calls) != 1 || executor.calls[0].Name != "ECHO" {
+		t.Fatalf("executor calls = %#v, want ECHO", executor.calls)
+	}
+}
+
+func TestAgentToolCallUsesPreparedExecutor(t *testing.T) {
+	executor := &recordingExecutor{}
+	a := prepare(Config{Name: "test"}, agent.PrepareRequest{
+		LLM: &scriptedLLM{responses: []scriptedResponse{
+			{toolCalls: []model.ToolCallDelta{
+				{CallID: "c1", Name: "ECHO", Args: map[string]any{"text": "hello"}},
+			}},
+			{text: "done"},
+		}},
+		Tools:        []tool.Tool{&panicTool{}},
+		ToolExecutor: executor,
+	})
+
+	var resultText string
+	for evt, err := range a.Run(newInvCtx(userMsg("echo"))) {
+		if err != nil {
+			t.Fatalf("error: %v", err)
+		}
+		if evt.Kind == session.EventKindToolResult && evt.ToolResultPayload != nil {
+			for _, part := range evt.ToolResultPayload.Content {
+				if part.Kind == session.PartKindText {
+					resultText += part.Text
+				}
+			}
+		}
+	}
+
+	if len(executor.calls) != 1 {
+		t.Fatalf("executor calls = %d, want 1", len(executor.calls))
+	}
+	if executor.calls[0].Name != "ECHO" || executor.calls[0].CallID != "c1" {
+		t.Fatalf("executor call = %#v, want ECHO/c1", executor.calls[0])
+	}
+	if resultText != "executor:hello" {
+		t.Fatalf("tool result text = %q, want executor output", resultText)
+	}
+}
+
+func TestAgentExecutesToolCallsConcurrentlyAndYieldsResultsInCallOrder(t *testing.T) {
+	executor := &concurrentExecutor{}
+	a := prepare(Config{Name: "test"}, agent.PrepareRequest{
+		LLM: &scriptedLLM{responses: []scriptedResponse{
+			{toolCalls: []model.ToolCallDelta{
+				{CallID: "c1", Name: "ECHO", Args: map[string]any{"text": "one"}},
+				{CallID: "c2", Name: "ECHO", Args: map[string]any{"text": "two"}},
+			}},
+			{text: "done"},
+		}},
+		Tools:        []tool.Tool{&echoTool{}},
+		ToolExecutor: executor,
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	invCtx := newInvCtx(userMsg("echo"))
+	invCtx.Context = ctx
+
+	var resultIDs []string
+	var resultTexts []string
+	for evt, err := range a.Run(invCtx) {
+		if err != nil {
+			t.Fatalf("error: %v", err)
+		}
+		if evt.Kind == session.EventKindToolResult && evt.ToolResultPayload != nil {
+			resultIDs = append(resultIDs, evt.ToolResultPayload.CallID)
+			if len(evt.ToolResultPayload.Content) > 0 {
+				resultTexts = append(resultTexts, evt.ToolResultPayload.Content[0].Text)
+			}
+		}
+	}
+
+	if executor.MaxActive() < 2 {
+		t.Fatalf("max active tool calls = %d, want concurrent execution", executor.MaxActive())
+	}
+	if got, want := fmt.Sprint(resultIDs), "[c1 c2]"; got != want {
+		t.Fatalf("result order = %s, want %s", got, want)
+	}
+	if got, want := fmt.Sprint(resultTexts), "[result:c1 result:c2]"; got != want {
+		t.Fatalf("result text order = %s, want %s", got, want)
+	}
+}
+
+func TestAgentRepairsMissingToolCallID(t *testing.T) {
+	executor := &recordingExecutor{}
+	a := prepare(Config{Name: "test"}, agent.PrepareRequest{
+		LLM: &scriptedLLM{responses: []scriptedResponse{
+			{toolCalls: []model.ToolCallDelta{
+				{Name: "ECHO", Args: map[string]any{"text": "hello"}},
+			}},
+			{text: "done"},
+		}},
+		Tools:        []tool.Tool{&echoTool{}},
+		ToolExecutor: executor,
+	})
+
+	var toolCallID string
+	for evt, err := range a.Run(newInvCtx(userMsg("echo"))) {
+		if err != nil {
+			t.Fatalf("error: %v", err)
+		}
+		if evt.Kind == session.EventKindToolCall && evt.ToolCallPayload != nil {
+			toolCallID = evt.ToolCallPayload.CallID
+		}
+	}
+
+	if toolCallID == "" {
+		t.Fatal("expected repaired tool call id")
+	}
+	if len(executor.calls) != 1 || executor.calls[0].CallID != toolCallID {
+		t.Fatalf("executor calls = %#v, want repaired call id %q", executor.calls, toolCallID)
+	}
+}
+
+func TestAgentTurnsMissingToolNameIntoCanonicalToolError(t *testing.T) {
+	executor := &recordingExecutor{}
+	a := prepare(Config{Name: "test"}, agent.PrepareRequest{
+		LLM: &scriptedLLM{responses: []scriptedResponse{
+			{toolCalls: []model.ToolCallDelta{
+				{CallID: "bad-1", Args: map[string]any{"text": "hello"}},
+			}},
+			{text: "done"},
+		}},
+		Tools:        []tool.Tool{&echoTool{}},
+		ToolExecutor: executor,
+	})
+
+	var callName string
+	var resultText string
+	var resultIsError bool
+	for evt, err := range a.Run(newInvCtx(userMsg("echo"))) {
+		if err != nil {
+			t.Fatalf("error: %v", err)
+		}
+		if evt.Kind == session.EventKindToolCall && evt.ToolCallPayload != nil {
+			callName = evt.ToolCallPayload.Name
+		}
+		if evt.Kind == session.EventKindToolResult && evt.ToolResultPayload != nil {
+			resultIsError = evt.ToolResultPayload.IsError
+			if len(evt.ToolResultPayload.Content) > 0 {
+				resultText = evt.ToolResultPayload.Content[0].Text
+			}
+		}
+	}
+
+	if callName != "INVALID_TOOL_CALL" {
+		t.Fatalf("tool call name = %q, want INVALID_TOOL_CALL", callName)
+	}
+	if !resultIsError || !strings.Contains(resultText, "missing tool name") {
+		t.Fatalf("tool result = isError:%v text:%q, want missing-name error", resultIsError, resultText)
+	}
+	if len(executor.calls) != 0 {
+		t.Fatalf("executor calls = %#v, want none for invalid tool name", executor.calls)
 	}
 }
 
@@ -235,7 +489,8 @@ func TestAgentMaxModelCalls(t *testing.T) {
 			{toolCalls: []model.ToolCallDelta{{CallID: "c2", Name: "ECHO", Args: map[string]any{}}}},
 			{toolCalls: []model.ToolCallDelta{{CallID: "c3", Name: "ECHO", Args: map[string]any{}}}},
 		}},
-		Tools: []tool.Tool{&echoTool{}},
+		Tools:        []tool.Tool{&echoTool{}},
+		ToolExecutor: &recordingExecutor{},
 	})
 
 	ctx := &mockInvCtx{
@@ -256,6 +511,43 @@ func TestAgentMaxModelCalls(t *testing.T) {
 	}
 	if !gotErr {
 		t.Error("expected error for exceeding max model calls")
+	}
+}
+
+func TestAgentMaxToolCalls(t *testing.T) {
+	executor := &recordingExecutor{}
+	a := prepare(Config{Name: "test"}, agent.PrepareRequest{
+		LLM: &scriptedLLM{responses: []scriptedResponse{
+			{toolCalls: []model.ToolCallDelta{
+				{CallID: "c1", Name: "ECHO", Args: map[string]any{"text": "one"}},
+				{CallID: "c2", Name: "ECHO", Args: map[string]any{"text": "two"}},
+			}},
+		}},
+		Tools:        []tool.Tool{&echoTool{}},
+		ToolExecutor: executor,
+	})
+
+	ctx := &mockInvCtx{
+		Context:     context.Background(),
+		userMessage: userMsg("loop"),
+		runConfig: &agent.RunConfig{
+			MaxModelCalls: 100,
+			MaxToolCalls:  1,
+			Metadata:      make(map[string]any),
+		},
+	}
+
+	var gotErr bool
+	for _, err := range a.Run(ctx) {
+		if err != nil {
+			gotErr = true
+		}
+	}
+	if !gotErr {
+		t.Error("expected error for exceeding max tool calls")
+	}
+	if len(executor.calls) != 1 {
+		t.Fatalf("executor calls = %d, want only first tool call executed", len(executor.calls))
 	}
 }
 

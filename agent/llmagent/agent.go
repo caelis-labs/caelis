@@ -3,6 +3,8 @@ package llmagent
 import (
 	"fmt"
 	"iter"
+	"strings"
+	"sync"
 
 	"github.com/OnslaughtSnail/caelis/agent"
 	"github.com/OnslaughtSnail/caelis/model"
@@ -12,13 +14,12 @@ import (
 
 // Config holds configuration for creating an LLM agent.
 type Config struct {
-	Name         string
-	Description  string
-	ModelRef     model.Ref
-	SystemPrompt string
-	Tools        []string // tool names to include
-	SubAgents    []agent.Agent
-	RunConfig    *agent.RunConfig
+	Name        string
+	Description string
+	ModelRef    model.Ref
+	Tools       []string // tool names to include
+	SubAgents   []agent.Agent
+	RunConfig   *agent.RunConfig
 }
 
 // Agent implements agent.Agent backed by an LLM.
@@ -27,6 +28,8 @@ type Agent struct {
 	modelRef model.Ref
 	llm      model.LLM
 	tools    []tool.Tool
+	catalog  tool.Registry
+	executor tool.Executor
 	toolCtx  tool.Context
 }
 
@@ -71,6 +74,8 @@ func (a *Agent) Prepare(req agent.PrepareRequest) agent.Agent {
 		modelRef: a.modelRef,
 		llm:      a.llm,
 		tools:    a.tools,
+		catalog:  a.catalog,
+		executor: a.executor,
 		toolCtx:  a.toolCtx,
 	}
 	if req.LLM != nil {
@@ -78,6 +83,12 @@ func (a *Agent) Prepare(req agent.PrepareRequest) agent.Agent {
 	}
 	if req.Tools != nil {
 		cp.tools = req.Tools
+	}
+	if req.ToolCatalog != nil {
+		cp.catalog = req.ToolCatalog
+	}
+	if req.ToolExecutor != nil {
+		cp.executor = req.ToolExecutor
 	}
 	if req.ToolContext != nil {
 		cp.toolCtx = req.ToolContext
@@ -109,7 +120,16 @@ func (a *Agent) Run(ctx agent.InvocationContext) iter.Seq2[session.Event, error]
 
 		// Build tool specs from resolved tools.
 		var toolSpecs []model.ToolSpec
-		for _, t := range a.tools {
+		specTools := a.tools
+		if a.catalog != nil {
+			listed, err := a.catalog.List(ctx)
+			if err != nil {
+				yield(session.Event{}, fmt.Errorf("llmagent: list tool catalog: %w", err))
+				return
+			}
+			specTools = listed
+		}
+		for _, t := range specTools {
 			def := t.Definition()
 			toolSpecs = append(toolSpecs, model.ToolSpec{
 				Name:        def.Name,
@@ -119,6 +139,7 @@ func (a *Agent) Run(ctx agent.InvocationContext) iter.Seq2[session.Event, error]
 		}
 
 		modelCalls := 0
+		toolCalls := 0
 		for {
 			if ctx.Ended() {
 				return
@@ -165,6 +186,7 @@ func (a *Agent) Run(ctx agent.InvocationContext) iter.Seq2[session.Event, error]
 				yield(session.Event{}, fmt.Errorf("llmagent: model error: %w", responseErr))
 				return
 			}
+			pendingCalls = canonicalizePendingCalls(pendingCalls)
 
 			// Emit assistant text event if present.
 			if assistantText != "" || reasoningText != "" {
@@ -235,12 +257,39 @@ func (a *Agent) Run(ctx agent.InvocationContext) iter.Seq2[session.Event, error]
 				return
 			}
 
-			// Execute tool calls and emit results.
-			for _, tc := range pendingCalls {
+			executableCalls := pendingCalls
+			toolLimitExceeded := false
+			if runCfg.MaxToolCalls > 0 {
+				remaining := runCfg.MaxToolCalls - toolCalls
+				if remaining <= 0 {
+					yield(session.Event{}, fmt.Errorf("llmagent: max tool calls (%d) exceeded", runCfg.MaxToolCalls))
+					return
+				}
+				if len(executableCalls) > remaining {
+					executableCalls = executableCalls[:remaining]
+					toolLimitExceeded = true
+				}
+			}
+			toolCalls += len(executableCalls)
+
+			// Execute tool calls concurrently, then emit results in the model's
+			// original tool-call order so durable replay stays deterministic.
+			results := make([]tool.Result, len(executableCalls))
+			var wg sync.WaitGroup
+			for i, tc := range executableCalls {
 				if ctx.Ended() {
 					return
 				}
-				result := a.executeTool(ctx, tc)
+				wg.Add(1)
+				go func(i int, tc pendingCall) {
+					defer wg.Done()
+					results[i] = a.executeTool(ctx, tc)
+				}(i, tc)
+			}
+			wg.Wait()
+
+			for i, tc := range executableCalls {
+				result := results[i]
 				content := []session.EventPart{
 					{Kind: session.PartKindText, Text: result.Output},
 				}
@@ -272,34 +321,89 @@ func (a *Agent) Run(ctx agent.InvocationContext) iter.Seq2[session.Event, error]
 					},
 				})
 			}
+			if toolLimitExceeded {
+				yield(session.Event{}, fmt.Errorf("llmagent: max tool calls (%d) exceeded", runCfg.MaxToolCalls))
+				return
+			}
 		}
 	}
 }
 
 // pendingCall holds a tool call request collected from the model stream.
 type pendingCall struct {
-	callID string
-	name   string
-	args   map[string]any
+	callID        string
+	name          string
+	args          map[string]any
+	invalidReason string
+}
+
+const invalidToolCallName = "INVALID_TOOL_CALL"
+
+func canonicalizePendingCalls(calls []pendingCall) []pendingCall {
+	if len(calls) == 0 {
+		return nil
+	}
+	out := make([]pendingCall, len(calls))
+	seen := make(map[string]bool, len(calls))
+	for i, call := range calls {
+		call.callID = strings.TrimSpace(call.callID)
+		call.name = strings.TrimSpace(call.name)
+		if call.callID == "" || seen[call.callID] {
+			call.callID = nextToolCallID(seen, i+1)
+		}
+		seen[call.callID] = true
+		if call.name == "" {
+			call.name = invalidToolCallName
+			call.invalidReason = "missing tool name"
+			call.args = cloneArgs(call.args)
+			if call.args == nil {
+				call.args = map[string]any{}
+			}
+			call.args["error"] = call.invalidReason
+		}
+		out[i] = call
+	}
+	return out
+}
+
+func nextToolCallID(seen map[string]bool, start int) string {
+	for i := start; ; i++ {
+		id := fmt.Sprintf("tool-call-%d", i)
+		if !seen[id] {
+			return id
+		}
+	}
+}
+
+func cloneArgs(args map[string]any) map[string]any {
+	if args == nil {
+		return nil
+	}
+	out := make(map[string]any, len(args))
+	for k, v := range args {
+		out[k] = v
+	}
+	return out
 }
 
 // executeTool finds and runs a tool by name.
-func (a *Agent) executeTool(_ agent.InvocationContext, tc pendingCall) tool.Result {
-	for _, t := range a.tools {
-		if t.Definition().Name == tc.name {
-			call := tool.Call{
-				CallID: tc.callID,
-				Name:   tc.name,
-				Args:   tc.args,
-			}
-			result, err := t.Run(a.toolCtx, call)
-			if err != nil {
-				return tool.Result{Output: err.Error(), IsError: true}
-			}
-			return result
-		}
+func (a *Agent) executeTool(ctx agent.InvocationContext, tc pendingCall) tool.Result {
+	if tc.invalidReason != "" {
+		return tool.Result{Output: "invalid model tool call: " + tc.invalidReason, IsError: true}
 	}
-	return tool.Result{Output: fmt.Sprintf("tool not found: %s", tc.name), IsError: true}
+	if a.executor == nil {
+		return tool.Result{Output: fmt.Sprintf("tool executor not configured: %s", tc.name), IsError: true}
+	}
+	call := tool.Call{
+		CallID: tc.callID,
+		Name:   tc.name,
+		Args:   tc.args,
+	}
+	result, err := a.executor.Execute(ctx, call)
+	if err != nil {
+		return tool.Result{Output: err.Error(), IsError: true}
+	}
+	return result
 }
 
 func truncMeta(r tool.Result) *session.TruncationMeta {

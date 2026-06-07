@@ -68,6 +68,20 @@ func ValidateEvent(e *Event) error {
 		if e.NoticePayload == nil {
 			return fmt.Errorf("event %s: NoticePayload required", e.Kind)
 		}
+	case EventKindHandoff:
+		if e.HandoffPayload == nil {
+			return fmt.Errorf("event %s: HandoffPayload required", e.Kind)
+		}
+		if e.HandoffPayload.FromAgent == "" || e.HandoffPayload.ToAgent == "" {
+			return fmt.Errorf("event %s: FromAgent and ToAgent required", e.Kind)
+		}
+	case EventKindParticipant:
+		if e.ParticipantPayload == nil {
+			return fmt.Errorf("event %s: ParticipantPayload required", e.Kind)
+		}
+		if e.ParticipantPayload.ParticipantID == "" {
+			return fmt.Errorf("event %s: ParticipantID required", e.Kind)
+		}
 	}
 
 	// Canonical/mirror events must be durable.

@@ -156,6 +156,32 @@ func TestParticipantLifecycle(t *testing.T) {
 	}
 }
 
+func TestParticipantEventRequiresPayloadAndClonesMetadata(t *testing.T) {
+	event := Event{
+		Kind:       EventKindParticipant,
+		Visibility: VisibilityCanonical,
+	}
+	if err := ValidateEvent(&event); err == nil {
+		t.Fatal("ValidateEvent() error = nil, want missing participant payload error")
+	}
+
+	event.ParticipantPayload = &ParticipantPayload{
+		ParticipantID: "participant-1",
+		Role:          "reviewer",
+		State:         "joined",
+		Metadata:      map[string]string{"agent": "codex"},
+	}
+	if err := ValidateEvent(&event); err != nil {
+		t.Fatalf("ValidateEvent() error = %v", err)
+	}
+
+	cloned := event.Clone()
+	cloned.ParticipantPayload.Metadata["agent"] = "changed"
+	if event.ParticipantPayload.Metadata["agent"] != "codex" {
+		t.Fatalf("clone mutated original metadata: %#v", event.ParticipantPayload.Metadata)
+	}
+}
+
 func TestStructuredState(t *testing.T) {
 	svc := InMemoryService().(*memService)
 	ctx := context.Background()

@@ -8,6 +8,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/model"
 	"github.com/OnslaughtSnail/caelis/session"
 	"github.com/OnslaughtSnail/caelis/tool"
+	"github.com/OnslaughtSnail/caelis/trace"
 )
 
 // Agent is the contract for an executable agent. Implementations include
@@ -44,6 +45,10 @@ type PrepareRequest struct {
 	LLM model.LLM
 	// Tools are the resolved tool instances.
 	Tools []tool.Tool
+	// ToolCatalog is the runner-owned tool catalog for model-visible tool specs.
+	ToolCatalog tool.Registry
+	// ToolExecutor executes tool calls through the runner-owned execution chain.
+	ToolExecutor tool.Executor
 	// ToolContext provides sandbox/session info to tools during execution.
 	ToolContext tool.Context
 }
@@ -74,6 +79,12 @@ type InvocationContext interface {
 
 	// RunConfig returns the runtime configuration.
 	RunConfig() *RunConfig
+
+	// Hooks returns invocation-scoped lifecycle hooks.
+	Hooks() []Hook
+
+	// Tracer returns the invocation tracer, or nil if tracing is disabled.
+	Tracer() trace.Tracer
 
 	// EndInvocation signals that the agent should stop.
 	EndInvocation()

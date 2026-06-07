@@ -1,7 +1,9 @@
 package runner
 
 import (
+	"context"
 	"fmt"
+	"strings"
 
 	"github.com/OnslaughtSnail/caelis/model"
 	"github.com/OnslaughtSnail/caelis/session"
@@ -159,4 +161,70 @@ func estimateMessageTokens(m model.Message) int {
 		}
 	}
 	return total
+}
+
+func (r *Runner) compactForOverflowRetry(ctx context.Context, ref session.Ref, msgs []model.Message) ([]model.Message, bool, error) {
+	budget := DefaultCompactionPolicy().MaxContextTokens
+	var (
+		compacted []model.Message
+		event     *session.Event
+		ok        bool
+	)
+	if r.cfg.Compactor != nil {
+		compacted, event, ok = r.cfg.Compactor.Compact(ctx, msgs, budget)
+	} else {
+		summaryTarget := int(float64(budget) * 0.6)
+		var summary string
+		compacted, ok, summary = CompactModelContext(msgs, summaryTarget)
+		if ok {
+			event = &session.Event{
+				Kind:       session.EventKindCompaction,
+				Visibility: session.VisibilityCanonical,
+				CompactionPayload: &session.CompactionPayload{
+					Reason:      "context overflow retry",
+					Previous:    len(msgs),
+					Remaining:   len(compacted),
+					SummaryText: summary,
+				},
+			}
+		}
+	}
+	if !ok {
+		return msgs, false, nil
+	}
+	if event != nil {
+		if event.CompactionPayload != nil && strings.TrimSpace(event.CompactionPayload.Reason) == "" {
+			event.CompactionPayload.Reason = "context overflow retry"
+		}
+		if _, err := r.cfg.Sessions.AppendEvent(ctx, ref, *event); err != nil {
+			return nil, false, fmt.Errorf("runner: persist overflow compaction event: %w", err)
+		}
+	}
+	return compacted, true, nil
+}
+
+func isContextOverflowError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if model.IsContextOverflow(err) {
+		return true
+	}
+	text := strings.ToLower(err.Error())
+	for _, keyword := range []string{
+		"context length",
+		"context window",
+		"prompt is too long",
+		"too many tokens",
+		"maximum context",
+		"input is too long",
+		"token limit",
+		"max context",
+		"context overflow",
+	} {
+		if strings.Contains(text, keyword) {
+			return true
+		}
+	}
+	return false
 }

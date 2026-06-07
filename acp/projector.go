@@ -29,6 +29,10 @@ func ProjectEvent(e *session.Event) []Update {
 		return projectToolResult(e)
 	case session.EventKindPlan:
 		return projectPlan(e)
+	case session.EventKindHandoff:
+		return projectHandoff(e)
+	case session.EventKindParticipant:
+		return projectParticipant(e)
 	default:
 		return nil
 	}
@@ -155,6 +159,39 @@ func projectPlan(e *session.Event) []Update {
 	return []Update{PlanUpdate{
 		SessionUpdate: UpdatePlan,
 		Entries:       entries,
+	}}
+}
+
+// ─── Control updates ─────────────────────────────────────────────────
+
+func projectHandoff(e *session.Event) []Update {
+	if e.HandoffPayload == nil {
+		return nil
+	}
+	return []Update{SessionInfoUpdate{
+		SessionUpdate: UpdateSessionInfo,
+		Handoff: &HandoffInfo{
+			FromAgent: e.HandoffPayload.FromAgent,
+			ToAgent:   e.HandoffPayload.ToAgent,
+			Reason:    e.HandoffPayload.Reason,
+		},
+		Meta: buildControlMeta(e),
+	}}
+}
+
+func projectParticipant(e *session.Event) []Update {
+	if e.ParticipantPayload == nil {
+		return nil
+	}
+	return []Update{SessionInfoUpdate{
+		SessionUpdate: UpdateSessionInfo,
+		Participant: &ParticipantInfo{
+			ParticipantID: e.ParticipantPayload.ParticipantID,
+			Role:          e.ParticipantPayload.Role,
+			State:         e.ParticipantPayload.State,
+			Metadata:      cloneStringMap(e.ParticipantPayload.Metadata),
+		},
+		Meta: buildControlMeta(e),
 	}}
 }
 
@@ -343,9 +380,9 @@ func buildToolMeta(e *session.Event) map[string]any {
 	}
 
 	if len(caelis) == 0 {
-		return nil
+		return buildMeta(nil, providerMetaValue(e.ProviderMeta))
 	}
-	return map[string]any{"caelis": caelis}
+	return buildMeta(caelis, providerMetaValue(e.ProviderMeta))
 }
 
 // buildToolResultMeta builds _meta for tool_call_update events.
@@ -373,7 +410,93 @@ func buildToolResultMeta(e *session.Event) map[string]any {
 	}
 
 	if len(caelis) == 0 {
+		return buildMeta(nil, providerMetaValue(e.ProviderMeta))
+	}
+	return buildMeta(caelis, providerMetaValue(e.ProviderMeta))
+}
+
+func buildControlMeta(e *session.Event) map[string]any {
+	caelis := make(map[string]any)
+	if e.RunID != "" {
+		caelis["run_id"] = e.RunID
+	}
+	if e.Actor.Scope != "" {
+		caelis["scope"] = e.Actor.Scope
+	}
+	if e.Actor.ScopeID != "" {
+		caelis["scope_id"] = e.Actor.ScopeID
+	}
+	if e.Actor.Source != "" {
+		caelis["source"] = e.Actor.Source
+	}
+	if e.Actor.ParticipantID != "" {
+		caelis["participant_id"] = e.Actor.ParticipantID
+	}
+	if len(caelis) == 0 {
 		return nil
 	}
 	return map[string]any{"caelis": caelis}
+}
+
+func buildMeta(caelis map[string]any, provider any) map[string]any {
+	meta := make(map[string]any, 2)
+	if len(caelis) > 0 {
+		meta["caelis"] = caelis
+	}
+	if provider != nil {
+		meta["provider"] = provider
+	}
+	if len(meta) == 0 {
+		return nil
+	}
+	return meta
+}
+
+func providerMetaValue(meta map[string]any) any {
+	if len(meta) == 0 {
+		return nil
+	}
+	raw, ok := meta["acp_meta"]
+	if !ok || raw == nil {
+		return nil
+	}
+	return cloneAny(raw)
+}
+
+func cloneAny(v any) any {
+	switch value := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(value))
+		for key, item := range value {
+			out[key] = cloneAny(item)
+		}
+		return out
+	case []any:
+		out := make([]any, len(value))
+		for i, item := range value {
+			out[i] = cloneAny(item)
+		}
+		return out
+	case []ToolCallLocation:
+		return append([]ToolCallLocation(nil), value...)
+	case map[string]string:
+		out := make(map[string]string, len(value))
+		for key, item := range value {
+			out[key] = item
+		}
+		return out
+	default:
+		return value
+	}
+}
+
+func cloneStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
 }

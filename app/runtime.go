@@ -8,6 +8,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/gateway"
 	"github.com/OnslaughtSnail/caelis/model"
 	"github.com/OnslaughtSnail/caelis/model/catalog"
+	caelisplugin "github.com/OnslaughtSnail/caelis/plugin"
 	"github.com/OnslaughtSnail/caelis/policy"
 	"github.com/OnslaughtSnail/caelis/policy/presets"
 	"github.com/OnslaughtSnail/caelis/runner"
@@ -36,6 +37,7 @@ type RuntimeConfig struct {
 	SandboxBackend sandbox.Backend
 	PolicyEngine   policy.Engine
 	SkillRegistry  skill.Registry
+	PluginRegistry caelisplugin.Registry
 	Approver       agent.ApprovalRequester
 	SystemPrompt   string
 }
@@ -89,6 +91,7 @@ func NewRuntime(cfg RuntimeConfig) (*Runtime, error) {
 		Sandbox:       sandboxFact,
 		Policy:        policyEngine,
 		Skills:        cfg.SkillRegistry,
+		Plugins:       cfg.PluginRegistry,
 		Approver:      cfg.Approver,
 		SystemPrompt:  cfg.SystemPrompt,
 	})

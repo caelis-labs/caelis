@@ -287,12 +287,13 @@ func TestE2E_RunnerToolLoopApprovalSandboxAndReplay(t *testing.T) {
 		UserMessage: model.Message{Role: model.RoleUser, Content: []model.Part{{Text: "run the sandbox command"}}},
 	})
 
-	assertEventKinds(t, events,
+	assertEventKinds(t, persistedLiveEvents(events),
 		session.EventKindUser,
 		session.EventKindToolCall,
 		session.EventKindToolResult,
 		session.EventKindAssistant,
 	)
+	assertTransientNoticeCount(t, events, 2)
 	if len(modelReg.resolved) != 1 {
 		t.Fatalf("model registry resolves: got %d, want 1", len(modelReg.resolved))
 	}
@@ -409,7 +410,7 @@ func TestE2E_FilesystemToolsThroughRunner(t *testing.T) {
 		SessionRef:  sess.Ref,
 		UserMessage: model.Message{Role: model.RoleUser, Content: []model.Part{{Text: "write then read the file"}}},
 	})
-	assertEventKinds(t, events,
+	assertEventKinds(t, persistedLiveEvents(events),
 		session.EventKindUser,
 		session.EventKindToolCall,
 		session.EventKindToolResult,
@@ -417,6 +418,7 @@ func TestE2E_FilesystemToolsThroughRunner(t *testing.T) {
 		session.EventKindToolResult,
 		session.EventKindAssistant,
 	)
+	assertTransientNoticeCount(t, events, 4)
 	data, err := os.ReadFile(filepath.Join(fs.root, "notes", "layer4.txt"))
 	if err != nil {
 		t.Fatalf("read written file: %v", err)
@@ -614,6 +616,29 @@ func assertEventKinds(t *testing.T, events []session.Event, want ...session.Even
 		if events[i].Kind != kind {
 			t.Fatalf("event %d kind: got %q, want %q\n%v", i, events[i].Kind, kind, eventKinds(events))
 		}
+	}
+}
+
+func persistedLiveEvents(events []session.Event) []session.Event {
+	out := make([]session.Event, 0, len(events))
+	for _, event := range events {
+		if event.Visibility.IsPersisted() {
+			out = append(out, event)
+		}
+	}
+	return out
+}
+
+func assertTransientNoticeCount(t *testing.T, events []session.Event, want int) {
+	t.Helper()
+	var got int
+	for _, event := range events {
+		if event.Kind == session.EventKindNotice && event.Visibility == session.VisibilityUIOnly {
+			got++
+		}
+	}
+	if got != want {
+		t.Fatalf("transient notice count = %d, want %d\n%v", got, want, eventKinds(events))
 	}
 }
 

@@ -42,6 +42,9 @@ func (e Event) Clone() Event {
 		v := *e.HandoffPayload
 		cp.HandoffPayload = &v
 	}
+	if e.ParticipantPayload != nil {
+		cp.ParticipantPayload = e.ParticipantPayload.Clone()
+	}
 	if e.ProviderMeta != nil {
 		cp.ProviderMeta = cloneMap(e.ProviderMeta)
 	}
@@ -217,6 +220,21 @@ func (p ParticipantBinding) Clone() ParticipantBinding {
 		}
 	}
 	return cp
+}
+
+// Clone returns a deep copy of the participant payload.
+func (p *ParticipantPayload) Clone() *ParticipantPayload {
+	if p == nil {
+		return nil
+	}
+	cp := *p
+	if p.Metadata != nil {
+		cp.Metadata = make(map[string]string, len(p.Metadata))
+		for k, v := range p.Metadata {
+			cp.Metadata[k] = v
+		}
+	}
+	return &cp
 }
 
 // Ensure time is used for any timestamp operations.

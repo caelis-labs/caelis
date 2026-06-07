@@ -187,6 +187,14 @@ type HandoffPayload struct {
 	Reason    string `json:"reason,omitempty"`
 }
 
+// ParticipantPayload records participant lifecycle changes.
+type ParticipantPayload struct {
+	ParticipantID string            `json:"participant_id"`
+	Role          string            `json:"role,omitempty"`
+	State         string            `json:"state,omitempty"`
+	Metadata      map[string]string `json:"metadata,omitempty"`
+}
+
 // ─── Helper methods ──────────────────────────────────────────────────
 
 // TextContent returns the concatenated text from all text parts in the

@@ -80,16 +80,17 @@ type Event struct {
 	RunID  string `json:"run_id,omitempty"`
 
 	// Semantic payloads — exactly one should be populated per Kind.
-	*UserPayload       `json:"user_payload,omitempty"`
-	*AssistantPayload  `json:"assistant_payload,omitempty"`
-	*ToolCallPayload   `json:"tool_call_payload,omitempty"`
-	*ToolResultPayload `json:"tool_result_payload,omitempty"`
-	*PlanPayload       `json:"plan_payload,omitempty"`
-	*SystemPayload     `json:"system_payload,omitempty"`
-	*CompactionPayload `json:"compaction_payload,omitempty"`
-	*LifecyclePayload  `json:"lifecycle_payload,omitempty"`
-	*NoticePayload     `json:"notice_payload,omitempty"`
-	*HandoffPayload    `json:"handoff_payload,omitempty"`
+	*UserPayload        `json:"user_payload,omitempty"`
+	*AssistantPayload   `json:"assistant_payload,omitempty"`
+	*ToolCallPayload    `json:"tool_call_payload,omitempty"`
+	*ToolResultPayload  `json:"tool_result_payload,omitempty"`
+	*PlanPayload        `json:"plan_payload,omitempty"`
+	*SystemPayload      `json:"system_payload,omitempty"`
+	*CompactionPayload  `json:"compaction_payload,omitempty"`
+	*LifecyclePayload   `json:"lifecycle_payload,omitempty"`
+	*NoticePayload      `json:"notice_payload,omitempty"`
+	*HandoffPayload     `json:"handoff_payload,omitempty"`
+	*ParticipantPayload `json:"participant_payload,omitempty"`
 
 	// Provider replay metadata — preserves provider-specific data needed
 	// for faithful model context reconstruction (thought signatures,

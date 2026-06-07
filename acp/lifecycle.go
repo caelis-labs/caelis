@@ -253,12 +253,30 @@ func (c ConfigOptionUpdate) SessionUpdateType() UpdateKind { return c.SessionUpd
 
 // SessionInfoUpdate notifies the client of session info changes.
 type SessionInfoUpdate struct {
-	SessionUpdate UpdateKind `json:"sessionUpdate"`
-	Title         *string    `json:"title,omitempty"`
-	UpdatedAt     *string    `json:"updatedAt,omitempty"`
+	SessionUpdate UpdateKind       `json:"sessionUpdate"`
+	Title         *string          `json:"title,omitempty"`
+	UpdatedAt     *string          `json:"updatedAt,omitempty"`
+	Handoff       *HandoffInfo     `json:"handoff,omitempty"`
+	Participant   *ParticipantInfo `json:"participant,omitempty"`
+	Meta          map[string]any   `json:"_meta,omitempty"`
 }
 
 func (s SessionInfoUpdate) SessionUpdateType() UpdateKind { return s.SessionUpdate }
+
+// HandoffInfo describes a control handoff between agents.
+type HandoffInfo struct {
+	FromAgent string `json:"fromAgent"`
+	ToAgent   string `json:"toAgent"`
+	Reason    string `json:"reason,omitempty"`
+}
+
+// ParticipantInfo describes a participant lifecycle update.
+type ParticipantInfo struct {
+	ParticipantID string            `json:"participantId"`
+	Role          string            `json:"role,omitempty"`
+	State         string            `json:"state,omitempty"`
+	Metadata      map[string]string `json:"metadata,omitempty"`
+}
 
 // AvailableCommandInput describes the expected command input.
 type AvailableCommandInput struct {

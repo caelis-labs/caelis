@@ -105,6 +105,69 @@ func TestTaskManager_NotFound(t *testing.T) {
 	}
 }
 
+func TestTaskManager_WriteUsesStoredAsyncSessionAcrossManagers(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryTaskStore()
+	backend := newAsyncTaskBackend()
+	startManager := NewTaskManagerWithStore(backend, store, "scope-1")
+
+	taskID, err := startManager.StartCommand(ctx, sandbox.CommandRequest{Command: "cat"})
+	if err != nil {
+		t.Fatalf("StartCommand: %v", err)
+	}
+	snap, ok, err := store.LoadTask(ctx, taskID)
+	if err != nil || !ok {
+		t.Fatalf("stored task = %#v, %v, %v", snap, ok, err)
+	}
+	if snap.SandboxSession.SessionID != "async-session-1" {
+		t.Fatalf("sandbox session = %#v, want async-session-1", snap.SandboxSession)
+	}
+
+	resumeManager := NewTaskManagerWithStore(backend, store, "scope-1")
+	if err := resumeManager.Write(ctx, taskID, "hello\n"); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if got := string(backend.session.input); got != "hello\n" {
+		t.Fatalf("session input = %q", got)
+	}
+	if backend.opened != 1 {
+		t.Fatalf("OpenSessionRef calls = %d, want 1", backend.opened)
+	}
+}
+
+func TestTaskManager_WaitUsesStoredAsyncSessionAfterRestart(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryTaskStore()
+	backend := newAsyncTaskBackend()
+	ref := sandbox.SessionRef{Backend: "async", SessionID: "async-session-1"}
+	backend.session = newAsyncTaskSession(ref)
+	if err := store.SaveTask(ctx, TaskSnapshot{
+		TaskID:         "task-1",
+		State:          TaskStateRunning,
+		SessionRef:     "scope-1",
+		SandboxSession: ref,
+	}); err != nil {
+		t.Fatalf("SaveTask: %v", err)
+	}
+	backend.session.complete(sandbox.CommandResult{Stdout: []byte("done"), ExitCode: 0}, nil)
+
+	resumeManager := NewTaskManagerWithStore(backend, store, "scope-1")
+	snap, err := resumeManager.Wait(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+	if snap.State != TaskStateCompleted || snap.Output != "done" || snap.SandboxSession.SessionID != "async-session-1" {
+		t.Fatalf("snapshot = %#v, want completed async session result", snap)
+	}
+	loaded, ok, err := store.LoadTask(ctx, "task-1")
+	if err != nil || !ok || loaded.State != TaskStateCompleted {
+		t.Fatalf("stored snapshot = %#v, %v, %v", loaded, ok, err)
+	}
+	if backend.opened != 1 {
+		t.Fatalf("OpenSessionRef calls = %d, want 1", backend.opened)
+	}
+}
+
 // ─── Tool augmentation tests ─────────────────────────────────────────
 
 func TestAugmentTools_InjectsTask(t *testing.T) {
@@ -181,4 +244,112 @@ func (t *mockSpawnTool) Definition() tool.Definition {
 }
 func (t *mockSpawnTool) Run(_ tool.Context, _ tool.Call) (tool.Result, error) {
 	return tool.Result{Output: "ok"}, nil
+}
+
+type asyncTaskBackend struct {
+	session *asyncTaskSession
+	opened  int
+}
+
+func newAsyncTaskBackend() *asyncTaskBackend {
+	return &asyncTaskBackend{}
+}
+
+func (b *asyncTaskBackend) Name() string { return "async" }
+func (b *asyncTaskBackend) Describe(_ context.Context) (sandbox.Descriptor, error) {
+	return sandbox.Descriptor{Name: "async"}, nil
+}
+func (b *asyncTaskBackend) Run(_ context.Context, _ sandbox.CommandRequest) (sandbox.CommandResult, error) {
+	return sandbox.CommandResult{}, nil
+}
+func (b *asyncTaskBackend) FileSystem(_ context.Context, _ sandbox.Constraints) (sandbox.FileSystem, error) {
+	return nil, nil
+}
+func (b *asyncTaskBackend) Status(_ context.Context) (sandbox.Status, error) {
+	return sandbox.Status{Running: true}, nil
+}
+func (b *asyncTaskBackend) Close() error { return nil }
+
+func (b *asyncTaskBackend) Start(_ context.Context, _ sandbox.CommandRequest) (sandbox.Session, error) {
+	ref := sandbox.SessionRef{Backend: "async", SessionID: "async-session-1"}
+	b.session = newAsyncTaskSession(ref)
+	return b.session, nil
+}
+
+func (b *asyncTaskBackend) OpenSessionRef(ref sandbox.SessionRef) (sandbox.Session, error) {
+	b.opened++
+	if b.session == nil {
+		b.session = newAsyncTaskSession(ref)
+	}
+	return b.session, nil
+}
+
+type asyncTaskSession struct {
+	ref    sandbox.SessionRef
+	input  []byte
+	done   chan struct{}
+	result sandbox.CommandResult
+	err    error
+}
+
+func newAsyncTaskSession(ref sandbox.SessionRef) *asyncTaskSession {
+	return &asyncTaskSession{ref: ref, done: make(chan struct{})}
+}
+
+func (s *asyncTaskSession) Ref() sandbox.SessionRef { return s.ref }
+
+func (s *asyncTaskSession) Terminal() sandbox.TerminalRef {
+	return sandbox.TerminalRef{Backend: s.ref.Backend, SessionID: s.ref.SessionID, TerminalID: "terminal-1"}
+}
+
+func (s *asyncTaskSession) WriteInput(_ context.Context, input []byte) error {
+	s.input = append(s.input, input...)
+	return nil
+}
+
+func (s *asyncTaskSession) ReadOutput(_ context.Context, _, _ int64) ([]byte, []byte, int64, int64, error) {
+	return s.result.Stdout, s.result.Stderr, int64(len(s.result.Stdout)), int64(len(s.result.Stderr)), nil
+}
+
+func (s *asyncTaskSession) Status(_ context.Context) (sandbox.SessionStatus, error) {
+	select {
+	case <-s.done:
+		return sandbox.SessionStatus{SessionRef: s.ref, Running: false, SupportsInput: true, ExitCode: s.result.ExitCode}, nil
+	default:
+		return sandbox.SessionStatus{SessionRef: s.ref, Running: true, SupportsInput: true}, nil
+	}
+}
+
+func (s *asyncTaskSession) Wait(ctx context.Context, _ time.Duration) (sandbox.SessionStatus, error) {
+	select {
+	case <-ctx.Done():
+		return sandbox.SessionStatus{}, ctx.Err()
+	case <-s.done:
+		return sandbox.SessionStatus{SessionRef: s.ref, Running: false, SupportsInput: true, ExitCode: s.result.ExitCode}, nil
+	}
+}
+
+func (s *asyncTaskSession) Result(ctx context.Context) (sandbox.CommandResult, error) {
+	select {
+	case <-ctx.Done():
+		return sandbox.CommandResult{}, ctx.Err()
+	case <-s.done:
+		return s.result, s.err
+	}
+}
+
+func (s *asyncTaskSession) Terminate(_ context.Context) error {
+	s.complete(sandbox.CommandResult{ExitCode: -1}, nil)
+	return nil
+}
+
+func (s *asyncTaskSession) complete(result sandbox.CommandResult, err error) {
+	select {
+	case <-s.done:
+		return
+	default:
+		s.result = result
+		s.err = err
+		close(s.done)
+	}
 }
