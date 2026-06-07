@@ -301,9 +301,14 @@ func (s *memService) SnapshotState(_ context.Context, ref Ref) (map[string]any, 
 		return make(map[string]any), nil
 	}
 	// Deep copy via JSON round-trip.
-	data, _ := json.Marshal(st)
+	data, err := json.Marshal(st)
+	if err != nil {
+		return nil, fmt.Errorf("marshal state: %w", err)
+	}
 	var cp map[string]any
-	json.Unmarshal(data, &cp)
+	if err := json.Unmarshal(data, &cp); err != nil {
+		return nil, fmt.Errorf("unmarshal state copy: %w", err)
+	}
 	return cp, nil
 }
 
@@ -315,9 +320,14 @@ func (s *memService) ReplaceState(_ context.Context, ref Ref, state map[string]a
 		return fmt.Errorf("session not found: %s", ref)
 	}
 	// Deep copy via JSON round-trip.
-	data, _ := json.Marshal(state)
+	data, err := json.Marshal(state)
+	if err != nil {
+		return fmt.Errorf("marshal state: %w", err)
+	}
 	var cp map[string]any
-	json.Unmarshal(data, &cp)
+	if err := json.Unmarshal(data, &cp); err != nil {
+		return fmt.Errorf("unmarshal state copy: %w", err)
+	}
 	s.structured[k] = cp
 	return nil
 }

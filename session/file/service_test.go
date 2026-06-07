@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/OnslaughtSnail/caelis/model"
 	"github.com/OnslaughtSnail/caelis/session"
 )
@@ -55,8 +57,10 @@ func TestGetNotFound(t *testing.T) {
 func TestList(t *testing.T) {
 	svc := tempService(t)
 	ctx := context.Background()
-	svc.Create(ctx, session.CreateRequest{AppName: "app", UserID: "u", WorkspaceKey: "ws"})
-	svc.Create(ctx, session.CreateRequest{AppName: "app", UserID: "u", WorkspaceKey: "ws"})
+	_, err := svc.Create(ctx, session.CreateRequest{AppName: "app", UserID: "u", WorkspaceKey: "ws"})
+	require.NoError(t, err)
+	_, err = svc.Create(ctx, session.CreateRequest{AppName: "app", UserID: "u", WorkspaceKey: "ws"})
+	require.NoError(t, err)
 
 	resp, err := svc.List(ctx, session.ListRequest{AppName: "app", UserID: "u"})
 	if err != nil {
@@ -73,12 +77,13 @@ func TestFork(t *testing.T) {
 	orig, _ := svc.Create(ctx, session.CreateRequest{
 		AppName: "app", UserID: "u", WorkspaceKey: "ws", Title: "original",
 	})
-	svc.AppendEvent(ctx, orig.Ref, session.Event{
+	_, err := svc.AppendEvent(ctx, orig.Ref, session.Event{
 		Kind: session.EventKindUser, Visibility: session.VisibilityCanonical,
 		UserPayload: &session.UserPayload{
 			Parts: []session.EventPart{{Kind: session.PartKindText, Text: "hello"}},
 		},
 	})
+	require.NoError(t, err)
 
 	forked, err := svc.Fork(ctx, session.ForkRequest{Source: orig.Ref, Title: "forked"})
 	if err != nil {
@@ -112,24 +117,27 @@ func TestAppendAndListEvents(t *testing.T) {
 	ctx := context.Background()
 	sess, _ := svc.Create(ctx, session.CreateRequest{AppName: "app", UserID: "u", WorkspaceKey: "ws"})
 
-	svc.AppendEvent(ctx, sess.Ref, session.Event{
+	_, err := svc.AppendEvent(ctx, sess.Ref, session.Event{
 		Kind: session.EventKindUser, Visibility: session.VisibilityCanonical,
 		UserPayload: &session.UserPayload{
 			Parts: []session.EventPart{{Kind: session.PartKindText, Text: "a"}},
 		},
 	})
-	svc.AppendEvent(ctx, sess.Ref, session.Event{
+	require.NoError(t, err)
+	_, err = svc.AppendEvent(ctx, sess.Ref, session.Event{
 		Kind: session.EventKindAssistant, Visibility: session.VisibilityCanonical,
 		AssistantPayload: &session.AssistantPayload{
 			Parts: []session.EventPart{{Kind: session.PartKindText, Text: "b"}},
 		},
 	})
-	svc.AppendEvent(ctx, sess.Ref, session.Event{
+	require.NoError(t, err)
+	_, err = svc.AppendEvent(ctx, sess.Ref, session.Event{
 		Kind: session.EventKindUser, Visibility: session.VisibilityCanonical,
 		UserPayload: &session.UserPayload{
 			Parts: []session.EventPart{{Kind: session.PartKindText, Text: "c"}},
 		},
 	})
+	require.NoError(t, err)
 
 	evts, err := svc.Events(ctx, session.EventsRequest{SessionRef: sess.Ref})
 	if err != nil {
@@ -398,12 +406,13 @@ func TestPersistenceVerification(t *testing.T) {
 	sess, _ := svc1.Create(ctx, session.CreateRequest{
 		AppName: "app", UserID: "u", WorkspaceKey: "ws",
 	})
-	svc1.AppendEvent(ctx, sess.Ref, session.Event{
+	_, err := svc1.AppendEvent(ctx, sess.Ref, session.Event{
 		Kind: session.EventKindUser, Visibility: session.VisibilityCanonical,
 		UserPayload: &session.UserPayload{
 			Parts: []session.EventPart{{Kind: session.PartKindText, Text: "persisted"}},
 		},
 	})
+	require.NoError(t, err)
 
 	// Read with second service instance (simulates restart).
 	svc2, _ := New(Config{RootDir: dir})

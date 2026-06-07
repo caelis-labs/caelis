@@ -72,7 +72,7 @@ func toSandboxConstraints(pc *policy.SandboxConstraints) sandbox.Constraints {
 		}
 		paths = append(paths, sandbox.PathRule{
 			Path:   p.Path,
-			Access: sandbox.PathAccess(access),
+			Access: access,
 		})
 	}
 	return sandbox.Constraints{

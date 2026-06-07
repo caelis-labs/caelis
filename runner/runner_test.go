@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/OnslaughtSnail/caelis/agent"
 	"github.com/OnslaughtSnail/caelis/agent/llmagent"
 	"github.com/OnslaughtSnail/caelis/model"
@@ -599,18 +601,20 @@ func TestReplayContextIsWired(t *testing.T) {
 	})
 
 	// Pre-populate session with prior conversation.
-	svc.AppendEvent(ctx, sess.Ref, session.Event{
+	_, err := svc.AppendEvent(ctx, sess.Ref, session.Event{
 		Kind: session.EventKindUser, Visibility: session.VisibilityCanonical,
 		UserPayload: &session.UserPayload{
 			Parts: []session.EventPart{{Kind: session.PartKindText, Text: "previous question"}},
 		},
 	})
-	svc.AppendEvent(ctx, sess.Ref, session.Event{
+	require.NoError(t, err)
+	_, err = svc.AppendEvent(ctx, sess.Ref, session.Event{
 		Kind: session.EventKindAssistant, Visibility: session.VisibilityCanonical,
 		AssistantPayload: &session.AssistantPayload{
 			Parts: []session.EventPart{{Kind: session.PartKindText, Text: "previous answer"}},
 		},
 	})
+	require.NoError(t, err)
 
 	a := llmagent.New(llmagent.Config{
 		Name: "test-agent", ModelRef: model.Ref{ModelID: "mock"},
@@ -895,7 +899,7 @@ func TestRunnerLoadsPluginMCPToolsIntoExecutor(t *testing.T) {
 	if !client.closed {
 		t.Fatal("MCP client was not closed after runner invocation")
 	}
-	if toolResult.ToolResultPayload == nil || toolResult.ToolResultPayload.Name != "memory.read" || len(toolResult.ToolResultPayload.Content) != 1 || toolResult.ToolResultPayload.Content[0].Text != "memory contents" {
+	if toolResult.ToolResultPayload == nil || toolResult.ToolResultPayload.Name != "memory.read" || len(toolResult.Content) != 1 || toolResult.Content[0].Text != "memory contents" {
 		t.Fatalf("tool result = %#v, want memory.read result", toolResult)
 	}
 }
@@ -938,7 +942,7 @@ func TestRunnerTaskWaitResumesAcrossInvocations(t *testing.T) {
 			t.Fatalf("start Run error: %v", err)
 		}
 		if evt.Kind == session.EventKindToolResult && evt.ToolResultPayload != nil && evt.ToolResultPayload.Name == "RUN_COMMAND" {
-			startResult = evt.ToolResultPayload.Content[0].Text
+			startResult = evt.Content[0].Text
 		}
 	}
 	taskID := strings.TrimSpace(strings.TrimPrefix(startResult, "task started: "))
@@ -1005,7 +1009,7 @@ func TestRunnerTaskWaitResumesAcrossInvocations(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("TASK wait did not resume after backend completed")
 	}
-	if waitResult.ToolResultPayload == nil || len(waitResult.ToolResultPayload.Content) != 1 || waitResult.ToolResultPayload.Content[0].Text != "later output" {
+	if waitResult.ToolResultPayload == nil || len(waitResult.Content) != 1 || waitResult.Content[0].Text != "later output" {
 		t.Fatalf("wait result = %#v, want later output", waitResult)
 	}
 }
@@ -1053,7 +1057,7 @@ func TestRunnerWiresSpawnDelegator(t *testing.T) {
 	if delegator.req.AgentName != "reviewer" || delegator.req.Prompt != "review this" || delegator.req.RunID == "" {
 		t.Fatalf("delegator request = %#v", delegator.req)
 	}
-	if result.ToolResultPayload == nil || len(result.ToolResultPayload.Content) != 1 || result.ToolResultPayload.Content[0].Text != "child done" {
+	if result.ToolResultPayload == nil || len(result.Content) != 1 || result.Content[0].Text != "child done" {
 		t.Fatalf("spawn result = %#v, want child done", result)
 	}
 }
@@ -1102,12 +1106,12 @@ func TestRunnerSpawnCreatesChildSession(t *testing.T) {
 			spawnResult = evt
 		}
 	}
-	if spawnResult.ToolResultPayload == nil || len(spawnResult.ToolResultPayload.Content) != 1 {
+	if spawnResult.ToolResultPayload == nil || len(spawnResult.Content) != 1 {
 		t.Fatalf("spawn result = %#v, want task handle", spawnResult)
 	}
-	taskID := strings.TrimSpace(strings.TrimPrefix(spawnResult.ToolResultPayload.Content[0].Text, "task started: "))
-	if taskID == "" || taskID == spawnResult.ToolResultPayload.Content[0].Text {
-		t.Fatalf("spawn output = %q, want task started handle", spawnResult.ToolResultPayload.Content[0].Text)
+	taskID := strings.TrimSpace(strings.TrimPrefix(spawnResult.Content[0].Text, "task started: "))
+	if taskID == "" || taskID == spawnResult.Content[0].Text {
+		t.Fatalf("spawn output = %q, want task started handle", spawnResult.Content[0].Text)
 	}
 	waitCtx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
@@ -1197,13 +1201,13 @@ func TestRunnerSpawnIsTaskBackedAndWaitable(t *testing.T) {
 	if parentLLM.taskID == "" {
 		t.Fatal("model did not receive SPAWN task id")
 	}
-	if spawnResult.ToolResultPayload == nil || len(spawnResult.ToolResultPayload.Content) != 1 {
+	if spawnResult.ToolResultPayload == nil || len(spawnResult.Content) != 1 {
 		t.Fatalf("spawn result = %#v, want task handle output", spawnResult)
 	}
-	if got := spawnResult.ToolResultPayload.Content[0].Text; got != "task started: "+parentLLM.taskID {
+	if got := spawnResult.Content[0].Text; got != "task started: "+parentLLM.taskID {
 		t.Fatalf("spawn output = %q, want task handle %q", got, parentLLM.taskID)
 	}
-	if taskResult.ToolResultPayload == nil || len(taskResult.ToolResultPayload.Content) != 1 || taskResult.ToolResultPayload.Content[0].Text != "child done" {
+	if taskResult.ToolResultPayload == nil || len(taskResult.Content) != 1 || taskResult.Content[0].Text != "child done" {
 		t.Fatalf("task result = %#v, want child output", taskResult)
 	}
 	if final != "parent done" {

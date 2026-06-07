@@ -54,9 +54,9 @@ func buildSkillsSection(skills []skill.Bundle) string {
 		desc := strings.TrimSpace(one.Description)
 		path := strings.TrimSpace(one.Path)
 		if path != "" {
-			b.WriteString(fmt.Sprintf("- %s: %s (file: %s)\n", name, desc, path))
+			fmt.Fprintf(&b, "- %s: %s (file: %s)\n", name, desc, path)
 		} else {
-			b.WriteString(fmt.Sprintf("- %s: %s\n", name, desc))
+			fmt.Fprintf(&b, "- %s: %s\n", name, desc)
 		}
 	}
 	return strings.TrimSpace(b.String())

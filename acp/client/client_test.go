@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/OnslaughtSnail/caelis/acp"
 )
 
@@ -49,7 +51,7 @@ func TestClientJSONRPCRequest(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 	var parsed jsonrpcMessage
-	json.Unmarshal(data, &parsed)
+	require.NoError(t, json.Unmarshal(data, &parsed))
 	if parsed.Method != "initialize" {
 		t.Errorf("method: %v", parsed.Method)
 	}
@@ -70,7 +72,7 @@ func TestClientNotification(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 	var parsed jsonrpcMessage
-	json.Unmarshal(data, &parsed)
+	require.NoError(t, json.Unmarshal(data, &parsed))
 	if parsed.Method != "session/cancel" {
 		t.Errorf("method: %v", parsed.Method)
 	}
@@ -274,7 +276,7 @@ func TestMarshalRaw(t *testing.T) {
 		t.Error("expected non-empty")
 	}
 	var parsed map[string]any
-	json.Unmarshal(data, &parsed)
+	require.NoError(t, json.Unmarshal(data, &parsed))
 	if parsed["key"] != "value" {
 		t.Errorf("key: %v", parsed["key"])
 	}

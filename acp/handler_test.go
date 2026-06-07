@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 // ─── Mock Agent ──────────────────────────────────────────────────────
@@ -136,7 +138,8 @@ func TestHandler_Initialize(t *testing.T) {
 	agent := newMockAgent()
 	h := NewHandler(agent)
 
-	params, _ := json.Marshal(map[string]any{"protocolVersion": 1})
+	params, err := json.Marshal(map[string]any{"protocolVersion": 1})
+	require.NoError(t, err)
 	result, rpcErr := h.HandleRequest(context.Background(), "initialize", params)
 	if rpcErr != nil {
 		t.Fatalf("error: %v", rpcErr)
@@ -157,7 +160,8 @@ func TestHandler_NewSession(t *testing.T) {
 	agent := newMockAgent()
 	h := NewHandler(agent)
 
-	params, _ := json.Marshal(map[string]any{"cwd": "/tmp"})
+	params, err := json.Marshal(map[string]any{"cwd": "/tmp"})
+	require.NoError(t, err)
 	result, rpcErr := h.HandleRequest(context.Background(), "session/new", params)
 	if rpcErr != nil {
 		t.Fatalf("error: %v", rpcErr)
@@ -176,15 +180,20 @@ func TestHandler_Prompt(t *testing.T) {
 	h := NewHandler(agent)
 
 	// Create a session first.
-	params, _ := json.Marshal(map[string]any{"cwd": "/tmp"})
-	sessionResp, _ := h.HandleRequest(context.Background(), "session/new", params)
+	params, err := json.Marshal(map[string]any{"cwd": "/tmp"})
+	require.NoError(t, err)
+	sessionResp, rpcErr := h.HandleRequest(context.Background(), "session/new", params)
+	if rpcErr != nil {
+		t.Fatalf("error: %v", rpcErr)
+	}
 	sid := sessionResp.(NewSessionResponse).SessionID
 
 	// Prompt the session.
-	promptParams, _ := json.Marshal(map[string]any{
+	promptParams, err := json.Marshal(map[string]any{
 		"sessionId": sid,
 		"prompt":    []map[string]any{{"type": "text", "text": "hello"}},
 	})
+	require.NoError(t, err)
 	result, rpcErr := h.HandleRequest(context.Background(), "session/prompt", promptParams)
 	if rpcErr != nil {
 		t.Fatalf("error: %v", rpcErr)
@@ -207,7 +216,8 @@ func TestHandler_Cancel(t *testing.T) {
 	agent := newMockAgent()
 	h := NewHandler(agent)
 
-	params, _ := json.Marshal(map[string]any{"sessionId": "sess-1"})
+	params, err := json.Marshal(map[string]any{"sessionId": "sess-1"})
+	require.NoError(t, err)
 	result, rpcErr := h.HandleRequest(context.Background(), "session/cancel", params)
 	if rpcErr != nil {
 		t.Fatalf("error: %v", rpcErr)
@@ -222,12 +232,17 @@ func TestHandler_CloseSession(t *testing.T) {
 	h := NewHandler(agent)
 
 	// Create and close.
-	params, _ := json.Marshal(map[string]any{"cwd": "/tmp"})
-	sessionResp, _ := h.HandleRequest(context.Background(), "session/new", params)
+	params, err := json.Marshal(map[string]any{"cwd": "/tmp"})
+	require.NoError(t, err)
+	sessionResp, rpcErr := h.HandleRequest(context.Background(), "session/new", params)
+	if rpcErr != nil {
+		t.Fatalf("error: %v", rpcErr)
+	}
 	sid := sessionResp.(NewSessionResponse).SessionID
 
-	closeParams, _ := json.Marshal(map[string]any{"sessionId": sid})
-	_, rpcErr := h.HandleRequest(context.Background(), "session/close", closeParams)
+	closeParams, err := json.Marshal(map[string]any{"sessionId": sid})
+	require.NoError(t, err)
+	_, rpcErr = h.HandleRequest(context.Background(), "session/close", closeParams)
 	if rpcErr != nil {
 		t.Fatalf("error: %v", rpcErr)
 	}
@@ -323,30 +338,29 @@ func TestLoopback_FullLifecycle(t *testing.T) {
 	ctx := context.Background()
 
 	// Initialize.
-	loopback.Client.Call(ctx, "initialize", map[string]any{"protocolVersion": 1})
+	_, err := loopback.Client.Call(ctx, "initialize", map[string]any{"protocolVersion": 1})
+	require.NoError(t, err)
 
 	// New session.
-	result, _ := loopback.Client.Call(ctx, "session/new", map[string]any{"cwd": "/tmp"})
+	result, err := loopback.Client.Call(ctx, "session/new", map[string]any{"cwd": "/tmp"})
+	require.NoError(t, err)
 	var sess NewSessionResponse
-	json.Unmarshal(result, &sess)
+	require.NoError(t, json.Unmarshal(result, &sess))
 
 	// Prompt.
-	loopback.Client.Call(ctx, "session/prompt", map[string]any{
+	_, err = loopback.Client.Call(ctx, "session/prompt", map[string]any{
 		"sessionId": sess.SessionID,
 		"prompt":    []map[string]any{{"type": "text", "text": "test"}},
 	})
+	require.NoError(t, err)
 
 	// Cancel.
-	_, err := loopback.Client.Call(ctx, "session/cancel", map[string]any{"sessionId": sess.SessionID})
-	if err != nil {
-		t.Fatalf("Cancel: %v", err)
-	}
+	_, err = loopback.Client.Call(ctx, "session/cancel", map[string]any{"sessionId": sess.SessionID})
+	require.NoError(t, err)
 
 	// Close.
 	_, err = loopback.Client.Call(ctx, "session/close", map[string]any{"sessionId": sess.SessionID})
-	if err != nil {
-		t.Fatalf("Close: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Verify session is gone.
 	if _, ok := agent.sessions[sess.SessionID]; ok {
@@ -378,7 +392,7 @@ func TestServe_IO(t *testing.T) {
 	// Write a JSON-RPC request.
 	req := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1}}` + "\n"
 	go func() {
-		pw.Write([]byte(req))
+		_, _ = pw.Write([]byte(req))
 		time.Sleep(50 * time.Millisecond)
 		pw.Close()
 	}()
@@ -407,7 +421,7 @@ func TestServe_PromptStreamsSessionUpdate(t *testing.T) {
 	pr, pw := pipe()
 	req := `{"jsonrpc":"2.0","id":1,"method":"session/prompt","params":{"sessionId":"sess-1","prompt":[{"type":"text","text":"hello"}]}}` + "\n"
 	go func() {
-		pw.Write([]byte(req))
+		_, _ = pw.Write([]byte(req))
 		time.Sleep(50 * time.Millisecond)
 		pw.Close()
 	}()
@@ -433,9 +447,9 @@ func TestServe_PromptPermissionRoundTrip(t *testing.T) {
 	handler := NewHandler(agent)
 	pr, pw := pipe()
 	go func() {
-		pw.Write([]byte(`{"jsonrpc":"2.0","id":1,"method":"session/prompt","params":{"sessionId":"sess-1","prompt":[{"type":"text","text":"run"}]}}` + "\n"))
+		_, _ = pw.Write([]byte(`{"jsonrpc":"2.0","id":1,"method":"session/prompt","params":{"sessionId":"sess-1","prompt":[{"type":"text","text":"run"}]}}` + "\n"))
 		time.Sleep(50 * time.Millisecond)
-		pw.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"outcome":{"outcome":"selected","optionId":"allow_once"}}}` + "\n"))
+		_, _ = pw.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"outcome":{"outcome":"selected","optionId":"allow_once"}}}` + "\n"))
 		time.Sleep(50 * time.Millisecond)
 		pw.Close()
 	}()
@@ -463,7 +477,7 @@ func TestServe_ParseErrorRespondsWithNullID(t *testing.T) {
 	handler := NewHandler(newMockAgent())
 	pr, pw := pipe()
 	go func() {
-		pw.Write([]byte("{not-json}\n"))
+		_, _ = pw.Write([]byte("{not-json}\n"))
 		time.Sleep(50 * time.Millisecond)
 		pw.Close()
 	}()
@@ -485,7 +499,7 @@ func TestServe_InvalidRequestRespondsWithOriginalID(t *testing.T) {
 	handler := NewHandler(newMockAgent())
 	pr, pw := pipe()
 	go func() {
-		pw.Write([]byte(`{"jsonrpc":"2.0","id":"bad-1"}` + "\n"))
+		_, _ = pw.Write([]byte(`{"jsonrpc":"2.0","id":"bad-1"}` + "\n"))
 		time.Sleep(50 * time.Millisecond)
 		pw.Close()
 	}()
@@ -509,9 +523,9 @@ func TestServe_MalformedPendingResponseUnblocksCallback(t *testing.T) {
 	handler := NewHandler(agent)
 	pr, pw := pipe()
 	go func() {
-		pw.Write([]byte(`{"jsonrpc":"2.0","id":99,"method":"session/prompt","params":{"sessionId":"sess-1","prompt":[{"type":"text","text":"run"}]}}` + "\n"))
+		_, _ = pw.Write([]byte(`{"jsonrpc":"2.0","id":99,"method":"session/prompt","params":{"sessionId":"sess-1","prompt":[{"type":"text","text":"run"}]}}` + "\n"))
 		time.Sleep(50 * time.Millisecond)
-		pw.Write([]byte(`{"jsonrpc":"2.0","id":1}` + "\n"))
+		_, _ = pw.Write([]byte(`{"jsonrpc":"2.0","id":1}` + "\n"))
 		time.Sleep(50 * time.Millisecond)
 		pw.Close()
 	}()
@@ -541,9 +555,9 @@ func TestServe_PromptTerminalCallbackRoundTrip(t *testing.T) {
 	handler := NewHandler(agent)
 	pr, pw := pipe()
 	go func() {
-		pw.Write([]byte(`{"jsonrpc":"2.0","id":1,"method":"session/prompt","params":{"sessionId":"sess-1","prompt":[{"type":"text","text":"run tests"}]}}` + "\n"))
+		_, _ = pw.Write([]byte(`{"jsonrpc":"2.0","id":1,"method":"session/prompt","params":{"sessionId":"sess-1","prompt":[{"type":"text","text":"run tests"}]}}` + "\n"))
 		time.Sleep(50 * time.Millisecond)
-		pw.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"terminalId":"term-1"}}` + "\n"))
+		_, _ = pw.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"terminalId":"term-1"}}` + "\n"))
 		time.Sleep(50 * time.Millisecond)
 		pw.Close()
 	}()
@@ -570,7 +584,7 @@ func TestServe_PromptCallbackUnblocksOnDisconnect(t *testing.T) {
 	handler := NewHandler(agent)
 	pr, pw := pipe()
 	go func() {
-		pw.Write([]byte(`{"jsonrpc":"2.0","id":1,"method":"session/prompt","params":{"sessionId":"sess-1","prompt":[{"type":"text","text":"run"}]}}` + "\n"))
+		_, _ = pw.Write([]byte(`{"jsonrpc":"2.0","id":1,"method":"session/prompt","params":{"sessionId":"sess-1","prompt":[{"type":"text","text":"run"}]}}` + "\n"))
 		time.Sleep(50 * time.Millisecond)
 		pw.Close()
 	}()

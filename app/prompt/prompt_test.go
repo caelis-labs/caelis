@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/OnslaughtSnail/caelis/skill"
+	"github.com/stretchr/testify/require"
 )
 
 func TestParseFrontmatter(t *testing.T) {
@@ -48,10 +49,10 @@ func TestSkillDiscovery(t *testing.T) {
 	// Create two skills.
 	s1 := filepath.Join(dir, "skill-a")
 	s2 := filepath.Join(dir, "skill-b")
-	os.MkdirAll(s1, 0o755)
-	os.MkdirAll(s2, 0o755)
-	os.WriteFile(filepath.Join(s1, "SKILL.md"), []byte("---\nname: skill-a\ndescription: First skill\n---\nBody"), 0o644)
-	os.WriteFile(filepath.Join(s2, "SKILL.md"), []byte("---\nname: skill-b\ndescription: Second skill\n---\nBody"), 0o644)
+	require.NoError(t, os.MkdirAll(s1, 0o755))
+	require.NoError(t, os.MkdirAll(s2, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(s1, "SKILL.md"), []byte("---\nname: skill-a\ndescription: First skill\n---\nBody"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(s2, "SKILL.md"), []byte("---\nname: skill-b\ndescription: Second skill\n---\nBody"), 0o644))
 
 	bundles, err := skill.Discover([]string{dir})
 	if err != nil {
@@ -65,8 +66,8 @@ func TestSkillDiscovery(t *testing.T) {
 func TestSkillDiscoveryDedup(t *testing.T) {
 	dir := t.TempDir()
 	s1 := filepath.Join(dir, "my-skill")
-	os.MkdirAll(s1, 0o755)
-	os.WriteFile(filepath.Join(s1, "SKILL.md"), []byte("---\nname: my-skill\ndescription: dup\n---\nBody"), 0o644)
+	require.NoError(t, os.MkdirAll(s1, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(s1, "SKILL.md"), []byte("---\nname: my-skill\ndescription: dup\n---\nBody"), 0o644))
 
 	// Same directory twice — should deduplicate.
 	bundles, _ := skill.Discover([]string{dir, dir})
@@ -78,13 +79,13 @@ func TestSkillDiscoveryDedup(t *testing.T) {
 func TestAgentProfileParse(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "reviewer.md")
-	os.WriteFile(path, []byte(`---
+	require.NoError(t, os.WriteFile(path, []byte(`---
 id: reviewer
 name: Code Reviewer
 description: Reviews code
 capabilities: review, tests
 ---
-You are a code reviewer.`), 0o644)
+You are a code reviewer.`), 0o644))
 
 	p, err := ParseAgentProfile(path)
 	if err != nil {

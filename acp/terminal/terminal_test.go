@@ -26,8 +26,9 @@ func TestTerminalSubdomainUsesCanonicalWireTypes(t *testing.T) {
 		Env:             []EnvVariable{{Name: "GOFLAGS", Value: "-count=1"}},
 		OutputByteLimit: &limit,
 	}
-	var canonical acp.CreateTerminalRequest = req
-	var roundTrip CreateRequest = canonical
+	// Verify CreateRequest is a type alias of acp.CreateTerminalRequest (compile-time check).
+	assertTypeAlias[acp.CreateTerminalRequest](req)
+	roundTrip := req
 
 	data, err := json.Marshal(roundTrip)
 	if err != nil {
@@ -46,9 +47,10 @@ func TestTerminalSubdomainUsesCanonicalWireTypes(t *testing.T) {
 		Output:     "ok\n",
 		ExitStatus: &ExitStatus{ExitCode: &code},
 	}
-	var canonicalOutput acp.TerminalOutputResponse = output
-	if canonicalOutput.ExitStatus == nil || canonicalOutput.ExitStatus.ExitCode == nil || *canonicalOutput.ExitStatus.ExitCode != 0 {
-		t.Fatalf("canonical output = %#v", canonicalOutput)
+	// Verify OutputResponse is a type alias of acp.TerminalOutputResponse (compile-time check).
+	assertTypeAlias[acp.TerminalOutputResponse](output)
+	if output.ExitStatus == nil || output.ExitStatus.ExitCode == nil || *output.ExitStatus.ExitCode != 0 {
+		t.Fatalf("canonical output = %#v", output)
 	}
 }
 
@@ -77,3 +79,6 @@ func (providerStub) TerminalKill(context.Context, KillRequest) error {
 func (providerStub) TerminalRelease(context.Context, ReleaseRequest) error {
 	return nil
 }
+
+// assertTypeAlias is a compile-time check that T and the argument's type are identical.
+func assertTypeAlias[T any](_ T) {}

@@ -30,8 +30,8 @@ func (b *Backend) Start(ctx context.Context, req sandbox.CommandRequest) (sandbo
 		return nil, err
 	}
 
-	runCtx := ctx
-	cancel := func() {}
+	var runCtx context.Context
+	var cancel context.CancelFunc
 	if req.Timeout > 0 {
 		runCtx, cancel = context.WithTimeout(ctx, time.Duration(req.Timeout)*time.Second)
 	} else {

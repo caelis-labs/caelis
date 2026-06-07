@@ -126,8 +126,8 @@ func TestEventCloneToolCall(t *testing.T) {
 		},
 	}
 	cp := e.Clone()
-	cp.ToolCallPayload.Args["k"] = "modified"
-	if e.ToolCallPayload.Args["k"] == "modified" {
+	cp.Args["k"] = "modified"
+	if e.Args["k"] == "modified" {
 		t.Error("clone should not affect original args")
 	}
 }
@@ -142,8 +142,8 @@ func TestEventCloneToolResult(t *testing.T) {
 		},
 	}
 	cp := e.Clone()
-	cp.ToolResultPayload.Content[0].Text = "modified"
-	if e.ToolResultPayload.Content[0].Text == "modified" {
+	cp.Content[0].Text = "modified"
+	if e.Content[0].Text == "modified" {
 		t.Error("clone should not affect original content")
 	}
 }

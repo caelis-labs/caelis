@@ -3,6 +3,7 @@ package acp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -299,7 +300,7 @@ func (h *Handler) HandleNotification(ctx context.Context, method string, params 
 	case MethodSessionCancel:
 		var req CancelNotification
 		if err := json.Unmarshal(params, &req); err == nil {
-			h.agent.Cancel(ctx, req.SessionID)
+			_ = h.agent.Cancel(ctx, req.SessionID) // notification handler; error cannot be returned to caller
 		}
 	}
 }
@@ -425,7 +426,7 @@ func (c *serverConn) serve(ctx context.Context) error {
 		if err != nil {
 			c.close(err)
 			c.wg.Wait()
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				return nil
 			}
 			return err

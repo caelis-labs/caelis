@@ -72,14 +72,14 @@ func ValidateEvent(e *Event) error {
 		if e.HandoffPayload == nil {
 			return fmt.Errorf("event %s: HandoffPayload required", e.Kind)
 		}
-		if e.HandoffPayload.FromAgent == "" || e.HandoffPayload.ToAgent == "" {
+		if e.FromAgent == "" || e.ToAgent == "" {
 			return fmt.Errorf("event %s: FromAgent and ToAgent required", e.Kind)
 		}
 	case EventKindParticipant:
 		if e.ParticipantPayload == nil {
 			return fmt.Errorf("event %s: ParticipantPayload required", e.Kind)
 		}
-		if e.ParticipantPayload.ParticipantID == "" {
+		if e.ParticipantID == "" {
 			return fmt.Errorf("event %s: ParticipantID required", e.Kind)
 		}
 	}

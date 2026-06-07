@@ -30,7 +30,7 @@ func (i *Installer) Install(ctx context.Context, req caelisplugin.InstallRequest
 	if i == nil || i.store == nil {
 		return caelisplugin.Installed{}, fmt.Errorf("plugin/fs: installer store is required")
 	}
-	resolved, err := i.resolver.Resolve(ctx, caelisplugin.ResolveRequest{Root: req.Root})
+	resolved, err := i.resolver.Resolve(ctx, caelisplugin.ResolveRequest(req)) //nolint:unconvert // type alias, explicit for clarity
 	if err != nil {
 		return caelisplugin.Installed{}, err
 	}

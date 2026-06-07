@@ -145,7 +145,12 @@ func readTestFrame(r *bufio.Reader) ([]byte, error) {
 }
 
 func writeTestFrame(w io.Writer, msg any) {
-	data, _ := json.Marshal(msg)
+	data, err := json.Marshal(msg)
+	if err != nil {
+		os.Exit(2)
+	}
 	fmt.Fprintf(w, "Content-Length: %d\r\n\r\n", len(data))
-	w.Write(data)
+	if _, err := w.Write(data); err != nil {
+		os.Exit(2)
+	}
 }

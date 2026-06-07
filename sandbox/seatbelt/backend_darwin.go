@@ -5,6 +5,7 @@ package seatbelt
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"time"
@@ -47,7 +48,8 @@ func (b *Backend) Run(ctx context.Context, req sandbox.CommandRequest) (sandbox.
 		Stderr: stderr.Bytes(),
 	}
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
 			result.ExitCode = exitErr.ExitCode()
 			return result, fmt.Errorf("seatbelt run: %w", err)
 		}

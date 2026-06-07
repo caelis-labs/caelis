@@ -416,7 +416,7 @@ func TestAgentToolCallUsesPreparedExecutor(t *testing.T) {
 			t.Fatalf("error: %v", err)
 		}
 		if evt.Kind == session.EventKindToolResult && evt.ToolResultPayload != nil {
-			for _, part := range evt.ToolResultPayload.Content {
+			for _, part := range evt.Content {
 				if part.Kind == session.PartKindText {
 					resultText += part.Text
 				}
@@ -462,8 +462,8 @@ func TestAgentExecutesToolCallsConcurrentlyAndYieldsResultsInCallOrder(t *testin
 		}
 		if evt.Kind == session.EventKindToolResult && evt.ToolResultPayload != nil {
 			resultIDs = append(resultIDs, evt.ToolResultPayload.CallID)
-			if len(evt.ToolResultPayload.Content) > 0 {
-				resultTexts = append(resultTexts, evt.ToolResultPayload.Content[0].Text)
+			if len(evt.Content) > 0 {
+				resultTexts = append(resultTexts, evt.Content[0].Text)
 			}
 		}
 	}
@@ -534,9 +534,9 @@ func TestAgentTurnsMissingToolNameIntoCanonicalToolError(t *testing.T) {
 			callName = evt.ToolCallPayload.Name
 		}
 		if evt.Kind == session.EventKindToolResult && evt.ToolResultPayload != nil {
-			resultIsError = evt.ToolResultPayload.IsError
-			if len(evt.ToolResultPayload.Content) > 0 {
-				resultText = evt.ToolResultPayload.Content[0].Text
+			resultIsError = evt.IsError
+			if len(evt.Content) > 0 {
+				resultText = evt.Content[0].Text
 			}
 		}
 	}
@@ -572,7 +572,7 @@ func TestAgentToolNotFound(t *testing.T) {
 
 	for _, e := range events {
 		if e.Kind == session.EventKindToolResult && e.ToolResultPayload != nil {
-			if !e.ToolResultPayload.IsError {
+			if !e.IsError {
 				t.Error("expected error for missing tool")
 			}
 			return

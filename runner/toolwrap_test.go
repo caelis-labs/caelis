@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/OnslaughtSnail/caelis/agent"
 	"github.com/OnslaughtSnail/caelis/agent/approval/autoreview"
 	"github.com/OnslaughtSnail/caelis/model"
@@ -245,10 +247,11 @@ func TestObserverCalled(t *testing.T) {
 	obs := &testObserver{}
 	wrapped := WrapTools([]tool.Tool{base}, nil, nil, obs)
 
-	wrapped[0].Run(fakeCtx(), tool.Call{
+	_, err := wrapped[0].Run(fakeCtx(), tool.Call{
 		Name: "ECHO",
 		Args: map[string]any{"text": "observed"},
 	})
+	require.NoError(t, err)
 
 	if !obs.beforeCalled {
 		t.Error("BeforeTool not called")

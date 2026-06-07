@@ -153,8 +153,8 @@ func projectPlan(e *session.Event) []Update {
 	if e.PlanPayload == nil {
 		return nil
 	}
-	entries := make([]PlanEntry, 0, len(e.PlanPayload.Entries))
-	for _, pe := range e.PlanPayload.Entries {
+	entries := make([]PlanEntry, 0, len(e.Entries))
+	for _, pe := range e.Entries {
 		entries = append(entries, PlanEntry{
 			Content: pe.Content,
 			Status:  pe.Status,
@@ -175,8 +175,8 @@ func projectHandoff(e *session.Event) []Update {
 	return []Update{SessionInfoUpdate{
 		SessionUpdate: UpdateSessionInfo,
 		Handoff: &HandoffInfo{
-			FromAgent: e.HandoffPayload.FromAgent,
-			ToAgent:   e.HandoffPayload.ToAgent,
+			FromAgent: e.FromAgent,
+			ToAgent:   e.ToAgent,
 			Reason:    e.HandoffPayload.Reason,
 		},
 		Meta: buildControlMeta(e),
@@ -190,10 +190,10 @@ func projectParticipant(e *session.Event) []Update {
 	return []Update{SessionInfoUpdate{
 		SessionUpdate: UpdateSessionInfo,
 		Participant: &ParticipantInfo{
-			ParticipantID: e.ParticipantPayload.ParticipantID,
-			Role:          e.ParticipantPayload.Role,
-			State:         e.ParticipantPayload.State,
-			Metadata:      cloneStringMap(e.ParticipantPayload.Metadata),
+			ParticipantID: e.ParticipantID,
+			Role:          e.Role,
+			State:         e.State,
+			Metadata:      cloneStringMap(e.Metadata),
 		},
 		Meta: buildControlMeta(e),
 	}}

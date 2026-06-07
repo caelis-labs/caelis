@@ -530,7 +530,7 @@ func WrapTools(tools []tool.Tool, engine policy.Engine, approver agent.ApprovalR
 	}
 	wrapped := make([]tool.Tool, len(tools))
 	for i, t := range tools {
-		var w tool.Tool = t
+		var w = t
 		// Innermost: truncation.
 		w = &truncationWrappedTool{inner: w, policy: tool.DefaultTruncationPolicy()}
 		// Middle: observer.

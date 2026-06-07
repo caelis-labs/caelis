@@ -176,9 +176,9 @@ func TestParticipantEventRequiresPayloadAndClonesMetadata(t *testing.T) {
 	}
 
 	cloned := event.Clone()
-	cloned.ParticipantPayload.Metadata["agent"] = "changed"
-	if event.ParticipantPayload.Metadata["agent"] != "codex" {
-		t.Fatalf("clone mutated original metadata: %#v", event.ParticipantPayload.Metadata)
+	cloned.Metadata["agent"] = "changed"
+	if event.Metadata["agent"] != "codex" {
+		t.Fatalf("clone mutated original metadata: %#v", event.Metadata)
 	}
 }
 

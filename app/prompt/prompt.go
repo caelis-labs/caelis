@@ -128,7 +128,7 @@ func buildSkillsSection(skills []skill.Bundle) string {
 	b.WriteString("## Skills\n\n")
 	b.WriteString("Use a skill only when its description clearly matches the task.\n\n")
 	for _, s := range skills {
-		b.WriteString(fmt.Sprintf("- %s: %s (file: %s)\n", s.Name, s.Description, s.Path))
+		fmt.Fprintf(&b, "- %s: %s (file: %s)\n", s.Name, s.Description, s.Path)
 	}
 	return b.String()
 }

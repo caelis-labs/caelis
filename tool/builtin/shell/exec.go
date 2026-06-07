@@ -3,6 +3,7 @@ package shell
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os/exec"
 	"time"
 
@@ -48,7 +49,8 @@ func executeHostCommand(ctx context.Context, req sandbox.CommandRequest) (sandbo
 		ExitCode: 0,
 	}
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
 			result.ExitCode = exitErr.ExitCode()
 		} else {
 			return sandbox.CommandResult{}, err

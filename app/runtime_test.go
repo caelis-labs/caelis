@@ -161,7 +161,7 @@ func (a sandboxAwareAgent) Prepare(req agent.PrepareRequest) agent.Agent {
 }
 
 func (a sandboxAwareAgent) Run(agent.InvocationContext) iter.Seq2[session.Event, error] {
-	return staticAgent{name: a.name}.Run(nil)
+	return staticAgent(a).Run(nil)
 }
 
 type recordingAppSandboxBackend struct {

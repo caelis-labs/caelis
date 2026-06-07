@@ -30,7 +30,7 @@ func (e Event) Clone() Event {
 	}
 	if e.CompactionPayload != nil {
 		v := *e.CompactionPayload
-		v.RetainedMessages = cloneCompactionRetainedMessages(e.CompactionPayload.RetainedMessages)
+		v.RetainedMessages = cloneCompactionRetainedMessages(e.RetainedMessages)
 		cp.CompactionPayload = &v
 	}
 	if e.LifecyclePayload != nil {

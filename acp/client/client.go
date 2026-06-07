@@ -444,7 +444,7 @@ func (c *Client) dispatchLine(line []byte) {
 		params := msg.Params
 		go func() {
 			result, rpcErr := c.dispatchRequest(method, params)
-			c.respond(id, result, rpcErr)
+			_ = c.respond(id, result, rpcErr) // best-effort; cannot propagate error from goroutine
 		}()
 
 	case msg.ID != nil && len(msg.Result) == 0 && msg.Error == nil:
@@ -736,10 +736,10 @@ func (c *Client) Close() error {
 		c.cancel()
 	}
 	if c.stdin != nil {
-		c.stdin.Close()
+		_ = c.stdin.Close() // best-effort cleanup
 	}
 	if c.proc != nil {
-		c.proc.Kill()
+		_ = c.proc.Kill() // best-effort cleanup
 	}
 	return nil
 }

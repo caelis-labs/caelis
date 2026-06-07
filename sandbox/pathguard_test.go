@@ -6,12 +6,13 @@ import (
 	"testing"
 
 	"github.com/OnslaughtSnail/caelis/sandbox"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCheckPathAccess_AllowedPath(t *testing.T) {
 	dir := t.TempDir()
 	allowed := filepath.Join(dir, "workspace")
-	os.MkdirAll(allowed, 0o755)
+	require.NoError(t, os.MkdirAll(allowed, 0o755))
 
 	err := sandbox.CheckPathAccess(filepath.Join(allowed, "file.txt"), sandbox.PathAccessRead, sandbox.Constraints{
 		Paths: []sandbox.PathRule{{Path: allowed, Access: sandbox.PathAccessWrite}},
@@ -25,8 +26,8 @@ func TestCheckPathAccess_DeniedPath(t *testing.T) {
 	dir := t.TempDir()
 	allowed := filepath.Join(dir, "workspace")
 	denied := filepath.Join(dir, "secrets")
-	os.MkdirAll(allowed, 0o755)
-	os.MkdirAll(denied, 0o755)
+	require.NoError(t, os.MkdirAll(allowed, 0o755))
+	require.NoError(t, os.MkdirAll(denied, 0o755))
 
 	err := sandbox.CheckPathAccess(filepath.Join(denied, "key.pem"), sandbox.PathAccessRead, sandbox.Constraints{
 		Paths: []sandbox.PathRule{{Path: allowed, Access: sandbox.PathAccessWrite}},
@@ -39,7 +40,7 @@ func TestCheckPathAccess_DeniedPath(t *testing.T) {
 func TestCheckPathAccess_ReadOnlyDeniesWrite(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "data")
-	os.MkdirAll(path, 0o755)
+	require.NoError(t, os.MkdirAll(path, 0o755))
 
 	err := sandbox.CheckPathAccess(filepath.Join(path, "file"), sandbox.PathAccessWrite, sandbox.Constraints{
 		Paths: []sandbox.PathRule{{Path: path, Access: sandbox.PathAccessRead}},
@@ -53,13 +54,13 @@ func TestCheckPathAccess_SymlinkEscape(t *testing.T) {
 	dir := t.TempDir()
 	allowed := filepath.Join(dir, "workspace")
 	denied := filepath.Join(dir, "secrets")
-	os.MkdirAll(allowed, 0o755)
-	os.MkdirAll(denied, 0o755)
-	os.WriteFile(filepath.Join(denied, "key.pem"), []byte("secret"), 0o644)
+	require.NoError(t, os.MkdirAll(allowed, 0o755))
+	require.NoError(t, os.MkdirAll(denied, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(denied, "key.pem"), []byte("secret"), 0o644))
 
 	// Create symlink inside allowed that points to denied.
 	symlink := filepath.Join(allowed, "escape")
-	os.Symlink(denied, symlink)
+	require.NoError(t, os.Symlink(denied, symlink))
 
 	// Reading through the symlink should be denied because the resolved
 	// path is outside the allowed root.
@@ -82,7 +83,7 @@ func TestCheckPathAccess_NestedPaths(t *testing.T) {
 	dir := t.TempDir()
 	root := filepath.Join(dir, "project")
 	nested := filepath.Join(root, "src", "pkg")
-	os.MkdirAll(nested, 0o755)
+	require.NoError(t, os.MkdirAll(nested, 0o755))
 
 	err := sandbox.CheckPathAccess(filepath.Join(nested, "file.go"), sandbox.PathAccessRead, sandbox.Constraints{
 		Paths: []sandbox.PathRule{{Path: root, Access: sandbox.PathAccessWrite}},

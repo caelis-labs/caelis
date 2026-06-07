@@ -3,6 +3,7 @@ package host
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -83,7 +84,8 @@ func (b *Backend) Run(ctx context.Context, req sandbox.CommandRequest) (sandbox.
 		ExitCode: 0,
 	}
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
 			result.ExitCode = exitErr.ExitCode()
 		} else {
 			return sandbox.CommandResult{}, fmt.Errorf("host run: %w", err)

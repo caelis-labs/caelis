@@ -7,13 +7,14 @@ import (
 	"testing"
 
 	"github.com/OnslaughtSnail/caelis/sandbox"
+	"github.com/stretchr/testify/require"
 )
 
 func TestConstrainedFS_AllowedPath(t *testing.T) {
 	dir := t.TempDir()
 	allowed := filepath.Join(dir, "workspace")
-	os.MkdirAll(allowed, 0o755)
-	os.WriteFile(filepath.Join(allowed, "file.txt"), []byte("hello"), 0o644)
+	require.NoError(t, os.MkdirAll(allowed, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(allowed, "file.txt"), []byte("hello"), 0o644))
 
 	b := New()
 	fs, err := b.FileSystem(context.Background(), sandbox.Constraints{
@@ -45,9 +46,9 @@ func TestConstrainedFS_DeniedPath(t *testing.T) {
 	dir := t.TempDir()
 	allowed := filepath.Join(dir, "workspace")
 	denied := filepath.Join(dir, "secrets")
-	os.MkdirAll(allowed, 0o755)
-	os.MkdirAll(denied, 0o755)
-	os.WriteFile(filepath.Join(denied, "key.pem"), []byte("secret"), 0o644)
+	require.NoError(t, os.MkdirAll(allowed, 0o755))
+	require.NoError(t, os.MkdirAll(denied, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(denied, "key.pem"), []byte("secret"), 0o644))
 
 	b := New()
 	fs, err := b.FileSystem(context.Background(), sandbox.Constraints{
@@ -93,8 +94,8 @@ func TestConstrainedFS_DeniedPath(t *testing.T) {
 func TestConstrainedFS_ReadOnlyPath(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "readonly")
-	os.MkdirAll(path, 0o755)
-	os.WriteFile(filepath.Join(path, "data.txt"), []byte("read me"), 0o644)
+	require.NoError(t, os.MkdirAll(path, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(path, "data.txt"), []byte("read me"), 0o644))
 
 	b := New()
 	fs, err := b.FileSystem(context.Background(), sandbox.Constraints{
@@ -124,7 +125,7 @@ func TestConstrainedFS_ReadOnlyPath(t *testing.T) {
 
 func TestConstrainedFS_NoConstraints(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "file.txt"), []byte("free"), 0o644)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "file.txt"), []byte("free"), 0o644))
 
 	b := New()
 	fs, err := b.FileSystem(context.Background(), sandbox.Constraints{})
@@ -145,12 +146,12 @@ func TestConstrainedFS_SymlinkEscape(t *testing.T) {
 	dir := t.TempDir()
 	allowed := filepath.Join(dir, "workspace")
 	denied := filepath.Join(dir, "secrets")
-	os.MkdirAll(allowed, 0o755)
-	os.MkdirAll(denied, 0o755)
-	os.WriteFile(filepath.Join(denied, "key.pem"), []byte("secret"), 0o644)
+	require.NoError(t, os.MkdirAll(allowed, 0o755))
+	require.NoError(t, os.MkdirAll(denied, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(denied, "key.pem"), []byte("secret"), 0o644))
 
 	// Symlink inside allowed pointing to denied.
-	os.Symlink(denied, filepath.Join(allowed, "escape"))
+	require.NoError(t, os.Symlink(denied, filepath.Join(allowed, "escape")))
 
 	b := New()
 	fs, err := b.FileSystem(context.Background(), sandbox.Constraints{

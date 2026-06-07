@@ -145,8 +145,8 @@ func TestNormalizeExternalEvent_ToolCallUpdate(t *testing.T) {
 	if e.ToolCallPayload.CallID != "c1" {
 		t.Errorf("callid: %q", e.ToolCallPayload.CallID)
 	}
-	if e.ToolCallPayload.Args["path"] != "/tmp" {
-		t.Errorf("args: %v", e.ToolCallPayload.Args)
+	if e.Args["path"] != "/tmp" {
+		t.Errorf("args: %v", e.Args)
 	}
 }
 
@@ -168,11 +168,11 @@ func TestNormalizeExternalEvent_ToolCallPreservesRawInputAndMeta(t *testing.T) {
 	if e.SessionRef.SessionID != "sess-1" {
 		t.Fatalf("session id: %q", e.SessionRef.SessionID)
 	}
-	if e.ToolCallPayload.ArgJSON != `["echo","hi"]` {
-		t.Fatalf("arg json: %q", e.ToolCallPayload.ArgJSON)
+	if e.ArgJSON != `["echo","hi"]` {
+		t.Fatalf("arg json: %q", e.ArgJSON)
 	}
-	if e.ToolCallPayload.Args != nil {
-		t.Fatalf("non-object raw input should not be coerced into args: %#v", e.ToolCallPayload.Args)
+	if e.Args != nil {
+		t.Fatalf("non-object raw input should not be coerced into args: %#v", e.Args)
 	}
 	if e.ProviderMeta["acp_meta"] == nil {
 		t.Fatalf("expected acp meta: %#v", e.ProviderMeta)
@@ -210,10 +210,10 @@ func TestNormalizeExternalEvent_ToolResultPreservesStructuredRawOutput(t *testin
 	if e == nil || e.Kind != session.EventKindToolResult {
 		t.Fatal("expected tool_result event")
 	}
-	if len(e.ToolResultPayload.Content) != 1 {
-		t.Fatalf("content: %#v", e.ToolResultPayload.Content)
+	if len(e.Content) != 1 {
+		t.Fatalf("content: %#v", e.Content)
 	}
-	part := e.ToolResultPayload.Content[0]
+	part := e.Content[0]
 	if part.Kind != session.PartKindJSON {
 		t.Fatalf("part kind: %q", part.Kind)
 	}
@@ -237,8 +237,8 @@ func TestNormalizeExternalEvent_ToolResultUsesACPContentWhenRawOutputMissing(t *
 	if e == nil || e.Kind != session.EventKindToolResult {
 		t.Fatal("expected tool_result event")
 	}
-	if len(e.ToolResultPayload.Content) != 1 || e.ToolResultPayload.Content[0].Text != "visible output" {
-		t.Fatalf("content: %#v", e.ToolResultPayload.Content)
+	if len(e.Content) != 1 || e.Content[0].Text != "visible output" {
+		t.Fatalf("content: %#v", e.Content)
 	}
 }
 
@@ -251,8 +251,8 @@ func TestNormalizeExternalEvent_PlanUpdate(t *testing.T) {
 	if e == nil || e.Kind != session.EventKindPlan {
 		t.Fatal("expected plan event")
 	}
-	if len(e.PlanPayload.Entries) != 1 || e.PlanPayload.Entries[0].Content != "step 1" {
-		t.Errorf("entries: %v", e.PlanPayload.Entries)
+	if len(e.Entries) != 1 || e.Entries[0].Content != "step 1" {
+		t.Errorf("entries: %v", e.Entries)
 	}
 }
 
@@ -367,8 +367,8 @@ func TestNormalizeRoundTrip_ToolArgJSONAndLocations(t *testing.T) {
 	if normalized == nil || normalized.ToolCallPayload == nil {
 		t.Fatalf("normalized: %#v", normalized)
 	}
-	if normalized.ToolCallPayload.ArgJSON != `["echo","hi"]` || normalized.ToolCallPayload.Args != nil {
-		t.Fatalf("tool args: args=%#v argJSON=%q", normalized.ToolCallPayload.Args, normalized.ToolCallPayload.ArgJSON)
+	if normalized.ArgJSON != `["echo","hi"]` || normalized.Args != nil {
+		t.Fatalf("tool args: args=%#v argJSON=%q", normalized.Args, normalized.ArgJSON)
 	}
 	locations, ok := normalized.ProviderMeta["acp_locations"].([]ToolCallLocation)
 	if !ok || len(locations) != 1 || locations[0].Path != "src/main.go" || locations[0].Line == nil || *locations[0].Line != line {

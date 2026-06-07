@@ -100,7 +100,6 @@ func (r *Runner) Run(ctx context.Context, req RunRequest) iter.Seq2[session.Even
 		}
 
 		invID := fmt.Sprintf("inv-%d", time.Now().UnixNano())
-		runAgent := r.cfg.Agent
 		observer := newToolObserverBridge(sess.Ref, invID)
 
 		// Load prior session events once so both approval review and model

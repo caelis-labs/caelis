@@ -3,6 +3,8 @@ package session
 import (
 	"context"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestInMemoryServiceCreate(t *testing.T) {
@@ -48,9 +50,12 @@ func TestInMemoryServiceGetNotFound(t *testing.T) {
 func TestInMemoryServiceList(t *testing.T) {
 	svc := InMemoryService()
 	ctx := context.Background()
-	svc.Create(ctx, CreateRequest{AppName: "app", UserID: "u1", WorkspaceKey: "ws"})
-	svc.Create(ctx, CreateRequest{AppName: "app", UserID: "u1", WorkspaceKey: "ws"})
-	svc.Create(ctx, CreateRequest{AppName: "app", UserID: "u2", WorkspaceKey: "ws"})
+	_, err := svc.Create(ctx, CreateRequest{AppName: "app", UserID: "u1", WorkspaceKey: "ws"})
+	require.NoError(t, err)
+	_, err = svc.Create(ctx, CreateRequest{AppName: "app", UserID: "u1", WorkspaceKey: "ws"})
+	require.NoError(t, err)
+	_, err = svc.Create(ctx, CreateRequest{AppName: "app", UserID: "u2", WorkspaceKey: "ws"})
+	require.NoError(t, err)
 	resp, err := svc.List(ctx, ListRequest{AppName: "app", UserID: "u1"})
 	if err != nil {
 		t.Fatalf("List: %v", err)
@@ -66,13 +71,14 @@ func TestInMemoryServiceFork(t *testing.T) {
 	orig, _ := svc.Create(ctx, CreateRequest{
 		AppName: "app", UserID: "user", WorkspaceKey: "ws", Title: "original",
 	})
-	svc.AppendEvent(ctx, orig.Ref, Event{
+	_, err := svc.AppendEvent(ctx, orig.Ref, Event{
 		Kind:       EventKindUser,
 		Visibility: VisibilityCanonical,
 		UserPayload: &UserPayload{
 			Parts: []EventPart{{Kind: PartKindText, Text: "hello"}},
 		},
 	})
+	require.NoError(t, err)
 	forked, err := svc.Fork(ctx, ForkRequest{Source: orig.Ref, Title: "forked"})
 	if err != nil {
 		t.Fatalf("Fork: %v", err)
@@ -125,18 +131,21 @@ func TestInMemoryServiceEvents(t *testing.T) {
 	svc := InMemoryService()
 	ctx := context.Background()
 	sess, _ := svc.Create(ctx, CreateRequest{AppName: "app", UserID: "u", WorkspaceKey: "ws"})
-	svc.AppendEvent(ctx, sess.Ref, Event{
+	_, err := svc.AppendEvent(ctx, sess.Ref, Event{
 		Kind: EventKindUser, Visibility: VisibilityCanonical,
 		UserPayload: &UserPayload{Parts: []EventPart{{Kind: PartKindText, Text: "a"}}},
 	})
-	svc.AppendEvent(ctx, sess.Ref, Event{
+	require.NoError(t, err)
+	_, err = svc.AppendEvent(ctx, sess.Ref, Event{
 		Kind: EventKindAssistant, Visibility: VisibilityCanonical,
 		AssistantPayload: &AssistantPayload{Parts: []EventPart{{Kind: PartKindText, Text: "b"}}},
 	})
-	svc.AppendEvent(ctx, sess.Ref, Event{
+	require.NoError(t, err)
+	_, err = svc.AppendEvent(ctx, sess.Ref, Event{
 		Kind: EventKindUser, Visibility: VisibilityCanonical,
 		UserPayload: &UserPayload{Parts: []EventPart{{Kind: PartKindText, Text: "c"}}},
 	})
+	require.NoError(t, err)
 	evts, err := svc.Events(ctx, EventsRequest{SessionRef: sess.Ref})
 	if err != nil {
 		t.Fatalf("Events: %v", err)

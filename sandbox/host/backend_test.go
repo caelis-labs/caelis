@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/OnslaughtSnail/caelis/sandbox"
 )
 
@@ -233,8 +235,8 @@ func TestBackendRun_ConstraintsDeniedWorkdir(t *testing.T) {
 	dir := t.TempDir()
 	allowed := filepath.Join(dir, "workspace")
 	denied := filepath.Join(dir, "elsewhere")
-	os.MkdirAll(allowed, 0o755)
-	os.MkdirAll(denied, 0o755)
+	require.NoError(t, os.MkdirAll(allowed, 0o755))
+	require.NoError(t, os.MkdirAll(denied, 0o755))
 
 	b := New()
 	_, err := b.Run(context.Background(), sandbox.CommandRequest{

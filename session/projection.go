@@ -34,15 +34,15 @@ func ModelContextFromEvents(events []Event) []model.Message {
 	// If compaction exists, add its summary as the first system message.
 	if lastCompactIdx >= 0 {
 		comp := &events[lastCompactIdx]
-		if comp.CompactionPayload != nil && comp.CompactionPayload.SummaryText != "" {
+		if comp.CompactionPayload != nil && comp.SummaryText != "" {
 			msgs = append(msgs, model.Message{
 				Role:    model.RoleSystem,
-				Content: []model.Part{{Text: comp.CompactionPayload.SummaryText}},
+				Content: []model.Part{{Text: comp.SummaryText}},
 			})
 		}
 		if comp.CompactionPayload != nil {
-			msgs = append(msgs, retainedCompactionMessagesToModel(comp.CompactionPayload.RetainedMessages)...)
-			msgs = append(msgs, preCompactionMessagesAfterBoundary(events[:lastCompactIdx], comp.CompactionPayload.Previous)...)
+			msgs = append(msgs, retainedCompactionMessagesToModel(comp.RetainedMessages)...)
+			msgs = append(msgs, preCompactionMessagesAfterBoundary(events[:lastCompactIdx], comp.Previous)...)
 		}
 	}
 

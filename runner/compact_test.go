@@ -148,8 +148,8 @@ func TestLLMSummarizingCompactorCallsLLMAndPersistsSummary(t *testing.T) {
 	if event == nil || event.Kind != session.EventKindCompaction || event.CompactionPayload == nil {
 		t.Fatalf("event = %#v, want compaction payload", event)
 	}
-	if event.CompactionPayload.SummaryText != "summary from llm" {
-		t.Fatalf("summary = %q, want LLM summary", event.CompactionPayload.SummaryText)
+	if event.SummaryText != "summary from llm" {
+		t.Fatalf("summary = %q, want LLM summary", event.SummaryText)
 	}
 	if len(compacted) < 3 {
 		t.Fatalf("compacted messages = %#v, want system, summary, and recent message", compacted)

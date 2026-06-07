@@ -35,7 +35,7 @@ arch-lint:
 size-report:
 	bash scripts/size_report.sh
 
-quality: fmt-check arch-lint vet test build
+quality: fmt-check lint arch-lint vet test build
 
 regression: layer4-regression
 

@@ -6,15 +6,16 @@ import (
 	"testing"
 
 	"github.com/OnslaughtSnail/caelis/tool"
+	"github.com/stretchr/testify/require"
 )
 
 func TestGlobRecursive(t *testing.T) {
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, "src", "pkg"), 0o755)
-	os.WriteFile(filepath.Join(dir, "src", "main.go"), []byte("package main"), 0o644)
-	os.WriteFile(filepath.Join(dir, "src", "pkg", "lib.go"), []byte("package lib"), 0o644)
-	os.WriteFile(filepath.Join(dir, "src", "pkg", "test.txt"), []byte("test"), 0o644)
-	os.WriteFile(filepath.Join(dir, "README.md"), []byte("# test"), 0o644)
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "src", "pkg"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "src", "main.go"), []byte("package main"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "src", "pkg", "lib.go"), []byte("package lib"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "src", "pkg", "test.txt"), []byte("test"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "README.md"), []byte("# test"), 0o644))
 
 	g := &globFiles{}
 	result, err := g.Run(newTestContext(dir), tool.Call{
@@ -33,9 +34,9 @@ func TestGlobRecursive(t *testing.T) {
 
 func TestGlobExclude(t *testing.T) {
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, "node_modules", "pkg"), 0o755)
-	os.WriteFile(filepath.Join(dir, "index.js"), []byte("js"), 0o644)
-	os.WriteFile(filepath.Join(dir, "node_modules", "pkg", "dep.js"), []byte("dep"), 0o644)
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "node_modules", "pkg"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "index.js"), []byte("js"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "node_modules", "pkg", "dep.js"), []byte("dep"), 0o644))
 
 	g := &globFiles{}
 	result, err := g.Run(newTestContext(dir), tool.Call{
@@ -54,9 +55,9 @@ func TestGlobExclude(t *testing.T) {
 
 func TestSearchRecursive(t *testing.T) {
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, "src"), 0o755)
-	os.WriteFile(filepath.Join(dir, "src", "main.go"), []byte("func main() {\n\tfmt.Println(\"hello\")\n}"), 0o644)
-	os.WriteFile(filepath.Join(dir, "src", "lib.go"), []byte("func helper() {\n\t// helper\n}"), 0o644)
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "src"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "src", "main.go"), []byte("func main() {\n\tfmt.Println(\"hello\")\n}"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "src", "lib.go"), []byte("func helper() {\n\t// helper\n}"), 0o644))
 
 	s := &searchFiles{}
 	result, err := s.Run(newTestContext(dir), tool.Call{
@@ -75,8 +76,8 @@ func TestSearchRecursive(t *testing.T) {
 
 func TestSearchWithInclude(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "code.go"), []byte("func Test() {}"), 0o644)
-	os.WriteFile(filepath.Join(dir, "readme.md"), []byte("func is not code here"), 0o644)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "code.go"), []byte("func Test() {}"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "readme.md"), []byte("func is not code here"), 0o644))
 
 	s := &searchFiles{}
 	result, err := s.Run(newTestContext(dir), tool.Call{
@@ -98,11 +99,11 @@ func TestSearchWithInclude(t *testing.T) {
 
 func TestGlobDoubleStarRecursive(t *testing.T) {
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, "a", "b", "c"), 0o755)
-	os.WriteFile(filepath.Join(dir, "a", "x.go"), []byte("x"), 0o644)
-	os.WriteFile(filepath.Join(dir, "a", "b", "y.go"), []byte("y"), 0o644)
-	os.WriteFile(filepath.Join(dir, "a", "b", "c", "z.go"), []byte("z"), 0o644)
-	os.WriteFile(filepath.Join(dir, "a", "b", "c", "w.txt"), []byte("w"), 0o644)
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "a", "b", "c"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "a", "x.go"), []byte("x"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "a", "b", "y.go"), []byte("y"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "a", "b", "c", "z.go"), []byte("z"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "a", "b", "c", "w.txt"), []byte("w"), 0o644))
 
 	g := &globFiles{}
 	result, err := g.Run(newTestContext(dir), tool.Call{
@@ -131,10 +132,10 @@ func TestGlobDoubleStarRecursive(t *testing.T) {
 
 func TestGlobWithDirectoryPrefix(t *testing.T) {
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, "src", "pkg"), 0o755)
-	os.WriteFile(filepath.Join(dir, "src", "main.go"), []byte("x"), 0o644)
-	os.WriteFile(filepath.Join(dir, "src", "pkg", "lib.go"), []byte("y"), 0o644)
-	os.WriteFile(filepath.Join(dir, "README.md"), []byte("z"), 0o644)
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "src", "pkg"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "src", "main.go"), []byte("x"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "src", "pkg", "lib.go"), []byte("y"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "README.md"), []byte("z"), 0o644))
 
 	g := &globFiles{}
 	result, err := g.Run(newTestContext(dir), tool.Call{
@@ -158,10 +159,10 @@ func TestGlobWithDirectoryPrefix(t *testing.T) {
 
 func TestGlobRecursiveWithDirPrefix(t *testing.T) {
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, "src", "pkg"), 0o755)
-	os.WriteFile(filepath.Join(dir, "src", "main.go"), []byte("x"), 0o644)
-	os.WriteFile(filepath.Join(dir, "src", "pkg", "lib.go"), []byte("y"), 0o644)
-	os.WriteFile(filepath.Join(dir, "other.go"), []byte("z"), 0o644)
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "src", "pkg"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "src", "main.go"), []byte("x"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "src", "pkg", "lib.go"), []byte("y"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "other.go"), []byte("z"), 0o644))
 
 	g := &globFiles{}
 	result, err := g.Run(newTestContext(dir), tool.Call{
