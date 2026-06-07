@@ -119,6 +119,40 @@ func (f runnerSandboxFactory) Create(context.Context, sandbox.Config) (sandbox.B
 	return f.backend, nil
 }
 
+type selectableRunnerSandboxFactory struct {
+	backends map[string]sandbox.Backend
+	order    []string
+	created  []sandbox.Config
+}
+
+func (f *selectableRunnerSandboxFactory) Available(context.Context) ([]sandbox.Descriptor, error) {
+	out := make([]sandbox.Descriptor, 0, len(f.order))
+	for _, name := range f.order {
+		out = append(out, sandbox.Descriptor{Name: name})
+	}
+	return out, nil
+}
+
+func (f *selectableRunnerSandboxFactory) Create(_ context.Context, cfg sandbox.Config) (sandbox.Backend, error) {
+	f.created = append(f.created, cfg)
+	backend := f.backends[cfg.BackendName]
+	if backend == nil {
+		return nil, fmt.Errorf("backend %q unavailable", cfg.BackendName)
+	}
+	return backend, nil
+}
+
+type routingRunnerSandboxFactory struct {
+	*selectableRunnerSandboxFactory
+	route  func(context.Context, sandbox.RouteRequest) (sandbox.Config, error)
+	routes []sandbox.RouteRequest
+}
+
+func (f *routingRunnerSandboxFactory) Route(ctx context.Context, req sandbox.RouteRequest) (sandbox.Config, error) {
+	f.routes = append(f.routes, req)
+	return f.route(ctx, req)
+}
+
 type failingSandboxFactory struct{}
 
 func (f failingSandboxFactory) Available(context.Context) ([]sandbox.Descriptor, error) {
@@ -164,12 +198,12 @@ func (b *blockingRunnerBackend) Status(context.Context) (sandbox.Status, error) 
 func (b *blockingRunnerBackend) Close() error { return nil }
 
 type fakeRunnerSpawnDelegator struct {
-	req spawn.SpawnRequest
+	req agent.SpawnRequest
 }
 
-func (d *fakeRunnerSpawnDelegator) Spawn(_ tool.Context, req spawn.SpawnRequest) (spawn.SpawnResult, error) {
+func (d *fakeRunnerSpawnDelegator) Spawn(_ tool.Context, req agent.SpawnRequest) (agent.SpawnResult, error) {
 	d.req = req
-	return spawn.SpawnResult{HandleID: "child-1", FinalMessage: "child done"}, nil
+	return agent.SpawnResult{HandleID: "child-1", FinalMessage: "child done"}, nil
 }
 
 type overflowRetryLLM struct {
@@ -323,16 +357,58 @@ func (m *spawnCancelLoopLLM) Generate(_ context.Context, req model.Request) iter
 	}
 }
 
+type spawnThenBlockLoopLLM struct {
+	requests []model.Request
+	taskID   string
+	blocked  chan struct{}
+	once     sync.Once
+}
+
+func newSpawnThenBlockLoopLLM() *spawnThenBlockLoopLLM {
+	return &spawnThenBlockLoopLLM{blocked: make(chan struct{})}
+}
+
+func (m *spawnThenBlockLoopLLM) Name() string { return "spawn-then-block-loop" }
+
+func (m *spawnThenBlockLoopLLM) Generate(ctx context.Context, req model.Request) iter.Seq2[model.ResponseEvent, error] {
+	callIndex := len(m.requests)
+	m.requests = append(m.requests, req)
+	return func(yield func(model.ResponseEvent, error) bool) {
+		switch callIndex {
+		case 0:
+			yield(model.ResponseEvent{ToolCall: &model.ToolCallDelta{
+				CallID: "spawn-1",
+				Name:   "SPAWN",
+				Args:   map[string]any{"agent": "reviewer", "prompt": "inspect files"},
+			}}, nil)
+		case 1:
+			m.taskID = taskIDFromToolResult(req.Messages)
+			if m.taskID == "" {
+				yield(model.ResponseEvent{}, fmt.Errorf("missing SPAWN task id in model context"))
+				return
+			}
+			m.once.Do(func() { close(m.blocked) })
+			<-ctx.Done()
+			yield(model.ResponseEvent{}, ctx.Err())
+		default:
+			yield(model.ResponseEvent{}, fmt.Errorf("unexpected model call %d", callIndex))
+		}
+	}
+}
+
 type blockingTextLLM struct {
-	started chan struct{}
-	release chan struct{}
-	once    sync.Once
+	started    chan struct{}
+	cancelled  chan struct{}
+	release    chan struct{}
+	once       sync.Once
+	cancelOnce sync.Once
 }
 
 func newBlockingTextLLM() *blockingTextLLM {
 	return &blockingTextLLM{
-		started: make(chan struct{}),
-		release: make(chan struct{}),
+		started:   make(chan struct{}),
+		cancelled: make(chan struct{}),
+		release:   make(chan struct{}),
 	}
 }
 
@@ -343,6 +419,7 @@ func (m *blockingTextLLM) Generate(ctx context.Context, _ model.Request) iter.Se
 	return func(yield func(model.ResponseEvent, error) bool) {
 		select {
 		case <-ctx.Done():
+			m.cancelOnce.Do(func() { close(m.cancelled) })
 			yield(model.ResponseEvent{}, ctx.Err())
 		case <-m.release:
 			yield(model.ResponseEvent{TextDelta: "child done after cancel"}, nil)
@@ -1189,6 +1266,11 @@ func TestRunnerSpawnCancelKeepsTaskCancelled(t *testing.T) {
 	if !ok || snap.State != TaskStateCancelled {
 		t.Fatalf("snapshot after cancel = %#v ok=%v, want cancelled", snap, ok)
 	}
+	select {
+	case <-childLLM.cancelled:
+	case <-time.After(time.Second):
+		t.Fatal("child model did not observe TASK cancel")
+	}
 	close(childLLM.release)
 	time.Sleep(20 * time.Millisecond)
 	snap, ok, err = store.LoadTask(ctx, parentLLM.taskID)
@@ -1197,6 +1279,85 @@ func TestRunnerSpawnCancelKeepsTaskCancelled(t *testing.T) {
 	}
 	if !ok || snap.State != TaskStateCancelled {
 		t.Fatalf("snapshot after child completion = %#v ok=%v, want still cancelled", snap, ok)
+	}
+}
+
+func TestRunnerSpawnChildUsesParentCancellation(t *testing.T) {
+	svc := session.InMemoryService()
+	ctx, cancelParent := context.WithCancel(context.Background())
+	defer cancelParent()
+	parentSession, _ := svc.Create(ctx, session.CreateRequest{
+		AppName: "test",
+		UserID:  "u", WorkspaceKey: "ws",
+	})
+	registry := tool.NewMemoryRegistry()
+	registry.Register(spawn.All()[0])
+	store := NewMemoryTaskStore()
+
+	childLLM := newBlockingTextLLM()
+	child := llmagent.New(llmagent.Config{Name: "reviewer"})
+	child = child.Prepare(agent.PrepareRequest{LLM: childLLM}).(*llmagent.Agent)
+	parentLLM := newSpawnThenBlockLoopLLM()
+	parent := llmagent.New(llmagent.Config{Name: "parent", Tools: []string{"SPAWN"}, SubAgents: []agent.Agent{child}})
+	parent = parent.Prepare(agent.PrepareRequest{LLM: parentLLM}).(*llmagent.Agent)
+
+	r, _ := New(Config{
+		Agent:        parent,
+		Sessions:     svc,
+		ToolRegistry: registry,
+		TaskStore:    store,
+	})
+
+	errs := make(chan error, 1)
+	go func() {
+		for _, err := range r.Run(ctx, RunRequest{
+			SessionRef:  parentSession.Ref,
+			UserMessage: model.Message{Role: model.RoleUser, Content: []model.Part{{Text: "delegate"}}},
+		}) {
+			if err != nil {
+				errs <- err
+				return
+			}
+		}
+		errs <- nil
+	}()
+
+	select {
+	case <-childLLM.started:
+	case <-time.After(time.Second):
+		t.Fatal("child model did not start")
+	}
+	select {
+	case <-parentLLM.blocked:
+	case <-time.After(time.Second):
+		t.Fatal("parent model did not reach cancellable second call")
+	}
+	cancelParent()
+
+	select {
+	case <-childLLM.cancelled:
+	case <-time.After(time.Second):
+		t.Fatal("child model did not observe parent cancellation")
+	}
+	if parentLLM.taskID == "" {
+		t.Fatal("model did not receive SPAWN task id")
+	}
+	waitCtx, cancelWait := context.WithTimeout(context.Background(), time.Second)
+	defer cancelWait()
+	snap, err := store.WaitTask(waitCtx, parentLLM.taskID)
+	if err != nil {
+		t.Fatalf("WaitTask() error = %v", err)
+	}
+	if snap.State != TaskStateCancelled {
+		t.Fatalf("snapshot after parent cancel = %#v, want cancelled", snap)
+	}
+	select {
+	case err := <-errs:
+		if err == nil {
+			t.Fatal("Run completed without cancellation error")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("parent Run did not exit after cancellation")
 	}
 }
 
@@ -1315,6 +1476,133 @@ func TestRunnerRetriesAfterContextOverflowWithCompaction(t *testing.T) {
 	if !sawCompaction {
 		t.Fatalf("persisted events = %#v, want overflow compaction event", persisted)
 	}
+}
+
+func TestRunnerOverflowCompactionReplayKeepsToolContextAndCurrentUser(t *testing.T) {
+	svc := session.InMemoryService()
+	ctx := context.Background()
+	sess, _ := svc.Create(ctx, session.CreateRequest{
+		AppName: "test", UserID: "u", WorkspaceKey: "ws",
+	})
+	_, _ = svc.AppendEvent(ctx, sess.Ref, session.Event{
+		Kind:       session.EventKindUser,
+		Visibility: session.VisibilityCanonical,
+		UserPayload: &session.UserPayload{
+			Parts: []session.EventPart{{Kind: session.PartKindText, Text: strings.Repeat("old context ", 90000)}},
+		},
+	})
+	_, _ = svc.AppendEvent(ctx, sess.Ref, session.Event{
+		Kind:       session.EventKindToolCall,
+		Visibility: session.VisibilityCanonical,
+		ToolCallPayload: &session.ToolCallPayload{
+			CallID: "lookup-1",
+			Name:   "LOOKUP",
+			Status: "completed",
+			Args:   map[string]any{"q": "release state"},
+		},
+	})
+	_, _ = svc.AppendEvent(ctx, sess.Ref, session.Event{
+		Kind:       session.EventKindToolResult,
+		Visibility: session.VisibilityCanonical,
+		ToolResultPayload: &session.ToolResultPayload{
+			CallID:  "lookup-1",
+			Name:    "LOOKUP",
+			Status:  "completed",
+			Content: []session.EventPart{{Kind: session.PartKindText, Text: `{"state":"ready"}`}},
+		},
+	})
+
+	llm := &overflowRetryLLM{}
+	summarizer := &summarizerTestLLM{summary: "llm compact summary"}
+	compactor := overflowOnlyCompactor{Compactor: NewLLMSummarizingCompactor(summarizer)}
+	a := llmagent.New(llmagent.Config{Name: "test-agent"})
+	a = a.Prepare(agent.PrepareRequest{LLM: llm}).(*llmagent.Agent)
+	r, _ := New(Config{Agent: a, Sessions: svc, Compactor: compactor})
+
+	for _, err := range r.Run(ctx, RunRequest{
+		SessionRef:  sess.Ref,
+		UserMessage: model.Message{Role: model.RoleUser, Content: []model.Part{{Text: "current turn"}}},
+	}) {
+		if err != nil {
+			t.Fatalf("Run error: %v; model requests=%d summarizer calls=%d", err, len(llm.requests), summarizer.calls)
+		}
+	}
+	if len(llm.requests) != 2 {
+		t.Fatalf("model requests = %d, want initial overflow and retry", len(llm.requests))
+	}
+	retryMessages := llm.requests[1].Messages
+	assertModelContextShape(t, retryMessages, []model.Role{
+		model.RoleSystem,
+		model.RoleAssistant,
+		model.RoleTool,
+		model.RoleUser,
+	})
+	if retryMessages[0].Content[0].Text != "llm compact summary" {
+		t.Fatalf("retry summary = %q, want LLM summary", retryMessages[0].Content[0].Text)
+	}
+	if retryMessages[1].Content[0].ToolUse == nil || retryMessages[1].Content[0].ToolUse.CallID != "lookup-1" {
+		t.Fatalf("retry tool use = %#v, want lookup-1", retryMessages[1])
+	}
+	if retryMessages[2].Content[0].ToolResult == nil || retryMessages[2].Content[0].ToolResult.CallID != "lookup-1" {
+		t.Fatalf("retry tool result = %#v, want lookup-1", retryMessages[2])
+	}
+	if retryMessages[3].Content[0].Text != "current turn" {
+		t.Fatalf("retry current user = %#v, want current turn", retryMessages[3])
+	}
+
+	persisted, err := svc.Events(ctx, session.EventsRequest{SessionRef: sess.Ref})
+	if err != nil {
+		t.Fatalf("Events() error = %v", err)
+	}
+	var compaction *session.CompactionPayload
+	for _, evt := range persisted {
+		if evt.Kind == session.EventKindCompaction {
+			compaction = evt.CompactionPayload
+		}
+	}
+	if compaction == nil {
+		t.Fatalf("persisted events = %#v, want compaction", persisted)
+	}
+	if compaction.Reason != "context overflow retry" {
+		t.Fatalf("compaction reason = %q, want context overflow retry", compaction.Reason)
+	}
+	rebuilt := session.ModelContextFromEvents(persisted)
+	assertModelContextShape(t, rebuilt, []model.Role{
+		model.RoleSystem,
+		model.RoleAssistant,
+		model.RoleTool,
+		model.RoleUser,
+		model.RoleAssistant,
+	})
+	if rebuilt[0].Content[0].Text != "llm compact summary" {
+		t.Fatalf("rebuilt summary = %q, want LLM summary", rebuilt[0].Content[0].Text)
+	}
+	if rebuilt[3].Content[0].Text != "current turn" {
+		t.Fatalf("rebuilt current user = %#v, want current turn", rebuilt[3])
+	}
+	if rebuilt[4].Content[0].Text != "recovered" {
+		t.Fatalf("rebuilt assistant = %#v, want recovered", rebuilt[4])
+	}
+}
+
+func assertModelContextShape(t *testing.T, msgs []model.Message, roles []model.Role) {
+	t.Helper()
+	if len(msgs) != len(roles) {
+		t.Fatalf("model context length = %d, want %d: %#v", len(msgs), len(roles), msgs)
+	}
+	for i, role := range roles {
+		if msgs[i].Role != role {
+			t.Fatalf("model context role[%d] = %q, want %q: %#v", i, msgs[i].Role, role, msgs)
+		}
+	}
+}
+
+type overflowOnlyCompactor struct {
+	Compactor
+}
+
+func (c overflowOnlyCompactor) ShouldCompact([]model.Message, int) (bool, string) {
+	return false, ""
 }
 
 func TestRunnerFailsClosedWhenSandboxCreateFails(t *testing.T) {
@@ -1439,6 +1727,79 @@ func TestTransientEventsNotPersisted(t *testing.T) {
 	}
 }
 
+func TestRunnerYieldsAssistantDeltasWithoutPersistingThem(t *testing.T) {
+	svc := session.InMemoryService()
+	ctx := context.Background()
+	sess, _ := svc.Create(ctx, session.CreateRequest{
+		AppName: "test", UserID: "u", WorkspaceKey: "ws",
+	})
+	a := llmagent.New(llmagent.Config{Name: "test-agent"})
+	a = a.Prepare(agent.PrepareRequest{LLM: &runnerDeltaLLM{events: []model.ResponseEvent{
+		{ReasoningDelta: "think"},
+		{TextDelta: "hello"},
+	}}}).(*llmagent.Agent)
+	r, _ := New(Config{Agent: a, Sessions: svc})
+
+	var yielded []session.Event
+	for evt, err := range r.Run(ctx, RunRequest{
+		SessionRef:  sess.Ref,
+		UserMessage: model.Message{Role: model.RoleUser, Content: []model.Part{{Text: "go"}}},
+	}) {
+		if err != nil {
+			t.Fatalf("Run error: %v", err)
+		}
+		yielded = append(yielded, evt)
+	}
+
+	var transientAssistants, canonicalAssistants int
+	for _, evt := range yielded {
+		if evt.Kind != session.EventKindAssistant {
+			continue
+		}
+		switch evt.Visibility {
+		case session.VisibilityUIOnly:
+			transientAssistants++
+			if evt.SessionRef != sess.Ref || evt.RunID == "" {
+				t.Fatalf("transient assistant identity = %#v/%q, want session/run", evt.SessionRef, evt.RunID)
+			}
+		case session.VisibilityCanonical:
+			canonicalAssistants++
+		}
+	}
+	if transientAssistants != 2 || canonicalAssistants != 1 {
+		t.Fatalf("assistant events = transient %d canonical %d, want 2/1; yielded=%#v", transientAssistants, canonicalAssistants, yielded)
+	}
+	persisted, err := svc.Events(ctx, session.EventsRequest{SessionRef: sess.Ref})
+	if err != nil {
+		t.Fatalf("Events() error = %v", err)
+	}
+	for _, evt := range persisted {
+		if evt.Kind == session.EventKindAssistant && evt.Visibility == session.VisibilityUIOnly {
+			t.Fatalf("persisted transient assistant = %#v", evt)
+		}
+	}
+	msgs := session.ModelContextFromEvents(persisted)
+	if len(msgs) != 2 || msgs[1].Role != model.RoleAssistant || msgs[1].TextContent() != "thinkhello" {
+		t.Fatalf("model context = %#v, want user plus final canonical assistant", msgs)
+	}
+}
+
+type runnerDeltaLLM struct {
+	events []model.ResponseEvent
+}
+
+func (m *runnerDeltaLLM) Name() string { return "runner-delta" }
+
+func (m *runnerDeltaLLM) Generate(_ context.Context, _ model.Request) iter.Seq2[model.ResponseEvent, error] {
+	return func(yield func(model.ResponseEvent, error) bool) {
+		for _, evt := range m.events {
+			if !yield(evt, nil) {
+				return
+			}
+		}
+	}
+}
+
 func TestRunnerToolObserverEmitsTransientNotices(t *testing.T) {
 	svc := session.InMemoryService()
 	ctx := context.Background()
@@ -1489,6 +1850,134 @@ func TestRunnerToolObserverEmitsTransientNotices(t *testing.T) {
 		if evt.Kind == session.EventKindNotice && evt.Visibility == session.VisibilityUIOnly {
 			t.Fatalf("ui_only observer notice persisted: %#v", evt)
 		}
+	}
+}
+
+func TestRunnerSelectsRequestedSandboxBackend(t *testing.T) {
+	svc := session.InMemoryService()
+	ctx := context.Background()
+	sess, _ := svc.Create(ctx, session.CreateRequest{
+		AppName: "test", UserID: "u", WorkspaceKey: "ws",
+	})
+	slow := &mockBackend{result: sandbox.CommandResult{Stdout: []byte("slow"), ExitCode: 0}}
+	secure := &mockBackend{result: sandbox.CommandResult{Stdout: []byte("secure"), ExitCode: 0}}
+	factory := &selectableRunnerSandboxFactory{
+		order: []string{"slow", "secure"},
+		backends: map[string]sandbox.Backend{
+			"slow":   slow,
+			"secure": secure,
+		},
+	}
+	a := llmagent.New(llmagent.Config{Name: "test-agent"})
+	a = a.Prepare(agent.PrepareRequest{LLM: &mockLLM{responses: []string{"done"}}}).(*llmagent.Agent)
+	r, _ := New(Config{
+		Agent:    a,
+		Sessions: svc,
+		Sandbox:  factory,
+	})
+
+	for _, err := range r.Run(ctx, RunRequest{
+		SessionRef:  sess.Ref,
+		Metadata:    map[string]any{"sandbox_backend": "secure"},
+		UserMessage: model.Message{Role: model.RoleUser, Content: []model.Part{{Text: "hello"}}},
+	}) {
+		if err != nil {
+			t.Fatalf("Run error: %v", err)
+		}
+	}
+
+	if len(factory.created) != 1 {
+		t.Fatalf("created sandboxes = %#v, want one", factory.created)
+	}
+	if got := factory.created[0].BackendName; got != "secure" {
+		t.Fatalf("created backend = %q, want secure", got)
+	}
+}
+
+func TestRunnerFailsClosedForUnavailableRequestedSandboxBackend(t *testing.T) {
+	svc := session.InMemoryService()
+	ctx := context.Background()
+	sess, _ := svc.Create(ctx, session.CreateRequest{
+		AppName: "test", UserID: "u", WorkspaceKey: "ws",
+	})
+	factory := &selectableRunnerSandboxFactory{
+		order: []string{"host"},
+		backends: map[string]sandbox.Backend{
+			"host": &mockBackend{},
+		},
+	}
+	a := llmagent.New(llmagent.Config{Name: "test-agent"})
+	a = a.Prepare(agent.PrepareRequest{LLM: &mockLLM{responses: []string{"done"}}}).(*llmagent.Agent)
+	r, _ := New(Config{
+		Agent:    a,
+		Sessions: svc,
+		Sandbox:  factory,
+	})
+
+	var runErr error
+	for _, err := range r.Run(ctx, RunRequest{
+		SessionRef:  sess.Ref,
+		Metadata:    map[string]any{"sandbox_backend": "seatbelt"},
+		UserMessage: model.Message{Role: model.RoleUser, Content: []model.Part{{Text: "hello"}}},
+	}) {
+		if err != nil {
+			runErr = err
+			break
+		}
+	}
+	if runErr == nil || !strings.Contains(runErr.Error(), `requested backend "seatbelt" is not available`) {
+		t.Fatalf("Run error = %v, want unavailable requested backend", runErr)
+	}
+	if len(factory.created) != 0 {
+		t.Fatalf("created sandboxes = %#v, want none", factory.created)
+	}
+}
+
+func TestRunnerUsesSandboxRouterWhenAvailable(t *testing.T) {
+	svc := session.InMemoryService()
+	ctx := context.Background()
+	sess, _ := svc.Create(ctx, session.CreateRequest{
+		AppName: "test", UserID: "u", WorkspaceKey: "ws",
+		Workspace: session.Workspace{Root: "/workspace"},
+	})
+	base := &selectableRunnerSandboxFactory{
+		order: []string{"host", "secure"},
+		backends: map[string]sandbox.Backend{
+			"host":   &mockBackend{},
+			"secure": &mockBackend{},
+		},
+	}
+	factory := &routingRunnerSandboxFactory{
+		selectableRunnerSandboxFactory: base,
+		route: func(_ context.Context, req sandbox.RouteRequest) (sandbox.Config, error) {
+			if req.WorkspaceRoot != "/workspace" || req.RequestedBackend != "host" || req.Metadata["sandbox_backend"] != "host" {
+				return sandbox.Config{}, fmt.Errorf("unexpected route request: %#v", req)
+			}
+			return sandbox.Config{BackendName: "secure", RootDir: req.WorkspaceRoot}, nil
+		},
+	}
+	a := llmagent.New(llmagent.Config{Name: "test-agent"})
+	a = a.Prepare(agent.PrepareRequest{LLM: &mockLLM{responses: []string{"done"}}}).(*llmagent.Agent)
+	r, _ := New(Config{
+		Agent:    a,
+		Sessions: svc,
+		Sandbox:  factory,
+	})
+
+	for _, err := range r.Run(ctx, RunRequest{
+		SessionRef:  sess.Ref,
+		Metadata:    map[string]any{"sandbox_backend": "host"},
+		UserMessage: model.Message{Role: model.RoleUser, Content: []model.Part{{Text: "hello"}}},
+	}) {
+		if err != nil {
+			t.Fatalf("Run error: %v", err)
+		}
+	}
+	if len(factory.routes) != 1 {
+		t.Fatalf("routes = %#v, want one route request", factory.routes)
+	}
+	if len(base.created) != 1 || base.created[0].BackendName != "secure" {
+		t.Fatalf("created = %#v, want secure backend from router", base.created)
 	}
 }
 

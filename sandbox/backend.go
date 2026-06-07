@@ -31,3 +31,10 @@ type Factory interface {
 	// Available returns available backend descriptors.
 	Available(context.Context) ([]Descriptor, error)
 }
+
+// Router optionally selects a sandbox backend for one runtime invocation.
+// Factories can implement this when backend choice depends on policy,
+// workspace, platform, or embedder metadata.
+type Router interface {
+	Route(context.Context, RouteRequest) (Config, error)
+}

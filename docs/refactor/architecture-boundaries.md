@@ -7,6 +7,26 @@ phases must respect.
 See [adk-go-patterns.md](adk-go-patterns.md) for the Go conventions that
 inform these decisions.
 
+## Current Rewrite Branch State
+
+This document describes the target architecture. The current rewrite branch is
+intentionally narrower while Layer 4 is being closed:
+
+- Active implementation is Layer 4 infrastructure plus retained Layer 1-3
+  placeholders.
+- Old production roots are deleted from this branch: `impl/`, `surfaces/`,
+  `tui/`, `headless/`, `eval/`, `cmd/caelis/`, `app/gatewayapp/`,
+  `internal/kernel/`, `internal/cli/`, `internal/acpe2eagent/`,
+  `internal/evalharness`, `internal/bootstrap`, and
+  `internal/modelcataloggen`.
+- Old behavior remains available from `main`; the local reference worktree is
+  `../caelis-main-reference`.
+- Do not import or recreate deleted roots for new work. Port required behavior
+  into the target package for its layer.
+- `ports/*` remains temporarily because some ACP projector/protocol code still
+  references upper-layer placeholder contracts. New polished infrastructure
+  should define contracts in its domain package.
+
 ## Design Principles
 
 1. **Interfaces live in domain packages.** No separate `ports/` directory.
@@ -220,6 +240,12 @@ access:
 | `agent/` | `model/`, `session/`, `tool/`, stdlib | `runner/`, `gateway/`, `acp/`, `tui/`, `app/` |
 | `agent/llmagent/` | `agent/`, `model/`, `session/`, `tool/` | `runner/`, `gateway/`, `acp/`, `tui/`, `app/`, concrete sandbox backends |
 | `runner/` | `agent/`, `model/`, `session/`, `tool/`, `sandbox/`, `policy/`, `skill/`, optional `artifact/` | `tool/builtin/*`, `gateway/`, `acp/`, `tui/`, `app/` |
+
+Runner may depend on narrow domain contracts such as `agent.SpawnDelegator`,
+but must not import the built-in packages that implement model-visible tool
+declarations. Built-ins such as `tool/builtin/spawn` expose optional
+configuration methods for runner-owned services instead of making runner know
+their concrete package.
 
 ### Cross-Package Within Layer 4
 

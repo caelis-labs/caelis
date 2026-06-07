@@ -16,7 +16,9 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -33,6 +35,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/tool"
 	"github.com/OnslaughtSnail/caelis/tool/builtin/filesystem"
 	"github.com/OnslaughtSnail/caelis/tool/builtin/shell"
+	"github.com/OnslaughtSnail/caelis/tool/builtin/spawn"
 )
 
 // ─── Config loading ──────────────────────────────────────────────────
@@ -185,10 +188,11 @@ func TestE2E_RealProviderSmokeUsesRunnerRegistry(t *testing.T) {
 	if events[0].Kind != session.EventKindUser {
 		t.Errorf("event 0 kind: got %q, want %q", events[0].Kind, session.EventKindUser)
 	}
-	if events[1].Kind != session.EventKindAssistant {
-		t.Errorf("event 1 kind: got %q, want %q", events[1].Kind, session.EventKindAssistant)
+	livePersisted := persistedLiveEvents(events)
+	if len(livePersisted) < 2 || livePersisted[1].Kind != session.EventKindAssistant {
+		t.Fatalf("persisted live events = %v, want user then assistant", eventKinds(livePersisted))
 	}
-	assistantText := events[1].TextContent()
+	assistantText := livePersisted[1].TextContent()
 	if strings.TrimSpace(assistantText) == "" {
 		t.Fatal("assistant response is empty")
 	}
@@ -236,6 +240,59 @@ func TestE2E_RealProviderSmokeUsesRunnerRegistry(t *testing.T) {
 	}
 
 	t.Logf("E2E basic flow: %d events, %d model messages", len(events), len(modelCtx))
+}
+
+func TestE2E_AssistantDeltasAreTransientAndCanonicalFinalIsDurable(t *testing.T) {
+	svc := session.InMemoryService()
+	ctx := context.Background()
+	sess, err := svc.Create(ctx, session.CreateRequest{
+		AppName: "e2e-test", UserID: "test", WorkspaceKey: "e2e",
+	})
+	if err != nil {
+		t.Fatalf("Create session: %v", err)
+	}
+	llmAgent := llmagent.New(llmagent.Config{Name: "delta-agent"})
+	llmAgent = llmAgent.Prepare(agent.PrepareRequest{LLM: &deltaE2ELLM{events: []model.ResponseEvent{
+		{ReasoningDelta: "think-"},
+		{TextDelta: "hel"},
+		{ReasoningDelta: "ing"},
+		{TextDelta: "lo"},
+	}}}).(*llmagent.Agent)
+	r, err := runner.New(runner.Config{Agent: llmAgent, Sessions: svc})
+	if err != nil {
+		t.Fatalf("New runner: %v", err)
+	}
+
+	events := collectRun(t, r, ctx, runner.RunRequest{
+		SessionRef:  sess.Ref,
+		UserMessage: model.Message{Role: model.RoleUser, Content: []model.Part{{Text: "stream"}}},
+	})
+	var transientAssistants []session.Event
+	for _, event := range events {
+		if event.Kind == session.EventKindAssistant && event.Visibility == session.VisibilityUIOnly {
+			transientAssistants = append(transientAssistants, event)
+		}
+	}
+	if len(transientAssistants) != 4 {
+		t.Fatalf("transient assistant deltas = %d, want 4; events=%v", len(transientAssistants), eventKinds(events))
+	}
+	finals := persistedLiveEvents(events)
+	assertEventKinds(t, finals, session.EventKindUser, session.EventKindAssistant)
+	if finals[1].Visibility != session.VisibilityCanonical {
+		t.Fatalf("final assistant visibility = %q, want canonical", finals[1].Visibility)
+	}
+	if finals[1].TextContent() != "think-inghello" {
+		t.Fatalf("final assistant text = %q, want accumulated text", finals[1].TextContent())
+	}
+	persisted, err := svc.Events(ctx, session.EventsRequest{SessionRef: sess.Ref})
+	if err != nil {
+		t.Fatalf("Events: %v", err)
+	}
+	assertEventKinds(t, persisted, session.EventKindUser, session.EventKindAssistant)
+	modelCtx := session.ModelContextFromEvents(persisted)
+	if len(modelCtx) != 2 || modelCtx[1].Role != model.RoleAssistant || modelCtx[1].TextContent() != "think-inghello" {
+		t.Fatalf("model context = %#v, want user plus final assistant only", modelCtx)
+	}
 }
 
 // TestE2E_RunnerToolLoopApprovalSandboxAndReplay verifies the critical Layer4
@@ -364,6 +421,167 @@ func TestE2E_RunnerToolLoopApprovalSandboxAndReplay(t *testing.T) {
 	}
 	if call.Meta == nil || result.Meta == nil || call.Meta["caelis"] == nil || result.Meta["caelis"] == nil {
 		t.Fatal("ACP tool projections must carry _meta.caelis")
+	}
+}
+
+func TestE2E_SpawnTaskCancelThroughRunner(t *testing.T) {
+	ctx := context.Background()
+	fileSvc, err := filesession.New(filesession.Config{RootDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("New file service: %v", err)
+	}
+	parentSession, err := fileSvc.Create(ctx, session.CreateRequest{
+		AppName: "e2e-spawn", UserID: "test", WorkspaceKey: "workspace",
+		Workspace: session.Workspace{Root: t.TempDir()},
+	})
+	if err != nil {
+		t.Fatalf("Create session: %v", err)
+	}
+
+	toolReg := newTestToolRegistry(spawn.All()...)
+	taskStore := runner.NewMemoryTaskStore()
+	childLLM := newE2EBlockingLLM()
+	child := llmagent.New(llmagent.Config{Name: "reviewer"})
+	child = child.Prepare(agent.PrepareRequest{LLM: childLLM}).(*llmagent.Agent)
+	parentLLM := &scriptedSpawnCancelLLM{}
+	parent := llmagent.New(llmagent.Config{
+		Name:      "parent",
+		Tools:     []string{"SPAWN"},
+		SubAgents: []agent.Agent{child},
+	})
+	parent = parent.Prepare(agent.PrepareRequest{LLM: parentLLM}).(*llmagent.Agent)
+
+	r, err := runner.New(runner.Config{
+		Agent:        parent,
+		Sessions:     fileSvc,
+		ToolRegistry: toolReg,
+		TaskStore:    taskStore,
+	})
+	if err != nil {
+		t.Fatalf("New runner: %v", err)
+	}
+
+	events := collectRun(t, r, ctx, runner.RunRequest{
+		SessionRef:  parentSession.Ref,
+		UserMessage: model.Message{Role: model.RoleUser, Content: []model.Part{{Text: "delegate and cancel"}}},
+	})
+
+	assertEventKinds(t, persistedLiveEvents(events),
+		session.EventKindUser,
+		session.EventKindToolCall,
+		session.EventKindToolResult,
+		session.EventKindToolCall,
+		session.EventKindToolResult,
+		session.EventKindAssistant,
+	)
+	if len(parentLLM.requests) != 3 {
+		t.Fatalf("parent model requests: got %d, want 3", len(parentLLM.requests))
+	}
+	assertToolSpecs(t, parentLLM.requests[0].Tools, "SPAWN", "TASK")
+	if parentLLM.taskID == "" {
+		t.Fatal("parent model did not observe SPAWN task handle")
+	}
+	select {
+	case <-childLLM.cancelled:
+	case <-time.After(time.Second):
+		t.Fatal("child LLM did not observe TASK cancel")
+	}
+	snap, ok, err := taskStore.LoadTask(ctx, parentLLM.taskID)
+	if err != nil {
+		t.Fatalf("LoadTask: %v", err)
+	}
+	if !ok || snap.State != runner.TaskStateCancelled {
+		t.Fatalf("task snapshot = %#v ok=%v, want cancelled", snap, ok)
+	}
+
+	persisted, err := fileSvc.Events(ctx, session.EventsRequest{SessionRef: parentSession.Ref})
+	if err != nil {
+		t.Fatalf("Events: %v", err)
+	}
+	replay := session.ModelContextFromEvents(persisted)
+	if !lastToolResultContains(replay, "cancelled") {
+		t.Fatalf("replay messages do not contain TASK cancel result: %#v", replay)
+	}
+}
+
+func TestE2E_SpawnTaskContinueThroughRunner(t *testing.T) {
+	ctx := context.Background()
+	fileSvc, err := filesession.New(filesession.Config{RootDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("New file service: %v", err)
+	}
+	parentSession, err := fileSvc.Create(ctx, session.CreateRequest{
+		AppName: "e2e-spawn-continue", UserID: "test", WorkspaceKey: "workspace",
+		Workspace: session.Workspace{Root: t.TempDir()},
+	})
+	if err != nil {
+		t.Fatalf("Create session: %v", err)
+	}
+
+	toolReg := newTestToolRegistry(spawn.All()...)
+	taskStore := runner.NewMemoryTaskStore()
+	childLLM := &scriptedChildSequenceLLM{responses: []string{"first done", "continued done"}}
+	child := llmagent.New(llmagent.Config{Name: "reviewer"})
+	child = child.Prepare(agent.PrepareRequest{LLM: childLLM}).(*llmagent.Agent)
+	parentLLM := &scriptedSpawnContinueLLM{}
+	parent := llmagent.New(llmagent.Config{
+		Name:      "parent",
+		Tools:     []string{"SPAWN"},
+		SubAgents: []agent.Agent{child},
+	})
+	parent = parent.Prepare(agent.PrepareRequest{LLM: parentLLM}).(*llmagent.Agent)
+
+	r, err := runner.New(runner.Config{
+		Agent:        parent,
+		Sessions:     fileSvc,
+		ToolRegistry: toolReg,
+		TaskStore:    taskStore,
+	})
+	if err != nil {
+		t.Fatalf("New runner: %v", err)
+	}
+
+	events := collectRun(t, r, ctx, runner.RunRequest{
+		SessionRef:  parentSession.Ref,
+		UserMessage: model.Message{Role: model.RoleUser, Content: []model.Part{{Text: "delegate and continue"}}},
+	})
+
+	assertEventKinds(t, persistedLiveEvents(events),
+		session.EventKindUser,
+		session.EventKindToolCall,
+		session.EventKindToolResult,
+		session.EventKindToolCall,
+		session.EventKindToolResult,
+		session.EventKindToolCall,
+		session.EventKindToolResult,
+		session.EventKindToolCall,
+		session.EventKindToolResult,
+		session.EventKindAssistant,
+	)
+	if len(parentLLM.requests) != 5 {
+		t.Fatalf("parent model requests: got %d, want 5", len(parentLLM.requests))
+	}
+	if len(childLLM.requests) != 2 {
+		t.Fatalf("child model requests: got %d, want 2", len(childLLM.requests))
+	}
+	if parentLLM.taskID == "" {
+		t.Fatal("parent model did not observe SPAWN task handle")
+	}
+	snap, ok, err := taskStore.LoadTask(ctx, parentLLM.taskID)
+	if err != nil {
+		t.Fatalf("LoadTask: %v", err)
+	}
+	if !ok || snap.State != runner.TaskStateCompleted || snap.Output != "continued done" {
+		t.Fatalf("task snapshot = %#v ok=%v, want completed continued output", snap, ok)
+	}
+
+	persisted, err := fileSvc.Events(ctx, session.EventsRequest{SessionRef: parentSession.Ref})
+	if err != nil {
+		t.Fatalf("Events: %v", err)
+	}
+	replay := session.ModelContextFromEvents(persisted)
+	if !lastToolResultContains(replay, "continued done") {
+		t.Fatalf("replay messages do not contain continued result: %#v", replay)
 	}
 }
 
@@ -666,6 +884,9 @@ func assertToolSpecs(t *testing.T, got []model.ToolSpec, want ...string) {
 	for i := range got {
 		names[i] = got[i].Name
 	}
+	slices.Sort(names)
+	want = append([]string(nil), want...)
+	slices.Sort(want)
 	if !reflect.DeepEqual(names, want) {
 		t.Fatalf("model tool specs: got %#v, want %#v", names, want)
 	}
@@ -786,6 +1007,196 @@ func (m *scriptedToolLLM) Generate(_ context.Context, req model.Request) iter.Se
 			yield(model.ResponseEvent{}, fmt.Errorf("unexpected model call %d", callIndex))
 		}
 	}
+}
+
+type scriptedSpawnCancelLLM struct {
+	requests []model.Request
+	taskID   string
+}
+
+func (m *scriptedSpawnCancelLLM) Name() string { return "scripted-spawn-cancel" }
+
+func (m *scriptedSpawnCancelLLM) Generate(_ context.Context, req model.Request) iter.Seq2[model.ResponseEvent, error] {
+	callIndex := len(m.requests)
+	m.requests = append(m.requests, cloneModelRequest(req))
+	return func(yield func(model.ResponseEvent, error) bool) {
+		switch callIndex {
+		case 0:
+			yield(model.ResponseEvent{ToolCall: &model.ToolCallDelta{
+				CallID: "spawn-call-1",
+				Name:   "SPAWN",
+				Args:   map[string]any{"agent": "reviewer", "prompt": "inspect files"},
+			}}, nil)
+		case 1:
+			taskID := taskIDFromToolResult(req.Messages)
+			if taskID == "" {
+				yield(model.ResponseEvent{}, fmt.Errorf("missing SPAWN task id in model context"))
+				return
+			}
+			m.taskID = taskID
+			yield(model.ResponseEvent{ToolCall: &model.ToolCallDelta{
+				CallID: "task-cancel-1",
+				Name:   "TASK",
+				Args:   map[string]any{"action": "cancel", "task_id": taskID},
+			}}, nil)
+		case 2:
+			if !lastToolResultContains(req.Messages, "cancelled") {
+				yield(model.ResponseEvent{}, fmt.Errorf("missing TASK cancel result in model context"))
+				return
+			}
+			yield(model.ResponseEvent{TextDelta: "spawn-cancel-ok"}, nil)
+		default:
+			yield(model.ResponseEvent{}, fmt.Errorf("unexpected model call %d", callIndex))
+		}
+	}
+}
+
+type scriptedSpawnContinueLLM struct {
+	requests []model.Request
+	taskID   string
+}
+
+func (m *scriptedSpawnContinueLLM) Name() string { return "scripted-spawn-continue" }
+
+func (m *scriptedSpawnContinueLLM) Generate(_ context.Context, req model.Request) iter.Seq2[model.ResponseEvent, error] {
+	callIndex := len(m.requests)
+	m.requests = append(m.requests, cloneModelRequest(req))
+	return func(yield func(model.ResponseEvent, error) bool) {
+		switch callIndex {
+		case 0:
+			yield(model.ResponseEvent{ToolCall: &model.ToolCallDelta{
+				CallID: "spawn-call-1",
+				Name:   "SPAWN",
+				Args:   map[string]any{"agent": "reviewer", "prompt": "first prompt"},
+			}}, nil)
+		case 1:
+			taskID := taskIDFromToolResult(req.Messages)
+			if taskID == "" {
+				yield(model.ResponseEvent{}, fmt.Errorf("missing SPAWN task id in model context"))
+				return
+			}
+			m.taskID = taskID
+			yield(model.ResponseEvent{ToolCall: &model.ToolCallDelta{
+				CallID: "task-wait-1",
+				Name:   "TASK",
+				Args:   map[string]any{"action": "wait", "task_id": taskID},
+			}}, nil)
+		case 2:
+			if !lastToolResultContains(req.Messages, "first done") {
+				yield(model.ResponseEvent{}, fmt.Errorf("missing first child result in model context"))
+				return
+			}
+			yield(model.ResponseEvent{ToolCall: &model.ToolCallDelta{
+				CallID: "task-write-1",
+				Name:   "TASK",
+				Args:   map[string]any{"action": "write", "task_id": m.taskID, "input": "continue prompt"},
+			}}, nil)
+		case 3:
+			if !lastToolResultContains(req.Messages, "ok") {
+				yield(model.ResponseEvent{}, fmt.Errorf("missing TASK write result in model context"))
+				return
+			}
+			yield(model.ResponseEvent{ToolCall: &model.ToolCallDelta{
+				CallID: "task-wait-2",
+				Name:   "TASK",
+				Args:   map[string]any{"action": "wait", "task_id": m.taskID},
+			}}, nil)
+		case 4:
+			if !lastToolResultContains(req.Messages, "continued done") {
+				yield(model.ResponseEvent{}, fmt.Errorf("missing continued child result in model context"))
+				return
+			}
+			yield(model.ResponseEvent{TextDelta: "spawn-continue-ok"}, nil)
+		default:
+			yield(model.ResponseEvent{}, fmt.Errorf("unexpected model call %d", callIndex))
+		}
+	}
+}
+
+type e2eBlockingLLM struct {
+	started    chan struct{}
+	cancelled  chan struct{}
+	startOnce  sync.Once
+	cancelOnce sync.Once
+}
+
+func newE2EBlockingLLM() *e2eBlockingLLM {
+	return &e2eBlockingLLM{
+		started:   make(chan struct{}),
+		cancelled: make(chan struct{}),
+	}
+}
+
+func (m *e2eBlockingLLM) Name() string { return "e2e-blocking" }
+
+func (m *e2eBlockingLLM) Generate(ctx context.Context, _ model.Request) iter.Seq2[model.ResponseEvent, error] {
+	m.startOnce.Do(func() { close(m.started) })
+	return func(yield func(model.ResponseEvent, error) bool) {
+		<-ctx.Done()
+		m.cancelOnce.Do(func() { close(m.cancelled) })
+		yield(model.ResponseEvent{}, ctx.Err())
+	}
+}
+
+type scriptedChildSequenceLLM struct {
+	requests  []model.Request
+	responses []string
+}
+
+func (m *scriptedChildSequenceLLM) Name() string { return "scripted-child-sequence" }
+
+func (m *scriptedChildSequenceLLM) Generate(_ context.Context, req model.Request) iter.Seq2[model.ResponseEvent, error] {
+	callIndex := len(m.requests)
+	m.requests = append(m.requests, cloneModelRequest(req))
+	return func(yield func(model.ResponseEvent, error) bool) {
+		if callIndex >= len(m.responses) {
+			yield(model.ResponseEvent{}, fmt.Errorf("unexpected child model call %d", callIndex))
+			return
+		}
+		yield(model.ResponseEvent{TextDelta: m.responses[callIndex]}, nil)
+	}
+}
+
+type deltaE2ELLM struct {
+	events []model.ResponseEvent
+}
+
+func (m *deltaE2ELLM) Name() string { return "delta-e2e" }
+
+func (m *deltaE2ELLM) Generate(_ context.Context, _ model.Request) iter.Seq2[model.ResponseEvent, error] {
+	return func(yield func(model.ResponseEvent, error) bool) {
+		for _, evt := range m.events {
+			if !yield(evt, nil) {
+				return
+			}
+		}
+	}
+}
+
+func taskIDFromToolResult(messages []model.Message) string {
+	for i := len(messages) - 1; i >= 0; i-- {
+		for _, part := range messages[i].Content {
+			if part.ToolResult == nil {
+				continue
+			}
+			text := strings.TrimSpace(part.ToolResult.Content)
+			if after, ok := strings.CutPrefix(text, "task started: "); ok {
+				return strings.TrimSpace(after)
+			}
+		}
+	}
+	return ""
+}
+
+func lastToolResultContains(messages []model.Message, want string) bool {
+	for i := len(messages) - 1; i >= 0; i-- {
+		for _, part := range messages[i].Content {
+			if part.ToolResult != nil && strings.Contains(part.ToolResult.Content, want) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 type scriptedFilesystemLLM struct {

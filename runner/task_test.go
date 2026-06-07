@@ -2,10 +2,13 @@ package runner
 
 import (
 	"context"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/sandbox"
+	"github.com/OnslaughtSnail/caelis/sandbox/host"
 	"github.com/OnslaughtSnail/caelis/tool"
 )
 
@@ -168,6 +171,82 @@ func TestTaskManager_WaitUsesStoredAsyncSessionAfterRestart(t *testing.T) {
 	}
 }
 
+func TestTaskManagerUsesHostAsyncBackend(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("host shell test uses POSIX shell")
+	}
+
+	ctx := context.Background()
+	store := NewMemoryTaskStore()
+	tm := NewTaskManagerWithStore(host.New(), store, "scope-1")
+	taskID, err := tm.StartCommand(ctx, sandbox.CommandRequest{Command: "printf runner-host-async"})
+	if err != nil {
+		t.Fatalf("StartCommand: %v", err)
+	}
+	if taskID == "" {
+		t.Fatal("expected task id")
+	}
+	snap, err := tm.Wait(ctx, taskID)
+	if err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+	if snap.State != TaskStateCompleted || strings.TrimSpace(snap.Output) != "runner-host-async" {
+		t.Fatalf("snapshot = %#v, want completed host async output", snap)
+	}
+	loaded, ok, err := store.LoadTask(ctx, taskID)
+	if err != nil || !ok || loaded.SandboxSession.SessionID == "" {
+		t.Fatalf("stored snapshot = %#v ok=%v err=%v, want sandbox session ref", loaded, ok, err)
+	}
+}
+
+func TestTaskAwareShellCancelsAsyncSessionWithParentContext(t *testing.T) {
+	ctx, cancelParent := context.WithCancel(context.Background())
+	defer cancelParent()
+	backend := newAsyncTaskBackend()
+	store := NewMemoryTaskStore()
+	tm := NewTaskManagerWithStore(backend, store, "session-1")
+	shell := &taskAwareShellTool{inner: &mockShellTool{}, manager: tm}
+
+	result, err := shell.Run(&toolContext{
+		Context:      ctx,
+		sessionRef:   "session-1",
+		invocationID: "inv-1",
+		agentName:    "agent-1",
+		backend:      backend,
+	}, tool.Call{
+		Name: "RUN_COMMAND",
+		Args: map[string]any{
+			"command": "long",
+			"wait":    false,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	taskID, ok := result.Metadata["task_id"].(string)
+	if !ok || taskID == "" {
+		t.Fatalf("result metadata = %#v, want task_id", result.Metadata)
+	}
+	if backend.session == nil {
+		t.Fatal("async session did not start")
+	}
+
+	cancelParent()
+	select {
+	case <-backend.session.terminated:
+	case <-time.After(time.Second):
+		t.Fatal("async session was not terminated after parent context cancellation")
+	}
+
+	snap, err := store.WaitTask(context.Background(), taskID)
+	if err != nil {
+		t.Fatalf("WaitTask() error = %v", err)
+	}
+	if snap.State != TaskStateCancelled {
+		t.Fatalf("snapshot after parent cancel = %#v, want cancelled", snap)
+	}
+}
+
 // ─── Tool augmentation tests ─────────────────────────────────────────
 
 func TestAugmentTools_InjectsTask(t *testing.T) {
@@ -285,15 +364,16 @@ func (b *asyncTaskBackend) OpenSessionRef(ref sandbox.SessionRef) (sandbox.Sessi
 }
 
 type asyncTaskSession struct {
-	ref    sandbox.SessionRef
-	input  []byte
-	done   chan struct{}
-	result sandbox.CommandResult
-	err    error
+	ref        sandbox.SessionRef
+	input      []byte
+	done       chan struct{}
+	terminated chan struct{}
+	result     sandbox.CommandResult
+	err        error
 }
 
 func newAsyncTaskSession(ref sandbox.SessionRef) *asyncTaskSession {
-	return &asyncTaskSession{ref: ref, done: make(chan struct{})}
+	return &asyncTaskSession{ref: ref, done: make(chan struct{}), terminated: make(chan struct{})}
 }
 
 func (s *asyncTaskSession) Ref() sandbox.SessionRef { return s.ref }
@@ -339,6 +419,11 @@ func (s *asyncTaskSession) Result(ctx context.Context) (sandbox.CommandResult, e
 }
 
 func (s *asyncTaskSession) Terminate(_ context.Context) error {
+	select {
+	case <-s.terminated:
+	default:
+		close(s.terminated)
+	}
 	s.complete(sandbox.CommandResult{ExitCode: -1}, nil)
 	return nil
 }

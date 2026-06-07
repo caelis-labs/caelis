@@ -34,3 +34,24 @@ func TestEnvelopeMarshalIncludesACPUpdate(t *testing.T) {
 		}
 	}
 }
+
+func TestEnvelopeMarshalIncludesContentChunkFinalFalse(t *testing.T) {
+	final := false
+	env := Envelope{
+		Kind:      KindSessionUpdate,
+		SessionID: "session-1",
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateAgentMessage,
+			Content:       schema.TextContent{Type: "text", Text: "hel"},
+			Final:         &final,
+		},
+	}
+
+	data, err := json.Marshal(env)
+	if err != nil {
+		t.Fatalf("json.Marshal(Envelope) error = %v", err)
+	}
+	if !strings.Contains(string(data), `"final":false`) {
+		t.Fatalf("json = %s, want content chunk final=false", data)
+	}
+}

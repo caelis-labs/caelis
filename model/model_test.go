@@ -37,6 +37,55 @@ func TestMessageCloneInlineData(t *testing.T) {
 	}
 }
 
+func TestMessageCloneProviderReplayMetadata(t *testing.T) {
+	m := Message{
+		Role: RoleAssistant,
+		Content: []Part{
+			{
+				Reasoning: &Reasoning{
+					Text:       "thinking",
+					Visibility: ReasoningVisibilityVisible,
+					Replay: &ReplayMeta{
+						Provider: "anthropic",
+						Kind:     "thinking_signature",
+						Token:    "sig-1",
+						Metadata: map[string]any{"index": float64(0)},
+					},
+				},
+				ProviderMeta: map[string]any{"block_id": "block-1"},
+			},
+			{
+				ToolUse: &ToolUse{
+					CallID: "call-1",
+					Name:   "lookup",
+					ProviderMeta: map[string]any{
+						"gemini_thought_signature": "b64:sig-call",
+					},
+				},
+			},
+		},
+	}
+
+	cp := m.Clone()
+	cp.Content[0].Reasoning.Replay.Token = "modified"
+	cp.Content[0].Reasoning.Replay.Metadata["index"] = float64(1)
+	cp.Content[0].ProviderMeta["block_id"] = "modified"
+	cp.Content[1].ToolUse.ProviderMeta["gemini_thought_signature"] = "modified"
+
+	if got := m.Content[0].Reasoning.Replay.Token; got != "sig-1" {
+		t.Fatalf("reasoning replay token = %q, want sig-1", got)
+	}
+	if got := m.Content[0].Reasoning.Replay.Metadata["index"]; got != float64(0) {
+		t.Fatalf("reasoning replay metadata index = %#v, want 0", got)
+	}
+	if got := m.Content[0].ProviderMeta["block_id"]; got != "block-1" {
+		t.Fatalf("part provider meta block_id = %#v, want block-1", got)
+	}
+	if got := m.Content[1].ToolUse.ProviderMeta["gemini_thought_signature"]; got != "b64:sig-call" {
+		t.Fatalf("tool provider meta signature = %#v, want original", got)
+	}
+}
+
 func TestMessageNormalize(t *testing.T) {
 	m := Message{
 		Role: RoleUser,

@@ -7,8 +7,8 @@ import (
 	"github.com/OnslaughtSnail/caelis/agent"
 	"github.com/OnslaughtSnail/caelis/policy"
 	"github.com/OnslaughtSnail/caelis/sandbox"
+	"github.com/OnslaughtSnail/caelis/session"
 	"github.com/OnslaughtSnail/caelis/tool"
-	"github.com/OnslaughtSnail/caelis/tool/builtin/spawn"
 	"github.com/OnslaughtSnail/caelis/trace"
 )
 
@@ -20,12 +20,8 @@ type policyWrappedTool struct {
 	inner    tool.Tool
 	engine   policy.Engine
 	approver agent.ApprovalRequester
-	session  sessionSnapshot
-}
-
-type sessionSnapshot struct {
-	ref   string
-	state map[string]string
+	session  session.Session
+	events   []session.Event
 }
 
 func (w *policyWrappedTool) Definition() tool.Definition {
@@ -76,11 +72,13 @@ func (w *policyWrappedTool) Run(ctx tool.Context, call tool.Call) (tool.Result, 
 		}
 		// Request approval.
 		resp, err := w.approver.RequestApproval(ctx, agent.ApprovalRequest{
-			ToolName: call.Name,
-			CallID:   call.CallID,
-			Args:     call.Args,
-			Reason:   decision.Reason,
-			RunID:    ctx.InvocationID(),
+			ToolName:   call.Name,
+			CallID:     call.CallID,
+			Args:       call.Args,
+			Reason:     decision.Reason,
+			Session:    w.session.Clone(),
+			RunID:      ctx.InvocationID(),
+			Transcript: cloneSessionEvents(w.events),
 		})
 		if err != nil {
 			return tool.Result{
@@ -276,11 +274,11 @@ func (w *truncationWrappedTool) Run(ctx tool.Context, call tool.Call) (tool.Resu
 //   - Injects TASK tool when RUN_COMMAND or SPAWN is present
 //
 // Called before WrapTools to prepare the raw tool list.
-func AugmentTools(tools []tool.Tool, tm *TaskManager, delegators ...spawn.Delegator) []tool.Tool {
+func AugmentTools(tools []tool.Tool, tm *TaskManager, delegators ...agent.SpawnDelegator) []tool.Tool {
 	hasRUN_COMMAND := false
 	hasSPAWN := false
 	hasTASK := false
-	var delegator spawn.Delegator
+	var delegator agent.SpawnDelegator
 	if len(delegators) > 0 {
 		delegator = delegators[0]
 	}
@@ -297,8 +295,8 @@ func AugmentTools(tools []tool.Tool, tm *TaskManager, delegators ...spawn.Delega
 			}
 		case "SPAWN":
 			hasSPAWN = true
-			if delegator != nil {
-				result = append(result, spawn.New(delegator))
+			if configurable, ok := t.(spawnDelegationConfigurable); ok && delegator != nil {
+				result = append(result, configurable.WithSpawnDelegator(delegator))
 			} else {
 				result = append(result, t)
 			}
@@ -316,6 +314,10 @@ func AugmentTools(tools []tool.Tool, tm *TaskManager, delegators ...spawn.Delega
 	}
 
 	return result
+}
+
+type spawnDelegationConfigurable interface {
+	WithSpawnDelegator(agent.SpawnDelegator) tool.Tool
 }
 
 // ─── Task-aware RUN_COMMAND wrapper ─────────────────────────────────
@@ -480,8 +482,10 @@ func (t *taskTool) Run(ctx tool.Context, call tool.Call) (tool.Result, error) {
 // ─── Tool chain assembly ─────────────────────────────────────────────
 
 type toolWrapConfig struct {
-	hooks  []agent.Hook
-	tracer trace.Tracer
+	hooks           []agent.Hook
+	tracer          trace.Tracer
+	approvalSession session.Session
+	approvalEvents  []session.Event
 }
 
 // ToolWrapOption configures runner-owned tool decorators.
@@ -498,6 +502,14 @@ func WithToolHooks(hooks ...agent.Hook) ToolWrapOption {
 func WithToolTracer(tracer trace.Tracer) ToolWrapOption {
 	return func(cfg *toolWrapConfig) {
 		cfg.tracer = tracer
+	}
+}
+
+// WithApprovalContext adds session and transcript context to approval requests.
+func WithApprovalContext(activeSession session.Session, events []session.Event) ToolWrapOption {
+	return func(cfg *toolWrapConfig) {
+		cfg.approvalSession = activeSession.Clone()
+		cfg.approvalEvents = cloneSessionEvents(events)
 	}
 }
 
@@ -537,11 +549,24 @@ func WrapTools(tools []tool.Tool, engine policy.Engine, approver agent.ApprovalR
 				inner:    w,
 				engine:   engine,
 				approver: approver,
+				session:  cfg.approvalSession.Clone(),
+				events:   cloneSessionEvents(cfg.approvalEvents),
 			}
 		}
 		wrapped[i] = w
 	}
 	return wrapped
+}
+
+func cloneSessionEvents(events []session.Event) []session.Event {
+	if len(events) == 0 {
+		return nil
+	}
+	out := make([]session.Event, 0, len(events))
+	for _, event := range events {
+		out = append(out, event.Clone())
+	}
+	return out
 }
 
 func cloneAnyMap(in map[string]any) map[string]any {

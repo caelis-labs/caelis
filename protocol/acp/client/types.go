@@ -121,6 +121,7 @@ type SessionNotification struct {
 type ContentChunk struct {
 	SessionUpdate string          `json:"sessionUpdate"`
 	Content       json.RawMessage `json:"content"`
+	Final         *bool           `json:"final,omitempty"`
 }
 
 type TextChunk struct {

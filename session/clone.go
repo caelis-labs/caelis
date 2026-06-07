@@ -30,6 +30,7 @@ func (e Event) Clone() Event {
 	}
 	if e.CompactionPayload != nil {
 		v := *e.CompactionPayload
+		v.RetainedMessages = cloneCompactionRetainedMessages(e.CompactionPayload.RetainedMessages)
 		cp.CompactionPayload = &v
 	}
 	if e.LifecyclePayload != nil {
@@ -143,6 +144,20 @@ func cloneParts(parts []EventPart) []EventPart {
 	return cp
 }
 
+func cloneCompactionRetainedMessages(messages []CompactionRetainedMessage) []CompactionRetainedMessage {
+	if len(messages) == 0 {
+		return nil
+	}
+	out := make([]CompactionRetainedMessage, len(messages))
+	for i, msg := range messages {
+		out[i] = CompactionRetainedMessage{
+			Role:  msg.Role,
+			Parts: cloneParts(msg.Parts),
+		}
+	}
+	return out
+}
+
 // Clone returns a deep copy of the event part.
 func (p EventPart) Clone() EventPart {
 	cp := p
@@ -168,6 +183,9 @@ func (p EventPart) Clone() EventPart {
 	if p.FileRef != nil {
 		v := *p.FileRef
 		cp.FileRef = &v
+	}
+	if p.ProviderMeta != nil {
+		cp.ProviderMeta = cloneMap(p.ProviderMeta)
 	}
 	return cp
 }

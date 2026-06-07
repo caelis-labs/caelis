@@ -7,7 +7,8 @@ package session
 //   - Payloads store semantic data only; projections are computed
 //   - Tool calls and results are separate events linked by CallID
 //   - EventPart is the unified content atom across all payload types
-//   - Provider-specific replay data lives in Event.ProviderMeta, not in payloads
+//   - Event.ProviderMeta stores event-level provider data; EventPart.ProviderMeta
+//     stores provider data needed to replay a specific model-visible part.
 
 // ─── Message payloads ────────────────────────────────────────────────
 
@@ -65,6 +66,10 @@ type EventPart struct {
 
 	// JSON is structured JSON content (PartKindJSON).
 	JSON any `json:"json,omitempty"`
+
+	// ProviderMeta preserves provider-specific replay data for this part
+	// (for example Anthropic thinking signatures or Gemini thought signatures).
+	ProviderMeta map[string]any `json:"provider_meta,omitempty"`
 }
 
 // PartToolUse is a tool call request embedded in an assistant message part.
@@ -161,10 +166,19 @@ type PlanEntry struct {
 
 // CompactionPayload records that earlier events were compacted.
 type CompactionPayload struct {
-	Reason      string `json:"reason"`
-	Previous    int    `json:"previous"`     // events before compaction
-	Remaining   int    `json:"remaining"`    // events after compaction
-	SummaryText string `json:"summary_text"` // human-readable summary
+	Reason           string                      `json:"reason"`
+	Previous         int                         `json:"previous"`     // model messages before compaction
+	Remaining        int                         `json:"remaining"`    // model messages after compaction
+	SummaryText      string                      `json:"summary_text"` // human-readable summary
+	RetainedMessages []CompactionRetainedMessage `json:"retained_messages,omitempty"`
+}
+
+// CompactionRetainedMessage records non-summary model messages that remain
+// visible after compaction. This lets durable replay rebuild the same compacted
+// context that the runtime retried with.
+type CompactionRetainedMessage struct {
+	Role  string      `json:"role"`
+	Parts []EventPart `json:"parts,omitempty"`
 }
 
 // LifecyclePayload records session lifecycle transitions.

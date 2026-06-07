@@ -2,6 +2,7 @@ package acp
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"testing"
 
 	"github.com/OnslaughtSnail/caelis/session"
@@ -38,6 +39,46 @@ func TestNormalizeExternalEvent_AgentChunk(t *testing.T) {
 	}
 	if e.AssistantPayload.Parts[0].Text != "reply" {
 		t.Errorf("text: %q", e.AssistantPayload.Parts[0].Text)
+	}
+}
+
+func TestNormalizeExternalEvent_AgentChunkFinalFalseIsUIOnly(t *testing.T) {
+	final := false
+	update := ContentChunk{
+		SessionUpdate: UpdateAgentMessage,
+		Content:       TextContent{Type: "text", Text: "partial"},
+		Final:         &final,
+	}
+	e := NormalizeExternalEvent("sess-1", update)
+	if e == nil || e.Kind != session.EventKindAssistant {
+		t.Fatal("expected assistant event")
+	}
+	if e.Visibility != session.VisibilityUIOnly {
+		t.Fatalf("visibility = %q, want ui_only", e.Visibility)
+	}
+	if e.AssistantPayload.Parts[0].Text != "partial" {
+		t.Fatalf("text = %q", e.AssistantPayload.Parts[0].Text)
+	}
+}
+
+func TestNormalizeExternalUpdateJSON_DecodesContentChunkAndFinal(t *testing.T) {
+	raw := json.RawMessage(`{
+		"sessionUpdate":"agent_message_chunk",
+		"content":{"type":"text","text":"partial"},
+		"final":false
+	}`)
+	e, err := NormalizeExternalUpdateJSON("sess-1", raw)
+	if err != nil {
+		t.Fatalf("NormalizeExternalUpdateJSON error = %v", err)
+	}
+	if e == nil || e.Kind != session.EventKindAssistant {
+		t.Fatal("expected assistant event")
+	}
+	if e.Visibility != session.VisibilityUIOnly {
+		t.Fatalf("visibility = %q, want ui_only", e.Visibility)
+	}
+	if e.AssistantPayload.Parts[0].Text != "partial" {
+		t.Fatalf("text = %q", e.AssistantPayload.Parts[0].Text)
 	}
 }
 

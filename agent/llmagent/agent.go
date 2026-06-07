@@ -169,9 +169,29 @@ func (a *Agent) Run(ctx agent.InvocationContext) iter.Seq2[session.Event, error]
 				}
 				if event.TextDelta != "" {
 					assistantText += event.TextDelta
+					if !yield(session.Event{
+						Kind:       session.EventKindAssistant,
+						Visibility: session.VisibilityUIOnly,
+						AssistantPayload: &session.AssistantPayload{Parts: []session.EventPart{{
+							Kind: session.PartKindText,
+							Text: event.TextDelta,
+						}}},
+					}, nil) {
+						return
+					}
 				}
 				if event.ReasoningDelta != "" {
 					reasoningText += event.ReasoningDelta
+					if !yield(session.Event{
+						Kind:       session.EventKindAssistant,
+						Visibility: session.VisibilityUIOnly,
+						AssistantPayload: &session.AssistantPayload{Parts: []session.EventPart{{
+							Kind: session.PartKindReasoning,
+							Text: event.ReasoningDelta,
+						}}},
+					}, nil) {
+						return
+					}
 				}
 				if event.ToolCall != nil {
 					pendingCalls = append(pendingCalls, pendingCall{
@@ -213,7 +233,12 @@ func (a *Agent) Run(ctx agent.InvocationContext) iter.Seq2[session.Event, error]
 				}
 				var modelParts []model.Part
 				if reasoningText != "" {
-					modelParts = append(modelParts, model.Part{Text: reasoningText})
+					modelParts = append(modelParts, model.Part{
+						Reasoning: &model.Reasoning{
+							Text:       reasoningText,
+							Visibility: model.ReasoningVisibilityVisible,
+						},
+					})
 				}
 				if assistantText != "" {
 					modelParts = append(modelParts, model.Part{Text: assistantText})

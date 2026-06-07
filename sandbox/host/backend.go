@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sync"
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/sandbox"
@@ -20,10 +21,15 @@ import (
 // execution — the command can still access any path via absolute paths,
 // symlinks, or shell redirects. For full path isolation, use a platform
 // sandbox backend (seatbelt/bwrap/restricted-token).
-type Backend struct{}
+type Backend struct {
+	mu       sync.RWMutex
+	sessions map[string]*session
+}
 
 // New creates a new host backend.
-func New() *Backend { return &Backend{} }
+func New() *Backend {
+	return &Backend{sessions: make(map[string]*session)}
+}
 
 func (b *Backend) Name() string { return "host" }
 
@@ -98,7 +104,18 @@ func (b *Backend) Status(_ context.Context) (sandbox.Status, error) {
 	return sandbox.Status{Running: true}, nil
 }
 
-func (b *Backend) Close() error { return nil }
+func (b *Backend) Close() error {
+	b.mu.RLock()
+	sessions := make([]*session, 0, len(b.sessions))
+	for _, s := range b.sessions {
+		sessions = append(sessions, s)
+	}
+	b.mu.RUnlock()
+	for _, s := range sessions {
+		_ = s.Terminate(context.Background())
+	}
+	return nil
+}
 
 // Compile-time interface check.
 var _ sandbox.Backend = (*Backend)(nil)

@@ -59,6 +59,7 @@ func projectUser(e *session.Event) []Update {
 	return []Update{ContentChunk{
 		SessionUpdate: UpdateUserMessage,
 		Content:       content,
+		Final:         boolPtr(true),
 	}}
 }
 
@@ -69,6 +70,7 @@ func projectAssistant(e *session.Event) []Update {
 		return nil
 	}
 	var updates []Update
+	final := e.Visibility != session.VisibilityUIOnly
 
 	reasoningParts := filterParts(e.AssistantPayload.Parts, func(p session.EventPart) bool {
 		return p.Kind == session.PartKindReasoning
@@ -82,12 +84,14 @@ func projectAssistant(e *session.Event) []Update {
 		updates = append(updates, ContentChunk{
 			SessionUpdate: UpdateAgentThought,
 			Content:       content,
+			Final:         boolPtr(final),
 		})
 	}
 	if content := messageContentFromParts(messageParts); content != nil {
 		updates = append(updates, ContentChunk{
 			SessionUpdate: UpdateAgentMessage,
 			Content:       content,
+			Final:         boolPtr(final),
 		})
 	}
 	return updates
@@ -499,4 +503,8 @@ func cloneStringMap(in map[string]string) map[string]string {
 		out[key] = value
 	}
 	return out
+}
+
+func boolPtr(v bool) *bool {
+	return &v
 }

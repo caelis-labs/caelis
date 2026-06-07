@@ -18,6 +18,15 @@ type Config struct {
 	Env         map[string]string
 }
 
+// RouteRequest describes the runtime context used to select a backend.
+type RouteRequest struct {
+	WorkspaceRoot    string
+	RequestedBackend string
+	Constraints      Constraints
+	Metadata         map[string]any
+	Available        []Descriptor
+}
+
 // Permission describes the sandbox permission level.
 type Permission string
 

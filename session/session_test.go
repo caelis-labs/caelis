@@ -360,6 +360,58 @@ func TestModelContextWithReasoning(t *testing.T) {
 	}
 }
 
+func TestModelContextPreservesProviderReplayMetadata(t *testing.T) {
+	events := []Event{
+		{
+			Kind:       EventKindAssistant,
+			Visibility: VisibilityCanonical,
+			AssistantPayload: &AssistantPayload{
+				Parts: []EventPart{
+					{
+						Kind: PartKindReasoning,
+						Text: "prior reasoning",
+						ProviderMeta: map[string]any{
+							"replay": map[string]any{
+								"provider": "anthropic",
+								"kind":     "thinking_signature",
+								"token":    "sig-prev",
+							},
+						},
+					},
+					{
+						Kind: PartKindToolUse,
+						ToolUse: &PartToolUse{
+							CallID: "call-1",
+							Name:   "lookup",
+						},
+						ProviderMeta: map[string]any{
+							"gemini_thought_signature": "b64:sig-call",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	msgs := ModelContextFromEvents(events)
+	if len(msgs) != 1 || len(msgs[0].Content) != 2 {
+		t.Fatalf("messages = %#v, want one assistant message with two parts", msgs)
+	}
+	reasoning := msgs[0].Content[0].Reasoning
+	if reasoning == nil {
+		t.Fatalf("reasoning part = nil, want preserved reasoning")
+	}
+	if reasoning.Text != "prior reasoning" {
+		t.Fatalf("reasoning text = %q, want prior reasoning", reasoning.Text)
+	}
+	if reasoning.Replay == nil || reasoning.Replay.Provider != "anthropic" || reasoning.Replay.Token != "sig-prev" {
+		t.Fatalf("reasoning replay = %#v, want anthropic sig-prev", reasoning.Replay)
+	}
+	if got := msgs[0].Content[1].ToolUse.ProviderMeta["gemini_thought_signature"]; got != "b64:sig-call" {
+		t.Fatalf("tool provider meta signature = %#v, want b64:sig-call", got)
+	}
+}
+
 func TestRoundTripModelContext(t *testing.T) {
 	// Build events, project to model context, verify structure.
 	events := []Event{

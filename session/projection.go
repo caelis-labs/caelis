@@ -40,6 +40,10 @@ func ModelContextFromEvents(events []Event) []model.Message {
 				Content: []model.Part{{Text: comp.CompactionPayload.SummaryText}},
 			})
 		}
+		if comp.CompactionPayload != nil {
+			msgs = append(msgs, retainedCompactionMessagesToModel(comp.CompactionPayload.RetainedMessages)...)
+			msgs = append(msgs, preCompactionMessagesAfterBoundary(events[:lastCompactIdx], comp.CompactionPayload.Previous)...)
+		}
 	}
 
 	// Scan events after compaction (or all events if no compaction).
@@ -81,6 +85,48 @@ func projectEventToModelMessage(e *Event) *model.Message {
 		// do not produce model messages.
 		return nil
 	}
+}
+
+func retainedCompactionMessagesToModel(messages []CompactionRetainedMessage) []model.Message {
+	if len(messages) == 0 {
+		return nil
+	}
+	out := make([]model.Message, 0, len(messages))
+	for _, msg := range messages {
+		role := model.Role(msg.Role)
+		if role == "" {
+			continue
+		}
+		parts := eventPartsToModelParts(msg.Parts)
+		if len(parts) == 0 {
+			continue
+		}
+		out = append(out, model.Message{Role: role, Content: parts})
+	}
+	return out
+}
+
+func preCompactionMessagesAfterBoundary(events []Event, compactedMessages int) []model.Message {
+	if compactedMessages <= 0 || len(events) == 0 {
+		return nil
+	}
+	seen := 0
+	var out []model.Message
+	for i := range events {
+		e := &events[i]
+		if !e.IsModelVisible() {
+			continue
+		}
+		msg := projectEventToModelMessage(e)
+		if msg == nil {
+			continue
+		}
+		if seen >= compactedMessages {
+			out = append(out, *msg)
+		}
+		seen++
+	}
+	return out
 }
 
 func projectUserToModel(e *Event) *model.Message {
@@ -187,19 +233,26 @@ func eventPartsToModelParts(parts []EventPart) []model.Part {
 func eventPartToModelPart(p EventPart) *model.Part {
 	switch p.Kind {
 	case PartKindText:
-		return &model.Part{Text: p.Text}
+		return &model.Part{Text: p.Text, ProviderMeta: cloneProviderMeta(p.ProviderMeta)}
 	case PartKindReasoning:
-		// Reasoning text is included in model context for providers
-		// that support it (extended thinking).
-		return &model.Part{Text: p.Text}
+		return &model.Part{
+			Reasoning: &model.Reasoning{
+				Text:       p.Text,
+				Visibility: model.ReasoningVisibilityVisible,
+				Replay:     replayMetaFromProviderMeta(p.ProviderMeta),
+			},
+			ProviderMeta: cloneProviderMeta(p.ProviderMeta),
+		}
 	case PartKindToolUse:
 		if p.ToolUse != nil {
 			return &model.Part{
 				ToolUse: &model.ToolUse{
-					CallID: p.ToolUse.CallID,
-					Name:   p.ToolUse.Name,
-					Args:   p.ToolUse.Args,
+					CallID:       p.ToolUse.CallID,
+					Name:         p.ToolUse.Name,
+					Args:         p.ToolUse.Args,
+					ProviderMeta: cloneProviderMeta(p.ProviderMeta),
 				},
+				ProviderMeta: cloneProviderMeta(p.ProviderMeta),
 			}
 		}
 	case PartKindToolResult:
@@ -210,6 +263,7 @@ func eventPartToModelPart(p EventPart) *model.Part {
 					Content: p.ToolResultRef.Content,
 					IsError: p.ToolResultRef.IsError,
 				},
+				ProviderMeta: cloneProviderMeta(p.ProviderMeta),
 			}
 		}
 	case PartKindMedia:
@@ -219,6 +273,7 @@ func eventPartToModelPart(p EventPart) *model.Part {
 					MIMEType: p.Media.MIMEType,
 					Data:     p.Media.Data,
 				},
+				ProviderMeta: cloneProviderMeta(p.ProviderMeta),
 			}
 		}
 	case PartKindFileRef:
@@ -228,14 +283,69 @@ func eventPartToModelPart(p EventPart) *model.Part {
 					URI:      p.FileRef.URI,
 					MIMEType: p.FileRef.MIMEType,
 				},
+				ProviderMeta: cloneProviderMeta(p.ProviderMeta),
 			}
 		}
 	case PartKindJSON:
 		// JSON parts are serialized as text for model consumption.
 		if p.JSON != nil {
 			data, _ := json.Marshal(p.JSON)
-			return &model.Part{Text: string(data)}
+			return &model.Part{Text: string(data), ProviderMeta: cloneProviderMeta(p.ProviderMeta)}
 		}
 	}
 	return nil
+}
+
+func replayMetaFromProviderMeta(meta map[string]any) *model.ReplayMeta {
+	raw, ok := meta["replay"]
+	if !ok {
+		return nil
+	}
+	values, ok := raw.(map[string]any)
+	if !ok {
+		return nil
+	}
+	replay := &model.ReplayMeta{
+		Provider: stringFromAny(values["provider"]),
+		Kind:     stringFromAny(values["kind"]),
+		Token:    stringFromAny(values["token"]),
+	}
+	if metadata, ok := values["metadata"].(map[string]any); ok {
+		replay.Metadata = cloneProviderMeta(metadata)
+	}
+	if replay.Provider == "" && replay.Kind == "" && replay.Token == "" && replay.Metadata == nil {
+		return nil
+	}
+	return replay
+}
+
+func cloneProviderMeta(meta map[string]any) map[string]any {
+	if meta == nil {
+		return nil
+	}
+	cp := make(map[string]any, len(meta))
+	for k, v := range meta {
+		cp[k] = cloneProviderMetaValue(v)
+	}
+	return cp
+}
+
+func cloneProviderMetaValue(v any) any {
+	switch typed := v.(type) {
+	case map[string]any:
+		return cloneProviderMeta(typed)
+	case []any:
+		cp := make([]any, len(typed))
+		for i, item := range typed {
+			cp[i] = cloneProviderMetaValue(item)
+		}
+		return cp
+	default:
+		return typed
+	}
+}
+
+func stringFromAny(v any) string {
+	s, _ := v.(string)
+	return s
 }

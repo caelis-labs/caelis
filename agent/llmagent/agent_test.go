@@ -26,6 +26,7 @@ type scriptedLLM struct {
 
 type scriptedResponse struct {
 	text      string
+	reasoning string
 	toolCalls []model.ToolCallDelta
 	err       error
 }
@@ -47,10 +48,29 @@ func (m *scriptedLLM) Generate(_ context.Context, req model.Request) iter.Seq2[m
 		if resp.text != "" {
 			yield(model.ResponseEvent{TextDelta: resp.text}, nil)
 		}
+		if resp.reasoning != "" {
+			yield(model.ResponseEvent{ReasoningDelta: resp.reasoning}, nil)
+		}
 		for _, tc := range resp.toolCalls {
 			yield(model.ResponseEvent{ToolCall: &tc}, nil)
 		}
 		yield(model.ResponseEvent{FinishReason: "stop"}, nil)
+	}
+}
+
+type streamingDeltaLLM struct {
+	events []model.ResponseEvent
+}
+
+func (m *streamingDeltaLLM) Name() string { return "streaming-delta" }
+
+func (m *streamingDeltaLLM) Generate(_ context.Context, _ model.Request) iter.Seq2[model.ResponseEvent, error] {
+	return func(yield func(model.ResponseEvent, error) bool) {
+		for _, evt := range m.events {
+			if !yield(evt, nil) {
+				return
+			}
+		}
 	}
 }
 
@@ -190,6 +210,46 @@ func TestAgentNilLLM(t *testing.T) {
 	}
 }
 
+func TestAgentPreservesReasoningPartsWithinInvocationHistory(t *testing.T) {
+	llm := &scriptedLLM{responses: []scriptedResponse{
+		{
+			reasoning: "need tool",
+			toolCalls: []model.ToolCallDelta{{
+				CallID: "call-1",
+				Name:   "ECHO",
+				Args:   map[string]any{"text": "x"},
+			}},
+		},
+		{text: "done"},
+	}}
+	exec := &recordingExecutor{}
+	a := prepare(Config{Name: "test"}, agent.PrepareRequest{
+		LLM:          llm,
+		ToolExecutor: exec,
+	})
+
+	for _, err := range a.Run(newInvCtx(userMsg("hi"))) {
+		if err != nil {
+			t.Fatalf("Run error: %v", err)
+		}
+	}
+
+	if len(llm.requests) != 2 {
+		t.Fatalf("model requests = %d, want 2", len(llm.requests))
+	}
+	var got *model.Reasoning
+	for _, msg := range llm.requests[1].Messages {
+		for _, part := range msg.Content {
+			if part.Reasoning != nil {
+				got = part.Reasoning
+			}
+		}
+	}
+	if got == nil || got.Text != "need tool" {
+		t.Fatalf("second request reasoning = %#v, want need tool", got)
+	}
+}
+
 func TestAgentTextResponse(t *testing.T) {
 	a := prepare(Config{Name: "test"}, agent.PrepareRequest{
 		LLM: &scriptedLLM{responses: []scriptedResponse{{text: "hello world"}}},
@@ -203,14 +263,69 @@ func TestAgentTextResponse(t *testing.T) {
 		events = append(events, evt)
 	}
 
-	if len(events) != 1 {
-		t.Fatalf("got %d events, want 1", len(events))
+	if len(events) != 2 {
+		t.Fatalf("got %d events, want transient delta plus canonical assistant", len(events))
 	}
-	if events[0].Kind != session.EventKindAssistant {
-		t.Errorf("kind: got %q", events[0].Kind)
+	if events[0].Kind != session.EventKindAssistant || events[0].Visibility != session.VisibilityUIOnly {
+		t.Errorf("delta event: got %#v, want ui-only assistant", events[0])
 	}
-	if events[0].TextContent() != "hello world" {
-		t.Errorf("text: got %q", events[0].TextContent())
+	if events[1].Kind != session.EventKindAssistant || events[1].Visibility != session.VisibilityCanonical {
+		t.Errorf("canonical event: got %#v, want canonical assistant", events[1])
+	}
+	if events[1].TextContent() != "hello world" {
+		t.Errorf("text: got %q", events[1].TextContent())
+	}
+}
+
+func TestAgentStreamsTransientTextAndReasoningBeforeCanonicalAssistant(t *testing.T) {
+	a := prepare(Config{Name: "test"}, agent.PrepareRequest{
+		LLM: &streamingDeltaLLM{events: []model.ResponseEvent{
+			{ReasoningDelta: "think-"},
+			{TextDelta: "hel"},
+			{ReasoningDelta: "ing"},
+			{TextDelta: "lo"},
+			{FinishReason: "stop"},
+		}},
+	})
+
+	var events []session.Event
+	for evt, err := range a.Run(newInvCtx(userMsg("hi"))) {
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		events = append(events, evt)
+	}
+
+	if len(events) != 5 {
+		t.Fatalf("events = %#v, want four transient deltas plus canonical assistant", events)
+	}
+	for i := 0; i < 4; i++ {
+		if events[i].Kind != session.EventKindAssistant || events[i].Visibility != session.VisibilityUIOnly {
+			t.Fatalf("event[%d] = %#v, want ui-only assistant delta", i, events[i])
+		}
+		if events[i].AssistantPayload == nil || len(events[i].AssistantPayload.Parts) != 1 {
+			t.Fatalf("event[%d] payload = %#v, want one delta part", i, events[i].AssistantPayload)
+		}
+	}
+	if events[0].AssistantPayload.Parts[0].Kind != session.PartKindReasoning || events[0].TextContent() != "think-" {
+		t.Fatalf("event[0] = %#v, want reasoning delta think-", events[0])
+	}
+	if events[1].AssistantPayload.Parts[0].Kind != session.PartKindText || events[1].TextContent() != "hel" {
+		t.Fatalf("event[1] = %#v, want text delta hel", events[1])
+	}
+	final := events[4]
+	if final.Kind != session.EventKindAssistant || final.Visibility != session.VisibilityCanonical {
+		t.Fatalf("final = %#v, want canonical assistant", final)
+	}
+	if final.TextContent() != "think-inghello" {
+		t.Fatalf("final text content = %q, want reasoning+text content", final.TextContent())
+	}
+	if len(final.AssistantPayload.Parts) != 2 ||
+		final.AssistantPayload.Parts[0].Kind != session.PartKindReasoning ||
+		final.AssistantPayload.Parts[0].Text != "think-ing" ||
+		final.AssistantPayload.Parts[1].Kind != session.PartKindText ||
+		final.AssistantPayload.Parts[1].Text != "hello" {
+		t.Fatalf("final parts = %#v, want accumulated reasoning and text", final.AssistantPayload.Parts)
 	}
 }
 
@@ -242,7 +357,9 @@ func TestAgentToolCall(t *testing.T) {
 		case session.EventKindToolResult:
 			toolResults++
 		case session.EventKindAssistant:
-			assistants++
+			if e.Visibility == session.VisibilityCanonical {
+				assistants++
+			}
 		}
 	}
 	if toolCalls != 1 || toolResults != 1 || assistants != 1 {

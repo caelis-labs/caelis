@@ -151,12 +151,13 @@ type ApprovalRequester interface {
 
 // ApprovalRequest describes a tool call pending approval.
 type ApprovalRequest struct {
-	ToolName string
-	CallID   string
-	Args     map[string]any
-	Reason   string
-	Session  session.Session
-	RunID    string
+	ToolName   string
+	CallID     string
+	Args       map[string]any
+	Reason     string
+	Session    session.Session
+	RunID      string
+	Transcript []session.Event
 }
 
 // ApprovalResponse is the user's decision.

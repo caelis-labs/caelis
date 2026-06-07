@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"flag"
 	"fmt"
 	"go/parser"
@@ -58,7 +59,25 @@ func main() {
 			return err
 		}
 		rel = filepath.ToSlash(rel)
-		file, err := parser.ParseFile(fset, path, nil, parser.ImportsOnly)
+		if rule := deletedLegacyRootRule(rel); rule != "" {
+			violations = append(violations, violation{
+				file: rel,
+				line: 1,
+				rule: rule,
+			})
+		}
+		src, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("%s: %w", rel, err)
+		}
+		if rule := textRule(rel, src); rule != "" {
+			violations = append(violations, violation{
+				file: rel,
+				line: firstLineContaining(src, []byte("StreamEvent")),
+				rule: rule,
+			})
+		}
+		file, err := parser.ParseFile(fset, path, src, parser.ImportsOnly)
 		if err != nil {
 			return fmt.Errorf("%s: %w", rel, err)
 		}
@@ -134,6 +153,25 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 		if strings.HasPrefix(target, "surfaces/") {
 			return "impl must not depend on surfaces"
 		}
+	case strings.HasPrefix(rel, "runner/"):
+		if strings.HasPrefix(target, "tool/builtin/") {
+			return "runner must not depend on built-in tool implementations"
+		}
+		if target == "protocol/acp" || strings.HasPrefix(target, "protocol/acp/") {
+			return "runner must not depend on ACP, control, or presentation packages"
+		}
+		if target == "app" || strings.HasPrefix(target, "app/") ||
+			target == "gateway" || strings.HasPrefix(target, "gateway/") ||
+			target == "tui" || strings.HasPrefix(target, "tui/") ||
+			target == "headless" || strings.HasPrefix(target, "headless/") ||
+			target == "impl" || strings.HasPrefix(target, "impl/") ||
+			target == "surfaces" || strings.HasPrefix(target, "surfaces/") {
+			return "runner must not depend on control or presentation packages"
+		}
+	case strings.HasPrefix(rel, "sandbox/"):
+		if startsWithAny(target, "app/", "cmd/", "protocol/", "impl/", "surfaces/") {
+			return "sandbox must not depend on app, cmd, protocol, impl, or surfaces"
+		}
 	case strings.HasPrefix(rel, "surfaces/"):
 		if strings.HasPrefix(target, "impl/") {
 			return "surfaces must not depend directly on impl"
@@ -147,6 +185,70 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 		}
 	}
 	return ""
+}
+
+func deletedLegacyRootRule(rel string) string {
+	if pathIn(rel,
+		"impl",
+		"surfaces",
+		"tui",
+		"headless",
+		"eval",
+		"cmd/caelis",
+		"app/gatewayapp",
+		"internal/acpe2eagent",
+		"internal/bootstrap",
+		"internal/cli",
+		"internal/evalharness",
+		"internal/kernel",
+		"internal/modelcataloggen",
+	) {
+		return "legacy production roots must not be active in the rewrite branch"
+	}
+	return ""
+}
+
+func textRule(rel string, src []byte) string {
+	if !isLayer4RuntimeFile(rel) {
+		return ""
+	}
+	if bytes.Contains(src, []byte("StreamEvent")) {
+		return "layer4 runtime must use model.ResponseEvent, not legacy StreamEvent"
+	}
+	return ""
+}
+
+func isLayer4RuntimeFile(rel string) bool {
+	if strings.HasSuffix(rel, "_test.go") {
+		return false
+	}
+	return strings.HasPrefix(rel, "model/") ||
+		strings.HasPrefix(rel, "agent/") ||
+		strings.HasPrefix(rel, "runner/") ||
+		strings.HasPrefix(rel, "session/")
+}
+
+func firstLineContaining(src []byte, needle []byte) int {
+	if len(needle) == 0 {
+		return 0
+	}
+	line := 1
+	for len(src) > 0 {
+		next := bytes.IndexByte(src, '\n')
+		var current []byte
+		if next < 0 {
+			current = src
+			src = nil
+		} else {
+			current = src[:next]
+			src = src[next+1:]
+		}
+		if bytes.Contains(current, needle) {
+			return line
+		}
+		line++
+	}
+	return 0
 }
 
 func pathIn(value string, prefixes ...string) bool {

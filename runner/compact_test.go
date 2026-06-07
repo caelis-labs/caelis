@@ -1,6 +1,8 @@
 package runner
 
 import (
+	"context"
+	"iter"
 	"strings"
 	"testing"
 
@@ -120,20 +122,88 @@ func TestCompactModelContextNoCompaction(t *testing.T) {
 	}
 }
 
-func TestCompactEvents(t *testing.T) {
-	events := []session.Event{
-		{Kind: session.EventKindUser},
-		{Kind: session.EventKindAssistant},
+func TestLLMSummarizingCompactorCallsLLMAndPersistsSummary(t *testing.T) {
+	msgs := []model.Message{
+		{Role: model.RoleSystem, Content: []model.Part{{Text: "system prompt"}}},
+		{Role: model.RoleUser, Content: []model.Part{{Text: strings.Repeat("old user ", 1200)}}},
+		{Role: model.RoleAssistant, Content: []model.Part{{Text: strings.Repeat("old assistant ", 1200)}}},
+		{Role: model.RoleUser, Content: []model.Part{{Text: "latest question"}}},
+	}
+	llm := &summarizerTestLLM{summary: "summary from llm"}
+	compactor := NewLLMSummarizingCompactor(llm)
+
+	compacted, event, ok := compactor.Compact(context.Background(), msgs, 400)
+	if !ok {
+		t.Fatal("Compact() did not compact")
+	}
+	if llm.calls != 1 {
+		t.Fatalf("summarizer calls = %d, want 1", llm.calls)
+	}
+	if len(llm.requests) != 1 || len(llm.requests[0].Messages) == 0 {
+		t.Fatalf("summarizer request = %#v, want model-visible messages", llm.requests)
+	}
+	if got := llm.requests[0].Messages[len(llm.requests[0].Messages)-1].Content[0].Text; !strings.Contains(got, "old user") {
+		t.Fatalf("summarizer prompt = %q, want compacted conversation content", got)
+	}
+	if event == nil || event.Kind != session.EventKindCompaction || event.CompactionPayload == nil {
+		t.Fatalf("event = %#v, want compaction payload", event)
+	}
+	if event.CompactionPayload.SummaryText != "summary from llm" {
+		t.Fatalf("summary = %q, want LLM summary", event.CompactionPayload.SummaryText)
+	}
+	if len(compacted) < 3 {
+		t.Fatalf("compacted messages = %#v, want system, summary, and recent message", compacted)
+	}
+	if compacted[1].Role != model.RoleSystem || compacted[1].Content[0].Text != "summary from llm" {
+		t.Fatalf("summary message = %#v, want LLM summary system message", compacted[1])
+	}
+	if got := compacted[len(compacted)-1].Content[0].Text; got != "latest question" {
+		t.Fatalf("last message = %q, want latest question", got)
 	}
 
-	result, compaction := CompactEvents(events, "test compaction")
-	if len(result) != len(events) {
-		t.Error("events should be preserved")
+	rebuilt := session.ModelContextFromEvents([]session.Event{
+		{
+			Kind:       session.EventKindUser,
+			Visibility: session.VisibilityCanonical,
+			UserPayload: &session.UserPayload{
+				Parts: []session.EventPart{{Kind: session.PartKindText, Text: "old user content"}},
+			},
+		},
+		*event,
+		{
+			Kind:       session.EventKindUser,
+			Visibility: session.VisibilityCanonical,
+			UserPayload: &session.UserPayload{
+				Parts: []session.EventPart{{Kind: session.PartKindText, Text: "after compaction"}},
+			},
+		},
+	})
+	if len(rebuilt) != 3 {
+		t.Fatalf("rebuilt messages = %#v, want summary, retained message, and post-compaction user", rebuilt)
 	}
-	if compaction.Kind != session.EventKindCompaction {
-		t.Error("compaction event should be created")
+	if rebuilt[0].Role != model.RoleSystem || rebuilt[0].Content[0].Text != "summary from llm" {
+		t.Fatalf("rebuilt summary = %#v, want LLM summary", rebuilt[0])
 	}
-	if compaction.CompactionPayload == nil {
-		t.Error("compaction payload should be set")
+	if rebuilt[1].Content[0].Text != "latest question" {
+		t.Fatalf("rebuilt retained message = %#v, want latest question", rebuilt[1])
+	}
+	if rebuilt[2].Content[0].Text != "after compaction" {
+		t.Fatalf("rebuilt post-compaction message = %#v", rebuilt[2])
+	}
+}
+
+type summarizerTestLLM struct {
+	summary  string
+	calls    int
+	requests []model.Request
+}
+
+func (m *summarizerTestLLM) Name() string { return "summarizer-test" }
+
+func (m *summarizerTestLLM) Generate(_ context.Context, req model.Request) iter.Seq2[model.ResponseEvent, error] {
+	m.calls++
+	m.requests = append(m.requests, req)
+	return func(yield func(model.ResponseEvent, error) bool) {
+		yield(model.ResponseEvent{TextDelta: m.summary}, nil)
 	}
 }

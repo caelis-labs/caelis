@@ -17,7 +17,6 @@ import (
 	"github.com/OnslaughtSnail/caelis/session"
 	"github.com/OnslaughtSnail/caelis/skill"
 	"github.com/OnslaughtSnail/caelis/tool"
-	"github.com/OnslaughtSnail/caelis/tool/builtin/spawn"
 	"github.com/OnslaughtSnail/caelis/tool/mcp"
 	"github.com/OnslaughtSnail/caelis/trace"
 )
@@ -41,7 +40,7 @@ type Config struct {
 	SystemPrompt     string    // assembled system prompt
 	Compactor        Compactor // optional compaction engine
 	TaskStore        TaskStore
-	SpawnDelegator   spawn.Delegator
+	SpawnDelegator   agent.SpawnDelegator
 }
 
 // Runner executes one invocation against one session.
@@ -103,104 +102,9 @@ func (r *Runner) Run(ctx context.Context, req RunRequest) iter.Seq2[session.Even
 		invID := fmt.Sprintf("inv-%d", time.Now().UnixNano())
 		runAgent := r.cfg.Agent
 		observer := newToolObserverBridge(sess.Ref, invID)
-		var mcpClients []mcp.Client
-		defer func() {
-			closeMCPClients(mcpClients)
-		}()
 
-		// Prepare agent dependencies via Prepareable interface.
-		if p, ok := r.cfg.Agent.(agent.Prepareable); ok {
-			prepReq := agent.PrepareRequest{}
-
-			// Resolve LLM from registry.
-			if mr, ok := r.cfg.Agent.(interface{ ModelRef() model.Ref }); ok && r.cfg.ModelRegistry != nil {
-				llm, _, err := r.cfg.ModelRegistry.Resolve(ctx, mr.ModelRef())
-				if err != nil {
-					yield(session.Event{}, fmt.Errorf("runner: resolve model: %w", err))
-					return
-				}
-				prepReq.LLM = llm
-			}
-
-			// Wire tool context with sandbox.
-			tc := &toolContext{
-				Context:       ctx,
-				sessionRef:    sess.Ref.String(),
-				invocationID:  invID,
-				agentName:     runAgent.Name(),
-				workspaceRoot: sess.Workspace.Root,
-			}
-			var invBackend sandbox.Backend
-			if r.cfg.Sandbox != nil {
-				backends, err := r.cfg.Sandbox.Available(ctx)
-				if err != nil {
-					yield(session.Event{}, fmt.Errorf("runner: list sandboxes: %w", err))
-					return
-				}
-				if len(backends) == 0 {
-					yield(session.Event{}, fmt.Errorf("runner: no sandbox backend available"))
-					return
-				}
-				b, err := r.cfg.Sandbox.Create(ctx, sandbox.Config{
-					BackendName: backends[0].Name,
-				})
-				if err != nil {
-					yield(session.Event{}, fmt.Errorf("runner: create sandbox %s: %w", backends[0].Name, err))
-					return
-				}
-				invBackend = b
-				tc.backend = b
-				fs, err := b.FileSystem(ctx, sandbox.Constraints{})
-				if err != nil {
-					yield(session.Event{}, fmt.Errorf("runner: create sandbox filesystem: %w", err))
-					return
-				}
-				tc.fs = fs
-			}
-			prepReq.ToolContext = tc
-
-			tools, clients, err := r.resolveInvocationTools(ctx, runAgent)
-			if err != nil {
-				yield(session.Event{}, err)
-				return
-			}
-			mcpClients = append(mcpClients, clients...)
-
-			// Augment + wrap tools with per-invocation task manager.
-			taskStore := r.cfg.TaskStore
-			if taskStore == nil {
-				taskStore = NewMemoryTaskStore()
-			}
-			invTaskMgr := NewTaskManagerWithStore(invBackend, taskStore, sess.Ref.String())
-			spawnDelegator := r.cfg.SpawnDelegator
-			if spawnDelegator == nil {
-				spawnCfg := r.cfg
-				spawnCfg.TaskStore = taskStore
-				spawnDelegator = newRunnerSpawnDelegator(spawnCfg, sess, runAgent, req.Branch, invID)
-			}
-			if writer, ok := spawnDelegator.(taskWriter); ok {
-				invTaskMgr.SetWriter(writer)
-			}
-			if len(tools) > 0 {
-				tools = AugmentTools(tools, invTaskMgr, spawnDelegator)
-				prepReq.Tools = WrapTools(
-					tools,
-					r.cfg.Policy,
-					r.cfg.Approver,
-					observer,
-					WithToolTracer(r.cfg.Tracer),
-					WithToolHooks(r.cfg.Hooks...),
-				)
-				catalog := tool.NewMemoryRegistry()
-				catalog.RegisterAll(prepReq.Tools)
-				prepReq.ToolCatalog = catalog
-				prepReq.ToolExecutor = newToolExecutor(tc, prepReq.Tools)
-			}
-
-			runAgent = p.Prepare(prepReq)
-		}
-
-		// Load prior session events and rebuild model context.
+		// Load prior session events once so both approval review and model
+		// replay see the same durable history snapshot.
 		priorEvts, err := r.cfg.Sessions.Events(ctx, session.EventsRequest{
 			SessionRef: sess.Ref,
 		})
@@ -208,45 +112,21 @@ func (r *Runner) Run(ctx context.Context, req RunRequest) iter.Seq2[session.Even
 			yield(session.Event{}, fmt.Errorf("runner: load events: %w", err))
 			return
 		}
-		priorMessages := session.ModelContextFromEvents(priorEvts)
 
-		// Compact if needed using the configured compactor.
-		if r.cfg.Compactor != nil {
-			budget := DefaultCompactionPolicy().MaxContextTokens
-			if ok, reason := r.cfg.Compactor.ShouldCompact(priorMessages, budget); ok {
-				compactedMsgs, compactionEvt, didCompact := r.cfg.Compactor.Compact(ctx, priorMessages, budget)
-				if didCompact {
-					priorMessages = compactedMsgs
-					if compactionEvt != nil {
-						if _, err := r.cfg.Sessions.AppendEvent(ctx, sess.Ref, *compactionEvt); err != nil {
-							yield(session.Event{}, fmt.Errorf("runner: persist compaction event: %w", err))
-							return
-						}
-					}
-				}
-				_ = reason
-			}
-		} else {
-			// Fallback: heuristic compaction.
-			compacted, reason := NeedsCompaction(priorMessages, DefaultCompactionPolicy())
-			if compacted {
-				compactedMsgs, ok, summaryText := CompactModelContext(priorMessages, int(float64(DefaultCompactionPolicy().MaxContextTokens)*0.6))
-				if ok {
-					priorMessages = compactedMsgs
-					if _, err := r.cfg.Sessions.AppendEvent(ctx, sess.Ref, session.Event{
-						Kind:       session.EventKindCompaction,
-						Visibility: session.VisibilityCanonical,
-						CompactionPayload: &session.CompactionPayload{
-							Reason:      reason,
-							Previous:    len(priorEvts),
-							SummaryText: summaryText,
-						},
-					}); err != nil {
-						yield(session.Event{}, fmt.Errorf("runner: persist compaction event: %w", err))
-						return
-					}
-				}
-			}
+		runAgent, cleanup, err := r.prepareInvocationAgent(ctx, sess, invID, req, priorEvts, observer)
+		if cleanup != nil {
+			defer cleanup()
+		}
+		if err != nil {
+			yield(session.Event{}, err)
+			return
+		}
+
+		priorMessages := session.ModelContextFromEvents(priorEvts)
+		priorMessages, err = r.compactBeforeInvocation(ctx, sess.Ref, priorMessages)
+		if err != nil {
+			yield(session.Event{}, err)
+			return
 		}
 
 		systemPrompt, err := r.assembleSystemPrompt(ctx)
@@ -313,64 +193,60 @@ func (r *Runner) Run(ctx context.Context, req RunRequest) iter.Seq2[session.Even
 			})
 		}()
 
-		// Run the agent and persist non-transient events. If the model reports
-		// context overflow, compact replay context and retry the same turn once.
-		retriedOverflow := false
-		for {
-			retry := false
-			for evt, err := range runAgent.Run(invCtx) {
-				if err != nil {
-					if !retriedOverflow && isContextOverflowError(err) {
-						compacted, ok, err := r.compactForOverflowRetry(ctx, sess.Ref, invCtx.priorMessages)
-						if err != nil {
-							yield(session.Event{}, err)
-							return
-						}
-						if ok {
-							invCtx.priorMessages = compacted
-							retriedOverflow = true
-							retry = true
-							break
-						}
-					}
-					invocationErr = fmt.Errorf("runner: agent error: %w", err)
-					yield(session.Event{}, fmt.Errorf("runner: agent error: %w", err))
-					return
-				}
-
-				if !drainObserverBridge(observer, yield) {
-					return
-				}
-
-				evt.SessionRef = sess.Ref
-				evt.RunID = invID
-
-				// Filter transient events from persistence.
-				if evt.Visibility.IsTransient() {
-					if !yield(evt, nil) {
-						return
-					}
-					continue
-				}
-
-				persisted, err := r.cfg.Sessions.AppendEvent(ctx, sess.Ref, evt)
-				if err != nil {
-					invocationErr = fmt.Errorf("runner: persist event: %w", err)
-					yield(session.Event{}, fmt.Errorf("runner: persist event: %w", err))
-					return
-				}
-
-				if !yield(persisted, nil) {
-					return
-				}
-			}
-			if retry {
-				continue
-			}
-			break
+		completed, err := r.runAgentWithPersistence(ctx, sess.Ref, invID, runAgent, invCtx, observer, yield)
+		if err != nil {
+			invocationErr = err
+			yield(session.Event{}, err)
+			return
+		}
+		if !completed {
+			return
 		}
 		drainObserverBridge(observer, yield)
 	}
+}
+
+func routeSandbox(ctx context.Context, factory sandbox.Factory, req sandbox.RouteRequest) (sandbox.Config, error) {
+	if router, ok := factory.(sandbox.Router); ok {
+		cfg, err := router.Route(ctx, req)
+		if err != nil {
+			return sandbox.Config{}, err
+		}
+		if cfg.BackendName == "" {
+			return sandbox.Config{}, fmt.Errorf("sandbox router returned empty backend")
+		}
+		return cfg, nil
+	}
+	name := strings.TrimSpace(req.RequestedBackend)
+	if name != "" {
+		for _, backend := range req.Available {
+			if backend.Name == name {
+				return sandbox.Config{
+					BackendName: backend.Name,
+					RootDir:     req.WorkspaceRoot,
+					Constraints: req.Constraints,
+				}, nil
+			}
+		}
+		return sandbox.Config{}, fmt.Errorf("requested backend %q is not available", name)
+	}
+	if len(req.Available) == 0 {
+		return sandbox.Config{}, fmt.Errorf("no sandbox backend available")
+	}
+	return sandbox.Config{
+		BackendName: req.Available[0].Name,
+		RootDir:     req.WorkspaceRoot,
+		Constraints: req.Constraints,
+	}, nil
+}
+
+func sandboxBackendFromMetadata(metadata map[string]any) string {
+	for _, key := range []string{"sandbox_backend", "sandbox_backend_name", "sandbox.backend"} {
+		if value, ok := metadata[key].(string); ok && strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 // RunRequest is the input to Runner.Run.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/OnslaughtSnail/caelis/agent"
 	"github.com/OnslaughtSnail/caelis/sandbox"
 	"github.com/OnslaughtSnail/caelis/tool"
 )
@@ -18,12 +19,12 @@ func (c fakeToolContext) AgentName() string              { return "agent-1" }
 func (c fakeToolContext) FileSystem() sandbox.FileSystem { return nil }
 
 type fakeDelegator struct {
-	req SpawnRequest
+	req agent.SpawnRequest
 }
 
-func (d *fakeDelegator) Spawn(_ tool.Context, req SpawnRequest) (SpawnResult, error) {
+func (d *fakeDelegator) Spawn(_ tool.Context, req agent.SpawnRequest) (agent.SpawnResult, error) {
 	d.req = req
-	return SpawnResult{HandleID: "child-1", FinalMessage: "child done"}, nil
+	return agent.SpawnResult{HandleID: "child-1", FinalMessage: "child done"}, nil
 }
 
 func TestSpawnToolRequiresPrompt(t *testing.T) {

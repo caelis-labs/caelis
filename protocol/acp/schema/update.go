@@ -72,6 +72,7 @@ type ToolCallContent struct {
 type ContentChunk struct {
 	SessionUpdate string `json:"sessionUpdate"`
 	Content       any    `json:"content"`
+	Final         *bool  `json:"final,omitempty"`
 }
 
 func (u ContentChunk) SessionUpdateType() string { return u.SessionUpdate }

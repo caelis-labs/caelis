@@ -2,6 +2,12 @@ package model
 
 import "errors"
 
+// RetryableError marks provider/control-plane failures that callers can retry.
+type RetryableError interface {
+	error
+	Retryable() bool
+}
+
 // ContextOverflowError indicates that a request exceeded the model context
 // window. Providers should wrap their native error in this type when possible.
 type ContextOverflowError struct {

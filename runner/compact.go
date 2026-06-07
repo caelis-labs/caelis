@@ -57,26 +57,6 @@ func NeedsCompaction(msgs []model.Message, policy CompactionPolicy) (bool, strin
 	return false, ""
 }
 
-// CompactEvents creates a compaction event that summarizes older events.
-// The compaction event replaces the summarized events in the model context.
-// Returns the new event set with the compaction event prepended.
-func CompactEvents(events []session.Event, reason string) ([]session.Event, session.Event) {
-	// Create a compaction event that records what was compacted.
-	compaction := session.Event{
-		Kind:       session.EventKindCompaction,
-		Visibility: session.VisibilityCanonical,
-		CompactionPayload: &session.CompactionPayload{
-			Reason:    reason,
-			Previous:  len(events),
-			Remaining: 0, // all events are kept, compaction is metadata-only
-		},
-	}
-
-	// For now, keep all events (metadata-only compaction).
-	// Real LLM-based summarization would replace older events here.
-	return events, compaction
-}
-
 // CompactModelContext performs overflow recovery by summarizing older
 // messages and returning a reduced context. Returns the compacted
 // messages, whether compaction was performed, and the summary text.
@@ -181,10 +161,11 @@ func (r *Runner) compactForOverflowRetry(ctx context.Context, ref session.Ref, m
 				Kind:       session.EventKindCompaction,
 				Visibility: session.VisibilityCanonical,
 				CompactionPayload: &session.CompactionPayload{
-					Reason:      "context overflow retry",
-					Previous:    len(msgs),
-					Remaining:   len(compacted),
-					SummaryText: summary,
+					Reason:           "context overflow retry",
+					Previous:         len(msgs),
+					Remaining:        len(compacted),
+					SummaryText:      summary,
+					RetainedMessages: retainedMessagesToSession(retainedMessagesAfterSummary(compacted, summary)),
 				},
 			}
 		}
@@ -193,7 +174,7 @@ func (r *Runner) compactForOverflowRetry(ctx context.Context, ref session.Ref, m
 		return msgs, false, nil
 	}
 	if event != nil {
-		if event.CompactionPayload != nil && strings.TrimSpace(event.CompactionPayload.Reason) == "" {
+		if event.CompactionPayload != nil {
 			event.CompactionPayload.Reason = "context overflow retry"
 		}
 		if _, err := r.cfg.Sessions.AppendEvent(ctx, ref, *event); err != nil {
@@ -201,6 +182,57 @@ func (r *Runner) compactForOverflowRetry(ctx context.Context, ref session.Ref, m
 		}
 	}
 	return compacted, true, nil
+}
+
+func (r *Runner) compactBeforeInvocation(ctx context.Context, ref session.Ref, msgs []model.Message) ([]model.Message, error) {
+	if r.cfg.Compactor != nil {
+		return r.compactBeforeInvocationWithConfiguredCompactor(ctx, ref, msgs)
+	}
+	return r.compactBeforeInvocationWithHeuristic(ctx, ref, msgs)
+}
+
+func (r *Runner) compactBeforeInvocationWithConfiguredCompactor(ctx context.Context, ref session.Ref, msgs []model.Message) ([]model.Message, error) {
+	budget := DefaultCompactionPolicy().MaxContextTokens
+	if ok, _ := r.cfg.Compactor.ShouldCompact(msgs, budget); !ok {
+		return msgs, nil
+	}
+	compactedMsgs, compactionEvt, didCompact := r.cfg.Compactor.Compact(ctx, msgs, budget)
+	if !didCompact {
+		return msgs, nil
+	}
+	if compactionEvt != nil {
+		if _, err := r.cfg.Sessions.AppendEvent(ctx, ref, *compactionEvt); err != nil {
+			return nil, fmt.Errorf("runner: persist compaction event: %w", err)
+		}
+	}
+	return compactedMsgs, nil
+}
+
+func (r *Runner) compactBeforeInvocationWithHeuristic(ctx context.Context, ref session.Ref, msgs []model.Message) ([]model.Message, error) {
+	policy := DefaultCompactionPolicy()
+	needsCompaction, reason := NeedsCompaction(msgs, policy)
+	if !needsCompaction {
+		return msgs, nil
+	}
+	target := int(float64(policy.MaxContextTokens) * 0.6)
+	compactedMsgs, ok, summaryText := CompactModelContext(msgs, target)
+	if !ok {
+		return msgs, nil
+	}
+	if _, err := r.cfg.Sessions.AppendEvent(ctx, ref, session.Event{
+		Kind:       session.EventKindCompaction,
+		Visibility: session.VisibilityCanonical,
+		CompactionPayload: &session.CompactionPayload{
+			Reason:           reason,
+			Previous:         len(msgs),
+			Remaining:        len(compactedMsgs),
+			SummaryText:      summaryText,
+			RetainedMessages: retainedMessagesToSession(retainedMessagesAfterSummary(compactedMsgs, summaryText)),
+		},
+	}); err != nil {
+		return nil, fmt.Errorf("runner: persist compaction event: %w", err)
+	}
+	return compactedMsgs, nil
 }
 
 func isContextOverflowError(err error) bool {

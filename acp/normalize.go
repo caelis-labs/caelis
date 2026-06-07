@@ -3,6 +3,7 @@ package acp
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 
 	"github.com/OnslaughtSnail/caelis/session"
 )
@@ -28,18 +29,57 @@ func NormalizeExternalEvent(sessionID string, update Update) *session.Event {
 	}
 }
 
+// NormalizeExternalUpdateJSON decodes one ACP session/update payload and
+// converts it into a canonical session event.
+func NormalizeExternalUpdateJSON(sessionID string, raw json.RawMessage) (*session.Event, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, nil
+	}
+	var probe struct {
+		SessionUpdate UpdateKind `json:"sessionUpdate"`
+	}
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return nil, err
+	}
+	switch probe.SessionUpdate {
+	case UpdateUserMessage, UpdateAgentMessage, UpdateAgentThought:
+		var chunk ContentChunk
+		if err := json.Unmarshal(raw, &chunk); err != nil {
+			return nil, err
+		}
+		return NormalizeExternalEvent(sessionID, chunk), nil
+	case UpdateToolCall, UpdateToolCallInfo:
+		var update ToolCallUpdate
+		if err := json.Unmarshal(raw, &update); err != nil {
+			return nil, err
+		}
+		return NormalizeExternalEvent(sessionID, update), nil
+	case UpdatePlan:
+		var update PlanUpdate
+		if err := json.Unmarshal(raw, &update); err != nil {
+			return nil, err
+		}
+		return NormalizeExternalEvent(sessionID, update), nil
+	case "":
+		return nil, fmt.Errorf("acp: sessionUpdate is required")
+	default:
+		return nil, nil
+	}
+}
+
 func normalizeContentChunk(sessionID string, chunk ContentChunk) *session.Event {
 	parts := contentToParts(chunk.Content, session.PartKindText)
 	if len(parts) == 0 {
 		return nil
 	}
+	visibility := contentChunkVisibility(chunk)
 
 	switch chunk.SessionUpdate {
 	case UpdateUserMessage:
 		return &session.Event{
 			SessionRef: session.Ref{SessionID: sessionID},
 			Kind:       session.EventKindUser,
-			Visibility: session.VisibilityCanonical,
+			Visibility: visibility,
 			UserPayload: &session.UserPayload{
 				Parts: parts,
 			},
@@ -48,7 +88,7 @@ func normalizeContentChunk(sessionID string, chunk ContentChunk) *session.Event 
 		return &session.Event{
 			SessionRef: session.Ref{SessionID: sessionID},
 			Kind:       session.EventKindAssistant,
-			Visibility: session.VisibilityCanonical,
+			Visibility: visibility,
 			AssistantPayload: &session.AssistantPayload{
 				Parts: parts,
 			},
@@ -58,7 +98,7 @@ func normalizeContentChunk(sessionID string, chunk ContentChunk) *session.Event 
 		return &session.Event{
 			SessionRef: session.Ref{SessionID: sessionID},
 			Kind:       session.EventKindAssistant,
-			Visibility: session.VisibilityCanonical,
+			Visibility: visibility,
 			AssistantPayload: &session.AssistantPayload{
 				Parts: reasoning,
 			},
@@ -66,6 +106,13 @@ func normalizeContentChunk(sessionID string, chunk ContentChunk) *session.Event 
 	default:
 		return nil
 	}
+}
+
+func contentChunkVisibility(chunk ContentChunk) session.Visibility {
+	if chunk.Final != nil && !*chunk.Final {
+		return session.VisibilityUIOnly
+	}
+	return session.VisibilityCanonical
 }
 
 func normalizeToolCallUpdate(sessionID string, tc ToolCallUpdate) *session.Event {

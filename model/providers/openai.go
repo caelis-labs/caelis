@@ -1,7 +1,6 @@
 package providers
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -10,35 +9,52 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/OnslaughtSnail/caelis/model"
 )
 
+const defaultOpenAIBaseURL = "https://api.openai.com/v1"
+
 // OpenAIProvider implements model.LLM using an OpenAI-compatible API.
 type OpenAIProvider struct {
-	name    string
-	baseURL string
-	token   string
-	model   string
-	client  *http.Client
+	name              string
+	provider          string
+	baseURL           string
+	token             string
+	model             string
+	headers           map[string]string
+	client            *http.Client
+	firstEventTimeout time.Duration
+	maxOutputTokens   int
+	output            func(*openAIRequestPayload, *model.OutputSpec)
+	reasoning         func(*openAIRequestPayload, model.ReasoningConfig)
+	request           func(*openAIRequestPayload)
 }
 
 // OpenAIConfig holds configuration for an OpenAI-compatible provider.
 type OpenAIConfig struct {
-	Name    string
-	BaseURL string
-	Token   string
-	Model   string
+	Name                    string
+	BaseURL                 string
+	Token                   string
+	Model                   string
+	Headers                 map[string]string
+	HTTPClient              *http.Client
+	Timeout                 time.Duration
+	StreamFirstEventTimeout time.Duration
 }
 
 // NewOpenAI creates a new OpenAI-compatible provider.
 func NewOpenAI(cfg OpenAIConfig) *OpenAIProvider {
 	return &OpenAIProvider{
-		name:    cfg.Name,
-		baseURL: strings.TrimSuffix(cfg.BaseURL, "/"),
-		token:   cfg.Token,
-		model:   cfg.Model,
-		client:  &http.Client{},
+		name:              cfg.Name,
+		provider:          "openai",
+		baseURL:           normalizeProviderBaseURL(cfg.BaseURL, defaultOpenAIBaseURL),
+		token:             cfg.Token,
+		model:             cfg.Model,
+		headers:           cloneHeaders(cfg.Headers),
+		client:            coalesceHTTPClient(cfg.HTTPClient),
+		firstEventTimeout: normalizeStreamFirstEventTimeout(cfg.StreamFirstEventTimeout),
 	}
 }
 
@@ -60,6 +76,7 @@ func (p *OpenAIProvider) Generate(ctx context.Context, req model.Request) iter.S
 		}
 		httpReq.Header.Set("Content-Type", "application/json")
 		httpReq.Header.Set("Authorization", "Bearer "+p.token)
+		applyConfiguredHeaders(httpReq, p.headers)
 
 		resp, err := p.client.Do(httpReq)
 		if err != nil {
@@ -69,9 +86,7 @@ func (p *OpenAIProvider) Generate(ctx context.Context, req model.Request) iter.S
 		defer resp.Body.Close()
 
 		if resp.StatusCode != http.StatusOK {
-			var errBody map[string]any
-			json.NewDecoder(resp.Body).Decode(&errBody)
-			yield(model.ResponseEvent{}, fmt.Errorf("API error %d: %v", resp.StatusCode, errBody))
+			yield(model.ResponseEvent{}, statusError(resp))
 			return
 		}
 
@@ -80,36 +95,32 @@ func (p *OpenAIProvider) Generate(ctx context.Context, req model.Request) iter.S
 		// across multiple chunks. We accumulate them until finish_reason.
 		toolCalls := make(map[int]*pendingToolCall)
 
-		scanner := bufio.NewScanner(resp.Body)
-		for scanner.Scan() {
-			line := scanner.Text()
-			if !strings.HasPrefix(line, "data: ") {
-				continue
-			}
-			data := strings.TrimPrefix(line, "data: ")
-			if data == "[DONE]" {
-				break
-			}
-
+		if err := readSSEWithFirstEventTimeout(resp.Body, p.firstEventTimeout, func(data []byte) error {
 			var chunk openaiChunk
-			if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			if err := json.Unmarshal(data, &chunk); err != nil {
 				// Report parse errors instead of silently skipping.
-				yield(model.ResponseEvent{}, fmt.Errorf("SSE parse error: %w", err))
-				return
+				if !yield(model.ResponseEvent{}, fmt.Errorf("SSE parse error: %w", err)) {
+					return errStopSSE
+				}
+				return nil
 			}
 			if len(chunk.Choices) == 0 {
-				continue
+				return nil
 			}
 			delta := chunk.Choices[0].Delta
 
 			// Handle text content.
 			if delta.Content != "" {
-				yield(model.ResponseEvent{TextDelta: delta.Content}, nil)
+				if !yield(model.ResponseEvent{TextDelta: delta.Content}, nil) {
+					return errStopSSE
+				}
 			}
 
-			// Handle reasoning content (some providers use this).
-			if delta.ReasoningContent != "" {
-				yield(model.ResponseEvent{ReasoningDelta: delta.ReasoningContent}, nil)
+			// Handle reasoning content (some providers use reasoning_content, OpenRouter uses reasoning).
+			if reasoning := firstNonEmpty(delta.Reasoning, delta.ReasoningContent); reasoning != "" {
+				if !yield(model.ResponseEvent{ReasoningDelta: reasoning}, nil) {
+					return errStopSSE
+				}
 			}
 
 			// Handle tool call deltas.
@@ -141,31 +152,38 @@ func (p *OpenAIProvider) Generate(ctx context.Context, req model.Request) iter.S
 					sort.Ints(indices)
 					for _, idx := range indices {
 						tc := toolCalls[idx]
-						args, err := parseArgsJSON(tc.argsJSON)
+						args, err := toolArgsMap(tc.argsJSON)
 						if err != nil {
-							yield(model.ResponseEvent{}, fmt.Errorf("tool call %s arguments: %w", tc.id, err))
-							return
+							if !yield(model.ResponseEvent{}, fmt.Errorf("tool call %s arguments: %w", tc.id, err)) {
+								return errStopSSE
+							}
+							return nil
 						}
-						yield(model.ResponseEvent{
+						if !yield(model.ResponseEvent{
 							ToolCall: &model.ToolCallDelta{
 								CallID: tc.id,
 								Name:   tc.name,
 								Args:   args,
 							},
-						}, nil)
+						}, nil) {
+							return errStopSSE
+						}
 					}
 				}
 				evt := model.ResponseEvent{FinishReason: chunk.Choices[0].FinishReason}
-				if chunk.Usage != nil {
-					evt.Usage = &model.Usage{
-						PromptTokens:     chunk.Usage.PromptTokens,
-						CompletionTokens: chunk.Usage.CompletionTokens,
-						TotalTokens:      chunk.Usage.TotalTokens,
-					}
+				if chunk.Usage.hasAny() {
+					usage := chunk.Usage.toModelUsage()
+					evt.Usage = &usage
 				}
-				yield(evt, nil)
-				return
+				if !yield(evt, nil) {
+					return errStopSSE
+				}
+				return errStopSSE
 			}
+			return nil
+		}); err != nil {
+			yield(model.ResponseEvent{}, err)
+			return
 		}
 	}
 }
@@ -177,29 +195,18 @@ type pendingToolCall struct {
 	argsJSON string
 }
 
-// parseArgsJSON parses a streamed JSON argument object into a map.
-func parseArgsJSON(s string) (map[string]any, error) {
-	if s == "" {
-		return nil, nil
-	}
-	var m map[string]any
-	if err := json.Unmarshal([]byte(s), &m); err != nil {
-		return nil, err
-	}
-	return m, nil
-}
-
 func (p *OpenAIProvider) buildRequest(req model.Request) map[string]any {
-	msgs := make([]map[string]any, 0, len(req.Messages))
+	payload := &openAIRequestPayload{
+		Model:    p.model,
+		Messages: make([]map[string]any, 0, len(req.Messages)),
+		Stream:   true,
+	}
 	for _, m := range req.Messages {
 		msg := p.buildMessage(m)
-		msgs = append(msgs, msg)
+		payload.Messages = append(payload.Messages, msg)
 	}
-
-	body := map[string]any{
-		"model":    p.model,
-		"messages": msgs,
-		"stream":   true,
+	if p.maxOutputTokens > 0 {
+		payload.MaxTokens = p.maxOutputTokens
 	}
 
 	if len(req.Tools) > 0 {
@@ -214,17 +221,28 @@ func (p *OpenAIProvider) buildRequest(req model.Request) map[string]any {
 				},
 			})
 		}
-		body["tools"] = tools
+		payload.Tools = tools
 	}
 
 	if req.Temperature != nil {
-		body["temperature"] = *req.Temperature
+		payload.Temperature = req.Temperature
 	}
 	if req.MaxTokens > 0 {
-		body["max_tokens"] = req.MaxTokens
+		payload.MaxTokens = req.MaxTokens
+	}
+	if p.output != nil {
+		p.output(payload, req.Output)
+	} else {
+		applyOpenAIOutputSchema(payload, req.Output, openAIStructuredOutputSchema)
+	}
+	if p.reasoning != nil {
+		p.reasoning(payload, req.Reasoning)
+	}
+	if p.request != nil {
+		p.request(payload)
 	}
 
-	return body
+	return payload.toMap()
 }
 
 // buildMessage converts a model.Message to OpenAI wire format,
@@ -245,12 +263,12 @@ func (p *OpenAIProvider) buildMessage(m model.Message) map[string]any {
 		// Check for tool_use parts.
 		var toolCalls []map[string]any
 		var textParts []string
+		var reasoningText string
 		for _, part := range m.Content {
 			if part.ToolUse != nil {
 				argsJSON := part.ToolUse.ArgJSON
 				if argsJSON == "" {
-					data, _ := json.Marshal(part.ToolUse.Args)
-					argsJSON = string(data)
+					argsJSON = toolArgsRaw(part.ToolUse.Args)
 				}
 				toolCalls = append(toolCalls, map[string]any{
 					"id":   part.ToolUse.CallID,
@@ -262,10 +280,15 @@ func (p *OpenAIProvider) buildMessage(m model.Message) map[string]any {
 				})
 			} else if part.Text != "" {
 				textParts = append(textParts, part.Text)
+			} else if part.Reasoning != nil && part.Reasoning.Text != "" && part.Reasoning.Visibility != model.ReasoningVisibilityRedacted {
+				reasoningText += part.Reasoning.Text
 			}
 		}
 		if len(textParts) > 0 {
 			msg["content"] = strings.Join(textParts, "")
+		}
+		if reasoningText != "" {
+			msg["reasoning_content"] = reasoningText
 		}
 		if len(toolCalls) > 0 {
 			msg["tool_calls"] = toolCalls
@@ -277,6 +300,9 @@ func (p *OpenAIProvider) buildMessage(m model.Message) map[string]any {
 		var text string
 		for _, part := range m.Content {
 			text += part.Text
+			if part.Reasoning != nil && part.Reasoning.Visibility != model.ReasoningVisibilityRedacted {
+				text += part.Reasoning.Text
+			}
 		}
 		if text != "" {
 			msg["content"] = text
@@ -307,16 +333,13 @@ type openaiChunk struct {
 	Choices []struct {
 		Delta struct {
 			Content          string                `json:"content"`
+			Reasoning        string                `json:"reasoning"`
 			ReasoningContent string                `json:"reasoning_content"`
 			ToolCalls        []openaiToolCallDelta `json:"tool_calls"`
 		} `json:"delta"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
-	Usage *struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
-		TotalTokens      int `json:"total_tokens"`
-	} `json:"usage"`
+	Usage openAICompatUsage `json:"usage"`
 }
 
 type openaiToolCallDelta struct {

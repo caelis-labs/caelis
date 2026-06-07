@@ -2,8 +2,11 @@ package file
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,6 +36,21 @@ type Service struct {
 	counter int64
 }
 
+const lockFilename = ".sessions.lock"
+
+var storeRootLocks sync.Map
+
+type storeRootLockMode int
+
+const (
+	storeRootLockShared storeRootLockMode = iota
+	storeRootLockExclusive
+)
+
+type storeRootLock struct {
+	mu sync.RWMutex
+}
+
 // New creates a new file-backed session service.
 func New(cfg Config) (*Service, error) {
 	if cfg.RootDir == "" {
@@ -46,7 +64,58 @@ func New(cfg Config) (*Service, error) {
 
 func (s *Service) nextID() string {
 	s.counter++
-	return fmt.Sprintf("evt-%d-%d", time.Now().UnixNano(), s.counter)
+	return fmt.Sprintf("evt-%d-%d-%s", time.Now().UnixNano(), s.counter, randomSuffix())
+}
+
+func (s *Service) nextSessionID() string {
+	s.counter++
+	return fmt.Sprintf("sess-%d-%d-%s", time.Now().UnixNano(), s.counter, randomSuffix())
+}
+
+func randomSuffix() string {
+	var buf [8]byte
+	if _, err := rand.Read(buf[:]); err == nil {
+		return hex.EncodeToString(buf[:])
+	}
+	return fmt.Sprintf("%d", time.Now().UnixNano())
+}
+
+func (s *Service) withRootWriteLock(fn func() error) error {
+	return s.withRootLock(storeRootLockExclusive, fn)
+}
+
+func (s *Service) withRootReadLock(fn func() error) error {
+	return s.withRootLock(storeRootLockShared, fn)
+}
+
+func (s *Service) withRootLock(mode storeRootLockMode, fn func() error) error {
+	if s == nil || fn == nil {
+		return nil
+	}
+	root := filepath.Clean(s.rootDir)
+	if abs, err := filepath.Abs(root); err == nil {
+		root = abs
+	}
+	lockValue, _ := storeRootLocks.LoadOrStore(root, &storeRootLock{})
+	rootLock := lockValue.(*storeRootLock)
+	if mode == storeRootLockShared {
+		rootLock.mu.RLock()
+		defer rootLock.mu.RUnlock()
+	} else {
+		rootLock.mu.Lock()
+		defer rootLock.mu.Unlock()
+	}
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return err
+	}
+	file, err := lockSessionStoreRoot(root, mode)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = unlockSessionStoreRoot(file)
+	}()
+	return fn()
 }
 
 func (s *Service) sessionDir(ref session.Ref) string {
@@ -69,45 +138,54 @@ func (s *Service) Create(_ context.Context, req session.CreateRequest) (session.
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	sess := session.Session{
-		Ref: session.Ref{
-			AppName:      req.AppName,
-			UserID:       req.UserID,
-			WorkspaceKey: req.WorkspaceKey,
-			SessionID:    fmt.Sprintf("sess-%d", time.Now().UnixNano()),
-		},
-		Workspace:    req.Workspace.Clone(),
-		Title:        req.Title,
-		State:        req.State.Clone(),
-		Controller:   req.Controller,
-		Participants: make([]session.ParticipantBinding, len(req.Participants)),
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
-	}
-	for i, p := range req.Participants {
-		sess.Participants[i] = p.Clone()
-	}
+	var sess session.Session
+	if err := s.withRootWriteLock(func() error {
+		now := time.Now()
+		sess = session.Session{
+			Ref: session.Ref{
+				AppName:      req.AppName,
+				UserID:       req.UserID,
+				WorkspaceKey: req.WorkspaceKey,
+				SessionID:    s.nextSessionID(),
+			},
+			Workspace:    req.Workspace.Clone(),
+			Title:        req.Title,
+			State:        req.State.Clone(),
+			Controller:   req.Controller,
+			Participants: make([]session.ParticipantBinding, len(req.Participants)),
+			CreatedAt:    now,
+			UpdatedAt:    now,
+		}
+		for i, p := range req.Participants {
+			sess.Participants[i] = p.Clone()
+		}
 
-	dir := s.sessionDir(sess.Ref)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return session.Session{}, fmt.Errorf("file: mkdir: %w", err)
-	}
-
-	if err := s.writeSession(sess); err != nil {
+		dir := s.sessionDir(sess.Ref)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("file: mkdir: %w", err)
+		}
+		if err := s.writeSession(sess); err != nil {
+			return err
+		}
+		return s.writeFileDurable(s.eventsPath(sess.Ref), nil, 0o644)
+	}); err != nil {
 		return session.Session{}, err
 	}
-	// Create empty events file.
-	if err := os.WriteFile(s.eventsPath(sess.Ref), nil, 0o644); err != nil {
-		return session.Session{}, fmt.Errorf("file: create events: %w", err)
-	}
-
 	return sess, nil
 }
 
 func (s *Service) Get(_ context.Context, ref session.Ref) (session.Session, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.readSession(ref)
+	var out session.Session
+	if err := s.withRootReadLock(func() error {
+		var err error
+		out, err = s.readSession(ref)
+		return err
+	}); err != nil {
+		return session.Session{}, err
+	}
+	return out, nil
 }
 
 func (s *Service) List(_ context.Context, req session.ListRequest) (session.ListResponse, error) {
@@ -115,34 +193,35 @@ func (s *Service) List(_ context.Context, req session.ListRequest) (session.List
 	defer s.mu.RUnlock()
 
 	var sessions []session.Session
-	baseDir := filepath.Join(s.rootDir, req.AppName)
-	if req.UserID != "" {
-		baseDir = filepath.Join(baseDir, req.UserID)
-	}
+	if err := s.withRootReadLock(func() error {
+		baseDir := filepath.Join(s.rootDir, req.AppName)
+		if req.UserID != "" {
+			baseDir = filepath.Join(baseDir, req.UserID)
+		}
 
-	// Walk the directory tree to find session files.
-	err := filepath.Walk(baseDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil // skip errors
-		}
-		if info.IsDir() || !strings.HasSuffix(info.Name(), ".json") || strings.HasSuffix(info.Name(), ".events.jsonl") {
+		// Walk the directory tree to find session files.
+		return filepath.Walk(baseDir, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return nil // skip errors
+			}
+			if info.IsDir() || !strings.HasSuffix(info.Name(), ".json") || strings.HasSuffix(info.Name(), ".events.jsonl") || strings.HasSuffix(info.Name(), ".state.json") {
+				return nil
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return nil
+			}
+			var sess session.Session
+			if err := json.Unmarshal(data, &sess); err != nil {
+				return nil
+			}
+			if req.WorkspaceKey != "" && sess.Ref.WorkspaceKey != req.WorkspaceKey {
+				return nil
+			}
+			sessions = append(sessions, sess)
 			return nil
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return nil
-		}
-		var sess session.Session
-		if err := json.Unmarshal(data, &sess); err != nil {
-			return nil
-		}
-		if req.WorkspaceKey != "" && sess.Ref.WorkspaceKey != req.WorkspaceKey {
-			return nil
-		}
-		sessions = append(sessions, sess)
-		return nil
-	})
-	if err != nil {
+		})
+	}); err != nil {
 		return session.ListResponse{}, fmt.Errorf("file: walk: %w", err)
 	}
 
@@ -156,49 +235,55 @@ func (s *Service) Fork(_ context.Context, req session.ForkRequest) (session.Sess
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	orig, err := s.readSession(req.Source)
-	if err != nil {
-		return session.Session{}, err
-	}
-
-	forked := orig.Clone()
-	forked.Ref.SessionID = fmt.Sprintf("sess-%d", time.Now().UnixNano())
-	if req.Title != "" {
-		forked.Title = req.Title
-	}
-	forked.CreatedAt = time.Now()
-	forked.UpdatedAt = time.Now()
-
-	dir := s.sessionDir(forked.Ref)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return session.Session{}, fmt.Errorf("file: mkdir: %w", err)
-	}
-	if err := s.writeSession(forked); err != nil {
-		return session.Session{}, err
-	}
-
-	// Copy events from source.
-	srcEvts, err := s.readEvents(req.Source, session.EventsRequest{})
-	if err != nil {
-		return session.Session{}, err
-	}
-	for _, e := range srcEvts {
-		e.SessionRef = forked.Ref
-		e.ID = s.nextID()
-		if err := s.appendEventFile(forked.Ref, e); err != nil {
-			return session.Session{}, err
+	var forked session.Session
+	if err := s.withRootWriteLock(func() error {
+		orig, err := s.readSession(req.Source)
+		if err != nil {
+			return err
 		}
-	}
-	state, err := s.readStructuredState(req.Source)
-	if err != nil {
+
+		forked = orig.Clone()
+		forked.Ref.SessionID = s.nextSessionID()
+		if req.Title != "" {
+			forked.Title = req.Title
+		}
+		forked.CreatedAt = time.Now()
+		forked.UpdatedAt = time.Now()
+
+		dir := s.sessionDir(forked.Ref)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("file: mkdir: %w", err)
+		}
+		if err := s.writeSession(forked); err != nil {
+			return err
+		}
+
+		// Copy events from source.
+		srcEvts, err := s.readEvents(req.Source, session.EventsRequest{})
+		if err != nil {
+			return err
+		}
+		for _, e := range srcEvts {
+			e.SessionRef = forked.Ref
+			e.ID = s.nextID()
+			if err := s.appendEventFile(forked.Ref, e); err != nil {
+				return err
+			}
+		}
+		state, err := s.readStructuredState(req.Source)
+		if err != nil {
+			return err
+		}
+		if len(state) > 0 {
+			if err := s.writeStructuredState(forked.Ref, state); err != nil {
+				return err
+			}
+		}
+
+		return nil
+	}); err != nil {
 		return session.Session{}, err
 	}
-	if len(state) > 0 {
-		if err := s.writeStructuredState(forked.Ref, state); err != nil {
-			return session.Session{}, err
-		}
-	}
-
 	return forked, nil
 }
 
@@ -206,57 +291,79 @@ func (s *Service) Delete(_ context.Context, ref session.Ref) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	sPath := s.sessionPath(ref)
-	if _, err := os.Stat(sPath); os.IsNotExist(err) {
-		return fmt.Errorf("session not found: %s", ref)
-	}
-	if err := os.Remove(sPath); err != nil {
-		return fmt.Errorf("file: delete session: %w", err)
-	}
-	// Best-effort remove auxiliary files after the canonical session file
-	// has been deleted.
-	os.Remove(s.eventsPath(ref))
-	os.Remove(s.statePath(ref))
-	return nil
+	return s.withRootWriteLock(func() error {
+		sPath := s.sessionPath(ref)
+		if _, err := os.Stat(sPath); os.IsNotExist(err) {
+			return fmt.Errorf("session not found: %s", ref)
+		}
+		if err := os.Remove(sPath); err != nil {
+			return fmt.Errorf("file: delete session: %w", err)
+		}
+		// Best-effort remove auxiliary files after the canonical session file
+		// has been deleted.
+		os.Remove(s.eventsPath(ref))
+		os.Remove(s.statePath(ref))
+		return syncDir(s.sessionDir(ref))
+	})
 }
 
 func (s *Service) AppendEvent(_ context.Context, ref session.Ref, evt session.Event) (session.Event, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Verify session exists.
-	if _, err := os.Stat(s.sessionPath(ref)); os.IsNotExist(err) {
-		return session.Event{}, fmt.Errorf("session not found: %s", ref)
-	}
+	var persisted session.Event
+	if err := s.withRootWriteLock(func() error {
+		// Verify session exists.
+		if _, err := os.Stat(s.sessionPath(ref)); os.IsNotExist(err) {
+			return fmt.Errorf("session not found: %s", ref)
+		}
 
-	persisted := evt.Clone()
-	persisted.ID = s.nextID()
-	persisted.SessionRef = ref
+		existing, err := s.readEvents(ref, session.EventsRequest{})
+		if err != nil {
+			return err
+		}
+		ids := make(map[string]struct{}, len(existing))
+		for _, existingEvent := range existing {
+			ids[existingEvent.ID] = struct{}{}
+		}
 
-	// Canonicalize and validate before persisting.
-	session.CanonicalizeEvent(&persisted)
-	if err := session.ValidateEvent(&persisted); err != nil {
-		return session.Event{}, fmt.Errorf("event validation: %w", err)
-	}
+		persisted = evt.Clone()
+		for {
+			persisted.ID = s.nextID()
+			if _, ok := ids[persisted.ID]; !ok {
+				break
+			}
+		}
+		persisted.SessionRef = ref
 
-	// Reject transient events — they should not be persisted.
-	if persisted.Visibility.IsTransient() {
-		return session.Event{}, fmt.Errorf("transient events (overlay/ui_only) cannot be persisted")
-	}
+		// Canonicalize and validate before persisting.
+		session.CanonicalizeEvent(&persisted)
+		if err := session.ValidateEvent(&persisted); err != nil {
+			return fmt.Errorf("event validation: %w", err)
+		}
 
-	if persisted.CreatedAt.IsZero() {
-		persisted.CreatedAt = time.Now()
-	}
+		// Reject transient events — they should not be persisted.
+		if persisted.Visibility.IsTransient() {
+			return fmt.Errorf("transient events (overlay/ui_only) cannot be persisted")
+		}
 
-	if err := s.appendEventFile(ref, persisted); err != nil {
-		return session.Event{}, err
-	}
+		if persisted.CreatedAt.IsZero() {
+			persisted.CreatedAt = time.Now()
+		}
 
-	// Update session timestamp.
-	sess, err := s.readSession(ref)
-	if err == nil {
+		if err := s.appendEventFile(ref, persisted); err != nil {
+			return err
+		}
+
+		// Update session timestamp.
+		sess, err := s.readSession(ref)
+		if err != nil {
+			return err
+		}
 		sess.UpdatedAt = persisted.CreatedAt
-		s.writeSession(sess)
+		return s.writeSession(sess)
+	}); err != nil {
+		return session.Event{}, err
 	}
 
 	return persisted, nil
@@ -265,24 +372,34 @@ func (s *Service) AppendEvent(_ context.Context, ref session.Ref, evt session.Ev
 func (s *Service) Events(_ context.Context, req session.EventsRequest) ([]session.Event, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.readEvents(req.SessionRef, req)
+	var events []session.Event
+	if err := s.withRootReadLock(func() error {
+		var err error
+		events, err = s.readEvents(req.SessionRef, req)
+		return err
+	}); err != nil {
+		return nil, err
+	}
+	return events, nil
 }
 
 func (s *Service) UpdateState(_ context.Context, ref session.Ref, fn func(session.State) (session.State, error)) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	sess, err := s.readSession(ref)
-	if err != nil {
-		return err
-	}
-	newState, err := fn(sess.State.Clone())
-	if err != nil {
-		return err
-	}
-	sess.State = newState
-	sess.UpdatedAt = time.Now()
-	return s.writeSession(sess)
+	return s.withRootWriteLock(func() error {
+		sess, err := s.readSession(ref)
+		if err != nil {
+			return err
+		}
+		newState, err := fn(sess.State.Clone())
+		if err != nil {
+			return err
+		}
+		sess.State = newState
+		sess.UpdatedAt = time.Now()
+		return s.writeSession(sess)
+	})
 }
 
 // ─── Internal helpers ────────────────────────────────────────────────
@@ -292,7 +409,8 @@ func (s *Service) writeSession(sess session.Session) error {
 	if err != nil {
 		return fmt.Errorf("file: marshal session: %w", err)
 	}
-	if err := os.WriteFile(s.sessionPath(sess.Ref), data, 0o644); err != nil {
+	data = append(data, '\n')
+	if err := s.writeFileDurable(s.sessionPath(sess.Ref), data, 0o644); err != nil {
 		return fmt.Errorf("file: write session: %w", err)
 	}
 	return nil
@@ -323,9 +441,23 @@ func (s *Service) appendEventFile(ref session.Ref, evt session.Event) error {
 	if err != nil {
 		return fmt.Errorf("file: open events: %w", err)
 	}
-	defer f.Close()
-	if _, err := f.Write(data); err != nil {
+	written, err := f.Write(data)
+	if err != nil || written != len(data) {
+		if err == nil {
+			err = io.ErrShortWrite
+		}
+		f.Close()
 		return fmt.Errorf("file: write event: %w", err)
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return fmt.Errorf("file: sync events: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("file: close events: %w", err)
+	}
+	if err := syncDir(s.sessionDir(ref)); err != nil {
+		return fmt.Errorf("file: sync events dir: %w", err)
 	}
 	return nil
 }
@@ -406,10 +538,42 @@ func (s *Service) writeStructuredState(ref session.Ref, state map[string]any) er
 	if err != nil {
 		return fmt.Errorf("file: marshal structured state: %w", err)
 	}
-	if err := os.WriteFile(s.statePath(ref), data, 0o644); err != nil {
+	data = append(data, '\n')
+	if err := s.writeFileDurable(s.statePath(ref), data, 0o644); err != nil {
 		return fmt.Errorf("file: write structured state: %w", err)
 	}
 	return nil
+}
+
+func (s *Service) writeFileDurable(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return err
+	}
+	if err := os.Chmod(path, perm); err != nil {
+		return err
+	}
+	return syncDir(dir)
 }
 
 func cloneStructuredState(state map[string]any) (map[string]any, error) {
@@ -439,79 +603,94 @@ var _ session.Service = (*Service)(nil)
 func (s *Service) BindController(_ context.Context, ref session.Ref, binding session.ControllerBinding) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	sess, err := s.readSession(ref)
-	if err != nil {
-		return err
-	}
-	sess.Controller = binding
-	sess.UpdatedAt = time.Now()
-	return s.writeSession(sess)
+	return s.withRootWriteLock(func() error {
+		sess, err := s.readSession(ref)
+		if err != nil {
+			return err
+		}
+		sess.Controller = binding
+		sess.UpdatedAt = time.Now()
+		return s.writeSession(sess)
+	})
 }
 
 // PutParticipant adds or updates a participant in a session.
 func (s *Service) PutParticipant(_ context.Context, ref session.Ref, p session.ParticipantBinding) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	sess, err := s.readSession(ref)
-	if err != nil {
-		return err
-	}
-	for i, existing := range sess.Participants {
-		if existing.ID == p.ID {
-			sess.Participants[i] = p
-			sess.UpdatedAt = time.Now()
-			return s.writeSession(sess)
+	return s.withRootWriteLock(func() error {
+		sess, err := s.readSession(ref)
+		if err != nil {
+			return err
 		}
-	}
-	sess.Participants = append(sess.Participants, p)
-	sess.UpdatedAt = time.Now()
-	return s.writeSession(sess)
+		for i, existing := range sess.Participants {
+			if existing.ID == p.ID {
+				sess.Participants[i] = p
+				sess.UpdatedAt = time.Now()
+				return s.writeSession(sess)
+			}
+		}
+		sess.Participants = append(sess.Participants, p)
+		sess.UpdatedAt = time.Now()
+		return s.writeSession(sess)
+	})
 }
 
 // RemoveParticipant removes a participant from a session.
 func (s *Service) RemoveParticipant(_ context.Context, ref session.Ref, participantID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	sess, err := s.readSession(ref)
-	if err != nil {
-		return err
-	}
-	for i, p := range sess.Participants {
-		if p.ID == participantID {
-			sess.Participants = append(sess.Participants[:i], sess.Participants[i+1:]...)
-			sess.UpdatedAt = time.Now()
-			return s.writeSession(sess)
+	return s.withRootWriteLock(func() error {
+		sess, err := s.readSession(ref)
+		if err != nil {
+			return err
 		}
-	}
-	return fmt.Errorf("participant not found: %s", participantID)
+		for i, p := range sess.Participants {
+			if p.ID == participantID {
+				sess.Participants = append(sess.Participants[:i], sess.Participants[i+1:]...)
+				sess.UpdatedAt = time.Now()
+				return s.writeSession(sess)
+			}
+		}
+		return fmt.Errorf("participant not found: %s", participantID)
+	})
 }
 
 // SnapshotState returns a deep copy of the structured state.
 func (s *Service) SnapshotState(_ context.Context, ref session.Ref) (map[string]any, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if _, err := s.readSession(ref); err != nil {
+	var out map[string]any
+	if err := s.withRootReadLock(func() error {
+		if _, err := s.readSession(ref); err != nil {
+			return err
+		}
+		state, err := s.readStructuredState(ref)
+		if err != nil {
+			return err
+		}
+		out, err = cloneStructuredState(state)
+		return err
+	}); err != nil {
 		return nil, err
 	}
-	state, err := s.readStructuredState(ref)
-	if err != nil {
-		return nil, err
-	}
-	return cloneStructuredState(state)
+	return out, nil
 }
 
 // ReplaceState replaces the entire structured state.
 func (s *Service) ReplaceState(_ context.Context, ref session.Ref, state map[string]any) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, err := s.readSession(ref); err != nil {
-		return err
-	}
-	cloned, err := cloneStructuredState(state)
-	if err != nil {
-		return err
-	}
-	return s.writeStructuredState(ref, cloned)
+	return s.withRootWriteLock(func() error {
+		if _, err := s.readSession(ref); err != nil {
+			return err
+		}
+		cloned, err := cloneStructuredState(state)
+		if err != nil {
+			return err
+		}
+		return s.writeStructuredState(ref, cloned)
+	})
 }
 
 // Compile-time optional interface checks.

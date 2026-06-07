@@ -48,6 +48,7 @@ type taskEntry struct {
 	sandbox  sandbox.SessionRef
 	done     chan struct{} // closed when task completes
 	mu       sync.Mutex
+	termOnce sync.Once
 }
 
 // TaskManager manages async command tasks for the runner.
@@ -157,6 +158,8 @@ func (tm *TaskManager) startSession(ctx context.Context, backend sandbox.AsyncBa
 		sandbox: session.Ref(),
 		done:    make(chan struct{}),
 	}
+	runCtx, cancel := context.WithCancel(ctx)
+	entry.cancel = cancel
 	if entry.sandbox.Backend == "" && tm.backend != nil {
 		entry.sandbox.Backend = tm.backend.Name()
 	}
@@ -164,18 +167,29 @@ func (tm *TaskManager) startSession(ctx context.Context, backend sandbox.AsyncBa
 	tm.order = append(tm.order, taskID)
 	tm.mu.Unlock()
 	if err := tm.saveEntry(ctx, entry); err != nil {
+		cancel()
+		_ = session.Terminate(ctx)
+		return "", err
+	}
+	if err := tm.registerTaskCancel(ctx, taskID, cancel); err != nil {
+		cancel()
 		_ = session.Terminate(ctx)
 		return "", err
 	}
 
-	go tm.finishSession(context.Background(), entry, session)
+	go tm.terminateSessionOnCancel(runCtx, entry, session)
+	go tm.finishSession(runCtx, entry, session)
 
 	tm.gc()
 	return taskID, nil
 }
 
 func (tm *TaskManager) finishSession(ctx context.Context, entry *taskEntry, session sandbox.Session) {
+	defer tm.unregisterTaskCancel(context.Background(), entry.id)
 	result, err := session.Result(ctx)
+	if ctx.Err() != nil {
+		_ = tm.terminateEntrySession(context.Background(), entry, session)
+	}
 	entry.mu.Lock()
 	defer entry.mu.Unlock()
 	if entry.state == TaskStateCancelled {
@@ -183,8 +197,28 @@ func (tm *TaskManager) finishSession(ctx context.Context, entry *taskEntry, sess
 		return
 	}
 	entry.finishLocked(result, err)
+	if ctx.Err() != nil {
+		entry.state = TaskStateCancelled
+		entry.err = ctx.Err()
+	}
 	_ = tm.saveSnapshot(context.Background(), entry.snapshotLocked(tm.scope))
 	close(entry.done)
+}
+
+func (tm *TaskManager) terminateSessionOnCancel(ctx context.Context, entry *taskEntry, session sandbox.Session) {
+	<-ctx.Done()
+	_ = tm.terminateEntrySession(context.Background(), entry, session)
+}
+
+func (tm *TaskManager) terminateEntrySession(ctx context.Context, entry *taskEntry, session sandbox.Session) error {
+	if entry == nil || session == nil {
+		return nil
+	}
+	var err error
+	entry.termOnce.Do(func() {
+		err = session.Terminate(ctx)
+	})
+	return err
 }
 
 // Wait blocks until a task completes and returns its snapshot.
@@ -257,6 +291,9 @@ func (tm *TaskManager) Cancel(ctx context.Context, taskID string) error {
 				return err
 			}
 			if ok && !isTerminalTaskState(snap.State) {
+				if cancels, ok := tm.store.(TaskCancelStore); ok {
+					cancels.CancelTaskRun(ctx, taskID)
+				}
 				if hasSandboxSession(snap.SandboxSession) {
 					session, err := tm.openSandboxSession(snap.SandboxSession)
 					if err != nil {
@@ -276,7 +313,7 @@ func (tm *TaskManager) Cancel(ctx context.Context, taskID string) error {
 	entry.mu.Lock()
 	defer entry.mu.Unlock()
 	if entry.session != nil {
-		if err := entry.session.Terminate(ctx); err != nil {
+		if err := tm.terminateEntrySession(ctx, entry, entry.session); err != nil {
 			return err
 		}
 	}
@@ -365,6 +402,21 @@ func (tm *TaskManager) saveSnapshot(ctx context.Context, snap TaskSnapshot) erro
 		return nil
 	}
 	return tm.store.SaveTask(ctx, snap)
+}
+
+func (tm *TaskManager) registerTaskCancel(ctx context.Context, taskID string, cancel context.CancelFunc) error {
+	cancelStore, ok := tm.store.(TaskCancelStore)
+	if !ok {
+		return nil
+	}
+	return cancelStore.RegisterTaskCancel(ctx, taskID, cancel)
+}
+
+func (tm *TaskManager) unregisterTaskCancel(ctx context.Context, taskID string) {
+	cancelStore, ok := tm.store.(TaskCancelStore)
+	if ok {
+		cancelStore.UnregisterTaskCancel(ctx, taskID)
+	}
 }
 
 func (e *taskEntry) snapshotLocked(scope string) TaskSnapshot {

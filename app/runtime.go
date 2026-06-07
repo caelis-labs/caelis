@@ -28,12 +28,16 @@ type Runtime struct {
 
 // RuntimeConfig holds the configuration for assembling a Runtime.
 type RuntimeConfig struct {
-	AppName        string
-	Agent          agent.Agent
-	SessionStore   session.Service
-	ModelProfiles  []model.ModelInfo
-	ModelFactory   func(model.Ref) (model.LLM, error)
-	ToolList       []tool.Tool
+	AppName       string
+	Agent         agent.Agent
+	SessionStore  session.Service
+	ModelProfiles []model.ModelInfo
+	ModelFactory  func(model.Ref) (model.LLM, error)
+	ToolList      []tool.Tool
+	// SandboxBackends exposes an ordered set of sandbox backends to the Layer 4
+	// runner. Runtime metadata can select a backend by descriptor name.
+	SandboxBackends []sandbox.Backend
+	// SandboxBackend is retained as the single-backend shorthand.
 	SandboxBackend sandbox.Backend
 	PolicyEngine   policy.Engine
 	SkillRegistry  skill.Registry
@@ -69,11 +73,9 @@ func NewRuntime(cfg RuntimeConfig) (*Runtime, error) {
 	}
 
 	// Sandbox: default to host backend.
-	var sandboxFact sandbox.Factory
-	if cfg.SandboxBackend != nil {
-		sandboxFact = &singleBackendFactory{backend: cfg.SandboxBackend}
-	} else {
-		sandboxFact = &singleBackendFactory{backend: host.New()}
+	sandboxFact, err := runtimeSandboxFactory(cfg)
+	if err != nil {
+		return nil, err
 	}
 
 	// Policy: default to workspace-write.
@@ -106,16 +108,73 @@ func NewRuntime(cfg RuntimeConfig) (*Runtime, error) {
 	}, nil
 }
 
-// singleBackendFactory wraps a single backend as a sandbox.Factory.
-type singleBackendFactory struct {
-	backend sandbox.Backend
+func runtimeSandboxFactory(cfg RuntimeConfig) (sandbox.Factory, error) {
+	switch {
+	case len(cfg.SandboxBackends) > 0:
+		return newSandboxBackendFactory(cfg.SandboxBackends)
+	case cfg.SandboxBackend != nil:
+		return newSandboxBackendFactory([]sandbox.Backend{cfg.SandboxBackend})
+	default:
+		return newSandboxBackendFactory([]sandbox.Backend{host.New()})
+	}
 }
 
-func (f *singleBackendFactory) Create(_ context.Context, _ sandbox.Config) (sandbox.Backend, error) {
-	return f.backend, nil
+type sandboxBackendFactory struct {
+	order    []string
+	backends map[string]sandbox.Backend
+	descs    map[string]sandbox.Descriptor
 }
 
-func (f *singleBackendFactory) Available(_ context.Context) ([]sandbox.Descriptor, error) {
-	desc, _ := f.backend.Describe(context.Background())
-	return []sandbox.Descriptor{desc}, nil
+func newSandboxBackendFactory(backends []sandbox.Backend) (*sandboxBackendFactory, error) {
+	if len(backends) == 0 {
+		return nil, fmt.Errorf("app: no sandbox backends configured")
+	}
+	f := &sandboxBackendFactory{
+		backends: make(map[string]sandbox.Backend, len(backends)),
+		descs:    make(map[string]sandbox.Descriptor, len(backends)),
+	}
+	for i, backend := range backends {
+		if backend == nil {
+			return nil, fmt.Errorf("app: sandbox backend %d is nil", i)
+		}
+		desc, err := backend.Describe(context.Background())
+		if err != nil {
+			return nil, fmt.Errorf("app: describe sandbox backend %d: %w", i, err)
+		}
+		name := desc.Name
+		if name == "" {
+			name = backend.Name()
+			desc.Name = name
+		}
+		if name == "" {
+			return nil, fmt.Errorf("app: sandbox backend %d has empty name", i)
+		}
+		if _, exists := f.backends[name]; exists {
+			return nil, fmt.Errorf("app: duplicate sandbox backend %q", name)
+		}
+		f.order = append(f.order, name)
+		f.backends[name] = backend
+		f.descs[name] = desc
+	}
+	return f, nil
+}
+
+func (f *sandboxBackendFactory) Create(_ context.Context, cfg sandbox.Config) (sandbox.Backend, error) {
+	name := cfg.BackendName
+	if name == "" && len(f.order) > 0 {
+		name = f.order[0]
+	}
+	backend, ok := f.backends[name]
+	if !ok {
+		return nil, fmt.Errorf("sandbox backend %q is not configured", cfg.BackendName)
+	}
+	return backend, nil
+}
+
+func (f *sandboxBackendFactory) Available(context.Context) ([]sandbox.Descriptor, error) {
+	descs := make([]sandbox.Descriptor, 0, len(f.order))
+	for _, name := range f.order {
+		descs = append(descs, f.descs[name])
+	}
+	return descs, nil
 }

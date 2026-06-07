@@ -113,6 +113,101 @@ func TestBackendCancellation(t *testing.T) {
 	}
 }
 
+func TestBackendAsyncSessionResultAndReopen(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("host shell test uses POSIX shell")
+	}
+
+	b := New()
+	async, ok := any(b).(sandbox.AsyncBackend)
+	if !ok {
+		t.Fatal("host backend must implement sandbox.AsyncBackend")
+	}
+	session, err := async.Start(context.Background(), sandbox.CommandRequest{
+		Command: `printf async-ok`,
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	reopened, err := async.OpenSessionRef(session.Ref())
+	if err != nil {
+		t.Fatalf("OpenSessionRef: %v", err)
+	}
+	if reopened.Ref() != session.Ref() {
+		t.Fatalf("reopened ref = %#v, want %#v", reopened.Ref(), session.Ref())
+	}
+
+	status, err := session.Wait(context.Background(), 5*time.Second)
+	if err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+	if status.Running {
+		t.Fatalf("status = %#v, want stopped", status)
+	}
+	stdout, stderr, stdoutMark, stderrMark, err := session.ReadOutput(context.Background(), 0, 0)
+	if err != nil {
+		t.Fatalf("ReadOutput: %v", err)
+	}
+	if string(stdout) != "async-ok" || len(stderr) != 0 || stdoutMark == 0 || stderrMark != 0 {
+		t.Fatalf("output stdout=%q stderr=%q markers=%d/%d", stdout, stderr, stdoutMark, stderrMark)
+	}
+	result, err := session.Result(context.Background())
+	if err != nil {
+		t.Fatalf("Result: %v", err)
+	}
+	if string(result.Stdout) != "async-ok" || result.ExitCode != 0 {
+		t.Fatalf("result = %#v, want async-ok exit 0", result)
+	}
+}
+
+func TestBackendAsyncSessionWriteInput(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("host shell test uses POSIX shell")
+	}
+
+	async := any(New()).(sandbox.AsyncBackend)
+	session, err := async.Start(context.Background(), sandbox.CommandRequest{
+		Command: `read line; printf "got:%s" "$line"`,
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if err := session.WriteInput(context.Background(), []byte("hello\n")); err != nil {
+		t.Fatalf("WriteInput: %v", err)
+	}
+	result, err := session.Result(context.Background())
+	if err != nil {
+		t.Fatalf("Result: %v", err)
+	}
+	if string(result.Stdout) != "got:hello" {
+		t.Fatalf("stdout = %q, want got:hello", result.Stdout)
+	}
+}
+
+func TestBackendAsyncSessionTerminate(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("host shell test uses POSIX shell")
+	}
+
+	async := any(New()).(sandbox.AsyncBackend)
+	session, err := async.Start(context.Background(), sandbox.CommandRequest{
+		Command: `sleep 60`,
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if err := session.Terminate(context.Background()); err != nil {
+		t.Fatalf("Terminate: %v", err)
+	}
+	status, err := session.Wait(context.Background(), 5*time.Second)
+	if err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+	if status.Running {
+		t.Fatalf("status = %#v, want stopped after terminate", status)
+	}
+}
+
 // ─── Command constraints tests ───────────────────────────────────────
 
 func TestBackendRun_ConstraintsAllowedWorkdir(t *testing.T) {

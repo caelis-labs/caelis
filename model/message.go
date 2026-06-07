@@ -20,6 +20,9 @@ type Message struct {
 type Part struct {
 	// Text content.
 	Text string
+	// Reasoning/thinking content. Providers that need replay signatures should
+	// store them in Reasoning.Replay rather than UI-only metadata.
+	Reasoning *Reasoning
 	// Inline data (images, audio, etc.).
 	InlineData *InlineData
 	// File reference.
@@ -28,6 +31,33 @@ type Part struct {
 	ToolUse *ToolUse
 	// Tool result (tool role only).
 	ToolResult *ToolResult
+	// ProviderMeta stores provider-specific part metadata that may be needed
+	// to faithfully rebuild provider-native requests.
+	ProviderMeta map[string]any
+}
+
+// ReasoningVisibility controls whether reasoning content is model-visible.
+type ReasoningVisibility string
+
+const (
+	ReasoningVisibilityVisible  ReasoningVisibility = "visible"
+	ReasoningVisibilityRedacted ReasoningVisibility = "redacted"
+)
+
+// Reasoning holds model reasoning/thinking content and replay metadata.
+type Reasoning struct {
+	Text       string
+	Visibility ReasoningVisibility
+	Replay     *ReplayMeta
+}
+
+// ReplayMeta preserves provider-native replay tokens such as Anthropic
+// thinking signatures and Gemini thought signatures.
+type ReplayMeta struct {
+	Provider string
+	Kind     string
+	Token    string
+	Metadata map[string]any
 }
 
 // InlineData holds binary content embedded in a message.
@@ -44,10 +74,11 @@ type FileRef struct {
 
 // ToolUse requests a tool call.
 type ToolUse struct {
-	CallID  string
-	Name    string
-	Args    map[string]any
-	ArgJSON string
+	CallID       string
+	Name         string
+	Args         map[string]any
+	ArgJSON      string
+	ProviderMeta map[string]any
 }
 
 // ToolResult reports the outcome of a tool call.

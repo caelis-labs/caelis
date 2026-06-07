@@ -4,7 +4,10 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/OnslaughtSnail/caelis/model"
 	"github.com/OnslaughtSnail/caelis/session"
@@ -421,5 +424,141 @@ func TestPersistenceVerification(t *testing.T) {
 	}
 	if evts[0].TextContent() != "persisted" {
 		t.Errorf("event text: got %q, want %q", evts[0].TextContent(), "persisted")
+	}
+}
+
+func TestAppendEventWaitsForStoreLockAcrossInstances(t *testing.T) {
+	dir := filepath.Join(os.TempDir(), "session-file-test", "lock-"+t.Name())
+	defer os.RemoveAll(dir)
+	ctx := context.Background()
+
+	svc1, err := New(Config{RootDir: dir})
+	if err != nil {
+		t.Fatalf("New svc1: %v", err)
+	}
+	sess, err := svc1.Create(ctx, session.CreateRequest{AppName: "app", UserID: "u", WorkspaceKey: "ws"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	held, err := lockSessionStoreRoot(dir, storeRootLockExclusive)
+	if err != nil {
+		t.Fatalf("lockSessionStoreRoot: %v", err)
+	}
+
+	svc2, err := New(Config{RootDir: dir})
+	if err != nil {
+		t.Fatalf("New svc2: %v", err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := svc2.AppendEvent(ctx, sess.Ref, session.Event{
+			Kind:       session.EventKindUser,
+			Visibility: session.VisibilityCanonical,
+			UserPayload: &session.UserPayload{
+				Parts: []session.EventPart{{Kind: session.PartKindText, Text: "blocked until lock release"}},
+			},
+		})
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		t.Fatalf("AppendEvent completed while root lock was held: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	if err := unlockSessionStoreRoot(held); err != nil {
+		t.Fatalf("unlockSessionStoreRoot: %v", err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("AppendEvent after unlock: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("AppendEvent did not complete after root lock release")
+	}
+}
+
+func TestConcurrentAppendAcrossInstances(t *testing.T) {
+	dir := filepath.Join(os.TempDir(), "session-file-test", "concurrent-"+t.Name())
+	defer os.RemoveAll(dir)
+	ctx := context.Background()
+
+	svc1, err := New(Config{RootDir: dir})
+	if err != nil {
+		t.Fatalf("New svc1: %v", err)
+	}
+	sess, err := svc1.Create(ctx, session.CreateRequest{AppName: "app", UserID: "u", WorkspaceKey: "ws"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	svc2, err := New(Config{RootDir: dir})
+	if err != nil {
+		t.Fatalf("New svc2: %v", err)
+	}
+
+	const n = 25
+	var wg sync.WaitGroup
+	errs := make(chan error, n*2)
+	appendFrom := func(svc *Service, prefix string) {
+		defer wg.Done()
+		for i := 0; i < n; i++ {
+			_, err := svc.AppendEvent(ctx, sess.Ref, session.Event{
+				Kind:       session.EventKindUser,
+				Visibility: session.VisibilityCanonical,
+				UserPayload: &session.UserPayload{
+					Parts: []session.EventPart{{Kind: session.PartKindText, Text: prefix}},
+				},
+			})
+			errs <- err
+		}
+	}
+	wg.Add(2)
+	go appendFrom(svc1, "a")
+	go appendFrom(svc2, "b")
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("AppendEvent: %v", err)
+		}
+	}
+
+	evts, err := svc1.Events(ctx, session.EventsRequest{SessionRef: sess.Ref})
+	if err != nil {
+		t.Fatalf("Events: %v", err)
+	}
+	if len(evts) != n*2 {
+		t.Fatalf("got %d events, want %d", len(evts), n*2)
+	}
+	seen := make(map[string]bool, len(evts))
+	for _, evt := range evts {
+		if evt.ID == "" {
+			t.Fatal("persisted event has empty id")
+		}
+		if seen[evt.ID] {
+			t.Fatalf("duplicate event id %q", evt.ID)
+		}
+		seen[evt.ID] = true
+	}
+}
+
+func TestEventsReturnsErrorForCorruptJSONL(t *testing.T) {
+	svc := tempService(t)
+	ctx := context.Background()
+	sess, err := svc.Create(ctx, session.CreateRequest{AppName: "app", UserID: "u", WorkspaceKey: "ws"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := os.WriteFile(svc.eventsPath(sess.Ref), []byte("{not-json}\n"), 0o644); err != nil {
+		t.Fatalf("write corrupt events log: %v", err)
+	}
+	_, err = svc.Events(ctx, session.EventsRequest{SessionRef: sess.Ref})
+	if err == nil {
+		t.Fatal("Events succeeded for corrupt JSONL")
+	}
+	if !strings.Contains(err.Error(), "corrupt JSONL") {
+		t.Fatalf("Events error = %v, want corrupt JSONL", err)
 	}
 }

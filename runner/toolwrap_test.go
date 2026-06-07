@@ -2,12 +2,16 @@ package runner
 
 import (
 	"context"
+	"iter"
 	"testing"
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/agent"
+	"github.com/OnslaughtSnail/caelis/agent/approval/autoreview"
+	"github.com/OnslaughtSnail/caelis/model"
 	"github.com/OnslaughtSnail/caelis/policy"
 	"github.com/OnslaughtSnail/caelis/sandbox"
+	"github.com/OnslaughtSnail/caelis/session"
 	"github.com/OnslaughtSnail/caelis/tool"
 )
 
@@ -123,6 +127,68 @@ func TestPolicyApprovalDenied(t *testing.T) {
 	}
 	if !result.IsError {
 		t.Error("expected error result for denied approval")
+	}
+}
+
+func TestPolicyApprovalUsesAutoReviewRequester(t *testing.T) {
+	base := &echoTool{}
+	approver := autoreview.New(autoreview.Config{
+		Model: &toolwrapReviewLLM{events: []model.ResponseEvent{{TextDelta: `{"outcome":"allow"}`}}},
+	})
+	wrapped := WrapTools([]tool.Tool{base}, &approveNeededPolicy{}, approver, nil)
+
+	result, err := wrapped[0].Run(fakeCtx(), tool.Call{
+		Name: "ECHO",
+		Args: map[string]any{"text": "auto-approved"},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", result.Output)
+	}
+	if result.Output != "auto-approved" {
+		t.Fatalf("output = %q", result.Output)
+	}
+}
+
+func TestPolicyApprovalPassesTranscriptContext(t *testing.T) {
+	base := &echoTool{}
+	approver := &capturingApprover{approved: true}
+	activeSession := session.Session{
+		Ref: session.Ref{AppName: "test", UserID: "user", WorkspaceKey: "workspace", SessionID: "sess-1"},
+	}
+	transcript := []session.Event{{
+		ID:         "event-1",
+		Kind:       session.EventKindUser,
+		Visibility: session.VisibilityCanonical,
+		UserPayload: &session.UserPayload{
+			Parts: []session.EventPart{{Kind: session.PartKindText, Text: "approve writes"}},
+		},
+	}}
+	wrapped := WrapTools(
+		[]tool.Tool{base},
+		&approveNeededPolicy{},
+		approver,
+		nil,
+		WithApprovalContext(activeSession, transcript),
+	)
+
+	result, err := wrapped[0].Run(fakeCtx(), tool.Call{
+		Name: "ECHO",
+		Args: map[string]any{"text": "with transcript"},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", result.Output)
+	}
+	if !approver.request.Session.Ref.Equal(activeSession.Ref) {
+		t.Fatalf("approval session = %#v, want %#v", approver.request.Session.Ref, activeSession.Ref)
+	}
+	if len(approver.request.Transcript) != 1 || approver.request.Transcript[0].TextContent() != "approve writes" {
+		t.Fatalf("approval transcript = %#v", approver.request.Transcript)
 	}
 }
 
@@ -336,4 +402,30 @@ type testObserver struct {
 func (o *testObserver) BeforeTool(_ tool.Call) { o.beforeCalled = true }
 func (o *testObserver) AfterTool(_ tool.Call, _ tool.Result, _ error) {
 	o.afterCalled = true
+}
+
+type capturingApprover struct {
+	approved bool
+	request  agent.ApprovalRequest
+}
+
+func (a *capturingApprover) RequestApproval(_ context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+	a.request = req
+	return agent.ApprovalResponse{Approved: a.approved, Reason: "captured"}, nil
+}
+
+type toolwrapReviewLLM struct {
+	events []model.ResponseEvent
+}
+
+func (m *toolwrapReviewLLM) Name() string { return "toolwrap-reviewer" }
+
+func (m *toolwrapReviewLLM) Generate(_ context.Context, _ model.Request) iter.Seq2[model.ResponseEvent, error] {
+	return func(yield func(model.ResponseEvent, error) bool) {
+		for _, event := range m.events {
+			if !yield(event, nil) {
+				return
+			}
+		}
+	}
 }

@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -51,6 +52,93 @@ func TestOpenAIProvider_TextStreaming(t *testing.T) {
 	}
 	if usage == nil || usage.TotalTokens != 15 {
 		t.Errorf("expected usage with 15 total tokens")
+	}
+}
+
+func TestOpenAIProvider_UsageIncludesCachedAndReasoningTokens(t *testing.T) {
+	srv := mockOpenAIServer(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprintf(w, "data: %s\n\n", `{"choices":[{"delta":{},"finish_reason":"stop","index":0}],"usage":{"prompt_tokens":20,"completion_tokens":8,"prompt_tokens_details":{"cached_tokens":6},"completion_tokens_details":{"reasoning_tokens":3}}}`)
+		fmt.Fprintf(w, "data: [DONE]\n\n")
+	})
+	defer srv.Close()
+
+	p := NewOpenAI(OpenAIConfig{BaseURL: srv.URL, Token: "test", Model: "test-model"})
+
+	var usage *model.Usage
+	for evt, err := range p.Generate(context.Background(), model.Request{
+		Messages: []model.Message{{Role: model.RoleUser, Content: []model.Part{{Text: "hi"}}}},
+	}) {
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if evt.Usage != nil {
+			usage = evt.Usage
+		}
+	}
+	if usage == nil {
+		t.Fatal("usage = nil, want usage")
+	}
+	if usage.PromptTokens != 20 || usage.CachedInputTokens != 6 || usage.CompletionTokens != 8 || usage.ReasoningTokens != 3 || usage.TotalTokens != 28 {
+		t.Fatalf("usage = %+v, want cached/reasoning tokens with derived total", *usage)
+	}
+}
+
+func TestOpenAIProvider_MultilineSSE(t *testing.T) {
+	srv := mockOpenAIServer(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprintf(w, "data: {\"choices\":[\n")
+		fmt.Fprintf(w, "data: {\"delta\":{\"content\":\"Hello\"},\"index\":0}\n")
+		fmt.Fprintf(w, "data: ]}\n\n")
+		fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\",\"index\":0}]}\n\n")
+		fmt.Fprintf(w, "data: [DONE]\n\n")
+	})
+	defer srv.Close()
+
+	p := NewOpenAI(OpenAIConfig{BaseURL: srv.URL, Token: "test", Model: "test-model"})
+
+	var text string
+	for evt, err := range p.Generate(context.Background(), model.Request{
+		Messages: []model.Message{{Role: model.RoleUser, Content: []model.Part{{Text: "hi"}}}},
+	}) {
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		text += evt.TextDelta
+	}
+	if text != "Hello" {
+		t.Fatalf("text = %q, want Hello", text)
+	}
+}
+
+func TestOpenAIProvider_FirstEventTimeout(t *testing.T) {
+	srv := mockOpenAIServer(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		<-r.Context().Done()
+	})
+	defer srv.Close()
+
+	p := NewOpenAI(OpenAIConfig{
+		BaseURL:                 srv.URL,
+		Token:                   "test",
+		Model:                   "test-model",
+		StreamFirstEventTimeout: 20 * time.Millisecond,
+	})
+
+	var gotErr error
+	for _, err := range p.Generate(context.Background(), model.Request{
+		Messages: []model.Message{{Role: model.RoleUser, Content: []model.Part{{Text: "hi"}}}},
+	}) {
+		if err != nil {
+			gotErr = err
+			break
+		}
+	}
+	if !errors.Is(gotErr, errStreamFirstEventTimeout) {
+		t.Fatalf("Generate error = %v, want first event timeout", gotErr)
 	}
 }
 
@@ -241,6 +329,47 @@ func TestOpenAIProvider_BuildMessageWithToolCalls(t *testing.T) {
 	}
 }
 
+func TestOpenAIProvider_BuildMessagePreservesRawToolArguments(t *testing.T) {
+	p := NewOpenAI(OpenAIConfig{Model: "test"})
+	msg := model.Message{
+		Role: model.RoleAssistant,
+		Content: []model.Part{
+			{ToolUse: &model.ToolUse{
+				CallID:  "c1",
+				Name:    "READ",
+				Args:    map[string]any{"path": "/decoded"},
+				ArgJSON: `{"path":"\/raw","limit":1.0}`,
+			}},
+		},
+	}
+
+	built := p.buildMessage(msg)
+	tc := built["tool_calls"].([]map[string]any)
+	fn := tc[0]["function"].(map[string]any)
+	if got := fn["arguments"]; got != `{"path":"\/raw","limit":1.0}` {
+		t.Fatalf("arguments = %#v, want raw ArgJSON preserved", got)
+	}
+}
+
+func TestOpenAIProvider_BuildMessageIncludesReasoningText(t *testing.T) {
+	p := NewOpenAI(OpenAIConfig{Model: "test"})
+	msg := model.Message{
+		Role: model.RoleAssistant,
+		Content: []model.Part{
+			{Reasoning: &model.Reasoning{Text: "Think first.", Visibility: model.ReasoningVisibilityVisible}},
+			{Text: "Final answer."},
+		},
+	}
+
+	built := p.buildMessage(msg)
+	if built["content"] != "Final answer." {
+		t.Fatalf("content = %#v, want answer text only", built["content"])
+	}
+	if built["reasoning_content"] != "Think first." {
+		t.Fatalf("reasoning_content = %#v, want reasoning preserved separately", built["reasoning_content"])
+	}
+}
+
 func TestOpenAIProvider_BuildMessageToolResult(t *testing.T) {
 	p := NewOpenAI(OpenAIConfig{Model: "test"})
 	msg := model.Message{
@@ -290,22 +419,22 @@ func TestOpenAIProvider_ContextCancellation(t *testing.T) {
 	}
 }
 
-func TestParseArgsJSON(t *testing.T) {
-	m, err := parseArgsJSON(`{"path":"/tmp","limit":10}`)
+func TestOpenAIToolArgsMapCompatibility(t *testing.T) {
+	m, err := toolArgsMap(`{"path":"/tmp","limit":10}`)
 	if err != nil {
-		t.Fatalf("parseArgsJSON: %v", err)
+		t.Fatalf("toolArgsMap: %v", err)
 	}
 	if m["path"] != "/tmp" {
 		t.Errorf("path: %v", m["path"])
 	}
-	empty, err := parseArgsJSON("")
+	empty, err := toolArgsMap("")
 	if err != nil {
-		t.Fatalf("parseArgsJSON empty: %v", err)
+		t.Fatalf("toolArgsMap empty: %v", err)
 	}
-	if empty != nil {
-		t.Error("empty string should return nil")
+	if len(empty) != 0 {
+		t.Error("empty string should return empty object")
 	}
-	if _, err := parseArgsJSON("not json"); err == nil {
+	if _, err := toolArgsMap("not json"); err == nil {
 		t.Error("invalid json should return error")
 	}
 }

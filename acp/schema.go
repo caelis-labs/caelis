@@ -70,6 +70,7 @@ type TextContent struct {
 type ContentChunk struct {
 	SessionUpdate UpdateKind `json:"sessionUpdate"`
 	Content       any        `json:"content"` // typically TextContent
+	Final         *bool      `json:"final,omitempty"`
 }
 
 func (c ContentChunk) SessionUpdateType() UpdateKind { return c.SessionUpdate }

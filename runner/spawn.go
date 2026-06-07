@@ -10,7 +10,6 @@ import (
 	"github.com/OnslaughtSnail/caelis/model"
 	"github.com/OnslaughtSnail/caelis/session"
 	"github.com/OnslaughtSnail/caelis/tool"
-	"github.com/OnslaughtSnail/caelis/tool/builtin/spawn"
 )
 
 type runnerSpawnDelegator struct {
@@ -21,7 +20,7 @@ type runnerSpawnDelegator struct {
 	taskRun string
 }
 
-func newRunnerSpawnDelegator(cfg Config, parent session.Session, current agent.Agent, branch string, runID string) spawn.Delegator {
+func newRunnerSpawnDelegator(cfg Config, parent session.Session, current agent.Agent, branch string, runID string) agent.SpawnDelegator {
 	return &runnerSpawnDelegator{
 		cfg:     cfg,
 		parent:  parent,
@@ -31,14 +30,14 @@ func newRunnerSpawnDelegator(cfg Config, parent session.Session, current agent.A
 	}
 }
 
-func (d *runnerSpawnDelegator) Spawn(ctx tool.Context, req spawn.SpawnRequest) (spawn.SpawnResult, error) {
+func (d *runnerSpawnDelegator) Spawn(ctx tool.Context, req agent.SpawnRequest) (agent.SpawnResult, error) {
 	child := d.findChild(req.AgentName)
 	if child == nil {
 		name := strings.TrimSpace(req.AgentName)
 		if name == "" {
 			name = "<default>"
 		}
-		return spawn.SpawnResult{}, fmt.Errorf("child agent %s not found", name)
+		return agent.SpawnResult{}, fmt.Errorf("child agent %s not found", name)
 	}
 	childSession, err := d.cfg.Sessions.Create(ctx, session.CreateRequest{
 		AppName:      d.parent.Ref.AppName,
@@ -54,7 +53,7 @@ func (d *runnerSpawnDelegator) Spawn(ctx tool.Context, req spawn.SpawnRequest) (
 		},
 	})
 	if err != nil {
-		return spawn.SpawnResult{}, err
+		return agent.SpawnResult{}, err
 	}
 	taskID := fmt.Sprintf("task-%d-spawn", time.Now().UnixNano())
 	taskStore := d.cfg.TaskStore
@@ -62,22 +61,30 @@ func (d *runnerSpawnDelegator) Spawn(ctx tool.Context, req spawn.SpawnRequest) (
 		taskStore = NewMemoryTaskStore()
 	}
 	started := time.Now()
+	childCtx, childCancel := context.WithCancel(ctx)
 	if err := taskStore.SaveTask(ctx, TaskSnapshot{
 		SessionRef: childSession.Ref.String(),
 		TaskID:     taskID,
 		State:      TaskStateRunning,
 		Started:    started,
 	}); err != nil {
-		return spawn.SpawnResult{}, err
+		childCancel()
+		return agent.SpawnResult{}, err
 	}
-	go d.runChildTask(taskStore, taskID, childSession, child, req.Prompt, started)
-	return spawn.SpawnResult{
+	if err := registerTaskCancel(ctx, taskStore, taskID, childCancel); err != nil {
+		childCancel()
+		return agent.SpawnResult{}, err
+	}
+	go d.runChildTask(childCtx, childCancel, taskStore, taskID, childSession, child, req.Prompt, started)
+	return agent.SpawnResult{
 		HandleID:     taskID,
 		FinalMessage: "task started: " + taskID,
 	}, nil
 }
 
-func (d *runnerSpawnDelegator) runChildTask(taskStore TaskStore, taskID string, childSession session.Session, child agent.Agent, prompt string, started time.Time) {
+func (d *runnerSpawnDelegator) runChildTask(ctx context.Context, cancel context.CancelFunc, taskStore TaskStore, taskID string, childSession session.Session, child agent.Agent, prompt string, started time.Time) {
+	defer cancel()
+	defer unregisterTaskCancel(context.Background(), taskStore, taskID)
 	childCfg := d.cfg
 	childCfg.Agent = child
 	childCfg.TaskStore = taskStore
@@ -94,7 +101,7 @@ func (d *runnerSpawnDelegator) runChildTask(taskStore TaskStore, taskID string, 
 		return
 	}
 	var final string
-	for evt, err := range r.Run(context.Background(), RunRequest{
+	for evt, err := range r.Run(ctx, RunRequest{
 		SessionRef: childSession.Ref,
 		Branch:     d.branch,
 		UserMessage: model.Message{
@@ -103,10 +110,14 @@ func (d *runnerSpawnDelegator) runChildTask(taskStore TaskStore, taskID string, 
 		},
 	}) {
 		if err != nil {
+			state := TaskStateFailed
+			if ctx.Err() != nil {
+				state = TaskStateCancelled
+			}
 			_ = taskStore.SaveTask(context.Background(), TaskSnapshot{
 				SessionRef: childSession.Ref.String(),
 				TaskID:     taskID,
-				State:      TaskStateFailed,
+				State:      state,
 				Error:      err.Error(),
 				Started:    started,
 				Ended:      time.Now(),
@@ -160,6 +171,7 @@ func (d *runnerSpawnDelegator) WriteTask(ctx context.Context, taskID string, inp
 		return TaskSnapshot{}, fmt.Errorf("child agent %q not found", childSession.State["agent"])
 	}
 	started := time.Now()
+	childCtx, childCancel := context.WithCancel(ctx)
 	running := TaskSnapshot{
 		SessionRef: childSession.Ref.String(),
 		TaskID:     taskID,
@@ -167,10 +179,28 @@ func (d *runnerSpawnDelegator) WriteTask(ctx context.Context, taskID string, inp
 		Started:    started,
 	}
 	if err := taskStore.SaveTask(ctx, running); err != nil {
+		childCancel()
 		return TaskSnapshot{}, err
 	}
-	go d.runChildTask(taskStore, taskID, childSession, child, input, started)
+	if err := registerTaskCancel(ctx, taskStore, taskID, childCancel); err != nil {
+		childCancel()
+		return TaskSnapshot{}, err
+	}
+	go d.runChildTask(childCtx, childCancel, taskStore, taskID, childSession, child, input, started)
 	return running, nil
+}
+
+func registerTaskCancel(ctx context.Context, store TaskStore, taskID string, cancel context.CancelFunc) error {
+	if cancelStore, ok := store.(TaskCancelStore); ok {
+		return cancelStore.RegisterTaskCancel(ctx, taskID, cancel)
+	}
+	return nil
+}
+
+func unregisterTaskCancel(ctx context.Context, store TaskStore, taskID string) {
+	if cancelStore, ok := store.(TaskCancelStore); ok {
+		cancelStore.UnregisterTaskCancel(ctx, taskID)
+	}
 }
 
 func (d *runnerSpawnDelegator) findChild(name string) agent.Agent {

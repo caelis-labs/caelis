@@ -118,6 +118,39 @@ func TestProjectEvent_AssistantReasoningAndText(t *testing.T) {
 	}
 }
 
+func TestProjectEvent_AssistantUIOnlyDeltasAreNotFinal(t *testing.T) {
+	e := &session.Event{
+		Kind:       session.EventKindAssistant,
+		Visibility: session.VisibilityUIOnly,
+		AssistantPayload: &session.AssistantPayload{
+			Parts: []session.EventPart{
+				{Kind: session.PartKindReasoning, Text: "thinking"},
+				{Kind: session.PartKindText, Text: "hel"},
+			},
+		},
+	}
+	updates := ProjectEvent(e)
+	if len(updates) != 2 {
+		t.Fatalf("got %d, want 2", len(updates))
+	}
+
+	thought := updates[0].(ContentChunk)
+	if thought.SessionUpdate != UpdateAgentThought {
+		t.Fatalf("thought type = %q", thought.SessionUpdate)
+	}
+	if thought.Final == nil || *thought.Final {
+		t.Fatalf("thought final = %v, want false", thought.Final)
+	}
+
+	message := updates[1].(ContentChunk)
+	if message.SessionUpdate != UpdateAgentMessage {
+		t.Fatalf("message type = %q", message.SessionUpdate)
+	}
+	if message.Final == nil || *message.Final {
+		t.Fatalf("message final = %v, want false", message.Final)
+	}
+}
+
 func TestProjectEvent_ToolCall(t *testing.T) {
 	e := &session.Event{
 		Kind: session.EventKindToolCall,

@@ -7,6 +7,8 @@ type Request struct {
 	Temperature *float64
 	MaxTokens   int
 	Stop        []string
+	Output      *OutputSpec
+	Reasoning   ReasoningConfig
 	Metadata    map[string]any
 }
 
@@ -26,6 +28,33 @@ type Schema struct {
 	Enum        []any
 	Format      string
 	Description string
+}
+
+// OutputMode identifies a provider-neutral desired output contract.
+type OutputMode string
+
+const (
+	OutputModeText   OutputMode = "text"
+	OutputModeJSON   OutputMode = "json"
+	OutputModeSchema OutputMode = "schema"
+)
+
+// OutputSpec defines the desired provider-neutral output contract.
+type OutputSpec struct {
+	Mode            OutputMode
+	JSONSchema      map[string]any
+	MaxOutputTokens int
+}
+
+// ReasoningConfig controls provider reasoning/thinking behavior.
+type ReasoningConfig struct {
+	// Effort is provider-neutral: "none", "minimal", "low", "medium", "high",
+	// "xhigh", or provider-specific values accepted by profiles.
+	Effort string
+	// BudgetTokens is used by providers that expose explicit thinking budgets.
+	BudgetTokens int
+	// Include asks providers to stream or return reasoning when supported.
+	Include bool
 }
 
 // ResponseEvent is a streamed event from LLM.Generate.
@@ -53,7 +82,9 @@ type ToolCallDelta struct {
 
 // Usage reports token consumption.
 type Usage struct {
-	PromptTokens     int
-	CompletionTokens int
-	TotalTokens      int
+	PromptTokens      int
+	CachedInputTokens int
+	CompletionTokens  int
+	ReasoningTokens   int
+	TotalTokens       int
 }
