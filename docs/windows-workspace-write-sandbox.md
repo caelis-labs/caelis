@@ -1,8 +1,10 @@
 # Windows Workspace-Write Sandbox Simplification
 
 This document defines the current Windows sandbox direction for Caelis. It
-supersedes `docs/windows-elevated-sandbox.md` as the implementation target. The
-old elevated design is useful only as legacy context for cleanup and migration.
+replaces the earlier elevated-sandbox direction based on separate sandbox users,
+helper binaries, a command runner, profile manipulation, and network firewall
+policy. The elevated design is useful only as legacy context for cleanup and
+migration.
 
 ## Decision
 

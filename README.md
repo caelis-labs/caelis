@@ -56,8 +56,8 @@ headless one-shot runner.
   ACP, CLI, local-config model, and TUI gateway-driver flows.
 - `npm/`: npm wrapper package plus platform-specific binary packages.
 
-Architecture plan:
-[docs/agent-sdk-acp-architecture-plan.md](docs/agent-sdk-acp-architecture-plan.md)
+Architecture and refactor preparation:
+[docs/refactor/README.md](docs/refactor/README.md)
 
 ## Install
 
