@@ -329,10 +329,10 @@ composition resolves them from Layer 4 packages, and model replay preserves
 provider-critical metadata.
 
 **Slice 4 Evidence:** The canonical Layer 4 LLM streaming contract is
-`model.ResponseEvent`; old `ports/model.StreamEvent` remains only in retained
-upper-layer placeholder contracts until those layers are rewritten.
-Architecture lint now rejects `StreamEvent` references in new Layer 4 runtime directories
-(`model`, `agent`, `runner`, `session`). Shared HTTP client, SSE, status error,
+`model.ResponseEvent`; old `ports/model.StreamEvent` has been removed from the
+active rewrite module. Architecture lint now rejects `StreamEvent` references
+in new Layer 4 runtime directories (`model`, `agent`, `runner`, `session`).
+Shared HTTP client, SSE, status error,
 usage, tool-argument, discovery, and OpenAI-compatible provider helpers are in
 `model/providers` with focused tests. CodeFree auth now has a Layer 4
 store/refresher abstraction that does not read local credential files directly.
@@ -610,12 +610,10 @@ architecture:
 
 - Deleted active roots: `impl/`, `surfaces/`, `tui/`, `headless/`, `eval/`,
   `cmd/caelis/`, `app/gatewayapp/`, `internal/kernel/`, `internal/cli/`,
-  `internal/acpe2eagent/`, `internal/evalharness`, `internal/bootstrap`, and
-  `internal/modelcataloggen`.
+  `internal/acpe2eagent/`, `internal/evalharness`, `internal/bootstrap`,
+  `internal/modelcataloggen`, and `ports/`.
 - Retained placeholders: `app/`, `app/commands/`, `gateway/`, and
   `gateway/kernel/`.
-- Temporarily retained upper-layer contracts: `ports/*`, because ACP protocol
-  and projector code still reference them until Layer 1-3 are rewritten.
 - Reference source for old behavior: `../caelis-main-reference` checked out
   from `main`.
 

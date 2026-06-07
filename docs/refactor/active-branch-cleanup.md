@@ -32,6 +32,7 @@ These roots are intentionally absent from the active rewrite branch:
 - `internal/evalharness`
 - `internal/bootstrap`
 - `internal/modelcataloggen`
+- `ports/`
 
 Architecture lint rejects Go files under these roots so accidental
 reintroduction fails during `make quality`.
@@ -46,9 +47,9 @@ and TODOs so the next rewrite slices have clear landing zones:
 - `gateway/`
 - `gateway/kernel/`
 
-`ports/*` is temporarily retained because ACP projector/protocol code still
-references upper-layer placeholder contracts. Do not use `ports/*` as the
-contract pattern for newly polished Layer 4 infrastructure.
+`ports/*` has been removed. ACP protocol and projector code must use Layer 4
+domain packages such as `session`, `model`, `sandbox`, and the ACP packages
+themselves.
 
 ## Verification
 

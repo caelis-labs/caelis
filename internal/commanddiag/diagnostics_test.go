@@ -3,7 +3,7 @@ package commanddiag
 import (
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
+	"github.com/OnslaughtSnail/caelis/sandbox"
 )
 
 func TestBestDetectsWindowsMSYSSSHSignalPipe(t *testing.T) {

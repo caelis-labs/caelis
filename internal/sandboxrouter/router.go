@@ -6,27 +6,27 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
+	"github.com/OnslaughtSnail/caelis/sandbox"
 )
 
 type Route struct {
-	BackendCandidates   []sandbox.Backend
+	BackendCandidates   []sandbox.BackendName
 	FallbackInstallHint string
 }
 
-func Current(requested sandbox.Backend) (Route, error) {
+func Current(requested sandbox.BackendName) (Route, error) {
 	return ForGOOS(runtime.GOOS, requested)
 }
 
-func ForGOOS(goos string, requested sandbox.Backend) (Route, error) {
+func ForGOOS(goos string, requested sandbox.BackendName) (Route, error) {
 	requested = normalizeRequestedBackend(requested)
 	switch strings.TrimSpace(goos) {
 	case "darwin":
-		return routeForPlatform(goos, requested, []sandbox.Backend{sandbox.BackendSeatbelt}, darwinInstallHint())
+		return routeForPlatform(goos, requested, []sandbox.BackendName{sandbox.BackendSeatbelt}, darwinInstallHint())
 	case "linux":
-		return routeForPlatform(goos, requested, []sandbox.Backend{sandbox.BackendBwrap, sandbox.BackendLandlock}, linuxInstallHint())
+		return routeForPlatform(goos, requested, []sandbox.BackendName{sandbox.BackendBwrap, sandbox.BackendLandlock}, linuxInstallHint())
 	case "windows":
-		return routeForPlatform(goos, requested, []sandbox.Backend{sandbox.BackendWindows}, windowsInstallHint())
+		return routeForPlatform(goos, requested, []sandbox.BackendName{sandbox.BackendWindows}, windowsInstallHint())
 	default:
 		if requested == "" || requested == sandbox.BackendHost {
 			return Route{FallbackInstallHint: genericInstallHint(goos)}, nil
@@ -35,22 +35,22 @@ func ForGOOS(goos string, requested sandbox.Backend) (Route, error) {
 	}
 }
 
-func routeForPlatform(goos string, requested sandbox.Backend, candidates []sandbox.Backend, hint string) (Route, error) {
+func routeForPlatform(goos string, requested sandbox.BackendName, candidates []sandbox.BackendName, hint string) (Route, error) {
 	if requested == "" {
-		return Route{BackendCandidates: append([]sandbox.Backend(nil), candidates...), FallbackInstallHint: hint}, nil
+		return Route{BackendCandidates: append([]sandbox.BackendName(nil), candidates...), FallbackInstallHint: hint}, nil
 	}
 	if requested == sandbox.BackendHost {
 		return Route{FallbackInstallHint: hint}, nil
 	}
 	for _, candidate := range candidates {
 		if requested == candidate {
-			return Route{BackendCandidates: []sandbox.Backend{requested}, FallbackInstallHint: hint}, nil
+			return Route{BackendCandidates: []sandbox.BackendName{requested}, FallbackInstallHint: hint}, nil
 		}
 	}
 	return Route{}, fmt.Errorf("sandbox router: backend %q is unsupported on %s", requested, goos)
 }
 
-func normalizeRequestedBackend(value sandbox.Backend) sandbox.Backend {
+func normalizeRequestedBackend(value sandbox.BackendName) sandbox.BackendName {
 	text := strings.ToLower(strings.TrimSpace(string(value)))
 	switch text {
 	case "", "auto", "default":
@@ -58,7 +58,7 @@ func normalizeRequestedBackend(value sandbox.Backend) sandbox.Backend {
 	case "windows", "windows-restricted-token", "windows_restricted_token", "windows-elevated", "windows_elevated", "windows elevated", "elevated":
 		return sandbox.BackendWindows
 	default:
-		return sandbox.Backend(text)
+		return sandbox.BackendName(text)
 	}
 }
 

@@ -134,6 +134,15 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 		return ""
 	}
 	target := strings.TrimPrefix(importPath, modulePath+"/")
+	if pathIn(target, "ports") {
+		if pathIn(rel, "ports") {
+			return ""
+		}
+		if strings.HasPrefix(rel, "protocol/acp/") {
+			return "protocol/acp must not depend on old ports"
+		}
+		return "active packages must not depend on old ports"
+	}
 	switch {
 	case strings.HasPrefix(rel, "kernel/"):
 		if target == "internal/kernel" || strings.HasPrefix(target, "internal/kernel/") {
@@ -194,6 +203,7 @@ func deletedLegacyRootRule(rel string) string {
 		"tui",
 		"headless",
 		"eval",
+		"ports",
 		"cmd/caelis",
 		"app/gatewayapp",
 		"internal/acpe2eagent",

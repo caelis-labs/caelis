@@ -54,6 +54,18 @@ func TestBoundaryRuleRejectsPublicContractsImportingInternal(t *testing.T) {
 			importPath: modulePath + "/cmd/caelis/internal/cli",
 			want:       "sandbox must not depend on app, cmd, protocol, impl, or surfaces",
 		},
+		{
+			name:       "acp protocol must not import old ports",
+			rel:        "protocol/acp/projector/projector.go",
+			importPath: modulePath + "/ports/session",
+			want:       "protocol/acp must not depend on old ports",
+		},
+		{
+			name:       "active internals must not import old ports",
+			rel:        "internal/sandboxrouter/router.go",
+			importPath: modulePath + "/ports/sandbox",
+			want:       "active packages must not depend on old ports",
+		},
 	}
 
 	for _, tt := range tests {
@@ -91,6 +103,11 @@ func TestDeletedLegacyRootRuleRejectsOldProductionRoots(t *testing.T) {
 			want: "legacy production roots must not be active in the rewrite branch",
 		},
 		{
+			name: "old ports root",
+			rel:  "ports/session/session.go",
+			want: "legacy production roots must not be active in the rewrite branch",
+		},
+		{
 			name: "old internal kernel root",
 			rel:  "internal/kernel/gateway.go",
 			want: "legacy production roots must not be active in the rewrite branch",
@@ -106,9 +123,9 @@ func TestDeletedLegacyRootRuleRejectsOldProductionRoots(t *testing.T) {
 			want: "",
 		},
 		{
-			name: "ports remain allowed for upper-layer placeholder contracts",
+			name: "old ports root",
 			rel:  "ports/model/model.go",
-			want: "",
+			want: "legacy production roots must not be active in the rewrite branch",
 		},
 	}
 
@@ -151,7 +168,7 @@ func TestTextRuleRejectsLegacyStreamEventInLayer4Runtime(t *testing.T) {
 			want: "",
 		},
 		{
-			name: "ports model remains old contract until upper layers rewrite",
+			name: "old ports text rule is superseded by deleted root rule",
 			rel:  "ports/model/model.go",
 			text: "type StreamEvent struct{}",
 			want: "",

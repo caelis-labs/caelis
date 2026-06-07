@@ -2,6 +2,29 @@ package sandbox
 
 import "time"
 
+// BackendName identifies a concrete sandbox backend implementation.
+type BackendName string
+
+const (
+	BackendHost     BackendName = "host"
+	BackendSeatbelt BackendName = "seatbelt"
+	BackendBwrap    BackendName = "bwrap"
+	BackendLandlock BackendName = "landlock"
+	BackendWindows  BackendName = "windows"
+	// BackendWindowsElevated is a legacy request alias normalized to
+	// BackendWindows by routing code.
+	BackendWindowsElevated BackendName = "windows-elevated"
+)
+
+// Route identifies whether a command should run on host or through a sandbox.
+type Route string
+
+const (
+	RouteAuto    Route = ""
+	RouteHost    Route = "host"
+	RouteSandbox Route = "sandbox"
+)
+
 // Descriptor describes a sandbox backend's identity and capabilities.
 type Descriptor struct {
 	Name        string

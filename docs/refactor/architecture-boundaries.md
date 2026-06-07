@@ -19,13 +19,12 @@ intentionally narrower while Layer 4 is being closed:
   `internal/kernel/`, `internal/cli/`, `internal/acpe2eagent/`,
   `internal/evalharness`, `internal/bootstrap`, and
   `internal/modelcataloggen`.
+- The old `ports/` root is also deleted. Public contracts now live in their
+  domain package, and ACP code must depend on Layer 4 packages directly.
 - Old behavior remains available from `main`; the local reference worktree is
   `../caelis-main-reference`.
 - Do not import or recreate deleted roots for new work. Port required behavior
   into the target package for its layer.
-- `ports/*` remains temporarily because some ACP projector/protocol code still
-  references upper-layer placeholder contracts. New polished infrastructure
-  should define contracts in its domain package.
 
 ## Design Principles
 

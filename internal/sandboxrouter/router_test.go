@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
+	"github.com/OnslaughtSnail/caelis/sandbox"
 )
 
 func TestForGOOSWindowsDefaultsToSandbox(t *testing.T) {
@@ -58,7 +58,7 @@ func TestForGOOSLinuxOrdersBwrapBeforeLandlock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ForGOOS(linux, auto) error = %v", err)
 	}
-	want := []sandbox.Backend{sandbox.BackendBwrap, sandbox.BackendLandlock}
+	want := []sandbox.BackendName{sandbox.BackendBwrap, sandbox.BackendLandlock}
 	if len(route.BackendCandidates) != len(want) {
 		t.Fatalf("BackendCandidates = %v, want %v", route.BackendCandidates, want)
 	}

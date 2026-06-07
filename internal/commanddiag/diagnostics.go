@@ -3,7 +3,7 @@ package commanddiag
 import (
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
+	"github.com/OnslaughtSnail/caelis/sandbox"
 )
 
 const (
@@ -26,7 +26,7 @@ type Input struct {
 	Error    string
 	ExitCode int
 	Route    sandbox.Route
-	Backend  sandbox.Backend
+	Backend  sandbox.BackendName
 	GOOS     string
 }
 
@@ -93,7 +93,7 @@ func isSandbox(input Input) bool {
 	}
 }
 
-func normalizeWindowsBackend(backend sandbox.Backend) sandbox.Backend {
+func normalizeWindowsBackend(backend sandbox.BackendName) sandbox.BackendName {
 	switch strings.ToLower(strings.TrimSpace(string(backend))) {
 	case "windows", "windows-restricted-token", "windows_restricted_token", "windows-elevated", "windows_elevated", "elevated":
 		return sandbox.BackendWindows

@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
+	"github.com/OnslaughtSnail/caelis/session"
 )
 
 const (
