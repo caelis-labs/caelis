@@ -259,6 +259,26 @@ func (b *MainACPTurnBlock) AppendStreamChunk(kind SubagentEventKind, chunk strin
 	b.Events = append(b.Events, newNarrativeEventChunk(kind, chunk, at))
 }
 
+func (b *MainACPTurnBlock) ClearActiveBuffers() {
+	if b == nil {
+		return
+	}
+	out := b.Events[:0]
+	for _, ev := range b.Events {
+		if ev.ActiveBuffer != nil && activeNarrativeEventKind(ev.Kind) {
+			continue
+		}
+		ev.ActiveBuffer = nil
+		out = append(out, ev)
+	}
+	clear(b.Events[len(out):])
+	b.Events = out
+}
+
+func activeNarrativeEventKind(kind SubagentEventKind) bool {
+	return kind == SEAssistant || kind == SEReasoning
+}
+
 func (b *MainACPTurnBlock) ReplaceFinalStreamChunk(kind SubagentEventKind, chunk string, occurredAt ...time.Time) {
 	if b == nil {
 		return

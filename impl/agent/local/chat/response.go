@@ -54,7 +54,41 @@ func collectFinalResponse(
 }
 
 func chunkEventFromStreamEvent(event *model.StreamEvent) *session.Event {
-	if event == nil || event.PartDelta == nil {
+	if event == nil {
+		return nil
+	}
+	if event.Type == model.StreamEventAttemptReset {
+		meta := map[string]any{
+			"caelis": map[string]any{
+				"version": 1,
+				"runtime": map[string]any{
+					"attempt_reset": map[string]any{},
+				},
+			},
+		}
+		resetMeta, _ := meta["caelis"].(map[string]any)
+		runtimeMeta, _ := resetMeta["runtime"].(map[string]any)
+		attemptMeta, _ := runtimeMeta["attempt_reset"].(map[string]any)
+		if event.AttemptReset != nil {
+			if event.AttemptReset.Attempt > 0 {
+				attemptMeta["attempt"] = event.AttemptReset.Attempt
+			}
+			if cause := strings.TrimSpace(event.AttemptReset.Cause); cause != "" {
+				attemptMeta["cause"] = cause
+			}
+			attemptMeta["retrying"] = event.AttemptReset.Retrying
+		}
+		return session.MarkUIOnly(&session.Event{
+			Type: session.EventTypeLifecycle,
+			Text: "model attempt reset",
+			Lifecycle: &session.EventLifecycle{
+				Status: "attempt_reset",
+				Reason: "model_retry",
+			},
+			Meta: meta,
+		})
+	}
+	if event.PartDelta == nil {
 		return nil
 	}
 	delta := event.PartDelta

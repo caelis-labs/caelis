@@ -506,18 +506,17 @@ func TestRuntimeSubmitQueuesGuidanceForNextModelStep(t *testing.T) {
 	}
 }
 
-func TestRuntimePersistsInterruptedAssistantReplaySnapshot(t *testing.T) {
+func TestRuntimeRunDoesNotPersistInterruptedAssistantReplay(t *testing.T) {
 	t.Parallel()
 
-	sessions := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{
-		RootDir:            t.TempDir(),
-		SessionIDGenerator: func() string { return "sess-interrupted-replay" },
+	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{
+		SessionIDGenerator: func() string { return "sess-no-interrupted-replay" },
 	}))
 	activeSession, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
 		Workspace: session.WorkspaceRef{
-			Key: "ws-interrupted-replay",
+			Key: "ws-no-interrupted-replay",
 			CWD: t.TempDir(),
 		},
 	})
@@ -556,7 +555,7 @@ func TestRuntimePersistsInterruptedAssistantReplaySnapshot(t *testing.T) {
 	runtime, err := New(Config{
 		Sessions:       sessions,
 		AgentFactory:   factory,
-		RunIDGenerator: func() string { return "run-interrupted-replay" },
+		RunIDGenerator: func() string { return "run-no-interrupted-replay" },
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -589,35 +588,10 @@ func TestRuntimePersistsInterruptedAssistantReplaySnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Events(include transient) error = %v", err)
 	}
-	var replay *session.Event
 	for _, event := range transcript {
 		if session.EventTypeOf(event) == session.EventTypeAssistant && event.Visibility == session.VisibilityMirror {
-			replay = event
-			break
+			t.Fatalf("found unexpected VisibilityMirror event in transcript: %#v", event)
 		}
-	}
-	if replay == nil {
-		t.Fatalf("transcript events = %#v, want mirror replay snapshot", transcript)
-		return
-	}
-	if got := session.EventText(replay); got != "partial answer" {
-		t.Fatalf("mirror replay text = %q, want partial answer", got)
-	}
-	replayMessage, ok := session.ModelMessageOf(replay)
-	if !ok {
-		t.Fatal("ModelMessageOf(replay) = false, want durable assistant snapshot projection")
-	}
-	if got := replayMessage.TextContent(); got != "partial answer" {
-		t.Fatalf("mirror replay message text = %q, want partial answer", got)
-	}
-	if got := replayMessage.ReasoningText(); got != "partial thought" {
-		t.Fatalf("mirror replay message reasoning = %q, want partial thought", got)
-	}
-	if replay.Meta != nil {
-		t.Fatalf("mirror replay meta = %#v, want semantic replay without durable display meta", replay.Meta)
-	}
-	if session.IsInvocationVisibleEvent(replay) {
-		t.Fatalf("mirror replay snapshot must not be invocation-visible: %#v", replay)
 	}
 }
 

@@ -393,7 +393,11 @@ func (m *Model) applyTranscriptLifecycle(event TranscriptEvent) (tea.Model, tea.
 		if block == nil {
 			return m, nil
 		}
-		block.SetStatus(event.State, "", "", event.OccurredAt)
+		if event.State == "attempt_reset" {
+			block.ClearActiveBuffers()
+		} else {
+			block.SetStatus(event.State, "", "", event.OccurredAt)
+		}
 		m.markViewportBlockDirty(block.BlockID())
 		return m, m.requestStreamViewportSync()
 	}

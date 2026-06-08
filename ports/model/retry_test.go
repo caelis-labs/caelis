@@ -110,7 +110,7 @@ func TestWithRetryRetriesSameLLMRequestBeforeEmission(t *testing.T) {
 	}
 }
 
-func TestWithRetryDoesNotRetryAfterEmission(t *testing.T) {
+func TestWithRetryDoesNotRetryAfterProviderExecutedToolSemanticEmission(t *testing.T) {
 	t.Parallel()
 
 	inner := &retryTestLLM{
@@ -136,7 +136,16 @@ func TestWithRetryDoesNotRetryAfterEmission(t *testing.T) {
 		gotEvents int
 		gotErr    error
 	)
-	for event, err := range llm.Generate(context.Background(), &Request{Messages: []Message{NewTextMessage(RoleUser, "hello")}}) {
+	req := &Request{
+		Messages: []Message{NewTextMessage(RoleUser, "hello")},
+		Tools: []ToolSpec{
+			{
+				Kind:             ToolSpecKindProviderExecuted,
+				ProviderExecuted: &ProviderExecutedToolSpec{},
+			},
+		},
+	}
+	for event, err := range llm.Generate(context.Background(), req) {
 		if err != nil {
 			gotErr = err
 			continue
@@ -153,6 +162,50 @@ func TestWithRetryDoesNotRetryAfterEmission(t *testing.T) {
 	}
 	if gotEvents != 1 {
 		t.Fatalf("event count = %d, want 1", gotEvents)
+	}
+}
+
+func TestWithRetryRetriesAfterEmptyEventEmission(t *testing.T) {
+	t.Parallel()
+
+	final := StreamEventFromResponse(&Response{
+		Message:      NewTextMessage(RoleAssistant, "ok"),
+		TurnComplete: true,
+	})
+	inner := &retryTestLLM{
+		events: [][]*StreamEvent{
+			{{Type: StreamEventPartDelta, PartDelta: &PartDelta{}}},
+			{final},
+		},
+		errs: []error{
+			errors.New("model: http status 529 body={\"error\":\"overloaded_error\"}"),
+			nil,
+		},
+	}
+	llm := WithRetry(inner, RetryConfig{
+		MaxRetries:          2,
+		BaseDelay:           time.Nanosecond,
+		MaxDelay:            time.Nanosecond,
+		RateLimitMaxRetries: 2,
+		RateLimitBaseDelay:  time.Nanosecond,
+		RateLimitMaxDelay:   time.Nanosecond,
+	})
+
+	var gotText string
+	for event, err := range llm.Generate(context.Background(), &Request{Messages: []Message{NewTextMessage(RoleUser, "hello")}}) {
+		if err != nil {
+			t.Fatalf("Generate() error = %v", err)
+		}
+		if event != nil && event.Response != nil {
+			gotText = event.Response.Message.TextContent()
+		}
+	}
+
+	if got, want := inner.calls, 2; got != want {
+		t.Fatalf("calls = %d, want %d", got, want)
+	}
+	if gotText != "ok" {
+		t.Fatalf("final text = %q, want ok", gotText)
 	}
 }
 
@@ -273,4 +326,154 @@ func errForCall(errs []error, call int) error {
 		return nil
 	}
 	return errs[call]
+}
+
+func TestWithRetrySpeculativeAttemptRetry(t *testing.T) {
+	t.Parallel()
+
+	final := StreamEventFromResponse(&Response{
+		Message:      NewTextMessage(RoleAssistant, "final-ok"),
+		TurnComplete: true,
+	})
+	inner := &retryTestLLM{
+		events: [][]*StreamEvent{
+			{
+				{Type: StreamEventPartDelta, PartDelta: &PartDelta{TextDelta: "partial text"}},
+			},
+			{final},
+		},
+		errs: []error{
+			errors.New("providers: sse scanner: unexpected EOF"),
+			nil,
+		},
+	}
+	llm := WithRetry(inner, RetryConfig{
+		MaxRetries: 2,
+		BaseDelay:  time.Nanosecond,
+		MaxDelay:   time.Nanosecond,
+	})
+
+	var (
+		gotEvents []*StreamEvent
+		gotErr    error
+	)
+	for event, err := range llm.Generate(context.Background(), &Request{Messages: []Message{NewTextMessage(RoleUser, "hello")}}) {
+		if err != nil {
+			gotErr = err
+			continue
+		}
+		if event != nil {
+			gotEvents = append(gotEvents, event)
+		}
+	}
+
+	if gotErr != nil {
+		t.Fatalf("unexpected error: %v", gotErr)
+	}
+	if got, want := inner.calls, 2; got != want {
+		t.Fatalf("calls = %d, want %d", got, want)
+	}
+
+	// Expected event order:
+	// 1. partial text delta
+	// 2. attempt_reset
+	// 3. final response event
+	if len(gotEvents) != 3 {
+		t.Fatalf("len(gotEvents) = %d, want 3", len(gotEvents))
+	}
+	if gotEvents[0].PartDelta == nil || gotEvents[0].PartDelta.TextDelta != "partial text" {
+		t.Errorf("gotEvents[0] = %#v, want partial text delta", gotEvents[0])
+	}
+	if gotEvents[1].Type != StreamEventAttemptReset || gotEvents[1].AttemptReset == nil || gotEvents[1].AttemptReset.Attempt != 1 {
+		t.Errorf("gotEvents[1] = %#v, want attempt_reset", gotEvents[1])
+	}
+	if gotEvents[2].Response == nil || gotEvents[2].Response.Message.TextContent() != "final-ok" {
+		t.Errorf("gotEvents[2] = %#v, want final-ok response", gotEvents[2])
+	}
+}
+
+func TestWithRetryNoRetryForProviderExecutedTools(t *testing.T) {
+	t.Parallel()
+
+	inner := &retryTestLLM{
+		events: [][]*StreamEvent{
+			{
+				{Type: StreamEventPartDelta, PartDelta: &PartDelta{TextDelta: "partial text"}},
+			},
+			{
+				StreamEventFromResponse(&Response{Message: NewTextMessage(RoleAssistant, "should-not-reach"), TurnComplete: true}),
+			},
+		},
+		errs: []error{
+			errors.New("providers: sse scanner: unexpected EOF"),
+			nil,
+		},
+	}
+	llm := WithRetry(inner, RetryConfig{
+		MaxRetries: 2,
+		BaseDelay:  time.Nanosecond,
+		MaxDelay:   time.Nanosecond,
+	})
+
+	req := &Request{
+		Messages: []Message{NewTextMessage(RoleUser, "hello")},
+		Tools: []ToolSpec{
+			{
+				Kind:             ToolSpecKindProviderExecuted,
+				ProviderExecuted: &ProviderExecutedToolSpec{},
+			},
+		},
+	}
+
+	var gotErr error
+	for _, err := range llm.Generate(context.Background(), req) {
+		if err != nil {
+			gotErr = err
+		}
+	}
+
+	if gotErr == nil || !strings.Contains(gotErr.Error(), "unexpected EOF") {
+		t.Fatalf("gotErr = %v, want unexpected EOF", gotErr)
+	}
+	if got, want := inner.calls, 1; got != want {
+		t.Fatalf("calls = %d, want %d (no retry should happen)", got, want)
+	}
+}
+
+func TestWithRetryNoRetryAfterFinalResponse(t *testing.T) {
+	t.Parallel()
+
+	final := StreamEventFromResponse(&Response{
+		Message:      NewTextMessage(RoleAssistant, "final-ok"),
+		TurnComplete: true,
+	})
+	inner := &retryTestLLM{
+		events: [][]*StreamEvent{
+			{final},
+			{final},
+		},
+		errs: []error{
+			errors.New("providers: sse scanner: unexpected EOF"),
+			nil,
+		},
+	}
+	llm := WithRetry(inner, RetryConfig{
+		MaxRetries: 2,
+		BaseDelay:  time.Nanosecond,
+		MaxDelay:   time.Nanosecond,
+	})
+
+	var gotErr error
+	for _, err := range llm.Generate(context.Background(), &Request{Messages: []Message{NewTextMessage(RoleUser, "hello")}}) {
+		if err != nil {
+			gotErr = err
+		}
+	}
+
+	if gotErr == nil || !strings.Contains(gotErr.Error(), "unexpected EOF") {
+		t.Fatalf("gotErr = %v, want unexpected EOF", gotErr)
+	}
+	if got, want := inner.calls, 1; got != want {
+		t.Fatalf("calls = %d, want %d (no retry should happen after final response)", got, want)
+	}
 }

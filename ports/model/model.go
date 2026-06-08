@@ -131,14 +131,22 @@ const (
 type StreamEventType string
 
 const (
-	StreamEventPartStart   StreamEventType = "part_start"
-	StreamEventPartDelta   StreamEventType = "part_delta"
-	StreamEventPartDone    StreamEventType = "part_done"
-	StreamEventMessageDone StreamEventType = "message_done"
-	StreamEventStepDone    StreamEventType = "step_done"
-	StreamEventTurnDone    StreamEventType = "turn_done"
-	StreamEventRawProvider StreamEventType = "raw_provider_event"
+	StreamEventPartStart    StreamEventType = "part_start"
+	StreamEventPartDelta    StreamEventType = "part_delta"
+	StreamEventPartDone     StreamEventType = "part_done"
+	StreamEventMessageDone  StreamEventType = "message_done"
+	StreamEventStepDone     StreamEventType = "step_done"
+	StreamEventTurnDone     StreamEventType = "turn_done"
+	StreamEventRawProvider  StreamEventType = "raw_provider_event"
+	StreamEventAttemptReset StreamEventType = "attempt_reset"
 )
+
+// AttemptReset carries retry attempt information for client side speculative buffer clearing.
+type AttemptReset struct {
+	Attempt  int    `json:"attempt"`
+	Cause    string `json:"cause,omitempty"`
+	Retrying bool   `json:"retrying"`
+}
 
 // ReplayMeta preserves replay metadata such as reasoning signatures.
 type ReplayMeta struct {
@@ -742,6 +750,7 @@ type StreamEvent struct {
 	Message   *Message        `json:"message,omitempty"`
 	*Response
 	RawProviderEvent json.RawMessage `json:"raw_provider_event,omitempty"`
+	AttemptReset     *AttemptReset   `json:"attempt_reset,omitempty"`
 }
 
 func StreamEventFromResponse(resp *Response) *StreamEvent {

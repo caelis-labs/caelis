@@ -108,6 +108,22 @@ func TestMainACPFinalCumulativeSuffixKeepsPreToolTextInPlace(t *testing.T) {
 	}
 }
 
+func TestMainACPClearActiveBuffersDropsSpeculativeNarrativeText(t *testing.T) {
+	block := NewMainACPTurnBlock("session-1")
+	block.AppendStreamChunk(SEReasoning, "failed thought")
+	block.AppendStreamChunk(SEAssistant, "failed answer")
+
+	block.ClearActiveBuffers()
+	block.AppendStreamChunk(SEAssistant, "retry answer")
+
+	if len(block.Events) != 1 {
+		t.Fatalf("events = %#v, want only retry narrative after reset", block.Events)
+	}
+	if block.Events[0].Kind != SEAssistant || block.Events[0].Text != "retry answer" {
+		t.Fatalf("retry event = %#v, want clean assistant retry text", block.Events[0])
+	}
+}
+
 func TestParticipantFinalCumulativeSuffixKeepsPreToolTextInPlace(t *testing.T) {
 	block := NewParticipantTurnBlock("session-1", "@self")
 	block.AppendStreamChunk(SEAssistant, "Before tool.")

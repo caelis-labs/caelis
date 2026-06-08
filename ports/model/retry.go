@@ -106,21 +106,35 @@ func (l *retryingLLM) Generate(ctx context.Context, req *Request) iter.Seq2[*Str
 			yield(nil, errors.New("model: llm is nil"))
 			return
 		}
+		hasProviderTool := hasProviderExecutedTools(req)
+
 		for attempt := 0; ; attempt++ {
-			emitted, stopped, err := l.runAttempt(ctx, req, yield)
+			committed, semanticDeltaEmitted, stopped, err := l.runAttempt(ctx, req, yield)
 			if stopped {
 				return
 			}
 			if err == nil {
 				return
 			}
-			policy := retryPolicyForError(l.cfg, err)
-			if emitted || !IsRetryableLLMError(err) {
+			cannotRetry := committed || (hasProviderTool && semanticDeltaEmitted)
+			if cannotRetry || !IsRetryableLLMError(err) {
 				yield(nil, err)
 				return
 			}
+			policy := retryPolicyForError(l.cfg, err)
 			if attempt >= policy.maxRetries {
 				yield(nil, retryExhaustedError(policy, err))
+				return
+			}
+			resetEvent := &StreamEvent{
+				Type: StreamEventAttemptReset,
+				AttemptReset: &AttemptReset{
+					Attempt:  attempt + 1,
+					Cause:    err.Error(),
+					Retrying: true,
+				},
+			}
+			if !yield(resetEvent, nil) {
 				return
 			}
 			if sleepErr := sleepRetryDelay(ctx, RetryDelayForAttempt(attempt, policy.baseDelay, policy.maxDelay)); sleepErr != nil {
@@ -131,22 +145,76 @@ func (l *retryingLLM) Generate(ctx context.Context, req *Request) iter.Seq2[*Str
 	}
 }
 
-func (l *retryingLLM) runAttempt(ctx context.Context, req *Request, yield func(*StreamEvent, error) bool) (bool, bool, error) {
-	emitted := false
+func (l *retryingLLM) runAttempt(ctx context.Context, req *Request, yield func(*StreamEvent, error) bool) (bool, bool, bool, error) {
+	committed := false
+	semanticDeltaEmitted := false
 	for event, err := range l.inner.Generate(ctx, CloneRequest(req)) {
 		if err != nil {
-			return emitted, false, err
+			return committed, semanticDeltaEmitted, false, err
 		}
 		if event != nil {
-			emitted = true
+			if hasStreamContent(event) {
+				semanticDeltaEmitted = true
+			}
+			if isFinalResponse(event) {
+				committed = true
+			}
 		} else {
 			continue
 		}
 		if !yield(event, nil) {
-			return emitted, true, nil
+			return committed, semanticDeltaEmitted, true, nil
 		}
 	}
-	return emitted, false, nil
+	return committed, semanticDeltaEmitted, false, nil
+}
+
+func hasProviderExecutedTools(req *Request) bool {
+	if req == nil {
+		return false
+	}
+	for _, spec := range req.Tools {
+		if spec.Kind == ToolSpecKindProviderExecuted || spec.ProviderExecuted != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func isFinalResponse(event *StreamEvent) bool {
+	if event == nil {
+		return false
+	}
+	if event.Response != nil {
+		if event.Response.TurnComplete || event.Response.StepComplete || event.Response.Status == ResponseStatusCompleted {
+			return true
+		}
+	}
+	switch event.Type {
+	case StreamEventMessageDone, StreamEventStepDone, StreamEventTurnDone:
+		return true
+	}
+	return false
+}
+
+func hasStreamContent(event *StreamEvent) bool {
+	if event == nil {
+		return false
+	}
+	if event.PartDelta != nil {
+		if event.PartDelta.TextDelta != "" || event.PartDelta.InputDelta != "" || event.PartDelta.Kind == PartKindToolUse {
+			return true
+		}
+	}
+	if event.Message != nil {
+		if len(event.Message.Parts) > 0 {
+			return true
+		}
+	}
+	if event.Response != nil {
+		return true
+	}
+	return false
 }
 
 func (l *retryingLLM) ProviderName() string {

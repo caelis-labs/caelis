@@ -232,14 +232,10 @@ func (r *Runtime) executeKernelTurn(
 	batch := make([]*session.Event, 0, 4)
 	userEvent := buildUserEvent(activeSession, turnID, req.Input, req.ContentParts)
 	if err := r.runWithOverflowRecovery(ctx, activeSession, ref, runID, turnID, req, userEvent, &batch, handle); err != nil {
-		stateErr := err
-		if replayErr := r.persistInterruptedAssistantReplay(context.WithoutCancel(ctx), activeSession, ref, turnID, batch, err); replayErr != nil {
-			stateErr = errors.Join(err, replayErr)
-		}
 		r.setRunState(ref.SessionID, agent.RunState{
 			Status:      interruptedOrFailedStatus(ctx, err),
 			ActiveRunID: runID,
-			LastError:   stateErr.Error(),
+			LastError:   err.Error(),
 			UpdatedAt:   r.now(),
 		})
 		handle.publishError(err)

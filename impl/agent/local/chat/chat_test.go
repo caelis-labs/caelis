@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"iter"
 	"maps"
 	"strings"
@@ -2554,5 +2555,154 @@ func (m *longToolLoopModel) Generate(_ context.Context, _ *model.Request) iter.S
 				FinishReason: model.FinishReasonStop,
 			},
 		}, nil)
+	}
+}
+
+type retryToolModel struct {
+	calls atomic.Int32
+}
+
+func (m *retryToolModel) Name() string { return "retry-tool-model" }
+
+func (m *retryToolModel) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
+	call := m.calls.Add(1)
+
+	return func(yield func(*model.StreamEvent, error) bool) {
+		if call >= 3 {
+			yield(&model.StreamEvent{
+				Type: model.StreamEventTurnDone,
+				Response: &model.Response{
+					Message:      model.NewTextMessage(model.RoleAssistant, "done"),
+					TurnComplete: true,
+					StepComplete: true,
+					Status:       model.ResponseStatusCompleted,
+					FinishReason: model.FinishReasonStop,
+				},
+			}, nil)
+			return
+		}
+
+		if call == 1 {
+			yield(&model.StreamEvent{
+				Type: model.StreamEventPartDelta,
+				PartDelta: &model.PartDelta{
+					Kind:       model.PartKindToolUse,
+					InputDelta: `{"value":`,
+				},
+			}, nil)
+			yield(nil, errors.New("providers: sse scanner: unexpected EOF"))
+			return
+		}
+
+		// call == 2
+		yield(&model.StreamEvent{
+			Type: model.StreamEventTurnDone,
+			Response: &model.Response{
+				Message: model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
+					ID:   "call-retry",
+					Name: "ECHO",
+					Args: `{"value":"retry-pong"}`,
+				}}, ""),
+				TurnComplete: true,
+				StepComplete: true,
+				Status:       model.ResponseStatusCompleted,
+				FinishReason: model.FinishReasonToolCalls,
+			},
+		}, nil)
+	}
+}
+
+func TestChatAgentSpeculativeToolCallRetry(t *testing.T) {
+	t.Parallel()
+
+	testModel := &retryToolModel{}
+	var toolCallsCount int
+	echoTool := tool.NamedTool{
+		Def: tool.Definition{
+			Name:        "ECHO",
+			Description: "echo input",
+			InputSchema: map[string]any{"type": "object"},
+		},
+		Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
+			toolCallsCount++
+			return tool.Result{
+				ID:   call.ID,
+				Name: call.Name,
+				Content: []model.Part{
+					model.NewJSONPart([]byte(`{"value":"retry-pong"}`)),
+				},
+			}, nil
+		},
+	}
+
+	retryingModel := model.WithRetry(testModel, model.RetryConfig{
+		MaxRetries: 2,
+		BaseDelay:  time.Nanosecond,
+		MaxDelay:   time.Nanosecond,
+	})
+
+	chatAgent, err := (Factory{SystemPrompt: "Use tools."}).NewAgent(context.Background(), agent.AgentSpec{
+		Name:  "chat",
+		Model: retryingModel,
+		Tools: []tool.Tool{echoTool},
+		Request: agent.ModelRequestOptions{
+			Stream: boolPtr(true),
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewAgent() error = %v", err)
+	}
+
+	ctx := agent.NewContext(agent.ContextSpec{
+		Context: context.Background(),
+		Session: session.Session{SessionRef: session.SessionRef{SessionID: "sess-retry-tool"}},
+		Events: []*session.Event{{
+			Type:    session.EventTypeUser,
+			Message: ptrMessage(model.NewTextMessage(model.RoleUser, "run")),
+			Text:    "run",
+		}},
+	})
+
+	var gotEvents []*session.Event
+	for event, runErr := range chatAgent.Run(ctx) {
+		if runErr != nil {
+			t.Fatalf("Run() error = %v", runErr)
+		}
+		if event != nil {
+			gotEvents = append(gotEvents, event)
+		}
+	}
+
+	if gotEvents == nil {
+		t.Fatal("gotEvents is nil")
+	}
+	if got, want := toolCallsCount, 1; got != want {
+		t.Fatalf("toolCallsCount = %d, want %d", got, want)
+	}
+	if got, want := int(testModel.calls.Load()), 3; got != want {
+		t.Fatalf("model calls = %d, want %d", got, want)
+	}
+
+	// Expected event stream:
+	// - partial tool call from the first attempt (not canonical)
+	// - attempt_reset (UI only)
+	// - successful tool_call from the retry (canonical)
+	// - matching tool_result (canonical)
+	var resetEventCount int
+	var canonicalToolCallsCount int
+	for _, ev := range gotEvents {
+		if ev.Type == session.EventTypeLifecycle && ev.Lifecycle != nil && ev.Lifecycle.Status == "attempt_reset" {
+			resetEventCount++
+		}
+		if ev.Type == session.EventTypeToolCall && ev.Visibility == session.VisibilityCanonical {
+			canonicalToolCallsCount++
+		}
+	}
+
+	if got, want := resetEventCount, 1; got != want {
+		t.Fatalf("resetEventCount = %d, want %d", got, want)
+	}
+	if got, want := canonicalToolCallsCount, 1; got != want {
+		t.Fatalf("canonicalToolCallsCount = %d, want %d", got, want)
 	}
 }
