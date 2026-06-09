@@ -225,7 +225,7 @@ func toolContinuesPreviousNarrative(events []SubagentEvent, idx int) bool {
 		return false
 	}
 	ev := events[idx]
-	if ev.Kind != SEToolCall || isTaskControlEvent(ev) || isCompactExplorationTool(ev) {
+	if ev.Kind != SEToolCall || isTaskControlEvent(ev) {
 		return false
 	}
 	return true

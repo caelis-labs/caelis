@@ -692,6 +692,33 @@ func TestGatewaySettledExplorationStepsStayInSingleExploredGroup(t *testing.T) {
 	}
 }
 
+func TestGatewayLiveExplorationCompletedToolStaysAttachedToReasoning(t *testing.T) {
+	model := newGatewayEventTestModel()
+	block := NewMainACPTurnBlock("root-session")
+	block.Events = append(block.Events,
+		SubagentEvent{Kind: SEReasoning, Text: "继续读取文件，找到 `extractExportClusterListData` 方法。"},
+		SubagentEvent{
+			Kind:   SEToolCall,
+			CallID: "read-oss-cluster",
+			Name:   "READ",
+			Args:   `D:\xue\code\storage\internal\service\oss_cluster.go`,
+			Output: "package service",
+			Done:   true,
+		},
+	)
+
+	rows := block.Render(BlockRenderContext{Width: 120, Height: 20, TermWidth: 120, Theme: model.theme})
+	plain := renderedPlainRows(rows)
+	reasoningIdx := indexPlainLineContaining(plain, "继续读取文件")
+	readIdx := indexPlainLineContaining(plain, "Read")
+	if reasoningIdx < 0 || readIdx < 0 {
+		t.Fatalf("rendered rows missing expected lines: %#v", plain)
+	}
+	if hasBlankLineBetween(plain, reasoningIdx, readIdx) {
+		t.Fatalf("completed exploration tool should stay attached to its live reasoning until the next step compacts it: %#v", plain)
+	}
+}
+
 func TestGatewayLiveExplorationKeepsCompletedPrefixCollapsed(t *testing.T) {
 	model := newGatewayEventTestModel()
 	block := NewMainACPTurnBlock("root-session")
