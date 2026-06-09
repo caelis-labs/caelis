@@ -31,7 +31,7 @@ func (Tool) Definition() tool.Definition {
 				"task_id": map[string]any{
 					"type":        "string",
 					"minLength":   1,
-					"description": "Yielded task handle.",
+					"description": "Yielded task handle. For action=wait or action=cancel, multiple handles may be separated by commas.",
 				},
 				"input": map[string]any{
 					"type":        "string",

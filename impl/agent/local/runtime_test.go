@@ -3164,6 +3164,182 @@ func TestRuntimeTaskWaitUsesDefaultYieldWhenOmitted(t *testing.T) {
 	}
 }
 
+func TestRuntimeTaskWaitAcceptsCommaSeparatedTaskIDs(t *testing.T) {
+	t.Parallel()
+
+	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
+	fakeOne := &yieldProbeSandboxRuntime{session: newYieldProbeSandboxSession()}
+	fakeTwo := &yieldProbeSandboxRuntime{session: newYieldProbeSandboxSession()}
+	taskOne := startProbeCommandTask(t, activeSession, runtime, fakeOne)
+	taskTwo := startProbeCommandTask(t, activeSession, runtime, fakeTwo)
+
+	taskResult := callRuntimeTaskTool(t, runtimeTaskTool{
+		base:       tasktool.New(),
+		sessionRef: activeSession.SessionRef,
+		tasks:      runtime.tasks,
+	}, map[string]any{
+		"action":        "wait",
+		"task_id":       taskOne + ", " + taskTwo,
+		"yield_time_ms": 125,
+	})
+
+	if fakeOne.session.lastWait > 125*time.Millisecond || fakeTwo.session.lastWait > 125*time.Millisecond {
+		t.Fatalf("wait durations = %v/%v, want both <=125ms", fakeOne.session.lastWait, fakeTwo.session.lastWait)
+	}
+	payload := testToolResultPayload(t, taskResult)
+	if got, _ := payload["action"].(string); got != "wait" {
+		t.Fatalf("payload[action] = %q, want wait", got)
+	}
+	tasks, _ := payload["tasks"].([]any)
+	if len(tasks) != 2 {
+		t.Fatalf("payload[tasks] = %#v, want 2 tasks", payload["tasks"])
+	}
+	toolMeta := testToolResultRuntimeMeta(t, taskResult, "tool")
+	if got := stringSliceFromAny(toolMeta["target_ids"]); !reflect.DeepEqual(got, []string{taskOne, taskTwo}) {
+		t.Fatalf("target_ids = %#v, want [%s %s]", toolMeta["target_ids"], taskOne, taskTwo)
+	}
+}
+
+func TestRuntimeTaskBatchWaitUsesSharedYieldBudget(t *testing.T) {
+	t.Parallel()
+
+	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
+	fakeOne := &yieldProbeSandboxRuntime{session: &yieldProbeSandboxSession{waitDelay: 35 * time.Millisecond}}
+	fakeTwo := &yieldProbeSandboxRuntime{session: newYieldProbeSandboxSession()}
+	taskOne := startProbeCommandTask(t, activeSession, runtime, fakeOne)
+	taskTwo := startProbeCommandTask(t, activeSession, runtime, fakeTwo)
+
+	_ = callRuntimeTaskTool(t, runtimeTaskTool{
+		base:       tasktool.New(),
+		sessionRef: activeSession.SessionRef,
+		tasks:      runtime.tasks,
+	}, map[string]any{
+		"action":        "wait",
+		"task_id":       taskOne + "," + taskTwo,
+		"yield_time_ms": 50,
+	})
+
+	if len(fakeOne.session.waitCalls) < 2 || len(fakeTwo.session.waitCalls) < 2 {
+		t.Fatalf("wait calls = %#v/%#v, want start and TASK wait calls", fakeOne.session.waitCalls, fakeTwo.session.waitCalls)
+	}
+	batchFirst := fakeOne.session.waitCalls[len(fakeOne.session.waitCalls)-1]
+	batchSecond := fakeTwo.session.waitCalls[len(fakeTwo.session.waitCalls)-1]
+	if batchFirst > 50*time.Millisecond || batchFirst < 40*time.Millisecond {
+		t.Fatalf("first batch wait = %v, want near 50ms", batchFirst)
+	}
+	if batchSecond >= 50*time.Millisecond {
+		t.Fatalf("second batch wait = %v, want remaining budget below 50ms", batchSecond)
+	}
+}
+
+func TestRuntimeTaskCancelAcceptsCommaSeparatedTaskIDs(t *testing.T) {
+	t.Parallel()
+
+	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
+	fakeOne := &yieldProbeSandboxRuntime{session: newYieldProbeSandboxSession()}
+	fakeTwo := &yieldProbeSandboxRuntime{session: newYieldProbeSandboxSession()}
+	taskOne := startProbeCommandTask(t, activeSession, runtime, fakeOne)
+	taskTwo := startProbeCommandTask(t, activeSession, runtime, fakeTwo)
+
+	taskResult := callRuntimeTaskTool(t, runtimeTaskTool{
+		base:       tasktool.New(),
+		sessionRef: activeSession.SessionRef,
+		tasks:      runtime.tasks,
+	}, map[string]any{
+		"action":  "cancel",
+		"task_id": taskOne + "," + taskTwo,
+	})
+
+	if !fakeOne.session.terminated || !fakeTwo.session.terminated {
+		t.Fatalf("terminated = %v/%v, want both true", fakeOne.session.terminated, fakeTwo.session.terminated)
+	}
+	payload := testToolResultPayload(t, taskResult)
+	if got, _ := payload["action"].(string); got != "cancel" {
+		t.Fatalf("payload[action] = %q, want cancel", got)
+	}
+	tasks, _ := payload["tasks"].([]any)
+	if len(tasks) != 2 {
+		t.Fatalf("payload[tasks] = %#v, want 2 tasks", payload["tasks"])
+	}
+	toolMeta := testToolResultRuntimeMeta(t, taskResult, "tool")
+	if got := stringSliceFromAny(toolMeta["target_ids"]); !reflect.DeepEqual(got, []string{taskOne, taskTwo}) {
+		t.Fatalf("target_ids = %#v, want [%s %s]", toolMeta["target_ids"], taskOne, taskTwo)
+	}
+}
+
+func TestRuntimeTaskBatchCancelReturnsPartialFailurePayload(t *testing.T) {
+	t.Parallel()
+
+	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
+	fakeOne := &yieldProbeSandboxRuntime{session: newYieldProbeSandboxSession()}
+	taskOne := startProbeCommandTask(t, activeSession, runtime, fakeOne)
+
+	taskResult := callRuntimeTaskTool(t, runtimeTaskTool{
+		base:       tasktool.New(),
+		sessionRef: activeSession.SessionRef,
+		tasks:      runtime.tasks,
+	}, map[string]any{
+		"action":  "cancel",
+		"task_id": taskOne + ",stale-id",
+	})
+
+	if !fakeOne.session.terminated {
+		t.Fatal("first task was not cancelled before stale-id failure")
+	}
+	if !taskResult.IsError {
+		t.Fatal("batch cancel partial failure IsError = false, want true")
+	}
+	payload := testToolResultPayload(t, taskResult)
+	if got, _ := payload["failed"].(float64); got != 1 {
+		t.Fatalf("payload[failed] = %#v, want 1", payload["failed"])
+	}
+	tasks, _ := payload["tasks"].([]any)
+	if len(tasks) != 2 {
+		t.Fatalf("payload[tasks] = %#v, want success and error entries", payload["tasks"])
+	}
+	second, _ := tasks[1].(map[string]any)
+	if got, _ := second["task_id"].(string); got != "stale-id" {
+		t.Fatalf("second task_id = %q, want stale-id", got)
+	}
+	if errText, _ := second["error"].(string); !strings.Contains(errText, "not found") {
+		t.Fatalf("second error = %q, want not found", errText)
+	}
+	toolMeta := testToolResultRuntimeMeta(t, taskResult, "tool")
+	if got := stringSliceFromAny(toolMeta["target_ids"]); !reflect.DeepEqual(got, []string{taskOne, "stale-id"}) {
+		t.Fatalf("target_ids = %#v, want [%s stale-id]", toolMeta["target_ids"], taskOne)
+	}
+	if got := toolMeta["failed_count"]; got != 1 {
+		t.Fatalf("failed_count = %#v, want 1", got)
+	}
+}
+
+func TestRuntimeTaskWriteRejectsCommaSeparatedTaskIDs(t *testing.T) {
+	t.Parallel()
+
+	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
+	fakeOne := &yieldProbeSandboxRuntime{session: newYieldProbeSandboxSession()}
+	fakeTwo := &yieldProbeSandboxRuntime{session: newYieldProbeSandboxSession()}
+	taskOne := startProbeCommandTask(t, activeSession, runtime, fakeOne)
+	taskTwo := startProbeCommandTask(t, activeSession, runtime, fakeTwo)
+
+	raw, err := json.Marshal(map[string]any{
+		"action":  "write",
+		"task_id": taskOne + "," + taskTwo,
+		"input":   "hello",
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	_, err = (runtimeTaskTool{
+		base:       tasktool.New(),
+		sessionRef: activeSession.SessionRef,
+		tasks:      runtime.tasks,
+	}).Call(context.Background(), tool.Call{ID: "task-write", Name: tasktool.ToolName, Input: raw})
+	if err == nil || !strings.Contains(err.Error(), "TASK write supports one task_id") {
+		t.Fatalf("TASK write batch error = %v, want single-task rejection", err)
+	}
+}
+
 func TestRuntimeTaskWaitKeepsExplicitZeroYield(t *testing.T) {
 	t.Parallel()
 

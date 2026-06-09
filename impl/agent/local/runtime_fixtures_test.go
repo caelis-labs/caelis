@@ -1512,6 +1512,8 @@ type yieldProbeSandboxSession struct {
 	workdir       string
 	timeout       time.Duration
 	lastWait      time.Duration
+	waitCalls     []time.Duration
+	waitDelay     time.Duration
 	waitErr       error
 	statusRunning *bool
 	terminated    bool
@@ -1567,6 +1569,10 @@ func (s *yieldProbeSandboxSession) Status(context.Context) (sandbox.SessionStatu
 
 func (s *yieldProbeSandboxSession) Wait(_ context.Context, timeout time.Duration) (sandbox.SessionStatus, error) {
 	s.lastWait = timeout
+	s.waitCalls = append(s.waitCalls, timeout)
+	if s.waitDelay > 0 {
+		time.Sleep(s.waitDelay)
+	}
 	if s.waitErr != nil {
 		return sandbox.SessionStatus{}, s.waitErr
 	}
@@ -1737,6 +1743,26 @@ func callRuntimeRunCommandTool(t *testing.T, runCommandTool runtimeCommandTool, 
 	return result
 }
 
+func startProbeCommandTask(t *testing.T, activeSession session.Session, runtime *Runtime, fake *yieldProbeSandboxRuntime) string {
+	t.Helper()
+
+	result := callRuntimeRunCommandTool(t, runtimeCommandTool{
+		base:       mustRuntimeRunCommandTool(t, fake),
+		session:    session.CloneSession(activeSession),
+		sessionRef: activeSession.SessionRef,
+		tasks:      runtime.tasks,
+	}, map[string]any{
+		"command":       "printf 'ok'",
+		"workdir":       activeSession.CWD,
+		"yield_time_ms": 0,
+	})
+	taskID, _ := testToolResultRuntimeMeta(t, result, "task")["task_id"].(string)
+	if strings.TrimSpace(taskID) == "" {
+		t.Fatalf("command result metadata = %#v, want task_id", result.Metadata)
+	}
+	return taskID
+}
+
 func callRuntimeTaskTool(t *testing.T, taskTool runtimeTaskTool, args map[string]any) tool.Result {
 	t.Helper()
 
@@ -1753,6 +1779,24 @@ func callRuntimeTaskTool(t *testing.T, taskTool runtimeTaskTool, args map[string
 		t.Fatalf("taskTool.Call() error = %v", err)
 	}
 	return result
+}
+
+func stringSliceFromAny(raw any) []string {
+	switch values := raw.(type) {
+	case []string:
+		return append([]string(nil), values...)
+	case []any:
+		out := make([]string, 0, len(values))
+		for _, value := range values {
+			text, _ := value.(string)
+			if strings.TrimSpace(text) != "" {
+				out = append(out, strings.TrimSpace(text))
+			}
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 func testToolResultPayload(t *testing.T, result tool.Result) map[string]any {

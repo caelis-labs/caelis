@@ -61,6 +61,25 @@ func taskControlSnapshotToolResult(call tool.Call, def tool.Definition, snapshot
 	return taskSnapshotToolResult(call, def, snapshot)
 }
 
+type taskBatchControlItem struct {
+	TaskID   string
+	Snapshot taskapi.Snapshot
+	Err      error
+	OK       bool
+}
+
+func taskBatchControlToolResult(call tool.Call, def tool.Definition, items []taskBatchControlItem, action string) tool.Result {
+	payload := taskBatchControlPayload(items, action)
+	payload, _ = tool.TruncateMap(payload, tool.DefaultTruncationPolicy())
+	raw, _ := json.Marshal(payload)
+	return tool.Result{
+		ID:      strings.TrimSpace(call.ID),
+		Name:    strings.TrimSpace(def.Name),
+		Content: []model.Part{model.NewJSONPart(raw)},
+		IsError: taskBatchHasError(items),
+	}
+}
+
 func taskSnapshotToolResultWithPayload(call tool.Call, def tool.Definition, snapshot taskapi.Snapshot, payload map[string]any) tool.Result {
 	if payload == nil {
 		payload = map[string]any{}
@@ -74,6 +93,46 @@ func taskSnapshotToolResultWithPayload(call tool.Call, def tool.Definition, snap
 		Content:  []model.Part{model.NewJSONPart(raw)},
 		Metadata: meta,
 	}
+}
+
+func taskBatchControlPayload(items []taskBatchControlItem, action string) map[string]any {
+	tasks := make([]any, 0, len(items))
+	for _, item := range items {
+		if item.Err != nil {
+			tasks = append(tasks, map[string]any{
+				"task_id": strings.TrimSpace(item.TaskID),
+				"error":   item.Err.Error(),
+			})
+			continue
+		}
+		var payload map[string]any
+		if strings.EqualFold(strings.TrimSpace(action), "cancel") {
+			payload = taskCancelToolPayload(item.Snapshot)
+		} else {
+			payload = taskToolPayload(item.Snapshot)
+		}
+		tasks = append(tasks, payload)
+	}
+	return map[string]any{
+		"action": strings.ToLower(strings.TrimSpace(action)),
+		"count":  len(tasks),
+		"failed": taskBatchErrorCount(items),
+		"tasks":  tasks,
+	}
+}
+
+func taskBatchHasError(items []taskBatchControlItem) bool {
+	return taskBatchErrorCount(items) > 0
+}
+
+func taskBatchErrorCount(items []taskBatchControlItem) int {
+	count := 0
+	for _, item := range items {
+		if item.Err != nil {
+			count++
+		}
+	}
+	return count
 }
 
 func taskCancelToolPayload(snapshot taskapi.Snapshot) map[string]any {
