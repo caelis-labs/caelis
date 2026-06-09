@@ -165,18 +165,6 @@ func formatSessionTokenUsageStatus(status control.StatusSnapshot) string {
 		}
 		rows = append(rows, tokenUsageStatusRow{scope: modelUsageStatusLabel(item), usage: usage})
 	}
-	main := normalizedUsageSnapshot(status.SessionUsageMain)
-	subagents := normalizedUsageSnapshot(status.SessionUsageSubagents)
-	autoReview := normalizedUsageSnapshot(status.SessionUsageAutoReview)
-	if !usageSnapshotZero(main) {
-		rows = append(rows, tokenUsageStatusRow{scope: "main", usage: main})
-	}
-	if !usageSnapshotZero(subagents) {
-		rows = append(rows, tokenUsageStatusRow{scope: "sub-agent", usage: subagents})
-	}
-	if !usageSnapshotZero(autoReview) {
-		rows = append(rows, tokenUsageStatusRow{scope: "auto-review", usage: autoReview})
-	}
 	return formatTokenUsageTable(rows)
 }
 
