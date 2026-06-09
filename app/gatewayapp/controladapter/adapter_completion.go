@@ -150,6 +150,8 @@ func (d *Adapter) CompleteSlashArg(ctx context.Context, command string, query st
 		return d.completeAgentProfiles(ctx, query, limit)
 	case "model use", "model del":
 		return d.completeModelAliases(ctx, query, limit)
+	case "plugin enable", "plugin disable", "plugin remove", "plugin inspect":
+		return d.completePluginIDs(ctx, query, limit)
 	case "connect":
 		return completeConnectArgs(ctx, d, "connect", query, limit)
 	}
@@ -961,4 +963,26 @@ func hasSlashArgPrefix(query string, values ...string) bool {
 		}
 	}
 	return false
+}
+
+func (d *Adapter) completePluginIDs(ctx context.Context, query string, limit int) ([]SlashArgCandidate, error) {
+	plugins, err := d.stack.ListPlugins(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]SlashArgCandidate, 0, min(limit, len(plugins)))
+	for _, p := range plugins {
+		if query != "" && !hasSlashArgPrefix(query, p.ID, p.Name, p.Description) {
+			continue
+		}
+		out = append(out, SlashArgCandidate{
+			Value:   p.ID,
+			Display: p.ID,
+			Detail:  p.Name,
+		})
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
 }

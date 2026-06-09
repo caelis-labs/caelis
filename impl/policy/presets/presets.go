@@ -12,6 +12,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/policy"
 	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/OnslaughtSnail/caelis/ports/tool"
 )
 
 const (
@@ -66,10 +67,21 @@ func WorkspaceWriteMode() policy.Mode {
 			case "RUN_COMMAND":
 				return decideCommand(input, def, "workspace-write policy")
 			default:
+				if isMCPTool(input) {
+					return allow(def), nil
+				}
 				return deny(fmt.Sprintf("tool %q is not allowed in workspace-write policy", input.Tool.Name)), nil
 			}
 		},
 	}
+}
+
+func isMCPTool(input policy.ToolContext) bool {
+	if len(input.Tool.Metadata) == 0 {
+		return false
+	}
+	kind, _ := input.Tool.Metadata[tool.MetadataToolKind].(string)
+	return strings.EqualFold(strings.TrimSpace(kind), tool.MetadataToolKindMCP)
 }
 
 func AutoReviewMode() policy.Mode {

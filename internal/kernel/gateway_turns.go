@@ -2,10 +2,14 @@ package kernel
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
 
+	"github.com/OnslaughtSnail/caelis/internal/kernel/hooks"
 	"github.com/OnslaughtSnail/caelis/ports/agent"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	policyapi "github.com/OnslaughtSnail/caelis/ports/policy"
@@ -47,6 +51,15 @@ func (g *Gateway) BeginTurn(ctx context.Context, req BeginTurnRequest) (BeginTur
 	})
 	g.active[session.SessionID] = handle
 	g.mu.Unlock()
+
+	// Dispatch SessionStart hooks before resolving the first model invocation.
+	// Hook outputs are persisted as plugin context hints, not provider system messages.
+	if err := g.dispatchSessionStartHooks(ctx, session, handle); err != nil {
+		cancelFn()
+		handle.finish()
+		g.releaseActive(session.SessionID, handle)
+		return BeginTurnResult{}, fmt.Errorf("gateway: failed to dispatch SessionStart hooks: %w", err)
+	}
 
 	resolved, err := g.resolveBeginTurn(ctx, session, req)
 	if err != nil {
@@ -241,4 +254,162 @@ func (g *Gateway) runParticipantTurn(
 		handle.publishSessionEvent(event)
 		g.noteSessionCursor(session.SessionID, event.ID)
 	}
+}
+
+func (g *Gateway) dispatchSessionStartHooks(ctx context.Context, sessionObj session.Session, handle *turnHandle) error {
+	if len(g.sessionStartHooks) == 0 {
+		return nil
+	}
+
+	for _, hook := range g.sessionStartHooks {
+		// Calculate the digest of the full hook configuration
+		hookBytes, err := json.Marshal(hook)
+		if err != nil {
+			return fmt.Errorf("plugin hooks: failed to marshal HookSpec: %w", err)
+		}
+		hasher := sha256.New()
+		hasher.Write(hookBytes)
+		digest := hex.EncodeToString(hasher.Sum(nil))
+
+		stateKey := fmt.Sprintf("plugin.hooks.session_start.v1.%s.%s", hook.PluginID, digest)
+
+		// Check if it has already been executed in this session
+		state, err := g.sessions.SnapshotState(ctx, sessionObj.SessionRef)
+		if err != nil {
+			return fmt.Errorf("plugin hooks: failed to snapshot session state: %w", err)
+		}
+		if val, ok := state[stateKey].(bool); ok && val {
+			continue
+		}
+
+		// Fallback check: scan session events to ensure exactly-once even if state update failed.
+		// A hook has successfully run and persisted its output if we find a corresponding plugin context event.
+		events, err := g.sessions.Events(ctx, session.EventsRequest{
+			SessionRef:       sessionObj.SessionRef,
+			IncludeTransient: true,
+		})
+		if err != nil {
+			return fmt.Errorf("plugin hooks: failed to list session events: %w", err)
+		}
+		alreadyRun := false
+		for _, ev := range events {
+			meta := ev.Meta
+			if meta["plugin_id"] == hook.PluginID && meta["event"] == "SessionStart" && meta["digest"] == digest && meta["source"] == "plugin_hook" {
+				alreadyRun = true
+				break
+			}
+		}
+		if alreadyRun {
+			// Best-effort backfill session state key to avoid event scans on subsequent turns
+			_ = g.sessions.UpdateState(ctx, sessionObj.SessionRef, func(state map[string]any) (map[string]any, error) {
+				if state == nil {
+					state = make(map[string]any)
+				}
+				state[stateKey] = true
+				return state, nil
+			})
+			continue
+		}
+
+		// Run the hook
+		res := hooks.Run(ctx, hook, sessionObj.SessionRef, sessionObj.CWD)
+
+		if res.Error != nil || res.ExitCode != 0 {
+			errMsg := ""
+			if res.Error != nil {
+				errMsg = res.Error.Error()
+			}
+			stderrSummary := strings.TrimSpace(res.Stderr)
+			if len(stderrSummary) > 200 {
+				stderrSummary = stderrSummary[:200] + "..."
+			}
+			lifecycleEvent := &session.Event{
+				Type:       session.EventTypeLifecycle,
+				Visibility: session.VisibilityCanonical,
+				Meta: map[string]any{
+					"plugin_id": hook.PluginID,
+					"event":     "SessionStart",
+					"digest":    digest,
+					"source":    "plugin_hook",
+				},
+				Lifecycle: &session.EventLifecycle{
+					Status: "failed",
+					Reason: fmt.Sprintf("SessionStart hook for plugin %q failed", hook.PluginID),
+					Meta: map[string]any{
+						"plugin_id": hook.PluginID,
+						"event":     "SessionStart",
+						"exit_code": res.ExitCode,
+						"error":     errMsg,
+						"stderr":    stderrSummary,
+					},
+				},
+			}
+			if appendedEvent, appendErr := g.sessions.AppendEvent(ctx, session.AppendEventRequest{
+				SessionRef: sessionObj.SessionRef,
+				Event:      lifecycleEvent,
+			}); appendErr == nil {
+				handle.publishSessionEvent(appendedEvent)
+				g.noteSessionCursor(sessionObj.SessionID, appendedEvent.ID)
+			}
+
+			if err := g.markSessionStartHookExecuted(ctx, sessionObj.SessionRef, stateKey); err != nil {
+				return fmt.Errorf("plugin hooks: failed to update session state: %w", err)
+			}
+			continue
+		}
+
+		stdoutTrimmed := strings.TrimSpace(res.Stdout)
+		vis := session.VisibilityCanonical
+		text := ""
+		if stdoutTrimmed == "" {
+			vis = session.VisibilityMirror
+		} else {
+			text = fmt.Sprintf("[Plugin context: %s]\n%s", hook.PluginID, stdoutTrimmed)
+			if res.StdoutTruncated {
+				text += "\n[Plugin context output truncated]"
+			}
+		}
+		message := model.NewTextMessage(model.RoleUser, text)
+		pluginContextEvent := &session.Event{
+			Type:       session.EventTypeCustom,
+			Visibility: vis,
+			Message:    &message,
+			Text:       text,
+			Actor:      session.ActorRef{Kind: session.ActorKindSystem, Name: "plugin"},
+			Meta: map[string]any{
+				"plugin_id":              hook.PluginID,
+				"event":                  "SessionStart",
+				"digest":                 digest,
+				"source":                 "plugin_hook",
+				"model_context_role":     string(model.RoleUser),
+				"hidden_from_transcript": true,
+				"truncated":              res.StdoutTruncated,
+			},
+		}
+		appendedEvent, err := g.sessions.AppendEvent(ctx, session.AppendEventRequest{
+			SessionRef: sessionObj.SessionRef,
+			Event:      pluginContextEvent,
+		})
+		if err != nil {
+			return fmt.Errorf("plugin hooks: failed to append plugin context event: %w", err)
+		}
+		handle.publishSessionEvent(appendedEvent)
+		g.noteSessionCursor(sessionObj.SessionID, appendedEvent.ID)
+
+		if err := g.markSessionStartHookExecuted(ctx, sessionObj.SessionRef, stateKey); err != nil {
+			return fmt.Errorf("plugin hooks: failed to update session state: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func (g *Gateway) markSessionStartHookExecuted(ctx context.Context, ref session.SessionRef, stateKey string) error {
+	return g.sessions.UpdateState(ctx, ref, func(state map[string]any) (map[string]any, error) {
+		if state == nil {
+			state = make(map[string]any)
+		}
+		state[stateKey] = true
+		return state, nil
+	})
 }

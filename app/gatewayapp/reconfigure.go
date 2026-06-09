@@ -5,12 +5,16 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/pluginregistry"
 	"github.com/OnslaughtSnail/caelis/impl/agent/local"
 	"github.com/OnslaughtSnail/caelis/impl/agent/local/chat"
 	"github.com/OnslaughtSnail/caelis/impl/approval/agentreview"
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin"
+	"github.com/OnslaughtSnail/caelis/impl/tool/mcp"
 	kernelimpl "github.com/OnslaughtSnail/caelis/internal/kernel"
 	"github.com/OnslaughtSnail/caelis/internal/sandboxrouter"
+	"github.com/OnslaughtSnail/caelis/ports/assembly"
+	"github.com/OnslaughtSnail/caelis/ports/plugin"
 	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
@@ -58,6 +62,43 @@ func (s *Stack) rebuildGateway() error {
 	sandboxCfg := effectiveSandboxConfig(s.sandbox, s.Workspace.CWD)
 	runtimeCfg := s.runtime
 	s.mu.RUnlock()
+
+	doc, err := s.store.Load()
+	if err != nil {
+		return err
+	}
+	var sessionStartHooks []plugin.HookSpec
+	var mcpServerSpecs []plugin.MCPServerSpec
+	skillDirs := DefaultSkillDiscoveryDirs(s.Workspace.CWD)
+	for _, pCfg := range doc.Plugins {
+		if !pCfg.Enabled {
+			continue
+		}
+		p, err := pluginregistry.ParsePlugin(pCfg.Root)
+		if err != nil {
+			return fmt.Errorf("gatewayapp: parse enabled plugin %q failed: %w", pCfg.ID, err)
+		}
+		for _, hook := range p.Hooks {
+			if hook.Event == plugin.HookEventSessionStart {
+				sessionStartHooks = append(sessionStartHooks, hook)
+			}
+		}
+		for _, sc := range p.Skills {
+			skillDirs = append(skillDirs, sc.Root)
+		}
+		mcpServerSpecs = append(mcpServerSpecs, p.MCPServers...)
+	}
+	configuredAssembly, err := s.configuredAssembly(runtimeCfg.BaseAssembly, doc.Agents, doc.Plugins, runtimeCfg)
+	if err != nil {
+		return err
+	}
+	runtimeCfg.Assembly = configuredAssembly
+	runtimeCfg.Plugins = clonePluginConfigs(doc.Plugins)
+	baseMetadata, err := buildStackBaseMetadata(s.AppName, s.Workspace.CWD, runtimeCfg.SystemPrompt, runtimeCfg.Model, sandboxCfg, skillDirs)
+	if err != nil {
+		return err
+	}
+	runtimeCfg.BaseMetadata = baseMetadata
 	if err := rejectReconfigureWithActiveTurns(oldGateway, "rebuild gateway"); err != nil {
 		return err
 	}
@@ -79,6 +120,13 @@ func (s *Stack) rebuildGateway() error {
 	if err != nil {
 		return err
 	}
+
+	mcpMgr, err := mcp.NewManager(context.Background(), mcpServerSpecs)
+	if err != nil {
+		_ = sandboxRuntime.Close()
+		return fmt.Errorf("gatewayapp: failed to initialize MCP servers: %w", err)
+	}
+
 	effectivePolicyProfile := policyProfile(runtimeCfg.PolicyProfile)
 	effectiveBaseMetadata := cloneMap(runtimeCfg.BaseMetadata)
 	sandboxStatus := sandbox.SelectionStatus(sandboxRuntime)
@@ -96,8 +144,11 @@ func (s *Stack) rebuildGateway() error {
 	tools, err := builtin.BuildCoreTools(builtin.CoreToolsConfig{Runtime: sandboxRuntime})
 	if err != nil {
 		_ = sandboxRuntime.Close()
+		_ = mcpMgr.Close()
 		return err
 	}
+	tools = append(tools, mcpMgr.Tools()...)
+
 	estimatedPrefixTokens := estimateModelPromptPrefixTokens(effectiveBaseMetadata, tools)
 	compactionCfg := defaultCompactionConfig(runtimeCfg.ContextWindow)
 	compactionCfg.EstimatedPromptPrefixTokens = estimatedPrefixTokens
@@ -111,6 +162,7 @@ func (s *Stack) rebuildGateway() error {
 	})
 	if err != nil {
 		_ = sandboxRuntime.Close()
+		_ = mcpMgr.Close()
 		return err
 	}
 	resolver, err := kernelimpl.NewAssemblyResolver(kernelimpl.AssemblyResolverConfig{
@@ -149,6 +201,7 @@ func (s *Stack) rebuildGateway() error {
 	})
 	if err != nil {
 		_ = sandboxRuntime.Close()
+		_ = mcpMgr.Close()
 		return err
 	}
 	gw, err := kernelimpl.New(kernelimpl.Config{
@@ -157,26 +210,37 @@ func (s *Stack) rebuildGateway() error {
 		Resolver:            resolver,
 		DefaultApprovalMode: kernelimpl.NormalizeApprovalMode(runtimeCfg.ApprovalMode),
 		ApprovalApprover:    agentreview.Approver{Reviewer: s.newModelApprovalReviewer()},
+		SessionStartHooks:   sessionStartHooks,
 	})
 	if err != nil {
 		_ = sandboxRuntime.Close()
+		_ = mcpMgr.Close()
 		return err
 	}
 	if err := rejectReconfigureWithActiveTurns(oldGateway, "rebuild gateway"); err != nil {
 		_ = sandboxRuntime.Close()
+		_ = mcpMgr.Close()
 		return err
 	}
 	s.mu.Lock()
 	oldExec := s.exec
+	oldMcpMgr := s.mcpMgr
 	currentRuntime := s.runtime
+	currentRuntime.Assembly = assembly.CloneResolvedAssembly(runtimeCfg.Assembly)
+	currentRuntime.Plugins = clonePluginConfigs(runtimeCfg.Plugins)
+	currentRuntime.BaseMetadata = cloneMap(runtimeCfg.BaseMetadata)
 	currentRuntime.EstimatedPromptPrefixTokens = estimatedPrefixTokens
 	s.runtime = currentRuntime
 	s.gateway = gw
 	s.exec = sandboxRuntime
 	s.engine = rt
+	s.mcpMgr = mcpMgr
 	s.mu.Unlock()
 	if oldExec != nil {
 		_ = oldExec.Close()
+	}
+	if oldMcpMgr != nil {
+		_ = oldMcpMgr.Close()
 	}
 	return nil
 }

@@ -134,6 +134,11 @@ func TestRegressionChatInvalidToolCallRetryTrace(t *testing.T) {
 	want := `[
   {
     "visibility": "ui_only",
+    "type": "lifecycle",
+    "text": "model attempt reset"
+  },
+  {
+    "visibility": "ui_only",
     "type": "assistant",
     "role": "assistant",
     "text": "All checks pass. Now let me commit."

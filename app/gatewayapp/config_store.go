@@ -12,10 +12,12 @@ type SandboxConfig = configstore.SandboxConfig
 type RuntimeConfig = configstore.RuntimeConfig
 type AgentProviderConfig = configstore.AgentProviderConfig
 type persistedModelConfig = configstore.PersistedModelConfig
+type PluginConfig = configstore.PluginConfig
 
 type appConfigStore struct {
-	path  string
-	inner *configstore.Store
+	path     string
+	inner    *configstore.Store
+	saveHook func(AppConfig) error
 }
 
 func newAppConfigStore(root string) *appConfigStore {
@@ -44,6 +46,11 @@ func (s *appConfigStore) Load() (AppConfig, error) {
 func (s *appConfigStore) Save(doc AppConfig) error {
 	if s == nil || s.inner == nil {
 		return nil
+	}
+	if s.saveHook != nil {
+		if err := s.saveHook(doc); err != nil {
+			return err
+		}
 	}
 	s.inner.SetPath(s.path)
 	return s.inner.Save(doc)

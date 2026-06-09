@@ -22,6 +22,18 @@ type AppConfig struct {
 	AgentBindings  agentprofile.BindingSet `json:"agent_bindings,omitempty"`
 	Sandbox        SandboxConfig           `json:"sandbox,omitempty"`
 	Runtime        RuntimeConfig           `json:"runtime,omitempty"`
+	Plugins        []PluginConfig          `json:"plugins,omitempty"`
+}
+
+type PluginConfig struct {
+	ID          string `json:"id,omitempty"`
+	Name        string `json:"name,omitempty"`
+	Root        string `json:"root,omitempty"`
+	Manifest    string `json:"manifest,omitempty"`
+	Kind        string `json:"kind,omitempty"`
+	Enabled     bool   `json:"enabled"`
+	Version     string `json:"version,omitempty"`
+	Description string `json:"description,omitempty"`
 }
 
 type AgentConfig struct {
@@ -123,6 +135,7 @@ func (s *Store) loadUnlocked() (AppConfig, error) {
 		doc.AgentBindings = agentprofile.NormalizeBindingSet(doc.AgentBindings)
 		doc.Sandbox = NormalizeSandboxConfig(doc.Sandbox)
 		doc.Runtime = NormalizeRuntimeConfig(doc.Runtime)
+		doc.Plugins = DedupePluginConfigs(doc.Plugins)
 		return doc, nil
 	}
 	if !os.IsNotExist(err) {
@@ -144,6 +157,7 @@ func (s *Store) Save(doc AppConfig) error {
 	doc.AgentBindings = agentprofile.NormalizeBindingSet(doc.AgentBindings)
 	doc.Sandbox = DefaultSandboxConfig(doc.Sandbox)
 	doc.Runtime = NormalizeRuntimeConfig(doc.Runtime)
+	doc.Plugins = DedupePluginConfigs(doc.Plugins)
 	dir := filepath.Dir(s.path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
@@ -469,5 +483,38 @@ func DedupeStrings(values []string) []string {
 		seen[key] = struct{}{}
 		out = append(out, trimmed)
 	}
+	return out
+}
+
+func DedupePluginConfigs(configs []PluginConfig) []PluginConfig {
+	if len(configs) == 0 {
+		return nil
+	}
+	out := make([]PluginConfig, 0, len(configs))
+	seen := make(map[string]struct{}, len(configs))
+	for _, cfg := range configs {
+		cfg = NormalizePluginConfig(cfg)
+		if cfg.ID == "" {
+			continue
+		}
+		key := strings.ToLower(strings.TrimSpace(cfg.ID))
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, cfg)
+	}
+	return out
+}
+
+func NormalizePluginConfig(in PluginConfig) PluginConfig {
+	out := in
+	out.ID = strings.ToLower(strings.TrimSpace(in.ID))
+	out.Name = strings.TrimSpace(in.Name)
+	out.Root = strings.TrimSpace(in.Root)
+	out.Manifest = strings.TrimSpace(in.Manifest)
+	out.Kind = strings.ToLower(strings.TrimSpace(in.Kind))
+	out.Version = strings.TrimSpace(in.Version)
+	out.Description = strings.TrimSpace(in.Description)
 	return out
 }

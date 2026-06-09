@@ -401,3 +401,40 @@ func readConfigFileForTest(t *testing.T, root string) string {
 	}
 	return string(data)
 }
+
+func TestAppConfigStoreCanPersistPlugins(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := newAppConfigStore(root)
+	err := store.Save(AppConfig{
+		Plugins: []PluginConfig{
+			{
+				ID:          "superpowers",
+				Name:        "Superpowers",
+				Root:        "/some/root/superpowers",
+				Manifest:    "/some/root/superpowers/gemini-extension.json",
+				Kind:        "gemini",
+				Enabled:     true,
+				Version:     "5.1.0",
+				Description: "A great plugin",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	doc, err := store.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if len(doc.Plugins) != 1 {
+		t.Fatalf("len(doc.Plugins) = %d, want 1", len(doc.Plugins))
+	}
+	p := doc.Plugins[0]
+	if p.ID != "superpowers" || p.Name != "Superpowers" || p.Root != "/some/root/superpowers" || p.Kind != "gemini" || !p.Enabled {
+		t.Errorf("unexpected plugin persisted contents: %+v", p)
+	}
+}

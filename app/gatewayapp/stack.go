@@ -2,15 +2,18 @@ package gatewayapp
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/modelregistry"
+	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/pluginregistry"
 	"github.com/OnslaughtSnail/caelis/impl/agent/local"
 	sessionfile "github.com/OnslaughtSnail/caelis/impl/session/file"
 	taskfile "github.com/OnslaughtSnail/caelis/impl/task/file"
+	"github.com/OnslaughtSnail/caelis/impl/tool/mcp"
 	kernelimpl "github.com/OnslaughtSnail/caelis/internal/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/agent"
 	"github.com/OnslaughtSnail/caelis/ports/assembly"
@@ -61,6 +64,7 @@ type Stack struct {
 	engine        *local.Runtime
 	taskStore     *taskfile.Store
 	gateway       *kernelimpl.Gateway
+	mcpMgr        *mcp.Manager
 }
 
 func (s *Stack) CurrentGateway() GatewayRuntime {
@@ -167,22 +171,14 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		return nil, err
 	}
 	sandboxCfg := mergeSandboxConfig(doc.Sandbox, cfg.Sandbox)
-	baseMetadata := map[string]any{}
-	systemPrompt, err := buildSystemPrompt(promptConfig{
-		AppName:      appName,
-		WorkspaceDir: workspaceCWD,
-		BasePrompt:   cfg.SystemPrompt,
-	})
+	skillDirs, err := pluginSkillDirsFromConfig(workspaceCWD, doc.Plugins)
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(systemPrompt) != "" {
-		baseMetadata["system_prompt"] = systemPrompt
+	baseMetadata, err := buildStackBaseMetadata(appName, workspaceCWD, cfg.SystemPrompt, cfg.Model, sandboxCfg, skillDirs)
+	if err != nil {
+		return nil, err
 	}
-	if reasoning := strings.TrimSpace(cfg.Model.ReasoningEffort); reasoning != "" {
-		baseMetadata["reasoning_effort"] = reasoning
-	}
-	baseMetadata = withSandboxPolicyRootMetadata(baseMetadata, sandboxCfg, workspaceCWD)
 	stack := &Stack{
 		Sessions: sessions,
 		AppName:  appName,
@@ -202,13 +198,14 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 			ContextWindow:  cfg.ContextWindow,
 			SystemPrompt:   cfg.SystemPrompt,
 			Model:          cfg.Model,
+			Plugins:        clonePluginConfigs(doc.Plugins),
 			BaseAssembly:   baseAssembly,
 			Assembly:       assembly.CloneResolvedAssembly(baseAssembly),
 			BaseMetadata:   cloneMap(baseMetadata),
 		},
 		sandbox: sandboxCfg,
 	}
-	configuredAssembly, err := stack.configuredAssembly(baseAssembly, doc.Agents, stack.runtime)
+	configuredAssembly, err := stack.configuredAssembly(baseAssembly, doc.Agents, doc.Plugins, stack.runtime)
 	if err != nil {
 		return nil, err
 	}
@@ -217,4 +214,79 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		return nil, err
 	}
 	return stack, nil
+}
+
+func pluginSkillDirsFromConfig(workspaceCWD string, plugins []PluginConfig) ([]string, error) {
+	skillDirs := DefaultSkillDiscoveryDirs(workspaceCWD)
+	for _, pCfg := range plugins {
+		if !pCfg.Enabled {
+			continue
+		}
+		p, err := pluginregistry.ParsePlugin(pCfg.Root)
+		if err != nil {
+			return nil, fmt.Errorf("gatewayapp: parse enabled plugin %q failed: %w", pCfg.ID, err)
+		}
+		for _, sc := range p.Skills {
+			skillDirs = append(skillDirs, sc.Root)
+		}
+	}
+	return skillDirs, nil
+}
+
+func buildStackBaseMetadata(appName, workspaceCWD, basePrompt string, model ModelConfig, sandboxCfg SandboxConfig, skillDirs []string) (map[string]any, error) {
+	baseMetadata := map[string]any{}
+	systemPrompt, err := buildSystemPrompt(promptConfig{
+		AppName:      appName,
+		WorkspaceDir: workspaceCWD,
+		BasePrompt:   basePrompt,
+		SkillDirs:    skillDirs,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(systemPrompt) != "" {
+		baseMetadata["system_prompt"] = systemPrompt
+	}
+	if reasoning := strings.TrimSpace(model.ReasoningEffort); reasoning != "" {
+		baseMetadata["reasoning_effort"] = reasoning
+	}
+	return withSandboxPolicyRootMetadata(baseMetadata, sandboxCfg, workspaceCWD), nil
+}
+
+func (s *Stack) Close() error {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	exec := s.exec
+	s.exec = nil
+	mcpMgr := s.mcpMgr
+	s.mcpMgr = nil
+	s.mu.Unlock()
+
+	var errs []error
+	if exec != nil {
+		if err := exec.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if mcpMgr != nil {
+		if err := mcpMgr.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("gatewayapp stack: close failed: %v", errs)
+	}
+	return nil
+}
+
+func (s *Stack) MCPServersStatus(pluginID string) []mcp.MCPServerInfo {
+	s.mu.RLock()
+	mgr := s.mcpMgr
+	s.mu.RUnlock()
+	if mgr == nil {
+		return nil
+	}
+	return mgr.GetServerInfos(pluginID)
 }

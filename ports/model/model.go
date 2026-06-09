@@ -646,15 +646,36 @@ func (m Message) ToolResponse() *ToolResponse {
 		ID:   first.ToolUseID,
 		Name: first.Name,
 	}
-	if len(first.Content) > 0 {
-		if raw := first.Content[0].JSONValue(); len(raw) > 0 {
-			_ = json.Unmarshal(raw, &out.Result)
-		}
-	}
+	out.Result = toolResponseResultFromParts(first.Content)
 	if out.Result == nil {
 		out.Result = map[string]any{}
 	}
 	return out
+}
+
+func toolResponseResultFromParts(parts []Part) map[string]any {
+	for _, part := range parts {
+		if raw := part.JSONValue(); len(raw) > 0 {
+			var decoded any
+			if err := json.Unmarshal(raw, &decoded); err != nil {
+				return map[string]any{"result": strings.TrimSpace(string(raw))}
+			}
+			if payload, ok := decoded.(map[string]any); ok {
+				return payload
+			}
+			return map[string]any{"result": decoded}
+		}
+	}
+	texts := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part.Text != nil && part.Text.Text != "" {
+			texts = append(texts, part.Text.Text)
+		}
+	}
+	if len(texts) == 0 {
+		return nil
+	}
+	return map[string]any{"result": strings.Join(texts, "\n")}
 }
 
 func (m Message) HasMedia(modality MediaModality) bool {

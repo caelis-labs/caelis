@@ -51,6 +51,13 @@ type Service interface {
 	CompleteSkill(context.Context, string, int) ([]CompletionCandidate, error)
 	CompleteResume(context.Context, string, int) ([]ResumeCandidate, error)
 	CompleteSlashArg(context.Context, string, string, int) ([]SlashArgCandidate, error)
+
+	ListPlugins(context.Context) ([]PluginSnapshot, error)
+	AddPluginPath(context.Context, string) (PluginSnapshot, error)
+	EnablePlugin(context.Context, string) (PluginSnapshot, error)
+	DisablePlugin(context.Context, string) (PluginSnapshot, error)
+	RemovePlugin(context.Context, string) error
+	InspectPlugin(context.Context, string) (PluginSnapshot, error)
 }
 
 type StreamSubscriber interface {

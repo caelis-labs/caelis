@@ -33,6 +33,8 @@ func dispatchSlashCommandWithContext(ctx context.Context, service control.Servic
 		return slashHelpWithContext(ctx, service, send)
 	case "agent":
 		return slashAgentWithContext(ctx, service, send, args)
+	case "plugin":
+		return slashPluginWithContext(ctx, service, send, args)
 	case "subagent":
 		return slashSubagentWithContext(ctx, service, sender, args, argsStart, text, attachments)
 	case "new":
@@ -786,4 +788,148 @@ func slashCompactWithContext(ctx context.Context, service control.Service, send 
 	}
 	sendNotice(send, "compaction completed")
 	return TaskResultMsg{SuppressTurnDivider: true}
+}
+
+func slashPluginWithContext(ctx context.Context, service control.Service, send func(tea.Msg), args string) TaskResultMsg {
+	ctx = contextOrBackground(ctx)
+	sub, rest := splitFirst(strings.TrimSpace(args))
+	switch sub {
+	case "", "list":
+		plugins, err := service.ListPlugins(ctx)
+		if err != nil {
+			return TaskResultMsg{Err: friendlyCommandError("plugin list", err)}
+		}
+		sendNotice(send, formatPluginList(plugins))
+		return TaskResultMsg{SuppressTurnDivider: true}
+	case "add-path":
+		target := strings.TrimSpace(rest)
+		if target == "" {
+			sendNotice(send, "usage: /plugin add-path <directory-path>")
+			return TaskResultMsg{SuppressTurnDivider: true}
+		}
+		p, err := service.AddPluginPath(ctx, target)
+		if err != nil {
+			return TaskResultMsg{Err: friendlyCommandError("plugin add-path", err)}
+		}
+		sendNotice(send, fmt.Sprintf("added plugin %s successfully\n\n%s", p.ID, formatPluginDetail(p)))
+		return TaskResultMsg{SuppressTurnDivider: true}
+	case "enable":
+		target := strings.TrimSpace(rest)
+		if target == "" {
+			sendNotice(send, "usage: /plugin enable <plugin-id>")
+			return TaskResultMsg{SuppressTurnDivider: true}
+		}
+		p, err := service.EnablePlugin(ctx, target)
+		if err != nil {
+			return TaskResultMsg{Err: friendlyCommandError("plugin enable", err)}
+		}
+		sendNotice(send, fmt.Sprintf("enabled plugin %s successfully\n\n%s", p.ID, formatPluginDetail(p)))
+		return TaskResultMsg{SuppressTurnDivider: true}
+	case "disable":
+		target := strings.TrimSpace(rest)
+		if target == "" {
+			sendNotice(send, "usage: /plugin disable <plugin-id>")
+			return TaskResultMsg{SuppressTurnDivider: true}
+		}
+		p, err := service.DisablePlugin(ctx, target)
+		if err != nil {
+			return TaskResultMsg{Err: friendlyCommandError("plugin disable", err)}
+		}
+		sendNotice(send, fmt.Sprintf("disabled plugin %s successfully\n\n%s", p.ID, formatPluginDetail(p)))
+		return TaskResultMsg{SuppressTurnDivider: true}
+	case "remove":
+		target := strings.TrimSpace(rest)
+		if target == "" {
+			sendNotice(send, "usage: /plugin remove <plugin-id>")
+			return TaskResultMsg{SuppressTurnDivider: true}
+		}
+		err := service.RemovePlugin(ctx, target)
+		if err != nil {
+			return TaskResultMsg{Err: friendlyCommandError("plugin remove", err)}
+		}
+		sendNotice(send, fmt.Sprintf("removed plugin %s successfully", target))
+		return TaskResultMsg{SuppressTurnDivider: true}
+	case "inspect":
+		target := strings.TrimSpace(rest)
+		if target == "" {
+			sendNotice(send, "usage: /plugin inspect <plugin-id>")
+			return TaskResultMsg{SuppressTurnDivider: true}
+		}
+		p, err := service.InspectPlugin(ctx, target)
+		if err != nil {
+			return TaskResultMsg{Err: friendlyCommandError("plugin inspect", err)}
+		}
+		sendNotice(send, formatPluginDetail(p))
+		return TaskResultMsg{SuppressTurnDivider: true}
+	default:
+		sendNotice(send, "usage: /plugin list | add-path <path> | enable <id> | disable <id> | remove <id> | inspect <id>")
+		return TaskResultMsg{SuppressTurnDivider: true}
+	}
+}
+
+func formatPluginList(plugins []control.PluginSnapshot) string {
+	lines := []string{"installed plugins:"}
+	if len(plugins) == 0 {
+		lines = append(lines, "  none")
+		lines = append(lines, "next: run /plugin add-path <path>")
+		return strings.Join(lines, "\n")
+	}
+	for _, p := range plugins {
+		statusStr := p.Status
+		if !p.Enabled {
+			statusStr = "disabled"
+		}
+		line := fmt.Sprintf("  %s (%s): %s", p.ID, statusStr, p.Name)
+		if p.Version != "" {
+			line += " v" + p.Version
+		}
+		lines = append(lines, line)
+		if p.Description != "" {
+			lines = append(lines, "    description: "+p.Description)
+		}
+		lines = append(lines, "    path:        "+p.Root)
+	}
+	lines = append(lines, "next: /plugin enable <id> | disable <id> | inspect <id>")
+	return strings.Join(lines, "\n")
+}
+
+func formatPluginDetail(p control.PluginSnapshot) string {
+	lines := []string{fmt.Sprintf("plugin info: %s", p.ID)}
+	statusStr := p.Status
+	if !p.Enabled {
+		statusStr = "disabled"
+	}
+	lines = append(lines, fmt.Sprintf("  Name:        %s", p.Name))
+	lines = append(lines, fmt.Sprintf("  Version:     %s", p.Version))
+	lines = append(lines, fmt.Sprintf("  Status:      %s", statusStr))
+	lines = append(lines, fmt.Sprintf("  Root Path:   %s", p.Root))
+	if p.Description != "" {
+		lines = append(lines, fmt.Sprintf("  Description: %s", p.Description))
+	}
+	if len(p.Skills) > 0 {
+		lines = append(lines, fmt.Sprintf("  Skills:      %s", strings.Join(p.Skills, ", ")))
+	}
+	if len(p.Hooks) > 0 {
+		lines = append(lines, fmt.Sprintf("  Hooks:       %s", strings.Join(p.Hooks, ", ")))
+	}
+	if len(p.Agents) > 0 {
+		lines = append(lines, fmt.Sprintf("  Agents:      %s", strings.Join(p.Agents, ", ")))
+	}
+	if len(p.MCPServers) > 0 {
+		lines = append(lines, "  MCP Servers:")
+		for _, m := range p.MCPServers {
+			mcpLine := fmt.Sprintf("    - %s (%s)", m.Name, m.Status)
+			if len(m.Tools) > 0 {
+				mcpLine += fmt.Sprintf(" [tools: %s]", strings.Join(m.Tools, ", "))
+			}
+			if m.Warning != "" {
+				mcpLine += fmt.Sprintf(" (warning: %s)", m.Warning)
+			}
+			lines = append(lines, mcpLine)
+		}
+	}
+	if p.Warning != "" {
+		lines = append(lines, fmt.Sprintf("  Warning:     %s", p.Warning))
+	}
+	return strings.Join(lines, "\n")
 }

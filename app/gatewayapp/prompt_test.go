@@ -1,10 +1,18 @@
 package gatewayapp
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/OnslaughtSnail/caelis/ports/gateway"
+	"github.com/OnslaughtSnail/caelis/ports/model"
+	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
 func TestBuildSystemPromptIncludesPromptAssets(t *testing.T) {
@@ -184,5 +192,286 @@ func TestBuildSystemPromptPreservesSessionOverridePrecedence(t *testing.T) {
 		if !strings.Contains(prompt, required) {
 			t.Fatalf("prompt missing %q:\n%s", required, prompt)
 		}
+	}
+}
+
+func TestNewLocalStackLoadsPluginSkills(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	storeDir := filepath.Join(tmp, "caelis_store")
+	workspaceDir := filepath.Join(tmp, "workspace")
+	if err := os.MkdirAll(storeDir, 0700); err != nil {
+		t.Fatalf("mkdir storeDir: %v", err)
+	}
+	if err := os.MkdirAll(workspaceDir, 0700); err != nil {
+		t.Fatalf("mkdir workspaceDir: %v", err)
+	}
+
+	// Create a plugin directory
+	pluginRoot := filepath.Join(tmp, "my-plugin")
+	skillsDir := filepath.Join(pluginRoot, "skills", "plugin-skill")
+	if err := os.MkdirAll(skillsDir, 0700); err != nil {
+		t.Fatalf("mkdir plugin skills: %v", err)
+	}
+	// Write gemini-extension.json
+	manifest := `{
+		"name": "my-plugin",
+		"version": "1.0.0",
+		"description": "A test plugin with skills"
+	}`
+	if err := os.WriteFile(filepath.Join(pluginRoot, "gemini-extension.json"), []byte(manifest), 0600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	// Write SKILL.md
+	skillMD := "---\nname: plugin-skill\ndescription: Plugin skill description.\n---\n# Plugin Skill\nBody."
+	if err := os.WriteFile(filepath.Join(skillsDir, "SKILL.md"), []byte(skillMD), 0600); err != nil {
+		t.Fatalf("write SKILL.md: %v", err)
+	}
+
+	// Prepare config store and write AppConfig with the plugin enabled
+	configStore := newAppConfigStore(storeDir)
+	err := configStore.Save(AppConfig{
+		Plugins: []PluginConfig{
+			{
+				ID:      "my-plugin",
+				Root:    pluginRoot,
+				Enabled: true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to save config: %v", err)
+	}
+
+	// Create stack configuration
+	cfg := Config{
+		AppName:      "CAELIS",
+		StoreDir:     storeDir,
+		WorkspaceCWD: workspaceDir,
+	}
+
+	stack, err := NewLocalStack(cfg)
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+	defer stack.Close()
+
+	systemPrompt, _ := stack.runtime.BaseMetadata["system_prompt"].(string)
+	if !strings.Contains(systemPrompt, "plugin-skill") {
+		t.Fatalf("expected system prompt to contain plugin skill, but it didn't.\nPrompt:\n%s", systemPrompt)
+	}
+}
+
+func TestNewLocalStackMalformedPluginFails(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	storeDir := filepath.Join(tmp, "caelis_store")
+	workspaceDir := filepath.Join(tmp, "workspace")
+	if err := os.MkdirAll(storeDir, 0700); err != nil {
+		t.Fatalf("mkdir storeDir: %v", err)
+	}
+	if err := os.MkdirAll(workspaceDir, 0700); err != nil {
+		t.Fatalf("mkdir workspaceDir: %v", err)
+	}
+
+	// Create a plugin directory but write an invalid JSON manifest
+	pluginRoot := filepath.Join(tmp, "malformed-plugin")
+	if err := os.MkdirAll(pluginRoot, 0700); err != nil {
+		t.Fatalf("mkdir plugin root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginRoot, "gemini-extension.json"), []byte("invalid-json{"), 0600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	// Prepare config store and write AppConfig with the plugin enabled
+	configStore := newAppConfigStore(storeDir)
+	err := configStore.Save(AppConfig{
+		Plugins: []PluginConfig{
+			{
+				ID:      "malformed-plugin",
+				Root:    pluginRoot,
+				Enabled: true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to save config: %v", err)
+	}
+
+	// Create stack configuration
+	cfg := Config{
+		AppName:      "CAELIS",
+		StoreDir:     storeDir,
+		WorkspaceCWD: workspaceDir,
+	}
+
+	// NewLocalStack should return a failure because the enabled plugin is malformed
+	_, err = NewLocalStack(cfg)
+	if err == nil {
+		t.Fatal("expected NewLocalStack to fail for malformed enabled plugin, but it succeeded")
+	}
+	if !strings.Contains(err.Error(), "gatewayapp: parse enabled plugin") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestNewLocalStackRunsSessionStartHook(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	storeDir := filepath.Join(tmp, "caelis_store")
+	workspaceDir := filepath.Join(tmp, "workspace")
+	if err := os.MkdirAll(storeDir, 0700); err != nil {
+		t.Fatalf("mkdir storeDir: %v", err)
+	}
+	if err := os.MkdirAll(workspaceDir, 0700); err != nil {
+		t.Fatalf("mkdir workspaceDir: %v", err)
+	}
+
+	// Create plugin directory with a Caelis manifest containing a SessionStart hook
+	pluginRoot := filepath.Join(tmp, "hook-plugin")
+	metaDir := filepath.Join(pluginRoot, ".caelis-plugin")
+	if err := os.MkdirAll(metaDir, 0700); err != nil {
+		t.Fatalf("mkdir plugin: %v", err)
+	}
+
+	cmdBytes, err := json.Marshal(os.Args[0])
+	if err != nil {
+		t.Fatalf("failed to marshal os.Args[0]: %v", err)
+	}
+	manifest := fmt.Sprintf(`{
+		"name": "hook-plugin",
+		"version": "1.0.0",
+		"hooks": {
+			"SessionStart": [
+				{
+					"command": %s,
+					"args": ["-test.run=^TestHookHelperProcess$"],
+					"env": {
+						"CAELIS_HOOK_HELPER": "1",
+						"CAELIS_HOOK_MODE": "echo",
+						"CAELIS_HOOK_ECHO_VAL": "hello stack hook"
+					}
+				}
+			]
+		}
+	}`, cmdBytes)
+	if err := os.WriteFile(filepath.Join(metaDir, "plugin.json"), []byte(manifest), 0600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	// Save AppConfig with plugin enabled
+	configStore := newAppConfigStore(storeDir)
+	err = configStore.Save(AppConfig{
+		Plugins: []PluginConfig{
+			{
+				ID:      "hook-plugin",
+				Root:    pluginRoot,
+				Enabled: true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	// Initialize the Stack
+	cfg := Config{
+		AppName:      "CAELIS",
+		StoreDir:     storeDir,
+		WorkspaceCWD: workspaceDir,
+		Model: ModelConfig{
+			Provider: "ollama",
+			API:      "ollama",
+			Model:    "llama3",
+		},
+	}
+
+	stack, err := NewLocalStack(cfg)
+	if err != nil {
+		t.Fatalf("NewLocalStack() failed: %v", err)
+	}
+	defer stack.Close()
+
+	// Create a session in the stack's session service
+	ctx := context.Background()
+	sess, err := stack.Sessions.StartSession(ctx, session.StartSessionRequest{
+		AppName: "CAELIS",
+		UserID:  "local-user",
+		Workspace: session.WorkspaceRef{
+			Key: "workspace",
+			CWD: workspaceDir,
+		},
+	})
+	if err != nil {
+		t.Fatalf("StartSession() failed: %v", err)
+	}
+
+	// Get the gateway and run a turn
+	gw := stack.currentGateway()
+	if gw == nil {
+		t.Fatal("expected non-nil gateway from stack")
+	}
+
+	res, err := gw.BeginTurn(ctx, gateway.BeginTurnRequest{
+		SessionRef: sess.SessionRef,
+		Input:      "run turn",
+	})
+	if err != nil {
+		t.Fatalf("BeginTurn failed: %v", err)
+	}
+	for range res.Handle.Events() {
+	}
+
+	// Verify that the hook ran and appended plugin context as a user-role model message.
+	events, err := stack.Sessions.Events(ctx, session.EventsRequest{SessionRef: sess.SessionRef})
+	if err != nil {
+		t.Fatalf("failed to list session events: %v", err)
+	}
+
+	var pluginEvents []*session.Event
+	for _, ev := range events {
+		if ev.Meta["source"] == "plugin_hook" {
+			pluginEvents = append(pluginEvents, ev)
+		}
+	}
+
+	if len(pluginEvents) != 1 {
+		t.Fatalf("expected 1 plugin context event from stack-injected hook, got %d", len(pluginEvents))
+	}
+
+	ev := pluginEvents[0]
+	msg, ok := session.ModelMessageOf(ev)
+	if !ok {
+		t.Fatal("expected plugin context event to project to model message")
+	}
+	if msg.Role != model.RoleUser {
+		t.Fatalf("plugin context role = %q, want user", msg.Role)
+	}
+	if !strings.Contains(msg.TextContent(), "hello stack hook") {
+		t.Errorf("unexpected hook execution output event: %q", msg.TextContent())
+	}
+}
+
+func TestHookHelperProcess(t *testing.T) {
+	if os.Getenv("CAELIS_HOOK_HELPER") != "1" {
+		return
+	}
+	mode := os.Getenv("CAELIS_HOOK_MODE")
+	switch mode {
+	case "echo":
+		val := os.Getenv("CAELIS_HOOK_ECHO_VAL")
+		fmt.Print(val)
+		os.Exit(0)
+	case "fail":
+		os.Exit(1)
+	case "sleep":
+		time.Sleep(10 * time.Second)
+		os.Exit(0)
+	case "env":
+		fmt.Printf("%s|%s|%s", os.Getenv("TEST_VAR"), os.Getenv("CAELIS_PLUGIN_DIR"), os.Getenv("CAELIS_WORKSPACE_DIR"))
+		os.Exit(0)
 	}
 }

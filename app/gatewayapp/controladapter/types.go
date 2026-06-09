@@ -58,3 +58,7 @@ type ConnectConfig = control.ConnectConfig
 type ApprovalDecision = control.ApprovalDecision
 
 type Turn = control.Turn
+
+type PluginSnapshot = control.PluginSnapshot
+
+type MCPServerSnapshot = control.MCPServerSnapshot

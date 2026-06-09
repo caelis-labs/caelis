@@ -2478,3 +2478,41 @@ func (d *bridgeTestDriver) CompleteSlashArg(_ context.Context, command string, _
 	}
 	return nil, nil
 }
+
+func (d *bridgeTestDriver) ListPlugins(context.Context) ([]control.PluginSnapshot, error) {
+	return nil, nil
+}
+func (d *bridgeTestDriver) AddPluginPath(context.Context, string) (control.PluginSnapshot, error) {
+	return control.PluginSnapshot{}, nil
+}
+func (d *bridgeTestDriver) EnablePlugin(context.Context, string) (control.PluginSnapshot, error) {
+	return control.PluginSnapshot{}, nil
+}
+func (d *bridgeTestDriver) DisablePlugin(context.Context, string) (control.PluginSnapshot, error) {
+	return control.PluginSnapshot{}, nil
+}
+func (d *bridgeTestDriver) RemovePlugin(context.Context, string) error {
+	return nil
+}
+func (d *bridgeTestDriver) InspectPlugin(context.Context, string) (control.PluginSnapshot, error) {
+	return control.PluginSnapshot{}, nil
+}
+
+func (d *bridgeSubmitDriver) ListPlugins(context.Context) ([]control.PluginSnapshot, error) {
+	return nil, nil
+}
+func (d *bridgeSubmitDriver) AddPluginPath(context.Context, string) (control.PluginSnapshot, error) {
+	return control.PluginSnapshot{}, nil
+}
+func (d *bridgeSubmitDriver) EnablePlugin(context.Context, string) (control.PluginSnapshot, error) {
+	return control.PluginSnapshot{}, nil
+}
+func (d *bridgeSubmitDriver) DisablePlugin(context.Context, string) (control.PluginSnapshot, error) {
+	return control.PluginSnapshot{}, nil
+}
+func (d *bridgeSubmitDriver) RemovePlugin(context.Context, string) error {
+	return nil
+}
+func (d *bridgeSubmitDriver) InspectPlugin(context.Context, string) (control.PluginSnapshot, error) {
+	return control.PluginSnapshot{}, nil
+}

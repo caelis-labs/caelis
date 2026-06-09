@@ -9,6 +9,7 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/ports/agent"
 	"github.com/OnslaughtSnail/caelis/ports/approval"
+	"github.com/OnslaughtSnail/caelis/ports/plugin"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/stream"
 )
@@ -22,6 +23,7 @@ type Config struct {
 	ApprovalApprover    approval.Approver
 	ApprovalReviewer    ApprovalReviewer
 	Clock               func() time.Time
+	SessionStartHooks   []plugin.HookSpec
 }
 
 type Gateway struct {
@@ -34,6 +36,7 @@ type Gateway struct {
 	approvalApprover    approval.Approver
 	approvalReviewer    ApprovalReviewer
 	clock               func() time.Time
+	sessionStartHooks   []plugin.HookSpec
 
 	mu       sync.Mutex
 	active   map[string]*turnHandle
@@ -92,6 +95,7 @@ func New(cfg Config) (*Gateway, error) {
 		approvalApprover:    cfg.ApprovalApprover,
 		approvalReviewer:    cfg.ApprovalReviewer,
 		clock:               cfg.Clock,
+		sessionStartHooks:   cfg.SessionStartHooks,
 		active:              map[string]*turnHandle{},
 		bindings:            map[string]sessionBinding{},
 	}, nil

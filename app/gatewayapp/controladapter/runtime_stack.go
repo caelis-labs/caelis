@@ -220,6 +220,12 @@ type RuntimeStack struct {
 	ListACPAgentsFn                      func() []ACPAgentInfo
 	AgentProfileStatusFn                 func(context.Context) (AgentProfileStatusSnapshot, error)
 	BindAgentProfileFn                   func(context.Context, AgentProfileBindingConfig) (AgentProfileStatusSnapshot, error)
+	ListPluginsFn                        func(context.Context) ([]PluginSnapshot, error)
+	AddPluginPathFn                      func(context.Context, string) (PluginSnapshot, error)
+	EnablePluginFn                       func(context.Context, string) (PluginSnapshot, error)
+	DisablePluginFn                      func(context.Context, string) (PluginSnapshot, error)
+	RemovePluginFn                       func(context.Context, string) error
+	InspectPluginFn                      func(context.Context, string) (PluginSnapshot, error)
 }
 
 func (s *RuntimeStack) gateway() (GatewayService, error) {
@@ -516,4 +522,46 @@ func (s *RuntimeStack) BindAgentProfile(ctx context.Context, cfg AgentProfileBin
 		return AgentProfileStatusSnapshot{}, fmt.Errorf("app/gatewayapp/controladapter: agent profile binding dependency is unavailable")
 	}
 	return s.BindAgentProfileFn(ctx, cfg)
+}
+
+func (s *RuntimeStack) ListPlugins(ctx context.Context) ([]PluginSnapshot, error) {
+	if s == nil || s.ListPluginsFn == nil {
+		return nil, fmt.Errorf("app/gatewayapp/controladapter: list plugins dependency is unavailable")
+	}
+	return s.ListPluginsFn(ctx)
+}
+
+func (s *RuntimeStack) AddPluginPath(ctx context.Context, path string) (PluginSnapshot, error) {
+	if s == nil || s.AddPluginPathFn == nil {
+		return PluginSnapshot{}, fmt.Errorf("app/gatewayapp/controladapter: add plugin path dependency is unavailable")
+	}
+	return s.AddPluginPathFn(ctx, path)
+}
+
+func (s *RuntimeStack) EnablePlugin(ctx context.Context, id string) (PluginSnapshot, error) {
+	if s == nil || s.EnablePluginFn == nil {
+		return PluginSnapshot{}, fmt.Errorf("app/gatewayapp/controladapter: enable plugin dependency is unavailable")
+	}
+	return s.EnablePluginFn(ctx, id)
+}
+
+func (s *RuntimeStack) DisablePlugin(ctx context.Context, id string) (PluginSnapshot, error) {
+	if s == nil || s.DisablePluginFn == nil {
+		return PluginSnapshot{}, fmt.Errorf("app/gatewayapp/controladapter: disable plugin dependency is unavailable")
+	}
+	return s.DisablePluginFn(ctx, id)
+}
+
+func (s *RuntimeStack) RemovePlugin(ctx context.Context, id string) error {
+	if s == nil || s.RemovePluginFn == nil {
+		return fmt.Errorf("app/gatewayapp/controladapter: remove plugin dependency is unavailable")
+	}
+	return s.RemovePluginFn(ctx, id)
+}
+
+func (s *RuntimeStack) InspectPlugin(ctx context.Context, id string) (PluginSnapshot, error) {
+	if s == nil || s.InspectPluginFn == nil {
+		return PluginSnapshot{}, fmt.Errorf("app/gatewayapp/controladapter: inspect plugin dependency is unavailable")
+	}
+	return s.InspectPluginFn(ctx, id)
 }

@@ -233,6 +233,20 @@ func (m *Model) applySlashArgCompletion() {
 		m.setInputText("/" + command + " " + choice)
 		m.clearSlashArg()
 		return
+	case "plugin":
+		m.setInputText("/plugin " + choice + " ")
+		m.syncTextareaFromInput()
+		switch choice {
+		case "add-path", "enable", "disable", "remove", "inspect":
+			m.activateSlashArgPickerFromInput("plugin " + choice)
+		default:
+			m.clearSlashArg()
+		}
+		return
+	case "plugin add-path", "plugin enable", "plugin disable", "plugin remove", "plugin inspect":
+		m.setInputText("/" + command + " " + choice)
+		m.clearSlashArg()
+		return
 	case "subagent":
 		m.setInputText("/subagent " + choice + " ")
 		m.syncTextareaFromInput()
@@ -336,6 +350,10 @@ func (m *Model) shouldExecuteSlashArgSelection(command string, choice string) bo
 	case "agent":
 		return false
 	case "agent add", "agent install", "agent remove", "agent use":
+		return true
+	case "plugin":
+		return false
+	case "plugin add-path", "plugin enable", "plugin disable", "plugin remove", "plugin inspect":
 		return true
 	case "subagent":
 		return false

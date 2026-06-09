@@ -19,6 +19,14 @@ type Definition struct {
 	Metadata    map[string]any `json:"metadata,omitempty"`
 }
 
+const (
+	MetadataToolKind  = "caelis.tool.kind"
+	MetadataPluginID  = "caelis.plugin.id"
+	MetadataMCPServer = "caelis.mcp.server"
+
+	MetadataToolKindMCP = "mcp"
+)
+
 // Call is one provider-neutral tool invocation.
 type Call struct {
 	ID       string          `json:"id,omitempty"`

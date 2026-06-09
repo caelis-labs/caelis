@@ -3,6 +3,7 @@ package gatewayapp
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,9 +13,11 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/agentprofiles"
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/agentregistry"
+	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/pluginregistry"
 	"github.com/OnslaughtSnail/caelis/ports/agentprofile"
 	"github.com/OnslaughtSnail/caelis/ports/assembly"
 	"github.com/OnslaughtSnail/caelis/ports/controller"
+	pluginapi "github.com/OnslaughtSnail/caelis/ports/plugin"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
@@ -387,7 +390,7 @@ func (s *Stack) setConfiguredAgentsWithBase(base assembly.ResolvedAssembly, conf
 	engine := s.engine
 	s.mu.RUnlock()
 	runtimeCfg.BaseAssembly = assembly.CloneResolvedAssembly(base)
-	resolvedAssembly, err := s.configuredAssembly(runtimeCfg.BaseAssembly, configured, runtimeCfg)
+	resolvedAssembly, err := s.configuredAssembly(runtimeCfg.BaseAssembly, configured, runtimeCfg.Plugins, runtimeCfg)
 	if err != nil {
 		return err
 	}
@@ -407,7 +410,7 @@ func (s *Stack) setConfiguredAgentsWithBase(base assembly.ResolvedAssembly, conf
 	return nil
 }
 
-func (s *Stack) configuredAssembly(base assembly.ResolvedAssembly, configured []AgentConfig, runtimeCfg stackRuntimeConfig) (assembly.ResolvedAssembly, error) {
+func (s *Stack) configuredAssembly(base assembly.ResolvedAssembly, configured []AgentConfig, plugins []PluginConfig, runtimeCfg stackRuntimeConfig) (assembly.ResolvedAssembly, error) {
 	resolved := withConfiguredACPAgents(base, configured, defaultSelfACPAgent(defaultSelfACPAgentConfig{
 		Config: Config{
 			AppName:        s.AppName,
@@ -428,7 +431,68 @@ func (s *Stack) configuredAssembly(base assembly.ResolvedAssembly, configured []
 		WorkspaceKey: s.Workspace.Key,
 		WorkspaceCWD: s.Workspace.CWD,
 	}))
+	resolved, err := s.withPluginACPAgents(resolved, plugins)
+	if err != nil {
+		return assembly.ResolvedAssembly{}, err
+	}
 	return s.withAgentProfileACPAgents(resolved, runtimeCfg)
+}
+
+func (s *Stack) withPluginACPAgents(resolved assembly.ResolvedAssembly, plugins []PluginConfig) (assembly.ResolvedAssembly, error) {
+	out := assembly.CloneResolvedAssembly(resolved)
+	seen := map[string]struct{}{}
+	for _, agent := range out.Agents {
+		if name := strings.ToLower(strings.TrimSpace(agent.Name)); name != "" {
+			seen[name] = struct{}{}
+		}
+	}
+	for _, pCfg := range plugins {
+		if !pCfg.Enabled {
+			continue
+		}
+		p, err := pluginregistry.ParsePlugin(pCfg.Root)
+		if err != nil {
+			return out, fmt.Errorf("gatewayapp: parse enabled plugin %q agents failed: %w", pCfg.ID, err)
+		}
+		for _, contributed := range p.Agents {
+			agent, err := pluginAgentContributionToAssembly(p.ID, contributed)
+			if err != nil {
+				return out, err
+			}
+			nameKey := strings.ToLower(strings.TrimSpace(agent.Name))
+			if nameKey == "" {
+				continue
+			}
+			if _, exists := seen[nameKey]; exists {
+				continue
+			}
+			out.Agents = append(out.Agents, agent)
+			seen[nameKey] = struct{}{}
+		}
+	}
+	return out, nil
+}
+
+func pluginAgentContributionToAssembly(pluginID string, in pluginapi.AgentContribution) (assembly.AgentConfig, error) {
+	name := strings.TrimSpace(in.Name)
+	if name == "" {
+		return assembly.AgentConfig{}, fmt.Errorf("gatewayapp: plugin %q agent name is required", strings.TrimSpace(pluginID))
+	}
+	if reservedSlashCommandName(name) {
+		return assembly.AgentConfig{}, fmt.Errorf("gatewayapp: plugin %q agent %q conflicts with an existing slash command", strings.TrimSpace(pluginID), name)
+	}
+	command := strings.TrimSpace(in.Command)
+	if command == "" {
+		return assembly.AgentConfig{}, fmt.Errorf("gatewayapp: command is required for plugin %q agent %q", strings.TrimSpace(pluginID), name)
+	}
+	return assembly.AgentConfig{
+		Name:        name,
+		Description: strings.TrimSpace(in.Description),
+		Command:     command,
+		Args:        append([]string(nil), in.Args...),
+		Env:         maps.Clone(in.Env),
+		WorkDir:     strings.TrimSpace(in.WorkDir),
+	}, nil
 }
 
 func (s *Stack) withAgentProfileACPAgents(resolved assembly.ResolvedAssembly, runtimeCfg stackRuntimeConfig) (assembly.ResolvedAssembly, error) {

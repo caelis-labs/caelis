@@ -21,6 +21,7 @@ type stackRuntimeConfig struct {
 	ContextWindow               int
 	SystemPrompt                string
 	Model                       ModelConfig
+	Plugins                     []PluginConfig
 	BaseAssembly                assembly.ResolvedAssembly
 	Assembly                    assembly.ResolvedAssembly
 	BaseMetadata                map[string]any
@@ -180,6 +181,13 @@ func cloneMap(values map[string]any) map[string]any {
 		out[key] = value
 	}
 	return out
+}
+
+func clonePluginConfigs(values []PluginConfig) []PluginConfig {
+	if len(values) == 0 {
+		return nil
+	}
+	return append([]PluginConfig(nil), values...)
 }
 
 func stringFromMap(values map[string]any, key string) string {

@@ -94,6 +94,45 @@ func TestDefaultModeRejectsMalformedToolInput(t *testing.T) {
 	}
 }
 
+func TestDefaultModeAllowsMCPPluginTools(t *testing.T) {
+	t.Parallel()
+
+	input := policy.ToolContext{
+		Tool: tool.Definition{
+			Name: "mcp__plugin__server__read_fixture",
+			Metadata: map[string]any{
+				tool.MetadataToolKind:  tool.MetadataToolKindMCP,
+				tool.MetadataPluginID:  "plugin",
+				tool.MetadataMCPServer: "server",
+			},
+		},
+		Call: policyToolCall("mcp__plugin__server__read_fixture", map[string]any{"name": "fixture"}),
+	}
+	decision, err := AutoReviewMode().DecideTool(context.Background(), input)
+	if err != nil {
+		t.Fatalf("DecideTool() error = %v", err)
+	}
+	if decision.Action != policy.ActionAllow {
+		t.Fatalf("Action = %q, want allow (reason=%q)", decision.Action, decision.Reason)
+	}
+}
+
+func TestDefaultModeStillDeniesUnknownToolsWithoutMCPMetadata(t *testing.T) {
+	t.Parallel()
+
+	input := policy.ToolContext{
+		Tool: tool.Definition{Name: "mcp__plugin__server__read_fixture"},
+		Call: policyToolCall("mcp__plugin__server__read_fixture", map[string]any{"name": "fixture"}),
+	}
+	decision, err := AutoReviewMode().DecideTool(context.Background(), input)
+	if err != nil {
+		t.Fatalf("DecideTool() error = %v", err)
+	}
+	if decision.Action != policy.ActionDeny {
+		t.Fatalf("Action = %q, want deny", decision.Action)
+	}
+}
+
 func TestDefaultModeAllowsUserConfigReadsButRequiresWriteGrant(t *testing.T) {
 	home := t.TempDir()
 	setHomeForPresetsTest(t, home)
@@ -825,6 +864,11 @@ func globCtx(pattern string) policy.ToolContext {
 		},
 		Sandbox: sandbox.Descriptor{Backend: sandbox.BackendHost},
 	}
+}
+
+func policyToolCall(name string, input map[string]any) tool.Call {
+	raw, _ := json.Marshal(input)
+	return tool.Call{Name: name, Input: raw}
 }
 
 func testWorkspaceRoot() string {

@@ -96,6 +96,34 @@ func TestMessageFromToolCallsPreservesValidJSONUsingRawInputKey(t *testing.T) {
 	}
 }
 
+func TestToolResponseUsesTextToolResultContent(t *testing.T) {
+	msg := Message{
+		Role: RoleTool,
+		Parts: []Part{{
+			Kind: PartKindToolResult,
+			ToolResult: &ToolResultPart{
+				ToolUseID: "call-1",
+				Name:      "mcp__plugin__server__read_fixture",
+				Content: []Part{
+					NewTextPart("first line"),
+					NewTextPart("second line"),
+				},
+			},
+		}},
+	}
+
+	resp := msg.ToolResponse()
+	if resp == nil {
+		t.Fatal("ToolResponse() = nil, want response")
+	}
+	if resp.ID != "call-1" || resp.Name != "mcp__plugin__server__read_fixture" {
+		t.Fatalf("ToolResponse() id/name = %q/%q", resp.ID, resp.Name)
+	}
+	if got, _ := resp.Result["result"].(string); got != "first line\nsecond line" {
+		t.Fatalf("ToolResponse().Result[result] = %#v, want joined text", resp.Result["result"])
+	}
+}
+
 func TestParseToolCallArgsRawPreservesNumericLexemes(t *testing.T) {
 	rawArgs := `{"id":9007199254740993,"amount":0.12345678901234567890}`
 

@@ -296,3 +296,25 @@ type ApprovalDecision struct {
 	Reason     string
 	ReviewText string
 }
+
+type MCPServerSnapshot struct {
+	Name    string   `json:"name"`
+	Status  string   `json:"status"`
+	Tools   []string `json:"tools,omitempty"`
+	Warning string   `json:"warning,omitempty"`
+}
+
+type PluginSnapshot struct {
+	ID          string              `json:"id"`
+	Name        string              `json:"name"`
+	Version     string              `json:"version"`
+	Description string              `json:"description"`
+	Root        string              `json:"root"`
+	Enabled     bool                `json:"enabled"`
+	Skills      []string            `json:"skills"`
+	Hooks       []string            `json:"hooks"`
+	Agents      []string            `json:"agents,omitempty"`
+	MCPServers  []MCPServerSnapshot `json:"mcp_servers,omitempty"`
+	Status      string              `json:"status"`
+	Warning     string              `json:"warning,omitempty"`
+}

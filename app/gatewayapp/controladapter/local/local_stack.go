@@ -143,6 +143,24 @@ func runtimeStack(stack *gatewayapp.Stack) *RuntimeStack {
 		BindAgentProfileFn: func(ctx context.Context, cfg AgentProfileBindingConfig) (AgentProfileStatusSnapshot, error) {
 			return toRuntimeAgentProfileStatus(profiles.Bind(ctx, toGatewayAgentProfileBinding(cfg)))
 		},
+		ListPluginsFn: func(ctx context.Context) ([]controladapter.PluginSnapshot, error) {
+			return toRuntimePluginSnapshots(stack.Plugins().List(ctx))
+		},
+		AddPluginPathFn: func(ctx context.Context, path string) (controladapter.PluginSnapshot, error) {
+			return toRuntimePluginSnapshotWithError(stack.Plugins().AddPath(ctx, path))
+		},
+		EnablePluginFn: func(ctx context.Context, id string) (controladapter.PluginSnapshot, error) {
+			return toRuntimePluginSnapshotWithError(stack.Plugins().Enable(ctx, id))
+		},
+		DisablePluginFn: func(ctx context.Context, id string) (controladapter.PluginSnapshot, error) {
+			return toRuntimePluginSnapshotWithError(stack.Plugins().Disable(ctx, id))
+		},
+		RemovePluginFn: func(ctx context.Context, id string) error {
+			return stack.Plugins().Remove(ctx, id)
+		},
+		InspectPluginFn: func(ctx context.Context, id string) (controladapter.PluginSnapshot, error) {
+			return toRuntimePluginSnapshotWithError(stack.Plugins().Inspect(ctx, id))
+		},
 	}
 }
 
@@ -441,4 +459,48 @@ func agentProfileMetadataBool(metadata map[string]any, key string) bool {
 	default:
 		return false
 	}
+}
+
+func toRuntimePluginSnapshot(info gatewayapp.PluginInfo) controladapter.PluginSnapshot {
+	mcpSnapshots := make([]controladapter.MCPServerSnapshot, 0, len(info.MCPServers))
+	for _, mcpInfo := range info.MCPServers {
+		mcpSnapshots = append(mcpSnapshots, controladapter.MCPServerSnapshot{
+			Name:    mcpInfo.Name,
+			Status:  mcpInfo.Status,
+			Tools:   append([]string(nil), mcpInfo.Tools...),
+			Warning: mcpInfo.Warning,
+		})
+	}
+	return controladapter.PluginSnapshot{
+		ID:          info.ID,
+		Name:        info.Name,
+		Version:     info.Version,
+		Description: info.Description,
+		Root:        info.Root,
+		Enabled:     info.Enabled,
+		Skills:      append([]string(nil), info.Skills...),
+		Hooks:       append([]string(nil), info.Hooks...),
+		Agents:      append([]string(nil), info.Agents...),
+		MCPServers:  mcpSnapshots,
+		Status:      info.Status,
+		Warning:     info.Warning,
+	}
+}
+
+func toRuntimePluginSnapshots(list []gatewayapp.PluginInfo, err error) ([]controladapter.PluginSnapshot, error) {
+	if err != nil {
+		return nil, err
+	}
+	out := make([]controladapter.PluginSnapshot, 0, len(list))
+	for _, info := range list {
+		out = append(out, toRuntimePluginSnapshot(info))
+	}
+	return out, nil
+}
+
+func toRuntimePluginSnapshotWithError(info gatewayapp.PluginInfo, err error) (controladapter.PluginSnapshot, error) {
+	if err != nil {
+		return controladapter.PluginSnapshot{}, err
+	}
+	return toRuntimePluginSnapshot(info), nil
 }
