@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestTerminalToolPanelShowsTailWithoutInternalScroll(t *testing.T) {
@@ -490,6 +492,132 @@ func TestCompletedSubagentPanelPreservesToolOnlyOutput(t *testing.T) {
 	}
 }
 
+func TestSubagentPanelLogStreamRendersLightweightToolTrace(t *testing.T) {
+	model := newGatewayEventTestModel()
+	ctx := BlockRenderContext{Width: 120, TermWidth: 120, Theme: model.theme}
+	panel := NewSubagentPanelBlock("spawn-1", "", "helper", "spawn-call-1")
+	panel.VisibleLines = 20
+	panel.Events = append(panel.Events,
+		SubagentEvent{
+			Kind:   SEToolCall,
+			CallID: "read-1",
+			Name:   "READ",
+			Args:   "test.txt",
+			Output: "Tool completed",
+			Done:   true,
+		},
+		SubagentEvent{
+			Kind:   SEToolCall,
+			CallID: "test-1",
+			Name:   "RUN_COMMAND",
+			Args:   "python -m unittest",
+			Output: "└ test_tan_zero (test_calculator.TestTrigonometricFunctions.test_tan_zero)\n    Test tan(0) = 0. ... ok\nRan 32 tests in 0.001s\nOK\nTool completed",
+			Done:   true,
+		},
+	)
+
+	lines := stripStyledLines(renderSubagentPanelLogLines(panel, ctx, 100, 20))
+	joined := strings.Join(lines, "\n")
+	for _, want := range []string{
+		"• Read test.txt",
+		"• Run python -m unittest",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("subagent log stream missing %q:\n%s", want, joined)
+		}
+	}
+	for _, forbid := range []string{"Tool completed", "Test tan(0)", "Ran 32 tests", "OK"} {
+		if strings.Contains(joined, forbid) {
+			t.Fatalf("subagent log stream leaked tool result %q:\n%s", forbid, joined)
+		}
+	}
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			t.Fatalf("subagent log stream should not insert blank lines: %#v", lines)
+		}
+	}
+}
+
+func TestSubagentPanelLogStreamShowsApprovalContext(t *testing.T) {
+	model := newGatewayEventTestModel()
+	ctx := BlockRenderContext{Width: 120, TermWidth: 120, Theme: model.theme}
+	panel := NewSubagentPanelBlock("spawn-1", "", "helper", "spawn-call-1")
+	panel.Status = "waiting_approval"
+	panel.Events = append(panel.Events,
+		SubagentEvent{Kind: SEReasoning, Text: "Need permission before running this."},
+		SubagentEvent{
+			Kind:            SEApproval,
+			ApprovalTool:    "RUN_COMMAND",
+			ApprovalCommand: "rm -rf /tmp/demo",
+		},
+	)
+
+	lines := stripStyledLines(renderSubagentPanelLogLines(panel, ctx, 100, 20))
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "• Waiting approval: RUN_COMMAND rm -rf /tmp/demo") {
+		t.Fatalf("subagent log stream missing approval context:\n%s", joined)
+	}
+	if strings.Contains(joined, "waiting for subagent output") {
+		t.Fatalf("subagent log stream rendered placeholder instead of approval:\n%s", joined)
+	}
+}
+
+func TestSubagentPanelLogStreamShowsApprovalFallback(t *testing.T) {
+	model := newGatewayEventTestModel()
+	ctx := BlockRenderContext{Width: 120, TermWidth: 120, Theme: model.theme}
+	panel := NewSubagentPanelBlock("spawn-1", "", "helper", "spawn-call-1")
+	panel.Status = "waiting_approval"
+
+	lines := stripStyledLines(renderSubagentPanelLogLines(panel, ctx, 100, 20))
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "• Waiting approval") {
+		t.Fatalf("subagent log stream missing approval fallback:\n%s", joined)
+	}
+	if strings.Contains(joined, "waiting for subagent output") {
+		t.Fatalf("subagent log stream rendered placeholder instead of approval fallback:\n%s", joined)
+	}
+}
+
+func TestSubagentPanelLogStreamShowsFailedToolOutput(t *testing.T) {
+	model := newGatewayEventTestModel()
+	ctx := BlockRenderContext{Width: 120, TermWidth: 120, Theme: model.theme}
+	panel := NewSubagentPanelBlock("spawn-1", "", "helper", "spawn-call-1")
+	panel.Events = append(panel.Events,
+		SubagentEvent{
+			Kind:   SEToolCall,
+			CallID: "test-1",
+			Name:   "RUN_COMMAND",
+			Args:   "go test ./broken",
+		},
+		SubagentEvent{
+			Kind:   SEToolCall,
+			CallID: "test-1",
+			Name:   "RUN_COMMAND",
+			Args:   "go test ./broken",
+			Output: "panic: failed setup\nexit status 1",
+			Done:   true,
+			Err:    true,
+		},
+	)
+
+	lines := stripStyledLines(renderSubagentPanelLogLines(panel, ctx, 100, 20))
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "• Error: panic: failed setup") || !strings.Contains(joined, "• exit status 1") {
+		t.Fatalf("subagent log stream missing failed tool output:\n%s", joined)
+	}
+	if strings.Contains(joined, "• Run go test ./broken") {
+		t.Fatalf("subagent log stream should prefer error output over generic command trace:\n%s", joined)
+	}
+}
+
+func stripStyledLines(lines []string) []string {
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		out = append(out, ansi.Strip(line))
+	}
+	return out
+}
+
 func TestSubagentPanelPreviewShowsToolAfterNarrative(t *testing.T) {
 	model := newGatewayEventTestModel()
 	ctx := BlockRenderContext{Width: 140, TermWidth: 140, Theme: model.theme}
@@ -512,8 +640,8 @@ func TestSubagentPanelPreviewShowsToolAfterNarrative(t *testing.T) {
 	if !strings.Contains(joined, `Search "type PermissionGroup struct" in sfs`) {
 		t.Fatalf("subagent preview missing latest search activity:\n%s", joined)
 	}
-	if strings.Contains(joined, "I will search the repository.") {
-		t.Fatalf("subagent preview showed stale narrative instead of latest tool:\n%s", joined)
+	if !strings.Contains(joined, "I will search the repository.") {
+		t.Fatalf("subagent log stream dropped prior narrative:\n%s", joined)
 	}
 }
 
@@ -546,12 +674,13 @@ func TestSubagentPanelPreviewCompactsWindowsSearchToolTail(t *testing.T) {
 	if strings.Contains(strings.ToLower(joined), "completed") {
 		t.Fatalf("subagent preview leaked status-only completion:\n%s", joined)
 	}
-	if got := countRowsContaining(plain, "Search "); got != 1 {
-		t.Fatalf("subagent preview search rows = %d, want 1\n%s", got, joined)
+	if got := countRowsContaining(plain, "Search "); got != 3 {
+		t.Fatalf("subagent preview search rows = %d, want 3\n%s", got, joined)
 	}
 	for _, want := range []string{
+		`Search "type PermissionGroup struct" in sfs`,
 		`Search "type PermissionGroupRule struct" in sfs`,
-		`(+1 more)`,
+		`Search "type MountPoint struct" in sfs`,
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("subagent preview missing %q:\n%s", want, joined)

@@ -578,7 +578,7 @@ func renderSubagentPanelLines(panel *SubagentPanelBlock, ctx BlockRenderContext)
 	}
 	boxWidth := maxInt(20, baseWidth-4)
 	contentWidth := maxInt(1, boxWidth-4)
-	lines := renderSubagentTailPreviewLines(panel, ctx, contentWidth, subagentTailPreviewLineLimit(panel))
+	lines := renderSubagentPanelLogLines(panel, ctx, contentWidth, subagentTailPreviewLineLimit(panel))
 	if len(lines) == 0 {
 		_, lines, _ = subagentPanelRenderLines(panel, ctx, boxWidth)
 		if panel.Terminal {
@@ -612,12 +612,7 @@ func subagentPanelRenderLines(panel *SubagentPanelBlock, ctx BlockRenderContext,
 }
 
 func renderSubagentInnerLines(panel *SubagentPanelBlock, ctx BlockRenderContext, contentWidth int) []string {
-	events, status := subagentPanelDisplayEvents(panel)
-	return renderACPTranscriptLines(panel.id, events, status, contentWidth, ctx, acpTranscriptRenderOptions{
-		EmptyPlaceholder: "waiting for subagent output",
-		HideCompletedRow: true,
-		ToolPanelRows:    panel.renderToolPanelRows,
-	})
+	return renderSubagentPanelLogLines(panel, ctx, contentWidth, 0)
 }
 
 func (b *SubagentPanelBlock) renderToolPanelRows(request toolPanelRenderRequest) []RenderedRow {

@@ -186,7 +186,7 @@ func isFinalResponse(event *StreamEvent) bool {
 		return false
 	}
 	if event.Response != nil {
-		if event.Response.TurnComplete || event.Response.StepComplete || event.Response.Status == ResponseStatusCompleted {
+		if event.TurnComplete || event.StepComplete || event.Status == ResponseStatusCompleted {
 			return true
 		}
 	}
