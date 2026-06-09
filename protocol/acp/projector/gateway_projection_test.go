@@ -49,6 +49,24 @@ func TestProjectGatewayEventEnvelopeProjectsGatewayToolResult(t *testing.T) {
 	}
 }
 
+func TestProjectGatewayEventEnvelopeAddsInvocationMeta(t *testing.T) {
+	events := ProjectGatewayEventEnvelope(gateway.EventEnvelope{Event: gateway.Event{
+		Kind:       gateway.EventKindAssistantMessage,
+		SessionRef: session.SessionRef{SessionID: "session-1"},
+		Narrative:  &gateway.NarrativePayload{Role: gateway.NarrativeRoleAssistant, Text: "done"},
+		Invocation: &session.EventInvocation{Provider: "deepseek", Model: "deepseek-v4-flash"},
+	}})
+	if len(events) == 0 {
+		t.Fatal("ProjectGatewayEventEnvelope() returned no events")
+	}
+	if got := metaString(events[0].Meta, "caelis", "invocation", "provider"); got != "deepseek" {
+		t.Fatalf("invocation provider = %q, want deepseek", got)
+	}
+	if got := metaString(events[0].Meta, "caelis", "invocation", "model"); got != "deepseek-v4-flash" {
+		t.Fatalf("invocation model = %q, want deepseek-v4-flash", got)
+	}
+}
+
 func TestProjectGatewayEventEnvelopeProjectsProtocolPermission(t *testing.T) {
 	events := ProjectGatewayEventEnvelope(gateway.EventEnvelope{Event: gateway.Event{
 		Kind:       gateway.EventKindApprovalRequested,

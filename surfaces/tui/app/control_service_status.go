@@ -158,6 +158,13 @@ func formatSessionTokenUsageStatus(status control.StatusSnapshot) string {
 		return ""
 	}
 	rows := []tokenUsageStatusRow{{scope: "total", usage: total}}
+	for _, item := range status.SessionUsageByModel {
+		usage := normalizedUsageSnapshot(item.Usage)
+		if usageSnapshotZero(usage) {
+			continue
+		}
+		rows = append(rows, tokenUsageStatusRow{scope: modelUsageStatusLabel(item), usage: usage})
+	}
 	main := normalizedUsageSnapshot(status.SessionUsageMain)
 	subagents := normalizedUsageSnapshot(status.SessionUsageSubagents)
 	autoReview := normalizedUsageSnapshot(status.SessionUsageAutoReview)
@@ -171,6 +178,21 @@ func formatSessionTokenUsageStatus(status control.StatusSnapshot) string {
 		rows = append(rows, tokenUsageStatusRow{scope: "auto-review", usage: autoReview})
 	}
 	return formatTokenUsageTable(rows)
+}
+
+func modelUsageStatusLabel(item control.ModelUsageSnapshot) string {
+	provider := strings.TrimSpace(item.Provider)
+	model := strings.TrimSpace(item.Model)
+	switch {
+	case provider != "" && model != "":
+		return provider + "/" + model
+	case model != "":
+		return model
+	case provider != "":
+		return provider
+	default:
+		return "unknown-model"
+	}
 }
 
 type tokenUsageStatusRow struct {

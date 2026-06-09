@@ -159,17 +159,22 @@ func TestCloneEventPreservesCompactEnvelope(t *testing.T) {
 			Level: "warn",
 			Text:  "retrying",
 		},
+		Invocation: &EventInvocation{
+			Provider: "deepseek",
+			Model:    "deepseek-v4-flash",
+		},
 		Message: ptrMessage(model.NewTextMessage(model.RoleAssistant, "hello")),
 		Meta:    map[string]any{"raw": "ok"},
 	}
 
 	cloned := CloneEvent(event)
-	if cloned == nil || cloned.Scope == nil || cloned.Notice == nil {
+	if cloned == nil || cloned.Scope == nil || cloned.Notice == nil || cloned.Invocation == nil {
 		t.Fatal("CloneEvent() must preserve nested envelope payloads")
 	}
 	cloned.Actor.Name = "mutated"
 	cloned.Scope.TurnID = "turn-2"
 	cloned.Notice.Text = "changed"
+	cloned.Invocation.Model = "changed"
 	cloned.Meta["raw"] = "changed"
 	if event.Actor.Name != "kernel" {
 		t.Fatalf("source actor mutated = %q", event.Actor.Name)
@@ -179,6 +184,9 @@ func TestCloneEventPreservesCompactEnvelope(t *testing.T) {
 	}
 	if event.Notice.Text != "retrying" {
 		t.Fatalf("source notice text = %q, want %q", event.Notice.Text, "retrying")
+	}
+	if event.Invocation.Model != "deepseek-v4-flash" {
+		t.Fatalf("source invocation model = %q, want deepseek-v4-flash", event.Invocation.Model)
 	}
 	if got := event.Meta["raw"]; got != "ok" {
 		t.Fatalf("source meta raw = %v, want %q", got, "ok")

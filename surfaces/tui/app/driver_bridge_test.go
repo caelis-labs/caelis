@@ -1508,22 +1508,27 @@ func TestFormatAgentStatusSnapshotShowsDelegatedParticipants(t *testing.T) {
 
 func TestFormatStatusSnapshotUsesFriendlyThemeableLines(t *testing.T) {
 	got := formatStatusSnapshot(control.StatusSnapshot{
-		SessionID:                "sess-1",
-		Provider:                 "acp",
-		ModelName:                "gpt-5.5",
-		Model:                    "gpt-5.5 [high]",
-		ModeLabel:                "Default",
-		SandboxType:              "seatbelt",
-		Route:                    "sandbox",
-		Workspace:                "/tmp/ws",
-		StoreDir:                 "/tmp/store",
-		MissingAPIKey:            true,
-		HostExecution:            true,
-		FullAccessMode:           true,
-		SessionUsageTotal:        control.UsageSnapshot{PromptTokens: 12600, CachedInputTokens: 9000, CompletionTokens: 200, ReasoningTokens: 50, TotalTokens: 12800},
-		SessionUsageMain:         control.UsageSnapshot{PromptTokens: 10000, CachedInputTokens: 7000, CompletionTokens: 150, ReasoningTokens: 30, TotalTokens: 10150},
-		SessionUsageSubagents:    control.UsageSnapshot{PromptTokens: 2000, CachedInputTokens: 1800, CompletionTokens: 40, ReasoningTokens: 15, TotalTokens: 2040},
-		SessionUsageAutoReview:   control.UsageSnapshot{PromptTokens: 600, CachedInputTokens: 200, CompletionTokens: 10, ReasoningTokens: 5, TotalTokens: 610},
+		SessionID:              "sess-1",
+		Provider:               "acp",
+		ModelName:              "gpt-5.5",
+		Model:                  "gpt-5.5 [high]",
+		ModeLabel:              "Default",
+		SandboxType:            "seatbelt",
+		Route:                  "sandbox",
+		Workspace:              "/tmp/ws",
+		StoreDir:               "/tmp/store",
+		MissingAPIKey:          true,
+		HostExecution:          true,
+		FullAccessMode:         true,
+		SessionUsageTotal:      control.UsageSnapshot{PromptTokens: 12600, CachedInputTokens: 9000, CompletionTokens: 200, ReasoningTokens: 50, TotalTokens: 12800},
+		SessionUsageMain:       control.UsageSnapshot{PromptTokens: 10000, CachedInputTokens: 7000, CompletionTokens: 150, ReasoningTokens: 30, TotalTokens: 10150},
+		SessionUsageSubagents:  control.UsageSnapshot{PromptTokens: 2000, CachedInputTokens: 1800, CompletionTokens: 40, ReasoningTokens: 15, TotalTokens: 2040},
+		SessionUsageAutoReview: control.UsageSnapshot{PromptTokens: 600, CachedInputTokens: 200, CompletionTokens: 10, ReasoningTokens: 5, TotalTokens: 610},
+		SessionUsageByModel: []control.ModelUsageSnapshot{{
+			Provider: "deepseek",
+			Model:    "deepseek-v4-flash",
+			Usage:    control.UsageSnapshot{PromptTokens: 2000, CachedInputTokens: 1800, CompletionTokens: 40, ReasoningTokens: 15, TotalTokens: 2040},
+		}},
 		SessionInputTokens:       12600,
 		SessionCachedInputTokens: 9000,
 		SessionOutputTokens:      200,
@@ -1535,7 +1540,7 @@ func TestFormatStatusSnapshotUsesFriendlyThemeableLines(t *testing.T) {
 			t.Fatalf("formatStatusSnapshot() = %q, should not contain log-style label %q", got, forbidden)
 		}
 	}
-	for _, want := range []string{"  Model:", "  Mode:", "  Sandbox:", "  Workspace:", "  Session:", "sess-1", "  Scope", "-----", "total", "12,800", "main", "10,150", "sub-agent", "2,040", "auto-review", "610", "Warning:", "API key is missing"} {
+	for _, want := range []string{"  Model:", "  Mode:", "  Sandbox:", "  Workspace:", "  Session:", "sess-1", "  Scope", "-----", "total", "12,800", "deepseek/deepseek-v4-flash", "main", "10,150", "sub-agent", "2,040", "auto-review", "610", "Warning:", "API key is missing"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("formatStatusSnapshot() = %q, want substring %q", got, want)
 		}

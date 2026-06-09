@@ -25,6 +25,8 @@ type SessionSnapshot = control.SessionSnapshot
 
 type UsageSnapshot = control.UsageSnapshot
 
+type ModelUsageSnapshot = control.ModelUsageSnapshot
+
 type SandboxSetupStatus = control.SandboxSetupStatus
 
 type SandboxSetupCheck = control.SandboxSetupCheck

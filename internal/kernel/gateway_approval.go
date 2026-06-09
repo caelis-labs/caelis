@@ -119,8 +119,8 @@ func (g *Gateway) resolveApprovalRequest(
 	terminal.Risk = strings.TrimSpace(result.Risk)
 	terminal.Authorization = strings.TrimSpace(result.Authorization)
 	terminal.DecisionSource = strings.TrimSpace(result.DecisionSource)
-	handle.publishApprovalReviewPayloadWithUsage(req, terminal, result.Usage)
-	_ = g.persistApprovalReviewUsage(context.WithoutCancel(turnCtx), req, result.Usage, terminal.DecisionSource)
+	handle.publishApprovalReviewPayloadWithUsage(req, terminal, result.Usage, result.Invocation)
+	_ = g.persistApprovalReviewUsage(context.WithoutCancel(turnCtx), req, result.Usage, terminal.DecisionSource, result.Invocation)
 
 	// Do not abort the turn after repeated denials: a per-turn circuit breaker
 	// overwrote the reviewer's rationale with a generic "too many approval requests" error.
@@ -128,7 +128,7 @@ func (g *Gateway) resolveApprovalRequest(
 	return response, nil
 }
 
-func (g *Gateway) persistApprovalReviewUsage(ctx context.Context, req *agent.ApprovalRequest, usage *UsageSnapshot, source string) error {
+func (g *Gateway) persistApprovalReviewUsage(ctx context.Context, req *agent.ApprovalRequest, usage *UsageSnapshot, source string, invocation *session.EventInvocation) error {
 	if g == nil || g.sessions == nil || req == nil || usage == nil || usageSnapshotEmpty(*usage) {
 		return nil
 	}
@@ -150,9 +150,67 @@ func (g *Gateway) persistApprovalReviewUsage(ctx context.Context, req *agent.App
 		addUsageSnapshot(&total, usageCopy)
 		accounting["auto_review"] = usageSnapshotMeta(total)
 		accounting["auto_review_source"] = source
+		if invocation != nil {
+			accounting["by_model"] = addUsageByModelState(accounting["by_model"], *invocation, usageCopy)
+		}
 		next[StateUsageAccounting] = accounting
 		return next, nil
 	})
+}
+
+func addUsageByModelState(existing any, invocation session.EventInvocation, usage UsageSnapshot) []any {
+	invocation = session.CloneEventInvocation(invocation)
+	if invocation.Provider == "" && invocation.Model == "" {
+		return anySliceValue(existing)
+	}
+	rows := anySliceValue(existing)
+	key := invocation.Provider + "\x00" + invocation.Model
+	for i, row := range rows {
+		item := anyMapValue(row)
+		if item == nil {
+			continue
+		}
+		if anyStringValue(item["provider"])+"\x00"+anyStringValue(item["model"]) != key {
+			continue
+		}
+		total := UsageSnapshot{}
+		if existingUsage := UsageSnapshotFromMap(anyMapValue(item["usage"])); existingUsage != nil {
+			total = *existingUsage
+		}
+		addUsageSnapshot(&total, usage)
+		item["usage"] = usageSnapshotMeta(total)
+		rows[i] = item
+		return rows
+	}
+	rows = append(rows, map[string]any{
+		"provider": invocation.Provider,
+		"model":    invocation.Model,
+		"usage":    usageSnapshotMeta(usage),
+	})
+	return rows
+}
+
+func anySliceValue(value any) []any {
+	if value == nil {
+		return nil
+	}
+	switch typed := value.(type) {
+	case []any:
+		return append([]any(nil), typed...)
+	case []map[string]any:
+		out := make([]any, 0, len(typed))
+		for _, item := range typed {
+			out = append(out, item)
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func anyStringValue(value any) string {
+	text, _ := value.(string)
+	return strings.TrimSpace(text)
 }
 
 func usageSnapshotMeta(usage UsageSnapshot) map[string]any {

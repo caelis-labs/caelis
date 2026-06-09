@@ -164,6 +164,17 @@ func usageSnapshotFromSessionEvent(event *session.Event) *UsageSnapshot {
 	return gatewayapi.UsageSnapshotFromSessionEvent(event)
 }
 
+func canonicalInvocationPayload(event *session.Event) *session.EventInvocation {
+	if event == nil || event.Invocation == nil {
+		return nil
+	}
+	invocation := session.CloneEventInvocation(*event.Invocation)
+	if invocation.Provider == "" && invocation.Model == "" {
+		return nil
+	}
+	return &invocation
+}
+
 // UsageSnapshotFromSessionEvent projects provider token usage from a durable
 // session event into the canonical gateway usage contract.
 func UsageSnapshotFromSessionEvent(event *session.Event) *UsageSnapshot {

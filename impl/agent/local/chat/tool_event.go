@@ -194,6 +194,21 @@ func responseMeta(resp *model.Response) map[string]any {
 	}
 }
 
+func responseInvocation(resp *model.Response) *session.EventInvocation {
+	if resp == nil {
+		return nil
+	}
+	provider := strings.TrimSpace(resp.Provider)
+	modelName := strings.TrimSpace(resp.Model)
+	if provider == "" && modelName == "" {
+		return nil
+	}
+	return &session.EventInvocation{
+		Provider: provider,
+		Model:    modelName,
+	}
+}
+
 func toolMeta(name string) map[string]any {
 	name = strings.TrimSpace(name)
 	if name == "" {

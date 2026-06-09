@@ -390,14 +390,15 @@ type EventOrigin struct {
 }
 
 type Event struct {
-	Kind       EventKind          `json:"kind"`
-	HandleID   string             `json:"handle_id,omitempty"`
-	RunID      string             `json:"run_id,omitempty"`
-	TurnID     string             `json:"turn_id,omitempty"`
-	OccurredAt time.Time          `json:"occurred_at,omitempty"`
-	SessionRef session.SessionRef `json:"session_ref,omitempty"`
-	Origin     *EventOrigin       `json:"origin,omitempty"`
-	Meta       map[string]any     `json:"_meta,omitempty"`
+	Kind       EventKind                `json:"kind"`
+	HandleID   string                   `json:"handle_id,omitempty"`
+	RunID      string                   `json:"run_id,omitempty"`
+	TurnID     string                   `json:"turn_id,omitempty"`
+	OccurredAt time.Time                `json:"occurred_at,omitempty"`
+	SessionRef session.SessionRef       `json:"session_ref,omitempty"`
+	Origin     *EventOrigin             `json:"origin,omitempty"`
+	Meta       map[string]any           `json:"_meta,omitempty"`
+	Invocation *session.EventInvocation `json:"invocation,omitempty"`
 	// Protocol is the canonical ACP-shaped event payload. UI layers should use
 	// this plus _meta.caelis, not gateway display fallbacks, as their semantic
 	// source of truth.

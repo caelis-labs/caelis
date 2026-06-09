@@ -141,6 +141,7 @@ func modelResponseEvent(message model.Message, resp *model.Response) *session.Ev
 	}
 	if resp != nil {
 		out.Meta = responseMeta(resp)
+		out.Invocation = responseInvocation(resp)
 	}
 	return out
 }
@@ -170,6 +171,9 @@ func modelToolCallEvents(message model.Message, resp *model.Response) []*session
 		if i == 0 {
 			event.Message = &message
 			event.Text = message.TextContent()
+			if resp != nil {
+				event.Invocation = responseInvocation(resp)
+			}
 		}
 		out = append(out, event)
 	}

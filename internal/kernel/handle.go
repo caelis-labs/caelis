@@ -292,6 +292,7 @@ func (h *turnHandle) publishSessionEvent(event *session.Event) {
 			SessionRef:  h.sessionRef,
 			Origin:      canonicalOriginFromSessionEvent(h.sessionRef, event),
 			Meta:        canonicalEventMeta(event),
+			Invocation:  canonicalInvocationPayload(event),
 			Protocol:    canonicalProtocolPayload(event),
 			Usage:       usageSnapshotFromSessionEvent(event),
 			Narrative:   canonicalNarrativePayload(event),
@@ -311,22 +312,30 @@ func (h *turnHandle) publishApproval(req *agent.ApprovalRequest) <-chan Approval
 }
 
 func (h *turnHandle) publishApprovalPayload(req *agent.ApprovalRequest, payload *ApprovalPayload) {
-	h.publishApprovalEvent(req, payload, EventKindApprovalRequested)
+	h.publishApprovalEvent(req, payload, EventKindApprovalRequested, nil, nil)
 }
 
 func (h *turnHandle) publishApprovalReviewPayload(req *agent.ApprovalRequest, payload *ApprovalPayload) {
-	h.publishApprovalEvent(req, payload, EventKindApprovalReview)
+	h.publishApprovalEvent(req, payload, EventKindApprovalReview, nil, nil)
 }
 
-func (h *turnHandle) publishApprovalReviewPayloadWithUsage(req *agent.ApprovalRequest, payload *ApprovalPayload, usage *UsageSnapshot) {
-	h.publishApprovalEvent(req, payload, EventKindApprovalReview, usage)
+func (h *turnHandle) publishApprovalReviewPayloadWithUsage(req *agent.ApprovalRequest, payload *ApprovalPayload, usage *UsageSnapshot, invocation *session.EventInvocation) {
+	h.publishApprovalEvent(req, payload, EventKindApprovalReview, usage, invocation)
 }
 
-func (h *turnHandle) publishApprovalEvent(req *agent.ApprovalRequest, payload *ApprovalPayload, kind EventKind, usage ...*UsageSnapshot) {
+func (h *turnHandle) publishApprovalEvent(req *agent.ApprovalRequest, payload *ApprovalPayload, kind EventKind, usage *UsageSnapshot, invocation *session.EventInvocation) {
 	var eventUsage *UsageSnapshot
-	if len(usage) > 0 && usage[0] != nil {
-		copy := *usage[0]
+	if usage != nil {
+		copy := *usage
 		eventUsage = &copy
+	}
+	var eventInvocation *session.EventInvocation
+	if invocation != nil {
+		copy := session.CloneEventInvocation(*invocation)
+		eventInvocation = &copy
+	}
+	if eventInvocation != nil && eventInvocation.Provider == "" && eventInvocation.Model == "" {
+		eventInvocation = nil
 	}
 	h.publish(EventEnvelope{
 		Cursor: h.allocateCursor(),
@@ -338,6 +347,7 @@ func (h *turnHandle) publishApprovalEvent(req *agent.ApprovalRequest, payload *A
 			SessionRef:      h.sessionRef,
 			Origin:          canonicalOriginFromApproval(req, h.sessionRef, h.turnID),
 			Meta:            canonicalApprovalEventMeta(req),
+			Invocation:      eventInvocation,
 			Usage:           eventUsage,
 			ApprovalPayload: cloneApprovalPayload(payload),
 		},

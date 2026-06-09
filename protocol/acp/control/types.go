@@ -33,6 +33,12 @@ type UsageSnapshot struct {
 	TotalTokens       int
 }
 
+type ModelUsageSnapshot struct {
+	Provider string
+	Model    string
+	Usage    UsageSnapshot
+}
+
 type SessionSnapshot struct {
 	SessionID string
 }
@@ -154,6 +160,7 @@ type StatusSnapshot struct {
 	SessionUsageMain                UsageSnapshot
 	SessionUsageSubagents           UsageSnapshot
 	SessionUsageAutoReview          UsageSnapshot
+	SessionUsageByModel             []ModelUsageSnapshot
 	SessionInputTokens              int
 	SessionCachedInputTokens        int
 	SessionOutputTokens             int

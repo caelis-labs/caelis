@@ -104,6 +104,7 @@ type ReviewResult struct {
 	DisplayText    string
 	DecisionSource string
 	Usage          *UsageSnapshot
+	Invocation     *session.EventInvocation
 }
 
 type Reviewer interface {

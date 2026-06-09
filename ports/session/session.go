@@ -283,6 +283,14 @@ type ACPRef struct {
 	EventType string `json:"event_type,omitempty"`
 }
 
+// EventInvocation records runtime-owned model invocation context for one event.
+// Provider token usage remains in provider metadata; this context lets usage
+// accounting group those tokens without overloading the provider Usage shape.
+type EventInvocation struct {
+	Provider string `json:"provider,omitempty"`
+	Model    string `json:"model,omitempty"`
+}
+
 // EventScope is the compact session/controller/participant origin view for one
 // canonical event.
 type EventScope struct {
@@ -386,6 +394,7 @@ type Event struct {
 	Time              time.Time               `json:"time,omitempty"`
 	Actor             ActorRef                `json:"actor,omitempty"`
 	Scope             *EventScope             `json:"scope,omitempty"`
+	Invocation        *EventInvocation        `json:"invocation,omitempty"`
 	UserMessage       *EventMessagePayload    `json:"user_message,omitempty"`
 	AssistantMessage  *EventMessagePayload    `json:"assistant_message,omitempty"`
 	SystemContext     *EventMessagePayload    `json:"system_context,omitempty"`
@@ -1178,6 +1187,10 @@ func CloneEvent(in *Event) *Event {
 	out.Text = in.Text
 	out.Meta = maps.Clone(in.Meta)
 	out.Actor = CloneActorRef(in.Actor)
+	if in.Invocation != nil {
+		invocation := CloneEventInvocation(*in.Invocation)
+		out.Invocation = &invocation
+	}
 	if in.Scope != nil {
 		scope := CloneEventScope(*in.Scope)
 		out.Scope = &scope
@@ -1323,6 +1336,14 @@ func CloneActorRef(in ActorRef) ActorRef {
 		ID:   strings.TrimSpace(in.ID),
 		Role: strings.TrimSpace(in.Role),
 		Name: strings.TrimSpace(in.Name),
+	}
+}
+
+// CloneEventInvocation returns one normalized invocation context copy.
+func CloneEventInvocation(in EventInvocation) EventInvocation {
+	return EventInvocation{
+		Provider: strings.TrimSpace(in.Provider),
+		Model:    strings.TrimSpace(in.Model),
 	}
 }
 

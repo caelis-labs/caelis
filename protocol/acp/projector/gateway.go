@@ -110,8 +110,34 @@ func acpEventBase(env gateway.EventEnvelope) eventstream.Envelope {
 		Actor:         acpEventActor(ev, ""),
 		ParticipantID: acpEventParticipantID(ev),
 		Final:         acpEventFinal(ev),
-		Meta:          maps.Clone(ev.Meta),
+		Meta:          acpEventMeta(ev),
 	}
+}
+
+func acpEventMeta(ev gateway.Event) map[string]any {
+	meta := maps.Clone(ev.Meta)
+	if ev.Invocation == nil {
+		return meta
+	}
+	invocation := session.CloneEventInvocation(*ev.Invocation)
+	if invocation.Provider == "" && invocation.Model == "" {
+		return meta
+	}
+	if meta == nil {
+		meta = map[string]any{}
+	}
+	caelis, _ := meta["caelis"].(map[string]any)
+	if caelis == nil {
+		caelis = map[string]any{}
+	} else {
+		caelis = maps.Clone(caelis)
+	}
+	caelis["invocation"] = map[string]any{
+		"provider": invocation.Provider,
+		"model":    invocation.Model,
+	}
+	meta["caelis"] = caelis
+	return meta
 }
 
 func sessionTypeFromEventKind(kind gateway.EventKind) session.EventType {

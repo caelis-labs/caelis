@@ -1119,6 +1119,10 @@ func TestAdapterStatusIncludesContextUsageSnapshot(t *testing.T) {
 		Event: &session.Event{
 			Message: ptrRuntimeMessage(model.NewTextMessage(model.RoleAssistant, "world")),
 			Text:    "world",
+			Invocation: &session.EventInvocation{
+				Provider: "ollama",
+				Model:    "llama3",
+			},
 			Meta: map[string]any{
 				"provider":            "ollama",
 				"model":               "llama3",
@@ -1148,6 +1152,13 @@ func TestAdapterStatusIncludesContextUsageSnapshot(t *testing.T) {
 	}
 	if status.SessionUsageMain.PromptTokens != 12600 || status.SessionUsageMain.ReasoningTokens != 50 {
 		t.Fatalf("main usage = %+v, want assistant usage", status.SessionUsageMain)
+	}
+	if len(status.SessionUsageByModel) != 1 {
+		t.Fatalf("SessionUsageByModel = %#v, want one model row", status.SessionUsageByModel)
+	}
+	row := status.SessionUsageByModel[0]
+	if row.Provider != "ollama" || row.Model != "llama3" || row.Usage.PromptTokens != 12600 || row.Usage.TotalTokens != 12800 {
+		t.Fatalf("model usage row = %+v, want ollama/llama3 usage", row)
 	}
 }
 
@@ -1257,6 +1268,17 @@ func TestAdapterSessionTokenUsageBreakdownIncludesSelfSubagentAndAutoReview(t *t
 				"reasoning_tokens":    2,
 				"total_tokens":        9,
 			},
+			"by_model": []any{map[string]any{
+				"provider": "deepseek",
+				"model":    "deepseek-v4-pro",
+				"usage": map[string]any{
+					"prompt_tokens":       7,
+					"cached_input_tokens": 1,
+					"completion_tokens":   2,
+					"reasoning_tokens":    2,
+					"total_tokens":        9,
+				},
+			}},
 		}
 		return next, nil
 	}); err != nil {
@@ -1310,6 +1332,13 @@ func TestAdapterSessionTokenUsageBreakdownIncludesSelfSubagentAndAutoReview(t *t
 	}
 	if usage.Total.PromptTokens != 37 || usage.Total.CachedInputTokens != 8 || usage.Total.CompletionTokens != 10 || usage.Total.ReasoningTokens != 8 || usage.Total.TotalTokens != 47 {
 		t.Fatalf("total usage = %+v, want all buckets", usage.Total)
+	}
+	if len(usage.ByModel) != 1 {
+		t.Fatalf("by-model usage = %#v, want one auto-review model row", usage.ByModel)
+	}
+	modelRow := usage.ByModel["deepseek\x00deepseek-v4-pro"]
+	if modelRow.Provider != "deepseek" || modelRow.Model != "deepseek-v4-pro" || modelRow.Usage.TotalTokens != 9 {
+		t.Fatalf("by-model row = %+v, want deepseek/deepseek-v4-pro usage", modelRow)
 	}
 }
 

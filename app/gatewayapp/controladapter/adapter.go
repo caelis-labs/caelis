@@ -534,6 +534,7 @@ func (d *Adapter) status(ctx context.Context, includeDiagnostics bool) (StatusSn
 				status.SessionUsageMain = usageSnapshotFromKernel(usage.Main)
 				status.SessionUsageSubagents = usageSnapshotFromKernel(usage.Subagents)
 				status.SessionUsageAutoReview = usageSnapshotFromKernel(usage.AutoReview)
+				status.SessionUsageByModel = modelUsageSnapshotsFromBreakdown(usage)
 				status.SessionInputTokens = usage.Total.PromptTokens
 				status.SessionCachedInputTokens = usage.Total.CachedInputTokens
 				status.SessionOutputTokens = usage.Total.CompletionTokens

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"sort"
 	"strings"
 
 	"github.com/OnslaughtSnail/caelis/ports/gateway"
@@ -23,6 +24,13 @@ type sessionTokenUsageBreakdown struct {
 	Main       gateway.UsageSnapshot
 	Subagents  gateway.UsageSnapshot
 	AutoReview gateway.UsageSnapshot
+	ByModel    map[string]modelUsageSnapshot
+}
+
+type modelUsageSnapshot struct {
+	Provider string
+	Model    string
+	Usage    gateway.UsageSnapshot
 }
 
 func usageSnapshotFromKernel(usage gateway.UsageSnapshot) UsageSnapshot {
@@ -89,6 +97,9 @@ func sessionTokenUsageBreakdownFromEvents(events []*session.Event, fallbackCateg
 			continue
 		}
 		breakdown.add(usageCategoryFromSessionEvent(event, fallbackCategory), *one)
+		if invocation, ok := invocationFromSessionEvent(event); ok {
+			breakdown.addModel(invocation.Provider, invocation.Model, *one)
+		}
 		if isToolCall {
 			lastToolCallUsageKey = usageKey
 			lastUsageWasToolCall = true
@@ -105,6 +116,17 @@ func sessionTokenUsageBreakdownFromState(state map[string]any) sessionTokenUsage
 	accounting := mapAnyValue(state[gateway.StateUsageAccounting])
 	if usage := gateway.UsageSnapshotFromMap(mapAnyValue(accounting[tokenUsageCategoryAutoReview])); usage != nil {
 		breakdown.add(tokenUsageCategoryAutoReview, *usage)
+	}
+	for _, item := range anySliceValue(accounting["by_model"]) {
+		row := mapAnyValue(item)
+		if row == nil {
+			continue
+		}
+		usage := gateway.UsageSnapshotFromMap(mapAnyValue(row["usage"]))
+		if usage == nil {
+			continue
+		}
+		breakdown.addModel(anyString(row["provider"]), anyString(row["model"]), *usage)
 	}
 	return breakdown
 }
@@ -124,6 +146,26 @@ func (u *sessionTokenUsageBreakdown) add(category string, usage gateway.UsageSna
 	}
 }
 
+func (u *sessionTokenUsageBreakdown) addModel(provider string, modelName string, usage gateway.UsageSnapshot) {
+	if u == nil {
+		return
+	}
+	provider = strings.TrimSpace(provider)
+	modelName = strings.TrimSpace(modelName)
+	if provider == "" && modelName == "" {
+		return
+	}
+	key := provider + "\x00" + modelName
+	if u.ByModel == nil {
+		u.ByModel = map[string]modelUsageSnapshot{}
+	}
+	total := u.ByModel[key]
+	total.Provider = provider
+	total.Model = modelName
+	addUsageSnapshot(&total.Usage, usage)
+	u.ByModel[key] = total
+}
+
 func (u *sessionTokenUsageBreakdown) addBreakdown(other sessionTokenUsageBreakdown) {
 	if u == nil {
 		return
@@ -132,6 +174,9 @@ func (u *sessionTokenUsageBreakdown) addBreakdown(other sessionTokenUsageBreakdo
 	addUsageSnapshot(&u.Main, other.Main)
 	addUsageSnapshot(&u.Subagents, other.Subagents)
 	addUsageSnapshot(&u.AutoReview, other.AutoReview)
+	for _, item := range other.ByModel {
+		u.addModel(item.Provider, item.Model, item.Usage)
+	}
 }
 
 func addUsageSnapshot(total *gateway.UsageSnapshot, usage gateway.UsageSnapshot) {
@@ -156,6 +201,61 @@ func usageCategoryFromSessionEvent(event *session.Event, fallback string) string
 		return tokenUsageCategorySubagent
 	}
 	return firstNonEmpty(fallback, tokenUsageCategoryMain)
+}
+
+func invocationFromSessionEvent(event *session.Event) (session.EventInvocation, bool) {
+	if event == nil {
+		return session.EventInvocation{}, false
+	}
+	if event.Invocation != nil {
+		invocation := session.CloneEventInvocation(*event.Invocation)
+		if invocation.Provider != "" || invocation.Model != "" {
+			return invocation, true
+		}
+	}
+	for _, meta := range []map[string]any{semanticUsageMetadata(event), event.Meta} {
+		if len(meta) == 0 {
+			continue
+		}
+		provider := strings.TrimSpace(anyString(nestedMapAny(meta, "caelis", "invocation", "provider")))
+		modelName := strings.TrimSpace(anyString(nestedMapAny(meta, "caelis", "invocation", "model")))
+		if provider == "" {
+			provider = strings.TrimSpace(anyString(nestedMapAny(meta, "caelis", "sdk", "provider")))
+		}
+		if modelName == "" {
+			modelName = strings.TrimSpace(anyString(nestedMapAny(meta, "caelis", "sdk", "model")))
+		}
+		if provider == "" {
+			provider = strings.TrimSpace(anyString(meta["provider"]))
+		}
+		if modelName == "" {
+			modelName = strings.TrimSpace(anyString(meta["model"]))
+		}
+		if provider != "" || modelName != "" {
+			return session.EventInvocation{Provider: provider, Model: modelName}, true
+		}
+	}
+	return session.EventInvocation{}, false
+}
+
+func semanticUsageMetadata(event *session.Event) map[string]any {
+	if event == nil {
+		return nil
+	}
+	switch {
+	case event.AssistantMessage != nil && len(event.AssistantMessage.Metadata) > 0:
+		return event.AssistantMessage.Metadata
+	case event.UserMessage != nil && len(event.UserMessage.Metadata) > 0:
+		return event.UserMessage.Metadata
+	case event.SystemContext != nil && len(event.SystemContext.Metadata) > 0:
+		return event.SystemContext.Metadata
+	case event.ToolCallPayload != nil && len(event.ToolCallPayload.Metadata) > 0:
+		return event.ToolCallPayload.Metadata
+	case event.ToolResultPayload != nil && len(event.ToolResultPayload.Metadata) > 0:
+		return event.ToolResultPayload.Metadata
+	default:
+		return nil
+	}
 }
 
 func usageCategoryFromMeta(meta map[string]any) string {
@@ -200,6 +300,21 @@ func mapAnyValue(value any) map[string]any {
 		return maps.Clone(typed)
 	}
 	return nil
+}
+
+func anySliceValue(value any) []any {
+	switch typed := value.(type) {
+	case []any:
+		return append([]any(nil), typed...)
+	case []map[string]any:
+		out := make([]any, 0, len(typed))
+		for _, item := range typed {
+			out = append(out, item)
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 func normalizeUsageCategory(category string) string {
@@ -252,4 +367,24 @@ func usageSnapshotDedupeKey(usage gateway.UsageSnapshot) string {
 		return ""
 	}
 	return fmt.Sprintf("%d/%d/%d/%d/%d", usage.PromptTokens, usage.CachedInputTokens, usage.CompletionTokens, usage.ReasoningTokens, usage.TotalTokens)
+}
+
+func modelUsageSnapshotsFromBreakdown(breakdown sessionTokenUsageBreakdown) []ModelUsageSnapshot {
+	if len(breakdown.ByModel) == 0 {
+		return nil
+	}
+	out := make([]ModelUsageSnapshot, 0, len(breakdown.ByModel))
+	for _, item := range breakdown.ByModel {
+		out = append(out, ModelUsageSnapshot{
+			Provider: item.Provider,
+			Model:    item.Model,
+			Usage:    usageSnapshotFromKernel(item.Usage),
+		})
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		left := strings.ToLower(strings.TrimSpace(out[i].Provider + "/" + out[i].Model))
+		right := strings.ToLower(strings.TrimSpace(out[j].Provider + "/" + out[j].Model))
+		return left < right
+	})
+	return out
 }

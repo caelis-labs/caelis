@@ -1493,7 +1493,8 @@ func TestPersistApprovalReviewUsageUsesSessionStateNotHistory(t *testing.T) {
 		TurnID:     "turn-1",
 	}
 	usage := &UsageSnapshot{PromptTokens: 7, CachedInputTokens: 3, CompletionTokens: 2, ReasoningTokens: 1, TotalTokens: 9}
-	if err := gw.persistApprovalReviewUsage(ctx, req, usage, string(ApprovalModeAutoReview)); err != nil {
+	invocation := &session.EventInvocation{Provider: "deepseek", Model: "deepseek-v4-pro"}
+	if err := gw.persistApprovalReviewUsage(ctx, req, usage, string(ApprovalModeAutoReview), invocation); err != nil {
 		t.Fatalf("persistApprovalReviewUsage() error = %v", err)
 	}
 	events, err := sessions.Events(ctx, session.EventsRequest{SessionRef: activeSession.SessionRef})
@@ -1511,6 +1512,18 @@ func TestPersistApprovalReviewUsageUsesSessionStateNotHistory(t *testing.T) {
 	got := UsageSnapshotFromMap(anyMapValue(accounting["auto_review"]))
 	if got == nil || *got != *usage {
 		t.Fatalf("auto-review usage state = %+v, want %+v", got, usage)
+	}
+	rows, _ := accounting["by_model"].([]any)
+	if len(rows) != 1 {
+		t.Fatalf("by_model = %#v, want one row", accounting["by_model"])
+	}
+	row := anyMapValue(rows[0])
+	if row["provider"] != "deepseek" || row["model"] != "deepseek-v4-pro" {
+		t.Fatalf("by_model row = %#v, want deepseek/deepseek-v4-pro", row)
+	}
+	modelUsage := UsageSnapshotFromMap(anyMapValue(row["usage"]))
+	if modelUsage == nil || *modelUsage != *usage {
+		t.Fatalf("by_model usage = %+v, want %+v", modelUsage, usage)
 	}
 }
 

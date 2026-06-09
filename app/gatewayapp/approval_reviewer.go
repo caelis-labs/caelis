@@ -147,7 +147,19 @@ func (r *guardianApprovalReviewer) ReviewApproval(ctx context.Context, req gatew
 		DisplayText:    gateway.FormatApprovalReviewText(approved, risk, authorization, rationale),
 		DecisionSource: "auto-review",
 		Usage:          gateway.UsageSnapshotFromSessionEvent(assistantEvent),
+		Invocation:     approvalInvocationFromEvent(assistantEvent),
 	}, nil
+}
+
+func approvalInvocationFromEvent(event *session.Event) *session.EventInvocation {
+	if event == nil || event.Invocation == nil {
+		return nil
+	}
+	invocation := session.CloneEventInvocation(*event.Invocation)
+	if invocation.Provider == "" && invocation.Model == "" {
+		return nil
+	}
+	return &invocation
 }
 
 func (r *guardianApprovalReviewer) runGuardianReview(
