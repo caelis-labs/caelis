@@ -69,4 +69,43 @@ func TestDefinitionPreservesAgentDescriptions(t *testing.T) {
 			t.Fatalf("agent description missing %q: %q", required, description)
 		}
 	}
+	required, _ := def.InputSchema["required"].([]string)
+	if hasString(required, "agent") {
+		t.Fatalf("required = %#v, want agent optional when enum agents exist", required)
+	}
+}
+
+func TestDefinitionKeepsSelfFallbackInEnumAndOptional(t *testing.T) {
+	t.Parallel()
+
+	def := New([]delegation.Agent{{Name: "self", Description: "Caelis self ACP agent"}}).Definition()
+	props, ok := def.InputSchema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("properties = %#v, want object", def.InputSchema["properties"])
+	}
+	agentProp, ok := props["agent"].(map[string]any)
+	if !ok {
+		t.Fatalf("agent property = %#v, want object", props["agent"])
+	}
+	enum, _ := agentProp["enum"].([]string)
+	if len(enum) != 1 || enum[0] != "self" {
+		t.Fatalf("agent enum = %#v, want self only", agentProp["enum"])
+	}
+	description, _ := agentProp["description"].(string)
+	if !strings.Contains(description, "omit for self") {
+		t.Fatalf("agent description = %q, want self fallback guidance", description)
+	}
+	required, _ := def.InputSchema["required"].([]string)
+	if hasString(required, "agent") {
+		t.Fatalf("required = %#v, want agent optional for self fallback", required)
+	}
+}
+
+func hasString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }

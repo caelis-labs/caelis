@@ -22,7 +22,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/protocol/acp"
 )
 
-func TestLocalStackInjectsSpawnForSelfAndAgentProfiles(t *testing.T) {
+func TestLocalStackInjectsSpawnForSelfAndAgentProfilesOnly(t *testing.T) {
 	ctx := context.Background()
 	withAgents, session := newStackWithAssemblyForToolTest(t, assembly.ResolvedAssembly{
 		Agents: []assembly.AgentConfig{{
@@ -31,6 +31,16 @@ func TestLocalStackInjectsSpawnForSelfAndAgentProfiles(t *testing.T) {
 			Command:     "go",
 			Args:        []string{"run", "./internal/acpe2eagent"},
 			WorkDir:     repoRootForGatewayAppTest(t),
+		}, {
+			Name:        "claude",
+			Description: "native Claude ACP agent",
+			Command:     "claude",
+			Args:        []string{"acp"},
+		}, {
+			Name:        "codex",
+			Description: "native Codex ACP agent",
+			Command:     "codex",
+			Args:        []string{"acp"},
 		}},
 	})
 	resolved, err := withAgents.currentGateway().Resolver().ResolveTurn(ctx, gateway.TurnIntent{SessionRef: session.SessionRef})
@@ -48,8 +58,13 @@ func TestLocalStackInjectsSpawnForSelfAndAgentProfiles(t *testing.T) {
 			t.Fatalf("SPAWN agent enum missing %q with profile agents", want)
 		}
 	}
-	if spawnToolHasAgent(resolved.RunRequest.AgentSpec.Tools, "helper") {
-		t.Fatalf("SPAWN agent enum includes raw external ACP helper")
+	if spawnToolRequiresAgent(resolved.RunRequest.AgentSpec.Tools) {
+		t.Fatalf("SPAWN agent is required despite self default")
+	}
+	for _, forbidden := range []string{"helper", "claude", "codex"} {
+		if spawnToolHasAgent(resolved.RunRequest.AgentSpec.Tools, forbidden) {
+			t.Fatalf("SPAWN agent enum includes raw ACP agent %q", forbidden)
+		}
 	}
 	systemPrompt, _ := resolved.RunRequest.AgentSpec.Metadata["system_prompt"].(string)
 	if !strings.Contains(systemPrompt, "SPAWN for bounded child-agent work") {
@@ -62,16 +77,19 @@ func TestLocalStackInjectsSpawnForSelfAndAgentProfiles(t *testing.T) {
 		t.Fatalf("ResolveTurn(without agents) error = %v", err)
 	}
 	if !toolSetHas(resolved.RunRequest.AgentSpec.Tools, spawn.ToolName) {
-		t.Fatalf("tools missing %s for default self spawn", spawn.ToolName)
+		t.Fatalf("tools missing %s for default profile spawn", spawn.ToolName)
 	}
 	for _, want := range []string{"self", "explorer", "reviewer"} {
 		if !spawnToolHasAgent(resolved.RunRequest.AgentSpec.Tools, want) {
 			t.Fatalf("SPAWN agent enum missing %q for default profile agents", want)
 		}
 	}
+	if spawnToolRequiresAgent(resolved.RunRequest.AgentSpec.Tools) {
+		t.Fatalf("SPAWN agent is required for default profile agents")
+	}
 	systemPrompt, _ = resolved.RunRequest.AgentSpec.Metadata["system_prompt"].(string)
 	if !strings.Contains(systemPrompt, "SPAWN for bounded child-agent work") {
-		t.Fatalf("system prompt missing delegation guidance for default self spawn: %q", systemPrompt)
+		t.Fatalf("system prompt missing delegation guidance for default profile spawn: %q", systemPrompt)
 	}
 	if !agentConfigSetHas(withoutAgents.runtime.Assembly.Agents, "self") {
 		t.Fatalf("self agent missing from assembly: %#v", withoutAgents.runtime.Assembly.Agents)
@@ -80,6 +98,25 @@ func TestLocalStackInjectsSpawnForSelfAndAgentProfiles(t *testing.T) {
 		if agentConfigSetHas(withoutAgents.runtime.Assembly.Agents, removed) {
 			t.Fatalf("unregistered built-in agent %q unexpectedly present: %#v", removed, withoutAgents.runtime.Assembly.Agents)
 		}
+	}
+}
+
+func TestSpawnFallsBackToImplicitSelfWhenNoSubagentProfilesExist(t *testing.T) {
+	agents := delegationAgentsForSpawn(assembly.ResolvedAssembly{
+		Agents: []assembly.AgentConfig{{
+			Name:        "self",
+			Description: "Caelis self ACP agent",
+		}},
+	}, nil)
+	tools := spawnTools(agents)
+	if !toolSetHas(tools, spawn.ToolName) {
+		t.Fatalf("tools missing %s for self fallback", spawn.ToolName)
+	}
+	if !spawnToolHasAgent(tools, "self") {
+		t.Fatalf("SPAWN agent enum missing self for implicit fallback")
+	}
+	if spawnToolRequiresAgent(tools) {
+		t.Fatalf("SPAWN agent is required for implicit self fallback")
 	}
 }
 
@@ -1185,6 +1222,21 @@ func spawnToolHasAgent(tools []tool.Tool, name string) bool {
 		enum, _ := agentProp["enum"].([]string)
 		for _, item := range enum {
 			if strings.EqualFold(strings.TrimSpace(item), strings.TrimSpace(name)) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func spawnToolRequiresAgent(tools []tool.Tool) bool {
+	for _, tool := range tools {
+		if tool == nil || !strings.EqualFold(strings.TrimSpace(tool.Definition().Name), spawn.ToolName) {
+			continue
+		}
+		required, _ := tool.Definition().InputSchema["required"].([]string)
+		for _, item := range required {
+			if strings.EqualFold(strings.TrimSpace(item), "agent") {
 				return true
 			}
 		}

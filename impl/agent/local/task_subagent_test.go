@@ -906,6 +906,87 @@ func TestRuntimeSpawnToolRejectsYieldTimeMS(t *testing.T) {
 	}
 }
 
+func TestRuntimeSpawnToolAllowsSelfDefaultAndRejectsRawACPWhenEnumExists(t *testing.T) {
+	ctx := context.Background()
+	runner := &recordingSubagentRunner{
+		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "done"},
+	}
+	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
+	targetTool := runtimeSpawnTool{
+		base:       spawn.New([]delegation.Agent{{Name: "self"}, {Name: "reviewer"}}),
+		session:    activeSession,
+		sessionRef: activeSession.SessionRef,
+		tasks:      runtime.tasks,
+		runner:     runner,
+	}
+	for _, input := range []map[string]any{
+		{"prompt": "review this"},
+		{"agent": "self", "prompt": "review this"},
+	} {
+		raw, err := json.Marshal(input)
+		if err != nil {
+			t.Fatalf("json.Marshal() error = %v", err)
+		}
+		if _, err := targetTool.Call(ctx, tool.Call{ID: "spawn-1", Name: spawn.ToolName, Input: raw}); err != nil {
+			t.Fatalf("SPAWN Call(%v) error = %v", input, err)
+		}
+		if runner.spawnRequest.Agent != "self" {
+			t.Fatalf("spawn agent = %q, want self", runner.spawnRequest.Agent)
+		}
+	}
+
+	raw, err := json.Marshal(map[string]any{"agent": "codex", "prompt": "review this"})
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	if _, err := targetTool.Call(ctx, tool.Call{ID: "spawn-reject", Name: spawn.ToolName, Input: raw}); err == nil {
+		t.Fatal("SPAWN Call(codex) error = nil, want rejection")
+	}
+
+	raw, err = json.Marshal(map[string]any{"agent": "reviewer", "prompt": "review this"})
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	if _, err := targetTool.Call(ctx, tool.Call{ID: "spawn-2", Name: spawn.ToolName, Input: raw}); err != nil {
+		t.Fatalf("SPAWN Call(reviewer) error = %v", err)
+	}
+	if runner.spawnRequest.Agent != "reviewer" {
+		t.Fatalf("spawn agent = %q, want reviewer", runner.spawnRequest.Agent)
+	}
+}
+
+func TestRuntimeSpawnToolKeepsImplicitSelfFallback(t *testing.T) {
+	ctx := context.Background()
+	runner := &recordingSubagentRunner{
+		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "done"},
+	}
+	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
+	targetTool := runtimeSpawnTool{
+		base:       spawn.New([]delegation.Agent{{Name: "self"}}),
+		session:    activeSession,
+		sessionRef: activeSession.SessionRef,
+		tasks:      runtime.tasks,
+		runner:     runner,
+	}
+	raw, err := json.Marshal(map[string]any{"prompt": "inspect this"})
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	if _, err := targetTool.Call(ctx, tool.Call{ID: "spawn-1", Name: spawn.ToolName, Input: raw}); err != nil {
+		t.Fatalf("SPAWN Call(implicit self) error = %v", err)
+	}
+	if runner.spawnRequest.Agent != "self" {
+		t.Fatalf("spawn agent = %q, want self", runner.spawnRequest.Agent)
+	}
+	raw, err = json.Marshal(map[string]any{"agent": "codex", "prompt": "inspect this"})
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	if _, err := targetTool.Call(ctx, tool.Call{ID: "spawn-2", Name: spawn.ToolName, Input: raw}); err == nil {
+		t.Fatal("SPAWN Call(codex) error = nil, want rejection")
+	}
+}
+
 func newSubagentTaskTestRuntime(t *testing.T, runner subagent.Runner) (*Runtime, session.Session) {
 	t.Helper()
 	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))

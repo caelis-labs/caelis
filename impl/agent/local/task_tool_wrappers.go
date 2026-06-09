@@ -184,7 +184,7 @@ func (t runtimeSpawnTool) Call(ctx context.Context, call tool.Call) (tool.Result
 		return tool.Result{}, err
 	}
 	agent, _ := stringArg(args, "agent")
-	agent, err = resolveSpawnAgent(t.session, agent)
+	agent, err = resolveRuntimeSpawnToolAgent(t.base.Definition(), t.session, agent)
 	if err != nil {
 		return tool.Result{}, err
 	}
@@ -201,6 +201,47 @@ func (t runtimeSpawnTool) Call(ctx context.Context, call tool.Call) (tool.Result
 	}
 	result := taskSnapshotToolResult(call, t.base.Definition(), snapshot)
 	return result, nil
+}
+
+func resolveRuntimeSpawnToolAgent(def tool.Definition, activeSession session.Session, requested string) (string, error) {
+	requested = strings.TrimSpace(requested)
+	enum := spawnAgentEnum(def)
+	if len(enum) == 0 {
+		if requested != "" && !strings.EqualFold(requested, "self") {
+			return "", fmt.Errorf("tool: SPAWN agent %q is not available", requested)
+		}
+		return resolveSpawnAgent(activeSession, requested)
+	}
+	if requested == "" {
+		for _, allowed := range enum {
+			if strings.EqualFold(allowed, "self") {
+				return strings.TrimSpace(allowed), nil
+			}
+		}
+		return "", fmt.Errorf("tool: SPAWN agent default is not available")
+	}
+	for _, allowed := range enum {
+		if strings.EqualFold(requested, allowed) {
+			return strings.TrimSpace(allowed), nil
+		}
+	}
+	return "", fmt.Errorf("tool: SPAWN agent %q is not available", requested)
+}
+
+func spawnAgentEnum(def tool.Definition) []string {
+	props, _ := def.InputSchema["properties"].(map[string]any)
+	agentProp, _ := props["agent"].(map[string]any)
+	raw, _ := agentProp["enum"].([]string)
+	if len(raw) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(raw))
+	for _, item := range raw {
+		if name := strings.TrimSpace(item); name != "" {
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 type runtimeTaskTool struct {
