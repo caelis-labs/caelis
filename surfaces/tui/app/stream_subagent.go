@@ -396,6 +396,20 @@ func (m *Model) enqueueSubagentDelta(spawnID string, stream string, chunk string
 		m.syncSubagentSessionPanels(sessionKey)
 		return m, nil
 	}
+	if final {
+		key := streamSmoothingKey("subagent", sessionKey, streamKind, "")
+		if chunk == "" {
+			m.flushMatchingStreamSmoothing(func(state *streamSmoothingState) bool {
+				return state != nil && streamSmoothingKey(state.targetKind, state.sessionKey, state.streamKind, state.actor) == key
+			})
+			m.syncSubagentSessionPanels(sessionKey)
+			return m, nil
+		}
+		m.dropPendingStreamSmoothing(key)
+		cmd := m.applySubagentFinalStreamImmediate(sessionKey, streamKind, chunk)
+		m.syncSubagentSessionPanels(sessionKey)
+		return m, cmd
+	}
 	if !m.enqueueStreamDelta("subagent", sessionKey, streamKind, "", chunk, final) {
 		m.syncSubagentSessionPanels(sessionKey)
 		return m, nil
@@ -420,6 +434,30 @@ func (m *Model) applySubagentStreamImmediate(sessionKey string, stream string, c
 		state.AppendStreamChunk(SEAssistant, chunk)
 	case "reasoning":
 		state.AppendStreamChunk(SEReasoning, chunk)
+	default:
+		return nil
+	}
+	m.syncSubagentSessionPanels(sessionKey)
+	return m.requestStreamViewportSync()
+}
+
+func (m *Model) applySubagentFinalStreamImmediate(sessionKey string, stream string, chunk string) tea.Cmd {
+	if m == nil || strings.TrimSpace(sessionKey) == "" || chunk == "" {
+		return nil
+	}
+	state := m.subagentSessions[sessionKey]
+	if state == nil {
+		_, state = m.ensureSubagentSessionState(sessionKey, "", "")
+	}
+	if state == nil {
+		return nil
+	}
+	switch stream {
+	case "assistant":
+		closeLatestReasoningTiming(state.Events, time.Now())
+		state.ReplaceFinalStreamChunk(SEAssistant, chunk)
+	case "reasoning":
+		state.ReplaceFinalStreamChunk(SEReasoning, chunk)
 	default:
 		return nil
 	}

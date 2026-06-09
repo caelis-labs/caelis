@@ -20,3 +20,4 @@ npm/packages/*/runtime/
 .superpowers
 .caelis
 plans
+.claude
