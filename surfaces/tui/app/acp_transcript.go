@@ -20,6 +20,7 @@ type acpTranscriptRenderOptions struct {
 	PlaceholderAsMeta      bool
 	HideWaitingApprovalRow bool
 	HideCompletedRow       bool
+	HideFailedRow          bool
 	ToolOutputPanels       bool
 	ToolPanelExpanded      func(callID string) bool
 	ToolPanelFullOutput    func(callID string) bool
@@ -871,6 +872,9 @@ func renderACPStatusRows(blockID string, status string, width int, ctx BlockRend
 	case "running", "initializing", "prompting":
 		return nil
 	case "failed":
+		if opts.HideFailedRow {
+			return nil
+		}
 		label = "✗ failed"
 		style = ctx.Theme.ErrorStyle().Width(width)
 	case "interrupted":

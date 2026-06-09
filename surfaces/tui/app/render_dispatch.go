@@ -560,7 +560,7 @@ func (m *Model) handleTaskResultMsg(msg TaskResultMsg) (tea.Model, tea.Cmd) {
 	if msg.ContinueRunning {
 		if msg.Err != nil {
 			m.pendingQueue = nil
-			errLine := "error: " + msg.Err.Error()
+			errLine := terminalErrorLine(msg.Err)
 			m.commitLine(errLine)
 			m.ensureViewportLayout()
 			m.syncViewportContent()
@@ -605,7 +605,7 @@ func (m *Model) handleTaskResultMsg(msg TaskResultMsg) (tea.Model, tea.Cmd) {
 			errText == PromptErrInterrupt ||
 			errText == PromptErrEOF
 		if !isPromptCancel {
-			errLine := "error: " + msg.Err.Error()
+			errLine := terminalErrorLine(msg.Err)
 			m.commitLine(errLine)
 		}
 	}
@@ -635,6 +635,22 @@ func (m *Model) handleTaskResultMsg(msg TaskResultMsg) (tea.Model, tea.Cmd) {
 		return m.submitPendingPrompt(nextPending)
 	}
 	return m, nil
+}
+
+func terminalErrorLine(err error) string {
+	if err == nil {
+		return ""
+	}
+	text := singleLineErrorText(err.Error())
+	if text == "" {
+		return ""
+	}
+	return "✗ " + text
+}
+
+func singleLineErrorText(text string) string {
+	fields := strings.Fields(strings.TrimSpace(text))
+	return strings.Join(fields, " ")
 }
 
 func (m *Model) handleRunningInterruptResultMsg(msg RunningInterruptResultMsg) (tea.Model, tea.Cmd) {

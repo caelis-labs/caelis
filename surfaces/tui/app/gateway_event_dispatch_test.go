@@ -2,6 +2,7 @@ package tuiapp
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -192,6 +193,31 @@ func TestGatewayContextCanceledRendersUserInterrupt(t *testing.T) {
 	}
 	if sawErrorText {
 		t.Fatalf("doc blocks = %#v, should not render context canceled as error", m.doc.Blocks())
+	}
+}
+
+func TestTaskResultErrorRendersSingleLineFailure(t *testing.T) {
+	model := newGatewayEventTestModel()
+	block := model.ensureMainACPTurnBlock("root-session")
+	block.AppendStreamChunk(SEAssistant, "transient text")
+
+	updated, _ := model.Update(TaskResultMsg{
+		Err: errors.New("invalid model tool call for RUN_COMMAND: unexpected EOF\nprovider detail"),
+	})
+	model = updated.(*Model)
+	model.syncViewportContent()
+
+	if block.Status != "failed" {
+		t.Fatalf("main turn status = %q, want failed terminal state", block.Status)
+	}
+	joined := strings.Join(model.viewportPlainLines, "\n")
+	if !strings.Contains(joined, "✗ invalid model tool call for RUN_COMMAND: unexpected EOF provider detail") {
+		t.Fatalf("viewport lines = %#v, want compact error line", model.viewportPlainLines)
+	}
+	for _, forbidden := range []string{"✗ failed", "error:", "unexpected EOF\nprovider detail"} {
+		if strings.Contains(joined, forbidden) {
+			t.Fatalf("viewport lines = %#v, should not contain %q", model.viewportPlainLines, forbidden)
+		}
 	}
 }
 

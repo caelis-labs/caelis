@@ -132,6 +132,10 @@ func invalidToolCallWarningEvents(message model.Message, err error, includeNarra
 	return out
 }
 
+func invalidToolCallAttemptResetEvent(attempt int, err error) *session.Event {
+	return modelAttemptResetEvent(attempt, invalidToolCallReason(err), true)
+}
+
 func invalidToolCallNarrativeEvent(message model.Message) *session.Event {
 	cloned := model.CloneMessage(message)
 	parts := make([]model.Part, 0, len(cloned.Parts))

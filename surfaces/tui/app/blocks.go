@@ -432,6 +432,7 @@ func (b *MainACPTurnBlock) Render(ctx BlockRenderContext) []RenderedRow {
 		PlaceholderAsMeta:      true,
 		HideWaitingApprovalRow: true,
 		HideCompletedRow:       true,
+		HideFailedRow:          true,
 		ToolOutputPanels:       true,
 		ToolPanelExpanded:      b.toolPanelExpanded,
 		ToolPanelFullOutput:    b.toolPanelFullOutput,

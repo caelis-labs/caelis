@@ -442,14 +442,21 @@ func TestChatAgentRetriesInvalidModelToolCallWithoutPersistingIt(t *testing.T) {
 	}
 	var canonicalEvents []*session.Event
 	var invalidWarning *session.Event
+	var resetEvents int
 	for _, event := range events {
 		if event.Visibility == session.VisibilityUIOnly {
+			if event.Type == session.EventTypeLifecycle && event.Lifecycle != nil && event.Lifecycle.Status == "attempt_reset" {
+				resetEvents++
+			}
 			if event.Type == session.EventTypeToolResult && event.Tool != nil && event.Tool.Status == "failed" {
 				invalidWarning = event
 			}
 			continue
 		}
 		canonicalEvents = append(canonicalEvents, event)
+	}
+	if resetEvents != 1 {
+		t.Fatalf("resetEvents = %d, want one reset for the invalid attempt", resetEvents)
 	}
 	warningText := ""
 	if invalidWarning != nil && invalidWarning.Tool != nil {

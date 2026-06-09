@@ -58,35 +58,15 @@ func chunkEventFromStreamEvent(event *model.StreamEvent) *session.Event {
 		return nil
 	}
 	if event.Type == model.StreamEventAttemptReset {
-		meta := map[string]any{
-			"caelis": map[string]any{
-				"version": 1,
-				"runtime": map[string]any{
-					"attempt_reset": map[string]any{},
-				},
-			},
-		}
-		resetMeta, _ := meta["caelis"].(map[string]any)
-		runtimeMeta, _ := resetMeta["runtime"].(map[string]any)
-		attemptMeta, _ := runtimeMeta["attempt_reset"].(map[string]any)
+		attempt := 0
+		cause := ""
+		retrying := false
 		if event.AttemptReset != nil {
-			if event.AttemptReset.Attempt > 0 {
-				attemptMeta["attempt"] = event.AttemptReset.Attempt
-			}
-			if cause := strings.TrimSpace(event.AttemptReset.Cause); cause != "" {
-				attemptMeta["cause"] = cause
-			}
-			attemptMeta["retrying"] = event.AttemptReset.Retrying
+			attempt = event.AttemptReset.Attempt
+			cause = event.AttemptReset.Cause
+			retrying = event.AttemptReset.Retrying
 		}
-		return session.MarkUIOnly(&session.Event{
-			Type: session.EventTypeLifecycle,
-			Text: "model attempt reset",
-			Lifecycle: &session.EventLifecycle{
-				Status: "attempt_reset",
-				Reason: "model_retry",
-			},
-			Meta: meta,
-		})
+		return modelAttemptResetEvent(attempt, cause, retrying)
 	}
 	if event.PartDelta == nil {
 		return nil
@@ -130,6 +110,36 @@ func chunkEventFromStreamEvent(event *model.StreamEvent) *session.Event {
 	default:
 		return nil
 	}
+}
+
+func modelAttemptResetEvent(attempt int, cause string, retrying bool) *session.Event {
+	meta := map[string]any{
+		"caelis": map[string]any{
+			"version": 1,
+			"runtime": map[string]any{
+				"attempt_reset": map[string]any{},
+			},
+		},
+	}
+	resetMeta, _ := meta["caelis"].(map[string]any)
+	runtimeMeta, _ := resetMeta["runtime"].(map[string]any)
+	attemptMeta, _ := runtimeMeta["attempt_reset"].(map[string]any)
+	if attempt > 0 {
+		attemptMeta["attempt"] = attempt
+	}
+	if cause := strings.TrimSpace(cause); cause != "" {
+		attemptMeta["cause"] = cause
+	}
+	attemptMeta["retrying"] = retrying
+	return session.MarkUIOnly(&session.Event{
+		Type: session.EventTypeLifecycle,
+		Text: "model attempt reset",
+		Lifecycle: &session.EventLifecycle{
+			Status: "attempt_reset",
+			Reason: "model_retry",
+		},
+		Meta: meta,
+	})
 }
 
 func modelResponseEvent(message model.Message, resp *model.Response) *session.Event {

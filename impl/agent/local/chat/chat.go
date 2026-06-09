@@ -81,40 +81,17 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 	return func(yield func(*session.Event, error) bool) {
 		messages := messagesFromContext(ctx)
 		stream := a.request.StreamEnabled(false)
-		invalidToolCallRepairAttempts := 0
 		for {
-			request := &model.Request{
-				Messages:  messages,
-				Tools:     tool.ModelSpecs(a.tools),
-				Reasoning: a.reasoning,
-				Output:    a.request.OutputSpec(),
-				Stream:    stream,
-			}
-			request.Instructions = append(request.Instructions, instructionsFromContext(ctx, a.systemPrompt)...)
-
-			final, err := collectFinalResponse(ctx, a.model, request, func(event *session.Event) bool {
+			assistantMessage, calls, final, ok, err := a.collectCanonicalModelStep(ctx, messages, stream, func(event *session.Event) bool {
 				return yield(event, nil)
 			})
+			if !ok {
+				return
+			}
 			if err != nil {
 				yield(nil, err)
 				return
 			}
-
-			assistantMessage, calls, err := canonicalizeAssistantToolCalls(final.Message, a.tools...)
-			if err != nil {
-				if invalidToolCallRepairAttempts >= maxInvalidToolCallRepairAttempts {
-					yield(nil, err)
-					return
-				}
-				invalidToolCallRepairAttempts++
-				for _, event := range invalidToolCallWarningEvents(final.Message, err, !stream) {
-					if !yield(event, nil) {
-						return
-					}
-				}
-				continue
-			}
-			invalidToolCallRepairAttempts = 0
 			if len(calls) == 0 {
 				assistantEvent := modelResponseEvent(assistantMessage, final)
 				if !yield(assistantEvent, nil) {
@@ -154,6 +131,47 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 			a.drainPendingSubmissions(ctx, &messages, func(event *session.Event) bool {
 				return yield(event, nil)
 			})
+		}
+	}
+}
+
+func (a *Agent) collectCanonicalModelStep(
+	ctx agent.Context,
+	messages []model.Message,
+	stream bool,
+	yield func(*session.Event) bool,
+) (model.Message, []model.ToolCall, *model.Response, bool, error) {
+	for attempt := 0; ; attempt++ {
+		request := &model.Request{
+			Messages:  messages,
+			Tools:     tool.ModelSpecs(a.tools),
+			Reasoning: a.reasoning,
+			Output:    a.request.OutputSpec(),
+			Stream:    stream,
+		}
+		request.Instructions = append(request.Instructions, instructionsFromContext(ctx, a.systemPrompt)...)
+
+		final, err := collectFinalResponse(ctx, a.model, request, yield)
+		if err != nil {
+			return model.Message{}, nil, nil, true, err
+		}
+
+		assistantMessage, calls, err := canonicalizeAssistantToolCalls(final.Message, a.tools...)
+		if err == nil {
+			return assistantMessage, calls, final, true, nil
+		}
+		if attempt >= maxInvalidToolCallRepairAttempts {
+			return model.Message{}, nil, nil, true, err
+		}
+		if reset := invalidToolCallAttemptResetEvent(attempt+1, err); reset != nil {
+			if yield != nil && !yield(reset) {
+				return model.Message{}, nil, nil, false, nil
+			}
+		}
+		for _, event := range invalidToolCallWarningEvents(final.Message, err, !stream) {
+			if yield != nil && !yield(event) {
+				return model.Message{}, nil, nil, false, nil
+			}
 		}
 	}
 }
