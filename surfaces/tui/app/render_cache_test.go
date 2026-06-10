@@ -326,3 +326,43 @@ func numberedViewportLines(n int) []string {
 	}
 	return lines
 }
+
+func TestIncrementalSyncWithEmptyPrecedingBlockCorruptsLineStarts(t *testing.T) {
+	m := NewModel(Config{NoColor: true})
+	m.theme = tuikit.ResolveThemeFromOptions(true, colorprofile.NoTTY)
+	m.viewport.SetWidth(90)
+	m.viewport.SetHeight(30)
+
+	// Add an empty block that renders to 0 lines initially
+	emptyBlock := NewAssistantBlock()
+	emptyBlock.Streaming = true
+	m.doc.Append(emptyBlock)
+	m.syncViewportContent()
+
+	// Add a divider block
+	divider := NewDividerBlock("Turn completed")
+	m.doc.Append(divider)
+	m.syncViewportContent()
+
+	t.Logf("emptyBlock: start=%v, count=%v", m.viewportRenderEntries[0].lineStart, m.viewportRenderEntries[0].lineCount)
+	t.Logf("divider: start=%v, count=%v", m.viewportRenderEntries[1].lineStart, m.viewportRenderEntries[1].lineCount)
+
+	// Now modify the empty block to have 2 lines
+	emptyBlock.Raw = "hello\nworld"
+	emptyBlock.Streaming = false
+	if m.dirtyViewportBlocks == nil {
+		m.dirtyViewportBlocks = make(map[string]struct{})
+	}
+	m.dirtyViewportBlocks[emptyBlock.BlockID()] = struct{}{}
+
+	// Trigger incremental sync
+	m.syncViewportContent()
+
+	// The empty block now has 2 lines, so divider should have lineStart shifted by 2
+	expectedLineStart := m.viewportRenderEntries[0].lineStart + m.viewportRenderEntries[0].lineCount
+	if m.viewportRenderEntries[1].lineStart != expectedLineStart {
+		t.Fatalf("expected divider lineStart to be %v, but got %v", expectedLineStart, m.viewportRenderEntries[1].lineStart)
+	}
+	t.Logf("emptyBlock final: start=%v, count=%v", m.viewportRenderEntries[0].lineStart, m.viewportRenderEntries[0].lineCount)
+	t.Logf("divider final: start=%v, count=%v", m.viewportRenderEntries[1].lineStart, m.viewportRenderEntries[1].lineCount)
+}

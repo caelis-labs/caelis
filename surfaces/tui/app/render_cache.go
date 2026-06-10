@@ -438,7 +438,7 @@ func (m *Model) syncDirtyViewportRenderEntries(ctx BlockRenderContext) bool {
 		next.lineCount = len(next.styledLines)
 		m.viewportRenderEntries[idx] = next
 		if delta := next.lineCount - count; delta != 0 {
-			m.shiftViewportEntryLineStartsAfter(start, idx, delta)
+			m.shiftViewportEntryLineStartsAfter(idx, delta)
 		}
 	}
 	if m.streamLine != m.lastViewportStreamLine {
@@ -464,15 +464,12 @@ func (m *Model) viewportRenderEntryIndex(blockID string) int {
 	return -1
 }
 
-func (m *Model) shiftViewportEntryLineStartsAfter(start int, changedIndex int, delta int) {
+func (m *Model) shiftViewportEntryLineStartsAfter(changedIndex int, delta int) {
 	if m == nil {
 		return
 	}
 	for i := range m.viewportRenderEntries {
-		if i == changedIndex {
-			continue
-		}
-		if m.viewportRenderEntries[i].lineStart > start {
+		if i > changedIndex {
 			m.viewportRenderEntries[i].lineStart += delta
 		}
 	}
