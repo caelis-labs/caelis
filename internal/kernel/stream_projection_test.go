@@ -104,7 +104,10 @@ func TestStreamRequestFromEventIgnoresRunningTaskControl(t *testing.T) {
 func TestStreamFrameEventsDoNotAppendReasoningTextToParentTool(t *testing.T) {
 	t.Parallel()
 
-	req := StreamRequest{
+	// SPAWN tools: reasoning/thought frames are handled by the embedded
+	// event path (streamFrameEmbeddedEvent) and should NOT also produce
+	// parent tool result events, which would flood the SPAWN tool panel.
+	spawnReq := StreamRequest{
 		SessionRef: session.SessionRef{SessionID: "root-session"},
 		CallID:     "spawn-1",
 		ToolName:   "SPAWN",
@@ -112,9 +115,46 @@ func TestStreamFrameEventsDoNotAppendReasoningTextToParentTool(t *testing.T) {
 		Ref:        stream.Ref{SessionID: "root-session", TaskID: "amy"},
 		Scope:      EventScopeMain,
 	}
-	events := StreamFrameEvents(req, stream.Frame{
-		Ref:     req.Ref,
+	events := StreamFrameEvents(spawnReq, stream.Frame{
+		Ref:     spawnReq.Ref,
 		Text:    "The user wants me to inspect files.",
+		Running: true,
+		Event: &session.Event{
+			Type: session.EventTypeAssistant,
+			Protocol: &session.EventProtocol{
+				UpdateType: string(session.ProtocolUpdateTypeAgentThought),
+				Update:     &session.ProtocolUpdate{SessionUpdate: string(session.ProtocolUpdateTypeAgentThought)},
+			},
+		},
+	})
+	// For SPAWN: reasoning frames should NOT produce a parent tool result.
+	for _, event := range events {
+		if event.Event.Kind == EventKindToolResult {
+			t.Fatalf("SPAWN reasoning frame should NOT project a tool result: %#v", events)
+		}
+	}
+
+	events = StreamFrameEvents(spawnReq, stream.Frame{
+		Ref:     spawnReq.Ref,
+		Text:    "final visible output",
+		Running: true,
+	})
+	if len(events) != 1 || events[0].Event.Kind != EventKindToolResult {
+		t.Fatalf("stdout frame events = %#v, want one parent tool update", events)
+	}
+
+	// Non-SPAWN tools (e.g. RUN_COMMAND) should still filter reasoning text.
+	runReq := StreamRequest{
+		SessionRef: session.SessionRef{SessionID: "root-session"},
+		CallID:     "run-1",
+		ToolName:   "RUN_COMMAND",
+		RawInput:   map[string]any{"command": "echo ok"},
+		Ref:        stream.Ref{SessionID: "root-session", TaskID: "task-1"},
+		Scope:      EventScopeMain,
+	}
+	events = StreamFrameEvents(runReq, stream.Frame{
+		Ref:     runReq.Ref,
+		Text:    "reasoning about command",
 		Running: true,
 		Event: &session.Event{
 			Type: session.EventTypeAssistant,
@@ -126,17 +166,8 @@ func TestStreamFrameEventsDoNotAppendReasoningTextToParentTool(t *testing.T) {
 	})
 	for _, event := range events {
 		if event.Event.Kind == EventKindToolResult {
-			t.Fatalf("reasoning frame events = %#v, should not append parent tool update", events)
+			t.Fatalf("RUN_COMMAND reasoning frame should NOT project tool result: %#v", events)
 		}
-	}
-
-	events = StreamFrameEvents(req, stream.Frame{
-		Ref:     req.Ref,
-		Text:    "final visible output",
-		Running: true,
-	})
-	if len(events) != 1 || events[0].Event.Kind != EventKindToolResult {
-		t.Fatalf("stdout frame events = %#v, want one parent tool update", events)
 	}
 }
 

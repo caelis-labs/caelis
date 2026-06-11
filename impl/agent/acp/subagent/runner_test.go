@@ -45,7 +45,8 @@ func TestRunnerHandleUpdatePublishesChildStream(t *testing.T) {
 		t.Fatalf("stream frames = %#v, want one frame", sink.frames)
 	}
 	got := sink.frames[0]
-	if got.Ref.TaskID != "task-1" || got.Ref.SessionID != "child-1" || got.Text != "child output" || !got.Running {
+	if got.Ref.TaskID != "task-1" || got.Ref.SessionID != "child-1" || !got.Running ||
+		got.Text != "· child output" {
 		t.Fatalf("stream frame = %#v", got)
 	}
 	if got.Event == nil || got.Event.Type != session.EventTypeAssistant || got.Event.Text != "child output" {
@@ -103,15 +104,17 @@ func TestRunnerHandleUpdatePublishesStructuredToolAndPlanEvents(t *testing.T) {
 	if got := len(sink.frames); got != 3 {
 		t.Fatalf("stream frames = %#v, want three structured updates", sink.frames)
 	}
-	wantText := []string{
-		"run go test\n",
-		"run go test completed\n",
-		"Plan Run tests completed\n",
+	f0 := sink.frames[0].Text
+	f1 := sink.frames[1].Text
+	f2 := sink.frames[2].Text
+	if f0 != "• 正在调用工具: run go test\n" {
+		t.Fatalf("frame 0 = %q", f0)
 	}
-	for i, frame := range sink.frames {
-		if frame.Text != wantText[i] {
-			t.Fatalf("structured frame %d text = %q, want %q", i, frame.Text, wantText[i])
-		}
+	if f1 != "" {
+		t.Fatalf("frame 1 = %q", f1)
+	}
+	if !strings.Contains(f2, "Plan Run tests completed") {
+		t.Fatalf("frame 2 = %q", f2)
 	}
 	callEvent := sink.frames[0].Event
 	if callEvent == nil || callEvent.Type != session.EventTypeToolCall || callEvent.Protocol == nil || callEvent.Protocol.ToolCall == nil {
@@ -165,8 +168,8 @@ func TestRunnerKeepsCodexWebSearchToolIdentity(t *testing.T) {
 		t.Fatalf("stream frames = %#v, want one structured search update", sink.frames)
 	}
 	frame := sink.frames[0]
-	if frame.Text != "Searching for: weather: Shanghai, China\n" {
-		t.Fatalf("stream frame text = %q, want readable search trace", frame.Text)
+	if frame.Text != "" {
+		t.Fatalf("stream frame text = %q, expected empty string", frame.Text)
 	}
 	event := frame.Event
 	if event == nil || event.Protocol == nil || event.Protocol.ToolCall == nil {
@@ -218,8 +221,8 @@ func TestRunnerPublishesChildTerminalOutputMetaAsStreamText(t *testing.T) {
 	if got := len(sink.frames); got != 1 {
 		t.Fatalf("stream frames = %#v, want one terminal output frame", sink.frames)
 	}
-	if got := sink.frames[0].Text; got != "17:21:17\n" {
-		t.Fatalf("stream frame text = %q, want terminal output data", got)
+	if got := sink.frames[0].Text; got != "" {
+		t.Fatalf("stream frame text = %q, expected empty string", got)
 	}
 	event := sink.frames[0].Event
 	if event == nil || event.Protocol == nil || event.Protocol.Update == nil || event.Protocol.Update.Meta["terminal_output"] == nil {
@@ -251,7 +254,8 @@ func TestRunnerHandleUpdateUsesAgentMessageDeltas(t *testing.T) {
 	var rendered string
 	var renderedEvents string
 	for _, frame := range sink.frames {
-		rendered += frame.Text
+		rendered += strings.TrimPrefix(strings.TrimPrefix(frame.Text, "\n"), "· ")
+
 		if frame.Event == nil {
 			t.Fatalf("stream frame event = nil, want structured delta event")
 		}
@@ -318,7 +322,7 @@ func TestRunnerResultKeepsOnlyLatestAssistantSegmentAfterTools(t *testing.T) {
 	for _, frame := range sink.frames {
 		streamed += frame.Text
 	}
-	for _, want := range []string{"我先读取文件。", "Read hello_spawn.txt", "总结一下执行结果"} {
+	for _, want := range []string{"我先读取文件。", "总结一下执行结果"} {
 		if !strings.Contains(streamed, want) {
 			t.Fatalf("streamed text = %q, want %q preserved in running trace", streamed, want)
 		}
@@ -381,8 +385,8 @@ func TestRunnerHandleUpdatePublishesStructuredThoughtEvent(t *testing.T) {
 		t.Fatalf("stream frames = %#v, want one thought frame", sink.frames)
 	}
 	got := sink.frames[0]
-	if got.Text != "" {
-		t.Fatalf("stream frame text = %q, want structured thought event only", got.Text)
+	if got.Text != "› thinking about the command" {
+		t.Fatalf("thought text = %q, want '› thinking about the command'", got.Text)
 	}
 	if got.Event == nil || got.Event.Protocol == nil || got.Event.Protocol.UpdateType != client.UpdateAgentThought || got.Event.Text != "thinking about the command" {
 		t.Fatalf("stream event = %#v, want structured thought event", got.Event)
@@ -408,8 +412,8 @@ func TestRunnerHandleUpdatePreservesWhitespaceThoughtChunk(t *testing.T) {
 		t.Fatalf("stream frames = %#v, want one whitespace thought frame", sink.frames)
 	}
 	got := sink.frames[0]
-	if got.Text != "" {
-		t.Fatalf("stream frame text = %q, want structured thought event only", got.Text)
+	if got.Text != "›  " {
+		t.Fatalf("thought text = %q, want '›  '", got.Text)
 	}
 	if got.Event == nil || got.Event.Text != " " {
 		t.Fatalf("stream event = %#v, want single-space structured thought event", got.Event)
@@ -492,8 +496,9 @@ func TestRunnerHandleUpdateAcceptsStringContentChunks(t *testing.T) {
 	if got := len(sink.frames); got != 1 {
 		t.Fatalf("stream frames = %#v, want one string-content frame", sink.frames)
 	}
-	if got := sink.frames[0].Text; got != "string chunk" {
-		t.Fatalf("stream frame text = %q, want string chunk", got)
+	gotFrame := sink.frames[0]
+	if gotFrame.Text != "· string chunk" {
+		t.Fatalf("agent message text = %q, want '· string chunk'", gotFrame.Text)
 	}
 	run.mu.RLock()
 	result := run.result
@@ -556,5 +561,77 @@ func repoRootForRunnerTest(t *testing.T) string {
 			t.Fatal("could not locate repo root")
 		}
 		dir = parent
+	}
+}
+
+func TestRunnerPrependNewlineTransition(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingStreams{}
+	run := &childRun{
+		anchor:  delegation.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "copilot", AgentID: "copilot-1"},
+		taskID:  "task-1",
+		sink:    sink,
+		state:   delegation.StateRunning,
+		running: true,
+	}
+	runner := &Runner{clock: time.Now}
+
+	// 1. Send assistant narrative chunk (agent message).
+	runner.handleUpdate(run, contentUpdate(t, client.UpdateAgentMessage, "Step3完成。运行 Step4："))
+
+	// 2. Send tool call event.
+	runner.handleUpdate(run, client.UpdateEnvelope{
+		SessionID: "child-1",
+		Update: client.ToolCall{
+			SessionUpdate: client.UpdateToolCall,
+			ToolCallID:    "call-1",
+			Kind:          "execute",
+			Title:         "RUN_COMMAND python3 demo_helper.py both",
+			Status:        "pending",
+		},
+	})
+
+	if len(sink.frames) != 2 {
+		t.Fatalf("stream frames = %#v, want two frames", sink.frames)
+	}
+
+	// Validate first frame (agent message delta).
+	gotFirst := sink.frames[0].Text
+	if gotFirst != "· Step3完成。运行 Step4：" {
+		t.Fatalf("first text = %q", gotFirst)
+	}
+
+	// Validate second frame (tool call).
+	gotSecond := sink.frames[1].Text
+	if gotSecond != "\n• 正在调用工具: RUN_COMMAND python3 demo_helper.py both\n" {
+		t.Fatalf("second text = %q, want formatted tool call update", gotSecond)
+	}
+}
+
+func TestRunnerAppendAgentMessageLockedIncrementalChunksWithSamePrefix(t *testing.T) {
+	t.Parallel()
+
+	run := &childRun{
+		agentText: "我来按步骤",
+	}
+
+	// Turn 1 finished. We start Turn 2. We reset the text states (as done in Continue).
+	run.agentText = ""
+	run.lastToolTextLen = 0
+
+	// Now we stream incremental chunks for Turn 2.
+	// The first chunk is "我" (which is a prefix of Turn 1's text "我来按步骤").
+	if got := run.appendAgentMessageLocked("我"); got != "我" {
+		t.Fatalf("expected first chunk to be '我', got %q", got)
+	}
+
+	// The second chunk is "来"
+	if got := run.appendAgentMessageLocked("来"); got != "来" {
+		t.Fatalf("expected second chunk to be '来', got %q", got)
+	}
+
+	if run.result != "我来" {
+		t.Fatalf("expected run.result to be '我来', got %q", run.result)
 	}
 }

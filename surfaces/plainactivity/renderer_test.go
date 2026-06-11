@@ -16,7 +16,7 @@ func TestRenderUsesStablePrefixesAndSkipsBlankLines(t *testing.T) {
 	}, Options{})
 	want := []string{
 		"› checking repo",
-		"› next step",
+		"  next step",
 		"· patched",
 		"• Run go test ./surfaces/tui/app",
 	}
@@ -47,9 +47,15 @@ func TestRenderWrapsWithinWidthWithPrefix(t *testing.T) {
 	if len(got) < 2 {
 		t.Fatalf("Render() = %#v, want wrapped lines", got)
 	}
-	for _, line := range got {
-		if !strings.HasPrefix(line, "· ") {
-			t.Fatalf("Render() line = %q, want assistant prefix", line)
+	for i, line := range got {
+		if i == 0 {
+			if !strings.HasPrefix(line, "· ") {
+				t.Fatalf("Render() line = %q, want assistant prefix on first line", line)
+			}
+		} else {
+			if !strings.HasPrefix(line, "  ") {
+				t.Fatalf("Render() line = %q, want empty padding on wrapped line", line)
+			}
 		}
 		if width := ansi.StringWidthWc(line); width > 12 {
 			t.Fatalf("Render() line width = %d, want <= 12: %q", width, line)

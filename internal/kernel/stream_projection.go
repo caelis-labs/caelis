@@ -219,7 +219,15 @@ func subagentStreamFrameEvent(req StreamRequest, frame stream.Frame) (EventEnvel
 	if frame.Closed {
 		return subagentFinalFrameEvent(req, frame), true
 	}
-	if !frame.Running || frame.Text == "" || !shouldProjectFrameTextToParentTool(frame) {
+	// For SPAWN subagents we project non-thought frame text as tool result
+	// updates so the subagent panel can render step-by-step progress.
+	// Reasoning/thought frames are handled via the embedded event path
+	// (streamFrameEmbeddedEvent) and should not also produce parent tool
+	// result events, which would flood the SPAWN tool with redundant updates.
+	if !frame.Running || frame.Text == "" {
+		return EventEnvelope{}, false
+	}
+	if !shouldProjectFrameTextToParentTool(frame) {
 		return EventEnvelope{}, false
 	}
 	if taskID := strings.TrimSpace(req.Ref.TaskID); taskID != "" {

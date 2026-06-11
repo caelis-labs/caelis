@@ -21,6 +21,7 @@ const (
 type Options struct {
 	ApprovalPolicy  ApprovalPolicy
 	ResolveApproval func(context.Context, *gateway.ApprovalPayload) (gateway.ApprovalDecision, error)
+	OnEvent         func(gateway.EventEnvelope)
 }
 
 type Result struct {
@@ -42,6 +43,9 @@ func RunOnce(ctx context.Context, starter Starter, req gateway.BeginTurnRequest,
 
 	out := Result{Session: result.Session}
 	for env := range result.Handle.Events() {
+		if opts.OnEvent != nil {
+			opts.OnEvent(env)
+		}
 		out.LastCursor = env.Cursor
 		if env.Err != nil {
 			return out, env.Err

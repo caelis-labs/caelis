@@ -64,9 +64,29 @@ func DisplayTerminalInitialOutput(name string, args map[string]any) string {
 func SummarizeToolCallTitle(name string, args map[string]any) string {
 	name = strings.TrimSpace(strings.ToUpper(name))
 	switch name {
-	case "READ", "WRITE", "PATCH", "SEARCH", "LIST", "GLOB":
+	case "READ", "WRITE", "PATCH", "LIST":
 		if path := MapString(args, "path"); strings.TrimSpace(path) != "" {
 			return strings.TrimSpace(name + " " + path)
+		}
+	case "GLOB":
+		pattern := strings.TrimSpace(MapString(args, "pattern"))
+		path := strings.TrimSpace(MapString(args, "path"))
+		if pattern != "" && path != "" {
+			return strings.TrimSpace(name + " " + pattern + " in " + path)
+		} else if pattern != "" {
+			return strings.TrimSpace(name + " " + pattern)
+		} else if path != "" {
+			return strings.TrimSpace(name + " " + path)
+		}
+	case "SEARCH":
+		path := strings.TrimSpace(MapString(args, "path"))
+		query := strings.TrimSpace(MapString(args, "query"))
+		if path != "" && query != "" {
+			return strings.TrimSpace(name + " " + query + " in " + path)
+		} else if path != "" {
+			return strings.TrimSpace(name + " " + path)
+		} else if query != "" {
+			return strings.TrimSpace(name + " " + query)
 		}
 	case "RUN_COMMAND", "TASK":
 		if command := MapString(args, "command"); strings.TrimSpace(command) != "" {

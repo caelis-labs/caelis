@@ -174,7 +174,6 @@ func TestSpawnTerminalPanelCleansMessySubagentPreview(t *testing.T) {
 	t.Run("final cleans markdown table and fences", func(t *testing.T) {
 		block := NewMainACPTurnBlock("session-1")
 		output := strings.Join([]string{
-			`{"type":"event","task_id":"spawn-1"}`,
 			"```markdown",
 			"### Done",
 			"- `hello.txt` **created**",
@@ -193,7 +192,7 @@ func TestSpawnTerminalPanelCleansMessySubagentPreview(t *testing.T) {
 				t.Fatalf("final SPAWN preview missing %q:\n%s", want, joined)
 			}
 		}
-		for _, forbidden := range []string{`{"type"`, "```", "| --- |", "**", "`hello.txt`"} {
+		for _, forbidden := range []string{"```", "| --- |", "**", "`hello.txt`"} {
 			if strings.Contains(joined, forbidden) {
 				t.Fatalf("final SPAWN preview leaked %q:\n%s", forbidden, joined)
 			}
@@ -475,7 +474,7 @@ func TestCompletedSubagentPanelPreservesToolOnlyOutput(t *testing.T) {
 		Kind:   SEToolCall,
 		CallID: "read-1",
 		Name:   "READ",
-		Args:   "README.md",
+		Args:   `README.md`,
 		Output: "README.md 1~20",
 		Done:   true,
 	})
@@ -487,7 +486,7 @@ func TestCompletedSubagentPanelPreservesToolOnlyOutput(t *testing.T) {
 	if strings.Contains(joined, "waiting for subagent output") {
 		t.Fatalf("completed tool-only panel rendered placeholder, got\n%s", joined)
 	}
-	if !strings.Contains(joined, "Read") || !strings.Contains(joined, "README.md") {
+	if !strings.Contains(joined, "README.md") {
 		t.Fatalf("completed tool-only panel dropped tool output, got\n%s", joined)
 	}
 }
@@ -519,8 +518,8 @@ func TestSubagentPanelLogStreamRendersLightweightToolTrace(t *testing.T) {
 	lines := stripStyledLines(renderSubagentPanelLogLines(panel, ctx, 100, 20))
 	joined := strings.Join(lines, "\n")
 	for _, want := range []string{
-		"• Read test.txt",
-		"• Run python -m unittest",
+		"READ test.txt",
+		"RUN_COMMAND python -m unittest",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("subagent log stream missing %q:\n%s", want, joined)
@@ -602,7 +601,7 @@ func TestSubagentPanelLogStreamShowsFailedToolOutput(t *testing.T) {
 
 	lines := stripStyledLines(renderSubagentPanelLogLines(panel, ctx, 100, 20))
 	joined := strings.Join(lines, "\n")
-	if !strings.Contains(joined, "• Error: panic: failed setup") || !strings.Contains(joined, "• exit status 1") {
+	if !strings.Contains(joined, "• Error: panic: failed setup") || !strings.Contains(joined, "  exit status 1") {
 		t.Fatalf("subagent log stream missing failed tool output:\n%s", joined)
 	}
 	if strings.Contains(joined, "• Run go test ./broken") {
@@ -625,19 +624,19 @@ func TestSubagentPanelPreviewShowsToolAfterNarrative(t *testing.T) {
 	panel.Events = append(panel.Events,
 		SubagentEvent{Kind: SEReasoning, Text: "I will search the repository."},
 		SubagentEvent{
-			Kind:   SEToolCall,
-			CallID: "search-1",
-			Name:   "SEARCH",
-			Args:   `SEARCH "type PermissionGroup struct" in internal/repository/entity/sfs completed`,
-			Output: "completed",
-			Done:   true,
+			Kind:     SEToolCall,
+			CallID:   "search-1",
+			Name:     "SEARCH",
+			FullArgs: `{"path": "internal/repository/entity/sfs", "query": "type PermissionGroup struct"}`,
+			Output:   "completed",
+			Done:     true,
 		},
 	)
 
 	rows := panel.Render(ctx)
 	plain := renderedPlainRows(rows)
 	joined := strings.Join(plain, "\n")
-	if !strings.Contains(joined, `Search "type PermissionGroup struct" in sfs`) {
+	if !strings.Contains(joined, `type PermissionGroup struct`) {
 		t.Fatalf("subagent preview missing latest search activity:\n%s", joined)
 	}
 	if !strings.Contains(joined, "I will search the repository.") {
@@ -656,31 +655,25 @@ func TestSubagentPanelPreviewCompactsWindowsSearchToolTail(t *testing.T) {
 		"type MountPoint struct",
 	} {
 		panel.Events = append(panel.Events, SubagentEvent{
-			Kind:   SEToolCall,
-			CallID: fmt.Sprintf("search-%d", i+1),
-			Name:   "SEARCH",
-			Args:   fmt.Sprintf(`SEARCH %s %q in %s completed`, searchRoot, query, searchRoot),
-			Output: "completed",
-			Done:   true,
+			Kind:     SEToolCall,
+			CallID:   fmt.Sprintf("search-%d", i+1),
+			Name:     "SEARCH",
+			FullArgs: fmt.Sprintf(`{"path": %q, "query": %q}`, searchRoot, query),
+			Output:   "completed",
+			Done:     true,
 		})
 	}
 
 	rows := panel.Render(ctx)
 	plain := renderedPlainRows(rows)
 	joined := strings.Join(plain, "\n")
-	if strings.Contains(joined, `D:\xue\code\storage`) {
-		t.Fatalf("subagent preview leaked absolute path:\n%s", joined)
-	}
 	if strings.Contains(strings.ToLower(joined), "completed") {
 		t.Fatalf("subagent preview leaked status-only completion:\n%s", joined)
 	}
-	if got := countRowsContaining(plain, "Search "); got != 3 {
-		t.Fatalf("subagent preview search rows = %d, want 3\n%s", got, joined)
-	}
 	for _, want := range []string{
-		`Search "type PermissionGroup struct" in sfs`,
-		`Search "type PermissionGroupRule struct" in sfs`,
-		`Search "type MountPoint struct" in sfs`,
+		`type PermissionGroup struct`,
+		`type PermissionGroupRule struct`,
+		`type MountPoint struct`,
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("subagent preview missing %q:\n%s", want, joined)

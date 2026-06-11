@@ -28,7 +28,7 @@ func FormatToolContent(content []ToolContent) string {
 	parts := make([]string, 0, len(content))
 	for _, item := range content {
 		switch strings.TrimSpace(item.Type) {
-		case "content":
+		case "content", "text":
 			if text := toolContentText(item.Content); text != "" {
 				parts = append(parts, text)
 			}

@@ -60,15 +60,16 @@ type childRun struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	mu            sync.RWMutex
-	state         delegation.State
-	outputPreview string
-	result        string
-	agentText     string
-	lastTraceText string
-	updatedAt     time.Time
-	running       bool
-	done          chan struct{}
+	mu              sync.RWMutex
+	state           delegation.State
+	outputPreview   string
+	result          string
+	agentText       string
+	lastToolTextLen int
+	lastChunkKind   string
+	updatedAt       time.Time
+	running         bool
+	done            chan struct{}
 }
 
 func NewRunner(cfg RunnerConfig) (*Runner, error) {
@@ -181,6 +182,8 @@ func (r *Runner) Continue(ctx context.Context, anchor delegation.Anchor, req del
 	run.running = true
 	run.outputPreview = ""
 	run.result = ""
+	run.agentText = ""
+	run.lastToolTextLen = 0
 	run.updatedAt = r.clock()
 	run.done = make(chan struct{})
 	runCtx := run.ctx
@@ -433,36 +436,67 @@ func (r *Runner) handleUpdate(run *childRun, env client.UpdateEnvelope) {
 		if text := chunkText(update); text != "" {
 			switch strings.TrimSpace(update.SessionUpdate) {
 			case client.UpdateAgentMessage:
-				streamText = run.appendAgentMessageLocked(text)
+				delta := run.appendAgentMessageLocked(text)
 				run.outputPreview = compactPreview(run.agentText)
-				if streamText != "" {
-					event = run.acpUpdateEvent(env, run.updatedAt, streamText)
+				if delta != "" {
+					event = run.acpUpdateEvent(env, run.updatedAt, delta)
+					prefix := ""
+					if run.lastChunkKind != "message" {
+						if run.lastChunkKind != "" {
+							prefix = "\n"
+						}
+						prefix += "· "
+						run.lastChunkKind = "message"
+					}
+					streamText = prefix + delta
 				}
 			case client.UpdateAgentThought:
 				event = run.acpUpdateEvent(env, run.updatedAt)
+				prefix := ""
+				if run.lastChunkKind != "thought" {
+					if run.lastChunkKind != "" {
+						prefix = "\n"
+					}
+					prefix += "› "
+					run.lastChunkKind = "thought"
+				}
+				streamText = prefix + text
 			default:
 				break
 			}
 		}
 	case client.ToolCall:
-		run.agentText = ""
+		run.lastToolTextLen = len(run.agentText)
 		run.outputPreview = compactPreview(toolActivity(update.Title, update.Kind, update.Status))
-		streamText = run.appendTraceTextLocked(childToolCallTraceText(update))
 		event = run.acpUpdateEvent(env, run.updatedAt)
-	case client.ToolCallUpdate:
-		run.agentText = ""
-		run.outputPreview = compactPreview(toolActivity(derefString(update.Title), derefString(update.Kind), derefString(update.Status)))
-		if text := childToolCallUpdateTerminalText(update); text != "" {
-			streamText = text
-		} else {
-			streamText = run.appendTraceTextLocked(childToolCallUpdateTraceText(update))
+		prefix := ""
+		if run.lastChunkKind != "" {
+			prefix = "\n"
 		}
+		title := update.Title
+		if title == "" {
+			title = update.Kind
+		}
+		streamText = prefix + "• 正在调用工具: " + title + "\n"
+		run.lastChunkKind = "tool"
+	case client.ToolCallUpdate:
+		run.outputPreview = compactPreview(toolActivity(derefString(update.Title), derefString(update.Kind), derefString(update.Status)))
 		event = run.acpUpdateEvent(env, run.updatedAt)
+		streamText = ""
 	case client.PlanUpdate:
-		run.agentText = ""
+		run.lastToolTextLen = len(run.agentText)
 		run.outputPreview = "updating plan"
-		streamText = run.appendTraceTextLocked(childPlanTraceText(update))
 		event = run.acpUpdateEvent(env, run.updatedAt)
+		prefix := ""
+		if run.lastChunkKind != "plan" {
+			if run.lastChunkKind != "" {
+				prefix = "\n"
+			}
+			prefix += "• "
+			run.lastChunkKind = "plan"
+		}
+		streamText = prefix + acpPlanEntriesText(update.Entries) + "\n"
+		run.lastChunkKind = "plan"
 	}
 	if streamText != "" || event != nil {
 		next := stream.Frame{
@@ -723,60 +757,26 @@ func (run *childRun) appendAgentMessageLocked(text string) string {
 	}
 	if run.agentText == "" {
 		run.agentText = text
-		run.result = run.agentText
+		run.updateResult()
 		return text
 	}
 	if strings.HasPrefix(text, run.agentText) {
 		delta := text[len(run.agentText):]
 		run.agentText = text
-		run.result = run.agentText
+		run.updateResult()
 		return delta
 	}
-	if strings.HasPrefix(run.agentText, text) {
-		return ""
-	}
 	run.agentText += text
-	run.result = run.agentText
+	run.updateResult()
 	return text
 }
 
-func (run *childRun) appendTraceTextLocked(text string) string {
-	if run == nil {
-		return ""
+func (run *childRun) updateResult() {
+	if run.lastToolTextLen <= len(run.agentText) {
+		run.result = strings.TrimSpace(run.agentText[run.lastToolTextLen:])
+	} else {
+		run.result = strings.TrimSpace(run.agentText)
 	}
-	text = normalizeTraceLine(text)
-	if text == "" {
-		return ""
-	}
-	if text == run.lastTraceText {
-		return ""
-	}
-	run.lastTraceText = text
-	return text
-}
-
-func childToolCallTraceText(update client.ToolCall) string {
-	line := childToolTraceLine(update.Title, update.Kind, update.RawInput, update.Status)
-	return normalizeTraceLine(line)
-}
-
-func childToolCallUpdateTraceText(update client.ToolCallUpdate) string {
-	line := childToolTraceLine(derefString(update.Title), derefString(update.Kind), update.RawInput, derefString(update.Status))
-	return normalizeTraceLine(line)
-}
-
-func childToolTraceLine(title string, kind string, rawInput any, status string) string {
-	label := childToolLabel(title, kind)
-	if label == "" {
-		label = "Tool"
-	}
-	if summary := childToolInputSummary(rawInput); shouldAppendChildToolSummary(label, summary, title, kind) {
-		label += " " + summary
-	}
-	if suffix := childToolStatusSuffix(status); suffix != "" && !containsFold(label, suffix) {
-		label += " " + suffix
-	}
-	return label
 }
 
 func childToolCallUpdateTerminalText(update client.ToolCallUpdate) string {
@@ -808,175 +808,6 @@ func childTerminalContentText(content []client.ToolCallContent) string {
 	return out.String()
 }
 
-func childPlanTraceText(update client.PlanUpdate) string {
-	if len(update.Entries) == 0 {
-		return "Plan updated"
-	}
-	latest := update.Entries[len(update.Entries)-1]
-	content := strings.TrimSpace(latest.Content)
-	status := childToolStatusSuffix(latest.Status)
-	switch {
-	case content != "" && status != "":
-		return "Plan " + content + " " + status
-	case content != "":
-		return "Plan " + content
-	case status != "":
-		return "Plan " + status
-	default:
-		return "Plan updated"
-	}
-}
-
-func childToolLabel(title string, kind string) string {
-	if text := strings.TrimSpace(title); text != "" {
-		return text
-	}
-	kind = strings.TrimSpace(kind)
-	if kind == "" {
-		return ""
-	}
-	switch strings.ToLower(kind) {
-	case "think":
-		return "Think"
-	case "execute":
-		return "Run"
-	}
-	parts := strings.FieldsFunc(kind, func(r rune) bool {
-		return r == '_' || r == '-' || r == ' '
-	})
-	if len(parts) == 0 {
-		return kind
-	}
-	for i, part := range parts {
-		if part == "" {
-			continue
-		}
-		parts[i] = strings.ToUpper(part[:1]) + strings.ToLower(part[1:])
-	}
-	return strings.Join(parts, " ")
-}
-
-func childToolStatusSuffix(status string) string {
-	switch strings.ToLower(strings.TrimSpace(status)) {
-	case "completed", "complete", "succeeded", "success":
-		return "completed"
-	case "failed", "error":
-		return "failed"
-	case "cancelled", "canceled":
-		return "cancelled"
-	case "interrupted":
-		return "interrupted"
-	default:
-		return ""
-	}
-}
-
-func childToolInputSummary(raw any) string {
-	values := acpRawMap(raw)
-	if len(values) == 0 {
-		return ""
-	}
-	if query := rawValueString(values, "query"); query != "" {
-		if scope := firstNonEmpty(rawValueString(values, "path"), rawValueString(values, "cwd"), rawValueString(values, "directory")); scope != "" {
-			return truncateTraceText(quoteTraceValue(query)+" in "+scope, 140)
-		}
-		return truncateTraceText(quoteTraceValue(query), 140)
-	}
-	if pattern := rawValueString(values, "pattern"); pattern != "" {
-		if scope := firstNonEmpty(rawValueString(values, "path"), rawValueString(values, "cwd"), rawValueString(values, "directory")); scope != "" {
-			return truncateTraceText(quoteTraceValue(pattern)+" in "+scope, 140)
-		}
-		return truncateTraceText(quoteTraceValue(pattern), 140)
-	}
-	for _, key := range []string{"path", "file_path", "filePath", "uri", "url", "command", "cmd"} {
-		if value := rawValueString(values, key); value != "" {
-			return truncateTraceText(value, 140)
-		}
-	}
-	if prompt := rawValueString(values, "prompt"); prompt != "" {
-		if agent := rawValueString(values, "agent"); agent != "" {
-			return truncateTraceText(agent+": "+prompt, 140)
-		}
-		return truncateTraceText(prompt, 140)
-	}
-	if text := rawValueString(values, "text"); text != "" {
-		return truncateTraceText(text, 140)
-	}
-	return ""
-}
-
-func shouldAppendChildToolSummary(label string, summary string, title string, kind string) bool {
-	summary = strings.TrimSpace(summary)
-	if summary == "" {
-		return false
-	}
-	if containsFold(label, summary) || containsFold(label, strings.Trim(summary, `"`)) {
-		return false
-	}
-	if strings.TrimSpace(title) != "" && strings.EqualFold(strings.TrimSpace(kind), "execute") {
-		return false
-	}
-	return true
-}
-
-func rawValueString(values map[string]any, key string) string {
-	if len(values) == 0 {
-		return ""
-	}
-	value, ok := values[key]
-	if !ok {
-		return ""
-	}
-	text := textFromContentValue(value)
-	if text == "" {
-		text = strings.TrimSpace(fmt.Sprint(value))
-	}
-	if text == "<nil>" {
-		return ""
-	}
-	return strings.TrimSpace(text)
-}
-
-func quoteTraceValue(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return ""
-	}
-	if strings.ContainsAny(value, " \t") && !strings.HasPrefix(value, "\"") {
-		return `"` + value + `"`
-	}
-	return value
-}
-
-func truncateTraceText(text string, limit int) string {
-	text = strings.TrimSpace(text)
-	if text == "" || limit <= 0 {
-		return text
-	}
-	runes := []rune(text)
-	if len(runes) <= limit {
-		return text
-	}
-	if limit <= 1 {
-		return string(runes[:limit])
-	}
-	return strings.TrimSpace(string(runes[:limit-1])) + "..."
-}
-
-func containsFold(text string, part string) bool {
-	text = strings.ToLower(strings.TrimSpace(text))
-	part = strings.ToLower(strings.TrimSpace(part))
-	return text != "" && part != "" && strings.Contains(text, part)
-}
-
-func normalizeTraceLine(text string) string {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return ""
-	}
-	return text + "\n"
-}
-
 func chunkText(chunk client.ContentChunk) string {
 	var text client.TextChunk
 	if err := json.Unmarshal(chunk.Content, &text); err == nil {
@@ -986,6 +817,25 @@ func chunkText(chunk client.ContentChunk) string {
 		return textFromRawContent(chunk.Content)
 	}
 	return textFromRawContent(chunk.Content)
+}
+
+func acpPlanEntriesText(entries []client.PlanEntry) string {
+	if len(entries) == 0 {
+		return ""
+	}
+	last := entries[len(entries)-1]
+	content := strings.TrimSpace(last.Content)
+	status := strings.TrimSpace(last.Status)
+	switch {
+	case content != "" && status != "":
+		return "Plan " + content + " " + status
+	case content != "":
+		return "Plan " + content
+	case status != "":
+		return "Plan " + status
+	default:
+		return ""
+	}
 }
 
 func textFromRawContent(raw json.RawMessage) string {

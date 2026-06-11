@@ -1,6 +1,7 @@
 package tuiapp
 
 import (
+	"encoding/json"
 	"strings"
 
 	"github.com/OnslaughtSnail/caelis/internal/displaypolicy"
@@ -132,20 +133,70 @@ func subagentLogNarrativeText(group []SubagentEvent, assistant bool) string {
 
 func subagentLogToolText(group []SubagentEvent, workspace string) string {
 	start, final, hasFinal := subagentLogToolLifecycle(group)
-	if hasFinal && final.Err {
-		return subagentLogToolErrorText(final, workspace)
-	}
 	ev := start
-	if hasFinal {
-		ev = toolLifecycleHeaderEvent(start, final, true)
+	if ev.Kind != SEToolCall {
+		ev = final
 	}
-	if ev.Err {
-		return subagentLogToolErrorText(ev, workspace)
+	if ev.Kind != SEToolCall {
+		return ""
 	}
-	semantic := toolSemanticName(ev.Name, ev.ToolKind)
-	verb := subagentLogToolVerb(semantic)
-	detail := subagentLogToolDetail(ev, workspace)
-	return strings.TrimSpace(strings.TrimSpace(verb) + " " + strings.TrimSpace(detail))
+	// Use SummarizeToolCallTitle directly — same format as headless plainactivityStreamer.
+	title := subagentToolCallTitle(ev)
+	if title == "" {
+		return ""
+	}
+	if hasFinal && final.Err {
+		errText := strings.TrimSpace(sanitizeRenderableText(final.Output))
+		if errText == "" {
+			return "Error: " + title
+		}
+		if strings.HasPrefix(strings.ToLower(errText), "error") {
+			return errText
+		}
+		return "Error: " + errText
+	}
+	return title
+}
+
+// subagentToolCallTitle produces the same tool call title as the headless
+// plainactivityStreamer: "TOOL_NAME args" via displaypolicy.SummarizeToolCallTitle.
+func subagentToolCallTitle(ev SubagentEvent) string {
+	name := strings.TrimSpace(ev.Name)
+	if name == "" {
+		return ""
+	}
+	argsMap := subagentToolArgsMap(ev)
+	return displaypolicy.SummarizeToolCallTitle(name, argsMap)
+}
+
+// subagentToolArgsMap extracts the tool arguments as a map, handling both JSON
+// object args and plain string args (e.g. Args: "README.md" for READ).
+func subagentToolArgsMap(ev SubagentEvent) map[string]any {
+	var argsMap map[string]any
+	if ev.FullArgs != "" {
+		_ = json.Unmarshal([]byte(ev.FullArgs), &argsMap)
+	}
+	if argsMap == nil && strings.HasPrefix(strings.TrimSpace(ev.Args), "{") {
+		_ = json.Unmarshal([]byte(ev.Args), &argsMap)
+	}
+	if len(argsMap) > 0 {
+		return argsMap
+	}
+	// Plain string args: infer the key from the tool name.
+	arg := strings.TrimSpace(ev.Args)
+	if arg == "" {
+		return nil
+	}
+	switch strings.ToUpper(strings.TrimSpace(ev.Name)) {
+	case "READ", "WRITE", "PATCH", "LIST", "SEARCH":
+		return map[string]any{"path": arg}
+	case "GLOB":
+		return map[string]any{"pattern": arg}
+	case "RUN_COMMAND":
+		return map[string]any{"command": arg}
+	default:
+		return map[string]any{"path": arg}
+	}
 }
 
 func subagentLogApprovalText(ev SubagentEvent) string {
@@ -218,6 +269,29 @@ func subagentLogToolVerb(name string) string {
 }
 
 func subagentLogToolDetail(ev SubagentEvent, workspace string) string {
+	var argsMap map[string]any
+	if ev.FullArgs != "" {
+		_ = json.Unmarshal([]byte(ev.FullArgs), &argsMap)
+	} else if strings.HasPrefix(strings.TrimSpace(ev.Args), "{") {
+		_ = json.Unmarshal([]byte(ev.Args), &argsMap)
+	}
+	if len(argsMap) > 0 {
+		title := displaypolicy.SummarizeToolCallTitle(ev.Name, argsMap)
+		if title != "" {
+			nameParts := strings.Fields(strings.ToUpper(ev.Name))
+			if len(nameParts) > 0 {
+				prefix := nameParts[0] + " "
+				if strings.HasPrefix(strings.ToUpper(title), prefix) {
+					return strings.TrimSpace(title[len(prefix):])
+				}
+				if strings.HasPrefix(strings.ToUpper(title), strings.ToUpper(ev.Name)+" ") {
+					return strings.TrimSpace(title[len(ev.Name)+1:])
+				}
+			}
+			return title
+		}
+	}
+
 	if verb := explorationToolVerb(toolSemanticName(ev.Name, ev.ToolKind)); verb != "" {
 		if detail := subagentExplorationPreviewDetail(ev, workspace); detail != "" {
 			return detail

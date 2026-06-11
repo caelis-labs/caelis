@@ -13,6 +13,7 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
 	"github.com/OnslaughtSnail/caelis/impl/model/providers"
+	"github.com/OnslaughtSnail/caelis/ports/agent"
 	"github.com/OnslaughtSnail/caelis/ports/assembly"
 	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/surfaces/acpserver"
@@ -225,13 +226,29 @@ func runHeadless(ctx context.Context, stack *gatewayapp.Stack, sessionID string,
 	if err != nil {
 		return err
 	}
+	var opts headless.Options
+	var streamer *plainactivityStreamer
+	if format == outputText && writerIsTTY(stdout) {
+		streamer = newPlainactivityStreamer(stdout)
+		opts.OnEvent = streamer.OnEvent
+	}
 	result, err := headless.RunOnce(ctx, stack.Kernel(), gateway.BeginTurnRequest{
 		SessionRef: session.SessionRef,
 		Input:      input,
 		Surface:    "headless",
-	}, headless.Options{})
+		Request:    agent.ModelRequestOptions{Stream: boolPtr(streamer != nil)},
+	}, opts)
+	if streamer != nil {
+		defer streamer.finish()
+	}
 	if err != nil {
 		return err
+	}
+	if streamer != nil {
+		if result.PromptTokens > 0 {
+			fmt.Fprintf(stdout, "\n(%d prompt tokens)\n", result.PromptTokens)
+		}
+		return nil
 	}
 	return writeResult(stdout, format, runResult{
 		SessionID:    session.SessionID,
@@ -467,6 +484,16 @@ func readerIsTTY(reader io.Reader) bool {
 	}
 	return isTTY(file)
 }
+
+func writerIsTTY(writer io.Writer) bool {
+	file, ok := writer.(*os.File)
+	if !ok {
+		return false
+	}
+	return isTTY(file)
+}
+
+func boolPtr(v bool) *bool { return &v }
 
 func envOr(key string, fallback string) string {
 	if value := strings.TrimSpace(os.Getenv(key)); value != "" {

@@ -82,12 +82,6 @@ func cleanSubagentTerminalPreviewLine(raw string, final bool) (string, bool) {
 	if isSubagentTerminalProtocolNoise(line) {
 		return "", true
 	}
-	if extracted, ok := subagentTerminalJSONPreviewLine(line); ok {
-		if extracted == "" {
-			return "", true
-		}
-		line = extracted
-	}
 	if final {
 		line = strings.TrimSpace(displaypolicy.CleanSubagentFinalOutput(line))
 	}
