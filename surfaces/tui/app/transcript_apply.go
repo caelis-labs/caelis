@@ -357,6 +357,9 @@ func (m *Model) applyTranscriptLifecycle(event TranscriptEvent) (tea.Model, tea.
 
 func (m *Model) applyTranscriptSubagentNarrative(event TranscriptEvent) (tea.Model, tea.Cmd) {
 	if eventAnchorsSpawnSubagentTool(event) {
+		if event.MirroredToParentTool {
+			return m, nil
+		}
 		return m.applyAnchoredSubagentNarrativeToTool(event)
 	}
 	return m.handleParticipantTurnStream(event.ScopeID, transcriptNarrativeStreamKind(event.NarrativeKind), subagentTranscriptActor(event), event.Text, event.Final, event.OccurredAt)

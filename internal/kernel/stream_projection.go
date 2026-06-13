@@ -194,16 +194,29 @@ func StreamFrameEvent(req StreamRequest, frame stream.Frame) EventEnvelope {
 // the owning SPAWN/RUN_COMMAND panel.
 func StreamFrameEvents(req StreamRequest, frame stream.Frame) []EventEnvelope {
 	out := make([]EventEnvelope, 0, 2)
+	var embedded EventEnvelope
+	embeddedOK := false
 	if frame.Event != nil {
 		if env, ok := streamFrameEmbeddedEvent(req, frame); ok {
-			out = append(out, env)
+			embedded = env
+			embeddedOK = true
 		}
 	}
 	if strings.EqualFold(strings.TrimSpace(req.ToolName), "SPAWN") {
-		if env, ok := subagentStreamFrameEvent(req, frame); ok {
-			out = append(out, env)
+		parent, parentOK := subagentStreamFrameEvent(req, frame)
+		if embeddedOK {
+			if parentOK {
+				embedded.Event.Meta = markStreamFrameMirroredToParentTool(embedded.Event.Meta)
+			}
+			out = append(out, embedded)
+		}
+		if parentOK {
+			out = append(out, parent)
 		}
 		return out
+	}
+	if embeddedOK {
+		out = append(out, embedded)
 	}
 	if frame.Closed {
 		out = append(out, streamFinalFrameEvent(req, frame))
@@ -537,6 +550,12 @@ func markStreamFrameAnchor(meta map[string]any, callID string, toolName string) 
 	caelis[EventMetaRuntime] = runtimeMeta
 	out[EventMetaRoot] = caelis
 	return out
+}
+
+func markStreamFrameMirroredToParentTool(meta map[string]any) map[string]any {
+	return withCaelisRuntimeSection(meta, EventMetaRuntimeStream, map[string]any{
+		EventMetaRuntimeStreamMirroredToParentTool: true,
+	})
 }
 
 func streamFrameState(frame stream.Frame) string {

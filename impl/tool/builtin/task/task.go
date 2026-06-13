@@ -19,7 +19,7 @@ func New() Tool {
 func (Tool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        ToolName,
-		Description: "Control an async task returned by RUN_COMMAND or SPAWN. Use action=wait to collect progress or completion, action=write to send stdin to an interactive process or continue a running/waiting SPAWN child-agent conversation, and action=cancel to stop work that is no longer needed. Continue an existing child agent with TASK write instead of spawning a replacement unless a separate child agent is actually needed. Always wait for a task before relying on its result.",
+		Description: "Control an async task returned by RUN_COMMAND or SPAWN. Use action=wait to collect progress or completion, action=write to send stdin to an interactive process or continue a running/waiting SPAWN child-agent conversation, and action=cancel to stop work that is no longer needed. For SPAWN child agents, prefer a single action=wait with wait_until_done=true instead of repeated short waits; it waits until completion or a bounded timeout (default 300000 ms). Continue an existing child agent with TASK write instead of spawning a replacement unless a separate child agent is actually needed. Always wait for a task before relying on its result.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -40,7 +40,11 @@ func (Tool) Definition() tool.Definition {
 				"yield_time_ms": map[string]any{
 					"type":        "integer",
 					"minimum":     0,
-					"description": "Wait before returning.",
+					"description": "Wait before returning. With wait_until_done=true, this is the bounded completion timeout; default is 300000 ms.",
+				},
+				"wait_until_done": map[string]any{
+					"type":        "boolean",
+					"description": "For action=wait, wait until the task completes or yield_time_ms elapses. Prefer this for SPAWN child agents to avoid repeated short waits.",
 				},
 			},
 			"required":             []string{"action", "task_id"},

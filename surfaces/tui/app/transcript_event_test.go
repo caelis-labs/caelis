@@ -1152,6 +1152,41 @@ func TestProjectGatewayEventTaskResultShowsEffectiveWaitDuration(t *testing.T) {
 	}
 }
 
+func TestProjectGatewayEventTaskResultHidesWaitUntilDoneDuration(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectGatewayEventToTranscriptEvents(gateway.Event{
+		Kind: gateway.EventKindToolResult,
+		Meta: testRuntimeToolMeta(map[string]any{
+			"action":                  "wait",
+			"target_id":               "sima",
+			"target_kind":             "subagent",
+			"effective_yield_time_ms": 300000,
+			"yield_time_ms_defaulted": true,
+			"wait_until_done":         true,
+		}),
+		ToolResult: &gateway.ToolResultPayload{
+			CallID:   "task-result",
+			ToolName: "TASK",
+			Status:   gateway.ToolStatusRunning,
+			RawInput: map[string]any{"action": "wait", "task_id": "self"},
+			RawOutput: map[string]any{
+				"task_id": "sima",
+				"state":   "running",
+			},
+		},
+	})
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one tool event", events)
+	}
+	if got := events[0].ToolArgs; got != "Wait sima" {
+		t.Fatalf("ToolArgs = %q, want compact wait display", got)
+	}
+	if got := events[0].ToolOutput; got != "" {
+		t.Fatalf("ToolOutput = %q, want no TASK wait display output", got)
+	}
+}
+
 func TestProjectGatewayEventTaskResultShowsExplicitZeroWaitDuration(t *testing.T) {
 	t.Parallel()
 

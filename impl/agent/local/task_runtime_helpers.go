@@ -243,6 +243,18 @@ func optionalIntArg(values map[string]any, key string) *int {
 	return &value
 }
 
+func optionalBoolArg(values map[string]any, key string) *bool {
+	raw, ok := values[key]
+	if !ok || raw == nil {
+		return nil
+	}
+	value, ok := parseBoolArgValue(raw)
+	if !ok {
+		return nil
+	}
+	return &value
+}
+
 func parseIntArgValue(raw any) (int, bool) {
 	switch typed := raw.(type) {
 	case float64:
@@ -259,6 +271,18 @@ func parseIntArgValue(raw any) (int, bool) {
 		return value, err == nil
 	default:
 		return 0, false
+	}
+}
+
+func parseBoolArgValue(raw any) (bool, bool) {
+	switch typed := raw.(type) {
+	case bool:
+		return typed, true
+	case string:
+		value, err := strconv.ParseBool(strings.TrimSpace(typed))
+		return value, err == nil
+	default:
+		return false, false
 	}
 }
 

@@ -506,8 +506,10 @@ func taskControlDisplay(raw map[string]any) string {
 	switch action {
 	case "WAIT":
 		duration := ""
-		if ms := taskWaitDurationMS(raw); ms >= 0 {
-			duration = formatDurationMS(ms)
+		if !displayBool(raw["wait_until_done"]) {
+			if ms := taskWaitDurationMS(raw); ms >= 0 {
+				duration = formatDurationMS(ms)
+			}
 		}
 		parts := []string{"Wait"}
 		if handle != "" {
@@ -696,7 +698,7 @@ func taskDisplayInputForResult(input map[string]any, output map[string]any) map[
 	if out == nil {
 		out = map[string]any{}
 	}
-	for _, key := range []string{"effective_yield_time_ms", "yield_time_ms_defaulted"} {
+	for _, key := range []string{"effective_yield_time_ms", "yield_time_ms_defaulted", "wait_until_done"} {
 		if value, ok := output[key]; ok {
 			out[key] = value
 		}

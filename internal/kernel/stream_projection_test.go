@@ -340,6 +340,9 @@ func TestStreamFrameEventsPreserveEmbeddedSubagentEventAndToolUpdate(t *testing.
 	if child.Origin.ParticipantSessionID != "child-session" {
 		t.Fatalf("child origin participant session = %q, want original ACP child session", child.Origin.ParticipantSessionID)
 	}
+	if !EventMetaBool(child.Meta, EventMetaRoot, EventMetaRuntime, EventMetaRuntimeStream, EventMetaRuntimeStreamMirroredToParentTool) {
+		t.Fatalf("child meta = %#v, want mirrored_to_parent_tool marker when parent SPAWN update is also projected", child.Meta)
+	}
 	tool := events[1].Event
 	if tool.Kind != EventKindToolResult || tool.ToolResult == nil {
 		t.Fatalf("tool event = %#v, want stream tool result", tool)
@@ -353,6 +356,9 @@ func TestStreamFrameEventsPreserveEmbeddedSubagentEventAndToolUpdate(t *testing.
 	events = StreamFrameEvents(req, eventOnly)
 	if len(events) != 1 || events[0].Event.Kind != EventKindAssistantMessage {
 		t.Fatalf("StreamFrameEvents(event-only) = %#v, want embedded child event even without stream text", events)
+	}
+	if EventMetaBool(events[0].Event.Meta, EventMetaRoot, EventMetaRuntime, EventMetaRuntimeStream, EventMetaRuntimeStreamMirroredToParentTool) {
+		t.Fatalf("event-only child meta = %#v, should not mark mirror without parent SPAWN update", events[0].Event.Meta)
 	}
 }
 

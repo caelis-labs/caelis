@@ -365,9 +365,16 @@ func (t runtimeTaskTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 	}
 	yieldMS := 0
 	parsedYield := optionalIntArg(args, "yield_time_ms")
+	waitUntilDone := false
+	if parsed := optionalBoolArg(args, "wait_until_done"); parsed != nil {
+		waitUntilDone = *parsed
+	}
 	yieldDefaulted := false
 	if strings.EqualFold(strings.TrimSpace(action), "wait") {
 		yieldMS = int(defaultCommandYield / time.Millisecond)
+		if waitUntilDone {
+			yieldMS = int(defaultTaskWaitUntilDoneYield / time.Millisecond)
+		}
 		yieldDefaulted = parsedYield == nil
 	}
 	if parsedYield != nil {
@@ -388,7 +395,7 @@ func (t runtimeTaskTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 	}
 
 	if len(taskIDs) > 1 {
-		result := t.callBatchTaskControl(ctx, call, normalizedAction, taskIDs, input, yieldMS, yieldDefaulted)
+		result := t.callBatchTaskControl(ctx, call, normalizedAction, taskIDs, input, yieldMS, yieldDefaulted, waitUntilDone)
 		return result, nil
 	}
 	req := taskapi.ControlRequest{
@@ -402,11 +409,11 @@ func (t runtimeTaskTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 		return tool.Result{}, err
 	}
 	result := taskControlSnapshotToolResult(call, t.base.Definition(), snapshot, normalizedAction)
-	result.Metadata = taskToolResultEventMeta(result.Metadata, normalizedAction, input, yieldMS, yieldDefaulted, snapshot)
+	result.Metadata = taskToolResultEventMeta(result.Metadata, normalizedAction, input, yieldMS, yieldDefaulted, waitUntilDone, snapshot)
 	return result, nil
 }
 
-func (t runtimeTaskTool) callBatchTaskControl(ctx context.Context, call tool.Call, action string, taskIDs []string, input string, yieldMS int, yieldDefaulted bool) tool.Result {
+func (t runtimeTaskTool) callBatchTaskControl(ctx context.Context, call tool.Call, action string, taskIDs []string, input string, yieldMS int, yieldDefaulted bool, waitUntilDone bool) tool.Result {
 	items := make([]taskBatchControlItem, 0, len(taskIDs))
 	started := time.Now()
 	for _, id := range taskIDs {
@@ -433,7 +440,7 @@ func (t runtimeTaskTool) callBatchTaskControl(ctx context.Context, call tool.Cal
 		items = append(items, taskBatchControlItem{TaskID: id, Snapshot: snapshot, OK: true})
 	}
 	result := taskBatchControlToolResult(call, t.base.Definition(), items, action)
-	result.Metadata = taskBatchToolResultEventMeta(result.Metadata, action, input, yieldMS, yieldDefaulted, items)
+	result.Metadata = taskBatchToolResultEventMeta(result.Metadata, action, input, yieldMS, yieldDefaulted, waitUntilDone, items)
 	return result
 }
 
@@ -471,7 +478,7 @@ func splitTaskControlIDs(taskID string) []string {
 	return out
 }
 
-func taskToolResultEventMeta(existing map[string]any, action string, input string, yieldMS int, yieldDefaulted bool, snapshot taskapi.Snapshot) map[string]any {
+func taskToolResultEventMeta(existing map[string]any, action string, input string, yieldMS int, yieldDefaulted bool, waitUntilDone bool, snapshot taskapi.Snapshot) map[string]any {
 	out := maps.Clone(existing)
 	if out == nil {
 		out = map[string]any{}
@@ -483,6 +490,9 @@ func taskToolResultEventMeta(existing map[string]any, action string, input strin
 	toolMeta["target_id"] = taskVisibleID(snapshot)
 	if strings.EqualFold(strings.TrimSpace(action), "wait") {
 		toolMeta["effective_yield_time_ms"] = yieldMS
+		if waitUntilDone {
+			toolMeta["wait_until_done"] = true
+		}
 		if yieldDefaulted {
 			toolMeta["yield_time_ms_defaulted"] = true
 		}
@@ -493,7 +503,7 @@ func taskToolResultEventMeta(existing map[string]any, action string, input strin
 	return out
 }
 
-func taskBatchToolResultEventMeta(existing map[string]any, action string, input string, yieldMS int, yieldDefaulted bool, items []taskBatchControlItem) map[string]any {
+func taskBatchToolResultEventMeta(existing map[string]any, action string, input string, yieldMS int, yieldDefaulted bool, waitUntilDone bool, items []taskBatchControlItem) map[string]any {
 	out := maps.Clone(existing)
 	if out == nil {
 		out = map[string]any{}
@@ -511,6 +521,9 @@ func taskBatchToolResultEventMeta(existing map[string]any, action string, input 
 	}
 	if strings.EqualFold(strings.TrimSpace(action), "wait") {
 		toolMeta["effective_yield_time_ms"] = yieldMS
+		if waitUntilDone {
+			toolMeta["wait_until_done"] = true
+		}
 		if yieldDefaulted {
 			toolMeta["yield_time_ms_defaulted"] = true
 		}

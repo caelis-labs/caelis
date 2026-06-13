@@ -15,6 +15,7 @@ func ProjectACPEventToTranscriptEvents(env eventstream.Envelope) []TranscriptEve
 	meta := mergeTranscriptMeta(acpUpdateMeta(env.Update), env.Meta)
 	anchorToolCallID := metaString(meta, "caelis", "runtime", "stream", "parent_call_id")
 	anchorToolName := metaString(meta, "caelis", "runtime", "stream", "parent_tool")
+	mirroredToParentTool := metaBool(meta, "caelis", "runtime", "stream", "mirrored_to_parent_tool")
 	out := make([]TranscriptEvent, 0, 2)
 	switch env.Kind {
 	case eventstream.KindSessionUpdate:
@@ -74,6 +75,7 @@ func ProjectACPEventToTranscriptEvents(env eventstream.Envelope) []TranscriptEve
 	for i := range out {
 		out[i].AnchorToolCallID = anchorToolCallID
 		out[i].AnchorToolName = anchorToolName
+		out[i].MirroredToParentTool = mirroredToParentTool
 	}
 	return out
 }
@@ -342,4 +344,20 @@ func metaString(meta map[string]any, path ...string) string {
 	}
 	value, _ := current.(string)
 	return strings.TrimSpace(value)
+}
+
+func metaBool(meta map[string]any, path ...string) bool {
+	if len(meta) == 0 {
+		return false
+	}
+	var current any = meta
+	for _, key := range path {
+		mapped, ok := current.(map[string]any)
+		if !ok {
+			return false
+		}
+		current = mapped[strings.TrimSpace(key)]
+	}
+	value, _ := current.(bool)
+	return value
 }

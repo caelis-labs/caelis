@@ -127,7 +127,8 @@ func TestCoreToolSchemasExposeGuidanceBoundsAndAnnotations(t *testing.T) {
 
 	requireStringMinLength(t, defs[task.ToolName], "task_id", 1)
 	requireIntegerBounds(t, defs[task.ToolName], "yield_time_ms", 0, nil)
-	requireDescriptionContains(t, defs[task.ToolName], "Always wait")
+	requireBooleanProperty(t, defs[task.ToolName], "wait_until_done")
+	requireDescriptionContains(t, defs[task.ToolName], "Always wait", "wait_until_done=true")
 	requireAnnotations(t, defs[task.ToolName], false, true, false, true)
 
 	requirePlanSchema(t, defs[plan.ToolName])
@@ -394,6 +395,14 @@ func requireIntegerBounds(t *testing.T, def tool.Definition, prop string, minimu
 		if got := schemaProp["maximum"]; got != *maximum {
 			t.Fatalf("%s.%s maximum = %#v, want %#v", def.Name, prop, got, *maximum)
 		}
+	}
+}
+
+func requireBooleanProperty(t *testing.T, def tool.Definition, prop string) {
+	t.Helper()
+	schemaProp := schemaProperty(t, def, prop)
+	if got := schemaProp["type"]; got != "boolean" {
+		t.Fatalf("%s.%s type = %#v, want boolean", def.Name, prop, got)
 	}
 }
 

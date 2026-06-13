@@ -3164,6 +3164,38 @@ func TestRuntimeTaskWaitUsesDefaultYieldWhenOmitted(t *testing.T) {
 	}
 }
 
+func TestRuntimeTaskWaitUntilDoneDefaultsToBoundedCompletionWait(t *testing.T) {
+	t.Parallel()
+
+	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
+	fake := &yieldProbeSandboxRuntime{session: newYieldProbeSandboxSession()}
+	taskID := startProbeCommandTask(t, activeSession, runtime, fake)
+
+	taskResult := callRuntimeTaskTool(t, runtimeTaskTool{
+		base:       tasktool.New(),
+		sessionRef: activeSession.SessionRef,
+		tasks:      runtime.tasks,
+	}, map[string]any{
+		"action":          "wait",
+		"task_id":         taskID,
+		"wait_until_done": true,
+	})
+
+	if got := fake.session.lastWait; got != defaultTaskWaitUntilDoneYield {
+		t.Fatalf("wait_until_done TASK wait yield = %v, want %v", got, defaultTaskWaitUntilDoneYield)
+	}
+	toolMeta := testToolResultRuntimeMeta(t, taskResult, "tool")
+	if got := toolMeta["effective_yield_time_ms"]; got != float64(300000) && got != 300000 {
+		t.Fatalf("effective_yield_time_ms = %#v, want 300000", got)
+	}
+	if got := toolMeta["yield_time_ms_defaulted"]; got != true {
+		t.Fatalf("yield_time_ms_defaulted = %#v, want true", got)
+	}
+	if got := toolMeta["wait_until_done"]; got != true {
+		t.Fatalf("wait_until_done = %#v, want true", got)
+	}
+}
+
 func TestRuntimeTaskWaitAcceptsCommaSeparatedTaskIDs(t *testing.T) {
 	t.Parallel()
 

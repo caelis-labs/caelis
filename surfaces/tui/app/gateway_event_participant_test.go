@@ -555,6 +555,172 @@ func TestGatewayAnchoredSubagentNarrativeRendersUnderSpawnTool(t *testing.T) {
 	}
 }
 
+func TestGatewayMirroredSubagentNarrativeDoesNotDuplicateSpawnPanelStream(t *testing.T) {
+	model := newGatewayEventTestModel()
+	callID := "spawn-dup"
+	rawInput := map[string]any{"agent": "reviewer", "prompt": "review calculator"}
+	send := func(env gateway.EventEnvelope) {
+		updated, _ := model.Update(gatewayEventMsg(env))
+		model = updated.(*Model)
+	}
+	send(gateway.EventEnvelope{Event: gateway.Event{
+		Kind:       gateway.EventKindToolCall,
+		SessionRef: session.SessionRef{SessionID: "root-session"},
+		ToolCall: &gateway.ToolCallPayload{
+			CallID:   callID,
+			ToolName: "SPAWN",
+			Status:   gateway.ToolStatusRunning,
+			Scope:    gateway.EventScopeMain,
+			RawInput: rawInput,
+		},
+	}})
+	sendMirroredChild := func(text string) {
+		send(gateway.EventEnvelope{Event: gateway.Event{
+			Kind:       gateway.EventKindAssistantMessage,
+			SessionRef: session.SessionRef{SessionID: "root-session"},
+			Origin: &gateway.EventOrigin{
+				Scope:   gateway.EventScopeSubagent,
+				ScopeID: "reviewer",
+				Actor:   "reviewer",
+			},
+			Meta: mirroredSpawnStreamMeta(callID),
+			Narrative: &gateway.NarrativePayload{
+				Role: gateway.NarrativeRoleAssistant,
+				Text: text,
+			},
+		}})
+	}
+	sendParentToolUpdate := func(text string) {
+		send(gateway.EventEnvelope{Event: gateway.Event{
+			Kind:       gateway.EventKindToolResult,
+			SessionRef: session.SessionRef{SessionID: "root-session"},
+			ToolResult: &gateway.ToolResultPayload{
+				CallID:    callID,
+				ToolName:  "SPAWN",
+				Status:    gateway.ToolStatusRunning,
+				Scope:     gateway.EventScopeMain,
+				RawInput:  rawInput,
+				RawOutput: map[string]any{"running": true, "state": "running", "task_id": "reviewer"},
+				Content:   testTerminalContentWithID(text, "subagent-reviewer"),
+			},
+		}})
+	}
+
+	sendMirroredChild("### 10. ")
+	sendParentToolUpdate("### 10. ")
+	sendMirroredChild("`calculator.py` ")
+	sendParentToolUpdate("`calculator.py` ")
+
+	block := firstMainACPTurnBlock(t, model)
+	if len(block.Events) != 1 {
+		t.Fatalf("events = %#v, want one SPAWN event", block.Events)
+	}
+	if got, want := block.Events[0].Output, "### 10. `calculator.py` "; got != want {
+		t.Fatalf("SPAWN output = %q, want %q", got, want)
+	}
+	if strings.Count(block.Events[0].Output, "`calculator.py`") != 1 {
+		t.Fatalf("SPAWN output duplicated child delta: %q", block.Events[0].Output)
+	}
+}
+
+func TestGatewayMirroredSubagentFinalReplacesLiveSpawnPanelOnce(t *testing.T) {
+	model := newGatewayEventTestModel()
+	callID := "spawn-final-dup"
+	rawInput := map[string]any{"agent": "reviewer", "prompt": "review calculator"}
+	send := func(env gateway.EventEnvelope) {
+		updated, _ := model.Update(gatewayEventMsg(env))
+		model = updated.(*Model)
+	}
+	send(gateway.EventEnvelope{Event: gateway.Event{
+		Kind:       gateway.EventKindToolCall,
+		SessionRef: session.SessionRef{SessionID: "root-session"},
+		ToolCall: &gateway.ToolCallPayload{
+			CallID:   callID,
+			ToolName: "SPAWN",
+			Status:   gateway.ToolStatusRunning,
+			Scope:    gateway.EventScopeMain,
+			RawInput: rawInput,
+		},
+	}})
+	send(gateway.EventEnvelope{Event: gateway.Event{
+		Kind:       gateway.EventKindAssistantMessage,
+		SessionRef: session.SessionRef{SessionID: "root-session"},
+		Origin: &gateway.EventOrigin{
+			Scope:   gateway.EventScopeSubagent,
+			ScopeID: "reviewer",
+			Actor:   "reviewer",
+		},
+		Meta: mirroredSpawnStreamMeta(callID),
+		Narrative: &gateway.NarrativePayload{
+			Role: gateway.NarrativeRoleAssistant,
+			Text: "live review line",
+		},
+	}})
+	send(gateway.EventEnvelope{Event: gateway.Event{
+		Kind:       gateway.EventKindToolResult,
+		SessionRef: session.SessionRef{SessionID: "root-session"},
+		ToolResult: &gateway.ToolResultPayload{
+			CallID:    callID,
+			ToolName:  "SPAWN",
+			Status:    gateway.ToolStatusRunning,
+			Scope:     gateway.EventScopeMain,
+			RawInput:  rawInput,
+			RawOutput: map[string]any{"running": true, "state": "running", "task_id": "reviewer"},
+			Content:   testTerminalContentWithID("live review line", "subagent-reviewer"),
+		},
+	}})
+	send(gateway.EventEnvelope{Event: gateway.Event{
+		Kind:       gateway.EventKindToolResult,
+		SessionRef: session.SessionRef{SessionID: "root-session"},
+		ToolResult: &gateway.ToolResultPayload{
+			CallID:    callID,
+			ToolName:  "SPAWN",
+			Status:    gateway.ToolStatusCompleted,
+			Scope:     gateway.EventScopeMain,
+			RawInput:  rawInput,
+			RawOutput: map[string]any{"state": "completed", "task_id": "reviewer"},
+			Content:   testToolContent("final child answer"),
+		},
+	}})
+
+	block := firstMainACPTurnBlock(t, model)
+	if len(block.Events) != 1 {
+		t.Fatalf("events = %#v, want one SPAWN event", block.Events)
+	}
+	if got := strings.Count(block.Events[0].Output, "final child answer"); got != 1 {
+		t.Fatalf("SPAWN final output = %q, want final answer exactly once", block.Events[0].Output)
+	}
+	if strings.Contains(block.Events[0].Output, "live review linelive review line") {
+		t.Fatalf("SPAWN final output retained duplicated live stream: %q", block.Events[0].Output)
+	}
+}
+
+func firstMainACPTurnBlock(t *testing.T, model *Model) *MainACPTurnBlock {
+	t.Helper()
+	if model == nil || len(model.doc.Blocks()) == 0 {
+		t.Fatalf("model doc has no blocks")
+	}
+	block, ok := model.doc.Blocks()[0].(*MainACPTurnBlock)
+	if !ok {
+		t.Fatalf("first block = %T, want MainACPTurnBlock", model.doc.Blocks()[0])
+	}
+	return block
+}
+
+func mirroredSpawnStreamMeta(callID string) map[string]any {
+	return map[string]any{
+		"caelis": map[string]any{
+			"runtime": map[string]any{
+				"stream": map[string]any{
+					"parent_call_id":          callID,
+					"parent_tool":             "SPAWN",
+					"mirrored_to_parent_tool": true,
+				},
+			},
+		},
+	}
+}
+
 func TestGatewaySpawnStatusOnlyFinalDoesNotCreateEmptySubagentPanel(t *testing.T) {
 	model := newGatewayEventTestModel()
 	for _, env := range []gateway.EventEnvelope{

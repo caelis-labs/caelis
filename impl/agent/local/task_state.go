@@ -16,6 +16,7 @@ import (
 
 const (
 	defaultCommandYield             = 7 * time.Second
+	defaultTaskWaitUntilDoneYield   = 5 * time.Minute
 	taskCancelWait                  = 10 * time.Millisecond
 	commandLiveOutputBufferCapBytes = 64 * 1024
 )
