@@ -43,10 +43,6 @@ func renderEventPolicyFor(msg tea.Msg) (renderEventPolicy, bool) {
 		return renderEventPolicy{lane: renderLaneLog, flushSmoothing: true, dismissHints: true}, true
 	case ParticipantStatusMsg:
 		return renderEventPolicy{lane: renderLaneParticipant, flushSmoothing: true, flushLogChunks: true}, true
-	case SubagentStartMsg:
-		return renderEventPolicy{lane: renderLaneSubagent, flushSmoothing: true, flushLogChunks: true, dismissHints: true}, true
-	case SubagentStatusMsg, SubagentDoneMsg:
-		return renderEventPolicy{lane: renderLaneSubagent, flushSmoothing: true, flushLogChunks: true}, true
 	case PlanUpdateMsg, SetHintMsg, ApprovalReviewHintMsg, SetRunningMsg,
 		SetStatusMsg, StatusRefreshResultMsg, SetCommandsMsg, AttachmentCountMsg,
 		RunningInterruptResultMsg, SandboxProgressMsg:
@@ -229,16 +225,6 @@ func (m *Model) dispatchRenderEvent(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		model, cmd := m.handleParticipantStatusMsg(typed)
 		return model, tea.Batch(policyCmd, cmd), true
 
-	case SubagentStartMsg:
-		model, cmd := m.handleSubagentStart(typed)
-		return model, tea.Batch(policyCmd, cmd), true
-	case SubagentStatusMsg:
-		model, cmd := m.handleSubagentStatus(typed)
-		return model, tea.Batch(policyCmd, cmd), true
-	case SubagentDoneMsg:
-		model, cmd := m.handleSubagentDone(typed)
-		return model, tea.Batch(policyCmd, cmd), true
-
 	case PlanUpdateMsg:
 		return m.handlePlanUpdateMsg(typed), policyCmd, true
 	case SetHintMsg:
@@ -310,9 +296,6 @@ func (m *Model) dispatchRenderEvent(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		if legacyBroadcast || typed.kind == frameTickRenderDrain {
 			cmds = append(cmds, m.drainPendingRenderEvents(typed.at))
 		}
-		if legacyBroadcast || typed.kind == frameTickPanelAnimation {
-			cmds = append(cmds, m.advancePanelAnimations(typed.at))
-		}
 		if legacyBroadcast || typed.kind == frameTickScrollbarVisible {
 			cmds = append(cmds, m.advanceScrollbarVisibility(typed.at))
 		}
@@ -354,9 +337,7 @@ func (m *Model) invalidateUserDisplayDedup() {
 func shouldInvalidateUserDisplayDedup(msg tea.Msg) bool {
 	switch msg.(type) {
 	case TranscriptEventsMsg,
-		ParticipantStatusMsg,
-		SubagentStatusMsg,
-		SubagentDoneMsg:
+		ParticipantStatusMsg:
 		return true
 	default:
 		return false

@@ -47,29 +47,10 @@ func (m *Model) applyTranscriptToolToParticipant(event TranscriptEvent, mutation
 }
 
 func (m *Model) applyTranscriptToolToSubagent(event TranscriptEvent, mutation transcriptToolMutation) (tea.Model, tea.Cmd) {
-	if !m.shouldRenderSubagentPanelEvent(event) {
+	if eventAnchorsSpawnSubagentTool(event) {
 		return m, nil
 	}
-	sessionKey, state := m.ensureSubagentSessionState(event.ScopeID, "", "")
-	panel := m.ensureSubagentPanelBlock(event.ScopeID, "", "", "", "", false)
-	if state == nil || panel == nil {
-		return m, nil
-	}
-	if !event.OccurredAt.IsZero() && (state.StartedAt.IsZero() || event.OccurredAt.Before(state.StartedAt)) {
-		state.StartedAt = event.OccurredAt
-	}
-	switch {
-	case strings.EqualFold(state.Status, "waiting_approval"):
-		state.Status = "running"
-	case isTerminalSubagentState(state.Status):
-		state.ReviveFromTerminal()
-	}
-	panel.bindSession(state)
-	state.UpdateToolCallWithMeta(mutation.callID, mutation.name, mutation.args, mutation.stream, mutation.output, mutation.final, mutation.meta)
-	m.reviveSubagentPanel(panel, false)
-	m.syncSubagentSessionPanels(sessionKey)
-	m.markViewportBlockDirty(panel.BlockID())
-	return m, m.requestStreamViewportSync()
+	return m.applyTranscriptToolToParticipant(event, mutation)
 }
 
 func (m *Model) applyTranscriptToolToMain(event TranscriptEvent, mutation transcriptToolMutation) (tea.Model, tea.Cmd) {

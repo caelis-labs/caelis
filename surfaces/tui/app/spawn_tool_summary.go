@@ -46,47 +46,19 @@ func subagentTerminalSignalLines(text string, final bool) []string {
 	return lines
 }
 
-func subagentTerminalPreviewStyledLines(lines []string, limit int, final bool) []string {
-	if limit <= 0 || len(lines) == 0 {
-		return nil
-	}
-	filtered := make([]string, 0, minInt(len(lines), limit))
-	seen := map[string]struct{}{}
-	for _, line := range lines {
-		plain := strings.TrimSpace(ansi.Strip(line))
-		cleaned, ok := cleanSubagentTerminalPreviewLine(plain, final)
-		if !ok || cleaned == "" {
-			continue
-		}
-		key := normalizeSubagentTerminalPreviewLineKey(cleaned)
-		if key != "" {
-			if _, exists := seen[key]; exists {
-				continue
-			}
-			seen[key] = struct{}{}
-		}
-		filtered = append(filtered, cleaned)
-		if len(filtered) > limit {
-			copy(filtered, filtered[len(filtered)-limit:])
-			filtered = filtered[:limit]
-		}
-	}
-	return filtered
-}
-
 func cleanSubagentTerminalPreviewLine(raw string, final bool) (string, bool) {
 	line := strings.TrimSpace(ansi.Strip(sanitizeRenderableText(raw)))
 	if line == "" {
 		return "", true
 	}
-	if isSubagentTerminalProtocolNoise(line) {
-		return "", true
-	}
-	if extracted, ok := subagentTerminalJSONPreviewLine(line); ok {
-		if extracted == "" {
+	if preview, ok := subagentTerminalJSONPreviewLine(line); ok {
+		line = strings.TrimSpace(preview)
+		if line == "" {
 			return "", true
 		}
-		line = extracted
+	}
+	if isSubagentTerminalProtocolNoise(line) {
+		return "", true
 	}
 	if final {
 		line = strings.TrimSpace(displaypolicy.CleanSubagentFinalOutput(line))

@@ -227,14 +227,14 @@ func TestACPNarrativeStreamsUseActiveBufferFastPath(t *testing.T) {
 			},
 			active: func(t *testing.T, m *Model) *activeNarrativeBuffer {
 				t.Helper()
-				block, ok := m.doc.Blocks()[len(m.doc.Blocks())-1].(*SubagentPanelBlock)
+				block, ok := m.doc.Blocks()[len(m.doc.Blocks())-1].(*ParticipantTurnBlock)
 				if !ok {
-					t.Fatalf("last block = %T, want SubagentPanelBlock", m.doc.Blocks()[len(m.doc.Blocks())-1])
+					t.Fatalf("last block = %T, want ParticipantTurnBlock", m.doc.Blocks()[len(m.doc.Blocks())-1])
 				}
 				return activeBufferForEventKind(t, block.Events, SEAssistant)
 			},
-			blockKind:          BlockSubagent,
-			wantInitialGlamour: 0,
+			blockKind:          BlockParticipantTurn,
+			wantInitialGlamour: 1,
 		},
 	}
 
@@ -277,22 +277,6 @@ func TestACPNarrativeStreamsUseActiveBufferFastPath(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestActiveSubagentNarrativeHonorsPanelContentWidth(t *testing.T) {
-	m := newPerfTestModel()
-	ctx := m.blockRenderContext(80)
-	contentWidth := 24
-	panel := NewSubagentPanelBlock("spawn-1", "", "helper", "call-1")
-	text := strings.Repeat("narrow panel wraps active output ", 4)
-
-	panel.AppendStreamChunk(SEAssistant, text)
-	activeLines := renderSubagentInnerLines(panel, ctx, contentWidth)
-	assertRenderedLinesWithinWidth(t, activeLines, contentWidth)
-
-	panel.ReplaceFinalStreamChunk(SEAssistant, text)
-	finalLines := renderSubagentInnerLines(panel, ctx, contentWidth)
-	assertRenderedLinesWithinWidth(t, finalLines, contentWidth)
 }
 
 func TestACPActiveAndFinalNarrativeKeepStablePrefixBodyWidth(t *testing.T) {

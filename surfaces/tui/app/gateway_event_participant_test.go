@@ -460,7 +460,7 @@ func TestGatewayInterleavedStreamingFinalReplacesMatchingNarrativeOnly(t *testin
 	}
 }
 
-func TestGatewayAnchoredSubagentNarrativeDoesNotCreateStandalonePanel(t *testing.T) {
+func TestGatewayAnchoredSubagentNarrativeRendersUnderSpawnTool(t *testing.T) {
 	model := newGatewayEventTestModel()
 	for _, env := range []gateway.EventEnvelope{
 		{Event: gateway.Event{
@@ -496,18 +496,107 @@ func TestGatewayAnchoredSubagentNarrativeDoesNotCreateStandalonePanel(t *testing
 				Text: "child output",
 			},
 		}},
+		{Event: gateway.Event{
+			Kind:       gateway.EventKindAssistantMessage,
+			SessionRef: session.SessionRef{SessionID: "root-session"},
+			Origin: &gateway.EventOrigin{
+				Scope:   gateway.EventScopeSubagent,
+				ScopeID: "jack",
+			},
+			Meta: map[string]any{
+				"caelis": map[string]any{
+					"runtime": map[string]any{
+						"stream": map[string]any{
+							"parent_call_id": "spawn-1",
+							"parent_tool":    "SPAWN",
+						},
+					},
+				},
+			},
+			Narrative: &gateway.NarrativePayload{
+				Role:  gateway.NarrativeRoleAssistant,
+				Text:  "final child answer",
+				Final: true,
+			},
+		}},
+		{Event: gateway.Event{
+			Kind:       gateway.EventKindToolResult,
+			SessionRef: session.SessionRef{SessionID: "root-session"},
+			ToolResult: &gateway.ToolResultPayload{
+				CallID:   "spawn-1",
+				ToolName: "SPAWN",
+				Status:   gateway.ToolStatusCompleted,
+				Scope:    gateway.EventScopeMain,
+				RawInput: map[string]any{"agent": "self", "prompt": "inspect"},
+				RawOutput: map[string]any{
+					"state":   "completed",
+					"task_id": "jack",
+				},
+			},
+		}},
+	} {
+		updated, _ := model.Update(gatewayEventMsg(env))
+		model = updated.(*Model)
+	}
+	if got := len(model.doc.Blocks()); got != 1 {
+		t.Fatalf("doc blocks = %d, want only the main SPAWN turn: %#v", got, model.doc.Blocks())
+	}
+	block, ok := model.doc.Blocks()[0].(*MainACPTurnBlock)
+	if !ok {
+		t.Fatalf("first block = %T, want MainACPTurnBlock", model.doc.Blocks()[0])
+	}
+	rows := block.Render(BlockRenderContext{Width: 120, TermWidth: 120, Theme: model.theme})
+	joined := strings.Join(renderedPlainRows(rows), "\n")
+	if !strings.Contains(joined, "• Spawned") || !strings.Contains(joined, "final child answer") {
+		t.Fatalf("completed SPAWN tool missing final child answer:\n%s", joined)
+	}
+	if strings.Contains(joined, "child output") {
+		t.Fatalf("completed SPAWN tool should show final answer only:\n%s", joined)
+	}
+}
+
+func TestGatewaySpawnStatusOnlyFinalDoesNotCreateEmptySubagentPanel(t *testing.T) {
+	model := newGatewayEventTestModel()
+	for _, env := range []gateway.EventEnvelope{
+		{Event: gateway.Event{
+			Kind:       gateway.EventKindToolCall,
+			SessionRef: session.SessionRef{SessionID: "root-session"},
+			ToolCall: &gateway.ToolCallPayload{
+				CallID:   "spawn-status-only",
+				ToolName: "SPAWN",
+				Status:   gateway.ToolStatusRunning,
+				Scope:    gateway.EventScopeMain,
+				RawInput: map[string]any{"agent": "self", "prompt": "inspect"},
+			},
+		}},
+		{Event: gateway.Event{
+			Kind:       gateway.EventKindToolResult,
+			SessionRef: session.SessionRef{SessionID: "root-session"},
+			Meta:       testRuntimeToolMeta(map[string]any{"target_id": "jack"}),
+			ToolResult: &gateway.ToolResultPayload{
+				CallID:   "spawn-status-only",
+				ToolName: "SPAWN",
+				Status:   gateway.ToolStatusCompleted,
+				Scope:    gateway.EventScopeMain,
+				RawInput: map[string]any{"agent": "self", "prompt": "inspect"},
+				RawOutput: map[string]any{
+					"state":   "completed",
+					"task_id": "jack",
+				},
+			},
+		}},
 	} {
 		updated, _ := model.Update(gatewayEventMsg(env))
 		model = updated.(*Model)
 	}
 	for _, block := range model.doc.Blocks() {
-		if panel, ok := block.(*SubagentPanelBlock); ok {
-			t.Fatalf("anchored child stream created standalone panel: %#v", panel)
+		if participant, ok := block.(*ParticipantTurnBlock); ok {
+			t.Fatalf("unexpected empty subagent participant turn: session=%q status=%q events=%#v", participant.SessionID, participant.Status, participant.Events)
 		}
 	}
 }
 
-func TestGatewayAnchoredSubagentApprovalAppendsToSpawnTailUntilFinal(t *testing.T) {
+func TestGatewayAnchoredSubagentApprovalRendersUnderSpawnToolUntilFinal(t *testing.T) {
 	model := newGatewayEventTestModel()
 	for _, env := range []gateway.EventEnvelope{
 		{Event: gateway.Event{
@@ -554,25 +643,49 @@ func TestGatewayAnchoredSubagentApprovalAppendsToSpawnTailUntilFinal(t *testing.
 		updated, _ := model.Update(gatewayEventMsg(env))
 		model = updated.(*Model)
 	}
-	for _, docBlock := range model.doc.Blocks() {
-		if panel, ok := docBlock.(*SubagentPanelBlock); ok {
-			t.Fatalf("anchored child approval created standalone panel: %#v", panel)
-		}
+	if got := len(model.doc.Blocks()); got != 1 {
+		t.Fatalf("doc blocks = %d, want only the main SPAWN turn: %#v", got, model.doc.Blocks())
 	}
 	block, ok := model.doc.Blocks()[0].(*MainACPTurnBlock)
 	if !ok {
-		t.Fatalf("first block = %#v, want MainACPTurnBlock", model.doc.Blocks()[0])
+		t.Fatalf("first block = %T, want MainACPTurnBlock", model.doc.Blocks()[0])
 	}
 	joined := strings.Join(renderedPlainRows(block.Render(BlockRenderContext{Width: 140, TermWidth: 140, Theme: model.theme})), "\n")
-	for _, want := range []string{"• Spawned claude:", "Approval review approved custom_tool path: hello_claude.txt", "creating the requested file"} {
+	for _, want := range []string{"Approval review approved custom_tool path: hello_claude.txt", "creating the requested file"} {
 		if !strings.Contains(joined, want) {
-			t.Fatalf("rendered rows = %q, want approval tail %q", joined, want)
+			t.Fatalf("SPAWN tool rows = %q, want approval tail %q", joined, want)
 		}
 	}
 
 	updated, _ := model.Update(gatewayEventMsg(gateway.EventEnvelope{Event: gateway.Event{
+		Kind:       gateway.EventKindAssistantMessage,
+		SessionRef: session.SessionRef{SessionID: "root-session"},
+		Origin: &gateway.EventOrigin{
+			Scope:   gateway.EventScopeSubagent,
+			ScopeID: "task-claude",
+			Actor:   "claude",
+		},
+		Meta: map[string]any{
+			"caelis": map[string]any{
+				"runtime": map[string]any{
+					"stream": map[string]any{
+						"parent_call_id": "spawn-approval",
+						"parent_tool":    "SPAWN",
+					},
+				},
+			},
+		},
+		Narrative: &gateway.NarrativePayload{
+			Role:  gateway.NarrativeRoleAssistant,
+			Text:  "created hello_claude.txt",
+			Final: true,
+		},
+	}}))
+	model = updated.(*Model)
+	updated, _ = model.Update(gatewayEventMsg(gateway.EventEnvelope{Event: gateway.Event{
 		Kind:       gateway.EventKindToolResult,
 		SessionRef: session.SessionRef{SessionID: "root-session"},
+		Meta:       testRuntimeToolMeta(map[string]any{"target_id": "task-claude"}),
 		ToolResult: &gateway.ToolResultPayload{
 			CallID:   "spawn-approval",
 			ToolName: "SPAWN",
@@ -580,21 +693,18 @@ func TestGatewayAnchoredSubagentApprovalAppendsToSpawnTailUntilFinal(t *testing.
 			Scope:    gateway.EventScopeMain,
 			RawInput: map[string]any{"agent": "claude", "prompt": "create hello_claude.txt"},
 			RawOutput: map[string]any{
-				"state":         "completed",
-				"task_id":       "task-claude",
-				"final_message": "created hello_claude.txt",
+				"state":   "completed",
+				"task_id": "task-claude",
 			},
-			Content: testToolContent("created hello_claude.txt"),
 		},
 	}}))
 
 	model = updated.(*Model)
-	block = model.doc.Blocks()[0].(*MainACPTurnBlock)
 	joined = strings.Join(renderedPlainRows(block.Render(BlockRenderContext{Width: 140, TermWidth: 140, Theme: model.theme})), "\n")
 	if !strings.Contains(joined, "created hello_claude.txt") {
-		t.Fatalf("rendered rows = %q, want final SPAWN output", joined)
+		t.Fatalf("SPAWN tool rows = %q, want final SPAWN output", joined)
 	}
 	if strings.Contains(joined, "Approval review approved") || strings.Contains(joined, "creating the requested file") {
-		t.Fatalf("rendered rows = %q, final SPAWN output should replace temporary approval tail", joined)
+		t.Fatalf("SPAWN tool rows = %q, final SPAWN output should replace temporary approval tail", joined)
 	}
 }

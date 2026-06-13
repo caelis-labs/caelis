@@ -124,16 +124,6 @@ func (m *Model) tryScrollPanelAtMouse(mouse tea.Mouse) (handled bool, changed bo
 		token = strings.TrimSpace(m.viewportClickTokens[contentLine])
 	}
 	switch block := m.doc.Find(blockID).(type) {
-	case *SubagentPanelBlock:
-		if !block.CanScroll(delta, ctx) {
-			return false, false
-		}
-		changed = block.Scroll(delta, ctx)
-		if changed {
-			touchScrollbarDeadline(block.scrollbarVisibleUntilPtr(), time.Now())
-			m.markViewportBlockDirty(block.BlockID())
-		}
-		return true, changed
 	case *MainACPTurnBlock:
 		callID, ok := strings.CutPrefix(token, "acp_tool_panel_scroll:")
 		if !ok || !block.CanScrollToolPanel(callID, delta, ctx) {
@@ -254,22 +244,12 @@ func (m *Model) tryTogglePanelAtClick(mouse tea.Mouse) bool {
 	if blk == nil {
 		return false
 	}
-	if _, ok := blk.(*TranscriptBlock); ok {
-		if panel := m.findInlineSubagentPanelByAnchorBlockID(bid); panel != nil {
-			m.toggleInlineSubagentPanel(panel)
-			return true
-		}
-	}
 	if turn, ok := blk.(*ParticipantTurnBlock); ok {
 		if contentLine > 0 && m.viewportBlockIDs[contentLine-1] == bid {
 			return false
 		}
 		turn.Expanded = !turn.Expanded
 		return true
-	}
-	if sp, ok := blk.(*SubagentPanelBlock); ok {
-		// Inline subagent panels toggle from the tool call line only.
-		_ = sp
 	}
 	return false
 }

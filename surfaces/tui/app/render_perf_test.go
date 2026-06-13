@@ -102,31 +102,6 @@ func TestDirtyViewportSyncFallsBackWhenRenderContextChanges(t *testing.T) {
 	}
 }
 
-func TestSubagentAttachMarksOrderAndAnchorDirty(t *testing.T) {
-	m := newPerfTestModel()
-	anchor := NewTranscriptBlock("▸ SPAWN helper task", tuikit.LineStyleTool)
-	panel := NewSubagentPanelBlock("spawn-1", "", "helper", "")
-	m.doc.Append(panel)
-	m.doc.Append(anchor)
-	m.syncViewportContent()
-	m.viewportStructureDirty = false
-
-	m.attachSubagentPanelToCall(panel, "call-1", "SPAWN", true)
-	if !m.viewportStructureDirty {
-		t.Fatal("attaching an existing panel after an anchor should mark viewport structure dirty")
-	}
-
-	m.viewportStructureDirty = false
-	panel.Expanded = true
-	m.syncInlineSubagentAnchorState(panel)
-	if _, ok := m.dirtyViewportBlocks[anchor.BlockID()]; !ok {
-		t.Fatal("inline anchor label change should mark the anchor block dirty")
-	}
-	if !strings.HasPrefix(strings.TrimSpace(anchor.Raw), "▾") {
-		t.Fatalf("anchor label was not expanded: %q", anchor.Raw)
-	}
-}
-
 func BenchmarkViewportSyncLongTranscript(b *testing.B) {
 	m := newPerfTestModel()
 	seedLongTranscript(m, 2000)

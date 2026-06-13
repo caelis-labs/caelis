@@ -491,7 +491,7 @@ func viewportRhythmForBlock(block Block) viewportRhythmClass {
 		return viewportRhythmAssistant
 	case *ReasoningBlock:
 		return viewportRhythmReasoning
-	case *MainACPTurnBlock, *ParticipantTurnBlock, *SubagentPanelBlock:
+	case *MainACPTurnBlock, *ParticipantTurnBlock:
 		return viewportRhythmPanel
 	case *TranscriptBlock:
 		if strings.TrimSpace(b.Raw) == "" {
@@ -719,22 +719,6 @@ func viewportBlockRenderKey(block Block, ctx BlockRenderContext) string {
 	case *DividerBlock:
 		builder.addString(b.Label)
 		builder.addString(b.Text)
-	case *SubagentPanelBlock:
-		builder.addString(b.SpawnID)
-		builder.addString(b.AttachID)
-		builder.addString(b.Agent)
-		builder.addString(b.CallID)
-		builder.addString(b.Status)
-		builder.addBool(b.Expanded)
-		builder.addInt(b.VisibleLines)
-		builder.addInt(b.ScrollOffset)
-		builder.addBool(b.FollowTail)
-		builder.addBool(b.Terminal)
-		builder.addBool(b.PinnedOpenByUser)
-		builder.addTime(b.ScrollbarVisibleUntil)
-		builder.addTime(b.StartedAt)
-		builder.addInt(int(b.localEvtGen))
-		writeSubagentEvents(builder, b.Events, ctx)
 	case *MainACPTurnBlock:
 		builder.addString(b.SessionID)
 		builder.addString(b.Status)

@@ -174,28 +174,3 @@ type BTWOverlayMsg struct {
 type BTWErrorMsg struct {
 	Text string
 }
-
-type SubagentStartMsg struct {
-	SpawnID      string
-	AttachTarget string
-	Agent        string
-	CallID       string
-	AnchorTool   string
-	ClaimAnchor  bool
-	Provisional  bool
-	OccurredAt   time.Time
-}
-
-type SubagentStatusMsg struct {
-	SpawnID         string
-	State           string
-	ApprovalTool    string
-	ApprovalCommand string
-	OccurredAt      time.Time
-}
-
-type SubagentDoneMsg struct {
-	SpawnID    string
-	State      string
-	OccurredAt time.Time
-}

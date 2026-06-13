@@ -26,7 +26,6 @@ const runningLightBandRadius = 5.5
 const runningLightLead = 4.0
 const runningTickerStaticFrameCostThreshold = 40 * time.Millisecond
 const copyHintDuration = 1600 * time.Millisecond
-const subagentOutputPreviewLines = 12
 const inputHorizontalInset = tuikit.InputInset
 const paletteAnimationInterval = 16 * time.Millisecond
 const paletteAnimationStep = 3
@@ -38,8 +37,6 @@ const streamSmoothingNormalCPSDefault = 68.0
 const streamSmoothingCatchupCPSDefault = 128.0
 const streamSmoothingNormalMaxPerFrameDefault = 5
 const streamSmoothingCatchupMaxPerFrameDefault = 12
-const inlinePanelMinVisibleDuration = 600 * time.Millisecond
-const inlinePanelCollapseDuration = 180 * time.Millisecond
 const scrollbarVisibleDuration = 900 * time.Millisecond
 const offscreenViewportSyncIntervalFloor = 80 * time.Millisecond
 const offscreenViewportSyncIntervalMax = 160 * time.Millisecond
@@ -276,9 +273,6 @@ type inputAttachment struct {
 	Offset int
 }
 
-// subagentPanelState is REMOVED — replaced by SubagentPanelBlock in Document.
-// The type definition is kept temporarily for compilation during migration.
-
 type planEntryState struct {
 	Content string
 	Status  string
@@ -300,12 +294,6 @@ type sandboxProgressState struct {
 	Total     int
 	Done      bool
 	UpdatedAt time.Time
-}
-
-// toolAnchor is a pending, unclaimed tool-style TranscriptBlock.
-type toolAnchor struct {
-	blockID  string
-	toolName string // normalized tool name from "▸ TOOLNAME ..." line
 }
 
 type Model struct {
@@ -337,23 +325,11 @@ type Model struct {
 	activeReasoningActor string
 
 	// Maps external keys to doc block IDs.
-	subagentBlockIDs               map[string]string
-	subagentSessions               map[string]*SubagentSessionState
-	subagentSessionRefs            map[string][]string
 	activeMainACPTurnID            string
 	pendingMainACPSessionID        string
 	pendingMainACPStartedAt        time.Time
 	participantTurnIDs             map[string]string
 	activeParticipantTurnSessionID string
-
-	// pendingToolAnchors tracks tool-style TranscriptBlocks ("▸ RUN_COMMAND ...",
-	// "▸ SPAWN ...") that haven't yet been claimed by a panel. FIFO order.
-	pendingToolAnchors []toolAnchor
-
-	// callAnchorIndex maps a CallID (or SpawnID parent CallID) to the block ID
-	// of its corresponding "▸ TOOL ..." line. Once a pending anchor is claimed,
-	// it's stored here for stable future lookups.
-	callAnchorIndex map[string]string
 
 	streamLine          string
 	pendingLogBuffer    logChunkBuffer
@@ -451,7 +427,6 @@ type Model struct {
 	offscreenViewportSyncAt        time.Time
 	viewportSyncPending            bool
 	viewportSyncTickScheduled      bool
-	panelAnimationTickScheduled    bool
 	scrollbarTickScheduled         bool
 	streamPlayback                 streamPlaybackMetrics
 	viewportRenderEntries          []viewportRenderEntry

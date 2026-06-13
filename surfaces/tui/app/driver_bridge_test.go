@@ -1694,13 +1694,8 @@ func TestDynamicAgentSlashStreamsParticipantTurnOutput(t *testing.T) {
 	}
 	close(msgs)
 	for msg := range msgs {
-		switch typed := msg.(type) {
-		case SubagentStartMsg:
-			t.Fatalf("dynamic slash emitted SPAWN panel start message: %#v", typed)
-		default:
-			if transcriptEventsContainText(transcriptEventsFromMsg(msg), "copilot 子代理") {
-				return
-			}
+		if transcriptEventsContainText(transcriptEventsFromMsg(msg), "copilot 子代理") {
+			return
 		}
 	}
 	t.Fatal("dynamic slash emitted no participant output")

@@ -717,8 +717,6 @@ func (m *Model) applyPendingSmoothChunk(state *streamSmoothingState, chunk strin
 		return nil
 	}
 	switch state.targetKind {
-	case "subagent":
-		return m.applySubagentStreamImmediate(state.sessionKey, state.streamKind, chunk)
 	case "btw":
 		m.applyBTWOverlayImmediate(chunk, false)
 		return nil

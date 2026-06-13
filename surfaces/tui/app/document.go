@@ -58,7 +58,6 @@ const (
 	BlockAssistant       BlockKind = "assistant"
 	BlockReasoning       BlockKind = "reasoning"
 	BlockDivider         BlockKind = "divider"
-	BlockSubagent        BlockKind = "subagent"
 	BlockMainACPTurn     BlockKind = "main_acp_turn"
 	BlockParticipantTurn BlockKind = "participant_turn"
 	BlockWelcome         BlockKind = "welcome"

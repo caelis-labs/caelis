@@ -135,28 +135,10 @@ func (m *Model) applyTranscriptPlan(event TranscriptEvent) (tea.Model, tea.Cmd) 
 		m.markViewportBlockDirty(block.BlockID())
 		return m, m.requestStreamViewportSync()
 	case ACPProjectionSubagent:
-		if !m.shouldRenderSubagentPanelEvent(event) {
+		if eventAnchorsSpawnSubagentTool(event) {
 			return m, nil
 		}
-		sessionKey, state := m.ensureSubagentSessionState(event.ScopeID, "", "")
-		panel := m.ensureSubagentPanelBlock(event.ScopeID, "", "", "", "", false)
-		if state == nil || panel == nil {
-			return m, nil
-		}
-		if !event.OccurredAt.IsZero() && (state.StartedAt.IsZero() || event.OccurredAt.Before(state.StartedAt)) {
-			state.StartedAt = event.OccurredAt
-		}
-		if strings.EqualFold(state.Status, "waiting_approval") {
-			state.Status = "running"
-		} else if isTerminalSubagentState(state.Status) {
-			state.ReviveFromTerminal()
-		}
-		panel.bindSession(state)
-		state.UpdatePlan(entries)
-		m.reviveSubagentPanel(panel, false)
-		m.syncSubagentSessionPanels(sessionKey)
-		m.markViewportBlockDirty(panel.BlockID())
-		return m, m.requestStreamViewportSync()
+		return m.applyTranscriptPlanToParticipantTurn(event, entries)
 	default:
 		block := m.ensureMainACPTurnBlock(strings.TrimSpace(event.ScopeID))
 		if block == nil {
@@ -200,16 +182,10 @@ func (m *Model) applyTranscriptApproval(event TranscriptEvent) (tea.Model, tea.C
 			OccurredAt:      event.OccurredAt,
 		})
 	case ACPProjectionSubagent:
-		if !m.shouldRenderSubagentPanelEvent(event) {
+		if eventAnchorsSpawnSubagentTool(event) {
 			return m, nil
 		}
-		return m.handleSubagentStatus(SubagentStatusMsg{
-			SpawnID:         event.ScopeID,
-			State:           firstNonEmpty(strings.TrimSpace(event.State), "waiting_approval"),
-			ApprovalTool:    event.ApprovalTool,
-			ApprovalCommand: event.ApprovalCommand,
-			OccurredAt:      event.OccurredAt,
-		})
+		return m.applyTranscriptStatusToParticipantTurn(event, firstNonEmpty(strings.TrimSpace(event.State), "waiting_approval"), event.ApprovalTool, event.ApprovalCommand)
 	default:
 		block := m.ensureMainACPTurnBlock(strings.TrimSpace(event.ScopeID))
 		if block == nil {
@@ -237,26 +213,10 @@ func (m *Model) applyTranscriptApprovalReview(event TranscriptEvent) (tea.Model,
 		m.markViewportBlockDirty(block.BlockID())
 		return m, m.requestStreamViewportSync()
 	case ACPProjectionSubagent:
-		if !m.shouldRenderSubagentPanelEvent(event) {
+		if eventAnchorsSpawnSubagentTool(event) {
 			return m, nil
 		}
-		sessionKey, state := m.ensureSubagentSessionState(event.ScopeID, "", "")
-		panel := m.ensureSubagentPanelBlock(event.ScopeID, "", "", "", "", false)
-		if state == nil || panel == nil {
-			return m, nil
-		}
-		switch {
-		case strings.EqualFold(state.Status, "waiting_approval"):
-			state.Status = "running"
-		case isTerminalSubagentState(state.Status):
-			state.ReviveFromTerminal()
-		}
-		panel.bindSession(state)
-		state.AddApprovalReviewEvent(event.ToolCallID, event.ApprovalTool, event.ApprovalCommand, event.ApprovalStatus, event.ApprovalRisk, event.ApprovalAuth, event.ApprovalText)
-		m.reviveSubagentPanel(panel, false)
-		m.syncSubagentSessionPanels(sessionKey)
-		m.markViewportBlockDirty(panel.BlockID())
-		return m, m.requestStreamViewportSync()
+		return m.applyTranscriptApprovalReviewToParticipantTurn(event)
 	default:
 		block := m.ensureMainACPTurnBlock(strings.TrimSpace(event.ScopeID))
 		if block == nil {
@@ -353,14 +313,10 @@ func (m *Model) applyTranscriptParticipant(event TranscriptEvent) (tea.Model, te
 	m.prepareForTranscriptScope(event.Scope)
 	switch event.Scope {
 	case ACPProjectionSubagent:
-		if !m.shouldRenderSubagentPanelEvent(event) {
+		if eventAnchorsSpawnSubagentTool(event) {
 			return m, nil
 		}
-		return m.handleSubagentStatus(SubagentStatusMsg{
-			SpawnID:    event.ScopeID,
-			State:      event.State,
-			OccurredAt: event.OccurredAt,
-		})
+		return m.applyTranscriptStatusToParticipantTurn(event, event.State, "", "")
 	default:
 		return m.handleParticipantStatusMsg(ParticipantStatusMsg{
 			SessionID:  event.ScopeID,
@@ -380,14 +336,10 @@ func (m *Model) applyTranscriptLifecycle(event TranscriptEvent) (tea.Model, tea.
 			OccurredAt: event.OccurredAt,
 		})
 	case ACPProjectionSubagent:
-		if !m.shouldRenderSubagentPanelEvent(event) {
+		if eventAnchorsSpawnSubagentTool(event) {
 			return m, nil
 		}
-		return m.handleSubagentStatus(SubagentStatusMsg{
-			SpawnID:    event.ScopeID,
-			State:      event.State,
-			OccurredAt: event.OccurredAt,
-		})
+		return m.applyTranscriptStatusToParticipantTurn(event, event.State, "", "")
 	default:
 		block := m.ensureMainACPTurnBlock(strings.TrimSpace(event.ScopeID))
 		if block == nil {
@@ -404,50 +356,89 @@ func (m *Model) applyTranscriptLifecycle(event TranscriptEvent) (tea.Model, tea.
 }
 
 func (m *Model) applyTranscriptSubagentNarrative(event TranscriptEvent) (tea.Model, tea.Cmd) {
-	if !m.shouldRenderSubagentPanelEvent(event) {
+	if eventAnchorsSpawnSubagentTool(event) {
+		return m.applyAnchoredSubagentNarrativeToTool(event)
+	}
+	return m.handleParticipantTurnStream(event.ScopeID, transcriptNarrativeStreamKind(event.NarrativeKind), subagentTranscriptActor(event), event.Text, event.Final, event.OccurredAt)
+}
+
+func eventAnchorsSpawnSubagentTool(event TranscriptEvent) bool {
+	return event.Scope == ACPProjectionSubagent &&
+		strings.TrimSpace(event.ScopeID) != "" &&
+		strings.TrimSpace(event.AnchorToolCallID) != "" &&
+		strings.EqualFold(firstNonEmpty(strings.TrimSpace(event.AnchorToolName), "SPAWN"), "SPAWN")
+}
+
+func (m *Model) applyAnchoredSubagentNarrativeToTool(event TranscriptEvent) (tea.Model, tea.Cmd) {
+	if m == nil {
 		return m, nil
 	}
-	sessionKey, state := m.ensureSubagentSessionState(event.ScopeID, "", "")
-	panel := m.ensureSubagentPanelBlock(event.ScopeID, "", "", "", "", false)
-	if state == nil || panel == nil {
+	callID := strings.TrimSpace(event.AnchorToolCallID)
+	if callID == "" {
 		return m, nil
 	}
-	if !event.OccurredAt.IsZero() && (state.StartedAt.IsZero() || event.OccurredAt.Before(state.StartedAt)) {
-		state.StartedAt = event.OccurredAt
-	}
-	switch {
-	case strings.EqualFold(state.Status, "waiting_approval"):
-		state.Status = "running"
-	case isTerminalSubagentState(state.Status):
-		state.ReviveFromTerminal()
-	}
-	panel.bindSession(state)
 	text := tuikit.SanitizeLogText(event.Text)
-	if event.NarrativeKind == TranscriptNarrativeReasoning {
-		if event.Final {
-			panel.ReplaceFinalStreamChunk(SEReasoning, text, event.OccurredAt)
-		} else {
-			panel.AppendStreamChunk(SEReasoning, text, event.OccurredAt)
-		}
-	} else {
-		if event.Final {
-			closeLatestReasoningTiming(state.Events, event.OccurredAt)
-			state.eventsGen++
-		}
-		if event.Final {
-			panel.ReplaceFinalStreamChunk(SEAssistant, text, event.OccurredAt)
-		} else {
-			panel.AppendStreamChunk(SEAssistant, text, event.OccurredAt)
-		}
+	if strings.TrimSpace(text) == "" {
+		return m, nil
 	}
-	m.reviveSubagentPanel(panel, false)
-	m.syncSubagentSessionPanels(sessionKey)
-	m.markViewportBlockDirty(panel.BlockID())
+	toolName := firstNonEmpty(strings.TrimSpace(event.AnchorToolName), "SPAWN")
+	for _, docBlock := range m.doc.Blocks() {
+		block, ok := docBlock.(*MainACPTurnBlock)
+		if !ok || !mainACPBlockHasToolCall(block, callID) {
+			continue
+		}
+		block.UpdateToolWithMeta(callID, toolName, "", text, event.Final, false, ToolUpdateMeta{
+			ToolKind: "execute",
+			TaskID:   strings.TrimSpace(event.ScopeID),
+		})
+		m.markViewportBlockDirty(block.BlockID())
+		return m, m.requestStreamViewportSync()
+	}
+	return m, nil
+}
+
+func (m *Model) applyTranscriptPlanToParticipantTurn(event TranscriptEvent, entries []planEntryState) (tea.Model, tea.Cmd) {
+	block := m.ensureParticipantTurnBlock(event.ScopeID, subagentTranscriptActor(event))
+	if block == nil {
+		return m, nil
+	}
+	m.activeParticipantTurnSessionID = strings.TrimSpace(block.SessionID)
+	if !event.OccurredAt.IsZero() && (block.StartedAt.IsZero() || event.OccurredAt.Before(block.StartedAt)) {
+		block.StartedAt = event.OccurredAt
+	}
+	if state := strings.ToLower(strings.TrimSpace(block.Status)); state == "initializing" || state == "prompting" || state == "waiting_approval" || participantTurnIsTerminal(state) {
+		block.Status = "running"
+	}
+	block.UpdatePlan(entries)
+	m.markViewportBlockDirty(block.BlockID())
 	return m, m.requestStreamViewportSync()
 }
 
-func (m *Model) shouldRenderSubagentPanelEvent(event TranscriptEvent) bool {
-	return strings.TrimSpace(event.AnchorToolCallID) == ""
+func (m *Model) applyTranscriptStatusToParticipantTurn(event TranscriptEvent, stateName, approvalTool, approvalCommand string) (tea.Model, tea.Cmd) {
+	block := m.ensureParticipantTurnBlock(event.ScopeID, subagentTranscriptActor(event))
+	if block == nil {
+		return m, nil
+	}
+	block.SetStatus(stateName, approvalTool, approvalCommand, event.OccurredAt)
+	m.markViewportBlockDirty(block.BlockID())
+	return m, m.requestStreamViewportSync()
+}
+
+func (m *Model) applyTranscriptApprovalReviewToParticipantTurn(event TranscriptEvent) (tea.Model, tea.Cmd) {
+	block := m.ensureParticipantTurnBlock(event.ScopeID, subagentTranscriptActor(event))
+	if block == nil {
+		return m, nil
+	}
+	if state := strings.ToLower(strings.TrimSpace(block.Status)); state == "waiting_approval" {
+		block.Status = "running"
+	}
+	block.AddApprovalReviewEvent(event.ToolCallID, event.ApprovalTool, event.ApprovalCommand, event.ApprovalStatus, event.ApprovalRisk, event.ApprovalAuth, event.ApprovalText)
+	m.markViewportBlockDirty(block.BlockID())
+	return m, m.requestStreamViewportSync()
+}
+
+func subagentTranscriptActor(event TranscriptEvent) string {
+	return firstNonEmpty(strings.TrimSpace(event.Actor), strings.TrimSpace(event.ScopeID), "subagent")
 }
 
 func transcriptToolUpdateMeta(event TranscriptEvent) ToolUpdateMeta {

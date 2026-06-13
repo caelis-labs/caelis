@@ -60,10 +60,6 @@ func (m *Model) shouldShowViewportScrollbar(now time.Time) bool {
 	return m != nil && scrollbarVisibleUntil(&m.viewportScrollbarVisibleUntil, now)
 }
 
-func (b *SubagentPanelBlock) shouldShowScrollbar(now time.Time) bool {
-	return scrollbarVisibleUntil(b.scrollbarVisibleUntilPtr(), now)
-}
-
 func (m *Model) ensureScrollbarTick() tea.Cmd {
 	if m == nil || m.scrollbarTickScheduled {
 		return nil
@@ -353,12 +349,7 @@ func (m *Model) contentLineAtViewportY(y int) (int, bool) {
 }
 
 func panelScrollbarKind(block panelScrollbarBlock) scrollbarTargetKind {
-	switch block.(type) {
-	case *SubagentPanelBlock:
-		return scrollbarTargetSubagentPanel
-	default:
-		return 0
-	}
+	return 0
 }
 
 func (m *Model) panelScrollbarHitAtContentLine(contentLine int) (panelScrollbarBlock, scrollbarHitTarget, int, bool) {

@@ -564,11 +564,9 @@ func TestTranscriptSnapshots(t *testing.T) {
 						},
 					}}))
 
-				m = updated.(*Model)
-				updated, _ = m.Update(SubagentStatusMsg{SpawnID: "spawn-1", State: "completed"})
 				return updated.(*Model)
 			},
-			want: "Participant(session=participant-session,status=completed)\n  assistant:participant answer\nSubagent(spawn=spawn-1,status=completed)\n  assistant:subagent answer",
+			want: "Participant(session=participant-session,status=completed)\n  assistant:participant answer\nParticipant(session=spawn-1,status=completed)\n  assistant:subagent answer",
 		},
 		{
 			name: "replayed durable events",
@@ -728,7 +726,7 @@ func TestStructuredSubagentGatewayToolRendersThroughTranscriptModel(t *testing.T
 	}
 
 	got := snapshotTranscriptModel(model)
-	want := "Subagent(spawn=child-1,status=running)\n  tool(call-1,RUN_COMMAND,done,args=go test ./surfaces/tui/app/...,output=ok)"
+	want := "Participant(session=child-1,status=running)\n  tool(call-1,RUN_COMMAND,done,args=go test ./surfaces/tui/app/...,output=ok)"
 	if got != want {
 		t.Fatalf("snapshot mismatch\nwant:\n%s\n\ngot:\n%s", want, got)
 	}
@@ -1511,11 +1509,6 @@ func snapshotTranscriptModel(m *Model) string {
 			}
 		case *ParticipantTurnBlock:
 			lines = append(lines, "Participant(session="+typed.SessionID+",status="+typed.Status+")")
-			for _, ev := range typed.Events {
-				lines = append(lines, "  "+snapshotSubagentEvent(ev))
-			}
-		case *SubagentPanelBlock:
-			lines = append(lines, "Subagent(spawn="+typed.SpawnID+",status="+typed.Status+")")
 			for _, ev := range typed.Events {
 				lines = append(lines, "  "+snapshotSubagentEvent(ev))
 			}

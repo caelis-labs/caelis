@@ -35,7 +35,6 @@ const (
 	frameTickViewportSync     frameTickKind = "viewport_sync"
 	frameTickStreamSmoothing  frameTickKind = "stream_smoothing"
 	frameTickRenderDrain      frameTickKind = "render_drain"
-	frameTickPanelAnimation   frameTickKind = "panel_animation"
 	frameTickScrollbarVisible frameTickKind = "scrollbar_visibility"
 )
 

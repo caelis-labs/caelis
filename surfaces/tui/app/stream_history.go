@@ -13,14 +13,9 @@ func (m *Model) resetConversationView() {
 	m.activeAssistantID = ""
 	m.activeReasoningID = ""
 	m.transientBlockID = ""
-	m.subagentBlockIDs = nil
-	m.subagentSessions = nil
-	m.subagentSessionRefs = nil
 	m.activeMainACPTurnID = ""
 	m.participantTurnIDs = nil
 	m.activeParticipantTurnSessionID = ""
-	m.pendingToolAnchors = nil
-	m.callAnchorIndex = nil
 	m.doc.Clear()
 	m.viewportStyledLines = m.viewportStyledLines[:0]
 	m.viewportPlainLines = m.viewportPlainLines[:0]
@@ -136,16 +131,6 @@ func (m *Model) commitLine(line string) {
 
 	block := NewTranscriptBlock(line, style)
 	m.doc.Append(block)
-
-	// Track tool call start lines as anchor points for panel insertion.
-	if style == tuikit.LineStyleTool {
-		if toolName, ok := extractToolCallName(line); ok && panelProducingTools[toolName] {
-			m.pendingToolAnchors = append(m.pendingToolAnchors, toolAnchor{
-				blockID:  block.BlockID(),
-				toolName: toolName,
-			})
-		}
-	}
 
 	if isRetry {
 		m.transientBlockID = block.BlockID()
