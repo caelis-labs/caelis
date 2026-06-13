@@ -41,9 +41,13 @@ func (m *Model) renderPromptModal() string {
 	start = min(start, len(visible))
 	end := minInt(len(visible), start+maxVisiblePromptChoices)
 	window := visible[start:end]
-	maxItems := len(window)
-	lines := make([]string, 0, maxItems+1)
-	for i := range maxItems {
+	lines := make([]string, 0, len(window)+2)
+	if start > 0 {
+		lines = append(lines, m.theme.HelpHintTextStyle().Render(
+			fmt.Sprintf("… and %d earlier", start),
+		))
+	}
+	for i := range window {
 		choice := window[i]
 		actualIndex := start + i
 		lines = append(lines, m.renderPromptChoiceLine(choice, actualIndex == p.choiceIndex))

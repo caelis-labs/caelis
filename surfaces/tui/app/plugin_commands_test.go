@@ -3,8 +3,10 @@ package tuiapp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/control"
@@ -88,12 +90,14 @@ func runPluginCmd(svc control.Service, args string) (TaskResultMsg, []string) {
 }
 
 // ---------------------------------------------------------------------------
-// /plugin list
+// /plugin manage
 // ---------------------------------------------------------------------------
 
-func TestSlashPluginListEmpty(t *testing.T) {
+func TestSlashPluginListShowsUsage(t *testing.T) {
+	called := false
 	svc := &pluginStubService{
 		listFn: func(ctx context.Context) ([]control.PluginSnapshot, error) {
+			called = true
 			return nil, nil
 		},
 	}
@@ -102,46 +106,39 @@ func TestSlashPluginListEmpty(t *testing.T) {
 	if result.Err != nil {
 		t.Fatalf("expected no error, got %v", result.Err)
 	}
+	if called {
+		t.Fatal("/plugin list must not call ListPlugins")
+	}
+	combined := strings.Join(notices, "\n")
+	if !strings.Contains(combined, "usage: /plugin") || strings.Contains(combined, " list ") {
+		t.Fatalf("/plugin list notice = %q, want usage without list action", combined)
+	}
+}
+
+func TestSlashPluginManageEmpty(t *testing.T) {
+	svc := &pluginStubService{
+		listFn: func(ctx context.Context) ([]control.PluginSnapshot, error) {
+			return nil, nil
+		},
+	}
+	result, notices := runPluginCmd(svc, "manage")
+
+	if result.Err != nil {
+		t.Fatalf("expected no error, got %v", result.Err)
+	}
 	if !result.SuppressTurnDivider {
 		t.Error("expected SuppressTurnDivider = true")
 	}
 	combined := strings.Join(notices, "\n")
-	if !strings.Contains(combined, "none") {
-		t.Errorf("expected 'none' in notice, got: %q", combined)
+	if !strings.Contains(combined, "no installed plugins") {
+		t.Errorf("expected empty-plugin notice, got: %q", combined)
 	}
 	if !strings.Contains(combined, "install") {
 		t.Errorf("expected 'install' hint in notice, got: %q", combined)
 	}
 }
 
-func TestSlashPluginListWithPlugins(t *testing.T) {
-	svc := &pluginStubService{
-		listFn: func(ctx context.Context) ([]control.PluginSnapshot, error) {
-			return []control.PluginSnapshot{
-				{ID: "myplugin", Name: "My Plugin", Version: "1.0.0", Enabled: true, Status: "active", Root: "/tmp/myplugin"},
-				{ID: "disabled-plug", Name: "Disabled", Version: "2.0.0", Enabled: false, Status: "inactive", Root: "/tmp/disabled"},
-			}, nil
-		},
-	}
-	result, notices := runPluginCmd(svc, "list")
-
-	if result.Err != nil {
-		t.Fatalf("expected no error, got %v", result.Err)
-	}
-	combined := strings.Join(notices, "\n")
-	if !strings.Contains(combined, "myplugin") {
-		t.Errorf("expected 'myplugin' in notice, got: %q", combined)
-	}
-	if !strings.Contains(combined, "disabled") {
-		t.Errorf("expected 'disabled' in notice, got: %q", combined)
-	}
-	// Disabled plugin should show "disabled" status
-	if !strings.Contains(combined, "disabled") {
-		t.Errorf("expected disabled status indicator, got: %q", combined)
-	}
-}
-
-func TestSlashPluginListOpensMultiSelectManager(t *testing.T) {
+func TestSlashPluginManageOpensMultiSelectManager(t *testing.T) {
 	svc := &pluginStubService{
 		listFn: func(ctx context.Context) ([]control.PluginSnapshot, error) {
 			return []control.PluginSnapshot{
@@ -151,14 +148,23 @@ func TestSlashPluginListOpensMultiSelectManager(t *testing.T) {
 		},
 	}
 	var prompts []PromptRequestMsg
+	var notices []string
 	send := func(msg tea.Msg) {
-		if prompt, ok := msg.(PromptRequestMsg); ok {
+		switch prompt := msg.(type) {
+		case PromptRequestMsg:
 			prompts = append(prompts, prompt)
+		case LogChunkMsg:
+			notices = append(notices, prompt.Chunk)
 		}
 	}
-	result := slashPluginWithContext(context.Background(), svc, send, "list")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	result := slashPluginWithContext(ctx, svc, send, "manage")
 	if result.Err != nil {
-		t.Fatalf("slashPluginWithContext(list) error = %v", result.Err)
+		t.Fatalf("slashPluginWithContext(manage) error = %v", result.Err)
+	}
+	if len(notices) != 0 {
+		t.Fatalf("/plugin manage notices = %#v, want only prompt", notices)
 	}
 	if len(prompts) != 1 {
 		t.Fatalf("prompt count = %d, want 1", len(prompts))
@@ -167,11 +173,77 @@ func TestSlashPluginListOpensMultiSelectManager(t *testing.T) {
 	if !prompt.MultiSelect || !prompt.Filterable {
 		t.Fatalf("prompt flags = multi %v filter %v, want true/true", prompt.MultiSelect, prompt.Filterable)
 	}
+	if prompt.Title != "Manage plugins" {
+		t.Fatalf("prompt title = %q, want Manage plugins", prompt.Title)
+	}
 	if got := strings.Join(prompt.SelectedChoices, ","); got != "enabled-plug" {
 		t.Fatalf("selected choices = %#v, want enabled-plug", prompt.SelectedChoices)
 	}
 	if len(prompt.Choices) != 2 || prompt.Choices[0].Value != "enabled-plug" || prompt.Choices[1].Value != "disabled-plug" {
 		t.Fatalf("prompt choices = %#v, want plugin ids", prompt.Choices)
+	}
+}
+
+func TestPluginManagePromptScrollsPastFirstPage(t *testing.T) {
+	model := NewModel(Config{Commands: DefaultCommands()})
+	model.width = 100
+	model.height = 40
+	choices := make([]PromptChoice, 0, 12)
+	for i := 0; i < 12; i++ {
+		id := fmt.Sprintf("plugin-%02d", i)
+		choices = append(choices, PromptChoice{Label: id, Value: id, Detail: "inactive"})
+	}
+	model.activePrompt = newPromptState(PromptRequestMsg{
+		Title:       "Manage plugins",
+		Choices:     choices,
+		Filterable:  true,
+		MultiSelect: true,
+		Response:    make(chan PromptResponse, 1),
+	})
+	model.activePrompt.choiceIndex = 10
+	model.syncPromptChoiceWindow()
+
+	out := model.renderPromptModal()
+	if !strings.Contains(out, "plugin-10") {
+		t.Fatalf("rendered prompt = %q, want scrolled selection plugin-10", out)
+	}
+	if !strings.Contains(out, "earlier") {
+		t.Fatalf("rendered prompt = %q, want earlier page hint", out)
+	}
+	if strings.Contains(out, "plugin-00") {
+		t.Fatalf("rendered prompt = %q, should not stay on first page", out)
+	}
+}
+
+func TestPluginManagePromptAllowsEmptySelection(t *testing.T) {
+	response := make(chan PromptResponse, 1)
+	model := NewModel(Config{Commands: DefaultCommands()})
+	model.activePrompt = newPromptState(PromptRequestMsg{
+		Title:               "Manage plugins",
+		Choices:             []PromptChoice{{Label: "superpowers", Value: "superpowers", Detail: "active"}},
+		SelectedChoices:     []string{"superpowers"},
+		Filterable:          true,
+		MultiSelect:         true,
+		AllowEmptySelection: true,
+		Response:            response,
+	})
+
+	model.handlePromptChoiceKey(keyPress("space"))
+	if len(model.activePrompt.selected) != 0 {
+		t.Fatalf("selected choices after toggle = %#v, want empty", model.activePrompt.selected)
+	}
+	model.handlePromptChoiceKey(keyPress("enter"))
+
+	select {
+	case got := <-response:
+		if got.Err != nil {
+			t.Fatalf("prompt response error = %v", got.Err)
+		}
+		if got.Line != "" {
+			t.Fatalf("prompt response line = %q, want empty selection", got.Line)
+		}
+	default:
+		t.Fatal("expected prompt response after confirming empty selection")
 	}
 }
 
@@ -205,6 +277,41 @@ func TestPluginManagerSelectionUpdatesEnabledPlugins(t *testing.T) {
 	}
 }
 
+func TestPluginManagerSelectionSurvivesCommandContextCancellation(t *testing.T) {
+	disabled := make(chan string, 1)
+	svc := &pluginStubService{
+		disableFn: func(ctx context.Context, id string) (control.PluginSnapshot, error) {
+			disabled <- id
+			return control.PluginSnapshot{ID: id, Enabled: false}, nil
+		},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	var prompt PromptRequestMsg
+	send := func(msg tea.Msg) {
+		if next, ok := msg.(PromptRequestMsg); ok {
+			prompt = next
+		}
+	}
+	sendPluginManagerPrompt(ctx, svc, send, []control.PluginSnapshot{
+		{ID: "superpowers", Enabled: true, Status: "active"},
+	})
+	if prompt.Response == nil {
+		t.Fatal("sendPluginManagerPrompt did not send a prompt")
+	}
+
+	cancel()
+	prompt.Response <- PromptResponse{Line: ""}
+
+	select {
+	case got := <-disabled:
+		if got != "superpowers" {
+			t.Fatalf("disabled plugin = %q, want superpowers", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("plugin manager did not process selection after command context cancellation")
+	}
+}
+
 func TestSlashPluginBareCommandOnlyShowsUsage(t *testing.T) {
 	called := false
 	svc := &pluginStubService{
@@ -226,13 +333,13 @@ func TestSlashPluginBareCommandOnlyShowsUsage(t *testing.T) {
 	}
 }
 
-func TestSlashPluginListError(t *testing.T) {
+func TestSlashPluginManageError(t *testing.T) {
 	svc := &pluginStubService{
 		listFn: func(ctx context.Context) ([]control.PluginSnapshot, error) {
 			return nil, errors.New("store unavailable")
 		},
 	}
-	result, _ := runPluginCmd(svc, "list")
+	result, _ := runPluginCmd(svc, "manage")
 	if result.Err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -395,28 +502,8 @@ func TestSlashPluginUnknownSubcommand(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// formatPluginList and formatPluginDetail
+// formatPluginDetail
 // ---------------------------------------------------------------------------
-
-func TestFormatPluginListEmpty(t *testing.T) {
-	out := formatPluginList(nil)
-	if !strings.Contains(out, "none") {
-		t.Errorf("formatPluginList(nil): expected 'none', got: %q", out)
-	}
-}
-
-func TestFormatPluginListWithEntries(t *testing.T) {
-	plugins := []control.PluginSnapshot{
-		{ID: "plug1", Name: "Plug One", Version: "1.0.0", Enabled: true, Status: "active", Root: "/p1", Description: "First plugin"},
-		{ID: "plug2", Name: "Plug Two", Version: "2.0.0", Enabled: false, Status: "inactive", Root: "/p2"},
-	}
-	out := formatPluginList(plugins)
-	for _, want := range []string{"plug1", "plug2", "active", "disabled", "/p1", "/p2"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("formatPluginList: expected %q, got: %q", want, out)
-		}
-	}
-}
 
 func TestFormatPluginDetailFields(t *testing.T) {
 	p := control.PluginSnapshot{

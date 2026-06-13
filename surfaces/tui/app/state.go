@@ -218,21 +218,22 @@ type streamPlaybackMetrics struct {
 }
 
 type promptState struct {
-	title              string
-	prompt             string
-	details            []PromptDetail
-	secret             bool
-	input              []rune
-	cursor             int
-	choices            []promptChoice
-	choiceIndex        int
-	scrollOffset       int
-	filter             []rune
-	filterable         bool
-	multiSelect        bool
-	allowFreeformInput bool
-	selected           map[string]struct{}
-	response           chan PromptResponse
+	title               string
+	prompt              string
+	details             []PromptDetail
+	secret              bool
+	input               []rune
+	cursor              int
+	choices             []promptChoice
+	choiceIndex         int
+	scrollOffset        int
+	filter              []rune
+	filterable          bool
+	multiSelect         bool
+	allowEmptySelection bool
+	allowFreeformInput  bool
+	selected            map[string]struct{}
+	response            chan PromptResponse
 }
 
 type promptChoice struct {

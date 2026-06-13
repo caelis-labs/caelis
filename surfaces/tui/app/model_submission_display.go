@@ -198,13 +198,20 @@ func (m *Model) tryOpenSlashArgPicker(line string) bool {
 			m.openSlashArgPicker(cmd)
 			return m.slashArgActive
 		}
-		switch text {
-		case "/agent", "/model", "/subagent":
+		if slashCommandCanOpenArgPicker(cmd) {
 			m.openSlashArgPicker(cmd)
 			return len(m.slashArgCandidates) > 0
 		}
 	}
 	return false
+}
+
+func slashCommandCanOpenArgPicker(command string) bool {
+	spec, ok := lookupSlashCommandSpec(command)
+	if !ok {
+		return false
+	}
+	return len(spec.ArgCandidates) > 0 || spec.DynamicCompleter
 }
 
 func isViewportEndKey(msg tea.KeyMsg) bool {

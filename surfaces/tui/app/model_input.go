@@ -668,8 +668,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.applyResumeCompletion()
 			m.syncTextareaFromInput()
 		case len(m.slashArgCandidates) > 0:
-			m.applySlashArgCompletion()
+			cmd := m.applySlashArgCompletion()
 			m.syncTextareaFromInput()
+			if cmd != nil {
+				return m, cmd
+			}
 		case len(m.slashCandidates) > 0:
 			m.applySlashCommandCompletion()
 			m.syncTextareaFromInput()

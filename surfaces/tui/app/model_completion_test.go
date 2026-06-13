@@ -49,38 +49,91 @@ func TestModelDeleteSelectionOpensAliasPicker(t *testing.T) {
 	}
 }
 
-func TestPluginBareCommandShowsRootCompletion(t *testing.T) {
+func TestPluginCommandShowsRootCompletion(t *testing.T) {
+	for _, input := range []string{"/plugin", "/plugin "} {
+		t.Run(fmt.Sprintf("%q", input), func(t *testing.T) {
+			model := NewModel(Config{
+				Commands: DefaultCommands(),
+				SlashArgComplete: func(command string, query string, limit int) ([]SlashArgCandidate, error) {
+					if command != "plugin" {
+						t.Fatalf("SlashArgComplete command = %q, want plugin", command)
+					}
+					return []SlashArgCandidate{
+						{Value: "install", Display: "install"},
+						{Value: "manage", Display: "manage"},
+						{Value: "rm", Display: "rm"},
+					}, nil
+				},
+			})
+
+			model.setInputText(input)
+			model.syncTextareaFromInput()
+			model.syncSlashInputOverlays()
+
+			if got := string(model.input); got != input {
+				t.Fatalf("input = %q, want %q", got, input)
+			}
+			if got := model.slashArgCommand; got != "plugin" {
+				t.Fatalf("slashArgCommand = %q, want plugin", got)
+			}
+			got := make([]string, 0, len(model.slashArgCandidates))
+			for _, candidate := range model.slashArgCandidates {
+				got = append(got, candidate.Value)
+			}
+			if strings.Join(got, ",") != "install,manage,rm" {
+				t.Fatalf("plugin candidates = %#v, want install/manage/rm", model.slashArgCandidates)
+			}
+		})
+	}
+}
+
+func TestTryOpenSlashArgPickerUsesCommandRegistry(t *testing.T) {
 	model := NewModel(Config{
 		Commands: DefaultCommands(),
 		SlashArgComplete: func(command string, query string, limit int) ([]SlashArgCandidate, error) {
 			if command != "plugin" {
-				t.Fatalf("SlashArgComplete command = %q, want plugin", command)
+				return nil, nil
 			}
-			return []SlashArgCandidate{
-				{Value: "install", Display: "install"},
-				{Value: "list", Display: "list"},
-				{Value: "rm", Display: "rm"},
-			}, nil
+			return []SlashArgCandidate{{Value: "install"}, {Value: "manage"}, {Value: "rm"}}, nil
 		},
 	})
 
-	_, cmd := model.handleKey(keyPress("/"))
-	runCompletionCmd(t, model, cmd)
-	_, cmd = model.handleKey(keyPress("plugin"))
-	runCompletionCmd(t, model, cmd)
-
-	if got := string(model.input); got != "/plugin" {
-		t.Fatalf("input after /plugin = %q, want /plugin", got)
+	if !model.tryOpenSlashArgPicker("/plugin") {
+		t.Fatal("tryOpenSlashArgPicker(/plugin) = false, want true")
 	}
 	if got := model.slashArgCommand; got != "plugin" {
 		t.Fatalf("slashArgCommand = %q, want plugin", got)
 	}
-	got := make([]string, 0, len(model.slashArgCandidates))
-	for _, candidate := range model.slashArgCandidates {
-		got = append(got, candidate.Value)
+}
+
+func TestPluginManageCompletionSubmitsPickerCommand(t *testing.T) {
+	var submitted string
+	model := NewModel(Config{
+		Commands: DefaultCommands(),
+		ExecuteLine: func(submission Submission) TaskResultMsg {
+			submitted = submission.Text
+			return TaskResultMsg{SuppressTurnDivider: true}
+		},
+		SlashArgComplete: func(command string, query string, limit int) ([]SlashArgCandidate, error) {
+			if command != "plugin" {
+				return nil, nil
+			}
+			return []SlashArgCandidate{{Value: "install"}, {Value: "manage"}, {Value: "rm"}}, nil
+		},
+	})
+
+	model.openSlashArgPicker("plugin")
+	model.slashArgIndex = 1
+	handled, cmd := model.handleSlashArgKey(keyPress("enter"))
+	if !handled {
+		t.Fatal("handleSlashArgKey(enter) = false, want true")
 	}
-	if strings.Join(got, ",") != "install,list,rm" {
-		t.Fatalf("plugin candidates = %#v, want install/list/rm", model.slashArgCandidates)
+	if cmd == nil {
+		t.Fatal("handleSlashArgKey(enter) command = nil, want /plugin manage submit command")
+	}
+	findAndRunTaskResult(cmd(), model)
+	if submitted != "/plugin manage" {
+		t.Fatalf("submitted input = %q, want /plugin manage", submitted)
 	}
 }
 

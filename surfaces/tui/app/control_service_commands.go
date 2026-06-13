@@ -797,12 +797,15 @@ func slashPluginWithContext(ctx context.Context, service control.Service, send f
 	case "":
 		sendNotice(send, pluginUsageText())
 		return TaskResultMsg{SuppressTurnDivider: true}
-	case "list":
+	case "manage":
 		plugins, err := service.ListPlugins(ctx)
 		if err != nil {
-			return TaskResultMsg{Err: friendlyCommandError("plugin list", err)}
+			return TaskResultMsg{Err: friendlyCommandError("plugin manage", err)}
 		}
-		sendNotice(send, formatPluginList(plugins))
+		if len(plugins) == 0 {
+			sendNotice(send, "no installed plugins\nnext: /plugin install <plugin@marketplace|path>")
+			return TaskResultMsg{SuppressTurnDivider: true}
+		}
 		sendPluginManagerPrompt(ctx, service, send, plugins)
 		return TaskResultMsg{SuppressTurnDivider: true}
 	case "install":
@@ -869,15 +872,16 @@ func sendPluginManagerPrompt(ctx context.Context, service control.Service, send 
 	}
 	responses := make(chan PromptResponse, 1)
 	send(PromptRequestMsg{
-		Title:           "Enable plugins",
-		Prompt:          "Select enabled plugins",
-		Choices:         choices,
-		SelectedChoices: selected,
-		Filterable:      true,
-		MultiSelect:     true,
-		Response:        responses,
+		Title:               "Manage plugins",
+		Prompt:              "Select enabled plugins",
+		Choices:             choices,
+		SelectedChoices:     selected,
+		Filterable:          true,
+		MultiSelect:         true,
+		AllowEmptySelection: true,
+		Response:            responses,
 	})
-	go awaitPluginManagerSelection(ctx, service, send, plugins, responses)
+	go awaitPluginManagerSelection(context.WithoutCancel(ctx), service, send, plugins, responses)
 }
 
 func awaitPluginManagerSelection(ctx context.Context, service control.Service, send func(tea.Msg), plugins []control.PluginSnapshot, responses <-chan PromptResponse) {
@@ -939,37 +943,7 @@ func awaitPluginManagerSelection(ctx context.Context, service control.Service, s
 }
 
 func pluginUsageText() string {
-	return "usage: /plugin install <plugin@marketplace|path> | list | rm <id>"
-}
-
-func formatPluginList(plugins []control.PluginSnapshot) string {
-	lines := []string{"installed plugins:"}
-	if len(plugins) == 0 {
-		lines = append(lines, "  none")
-		lines = append(lines, "next: /plugin install <plugin@marketplace|path>")
-		return strings.Join(lines, "\n")
-	}
-	for _, p := range plugins {
-		statusStr := p.Status
-		if !p.Enabled {
-			statusStr = "disabled"
-		}
-		checkbox := "[ ]"
-		if p.Enabled {
-			checkbox = "[x]"
-		}
-		line := fmt.Sprintf("  %s %-24s %-10s %s", checkbox, p.ID, statusStr, p.Name)
-		if p.Version != "" {
-			line += " v" + p.Version
-		}
-		lines = append(lines, line)
-		if p.Description != "" {
-			lines = append(lines, "    description: "+p.Description)
-		}
-		lines = append(lines, "    path:        "+p.Root)
-	}
-	lines = append(lines, "next: use the checkbox picker to enable plugins, or /plugin rm <id>")
-	return strings.Join(lines, "\n")
+	return "usage: /plugin install <plugin@marketplace|path> | manage | rm <id>"
 }
 
 func formatPluginDetail(p control.PluginSnapshot) string {

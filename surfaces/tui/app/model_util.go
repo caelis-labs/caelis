@@ -574,37 +574,7 @@ func slashArgQueryAtCursor(input []rune, cursor int) (string, string, bool) {
 		}
 		return "", "", false
 	case "plugin":
-		if len(fields) == 1 {
-			return command, "", true
-		}
-		action := strings.ToLower(strings.TrimSpace(fields[1]))
-		if len(fields) == 2 {
-			if hasTrailingDelimiter {
-				switch action {
-				case "install", "rm":
-					return "plugin " + action, "", true
-				case "list":
-					return "", "", false
-				default:
-					return "", "", false
-				}
-			}
-			if action == "" {
-				return "", "", false
-			}
-			switch action {
-			case "install", "list", "rm":
-			default:
-				return "plugin", action, true
-			}
-			return "plugin", action, true
-		}
-		switch action {
-		case "install", "rm":
-			return "plugin " + action, strings.TrimSpace(strings.Join(fields[2:], " ")), true
-		default:
-			return "", "", false
-		}
+		return slashRootActionQuery(command, fields, hasTrailingDelimiter, []string{"install", "manage", "rm"}, []string{"install", "rm"})
 	case "subagent":
 		if len(fields) == 1 {
 			if !hasTrailingDelimiter {
@@ -701,6 +671,49 @@ func slashArgQueryAtCursor(input []rune, cursor int) (string, string, bool) {
 	default:
 		return "", "", false
 	}
+}
+
+func slashRootActionQuery(command string, fields []string, hasTrailingDelimiter bool, rootActions []string, valueActions []string) (string, string, bool) {
+	command = strings.ToLower(strings.TrimSpace(command))
+	if command == "" || len(fields) == 0 {
+		return "", "", false
+	}
+	if len(fields) == 1 {
+		return command, "", true
+	}
+	action := strings.ToLower(strings.TrimSpace(fields[1]))
+	if len(fields) == 2 {
+		if hasTrailingDelimiter {
+			if slashArgStringSliceContains(valueActions, action) {
+				return command + " " + action, "", true
+			}
+			return "", "", false
+		}
+		if action == "" {
+			return "", "", false
+		}
+		if slashArgStringSliceContains(rootActions, action) {
+			return command, action, true
+		}
+		return command, action, true
+	}
+	if slashArgStringSliceContains(valueActions, action) {
+		return command + " " + action, strings.TrimSpace(strings.Join(fields[2:], " ")), true
+	}
+	return "", "", false
+}
+
+func slashArgStringSliceContains(values []string, target string) bool {
+	target = strings.ToLower(strings.TrimSpace(target))
+	if target == "" {
+		return false
+	}
+	for _, value := range values {
+		if strings.EqualFold(strings.TrimSpace(value), target) {
+			return true
+		}
+	}
+	return false
 }
 
 func slashArgQueryAtEnd(input []rune) (string, string, bool) {

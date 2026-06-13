@@ -1428,6 +1428,32 @@ func TestSlashArgQueryAgentInstall(t *testing.T) {
 	}
 }
 
+func TestSlashArgQueryPluginRoot(t *testing.T) {
+	for _, input := range []string{"/plugin", "/plugin "} {
+		command, query, ok := slashArgQueryAtEnd([]rune(input))
+		if !ok {
+			t.Fatalf("slashArgQueryAtEnd(%q) ok = false", input)
+		}
+		if command != "plugin" || query != "" {
+			t.Fatalf("slashArgQueryAtEnd(%q) = command %q query %q, want plugin / empty", input, command, query)
+		}
+	}
+	command, query, ok := slashArgQueryAtEnd([]rune("/plugin rm auto-review"))
+	if !ok {
+		t.Fatal("slashArgQueryAtEnd(/plugin rm auto-review) ok = false")
+	}
+	if command != "plugin rm" || query != "auto-review" {
+		t.Fatalf("slashArgQueryAtEnd(/plugin rm auto-review) = command %q query %q, want plugin rm / auto-review", command, query)
+	}
+	command, query, ok = slashArgQueryAtEnd([]rune("/plugin manage"))
+	if !ok {
+		t.Fatal("slashArgQueryAtEnd(/plugin manage) ok = false")
+	}
+	if command != "plugin" || query != "manage" {
+		t.Fatalf("slashArgQueryAtEnd(/plugin manage) = command %q query %q, want plugin / manage", command, query)
+	}
+}
+
 func TestAgentInstallSlashArgFallbackIsExecutable(t *testing.T) {
 	if !isExecutableSlashArgInput("/agent install claude") {
 		t.Fatal("isExecutableSlashArgInput(/agent install claude) = false, want true")

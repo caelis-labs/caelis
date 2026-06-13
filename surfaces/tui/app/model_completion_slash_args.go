@@ -194,27 +194,27 @@ func (m *Model) exactModelUseReasoningCandidates(query string, candidates []Slas
 	return "", nil
 }
 
-func (m *Model) applySlashArgCompletion() {
+func (m *Model) applySlashArgCompletion() tea.Cmd {
 	if len(m.slashArgCandidates) == 0 || strings.TrimSpace(m.slashArgCommand) == "" {
 		m.updateSlashArgCandidates()
 		if len(m.slashArgCandidates) == 0 || strings.TrimSpace(m.slashArgCommand) == "" {
-			return
+			return nil
 		}
 	}
 	selected, ok := m.currentSlashArgCandidate()
 	if !ok {
-		return
+		return nil
 	}
 	choice := strings.TrimSpace(selected.Value)
 	if choice == "" {
-		return
+		return nil
 	}
 	if m.isWizardActive() {
 		// During a wizard, fill only the step-local query.
 		m.setInputText(choice)
 		m.syncTextareaFromInput()
 		m.updateSlashArgCandidates()
-		return
+		return nil
 	}
 	// Non-wizard: fill and close.
 	command := strings.TrimSpace(m.slashArgCommand)
@@ -228,12 +228,20 @@ func (m *Model) applySlashArgCompletion() {
 		default:
 			m.clearSlashArg()
 		}
-		return
+		return nil
 	case "agent add", "agent install", "agent remove", "agent use":
 		m.setInputText("/" + command + " " + choice)
 		m.clearSlashArg()
-		return
+		return nil
 	case "plugin":
+		if choice == "manage" {
+			line := "/plugin manage"
+			m.setInputText(line)
+			m.syncTextareaFromInput()
+			m.clearSlashArg()
+			_, cmd := m.submitLine(line)
+			return cmd
+		}
 		m.setInputText("/plugin " + choice + " ")
 		m.syncTextareaFromInput()
 		switch choice {
@@ -242,11 +250,11 @@ func (m *Model) applySlashArgCompletion() {
 		default:
 			m.clearSlashArg()
 		}
-		return
+		return nil
 	case "plugin rm":
 		m.setInputText("/" + command + " " + choice)
 		m.clearSlashArg()
-		return
+		return nil
 	case "subagent":
 		m.setInputText("/subagent " + choice + " ")
 		m.syncTextareaFromInput()
@@ -256,16 +264,16 @@ func (m *Model) applySlashArgCompletion() {
 		default:
 			m.clearSlashArg()
 		}
-		return
+		return nil
 	case "subagent run":
 		m.setInputText("/subagent run " + choice + " ")
 		m.clearSlashArg()
-		return
+		return nil
 	case "subagent bind":
 		m.setInputText("/subagent bind " + choice + " ")
 		m.syncTextareaFromInput()
 		m.activateSlashArgPickerFromInput("subagent bind " + choice)
-		return
+		return nil
 	case "model":
 		m.setInputText("/model " + choice + " ")
 		m.syncTextareaFromInput()
@@ -277,30 +285,30 @@ func (m *Model) applySlashArgCompletion() {
 		default:
 			m.clearSlashArg()
 		}
-		return
+		return nil
 	case "model use":
 		m.setInputText("/model use " + choice + " ")
 		m.syncTextareaFromInput()
 		m.activateSlashArgPickerFromInput("model use " + choice)
-		return
+		return nil
 	case "model del":
 		m.setInputText("/model del " + choice + " ")
 		m.clearSlashArg()
-		return
+		return nil
 	case "model use ":
 		m.setInputText("/model use " + choice + " ")
 		m.clearSlashArg()
-		return
+		return nil
 	}
 	if strings.HasPrefix(command, "model use ") {
 		m.setInputText("/" + command + " " + choice)
 		m.clearSlashArg()
-		return
+		return nil
 	}
 	if strings.HasPrefix(command, "model del ") {
 		m.setInputText("/" + command + " " + choice)
 		m.clearSlashArg()
-		return
+		return nil
 	}
 	if strings.HasPrefix(command, "subagent bind ") {
 		fields := strings.Fields(command)
@@ -313,7 +321,7 @@ func (m *Model) applySlashArgCompletion() {
 			default:
 				m.clearSlashArg()
 			}
-			return
+			return nil
 		}
 		if len(fields) == 4 {
 			m.setInputText("/" + command + " " + choice + " ")
@@ -323,14 +331,15 @@ func (m *Model) applySlashArgCompletion() {
 			} else {
 				m.clearSlashArg()
 			}
-			return
+			return nil
 		}
 		m.setInputText("/" + command + " " + choice)
 		m.clearSlashArg()
-		return
+		return nil
 	}
 	m.setInputText("/" + command + " " + choice + " ")
 	m.clearSlashArg()
+	return nil
 }
 
 func (m *Model) shouldExecuteSlashArgSelection(command string, choice string) bool {
@@ -431,7 +440,7 @@ func isExecutableSlashArgInput(line string) bool {
 	case "/plugin":
 		action := strings.ToLower(strings.TrimSpace(fields[1]))
 		switch action {
-		case "list":
+		case "manage":
 			return len(fields) == 2
 		case "install", "rm":
 			return len(fields) >= 3
@@ -492,9 +501,9 @@ func (m *Model) handleSlashArgKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 		}
 		return true, nil
 	case key.Matches(msg, m.keys.Complete):
-		m.applySlashArgCompletion()
+		cmd := m.applySlashArgCompletion()
 		m.syncTextareaFromInput()
-		return true, nil
+		return true, cmd
 	case key.Matches(msg, m.keys.Accept):
 		if m.running || strings.TrimSpace(m.slashArgCommand) == "" {
 			return true, nil
@@ -523,21 +532,24 @@ func (m *Model) handleSlashArgKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 		}
 		command := strings.TrimSpace(m.slashArgCommand)
 		if m.shouldExecuteSlashArgSelection(command, selected) {
-			m.applySlashArgCompletion()
+			cmd := m.applySlashArgCompletion()
 			m.syncTextareaFromInput()
+			if cmd != nil {
+				return true, cmd
+			}
 			line = strings.TrimSpace(m.textarea.Value())
 			m.clearSlashArg()
-			_, cmd := m.submitLine(line)
-			return true, cmd
+			_, submitCmd := m.submitLine(line)
+			return true, submitCmd
 		}
 		if command == "agent" || command == "plugin" || command == "subagent" || command == "subagent run" || command == "subagent bind" || strings.HasPrefix(command, "subagent bind ") || command == "model" || command == "model use" || command == "model del" || strings.HasPrefix(command, "model use ") || strings.HasPrefix(command, "model del ") {
-			m.applySlashArgCompletion()
+			cmd := m.applySlashArgCompletion()
 			m.syncTextareaFromInput()
-			return true, nil
+			return true, cmd
 		}
-		m.applySlashArgCompletion()
+		cmd := m.applySlashArgCompletion()
 		m.syncTextareaFromInput()
-		return true, nil
+		return true, cmd
 	default:
 		return false, nil
 	}

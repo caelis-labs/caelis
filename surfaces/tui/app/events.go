@@ -83,17 +83,18 @@ type SandboxProgressMsg struct {
 }
 
 type PromptRequestMsg struct {
-	Title              string
-	Prompt             string
-	Details            []PromptDetail
-	Secret             bool
-	Choices            []PromptChoice
-	DefaultChoice      string
-	SelectedChoices    []string
-	Filterable         bool
-	MultiSelect        bool
-	AllowFreeformInput bool
-	Response           chan PromptResponse
+	Title               string
+	Prompt              string
+	Details             []PromptDetail
+	Secret              bool
+	Choices             []PromptChoice
+	DefaultChoice       string
+	SelectedChoices     []string
+	Filterable          bool
+	MultiSelect         bool
+	AllowEmptySelection bool
+	AllowFreeformInput  bool
+	Response            chan PromptResponse
 }
 
 type PromptResponse struct {

@@ -141,15 +141,16 @@ func (m *Model) handlePromptPaste(msg tea.PasteMsg) tea.Cmd {
 
 func newPromptState(req PromptRequestMsg) *promptState {
 	state := &promptState{
-		title:              strings.TrimSpace(req.Title),
-		prompt:             req.Prompt,
-		details:            append([]PromptDetail(nil), req.Details...),
-		secret:             req.Secret,
-		response:           req.Response,
-		filterable:         req.Filterable,
-		multiSelect:        req.MultiSelect,
-		allowFreeformInput: req.AllowFreeformInput,
-		selected:           map[string]struct{}{},
+		title:               strings.TrimSpace(req.Title),
+		prompt:              req.Prompt,
+		details:             append([]PromptDetail(nil), req.Details...),
+		secret:              req.Secret,
+		response:            req.Response,
+		filterable:          req.Filterable,
+		multiSelect:         req.MultiSelect,
+		allowEmptySelection: req.AllowEmptySelection,
+		allowFreeformInput:  req.AllowFreeformInput,
+		selected:            map[string]struct{}{},
 	}
 	if state.title == "" {
 		state.title = strings.TrimSpace(req.Prompt)
@@ -318,6 +319,10 @@ func (m *Model) handlePromptChoiceKey(msg tea.KeyMsg) tea.Cmd {
 	case "enter":
 		visible = m.visiblePromptChoices()
 		if m.activePrompt.multiSelect && len(m.activePrompt.selected) == 0 {
+			if m.activePrompt.allowEmptySelection {
+				m.finishPrompt("", nil)
+				return nil
+			}
 			filterValue := strings.TrimSpace(string(m.activePrompt.filter))
 			if custom, ok := firstAlwaysVisibleChoice(m.activePrompt.choices); ok && (filterValue == "" || len(visible) == 0 || promptChoicesOnlyAlwaysVisible(visible)) {
 				m.finishPrompt(custom.value, nil)
