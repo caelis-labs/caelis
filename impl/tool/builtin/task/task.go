@@ -19,7 +19,7 @@ func New() Tool {
 func (Tool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        ToolName,
-		Description: "Control an async task returned by RUN_COMMAND or SPAWN. Use action=wait to collect progress or completion, action=write to send stdin to an interactive process, and action=cancel to stop work that is no longer needed. Always wait for a task before relying on its result.",
+		Description: "Control an async task returned by RUN_COMMAND or SPAWN. Use action=wait to collect progress or completion, action=write to send stdin to an interactive process or continue a running/waiting SPAWN child-agent conversation, and action=cancel to stop work that is no longer needed. Continue an existing child agent with TASK write instead of spawning a replacement unless a separate child agent is actually needed. Always wait for a task before relying on its result.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

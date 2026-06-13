@@ -60,7 +60,7 @@ func isSpawnVisibleAgent(agent assembly.AgentConfig) bool {
 
 func systemPromptWithDelegationGuidance(systemPrompt string) string {
 	systemPrompt = strings.TrimRight(strings.TrimSpace(systemPrompt), "\n")
-	guidance := "- Use SPAWN for bounded child-agent work that can run independently; use TASK wait, cancel, or write to control yielded work."
+	guidance := "- Use SPAWN for bounded child-agent work that can run independently. For an existing running or waiting SPAWN task, use TASK wait to inspect progress and TASK write to continue that same child-agent conversation; do not spawn a replacement unless a separate child agent is actually needed."
 	if strings.Contains(systemPrompt, "SPAWN for bounded child-agent work") || strings.Contains(systemPrompt, "SPAWN for bounded child ACP work") {
 		return systemPrompt
 	}

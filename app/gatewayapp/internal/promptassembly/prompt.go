@@ -167,13 +167,13 @@ func builtInPermissionBoundariesPrompt() string {
 		"## Shell Tool Permissions",
 		"",
 		"- Run normal inspection, builds, tests, and workspace file edits with default sandbox permissions.",
-		"- VCS/control metadata writes, including staging, commits, refs, history, remote updates, and control-directory writes, must use `RUN_COMMAND` with `sandbox_permissions=require_escalated` and a concise justification.",
+		"- `sandbox_permissions=require_escalated` requests approved host execution outside the sandbox. Use it only for the specific operation that genuinely needs host access, with a concise justification; VCS/control metadata writes are common examples, not the only valid use.",
 		"- When permission or lock errors occur, do not substitute broader cleanup, reset, delete, ACL, or mode changes for the failed operation; retry only the necessary original operation with the narrowest permissions, or stop for user input.",
 	}, "\n")
 }
 
 func delegationGuidanceLine() string {
-	return "- Use SPAWN for bounded child-agent work that can run independently; use TASK wait, cancel, or write to control yielded work."
+	return "- Use SPAWN for bounded child-agent work that can run independently. For an existing running or waiting SPAWN task, use TASK wait to inspect progress and TASK write to continue that same child-agent conversation; do not spawn a replacement unless a separate child agent is actually needed."
 }
 
 func builtInEnvironmentContextPrompt(workspaceDir string) string {
