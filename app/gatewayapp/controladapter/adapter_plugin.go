@@ -10,6 +10,10 @@ func (d *Adapter) AddPluginPath(ctx context.Context, path string) (PluginSnapsho
 	return d.stack.AddPluginPath(ctx, path)
 }
 
+func (d *Adapter) InstallPlugin(ctx context.Context, source string) (PluginSnapshot, error) {
+	return d.stack.InstallPlugin(ctx, source)
+}
+
 func (d *Adapter) EnablePlugin(ctx context.Context, id string) (PluginSnapshot, error) {
 	return d.stack.EnablePlugin(ctx, id)
 }

@@ -794,84 +794,159 @@ func slashPluginWithContext(ctx context.Context, service control.Service, send f
 	ctx = contextOrBackground(ctx)
 	sub, rest := splitFirst(strings.TrimSpace(args))
 	switch sub {
-	case "", "list":
+	case "":
+		sendNotice(send, pluginUsageText())
+		return TaskResultMsg{SuppressTurnDivider: true}
+	case "list":
 		plugins, err := service.ListPlugins(ctx)
 		if err != nil {
 			return TaskResultMsg{Err: friendlyCommandError("plugin list", err)}
 		}
 		sendNotice(send, formatPluginList(plugins))
+		sendPluginManagerPrompt(ctx, service, send, plugins)
 		return TaskResultMsg{SuppressTurnDivider: true}
-	case "add-path":
+	case "install":
 		target := strings.TrimSpace(rest)
 		if target == "" {
-			sendNotice(send, "usage: /plugin add-path <directory-path>")
+			sendNotice(send, "usage: /plugin install <plugin@marketplace|directory-path>")
 			return TaskResultMsg{SuppressTurnDivider: true}
 		}
-		p, err := service.AddPluginPath(ctx, target)
+		p, err := service.InstallPlugin(ctx, target)
 		if err != nil {
-			return TaskResultMsg{Err: friendlyCommandError("plugin add-path", err)}
+			return TaskResultMsg{Err: friendlyCommandError("plugin install", err)}
 		}
-		sendNotice(send, fmt.Sprintf("added plugin %s successfully\n\n%s", p.ID, formatPluginDetail(p)))
+		sendNotice(send, fmt.Sprintf("installed plugin %s successfully\n\n%s", p.ID, formatPluginDetail(p)))
 		return TaskResultMsg{SuppressTurnDivider: true}
-	case "enable":
+	case "rm":
 		target := strings.TrimSpace(rest)
 		if target == "" {
-			sendNotice(send, "usage: /plugin enable <plugin-id>")
-			return TaskResultMsg{SuppressTurnDivider: true}
-		}
-		p, err := service.EnablePlugin(ctx, target)
-		if err != nil {
-			return TaskResultMsg{Err: friendlyCommandError("plugin enable", err)}
-		}
-		sendNotice(send, fmt.Sprintf("enabled plugin %s successfully\n\n%s", p.ID, formatPluginDetail(p)))
-		return TaskResultMsg{SuppressTurnDivider: true}
-	case "disable":
-		target := strings.TrimSpace(rest)
-		if target == "" {
-			sendNotice(send, "usage: /plugin disable <plugin-id>")
-			return TaskResultMsg{SuppressTurnDivider: true}
-		}
-		p, err := service.DisablePlugin(ctx, target)
-		if err != nil {
-			return TaskResultMsg{Err: friendlyCommandError("plugin disable", err)}
-		}
-		sendNotice(send, fmt.Sprintf("disabled plugin %s successfully\n\n%s", p.ID, formatPluginDetail(p)))
-		return TaskResultMsg{SuppressTurnDivider: true}
-	case "remove":
-		target := strings.TrimSpace(rest)
-		if target == "" {
-			sendNotice(send, "usage: /plugin remove <plugin-id>")
+			sendNotice(send, "usage: /plugin rm <plugin-id>")
 			return TaskResultMsg{SuppressTurnDivider: true}
 		}
 		err := service.RemovePlugin(ctx, target)
 		if err != nil {
-			return TaskResultMsg{Err: friendlyCommandError("plugin remove", err)}
+			return TaskResultMsg{Err: friendlyCommandError("plugin rm", err)}
 		}
 		sendNotice(send, fmt.Sprintf("removed plugin %s successfully", target))
 		return TaskResultMsg{SuppressTurnDivider: true}
-	case "inspect":
-		target := strings.TrimSpace(rest)
-		if target == "" {
-			sendNotice(send, "usage: /plugin inspect <plugin-id>")
-			return TaskResultMsg{SuppressTurnDivider: true}
-		}
-		p, err := service.InspectPlugin(ctx, target)
-		if err != nil {
-			return TaskResultMsg{Err: friendlyCommandError("plugin inspect", err)}
-		}
-		sendNotice(send, formatPluginDetail(p))
-		return TaskResultMsg{SuppressTurnDivider: true}
 	default:
-		sendNotice(send, "usage: /plugin list | add-path <path> | enable <id> | disable <id> | remove <id> | inspect <id>")
+		sendNotice(send, pluginUsageText())
 		return TaskResultMsg{SuppressTurnDivider: true}
 	}
+}
+
+func sendPluginManagerPrompt(ctx context.Context, service control.Service, send func(tea.Msg), plugins []control.PluginSnapshot) {
+	if send == nil || service == nil || len(plugins) == 0 {
+		return
+	}
+	choices := make([]PromptChoice, 0, len(plugins))
+	selected := make([]string, 0, len(plugins))
+	for _, p := range plugins {
+		id := strings.TrimSpace(p.ID)
+		if id == "" {
+			continue
+		}
+		status := p.Status
+		if !p.Enabled {
+			status = "disabled"
+		}
+		detail := strings.TrimSpace(strings.Join([]string{
+			strings.TrimSpace(status),
+			strings.TrimSpace(p.Name),
+			strings.TrimSpace(p.Version),
+		}, " "))
+		choices = append(choices, PromptChoice{
+			Label:  id,
+			Value:  id,
+			Detail: detail,
+		})
+		if p.Enabled {
+			selected = append(selected, id)
+		}
+	}
+	if len(choices) == 0 {
+		return
+	}
+	responses := make(chan PromptResponse, 1)
+	send(PromptRequestMsg{
+		Title:           "Enable plugins",
+		Prompt:          "Select enabled plugins",
+		Choices:         choices,
+		SelectedChoices: selected,
+		Filterable:      true,
+		MultiSelect:     true,
+		Response:        responses,
+	})
+	go awaitPluginManagerSelection(ctx, service, send, plugins, responses)
+}
+
+func awaitPluginManagerSelection(ctx context.Context, service control.Service, send func(tea.Msg), plugins []control.PluginSnapshot, responses <-chan PromptResponse) {
+	ctx = contextOrBackground(ctx)
+	var response PromptResponse
+	select {
+	case <-ctx.Done():
+		return
+	case next, ok := <-responses:
+		if !ok {
+			return
+		}
+		response = next
+	}
+	if response.Err != nil {
+		return
+	}
+	selected := map[string]struct{}{}
+	for _, id := range strings.Split(response.Line, ",") {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			selected[id] = struct{}{}
+		}
+	}
+	var enabled, disabled []string
+	for _, p := range plugins {
+		id := strings.TrimSpace(p.ID)
+		if id == "" {
+			continue
+		}
+		_, wantEnabled := selected[id]
+		switch {
+		case wantEnabled && !p.Enabled:
+			if _, err := service.EnablePlugin(ctx, id); err != nil {
+				sendNotice(send, fmt.Sprintf("plugin manager failed enabling %s: %v", id, err))
+				return
+			}
+			enabled = append(enabled, id)
+		case !wantEnabled && p.Enabled:
+			if _, err := service.DisablePlugin(ctx, id); err != nil {
+				sendNotice(send, fmt.Sprintf("plugin manager failed disabling %s: %v", id, err))
+				return
+			}
+			disabled = append(disabled, id)
+		}
+	}
+	if len(enabled) == 0 && len(disabled) == 0 {
+		sendNotice(send, "plugin selection unchanged")
+		return
+	}
+	parts := make([]string, 0, 2)
+	if len(enabled) > 0 {
+		parts = append(parts, "enabled "+strings.Join(enabled, ", "))
+	}
+	if len(disabled) > 0 {
+		parts = append(parts, "disabled "+strings.Join(disabled, ", "))
+	}
+	sendNotice(send, "plugin selection updated: "+strings.Join(parts, "; "))
+}
+
+func pluginUsageText() string {
+	return "usage: /plugin install <plugin@marketplace|path> | list | rm <id>"
 }
 
 func formatPluginList(plugins []control.PluginSnapshot) string {
 	lines := []string{"installed plugins:"}
 	if len(plugins) == 0 {
 		lines = append(lines, "  none")
-		lines = append(lines, "next: run /plugin add-path <path>")
+		lines = append(lines, "next: /plugin install <plugin@marketplace|path>")
 		return strings.Join(lines, "\n")
 	}
 	for _, p := range plugins {
@@ -879,7 +954,11 @@ func formatPluginList(plugins []control.PluginSnapshot) string {
 		if !p.Enabled {
 			statusStr = "disabled"
 		}
-		line := fmt.Sprintf("  %s (%s): %s", p.ID, statusStr, p.Name)
+		checkbox := "[ ]"
+		if p.Enabled {
+			checkbox = "[x]"
+		}
+		line := fmt.Sprintf("  %s %-24s %-10s %s", checkbox, p.ID, statusStr, p.Name)
 		if p.Version != "" {
 			line += " v" + p.Version
 		}
@@ -889,7 +968,7 @@ func formatPluginList(plugins []control.PluginSnapshot) string {
 		}
 		lines = append(lines, "    path:        "+p.Root)
 	}
-	lines = append(lines, "next: /plugin enable <id> | disable <id> | inspect <id>")
+	lines = append(lines, "next: use the checkbox picker to enable plugins, or /plugin rm <id>")
 	return strings.Join(lines, "\n")
 }
 

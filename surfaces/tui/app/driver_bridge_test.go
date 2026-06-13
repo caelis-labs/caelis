@@ -2485,6 +2485,9 @@ func (d *bridgeTestDriver) ListPlugins(context.Context) ([]control.PluginSnapsho
 func (d *bridgeTestDriver) AddPluginPath(context.Context, string) (control.PluginSnapshot, error) {
 	return control.PluginSnapshot{}, nil
 }
+func (d *bridgeTestDriver) InstallPlugin(context.Context, string) (control.PluginSnapshot, error) {
+	return control.PluginSnapshot{}, nil
+}
 func (d *bridgeTestDriver) EnablePlugin(context.Context, string) (control.PluginSnapshot, error) {
 	return control.PluginSnapshot{}, nil
 }
@@ -2502,6 +2505,9 @@ func (d *bridgeSubmitDriver) ListPlugins(context.Context) ([]control.PluginSnaps
 	return nil, nil
 }
 func (d *bridgeSubmitDriver) AddPluginPath(context.Context, string) (control.PluginSnapshot, error) {
+	return control.PluginSnapshot{}, nil
+}
+func (d *bridgeSubmitDriver) InstallPlugin(context.Context, string) (control.PluginSnapshot, error) {
 	return control.PluginSnapshot{}, nil
 }
 func (d *bridgeSubmitDriver) EnablePlugin(context.Context, string) (control.PluginSnapshot, error) {

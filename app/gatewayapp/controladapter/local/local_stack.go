@@ -149,6 +149,9 @@ func runtimeStack(stack *gatewayapp.Stack) *RuntimeStack {
 		AddPluginPathFn: func(ctx context.Context, path string) (controladapter.PluginSnapshot, error) {
 			return toRuntimePluginSnapshotWithError(stack.Plugins().AddPath(ctx, path))
 		},
+		InstallPluginFn: func(ctx context.Context, source string) (controladapter.PluginSnapshot, error) {
+			return toRuntimePluginSnapshotWithError(stack.Plugins().Install(ctx, source))
+		},
 		EnablePluginFn: func(ctx context.Context, id string) (controladapter.PluginSnapshot, error) {
 			return toRuntimePluginSnapshotWithError(stack.Plugins().Enable(ctx, id))
 		},

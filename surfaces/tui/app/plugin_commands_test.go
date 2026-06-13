@@ -17,6 +17,7 @@ type pluginStubService struct {
 	bridgeTestDriver
 	listFn    func(context.Context) ([]control.PluginSnapshot, error)
 	addPathFn func(context.Context, string) (control.PluginSnapshot, error)
+	installFn func(context.Context, string) (control.PluginSnapshot, error)
 	enableFn  func(context.Context, string) (control.PluginSnapshot, error)
 	disableFn func(context.Context, string) (control.PluginSnapshot, error)
 	removeFn  func(context.Context, string) error
@@ -32,6 +33,12 @@ func (s *pluginStubService) ListPlugins(ctx context.Context) ([]control.PluginSn
 func (s *pluginStubService) AddPluginPath(ctx context.Context, path string) (control.PluginSnapshot, error) {
 	if s.addPathFn != nil {
 		return s.addPathFn(ctx, path)
+	}
+	return control.PluginSnapshot{}, nil
+}
+func (s *pluginStubService) InstallPlugin(ctx context.Context, source string) (control.PluginSnapshot, error) {
+	if s.installFn != nil {
+		return s.installFn(ctx, source)
 	}
 	return control.PluginSnapshot{}, nil
 }
@@ -102,8 +109,8 @@ func TestSlashPluginListEmpty(t *testing.T) {
 	if !strings.Contains(combined, "none") {
 		t.Errorf("expected 'none' in notice, got: %q", combined)
 	}
-	if !strings.Contains(combined, "add-path") {
-		t.Errorf("expected 'add-path' hint in notice, got: %q", combined)
+	if !strings.Contains(combined, "install") {
+		t.Errorf("expected 'install' hint in notice, got: %q", combined)
 	}
 }
 
@@ -134,7 +141,71 @@ func TestSlashPluginListWithPlugins(t *testing.T) {
 	}
 }
 
-func TestSlashPluginListDefaultsToList(t *testing.T) {
+func TestSlashPluginListOpensMultiSelectManager(t *testing.T) {
+	svc := &pluginStubService{
+		listFn: func(ctx context.Context) ([]control.PluginSnapshot, error) {
+			return []control.PluginSnapshot{
+				{ID: "enabled-plug", Name: "Enabled", Enabled: true, Status: "active"},
+				{ID: "disabled-plug", Name: "Disabled", Enabled: false, Status: "inactive"},
+			}, nil
+		},
+	}
+	var prompts []PromptRequestMsg
+	send := func(msg tea.Msg) {
+		if prompt, ok := msg.(PromptRequestMsg); ok {
+			prompts = append(prompts, prompt)
+		}
+	}
+	result := slashPluginWithContext(context.Background(), svc, send, "list")
+	if result.Err != nil {
+		t.Fatalf("slashPluginWithContext(list) error = %v", result.Err)
+	}
+	if len(prompts) != 1 {
+		t.Fatalf("prompt count = %d, want 1", len(prompts))
+	}
+	prompt := prompts[0]
+	if !prompt.MultiSelect || !prompt.Filterable {
+		t.Fatalf("prompt flags = multi %v filter %v, want true/true", prompt.MultiSelect, prompt.Filterable)
+	}
+	if got := strings.Join(prompt.SelectedChoices, ","); got != "enabled-plug" {
+		t.Fatalf("selected choices = %#v, want enabled-plug", prompt.SelectedChoices)
+	}
+	if len(prompt.Choices) != 2 || prompt.Choices[0].Value != "enabled-plug" || prompt.Choices[1].Value != "disabled-plug" {
+		t.Fatalf("prompt choices = %#v, want plugin ids", prompt.Choices)
+	}
+}
+
+func TestPluginManagerSelectionUpdatesEnabledPlugins(t *testing.T) {
+	var enabled []string
+	var disabled []string
+	svc := &pluginStubService{
+		enableFn: func(ctx context.Context, id string) (control.PluginSnapshot, error) {
+			enabled = append(enabled, id)
+			return control.PluginSnapshot{ID: id, Enabled: true}, nil
+		},
+		disableFn: func(ctx context.Context, id string) (control.PluginSnapshot, error) {
+			disabled = append(disabled, id)
+			return control.PluginSnapshot{ID: id, Enabled: false}, nil
+		},
+	}
+	responses := make(chan PromptResponse, 1)
+	responses <- PromptResponse{Line: "disabled-plug"}
+	close(responses)
+
+	awaitPluginManagerSelection(context.Background(), svc, nil, []control.PluginSnapshot{
+		{ID: "enabled-plug", Enabled: true},
+		{ID: "disabled-plug", Enabled: false},
+	}, responses)
+
+	if strings.Join(enabled, ",") != "disabled-plug" {
+		t.Fatalf("enabled = %#v, want disabled-plug", enabled)
+	}
+	if strings.Join(disabled, ",") != "enabled-plug" {
+		t.Fatalf("disabled = %#v, want enabled-plug", disabled)
+	}
+}
+
+func TestSlashPluginBareCommandOnlyShowsUsage(t *testing.T) {
 	called := false
 	svc := &pluginStubService{
 		listFn: func(ctx context.Context) ([]control.PluginSnapshot, error) {
@@ -142,10 +213,16 @@ func TestSlashPluginListDefaultsToList(t *testing.T) {
 			return nil, nil
 		},
 	}
-	// Invoke with no args — should default to "list"
-	runPluginCmd(svc, "")
-	if !called {
-		t.Error("expected ListPlugins to be called with empty args")
+	result, notices := runPluginCmd(svc, "")
+	if result.Err != nil {
+		t.Fatalf("bare command should not return error, got %v", result.Err)
+	}
+	if called {
+		t.Error("bare /plugin must not execute list")
+	}
+	combined := strings.Join(notices, "\n")
+	if !strings.Contains(combined, "usage: /plugin") || !strings.Contains(combined, "install") {
+		t.Fatalf("bare /plugin notice = %q, want usage with install", combined)
 	}
 }
 
@@ -162,78 +239,69 @@ func TestSlashPluginListError(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// /plugin add-path
+// /plugin install
 // ---------------------------------------------------------------------------
 
-func TestSlashPluginAddPathSuccess(t *testing.T) {
+func TestSlashPluginInstallSuccess(t *testing.T) {
+	var gotSource string
 	svc := &pluginStubService{
-		addPathFn: func(ctx context.Context, path string) (control.PluginSnapshot, error) {
+		installFn: func(ctx context.Context, source string) (control.PluginSnapshot, error) {
+			gotSource = source
 			return control.PluginSnapshot{
-				ID:      "newplug",
-				Name:    "New Plug",
+				ID:      "mcp-server-dev",
+				Name:    "MCP Server Dev",
 				Enabled: true,
 				Status:  "active",
-				Root:    path,
 			}, nil
 		},
 	}
-	result, notices := runPluginCmd(svc, "add-path /some/path")
-
+	result, notices := runPluginCmd(svc, "install mcp-server-dev@claude-plugins-official")
 	if result.Err != nil {
 		t.Fatalf("expected no error, got %v", result.Err)
 	}
-	combined := strings.Join(notices, "\n")
-	if !strings.Contains(combined, "newplug") {
-		t.Errorf("expected plugin ID in notice, got: %q", combined)
+	if gotSource != "mcp-server-dev@claude-plugins-official" {
+		t.Fatalf("InstallPlugin source = %q, want mcp-server-dev@claude-plugins-official", gotSource)
 	}
-	if !strings.Contains(combined, "added plugin") {
-		t.Errorf("expected 'added plugin' in notice, got: %q", combined)
+	combined := strings.Join(notices, "\n")
+	if !strings.Contains(combined, "installed plugin mcp-server-dev") {
+		t.Fatalf("install notice = %q, want installed plugin", combined)
 	}
 }
 
-func TestSlashPluginAddPathMissingArg(t *testing.T) {
+func TestSlashPluginInstallMissingSource(t *testing.T) {
 	svc := &pluginStubService{}
-	result, notices := runPluginCmd(svc, "add-path")
-
+	result, notices := runPluginCmd(svc, "install")
 	if result.Err != nil {
-		t.Fatalf("missing arg should not return error, got %v", result.Err)
+		t.Fatalf("missing source should not return error, got %v", result.Err)
 	}
 	combined := strings.Join(notices, "\n")
-	if !strings.Contains(combined, "usage") {
-		t.Errorf("expected usage hint in notice, got: %q", combined)
-	}
-}
-
-func TestSlashPluginAddPathError(t *testing.T) {
-	svc := &pluginStubService{
-		addPathFn: func(ctx context.Context, path string) (control.PluginSnapshot, error) {
-			return control.PluginSnapshot{}, errors.New("path does not exist")
-		},
-	}
-	result, _ := runPluginCmd(svc, "add-path /bad/path")
-	if result.Err == nil {
-		t.Fatal("expected error, got nil")
+	if !strings.Contains(combined, "usage") || !strings.Contains(combined, "plugin@marketplace") {
+		t.Fatalf("install missing source notice = %q, want usage", combined)
 	}
 }
 
 // ---------------------------------------------------------------------------
-// /plugin enable
+// /plugin enable / disable legacy subcommands
 // ---------------------------------------------------------------------------
 
-func TestSlashPluginEnableSuccess(t *testing.T) {
+func TestSlashPluginEnableShowsUsage(t *testing.T) {
+	called := false
 	svc := &pluginStubService{
 		enableFn: func(ctx context.Context, id string) (control.PluginSnapshot, error) {
+			called = true
 			return control.PluginSnapshot{ID: id, Enabled: true, Status: "active"}, nil
 		},
 	}
 	result, notices := runPluginCmd(svc, "enable myplugin")
-
 	if result.Err != nil {
 		t.Fatalf("expected no error, got %v", result.Err)
 	}
+	if called {
+		t.Fatal("enable service should not be called by legacy subcommand")
+	}
 	combined := strings.Join(notices, "\n")
-	if !strings.Contains(combined, "enabled plugin myplugin") {
-		t.Errorf("expected 'enabled plugin myplugin' in notice, got: %q", combined)
+	if !strings.Contains(combined, "usage") || strings.Contains(combined, "enable <id>") {
+		t.Errorf("expected updated usage without enable subcommand, got: %q", combined)
 	}
 }
 
@@ -249,25 +317,11 @@ func TestSlashPluginEnableMissingID(t *testing.T) {
 	}
 }
 
-func TestSlashPluginEnableError(t *testing.T) {
-	svc := &pluginStubService{
-		enableFn: func(ctx context.Context, id string) (control.PluginSnapshot, error) {
-			return control.PluginSnapshot{}, errors.New("plugin not found: nosuch")
-		},
-	}
-	result, _ := runPluginCmd(svc, "enable nosuch")
-	if result.Err == nil {
-		t.Fatal("expected error, got nil")
-	}
-}
-
-// ---------------------------------------------------------------------------
-// /plugin disable
-// ---------------------------------------------------------------------------
-
-func TestSlashPluginDisableSuccess(t *testing.T) {
+func TestSlashPluginDisableShowsUsage(t *testing.T) {
+	called := false
 	svc := &pluginStubService{
 		disableFn: func(ctx context.Context, id string) (control.PluginSnapshot, error) {
+			called = true
 			return control.PluginSnapshot{ID: id, Enabled: false, Status: "inactive"}, nil
 		},
 	}
@@ -275,21 +329,24 @@ func TestSlashPluginDisableSuccess(t *testing.T) {
 	if result.Err != nil {
 		t.Fatalf("expected no error, got %v", result.Err)
 	}
+	if called {
+		t.Fatal("disable service should not be called by legacy subcommand")
+	}
 	combined := strings.Join(notices, "\n")
-	if !strings.Contains(combined, "disabled plugin myplugin") {
-		t.Errorf("expected 'disabled plugin myplugin' in notice, got: %q", combined)
+	if !strings.Contains(combined, "usage") || strings.Contains(combined, "disable <id>") {
+		t.Errorf("expected updated usage without disable subcommand, got: %q", combined)
 	}
 }
 
 // ---------------------------------------------------------------------------
-// /plugin remove
+// /plugin rm
 // ---------------------------------------------------------------------------
 
-func TestSlashPluginRemoveSuccess(t *testing.T) {
+func TestSlashPluginRmSuccess(t *testing.T) {
 	svc := &pluginStubService{
 		removeFn: func(ctx context.Context, id string) error { return nil },
 	}
-	result, notices := runPluginCmd(svc, "remove myplugin")
+	result, notices := runPluginCmd(svc, "rm myplugin")
 	if result.Err != nil {
 		t.Fatalf("expected no error, got %v", result.Err)
 	}
@@ -299,9 +356,9 @@ func TestSlashPluginRemoveSuccess(t *testing.T) {
 	}
 }
 
-func TestSlashPluginRemoveMissingID(t *testing.T) {
+func TestSlashPluginRmMissingID(t *testing.T) {
 	svc := &pluginStubService{}
-	result, notices := runPluginCmd(svc, "remove")
+	result, notices := runPluginCmd(svc, "rm")
 	if result.Err != nil {
 		t.Fatalf("missing id should not return error, got %v", result.Err)
 	}
@@ -311,57 +368,13 @@ func TestSlashPluginRemoveMissingID(t *testing.T) {
 	}
 }
 
-func TestSlashPluginRemoveError(t *testing.T) {
+func TestSlashPluginRmError(t *testing.T) {
 	svc := &pluginStubService{
 		removeFn: func(ctx context.Context, id string) error { return errors.New("plugin not found: x") },
 	}
-	result, _ := runPluginCmd(svc, "remove x")
+	result, _ := runPluginCmd(svc, "rm x")
 	if result.Err == nil {
 		t.Fatal("expected error, got nil")
-	}
-}
-
-// ---------------------------------------------------------------------------
-// /plugin inspect
-// ---------------------------------------------------------------------------
-
-func TestSlashPluginInspectSuccess(t *testing.T) {
-	svc := &pluginStubService{
-		inspectFn: func(ctx context.Context, id string) (control.PluginSnapshot, error) {
-			return control.PluginSnapshot{
-				ID:          id,
-				Name:        "My Plugin",
-				Version:     "3.0.0",
-				Enabled:     true,
-				Status:      "active",
-				Root:        "/tmp/myplugin",
-				Description: "A great plugin",
-				Skills:      []string{"skill-a"},
-				Hooks:       []string{"SessionStart"},
-			}, nil
-		},
-	}
-	result, notices := runPluginCmd(svc, "inspect myplugin")
-	if result.Err != nil {
-		t.Fatalf("expected no error, got %v", result.Err)
-	}
-	combined := strings.Join(notices, "\n")
-	for _, want := range []string{"myplugin", "My Plugin", "3.0.0", "skill-a", "SessionStart"} {
-		if !strings.Contains(combined, want) {
-			t.Errorf("expected %q in inspect output, got: %q", want, combined)
-		}
-	}
-}
-
-func TestSlashPluginInspectMissingID(t *testing.T) {
-	svc := &pluginStubService{}
-	result, notices := runPluginCmd(svc, "inspect")
-	if result.Err != nil {
-		t.Fatalf("missing id should not return error, got %v", result.Err)
-	}
-	combined := strings.Join(notices, "\n")
-	if !strings.Contains(combined, "usage") {
-		t.Errorf("expected usage hint, got: %q", combined)
 	}
 }
 

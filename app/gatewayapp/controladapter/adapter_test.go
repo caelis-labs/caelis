@@ -2337,6 +2337,44 @@ func TestAdapterCompleteSlashArgAgentRootOrder(t *testing.T) {
 	}
 }
 
+func TestAdapterCompleteSlashArgPluginRootOrder(t *testing.T) {
+	ctx := context.Background()
+	stack, err := newAdapterTestStack(t, gatewayapp.Config{
+		AppName:        "caelis",
+		UserID:         "plugin-root-order-test",
+		StoreDir:       t.TempDir(),
+		WorkspaceKey:   t.TempDir(),
+		WorkspaceCWD:   t.TempDir(),
+		PermissionMode: "default",
+		Assembly:       assembly.ResolvedAssembly{},
+		Model: gatewayapp.ModelConfig{
+			Provider: "ollama",
+			API:      providers.APIOllama,
+			Model:    "llama3",
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "plugin-root-order-session", "surface", "ollama/llama3")
+	if err != nil {
+		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
+	}
+
+	candidates, err := driver.CompleteSlashArg(ctx, "plugin", "", 10)
+	if err != nil {
+		t.Fatalf("CompleteSlashArg(plugin) error = %v", err)
+	}
+	got := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		got = append(got, candidate.Value)
+	}
+	want := []string{"install", "list", "rm"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("plugin root candidates = %#v, want %#v", got, want)
+	}
+}
+
 func TestAdapterInterruptCancelsAgentInstall(t *testing.T) {
 	ctx := context.Background()
 	binDir := t.TempDir()

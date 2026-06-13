@@ -49,6 +49,41 @@ func TestModelDeleteSelectionOpensAliasPicker(t *testing.T) {
 	}
 }
 
+func TestPluginBareCommandShowsRootCompletion(t *testing.T) {
+	model := NewModel(Config{
+		Commands: DefaultCommands(),
+		SlashArgComplete: func(command string, query string, limit int) ([]SlashArgCandidate, error) {
+			if command != "plugin" {
+				t.Fatalf("SlashArgComplete command = %q, want plugin", command)
+			}
+			return []SlashArgCandidate{
+				{Value: "install", Display: "install"},
+				{Value: "list", Display: "list"},
+				{Value: "rm", Display: "rm"},
+			}, nil
+		},
+	})
+
+	_, cmd := model.handleKey(keyPress("/"))
+	runCompletionCmd(t, model, cmd)
+	_, cmd = model.handleKey(keyPress("plugin"))
+	runCompletionCmd(t, model, cmd)
+
+	if got := string(model.input); got != "/plugin" {
+		t.Fatalf("input after /plugin = %q, want /plugin", got)
+	}
+	if got := model.slashArgCommand; got != "plugin" {
+		t.Fatalf("slashArgCommand = %q, want plugin", got)
+	}
+	got := make([]string, 0, len(model.slashArgCandidates))
+	for _, candidate := range model.slashArgCandidates {
+		got = append(got, candidate.Value)
+	}
+	if strings.Join(got, ",") != "install,list,rm" {
+		t.Fatalf("plugin candidates = %#v, want install/list/rm", model.slashArgCandidates)
+	}
+}
+
 func TestModelUseSelectionOpensReasoningPicker(t *testing.T) {
 	model := NewModel(Config{
 		Commands: DefaultCommands(),

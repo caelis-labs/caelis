@@ -573,6 +573,38 @@ func slashArgQueryAtCursor(input []rune, cursor int) (string, string, bool) {
 			return "agent add --install", strings.TrimSpace(fields[3]), true
 		}
 		return "", "", false
+	case "plugin":
+		if len(fields) == 1 {
+			return command, "", true
+		}
+		action := strings.ToLower(strings.TrimSpace(fields[1]))
+		if len(fields) == 2 {
+			if hasTrailingDelimiter {
+				switch action {
+				case "install", "rm":
+					return "plugin " + action, "", true
+				case "list":
+					return "", "", false
+				default:
+					return "", "", false
+				}
+			}
+			if action == "" {
+				return "", "", false
+			}
+			switch action {
+			case "install", "list", "rm":
+			default:
+				return "plugin", action, true
+			}
+			return "plugin", action, true
+		}
+		switch action {
+		case "install", "rm":
+			return "plugin " + action, strings.TrimSpace(strings.Join(fields[2:], " ")), true
+		default:
+			return "", "", false
+		}
 	case "subagent":
 		if len(fields) == 1 {
 			if !hasTrailingDelimiter {

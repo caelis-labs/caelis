@@ -150,7 +150,7 @@ func (d *Adapter) CompleteSlashArg(ctx context.Context, command string, query st
 		return d.completeAgentProfiles(ctx, query, limit)
 	case "model use", "model del":
 		return d.completeModelAliases(ctx, query, limit)
-	case "plugin enable", "plugin disable", "plugin remove", "plugin inspect":
+	case "plugin rm":
 		return d.completePluginIDs(ctx, query, limit)
 	case "connect":
 		return completeConnectArgs(ctx, d, "connect", query, limit)

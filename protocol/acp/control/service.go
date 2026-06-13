@@ -54,6 +54,7 @@ type Service interface {
 
 	ListPlugins(context.Context) ([]PluginSnapshot, error)
 	AddPluginPath(context.Context, string) (PluginSnapshot, error)
+	InstallPlugin(context.Context, string) (PluginSnapshot, error)
 	EnablePlugin(context.Context, string) (PluginSnapshot, error)
 	DisablePlugin(context.Context, string) (PluginSnapshot, error)
 	RemovePlugin(context.Context, string) error

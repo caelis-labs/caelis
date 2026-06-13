@@ -237,13 +237,13 @@ func (m *Model) applySlashArgCompletion() {
 		m.setInputText("/plugin " + choice + " ")
 		m.syncTextareaFromInput()
 		switch choice {
-		case "add-path", "enable", "disable", "remove", "inspect":
+		case "rm":
 			m.activateSlashArgPickerFromInput("plugin " + choice)
 		default:
 			m.clearSlashArg()
 		}
 		return
-	case "plugin add-path", "plugin enable", "plugin disable", "plugin remove", "plugin inspect":
+	case "plugin rm":
 		m.setInputText("/" + command + " " + choice)
 		m.clearSlashArg()
 		return
@@ -353,7 +353,7 @@ func (m *Model) shouldExecuteSlashArgSelection(command string, choice string) bo
 		return true
 	case "plugin":
 		return false
-	case "plugin add-path", "plugin enable", "plugin disable", "plugin remove", "plugin inspect":
+	case "plugin rm":
 		return true
 	case "subagent":
 		return false
@@ -386,7 +386,7 @@ func (m *Model) shouldExecuteSlashArgSelection(command string, choice string) bo
 
 func requiresExactSlashArgSelection(command string) bool {
 	switch strings.ToLower(strings.TrimSpace(command)) {
-	case "agent remove", "agent rm", "model del":
+	case "agent remove", "agent rm", "model del", "plugin rm":
 		return true
 	default:
 		return false
@@ -424,6 +424,16 @@ func isExecutableSlashArgInput(line string) bool {
 		case "use":
 			return len(fields) >= 3
 		case "del":
+			return len(fields) >= 3
+		default:
+			return false
+		}
+	case "/plugin":
+		action := strings.ToLower(strings.TrimSpace(fields[1]))
+		switch action {
+		case "list":
+			return len(fields) == 2
+		case "install", "rm":
 			return len(fields) >= 3
 		default:
 			return false
@@ -520,7 +530,7 @@ func (m *Model) handleSlashArgKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 			_, cmd := m.submitLine(line)
 			return true, cmd
 		}
-		if command == "agent" || command == "subagent" || command == "subagent run" || command == "subagent bind" || strings.HasPrefix(command, "subagent bind ") || command == "model" || command == "model use" || command == "model del" || strings.HasPrefix(command, "model use ") || strings.HasPrefix(command, "model del ") {
+		if command == "agent" || command == "plugin" || command == "subagent" || command == "subagent run" || command == "subagent bind" || strings.HasPrefix(command, "subagent bind ") || command == "model" || command == "model use" || command == "model del" || strings.HasPrefix(command, "model use ") || strings.HasPrefix(command, "model del ") {
 			m.applySlashArgCompletion()
 			m.syncTextareaFromInput()
 			return true, nil

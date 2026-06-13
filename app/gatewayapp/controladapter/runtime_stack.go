@@ -222,6 +222,7 @@ type RuntimeStack struct {
 	BindAgentProfileFn                   func(context.Context, AgentProfileBindingConfig) (AgentProfileStatusSnapshot, error)
 	ListPluginsFn                        func(context.Context) ([]PluginSnapshot, error)
 	AddPluginPathFn                      func(context.Context, string) (PluginSnapshot, error)
+	InstallPluginFn                      func(context.Context, string) (PluginSnapshot, error)
 	EnablePluginFn                       func(context.Context, string) (PluginSnapshot, error)
 	DisablePluginFn                      func(context.Context, string) (PluginSnapshot, error)
 	RemovePluginFn                       func(context.Context, string) error
@@ -536,6 +537,13 @@ func (s *RuntimeStack) AddPluginPath(ctx context.Context, path string) (PluginSn
 		return PluginSnapshot{}, fmt.Errorf("app/gatewayapp/controladapter: add plugin path dependency is unavailable")
 	}
 	return s.AddPluginPathFn(ctx, path)
+}
+
+func (s *RuntimeStack) InstallPlugin(ctx context.Context, source string) (PluginSnapshot, error) {
+	if s == nil || s.InstallPluginFn == nil {
+		return PluginSnapshot{}, fmt.Errorf("app/gatewayapp/controladapter: install plugin dependency is unavailable")
+	}
+	return s.InstallPluginFn(ctx, source)
 }
 
 func (s *RuntimeStack) EnablePlugin(ctx context.Context, id string) (PluginSnapshot, error) {

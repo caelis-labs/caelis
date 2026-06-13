@@ -25,7 +25,7 @@ func DefaultSpecs() []CommandSpec {
 		{Name: "agent", Usage: "/agent <action>", Description: "Manage ACP agents and controller switching", LocalDuringACP: true, Details: []string{"actions: list, add <builtin>, install <adapter>, use <agent|local>, remove <agent>"}, ArgCandidates: agentRootCandidates(), DynamicCompleter: true},
 		{Name: "subagent", Usage: "/subagent <action>", Description: "Manage subagents and runtime bindings", LocalDuringACP: true, Details: []string{"actions: list, run <id> <prompt>, bind <id> default|model|acp ..."}, ArgCandidates: subagentRootCandidates(), DynamicCompleter: true},
 		{Name: "connect", Usage: "/connect", Description: "Open the guided model/provider setup wizard", DynamicCompleter: true},
-		{Name: "plugin", Usage: "/plugin <action>", Description: "Manage Caelis plugins", LocalDuringACP: true, Details: []string{"actions: list, add-path <path>, enable <id>, disable <id>, remove <id>, inspect <id>"}, ArgCandidates: pluginRootCandidates(), DynamicCompleter: true},
+		{Name: "plugin", Usage: "/plugin <action>", Description: "Manage Caelis plugins", LocalDuringACP: true, Details: []string{"actions: install <plugin@marketplace|path>, list, rm <id>"}, ArgCandidates: pluginRootCandidates(), DynamicCompleter: true},
 		{Name: "model", Usage: "/model <action>", Description: "Switch or delete a configured model alias", LocalDuringACP: true, Details: []string{"actions: use <alias>, del <alias>"}, ArgCandidates: modelRootCandidates(), DynamicCompleter: true},
 		{Name: "status", Usage: "/status", Description: "Show current provider, model, session, sandbox, and store info", LocalDuringACP: true},
 		{Name: "doctor", Usage: "/doctor [fix]", Description: "Diagnose provider, model, session store, and sandbox readiness", LocalDuringACP: true, Details: []string{"fix: run explicit Windows sandbox ACL repair"}, ArgCandidates: doctorCandidates()},
@@ -204,12 +204,9 @@ func doctorCandidates() []control.SlashArgCandidate {
 
 func pluginRootCandidates() []control.SlashArgCandidate {
 	return []control.SlashArgCandidate{
-		{Value: "list", Display: "list", Detail: "List installed plugins"},
-		{Value: "add-path", Display: "add-path", Detail: "Add local plugin by root directory path"},
-		{Value: "enable", Display: "enable", Detail: "Enable a plugin by ID"},
-		{Value: "disable", Display: "disable", Detail: "Disable a plugin by ID"},
-		{Value: "remove", Display: "remove", Detail: "Remove a plugin by ID"},
-		{Value: "inspect", Display: "inspect", Detail: "Inspect details of a plugin by ID"},
+		{Value: "install", Display: "install", Detail: "Install a Claude/Codex compatible plugin"},
+		{Value: "list", Display: "list", Detail: "List and enable installed plugins"},
+		{Value: "rm", Display: "rm", Detail: "Remove a plugin by ID"},
 	}
 }
 
