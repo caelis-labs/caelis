@@ -331,7 +331,7 @@ func seatbeltWritableRoots(p policy.Policy, workDir string) []string {
 	roots := make([]string, 0, len(p.WritableRoots)+8)
 	for _, one := range p.WritableRoots {
 		if resolved := policy.ResolveSandboxPath(workDir, one); resolved != "" {
-			roots = append(roots, policy.SandboxPathVariants(seatbeltWritableRoot(resolved))...)
+			roots = append(roots, policy.SandboxPathVariants(policy.WritableRootPath(resolved))...)
 		}
 	}
 	if tmp := strings.TrimSpace(os.TempDir()); tmp != "" {
@@ -350,22 +350,6 @@ func seatbeltWritableRoots(p policy.Policy, workDir string) []string {
 		}
 	}
 	return normalizeStringList(roots)
-}
-
-func seatbeltWritableRoot(path string) string {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return ""
-	}
-	cleaned := filepath.Clean(path)
-	if info, err := os.Stat(cleaned); err == nil && info.IsDir() {
-		return cleaned
-	}
-	parent := filepath.Dir(cleaned)
-	if parent == "." || parent == "" || parent == string(filepath.Separator) {
-		return cleaned
-	}
-	return parent
 }
 
 func darwinUserCacheDir() string {

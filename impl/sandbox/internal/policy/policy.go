@@ -204,6 +204,17 @@ func SandboxPathVariants(path string) []string {
 	return normalizeStringList(variants)
 }
 
+func WritableRootPath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	// Writable roots are authority boundaries. Do not broaden a missing cache
+	// directory such as ~/.pnpm-store to its existing parent, because that can
+	// turn a narrow developer-cache grant into a $HOME write grant.
+	return filepath.Clean(path)
+}
+
 func ResolveSandboxPath(baseDir, value string) string {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" {

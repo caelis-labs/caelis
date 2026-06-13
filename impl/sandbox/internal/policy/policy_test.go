@@ -113,6 +113,23 @@ func TestDefaultFullAccessIgnoresConstraintPathRules(t *testing.T) {
 	}
 }
 
+func TestWritableRootPathDoesNotBroadenMissingRootToParent(t *testing.T) {
+	t.Parallel()
+
+	fakeHome := filepath.Join(t.TempDir(), "home")
+	missingCache := filepath.Join(fakeHome, ".pnpm-store")
+
+	if got := WritableRootPath(missingCache); got != missingCache {
+		t.Fatalf("WritableRootPath(%q) = %q, want exact path", missingCache, got)
+	}
+	if got := WritableRootPath("  " + missingCache + "  "); got != missingCache {
+		t.Fatalf("WritableRootPath(trimmed %q) = %q, want exact path", missingCache, got)
+	}
+	if got := WritableRootPath(" "); got != "" {
+		t.Fatalf("WritableRootPath(blank) = %q, want empty", got)
+	}
+}
+
 func testWorkspaceRoot() string {
 	if runtime.GOOS == "windows" {
 		return `C:\workspace`

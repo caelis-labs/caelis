@@ -35,6 +35,30 @@ func TestBuildScopedBwrapArgsKeepsManagedDevMountWithMissingReadRoot(t *testing.
 	assertBwrapManagedMountsNotReadOnly(t, args)
 }
 
+func TestBwrapWritableRootsDoNotBroadenMissingRootToParent(t *testing.T) {
+	root := t.TempDir()
+	workDir := filepath.Join(root, "workspace")
+	fakeHome := filepath.Join(root, "home")
+	missingCache := filepath.Join(fakeHome, ".pnpm-store")
+	for _, dir := range []string{workDir, fakeHome} {
+		if err := os.Mkdir(dir, 0o700); err != nil {
+			t.Fatalf("Mkdir(%q) error = %v", dir, err)
+		}
+	}
+
+	roots := bwrapWritableRoots(policy.Policy{
+		Type:          policy.TypeWorkspaceWrite,
+		WritableRoots: []string{workDir, missingCache},
+	}, workDir)
+
+	if containsString(roots, fakeHome) {
+		t.Fatalf("Writable roots = %#v, must not grant parent of missing root %q", roots, missingCache)
+	}
+	if containsString(roots, missingCache) {
+		t.Fatalf("Writable roots = %#v, did not expect missing root %q to be bound", roots, missingCache)
+	}
+}
+
 func assertBwrapManagedMountsNotReadOnly(t *testing.T, args []string) {
 	t.Helper()
 	if !hasBwrapPair(args, "--dev", "/dev", "") {
@@ -217,6 +241,15 @@ func hasBwrapPair(args []string, flag string, left string, right string) bool {
 			return true
 		}
 		if i+2 < len(args) && args[i+2] == right {
+			return true
+		}
+	}
+	return false
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
 			return true
 		}
 	}

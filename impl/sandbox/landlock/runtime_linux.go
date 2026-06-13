@@ -477,7 +477,7 @@ func landlockWritableRoots(p policy.Policy, workDir string) []string {
 	for _, one := range p.WritableRoots {
 		resolved := policy.ResolveSandboxPath(workDir, one)
 		if resolved != "" {
-			roots = append(roots, landlockWritableRoot(resolved))
+			roots = append(roots, policy.WritableRootPath(resolved))
 		}
 	}
 	roots = append(roots, "/tmp", "/var/tmp")
@@ -486,22 +486,6 @@ func landlockWritableRoots(p policy.Policy, workDir string) []string {
 		roots = append(roots, filepath.Join(home, ".cache"))
 	}
 	return policy.FilterExistingPaths(roots)
-}
-
-func landlockWritableRoot(path string) string {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return ""
-	}
-	cleaned := filepath.Clean(path)
-	if info, err := os.Stat(cleaned); err == nil && info.IsDir() {
-		return cleaned
-	}
-	parent := filepath.Dir(cleaned)
-	if parent == "." || parent == "" || parent == string(filepath.Separator) {
-		return cleaned
-	}
-	return parent
 }
 
 func landlockABI() (int, error) {
