@@ -138,6 +138,58 @@ func TestStoreAppendMigratesProtocolOnlyCoreToolResult(t *testing.T) {
 	}
 }
 
+func TestStoreAppendSkipsHiddenPluginContextForGeneratedTitle(t *testing.T) {
+	t.Parallel()
+
+	store := NewStore(Config{
+		RootDir:            t.TempDir(),
+		SessionIDGenerator: func() string { return "sess-1" },
+	})
+	ctx := context.Background()
+	createdSession, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+		AppName: "caelis",
+		UserID:  "user-1",
+		Workspace: session.WorkspaceRef{
+			Key: "ws-1",
+			CWD: "/tmp/ws",
+		},
+	})
+	if err != nil {
+		t.Fatalf("GetOrCreate() error = %v", err)
+	}
+
+	hookText := "[Plugin context: prompt-plugin]\nHOOK PREFIX"
+	if _, err := store.AppendEvent(ctx, createdSession.SessionRef, &session.Event{
+		Type:       session.EventTypeCustom,
+		Visibility: session.VisibilityCanonical,
+		Message:    ptrMessage(model.NewTextMessage(model.RoleUser, hookText)),
+		Text:       hookText,
+		Meta: map[string]any{
+			"source":                 "plugin_hook",
+			"hidden_from_transcript": true,
+		},
+	}); err != nil {
+		t.Fatalf("AppendEvent(hook context) error = %v", err)
+	}
+	if _, err := store.AppendEvent(ctx, createdSession.SessionRef, &session.Event{
+		Message: ptrMessage(model.NewTextMessage(model.RoleUser, "真实的用户消息")),
+	}); err != nil {
+		t.Fatalf("AppendEvent(user) error = %v", err)
+	}
+
+	list, err := store.List(ctx, session.ListSessionsRequest{
+		AppName:      "caelis",
+		UserID:       "user-1",
+		WorkspaceKey: "ws-1",
+	})
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if got, want := list.Sessions[0].Title, "真实的用户消息"; got != want {
+		t.Fatalf("List title = %q, want %q", got, want)
+	}
+}
+
 func TestStoreLoadMigratesLegacyToolResultNameCaseMismatch(t *testing.T) {
 	t.Parallel()
 

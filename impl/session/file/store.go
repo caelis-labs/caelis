@@ -261,7 +261,7 @@ func (s *Store) AppendEvent(
 		}
 		doc.Session.UpdatedAt = normalized.Time
 		if doc.Session.Title == "" {
-			if text := session.EventText(normalized); text != "" {
+			if text := generatedTitleText(normalized); text != "" {
 				doc.Session.Title = truncateTitle(text)
 			}
 		}

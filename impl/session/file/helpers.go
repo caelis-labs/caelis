@@ -161,6 +161,34 @@ func persistedEvents(events []*session.Event) []*session.Event {
 	return out
 }
 
+func generatedTitleText(event *session.Event) string {
+	if event == nil || titleHiddenEvent(event) {
+		return ""
+	}
+	return session.EventText(event)
+}
+
+func titleHiddenEvent(event *session.Event) bool {
+	if event == nil {
+		return false
+	}
+	if hiddenTranscriptMeta(event.Meta["hidden_from_transcript"]) {
+		return true
+	}
+	return event.Meta["source"] == "plugin_hook"
+}
+
+func hiddenTranscriptMeta(value any) bool {
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	case string:
+		return strings.EqualFold(strings.TrimSpace(typed), "true")
+	default:
+		return false
+	}
+}
+
 func cloneMap(in map[string]any) map[string]any {
 	return cloneState(in)
 }
