@@ -70,6 +70,7 @@ type SpawnContext struct {
 	TaskID            string             `json:"task_id,omitempty"`
 	ParentCallID      string             `json:"parent_call_id,omitempty"`
 	Mode              string             `json:"mode,omitempty"`
+	ApprovalMode      string             `json:"approval_mode,omitempty"`
 	ApprovalRequester ApprovalRequester  `json:"-"`
 	Streams           stream.Sink        `json:"-"`
 }

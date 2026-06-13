@@ -104,6 +104,7 @@ func newTaskRuntime(runtime *Runtime, store taskapi.Store) *taskRuntime {
 
 type runtimeToolContext struct {
 	mode              string
+	approvalMode      string
 	approvalRequester agent.ApprovalRequester
 	runID             string
 	turnID            string
@@ -111,6 +112,7 @@ type runtimeToolContext struct {
 
 type StartSubagentOptions struct {
 	ApprovalRequester agent.ApprovalRequester
+	ApprovalMode      string
 }
 
 func normalizeTaskWriteInput(input string) string {

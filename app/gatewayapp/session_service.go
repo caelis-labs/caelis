@@ -67,6 +67,7 @@ func (s *Stack) StartSubagentWithOptions(
 	}
 	return engine.StartSubagentWithOptions(ctx, ref, agent, prompt, source, local.StartSubagentOptions{
 		ApprovalRequester: opts.ApprovalRequester,
+		ApprovalMode:      opts.ApprovalMode,
 	})
 }
 

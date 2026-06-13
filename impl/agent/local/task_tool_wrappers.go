@@ -47,13 +47,14 @@ func (r *Runtime) wrapToolsForRuntime(activeSession session.Session, ref session
 		case spawn.ToolName:
 			hasSpawn = true
 			out = append(out, runtimeSpawnTool{
-				base:       one,
-				session:    session.CloneSession(activeSession),
-				sessionRef: session.NormalizeSessionRef(ref),
-				tasks:      r.tasks,
-				runner:     r.subagents,
-				mode:       strings.TrimSpace(toolCtx.mode),
-				approval:   toolCtx.approvalRequester,
+				base:         one,
+				session:      session.CloneSession(activeSession),
+				sessionRef:   session.NormalizeSessionRef(ref),
+				tasks:        r.tasks,
+				runner:       r.subagents,
+				mode:         strings.TrimSpace(toolCtx.mode),
+				approvalMode: strings.TrimSpace(toolCtx.approvalMode),
+				approval:     toolCtx.approvalRequester,
 			})
 		case tasktool.ToolName:
 			hasTask = true
@@ -155,13 +156,14 @@ func (t runtimeCommandTool) Call(ctx context.Context, call tool.Call) (tool.Resu
 }
 
 type runtimeSpawnTool struct {
-	base       tool.Tool
-	session    session.Session
-	sessionRef session.SessionRef
-	tasks      *taskRuntime
-	runner     subagent.Runner
-	mode       string
-	approval   agent.ApprovalRequester
+	base         tool.Tool
+	session      session.Session
+	sessionRef   session.SessionRef
+	tasks        *taskRuntime
+	runner       subagent.Runner
+	mode         string
+	approvalMode string
+	approval     agent.ApprovalRequester
 }
 
 func (t runtimeSpawnTool) Definition() tool.Definition {
@@ -189,12 +191,13 @@ func (t runtimeSpawnTool) Call(ctx context.Context, call tool.Call) (tool.Result
 		return tool.Result{}, err
 	}
 	snapshot, err := t.tasks.StartSubagent(ctx, t.session, t.sessionRef, t.runner, taskapi.SubagentStartRequest{
-		Agent:      strings.TrimSpace(agent),
-		Prompt:     strings.TrimSpace(prompt),
-		ParentCall: strings.TrimSpace(call.ID),
-		ParentTool: strings.TrimSpace(call.Name),
-		Mode:       strings.TrimSpace(t.mode),
-		Approval:   newSubagentApprovalRequester(t.approval, t.session, t.sessionRef),
+		Agent:        strings.TrimSpace(agent),
+		Prompt:       strings.TrimSpace(prompt),
+		ParentCall:   strings.TrimSpace(call.ID),
+		ParentTool:   strings.TrimSpace(call.Name),
+		Mode:         strings.TrimSpace(t.mode),
+		ApprovalMode: strings.TrimSpace(t.approvalMode),
+		Approval:     newSubagentApprovalRequester(t.approval, t.session, t.sessionRef),
 	})
 	if err != nil {
 		return tool.Result{}, err

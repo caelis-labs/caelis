@@ -10,6 +10,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/spawn"
 	"github.com/OnslaughtSnail/caelis/internal/agenthandle"
 	"github.com/OnslaughtSnail/caelis/ports/delegation"
+	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/stream"
@@ -40,6 +41,7 @@ func (tm *taskRuntime) StartSubagent(
 		TaskID:            taskID,
 		ParentCallID:      strings.TrimSpace(req.ParentCall),
 		Mode:              mode,
+		ApprovalMode:      strings.TrimSpace(req.ApprovalMode),
 		ApprovalRequester: req.Approval,
 		Streams:           tm,
 	}, delegation.Request{
@@ -235,6 +237,12 @@ func (r *Runtime) StartSubagentWithOptions(
 	if strings.TrimSpace(prompt) == "" {
 		return taskapi.Snapshot{}, fmt.Errorf("impl/agent/local: subagent prompt is required")
 	}
+	approvalMode := strings.TrimSpace(opts.ApprovalMode)
+	if approvalMode == "" {
+		if state, stateErr := r.sessions.SnapshotState(ctx, ref); stateErr == nil {
+			approvalMode = string(gateway.CurrentApprovalMode(state))
+		}
+	}
 	contextPrelude, _ := r.buildSideSubagentPromptContext(ctx, activeSession, ref, strings.TrimSpace(agent), strings.TrimSpace(prompt), 0)
 	snapshot, err := r.tasks.StartSubagent(ctx, activeSession, ref, r.subagents, taskapi.SubagentStartRequest{
 		Agent:          strings.TrimSpace(agent),
@@ -243,6 +251,7 @@ func (r *Runtime) StartSubagentWithOptions(
 		ParentTool:     "slash",
 		Source:         firstNonEmpty(strings.TrimSpace(source), "slash_agent"),
 		Mode:           strings.TrimSpace(r.defaultPolicyMode),
+		ApprovalMode:   approvalMode,
 		Approval:       newSubagentApprovalRequester(opts.ApprovalRequester, activeSession, ref),
 	})
 	if err != nil || !snapshot.Running {

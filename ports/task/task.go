@@ -87,6 +87,7 @@ type SubagentStartRequest struct {
 	ParentTool     string                     `json:"parent_tool,omitempty"`
 	Source         string                     `json:"source,omitempty"`
 	Mode           string                     `json:"mode,omitempty"`
+	ApprovalMode   string                     `json:"approval_mode,omitempty"`
 	Approval       subagent.ApprovalRequester `json:"-"`
 }
 

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/OnslaughtSnail/caelis/ports/agent"
+	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
@@ -42,6 +43,7 @@ func (r *Runtime) resolveAgent(
 	modeName, _ := r.policyForName(ctx, r.policyMode(spec))
 	spec.Tools = r.wrapToolsForRuntime(activeSession, ref, spec, runtimeToolContext{
 		mode:              modeName,
+		approvalMode:      string(gateway.CurrentApprovalMode(state)),
 		approvalRequester: req.ApprovalRequester,
 		runID:             strings.TrimSpace(runID),
 		turnID:            strings.TrimSpace(turnID),

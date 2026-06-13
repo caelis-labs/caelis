@@ -129,6 +129,7 @@ type SandboxStatus struct {
 
 type StartSubagentOptions struct {
 	ApprovalRequester agent.ApprovalRequester
+	ApprovalMode      string
 }
 
 func NewLocalStack(cfg Config) (*Stack, error) {

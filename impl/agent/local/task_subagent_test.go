@@ -13,6 +13,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/internal/agenthandle"
 	"github.com/OnslaughtSnail/caelis/ports/assembly"
 	"github.com/OnslaughtSnail/caelis/ports/delegation"
+	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/stream"
@@ -987,6 +988,56 @@ func TestRuntimeSpawnToolKeepsImplicitSelfFallback(t *testing.T) {
 	}
 }
 
+func TestRuntimeSpawnToolPassesApprovalModeToChild(t *testing.T) {
+	ctx := context.Background()
+	runner := &recordingSubagentRunner{
+		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "done"},
+	}
+	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
+	targetTool := runtimeSpawnTool{
+		base:         spawn.New([]delegation.Agent{{Name: "self"}}),
+		session:      activeSession,
+		sessionRef:   activeSession.SessionRef,
+		tasks:        runtime.tasks,
+		runner:       runner,
+		approvalMode: "manual",
+	}
+	raw, err := json.Marshal(map[string]any{"prompt": "inspect this"})
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	if _, err := targetTool.Call(ctx, tool.Call{ID: "spawn-1", Name: spawn.ToolName, Input: raw}); err != nil {
+		t.Fatalf("SPAWN Call() error = %v", err)
+	}
+	if got := runner.spawnContext.ApprovalMode; got != "manual" {
+		t.Fatalf("spawn approval mode = %q, want manual", got)
+	}
+}
+
+func TestStartSubagentWithOptionsInheritsSessionApprovalMode(t *testing.T) {
+	ctx := context.Background()
+	runner := &recordingSubagentRunner{
+		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "done"},
+	}
+	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
+	if err := runtime.sessions.UpdateState(ctx, activeSession.SessionRef, func(state map[string]any) (map[string]any, error) {
+		next := session.CloneState(state)
+		if next == nil {
+			next = map[string]any{}
+		}
+		next[gateway.StateCurrentApprovalMode] = "manual"
+		return next, nil
+	}); err != nil {
+		t.Fatalf("UpdateState() error = %v", err)
+	}
+	if _, err := runtime.StartSubagentWithOptions(ctx, activeSession.SessionRef, "self", "inspect this", "slash", StartSubagentOptions{}); err != nil {
+		t.Fatalf("StartSubagentWithOptions() error = %v", err)
+	}
+	if got := runner.spawnContext.ApprovalMode; got != "manual" {
+		t.Fatalf("spawn approval mode = %q, want manual", got)
+	}
+}
+
 func newSubagentTaskTestRuntime(t *testing.T, runner subagent.Runner) (*Runtime, session.Session) {
 	t.Helper()
 	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
@@ -1031,10 +1082,12 @@ type recordingSubagentRunner struct {
 	waitErr         error
 	publishOnSpawn  bool
 	spawnStreamText string
+	spawnContext    subagent.SpawnContext
 }
 
 func (r *recordingSubagentRunner) Spawn(_ context.Context, spawn subagent.SpawnContext, req delegation.Request) (delegation.Anchor, delegation.Result, error) {
 	r.spawnRequest = delegation.CloneRequest(req)
+	r.spawnContext = spawn
 	if r.publishOnSpawn && spawn.Streams != nil {
 		spawn.Streams.PublishStream(stream.Frame{
 			Ref:     stream.Ref{TaskID: strings.TrimSpace(spawn.TaskID)},
