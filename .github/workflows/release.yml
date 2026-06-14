@@ -12,6 +12,7 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     environment: default
     permissions:
       contents: write

@@ -253,6 +253,7 @@ func TestNewLocalStackLoadsPluginSkills(t *testing.T) {
 		AppName:      "CAELIS",
 		StoreDir:     storeDir,
 		WorkspaceCWD: workspaceDir,
+		Sandbox:      SandboxConfig{RequestedType: "host"},
 	}
 
 	stack, err := NewLocalStack(cfg)
@@ -309,6 +310,7 @@ func TestNewLocalStackMalformedPluginFails(t *testing.T) {
 		AppName:      "CAELIS",
 		StoreDir:     storeDir,
 		WorkspaceCWD: workspaceDir,
+		Sandbox:      SandboxConfig{RequestedType: "host"},
 	}
 
 	// NewLocalStack should return a failure because the enabled plugin is malformed
@@ -388,6 +390,7 @@ func TestNewLocalStackRunsSessionStartHook(t *testing.T) {
 		AppName:      "CAELIS",
 		StoreDir:     storeDir,
 		WorkspaceCWD: workspaceDir,
+		Sandbox:      SandboxConfig{RequestedType: "host"},
 		Model: ModelConfig{
 			Provider:   "openai-compatible",
 			API:        providers.APIOpenAICompatible,

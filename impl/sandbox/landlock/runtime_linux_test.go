@@ -3,9 +3,12 @@
 package landlock
 
 import (
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/OnslaughtSnail/caelis/impl/sandbox/internal/policy"
 )
@@ -31,6 +34,28 @@ func TestLandlockWritableRootsDoNotBroadenMissingRootToParent(t *testing.T) {
 	}
 	if containsString(roots, missingCache) {
 		t.Fatalf("Writable roots = %#v, did not expect missing root %q to be added", roots, missingCache)
+	}
+}
+
+func TestProbeRuntimeHonorsContextTimeout(t *testing.T) {
+	runner := &landlockRunner{
+		execCommand: func(ctx context.Context, _ string, _ ...string) *exec.Cmd {
+			return exec.CommandContext(ctx, "sh", "-c", "sleep 30")
+		},
+		helperPath: "/bin/sh",
+		probe:      func() error { return nil },
+		goos:       "linux",
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	err := runner.probeRuntime(ctx)
+	if err == nil {
+		t.Fatal("probeRuntime() error = nil, want timeout failure")
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("probeRuntime() elapsed = %s, want prompt context cancellation", elapsed)
 	}
 }
 

@@ -5,6 +5,7 @@ DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 BUILD_VERSION ?= $(if $(and $(strip $(GIT_TAG)),$(filter-out dirty,$(GIT_DIRTY))),$(strip $(GIT_TAG)),dev)
 LDFLAGS ?= -X github.com/OnslaughtSnail/caelis/internal/version.Version=$(BUILD_VERSION) -X github.com/OnslaughtSnail/caelis/internal/version.Commit=$(COMMIT) -X github.com/OnslaughtSnail/caelis/internal/version.Date=$(DATE)
 GOFILES_CMD = if command -v rg >/dev/null 2>&1; then rg --files -0 -g '*.go'; else find . -type f -name '*.go' -print0; fi
+GO_TEST_TIMEOUT ?= 5m
 CACHE_ROOT ?= $(CURDIR)/.tmp/cache
 GOMODCACHE ?= $(CACHE_ROOT)/gomod
 GOCACHE ?= $(CACHE_ROOT)/gocache
@@ -50,28 +51,28 @@ quality: fmt-check lint vet test build
 regression: eval-smoke tui-golden tui-interaction command-regression command-execution-regression
 
 eval-smoke: cache-dirs
-	go test ./eval -run 'TestRegression'
+	go test -timeout $(GO_TEST_TIMEOUT) ./eval -run 'TestRegression'
 
 tui-golden: cache-dirs
-	go test ./surfaces/tui/app -run 'TestRegression.*Golden'
+	go test -timeout $(GO_TEST_TIMEOUT) ./surfaces/tui/app -run 'TestRegression.*Golden'
 
 tui-interaction: cache-dirs
-	go test ./surfaces/tui/app -run 'TestRegression(Resize|NoWelcome|TerminalOutput|FollowTail|Slash|Approval)'
+	go test -timeout $(GO_TEST_TIMEOUT) ./surfaces/tui/app -run 'TestRegression(Resize|NoWelcome|TerminalOutput|FollowTail|Slash|Approval)'
 
 command-regression: cache-dirs
-	go test ./app/gatewayapp/controladapter -run 'TestRegression(Command(Status|Workspace|List|Agent|Parse|Connect|NewDriver)|Slash)'
+	go test -timeout $(GO_TEST_TIMEOUT) ./app/gatewayapp/controladapter -run 'TestRegression(Command(Status|Workspace|List|Agent|Parse|Connect|NewDriver)|Slash)'
 
 command-execution-regression: cache-dirs
-	go test ./app/gatewayapp/controladapter -run 'TestRegressionCommandExec'
+	go test -timeout $(GO_TEST_TIMEOUT) ./app/gatewayapp/controladapter -run 'TestRegressionCommandExec'
 
 tui-bench: cache-dirs
 	CAELIS_BENCH_REGRESSION=1 go test ./surfaces/tui/app -run 'TestRegressionBenchThresholds' -v
 
 bench-regression: cache-dirs
-	go test ./surfaces/tui/app -run '^$$' -bench 'Benchmark(ViewportSyncLongTranscript|AssistantTailIncrementalSync|AssistantStablePrefixTailMarkdownStream|ToolOutputStream10kChunks|VisibleSelectionRenderLongTranscript|RenderSchedulerMixedStreams)' -benchmem
+	go test -timeout $(GO_TEST_TIMEOUT) ./surfaces/tui/app -run '^$$' -bench 'Benchmark(ViewportSyncLongTranscript|AssistantTailIncrementalSync|AssistantStablePrefixTailMarkdownStream|ToolOutputStream10kChunks|VisibleSelectionRenderLongTranscript|RenderSchedulerMixedStreams)' -benchmem
 
 test: cache-dirs
-	go test ./...
+	go test -timeout $(GO_TEST_TIMEOUT) ./...
 
 release-dry-run: cache-dirs
 	goreleaser release --clean --snapshot

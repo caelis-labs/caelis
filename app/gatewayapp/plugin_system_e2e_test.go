@@ -75,6 +75,7 @@ func TestRealConfigPluginSystemE2E(t *testing.T) {
 		StoreDir:     storeDir,
 		WorkspaceKey: "plugin-e2e-workspace",
 		WorkspaceCWD: workspaceDir,
+		Sandbox:      SandboxConfig{RequestedType: "host"},
 		Model: ModelConfig{
 			Alias:               "plugin-e2e",
 			Provider:            "openai-compatible",

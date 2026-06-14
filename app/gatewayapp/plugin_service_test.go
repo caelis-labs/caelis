@@ -33,6 +33,7 @@ func buildPluginStack(t *testing.T, storeDir, workspaceDir string) *Stack {
 		AppName:      "CAELIS",
 		StoreDir:     storeDir,
 		WorkspaceCWD: workspaceDir,
+		Sandbox:      SandboxConfig{RequestedType: "host"},
 	}
 	stack, err := NewLocalStack(cfg)
 	if err != nil {

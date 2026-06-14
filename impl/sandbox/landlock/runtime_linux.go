@@ -28,7 +28,10 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const internalHelperCommand = "__caelis_execenv_helper__"
+const (
+	internalHelperCommand = "__caelis_execenv_helper__"
+	landlockProbeTimeout  = 5 * time.Second
+)
 
 type landlockRunner struct {
 	execCommand    func(context.Context, string, ...string) *exec.Cmd
@@ -52,7 +55,9 @@ func newRuntime(cfg Config) (sandbox.Runtime, error) {
 		cfg:            cfg,
 		sessionManager: cmdsession.NewSessionManager(cmdsession.DefaultSessionManagerConfig()),
 	}
-	if err := runner.probeRuntime(context.Background()); err != nil {
+	probeCtx, cancel := context.WithTimeout(context.Background(), landlockProbeTimeout)
+	defer cancel()
+	if err := runner.probeRuntime(probeCtx); err != nil {
 		_ = runner.Close()
 		return nil, err
 	}
@@ -96,6 +101,9 @@ func newRuntime(cfg Config) (sandbox.Runtime, error) {
 }
 
 func (l *landlockRunner) probeRuntime(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if l.goos != "linux" {
 		return fmt.Errorf("landlock sandbox is only supported on linux (current=%s)", l.goos)
 	}
