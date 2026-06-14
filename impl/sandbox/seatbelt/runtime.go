@@ -130,7 +130,10 @@ func (s *seatbeltRunner) Run(ctx context.Context, req runnerruntime.Request) (sa
 		return sandbox.CommandResult{}, fmt.Errorf("tool: resolve seatbelt workdir failed: %w", err)
 	}
 	effectivePolicy := policy.Default(s.cfg, req.Constraints)
-	profile := buildSeatbeltProfile(effectivePolicy, workDir)
+	profile, err := buildSeatbeltProfile(effectivePolicy, workDir)
+	if err != nil {
+		return sandbox.CommandResult{}, fmt.Errorf("tool: prepare seatbelt sandbox policy failed: %w", err)
+	}
 
 	args := []string{"-p", profile, "bash", "-lc", req.Command}
 	cmd := s.execCommand(runCtx, "sandbox-exec", args...)
@@ -201,7 +204,10 @@ func (s *seatbeltRunner) StartAsync(_ context.Context, req runnerruntime.Request
 		IdleTimeout:     req.IdleTimeout,
 		OnOutput:        asyncOutputForwarder(req.OnOutput),
 		BuildCommand: func(ctx context.Context, cfg cmdsession.AsyncSessionConfig) (*exec.Cmd, error) {
-			profile := buildSeatbeltProfile(effectivePolicy, workDir)
+			profile, err := buildSeatbeltProfile(effectivePolicy, workDir)
+			if err != nil {
+				return nil, fmt.Errorf("tool: prepare seatbelt sandbox policy failed: %w", err)
+			}
 			cmd := s.execCommand(ctx, "sandbox-exec", "-p", profile, "bash", "-lc", cfg.Command)
 			if strings.TrimSpace(cfg.Dir) != "" {
 				cmd.Dir = cfg.Dir
@@ -292,7 +298,7 @@ func (s *seatbeltRunner) asyncSessionManager() (*cmdsession.SessionManager, erro
 	return s.sessionManager, nil
 }
 
-func buildSeatbeltProfile(p policy.Policy, workDir string) string {
+func buildSeatbeltProfile(p policy.Policy, workDir string) (string, error) {
 	var b strings.Builder
 	b.WriteString("(version 1)\n")
 	b.WriteString("(deny default)\n")
@@ -315,24 +321,36 @@ func buildSeatbeltProfile(p policy.Policy, workDir string) string {
 		b.WriteString("(allow network*)\n")
 		b.WriteString(seatbeltNetworkExtensions)
 	}
-	for _, root := range seatbeltWritableRoots(p, workDir) {
+	writableRoots, err := seatbeltWritableRoots(p, workDir)
+	if err != nil {
+		return "", err
+	}
+	for _, root := range writableRoots {
 		fmt.Fprintf(&b, "(allow file-write* (subpath %s))\n", sbplString(root))
 	}
 	for _, sub := range seatbeltReadOnlySubpaths(p, workDir) {
 		fmt.Fprintf(&b, "(deny file-write* (subpath %s))\n", sbplString(sub))
 	}
-	return b.String()
+	return b.String(), nil
 }
 
-func seatbeltWritableRoots(p policy.Policy, workDir string) []string {
+func seatbeltWritableRoots(p policy.Policy, workDir string) ([]string, error) {
 	if p.Type == policy.TypeReadOnly {
-		return nil
+		return nil, nil
 	}
-	roots := make([]string, 0, len(p.WritableRoots)+8)
+	explicit := make([]string, 0, len(p.WritableRoots))
 	for _, one := range p.WritableRoots {
 		if resolved := policy.ResolveSandboxPath(workDir, one); resolved != "" {
-			roots = append(roots, policy.SandboxPathVariants(policy.WritableRootPath(resolved))...)
+			explicit = append(explicit, policy.WritableRootPath(resolved))
 		}
+	}
+	if err := policy.EnsureExplicitWritableRoots(explicit); err != nil {
+		return nil, err
+	}
+
+	roots := make([]string, 0, len(explicit)+8)
+	for _, one := range explicit {
+		roots = append(roots, policy.SandboxPathVariants(one)...)
 	}
 	if tmp := strings.TrimSpace(os.TempDir()); tmp != "" {
 		roots = append(roots, policy.SandboxPathVariants(tmp)...)
@@ -349,7 +367,7 @@ func seatbeltWritableRoots(p policy.Policy, workDir string) []string {
 			roots = append(roots, policy.SandboxPathVariants(cacheDir)...)
 		}
 	}
-	return normalizeStringList(roots)
+	return normalizeStringList(roots), nil
 }
 
 func darwinUserCacheDir() string {

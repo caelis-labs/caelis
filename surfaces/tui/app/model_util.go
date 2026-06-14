@@ -574,7 +574,7 @@ func slashArgQueryAtCursor(input []rune, cursor int) (string, string, bool) {
 		}
 		return "", "", false
 	case "plugin":
-		return slashRootActionQuery(command, fields, hasTrailingDelimiter, []string{"install", "manage", "rm"}, []string{"install", "rm"})
+		return pluginSlashArgQuery(command, fields, hasTrailingDelimiter)
 	case "subagent":
 		if len(fields) == 1 {
 			if !hasTrailingDelimiter {
@@ -714,6 +714,72 @@ func slashArgStringSliceContains(values []string, target string) bool {
 		}
 	}
 	return false
+}
+
+func pluginSlashArgQuery(command string, fields []string, hasTrailingDelimiter bool) (string, string, bool) {
+	command = strings.ToLower(strings.TrimSpace(command))
+	if command == "" || len(fields) == 0 {
+		return "", "", false
+	}
+	if len(fields) == 1 {
+		return command, "", true
+	}
+	action := strings.ToLower(strings.TrimSpace(fields[1]))
+	if len(fields) == 2 {
+		if hasTrailingDelimiter {
+			switch action {
+			case "install", "rm":
+				return command + " " + action, "", true
+			case "marketplace":
+				return command + " marketplace", "", true
+			case "manage":
+				return "", "", false
+			default:
+				return "", "", false
+			}
+		}
+		if action == "" {
+			return "", "", false
+		}
+		return command, action, true
+	}
+	switch action {
+	case "install", "rm":
+		return command + " " + action, strings.TrimSpace(strings.Join(fields[2:], " ")), true
+	case "marketplace":
+		return pluginMarketplaceSlashArgQuery(command, fields, hasTrailingDelimiter)
+	default:
+		return "", "", false
+	}
+}
+
+func pluginMarketplaceSlashArgQuery(command string, fields []string, hasTrailingDelimiter bool) (string, string, bool) {
+	if len(fields) == 2 {
+		return command + " marketplace", "", true
+	}
+	marketplaceAction := strings.ToLower(strings.TrimSpace(fields[2]))
+	if len(fields) == 3 {
+		if hasTrailingDelimiter {
+			switch marketplaceAction {
+			case "update", "rm":
+				return command + " marketplace " + marketplaceAction, "", true
+			case "add", "list":
+				return "", "", false
+			default:
+				return "", "", false
+			}
+		}
+		if marketplaceAction == "" {
+			return "", "", false
+		}
+		return command + " marketplace", marketplaceAction, true
+	}
+	switch marketplaceAction {
+	case "update", "rm":
+		return command + " marketplace " + marketplaceAction, strings.TrimSpace(strings.Join(fields[3:], " ")), true
+	default:
+		return "", "", false
+	}
 }
 
 func slashArgQueryAtEnd(input []rune) (string, string, bool) {

@@ -152,6 +152,10 @@ func (d *Adapter) CompleteSlashArg(ctx context.Context, command string, query st
 		return d.completeModelAliases(ctx, query, limit)
 	case "plugin rm":
 		return d.completePluginIDs(ctx, query, limit)
+	case "plugin marketplace":
+		return filterSlashCandidates(pluginMarketplaceActionCandidates(), query, limit), nil
+	case "plugin marketplace update", "plugin marketplace rm":
+		return d.completeMarketplaceNames(ctx, query, limit)
 	case "connect":
 		return completeConnectArgs(ctx, d, "connect", query, limit)
 	}
@@ -985,4 +989,59 @@ func (d *Adapter) completePluginIDs(ctx context.Context, query string, limit int
 		}
 	}
 	return out, nil
+}
+
+func pluginMarketplaceActionCandidates() []SlashArgCandidate {
+	return []SlashArgCandidate{
+		{Value: "add", Display: "add", Detail: "Add a plugin marketplace"},
+		{Value: "list", Display: "list", Detail: "List plugin marketplaces"},
+		{Value: "update", Display: "update", Detail: "Refresh a plugin marketplace"},
+		{Value: "rm", Display: "rm", Detail: "Remove a plugin marketplace"},
+	}
+}
+
+func (d *Adapter) completeMarketplaceNames(ctx context.Context, query string, limit int) ([]SlashArgCandidate, error) {
+	marketplaces, err := d.stack.ListMarketplaces(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]SlashArgCandidate, 0, min(limit, len(marketplaces)))
+	for _, marketplace := range marketplaces {
+		name := strings.TrimSpace(marketplace.Name)
+		if name == "" {
+			continue
+		}
+		if query != "" && !hasSlashArgPrefix(query, name, marketplace.Description, marketplace.Source) {
+			continue
+		}
+		out = append(out, SlashArgCandidate{
+			Value:   name,
+			Display: name,
+			Detail:  marketplaceCompletionDetail(marketplace),
+		})
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+
+func marketplaceCompletionDetail(marketplace MarketplaceSnapshot) string {
+	parts := compactNonEmpty([]string{
+		strings.TrimSpace(marketplace.Description),
+		marketplacePluginCountDetail(marketplace.PluginCount),
+		strings.TrimSpace(marketplace.Source),
+	})
+	return strings.Join(parts, " · ")
+}
+
+func marketplacePluginCountDetail(count int) string {
+	switch {
+	case count == 1:
+		return "1 plugin"
+	case count > 1:
+		return fmt.Sprintf("%d plugins", count)
+	default:
+		return ""
+	}
 }

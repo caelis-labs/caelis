@@ -2369,9 +2369,59 @@ func TestAdapterCompleteSlashArgPluginRootOrder(t *testing.T) {
 	for _, candidate := range candidates {
 		got = append(got, candidate.Value)
 	}
-	want := []string{"install", "manage", "rm"}
+	want := []string{"install", "marketplace", "opencode", "manage", "rm"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("plugin root candidates = %#v, want %#v", got, want)
+	}
+}
+
+func TestAdapterCompleteSlashArgPluginMarketplace(t *testing.T) {
+	ctx := context.Background()
+	driver, err := NewAdapter(ctx, &RuntimeStack{
+		ListMarketplacesFn: func(context.Context) ([]MarketplaceSnapshot, error) {
+			return []MarketplaceSnapshot{
+				{Name: "demo-market", Description: "Demo marketplace", Source: "acme/plugins", PluginCount: 2},
+				{Name: "internal", Description: "Internal plugins", Source: "/tmp/internal", PluginCount: 1},
+			}, nil
+		},
+	}, "", "", "")
+	if err != nil {
+		t.Fatalf("NewAdapter() error = %v", err)
+	}
+
+	actions, err := driver.CompleteSlashArg(ctx, "plugin marketplace", "", 10)
+	if err != nil {
+		t.Fatalf("CompleteSlashArg(plugin marketplace) error = %v", err)
+	}
+	if got := candidateValues(actions); !equalStrings(got, []string{"add", "list", "update", "rm"}) {
+		t.Fatalf("plugin marketplace actions = %#v, want add/list/update/rm", actions)
+	}
+
+	filtered, err := driver.CompleteSlashArg(ctx, "plugin marketplace", "up", 10)
+	if err != nil {
+		t.Fatalf("CompleteSlashArg(plugin marketplace, up) error = %v", err)
+	}
+	if got := candidateValues(filtered); !equalStrings(got, []string{"update"}) {
+		t.Fatalf("plugin marketplace filtered actions = %#v, want update", filtered)
+	}
+
+	names, err := driver.CompleteSlashArg(ctx, "plugin marketplace update", "de", 10)
+	if err != nil {
+		t.Fatalf("CompleteSlashArg(plugin marketplace update) error = %v", err)
+	}
+	if got := candidateValues(names); !equalStrings(got, []string{"demo-market"}) {
+		t.Fatalf("plugin marketplace update candidates = %#v, want demo-market", names)
+	}
+	if len(names) != 1 || !strings.Contains(names[0].Detail, "2 plugins") {
+		t.Fatalf("plugin marketplace update detail = %#v, want plugin count", names)
+	}
+
+	removeNames, err := driver.CompleteSlashArg(ctx, "plugin marketplace rm", "in", 10)
+	if err != nil {
+		t.Fatalf("CompleteSlashArg(plugin marketplace rm) error = %v", err)
+	}
+	if got := candidateValues(removeNames); !equalStrings(got, []string{"internal"}) {
+		t.Fatalf("plugin marketplace rm candidates = %#v, want internal", removeNames)
 	}
 }
 

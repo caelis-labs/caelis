@@ -6,6 +6,30 @@ func (d *Adapter) ListPlugins(ctx context.Context) ([]PluginSnapshot, error) {
 	return d.stack.ListPlugins(ctx)
 }
 
+func (d *Adapter) AddMarketplace(ctx context.Context, source string) (MarketplaceSnapshot, error) {
+	return d.stack.AddMarketplace(ctx, source)
+}
+
+func (d *Adapter) ListMarketplaces(ctx context.Context) ([]MarketplaceSnapshot, error) {
+	return d.stack.ListMarketplaces(ctx)
+}
+
+func (d *Adapter) UpdateMarketplace(ctx context.Context, name string) (MarketplaceSnapshot, error) {
+	return d.stack.UpdateMarketplace(ctx, name)
+}
+
+func (d *Adapter) RemoveMarketplace(ctx context.Context, name string) error {
+	return d.stack.RemoveMarketplace(ctx, name)
+}
+
+func (d *Adapter) DiscoverOpenCode(ctx context.Context, workspace string) (OpenCodeDiscoverySnapshot, error) {
+	return d.stack.DiscoverOpenCode(ctx, workspace)
+}
+
+func (d *Adapter) ImportOpenCode(ctx context.Context, workspace string) ([]PluginSnapshot, error) {
+	return d.stack.ImportOpenCode(ctx, workspace)
+}
+
 func (d *Adapter) AddPluginPath(ctx context.Context, path string) (PluginSnapshot, error) {
 	return d.stack.AddPluginPath(ctx, path)
 }

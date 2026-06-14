@@ -1454,9 +1454,54 @@ func TestSlashArgQueryPluginRoot(t *testing.T) {
 	}
 }
 
+func TestSlashArgQueryPluginMarketplace(t *testing.T) {
+	for _, tt := range []struct {
+		input   string
+		command string
+		query   string
+	}{
+		{input: "/plugin marketplace", command: "plugin", query: "marketplace"},
+		{input: "/plugin marketplace ", command: "plugin marketplace", query: ""},
+		{input: "/plugin marketplace u", command: "plugin marketplace", query: "u"},
+		{input: "/plugin marketplace update ", command: "plugin marketplace update", query: ""},
+		{input: "/plugin marketplace update demo-market", command: "plugin marketplace update", query: "demo-market"},
+		{input: "/plugin marketplace rm demo-market", command: "plugin marketplace rm", query: "demo-market"},
+	} {
+		command, query, ok := slashArgQueryAtEnd([]rune(tt.input))
+		if !ok {
+			t.Fatalf("slashArgQueryAtEnd(%q) ok = false", tt.input)
+		}
+		if command != tt.command || query != tt.query {
+			t.Fatalf("slashArgQueryAtEnd(%q) = command %q query %q, want %q / %q", tt.input, command, query, tt.command, tt.query)
+		}
+	}
+}
+
 func TestAgentInstallSlashArgFallbackIsExecutable(t *testing.T) {
 	if !isExecutableSlashArgInput("/agent install claude") {
 		t.Fatal("isExecutableSlashArgInput(/agent install claude) = false, want true")
+	}
+}
+
+func TestPluginMarketplaceSlashArgFallbackIsExecutable(t *testing.T) {
+	for _, input := range []string{
+		"/plugin marketplace list",
+		"/plugin marketplace add acme/plugins",
+		"/plugin marketplace update demo-market",
+		"/plugin marketplace rm demo-market",
+	} {
+		if !isExecutableSlashArgInput(input) {
+			t.Fatalf("isExecutableSlashArgInput(%q) = false, want true", input)
+		}
+	}
+	for _, input := range []string{
+		"/plugin marketplace",
+		"/plugin marketplace update",
+		"/plugin marketplace rm",
+	} {
+		if isExecutableSlashArgInput(input) {
+			t.Fatalf("isExecutableSlashArgInput(%q) = true, want false", input)
+		}
 	}
 }
 
@@ -2503,6 +2548,24 @@ func (d *bridgeTestDriver) CompleteSlashArg(_ context.Context, command string, _
 func (d *bridgeTestDriver) ListPlugins(context.Context) ([]control.PluginSnapshot, error) {
 	return nil, nil
 }
+func (d *bridgeTestDriver) AddMarketplace(context.Context, string) (control.MarketplaceSnapshot, error) {
+	return control.MarketplaceSnapshot{}, nil
+}
+func (d *bridgeTestDriver) ListMarketplaces(context.Context) ([]control.MarketplaceSnapshot, error) {
+	return nil, nil
+}
+func (d *bridgeTestDriver) UpdateMarketplace(context.Context, string) (control.MarketplaceSnapshot, error) {
+	return control.MarketplaceSnapshot{}, nil
+}
+func (d *bridgeTestDriver) RemoveMarketplace(context.Context, string) error {
+	return nil
+}
+func (d *bridgeTestDriver) DiscoverOpenCode(context.Context, string) (control.OpenCodeDiscoverySnapshot, error) {
+	return control.OpenCodeDiscoverySnapshot{}, nil
+}
+func (d *bridgeTestDriver) ImportOpenCode(context.Context, string) ([]control.PluginSnapshot, error) {
+	return nil, nil
+}
 func (d *bridgeTestDriver) AddPluginPath(context.Context, string) (control.PluginSnapshot, error) {
 	return control.PluginSnapshot{}, nil
 }
@@ -2523,6 +2586,24 @@ func (d *bridgeTestDriver) InspectPlugin(context.Context, string) (control.Plugi
 }
 
 func (d *bridgeSubmitDriver) ListPlugins(context.Context) ([]control.PluginSnapshot, error) {
+	return nil, nil
+}
+func (d *bridgeSubmitDriver) AddMarketplace(context.Context, string) (control.MarketplaceSnapshot, error) {
+	return control.MarketplaceSnapshot{}, nil
+}
+func (d *bridgeSubmitDriver) ListMarketplaces(context.Context) ([]control.MarketplaceSnapshot, error) {
+	return nil, nil
+}
+func (d *bridgeSubmitDriver) UpdateMarketplace(context.Context, string) (control.MarketplaceSnapshot, error) {
+	return control.MarketplaceSnapshot{}, nil
+}
+func (d *bridgeSubmitDriver) RemoveMarketplace(context.Context, string) error {
+	return nil
+}
+func (d *bridgeSubmitDriver) DiscoverOpenCode(context.Context, string) (control.OpenCodeDiscoverySnapshot, error) {
+	return control.OpenCodeDiscoverySnapshot{}, nil
+}
+func (d *bridgeSubmitDriver) ImportOpenCode(context.Context, string) ([]control.PluginSnapshot, error) {
 	return nil, nil
 }
 func (d *bridgeSubmitDriver) AddPluginPath(context.Context, string) (control.PluginSnapshot, error) {

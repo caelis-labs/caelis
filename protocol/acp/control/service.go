@@ -53,6 +53,12 @@ type Service interface {
 	CompleteSlashArg(context.Context, string, string, int) ([]SlashArgCandidate, error)
 
 	ListPlugins(context.Context) ([]PluginSnapshot, error)
+	AddMarketplace(context.Context, string) (MarketplaceSnapshot, error)
+	ListMarketplaces(context.Context) ([]MarketplaceSnapshot, error)
+	UpdateMarketplace(context.Context, string) (MarketplaceSnapshot, error)
+	RemoveMarketplace(context.Context, string) error
+	DiscoverOpenCode(context.Context, string) (OpenCodeDiscoverySnapshot, error)
+	ImportOpenCode(context.Context, string) ([]PluginSnapshot, error)
 	AddPluginPath(context.Context, string) (PluginSnapshot, error)
 	InstallPlugin(context.Context, string) (PluginSnapshot, error)
 	EnablePlugin(context.Context, string) (PluginSnapshot, error)

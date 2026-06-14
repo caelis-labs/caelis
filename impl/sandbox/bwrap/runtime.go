@@ -159,7 +159,10 @@ func (b *bwrapRunner) Run(ctx context.Context, req runnerruntime.Request) (sandb
 		return sandbox.CommandResult{}, fmt.Errorf("tool: resolve bwrap workdir failed: %w", err)
 	}
 	effectivePolicy := policy.Default(b.cfg, req.Constraints)
-	bwrapArgs := buildBwrapArgs(effectivePolicy, workDir)
+	bwrapArgs, err := buildBwrapArgs(effectivePolicy, workDir)
+	if err != nil {
+		return sandbox.CommandResult{}, fmt.Errorf("tool: prepare bwrap sandbox policy failed: %w", err)
+	}
 	bwrapArgs = append(bwrapArgs, "--", "bash", "-lc", req.Command)
 	cmd := b.execCommand(runCtx, "bwrap", bwrapArgs...)
 	procutil.ApplyNonInteractiveCommandDefaults(cmd)
@@ -229,7 +232,10 @@ func (b *bwrapRunner) StartAsync(_ context.Context, req runnerruntime.Request) (
 		IdleTimeout:     req.IdleTimeout,
 		OnOutput:        asyncOutputForwarder(req.OnOutput),
 		BuildCommand: func(ctx context.Context, cfg cmdsession.AsyncSessionConfig) (*exec.Cmd, error) {
-			args := buildBwrapArgs(effectivePolicy, workDir)
+			args, err := buildBwrapArgs(effectivePolicy, workDir)
+			if err != nil {
+				return nil, fmt.Errorf("tool: prepare bwrap sandbox policy failed: %w", err)
+			}
 			args = append(args, "--", "bash", "-lc", cfg.Command)
 			cmd := b.execCommand(ctx, "bwrap", args...)
 			if strings.TrimSpace(cfg.Dir) != "" {
@@ -321,30 +327,41 @@ func (b *bwrapRunner) asyncSessionManager() (*cmdsession.SessionManager, error) 
 	return b.sessionManager, nil
 }
 
-func buildBwrapArgs(p policy.Policy, workDir string) []string {
+func buildBwrapArgs(p policy.Policy, workDir string) ([]string, error) {
 	args := []string{"--new-session", "--die-with-parent", "--unshare-user", "--unshare-pid"}
 	if !p.NetworkAccess {
 		args = append(args, "--unshare-net")
 	}
 	if policy.HasExplicitReadableRoots(p) {
-		args = append(args, buildScopedBwrapRootArgs(p, workDir)...)
+		rootArgs, err := buildScopedBwrapRootArgs(p, workDir)
+		if err != nil {
+			return nil, err
+		}
+		args = append(args, rootArgs...)
 	} else {
 		args = append(args, "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc")
 	}
 	if p.Type != policy.TypeReadOnly {
-		for _, root := range bwrapWritableRoots(p, workDir) {
+		writableRoots, err := bwrapWritableRoots(p, workDir)
+		if err != nil {
+			return nil, err
+		}
+		for _, root := range writableRoots {
 			args = append(args, "--bind", root, root)
 		}
 	}
 	for _, sub := range bwrapReadOnlySubpaths(p, workDir) {
 		args = append(args, "--ro-bind", sub, sub)
 	}
-	return args
+	return args, nil
 }
 
-func buildScopedBwrapRootArgs(p policy.Policy, workDir string) []string {
+func buildScopedBwrapRootArgs(p policy.Policy, workDir string) ([]string, error) {
 	readableRoots := bwrapRegularReadableRoots(policy.ShellReadableRoots(p, workDir))
-	writableRoots := bwrapWritableRoots(p, workDir)
+	writableRoots, err := bwrapWritableRoots(p, workDir)
+	if err != nil {
+		return nil, err
+	}
 	readOnlySubpaths := bwrapReadOnlySubpaths(p, workDir)
 	destParents := bwrapMountParentDirs(readableRoots, writableRoots, readOnlySubpaths)
 	args := []string{"--tmpfs", "/"}
@@ -355,7 +372,7 @@ func buildScopedBwrapRootArgs(p policy.Policy, workDir string) []string {
 	for _, root := range readableRoots {
 		args = append(args, "--ro-bind", root, root)
 	}
-	return args
+	return args, nil
 }
 
 var quotedAbsolutePathPattern = regexp.MustCompile(`['"](/[^'"\n]+)['"]`)
@@ -365,7 +382,10 @@ func bwrapMissingMountDiagnostic(result sandbox.CommandResult, p policy.Policy, 
 	if !policy.HasExplicitReadableRoots(p) {
 		return ""
 	}
-	mountedRoots := bwrapMountedRoots(p, workDir)
+	mountedRoots, err := bwrapMountedRoots(p, workDir)
+	if err != nil {
+		return ""
+	}
 	if detail := bwrapMissingMountStreamDiagnostic(result.Stderr, mountedRoots); detail != "" {
 		return detail
 	}
@@ -414,14 +434,18 @@ func bwrapLineLooksLikeMissingPath(line string) bool {
 		strings.Contains(line, "没有那个文件或目录")
 }
 
-func bwrapMountedRoots(p policy.Policy, workDir string) []string {
+func bwrapMountedRoots(p policy.Policy, workDir string) ([]string, error) {
 	roots := make([]string, 0, len(p.ReadableRoots)+len(p.WritableRoots)+len(p.ReadOnlySubpaths)+16)
 	if policy.HasExplicitReadableRoots(p) {
 		roots = append(roots, bwrapRegularReadableRoots(policy.ShellReadableRoots(p, workDir))...)
 	}
-	roots = append(roots, bwrapWritableRoots(p, workDir)...)
+	writableRoots, err := bwrapWritableRoots(p, workDir)
+	if err != nil {
+		return nil, err
+	}
+	roots = append(roots, writableRoots...)
 	roots = append(roots, bwrapReadOnlySubpaths(p, workDir)...)
-	return normalizeStringList(roots)
+	return normalizeStringList(roots), nil
 }
 
 func bwrapPathWithinAnyRoot(path string, roots []string) bool {
@@ -462,21 +486,27 @@ func bwrapManagedMountPath(path string) bool {
 		strings.HasPrefix(cleaned, "/proc/")
 }
 
-func bwrapWritableRoots(p policy.Policy, workDir string) []string {
+func bwrapWritableRoots(p policy.Policy, workDir string) ([]string, error) {
 	if p.Type == policy.TypeReadOnly {
-		return nil
+		return nil, nil
 	}
-	roots := make([]string, 0, len(p.WritableRoots)+8)
+	explicit := make([]string, 0, len(p.WritableRoots))
 	for _, one := range p.WritableRoots {
 		if resolved := resolveBwrapPath(workDir, one); resolved != "" {
-			roots = append(roots, policy.WritableRootPath(resolved))
+			explicit = append(explicit, policy.WritableRootPath(resolved))
 		}
 	}
+	if err := policy.EnsureExplicitWritableRoots(explicit); err != nil {
+		return nil, err
+	}
+
+	roots := make([]string, 0, len(explicit)+8)
+	roots = append(roots, explicit...)
 	roots = append(roots, "/tmp", "/var/tmp")
 	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
 		roots = append(roots, filepath.Join(home, ".cache"))
 	}
-	return filterExistingPaths(normalizeStringList(roots))
+	return filterExistingPaths(normalizeStringList(roots)), nil
 }
 
 func bwrapReadOnlySubpaths(p policy.Policy, workDir string) []string {

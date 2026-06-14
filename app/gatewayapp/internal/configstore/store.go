@@ -16,13 +16,26 @@ import (
 )
 
 type AppConfig struct {
-	Models         PersistedModelConfig    `json:"models,omitempty"`
-	Agents         []AgentConfig           `json:"agents,omitempty"`
-	AgentProviders []AgentProviderConfig   `json:"agent_providers,omitempty"`
-	AgentBindings  agentprofile.BindingSet `json:"agent_bindings,omitempty"`
-	Sandbox        SandboxConfig           `json:"sandbox,omitempty"`
-	Runtime        RuntimeConfig           `json:"runtime,omitempty"`
-	Plugins        []PluginConfig          `json:"plugins,omitempty"`
+	Models             PersistedModelConfig    `json:"models,omitempty"`
+	Agents             []AgentConfig           `json:"agents,omitempty"`
+	AgentProviders     []AgentProviderConfig   `json:"agent_providers,omitempty"`
+	AgentBindings      agentprofile.BindingSet `json:"agent_bindings,omitempty"`
+	Sandbox            SandboxConfig           `json:"sandbox,omitempty"`
+	Runtime            RuntimeConfig           `json:"runtime,omitempty"`
+	Plugins            []PluginConfig          `json:"plugins,omitempty"`
+	PluginMarketplaces []MarketplaceConfig     `json:"plugin_marketplaces,omitempty"`
+}
+
+type MarketplaceConfig struct {
+	Name                              string   `json:"name,omitempty"`
+	Description                       string   `json:"description,omitempty"`
+	Owner                             string   `json:"owner,omitempty"`
+	Source                            string   `json:"source,omitempty"`
+	Root                              string   `json:"root,omitempty"`
+	Version                           string   `json:"version,omitempty"`
+	RepoURL                           string   `json:"repo_url,omitempty"`
+	PluginRoot                        string   `json:"plugin_root,omitempty"`
+	AllowCrossMarketplaceDependencies []string `json:"allow_cross_marketplace_dependencies,omitempty"`
 }
 
 type PluginConfig struct {
@@ -136,6 +149,7 @@ func (s *Store) loadUnlocked() (AppConfig, error) {
 		doc.Sandbox = NormalizeSandboxConfig(doc.Sandbox)
 		doc.Runtime = NormalizeRuntimeConfig(doc.Runtime)
 		doc.Plugins = DedupePluginConfigs(doc.Plugins)
+		doc.PluginMarketplaces = DedupeMarketplaceConfigs(doc.PluginMarketplaces)
 		return doc, nil
 	}
 	if !os.IsNotExist(err) {
@@ -158,6 +172,7 @@ func (s *Store) Save(doc AppConfig) error {
 	doc.Sandbox = DefaultSandboxConfig(doc.Sandbox)
 	doc.Runtime = NormalizeRuntimeConfig(doc.Runtime)
 	doc.Plugins = DedupePluginConfigs(doc.Plugins)
+	doc.PluginMarketplaces = DedupeMarketplaceConfigs(doc.PluginMarketplaces)
 	dir := filepath.Dir(s.path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
@@ -504,6 +519,69 @@ func DedupePluginConfigs(configs []PluginConfig) []PluginConfig {
 		seen[key] = struct{}{}
 		out = append(out, cfg)
 	}
+	return out
+}
+
+func DedupeMarketplaceConfigs(configs []MarketplaceConfig) []MarketplaceConfig {
+	if len(configs) == 0 {
+		return nil
+	}
+	out := make([]MarketplaceConfig, 0, len(configs))
+	seen := make(map[string]struct{}, len(configs))
+	for _, cfg := range configs {
+		cfg = NormalizeMarketplaceConfig(cfg)
+		if cfg.Name == "" {
+			continue
+		}
+		key := strings.ToLower(strings.TrimSpace(cfg.Name))
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, cfg)
+	}
+	return out
+}
+
+func UpsertMarketplaceConfig(configs []MarketplaceConfig, entry MarketplaceConfig) []MarketplaceConfig {
+	entry = NormalizeMarketplaceConfig(entry)
+	if entry.Name == "" {
+		return DedupeMarketplaceConfigs(configs)
+	}
+	key := strings.ToLower(strings.TrimSpace(entry.Name))
+	out := make([]MarketplaceConfig, 0, len(configs)+1)
+	replaced := false
+	for _, cfg := range configs {
+		cfg = NormalizeMarketplaceConfig(cfg)
+		if cfg.Name == "" {
+			continue
+		}
+		if strings.ToLower(strings.TrimSpace(cfg.Name)) == key {
+			if !replaced {
+				out = append(out, entry)
+				replaced = true
+			}
+			continue
+		}
+		out = append(out, cfg)
+	}
+	if !replaced {
+		out = append(out, entry)
+	}
+	return out
+}
+
+func NormalizeMarketplaceConfig(in MarketplaceConfig) MarketplaceConfig {
+	out := in
+	out.Name = strings.TrimSpace(in.Name)
+	out.Description = strings.TrimSpace(in.Description)
+	out.Owner = strings.TrimSpace(in.Owner)
+	out.Source = strings.TrimSpace(in.Source)
+	out.Root = strings.TrimSpace(in.Root)
+	out.Version = strings.TrimSpace(in.Version)
+	out.RepoURL = strings.TrimSpace(in.RepoURL)
+	out.PluginRoot = strings.TrimSpace(in.PluginRoot)
+	out.AllowCrossMarketplaceDependencies = DedupeStrings(in.AllowCrossMarketplaceDependencies)
 	return out
 }
 

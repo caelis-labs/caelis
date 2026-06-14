@@ -2,6 +2,7 @@ package local
 
 import (
 	"context"
+	"strings"
 
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	taskapi "github.com/OnslaughtSnail/caelis/ports/task"
@@ -14,11 +15,22 @@ type taskControlTarget interface {
 }
 
 func (tm *taskRuntime) control(ctx context.Context, ref session.SessionRef, req taskapi.ControlRequest, fn func(taskControlTarget) (taskapi.Snapshot, error)) (taskapi.Snapshot, error) {
+	req = normalizeTaskControlRequest(req)
 	target, err := tm.lookupControlTarget(ctx, ref, req.TaskID)
 	if err != nil {
 		return taskapi.Snapshot{}, err
 	}
 	return fn(target)
+}
+
+func normalizeTaskControlRequest(req taskapi.ControlRequest) taskapi.ControlRequest {
+	return taskapi.ControlRequest{
+		TaskID:         strings.TrimSpace(req.TaskID),
+		Yield:          req.Yield,
+		Input:          req.Input,
+		Source:         strings.TrimSpace(req.Source),
+		ContextPrelude: req.ContextPrelude,
+	}
 }
 
 func (tm *taskRuntime) lookupControlTarget(ctx context.Context, ref session.SessionRef, taskID string) (taskControlTarget, error) {

@@ -221,6 +221,12 @@ type RuntimeStack struct {
 	AgentProfileStatusFn                 func(context.Context) (AgentProfileStatusSnapshot, error)
 	BindAgentProfileFn                   func(context.Context, AgentProfileBindingConfig) (AgentProfileStatusSnapshot, error)
 	ListPluginsFn                        func(context.Context) ([]PluginSnapshot, error)
+	AddMarketplaceFn                     func(context.Context, string) (MarketplaceSnapshot, error)
+	ListMarketplacesFn                   func(context.Context) ([]MarketplaceSnapshot, error)
+	UpdateMarketplaceFn                  func(context.Context, string) (MarketplaceSnapshot, error)
+	RemoveMarketplaceFn                  func(context.Context, string) error
+	DiscoverOpenCodeFn                   func(context.Context, string) (OpenCodeDiscoverySnapshot, error)
+	ImportOpenCodeFn                     func(context.Context, string) ([]PluginSnapshot, error)
 	AddPluginPathFn                      func(context.Context, string) (PluginSnapshot, error)
 	InstallPluginFn                      func(context.Context, string) (PluginSnapshot, error)
 	EnablePluginFn                       func(context.Context, string) (PluginSnapshot, error)
@@ -530,6 +536,48 @@ func (s *RuntimeStack) ListPlugins(ctx context.Context) ([]PluginSnapshot, error
 		return nil, fmt.Errorf("app/gatewayapp/controladapter: list plugins dependency is unavailable")
 	}
 	return s.ListPluginsFn(ctx)
+}
+
+func (s *RuntimeStack) AddMarketplace(ctx context.Context, source string) (MarketplaceSnapshot, error) {
+	if s == nil || s.AddMarketplaceFn == nil {
+		return MarketplaceSnapshot{}, fmt.Errorf("app/gatewayapp/controladapter: add marketplace dependency is unavailable")
+	}
+	return s.AddMarketplaceFn(ctx, source)
+}
+
+func (s *RuntimeStack) ListMarketplaces(ctx context.Context) ([]MarketplaceSnapshot, error) {
+	if s == nil || s.ListMarketplacesFn == nil {
+		return nil, fmt.Errorf("app/gatewayapp/controladapter: list marketplaces dependency is unavailable")
+	}
+	return s.ListMarketplacesFn(ctx)
+}
+
+func (s *RuntimeStack) UpdateMarketplace(ctx context.Context, name string) (MarketplaceSnapshot, error) {
+	if s == nil || s.UpdateMarketplaceFn == nil {
+		return MarketplaceSnapshot{}, fmt.Errorf("app/gatewayapp/controladapter: update marketplace dependency is unavailable")
+	}
+	return s.UpdateMarketplaceFn(ctx, name)
+}
+
+func (s *RuntimeStack) RemoveMarketplace(ctx context.Context, name string) error {
+	if s == nil || s.RemoveMarketplaceFn == nil {
+		return fmt.Errorf("app/gatewayapp/controladapter: remove marketplace dependency is unavailable")
+	}
+	return s.RemoveMarketplaceFn(ctx, name)
+}
+
+func (s *RuntimeStack) DiscoverOpenCode(ctx context.Context, workspace string) (OpenCodeDiscoverySnapshot, error) {
+	if s == nil || s.DiscoverOpenCodeFn == nil {
+		return OpenCodeDiscoverySnapshot{}, fmt.Errorf("app/gatewayapp/controladapter: discover opencode dependency is unavailable")
+	}
+	return s.DiscoverOpenCodeFn(ctx, workspace)
+}
+
+func (s *RuntimeStack) ImportOpenCode(ctx context.Context, workspace string) ([]PluginSnapshot, error) {
+	if s == nil || s.ImportOpenCodeFn == nil {
+		return nil, fmt.Errorf("app/gatewayapp/controladapter: import opencode dependency is unavailable")
+	}
+	return s.ImportOpenCodeFn(ctx, workspace)
 }
 
 func (s *RuntimeStack) AddPluginPath(ctx context.Context, path string) (PluginSnapshot, error) {

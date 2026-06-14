@@ -5,10 +5,11 @@ import "strings"
 type ManifestKind string
 
 const (
-	ManifestKindCaelis ManifestKind = "caelis"
-	ManifestKindCodex  ManifestKind = "codex"
-	ManifestKindClaude ManifestKind = "claude"
-	ManifestKindGemini ManifestKind = "gemini"
+	ManifestKindCaelis   ManifestKind = "caelis"
+	ManifestKindCodex    ManifestKind = "codex"
+	ManifestKindClaude   ManifestKind = "claude"
+	ManifestKindGemini   ManifestKind = "gemini"
+	ManifestKindOpenCode ManifestKind = "opencode"
 )
 
 type InstalledPlugin struct {

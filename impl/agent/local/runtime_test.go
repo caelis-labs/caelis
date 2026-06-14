@@ -3164,7 +3164,7 @@ func TestRuntimeTaskWaitUsesDefaultYieldWhenOmitted(t *testing.T) {
 	}
 }
 
-func TestRuntimeTaskWaitUntilDoneDefaultsToBoundedCompletionWait(t *testing.T) {
+func TestRuntimeTaskWaitUntilDoneReportsDefaultYieldMetadata(t *testing.T) {
 	t.Parallel()
 
 	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
@@ -3179,20 +3179,71 @@ func TestRuntimeTaskWaitUntilDoneDefaultsToBoundedCompletionWait(t *testing.T) {
 		"action":          "wait",
 		"task_id":         taskID,
 		"wait_until_done": true,
+		"yield_time_ms":   40,
 	})
 
-	if got := fake.session.lastWait; got != defaultTaskWaitUntilDoneYield {
-		t.Fatalf("wait_until_done TASK wait yield = %v, want %v", got, defaultTaskWaitUntilDoneYield)
-	}
 	toolMeta := testToolResultRuntimeMeta(t, taskResult, "tool")
-	if got := toolMeta["effective_yield_time_ms"]; got != float64(300000) && got != 300000 {
-		t.Fatalf("effective_yield_time_ms = %#v, want 300000", got)
+	if got := toolMeta["effective_yield_time_ms"]; got != float64(40) && got != 40 {
+		t.Fatalf("effective_yield_time_ms = %#v, want 40", got)
 	}
-	if got := toolMeta["yield_time_ms_defaulted"]; got != true {
-		t.Fatalf("yield_time_ms_defaulted = %#v, want true", got)
+	if got := toolMeta["yield_time_ms_defaulted"]; got == true {
+		t.Fatalf("yield_time_ms_defaulted = %#v, want false when yield_time_ms is explicit", got)
 	}
 	if got := toolMeta["wait_until_done"]; got != true {
 		t.Fatalf("wait_until_done = %#v, want true", got)
+	}
+}
+
+func TestRuntimeTaskWaitUntilDoneTimesOutWhileStillRunning(t *testing.T) {
+	t.Parallel()
+
+	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
+	fake := &runningOnlyProbeSandboxRuntime{session: &runningOnlyProbeSandboxSession{}}
+	startResult := callRuntimeRunCommandTool(t, runtimeCommandTool{
+		base:       mustRuntimeRunCommandTool(t, fake),
+		session:    session.CloneSession(activeSession),
+		sessionRef: activeSession.SessionRef,
+		tasks:      runtime.tasks,
+	}, map[string]any{
+		"command":       "printf 'still-running'",
+		"workdir":       activeSession.CWD,
+		"yield_time_ms": 0,
+	})
+	taskID, _ := testToolResultRuntimeMeta(t, startResult, "task")["task_id"].(string)
+	if strings.TrimSpace(taskID) == "" {
+		t.Fatalf("command result metadata = %#v, want task_id", startResult.Metadata)
+	}
+
+	taskResult := callRuntimeTaskTool(t, runtimeTaskTool{
+		base:       tasktool.New(),
+		sessionRef: activeSession.SessionRef,
+		tasks:      runtime.tasks,
+	}, map[string]any{
+		"action":          "wait",
+		"task_id":         taskID,
+		"wait_until_done": true,
+		"yield_time_ms":   25,
+	})
+
+	toolMeta := testToolResultRuntimeMeta(t, taskResult, "tool")
+	if got := toolMeta["wait_timed_out"]; got != true {
+		t.Fatalf("wait_timed_out = %#v, want true", got)
+	}
+	if got := toolMeta["still_running"]; got != true {
+		t.Fatalf("still_running = %#v, want true", got)
+	}
+	if len(taskResult.Content) == 0 || taskResult.Content[0].JSON == nil {
+		t.Fatalf("task result content = %#v, want json payload", taskResult.Content)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(taskResult.Content[0].JSON.Value, &payload); err != nil {
+		t.Fatalf("json.Unmarshal(task payload) error = %v", err)
+	}
+	if got := payload["still_running"]; got != true {
+		t.Fatalf("payload still_running = %#v, want true", got)
+	}
+	if got := payload["wait_timed_out"]; got != true {
+		t.Fatalf("payload wait_timed_out = %#v, want true", got)
 	}
 }
 
@@ -3686,6 +3737,8 @@ func TestTaskControlSnapshotToolResultSimplifiesCancelPayload(t *testing.T) {
 			},
 		},
 		"cancel",
+		false,
+		false,
 	)
 
 	payload := testToolResultPayload(t, result)

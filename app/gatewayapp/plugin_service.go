@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -35,28 +34,6 @@ type PluginInfo struct {
 	MCPServers  []mcp.MCPServerInfo
 	Status      string
 	Warning     string
-}
-
-type pluginMarketplaceManifest struct {
-	Name        string                   `json:"name"`
-	Description string                   `json:"description"`
-	Plugins     []pluginMarketplaceEntry `json:"plugins"`
-}
-
-type pluginMarketplaceEntry struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description"`
-	Version     string          `json:"version"`
-	Source      json.RawMessage `json:"source"`
-}
-
-type pluginMarketplaceSource struct {
-	Source string `json:"source"`
-	URL    string `json:"url"`
-	Repo   string `json:"repo"`
-	Ref    string `json:"ref"`
-	SHA    string `json:"sha"`
-	Path   string `json:"path"`
 }
 
 func (s PluginService) List(ctx context.Context) ([]PluginInfo, error) {
@@ -115,7 +92,7 @@ func (s PluginService) Install(ctx context.Context, source string) (PluginInfo, 
 	if !ok {
 		return PluginInfo{}, fmt.Errorf("plugin service: plugin %q not found in marketplace %q", strings.TrimSpace(pluginName), strings.TrimSpace(marketplaceRef))
 	}
-	pluginRoot, err := s.resolveMarketplacePluginRoot(ctx, marketplaceRoot, entry)
+	pluginRoot, err := s.resolveMarketplacePluginRoot(ctx, marketplaceRoot, manifest, entry)
 	if err != nil {
 		return PluginInfo{}, err
 	}
@@ -133,70 +110,6 @@ func (s PluginService) installLocalPluginSource(ctx context.Context, source stri
 	}
 	info, err := s.AddPath(ctx, absPath)
 	return info, true, err
-}
-
-func (s PluginService) resolveMarketplaceRoot(ctx context.Context, ref string) (string, error) {
-	ref = strings.TrimSpace(ref)
-	if ref == "" {
-		return "", fmt.Errorf("plugin service: marketplace is required")
-	}
-	if absPath, err := filepath.Abs(ref); err == nil {
-		if fi, statErr := os.Stat(absPath); statErr == nil && fi.IsDir() {
-			return absPath, nil
-		}
-	}
-	repoURL := marketplaceGitURL(ref)
-	if repoURL == "" {
-		return "", fmt.Errorf("plugin service: unsupported marketplace %q", ref)
-	}
-	root := filepath.Join(s.stack.storeDir, "plugins", "marketplaces", safePluginCacheName(ref))
-	if err := cloneOrRefreshGitRepo(ctx, repoURL, "", root); err != nil {
-		return "", fmt.Errorf("plugin service: fetch marketplace %q: %w", ref, err)
-	}
-	return root, nil
-}
-
-func (s PluginService) resolveMarketplacePluginRoot(ctx context.Context, marketplaceRoot string, entry pluginMarketplaceEntry) (string, error) {
-	if len(entry.Source) == 0 {
-		return "", fmt.Errorf("plugin service: marketplace plugin %q has no source", entry.Name)
-	}
-	var sourcePath string
-	if err := json.Unmarshal(entry.Source, &sourcePath); err == nil && strings.TrimSpace(sourcePath) != "" {
-		return safeJoinPluginPath(marketplaceRoot, sourcePath)
-	}
-	var source pluginMarketplaceSource
-	if err := json.Unmarshal(entry.Source, &source); err != nil {
-		return "", fmt.Errorf("plugin service: decode source for plugin %q: %w", entry.Name, err)
-	}
-	kind := strings.ToLower(strings.TrimSpace(source.Source))
-	if kind == "" {
-		kind = "url"
-	}
-	switch kind {
-	case "github":
-		if strings.TrimSpace(source.Repo) == "" {
-			return "", fmt.Errorf("plugin service: github source for plugin %q is missing repo", entry.Name)
-		}
-		return s.cloneMarketplacePluginSource(ctx, "https://github.com/"+strings.TrimSpace(source.Repo)+".git", firstNonEmpty(source.Ref, source.SHA), source.Path, entry.Name)
-	case "git", "git-subdir", "url":
-		if strings.TrimSpace(source.URL) == "" {
-			return "", fmt.Errorf("plugin service: %s source for plugin %q is missing url", kind, entry.Name)
-		}
-		return s.cloneMarketplacePluginSource(ctx, source.URL, firstNonEmpty(source.Ref, source.SHA), source.Path, entry.Name)
-	default:
-		return "", fmt.Errorf("plugin service: marketplace source type %q for plugin %q is not supported yet", kind, entry.Name)
-	}
-}
-
-func (s PluginService) cloneMarketplacePluginSource(ctx context.Context, repoURL string, ref string, subpath string, pluginName string) (string, error) {
-	root := filepath.Join(s.stack.storeDir, "plugins", "installed", safePluginCacheName(pluginName))
-	if err := cloneOrRefreshGitRepo(ctx, repoURL, ref, root); err != nil {
-		return "", err
-	}
-	if strings.TrimSpace(subpath) == "" {
-		return root, nil
-	}
-	return safeJoinPluginPath(root, subpath)
 }
 
 // AddPath registers or updates a local plugin directory, enables it, and
@@ -429,65 +342,6 @@ func findMarketplacePlugin(manifest pluginMarketplaceManifest, name string) (plu
 	return pluginMarketplaceEntry{}, false
 }
 
-func marketplaceGitURL(ref string) string {
-	ref = strings.TrimSpace(ref)
-	switch {
-	case ref == "":
-		return ""
-	case strings.EqualFold(ref, "claude-plugins-official"):
-		return "https://github.com/anthropics/claude-plugins-official.git"
-	case strings.HasPrefix(ref, "https://") || strings.HasPrefix(ref, "http://") || strings.HasPrefix(ref, "ssh://") || strings.HasPrefix(ref, "git@"):
-		return ref
-	case strings.Count(ref, "/") == 1:
-		return "https://github.com/" + ref + ".git"
-	default:
-		return ""
-	}
-}
-
-func cloneOrRefreshGitRepo(ctx context.Context, repoURL string, ref string, root string) error {
-	repoURL = strings.TrimSpace(repoURL)
-	root = filepath.Clean(strings.TrimSpace(root))
-	if repoURL == "" || root == "" || root == "." {
-		return fmt.Errorf("invalid git source")
-	}
-	if err := os.RemoveAll(root); err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(root), 0o700); err != nil {
-		return err
-	}
-	args := []string{"clone", "--depth", "1", repoURL, root}
-	cmd := exec.CommandContext(ctx, "git", args...)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("git %s: %w\n%s", strings.Join(args, " "), err, strings.TrimSpace(string(output)))
-	}
-	if strings.TrimSpace(ref) != "" {
-		if err := checkoutGitRef(ctx, root, strings.TrimSpace(ref)); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func checkoutGitRef(ctx context.Context, root string, ref string) error {
-	fetch := exec.CommandContext(ctx, "git", "-C", root, "fetch", "--depth", "1", "origin", ref)
-	if output, err := fetch.CombinedOutput(); err == nil {
-		checkout := exec.CommandContext(ctx, "git", "-C", root, "checkout", "--detach", "FETCH_HEAD")
-		if checkoutOutput, checkoutErr := checkout.CombinedOutput(); checkoutErr != nil {
-			return fmt.Errorf("git checkout FETCH_HEAD: %w\n%s", checkoutErr, strings.TrimSpace(string(checkoutOutput)))
-		}
-		return nil
-	} else {
-		checkout := exec.CommandContext(ctx, "git", "-C", root, "checkout", ref)
-		if checkoutOutput, checkoutErr := checkout.CombinedOutput(); checkoutErr != nil {
-			return fmt.Errorf("git fetch %s: %w\n%s\ngit checkout %s: %w\n%s", ref, err, strings.TrimSpace(string(output)), ref, checkoutErr, strings.TrimSpace(string(checkoutOutput)))
-		}
-	}
-	return nil
-}
-
 func safeJoinPluginPath(root string, rel string) (string, error) {
 	rootAbs, err := filepath.Abs(filepath.Clean(root))
 	if err != nil {
@@ -497,7 +351,7 @@ func safeJoinPluginPath(root string, rel string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if !pathWithinPluginRoot(rootAbs, joined) {
+	if !pluginregistry.PathWithinRoot(rootAbs, joined) {
 		return "", fmt.Errorf("plugin service: plugin source path escapes marketplace root: %s", rel)
 	}
 	fi, err := os.Stat(joined)
@@ -517,20 +371,10 @@ func safeJoinPluginPath(root string, rel string) (string, error) {
 	}
 	rootReal = filepath.Clean(rootReal)
 	joinedReal = filepath.Clean(joinedReal)
-	if !pathWithinPluginRoot(rootReal, joinedReal) {
+	if !pluginregistry.PathWithinRoot(rootReal, joinedReal) {
 		return "", fmt.Errorf("plugin service: plugin source path escapes marketplace root: %s", rel)
 	}
 	return joined, nil
-}
-
-func pathWithinPluginRoot(root string, target string) bool {
-	root = filepath.Clean(root)
-	target = filepath.Clean(target)
-	rel, err := filepath.Rel(root, target)
-	if err != nil {
-		return false
-	}
-	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)) && !filepath.IsAbs(rel))
 }
 
 func safePluginCacheName(value string) string {
@@ -583,11 +427,15 @@ func (s PluginService) pluginInfoFromConfig(pCfg PluginConfig) PluginInfo {
 		info.Status = "active"
 		info.MCPServers = s.stack.MCPServersStatus(pCfg.ID)
 	}
+	applyOpenCodePluginInfo(&info, pCfg)
 	return info
 }
 
 func (s PluginService) enrichPluginInfoFromManifest(info *PluginInfo, pCfg PluginConfig) {
 	if info == nil {
+		return
+	}
+	if applyOpenCodePluginInfo(info, pCfg) {
 		return
 	}
 	p, err := pluginregistry.ParsePlugin(pCfg.Root)
@@ -639,6 +487,7 @@ func pluginInfoHasMCPServer(info PluginInfo, name string) bool {
 func cloneAppConfig(doc AppConfig) AppConfig {
 	out := doc
 	out.Plugins = clonePluginConfigs(doc.Plugins)
+	out.PluginMarketplaces = append([]MarketplaceConfig(nil), doc.PluginMarketplaces...)
 	return out
 }
 

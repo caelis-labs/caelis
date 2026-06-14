@@ -99,11 +99,11 @@ func ResolveSafePath(pluginRoot, relativePath string) (string, error) {
 		realRoot = filepath.Clean(realRoot)
 	}
 
-	joined := filepath.Join(realRoot, relativePath)
+	joined := filepath.Join(cleanRoot, relativePath)
 	cleanJoined := filepath.Clean(joined)
 
 	// 1. Lexical prefix boundary check
-	if !strings.HasPrefix(cleanJoined, realRoot+string(filepath.Separator)) && cleanJoined != realRoot {
+	if !PathWithinRoot(cleanRoot, cleanJoined) {
 		return "", fmt.Errorf("pluginregistry: path traversal escape detected: %s escapes %s", relativePath, pluginRoot)
 	}
 
@@ -111,14 +111,16 @@ func ResolveSafePath(pluginRoot, relativePath string) (string, error) {
 	current := cleanJoined
 	var suffixParts []string
 	var realPrefix string
+	var displayPrefix string
 	for {
 		realCurrent, err := filepath.EvalSymlinks(current)
 		if err == nil {
 			realCurrent = filepath.Clean(realCurrent)
-			if !strings.HasPrefix(realCurrent, realRoot+string(filepath.Separator)) && realCurrent != realRoot {
+			if !PathWithinRoot(realRoot, realCurrent) {
 				return "", fmt.Errorf("pluginregistry: path traversal escape detected (via parent symlink): %s escapes %s", relativePath, pluginRoot)
 			}
 			realPrefix = realCurrent
+			displayPrefix = current
 			break
 		}
 		parent := filepath.Dir(current)
@@ -130,14 +132,50 @@ func ResolveSafePath(pluginRoot, relativePath string) (string, error) {
 	}
 
 	if realPrefix != "" {
-		resolved := realPrefix
-		for _, part := range suffixParts {
-			resolved = filepath.Join(resolved, part)
+		if pathContainsSymlink(cleanRoot, displayPrefix) {
+			resolved := realPrefix
+			for _, part := range suffixParts {
+				resolved = filepath.Join(resolved, part)
+			}
+			return filepath.Clean(resolved), nil
 		}
-		return filepath.Clean(resolved), nil
 	}
 
 	return cleanJoined, nil
+}
+
+func PathWithinRoot(root, target string) bool {
+	root = filepath.Clean(root)
+	target = filepath.Clean(target)
+	rel, err := filepath.Rel(root, target)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel))
+}
+
+func pathContainsSymlink(root, target string) bool {
+	root = filepath.Clean(root)
+	target = filepath.Clean(target)
+	rel, err := filepath.Rel(root, target)
+	if err != nil || rel == "." || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
+		return false
+	}
+	current := root
+	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+		if part == "" || part == "." {
+			continue
+		}
+		current = filepath.Join(current, part)
+		info, err := os.Lstat(current)
+		if err != nil {
+			return false
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func ParsePlugin(root string) (plugin.InstalledPlugin, error) {

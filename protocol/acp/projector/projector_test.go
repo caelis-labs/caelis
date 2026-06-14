@@ -1,6 +1,7 @@
 package projector
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/OnslaughtSnail/caelis/ports/model"
@@ -122,6 +123,16 @@ func TestEventProjectorSeparatesMultipleTerminalContentItems(t *testing.T) {
 	}
 	if got := output["data"]; got != "caelis\ncodex\ndemo" {
 		t.Fatalf("terminal_output data = %#v, want separated terminal records", got)
+	}
+}
+
+func TestTerminalTextAccumulatorAppendsManyChunksWithoutFullRescan(t *testing.T) {
+	var acc terminalTextAccumulator
+	for i := 0; i < 128; i++ {
+		acc.appendPart("chunk")
+	}
+	if got := acc.string(); got != strings.Repeat("chunk\n", 127)+"chunk" {
+		t.Fatalf("accumulator = %q, want newline-separated chunks", got)
 	}
 }
 

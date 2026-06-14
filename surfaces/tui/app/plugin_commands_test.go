@@ -17,18 +17,60 @@ import (
 // no-op stubs) and overriding only the plugin methods we care about.
 type pluginStubService struct {
 	bridgeTestDriver
-	listFn    func(context.Context) ([]control.PluginSnapshot, error)
-	addPathFn func(context.Context, string) (control.PluginSnapshot, error)
-	installFn func(context.Context, string) (control.PluginSnapshot, error)
-	enableFn  func(context.Context, string) (control.PluginSnapshot, error)
-	disableFn func(context.Context, string) (control.PluginSnapshot, error)
-	removeFn  func(context.Context, string) error
-	inspectFn func(context.Context, string) (control.PluginSnapshot, error)
+	listFn              func(context.Context) ([]control.PluginSnapshot, error)
+	addMarketplaceFn    func(context.Context, string) (control.MarketplaceSnapshot, error)
+	listMarketplacesFn  func(context.Context) ([]control.MarketplaceSnapshot, error)
+	updateMarketplaceFn func(context.Context, string) (control.MarketplaceSnapshot, error)
+	removeMarketplaceFn func(context.Context, string) error
+	discoverOpenCodeFn  func(context.Context, string) (control.OpenCodeDiscoverySnapshot, error)
+	importOpenCodeFn    func(context.Context, string) ([]control.PluginSnapshot, error)
+	addPathFn           func(context.Context, string) (control.PluginSnapshot, error)
+	installFn           func(context.Context, string) (control.PluginSnapshot, error)
+	enableFn            func(context.Context, string) (control.PluginSnapshot, error)
+	disableFn           func(context.Context, string) (control.PluginSnapshot, error)
+	removeFn            func(context.Context, string) error
+	inspectFn           func(context.Context, string) (control.PluginSnapshot, error)
 }
 
 func (s *pluginStubService) ListPlugins(ctx context.Context) ([]control.PluginSnapshot, error) {
 	if s.listFn != nil {
 		return s.listFn(ctx)
+	}
+	return nil, nil
+}
+func (s *pluginStubService) AddMarketplace(ctx context.Context, source string) (control.MarketplaceSnapshot, error) {
+	if s.addMarketplaceFn != nil {
+		return s.addMarketplaceFn(ctx, source)
+	}
+	return control.MarketplaceSnapshot{}, nil
+}
+func (s *pluginStubService) ListMarketplaces(ctx context.Context) ([]control.MarketplaceSnapshot, error) {
+	if s.listMarketplacesFn != nil {
+		return s.listMarketplacesFn(ctx)
+	}
+	return nil, nil
+}
+func (s *pluginStubService) UpdateMarketplace(ctx context.Context, name string) (control.MarketplaceSnapshot, error) {
+	if s.updateMarketplaceFn != nil {
+		return s.updateMarketplaceFn(ctx, name)
+	}
+	return control.MarketplaceSnapshot{}, nil
+}
+func (s *pluginStubService) RemoveMarketplace(ctx context.Context, name string) error {
+	if s.removeMarketplaceFn != nil {
+		return s.removeMarketplaceFn(ctx, name)
+	}
+	return nil
+}
+func (s *pluginStubService) DiscoverOpenCode(ctx context.Context, workspace string) (control.OpenCodeDiscoverySnapshot, error) {
+	if s.discoverOpenCodeFn != nil {
+		return s.discoverOpenCodeFn(ctx, workspace)
+	}
+	return control.OpenCodeDiscoverySnapshot{}, nil
+}
+func (s *pluginStubService) ImportOpenCode(ctx context.Context, workspace string) ([]control.PluginSnapshot, error) {
+	if s.importOpenCodeFn != nil {
+		return s.importOpenCodeFn(ctx, workspace)
 	}
 	return nil, nil
 }
@@ -384,6 +426,160 @@ func TestSlashPluginInstallMissingSource(t *testing.T) {
 	combined := strings.Join(notices, "\n")
 	if !strings.Contains(combined, "usage") || !strings.Contains(combined, "plugin@marketplace") {
 		t.Fatalf("install missing source notice = %q, want usage", combined)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// /plugin marketplace
+// ---------------------------------------------------------------------------
+
+func TestSlashPluginMarketplaceAddSuccess(t *testing.T) {
+	var gotSource string
+	svc := &pluginStubService{
+		addMarketplaceFn: func(ctx context.Context, source string) (control.MarketplaceSnapshot, error) {
+			gotSource = source
+			return control.MarketplaceSnapshot{Name: "demo-market", Source: source, PluginCount: 2}, nil
+		},
+	}
+	result, notices := runPluginCmd(svc, "marketplace add acme/plugins")
+	if result.Err != nil {
+		t.Fatalf("expected no error, got %v", result.Err)
+	}
+	if gotSource != "acme/plugins" {
+		t.Fatalf("AddMarketplace source = %q, want acme/plugins", gotSource)
+	}
+	combined := strings.Join(notices, "\n")
+	if !strings.Contains(combined, "added marketplace demo-market") || !strings.Contains(combined, "Plugins:     2") {
+		t.Fatalf("marketplace add notice = %q", combined)
+	}
+}
+
+func TestSlashPluginMarketplaceList(t *testing.T) {
+	svc := &pluginStubService{
+		listMarketplacesFn: func(ctx context.Context) ([]control.MarketplaceSnapshot, error) {
+			return []control.MarketplaceSnapshot{{Name: "demo-market", Description: "Demo", PluginCount: 1}}, nil
+		},
+	}
+	result, notices := runPluginCmd(svc, "marketplace list")
+	if result.Err != nil {
+		t.Fatalf("expected no error, got %v", result.Err)
+	}
+	combined := strings.Join(notices, "\n")
+	if !strings.Contains(combined, "demo-market (1 plugin) - Demo") {
+		t.Fatalf("marketplace list notice = %q", combined)
+	}
+}
+
+func TestSlashPluginMarketplaceUpdateSuccess(t *testing.T) {
+	var gotName string
+	svc := &pluginStubService{
+		updateMarketplaceFn: func(ctx context.Context, name string) (control.MarketplaceSnapshot, error) {
+			gotName = name
+			return control.MarketplaceSnapshot{Name: name, PluginCount: 3}, nil
+		},
+	}
+	result, notices := runPluginCmd(svc, "marketplace update demo-market")
+	if result.Err != nil {
+		t.Fatalf("expected no error, got %v", result.Err)
+	}
+	if gotName != "demo-market" {
+		t.Fatalf("UpdateMarketplace name = %q, want demo-market", gotName)
+	}
+	combined := strings.Join(notices, "\n")
+	if !strings.Contains(combined, "updated marketplace demo-market") {
+		t.Fatalf("marketplace update notice = %q", combined)
+	}
+}
+
+func TestSlashPluginMarketplaceRemoveSuccess(t *testing.T) {
+	var gotName string
+	svc := &pluginStubService{
+		removeMarketplaceFn: func(ctx context.Context, name string) error {
+			gotName = name
+			return nil
+		},
+	}
+	result, notices := runPluginCmd(svc, "marketplace rm demo-market")
+	if result.Err != nil {
+		t.Fatalf("expected no error, got %v", result.Err)
+	}
+	if gotName != "demo-market" {
+		t.Fatalf("RemoveMarketplace name = %q, want demo-market", gotName)
+	}
+	combined := strings.Join(notices, "\n")
+	if !strings.Contains(combined, "removed marketplace demo-market") {
+		t.Fatalf("marketplace rm notice = %q", combined)
+	}
+}
+
+func TestSlashPluginMarketplaceMissingActionShowsUsage(t *testing.T) {
+	svc := &pluginStubService{}
+	result, notices := runPluginCmd(svc, "marketplace")
+	if result.Err != nil {
+		t.Fatalf("missing marketplace action should not return error, got %v", result.Err)
+	}
+	combined := strings.Join(notices, "\n")
+	if !strings.Contains(combined, "usage: /plugin marketplace") {
+		t.Fatalf("marketplace usage notice = %q", combined)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// /plugin opencode
+// ---------------------------------------------------------------------------
+
+func TestSlashPluginOpenCodeDiscover(t *testing.T) {
+	var gotWorkspace string
+	svc := &pluginStubService{
+		discoverOpenCodeFn: func(ctx context.Context, workspace string) (control.OpenCodeDiscoverySnapshot, error) {
+			gotWorkspace = workspace
+			return control.OpenCodeDiscoverySnapshot{
+				LocalPlugins: []control.OpenCodePluginSourceSnapshot{{Name: "guard", Path: "/tmp/ws/.opencode/plugins/guard.js"}},
+				NPMPackages:  []control.OpenCodeNPMPackageSnapshot{{Package: "opencode-helicone-session", Source: "/tmp/ws/opencode.json"}},
+				Warnings:     []string{"OpenCode plugins are unsupported"},
+			}, nil
+		},
+	}
+	result, notices := runPluginCmd(svc, "opencode discover /tmp/ws")
+	if result.Err != nil {
+		t.Fatalf("/plugin opencode discover error = %v", result.Err)
+	}
+	if gotWorkspace != "/tmp/ws" {
+		t.Fatalf("DiscoverOpenCode workspace = %q, want /tmp/ws", gotWorkspace)
+	}
+	combined := strings.Join(notices, "\n")
+	for _, want := range []string{"opencode discovery: /tmp/ws", "guard", "opencode-helicone-session", "unsupported"} {
+		if !strings.Contains(combined, want) {
+			t.Fatalf("/plugin opencode discover notice = %q, want %q", combined, want)
+		}
+	}
+}
+
+func TestSlashPluginOpenCodeImport(t *testing.T) {
+	var gotWorkspace string
+	svc := &pluginStubService{
+		importOpenCodeFn: func(ctx context.Context, workspace string) ([]control.PluginSnapshot, error) {
+			gotWorkspace = workspace
+			return []control.PluginSnapshot{{
+				ID:      "opencode-guard",
+				Name:    "guard",
+				Status:  "unsupported",
+				Warning: "cannot be executed",
+			}}, nil
+		},
+	}
+	result, notices := runPluginCmd(svc, "opencode import /tmp/ws")
+	if result.Err != nil {
+		t.Fatalf("/plugin opencode import error = %v", result.Err)
+	}
+	if gotWorkspace != "/tmp/ws" {
+		t.Fatalf("ImportOpenCode workspace = %q, want /tmp/ws", gotWorkspace)
+	}
+	combined := strings.Join(notices, "\n")
+	for _, want := range []string{"imported OpenCode entries: 1", "opencode-guard", "unsupported", "cannot be executed"} {
+		if !strings.Contains(combined, want) {
+			t.Fatalf("/plugin opencode import notice = %q, want %q", combined, want)
+		}
 	}
 }
 

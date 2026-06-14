@@ -25,16 +25,22 @@ func TestSeatbeltWritableRootsDoNotBroadenMissingRootToParent(t *testing.T) {
 	fakeHome := filepath.Join(root, "home")
 	missingCache := filepath.Join(fakeHome, ".pnpm-store")
 
-	roots := seatbeltWritableRoots(policy.Policy{
+	roots, err := seatbeltWritableRoots(policy.Policy{
 		Type:          policy.TypeWorkspaceWrite,
 		WritableRoots: []string{workspace, missingCache},
 	}, workspace)
+	if err != nil {
+		t.Fatalf("seatbeltWritableRoots() error = %v", err)
+	}
 
 	if containsString(roots, fakeHome) {
 		t.Fatalf("Writable roots = %#v, must not grant parent of missing root %q", roots, missingCache)
 	}
 	if !containsString(roots, missingCache) {
 		t.Fatalf("Writable roots = %#v, want exact missing root %q retained", roots, missingCache)
+	}
+	if _, err := os.Stat(missingCache); err != nil {
+		t.Fatalf("Stat(missingCache) error = %v, want pre-created writable root", err)
 	}
 }
 

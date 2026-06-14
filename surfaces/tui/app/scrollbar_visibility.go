@@ -2,7 +2,6 @@ package tuiapp
 
 import (
 	"math"
-	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -14,20 +13,10 @@ type scrollbarTargetKind int
 
 const (
 	scrollbarTargetViewport scrollbarTargetKind = iota + 1
-	scrollbarTargetSubagentPanel
 )
-
-type panelScrollbarBlock interface {
-	Block
-	previewLines() int
-	scrollableLineCount(BlockRenderContext) int
-	scrollState() (*int, *bool)
-	scrollbarVisibleUntilPtr() *time.Time
-}
 
 type scrollbarHitTarget struct {
 	kind      scrollbarTargetKind
-	blockID   string
 	lineStart int
 }
 
@@ -41,18 +30,6 @@ func (m *Model) touchViewportScrollbar() tea.Cmd {
 		return nil
 	}
 	touchScrollbarDeadline(&m.viewportScrollbarVisibleUntil, time.Now())
-	return m.ensureScrollbarTick()
-}
-
-func (m *Model) touchPanelScrollbar(block Block) tea.Cmd {
-	if m == nil {
-		return nil
-	}
-	panel, ok := block.(panelScrollbarBlock)
-	if !ok {
-		return nil
-	}
-	touchScrollbarDeadline(panel.scrollbarVisibleUntilPtr(), time.Now())
 	return m.ensureScrollbarTick()
 }
 
@@ -84,27 +61,10 @@ func (m *Model) nextScrollbarVisibilityDelay(now time.Time) (time.Duration, bool
 	if m == nil {
 		return 0, false
 	}
-	next := time.Time{}
-	consider := func(until time.Time) {
-		if until.IsZero() || !until.After(now) {
-			return
-		}
-		if next.IsZero() || until.Before(next) {
-			next = until
-		}
-	}
-	consider(m.viewportScrollbarVisibleUntil)
-	for _, block := range m.doc.Blocks() {
-		if panel, ok := block.(panelScrollbarBlock); ok {
-			if until := panel.scrollbarVisibleUntilPtr(); until != nil {
-				consider(*until)
-			}
-		}
-	}
-	if next.IsZero() {
+	if m.viewportScrollbarVisibleUntil.IsZero() || !m.viewportScrollbarVisibleUntil.After(now) {
 		return 0, false
 	}
-	delay := time.Until(next)
+	delay := time.Until(m.viewportScrollbarVisibleUntil)
 	if delay <= 0 {
 		delay = time.Millisecond
 	}
@@ -120,16 +80,8 @@ func (m *Model) hoverScrollbarAtMouse(mouse tea.Mouse) tea.Cmd {
 }
 
 func (m *Model) touchScrollbarTarget(target scrollbarHitTarget) tea.Cmd {
-	switch target.kind {
-	case scrollbarTargetViewport:
+	if target.kind == scrollbarTargetViewport {
 		return m.touchViewportScrollbar()
-	case scrollbarTargetSubagentPanel:
-		if block := m.doc.Find(target.blockID); block != nil {
-			cmd := m.touchPanelScrollbar(block)
-			m.markViewportBlockDirty(block.BlockID())
-			m.syncViewportContent()
-			return cmd
-		}
 	}
 	return nil
 }
@@ -177,15 +129,10 @@ func (m *Model) applyScrollbarDrag(mouse tea.Mouse) bool {
 	if !m.scrollbarDrag.active {
 		return false
 	}
-	target := m.scrollbarDrag.target
-	switch target.kind {
-	case scrollbarTargetViewport:
+	if m.scrollbarDrag.target.kind == scrollbarTargetViewport {
 		return m.dragViewportScrollbarTo(mouse.Y)
-	case scrollbarTargetSubagentPanel:
-		return m.dragPanelScrollbarTo(target, mouse.Y)
-	default:
-		return false
 	}
+	return false
 }
 
 func (m *Model) dragViewportScrollbarTo(y int) bool {
@@ -212,28 +159,6 @@ func (m *Model) dragViewportScrollbarTo(y int) bool {
 	return true
 }
 
-func (m *Model) dragPanelScrollbarTo(target scrollbarHitTarget, y int) bool {
-	block := m.doc.Find(target.blockID)
-	panel, ok := block.(panelScrollbarBlock)
-	if !ok {
-		return false
-	}
-	ctx := m.blockRenderContext(maxInt(1, m.viewport.Width()))
-	localY := m.screenYToFrameY(y)
-	if localY < 0 {
-		localY = 0
-	}
-	offset, followTail := panel.scrollState()
-	if offset == nil || followTail == nil {
-		return false
-	}
-	changed := setPanelScrollFromPointer(offset, followTail, panel.scrollableLineCount(ctx), panel.previewLines(), localY-target.lineStart)
-	if changed {
-		m.markViewportBlockDirty(target.blockID)
-	}
-	return changed
-}
-
 func scrollbarOffsetForPosition(pos, visible, maxOffset int) int {
 	if maxOffset <= 0 || visible <= 1 {
 		return maxOffset
@@ -242,41 +167,12 @@ func scrollbarOffsetForPosition(pos, visible, maxOffset int) int {
 	return int(math.Round(p * float64(maxOffset)))
 }
 
-func setPanelScrollFromPointer(offset *int, followTail *bool, total, visible, localY int) bool {
-	if offset == nil || followTail == nil {
-		return false
-	}
-	maxOffset := maxInt(0, total-visible)
-	if maxOffset == 0 {
-		return false
-	}
-	if localY < 0 {
-		localY = 0
-	}
-	if localY >= visible {
-		localY = visible - 1
-	}
-	next := scrollbarOffsetForPosition(localY, visible, maxOffset)
-	if *offset == next && *followTail == (next == maxOffset) {
-		return false
-	}
-	*offset = next
-	*followTail = next == maxOffset
-	return true
-}
-
 func (m *Model) scrollbarTargetAtMouse(x, y int) (scrollbarHitTarget, bool) {
-	if target, ok := m.panelScrollbarTargetAtMouse(x, y); ok {
-		return target, true
-	}
 	return m.viewportScrollbarTargetAtMouse(x, y)
 }
 
 func (m *Model) scrollbarHoverTargetAtMouse(x, y int) (scrollbarHitTarget, bool) {
-	if target, ok := m.scrollbarTargetAtMouse(x, y); ok {
-		return target, true
-	}
-	return m.panelHoverTargetAtMouse(y)
+	return m.viewportScrollbarTargetAtMouse(x, y)
 }
 
 func (m *Model) viewportScrollbarTargetAtMouse(x, y int) (scrollbarHitTarget, bool) {
@@ -294,35 +190,6 @@ func (m *Model) viewportScrollbarTargetAtMouse(x, y int) (scrollbarHitTarget, bo
 		return scrollbarHitTarget{}, false
 	}
 	return scrollbarHitTarget{kind: scrollbarTargetViewport, lineStart: 0}, true
-}
-
-func (m *Model) panelScrollbarTargetAtMouse(x, y int) (scrollbarHitTarget, bool) {
-	contentLine, ok := m.contentLineAtViewportY(y)
-	if !ok {
-		return scrollbarHitTarget{}, false
-	}
-	_, target, lineWidth, ok := m.panelScrollbarHitAtContentLine(contentLine)
-	if !ok {
-		return scrollbarHitTarget{}, false
-	}
-	if lineWidth <= 0 {
-		return scrollbarHitTarget{}, false
-	}
-	hotZoneWidth := minInt(8, lineWidth)
-	scrollbarX := m.mainColumnX() + tuikit.GutterNarrative + maxInt(0, lineWidth-hotZoneWidth)
-	if x < scrollbarX || x >= scrollbarX+hotZoneWidth {
-		return scrollbarHitTarget{}, false
-	}
-	return target, true
-}
-
-func (m *Model) panelHoverTargetAtMouse(y int) (scrollbarHitTarget, bool) {
-	contentLine, ok := m.contentLineAtViewportY(y)
-	if !ok {
-		return scrollbarHitTarget{}, false
-	}
-	_, target, _, ok := m.panelScrollbarHitAtContentLine(contentLine)
-	return target, ok
 }
 
 func touchScrollbarDeadline(until *time.Time, now time.Time) {
@@ -346,53 +213,4 @@ func (m *Model) contentLineAtViewportY(y int) (int, bool) {
 		return 0, false
 	}
 	return contentLine, true
-}
-
-func panelScrollbarKind(block panelScrollbarBlock) scrollbarTargetKind {
-	return 0
-}
-
-func (m *Model) panelScrollbarHitAtContentLine(contentLine int) (panelScrollbarBlock, scrollbarHitTarget, int, bool) {
-	if contentLine < 0 || contentLine >= len(m.viewportBlockIDs) {
-		return nil, scrollbarHitTarget{}, 0, false
-	}
-	blockID := strings.TrimSpace(m.viewportBlockIDs[contentLine])
-	if blockID == "" {
-		return nil, scrollbarHitTarget{}, 0, false
-	}
-	block := m.doc.Find(blockID)
-	panel, ok := block.(panelScrollbarBlock)
-	if !ok {
-		return nil, scrollbarHitTarget{}, 0, false
-	}
-	kind := panelScrollbarKind(panel)
-	if kind == 0 {
-		return nil, scrollbarHitTarget{}, 0, false
-	}
-	ctx := m.blockRenderContext(maxInt(1, m.viewport.Width()))
-	if panel.scrollableLineCount(ctx) <= panel.previewLines() {
-		return nil, scrollbarHitTarget{}, 0, false
-	}
-	start, _ := m.visibleBlockLineRange(blockID, contentLine)
-	lineWidth := 0
-	if contentLine < len(m.viewportPlainLines) {
-		lineWidth = displayColumns(m.viewportPlainLines[contentLine])
-	}
-	return panel, scrollbarHitTarget{
-		kind:      kind,
-		blockID:   blockID,
-		lineStart: start - m.viewportVisibleOffset(),
-	}, lineWidth, true
-}
-
-func (m *Model) visibleBlockLineRange(blockID string, contentLine int) (int, int) {
-	start := contentLine
-	for start > 0 && m.viewportBlockIDs[start-1] == blockID {
-		start--
-	}
-	end := contentLine
-	for end+1 < len(m.viewportBlockIDs) && m.viewportBlockIDs[end+1] == blockID {
-		end++
-	}
-	return start, end
 }

@@ -703,7 +703,7 @@ func projectToolContent(content []session.ProtocolToolCallContent, displayTermin
 func terminalOutputMetaFromEventToolContent(content []session.EventToolContent, displayTerminalID string) map[string]any {
 	displayTerminalID = strings.TrimSpace(displayTerminalID)
 	var terminalID string
-	var text strings.Builder
+	var text terminalTextAccumulator
 	for _, item := range content {
 		if !strings.EqualFold(strings.TrimSpace(item.Type), "terminal") {
 			continue
@@ -712,16 +712,16 @@ func terminalOutputMetaFromEventToolContent(content []session.EventToolContent, 
 			terminalID = firstNonEmpty(displayTerminalID, strings.TrimSpace(item.TerminalID))
 		}
 		if item.Text != "" {
-			appendTerminalTextPart(&text, item.Text)
+			text.appendPart(item.Text)
 		}
 	}
-	if terminalID == "" || text.Len() == 0 {
+	if terminalID == "" || text.len() == 0 {
 		return nil
 	}
 	return map[string]any{
 		"terminal_output": map[string]any{
 			"terminal_id": terminalID,
-			"data":        text.String(),
+			"data":        text.string(),
 		},
 	}
 }
@@ -729,7 +729,7 @@ func terminalOutputMetaFromEventToolContent(content []session.EventToolContent, 
 func terminalOutputMetaFromProtocolContent(content []session.ProtocolToolCallContent, displayTerminalID string) map[string]any {
 	displayTerminalID = strings.TrimSpace(displayTerminalID)
 	var terminalID string
-	var text strings.Builder
+	var text terminalTextAccumulator
 	for _, item := range content {
 		if !strings.EqualFold(strings.TrimSpace(item.Type), "terminal") {
 			continue
@@ -738,28 +738,54 @@ func terminalOutputMetaFromProtocolContent(content []session.ProtocolToolCallCon
 			terminalID = firstNonEmpty(displayTerminalID, strings.TrimSpace(item.TerminalID))
 		}
 		if part := terminalTextContent(item.Content); part != "" {
-			appendTerminalTextPart(&text, part)
+			text.appendPart(part)
 		}
 	}
-	if terminalID == "" || text.Len() == 0 {
+	if terminalID == "" || text.len() == 0 {
 		return nil
 	}
 	return map[string]any{
 		"terminal_output": map[string]any{
 			"terminal_id": terminalID,
-			"data":        text.String(),
+			"data":        text.string(),
 		},
 	}
 }
 
-func appendTerminalTextPart(dst *strings.Builder, part string) {
-	if dst == nil || part == "" {
+type terminalTextAccumulator struct {
+	buf      strings.Builder
+	lastByte byte
+	hasLast  bool
+}
+
+func (a *terminalTextAccumulator) len() int {
+	if a == nil {
+		return 0
+	}
+	return a.buf.Len()
+}
+
+func (a *terminalTextAccumulator) string() string {
+	if a == nil {
+		return ""
+	}
+	return a.buf.String()
+}
+
+func (a *terminalTextAccumulator) appendPart(part string) {
+	if a == nil || part == "" {
 		return
 	}
-	if dst.Len() > 0 && !strings.HasSuffix(dst.String(), "\n") && !strings.HasPrefix(part, "\n") {
-		dst.WriteByte('\n')
+	if a.hasLast && a.lastByte != '\n' && !strings.HasPrefix(part, "\n") {
+		a.buf.WriteByte('\n')
+		a.lastByte = '\n'
+		a.hasLast = true
 	}
-	dst.WriteString(part)
+	a.buf.WriteString(part)
+	if n := len(part); n > 0 {
+		a.lastByte = part[n-1]
+		a.hasLast = true
+	}
 }
 
 func terminalTextContent(content any) string {

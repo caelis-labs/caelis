@@ -87,6 +87,132 @@ func TestPluginCommandShowsRootCompletion(t *testing.T) {
 	}
 }
 
+func TestPluginMarketplaceSelectionOpensNestedPicker(t *testing.T) {
+	model := NewModel(Config{
+		Commands: DefaultCommands(),
+		SlashArgComplete: func(command string, query string, limit int) ([]SlashArgCandidate, error) {
+			switch command {
+			case "plugin":
+				return []SlashArgCandidate{{Value: "marketplace", Display: "marketplace"}}, nil
+			case "plugin marketplace":
+				return []SlashArgCandidate{
+					{Value: "add", Display: "add"},
+					{Value: "list", Display: "list"},
+					{Value: "update", Display: "update"},
+					{Value: "rm", Display: "rm"},
+				}, nil
+			case "plugin marketplace update":
+				return []SlashArgCandidate{{Value: "demo-market", Display: "demo-market"}}, nil
+			default:
+				return nil, nil
+			}
+		},
+	})
+
+	model.openSlashArgPicker("plugin")
+	model.applySlashArgCompletion()
+
+	if got := string(model.input); got != "/plugin marketplace " {
+		t.Fatalf("input after marketplace selection = %q, want /plugin marketplace ", got)
+	}
+	if got := model.slashArgCommand; got != "plugin marketplace" {
+		t.Fatalf("slashArgCommand = %q, want plugin marketplace", got)
+	}
+	if got := candidateValuesForTUITest(model.slashArgCandidates); strings.Join(got, ",") != "add,list,update,rm" {
+		t.Fatalf("marketplace action candidates = %#v, want add/list/update/rm", model.slashArgCandidates)
+	}
+
+	model.slashArgIndex = 2
+	model.applySlashArgCompletion()
+
+	if got := string(model.input); got != "/plugin marketplace update " {
+		t.Fatalf("input after marketplace update selection = %q, want /plugin marketplace update ", got)
+	}
+	if got := model.slashArgCommand; got != "plugin marketplace update" {
+		t.Fatalf("slashArgCommand = %q, want plugin marketplace update", got)
+	}
+	if len(model.slashArgCandidates) != 1 || model.slashArgCandidates[0].Value != "demo-market" {
+		t.Fatalf("marketplace name candidates = %#v, want demo-market", model.slashArgCandidates)
+	}
+}
+
+func TestPluginMarketplaceInputShowsNestedCompletion(t *testing.T) {
+	for _, tt := range []struct {
+		input   string
+		command string
+		value   string
+	}{
+		{input: "/plugin marketplace ", command: "plugin marketplace", value: "update"},
+		{input: "/plugin marketplace update d", command: "plugin marketplace update", value: "demo-market"},
+	} {
+		t.Run(tt.input, func(t *testing.T) {
+			model := NewModel(Config{
+				Commands: DefaultCommands(),
+				SlashArgComplete: func(command string, query string, limit int) ([]SlashArgCandidate, error) {
+					switch command {
+					case "plugin marketplace":
+						return []SlashArgCandidate{{Value: "update", Display: "update"}}, nil
+					case "plugin marketplace update":
+						return []SlashArgCandidate{{Value: "demo-market", Display: "demo-market"}}, nil
+					default:
+						return nil, nil
+					}
+				},
+			})
+
+			model.setInputText(tt.input)
+			model.syncTextareaFromInput()
+			model.syncSlashInputOverlays()
+
+			if got := model.slashArgCommand; got != tt.command {
+				t.Fatalf("slashArgCommand = %q, want %q", got, tt.command)
+			}
+			if len(model.slashArgCandidates) != 1 || model.slashArgCandidates[0].Value != tt.value {
+				t.Fatalf("slashArgCandidates = %#v, want %q", model.slashArgCandidates, tt.value)
+			}
+		})
+	}
+}
+
+func TestPluginMarketplaceListCompletionSubmitsPickerCommand(t *testing.T) {
+	var submitted string
+	model := NewModel(Config{
+		Commands: DefaultCommands(),
+		ExecuteLine: func(submission Submission) TaskResultMsg {
+			submitted = submission.Text
+			return TaskResultMsg{SuppressTurnDivider: true}
+		},
+		SlashArgComplete: func(command string, query string, limit int) ([]SlashArgCandidate, error) {
+			if command != "plugin marketplace" {
+				return nil, nil
+			}
+			return []SlashArgCandidate{{Value: "add"}, {Value: "list"}, {Value: "update"}, {Value: "rm"}}, nil
+		},
+	})
+
+	model.openSlashArgPicker("plugin marketplace")
+	model.slashArgIndex = 1
+	handled, cmd := model.handleSlashArgKey(keyPress("enter"))
+	if !handled {
+		t.Fatal("handleSlashArgKey(enter) = false, want true")
+	}
+	if cmd == nil {
+		t.Fatal("handleSlashArgKey(enter) command = nil, want /plugin marketplace list submit command")
+	}
+	findAndRunTaskResult(cmd(), model)
+	if submitted != "/plugin marketplace list" {
+		t.Fatalf("submitted input = %q, want /plugin marketplace list", submitted)
+	}
+}
+
+func candidateValuesForTUITest(candidates []SlashArgCandidate) []string {
+	out := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		out = append(out, strings.TrimSpace(candidate.Value))
+	}
+	return out
+}
+
 func TestTryOpenSlashArgPickerUsesCommandRegistry(t *testing.T) {
 	model := NewModel(Config{
 		Commands: DefaultCommands(),

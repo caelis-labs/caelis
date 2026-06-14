@@ -245,11 +245,34 @@ func (m *Model) applySlashArgCompletion() tea.Cmd {
 		m.setInputText("/plugin " + choice + " ")
 		m.syncTextareaFromInput()
 		switch choice {
-		case "rm":
+		case "marketplace", "rm":
 			m.activateSlashArgPickerFromInput("plugin " + choice)
 		default:
 			m.clearSlashArg()
 		}
+		return nil
+	case "plugin marketplace":
+		switch choice {
+		case "list":
+			line := "/plugin marketplace list"
+			m.setInputText(line)
+			m.syncTextareaFromInput()
+			m.clearSlashArg()
+			_, cmd := m.submitLine(line)
+			return cmd
+		case "update", "rm":
+			m.setInputText("/plugin marketplace " + choice + " ")
+			m.syncTextareaFromInput()
+			m.activateSlashArgPickerFromInput("plugin marketplace " + choice)
+		default:
+			m.setInputText("/plugin marketplace " + choice + " ")
+			m.syncTextareaFromInput()
+			m.clearSlashArg()
+		}
+		return nil
+	case "plugin marketplace update", "plugin marketplace rm":
+		m.setInputText("/" + command + " " + choice)
+		m.clearSlashArg()
 		return nil
 	case "plugin rm":
 		m.setInputText("/" + command + " " + choice)
@@ -362,6 +385,10 @@ func (m *Model) shouldExecuteSlashArgSelection(command string, choice string) bo
 		return true
 	case "plugin":
 		return false
+	case "plugin marketplace":
+		return choice == "list"
+	case "plugin marketplace update", "plugin marketplace rm":
+		return true
 	case "plugin rm":
 		return true
 	case "subagent":
@@ -395,7 +422,7 @@ func (m *Model) shouldExecuteSlashArgSelection(command string, choice string) bo
 
 func requiresExactSlashArgSelection(command string) bool {
 	switch strings.ToLower(strings.TrimSpace(command)) {
-	case "agent remove", "agent rm", "model del", "plugin rm":
+	case "agent remove", "agent rm", "model del", "plugin rm", "plugin marketplace update", "plugin marketplace rm":
 		return true
 	default:
 		return false
@@ -444,6 +471,19 @@ func isExecutableSlashArgInput(line string) bool {
 			return len(fields) == 2
 		case "install", "rm":
 			return len(fields) >= 3
+		case "marketplace":
+			if len(fields) < 3 {
+				return false
+			}
+			marketplaceAction := strings.ToLower(strings.TrimSpace(fields[2]))
+			switch marketplaceAction {
+			case "list":
+				return len(fields) == 3
+			case "add", "update", "rm":
+				return len(fields) >= 4
+			default:
+				return false
+			}
 		default:
 			return false
 		}
@@ -542,7 +582,7 @@ func (m *Model) handleSlashArgKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 			_, submitCmd := m.submitLine(line)
 			return true, submitCmd
 		}
-		if command == "agent" || command == "plugin" || command == "subagent" || command == "subagent run" || command == "subagent bind" || strings.HasPrefix(command, "subagent bind ") || command == "model" || command == "model use" || command == "model del" || strings.HasPrefix(command, "model use ") || strings.HasPrefix(command, "model del ") {
+		if command == "agent" || command == "plugin" || command == "plugin marketplace" || command == "plugin marketplace update" || command == "plugin marketplace rm" || command == "subagent" || command == "subagent run" || command == "subagent bind" || strings.HasPrefix(command, "subagent bind ") || command == "model" || command == "model use" || command == "model del" || strings.HasPrefix(command, "model use ") || strings.HasPrefix(command, "model del ") {
 			cmd := m.applySlashArgCompletion()
 			m.syncTextareaFromInput()
 			return true, cmd

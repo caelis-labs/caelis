@@ -318,3 +318,32 @@ type PluginSnapshot struct {
 	Status      string              `json:"status"`
 	Warning     string              `json:"warning,omitempty"`
 }
+
+type MarketplaceSnapshot struct {
+	Name                              string   `json:"name"`
+	Description                       string   `json:"description,omitempty"`
+	Owner                             string   `json:"owner,omitempty"`
+	Source                            string   `json:"source,omitempty"`
+	Root                              string   `json:"root,omitempty"`
+	Version                           string   `json:"version,omitempty"`
+	PluginRoot                        string   `json:"plugin_root,omitempty"`
+	AllowCrossMarketplaceDependencies []string `json:"allow_cross_marketplace_dependencies,omitempty"`
+	PluginCount                       int      `json:"plugin_count,omitempty"`
+}
+
+type OpenCodeDiscoverySnapshot struct {
+	LocalPlugins []OpenCodePluginSourceSnapshot `json:"local_plugins,omitempty"`
+	NPMPackages  []OpenCodeNPMPackageSnapshot   `json:"npm_packages,omitempty"`
+	Warnings     []string                       `json:"warnings,omitempty"`
+}
+
+type OpenCodePluginSourceSnapshot struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+	Kind string `json:"kind"`
+}
+
+type OpenCodeNPMPackageSnapshot struct {
+	Package string `json:"package"`
+	Source  string `json:"source"`
+}

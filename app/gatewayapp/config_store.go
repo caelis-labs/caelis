@@ -13,6 +13,7 @@ type RuntimeConfig = configstore.RuntimeConfig
 type AgentProviderConfig = configstore.AgentProviderConfig
 type persistedModelConfig = configstore.PersistedModelConfig
 type PluginConfig = configstore.PluginConfig
+type MarketplaceConfig = configstore.MarketplaceConfig
 
 type appConfigStore struct {
 	path     string

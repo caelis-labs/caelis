@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -135,6 +136,23 @@ func testWorkspaceRoot() string {
 		return `C:\workspace`
 	}
 	return "/workspace"
+}
+
+func TestEnsureExplicitWritableRootsCreatesMissingCacheDir(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	missingCache := filepath.Join(root, "home", ".pnpm-store")
+	if err := EnsureExplicitWritableRoots([]string{missingCache}); err != nil {
+		t.Fatalf("EnsureExplicitWritableRoots() error = %v", err)
+	}
+	if _, err := os.Stat(missingCache); err != nil {
+		t.Fatalf("Stat(missingCache) error = %v, want created directory", err)
+	}
+	parent := filepath.Dir(missingCache)
+	if _, err := os.Stat(parent); err != nil {
+		t.Fatalf("Stat(parent) error = %v, want parent created for nested root", err)
+	}
 }
 
 func testReadOnlyRoot() string {
