@@ -40,7 +40,7 @@ func TestLandlockWritableRootsDoNotBroadenMissingRootToParent(t *testing.T) {
 func TestProbeRuntimeHonorsContextTimeout(t *testing.T) {
 	runner := &landlockRunner{
 		execCommand: func(ctx context.Context, _ string, _ ...string) *exec.Cmd {
-			return exec.CommandContext(ctx, "sh", "-c", "sleep 30")
+			return exec.CommandContext(ctx, "sleep", "30")
 		},
 		helperPath: "/bin/sh",
 		probe:      func() error { return nil },

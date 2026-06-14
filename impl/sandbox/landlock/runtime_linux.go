@@ -29,8 +29,9 @@ import (
 )
 
 const (
-	internalHelperCommand = "__caelis_execenv_helper__"
-	landlockProbeTimeout  = 5 * time.Second
+	internalHelperCommand  = "__caelis_execenv_helper__"
+	landlockProbeTimeout   = 5 * time.Second
+	landlockProbeWaitDelay = time.Second
 )
 
 type landlockRunner struct {
@@ -331,6 +332,7 @@ func (l *landlockRunner) probeHelper(ctx context.Context) error {
 		return fmt.Errorf("landlock helper probe requires context")
 	}
 	cmd := l.execCommand(ctx, helperPath, internalHelperCommand, "--probe")
+	cmd.WaitDelay = landlockProbeWaitDelay
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
