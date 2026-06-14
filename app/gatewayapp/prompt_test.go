@@ -4,12 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/OnslaughtSnail/caelis/impl/model/providers"
 	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
@@ -378,15 +381,22 @@ func TestNewLocalStackRunsSessionStartHook(t *testing.T) {
 		t.Fatalf("save config: %v", err)
 	}
 
+	fakeProvider := newSessionStartHookProvider(t)
+
 	// Initialize the Stack
 	cfg := Config{
 		AppName:      "CAELIS",
 		StoreDir:     storeDir,
 		WorkspaceCWD: workspaceDir,
 		Model: ModelConfig{
-			Provider: "ollama",
-			API:      "ollama",
-			Model:    "llama3",
+			Provider:   "openai-compatible",
+			API:        providers.APIOpenAICompatible,
+			Model:      "hook-test-model",
+			BaseURL:    fakeProvider.URL,
+			HTTPClient: fakeProvider.Client(),
+			Token:      "hook-test-token",
+			AuthType:   providers.AuthBearerToken,
+			Timeout:    2 * time.Second,
 		},
 	}
 
@@ -475,4 +485,36 @@ func TestHookHelperProcess(t *testing.T) {
 		fmt.Printf("%s|%s|%s", os.Getenv("TEST_VAR"), os.Getenv("CAELIS_PLUGIN_DIR"), os.Getenv("CAELIS_WORKSPACE_DIR"))
 		os.Exit(0)
 	}
+}
+
+func newSessionStartHookProvider(t *testing.T) *httptest.Server {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		writePluginSystemE2ESSE(w, map[string]any{
+			"id":     "hook-test-1",
+			"object": "chat.completion.chunk",
+			"model":  "hook-test-model",
+			"choices": []map[string]any{{
+				"index": 0,
+				"delta": map[string]any{
+					"role":    "assistant",
+					"content": "done",
+				},
+				"finish_reason": "stop",
+			}},
+		})
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	t.Cleanup(server.Close)
+	return server
 }

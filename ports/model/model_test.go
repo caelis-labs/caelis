@@ -115,6 +115,7 @@ func TestToolResponseUsesTextToolResultContent(t *testing.T) {
 	resp := msg.ToolResponse()
 	if resp == nil {
 		t.Fatal("ToolResponse() = nil, want response")
+		return
 	}
 	if resp.ID != "call-1" || resp.Name != "mcp__plugin__server__read_fixture" {
 		t.Fatalf("ToolResponse() id/name = %q/%q", resp.ID, resp.Name)

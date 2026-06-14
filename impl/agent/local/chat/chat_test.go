@@ -1645,6 +1645,7 @@ func TestToolResultEventUsesCanonicalTruncatedOutputForDisplayAndMessage(t *test
 	toolPayload := session.EventToolProjection(event)
 	if toolPayload == nil {
 		t.Fatal("EventToolProjection(event) = nil, want tool result projection")
+		return
 	}
 	rawOutput := toolPayload.Output
 	resultText, _ := rawOutput["result"].(string)

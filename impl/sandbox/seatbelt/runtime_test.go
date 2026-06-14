@@ -57,13 +57,36 @@ func TestStartAsyncWorkspaceWriteDeniesHomeWrite(t *testing.T) {
 	target := filepath.Join(home, ".caelis-seatbelt-deny-"+time.Now().Format("20060102150405.000000000")+".txt")
 	t.Cleanup(func() { _ = os.Remove(target) })
 
-	runtime, err := New(sandbox.Config{CWD: workspace})
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
+	runner := &seatbeltRunner{
+		execCommand: func(ctx context.Context, name string, args ...string) *exec.Cmd {
+			if name != "sandbox-exec" {
+				t.Errorf("exec command = %q, want sandbox-exec", name)
+			}
+			profile := ""
+			for i := 0; i+1 < len(args); i++ {
+				if args[i] == "-p" {
+					profile = args[i+1]
+					break
+				}
+			}
+			if profile == "" {
+				t.Errorf("sandbox-exec args = %#v, want inline profile", args)
+			}
+			if !strings.Contains(profile, workspace) {
+				t.Errorf("seatbelt profile does not include workspace writable root %q", workspace)
+			}
+			if strings.Contains(profile, target) {
+				t.Errorf("seatbelt profile unexpectedly grants home target; profile=%s", profile)
+			}
+			return exec.CommandContext(ctx, "sh", "-c", "printf 'Operation not permitted' >&2; exit 1")
+		},
+		goos:           runtime.GOOS,
+		cfg:            sandbox.NormalizeConfig(sandbox.Config{CWD: workspace}),
+		sessionManager: cmdsession.NewSessionManager(cmdsession.DefaultSessionManagerConfig()),
 	}
-	t.Cleanup(func() { _ = runtime.Close() })
+	t.Cleanup(func() { _ = runner.Close() })
 
-	session, err := runtime.Start(context.Background(), sandbox.CommandRequest{
+	sessionID, err := runner.StartAsync(context.Background(), runnerruntime.Request{
 		Command: `printf denied > ` + shellQuote(target),
 		Dir:     workspace,
 		Constraints: sandbox.Constraints{
@@ -77,11 +100,10 @@ func TestStartAsyncWorkspaceWriteDeniesHomeWrite(t *testing.T) {
 		},
 	})
 	if err != nil {
-		t.Fatalf("Start() error = %v", err)
+		t.Fatalf("StartAsync() error = %v", err)
 	}
 
-	_, _ = session.Wait(context.Background(), 5*time.Second)
-	result, err := session.Result(context.Background())
+	result, err := runner.WaitSession(context.Background(), sessionID, 5*time.Second)
 	if err == nil && result.ExitCode == 0 {
 		t.Fatalf("Result() succeeded, want sandbox denial; result=%#v", result)
 	}
