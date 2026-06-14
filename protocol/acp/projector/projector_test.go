@@ -173,6 +173,241 @@ func TestEventProjectorUsesDurableProtocolUpdateForTerminalToolCall(t *testing.T
 	}
 }
 
+func TestEventProjectorProjectsSemanticMessagePayloads(t *testing.T) {
+	userMessage := model.NewTextMessage(model.RoleUser, "hello")
+	userEvent := session.CanonicalizeEvent(&session.Event{
+		SessionID: "session-1",
+		Type:      session.EventTypeUser,
+		Message:   &userMessage,
+	})
+	if userEvent.UserMessage == nil || userEvent.Message != nil {
+		t.Fatalf("canonical user event = %#v, want semantic payload only", userEvent)
+	}
+	userUpdates, err := (EventProjector{}).ProjectEvent(userEvent)
+	if err != nil {
+		t.Fatalf("ProjectEvent(user) error = %v", err)
+	}
+	if len(userUpdates) != 1 {
+		t.Fatalf("ProjectEvent(user) produced %d updates, want 1", len(userUpdates))
+	}
+	userChunk, ok := userUpdates[0].(ContentChunk)
+	if !ok || userChunk.SessionUpdate != UpdateUserMessage {
+		t.Fatalf("user update = %#v, want user message chunk", userUpdates[0])
+	}
+	if content, ok := userChunk.Content.(TextContent); !ok || content.Text != "hello" {
+		t.Fatalf("user content = %#v, want hello text", userChunk.Content)
+	}
+
+	assistantMessage := model.MessageFromAssistantParts("done", "thinking", nil)
+	assistantEvent := session.CanonicalizeEvent(&session.Event{
+		SessionID: "session-1",
+		Type:      session.EventTypeAssistant,
+		Message:   &assistantMessage,
+	})
+	if assistantEvent.AssistantMessage == nil || assistantEvent.Message != nil {
+		t.Fatalf("canonical assistant event = %#v, want semantic payload only", assistantEvent)
+	}
+	assistantUpdates, err := (EventProjector{}).ProjectEvent(assistantEvent)
+	if err != nil {
+		t.Fatalf("ProjectEvent(assistant) error = %v", err)
+	}
+	if len(assistantUpdates) != 2 {
+		t.Fatalf("ProjectEvent(assistant) produced %d updates, want thought + message: %#v", len(assistantUpdates), assistantUpdates)
+	}
+	thought, ok := assistantUpdates[0].(ContentChunk)
+	if !ok || thought.SessionUpdate != UpdateAgentThought {
+		t.Fatalf("assistant updates[0] = %#v, want thought chunk", assistantUpdates[0])
+	}
+	if content, ok := thought.Content.(TextContent); !ok || content.Text != "thinking" {
+		t.Fatalf("thought content = %#v, want thinking", thought.Content)
+	}
+	messageChunk, ok := assistantUpdates[1].(ContentChunk)
+	if !ok || messageChunk.SessionUpdate != UpdateAgentMessage {
+		t.Fatalf("assistant updates[1] = %#v, want message chunk", assistantUpdates[1])
+	}
+	if content, ok := messageChunk.Content.(TextContent); !ok || content.Text != "done" {
+		t.Fatalf("message content = %#v, want done", messageChunk.Content)
+	}
+
+	reasoningOnly := model.NewReasoningMessage(model.RoleAssistant, "only thought", model.ReasoningVisibilityVisible)
+	reasoningEvent := session.CanonicalizeEvent(&session.Event{
+		SessionID: "session-1",
+		Type:      session.EventTypeAssistant,
+		Message:   &reasoningOnly,
+	})
+	reasoningUpdates, err := (EventProjector{}).ProjectEvent(reasoningEvent)
+	if err != nil {
+		t.Fatalf("ProjectEvent(reasoning-only) error = %v", err)
+	}
+	if len(reasoningUpdates) != 1 {
+		t.Fatalf("ProjectEvent(reasoning-only) produced %d updates, want thought only: %#v", len(reasoningUpdates), reasoningUpdates)
+	}
+	if chunk, ok := reasoningUpdates[0].(ContentChunk); !ok || chunk.SessionUpdate != UpdateAgentThought {
+		t.Fatalf("reasoning-only update = %#v, want thought chunk", reasoningUpdates[0])
+	}
+
+	systemMessage := model.NewTextMessage(model.RoleSystem, "system prompt")
+	systemEvent := session.CanonicalizeEvent(&session.Event{
+		SessionID: "session-1",
+		Type:      session.EventTypeSystem,
+		Message:   &systemMessage,
+	})
+	systemUpdates, err := (EventProjector{}).ProjectEvent(systemEvent)
+	if err != nil {
+		t.Fatalf("ProjectEvent(system) error = %v", err)
+	}
+	if len(systemUpdates) != 0 {
+		t.Fatalf("ProjectEvent(system) produced %#v, want no ACP session/update", systemUpdates)
+	}
+}
+
+func TestEventProjectorProjectsSemanticToolPayloads(t *testing.T) {
+	assistantMessage := model.MessageFromAssistantParts("I will run it.", "Need output first.", []model.ToolCall{{
+		ID:   "call-1",
+		Name: "RUN_COMMAND",
+		Args: `{"command":"date","workdir":"/tmp/work"}`,
+	}})
+	callEvent := session.CanonicalizeEvent(&session.Event{
+		SessionID: "session-1",
+		Type:      session.EventTypeToolCall,
+		Message:   &assistantMessage,
+	})
+	if callEvent.ToolCallPayload == nil || callEvent.AssistantMessage == nil || callEvent.Message != nil {
+		t.Fatalf("canonical tool call event = %#v, want semantic payloads only", callEvent)
+	}
+	callUpdates, err := (EventProjector{}).ProjectEvent(callEvent)
+	if err != nil {
+		t.Fatalf("ProjectEvent(tool call) error = %v", err)
+	}
+	if len(callUpdates) != 3 {
+		t.Fatalf("ProjectEvent(tool call) produced %d updates, want thought + message + tool_call: %#v", len(callUpdates), callUpdates)
+	}
+	call, ok := callUpdates[2].(ToolCall)
+	if !ok {
+		t.Fatalf("tool call update = %T, want ToolCall", callUpdates[2])
+	}
+	if call.ToolCallID != "call-1" || call.Kind != ToolKindExecute || call.Title != "RUN_COMMAND date" {
+		t.Fatalf("tool call = %#v, want RUN_COMMAND execute call", call)
+	}
+	if len(call.Content) != 1 || call.Content[0].Type != "terminal" || call.Content[0].TerminalID != "call-1" {
+		t.Fatalf("tool call content = %#v, want display terminal marker", call.Content)
+	}
+
+	toolMessage := model.MessageFromToolResponse(&model.ToolResponse{
+		ID:     "call-1",
+		Name:   "RUN_COMMAND",
+		Result: map[string]any{"stdout": "ok\n", "exit_code": 0},
+	})
+	resultEvent := session.CanonicalizeEvent(&session.Event{
+		SessionID: "session-1",
+		Type:      session.EventTypeToolResult,
+		Tool: &session.EventTool{
+			ID:     "call-1",
+			Name:   "RUN_COMMAND",
+			Kind:   ToolKindExecute,
+			Title:  "RUN_COMMAND echo ok",
+			Status: ToolStatusCompleted,
+			Input:  map[string]any{"command": "echo ok"},
+			Output: map[string]any{"stdout": "ok\n", "exit_code": 0},
+			Content: []session.EventToolContent{{
+				Type:       "terminal",
+				TerminalID: "call-1",
+				Text:       "ok\n",
+			}},
+		},
+		Message: &toolMessage,
+	})
+	if resultEvent.ToolResultPayload == nil || resultEvent.Tool != nil || resultEvent.Message != nil {
+		t.Fatalf("canonical tool result event = %#v, want semantic payload only", resultEvent)
+	}
+	resultUpdates, err := (EventProjector{}).ProjectEvent(resultEvent)
+	if err != nil {
+		t.Fatalf("ProjectEvent(tool result) error = %v", err)
+	}
+	if len(resultUpdates) != 1 {
+		t.Fatalf("ProjectEvent(tool result) produced %d updates, want 1", len(resultUpdates))
+	}
+	result, ok := resultUpdates[0].(ToolCallUpdate)
+	if !ok {
+		t.Fatalf("tool result update = %T, want ToolCallUpdate", resultUpdates[0])
+	}
+	if result.ToolCallID != "call-1" || result.Status == nil || *result.Status != ToolStatusCompleted {
+		t.Fatalf("tool result = %#v, want completed call-1", result)
+	}
+	if output, ok := result.RawOutput.(map[string]any); !ok || output["stdout"] != "ok\n" {
+		t.Fatalf("raw output = %#v, want stdout", result.RawOutput)
+	}
+	if meta, ok := result.Meta["terminal_output"].(map[string]any); !ok || meta["terminal_id"] != "call-1" || meta["data"] != "ok\n" {
+		t.Fatalf("terminal meta = %#v, want terminal output", result.Meta)
+	}
+}
+
+func TestEventProjectorProjectsSemanticPlanPayload(t *testing.T) {
+	event := session.CanonicalizeEvent(&session.Event{
+		SessionID: "session-1",
+		Type:      session.EventTypePlan,
+		Protocol: &session.EventProtocol{
+			Plan: &session.ProtocolPlan{Entries: []session.ProtocolPlanEntry{{
+				Content:  "inspect",
+				Status:   "completed",
+				Priority: "high",
+			}, {
+				Content: "fix",
+				Status:  "pending",
+			}}},
+		},
+	})
+	if event.PlanPayload == nil || event.Protocol != nil {
+		t.Fatalf("canonical plan event = %#v, want semantic plan payload only", event)
+	}
+	updates, err := (EventProjector{}).ProjectEvent(event)
+	if err != nil {
+		t.Fatalf("ProjectEvent(plan) error = %v", err)
+	}
+	if len(updates) != 1 {
+		t.Fatalf("ProjectEvent(plan) produced %d updates, want 1", len(updates))
+	}
+	plan, ok := updates[0].(PlanUpdate)
+	if !ok {
+		t.Fatalf("update = %T, want PlanUpdate", updates[0])
+	}
+	if len(plan.Entries) != 2 {
+		t.Fatalf("plan entries = %#v, want 2", plan.Entries)
+	}
+	if plan.Entries[0].Content != "inspect" || plan.Entries[0].Priority != "high" {
+		t.Fatalf("first plan entry = %#v, want inspect/high", plan.Entries[0])
+	}
+	if plan.Entries[1].Content != "fix" || plan.Entries[1].Priority != "medium" {
+		t.Fatalf("second plan entry = %#v, want fix/medium default", plan.Entries[1])
+	}
+}
+
+func TestEventProjectorPreservesExplicitEmptyPlanUpdate(t *testing.T) {
+	updates, err := (EventProjector{}).ProjectEvent(session.CanonicalizeEvent(&session.Event{
+		SessionID: "session-1",
+		Type:      session.EventTypePlan,
+		Protocol: &session.EventProtocol{
+			Update: &session.ProtocolUpdate{
+				SessionUpdate: UpdatePlan,
+				Entries:       []session.ProtocolPlanEntry{},
+			},
+		},
+	}))
+	if err != nil {
+		t.Fatalf("ProjectEvent(empty plan) error = %v", err)
+	}
+	if len(updates) != 1 {
+		t.Fatalf("ProjectEvent(empty plan) produced %d updates, want 1: %#v", len(updates), updates)
+	}
+	plan, ok := updates[0].(PlanUpdate)
+	if !ok {
+		t.Fatalf("update = %T, want PlanUpdate", updates[0])
+	}
+	if len(plan.Entries) != 0 {
+		t.Fatalf("plan entries = %#v, want empty replacement", plan.Entries)
+	}
+}
+
 func TestEventProjectorPreservesPartialProtocolToolUpdate(t *testing.T) {
 	updates, err := (EventProjector{}).ProjectEvent(&session.Event{
 		SessionID: "session-1",

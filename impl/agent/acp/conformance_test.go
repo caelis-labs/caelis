@@ -11,10 +11,13 @@ import (
 	runtimeacp "github.com/OnslaughtSnail/caelis/impl/agent/acp"
 	"github.com/OnslaughtSnail/caelis/impl/agent/local"
 	"github.com/OnslaughtSnail/caelis/impl/agent/local/chat"
+	"github.com/OnslaughtSnail/caelis/impl/sandbox/host"
 	"github.com/OnslaughtSnail/caelis/impl/session/memory"
+	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/shell"
 	"github.com/OnslaughtSnail/caelis/ports/agent"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/OnslaughtSnail/caelis/ports/tool"
 	"github.com/OnslaughtSnail/caelis/protocol/acp"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/fixture"
 )
@@ -96,6 +99,124 @@ func TestRuntimeAgentConformancePromptOrdering(t *testing.T) {
 	}
 	if !slices.Contains(kinds, acp.UpdateAgentMessage) {
 		t.Fatalf("prompt update kinds = %v, want assistant message update", kinds)
+	}
+}
+
+func TestRuntimeAgentConformanceInitializeDoesNotDeclareMCP(t *testing.T) {
+	agent, _ := newTestRuntimeAgent(t, staticModel{text: "ok"})
+	resp, err := agent.Initialize(context.Background(), acp.InitializeRequest{})
+	if err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+	if resp.AgentCapabilities.MCPCapabilities.HTTP || resp.AgentCapabilities.MCPCapabilities.SSE {
+		t.Fatalf("mcp capabilities = %#v, want http+sse disabled until ACP mcpServers are wired", resp.AgentCapabilities.MCPCapabilities)
+	}
+}
+
+func TestRuntimeAgentConformanceEmitsToolCallBeforeToolUpdate(t *testing.T) {
+	llm := &toolThenTextModel{}
+	echoTool := tool.NamedTool{
+		Def: tool.Definition{
+			Name:        "ECHO",
+			Description: "Echo one value.",
+			InputSchema: map[string]any{
+				"type":                 "object",
+				"additionalProperties": true,
+			},
+		},
+		Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
+			return tool.Result{
+				ID:      call.ID,
+				Name:    call.Name,
+				Content: []model.Part{model.NewJSONPart(json.RawMessage(`{"ok":true}`))},
+			}, nil
+		},
+	}
+	agent, _ := newTestRuntimeAgentWithTools(t, llm, []tool.Tool{echoTool})
+	rec := fixture.NewRecorder(acp.RequestPermissionResponse{
+		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: acp.PermAllowOnce},
+	})
+	resp, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatalf("NewSession() error = %v", err)
+	}
+	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{
+		SessionID: resp.SessionID,
+		Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"call echo"}`)},
+	}, rec); err != nil {
+		t.Fatalf("Prompt() error = %v", err)
+	}
+	firstCall := -1
+	firstUpdate := -1
+	for i, notification := range rec.Notifications() {
+		switch update := notification.Update.(type) {
+		case acp.ToolCall:
+			if update.ToolCallID == "call-echo" && firstCall < 0 {
+				firstCall = i
+			}
+		case acp.ToolCallUpdate:
+			if update.ToolCallID == "call-echo" && firstUpdate < 0 {
+				firstUpdate = i
+			}
+		}
+	}
+	if firstCall < 0 {
+		t.Fatalf("notifications = %#v, want tool_call for call-echo", rec.Notifications())
+	}
+	if firstUpdate < 0 {
+		t.Fatalf("notifications = %#v, want tool_call_update for call-echo", rec.Notifications())
+	}
+	if firstUpdate < firstCall {
+		t.Fatalf("tool_call_update index %d came before tool_call index %d", firstUpdate, firstCall)
+	}
+}
+
+func TestRuntimeAgentConformanceEmitsRunCommandToolCallBeforeTerminalUpdates(t *testing.T) {
+	llm := &runCommandThenTextModel{}
+	sandboxRuntime, err := host.New(host.Config{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatalf("host.New() error = %v", err)
+	}
+	runCommandTool, err := shell.NewRunCommand(shell.RunCommandConfig{Runtime: sandboxRuntime})
+	if err != nil {
+		t.Fatalf("shell.NewRunCommand() error = %v", err)
+	}
+	agent, _ := newTestRuntimeAgentWithTools(t, llm, []tool.Tool{runCommandTool})
+	rec := fixture.NewRecorder(acp.RequestPermissionResponse{
+		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: acp.PermAllowOnce},
+	})
+	resp, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatalf("NewSession() error = %v", err)
+	}
+	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{
+		SessionID: resp.SessionID,
+		Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"run command"}`)},
+	}, rec); err != nil {
+		t.Fatalf("Prompt() error = %v", err)
+	}
+	firstCall := -1
+	firstUpdate := -1
+	for i, notification := range rec.Notifications() {
+		switch update := notification.Update.(type) {
+		case acp.ToolCall:
+			if update.ToolCallID == "call-shell" && firstCall < 0 {
+				firstCall = i
+			}
+		case acp.ToolCallUpdate:
+			if update.ToolCallID == "call-shell" && firstUpdate < 0 {
+				firstUpdate = i
+			}
+		}
+	}
+	if firstCall < 0 {
+		t.Fatalf("notifications = %#v, want RUN_COMMAND tool_call for call-shell", rec.Notifications())
+	}
+	if firstUpdate < 0 {
+		t.Fatalf("notifications = %#v, want RUN_COMMAND tool_call_update for call-shell", rec.Notifications())
+	}
+	if firstUpdate < firstCall {
+		t.Fatalf("RUN_COMMAND tool_call_update index %d came before tool_call index %d", firstUpdate, firstCall)
 	}
 }
 
@@ -269,6 +390,80 @@ func (cancelModel) Generate(ctx context.Context, _ *model.Request) iter.Seq2[*mo
 	}
 }
 
+type toolThenTextModel struct {
+	calls int
+}
+
+func (m *toolThenTextModel) Name() string { return "tool-then-text" }
+
+func (m *toolThenTextModel) Generate(context.Context, *model.Request) iter.Seq2[*model.StreamEvent, error] {
+	return func(yield func(*model.StreamEvent, error) bool) {
+		m.calls++
+		if m.calls == 1 {
+			yield(&model.StreamEvent{
+				Type: model.StreamEventTurnDone,
+				Response: &model.Response{
+					Message: model.MessageFromAssistantParts("I will call ECHO.", "Need tool result.", []model.ToolCall{{
+						ID:   "call-echo",
+						Name: "ECHO",
+						Args: `{"value":"hello"}`,
+					}}),
+					TurnComplete: true,
+					StepComplete: true,
+					Status:       model.ResponseStatusCompleted,
+				},
+			}, nil)
+			return
+		}
+		yield(&model.StreamEvent{
+			Type: model.StreamEventTurnDone,
+			Response: &model.Response{
+				Message:      model.NewTextMessage(model.RoleAssistant, "done"),
+				TurnComplete: true,
+				StepComplete: true,
+				Status:       model.ResponseStatusCompleted,
+			},
+		}, nil)
+	}
+}
+
+type runCommandThenTextModel struct {
+	calls int
+}
+
+func (m *runCommandThenTextModel) Name() string { return "run-command-then-text" }
+
+func (m *runCommandThenTextModel) Generate(context.Context, *model.Request) iter.Seq2[*model.StreamEvent, error] {
+	return func(yield func(*model.StreamEvent, error) bool) {
+		m.calls++
+		if m.calls == 1 {
+			yield(&model.StreamEvent{
+				Type: model.StreamEventTurnDone,
+				Response: &model.Response{
+					Message: model.MessageFromAssistantParts("I will run a command.", "Need command output.", []model.ToolCall{{
+						ID:   "call-shell",
+						Name: shell.RunCommandToolName,
+						Args: `{"command":"printf acp-run-command-test"}`,
+					}}),
+					TurnComplete: true,
+					StepComplete: true,
+					Status:       model.ResponseStatusCompleted,
+				},
+			}, nil)
+			return
+		}
+		yield(&model.StreamEvent{
+			Type: model.StreamEventTurnDone,
+			Response: &model.Response{
+				Message:      model.NewTextMessage(model.RoleAssistant, "done"),
+				TurnComplete: true,
+				StepComplete: true,
+				Status:       model.ResponseStatusCompleted,
+			},
+		}, nil)
+	}
+}
+
 func agentMessageTexts(notifications []acp.SessionNotification) []string {
 	out := make([]string, 0, len(notifications))
 	for _, notification := range notifications {
@@ -286,6 +481,10 @@ func agentMessageTexts(notifications []acp.SessionNotification) []string {
 }
 
 func newTestRuntimeAgent(t *testing.T, model model.LLM) (*runtimeacp.RuntimeAgent, session.Service) {
+	return newTestRuntimeAgentWithTools(t, model, nil)
+}
+
+func newTestRuntimeAgentWithTools(t *testing.T, model model.LLM, tools []tool.Tool) (*runtimeacp.RuntimeAgent, session.Service) {
 	t.Helper()
 	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
 	runtime, err := local.New(local.Config{
@@ -301,7 +500,7 @@ func newTestRuntimeAgent(t *testing.T, model model.LLM) (*runtimeacp.RuntimeAgen
 		Runtime:  runtime,
 		Sessions: sessions,
 		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
-			return agent.AgentSpec{Name: "chat", Model: model}, nil
+			return agent.AgentSpec{Name: "chat", Model: model, Tools: tools}, nil
 		},
 		AppName: "caelis",
 		UserID:  "user-1",

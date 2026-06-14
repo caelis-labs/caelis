@@ -150,10 +150,11 @@ func explicitUpdates(event *session.Event) []Update {
 				return []Update{planUpdateFromEntries(update.Entries)}
 			}
 		}
-		if event.Protocol.Plan == nil {
+		update, ok := planUpdateForEvent(event)
+		if !ok {
 			return nil
 		}
-		return []Update{planUpdateFromProtocol(*event.Protocol.Plan)}
+		return []Update{update}
 	case "":
 		return nil
 	default:
@@ -192,17 +193,27 @@ func inferredUpdates(event *session.Event) []Update {
 		}
 		return []Update{update}
 	case session.EventTypePlan:
-		if event.Protocol == nil || event.Protocol.Plan == nil {
+		update, ok := planUpdateForEvent(event)
+		if !ok {
 			return nil
 		}
-		return []Update{planUpdateFromProtocol(*event.Protocol.Plan)}
+		return []Update{update}
 	default:
 		return nil
 	}
 }
 
 func inferredAssistantUpdates(event *session.Event) []Update {
-	if event == nil || event.Message == nil {
+	if event == nil {
+		return nil
+	}
+	message := event.Message
+	if message == nil {
+		if projected, ok := session.ModelMessageOf(event); ok {
+			message = &projected
+		}
+	}
+	if message == nil {
 		return singleContentUpdate(UpdateAgentMessage, textForAssistantEvent(event))
 	}
 	out := make([]Update, 0, 2)
@@ -232,7 +243,14 @@ func explicitToolCallUpdates(event *session.Event) []Update {
 }
 
 func inferredAssistantMessageOnly(event *session.Event) []Update {
-	if event == nil || event.Message == nil || event.Message.Role != model.RoleAssistant {
+	if event == nil {
+		return nil
+	}
+	if event.Message != nil {
+		if event.Message.Role != model.RoleAssistant {
+			return nil
+		}
+	} else if message, ok := session.ModelMessageOf(event); !ok || message.Role != model.RoleAssistant {
 		return nil
 	}
 	out := make([]Update, 0, 2)
@@ -255,17 +273,23 @@ func inferredToolCallUpdates(event *session.Event) []Update {
 	if event == nil {
 		return nil
 	}
-	if event.Tool != nil {
+	if event.Tool != nil || event.ToolCallPayload != nil {
 		return explicitToolCallUpdates(event)
 	}
 	if event.Protocol != nil && event.Protocol.ToolCall != nil {
 		return explicitToolCallUpdates(event)
 	}
 	out := inferredAssistantMessageOnly(event)
-	if event.Message == nil {
+	message := event.Message
+	if message == nil {
+		if projected, ok := session.ModelMessageOf(event); ok {
+			message = &projected
+		}
+	}
+	if message == nil {
 		return out
 	}
-	for _, call := range event.Message.ToolCalls() {
+	for _, call := range message.ToolCalls() {
 		args := parseObject(call.Args)
 		update := ToolCall{
 			SessionUpdate: UpdateToolCall,
@@ -296,7 +320,13 @@ func toolCallForEvent(event *session.Event) (ToolCall, bool, error) {
 		return ToolCall{}, false, nil
 	}
 	if event.Tool != nil {
-		return toolCallFromEventTool(event), true, nil
+		return toolCallFromEventToolPayload(event.Tool), true, nil
+	}
+	if event.ToolCallPayload != nil {
+		projected := session.EventToolProjection(event)
+		if projected != nil {
+			return toolCallFromEventToolPayload(projected), true, nil
+		}
 	}
 	if event.Protocol != nil && event.Protocol.Update != nil {
 		update := session.ProtocolUpdateOf(event)
@@ -341,8 +371,10 @@ func toolCallForEvent(event *session.Event) (ToolCall, bool, error) {
 	return call, true, nil
 }
 
-func toolCallFromEventTool(event *session.Event) ToolCall {
-	tool := event.Tool
+func toolCallFromEventToolPayload(tool *session.EventTool) ToolCall {
+	if tool == nil {
+		return ToolCall{SessionUpdate: UpdateToolCall}
+	}
 	rawInput := cloneAnyMap(tool.Input)
 	displayTerminalID, _ := displayTerminalID(tool.ID, tool.Name)
 	call := ToolCall{
@@ -385,7 +417,7 @@ func toolCallUpdateForEvent(event *session.Event) (ToolCallUpdate, bool, error) 
 		return ToolCallUpdate{}, false, nil
 	}
 	if event.Tool != nil {
-		return toolCallUpdateFromEventTool(event), true, nil
+		return toolCallUpdateFromEventToolPayload(event.Tool), true, nil
 	}
 	if event.Protocol != nil && event.Protocol.Update != nil {
 		update := session.ProtocolUpdateOf(event)
@@ -423,6 +455,12 @@ func toolCallUpdateForEvent(event *session.Event) (ToolCallUpdate, bool, error) 
 		}
 		return update, true, nil
 	}
+	if event.ToolResultPayload != nil {
+		projected := session.EventToolProjection(event)
+		if projected != nil {
+			return toolCallUpdateFromEventToolPayload(projected), true, nil
+		}
+	}
 	if event.Message == nil {
 		return ToolCallUpdate{}, false, nil
 	}
@@ -447,8 +485,10 @@ func toolCallUpdateForEvent(event *session.Event) (ToolCallUpdate, bool, error) 
 	}, true, nil
 }
 
-func toolCallUpdateFromEventTool(event *session.Event) ToolCallUpdate {
-	tool := event.Tool
+func toolCallUpdateFromEventToolPayload(tool *session.EventTool) ToolCallUpdate {
+	if tool == nil {
+		return ToolCallUpdate{SessionUpdate: UpdateToolCallInfo}
+	}
 	displayTerminalID, _ := displayTerminalID(tool.ID, tool.Name)
 	out := ToolCallUpdate{
 		SessionUpdate: UpdateToolCallInfo,
@@ -819,9 +859,43 @@ func planUpdateFromProtocol(plan session.ProtocolPlan) PlanUpdate {
 	return planUpdateFromEntries(plan.Entries)
 }
 
+func planUpdateForEvent(event *session.Event) (PlanUpdate, bool) {
+	if event == nil {
+		return PlanUpdate{}, false
+	}
+	if event.Protocol != nil {
+		if event.Protocol.Plan != nil {
+			return planUpdateFromProtocol(*event.Protocol.Plan), true
+		}
+		if update := session.ProtocolUpdateOf(event); update != nil && (len(update.Entries) > 0 || normalizeUpdateType(update.SessionUpdate) == UpdatePlan) {
+			return planUpdateFromEntries(update.Entries), true
+		}
+	}
+	payload := session.PlanPayloadOf(event)
+	if payload == nil {
+		return PlanUpdate{}, false
+	}
+	return planUpdateFromPayload(*payload), true
+}
+
 func planUpdateFromEntries(protocolEntries []session.ProtocolPlanEntry) PlanUpdate {
 	entries := make([]PlanEntry, 0, len(protocolEntries))
 	for _, item := range protocolEntries {
+		entries = append(entries, PlanEntry{
+			Content:  strings.TrimSpace(item.Content),
+			Status:   strings.TrimSpace(item.Status),
+			Priority: firstNonEmpty(strings.TrimSpace(item.Priority), "medium"),
+		})
+	}
+	return PlanUpdate{
+		SessionUpdate: UpdatePlan,
+		Entries:       entries,
+	}
+}
+
+func planUpdateFromPayload(payload session.EventPlanPayload) PlanUpdate {
+	entries := make([]PlanEntry, 0, len(payload.Entries))
+	for _, item := range payload.Entries {
 		entries = append(entries, PlanEntry{
 			Content:  strings.TrimSpace(item.Content),
 			Status:   strings.TrimSpace(item.Status),
@@ -861,6 +935,9 @@ func textForAssistantEvent(event *session.Event) string {
 	if event.Message != nil {
 		return event.Message.TextContent()
 	}
+	if message, ok := session.ModelMessageOf(event); ok {
+		return message.TextContent()
+	}
 	return session.EventText(event)
 }
 
@@ -870,6 +947,10 @@ func reasoningForAssistantEvent(event *session.Event) string {
 	}
 	if event.Message != nil {
 		if reasoning := event.Message.ReasoningText(); reasoning != "" {
+			return reasoning
+		}
+	} else if message, ok := session.ModelMessageOf(event); ok {
+		if reasoning := message.ReasoningText(); reasoning != "" {
 			return reasoning
 		}
 	}
