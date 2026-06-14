@@ -16,6 +16,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/assembly"
 	"github.com/OnslaughtSnail/caelis/ports/compact"
 	"github.com/OnslaughtSnail/caelis/ports/controller"
+	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/policy"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/stream"
@@ -27,39 +28,41 @@ const overflowCompactionRecoveryLimit = 3
 
 // Config defines one baseline local runtime instance.
 type Config struct {
-	Sessions          session.Service
-	AgentFactory      agent.AgentFactory
-	RunIDGenerator    func() string
-	Clock             func() time.Time
-	Compaction        CompactionConfig
-	Compactor         compact.Engine
-	PolicyRegistry    policy.Registry
-	DefaultPolicyMode string
-	Assembly          assembly.ResolvedAssembly
-	Controllers       controller.Backend
-	TaskStore         task.Store
-	Subagents         subagent.Runner
+	Sessions            session.Service
+	AgentFactory        agent.AgentFactory
+	RunIDGenerator      func() string
+	Clock               func() time.Time
+	Compaction          CompactionConfig
+	Compactor           compact.Engine
+	PolicyRegistry      policy.Registry
+	DefaultPolicyMode   string
+	DefaultApprovalMode string
+	Assembly            assembly.ResolvedAssembly
+	Controllers         controller.Backend
+	TaskStore           task.Store
+	Subagents           subagent.Runner
 }
 
 // Runtime is the baseline local runtime implementation.
 type Runtime struct {
-	sessions          session.Service
-	agentFactory      agent.AgentFactory
-	runIDGenerator    func() string
-	clock             func() time.Time
-	compaction        CompactionConfig
-	compactor         compact.Engine
-	policies          policy.Registry
-	defaultPolicyMode string
-	assembly          assembly.ResolvedAssembly
-	acpRegistry       *acpsubagent.Registry
-	controllers       controller.Backend
-	subagents         subagent.Runner
-	idCounter         atomic.Uint64
-	mu                sync.RWMutex
-	runStates         map[string]agent.RunState
-	tasks             *taskRuntime
-	terminals         *streamService
+	sessions            session.Service
+	agentFactory        agent.AgentFactory
+	runIDGenerator      func() string
+	clock               func() time.Time
+	compaction          CompactionConfig
+	compactor           compact.Engine
+	policies            policy.Registry
+	defaultPolicyMode   string
+	defaultApprovalMode gateway.ApprovalMode
+	assembly            assembly.ResolvedAssembly
+	acpRegistry         *acpsubagent.Registry
+	controllers         controller.Backend
+	subagents           subagent.Runner
+	idCounter           atomic.Uint64
+	mu                  sync.RWMutex
+	runStates           map[string]agent.RunState
+	tasks               *taskRuntime
+	terminals           *streamService
 }
 
 // New returns one baseline local runtime.
@@ -71,17 +74,18 @@ func New(cfg Config) (*Runtime, error) {
 		return nil, errors.New("impl/agent/local: agent factory is required")
 	}
 	r := &Runtime{
-		sessions:          cfg.Sessions,
-		agentFactory:      cfg.AgentFactory,
-		runIDGenerator:    cfg.RunIDGenerator,
-		clock:             cfg.Clock,
-		compaction:        normalizeCompactionConfig(cfg.Compaction),
-		policies:          cfg.PolicyRegistry,
-		defaultPolicyMode: strings.TrimSpace(cfg.DefaultPolicyMode),
-		assembly:          assembly.CloneResolvedAssembly(cfg.Assembly),
-		controllers:       cfg.Controllers,
-		subagents:         cfg.Subagents,
-		runStates:         map[string]agent.RunState{},
+		sessions:            cfg.Sessions,
+		agentFactory:        cfg.AgentFactory,
+		runIDGenerator:      cfg.RunIDGenerator,
+		clock:               cfg.Clock,
+		compaction:          normalizeCompactionConfig(cfg.Compaction),
+		policies:            cfg.PolicyRegistry,
+		defaultPolicyMode:   strings.TrimSpace(cfg.DefaultPolicyMode),
+		defaultApprovalMode: gateway.NormalizeApprovalMode(cfg.DefaultApprovalMode),
+		assembly:            assembly.CloneResolvedAssembly(cfg.Assembly),
+		controllers:         cfg.Controllers,
+		subagents:           cfg.Subagents,
+		runStates:           map[string]agent.RunState{},
 	}
 	if r.clock == nil {
 		r.clock = time.Now
@@ -110,6 +114,13 @@ func New(cfg Config) (*Runtime, error) {
 	r.tasks = newTaskRuntime(r, cfg.TaskStore)
 	r.terminals = newStreamService(r.tasks)
 	return r, nil
+}
+
+func (r *Runtime) currentApprovalMode(state map[string]any) gateway.ApprovalMode {
+	if r == nil {
+		return gateway.CurrentApprovalMode(state)
+	}
+	return gateway.CurrentApprovalModeOrDefault(state, r.defaultApprovalMode)
 }
 
 func (r *Runtime) applyAssembly(resolved assembly.ResolvedAssembly, cfg Config) error {

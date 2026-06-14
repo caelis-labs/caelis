@@ -1038,6 +1038,33 @@ func TestStartSubagentWithOptionsInheritsSessionApprovalMode(t *testing.T) {
 	}
 }
 
+func TestRuntimeCurrentApprovalModeUsesConfiguredDefault(t *testing.T) {
+	runtime := &Runtime{defaultApprovalMode: gateway.ApprovalModeManual}
+	if got := runtime.currentApprovalMode(nil); got != gateway.ApprovalModeManual {
+		t.Fatalf("currentApprovalMode(empty) = %q, want manual", got)
+	}
+	state := map[string]any{gateway.StateCurrentApprovalMode: string(gateway.ApprovalModeAutoReview)}
+	if got := runtime.currentApprovalMode(state); got != gateway.ApprovalModeAutoReview {
+		t.Fatalf("currentApprovalMode(override) = %q, want auto-review", got)
+	}
+}
+
+func TestStartSubagentWithOptionsUsesRuntimeDefaultApprovalMode(t *testing.T) {
+	ctx := context.Background()
+	runner := &recordingSubagentRunner{
+		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "done"},
+	}
+	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
+	runtime.defaultApprovalMode = gateway.ApprovalModeManual
+
+	if _, err := runtime.StartSubagentWithOptions(ctx, activeSession.SessionRef, "self", "inspect this", "slash", StartSubagentOptions{}); err != nil {
+		t.Fatalf("StartSubagentWithOptions() error = %v", err)
+	}
+	if got := runner.spawnContext.ApprovalMode; got != "manual" {
+		t.Fatalf("spawn approval mode = %q, want manual", got)
+	}
+}
+
 func newSubagentTaskTestRuntime(t *testing.T, runner subagent.Runner) (*Runtime, session.Session) {
 	t.Helper()
 	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))

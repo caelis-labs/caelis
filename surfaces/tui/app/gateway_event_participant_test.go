@@ -695,6 +695,48 @@ func TestGatewayMirroredSubagentFinalReplacesLiveSpawnPanelOnce(t *testing.T) {
 	}
 }
 
+func TestGatewayAnchoredSubagentReasoningDoesNotAppendToSpawnTool(t *testing.T) {
+	model := newGatewayEventTestModel()
+	callID := "spawn-reasoning"
+	send := func(env gateway.EventEnvelope) {
+		updated, _ := model.Update(gatewayEventMsg(env))
+		model = updated.(*Model)
+	}
+	send(gateway.EventEnvelope{Event: gateway.Event{
+		Kind:       gateway.EventKindToolCall,
+		SessionRef: session.SessionRef{SessionID: "root-session"},
+		ToolCall: &gateway.ToolCallPayload{
+			CallID:   callID,
+			ToolName: "SPAWN",
+			Status:   gateway.ToolStatusRunning,
+			Scope:    gateway.EventScopeMain,
+			RawInput: map[string]any{"agent": "reviewer", "prompt": "review"},
+		},
+	}})
+	send(gateway.EventEnvelope{Event: gateway.Event{
+		Kind:       gateway.EventKindAssistantMessage,
+		SessionRef: session.SessionRef{SessionID: "root-session"},
+		Origin: &gateway.EventOrigin{
+			Scope:   gateway.EventScopeSubagent,
+			ScopeID: "reviewer",
+			Actor:   "reviewer",
+		},
+		Meta: anchoredSpawnStreamMeta(callID),
+		Narrative: &gateway.NarrativePayload{
+			Role:          gateway.NarrativeRoleAssistant,
+			ReasoningText: "private child thought",
+		},
+	}})
+
+	block := firstMainACPTurnBlock(t, model)
+	if len(block.Events) != 1 {
+		t.Fatalf("events = %#v, want one SPAWN event", block.Events)
+	}
+	if strings.Contains(block.Events[0].Output, "private child thought") {
+		t.Fatalf("SPAWN output leaked child reasoning: %q", block.Events[0].Output)
+	}
+}
+
 func firstMainACPTurnBlock(t *testing.T, model *Model) *MainACPTurnBlock {
 	t.Helper()
 	if model == nil || len(model.doc.Blocks()) == 0 {
@@ -705,6 +747,19 @@ func firstMainACPTurnBlock(t *testing.T, model *Model) *MainACPTurnBlock {
 		t.Fatalf("first block = %T, want MainACPTurnBlock", model.doc.Blocks()[0])
 	}
 	return block
+}
+
+func anchoredSpawnStreamMeta(callID string) map[string]any {
+	return map[string]any{
+		"caelis": map[string]any{
+			"runtime": map[string]any{
+				"stream": map[string]any{
+					"parent_call_id": callID,
+					"parent_tool":    "SPAWN",
+				},
+			},
+		},
+	}
 }
 
 func mirroredSpawnStreamMeta(callID string) map[string]any {

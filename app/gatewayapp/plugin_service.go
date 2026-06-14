@@ -497,11 +497,8 @@ func safeJoinPluginPath(root string, rel string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if joined != rootAbs {
-		prefix := rootAbs + string(os.PathSeparator)
-		if !strings.HasPrefix(joined, prefix) {
-			return "", fmt.Errorf("plugin service: plugin source path escapes marketplace root: %s", rel)
-		}
+	if !pathWithinPluginRoot(rootAbs, joined) {
+		return "", fmt.Errorf("plugin service: plugin source path escapes marketplace root: %s", rel)
 	}
 	fi, err := os.Stat(joined)
 	if err != nil {
@@ -510,7 +507,30 @@ func safeJoinPluginPath(root string, rel string) (string, error) {
 	if !fi.IsDir() {
 		return "", fmt.Errorf("plugin service: plugin source path is not a directory: %s", joined)
 	}
+	rootReal, err := filepath.EvalSymlinks(rootAbs)
+	if err != nil {
+		return "", fmt.Errorf("plugin service: marketplace root is unavailable: %w", err)
+	}
+	joinedReal, err := filepath.EvalSymlinks(joined)
+	if err != nil {
+		return "", fmt.Errorf("plugin service: plugin source path does not exist: %w", err)
+	}
+	rootReal = filepath.Clean(rootReal)
+	joinedReal = filepath.Clean(joinedReal)
+	if !pathWithinPluginRoot(rootReal, joinedReal) {
+		return "", fmt.Errorf("plugin service: plugin source path escapes marketplace root: %s", rel)
+	}
 	return joined, nil
+}
+
+func pathWithinPluginRoot(root string, target string) bool {
+	root = filepath.Clean(root)
+	target = filepath.Clean(target)
+	rel, err := filepath.Rel(root, target)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)) && !filepath.IsAbs(rel))
 }
 
 func safePluginCacheName(value string) string {

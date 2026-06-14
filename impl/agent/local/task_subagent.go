@@ -10,7 +10,6 @@ import (
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/spawn"
 	"github.com/OnslaughtSnail/caelis/internal/agenthandle"
 	"github.com/OnslaughtSnail/caelis/ports/delegation"
-	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/stream"
@@ -240,7 +239,7 @@ func (r *Runtime) StartSubagentWithOptions(
 	approvalMode := strings.TrimSpace(opts.ApprovalMode)
 	if approvalMode == "" {
 		if state, stateErr := r.sessions.SnapshotState(ctx, ref); stateErr == nil {
-			approvalMode = string(gateway.CurrentApprovalMode(state))
+			approvalMode = string(r.currentApprovalMode(state))
 		}
 	}
 	contextPrelude, _ := r.buildSideSubagentPromptContext(ctx, activeSession, ref, strings.TrimSpace(agent), strings.TrimSpace(prompt), 0)

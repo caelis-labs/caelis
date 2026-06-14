@@ -167,6 +167,33 @@ func TestPluginServiceInstallFromClaudeMarketplaceDirectory(t *testing.T) {
 	}
 }
 
+func TestSafeJoinPluginPathRejectsSymlinkEscape(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	marketplaceDir := filepath.Join(tmp, "marketplace")
+	pluginsDir := filepath.Join(marketplaceDir, "plugins")
+	if err := os.MkdirAll(pluginsDir, 0o700); err != nil {
+		t.Fatalf("mkdir plugins dir: %v", err)
+	}
+	outsideDir := filepath.Join(tmp, "outside-plugin")
+	if err := os.MkdirAll(outsideDir, 0o700); err != nil {
+		t.Fatalf("mkdir outside plugin dir: %v", err)
+	}
+	linkPath := filepath.Join(pluginsDir, "escape")
+	if err := os.Symlink(outsideDir, linkPath); err != nil {
+		t.Skipf("symlink unavailable on this platform: %v", err)
+	}
+
+	_, err := safeJoinPluginPath(marketplaceDir, "plugins/escape")
+	if err == nil {
+		t.Fatal("safeJoinPluginPath() error = nil, want symlink escape rejection")
+	}
+	if !strings.Contains(err.Error(), "escapes marketplace root") {
+		t.Fatalf("safeJoinPluginPath() error = %v, want escape rejection", err)
+	}
+}
+
 // TestPluginServiceEnableDisableHappyPath exercises Enable→Disable lifecycle.
 func TestPluginServiceEnableDisableHappyPath(t *testing.T) {
 	t.Parallel()

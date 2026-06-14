@@ -153,12 +153,13 @@ func (s *Stack) rebuildGateway() error {
 	compactionCfg := defaultCompactionConfig(runtimeCfg.ContextWindow)
 	compactionCfg.EstimatedPromptPrefixTokens = estimatedPrefixTokens
 	rt, err := local.New(local.Config{
-		Sessions:          s.Sessions,
-		AgentFactory:      chat.Factory{},
-		DefaultPolicyMode: effectivePolicyProfile,
-		Compaction:        compactionCfg,
-		Assembly:          runtimeCfg.Assembly,
-		TaskStore:         s.taskStore,
+		Sessions:            s.Sessions,
+		AgentFactory:        chat.Factory{},
+		DefaultPolicyMode:   effectivePolicyProfile,
+		DefaultApprovalMode: string(kernelimpl.NormalizeApprovalMode(runtimeCfg.ApprovalMode)),
+		Compaction:          compactionCfg,
+		Assembly:            runtimeCfg.Assembly,
+		TaskStore:           s.taskStore,
 	})
 	if err != nil {
 		_ = sandboxRuntime.Close()

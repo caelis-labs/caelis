@@ -360,6 +360,9 @@ func (m *Model) applyTranscriptSubagentNarrative(event TranscriptEvent) (tea.Mod
 		if event.MirroredToParentTool {
 			return m, nil
 		}
+		if event.NarrativeKind != TranscriptNarrativeAssistant {
+			return m, nil
+		}
 		return m.applyAnchoredSubagentNarrativeToTool(event)
 	}
 	return m.handleParticipantTurnStream(event.ScopeID, transcriptNarrativeStreamKind(event.NarrativeKind), subagentTranscriptActor(event), event.Text, event.Final, event.OccurredAt)

@@ -541,6 +541,9 @@ func TestRuntimeAgentSuppressesProjectedTerminalOutputWhenBridgeOwnsTerminal(t *
 			if outputs[0] != "streamed output\n" {
 				t.Fatalf("terminal output = %q, want streamed output", outputs[0])
 			}
+			if hasToolUpdateContent(notes, "call-1") {
+				t.Fatalf("notifications = %#v, bridged terminal tool update should not also carry content", notes)
+			}
 			outputIndex := firstTerminalOutputIndex(notes, "call-1")
 			completedIndex := firstCompletedToolUpdateIndex(notes, "call-1")
 			if outputIndex < 0 || completedIndex < 0 || outputIndex > completedIndex {
@@ -551,6 +554,58 @@ func TestRuntimeAgentSuppressesProjectedTerminalOutputWhenBridgeOwnsTerminal(t *
 		select {
 		case <-deadline:
 			t.Fatalf("notifications = %#v, want completed terminal status", notes)
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
+func TestRuntimeAgentSuppressesSpawnFinalContentWhenBridgeOwnsTerminal(t *testing.T) {
+	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	runtime := terminalBridgeFinalRuntime{toolName: "SPAWN", taskID: "task-spawn-1", terminalID: "subagent-task-spawn-1"}
+	agent, err := runtimeacp.New(runtimeacp.Config{
+		Runtime:  runtime,
+		Sessions: sessions,
+		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
+			return agent.AgentSpec{Name: "fake"}, nil
+		},
+		AppName: "caelis",
+		UserID:  "user-1",
+		AgentInfo: &acp.Implementation{
+			Name:    "caelis-sdk",
+			Version: "0.1.0",
+		},
+	})
+	if err != nil {
+		t.Fatalf("runtimeacp.New() error = %v", err)
+	}
+	activeSession, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatalf("NewSession() error = %v", err)
+	}
+	cb := &terminalBridgeCallbacks{}
+	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{SessionID: activeSession.SessionID}, cb); err != nil {
+		t.Fatalf("Prompt() error = %v", err)
+	}
+
+	deadline := time.After(2 * time.Second)
+	for {
+		notes := cb.snapshot()
+		if hasCompletedTerminalExit(notes, "call-1", 0) {
+			outputs := terminalOutputPayloads(notes, "call-1")
+			if got, want := len(outputs), 1; got != want {
+				t.Fatalf("terminal outputs = %#v, want exactly one bridged SPAWN output update", outputs)
+			}
+			if outputs[0] != "streamed output\n" {
+				t.Fatalf("terminal output = %q, want streamed output", outputs[0])
+			}
+			if hasToolUpdateContent(notes, "call-1") {
+				t.Fatalf("notifications = %#v, bridged SPAWN final update should not also carry content", notes)
+			}
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("notifications = %#v, want completed SPAWN terminal status", notes)
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
@@ -1266,10 +1321,30 @@ func (r terminalBridgeRuntime) Streams() stream.Service {
 	}
 }
 
-type terminalBridgeFinalRuntime struct{}
+type terminalBridgeFinalRuntime struct {
+	toolName   string
+	taskID     string
+	terminalID string
+}
 
-func (terminalBridgeFinalRuntime) Run(_ context.Context, req agent.RunRequest) (agent.RunResult, error) {
+func (r terminalBridgeFinalRuntime) Run(_ context.Context, req agent.RunRequest) (agent.RunResult, error) {
 	sessionID := req.SessionRef.SessionID
+	toolName := strings.TrimSpace(r.toolName)
+	if toolName == "" {
+		toolName = "RUN_COMMAND"
+	}
+	taskID := strings.TrimSpace(r.taskID)
+	if taskID == "" {
+		taskID = "task-1"
+	}
+	terminalID := strings.TrimSpace(r.terminalID)
+	if terminalID == "" {
+		terminalID = "terminal-1"
+	}
+	rawInput := map[string]any{"command": "printf streamed"}
+	if strings.EqualFold(toolName, "SPAWN") {
+		rawInput = map[string]any{"agent": "claude", "prompt": "stream child output"}
+	}
 	return agent.RunResult{
 		Handle: terminalBridgeRun{events: []*session.Event{
 			{
@@ -1279,9 +1354,9 @@ func (terminalBridgeFinalRuntime) Run(_ context.Context, req agent.RunRequest) (
 					UpdateType: string(session.ProtocolUpdateTypeToolCall),
 					ToolCall: &session.ProtocolToolCall{
 						ID:       "call-1",
-						Name:     "RUN_COMMAND",
+						Name:     toolName,
 						Status:   "pending",
-						RawInput: map[string]any{"command": "printf streamed"},
+						RawInput: rawInput,
 					},
 				},
 			},
@@ -1292,11 +1367,11 @@ func (terminalBridgeFinalRuntime) Run(_ context.Context, req agent.RunRequest) (
 					UpdateType: string(session.ProtocolUpdateTypeToolUpdate),
 					ToolCall: &session.ProtocolToolCall{
 						ID:     "call-1",
-						Name:   "RUN_COMMAND",
+						Name:   toolName,
 						Status: "completed",
 						Content: []session.ProtocolToolCallContent{{
 							Type:       "terminal",
-							TerminalID: "terminal-1",
+							TerminalID: terminalID,
 							Content:    session.ProtocolTextContent("streamed output\n"),
 						}},
 					},
@@ -1305,8 +1380,8 @@ func (terminalBridgeFinalRuntime) Run(_ context.Context, req agent.RunRequest) (
 					"caelis": map[string]any{
 						"runtime": map[string]any{
 							"task": map[string]any{
-								"task_id":     "task-1",
-								"terminal_id": "terminal-1",
+								"task_id":     taskID,
+								"terminal_id": terminalID,
 								"running":     false,
 							},
 						},
@@ -1569,6 +1644,19 @@ func terminalOutputPayloads(notifications []acp.SessionNotification, terminalID 
 		}
 	}
 	return out
+}
+
+func hasToolUpdateContent(notifications []acp.SessionNotification, toolCallID string) bool {
+	for _, notification := range notifications {
+		update, ok := notification.Update.(acp.ToolCallUpdate)
+		if !ok || strings.TrimSpace(update.ToolCallID) != toolCallID {
+			continue
+		}
+		if len(update.Content) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func firstTerminalOutputIndex(notifications []acp.SessionNotification, terminalID string) int {

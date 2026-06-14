@@ -654,15 +654,18 @@ func (a *RuntimeAgent) emitRunEvents(runCtx context.Context, bridgeCtx context.C
 			continue
 		}
 		terminalBridge, hasTerminalBridge := a.terminalBridgePlan(event)
+		bridgeOwnsTerminal := hasTerminalBridge
 		if hasTerminalBridge {
 			a.rememberTerminalRef(event.SessionID, terminalBridge.displayTerminalID, terminalBridge.ref)
 			if terminalBridgeFinalStatus(terminalBridge.status) {
-				if _, err := a.emitTerminalBridgeSnapshot(context.WithoutCancel(bridgeCtx), cb, terminalBridge, bridgedTerminals); err != nil {
+				emitted, err := a.emitTerminalBridgeSnapshot(context.WithoutCancel(bridgeCtx), cb, terminalBridge, bridgedTerminals)
+				if err != nil {
 					return err
 				}
+				bridgeOwnsTerminal = emitted
 			}
 		}
-		if err := a.emitEvent(runCtx, cb, event, outboundFilter, hasTerminalBridge); err != nil {
+		if err := a.emitEvent(runCtx, cb, event, outboundFilter, bridgeOwnsTerminal); err != nil {
 			return err
 		}
 		if hasTerminalBridge {
@@ -742,7 +745,7 @@ func (a *RuntimeAgent) emitEvent(ctx context.Context, cb acp.PromptCallbacks, ev
 	for _, notification := range notifications {
 		filtered := notification
 		if stripTerminalOutput {
-			filtered = withoutTerminalOutputMeta(filtered)
+			filtered = withoutTerminalOutputProjection(filtered)
 		}
 		if outboundFilter != nil {
 			var ok bool
@@ -828,7 +831,7 @@ func (a *RuntimeAgent) emitTerminalBridgeSnapshot(ctx context.Context, cb acp.Pr
 		return false, nil
 	}
 	if _, exists := active[plan.key]; exists {
-		return false, nil
+		return true, nil
 	}
 	provider, ok := a.runtime.(agent.StreamProvider)
 	if !ok || provider.Streams() == nil {
@@ -956,13 +959,15 @@ func terminalOutputMeta(terminalID string, data string) map[string]any {
 	}
 }
 
-func withoutTerminalOutputMeta(notification acp.SessionNotification) acp.SessionNotification {
+func withoutTerminalOutputProjection(notification acp.SessionNotification) acp.SessionNotification {
 	switch update := notification.Update.(type) {
 	case acp.ToolCall:
 		update.Meta = withoutMetaKey(update.Meta, "terminal_output")
+		update.Content = nil
 		notification.Update = update
 	case acp.ToolCallUpdate:
 		update.Meta = withoutMetaKey(update.Meta, "terminal_output")
+		update.Content = nil
 		notification.Update = update
 	}
 	return notification
