@@ -218,20 +218,21 @@ func (b *ReasoningBlock) Render(ctx BlockRenderContext) []RenderedRow {
 // ---------------------------------------------------------------------------
 
 type MainACPTurnBlock struct {
-	id                   string
-	SessionID            string
-	Status               string
-	StartedAt            time.Time
-	EndedAt              time.Time
-	Events               []SubagentEvent
-	ExpandedTools        map[string]bool
-	ExpandedToolOutput   map[string]bool
-	ToolPanelScroll      map[string]toolPanelScrollState
-	ExpandedThought      map[string]bool
-	ExpandedExplore      map[string]bool
-	toolPanelRenderCache map[string]toolOutputRenderCache
-	toolEventIndex       map[string]int
-	compactHeightBudget  compactHeightBudgetState
+	id                    string
+	SessionID             string
+	Status                string
+	StartedAt             time.Time
+	EndedAt               time.Time
+	Events                []SubagentEvent
+	ExpandedTools         map[string]bool
+	ExpandedToolOutput    map[string]bool
+	ToolPanelScroll       map[string]toolPanelScrollState
+	ExpandedThought       map[string]bool
+	ExpandedExplore       map[string]bool
+	explorationProjection explorationProjectionState
+	toolPanelRenderCache  map[string]toolOutputRenderCache
+	toolEventIndex        map[string]int
+	compactHeightBudget   compactHeightBudgetState
 }
 
 func NewMainACPTurnBlock(sessionID string) *MainACPTurnBlock {
@@ -438,6 +439,8 @@ func (b *MainACPTurnBlock) Render(ctx BlockRenderContext) []RenderedRow {
 		ToolPanelFullOutput:    b.toolPanelFullOutput,
 		ToolPanelRows:          b.renderToolPanelRows,
 		ExplorationExpanded:    b.explorationExpanded,
+		StableExplorationPrep:  b.explorationProjection.reconcile,
+		StableExplorationRows:  b.stableExplorationRows,
 		ToolPanelScrollState:   b.toolPanelScrollState,
 		ReasoningExpanded:      b.reasoningExpanded,
 	})
@@ -526,22 +529,23 @@ func hasDeferredLiveTailCompactStage(events []SubagentEvent, status string) bool
 // ---------------------------------------------------------------------------
 
 type ParticipantTurnBlock struct {
-	id                   string
-	SessionID            string
-	Actor                string
-	Status               string
-	Expanded             bool
-	StartedAt            time.Time
-	EndedAt              time.Time
-	Events               []SubagentEvent
-	ExpandedTools        map[string]bool
-	ExpandedToolOutput   map[string]bool
-	ToolPanelScroll      map[string]toolPanelScrollState
-	ExpandedThought      map[string]bool
-	ExpandedExplore      map[string]bool
-	toolPanelRenderCache map[string]toolOutputRenderCache
-	toolEventIndex       map[string]int
-	compactHeightBudget  compactHeightBudgetState
+	id                    string
+	SessionID             string
+	Actor                 string
+	Status                string
+	Expanded              bool
+	StartedAt             time.Time
+	EndedAt               time.Time
+	Events                []SubagentEvent
+	ExpandedTools         map[string]bool
+	ExpandedToolOutput    map[string]bool
+	ToolPanelScroll       map[string]toolPanelScrollState
+	ExpandedThought       map[string]bool
+	ExpandedExplore       map[string]bool
+	explorationProjection explorationProjectionState
+	toolPanelRenderCache  map[string]toolOutputRenderCache
+	toolEventIndex        map[string]int
+	compactHeightBudget   compactHeightBudgetState
 }
 
 func NewParticipantTurnBlock(sessionID, actor string) *ParticipantTurnBlock {
@@ -702,6 +706,8 @@ func (b *ParticipantTurnBlock) Render(ctx BlockRenderContext) []RenderedRow {
 			ToolPanelFullOutput:    b.toolPanelFullOutput,
 			ToolPanelRows:          b.renderToolPanelRows,
 			ExplorationExpanded:    b.explorationExpanded,
+			StableExplorationPrep:  b.explorationProjection.reconcile,
+			StableExplorationRows:  b.stableExplorationRows,
 			ToolPanelScrollState:   b.toolPanelScrollState,
 			ReasoningExpanded:      b.reasoningExpanded,
 		})

@@ -1305,11 +1305,11 @@ func (m *Model) tryToggleFoldToken(blockID string, token string) bool {
 	if key, ok := strings.CutPrefix(strings.TrimSpace(token), "acp_exploration_stage:"); ok {
 		return m.tryToggleACPExplorationStageToken(blockID, key)
 	}
-	if key, ok := strings.CutPrefix(strings.TrimSpace(token), "acp_task_stage:"); ok {
+	if key, ok := strings.CutPrefix(strings.TrimSpace(token), "acp_exploration_stable:"); ok {
 		return m.tryToggleACPExplorationStageToken(blockID, key)
 	}
-	if rawIDs, ok := strings.CutPrefix(strings.TrimSpace(token), "acp_exploration_group:"); ok {
-		return m.tryToggleACPExplorationGroupToken(blockID, rawIDs)
+	if key, ok := strings.CutPrefix(strings.TrimSpace(token), "acp_task_stage:"); ok {
+		return m.tryToggleACPExplorationStageToken(blockID, key)
 	}
 	callID, ok := strings.CutPrefix(strings.TrimSpace(token), "acp_tool_panel:")
 	if !ok || strings.TrimSpace(callID) == "" {
@@ -1357,54 +1357,6 @@ func (m *Model) tryToggleACPExplorationStageToken(blockID string, key string) bo
 	default:
 		return false
 	}
-}
-
-func (m *Model) tryToggleACPExplorationGroupToken(blockID string, rawIDs string) bool {
-	callIDs := splitNonEmptyCommaList(rawIDs)
-	if len(callIDs) == 0 {
-		return false
-	}
-	switch blk := m.doc.Find(strings.TrimSpace(blockID)).(type) {
-	case *ParticipantTurnBlock:
-		allExpanded := true
-		for _, callID := range callIDs {
-			if !blk.toolPanelExpanded(callID) {
-				allExpanded = false
-				break
-			}
-		}
-		next := !allExpanded
-		for _, callID := range callIDs {
-			blk.setToolPanelExpanded(callID, next)
-		}
-		return true
-	case *MainACPTurnBlock:
-		allExpanded := true
-		for _, callID := range callIDs {
-			if !blk.toolPanelExpanded(callID) {
-				allExpanded = false
-				break
-			}
-		}
-		next := !allExpanded
-		for _, callID := range callIDs {
-			blk.setToolPanelExpanded(callID, next)
-		}
-		return true
-	default:
-		return false
-	}
-}
-
-func splitNonEmptyCommaList(raw string) []string {
-	parts := strings.Split(raw, ",")
-	out := make([]string, 0, len(parts))
-	for _, part := range parts {
-		if value := strings.TrimSpace(part); value != "" {
-			out = append(out, value)
-		}
-	}
-	return out
 }
 
 func (m *Model) submissionModeForLine(line string) SubmissionMode {

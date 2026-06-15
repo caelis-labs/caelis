@@ -26,6 +26,8 @@ type acpTranscriptRenderOptions struct {
 	ToolPanelFullOutput    func(callID string) bool
 	ToolPanelRows          func(toolPanelRenderRequest) []RenderedRow
 	ExplorationExpanded    func(key string) bool
+	StableExplorationPrep  func(events []SubagentEvent, status string)
+	StableExplorationRows  func(blockID string, events []SubagentEvent, idx int, status string, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) ([]RenderedRow, int, bool)
 	ToolPanelScrollState   func(callID string) toolPanelScrollState
 	ReasoningExpanded      func(key string) bool
 }
@@ -49,11 +51,22 @@ const (
 
 func renderACPTranscriptRows(blockID string, events []SubagentEvent, status string, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) []RenderedRow {
 	visible := visibleNarrativeEvents(events, status)
+	if opts.StableExplorationPrep != nil {
+		opts.StableExplorationPrep(visible, status)
+	}
 	rows := make([]RenderedRow, 0, len(visible)+2)
 	hasContent := false
 	lastGroup := acpTranscriptGroupNone
 	for i := 0; i < len(visible); i++ {
 		ev := visible[i]
+		if stableRows, consumed, ok := renderStableExplorationRows(blockID, visible, i, status, width, ctx, opts); ok {
+			rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupExploration, false)
+			rows = append(rows, stableRows...)
+			hasContent = true
+			lastGroup = acpTranscriptGroupExploration
+			i = consumed
+			continue
+		}
 		switch ev.Kind {
 		case SEPlan:
 			rows = append(rows, renderACPPlanRows(blockID, ev, width, ctx)...)
@@ -65,14 +78,6 @@ func renderACPTranscriptRows(blockID string, events []SubagentEvent, status stri
 				rows = append(rows, taskRows...)
 				hasContent = true
 				lastGroup = acpTranscriptGroupTask
-				i = consumed
-				continue
-			}
-			if explorationRows, consumed, ok := renderACPExplorationStageRows(blockID, visible, i, status, width, ctx, opts); ok {
-				rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupExploration, false)
-				rows = append(rows, explorationRows...)
-				hasContent = true
-				lastGroup = acpTranscriptGroupExploration
 				i = consumed
 				continue
 			}
@@ -116,14 +121,6 @@ func renderACPTranscriptRows(blockID string, events []SubagentEvent, status stri
 				i = consumed
 				continue
 			}
-			if explorationRows, consumed, ok := renderACPExplorationStageRows(blockID, visible, i, status, width, ctx, opts); ok {
-				rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupExploration, false)
-				rows = append(rows, explorationRows...)
-				hasContent = true
-				lastGroup = acpTranscriptGroupExploration
-				i = consumed
-				continue
-			}
 			if ev.Text != "" {
 				rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupNarrative, false)
 				rows = append(rows, renderParticipantTurnNarrativeEventRows(blockID, ev, tuikit.LineStyleAssistant, width, ctx, participantNarrativeEventActive(visible, i, status))...)
@@ -136,22 +133,6 @@ func renderACPTranscriptRows(blockID string, events []SubagentEvent, status stri
 				rows = append(rows, taskRows...)
 				hasContent = true
 				lastGroup = acpTranscriptGroupTask
-				i = consumed
-				continue
-			}
-			if explorationRows, consumed, ok := renderACPExplorationStageRows(blockID, visible, i, status, width, ctx, opts); ok {
-				rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupExploration, false)
-				rows = append(rows, explorationRows...)
-				hasContent = true
-				lastGroup = acpTranscriptGroupExploration
-				i = consumed
-				continue
-			}
-			if groupRows, consumed, ok := renderACPExplorationGroupRows(blockID, visible, i, status, width, ctx, opts); ok {
-				rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupExploration, false)
-				rows = append(rows, groupRows...)
-				hasContent = true
-				lastGroup = acpTranscriptGroupExploration
 				i = consumed
 				continue
 			}

@@ -238,6 +238,13 @@ func (b *MainACPTurnBlock) toggleExplorationExpanded(key string) bool {
 	return toggleKeyedExpansion(&b.ExpandedExplore, key)
 }
 
+func (b *MainACPTurnBlock) stableExplorationRows(blockID string, events []SubagentEvent, idx int, status string, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) ([]RenderedRow, int, bool) {
+	if b == nil {
+		return nil, idx, false
+	}
+	return b.explorationProjection.renderContainerRows(blockID, events, idx, status, width, ctx, opts)
+}
+
 func (b *MainACPTurnBlock) toolPanelScrollState(callID string) toolPanelScrollState {
 	if b == nil {
 		return defaultToolPanelScrollState()
@@ -328,6 +335,13 @@ func (b *ParticipantTurnBlock) toggleExplorationExpanded(key string) bool {
 		return false
 	}
 	return toggleKeyedExpansion(&b.ExpandedExplore, key)
+}
+
+func (b *ParticipantTurnBlock) stableExplorationRows(blockID string, events []SubagentEvent, idx int, status string, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) ([]RenderedRow, int, bool) {
+	if b == nil {
+		return nil, idx, false
+	}
+	return b.explorationProjection.renderContainerRows(blockID, events, idx, status, width, ctx, opts)
 }
 
 func (b *ParticipantTurnBlock) toolPanelScrollState(callID string) toolPanelScrollState {

@@ -7,29 +7,326 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-func renderACPExplorationStageRows(blockID string, events []SubagentEvent, idx int, status string, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) ([]RenderedRow, int, bool) {
-	stage, end := compactExplorationStage(events, idx, status)
-	if !compactExplorationStageHasSummary(stage) {
+type explorationProjectionState struct {
+	Containers []explorationContainerState
+}
+
+type explorationContainerState struct {
+	StableID string
+	CallIDs  []string
+}
+
+func renderStableExplorationRows(blockID string, events []SubagentEvent, idx int, status string, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) ([]RenderedRow, int, bool) {
+	if opts.StableExplorationRows == nil {
 		return nil, idx, false
 	}
-	key := explorationStageKey(stage)
-	token := acpExplorationStageClickToken(key)
+	return opts.StableExplorationRows(blockID, events, idx, status, width, ctx, opts)
+}
+
+func (s *explorationProjectionState) reconcile(events []SubagentEvent, status string) {
+	if s == nil {
+		return
+	}
+	existing := make(map[string]explorationContainerState, len(s.Containers))
+	for _, container := range s.Containers {
+		if container.StableID == "" || len(container.CallIDs) == 0 {
+			continue
+		}
+		existing[container.StableID] = container
+	}
+	candidates := make(map[string][]string)
+	for _, callIDs := range collectStableExplorationRuns(events, status) {
+		addExplorationCandidate(candidates, callIDs)
+	}
+	seen := map[string]bool{}
+	out := make([]explorationContainerState, 0, len(s.Containers)+len(candidates))
+	for stableID, callIDs := range candidates {
+		container := explorationContainerState{StableID: stableID, CallIDs: callIDs}
+		if prev, ok := existing[stableID]; ok {
+			if len(prev.CallIDs) > len(container.CallIDs) && explorationCallIDsPresent(events, prev.CallIDs) {
+				container.CallIDs = prev.CallIDs
+			}
+		}
+		out = append(out, container)
+		seen[stableID] = true
+	}
+	for _, prev := range s.Containers {
+		if prev.StableID == "" || seen[prev.StableID] || !explorationCallIDsPresent(events, prev.CallIDs) {
+			continue
+		}
+		out = append(out, prev)
+		seen[prev.StableID] = true
+	}
+	sortExplorationContainers(out, events)
+	s.Containers = out
+}
+
+func collectStableExplorationRuns(events []SubagentEvent, status string) [][]string {
+	var runs [][]string
+	var current []string
+	currentHasNarrative := false
+	flush := func() {
+		if len(current) == 0 {
+			currentHasNarrative = false
+			return
+		}
+		if currentHasNarrative || len(current) >= 2 {
+			runs = append(runs, append([]string(nil), current...))
+		}
+		current = nil
+		currentHasNarrative = false
+	}
+	for i := 0; i < len(events); {
+		step, ok := collectExplorationRenderStep(events, i)
+		if !ok {
+			flush()
+			i++
+			continue
+		}
+		settled := isTerminalACPTranscriptStatus(status) || hasLaterTranscriptStep(events, step.end+1)
+		if step.completedExploration && settled {
+			current = append(current, step.callIDs...)
+			currentHasNarrative = currentHasNarrative || step.hasNarrative
+		} else {
+			flush()
+		}
+		i = step.end + 1
+	}
+	flush()
+	return runs
+}
+
+type explorationRenderStep struct {
+	start                int
+	end                  int
+	callIDs              []string
+	hasNarrative         bool
+	completedExploration bool
+}
+
+func collectExplorationRenderStep(events []SubagentEvent, idx int) (explorationRenderStep, bool) {
+	if idx < 0 || idx >= len(events) {
+		return explorationRenderStep{}, false
+	}
+	start := idx
+	i := idx
+	for i < len(events) && isExplorationNarrativeEvent(events[i]) {
+		i++
+	}
+	if i >= len(events) || events[i].Kind != SEToolCall {
+		return explorationRenderStep{}, false
+	}
+	step := explorationRenderStep{
+		start:                start,
+		end:                  i,
+		completedExploration: true,
+	}
+	for j := start; j < i; j++ {
+		if strings.TrimSpace(events[j].Text) != "" {
+			step.hasNarrative = true
+			break
+		}
+	}
+	for i < len(events) && events[i].Kind == SEToolCall {
+		ev := events[i]
+		if !isCompactExplorationTool(ev) {
+			break
+		}
+		step.callIDs = append(step.callIDs, strings.TrimSpace(ev.CallID))
+		step.end = i
+		i++
+	}
+	if len(step.callIDs) == 0 {
+		step.completedExploration = false
+	}
+	return step, true
+}
+
+func addExplorationCandidate(candidates map[string][]string, callIDs []string) {
+	if len(callIDs) == 0 {
+		return
+	}
+	stableID := callIDs[0]
+	if len(callIDs) > len(candidates[stableID]) {
+		candidates[stableID] = callIDs
+	}
+}
+
+func explorationCallIDs(events []SubagentEvent) []string {
+	out := make([]string, 0, len(events))
+	seen := map[string]bool{}
+	for _, ev := range events {
+		if ev.Kind != SEToolCall {
+			continue
+		}
+		callID := strings.TrimSpace(ev.CallID)
+		if callID == "" || seen[callID] {
+			continue
+		}
+		seen[callID] = true
+		out = append(out, callID)
+	}
+	return out
+}
+
+func explorationCallIDsPresent(events []SubagentEvent, callIDs []string) bool {
+	if len(callIDs) == 0 {
+		return false
+	}
+	present := map[string]bool{}
+	for _, ev := range events {
+		if ev.Kind == SEToolCall {
+			present[strings.TrimSpace(ev.CallID)] = true
+		}
+	}
+	for _, callID := range callIDs {
+		if !present[strings.TrimSpace(callID)] {
+			return false
+		}
+	}
+	return true
+}
+
+func sortExplorationContainers(containers []explorationContainerState, events []SubagentEvent) {
+	for i := 1; i < len(containers); i++ {
+		item := containers[i]
+		itemIdx := firstExplorationCallIndex(events, item.StableID)
+		j := i - 1
+		for ; j >= 0 && firstExplorationCallIndex(events, containers[j].StableID) > itemIdx; j-- {
+			containers[j+1] = containers[j]
+		}
+		containers[j+1] = item
+	}
+}
+
+func firstExplorationCallIndex(events []SubagentEvent, callID string) int {
+	callID = strings.TrimSpace(callID)
+	for i, ev := range events {
+		if ev.Kind == SEToolCall && strings.TrimSpace(ev.CallID) == callID {
+			return i
+		}
+	}
+	return len(events)
+}
+
+func (s *explorationProjectionState) renderContainerRows(blockID string, events []SubagentEvent, idx int, status string, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) ([]RenderedRow, int, bool) {
+	if s == nil || idx < 0 || idx >= len(events) {
+		return nil, idx, false
+	}
+	for i := range s.Containers {
+		start, end, ok := explorationContainerRange(events, idx, s.Containers[i].CallIDs)
+		if !ok || start != idx {
+			continue
+		}
+		return s.renderContainerAt(blockID, events[start:end+1], end, width, ctx, opts, &s.Containers[i])
+	}
+	return nil, idx, false
+}
+
+func explorationContainerRange(events []SubagentEvent, idx int, callIDs []string) (int, int, bool) {
+	if len(callIDs) == 0 || idx < 0 || idx >= len(events) {
+		return idx, idx, false
+	}
+	firstID := strings.TrimSpace(callIDs[0])
+	if firstID == "" {
+		return idx, idx, false
+	}
+	if events[idx].Kind == SEReasoning || events[idx].Kind == SEAssistant {
+		j := idx
+		for j < len(events) && isExplorationNarrativeEvent(events[j]) {
+			j++
+		}
+		if j >= len(events) || events[j].Kind != SEToolCall || strings.TrimSpace(events[j].CallID) != firstID {
+			return idx, idx, false
+		}
+	} else if events[idx].Kind != SEToolCall || strings.TrimSpace(events[idx].CallID) != firstID {
+		return idx, idx, false
+	}
+	needed := map[string]bool{}
+	for _, callID := range callIDs {
+		needed[strings.TrimSpace(callID)] = true
+	}
+	seen := map[string]bool{}
+	for end := idx; end < len(events); end++ {
+		if events[end].Kind != SEToolCall {
+			continue
+		}
+		callID := strings.TrimSpace(events[end].CallID)
+		if needed[callID] {
+			seen[callID] = true
+			if len(seen) == len(needed) {
+				return idx, end, true
+			}
+		}
+	}
+	return idx, idx, false
+}
+
+func (s *explorationProjectionState) renderContainerAt(blockID string, events []SubagentEvent, end int, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions, container *explorationContainerState) ([]RenderedRow, int, bool) {
+	if container == nil || len(container.CallIDs) == 0 {
+		return nil, end, false
+	}
+	key := strings.TrimSpace(container.StableID)
+	if key == "" {
+		return nil, end, false
+	}
+	token := acpStableExplorationClickToken(key)
 	expanded := false
 	if opts.ExplorationExpanded != nil {
-		expanded = opts.ExplorationExpanded(key)
+		expanded = opts.ExplorationExpanded(key) || opts.ExplorationExpanded(explorationStageKey(events))
 	}
 	header := "• Explored"
 	if expanded {
 		rows := []RenderedRow{renderACPTranscriptHeaderRow(blockID, header, width, ctx, token)}
-		expandedRows := explorationStageExpandedRows(blockID, stage, width, ctx, token)
-		rows = append(rows, expandedRows...)
+		rows = append(rows, explorationContainerExpandedRows(blockID, events, width, ctx, token)...)
 		return rows, end, true
 	}
+	toolEvents := explorationContainerToolEvents(events, container.CallIDs)
 	rows := []RenderedRow{renderACPTranscriptHeaderRow(blockID, header, width, ctx, token)}
-	for _, detail := range explorationGroupDetailRowsWithWorkspace(explorationToolEvents(stage), width, ctx.Workspace) {
+	for _, detail := range explorationGroupDetailRowsWithWorkspace(toolEvents, width, ctx.Workspace) {
 		rows = append(rows, StyledPlainClickableRow(blockID, detail, styleExplorationSummaryRow(detail, ctx), token))
 	}
 	return rows, end, true
+}
+
+func explorationContainerExpandedRows(blockID string, events []SubagentEvent, width int, ctx BlockRenderContext, token string) []RenderedRow {
+	rows := make([]RenderedRow, 0, len(events))
+	for _, ev := range events {
+		first := len(rows) == 0
+		switch ev.Kind {
+		case SEReasoning:
+			rows = append(rows, renderExplorationNarrativeRows(blockID, ev.Text, width, ctx, ctx.Theme.ReasoningStyle(), token, first)...)
+		case SEAssistant:
+			rows = append(rows, renderExplorationNarrativeRows(blockID, ev.Text, width, ctx, ctx.Theme.TextStyle(), token, first)...)
+		case SEToolCall:
+			if isCompactExplorationTool(ev) {
+				rows = append(rows, renderExplorationToolRow(blockID, ev, width, ctx, token, first))
+			}
+		}
+	}
+	return rows
+}
+
+func explorationContainerToolEvents(events []SubagentEvent, callIDs []string) []SubagentEvent {
+	needed := map[string]bool{}
+	for _, callID := range callIDs {
+		needed[strings.TrimSpace(callID)] = true
+	}
+	out := make([]SubagentEvent, 0, len(callIDs))
+	for _, ev := range events {
+		if ev.Kind == SEToolCall && needed[strings.TrimSpace(ev.CallID)] {
+			out = append(out, ev)
+		}
+	}
+	return out
+}
+
+func acpStableExplorationClickToken(key string) string {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return ""
+	}
+	return "acp_exploration_stable:" + key
 }
 
 func compactExplorationStageHasSummary(stage []SubagentEvent) bool {
@@ -185,24 +482,6 @@ func explorationToolEvents(events []SubagentEvent) []SubagentEvent {
 	return out
 }
 
-func explorationStageExpandedRows(blockID string, events []SubagentEvent, width int, ctx BlockRenderContext, token string) []RenderedRow {
-	rows := make([]RenderedRow, 0, len(events))
-	for _, ev := range events {
-		first := len(rows) == 0
-		switch ev.Kind {
-		case SEReasoning:
-			rows = append(rows, renderExplorationNarrativeRows(blockID, ev.Text, width, ctx, ctx.Theme.ReasoningStyle(), token, first)...)
-		case SEAssistant:
-			rows = append(rows, renderExplorationNarrativeRows(blockID, ev.Text, width, ctx, ctx.Theme.TextStyle(), token, first)...)
-		case SEToolCall:
-			if isCompactExplorationTool(ev) {
-				rows = append(rows, renderExplorationToolRow(blockID, ev, width, ctx, token, first))
-			}
-		}
-	}
-	return rows
-}
-
 func renderExplorationNarrativeRows(blockID string, text string, width int, ctx BlockRenderContext, style lipgloss.Style, token string, first bool) []RenderedRow {
 	text = sanitizeRenderableText(text)
 	if text == "" {
@@ -266,52 +545,6 @@ func explorationStageKey(events []SubagentEvent) string {
 		}
 	}
 	return strings.Join(ids, ",")
-}
-
-func acpExplorationStageClickToken(key string) string {
-	key = strings.TrimSpace(key)
-	if key == "" {
-		return ""
-	}
-	return "acp_exploration_stage:" + key
-}
-
-func renderACPExplorationGroupRows(blockID string, events []SubagentEvent, idx int, status string, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) ([]RenderedRow, int, bool) {
-	group, end := compactExplorationGroup(events, idx, opts)
-	if len(group) < 2 {
-		return nil, idx, false
-	}
-	if shouldDeferLiveTailStageCompaction(events, end, status) {
-		return nil, idx, false
-	}
-	summary := "• Explored"
-	token := explorationGroupClickToken(group)
-	rows := []RenderedRow{renderACPTranscriptHeaderRow(blockID, summary, width, ctx, token)}
-	for _, detail := range explorationGroupDetailRowsWithWorkspace(group, width, ctx.Workspace) {
-		rows = append(rows, StyledPlainClickableRow(blockID, detail, styleExplorationSummaryRow(detail, ctx), token))
-	}
-	return rows, end, true
-}
-
-func compactExplorationGroup(events []SubagentEvent, idx int, opts acpTranscriptRenderOptions) ([]SubagentEvent, int) {
-	if idx < 0 || idx >= len(events) {
-		return nil, idx
-	}
-	group := make([]SubagentEvent, 0, 4)
-	end := idx - 1
-	for i := idx; i < len(events); i++ {
-		ev := events[i]
-		if !isCompactExplorationTool(ev) {
-			break
-		}
-		callID := strings.TrimSpace(ev.CallID)
-		if opts.ToolPanelExpanded != nil && opts.ToolPanelExpanded(callID) {
-			break
-		}
-		group = append(group, ev)
-		end = i
-	}
-	return group, end
 }
 
 func isCompactExplorationTool(ev SubagentEvent) bool {
@@ -658,19 +891,6 @@ func explorationToolVerb(name string) string {
 	default:
 		return ""
 	}
-}
-
-func explorationGroupClickToken(events []SubagentEvent) string {
-	ids := make([]string, 0, len(events))
-	for _, ev := range events {
-		if callID := strings.TrimSpace(ev.CallID); callID != "" {
-			ids = append(ids, callID)
-		}
-	}
-	if len(ids) == 0 {
-		return ""
-	}
-	return "acp_exploration_group:" + strings.Join(ids, ",")
 }
 
 func pluralizeUnit(n int, unit string) string {
