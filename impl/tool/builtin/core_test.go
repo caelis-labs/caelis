@@ -91,7 +91,7 @@ func TestCoreToolSchemasExposeGuidanceBoundsAndAnnotations(t *testing.T) {
 	requireStringMinLength(t, defs[filesystem.ReadToolName], "path", 1)
 	requireIntegerBounds(t, defs[filesystem.ReadToolName], "offset", 0, nil)
 	requireIntegerBounds(t, defs[filesystem.ReadToolName], "limit", 1, ptrAny(400))
-	requireDescriptionContains(t, defs[filesystem.ReadToolName], "has_more", "revision", "if_revision")
+	requireDescriptionContains(t, defs[filesystem.ReadToolName], "numbered lines", "small offsets", "has_more", "revision", "if_revision")
 	requireAnnotations(t, defs[filesystem.ReadToolName], true, false, true, false)
 
 	requireIntegerBounds(t, defs[filesystem.ListToolName], "limit", 1, ptrAny(1000))
@@ -122,17 +122,17 @@ func TestCoreToolSchemasExposeGuidanceBoundsAndAnnotations(t *testing.T) {
 
 	requireStringMinLength(t, defs[shell.RunCommandToolName], "command", 1)
 	requireIntegerBounds(t, defs[shell.RunCommandToolName], "yield_time_ms", 0, nil)
-	requireDescriptionContains(t, defs[shell.RunCommandToolName], "workdir", "require_escalated")
+	requireDescriptionContains(t, defs[shell.RunCommandToolName], "repository inspection", "Do not prefix with cd", "workdir", "yield_time_ms", "require_escalated")
 	requireAnnotations(t, defs[shell.RunCommandToolName], false, true, false, true)
 
 	requireStringMinLength(t, defs[task.ToolName], "task_id", 1)
 	requireIntegerBounds(t, defs[task.ToolName], "yield_time_ms", 0, nil)
 	requireBooleanProperty(t, defs[task.ToolName], "wait_until_done")
-	requireDescriptionContains(t, defs[task.ToolName], "Always wait", "wait_until_done=true")
+	requireDescriptionContains(t, defs[task.ToolName], "continue a running/waiting SPAWN", "Always wait", "wait_until_done=true")
 	requireAnnotations(t, defs[task.ToolName], false, true, false, true)
 
 	requirePlanSchema(t, defs[plan.ToolName])
-	requireDescriptionContains(t, defs[plan.ToolName], "skip it for trivial")
+	requireDescriptionContains(t, defs[plan.ToolName], "multi-step, risky, or ambiguous", "skip it for trivial")
 	requireAnnotations(t, defs[plan.ToolName], false, false, true, false)
 }
 

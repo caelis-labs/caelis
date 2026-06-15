@@ -44,6 +44,9 @@ func TestDefinitionsAndModelSpecsCloneStableToolContracts(t *testing.T) {
 	if got := specs[0].Function.Name; got != "inspect" {
 		t.Fatalf("specs[0].Name = %q, want %q", got, "inspect")
 	}
+	if got := specs[0].Function.Description; got != "Inspect session state" {
+		t.Fatalf("specs[0].Description = %q, want %q", got, "Inspect session state")
+	}
 	if got := specs[0].Kind; got != model.ToolSpecKindFunction {
 		t.Fatalf("specs[0].Kind = %q, want %q", got, model.ToolSpecKindFunction)
 	}
