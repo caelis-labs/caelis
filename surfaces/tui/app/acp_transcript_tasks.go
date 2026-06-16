@@ -1,37 +1,37 @@
 package tuiapp
 
 import (
-	"strconv"
 	"strings"
 
 	"charm.land/lipgloss/v2"
 )
 
-func renderACPTaskStageRows(blockID string, events []SubagentEvent, idx int, status string, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) ([]RenderedRow, int, bool) {
-	stage, end := compactTaskStage(events, idx, status)
+func renderACPTaskStageRows(blockID string, events []SubagentEvent, idx int, status string, width int, ctx BlockRenderContext, _ acpTranscriptRenderOptions) ([]RenderedRow, int, bool) {
+	stage, end := compactTaskWaitRun(events, idx, status)
 	actions := taskControlEvents(stage)
 	if len(actions) == 0 {
 		return nil, idx, false
 	}
-	if hasTaskNarrative(stage) && shouldDeferLiveTailStageCompaction(events, end, status) {
-		return nil, idx, false
-	}
-	key := taskStageKey(actions)
-	token := acpTaskStageClickToken(key)
-	expanded := false
-	if opts.ExplorationExpanded != nil {
-		expanded = opts.ExplorationExpanded(key)
-	}
-	header := "• Tasks"
-	rows := []RenderedRow{renderACPTranscriptHeaderRow(blockID, header, width, ctx, token)}
-	if expanded {
-		rows = append(rows, taskStageExpandedRows(blockID, stage, width, ctx, token)...)
-		return rows, end, true
-	}
-	for _, detail := range taskStageDetailRows(actions, width) {
-		rows = append(rows, StyledPlainClickableRow(blockID, detail, styleTaskSummaryRow(detail, ctx), token))
+	rows := make([]RenderedRow, 0, 1)
+	for _, detail := range taskWaitRunRows(actions, width) {
+		rows = append(rows, StyledPlainRow(blockID, detail, styleTaskSummaryRow(detail, ctx)))
 	}
 	return rows, end, true
+}
+
+func compactTaskWaitRun(events []SubagentEvent, idx int, status string) ([]SubagentEvent, int) {
+	if idx < 0 || idx >= len(events) || !isTaskWaitControlEvent(events, idx) {
+		return nil, idx
+	}
+	end := idx
+	for end+1 < len(events) && isTaskWaitControlEvent(events, end+1) {
+		end++
+	}
+	settled := isTerminalACPTranscriptStatus(status) || hasLaterTranscriptStep(events, end+1)
+	if !settled {
+		return nil, idx
+	}
+	return events[idx : end+1], end
 }
 
 func compactTaskStage(events []SubagentEvent, idx int, status string) ([]SubagentEvent, int) {
@@ -94,21 +94,33 @@ func collectTaskTranscriptStep(events []SubagentEvent, idx int) (transcriptStep,
 func taskControlEvents(events []SubagentEvent) []SubagentEvent {
 	out := make([]SubagentEvent, 0, len(events))
 	seen := map[string]struct{}{}
-	for i, ev := range events {
+	for _, ev := range events {
 		if !isTaskControlEvent(ev) {
 			continue
 		}
 		key := strings.TrimSpace(ev.CallID)
-		if key == "" {
-			key = strconv.Itoa(i)
+		if key != "" {
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
 		}
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
 		out = append(out, ev)
 	}
 	return out
+}
+
+func taskWaitRunRows(events []SubagentEvent, width int) []string {
+	waits := make([]string, 0, len(events))
+	for _, ev := range events {
+		verb, detail := splitTaskAction(ev.Args)
+		if !strings.EqualFold(verb, "Wait") {
+			continue
+		}
+		waits = append(waits, detail)
+	}
+	detail := strings.Join(compactNonEmpty(waits), ", ")
+	return wrapExplorationSummaryDetail("• ", "Wait", detail, width)
 }
 
 func taskStageDetailRows(events []SubagentEvent, width int) []string {
@@ -276,7 +288,10 @@ func hasTaskNarrative(events []SubagentEvent) bool {
 func styleTaskSummaryRow(row string, ctx BlockRenderContext) string {
 	plainPrefix := ""
 	content := row
-	if strings.HasPrefix(row, "  └ ") {
+	if strings.HasPrefix(row, "• ") {
+		plainPrefix = "• "
+		content = strings.TrimPrefix(row, plainPrefix)
+	} else if strings.HasPrefix(row, "  └ ") {
 		plainPrefix = "  └ "
 		content = strings.TrimPrefix(row, plainPrefix)
 	} else if strings.HasPrefix(row, "    ") {
@@ -340,6 +355,13 @@ func isGroupedTaskControlEvent(events []SubagentEvent, idx int) bool {
 		return false
 	}
 	return isTaskControlEvent(events[idx]) && taskEventAction(events[idx]) != "write"
+}
+
+func isTaskWaitControlEvent(events []SubagentEvent, idx int) bool {
+	if idx < 0 || idx >= len(events) {
+		return false
+	}
+	return isTaskControlEvent(events[idx]) && taskEventAction(events[idx]) == "wait"
 }
 
 func isSubagentTaskWriteEvent(events []SubagentEvent, idx int) bool {

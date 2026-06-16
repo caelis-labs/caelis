@@ -511,6 +511,11 @@ func taskControlDisplay(raw map[string]any) string {
 				duration = formatDurationMS(ms)
 			}
 		}
+		if handle == "" && duration == "" {
+			if targetKind := taskTargetKindDisplay(asString(raw["target_kind"])); targetKind != "" {
+				return "Wait " + targetKind
+			}
+		}
 		parts := []string{"Wait"}
 		if handle != "" {
 			parts = append(parts, handle)
@@ -698,7 +703,7 @@ func taskDisplayInputForResult(input map[string]any, output map[string]any) map[
 	if out == nil {
 		out = map[string]any{}
 	}
-	for _, key := range []string{"effective_yield_time_ms", "yield_time_ms_defaulted", "wait_until_done"} {
+	for _, key := range []string{"effective_yield_time_ms", "yield_time_ms_defaulted", "wait_until_done", "target_kind"} {
 		if value, ok := output[key]; ok {
 			out[key] = value
 		}
@@ -825,6 +830,9 @@ func taskHandleDisplay(value string) string {
 	if value == "" {
 		return ""
 	}
+	if displayStringAllDigits(value) {
+		return ""
+	}
 	lower := strings.ToLower(value)
 	if strings.HasPrefix(lower, "task-") || strings.Contains(lower, "-task-") {
 		return ""
@@ -833,6 +841,29 @@ func taskHandleDisplay(value string) string {
 		return ""
 	}
 	return value
+}
+
+func taskTargetKindDisplay(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "command":
+		return "command"
+	case "subagent":
+		return "subagent"
+	default:
+		return ""
+	}
+}
+
+func displayStringAllDigits(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func toolDisplayResultHeader(name string, output string) string {

@@ -1056,12 +1056,14 @@ func TestProjectGatewayEventTaskControlsHideRawOutput(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		name    string
-		action  string
-		status  gateway.ToolStatus
-		output  map[string]any
-		content string
-		wantArg string
+		name     string
+		action   string
+		status   gateway.ToolStatus
+		output   map[string]any
+		content  string
+		wantArg  string
+		checkErr bool
+		wantErr  bool
 	}{
 		{
 			name:   "failed wait",
@@ -1073,8 +1075,10 @@ func TestProjectGatewayEventTaskControlsHideRawOutput(t *testing.T) {
 				"error":     "TASK_WAIT_FAILED_RAW_ERROR",
 				"exit_code": 1,
 			},
-			content: "TASK_WAIT_FAILED_CONTENT\n",
-			wantArg: "Wait jeff",
+			content:  "TASK_WAIT_FAILED_CONTENT\n",
+			wantArg:  "Wait jeff",
+			checkErr: true,
+			wantErr:  true,
 		},
 		{
 			name:   "cancel",
@@ -1116,6 +1120,10 @@ func TestProjectGatewayEventTaskControlsHideRawOutput(t *testing.T) {
 			}
 			if got := events[0].ToolOutput; got != "" {
 				t.Fatalf("ToolOutput = %q, want no TASK control display output", got)
+			}
+			if tc.checkErr && events[0].ToolError != tc.wantErr {
+				got := events[0].ToolError
+				t.Fatalf("ToolError = %v, want %v", got, tc.wantErr)
 			}
 		})
 	}
@@ -1303,6 +1311,30 @@ func TestProjectGatewayEventToolResultDoesNotDisplayRawOutputOnly(t *testing.T) 
 	}
 	if strings.Contains(events[0].ToolOutput, "network error") {
 		t.Fatalf("ToolOutput = %q, must not display rawOutput-only text", events[0].ToolOutput)
+	}
+}
+
+func TestProjectGatewayEventSilentTerminalFailureDisplaysExitCode(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectGatewayEventToTranscriptEvents(gateway.Event{
+		Kind: gateway.EventKindToolResult,
+		ToolResult: &gateway.ToolResultPayload{
+			CallID:    "command-silent-failed",
+			ToolName:  "RUN_COMMAND",
+			Status:    gateway.ToolStatusFailed,
+			RawInput:  map[string]any{"command": "false"},
+			RawOutput: map[string]any{"exit_code": 1},
+		},
+	})
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one tool event", events)
+	}
+	if got := events[0].ToolOutput; got != "exit 1" {
+		t.Fatalf("ToolOutput = %q, want exit code summary", got)
+	}
+	if !events[0].ToolOutputSynthetic {
+		t.Fatalf("ToolOutputSynthetic = false, want synthetic exit code summary")
 	}
 }
 

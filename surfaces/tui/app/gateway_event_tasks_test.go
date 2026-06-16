@@ -13,7 +13,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/stream"
 )
 
-func TestGatewayTaskControlsMergeIntoTaskStage(t *testing.T) {
+func TestGatewayTaskControlsCompactConsecutiveWaits(t *testing.T) {
 	model := newGatewayEventTestModel()
 	sendReasoning := func(text string) {
 		updated, _ := model.Update(gatewayEventMsg(gateway.EventEnvelope{
@@ -105,30 +105,14 @@ func TestGatewayTaskControlsMergeIntoTaskStage(t *testing.T) {
 	joined = strings.Join(renderedPlainRows(rows), "\n")
 	if !strings.Contains(joined, `› 两个子任务已启动`) ||
 		!strings.Contains(joined, `▸ TASK Write "Alice"`) ||
-		!strings.Contains(joined, `• Tasks`) ||
-		!strings.Contains(joined, `  └ Wait ella 5s, 8s`) ||
+		!strings.Contains(joined, `• Wait ella 5s, 8s`) ||
 		!strings.Contains(joined, `› 继续处理`) {
 		t.Fatalf("settled rows = %q, want previous wait controls settled before new reasoning", joined)
 	}
-	if !model.tryToggleACPToolPanelToken(block.BlockID(), "acp_task_stage:tasks:task-1,task-2") {
-		t.Fatal("expected task stage click token to expand grouped TASK controls")
-	}
-	rows = block.Render(BlockRenderContext{Width: 110, TermWidth: 110, Theme: model.theme})
-	joined = strings.Join(renderedPlainRows(rows), "\n")
-	if !strings.Contains(joined, `  └ Wait ella 5s`) ||
-		!strings.Contains(joined, `    Wait 8s`) ||
-		strings.Contains(joined, `  └ Write "Alice"`) {
-		t.Fatalf("expanded settled rows = %q, want wait controls expanded while Write stays independent", joined)
-	}
-	if !model.tryToggleACPToolPanelToken(block.BlockID(), "acp_task_stage:tasks:task-1,task-2") {
-		t.Fatal("expected expanded task stage click token to collapse grouped TASK controls")
-	}
-	rows = block.Render(BlockRenderContext{Width: 110, TermWidth: 110, Theme: model.theme})
-	joined = strings.Join(renderedPlainRows(rows), "\n")
-	if !strings.Contains(joined, `Tasks`) ||
-		!strings.Contains(joined, `Wait ella 5s, 8s`) ||
+	if strings.Contains(joined, "• Tasks") ||
+		strings.Contains(joined, "acp_task_stage") ||
 		strings.Contains(joined, `    Wait 8s`) {
-		t.Fatalf("collapsed task rows = %q, want wait controls summarized again", joined)
+		t.Fatalf("settled rows = %q, should use a non-expandable wait summary", joined)
 	}
 }
 
@@ -231,13 +215,8 @@ func TestGatewayTaskHandoffBudgetKeepsSummaryAndNewStreamVisible(t *testing.T) {
 
 	block.Events = append(block.Events, SubagentEvent{Kind: SEReasoning, Text: "继续处理"})
 	settledPlain := renderedPlainRows(block.Render(ctx))
-	maxBudget := maxInt(1, ctx.Height/2)
-	trailing := countTrailingBlankRows(settledPlain)
-	if trailing == 0 || trailing > maxBudget {
-		t.Fatalf("settled trailing budget rows = %d, want 1..%d; rows = %#v", trailing, maxBudget, settledPlain)
-	}
 	tail := strings.Join(tailPlainRows(settledPlain, ctx.Height), "\n")
-	if !strings.Contains(tail, "• Tasks") || !strings.Contains(tail, "继续处理") {
+	if !strings.Contains(tail, "• Wait ella 5s") || !strings.Contains(tail, "继续处理") {
 		t.Fatalf("visible tail = %q, want task summary and new stream visible", tail)
 	}
 }
@@ -586,6 +565,7 @@ func TestTaskControlFallbackHidesRawToolAndInternalTaskIDs(t *testing.T) {
 
 	cases := map[string]string{
 		"TASK wait task-4":       "Wait",
+		"TASK wait 42":           "Wait",
 		"TASK wait leo":          "Wait leo",
 		"TASK wait leo 10s":      "Wait leo 10s",
 		"TASK wait task-4 500ms": "Wait 500ms",
@@ -595,6 +575,20 @@ func TestTaskControlFallbackHidesRawToolAndInternalTaskIDs(t *testing.T) {
 		if got := toolDisplayArgs("TASK", nil, input); got != want {
 			t.Fatalf("toolDisplayArgs(TASK, %q) = %q, want %q", input, got, want)
 		}
+	}
+}
+
+func TestTaskControlDisplayUsesTargetKindFallback(t *testing.T) {
+	t.Parallel()
+
+	input := map[string]any{
+		"action":          "wait",
+		"task_id":         "task-4",
+		"target_kind":     "command",
+		"wait_until_done": true,
+	}
+	if got := toolDisplayArgs("TASK", input); got != "Wait command" {
+		t.Fatalf("toolDisplayArgs(TASK) = %q, want Wait command", got)
 	}
 }
 
@@ -612,7 +606,7 @@ func TestTaskControlDisplayHidesWaitUntilDoneDuration(t *testing.T) {
 	}
 }
 
-func TestGatewayTaskStageCleansRawTaskFallbackRows(t *testing.T) {
+func TestGatewayTaskWaitSummaryCleansRawTaskFallbackRows(t *testing.T) {
 	model := newGatewayEventTestModel()
 	for _, item := range []struct {
 		callID string
@@ -658,9 +652,8 @@ func TestGatewayTaskStageCleansRawTaskFallbackRows(t *testing.T) {
 	}
 	rows := block.Render(BlockRenderContext{Width: 120, TermWidth: 120, Theme: model.theme})
 	joined := strings.Join(renderedPlainRows(rows), "\n")
-	if !strings.Contains(joined, "• Tasks") ||
-		!strings.Contains(joined, "  └ Wait 5s, nora 3s, nora 3s, nora 3s") ||
-		!strings.Contains(joined, "    Cancel nora") {
+	if !strings.Contains(joined, "• Wait 5s, nora 3s, nora 3s, nora 3s") ||
+		!strings.Contains(joined, "▸ TASK Cancel nora") {
 		t.Fatalf("rendered rows = %q, want cleaned task action rows", joined)
 	}
 	for _, forbidden := range []string{"TASK wait", "task-12"} {
@@ -843,7 +836,7 @@ func TestGatewayTaskControlResultsHideRawOutput(t *testing.T) {
 			},
 			content:   "TASK_WAIT_FAILED_CONTENT\n",
 			wantArg:   "Wait 12s",
-			forbidden: []string{"TASK_WAIT_FAILED_RAW_RESULT", "TASK_WAIT_FAILED_RAW_ERROR", "TASK_WAIT_FAILED_CONTENT"},
+			forbidden: []string{"TASK_WAIT_FAILED_RAW_RESULT", "TASK_WAIT_FAILED_RAW_ERROR", "TASK_WAIT_FAILED_CONTENT", "failed"},
 		},
 		{
 			name:   "cancel",
@@ -1412,7 +1405,7 @@ func TestGatewayTaskWriteRendersOwnPanelAndAbsorbsContinuationSpawn(t *testing.T
 	}
 	rows := block.Render(BlockRenderContext{Width: 160, TermWidth: 160, Theme: model.theme})
 	joined := strings.Join(renderedPlainRows(rows), "\n")
-	for _, want := range []string{"• Spawned jack[self]: 创建文件", "• Tasks", "Wait jack", "• Write jack: 检查刚才创建的文件", "正在读取 hello_from_spawn.txt"} {
+	for _, want := range []string{"• Spawned jack[self]: 创建文件", "• Wait jack 5s", "• Write jack: 检查刚才创建的文件", "正在读取 hello_from_spawn.txt"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("running continuation rows missing %q:\n%s", want, joined)
 		}

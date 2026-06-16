@@ -1582,8 +1582,8 @@ func TestToolResultEventUsesStatusForSilentCommandFailure(t *testing.T) {
 		t.Fatalf("content = %#v, want one terminal content item", content)
 	}
 	got := content[0].Text
-	if got != "failed" {
-		t.Fatalf("content text = %q, want failed status", got)
+	if got != "exit 1" {
+		t.Fatalf("content text = %q, want exit code status", got)
 	}
 }
 

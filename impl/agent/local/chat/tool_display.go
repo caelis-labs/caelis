@@ -213,7 +213,20 @@ func terminalResultText(output map[string]any, status string, isErr bool) string
 	if errText := toolRawString(output["error"]); toolOutputHasNonBlankLine(errText) {
 		return errText
 	}
+	if isErr || strings.EqualFold(strings.TrimSpace(status), "failed") {
+		if exitText := terminalExitCodeText(output); exitText != "" {
+			return exitText
+		}
+	}
 	return ""
+}
+
+func terminalExitCodeText(output map[string]any) string {
+	exitCode := toolInt(output["exit_code"])
+	if exitCode <= 0 {
+		return ""
+	}
+	return "exit " + strconv.Itoa(exitCode)
 }
 
 func spawnResultText(output map[string]any, status string, isErr bool) string {

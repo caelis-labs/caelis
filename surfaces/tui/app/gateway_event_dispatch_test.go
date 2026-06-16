@@ -605,6 +605,27 @@ func TestConsecutiveReasoningEventsFoldAsOnePreviewBeforeAttentionTool(t *testin
 	}
 }
 
+func TestLiveReasoningStaysExpandedBeforePendingTaskWait(t *testing.T) {
+	model := newGatewayEventTestModel()
+	block := NewMainACPTurnBlock("root-session")
+	block.Events = append(block.Events,
+		SubagentEvent{
+			Kind: SEReasoning,
+			Text: "checking whether the task is still running\nreasoning live line two",
+		},
+		SubagentEvent{Kind: SEToolCall, CallID: "task-wait-1", Name: "TASK", Args: "Wait 5s"},
+	)
+
+	rows := block.Render(BlockRenderContext{Width: 100, TermWidth: 100, Theme: model.theme})
+	joined := strings.Join(renderedPlainRows(rows), "\n")
+	if !strings.Contains(joined, "\n  reasoning live line two") {
+		t.Fatalf("rendered rows = %q, want live reasoning body expanded before pending TASK wait", joined)
+	}
+	if !strings.Contains(joined, "▸ TASK Wait 5s") {
+		t.Fatalf("rendered rows = %q, want pending TASK wait still visible", joined)
+	}
+}
+
 func TestGatewayReasoningFoldUsesTimedDurationWhenAvailable(t *testing.T) {
 	model := newGatewayEventTestModel()
 	start := time.Date(2026, 4, 27, 10, 0, 0, 0, time.UTC)

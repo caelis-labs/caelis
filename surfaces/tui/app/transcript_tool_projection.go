@@ -114,6 +114,9 @@ func projectTranscriptToolResult(input transcriptToolProjection, defaultSuccessS
 	if strings.TrimSpace(toolOutput) == "" {
 		if terminalOutput := terminalToolOutputText(semanticName, input.ToolKind, rawOutput, input.Meta, input.Content, status, toolErr); terminalOutput != "" {
 			toolOutput = terminalOutput
+		} else if exitText := terminalExitCodeOutputText(semanticName, input.ToolKind, rawOutput, status, toolErr); exitText != "" {
+			toolOutput = exitText
+			toolOutputSynthetic = true
 		} else if terminalNoOutputPlaceholder(semanticName, input.ToolKind, rawOutput, input.Meta, input.Content, status, toolErr) {
 			toolOutput = "(no output)"
 			toolOutputSynthetic = true

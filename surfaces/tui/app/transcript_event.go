@@ -1,6 +1,7 @@
 package tuiapp
 
 import (
+	"strconv"
 	"strings"
 	"time"
 
@@ -176,6 +177,20 @@ func terminalNoOutputPlaceholder(toolName string, toolKind string, rawOutput map
 		return false
 	}
 	return len(content) == 0 || hasStandardTerminalContent(content)
+}
+
+func terminalExitCodeOutputText(toolName string, toolKind string, rawOutput map[string]any, status string, isErr bool) string {
+	if !isTerminalPanelToolKind(toolName, toolKind) {
+		return ""
+	}
+	if !isErr && !strings.EqualFold(strings.TrimSpace(status), "failed") {
+		return ""
+	}
+	exitCode := displayInt(rawOutput["exit_code"])
+	if exitCode <= 0 {
+		return ""
+	}
+	return "exit " + strconv.Itoa(exitCode)
 }
 
 func terminalRawOutputHasText(rawOutput map[string]any) bool {

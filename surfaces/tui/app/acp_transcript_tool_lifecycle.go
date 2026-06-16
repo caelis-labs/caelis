@@ -295,7 +295,7 @@ func standardToolLifecycleHeader(ev SubagentEvent, err bool) string {
 		if taskEventAction(ev) == "write" {
 			return taskWriteLifecycleHeader(ev, err)
 		}
-		return standardVerbLifecycleHeader("Task", ev.Args, err)
+		return taskControlLifecycleHeader(ev)
 	case "WRITE", "PATCH":
 		ev.Name = semanticName
 		return mutationLifecycleHeader(ev, err)
@@ -309,6 +309,19 @@ func standardToolLifecycleHeader(ev SubagentEvent, err bool) string {
 		return standardVerbLifecycleHeader("Search", ev.Args, err)
 	default:
 		return standardVerbLifecycleHeader(toolEventDisplayName(firstTrimmed(ev.Name, ev.ToolKind, "Tool")), ev.Args, err)
+	}
+}
+
+func taskControlLifecycleHeader(ev SubagentEvent) string {
+	verb, detail := splitTaskAction(ev.Args)
+	if verb == "" {
+		verb = "Task"
+	}
+	switch strings.ToLower(strings.TrimSpace(verb)) {
+	case "wait", "cancel":
+		return standardVerbLifecycleHeader(verb, detail, false)
+	default:
+		return standardVerbLifecycleHeader("Task", ev.Args, false)
 	}
 }
 

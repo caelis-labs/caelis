@@ -1447,7 +1447,7 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 					"task_id":        "task-9",
 				},
 			},
-			want:        []string{"• Tasks", "  └ Wait 5s"},
+			want:        []string{"• Wait 5s"},
 			forbidden:   []string{"TASK", "task-9", "task / control", "state running", "session_id", "supports_input", "556d7447"},
 			expandPanel: true,
 			settleStep:  true,
