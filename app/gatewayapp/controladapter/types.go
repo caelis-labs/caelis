@@ -64,9 +64,3 @@ type PluginSnapshot = control.PluginSnapshot
 type MCPServerSnapshot = control.MCPServerSnapshot
 
 type MarketplaceSnapshot = control.MarketplaceSnapshot
-
-type OpenCodeDiscoverySnapshot = control.OpenCodeDiscoverySnapshot
-
-type OpenCodePluginSourceSnapshot = control.OpenCodePluginSourceSnapshot
-
-type OpenCodeNPMPackageSnapshot = control.OpenCodeNPMPackageSnapshot

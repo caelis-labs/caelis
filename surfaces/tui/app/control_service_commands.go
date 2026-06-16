@@ -822,8 +822,6 @@ func slashPluginWithContext(ctx context.Context, service control.Service, send f
 		return TaskResultMsg{SuppressTurnDivider: true}
 	case "marketplace":
 		return slashPluginMarketplaceWithContext(ctx, service, send, rest)
-	case "opencode":
-		return slashPluginOpenCodeWithContext(ctx, service, send, rest)
 	case "rm":
 		target := strings.TrimSpace(rest)
 		if target == "" {
@@ -947,7 +945,7 @@ func awaitPluginManagerSelection(ctx context.Context, service control.Service, s
 }
 
 func pluginUsageText() string {
-	return "usage: /plugin install <plugin@marketplace|path> | marketplace add|list|update|rm | opencode discover|import | manage | rm <id>"
+	return "usage: /plugin install <plugin@marketplace|path> | marketplace add|list|update|rm | manage | rm <id>"
 }
 
 func formatPluginDetail(p control.PluginSnapshot) string {

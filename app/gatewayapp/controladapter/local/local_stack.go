@@ -158,12 +158,6 @@ func runtimeStack(stack *gatewayapp.Stack) *RuntimeStack {
 		RemoveMarketplaceFn: func(ctx context.Context, name string) error {
 			return stack.Plugins().RemoveMarketplace(ctx, name)
 		},
-		DiscoverOpenCodeFn: func(ctx context.Context, workspace string) (controladapter.OpenCodeDiscoverySnapshot, error) {
-			return toRuntimeOpenCodeDiscoveryWithError(stack.Plugins().DiscoverOpenCode(workspace))
-		},
-		ImportOpenCodeFn: func(ctx context.Context, workspace string) ([]controladapter.PluginSnapshot, error) {
-			return toRuntimePluginSnapshots(stack.Plugins().ImportOpenCode(ctx, workspace))
-		},
 		AddPluginPathFn: func(ctx context.Context, path string) (controladapter.PluginSnapshot, error) {
 			return toRuntimePluginSnapshotWithError(stack.Plugins().AddPath(ctx, path))
 		},
@@ -556,34 +550,4 @@ func toRuntimeMarketplaceSnapshotWithError(info gatewayapp.MarketplaceInfo, err 
 		return controladapter.MarketplaceSnapshot{}, err
 	}
 	return toRuntimeMarketplaceSnapshot(info), nil
-}
-
-func toRuntimeOpenCodeDiscovery(info gatewayapp.OpenCodeDiscovery) controladapter.OpenCodeDiscoverySnapshot {
-	localPlugins := make([]controladapter.OpenCodePluginSourceSnapshot, 0, len(info.LocalPlugins))
-	for _, source := range info.LocalPlugins {
-		localPlugins = append(localPlugins, controladapter.OpenCodePluginSourceSnapshot{
-			Name: source.Name,
-			Path: source.Path,
-			Kind: source.Kind,
-		})
-	}
-	npmPackages := make([]controladapter.OpenCodeNPMPackageSnapshot, 0, len(info.NPMPackages))
-	for _, pkg := range info.NPMPackages {
-		npmPackages = append(npmPackages, controladapter.OpenCodeNPMPackageSnapshot{
-			Package: pkg.Package,
-			Source:  pkg.Source,
-		})
-	}
-	return controladapter.OpenCodeDiscoverySnapshot{
-		LocalPlugins: localPlugins,
-		NPMPackages:  npmPackages,
-		Warnings:     append([]string(nil), info.Warnings...),
-	}
-}
-
-func toRuntimeOpenCodeDiscoveryWithError(info gatewayapp.OpenCodeDiscovery, err error) (controladapter.OpenCodeDiscoverySnapshot, error) {
-	if err != nil {
-		return controladapter.OpenCodeDiscoverySnapshot{}, err
-	}
-	return toRuntimeOpenCodeDiscovery(info), nil
 }

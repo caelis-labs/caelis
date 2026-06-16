@@ -2369,7 +2369,7 @@ func TestAdapterCompleteSlashArgPluginRootOrder(t *testing.T) {
 	for _, candidate := range candidates {
 		got = append(got, candidate.Value)
 	}
-	want := []string{"install", "marketplace", "opencode", "manage", "rm"}
+	want := []string{"install", "marketplace", "manage", "rm"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("plugin root candidates = %#v, want %#v", got, want)
 	}

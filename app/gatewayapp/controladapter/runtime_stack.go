@@ -225,8 +225,6 @@ type RuntimeStack struct {
 	ListMarketplacesFn                   func(context.Context) ([]MarketplaceSnapshot, error)
 	UpdateMarketplaceFn                  func(context.Context, string) (MarketplaceSnapshot, error)
 	RemoveMarketplaceFn                  func(context.Context, string) error
-	DiscoverOpenCodeFn                   func(context.Context, string) (OpenCodeDiscoverySnapshot, error)
-	ImportOpenCodeFn                     func(context.Context, string) ([]PluginSnapshot, error)
 	AddPluginPathFn                      func(context.Context, string) (PluginSnapshot, error)
 	InstallPluginFn                      func(context.Context, string) (PluginSnapshot, error)
 	EnablePluginFn                       func(context.Context, string) (PluginSnapshot, error)
@@ -564,20 +562,6 @@ func (s *RuntimeStack) RemoveMarketplace(ctx context.Context, name string) error
 		return fmt.Errorf("app/gatewayapp/controladapter: remove marketplace dependency is unavailable")
 	}
 	return s.RemoveMarketplaceFn(ctx, name)
-}
-
-func (s *RuntimeStack) DiscoverOpenCode(ctx context.Context, workspace string) (OpenCodeDiscoverySnapshot, error) {
-	if s == nil || s.DiscoverOpenCodeFn == nil {
-		return OpenCodeDiscoverySnapshot{}, fmt.Errorf("app/gatewayapp/controladapter: discover opencode dependency is unavailable")
-	}
-	return s.DiscoverOpenCodeFn(ctx, workspace)
-}
-
-func (s *RuntimeStack) ImportOpenCode(ctx context.Context, workspace string) ([]PluginSnapshot, error) {
-	if s == nil || s.ImportOpenCodeFn == nil {
-		return nil, fmt.Errorf("app/gatewayapp/controladapter: import opencode dependency is unavailable")
-	}
-	return s.ImportOpenCodeFn(ctx, workspace)
 }
 
 func (s *RuntimeStack) AddPluginPath(ctx context.Context, path string) (PluginSnapshot, error) {

@@ -427,15 +427,11 @@ func (s PluginService) pluginInfoFromConfig(pCfg PluginConfig) PluginInfo {
 		info.Status = "active"
 		info.MCPServers = s.stack.MCPServersStatus(pCfg.ID)
 	}
-	applyOpenCodePluginInfo(&info, pCfg)
 	return info
 }
 
 func (s PluginService) enrichPluginInfoFromManifest(info *PluginInfo, pCfg PluginConfig) {
 	if info == nil {
-		return
-	}
-	if applyOpenCodePluginInfo(info, pCfg) {
 		return
 	}
 	p, err := pluginregistry.ParsePlugin(pCfg.Root)

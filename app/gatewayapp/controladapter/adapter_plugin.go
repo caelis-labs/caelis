@@ -22,14 +22,6 @@ func (d *Adapter) RemoveMarketplace(ctx context.Context, name string) error {
 	return d.stack.RemoveMarketplace(ctx, name)
 }
 
-func (d *Adapter) DiscoverOpenCode(ctx context.Context, workspace string) (OpenCodeDiscoverySnapshot, error) {
-	return d.stack.DiscoverOpenCode(ctx, workspace)
-}
-
-func (d *Adapter) ImportOpenCode(ctx context.Context, workspace string) ([]PluginSnapshot, error) {
-	return d.stack.ImportOpenCode(ctx, workspace)
-}
-
 func (d *Adapter) AddPluginPath(ctx context.Context, path string) (PluginSnapshot, error) {
 	return d.stack.AddPluginPath(ctx, path)
 }

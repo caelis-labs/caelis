@@ -2560,12 +2560,6 @@ func (d *bridgeTestDriver) UpdateMarketplace(context.Context, string) (control.M
 func (d *bridgeTestDriver) RemoveMarketplace(context.Context, string) error {
 	return nil
 }
-func (d *bridgeTestDriver) DiscoverOpenCode(context.Context, string) (control.OpenCodeDiscoverySnapshot, error) {
-	return control.OpenCodeDiscoverySnapshot{}, nil
-}
-func (d *bridgeTestDriver) ImportOpenCode(context.Context, string) ([]control.PluginSnapshot, error) {
-	return nil, nil
-}
 func (d *bridgeTestDriver) AddPluginPath(context.Context, string) (control.PluginSnapshot, error) {
 	return control.PluginSnapshot{}, nil
 }
@@ -2599,12 +2593,6 @@ func (d *bridgeSubmitDriver) UpdateMarketplace(context.Context, string) (control
 }
 func (d *bridgeSubmitDriver) RemoveMarketplace(context.Context, string) error {
 	return nil
-}
-func (d *bridgeSubmitDriver) DiscoverOpenCode(context.Context, string) (control.OpenCodeDiscoverySnapshot, error) {
-	return control.OpenCodeDiscoverySnapshot{}, nil
-}
-func (d *bridgeSubmitDriver) ImportOpenCode(context.Context, string) ([]control.PluginSnapshot, error) {
-	return nil, nil
 }
 func (d *bridgeSubmitDriver) AddPluginPath(context.Context, string) (control.PluginSnapshot, error) {
 	return control.PluginSnapshot{}, nil

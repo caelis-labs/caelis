@@ -22,8 +22,6 @@ type pluginStubService struct {
 	listMarketplacesFn  func(context.Context) ([]control.MarketplaceSnapshot, error)
 	updateMarketplaceFn func(context.Context, string) (control.MarketplaceSnapshot, error)
 	removeMarketplaceFn func(context.Context, string) error
-	discoverOpenCodeFn  func(context.Context, string) (control.OpenCodeDiscoverySnapshot, error)
-	importOpenCodeFn    func(context.Context, string) ([]control.PluginSnapshot, error)
 	addPathFn           func(context.Context, string) (control.PluginSnapshot, error)
 	installFn           func(context.Context, string) (control.PluginSnapshot, error)
 	enableFn            func(context.Context, string) (control.PluginSnapshot, error)
@@ -61,18 +59,6 @@ func (s *pluginStubService) RemoveMarketplace(ctx context.Context, name string) 
 		return s.removeMarketplaceFn(ctx, name)
 	}
 	return nil
-}
-func (s *pluginStubService) DiscoverOpenCode(ctx context.Context, workspace string) (control.OpenCodeDiscoverySnapshot, error) {
-	if s.discoverOpenCodeFn != nil {
-		return s.discoverOpenCodeFn(ctx, workspace)
-	}
-	return control.OpenCodeDiscoverySnapshot{}, nil
-}
-func (s *pluginStubService) ImportOpenCode(ctx context.Context, workspace string) ([]control.PluginSnapshot, error) {
-	if s.importOpenCodeFn != nil {
-		return s.importOpenCodeFn(ctx, workspace)
-	}
-	return nil, nil
 }
 func (s *pluginStubService) AddPluginPath(ctx context.Context, path string) (control.PluginSnapshot, error) {
 	if s.addPathFn != nil {
@@ -521,65 +507,6 @@ func TestSlashPluginMarketplaceMissingActionShowsUsage(t *testing.T) {
 	combined := strings.Join(notices, "\n")
 	if !strings.Contains(combined, "usage: /plugin marketplace") {
 		t.Fatalf("marketplace usage notice = %q", combined)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// /plugin opencode
-// ---------------------------------------------------------------------------
-
-func TestSlashPluginOpenCodeDiscover(t *testing.T) {
-	var gotWorkspace string
-	svc := &pluginStubService{
-		discoverOpenCodeFn: func(ctx context.Context, workspace string) (control.OpenCodeDiscoverySnapshot, error) {
-			gotWorkspace = workspace
-			return control.OpenCodeDiscoverySnapshot{
-				LocalPlugins: []control.OpenCodePluginSourceSnapshot{{Name: "guard", Path: "/tmp/ws/.opencode/plugins/guard.js"}},
-				NPMPackages:  []control.OpenCodeNPMPackageSnapshot{{Package: "opencode-helicone-session", Source: "/tmp/ws/opencode.json"}},
-				Warnings:     []string{"OpenCode plugins are unsupported"},
-			}, nil
-		},
-	}
-	result, notices := runPluginCmd(svc, "opencode discover /tmp/ws")
-	if result.Err != nil {
-		t.Fatalf("/plugin opencode discover error = %v", result.Err)
-	}
-	if gotWorkspace != "/tmp/ws" {
-		t.Fatalf("DiscoverOpenCode workspace = %q, want /tmp/ws", gotWorkspace)
-	}
-	combined := strings.Join(notices, "\n")
-	for _, want := range []string{"opencode discovery: /tmp/ws", "guard", "opencode-helicone-session", "unsupported"} {
-		if !strings.Contains(combined, want) {
-			t.Fatalf("/plugin opencode discover notice = %q, want %q", combined, want)
-		}
-	}
-}
-
-func TestSlashPluginOpenCodeImport(t *testing.T) {
-	var gotWorkspace string
-	svc := &pluginStubService{
-		importOpenCodeFn: func(ctx context.Context, workspace string) ([]control.PluginSnapshot, error) {
-			gotWorkspace = workspace
-			return []control.PluginSnapshot{{
-				ID:      "opencode-guard",
-				Name:    "guard",
-				Status:  "unsupported",
-				Warning: "cannot be executed",
-			}}, nil
-		},
-	}
-	result, notices := runPluginCmd(svc, "opencode import /tmp/ws")
-	if result.Err != nil {
-		t.Fatalf("/plugin opencode import error = %v", result.Err)
-	}
-	if gotWorkspace != "/tmp/ws" {
-		t.Fatalf("ImportOpenCode workspace = %q, want /tmp/ws", gotWorkspace)
-	}
-	combined := strings.Join(notices, "\n")
-	for _, want := range []string{"imported OpenCode entries: 1", "opencode-guard", "unsupported", "cannot be executed"} {
-		if !strings.Contains(combined, want) {
-			t.Fatalf("/plugin opencode import notice = %q, want %q", combined, want)
-		}
 	}
 }
 
