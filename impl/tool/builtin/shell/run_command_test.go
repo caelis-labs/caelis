@@ -40,8 +40,8 @@ func TestRunCommandDefinitionExposesMinimalArguments(t *testing.T) {
 		"command":             "Command to execute.",
 		"workdir":             "Working directory for the command; defaults to the session cwd.",
 		"yield_time_ms":       "Wait before yielding async control.",
-		"sandbox_permissions": "Sandbox mode for this command.",
-		"justification":       "Short approval question for require_escalated.",
+		"sandbox_permissions": "Sandbox mode for this command. Use require_escalated only when this exact command needs host permissions or after it failed due to sandbox/permission denial.",
+		"justification":       "Short approval question for require_escalated; include what will run and why current permissions are insufficient.",
 	}
 	if len(properties) != len(wantDescriptions) {
 		t.Fatalf("properties = %#v, want only %v", properties, sortedRunCommandPropertyKeys(wantDescriptions))

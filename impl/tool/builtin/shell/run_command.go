@@ -68,12 +68,12 @@ func (t *RunCommandTool) Definition() tool.Definition {
 				},
 				"sandbox_permissions": map[string]any{
 					"type":        "string",
-					"description": "Sandbox mode for this command.",
+					"description": "Sandbox mode for this command. Use require_escalated only when this exact command needs host permissions or after it failed due to sandbox/permission denial.",
 					"enum":        []string{"use_default", "require_escalated"},
 				},
 				"justification": map[string]any{
 					"type":        "string",
-					"description": "Short approval question for require_escalated.",
+					"description": "Short approval question for require_escalated; include what will run and why current permissions are insufficient.",
 				},
 			},
 			"required":             []string{"command"},

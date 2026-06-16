@@ -164,7 +164,7 @@ func builtInPermissionBoundariesPrompt() string {
 	return strings.Join([]string{
 		"## Execution And Approval",
 		"",
-		"- Use the current permissions for normal inspection, edits, builds, tests, and formatting checks.",
+		"- Start with the current permissions for normal inspection, edits, builds, tests, and formatting checks.",
 		"- Request elevated execution only when the specific operation cannot complete under current permissions. Keep the requested scope and justification narrow.",
 		"- When permission or lock errors occur, do not substitute broader cleanup, reset, delete, ACL, or mode changes for the failed operation; retry only the necessary original operation with the narrowest permissions, or stop for user input.",
 	}, "\n")
