@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/OnslaughtSnail/caelis/surfaces/tui/tuikit"
 )
 
 type explorationProjectionState struct {
@@ -129,10 +130,14 @@ func collectExplorationRenderStep(events []SubagentEvent, idx int) (explorationR
 	}
 	for i < len(events) && events[i].Kind == SEToolCall {
 		ev := events[i]
-		if !isCompactExplorationTool(ev) {
+		if !isExplorationToolEvent(ev) {
 			break
 		}
-		step.callIDs = append(step.callIDs, strings.TrimSpace(ev.CallID))
+		if isCompactExplorationTool(ev) {
+			step.callIDs = append(step.callIDs, strings.TrimSpace(ev.CallID))
+		} else {
+			step.completedExploration = false
+		}
 		step.end = i
 		i++
 	}
@@ -342,6 +347,85 @@ func potentialExplorationStage(events []SubagentEvent, idx int, status string) (
 	return collectExplorationStage(events, idx, status, true)
 }
 
+func renderACPLiveExplorationStageRows(blockID string, events []SubagentEvent, idx int, status string, width int, ctx BlockRenderContext) ([]RenderedRow, int, bool) {
+	if idx < 0 || idx >= len(events) || isTerminalACPTranscriptStatus(status) {
+		return nil, idx, false
+	}
+	step, ok := collectTranscriptStep(events, idx)
+	if !ok || step.start != idx || !step.allExploration {
+		return nil, idx, false
+	}
+	if step.allDone && hasLaterTranscriptStep(events, step.end+1) {
+		return nil, idx, false
+	}
+	stage := events[step.start : step.end+1]
+	toolEvents, verb, ok := liveExplorationRepeatedToolSummary(stage)
+	if !ok {
+		return nil, idx, false
+	}
+	rows := make([]RenderedRow, 0, len(stage)+1)
+	for offset, ev := range stage {
+		eventIdx := step.start + offset
+		switch ev.Kind {
+		case SEReasoning:
+			if strings.TrimSpace(ev.Text) != "" {
+				rows = append(rows, renderACPReasoningNarrativeRows(blockID, ev.Text, ev.ActiveBuffer, width, ctx, participantNarrativeEventActive(events, eventIdx, status))...)
+			}
+		case SEAssistant:
+			if strings.TrimSpace(ev.Text) != "" {
+				rows = append(rows, renderParticipantTurnNarrativeEventRows(blockID, ev, tuikit.LineStyleAssistant, width, ctx, participantNarrativeEventActive(events, eventIdx, status))...)
+			}
+		}
+	}
+	if summary := liveExplorationRepeatedToolSummaryRow(blockID, toolEvents, verb, width, ctx); strings.TrimSpace(summary.Plain) != "" {
+		rows = append(rows, summary)
+	}
+	if len(rows) == 0 {
+		return nil, idx, false
+	}
+	return rows, step.end, true
+}
+
+func liveExplorationRepeatedToolSummary(stage []SubagentEvent) ([]SubagentEvent, string, bool) {
+	tools := make([]SubagentEvent, 0, len(stage))
+	verb := ""
+	for _, ev := range stage {
+		if !isExplorationToolEvent(ev) {
+			continue
+		}
+		nextVerb := explorationToolVerb(toolSemanticName(ev.Name, ev.ToolKind))
+		if nextVerb == "" {
+			return nil, "", false
+		}
+		if verb == "" {
+			verb = nextVerb
+		} else if nextVerb != verb {
+			return nil, "", false
+		}
+		tools = append(tools, ev)
+	}
+	if len(tools) < 2 {
+		return nil, "", false
+	}
+	return tools, verb, true
+}
+
+func liveExplorationRepeatedToolSummaryRow(blockID string, tools []SubagentEvent, verb string, width int, ctx BlockRenderContext) RenderedRow {
+	details := make([]string, 0, len(tools))
+	for _, ev := range tools {
+		if detail := explorationToolDetailWithWorkspace(ev, ctx.Workspace); detail != "" {
+			details = append(details, detail)
+		}
+	}
+	detail := strings.Join(details, ", ")
+	plain := strings.TrimSpace("• " + strings.TrimSpace(verb))
+	if detail != "" {
+		plain = strings.TrimSpace(plain + " " + detail)
+	}
+	plain = truncateTailDisplay(plain, maxInt(16, width))
+	return renderACPTranscriptHeaderRow(blockID, plain, width, ctx, "")
+}
+
 func collectExplorationStage(events []SubagentEvent, idx int, status string, includeLiveTail bool) ([]SubagentEvent, int) {
 	if idx < 0 || idx >= len(events) {
 		return nil, idx
@@ -412,7 +496,7 @@ func collectTranscriptStep(events []SubagentEvent, idx int) (transcriptStep, boo
 	if i >= len(events) || events[i].Kind != SEToolCall {
 		return transcriptStep{}, false
 	}
-	firstToolExploration := isCompactExplorationTool(events[i])
+	firstToolExploration := isExplorationToolEvent(events[i])
 	step := transcriptStep{
 		start:          idx,
 		end:            i,
@@ -420,7 +504,7 @@ func collectTranscriptStep(events []SubagentEvent, idx int) (transcriptStep, boo
 		allDone:        true,
 	}
 	for i < len(events) && events[i].Kind == SEToolCall {
-		toolExploration := isCompactExplorationTool(events[i])
+		toolExploration := isExplorationToolEvent(events[i])
 		if toolExploration != firstToolExploration {
 			break
 		}
@@ -549,6 +633,13 @@ func explorationStageKey(events []SubagentEvent) string {
 
 func isCompactExplorationTool(ev SubagentEvent) bool {
 	if ev.Kind != SEToolCall || !ev.Done {
+		return false
+	}
+	return isExplorationToolEvent(ev)
+}
+
+func isExplorationToolEvent(ev SubagentEvent) bool {
+	if ev.Kind != SEToolCall {
 		return false
 	}
 	if strings.TrimSpace(ev.CallID) == "" {

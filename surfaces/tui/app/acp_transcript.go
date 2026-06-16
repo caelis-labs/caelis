@@ -67,6 +67,14 @@ func renderACPTranscriptRows(blockID string, events []SubagentEvent, status stri
 			i = consumed
 			continue
 		}
+		if liveRows, consumed, ok := renderACPLiveExplorationStageRows(blockID, visible, i, status, width, ctx); ok {
+			rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupTool, false)
+			rows = append(rows, liveRows...)
+			hasContent = true
+			lastGroup = acpTranscriptGroupTool
+			i = consumed
+			continue
+		}
 		switch ev.Kind {
 		case SEPlan:
 			rows = append(rows, renderACPPlanRows(blockID, ev, width, ctx)...)

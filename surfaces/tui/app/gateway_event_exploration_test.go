@@ -719,7 +719,62 @@ func TestGatewayLiveExplorationCompletedToolStaysAttachedToReasoning(t *testing.
 	}
 }
 
-func TestGatewayLiveExplorationKeepsCompletedPrefixCollapsed(t *testing.T) {
+func TestGatewayLiveExplorationDoesNotFoldCompletedToolsBeforePendingSibling(t *testing.T) {
+	model := newGatewayEventTestModel()
+	block := NewMainACPTurnBlock("root-session")
+	block.Events = append(block.Events,
+		SubagentEvent{Kind: SEReasoning, Text: `I need the existing store context first.`},
+		SubagentEvent{Kind: SEToolCall, CallID: "read-old", Name: "READ", Args: "internal/store/store.go", Output: "package store", Done: true},
+		SubagentEvent{Kind: SEReasoning, Text: `I need to read the related files before editing.`},
+		SubagentEvent{Kind: SEToolCall, CallID: "read-one", Name: "READ", Args: "internal/store/memory.go", Output: "package store", Done: true},
+		SubagentEvent{Kind: SEToolCall, CallID: "read-two", Name: "READ", Args: "internal/store/file.go", Output: "package store", Done: true},
+		SubagentEvent{Kind: SEToolCall, CallID: "read-three", Name: "READ", Args: "internal/store/sql.go"},
+	)
+
+	rows := block.Render(BlockRenderContext{Width: 96, Height: 20, TermWidth: 96, Theme: model.theme})
+	plain := renderedPlainRows(rows)
+	joined := strings.Join(plain, "\n")
+	if !strings.Contains(joined, "• Explored") || !strings.Contains(joined, "Read store.go") {
+		t.Fatalf("rendered rows = %q, want earlier settled exploration collapsed", joined)
+	}
+	if !strings.Contains(joined, "I need to read the related files before editing.") {
+		t.Fatalf("rendered rows = %q, want current live exploration reasoning visible", joined)
+	}
+	if got := strings.Count(joined, "• Read "); got != 1 {
+		t.Fatalf("rendered rows = %q, want one compressed live Read row, got %d", joined, got)
+	}
+	if !strings.Contains(joined, "• Read memory.go, file.go, sql.go") {
+		t.Fatalf("rendered rows = %q, want compressed live Read summary", joined)
+	}
+	for _, forbidden := range []string{"package store", "Read internal/store/memory.go", "Read internal/store/file.go", "Read internal/store/sql.go"} {
+		if strings.Contains(joined, forbidden) {
+			t.Fatalf("rendered rows = %q, live repeated exploration tools should not expand detail %q", joined, forbidden)
+		}
+	}
+	if oldIdx, currentIdx := indexPlainLineContaining(plain, "Read store.go"), indexPlainLineContaining(plain, "I need to read the related files before editing."); oldIdx < 0 || currentIdx < 0 || oldIdx >= currentIdx {
+		t.Fatalf("rendered rows = %#v, want current exploration step after earlier Explored group", plain)
+	}
+
+	liveRows := len(plain)
+	block.Events[5].Output = "package store"
+	block.Events[5].Done = true
+	block.Events = append(block.Events,
+		SubagentEvent{Kind: SEReasoning, Text: "Now I can update the store."},
+		SubagentEvent{Kind: SEToolCall, CallID: "patch-store", Name: "PATCH", Args: "internal/store/store.go", Output: "patched", Done: true},
+	)
+	settledPlain := renderedPlainRows(block.Render(BlockRenderContext{Width: 96, Height: 20, TermWidth: 96, Theme: model.theme}))
+	settled := strings.Join(settledPlain, "\n")
+	if !strings.Contains(settled, "• Explored") ||
+		!strings.Contains(settled, "Read store.go, memory.go, file.go, sql.go") ||
+		!strings.Contains(settled, "Now I can update the store.") {
+		t.Fatalf("settled rows = %q, want completed live exploration step folded into Explored before next step", settled)
+	}
+	if len(settledPlain) < liveRows {
+		t.Fatalf("live repeated exploration collapsed from %d rows to %d rows after settling; live rows = %#v settled rows = %#v", liveRows, len(settledPlain), plain, settledPlain)
+	}
+}
+
+func TestGatewayLiveExplorationKeepsCompletedPrefixVisibleWithPendingSibling(t *testing.T) {
 	model := newGatewayEventTestModel()
 	block := NewMainACPTurnBlock("root-session")
 	block.Events = append(block.Events,
@@ -730,15 +785,19 @@ func TestGatewayLiveExplorationKeepsCompletedPrefixCollapsed(t *testing.T) {
 
 	rows := block.Render(BlockRenderContext{Width: 96, Height: 20, TermWidth: 96, Theme: model.theme})
 	joined := strings.Join(renderedPlainRows(rows), "\n")
-	if !strings.Contains(joined, "• Explored") || !strings.Contains(joined, "Read store_test.go") {
-		t.Fatalf("rendered rows = %q, want completed exploration prefix collapsed", joined)
+	if strings.Contains(joined, "• Explored") {
+		t.Fatalf("rendered rows = %q, current live exploration step should not compact before the pending sibling settles", joined)
+	}
+	if !strings.Contains(joined, "I need to inspect the session store before editing.") ||
+		!strings.Contains(joined, "Read internal/adapters/store/memory/store_test.go") {
+		t.Fatalf("rendered rows = %q, want completed exploration sibling still visible in live step", joined)
 	}
 	if !strings.Contains(joined, `Search "StoreExerciseR03"`) {
 		t.Fatalf("rendered rows = %q, want live exploration tool visible", joined)
 	}
-	for _, forbidden := range []string{"I need to inspect the session store", "package memory", "✓ READ"} {
+	for _, forbidden := range []string{"✓ READ", "╭"} {
 		if strings.Contains(joined, forbidden) {
-			t.Fatalf("rendered rows = %q, completed exploration prefix should remain collapsed", joined)
+			t.Fatalf("rendered rows = %q, live exploration should keep compact tool rows", joined)
 		}
 	}
 }
