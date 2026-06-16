@@ -73,18 +73,6 @@ func atomicWriteFile(path string, data []byte, perm os.FileMode, ops atomicWrite
 	})
 }
 
-func dedupeAgentConfigs(configs []AgentConfig) []AgentConfig {
-	return configstore.DedupeAgentConfigs(configs)
-}
-
 func normalizeAgentConfig(in AgentConfig) AgentConfig {
 	return configstore.NormalizeAgentConfig(in)
-}
-
-func normalizeSandboxConfig(cfg SandboxConfig) SandboxConfig {
-	return configstore.NormalizeSandboxConfig(cfg)
-}
-
-func dedupeStrings(values []string) []string {
-	return configstore.DedupeStrings(values)
 }

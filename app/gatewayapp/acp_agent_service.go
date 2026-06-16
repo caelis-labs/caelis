@@ -87,10 +87,6 @@ func withConfiguredACPAgents(assembly assembly.ResolvedAssembly, configured []Ag
 	return agentregistry.WithConfiguredAgents(assembly, configured, self)
 }
 
-func agentConfigToPlugin(in AgentConfig) assembly.AgentConfig {
-	return agentregistry.AgentConfigToPlugin(in)
-}
-
 func pluginAgentToConfig(in assembly.AgentConfig, builtin bool) AgentConfig {
 	return agentregistry.PluginAgentToConfig(in, builtin)
 }
@@ -113,14 +109,6 @@ func defaultSelfACPAgent(cfg defaultSelfACPAgentConfig) assembly.AgentConfig {
 		WorkspaceKey: cfg.WorkspaceKey,
 		WorkspaceCWD: cfg.WorkspaceCWD,
 	})
-}
-
-func selfRuntimeArgs(cfg Config) []string {
-	return agentregistry.SelfRuntimeArgs(agentRuntimeConfig(cfg))
-}
-
-func selfRuntimeInvocation(cfg Config) ([]string, map[string]string) {
-	return agentregistry.SelfRuntimeInvocation(agentRuntimeConfig(cfg))
 }
 
 func agentRuntimeConfig(cfg Config) agentregistry.RuntimeConfig {

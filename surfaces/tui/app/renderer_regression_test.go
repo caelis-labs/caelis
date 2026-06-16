@@ -2,6 +2,7 @@ package tuiapp
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -31,6 +32,22 @@ func TestComposerMixedWidthDeleteAvoidsRendererDCHInsideWideGlyph(t *testing.T) 
 	}
 	if !bytes.Contains([]byte(second), []byte("丙c丁d")) {
 		t.Fatalf("renderer update = %q, want shifted CJK tail to be repainted", second)
+	}
+}
+
+func TestWideCellRepaintSentinelDoesNotEmitHyperlink(t *testing.T) {
+	got := protectWideCellRepaintLine("甲", 4)
+	if strings.Contains(got, "\x1b]8;;") {
+		t.Fatalf("wide-cell sentinel emitted OSC 8 hyperlink: %q", got)
+	}
+	if strings.Contains(got, "caelis://") {
+		t.Fatalf("wide-cell sentinel emitted URI: %q", got)
+	}
+	if got == ansi.Strip(got) {
+		t.Fatalf("wide-cell sentinel should keep an ANSI guard, got plain text %q", got)
+	}
+	if stripped := ansi.Strip(got); displayColumns(stripped) != 4 {
+		t.Fatalf("stripped width = %d, want 4; stripped=%q raw=%q", displayColumns(stripped), stripped, got)
 	}
 }
 

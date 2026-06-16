@@ -533,10 +533,6 @@ func modelProfileFromModelConfig(cfg ModelConfig) ModelProfileConfig {
 	return modelregistry.ProfileFromConfig(cfg)
 }
 
-func modelConfigCarriesProfileFields(cfg ModelConfig) bool {
-	return modelregistry.ConfigCarriesProfileFields(cfg)
-}
-
 func modelConfigCarriesProfileAuth(cfg ModelConfig) bool {
 	return modelregistry.ConfigCarriesProfileAuth(cfg)
 }
@@ -547,44 +543,4 @@ func mergeModelConfigProfile(cfg ModelConfig, profile ModelProfileConfig) ModelC
 
 func modelConfigSupportsReasoningEffort(cfg ModelConfig, effort string) bool {
 	return modelregistry.SupportsReasoningEffort(cfg, effort)
-}
-
-func defaultModelAPIForProvider(provider string) providers.APIType {
-	return modelregistry.DefaultAPIForProvider(provider)
-}
-
-func sanitizePersistedModelConfig(cfg ModelConfig) ModelConfig {
-	return modelregistry.SanitizePersistedConfig(cfg)
-}
-
-func sanitizePersistedModelProfile(profile ModelProfileConfig) ModelProfileConfig {
-	return modelregistry.SanitizePersistedProfile(profile)
-}
-
-func defaultAuthTypeForProvider(provider string) providers.AuthType {
-	return modelregistry.DefaultAuthTypeForProvider(provider)
-}
-
-func buildAlias(provider string, modelName string) string {
-	return modelregistry.BuildAlias(provider, modelName)
-}
-
-func buildProfileID(provider string, endpointID string, baseURL string) string {
-	return modelregistry.BuildProfileID(provider, endpointID, baseURL)
-}
-
-func buildModelID(profileID string, alias string) string {
-	return modelregistry.BuildModelID(profileID, alias)
-}
-
-func normalizeEndpointID(provider string, endpointID string, baseURL string, api providers.APIType) string {
-	return modelregistry.NormalizeEndpointID(provider, endpointID, baseURL, api)
-}
-
-func firstNonEmptyAPI(values ...providers.APIType) providers.APIType {
-	return modelregistry.FirstNonEmptyAPI(values...)
-}
-
-func firstNonEmptyAuthType(values ...providers.AuthType) providers.AuthType {
-	return modelregistry.FirstNonEmptyAuthType(values...)
 }

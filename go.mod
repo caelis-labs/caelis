@@ -13,7 +13,6 @@ require (
 	github.com/charmbracelet/ultraviolet v0.0.0-20260601155805-6cf7526a1b3f
 	github.com/charmbracelet/x/ansi v0.11.7
 	github.com/google/uuid v1.6.0
-	github.com/mattn/go-runewidth v0.0.23
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/rivo/uniseg v0.4.7
 	golang.org/x/sys v0.45.0
@@ -46,6 +45,7 @@ require (
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/lucasb-eyer/go-colorful v1.4.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
+	github.com/mattn/go-runewidth v0.0.23 // indirect
 	github.com/microcosm-cc/bluemonday v1.0.27 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/muesli/reflow v0.3.0 // indirect

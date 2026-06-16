@@ -1,7 +1,6 @@
 package builtin
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
@@ -83,9 +82,4 @@ func EnsureCoreTools(userTools []tool.Tool, builtins []tool.Tool) ([]tool.Tool, 
 	out = append(out, builtins...)
 	out = append(out, filtered...)
 	return out, nil
-}
-
-// RunTool is one small helper for builtin end-to-end tests.
-func RunTool(ctx context.Context, one tool.Tool, input string) (tool.Result, error) {
-	return one.Call(ctx, tool.Call{Name: one.Definition().Name, Input: []byte(input)})
 }

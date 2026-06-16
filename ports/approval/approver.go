@@ -30,13 +30,3 @@ func (a ApproverAdapter) ReviewApproval(ctx context.Context, req Request) (Decis
 	}
 	return a.Approver.Decide(ctx, req)
 }
-
-type Provider interface {
-	Name() string
-	NewApprover(Config) (Approver, error)
-}
-
-type Config struct {
-	Mode     Mode
-	Metadata map[string]any
-}

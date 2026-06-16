@@ -1028,8 +1028,6 @@ func normalizeFullscreenFrameWithTopTrim(view string, width int, height int) (st
 	return strings.Join(lines, "\n"), topTrim
 }
 
-const wideCellRendererSentinelURI = "caelis://wide-cell-render-sentinel"
-
 func protectWideCellRepaintBlock(text string, width int) string {
 	if text == "" || width <= 1 {
 		return text
@@ -1064,7 +1062,7 @@ func protectWideCellRepaintLine(line string, width int) string {
 }
 
 func wideCellRendererSentinel() string {
-	return ansi.SetHyperlink(wideCellRendererSentinelURI) + " " + ansi.ResetHyperlink()
+	return "\x1b[8m \x1b[28m"
 }
 
 func lineContainsWideCell(line string) bool {

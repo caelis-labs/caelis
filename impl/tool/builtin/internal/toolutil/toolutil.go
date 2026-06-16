@@ -68,12 +68,6 @@ func JSONResult(name string, payload map[string]any, metaExtra ...map[string]any
 	}, nil
 }
 
-func JSONErrorResult(name string, payload map[string]any) (tool.Result, error) {
-	out, err := JSONResult(name, payload)
-	out.IsError = true
-	return out, err
-}
-
 func WithContextCancel(ctx context.Context) error {
 	select {
 	case <-ctx.Done():

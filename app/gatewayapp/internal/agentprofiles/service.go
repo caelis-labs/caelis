@@ -22,14 +22,6 @@ type LoadStatus struct {
 	Warnings []LoadWarning
 }
 
-func LoadDir(dir string) ([]agentprofile.Profile, error) {
-	status, err := LoadDirStatus(dir)
-	if err != nil {
-		return nil, err
-	}
-	return status.Profiles, nil
-}
-
 func LoadDirStatus(dir string) (LoadStatus, error) {
 	dir = strings.TrimSpace(dir)
 	if dir == "" {
@@ -73,31 +65,4 @@ func LoadDirStatus(dir string) (LoadStatus, error) {
 		status.Profiles = append(status.Profiles, profile)
 	}
 	return status, nil
-}
-
-func ProfileBuiltIn(profile agentprofile.Profile) bool {
-	return metadataBool(profile.Metadata, "built_in")
-}
-
-func ProfileSystemManaged(profile agentprofile.Profile) bool {
-	return metadataBool(profile.Metadata, "system_managed")
-}
-
-func metadataBool(metadata map[string]any, key string) bool {
-	if len(metadata) == 0 {
-		return false
-	}
-	switch value := metadata[key].(type) {
-	case bool:
-		return value
-	case string:
-		switch strings.ToLower(strings.TrimSpace(value)) {
-		case "true", "yes", "1", "on":
-			return true
-		default:
-			return false
-		}
-	default:
-		return false
-	}
 }

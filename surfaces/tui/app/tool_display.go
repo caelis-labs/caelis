@@ -1,7 +1,6 @@
 package tuiapp
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	pathpkg "path"
@@ -1096,111 +1095,6 @@ func searchDisplaySummary(input map[string]any, output map[string]any) string {
 		summary += " in " + pluralizeUnit(files, "file")
 	}
 	return summary
-}
-
-func mutationDisplaySummary(input map[string]any, output map[string]any) string {
-	path := firstTrimmed(toolPath(output), toolPath(input))
-	if path == "" {
-		return ""
-	}
-	added := displayInt(output["added_lines"])
-	removed := displayInt(output["removed_lines"])
-	header := filepath.Base(path)
-	if added > 0 || removed > 0 {
-		header += fmt.Sprintf(" +%d -%d", added, removed)
-	}
-	if diffLines := mutationStructuredDiffLines(output); len(diffLines) > 0 {
-		return strings.Join(append([]string{header, "diff / hunk"}, diffLines...), "\n")
-	}
-	oldText := strings.TrimSpace(asString(input["old"]))
-	newText := strings.TrimSpace(asString(input["new"]))
-	if hunk := strings.TrimSpace(asString(output["hunk"])); hunk != "" || oldText != "" || newText != "" {
-		if hunk == "" {
-			hunk = mutationSyntheticHunk(output)
-		}
-		diffLines := []string{header, "diff / hunk", hunk}
-		if oldText != "" {
-			diffLines = append(diffLines, prefixDiffLines("-", oldText)...)
-		}
-		if newText != "" {
-			diffLines = append(diffLines, prefixDiffLines("+", newText)...)
-		}
-		return strings.Join(diffLines, "\n")
-	}
-	if strings.EqualFold(strings.TrimSpace(asString(output["created"])), "true") || displayBool(output["created"]) || displayBool(output["previous_empty"]) {
-		if content := asString(input["content"]); content != "" {
-			diffLines := []string{header, "diff / hunk", writeCreateHunk(content)}
-			diffLines = append(diffLines, prefixDiffLines("+", strings.TrimRight(content, "\n"))...)
-			return strings.Join(diffLines, "\n")
-		}
-	}
-	return header
-}
-
-type mutationDisplayDiffHunk struct {
-	Header string   `json:"header"`
-	Lines  []string `json:"lines"`
-}
-
-func mutationStructuredDiffLines(output map[string]any) []string {
-	raw, exists := output["diff_hunks"]
-	if !exists || raw == nil {
-		return nil
-	}
-	data, err := json.Marshal(raw)
-	if err != nil {
-		return nil
-	}
-	var hunks []mutationDisplayDiffHunk
-	if err := json.Unmarshal(data, &hunks); err != nil {
-		return nil
-	}
-	lines := make([]string, 0, len(hunks)*4)
-	for _, hunk := range hunks {
-		header := strings.TrimSpace(hunk.Header)
-		if header == "" && len(hunk.Lines) == 0 {
-			continue
-		}
-		if header != "" {
-			lines = append(lines, header)
-		}
-		lines = append(lines, hunk.Lines...)
-	}
-	if len(lines) == 0 {
-		return nil
-	}
-	if displayBool(output["diff_truncated"]) {
-		lines = append(lines, "@@ diff truncated @@")
-	}
-	return lines
-}
-
-func mutationSyntheticHunk(output map[string]any) string {
-	replaced := displayInt(output["replacements"])
-	if replaced <= 0 {
-		replaced = displayInt(output["replaced"])
-	}
-	if replaced > 0 {
-		return "@@ repeated replacement: " + pluralizeUnit(replaced, "match") + " @@"
-	}
-	return "@@ changed @@"
-}
-
-func prefixDiffLines(prefix string, text string) []string {
-	lines := strings.Split(strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n"), "\n")
-	out := make([]string, 0, len(lines))
-	for _, line := range lines {
-		out = append(out, prefix+line)
-	}
-	return out
-}
-
-func writeCreateHunk(content string) string {
-	lines := 0
-	if strings.TrimSpace(content) != "" {
-		lines = strings.Count(strings.TrimRight(content, "\n"), "\n") + 1
-	}
-	return "@@ -0,0 +1," + strconv.Itoa(lines) + " @@"
 }
 
 func toolPath(raw map[string]any) string {
