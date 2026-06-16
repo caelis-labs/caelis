@@ -67,6 +67,94 @@ func TestProjectGatewayEventEnvelopeAddsInvocationMeta(t *testing.T) {
 	}
 }
 
+func TestProjectGatewayEventEnvelopeProjectsGatewayAssistantNarrative(t *testing.T) {
+	events := ProjectGatewayEventEnvelope(gateway.EventEnvelope{Event: gateway.Event{
+		Kind:       gateway.EventKindAssistantMessage,
+		SessionRef: session.SessionRef{SessionID: "session-1"},
+		Narrative: &gateway.NarrativePayload{
+			Role:          gateway.NarrativeRoleAssistant,
+			Actor:         "codex",
+			ReasoningText: "thinking",
+			Text:          "done",
+			Final:         true,
+		},
+	}})
+	if len(events) != 2 {
+		t.Fatalf("ProjectGatewayEventEnvelope() returned %d events, want thought + message: %#v", len(events), events)
+	}
+	for _, env := range events {
+		if env.Kind != eventstream.KindSessionUpdate || env.Actor != "codex" || !env.Final {
+			t.Fatalf("event = %#v, want codex final session/update", env)
+		}
+	}
+	thought, ok := events[0].Update.(schema.ContentChunk)
+	if !ok || thought.SessionUpdate != schema.UpdateAgentThought {
+		t.Fatalf("first update = %#v, want agent_thought_chunk", events[0].Update)
+	}
+	if content, ok := thought.Content.(schema.TextContent); !ok || content.Text != "thinking" {
+		t.Fatalf("thought content = %#v, want thinking text", thought.Content)
+	}
+	message, ok := events[1].Update.(schema.ContentChunk)
+	if !ok || message.SessionUpdate != schema.UpdateAgentMessage {
+		t.Fatalf("second update = %#v, want agent_message_chunk", events[1].Update)
+	}
+	if content, ok := message.Content.(schema.TextContent); !ok || content.Text != "done" {
+		t.Fatalf("message content = %#v, want done text", message.Content)
+	}
+}
+
+func TestProjectGatewayEventEnvelopeProjectsGatewayToolCall(t *testing.T) {
+	events := ProjectGatewayEventEnvelope(gateway.EventEnvelope{Event: gateway.Event{
+		Kind:       gateway.EventKindToolCall,
+		SessionRef: session.SessionRef{SessionID: "session-1"},
+		ToolCall: &gateway.ToolCallPayload{
+			CallID:   "call-1",
+			ToolName: "RUN_COMMAND",
+			Status:   gateway.ToolStatusStarted,
+			RawInput: map[string]any{"cmd": "go test ./..."},
+			Actor:    "codex",
+		},
+	}})
+	if len(events) != 1 {
+		t.Fatalf("ProjectGatewayEventEnvelope() returned %d events, want 1: %#v", len(events), events)
+	}
+	env := events[0]
+	if env.Kind != eventstream.KindSessionUpdate || env.Actor != "codex" {
+		t.Fatalf("event = %#v, want codex session/update", env)
+	}
+	update, ok := env.Update.(schema.ToolCall)
+	if !ok {
+		t.Fatalf("update = %#v, want ToolCall", env.Update)
+	}
+	if update.ToolCallID != "call-1" || update.Kind != "RUN_COMMAND" || update.Status != schema.ToolStatusInProgress {
+		t.Fatalf("tool call = %#v, want RUN_COMMAND in_progress call-1", update)
+	}
+	if got := metaString(update.Meta, "caelis", "runtime", "tool", "name"); got != "RUN_COMMAND" {
+		t.Fatalf("tool meta name = %q, want RUN_COMMAND", got)
+	}
+}
+
+func TestProjectGatewayEventEnvelopeProjectsGatewayPlan(t *testing.T) {
+	events := ProjectGatewayEventEnvelope(gateway.EventEnvelope{Event: gateway.Event{
+		Kind:       gateway.EventKindPlanUpdate,
+		SessionRef: session.SessionRef{SessionID: "session-1"},
+		Plan: &gateway.PlanPayload{Entries: []gateway.PlanEntryPayload{{
+			Content: "inspect",
+			Status:  "in_progress",
+		}}},
+	}})
+	if len(events) != 1 {
+		t.Fatalf("ProjectGatewayEventEnvelope() returned %d events, want 1: %#v", len(events), events)
+	}
+	update, ok := events[0].Update.(schema.PlanUpdate)
+	if !ok {
+		t.Fatalf("update = %#v, want PlanUpdate", events[0].Update)
+	}
+	if len(update.Entries) != 1 || update.Entries[0].Content != "inspect" || update.Entries[0].Status != "in_progress" {
+		t.Fatalf("plan update = %#v, want inspect in_progress", update)
+	}
+}
+
 func TestProjectGatewayEventEnvelopeProjectsProtocolPermission(t *testing.T) {
 	events := ProjectGatewayEventEnvelope(gateway.EventEnvelope{Event: gateway.Event{
 		Kind:       gateway.EventKindApprovalRequested,

@@ -105,9 +105,13 @@ func (EventProjector) ProjectPermissionRequest(event *session.Event) (*RequestPe
 		return nil, false, nil
 	}
 	approval := event.Protocol.Approval
-	toolCall, err := toolCallUpdateFromProtocol(approval.ToolCall)
-	if err != nil {
-		return nil, false, err
+	toolCall := permissionToolCallUpdateFromProtocol(approval.ToolCall)
+	if strings.TrimSpace(toolCall.ToolCallID) == "" &&
+		toolCall.Title == nil &&
+		toolCall.Kind == nil &&
+		len(approval.Options) == 0 &&
+		rawInputLen(toolCall.RawInput) == 0 {
+		return nil, false, nil
 	}
 	options := make([]PermissionOption, 0, len(approval.Options))
 	for _, item := range approval.Options {
@@ -122,6 +126,44 @@ func (EventProjector) ProjectPermissionRequest(event *session.Event) (*RequestPe
 		ToolCall:  toolCall,
 		Options:   options,
 	}, true, nil
+}
+
+func permissionToolCallUpdateFromProtocol(call session.ProtocolToolCall) ToolCallUpdate {
+	update := ToolCallUpdate{
+		SessionUpdate: UpdateToolCallInfo,
+		ToolCallID:    strings.TrimSpace(call.ID),
+	}
+	if title := strings.TrimSpace(call.Title); title != "" {
+		update.Title = stringPtr(title)
+	} else if title := summarizeToolCallTitle(call.Name, call.RawInput); title != "" {
+		update.Title = stringPtr(title)
+	}
+	if kind := firstNonEmpty(strings.TrimSpace(call.Kind), toolKindForName(call.Name)); kind != "" {
+		update.Kind = stringPtr(kind)
+	}
+	if status := acpToolStatus(call.Status); status != "" {
+		update.Status = stringPtr(status)
+	}
+	if input := cloneAnyMap(call.RawInput); len(input) > 0 {
+		update.RawInput = input
+	}
+	if output := cloneAnyMap(call.RawOutput); len(output) > 0 {
+		update.RawOutput = output
+	}
+	displayTerminalID, _ := displayTerminalID(call.ID, call.Name)
+	update.Content = projectToolContent(call.Content, displayTerminalID)
+	update.Meta = terminalOutputMetaFromProtocolContent(call.Content, displayTerminalID)
+	return update
+}
+
+func rawInputLen(raw any) int {
+	if raw == nil {
+		return 0
+	}
+	if mapped, ok := raw.(map[string]any); ok {
+		return len(mapped)
+	}
+	return 1
 }
 
 func explicitUpdates(event *session.Event) []Update {
@@ -872,7 +914,7 @@ func acpToolStatus(status string) string {
 	switch strings.ToLower(strings.TrimSpace(status)) {
 	case "", ToolStatusPending, ToolStatusInProgress, ToolStatusCompleted, ToolStatusFailed:
 		return strings.TrimSpace(status)
-	case "running", "waiting_approval":
+	case "started", "running", "waiting_approval":
 		return ToolStatusInProgress
 	case "cancelled", "canceled", "interrupted", "terminated", "timed_out", "timeout":
 		return ToolStatusFailed
