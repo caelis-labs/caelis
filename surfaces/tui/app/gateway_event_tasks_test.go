@@ -582,24 +582,23 @@ func TestTaskControlDisplayUsesTargetKindFallback(t *testing.T) {
 	t.Parallel()
 
 	input := map[string]any{
-		"action":          "wait",
-		"task_id":         "task-4",
-		"target_kind":     "command",
-		"wait_until_done": true,
+		"action":      "wait",
+		"task_id":     "task-4",
+		"target_kind": "command",
 	}
 	if got := toolDisplayArgs("TASK", input); got != "Wait command" {
 		t.Fatalf("toolDisplayArgs(TASK) = %q, want Wait command", got)
 	}
 }
 
-func TestTaskControlDisplayHidesWaitUntilDoneDuration(t *testing.T) {
+func TestTaskControlDisplayHidesNegativeOneYieldDuration(t *testing.T) {
 	t.Parallel()
 
 	input := map[string]any{
 		"action":                  "wait",
 		"task_id":                 "sima",
+		"yield_time_ms":           -1,
 		"effective_yield_time_ms": 300000,
-		"wait_until_done":         true,
 	}
 	if got := toolDisplayArgs("TASK", input); got != "Wait sima" {
 		t.Fatalf("toolDisplayArgs(TASK) = %q, want Wait sima", got)

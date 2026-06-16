@@ -27,7 +27,10 @@ func (tm *taskRuntime) StartSubagent(
 	if runner == nil {
 		return taskapi.Snapshot{}, fmt.Errorf("impl/agent/local: subagent runner is required")
 	}
-	taskID := tm.runtime.nextID("task", nil)
+	taskID, err := randomTaskID()
+	if err != nil {
+		return taskapi.Snapshot{}, err
+	}
 	mode := strings.TrimSpace(req.Mode)
 	if mode == "" {
 		mode = strings.TrimSpace(tm.runtime.defaultPolicyMode)

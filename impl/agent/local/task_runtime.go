@@ -2,7 +2,10 @@ package local
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -11,6 +14,16 @@ import (
 	taskapi "github.com/OnslaughtSnail/caelis/ports/task"
 	"github.com/OnslaughtSnail/caelis/ports/tool"
 )
+
+const taskIDRandomBytes = 6
+
+func randomTaskID() (string, error) {
+	var raw [taskIDRandomBytes]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", fmt.Errorf("impl/agent/local: generate task id: %w", err)
+	}
+	return hex.EncodeToString(raw[:]), nil
+}
 
 type taskToolObserver struct {
 	call     tool.Call
@@ -110,27 +123,29 @@ func taskSnapshotToolResult(call tool.Call, def tool.Definition, snapshot taskap
 	return taskSnapshotToolResultWithPayload(call, def, snapshot, taskToolPayload(snapshot))
 }
 
-func taskControlSnapshotToolResult(call tool.Call, def tool.Definition, snapshot taskapi.Snapshot, action string, waitUntilDone bool, timedOut bool) tool.Result {
+func taskControlSnapshotToolResult(call tool.Call, def tool.Definition, snapshot taskapi.Snapshot, action string, waitUntilDone bool, timedOut bool, actualWaitMS int) tool.Result {
 	if strings.EqualFold(strings.TrimSpace(action), "cancel") {
 		return taskSnapshotToolResultWithPayload(call, def, snapshot, taskCancelToolPayload(snapshot))
 	}
 	payload := taskToolPayload(snapshot)
 	if strings.EqualFold(strings.TrimSpace(action), "wait") {
 		applyWaitUntilDonePayloadHints(payload, waitUntilDone, timedOut, snapshot)
+		payload["actual_wait_time_ms"] = actualWaitMS
 	}
 	return taskSnapshotToolResultWithPayload(call, def, snapshot, payload)
 }
 
 type taskBatchControlItem struct {
-	TaskID   string
-	Snapshot taskapi.Snapshot
-	Err      error
-	OK       bool
-	TimedOut bool
+	TaskID       string
+	Snapshot     taskapi.Snapshot
+	Err          error
+	OK           bool
+	TimedOut     bool
+	ActualWaitMS int
 }
 
-func taskBatchControlToolResult(call tool.Call, def tool.Definition, items []taskBatchControlItem, action string, waitUntilDone bool) tool.Result {
-	payload := taskBatchControlPayload(items, action, waitUntilDone)
+func taskBatchControlToolResult(call tool.Call, def tool.Definition, items []taskBatchControlItem, action string, waitUntilDone bool, actualWaitMS int) tool.Result {
+	payload := taskBatchControlPayload(items, action, waitUntilDone, actualWaitMS)
 	payload, _ = tool.TruncateMap(payload, tool.DefaultTruncationPolicy())
 	raw, _ := json.Marshal(payload)
 	return tool.Result{
@@ -156,14 +171,19 @@ func taskSnapshotToolResultWithPayload(call tool.Call, def tool.Definition, snap
 	}
 }
 
-func taskBatchControlPayload(items []taskBatchControlItem, action string, waitUntilDone bool) map[string]any {
+func taskBatchControlPayload(items []taskBatchControlItem, action string, waitUntilDone bool, actualWaitMS int) map[string]any {
 	tasks := make([]any, 0, len(items))
+	normalizedAction := strings.ToLower(strings.TrimSpace(action))
 	for _, item := range items {
 		if item.Err != nil {
-			tasks = append(tasks, map[string]any{
+			payload := map[string]any{
 				"task_id": strings.TrimSpace(item.TaskID),
 				"error":   item.Err.Error(),
-			})
+			}
+			if normalizedAction == "wait" {
+				payload["actual_wait_time_ms"] = item.ActualWaitMS
+			}
+			tasks = append(tasks, payload)
 			continue
 		}
 		var payload map[string]any
@@ -173,16 +193,21 @@ func taskBatchControlPayload(items []taskBatchControlItem, action string, waitUn
 			payload = taskToolPayload(item.Snapshot)
 			if strings.EqualFold(strings.TrimSpace(action), "wait") {
 				applyWaitUntilDonePayloadHints(payload, waitUntilDone, item.TimedOut, item.Snapshot)
+				payload["actual_wait_time_ms"] = item.ActualWaitMS
 			}
 		}
 		tasks = append(tasks, payload)
 	}
-	return map[string]any{
-		"action": strings.ToLower(strings.TrimSpace(action)),
+	out := map[string]any{
+		"action": normalizedAction,
 		"count":  len(tasks),
 		"failed": taskBatchErrorCount(items),
 		"tasks":  tasks,
 	}
+	if normalizedAction == "wait" {
+		out["actual_wait_time_ms"] = actualWaitMS
+	}
+	return out
 }
 
 func applyWaitUntilDonePayloadHints(payload map[string]any, waitUntilDone bool, timedOut bool, snapshot taskapi.Snapshot) {

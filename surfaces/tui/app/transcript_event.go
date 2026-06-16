@@ -346,7 +346,7 @@ func toolDisplayMetaOutput(toolName string, meta map[string]any) map[string]any 
 		if taskID := firstNonEmpty(asString(toolMeta["target_id"]), asString(taskMeta["task_id"])); taskID != "" {
 			out["task_id"] = taskID
 		}
-		for _, key := range []string{"effective_yield_time_ms", "yield_time_ms_defaulted", "wait_until_done"} {
+		for _, key := range []string{"yield_time_ms", "effective_yield_time_ms", "yield_time_ms_defaulted"} {
 			if value, ok := toolMeta[key]; ok {
 				out[key] = value
 			}

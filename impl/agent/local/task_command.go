@@ -59,7 +59,10 @@ func (tm *taskRuntime) StartCommand(
 		return taskapi.Snapshot{}, err
 	}
 	now := tm.runtime.now()
-	taskID := tm.runtime.nextID("task", nil)
+	taskID, err := randomTaskID()
+	if err != nil {
+		return taskapi.Snapshot{}, err
+	}
 	createdTask := &commandTask{
 		ref: taskapi.Ref{
 			TaskID:     taskID,

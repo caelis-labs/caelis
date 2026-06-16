@@ -126,9 +126,9 @@ func TestCoreToolSchemasExposeGuidanceBoundsAndAnnotations(t *testing.T) {
 	requireAnnotations(t, defs[shell.RunCommandToolName], false, true, false, true)
 
 	requireStringMinLength(t, defs[task.ToolName], "task_id", 1)
-	requireIntegerBounds(t, defs[task.ToolName], "yield_time_ms", 0, nil)
-	requireBooleanProperty(t, defs[task.ToolName], "wait_until_done")
-	requireDescriptionContains(t, defs[task.ToolName], "continue a running/waiting SPAWN", "Always wait", "wait_until_done=true")
+	requireIntegerBounds(t, defs[task.ToolName], "yield_time_ms", -1, nil)
+	requireNoProperty(t, defs[task.ToolName], "wait_until_done")
+	requireDescriptionContains(t, defs[task.ToolName], "Control an async task", "terminal stdin", "follow-up prompt", "Always wait")
 	requireAnnotations(t, defs[task.ToolName], false, true, false, true)
 
 	requirePlanSchema(t, defs[plan.ToolName])
@@ -379,6 +379,14 @@ func requireNoMinLength(t *testing.T, def tool.Definition, prop string) {
 	schemaProp := schemaProperty(t, def, prop)
 	if _, ok := schemaProp["minLength"]; ok {
 		t.Fatalf("%s.%s minLength present: %#v", def.Name, prop, schemaProp["minLength"])
+	}
+}
+
+func requireNoProperty(t *testing.T, def tool.Definition, prop string) {
+	t.Helper()
+	props, _ := def.InputSchema["properties"].(map[string]any)
+	if _, ok := props[prop]; ok {
+		t.Fatalf("%s.%s property present: %#v", def.Name, prop, props[prop])
 	}
 }
 

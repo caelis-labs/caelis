@@ -1160,7 +1160,7 @@ func TestProjectGatewayEventTaskResultShowsEffectiveWaitDuration(t *testing.T) {
 	}
 }
 
-func TestProjectGatewayEventTaskResultHidesWaitUntilDoneDuration(t *testing.T) {
+func TestProjectGatewayEventTaskResultHidesNegativeOneYieldDuration(t *testing.T) {
 	t.Parallel()
 
 	events := ProjectGatewayEventToTranscriptEvents(gateway.Event{
@@ -1169,15 +1169,15 @@ func TestProjectGatewayEventTaskResultHidesWaitUntilDoneDuration(t *testing.T) {
 			"action":                  "wait",
 			"target_id":               "sima",
 			"target_kind":             "subagent",
+			"yield_time_ms":           -1,
 			"effective_yield_time_ms": 300000,
 			"yield_time_ms_defaulted": true,
-			"wait_until_done":         true,
 		}),
 		ToolResult: &gateway.ToolResultPayload{
 			CallID:   "task-result",
 			ToolName: "TASK",
 			Status:   gateway.ToolStatusRunning,
-			RawInput: map[string]any{"action": "wait", "task_id": "self"},
+			RawInput: map[string]any{"action": "wait", "task_id": "self", "yield_time_ms": -1},
 			RawOutput: map[string]any{
 				"task_id": "sima",
 				"state":   "running",
