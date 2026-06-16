@@ -610,7 +610,7 @@ func TestPromptRequestKeepsGatewayToolContentVisible(t *testing.T) {
 	m = updated.(*Model)
 
 	view := m.View().Content
-	if !strings.Contains(view, "READ") {
+	if !strings.Contains(view, "Read") {
 		t.Fatalf("view = %q, want tool row to remain visible", view)
 	}
 	if !strings.Contains(view, "Approval Required") {
@@ -683,7 +683,7 @@ func TestPendingGatewayToolCallIsVisibleBeforeTaskCompletes(t *testing.T) {
 	m = updated.(*Model)
 
 	view := m.View().Content
-	if !strings.Contains(view, "LIST") {
+	if !strings.Contains(view, "List") {
 		t.Fatalf("view = %q, want pending tool call before task result", view)
 	}
 }

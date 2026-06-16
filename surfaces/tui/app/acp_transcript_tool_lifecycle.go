@@ -110,6 +110,9 @@ func renderACPToolLifecycleRows(blockID string, events []SubagentEvent, idx int,
 			token := acpStandardCollapsedClickToken(callID, final, panelText, panelErr)
 			return renderACPStandardToolCollapsedRows(blockID, toolLifecycleHeaderEvent(start, final, hasFinal), callID, width, ctx, final.Err, token), end
 		}
+		if !hasFinal && shouldDefaultCollapseToolEvent(start) && !shouldRenderACPToolPanel(panelText, panelErr) {
+			return renderACPStandardToolCollapsedRows(blockID, toolLifecycleHeaderEvent(start, final, hasFinal), callID, width, ctx, panelErr, ""), end
+		}
 		if !shouldRenderACPToolPanel(panelText, panelErr) {
 			return renderParticipantTurnToolRows(blockID, toolLifecycleHeaderEvent(start, final, hasFinal), width, ctx), end
 		}

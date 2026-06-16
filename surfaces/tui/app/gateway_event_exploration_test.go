@@ -674,7 +674,7 @@ func TestGatewaySettledExplorationStepsStayInSingleExploredGroup(t *testing.T) {
 		`Search "GetReadyDispatchesByRegion"`,
 		`"GetBusyEbsIDsByRegion"`,
 		"Now I will inspect trigger flow before patching.",
-		`SEARCH "TriggerEbsBackupDispatch"`,
+		`Search "TriggerEbsBackupDispatch"`,
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("rendered rows = %q, want %q", joined, want)
@@ -733,7 +733,7 @@ func TestGatewayLiveExplorationKeepsCompletedPrefixCollapsed(t *testing.T) {
 	if !strings.Contains(joined, "• Explored") || !strings.Contains(joined, "Read store_test.go") {
 		t.Fatalf("rendered rows = %q, want completed exploration prefix collapsed", joined)
 	}
-	if !strings.Contains(joined, `SEARCH "StoreExerciseR03"`) {
+	if !strings.Contains(joined, `Search "StoreExerciseR03"`) {
 		t.Fatalf("rendered rows = %q, want live exploration tool visible", joined)
 	}
 	for _, forbidden := range []string{"I need to inspect the session store", "package memory", "✓ READ"} {
