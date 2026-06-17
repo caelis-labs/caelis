@@ -49,6 +49,46 @@ func TestProjectGatewayEventEnvelopeProjectsGatewayToolResult(t *testing.T) {
 	}
 }
 
+func TestProjectGatewayEventEnvelopeProjectsGatewayToolResultTerminalOutput(t *testing.T) {
+	events := ProjectGatewayEventEnvelope(gateway.EventEnvelope{Event: gateway.Event{
+		Kind:       gateway.EventKindToolResult,
+		SessionRef: session.SessionRef{SessionID: "session-1"},
+		ToolResult: &gateway.ToolResultPayload{
+			CallID:   "call-ls",
+			ToolName: "RUN_COMMAND",
+			Status:   gateway.ToolStatusCompleted,
+			Content: []session.ProtocolToolCallContent{{
+				Type:       "terminal",
+				TerminalID: "runtime-term-1",
+				Content:    session.ProtocolTextContent("total 0\n"),
+			}},
+		},
+	}})
+	if len(events) != 1 {
+		t.Fatalf("ProjectGatewayEventEnvelope() returned %d events, want 1: %#v", len(events), events)
+	}
+	update, ok := events[0].Update.(schema.ToolCallUpdate)
+	if !ok {
+		t.Fatalf("update = %#v, want ToolCallUpdate", events[0].Update)
+	}
+	if len(update.Content) != 1 {
+		t.Fatalf("content items = %d, want 1", len(update.Content))
+	}
+	if update.Content[0].TerminalID != "runtime-term-1" {
+		t.Fatalf("content terminal_id = %q, want runtime-term-1", update.Content[0].TerminalID)
+	}
+	terminalOutput, ok := update.Meta["terminal_output"].(map[string]any)
+	if !ok {
+		t.Fatalf("update meta = %#v, want terminal_output", update.Meta)
+	}
+	if terminalOutput["terminal_id"] != "call-ls" {
+		t.Fatalf("terminal_output.terminal_id = %#v, want call-ls", terminalOutput["terminal_id"])
+	}
+	if terminalOutput["data"] != "total 0\n" {
+		t.Fatalf("terminal_output.data = %#v, want terminal output", terminalOutput["data"])
+	}
+}
+
 func TestProjectGatewayEventEnvelopeAddsInvocationMeta(t *testing.T) {
 	events := ProjectGatewayEventEnvelope(gateway.EventEnvelope{Event: gateway.Event{
 		Kind:       gateway.EventKindAssistantMessage,
