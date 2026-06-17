@@ -203,9 +203,13 @@ func terminalRawOutputHasText(rawOutput map[string]any) bool {
 }
 
 func terminalToolOutputText(toolName string, toolKind string, rawOutput map[string]any, meta map[string]any, content []acpprojector.ToolContent, status string, isErr bool) string {
-	if !isTerminalPanelToolKind(toolName, toolKind) && !strings.EqualFold(strings.TrimSpace(toolName), "TASK") {
-		return ""
+	if text := terminalUniversalOutputText(meta, content); text != "" {
+		return text
 	}
+	return terminalKindSpecificOutputText(toolName, toolKind, rawOutput, meta, content, status, isErr)
+}
+
+func terminalUniversalOutputText(meta map[string]any, content []acpprojector.ToolContent) string {
 	if text := terminalOutputMetaText(meta); text != "" {
 		return text
 	}
@@ -214,6 +218,13 @@ func terminalToolOutputText(toolName string, toolKind string, rawOutput map[stri
 	}
 	if text := terminalContentText(content); text != "" {
 		return text
+	}
+	return ""
+}
+
+func terminalKindSpecificOutputText(toolName string, toolKind string, rawOutput map[string]any, meta map[string]any, content []acpprojector.ToolContent, status string, isErr bool) string {
+	if !isTerminalPanelToolKind(toolName, toolKind) && !strings.EqualFold(strings.TrimSpace(toolName), "TASK") {
+		return ""
 	}
 	if !hasStandardTerminalContent(content) {
 		return ""

@@ -2,13 +2,13 @@ package acp
 
 import (
 	"encoding/json"
-	"fmt"
 	"maps"
 	"strings"
 
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/client"
+	acpschema "github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
 func acpToolDisplayName(kind string, title string) string {
@@ -19,7 +19,7 @@ func acpToolDisplayName(kind string, title string) string {
 }
 
 func acpToolRawInput(kind string, title string, raw any) map[string]any {
-	out := acpRawMap(raw)
+	out := acpschema.NormalizeRawMap(raw)
 	if len(out) == 0 {
 		return nil
 	}
@@ -27,7 +27,7 @@ func acpToolRawInput(kind string, title string, raw any) map[string]any {
 }
 
 func acpToolRawOutput(raw any) map[string]any {
-	out := acpRawMap(raw)
+	out := acpschema.NormalizeRawMap(raw)
 	if len(out) == 0 {
 		return nil
 	}
@@ -75,23 +75,6 @@ func acpToolContent(content []client.ToolCallContent) []session.ProtocolToolCall
 		})
 	}
 	return session.CloneProtocolToolCallContent(out)
-}
-
-func acpRawMap(raw any) map[string]any {
-	switch typed := raw.(type) {
-	case nil:
-		return nil
-	case map[string]any:
-		return maps.Clone(typed)
-	default:
-		if text := strings.TrimSpace(textFromContentValue(typed)); text != "" {
-			return map[string]any{"text": text}
-		}
-		if text := strings.TrimSpace(fmt.Sprint(typed)); text != "" && text != "<nil>" {
-			return map[string]any{"text": text}
-		}
-		return nil
-	}
 }
 
 func messageForContentChunk(chunk client.ContentChunk, text string) model.Message {

@@ -67,6 +67,103 @@ func TestProjectACPEventToTranscriptEventsDisplaysStandardRawTerminalOutput(t *t
 	}
 }
 
+func TestProjectACPEventToTranscriptEventsDisplaysStandardRawOutputWithoutToolKind(t *testing.T) {
+	t.Parallel()
+
+	status := schema.ToolStatusCompleted
+	events := ProjectACPEventToTranscriptEvents(eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate,
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo,
+			ToolCallID:    "call-1",
+			Status:        &status,
+			RawOutput:     map[string]any{"stdout": "side acp output\n"},
+		},
+	})
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one transcript event", events)
+	}
+	if events[0].ToolOutput != "side acp output\n" {
+		t.Fatalf("ToolOutput = %q, want standard raw terminal output", events[0].ToolOutput)
+	}
+}
+
+func TestProjectACPEventToTranscriptEventsDisplaysStandardTerminalContentWithoutToolKind(t *testing.T) {
+	t.Parallel()
+
+	status := schema.ToolStatusCompleted
+	events := ProjectACPEventToTranscriptEvents(eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate,
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo,
+			ToolCallID:    "call-1",
+			Status:        &status,
+			Content: []schema.ToolCallContent{{
+				Type:       "terminal",
+				TerminalID: "terminal-1",
+				Content:    schema.TextContent{Type: "text", Text: "terminal content\n"},
+			}},
+		},
+	})
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one transcript event", events)
+	}
+	if events[0].ToolOutput != "terminal content\n" {
+		t.Fatalf("ToolOutput = %q, want standard terminal content", events[0].ToolOutput)
+	}
+}
+
+func TestProjectACPEventToTranscriptEventsDisplaysTerminalMetaWithoutToolKind(t *testing.T) {
+	t.Parallel()
+
+	status := schema.ToolStatusCompleted
+	events := ProjectACPEventToTranscriptEvents(eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate,
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo,
+			ToolCallID:    "call-1",
+			Status:        &status,
+			Content: []schema.ToolCallContent{{
+				Type:       "terminal",
+				TerminalID: "call-1",
+			}},
+			Meta: map[string]any{
+				"terminal_output": map[string]any{
+					"terminal_id": "call-1",
+					"data":        "terminal meta output\n",
+				},
+			},
+		},
+	})
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one transcript event", events)
+	}
+	if events[0].ToolOutput != "terminal meta output\n" {
+		t.Fatalf("ToolOutput = %q, want terminal meta output", events[0].ToolOutput)
+	}
+}
+
+func TestProjectACPEventToTranscriptEventsDisplaysStringRawOutput(t *testing.T) {
+	t.Parallel()
+
+	status := schema.ToolStatusCompleted
+	events := ProjectACPEventToTranscriptEvents(eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate,
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo,
+			ToolCallID:    "call-1",
+			Status:        &status,
+			RawOutput:     "string raw output\n",
+		},
+	})
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one transcript event", events)
+	}
+	if events[0].ToolOutput != "string raw output\n" {
+		t.Fatalf("ToolOutput = %q, want string raw output", events[0].ToolOutput)
+	}
+}
+
 func TestProjectACPEventToTranscriptEventsDoesNotDisplayGatewayProjectedRawTerminalOutput(t *testing.T) {
 	t.Parallel()
 

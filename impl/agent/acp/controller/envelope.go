@@ -2,6 +2,7 @@ package acp
 
 import (
 	"encoding/json"
+	"maps"
 	"strings"
 
 	"github.com/OnslaughtSnail/caelis/ports/session"
@@ -10,7 +11,13 @@ import (
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
-func acpEnvelopeFromUpdate(env client.UpdateEnvelope, canonical *session.Event) *eventstream.Envelope {
+type acpEnvelopeParticipantScope struct {
+	binding session.ParticipantBinding
+	agent   string
+	turnID  string
+}
+
+func acpEnvelopeFromUpdate(env client.UpdateEnvelope, canonical *session.Event, participant *acpEnvelopeParticipantScope) *eventstream.Envelope {
 	update := schemaUpdateFromClientUpdate(env)
 	if update == nil {
 		return nil
@@ -34,6 +41,37 @@ func acpEnvelopeFromUpdate(env client.UpdateEnvelope, canonical *session.Event) 
 				out.ParticipantID = id
 			}
 		}
+	}
+	if participant != nil {
+		applyACPParticipantEnvelopeScope(out, participant.binding, participant.agent, participant.turnID)
+	}
+	return out
+}
+
+func applyACPParticipantEnvelopeScope(env *eventstream.Envelope, binding session.ParticipantBinding, agent string, turnID string) {
+	if env == nil {
+		return
+	}
+	participantID := strings.TrimSpace(binding.ID)
+	env.TurnID = strings.TrimSpace(firstNonEmpty(env.TurnID, turnID))
+	env.Scope = eventstream.ScopeParticipant
+	env.ScopeID = participantID
+	env.ParticipantID = participantID
+	env.Actor = strings.TrimSpace(firstNonEmpty(env.Actor, binding.Label, agent, participantID))
+	env.Meta = applyACPParticipantDisplayMeta(env.Meta, binding, agent)
+}
+
+func applyACPParticipantDisplayMeta(meta map[string]any, binding session.ParticipantBinding, agent string) map[string]any {
+	out := maps.Clone(meta)
+	if out == nil {
+		out = map[string]any{}
+	}
+	if agent := strings.TrimSpace(agent); agent != "" {
+		out["agent"] = agent
+	}
+	if label := strings.TrimSpace(binding.Label); label != "" {
+		out["mention"] = label
+		out["handle"] = strings.TrimPrefix(label, "@")
 	}
 	return out
 }

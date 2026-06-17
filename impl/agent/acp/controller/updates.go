@@ -9,6 +9,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/controller"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/client"
+	acpschema "github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
 func normalizeACPUpdateEvent(
@@ -151,39 +152,9 @@ func contentChunkText(chunk client.ContentChunk) string {
 		if text.Text != "" {
 			return text.Text
 		}
-		return textFromRawContent(chunk.Content)
+		return acpschema.TextFromRawContent(chunk.Content)
 	}
-	return textFromRawContent(chunk.Content)
-}
-
-func textFromRawContent(raw json.RawMessage) string {
-	var content any
-	if err := json.Unmarshal(raw, &content); err != nil {
-		return strings.TrimSpace(string(raw))
-	}
-	return textFromContentValue(content)
-}
-
-func textFromContentValue(value any) string {
-	switch typed := value.(type) {
-	case string:
-		return typed
-	case []any:
-		var out strings.Builder
-		for _, item := range typed {
-			out.WriteString(textFromContentValue(item))
-		}
-		return out.String()
-	case map[string]any:
-		for _, key := range []string{"text", "content", "detailedContent"} {
-			if nested, ok := typed[key]; ok {
-				if text := textFromContentValue(nested); text != "" {
-					return text
-				}
-			}
-		}
-	}
-	return ""
+	return acpschema.TextFromRawContent(chunk.Content)
 }
 
 func controllerCommandsFromACP(in []map[string]any) []controller.ControllerCommand {

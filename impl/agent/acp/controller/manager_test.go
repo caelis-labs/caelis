@@ -15,6 +15,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/client"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/jsonrpc"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
@@ -1813,6 +1814,69 @@ func TestControllerRunPublishesACPSourceEvent(t *testing.T) {
 	}
 	if vendor, ok := update.Meta["vendor"].(map[string]any); !ok || vendor["trace"] != "abc" {
 		t.Fatalf("ACP tool meta = %#v, want vendor trace", update.Meta)
+	}
+}
+
+func TestParticipantPassthroughOnlyACPUpdatePreservesScope(t *testing.T) {
+	t.Parallel()
+
+	handle := newTurnHandle(nil)
+	run := &participantRun{
+		remoteSessionID: "remote-participant",
+		agent:           "otto",
+		binding: session.ParticipantBinding{
+			ID:            "participant-1",
+			Kind:          session.ParticipantKindACP,
+			Role:          "reviewer",
+			Label:         "@otto",
+			ControllerRef: "epoch-1",
+			SessionID:     "remote-participant",
+		},
+		turnID:     "turn-1",
+		turnStream: true,
+		handle:     handle,
+	}
+	raw := json.RawMessage(`{"sessionUpdate":"vendor/current_mode_update","mode":"review"}`)
+	run.handleUpdate(func() time.Time { return time.Unix(10, 0) }, client.UpdateEnvelope{
+		SessionID: "remote-participant",
+		Raw:       raw,
+		Update: client.RawUpdate{
+			SessionUpdate: "vendor/current_mode_update",
+			Raw:           raw,
+		},
+	})
+
+	handle.finish()
+
+	var events []eventsource.Event
+	for event, err := range handle.SourceEvents() {
+		if err != nil {
+			t.Fatalf("source error = %v", err)
+		}
+		events = append(events, event)
+	}
+	if len(events) != 1 {
+		t.Fatalf("source events len = %d, want 1", len(events))
+	}
+	if events[0].Canonical != nil {
+		t.Fatalf("canonical event = %#v, want nil for passthrough-only update", events[0].Canonical)
+	}
+	if events[0].ACP == nil {
+		t.Fatal("source ACP envelope is nil")
+	}
+	env := events[0].ACP
+	if env.Scope != eventstream.ScopeParticipant || env.ScopeID != "participant-1" || env.ParticipantID != "participant-1" {
+		t.Fatalf("ACP scope = scope:%q scopeID:%q participantID:%q, want participant participant-1", env.Scope, env.ScopeID, env.ParticipantID)
+	}
+	if env.Actor != "@otto" || env.TurnID != "turn-1" {
+		t.Fatalf("ACP actor/turn = %q/%q, want @otto/turn-1", env.Actor, env.TurnID)
+	}
+	update, ok := env.Update.(schema.RawUpdate)
+	if !ok {
+		t.Fatalf("ACP update = %T, want RawUpdate", env.Update)
+	}
+	if update.SessionUpdate != "vendor/current_mode_update" {
+		t.Fatalf("SessionUpdate = %q, want vendor/current_mode_update", update.SessionUpdate)
 	}
 }
 

@@ -300,13 +300,7 @@ func acpToolUpdateError(update schema.ToolCallUpdate) bool {
 }
 
 func acpRawMap(raw any) map[string]any {
-	if raw == nil {
-		return nil
-	}
-	if mapped, ok := raw.(map[string]any); ok {
-		return cloneAnyMap(mapped)
-	}
-	return nil
+	return schema.NormalizeRawMap(raw)
 }
 
 func acpToolContentToDisplay(in []schema.ToolCallContent) []acpprojector.ToolContent {

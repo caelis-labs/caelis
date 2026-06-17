@@ -880,7 +880,7 @@ func translateApprovalRequest(
 			Kind:     derefString(req.ToolCall.Kind),
 			Title:    derefString(req.ToolCall.Title),
 			Status:   derefString(req.ToolCall.Status),
-			RawInput: acpRawMap(req.ToolCall.RawInput),
+			RawInput: schema.NormalizeRawMap(req.ToolCall.RawInput),
 		},
 		Options: options,
 	}
@@ -983,7 +983,7 @@ func (r *controllerRun) handleUpdate(clock func() time.Time, env client.UpdateEn
 	stream := r.turnStream
 	handle := r.handle
 	event := normalizeACPUpdateEvent(clock, r.binding, r.remoteSessionID, turnID, env.Update)
-	acpEnv := acpEnvelopeFromUpdate(env, event)
+	acpEnv := acpEnvelopeFromUpdate(env, event, nil)
 	if event == nil && acpEnv == nil {
 		r.mu.Unlock()
 		return
@@ -1315,7 +1315,11 @@ func (r *participantRun) handleUpdate(clock func() time.Time, env client.UpdateE
 	if event != nil {
 		applyACPParticipantEventScope(event, r.binding, r.agent)
 	}
-	acpEnv := acpEnvelopeFromUpdate(env, event)
+	acpEnv := acpEnvelopeFromUpdate(env, event, &acpEnvelopeParticipantScope{
+		binding: r.binding,
+		agent:   r.agent,
+		turnID:  turnID,
+	})
 	if event == nil && acpEnv == nil {
 		r.mu.Unlock()
 		return

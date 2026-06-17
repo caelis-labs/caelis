@@ -17,6 +17,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/stream"
 	"github.com/OnslaughtSnail/caelis/ports/subagent"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/client"
+	acpschema "github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
 type PermissionHandler func(context.Context, client.RequestPermissionRequest) (client.RequestPermissionResponse, error)
@@ -406,7 +407,7 @@ func translateApprovalRequest(
 			Kind:     trimStringPtr(req.ToolCall.Kind),
 			Title:    trimStringPtr(req.ToolCall.Title),
 			Status:   trimStringPtr(req.ToolCall.Status),
-			RawInput: acpRawMap(req.ToolCall.RawInput),
+			RawInput: acpschema.NormalizeRawMap(req.ToolCall.RawInput),
 		},
 		Options: options,
 	}
@@ -655,7 +656,7 @@ func acpToolDisplayName(kind string, title string) string {
 }
 
 func acpToolRawInput(kind string, title string, raw any) map[string]any {
-	out := acpRawMap(raw)
+	out := acpschema.NormalizeRawMap(raw)
 	if len(out) == 0 {
 		return nil
 	}
@@ -663,7 +664,7 @@ func acpToolRawInput(kind string, title string, raw any) map[string]any {
 }
 
 func acpToolRawOutput(raw any) map[string]any {
-	out := acpRawMap(raw)
+	out := acpschema.NormalizeRawMap(raw)
 	if len(out) == 0 {
 		return nil
 	}
@@ -711,23 +712,6 @@ func acpToolContent(content []client.ToolCallContent) []session.ProtocolToolCall
 		})
 	}
 	return session.CloneProtocolToolCallContent(out)
-}
-
-func acpRawMap(raw any) map[string]any {
-	switch typed := raw.(type) {
-	case nil:
-		return nil
-	case map[string]any:
-		return maps.Clone(typed)
-	default:
-		if text := strings.TrimSpace(textFromContentValue(typed)); text != "" {
-			return map[string]any{"text": text}
-		}
-		if text := strings.TrimSpace(fmt.Sprint(typed)); text != "" && text != "<nil>" {
-			return map[string]any{"text": text}
-		}
-		return nil
-	}
 }
 
 func acpPlanEntries(in []client.PlanEntry) []session.ProtocolPlanEntry {
@@ -829,7 +813,7 @@ func childTerminalOutputMetaText(meta map[string]any) string {
 	if len(output) == 0 {
 		return ""
 	}
-	return textFromContentValue(output["data"])
+	return acpschema.ExtractTextValue(output["data"])
 }
 
 func childTerminalContentText(content []client.ToolCallContent) string {
@@ -838,7 +822,7 @@ func childTerminalContentText(content []client.ToolCallContent) string {
 		if !strings.EqualFold(strings.TrimSpace(item.Type), "terminal") {
 			continue
 		}
-		out.WriteString(textFromContentValue(item.Content))
+		out.WriteString(acpschema.ExtractTextValue(item.Content))
 	}
 	return out.String()
 }
@@ -907,7 +891,7 @@ func childToolStatusSuffix(status string) string {
 }
 
 func childToolInputSummary(raw any) string {
-	values := acpRawMap(raw)
+	values := acpschema.NormalizeRawMap(raw)
 	if len(values) == 0 {
 		return ""
 	}
@@ -962,7 +946,7 @@ func rawValueString(values map[string]any, key string) string {
 	if !ok {
 		return ""
 	}
-	text := textFromContentValue(value)
+	text := acpschema.ExtractTextValue(value)
 	if text == "" {
 		text = strings.TrimSpace(fmt.Sprint(value))
 	}
@@ -1018,39 +1002,9 @@ func chunkText(chunk client.ContentChunk) string {
 		if text.Text != "" {
 			return text.Text
 		}
-		return textFromRawContent(chunk.Content)
+		return acpschema.TextFromRawContent(chunk.Content)
 	}
-	return textFromRawContent(chunk.Content)
-}
-
-func textFromRawContent(raw json.RawMessage) string {
-	var content any
-	if err := json.Unmarshal(raw, &content); err != nil {
-		return strings.TrimSpace(string(raw))
-	}
-	return textFromContentValue(content)
-}
-
-func textFromContentValue(value any) string {
-	switch typed := value.(type) {
-	case string:
-		return typed
-	case []any:
-		var out strings.Builder
-		for _, item := range typed {
-			out.WriteString(textFromContentValue(item))
-		}
-		return out.String()
-	case map[string]any:
-		for _, key := range []string{"text", "content", "detailedContent"} {
-			if nested, ok := typed[key]; ok {
-				if text := textFromContentValue(nested); text != "" {
-					return text
-				}
-			}
-		}
-	}
-	return ""
+	return acpschema.TextFromRawContent(chunk.Content)
 }
 
 func toolActivity(title string, kind string, status string) string {
