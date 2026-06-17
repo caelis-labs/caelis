@@ -7,14 +7,16 @@ import (
 	"iter"
 	"sync"
 
+	"github.com/OnslaughtSnail/caelis/internal/eventqueue"
 	"github.com/OnslaughtSnail/caelis/ports/agent"
+	"github.com/OnslaughtSnail/caelis/ports/eventsource"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
 type runner struct {
 	runID       string
 	cancelFn    context.CancelFunc
-	eventsCh    chan runnerEvent
+	events      *eventqueue.Queue[runnerEvent]
 	closeOnce   sync.Once
 	mu          sync.Mutex
 	cancelled   bool
@@ -24,7 +26,7 @@ type runner struct {
 }
 
 type runnerEvent struct {
-	event *session.Event
+	event eventsource.Event
 	err   error
 }
 
@@ -32,7 +34,7 @@ func newRunner(runID string, cancel context.CancelFunc) *runner {
 	return &runner{
 		runID:    runID,
 		cancelFn: cancel,
-		eventsCh: make(chan runnerEvent, 64),
+		events:   eventqueue.New[runnerEvent](),
 	}
 }
 
@@ -40,8 +42,41 @@ func (r *runner) RunID() string { return r.runID }
 
 func (r *runner) Events() iter.Seq2[*session.Event, error] {
 	return func(yield func(*session.Event, error) bool) {
-		for item := range r.eventsCh {
-			if !yield(session.CloneEvent(item.event), item.err) {
+		if r == nil {
+			return
+		}
+		for {
+			item, ok := r.events.Pop()
+			if !ok {
+				return
+			}
+			if item.err != nil {
+				if !yield(nil, item.err) {
+					return
+				}
+				continue
+			}
+			if item.event.Canonical == nil {
+				continue
+			}
+			if !yield(session.CloneEvent(item.event.Canonical), nil) {
+				return
+			}
+		}
+	}
+}
+
+func (r *runner) SourceEvents() iter.Seq2[eventsource.Event, error] {
+	return func(yield func(eventsource.Event, error) bool) {
+		if r == nil {
+			return
+		}
+		for {
+			item, ok := r.events.Pop()
+			if !ok {
+				return
+			}
+			if !yield(cloneSourceEvent(item.event), item.err) {
 				return
 			}
 		}
@@ -123,7 +158,14 @@ func (r *runner) publishEvent(event *session.Event) {
 	if r == nil || event == nil {
 		return
 	}
-	r.publish(runnerEvent{event: session.CloneEvent(event)})
+	r.publishSourceEvent(eventsource.Event{Canonical: session.CloneEvent(event)})
+}
+
+func (r *runner) publishSourceEvent(event eventsource.Event) {
+	if r == nil || (event.Canonical == nil && event.ACP == nil) {
+		return
+	}
+	r.publish(runnerEvent{event: eventsource.CloneEvent(event)})
 }
 
 func (r *runner) publishError(err error) {
@@ -137,11 +179,7 @@ func (r *runner) publish(item runnerEvent) {
 	if r == nil {
 		return
 	}
-	select {
-	case r.eventsCh <- item:
-	default:
-		r.eventsCh <- item
-	}
+	r.events.Push(item)
 }
 
 func (r *runner) finish() {
@@ -150,7 +188,7 @@ func (r *runner) finish() {
 	}
 	r.closeOnce.Do(func() {
 		r.markClosed()
-		close(r.eventsCh)
+		r.events.Close()
 	})
 }
 

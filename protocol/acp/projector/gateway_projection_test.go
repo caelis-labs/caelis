@@ -174,6 +174,45 @@ func TestProjectGatewayEventEnvelopeProjectsGatewayToolCall(t *testing.T) {
 	}
 }
 
+func TestGatewayCanonicalPayloadNormalizesBeforeACPProjection(t *testing.T) {
+	base := eventstream.Envelope{SessionID: "session-1"}
+	event := gateway.Event{
+		Kind:       gateway.EventKindToolResult,
+		SessionRef: session.SessionRef{SessionID: "session-1"},
+		ToolResult: &gateway.ToolResultPayload{
+			CallID:    "call-1",
+			ToolName:  "RUN_COMMAND",
+			Status:    gateway.ToolStatusRunning,
+			RawInput:  map[string]any{"cmd": "go test ./..."},
+			RawOutput: map[string]any{"running": true},
+		},
+	}
+	sessionEvent, ok := sessionEventFromGatewayEvent(base, event)
+	if !ok {
+		t.Fatal("sessionEventFromGatewayEvent() ok = false, want true")
+	}
+	if sessionEvent.Protocol == nil || session.ProtocolUpdateOf(sessionEvent) == nil {
+		t.Fatalf("session event protocol = %#v, want normalized protocol update", sessionEvent.Protocol)
+	}
+	updates, err := (EventProjector{}).ProjectEvent(sessionEvent)
+	if err != nil {
+		t.Fatalf("ProjectEvent() error = %v", err)
+	}
+	if len(updates) != 1 {
+		t.Fatalf("ProjectEvent() produced %d updates, want 1: %#v", len(updates), updates)
+	}
+	update, ok := updates[0].(schema.ToolCallUpdate)
+	if !ok {
+		t.Fatalf("update = %#v, want ToolCallUpdate", updates[0])
+	}
+	if update.ToolCallID != "call-1" || stringPtrValue(update.Kind) != "RUN_COMMAND" || stringPtrValue(update.Status) != schema.ToolStatusInProgress {
+		t.Fatalf("tool update = %#v, want canonical gateway payload routed through EventProjector", update)
+	}
+	if got := metaString(update.Meta, "caelis", "runtime", "tool", "name"); got != "RUN_COMMAND" {
+		t.Fatalf("tool meta name = %q, want RUN_COMMAND", got)
+	}
+}
+
 func TestProjectGatewayEventEnvelopeProjectsGatewayPlan(t *testing.T) {
 	events := ProjectGatewayEventEnvelope(gateway.EventEnvelope{Event: gateway.Event{
 		Kind:       gateway.EventKindPlanUpdate,
@@ -284,6 +323,46 @@ func TestProjectGatewayEventEnvelopeProjectsManualApprovalPayloadPermission(t *t
 	}
 	if len(env.Permission.Options) != 2 || env.Permission.Options[0].OptionID != "allow_once" || env.Permission.Options[1].OptionID != "reject_once" {
 		t.Fatalf("options = %#v, want allow/reject", env.Permission.Options)
+	}
+}
+
+func TestProjectGatewayEventEnvelopePreservesCanonicalProtocolToolFields(t *testing.T) {
+	line := 42
+	events := ProjectGatewayEventEnvelope(gateway.EventEnvelope{Event: gateway.Event{
+		Kind:       gateway.EventKindToolResult,
+		SessionRef: session.SessionRef{SessionID: "session-1"},
+		Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
+			SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate),
+			ToolCallID:    "call-1",
+			Kind:          "edit",
+			Title:         "Edit file",
+			Status:        "completed",
+			Locations: []session.ProtocolToolCallLocation{{
+				Path: "main.go",
+				Line: &line,
+			}},
+			Meta: map[string]any{
+				"vendor": map[string]any{"trace_id": "trace-1"},
+			},
+		}},
+		ToolResult: &gateway.ToolResultPayload{
+			CallID:   "call-1",
+			ToolName: "EDIT",
+			Status:   gateway.ToolStatusCompleted,
+		},
+	}})
+	if len(events) != 1 {
+		t.Fatalf("ProjectGatewayEventEnvelope() returned %d events, want 1: %#v", len(events), events)
+	}
+	update, ok := events[0].Update.(schema.ToolCallUpdate)
+	if !ok {
+		t.Fatalf("update = %#v, want ToolCallUpdate", events[0].Update)
+	}
+	if len(update.Locations) != 1 || update.Locations[0].Path != "main.go" || update.Locations[0].Line == nil || *update.Locations[0].Line != 42 {
+		t.Fatalf("locations = %#v, want main.go:42", update.Locations)
+	}
+	if got := metaString(update.Meta, "vendor", "trace_id"); got != "trace-1" {
+		t.Fatalf("meta vendor.trace_id = %q, want trace-1", got)
 	}
 }
 

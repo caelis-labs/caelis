@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/OnslaughtSnail/caelis/ports/gateway"
+	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
@@ -51,17 +52,14 @@ func ProjectGatewayEventEnvelope(env gateway.EventEnvelope) []eventstream.Envelo
 }
 
 func projectGatewayStandardACPEvents(base eventstream.Envelope, ev gateway.Event) []eventstream.Envelope {
-	if ev.Protocol == nil {
-		return projectCanonicalGatewayACPEvents(base, ev)
-	}
-	return projectProtocolGatewayACPEvents(base, ev)
-}
-
-func projectProtocolGatewayACPEvents(base eventstream.Envelope, ev gateway.Event) []eventstream.Envelope {
 	sessionEvent, ok := sessionEventFromGatewayEvent(base, ev)
 	if !ok {
 		return nil
 	}
+	return projectSessionEventToACPEnvelopes(base, ev, sessionEvent)
+}
+
+func projectSessionEventToACPEnvelopes(base eventstream.Envelope, ev gateway.Event, sessionEvent *session.Event) []eventstream.Envelope {
 	projector := EventProjector{}
 	out := make([]eventstream.Envelope, 0, 2)
 	if permission, ok, err := projector.ProjectPermissionRequest(sessionEvent); err != nil {
@@ -89,7 +87,7 @@ func projectProtocolGatewayACPEvents(base eventstream.Envelope, ev gateway.Event
 		}
 		next := base
 		next.Kind = eventstream.KindSessionUpdate
-		next.Update = update
+		next.Update = gatewayCompatibleUpdateContent(update, ev)
 		if len(updateMeta) > 0 {
 			next.Meta = mergeACPEventMeta(updateMeta, next.Meta)
 		}
@@ -98,187 +96,7 @@ func projectProtocolGatewayACPEvents(base eventstream.Envelope, ev gateway.Event
 	return out
 }
 
-func projectCanonicalGatewayACPEvents(base eventstream.Envelope, ev gateway.Event) []eventstream.Envelope {
-	switch ev.Kind {
-	case gateway.EventKindUserMessage, gateway.EventKindAssistantMessage:
-		return projectGatewayNarrativeACPEvents(base, ev.Narrative)
-	case gateway.EventKindToolCall:
-		if update, ok := gatewayToolCallUpdate(ev); ok {
-			return []eventstream.Envelope{sessionUpdateEnvelope(base, update)}
-		}
-	case gateway.EventKindToolResult:
-		if update, ok := gatewayToolResultUpdate(ev); ok {
-			return []eventstream.Envelope{sessionUpdateEnvelope(base, update)}
-		}
-	case gateway.EventKindPlanUpdate:
-		if update, ok := gatewayPlanUpdate(ev.Plan); ok {
-			return []eventstream.Envelope{sessionUpdateEnvelope(base, update)}
-		}
-	case gateway.EventKindApprovalRequested:
-		if permission, ok := gatewayPermissionRequest(base, ev.ApprovalPayload); ok {
-			next := base
-			next.Kind = eventstream.KindRequestPermission
-			next.Permission = permission
-			return []eventstream.Envelope{next}
-		}
-	}
-	return nil
-}
-
-func projectGatewayNarrativeACPEvents(base eventstream.Envelope, narrative *gateway.NarrativePayload) []eventstream.Envelope {
-	if narrative == nil {
-		return nil
-	}
-	switch narrative.Role {
-	case gateway.NarrativeRoleUser:
-		text := strings.TrimSpace(narrative.Text)
-		if text == "" {
-			return nil
-		}
-		return []eventstream.Envelope{sessionUpdateEnvelope(base, schema.ContentChunk{
-			SessionUpdate: UpdateUserMessage,
-			Content:       TextContent{Type: "text", Text: text},
-		})}
-	case gateway.NarrativeRoleAssistant:
-		out := make([]eventstream.Envelope, 0, 2)
-		if narrative.ReasoningText != "" {
-			out = append(out, sessionUpdateEnvelope(base, schema.ContentChunk{
-				SessionUpdate: UpdateAgentThought,
-				Content:       TextContent{Type: "text", Text: narrative.ReasoningText},
-			}))
-		}
-		if narrative.Text != "" {
-			out = append(out, sessionUpdateEnvelope(base, schema.ContentChunk{
-				SessionUpdate: UpdateAgentMessage,
-				Content:       TextContent{Type: "text", Text: narrative.Text},
-			}))
-		}
-		return out
-	default:
-		return nil
-	}
-}
-
-func gatewayToolCallUpdate(ev gateway.Event) (schema.ToolCall, bool) {
-	if ev.ToolCall == nil {
-		return schema.ToolCall{}, false
-	}
-	payload := ev.ToolCall
-	toolName := strings.TrimSpace(payload.ToolName)
-	rawInput := cloneAnyMap(payload.RawInput)
-	displayTerminalID, _ := displayTerminalID(payload.CallID, toolName)
-	call := schema.ToolCall{
-		SessionUpdate: UpdateToolCall,
-		ToolCallID:    strings.TrimSpace(payload.CallID),
-		Title:         firstNonEmpty(payload.ToolTitle, payload.ToolName, payload.ToolKind),
-		Kind:          firstNonEmpty(payload.ToolKind, payload.ToolName),
-		Status:        firstNonEmpty(acpToolStatus(string(payload.Status)), ToolStatusPending),
-		RawInput:      rawInput,
-		Content:       projectToolContent(payload.Content, displayTerminalID),
-		Meta:          mergeMeta(terminalOutputMetaFromProtocolContent(payload.Content, displayTerminalID), acpMetaWithToolName(ev.Meta, toolName)),
-	}
-	call = withDisplayTerminal(call, toolName, rawInput)
-	if len(payload.Content) > 0 {
-		call.Content = acpToolCallContent(payload.Content)
-	}
-	return call, true
-}
-
-func gatewayToolResultUpdate(ev gateway.Event) (schema.ToolCallUpdate, bool) {
-	if ev.ToolResult == nil {
-		return schema.ToolCallUpdate{}, false
-	}
-	payload := ev.ToolResult
-	toolName := strings.TrimSpace(payload.ToolName)
-	rawInput := cloneAnyMap(payload.RawInput)
-	displayTerminalID, _ := displayTerminalID(payload.CallID, toolName)
-	update := schema.ToolCallUpdate{
-		SessionUpdate: UpdateToolCallInfo,
-		ToolCallID:    strings.TrimSpace(payload.CallID),
-		RawInput:      rawInput,
-		RawOutput:     cloneAnyMap(payload.RawOutput),
-		Content:       projectToolContent(payload.Content, displayTerminalID),
-		Meta:          mergeMeta(terminalOutputMetaFromProtocolContent(payload.Content, displayTerminalID), acpMetaWithToolName(ev.Meta, toolName)),
-	}
-	if title := firstNonEmpty(payload.ToolTitle, payload.ToolName, payload.ToolKind); title != "" {
-		update.Title = stringPtr(title)
-	}
-	if kind := firstNonEmpty(payload.ToolKind, payload.ToolName); kind != "" {
-		update.Kind = stringPtr(kind)
-	}
-	if status := acpToolStatus(string(payload.Status)); status != "" {
-		update.Status = stringPtr(status)
-	}
-	if len(payload.Content) > 0 {
-		update.Content = acpToolCallContent(payload.Content)
-	}
-	return update, true
-}
-
-func gatewayPlanUpdate(plan *gateway.PlanPayload) (schema.PlanUpdate, bool) {
-	if plan == nil || len(plan.Entries) == 0 {
-		return schema.PlanUpdate{}, false
-	}
-	entries := make([]schema.PlanEntry, 0, len(plan.Entries))
-	for _, item := range plan.Entries {
-		entries = append(entries, schema.PlanEntry{
-			Content:  strings.TrimSpace(item.Content),
-			Status:   strings.TrimSpace(item.Status),
-			Priority: firstNonEmpty(strings.TrimSpace(item.Priority), "medium"),
-		})
-	}
-	return schema.PlanUpdate{SessionUpdate: UpdatePlan, Entries: entries}, true
-}
-
-func gatewayPermissionRequest(base eventstream.Envelope, payload *gateway.ApprovalPayload) (*schema.RequestPermissionRequest, bool) {
-	if payload == nil {
-		return nil, false
-	}
-	toolName := strings.TrimSpace(payload.ToolName)
-	toolCallID := strings.TrimSpace(payload.ToolCallID)
-	rawInput := acpApprovalRawInput(payload)
-	if toolName == "" && toolCallID == "" && len(rawInput) == 0 && len(payload.Options) == 0 {
-		return nil, false
-	}
-	options := make([]schema.PermissionOption, 0, len(payload.Options))
-	for _, item := range payload.Options {
-		options = append(options, schema.PermissionOption{
-			OptionID: strings.TrimSpace(item.ID),
-			Name:     strings.TrimSpace(item.Name),
-			Kind:     strings.TrimSpace(item.Kind),
-		})
-	}
-	toolCall := schema.ToolCallUpdate{
-		SessionUpdate: UpdateToolCallInfo,
-		ToolCallID:    toolCallID,
-		RawInput:      rawInput,
-		Meta:          acpMetaWithToolName(base.Meta, toolName),
-	}
-	if toolName != "" {
-		toolCall.Title = stringPtr(toolName)
-		toolCall.Kind = stringPtr(toolName)
-	}
-	if status := acpToolStatus(string(payload.Status)); status != "" {
-		toolCall.Status = stringPtr(status)
-	}
-	return &schema.RequestPermissionRequest{
-		SessionID: strings.TrimSpace(base.SessionID),
-		ToolCall:  toolCall,
-		Options:   options,
-	}, true
-}
-
-func sessionUpdateEnvelope(base eventstream.Envelope, update schema.Update) eventstream.Envelope {
-	next := base
-	next.Kind = eventstream.KindSessionUpdate
-	next.Update = update
-	return next
-}
-
 func sessionEventFromGatewayEvent(base eventstream.Envelope, ev gateway.Event) (*session.Event, bool) {
-	if ev.Protocol == nil {
-		return nil, false
-	}
 	out := &session.Event{
 		SessionID:  strings.TrimSpace(base.SessionID),
 		Type:       sessionTypeFromEventKind(ev.Kind),
@@ -286,12 +104,242 @@ func sessionEventFromGatewayEvent(base eventstream.Envelope, ev gateway.Event) (
 		Visibility: session.VisibilityCanonical,
 		Meta:       maps.Clone(ev.Meta),
 	}
-	protocol := session.CloneEventProtocol(*ev.Protocol)
-	out.Protocol = &protocol
+	if ev.Protocol != nil {
+		protocol := session.CloneEventProtocol(*ev.Protocol)
+		out.Protocol = &protocol
+	}
 	if ev.Narrative != nil {
 		out.Text = ev.Narrative.Text
+		out.Type = sessionTypeFromNarrativeRole(ev.Narrative.Role, out.Type)
+		if message, ok := gatewayNarrativeMessage(ev.Narrative); ok {
+			out.Message = &message
+		}
+	}
+	if ev.ToolCall != nil {
+		out.Type = session.EventTypeToolCall
+		if out.Protocol == nil {
+			out.Protocol = gatewayToolCallProtocol(ev)
+		}
+	}
+	if ev.ToolResult != nil {
+		out.Type = session.EventTypeToolResult
+		if out.Protocol == nil {
+			out.Protocol = gatewayToolResultProtocol(ev)
+		}
+	}
+	if ev.Plan != nil {
+		out.Type = session.EventTypePlan
+		if out.Protocol == nil {
+			out.Protocol = gatewayPlanProtocol(ev.Plan)
+		}
+	}
+	if ev.ApprovalPayload != nil && ev.Kind == gateway.EventKindApprovalRequested {
+		out.Type = session.EventTypeLifecycle
+		out.Protocol = gatewayApprovalProtocol(ev.ApprovalPayload)
+	}
+	if out.Protocol == nil && out.Message == nil {
+		return nil, false
 	}
 	return out, true
+}
+
+func sessionTypeFromNarrativeRole(role gateway.NarrativeRole, fallback session.EventType) session.EventType {
+	switch role {
+	case gateway.NarrativeRoleUser:
+		return session.EventTypeUser
+	case gateway.NarrativeRoleAssistant:
+		return session.EventTypeAssistant
+	case gateway.NarrativeRoleSystem:
+		return session.EventTypeSystem
+	case gateway.NarrativeRoleNotice:
+		return session.EventTypeNotice
+	default:
+		return fallback
+	}
+}
+
+func gatewayNarrativeMessage(narrative *gateway.NarrativePayload) (model.Message, bool) {
+	if narrative == nil {
+		return model.Message{}, false
+	}
+	switch narrative.Role {
+	case gateway.NarrativeRoleUser:
+		text := strings.TrimSpace(narrative.Text)
+		if text == "" {
+			return model.Message{}, false
+		}
+		return model.NewTextMessage(model.RoleUser, text), true
+	case gateway.NarrativeRoleAssistant:
+		parts := make([]model.Part, 0, 2)
+		if narrative.ReasoningText != "" {
+			parts = append(parts, model.NewReasoningPart(narrative.ReasoningText, model.ReasoningVisibilityVisible))
+		}
+		if narrative.Text != "" {
+			parts = append(parts, model.NewTextPart(narrative.Text))
+		}
+		if len(parts) == 0 {
+			return model.Message{}, false
+		}
+		return model.NewMessage(model.RoleAssistant, parts...), true
+	default:
+		return model.Message{}, false
+	}
+}
+
+func gatewayToolCallProtocol(ev gateway.Event) *session.EventProtocol {
+	payload := ev.ToolCall
+	if payload == nil {
+		return nil
+	}
+	toolName := strings.TrimSpace(payload.ToolName)
+	rawInput := cloneAnyMap(payload.RawInput)
+	update := &session.ProtocolUpdate{
+		SessionUpdate: string(session.ProtocolUpdateTypeToolCall),
+		ToolCallID:    strings.TrimSpace(payload.CallID),
+		Title:         firstNonEmpty(payload.ToolTitle, payload.ToolName, payload.ToolKind),
+		Kind:          firstNonEmpty(payload.ToolKind, payload.ToolName),
+		Status:        string(payload.Status),
+		RawInput:      rawInput,
+		Content:       session.CloneProtocolToolCallContent(payload.Content),
+		Meta:          acpMetaWithToolName(ev.Meta, toolName),
+	}
+	return &session.EventProtocol{
+		Method:     session.ProtocolMethodSessionUpdate,
+		UpdateType: string(session.ProtocolUpdateTypeToolCall),
+		Update:     update,
+		ToolCall: &session.ProtocolToolCall{
+			ID:       strings.TrimSpace(payload.CallID),
+			Name:     toolName,
+			Kind:     firstNonEmpty(payload.ToolKind, payload.ToolName),
+			Title:    firstNonEmpty(payload.ToolTitle, payload.ToolName, payload.ToolKind),
+			Status:   string(payload.Status),
+			RawInput: rawInput,
+			Content:  session.CloneProtocolToolCallContent(payload.Content),
+		},
+	}
+}
+
+func gatewayToolResultProtocol(ev gateway.Event) *session.EventProtocol {
+	payload := ev.ToolResult
+	if payload == nil {
+		return nil
+	}
+	toolName := strings.TrimSpace(payload.ToolName)
+	update := &session.ProtocolUpdate{
+		SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate),
+		ToolCallID:    strings.TrimSpace(payload.CallID),
+		Title:         firstNonEmpty(payload.ToolTitle, payload.ToolName, payload.ToolKind),
+		Kind:          firstNonEmpty(payload.ToolKind, payload.ToolName),
+		Status:        string(payload.Status),
+		RawInput:      cloneAnyMap(payload.RawInput),
+		RawOutput:     cloneAnyMap(payload.RawOutput),
+		Content:       session.CloneProtocolToolCallContent(payload.Content),
+		Meta:          acpMetaWithToolName(ev.Meta, toolName),
+	}
+	return &session.EventProtocol{
+		Method:     session.ProtocolMethodSessionUpdate,
+		UpdateType: string(session.ProtocolUpdateTypeToolUpdate),
+		Update:     update,
+		ToolCall: &session.ProtocolToolCall{
+			ID:        strings.TrimSpace(payload.CallID),
+			Name:      toolName,
+			Kind:      firstNonEmpty(payload.ToolKind, payload.ToolName),
+			Title:     firstNonEmpty(payload.ToolTitle, payload.ToolName, payload.ToolKind),
+			Status:    string(payload.Status),
+			RawInput:  cloneAnyMap(payload.RawInput),
+			RawOutput: cloneAnyMap(payload.RawOutput),
+			Content:   session.CloneProtocolToolCallContent(payload.Content),
+		},
+	}
+}
+
+func gatewayPlanProtocol(plan *gateway.PlanPayload) *session.EventProtocol {
+	if plan == nil || len(plan.Entries) == 0 {
+		return nil
+	}
+	entries := make([]session.ProtocolPlanEntry, 0, len(plan.Entries))
+	for _, item := range plan.Entries {
+		entries = append(entries, session.ProtocolPlanEntry{
+			Content:  strings.TrimSpace(item.Content),
+			Status:   strings.TrimSpace(item.Status),
+			Priority: firstNonEmpty(strings.TrimSpace(item.Priority), "medium"),
+		})
+	}
+	return &session.EventProtocol{
+		Method:     session.ProtocolMethodSessionUpdate,
+		UpdateType: string(session.ProtocolUpdateTypePlan),
+		Update: &session.ProtocolUpdate{
+			SessionUpdate: string(session.ProtocolUpdateTypePlan),
+			Entries:       entries,
+		},
+	}
+}
+
+func gatewayApprovalProtocol(payload *gateway.ApprovalPayload) *session.EventProtocol {
+	if payload == nil {
+		return nil
+	}
+	toolName := strings.TrimSpace(payload.ToolName)
+	rawInput := acpApprovalRawInput(payload)
+	approval := session.ProtocolApproval{
+		ToolCall: session.ProtocolToolCall{
+			ID:       strings.TrimSpace(payload.ToolCallID),
+			Name:     toolName,
+			Kind:     toolName,
+			Title:    toolName,
+			Status:   string(payload.Status),
+			RawInput: rawInput,
+		},
+		Options: gatewayApprovalOptions(payload.Options),
+	}
+	return &session.EventProtocol{
+		Method:     session.ProtocolMethodRequestPermission,
+		Permission: &approval,
+		Approval:   &approval,
+	}
+}
+
+func gatewayApprovalOptions(in []gateway.ApprovalOption) []session.ProtocolApprovalOption {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]session.ProtocolApprovalOption, 0, len(in))
+	for _, item := range in {
+		out = append(out, session.ProtocolApprovalOption{
+			ID:   strings.TrimSpace(item.ID),
+			Name: strings.TrimSpace(item.Name),
+			Kind: strings.TrimSpace(item.Kind),
+		})
+	}
+	return out
+}
+
+func gatewayCompatibleUpdateContent(update schema.Update, ev gateway.Event) schema.Update {
+	content := gatewayCompatibleToolContent(ev)
+	if len(content) == 0 {
+		return update
+	}
+	switch typed := update.(type) {
+	case schema.ToolCall:
+		typed.Content = content
+		return typed
+	case schema.ToolCallUpdate:
+		typed.Content = content
+		return typed
+	default:
+		return update
+	}
+}
+
+func gatewayCompatibleToolContent(ev gateway.Event) []schema.ToolCallContent {
+	switch {
+	case ev.ToolCall != nil && len(ev.ToolCall.Content) > 0:
+		return acpToolCallContent(ev.ToolCall.Content)
+	case ev.ToolResult != nil && len(ev.ToolResult.Content) > 0:
+		return acpToolCallContent(ev.ToolResult.Content)
+	default:
+		return nil
+	}
 }
 
 func acpEventBase(env gateway.EventEnvelope) eventstream.Envelope {

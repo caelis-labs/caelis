@@ -104,6 +104,7 @@ type WriteTextFileRequest = schema.WriteTextFileRequest
 type WriteTextFileResponse = schema.WriteTextFileResponse
 type TextContent = schema.TextContent
 type ImageContent = schema.ImageContent
+type RawUpdate = schema.RawUpdate
 type AvailableCommand = schema.AvailableCommand
 type AvailableCommandInput = schema.AvailableCommandInput
 
@@ -143,4 +144,5 @@ type Update any
 type UpdateEnvelope struct {
 	SessionID string
 	Update    Update
+	Raw       json.RawMessage
 }

@@ -1309,6 +1309,74 @@ func TestRuntimeACPControllerPublishesChunksAsLiveDeltas(t *testing.T) {
 	}
 }
 
+func TestRuntimeACPControllerHonorsRequestedStreamMode(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name    string
+		request agent.ModelRequestOptions
+		want    bool
+	}{
+		{name: "default false", request: agent.ModelRequestOptions{}, want: false},
+		{name: "explicit false", request: agent.ModelRequestOptions{Stream: boolPtr(false)}, want: false},
+		{name: "explicit true", request: agent.ModelRequestOptions{Stream: boolPtr(true)}, want: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			sessions, activeSession := newTestSessionService(t, "sess-acp-stream-mode")
+			activeSession, err := sessions.BindController(context.Background(), session.BindControllerRequest{
+				SessionRef: activeSession.SessionRef,
+				Binding: session.ControllerBinding{
+					Kind:         session.ControllerKindACP,
+					ControllerID: "acp-main",
+					Label:        "ACP Main",
+					EpochID:      "epoch-stream",
+					Source:       "test",
+				},
+			})
+			if err != nil {
+				t.Fatalf("BindController() error = %v", err)
+			}
+			streamSeen := make(chan bool, 1)
+			testController := stubACPController{
+				runTurn: func(_ context.Context, req controller.TurnRequest) (controller.TurnResult, error) {
+					streamSeen <- req.Stream
+					handle := newTestControllerTurnHandle(nil)
+					handle.finish()
+					return controller.TurnResult{Handle: handle}, nil
+				},
+			}
+			runtime, err := New(Config{
+				Sessions:       sessions,
+				AgentFactory:   chat.Factory{SystemPrompt: "Be terse."},
+				Controllers:    testController,
+				RunIDGenerator: func() string { return "run-acp-stream-mode" },
+			})
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+			result, err := runtime.Run(context.Background(), agent.RunRequest{
+				SessionRef: activeSession.SessionRef,
+				Input:      "hello",
+				Request:    tc.request,
+			})
+			if err != nil {
+				t.Fatalf("Run() error = %v", err)
+			}
+			for range result.Handle.Events() {
+			}
+			select {
+			case got := <-streamSeen:
+				if got != tc.want {
+					t.Fatalf("controller stream = %v, want %v", got, tc.want)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("timed out waiting for controller stream flag")
+			}
+		})
+	}
+}
+
 func TestRuntimeACPControllerInterruptedTurnDoesNotPersistLocalReplaySnapshot(t *testing.T) {
 	t.Parallel()
 

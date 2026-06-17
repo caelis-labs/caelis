@@ -8,6 +8,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/approval"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
 )
 
 type BeginTurnRequest struct {
@@ -489,4 +490,8 @@ type TurnHandle interface {
 	Submit(context.Context, SubmitRequest) error
 	Cancel() agent.CancelResult
 	Close() error
+}
+
+type ACPEventStreamHandle interface {
+	ACPEvents() <-chan eventstream.Envelope
 }

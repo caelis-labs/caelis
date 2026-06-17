@@ -181,56 +181,16 @@ func (r *Runtime) executeACPParticipantTurn(
 		return turnResult.Handle.Cancel().Err
 	})
 	defer turnResult.Handle.Close()
-	accumulator := acpNarrativeAccumulator{}
-	for event, seqErr := range turnResult.Handle.Events() {
-		if seqErr != nil {
-			handle.publishError(seqErr)
-			return
-		}
-		normalized := normalizeEvent(activeSession, turnID, event)
-		if normalized == nil {
-			continue
-		}
-		if isACPParticipantUserEcho(normalized) {
-			continue
-		}
-		publishEvent := normalized
-		if persistedEvent, liveEvent, ok := accumulator.normalize(normalized); ok {
-			if liveEvent != nil {
-				handle.publishEvent(liveEvent)
-			}
-			if persistedEvent == nil {
-				continue
-			}
-			normalized = persistedEvent
-			publishEvent = nil
-		}
-		if shouldPersistExternalACPEvent(normalized) {
-			persisted, appendErr := r.sessions.AppendEvent(ctx, session.AppendEventRequest{
-				SessionRef: ref,
-				Event:      normalized,
-			})
-			if appendErr != nil {
-				handle.publishError(appendErr)
-				return
-			}
-			normalized = persisted
-		}
-		if publishEvent == nil {
-			publishEvent = normalized
-		}
-		handle.publishEvent(publishEvent)
-	}
-	if finalEvent := accumulator.finalAssistantEvent(); finalEvent != nil {
-		persisted, appendErr := r.sessions.AppendEvent(ctx, session.AppendEventRequest{
-			SessionRef: ref,
-			Event:      finalEvent,
-		})
-		if appendErr != nil {
-			handle.publishError(appendErr)
-			return
-		}
-		handle.publishEvent(persisted)
+	if err := r.forwardACPControllerEvents(ctx, acpForwardRequest{
+		activeSession: activeSession,
+		ref:           ref,
+		turnID:        turnID,
+		source:        turnResult.Handle,
+		handle:        handle,
+		isUserEcho:    isACPParticipantUserEcho,
+	}); err != nil {
+		handle.publishError(err)
+		return
 	}
 	if err := r.updateParticipantContextCheckpoint(ctx, ref, participantID); err != nil {
 		handle.publishError(err)

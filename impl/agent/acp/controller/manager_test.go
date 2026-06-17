@@ -11,6 +11,7 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/impl/agent/acp/subagent"
 	"github.com/OnslaughtSnail/caelis/ports/controller"
+	"github.com/OnslaughtSnail/caelis/ports/eventsource"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/client"
@@ -1749,6 +1750,92 @@ func TestTurnHandlePublishDoesNotBlockAfterBufferFillsOrFinishes(t *testing.T) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("turn handle publish blocked with a full or finished channel")
+	}
+}
+
+func TestControllerRunPublishesACPSourceEvent(t *testing.T) {
+	t.Parallel()
+
+	handle := newTurnHandle(nil)
+	run := &controllerRun{
+		remoteSessionID: "remote-1",
+		binding: session.ControllerBinding{
+			Kind:         session.ControllerKindACP,
+			ControllerID: "ctrl-1",
+			Label:        "Remote",
+			EpochID:      "epoch-1",
+		},
+		turnID:     "turn-1",
+		turnStream: true,
+		handle:     handle,
+	}
+	title := "READ"
+	status := schema.ToolStatusInProgress
+	line := 7
+	raw := json.RawMessage(`{"sessionUpdate":"tool_call_update","toolCallId":"call-1","title":"READ","status":"in_progress","locations":[{"path":"main.go","line":7}],"_meta":{"vendor":{"trace":"abc"}}}`)
+	run.handleUpdate(func() time.Time { return time.Unix(10, 0) }, client.UpdateEnvelope{
+		SessionID: "remote-1",
+		Raw:       raw,
+		Update: client.ToolCallUpdate{
+			SessionUpdate: client.UpdateToolCallState,
+			ToolCallID:    "call-1",
+			Title:         &title,
+			Status:        &status,
+			Locations:     []client.ToolCallLocation{{Path: "main.go", Line: &line}},
+			Meta:          map[string]any{"vendor": map[string]any{"trace": "abc"}},
+		},
+	})
+
+	handle.finish()
+
+	var events []eventsource.Event
+	for event, err := range handle.SourceEvents() {
+		if err != nil {
+			t.Fatalf("source error = %v", err)
+		}
+		events = append(events, event)
+	}
+	if len(events) != 1 {
+		t.Fatalf("source events len = %d, want 1", len(events))
+	}
+	if events[0].Canonical == nil {
+		t.Fatal("source canonical event is nil")
+	}
+	if events[0].ACP == nil {
+		t.Fatal("source ACP envelope is nil")
+	}
+	update, ok := events[0].ACP.Update.(schema.ToolCallUpdate)
+	if !ok {
+		t.Fatalf("ACP update = %T, want ToolCallUpdate", events[0].ACP.Update)
+	}
+	if update.ToolCallID != "call-1" || len(update.Locations) != 1 || update.Locations[0].Path != "main.go" {
+		t.Fatalf("ACP tool update = %#v, want preserved call and location", update)
+	}
+	if vendor, ok := update.Meta["vendor"].(map[string]any); !ok || vendor["trace"] != "abc" {
+		t.Fatalf("ACP tool meta = %#v, want vendor trace", update.Meta)
+	}
+}
+
+func TestTurnHandleSourceEventsDoNotDropBurst(t *testing.T) {
+	t.Parallel()
+
+	handle := newTurnHandle(nil)
+	for i := 0; i < 128; i++ {
+		handle.publishEvent(&session.Event{ID: fmt.Sprintf("event-%d", i), Type: session.EventTypeAssistant})
+	}
+	handle.finish()
+
+	count := 0
+	for event, err := range handle.SourceEvents() {
+		if err != nil {
+			t.Fatalf("source error = %v", err)
+		}
+		if event.Canonical != nil {
+			count++
+		}
+	}
+	if count != 128 {
+		t.Fatalf("SourceEvents received %d canonical events, want 128", count)
 	}
 }
 

@@ -196,74 +196,22 @@ func (r *Runtime) executeACPControllerTurn(
 			return turnResult.Handle.Cancel().Err
 		})
 		defer turnResult.Handle.Close()
-		accumulator := acpNarrativeAccumulator{}
-		for event, seqErr := range turnResult.Handle.Events() {
-			if seqErr != nil {
-				r.setRunState(ref.SessionID, agent.RunState{
-					Status:      interruptedOrFailedStatus(ctx, seqErr),
-					ActiveRunID: runID,
-					LastError:   seqErr.Error(),
-					UpdatedAt:   r.now(),
-				})
-				handle.publishError(seqErr)
-				return
-			}
-			normalized := normalizeEvent(activeSession, turnID, event)
-			if normalized == nil {
-				continue
-			}
-			if isACPControllerUserEcho(normalized) {
-				continue
-			}
-			publishEvent := normalized
-			if persistedEvent, liveEvent, ok := accumulator.normalize(normalized); ok {
-				if liveEvent != nil {
-					handle.publishEvent(liveEvent)
-				}
-				if persistedEvent == nil {
-					continue
-				}
-				normalized = persistedEvent
-				publishEvent = nil
-			}
-			if shouldPersistExternalACPEvent(normalized) {
-				persisted, appendErr := r.sessions.AppendEvent(ctx, session.AppendEventRequest{
-					SessionRef: ref,
-					Event:      normalized,
-				})
-				if appendErr != nil {
-					r.setRunState(ref.SessionID, agent.RunState{
-						Status:      interruptedOrFailedStatus(ctx, appendErr),
-						ActiveRunID: runID,
-						LastError:   appendErr.Error(),
-						UpdatedAt:   r.now(),
-					})
-					handle.publishError(appendErr)
-					return
-				}
-				normalized = persisted
-			}
-			if publishEvent == nil {
-				publishEvent = normalized
-			}
-			handle.publishEvent(publishEvent)
-		}
-		if finalEvent := accumulator.finalAssistantEvent(); finalEvent != nil {
-			persisted, appendErr := r.sessions.AppendEvent(ctx, session.AppendEventRequest{
-				SessionRef: ref,
-				Event:      finalEvent,
+		if err := r.forwardACPControllerEvents(ctx, acpForwardRequest{
+			activeSession: activeSession,
+			ref:           ref,
+			turnID:        turnID,
+			source:        turnResult.Handle,
+			handle:        handle,
+			isUserEcho:    isACPControllerUserEcho,
+		}); err != nil {
+			r.setRunState(ref.SessionID, agent.RunState{
+				Status:      interruptedOrFailedStatus(ctx, err),
+				ActiveRunID: runID,
+				LastError:   err.Error(),
+				UpdatedAt:   r.now(),
 			})
-			if appendErr != nil {
-				r.setRunState(ref.SessionID, agent.RunState{
-					Status:      interruptedOrFailedStatus(ctx, appendErr),
-					ActiveRunID: runID,
-					LastError:   appendErr.Error(),
-					UpdatedAt:   r.now(),
-				})
-				handle.publishError(appendErr)
-				return
-			}
-			handle.publishEvent(persisted)
+			handle.publishError(err)
+			return
 		}
 		if err := r.updateControllerContextCheckpoint(ctx, ref); err != nil {
 			r.setRunState(ref.SessionID, agent.RunState{

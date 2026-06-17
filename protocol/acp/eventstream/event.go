@@ -147,6 +147,9 @@ func CloneUpdate(update schema.Update) schema.Update {
 	case schema.PlanUpdate:
 		typed.Entries = append([]schema.PlanEntry(nil), typed.Entries...)
 		return typed
+	case schema.RawUpdate:
+		typed.Raw = append([]byte(nil), typed.Raw...)
+		return typed
 	default:
 		return update
 	}
@@ -157,6 +160,17 @@ func UpdateType(update schema.Update) string {
 		return ""
 	}
 	return strings.TrimSpace(update.SessionUpdateType())
+}
+
+func UpdateMeta(update schema.Update) map[string]any {
+	switch typed := update.(type) {
+	case schema.ToolCall:
+		return cloneAnyMap(typed.Meta)
+	case schema.ToolCallUpdate:
+		return cloneAnyMap(typed.Meta)
+	default:
+		return nil
+	}
 }
 
 func IsError(err error, target error) bool {

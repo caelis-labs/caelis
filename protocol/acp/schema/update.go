@@ -1,5 +1,7 @@
 package schema
 
+import "encoding/json"
+
 const (
 	MethodSessionUpdate        = "session/update"
 	MethodSessionReqPermission = "session/request_permission"
@@ -43,6 +45,21 @@ const (
 
 type Update interface {
 	SessionUpdateType() string
+}
+
+type RawUpdate struct {
+	SessionUpdate string          `json:"sessionUpdate"`
+	Raw           json.RawMessage `json:"-"`
+}
+
+func (u RawUpdate) SessionUpdateType() string { return u.SessionUpdate }
+
+func (u RawUpdate) MarshalJSON() ([]byte, error) {
+	if len(u.Raw) > 0 && string(u.Raw) != "null" {
+		return append([]byte(nil), u.Raw...), nil
+	}
+	type rawUpdate RawUpdate
+	return json.Marshal(rawUpdate(u))
 }
 
 type SessionNotification struct {

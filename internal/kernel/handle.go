@@ -3,13 +3,17 @@ package kernel
 import (
 	"context"
 	"fmt"
+	"maps"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/ports/agent"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
+	acpprojector "github.com/OnslaughtSnail/caelis/protocol/acp/projector"
 )
 
 type turnHandleConfig struct {
@@ -35,10 +39,14 @@ type turnHandle struct {
 	mu                      sync.Mutex
 	events                  []EventEnvelope
 	eventsCh                chan EventEnvelope
+	acpEventsCh             chan eventstream.Envelope
 	eventsCond              *sync.Cond
 	liveQueue               []EventEnvelope
+	acpLiveQueue            []eventstream.Envelope
 	eventsStarted           bool
+	acpEventsStarted        bool
 	eventsClosed            bool
+	acpEventsClosed         bool
 	closed                  bool
 	finished                bool
 	cancelled               bool
@@ -61,6 +69,7 @@ func newTurnHandle(cfg turnHandleConfig) *turnHandle {
 		cancelFn:                cfg.cancel,
 		allowPendingSubmissions: cfg.allowPendingSubmissions,
 		eventsCh:                make(chan EventEnvelope, 32),
+		acpEventsCh:             make(chan eventstream.Envelope, 32),
 	}
 	h.eventsCond = sync.NewCond(&h.mu)
 	return h
@@ -80,6 +89,16 @@ func (h *turnHandle) Events() <-chan EventEnvelope {
 		go h.dispatchLiveEvents()
 	}
 	return h.eventsCh
+}
+
+func (h *turnHandle) ACPEvents() <-chan eventstream.Envelope {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if !h.acpEventsStarted && !h.acpEventsClosed {
+		h.acpEventsStarted = true
+		go h.dispatchACPEvents()
+	}
+	return h.acpEventsCh
 }
 
 func (h *turnHandle) EventsAfter(cursor string) ([]EventEnvelope, string, error) {
@@ -278,10 +297,14 @@ func (h *turnHandle) setPendingApproval() <-chan ApprovalDecision {
 }
 
 func (h *turnHandle) publishSessionEvent(event *session.Event) {
+	h.publishSessionEventWithACPProjection(event, true)
+}
+
+func (h *turnHandle) publishSessionEventWithACPProjection(event *session.Event, projectACP bool) {
 	if event == nil {
 		return
 	}
-	h.publish(EventEnvelope{
+	env := EventEnvelope{
 		Cursor: event.ID,
 		Event: Event{
 			Kind:        sessionEventKind(event),
@@ -302,7 +325,8 @@ func (h *turnHandle) publishSessionEvent(event *session.Event) {
 			Participant: canonicalParticipantPayload(event),
 			Lifecycle:   canonicalLifecyclePayload(event),
 		},
-	})
+	}
+	h.publishWithACPProjection(env, projectACP)
 }
 
 func (h *turnHandle) publishApproval(req *agent.ApprovalRequest) <-chan ApprovalDecision {
@@ -379,6 +403,10 @@ func (h *turnHandle) nextApprovalReviewID() string {
 }
 
 func (h *turnHandle) publish(env EventEnvelope) {
+	h.publishWithACPProjection(env, true)
+}
+
+func (h *turnHandle) publishWithACPProjection(env EventEnvelope, projectACP bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if env.Cursor == "" {
@@ -389,7 +417,26 @@ func (h *turnHandle) publish(env EventEnvelope) {
 		return
 	}
 	h.liveQueue = append(h.liveQueue, env)
-	h.eventsCond.Signal()
+	if projectACP {
+		for _, acpEnv := range acpprojector.ProjectGatewayEventEnvelope(env) {
+			h.acpLiveQueue = append(h.acpLiveQueue, h.enrichACPEnvelopeLocked(acpEnv, "gateway_projection"))
+		}
+	}
+	h.eventsCond.Broadcast()
+}
+
+func (h *turnHandle) publishACP(env eventstream.Envelope, bridgeSource string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if env.Cursor == "" {
+		env.Cursor = h.allocateCursorLocked()
+	}
+	env = h.enrichACPEnvelopeLocked(env, bridgeSource)
+	if h.closed || h.finished {
+		return
+	}
+	h.acpLiveQueue = append(h.acpLiveQueue, env)
+	h.eventsCond.Broadcast()
 }
 
 func (h *turnHandle) allocateCursor() string {
@@ -420,13 +467,9 @@ func (h *turnHandle) finish() {
 }
 
 func (h *turnHandle) closeEventsLocked() {
-	if h.eventsClosed {
-		return
+	if (!h.eventsClosed && h.eventsStarted) || (!h.acpEventsClosed && h.acpEventsStarted) {
+		h.eventsCond.Broadcast()
 	}
-	if !h.eventsStarted {
-		return
-	}
-	h.eventsCond.Signal()
 }
 
 func (h *turnHandle) dispatchLiveEvents() {
@@ -449,6 +492,75 @@ func (h *turnHandle) dispatchLiveEvents() {
 		h.mu.Unlock()
 		h.eventsCh <- env
 	}
+}
+
+func (h *turnHandle) dispatchACPEvents() {
+	for {
+		h.mu.Lock()
+		for len(h.acpLiveQueue) == 0 && !h.finished {
+			h.eventsCond.Wait()
+		}
+		if len(h.acpLiveQueue) == 0 && h.finished {
+			if !h.acpEventsClosed {
+				h.acpEventsClosed = true
+				close(h.acpEventsCh)
+			}
+			h.mu.Unlock()
+			return
+		}
+		env := h.acpLiveQueue[0]
+		copy(h.acpLiveQueue, h.acpLiveQueue[1:])
+		h.acpLiveQueue = h.acpLiveQueue[:len(h.acpLiveQueue)-1]
+		h.mu.Unlock()
+		h.acpEventsCh <- env
+	}
+}
+
+func (h *turnHandle) enrichACPEnvelopeLocked(env eventstream.Envelope, bridgeSource string) eventstream.Envelope {
+	env.SessionID = strings.TrimSpace(h.sessionRef.SessionID)
+	env.HandleID = strings.TrimSpace(h.handleID)
+	env.RunID = strings.TrimSpace(h.runID)
+	env.TurnID = strings.TrimSpace(h.turnID)
+	if env.OccurredAt.IsZero() {
+		env.OccurredAt = time.Now()
+	}
+	if env.Scope == "" {
+		env.Scope = eventstream.ScopeMain
+	}
+	if strings.TrimSpace(env.ScopeID) == "" {
+		env.ScopeID = strings.TrimSpace(h.sessionRef.SessionID)
+	}
+	env.Meta = mergeCaelisBridgeMeta(env.Meta, bridgeSource)
+	if env.Permission != nil {
+		env.Permission.SessionID = strings.TrimSpace(h.sessionRef.SessionID)
+	}
+	return env
+}
+
+func mergeCaelisBridgeMeta(meta map[string]any, bridgeSource string) map[string]any {
+	out := maps.Clone(meta)
+	if out == nil {
+		out = map[string]any{}
+	}
+	caelis, _ := out["caelis"].(map[string]any)
+	if caelis == nil {
+		caelis = map[string]any{}
+	} else {
+		caelis = maps.Clone(caelis)
+	}
+	caelis["version"] = 1
+	if strings.TrimSpace(bridgeSource) != "" {
+		bridge, _ := caelis["bridge"].(map[string]any)
+		if bridge == nil {
+			bridge = map[string]any{}
+		} else {
+			bridge = maps.Clone(bridge)
+		}
+		bridge["source"] = strings.TrimSpace(bridgeSource)
+		caelis["bridge"] = bridge
+	}
+	out["caelis"] = caelis
+	return out
 }
 
 func cloneMap(in map[string]any) map[string]any {

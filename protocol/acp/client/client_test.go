@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/protocol/acp/jsonrpc"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
 func TestCancelSendsNotification(t *testing.T) {
@@ -35,6 +36,35 @@ func TestCancelSendsNotification(t *testing.T) {
 	}
 	if req.SessionID != "session-1" {
 		t.Fatalf("cancel session id = %q, want session-1", req.SessionID)
+	}
+}
+
+func TestDecodeUpdatePreservesUnknownRawUpdate(t *testing.T) {
+	raw := json.RawMessage(`{"sessionUpdate":"vendor/custom","value":42,"nested":{"ok":true}}`)
+	update, err := decodeUpdate(raw)
+	if err != nil {
+		t.Fatalf("decodeUpdate() error = %v", err)
+	}
+	typed, ok := update.(schema.RawUpdate)
+	if !ok {
+		t.Fatalf("update = %T, want RawUpdate", update)
+	}
+	if typed.SessionUpdate != "vendor/custom" {
+		t.Fatalf("SessionUpdate = %q, want vendor/custom", typed.SessionUpdate)
+	}
+	encoded, err := json.Marshal(typed)
+	if err != nil {
+		t.Fatalf("Marshal(RawUpdate) error = %v", err)
+	}
+	var got, want map[string]any
+	if err := json.Unmarshal(encoded, &got); err != nil {
+		t.Fatalf("Unmarshal(encoded) error = %v", err)
+	}
+	if err := json.Unmarshal(raw, &want); err != nil {
+		t.Fatalf("Unmarshal(raw) error = %v", err)
+	}
+	if got["value"] != want["value"] || got["sessionUpdate"] != want["sessionUpdate"] {
+		t.Fatalf("encoded raw update = %#v, want %#v", got, want)
 	}
 }
 

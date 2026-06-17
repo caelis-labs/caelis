@@ -11,6 +11,7 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/internal/kernel/hooks"
 	"github.com/OnslaughtSnail/caelis/ports/agent"
+	"github.com/OnslaughtSnail/caelis/ports/eventsource"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	policyapi "github.com/OnslaughtSnail/caelis/ports/policy"
 	"github.com/OnslaughtSnail/caelis/ports/session"
@@ -153,6 +154,10 @@ func (g *Gateway) runTurn(
 	}
 	handle.setRunner(result.Handle)
 	defer result.Handle.Close()
+	if sourceHandle, ok := result.Handle.(eventsource.Handle); ok && sourceHandle != nil {
+		g.forwardSourceEvents(session, handle, sourceHandle)
+		return
+	}
 	for event, seqErr := range result.Handle.Events() {
 		if seqErr != nil {
 			handle.publish(EventEnvelope{
@@ -237,6 +242,10 @@ func (g *Gateway) runParticipantTurn(
 	}
 	handle.setRunner(result.Handle)
 	defer result.Handle.Close()
+	if sourceHandle, ok := result.Handle.(eventsource.Handle); ok && sourceHandle != nil {
+		g.forwardSourceEvents(session, handle, sourceHandle)
+		return
+	}
 	for event, seqErr := range result.Handle.Events() {
 		if seqErr != nil {
 			handle.publish(EventEnvelope{

@@ -983,15 +983,18 @@ func (r *controllerRun) handleUpdate(clock func() time.Time, env client.UpdateEn
 	stream := r.turnStream
 	handle := r.handle
 	event := normalizeACPUpdateEvent(clock, r.binding, r.remoteSessionID, turnID, env.Update)
-	if event == nil {
+	acpEnv := acpEnvelopeFromUpdate(env, event)
+	if event == nil && acpEnv == nil {
 		r.mu.Unlock()
 		return
 	}
 	r.updatedAt = clock()
-	r.events = append(r.events, session.CloneEvent(event))
+	if event != nil {
+		r.events = append(r.events, session.CloneEvent(event))
+	}
 	r.mu.Unlock()
 	if stream && handle != nil {
-		handle.publishEvent(event)
+		handle.publishSourceEvent(event, acpEnv)
 	}
 }
 
@@ -1309,16 +1312,21 @@ func (r *participantRun) handleUpdate(clock func() time.Time, env client.UpdateE
 		Label:        r.binding.Label,
 		EpochID:      r.binding.ControllerRef,
 	}, r.remoteSessionID, turnID, env.Update)
-	if event == nil {
+	if event != nil {
+		applyACPParticipantEventScope(event, r.binding, r.agent)
+	}
+	acpEnv := acpEnvelopeFromUpdate(env, event)
+	if event == nil && acpEnv == nil {
 		r.mu.Unlock()
 		return
 	}
-	applyACPParticipantEventScope(event, r.binding, r.agent)
 	r.updatedAt = clock()
-	r.events = append(r.events, session.CloneEvent(event))
+	if event != nil {
+		r.events = append(r.events, session.CloneEvent(event))
+	}
 	r.mu.Unlock()
 	if stream && handle != nil {
-		handle.publishEvent(event)
+		handle.publishSourceEvent(event, acpEnv)
 	}
 }
 

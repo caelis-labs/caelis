@@ -8,8 +8,11 @@ import (
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/ports/agent"
+	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/tool"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
 func TestTurnHandleReplaysEventsAfterCursor(t *testing.T) {
@@ -33,6 +36,135 @@ func TestTurnHandleReplaysEventsAfterCursor(t *testing.T) {
 	}
 	if len(replayed) != 1 || replayed[0].Cursor != "e2" || next != "e2" {
 		t.Fatalf("EventsAfter() = %#v, %q, want only e2", replayed, next)
+	}
+}
+
+func TestTurnHandleACPEventsProjectsCanonicalAndPassesThroughTransient(t *testing.T) {
+	t.Parallel()
+
+	handle := newTurnHandle(turnHandleConfig{
+		handleID: "h1",
+		runID:    "run-1",
+		turnID:   "turn-1",
+		sessionRef: session.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+		},
+		createdAt: time.Unix(100, 0),
+	})
+	acpEvents := handle.ACPEvents()
+	msg := model.NewTextMessage(model.RoleAssistant, "done")
+	handle.publishSessionEvent(&session.Event{ID: "e1", Type: session.EventTypeAssistant, Message: &msg})
+	handle.publishACP(eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate,
+		Update: schema.RawUpdate{
+			SessionUpdate: "vendor/custom",
+		},
+	}, "acp_passthrough")
+	handle.finish()
+
+	var got []eventstream.Envelope
+	for env := range acpEvents {
+		got = append(got, env)
+	}
+	if len(got) != 2 {
+		t.Fatalf("ACPEvents() produced %d events, want 2: %#v", len(got), got)
+	}
+	if update, ok := got[0].Update.(schema.ContentChunk); !ok || update.SessionUpdate != schema.UpdateAgentMessage {
+		t.Fatalf("first ACP update = %#v, want projected assistant chunk", got[0].Update)
+	}
+	if update, ok := got[1].Update.(schema.RawUpdate); !ok || update.SessionUpdate != "vendor/custom" {
+		t.Fatalf("second ACP update = %#v, want passthrough raw update", got[1].Update)
+	}
+	if got[1].SessionID != "s1" || got[1].HandleID != "h1" || got[1].RunID != "run-1" || got[1].TurnID != "turn-1" {
+		t.Fatalf("passthrough IDs = session:%q handle:%q run:%q turn:%q", got[1].SessionID, got[1].HandleID, got[1].RunID, got[1].TurnID)
+	}
+	replayed, _, err := handle.EventsAfter("")
+	if err != nil {
+		t.Fatalf("EventsAfter() error = %v", err)
+	}
+	if len(replayed) != 1 || replayed[0].Cursor != "e1" {
+		t.Fatalf("EventsAfter() = %#v, want only canonical event e1", replayed)
+	}
+}
+
+func TestTurnHandlePublishWakesGatewayAndACPStreams(t *testing.T) {
+	t.Parallel()
+
+	handle := newTurnHandle(turnHandleConfig{
+		handleID: "h1",
+		runID:    "run-1",
+		turnID:   "turn-1",
+		sessionRef: session.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+		},
+		createdAt: time.Unix(100, 0),
+	})
+	events := handle.Events()
+	acpEvents := handle.ACPEvents()
+	time.Sleep(20 * time.Millisecond)
+
+	msg := model.NewTextMessage(model.RoleAssistant, "done")
+	handle.publishSessionEvent(&session.Event{ID: "e1", Type: session.EventTypeAssistant, Message: &msg})
+
+	select {
+	case env := <-events:
+		if env.Cursor != "e1" {
+			t.Fatalf("event cursor = %q, want e1", env.Cursor)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for canonical live event")
+	}
+	select {
+	case env := <-acpEvents:
+		update, ok := env.Update.(schema.ContentChunk)
+		if !ok || update.SessionUpdate != schema.UpdateAgentMessage {
+			t.Fatalf("ACP update = %#v, want projected assistant chunk", env.Update)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for ACP live event")
+	}
+	handle.finish()
+}
+
+func TestTurnHandleACPEventsCanSuppressCanonicalProjectionForNativePassthrough(t *testing.T) {
+	t.Parallel()
+
+	handle := newTurnHandle(turnHandleConfig{
+		handleID: "h1",
+		runID:    "run-1",
+		turnID:   "turn-1",
+		sessionRef: session.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+		},
+		createdAt: time.Unix(100, 0),
+	})
+	acpEvents := handle.ACPEvents()
+	msg := model.NewTextMessage(model.RoleAssistant, "done")
+	handle.publishSessionEventWithACPProjection(&session.Event{ID: "e1", Type: session.EventTypeAssistant, Message: &msg}, false)
+	handle.publishACP(eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate,
+		Update: schema.RawUpdate{
+			SessionUpdate: "vendor/custom",
+		},
+	}, "acp_passthrough")
+	handle.finish()
+
+	var got []eventstream.Envelope
+	for env := range acpEvents {
+		got = append(got, env)
+	}
+	if len(got) != 1 {
+		t.Fatalf("ACPEvents() produced %d events, want only native passthrough: %#v", len(got), got)
+	}
+	if update, ok := got[0].Update.(schema.RawUpdate); !ok || update.SessionUpdate != "vendor/custom" {
+		t.Fatalf("ACP update = %#v, want native raw passthrough", got[0].Update)
+	}
+	replayed, _, err := handle.EventsAfter("")
+	if err != nil {
+		t.Fatalf("EventsAfter() error = %v", err)
+	}
+	if len(replayed) != 1 || replayed[0].Cursor != "e1" {
+		t.Fatalf("EventsAfter() = %#v, want canonical gateway event e1", replayed)
 	}
 }
 

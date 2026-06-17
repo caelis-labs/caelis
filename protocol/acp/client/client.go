@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -366,6 +365,7 @@ func (c *Client) handleNotification(ctx context.Context, msg jsonrpc.Message) {
 				c.cfg.OnUpdate(UpdateEnvelope{
 					SessionID: strings.TrimSpace(note.SessionID),
 					Update:    update,
+					Raw:       append(json.RawMessage(nil), note.Update...),
 				})
 			}
 		}
@@ -446,7 +446,10 @@ func decodeUpdate(raw json.RawMessage) (Update, error) {
 		}
 		return update, nil
 	default:
-		return nil, fmt.Errorf("acp/client: unknown session update %q", probe.SessionUpdate)
+		return RawUpdate{
+			SessionUpdate: strings.TrimSpace(probe.SessionUpdate),
+			Raw:           append(json.RawMessage(nil), raw...),
+		}, nil
 	}
 }
 

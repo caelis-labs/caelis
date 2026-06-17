@@ -1250,6 +1250,9 @@ func (t gatewayTurn) HandleID() string { return t.handle.HandleID() }
 func (t gatewayTurn) RunID() string    { return t.handle.RunID() }
 func (t gatewayTurn) TurnID() string   { return t.handle.TurnID() }
 func (t gatewayTurn) Events() <-chan eventstream.Envelope {
+	if acpHandle, ok := t.handle.(gateway.ACPEventStreamHandle); ok && acpHandle != nil {
+		return acpHandle.ACPEvents()
+	}
 	events := t.handle.Events()
 	out := make(chan eventstream.Envelope, 32)
 	go func() {
