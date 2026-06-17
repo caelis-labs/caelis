@@ -86,11 +86,11 @@ func schemaUpdateFromClientUpdate(env client.UpdateEnvelope) schema.Update {
 			Content:       rawContentValue(typed.Content),
 		}
 	case client.ToolCall:
-		return schema.ToolCall(typed)
+		return typed
 	case client.ToolCallUpdate:
-		return schema.ToolCallUpdate(typed)
+		return typed
 	case client.PlanUpdate:
-		return schema.PlanUpdate(typed)
+		return typed
 	case client.CurrentModeUpdate:
 		return schema.RawUpdate{SessionUpdate: strings.TrimSpace(typed.SessionUpdate), Raw: cloneRaw(env.Raw)}
 	case client.ConfigOptionUpdate:
