@@ -61,6 +61,7 @@ func (r *Runtime) forwardACPSourceEvent(ctx context.Context, req acpForwardReque
 			}
 			return nil
 		}
+		accumulator.observeBarrier(normalized)
 
 		if shouldPersistExternalACPEvent(normalized) {
 			persisted, err := r.sessions.AppendEvent(ctx, session.AppendEventRequest{

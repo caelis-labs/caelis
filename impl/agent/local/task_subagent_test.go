@@ -93,6 +93,71 @@ func TestSlashSideSubagentReceivesSharedContextAndPublishesPublicDialogue(t *tes
 	}
 }
 
+func TestSlashSideSubagentDoesNotPersistPreviewAsFinalDialogue(t *testing.T) {
+	ctx := context.Background()
+	runner := &recordingSubagentRunner{
+		spawnResult: delegation.Result{State: delegation.StateCompleted, OutputPreview: "I will inspect files"},
+	}
+	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
+
+	snapshot, err := runtime.StartSubagent(ctx, activeSession.SessionRef, "helper", "review", "slash_helper")
+	if err != nil {
+		t.Fatalf("StartSubagent() error = %v", err)
+	}
+	if snapshot.State != task.StateCompleted {
+		t.Fatalf("snapshot state = %q, want completed", snapshot.State)
+	}
+
+	loaded, err := runtime.sessions.LoadSession(ctx, session.LoadSessionRequest{SessionRef: activeSession.SessionRef})
+	if err != nil {
+		t.Fatalf("LoadSession() error = %v", err)
+	}
+	for _, event := range loaded.Events {
+		if event == nil || event.Scope == nil || event.Scope.Participant.Role != session.ParticipantRoleSidecar {
+			continue
+		}
+		if session.EventTypeOf(event) == session.EventTypeAssistant {
+			t.Fatalf("side assistant event = %#v, want no durable final from preview-only output", event)
+		}
+	}
+}
+
+func TestSlashSideSubagentPersistsStreamBackedFinalDialogue(t *testing.T) {
+	ctx := context.Background()
+	runner := &recordingSubagentRunner{
+		spawnResult:      delegation.Result{State: delegation.StateCompleted},
+		publishOnSpawn:   true,
+		spawnStreamText:  "streamed final answer\n",
+		spawnStreamState: string(delegation.StateCompleted),
+	}
+	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
+
+	snapshot, err := runtime.StartSubagent(ctx, activeSession.SessionRef, "helper", "review", "slash_helper")
+	if err != nil {
+		t.Fatalf("StartSubagent() error = %v", err)
+	}
+	if snapshot.State != task.StateCompleted {
+		t.Fatalf("snapshot state = %q, want completed", snapshot.State)
+	}
+
+	loaded, err := runtime.sessions.LoadSession(ctx, session.LoadSessionRequest{SessionRef: activeSession.SessionRef})
+	if err != nil {
+		t.Fatalf("LoadSession() error = %v", err)
+	}
+	var sideAssistant *session.Event
+	for _, event := range loaded.Events {
+		if event == nil || event.Scope == nil || event.Scope.Participant.Role != session.ParticipantRoleSidecar {
+			continue
+		}
+		if session.EventTypeOf(event) == session.EventTypeAssistant {
+			sideAssistant = event
+		}
+	}
+	if sideAssistant == nil || strings.TrimSpace(sideAssistant.Text) != "streamed final answer" {
+		t.Fatalf("side assistant event = %#v, want stream-backed final", sideAssistant)
+	}
+}
+
 func TestSubagentTaskIDForHandleAllowsSidecarCustomSource(t *testing.T) {
 	t.Parallel()
 
@@ -1100,27 +1165,35 @@ func localAgentConfigSetHas(agents []assembly.AgentConfig, name string) bool {
 }
 
 type recordingSubagentRunner struct {
-	spawnResult     delegation.Result
-	waitResult      delegation.Result
-	continueResult  delegation.Result
-	spawnRequest    delegation.Request
-	continueAnchor  delegation.Anchor
-	continuePrompt  string
-	waitErr         error
-	publishOnSpawn  bool
-	spawnStreamText string
-	spawnContext    subagent.SpawnContext
+	spawnResult        delegation.Result
+	waitResult         delegation.Result
+	continueResult     delegation.Result
+	spawnRequest       delegation.Request
+	continueAnchor     delegation.Anchor
+	continuePrompt     string
+	waitErr            error
+	publishOnSpawn     bool
+	spawnStreamText    string
+	spawnStreamState   string
+	spawnStreamRunning bool
+	spawnContext       subagent.SpawnContext
 }
 
 func (r *recordingSubagentRunner) Spawn(_ context.Context, spawn subagent.SpawnContext, req delegation.Request) (delegation.Anchor, delegation.Result, error) {
 	r.spawnRequest = delegation.CloneRequest(req)
 	r.spawnContext = spawn
 	if r.publishOnSpawn && spawn.Streams != nil {
+		state := strings.TrimSpace(r.spawnStreamState)
+		running := r.spawnStreamRunning
+		if state == "" {
+			state = string(delegation.StateRunning)
+			running = true
+		}
 		spawn.Streams.PublishStream(stream.Frame{
 			Ref:     stream.Ref{TaskID: strings.TrimSpace(spawn.TaskID)},
 			Text:    r.spawnStreamText,
-			State:   string(delegation.StateRunning),
-			Running: true,
+			State:   state,
+			Running: running,
 		})
 	}
 	return delegation.Anchor{SessionID: "child-1", Agent: "helper", AgentID: "helper-1"}, delegation.CloneResult(r.spawnResult), nil

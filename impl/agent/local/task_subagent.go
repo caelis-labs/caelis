@@ -849,12 +849,9 @@ func (tm *taskRuntime) appendSideSubagentFinalEvent(ctx context.Context, task *s
 		task.mu.Unlock()
 		return nil
 	}
-	text := taskRawStringValue(task.result["result"])
-	if !taskOutputHasNonBlankLine(text) {
+	text := firstNonBlankTaskOutput(taskRawStringValue(task.result["final_message"]), taskRawStringValue(task.result["result"]))
+	if !taskOutputHasNonBlankLine(text) && subagentFramesContainAssistantText(task.streamFrames) {
 		text = compactFinalOutput(task.stdout, task.stderr)
-	}
-	if !taskOutputHasNonBlankLine(text) {
-		text = taskRawStringValue(task.result["output_preview"])
 	}
 	if !taskOutputHasNonBlankLine(text) {
 		task.mu.Unlock()
@@ -1014,13 +1011,8 @@ func (t *subagentTask) applyResult(result delegation.Result) {
 			t.result["final_message"] = result.Result
 		}
 	} else if !t.running {
-		if taskOutputHasNonBlankLine(result.OutputPreview) {
-			t.result["result"] = result.OutputPreview
-			t.result["final_message"] = result.OutputPreview
-		} else {
-			delete(t.result, "result")
-			delete(t.result, "final_message")
-		}
+		delete(t.result, "result")
+		delete(t.result, "final_message")
 	} else if t.result != nil {
 		delete(t.result, "result")
 		delete(t.result, "final_message")

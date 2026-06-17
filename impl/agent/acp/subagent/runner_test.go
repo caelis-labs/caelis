@@ -1,6 +1,7 @@
 package acp
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -353,6 +354,28 @@ func TestRunnerResultKeepsOnlyLatestAssistantSegmentAfterTools(t *testing.T) {
 		if !strings.Contains(streamed, want) {
 			t.Fatalf("streamed text = %q, want %q preserved in running trace", streamed, want)
 		}
+	}
+}
+
+func TestRunnerResultDoesNotUseToolPreviewAsFinalAnswer(t *testing.T) {
+	t.Parallel()
+
+	run := &childRun{
+		anchor:        delegation.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "claude", AgentID: "agent-1"},
+		taskID:        "task-1",
+		state:         delegation.StateCompleted,
+		outputPreview: "Read hello_spawn.txt completed",
+		running:       false,
+		updatedAt:     time.Now(),
+	}
+	runner := &Runner{clock: time.Now}
+
+	got := runner.waitRun(context.Background(), run, 0)
+	if got.Result != "" {
+		t.Fatalf("Result = %q, want empty final answer for tool-only run", got.Result)
+	}
+	if got.OutputPreview != "Read hello_spawn.txt completed" {
+		t.Fatalf("OutputPreview = %q, want preview preserved", got.OutputPreview)
 	}
 }
 

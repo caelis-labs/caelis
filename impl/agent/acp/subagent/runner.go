@@ -61,15 +61,16 @@ type childRun struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	mu            sync.RWMutex
-	state         delegation.State
-	outputPreview string
-	result        string
-	agentText     string
-	lastTraceText string
-	updatedAt     time.Time
-	running       bool
-	done          chan struct{}
+	mu             sync.RWMutex
+	state          delegation.State
+	outputPreview  string
+	result         string
+	agentText      string
+	finalAssistant acpschema.FinalAssistantAccumulator
+	lastTraceText  string
+	updatedAt      time.Time
+	running        bool
+	done           chan struct{}
 }
 
 func NewRunner(cfg RunnerConfig) (*Runner, error) {
@@ -187,6 +188,8 @@ func (r *Runner) Continue(ctx context.Context, anchor delegation.Anchor, req del
 	run.running = true
 	run.outputPreview = ""
 	run.result = ""
+	run.agentText = ""
+	run.finalAssistant.Reset()
 	run.updatedAt = r.clock()
 	run.done = make(chan struct{})
 	runCtx := run.ctx
@@ -252,11 +255,9 @@ func (r *Runner) drivePrompt(ctx context.Context, run *childRun, prompt string) 
 	if strings.EqualFold(strings.TrimSpace(resp.StopReason), "cancelled") {
 		run.state = delegation.StateCancelled
 		run.outputPreview = "cancelled"
+		run.result = ""
 		_ = run.client.Close(context.WithoutCancel(ctx))
 		return
-	}
-	if strings.TrimSpace(run.result) == "" {
-		run.result = strings.TrimSpace(run.outputPreview)
 	}
 	run.state = delegation.StateCompleted
 	run.outputPreview = compactPreview(run.outputPreview)
@@ -475,18 +476,19 @@ func (r *Runner) handleUpdate(run *childRun, env client.UpdateEnvelope) {
 					event = run.acpUpdateEvent(env, run.updatedAt, streamText)
 				}
 			case client.UpdateAgentThought:
+				run.clearFinalAssistantLocked()
 				event = run.acpUpdateEvent(env, run.updatedAt)
 			default:
 				break
 			}
 		}
 	case client.ToolCall:
-		run.agentText = ""
+		run.clearFinalAssistantLocked()
 		run.outputPreview = compactPreview(toolActivity(update.Title, update.Kind, update.Status))
 		streamText = run.appendTraceTextLocked(childToolCallTraceText(update))
 		event = run.acpUpdateEvent(env, run.updatedAt)
 	case client.ToolCallUpdate:
-		run.agentText = ""
+		run.clearFinalAssistantLocked()
 		run.outputPreview = compactPreview(toolActivity(derefString(update.Title), derefString(update.Kind), derefString(update.Status)))
 		if text := childToolCallUpdateTerminalText(update); text != "" {
 			streamText = text
@@ -495,7 +497,7 @@ func (r *Runner) handleUpdate(run *childRun, env client.UpdateEnvelope) {
 		}
 		event = run.acpUpdateEvent(env, run.updatedAt)
 	case client.PlanUpdate:
-		run.agentText = ""
+		run.clearFinalAssistantLocked()
 		run.outputPreview = "updating plan"
 		streamText = run.appendTraceTextLocked(childPlanTraceText(update))
 		event = run.acpUpdateEvent(env, run.updatedAt)
@@ -737,26 +739,19 @@ func (run *childRun) appendAgentMessageLocked(text string) string {
 	if run == nil {
 		return ""
 	}
-	if text == "" {
-		return ""
+	update := run.finalAssistant.ObserveContentChunk(acpschema.UpdateAgentMessage, text)
+	run.agentText = update.Text
+	run.result = update.Text
+	return update.Delta
+}
+
+func (run *childRun) clearFinalAssistantLocked() {
+	if run == nil {
+		return
 	}
-	if run.agentText == "" {
-		run.agentText = text
-		run.result = run.agentText
-		return text
-	}
-	if strings.HasPrefix(text, run.agentText) {
-		delta := text[len(run.agentText):]
-		run.agentText = text
-		run.result = run.agentText
-		return delta
-	}
-	if strings.HasPrefix(run.agentText, text) {
-		return ""
-	}
-	run.agentText += text
-	run.result = run.agentText
-	return text
+	run.agentText = ""
+	run.result = ""
+	run.finalAssistant.Reset()
 }
 
 func (run *childRun) appendTraceTextLocked(text string) string {

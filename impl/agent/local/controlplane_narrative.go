@@ -5,10 +5,11 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
+	acpschema "github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
 type acpNarrativeAccumulator struct {
-	assistantText      string
+	final              acpschema.FinalAssistantAccumulator
 	reasoningText      string
 	lastNarrativeEvent *session.Event
 	lastAssistantEvent *session.Event
@@ -23,8 +24,22 @@ func (a *acpNarrativeAccumulator) normalize(event *session.Event) (*session.Even
 	a.lastNarrativeEvent = session.CloneEvent(event)
 	if updateType == string(session.ProtocolUpdateTypeAgentMessage) {
 		a.lastAssistantEvent = session.CloneEvent(event)
+		update := a.final.ObserveContentChunk(acpschema.UpdateAgentMessage, raw)
+		if update.Text == "" && update.Delta == "" {
+			return nil, nil, true
+		}
+		if update.Delta == "" {
+			return nil, nil, true
+		}
+		live := session.CloneEvent(event)
+		live.ID = ""
+		live.Visibility = session.VisibilityUIOnly
+		setNarrativeEventText(live, updateType, update.Delta)
+		return nil, live, true
 	}
-	cumulative, delta := a.append(updateType, raw)
+	a.final.Reset()
+	cumulative, delta := appendNarrativeText(a.reasoningText, raw)
+	a.reasoningText = cumulative
 	if cumulative == "" && delta == "" {
 		return nil, nil, true
 	}
@@ -38,28 +53,28 @@ func (a *acpNarrativeAccumulator) normalize(event *session.Event) (*session.Even
 	return nil, live, true
 }
 
-func (a *acpNarrativeAccumulator) append(updateType string, text string) (string, string) {
-	switch strings.TrimSpace(updateType) {
-	case string(session.ProtocolUpdateTypeAgentThought):
-		cumulative, delta := appendNarrativeText(a.reasoningText, text)
-		a.reasoningText = cumulative
-		return cumulative, delta
-	default:
-		cumulative, delta := appendNarrativeText(a.assistantText, text)
-		a.assistantText = cumulative
-		return cumulative, delta
+func (a *acpNarrativeAccumulator) observeBarrier(event *session.Event) {
+	if a == nil || event == nil || event.Scope == nil || event.Protocol == nil {
+		return
+	}
+	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(event.Scope.Source)), "acp") {
+		return
+	}
+	switch strings.TrimSpace(event.Protocol.UpdateType) {
+	case string(session.ProtocolUpdateTypeToolCall), string(session.ProtocolUpdateTypeToolUpdate), string(session.ProtocolUpdateTypePlan):
+		a.final.Reset()
 	}
 }
 
 func (a *acpNarrativeAccumulator) finalAssistantEvent() *session.Event {
-	if a == nil || strings.TrimSpace(a.assistantText) == "" || a.lastAssistantEvent == nil {
+	if a == nil || strings.TrimSpace(a.final.FinalText()) == "" || a.lastAssistantEvent == nil {
 		return nil
 	}
 	event := session.CloneEvent(a.lastAssistantEvent)
 	event.ID = ""
 	event.Visibility = session.VisibilityCanonical
 	event.Type = session.EventTypeAssistant
-	setNarrativeEventText(event, string(session.ProtocolUpdateTypeAgentMessage), a.assistantText)
+	setNarrativeEventText(event, string(session.ProtocolUpdateTypeAgentMessage), a.final.FinalText())
 	return event
 }
 
@@ -160,18 +175,5 @@ func setNarrativeEventText(event *session.Event, updateType string, text string)
 }
 
 func appendNarrativeText(existing string, incoming string) (string, string) {
-	if incoming == "" {
-		return existing, ""
-	}
-	if existing == "" {
-		return incoming, incoming
-	}
-	if strings.HasPrefix(incoming, existing) {
-		delta := incoming[len(existing):]
-		return incoming, delta
-	}
-	if strings.HasPrefix(existing, incoming) {
-		return existing, ""
-	}
-	return existing + incoming, incoming
+	return acpschema.AppendAssistantText(existing, incoming)
 }

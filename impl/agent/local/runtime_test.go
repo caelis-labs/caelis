@@ -1281,8 +1281,8 @@ func TestRuntimeACPControllerPublishesChunksAsLiveDeltas(t *testing.T) {
 			}
 		}
 	}
-	if !reflect.DeepEqual(liveTexts, []string{"hel", "lo"}) {
-		t.Fatalf("live ACP texts = %#v, want delta chunks", liveTexts)
+	if !reflect.DeepEqual(liveTexts, []string{"hel", "hello"}) {
+		t.Fatalf("live ACP texts = %#v, want assistant step chunks", liveTexts)
 	}
 
 	loaded, err := sessions.LoadSession(context.Background(), session.LoadSessionRequest{SessionRef: activeSession.SessionRef})
@@ -1305,7 +1305,7 @@ func TestRuntimeACPControllerPublishesChunksAsLiveDeltas(t *testing.T) {
 		}
 	}
 	if !reflect.DeepEqual(persistedTexts, []string{"hello"}) {
-		t.Fatalf("persisted ACP texts = %#v, want final assistant snapshot only", persistedTexts)
+		t.Fatalf("persisted ACP texts = %#v, want final assistant step only", persistedTexts)
 	}
 }
 

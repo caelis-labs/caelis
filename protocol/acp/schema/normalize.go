@@ -55,6 +55,13 @@ func ExtractTextValue(value any) string {
 		return ""
 	case string:
 		return typed
+	case TextContent:
+		return typed.Text
+	case *TextContent:
+		if typed == nil {
+			return ""
+		}
+		return typed.Text
 	case json.RawMessage:
 		return TextFromRawContent(typed)
 	case []any:
