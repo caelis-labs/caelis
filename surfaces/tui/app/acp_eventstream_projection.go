@@ -108,6 +108,10 @@ func projectACPSessionUpdate(env eventstream.Envelope, meta map[string]any, scop
 		if acpToolIsPlan(title, kind) {
 			return nil
 		}
+		content := acpToolContentToDisplay(update.Content)
+		if len(content) == 0 && !acpGatewayProjection(meta) {
+			content = standardACPRawOutputContent(update.RawOutput, update.ToolCallID)
+		}
 		event, ok := projectTranscriptToolResult(transcriptToolProjection{
 			Scope:      scope,
 			ScopeID:    scopeID,
@@ -121,7 +125,7 @@ func projectACPSessionUpdate(env eventstream.Envelope, meta map[string]any, scop
 			Status:     stringFromPtr(update.Status),
 			RawInput:   acpRawMap(update.RawInput),
 			RawOutput:  acpRawMap(update.RawOutput),
-			Content:    acpToolContentToDisplay(update.Content),
+			Content:    content,
 			Error:      acpToolUpdateError(update),
 		}, "in_progress")
 		if !ok {
@@ -321,6 +325,31 @@ func acpToolContentToDisplay(in []schema.ToolCallContent) []acpprojector.ToolCon
 		})
 	}
 	return out
+}
+
+func standardACPRawOutputContent(raw any, toolCallID string) []acpprojector.ToolContent {
+	text := standardACPRawOutputText(acpRawMap(raw))
+	if text == "" {
+		return nil
+	}
+	return []acpprojector.ToolContent{{
+		Type:       "terminal",
+		Content:    schema.TextContent{Type: "text", Text: text},
+		TerminalID: strings.TrimSpace(toolCallID),
+	}}
+}
+
+func standardACPRawOutputText(raw map[string]any) string {
+	for _, key := range []string{"latest_output", "output_preview", "result", "output", "stdout", "stderr", "error", "final_message", "finalMessage", "text"} {
+		if text := asString(raw[key]); text != "" {
+			return text
+		}
+	}
+	return ""
+}
+
+func acpGatewayProjection(meta map[string]any) bool {
+	return strings.EqualFold(metaString(meta, "caelis", "bridge", "source"), "gateway_projection")
 }
 
 func stringFromPtr(value *string) string {

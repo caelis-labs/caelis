@@ -43,3 +43,54 @@ func TestProjectACPEventToTranscriptEventsProjectsNotice(t *testing.T) {
 		t.Fatalf("event = %#v, want notice text", events[0])
 	}
 }
+
+func TestProjectACPEventToTranscriptEventsDisplaysStandardRawTerminalOutput(t *testing.T) {
+	t.Parallel()
+
+	status := schema.ToolStatusCompleted
+	kind := schema.ToolKindExecute
+	events := ProjectACPEventToTranscriptEvents(eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate,
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo,
+			ToolCallID:    "call-1",
+			Kind:          &kind,
+			Status:        &status,
+			RawOutput:     map[string]any{"stdout": "side acp output\n"},
+		},
+	})
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one transcript event", events)
+	}
+	if events[0].ToolOutput != "side acp output\n" {
+		t.Fatalf("ToolOutput = %q, want standard raw terminal output", events[0].ToolOutput)
+	}
+}
+
+func TestProjectACPEventToTranscriptEventsDoesNotDisplayGatewayProjectedRawTerminalOutput(t *testing.T) {
+	t.Parallel()
+
+	status := schema.ToolStatusCompleted
+	kind := schema.ToolKindExecute
+	events := ProjectACPEventToTranscriptEvents(eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate,
+		Meta: map[string]any{
+			"caelis": map[string]any{
+				"bridge": map[string]any{"source": "gateway_projection"},
+			},
+		},
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo,
+			ToolCallID:    "call-1",
+			Kind:          &kind,
+			Status:        &status,
+			RawOutput:     map[string]any{"stdout": "hidden raw output\n"},
+		},
+	})
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one transcript event", events)
+	}
+	if events[0].ToolOutput != "" {
+		t.Fatalf("ToolOutput = %q, want gateway-projected raw terminal output hidden without content", events[0].ToolOutput)
+	}
+}

@@ -363,7 +363,7 @@ func acpEventBase(env gateway.EventEnvelope) eventstream.Envelope {
 }
 
 func acpEventMeta(ev gateway.Event) map[string]any {
-	meta := maps.Clone(ev.Meta)
+	meta := gatewayProjectionBridgeMeta(maps.Clone(ev.Meta))
 	if ev.Invocation == nil {
 		return meta
 	}
@@ -384,6 +384,28 @@ func acpEventMeta(ev gateway.Event) map[string]any {
 		"provider": invocation.Provider,
 		"model":    invocation.Model,
 	}
+	meta["caelis"] = caelis
+	return meta
+}
+
+func gatewayProjectionBridgeMeta(meta map[string]any) map[string]any {
+	if meta == nil {
+		meta = map[string]any{}
+	}
+	caelis, _ := meta["caelis"].(map[string]any)
+	if caelis == nil {
+		caelis = map[string]any{}
+	} else {
+		caelis = maps.Clone(caelis)
+	}
+	bridge, _ := caelis["bridge"].(map[string]any)
+	if bridge == nil {
+		bridge = map[string]any{}
+	} else {
+		bridge = maps.Clone(bridge)
+	}
+	bridge["source"] = "gateway_projection"
+	caelis["bridge"] = bridge
 	meta["caelis"] = caelis
 	return meta
 }

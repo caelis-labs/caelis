@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"iter"
 	"testing"
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/ports/agent"
+	"github.com/OnslaughtSnail/caelis/ports/eventsource"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/tool"
@@ -165,6 +167,50 @@ func TestTurnHandleACPEventsCanSuppressCanonicalProjectionForNativePassthrough(t
 	}
 	if len(replayed) != 1 || replayed[0].Cursor != "e1" {
 		t.Fatalf("EventsAfter() = %#v, want canonical gateway event e1", replayed)
+	}
+}
+
+func TestGatewayForwardSourceEventsDoesNotProjectACPFinalMaterialization(t *testing.T) {
+	t.Parallel()
+
+	handle := newTurnHandle(turnHandleConfig{
+		handleID: "h1",
+		runID:    "run-1",
+		turnID:   "turn-1",
+		sessionRef: session.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+		},
+		createdAt: time.Unix(100, 0),
+	})
+	acpEvents := handle.ACPEvents()
+	msg := model.NewTextMessage(model.RoleAssistant, "final answer")
+	(&Gateway{}).forwardSourceEvents(session.Session{SessionRef: handle.sessionRef}, handle, staticSourceEvents{
+		events: []eventsource.Event{{
+			Canonical: &session.Event{
+				ID:         "e-final",
+				SessionID:  "s1",
+				Type:       session.EventTypeAssistant,
+				Visibility: session.VisibilityCanonical,
+				Message:    &msg,
+				Scope:      &session.EventScope{Source: "acp", TurnID: "turn-1"},
+			},
+		}},
+	})
+	handle.finish()
+
+	var got []eventstream.Envelope
+	for env := range acpEvents {
+		got = append(got, env)
+	}
+	if len(got) != 0 {
+		t.Fatalf("ACPEvents() = %#v, want no live projection for ACP final materialization", got)
+	}
+	replayed, _, err := handle.EventsAfter("")
+	if err != nil {
+		t.Fatalf("EventsAfter() error = %v", err)
+	}
+	if len(replayed) != 1 || replayed[0].Cursor != "e-final" {
+		t.Fatalf("EventsAfter() = %#v, want durable canonical final event", replayed)
 	}
 }
 
@@ -696,6 +742,20 @@ func TestTurnHandleEventsAfterReturnsCursorNotFound(t *testing.T) {
 	var gwErr *Error
 	if !As(err, &gwErr) || gwErr.Code != CodeCursorNotFound {
 		t.Fatalf("EventsAfter() error = %v, want cursor_not_found", err)
+	}
+}
+
+type staticSourceEvents struct {
+	events []eventsource.Event
+}
+
+func (s staticSourceEvents) SourceEvents() iter.Seq2[eventsource.Event, error] {
+	return func(yield func(eventsource.Event, error) bool) {
+		for _, event := range s.events {
+			if !yield(event, nil) {
+				return
+			}
+		}
 	}
 }
 
