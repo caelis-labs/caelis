@@ -36,6 +36,7 @@ type TranscriptEvent struct {
 	Kind       TranscriptEventKind
 	Scope      ACPProjectionScope
 	ScopeID    string
+	TurnID     string
 	Actor      string
 	OccurredAt time.Time
 

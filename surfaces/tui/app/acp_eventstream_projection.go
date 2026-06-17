@@ -73,6 +73,7 @@ func ProjectACPEventToTranscriptEvents(env eventstream.Envelope) []TranscriptEve
 		}
 	}
 	for i := range out {
+		out[i].TurnID = strings.TrimSpace(env.TurnID)
 		out[i].AnchorToolCallID = anchorToolCallID
 		out[i].AnchorToolName = anchorToolName
 		out[i].MirroredToParentTool = mirroredToParentTool

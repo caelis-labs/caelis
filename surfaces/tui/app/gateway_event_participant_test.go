@@ -7,6 +7,8 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
 func TestGatewayStreamingNarrativeKeepsReasoningAnswerBoundaries(t *testing.T) {
@@ -306,6 +308,67 @@ func TestGatewayParticipantPromptTurnsRenderAsSeparateBlocks(t *testing.T) {
 	}
 	if !participantTurnIsTerminal(secondTurn.Status) {
 		t.Fatalf("second turn status = %q, want terminal after task result", secondTurn.Status)
+	}
+}
+
+func TestACPParticipantTurnsUseTurnIDWhenScopeIDIsStable(t *testing.T) {
+	model := newGatewayEventTestModel()
+
+	sendUser := func(text string) {
+		updated, _ := model.Update(UserMessageMsg{Text: text})
+		model = updated.(*Model)
+	}
+	sendParticipant := func(turnID string, text string) {
+		events := ProjectACPEventToTranscriptEvents(eventstream.Envelope{
+			Kind:    eventstream.KindSessionUpdate,
+			Scope:   eventstream.ScopeParticipant,
+			ScopeID: "participant-1",
+			TurnID:  turnID,
+			Actor:   "@otto",
+			Update: schema.ContentChunk{
+				SessionUpdate: schema.UpdateAgentMessage,
+				Content:       schema.TextContent{Type: "text", Text: text},
+			},
+			Final: true,
+		})
+		updated, _ := model.Update(TranscriptEventsMsg{Events: events})
+		model = updated.(*Model)
+	}
+
+	sendUser("@otto 整体审查一遍修改")
+	sendParticipant("turn-1", "first review")
+	sendUser("@otto 审查本轮修改")
+	sendParticipant("turn-2", "second review")
+
+	blocks := model.doc.Blocks()
+	var participantBlocks []*ParticipantTurnBlock
+	secondUserIndex := -1
+	secondTurnIndex := -1
+	for i, block := range blocks {
+		if user, ok := block.(*UserNarrativeBlock); ok && strings.Contains(user.Raw, "@otto 审查本轮修改") {
+			secondUserIndex = i
+		}
+		if transcript, ok := block.(*TranscriptBlock); ok && strings.Contains(transcript.Raw, "@otto 审查本轮修改") {
+			secondUserIndex = i
+		}
+		if turn, ok := block.(*ParticipantTurnBlock); ok {
+			participantBlocks = append(participantBlocks, turn)
+			if turn.SessionID == "turn-2" {
+				secondTurnIndex = i
+			}
+		}
+	}
+	if len(participantBlocks) != 2 {
+		t.Fatalf("participant blocks = %#v, want separate block per turn_id", participantBlocks)
+	}
+	if participantBlocks[0].SessionID != "turn-1" || participantBlocks[1].SessionID != "turn-2" {
+		t.Fatalf("participant block keys = %q/%q, want turn ids", participantBlocks[0].SessionID, participantBlocks[1].SessionID)
+	}
+	if secondUserIndex < 0 || secondTurnIndex < 0 || secondTurnIndex <= secondUserIndex {
+		t.Fatalf("second user index=%d second turn index=%d blocks=%#v", secondUserIndex, secondTurnIndex, blocks)
+	}
+	if got := participantBlocks[1].Events[0].Text; got != "second review" {
+		t.Fatalf("second participant text = %q, want second review", got)
 	}
 }
 
