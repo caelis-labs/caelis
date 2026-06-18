@@ -245,10 +245,10 @@ func isWindowsGitCredentialFailure(lower string) bool {
 	if !strings.Contains(lower, "credential") {
 		return false
 	}
-	if !(strings.Contains(lower, "git") ||
-		strings.Contains(lower, "credential-manager") ||
-		strings.Contains(lower, "git-credential-manager") ||
-		strings.Contains(lower, "manager-core")) {
+	if !strings.Contains(lower, "git") &&
+		!strings.Contains(lower, "credential-manager") &&
+		!strings.Contains(lower, "git-credential-manager") &&
+		!strings.Contains(lower, "manager-core") {
 		return false
 	}
 	return strings.Contains(lower, "access is denied") ||
@@ -263,7 +263,7 @@ func isGoPrivateDependencyFailure(input Input, lower string) bool {
 	if len(fields) == 0 || !strings.EqualFold(strings.TrimSuffix(commandBase(fields[0]), ".exe"), "go") {
 		return false
 	}
-	if !(strings.Contains(lower, "go:") || strings.Contains(lower, "module") || strings.Contains(lower, "git ls-remote")) {
+	if !strings.Contains(lower, "go:") && !strings.Contains(lower, "module") && !strings.Contains(lower, "git ls-remote") {
 		return false
 	}
 	credentialEvidence := strings.Contains(lower, "could not read username") ||
@@ -298,11 +298,11 @@ func isSandboxCacheDenied(input Input, lower string) bool {
 	if !isSandbox(input) {
 		return false
 	}
-	if !(strings.Contains(lower, "cache") ||
-		strings.Contains(lower, "gocache") ||
-		strings.Contains(lower, "gomodcache") ||
-		strings.Contains(lower, "go/pkg/mod") ||
-		strings.Contains(lower, "writing stat cache")) {
+	if !strings.Contains(lower, "cache") &&
+		!strings.Contains(lower, "gocache") &&
+		!strings.Contains(lower, "gomodcache") &&
+		!strings.Contains(lower, "go/pkg/mod") &&
+		!strings.Contains(lower, "writing stat cache") {
 		return false
 	}
 	return sandbox.IsSandboxPermissionDeniedText(lower) ||
