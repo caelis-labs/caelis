@@ -445,6 +445,25 @@ func TestCompositeRuntimeStatusForwardsBackendSetupDetails(t *testing.T) {
 	}
 }
 
+func TestCompositeRuntimeRefreshForwardsSandbox(t *testing.T) {
+	sandboxRuntime := &refreshRuntime{fakeRuntime: fakeRuntime{backend: BackendWindows}}
+	rt := &compositeRuntime{
+		host:    fakeRuntime{backend: BackendHost},
+		sandbox: sandboxRuntime,
+		backends: map[Backend]Runtime{
+			BackendHost:    fakeRuntime{backend: BackendHost},
+			BackendWindows: sandboxRuntime,
+		},
+	}
+
+	if err := rt.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh() error = %v", err)
+	}
+	if sandboxRuntime.calls != 1 {
+		t.Fatalf("sandbox Refresh calls = %d, want 1", sandboxRuntime.calls)
+	}
+}
+
 type fakeBackendFactory struct {
 	backend Backend
 	err     error
@@ -512,6 +531,16 @@ func (r *countingSelectionRuntime) Status() Status {
 
 func (r *countingSelectionRuntime) SelectionStatus() Status {
 	return r.selection
+}
+
+type refreshRuntime struct {
+	fakeRuntime
+	calls int
+}
+
+func (r *refreshRuntime) Refresh(context.Context) error {
+	r.calls++
+	return nil
 }
 
 type sentinelFileSystem struct {

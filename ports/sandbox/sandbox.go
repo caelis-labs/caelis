@@ -363,6 +363,13 @@ type PreflightRuntime interface {
 	Preflight(context.Context, PreflightOptions) error
 }
 
+// RefreshableRuntime is implemented by backends that can run best-effort
+// non-blocking maintenance such as ACL refresh or cache cleanup. Callers should
+// invoke it from background paths only; command launch must not depend on it.
+type RefreshableRuntime interface {
+	Refresh(context.Context) error
+}
+
 // ResettableRuntime is implemented by backends that can remove local sandbox
 // infrastructure through an explicit user-triggered maintenance command.
 type ResettableRuntime interface {

@@ -31,6 +31,13 @@ const (
 )
 
 const fileDeleteChild windows.ACCESS_MASK = 0x00000040
+const aclRevision = 2
+
+var (
+	modadvapi32       = windows.NewLazySystemDLL("advapi32.dll")
+	procAddACE        = modadvapi32.NewProc("AddAce")
+	procInitializeACL = modadvapi32.NewProc("InitializeAcl")
+)
 
 type Entry struct {
 	Principal string
@@ -117,22 +124,59 @@ func RemoveFileDACLPrincipals(path string, principals ...string) error {
 	if len(principals) == 0 {
 		return nil
 	}
-	entries := make([]Entry, 0, len(principals))
+	removeSIDs := make([]*windows.SID, 0, len(principals))
 	for _, principal := range principals {
 		principal = strings.TrimSpace(principal)
 		if principal == "" {
 			continue
 		}
-		entries = append(entries, Entry{Principal: principal, Mode: Revoke})
+		_, sid, err := trustee(principal)
+		if err != nil {
+			return err
+		}
+		removeSIDs = append(removeSIDs, sid)
 	}
-	if len(entries) == 0 {
+	if len(removeSIDs) == 0 {
 		return nil
 	}
 	current, err := ReadFileDACL(path)
 	if err != nil {
 		return err
 	}
-	return writeBuiltFileDACL(path, current.sd, false, entries...)
+	baseDACL, _, err := current.sd.DACL()
+	if err != nil {
+		return fmt.Errorf("acl: extract base %s DACL: %w", path, err)
+	}
+	nextDACL, changed, err := daclWithoutPrincipals(baseDACL, removeSIDs)
+	if err != nil {
+		return err
+	}
+	if !changed {
+		return nil
+	}
+	info := windows.SECURITY_INFORMATION(windows.DACL_SECURITY_INFORMATION)
+	if err := windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, info, nil, nil, nextDACL, nil); err != nil {
+		return fmt.Errorf("acl: write %s DACL: %w", path, err)
+	}
+	runtime.KeepAlive(current.sd)
+	runtime.KeepAlive(nextDACL)
+	return nil
+}
+
+func emptyACL(size uint32) (*windows.ACL, error) {
+	if size < uint32(unsafe.Sizeof(windows.ACL{})) {
+		size = uint32(unsafe.Sizeof(windows.ACL{}))
+	}
+	buf := make([]byte, size)
+	acl := (*windows.ACL)(unsafe.Pointer(&buf[0]))
+	r1, _, e1 := procInitializeACL.Call(uintptr(unsafe.Pointer(acl)), uintptr(size), uintptr(aclRevision))
+	if r1 == 0 {
+		if e1 != nil {
+			return nil, e1
+		}
+		return nil, fmt.Errorf("InitializeAcl failed")
+	}
+	return acl, nil
 }
 
 func MissingFileDACLEntries(path string, entries ...Entry) ([]Entry, error) {
@@ -274,6 +318,97 @@ func daclHasInheritedACE(dacl *windows.ACL) bool {
 		}
 		header := (*windows.ACE_HEADER)(unsafe.Pointer(ace))
 		if header.AceFlags&windows.INHERITED_ACE != 0 {
+			return true
+		}
+	}
+	return false
+}
+
+type rawACE struct {
+	ptr  unsafe.Pointer
+	size uint32
+}
+
+func daclWithoutPrincipals(dacl *windows.ACL, removeSIDs []*windows.SID) (*windows.ACL, bool, error) {
+	if dacl == nil {
+		return nil, false, nil
+	}
+	kept := make([]rawACE, 0, dacl.AceCount)
+	size := uint32(unsafe.Sizeof(windows.ACL{}))
+	var changed bool
+	for i := uint32(0); i < uint32(dacl.AceCount); i++ {
+		var ace *windows.ACCESS_ALLOWED_ACE
+		if err := windows.GetAce(dacl, i, &ace); err != nil {
+			return nil, false, fmt.Errorf("acl: read ACE %d: %w", i, err)
+		}
+		if ace == nil {
+			return nil, false, fmt.Errorf("acl: read ACE %d: nil ACE", i)
+		}
+		header := (*windows.ACE_HEADER)(unsafe.Pointer(ace))
+		if aceMatchesPrincipals(header, ace, removeSIDs) {
+			changed = true
+			continue
+		}
+		aceSize := uint32(header.AceSize)
+		kept = append(kept, rawACE{ptr: unsafe.Pointer(ace), size: aceSize})
+		size += aceSize
+	}
+	if !changed {
+		return nil, false, nil
+	}
+	next, err := emptyACL(size)
+	if err != nil {
+		return nil, false, err
+	}
+	for _, ace := range kept {
+		if err := addACE(next, ace.ptr, ace.size); err != nil {
+			return nil, false, err
+		}
+	}
+	runtime.KeepAlive(dacl)
+	return next, true, nil
+}
+
+func aceMatchesPrincipals(header *windows.ACE_HEADER, ace *windows.ACCESS_ALLOWED_ACE, removeSIDs []*windows.SID) bool {
+	if header == nil || ace == nil {
+		return false
+	}
+	if header.AceFlags&windows.INHERITED_ACE != 0 {
+		return false
+	}
+	switch header.AceType {
+	case windows.ACCESS_ALLOWED_ACE_TYPE, windows.ACCESS_DENIED_ACE_TYPE:
+		aceSID := (*windows.SID)(unsafe.Pointer(&ace.SidStart))
+		return sidListContains(removeSIDs, aceSID)
+	default:
+		return false
+	}
+}
+
+func addACE(acl *windows.ACL, ace unsafe.Pointer, size uint32) error {
+	const maxDWORD = 0xffffffff
+	r1, _, e1 := procAddACE.Call(
+		uintptr(unsafe.Pointer(acl)),
+		uintptr(aclRevision),
+		uintptr(maxDWORD),
+		uintptr(ace),
+		uintptr(size),
+	)
+	if r1 == 0 {
+		if e1 != nil {
+			return e1
+		}
+		return fmt.Errorf("AddAce failed")
+	}
+	return nil
+}
+
+func sidListContains(values []*windows.SID, want *windows.SID) bool {
+	if want == nil {
+		return false
+	}
+	for _, value := range values {
+		if value != nil && windows.EqualSid(value, want) {
 			return true
 		}
 	}

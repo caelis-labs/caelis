@@ -270,6 +270,15 @@ func runCommandPayloadForCommand(command string, result sandbox.CommandResult, e
 		if strings.TrimSpace(diag.Severity) != "" {
 			payload["hint_severity"] = diag.Severity
 		}
+		if diag.RetryableWithHost {
+			payload["retryable_with_host"] = true
+		}
+		if strings.TrimSpace(diag.SuggestedSandboxPermissions) != "" {
+			payload["suggested_sandbox_permissions"] = strings.TrimSpace(diag.SuggestedSandboxPermissions)
+		}
+		if len(diag.SuggestedPrefixRule) > 0 {
+			payload["suggested_prefix_rule"] = append([]string(nil), diag.SuggestedPrefixRule...)
+		}
 	}
 	return payload
 }

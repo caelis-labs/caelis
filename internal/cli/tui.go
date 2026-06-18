@@ -5,13 +5,13 @@ import (
 	"errors"
 	"io"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp/controladapter/local"
 	"github.com/OnslaughtSnail/caelis/internal/version"
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/app"
 )
 
@@ -34,7 +34,7 @@ func runTUI(ctx context.Context, stack *gatewayapp.Stack, sessionID string, mode
 		Wizards:         tuiapp.DefaultWizards(),
 		RenderFPS:       envInt("CAELIS_TUI_RENDER_FPS", 0),
 		OnStart: func() {
-			startTUISandboxPreflight(programCtx, stack, sender)
+			startTUISandboxRefresh(programCtx, stack, sender)
 		},
 	})
 	model := tuiapp.NewModel(cfg)
@@ -45,51 +45,23 @@ func runTUI(ctx context.Context, stack *gatewayapp.Stack, sessionID string, mode
 	return err
 }
 
-func startTUISandboxPreflight(ctx context.Context, stack *gatewayapp.Stack, sender *tuiapp.ProgramSender) {
+func startTUISandboxRefresh(ctx context.Context, stack *gatewayapp.Stack, sender *tuiapp.ProgramSender) {
 	if stack == nil || sender == nil {
 		return
 	}
-	status := stack.SandboxStatus()
-	if !isWindowsSandboxStatus(status) {
-		return
-	}
 	go func() {
-		const source = "sandbox-preflight"
-		progressCtx := sandbox.ContextWithPrepareProgress(ctx, func(progress sandbox.PrepareProgress) {
-			sender.SendMsg(tuiapp.SandboxProgressMsg{
-				Title:   "Windows sandbox",
-				Source:  source,
-				Phase:   progress.Phase,
-				Message: progress.Message,
-				Step:    progress.Step,
-				Total:   progress.Total,
-				Done:    progress.Done,
-			})
-		})
-		next, err := stack.PreflightSandbox(progressCtx, true)
-		sender.SendMsg(tuiapp.SandboxProgressMsg{Source: source, Clear: true})
-		if err == nil || errors.Is(err, context.Canceled) {
-			return
+		refreshCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		defer cancel()
+		if err := stack.RefreshSandbox(refreshCtx); err != nil && !errors.Is(err, context.Canceled) {
+			sender.SendMsg(tuiapp.LogChunkMsg{Chunk: formatTUISandboxRefreshError(err) + "\n"})
 		}
-		sender.SendMsg(tuiapp.LogChunkMsg{Chunk: formatTUISandboxPreflightError(next, err) + "\n"})
 	}()
 }
 
-func isWindowsSandboxStatus(status gatewayapp.SandboxStatus) bool {
-	for _, value := range []string{status.ResolvedBackend, status.RequestedBackend} {
-		switch strings.ToLower(strings.TrimSpace(value)) {
-		case "windows", "windows-restricted-token", "windows_restricted_token", "windows_elevated", "windows-elevated", "elevated":
-			return true
-		}
-	}
-	return false
-}
-
-func formatTUISandboxPreflightError(status gatewayapp.SandboxStatus, err error) string {
-	_ = err
-	lines := []string{"Windows sandbox ACL repair failed."}
-	if root := strings.TrimSpace(status.WorkspaceSetupRoot); root != "" {
-		lines = append(lines, "workspace: "+root)
+func formatTUISandboxRefreshError(err error) string {
+	lines := []string{"Windows sandbox background refresh failed."}
+	if errText := strings.TrimSpace(err.Error()); errText != "" {
+		lines = append(lines, errText)
 	}
 	lines = append(lines, "run /doctor fix")
 	return strings.Join(lines, "\n")

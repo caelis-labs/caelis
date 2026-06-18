@@ -549,6 +549,15 @@ func TestRunCommandCallAddsWindowsSChannelNoCredentialsHint(t *testing.T) {
 	if got, _ := payload["hint"].(string); !strings.Contains(got, "SChannel TLS can fail") {
 		t.Fatalf("hint = %q, want SChannel guidance", got)
 	}
+	if got, _ := payload["retryable_with_host"].(bool); !got {
+		t.Fatalf("retryable_with_host = %#v, want true", payload["retryable_with_host"])
+	}
+	if got, _ := payload["suggested_sandbox_permissions"].(string); got != "require_escalated" {
+		t.Fatalf("suggested_sandbox_permissions = %q, want require_escalated", got)
+	}
+	if _, ok := payload["suggested_prefix_rule"]; ok {
+		t.Fatalf("suggested_prefix_rule = %#v, want omitted for broad curl retry", payload["suggested_prefix_rule"])
+	}
 	if text, _ := payload["result"].(string); !strings.Contains(text, "SEC_E_NO_CREDENTIALS") {
 		t.Fatalf("result = %q, want original SChannel diagnostic", text)
 	}

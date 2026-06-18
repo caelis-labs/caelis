@@ -66,6 +66,41 @@ func TestModifyFileDACLIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestRemoveFileDACLPrincipalsRemovesDenyWrite(t *testing.T) {
+	dir := t.TempDir()
+	keep := Entry{
+		Principal: "S-1-5-21-1-2-3-4",
+		Rights:    Modify,
+		Mode:      Grant,
+		Inherit:   true,
+	}
+	entry := Entry{
+		Principal: "S-1-5-21-1-2-3-5",
+		Rights:    Write,
+		Mode:      Deny,
+		Inherit:   true,
+	}
+	if err := ModifyFileDACL(dir, keep, entry); err != nil {
+		t.Fatalf("ModifyFileDACL() error = %v", err)
+	}
+	if missing, err := MissingFileDACLEntries(dir, entry); err != nil || len(missing) != 0 {
+		t.Fatalf("deny entry before remove = %#v/%v, want present", missing, err)
+	}
+	if err := RemoveFileDACLPrincipals(dir, entry.Principal); err != nil {
+		t.Fatalf("RemoveFileDACLPrincipals() error = %v", err)
+	}
+	missing, err := MissingFileDACLEntries(dir, entry)
+	if err != nil {
+		t.Fatalf("MissingFileDACLEntries(after remove) error = %v", err)
+	}
+	if len(missing) == 0 {
+		t.Fatalf("deny entry remained after remove")
+	}
+	if missing, err := MissingFileDACLEntries(dir, keep); err != nil || len(missing) != 0 {
+		t.Fatalf("kept grant after remove = %#v/%v, want present", missing, err)
+	}
+}
+
 func TestReplaceAndWriteFileDACL(t *testing.T) {
 	dir := t.TempDir()
 	username := os.Getenv("USERNAME")

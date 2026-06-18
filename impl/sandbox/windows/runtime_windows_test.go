@@ -539,6 +539,44 @@ func TestSandboxEnvironmentPreservesHostUserDirsAndRedirectsToolCaches(t *testin
 	}
 }
 
+func TestCleanupSandboxCachesPreservesActiveEnvRoot(t *testing.T) {
+	workspace := t.TempDir()
+	rt, err := New(sandbox.Config{CWD: workspace, StateDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer rt.Close()
+	windowsRT := rt.(*runtime)
+
+	active := windowsRT.sandboxEnvRoot(workspace)
+	old := filepath.Join(windowsRT.sandboxEnvBase(), "old-workspace")
+	for _, dir := range []string{filepath.Join(active, "cache"), filepath.Join(old, "cache")} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatalf("MkdirAll(%s) error = %v", dir, err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "cache.bin"), []byte("cache"), 0o600); err != nil {
+			t.Fatalf("WriteFile(%s) error = %v", dir, err)
+		}
+	}
+	stale := time.Now().Add(-(windowsCacheMaxAge + time.Hour))
+	if err := os.Chtimes(old, stale, stale); err != nil {
+		t.Fatalf("Chtimes(old) error = %v", err)
+	}
+	if err := os.Chtimes(active, stale, stale); err != nil {
+		t.Fatalf("Chtimes(active) error = %v", err)
+	}
+
+	if err := windowsRT.cleanupSandboxCaches(context.Background(), active); err != nil {
+		t.Fatalf("cleanupSandboxCaches() error = %v", err)
+	}
+	if _, err := os.Stat(active); err != nil {
+		t.Fatalf("active env stat error = %v, want preserved", err)
+	}
+	if _, err := os.Stat(old); !os.IsNotExist(err) {
+		t.Fatalf("old env stat error = %v, want removed", err)
+	}
+}
+
 func TestEnsureSkipsMissingWritableRootsAndRepairsWhenPresent(t *testing.T) {
 	workspace := t.TempDir()
 	stateDir := t.TempDir()
@@ -605,7 +643,7 @@ func TestRepairCurrentWorkspaceACLsCleansStaleManifestACLs(t *testing.T) {
 	defer rt.Close()
 	windowsRT := rt.(*runtime)
 
-	oldPolicy, err := windowsRT.ensureForRequest(context.Background(), sandbox.CommandRequest{Dir: workspace})
+	oldPolicy, err := windowsRT.ensureForRequestMode(context.Background(), sandbox.CommandRequest{Dir: workspace}, ensureModeBackgroundRefresh)
 	if err != nil {
 		t.Fatalf("ensureForRequest() error = %v", err)
 	}
@@ -657,7 +695,7 @@ func TestUnsafeWritableRootReasonRejectsBroadUserRoots(t *testing.T) {
 	}
 }
 
-func TestEnsureForRequestSkipsWritableRootACLFailure(t *testing.T) {
+func TestEnsureForRequestReturnsCoreWritableRootACLFailure(t *testing.T) {
 	workspace := t.TempDir()
 	rt, err := New(sandbox.Config{CWD: workspace, StateDir: t.TempDir()})
 	if err != nil {
@@ -675,19 +713,19 @@ func TestEnsureForRequestSkipsWritableRootACLFailure(t *testing.T) {
 		return oldModify(path, entries...)
 	}
 
-	policy, err := windowsRT.ensureForRequest(context.Background(), sandbox.CommandRequest{Dir: workspace})
-	if err != nil {
-		t.Fatalf("ensureForRequest() error = %v, want ACL failure skipped", err)
+	_, err = windowsRT.ensureForRequest(context.Background(), sandbox.CommandRequest{Dir: workspace})
+	if err == nil {
+		t.Fatal("ensureForRequest() error = nil, want foreground core ACL failure")
 	}
-	if containsPath(policy.WriteRoots, workspace) {
-		t.Fatalf("WriteRoots = %#v, want failed workspace root skipped", policy.WriteRoots)
+	if !errors.Is(err, syscall.ERROR_ACCESS_DENIED) {
+		t.Fatalf("ensureForRequest() error = %v, want access denied", err)
 	}
-	if len(policy.CapabilitySIDs) == 0 {
-		t.Fatalf("CapabilitySIDs empty, want restricted token SID retained")
+	if setupErr := windowsRT.workspaceSetupError(); setupErr == "" {
+		t.Fatal("workspaceSetupError() = empty, want recorded ACL failure")
 	}
 }
 
-func TestEnsureForRequestDropsParentRootWhenDenyCarveoutACLFailure(t *testing.T) {
+func TestEnsureForRequestReturnsDenyCarveoutACLFailure(t *testing.T) {
 	workspace := t.TempDir()
 	gitDir := filepath.Join(workspace, ".git")
 	if err := os.MkdirAll(gitDir, 0o700); err != nil {
@@ -709,21 +747,47 @@ func TestEnsureForRequestDropsParentRootWhenDenyCarveoutACLFailure(t *testing.T)
 		return oldModify(path, entries...)
 	}
 
-	policy, err := windowsRT.ensureForRequest(context.Background(), sandbox.CommandRequest{Dir: workspace})
-	if err != nil {
-		t.Fatalf("ensureForRequest() error = %v, want deny ACL failure skipped", err)
+	_, err = windowsRT.ensureForRequest(context.Background(), sandbox.CommandRequest{Dir: workspace})
+	if err == nil {
+		t.Fatal("ensureForRequest() error = nil, want deny ACL failure")
 	}
-	if containsPath(policy.WriteRoots, workspace) {
-		t.Fatalf("WriteRoots = %#v, want parent workspace root removed when .git deny ACL fails", policy.WriteRoots)
+	if !errors.Is(err, syscall.ERROR_ACCESS_DENIED) {
+		t.Fatalf("ensureForRequest() error = %v, want access denied", err)
 	}
 }
 
-func TestEnsureForRequestRevokesWorkspaceRootGrantWhenDenyCarveoutACLFailure(t *testing.T) {
+func TestForegroundPolicyExcludesUnrelatedConfiguredWritableRoot(t *testing.T) {
 	workspace := t.TempDir()
-	gitDir := filepath.Join(workspace, ".git")
-	if err := os.MkdirAll(gitDir, 0o700); err != nil {
-		t.Fatalf("MkdirAll(.git) error = %v", err)
+	extraRoot := filepath.Join(t.TempDir(), "extra-write")
+	if err := os.MkdirAll(extraRoot, 0o700); err != nil {
+		t.Fatalf("MkdirAll(extraRoot) error = %v", err)
 	}
+	rt, err := New(sandbox.Config{CWD: workspace, StateDir: t.TempDir(), WritableRoots: []string{extraRoot}})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer rt.Close()
+	windowsRT := rt.(*runtime)
+
+	foreground, err := windowsRT.foregroundPolicyForRequest(sandbox.CommandRequest{Dir: workspace})
+	if err != nil {
+		t.Fatalf("foregroundPolicyForRequest() error = %v", err)
+	}
+	full, err := windowsRT.policyForRequest(sandbox.CommandRequest{Dir: workspace})
+	if err != nil {
+		t.Fatalf("policyForRequest() error = %v", err)
+	}
+	if containsPath(foreground.WriteRoots, extraRoot) {
+		t.Fatalf("foreground WriteRoots = %#v, did not expect unrelated root %q", foreground.WriteRoots, extraRoot)
+	}
+	if !containsPath(full.WriteRoots, extraRoot) {
+		t.Fatalf("full WriteRoots = %#v, want unrelated root %q queued for refresh", full.WriteRoots, extraRoot)
+	}
+}
+
+func TestApplyPolicyACLsInterruptibleReturnsAppliedWriteRoots(t *testing.T) {
+	workspace := t.TempDir()
+	missingRoot := filepath.Join(t.TempDir(), "missing")
 	rt, err := New(sandbox.Config{CWD: workspace, StateDir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -731,62 +795,69 @@ func TestEnsureForRequestRevokesWorkspaceRootGrantWhenDenyCarveoutACLFailure(t *
 	defer rt.Close()
 	windowsRT := rt.(*runtime)
 
-	var revoked []string
-	oldModify := modifyFileDACL
-	defer func() { modifyFileDACL = oldModify }()
-	modifyFileDACL = func(path string, entries ...acl.Entry) error {
-		for _, entry := range entries {
-			if entry.Mode == acl.Revoke {
-				revoked = append(revoked, path)
-			}
-			if pathutil.Key(path) == pathutil.Key(gitDir) && entry.Mode == acl.Deny {
-				return syscall.ERROR_ACCESS_DENIED
-			}
-		}
-		return oldModify(path, entries...)
+	sid := "S-1-5-21-1-2-3-4"
+	policy := workspacePolicy{
+		WorkspaceRoot:           workspace,
+		CommandDir:              workspace,
+		WriteRoots:              []string{workspace, missingRoot},
+		CapabilitySIDs:          []string{sid},
+		WriteRootCapabilitySIDs: map[string]string{pathutil.Normalize(workspace): sid, pathutil.Normalize(missingRoot): sid},
 	}
 
-	policy, err := windowsRT.ensureForRequest(context.Background(), sandbox.CommandRequest{Dir: workspace})
+	applied, complete, err := windowsRT.applyPolicyACLsInterruptible(context.Background(), policy)
 	if err != nil {
-		t.Fatalf("ensureForRequest() error = %v, want deny ACL failure skipped", err)
+		t.Fatalf("applyPolicyACLsInterruptible() error = %v", err)
 	}
-	if containsPath(policy.WriteRoots, workspace) {
-		t.Fatalf("WriteRoots = %#v, want parent workspace root removed when .git deny ACL fails", policy.WriteRoots)
+	if !complete {
+		t.Fatal("applyPolicyACLsInterruptible() complete = false, want true")
 	}
-	if !containsPath(revoked, workspace) {
-		t.Fatalf("revoked paths = %#v, want workspace root grant revoked after .git deny ACL failure", revoked)
+	if containsPath(applied.WriteRoots, missingRoot) {
+		t.Fatalf("applied WriteRoots = %#v, did not expect missing root %q", applied.WriteRoots, missingRoot)
+	}
+	if !containsPath(applied.WriteRoots, workspace) {
+		t.Fatalf("applied WriteRoots = %#v, want workspace root %q", applied.WriteRoots, workspace)
 	}
 }
 
-func TestEnsureForRequestDropsChildRootWhenDenyCarveoutACLFailure(t *testing.T) {
+func TestEnsureForRequestCleansStaleDenyACLFromSatisfyingManifest(t *testing.T) {
 	workspace := t.TempDir()
-	gitDir := filepath.Join(workspace, ".git")
-	hooksDir := filepath.Join(gitDir, "hooks")
-	if err := os.MkdirAll(hooksDir, 0o700); err != nil {
-		t.Fatalf("MkdirAll(.git/hooks) error = %v", err)
+	readonly := filepath.Join(workspace, "readonly")
+	if err := os.MkdirAll(readonly, 0o700); err != nil {
+		t.Fatalf("MkdirAll(readonly) error = %v", err)
 	}
-	rt, err := New(sandbox.Config{CWD: workspace, StateDir: t.TempDir()})
+	rt, err := New(sandbox.Config{
+		CWD:              workspace,
+		StateDir:         t.TempDir(),
+		ReadOnlySubpaths: []string{"readonly"},
+	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
 	defer rt.Close()
 	windowsRT := rt.(*runtime)
 
-	oldModify := modifyFileDACL
-	defer func() { modifyFileDACL = oldModify }()
-	modifyFileDACL = func(path string, entries ...acl.Entry) error {
-		if pathutil.Key(path) == pathutil.Key(gitDir) {
-			return syscall.ERROR_ACCESS_DENIED
-		}
-		return oldModify(path, entries...)
+	oldPolicy, err := windowsRT.ensureForRequestMode(context.Background(), sandbox.CommandRequest{Dir: workspace}, ensureModeBackgroundRefresh)
+	if err != nil {
+		t.Fatalf("ensureForRequestMode() error = %v", err)
+	}
+	staleDenyEntries := denyEntries(oldPolicy.CapabilitySIDs)
+	if len(staleDenyEntries) == 0 {
+		t.Fatalf("old policy missing deny entries: %+v", oldPolicy)
+	}
+	if missing, err := acl.MissingFileDACLEntries(readonly, staleDenyEntries...); err != nil || len(missing) != 0 {
+		t.Fatalf("readonly deny ACL entries before foreground ensure = %#v/%v, want present", missing, err)
 	}
 
-	policy, err := windowsRT.ensureForRequest(context.Background(), sandbox.CommandRequest{Dir: hooksDir})
-	if err != nil {
-		t.Fatalf("ensureForRequest() error = %v, want deny ACL failure skipped", err)
+	windowsRT.cfg.ReadOnlySubpaths = nil
+	if _, err := windowsRT.ensureForRequest(context.Background(), sandbox.CommandRequest{Dir: workspace}); err != nil {
+		t.Fatalf("ensureForRequest() error = %v", err)
 	}
-	if containsPath(policy.WriteRoots, hooksDir) {
-		t.Fatalf("WriteRoots = %#v, want child .git/hooks root removed when .git deny ACL fails", policy.WriteRoots)
+	missing, err := acl.MissingFileDACLEntries(readonly, staleDenyEntries...)
+	if err != nil {
+		t.Fatalf("MissingFileDACLEntries(after foreground ensure) error = %v", err)
+	}
+	if len(missing) == 0 {
+		t.Fatalf("stale readonly deny ACL entries remained after foreground ensure")
 	}
 }
 
@@ -810,6 +881,56 @@ func TestEnsureForRequestReturnsManifestWriteError(t *testing.T) {
 	}
 	if setupErr := windowsRT.workspaceSetupError(); setupErr == "" {
 		t.Fatal("workspaceSetupError() = empty, want recorded manifest write error")
+	}
+}
+
+func TestPreflightSkipsACLsWhenRepairDisallowed(t *testing.T) {
+	workspace := t.TempDir()
+	rt, err := New(sandbox.Config{CWD: workspace, StateDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer rt.Close()
+	windowsRT := rt.(*runtime)
+
+	calls := 0
+	oldModify := modifyFileDACL
+	defer func() { modifyFileDACL = oldModify }()
+	modifyFileDACL = func(path string, entries ...acl.Entry) error {
+		calls++
+		return oldModify(path, entries...)
+	}
+
+	if err := windowsRT.Preflight(context.Background(), sandbox.PreflightOptions{}); err != nil {
+		t.Fatalf("Preflight() error = %v", err)
+	}
+	if calls != 0 {
+		t.Fatalf("modifyFileDACL calls = %d, want 0", calls)
+	}
+}
+
+func TestPreflightRefreshesWhenRepairAllowed(t *testing.T) {
+	workspace := t.TempDir()
+	rt, err := New(sandbox.Config{CWD: workspace, StateDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer rt.Close()
+	windowsRT := rt.(*runtime)
+
+	calls := 0
+	oldModify := modifyFileDACL
+	defer func() { modifyFileDACL = oldModify }()
+	modifyFileDACL = func(path string, entries ...acl.Entry) error {
+		calls++
+		return oldModify(path, entries...)
+	}
+
+	if err := windowsRT.Preflight(context.Background(), sandbox.PreflightOptions{AllowNonElevatedRepair: true}); err != nil {
+		t.Fatalf("Preflight() error = %v", err)
+	}
+	if calls == 0 {
+		t.Fatal("modifyFileDACL calls = 0, want refresh to prepare ACLs")
 	}
 }
 

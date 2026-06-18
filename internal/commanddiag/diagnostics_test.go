@@ -22,6 +22,9 @@ fatal: Could not read from remote repository.`
 	if got.Hint == "" || got.Severity != "warning" {
 		t.Fatalf("Diagnostic = %+v, want user-visible warning hint", got)
 	}
+	if !got.RetryableWithHost || got.SuggestedSandboxPermissions != "require_escalated" {
+		t.Fatalf("Diagnostic = %+v, want host retry metadata", got)
+	}
 	if !strings.Contains(got.Hint, "sandbox_permissions=require_escalated") {
 		t.Fatalf("Hint = %q, want concrete escalation parameter", got.Hint)
 	}
@@ -48,6 +51,7 @@ func TestBestRequiresWindowsSandboxBackend(t *testing.T) {
 
 func TestBestDetectsCurlSChannelNoCredentials(t *testing.T) {
 	input := windowsSandboxInput()
+	input.Command = "curl.exe https://private.example.com"
 	input.Stderr = "curl: (35) schannel: AcquireCredentialsHandle failed: SEC_E_NO_CREDENTIALS (0x8009030E) - 安全包中没有可用的凭证"
 
 	got, ok := Best(input)
@@ -59,6 +63,9 @@ func TestBestDetectsCurlSChannelNoCredentials(t *testing.T) {
 	}
 	if !strings.Contains(got.Hint, "sandbox_permissions=require_escalated") {
 		t.Fatalf("Hint = %q, want concrete escalation parameter", got.Hint)
+	}
+	if !got.RetryableWithHost || got.SuggestedPrefixRule != nil {
+		t.Fatalf("Diagnostic = %+v, want host retry metadata without broad prefix rule", got)
 	}
 }
 
@@ -112,6 +119,100 @@ func TestBestDetectsGitIndexLockSandboxDenied(t *testing.T) {
 	if got.Hint != hintGitIndexLockSandbox {
 		t.Fatalf("Hint = %q, want short precise hint %q", got.Hint, hintGitIndexLockSandbox)
 	}
+	if !got.RetryableWithHost || got.SuggestedSandboxPermissions != "require_escalated" {
+		t.Fatalf("Diagnostic = %+v, want host retry metadata", got)
+	}
+	if !sameStrings(got.SuggestedPrefixRule, []string{"git", "add"}) {
+		t.Fatalf("SuggestedPrefixRule = %#v, want git add", got.SuggestedPrefixRule)
+	}
+}
+
+func TestBestDoesNotSuggestGitGlobalOptionPrefixRule(t *testing.T) {
+	input := sandboxInput()
+	input.Command = `git -C C:\repo add .`
+	input.Stderr = "fatal: Unable to create 'C:/repo/.git/index.lock': Access is denied."
+
+	got, ok := Best(input)
+	if !ok {
+		t.Fatal("Best() ok = false, want Git index lock diagnostic")
+	}
+	if got.SuggestedPrefixRule != nil {
+		t.Fatalf("SuggestedPrefixRule = %#v, want nil for git global option command", got.SuggestedPrefixRule)
+	}
+}
+
+func TestBestDetectsGoPrivateDependencySandboxFailure(t *testing.T) {
+	input := windowsSandboxInput()
+	input.Command = "go test ./..."
+	input.Stderr = "go: module private.example.com/repo: git ls-remote -q origin in C:\\cache: terminal prompts disabled"
+
+	got, ok := Best(input)
+	if !ok {
+		t.Fatal("Best() ok = false, want Go private dependency diagnostic")
+	}
+	if got.Code != CodeGoPrivateDependency {
+		t.Fatalf("Code = %q, want %q", got.Code, CodeGoPrivateDependency)
+	}
+	if got.SuggestedSandboxPermissions != "require_escalated" || !sameStrings(got.SuggestedPrefixRule, []string{"go", "test"}) {
+		t.Fatalf("Diagnostic = %+v, want go test host retry metadata", got)
+	}
+}
+
+func TestBestDoesNotTreatGoRepositoryNotFoundAsSandboxFailure(t *testing.T) {
+	input := windowsSandboxInput()
+	input.Command = "go get example.com/missing/module"
+	input.Stderr = "go: module example.com/missing/module: git ls-remote -q origin: repository not found"
+
+	if got, ok := Best(input); ok {
+		t.Fatalf("Best() = %+v, want no sandbox diagnostic for ordinary missing repository", got)
+	}
+}
+
+func TestBestDetectsWindowsSandboxACLDenied(t *testing.T) {
+	input := windowsSandboxInput()
+	input.Error = `impl/sandbox/windows: apply writable root ACL C:\repo: current token cannot update the directory DACL: Access is denied.`
+
+	got, ok := Best(input)
+	if !ok {
+		t.Fatal("Best() ok = false, want Windows ACL diagnostic")
+	}
+	if got.Code != CodeWindowsSandboxACLDenied {
+		t.Fatalf("Code = %q, want %q", got.Code, CodeWindowsSandboxACLDenied)
+	}
+	if !got.RetryableWithHost {
+		t.Fatalf("Diagnostic = %+v, want retryable host path", got)
+	}
+}
+
+func TestBestDetectsSandboxCacheDenied(t *testing.T) {
+	input := sandboxInput()
+	input.Command = "go test ./..."
+	input.Stderr = "go: writing stat cache: open /home/test/go/pkg/mod/cache/download/private/@v/v0.tmp: read-only file system"
+
+	got, ok := Best(input)
+	if !ok {
+		t.Fatal("Best() ok = false, want cache denied diagnostic")
+	}
+	if got.Code != CodeSandboxCacheDenied {
+		t.Fatalf("Code = %q, want %q", got.Code, CodeSandboxCacheDenied)
+	}
+	if got.SuggestedSandboxPermissions != "require_escalated" {
+		t.Fatalf("Diagnostic = %+v, want escalation metadata", got)
+	}
+}
+
+func TestBestDoesNotSuggestBroadPrefixRule(t *testing.T) {
+	input := windowsSandboxInput()
+	input.Command = "python -m pip install private-package"
+	input.Stderr = "pip cache write failed: access is denied"
+
+	got, ok := Best(input)
+	if !ok {
+		t.Fatal("Best() ok = false, want cache diagnostic")
+	}
+	if got.SuggestedPrefixRule != nil {
+		t.Fatalf("SuggestedPrefixRule = %#v, want nil for broad command", got.SuggestedPrefixRule)
+	}
 }
 
 func TestBestDoesNotHintGitIndexLockWithoutPermissionEvidence(t *testing.T) {
@@ -162,4 +263,16 @@ func sandboxInput() Input {
 		Route:    sandbox.RouteSandbox,
 		Backend:  sandbox.BackendLandlock,
 	}
+}
+
+func sameStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

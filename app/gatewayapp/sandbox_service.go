@@ -253,6 +253,23 @@ func (s *Stack) PreflightSandbox(ctx context.Context, allowNonElevatedRepair boo
 	return s.SandboxStatus(), err
 }
 
+func (s *Stack) RefreshSandbox(ctx context.Context) error {
+	if s == nil {
+		return fmt.Errorf("gatewayapp: stack is unavailable")
+	}
+	s.mu.RLock()
+	exec := s.exec
+	s.mu.RUnlock()
+	if exec == nil {
+		return fmt.Errorf("gatewayapp: sandbox runtime is unavailable")
+	}
+	refresher, ok := exec.(sandbox.RefreshableRuntime)
+	if !ok {
+		return nil
+	}
+	return refresher.Refresh(ctx)
+}
+
 func (s *Stack) ResetSandbox(ctx context.Context) (SandboxStatus, error) {
 	if s == nil {
 		return SandboxStatus{}, fmt.Errorf("gatewayapp: stack is unavailable")

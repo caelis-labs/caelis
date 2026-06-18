@@ -10,12 +10,20 @@ const (
 	CodeWindowsMSYSSSHSignalPipe   = "windows_msys_ssh_signal_pipe"
 	CodeWindowsSChannelCredentials = "windows_schannel_no_credentials"
 	CodeGitIndexLockSandboxDenied  = "git_index_lock_sandbox_denied"
+	CodeWindowsGitCredential       = "windows_git_credential_sandbox_incompatible"
+	CodeGoPrivateDependency        = "go_private_dependency_sandbox_incompatible"
+	CodeSandboxCacheDenied         = "sandbox_cache_write_denied"
+	CodeWindowsSandboxACLDenied    = "windows_sandbox_acl_denied"
 )
 
 const (
 	hintWindowsMSYSSSHSignalPipe = "Git for Windows MSYS ssh appears incompatible with the Windows restricted-token sandbox. Retry with GIT_SSH_COMMAND=C:/Windows/System32/OpenSSH/ssh.exe if that binary exists; otherwise retry the same necessary network command with sandbox_permissions=require_escalated."
 	hintWindowsSChannel          = "Windows SChannel TLS can fail under the restricted-token sandbox. Prefer Python/Node/OpenSSL-backed HTTPS or native alternatives; otherwise retry the same necessary network command with sandbox_permissions=require_escalated."
 	hintGitIndexLockSandbox      = "Git index write is blocked by sandbox permissions; retry the original Git command with sandbox_permissions=require_escalated."
+	hintWindowsGitCredential     = "Git credential helpers can fail under the Windows restricted-token sandbox. Retry the same credentialed Git command with sandbox_permissions=require_escalated."
+	hintGoPrivateDependency      = "Go private dependency resolution can hit Windows sandbox TLS or credential-helper limits. Retry the same Go dependency/test command with sandbox_permissions=require_escalated."
+	hintSandboxCacheDenied       = "A sandboxed tool could not write its cache path. Retry the same necessary command with sandbox_permissions=require_escalated, or clean/reset the sandbox cache if the redirected cache is corrupt."
+	hintWindowsSandboxACLDenied  = "Windows sandbox ACL preparation failed for a required foreground path. Retry the same necessary command with sandbox_permissions=require_escalated, then run `/doctor fix` or `caelis sandbox fix` when convenient."
 )
 
 type Input struct {
@@ -31,9 +39,12 @@ type Input struct {
 }
 
 type Diagnostic struct {
-	Code     string
-	Hint     string
-	Severity string
+	Code                        string
+	Hint                        string
+	Severity                    string
+	RetryableWithHost           bool
+	SuggestedSandboxPermissions string
+	SuggestedPrefixRule         []string
 }
 
 func Best(input Input) (Diagnostic, bool) {
@@ -43,16 +54,25 @@ func Best(input Input) (Diagnostic, bool) {
 	text := diagnosticText(input)
 	lower := strings.ToLower(text)
 	if isGitIndexLockSandboxDenied(input, lower) {
-		return Diagnostic{Code: CodeGitIndexLockSandboxDenied, Hint: hintGitIndexLockSandbox, Severity: "warning"}, true
+		return hostRetryDiagnostic(input, CodeGitIndexLockSandboxDenied, hintGitIndexLockSandbox), true
+	}
+	if isSandboxCacheDenied(input, lower) {
+		return hostRetryDiagnostic(input, CodeSandboxCacheDenied, hintSandboxCacheDenied), true
 	}
 	if !isWindowsSandbox(input) {
 		return Diagnostic{}, false
 	}
 	switch {
+	case isWindowsSandboxACLSetupDenied(lower):
+		return hostRetryDiagnostic(input, CodeWindowsSandboxACLDenied, hintWindowsSandboxACLDenied), true
 	case isMSYSSSHSignalPipeFailure(lower):
-		return Diagnostic{Code: CodeWindowsMSYSSSHSignalPipe, Hint: hintWindowsMSYSSSHSignalPipe, Severity: "warning"}, true
+		return hostRetryDiagnostic(input, CodeWindowsMSYSSSHSignalPipe, hintWindowsMSYSSSHSignalPipe), true
 	case isSChannelNoCredentialsFailure(lower):
-		return Diagnostic{Code: CodeWindowsSChannelCredentials, Hint: hintWindowsSChannel, Severity: "warning"}, true
+		return hostRetryDiagnostic(input, CodeWindowsSChannelCredentials, hintWindowsSChannel), true
+	case isWindowsGitCredentialFailure(lower):
+		return hostRetryDiagnostic(input, CodeWindowsGitCredential, hintWindowsGitCredential), true
+	case isGoPrivateDependencyFailure(input, lower):
+		return hostRetryDiagnostic(input, CodeGoPrivateDependency, hintGoPrivateDependency), true
 	default:
 		return Diagnostic{}, false
 	}
@@ -165,4 +185,127 @@ func hasGitIndexLockEvidence(lower string) bool {
 		strings.Contains(lower, "unable to create") ||
 		strings.Contains(lower, "unable to create file") ||
 		strings.Contains(lower, "fatal:")
+}
+
+func hostRetryDiagnostic(input Input, code string, hint string) Diagnostic {
+	return Diagnostic{
+		Code:                        code,
+		Hint:                        hint,
+		Severity:                    "warning",
+		RetryableWithHost:           true,
+		SuggestedSandboxPermissions: "require_escalated",
+		SuggestedPrefixRule:         suggestedPrefixRule(input.Command),
+	}
+}
+
+func suggestedPrefixRule(command string) []string {
+	fields := strings.Fields(strings.TrimSpace(command))
+	if len(fields) == 0 {
+		return nil
+	}
+	first := strings.ToLower(commandBase(fields[0]))
+	switch first {
+	case "go", "go.exe":
+		if len(fields) >= 2 {
+			switch strings.ToLower(strings.Trim(fields[1], `"'`)) {
+			case "test", "mod", "list", "get", "work", "run", "build":
+				return []string{fields[0], fields[1]}
+			}
+		}
+	case "git", "git.exe":
+		if len(fields) >= 2 && isGitSubcommand(fields[1]) {
+			return []string{fields[0], fields[1]}
+		}
+	}
+	return nil
+}
+
+func isGitSubcommand(value string) bool {
+	switch strings.ToLower(strings.Trim(value, `"'`)) {
+	case "add", "clone", "fetch", "pull", "push", "submodule":
+		return true
+	default:
+		return false
+	}
+}
+
+func isWindowsSandboxACLSetupDenied(lower string) bool {
+	if !strings.Contains(lower, "impl/sandbox/windows") {
+		return false
+	}
+	if !strings.Contains(lower, "acl") && !strings.Contains(lower, "dacl") && !strings.Contains(lower, "write_dac") {
+		return false
+	}
+	return strings.Contains(lower, "access is denied") ||
+		strings.Contains(lower, "permission denied") ||
+		strings.Contains(lower, "拒绝访问")
+}
+
+func isWindowsGitCredentialFailure(lower string) bool {
+	if !strings.Contains(lower, "credential") {
+		return false
+	}
+	if !(strings.Contains(lower, "git") ||
+		strings.Contains(lower, "credential-manager") ||
+		strings.Contains(lower, "git-credential-manager") ||
+		strings.Contains(lower, "manager-core")) {
+		return false
+	}
+	return strings.Contains(lower, "access is denied") ||
+		strings.Contains(lower, "permission denied") ||
+		strings.Contains(lower, "no credentials") ||
+		strings.Contains(lower, "authentication failed") ||
+		strings.Contains(lower, "failed to")
+}
+
+func isGoPrivateDependencyFailure(input Input, lower string) bool {
+	fields := strings.Fields(strings.TrimSpace(input.Command))
+	if len(fields) == 0 || !strings.EqualFold(strings.TrimSuffix(commandBase(fields[0]), ".exe"), "go") {
+		return false
+	}
+	if !(strings.Contains(lower, "go:") || strings.Contains(lower, "module") || strings.Contains(lower, "git ls-remote")) {
+		return false
+	}
+	credentialEvidence := strings.Contains(lower, "could not read username") ||
+		strings.Contains(lower, "terminal prompts disabled") ||
+		strings.Contains(lower, "authentication failed") ||
+		strings.Contains(lower, "credential")
+	tlsEvidence := strings.Contains(lower, "schannel") ||
+		strings.Contains(lower, "sec_e_no_credentials") ||
+		strings.Contains(lower, "no credentials")
+	sandboxEvidence := sandbox.IsSandboxPermissionDeniedText(lower) ||
+		strings.Contains(lower, "access is denied") ||
+		strings.Contains(lower, "permission denied")
+	return strings.Contains(lower, "could not read username") ||
+		strings.Contains(lower, "terminal prompts disabled") ||
+		(strings.Contains(lower, "git ls-remote") && (credentialEvidence || tlsEvidence || sandboxEvidence)) ||
+		(strings.Contains(lower, "module") && (credentialEvidence || tlsEvidence))
+}
+
+func commandBase(raw string) string {
+	raw = strings.Trim(strings.TrimSpace(raw), `"'`)
+	if raw == "" {
+		return ""
+	}
+	lastSlash := strings.LastIndexAny(raw, `\/`)
+	if lastSlash >= 0 && lastSlash+1 < len(raw) {
+		raw = raw[lastSlash+1:]
+	}
+	return raw
+}
+
+func isSandboxCacheDenied(input Input, lower string) bool {
+	if !isSandbox(input) {
+		return false
+	}
+	if !(strings.Contains(lower, "cache") ||
+		strings.Contains(lower, "gocache") ||
+		strings.Contains(lower, "gomodcache") ||
+		strings.Contains(lower, "go/pkg/mod") ||
+		strings.Contains(lower, "writing stat cache")) {
+		return false
+	}
+	return sandbox.IsSandboxPermissionDeniedText(lower) ||
+		strings.Contains(lower, "read-only file system") ||
+		strings.Contains(lower, "access is denied")
 }

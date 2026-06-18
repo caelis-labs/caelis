@@ -39,9 +39,22 @@ const (
 	workspaceManifestVersion = 1
 	windowsOutputCap         = 1024 * 1024
 	windowsTerminateDrain    = 500 * time.Millisecond
+	windowsCacheMaxBytes     = 10 * 1024 * 1024 * 1024
+	windowsCacheMaxAge       = 14 * 24 * time.Hour
+	windowsPreflightTimeout  = 15 * time.Second
 )
 
-var modifyFileDACL = acl.ModifyFileDACL
+var (
+	modifyFileDACL           = acl.ModifyFileDACL
+	errBackgroundRefreshBusy = errors.New("windows sandbox background ACL refresh yielded to foreground work")
+)
+
+type ensureMode string
+
+const (
+	ensureModeForegroundCore    ensureMode = "foreground-core"
+	ensureModeBackgroundRefresh ensureMode = "background-refresh"
+)
 
 type appliedWriteGrant struct {
 	path string
@@ -71,12 +84,18 @@ type runtime struct {
 	stateRoot string
 	fs        sandbox.FileSystem
 
-	ensureMu sync.Mutex
-	setupMu  sync.RWMutex
-	mu       sync.RWMutex
-	sessions map[string]*windowsSession
+	ensureMu  sync.Mutex
+	setupMu   sync.RWMutex
+	refreshMu sync.RWMutex
+	mu        sync.RWMutex
+	sessions  map[string]*windowsSession
 
 	lastWorkspaceSetupError string
+	refreshRunning          bool
+	lastRefreshError        string
+	lastRefreshAt           time.Time
+	lastCacheCleanupAt      time.Time
+	lastCacheBytes          int64
 }
 
 func (r *runtime) Describe() sandbox.Descriptor {
@@ -131,6 +150,7 @@ func (r *runtime) Run(ctx context.Context, req sandbox.CommandRequest) (sandbox.
 		result.Error = err.Error()
 		return result, err
 	}
+	defer r.startBackgroundRefresh(context.WithoutCancel(ctx), req)
 	runCtx := ctx
 	cancel := func() {}
 	if req.Timeout > 0 {
@@ -182,6 +202,7 @@ func (r *runtime) Start(ctx context.Context, req sandbox.CommandRequest) (sandbo
 	if err != nil {
 		return nil, err
 	}
+	defer r.startBackgroundRefresh(context.WithoutCancel(ctx), req)
 	sessionID, err := newID("exec")
 	if err != nil {
 		return nil, err
@@ -329,7 +350,7 @@ func (r *runtime) Prepare(ctx context.Context) error {
 		Step:    1,
 		Total:   2,
 	})
-	_, err := r.ensureForRequest(ctx, sandbox.CommandRequest{
+	_, err := r.ensureForRequestMode(ctx, sandbox.CommandRequest{
 		Dir: r.cfg.CWD,
 		Constraints: sandbox.Constraints{
 			Route:      sandbox.RouteSandbox,
@@ -337,7 +358,7 @@ func (r *runtime) Prepare(ctx context.Context) error {
 			Permission: sandbox.PermissionWorkspaceWrite,
 			Network:    sandbox.NetworkEnabled,
 		},
-	})
+	}, ensureModeBackgroundRefresh)
 	if err != nil {
 		return err
 	}
@@ -395,10 +416,133 @@ func requiresElevatedACLRepair(err error) bool {
 }
 
 func (r *runtime) Preflight(ctx context.Context, opts sandbox.PreflightOptions) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if !opts.AllowNonElevatedRepair {
 		return nil
 	}
-	return r.Prepare(ctx)
+	refreshCtx, cancel := context.WithTimeout(ctx, windowsPreflightTimeout)
+	defer cancel()
+	return r.Refresh(refreshCtx)
+}
+
+func (r *runtime) Refresh(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if !r.beginRefresh() {
+		return nil
+	}
+	err := r.refreshForRequest(ctx, sandbox.CommandRequest{
+		Dir: r.cfg.CWD,
+		Constraints: sandbox.Constraints{
+			Route:      sandbox.RouteSandbox,
+			Backend:    sandbox.BackendWindows,
+			Permission: sandbox.PermissionWorkspaceWrite,
+			Network:    sandbox.NetworkEnabled,
+		},
+	})
+	r.finishRefresh(err)
+	return err
+}
+
+func (r *runtime) startBackgroundRefresh(ctx context.Context, req sandbox.CommandRequest) {
+	if r == nil || !r.beginRefresh() {
+		return
+	}
+	go func() {
+		refreshCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		defer cancel()
+		r.finishRefresh(r.refreshForRequest(refreshCtx, req))
+	}()
+}
+
+func (r *runtime) beginRefresh() bool {
+	r.refreshMu.Lock()
+	defer r.refreshMu.Unlock()
+	if r.refreshRunning {
+		return false
+	}
+	r.refreshRunning = true
+	return true
+}
+
+func (r *runtime) finishRefresh(err error) {
+	r.refreshMu.Lock()
+	defer r.refreshMu.Unlock()
+	r.refreshRunning = false
+	r.lastRefreshAt = time.Now().UTC()
+	if err == nil || errors.Is(err, context.Canceled) {
+		r.lastRefreshError = ""
+		return
+	}
+	r.lastRefreshError = strings.TrimSpace(err.Error())
+}
+
+func (r *runtime) refreshSnapshot() (running bool, lastErr string, lastAt time.Time, lastCacheCleanup time.Time, lastCacheBytes int64) {
+	r.refreshMu.RLock()
+	defer r.refreshMu.RUnlock()
+	return r.refreshRunning, strings.TrimSpace(r.lastRefreshError), r.lastRefreshAt, r.lastCacheCleanupAt, r.lastCacheBytes
+}
+
+func (r *runtime) refreshForRequest(ctx context.Context, req sandbox.CommandRequest) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	policy, err := r.policyForRequest(req)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(r.sandboxStateDir(), 0o700); err != nil {
+		return err
+	}
+	manifest, manifestErr := r.readManifest()
+	if manifestErr == nil && manifestCoversPolicy(manifest, policy, true) {
+		missing, err := r.missingACLEntries(policy)
+		if err == nil && len(missing) == 0 {
+			return r.cleanupSandboxCaches(ctx, policy.SandboxEnvRoot)
+		}
+	}
+	if manifestErr == nil {
+		if !r.tryCleanupStaleManifestACLs(ctx, manifest, policy) {
+			return r.cleanupSandboxCaches(ctx, policy.SandboxEnvRoot)
+		}
+	}
+	appliedPolicy, complete, aclErr := r.applyPolicyACLsInterruptible(ctx, policy)
+	if complete && aclErr == nil {
+		if !r.tryWriteManifest(ctx, appliedPolicy) {
+			return r.cleanupSandboxCaches(ctx, policy.SandboxEnvRoot)
+		}
+	}
+	cacheErr := r.cleanupSandboxCaches(ctx, policy.SandboxEnvRoot)
+	return errors.Join(aclErr, cacheErr)
+}
+
+func (r *runtime) tryCleanupStaleManifestACLs(ctx context.Context, manifest workspaceManifest, policy workspacePolicy) bool {
+	if err := ctx.Err(); err != nil {
+		return false
+	}
+	if !r.ensureMu.TryLock() {
+		return false
+	}
+	defer r.ensureMu.Unlock()
+	r.cleanupStaleManifestACLs(manifest, policy)
+	return true
+}
+
+func (r *runtime) tryWriteManifest(ctx context.Context, policy workspacePolicy) bool {
+	if err := ctx.Err(); err != nil {
+		return false
+	}
+	if !r.ensureMu.TryLock() {
+		return false
+	}
+	defer r.ensureMu.Unlock()
+	return r.writeManifest(policy) == nil
 }
 
 func (r *runtime) Reset(ctx context.Context) error {
@@ -603,10 +747,14 @@ type manifestACE struct {
 }
 
 func (r *runtime) ensureForRequest(ctx context.Context, req sandbox.CommandRequest) (workspacePolicy, error) {
+	return r.ensureForRequestMode(ctx, req, ensureModeForegroundCore)
+}
+
+func (r *runtime) ensureForRequestMode(ctx context.Context, req sandbox.CommandRequest, mode ensureMode) (workspacePolicy, error) {
 	if err := ctx.Err(); err != nil {
 		return workspacePolicy{}, err
 	}
-	policy, err := r.policyForRequest(req)
+	policy, err := r.policyForRequestMode(req, mode)
 	if err != nil {
 		r.recordWorkspaceSetupError(err)
 		return workspacePolicy{}, err
@@ -618,17 +766,23 @@ func (r *runtime) ensureForRequest(ctx context.Context, req sandbox.CommandReque
 		return workspacePolicy{}, err
 	}
 	manifest, manifestErr := r.readManifest()
-	if manifestErr == nil && manifestFresh(manifest, policy) {
+	if manifestErr == nil && manifestCoversPolicy(manifest, policy, false) {
+		if !manifestCoversPolicy(manifest, policy, true) {
+			r.cleanupStaleManifestDenyACLs(manifest, policy)
+		}
 		missing, err := r.missingACLEntries(policy)
 		if err == nil && len(missing) == 0 {
 			r.clearWorkspaceSetupError()
 			return policy, nil
 		}
 	}
-	if manifestErr == nil {
+	if manifestErr == nil && mode == ensureModeBackgroundRefresh {
 		r.cleanupStaleManifestACLs(manifest, policy)
 	}
-	policy = r.applyPolicyACLsBestEffort(policy)
+	if err := r.applyPolicyACLs(policy); err != nil {
+		r.recordWorkspaceSetupError(err)
+		return policy, err
+	}
 	if err := r.writeManifest(policy); err != nil {
 		r.recordWorkspaceSetupError(err)
 		return policy, err
@@ -638,14 +792,22 @@ func (r *runtime) ensureForRequest(ctx context.Context, req sandbox.CommandReque
 }
 
 func (r *runtime) policyForRequest(req sandbox.CommandRequest) (workspacePolicy, error) {
-	return r.policyForRequestWithBinding(req, true)
+	return r.policyForRequestMode(req, ensureModeBackgroundRefresh)
+}
+
+func (r *runtime) foregroundPolicyForRequest(req sandbox.CommandRequest) (workspacePolicy, error) {
+	return r.policyForRequestMode(req, ensureModeForegroundCore)
+}
+
+func (r *runtime) policyForRequestMode(req sandbox.CommandRequest, mode ensureMode) (workspacePolicy, error) {
+	return r.policyForRequestWithBinding(req, true, mode)
 }
 
 func (r *runtime) inspectPolicyForRequest(req sandbox.CommandRequest) (workspacePolicy, error) {
-	return r.policyForRequestWithBinding(req, false)
+	return r.policyForRequestWithBinding(req, false, ensureModeBackgroundRefresh)
 }
 
-func (r *runtime) policyForRequestWithBinding(req sandbox.CommandRequest, createSIDs bool) (workspacePolicy, error) {
+func (r *runtime) policyForRequestWithBinding(req sandbox.CommandRequest, createSIDs bool, mode ensureMode) (workspacePolicy, error) {
 	constraints := sandbox.EffectiveConstraints(req)
 	constraints.Network = effectiveWindowsSandboxNetwork(constraints.Network)
 	if constraints.Permission == "" || constraints.Permission == sandbox.PermissionDefault {
@@ -663,10 +825,15 @@ func (r *runtime) policyForRequestWithBinding(req sandbox.CommandRequest, create
 	if err != nil {
 		return workspacePolicy{}, err
 	}
-	userWriteRoots := []string{workspaceRoot, commandDir}
+	coreUserWriteRoots := []string{workspaceRoot, commandDir}
+	fullUserWriteRoots := append([]string(nil), coreUserWriteRoots...)
+	commandSpecificWriteRoots := []string{}
 	for _, root := range r.cfg.WritableRoots {
 		if normalized, err := pathutil.NormalizeWithBase(workspaceRoot, root); err == nil && normalized != "" {
-			userWriteRoots = append(userWriteRoots, normalized)
+			fullUserWriteRoots = append(fullUserWriteRoots, normalized)
+			if pathutil.IsUnder(commandDir, normalized) || pathutil.IsUnder(normalized, commandDir) {
+				coreUserWriteRoots = append(coreUserWriteRoots, normalized)
+			}
 		}
 	}
 	for _, rule := range constraints.PathRules {
@@ -674,10 +841,16 @@ func (r *runtime) policyForRequestWithBinding(req sandbox.CommandRequest, create
 			continue
 		}
 		if normalized, err := pathutil.NormalizeWithBase(commandDir, rule.Path); err == nil && normalized != "" {
-			userWriteRoots = append(userWriteRoots, normalized)
+			fullUserWriteRoots = append(fullUserWriteRoots, normalized)
+			commandSpecificWriteRoots = append(commandSpecificWriteRoots, normalized)
 		}
 	}
-	userWriteRoots = pathutil.Dedupe(userWriteRoots)
+	fullUserWriteRoots = pathutil.Dedupe(fullUserWriteRoots)
+	coreUserWriteRoots = pathutil.Dedupe(append(coreUserWriteRoots, commandSpecificWriteRoots...))
+	userWriteRoots := fullUserWriteRoots
+	if mode == ensureModeForegroundCore {
+		userWriteRoots = coreUserWriteRoots
+	}
 	envRoot, err := r.prepareSandboxEnvRoot(workspaceRoot, createSIDs)
 	if err != nil {
 		return workspacePolicy{}, err
@@ -958,7 +1131,7 @@ func (r *runtime) applyPolicyACLs(policy workspacePolicy) error {
 		if !info.IsDir() {
 			return fmt.Errorf("impl/sandbox/windows: writable root %s is not a directory", root)
 		}
-		if err := modifyFileDACL(root, allowEntries(policy.sidForWriteRoot(root))...); err != nil {
+		if err := ensureFileDACLEntries(root, allowEntries(policy.sidForWriteRoot(root))...); err != nil {
 			return fmt.Errorf("impl/sandbox/windows: apply writable root ACL %s: %w", root, diagnoseACLWriteFailure(root, err))
 		}
 	}
@@ -978,7 +1151,7 @@ func (r *runtime) applyPolicyACLs(policy workspacePolicy) error {
 			if !info.IsDir() {
 				return fmt.Errorf("impl/sandbox/windows: sandbox environment path %s is not a directory", path)
 			}
-			if err := modifyFileDACL(path, allowEntries(envSID)...); err != nil {
+			if err := ensureFileDACLEntries(path, allowEntries(envSID)...); err != nil {
 				return fmt.Errorf("impl/sandbox/windows: apply sandbox environment ACL %s: %w", path, diagnoseACLWriteFailure(path, err))
 			}
 		}
@@ -990,22 +1163,32 @@ func (r *runtime) applyPolicyACLs(policy workspacePolicy) error {
 			}
 			return fmt.Errorf("impl/sandbox/windows: inspect deny-write path %s: %w", path, err)
 		}
-		if err := modifyFileDACL(path, denyEntries(policy.CapabilitySIDs)...); err != nil {
+		if err := ensureFileDACLEntries(path, denyEntries(policy.CapabilitySIDs)...); err != nil {
 			return fmt.Errorf("impl/sandbox/windows: apply deny-write ACL %s: %w", path, diagnoseACLWriteFailure(path, err))
 		}
 	}
 	return nil
 }
 
-func (r *runtime) applyPolicyACLsBestEffort(policy workspacePolicy) workspacePolicy {
+func (r *runtime) applyPolicyACLsInterruptible(ctx context.Context, policy workspacePolicy) (workspacePolicy, bool, error) {
 	keptRoots := make([]string, 0, len(policy.WriteRoots))
 	failedDenyPaths := make([]string, 0, len(policy.DenyWritePaths))
 	appliedGrants := make([]appliedWriteGrant, 0, len(policy.WriteRoots)+len(sandboxEnvDirs(policy.SandboxEnvRoot)))
+	var errs []error
 	for _, root := range policy.WriteRoots {
 		sid := policy.sidForWriteRoot(root)
-		if r.applyWritableRootACL(root, sid) {
+		ok, err := r.tryApplyWritableRootACL(ctx, root, sid)
+		if errors.Is(err, errBackgroundRefreshBusy) {
+			return policy, false, errors.Join(errs...)
+		}
+		if err != nil {
+			errs = append(errs, err)
+		}
+		if ok {
 			keptRoots = append(keptRoots, root)
 			appliedGrants = append(appliedGrants, appliedWriteGrant{path: root, sid: sid})
+		} else if ctx.Err() != nil {
+			return policy, false, errors.Join(append(errs, ctx.Err())...)
 		}
 	}
 	for _, path := range sandboxEnvDirs(policy.SandboxEnvRoot) {
@@ -1013,44 +1196,120 @@ func (r *runtime) applyPolicyACLsBestEffort(policy workspacePolicy) workspacePol
 			continue
 		}
 		sid := policy.sidForWriteRoot(policy.SandboxEnvRoot)
-		if r.applyWritableRootACL(path, sid) {
+		ok, err := r.tryApplyWritableRootACL(ctx, path, sid)
+		if errors.Is(err, errBackgroundRefreshBusy) {
+			return policy, false, errors.Join(errs...)
+		}
+		if err != nil {
+			errs = append(errs, err)
+		}
+		if ok {
 			appliedGrants = append(appliedGrants, appliedWriteGrant{path: path, sid: sid})
+		} else if ctx.Err() != nil {
+			return policy, false, errors.Join(append(errs, ctx.Err())...)
 		}
 	}
 	for _, path := range policy.DenyWritePaths {
-		if r.applyDenyWriteACL(path, policy.CapabilitySIDs) {
+		ok, err := r.tryApplyDenyWriteACL(ctx, path, policy.CapabilitySIDs)
+		if errors.Is(err, errBackgroundRefreshBusy) {
+			return policy, false, errors.Join(errs...)
+		}
+		if err != nil {
+			errs = append(errs, err)
+		}
+		if ok {
 			continue
+		}
+		if ctx.Err() != nil {
+			return policy, false, errors.Join(append(errs, ctx.Err())...)
 		}
 		failedDenyPaths = append(failedDenyPaths, path)
 	}
 	if len(failedDenyPaths) > 0 {
-		revokeWriteGrantsCovering(appliedGrants, failedDenyPaths)
+		if !r.tryRevokeWriteGrantsCovering(ctx, appliedGrants, failedDenyPaths) {
+			return policy, false, errors.Join(errs...)
+		}
 		keptRoots = removeWriteRootsCovering(keptRoots, failedDenyPaths)
 	}
-	return policy.withWriteRoots(keptRoots)
+	return policy.withWriteRoots(keptRoots), true, errors.Join(errs...)
 }
 
-func (r *runtime) applyWritableRootACL(root string, sid string) bool {
+func (r *runtime) tryApplyWritableRootACL(ctx context.Context, root string, sid string) (bool, error) {
 	root = strings.TrimSpace(root)
 	if root == "" || strings.TrimSpace(sid) == "" {
-		return false
+		return false, nil
 	}
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if !r.ensureMu.TryLock() {
+		return false, errBackgroundRefreshBusy
+	}
+	defer r.ensureMu.Unlock()
 	info, err := os.Stat(root)
-	if err != nil || !info.IsDir() {
-		return false
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("impl/sandbox/windows: inspect writable root %s: %w", root, err)
 	}
-	return modifyFileDACL(root, allowEntries(sid)...) == nil
+	if !info.IsDir() {
+		return false, fmt.Errorf("impl/sandbox/windows: writable root %s is not a directory", root)
+	}
+	if err := ensureFileDACLEntries(root, allowEntries(sid)...); err != nil {
+		return false, fmt.Errorf("impl/sandbox/windows: apply writable root ACL %s: %w", root, diagnoseACLWriteFailure(root, err))
+	}
+	return true, nil
 }
 
-func (r *runtime) applyDenyWriteACL(path string, sids []string) bool {
+func (r *runtime) tryApplyDenyWriteACL(ctx context.Context, path string, sids []string) (bool, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
+		return true, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if !r.ensureMu.TryLock() {
+		return false, errBackgroundRefreshBusy
+	}
+	defer r.ensureMu.Unlock()
+	if _, err := os.Stat(path); err != nil {
+		if os.IsNotExist(err) {
+			return true, nil
+		}
+		return false, fmt.Errorf("impl/sandbox/windows: inspect deny-write path %s: %w", path, err)
+	}
+	if err := ensureFileDACLEntries(path, denyEntries(sids)...); err != nil {
+		return false, fmt.Errorf("impl/sandbox/windows: apply deny-write ACL %s: %w", path, diagnoseACLWriteFailure(path, err))
+	}
+	return true, nil
+}
+
+func (r *runtime) tryRevokeWriteGrantsCovering(ctx context.Context, grants []appliedWriteGrant, blocked []string) bool {
+	if len(grants) == 0 || len(blocked) == 0 {
 		return true
 	}
-	if _, err := os.Stat(path); err != nil {
-		return os.IsNotExist(err)
+	if ctx.Err() != nil {
+		return false
 	}
-	return modifyFileDACL(path, denyEntries(sids)...) == nil
+	if !r.ensureMu.TryLock() {
+		return false
+	}
+	defer r.ensureMu.Unlock()
+	revokeWriteGrantsCovering(grants, blocked)
+	return true
+}
+
+func ensureFileDACLEntries(path string, entries ...acl.Entry) error {
+	if len(entries) == 0 {
+		return nil
+	}
+	missing, err := acl.MissingFileDACLEntries(path, entries...)
+	if err == nil && len(missing) == 0 {
+		return nil
+	}
+	return modifyFileDACL(path, entries...)
 }
 
 func revokeWriteGrantsCovering(grants []appliedWriteGrant, blocked []string) {
@@ -1297,6 +1556,46 @@ func manifestFresh(manifest workspaceManifest, policy workspacePolicy) bool {
 	return sameRootSIDMap(manifest.WriteRootCapabilitySIDs, policy.WriteRootCapabilitySIDs)
 }
 
+func manifestSatisfiesPolicy(manifest workspaceManifest, policy workspacePolicy) bool {
+	return manifestCoversPolicy(manifest, policy, false)
+}
+
+func manifestCoversPolicy(manifest workspaceManifest, policy workspacePolicy, requireExact bool) bool {
+	if manifestFresh(manifest, policy) {
+		return true
+	}
+	if requireExact {
+		return false
+	}
+	if manifest.Version != workspaceManifestVersion {
+		return false
+	}
+	if pathutil.Key(manifest.WorkspaceRoot) != pathutil.Key(policy.WorkspaceRoot) {
+		return false
+	}
+	if pathutil.Key(manifest.SandboxEnvRoot) != pathutil.Key(policy.SandboxEnvRoot) {
+		return false
+	}
+	if !pathSetContainsAll(manifest.WriteRoots, policy.WriteRoots) ||
+		!pathSetContainsAll(manifest.DenyWritePaths, policy.DenyWritePaths) {
+		return false
+	}
+	for _, sid := range policy.CapabilitySIDs {
+		if !stringSetContains(manifest.CapabilitySIDs, sid) {
+			return false
+		}
+	}
+	for root, sid := range policy.WriteRootCapabilitySIDs {
+		if strings.TrimSpace(sid) == "" {
+			continue
+		}
+		if !strings.EqualFold(strings.TrimSpace(manifest.WriteRootCapabilitySIDs[pathutil.Normalize(root)]), strings.TrimSpace(sid)) {
+			return false
+		}
+	}
+	return true
+}
+
 func manifestACEs(policy workspacePolicy) []manifestACE {
 	var out []manifestACE
 	for _, root := range policy.WriteRoots {
@@ -1323,12 +1622,28 @@ func manifestACEs(policy workspacePolicy) []manifestACE {
 }
 
 func (r *runtime) cleanupStaleManifestACLs(manifest workspaceManifest, policy workspacePolicy) {
-	currentPaths := map[string]struct{}{}
+	r.cleanupStaleManifestACLsMatching(manifest, policy, func(manifestACE) bool { return true })
+}
+
+func (r *runtime) cleanupStaleManifestDenyACLs(manifest workspaceManifest, policy workspacePolicy) {
+	r.cleanupStaleManifestACLsMatching(manifest, policy, func(ace manifestACE) bool {
+		return strings.EqualFold(strings.TrimSpace(ace.Mode), string(acl.Deny))
+	})
+}
+
+func (r *runtime) cleanupStaleManifestACLsMatching(manifest workspaceManifest, policy workspacePolicy, include func(manifestACE) bool) {
+	currentGrantPaths := map[string]struct{}{}
 	grantPaths := append([]string{}, policy.WriteRoots...)
 	grantPaths = append(grantPaths, sandboxEnvDirs(policy.SandboxEnvRoot)...)
-	for _, path := range append(grantPaths, policy.DenyWritePaths...) {
+	for _, path := range grantPaths {
 		if key := pathutil.Key(path); key != "" {
-			currentPaths[key] = struct{}{}
+			currentGrantPaths[key] = struct{}{}
+		}
+	}
+	currentDenyPaths := map[string]struct{}{}
+	for _, path := range policy.DenyWritePaths {
+		if key := pathutil.Key(path); key != "" {
+			currentDenyPaths[key] = struct{}{}
 		}
 	}
 	currentSIDs := map[string]struct{}{}
@@ -1336,19 +1651,44 @@ func (r *runtime) cleanupStaleManifestACLs(manifest workspaceManifest, policy wo
 		currentSIDs[strings.ToUpper(strings.TrimSpace(sid))] = struct{}{}
 	}
 	for _, ace := range manifest.ACEs {
+		if include != nil && !include(ace) {
+			continue
+		}
 		path := strings.TrimSpace(ace.Path)
 		sid := strings.TrimSpace(ace.Principal)
 		if path == "" || sid == "" {
 			continue
 		}
-		if _, pathCurrent := currentPaths[pathutil.Key(path)]; pathCurrent {
-			if _, sidCurrent := currentSIDs[strings.ToUpper(sid)]; sidCurrent {
-				continue
-			}
+		if manifestACEStillCurrent(ace, currentGrantPaths, currentDenyPaths, currentSIDs) {
+			continue
 		}
 		if _, err := os.Stat(path); err == nil {
 			_ = acl.RemoveFileDACLPrincipals(path, sid)
 		}
+	}
+}
+
+func manifestACEStillCurrent(ace manifestACE, currentGrantPaths map[string]struct{}, currentDenyPaths map[string]struct{}, currentSIDs map[string]struct{}) bool {
+	sid := strings.ToUpper(strings.TrimSpace(ace.Principal))
+	if sid == "" {
+		return false
+	}
+	if _, ok := currentSIDs[sid]; !ok {
+		return false
+	}
+	pathKey := pathutil.Key(ace.Path)
+	if pathKey == "" {
+		return false
+	}
+	switch {
+	case strings.EqualFold(strings.TrimSpace(ace.Mode), string(acl.Grant)):
+		_, ok := currentGrantPaths[pathKey]
+		return ok
+	case strings.EqualFold(strings.TrimSpace(ace.Mode), string(acl.Deny)):
+		_, ok := currentDenyPaths[pathKey]
+		return ok
+	default:
+		return false
 	}
 }
 
@@ -1379,6 +1719,23 @@ func (r *runtime) workspaceSetupCheck() (check sandbox.SetupCheck) {
 	}
 	check.Root = policy.WorkspaceRoot
 	check.Details = map[string]string{"policy_hash": policy.PolicyHash}
+	refreshRunning, refreshErr, refreshAt, cacheCleanupAt, cacheBytes := r.refreshSnapshot()
+	check.Details["refresh_state"] = "idle"
+	if refreshRunning {
+		check.Details["refresh_state"] = "running"
+	}
+	if refreshErr != "" {
+		check.Details["refresh_error"] = refreshErr
+	}
+	if !refreshAt.IsZero() {
+		check.Details["last_refresh_at"] = refreshAt.Format(time.RFC3339)
+	}
+	if !cacheCleanupAt.IsZero() {
+		check.Details["last_cache_cleanup_at"] = cacheCleanupAt.Format(time.RFC3339)
+	}
+	if cacheBytes > 0 {
+		check.Details["sandbox_cache_bytes"] = fmt.Sprint(cacheBytes)
+	}
 	check.Counts = map[string]int{
 		"write_roots": len(policy.WriteRoots),
 		"deny_write":  len(policy.DenyWritePaths),
@@ -1533,6 +1890,144 @@ func (r *runtime) sandboxEnvRoot(workspaceRoot string) string {
 	}
 	sum := sha256.Sum256([]byte(pathutil.Key(workspace)))
 	return filepath.Join(r.sandboxEnvBase(), hex.EncodeToString(sum[:])[:16])
+}
+
+type sandboxEnvCacheEntry struct {
+	path    string
+	modTime time.Time
+	size    int64
+}
+
+func (r *runtime) cleanupSandboxCaches(ctx context.Context, activeEnvRoot string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	base := r.sandboxEnvBase()
+	entries, total, err := sandboxEnvCacheEntries(ctx, base)
+	if err != nil {
+		if os.IsNotExist(err) {
+			r.recordCacheCleanup(time.Now().UTC(), 0)
+			return nil
+		}
+		return err
+	}
+	activeKey := pathutil.Key(activeEnvRoot)
+	now := time.Now().UTC()
+	var errs []error
+	removed := map[string]struct{}{}
+	for _, entry := range entries {
+		if activeKey != "" && pathutil.Key(entry.path) == activeKey {
+			continue
+		}
+		if now.Sub(entry.modTime) <= windowsCacheMaxAge {
+			continue
+		}
+		if err := ctx.Err(); err != nil {
+			return errors.Join(append(errs, err)...)
+		}
+		if err := os.RemoveAll(entry.path); err != nil {
+			errs = append(errs, fmt.Errorf("impl/sandbox/windows: clean sandbox cache %s: %w", entry.path, err))
+			continue
+		}
+		total -= entry.size
+		removed[pathutil.Key(entry.path)] = struct{}{}
+	}
+	if total > windowsCacheMaxBytes {
+		sort.Slice(entries, func(i, j int) bool {
+			return entries[i].modTime.Before(entries[j].modTime)
+		})
+		for _, entry := range entries {
+			if total <= windowsCacheMaxBytes {
+				break
+			}
+			key := pathutil.Key(entry.path)
+			if key == "" {
+				continue
+			}
+			if activeKey != "" && key == activeKey {
+				continue
+			}
+			if _, ok := removed[key]; ok {
+				continue
+			}
+			if err := ctx.Err(); err != nil {
+				return errors.Join(append(errs, err)...)
+			}
+			if err := os.RemoveAll(entry.path); err != nil {
+				errs = append(errs, fmt.Errorf("impl/sandbox/windows: clean sandbox cache %s: %w", entry.path, err))
+				continue
+			}
+			total -= entry.size
+			removed[key] = struct{}{}
+		}
+	}
+	if total < 0 {
+		total = 0
+	}
+	r.recordCacheCleanup(now, total)
+	return errors.Join(errs...)
+}
+
+func sandboxEnvCacheEntries(ctx context.Context, base string) ([]sandboxEnvCacheEntry, int64, error) {
+	base = pathutil.Normalize(base)
+	if base == "" {
+		return nil, 0, nil
+	}
+	items, err := os.ReadDir(base)
+	if err != nil {
+		return nil, 0, err
+	}
+	entries := make([]sandboxEnvCacheEntry, 0, len(items))
+	var total int64
+	for _, item := range items {
+		if err := ctx.Err(); err != nil {
+			return nil, total, err
+		}
+		if !item.IsDir() {
+			continue
+		}
+		path := filepath.Join(base, item.Name())
+		info, err := item.Info()
+		if err != nil {
+			return nil, total, err
+		}
+		size, err := directorySize(ctx, path)
+		if err != nil {
+			return nil, total, err
+		}
+		entries = append(entries, sandboxEnvCacheEntry{path: path, modTime: info.ModTime(), size: size})
+		total += size
+	}
+	return entries, total, nil
+}
+
+func directorySize(ctx context.Context, root string) (int64, error) {
+	var total int64
+	err := filepath.WalkDir(root, func(_ string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+		if d.IsDir() {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		total += info.Size()
+		return nil
+	})
+	return total, err
+}
+
+func (r *runtime) recordCacheCleanup(at time.Time, bytes int64) {
+	r.refreshMu.Lock()
+	defer r.refreshMu.Unlock()
+	r.lastCacheCleanupAt = at
+	r.lastCacheBytes = bytes
 }
 
 func (r *runtime) legacyWorkspaceSandboxEnvRoot() string {
@@ -1886,6 +2381,7 @@ func sandboxEnvironment(policy workspacePolicy, extra map[string]string) ([]stri
 			return nil, fmt.Errorf("impl/sandbox/windows: prepare sandbox environment directory %s: %w", dir, err)
 		}
 	}
+	touchSandboxEnvRoot(envRoot)
 	if err := writeSandboxPythonSiteCustomize(pythonSiteDir); err != nil {
 		return nil, err
 	}
@@ -1925,6 +2421,15 @@ func sandboxEnvironment(policy workspacePolicy, extra map[string]string) ([]stri
 		forced["PATHEXT"] = `.COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC`
 	}
 	return mergeEnv(extra, forced), nil
+}
+
+func touchSandboxEnvRoot(envRoot string) {
+	envRoot = strings.TrimSpace(envRoot)
+	if envRoot == "" {
+		return
+	}
+	now := time.Now()
+	_ = os.Chtimes(envRoot, now, now)
 }
 
 func hostUserSkillsDir() string {
@@ -2103,8 +2608,30 @@ func pathListContains(paths []string, want string) bool {
 	return false
 }
 
+func pathSetContainsAll(haystack, needles []string) bool {
+	for _, needle := range pathutil.Dedupe(needles) {
+		if !pathListContains(haystack, needle) {
+			return false
+		}
+	}
+	return true
+}
+
 func sameStringSet(a, b []string) bool {
 	return slices.Equal(dedupeStrings(a), dedupeStrings(b))
+}
+
+func stringSetContains(values []string, want string) bool {
+	want = strings.TrimSpace(want)
+	if want == "" {
+		return false
+	}
+	for _, value := range values {
+		if strings.EqualFold(strings.TrimSpace(value), want) {
+			return true
+		}
+	}
+	return false
 }
 
 func sameRootSIDMap(a, b map[string]string) bool {

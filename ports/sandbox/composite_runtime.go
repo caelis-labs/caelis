@@ -142,6 +142,17 @@ func (r *compositeRuntime) Preflight(ctx context.Context, opts PreflightOptions)
 	return preflight.Preflight(ctx, opts)
 }
 
+func (r *compositeRuntime) Refresh(ctx context.Context) error {
+	if r == nil || r.sandbox == nil {
+		return nil
+	}
+	refresher, ok := r.sandbox.(RefreshableRuntime)
+	if !ok {
+		return nil
+	}
+	return refresher.Refresh(ctx)
+}
+
 func (r *compositeRuntime) Reset(ctx context.Context) error {
 	if r == nil || r.sandbox == nil {
 		return nil
