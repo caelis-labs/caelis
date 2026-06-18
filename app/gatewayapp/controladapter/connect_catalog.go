@@ -97,13 +97,13 @@ func completeConnectArgs(ctx context.Context, driver *Adapter, command string, q
 	case strings.HasPrefix(command, "connect-apikey:"):
 		return nil, nil
 	case strings.HasPrefix(command, "connect-model:"):
-		return completeConnectModels(ctx, driver, controlcommands.ParseConnectWizardPayload(strings.TrimPrefix(command, "connect-model:")), query, limit)
+		return completeConnectModels(ctx, driver, controlcommands.ParseConnectWizardStatePayload(strings.TrimPrefix(command, "connect-model:")), query, limit)
 	case strings.HasPrefix(command, "connect-context:"):
-		return completeConnectContext(ctx, driver, controlcommands.ParseConnectWizardPayload(strings.TrimPrefix(command, "connect-context:")), query, limit)
+		return completeConnectContext(ctx, driver, controlcommands.ParseConnectWizardStatePayload(strings.TrimPrefix(command, "connect-context:")), query, limit)
 	case strings.HasPrefix(command, "connect-maxout:"):
-		return completeConnectMaxOutput(ctx, driver, controlcommands.ParseConnectWizardPayload(strings.TrimPrefix(command, "connect-maxout:")), query, limit)
+		return completeConnectMaxOutput(ctx, driver, controlcommands.ParseConnectWizardStatePayload(strings.TrimPrefix(command, "connect-maxout:")), query, limit)
 	case strings.HasPrefix(command, "connect-reasoning-levels:"):
-		return completeConnectReasoningLevels(ctx, driver, controlcommands.ParseConnectWizardPayload(strings.TrimPrefix(command, "connect-reasoning-levels:")), query, limit)
+		return completeConnectReasoningLevels(ctx, driver, controlcommands.ParseConnectWizardStatePayload(strings.TrimPrefix(command, "connect-reasoning-levels:")), query, limit)
 	default:
 		return nil, nil
 	}

@@ -22,6 +22,10 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/tool"
 )
 
+func ptrModelMessage(message model.Message) *model.Message {
+	return &message
+}
+
 func TestSlashSideSubagentReceivesSharedContextAndPublishesPublicDialogue(t *testing.T) {
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
@@ -680,14 +684,8 @@ func TestSubagentStreamsExposeSemanticAssistantEventText(t *testing.T) {
 		Running: true,
 		State:   string(delegation.StateRunning),
 		Event: &session.Event{
-			Type: session.EventTypeAssistant,
-			AssistantMessage: &session.EventMessagePayload{
-				Role: "assistant",
-				Parts: []session.EventPart{{
-					Kind: "text",
-					Text: "child output\n",
-				}},
-			},
+			Type:    session.EventTypeAssistant,
+			Message: ptrModelMessage(model.NewTextMessage(model.RoleAssistant, "child output\n")),
 		},
 	})
 
@@ -725,14 +723,8 @@ func TestSubagentStreamsDoNotExposeSemanticReasoningAsParentOutput(t *testing.T)
 		Running: true,
 		State:   string(delegation.StateRunning),
 		Event: &session.Event{
-			Type: session.EventTypeAssistant,
-			AssistantMessage: &session.EventMessagePayload{
-				Role: "assistant",
-				Parts: []session.EventPart{{
-					Kind:      "reasoning",
-					Reasoning: &session.EventReasoningPart{Text: "private thought"},
-				}},
-			},
+			Type:    session.EventTypeAssistant,
+			Message: ptrModelMessage(model.NewReasoningMessage(model.RoleAssistant, "private thought", model.ReasoningVisibilityVisible)),
 		},
 	})
 

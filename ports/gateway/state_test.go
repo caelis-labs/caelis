@@ -11,9 +11,8 @@ func TestCurrentSessionModeNormalizesCompatibilityValues(t *testing.T) {
 		want  string
 	}{
 		{name: "empty defaults to auto-review", state: map[string]any{}, want: string(ApprovalModeAutoReview)},
-		{name: "legacy session mode alias normalizes", state: map[string]any{StateCurrentSessionMode: "auto_review"}, want: string(ApprovalModeAutoReview)},
-		{name: "approval mode key wins", state: map[string]any{StateCurrentSessionMode: "manual", StateCurrentApprovalMode: "auto_review"}, want: string(ApprovalModeAutoReview)},
-		{name: "unknown explicit mode defaults to auto-review", state: map[string]any{StateCurrentSessionMode: "unknown"}, want: string(ApprovalModeAutoReview)},
+		{name: "approval mode key normalizes", state: map[string]any{StateCurrentApprovalMode: "auto_review"}, want: string(ApprovalModeAutoReview)},
+		{name: "unknown explicit mode defaults to auto-review", state: map[string]any{StateCurrentApprovalMode: "unknown"}, want: string(ApprovalModeAutoReview)},
 	}
 	for _, tt := range tests {
 		tt := tt
@@ -45,6 +44,30 @@ func TestCurrentSessionModeOrDefaultNormalizesFallback(t *testing.T) {
 			t.Parallel()
 			if got := CurrentSessionModeOrDefault(tt.state, tt.fallback); got != tt.want {
 				t.Fatalf("CurrentSessionModeOrDefault(%#v, %q) = %q, want %q", tt.state, tt.fallback, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestUnsupportedLegacyStateKey(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		state map[string]any
+		want  string
+	}{
+		{name: "none", state: map[string]any{StateCurrentApprovalMode: "manual"}, want: ""},
+		{name: "legacy session mode", state: map[string]any{"gateway.current_session_mode": "manual"}, want: "gateway.current_session_mode"},
+		{name: "legacy sandbox mode", state: map[string]any{"gateway.current_sandbox_mode": "workspace-write"}, want: "gateway.current_sandbox_mode"},
+		{name: "empty legacy value ignored", state: map[string]any{"gateway.current_session_mode": " "}, want: ""},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := UnsupportedLegacyStateKey(tt.state); got != tt.want {
+				t.Fatalf("UnsupportedLegacyStateKey(%#v) = %q, want %q", tt.state, got, tt.want)
 			}
 		})
 	}

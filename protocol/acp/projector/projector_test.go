@@ -184,15 +184,15 @@ func TestEventProjectorUsesDurableProtocolUpdateForTerminalToolCall(t *testing.T
 	}
 }
 
-func TestEventProjectorProjectsSemanticMessagePayloads(t *testing.T) {
+func TestEventProjectorProjectsCanonicalMessages(t *testing.T) {
 	userMessage := model.NewTextMessage(model.RoleUser, "hello")
 	userEvent := session.CanonicalizeEvent(&session.Event{
 		SessionID: "session-1",
 		Type:      session.EventTypeUser,
 		Message:   &userMessage,
 	})
-	if userEvent.UserMessage == nil || userEvent.Message != nil {
-		t.Fatalf("canonical user event = %#v, want semantic payload only", userEvent)
+	if userEvent.Message == nil {
+		t.Fatalf("canonical user event = %#v, want durable message", userEvent)
 	}
 	userUpdates, err := (EventProjector{}).ProjectEvent(userEvent)
 	if err != nil {
@@ -215,8 +215,8 @@ func TestEventProjectorProjectsSemanticMessagePayloads(t *testing.T) {
 		Type:      session.EventTypeAssistant,
 		Message:   &assistantMessage,
 	})
-	if assistantEvent.AssistantMessage == nil || assistantEvent.Message != nil {
-		t.Fatalf("canonical assistant event = %#v, want semantic payload only", assistantEvent)
+	if assistantEvent.Message == nil {
+		t.Fatalf("canonical assistant event = %#v, want durable message", assistantEvent)
 	}
 	assistantUpdates, err := (EventProjector{}).ProjectEvent(assistantEvent)
 	if err != nil {
@@ -272,7 +272,7 @@ func TestEventProjectorProjectsSemanticMessagePayloads(t *testing.T) {
 	}
 }
 
-func TestEventProjectorProjectsSemanticToolPayloads(t *testing.T) {
+func TestEventProjectorProjectsCanonicalToolPayloads(t *testing.T) {
 	assistantMessage := model.MessageFromAssistantParts("I will run it.", "Need output first.", []model.ToolCall{{
 		ID:   "call-1",
 		Name: "RUN_COMMAND",
@@ -282,9 +282,21 @@ func TestEventProjectorProjectsSemanticToolPayloads(t *testing.T) {
 		SessionID: "session-1",
 		Type:      session.EventTypeToolCall,
 		Message:   &assistantMessage,
+		Tool: &session.EventTool{
+			ID:     "call-1",
+			Name:   "RUN_COMMAND",
+			Kind:   ToolKindExecute,
+			Title:  "RUN_COMMAND date",
+			Status: ToolStatusPending,
+			Input:  map[string]any{"command": "date", "workdir": "/tmp/work"},
+			Content: []session.EventToolContent{{
+				Type:       "terminal",
+				TerminalID: "call-1",
+			}},
+		},
 	})
-	if callEvent.ToolCallPayload == nil || callEvent.AssistantMessage == nil || callEvent.Message != nil {
-		t.Fatalf("canonical tool call event = %#v, want semantic payloads only", callEvent)
+	if callEvent.Tool == nil || callEvent.Message == nil {
+		t.Fatalf("canonical tool call event = %#v, want durable message and tool", callEvent)
 	}
 	callUpdates, err := (EventProjector{}).ProjectEvent(callEvent)
 	if err != nil {
@@ -328,8 +340,8 @@ func TestEventProjectorProjectsSemanticToolPayloads(t *testing.T) {
 		},
 		Message: &toolMessage,
 	})
-	if resultEvent.ToolResultPayload == nil || resultEvent.Tool != nil || resultEvent.Message != nil {
-		t.Fatalf("canonical tool result event = %#v, want semantic payload only", resultEvent)
+	if resultEvent.Tool == nil || resultEvent.Message == nil {
+		t.Fatalf("canonical tool result event = %#v, want durable message and tool", resultEvent)
 	}
 	resultUpdates, err := (EventProjector{}).ProjectEvent(resultEvent)
 	if err != nil {
@@ -353,23 +365,23 @@ func TestEventProjectorProjectsSemanticToolPayloads(t *testing.T) {
 	}
 }
 
-func TestEventProjectorProjectsSemanticPlanPayload(t *testing.T) {
+func TestEventProjectorProjectsPlanPayload(t *testing.T) {
 	event := session.CanonicalizeEvent(&session.Event{
 		SessionID: "session-1",
 		Type:      session.EventTypePlan,
-		Protocol: &session.EventProtocol{
-			Plan: &session.ProtocolPlan{Entries: []session.ProtocolPlanEntry{{
+		PlanPayload: &session.EventPlanPayload{Entries: []session.EventPlanEntry{
+			{
 				Content:  "inspect",
 				Status:   "completed",
 				Priority: "high",
 			}, {
 				Content: "fix",
 				Status:  "pending",
-			}}},
-		},
+			},
+		}},
 	})
-	if event.PlanPayload == nil || event.Protocol != nil {
-		t.Fatalf("canonical plan event = %#v, want semantic plan payload only", event)
+	if event.PlanPayload == nil {
+		t.Fatalf("canonical plan event = %#v, want plan payload", event)
 	}
 	updates, err := (EventProjector{}).ProjectEvent(event)
 	if err != nil {

@@ -2,7 +2,9 @@ package kernel
 
 import (
 	"context"
+	"errors"
 	"iter"
+	"strings"
 	"sync"
 	"testing"
 
@@ -139,6 +141,36 @@ func TestAssemblyResolverSessionReasoningOverridesModeAndModelDefault(t *testing
 	}
 }
 
+func TestAssemblyResolverRejectsLegacySessionState(t *testing.T) {
+	t.Parallel()
+
+	resolver, err := NewAssemblyResolver(AssemblyResolverConfig{
+		Sessions: snapshotStateFunc(func(context.Context, session.SessionRef) (map[string]any, error) {
+			return map[string]any{"gateway.current_session_mode": "manual"}, nil
+		}),
+		ModelLookup: modelLookupFunc(func(context.Context, string, int) (ModelResolution, error) {
+			t.Fatal("ResolveModel should not be called for legacy session state")
+			return ModelResolution{}, nil
+		}),
+	})
+	if err != nil {
+		t.Fatalf("NewAssemblyResolver() error = %v", err)
+	}
+
+	_, err = resolver.ResolveTurn(context.Background(), TurnIntent{SessionRef: session.SessionRef{SessionID: "s1"}})
+	if !errors.Is(err, session.ErrUnsupportedLegacyFormat) {
+		t.Fatalf("ResolveTurn() error = %v, want ErrUnsupportedLegacyFormat", err)
+	}
+	if err == nil || !strings.Contains(err.Error(), "gateway.current_session_mode") {
+		t.Fatalf("ResolveTurn() error = %v, want legacy key detail", err)
+	}
+
+	_, err = resolver.ResolveControllerTurn(context.Background(), TurnIntent{SessionRef: session.SessionRef{SessionID: "s1"}})
+	if !errors.Is(err, session.ErrUnsupportedLegacyFormat) {
+		t.Fatalf("ResolveControllerTurn() error = %v, want ErrUnsupportedLegacyFormat", err)
+	}
+}
+
 func TestAssemblyResolverDoesNotInventPolicyProfile(t *testing.T) {
 	t.Parallel()
 
@@ -173,7 +205,7 @@ func TestAssemblyResolverControllerTurnPreservesPolicyMetadataWithoutModelLookup
 	resolver, err := NewAssemblyResolver(AssemblyResolverConfig{
 		Sessions: snapshotStateFunc(func(context.Context, session.SessionRef) (map[string]any, error) {
 			return map[string]any{
-				StateCurrentSessionMode:     "manual",
+				StateCurrentApprovalMode:    "manual",
 				assembly.StateCurrentModeID: "plan",
 			}, nil
 		}),
@@ -291,9 +323,7 @@ func TestCurrentSessionModeUsesSessionModeKey(t *testing.T) {
 		want  string
 	}{
 		{name: "empty defaults to auto-review", state: map[string]any{}, want: "auto-review"},
-		{name: "sandbox mode key ignored", state: map[string]any{StateCurrentSandboxMode: "manual"}, want: "auto-review"},
-		{name: "legacy session mode key wins", state: map[string]any{StateCurrentSandboxMode: "manual", StateCurrentSessionMode: "manual"}, want: "manual"},
-		{name: "approval mode key wins", state: map[string]any{StateCurrentSessionMode: "manual", StateCurrentApprovalMode: "auto-review"}, want: "auto-review"},
+		{name: "approval mode key wins", state: map[string]any{StateCurrentApprovalMode: "auto-review"}, want: "auto-review"},
 	}
 
 	for _, tt := range tests {
@@ -315,10 +345,8 @@ func TestCurrentApprovalModeIgnoresLegacySandboxState(t *testing.T) {
 		want  ApprovalMode
 	}{
 		{name: "empty defaults to auto-review", state: map[string]any{}, want: ApprovalModeAutoReview},
-		{name: "legacy sandbox mode key ignored", state: map[string]any{StateCurrentSandboxMode: "manual"}, want: ApprovalModeAutoReview},
-		{name: "unknown session mode defaults to auto-review", state: map[string]any{StateCurrentSessionMode: "unknown"}, want: ApprovalModeAutoReview},
-		{name: "legacy session mode key wins", state: map[string]any{StateCurrentSandboxMode: "manual", StateCurrentSessionMode: "manual"}, want: ApprovalModeManual},
-		{name: "approval mode key wins", state: map[string]any{StateCurrentSessionMode: "manual", StateCurrentApprovalMode: "auto-review"}, want: ApprovalModeAutoReview},
+		{name: "unknown approval mode defaults to auto-review", state: map[string]any{StateCurrentApprovalMode: "unknown"}, want: ApprovalModeAutoReview},
+		{name: "approval mode key wins", state: map[string]any{StateCurrentApprovalMode: "manual"}, want: ApprovalModeManual},
 	}
 
 	for _, tt := range tests {
@@ -340,9 +368,7 @@ func TestCurrentApprovalModeOrDefaultUsesFallbackOnlyWithoutOverride(t *testing.
 		want  ApprovalMode
 	}{
 		{name: "empty uses manual fallback", state: map[string]any{}, want: ApprovalModeManual},
-		{name: "sandbox legacy does not override fallback", state: map[string]any{StateCurrentSandboxMode: "auto-review"}, want: ApprovalModeManual},
 		{name: "explicit approval mode overrides fallback", state: map[string]any{StateCurrentApprovalMode: "auto-review"}, want: ApprovalModeAutoReview},
-		{name: "legacy session mode overrides fallback", state: map[string]any{StateCurrentSessionMode: "auto-review"}, want: ApprovalModeAutoReview},
 	}
 
 	for _, tt := range tests {

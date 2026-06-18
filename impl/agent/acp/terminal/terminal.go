@@ -194,12 +194,6 @@ func terminalEventMetadata(event *session.Event) []map[string]any {
 	if len(event.Meta) > 0 {
 		out = append(out, event.Meta)
 	}
-	if event.ToolCallPayload != nil && len(event.ToolCallPayload.Metadata) > 0 {
-		out = append(out, event.ToolCallPayload.Metadata)
-	}
-	if event.ToolResultPayload != nil && len(event.ToolResultPayload.Metadata) > 0 {
-		out = append(out, event.ToolResultPayload.Metadata)
-	}
 	return out
 }
 

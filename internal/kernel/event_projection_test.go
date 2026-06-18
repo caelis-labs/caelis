@@ -170,7 +170,7 @@ func TestProjectSessionEventPreservesMinimalCaelisMeta(t *testing.T) {
 	}
 }
 
-func TestProjectSessionEventProjectsSemanticToolResultTaskMeta(t *testing.T) {
+func TestProjectSessionEventProjectsToolResultTaskMeta(t *testing.T) {
 	t.Parallel()
 
 	event := session.CanonicalizeEvent(&session.Event{
@@ -199,8 +199,8 @@ func TestProjectSessionEventProjectsSemanticToolResultTaskMeta(t *testing.T) {
 			},
 		},
 	})
-	if event.Meta != nil {
-		t.Fatalf("canonical event meta = %#v, want stripped projection", event.Meta)
+	if event.Meta == nil {
+		t.Fatal("canonical event meta = nil, want runtime task metadata preserved")
 	}
 	env, ok := ProjectSessionEvent(session.SessionRef{SessionID: "root-session"}, event)
 	if !ok || env.Event.ToolResult == nil {

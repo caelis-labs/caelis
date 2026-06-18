@@ -3,6 +3,7 @@ package gatewayapp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -75,6 +76,29 @@ func TestStackSessionRuntimeStateTracksModelAndSessionModeOverrides(t *testing.T
 	}
 	if state.SessionMode != "auto-review" {
 		t.Fatalf("session mode after reset = %q, want auto-review", state.SessionMode)
+	}
+}
+
+func TestStackSessionRuntimeStateRejectsLegacySessionState(t *testing.T) {
+	ctx := context.Background()
+	stack, activeSession := newLocalStateTestStack(t)
+	if err := stack.Sessions.UpdateState(ctx, activeSession.SessionRef, func(state map[string]any) (map[string]any, error) {
+		next := session.CloneState(state)
+		if next == nil {
+			next = map[string]any{}
+		}
+		next["gateway.current_session_mode"] = "manual"
+		return next, nil
+	}); err != nil {
+		t.Fatalf("UpdateState() error = %v", err)
+	}
+
+	_, err := stack.SessionRuntimeState(ctx, activeSession.SessionRef)
+	if !errors.Is(err, session.ErrUnsupportedLegacyFormat) {
+		t.Fatalf("SessionRuntimeState() error = %v, want ErrUnsupportedLegacyFormat", err)
+	}
+	if !strings.Contains(err.Error(), "gateway.current_session_mode") {
+		t.Fatalf("SessionRuntimeState() error = %v, want legacy key detail", err)
 	}
 }
 
@@ -204,13 +228,13 @@ func TestStackSandboxBackendPersistsAcrossRestart(t *testing.T) {
 	workdir := t.TempDir()
 
 	stack, err := newGatewayAppTestStack(t, Config{
-		AppName:        "caelis",
-		UserID:         "sandbox-persist-test",
-		StoreDir:       root,
-		WorkspaceKey:   workdir,
-		WorkspaceCWD:   workdir,
-		PermissionMode: "auto-review",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "sandbox-persist-test",
+		StoreDir:     root,
+		WorkspaceKey: workdir,
+		WorkspaceCWD: workdir,
+		ApprovalMode: "auto-review",
+		Assembly:     assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
@@ -227,13 +251,13 @@ func TestStackSandboxBackendPersistsAcrossRestart(t *testing.T) {
 	}
 
 	reloaded, err := newGatewayAppTestStack(t, Config{
-		AppName:        "caelis",
-		UserID:         "sandbox-persist-test",
-		StoreDir:       root,
-		WorkspaceKey:   workdir,
-		WorkspaceCWD:   workdir,
-		PermissionMode: "auto-review",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "sandbox-persist-test",
+		StoreDir:     root,
+		WorkspaceKey: workdir,
+		WorkspaceCWD: workdir,
+		ApprovalMode: "auto-review",
+		Assembly:     assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack(reloaded) error = %v", err)
@@ -292,13 +316,13 @@ func TestStackDeleteModelDropsUnreferencedProfile(t *testing.T) {
 	root := t.TempDir()
 	workdir := t.TempDir()
 	stack, err := newGatewayAppTestStack(t, Config{
-		AppName:        "caelis",
-		UserID:         "delete-profile-test",
-		StoreDir:       root,
-		WorkspaceKey:   workdir,
-		WorkspaceCWD:   workdir,
-		PermissionMode: "auto-review",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "delete-profile-test",
+		StoreDir:     root,
+		WorkspaceKey: workdir,
+		WorkspaceCWD: workdir,
+		ApprovalMode: "auto-review",
+		Assembly:     assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
@@ -424,13 +448,13 @@ func TestStackDeleteOnlyModelClearsRuntimeModelState(t *testing.T) {
 	ctx := context.Background()
 	workdir := t.TempDir()
 	stack, err := newGatewayAppTestStack(t, Config{
-		AppName:        "caelis",
-		UserID:         "delete-only-model-test",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   workdir,
-		WorkspaceCWD:   workdir,
-		PermissionMode: "auto-review",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "delete-only-model-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: workdir,
+		WorkspaceCWD: workdir,
+		ApprovalMode: "auto-review",
+		Assembly:     assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
@@ -501,13 +525,13 @@ func TestLocalStackPersistsMultipleProviderModelsAcrossRestart(t *testing.T) {
 	workdir := t.TempDir()
 
 	stack, err := newGatewayAppTestStack(t, Config{
-		AppName:        "caelis",
-		UserID:         "persist-test",
-		StoreDir:       root,
-		WorkspaceKey:   workdir,
-		WorkspaceCWD:   workdir,
-		PermissionMode: "auto-review",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "persist-test",
+		StoreDir:     root,
+		WorkspaceKey: workdir,
+		WorkspaceCWD: workdir,
+		ApprovalMode: "auto-review",
+		Assembly:     assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
@@ -538,13 +562,13 @@ func TestLocalStackPersistsMultipleProviderModelsAcrossRestart(t *testing.T) {
 	}
 
 	reloaded, err := newGatewayAppTestStack(t, Config{
-		AppName:        "caelis",
-		UserID:         "persist-test",
-		StoreDir:       root,
-		WorkspaceKey:   workdir,
-		WorkspaceCWD:   workdir,
-		PermissionMode: "auto-review",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "persist-test",
+		StoreDir:     root,
+		WorkspaceKey: workdir,
+		WorkspaceCWD: workdir,
+		ApprovalMode: "auto-review",
+		Assembly:     assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack(reloaded) error = %v", err)
@@ -593,13 +617,13 @@ func TestLocalStackPersistsMultipleProviderModelsAcrossRestart(t *testing.T) {
 func TestNewLocalStackAllowsEmptyInitialModelConfig(t *testing.T) {
 	root := t.TempDir()
 	stack, err := newGatewayAppTestStack(t, Config{
-		AppName:        "caelis",
-		UserID:         "empty-model-test",
-		StoreDir:       root,
-		WorkspaceKey:   t.TempDir(),
-		WorkspaceCWD:   t.TempDir(),
-		PermissionMode: "auto-review",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "empty-model-test",
+		StoreDir:     root,
+		WorkspaceKey: t.TempDir(),
+		WorkspaceCWD: t.TempDir(),
+		ApprovalMode: "auto-review",
+		Assembly:     assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
@@ -620,14 +644,14 @@ func TestLocalStackDefaultRuntimeAutoCompactionEnabled(t *testing.T) {
 	ctx := context.Background()
 	server := newGatewayAppCompactionOllamaServer(t)
 	stack, err := newGatewayAppTestStack(t, Config{
-		AppName:        "caelis",
-		UserID:         "auto-compact-test",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   t.TempDir(),
-		WorkspaceCWD:   t.TempDir(),
-		PermissionMode: "auto-review",
-		ContextWindow:  64,
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:       "caelis",
+		UserID:        "auto-compact-test",
+		StoreDir:      t.TempDir(),
+		WorkspaceKey:  t.TempDir(),
+		WorkspaceCWD:  t.TempDir(),
+		ApprovalMode:  "auto-review",
+		ContextWindow: 64,
+		Assembly:      assembly.ResolvedAssembly{},
 		Model: ModelConfig{
 			Provider:   "ollama",
 			API:        providers.APIOllama,
@@ -681,15 +705,15 @@ func TestLocalStackAutoCompactCountsPromptPrefix(t *testing.T) {
 	ctx := context.Background()
 	server := newGatewayAppCompactionOllamaServer(t)
 	stack, err := newGatewayAppTestStack(t, Config{
-		AppName:        "caelis",
-		UserID:         "auto-compact-prefix-test",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   t.TempDir(),
-		WorkspaceCWD:   t.TempDir(),
-		PermissionMode: "auto-review",
-		ContextWindow:  4096,
-		SystemPrompt:   strings.Repeat("stable prompt prefix token. ", 600),
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:       "caelis",
+		UserID:        "auto-compact-prefix-test",
+		StoreDir:      t.TempDir(),
+		WorkspaceKey:  t.TempDir(),
+		WorkspaceCWD:  t.TempDir(),
+		ApprovalMode:  "auto-review",
+		ContextWindow: 4096,
+		SystemPrompt:  strings.Repeat("stable prompt prefix token. ", 600),
+		Assembly:      assembly.ResolvedAssembly{},
 		Model: ModelConfig{
 			Provider:   "ollama",
 			API:        providers.APIOllama,
@@ -723,14 +747,14 @@ func TestLocalStackManualCompactUsesStructuredRuntimeCompaction(t *testing.T) {
 	ctx := context.Background()
 	server := newGatewayAppCompactionOllamaServer(t)
 	stack, err := newGatewayAppTestStack(t, Config{
-		AppName:        "caelis",
-		UserID:         "manual-compact-test",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   t.TempDir(),
-		WorkspaceCWD:   t.TempDir(),
-		PermissionMode: "auto-review",
-		ContextWindow:  4096,
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:       "caelis",
+		UserID:        "manual-compact-test",
+		StoreDir:      t.TempDir(),
+		WorkspaceKey:  t.TempDir(),
+		WorkspaceCWD:  t.TempDir(),
+		ApprovalMode:  "auto-review",
+		ContextWindow: 4096,
+		Assembly:      assembly.ResolvedAssembly{},
 		Model: ModelConfig{
 			Provider:   "ollama",
 			API:        providers.APIOllama,
@@ -785,13 +809,13 @@ func TestLocalStackManualCompactUsesStructuredRuntimeCompaction(t *testing.T) {
 func TestSessionUsageSnapshotKeepsPromptPrefixVisibleAfterCompact(t *testing.T) {
 	ctx := context.Background()
 	stack, err := newGatewayAppTestStack(t, Config{
-		AppName:        "caelis",
-		UserID:         "compact-usage-prefix-test",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   t.TempDir(),
-		WorkspaceCWD:   t.TempDir(),
-		PermissionMode: "auto-review",
-		SystemPrompt:   strings.Repeat("count this stable prefix instruction. ", 2000),
+		AppName:      "caelis",
+		UserID:       "compact-usage-prefix-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: t.TempDir(),
+		WorkspaceCWD: t.TempDir(),
+		ApprovalMode: "auto-review",
+		SystemPrompt: strings.Repeat("count this stable prefix instruction. ", 2000),
 		Model: ModelConfig{
 			Provider:            "ollama",
 			API:                 providers.APIOllama,
@@ -843,13 +867,13 @@ func TestSessionUsageSnapshotKeepsPromptPrefixVisibleAfterCompact(t *testing.T) 
 
 func TestNewLocalStackInfersCodeFreeAPIFromProvider(t *testing.T) {
 	stack, err := newGatewayAppTestStack(t, Config{
-		AppName:        "caelis",
-		UserID:         "codefree-api-test",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   t.TempDir(),
-		WorkspaceCWD:   t.TempDir(),
-		PermissionMode: "auto-review",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "codefree-api-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: t.TempDir(),
+		WorkspaceCWD: t.TempDir(),
+		ApprovalMode: "auto-review",
+		Assembly:     assembly.ResolvedAssembly{},
 		Model: ModelConfig{
 			Provider: "codefree",
 			Model:    "GLM-5.1",
@@ -883,13 +907,13 @@ func newLocalStateTestStack(t *testing.T) (*Stack, session.Session) {
 	root := t.TempDir()
 	workdir := t.TempDir()
 	stack, err := newGatewayAppTestStack(t, Config{
-		AppName:        "caelis",
-		UserID:         "state-test",
-		StoreDir:       root,
-		WorkspaceKey:   workdir,
-		WorkspaceCWD:   workdir,
-		PermissionMode: "auto-review",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "state-test",
+		StoreDir:     root,
+		WorkspaceKey: workdir,
+		WorkspaceCWD: workdir,
+		ApprovalMode: "auto-review",
+		Assembly:     assembly.ResolvedAssembly{},
 		Model: ModelConfig{
 			Provider: "ollama",
 			API:      providers.APIOllama,

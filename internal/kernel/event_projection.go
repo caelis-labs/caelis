@@ -956,7 +956,7 @@ func eventMeta(event *session.Event) map[string]any {
 	if event == nil {
 		return nil
 	}
-	return mergeEventMeta(semanticEventMeta(event), event.Meta)
+	return event.Meta
 }
 
 func stringFromNestedMap(values map[string]any, path ...string) string {
@@ -977,29 +977,6 @@ func canonicalEventMeta(event *session.Event) map[string]any {
 		return nil
 	}
 	return eventMeta(event)
-}
-
-func semanticEventMeta(event *session.Event) map[string]any {
-	if event == nil {
-		return nil
-	}
-	var out map[string]any
-	if event.UserMessage != nil {
-		out = mergeEventMeta(out, event.UserMessage.Metadata)
-	}
-	if event.AssistantMessage != nil {
-		out = mergeEventMeta(out, event.AssistantMessage.Metadata)
-	}
-	if event.SystemContext != nil {
-		out = mergeEventMeta(out, event.SystemContext.Metadata)
-	}
-	if event.ToolCallPayload != nil {
-		out = mergeEventMeta(out, event.ToolCallPayload.Metadata)
-	}
-	if event.ToolResultPayload != nil {
-		out = mergeEventMeta(out, event.ToolResultPayload.Metadata)
-	}
-	return out
 }
 
 func rawInputFromJSONString(raw string) map[string]any {

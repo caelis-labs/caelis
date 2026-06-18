@@ -59,6 +59,23 @@ headless one-shot runner.
 Architecture plan:
 [docs/agent-sdk-acp-architecture-plan.md](docs/agent-sdk-acp-architecture-plan.md)
 
+## Pre-v1 Upgrade Notes
+
+Current builds use canonical session events as the replay source:
+`session.Event.Message` for model-visible messages and `session.Event.Tool` for
+tool execution state. Older local data that only stored v2 semantic sidecar
+payloads (`user_message`, `assistant_message`, `system_context`, `tool_call`,
+`tool_result`) or embedded document `events` arrays is not migrated at read time;
+the file session store returns an unsupported legacy format error instead of
+silently replaying partial history.
+
+Other pre-v1 compatibility paths are intentionally cut: compact
+`replacement_history` / `retained_user_inputs` metadata is not replayed,
+uppercase model config JSON is rejected, `-permission-mode` is replaced by
+`-approval-mode`, CodeFree credentials are read from the Caelis credential path
+instead of imported from `~/.codefree-cli`, and connect wizard completions use a
+structured JSON payload rather than the old pipe-delimited payload.
+
 ## Install
 
 From npm:
@@ -100,7 +117,7 @@ Common flags:
 - `-format`: `text` or `json` for headless output
 - `-interactive`: force the TUI path even when stdin is piped
 - `-session`, `-store-dir`, `-workspace-key`, `-workspace-cwd`
-- `-permission-mode`: `auto-review` or `manual`
+- `-approval-mode`: `auto-review` or `manual`
 - `-provider`, `-api`, `-model`, `-base-url`, `-token`, `-token-env`
 - `-auth-type`, `-header-key`
 - `-model-alias`, `-context-window`, `-max-output-tokens`
@@ -113,7 +130,7 @@ Interactive TUI:
 caelis \
   -provider openai \
   -model gpt-5 \
-  -permission-mode auto-review
+  -approval-mode auto-review
 ```
 
 Headless single-shot:
@@ -122,7 +139,7 @@ Headless single-shot:
 caelis \
   -provider openai \
   -model gpt-5 \
-  -permission-mode auto-review \
+  -approval-mode auto-review \
   -p "Summarize the repository layout."
 ```
 
@@ -182,11 +199,11 @@ Notes:
 
 ## Runtime And Permissions
 
-`caelis` exposes one CLI permission switch:
+`caelis` exposes one CLI approval switch:
 
-- `-permission-mode auto-review`: use model-backed approval review for
+- `-approval-mode auto-review`: use model-backed approval review for
   sensitive requests when the sandbox route requires escalation.
-- `-permission-mode manual`: require an explicit user decision for sensitive
+- `-approval-mode manual`: require an explicit user decision for sensitive
   requests.
 
 Sandbox backend selection is resolved by the local runtime: macOS uses seatbelt,

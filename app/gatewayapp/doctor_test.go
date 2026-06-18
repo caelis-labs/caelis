@@ -16,13 +16,13 @@ func TestDoctorReportFlagsMissingAPIKeyAfterRedactedPersistence(t *testing.T) {
 	workdir := t.TempDir()
 
 	stack, err := newGatewayAppTestStack(t, Config{
-		AppName:        "caelis",
-		UserID:         "doctor-test",
-		StoreDir:       root,
-		WorkspaceKey:   workdir,
-		WorkspaceCWD:   workdir,
-		PermissionMode: "auto-review",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "doctor-test",
+		StoreDir:     root,
+		WorkspaceKey: workdir,
+		WorkspaceCWD: workdir,
+		ApprovalMode: "auto-review",
+		Assembly:     assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
@@ -48,13 +48,13 @@ func TestDoctorReportFlagsMissingAPIKeyAfterRedactedPersistence(t *testing.T) {
 	}
 
 	reloaded, err := newGatewayAppTestStack(t, Config{
-		AppName:        "caelis",
-		UserID:         "doctor-test",
-		StoreDir:       root,
-		WorkspaceKey:   workdir,
-		WorkspaceCWD:   workdir,
-		PermissionMode: "auto-review",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "doctor-test",
+		StoreDir:     root,
+		WorkspaceKey: workdir,
+		WorkspaceCWD: workdir,
+		ApprovalMode: "auto-review",
+		Assembly:     assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack(reloaded) error = %v", err)
@@ -98,13 +98,13 @@ func TestDoctorReportUsesConfiguredModeWithoutSession(t *testing.T) {
 	workdir := t.TempDir()
 
 	stack, err := newGatewayAppTestStack(t, Config{
-		AppName:        "caelis",
-		UserID:         "doctor-test",
-		StoreDir:       root,
-		WorkspaceKey:   workdir,
-		WorkspaceCWD:   workdir,
-		PermissionMode: "manual",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "doctor-test",
+		StoreDir:     root,
+		WorkspaceKey: workdir,
+		WorkspaceCWD: workdir,
+		ApprovalMode: "manual",
+		Assembly:     assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)

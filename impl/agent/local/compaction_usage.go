@@ -196,20 +196,7 @@ func eventUsageMetadata(event *session.Event) map[string]any {
 	if event == nil {
 		return nil
 	}
-	switch {
-	case event.AssistantMessage != nil && len(event.AssistantMessage.Metadata) > 0:
-		return event.AssistantMessage.Metadata
-	case event.UserMessage != nil && len(event.UserMessage.Metadata) > 0:
-		return event.UserMessage.Metadata
-	case event.SystemContext != nil && len(event.SystemContext.Metadata) > 0:
-		return event.SystemContext.Metadata
-	case event.ToolCallPayload != nil && len(event.ToolCallPayload.Metadata) > 0:
-		return event.ToolCallPayload.Metadata
-	case event.ToolResultPayload != nil && len(event.ToolResultPayload.Metadata) > 0:
-		return event.ToolResultPayload.Metadata
-	default:
-		return event.Meta
-	}
+	return event.Meta
 }
 
 func nestedMap(values map[string]any, path ...string) map[string]any {

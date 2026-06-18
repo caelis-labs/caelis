@@ -22,12 +22,12 @@ func TestLocalStackGatewayACPMainE2E(t *testing.T) {
 	workdir := t.TempDir()
 
 	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "user-1",
-		StoreDir:       root,
-		WorkspaceKey:   workdir,
-		WorkspaceCWD:   workdir,
-		PermissionMode: "auto-review",
+		AppName:      "caelis",
+		UserID:       "user-1",
+		StoreDir:     root,
+		WorkspaceKey: workdir,
+		WorkspaceCWD: workdir,
+		ApprovalMode: "auto-review",
 		Assembly: assembly.ResolvedAssembly{
 			Agents: []assembly.AgentConfig{{
 				Name:        "codex",

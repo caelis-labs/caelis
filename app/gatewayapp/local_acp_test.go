@@ -726,13 +726,13 @@ func TestAgentProfileNameCollisionReportsStaleAndNotRunnable(t *testing.T) {
 func TestLocalStackAgentRegistryUpdatesPreserveSelfModelArgs(t *testing.T) {
 	workdir := t.TempDir()
 	stack, err := NewLocalStack(Config{
-		AppName:        "caelis",
-		UserID:         "self-model-test",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   workdir,
-		WorkspaceCWD:   workdir,
-		PermissionMode: "auto-review",
-		ContextWindow:  12345,
+		AppName:       "caelis",
+		UserID:        "self-model-test",
+		StoreDir:      t.TempDir(),
+		WorkspaceKey:  workdir,
+		WorkspaceCWD:  workdir,
+		ApprovalMode:  "auto-review",
+		ContextWindow: 12345,
 		Sandbox: SandboxConfig{
 			RequestedType: "host",
 		},
@@ -792,13 +792,13 @@ func TestLocalStackMaterializesBuiltInAgentProfiles(t *testing.T) {
 	workdir := t.TempDir()
 	storeDir := t.TempDir()
 	stack, err := NewLocalStack(Config{
-		AppName:        "caelis",
-		UserID:         "profile-agent-test",
-		StoreDir:       storeDir,
-		WorkspaceKey:   workdir,
-		WorkspaceCWD:   workdir,
-		PermissionMode: "auto-review",
-		Sandbox:        SandboxConfig{RequestedType: "host"},
+		AppName:      "caelis",
+		UserID:       "profile-agent-test",
+		StoreDir:     storeDir,
+		WorkspaceKey: workdir,
+		WorkspaceCWD: workdir,
+		ApprovalMode: "auto-review",
+		Sandbox:      SandboxConfig{RequestedType: "host"},
 		Model: ModelConfig{
 			Provider: "ollama",
 			Model:    "llama3",
@@ -858,13 +858,13 @@ func TestLocalStackMaterializesBuiltInAgentProfiles(t *testing.T) {
 func TestGuardianProfileStatusIgnoresLegacyDisabledACPBinding(t *testing.T) {
 	workdir := t.TempDir()
 	stack, err := NewLocalStack(Config{
-		AppName:        "caelis",
-		UserID:         "guardian-legacy-test",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   workdir,
-		WorkspaceCWD:   workdir,
-		PermissionMode: "auto-review",
-		Sandbox:        SandboxConfig{RequestedType: "host"},
+		AppName:      "caelis",
+		UserID:       "guardian-legacy-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: workdir,
+		WorkspaceCWD: workdir,
+		ApprovalMode: "auto-review",
+		Sandbox:      SandboxConfig{RequestedType: "host"},
 		Model: ModelConfig{
 			Provider: "ollama",
 			Model:    "llama3",
@@ -931,13 +931,13 @@ func TestLocalStackIgnoresLegacyGuardianProfileFile(t *testing.T) {
 		t.Fatalf("WriteFile(guardian.md) error = %v", err)
 	}
 	stack, err := NewLocalStack(Config{
-		AppName:        "caelis",
-		UserID:         "guardian-file-test",
-		StoreDir:       storeDir,
-		WorkspaceKey:   workdir,
-		WorkspaceCWD:   workdir,
-		PermissionMode: "auto-review",
-		Sandbox:        SandboxConfig{RequestedType: "host"},
+		AppName:      "caelis",
+		UserID:       "guardian-file-test",
+		StoreDir:     storeDir,
+		WorkspaceKey: workdir,
+		WorkspaceCWD: workdir,
+		ApprovalMode: "auto-review",
+		Sandbox:      SandboxConfig{RequestedType: "host"},
 		Model: ModelConfig{
 			Provider: "ollama",
 			Model:    "llama3",
@@ -970,13 +970,13 @@ func TestLocalStackIgnoresLegacyGuardianProfileFile(t *testing.T) {
 func TestAgentProfileBindModelUpdatesACPAgentArgs(t *testing.T) {
 	workdir := t.TempDir()
 	stack, err := NewLocalStack(Config{
-		AppName:        "caelis",
-		UserID:         "profile-bind-test",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   workdir,
-		WorkspaceCWD:   workdir,
-		PermissionMode: "auto-review",
-		Sandbox:        SandboxConfig{RequestedType: "host"},
+		AppName:      "caelis",
+		UserID:       "profile-bind-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: workdir,
+		WorkspaceCWD: workdir,
+		ApprovalMode: "auto-review",
+		Sandbox:      SandboxConfig{RequestedType: "host"},
 		Model: ModelConfig{
 			Provider: "ollama",
 			Model:    "llama3",
@@ -1115,13 +1115,13 @@ func TestAgentProfileAssemblyReturnsInvalidBindingTargetError(t *testing.T) {
 func TestAgentProfileBindGuardianModelDoesNotMaterializeACPAgent(t *testing.T) {
 	workdir := t.TempDir()
 	stack, err := NewLocalStack(Config{
-		AppName:        "caelis",
-		UserID:         "guardian-bind-test",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   workdir,
-		WorkspaceCWD:   workdir,
-		PermissionMode: "auto-review",
-		Sandbox:        SandboxConfig{RequestedType: "host"},
+		AppName:      "caelis",
+		UserID:       "guardian-bind-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: workdir,
+		WorkspaceCWD: workdir,
+		ApprovalMode: "auto-review",
+		Sandbox:      SandboxConfig{RequestedType: "host"},
 		Model: ModelConfig{
 			Provider: "ollama",
 			Model:    "llama3",
@@ -1171,13 +1171,13 @@ func newStackWithAssemblyForToolTest(t *testing.T, assembly assembly.ResolvedAss
 	t.Helper()
 	workdir := t.TempDir()
 	stack, err := NewLocalStack(Config{
-		AppName:        "caelis",
-		UserID:         "tool-test",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   workdir,
-		WorkspaceCWD:   workdir,
-		PermissionMode: "auto-review",
-		Assembly:       assembly,
+		AppName:      "caelis",
+		UserID:       "tool-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: workdir,
+		WorkspaceCWD: workdir,
+		ApprovalMode: "auto-review",
+		Assembly:     assembly,
 		// These tests rewrite PATH to exercise ACP adapter lookup. Keep the
 		// sandbox on host so auto-probing does not execute the test binary as a
 		// landlock helper and recursively re-enter this package's tests.

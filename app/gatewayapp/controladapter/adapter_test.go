@@ -26,6 +26,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/stream"
+	controlcommands "github.com/OnslaughtSnail/caelis/protocol/acp/control/commands"
 	acpprojector "github.com/OnslaughtSnail/caelis/protocol/acp/projector"
 )
 
@@ -157,12 +158,12 @@ func newAdapterTestStack(t *testing.T, cfg gatewayapp.Config) (*gatewayapp.Stack
 func TestAdapterUsesCurrentGatewayAfterSandboxRebuild(t *testing.T) {
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "driver-test",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   "driver-workspace",
-		WorkspaceCWD:   t.TempDir(),
-		PermissionMode: "default",
+		AppName:      "caelis",
+		UserID:       "driver-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: "driver-workspace",
+		WorkspaceCWD: t.TempDir(),
+		ApprovalMode: "default",
 		Sandbox: gatewayapp.SandboxConfig{
 			HelperPath: filepath.Join(t.TempDir(), "missing-landlock-helper"),
 		},
@@ -227,13 +228,13 @@ func TestAdapterDefersBlankSessionUntilFirstSubmission(t *testing.T) {
 	storeDir := t.TempDir()
 	workspace := t.TempDir()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "lazy-session-test",
-		StoreDir:       storeDir,
-		WorkspaceKey:   workspace,
-		WorkspaceCWD:   workspace,
-		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "lazy-session-test",
+		StoreDir:     storeDir,
+		WorkspaceKey: workspace,
+		WorkspaceCWD: workspace,
+		ApprovalMode: "default",
+		Assembly:     assembly.ResolvedAssembly{},
 		Model: gatewayapp.ModelConfig{
 			Provider: "ollama",
 			API:      providers.APIOllama,
@@ -444,13 +445,13 @@ func TestAdapterListSessionsSkipsUntitledSessions(t *testing.T) {
 	ctx := context.Background()
 	workspace := t.TempDir()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "resume-filter-test",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   workspace,
-		WorkspaceCWD:   workspace,
-		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "resume-filter-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: workspace,
+		WorkspaceCWD: workspace,
+		ApprovalMode: "default",
+		Assembly:     assembly.ResolvedAssembly{},
 		Model: gatewayapp.ModelConfig{
 			Provider: "ollama",
 			API:      providers.APIOllama,
@@ -509,13 +510,13 @@ func TestAdapterCompleteSlashArgConnectFlowUsesLegacyCommands(t *testing.T) {
 	t.Setenv("CODEFREE_OAUTH_CREDS_PATH", credsPath)
 
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "connect-test",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   t.TempDir(),
-		WorkspaceCWD:   t.TempDir(),
-		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "connect-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: t.TempDir(),
+		WorkspaceCWD: t.TempDir(),
+		ApprovalMode: "default",
+		Assembly:     assembly.ResolvedAssembly{},
 		Model: gatewayapp.ModelConfig{
 			Provider: "ollama",
 			API:      providers.APIOllama,
@@ -554,7 +555,11 @@ func TestAdapterCompleteSlashArgConnectFlowUsesLegacyCommands(t *testing.T) {
 		t.Fatalf("xiaomi endpoint candidates = %#v, missing token-plan CN OpenAI detail", xiaomiEndpoints)
 	}
 
-	models, err := driver.CompleteSlashArg(ctx, "connect-model:minimax|https%3A%2F%2Fapi.minimaxi.com%2Fanthropic|60||", "", 20)
+	models, err := driver.CompleteSlashArg(ctx, connectModelCompletionCommand(controlcommands.ConnectWizardState{
+		Provider:       "minimax",
+		BaseURL:        "https://api.minimaxi.com/anthropic",
+		TimeoutSeconds: controlcommands.DefaultConnectTimeoutSeconds,
+	}), "", 20)
 	if err != nil {
 		t.Fatalf("CompleteSlashArg(connect-model) error = %v", err)
 	}
@@ -569,7 +574,11 @@ func TestAdapterCompleteSlashArgConnectFlowUsesLegacyCommands(t *testing.T) {
 		t.Fatalf("connect model candidates = %#v, want built-in MiniMax-M2.7-highspeed", models)
 	}
 
-	deepseekModels, err := driver.CompleteSlashArg(ctx, "connect-model:deepseek|https%3A%2F%2Fapi.deepseek.com%2Fv1|60||", "", 20)
+	deepseekModels, err := driver.CompleteSlashArg(ctx, connectModelCompletionCommand(controlcommands.ConnectWizardState{
+		Provider:       "deepseek",
+		BaseURL:        "https://api.deepseek.com/v1",
+		TimeoutSeconds: controlcommands.DefaultConnectTimeoutSeconds,
+	}), "", 20)
 	if err != nil {
 		t.Fatalf("CompleteSlashArg(connect-model deepseek) error = %v", err)
 	}
@@ -585,7 +594,11 @@ func TestAdapterCompleteSlashArgConnectFlowUsesLegacyCommands(t *testing.T) {
 		}
 	}
 
-	codefreeModels, err := driver.CompleteSlashArg(ctx, "connect-model:codefree|https%3A%2F%2Fwww.srdcloud.cn|60||", "", 20)
+	codefreeModels, err := driver.CompleteSlashArg(ctx, connectModelCompletionCommand(controlcommands.ConnectWizardState{
+		Provider:       "codefree",
+		BaseURL:        "https://www.srdcloud.cn",
+		TimeoutSeconds: controlcommands.DefaultConnectTimeoutSeconds,
+	}), "", 20)
 	if err != nil {
 		t.Fatalf("CompleteSlashArg(connect-model codefree) error = %v", err)
 	}
@@ -604,13 +617,13 @@ func TestAdapterCompleteSlashArgConnectFlowUsesLegacyCommands(t *testing.T) {
 func TestAdapterCompleteSlashArgUsesRealModelAliases(t *testing.T) {
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "slash-test",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   t.TempDir(),
-		WorkspaceCWD:   t.TempDir(),
-		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "slash-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: t.TempDir(),
+		WorkspaceCWD: t.TempDir(),
+		ApprovalMode: "default",
+		Assembly:     assembly.ResolvedAssembly{},
 		Model: gatewayapp.ModelConfig{
 			Provider: "ollama",
 			API:      providers.APIOllama,
@@ -736,13 +749,13 @@ func TestAdapterCompleteSlashArgACPModelUsesModelSpecificEfforts(t *testing.T) {
 func TestAdapterCompletesAndPersistsModelReasoningLevel(t *testing.T) {
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "model-reasoning-test",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   t.TempDir(),
-		WorkspaceCWD:   t.TempDir(),
-		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "model-reasoning-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: t.TempDir(),
+		WorkspaceCWD: t.TempDir(),
+		ApprovalMode: "default",
+		Assembly:     assembly.ResolvedAssembly{},
 		Model: gatewayapp.ModelConfig{
 			Provider: "deepseek",
 			API:      providers.APIDeepSeek,
@@ -798,13 +811,13 @@ func TestAdapterConnectPersistsDeepSeekModelDefaults(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "connect-defaults-test",
-		StoreDir:       root,
-		WorkspaceKey:   t.TempDir(),
-		WorkspaceCWD:   t.TempDir(),
-		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "connect-defaults-test",
+		StoreDir:     root,
+		WorkspaceKey: t.TempDir(),
+		WorkspaceCWD: t.TempDir(),
+		ApprovalMode: "default",
+		Assembly:     assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
@@ -934,13 +947,13 @@ func TestAdapterConnectWithTokenEnvDoesNotPersistTokenValue(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "connect-token-env-test",
-		StoreDir:       root,
-		WorkspaceKey:   t.TempDir(),
-		WorkspaceCWD:   t.TempDir(),
-		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "connect-token-env-test",
+		StoreDir:     root,
+		WorkspaceKey: t.TempDir(),
+		WorkspaceCWD: t.TempDir(),
+		ApprovalMode: "default",
+		Assembly:     assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
@@ -992,13 +1005,13 @@ func TestAdapterConnectWithTokenEnvDoesNotPersistTokenValue(t *testing.T) {
 func TestAdapterCodeFreeModelHasNoReasoningLevels(t *testing.T) {
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "codefree-no-reasoning-test",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   t.TempDir(),
-		WorkspaceCWD:   t.TempDir(),
-		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "codefree-no-reasoning-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: t.TempDir(),
+		WorkspaceCWD: t.TempDir(),
+		ApprovalMode: "default",
+		Assembly:     assembly.ResolvedAssembly{},
 		Model: gatewayapp.ModelConfig{
 			Provider: "codefree",
 			API:      providers.APICodeFree,
@@ -1041,13 +1054,13 @@ func TestAdapterConnectCodeFreeUsesExistingOAuthCache(t *testing.T) {
 	t.Setenv("CODEFREE_OAUTH_CREDS_PATH", credsPath)
 
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "codefree-connect-test",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   t.TempDir(),
-		WorkspaceCWD:   t.TempDir(),
-		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "codefree-connect-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: t.TempDir(),
+		WorkspaceCWD: t.TempDir(),
+		ApprovalMode: "default",
+		Assembly:     assembly.ResolvedAssembly{},
 		Model: gatewayapp.ModelConfig{
 			Provider: "ollama",
 			API:      providers.APIOllama,
@@ -1080,13 +1093,13 @@ func TestAdapterConnectCodeFreeUsesExistingOAuthCache(t *testing.T) {
 func TestAdapterStatusIncludesContextUsageSnapshot(t *testing.T) {
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "status-usage-test",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   t.TempDir(),
-		WorkspaceCWD:   t.TempDir(),
-		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "status-usage-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: t.TempDir(),
+		WorkspaceCWD: t.TempDir(),
+		ApprovalMode: "default",
+		Assembly:     assembly.ResolvedAssembly{},
 		Model: gatewayapp.ModelConfig{
 			Provider:            "ollama",
 			API:                 providers.APIOllama,
@@ -1165,13 +1178,13 @@ func TestAdapterStatusIncludesContextUsageSnapshot(t *testing.T) {
 func TestAdapterSessionTokenUsageDeduplicatesConsecutiveToolCallUsage(t *testing.T) {
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "status-usage-dedupe-test",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   t.TempDir(),
-		WorkspaceCWD:   t.TempDir(),
-		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "status-usage-dedupe-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: t.TempDir(),
+		WorkspaceCWD: t.TempDir(),
+		ApprovalMode: "default",
+		Assembly:     assembly.ResolvedAssembly{},
 		Model: gatewayapp.ModelConfig{
 			Provider: "ollama",
 			API:      providers.APIOllama,
@@ -1194,14 +1207,14 @@ func TestAdapterSessionTokenUsageDeduplicatesConsecutiveToolCallUsage(t *testing
 			SessionRef: activeSession.SessionRef,
 			Event: &session.Event{
 				Type: session.EventTypeToolCall,
-				Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
-					SessionUpdate: string(session.ProtocolUpdateTypeToolCall),
-					ToolCallID:    id,
-					Kind:          "RUN_COMMAND",
-					Title:         "RUN_COMMAND",
-					Status:        "pending",
-					RawInput:      map[string]any{"cmd": "pwd"},
-				}},
+				Tool: &session.EventTool{
+					ID:     id,
+					Name:   "RUN_COMMAND",
+					Kind:   "execute",
+					Title:  "RUN_COMMAND",
+					Status: "pending",
+					Input:  map[string]any{"cmd": "pwd"},
+				},
 				Meta: modelUsageMetaForRuntimeTest(10, 3, 2, 12),
 			},
 		}); err != nil {
@@ -1221,13 +1234,13 @@ func TestAdapterSessionTokenUsageDeduplicatesConsecutiveToolCallUsage(t *testing
 func TestAdapterSessionTokenUsageBreakdownIncludesSelfSubagentAndAutoReview(t *testing.T) {
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "status-usage-breakdown-test",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   t.TempDir(),
-		WorkspaceCWD:   t.TempDir(),
-		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "status-usage-breakdown-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: t.TempDir(),
+		WorkspaceCWD: t.TempDir(),
+		ApprovalMode: "default",
+		Assembly:     assembly.ResolvedAssembly{},
 		Model: gatewayapp.ModelConfig{
 			Provider: "ollama",
 			API:      providers.APIOllama,
@@ -1248,9 +1261,10 @@ func TestAdapterSessionTokenUsageBreakdownIncludesSelfSubagentAndAutoReview(t *t
 	if _, err := stack.Sessions.AppendEvent(ctx, session.AppendEventRequest{
 		SessionRef: activeSession.SessionRef,
 		Event: &session.Event{
-			Type: session.EventTypeAssistant,
-			Text: "main answer",
-			Meta: modelUsageMetaForRuntimeTest(10, 3, 2, 12, 1),
+			Type:    session.EventTypeAssistant,
+			Text:    "main answer",
+			Message: ptrRuntimeMessage(model.NewTextMessage(model.RoleAssistant, "main answer")),
+			Meta:    modelUsageMetaForRuntimeTest(10, 3, 2, 12, 1),
 		},
 	}); err != nil {
 		t.Fatalf("AppendEvent(main) error = %v", err)
@@ -1309,9 +1323,10 @@ func TestAdapterSessionTokenUsageBreakdownIncludesSelfSubagentAndAutoReview(t *t
 	if _, err := stack.Sessions.AppendEvent(ctx, session.AppendEventRequest{
 		SessionRef: child.SessionRef,
 		Event: &session.Event{
-			Type: session.EventTypeAssistant,
-			Text: "child answer",
-			Meta: modelUsageMetaForRuntimeTest(20, 4, 6, 26, 5),
+			Type:    session.EventTypeAssistant,
+			Text:    "child answer",
+			Message: ptrRuntimeMessage(model.NewTextMessage(model.RoleAssistant, "child answer")),
+			Meta:    modelUsageMetaForRuntimeTest(20, 4, 6, 26, 5),
 		},
 	}); err != nil {
 		t.Fatalf("AppendEvent(child) error = %v", err)
@@ -1345,13 +1360,13 @@ func TestAdapterSessionTokenUsageBreakdownIncludesSelfSubagentAndAutoReview(t *t
 func TestAdapterDeleteModelRemovesConfiguredAlias(t *testing.T) {
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "slash-test",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   t.TempDir(),
-		WorkspaceCWD:   t.TempDir(),
-		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "slash-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: t.TempDir(),
+		WorkspaceCWD: t.TempDir(),
+		ApprovalMode: "default",
+		Assembly:     assembly.ResolvedAssembly{},
 		Model: gatewayapp.ModelConfig{
 			Provider: "ollama",
 			API:      providers.APIOllama,
@@ -1395,13 +1410,13 @@ func TestAdapterDeleteModelRemovesConfiguredAlias(t *testing.T) {
 func TestAdapterDeleteOnlyModelClearsAliasCandidatesAndStatus(t *testing.T) {
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "delete-only-model-test",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   t.TempDir(),
-		WorkspaceCWD:   t.TempDir(),
-		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "delete-only-model-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: t.TempDir(),
+		WorkspaceCWD: t.TempDir(),
+		ApprovalMode: "default",
+		Assembly:     assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
@@ -1438,13 +1453,13 @@ func TestAdapterDeleteOnlyModelClearsAliasCandidatesAndStatus(t *testing.T) {
 func TestAdapterUseModelResolvesCaseInsensitiveAlias(t *testing.T) {
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "use-model-test",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   t.TempDir(),
-		WorkspaceCWD:   t.TempDir(),
-		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "use-model-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: t.TempDir(),
+		WorkspaceCWD: t.TempDir(),
+		ApprovalMode: "default",
+		Assembly:     assembly.ResolvedAssembly{},
 		Model: gatewayapp.ModelConfig{
 			Provider: "ollama",
 			API:      providers.APIOllama,
@@ -1480,12 +1495,12 @@ func TestAdapterAgentRegistryAndControllerUse(t *testing.T) {
 	root := t.TempDir()
 	workdir := t.TempDir()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "agent-driver-test",
-		StoreDir:       root,
-		WorkspaceKey:   workdir,
-		WorkspaceCWD:   workdir,
-		PermissionMode: "default",
+		AppName:      "caelis",
+		UserID:       "agent-driver-test",
+		StoreDir:     root,
+		WorkspaceKey: workdir,
+		WorkspaceCWD: workdir,
+		ApprovalMode: "default",
 		Assembly: assembly.ResolvedAssembly{
 			Agents: []assembly.AgentConfig{{
 				Name:        "copilot",
@@ -1705,13 +1720,13 @@ func TestAdapterStatusUsesPersistedDefaultAliasOnStartup(t *testing.T) {
 	root := t.TempDir()
 	workdir := t.TempDir()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "status-startup-test",
-		StoreDir:       root,
-		WorkspaceKey:   workdir,
-		WorkspaceCWD:   workdir,
-		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "status-startup-test",
+		StoreDir:     root,
+		WorkspaceKey: workdir,
+		WorkspaceCWD: workdir,
+		ApprovalMode: "default",
+		Assembly:     assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
@@ -1726,13 +1741,13 @@ func TestAdapterStatusUsesPersistedDefaultAliasOnStartup(t *testing.T) {
 	}
 
 	reloaded, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "status-startup-test",
-		StoreDir:       root,
-		WorkspaceKey:   workdir,
-		WorkspaceCWD:   workdir,
-		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "status-startup-test",
+		StoreDir:     root,
+		WorkspaceKey: workdir,
+		WorkspaceCWD: workdir,
+		ApprovalMode: "default",
+		Assembly:     assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack(reloaded) error = %v", err)
@@ -1753,13 +1768,13 @@ func TestAdapterStatusUsesPersistedDefaultAliasOnStartup(t *testing.T) {
 func TestAdapterStartupUsesRequestedSessionID(t *testing.T) {
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "lazy-session-test",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   t.TempDir(),
-		WorkspaceCWD:   t.TempDir(),
-		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "lazy-session-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: t.TempDir(),
+		WorkspaceCWD: t.TempDir(),
+		ApprovalMode: "default",
+		Assembly:     assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
@@ -1790,13 +1805,13 @@ func TestAdapterStartupUsesRequestedSessionID(t *testing.T) {
 func TestAdapterStartupBindsRequestedSessionInsteadOfFreshOne(t *testing.T) {
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "binding-reset-test",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   t.TempDir(),
-		WorkspaceCWD:   t.TempDir(),
-		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "binding-reset-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: t.TempDir(),
+		WorkspaceCWD: t.TempDir(),
+		ApprovalMode: "default",
+		Assembly:     assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
@@ -1835,13 +1850,13 @@ func TestAdapterStartupBindsRequestedSessionInsteadOfFreshOne(t *testing.T) {
 func TestAdapterStartupReusesExistingRequestedSession(t *testing.T) {
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "startup-resume-test",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   t.TempDir(),
-		WorkspaceCWD:   t.TempDir(),
-		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "startup-resume-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: t.TempDir(),
+		WorkspaceCWD: t.TempDir(),
+		ApprovalMode: "default",
+		Assembly:     assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
@@ -1867,13 +1882,13 @@ func TestAdapterStartupReusesExistingRequestedSession(t *testing.T) {
 func TestAdapterCycleSessionModeUsesStartupSession(t *testing.T) {
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "lazy-session-mode-test",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   t.TempDir(),
-		WorkspaceCWD:   t.TempDir(),
-		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "lazy-session-mode-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: t.TempDir(),
+		WorkspaceCWD: t.TempDir(),
+		ApprovalMode: "default",
+		Assembly:     assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
@@ -1904,13 +1919,13 @@ func TestAdapterCycleSessionModeUsesStartupSession(t *testing.T) {
 func TestAdapterSetSessionModeUpdatesLocalApprovalModeUnderACPController(t *testing.T) {
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "acp-approval-mode-test",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   t.TempDir(),
-		WorkspaceCWD:   t.TempDir(),
-		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "acp-approval-mode-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: t.TempDir(),
+		WorkspaceCWD: t.TempDir(),
+		ApprovalMode: "default",
+		Assembly:     assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
@@ -2139,13 +2154,13 @@ func TestAdapterACPStatusPrefersRemoteModeOverLocalSessionMode(t *testing.T) {
 func TestAdapterACPStatusKeepsAgentFallbackWithoutRemoteModel(t *testing.T) {
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "acp-model-fallback-test",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   t.TempDir(),
-		WorkspaceCWD:   t.TempDir(),
-		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "acp-model-fallback-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: t.TempDir(),
+		WorkspaceCWD: t.TempDir(),
+		ApprovalMode: "default",
+		Assembly:     assembly.ResolvedAssembly{},
 		Model: gatewayapp.ModelConfig{
 			Provider: "minimax",
 			Model:    "MiniMax-M2",
@@ -2197,13 +2212,13 @@ func TestAdapterACPStatusKeepsAgentFallbackWithoutRemoteModel(t *testing.T) {
 func TestAdapterIgnoresStaleSessionAliasOutsideConfiguredModels(t *testing.T) {
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "stale-session-alias-test",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   t.TempDir(),
-		WorkspaceCWD:   t.TempDir(),
-		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "stale-session-alias-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: t.TempDir(),
+		WorkspaceCWD: t.TempDir(),
+		ApprovalMode: "default",
+		Assembly:     assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
@@ -2247,13 +2262,13 @@ func TestAdapterIgnoresStaleSessionAliasOutsideConfiguredModels(t *testing.T) {
 func TestAdapterCompleteSlashArgUsesPrefixMatching(t *testing.T) {
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "prefix-test",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   t.TempDir(),
-		WorkspaceCWD:   t.TempDir(),
-		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "prefix-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: t.TempDir(),
+		WorkspaceCWD: t.TempDir(),
+		ApprovalMode: "default",
+		Assembly:     assembly.ResolvedAssembly{},
 		Model: gatewayapp.ModelConfig{
 			Provider: "ollama",
 			API:      providers.APIOllama,
@@ -2302,13 +2317,13 @@ func TestAdapterCompleteSlashArgUsesPrefixMatching(t *testing.T) {
 func TestAdapterCompleteSlashArgAgentRootOrder(t *testing.T) {
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "agent-root-order-test",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   t.TempDir(),
-		WorkspaceCWD:   t.TempDir(),
-		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "agent-root-order-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: t.TempDir(),
+		WorkspaceCWD: t.TempDir(),
+		ApprovalMode: "default",
+		Assembly:     assembly.ResolvedAssembly{},
 		Model: gatewayapp.ModelConfig{
 			Provider: "ollama",
 			API:      providers.APIOllama,
@@ -2340,13 +2355,13 @@ func TestAdapterCompleteSlashArgAgentRootOrder(t *testing.T) {
 func TestAdapterCompleteSlashArgPluginRootOrder(t *testing.T) {
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "plugin-root-order-test",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   t.TempDir(),
-		WorkspaceCWD:   t.TempDir(),
-		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "plugin-root-order-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: t.TempDir(),
+		WorkspaceCWD: t.TempDir(),
+		ApprovalMode: "default",
+		Assembly:     assembly.ResolvedAssembly{},
 		Model: gatewayapp.ModelConfig{
 			Provider: "ollama",
 			API:      providers.APIOllama,
@@ -2440,13 +2455,13 @@ func TestAdapterInterruptCancelsAgentInstall(t *testing.T) {
 	t.Setenv("PATH", binDir)
 	t.Setenv("CAELIS_NPM_STARTED", started)
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "agent-install-cancel-test",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   t.TempDir(),
-		WorkspaceCWD:   t.TempDir(),
-		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "agent-install-cancel-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: t.TempDir(),
+		WorkspaceCWD: t.TempDir(),
+		ApprovalMode: "default",
+		Assembly:     assembly.ResolvedAssembly{},
 		Model: gatewayapp.ModelConfig{
 			Provider: "ollama",
 			API:      providers.APIOllama,
@@ -2498,13 +2513,13 @@ func TestAdapterConnectPersistsMultipleProviders(t *testing.T) {
 	root := t.TempDir()
 	workdir := t.TempDir()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "multi-provider-test",
-		StoreDir:       root,
-		WorkspaceKey:   workdir,
-		WorkspaceCWD:   workdir,
-		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "multi-provider-test",
+		StoreDir:     root,
+		WorkspaceKey: workdir,
+		WorkspaceCWD: workdir,
+		ApprovalMode: "default",
+		Assembly:     assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
@@ -2613,13 +2628,13 @@ func TestAdapterConnectXiaomiTokenPlanCNStoresXiaomiProvider(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "xiaomi-token-plan-connect-test",
-		StoreDir:       root,
-		WorkspaceKey:   t.TempDir(),
-		WorkspaceCWD:   t.TempDir(),
-		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "xiaomi-token-plan-connect-test",
+		StoreDir:     root,
+		WorkspaceKey: t.TempDir(),
+		WorkspaceCWD: t.TempDir(),
+		ApprovalMode: "default",
+		Assembly:     assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
@@ -2685,13 +2700,13 @@ func TestAdapterConnectXiaomiEndpointsCoexistUnderVisibleAlias(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "xiaomi-endpoint-coexist-test",
-		StoreDir:       root,
-		WorkspaceKey:   t.TempDir(),
-		WorkspaceCWD:   t.TempDir(),
-		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "xiaomi-endpoint-coexist-test",
+		StoreDir:     root,
+		WorkspaceKey: t.TempDir(),
+		WorkspaceCWD: t.TempDir(),
+		ApprovalMode: "default",
+		Assembly:     assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
@@ -2763,13 +2778,13 @@ func TestAdapterConnectReusesExistingEndpointAuth(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "connect-reuse-auth-test",
-		StoreDir:       root,
-		WorkspaceKey:   t.TempDir(),
-		WorkspaceCWD:   t.TempDir(),
-		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "connect-reuse-auth-test",
+		StoreDir:     root,
+		WorkspaceKey: t.TempDir(),
+		WorkspaceCWD: t.TempDir(),
+		ApprovalMode: "default",
+		Assembly:     assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
@@ -2861,13 +2876,13 @@ func TestAdapterCompleteFileUsesRelativePathsAndSkipsNoise(t *testing.T) {
 	}
 
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "file-complete-test",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   workspace,
-		WorkspaceCWD:   workspace,
-		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "file-complete-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: workspace,
+		WorkspaceCWD: workspace,
+		ApprovalMode: "default",
+		Assembly:     assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
@@ -2920,13 +2935,13 @@ func TestAdapterCompleteSkillDiscoversGlobalAndWorkspaceSkills(t *testing.T) {
 	}
 
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "skill-complete-test",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   workspace,
-		WorkspaceCWD:   workspace,
-		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "skill-complete-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: workspace,
+		WorkspaceCWD: workspace,
+		ApprovalMode: "default",
+		Assembly:     assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
@@ -2961,13 +2976,13 @@ func TestAdapterCompleteSkillDiscoversGlobalAndWorkspaceSkills(t *testing.T) {
 func TestAdapterCompleteMentionReturnsACPSidecarsOnly(t *testing.T) {
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "mention-complete-test",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   t.TempDir(),
-		WorkspaceCWD:   t.TempDir(),
-		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "mention-complete-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: t.TempDir(),
+		WorkspaceCWD: t.TempDir(),
+		ApprovalMode: "default",
+		Assembly:     assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
@@ -3059,13 +3074,13 @@ func TestAdapterCompleteResumeIncludesMetadataAndRecentFirst(t *testing.T) {
 	ctx := context.Background()
 	workspace := t.TempDir()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "resume-complete-test",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   workspace,
-		WorkspaceCWD:   workspace,
-		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "resume-complete-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: workspace,
+		WorkspaceCWD: workspace,
+		ApprovalMode: "default",
+		Assembly:     assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
@@ -3127,13 +3142,13 @@ func TestAdapterCompleteResumeIncludesMetadataAndRecentFirst(t *testing.T) {
 func TestAdapterDeleteModelRejectsUnknownAlias(t *testing.T) {
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "delete-unknown-test",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   t.TempDir(),
-		WorkspaceCWD:   t.TempDir(),
-		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "delete-unknown-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: t.TempDir(),
+		WorkspaceCWD: t.TempDir(),
+		ApprovalMode: "default",
+		Assembly:     assembly.ResolvedAssembly{},
 		Model: gatewayapp.ModelConfig{
 			Provider: "ollama",
 			API:      providers.APIOllama,
@@ -3155,13 +3170,13 @@ func TestAdapterDeleteModelRejectsUnknownAlias(t *testing.T) {
 func TestAdapterConnectModelCandidatesIncludeConfiguredProviderModels(t *testing.T) {
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "connect-candidates-test",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   t.TempDir(),
-		WorkspaceCWD:   t.TempDir(),
-		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "connect-candidates-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: t.TempDir(),
+		WorkspaceCWD: t.TempDir(),
+		ApprovalMode: "default",
+		Assembly:     assembly.ResolvedAssembly{},
 		Model: gatewayapp.ModelConfig{
 			Provider: "ollama",
 			API:      providers.APIOllama,
@@ -3183,7 +3198,12 @@ func TestAdapterConnectModelCandidatesIncludeConfiguredProviderModels(t *testing
 		t.Fatalf("Connect() error = %v", err)
 	}
 
-	models, err := driver.CompleteSlashArg(ctx, "connect-model:minimax|https%3A%2F%2Fapi.minimaxi.com%2Fanthropic|60|secret|", "", 20)
+	models, err := driver.CompleteSlashArg(ctx, connectModelCompletionCommand(controlcommands.ConnectWizardState{
+		Provider:       "minimax",
+		BaseURL:        "https://api.minimaxi.com/anthropic",
+		TimeoutSeconds: controlcommands.DefaultConnectTimeoutSeconds,
+		TokenRef:       "secret",
+	}), "", 20)
 	if err != nil {
 		t.Fatalf("CompleteSlashArg(connect-model) error = %v", err)
 	}
@@ -3202,13 +3222,13 @@ func TestAdapterConnectModelCandidatesIncludeConfiguredProviderModels(t *testing
 func TestAdapterConnectRejectsMissingAPIKeyWithActionableError(t *testing.T) {
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "missing-key-test",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   t.TempDir(),
-		WorkspaceCWD:   t.TempDir(),
-		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "missing-key-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: t.TempDir(),
+		WorkspaceCWD: t.TempDir(),
+		ApprovalMode: "default",
+		Assembly:     assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
@@ -3228,13 +3248,13 @@ func TestAdapterConnectRejectsMissingAPIKeyWithActionableError(t *testing.T) {
 func TestAdapterConnectRejectsInvalidBaseURL(t *testing.T) {
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "invalid-baseurl-test",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   t.TempDir(),
-		WorkspaceCWD:   t.TempDir(),
-		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "invalid-baseurl-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: t.TempDir(),
+		WorkspaceCWD: t.TempDir(),
+		ApprovalMode: "default",
+		Assembly:     assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
@@ -3258,13 +3278,13 @@ func TestAdapterStatusIncludesDoctorDiagnostics(t *testing.T) {
 	root := t.TempDir()
 	workdir := t.TempDir()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "doctor-status-test",
-		StoreDir:       root,
-		WorkspaceKey:   workdir,
-		WorkspaceCWD:   workdir,
-		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "doctor-status-test",
+		StoreDir:     root,
+		WorkspaceKey: workdir,
+		WorkspaceCWD: workdir,
+		ApprovalMode: "default",
+		Assembly:     assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
@@ -3475,6 +3495,10 @@ func slashCandidatesHaveValue(candidates []SlashArgCandidate, value string) bool
 		}
 	}
 	return false
+}
+
+func connectModelCompletionCommand(state controlcommands.ConnectWizardState) string {
+	return "connect-model:" + state.EncodeCompletionState()
 }
 
 func candidateValues(candidates []SlashArgCandidate) []string {

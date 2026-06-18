@@ -93,20 +93,7 @@ func semanticUsageMetadata(event *session.Event) map[string]any {
 	if event == nil {
 		return nil
 	}
-	switch {
-	case event.AssistantMessage != nil:
-		return event.AssistantMessage.Metadata
-	case event.UserMessage != nil:
-		return event.UserMessage.Metadata
-	case event.SystemContext != nil:
-		return event.SystemContext.Metadata
-	case event.ToolCallPayload != nil:
-		return event.ToolCallPayload.Metadata
-	case event.ToolResultPayload != nil:
-		return event.ToolResultPayload.Metadata
-	default:
-		return nil
-	}
+	return event.Meta
 }
 
 func cachedInputTokensFromPayload(payload map[string]any) int {

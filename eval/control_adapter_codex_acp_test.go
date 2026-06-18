@@ -29,12 +29,12 @@ func TestAdapterCodexACPModelEffortE2E(t *testing.T) {
 	defer cancel()
 	workspace := t.TempDir()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "codex-acp-e2e",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   workspace,
-		WorkspaceCWD:   workspace,
-		PermissionMode: "default",
+		AppName:      "caelis",
+		UserID:       "codex-acp-e2e",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: workspace,
+		WorkspaceCWD: workspace,
+		ApprovalMode: "default",
 		Assembly: assembly.ResolvedAssembly{
 			Agents: []assembly.AgentConfig{{
 				Name:        "codex",

@@ -142,26 +142,10 @@ func subagentFrameAssistantText(frame stream.Frame) string {
 		strings.TrimSpace(update.SessionUpdate) == string(session.ProtocolUpdateTypeAgentThought) {
 		return ""
 	}
-	if event.AssistantMessage != nil {
-		return subagentAssistantMessageText(*event.AssistantMessage)
-	}
 	if event.Message != nil {
 		return event.Message.TextContent()
 	}
 	return event.Text
-}
-
-func subagentAssistantMessageText(payload session.EventMessagePayload) string {
-	if len(payload.Parts) == 0 {
-		return ""
-	}
-	texts := make([]string, 0, len(payload.Parts))
-	for _, part := range payload.Parts {
-		if part.Text != "" {
-			texts = append(texts, part.Text)
-		}
-	}
-	return strings.Join(texts, "\n")
 }
 
 func (t *subagentTask) appendStreamLocked(text string) {

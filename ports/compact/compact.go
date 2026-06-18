@@ -147,12 +147,8 @@ func PromptEventsFromLatestCompact(events []*session.Event) []*session.Event {
 	}
 	if _, ok := CompactEventDataFromEvent(visible[index]); ok {
 		out := make([]*session.Event, 0, len(visible[index:]))
-		if legacy := legacyPromptEventsFromCompactEvent(visible[index]); len(legacy) > 0 {
-			out = append(out, legacy...)
-		} else {
-			if replacement := replacementTextEvent(session.EventText(visible[index])); replacement != nil {
-				out = append(out, replacement)
-			}
+		if replacement := replacementTextEvent(session.EventText(visible[index])); replacement != nil {
+			out = append(out, replacement)
 		}
 		for _, event := range visible[index+1:] {
 			out = append(out, session.CloneEvent(event))
@@ -193,106 +189,6 @@ func lastCompactIndex(events []*session.Event) int {
 		}
 	}
 	return -1
-}
-
-func legacyPromptEventsFromCompactEvent(event *session.Event) []*session.Event {
-	if event == nil || event.Meta == nil {
-		return nil
-	}
-	raw, ok := event.Meta[MetaKeyCompact]
-	if !ok {
-		return nil
-	}
-	meta := compactMetaMap(raw)
-	if len(meta) == 0 {
-		return nil
-	}
-	if out := legacyReplacementHistoryEvents(meta["replacement_history"]); len(out) > 0 {
-		return out
-	}
-	retained := legacyRetainedUserInputs(meta["retained_user_inputs"])
-	if len(retained) == 0 {
-		return nil
-	}
-	out := make([]*session.Event, 0, len(retained)+1)
-	for _, text := range retained {
-		if replacement := replacementTextEvent(text); replacement != nil {
-			out = append(out, replacement)
-		}
-	}
-	if replacement := replacementTextEvent(session.EventText(event)); replacement != nil {
-		out = append(out, replacement)
-	}
-	return out
-}
-
-func compactMetaMap(raw any) map[string]any {
-	switch typed := raw.(type) {
-	case map[string]any:
-		return typed
-	default:
-		buf, err := json.Marshal(raw)
-		if err != nil {
-			return nil
-		}
-		out := map[string]any{}
-		if err := json.Unmarshal(buf, &out); err != nil {
-			return nil
-		}
-		return out
-	}
-}
-
-func legacyReplacementHistoryEvents(raw any) []*session.Event {
-	if raw == nil {
-		return nil
-	}
-	buf, err := json.Marshal(raw)
-	if err != nil {
-		return nil
-	}
-	var decoded []*session.Event
-	if err := json.Unmarshal(buf, &decoded); err != nil {
-		return nil
-	}
-	out := make([]*session.Event, 0, len(decoded))
-	for _, event := range decoded {
-		if event == nil || !session.IsInvocationVisibleEvent(event) {
-			continue
-		}
-		if replacement := replacementTextEvent(session.EventText(event)); replacement != nil {
-			out = append(out, replacement)
-		}
-	}
-	return out
-}
-
-func legacyRetainedUserInputs(raw any) []string {
-	if raw == nil {
-		return nil
-	}
-	buf, err := json.Marshal(raw)
-	if err != nil {
-		return nil
-	}
-	var decoded []string
-	if err := json.Unmarshal(buf, &decoded); err != nil {
-		return nil
-	}
-	out := make([]string, 0, len(decoded))
-	seen := map[string]struct{}{}
-	for _, item := range decoded {
-		item = strings.TrimSpace(item)
-		if item == "" {
-			continue
-		}
-		if _, ok := seen[item]; ok {
-			continue
-		}
-		seen[item] = struct{}{}
-		out = append(out, item)
-	}
-	return out
 }
 
 func replacementTextEvent(text string) *session.Event {

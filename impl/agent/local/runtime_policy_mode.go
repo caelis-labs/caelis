@@ -16,10 +16,6 @@ func (r *Runtime) policyMode(spec agent.AgentSpec) string {
 		if trimmed := strings.TrimSpace(raw); trimmed != "" {
 			mode = trimmed
 		}
-	} else if raw, ok := spec.Metadata[policy.MetadataLegacyPolicyMode].(string); ok {
-		if trimmed := strings.TrimSpace(raw); trimmed != "" {
-			mode = trimmed
-		}
 	}
 	return normalizePolicyMode(mode)
 }

@@ -17,13 +17,13 @@ func newRegressionDriver(t *testing.T) (*Adapter, *gatewayapp.Stack) {
 	storeDir := t.TempDir()
 	workspace := t.TempDir()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "regression-user",
-		StoreDir:       storeDir,
-		WorkspaceKey:   "regression-workspace",
-		WorkspaceCWD:   workspace,
-		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "regression-user",
+		StoreDir:     storeDir,
+		WorkspaceKey: "regression-workspace",
+		WorkspaceCWD: workspace,
+		ApprovalMode: "default",
+		Assembly:     assembly.ResolvedAssembly{},
 		Sandbox: gatewayapp.SandboxConfig{
 			RequestedType: "host",
 		},
@@ -72,13 +72,13 @@ func TestRegressionCommandStatusAfterLazySession(t *testing.T) {
 	storeDir := t.TempDir()
 	workspace := t.TempDir()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "lazy-regression",
-		StoreDir:       storeDir,
-		WorkspaceKey:   workspace,
-		WorkspaceCWD:   workspace,
-		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "lazy-regression",
+		StoreDir:     storeDir,
+		WorkspaceKey: workspace,
+		WorkspaceCWD: workspace,
+		ApprovalMode: "default",
+		Assembly:     assembly.ResolvedAssembly{},
 		Model: gatewayapp.ModelConfig{
 			Provider: "ollama",
 			API:      providers.APIOllama,
@@ -436,13 +436,13 @@ func TestRegressionCommandNewDriverWithSandboxConfig(t *testing.T) {
 	storeDir := t.TempDir()
 	workspace := t.TempDir()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "sandbox-regression",
-		StoreDir:       storeDir,
-		WorkspaceKey:   "sandbox-workspace",
-		WorkspaceCWD:   workspace,
-		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "sandbox-regression",
+		StoreDir:     storeDir,
+		WorkspaceKey: "sandbox-workspace",
+		WorkspaceCWD: workspace,
+		ApprovalMode: "default",
+		Assembly:     assembly.ResolvedAssembly{},
 		Sandbox: gatewayapp.SandboxConfig{
 			RequestedType: "host",
 			HelperPath:    filepath.Join(t.TempDir(), "missing-helper"),

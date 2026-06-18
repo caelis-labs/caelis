@@ -19,12 +19,6 @@ const (
 	// model reference selected by the TUI. Newer clients store stable model IDs
 	// here; older session state may still contain visible model aliases.
 	StateCurrentModelAlias = "gateway.current_model_alias"
-	// StateCurrentSandboxMode is the legacy durable session-state key used by
-	// older TUI builds before session mode and sandbox backend were split.
-	StateCurrentSandboxMode = "gateway.current_sandbox_mode"
-	// StateCurrentSessionMode is the legacy durable session-state key for a
-	// per-session approval mode override selected by the TUI.
-	StateCurrentSessionMode = "gateway.current_session_mode"
 	// StateCurrentApprovalMode is the durable session-state key for a
 	// per-session approval routing override selected by the TUI.
 	StateCurrentApprovalMode = "gateway.current_approval_mode"
@@ -38,6 +32,11 @@ const (
 	// token usage bookkeeping that must not enter canonical prompt history.
 	StateUsageAccounting = "gateway.usage.v1"
 )
+
+var unsupportedLegacyStateKeys = []string{
+	"gateway.current_session_mode",
+	"gateway.current_sandbox_mode",
+}
 
 type ModelResolution struct {
 	Model                  model.LLM
@@ -137,6 +136,9 @@ func (r *AssemblyResolver) ResolveTurn(ctx context.Context, intent TurnIntent) (
 	if err != nil {
 		return ResolvedTurn{}, err
 	}
+	if key := unsupportedLegacyStateKey(state); key != "" {
+		return ResolvedTurn{}, fmt.Errorf("gateway: %w: session state contains legacy key %q", session.ErrUnsupportedLegacyFormat, key)
+	}
 	snap := r.snapshot()
 	if snap.modelLookup == nil {
 		return ResolvedTurn{}, fmt.Errorf("gateway: model lookup is required")
@@ -165,6 +167,9 @@ func (r *AssemblyResolver) ResolveControllerTurn(ctx context.Context, intent Tur
 	state, err := r.snapshotState(ctx, intent.SessionRef)
 	if err != nil {
 		return ResolvedTurn{}, err
+	}
+	if key := unsupportedLegacyStateKey(state); key != "" {
+		return ResolvedTurn{}, fmt.Errorf("gateway: %w: session state contains legacy key %q", session.ErrUnsupportedLegacyFormat, key)
 	}
 	spec, err := resolveAgentSpecWith(ctx, r.snapshot(), intent, state, ModelResolution{})
 	if err != nil {
@@ -373,16 +378,6 @@ func CurrentReasoningEffort(state map[string]any) string {
 	return strings.TrimSpace(value)
 }
 
-// CurrentSandboxMode returns the legacy raw sandbox mode value from session
-// state. New code should prefer CurrentSessionMode.
-func CurrentSandboxMode(state map[string]any) string {
-	if state == nil {
-		return ""
-	}
-	value, _ := state[StateCurrentSandboxMode].(string)
-	return strings.TrimSpace(value)
-}
-
 // CurrentSessionMode returns the normalized per-session approval routing mode.
 func CurrentSessionMode(state map[string]any) string {
 	return string(CurrentApprovalMode(state))
@@ -407,10 +402,16 @@ func currentApprovalModeOverride(state map[string]any) (ApprovalMode, bool) {
 	if value, _ := state[StateCurrentApprovalMode].(string); strings.TrimSpace(value) != "" {
 		return NormalizeApprovalMode(value), true
 	}
-	if value, _ := state[StateCurrentSessionMode].(string); strings.TrimSpace(value) != "" {
-		return NormalizeApprovalMode(value), true
-	}
 	return ApprovalModeAutoReview, false
+}
+
+func unsupportedLegacyStateKey(state map[string]any) string {
+	for _, key := range unsupportedLegacyStateKeys {
+		if value, _ := state[key].(string); strings.TrimSpace(value) != "" {
+			return key
+		}
+	}
+	return ""
 }
 
 func normalizeSessionMode(mode string) string {
@@ -597,10 +598,7 @@ func mergeStringSliceMetadata(existing any, values []string) []string {
 }
 
 func metadataPolicyProfile(metadata map[string]any) string {
-	if profile := policyapi.NormalizeProfileName(stringMetadata(metadata, policyapi.MetadataPolicyProfile)); profile != "" {
-		return profile
-	}
-	return policyapi.NormalizeProfileName(stringMetadata(metadata, policyapi.MetadataLegacyPolicyMode))
+	return policyapi.NormalizeProfileName(stringMetadata(metadata, policyapi.MetadataPolicyProfile))
 }
 
 func stringMetadata(metadata map[string]any, key string) string {

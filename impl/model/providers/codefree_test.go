@@ -225,33 +225,23 @@ func TestResolveCodeFreeCredentialPath_DefaultsToCaelisStore(t *testing.T) {
 	}
 }
 
-func TestReadCodeFreeStoredCredentials_ImportsLegacyCodeFreeCredsIntoCaelisStore(t *testing.T) {
+func TestReadCodeFreeStoredCredentialsIgnoresLegacyCodeFreeCreds(t *testing.T) {
 	home := t.TempDir()
 	setHomeForCodeFreeTest(t, home)
 	t.Setenv(codeFreeCredsPathEnv, "")
 
-	primary, legacy, err := resolveCodeFreeDefaultCredentialPaths()
+	primary, err := resolveCodeFreeDefaultCredentialPath()
 	if err != nil {
-		t.Fatalf("resolveCodeFreeDefaultCredentialPaths() error = %v", err)
+		t.Fatalf("resolveCodeFreeDefaultCredentialPath() error = %v", err)
 	}
+	legacy := filepath.Join(home, ".codefree-cli", codeFreeDefaultCredentialFile)
 	writeCodeFreeCredsAtPathForTest(t, legacy, "272182", "legacy-api-key")
 
-	stored, err := readCodeFreeStoredCredentials()
-	if err != nil {
-		t.Fatalf("readCodeFreeStoredCredentials() error = %v", err)
+	if _, err := readCodeFreeStoredCredentials(); err == nil {
+		t.Fatal("readCodeFreeStoredCredentials() error = nil, want missing current credentials")
 	}
-	if stored.Path != primary {
-		t.Fatalf("stored path = %q, want %q", stored.Path, primary)
-	}
-	creds, err := finalizeCodeFreeCredentials(stored)
-	if err != nil {
-		t.Fatalf("finalizeCodeFreeCredentials() error = %v", err)
-	}
-	if creds.APIKey != "legacy-api-key" {
-		t.Fatalf("apikey = %q, want legacy-api-key", creds.APIKey)
-	}
-	if _, err := os.Stat(primary); err != nil {
-		t.Fatalf("expected imported credentials at %q: %v", primary, err)
+	if _, err := os.Stat(primary); err == nil {
+		t.Fatalf("unexpected imported credentials at %q", primary)
 	}
 	if _, err := os.Stat(legacy); err != nil {
 		t.Fatalf("expected legacy credentials to remain at %q: %v", legacy, err)

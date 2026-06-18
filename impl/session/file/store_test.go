@@ -87,7 +87,7 @@ func TestStoreAppendAndPersistCanonicalEvents(t *testing.T) {
 	}
 }
 
-func TestStoreAppendMigratesProtocolOnlyCoreToolResult(t *testing.T) {
+func TestStoreAppendRejectsProtocolOnlyCoreToolResult(t *testing.T) {
 	t.Parallel()
 
 	store := NewStore(Config{
@@ -103,7 +103,7 @@ func TestStoreAppendMigratesProtocolOnlyCoreToolResult(t *testing.T) {
 		t.Fatalf("GetOrCreate() error = %v", err)
 	}
 
-	appended, err := store.AppendEvent(ctx, createdSession.SessionRef, &session.Event{
+	_, err = store.AppendEvent(ctx, createdSession.SessionRef, &session.Event{
 		Type: session.EventTypeToolResult,
 		Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
 			SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate),
@@ -112,29 +112,108 @@ func TestStoreAppendMigratesProtocolOnlyCoreToolResult(t *testing.T) {
 			RawOutput:     map[string]any{"stdout": "ok"},
 		}},
 	})
+	if err == nil {
+		t.Fatal("AppendEvent() error = nil, want protocol-only tool result rejected")
+	}
+	if detail := session.EventValidationDetail(err); !strings.Contains(detail, "Event.Tool") {
+		t.Fatalf("validation detail = %q, want missing Event.Tool", detail)
+	}
+}
+
+func TestStoreEventsRejectsLegacySemanticEventLog(t *testing.T) {
+	t.Parallel()
+
+	store := NewStore(Config{
+		RootDir:            t.TempDir(),
+		SessionIDGenerator: func() string { return "sess-1" },
+	})
+	ctx := context.Background()
+	createdSession, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+		AppName: "caelis",
+		UserID:  "user-1",
+	})
 	if err != nil {
-		t.Fatalf("AppendEvent() error = %v, want protocol-only tool result migrated", err)
+		t.Fatalf("GetOrCreate() error = %v", err)
 	}
-	if appended == nil || appended.ToolResultPayload == nil {
-		t.Fatalf("AppendEvent() = %#v, want semantic tool_result payload", appended)
+	writeRawEventLogForTest(t, store, createdSession, `{"id":"evt-legacy","type":"user","visibility":"canonical","user_message":{"role":"user","parts":[{"kind":"text","text":"hello"}]}}`)
+
+	_, err = store.Events(ctx, session.EventsRequest{SessionRef: createdSession.SessionRef})
+	if !errors.Is(err, session.ErrUnsupportedLegacyFormat) {
+		t.Fatalf("Events() error = %v, want ErrUnsupportedLegacyFormat", err)
 	}
-	if appended.Message != nil || appended.Tool != nil || appended.Protocol != nil || appended.Meta != nil {
-		t.Fatalf("legacy projection persisted in append result: message=%#v tool=%#v protocol=%#v meta=%#v", appended.Message, appended.Tool, appended.Protocol, appended.Meta)
+	if !strings.Contains(err.Error(), "legacy semantic field") {
+		t.Fatalf("Events() error = %v, want legacy semantic field detail", err)
 	}
-	events, err := store.Events(ctx, session.EventsRequest{SessionRef: createdSession.SessionRef})
+}
+
+func TestStoreEventsRejectsLegacyEmbeddedDocumentEvents(t *testing.T) {
+	t.Parallel()
+
+	store := NewStore(Config{
+		RootDir:            t.TempDir(),
+		SessionIDGenerator: func() string { return "sess-1" },
+	})
+	ctx := context.Background()
+	createdSession, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+		AppName: "caelis",
+		UserID:  "user-1",
+	})
 	if err != nil {
-		t.Fatalf("Events() error = %v", err)
+		t.Fatalf("GetOrCreate() error = %v", err)
 	}
-	if len(events) != 1 || events[0].ToolResultPayload == nil {
-		t.Fatalf("Events() = %#v, want one semantic tool_result event", events)
+	path, err := store.resolveWritePath(createdSession)
+	if err != nil {
+		t.Fatalf("resolveWritePath() error = %v", err)
 	}
-	message, ok := session.ModelMessageOf(events[0])
-	if !ok || len(message.ToolResults()) != 1 {
-		t.Fatalf("ModelMessageOf() = %#v, %v; want one tool result", message, ok)
+	raw := map[string]any{
+		"kind":    documentKind,
+		"version": documentVersion,
+		"session": createdSession,
+		"events": []any{
+			map[string]any{"id": "evt-embedded", "type": "user"},
+		},
+		"state": map[string]any{},
 	}
-	result := message.ToolResults()[0]
-	if result.ToolUseID != "call-1" || result.Name != "RUN_COMMAND" {
-		t.Fatalf("tool result = %#v, want call-1/RUN_COMMAND", result)
+	data, err := json.Marshal(raw)
+	if err != nil {
+		t.Fatalf("Marshal(legacy doc) error = %v", err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("WriteFile(legacy doc) error = %v", err)
+	}
+
+	_, err = store.Events(ctx, session.EventsRequest{SessionRef: createdSession.SessionRef})
+	if !errors.Is(err, session.ErrUnsupportedLegacyFormat) {
+		t.Fatalf("Events() error = %v, want ErrUnsupportedLegacyFormat", err)
+	}
+	if !strings.Contains(err.Error(), "legacy embedded events") {
+		t.Fatalf("Events() error = %v, want embedded events detail", err)
+	}
+}
+
+func TestStoreEventsRejectsInvalidEventLog(t *testing.T) {
+	t.Parallel()
+
+	store := NewStore(Config{
+		RootDir:            t.TempDir(),
+		SessionIDGenerator: func() string { return "sess-1" },
+	})
+	ctx := context.Background()
+	createdSession, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+		AppName: "caelis",
+		UserID:  "user-1",
+	})
+	if err != nil {
+		t.Fatalf("GetOrCreate() error = %v", err)
+	}
+	writeRawEventLogForTest(t, store, createdSession, `{"id":"evt-invalid","type":"user","visibility":"canonical"}`)
+
+	_, err = store.Events(ctx, session.EventsRequest{SessionRef: createdSession.SessionRef})
+	if !errors.Is(err, session.ErrInvalidEvent) {
+		t.Fatalf("Events() error = %v, want ErrInvalidEvent", err)
+	}
+	if detail := session.EventValidationDetail(err); !strings.Contains(detail, "Event.Message") {
+		t.Fatalf("validation detail = %q, want missing Event.Message", detail)
 	}
 }
 
@@ -190,7 +269,7 @@ func TestStoreAppendSkipsHiddenPluginContextForGeneratedTitle(t *testing.T) {
 	}
 }
 
-func TestStoreLoadMigratesLegacyToolResultNameCaseMismatch(t *testing.T) {
+func TestStoreLoadRejectsToolResultNameMismatch(t *testing.T) {
 	t.Parallel()
 
 	store := NewStore(Config{
@@ -247,30 +326,12 @@ func TestStoreLoadMigratesLegacyToolResultNameCaseMismatch(t *testing.T) {
 		t.Fatalf("appendEventLog() error = %v", err)
 	}
 
-	loaded, err := NewService(store).LoadSession(ctx, session.LoadSessionRequest{SessionRef: createdSession.SessionRef})
-	if err != nil {
-		t.Fatalf("LoadSession() error = %v", err)
+	_, err = NewService(store).LoadSession(ctx, session.LoadSessionRequest{SessionRef: createdSession.SessionRef})
+	if !errors.Is(err, session.ErrInvalidEvent) {
+		t.Fatalf("LoadSession() error = %v, want ErrInvalidEvent", err)
 	}
-	if len(loaded.Events) != 1 {
-		t.Fatalf("len(loaded.Events) = %d, want 1", len(loaded.Events))
-	}
-	event := loaded.Events[0]
-	if event.Schema != session.EventSchemaSemanticV2 || event.ToolResultPayload == nil {
-		t.Fatalf("loaded event = %#v, want v2 semantic tool_result", event)
-	}
-	if event.Message != nil || event.Tool != nil || event.Protocol != nil || event.Meta != nil {
-		t.Fatalf("legacy fields survived migration: message=%#v tool=%#v protocol=%#v meta=%#v", event.Message, event.Tool, event.Protocol, event.Meta)
-	}
-	if err := session.ValidateDurableCoreEvent(event); err != nil {
-		t.Fatalf("ValidateDurableCoreEvent() error = %v", err)
-	}
-	projected, ok := session.ModelMessageOf(event)
-	if !ok || len(projected.ToolResults()) != 1 {
-		t.Fatalf("ModelMessageOf() = %#v, %v; want one tool result", projected, ok)
-	}
-	result := projected.ToolResults()[0]
-	if result.ToolUseID != "call-1" || result.Name != "Write" {
-		t.Fatalf("projected tool result = %#v, want call-1/Write", result)
+	if detail := session.EventValidationDetail(err); !strings.Contains(detail, "name") {
+		t.Fatalf("validation detail = %q, want name mismatch detail", detail)
 	}
 }
 
@@ -1288,7 +1349,7 @@ func TestStoreRequiresWorkspaceKeyWhenSessionIDMatchesMultipleWorkspaces(t *test
 	}
 }
 
-func TestStorePreservesLegacyFlatSessionDocuments(t *testing.T) {
+func TestStoreIgnoresLegacyFlatSessionDocuments(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -1311,19 +1372,43 @@ func TestStorePreservesLegacyFlatSessionDocuments(t *testing.T) {
 		RootDir:            root,
 		SessionIDGenerator: func() string { return "sess-2" },
 	})
-	if _, err := store.GetOrCreate(context.Background(), session.StartSessionRequest{
-		AppName: "caelis",
-		UserID:  "user-1",
-		Workspace: session.WorkspaceRef{
-			Key: "ws-1",
-			CWD: "/tmp/ws",
-		},
-	}); err != nil {
-		t.Fatalf("GetOrCreate() error = %v", err)
+	if _, err := store.Get(context.Background(), session.SessionRef{
+		AppName:      "caelis",
+		UserID:       "user-1",
+		SessionID:    "session-1",
+		WorkspaceKey: "ws-1",
+	}); !errors.Is(err, session.ErrSessionNotFound) {
+		t.Fatalf("Get(legacy flat) error = %v, want ErrSessionNotFound", err)
 	}
 
-	if _, err := os.Stat(legacyPath); err != nil {
-		t.Fatalf("legacy flat session document must be preserved, stat err = %v", err)
+	list, err := store.List(context.Background(), session.ListSessionsRequest{
+		AppName: "caelis",
+		UserID:  "user-1",
+	})
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(list.Sessions) != 0 {
+		t.Fatalf("List() = %#v, want legacy flat document ignored", list.Sessions)
+	}
+}
+
+func writeRawEventLogForTest(t *testing.T, store *Store, sess session.Session, lines ...string) {
+	t.Helper()
+	path, err := store.resolveWritePath(sess)
+	if err != nil {
+		t.Fatalf("resolveWritePath() error = %v", err)
+	}
+	logPath := eventLogPath(path)
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o700); err != nil {
+		t.Fatalf("MkdirAll(event log dir) error = %v", err)
+	}
+	data := strings.Join(lines, "\n")
+	if data != "" {
+		data += "\n"
+	}
+	if err := os.WriteFile(logPath, []byte(data), 0o600); err != nil {
+		t.Fatalf("WriteFile(event log) error = %v", err)
 	}
 }
 

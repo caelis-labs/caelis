@@ -315,7 +315,7 @@ func inferredToolCallUpdates(event *session.Event) []Update {
 	if event == nil {
 		return nil
 	}
-	if event.Tool != nil || event.ToolCallPayload != nil {
+	if event.Tool != nil {
 		return explicitToolCallUpdates(event)
 	}
 	if event.Protocol != nil && event.Protocol.ToolCall != nil {
@@ -363,12 +363,6 @@ func toolCallForEvent(event *session.Event) (ToolCall, bool, error) {
 	}
 	if event.Tool != nil {
 		return toolCallFromEventToolPayload(event.Tool), true, nil
-	}
-	if event.ToolCallPayload != nil {
-		projected := session.EventToolProjection(event)
-		if projected != nil {
-			return toolCallFromEventToolPayload(projected), true, nil
-		}
 	}
 	if event.Protocol != nil && event.Protocol.Update != nil {
 		update := session.ProtocolUpdateOf(event)
@@ -496,12 +490,6 @@ func toolCallUpdateForEvent(event *session.Event) (ToolCallUpdate, bool, error) 
 			}
 		}
 		return update, true, nil
-	}
-	if event.ToolResultPayload != nil {
-		projected := session.EventToolProjection(event)
-		if projected != nil {
-			return toolCallUpdateFromEventToolPayload(projected), true, nil
-		}
 	}
 	if event.Message == nil {
 		return ToolCallUpdate{}, false, nil

@@ -511,64 +511,6 @@ func TestSlashPluginMarketplaceMissingActionShowsUsage(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// /plugin enable / disable legacy subcommands
-// ---------------------------------------------------------------------------
-
-func TestSlashPluginEnableShowsUsage(t *testing.T) {
-	called := false
-	svc := &pluginStubService{
-		enableFn: func(ctx context.Context, id string) (control.PluginSnapshot, error) {
-			called = true
-			return control.PluginSnapshot{ID: id, Enabled: true, Status: "active"}, nil
-		},
-	}
-	result, notices := runPluginCmd(svc, "enable myplugin")
-	if result.Err != nil {
-		t.Fatalf("expected no error, got %v", result.Err)
-	}
-	if called {
-		t.Fatal("enable service should not be called by legacy subcommand")
-	}
-	combined := strings.Join(notices, "\n")
-	if !strings.Contains(combined, "usage") || strings.Contains(combined, "enable <id>") {
-		t.Errorf("expected updated usage without enable subcommand, got: %q", combined)
-	}
-}
-
-func TestSlashPluginEnableMissingID(t *testing.T) {
-	svc := &pluginStubService{}
-	result, notices := runPluginCmd(svc, "enable")
-	if result.Err != nil {
-		t.Fatalf("missing id should not return error, got %v", result.Err)
-	}
-	combined := strings.Join(notices, "\n")
-	if !strings.Contains(combined, "usage") {
-		t.Errorf("expected usage hint, got: %q", combined)
-	}
-}
-
-func TestSlashPluginDisableShowsUsage(t *testing.T) {
-	called := false
-	svc := &pluginStubService{
-		disableFn: func(ctx context.Context, id string) (control.PluginSnapshot, error) {
-			called = true
-			return control.PluginSnapshot{ID: id, Enabled: false, Status: "inactive"}, nil
-		},
-	}
-	result, notices := runPluginCmd(svc, "disable myplugin")
-	if result.Err != nil {
-		t.Fatalf("expected no error, got %v", result.Err)
-	}
-	if called {
-		t.Fatal("disable service should not be called by legacy subcommand")
-	}
-	combined := strings.Join(notices, "\n")
-	if !strings.Contains(combined, "usage") || strings.Contains(combined, "disable <id>") {
-		t.Errorf("expected updated usage without disable subcommand, got: %q", combined)
-	}
-}
-
-// ---------------------------------------------------------------------------
 // /plugin rm
 // ---------------------------------------------------------------------------
 

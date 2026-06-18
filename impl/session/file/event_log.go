@@ -19,47 +19,7 @@ func (s *Store) eventsForDocument(doc persistedDocument) ([]*session.Event, erro
 	if err != nil {
 		return nil, err
 	}
-	events := persistedEvents(doc.Events)
-	logEvents, err := s.readEventLog(path)
-	if err != nil {
-		return nil, err
-	}
-	events = append(events, logEvents...)
-	return session.CloneEvents(events), nil
-}
-
-func (s *Store) migrateDocumentEventsToLog(doc *persistedDocument) error {
-	if doc == nil || len(doc.Events) == 0 {
-		return nil
-	}
-	events := persistedEvents(doc.Events)
-	doc.Events = nil
-	if len(events) == 0 {
-		return nil
-	}
-	path, err := s.resolveWritePath(doc.Session)
-	if err != nil {
-		return err
-	}
-	existing, err := s.readEventLogIDs(path)
-	if err != nil {
-		return err
-	}
-	missing := make([]*session.Event, 0, len(events))
-	for _, event := range events {
-		if event == nil {
-			continue
-		}
-		id := strings.TrimSpace(event.ID)
-		if id != "" && existing[id] {
-			continue
-		}
-		missing = append(missing, event)
-	}
-	if len(missing) == 0 {
-		return nil
-	}
-	return s.appendEventLog(path, missing)
+	return s.readEventLog(path)
 }
 
 func (s *Store) appendEventLog(documentPath string, events []*session.Event) error {
@@ -130,19 +90,27 @@ func (s *Store) readEventLog(documentPath string) ([]*session.Event, error) {
 	defer file.Close()
 	reader := bufio.NewReader(file)
 	events := make([]*session.Event, 0)
+	lineNo := 0
 	for {
 		line, readErr := reader.ReadString('\n')
+		lineNo++
 		if readErr != nil && !errors.Is(readErr, io.EOF) {
 			return nil, readErr
 		}
 		trimmed := strings.TrimSpace(line)
 		if trimmed != "" {
+			if err := rejectUnsupportedLegacyEventLogLine([]byte(trimmed), path, lineNo); err != nil {
+				return nil, err
+			}
 			var event session.Event
 			if err := json.Unmarshal([]byte(trimmed), &event); err != nil {
 				if errors.Is(readErr, io.EOF) {
 					break
 				}
 				return nil, fmt.Errorf("impl/session/file: decode event log %s: %w", path, err)
+			}
+			if err := session.ValidateDurableCoreEvent(&event); err != nil {
+				return nil, fmt.Errorf("impl/session/file: invalid event log %s line %d: %w", path, lineNo, err)
 			}
 			events = append(events, session.CloneEvent(&event))
 		}
@@ -151,6 +119,25 @@ func (s *Store) readEventLog(documentPath string) ([]*session.Event, error) {
 		}
 	}
 	return events, nil
+}
+
+func rejectUnsupportedLegacyEventLogLine(data []byte, path string, lineNo int) error {
+	var root map[string]json.RawMessage
+	if err := json.Unmarshal(data, &root); err != nil {
+		return nil
+	}
+	for _, key := range []string{
+		"user_message",
+		"assistant_message",
+		"system_context",
+		"tool_call",
+		"tool_result",
+	} {
+		if raw, ok := root[key]; ok && len(raw) > 0 && strings.TrimSpace(string(raw)) != "null" {
+			return fmt.Errorf("impl/session/file: %w: event log %s line %d contains legacy semantic field %q", session.ErrUnsupportedLegacyFormat, path, lineNo, key)
+		}
+	}
+	return nil
 }
 
 func truncatePartialEventLogTail(path string) error {

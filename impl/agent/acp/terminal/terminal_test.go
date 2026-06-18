@@ -91,8 +91,8 @@ func TestRefFromEventUsesSemanticToolResultTaskMetadata(t *testing.T) {
 			},
 		},
 	})
-	if event.Meta != nil || event.Tool != nil || event.Protocol != nil {
-		t.Fatalf("canonical event kept legacy projections: tool=%#v protocol=%#v meta=%#v", event.Tool, event.Protocol, event.Meta)
+	if event.Meta == nil || event.Tool == nil {
+		t.Fatalf("canonical event lost durable tool metadata: tool=%#v meta=%#v", event.Tool, event.Meta)
 	}
 	ref, ok := RefFromEvent(event)
 	if !ok {

@@ -249,9 +249,6 @@ func (s *Store) AppendEvent(
 			return err
 		}
 		s.ensureUniqueEventID(normalized, existingEventIDSet(existingEvents))
-		if err := s.migrateDocumentEventsToLog(&doc); err != nil {
-			return err
-		}
 		path, err := s.resolveWritePath(doc.Session)
 		if err != nil {
 			return err

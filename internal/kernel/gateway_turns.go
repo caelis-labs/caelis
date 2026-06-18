@@ -190,16 +190,7 @@ func normalizeRunRequestPolicyProfile(req *agent.RunRequest) {
 		req.AgentSpec.Metadata[policyapi.MetadataPolicyProfile] = profile
 		return
 	}
-	raw, ok := req.AgentSpec.Metadata[policyapi.MetadataLegacyPolicyMode].(string)
-	if !ok {
-		return
-	}
-	profile := policyapi.NormalizeProfileName(raw)
 	delete(req.AgentSpec.Metadata, policyapi.MetadataLegacyPolicyMode)
-	if profile == "" {
-		return
-	}
-	req.AgentSpec.Metadata[policyapi.MetadataPolicyProfile] = profile
 }
 
 func (g *Gateway) runParticipantTurn(

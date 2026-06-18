@@ -14,15 +14,15 @@ func newCommandExecDriver(t *testing.T, modelCfg gatewayapp.ModelConfig) (*Adapt
 	t.Helper()
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "cmd-exec-test",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   "cmd-exec-workspace",
-		WorkspaceCWD:   t.TempDir(),
-		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
-		Sandbox:        gatewayapp.SandboxConfig{RequestedType: "host"},
-		Model:          modelCfg,
+		AppName:      "caelis",
+		UserID:       "cmd-exec-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: "cmd-exec-workspace",
+		WorkspaceCWD: t.TempDir(),
+		ApprovalMode: "default",
+		Assembly:     assembly.ResolvedAssembly{},
+		Sandbox:      gatewayapp.SandboxConfig{RequestedType: "host"},
+		Model:        modelCfg,
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
@@ -103,14 +103,14 @@ func TestRegressionCommandExecModelUseWithReasoning(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "reasoning-test",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   t.TempDir(),
-		WorkspaceCWD:   t.TempDir(),
-		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
-		Sandbox:        gatewayapp.SandboxConfig{RequestedType: "host"},
+		AppName:      "caelis",
+		UserID:       "reasoning-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: t.TempDir(),
+		WorkspaceCWD: t.TempDir(),
+		ApprovalMode: "default",
+		Assembly:     assembly.ResolvedAssembly{},
+		Sandbox:      gatewayapp.SandboxConfig{RequestedType: "host"},
 		Model: gatewayapp.ModelConfig{
 			Provider:        "ollama",
 			API:             providers.APIOllama,
@@ -191,13 +191,13 @@ func TestRegressionCommandExecDeleteCurrentModelClearsStatus(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "delete-current-test",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   t.TempDir(),
-		WorkspaceCWD:   t.TempDir(),
-		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
+		AppName:      "caelis",
+		UserID:       "delete-current-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: t.TempDir(),
+		WorkspaceCWD: t.TempDir(),
+		ApprovalMode: "default",
+		Assembly:     assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
@@ -628,14 +628,14 @@ func TestRegressionCommandExecModelReasoningCompletion(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "reasoning-completion",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   t.TempDir(),
-		WorkspaceCWD:   t.TempDir(),
-		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
-		Sandbox:        gatewayapp.SandboxConfig{RequestedType: "host"},
+		AppName:      "caelis",
+		UserID:       "reasoning-completion",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: t.TempDir(),
+		WorkspaceCWD: t.TempDir(),
+		ApprovalMode: "default",
+		Assembly:     assembly.ResolvedAssembly{},
+		Sandbox:      gatewayapp.SandboxConfig{RequestedType: "host"},
 		Model: gatewayapp.ModelConfig{
 			Provider:        "ollama",
 			API:             providers.APIOllama,

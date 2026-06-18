@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
@@ -40,6 +41,9 @@ func (s *Store) readDocumentAt(path string) (persistedDocument, error) {
 		}
 		return persistedDocument{}, err
 	}
+	if err := rejectUnsupportedLegacyDocument(data, path); err != nil {
+		return persistedDocument{}, err
+	}
 	var doc persistedDocument
 	if err := json.Unmarshal(data, &doc); err != nil {
 		return persistedDocument{}, fmt.Errorf("impl/session/file: decode %s: %w", path, err)
@@ -52,21 +56,39 @@ func (s *Store) readDocumentAt(path string) (persistedDocument, error) {
 		)
 	}
 	doc.Session = session.CloneSession(doc.Session)
-	doc.Events = session.CloneEvents(doc.Events)
 	if doc.State != nil {
 		doc.State = cloneState(doc.State)
 	}
 	return doc, nil
 }
 
+func rejectUnsupportedLegacyDocument(data []byte, path string) error {
+	var root map[string]json.RawMessage
+	if err := json.Unmarshal(data, &root); err != nil {
+		return nil
+	}
+	raw, ok := root["events"]
+	if !ok {
+		return nil
+	}
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "null" {
+		return nil
+	}
+	var events []json.RawMessage
+	if err := json.Unmarshal(raw, &events); err != nil {
+		return fmt.Errorf("impl/session/file: %w: session document %s has legacy embedded events", session.ErrUnsupportedLegacyFormat, path)
+	}
+	if len(events) == 0 {
+		return nil
+	}
+	return fmt.Errorf("impl/session/file: %w: session document %s has legacy embedded events", session.ErrUnsupportedLegacyFormat, path)
+}
+
 func (s *Store) writeDocument(doc persistedDocument) error {
 	doc.Kind = documentKind
 	doc.Version = documentVersion
 	doc.Session = session.CloneSession(doc.Session)
-	if err := s.migrateDocumentEventsToLog(&doc); err != nil {
-		return err
-	}
-	doc.Events = nil
 	doc.State = cloneState(doc.State)
 
 	data, err := json.MarshalIndent(doc, "", "  ")

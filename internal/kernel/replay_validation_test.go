@@ -145,7 +145,7 @@ func TestValidateReplaySessionEventsRejectsProtocolOnlyToolCall(t *testing.T) {
 	}
 }
 
-func TestValidateReplaySessionEventsAllowsModelToolCallPayload(t *testing.T) {
+func TestValidateReplaySessionEventsAllowsCanonicalToolCallPayload(t *testing.T) {
 	t.Parallel()
 
 	args, err := json.Marshal(map[string]any{"command": "echo hi"})
@@ -161,8 +161,14 @@ func TestValidateReplaySessionEventsAllowsModelToolCallPayload(t *testing.T) {
 		ID:      "tool-call-message",
 		Type:    session.EventTypeToolCall,
 		Message: &msg,
+		Tool: &session.EventTool{
+			ID:     "call-1",
+			Name:   "RUN_COMMAND",
+			Input:  map[string]any{"command": "echo hi"},
+			Status: "pending",
+		},
 	}})
 	if err != nil {
-		t.Fatalf("validateReplaySessionEvents() error = %v, want canonical model tool-call payload accepted", err)
+		t.Fatalf("validateReplaySessionEvents() error = %v, want canonical tool-call payload accepted", err)
 	}
 }

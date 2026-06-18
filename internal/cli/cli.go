@@ -82,7 +82,6 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 		systemPrompt     = fs.String("system-prompt", envOr("CAELIS_SYSTEM_PROMPT", ""), "Session override text to append into the assembled system prompt")
 		approvalMode     = fs.String("approval-mode", envOr("CAELIS_APPROVAL_MODE", ""), "Approval mode: auto-review|manual")
 		policyProfile    = fs.String("policy-profile", envOr("CAELIS_POLICY_PROFILE", ""), "Policy profile: workspace-write")
-		permissionMode   = fs.String("permission-mode", envOr("CAELIS_PERMISSION_MODE", ""), "Legacy approval mode: auto-review|manual")
 		modelAlias       = fs.String("model-alias", envOr("CAELIS_MODEL_ALIAS", ""), "Model alias")
 		modelProvider    = fs.String("provider", envOr("CAELIS_MODEL_PROVIDER", ""), "Model provider name")
 		modelAPI         = fs.String("api", envOr("CAELIS_MODEL_API", ""), "Model API type")
@@ -110,16 +109,15 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 	}
 
 	cfg, err := normalizeConfig(gatewayapp.Config{
-		AppName:        *appName,
-		UserID:         *userID,
-		StoreDir:       *storeDir,
-		WorkspaceKey:   *workspaceKey,
-		WorkspaceCWD:   *workspaceCWD,
-		ApprovalMode:   *approvalMode,
-		PolicyProfile:  *policyProfile,
-		PermissionMode: *permissionMode,
-		ContextWindow:  *contextWindow,
-		SystemPrompt:   *systemPrompt,
+		AppName:       *appName,
+		UserID:        *userID,
+		StoreDir:      *storeDir,
+		WorkspaceKey:  *workspaceKey,
+		WorkspaceCWD:  *workspaceCWD,
+		ApprovalMode:  *approvalMode,
+		PolicyProfile: *policyProfile,
+		ContextWindow: *contextWindow,
+		SystemPrompt:  *systemPrompt,
 		Model: gatewayapp.ModelConfig{
 			Alias:        *modelAlias,
 			Provider:     *modelProvider,

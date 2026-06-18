@@ -1,11 +1,11 @@
 package tuiapp
 
 import (
-	"net/url"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	controlcommands "github.com/OnslaughtSnail/caelis/protocol/acp/control/commands"
 )
 
 func TestConnectEnterStartsInteractiveWizardAndIgnoresTypedArgs(t *testing.T) {
@@ -131,9 +131,11 @@ func TestConnectWizardSkipsAPIKeyForNoAuthProvider(t *testing.T) {
 			switch command {
 			case "connect":
 				return []SlashArgCandidate{{Value: "ollama", Display: "ollama", NoAuth: true}}, nil
-			case "connect-model:ollama||60||":
-				return []SlashArgCandidate{{Value: "qwen2.5:7b", Display: "ollama/qwen2.5:7b"}}, nil
 			default:
+				state, ok := connectModelCommandState(command)
+				if ok && state.Provider == "ollama" {
+					return []SlashArgCandidate{{Value: "qwen2.5:7b", Display: "ollama/qwen2.5:7b"}}, nil
+				}
 				return nil, nil
 			}
 		},
@@ -149,8 +151,9 @@ func TestConnectWizardSkipsAPIKeyForNoAuthProvider(t *testing.T) {
 	if cmd != nil {
 		cmd()
 	}
-	if got := strings.TrimSpace(m.slashArgCommand); got != "connect-model:ollama||60||" {
-		t.Fatalf("slashArgCommand after ollama provider = %q, want connect-model:ollama||60||", got)
+	state := requireConnectModelCommandState(t, m.slashArgCommand)
+	if state.Provider != "ollama" || state.TimeoutSeconds != controlcommands.DefaultConnectTimeoutSeconds || state.TokenRef != "" {
+		t.Fatalf("connect model state after ollama provider = %#v, want provider without auth", state)
 	}
 	if got := m.textarea.Value(); got != "" {
 		t.Fatalf("textarea after no-auth provider = %q, want empty wizard input", got)
@@ -200,9 +203,11 @@ func TestConnectWizardSkipsAPIKeyForReusableBaseURLAuth(t *testing.T) {
 				return []SlashArgCandidate{{Value: "openai-compatible", Display: "openai-compatible"}}, nil
 			case "connect-baseurl:openai-compatible":
 				return []SlashArgCandidate{{Value: baseURL, Display: baseURL, Detail: "configured auth", NoAuth: true}}, nil
-			case "connect-model:openai-compatible|" + url.QueryEscape(baseURL) + "|60||":
-				return []SlashArgCandidate{{Value: "gpt-4o-mini", Display: "openai-compatible/gpt-4o-mini"}}, nil
 			default:
+				state, ok := connectModelCommandState(command)
+				if ok && state.Provider == "openai-compatible" && state.BaseURL == baseURL {
+					return []SlashArgCandidate{{Value: "gpt-4o-mini", Display: "openai-compatible/gpt-4o-mini"}}, nil
+				}
 				return nil, nil
 			}
 		},
@@ -225,8 +230,9 @@ func TestConnectWizardSkipsAPIKeyForReusableBaseURLAuth(t *testing.T) {
 	if cmd != nil {
 		cmd()
 	}
-	if got := strings.TrimSpace(m.slashArgCommand); got != "connect-model:openai-compatible|"+url.QueryEscape(baseURL)+"|60||" {
-		t.Fatalf("slashArgCommand after reusable baseurl = %q, want model step without API key", got)
+	state := requireConnectModelCommandState(t, m.slashArgCommand)
+	if state.Provider != "openai-compatible" || state.BaseURL != baseURL || state.TokenRef != "" {
+		t.Fatalf("connect model state after reusable baseurl = %#v, want model step without API key", state)
 	}
 }
 
@@ -286,9 +292,11 @@ func TestConnectWizardPrefixSelectsXiaomiCandidateAndKeepsModelCandidates(t *tes
 				}, nil
 			case "connect-apikey:xiaomi":
 				return nil, nil
-			case "connect-model:xiaomi|" + url.QueryEscape(tokenPlanBaseURL) + "|60|sk-test|":
-				return []SlashArgCandidate{{Value: "mimo-v2.5-pro", Display: "xiaomi/mimo-v2.5-pro"}}, nil
 			default:
+				state, ok := connectModelCommandState(command)
+				if ok && state.Provider == "xiaomi" && state.BaseURL == tokenPlanBaseURL && state.TokenRef == "sk-test" {
+					return []SlashArgCandidate{{Value: "mimo-v2.5-pro", Display: "xiaomi/mimo-v2.5-pro"}}, nil
+				}
 				return nil, nil
 			}
 		},
@@ -337,9 +345,9 @@ func TestConnectWizardPrefixSelectsXiaomiCandidateAndKeepsModelCandidates(t *tes
 	if cmd != nil {
 		cmd()
 	}
-	wantCommand := "connect-model:xiaomi|" + url.QueryEscape(tokenPlanBaseURL) + "|60|sk-test|"
-	if got := strings.TrimSpace(m.slashArgCommand); got != wantCommand {
-		t.Fatalf("slashArgCommand after api key = %q, want %q", got, wantCommand)
+	state := requireConnectModelCommandState(t, m.slashArgCommand)
+	if state.Provider != "xiaomi" || state.BaseURL != tokenPlanBaseURL || state.TokenRef != "sk-test" {
+		t.Fatalf("connect model state after api key = %#v, want selected endpoint and token", state)
 	}
 	if len(m.slashArgCandidates) == 0 || m.slashArgCandidates[0].Value != "mimo-v2.5-pro" {
 		t.Fatalf("model candidates after api key = %#v, want mimo-v2.5-pro", m.slashArgCandidates)
@@ -400,9 +408,11 @@ func TestConnectWizardAddsEndpointStepForXiaomiTokenPlan(t *testing.T) {
 				}, nil
 			case "connect-apikey:xiaomi":
 				return nil, nil
-			case "connect-model:xiaomi|" + url.QueryEscape(tokenPlanBaseURL) + "|60|" + url.QueryEscape("env:MIMO_TOKEN_PLAN_API_KEY") + "|":
-				return []SlashArgCandidate{{Value: "mimo-v2.5-pro", Display: "xiaomi/mimo-v2.5-pro"}}, nil
 			default:
+				state, ok := connectModelCommandState(command)
+				if ok && state.Provider == "xiaomi" && state.BaseURL == tokenPlanBaseURL && state.TokenRef == "env:MIMO_TOKEN_PLAN_API_KEY" {
+					return []SlashArgCandidate{{Value: "mimo-v2.5-pro", Display: "xiaomi/mimo-v2.5-pro"}}, nil
+				}
 				return nil, nil
 			}
 		},
@@ -442,8 +452,9 @@ func TestConnectWizardAddsEndpointStepForXiaomiTokenPlan(t *testing.T) {
 	if cmd != nil {
 		cmd()
 	}
-	if got := strings.TrimSpace(m.slashArgCommand); !strings.HasPrefix(got, "connect-model:xiaomi|"+url.QueryEscape(tokenPlanBaseURL)+"|60|") {
-		t.Fatalf("slashArgCommand after token-plan api key = %q, want connect-model:xiaomi|token-plan...", got)
+	state := requireConnectModelCommandState(t, m.slashArgCommand)
+	if state.Provider != "xiaomi" || state.BaseURL != tokenPlanBaseURL || state.TokenRef != "env:MIMO_TOKEN_PLAN_API_KEY" {
+		t.Fatalf("connect model state after token-plan api key = %#v, want token-plan endpoint and env token", state)
 	}
 
 	handled, cmd = m.handleWizardEnter() // model -> submit
@@ -473,9 +484,11 @@ func TestConnectWizardSkipsAPIKeyForReusableEndpointAuth(t *testing.T) {
 				return []SlashArgCandidate{{Value: "xiaomi", Display: "xiaomi"}}, nil
 			case "connect-baseurl:xiaomi":
 				return []SlashArgCandidate{{Value: apiBaseURL, Display: "api cn", Detail: "configured auth", NoAuth: true}}, nil
-			case "connect-model:xiaomi|" + url.QueryEscape(apiBaseURL) + "|60||":
-				return []SlashArgCandidate{{Value: "mimo-v2-pro", Display: "xiaomi/mimo-v2-pro"}}, nil
 			default:
+				state, ok := connectModelCommandState(command)
+				if ok && state.Provider == "xiaomi" && state.BaseURL == apiBaseURL {
+					return []SlashArgCandidate{{Value: "mimo-v2-pro", Display: "xiaomi/mimo-v2-pro"}}, nil
+				}
 				return nil, nil
 			}
 		},
@@ -495,8 +508,9 @@ func TestConnectWizardSkipsAPIKeyForReusableEndpointAuth(t *testing.T) {
 	if cmd != nil {
 		cmd()
 	}
-	if got := strings.TrimSpace(m.slashArgCommand); got != "connect-model:xiaomi|"+url.QueryEscape(apiBaseURL)+"|60||" {
-		t.Fatalf("slashArgCommand after reusable endpoint = %q, want model step without API key", got)
+	state := requireConnectModelCommandState(t, m.slashArgCommand)
+	if state.Provider != "xiaomi" || state.BaseURL != apiBaseURL || state.TokenRef != "" {
+		t.Fatalf("connect model state after reusable endpoint = %#v, want model step without API key", state)
 	}
 }
 
@@ -574,9 +588,11 @@ func TestConnectWizardSkipsAdvancedStepsForKnownModelCandidate(t *testing.T) {
 			switch command {
 			case "connect":
 				return []SlashArgCandidate{{Value: "minimax", Display: "minimax"}}, nil
-			case "connect-model:minimax||60|sk-test|":
-				return []SlashArgCandidate{{Value: "MiniMax-M2.7-highspeed", Display: "minimax/MiniMax-M2.7-highspeed"}}, nil
 			default:
+				state, ok := connectModelCommandState(command)
+				if ok && state.Provider == "minimax" && state.TokenRef == "sk-test" {
+					return []SlashArgCandidate{{Value: "MiniMax-M2.7-highspeed", Display: "minimax/MiniMax-M2.7-highspeed"}}, nil
+				}
 				return nil, nil
 			}
 		},
@@ -597,8 +613,9 @@ func TestConnectWizardSkipsAdvancedStepsForKnownModelCandidate(t *testing.T) {
 	if cmd != nil {
 		cmd()
 	}
-	if got := strings.TrimSpace(m.slashArgCommand); !strings.HasPrefix(got, "connect-model:minimax|") {
-		t.Fatalf("slashArgCommand after api key = %q, want connect-model:minimax|...", got)
+	state := requireConnectModelCommandState(t, m.slashArgCommand)
+	if state.Provider != "minimax" || state.TokenRef != "sk-test" {
+		t.Fatalf("connect model state after api key = %#v, want minimax token state", state)
 	}
 	handled, cmd = m.handleWizardEnter() // model -> submit
 	if !handled {
@@ -628,9 +645,11 @@ func TestConnectWizardTypedKnownModelAlsoSkipsAdvancedSteps(t *testing.T) {
 			switch command {
 			case "connect":
 				return []SlashArgCandidate{{Value: "minimax", Display: "minimax"}}, nil
-			case "connect-model:minimax||60|sk-test|":
-				return []SlashArgCandidate{{Value: "MiniMax-M2.7-highspeed", Display: "minimax/MiniMax-M2.7-highspeed"}}, nil
 			default:
+				state, ok := connectModelCommandState(command)
+				if ok && state.Provider == "minimax" && state.TokenRef == "sk-test" {
+					return []SlashArgCandidate{{Value: "MiniMax-M2.7-highspeed", Display: "minimax/MiniMax-M2.7-highspeed"}}, nil
+				}
 				return nil, nil
 			}
 		},
@@ -666,6 +685,24 @@ func TestConnectWizardTypedKnownModelAlsoSkipsAdvancedSteps(t *testing.T) {
 	if called != "/connect minimax MiniMax-M2.7-highspeed - 60 sk-test - - -" {
 		t.Fatalf("called = %q", called)
 	}
+}
+
+func requireConnectModelCommandState(t *testing.T, command string) controlcommands.ConnectWizardState {
+	t.Helper()
+	state, ok := connectModelCommandState(command)
+	if !ok {
+		t.Fatalf("slashArgCommand = %q, want connect-model command", command)
+	}
+	return state
+}
+
+func connectModelCommandState(command string) (controlcommands.ConnectWizardState, bool) {
+	const prefix = "connect-model:"
+	command = strings.TrimSpace(command)
+	if !strings.HasPrefix(command, prefix) {
+		return controlcommands.ConnectWizardState{}, false
+	}
+	return controlcommands.ParseConnectWizardStatePayload(strings.TrimPrefix(command, prefix)), true
 }
 
 func findAndRunTaskResult(msg tea.Msg, m *Model) bool {

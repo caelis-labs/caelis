@@ -57,7 +57,7 @@ func (s *Store) findDocumentPath(sessionID string, workspaceKey string) (string,
 			}
 			return err
 		}
-		if d.IsDir() || d.Name() == indexFilename || filepath.Ext(d.Name()) != ".json" {
+		if d.IsDir() || !currentDocumentFileName(d.Name()) {
 			return nil
 		}
 		if strings.HasSuffix(d.Name(), "-"+sanitizeSessionID(sessionID)+".json") {
@@ -97,7 +97,7 @@ func (s *Store) listDocumentPaths() ([]string, error) {
 			}
 			return err
 		}
-		if d.IsDir() || d.Name() == indexFilename || filepath.Ext(d.Name()) != ".json" {
+		if d.IsDir() || !currentDocumentFileName(d.Name()) {
 			return nil
 		}
 		paths = append(paths, path)
@@ -111,6 +111,10 @@ func (s *Store) listDocumentPaths() ([]string, error) {
 	}
 	sort.Strings(paths)
 	return paths, nil
+}
+
+func currentDocumentFileName(name string) bool {
+	return strings.HasPrefix(name, "rollout-") && filepath.Ext(name) == ".json"
 }
 
 func (s *Store) newDocumentPath(session session.Session) string {

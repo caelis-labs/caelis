@@ -17,7 +17,6 @@ import (
 type stackRuntimeConfig struct {
 	ApprovalMode                string
 	PolicyProfile               string
-	PermissionMode              string
 	ContextWindow               int
 	SystemPrompt                string
 	Model                       ModelConfig

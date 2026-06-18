@@ -27,13 +27,13 @@ func TestGatewayProviderLiveReasoningBoundaryFromLocalConfigE2E(t *testing.T) {
 	modelCfg.ReasoningEffort = "high"
 
 	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "gateway-live-local-config-e2e",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   "gateway-live-local-config-e2e",
-		WorkspaceCWD:   t.TempDir(),
-		PermissionMode: "default",
-		Model:          modelCfg,
+		AppName:      "caelis",
+		UserID:       "gateway-live-local-config-e2e",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: "gateway-live-local-config-e2e",
+		WorkspaceCWD: t.TempDir(),
+		ApprovalMode: "default",
+		Model:        modelCfg,
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)

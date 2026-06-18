@@ -395,7 +395,7 @@ func connectWizardProviderHasBaseURLStep(provider string) bool {
 }
 
 func buildConnectWizardPayload(state map[string]string) string {
-	return controlcommands.ConnectWizardStateFromMap(state).EncodeCompletionPayload()
+	return controlcommands.ConnectWizardStateFromMap(state).EncodeCompletionState()
 }
 
 func connectWizardTimeout() string {

@@ -30,13 +30,11 @@ type Config struct {
 	WorkspaceCWD  string
 	ApprovalMode  string
 	PolicyProfile string
-	// PermissionMode is a legacy approval-mode input kept for compatibility.
-	PermissionMode string
-	ContextWindow  int
-	SystemPrompt   string
-	Assembly       assembly.ResolvedAssembly
-	Model          ModelConfig
-	Sandbox        SandboxConfig
+	ContextWindow int
+	SystemPrompt  string
+	Assembly      assembly.ResolvedAssembly
+	Model         ModelConfig
+	Sandbox       SandboxConfig
 }
 
 type ModelConfig = modelregistry.Config
@@ -153,7 +151,7 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 			return nil, err
 		}
 	}
-	effectiveApprovalMode := approvalMode(firstNonEmpty(cfg.ApprovalMode, cfg.PermissionMode, doc.Runtime.ApprovalMode))
+	effectiveApprovalMode := approvalMode(firstNonEmpty(cfg.ApprovalMode, doc.Runtime.ApprovalMode))
 	effectivePolicyProfile := policyProfile(firstNonEmpty(cfg.PolicyProfile, doc.Runtime.PolicyProfile))
 	baseAssembly := assembly.CloneResolvedAssembly(cfg.Assembly)
 	sessions := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{
@@ -193,16 +191,15 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		storeDir:  storeDir,
 		taskStore: taskStore,
 		runtime: stackRuntimeConfig{
-			ApprovalMode:   effectiveApprovalMode,
-			PolicyProfile:  effectivePolicyProfile,
-			PermissionMode: cfg.PermissionMode,
-			ContextWindow:  cfg.ContextWindow,
-			SystemPrompt:   cfg.SystemPrompt,
-			Model:          cfg.Model,
-			Plugins:        clonePluginConfigs(doc.Plugins),
-			BaseAssembly:   baseAssembly,
-			Assembly:       assembly.CloneResolvedAssembly(baseAssembly),
-			BaseMetadata:   cloneMap(baseMetadata),
+			ApprovalMode:  effectiveApprovalMode,
+			PolicyProfile: effectivePolicyProfile,
+			ContextWindow: cfg.ContextWindow,
+			SystemPrompt:  cfg.SystemPrompt,
+			Model:         cfg.Model,
+			Plugins:       clonePluginConfigs(doc.Plugins),
+			BaseAssembly:  baseAssembly,
+			Assembly:      assembly.CloneResolvedAssembly(baseAssembly),
+			BaseMetadata:  cloneMap(baseMetadata),
 		},
 		sandbox: sandboxCfg,
 	}

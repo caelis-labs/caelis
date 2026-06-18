@@ -138,6 +138,9 @@ func (s *Store) Load() (AppConfig, error) {
 func (s *Store) loadUnlocked() (AppConfig, error) {
 	data, err := os.ReadFile(s.path)
 	if err == nil {
+		if err := rejectUnsupportedLegacyModelConfig(data); err != nil {
+			return AppConfig{}, err
+		}
 		var doc AppConfig
 		if err := json.Unmarshal(data, &doc); err != nil {
 			return AppConfig{}, fmt.Errorf("gatewayapp: decode app config: %w", err)
@@ -156,6 +159,98 @@ func (s *Store) loadUnlocked() (AppConfig, error) {
 		return AppConfig{}, err
 	}
 	return AppConfig{}, nil
+}
+
+func rejectUnsupportedLegacyModelConfig(data []byte) error {
+	var root map[string]json.RawMessage
+	if err := json.Unmarshal(data, &root); err != nil {
+		return nil
+	}
+	if key := firstLegacyKey(root, "Models"); key != "" {
+		return fmt.Errorf("gatewayapp: unsupported legacy uppercase model config key %q", key)
+	}
+	modelsRaw, ok := root["models"]
+	if !ok {
+		return nil
+	}
+	var models map[string]json.RawMessage
+	if err := json.Unmarshal(modelsRaw, &models); err != nil {
+		return nil
+	}
+	if key := firstLegacyKey(models, "DefaultAlias", "DefaultID", "Profiles", "Configs"); key != "" {
+		return fmt.Errorf("gatewayapp: unsupported legacy uppercase model config key %q", key)
+	}
+	if err := rejectLegacyModelArrayKeys(models["configs"], "models.configs", legacyModelConfigKeys...); err != nil {
+		return err
+	}
+	if err := rejectLegacyModelArrayKeys(models["profiles"], "models.profiles", legacyModelProfileKeys...); err != nil {
+		return err
+	}
+	return nil
+}
+
+func rejectLegacyModelArrayKeys(raw json.RawMessage, path string, legacyKeys ...string) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	var entries []map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		return nil
+	}
+	for i, entry := range entries {
+		if key := firstLegacyKey(entry, legacyKeys...); key != "" {
+			return fmt.Errorf("gatewayapp: unsupported legacy uppercase model config key %q at %s[%d]", key, path, i)
+		}
+	}
+	return nil
+}
+
+func firstLegacyKey(values map[string]json.RawMessage, legacyKeys ...string) string {
+	for _, key := range legacyKeys {
+		if _, ok := values[key]; ok {
+			return key
+		}
+	}
+	return ""
+}
+
+var legacyModelConfigKeys = []string{
+	"ID",
+	"Alias",
+	"Provider",
+	"ProfileID",
+	"EndpointID",
+	"API",
+	"Model",
+	"BaseURL",
+	"Token",
+	"TokenEnv",
+	"PersistToken",
+	"AuthType",
+	"HeaderKey",
+	"ContextWindowTokens",
+	"ReasoningEffort",
+	"DefaultReasoningEffort",
+	"ReasoningLevels",
+	"ReasoningMode",
+	"MaxOutputTok",
+	"Timeout",
+	"StreamFirstEventTimeout",
+}
+
+var legacyModelProfileKeys = []string{
+	"ID",
+	"Provider",
+	"EndpointID",
+	"API",
+	"BaseURL",
+	"Token",
+	"TokenEnv",
+	"PersistToken",
+	"AuthType",
+	"HeaderKey",
+	"Timeout",
+	"StreamFirstEventTimeout",
 }
 
 func (s *Store) Save(doc AppConfig) error {

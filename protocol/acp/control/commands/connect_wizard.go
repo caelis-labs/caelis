@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"encoding/json"
 	"net/url"
 	"strconv"
 	"strings"
@@ -11,15 +12,15 @@ const DefaultConnectTimeoutSeconds = 60
 // ConnectWizardState is the structured state carried between connect wizard
 // steps and driver completions.
 type ConnectWizardState struct {
-	Provider            string
-	BaseURL             string
-	TimeoutSeconds      int
-	AuthMode            string
-	TokenRef            string
-	Model               string
-	ContextWindowTokens int
-	MaxOutputTokens     int
-	ReasoningLevels     []string
+	Provider            string   `json:"provider,omitempty"`
+	BaseURL             string   `json:"base_url,omitempty"`
+	TimeoutSeconds      int      `json:"timeout_seconds,omitempty"`
+	AuthMode            string   `json:"auth_mode,omitempty"`
+	TokenRef            string   `json:"token_ref,omitempty"`
+	Model               string   `json:"model,omitempty"`
+	ContextWindowTokens int      `json:"context_window_tokens,omitempty"`
+	MaxOutputTokens     int      `json:"max_output_tokens,omitempty"`
+	ReasoningLevels     []string `json:"reasoning_levels,omitempty"`
 }
 
 // ConnectWizardStateFromMap converts the TUI wizard state map into the
@@ -42,36 +43,32 @@ func ConnectWizardStateFromMap(state map[string]string) ConnectWizardState {
 	}
 }
 
-// EncodeCompletionPayload preserves the legacy slash-completion command payload
-// shape while keeping construction centralized.
-func (s ConnectWizardState) EncodeCompletionPayload() string {
-	timeout := s.TimeoutSeconds
-	if timeout <= 0 {
-		timeout = DefaultConnectTimeoutSeconds
+// EncodeCompletionState encodes structured wizard state for slash-completion
+// continuation commands.
+func (s ConnectWizardState) EncodeCompletionState() string {
+	payload, err := json.Marshal(s.normalized())
+	if err != nil {
+		return ""
 	}
-	return strings.TrimSpace(s.Provider) +
-		"|" + url.QueryEscape(strings.TrimSpace(s.BaseURL)) +
-		"|" + strconv.Itoa(timeout) +
-		"|" + url.QueryEscape(strings.TrimSpace(s.TokenRef)) +
-		"|" + url.QueryEscape(strings.TrimSpace(s.Model))
+	return url.QueryEscape(string(payload))
 }
 
-// ParseConnectWizardPayload decodes the legacy slash-completion command
-// payload into structured wizard state.
-func ParseConnectWizardPayload(raw string) ConnectWizardState {
-	parts := strings.SplitN(raw, "|", 5)
-	for len(parts) < 5 {
-		parts = append(parts, "")
+// ParseConnectWizardStatePayload decodes structured wizard state from a
+// slash-completion continuation command.
+func ParseConnectWizardStatePayload(raw string) ConnectWizardState {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ConnectWizardState{TimeoutSeconds: DefaultConnectTimeoutSeconds}
 	}
-	tokenRef := decodeConnectWizardPart(parts[3])
-	return ConnectWizardState{
-		Provider:       strings.TrimSpace(parts[0]),
-		BaseURL:        decodeConnectWizardPart(parts[1]),
-		TimeoutSeconds: parsePositiveInt(parts[2], DefaultConnectTimeoutSeconds),
-		AuthMode:       authModeForTokenRef(tokenRef),
-		TokenRef:       tokenRef,
-		Model:          decodeConnectWizardPart(parts[4]),
+	decoded, err := url.QueryUnescape(raw)
+	if err != nil {
+		return ConnectWizardState{TimeoutSeconds: DefaultConnectTimeoutSeconds}
 	}
+	var state ConnectWizardState
+	if err := json.Unmarshal([]byte(decoded), &state); err != nil {
+		return ConnectWizardState{TimeoutSeconds: DefaultConnectTimeoutSeconds}
+	}
+	return state.normalized()
 }
 
 func parsePositiveInt(raw string, fallback int) int {
@@ -109,10 +106,29 @@ func parseReasoningLevels(raw string) []string {
 	return out
 }
 
-func decodeConnectWizardPart(value string) string {
-	decoded, err := url.QueryUnescape(strings.TrimSpace(value))
-	if err != nil {
-		return strings.TrimSpace(value)
+func (s ConnectWizardState) normalized() ConnectWizardState {
+	s.Provider = strings.TrimSpace(s.Provider)
+	s.BaseURL = strings.TrimSpace(s.BaseURL)
+	if s.TimeoutSeconds <= 0 {
+		s.TimeoutSeconds = DefaultConnectTimeoutSeconds
 	}
-	return decoded
+	s.TokenRef = strings.TrimSpace(s.TokenRef)
+	s.AuthMode = authModeForTokenRef(s.TokenRef)
+	s.Model = strings.TrimSpace(s.Model)
+	if s.ContextWindowTokens < 0 {
+		s.ContextWindowTokens = 0
+	}
+	if s.MaxOutputTokens < 0 {
+		s.MaxOutputTokens = 0
+	}
+	if len(s.ReasoningLevels) > 0 {
+		levels := make([]string, 0, len(s.ReasoningLevels))
+		for _, level := range s.ReasoningLevels {
+			if trimmed := strings.TrimSpace(level); trimmed != "" {
+				levels = append(levels, trimmed)
+			}
+		}
+		s.ReasoningLevels = levels
+	}
+	return s
 }

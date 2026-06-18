@@ -11,17 +11,16 @@ import (
 )
 
 type RuntimeConfig struct {
-	AppName        string
-	UserID         string
-	StoreDir       string
-	WorkspaceKey   string
-	WorkspaceCWD   string
-	ApprovalMode   string
-	PolicyProfile  string
-	PermissionMode string
-	ContextWindow  int
-	SystemPrompt   string
-	Model          modelregistry.Config
+	AppName       string
+	UserID        string
+	StoreDir      string
+	WorkspaceKey  string
+	WorkspaceCWD  string
+	ApprovalMode  string
+	PolicyProfile string
+	ContextWindow int
+	SystemPrompt  string
+	Model         modelregistry.Config
 }
 
 type DefaultSelfConfig struct {

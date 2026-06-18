@@ -7,6 +7,7 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/ports/controller"
 	"github.com/OnslaughtSnail/caelis/ports/eventsource"
+	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
@@ -18,11 +19,13 @@ func TestForwardACPControllerEventsPublishesPersistedCanonicalWhenACPPresent(t *
 	sessions, activeSession := newTestSessionService(t, "sess-acp-forward-bundled")
 	runtime := &Runtime{sessions: sessions}
 	runner := newRunner("run-1", func() {})
+	message := model.NewTextMessage(model.RoleAssistant, "done")
 	source := scriptedSourceHandle{events: []eventsource.Event{{
 		Canonical: &session.Event{
 			Type:       session.EventTypeAssistant,
 			Visibility: session.VisibilityCanonical,
 			Text:       "done",
+			Message:    &message,
 		},
 		ACP: &eventstream.Envelope{
 			Kind: eventstream.KindSessionUpdate,

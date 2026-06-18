@@ -59,7 +59,6 @@ const (
 	codeFreeAPIKeyDecryptIV       = "%1KJIrl3!XUxr04V"
 	codeFreeDefaultCredentialFile = "oauth_creds.json"
 	codeFreeCredentialDir         = "providers/codefree"
-	codeFreeLegacyCredentialDir   = ".codefree-cli"
 	codeFreeResponseSummaryLimit  = 2048
 )
 

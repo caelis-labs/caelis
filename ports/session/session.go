@@ -27,6 +27,10 @@ var (
 
 	// ErrInvalidEvent reports that one event payload is incomplete.
 	ErrInvalidEvent = errors.New("ports/session: invalid event")
+
+	// ErrUnsupportedLegacyFormat reports an older on-disk session format that is
+	// no longer a supported replay source.
+	ErrUnsupportedLegacyFormat = errors.New("ports/session: unsupported legacy format")
 )
 
 // EventType identifies one canonical session event kind.
@@ -382,32 +386,27 @@ type EventToolContent struct {
 }
 
 // Event is the compact canonical event envelope. Durable model-visible
-// semantics live in the v2 semantic payload fields. Legacy Message, Tool,
-// Protocol, and Meta fields are accepted as v1 load/migration inputs and as
-// transient projection carriers, but canonical new writes do not persist them.
+// messages live in Message. Durable tool execution state lives in Tool. Protocol
+// is the ACP projection/control payload and must not be used as the local model
+// replay source.
 type Event struct {
-	ID                string                  `json:"id,omitempty"`
-	SessionID         string                  `json:"session_id,omitempty"`
-	Schema            int                     `json:"schema,omitempty"`
-	Type              EventType               `json:"type,omitempty"`
-	Visibility        Visibility              `json:"visibility,omitempty"`
-	Time              time.Time               `json:"time,omitempty"`
-	Actor             ActorRef                `json:"actor,omitempty"`
-	Scope             *EventScope             `json:"scope,omitempty"`
-	Invocation        *EventInvocation        `json:"invocation,omitempty"`
-	UserMessage       *EventMessagePayload    `json:"user_message,omitempty"`
-	AssistantMessage  *EventMessagePayload    `json:"assistant_message,omitempty"`
-	SystemContext     *EventMessagePayload    `json:"system_context,omitempty"`
-	ToolCallPayload   *EventToolCallPayload   `json:"tool_call,omitempty"`
-	ToolResultPayload *EventToolResultPayload `json:"tool_result,omitempty"`
-	PlanPayload       *EventPlanPayload       `json:"plan,omitempty"`
-	Message           *model.Message          `json:"message,omitempty"`
-	Tool              *EventTool              `json:"tool,omitempty"`
-	Notice            *EventNotice            `json:"notice,omitempty"`
-	Lifecycle         *EventLifecycle         `json:"lifecycle,omitempty"`
-	Protocol          *EventProtocol          `json:"protocol,omitempty"`
-	Text              string                  `json:"-"`
-	Meta              map[string]any          `json:"_meta,omitempty"`
+	ID          string            `json:"id,omitempty"`
+	SessionID   string            `json:"session_id,omitempty"`
+	Schema      int               `json:"schema,omitempty"`
+	Type        EventType         `json:"type,omitempty"`
+	Visibility  Visibility        `json:"visibility,omitempty"`
+	Time        time.Time         `json:"time,omitempty"`
+	Actor       ActorRef          `json:"actor,omitempty"`
+	Scope       *EventScope       `json:"scope,omitempty"`
+	Invocation  *EventInvocation  `json:"invocation,omitempty"`
+	Message     *model.Message    `json:"message,omitempty"`
+	Tool        *EventTool        `json:"tool,omitempty"`
+	PlanPayload *EventPlanPayload `json:"plan,omitempty"`
+	Notice      *EventNotice      `json:"notice,omitempty"`
+	Lifecycle   *EventLifecycle   `json:"lifecycle,omitempty"`
+	Protocol    *EventProtocol    `json:"protocol,omitempty"`
+	Text        string            `json:"-"`
+	Meta        map[string]any    `json:"_meta,omitempty"`
 }
 
 // MessageNotice recognizes one system-message runtime notice.
@@ -546,9 +545,6 @@ func EventText(event *Event) string {
 	if event == nil {
 		return ""
 	}
-	if text := eventTextFromSemanticPayload(event); text != "" {
-		return text
-	}
 	if event.Message != nil {
 		if text := event.Message.TextContent(); text != "" {
 			return text
@@ -568,10 +564,9 @@ func EventText(event *Event) string {
 	return ""
 }
 
-// CanonicalizeEvent returns a normalized event copy. Canonical and mirror
-// model/runtime facts are converted to the v2 Caelis semantic schema; legacy
-// model.Message, tool, ACP protocol, and display meta projections are dropped
-// from durable writes once the semantic payload has been built.
+// CanonicalizeEvent returns a normalized event copy. It preserves the canonical
+// Message/Tool durable state and removes redundant ACP projection content when
+// the canonical state already carries the same fact.
 func CanonicalizeEvent(event *Event) *Event {
 	out := CloneEvent(event)
 	if out == nil {
@@ -579,12 +574,6 @@ func CanonicalizeEvent(event *Event) *Event {
 	}
 	if out.Type == "" {
 		out.Type = EventTypeOf(out)
-	}
-	ensureCoreMessage(out)
-	semanticizeCoreEvent(out)
-	if shouldStripLegacyCoreProjection(out) {
-		stripLegacyCoreProjection(out)
-		return out
 	}
 	if out.Tool != nil {
 		removeToolProjectionProtocol(out)
@@ -604,85 +593,21 @@ func ValidateDurableCoreEvent(event *Event) error {
 	if event == nil || !IsCanonicalHistoryEvent(event) {
 		return nil
 	}
-	if eventHasSemanticPayload(event) {
-		return validateDurableCoreSemanticEvent(event)
-	}
 	switch EventTypeOf(event) {
 	case EventTypeUser, EventTypeAssistant, EventTypeSystem:
 		if event.Message == nil {
 			return coreEventValidationError("model-visible event is missing durable Event.Message")
 		}
 	case EventTypeToolCall:
-		if event.Tool != nil {
-			return validateDurableCoreMeta(event.Meta)
+		if event.Tool == nil {
+			return coreEventValidationError("tool call is missing durable Event.Tool")
 		}
-		if event.Message != nil && len(event.Message.ToolCalls()) > 0 {
-			return validateDurableCoreMeta(event.Meta)
+		if event.Message != nil && len(event.Message.ToolCalls()) == 0 {
+			return coreEventValidationError("tool call Event.Message is missing model tool-call payload")
 		}
-		if hasDurableUsageMetadata(event.Meta) {
-			return validateDurableCoreMeta(event.Meta)
-		}
-		if !hasProtocolToolExecutionPayload(event) {
-			return validateDurableCoreMeta(event.Meta)
-		}
-		return coreEventValidationError("tool call is missing durable Event.Tool or model tool-call payload")
+		return validateDurableCoreMeta(event.Meta)
 	case EventTypeToolResult:
 		return validateDurableCoreToolResult(event)
-	}
-	return nil
-}
-
-func validateDurableCoreSemanticEvent(event *Event) error {
-	switch EventTypeOf(event) {
-	case EventTypeUser, EventTypeAssistant, EventTypeSystem:
-		if _, ok := ModelMessageOf(event); !ok {
-			return coreEventValidationError("model-visible event is missing durable semantic message payload")
-		}
-	case EventTypeToolCall:
-		payload := ToolCallPayloadOf(event)
-		if payload == nil {
-			return coreEventValidationError("tool call is missing durable semantic tool_call payload")
-		}
-		if len(payload.Args) > 0 {
-			if _, err := model.ParseToolCallArgsRaw(string(payload.Args)); err != nil {
-				return coreEventValidationError(fmt.Sprintf("tool call args are not canonical JSON: %v", err))
-			}
-		}
-		if strings.TrimSpace(payload.ID) == "" && strings.TrimSpace(payload.Name) == "" && len(payload.Input) == 0 && len(payload.Args) == 0 && len(payload.Content) == 0 && !hasDurableUsageMetadata(payload.Metadata) {
-			return coreEventValidationError("tool call is missing durable semantic tool_call facts")
-		}
-	case EventTypeToolResult:
-		return validateDurableCoreSemanticToolResult(event)
-	}
-	return nil
-}
-
-func validateDurableCoreSemanticToolResult(event *Event) error {
-	payload := ToolResultPayloadOf(event)
-	if payload == nil {
-		return coreEventValidationError("tool result is missing durable semantic tool_result payload")
-	}
-	if len(payload.Output) > 0 {
-		if err := validateDurableCoreRawOutput(payload.Output); err != nil {
-			return err
-		}
-	}
-	if len(payload.Output) > 0 && len(payload.Content) > 0 {
-		contentPayload, err := toolResultOutputFromEventParts(payload.Content)
-		if err != nil {
-			return coreEventValidationError(err.Error())
-		}
-		if len(contentPayload) > 0 && !sameCanonicalJSON(payload.Output, contentPayload) {
-			return coreEventValidationError("tool semantic content diverges from durable tool_result output")
-		}
-	}
-	if strings.TrimSpace(payload.ToolCallID) == "" &&
-		strings.TrimSpace(payload.Name) == "" &&
-		len(payload.Output) == 0 &&
-		len(payload.Content) == 0 &&
-		len(payload.Display) == 0 &&
-		!hasDurableUsageMetadata(payload.Metadata) {
-		return coreEventValidationError("tool result is missing durable semantic tool_result facts")
 	}
 	return nil
 }
@@ -761,22 +686,8 @@ func EventTypeOf(event *Event) EventType {
 		return event.Type
 	}
 	switch {
-	case event.ToolResultPayload != nil:
-		return EventTypeToolResult
-	case event.ToolCallPayload != nil:
-		return EventTypeToolCall
 	case event.PlanPayload != nil:
 		return EventTypePlan
-	case event.AssistantMessage != nil:
-		message := modelMessageFromEventPayload(*event.AssistantMessage, model.RoleAssistant)
-		if len(message.ToolCalls()) > 0 {
-			return EventTypeToolCall
-		}
-		return EventTypeAssistant
-	case event.UserMessage != nil:
-		return EventTypeUser
-	case event.SystemContext != nil:
-		return EventTypeSystem
 	}
 	if event.Notice != nil || IsNotice(event) {
 		return EventTypeNotice
@@ -946,34 +857,6 @@ func removeToolProjectionProtocol(event *Event) {
 	event.Protocol = &protocol
 }
 
-func ensureCoreMessage(event *Event) {
-	if event == nil || event.Message != nil {
-		return
-	}
-	text := EventText(event)
-	if strings.TrimSpace(text) == "" {
-		return
-	}
-	var message model.Message
-	switch EventTypeOf(event) {
-	case EventTypeUser:
-		message = model.NewTextMessage(model.RoleUser, text)
-	case EventTypeAssistant:
-		if update := ProtocolUpdateOf(event); update != nil && strings.TrimSpace(update.SessionUpdate) == string(ProtocolUpdateTypeAgentThought) {
-			message = model.NewReasoningMessage(model.RoleAssistant, text, model.ReasoningVisibilityVisible)
-		} else {
-			message = model.NewTextMessage(model.RoleAssistant, text)
-		}
-	case EventTypeSystem:
-		message = model.NewTextMessage(model.RoleSystem, text)
-	case EventTypeCompact:
-		message = model.NewTextMessage(model.RoleUser, text)
-	default:
-		return
-	}
-	event.Message = &message
-}
-
 func validateDurableCoreToolResult(event *Event) error {
 	if event.Tool != nil {
 		if len(event.Tool.Output) > 0 {
@@ -987,12 +870,6 @@ func validateDurableCoreToolResult(event *Event) error {
 		return validateDurableCoreMeta(event.Meta)
 	}
 	if event.Message != nil && len(event.Message.ToolResults()) > 0 {
-		return validateDurableCoreMeta(event.Meta)
-	}
-	if hasDurableUsageMetadata(event.Meta) {
-		return validateDurableCoreMeta(event.Meta)
-	}
-	if !hasProtocolToolExecutionPayload(event) {
 		return validateDurableCoreMeta(event.Meta)
 	}
 	return coreEventValidationError("tool result is missing durable Event.Tool or model tool-result payload")
@@ -1108,21 +985,6 @@ func coreEventValidationError(detail string) error {
 	return &EventValidationError{Detail: strings.TrimSpace(detail)}
 }
 
-func hasProtocolToolExecutionPayload(event *Event) bool {
-	update := ProtocolUpdateOf(event)
-	if update == nil {
-		return false
-	}
-	return strings.TrimSpace(update.ToolCallID) != "" ||
-		strings.TrimSpace(update.Title) != "" ||
-		strings.TrimSpace(update.Kind) != "" ||
-		strings.TrimSpace(update.Status) != "" ||
-		update.Content != nil ||
-		len(update.RawInput) > 0 ||
-		len(update.RawOutput) > 0 ||
-		len(update.Locations) > 0
-}
-
 func hasDurableUsageMetadata(meta map[string]any) bool {
 	if len(meta) == 0 {
 		return false
@@ -1194,26 +1056,6 @@ func CloneEvent(in *Event) *Event {
 	if in.Scope != nil {
 		scope := CloneEventScope(*in.Scope)
 		out.Scope = &scope
-	}
-	if in.UserMessage != nil {
-		payload := cloneEventMessagePayload(*in.UserMessage)
-		out.UserMessage = &payload
-	}
-	if in.AssistantMessage != nil {
-		payload := cloneEventMessagePayload(*in.AssistantMessage)
-		out.AssistantMessage = &payload
-	}
-	if in.SystemContext != nil {
-		payload := cloneEventMessagePayload(*in.SystemContext)
-		out.SystemContext = &payload
-	}
-	if in.ToolCallPayload != nil {
-		payload := cloneEventToolCallPayload(*in.ToolCallPayload)
-		out.ToolCallPayload = &payload
-	}
-	if in.ToolResultPayload != nil {
-		payload := cloneEventToolResultPayload(*in.ToolResultPayload)
-		out.ToolResultPayload = &payload
 	}
 	if in.PlanPayload != nil {
 		payload := cloneEventPlanPayload(*in.PlanPayload)

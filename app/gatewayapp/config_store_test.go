@@ -323,7 +323,7 @@ func TestAppConfigStoreIgnoresIntermediateConnectionsConfig(t *testing.T) {
 	}
 }
 
-func TestAppConfigStoreLoadsLegacyUppercaseModelConfig(t *testing.T) {
+func TestAppConfigStoreRejectsLegacyUppercaseModelConfig(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -350,16 +350,36 @@ func TestAppConfigStoreLoadsLegacyUppercaseModelConfig(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "config.json"), []byte(raw), 0o600); err != nil {
 		t.Fatalf("WriteFile(config.json) error = %v", err)
 	}
-	doc, err := LoadAppConfig(root)
-	if err != nil {
-		t.Fatalf("LoadAppConfig() error = %v", err)
+	_, err := LoadAppConfig(root)
+	if err == nil {
+		t.Fatal("LoadAppConfig() error = nil, want unsupported legacy format")
 	}
-	if len(doc.Models.Configs) != 1 {
-		t.Fatalf("len(configs) = %d, want 1", len(doc.Models.Configs))
+	if !strings.Contains(err.Error(), "unsupported legacy uppercase model config") {
+		t.Fatalf("LoadAppConfig() error = %v, want unsupported legacy uppercase model config", err)
 	}
-	cfg := doc.Models.Configs[0]
-	if cfg.Alias != "deepseek/deepseek-v4-flash" || cfg.Token != "legacy-token" || cfg.AuthType != providers.AuthAPIKey {
-		t.Fatalf("loaded legacy config = %#v", cfg)
+}
+
+func TestAppConfigStoreRejectsLegacyUppercaseModelsKey(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatalf("MkdirAll(root) error = %v", err)
+	}
+	raw := `{
+  "Models": {
+    "default_alias": "deepseek/deepseek-v4-flash"
+  }
+}`
+	if err := os.WriteFile(filepath.Join(root, "config.json"), []byte(raw), 0o600); err != nil {
+		t.Fatalf("WriteFile(config.json) error = %v", err)
+	}
+	_, err := LoadAppConfig(root)
+	if err == nil {
+		t.Fatal("LoadAppConfig() error = nil, want unsupported legacy format")
+	}
+	if !strings.Contains(err.Error(), "unsupported legacy uppercase model config") {
+		t.Fatalf("LoadAppConfig() error = %v, want unsupported legacy uppercase model config", err)
 	}
 }
 

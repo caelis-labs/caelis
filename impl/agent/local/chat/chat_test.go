@@ -1658,8 +1658,9 @@ func TestToolResultEventUsesCanonicalTruncatedOutputForDisplayAndMessage(t *test
 	if rawOutput["_tool_truncation"] != nil {
 		t.Fatalf("raw output = %#v, should not carry model truncation metadata", rawOutput)
 	}
-	if payload := session.ToolResultPayloadOf(session.CanonicalizeEvent(event)); payload == nil || payload.Truncation["truncated"] != true {
-		t.Fatalf("tool_result payload = %#v, want truncation metadata", payload)
+	truncation := nestedMap(session.CanonicalizeEvent(event).Meta, "caelis", "runtime", "tool", "truncation")
+	if truncation["truncated"] != true {
+		t.Fatalf("event meta truncation = %#v, want truncation metadata", truncation)
 	}
 	results := event.Message.ToolResults()
 	if len(results) != 1 || len(results[0].Content) == 0 || results[0].Content[0].JSON == nil {

@@ -1189,7 +1189,7 @@ func TestBeginTurnBridgesApprovalRequestsIntoHandleEvents(t *testing.T) {
 	rt := &approvalRuntime{session: activeSession}
 	sessions := staticSessionService{
 		session: activeSession,
-		state:   map[string]any{StateCurrentSessionMode: string(ApprovalModeManual)},
+		state:   map[string]any{StateCurrentApprovalMode: string(ApprovalModeManual)},
 	}
 	gw, err := New(Config{
 		Sessions: sessions,

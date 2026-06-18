@@ -3,6 +3,8 @@ package tuiapp
 import (
 	"strings"
 	"testing"
+
+	controlcommands "github.com/OnslaughtSnail/caelis/protocol/acp/control/commands"
 )
 
 func TestRenderSlashArgListUsesWizardHintInsteadOfInternalConnectPayload(t *testing.T) {
@@ -20,7 +22,13 @@ func TestRenderSlashArgListUsesWizardHintInsteadOfInternalConnectPayload(t *test
 		state:     map[string]string{},
 	}
 	model.slashArgActive = true
-	model.slashArgCommand = "connect-context:minimax|https%3A%2F%2Fapi.minimaxi.com%2Fanthropic|60|sk-secret|MiniMax-M2.7-highspeed"
+	model.slashArgCommand = "connect-context:" + controlcommands.ConnectWizardState{
+		Provider:       "minimax",
+		BaseURL:        "https://api.minimaxi.com/anthropic",
+		TimeoutSeconds: controlcommands.DefaultConnectTimeoutSeconds,
+		TokenRef:       "sk-secret",
+		Model:          "MiniMax-M2.7-highspeed",
+	}.EncodeCompletionState()
 	model.slashArgCandidates = []SlashArgCandidate{{
 		Value:   "204800",
 		Display: "204800",

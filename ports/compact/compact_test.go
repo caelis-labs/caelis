@@ -69,25 +69,17 @@ func TestPromptEventsFromLatestCompactUsesPureTextOverlay(t *testing.T) {
 	}
 }
 
-func TestPromptEventsFromLatestCompactPreservesLegacyReplacementHistory(t *testing.T) {
-	legacy := &session.Event{
-		Type:       session.EventTypeUser,
-		Visibility: session.VisibilityOverlay,
-		Protocol: &session.EventProtocol{
-			Update: &session.ProtocolUpdate{
-				SessionUpdate: string(session.ProtocolUpdateTypeUserMessage),
-				Content:       session.ProtocolTextContent("legacy retained instruction"),
-			},
-		},
-	}
+func TestPromptEventsFromLatestCompactIgnoresLegacyReplacementHistory(t *testing.T) {
 	compactEvent := &session.Event{
 		Type:       session.EventTypeCompact,
 		Visibility: session.VisibilityCanonical,
 		Text:       "CONTEXT CHECKPOINT\nnew compact text",
 		Meta: map[string]any{
 			MetaKeyCompact: map[string]any{
-				"contract_version":    CompactContractVersion,
-				"replacement_history": []*session.Event{legacy},
+				"contract_version": CompactContractVersion,
+				"replacement_history": []map[string]any{{
+					"text": "legacy retained instruction",
+				}},
 			},
 		},
 	}
@@ -96,15 +88,15 @@ func TestPromptEventsFromLatestCompactPreservesLegacyReplacementHistory(t *testi
 	if len(got) != 1 {
 		t.Fatalf("prompt event count = %d, want 1 (%+v)", len(got), got)
 	}
-	if got[0].Text != "legacy retained instruction" {
-		t.Fatalf("prompt text = %q, want legacy retained instruction", got[0].Text)
+	if got[0].Text != "CONTEXT CHECKPOINT\nnew compact text" {
+		t.Fatalf("prompt text = %q, want current compact text", got[0].Text)
 	}
 	if got[0].Message != nil || got[0].Protocol != nil {
-		t.Fatalf("legacy prompt overlay should be pure text, got message=%+v protocol=%+v", got[0].Message, got[0].Protocol)
+		t.Fatalf("prompt overlay should be pure text, got message=%+v protocol=%+v", got[0].Message, got[0].Protocol)
 	}
 }
 
-func TestPromptEventsFromLatestCompactPreservesLegacyRetainedInputs(t *testing.T) {
+func TestPromptEventsFromLatestCompactIgnoresLegacyRetainedInputs(t *testing.T) {
 	compactText := "CONTEXT CHECKPOINT\nlegacy summary"
 	compactEvent := &session.Event{
 		Type:       session.EventTypeCompact,
@@ -119,10 +111,10 @@ func TestPromptEventsFromLatestCompactPreservesLegacyRetainedInputs(t *testing.T
 	}
 
 	got := PromptEventsFromLatestCompact([]*session.Event{compactEvent})
-	if len(got) != 2 {
-		t.Fatalf("prompt event count = %d, want retained input plus compact text (%+v)", len(got), got)
+	if len(got) != 1 {
+		t.Fatalf("prompt event count = %d, want compact text only (%+v)", len(got), got)
 	}
-	if got[0].Text != "legacy user constraint" || got[1].Text != compactText {
-		t.Fatalf("prompt texts = %q / %q, want legacy retained input then compact text", got[0].Text, got[1].Text)
+	if got[0].Text != compactText {
+		t.Fatalf("prompt text = %q, want compact text", got[0].Text)
 	}
 }

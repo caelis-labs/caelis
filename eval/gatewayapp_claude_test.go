@@ -25,12 +25,12 @@ func TestLocalStackClaudeBuiltInACPE2E(t *testing.T) {
 	defer cancel()
 	workdir := t.TempDir()
 	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "claude-e2e-test",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   workdir,
-		WorkspaceCWD:   workdir,
-		PermissionMode: "auto-review",
+		AppName:      "caelis",
+		UserID:       "claude-e2e-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: workdir,
+		WorkspaceCWD: workdir,
+		ApprovalMode: "auto-review",
 		Model: gatewayapp.ModelConfig{
 			Provider: "ollama",
 			Model:    "llama3",
@@ -72,12 +72,12 @@ func TestLocalStackClaudeACPMainResumeOrNewE2E(t *testing.T) {
 	defer cancel()
 	workdir := t.TempDir()
 	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "claude-resume-e2e-test",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   workdir,
-		WorkspaceCWD:   workdir,
-		PermissionMode: "auto-review",
+		AppName:      "caelis",
+		UserID:       "claude-resume-e2e-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: workdir,
+		WorkspaceCWD: workdir,
+		ApprovalMode: "auto-review",
 		Model: gatewayapp.ModelConfig{
 			Provider: "ollama",
 			Model:    "llama3",

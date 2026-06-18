@@ -641,14 +641,11 @@ func TestRuntimeACPControllerReturnsLiveRunnerBeforeTurnCompletion(t *testing.T)
 					},
 				}))
 				<-releaseFinal
-				handle.publishEvent(&session.Event{
-					Type:       session.EventTypeAssistant,
-					Visibility: session.VisibilityCanonical,
-					Text:       "hello",
-					Protocol: &session.EventProtocol{
-						UpdateType: string(session.ProtocolUpdateTypeAgentMessage),
-					},
-				})
+				event := assistantEvent("hello")
+				event.Protocol = &session.EventProtocol{
+					UpdateType: string(session.ProtocolUpdateTypeAgentMessage),
+				}
+				handle.publishEvent(event)
 				handle.finish()
 			}()
 			return controller.TurnResult{Handle: handle}, nil
@@ -786,21 +783,18 @@ func TestRuntimeACPControllerTurnSendsUnsyncedSharedDialogue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BindController() error = %v", err)
 	}
+	sideEvent := assistantEvent("side result")
+	sideEvent.Actor = session.ActorRef{Kind: session.ActorKindParticipant, Name: "jeff"}
+	sideEvent.Scope = &session.EventScope{
+		Participant: session.ParticipantRef{
+			ID:   "side-1",
+			Kind: session.ParticipantKindSubagent,
+			Role: session.ParticipantRoleSidecar,
+		},
+	}
 	if _, err := sessions.AppendEvent(context.Background(), session.AppendEventRequest{
 		SessionRef: activeSession.SessionRef,
-		Event: &session.Event{
-			Type:       session.EventTypeAssistant,
-			Visibility: session.VisibilityCanonical,
-			Text:       "side result",
-			Actor:      session.ActorRef{Kind: session.ActorKindParticipant, Name: "jeff"},
-			Scope: &session.EventScope{
-				Participant: session.ParticipantRef{
-					ID:   "side-1",
-					Kind: session.ParticipantKindSubagent,
-					Role: session.ParticipantRoleSidecar,
-				},
-			},
-		},
+		Event:      sideEvent,
 	}); err != nil {
 		t.Fatalf("AppendEvent(side) error = %v", err)
 	}
@@ -811,14 +805,11 @@ func TestRuntimeACPControllerTurnSendsUnsyncedSharedDialogue(t *testing.T) {
 			turnReqCh <- req
 			handle := newTestControllerTurnHandle(nil)
 			go func() {
-				handle.publishEvent(&session.Event{
-					Type:       session.EventTypeAssistant,
-					Visibility: session.VisibilityCanonical,
-					Text:       "main done",
-					Protocol: &session.EventProtocol{
-						UpdateType: string(session.ProtocolUpdateTypeAgentMessage),
-					},
-				})
+				event := assistantEvent("main done")
+				event.Protocol = &session.EventProtocol{
+					UpdateType: string(session.ProtocolUpdateTypeAgentMessage),
+				}
+				handle.publishEvent(event)
 				handle.finish()
 			}()
 			return controller.TurnResult{Handle: handle}, nil
@@ -1464,10 +1455,29 @@ func TestBuildControllerHandoffContextUsesSharedDialogueOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PutParticipant() error = %v", err)
 	}
+	toolMessage := model.Message{
+		Role: model.RoleTool,
+		Parts: []model.Part{model.NewToolResultJSONPart("call-1", "RUN_COMMAND", map[string]any{
+			"result": "tool output",
+		}, false)},
+	}
+	childEvent := assistantEvent("child answer")
+	childEvent.Actor = session.ActorRef{Kind: session.ActorKindParticipant, Name: "ella"}
+	childEvent.Scope = &session.EventScope{Participant: session.ParticipantRef{ID: "participant-1", Kind: session.ParticipantKindSubagent}}
 	events := []*session.Event{
-		{Type: session.EventTypeUser, Visibility: session.VisibilityCanonical, Text: "user prompt"},
-		{Type: session.EventTypeToolResult, Visibility: session.VisibilityCanonical, Text: "tool output"},
-		{Type: session.EventTypeAssistant, Visibility: session.VisibilityCanonical, Text: "child answer", Actor: session.ActorRef{Kind: session.ActorKindParticipant, Name: "ella"}, Scope: &session.EventScope{Participant: session.ParticipantRef{ID: "participant-1", Kind: session.ParticipantKindSubagent}}},
+		userTextEvent("user prompt"),
+		{
+			Type:       session.EventTypeToolResult,
+			Visibility: session.VisibilityCanonical,
+			Text:       "tool output",
+			Message:    &toolMessage,
+			Tool: &session.EventTool{
+				ID:     "call-1",
+				Name:   "RUN_COMMAND",
+				Output: map[string]any{"result": "tool output"},
+			},
+		},
+		childEvent,
 		session.MarkUIOnly(&session.Event{Type: session.EventTypeAssistant, Text: "live chunk"}),
 	}
 	for _, event := range events {

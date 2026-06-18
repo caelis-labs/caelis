@@ -5,7 +5,6 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"encoding/base64"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -117,21 +116,20 @@ func resolveCodeFreeCredentialPath() (string, error) {
 	if path != "" {
 		return path, nil
 	}
-	primary, _, err := resolveCodeFreeDefaultCredentialPaths()
+	primary, err := resolveCodeFreeDefaultCredentialPath()
 	if err != nil {
 		return "", err
 	}
 	return primary, nil
 }
 
-func resolveCodeFreeDefaultCredentialPaths() (string, string, error) {
+func resolveCodeFreeDefaultCredentialPath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "", "", fmt.Errorf("providers: resolve codefree home dir: %w", err)
+		return "", fmt.Errorf("providers: resolve codefree home dir: %w", err)
 	}
 	primary := filepath.Join(home, ".caelis", filepath.FromSlash(codeFreeCredentialDir), codeFreeDefaultCredentialFile)
-	legacy := filepath.Join(home, codeFreeLegacyCredentialDir, codeFreeDefaultCredentialFile)
-	return primary, legacy, nil
+	return primary, nil
 }
 
 func readCodeFreeStoredCredentials() (codeFreeStoredCredentials, error) {
@@ -139,49 +137,7 @@ func readCodeFreeStoredCredentials() (codeFreeStoredCredentials, error) {
 	if err != nil {
 		return codeFreeStoredCredentials{}, err
 	}
-	stored, err := readCodeFreeStoredCredentialsAtPath(path)
-	if err == nil {
-		return stored, nil
-	}
-	if strings.TrimSpace(os.Getenv(codeFreeCredsPathEnv)) != "" || !errors.Is(err, os.ErrNotExist) {
-		return codeFreeStoredCredentials{}, err
-	}
-	primary, legacy, resolveErr := resolveCodeFreeDefaultCredentialPaths()
-	if resolveErr != nil {
-		return codeFreeStoredCredentials{}, resolveErr
-	}
-	if filepath.Clean(path) != filepath.Clean(primary) {
-		return codeFreeStoredCredentials{}, err
-	}
-	imported, importErr := importLegacyCodeFreeStoredCredentials(primary, legacy)
-	if importErr == nil {
-		return imported, nil
-	}
-	return codeFreeStoredCredentials{}, err
-}
-
-func importLegacyCodeFreeStoredCredentials(primary string, legacy string) (codeFreeStoredCredentials, error) {
-	if filepath.Clean(primary) == filepath.Clean(legacy) {
-		return codeFreeStoredCredentials{}, fmt.Errorf("providers: codefree credential import source and destination are identical")
-	}
-	raw, err := os.ReadFile(legacy)
-	if err != nil {
-		return codeFreeStoredCredentials{}, fmt.Errorf("providers: read legacy codefree credentials %q: %w", legacy, err)
-	}
-	info, err := os.Stat(legacy)
-	if err != nil {
-		return codeFreeStoredCredentials{}, fmt.Errorf("providers: stat legacy codefree credentials %q: %w", legacy, err)
-	}
-	if err := os.MkdirAll(filepath.Dir(primary), 0o755); err != nil {
-		return codeFreeStoredCredentials{}, fmt.Errorf("providers: create caelis codefree credential dir: %w", err)
-	}
-	if err := os.WriteFile(primary, raw, 0o600); err != nil {
-		return codeFreeStoredCredentials{}, fmt.Errorf("providers: import codefree credentials into %q: %w", primary, err)
-	}
-	if err := os.Chtimes(primary, info.ModTime(), info.ModTime()); err != nil {
-		return codeFreeStoredCredentials{}, fmt.Errorf("providers: preserve imported codefree credential mtime for %q: %w", primary, err)
-	}
-	return readCodeFreeStoredCredentialsAtPath(primary)
+	return readCodeFreeStoredCredentialsAtPath(path)
 }
 
 func canUseCodeFreeStoredCredentials(cached codeFreeCachedCredentials) bool {

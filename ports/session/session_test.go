@@ -289,7 +289,7 @@ func TestEventTypeOfProtocolPlan(t *testing.T) {
 	}
 }
 
-func TestCanonicalizeEventBuildsCoreMessageFromProtocolText(t *testing.T) {
+func TestCanonicalizeEventDoesNotBuildCoreMessageFromProtocolText(t *testing.T) {
 	t.Parallel()
 
 	event := CanonicalizeEvent(&Event{
@@ -299,25 +299,24 @@ func TestCanonicalizeEventBuildsCoreMessageFromProtocolText(t *testing.T) {
 			Content:       ProtocolTextContent("final answer"),
 		}},
 	})
-	if event == nil || event.AssistantMessage == nil {
-		t.Fatal("CanonicalizeEvent() did not build durable assistant semantic payload")
+	if event == nil {
+		t.Fatal("CanonicalizeEvent() = nil")
 	}
-	if event.Schema != EventSchemaSemanticV2 {
-		t.Fatalf("schema = %d, want %d", event.Schema, EventSchemaSemanticV2)
+	if event.Message != nil {
+		t.Fatalf("event.Message = %#v, want no protocol-to-message migration", event.Message)
 	}
-	if event.Message != nil || event.Protocol != nil || event.Meta != nil {
-		t.Fatalf("legacy projection fields persisted after canonicalization: message=%#v protocol=%#v meta=%#v", event.Message, event.Protocol, event.Meta)
+	if event.Protocol == nil {
+		t.Fatal("event.Protocol = nil, want ACP projection preserved for protocol event")
 	}
-	message, ok := ModelMessageOf(event)
-	if !ok {
-		t.Fatal("ModelMessageOf() did not project assistant semantic payload")
+	if _, ok := ModelMessageOf(event); ok {
+		t.Fatal("ModelMessageOf() projected protocol-only event, want false")
 	}
-	if message.Role != model.RoleAssistant || message.TextContent() != "final answer" {
-		t.Fatalf("projected message = %#v, want assistant final answer", message)
+	if got := EventText(event); got != "final answer" {
+		t.Fatalf("EventText() = %q, want protocol display text", got)
 	}
 }
 
-func TestCanonicalizeEventPreservesProtocolTextWhitespaceInSemanticPayload(t *testing.T) {
+func TestValidateDurableCoreEventRejectsProtocolOnlyMessage(t *testing.T) {
 	t.Parallel()
 
 	const text = "  final answer\n"
@@ -328,19 +327,16 @@ func TestCanonicalizeEventPreservesProtocolTextWhitespaceInSemanticPayload(t *te
 			Content:       ProtocolTextContent(text),
 		}},
 	})
-	if event == nil || event.AssistantMessage == nil {
-		t.Fatal("CanonicalizeEvent() did not build durable assistant semantic payload")
+	err := ValidateDurableCoreEvent(event)
+	if err == nil {
+		t.Fatal("ValidateDurableCoreEvent() error = nil, want protocol-only message rejected")
 	}
-	message, ok := ModelMessageOf(event)
-	if !ok {
-		t.Fatal("ModelMessageOf() did not project assistant semantic payload")
-	}
-	if got := message.TextContent(); got != text {
-		t.Fatalf("projected message text = %q, want raw protocol text %q", got, text)
+	if detail := EventValidationDetail(err); !strings.Contains(detail, "Event.Message") {
+		t.Fatalf("validation detail = %q, want missing Event.Message", detail)
 	}
 }
 
-func TestCanonicalizeEventMigratesProtocolOnlyToolResult(t *testing.T) {
+func TestValidateDurableCoreEventRejectsProtocolOnlyToolResult(t *testing.T) {
 	t.Parallel()
 
 	event := CanonicalizeEvent(&Event{
@@ -353,29 +349,16 @@ func TestCanonicalizeEventMigratesProtocolOnlyToolResult(t *testing.T) {
 			RawOutput:     map[string]any{"stdout": "ok"},
 		}},
 	})
-	if event == nil || event.ToolResultPayload == nil {
-		t.Fatal("CanonicalizeEvent() did not build durable tool_result semantic payload")
+	err := ValidateDurableCoreEvent(event)
+	if err == nil {
+		t.Fatal("ValidateDurableCoreEvent() error = nil, want protocol-only tool result rejected")
 	}
-	if event.Message != nil || event.Tool != nil || event.Protocol != nil || event.Meta != nil {
-		t.Fatalf("legacy projection fields persisted after canonicalization: message=%#v tool=%#v protocol=%#v meta=%#v", event.Message, event.Tool, event.Protocol, event.Meta)
-	}
-	if err := ValidateDurableCoreEvent(event); err != nil {
-		t.Fatalf("ValidateDurableCoreEvent() error = %v, want semantic tool result accepted", err)
-	}
-	if event.ToolResultPayload.ToolCallID != "call-1" || event.ToolResultPayload.Name != "RUN_COMMAND" {
-		t.Fatalf("tool_result payload = %#v, want call-1/RUN_COMMAND", event.ToolResultPayload)
-	}
-	message, ok := ModelMessageOf(event)
-	if !ok || len(message.ToolResults()) != 1 {
-		t.Fatalf("ModelMessageOf() = %#v, %v; want one tool result", message, ok)
-	}
-	result := message.ToolResults()[0]
-	if result.ToolUseID != "call-1" || result.Name != "RUN_COMMAND" {
-		t.Fatalf("projected tool result = %#v, want call-1/RUN_COMMAND", result)
+	if detail := EventValidationDetail(err); !strings.Contains(detail, "Event.Tool") {
+		t.Fatalf("validation detail = %q, want missing Event.Tool", detail)
 	}
 }
 
-func TestValidateDurableCoreEventAllowsUsageOnlyProtocolToolEvent(t *testing.T) {
+func TestValidateDurableCoreEventRejectsUsageOnlyProtocolToolEvent(t *testing.T) {
 	t.Parallel()
 
 	err := ValidateDurableCoreEvent(&Event{
@@ -395,12 +378,15 @@ func TestValidateDurableCoreEventAllowsUsageOnlyProtocolToolEvent(t *testing.T) 
 			},
 		},
 	})
-	if err != nil {
-		t.Fatalf("ValidateDurableCoreEvent() error = %v, want usage-only protocol tool event accepted", err)
+	if err == nil {
+		t.Fatal("ValidateDurableCoreEvent() error = nil, want protocol-only tool event rejected")
+	}
+	if detail := EventValidationDetail(err); !strings.Contains(detail, "Event.Tool") {
+		t.Fatalf("validation detail = %q, want missing Event.Tool", detail)
 	}
 }
 
-func TestValidateDurableCoreEventAllowsTextOnlyToolPlaceholder(t *testing.T) {
+func TestValidateDurableCoreEventRejectsTextOnlyToolPlaceholder(t *testing.T) {
 	t.Parallel()
 
 	err := ValidateDurableCoreEvent(&Event{
@@ -408,8 +394,11 @@ func TestValidateDurableCoreEventAllowsTextOnlyToolPlaceholder(t *testing.T) {
 		Visibility: VisibilityCanonical,
 		Text:       "tool output shown only in transcript",
 	})
-	if err != nil {
-		t.Fatalf("ValidateDurableCoreEvent() error = %v, want text-only placeholder accepted", err)
+	if err == nil {
+		t.Fatal("ValidateDurableCoreEvent() error = nil, want text-only tool placeholder rejected")
+	}
+	if detail := EventValidationDetail(err); !strings.Contains(detail, "Event.Tool") {
+		t.Fatalf("validation detail = %q, want missing Event.Tool", detail)
 	}
 }
 
@@ -442,7 +431,7 @@ func TestValidateDurableCoreEventAllowsMatchingToolMessageOutput(t *testing.T) {
 	}
 }
 
-func TestCanonicalizeEventMigratesToolResultNameCaseMismatch(t *testing.T) {
+func TestValidateDurableCoreEventRejectsToolResultNameCaseMismatch(t *testing.T) {
 	t.Parallel()
 
 	message := model.Message{
@@ -468,24 +457,10 @@ func TestCanonicalizeEventMigratesToolResultNameCaseMismatch(t *testing.T) {
 		Message: &message,
 		Meta:    toolResultTestMeta("WRITE"),
 	})
-	if event == nil || event.ToolResultPayload == nil {
-		t.Fatal("CanonicalizeEvent() did not build durable tool_result semantic payload")
-	}
-	if event.Message != nil || event.Tool != nil || event.Protocol != nil || event.Meta != nil {
-		t.Fatalf("legacy projection fields persisted after canonicalization: message=%#v tool=%#v protocol=%#v meta=%#v", event.Message, event.Tool, event.Protocol, event.Meta)
-	}
-	if err := ValidateDurableCoreEvent(event); err != nil {
-		t.Fatalf("ValidateDurableCoreEvent() error = %v, want semantic mismatch accepted", err)
-	}
-	if got := event.ToolResultPayload.Name; got != "Write" {
-		t.Fatalf("tool_result name = %q, want canonical Event.Tool name %q", got, "Write")
-	}
-	projected, ok := ModelMessageOf(event)
-	if !ok || len(projected.ToolResults()) != 1 {
-		t.Fatalf("ModelMessageOf() = %#v, %v; want one tool result", projected, ok)
-	}
-	if got := projected.ToolResults()[0].Name; got != "Write" {
-		t.Fatalf("projected tool result name = %q, want %q", got, "Write")
+	if err := ValidateDurableCoreEvent(event); err == nil {
+		t.Fatal("ValidateDurableCoreEvent() error = nil, want tool result name mismatch rejected")
+	} else if detail := EventValidationDetail(err); !strings.Contains(detail, "name") {
+		t.Fatalf("validation detail = %q, want name mismatch detail", detail)
 	}
 }
 
@@ -520,16 +495,13 @@ func TestCanonicalizeToolResultPreservesRuntimeTaskMetadata(t *testing.T) {
 			},
 		},
 	})
-	if event == nil || event.ToolResultPayload == nil {
-		t.Fatal("CanonicalizeEvent() did not build durable tool_result semantic payload")
+	if event == nil || event.Tool == nil {
+		t.Fatal("CanonicalizeEvent() did not preserve durable Event.Tool")
 	}
-	if event.Meta != nil {
-		t.Fatalf("event.Meta = %#v, want stripped projection", event.Meta)
-	}
-	taskMeta, _ := nestedAnyFromMap(event.ToolResultPayload.Metadata, "caelis", "runtime", "task").(map[string]any)
+	taskMeta, _ := nestedAnyFromMap(event.Meta, "caelis", "runtime", "task").(map[string]any)
 	for _, key := range []string{"task_id", "internal_task_id", "terminal_id", "output_cursor", "running", "state"} {
 		if _, ok := taskMeta[key]; !ok {
-			t.Fatalf("semantic task metadata missing %q: %#v", key, event.ToolResultPayload.Metadata)
+			t.Fatalf("runtime task metadata missing %q: %#v", key, event.Meta)
 		}
 	}
 }
@@ -562,39 +534,15 @@ func TestValidateDurableCoreEventRejectsToolMessageOutputDivergence(t *testing.T
 	}
 }
 
-func TestValidateDurableCoreEventRejectsSemanticToolOutputDivergence(t *testing.T) {
+func TestValidateDurableCoreEventRejectsUntruncatedToolOutput(t *testing.T) {
 	t.Parallel()
 
 	err := ValidateDurableCoreEvent(&Event{
 		Type:       EventTypeToolResult,
 		Visibility: VisibilityCanonical,
-		ToolResultPayload: &EventToolResultPayload{
-			ToolCallID: "call-1",
-			Name:       "RUN_COMMAND",
-			Output:     map[string]any{"result": "canonical", "exit_code": 1},
-			Content: []EventPart{{
-				Kind: string(model.PartKindJSON),
-				JSON: []byte(`{"result":"raw","exit_code":1}`),
-			}},
-		},
-	})
-	if err == nil {
-		t.Fatal("ValidateDurableCoreEvent() error = nil, want semantic divergence rejection")
-	}
-	if detail := EventValidationDetail(err); !strings.Contains(detail, "diverges") {
-		t.Fatalf("validation detail = %q, want divergence detail", detail)
-	}
-}
-
-func TestValidateDurableCoreEventRejectsUntruncatedSemanticToolOutput(t *testing.T) {
-	t.Parallel()
-
-	err := ValidateDurableCoreEvent(&Event{
-		Type:       EventTypeToolResult,
-		Visibility: VisibilityCanonical,
-		ToolResultPayload: &EventToolResultPayload{
-			ToolCallID: "call-1",
-			Name:       "RUN_COMMAND",
+		Tool: &EventTool{
+			ID:   "call-1",
+			Name: "RUN_COMMAND",
 			Output: map[string]any{
 				"result": strings.Repeat("x", tool.DefaultTruncationPolicy().ByteBudget()*2),
 			},
@@ -623,4 +571,16 @@ func toolResultTestMeta(name string) map[string]any {
 			},
 		},
 	}
+}
+
+func nestedAnyFromMap(values map[string]any, path ...string) any {
+	var current any = values
+	for _, key := range path {
+		mapped, ok := current.(map[string]any)
+		if !ok {
+			return nil
+		}
+		current = mapped[key]
+	}
+	return current
 }

@@ -28,8 +28,6 @@ func (s *Stack) SetSessionMode(ctx context.Context, ref session.SessionRef, mode
 			next = map[string]any{}
 		}
 		next[gateway.StateCurrentApprovalMode] = normalized
-		delete(next, gateway.StateCurrentSessionMode)
-		delete(next, gateway.StateCurrentSandboxMode)
 		return next, nil
 	})
 	if err != nil {
@@ -57,6 +55,9 @@ func (s *Stack) SessionRuntimeState(ctx context.Context, ref session.SessionRef)
 	if err != nil {
 		return SessionRuntimeState{}, err
 	}
+	if key := gateway.UnsupportedLegacyStateKey(state); key != "" {
+		return SessionRuntimeState{}, fmt.Errorf("gatewayapp: %w: session state contains legacy key %q", session.ErrUnsupportedLegacyFormat, key)
+	}
 	modelRef := gateway.CurrentModelAlias(state)
 	modelID := ""
 	modelAlias := ""
@@ -72,7 +73,6 @@ func (s *Stack) SessionRuntimeState(ctx context.Context, ref session.SessionRef)
 		ReasoningEffort: gateway.CurrentReasoningEffort(state),
 		SessionMode:     gateway.CurrentSessionModeOrDefault(state, s.runtime.ApprovalMode),
 		PolicyProfile:   firstNonEmpty(gateway.CurrentPolicyProfile(state), policyProfile(s.runtime.PolicyProfile)),
-		SandboxMode:     gateway.CurrentSandboxMode(state),
 	}, nil
 }
 

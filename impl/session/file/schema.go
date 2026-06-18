@@ -55,11 +55,10 @@ type Service struct {
 }
 
 type persistedDocument struct {
-	Kind    string           `json:"kind"`
-	Version int              `json:"version"`
-	Session session.Session  `json:"session"`
-	Events  []*session.Event `json:"events,omitempty"`
-	State   map[string]any   `json:"state"`
+	Kind    string          `json:"kind"`
+	Version int             `json:"version"`
+	Session session.Session `json:"session"`
+	State   map[string]any  `json:"state"`
 }
 
 type persistedSessionIndex struct {

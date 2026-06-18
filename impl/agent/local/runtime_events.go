@@ -167,13 +167,8 @@ func (r *Runtime) handlePlanEvent(
 			TurnID: strings.TrimSpace(turnID),
 			Source: "tool_result",
 		},
-		Protocol: &session.EventProtocol{
-			UpdateType: string(session.ProtocolUpdateTypePlan),
-			Plan: &session.ProtocolPlan{
-				Entries: entriesToProtocol(entries),
-			},
-		},
-		Text: strings.TrimSpace(explanation),
+		PlanPayload: &session.EventPlanPayload{Entries: entriesToPlanPayload(entries)},
+		Text:        strings.TrimSpace(explanation),
 	}
 	normalized := normalizeEvent(session.Session{}, turnID, planEvent)
 	normalized.Scope.Controller = event.Scope.Controller
@@ -240,17 +235,7 @@ func planEntriesFromEvent(event *session.Event) ([]plan.Entry, string, bool) {
 	entries := planEntriesFromAny(payload["entries"])
 	explanation := strings.TrimSpace(stringValue(payload["explanation"]))
 	if len(entries) == 0 {
-		if toolResult := session.ToolResultPayloadOf(event); toolResult != nil {
-			entries = planEntriesFromAny(nestedValue(toolResult.Metadata, "caelis", "runtime", "tool", "entries"))
-		}
-	}
-	if len(entries) == 0 {
 		entries = planEntriesFromAny(nestedValue(event.Meta, "caelis", "runtime", "tool", "entries"))
-	}
-	if explanation == "" {
-		if toolResult := session.ToolResultPayloadOf(event); toolResult != nil {
-			explanation = nestedString(toolResult.Metadata, "caelis", "runtime", "tool", "explanation")
-		}
 	}
 	if explanation == "" {
 		explanation = nestedString(event.Meta, "caelis", "runtime", "tool", "explanation")
@@ -343,6 +328,21 @@ func entriesToProtocol(entries []plan.Entry) []session.ProtocolPlanEntry {
 		out = append(out, session.ProtocolPlanEntry{
 			Content:  strings.TrimSpace(item.Content),
 			Status:   strings.TrimSpace(string(item.Status)),
+			Priority: "medium",
+		})
+	}
+	return out
+}
+
+func entriesToPlanPayload(entries []plan.Entry) []session.EventPlanEntry {
+	if len(entries) == 0 {
+		return nil
+	}
+	out := make([]session.EventPlanEntry, 0, len(entries))
+	for _, entry := range entries {
+		out = append(out, session.EventPlanEntry{
+			Content:  strings.TrimSpace(entry.Content),
+			Status:   strings.TrimSpace(string(entry.Status)),
 			Priority: "medium",
 		})
 	}
