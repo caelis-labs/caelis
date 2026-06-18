@@ -48,7 +48,7 @@ func NewRunCommand(cfg RunCommandConfig) (*RunCommandTool, error) {
 func (t *RunCommandTool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        RunCommandToolName,
-		Description: "Run a shell command from the session workspace or a specified workdir. Use this for repository inspection, tests, builds, formatting checks, git status/diff inspection, and commands that cannot be expressed by file tools. Do not prefix with cd; set workdir instead. Use yield_time_ms for long-running commands and sandbox_permissions=require_escalated only for the specific operation that needs escalation.",
+		Description: "Run a shell command from the session workspace or a specified workdir. Use this for repository inspection, tests, builds, formatting checks, git status/diff inspection, and commands that cannot be expressed by file tools. Do not prefix with cd; set workdir instead. Use yield_time_ms for long-running commands. Commands use default sandbox permissions unless this call requests task-necessary Host execution.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -68,12 +68,12 @@ func (t *RunCommandTool) Definition() tool.Definition {
 				},
 				"sandbox_permissions": map[string]any{
 					"type":        "string",
-					"description": "Sandbox mode for this command. Use require_escalated only when this exact command needs host permissions or after it failed due to sandbox/permission denial.",
+					"description": "Sandbox mode for this command only. use_default runs with default sandbox permissions; require_escalated requests Host execution for this task-necessary command or exact retry after sandbox/permission/lock denial.",
 					"enum":        []string{"use_default", "require_escalated"},
 				},
 				"justification": map[string]any{
 					"type":        "string",
-					"description": "Short approval question for require_escalated; include what will run and why current permissions are insufficient.",
+					"description": "Short approval question for require_escalated; state what will run and why sandbox/current permissions are insufficient.",
 				},
 			},
 			"required":             []string{"command"},

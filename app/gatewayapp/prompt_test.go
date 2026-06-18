@@ -66,8 +66,9 @@ func TestBuildSystemPromptIncludesPromptAssets(t *testing.T) {
 		"changed / verified / remaining",
 		"investigation-only tasks, answer directly with evidence",
 		"## Execution And Approval",
-		"Request elevated execution only when the specific operation cannot complete under current permissions.",
-		"Keep the requested scope and justification narrow.",
+		"Start from the restricted sandbox and current permissions.",
+		"sandbox_permissions=require_escalated",
+		"Do not bypass or repair sandbox restrictions",
 		"Tool-specific behavior belongs to each tool's own description and schema.",
 		"Do not invent facts when evidence can be inspected.",
 		"Stop searching once the available evidence is sufficient",
@@ -77,6 +78,10 @@ func TestBuildSystemPromptIncludesPromptAssets(t *testing.T) {
 		"Global rule.",
 		"<environment_context>",
 		"<cwd>" + resolvedWorkspace + "</cwd>",
+		"<os>",
+		"<sandbox>restricted sandbox</sandbox>",
+		"<default_permission>workspace-write sandbox; Host execution requires explicit escalation</default_permission>",
+		"Use a skill only when its description clearly matches the task.",
 		"### Available skills",
 		"echo",
 	} {
@@ -95,7 +100,6 @@ func TestBuildSystemPromptIncludesPromptAssets(t *testing.T) {
 		"PATCH",
 		"TASK",
 		"SPAWN",
-		"sandbox_permissions",
 	} {
 		if strings.Contains(prompt, forbidden) {
 			t.Fatalf("prompt should not contain tool-coupled %q:\n%s", forbidden, prompt)
@@ -109,6 +113,9 @@ func TestBuildSystemPromptIncludesPromptAssets(t *testing.T) {
 	}
 	if got := strings.Index(prompt, "<environment_context>"); got < strings.Index(prompt, "### Available skills") {
 		t.Fatalf("environment context rendered before skills metadata:\n%s", prompt)
+	}
+	if got := strings.Count(prompt, "Use a skill only when its description clearly matches the task."); got != 1 {
+		t.Fatalf("skill activation guidance count = %d, want 1:\n%s", got, prompt)
 	}
 }
 
@@ -141,7 +148,6 @@ func TestBuildSystemPromptCoreContractIsConciseAndToolAgnostic(t *testing.T) {
 		"PATCH",
 		"TASK",
 		"SPAWN",
-		"sandbox_permissions",
 		"with_additional_permissions",
 	} {
 		if strings.Contains(prompt, forbidden) {
@@ -196,9 +202,9 @@ func TestBuildSystemPromptPermissionBoundariesAreRuntimeAgnostic(t *testing.T) {
 	expected := strings.Join([]string{
 		"## Execution And Approval",
 		"",
-		"- Use the current permissions for normal inspection, edits, builds, tests, and formatting checks.",
-		"- Request elevated execution only when the specific operation cannot complete under current permissions. Keep the requested scope and justification narrow.",
-		"- When permission or lock errors occur, do not substitute broader cleanup, reset, delete, ACL, or mode changes for the failed operation; retry only the necessary original operation with the narrowest permissions, or stop for user input.",
+		"- Start from the restricted sandbox and current permissions.",
+		"- For a task-necessary command that cannot complete there, request Host execution for that command with `sandbox_permissions=require_escalated` and a clear reason.",
+		"- Do not bypass or repair sandbox restrictions after permission or lock failures; retry only the necessary original operation with escalation, narrow the operation, or stop for user input.",
 	}, "\n")
 	if !strings.Contains(prompt, expected) {
 		t.Fatalf("prompt missing exact permission block:\n%s", prompt)
@@ -213,7 +219,6 @@ func TestBuildSystemPromptPermissionBoundariesAreRuntimeAgnostic(t *testing.T) {
 		"Default RUN_COMMAND execution uses the sandbox route",
 		"Default RUN_COMMAND execution uses the host route",
 		"Default RUN_COMMAND execution uses the host backend",
-		"sandbox_permissions",
 		"Configured readable roots:",
 		"Configured writable roots:",
 		"Configured read-only subpaths:",

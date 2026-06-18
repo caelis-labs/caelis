@@ -60,8 +60,14 @@ func isSpawnVisibleAgent(agent assembly.AgentConfig) bool {
 
 func systemPromptWithDelegationGuidance(systemPrompt string) string {
 	systemPrompt = strings.TrimRight(strings.TrimSpace(systemPrompt), "\n")
-	guidance := "- Delegate only bounded side work that can run independently; keep final integration and user-facing judgment in the main session."
+	guidance := strings.Join([]string{
+		"- Delegate only when the subtask has clear independent scope, useful parallelism, or a focused review/investigation role.",
+		"- Make delegated prompts self-contained: goal, scope, constraints, edit permission, and expected output.",
+		"- Keep architecture, integration, validation, and user-facing judgment in the main session.",
+	}, "\n")
 	if strings.Contains(systemPrompt, guidance) ||
+		strings.Contains(systemPrompt, "Delegate only when the subtask has clear independent scope") ||
+		strings.Contains(systemPrompt, "Delegate only bounded side work") ||
 		strings.Contains(systemPrompt, "SPAWN for bounded child-agent work") ||
 		strings.Contains(systemPrompt, "SPAWN for bounded child ACP work") {
 		return systemPrompt

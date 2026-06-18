@@ -1,6 +1,7 @@
 package commanddiag
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/OnslaughtSnail/caelis/ports/sandbox"
@@ -20,6 +21,9 @@ fatal: Could not read from remote repository.`
 	}
 	if got.Hint == "" || got.Severity != "warning" {
 		t.Fatalf("Diagnostic = %+v, want user-visible warning hint", got)
+	}
+	if !strings.Contains(got.Hint, "sandbox_permissions=require_escalated") {
+		t.Fatalf("Hint = %q, want concrete escalation parameter", got.Hint)
 	}
 }
 
@@ -52,6 +56,9 @@ func TestBestDetectsCurlSChannelNoCredentials(t *testing.T) {
 	}
 	if got.Code != CodeWindowsSChannelCredentials {
 		t.Fatalf("Code = %q, want %q", got.Code, CodeWindowsSChannelCredentials)
+	}
+	if !strings.Contains(got.Hint, "sandbox_permissions=require_escalated") {
+		t.Fatalf("Hint = %q, want concrete escalation parameter", got.Hint)
 	}
 }
 

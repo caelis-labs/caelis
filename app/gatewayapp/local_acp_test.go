@@ -67,7 +67,7 @@ func TestLocalStackInjectsSpawnForSelfAndAgentProfilesOnly(t *testing.T) {
 		}
 	}
 	systemPrompt, _ := resolved.RunRequest.AgentSpec.Metadata["system_prompt"].(string)
-	if !strings.Contains(systemPrompt, "Delegate only bounded side work") {
+	if !strings.Contains(systemPrompt, "Delegate only when the subtask has clear independent scope") {
 		t.Fatalf("system prompt missing delegation guidance: %q", systemPrompt)
 	}
 
@@ -88,7 +88,7 @@ func TestLocalStackInjectsSpawnForSelfAndAgentProfilesOnly(t *testing.T) {
 		t.Fatalf("SPAWN agent is required for default profile agents")
 	}
 	systemPrompt, _ = resolved.RunRequest.AgentSpec.Metadata["system_prompt"].(string)
-	if !strings.Contains(systemPrompt, "Delegate only bounded side work") {
+	if !strings.Contains(systemPrompt, "Delegate only when the subtask has clear independent scope") {
 		t.Fatalf("system prompt missing delegation guidance for default profile spawn: %q", systemPrompt)
 	}
 	if !agentConfigSetHas(withoutAgents.runtime.Assembly.Agents, "self") {

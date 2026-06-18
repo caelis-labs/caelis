@@ -21,11 +21,14 @@ const (
 )
 
 type Config struct {
-	AppName          string
-	WorkspaceDir     string
-	BasePrompt       string
-	SkillDirs        []string
-	DelegationAgents []delegation.Agent
+	AppName           string
+	WorkspaceDir      string
+	BasePrompt        string
+	SkillDirs         []string
+	DelegationAgents  []delegation.Agent
+	RuntimeOS         string
+	SandboxMode       string
+	DefaultPermission string
 }
 
 type fragmentKind string
@@ -105,7 +108,7 @@ func BuildSystemPrompt(cfg Config) (string, error) {
 			Kind:    fragmentContext,
 			Stage:   "dynamic_runtime_context",
 			Source:  "app:workspace-context",
-			Content: builtInEnvironmentContextPrompt(workspaceDir),
+			Content: builtInEnvironmentContextPrompt(workspaceDir, cfg),
 		},
 		{
 			Kind:    fragmentMetadata,
@@ -150,11 +153,10 @@ func builtInCapabilityGuidancePrompt(agents []delegation.Agent) string {
 		"- Use prompts as operating principles, not scenario catalogs. Tool-specific behavior belongs to each tool's own description and schema.",
 		"- Do not invent facts when evidence can be inspected. Stop searching once the available evidence is sufficient for a defensible answer or change.",
 		"- Do not chase speculative dead ends, over-plan trivial work, or produce long reports when a concise answer is enough.",
-		"- Load a skill only when its description clearly matches the task; read only the needed parts of its SKILL.md.",
 	}
 	if len(agents) > 0 {
 		lines = append(lines,
-			delegationGuidanceLine(),
+			delegationGuidanceLines()...,
 		)
 	}
 	return strings.Join(lines, "\n")
@@ -164,25 +166,35 @@ func builtInPermissionBoundariesPrompt() string {
 	return strings.Join([]string{
 		"## Execution And Approval",
 		"",
-		"- Use the current permissions for normal inspection, edits, builds, tests, and formatting checks.",
-		"- Request elevated execution only when the specific operation cannot complete under current permissions. Keep the requested scope and justification narrow.",
-		"- When permission or lock errors occur, do not substitute broader cleanup, reset, delete, ACL, or mode changes for the failed operation; retry only the necessary original operation with the narrowest permissions, or stop for user input.",
+		"- Start from the restricted sandbox and current permissions.",
+		"- For a task-necessary command that cannot complete there, request Host execution for that command with `sandbox_permissions=require_escalated` and a clear reason.",
+		"- Do not bypass or repair sandbox restrictions after permission or lock failures; retry only the necessary original operation with escalation, narrow the operation, or stop for user input.",
 	}, "\n")
 }
 
-func delegationGuidanceLine() string {
-	return "- Delegate only bounded side work that can run independently; keep final integration and user-facing judgment in the main session."
+func delegationGuidanceLines() []string {
+	return []string{
+		"- Delegate only when the subtask has clear independent scope, useful parallelism, or a focused review/investigation role.",
+		"- Make delegated prompts self-contained: goal, scope, constraints, edit permission, and expected output.",
+		"- Keep architecture, integration, validation, and user-facing judgment in the main session.",
+	}
 }
 
-func builtInEnvironmentContextPrompt(workspaceDir string) string {
+func builtInEnvironmentContextPrompt(workspaceDir string, cfg Config) string {
 	workspaceDir = strings.TrimSpace(workspaceDir)
 	if workspaceDir == "" {
 		return ""
 	}
+	osName := firstNonEmpty(strings.TrimSpace(cfg.RuntimeOS), runtime.GOOS)
+	sandboxMode := firstNonEmpty(strings.TrimSpace(cfg.SandboxMode), "restricted sandbox")
+	defaultPermission := firstNonEmpty(strings.TrimSpace(cfg.DefaultPermission), "workspace-write sandbox; Host execution requires explicit escalation")
 	return fmt.Sprintf(`<environment_context>
   <cwd>%s</cwd>
+  <os>%s</os>
   <shell>%s</shell>
-</environment_context>`, workspaceDir, currentShellName())
+  <sandbox>%s</sandbox>
+  <default_permission>%s</default_permission>
+</environment_context>`, workspaceDir, osName, currentShellName(), sandboxMode, defaultPermission)
 }
 
 func currentShellName() string {
@@ -253,6 +265,15 @@ func buildSkillsMetaPrompt(metas []fs.Meta) string {
 
 func promptSingleLine(text string) string {
 	return strings.Join(strings.Fields(text), " ")
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 func renderPromptFragments(fragments []fragment) string {

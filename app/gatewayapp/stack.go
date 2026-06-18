@@ -237,10 +237,12 @@ func pluginSkillDirsFromConfig(workspaceCWD string, plugins []PluginConfig) ([]s
 func buildStackBaseMetadata(appName, workspaceCWD, basePrompt string, model ModelConfig, sandboxCfg SandboxConfig, skillDirs []string) (map[string]any, error) {
 	baseMetadata := map[string]any{}
 	systemPrompt, err := buildSystemPrompt(promptConfig{
-		AppName:      appName,
-		WorkspaceDir: workspaceCWD,
-		BasePrompt:   basePrompt,
-		SkillDirs:    skillDirs,
+		AppName:           appName,
+		WorkspaceDir:      workspaceCWD,
+		BasePrompt:        basePrompt,
+		SkillDirs:         skillDirs,
+		SandboxMode:       promptSandboxContextMode(sandboxCfg),
+		DefaultPermission: promptDefaultPermissionSummary(sandboxCfg),
 	})
 	if err != nil {
 		return nil, err
@@ -252,6 +254,25 @@ func buildStackBaseMetadata(appName, workspaceCWD, basePrompt string, model Mode
 		baseMetadata["reasoning_effort"] = reasoning
 	}
 	return withSandboxPolicyRootMetadata(baseMetadata, sandboxCfg, workspaceCWD), nil
+}
+
+func promptSandboxContextMode(cfg SandboxConfig) string {
+	requested := strings.ToLower(strings.TrimSpace(cfg.RequestedType))
+	switch requested {
+	case "host":
+		return "host"
+	case "", "auto":
+		return "restricted sandbox (auto)"
+	default:
+		return requested + " sandbox"
+	}
+}
+
+func promptDefaultPermissionSummary(cfg SandboxConfig) string {
+	if strings.EqualFold(strings.TrimSpace(cfg.RequestedType), "host") {
+		return "host permissions"
+	}
+	return "workspace-write sandbox; Host execution requires explicit escalation"
 }
 
 func (s *Stack) Close() error {

@@ -13,9 +13,9 @@ const (
 )
 
 const (
-	hintWindowsMSYSSSHSignalPipe = "Git for Windows MSYS ssh appears incompatible with the Windows restricted-token sandbox. Retry with GIT_SSH_COMMAND=C:/Windows/System32/OpenSSH/ssh.exe if that binary exists, or run dependency download outside the sandbox."
-	hintWindowsSChannel          = "Windows SChannel TLS can fail under the restricted-token sandbox. Prefer Python/Node/OpenSSL-backed HTTPS, use native alternatives, or rerun the specific network operation outside the sandbox."
-	hintGitIndexLockSandbox      = "Git index write is blocked by sandbox permissions; retry the original Git command with escalation."
+	hintWindowsMSYSSSHSignalPipe = "Git for Windows MSYS ssh appears incompatible with the Windows restricted-token sandbox. Retry with GIT_SSH_COMMAND=C:/Windows/System32/OpenSSH/ssh.exe if that binary exists; otherwise retry the same necessary network command with sandbox_permissions=require_escalated."
+	hintWindowsSChannel          = "Windows SChannel TLS can fail under the restricted-token sandbox. Prefer Python/Node/OpenSSL-backed HTTPS or native alternatives; otherwise retry the same necessary network command with sandbox_permissions=require_escalated."
+	hintGitIndexLockSandbox      = "Git index write is blocked by sandbox permissions; retry the original Git command with sandbox_permissions=require_escalated."
 )
 
 type Input struct {
