@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -137,7 +138,49 @@ func writeEmbeddedFile(src string, dst string, safeRoot string) error {
 		_ = os.Chmod(dst, mode)
 		return nil
 	}
-	return os.WriteFile(dst, data, mode)
+	return writeFileAtomically(dst, data, mode)
+}
+
+func writeFileAtomically(dst string, data []byte, mode os.FileMode) error {
+	dir := filepath.Dir(dst)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(dst)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(tmpName)
+		}
+	}()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(mode); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, dst); err != nil {
+		if runtime.GOOS != "windows" {
+			return err
+		}
+		if removeErr := os.Remove(dst); removeErr != nil && !os.IsNotExist(removeErr) {
+			return err
+		}
+		if renameErr := os.Rename(tmpName, dst); renameErr != nil {
+			return renameErr
+		}
+	}
+	cleanup = false
+	return nil
 }
 
 func removeStaleEntries(dst string, safeRoot string, keep map[string]struct{}) error {

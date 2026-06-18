@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/OnslaughtSnail/caelis/internal/testenv"
@@ -101,6 +102,42 @@ func TestDiscoverMetaSkipsSystemRootWhenMaterializationFails(t *testing.T) {
 	}
 	if metas[0].Name != "workspace-skill" {
 		t.Fatalf("metas[0] = %#v, want workspace skill", metas[0])
+	}
+}
+
+func TestDiscoverMetaConcurrentSystemMaterializationDoesNotExposeEmptySkills(t *testing.T) {
+	home := t.TempDir()
+	testenv.SetHome(t, home)
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	systemRoot := filepath.Join(home, ".caelis", "skills", ".system")
+	emptySkill := filepath.Join(systemRoot, "subagent-creator")
+	if err := os.MkdirAll(emptySkill, 0o755); err != nil {
+		t.Fatalf("mkdir empty system skill: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(emptySkill, "SKILL.md"), nil, 0o600); err != nil {
+		t.Fatalf("write empty system skill: %v", err)
+	}
+
+	const workers = 64
+	start := make(chan struct{})
+	errs := make(chan error, workers)
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, err := DiscoverMeta(nil, workspace)
+			errs <- err
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("DiscoverMeta() error = %v", err)
+		}
 	}
 }
 
