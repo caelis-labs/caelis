@@ -372,6 +372,87 @@ func TestACPParticipantTurnsUseTurnIDWhenScopeIDIsStable(t *testing.T) {
 	}
 }
 
+func TestACPParticipantToolEventsUseTurnIDWhenScopeIDIsStable(t *testing.T) {
+	model := newGatewayEventTestModel()
+
+	send := func(env eventstream.Envelope) {
+		events := ProjectACPEventToTranscriptEvents(env)
+		updated, _ := model.Update(TranscriptEventsMsg{Events: events})
+		model = updated.(*Model)
+	}
+	base := eventstream.Envelope{
+		Kind:    eventstream.KindSessionUpdate,
+		Scope:   eventstream.ScopeParticipant,
+		ScopeID: "participant-1",
+		TurnID:  "turn-1",
+		Actor:   "@ari",
+	}
+	send(withACPUpdate(base, schema.ContentChunk{
+		SessionUpdate: schema.UpdateAgentThought,
+		Content:       schema.TextContent{Type: "text", Text: "think before tools"},
+	}))
+	send(withACPUpdate(base, schema.ContentChunk{
+		SessionUpdate: schema.UpdateAgentMessage,
+		Content:       schema.TextContent{Type: "text", Text: "I will inspect first."},
+	}))
+	send(withACPUpdate(base, schema.ToolCall{
+		SessionUpdate: schema.UpdateToolCall,
+		ToolCallID:    "call-1",
+		Title:         "Read",
+		Kind:          schema.ToolKindRead,
+		Status:        schema.ToolStatusInProgress,
+		RawInput:      map[string]any{"path": "a.py"},
+	}))
+	status := schema.ToolStatusCompleted
+	send(withACPUpdate(base, schema.ToolCallUpdate{
+		SessionUpdate: schema.UpdateToolCallInfo,
+		ToolCallID:    "call-1",
+		Status:        &status,
+		RawOutput:     map[string]any{"stdout": "file contents"},
+	}))
+	send(withACPUpdate(base, schema.ContentChunk{
+		SessionUpdate: schema.UpdateAgentThought,
+		Content:       schema.TextContent{Type: "text", Text: "think after tools"},
+	}))
+	final := withACPUpdate(base, schema.ContentChunk{
+		SessionUpdate: schema.UpdateAgentMessage,
+		Content:       schema.TextContent{Type: "text", Text: "Done."},
+	})
+	final.Final = true
+	send(final)
+
+	var participantBlocks []*ParticipantTurnBlock
+	for _, block := range model.doc.Blocks() {
+		if turn, ok := block.(*ParticipantTurnBlock); ok {
+			participantBlocks = append(participantBlocks, turn)
+		}
+	}
+	if len(participantBlocks) != 1 {
+		t.Fatalf("participant blocks = %#v, want one block keyed by turn_id", participantBlocks)
+	}
+	block := participantBlocks[0]
+	if block.SessionID != "turn-1" {
+		t.Fatalf("participant block key = %q, want turn-1", block.SessionID)
+	}
+	wantKinds := []SubagentEventKind{SEReasoning, SEAssistant, SEToolCall, SEReasoning, SEAssistant}
+	if len(block.Events) != len(wantKinds) {
+		t.Fatalf("participant events = %#v, want reasoning/assistant/tool/reasoning/assistant timeline", block.Events)
+	}
+	for i, kind := range wantKinds {
+		if block.Events[i].Kind != kind {
+			t.Fatalf("participant events[%d] = %#v, want kind %v", i, block.Events[i], kind)
+		}
+	}
+	if !block.Events[2].Done || block.Events[2].CallID != "call-1" {
+		t.Fatalf("tool event = %#v, want completed call-1 in timeline", block.Events[2])
+	}
+}
+
+func withACPUpdate(env eventstream.Envelope, update schema.Update) eventstream.Envelope {
+	env.Update = update
+	return env
+}
+
 func TestGatewayParticipantUserMessageDoesNotDuplicateDisplayedPrompt(t *testing.T) {
 	model := newGatewayEventTestModel()
 

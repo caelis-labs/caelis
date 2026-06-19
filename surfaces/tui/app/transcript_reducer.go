@@ -31,7 +31,7 @@ func transcriptToolMutationFromEvent(event TranscriptEvent) transcriptToolMutati
 }
 
 func (m *Model) applyTranscriptToolToParticipant(event TranscriptEvent, mutation transcriptToolMutation) (tea.Model, tea.Cmd) {
-	block := m.ensureParticipantTurnBlock(event.ScopeID, event.Actor)
+	block := m.ensureParticipantTurnBlock(transcriptParticipantTurnKey(event), event.Actor)
 	if block == nil {
 		return m, nil
 	}
