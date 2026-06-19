@@ -33,10 +33,12 @@ type SubagentEvent struct {
 	ActiveBuffer *activeNarrativeBuffer `json:"-"`
 
 	// ToolCall fields.
-	CallID          string
-	Name            string
-	ToolKind        string
-	Args            string
+	CallID   string
+	Name     string
+	ToolKind string
+	Args     string
+	// StartArgs keeps live exploration rows stable when final summaries arrive.
+	StartArgs       string
 	FullArgs        string
 	Output          string
 	OutputSynthetic bool

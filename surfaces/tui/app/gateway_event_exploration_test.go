@@ -403,6 +403,106 @@ func TestGatewaySingleExplorationStepSettlesOnNextAssistantNarrative(t *testing.
 	}
 }
 
+func TestGatewayLiveExplorationDefersResultSummaryUntilStepSettles(t *testing.T) {
+	model := newGatewayEventTestModel()
+	ctx := BlockRenderContext{Width: 110, Height: 20, TermWidth: 110, Theme: model.theme}
+	sendReasoning := func(text string) {
+		updated, _ := model.Update(gatewayEventMsg(gateway.EventEnvelope{Event: gateway.Event{
+			Kind:       gateway.EventKindAssistantMessage,
+			SessionRef: session.SessionRef{SessionID: "root-session"},
+			Narrative: &gateway.NarrativePayload{
+				Role:          gateway.NarrativeRoleAssistant,
+				ReasoningText: text,
+				Final:         true,
+				Scope:         gateway.EventScopeMain,
+			},
+		}}))
+		model = updated.(*Model)
+	}
+	sendToolCall := func(id string, name string, input map[string]any) {
+		updated, _ := model.Update(gatewayEventMsg(gateway.EventEnvelope{Event: gateway.Event{
+			Kind:       gateway.EventKindToolCall,
+			SessionRef: session.SessionRef{SessionID: "root-session"},
+			ToolCall: &gateway.ToolCallPayload{
+				CallID:   id,
+				ToolName: name,
+				RawInput: input,
+				Status:   gateway.ToolStatusRunning,
+				Scope:    gateway.EventScopeMain,
+			},
+		}}))
+		model = updated.(*Model)
+	}
+	sendToolResult := func(id string, name string, input map[string]any, output map[string]any, content string) {
+		updated, _ := model.Update(gatewayEventMsg(gateway.EventEnvelope{Event: gateway.Event{
+			Kind:       gateway.EventKindToolResult,
+			SessionRef: session.SessionRef{SessionID: "root-session"},
+			ToolResult: &gateway.ToolResultPayload{
+				CallID:    id,
+				ToolName:  name,
+				RawInput:  input,
+				RawOutput: output,
+				Content:   testToolContent(content),
+				Status:    gateway.ToolStatusCompleted,
+				Scope:     gateway.EventScopeMain,
+			},
+		}}))
+		model = updated.(*Model)
+	}
+	render := func() string {
+		t.Helper()
+		block, ok := model.doc.Blocks()[0].(*MainACPTurnBlock)
+		if !ok {
+			t.Fatalf("first block = %#v, want MainACPTurnBlock", model.doc.Blocks()[0])
+		}
+		return strings.Join(renderedPlainRows(block.Render(ctx)), "\n")
+	}
+
+	readInput := map[string]any{"path": "demo.py", "offset": 0, "limit": 100}
+	sendReasoning("I need to read the target file before patching.")
+	sendToolCall("read-live", "READ", readInput)
+	runningRead := render()
+	if !strings.Contains(runningRead, "Read demo.py") || strings.Contains(runningRead, "demo.py 1~100") {
+		t.Fatalf("running read rows = %q, want start args without result summary", runningRead)
+	}
+	sendToolResult("read-live", "READ", readInput, map[string]any{
+		"path":       "demo.py",
+		"start_line": 1,
+		"end_line":   100,
+		"content":    "print('ok')",
+	}, "demo.py 1~100")
+	completedRead := render()
+	if !strings.Contains(completedRead, "Read demo.py") || strings.Contains(completedRead, "demo.py 1~100") || strings.Contains(completedRead, "╭") {
+		t.Fatalf("completed read rows = %q, want live step to keep start args and hide panel", completedRead)
+	}
+	sendReasoning("Now I need to search references.")
+	settledRead := render()
+	if !strings.Contains(settledRead, "• Explored") || !strings.Contains(settledRead, "Read demo.py 1~100") {
+		t.Fatalf("settled read rows = %q, want result summary after step boundary", settledRead)
+	}
+
+	searchInput := map[string]any{"query": "Needle"}
+	sendToolCall("search-live", "SEARCH", searchInput)
+	runningSearch := render()
+	if !strings.Contains(runningSearch, `Search "Needle"`) || strings.Contains(runningSearch, "3 hits") {
+		t.Fatalf("running search rows = %q, want start args without result summary", runningSearch)
+	}
+	sendToolResult("search-live", "SEARCH", searchInput, map[string]any{
+		"query":      "Needle",
+		"count":      3,
+		"file_count": 2,
+	}, `"Needle" 3 hits in 2 files`)
+	completedSearch := render()
+	if !strings.Contains(completedSearch, `Search "Needle"`) || strings.Contains(completedSearch, "3 hits") || strings.Contains(completedSearch, "╭") {
+		t.Fatalf("completed search rows = %q, want live step to keep start args and hide panel", completedSearch)
+	}
+	sendReasoning("Now I can patch the references.")
+	settledSearch := render()
+	if !strings.Contains(settledSearch, `Search "Needle" 3 hits in 2 files`) {
+		t.Fatalf("settled search rows = %q, want result summary after step boundary", settledSearch)
+	}
+}
+
 func TestGatewayAssistantExplorationStepSettlesOnlyAtStepBoundary(t *testing.T) {
 	model := newGatewayEventTestModel()
 	block := NewMainACPTurnBlock("root-session")

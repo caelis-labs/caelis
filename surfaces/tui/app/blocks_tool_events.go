@@ -67,6 +67,7 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 			Name:            name,
 			ToolKind:        toolKind,
 			Args:            args,
+			StartArgs:       args,
 			FullArgs:        fullArgs,
 			Output:          output,
 			OutputSynthetic: update.Meta.OutputSynthetic,
@@ -84,6 +85,7 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 		Name:            name,
 		ToolKind:        toolKind,
 		Args:            args,
+		StartArgs:       args,
 		FullArgs:        fullArgs,
 		Output:          output,
 		OutputSynthetic: update.Meta.OutputSynthetic,
@@ -187,6 +189,7 @@ func mergeOpenToolEvent(ev *SubagentEvent, name, toolKind, args, fullArgs, outpu
 	} else if strings.EqualFold(semanticName, "TASK") && preferredTaskID != strings.TrimSpace(ev.TaskID) && strings.TrimSpace(args) != "" {
 		ev.Args = args
 	}
+	mergeStartArgs(ev, args, ev.Args)
 	if strings.TrimSpace(ev.FullArgs) == "" {
 		ev.FullArgs = fullArgs
 	} else if strings.EqualFold(semanticName, "SPAWN") && shouldReplaceSpawnDisplayArgs(ev.FullArgs, fullArgs) {
@@ -224,6 +227,7 @@ func fillFinalToolEventFromExisting(finalEvent *SubagentEvent, existing Subagent
 	if strings.TrimSpace(finalEvent.Args) == "" || shouldReplaceSpawnDisplayArgs(finalEvent.Args, existing.Args) {
 		finalEvent.Args = strings.TrimSpace(existing.Args)
 	}
+	mergeStartArgs(finalEvent, existing.StartArgs, existing.Args, finalEvent.Args)
 	if strings.TrimSpace(finalEvent.FullArgs) == "" || shouldReplaceSpawnDisplayArgs(finalEvent.FullArgs, existing.FullArgs) {
 		finalEvent.FullArgs = strings.TrimSpace(existing.FullArgs)
 	}
@@ -242,6 +246,7 @@ func fillMissingFinalToolEventFromExisting(finalEvent *SubagentEvent, existing S
 	if strings.TrimSpace(finalEvent.Args) == "" {
 		finalEvent.Args = strings.TrimSpace(existing.Args)
 	}
+	mergeStartArgs(finalEvent, existing.StartArgs, existing.Args, finalEvent.Args)
 	if strings.TrimSpace(finalEvent.FullArgs) == "" {
 		finalEvent.FullArgs = strings.TrimSpace(existing.FullArgs)
 	}
@@ -258,6 +263,7 @@ func mergeFinalToolEvent(ev *SubagentEvent, finalEvent *SubagentEvent) {
 	ev.Name = finalEvent.Name
 	ev.ToolKind = finalEvent.ToolKind
 	ev.Args = finalEvent.Args
+	mergeStartArgs(ev, finalEvent.StartArgs, finalEvent.Args)
 	ev.FullArgs = finalEvent.FullArgs
 	if finalToolOutputShouldReplace(*ev, *finalEvent) {
 		ev.Output = finalEvent.Output
@@ -283,6 +289,13 @@ func mergeOpenFinalToolEvent(ev *SubagentEvent, finalEvent *SubagentEvent) {
 	}
 	fillFinalToolEventFromExisting(finalEvent, *ev)
 	mergeFinalToolEvent(ev, finalEvent)
+}
+
+func mergeStartArgs(dst *SubagentEvent, candidates ...string) {
+	if dst == nil || strings.TrimSpace(dst.StartArgs) != "" {
+		return
+	}
+	dst.StartArgs = firstTrimmed(candidates...)
 }
 
 func finalToolOutputShouldReplace(existing SubagentEvent, finalEvent SubagentEvent) bool {

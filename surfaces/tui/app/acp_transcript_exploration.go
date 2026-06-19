@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-	"github.com/OnslaughtSnail/caelis/surfaces/tui/tuikit"
 )
 
 type explorationProjectionState struct {
@@ -347,85 +346,6 @@ func potentialExplorationStage(events []SubagentEvent, idx int, status string) (
 	return collectExplorationStage(events, idx, status, true)
 }
 
-func renderACPLiveExplorationStageRows(blockID string, events []SubagentEvent, idx int, status string, width int, ctx BlockRenderContext) ([]RenderedRow, int, bool) {
-	if idx < 0 || idx >= len(events) || isTerminalACPTranscriptStatus(status) {
-		return nil, idx, false
-	}
-	step, ok := collectTranscriptStep(events, idx)
-	if !ok || step.start != idx || !step.allExploration {
-		return nil, idx, false
-	}
-	if step.allDone && hasLaterTranscriptStep(events, step.end+1) {
-		return nil, idx, false
-	}
-	stage := events[step.start : step.end+1]
-	toolEvents, verb, ok := liveExplorationRepeatedToolSummary(stage)
-	if !ok {
-		return nil, idx, false
-	}
-	rows := make([]RenderedRow, 0, len(stage)+1)
-	for offset, ev := range stage {
-		eventIdx := step.start + offset
-		switch ev.Kind {
-		case SEReasoning:
-			if strings.TrimSpace(ev.Text) != "" {
-				rows = append(rows, renderACPReasoningNarrativeRows(blockID, ev.Text, ev.ActiveBuffer, width, ctx, participantNarrativeEventActive(events, eventIdx, status))...)
-			}
-		case SEAssistant:
-			if strings.TrimSpace(ev.Text) != "" {
-				rows = append(rows, renderParticipantTurnNarrativeEventRows(blockID, ev, tuikit.LineStyleAssistant, width, ctx, participantNarrativeEventActive(events, eventIdx, status))...)
-			}
-		}
-	}
-	if summary := liveExplorationRepeatedToolSummaryRow(blockID, toolEvents, verb, width, ctx); strings.TrimSpace(summary.Plain) != "" {
-		rows = append(rows, summary)
-	}
-	if len(rows) == 0 {
-		return nil, idx, false
-	}
-	return rows, step.end, true
-}
-
-func liveExplorationRepeatedToolSummary(stage []SubagentEvent) ([]SubagentEvent, string, bool) {
-	tools := make([]SubagentEvent, 0, len(stage))
-	verb := ""
-	for _, ev := range stage {
-		if !isExplorationToolEvent(ev) {
-			continue
-		}
-		nextVerb := explorationToolVerb(toolSemanticName(ev.Name, ev.ToolKind))
-		if nextVerb == "" {
-			return nil, "", false
-		}
-		if verb == "" {
-			verb = nextVerb
-		} else if nextVerb != verb {
-			return nil, "", false
-		}
-		tools = append(tools, ev)
-	}
-	if len(tools) < 2 {
-		return nil, "", false
-	}
-	return tools, verb, true
-}
-
-func liveExplorationRepeatedToolSummaryRow(blockID string, tools []SubagentEvent, verb string, width int, ctx BlockRenderContext) RenderedRow {
-	details := make([]string, 0, len(tools))
-	for _, ev := range tools {
-		if detail := explorationToolDetailWithWorkspace(ev, ctx.Workspace); detail != "" {
-			details = append(details, detail)
-		}
-	}
-	detail := strings.Join(details, ", ")
-	plain := strings.TrimSpace("• " + strings.TrimSpace(verb))
-	if detail != "" {
-		plain = strings.TrimSpace(plain + " " + detail)
-	}
-	plain = truncateTailDisplay(plain, maxInt(16, width))
-	return renderACPTranscriptHeaderRow(blockID, plain, width, ctx, "")
-}
-
 func collectExplorationStage(events []SubagentEvent, idx int, status string, includeLiveTail bool) ([]SubagentEvent, int) {
 	if idx < 0 || idx >= len(events) {
 		return nil, idx
@@ -595,11 +515,15 @@ func renderExplorationNarrativeRows(blockID string, text string, width int, ctx 
 }
 
 func renderExplorationToolRow(blockID string, ev SubagentEvent, width int, ctx BlockRenderContext, token string, first bool) RenderedRow {
+	return renderExplorationToolRowWithMode(blockID, ev, width, ctx, token, first, explorationToolDetailSettled)
+}
+
+func renderExplorationToolRowWithMode(blockID string, ev SubagentEvent, width int, ctx BlockRenderContext, token string, first bool, mode explorationToolDetailMode) RenderedRow {
 	verb := explorationToolVerb(toolSemanticName(ev.Name, ev.ToolKind))
 	if verb == "" {
 		verb = strings.ToUpper(strings.TrimSpace(ev.Name))
 	}
-	detail := explorationToolDetailWithWorkspace(ev, ctx.Workspace)
+	detail := explorationToolDetailForDisplay(ev, ctx.Workspace, mode)
 	prefix := explorationChildPrefix(first)
 	detail = truncateTailDisplay(detail, maxInt(16, width-displayColumns(prefix)-displayColumns(verb)-1))
 	plain := prefix + strings.TrimSpace(verb+" "+detail)
@@ -653,6 +577,10 @@ func explorationGroupDetailRows(events []SubagentEvent, width int) []string {
 }
 
 func explorationGroupDetailRowsWithWorkspace(events []SubagentEvent, width int, workspace string) []string {
+	return explorationGroupDetailRowsWithWorkspaceMode(events, width, workspace, explorationToolDetailSettled)
+}
+
+func explorationGroupDetailRowsWithWorkspaceMode(events []SubagentEvent, width int, workspace string, mode explorationToolDetailMode) []string {
 	grouped := map[string][]string{}
 	order := make([]string, 0, 4)
 	for _, ev := range events {
@@ -663,7 +591,7 @@ func explorationGroupDetailRowsWithWorkspace(events []SubagentEvent, width int, 
 		if _, ok := grouped[verb]; !ok {
 			order = append(order, verb)
 		}
-		item := explorationToolDetailWithWorkspace(ev, workspace)
+		item := explorationToolDetailForDisplay(ev, workspace, mode)
 		if item != "" {
 			grouped[verb] = append(grouped[verb], item)
 		}
@@ -693,7 +621,24 @@ func explorationToolDetail(ev SubagentEvent) string {
 }
 
 func explorationToolDetailWithWorkspace(ev SubagentEvent, workspace string) string {
+	return explorationToolDetailForDisplay(ev, workspace, explorationToolDetailSettled)
+}
+
+type explorationToolDetailMode int
+
+const (
+	explorationToolDetailSettled explorationToolDetailMode = iota
+	explorationToolDetailLiveRow
+	explorationToolDetailLiveSummary
+)
+
+func explorationToolDetailForDisplay(ev SubagentEvent, workspace string, mode explorationToolDetailMode) string {
 	item := sanitizeRenderableText(ev.Args)
+	if mode != explorationToolDetailSettled {
+		if startArgs := sanitizeRenderableText(ev.StartArgs); startArgs != "" {
+			item = startArgs
+		}
+	}
 	fromArgs := item != ""
 	if item == "" {
 		item = sanitizeRenderableText(ev.Output)
@@ -706,7 +651,9 @@ func explorationToolDetailWithWorkspace(ev SubagentEvent, workspace string) stri
 		item = strings.ToUpper(strings.TrimSpace(ev.Name))
 	}
 	item = normalizeExplorationFailedDetail(item)
-	item = compactExplorationToolDetailWithWorkspace(ev, item, workspace)
+	if mode != explorationToolDetailLiveRow {
+		item = compactExplorationToolDetailWithWorkspace(ev, item, workspace)
+	}
 	if ev.Err && item != "" && !fromOutput && !hasExplorationFailedStatus(item) {
 		item = strings.TrimSpace(item + " failed")
 	}

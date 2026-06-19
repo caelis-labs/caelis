@@ -67,7 +67,7 @@ func renderACPTranscriptRows(blockID string, events []SubagentEvent, status stri
 			i = consumed
 			continue
 		}
-		if liveRows, consumed, ok := renderACPLiveExplorationStageRows(blockID, visible, i, status, width, ctx); ok {
+		if liveRows, consumed, ok := renderACPLiveExplorationStageRows(blockID, visible, i, status, width, ctx, opts); ok {
 			rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupTool, false)
 			rows = append(rows, liveRows...)
 			hasContent = true
@@ -89,36 +89,12 @@ func renderACPTranscriptRows(blockID string, events []SubagentEvent, status stri
 				i = consumed
 				continue
 			}
-			if ev.Text != "" {
-				shouldFoldReasoning := reasoningShouldFold(visible, i, status)
-				text := ev.Text
-				reasoningEnd := i
-				if shouldFoldReasoning {
-					text, reasoningEnd = collectConsecutiveReasoning(visible, i)
-					expanded := reasoningExpanded(opts, reasoningFoldKey(i))
-					if !expanded {
-						rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupNarrative, false)
-						rows = append(rows, renderACPReasoningSummaryRow(blockID, SubagentEvent{Text: text}, i, width, ctx, expanded))
-						hasContent = true
-						lastGroup = acpTranscriptGroupNarrative
-						i = reasoningEnd
-						continue
-					}
-				}
-				if !shouldFoldReasoning {
-					rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupNarrative, false)
-					active := participantNarrativeEventActive(visible, reasoningEnd, status)
-					activeBuffer := activeBufferForConsecutiveReasoning(visible, i, reasoningEnd, text)
-					rows = append(rows, renderACPReasoningNarrativeRows(blockID, text, activeBuffer, width, ctx, active)...)
-				} else {
-					rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupNarrative, false)
-					active := participantNarrativeEventActive(visible, reasoningEnd, status)
-					activeBuffer := activeBufferForConsecutiveReasoning(visible, i, reasoningEnd, text)
-					rows = append(rows, renderACPReasoningExpandedRows(blockID, text, activeBuffer, i, width, ctx, active)...)
-				}
+			if reasoningRows, consumed, ok := renderFoldableReasoningSegment(blockID, visible, i, status, width, ctx, opts); ok {
+				rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupNarrative, false)
+				rows = append(rows, reasoningRows...)
 				hasContent = true
 				lastGroup = acpTranscriptGroupNarrative
-				i = reasoningEnd
+				i = consumed
 			}
 		case SEAssistant:
 			if taskRows, consumed, ok := renderACPTaskStageRows(blockID, visible, i, status, width, ctx, opts); ok {

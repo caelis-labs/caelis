@@ -19,6 +19,28 @@ func reasoningExpanded(opts acpTranscriptRenderOptions, key string) bool {
 	return opts.ReasoningExpanded(key)
 }
 
+func renderFoldableReasoningSegment(blockID string, events []SubagentEvent, idx int, status string, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) ([]RenderedRow, int, bool) {
+	if idx < 0 || idx >= len(events) || events[idx].Kind != SEReasoning || events[idx].Text == "" {
+		return nil, idx, false
+	}
+	shouldFold := reasoningShouldFold(events, idx, status)
+	text := events[idx].Text
+	end := idx
+	if shouldFold {
+		text, end = collectConsecutiveReasoning(events, idx)
+		expanded := reasoningExpanded(opts, reasoningFoldKey(idx))
+		if !expanded {
+			return []RenderedRow{renderACPReasoningSummaryRow(blockID, SubagentEvent{Text: text}, idx, width, ctx, expanded)}, end, true
+		}
+	}
+	active := participantNarrativeEventActive(events, end, status)
+	activeBuffer := activeBufferForConsecutiveReasoning(events, idx, end, text)
+	if shouldFold {
+		return renderACPReasoningExpandedRows(blockID, text, activeBuffer, idx, width, ctx, active), end, true
+	}
+	return renderACPReasoningNarrativeRows(blockID, text, activeBuffer, width, ctx, active), end, true
+}
+
 const (
 	acpLiveReasoningHeadRows    = 1
 	acpLiveReasoningTailRows    = 3
