@@ -12,11 +12,15 @@ import (
 )
 
 func newRegressionDriver(t *testing.T) (*Adapter, *gatewayapp.Stack) {
+	return newRegressionDriverWithOptions(t, adapterTestStackOptions{})
+}
+
+func newRegressionDriverWithOptions(t *testing.T, opts adapterTestStackOptions) (*Adapter, *gatewayapp.Stack) {
 	t.Helper()
 	ctx := context.Background()
 	storeDir := t.TempDir()
 	workspace := t.TempDir()
-	stack, err := newAdapterTestStack(t, gatewayapp.Config{
+	stack, err := newAdapterTestStackWithOptions(t, gatewayapp.Config{
 		AppName:      "caelis",
 		UserID:       "regression-user",
 		StoreDir:     storeDir,
@@ -32,7 +36,7 @@ func newRegressionDriver(t *testing.T) (*Adapter, *gatewayapp.Stack) {
 			API:      providers.APIOllama,
 			Model:    "llama3",
 		},
-	})
+	}, opts)
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
@@ -251,7 +255,7 @@ func TestRegressionSlashCompletionAgentRemove(t *testing.T) {
 
 func TestRegressionSlashCompletionSubagentRunExcludesGuardian(t *testing.T) {
 	t.Parallel()
-	driver, _ := newRegressionDriver(t)
+	driver, _ := newRegressionDriverWithOptions(t, adapterTestStackOptions{BuiltInAgentProfiles: true})
 	ctx := context.Background()
 
 	candidates, err := driver.CompleteSlashArg(ctx, "subagent run", "", 10)
@@ -268,7 +272,7 @@ func TestRegressionSlashCompletionSubagentRunExcludesGuardian(t *testing.T) {
 
 func TestRegressionSlashCompletionSubagentBindGuardianOmitsACP(t *testing.T) {
 	t.Parallel()
-	driver, _ := newRegressionDriver(t)
+	driver, _ := newRegressionDriverWithOptions(t, adapterTestStackOptions{BuiltInAgentProfiles: true})
 	ctx := context.Background()
 
 	candidates, err := driver.CompleteSlashArg(ctx, "subagent bind guardian", "", 10)

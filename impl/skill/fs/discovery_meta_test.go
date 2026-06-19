@@ -1,6 +1,7 @@
 package fs
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -138,6 +139,42 @@ func TestDiscoverMetaConcurrentSystemMaterializationDoesNotExposeEmptySkills(t *
 		if err != nil {
 			t.Fatalf("DiscoverMeta() error = %v", err)
 		}
+	}
+}
+
+func TestParseMetaCacheIsBounded(t *testing.T) {
+	metaCache.Lock()
+	previousNext := metaCache.next
+	previousEntries := metaCache.entries
+	metaCache.next = 0
+	metaCache.entries = map[string]metaCacheEntry{}
+	metaCache.Unlock()
+	t.Cleanup(func() {
+		metaCache.Lock()
+		metaCache.next = previousNext
+		metaCache.entries = previousEntries
+		metaCache.Unlock()
+	})
+
+	root := t.TempDir()
+	for i := 0; i < maxMetaCacheEntries+25; i++ {
+		dir := filepath.Join(root, fmt.Sprintf("skill-%03d", i))
+		name := fmt.Sprintf("skill-%03d", i)
+		writeSkillForDiscoveryTest(t, dir, name, "cache bounded")
+		path := filepath.Join(dir, "SKILL.md")
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("Stat(%s) error = %v", path, err)
+		}
+		if _, err := parseMetaCached(path, info); err != nil {
+			t.Fatalf("parseMetaCached(%s) error = %v", path, err)
+		}
+	}
+	metaCache.Lock()
+	got := len(metaCache.entries)
+	metaCache.Unlock()
+	if got > maxMetaCacheEntries {
+		t.Fatalf("meta cache entries = %d, want <= %d", got, maxMetaCacheEntries)
 	}
 }
 

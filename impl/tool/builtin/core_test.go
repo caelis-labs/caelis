@@ -101,13 +101,15 @@ func TestCoreToolSchemasExposeGuidanceBoundsAndAnnotations(t *testing.T) {
 	requireStringMinLength(t, defs[filesystem.GlobToolName], "pattern", 1)
 	requireArrayItemMinLength(t, defs[filesystem.GlobToolName], "exclude", 1)
 	requireIntegerBounds(t, defs[filesystem.GlobToolName], "limit", 1, ptrAny(1000))
+	requireDescriptionContains(t, defs[filesystem.GlobToolName], "**/*.txt", "*.{go,md}", "RUN_COMMAND")
 	requireAnnotations(t, defs[filesystem.GlobToolName], true, false, true, false)
 
 	requireStringMinLength(t, defs[filesystem.SearchToolName], "path", 1)
 	requireStringMinLength(t, defs[filesystem.SearchToolName], "query", 1)
+	requireArrayItemMinLength(t, defs[filesystem.SearchToolName], "include", 1)
 	requireArrayItemMinLength(t, defs[filesystem.SearchToolName], "exclude", 1)
 	requireIntegerBounds(t, defs[filesystem.SearchToolName], "limit", 1, ptrAny(200))
-	requireDescriptionContains(t, defs[filesystem.SearchToolName], "locate symbols", "regex")
+	requireDescriptionContains(t, defs[filesystem.SearchToolName], "locate symbols", "regex", "Use GLOB", "include")
 	requireAnnotations(t, defs[filesystem.SearchToolName], true, false, true, false)
 
 	requireStringMinLength(t, defs[filesystem.WriteToolName], "path", 1)
@@ -146,6 +148,92 @@ func TestEnsureCoreToolsRejectsReservedBuiltinNames(t *testing.T) {
 	}
 }
 
+func TestCoreToolsRejectUnknownArgs(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(notes.txt) error = %v", err)
+	}
+	rt, err := host.New(host.Config{CWD: dir})
+	if err != nil {
+		t.Fatalf("host.New() error = %v", err)
+	}
+	tools, err := BuildCoreTools(CoreToolsConfig{Runtime: rt})
+	if err != nil {
+		t.Fatalf("BuildCoreTools() error = %v", err)
+	}
+	reg, err := registry.NewMemory(tools...)
+	if err != nil {
+		t.Fatalf("NewMemory() error = %v", err)
+	}
+
+	tests := []struct {
+		name string
+		args map[string]any
+	}{
+		{filesystem.ReadToolName, map[string]any{"path": "notes.txt", "unexpected": true}},
+		{filesystem.ListToolName, map[string]any{"path": ".", "unexpected": true}},
+		{filesystem.GlobToolName, map[string]any{"pattern": "*.txt", "unexpected": true}},
+		{filesystem.SearchToolName, map[string]any{"path": ".", "query": "hello", "unexpected": true}},
+		{filesystem.WriteToolName, map[string]any{"path": "new.txt", "content": "new\n", "unexpected": true}},
+		{filesystem.PatchToolName, map[string]any{
+			"path":       "notes.txt",
+			"edits":      []map[string]any{{"old": "hello", "new": "hi"}},
+			"unexpected": true,
+		}},
+		{shell.RunCommandToolName, map[string]any{"command": "printf ok", "unexpected": true}},
+		{plan.ToolName, map[string]any{"entries": []map[string]any{{"content": "Read", "status": "pending"}}, "unexpected": true}},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			targetTool := mustLookupTool(t, reg, tt.name)
+			err := runToolErr(t, targetTool, tt.args)
+			if err == nil {
+				t.Fatalf("%s.Call() error = nil, want unknown arg rejection", tt.name)
+			}
+			if !strings.Contains(err.Error(), "unexpected") || !strings.Contains(err.Error(), "not supported") {
+				t.Fatalf("%s.Call() error = %v, want unsupported unexpected arg", tt.name, err)
+			}
+		})
+	}
+}
+
+func TestPatchRejectsUnknownNestedEditArgs(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(notes.txt) error = %v", err)
+	}
+	rt, err := host.New(host.Config{CWD: dir})
+	if err != nil {
+		t.Fatalf("host.New() error = %v", err)
+	}
+	patchTool, err := filesystem.NewPatch(rt)
+	if err != nil {
+		t.Fatalf("NewPatch() error = %v", err)
+	}
+
+	err = runToolErr(t, patchTool, map[string]any{
+		"path": "notes.txt",
+		"edits": []map[string]any{{
+			"old":        "hello",
+			"new":        "hi",
+			"unexpected": true,
+		}},
+	})
+	if err == nil {
+		t.Fatal("PATCH.Call() error = nil, want nested unknown arg rejection")
+	}
+	if !strings.Contains(err.Error(), "edits[0]") || !strings.Contains(err.Error(), "unexpected") {
+		t.Fatalf("PATCH.Call() error = %v, want nested edit arg context", err)
+	}
+}
+
 func TestCoreCodingToolsE2E(t *testing.T) {
 	t.Parallel()
 
@@ -170,6 +258,9 @@ func TestCoreCodingToolsE2E(t *testing.T) {
 	})
 	if got := writeResult["path"]; got != filepath.Join(dir, "notes.txt") {
 		t.Fatalf("write path = %v", got)
+	}
+	if revision, _ := writeResult["revision"].(string); revision == "" {
+		t.Fatalf("write revision = %#v, want non-empty", writeResult["revision"])
 	}
 
 	readTool := mustLookupTool(t, reg, filesystem.ReadToolName)
@@ -199,6 +290,9 @@ func TestCoreCodingToolsE2E(t *testing.T) {
 	if got := patchResult["replacements"]; got != float64(1) {
 		t.Fatalf("patch replacements = %v, want 1", got)
 	}
+	if revision, _ := patchResult["revision"].(string); revision == "" {
+		t.Fatalf("patch revision = %#v, want non-empty", patchResult["revision"])
+	}
 
 	searchTool := mustLookupTool(t, reg, filesystem.SearchToolName)
 	searchResult := runToolJSON(t, searchTool, map[string]any{
@@ -207,6 +301,14 @@ func TestCoreCodingToolsE2E(t *testing.T) {
 	})
 	if got := searchResult["count"]; got != float64(1) {
 		t.Fatalf("search count = %v, want 1", got)
+	}
+	hits, _ := searchResult["hits"].([]any)
+	if len(hits) != 1 {
+		t.Fatalf("search hits = %#v, want one hit", searchResult["hits"])
+	}
+	hit, _ := hits[0].(map[string]any)
+	if hit["column"] == nil || hit["match"] == nil {
+		t.Fatalf("search hit = %#v, want column and match in payload", hit)
 	}
 	searchResult = runToolJSON(t, searchTool, map[string]any{
 		"path":  dir,
@@ -352,6 +454,19 @@ func runToolJSON(t *testing.T, targetTool tool.Tool, args map[string]any) map[st
 		t.Fatalf("json.Unmarshal(result) error = %v", err)
 	}
 	return out
+}
+
+func runToolErr(t *testing.T, targetTool tool.Tool, args map[string]any) error {
+	t.Helper()
+	raw, err := json.Marshal(args)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	_, err = targetTool.Call(context.Background(), tool.Call{
+		Name:  targetTool.Definition().Name,
+		Input: raw,
+	})
+	return err
 }
 
 func requireDescriptionContains(t *testing.T, def tool.Definition, wants ...string) {

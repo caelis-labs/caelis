@@ -22,6 +22,12 @@ const (
 	ErrorCodeInvalidInput         ErrorCode = "invalid_input"
 )
 
+const (
+	CommandSandboxPermissionUseDefault       = "use_default"
+	CommandSandboxPermissionRequireEscalated = "require_escalated"
+	CommandSandboxPermissionLegacyAdditional = "with_additional_permissions"
+)
+
 type ToolError struct {
 	Code      ErrorCode
 	Message   string
@@ -59,6 +65,47 @@ func NewError(code ErrorCode, message string) *ToolError {
 
 func WrapError(code ErrorCode, err error, message string) *ToolError {
 	return &ToolError{Code: code, Message: strings.TrimSpace(firstNonEmpty(message, errorString(err))), Err: err}
+}
+
+func RejectUnknownArgs(args map[string]any, allowed ...string) error {
+	if len(args) == 0 {
+		return nil
+	}
+	allowedSet := make(map[string]struct{}, len(allowed))
+	for _, key := range allowed {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		allowedSet[key] = struct{}{}
+	}
+	for key := range args {
+		if _, ok := allowedSet[key]; !ok {
+			return NewError(ErrorCodeInvalidInput, fmt.Sprintf("tool: arg %q is not supported", key))
+		}
+	}
+	return nil
+}
+
+func NormalizeCommandSandboxPermission(value string, allowLegacy bool) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", CommandSandboxPermissionUseDefault:
+		return CommandSandboxPermissionUseDefault, nil
+	case CommandSandboxPermissionRequireEscalated:
+		return CommandSandboxPermissionRequireEscalated, nil
+	case CommandSandboxPermissionLegacyAdditional:
+		if allowLegacy {
+			return CommandSandboxPermissionUseDefault, nil
+		}
+	}
+	return "", NewError(ErrorCodeInvalidInput, fmt.Sprintf("tool: arg %q must be %s", "sandbox_permissions", CommandSandboxPermissionAllowedValues(allowLegacy)))
+}
+
+func CommandSandboxPermissionAllowedValues(allowLegacy bool) string {
+	if allowLegacy {
+		return CommandSandboxPermissionUseDefault + ", " + CommandSandboxPermissionRequireEscalated + ", or " + CommandSandboxPermissionLegacyAdditional
+	}
+	return CommandSandboxPermissionUseDefault + " or " + CommandSandboxPermissionRequireEscalated
 }
 
 func ErrorPayload(err error) map[string]any {

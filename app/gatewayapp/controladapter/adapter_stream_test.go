@@ -8,6 +8,8 @@ import (
 )
 
 func TestStreamRequestFromACPEventAcceptsInProgressTaskRefWithoutRunningFlag(t *testing.T) {
+	t.Parallel()
+
 	status := schema.ToolStatusInProgress
 	kind := "RUN_COMMAND"
 	req, ok := streamRequestFromACPEvent(eventstream.Envelope{

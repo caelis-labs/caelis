@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -42,6 +41,13 @@ func encryptCodeFreeAPIKeyForRuntimeTest(t *testing.T, apiKey string) string {
 	out := make([]byte, len(plain))
 	cipher.NewCBCEncrypter(block, []byte("%1KJIrl3!XUxr04V")).CryptBlocks(out, plain)
 	return base64.StdEncoding.EncodeToString(out)
+}
+
+func TestMain(m *testing.M) {
+	readGitWorkspaceStatusForDisplay = func(context.Context, string) (gitWorkspaceStatus, bool) {
+		return gitWorkspaceStatus{}, false
+	}
+	os.Exit(m.Run())
 }
 
 func ptrRuntimeMessage(message model.Message) *model.Message {
@@ -147,15 +153,9 @@ func TestStreamRequestFromProjectedSemanticSpawnRunningEvent(t *testing.T) {
 	t.Fatalf("projected ACP envelopes did not produce stream request: %#v", acpprojector.ProjectGatewayEventEnvelope(gatewayEnv))
 }
 
-func newAdapterTestStack(t *testing.T, cfg gatewayapp.Config) (*gatewayapp.Stack, error) {
-	t.Helper()
-	if strings.TrimSpace(cfg.Sandbox.RequestedType) == "" {
-		cfg.Sandbox.RequestedType = "host"
-	}
-	return gatewayapp.NewLocalStack(cfg)
-}
-
 func TestAdapterUsesCurrentGatewayAfterSandboxRebuild(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
 		AppName:      "caelis",
@@ -199,6 +199,8 @@ func TestAdapterUsesCurrentGatewayAfterSandboxRebuild(t *testing.T) {
 }
 
 func TestAllocateSideAgentHandleUsesSharedNamePool(t *testing.T) {
+	t.Parallel()
+
 	used := map[string]struct{}{}
 
 	first := allocateSideAgentHandle(used, "claude")
@@ -224,6 +226,8 @@ func TestAllocateSideAgentHandleUsesSharedNamePool(t *testing.T) {
 }
 
 func TestAdapterDefersBlankSessionUntilFirstSubmission(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	storeDir := t.TempDir()
 	workspace := t.TempDir()
@@ -288,6 +292,8 @@ func TestAdapterDefersBlankSessionUntilFirstSubmission(t *testing.T) {
 }
 
 func TestAdapterSubmitRoutesActiveSessionInputToActiveTurn(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	activeSession := session.Session{
 		SessionRef: session.SessionRef{
@@ -335,6 +341,8 @@ func TestAdapterSubmitRoutesActiveSessionInputToActiveTurn(t *testing.T) {
 }
 
 func TestAdapterStartupDoesNotQuerySandboxStatus(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	statusCalls := 0
 	activeSession := session.Session{
@@ -365,6 +373,8 @@ func TestAdapterStartupDoesNotQuerySandboxStatus(t *testing.T) {
 }
 
 func TestAdapterLightweightStatusSkipsSandboxDiagnostics(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	sandboxCalls := 0
 	doctorCalls := 0
@@ -401,6 +411,8 @@ func TestAdapterLightweightStatusSkipsSandboxDiagnostics(t *testing.T) {
 }
 
 func TestAdapterSubmitDoesNotRouteParticipantActiveTurnInputToActiveTurn(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	activeSession := session.Session{
 		SessionRef: session.SessionRef{
@@ -442,6 +454,8 @@ func TestAdapterSubmitDoesNotRouteParticipantActiveTurnInputToActiveTurn(t *test
 }
 
 func TestAdapterListSessionsSkipsUntitledSessions(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	workspace := t.TempDir()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
@@ -615,6 +629,8 @@ func TestAdapterCompleteSlashArgConnectFlowUsesLegacyCommands(t *testing.T) {
 }
 
 func TestAdapterCompleteSlashArgUsesRealModelAliases(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
 		AppName:      "caelis",
@@ -670,6 +686,8 @@ func TestAdapterCompleteSlashArgUsesRealModelAliases(t *testing.T) {
 }
 
 func TestAdapterCompleteSlashArgACPModelUseOnly(t *testing.T) {
+	t.Parallel()
+
 	driver := &Adapter{}
 	status := gatewayapp.ACPControllerStatus{
 		ModelOptions: []gatewayapp.ACPControllerConfigChoice{{
@@ -701,6 +719,8 @@ func TestAdapterCompleteSlashArgACPModelUseOnly(t *testing.T) {
 }
 
 func TestAdapterCompleteSlashArgACPModelUsesConfigEfforts(t *testing.T) {
+	t.Parallel()
+
 	driver := &Adapter{}
 	status := gatewayapp.ACPControllerStatus{
 		ModelOptions: []gatewayapp.ACPControllerConfigChoice{
@@ -723,6 +743,8 @@ func TestAdapterCompleteSlashArgACPModelUsesConfigEfforts(t *testing.T) {
 }
 
 func TestAdapterCompleteSlashArgACPModelUsesModelSpecificEfforts(t *testing.T) {
+	t.Parallel()
+
 	driver := &Adapter{}
 	status := gatewayapp.ACPControllerStatus{
 		ModelOptions: []gatewayapp.ACPControllerConfigChoice{
@@ -747,6 +769,8 @@ func TestAdapterCompleteSlashArgACPModelUsesModelSpecificEfforts(t *testing.T) {
 }
 
 func TestAdapterCompletesAndPersistsModelReasoningLevel(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
 		AppName:      "caelis",
@@ -808,6 +832,8 @@ func TestAdapterCompletesAndPersistsModelReasoningLevel(t *testing.T) {
 }
 
 func TestAdapterConnectPersistsDeepSeekModelDefaults(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	root := t.TempDir()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
@@ -944,6 +970,8 @@ func TestAdapterConnectPersistsDeepSeekModelDefaults(t *testing.T) {
 }
 
 func TestAdapterConnectWithTokenEnvDoesNotPersistTokenValue(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	root := t.TempDir()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
@@ -1003,6 +1031,8 @@ func TestAdapterConnectWithTokenEnvDoesNotPersistTokenValue(t *testing.T) {
 }
 
 func TestAdapterCodeFreeModelHasNoReasoningLevels(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
 		AppName:      "caelis",
@@ -1091,6 +1121,8 @@ func TestAdapterConnectCodeFreeUsesExistingOAuthCache(t *testing.T) {
 }
 
 func TestAdapterStatusIncludesContextUsageSnapshot(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
 		AppName:      "caelis",
@@ -1176,6 +1208,8 @@ func TestAdapterStatusIncludesContextUsageSnapshot(t *testing.T) {
 }
 
 func TestAdapterSessionTokenUsageDeduplicatesConsecutiveToolCallUsage(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
 		AppName:      "caelis",
@@ -1232,6 +1266,8 @@ func TestAdapterSessionTokenUsageDeduplicatesConsecutiveToolCallUsage(t *testing
 }
 
 func TestAdapterSessionTokenUsageBreakdownIncludesSelfSubagentAndAutoReview(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
 		AppName:      "caelis",
@@ -1358,6 +1394,8 @@ func TestAdapterSessionTokenUsageBreakdownIncludesSelfSubagentAndAutoReview(t *t
 }
 
 func TestAdapterDeleteModelRemovesConfiguredAlias(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
 		AppName:      "caelis",
@@ -1408,6 +1446,8 @@ func TestAdapterDeleteModelRemovesConfiguredAlias(t *testing.T) {
 }
 
 func TestAdapterDeleteOnlyModelClearsAliasCandidatesAndStatus(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
 		AppName:      "caelis",
@@ -1451,6 +1491,8 @@ func TestAdapterDeleteOnlyModelClearsAliasCandidatesAndStatus(t *testing.T) {
 }
 
 func TestAdapterUseModelResolvesCaseInsensitiveAlias(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
 		AppName:      "caelis",
@@ -1490,10 +1532,12 @@ func TestAdapterUseModelResolvesCaseInsensitiveAlias(t *testing.T) {
 }
 
 func TestAdapterAgentRegistryAndControllerUse(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
-	repo := repoRootForAdapterTest(t)
 	root := t.TempDir()
 	workdir := t.TempDir()
+	helperCommand := adapterACPHelperCommandForTest(t)
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
 		AppName:      "caelis",
 		UserID:       "agent-driver-test",
@@ -1505,13 +1549,12 @@ func TestAdapterAgentRegistryAndControllerUse(t *testing.T) {
 			Agents: []assembly.AgentConfig{{
 				Name:        "copilot",
 				Description: "ACP sidecar agent.",
-				Command:     "go",
-				Args:        []string{"run", "./internal/acpe2eagent"},
-				WorkDir:     repo,
+				Command:     helperCommand,
+				Args:        []string{"-test.run=^TestAdapterACPHelperProcess$", "--"},
+				WorkDir:     workdir,
 				Env: map[string]string{
-					"SDK_ACP_STUB_REPLY":   "driver acp ok",
-					"SDK_ACP_SESSION_ROOT": filepath.Join(root, "agent-sessions"),
-					"SDK_ACP_TASK_ROOT":    filepath.Join(root, "agent-tasks"),
+					"CAELIS_ADAPTER_ACP_HELPER":         "1",
+					"CAELIS_ADAPTER_ACP_REMOTE_SESSION": "driver-remote-session",
 				},
 			}},
 		},
@@ -1629,6 +1672,8 @@ func TestAdapterAgentRegistryAndControllerUse(t *testing.T) {
 }
 
 func TestAdapterStartAgentSubagentRollsBackAttachmentOnPromptConflict(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	activeSession := session.Session{
 		SessionRef: session.SessionRef{
@@ -1716,6 +1761,8 @@ func TestAdapterStartAgentSubagentRollsBackAttachmentOnPromptConflict(t *testing
 }
 
 func TestAdapterStatusUsesPersistedDefaultAliasOnStartup(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	root := t.TempDir()
 	workdir := t.TempDir()
@@ -1766,6 +1813,8 @@ func TestAdapterStatusUsesPersistedDefaultAliasOnStartup(t *testing.T) {
 }
 
 func TestAdapterStartupUsesRequestedSessionID(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
 		AppName:      "caelis",
@@ -1803,6 +1852,8 @@ func TestAdapterStartupUsesRequestedSessionID(t *testing.T) {
 }
 
 func TestAdapterStartupBindsRequestedSessionInsteadOfFreshOne(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
 		AppName:      "caelis",
@@ -1848,6 +1899,8 @@ func TestAdapterStartupBindsRequestedSessionInsteadOfFreshOne(t *testing.T) {
 }
 
 func TestAdapterStartupReusesExistingRequestedSession(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
 		AppName:      "caelis",
@@ -1880,6 +1933,8 @@ func TestAdapterStartupReusesExistingRequestedSession(t *testing.T) {
 }
 
 func TestAdapterCycleSessionModeUsesStartupSession(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
 		AppName:      "caelis",
@@ -1917,6 +1972,8 @@ func TestAdapterCycleSessionModeUsesStartupSession(t *testing.T) {
 }
 
 func TestAdapterSetSessionModeUpdatesLocalApprovalModeUnderACPController(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
 		AppName:      "caelis",
@@ -1982,6 +2039,8 @@ func TestAdapterSetSessionModeUpdatesLocalApprovalModeUnderACPController(t *test
 }
 
 func TestAdapterCycleSessionModeUpdatesRemoteACPControllerMode(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	ref := session.SessionRef{AppName: "caelis", UserID: "u", SessionID: "parent", WorkspaceKey: "ws"}
 	activeSession := session.Session{
@@ -2056,6 +2115,8 @@ func TestAdapterCycleSessionModeUpdatesRemoteACPControllerMode(t *testing.T) {
 }
 
 func TestNextACPControllerModeUsesDeclaredModeOrder(t *testing.T) {
+	t.Parallel()
+
 	status := gatewayapp.ACPControllerStatus{
 		Mode: "default",
 		ModeOptions: []gatewayapp.ACPControllerMode{
@@ -2083,6 +2144,8 @@ func TestNextACPControllerModeUsesDeclaredModeOrder(t *testing.T) {
 }
 
 func TestACPControllerModeDisplayPrefersDeclaredName(t *testing.T) {
+	t.Parallel()
+
 	status := gatewayapp.ACPControllerStatus{
 		Mode: "review",
 		ModeOptions: []gatewayapp.ACPControllerMode{
@@ -2099,6 +2162,8 @@ func TestACPControllerModeDisplayPrefersDeclaredName(t *testing.T) {
 }
 
 func TestAdapterACPStatusPrefersRemoteModeOverLocalSessionMode(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	ref := session.SessionRef{AppName: "caelis", UserID: "u", SessionID: "parent", WorkspaceKey: "ws"}
 	activeSession := session.Session{
@@ -2152,6 +2217,8 @@ func TestAdapterACPStatusPrefersRemoteModeOverLocalSessionMode(t *testing.T) {
 }
 
 func TestAdapterACPStatusKeepsAgentFallbackWithoutRemoteModel(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
 		AppName:      "caelis",
@@ -2210,6 +2277,8 @@ func TestAdapterACPStatusKeepsAgentFallbackWithoutRemoteModel(t *testing.T) {
 }
 
 func TestAdapterIgnoresStaleSessionAliasOutsideConfiguredModels(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
 		AppName:      "caelis",
@@ -2260,6 +2329,8 @@ func TestAdapterIgnoresStaleSessionAliasOutsideConfiguredModels(t *testing.T) {
 }
 
 func TestAdapterCompleteSlashArgUsesPrefixMatching(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
 		AppName:      "caelis",
@@ -2315,6 +2386,8 @@ func TestAdapterCompleteSlashArgUsesPrefixMatching(t *testing.T) {
 }
 
 func TestAdapterCompleteSlashArgAgentRootOrder(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
 		AppName:      "caelis",
@@ -2353,6 +2426,8 @@ func TestAdapterCompleteSlashArgAgentRootOrder(t *testing.T) {
 }
 
 func TestAdapterCompleteSlashArgPluginRootOrder(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
 		AppName:      "caelis",
@@ -2391,6 +2466,8 @@ func TestAdapterCompleteSlashArgPluginRootOrder(t *testing.T) {
 }
 
 func TestAdapterCompleteSlashArgPluginMarketplace(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	driver, err := NewAdapter(ctx, &RuntimeStack{
 		ListMarketplacesFn: func(context.Context) ([]MarketplaceSnapshot, error) {
@@ -2442,38 +2519,19 @@ func TestAdapterCompleteSlashArgPluginMarketplace(t *testing.T) {
 
 func TestAdapterInterruptCancelsAgentInstall(t *testing.T) {
 	ctx := context.Background()
-	binDir := t.TempDir()
-	started := filepath.Join(t.TempDir(), "npm-started")
-	npmPath := filepath.Join(binDir, testenv.CommandScriptName("npm"))
-	body := "#!/bin/sh\nprintf started > \"$CAELIS_NPM_STARTED\"\nwhile true; do /bin/sleep 1; done\n"
-	if runtime.GOOS == "windows" {
-		body = "@echo off\r\necho started> \"%CAELIS_NPM_STARTED%\"\r\n:loop\r\nping -n 2 127.0.0.1 >nul\r\ngoto loop\r\n"
-	}
-	if err := os.WriteFile(npmPath, []byte(body), 0o755); err != nil {
-		t.Fatalf("WriteFile(npm) error = %v", err)
-	}
-	t.Setenv("PATH", binDir)
-	t.Setenv("CAELIS_NPM_STARTED", started)
-	stack, err := newAdapterTestStack(t, gatewayapp.Config{
-		AppName:      "caelis",
-		UserID:       "agent-install-cancel-test",
-		StoreDir:     t.TempDir(),
-		WorkspaceKey: t.TempDir(),
-		WorkspaceCWD: t.TempDir(),
-		ApprovalMode: "default",
-		Assembly:     assembly.ResolvedAssembly{},
-		Model: gatewayapp.ModelConfig{
-			Provider: "ollama",
-			API:      providers.APIOllama,
-			Model:    "llama3",
+	started := make(chan struct{})
+	driver, err := NewAdapter(ctx, &RuntimeStack{
+		RegisterBuiltinACPAgentWithOptionsFn: func(ctx context.Context, target string, opts RegisterBuiltinACPAgentOptions) error {
+			if target != "claude" || !opts.Install {
+				return errors.New("unexpected install request")
+			}
+			close(started)
+			<-ctx.Done()
+			return ctx.Err()
 		},
-	})
+	}, "", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("NewLocalStack() error = %v", err)
-	}
-	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "agent-install-cancel-session", "surface", "ollama/llama3")
-	if err != nil {
-		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
+		t.Fatalf("NewAdapter() error = %v", err)
 	}
 
 	done := make(chan error, 1)
@@ -2482,18 +2540,12 @@ func TestAdapterInterruptCancelsAgentInstall(t *testing.T) {
 		done <- err
 	}()
 
-	deadline := time.After(15 * time.Second)
-	for {
-		if _, err := os.Stat(started); err == nil {
-			break
-		}
-		select {
-		case err := <-done:
-			t.Fatalf("AddAgentWithOptions returned before fake npm started: %v", err)
-		case <-deadline:
-			t.Fatal("fake npm did not start")
-		case <-time.After(10 * time.Millisecond):
-		}
+	select {
+	case <-started:
+	case err := <-done:
+		t.Fatalf("AddAgentWithOptions returned before install started: %v", err)
+	case <-time.After(time.Second):
+		t.Fatal("install did not start")
 	}
 	if err := driver.Interrupt(ctx); err != nil {
 		t.Fatalf("Interrupt() error = %v", err)
@@ -2503,12 +2555,14 @@ func TestAdapterInterruptCancelsAgentInstall(t *testing.T) {
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("AddAgentWithOptions error = %v, want context.Canceled", err)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(time.Second):
 		t.Fatal("AddAgentWithOptions did not return after Interrupt")
 	}
 }
 
 func TestAdapterConnectPersistsMultipleProviders(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	root := t.TempDir()
 	workdir := t.TempDir()
@@ -2625,6 +2679,8 @@ func TestValidateConnectConfigXiaomiTokenPlanCNUsesTokenPlanEnvHint(t *testing.T
 }
 
 func TestAdapterConnectXiaomiTokenPlanCNStoresXiaomiProvider(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	root := t.TempDir()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
@@ -2697,6 +2753,8 @@ func TestAdapterConnectXiaomiTokenPlanCNStoresXiaomiProvider(t *testing.T) {
 }
 
 func TestAdapterConnectXiaomiEndpointsCoexistUnderVisibleAlias(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	root := t.TempDir()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
@@ -2775,6 +2833,8 @@ func TestAdapterConnectXiaomiEndpointsCoexistUnderVisibleAlias(t *testing.T) {
 }
 
 func TestAdapterConnectReusesExistingEndpointAuth(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	root := t.TempDir()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
@@ -2854,6 +2914,8 @@ func TestConnectDefaultsForConfigOpenAICompatibleCustomBaseURL(t *testing.T) {
 }
 
 func TestAdapterCompleteFileUsesRelativePathsAndSkipsNoise(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	workspace := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(workspace, "src", "pkg"), 0o700); err != nil {
@@ -2974,6 +3036,8 @@ func TestAdapterCompleteSkillDiscoversGlobalAndWorkspaceSkills(t *testing.T) {
 }
 
 func TestAdapterCompleteMentionReturnsACPSidecarsOnly(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
 		AppName:      "caelis",
@@ -3071,6 +3135,8 @@ func TestAdapterCompleteMentionReturnsACPSidecarsOnly(t *testing.T) {
 }
 
 func TestAdapterCompleteResumeIncludesMetadataAndRecentFirst(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	workspace := t.TempDir()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
@@ -3140,6 +3206,8 @@ func TestAdapterCompleteResumeIncludesMetadataAndRecentFirst(t *testing.T) {
 }
 
 func TestAdapterDeleteModelRejectsUnknownAlias(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
 		AppName:      "caelis",
@@ -3168,6 +3236,8 @@ func TestAdapterDeleteModelRejectsUnknownAlias(t *testing.T) {
 }
 
 func TestAdapterConnectModelCandidatesIncludeConfiguredProviderModels(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
 		AppName:      "caelis",
@@ -3220,6 +3290,8 @@ func TestAdapterConnectModelCandidatesIncludeConfiguredProviderModels(t *testing
 }
 
 func TestAdapterConnectRejectsMissingAPIKeyWithActionableError(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
 		AppName:      "caelis",
@@ -3246,6 +3318,8 @@ func TestAdapterConnectRejectsMissingAPIKeyWithActionableError(t *testing.T) {
 }
 
 func TestAdapterConnectRejectsInvalidBaseURL(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	stack, err := newAdapterTestStack(t, gatewayapp.Config{
 		AppName:      "caelis",
@@ -3274,6 +3348,8 @@ func TestAdapterConnectRejectsInvalidBaseURL(t *testing.T) {
 }
 
 func TestAdapterStatusIncludesDoctorDiagnostics(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	root := t.TempDir()
 	workdir := t.TempDir()

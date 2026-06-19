@@ -35,7 +35,7 @@ func NewGlob(runtime sandbox.Runtime) (*GlobTool, error) {
 func (t *GlobTool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        GlobToolName,
-		Description: "Find filesystem paths matching a glob pattern, respecting workspace ignore rules. Use it when a filename, extension, directory shape, or path pattern is known but the exact path is not. This does not inspect file contents; use SEARCH for text and READ for exact context.",
+		Description: "Find filesystem paths matching a glob pattern, respecting workspace ignore rules. Use it when a filename, extension, directory shape, or path pattern is known but the exact path is not. Examples: **/*.txt, *.{go,md}. This does not inspect file contents; use SEARCH for text and READ for exact context. Use RUN_COMMAND for advanced path regex searches.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -60,6 +60,9 @@ func (t *GlobTool) Call(ctx context.Context, call tool.Call) (tool.Result, error
 	}
 	args, err := toolutil.DecodeArgs(call)
 	if err != nil {
+		return tool.Result{}, err
+	}
+	if err := tool.RejectUnknownArgs(args, "pattern", "exclude", "limit"); err != nil {
 		return tool.Result{}, err
 	}
 	pattern, err := argparse.String(args, "pattern", true)

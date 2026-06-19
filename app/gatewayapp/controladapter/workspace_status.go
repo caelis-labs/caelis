@@ -17,12 +17,14 @@ type gitWorkspaceStatus struct {
 	Dirty  bool
 }
 
+var readGitWorkspaceStatusForDisplay = readGitWorkspaceStatus
+
 func workspaceStatusDisplay(ctx context.Context, cwd string) string {
 	cwd = strings.TrimSpace(cwd)
 	if cwd == "" {
 		return ""
 	}
-	status, ok := readGitWorkspaceStatus(ctx, cwd)
+	status, ok := readGitWorkspaceStatusForDisplay(ctx, cwd)
 	if !ok {
 		return compactHomePath(cwd, userHomeDir())
 	}

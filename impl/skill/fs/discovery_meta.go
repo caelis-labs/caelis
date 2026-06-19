@@ -5,12 +5,30 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/OnslaughtSnail/caelis/impl/skill/system"
 	"github.com/OnslaughtSnail/caelis/ports/skill"
 )
 
 type Meta = skill.Meta
+
+const maxMetaCacheEntries = 512
+
+var metaCache = struct {
+	sync.Mutex
+	next    uint64
+	entries map[string]metaCacheEntry
+}{
+	entries: map[string]metaCacheEntry{},
+}
+
+type metaCacheEntry struct {
+	size    int64
+	modTime int64
+	used    uint64
+	meta    Meta
+}
 
 func DefaultDiscoveryDirs(workspaceDir string) []string {
 	out := []string{"~/.caelis/skills/.system"}
@@ -63,7 +81,8 @@ func DiscoverMeta(dirs []string, workspaceDir string) ([]Meta, error) {
 				continue
 			}
 			skillPath := filepath.Join(resolvedDir, entry.Name(), "SKILL.md")
-			if _, err := os.Stat(skillPath); err != nil {
+			info, err := os.Stat(skillPath)
+			if err != nil {
 				if os.IsNotExist(err) {
 					continue
 				}
@@ -73,7 +92,7 @@ func DiscoverMeta(dirs []string, workspaceDir string) ([]Meta, error) {
 			if _, ok := seenPaths[skillPath]; ok {
 				continue
 			}
-			meta, err := parseMeta(skillPath)
+			meta, err := parseMetaCached(skillPath, info)
 			if err != nil {
 				return nil, err
 			}
@@ -137,6 +156,55 @@ func ResolvePath(path string) (string, error) {
 		path = filepath.Join(cwd, path)
 	}
 	return filepath.Clean(path), nil
+}
+
+func parseMetaCached(path string, info os.FileInfo) (Meta, error) {
+	if info == nil {
+		return parseMeta(path)
+	}
+	entry := metaCacheEntry{
+		size:    info.Size(),
+		modTime: info.ModTime().UnixNano(),
+	}
+	metaCache.Lock()
+	cached, ok := metaCache.entries[path]
+	if ok && cached.size == entry.size && cached.modTime == entry.modTime {
+		metaCache.next++
+		cached.used = metaCache.next
+		metaCache.entries[path] = cached
+		metaCache.Unlock()
+		return cached.meta, nil
+	}
+	metaCache.Unlock()
+	meta, err := parseMeta(path)
+	if err != nil {
+		return Meta{}, err
+	}
+	entry.meta = meta
+	metaCache.Lock()
+	metaCache.next++
+	entry.used = metaCache.next
+	metaCache.entries[path] = entry
+	pruneMetaCacheLocked()
+	metaCache.Unlock()
+	return meta, nil
+}
+
+func pruneMetaCacheLocked() {
+	for len(metaCache.entries) > maxMetaCacheEntries {
+		var oldestPath string
+		var oldestUsed uint64
+		for path, entry := range metaCache.entries {
+			if oldestPath == "" || entry.used < oldestUsed {
+				oldestPath = path
+				oldestUsed = entry.used
+			}
+		}
+		if oldestPath == "" {
+			return
+		}
+		delete(metaCache.entries, oldestPath)
+	}
 }
 
 func parseMeta(path string) (Meta, error) {

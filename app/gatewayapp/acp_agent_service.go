@@ -50,6 +50,19 @@ type ACPAgentInstallError struct {
 	Err     error
 }
 
+type builtinACPAgentNPMInstallRequest struct {
+	Root        string
+	InstallSpec string
+	Package     builtinACPAdapterPackage
+}
+
+type builtinACPAgentNPMInstallResult struct {
+	Command []string
+	Output  string
+}
+
+var runBuiltinACPAgentNPMInstall = defaultRunBuiltinACPAgentNPMInstall
+
 func (e *ACPAgentInstallError) Error() string {
 	if e == nil {
 		return ""
@@ -259,30 +272,16 @@ func (s *Stack) installBuiltinACPAgent(ctx context.Context, name string, base as
 	}
 	root := s.managedACPAgentRoot()
 	installSpec := builtinACPAdapterInstallSpec(pkg)
-	installCommand := []string{"npm", "install", "--prefix", root, installSpec}
-	npm, err := exec.LookPath("npm")
-	if err != nil || strings.TrimSpace(npm) == "" {
-		return assembly.AgentConfig{}, &ACPAgentInstallError{
-			Agent:   strings.TrimSpace(name),
-			Command: installCommand,
-			Err:     fmt.Errorf("npm is required"),
-		}
-	}
-	if err := os.MkdirAll(root, 0o700); err != nil {
-		return assembly.AgentConfig{}, err
-	}
-	cmd := exec.CommandContext(ctx, npm, "install", "--prefix", root, npmInstallSpecForExec(npm, installSpec))
-	cmd.Dir = root
-	cmd.Env = append(os.Environ(), "npm_config_cache="+filepath.Join(root, "npm-cache"))
-	output, err := cmd.CombinedOutput()
+	result, err := runBuiltinACPAgentNPMInstall(ctx, builtinACPAgentNPMInstallRequest{
+		Root:        root,
+		InstallSpec: installSpec,
+		Package:     pkg,
+	})
 	if err != nil {
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			err = ctxErr
-		}
 		return assembly.AgentConfig{}, &ACPAgentInstallError{
 			Agent:   strings.TrimSpace(name),
-			Command: installCommand,
-			Output:  strings.TrimSpace(string(output)),
+			Command: result.Command,
+			Output:  result.Output,
 			Err:     err,
 		}
 	}
@@ -296,6 +295,33 @@ func (s *Stack) installBuiltinACPAgent(ctx context.Context, name string, base as
 	base.Command = bin
 	base.Args = nil
 	return base, nil
+}
+
+func defaultRunBuiltinACPAgentNPMInstall(ctx context.Context, req builtinACPAgentNPMInstallRequest) (builtinACPAgentNPMInstallResult, error) {
+	root := strings.TrimSpace(req.Root)
+	installSpec := strings.TrimSpace(req.InstallSpec)
+	result := builtinACPAgentNPMInstallResult{
+		Command: []string{"npm", "install", "--prefix", root, installSpec},
+	}
+	npm, err := exec.LookPath("npm")
+	if err != nil || strings.TrimSpace(npm) == "" {
+		return result, fmt.Errorf("npm is required")
+	}
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		return result, err
+	}
+	cmd := exec.CommandContext(ctx, npm, "install", "--prefix", root, npmInstallSpecForExec(npm, installSpec))
+	cmd.Dir = root
+	cmd.Env = append(os.Environ(), "npm_config_cache="+filepath.Join(root, "npm-cache"))
+	output, err := cmd.CombinedOutput()
+	result.Output = strings.TrimSpace(string(output))
+	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			err = ctxErr
+		}
+		return result, err
+	}
+	return result, nil
 }
 
 func (s *Stack) managedACPAgentRoot() string {
@@ -484,6 +510,9 @@ func pluginAgentContributionToAssembly(pluginID string, in pluginapi.AgentContri
 func (s *Stack) withAgentProfileACPAgents(resolved assembly.ResolvedAssembly, runtimeCfg stackRuntimeConfig) (assembly.ResolvedAssembly, error) {
 	out := assembly.CloneResolvedAssembly(resolved)
 	if s == nil || s.store == nil {
+		return out, nil
+	}
+	if runtimeCfg.DisableBuiltInAgentProfiles {
 		return out, nil
 	}
 	profileStatus, err := agentprofiles.LoadDirStatus(filepath.Join(s.storeDir, agentprofiles.DefaultAgentsDirName))

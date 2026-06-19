@@ -119,6 +119,9 @@ func (t runtimeCommandTool) Call(ctx context.Context, call tool.Call) (tool.Resu
 	if err != nil {
 		return tool.Result{}, err
 	}
+	if err := shell.ValidateRunCommandArgs(args); err != nil {
+		return tool.Result{}, err
+	}
 	command, ok := stringArg(args, "command")
 	if !ok || strings.TrimSpace(command) == "" {
 		return tool.Result{}, fmt.Errorf("tool: arg %q is required", "command")
@@ -178,12 +181,12 @@ func (t runtimeSpawnTool) Call(ctx context.Context, call tool.Call) (tool.Result
 	if err != nil {
 		return tool.Result{}, err
 	}
+	if err := spawn.ValidateArgs(args); err != nil {
+		return tool.Result{}, err
+	}
 	prompt, ok := stringArg(args, "prompt")
 	if !ok || strings.TrimSpace(prompt) == "" {
 		return tool.Result{}, fmt.Errorf("tool: arg %q is required", "prompt")
-	}
-	if err := rejectUnknownArgs(args, "agent", "prompt"); err != nil {
-		return tool.Result{}, err
 	}
 	agent, _ := stringArg(args, "agent")
 	agent, err = resolveRuntimeSpawnToolAgent(t.base.Definition(), t.session, agent)
@@ -349,6 +352,9 @@ func (t runtimeTaskTool) Definition() tool.Definition {
 func (t runtimeTaskTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
 	args, err := decodeJSONMap(call.Input)
 	if err != nil {
+		return tool.Result{}, err
+	}
+	if err := tasktool.ValidateArgs(args); err != nil {
 		return tool.Result{}, err
 	}
 	action, ok := stringArg(args, "action")

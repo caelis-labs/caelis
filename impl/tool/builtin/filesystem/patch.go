@@ -70,6 +70,9 @@ func (t *PatchTool) Call(ctx context.Context, call tool.Call) (tool.Result, erro
 	if err != nil {
 		return tool.Result{}, err
 	}
+	if err := tool.RejectUnknownArgs(args, "path", "edits", "if_revision"); err != nil {
+		return tool.Result{}, err
+	}
 	fsys := fileSystemFromRuntime(t.runtime, call.Metadata)
 	plan, err := planPatchMutation(fsys, args)
 	if err != nil {
@@ -85,6 +88,7 @@ func (t *PatchTool) Call(ctx context.Context, call tool.Call) (tool.Result, erro
 		"edit_count":   plan.editCount,
 		"changed":      plan.before != plan.after || plan.created,
 		"summary":      mutationSummary(plan.created, diffStats.Added, diffStats.Removed),
+		"revision":     textRevision(plan.after),
 	}
 	meta := map[string]any{
 		"created":        plan.created,

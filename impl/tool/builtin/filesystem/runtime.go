@@ -122,29 +122,35 @@ func parseStringSliceArg(args map[string]any, key string) ([]string, error) {
 	}
 }
 
-type pathExcludeRule struct {
+type pathMatchRule struct {
 	pattern   string
 	negated   bool
 	recursive bool
 	dirOnly   bool
 }
 
-func excludeRulesFromPatterns(patterns []string) []pathExcludeRule {
+type pathExcludeRule = pathMatchRule
+
+func pathRulesFromPatterns(patterns []string) []pathMatchRule {
 	if len(patterns) == 0 {
 		return nil
 	}
-	rules := make([]pathExcludeRule, 0, len(patterns))
+	rules := make([]pathMatchRule, 0, len(patterns))
 	for _, pattern := range patterns {
 		pattern = normalizeRelativeMatchPath(pattern)
 		if pattern == "" {
 			continue
 		}
-		rules = append(rules, pathExcludeRule{
+		rules = append(rules, pathMatchRule{
 			pattern:   pattern,
 			recursive: !strings.Contains(pattern, "/"),
 		})
 	}
 	return rules
+}
+
+func excludeRulesFromPatterns(patterns []string) []pathExcludeRule {
+	return pathRulesFromPatterns(patterns)
 }
 
 func defaultWorkspaceExcludeRules() []pathExcludeRule {
@@ -163,13 +169,7 @@ func shouldExcludePath(root, candidate string, isDir bool, rules []pathExcludeRu
 	if len(rules) == 0 {
 		return false
 	}
-	rel := candidate
-	if root != "" {
-		if computed, err := filepath.Rel(root, candidate); err == nil {
-			rel = computed
-		}
-	}
-	rel = normalizeRelativeMatchPath(rel)
+	rel := relativeMatchPath(root, candidate)
 	excluded := false
 	for _, rule := range rules {
 		if rule.matches(rel, isDir) {
@@ -179,7 +179,33 @@ func shouldExcludePath(root, candidate string, isDir bool, rules []pathExcludeRu
 	return excluded
 }
 
-func (r pathExcludeRule) matches(rel string, isDir bool) bool {
+func shouldIncludeFilePath(root, candidate string, rules []pathMatchRule) bool {
+	if len(rules) == 0 {
+		return true
+	}
+	return pathMatchesAnyRule(relativeMatchPath(root, candidate), false, rules)
+}
+
+func pathMatchesAnyRule(rel string, isDir bool, rules []pathMatchRule) bool {
+	for _, rule := range rules {
+		if rule.matches(rel, isDir) {
+			return true
+		}
+	}
+	return false
+}
+
+func relativeMatchPath(root, candidate string) string {
+	rel := candidate
+	if root != "" {
+		if computed, err := filepath.Rel(root, candidate); err == nil {
+			rel = computed
+		}
+	}
+	return normalizeRelativeMatchPath(rel)
+}
+
+func (r pathMatchRule) matches(rel string, isDir bool) bool {
 	pattern := normalizeRelativeMatchPath(r.pattern)
 	if pattern == "" {
 		return false

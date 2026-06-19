@@ -7,11 +7,12 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/ports/policy"
 	"github.com/OnslaughtSnail/caelis/ports/sandbox"
+	"github.com/OnslaughtSnail/caelis/ports/tool"
 )
 
 const (
-	commandSandboxPermissionUseDefault       = "use_default"
-	commandSandboxPermissionRequireEscalated = "require_escalated"
+	commandSandboxPermissionUseDefault       = tool.CommandSandboxPermissionUseDefault
+	commandSandboxPermissionRequireEscalated = tool.CommandSandboxPermissionRequireEscalated
 )
 
 type commandSandboxRequest struct {
@@ -50,16 +51,7 @@ func parseCommandSandboxRequest(input policy.ToolContext) (commandSandboxRequest
 }
 
 func normalizeCommandSandboxPermission(value string) (string, error) {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "", commandSandboxPermissionUseDefault:
-		return commandSandboxPermissionUseDefault, nil
-	case commandSandboxPermissionRequireEscalated:
-		return commandSandboxPermissionRequireEscalated, nil
-	case "with_additional_permissions":
-		return commandSandboxPermissionUseDefault, nil
-	default:
-		return "", fmt.Errorf("unknown sandbox_permissions value %q", value)
-	}
+	return tool.NormalizeCommandSandboxPermission(value, true)
 }
 
 func (r commandSandboxRequest) approvalMetadata(reason string) map[string]any {

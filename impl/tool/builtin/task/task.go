@@ -2,12 +2,19 @@ package task
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/internal/toolutil"
 	"github.com/OnslaughtSnail/caelis/ports/tool"
 )
 
 const ToolName = "TASK"
+
+var allowedArgs = []string{"action", "task_id", "input", "yield_time_ms"}
+
+func ValidateArgs(args map[string]any) error {
+	return tool.RejectUnknownArgs(args, allowedArgs...)
+}
 
 // Tool is the runtime-managed async task control plane declaration.
 type Tool struct{}
@@ -50,8 +57,15 @@ func (Tool) Definition() tool.Definition {
 	}
 }
 
-func (Tool) Call(context.Context, tool.Call) (tool.Result, error) {
-	return tool.Result{}, nil
+func (Tool) Call(_ context.Context, call tool.Call) (tool.Result, error) {
+	args, err := toolutil.DecodeArgs(call)
+	if err != nil {
+		return tool.Result{}, err
+	}
+	if err := ValidateArgs(args); err != nil {
+		return tool.Result{}, err
+	}
+	return tool.Result{}, fmt.Errorf("tool: TASK must be executed by the runtime wrapper")
 }
 
 var _ tool.Tool = Tool{}

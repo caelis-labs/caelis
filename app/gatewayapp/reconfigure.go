@@ -69,7 +69,7 @@ func (s *Stack) rebuildGateway() error {
 	}
 	var sessionStartHooks []plugin.HookSpec
 	var mcpServerSpecs []plugin.MCPServerSpec
-	skillDirs := DefaultSkillDiscoveryDirs(s.Workspace.CWD)
+	skillDirs := stackSkillDiscoveryDirs(s.Workspace.CWD, runtimeCfg.SkillDirs)
 	for _, pCfg := range doc.Plugins {
 		if !pCfg.Enabled {
 			continue
@@ -228,6 +228,7 @@ func (s *Stack) rebuildGateway() error {
 	oldMcpMgr := s.mcpMgr
 	currentRuntime := s.runtime
 	currentRuntime.Assembly = assembly.CloneResolvedAssembly(runtimeCfg.Assembly)
+	currentRuntime.SkillDirs = cloneStringSlicePreserveNil(runtimeCfg.SkillDirs)
 	currentRuntime.Plugins = clonePluginConfigs(runtimeCfg.Plugins)
 	currentRuntime.BaseMetadata = cloneMap(runtimeCfg.BaseMetadata)
 	currentRuntime.EstimatedPromptPrefixTokens = estimatedPrefixTokens
@@ -244,4 +245,11 @@ func (s *Stack) rebuildGateway() error {
 		_ = oldMcpMgr.Close()
 	}
 	return nil
+}
+
+func stackSkillDiscoveryDirs(workspaceDir string, configured []string) []string {
+	if configured != nil {
+		return cloneStringSlicePreserveNil(configured)
+	}
+	return DefaultSkillDiscoveryDirs(workspaceDir)
 }

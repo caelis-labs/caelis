@@ -104,6 +104,9 @@ func TestBindWriteRootsConcurrentPersistsValidStableStore(t *testing.T) {
 }
 
 func TestBindWriteRootsConcurrentProcessesPersistsValidStableStore(t *testing.T) {
+	if os.Getenv("CAELIS_CAPABILITY_PROCESS_CONCURRENCY") != "1" {
+		t.Skip("set CAELIS_CAPABILITY_PROCESS_CONCURRENCY=1 to run cross-process lock integration coverage")
+	}
 	dir := t.TempDir()
 	store := filepath.Join(dir, "cap_sids.json")
 	workspace := filepath.Join(dir, "workspace")

@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
 	"github.com/OnslaughtSnail/caelis/internal/testenv"
 	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/session"
@@ -120,6 +121,28 @@ func cliTestStoreDir(t *testing.T) string {
 		t.Fatalf("write CLI test config: %v", err)
 	}
 	return dir
+}
+
+func useFakeSandboxCommandsForCLITest(t *testing.T) {
+	t.Helper()
+	oldSetup := runSandboxSetupCommand
+	oldFix := runSandboxFixCommand
+	oldReset := runSandboxResetCommand
+	fake := func(_ context.Context, _ gatewayapp.Config, format outputFormat, stdout io.Writer) error {
+		return writeSandboxStatusResult(stdout, format, sandboxStatusResult{
+			RequestedBackend: "host",
+			ResolvedBackend:  "host",
+			Route:            "host",
+		})
+	}
+	runSandboxSetupCommand = fake
+	runSandboxFixCommand = fake
+	runSandboxResetCommand = fake
+	t.Cleanup(func() {
+		runSandboxSetupCommand = oldSetup
+		runSandboxFixCommand = oldFix
+		runSandboxResetCommand = oldReset
+	})
 }
 
 func TestStreamHandleWritesAssistantTextAndDeniesApproval(t *testing.T) {
@@ -272,6 +295,7 @@ func TestRunDoctorSubcommandTextOutput(t *testing.T) {
 
 func TestRunSandboxSetupSubcommandTextOutput(t *testing.T) {
 	testenv.SetHome(t, t.TempDir())
+	useFakeSandboxCommandsForCLITest(t)
 	var out bytes.Buffer
 	var errBuf bytes.Buffer
 	err := run(context.Background(), []string{
@@ -299,6 +323,7 @@ func TestRunSandboxSetupSubcommandTextOutput(t *testing.T) {
 
 func TestRunSandboxSetupSubcommandJSONOutput(t *testing.T) {
 	testenv.SetHome(t, t.TempDir())
+	useFakeSandboxCommandsForCLITest(t)
 	var out bytes.Buffer
 	var errBuf bytes.Buffer
 	err := run(context.Background(), []string{
@@ -326,6 +351,7 @@ func TestRunSandboxSetupSubcommandJSONOutput(t *testing.T) {
 
 func TestRunSandboxSetupSubcommandAcceptsBackendOverride(t *testing.T) {
 	testenv.SetHome(t, t.TempDir())
+	useFakeSandboxCommandsForCLITest(t)
 	var out bytes.Buffer
 	var errBuf bytes.Buffer
 	err := run(context.Background(), []string{
@@ -345,6 +371,7 @@ func TestRunSandboxSetupSubcommandAcceptsBackendOverride(t *testing.T) {
 
 func TestRunSandboxFixSubcommandTextOutput(t *testing.T) {
 	testenv.SetHome(t, t.TempDir())
+	useFakeSandboxCommandsForCLITest(t)
 	var out bytes.Buffer
 	var errBuf bytes.Buffer
 	err := run(context.Background(), []string{
@@ -364,6 +391,7 @@ func TestRunSandboxFixSubcommandTextOutput(t *testing.T) {
 
 func TestRunSandboxResetSubcommandTextOutput(t *testing.T) {
 	testenv.SetHome(t, t.TempDir())
+	useFakeSandboxCommandsForCLITest(t)
 	var out bytes.Buffer
 	var errBuf bytes.Buffer
 	err := run(context.Background(), []string{
@@ -383,6 +411,7 @@ func TestRunSandboxResetSubcommandTextOutput(t *testing.T) {
 
 func TestRunSandboxCleanSubcommandAliasesReset(t *testing.T) {
 	testenv.SetHome(t, t.TempDir())
+	useFakeSandboxCommandsForCLITest(t)
 	var out bytes.Buffer
 	var errBuf bytes.Buffer
 	err := run(context.Background(), []string{

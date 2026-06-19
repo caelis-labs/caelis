@@ -180,6 +180,154 @@ func TestGlobToolSupportsBraceExpansion(t *testing.T) {
 	}
 }
 
+func TestGlobToolMatchesRecursiveExtensionPattern(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "docs"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(docs) error = %v", err)
+	}
+	for _, name := range []string{"root.txt", filepath.Join("docs", "nested.txt"), filepath.Join("docs", "nested.md")} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(name), 0o644); err != nil {
+			t.Fatalf("WriteFile(%s) error = %v", name, err)
+		}
+	}
+	globTool, err := NewGlob(fakeRuntime{defaultFS: hostFileSystem{cwd: dir}})
+	if err != nil {
+		t.Fatalf("NewGlob() error = %v", err)
+	}
+	input, err := json.Marshal(map[string]any{
+		"pattern": "**/*.txt",
+	})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+
+	result, err := globTool.Call(context.Background(), tool.Call{Input: input})
+	if err != nil {
+		t.Fatalf("Call() error = %v", err)
+	}
+	payload := filesystemToolPayload(t, result)
+	matches := stringSlicePayloadValue(t, payload["matches"])
+	if len(matches) != 2 {
+		t.Fatalf("matches = %#v, want root and nested txt files", matches)
+	}
+}
+
+func TestSearchToolPlainTxtDollarDoesNotMatchFilenameAndRegexMatchesContent(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"notes.txt": "plain content\n",
+		"data.md":   "artifact.txt\nartifact.md\n",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatalf("WriteFile(%s) error = %v", name, err)
+		}
+	}
+	searchTool, err := NewSearch(fakeRuntime{defaultFS: hostFileSystem{cwd: dir}})
+	if err != nil {
+		t.Fatalf("NewSearch() error = %v", err)
+	}
+
+	input, err := json.Marshal(map[string]any{
+		"path":  ".",
+		"query": ".txt$",
+	})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	result, err := searchTool.Call(context.Background(), tool.Call{Input: input})
+	if err != nil {
+		t.Fatalf("Call() error = %v", err)
+	}
+	payload := filesystemToolPayload(t, result)
+	if got := numericMetaValue(payload["count"]); got != 0 {
+		t.Fatalf("plain SEARCH count = %v, want 0 because filenames are not searched", payload["count"])
+	}
+
+	input, err = json.Marshal(map[string]any{
+		"path":  ".",
+		"query": ".txt$",
+		"regex": true,
+	})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	result, err = searchTool.Call(context.Background(), tool.Call{Input: input})
+	if err != nil {
+		t.Fatalf("Call(regex) error = %v", err)
+	}
+	payload = filesystemToolPayload(t, result)
+	if got := numericMetaValue(payload["count"]); got != 1 {
+		t.Fatalf("regex SEARCH count = %v, want 1 content hit", payload["count"])
+	}
+	if got, _ := payload["path"].(string); got != dir {
+		t.Fatalf("payload path = %q, want %q", got, dir)
+	}
+	if got, _ := payload["query"].(string); got != ".txt$" {
+		t.Fatalf("payload query = %q, want .txt$", got)
+	}
+	if got, _ := payload["regex"].(bool); !got {
+		t.Fatalf("payload regex = %v, want true", payload["regex"])
+	}
+	hits, _ := payload["hits"].([]any)
+	if len(hits) != 1 {
+		t.Fatalf("hits = %#v, want one regex hit", payload["hits"])
+	}
+	hit, _ := hits[0].(map[string]any)
+	if got := numericMetaValue(hit["column"]); got <= 0 {
+		t.Fatalf("hit column = %v, want positive column", hit["column"])
+	}
+	if got, _ := hit["match"].(string); got == "" {
+		t.Fatalf("hit match = %q, want non-empty match", got)
+	}
+}
+
+func TestSearchToolIncludeFiltersScannedFiles(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "docs"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(docs) error = %v", err)
+	}
+	files := map[string]string{
+		"notes.txt":                    "needle\n",
+		filepath.Join("docs", "a.md"):  "needle\n",
+		filepath.Join("docs", "b.txt"): "needle\n",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatalf("WriteFile(%s) error = %v", name, err)
+		}
+	}
+	searchTool, err := NewSearch(fakeRuntime{defaultFS: hostFileSystem{cwd: dir}})
+	if err != nil {
+		t.Fatalf("NewSearch() error = %v", err)
+	}
+	input, err := json.Marshal(map[string]any{
+		"path":    ".",
+		"query":   "needle",
+		"include": []string{"**/*.txt"},
+	})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+
+	result, err := searchTool.Call(context.Background(), tool.Call{Input: input})
+	if err != nil {
+		t.Fatalf("Call() error = %v", err)
+	}
+	payload := filesystemToolPayload(t, result)
+	if got := numericMetaValue(payload["count"]); got != 2 {
+		t.Fatalf("hits = %#v, want two txt hits", payload["hits"])
+	}
+	hits, _ := payload["hits"].([]any)
+	for _, rawHit := range hits {
+		hit, _ := rawHit.(map[string]any)
+		path, _ := hit["path"].(string)
+		if filepath.Ext(path) != ".txt" {
+			t.Fatalf("SEARCH include returned non-txt hit: %#v", payload["hits"])
+		}
+	}
+}
+
 func TestSearchToolExcludeBarePatternMatchesNestedFiles(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "pkg"), 0o755); err != nil {

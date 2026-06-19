@@ -1,10 +1,13 @@
 package spawn
 
 import (
+	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
 	"github.com/OnslaughtSnail/caelis/ports/delegation"
+	"github.com/OnslaughtSnail/caelis/ports/tool"
 )
 
 func TestDefinitionDoesNotExposeYieldTimeMS(t *testing.T) {
@@ -38,6 +41,25 @@ func TestDefinitionExposesOpenWorldAnnotations(t *testing.T) {
 		if got := annotations[key]; got != want {
 			t.Fatalf("annotation %s = %#v, want %v; metadata=%#v", key, got, want, def.Metadata)
 		}
+	}
+}
+
+func TestCallRejectsUnknownArgsBeforeRuntimeWrapperError(t *testing.T) {
+	t.Parallel()
+
+	raw, _ := json.Marshal(map[string]any{
+		"prompt":        "inspect this",
+		"yield_time_ms": 1000,
+	})
+	_, err := New([]delegation.Agent{{Name: "self"}}).Call(context.Background(), tool.Call{
+		Name:  ToolName,
+		Input: raw,
+	})
+	if err == nil {
+		t.Fatal("SPAWN Call() error = nil, want unknown arg rejection")
+	}
+	if strings.Contains(err.Error(), "runtime wrapper") || !strings.Contains(err.Error(), "yield_time_ms") {
+		t.Fatalf("SPAWN Call() error = %v, want yield_time_ms rejection before runtime wrapper error", err)
 	}
 }
 

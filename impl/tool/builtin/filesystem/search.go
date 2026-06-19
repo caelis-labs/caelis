@@ -40,7 +40,7 @@ func NewSearch(runtime sandbox.Runtime) (*SearchTool, error) {
 func (t *SearchTool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        SearchToolName,
-		Description: "Search for text or regex matches in one file or directory and return matching lines. Use it to locate symbols, strings, error messages, config keys, or references before reading files. By default query is plain text with | alternatives; set regex=true only for regular expressions.",
+		Description: "Search file contents for text or regex matches in one file or directory and return matching lines. Use it to locate symbols, strings, error messages, config keys, or references before reading files. By default query is plain text with | alternatives; set regex=true for content regular expressions. Use GLOB for filenames, extensions, and path patterns; use include to restrict content search to file globs such as **/*.txt.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -49,6 +49,11 @@ func (t *SearchTool) Definition() tool.Definition {
 				"limit":          map[string]any{"type": "integer", "minimum": 1, "maximum": 200, "description": "Max results."},
 				"case_sensitive": map[string]any{"type": "boolean", "description": "Case-sensitive match."},
 				"regex":          map[string]any{"type": "boolean", "description": "Treat query as regex."},
+				"include": map[string]any{
+					"type":        "array",
+					"description": "Relative include globs for files to scan.",
+					"items":       map[string]any{"type": "string", "minLength": 1},
+				},
 				"exclude": map[string]any{
 					"type":        "array",
 					"description": "Relative exclude globs.",
@@ -68,6 +73,9 @@ func (t *SearchTool) Call(ctx context.Context, call tool.Call) (tool.Result, err
 	}
 	args, err := toolutil.DecodeArgs(call)
 	if err != nil {
+		return tool.Result{}, err
+	}
+	if err := tool.RejectUnknownArgs(args, "path", "query", "limit", "case_sensitive", "regex", "include", "exclude"); err != nil {
 		return tool.Result{}, err
 	}
 	pathArg, err := argparse.String(args, "path", true)
@@ -107,6 +115,10 @@ func (t *SearchTool) Call(ctx context.Context, call tool.Call) (tool.Result, err
 	if err != nil {
 		return tool.Result{}, err
 	}
+	include, err := parseStringSliceArg(args, "include")
+	if err != nil {
+		return tool.Result{}, err
+	}
 	fsys := fileSystemFromRuntime(t.runtime, call.Metadata)
 
 	target, err := normalizePathWithFS(fsys, pathArg)
@@ -118,28 +130,23 @@ func (t *SearchTool) Call(ctx context.Context, call tool.Call) (tool.Result, err
 		return tool.Result{}, err
 	}
 
-	results := make([]map[string]any, 0, limit)
-	fullResults := make([]map[string]any, 0, limit)
+	hits := make([]map[string]any, 0, limit)
 	filesWithHits := map[string]struct{}{}
 	truncated := false
 	appendMatch := func(path string, lineNum, column int, match string, text string) bool {
 		filesWithHits[path] = struct{}{}
-		results = append(results, map[string]any{
-			"path": path,
-			"line": lineNum,
-			"text": text,
-		})
-		fullResults = append(fullResults, map[string]any{
+		result := map[string]any{
 			"path":   path,
 			"line":   lineNum,
 			"column": column,
 			"match":  match,
 			"text":   text,
-		})
-		if len(results) >= limit {
+		}
+		hits = append(hits, result)
+		if len(hits) >= limit {
 			truncated = true
 		}
-		return len(results) >= limit
+		return len(hits) >= limit
 	}
 
 	root := target
@@ -147,6 +154,7 @@ func (t *SearchTool) Call(ctx context.Context, call tool.Call) (tool.Result, err
 		root = filepath.Dir(target)
 	}
 	excludeRules := append(workspaceExcludeRules(fsys, root), excludeRulesFromPatterns(exclude)...)
+	includeRules := pathRulesFromPatterns(include)
 	if info.IsDir() {
 		walkErr := walkDir(fsys, target, func(path string, d fs.DirEntry, walkErr error) error {
 			if walkErr != nil {
@@ -161,6 +169,9 @@ func (t *SearchTool) Call(ctx context.Context, call tool.Call) (tool.Result, err
 			if d == nil || d.IsDir() {
 				return nil
 			}
+			if !shouldIncludeFilePath(root, path, includeRules) {
+				return nil
+			}
 			_, stop := searchInFile(fsys, path, terms, caseSensitive, appendMatch)
 			if stop {
 				return errSearchLimitReached
@@ -171,10 +182,11 @@ func (t *SearchTool) Call(ctx context.Context, call tool.Call) (tool.Result, err
 			return tool.Result{}, walkErr
 		}
 	} else {
-		if shouldExcludePath(root, target, false, excludeRules) {
+		if shouldExcludePath(root, target, false, excludeRules) || !shouldIncludeFilePath(root, target, includeRules) {
 			return toolutil.JSONResult(SearchToolName, map[string]any{
 				"path":       target,
 				"query":      query,
+				"regex":      regexMode,
 				"count":      0,
 				"file_count": 0,
 				"truncated":  false,
@@ -187,16 +199,19 @@ func (t *SearchTool) Call(ctx context.Context, call tool.Call) (tool.Result, err
 	}
 
 	return toolutil.JSONResult(SearchToolName, map[string]any{
-		"count":      len(results),
+		"path":       target,
+		"query":      query,
+		"regex":      regexMode,
+		"count":      len(hits),
 		"file_count": len(filesWithHits),
 		"truncated":  truncated,
-		"hits":       results,
+		"hits":       hits,
 	}, map[string]any{
 		"path":  target,
 		"query": query,
 		"regex": regexMode,
 		"terms": searchTermRawValues(terms),
-		"hits":  fullResults,
+		"hits":  hits,
 	})
 }
 

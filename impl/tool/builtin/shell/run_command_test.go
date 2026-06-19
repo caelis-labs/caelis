@@ -88,7 +88,7 @@ func TestRunCommandDefinitionExposesMinimalArguments(t *testing.T) {
 	}
 }
 
-func TestRunCommandCallIgnoresRemovedSandboxPermissionFields(t *testing.T) {
+func TestRunCommandCallRejectsUnsupportedArgsAndSandboxPermissions(t *testing.T) {
 	t.Parallel()
 
 	rt := sandboxPermissionRuntime{result: sandbox.CommandResult{Stdout: "ok", ExitCode: 0}}
@@ -117,10 +117,10 @@ func TestRunCommandCallIgnoresRemovedSandboxPermissionFields(t *testing.T) {
 			},
 		},
 		{
-			name: "require escalated without justification",
+			name: "timeout alias",
 			args: map[string]any{
-				"command":             "curl https://example.com",
-				"sandbox_permissions": "require_escalated",
+				"command":    "go test ./...",
+				"timeout_ms": 1,
 			},
 		},
 	}
@@ -133,14 +133,22 @@ func TestRunCommandCallIgnoresRemovedSandboxPermissionFields(t *testing.T) {
 			if err != nil {
 				t.Fatalf("json.Marshal() error = %v", err)
 			}
-			result, err := runCommandTool.Call(context.Background(), tool.Call{Name: RunCommandToolName, Input: raw})
-			if err != nil {
-				t.Fatalf("Call() error = %v, want nil", err)
-			}
-			if len(result.Content) == 0 {
-				t.Fatal("result.Content = empty, want json payload")
+			_, err = runCommandTool.Call(context.Background(), tool.Call{Name: RunCommandToolName, Input: raw})
+			if err == nil {
+				t.Fatal("Call() error = nil, want validation failure")
 			}
 		})
+	}
+
+	raw, err := json.Marshal(map[string]any{
+		"command":             "curl https://example.com",
+		"sandbox_permissions": "require_escalated",
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal(require_escalated) error = %v", err)
+	}
+	if _, err := runCommandTool.Call(context.Background(), tool.Call{Name: RunCommandToolName, Input: raw}); err != nil {
+		t.Fatalf("Call(require_escalated) error = %v", err)
 	}
 }
 
@@ -191,8 +199,7 @@ func TestRunCommandCallUsesConfiguredHardTimeoutOnly(t *testing.T) {
 		t.Fatalf("NewRunCommand() error = %v", err)
 	}
 	raw, err := json.Marshal(map[string]any{
-		"command":    "printf 'ok'",
-		"timeout_ms": 1,
+		"command": "printf 'ok'",
 	})
 	if err != nil {
 		t.Fatalf("json.Marshal() error = %v", err)

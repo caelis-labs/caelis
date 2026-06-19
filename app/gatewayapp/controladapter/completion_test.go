@@ -3,6 +3,8 @@ package controladapter
 import "testing"
 
 func TestNormalizeCompletionLimitAllowsPagedCompletion(t *testing.T) {
+	t.Parallel()
+
 	if got := normalizeCompletionLimit(0); got != defaultCompletionLimit {
 		t.Fatalf("normalizeCompletionLimit(0) = %d, want %d", got, defaultCompletionLimit)
 	}

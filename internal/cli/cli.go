@@ -34,6 +34,13 @@ type runResult struct {
 
 type doctorResult = gatewayapp.DoctorReport
 type sandboxStatusResult = gatewayapp.SandboxStatus
+type sandboxCommandFunc func(context.Context, gatewayapp.Config, outputFormat, io.Writer) error
+
+var (
+	runSandboxSetupCommand sandboxCommandFunc = runSandboxSetupFromConfig
+	runSandboxFixCommand   sandboxCommandFunc = runSandboxFixFromConfig
+	runSandboxResetCommand sandboxCommandFunc = runSandboxResetFromConfig
+)
 
 func Run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
 	return run(ctx, args, stdin, stdout, stderr)
@@ -139,6 +146,21 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 		return err
 	}
 	cfg.Assembly = assemblyFromEnv()
+	if sandboxSubcommand != "" {
+		outFmt, err := parseOutputFormat(*format)
+		if err != nil {
+			return err
+		}
+		switch sandboxSubcommand {
+		case "setup":
+			return runSandboxSetupCommand(ctx, cfg, outFmt, stdout)
+		case "fix":
+			return runSandboxFixCommand(ctx, cfg, outFmt, stdout)
+		case "reset", "clean":
+			return runSandboxResetCommand(ctx, cfg, outFmt, stdout)
+		}
+	}
+
 	stack, err := gatewayapp.NewLocalStack(cfg)
 	if err != nil {
 		return err
@@ -152,20 +174,6 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 			return err
 		}
 		return runDoctor(ctx, stack, strings.TrimSpace(*sessionID), outFmt, stdout)
-	}
-	if sandboxSubcommand != "" {
-		outFmt, err := parseOutputFormat(*format)
-		if err != nil {
-			return err
-		}
-		switch sandboxSubcommand {
-		case "setup":
-			return runSandboxSetup(ctx, stack, outFmt, stdout)
-		case "fix":
-			return runSandboxFix(ctx, stack, outFmt, stdout)
-		case "reset", "clean":
-			return runSandboxReset(ctx, stack, outFmt, stdout)
-		}
 	}
 
 	stdinTTY := readerIsTTY(stdin)
@@ -248,6 +256,14 @@ func runDoctor(ctx context.Context, stack *gatewayapp.Stack, sessionID string, f
 	return writeDoctorResult(stdout, format, report)
 }
 
+func runSandboxSetupFromConfig(ctx context.Context, cfg gatewayapp.Config, format outputFormat, stdout io.Writer) error {
+	stack, err := gatewayapp.NewLocalStack(cfg)
+	if err != nil {
+		return err
+	}
+	return runSandboxSetup(ctx, stack, format, stdout)
+}
+
 func runSandboxSetup(ctx context.Context, stack *gatewayapp.Stack, format outputFormat, stdout io.Writer) error {
 	status, err := stack.PrepareSandbox(ctx)
 	if writeErr := writeSandboxStatusResult(stdout, format, status); writeErr != nil && err == nil {
@@ -256,12 +272,28 @@ func runSandboxSetup(ctx context.Context, stack *gatewayapp.Stack, format output
 	return err
 }
 
+func runSandboxFixFromConfig(ctx context.Context, cfg gatewayapp.Config, format outputFormat, stdout io.Writer) error {
+	stack, err := gatewayapp.NewLocalStack(cfg)
+	if err != nil {
+		return err
+	}
+	return runSandboxFix(ctx, stack, format, stdout)
+}
+
 func runSandboxFix(ctx context.Context, stack *gatewayapp.Stack, format outputFormat, stdout io.Writer) error {
 	status, err := stack.RepairSandbox(ctx)
 	if writeErr := writeSandboxStatusResult(stdout, format, status); writeErr != nil && err == nil {
 		err = writeErr
 	}
 	return err
+}
+
+func runSandboxResetFromConfig(ctx context.Context, cfg gatewayapp.Config, format outputFormat, stdout io.Writer) error {
+	stack, err := gatewayapp.NewLocalStack(cfg)
+	if err != nil {
+		return err
+	}
+	return runSandboxReset(ctx, stack, format, stdout)
 }
 
 func runSandboxReset(ctx context.Context, stack *gatewayapp.Stack, format outputFormat, stdout io.Writer) error {

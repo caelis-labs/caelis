@@ -1,8 +1,12 @@
 package task
 
 import (
+	"context"
+	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/OnslaughtSnail/caelis/ports/tool"
 )
 
 func TestTaskDescriptionGuidesContinuingSubagentConversation(t *testing.T) {
@@ -45,5 +49,34 @@ func TestTaskSchemaUsesYieldTimeForWaitBudget(t *testing.T) {
 		if !strings.Contains(inputDesc, want) {
 			t.Fatalf("input description = %q, want %q", inputDesc, want)
 		}
+	}
+}
+
+func TestTaskCallRequiresRuntimeWrapper(t *testing.T) {
+	t.Parallel()
+
+	_, err := New().Call(context.Background(), tool.Call{Name: ToolName})
+	if err == nil {
+		t.Fatal("TASK Call() error = nil, want runtime wrapper error")
+	}
+	if !strings.Contains(err.Error(), "runtime wrapper") {
+		t.Fatalf("TASK Call() error = %v, want runtime wrapper mention", err)
+	}
+}
+
+func TestTaskCallRejectsUnknownArgsBeforeRuntimeWrapperError(t *testing.T) {
+	t.Parallel()
+
+	raw, _ := json.Marshal(map[string]any{
+		"action":     "wait",
+		"task_id":    "task-1",
+		"unexpected": true,
+	})
+	_, err := New().Call(context.Background(), tool.Call{Name: ToolName, Input: raw})
+	if err == nil {
+		t.Fatal("TASK Call() error = nil, want unknown arg rejection")
+	}
+	if strings.Contains(err.Error(), "runtime wrapper") || !strings.Contains(err.Error(), "unexpected") {
+		t.Fatalf("TASK Call() error = %v, want unknown arg rejection before runtime wrapper error", err)
 	}
 }

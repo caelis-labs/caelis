@@ -3,6 +3,7 @@ package plan
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/OnslaughtSnail/caelis/ports/model"
@@ -47,5 +48,23 @@ func TestPlanToolReturnsNormalizedEntries(t *testing.T) {
 	entries, _ := toolMeta["entries"].([]map[string]any)
 	if got, want := len(entries), 2; got != want {
 		t.Fatalf("len(metadata entries) = %d, want %d", got, want)
+	}
+}
+
+func TestPlanToolRejectsNonObjectEntries(t *testing.T) {
+	t.Parallel()
+
+	raw, _ := json.Marshal(map[string]any{
+		"entries": []any{"not an entry"},
+	})
+	_, err := New().Call(context.Background(), tool.Call{
+		Name:  ToolName,
+		Input: raw,
+	})
+	if err == nil {
+		t.Fatal("Call() error = nil, want non-object entry rejection")
+	}
+	if got, want := err.Error(), "entries[0]"; !strings.Contains(got, want) {
+		t.Fatalf("Call() error = %v, want %q", err, want)
 	}
 }

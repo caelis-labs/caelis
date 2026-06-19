@@ -59,6 +59,9 @@ func (t *ListTool) Call(ctx context.Context, call tool.Call) (tool.Result, error
 	if err != nil {
 		return tool.Result{}, err
 	}
+	if err := tool.RejectUnknownArgs(args, "path", "limit", "metadata"); err != nil {
+		return tool.Result{}, err
+	}
 	pathArg, err := argparse.String(args, "path", false)
 	if err != nil {
 		return tool.Result{}, err

@@ -2,6 +2,7 @@ package gatewayapp
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -243,7 +244,7 @@ func acpCommandForToolTest(commands []acp.AvailableCommand, name string) *acp.Av
 }
 
 func TestNativeOpenCodeFamilyBuiltinOptionsAreAddOnly(t *testing.T) {
-	stack, _ := newStackWithAssemblyForToolTest(t, assembly.ResolvedAssembly{})
+	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
 	addOptions := stack.ListBuiltinACPAgentAddOptions()
 	installOptions := stack.ListInstallableACPAgentOptions()
 	for _, name := range []string{"opencode", "codefree-o"} {
@@ -264,7 +265,7 @@ func TestNativeOpenCodeFamilyBuiltinOptionsAreAddOnly(t *testing.T) {
 }
 
 func TestRegisterNativeOpenCodeFamilyBuiltinAgents(t *testing.T) {
-	stack, _ := newStackWithAssemblyForToolTest(t, assembly.ResolvedAssembly{})
+	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
 	for _, name := range []string{"opencode", "codefree-o"} {
 		if err := stack.RegisterBuiltinACPAgent(name); err != nil {
 			t.Fatalf("RegisterBuiltinACPAgent(%s) error = %v", name, err)
@@ -357,7 +358,7 @@ func TestRegisterBuiltinACPAgentNpxDoesNotPreferPATHAdapterBinary(t *testing.T) 
 	writeExecutableForGatewayAppTest(t, binDir, "claude-agent-acp", "#!/bin/sh\nexit 0\n")
 	t.Setenv("PATH", binDir)
 
-	stack, _ := newStackWithAssemblyForToolTest(t, assembly.ResolvedAssembly{})
+	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
 	if err := stack.RegisterBuiltinACPAgent("claude"); err != nil {
 		t.Fatalf("RegisterBuiltinACPAgent(claude) error = %v", err)
 	}
@@ -379,13 +380,12 @@ func TestRegisterBuiltinACPAgentNpxDoesNotPreferPATHAdapterBinary(t *testing.T) 
 
 func TestRegisterBuiltinACPAgentInstallRunsNPMEvenWhenPATHAdapterExists(t *testing.T) {
 	binDir := t.TempDir()
-	logPath := filepath.Join(t.TempDir(), "npm.log")
 	writeExecutableForGatewayAppTest(t, binDir, "claude-agent-acp", "#!/bin/sh\nexit 0\n")
-	writeFakeNPMInstallerForGatewayAppTest(t, binDir)
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("CAELIS_FAKE_NPM_LOG", logPath)
+	t.Setenv("PATH", binDir)
+	var installs []builtinACPAgentNPMInstallRequest
+	useFakeBuiltinACPAgentInstallerForGatewayAppTest(t, &installs, nil)
 
-	stack, _ := newStackWithAssemblyForToolTest(t, assembly.ResolvedAssembly{})
+	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
 	if err := stack.RegisterBuiltinACPAgentWithOptions(context.Background(), "claude", RegisterBuiltinACPAgentOptions{
 		Install: true,
 	}); err != nil {
@@ -406,24 +406,16 @@ func TestRegisterBuiltinACPAgentInstallRunsNPMEvenWhenPATHAdapterExists(t *testi
 	if len(agent.Args) != 0 {
 		t.Fatalf("stored args = %#v, want none", agent.Args)
 	}
-	logData, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatalf("ReadFile(npm log) error = %v", err)
-	}
-	if got, want := strings.Count(string(logData), "@agentclientprotocol/claude-agent-acp@^0.31.0"), 1; got != want {
-		t.Fatalf("npm install count = %d, want %d; log=%q", got, want, string(logData))
+	if got, want := countFakeInstallsForGatewayAppTest(installs, "@agentclientprotocol/claude-agent-acp@^0.31.0"), 1; got != want {
+		t.Fatalf("npm install count = %d, want %d; installs=%#v", got, want, installs)
 	}
 }
 
 func TestRegisterBuiltinACPAgentInstallUpdatesManagedAdapterOnRepeatedRuns(t *testing.T) {
-	binDir := t.TempDir()
-	logPath := filepath.Join(t.TempDir(), "npm.log")
-	writeExecutableForGatewayAppTest(t, binDir, "codex-acp", "#!/bin/sh\nexit 0\n")
-	writeFakeNPMInstallerForGatewayAppTest(t, binDir)
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("CAELIS_FAKE_NPM_LOG", logPath)
+	var installs []builtinACPAgentNPMInstallRequest
+	useFakeBuiltinACPAgentInstallerForGatewayAppTest(t, &installs, nil)
 
-	stack, _ := newStackWithAssemblyForToolTest(t, assembly.ResolvedAssembly{})
+	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
 	for i := 0; i < 2; i++ {
 		if err := stack.RegisterBuiltinACPAgentWithOptions(context.Background(), "codex", RegisterBuiltinACPAgentOptions{
 			Install: true,
@@ -442,21 +434,15 @@ func TestRegisterBuiltinACPAgentInstallUpdatesManagedAdapterOnRepeatedRuns(t *te
 	if doc.Agents[0].Command != wantCommand {
 		t.Fatalf("stored command = %q, want managed adapter %q", doc.Agents[0].Command, wantCommand)
 	}
-	logData, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatalf("ReadFile(npm log) error = %v", err)
-	}
-	if got, want := strings.Count(string(logData), "@zed-industries/codex-acp@latest"), 2; got != want {
-		t.Fatalf("npm install count = %d, want %d; log=%q", got, want, string(logData))
+	if got, want := countFakeInstallsForGatewayAppTest(installs, "@zed-industries/codex-acp@latest"), 2; got != want {
+		t.Fatalf("npm install count = %d, want %d; installs=%#v", got, want, installs)
 	}
 }
 
 func TestRegisterBuiltinACPAgentInstallUsesManagedAdapter(t *testing.T) {
-	binDir := t.TempDir()
-	writeFakeNPMInstallerForGatewayAppTest(t, binDir)
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	useFakeBuiltinACPAgentInstallerForGatewayAppTest(t, nil, nil)
 
-	stack, _ := newStackWithAssemblyForToolTest(t, assembly.ResolvedAssembly{})
+	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
 	if err := stack.RegisterBuiltinACPAgentWithOptions(context.Background(), "claude", RegisterBuiltinACPAgentOptions{
 		Install: true,
 	}); err != nil {
@@ -484,11 +470,9 @@ func TestRegisterBuiltinACPAgentInstallUsesManagedAdapter(t *testing.T) {
 }
 
 func TestRegisterBuiltinACPAgentInstallFailureDoesNotUpdateConfig(t *testing.T) {
-	binDir := t.TempDir()
-	writeExecutableForGatewayAppTest(t, binDir, "npm", "#!/bin/sh\necho install failed >&2\nexit 7\n")
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	useFakeBuiltinACPAgentInstallerForGatewayAppTest(t, nil, errors.New("exit status 7"))
 
-	stack, _ := newStackWithAssemblyForToolTest(t, assembly.ResolvedAssembly{})
+	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
 	err := stack.RegisterBuiltinACPAgentWithOptions(context.Background(), "claude", RegisterBuiltinACPAgentOptions{
 		Install: true,
 	})
@@ -506,7 +490,7 @@ func TestRegisterBuiltinACPAgentInstallFailureDoesNotUpdateConfig(t *testing.T) 
 
 func TestLocalStackAgentRegistryUpdatesWithoutRuntimeRebuild(t *testing.T) {
 	ctx := context.Background()
-	stack, session := newStackWithAssemblyForToolTest(t, assembly.ResolvedAssembly{})
+	stack, session := newStackWithAssemblyForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
 	oldGateway := stack.currentGateway()
 	oldEngine := stack.engine
 
@@ -561,7 +545,7 @@ func TestLocalStackAgentRegistryUpdatesWithoutRuntimeRebuild(t *testing.T) {
 
 func TestRegisterCustomACPAgentUpdatesConfigAndRuntimeRegistry(t *testing.T) {
 	ctx := context.Background()
-	stack, session := newStackWithAssemblyForToolTest(t, assembly.ResolvedAssembly{})
+	stack, session := newStackWithAssemblyForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
 	oldGateway := stack.currentGateway()
 	oldEngine := stack.engine
 
@@ -726,13 +710,15 @@ func TestAgentProfileNameCollisionReportsStaleAndNotRunnable(t *testing.T) {
 func TestLocalStackAgentRegistryUpdatesPreserveSelfModelArgs(t *testing.T) {
 	workdir := t.TempDir()
 	stack, err := NewLocalStack(Config{
-		AppName:       "caelis",
-		UserID:        "self-model-test",
-		StoreDir:      t.TempDir(),
-		WorkspaceKey:  workdir,
-		WorkspaceCWD:  workdir,
-		ApprovalMode:  "auto-review",
-		ContextWindow: 12345,
+		AppName:                     "caelis",
+		UserID:                      "self-model-test",
+		StoreDir:                    t.TempDir(),
+		WorkspaceKey:                workdir,
+		WorkspaceCWD:                workdir,
+		SkillDirs:                   []string{t.TempDir()},
+		ApprovalMode:                "auto-review",
+		ContextWindow:               12345,
+		DisableBuiltInAgentProfiles: true,
 		Sandbox: SandboxConfig{
 			RequestedType: "host",
 		},
@@ -797,6 +783,7 @@ func TestLocalStackMaterializesBuiltInAgentProfiles(t *testing.T) {
 		StoreDir:     storeDir,
 		WorkspaceKey: workdir,
 		WorkspaceCWD: workdir,
+		SkillDirs:    []string{t.TempDir()},
 		ApprovalMode: "auto-review",
 		Sandbox:      SandboxConfig{RequestedType: "host"},
 		Model: ModelConfig{
@@ -863,6 +850,7 @@ func TestGuardianProfileStatusIgnoresLegacyDisabledACPBinding(t *testing.T) {
 		StoreDir:     t.TempDir(),
 		WorkspaceKey: workdir,
 		WorkspaceCWD: workdir,
+		SkillDirs:    []string{t.TempDir()},
 		ApprovalMode: "auto-review",
 		Sandbox:      SandboxConfig{RequestedType: "host"},
 		Model: ModelConfig{
@@ -936,6 +924,7 @@ func TestLocalStackIgnoresLegacyGuardianProfileFile(t *testing.T) {
 		StoreDir:     storeDir,
 		WorkspaceKey: workdir,
 		WorkspaceCWD: workdir,
+		SkillDirs:    []string{t.TempDir()},
 		ApprovalMode: "auto-review",
 		Sandbox:      SandboxConfig{RequestedType: "host"},
 		Model: ModelConfig{
@@ -975,6 +964,7 @@ func TestAgentProfileBindModelUpdatesACPAgentArgs(t *testing.T) {
 		StoreDir:     t.TempDir(),
 		WorkspaceKey: workdir,
 		WorkspaceCWD: workdir,
+		SkillDirs:    []string{t.TempDir()},
 		ApprovalMode: "auto-review",
 		Sandbox:      SandboxConfig{RequestedType: "host"},
 		Model: ModelConfig{
@@ -1066,7 +1056,7 @@ func TestAgentProfileStaleModelBindingDoesNotMaterializeDefaultAgent(t *testing.
 }
 
 func TestAgentProfileAssemblyReturnsProfileDirError(t *testing.T) {
-	stack, _ := newStackWithAssemblyForToolTest(t, assembly.ResolvedAssembly{})
+	stack := newStackForToolTest(t, assembly.ResolvedAssembly{})
 	agentsDir := filepath.Join(stack.storeDir, agentprofile.DefaultAgentsDirName)
 	if err := os.RemoveAll(agentsDir); err != nil {
 		t.Fatalf("RemoveAll(%s) error = %v", agentsDir, err)
@@ -1082,7 +1072,7 @@ func TestAgentProfileAssemblyReturnsProfileDirError(t *testing.T) {
 }
 
 func TestAgentProfileAssemblyReturnsConfigStoreLoadError(t *testing.T) {
-	stack, _ := newStackWithAssemblyForToolTest(t, assembly.ResolvedAssembly{})
+	stack := newStackForToolTest(t, assembly.ResolvedAssembly{})
 	poisonConfigStorePath(t, stack)
 
 	err := stack.setConfiguredAgents(nil)
@@ -1092,7 +1082,7 @@ func TestAgentProfileAssemblyReturnsConfigStoreLoadError(t *testing.T) {
 }
 
 func TestAgentProfileAssemblyReturnsInvalidBindingTargetError(t *testing.T) {
-	stack, _ := newStackWithAssemblyForToolTest(t, assembly.ResolvedAssembly{})
+	stack := newStackForToolTest(t, assembly.ResolvedAssembly{})
 	doc, err := stack.store.Load()
 	if err != nil {
 		t.Fatalf("store.Load() error = %v", err)
@@ -1120,6 +1110,7 @@ func TestAgentProfileBindGuardianModelDoesNotMaterializeACPAgent(t *testing.T) {
 		StoreDir:     t.TempDir(),
 		WorkspaceKey: workdir,
 		WorkspaceCWD: workdir,
+		SkillDirs:    []string{t.TempDir()},
 		ApprovalMode: "auto-review",
 		Sandbox:      SandboxConfig{RequestedType: "host"},
 		Model: ModelConfig{
@@ -1169,15 +1160,51 @@ func TestAgentProfileBindGuardianModelDoesNotMaterializeACPAgent(t *testing.T) {
 
 func newStackWithAssemblyForToolTest(t *testing.T, assembly assembly.ResolvedAssembly) (*Stack, session.Session) {
 	t.Helper()
+	stack := newStackForToolTest(t, assembly)
+	session, err := stack.StartSession(context.Background(), "", "surface-tool-test")
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	return stack, session
+}
+
+func newStackWithAssemblyForToolTestWithoutProfiles(t *testing.T, assembly assembly.ResolvedAssembly) (*Stack, session.Session) {
+	t.Helper()
+	stack := newStackForToolTestWithoutProfiles(t, assembly)
+	session, err := stack.StartSession(context.Background(), "", "surface-tool-test")
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	return stack, session
+}
+
+func newStackForToolTest(t *testing.T, assembly assembly.ResolvedAssembly) *Stack {
+	t.Helper()
+	return newStackForToolTestWithOptions(t, assembly, stackForToolTestOptions{})
+}
+
+func newStackForToolTestWithoutProfiles(t *testing.T, assembly assembly.ResolvedAssembly) *Stack {
+	t.Helper()
+	return newStackForToolTestWithOptions(t, assembly, stackForToolTestOptions{DisableBuiltInAgentProfiles: true})
+}
+
+type stackForToolTestOptions struct {
+	DisableBuiltInAgentProfiles bool
+}
+
+func newStackForToolTestWithOptions(t *testing.T, assembly assembly.ResolvedAssembly, opts stackForToolTestOptions) *Stack {
+	t.Helper()
 	workdir := t.TempDir()
 	stack, err := NewLocalStack(Config{
-		AppName:      "caelis",
-		UserID:       "tool-test",
-		StoreDir:     t.TempDir(),
-		WorkspaceKey: workdir,
-		WorkspaceCWD: workdir,
-		ApprovalMode: "auto-review",
-		Assembly:     assembly,
+		AppName:                     "caelis",
+		UserID:                      "tool-test",
+		StoreDir:                    t.TempDir(),
+		WorkspaceKey:                workdir,
+		WorkspaceCWD:                workdir,
+		ApprovalMode:                "auto-review",
+		Assembly:                    assembly,
+		SkillDirs:                   []string{t.TempDir()},
+		DisableBuiltInAgentProfiles: opts.DisableBuiltInAgentProfiles,
 		// These tests rewrite PATH to exercise ACP adapter lookup. Keep the
 		// sandbox on host so auto-probing does not execute the test binary as a
 		// landlock helper and recursively re-enter this package's tests.
@@ -1192,11 +1219,7 @@ func newStackWithAssemblyForToolTest(t *testing.T, assembly assembly.ResolvedAss
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	session, err := stack.StartSession(context.Background(), "", "surface-tool-test")
-	if err != nil {
-		t.Fatalf("StartSession() error = %v", err)
-	}
-	return stack, session
+	return stack
 }
 
 func toolSetHas(tools []tool.Tool, name string) bool {
@@ -1366,6 +1389,47 @@ func repoRootForGatewayAppTest(t *testing.T) string {
 		}
 		dir = parent
 	}
+}
+
+func useFakeBuiltinACPAgentInstallerForGatewayAppTest(t *testing.T, installs *[]builtinACPAgentNPMInstallRequest, fail error) {
+	t.Helper()
+	previous := runBuiltinACPAgentNPMInstall
+	runBuiltinACPAgentNPMInstall = func(ctx context.Context, req builtinACPAgentNPMInstallRequest) (builtinACPAgentNPMInstallResult, error) {
+		result := builtinACPAgentNPMInstallResult{
+			Command: []string{"npm", "install", "--prefix", req.Root, req.InstallSpec},
+		}
+		if installs != nil {
+			*installs = append(*installs, req)
+		}
+		if fail != nil {
+			result.Output = "install failed"
+			return result, fail
+		}
+		if err := ctx.Err(); err != nil {
+			return result, err
+		}
+		bin := managedACPAgentBinPath(req.Root, req.Package.Bin)
+		if err := os.MkdirAll(filepath.Dir(bin), 0o700); err != nil {
+			return result, err
+		}
+		if err := os.WriteFile(bin, []byte("managed adapter"), 0o755); err != nil {
+			return result, err
+		}
+		return result, nil
+	}
+	t.Cleanup(func() {
+		runBuiltinACPAgentNPMInstall = previous
+	})
+}
+
+func countFakeInstallsForGatewayAppTest(installs []builtinACPAgentNPMInstallRequest, installSpec string) int {
+	count := 0
+	for _, install := range installs {
+		if install.InstallSpec == installSpec {
+			count++
+		}
+	}
+	return count
 }
 
 func writeExecutableForGatewayAppTest(t *testing.T, dir string, name string, body string) string {

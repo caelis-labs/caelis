@@ -194,23 +194,6 @@ func decodeJSONMap(raw []byte) (map[string]any, error) {
 	return out, nil
 }
 
-func rejectUnknownArgs(values map[string]any, allowed ...string) error {
-	allowedSet := map[string]struct{}{}
-	for _, key := range allowed {
-		key = strings.TrimSpace(key)
-		if key == "" {
-			continue
-		}
-		allowedSet[key] = struct{}{}
-	}
-	for key := range values {
-		if _, ok := allowedSet[key]; !ok {
-			return fmt.Errorf("tool: arg %q is not supported", key)
-		}
-	}
-	return nil
-}
-
 func stringArg(values map[string]any, key string) (string, bool) {
 	raw, ok := values[key]
 	if !ok || raw == nil {

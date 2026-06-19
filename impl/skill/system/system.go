@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 )
 
 const (
@@ -19,6 +20,18 @@ const (
 
 //go:embed embedded
 var embeddedSkills embed.FS
+
+var ensureState = struct {
+	sync.Mutex
+	inFlight map[string]*ensureCall
+}{
+	inFlight: map[string]*ensureCall{},
+}
+
+type ensureCall struct {
+	done chan struct{}
+	err  error
+}
 
 func Root() (string, error) {
 	home, err := os.UserHomeDir()
@@ -47,10 +60,23 @@ func Ensure() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := syncEmbeddedDir(embeddedRoot, root, root); err != nil {
-		return root, err
+	ensureState.Lock()
+	if call, ok := ensureState.inFlight[root]; ok {
+		ensureState.Unlock()
+		<-call.done
+		return root, call.err
 	}
-	return root, nil
+	call := &ensureCall{done: make(chan struct{})}
+	ensureState.inFlight[root] = call
+	ensureState.Unlock()
+
+	call.err = syncEmbeddedDir(embeddedRoot, root, root)
+
+	ensureState.Lock()
+	delete(ensureState.inFlight, root)
+	close(call.done)
+	ensureState.Unlock()
+	return root, call.err
 }
 
 func syncEmbeddedDir(src string, dst string, safeRoot string) error {

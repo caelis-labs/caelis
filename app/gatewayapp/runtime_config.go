@@ -20,6 +20,8 @@ type stackRuntimeConfig struct {
 	ContextWindow               int
 	SystemPrompt                string
 	Model                       ModelConfig
+	SkillDirs                   []string
+	DisableBuiltInAgentProfiles bool
 	Plugins                     []PluginConfig
 	BaseAssembly                assembly.ResolvedAssembly
 	Assembly                    assembly.ResolvedAssembly
@@ -145,6 +147,13 @@ func dedupeNonEmptyStrings(values []string) []string {
 		out = append(out, trimmed)
 	}
 	return out
+}
+
+func cloneStringSlicePreserveNil(in []string) []string {
+	if in == nil {
+		return nil
+	}
+	return append([]string(nil), in...)
 }
 
 func approvalMode(raw string) string {

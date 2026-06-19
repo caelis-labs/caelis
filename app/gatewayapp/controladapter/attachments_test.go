@@ -10,6 +10,8 @@ import (
 )
 
 func TestContentPartsFromAttachmentsReadsImageFiles(t *testing.T) {
+	t.Parallel()
+
 	workspace := t.TempDir()
 	imagePath := filepath.Join(workspace, "shot.png")
 	raw, err := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=")
@@ -43,6 +45,8 @@ func TestContentPartsFromAttachmentsReadsImageFiles(t *testing.T) {
 }
 
 func TestContentPartsFromSubmissionInterleavesTextAndImages(t *testing.T) {
+	t.Parallel()
+
 	workspace := t.TempDir()
 	imagePath := filepath.Join(workspace, "shot.png")
 	raw, err := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=")
@@ -72,6 +76,8 @@ func TestContentPartsFromSubmissionInterleavesTextAndImages(t *testing.T) {
 }
 
 func TestContentPartsFromAttachmentsRejectsNonImages(t *testing.T) {
+	t.Parallel()
+
 	workspace := t.TempDir()
 	if err := os.WriteFile(filepath.Join(workspace, "note.txt"), []byte("not an image"), 0o600); err != nil {
 		t.Fatal(err)
@@ -83,6 +89,8 @@ func TestContentPartsFromAttachmentsRejectsNonImages(t *testing.T) {
 }
 
 func TestContentPartsFromAttachmentsRejectsRenamedNonImages(t *testing.T) {
+	t.Parallel()
+
 	workspace := t.TempDir()
 	if err := os.WriteFile(filepath.Join(workspace, "not-really.png"), []byte("not an image"), 0o600); err != nil {
 		t.Fatal(err)
@@ -94,6 +102,8 @@ func TestContentPartsFromAttachmentsRejectsRenamedNonImages(t *testing.T) {
 }
 
 func TestContentPartsFromAttachmentsRejectsOversizedImages(t *testing.T) {
+	t.Parallel()
+
 	workspace := t.TempDir()
 	imagePath := filepath.Join(workspace, "huge.png")
 	file, err := os.Create(imagePath)

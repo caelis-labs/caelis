@@ -12,6 +12,12 @@ import (
 
 const ToolName = "SPAWN"
 
+var allowedArgs = []string{"agent", "prompt"}
+
+func ValidateArgs(args map[string]any) error {
+	return tool.RejectUnknownArgs(args, allowedArgs...)
+}
+
 type Tool struct {
 	agents []delegation.Agent
 }
@@ -56,7 +62,14 @@ func (t Tool) Definition() tool.Definition {
 	}
 }
 
-func (Tool) Call(context.Context, tool.Call) (tool.Result, error) {
+func (Tool) Call(_ context.Context, call tool.Call) (tool.Result, error) {
+	args, err := toolutil.DecodeArgs(call)
+	if err != nil {
+		return tool.Result{}, err
+	}
+	if err := ValidateArgs(args); err != nil {
+		return tool.Result{}, err
+	}
 	return tool.Result{}, fmt.Errorf("tool: SPAWN must be executed by the runtime wrapper")
 }
 

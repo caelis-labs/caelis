@@ -108,6 +108,8 @@ func (s *Store) Path() string {
 	if s == nil {
 		return ""
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.path
 }
 
@@ -115,6 +117,8 @@ func (s *Store) SetPath(path string) {
 	if s == nil {
 		return
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.path = strings.TrimSpace(path)
 }
 
@@ -127,11 +131,14 @@ func LoadAppConfig(root string) (AppConfig, error) {
 }
 
 func (s *Store) Load() (AppConfig, error) {
-	if s == nil || strings.TrimSpace(s.path) == "" {
+	if s == nil {
 		return AppConfig{}, nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if strings.TrimSpace(s.path) == "" {
+		return AppConfig{}, nil
+	}
 	return s.loadUnlocked()
 }
 
@@ -254,11 +261,14 @@ var legacyModelProfileKeys = []string{
 }
 
 func (s *Store) Save(doc AppConfig) error {
-	if s == nil || strings.TrimSpace(s.path) == "" {
+	if s == nil {
 		return nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if strings.TrimSpace(s.path) == "" {
+		return nil
+	}
 	doc.Models = normalizePersistedModelsForSave(doc.Models)
 	doc.Models.Configs = dedupeModelConfigsForSave(doc.Models.Configs)
 	doc.Models.Profiles = dedupeModelProfilesForSave(doc.Models.Profiles)

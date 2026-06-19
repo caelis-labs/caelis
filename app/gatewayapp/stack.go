@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/modelregistry"
-	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/pluginregistry"
 	"github.com/OnslaughtSnail/caelis/impl/agent/local"
 	sessionfile "github.com/OnslaughtSnail/caelis/impl/session/file"
 	taskfile "github.com/OnslaughtSnail/caelis/impl/task/file"
@@ -23,18 +22,20 @@ import (
 )
 
 type Config struct {
-	AppName       string
-	UserID        string
-	StoreDir      string
-	WorkspaceKey  string
-	WorkspaceCWD  string
-	ApprovalMode  string
-	PolicyProfile string
-	ContextWindow int
-	SystemPrompt  string
-	Assembly      assembly.ResolvedAssembly
-	Model         ModelConfig
-	Sandbox       SandboxConfig
+	AppName                     string
+	UserID                      string
+	StoreDir                    string
+	WorkspaceKey                string
+	WorkspaceCWD                string
+	ApprovalMode                string
+	PolicyProfile               string
+	ContextWindow               int
+	SystemPrompt                string
+	Assembly                    assembly.ResolvedAssembly
+	SkillDirs                   []string
+	DisableBuiltInAgentProfiles bool
+	Model                       ModelConfig
+	Sandbox                     SandboxConfig
 }
 
 type ModelConfig = modelregistry.Config
@@ -162,22 +163,16 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := ensureBuiltInAgentProfiles(context.Background(), storeDir, configStore); err != nil {
-		return nil, err
-	}
-	doc, err = configStore.Load()
-	if err != nil {
-		return nil, err
+	if !cfg.DisableBuiltInAgentProfiles {
+		if err := ensureBuiltInAgentProfiles(context.Background(), storeDir, configStore); err != nil {
+			return nil, err
+		}
+		doc, err = configStore.Load()
+		if err != nil {
+			return nil, err
+		}
 	}
 	sandboxCfg := mergeSandboxConfig(doc.Sandbox, cfg.Sandbox)
-	skillDirs, err := pluginSkillDirsFromConfig(workspaceCWD, doc.Plugins)
-	if err != nil {
-		return nil, err
-	}
-	baseMetadata, err := buildStackBaseMetadata(appName, workspaceCWD, cfg.SystemPrompt, cfg.Model, sandboxCfg, skillDirs)
-	if err != nil {
-		return nil, err
-	}
 	stack := &Stack{
 		Sessions: sessions,
 		AppName:  appName,
@@ -191,44 +186,23 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		storeDir:  storeDir,
 		taskStore: taskStore,
 		runtime: stackRuntimeConfig{
-			ApprovalMode:  effectiveApprovalMode,
-			PolicyProfile: effectivePolicyProfile,
-			ContextWindow: cfg.ContextWindow,
-			SystemPrompt:  cfg.SystemPrompt,
-			Model:         cfg.Model,
-			Plugins:       clonePluginConfigs(doc.Plugins),
-			BaseAssembly:  baseAssembly,
-			Assembly:      assembly.CloneResolvedAssembly(baseAssembly),
-			BaseMetadata:  cloneMap(baseMetadata),
+			ApprovalMode:                effectiveApprovalMode,
+			PolicyProfile:               effectivePolicyProfile,
+			ContextWindow:               cfg.ContextWindow,
+			SystemPrompt:                cfg.SystemPrompt,
+			Model:                       cfg.Model,
+			SkillDirs:                   cloneStringSlicePreserveNil(cfg.SkillDirs),
+			DisableBuiltInAgentProfiles: cfg.DisableBuiltInAgentProfiles,
+			Plugins:                     clonePluginConfigs(doc.Plugins),
+			BaseAssembly:                baseAssembly,
+			Assembly:                    assembly.CloneResolvedAssembly(baseAssembly),
 		},
 		sandbox: sandboxCfg,
 	}
-	configuredAssembly, err := stack.configuredAssembly(baseAssembly, doc.Agents, doc.Plugins, stack.runtime)
-	if err != nil {
-		return nil, err
-	}
-	stack.runtime.Assembly = configuredAssembly
 	if err := stack.rebuildGateway(); err != nil {
 		return nil, err
 	}
 	return stack, nil
-}
-
-func pluginSkillDirsFromConfig(workspaceCWD string, plugins []PluginConfig) ([]string, error) {
-	skillDirs := DefaultSkillDiscoveryDirs(workspaceCWD)
-	for _, pCfg := range plugins {
-		if !pCfg.Enabled {
-			continue
-		}
-		p, err := pluginregistry.ParsePlugin(pCfg.Root)
-		if err != nil {
-			return nil, fmt.Errorf("gatewayapp: parse enabled plugin %q failed: %w", pCfg.ID, err)
-		}
-		for _, sc := range p.Skills {
-			skillDirs = append(skillDirs, sc.Root)
-		}
-	}
-	return skillDirs, nil
 }
 
 func buildStackBaseMetadata(appName, workspaceCWD, basePrompt string, model ModelConfig, sandboxCfg SandboxConfig, skillDirs []string) (map[string]any, error) {

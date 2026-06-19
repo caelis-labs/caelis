@@ -20,6 +20,12 @@ const (
 	defaultRunCommandIdle    = 0
 )
 
+var runCommandAllowedArgs = []string{"command", "workdir", "yield_time_ms", "sandbox_permissions", "justification"}
+
+func ValidateRunCommandArgs(args map[string]any) error {
+	return tool.RejectUnknownArgs(args, runCommandAllowedArgs...)
+}
+
 type RunCommandConfig struct {
 	Timeout     time.Duration
 	IdleTimeout time.Duration
@@ -91,6 +97,9 @@ func (t *RunCommandTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 	if err != nil {
 		return tool.Result{}, err
 	}
+	if err := ValidateRunCommandArgs(args); err != nil {
+		return tool.Result{}, err
+	}
 	command, err := argparse.String(args, "command", true)
 	if err != nil {
 		return tool.Result{}, err
@@ -105,8 +114,14 @@ func (t *RunCommandTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 	if _, err := argparse.Int(args, "yield_time_ms", 0); err != nil {
 		return tool.Result{}, err
 	}
-	if _, err := argparse.String(args, "sandbox_permissions", false); err != nil {
+	sandboxPermissions, err := argparse.String(args, "sandbox_permissions", false)
+	if err != nil {
 		return tool.Result{}, err
+	}
+	if _, present := args["sandbox_permissions"]; present {
+		if _, err := tool.NormalizeCommandSandboxPermission(sandboxPermissions, false); err != nil {
+			return tool.Result{}, err
+		}
 	}
 	if _, err := argparse.String(args, "justification", false); err != nil {
 		return tool.Result{}, err

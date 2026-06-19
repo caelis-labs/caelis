@@ -964,6 +964,35 @@ func TestRuntimeSpawnToolRejectsYieldTimeMS(t *testing.T) {
 	}
 }
 
+func TestRuntimeSpawnToolRejectsUnknownArgsBeforeRequiredPrompt(t *testing.T) {
+	ctx := context.Background()
+	runner := &recordingSubagentRunner{
+		spawnResult: delegation.Result{State: delegation.StateRunning, Running: true},
+	}
+	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
+	targetTool := runtimeSpawnTool{
+		base:       spawn.New([]delegation.Agent{{Name: "self"}}),
+		session:    activeSession,
+		sessionRef: activeSession.SessionRef,
+		tasks:      runtime.tasks,
+		runner:     runner,
+	}
+	raw, err := json.Marshal(map[string]any{
+		"yield_time_ms": 15000,
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+
+	_, err = targetTool.Call(ctx, tool.Call{ID: "spawn-1", Name: spawn.ToolName, Input: raw})
+	if err == nil {
+		t.Fatal("SPAWN Call() error = nil, want yield_time_ms rejection")
+	}
+	if strings.Contains(err.Error(), "prompt") || !strings.Contains(err.Error(), "yield_time_ms") {
+		t.Fatalf("SPAWN Call() error = %v, want unknown arg rejection before prompt requirement", err)
+	}
+}
+
 func TestRuntimeSpawnToolAllowsSelfDefaultAndRejectsRawACPWhenEnumExists(t *testing.T) {
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{

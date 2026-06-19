@@ -188,6 +188,9 @@ func parsePatchEdits(args map[string]any) ([]patchEdit, error) {
 		if !ok {
 			return nil, tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("tool: arg \"edits[%d]\" must be an object", idx))
 		}
+		if err := tool.RejectUnknownArgs(item, "old", "new", "replace_all", "expected_replacements"); err != nil {
+			return nil, fmt.Errorf("tool: PATCH edits[%d]: %w", idx, err)
+		}
 		oldValue, err := requiredPatchEditString(item, idx, "old")
 		if err != nil {
 			return nil, err
