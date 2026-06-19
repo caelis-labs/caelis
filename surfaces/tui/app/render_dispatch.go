@@ -557,11 +557,7 @@ func (m *Model) handleTaskResultMsg(msg TaskResultMsg) (tea.Model, tea.Cmd) {
 	}
 	m.finalizeActiveMainACPTurn(msg.Interrupted, msg.Err)
 	m.finalizeActiveParticipantTurn(msg.Interrupted, msg.Err)
-	if !m.runStartedAt.IsZero() {
-		m.lastRunDuration = time.Since(m.runStartedAt)
-		m.hasLastRunDuration = true
-		m.runStartedAt = time.Time{}
-	}
+	m.captureLastRunDuration(time.Time{})
 	var nextPending pendingPrompt
 	hasNextPending := false
 	if msg.Err == nil && !msg.Interrupted && !msg.ExitNow {
@@ -590,21 +586,7 @@ func (m *Model) handleTaskResultMsg(msg TaskResultMsg) (tea.Model, tea.Cmd) {
 			m.commitLine(errLine)
 		}
 	}
-	if m.showTurnDivider && !msg.SuppressTurnDivider && m.doc.Len() > 0 && !m.lastBlockHasParticipantTurnFooter() {
-		last := m.doc.Last()
-		hasContent := false
-		if last != nil {
-			if tb, ok := last.(*TranscriptBlock); ok {
-				hasContent = strings.TrimSpace(tb.Raw) != ""
-			} else {
-				hasContent = true
-			}
-		}
-		if hasContent {
-			m.doc.Append(NewDividerBlock(m.userTurnDividerLabel()))
-			m.markViewportStructureDirty()
-		}
-	}
+	m.appendUserTurnDividerIfNeeded(msg.SuppressTurnDivider)
 	m.showTurnDivider = false
 	m.ensureViewportLayout()
 	m.syncViewportContent()
@@ -689,5 +671,51 @@ func (m *Model) lastBlockHasParticipantTurnFooter() bool {
 	if block == nil || !block.Expanded {
 		return false
 	}
-	return participantTurnIsTerminal(block.Status)
+	return participantTurnHasFooter(block)
+}
+
+func (m *Model) captureLastRunDuration(endedAt time.Time) {
+	if m == nil || m.runStartedAt.IsZero() {
+		return
+	}
+	if endedAt.IsZero() || endedAt.Before(m.runStartedAt) {
+		endedAt = time.Now()
+	}
+	m.lastRunDuration = endedAt.Sub(m.runStartedAt)
+	m.hasLastRunDuration = true
+	m.runStartedAt = time.Time{}
+}
+
+func (m *Model) appendUserTurnDividerIfNeeded(suppress bool) bool {
+	if m == nil || m.doc == nil || suppress || !m.showTurnDivider || m.doc.Len() == 0 {
+		return false
+	}
+	if m.lastBlockHasParticipantTurnFooter() || m.lastBlockIsDivider() || !m.lastBlockHasContent() {
+		return false
+	}
+	m.doc.Append(NewDividerBlock(m.userTurnDividerLabel()))
+	m.markViewportStructureDirty()
+	return true
+}
+
+func (m *Model) lastBlockIsDivider() bool {
+	if m == nil || m.doc == nil {
+		return false
+	}
+	_, ok := m.doc.Last().(*DividerBlock)
+	return ok
+}
+
+func (m *Model) lastBlockHasContent() bool {
+	if m == nil || m.doc == nil {
+		return false
+	}
+	last := m.doc.Last()
+	if last == nil {
+		return false
+	}
+	if tb, ok := last.(*TranscriptBlock); ok {
+		return strings.TrimSpace(tb.Raw) != ""
+	}
+	return true
 }

@@ -49,13 +49,22 @@ func renderACPLiveExplorationStageRows(blockID string, events []SubagentEvent, i
 		}
 	} else {
 		for _, ev := range pendingTools {
-			rows = append(rows, renderExplorationToolRowWithMode(blockID, ev, width, ctx, "", len(rows) == 0, explorationToolDetailLiveRow))
+			rows = append(rows, renderLiveExplorationToolHeaderRow(blockID, ev, width, ctx))
 		}
 	}
 	if len(rows) == 0 {
 		return nil, idx, false
 	}
 	return rows, step.end, true
+}
+
+func renderLiveExplorationToolHeaderRow(blockID string, ev SubagentEvent, width int, ctx BlockRenderContext) RenderedRow {
+	verb := explorationToolVerb(toolSemanticName(ev.Name, ev.ToolKind))
+	if verb == "" {
+		verb = strings.ToUpper(strings.TrimSpace(ev.Name))
+	}
+	detail := explorationToolDetailForDisplay(ev, ctx.Workspace, explorationToolDetailLiveSummary)
+	return liveExplorationBulletHeaderRow(blockID, verb, detail, width, ctx)
 }
 
 func liveExplorationRepeatedToolSummary(stage []SubagentEvent) ([]SubagentEvent, string, bool) {
@@ -90,8 +99,12 @@ func liveExplorationRepeatedToolSummaryRow(blockID string, tools []SubagentEvent
 		}
 	}
 	detail := strings.Join(details, ", ")
+	return liveExplorationBulletHeaderRow(blockID, verb, detail, width, ctx)
+}
+
+func liveExplorationBulletHeaderRow(blockID string, verb string, detail string, width int, ctx BlockRenderContext) RenderedRow {
 	plain := strings.TrimSpace("• " + strings.TrimSpace(verb))
-	if detail != "" {
+	if detail = strings.TrimSpace(detail); detail != "" {
 		plain = strings.TrimSpace(plain + " " + detail)
 	}
 	plain = truncateTailDisplay(plain, maxInt(16, width))

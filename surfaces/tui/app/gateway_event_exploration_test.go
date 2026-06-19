@@ -70,6 +70,28 @@ func TestGatewayCompletedExplorationToolDefaultsCollapsedWithoutHeaderClick(t *t
 	}
 }
 
+func TestLiveExplorationSingleToolAfterNarrativeRendersBulletHeader(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+
+	model := newGatewayEventTestModel()
+	block := NewMainACPTurnBlock("root-session")
+	block.Events = append(block.Events, SubagentEvent{Kind: SEReasoning, Text: "Good, now let me demonstrate READ."})
+	block.UpdateTool("read-live", "READ", filepath.Join(root, "a.py"), "", false, false)
+
+	rows := block.Render(BlockRenderContext{Width: 120, TermWidth: 120, Theme: model.theme})
+	joined := strings.Join(renderedPlainRows(rows), "\n")
+	if !strings.Contains(joined, "• Read a.py") {
+		t.Fatalf("rendered rows = %q, want live READ as bullet header", joined)
+	}
+	if strings.Contains(joined, "\n    Read ") || strings.Contains(joined, "\n  └ Read ") {
+		t.Fatalf("rendered rows = %q, live READ should not render as a floating exploration child row", joined)
+	}
+	if strings.Contains(joined, root) {
+		t.Fatalf("rendered rows = %q, live READ should compact workspace path %q", joined, root)
+	}
+}
+
 func TestGatewayCompletedExplorationToolsRenderAsCompactSummary(t *testing.T) {
 	model := newGatewayEventTestModel()
 	sendTool := func(id string, name string, args string, output string) {
@@ -889,7 +911,7 @@ func TestGatewayLiveExplorationKeepsCompletedPrefixVisibleWithPendingSibling(t *
 		t.Fatalf("rendered rows = %q, current live exploration step should not compact before the pending sibling settles", joined)
 	}
 	if !strings.Contains(joined, "I need to inspect the session store before editing.") ||
-		!strings.Contains(joined, "Read internal/adapters/store/memory/store_test.go") {
+		!strings.Contains(joined, "• Read store_test.go") {
 		t.Fatalf("rendered rows = %q, want completed exploration sibling still visible in live step", joined)
 	}
 	if !strings.Contains(joined, `Search "StoreExerciseR03"`) {

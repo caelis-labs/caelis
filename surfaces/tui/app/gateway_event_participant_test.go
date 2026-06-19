@@ -446,6 +446,37 @@ func TestParticipantTurnCompletionDoesNotRenderTwoDurationDividers(t *testing.T)
 	}
 }
 
+func TestTerminalParticipantWithoutRenderableFooterStillGetsGlobalDivider(t *testing.T) {
+	model := NewModel(Config{NoColor: true})
+	model.viewport.SetWidth(60)
+	model.viewport.SetHeight(20)
+	start := time.Now().Add(-2 * time.Minute)
+	block := NewParticipantTurnBlock("task-1:1", "@codex")
+	block.StartedAt = start
+	block.EndedAt = start
+	block.Status = "completed"
+	block.Events = append(block.Events, SubagentEvent{Kind: SEAssistant, Text: "side answer", Done: true})
+	model.doc.Append(block)
+	model.participantTurnIDs = map[string]string{block.SessionID: block.BlockID()}
+	model.activeParticipantTurnSessionID = block.SessionID
+	model.showTurnDivider = true
+	model.runStartedAt = time.Now().Add(-75 * time.Second)
+
+	updated, _ := model.Update(TaskResultMsg{})
+	model = updated.(*Model)
+	model.syncViewportContent()
+
+	dividerCount := 0
+	for _, line := range model.viewportPlainLines {
+		if strings.Contains(line, "─") {
+			dividerCount++
+		}
+	}
+	if dividerCount != 1 {
+		t.Fatalf("viewport lines = %#v, want global duration divider when participant footer is empty", model.viewportPlainLines)
+	}
+}
+
 func TestEmptyTerminalParticipantTurnDoesNotRenderArrowOrZeroDurationFooter(t *testing.T) {
 	model := NewModel(Config{NoColor: true})
 	start := time.Date(2026, 4, 29, 12, 0, 0, 0, time.UTC)

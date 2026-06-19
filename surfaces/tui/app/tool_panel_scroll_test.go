@@ -2,6 +2,7 @@ package tuiapp
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -166,6 +167,36 @@ func TestSpawnTerminalPanelCleansMessySubagentPreview(t *testing.T) {
 		}
 		if got := len(plain); got > 1+acpTerminalPanelMaxLines {
 			t.Fatalf("running SPAWN preview rows = %d, want capped at header + %d\n%s", got, acpTerminalPanelMaxLines, joined)
+		}
+	})
+
+	t.Run("running compacts duplicate tool lifecycle lines", func(t *testing.T) {
+		root := t.TempDir()
+		t.Chdir(root)
+		block := NewMainACPTurnBlock("session-1")
+		readPath := filepath.Join(root, "a.py")
+		writePath := filepath.Join(root, "spawn_demo_output.txt")
+		output := strings.Join([]string{
+			"READ " + readPath,
+			"READ " + readPath + " completed",
+			"WRITE " + writePath,
+			"WRITE " + writePath + " completed",
+			"completed",
+		}, "\n")
+		block.UpdateTool("spawn-tools", "SPAWN", "helper: inspect", output, false, false)
+
+		plain := renderedPlainRows(block.Render(ctx))
+		joined := strings.Join(plain, "\n")
+		if got := countRowsContaining(plain, "Read a.py"); got != 1 {
+			t.Fatalf("running SPAWN preview Read rows = %d, want 1\n%s", got, joined)
+		}
+		if got := countRowsContaining(plain, "Write spawn_demo_output.txt"); got != 1 {
+			t.Fatalf("running SPAWN preview Write rows = %d, want 1\n%s", got, joined)
+		}
+		for _, forbidden := range []string{root, "READ ", "WRITE ", "completed"} {
+			if strings.Contains(joined, forbidden) {
+				t.Fatalf("running SPAWN preview leaked %q:\n%s", forbidden, joined)
+			}
 		}
 	})
 

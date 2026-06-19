@@ -316,13 +316,21 @@ func participantTurnIsTerminal(state string) bool {
 }
 
 func renderParticipantTurnFooter(b *ParticipantTurnBlock, ctx BlockRenderContext) string {
-	label := ""
-	if b != nil && !b.StartedAt.IsZero() && !b.EndedAt.IsZero() && b.EndedAt.After(b.StartedAt) {
-		label = formatTurnDuration(b.EndedAt.Sub(b.StartedAt))
-	}
+	label := participantTurnFooterLabel(b)
 	if label == "" {
 		return ""
 	}
 	width := maxInt(12, ctx.Width)
 	return ctx.Theme.HelpHintTextStyle().Render(centeredDivider(width, label))
+}
+
+func participantTurnHasFooter(b *ParticipantTurnBlock) bool {
+	return participantTurnFooterLabel(b) != ""
+}
+
+func participantTurnFooterLabel(b *ParticipantTurnBlock) string {
+	if b == nil || !participantTurnIsTerminal(b.Status) || b.StartedAt.IsZero() || b.EndedAt.IsZero() || !b.EndedAt.After(b.StartedAt) {
+		return ""
+	}
+	return formatTurnDuration(b.EndedAt.Sub(b.StartedAt))
 }

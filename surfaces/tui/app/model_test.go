@@ -1,6 +1,7 @@
 package tuiapp
 
 import (
+	"errors"
 	"image/color"
 	"strings"
 	"testing"
@@ -498,6 +499,90 @@ func TestTaskResultDividerRendersImmediatelyWhenViewportHasDirtyBlock(t *testing
 	if !strings.Contains(joined, "─") || (!strings.Contains(joined, "3.") && !strings.Contains(joined, "3s")) {
 		t.Fatalf("viewport lines = %#v, want immediate completed-turn divider", model.viewportPlainLines)
 	}
+}
+
+func TestMainLifecycleCompletionAppendsTurnDividerOnce(t *testing.T) {
+	model := NewModel(Config{NoColor: true})
+	start := time.Now().Add(-7400 * time.Millisecond)
+	end := start.Add(7400 * time.Millisecond)
+	block := model.ensureMainACPTurnBlock("root-session")
+	block.Events = append(block.Events, SubagentEvent{Kind: SEAssistant, Text: "done", Done: true})
+	model.showTurnDivider = true
+	model.runStartedAt = start
+
+	updated, _ := model.Update(TranscriptEventsMsg{Events: []TranscriptEvent{{
+		Kind:       TranscriptEventLifecycle,
+		Scope:      ACPProjectionMain,
+		ScopeID:    "root-session",
+		State:      "completed",
+		OccurredAt: end,
+	}}})
+	model = updated.(*Model)
+
+	if got := countDividerBlocks(model); got != 1 {
+		t.Fatalf("divider blocks after lifecycle = %d, want 1", got)
+	}
+	divider, _ := model.doc.Last().(*DividerBlock)
+	if divider == nil || divider.Label != "7.4s" {
+		t.Fatalf("last block = %#v, want 7.4s divider", model.doc.Last())
+	}
+
+	updated, _ = model.Update(TaskResultMsg{})
+	model = updated.(*Model)
+	if got := countDividerBlocks(model); got != 1 {
+		t.Fatalf("divider blocks after TaskResult = %d, want lifecycle divider to be reused", got)
+	}
+}
+
+func TestMainLifecycleFailureWaitsForTaskResultBeforeDivider(t *testing.T) {
+	model := NewModel(Config{NoColor: true})
+	start := time.Now().Add(-7400 * time.Millisecond)
+	end := start.Add(7400 * time.Millisecond)
+	block := model.ensureMainACPTurnBlock("root-session")
+	block.Events = append(block.Events, SubagentEvent{Kind: SEAssistant, Text: "partial", Done: true})
+	model.showTurnDivider = true
+	model.runStartedAt = start
+
+	updated, _ := model.Update(TranscriptEventsMsg{Events: []TranscriptEvent{{
+		Kind:       TranscriptEventLifecycle,
+		Scope:      ACPProjectionMain,
+		ScopeID:    "root-session",
+		State:      "failed",
+		OccurredAt: end,
+	}}})
+	model = updated.(*Model)
+
+	if got := countDividerBlocks(model); got != 0 {
+		t.Fatalf("divider blocks after failed lifecycle = %d, want 0", got)
+	}
+
+	updated, _ = model.Update(TaskResultMsg{Err: errors.New("provider failed")})
+	model = updated.(*Model)
+
+	blocks := model.doc.Blocks()
+	if got := countDividerBlocks(model); got != 1 {
+		t.Fatalf("divider blocks after TaskResult error = %d, want 1", got)
+	}
+	if len(blocks) < 2 {
+		t.Fatalf("doc blocks = %#v, want error block followed by divider", blocks)
+	}
+	if _, ok := blocks[len(blocks)-1].(*DividerBlock); !ok {
+		t.Fatalf("last block = %T, want divider after error", blocks[len(blocks)-1])
+	}
+	errBlock, ok := blocks[len(blocks)-2].(*TranscriptBlock)
+	if !ok || !strings.Contains(errBlock.Raw, "provider failed") {
+		t.Fatalf("block before divider = %#v, want provider error", blocks[len(blocks)-2])
+	}
+}
+
+func countDividerBlocks(model *Model) int {
+	count := 0
+	for _, block := range model.doc.Blocks() {
+		if _, ok := block.(*DividerBlock); ok {
+			count++
+		}
+	}
+	return count
 }
 
 func TestReasoningAndAnswerBlocksRemainAdjacentAndIndependent(t *testing.T) {

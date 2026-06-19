@@ -29,9 +29,24 @@ func subagentTerminalSignalLines(text string, final bool) []string {
 	rawLines := splitRenderableLines(text)
 	lines := make([]string, 0, len(rawLines))
 	seen := map[string]struct{}{}
+	toolLineIndex := map[string]int{}
 	for _, raw := range rawLines {
 		line, ok := cleanSubagentTerminalPreviewLine(raw, final)
 		if !ok || line == "" {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(line), "completed") {
+			continue
+		}
+		if signal, ok := parseSubagentTerminalToolSignalLine(line); ok {
+			if idx, exists := toolLineIndex[signal.Key]; exists {
+				if signal.Status == "failed" {
+					lines[idx] = signal.Display
+				}
+				continue
+			}
+			toolLineIndex[signal.Key] = len(lines)
+			lines = append(lines, signal.Display)
 			continue
 		}
 		key := normalizeSubagentTerminalPreviewLineKey(line)
@@ -44,6 +59,76 @@ func subagentTerminalSignalLines(text string, final bool) []string {
 		lines = append(lines, line)
 	}
 	return lines
+}
+
+type subagentTerminalToolSignalLine struct {
+	Key     string
+	Display string
+	Status  string
+}
+
+func parseSubagentTerminalToolSignalLine(line string) (subagentTerminalToolSignalLine, bool) {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return subagentTerminalToolSignalLine{}, false
+	}
+	fields := strings.Fields(line)
+	if len(fields) == 0 {
+		return subagentTerminalToolSignalLine{}, false
+	}
+	rawName := fields[0]
+	displayName := toolSignalDisplayVerb(rawName)
+	if displayName == "" {
+		return subagentTerminalToolSignalLine{}, false
+	}
+	detail := strings.TrimSpace(strings.TrimPrefix(line, rawName))
+	status := ""
+	for _, candidate := range []string{"completed", "failed"} {
+		if strings.EqualFold(detail, candidate) {
+			detail = ""
+			status = candidate
+			break
+		}
+		suffix := " " + candidate
+		if len(detail) > len(suffix) && strings.HasSuffix(strings.ToLower(detail), suffix) {
+			detail = strings.TrimSpace(detail[:len(detail)-len(suffix)])
+			status = candidate
+			break
+		}
+	}
+	detail = compactSubagentTerminalToolSignalDetail(rawName, detail)
+	display := displayName
+	if detail != "" {
+		display += " " + detail
+	}
+	if status == "failed" {
+		display += " failed"
+	}
+	key := strings.ToUpper(strings.TrimSpace(rawName)) + "\x00" + normalizeSubagentTerminalPreviewLineKey(detail)
+	if key == "\x00" {
+		key = strings.ToUpper(strings.TrimSpace(rawName))
+	}
+	return subagentTerminalToolSignalLine{
+		Key:     key,
+		Display: display,
+		Status:  status,
+	}, true
+}
+
+func compactSubagentTerminalToolSignalDetail(name string, detail string) string {
+	detail = strings.TrimSpace(detail)
+	if detail == "" {
+		return ""
+	}
+	switch strings.ToUpper(strings.TrimSpace(name)) {
+	case "READ", "WRITE", "PATCH", "LIST", "GLOB", "SEARCH", "RG", "FIND":
+		if pathPart, rest, ok, _ := splitLeadingPathHeaderParts(detail); ok && isLikelyDisplayPath(pathPart) {
+			if compact := compactPathDisplay(pathPart); compact != "" {
+				return compact + rest
+			}
+		}
+	}
+	return detail
 }
 
 func cleanSubagentTerminalPreviewLine(raw string, final bool) (string, bool) {

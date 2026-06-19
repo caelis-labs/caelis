@@ -349,6 +349,12 @@ func (m *Model) applyTranscriptLifecycle(event TranscriptEvent) (tea.Model, tea.
 			block.ClearActiveBuffers()
 		} else {
 			block.SetStatus(event.State, "", "", event.OccurredAt)
+			if strings.EqualFold(strings.TrimSpace(event.State), "completed") {
+				m.captureLastRunDuration(event.OccurredAt)
+				if m.appendUserTurnDividerIfNeeded(false) {
+					m.showTurnDivider = false
+				}
+			}
 		}
 		m.markViewportBlockDirty(block.BlockID())
 		return m, m.requestStreamViewportSync()

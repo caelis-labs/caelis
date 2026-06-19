@@ -628,7 +628,6 @@ type explorationToolDetailMode int
 
 const (
 	explorationToolDetailSettled explorationToolDetailMode = iota
-	explorationToolDetailLiveRow
 	explorationToolDetailLiveSummary
 )
 
@@ -651,9 +650,7 @@ func explorationToolDetailForDisplay(ev SubagentEvent, workspace string, mode ex
 		item = strings.ToUpper(strings.TrimSpace(ev.Name))
 	}
 	item = normalizeExplorationFailedDetail(item)
-	if mode != explorationToolDetailLiveRow {
-		item = compactExplorationToolDetailWithWorkspace(ev, item, workspace)
-	}
+	item = compactExplorationToolDetailWithWorkspace(ev, item, workspace)
 	if ev.Err && item != "" && !fromOutput && !hasExplorationFailedStatus(item) {
 		item = strings.TrimSpace(item + " failed")
 	}
@@ -926,6 +923,20 @@ func explorationToolVerb(name string) string {
 		return "Glob"
 	case "RG", "SEARCH", "FIND":
 		return "Search"
+	default:
+		return ""
+	}
+}
+
+func toolSignalDisplayVerb(name string) string {
+	if verb := explorationToolVerb(name); verb != "" {
+		return verb
+	}
+	switch strings.ToUpper(strings.TrimSpace(name)) {
+	case "WRITE":
+		return "Write"
+	case "PATCH":
+		return "Patch"
 	default:
 		return ""
 	}
