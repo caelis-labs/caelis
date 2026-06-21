@@ -179,6 +179,7 @@ func (s *Store) sessionIndexEntry(sess session.Session, documentPath string) per
 			SessionRef: sess.SessionRef,
 			CWD:        sess.CWD,
 			Title:      sess.Title,
+			Metadata:   session.CloneState(sess.Metadata),
 			UpdatedAt:  sess.UpdatedAt,
 		},
 		Path: relPath,

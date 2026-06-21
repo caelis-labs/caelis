@@ -2,16 +2,12 @@ package gatewayapp
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/impl/agent/local/chat"
-	"github.com/OnslaughtSnail/caelis/ports/agent"
 	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
@@ -31,9 +27,9 @@ const (
 )
 
 type guardianApprovalReviewer struct {
-	sessions session.Service
-	factory  agent.AgentFactory
-	timeout  time.Duration
+	sessions     session.Service
+	systemAgents systemManagedAgentRunner
+	timeout      time.Duration
 
 	mu               sync.Mutex
 	sessionsByParent map[string]*guardianReviewSession
@@ -42,19 +38,6 @@ type guardianApprovalReviewer struct {
 type guardianBindingApprovalReviewer struct {
 	base    gateway.ApprovalReviewer
 	resolve func(context.Context, session.SessionRef) (model.LLM, error)
-}
-
-type guardianReviewSession struct {
-	mu       sync.Mutex
-	reuseKey string
-	events   []*session.Event
-	cursor   guardianTranscriptCursor
-	version  uint64
-}
-
-type guardianTranscriptCursor struct {
-	EventCount  int
-	LastEventID string
 }
 
 type guardianPromptMode struct {
@@ -94,7 +77,7 @@ func newModelApprovalReviewer(sessions ...session.Service) gateway.ApprovalRevie
 func newGuardianApprovalReviewer(service session.Service) gateway.ApprovalReviewer {
 	return &guardianApprovalReviewer{
 		sessions:         service,
-		factory:          chat.Factory{},
+		systemAgents:     newSystemManagedAgentRuntime(nil),
 		timeout:          defaultApprovalReviewTimeout,
 		sessionsByParent: map[string]*guardianReviewSession{},
 	}
@@ -130,7 +113,7 @@ func (r *guardianApprovalReviewer) ReviewApproval(ctx context.Context, req gatew
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	_, _, assistantEvent, parsed, err := r.runGuardianReview(ctx, req)
+	_, _, assistantEvent, parsed, trace, err := r.runGuardianReview(ctx, req)
 	if err != nil {
 		return gateway.ApprovalReviewResult{}, err
 	}
@@ -148,6 +131,7 @@ func (r *guardianApprovalReviewer) ReviewApproval(ctx context.Context, req gatew
 		DecisionSource: "auto-review",
 		Usage:          gateway.UsageSnapshotFromSessionEvent(assistantEvent),
 		Invocation:     approvalInvocationFromEvent(assistantEvent),
+		Trace:          trace,
 	}, nil
 }
 
@@ -165,29 +149,33 @@ func approvalInvocationFromEvent(event *session.Event) *session.EventInvocation 
 func (r *guardianApprovalReviewer) runGuardianReview(
 	ctx context.Context,
 	req gateway.ApprovalReviewRequest,
-) (guardianPromptItems, *session.Event, *session.Event, guardianReviewModelOutput, error) {
+) (guardianPromptItems, *session.Event, *session.Event, guardianReviewModelOutput, *gateway.ApprovalReviewTrace, error) {
 	activeSession, err := r.sessions.Session(ctx, req.SessionRef)
 	if err != nil {
-		return guardianPromptItems{}, nil, nil, guardianReviewModelOutput{}, err
+		return guardianPromptItems{}, nil, nil, guardianReviewModelOutput{}, nil, err
 	}
-	reviewSession := r.reviewSessionFor(req, activeSession)
+	reviewSession, err := r.reviewSessionFor(ctx, req, activeSession)
+	if err != nil {
+		return guardianPromptItems{}, nil, nil, guardianReviewModelOutput{}, nil, err
+	}
 	trunkEvents, promptMode, baseVersion := reviewSession.snapshot()
 	parentEvents, err := r.sessions.Events(ctx, session.EventsRequest{SessionRef: req.SessionRef})
 	if err != nil {
-		return guardianPromptItems{}, nil, nil, guardianReviewModelOutput{}, err
+		return guardianPromptItems{}, nil, nil, guardianReviewModelOutput{}, nil, err
 	}
 	promptItems, err := buildGuardianPromptItems(parentEvents, promptMode, req)
 	if err != nil {
-		return guardianPromptItems{}, nil, nil, guardianReviewModelOutput{}, err
+		return guardianPromptItems{}, nil, nil, guardianReviewModelOutput{}, nil, err
 	}
 	promptEvent := guardianUserEvent(activeSession, promptItems.Text)
+	annotateGuardianReviewEvent(promptEvent, req.ReviewID)
 	events := append(session.CloneEvents(trunkEvents), promptEvent)
 	var lastAssistantEvent *session.Event
 	var lastParseErr error
 	for attempt := 0; attempt < guardianAssessmentMaxAttempts; attempt++ {
-		assistantEvent, text, err := r.runGuardianAgent(ctx, req.Model, activeSession, events, guardianOutputSpec())
+		assistantEvent, text, err := r.runGuardianAgent(ctx, req.Model, reviewSession.session, events, guardianOutputSpec())
 		if err != nil {
-			return promptItems, promptEvent, assistantEvent, guardianReviewModelOutput{}, err
+			return promptItems, promptEvent, assistantEvent, guardianReviewModelOutput{}, nil, err
 		}
 		lastAssistantEvent = assistantEvent
 		parsed, err := parseGuardianAssessment(text)
@@ -197,111 +185,47 @@ func (r *guardianApprovalReviewer) runGuardianReview(
 		}
 		// Commit only validated assessments; malformed attempts must not poison
 		// the reusable reviewer prefix for later approval requests.
-		reviewSession.commit(baseVersion, promptItems.TranscriptCursor, promptEvent, assistantEvent)
-		return promptItems, promptEvent, assistantEvent, parsed, nil
+		annotateGuardianReviewEvent(assistantEvent, req.ReviewID)
+		trace, committed, err := reviewSession.commit(ctx, r.sessions, baseVersion, promptItems.TranscriptCursor, promptEvent, assistantEvent)
+		if err != nil {
+			return promptItems, promptEvent, assistantEvent, guardianReviewModelOutput{}, nil, err
+		}
+		if !committed {
+			// Concurrent approval reviews share one reusable Guardian prefix. A
+			// version loser keeps its decision but has no durable trace because
+			// its prompt/assessment were intentionally not appended.
+			trace = nil
+		}
+		return promptItems, promptEvent, assistantEvent, parsed, trace, nil
 	}
-	return promptItems, promptEvent, lastAssistantEvent, guardianReviewModelOutput{}, fmt.Errorf("approval reviewer failed to return a valid JSON assessment after %d attempts: %w", guardianAssessmentMaxAttempts, lastParseErr)
-}
-
-func (r *guardianApprovalReviewer) reviewSessionFor(req gateway.ApprovalReviewRequest, session session.Session) *guardianReviewSession {
-	key := strings.TrimSpace(req.SessionRef.SessionID)
-	if key == "" {
-		key = strings.TrimSpace(session.SessionID)
-	}
-	if key == "" {
-		key = "default"
-	}
-	reuseKey := guardianReuseKey(req.Model, guardianPolicyPrompt())
-
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	item := r.sessionsByParent[key]
-	if item == nil || item.reuseKey != reuseKey {
-		item = &guardianReviewSession{reuseKey: reuseKey}
-		r.sessionsByParent[key] = item
-	}
-	return item
+	return promptItems, promptEvent, lastAssistantEvent, guardianReviewModelOutput{}, nil, fmt.Errorf("approval reviewer failed to return a valid JSON assessment after %d attempts: %w", guardianAssessmentMaxAttempts, lastParseErr)
 }
 
 func (r *guardianApprovalReviewer) runGuardianAgent(
 	ctx context.Context,
 	model model.LLM,
-	parentSession session.Session,
+	guardianSession session.Session,
 	events []*session.Event,
 	output *model.OutputSpec,
 ) (*session.Event, string, error) {
-	metadata := chat.Metadata(guardianPolicyPrompt())
-	if metadata == nil {
-		metadata = map[string]any{}
+	runner := r.systemAgents
+	if runner == nil {
+		runner = newSystemManagedAgentRuntime(nil)
 	}
-	metadata["reasoning_effort"] = "none"
-	guardianAgent, err := r.factory.NewAgent(ctx, agent.AgentSpec{
-		Name:  "guardian",
-		Model: model,
-		Tools: nil,
-		Request: agent.ModelRequestOptions{
-			Stream: boolPtr(false),
-			Output: output,
-		},
-		Metadata: metadata,
+	result, err := runner.Run(ctx, systemManagedAgentRunRequest{
+		AgentID:       guardianProfileID,
+		Model:         model,
+		ParentSession: guardianSession,
+		Events:        events,
+		Output:        output,
 	})
 	if err != nil {
-		return nil, "", err
+		return result.AssistantEvent, "", err
 	}
-	reviewCtx := agent.NewContext(agent.ContextSpec{
-		Context: ctx,
-		Session: guardianSessionForParent(parentSession),
-		Events:  events,
-	})
-	var assistantEvent *session.Event
-	for event, runErr := range guardianAgent.Run(reviewCtx) {
-		if runErr != nil {
-			return assistantEvent, "", runErr
-		}
-		if event == nil {
-			continue
-		}
-		if session.EventTypeOf(event) == session.EventTypeAssistant {
-			assistantEvent = session.CloneEvent(event)
-		}
+	if result.AssistantEvent == nil || strings.TrimSpace(result.Text) == "" {
+		return result.AssistantEvent, "", fmt.Errorf("approval reviewer returned no final assessment")
 	}
-	if assistantEvent == nil || strings.TrimSpace(session.EventText(assistantEvent)) == "" {
-		return assistantEvent, "", fmt.Errorf("approval reviewer returned no final assessment")
-	}
-	return assistantEvent, session.EventText(assistantEvent), nil
-}
-
-func (s *guardianReviewSession) snapshot() ([]*session.Event, guardianPromptMode, uint64) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	mode := guardianPromptMode{}
-	if len(s.events) > 0 && s.cursor.EventCount > 0 {
-		mode = guardianPromptMode{Delta: true, Cursor: s.cursor}
-	}
-	return session.CloneEvents(s.events), mode, s.version
-}
-
-func (s *guardianReviewSession) commit(version uint64, cursor guardianTranscriptCursor, promptEvent *session.Event, assistantEvent *session.Event) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.version != version {
-		return false
-	}
-	s.events = append(s.events, session.CloneEvent(promptEvent), session.CloneEvent(assistantEvent))
-	s.cursor = cursor
-	s.version++
-	return true
-}
-
-func guardianSessionForParent(parent session.Session) session.Session {
-	out := session.CloneSession(parent)
-	out.SessionID = firstNonEmpty(strings.TrimSpace(parent.SessionID)+"-approval-review", "approval-review")
-	out.Metadata = map[string]any{
-		"guardian": true,
-		"source":   "auto-review",
-	}
-	out.Participants = nil
-	return out
+	return result.AssistantEvent, result.Text, nil
 }
 
 func buildGuardianPromptItems(
@@ -920,16 +844,6 @@ func scanGuardianJSONObject(text string, start int) (string, bool) {
 	return "", false
 }
 
-func guardianReuseKey(model model.LLM, policy string) string {
-	hash := sha256.New()
-	if model != nil {
-		hash.Write([]byte(model.Name()))
-	}
-	hash.Write([]byte{0})
-	hash.Write([]byte(policy))
-	return hex.EncodeToString(hash.Sum(nil))
-}
-
 func guardianUserEvent(_ session.Session, text string) *session.Event {
 	message := model.NewTextMessage(model.RoleUser, strings.TrimSpace(text))
 	return &session.Event{
@@ -942,6 +856,28 @@ func guardianUserEvent(_ session.Session, text string) *session.Event {
 		},
 		Message: &message,
 		Text:    message.TextContent(),
+	}
+}
+
+func annotateGuardianReviewEvent(event *session.Event, reviewID string) {
+	if event == nil {
+		return
+	}
+	if event.Visibility == "" {
+		event.Visibility = session.VisibilityCanonical
+	}
+	if event.Scope == nil {
+		event.Scope = &session.EventScope{}
+	}
+	event.Scope.TurnID = firstNonEmpty(strings.TrimSpace(reviewID), strings.TrimSpace(event.Scope.TurnID), "guardian-review")
+	event.Scope.Source = firstNonEmpty(strings.TrimSpace(event.Scope.Source), "auto-review")
+	if event.Meta == nil {
+		event.Meta = map[string]any{}
+	}
+	event.Meta["system_managed_agent"] = guardianProfileID
+	event.Meta["hidden_from_transcript"] = true
+	if strings.TrimSpace(reviewID) != "" {
+		event.Meta["review_id"] = strings.TrimSpace(reviewID)
 	}
 }
 
@@ -989,4 +925,3 @@ func boolPtr(value bool) *bool {
 }
 
 var _ gateway.ApprovalReviewer = (*guardianApprovalReviewer)(nil)
-var _ agent.AgentFactory = chat.Factory{}

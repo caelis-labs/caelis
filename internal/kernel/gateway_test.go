@@ -156,6 +156,42 @@ func TestListSessionsDelegatesToSDKSessions(t *testing.T) {
 	}
 }
 
+func TestListSessionsHidesSystemManagedSessions(t *testing.T) {
+	t.Parallel()
+
+	svc := &recordingSessionService{listSessionsResult: session.SessionList{
+		Sessions: []session.SessionSummary{
+			{SessionRef: session.SessionRef{AppName: "caelis", UserID: "u", SessionID: "visible", WorkspaceKey: "ws"}, Title: "Visible task"},
+			{
+				SessionRef: session.SessionRef{AppName: "caelis", UserID: "u", SessionID: "guardian", WorkspaceKey: "ws"},
+				Title:      "Guardian approval review",
+				Metadata:   map[string]any{"system_managed_agent": "guardian"},
+			},
+		},
+	}}
+	gw, err := New(Config{
+		Sessions: svc,
+		Runtime:  mockRuntime{},
+		Resolver: staticResolver{},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	got, err := gw.ListSessions(context.Background(), ListSessionsRequest{
+		AppName:      "caelis",
+		UserID:       "u",
+		WorkspaceKey: "ws",
+		Limit:        10,
+	})
+	if err != nil {
+		t.Fatalf("ListSessions() error = %v", err)
+	}
+	if len(got.Sessions) != 1 || got.Sessions[0].SessionID != "visible" {
+		t.Fatalf("ListSessions() = %+v, want only visible session", got)
+	}
+}
+
 func TestResumeSessionUsesMostRecentExcludingCurrentBinding(t *testing.T) {
 	t.Parallel()
 

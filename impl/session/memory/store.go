@@ -131,6 +131,7 @@ func (s *Store) List(
 			SessionRef: record.session.SessionRef,
 			CWD:        record.session.CWD,
 			Title:      record.session.Title,
+			Metadata:   session.CloneState(record.session.Metadata),
 			UpdatedAt:  record.session.UpdatedAt,
 		})
 	}
@@ -183,7 +184,7 @@ func (s *Store) AppendEvent(
 	record.events = append(record.events, normalized)
 	record.session.UpdatedAt = normalized.Time
 	if record.session.Title == "" {
-		if text := session.EventText(normalized); text != "" {
+		if text := generatedTitleText(normalized); text != "" {
 			record.session.Title = truncateTitle(text)
 		}
 	}
@@ -542,4 +543,29 @@ func truncateTitle(text string) string {
 		return text[:80]
 	}
 	return text
+}
+
+func generatedTitleText(event *session.Event) string {
+	if event == nil || titleHiddenEvent(event) {
+		return ""
+	}
+	return session.EventText(event)
+}
+
+func titleHiddenEvent(event *session.Event) bool {
+	if event == nil {
+		return false
+	}
+	return hiddenTranscriptMeta(event.Meta["hidden_from_transcript"]) || event.Meta["source"] == "plugin_hook"
+}
+
+func hiddenTranscriptMeta(value any) bool {
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	case string:
+		return strings.EqualFold(strings.TrimSpace(typed), "true")
+	default:
+		return false
+	}
 }

@@ -119,6 +119,7 @@ func (g *Gateway) resolveApprovalRequest(
 	terminal.Risk = strings.TrimSpace(result.Risk)
 	terminal.Authorization = strings.TrimSpace(result.Authorization)
 	terminal.DecisionSource = strings.TrimSpace(result.DecisionSource)
+	terminal.ReviewTrace = approval.CloneReviewTrace(result.Trace)
 	handle.publishApprovalReviewPayloadWithUsage(req, terminal, result.Usage, result.Invocation)
 	_ = g.persistApprovalReviewUsage(context.WithoutCancel(turnCtx), req, result.Usage, terminal.DecisionSource, result.Invocation)
 

@@ -99,6 +99,94 @@ func TestApprovalReviewerUsesRequestModelAndSessionContext(t *testing.T) {
 	}
 }
 
+func TestApprovalReviewerUsesSystemManagedGuardianRunner(t *testing.T) {
+	ctx := context.Background()
+	service, activeSession := newApprovalReviewerTestSession(t, ctx)
+	appendApprovalReviewerTextEvent(t, ctx, service, activeSession, session.EventTypeUser, model.RoleUser, "Please inspect the workspace.")
+	testModel := &approvalReviewerFakeModel{}
+	runner := &approvalReviewerSystemAgentRunner{
+		response: `{"outcome":"allow","risk_level":"low","user_authorization":"medium","rationale":"read-only inspection"}`,
+	}
+	reviewer := newModelApprovalReviewer(service).(*guardianApprovalReviewer)
+	reviewer.systemAgents = runner
+
+	result, err := reviewer.ReviewApproval(ctx, approvalReviewerTestRequest(activeSession, testModel, "inspect workspace", map[string]any{
+		"cmd": "rg TODO",
+	}))
+	if err != nil {
+		t.Fatalf("ReviewApproval() error = %v", err)
+	}
+	if !result.Approved {
+		t.Fatalf("Approved = false, want true: %#v", result)
+	}
+	if runner.calls != 1 {
+		t.Fatalf("system agent runner calls = %d, want 1", runner.calls)
+	}
+	if runner.req.AgentID != guardianProfileID {
+		t.Fatalf("system agent id = %q, want %q", runner.req.AgentID, guardianProfileID)
+	}
+	if runner.req.Model != testModel {
+		t.Fatalf("system agent model = %#v, want request model", runner.req.Model)
+	}
+	if !strings.HasPrefix(runner.req.ParentSession.SessionID, activeSession.SessionID+"-approval-review-") {
+		t.Fatalf("system agent session = %q, want guardian review session for %q", runner.req.ParentSession.SessionID, activeSession.SessionID)
+	}
+	if runner.req.Output == nil || runner.req.Output.MaxOutputTokens != guardianMaxOutputTokens {
+		t.Fatalf("system agent output = %#v, want guardian schema output", runner.req.Output)
+	}
+	if len(runner.req.Tools) != 0 {
+		t.Fatalf("system agent tools = %d, want no guardian tools", len(runner.req.Tools))
+	}
+	if len(runner.req.Events) != 1 || !strings.Contains(session.EventText(runner.req.Events[0]), "Please inspect the workspace.") {
+		t.Fatalf("system agent events = %#v, want guardian prompt event with transcript", runner.req.Events)
+	}
+}
+
+func TestSystemManagedAgentSessionKeepsExistingGuardianSession(t *testing.T) {
+	guardianSession := session.Session{
+		SessionRef: session.SessionRef{
+			AppName:   "caelis",
+			UserID:    "user",
+			SessionID: "parent-approval-review-abcdef123456",
+		},
+		Metadata: map[string]any{"system_managed_agent": guardianProfileID},
+		Participants: []session.ParticipantBinding{{
+			ID:   "visible-participant",
+			Kind: session.ParticipantKindSubagent,
+		}},
+	}
+
+	got := systemManagedAgentSessionForParent(guardianSession, guardianSystemManagedAgentSpec(), nil)
+	if got.SessionID != guardianSession.SessionID {
+		t.Fatalf("system-managed session id = %q, want existing guardian session %q", got.SessionID, guardianSession.SessionID)
+	}
+	if len(got.Participants) != 0 {
+		t.Fatalf("Participants = %#v, want stripped private system-agent session", got.Participants)
+	}
+}
+
+func TestSystemManagedAgentSessionUsesGuardianDurableIDFromMetadata(t *testing.T) {
+	parent := session.Session{
+		SessionRef: session.SessionRef{
+			AppName:   "caelis",
+			UserID:    "user",
+			SessionID: "parent-session",
+		},
+	}
+	reuseKey := strings.Repeat("a", 64)
+
+	got := systemManagedAgentSessionForParent(parent, guardianSystemManagedAgentSpec(), map[string]any{
+		guardianStateReuseKey: reuseKey,
+	})
+	want := guardianReviewSessionID(parent, reuseKey)
+	if got.SessionID != want {
+		t.Fatalf("system-managed session id = %q, want durable guardian id %q", got.SessionID, want)
+	}
+	if !strings.HasSuffix(got.SessionID, reuseKey) {
+		t.Fatalf("system-managed session id = %q, want full reuse key suffix %q", got.SessionID, reuseKey)
+	}
+}
+
 func TestGuardianPolicyPromptUsesGeneralRecoveryBoundary(t *testing.T) {
 	t.Parallel()
 
@@ -168,6 +256,231 @@ func TestApprovalReviewerReusesStablePrefixAndSendsTranscriptDelta(t *testing.T)
 	}
 	if strings.Contains(prompt, "Please commit and push the prepared fix.") {
 		t.Fatalf("second prompt repeated old transcript instead of delta:\n%s", prompt)
+	}
+}
+
+func TestApprovalReviewerReloadsDurableGuardianContext(t *testing.T) {
+	ctx := context.Background()
+	service, activeSession := newApprovalReviewerTestSession(t, ctx)
+	appendApprovalReviewerTextEvent(t, ctx, service, activeSession, session.EventTypeUser, model.RoleUser, "Please commit the prepared fix.")
+	testModel := &approvalReviewerFakeModel{responses: []string{
+		`{"outcome":"allow","risk_level":"medium","user_authorization":"high","rationale":"commit is user requested"}`,
+		`{"outcome":"allow","risk_level":"medium","user_authorization":"high","rationale":"push is user requested"}`,
+	}}
+
+	firstReviewer := newModelApprovalReviewer(service)
+	first, err := firstReviewer.ReviewApproval(ctx, approvalReviewerTestRequest(activeSession, testModel, "git commit -m fix", map[string]any{"cmd": "git commit -m fix"}))
+	if err != nil {
+		t.Fatalf("first ReviewApproval() error = %v", err)
+	}
+	if first.Trace == nil || first.Trace.SessionID == "" || first.Trace.PromptEventID == "" || first.Trace.AssistantEventID == "" {
+		t.Fatalf("first trace = %#v, want durable guardian trace", first.Trace)
+	}
+	guardianRef := activeSession.SessionRef
+	guardianRef.SessionID = first.Trace.SessionID
+	guardianEvents, err := service.Events(ctx, session.EventsRequest{SessionRef: guardianRef})
+	if err != nil {
+		t.Fatalf("guardian Events() error = %v", err)
+	}
+	if got, want := len(guardianEvents), 2; got != want {
+		t.Fatalf("guardian event count = %d, want %d", got, want)
+	}
+	if guardianEvents[0].ID != first.Trace.PromptEventID || guardianEvents[1].ID != first.Trace.AssistantEventID {
+		t.Fatalf("guardian trace ids = (%q,%q), events = (%q,%q)", first.Trace.PromptEventID, first.Trace.AssistantEventID, guardianEvents[0].ID, guardianEvents[1].ID)
+	}
+
+	appendApprovalReviewerTextEvent(t, ctx, service, activeSession, session.EventTypeAssistant, model.RoleAssistant, "Focused tests passed; next I will push.")
+	secondReviewer := newModelApprovalReviewer(service)
+	second, err := secondReviewer.ReviewApproval(ctx, approvalReviewerTestRequest(activeSession, testModel, "git push origin dev", map[string]any{"cmd": "git push origin dev"}))
+	if err != nil {
+		t.Fatalf("second ReviewApproval() error = %v", err)
+	}
+	if second.Trace == nil || second.Trace.SessionID != first.Trace.SessionID {
+		t.Fatalf("second trace = %#v, want same durable guardian session %q", second.Trace, first.Trace.SessionID)
+	}
+
+	requests := testModel.Requests()
+	if got, want := len(requests), 2; got != want {
+		t.Fatalf("model calls = %d, want %d", got, want)
+	}
+	if got, want := len(requests[1].Messages), len(requests[0].Messages)+2; got != want {
+		t.Fatalf("reloaded second len(Messages) = %d, want first prompt + first answer + second prompt", got)
+	}
+	if !reflect.DeepEqual(requests[1].Messages[0], requests[0].Messages[0]) {
+		t.Fatal("reloaded guardian context did not preserve first prompt as stable prefix")
+	}
+	if got, want := requests[1].Messages[1].TextContent(), testModel.responses[0]; got != want {
+		t.Fatalf("reloaded guardian prefix assistant text = %q, want %q", got, want)
+	}
+	prompt := requests[1].Messages[len(requests[1].Messages)-1].TextContent()
+	if !strings.Contains(prompt, ">>> TRANSCRIPT DELTA START") || !strings.Contains(prompt, "Focused tests passed") {
+		t.Fatalf("reloaded guardian prompt missing transcript delta:\n%s", prompt)
+	}
+	if strings.Contains(prompt, "Please commit the prepared fix.") {
+		t.Fatalf("reloaded guardian prompt repeated old transcript instead of delta:\n%s", prompt)
+	}
+
+	guardianEvents, err = service.Events(ctx, session.EventsRequest{SessionRef: guardianRef})
+	if err != nil {
+		t.Fatalf("guardian Events(after second) error = %v", err)
+	}
+	if got, want := len(guardianEvents), 4; got != want {
+		t.Fatalf("guardian event count after second = %d, want %d", got, want)
+	}
+	state, err := service.SnapshotState(ctx, guardianRef)
+	if err != nil {
+		t.Fatalf("guardian SnapshotState() error = %v", err)
+	}
+	if got := guardianStateInt(state, guardianStateCursorEventCount); got == 0 {
+		t.Fatalf("guardian cursor event count = %d, want persisted cursor", got)
+	}
+}
+
+func TestApprovalReviewerRotatesGuardianSessionWhenReuseKeyChanges(t *testing.T) {
+	ctx := context.Background()
+	service, activeSession := newApprovalReviewerTestSession(t, ctx)
+	appendApprovalReviewerTextEvent(t, ctx, service, activeSession, session.EventTypeUser, model.RoleUser, "Please inspect and report status.")
+	firstModel := &approvalReviewerFakeModel{
+		name:      "guardian-model-a",
+		responses: []string{`{"outcome":"allow","risk_level":"low","user_authorization":"medium","rationale":"inspection is low risk"}`},
+	}
+	secondModel := &approvalReviewerFakeModel{
+		name:      "guardian-model-b",
+		responses: []string{`{"outcome":"allow","risk_level":"low","user_authorization":"medium","rationale":"inspection is low risk"}`},
+	}
+	reviewer := newModelApprovalReviewer(service)
+
+	first, err := reviewer.ReviewApproval(ctx, approvalReviewerTestRequest(activeSession, firstModel, "rg TODO", map[string]any{"cmd": "rg TODO"}))
+	if err != nil {
+		t.Fatalf("first ReviewApproval() error = %v", err)
+	}
+	second, err := reviewer.ReviewApproval(ctx, approvalReviewerTestRequest(activeSession, secondModel, "rg FIXME", map[string]any{"cmd": "rg FIXME"}))
+	if err != nil {
+		t.Fatalf("second ReviewApproval() error = %v", err)
+	}
+	if first.Trace == nil || second.Trace == nil {
+		t.Fatalf("traces = (%#v,%#v), want durable guardian traces", first.Trace, second.Trace)
+	}
+	if first.Trace.SessionID == second.Trace.SessionID {
+		t.Fatalf("guardian session id did not rotate across reuse keys: %q", first.Trace.SessionID)
+	}
+	if want := guardianReuseKey(firstModel, guardianPolicyPrompt()); !strings.HasSuffix(first.Trace.SessionID, want) {
+		t.Fatalf("first guardian session id = %q, want full reuse key suffix %q", first.Trace.SessionID, want)
+	}
+	if want := guardianReuseKey(secondModel, guardianPolicyPrompt()); !strings.HasSuffix(second.Trace.SessionID, want) {
+		t.Fatalf("second guardian session id = %q, want full reuse key suffix %q", second.Trace.SessionID, want)
+	}
+	requests := secondModel.Requests()
+	if got, want := len(requests), 1; got != want {
+		t.Fatalf("second model calls = %d, want %d", got, want)
+	}
+	if got, want := len(requests[0].Messages), 1; got != want {
+		t.Fatalf("rotated guardian len(Messages) = %d, want clean first prompt", got)
+	}
+}
+
+func TestApprovalReviewerRecoversGuardianCursorWhenStateUpdateFails(t *testing.T) {
+	ctx := context.Background()
+	baseService, activeSession := newApprovalReviewerTestSession(t, ctx)
+	service := &approvalReviewerUpdateFailSessionService{
+		Service:  baseService,
+		failures: 1,
+	}
+	appendApprovalReviewerTextEvent(t, ctx, baseService, activeSession, session.EventTypeUser, model.RoleUser, "Please commit the prepared fix.")
+	testModel := &approvalReviewerFakeModel{responses: []string{
+		`{"outcome":"allow","risk_level":"medium","user_authorization":"high","rationale":"commit is user requested"}`,
+		`{"outcome":"allow","risk_level":"medium","user_authorization":"high","rationale":"push is user requested"}`,
+	}}
+
+	firstReviewer := newModelApprovalReviewer(service)
+	_, err := firstReviewer.ReviewApproval(ctx, approvalReviewerTestRequest(activeSession, testModel, "git commit -m fix", map[string]any{"cmd": "git commit -m fix"}))
+	if err == nil || !strings.Contains(err.Error(), "forced guardian state update failure") {
+		t.Fatalf("first ReviewApproval() error = %v, want forced state update failure", err)
+	}
+	guardianRef := activeSession.SessionRef
+	guardianRef.SessionID = guardianReviewSessionID(activeSession, guardianReuseKey(testModel, guardianPolicyPrompt()))
+	guardianEvents, err := baseService.Events(ctx, session.EventsRequest{SessionRef: guardianRef})
+	if err != nil {
+		t.Fatalf("guardian Events(after failed state update) error = %v", err)
+	}
+	if got, want := len(guardianEvents), 2; got != want {
+		t.Fatalf("guardian event count after failed state update = %d, want %d", got, want)
+	}
+	state, err := baseService.SnapshotState(ctx, guardianRef)
+	if err != nil {
+		t.Fatalf("guardian SnapshotState(after failed state update) error = %v", err)
+	}
+	if got := guardianStateInt(state, guardianStateCursorEventCount); got != 0 {
+		t.Fatalf("guardian cursor state after forced failure = %d, want missing state", got)
+	}
+
+	appendApprovalReviewerTextEvent(t, ctx, baseService, activeSession, session.EventTypeAssistant, model.RoleAssistant, "Focused tests passed; next I will push.")
+	secondReviewer := newModelApprovalReviewer(service)
+	second, err := secondReviewer.ReviewApproval(ctx, approvalReviewerTestRequest(activeSession, testModel, "git push origin dev", map[string]any{"cmd": "git push origin dev"}))
+	if err != nil {
+		t.Fatalf("second ReviewApproval() error = %v", err)
+	}
+	if second.Trace == nil || second.Trace.SessionID != guardianRef.SessionID {
+		t.Fatalf("second trace = %#v, want recovered guardian session %q", second.Trace, guardianRef.SessionID)
+	}
+
+	requests := testModel.Requests()
+	if got, want := len(requests), 2; got != want {
+		t.Fatalf("model calls = %d, want %d", got, want)
+	}
+	if got, want := len(requests[1].Messages), len(requests[0].Messages)+2; got != want {
+		t.Fatalf("recovered second len(Messages) = %d, want first prompt + first answer + second prompt", got)
+	}
+	prompt := requests[1].Messages[len(requests[1].Messages)-1].TextContent()
+	if !strings.Contains(prompt, ">>> TRANSCRIPT DELTA START") || !strings.Contains(prompt, "Focused tests passed") {
+		t.Fatalf("recovered guardian prompt missing transcript delta:\n%s", prompt)
+	}
+	if strings.Contains(prompt, "Please commit the prepared fix.") {
+		t.Fatalf("recovered guardian prompt repeated old transcript instead of delta:\n%s", prompt)
+	}
+}
+
+func TestApprovalReviewerKeepsGuardianCacheWhenStateUpdateFails(t *testing.T) {
+	ctx := context.Background()
+	baseService, activeSession := newApprovalReviewerTestSession(t, ctx)
+	service := &approvalReviewerUpdateFailSessionService{
+		Service:  baseService,
+		failures: 1,
+	}
+	appendApprovalReviewerTextEvent(t, ctx, baseService, activeSession, session.EventTypeUser, model.RoleUser, "Please commit the prepared fix.")
+	testModel := &approvalReviewerFakeModel{responses: []string{
+		`{"outcome":"allow","risk_level":"medium","user_authorization":"high","rationale":"commit is user requested"}`,
+		`{"outcome":"allow","risk_level":"medium","user_authorization":"high","rationale":"push is user requested"}`,
+	}}
+	reviewer := newModelApprovalReviewer(service)
+
+	_, err := reviewer.ReviewApproval(ctx, approvalReviewerTestRequest(activeSession, testModel, "git commit -m fix", map[string]any{"cmd": "git commit -m fix"}))
+	if err == nil || !strings.Contains(err.Error(), "forced guardian state update failure") {
+		t.Fatalf("first ReviewApproval() error = %v, want forced state update failure", err)
+	}
+
+	appendApprovalReviewerTextEvent(t, ctx, baseService, activeSession, session.EventTypeAssistant, model.RoleAssistant, "Focused tests passed; next I will push.")
+	second, err := reviewer.ReviewApproval(ctx, approvalReviewerTestRequest(activeSession, testModel, "git push origin dev", map[string]any{"cmd": "git push origin dev"}))
+	if err != nil {
+		t.Fatalf("second ReviewApproval() error = %v", err)
+	}
+	if second.Trace == nil {
+		t.Fatalf("second trace = %#v, want durable guardian trace", second.Trace)
+	}
+
+	requests := testModel.Requests()
+	if got, want := len(requests), 2; got != want {
+		t.Fatalf("model calls = %d, want %d", got, want)
+	}
+	if got, want := len(requests[1].Messages), len(requests[0].Messages)+2; got != want {
+		t.Fatalf("same-reviewer recovery len(Messages) = %d, want first prompt + first answer + second prompt", got)
+	}
+	prompt := requests[1].Messages[len(requests[1].Messages)-1].TextContent()
+	if !strings.Contains(prompt, ">>> TRANSCRIPT DELTA START") || !strings.Contains(prompt, "Focused tests passed") {
+		t.Fatalf("same-reviewer recovery prompt missing transcript delta:\n%s", prompt)
+	}
+	if strings.Contains(prompt, "Please commit the prepared fix.") {
+		t.Fatalf("same-reviewer recovery prompt repeated old transcript instead of delta:\n%s", prompt)
 	}
 }
 
@@ -493,13 +806,62 @@ func (e approvalReviewerError) Error() string { return string(e) }
 
 type approvalReviewerFakeModel struct {
 	mu        sync.Mutex
+	name      string
 	responses []string
 	requests  []model.Request
 	release   <-chan struct{}
 	started   chan struct{}
 }
 
-func (m *approvalReviewerFakeModel) Name() string { return "approval-reviewer-fake" }
+type approvalReviewerSystemAgentRunner struct {
+	calls    int
+	req      systemManagedAgentRunRequest
+	response string
+	err      error
+}
+
+func (r *approvalReviewerSystemAgentRunner) Run(_ context.Context, req systemManagedAgentRunRequest) (systemManagedAgentRunResult, error) {
+	r.calls++
+	r.req = req
+	if r.err != nil {
+		return systemManagedAgentRunResult{}, r.err
+	}
+	text := strings.TrimSpace(r.response)
+	if text == "" {
+		text = `{"outcome":"allow"}`
+	}
+	message := model.NewTextMessage(model.RoleAssistant, text)
+	event := &session.Event{
+		Type:    session.EventTypeAssistant,
+		Message: &message,
+		Text:    text,
+	}
+	return systemManagedAgentRunResult{
+		Events:         []*session.Event{event},
+		AssistantEvent: event,
+		Text:           text,
+	}, nil
+}
+
+func (m *approvalReviewerFakeModel) Name() string {
+	if m != nil && strings.TrimSpace(m.name) != "" {
+		return strings.TrimSpace(m.name)
+	}
+	return "approval-reviewer-fake"
+}
+
+type approvalReviewerUpdateFailSessionService struct {
+	session.Service
+	failures int
+}
+
+func (s *approvalReviewerUpdateFailSessionService) UpdateState(ctx context.Context, ref session.SessionRef, update func(map[string]any) (map[string]any, error)) error {
+	if s.failures > 0 {
+		s.failures--
+		return fmt.Errorf("forced guardian state update failure")
+	}
+	return s.Service.UpdateState(ctx, ref, update)
+}
 
 func (m *approvalReviewerFakeModel) Generate(ctx context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
 	index := m.recordRequest(req)

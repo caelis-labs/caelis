@@ -163,9 +163,10 @@ type LoadedSession struct {
 // SessionSummary is one session listing row.
 type SessionSummary struct {
 	SessionRef
-	CWD       string    `json:"cwd,omitempty"`
-	Title     string    `json:"title,omitempty"`
-	UpdatedAt time.Time `json:"updated_at,omitempty"`
+	CWD       string         `json:"cwd,omitempty"`
+	Title     string         `json:"title,omitempty"`
+	Metadata  map[string]any `json:"metadata,omitempty"`
+	UpdatedAt time.Time      `json:"updated_at,omitempty"`
 }
 
 // SessionList is one paged session listing result.
@@ -1268,6 +1269,7 @@ func CloneSessionSummaries(items []SessionSummary) []SessionSummary {
 		out[i].SessionRef = NormalizeSessionRef(out[i].SessionRef)
 		out[i].CWD = strings.TrimSpace(out[i].CWD)
 		out[i].Title = strings.TrimSpace(out[i].Title)
+		out[i].Metadata = CloneState(out[i].Metadata)
 	}
 	return out
 }

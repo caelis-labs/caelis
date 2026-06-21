@@ -73,6 +73,13 @@ type Payload struct {
 	Risk               string         `json:"risk,omitempty"`
 	Authorization      string         `json:"authorization,omitempty"`
 	DecisionSource     string         `json:"decision_source,omitempty"`
+	ReviewTrace        *ReviewTrace   `json:"review_trace,omitempty"`
+}
+
+type ReviewTrace struct {
+	SessionID        string `json:"session_id,omitempty"`
+	PromptEventID    string `json:"prompt_event_id,omitempty"`
+	AssistantEventID string `json:"assistant_event_id,omitempty"`
 }
 
 type UsageSnapshot struct {
@@ -105,6 +112,7 @@ type ReviewResult struct {
 	DecisionSource string
 	Usage          *UsageSnapshot
 	Invocation     *session.EventInvocation
+	Trace          *ReviewTrace
 }
 
 type Reviewer interface {
@@ -201,6 +209,21 @@ func ClonePayload(in *Payload) *Payload {
 	out.RawInput = maps.Clone(in.RawInput)
 	if len(in.Options) > 0 {
 		out.Options = append([]Option(nil), in.Options...)
+	}
+	out.ReviewTrace = CloneReviewTrace(in.ReviewTrace)
+	return &out
+}
+
+func CloneReviewTrace(in *ReviewTrace) *ReviewTrace {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	out.SessionID = strings.TrimSpace(out.SessionID)
+	out.PromptEventID = strings.TrimSpace(out.PromptEventID)
+	out.AssistantEventID = strings.TrimSpace(out.AssistantEventID)
+	if out.SessionID == "" && out.PromptEventID == "" && out.AssistantEventID == "" {
+		return nil
 	}
 	return &out
 }

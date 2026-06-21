@@ -126,5 +126,44 @@ func (g *Gateway) ListSessions(ctx context.Context, req ListSessionsRequest) (se
 	if err != nil {
 		return session.SessionList{}, wrapSessionError(err)
 	}
+	list.Sessions = g.filterListedSessions(ctx, list.Sessions)
 	return list, nil
+}
+
+func (g *Gateway) filterListedSessions(ctx context.Context, summaries []session.SessionSummary) []session.SessionSummary {
+	if len(summaries) == 0 {
+		return nil
+	}
+	out := make([]session.SessionSummary, 0, len(summaries))
+	for _, summary := range summaries {
+		if g.isSystemManagedSessionSummary(ctx, summary) {
+			continue
+		}
+		out = append(out, summary)
+	}
+	return session.CloneSessionSummaries(out)
+}
+
+func (g *Gateway) isSystemManagedSessionSummary(ctx context.Context, summary session.SessionSummary) bool {
+	if metadataString(summary.Metadata, "system_managed_agent") != "" {
+		return true
+	}
+	if !looksLikeLegacySystemManagedSessionSummary(summary) {
+		return false
+	}
+	if g == nil || g.sessions == nil {
+		return false
+	}
+	loaded, err := g.sessions.Session(ctx, summary.SessionRef)
+	if err != nil {
+		return false
+	}
+	return metadataString(loaded.Metadata, "system_managed_agent") != ""
+}
+
+func looksLikeLegacySystemManagedSessionSummary(summary session.SessionSummary) bool {
+	if strings.EqualFold(strings.TrimSpace(summary.Title), "Guardian approval review") {
+		return true
+	}
+	return strings.Contains(strings.TrimSpace(summary.SessionID), "-approval-review")
 }

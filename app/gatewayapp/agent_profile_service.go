@@ -438,14 +438,6 @@ You are a code review subagent. Prioritize correctness bugs, regression risks, b
 }
 
 func guardianVirtualProfile() agentprofile.Profile {
-	return agentprofile.NormalizeProfile(agentprofile.Profile{
-		ID:          guardianProfileID,
-		Name:        "Guardian",
-		Description: "Reviews approval requests for auto-review mode.",
-		Metadata: map[string]any{
-			"source":         "caelis",
-			"built_in":       true,
-			"system_managed": true,
-		},
-	})
+	profile, _ := systemManagedAgentProfile(guardianProfileID)
+	return profile
 }
