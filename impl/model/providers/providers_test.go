@@ -131,6 +131,55 @@ func TestGeminiStream_DoesNotApplyRequestTimeout(t *testing.T) {
 	}
 }
 
+func TestGeminiStream_PreservesDetailedUsageAcrossChunks(t *testing.T) {
+	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.URL.Path, "/v1beta/models/test-model:streamGenerateContent") {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, _ := w.(http.Flusher)
+		_, _ = fmt.Fprint(w, "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"hello\"}]}}],\"usageMetadata\":{\"promptTokenCount\":11,\"cachedContentTokenCount\":7,\"candidatesTokenCount\":1,\"thoughtsTokenCount\":5,\"totalTokenCount\":17}}\n\n")
+		if flusher != nil {
+			flusher.Flush()
+		}
+		_, _ = fmt.Fprint(w, "data: {\"usageMetadata\":{\"promptTokenCount\":11,\"candidatesTokenCount\":2,\"totalTokenCount\":18}}\n\n")
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}))
+	defer server.Close()
+
+	llm := newGemini(Config{
+		Provider:   "gemini",
+		Model:      "test-model",
+		BaseURL:    server.URL,
+		HTTPClient: server.Client(),
+		Timeout:    2 * time.Second,
+	}, "token")
+
+	var usage model.Usage
+	for resp, err := range llm.Generate(context.Background(), &model.Request{
+		Messages: []model.Message{model.NewTextMessage(model.RoleUser, "hi")},
+		Stream:   true,
+	}) {
+		if err != nil {
+			t.Fatalf("expected no stream error, got %v", err)
+		}
+		if resp != nil && resp.Response != nil && resp.TurnComplete {
+			usage = resp.Usage
+		}
+	}
+
+	if usage.PromptTokens != 11 ||
+		usage.CachedInputTokens != 7 ||
+		usage.CompletionTokens != 2 ||
+		usage.ReasoningTokens != 5 ||
+		usage.TotalTokens != 18 {
+		t.Fatalf("usage = %#v, want Gemini cached/thoughts preserved with latest totals", usage)
+	}
+}
+
 func TestGeminiStream_EmitsReasoningChunks(t *testing.T) {
 	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasPrefix(r.URL.Path, "/v1beta/models/test-model:streamGenerateContent") {

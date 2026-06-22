@@ -70,9 +70,33 @@ func usageSnapshotFromPayload(payload map[string]any) *UsageSnapshot {
 	if payload == nil {
 		return nil
 	}
-	promptTokens := firstNonZeroInt(intValue(payload["prompt_tokens"]), intValue(payload["input_tokens"]))
-	completionTokens := firstNonZeroInt(intValue(payload["completion_tokens"]), intValue(payload["output_tokens"]))
-	totalTokens := intValue(payload["total_tokens"])
+	promptTokens := firstNonZeroInt(
+		intValue(payload["prompt_tokens"]),
+		intValue(payload["input_tokens"]),
+		intValue(payload["prompt_token_count"]),
+		intValue(payload["promptTokenCount"]),
+		intValue(nestedAny(payload, "usage_metadata", "prompt_token_count")),
+		intValue(nestedAny(payload, "usageMetadata", "promptTokenCount")),
+	)
+	completionTokens := firstNonZeroInt(
+		intValue(payload["completion_tokens"]),
+		intValue(payload["output_tokens"]),
+		intValue(payload["candidates_token_count"]),
+		intValue(payload["candidatesTokenCount"]),
+		intValue(payload["response_token_count"]),
+		intValue(payload["responseTokenCount"]),
+		intValue(nestedAny(payload, "usage_metadata", "candidates_token_count")),
+		intValue(nestedAny(payload, "usageMetadata", "candidatesTokenCount")),
+		intValue(nestedAny(payload, "usage_metadata", "response_token_count")),
+		intValue(nestedAny(payload, "usageMetadata", "responseTokenCount")),
+	)
+	totalTokens := firstNonZeroInt(
+		intValue(payload["total_tokens"]),
+		intValue(payload["total_token_count"]),
+		intValue(payload["totalTokenCount"]),
+		intValue(nestedAny(payload, "usage_metadata", "total_token_count")),
+		intValue(nestedAny(payload, "usageMetadata", "totalTokenCount")),
+	)
 	if totalTokens == 0 && (promptTokens != 0 || completionTokens != 0) {
 		totalTokens = promptTokens + completionTokens
 	}
@@ -103,8 +127,12 @@ func cachedInputTokensFromPayload(payload map[string]any) int {
 		intValue(payload["cached_tokens"]),
 		intValue(payload["prompt_cache_hit_tokens"]),
 		intValue(payload["cache_read_input_tokens"]),
+		intValue(payload["cached_content_token_count"]),
+		intValue(payload["cachedContentTokenCount"]),
 		intValue(nestedAny(payload, "input_tokens_details", "cached_tokens")),
 		intValue(nestedAny(payload, "prompt_tokens_details", "cached_tokens")),
+		intValue(nestedAny(payload, "usage_metadata", "cached_content_token_count")),
+		intValue(nestedAny(payload, "usageMetadata", "cachedContentTokenCount")),
 	)
 }
 

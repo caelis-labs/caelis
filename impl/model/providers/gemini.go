@@ -145,7 +145,7 @@ func (l *geminiLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 			if out == nil {
 				continue
 			}
-			usage = geminiUsageFromResponse(out)
+			usage = mergeGeminiUsage(usage, geminiUsageFromResponse(out))
 
 			msg, _, convErr := geminiResponseToMessage(out)
 			if convErr != nil {
@@ -606,6 +606,25 @@ func geminiUsageFromResponse(out *genai.GenerateContentResponse) model.Usage {
 		ReasoningTokens:   int(out.UsageMetadata.ThoughtsTokenCount),
 		TotalTokens:       int(out.UsageMetadata.TotalTokenCount),
 	}
+}
+
+func mergeGeminiUsage(existing, next model.Usage) model.Usage {
+	if next.PromptTokens != 0 {
+		existing.PromptTokens = next.PromptTokens
+	}
+	if next.CachedInputTokens != 0 {
+		existing.CachedInputTokens = next.CachedInputTokens
+	}
+	if next.CompletionTokens != 0 {
+		existing.CompletionTokens = next.CompletionTokens
+	}
+	if next.ReasoningTokens != 0 {
+		existing.ReasoningTokens = next.ReasoningTokens
+	}
+	if next.TotalTokens != 0 {
+		existing.TotalTokens = next.TotalTokens
+	}
+	return existing
 }
 
 func geminiResponseToMessage(out *genai.GenerateContentResponse) (model.Message, model.Usage, error) {
