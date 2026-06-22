@@ -260,7 +260,7 @@ func TestSearchToolPlainTxtDollarDoesNotMatchFilenameAndRegexMatchesContent(t *t
 	if got := numericMetaValue(payload["count"]); got != 1 {
 		t.Fatalf("regex SEARCH count = %v, want 1 content hit", payload["count"])
 	}
-	if got, _ := payload["path"].(string); got != dir {
+	if got, _ := payload["path"].(string); filepath.Clean(got) != filepath.Clean(dir) {
 		t.Fatalf("payload path = %q, want %q", got, dir)
 	}
 	if got, _ := payload["query"].(string); got != ".txt$" {

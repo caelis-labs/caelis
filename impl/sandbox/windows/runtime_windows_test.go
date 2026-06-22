@@ -480,6 +480,7 @@ func TestSandboxEnvironmentPreservesHostUserDirsAndRedirectsToolCaches(t *testin
 	t.Setenv("APPDATA", hostAppData)
 	t.Setenv("LOCALAPPDATA", hostLocalAppData)
 	t.Setenv("PYTHONPATH", hostPythonPath)
+	unsetEnvForTest(t, "NUGET_PACKAGES", "pnpm_config_store_dir", "npm_config_store_dir", "YARN_CACHE_FOLDER")
 
 	env, err := sandboxEnvironment(workspacePolicy{SandboxEnvRoot: envRoot}, map[string]string{
 		"PYTHONPATH": extraPythonPath,
@@ -508,6 +509,10 @@ func TestSandboxEnvironmentPreservesHostUserDirsAndRedirectsToolCaches(t *testin
 		"GOTELEMETRY":               "off",
 		"PIP_CACHE_DIR":             filepath.Join(cacheRoot, "pip"),
 		"npm_config_cache":          filepath.Join(cacheRoot, "npm"),
+		"NUGET_PACKAGES":            filepath.Join(cacheRoot, "nuget", "packages"),
+		"pnpm_config_store_dir":     filepath.Join(cacheRoot, "pnpm-store"),
+		"npm_config_store_dir":      filepath.Join(cacheRoot, "pnpm-store"),
+		"YARN_CACHE_FOLDER":         filepath.Join(cacheRoot, "yarn"),
 		"PSModuleAnalysisCachePath": filepath.Join(sandboxPowerShellCacheDir(envRoot), "PowerShell_AnalysisCache"),
 		"PYTHONPATH":                prependEnvPath(sandboxPythonSiteDir(envRoot), extraPythonPath),
 	} {
@@ -527,6 +532,9 @@ func TestSandboxEnvironmentPreservesHostUserDirsAndRedirectsToolCaches(t *testin
 		filepath.Join(cacheRoot, "go-mod"),
 		filepath.Join(cacheRoot, "npm"),
 		filepath.Join(cacheRoot, "pip"),
+		filepath.Join(cacheRoot, "pnpm-store"),
+		filepath.Join(cacheRoot, "nuget", "packages"),
+		filepath.Join(cacheRoot, "yarn"),
 		sandboxPythonSiteDir(envRoot),
 	} {
 		info, err := os.Stat(dir)
@@ -536,6 +544,145 @@ func TestSandboxEnvironmentPreservesHostUserDirsAndRedirectsToolCaches(t *testin
 		if !info.IsDir() {
 			t.Fatalf("sandbox cache path %q is not a directory", dir)
 		}
+	}
+}
+
+func TestSandboxEnvironmentUsesNativeOpenSSHForGitWhenAvailable(t *testing.T) {
+	unsetEnvForTest(t, "GIT_SSH_COMMAND", "GIT_SSH")
+	envRoot := filepath.Join(t.TempDir(), "sandbox-env")
+	_, sshPath := withFakeSystemOpenSSH(t)
+
+	env, err := sandboxEnvironment(workspacePolicy{SandboxEnvRoot: envRoot}, nil)
+	if err != nil {
+		t.Fatalf("sandboxEnvironment() error = %v", err)
+	}
+
+	got, ok := envValue(env, "GIT_SSH_COMMAND")
+	if !ok || got != filepath.ToSlash(sshPath) {
+		t.Fatalf("env[GIT_SSH_COMMAND] = %q/%v, want %q", got, ok, filepath.ToSlash(sshPath))
+	}
+}
+
+func TestSandboxEnvironmentDoesNotOverrideGitSSHSelection(t *testing.T) {
+	unsetEnvForTest(t, "GIT_SSH_COMMAND", "GIT_SSH")
+	envRoot := filepath.Join(t.TempDir(), "sandbox-env")
+	withFakeSystemOpenSSH(t)
+
+	env, err := sandboxEnvironment(workspacePolicy{SandboxEnvRoot: envRoot}, map[string]string{
+		"GIT_SSH_COMMAND": "C:/custom/ssh.exe -F C:/custom/config",
+	})
+	if err != nil {
+		t.Fatalf("sandboxEnvironment(command override) error = %v", err)
+	}
+	if got, ok := envValue(env, "GIT_SSH_COMMAND"); !ok || got != "C:/custom/ssh.exe -F C:/custom/config" {
+		t.Fatalf("env[GIT_SSH_COMMAND] = %q/%v, want command override", got, ok)
+	}
+
+	env, err = sandboxEnvironment(workspacePolicy{SandboxEnvRoot: envRoot}, map[string]string{
+		"GIT_SSH": "C:/custom/ssh.exe",
+	})
+	if err != nil {
+		t.Fatalf("sandboxEnvironment(path override) error = %v", err)
+	}
+	if got, ok := envValue(env, "GIT_SSH"); !ok || got != "C:/custom/ssh.exe" {
+		t.Fatalf("env[GIT_SSH] = %q/%v, want path override", got, ok)
+	}
+	if got, ok := envValue(env, "GIT_SSH_COMMAND"); ok {
+		t.Fatalf("env[GIT_SSH_COMMAND] = %q, want absent when GIT_SSH is explicit", got)
+	}
+}
+
+func TestSandboxEnvironmentSkipsGitOpenSSHWhenUnavailable(t *testing.T) {
+	unsetEnvForTest(t, "GIT_SSH_COMMAND", "GIT_SSH")
+	envRoot := filepath.Join(t.TempDir(), "sandbox-env")
+	t.Setenv("SystemRoot", filepath.Join(t.TempDir(), "Windows"))
+
+	env, err := sandboxEnvironment(workspacePolicy{SandboxEnvRoot: envRoot}, nil)
+	if err != nil {
+		t.Fatalf("sandboxEnvironment() error = %v", err)
+	}
+	if got, ok := envValue(env, "GIT_SSH_COMMAND"); ok {
+		t.Fatalf("env[GIT_SSH_COMMAND] = %q, want absent without system OpenSSH", got)
+	}
+}
+
+func TestSandboxEnvironmentPreservesToolCacheOverrides(t *testing.T) {
+	unsetEnvForTest(t,
+		"GOCACHE", "GOMODCACHE", "PIP_CACHE_DIR", "npm_config_cache",
+		"NUGET_PACKAGES", "pnpm_config_store_dir", "npm_config_store_dir", "YARN_CACHE_FOLDER",
+	)
+	envRoot := filepath.Join(t.TempDir(), "sandbox-env")
+	extra := map[string]string{
+		"GOCACHE":               filepath.Join(t.TempDir(), "go-build"),
+		"GOMODCACHE":            filepath.Join(t.TempDir(), "go-mod"),
+		"PIP_CACHE_DIR":         filepath.Join(t.TempDir(), "pip"),
+		"npm_config_cache":      filepath.Join(t.TempDir(), "npm"),
+		"NUGET_PACKAGES":        filepath.Join(t.TempDir(), "nuget"),
+		"pnpm_config_store_dir": filepath.Join(t.TempDir(), "pnpm"),
+		"YARN_CACHE_FOLDER":     filepath.Join(t.TempDir(), "yarn"),
+	}
+
+	env, err := sandboxEnvironment(workspacePolicy{SandboxEnvRoot: envRoot}, extra)
+	if err != nil {
+		t.Fatalf("sandboxEnvironment() error = %v", err)
+	}
+	for key, want := range extra {
+		if got, ok := envValue(env, key); !ok || got != want {
+			t.Fatalf("env[%s] = %q/%v, want %q", key, got, ok, want)
+		}
+	}
+	if got, ok := envValue(env, "npm_config_store_dir"); ok {
+		t.Fatalf("env[npm_config_store_dir] = %q, want absent when pnpm_config_store_dir is explicit", got)
+	}
+}
+
+func TestSandboxEnvironmentPreservesHostDefaultCacheOverridesAndRedirectsForcedCaches(t *testing.T) {
+	unsetEnvForTest(t,
+		"GOCACHE", "GOMODCACHE", "PIP_CACHE_DIR", "npm_config_cache",
+		"NUGET_PACKAGES", "pnpm_config_store_dir", "npm_config_store_dir", "YARN_CACHE_FOLDER",
+	)
+	envRoot := filepath.Join(t.TempDir(), "sandbox-env")
+	hostGOCache := filepath.Join(t.TempDir(), "host-go-build")
+	hostGoModCache := filepath.Join(t.TempDir(), "host-go-mod")
+	hostPip := filepath.Join(t.TempDir(), "host-pip")
+	hostNPM := filepath.Join(t.TempDir(), "host-npm")
+	hostNuGet := filepath.Join(t.TempDir(), "host-nuget")
+	hostPnpm := filepath.Join(t.TempDir(), "host-pnpm")
+	hostYarn := filepath.Join(t.TempDir(), "host-yarn")
+	t.Setenv("GOCACHE", hostGOCache)
+	t.Setenv("GOMODCACHE", hostGoModCache)
+	t.Setenv("PIP_CACHE_DIR", hostPip)
+	t.Setenv("npm_config_cache", hostNPM)
+	t.Setenv("NUGET_PACKAGES", hostNuGet)
+	t.Setenv("npm_config_store_dir", hostPnpm)
+	t.Setenv("YARN_CACHE_FOLDER", hostYarn)
+
+	env, err := sandboxEnvironment(workspacePolicy{SandboxEnvRoot: envRoot}, nil)
+	if err != nil {
+		t.Fatalf("sandboxEnvironment() error = %v", err)
+	}
+	cacheRoot := sandboxCacheRoot(pathutil.Normalize(envRoot))
+	for key, want := range map[string]string{
+		"GOCACHE":          filepath.Join(cacheRoot, "go-build"),
+		"GOMODCACHE":       filepath.Join(cacheRoot, "go-mod"),
+		"PIP_CACHE_DIR":    filepath.Join(cacheRoot, "pip"),
+		"npm_config_cache": filepath.Join(cacheRoot, "npm"),
+	} {
+		if got, ok := envValue(env, key); !ok || got != want {
+			t.Fatalf("env[%s] = %q/%v, want sandbox cache %q despite host value", key, got, ok, want)
+		}
+	}
+	for key, want := range map[string]string{
+		"NUGET_PACKAGES":       hostNuGet,
+		"npm_config_store_dir": hostPnpm,
+		"YARN_CACHE_FOLDER":    hostYarn,
+	} {
+		if got, ok := envValue(env, key); !ok || got != want {
+			t.Fatalf("env[%s] = %q/%v, want host override %q", key, got, ok, want)
+		}
+	}
+	if got, ok := envValue(env, "pnpm_config_store_dir"); ok {
+		t.Fatalf("env[pnpm_config_store_dir] = %q, want absent when npm_config_store_dir is explicit", got)
 	}
 }
 
@@ -1278,4 +1425,36 @@ func envValue(env []string, key string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+func withFakeSystemOpenSSH(t *testing.T) (string, string) {
+	t.Helper()
+	systemRoot := filepath.Join(t.TempDir(), "Windows")
+	sshPath := filepath.Join(systemRoot, "System32", "OpenSSH", "ssh.exe")
+	if err := os.MkdirAll(filepath.Dir(sshPath), 0o700); err != nil {
+		t.Fatalf("mkdir OpenSSH dir: %v", err)
+	}
+	if err := os.WriteFile(sshPath, []byte(""), 0o600); err != nil {
+		t.Fatalf("write fake ssh.exe: %v", err)
+	}
+	t.Setenv("SystemRoot", systemRoot)
+	return systemRoot, sshPath
+}
+
+func unsetEnvForTest(t *testing.T, keys ...string) {
+	t.Helper()
+	for _, key := range keys {
+		key := key
+		value, ok := os.LookupEnv(key)
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatalf("unset %s: %v", key, err)
+		}
+		t.Cleanup(func() {
+			if ok {
+				_ = os.Setenv(key, value)
+			} else {
+				_ = os.Unsetenv(key)
+			}
+		})
+	}
 }

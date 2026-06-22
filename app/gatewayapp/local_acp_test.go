@@ -1073,7 +1073,9 @@ func TestAgentProfileAssemblyReturnsProfileDirError(t *testing.T) {
 
 func TestAgentProfileAssemblyReturnsConfigStoreLoadError(t *testing.T) {
 	stack := newStackForToolTest(t, assembly.ResolvedAssembly{})
-	poisonConfigStorePath(t, stack)
+	if err := os.WriteFile(stack.store.path, []byte("{"), 0o600); err != nil {
+		t.Fatalf("WriteFile(config poison) error = %v", err)
+	}
 
 	err := stack.setConfiguredAgents(nil)
 	if err == nil || !strings.Contains(err.Error(), "agent profile bindings") {

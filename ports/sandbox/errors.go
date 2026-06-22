@@ -81,6 +81,9 @@ func IsSandboxPermissionDeniedText(text string) bool {
 	if text == "" {
 		return false
 	}
+	if strings.Contains(text, "access to the path") && strings.Contains(text, " is denied") {
+		return true
+	}
 	patterns := []string{
 		"read-only file system",
 		"只读文件系统",
@@ -104,6 +107,55 @@ func IsSandboxPermissionDeniedText(text string) bool {
 		}
 	}
 	return false
+}
+
+func IsSandboxCachePathEvidenceText(text string) bool {
+	text = strings.ToLower(strings.TrimSpace(text))
+	if text == "" {
+		return false
+	}
+	for _, pattern := range sandboxCachePathEvidencePatterns {
+		if strings.Contains(text, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+var sandboxCachePathEvidencePatterns = []string{
+	"gocache",
+	"gomodcache",
+	"go/pkg/mod",
+	`go\pkg\mod`,
+	`cache\go-build`,
+	"/cache/go-build",
+	`cache\go-mod`,
+	"/cache/go-mod",
+	"writing stat cache",
+	"pip cache",
+	"pip-cache",
+	`pip\cache`,
+	"/pip/cache",
+	`cache\pip`,
+	"/cache/pip",
+	"npm cache",
+	"npm-cache",
+	`npm\cache`,
+	"/npm/cache",
+	`cache\npm`,
+	"/cache/npm",
+	`.nuget\packages`,
+	"/.nuget/packages",
+	`cache\nuget\packages`,
+	"/cache/nuget/packages",
+	"pnpm-store",
+	`cache\pnpm-store`,
+	"/cache/pnpm-store",
+	"yarn-cache",
+	`yarn\cache`,
+	"/yarn/cache",
+	`cache\yarn`,
+	"/cache/yarn",
 }
 
 func IsSandboxACLRefreshDeniedText(text string) bool {

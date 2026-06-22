@@ -298,14 +298,8 @@ func isSandboxCacheDenied(input Input, lower string) bool {
 	if !isSandbox(input) {
 		return false
 	}
-	if !strings.Contains(lower, "cache") &&
-		!strings.Contains(lower, "gocache") &&
-		!strings.Contains(lower, "gomodcache") &&
-		!strings.Contains(lower, "go/pkg/mod") &&
-		!strings.Contains(lower, "writing stat cache") {
+	if !sandbox.IsSandboxCachePathEvidenceText(lower) {
 		return false
 	}
-	return sandbox.IsSandboxPermissionDeniedText(lower) ||
-		strings.Contains(lower, "read-only file system") ||
-		strings.Contains(lower, "access is denied")
+	return sandbox.IsSandboxPermissionDeniedText(lower)
 }

@@ -11,6 +11,7 @@ func TestSubagentTerminalSignalLinesToolLifecycleCleanup(t *testing.T) {
 	root := t.TempDir()
 	t.Chdir(root)
 	readPath := filepath.Join(root, "internal", "a.py")
+	readDisplay := filepath.Join("internal", "a.py")
 
 	tests := []struct {
 		name string
@@ -23,7 +24,7 @@ func TestSubagentTerminalSignalLinesToolLifecycleCleanup(t *testing.T) {
 				"READ " + readPath,
 				"READ " + readPath + " completed",
 			}, "\n"),
-			want: []string{"Read internal/a.py"},
+			want: []string{"Read " + readDisplay},
 		},
 		{
 			name: "standalone completed filtered",
@@ -39,7 +40,7 @@ func TestSubagentTerminalSignalLinesToolLifecycleCleanup(t *testing.T) {
 				"READ " + readPath,
 				"READ " + readPath + " failed",
 			}, "\n"),
-			want: []string{"Read internal/a.py failed"},
+			want: []string{"Read " + readDisplay + " failed"},
 		},
 		{
 			name: "write completed duplicate collapses",

@@ -163,12 +163,15 @@ func Run(ctx context.Context, spec plugin.HookSpec, sessionRef session.SessionRe
 	cmd := newCmd(cmdName, cmdArgs)
 
 	err = cmd.Run()
-	if err != nil && runtime.GOOS != "windows" && isExecFormatError(err) {
+	if err != nil && runCtx.Err() == nil && runtime.GOOS != "windows" && isExecFormatError(err) {
 		stdoutBuf.Reset()
 		stderrBuf.Reset()
 		stdoutLimitWriter = &maxBytesWriter{w: &stdoutBuf, limit: MaxHookOutputBytes}
 		stderrLimitWriter = &maxBytesWriter{w: &stderrBuf, limit: MaxHookOutputBytes}
 		err = newCmd("/bin/sh", append([]string{cmdName}, cmdArgs...)).Run()
+	}
+	if runCtx.Err() != nil {
+		err = fmt.Errorf("plugin hooks: timeout after %s: %w", timeout, runCtx.Err())
 	}
 
 	var exitCode int

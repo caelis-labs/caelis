@@ -27,11 +27,18 @@ func LoadDirStatus(dir string) (LoadStatus, error) {
 	if dir == "" {
 		return LoadStatus{}, nil
 	}
-	entries, err := os.ReadDir(dir)
+	info, err := os.Stat(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return LoadStatus{}, nil
 		}
+		return LoadStatus{}, err
+	}
+	if !info.IsDir() {
+		return LoadStatus{}, fmt.Errorf("gatewayapp: agent profiles path %s is not a directory", dir)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
 		return LoadStatus{}, err
 	}
 	sort.Slice(entries, func(i, j int) bool {

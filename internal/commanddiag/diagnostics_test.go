@@ -201,6 +201,60 @@ func TestBestDetectsSandboxCacheDenied(t *testing.T) {
 	}
 }
 
+func TestBestDetectsNuGetPackageCacheDenied(t *testing.T) {
+	input := windowsSandboxInput()
+	input.Command = "dotnet restore"
+	input.Stderr = `Access to the path 'C:\Users\me\.nuget\packages\private\1.0.0' is denied.`
+
+	got, ok := Best(input)
+	if !ok {
+		t.Fatal("Best() ok = false, want NuGet package cache diagnostic")
+	}
+	if got.Code != CodeSandboxCacheDenied {
+		t.Fatalf("Code = %q, want %q", got.Code, CodeSandboxCacheDenied)
+	}
+	if got.SuggestedPrefixRule != nil {
+		t.Fatalf("SuggestedPrefixRule = %#v, want nil for dotnet command", got.SuggestedPrefixRule)
+	}
+}
+
+func TestBestDetectsRedirectedNPMCacheDenied(t *testing.T) {
+	input := windowsSandboxInput()
+	input.Command = "npm install"
+	input.Stderr = `Error: EACCES: permission denied, mkdir 'C:\state\.sandbox\env\current\cache\npm\_cacache'`
+
+	got, ok := Best(input)
+	if !ok {
+		t.Fatal("Best() ok = false, want redirected npm cache diagnostic")
+	}
+	if got.Code != CodeSandboxCacheDenied {
+		t.Fatalf("Code = %q, want %q", got.Code, CodeSandboxCacheDenied)
+	}
+	if got.SuggestedPrefixRule != nil {
+		t.Fatalf("SuggestedPrefixRule = %#v, want nil for npm command", got.SuggestedPrefixRule)
+	}
+}
+
+func TestBestDoesNotLabelPackageCachePathWithoutPermissionEvidence(t *testing.T) {
+	input := windowsSandboxInput()
+	input.Command = "dotnet restore"
+	input.Stderr = `Package C:\Users\me\.nuget\packages\missing\1.0.0 was not found.`
+
+	if got, ok := Best(input); ok {
+		t.Fatalf("Best() = %+v, want no cache diagnostic without permission evidence", got)
+	}
+}
+
+func TestBestDoesNotLabelGenericCacheDenied(t *testing.T) {
+	input := windowsSandboxInput()
+	input.Command = "tool sync"
+	input.Stderr = "remote cache policy is denied."
+
+	if got, ok := Best(input); ok {
+		t.Fatalf("Best() = %+v, want no cache diagnostic without tool cache evidence", got)
+	}
+}
+
 func TestBestDoesNotSuggestBroadPrefixRule(t *testing.T) {
 	input := windowsSandboxInput()
 	input.Command = "python -m pip install private-package"
