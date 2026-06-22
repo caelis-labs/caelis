@@ -96,7 +96,7 @@ func RenderOverlayCompletion(theme Theme, m OverlayCompletionModel) string {
 		}
 		var line string
 		if i == m.Index {
-			line = tok.Focus.Bold(true).Render("▸ " + label)
+			line = theme.SelectionStyle().Bold(true).Render("▸ " + label)
 		} else {
 			line = tok.TextPrimary.Render("  " + label)
 		}

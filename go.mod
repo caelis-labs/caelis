@@ -16,7 +16,7 @@ require (
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/rivo/uniseg v0.4.7
 	golang.org/x/sys v0.45.0
-	google.golang.org/genai v1.49.0
+	google.golang.org/genai v1.61.0
 )
 
 require (

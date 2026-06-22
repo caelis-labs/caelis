@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -71,6 +72,25 @@ func TestRenderOverlayCompletion_SelectedHighlight(t *testing.T) {
 	}
 	if !strings.Contains(plain, "▸") {
 		t.Fatalf("expected selection indicator, got %q", plain)
+	}
+}
+
+func TestRenderOverlayCompletion_SelectedHighlightAvoidsFocusAccent(t *testing.T) {
+	theme := DefaultTheme()
+	theme.Focus = lipgloss.Color("#123456")
+	theme.PromptFg = theme.Focus
+	theme.InvalidateTokens()
+	got := RenderOverlayCompletion(theme, OverlayCompletionModel{
+		Title: "Models",
+		Items: []OverlayCompletionItem{
+			{Label: "gpt-4"},
+			{Label: "claude-4-opus", Desc: "recommended"},
+		},
+		Index: 1,
+		Width: 50,
+	})
+	if strings.Contains(got, "38;2;18;52;86") {
+		t.Fatalf("selected overlay completion still uses focus accent: %q", got)
 	}
 }
 

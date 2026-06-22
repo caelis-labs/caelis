@@ -122,6 +122,10 @@ func (s ModelService) ListCatalogModels(provider string) []string {
 	return modelcatalog.ListCatalogModels(provider)
 }
 
+func (s ModelService) ListModelDirectoryModels(provider string) []string {
+	return modelcatalog.ListModelDirectoryModels(provider)
+}
+
 func (s ModelService) LookupCapabilities(provider string, modelName string) (ModelCapabilityInfo, bool) {
 	caps, ok := modelcatalog.LookupModelCapabilities(provider, modelName)
 	return toModelCapabilityInfo(caps), ok

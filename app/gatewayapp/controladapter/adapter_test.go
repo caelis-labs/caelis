@@ -607,6 +607,35 @@ func TestAdapterCompleteSlashArgConnectFlowUsesLegacyCommands(t *testing.T) {
 			t.Fatalf("deepseek connect model candidate = %#v, want catalog preset detail", item)
 		}
 	}
+	openAICompatModels, err := driver.CompleteSlashArg(ctx, connectModelCompletionCommand(controlcommands.ConnectWizardState{
+		Provider:       "openai-compatible",
+		BaseURL:        "https://api.openai.com/v1",
+		TimeoutSeconds: controlcommands.DefaultConnectTimeoutSeconds,
+	}), "gpt-5.5", 20)
+	if err != nil {
+		t.Fatalf("CompleteSlashArg(connect-model openai-compatible) error = %v", err)
+	}
+	foundOpenAICompatDirectoryModel := false
+	for _, item := range openAICompatModels {
+		if item.Value == "gpt-5.5" && strings.Contains(item.Detail, "model directory") {
+			foundOpenAICompatDirectoryModel = true
+			break
+		}
+	}
+	if !foundOpenAICompatDirectoryModel {
+		t.Fatalf("openai-compatible connect model candidates = %#v, want gpt-5.5 from model directory", openAICompatModels)
+	}
+	openAIModels, err := driver.CompleteSlashArg(ctx, connectModelCompletionCommand(controlcommands.ConnectWizardState{
+		Provider:       "openai",
+		BaseURL:        "https://api.openai.com/v1",
+		TimeoutSeconds: controlcommands.DefaultConnectTimeoutSeconds,
+	}), "gpt-5.1-codex", 20)
+	if err != nil {
+		t.Fatalf("CompleteSlashArg(connect-model openai) error = %v", err)
+	}
+	if len(openAIModels) != 0 {
+		t.Fatalf("openai connect model candidates = %#v, did not want models.dev-only model for explicit provider", openAIModels)
+	}
 
 	codefreeModels, err := driver.CompleteSlashArg(ctx, connectModelCompletionCommand(controlcommands.ConnectWizardState{
 		Provider:       "codefree",

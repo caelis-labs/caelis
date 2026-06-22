@@ -187,10 +187,10 @@ func TestGeminiStream_EmitsReasoningChunks(t *testing.T) {
 	if strings.Join(reasoningChunks, "|") != "think-1|think-2" {
 		t.Fatalf("unexpected reasoning chunks: %v", reasoningChunks)
 	}
-	if finalReasoning != "think-1think-2" {
+	if finalReasoning != "think-1\nthink-2" {
 		t.Fatalf("unexpected final reasoning %q", finalReasoning)
 	}
-	if finalText != "hello!" {
+	if finalText != "hello\n!" {
 		t.Fatalf("unexpected final text %q", finalText)
 	}
 }

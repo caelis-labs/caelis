@@ -44,12 +44,17 @@ func (t Theme) TitleStyle() lipgloss.Style {
 func (t Theme) ModalStyle() lipgloss.Style {
 	return withBg(lipgloss.NewStyle(), t.ModalBg).
 		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(t.Focus).
+		BorderForeground(t.PanelBorder).
 		Padding(1, 2)
 }
 
 func (t Theme) CommandActiveStyle() lipgloss.Style {
-	return withBg(fgStyle(t.Focus), t.CommandActive).
+	if t.CommandActive != nil {
+		return withBg(fgStyle(firstColor(t.SelectionFg, t.TextPrimary)), t.CommandActive).
+			Bold(true).
+			Padding(0, 1)
+	}
+	return t.SelectionStyle().
 		Bold(true).
 		Padding(0, 1)
 }

@@ -27,6 +27,7 @@ func NewModel(cfg Config) *Model {
 	themeAuto := tuikit.ThemeUsesAutoBackground()
 
 	delegate := list.NewDefaultDelegate()
+	configurePaletteDelegateStyles(&delegate, theme)
 	palette := list.New(nil, delegate, 20, 10)
 	palette.SetShowHelp(false)
 	palette.SetShowStatusBar(false)
@@ -146,6 +147,23 @@ func NewModel(cfg Config) *Model {
 	m.setCommands(cfg.Commands)
 	m.syncTextareaChrome()
 	return m
+}
+
+func configurePaletteDelegateStyles(delegate *list.DefaultDelegate, theme tuikit.Theme) {
+	if delegate == nil {
+		return
+	}
+	delegate.Styles.NormalTitle = theme.TextStyle().Padding(0, 0, 0, 2)
+	delegate.Styles.NormalDesc = theme.HelpHintTextStyle().Padding(0, 0, 0, 2)
+	selected := theme.SelectionStyle().
+		Border(lipgloss.NormalBorder(), false, false, false, true).
+		BorderForeground(theme.PanelBorder).
+		Padding(0, 0, 0, 1)
+	delegate.Styles.SelectedTitle = selected.Bold(true)
+	delegate.Styles.SelectedDesc = selected
+	delegate.Styles.DimmedTitle = theme.HelpHintTextStyle().Padding(0, 0, 0, 2)
+	delegate.Styles.DimmedDesc = theme.MutedTextStyle().Padding(0, 0, 0, 2)
+	delegate.Styles.FilterMatch = lipgloss.NewStyle().Underline(true)
 }
 
 func (m *Model) setCommands(commands []string) {
@@ -430,6 +448,10 @@ func (m *Model) armTerminalResponseGuard() {
 }
 
 func (m *Model) applyPaletteTheme(theme tuikit.Theme) {
+	delegate := list.NewDefaultDelegate()
+	configurePaletteDelegateStyles(&delegate, theme)
+	m.palette.SetDelegate(delegate)
+
 	styles := m.palette.Styles
 	styles.Title = theme.TitleStyle()
 	styles.PaginationStyle = theme.HelpHintTextStyle()

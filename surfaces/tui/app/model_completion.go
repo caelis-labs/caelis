@@ -450,8 +450,9 @@ func (m *Model) renderSkillCandidateLine(candidate CompletionCandidate, selected
 	gutterStyle := m.theme.HelpHintTextStyle()
 	nameStyle := m.theme.CommandStyle()
 	if selected {
-		gutterStyle = m.theme.PromptStyle()
 		nameStyle = m.theme.CommandActiveStyle()
+		display = gutter + display
+		gutter = ""
 	}
 	line := gutterStyle.Render(gutter) + nameStyle.Render(display)
 	description := truncateSkillListDescription(skillCandidateDescription(candidate), width-displayColumns(gutter)-displayColumns(display)-4)
@@ -648,8 +649,7 @@ func (m *Model) renderResumeList() string {
 		}
 		prefix := "  "
 		if i == m.resumeIndex {
-			prefix = m.theme.PromptStyle().Render("▸ ")
-			lines = append(lines, prefix+m.theme.CommandActiveStyle().Render(display))
+			lines = append(lines, m.renderCompletionSelectedText(display))
 		} else {
 			lines = append(lines, prefix+m.theme.HelpHintTextStyle().Render(display))
 		}
@@ -785,8 +785,7 @@ func (m *Model) renderSlashCommandList() string {
 	for i := start; i < end; i++ {
 		prefix := "  "
 		if i == m.slashIndex {
-			prefix = m.theme.PromptStyle().Render("▸ ")
-			lines = append(lines, prefix+m.theme.CommandActiveStyle().Render(m.slashCandidates[i]))
+			lines = append(lines, m.renderCompletionSelectedText(m.slashCandidates[i]))
 		} else {
 			lines = append(lines, prefix+m.theme.HelpHintTextStyle().Render(m.slashCandidates[i]))
 		}
@@ -847,6 +846,10 @@ func completionCandidateDisplay(candidate CompletionCandidate) string {
 		return display
 	}
 	return strings.TrimSpace(candidate.Value)
+}
+
+func (m *Model) renderCompletionSelectedText(text string) string {
+	return m.theme.CommandActiveStyle().Render("▸ " + strings.TrimSpace(text))
 }
 
 func completionCandidateDetail(candidate CompletionCandidate) string {

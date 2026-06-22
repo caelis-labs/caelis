@@ -6,7 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -1183,6 +1185,122 @@ func TestSkillCompletionListKeepsHeightStableAcrossSelection(t *testing.T) {
 	}
 	if strings.Contains(plain, "SKILL.md") {
 		t.Fatalf("renderSkillList() = %q, selected detail should not include path metadata", plain)
+	}
+}
+
+func TestInputCompletionSelectionsAvoidFocusAccent(t *testing.T) {
+	model := NewModel(Config{Commands: []string{"help", "model"}})
+	applyCompletionAccentTestTheme(model)
+	cases := map[string]string{}
+
+	model.slashCandidates = []string{"/help", "/model"}
+	model.slashIndex = 1
+	cases["slash"] = model.renderSlashCommandList()
+
+	model.mentionPrefix = "@"
+	model.mentionCandidates = []CompletionCandidate{
+		{Value: "agent-a", Display: "agent-a", Detail: "Agent A"},
+	}
+	model.mentionIndex = 0
+	cases["mention"] = model.renderMentionList()
+
+	model.mentionPrefix = "#"
+	model.mentionCandidates = []CompletionCandidate{
+		{Value: "docs/readme.md", Display: "docs/readme.md", Detail: "file"},
+	}
+	model.mentionIndex = 0
+	cases["file"] = model.renderMentionList()
+
+	model.skillCandidates = []CompletionCandidate{
+		{Value: "story-init", Display: "story-init", Detail: "Start a story project."},
+	}
+	model.skillIndex = 0
+	cases["skill"] = model.renderSkillList()
+
+	model.slashArgCandidates = []SlashArgCandidate{
+		{Value: "use", Display: "use", Detail: "switch active model"},
+	}
+	model.slashArgIndex = 0
+	model.slashArgActive = true
+	model.slashArgCommand = "model"
+	cases["slash-arg"] = model.renderSlashArgList()
+
+	model.resumeCandidates = []ResumeCandidate{
+		{SessionID: "session-1", Title: "Previous turn", Model: "gpt-test", Age: "1h"},
+	}
+	model.resumeIndex = 0
+	cases["resume"] = model.renderResumeList()
+
+	for name, rendered := range cases {
+		assertNoCompletionAccent(t, name, rendered)
+	}
+}
+
+func TestPromptAndPaletteSelectionsAvoidFocusAccent(t *testing.T) {
+	model := NewModel(Config{Commands: []string{"help", "model"}})
+	applyCompletionAccentTestTheme(model)
+	model.activePrompt = newPromptState(PromptRequestMsg{
+		Title: "Choose",
+		Choices: []PromptChoice{
+			{Label: "Allow", Value: "allow", Detail: "run once"},
+			{Label: "Deny", Value: "deny", Detail: "skip"},
+		},
+		Response: make(chan PromptResponse, 1),
+	})
+	model.activePrompt.choiceIndex = 0
+	assertNoCompletionAccent(t, "prompt", model.renderPromptModal())
+
+	delegate := list.NewDefaultDelegate()
+	configurePaletteDelegateStyles(&delegate, model.theme)
+	palette := list.New([]list.Item{commandItem{name: "help"}, commandItem{name: "model"}}, delegate, 40, 6)
+	palette.SetShowHelp(false)
+	palette.SetShowStatusBar(false)
+	palette.Styles.Title = model.theme.TitleStyle()
+	assertNoCompletionAccent(t, "palette", model.theme.ModalStyle().Render(palette.View()))
+}
+
+func TestApplyThemeRefreshesPaletteDelegateStyles(t *testing.T) {
+	model := NewModel(Config{Commands: []string{"help", "model"}})
+	model.palette.SetSize(40, 6)
+
+	oldTheme := model.theme
+	oldTheme.SelectionFg = lipgloss.Color("#f5f7fb")
+	oldTheme.SelectionBg = lipgloss.Color("#112233")
+	oldTheme.InvalidateTokens()
+	model.applyTheme(oldTheme)
+	if rendered := model.palette.View(); !strings.Contains(rendered, "48;2;17;34;51") {
+		t.Fatalf("palette view = %q, want old selection background before theme switch", rendered)
+	}
+
+	newTheme := oldTheme
+	newTheme.SelectionBg = lipgloss.Color("#445566")
+	newTheme.InvalidateTokens()
+	model.applyTheme(newTheme)
+	rendered := model.palette.View()
+	if strings.Contains(rendered, "48;2;17;34;51") {
+		t.Fatalf("palette view = %q, still uses stale selection background after theme switch", rendered)
+	}
+	if !strings.Contains(rendered, "48;2;68;85;102") {
+		t.Fatalf("palette view = %q, want refreshed selection background after theme switch", rendered)
+	}
+}
+
+func applyCompletionAccentTestTheme(model *Model) {
+	if model == nil {
+		return
+	}
+	focus := lipgloss.Color("#123456")
+	model.theme.Focus = focus
+	model.theme.PromptFg = focus
+	model.theme.ComposerBorderFocus = focus
+	model.theme.InvalidateTokens()
+}
+
+func assertNoCompletionAccent(t *testing.T, name string, rendered string) {
+	t.Helper()
+	const focusFragment = "38;2;18;52;86"
+	if strings.Contains(rendered, focusFragment) {
+		t.Fatalf("%s render still uses focus accent color: %q", name, rendered)
 	}
 }
 

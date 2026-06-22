@@ -158,53 +158,147 @@ func LookupOverlayModelCapabilities(provider, modelName string) (ModelCapabiliti
 	return lookupOverlayModelCapabilities(provider, modelName)
 }
 
-func ListCatalogModels(provider string) []string {
+// ProviderUsesModelDirectory reports whether connect-style model discovery for
+// a provider should use models.dev directory data instead of curated catalog
+// recommendations.
+func ProviderUsesModelDirectory(provider string) bool {
+	_, ok := modelDirectoryProviders[strings.ToLower(strings.TrimSpace(provider))]
+	return ok
+}
+
+// ListRecommendedModels returns the curated model recommendations for a
+// provider. It includes local overrides, built-in catalog entries, and provider
+// overlays, but intentionally does not enumerate the models.dev directory.
+func ListRecommendedModels(provider string) []string {
 	provider = strings.ToLower(strings.TrimSpace(provider))
 	if provider == "" {
 		return nil
 	}
-	seen := map[string]string{}
-	add := func(model string) {
-		model = strings.TrimSpace(model)
-		if model == "" || model == "*" {
-			return
-		}
-		key := strings.ToLower(model)
-		if _, ok := seen[key]; ok {
-			return
-		}
-		seen[key] = model
-	}
-
+	collector := newModelListCollector()
 	dynamicMu.RLock()
 	local := localOverrides
 	dynamicMu.RUnlock()
 
-	for key := range local {
-		p, model, ok := splitCatalogKey(key)
-		if !ok || !providerMatches(provider, p) {
-			continue
-		}
-		add(model)
-	}
+	collector.addSnapshot(local, provider, providerMatches)
 	for _, entry := range builtinCatalog {
 		if strings.EqualFold(strings.TrimSpace(entry.provider), provider) {
-			add(entry.pattern)
+			collector.add(entry.pattern)
 		}
 	}
-	for key := range providerOverlayCatalog {
+	collector.addOverlaySnapshot(providerOverlayCatalog, provider, exactProviderMatches)
+	return collector.sorted()
+}
+
+// ListCatalogModels is kept for callers that historically used "catalog" to
+// mean curated recommendations. New code should prefer ListRecommendedModels
+// when it needs recommendations, or ListModelDirectoryModels when it needs a
+// models.dev directory listing.
+func ListCatalogModels(provider string) []string {
+	return ListRecommendedModels(provider)
+}
+
+// ListModelDirectoryModels returns models.dev directory entries for a provider.
+// Directory provider aliases are explicit so compatible providers can opt into
+// their upstream model namespace without broad substring matching.
+func ListModelDirectoryModels(provider string) []string {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	if provider == "" {
+		return nil
+	}
+	collector := newModelListCollector()
+	dynamicMu.RLock()
+	local := localOverrides
+	remote := remoteCatalog
+	embedded := embeddedCatalog
+	dynamicMu.RUnlock()
+
+	collector.addSnapshot(local, provider, modelDirectoryProviderMatches)
+	collector.addSnapshot(remote, provider, modelDirectoryProviderMatches)
+	collector.addSnapshot(embedded, provider, modelDirectoryProviderMatches)
+	return collector.sorted()
+}
+
+type modelListCollector struct {
+	seen map[string]string
+}
+
+func newModelListCollector() modelListCollector {
+	return modelListCollector{seen: map[string]string{}}
+}
+
+func (c modelListCollector) add(model string) {
+	model = strings.TrimSpace(model)
+	if model == "" || model == "*" {
+		return
+	}
+	key := strings.ToLower(model)
+	if _, ok := c.seen[key]; ok {
+		return
+	}
+	c.seen[key] = model
+}
+
+func (c modelListCollector) addSnapshot(snap capSnapshot, provider string, match func(string, string) bool) {
+	for key := range snap {
 		p, model, ok := splitCatalogKey(key)
-		if !ok || p != provider {
+		if !ok || !match(provider, p) {
 			continue
 		}
-		add(model)
+		c.add(model)
 	}
-	out := make([]string, 0, len(seen))
-	for _, model := range seen {
+}
+
+func (c modelListCollector) addOverlaySnapshot(snap overlaySnapshot, provider string, match func(string, string) bool) {
+	for key := range snap {
+		p, model, ok := splitCatalogKey(key)
+		if !ok || !match(provider, p) {
+			continue
+		}
+		c.add(model)
+	}
+}
+
+func (c modelListCollector) sorted() []string {
+	out := make([]string, 0, len(c.seen))
+	for _, model := range c.seen {
 		out = append(out, model)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		return strings.ToLower(out[i]) < strings.ToLower(out[j])
 	})
 	return out
+}
+
+func exactProviderMatches(queryProvider, keyProvider string) bool {
+	return strings.EqualFold(strings.TrimSpace(queryProvider), strings.TrimSpace(keyProvider))
+}
+
+func modelDirectoryProviderMatches(queryProvider, keyProvider string) bool {
+	queryProvider = strings.ToLower(strings.TrimSpace(queryProvider))
+	keyProvider = strings.ToLower(strings.TrimSpace(keyProvider))
+	if queryProvider == "" || keyProvider == "" {
+		return false
+	}
+	if queryProvider == keyProvider {
+		return true
+	}
+	for _, alias := range modelDirectoryProviderAliases[queryProvider] {
+		if keyProvider == alias {
+			return true
+		}
+	}
+	return false
+}
+
+var modelDirectoryProviderAliases = map[string][]string{
+	"openai-compatible":    {"openai"},
+	"anthropic-compatible": {"anthropic"},
+	"openrouter":           {"openrouter"},
+	"gemini":               {"google"},
+}
+
+var modelDirectoryProviders = map[string]struct{}{
+	"openai-compatible":    {},
+	"anthropic-compatible": {},
+	"openrouter":           {},
 }

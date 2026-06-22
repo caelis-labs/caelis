@@ -542,6 +542,17 @@ func NewFunctionToolSpec(name, description string, parameters map[string]any) To
 	}
 }
 
+func NewProviderExecutedToolSpec(provider, name string, details map[string]json.RawMessage) ToolSpec {
+	return ToolSpec{
+		Kind: ToolSpecKindProviderExecuted,
+		ProviderExecuted: &ProviderExecutedToolSpec{
+			Name:            strings.TrimSpace(name),
+			Provider:        strings.TrimSpace(provider),
+			ProviderDetails: cloneRawMessageMap(details),
+		},
+	}
+}
+
 // ToolDefinition remains the concrete function-tool declaration used by simple registries.
 type ToolDefinition = FunctionToolSpec
 

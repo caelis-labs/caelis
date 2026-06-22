@@ -83,6 +83,176 @@ func TestListCatalogModelsIncludesBuiltinDefaults(t *testing.T) {
 	}
 }
 
+func TestCurrentGeminiStaticModels(t *testing.T) {
+	disableDynamicCatalogForTest(t)
+
+	wantModels := []string{
+		"gemini-3.5-flash",
+		"gemini-3.1-pro-preview",
+		"gemini-3.1-pro-preview-customtools",
+		"gemini-3-flash-preview",
+		"gemini-3.1-flash-lite",
+	}
+	models := ListCatalogModels("gemini")
+	for _, model := range wantModels {
+		if !containsString(models, model) {
+			t.Fatalf("ListCatalogModels(gemini) = %#v, missing %q", models, model)
+		}
+		caps, ok := LookupModelCapabilities("gemini", model)
+		if !ok {
+			t.Fatalf("LookupModelCapabilities(gemini, %q) = false, want true", model)
+		}
+		if caps.ContextWindowTokens != 1048576 || caps.MaxOutputTokens != 65536 {
+			t.Fatalf("LookupModelCapabilities(gemini, %q) limits = %d/%d, want 1048576/65536",
+				model, caps.ContextWindowTokens, caps.MaxOutputTokens)
+		}
+		if !caps.SupportsReasoning || caps.ReasoningMode != ReasoningModeEffort {
+			t.Fatalf("LookupModelCapabilities(gemini, %q) reasoning = %#v, want effort reasoning", model, caps)
+		}
+		if !sameStrings(ReasoningLevelsForModel("gemini", model), []string{"low", "medium", "high"}) {
+			t.Fatalf("ReasoningLevelsForModel(gemini, %q) = %#v, want low/medium/high",
+				model, ReasoningLevelsForModel("gemini", model))
+		}
+		if !caps.SupportsToolCalls || !caps.SupportsImages || !caps.SupportsJSONOutput {
+			t.Fatalf("LookupModelCapabilities(gemini, %q) caps = %#v, want tools/images/json", model, caps)
+		}
+	}
+}
+
+func TestCurrentOpenAIStaticModels(t *testing.T) {
+	disableDynamicCatalogForTest(t)
+
+	tests := []struct {
+		model   string
+		context int
+	}{
+		{model: "gpt-5.5", context: 1050000},
+		{model: "gpt-5.5-pro", context: 1050000},
+		{model: "gpt-5.5-instant", context: 400000},
+		{model: "gpt-5.4", context: 1050000},
+		{model: "gpt-5.4-pro", context: 1050000},
+		{model: "gpt-5.4-mini", context: 400000},
+		{model: "gpt-5.4-nano", context: 400000},
+	}
+	models := ListCatalogModels("openai")
+	for _, tc := range tests {
+		if !containsString(models, tc.model) {
+			t.Fatalf("ListCatalogModels(openai) = %#v, missing %q", models, tc.model)
+		}
+		caps, ok := LookupModelCapabilities("openai", tc.model)
+		if !ok {
+			t.Fatalf("LookupModelCapabilities(openai, %q) = false, want true", tc.model)
+		}
+		if caps.ContextWindowTokens != tc.context || caps.MaxOutputTokens != 128000 {
+			t.Fatalf("LookupModelCapabilities(openai, %q) limits = %d/%d, want %d/128000",
+				tc.model, caps.ContextWindowTokens, caps.MaxOutputTokens, tc.context)
+		}
+		if !caps.SupportsReasoning || caps.ReasoningMode != ReasoningModeEffort {
+			t.Fatalf("LookupModelCapabilities(openai, %q) reasoning = %#v, want effort reasoning", tc.model, caps)
+		}
+		if !sameStrings(ReasoningLevelsForModel("openai", tc.model), []string{"none", "low", "medium", "high", "xhigh"}) {
+			t.Fatalf("ReasoningLevelsForModel(openai, %q) = %#v, want none/low/medium/high/xhigh",
+				tc.model, ReasoningLevelsForModel("openai", tc.model))
+		}
+		if got := DefaultReasoningEffortForModel("openai", tc.model); got != "medium" {
+			t.Fatalf("DefaultReasoningEffortForModel(openai, %q) = %q, want medium", tc.model, got)
+		}
+		if !caps.SupportsToolCalls || !caps.SupportsImages || !caps.SupportsJSONOutput {
+			t.Fatalf("LookupModelCapabilities(openai, %q) caps = %#v, want tools/images/json", tc.model, caps)
+		}
+	}
+}
+
+func TestCurrentAnthropicStaticModels(t *testing.T) {
+	disableDynamicCatalogForTest(t)
+
+	tests := []struct {
+		model     string
+		context   int
+		maxOutput int
+	}{
+		{model: "claude-fable-5", context: 1000000, maxOutput: 128000},
+		{model: "claude-mythos-5", context: 1000000, maxOutput: 128000},
+		{model: "claude-opus-4-8", context: 1000000, maxOutput: 128000},
+		{model: "claude-sonnet-4-6", context: 1000000, maxOutput: 64000},
+		{model: "claude-haiku-4-5-20251001", context: 200000, maxOutput: 64000},
+	}
+	models := ListCatalogModels("anthropic")
+	for _, tc := range tests {
+		if tc.model != "claude-haiku-4-5-20251001" && !containsString(models, tc.model) {
+			t.Fatalf("ListCatalogModels(anthropic) = %#v, missing %q", models, tc.model)
+		}
+		caps, ok := LookupModelCapabilities("anthropic", tc.model)
+		if !ok {
+			t.Fatalf("LookupModelCapabilities(anthropic, %q) = false, want true", tc.model)
+		}
+		if caps.ContextWindowTokens != tc.context || caps.MaxOutputTokens != tc.maxOutput {
+			t.Fatalf("LookupModelCapabilities(anthropic, %q) limits = %d/%d, want %d/%d",
+				tc.model, caps.ContextWindowTokens, caps.MaxOutputTokens, tc.context, tc.maxOutput)
+		}
+		if !caps.SupportsReasoning || caps.ReasoningMode != ReasoningModeEffort {
+			t.Fatalf("LookupModelCapabilities(anthropic, %q) reasoning = %#v, want effort reasoning", tc.model, caps)
+		}
+		if tc.model == "claude-opus-4-8" {
+			if got := DefaultReasoningEffortForModel("anthropic", tc.model); got != "high" {
+				t.Fatalf("DefaultReasoningEffortForModel(anthropic, %q) = %q, want high", tc.model, got)
+			}
+		}
+		if !caps.SupportsToolCalls || !caps.SupportsImages || !caps.SupportsJSONOutput {
+			t.Fatalf("LookupModelCapabilities(anthropic, %q) caps = %#v, want tools/images/json", tc.model, caps)
+		}
+	}
+}
+
+func TestCurrentMiniMaxAndVolcengineStaticModels(t *testing.T) {
+	disableDynamicCatalogForTest(t)
+
+	minimaxCaps, ok := LookupModelCapabilities("minimax", "MiniMax-M3")
+	if !ok {
+		t.Fatal("LookupModelCapabilities(minimax, MiniMax-M3) = false, want true")
+	}
+	if minimaxCaps.ContextWindowTokens != 1000000 || minimaxCaps.MaxOutputTokens != 1000000 {
+		t.Fatalf("MiniMax-M3 limits = %d/%d, want 1000000/1000000",
+			minimaxCaps.ContextWindowTokens, minimaxCaps.MaxOutputTokens)
+	}
+	if !minimaxCaps.SupportsReasoning || !minimaxCaps.SupportsToolCalls || !minimaxCaps.SupportsImages {
+		t.Fatalf("MiniMax-M3 caps = %#v, want reasoning/tools/images", minimaxCaps)
+	}
+
+	for _, model := range []string{"doubao-seed-1.8", "doubao-seed-2.0-mini"} {
+		caps, ok := LookupModelCapabilities("volcengine", model)
+		if !ok {
+			t.Fatalf("LookupModelCapabilities(volcengine, %q) = false, want true", model)
+		}
+		if caps.ContextWindowTokens != 256000 || caps.MaxOutputTokens != 64000 {
+			t.Fatalf("LookupModelCapabilities(volcengine, %q) limits = %d/%d, want 256000/64000",
+				model, caps.ContextWindowTokens, caps.MaxOutputTokens)
+		}
+		if !caps.SupportsReasoning || !caps.SupportsToolCalls || !caps.SupportsImages {
+			t.Fatalf("LookupModelCapabilities(volcengine, %q) caps = %#v, want reasoning/tools/images", model, caps)
+		}
+	}
+}
+
+func TestOllamaStaticDefaultsComeFromCatalog(t *testing.T) {
+	disableDynamicCatalogForTest(t)
+
+	models := ListCatalogModels("ollama")
+	for _, model := range []string{"qwen2.5:7b", "llama3.1:8b", "deepseek-r1:7b", "gemma3:4b"} {
+		if !containsString(models, model) {
+			t.Fatalf("ListCatalogModels(ollama) = %#v, missing %q", models, model)
+		}
+		caps, ok := LookupModelCapabilities("ollama", model)
+		if !ok {
+			t.Fatalf("LookupModelCapabilities(ollama, %q) = false, want true", model)
+		}
+		if caps.ContextWindowTokens != 128000 || caps.MaxOutputTokens != 32768 {
+			t.Fatalf("LookupModelCapabilities(ollama, %q) limits = %d/%d, want 128000/32768",
+				model, caps.ContextWindowTokens, caps.MaxOutputTokens)
+		}
+	}
+}
+
 func TestCodeFreeStaticModelsDoNotExposeReasoning(t *testing.T) {
 	models := ListCatalogModels("codefree")
 	want := []string{"GLM-4.7", "DeepSeek-V3.1-Terminus", "Qwen3.5-122B-A10B", "GLM-5.1"}
@@ -217,6 +387,91 @@ func TestListCatalogModelsUsesStaticCatalogOnly(t *testing.T) {
 	}
 }
 
+func TestListModelDirectoryModelsUsesDynamicCatalog(t *testing.T) {
+	dynamicMu.Lock()
+	savedRemote := remoteCatalog
+	savedEmbedded := embeddedCatalog
+	savedLocal := localOverrides
+	remoteCatalog = capSnapshot{
+		"openai:gpt-from-remote": {
+			ContextWindow: 1000,
+			MaxOutput:     100,
+		},
+		"anthropic:claude-from-remote": {
+			ContextWindow: 1000,
+			MaxOutput:     100,
+		},
+		"openrouter:openai/gpt-from-openrouter": {
+			ContextWindow: 1000,
+			MaxOutput:     100,
+		},
+		"google:gemini-from-google": {
+			ContextWindow: 1000,
+			MaxOutput:     100,
+		},
+		"ai:accidental-substring-match": {
+			ContextWindow: 1000,
+			MaxOutput:     100,
+		},
+	}
+	embeddedCatalog = capSnapshot{
+		"openai:gpt-from-embedded": {
+			ContextWindow: 1000,
+			MaxOutput:     100,
+		},
+	}
+	localOverrides = capSnapshot{
+		"openai:gpt-from-local": {
+			ContextWindow: 1000,
+			MaxOutput:     100,
+		},
+	}
+	dynamicMu.Unlock()
+	defer func() {
+		dynamicMu.Lock()
+		remoteCatalog = savedRemote
+		embeddedCatalog = savedEmbedded
+		localOverrides = savedLocal
+		dynamicMu.Unlock()
+	}()
+
+	openAICompatModels := ListModelDirectoryModels("openai-compatible")
+	for _, want := range []string{"gpt-from-local", "gpt-from-remote", "gpt-from-embedded"} {
+		if !containsString(openAICompatModels, want) {
+			t.Fatalf("ListModelDirectoryModels(openai-compatible) = %#v, missing %q", openAICompatModels, want)
+		}
+	}
+	if containsString(openAICompatModels, "accidental-substring-match") {
+		t.Fatalf("ListModelDirectoryModels(openai-compatible) = %#v, included substring provider match", openAICompatModels)
+	}
+	for _, stale := range []string{"gpt-from-remote", "gpt-from-embedded"} {
+		if containsString(ListCatalogModels("openai-compatible"), stale) {
+			t.Fatalf("ListCatalogModels(openai-compatible) included dynamic model %q", stale)
+		}
+	}
+
+	anthropicCompatModels := ListModelDirectoryModels("anthropic-compatible")
+	if !containsString(anthropicCompatModels, "claude-from-remote") {
+		t.Fatalf("ListModelDirectoryModels(anthropic-compatible) = %#v, missing claude-from-remote", anthropicCompatModels)
+	}
+	openRouterModels := ListModelDirectoryModels("openrouter")
+	if !containsString(openRouterModels, "openai/gpt-from-openrouter") {
+		t.Fatalf("ListModelDirectoryModels(openrouter) = %#v, missing openai/gpt-from-openrouter", openRouterModels)
+	}
+	geminiModels := ListModelDirectoryModels("gemini")
+	if !containsString(geminiModels, "gemini-from-google") {
+		t.Fatalf("ListModelDirectoryModels(gemini) = %#v, missing aliased google model", geminiModels)
+	}
+	if ProviderUsesModelDirectory("gemini") {
+		t.Fatal("ProviderUsesModelDirectory(gemini) = true, want false for explicit provider catalog recommendations")
+	}
+	for _, provider := range []string{"openai-compatible", "anthropic-compatible", "openrouter"} {
+		if !ProviderUsesModelDirectory(provider) {
+			t.Fatalf("ProviderUsesModelDirectory(%q) = false, want true", provider)
+		}
+	}
+}
+
 func TestLookupModelCapabilitiesPrefersBuiltinOverSnapshot(t *testing.T) {
 	dynamicMu.Lock()
 	savedRemote := remoteCatalog
@@ -324,4 +579,23 @@ func sameStrings(got, want []string) bool {
 		}
 	}
 	return true
+}
+
+func disableDynamicCatalogForTest(t *testing.T) {
+	t.Helper()
+	dynamicMu.Lock()
+	savedRemote := remoteCatalog
+	savedEmbedded := embeddedCatalog
+	savedLocal := localOverrides
+	remoteCatalog = nil
+	embeddedCatalog = nil
+	localOverrides = nil
+	dynamicMu.Unlock()
+	t.Cleanup(func() {
+		dynamicMu.Lock()
+		remoteCatalog = savedRemote
+		embeddedCatalog = savedEmbedded
+		localOverrides = savedLocal
+		dynamicMu.Unlock()
+	})
 }

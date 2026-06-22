@@ -207,11 +207,7 @@ type RuntimeStack struct {
 	UnregisterACPAgentFn                 func(string) error
 	ListModelAliasesFn                   func(context.Context, session.SessionRef) ([]string, error)
 	ListModelChoicesFn                   func(context.Context, session.SessionRef) ([]ModelChoice, error)
-	ListProviderModelsFn                 func(string) []string
-	ListCatalogModelsFn                  func(string) []string
-	DefaultModelCapabilitiesFn           func() ModelCapabilityInfo
-	LookupModelCapabilitiesFn            func(string, string) (ModelCapabilityInfo, bool)
-	ReasoningLevelsForModelFn            func(string, string) []string
+	ModelCatalog                         RuntimeModelCatalog
 	EnsureCodeFreeAuthFn                 func(context.Context, CodeFreeAuthRequest) error
 	EnsureCodeFreeModelSelectionAuthFn   func(context.Context, CodeFreeAuthRequest) error
 	DiscoverSkillsFn                     func(context.Context, string) ([]skill.Meta, error)
@@ -231,6 +227,15 @@ type RuntimeStack struct {
 	DisablePluginFn                      func(context.Context, string) (PluginSnapshot, error)
 	RemovePluginFn                       func(context.Context, string) error
 	InspectPluginFn                      func(context.Context, string) (PluginSnapshot, error)
+}
+
+type RuntimeModelCatalog interface {
+	ListProviderModels(provider string) []string
+	ListCatalogModels(provider string) []string
+	ListModelDirectoryModels(provider string) []string
+	DefaultCapabilities() ModelCapabilityInfo
+	LookupCapabilities(provider string, modelName string) (ModelCapabilityInfo, bool)
+	ReasoningLevels(provider string, modelName string) []string
 }
 
 func (s *RuntimeStack) gateway() (GatewayService, error) {
@@ -435,42 +440,49 @@ func (s *RuntimeStack) ListModelChoices(ctx context.Context, ref session.Session
 }
 
 func (s *RuntimeStack) ListProviderModels(provider string) []string {
-	if s == nil || s.ListProviderModelsFn == nil {
+	if s == nil || s.ModelCatalog == nil {
 		return nil
 	}
-	return s.ListProviderModelsFn(provider)
+	return s.ModelCatalog.ListProviderModels(provider)
 }
 
 func (s *RuntimeStack) ListCatalogModels(provider string) []string {
-	if s == nil || s.ListCatalogModelsFn == nil {
+	if s == nil || s.ModelCatalog == nil {
 		return nil
 	}
-	return s.ListCatalogModelsFn(provider)
+	return s.ModelCatalog.ListCatalogModels(provider)
+}
+
+func (s *RuntimeStack) ListModelDirectoryModels(provider string) []string {
+	if s == nil || s.ModelCatalog == nil {
+		return nil
+	}
+	return s.ModelCatalog.ListModelDirectoryModels(provider)
 }
 
 func (s *RuntimeStack) DefaultModelCapabilities() ModelCapabilityInfo {
-	if s == nil || s.DefaultModelCapabilitiesFn == nil {
+	if s == nil || s.ModelCatalog == nil {
 		return ModelCapabilityInfo{
 			ContextWindowTokens:    128000,
 			DefaultMaxOutputTokens: 4096,
 			MaxOutputTokens:        4096,
 		}
 	}
-	return s.DefaultModelCapabilitiesFn()
+	return s.ModelCatalog.DefaultCapabilities()
 }
 
 func (s *RuntimeStack) LookupModelCapabilities(provider string, modelName string) (ModelCapabilityInfo, bool) {
-	if s == nil || s.LookupModelCapabilitiesFn == nil {
+	if s == nil || s.ModelCatalog == nil {
 		return ModelCapabilityInfo{}, false
 	}
-	return s.LookupModelCapabilitiesFn(provider, modelName)
+	return s.ModelCatalog.LookupCapabilities(provider, modelName)
 }
 
 func (s *RuntimeStack) ReasoningLevelsForModel(provider string, modelName string) []string {
-	if s == nil || s.ReasoningLevelsForModelFn == nil {
+	if s == nil || s.ModelCatalog == nil {
 		return nil
 	}
-	return s.ReasoningLevelsForModelFn(provider, modelName)
+	return s.ModelCatalog.ReasoningLevels(provider, modelName)
 }
 
 func (s *RuntimeStack) EnsureCodeFreeAuth(ctx context.Context, req CodeFreeAuthRequest) error {

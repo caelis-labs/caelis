@@ -93,6 +93,15 @@ type retryingLLM struct {
 	cfg   RetryConfig
 }
 
+// ProviderExecutedToolUsage is an optional LLM capability for providers that
+// can enable provider-executed tools implicitly from request/model policy. When
+// implemented, retry handling uses this hook instead of inspecting req.Tools
+// alone so it does not retry after semantic output from non-idempotent
+// provider-side tools.
+type ProviderExecutedToolUsage interface {
+	UsesProviderExecutedTools(*Request) bool
+}
+
 func (l *retryingLLM) Name() string {
 	if l == nil || l.inner == nil {
 		return ""
@@ -106,7 +115,7 @@ func (l *retryingLLM) Generate(ctx context.Context, req *Request) iter.Seq2[*Str
 			yield(nil, errors.New("model: llm is nil"))
 			return
 		}
-		hasProviderTool := hasProviderExecutedTools(req)
+		hasProviderTool := usesProviderExecutedTools(l.inner, req)
 
 		for attempt := 0; ; attempt++ {
 			committed, semanticDeltaEmitted, stopped, err := l.runAttempt(ctx, req, yield)
@@ -179,6 +188,13 @@ func hasProviderExecutedTools(req *Request) bool {
 		}
 	}
 	return false
+}
+
+func usesProviderExecutedTools(llm LLM, req *Request) bool {
+	if usage, ok := llm.(ProviderExecutedToolUsage); ok {
+		return usage.UsesProviderExecutedTools(CloneRequest(req))
+	}
+	return hasProviderExecutedTools(req)
 }
 
 func isFinalResponse(event *StreamEvent) bool {

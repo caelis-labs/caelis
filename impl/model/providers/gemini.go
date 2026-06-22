@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"iter"
@@ -69,8 +70,15 @@ func (l *geminiLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 			return
 		}
 
+		googleSearchEnabled := geminiGoogleSearchEnabled(l.name, req.Tools)
 		cfg := &genai.GenerateContentConfig{
-			Tools: toGeminiTools(model.FunctionToolDefinitions(req.Tools)),
+			Tools: toGeminiTools(req.Tools, googleSearchEnabled),
+		}
+		if googleSearchEnabled {
+			includeServerSideTools := true
+			cfg.ToolConfig = &genai.ToolConfig{
+				IncludeServerSideToolInvocations: &includeServerSideTools,
+			}
 		}
 		if strings.TrimSpace(system) != "" {
 			cfg.SystemInstruction = &genai.Content{
@@ -126,8 +134,7 @@ func (l *geminiLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 		}
 
 		acc := geminiAccumulator{
-			role:      model.RoleAssistant,
-			toolCalls: []model.ToolCall{},
+			role: model.RoleAssistant,
 		}
 		var usage model.Usage
 		for out, err := range client.Models.GenerateContentStream(runCtx, l.name, contents, cfg) {
@@ -152,33 +159,23 @@ func (l *geminiLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 			if msg.Role != "" {
 				acc.role = msg.Role
 			}
-			if reasoning := msg.ReasoningText(); reasoning != "" {
-				acc.reasoning.WriteString(reasoning)
-				if !yield(&model.StreamEvent{
-					Type:      model.StreamEventPartDelta,
-					PartDelta: &model.PartDelta{Kind: model.PartKindReasoning, TextDelta: reasoning},
-				}, nil) {
-					return
+			for _, part := range msg.Parts {
+				if delta := geminiStreamPartDelta(part); delta != nil {
+					if !yield(&model.StreamEvent{
+						Type:      model.StreamEventPartDelta,
+						PartDelta: delta,
+					}, nil) {
+						return
+					}
 				}
-			}
-			if text := msg.TextContent(); text != "" {
-				acc.text.WriteString(text)
-				if !yield(&model.StreamEvent{
-					Type:      model.StreamEventPartDelta,
-					PartDelta: &model.PartDelta{Kind: model.PartKindText, TextDelta: text},
-				}, nil) {
-					return
-				}
-			}
-			if calls := msg.ToolCalls(); len(calls) > 0 {
-				acc.toolCalls = append(acc.toolCalls, calls...)
+				acc.addPart(part)
 			}
 		}
 
 		yield(&model.StreamEvent{
 			Type: model.StreamEventTurnDone,
 			Response: &model.Response{
-				Message:      model.MessageFromAssistantParts(acc.text.String(), acc.reasoning.String(), dedupToolCalls(acc.toolCalls)),
+				Message:      acc.message(),
 				TurnComplete: true,
 				StepComplete: true,
 				Status:       model.ResponseStatusCompleted,
@@ -290,10 +287,135 @@ func (l *geminiLLM) newClient(ctx context.Context) (*genai.Client, error) {
 }
 
 type geminiAccumulator struct {
-	role      model.Role
-	text      strings.Builder
-	reasoning strings.Builder
-	toolCalls []model.ToolCall
+	role  model.Role
+	parts []model.Part
+}
+
+func (a *geminiAccumulator) addPart(part model.Part) {
+	switch part.Kind {
+	case model.PartKindText:
+		a.addTextPart(part)
+	case model.PartKindReasoning:
+		a.addReasoningPart(part)
+	case model.PartKindToolUse:
+		if !a.mergeToolUsePart(part) {
+			a.parts = append(a.parts, part)
+		}
+	default:
+		a.parts = append(a.parts, part)
+	}
+}
+
+func (a *geminiAccumulator) addTextPart(part model.Part) {
+	if part.Text == nil || part.Text.Text == "" {
+		return
+	}
+	if len(a.parts) > 0 {
+		last := &a.parts[len(a.parts)-1]
+		if last.Kind == model.PartKindText && last.Text != nil {
+			last.Text.Text += part.Text.Text
+			return
+		}
+	}
+	a.parts = append(a.parts, part)
+}
+
+func (a *geminiAccumulator) addReasoningPart(part model.Part) {
+	if part.Reasoning == nil {
+		return
+	}
+	if !geminiIsPlainVisibleReasoningPart(part) {
+		a.parts = append(a.parts, part)
+		return
+	}
+	if len(a.parts) > 0 {
+		last := &a.parts[len(a.parts)-1]
+		if geminiIsPlainVisibleReasoningPart(*last) {
+			*last.Reasoning.VisibleText += *part.Reasoning.VisibleText
+			return
+		}
+	}
+	a.parts = append(a.parts, part)
+}
+
+func (a *geminiAccumulator) mergeToolUsePart(part model.Part) bool {
+	incoming, ok := geminiToolCallFromPart(part)
+	if !ok {
+		return false
+	}
+	key := callKey(incoming)
+	for i, existingPart := range a.parts {
+		existing, ok := geminiToolCallFromPart(existingPart)
+		if !ok || callKey(existing) != key {
+			continue
+		}
+		a.parts[i] = geminiToolUsePartFromCall(mergeToolCall(existing, incoming))
+		return true
+	}
+	return false
+}
+
+func (a *geminiAccumulator) message() model.Message {
+	return model.NewMessage(a.role, a.parts...)
+}
+
+func geminiStreamPartDelta(part model.Part) *model.PartDelta {
+	switch part.Kind {
+	case model.PartKindText:
+		if part.Text == nil || part.Text.Text == "" {
+			return nil
+		}
+		return &model.PartDelta{Kind: model.PartKindText, TextDelta: part.Text.Text}
+	case model.PartKindReasoning:
+		text := geminiVisibleReasoningText(part)
+		if text == "" {
+			return nil
+		}
+		return &model.PartDelta{Kind: model.PartKindReasoning, TextDelta: text}
+	default:
+		return nil
+	}
+}
+
+func geminiVisibleReasoningText(part model.Part) string {
+	if part.Reasoning == nil || part.Reasoning.VisibleText == nil {
+		return ""
+	}
+	return *part.Reasoning.VisibleText
+}
+
+func geminiIsPlainVisibleReasoningPart(part model.Part) bool {
+	if part.Kind != model.PartKindReasoning || part.Reasoning == nil || part.Reasoning.VisibleText == nil {
+		return false
+	}
+	return part.Reasoning.Replay == nil && len(part.Reasoning.ProviderDetails) == 0
+}
+
+func geminiToolCallFromPart(part model.Part) (model.ToolCall, bool) {
+	if part.Kind != model.PartKindToolUse || part.ToolUse == nil {
+		return model.ToolCall{}, false
+	}
+	call := model.ToolCall{
+		ID:               part.ToolUse.ID,
+		Name:             part.ToolUse.Name,
+		Args:             toolArgsRawFromMessagePart(part),
+		ThoughtSignature: geminiReplayToken(part.ToolUse.Replay),
+	}
+	if strings.TrimSpace(call.ID) == "" && strings.TrimSpace(call.Name) == "" {
+		return model.ToolCall{}, false
+	}
+	return call, true
+}
+
+func geminiToolUsePartFromCall(call model.ToolCall) model.Part {
+	part := model.NewToolUsePart(call.ID, call.Name, json.RawMessage(strings.TrimSpace(call.Args)))
+	if part.ToolUse != nil && strings.TrimSpace(call.ThoughtSignature) != "" {
+		part.ToolUse.Replay = &model.ReplayMeta{
+			Provider: geminiReplayProvider,
+			Token:    call.ThoughtSignature,
+		}
+	}
+	return part
 }
 
 func buildGeminiHTTPOptions(baseURL string, headers map[string]string) genai.HTTPOptions {
@@ -492,9 +614,7 @@ func geminiResponseToMessage(out *genai.GenerateContentResponse) (model.Message,
 		return model.Message{}, usage, errGeminiNoCandidates
 	}
 
-	calls := make([]model.ToolCall, 0, len(out.Candidates[0].Content.Parts))
-	textParts := make([]string, 0, len(out.Candidates[0].Content.Parts))
-	reasoningParts := make([]string, 0, len(out.Candidates[0].Content.Parts))
+	parts := make([]model.Part, 0, len(out.Candidates[0].Content.Parts))
 	for _, part := range out.Candidates[0].Content.Parts {
 		if part == nil {
 			continue
@@ -504,23 +624,37 @@ func geminiResponseToMessage(out *genai.GenerateContentResponse) (model.Message,
 			if callID == "" {
 				callID = part.FunctionCall.Name
 			}
-			calls = append(calls, model.ToolCall{
-				ID:               callID,
-				Name:             part.FunctionCall.Name,
-				Args:             toolArgsRaw(part.FunctionCall.Args),
-				ThoughtSignature: encodeGeminiThoughtSignature(part.ThoughtSignature),
-			})
+			toolPart := model.NewToolUsePart(callID, part.FunctionCall.Name, json.RawMessage(toolArgsRaw(part.FunctionCall.Args)))
+			if token := encodeGeminiThoughtSignature(part.ThoughtSignature); token != "" && toolPart.ToolUse != nil {
+				toolPart.ToolUse.Replay = &model.ReplayMeta{
+					Provider: geminiReplayProvider,
+					Token:    token,
+				}
+			}
+			parts = append(parts, toolPart)
+			continue
+		}
+		if part.ToolCall != nil {
+			if replayPart, ok := geminiServerToolReplayPart(geminiReplayKindServerToolCall, part.ToolCall); ok {
+				parts = append(parts, replayPart)
+			}
+			continue
+		}
+		if part.ToolResponse != nil {
+			if replayPart, ok := geminiServerToolReplayPart(geminiReplayKindServerToolResponse, part.ToolResponse); ok {
+				parts = append(parts, replayPart)
+			}
 			continue
 		}
 		if strings.TrimSpace(part.Text) != "" {
 			if part.Thought {
-				reasoningParts = append(reasoningParts, part.Text)
+				parts = append(parts, model.NewReasoningPart(part.Text, model.ReasoningVisibilityVisible))
 			} else {
-				textParts = append(textParts, part.Text)
+				parts = append(parts, model.NewTextPart(part.Text))
 			}
 		}
 	}
-	return model.MessageFromAssistantParts(strings.TrimSpace(strings.Join(textParts, "\n")), strings.TrimSpace(strings.Join(reasoningParts, "\n")), calls), usage, nil
+	return model.NewMessage(model.RoleAssistant, parts...), usage, nil
 }
 
 func toGeminiContents(instructions []model.Part, messages []model.Message) (string, []*genai.Content, error) {
@@ -562,21 +696,7 @@ func toGeminiContents(instructions []model.Part, messages []model.Message) (stri
 			}
 			out = append(out, &genai.Content{Role: "user", Parts: parts})
 		case model.RoleAssistant:
-			calls := m.ToolCalls()
-			parts := make([]*genai.Part, 0, len(calls)+1)
-			if text := strings.TrimSpace(m.TextContent()); text != "" {
-				parts = append(parts, genai.NewPartFromText(text))
-			}
-			for _, call := range calls {
-				// Gemini tool loop requires thought signature in functionCall parts.
-				// Skip legacy tool calls without signature to avoid request rejection.
-				if call.ThoughtSignature == "" {
-					continue
-				}
-				part := genai.NewPartFromFunctionCall(call.Name, toolArgsMap(call.Args))
-				part.ThoughtSignature = decodeGeminiThoughtSignature(call.ThoughtSignature)
-				parts = append(parts, part)
-			}
+			parts := geminiAssistantContentParts(m)
 			if len(parts) > 0 {
 				out = append(out, &genai.Content{Role: "model", Parts: parts})
 			}
@@ -613,67 +733,6 @@ func decodeBase64Image(raw string) ([]byte, error) {
 		return data, nil
 	}
 	return nil, fmt.Errorf("model: invalid base64 image content")
-}
-
-func toGeminiTools(tools []model.ToolDefinition) []*genai.Tool {
-	if len(tools) == 0 {
-		return nil
-	}
-	declarations := make([]*genai.FunctionDeclaration, 0, len(tools))
-	for _, one := range tools {
-		declarations = append(declarations, &genai.FunctionDeclaration{
-			Name:                 one.Name,
-			Description:          one.Description,
-			ParametersJsonSchema: one.Parameters,
-		})
-	}
-	return []*genai.Tool{{FunctionDeclarations: declarations}}
-}
-
-func dedupToolCalls(calls []model.ToolCall) []model.ToolCall {
-	if len(calls) == 0 {
-		return nil
-	}
-	index := map[string]int{}
-	out := make([]model.ToolCall, 0, len(calls))
-	for _, call := range calls {
-		key := callKey(call)
-		if pos, exists := index[key]; exists {
-			out[pos] = mergeToolCall(out[pos], call)
-			continue
-		}
-		index[key] = len(out)
-		out = append(out, call)
-	}
-	return out
-}
-
-func callKey(call model.ToolCall) string {
-	callID := strings.TrimSpace(call.ID)
-	if callID != "" {
-		return callID + "|" + call.Name
-	}
-	if strings.TrimSpace(call.Args) == "" {
-		return call.Name
-	}
-	return call.Name + "|" + strings.TrimSpace(call.Args)
-}
-
-func mergeToolCall(oldCall model.ToolCall, newCall model.ToolCall) model.ToolCall {
-	merged := oldCall
-	if strings.TrimSpace(merged.ID) == "" {
-		merged.ID = newCall.ID
-	}
-	if strings.TrimSpace(newCall.Name) != "" {
-		merged.Name = newCall.Name
-	}
-	if merged.ThoughtSignature == "" && newCall.ThoughtSignature != "" {
-		merged.ThoughtSignature = newCall.ThoughtSignature
-	}
-	if strings.TrimSpace(newCall.Args) != "" {
-		merged.Args = newCall.Args
-	}
-	return merged
 }
 
 func encodeGeminiThoughtSignature(raw []byte) string {

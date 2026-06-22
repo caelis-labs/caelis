@@ -6,6 +6,7 @@ import (
 	"errors"
 	"iter"
 	"maps"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -863,6 +864,90 @@ func TestModelContextRoundTripsThroughSessionStore(t *testing.T) {
 	if got := len(messages[2].ToolResults()) + len(messages[3].ToolResults()); got != 2 {
 		t.Fatalf("tool result count = %d, want 2", got)
 	}
+}
+
+func TestServerSideToolReplayPartsRoundTripThroughSessionStore(t *testing.T) {
+	t.Parallel()
+
+	sessions := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{
+		RootDir:            t.TempDir(),
+		SessionIDGenerator: func() string { return "sess-server-tool-roundtrip" },
+	}))
+	activeSession, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
+		AppName: "caelis",
+		UserID:  "user-1",
+		Workspace: session.WorkspaceRef{
+			Key: "ws-server-tool-roundtrip",
+			CWD: t.TempDir(),
+		},
+	})
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+
+	user := model.NewTextMessage(model.RoleUser, "search before answering")
+	searchCall := json.RawMessage(`{"id":"search-1","toolType":"GOOGLE_SEARCH_WEB","args":{"query":"latest release"}}`)
+	assistant := model.NewMessage(model.RoleAssistant,
+		model.NewTextPart("checking"),
+		serverSideToolReplayTestPart("server_tool_call", searchCall),
+		model.NewTextPart("done"),
+	)
+	for _, event := range []*session.Event{
+		{Type: session.EventTypeUser, Visibility: session.VisibilityCanonical, Message: &user, Text: user.TextContent()},
+		{Type: session.EventTypeAssistant, Visibility: session.VisibilityCanonical, Message: &assistant, Text: assistant.TextContent()},
+	} {
+		if _, err := sessions.AppendEvent(context.Background(), session.AppendEventRequest{
+			SessionRef: activeSession.SessionRef,
+			Event:      event,
+		}); err != nil {
+			t.Fatalf("AppendEvent() error = %v", err)
+		}
+	}
+
+	loaded, err := sessions.LoadSession(context.Background(), session.LoadSessionRequest{SessionRef: activeSession.SessionRef})
+	if err != nil {
+		t.Fatalf("LoadSession() error = %v", err)
+	}
+	messages := messagesFromContext(agent.NewContext(agent.ContextSpec{
+		Context: context.Background(),
+		Session: activeSession,
+		Events:  loaded.Events,
+	}))
+	if got, want := len(messages), 2; got != want {
+		t.Fatalf("len(messages) = %d, want %d: %#v", got, want, messages)
+	}
+	gotParts := messages[1].Parts
+	if len(gotParts) != 3 {
+		t.Fatalf("assistant parts = %#v, want text/replay/text", gotParts)
+	}
+	replayPart := gotParts[1]
+	if replayPart.Reasoning == nil || replayPart.Reasoning.Visibility != model.ReasoningVisibilityTokenOnly {
+		t.Fatalf("replay part = %#v, want token-only reasoning carrier", replayPart)
+	}
+	if replayPart.Reasoning.Replay == nil || replayPart.Reasoning.Replay.Provider != "gemini" || replayPart.Reasoning.Replay.Kind != "server_tool_call" {
+		t.Fatalf("replay meta = %#v, want gemini server_tool_call", replayPart.Reasoning.Replay)
+	}
+	raw := replayPart.Reasoning.ProviderDetails["part"]
+	var gotPayload map[string]any
+	var wantPayload map[string]any
+	if err := json.Unmarshal(raw, &gotPayload); err != nil {
+		t.Fatalf("unmarshal round-tripped provider detail: %v", err)
+	}
+	if err := json.Unmarshal(searchCall, &wantPayload); err != nil {
+		t.Fatalf("unmarshal expected provider detail: %v", err)
+	}
+	if !reflect.DeepEqual(gotPayload, wantPayload) {
+		t.Fatalf("provider detail = %#v, want %#v", gotPayload, wantPayload)
+	}
+}
+
+func serverSideToolReplayTestPart(kind string, raw json.RawMessage) model.Part {
+	part := model.NewReasoningPart("", model.ReasoningVisibilityTokenOnly)
+	part.Reasoning.Replay = &model.ReplayMeta{Provider: "gemini", Kind: kind}
+	part.Reasoning.ProviderDetails = map[string]json.RawMessage{
+		"part": append(json.RawMessage(nil), raw...),
+	}
+	return part
 }
 
 func TestLiveModelContextPrefixMatchesPersistedReplay(t *testing.T) {

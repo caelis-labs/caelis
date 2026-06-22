@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	modelcatalog "github.com/OnslaughtSnail/caelis/impl/model/catalog"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	controlcommands "github.com/OnslaughtSnail/caelis/protocol/acp/control/commands"
 )
@@ -31,7 +32,6 @@ type providerTemplate struct {
 	defaultContextToken int
 	defaultMaxOutputTok int
 	noAuthRequired      bool
-	commonModels        []string
 	endpoints           []connectEndpointTemplate
 }
 
@@ -43,8 +43,6 @@ type connectEndpointTemplate struct {
 	api      model.APIType
 	tokenEnv string
 }
-
-var xiaomiMimoCommonModels = []string{"mimo-v2.5-pro", "mimo-v2-pro", "mimo-v2.5", "mimo-v2-omni", "mimo-v2-flash"}
 
 var connectXiaomiEndpoints = []connectEndpointTemplate{
 	{id: "api-cn", baseURL: connectXiaomiAPIBaseURL, display: "api cn", detail: "Xiaomi MiMo API CN · OpenAI-compatible", api: model.APIMimo, tokenEnv: "XIAOMI_API_KEY"},
@@ -72,18 +70,18 @@ type connectModelDefaults struct {
 type connectWizardPayload = controlcommands.ConnectWizardState
 
 var providerTemplates = []providerTemplate{
-	{label: "openai", api: model.APIOpenAI, provider: "openai", description: "OpenAI-hosted models", defaultBaseURL: "https://api.openai.com/v1", defaultContextToken: 128000, commonModels: []string{"gpt-4o", "gpt-4o-mini", "o3", "o4-mini"}},
-	{label: "openai-compatible", api: model.APIOpenAICompatible, provider: "openai-compatible", description: "OpenAI-compatible proxy or self-hosted endpoint", defaultBaseURL: "https://api.openai.com/v1", defaultContextToken: 128000, commonModels: []string{"gpt-4o", "gpt-4o-mini", "o3", "o4-mini"}},
-	{label: "codefree", api: model.APICodeFree, provider: "codefree", description: "China Telecom SRD CodeFree models via browser OAuth", defaultBaseURL: "https://www.srdcloud.cn", defaultContextToken: 128000, defaultMaxOutputTok: 8000, noAuthRequired: true, commonModels: []string{"GLM-4.7", "DeepSeek-V3.1-Terminus", "Qwen3.5-122B-A10B", "GLM-5.1"}},
-	{label: "openrouter", api: model.APIOpenRouter, provider: "openrouter", description: "OpenRouter multi-provider routing", defaultBaseURL: "https://openrouter.ai/api/v1", defaultContextToken: 262144, commonModels: []string{"openai/gpt-4o-mini", "anthropic/claude-sonnet-4", "google/gemini-2.5-flash"}},
-	{label: "gemini", api: model.APIGemini, provider: "gemini", description: "Google Gemini API", defaultBaseURL: "https://generativelanguage.googleapis.com/v1beta", defaultContextToken: 128000, commonModels: []string{"gemini-2.5-flash", "gemini-2.5-pro"}},
-	{label: "anthropic", api: model.APIAnthropic, provider: "anthropic", description: "Anthropic Claude API", defaultBaseURL: "https://api.anthropic.com", defaultContextToken: 200000, defaultMaxOutputTok: 1024, commonModels: []string{"claude-sonnet-4-20250514", "claude-opus-4-20250514"}},
+	{label: "openai", api: model.APIOpenAI, provider: "openai", description: "OpenAI-hosted models", defaultBaseURL: "https://api.openai.com/v1", defaultContextToken: 128000},
+	{label: "openai-compatible", api: model.APIOpenAICompatible, provider: "openai-compatible", description: "OpenAI-compatible proxy or self-hosted endpoint", defaultBaseURL: "https://api.openai.com/v1", defaultContextToken: 128000},
+	{label: "codefree", api: model.APICodeFree, provider: "codefree", description: "China Telecom SRD CodeFree models via browser OAuth", defaultBaseURL: "https://www.srdcloud.cn", defaultContextToken: 128000, defaultMaxOutputTok: 8000, noAuthRequired: true},
+	{label: "openrouter", api: model.APIOpenRouter, provider: "openrouter", description: "OpenRouter multi-provider routing", defaultBaseURL: "https://openrouter.ai/api/v1", defaultContextToken: 262144},
+	{label: "gemini", api: model.APIGemini, provider: "gemini", description: "Google Gemini API", defaultBaseURL: "https://generativelanguage.googleapis.com/v1beta", defaultContextToken: 128000},
+	{label: "anthropic", api: model.APIAnthropic, provider: "anthropic", description: "Anthropic Claude API", defaultBaseURL: "https://api.anthropic.com", defaultContextToken: 200000, defaultMaxOutputTok: 1024},
 	{label: "anthropic-compatible", api: model.APIAnthropicCompatible, provider: "anthropic-compatible", description: "Anthropic-compatible proxy or self-hosted endpoint", defaultBaseURL: "https://api.anthropic.com", defaultContextToken: 200000, defaultMaxOutputTok: 1024},
-	{label: "deepseek", api: model.APIDeepSeek, provider: "deepseek", description: "DeepSeek V4 models", defaultBaseURL: "https://api.deepseek.com/v1", defaultContextToken: 1048576, commonModels: []string{"deepseek-v4-flash", "deepseek-v4-pro"}},
-	{label: "xiaomi", api: model.APIMimo, provider: "xiaomi", description: "Xiaomi Mimo models", defaultEndpointID: "api-cn", defaultBaseURL: connectXiaomiAPIBaseURL, defaultContextToken: 262144, commonModels: xiaomiMimoCommonModels, endpoints: connectXiaomiEndpoints},
-	{label: "minimax", api: model.APIMiniMax, provider: "minimax", description: "MiniMax models over an Anthropic-compatible API", defaultBaseURL: "https://api.minimaxi.com/anthropic", defaultContextToken: 204800, defaultMaxOutputTok: 8192, commonModels: []string{"MiniMax-M2.7", "MiniMax-M2.7-highspeed", "MiniMax-M2.5", "MiniMax-M2.5-highspeed", "MiniMax-M2.1", "MiniMax-M2.1-highspeed", "MiniMax-M2"}},
+	{label: "deepseek", api: model.APIDeepSeek, provider: "deepseek", description: "DeepSeek V4 models", defaultBaseURL: "https://api.deepseek.com/v1", defaultContextToken: 1048576},
+	{label: "xiaomi", api: model.APIMimo, provider: "xiaomi", description: "Xiaomi Mimo models", defaultEndpointID: "api-cn", defaultBaseURL: connectXiaomiAPIBaseURL, defaultContextToken: 262144, endpoints: connectXiaomiEndpoints},
+	{label: "minimax", api: model.APIMiniMax, provider: "minimax", description: "MiniMax models over an Anthropic-compatible API", defaultBaseURL: "https://api.minimaxi.com/anthropic", defaultContextToken: 204800, defaultMaxOutputTok: 8192},
 	{label: "volcengine", api: model.APIVolcengine, provider: "volcengine", description: "Volcengine Ark standard or coding-plan endpoints", defaultEndpointID: connectVolcengineStandardValue, defaultBaseURL: "https://ark.cn-beijing.volces.com/api/v3", defaultContextToken: 128000, endpoints: connectVolcengineEndpoints},
-	{label: "ollama", api: model.APIOllama, provider: "ollama", description: "Local Ollama runtime", defaultBaseURL: "http://localhost:11434", defaultContextToken: 128000, noAuthRequired: true, commonModels: []string{"qwen2.5:7b", "llama3.1:8b", "deepseek-r1:7b", "gemma3:4b"}},
+	{label: "ollama", api: model.APIOllama, provider: "ollama", description: "Local Ollama runtime", defaultBaseURL: "http://localhost:11434", defaultContextToken: 128000, noAuthRequired: true},
 }
 
 func completeConnectArgs(ctx context.Context, driver *Adapter, command string, query string, limit int) ([]SlashArgCandidate, error) {
@@ -372,7 +370,6 @@ func findProviderTemplate(value string) (providerTemplate, bool) {
 			defaultEndpointID:   "token-plan-cn",
 			defaultBaseURL:      connectXiaomiTokenPlanCNBaseURL,
 			defaultContextToken: 1048576,
-			commonModels:        xiaomiMimoCommonModels,
 			endpoints:           connectXiaomiEndpoints,
 		}, true
 	}
@@ -433,14 +430,15 @@ func buildConnectModelChoices(stack *RuntimeStack, provider string, fallbackMode
 
 func fallbackConnectModels(stack *RuntimeStack, tpl providerTemplate) []string {
 	if stack != nil {
-		if models := stack.ListCatalogModels(tpl.provider); len(models) > 0 {
+		if modelcatalog.ProviderUsesModelDirectory(tpl.provider) {
+			if models := stack.ListModelDirectoryModels(tpl.provider); len(models) > 0 {
+				return models
+			}
+		} else if models := stack.ListCatalogModels(tpl.provider); len(models) > 0 {
 			return models
 		}
 	}
-	if len(tpl.commonModels) > 0 {
-		return append([]string(nil), tpl.commonModels...)
-	}
-	return commonModelsForProvider(tpl.provider)
+	return nil
 }
 
 func connectDisplayModelRef(provider, modelName string) string {
@@ -472,22 +470,15 @@ func defaultMaxOutputForTemplate(tpl providerTemplate) int {
 	return 4096
 }
 
-func commonModelsForProvider(provider string) []string {
-	provider = strings.ToLower(strings.TrimSpace(provider))
-	for _, tpl := range providerTemplates {
-		if tpl.provider == provider || tpl.label == provider {
-			return append([]string(nil), tpl.commonModels...)
-		}
-	}
-	return nil
-}
-
 func describeConnectModel(stack *RuntimeStack, provider string, modelName string) string {
 	caps, ok := lookupConnectModelCapabilities(stack, provider, modelName)
 	if !ok {
 		return "suggested model"
 	}
 	parts := []string{"catalog preset"}
+	if modelcatalog.ProviderUsesModelDirectory(provider) {
+		parts[0] = "model directory"
+	}
 	if caps.ContextWindowTokens > 0 {
 		parts = append(parts, fmt.Sprintf("%dk ctx", caps.ContextWindowTokens/1000))
 	}

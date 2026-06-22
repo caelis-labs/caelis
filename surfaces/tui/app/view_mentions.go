@@ -28,8 +28,7 @@ func (m *Model) renderMentionList() string {
 			detail = ""
 		}
 		if i == m.mentionIndex {
-			prefix = m.theme.PromptStyle().Render("▸ ")
-			line := prefix + m.theme.CommandActiveStyle().Render(display)
+			line := m.renderCompletionSelectedText(display)
 			if detail != "" {
 				line += "  " + m.theme.HelpHintTextStyle().Render(detail)
 			}

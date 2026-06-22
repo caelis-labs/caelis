@@ -625,8 +625,7 @@ func (m *Model) renderSlashArgList() string {
 		detail := strings.TrimSpace(candidates[i].Detail)
 		prefix := "  "
 		if i == index {
-			prefix = m.theme.PromptStyle().Render("▸ ")
-			line := prefix + m.theme.CommandActiveStyle().Render(display)
+			line := m.renderCompletionSelectedText(display)
 			if detail != "" {
 				line += "  " + m.theme.HelpHintTextStyle().Render(detail)
 			}

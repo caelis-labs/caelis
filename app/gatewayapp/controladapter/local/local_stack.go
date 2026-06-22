@@ -108,13 +108,7 @@ func runtimeStack(stack *gatewayapp.Stack) *RuntimeStack {
 		ListModelChoicesFn: func(ctx context.Context, ref session.SessionRef) ([]ModelChoice, error) {
 			return toRuntimeModelChoices(models.ListChoices(ctx, ref))
 		},
-		ListProviderModelsFn:       models.ListProviderModels,
-		ListCatalogModelsFn:        models.ListCatalogModels,
-		DefaultModelCapabilitiesFn: func() ModelCapabilityInfo { return toRuntimeModelCapabilities(models.DefaultCapabilities()) },
-		LookupModelCapabilitiesFn: func(provider string, modelName string) (ModelCapabilityInfo, bool) {
-			return toRuntimeModelCapabilitiesWithOK(models.LookupCapabilities(provider, modelName))
-		},
-		ReasoningLevelsForModelFn: models.ReasoningLevels,
+		ModelCatalog: runtimeModelCatalog{models: models},
 		EnsureCodeFreeAuthFn: func(ctx context.Context, req CodeFreeAuthRequest) error {
 			return models.EnsureCodeFreeAuth(ctx, gatewayapp.CodeFreeAuthRequest{
 				BaseURL:         req.BaseURL,
@@ -184,6 +178,34 @@ func toRuntimeModelConfigWithOK(cfg gatewayapp.ModelConfig, ok bool) (ModelConfi
 		return ModelConfig{}, false
 	}
 	return toRuntimeModelConfig(cfg), true
+}
+
+type runtimeModelCatalog struct {
+	models gatewayapp.ModelService
+}
+
+func (c runtimeModelCatalog) ListProviderModels(provider string) []string {
+	return c.models.ListProviderModels(provider)
+}
+
+func (c runtimeModelCatalog) ListCatalogModels(provider string) []string {
+	return c.models.ListCatalogModels(provider)
+}
+
+func (c runtimeModelCatalog) ListModelDirectoryModels(provider string) []string {
+	return c.models.ListModelDirectoryModels(provider)
+}
+
+func (c runtimeModelCatalog) DefaultCapabilities() ModelCapabilityInfo {
+	return toRuntimeModelCapabilities(c.models.DefaultCapabilities())
+}
+
+func (c runtimeModelCatalog) LookupCapabilities(provider string, modelName string) (ModelCapabilityInfo, bool) {
+	return toRuntimeModelCapabilitiesWithOK(c.models.LookupCapabilities(provider, modelName))
+}
+
+func (c runtimeModelCatalog) ReasoningLevels(provider string, modelName string) []string {
+	return c.models.ReasoningLevels(provider, modelName)
 }
 
 func toRuntimeModelConfig(cfg gatewayapp.ModelConfig) ModelConfig {

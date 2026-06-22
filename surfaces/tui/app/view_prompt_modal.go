@@ -126,15 +126,11 @@ func (m *Model) renderPromptChoiceLine(choice promptChoice, selected bool) strin
 		mainText += "  " + detail
 	}
 	mainText = truncateTailDisplay(mainText, contentWidth)
-	selectedLabelStyle := lipgloss.NewStyle().Foreground(m.theme.Focus).Bold(true)
-	selectedDetailStyle := m.theme.HelpHintTextStyle()
-	if m.theme.CommandActive != nil {
-		selectedLabelStyle = selectedLabelStyle.Background(m.theme.CommandActive)
-		selectedDetailStyle = selectedDetailStyle.Background(m.theme.CommandActive)
-	}
+	selectedLabelStyle := m.theme.SelectionStyle().Bold(true)
+	selectedDetailStyle := m.theme.SelectionStyle()
 	if detail == "" {
 		if selected {
-			return m.theme.PromptStyle().Render(gutter) + selectedLabelStyle.Render(mainText)
+			return selectedLabelStyle.Render(gutter) + selectedLabelStyle.Render(mainText)
 		}
 		return m.theme.HelpHintTextStyle().Render(gutter) + m.theme.TextStyle().Render(mainText)
 	}
@@ -149,7 +145,7 @@ func (m *Model) renderPromptChoiceLine(choice promptChoice, selected bool) strin
 	detailBudget := maxInt(1, contentWidth-displayColumns(labelText)-2)
 	detailText := truncateTailDisplay(detail, detailBudget)
 	if selected {
-		return m.theme.PromptStyle().Render(gutter) +
+		return selectedLabelStyle.Render(gutter) +
 			selectedLabelStyle.Render(labelText) +
 			"  " +
 			selectedDetailStyle.Render(detailText)
@@ -176,7 +172,7 @@ func (m *Model) renderPromptModalBox(lines []string) string {
 	}
 	box := lipgloss.NewStyle().
 		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(m.theme.Focus).
+		BorderForeground(m.theme.PanelBorder).
 		Padding(0, 1).
 		Width(width)
 	return box.Render(body)

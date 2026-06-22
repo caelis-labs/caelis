@@ -147,7 +147,7 @@ func resolveTokens(t Theme) Tokens {
 		BlockBadge:  quietStyle(t, t.SecondaryText).Bold(true),
 
 		// Overlay
-		OverlayBorder: fgStyle(t.Focus),
+		OverlayBorder: fgStyle(t.PanelBorder),
 		OverlayTitle:  fgStyle(t.PanelTitle).Bold(true),
 
 		// Scrollbar

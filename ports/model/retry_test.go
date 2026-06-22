@@ -46,6 +46,15 @@ func (m *retryTestLLM) Generate(ctx context.Context, req *Request) iter.Seq2[*St
 	}
 }
 
+type retryProviderToolUsageLLM struct {
+	*retryTestLLM
+	usesProviderTools bool
+}
+
+func (m *retryProviderToolUsageLLM) UsesProviderExecutedTools(*Request) bool {
+	return m.usesProviderTools
+}
+
 func TestWithRetryRetriesSameLLMRequestBeforeEmission(t *testing.T) {
 	t.Parallel()
 
@@ -107,6 +116,48 @@ func TestWithRetryRetriesSameLLMRequestBeforeEmission(t *testing.T) {
 	}
 	if len(inner.seenReqs) != 2 || inner.seenReqs[0] == req || inner.seenReqs[1] == req || inner.seenReqs[0] == inner.seenReqs[1] {
 		t.Fatalf("expected each attempt to receive a fresh request clone, got %#v", inner.seenReqs)
+	}
+}
+
+func TestWithRetryNoRetryAfterImplicitProviderExecutedToolSemanticEmission(t *testing.T) {
+	t.Parallel()
+
+	inner := &retryProviderToolUsageLLM{
+		retryTestLLM: &retryTestLLM{
+			events: [][]*StreamEvent{
+				{{Type: StreamEventPartDelta, PartDelta: &PartDelta{TextDelta: "partial"}}},
+				{StreamEventFromResponse(&Response{Message: NewTextMessage(RoleAssistant, "should-not-run"), TurnComplete: true})},
+			},
+			errs: []error{
+				errors.New("model: http status 529 body={\"error\":\"overloaded_error\"}"),
+				nil,
+			},
+		},
+		usesProviderTools: true,
+	}
+	llm := WithRetry(inner, RetryConfig{
+		MaxRetries:          2,
+		BaseDelay:           time.Nanosecond,
+		MaxDelay:            time.Nanosecond,
+		RateLimitMaxRetries: 2,
+		RateLimitBaseDelay:  time.Nanosecond,
+		RateLimitMaxDelay:   time.Nanosecond,
+	})
+
+	var gotErr error
+	for _, err := range llm.Generate(context.Background(), &Request{
+		Messages: []Message{NewTextMessage(RoleUser, "hello")},
+	}) {
+		if err != nil {
+			gotErr = err
+		}
+	}
+
+	if gotErr == nil || !strings.Contains(gotErr.Error(), "overloaded_error") {
+		t.Fatalf("Generate() error = %v, want original transient stream error", gotErr)
+	}
+	if got, want := inner.calls, 1; got != want {
+		t.Fatalf("calls = %d, want %d (implicit provider tool should block retry after semantic output)", got, want)
 	}
 }
 

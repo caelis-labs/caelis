@@ -59,13 +59,7 @@ func gatewayAppStackForRuntimeTest(stack *gatewayapp.Stack) *RuntimeStack {
 		ListModelChoicesFn: func(ctx context.Context, ref session.SessionRef) ([]ModelChoice, error) {
 			return testRuntimeModelChoices(stack.ListModelChoices(ctx, ref))
 		},
-		ListProviderModelsFn:       stack.ListProviderModels,
-		ListCatalogModelsFn:        stack.Models().ListCatalogModels,
-		DefaultModelCapabilitiesFn: func() ModelCapabilityInfo { return testRuntimeModelCapabilities(stack.Models().DefaultCapabilities()) },
-		LookupModelCapabilitiesFn: func(provider string, modelName string) (ModelCapabilityInfo, bool) {
-			return testRuntimeModelCapabilitiesWithOK(stack.Models().LookupCapabilities(provider, modelName))
-		},
-		ReasoningLevelsForModelFn: stack.Models().ReasoningLevels,
+		ModelCatalog: testRuntimeModelCatalog{stack: stack},
 		EnsureCodeFreeAuthFn: func(ctx context.Context, req CodeFreeAuthRequest) error {
 			return stack.Models().EnsureCodeFreeAuth(ctx, gatewayapp.CodeFreeAuthRequest{
 				BaseURL:         req.BaseURL,
@@ -176,6 +170,34 @@ func testRuntimeModelConfigWithOK(cfg gatewayapp.ModelConfig, ok bool) (ModelCon
 		return ModelConfig{}, false
 	}
 	return testRuntimeModelConfig(cfg), true
+}
+
+type testRuntimeModelCatalog struct {
+	stack *gatewayapp.Stack
+}
+
+func (c testRuntimeModelCatalog) ListProviderModels(provider string) []string {
+	return c.stack.ListProviderModels(provider)
+}
+
+func (c testRuntimeModelCatalog) ListCatalogModels(provider string) []string {
+	return c.stack.Models().ListCatalogModels(provider)
+}
+
+func (c testRuntimeModelCatalog) ListModelDirectoryModels(provider string) []string {
+	return c.stack.Models().ListModelDirectoryModels(provider)
+}
+
+func (c testRuntimeModelCatalog) DefaultCapabilities() ModelCapabilityInfo {
+	return testRuntimeModelCapabilities(c.stack.Models().DefaultCapabilities())
+}
+
+func (c testRuntimeModelCatalog) LookupCapabilities(provider string, modelName string) (ModelCapabilityInfo, bool) {
+	return testRuntimeModelCapabilitiesWithOK(c.stack.Models().LookupCapabilities(provider, modelName))
+}
+
+func (c testRuntimeModelCatalog) ReasoningLevels(provider string, modelName string) []string {
+	return c.stack.Models().ReasoningLevels(provider, modelName)
 }
 
 func testRuntimeModelConfig(cfg gatewayapp.ModelConfig) ModelConfig {
