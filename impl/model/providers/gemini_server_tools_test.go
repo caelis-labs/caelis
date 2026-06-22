@@ -230,7 +230,7 @@ func TestGeminiStream_PreservesInterleavedPartOrderForReplay(t *testing.T) {
 		flusher, _ := w.(http.Flusher)
 		chunks := []string{
 			`{"candidates":[{"content":{"role":"model","parts":[{"text":"pre-"}]}}]}`,
-			`{"candidates":[{"content":{"role":"model","parts":[{"toolCall":{"id":"search-1","toolType":"GOOGLE_SEARCH_WEB","args":{"query":"latest release"}}}]}}]}`,
+			`{"candidates":[{"content":{"role":"model","parts":[{"toolCall":{"id":"search-1","toolType":"GOOGLE_SEARCH_WEB","args":{"query":"latest release"}},"thoughtSignature":"c2lnLXNlYXJjaC0x"}]}}]}`,
 			`{"candidates":[{"content":{"role":"model","parts":[{"text":"mid-"}]}}]}`,
 			`{"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"id":"call-1","name":"lookup","args":{"query":"release"}},"thoughtSignature":"c2lnLWNhbGwtMQ=="}]}}]}`,
 			`{"candidates":[{"content":{"role":"model","parts":[{"toolResponse":{"id":"search-1","toolType":"GOOGLE_SEARCH_WEB","response":{"status":"ok"}}}]}}]}`,
@@ -280,6 +280,9 @@ func TestGeminiStream_PreservesInterleavedPartOrderForReplay(t *testing.T) {
 	if parts[1].ToolCall == nil || parts[1].ToolCall.ID != "search-1" {
 		t.Fatalf("part[1] = %#v, want server-side tool call", parts[1])
 	}
+	if string(parts[1].ThoughtSignature) != "sig-search-1" {
+		t.Fatalf("part[1].ThoughtSignature = %q, want server-side tool signature", string(parts[1].ThoughtSignature))
+	}
 	if parts[2].Text != "mid-" {
 		t.Fatalf("part[2] = %#v, want middle text", parts[2])
 	}
@@ -301,6 +304,7 @@ func TestGeminiResponseToMessage_PreservesServerSideToolPartsForReplay(t *testin
 				Content: &genai.Content{
 					Parts: []*genai.Part{
 						{
+							ThoughtSignature: []byte("sig-search-1"),
 							ToolCall: &genai.ToolCall{
 								ID:       "search-1",
 								ToolType: genai.ToolTypeGoogleSearchWeb,
@@ -343,11 +347,56 @@ func TestGeminiResponseToMessage_PreservesServerSideToolPartsForReplay(t *testin
 	if contents[0].Parts[0].ToolCall == nil || contents[0].Parts[0].ToolCall.ID != "search-1" {
 		t.Fatalf("first part = %#v, want replayed server-side tool call", contents[0].Parts[0])
 	}
+	if string(contents[0].Parts[0].ThoughtSignature) != "sig-search-1" {
+		t.Fatalf("first thought signature = %q, want server-side tool signature", string(contents[0].Parts[0].ThoughtSignature))
+	}
 	if contents[0].Parts[1].ToolResponse == nil || contents[0].Parts[1].ToolResponse.ID != "search-1" {
 		t.Fatalf("second part = %#v, want replayed server-side tool response", contents[0].Parts[1])
 	}
 	if contents[0].Parts[2].FunctionCall == nil || contents[0].Parts[2].FunctionCall.ID != "call-1" {
 		t.Fatalf("third part = %#v, want function call", contents[0].Parts[2])
+	}
+}
+
+func TestGeminiAssistantContentPartsSkipsUnsignedServerToolCallReplay(t *testing.T) {
+	msg, _, err := geminiResponseToMessage(&genai.GenerateContentResponse{
+		Candidates: []*genai.Candidate{
+			{
+				Content: &genai.Content{
+					Parts: []*genai.Part{
+						{
+							ToolCall: &genai.ToolCall{
+								ID:       "search-1",
+								ToolType: genai.ToolTypeGoogleSearchWeb,
+								Args:     map[string]any{"query": "latest release"},
+							},
+						},
+						{
+							ToolResponse: &genai.ToolResponse{
+								ID:       "search-1",
+								ToolType: genai.ToolTypeGoogleSearchWeb,
+								Response: map[string]any{"status": "ok"},
+							},
+						},
+						{Text: "done"},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, contents, err := toGeminiContents(nil, []model.Message{msg})
+	if err != nil {
+		t.Fatalf("toGeminiContents: %v", err)
+	}
+	if len(contents) != 1 || len(contents[0].Parts) != 1 {
+		t.Fatalf("contents = %#v, want only text after unsigned server tool replay is omitted", contents)
+	}
+	if contents[0].Parts[0].Text != "done" {
+		t.Fatalf("part = %#v, want final text", contents[0].Parts[0])
 	}
 }
 
@@ -358,6 +407,7 @@ func TestGeminiServerToolReplayPartsRoundTripThroughFileStore(t *testing.T) {
 				Content: &genai.Content{
 					Parts: []*genai.Part{
 						{
+							ThoughtSignature: []byte("sig-search-1"),
 							ToolCall: &genai.ToolCall{
 								ID:       "search-1",
 								ToolType: genai.ToolTypeGoogleSearchWeb,
@@ -428,6 +478,9 @@ func TestGeminiServerToolReplayPartsRoundTripThroughFileStore(t *testing.T) {
 	}
 	if contents[0].Parts[0].ToolCall == nil || contents[0].Parts[0].ToolCall.ID != "search-1" {
 		t.Fatalf("first part = %#v, want replayed server-side tool call", contents[0].Parts[0])
+	}
+	if string(contents[0].Parts[0].ThoughtSignature) != "sig-search-1" {
+		t.Fatalf("first thought signature = %q, want server-side tool signature", string(contents[0].Parts[0].ThoughtSignature))
 	}
 	if contents[0].Parts[1].ToolResponse == nil || contents[0].Parts[1].ToolResponse.ID != "search-1" {
 		t.Fatalf("second part = %#v, want replayed server-side tool response", contents[0].Parts[1])

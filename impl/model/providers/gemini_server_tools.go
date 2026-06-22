@@ -164,7 +164,7 @@ func geminiBoolProviderDetail(details map[string]json.RawMessage, key string) (b
 	return value, true
 }
 
-func geminiServerToolReplayPart(kind string, value any) (model.Part, bool) {
+func geminiServerToolReplayPart(kind string, value any, token string) (model.Part, bool) {
 	raw, err := json.Marshal(value)
 	if err != nil || len(raw) == 0 {
 		return model.Part{}, false
@@ -176,6 +176,7 @@ func geminiServerToolReplayPart(kind string, value any) (model.Part, bool) {
 	part.Reasoning.Replay = &model.ReplayMeta{
 		Provider: geminiReplayProvider,
 		Kind:     kind,
+		Token:    strings.TrimSpace(token),
 	}
 	part.Reasoning.ProviderDetails = map[string]json.RawMessage{
 		geminiProviderDetailPart: append(json.RawMessage(nil), raw...),
@@ -185,6 +186,7 @@ func geminiServerToolReplayPart(kind string, value any) (model.Part, bool) {
 
 func geminiAssistantContentParts(m model.Message) []*genai.Part {
 	parts := make([]*genai.Part, 0, len(m.Parts))
+	skippedServerToolCalls := map[string]struct{}{}
 	for _, msgPart := range m.Parts {
 		switch msgPart.Kind {
 		case model.PartKindText:
@@ -192,9 +194,19 @@ func geminiAssistantContentParts(m model.Message) []*genai.Part {
 				parts = append(parts, genai.NewPartFromText(msgPart.Text.Text))
 			}
 		case model.PartKindReasoning:
-			if replayPart := geminiServerToolPartFromReplay(msgPart); replayPart != nil {
-				parts = append(parts, replayPart)
+			replayPart, skippedCallID := geminiServerToolPartFromReplay(msgPart)
+			if skippedCallID != "" {
+				skippedServerToolCalls[skippedCallID] = struct{}{}
 			}
+			if replayPart == nil {
+				continue
+			}
+			if replayPart.ToolResponse != nil {
+				if _, skipped := skippedServerToolCalls[strings.TrimSpace(replayPart.ToolResponse.ID)]; skipped {
+					continue
+				}
+			}
+			parts = append(parts, replayPart)
 		case model.PartKindToolUse:
 			if msgPart.ToolUse == nil {
 				continue
@@ -239,32 +251,39 @@ func toolArgsRawFromMessagePart(part model.Part) string {
 	return strings.TrimSpace(calls[0].Args)
 }
 
-func geminiServerToolPartFromReplay(part model.Part) *genai.Part {
+func geminiServerToolPartFromReplay(part model.Part) (*genai.Part, string) {
 	if part.Reasoning == nil || part.Reasoning.Replay == nil {
-		return nil
+		return nil, ""
 	}
 	replay := part.Reasoning.Replay
 	if !strings.EqualFold(strings.TrimSpace(replay.Provider), geminiReplayProvider) {
-		return nil
+		return nil, ""
 	}
 	raw := part.Reasoning.ProviderDetails[geminiProviderDetailPart]
 	if len(raw) == 0 {
-		return nil
+		return nil, ""
 	}
 	switch strings.TrimSpace(replay.Kind) {
 	case geminiReplayKindServerToolCall:
 		var call genai.ToolCall
 		if err := json.Unmarshal(raw, &call); err != nil {
-			return nil
+			return nil, ""
 		}
-		return &genai.Part{ToolCall: &call}
+		token := geminiReplayToken(replay)
+		if token == "" {
+			return nil, strings.TrimSpace(call.ID)
+		}
+		return &genai.Part{
+			ToolCall:         &call,
+			ThoughtSignature: decodeGeminiThoughtSignature(token),
+		}, ""
 	case geminiReplayKindServerToolResponse:
 		var response genai.ToolResponse
 		if err := json.Unmarshal(raw, &response); err != nil {
-			return nil
+			return nil, ""
 		}
-		return &genai.Part{ToolResponse: &response}
+		return &genai.Part{ToolResponse: &response}, ""
 	default:
-		return nil
+		return nil, ""
 	}
 }

@@ -634,6 +634,7 @@ func geminiResponseToMessage(out *genai.GenerateContentResponse) (model.Message,
 	}
 
 	parts := make([]model.Part, 0, len(out.Candidates[0].Content.Parts))
+	serverToolCallTokens := map[string]string{}
 	for _, part := range out.Candidates[0].Content.Parts {
 		if part == nil {
 			continue
@@ -654,13 +655,21 @@ func geminiResponseToMessage(out *genai.GenerateContentResponse) (model.Message,
 			continue
 		}
 		if part.ToolCall != nil {
-			if replayPart, ok := geminiServerToolReplayPart(geminiReplayKindServerToolCall, part.ToolCall); ok {
+			token := encodeGeminiThoughtSignature(part.ThoughtSignature)
+			if id := strings.TrimSpace(part.ToolCall.ID); id != "" && token != "" {
+				serverToolCallTokens[id] = token
+			}
+			if replayPart, ok := geminiServerToolReplayPart(geminiReplayKindServerToolCall, part.ToolCall, token); ok {
 				parts = append(parts, replayPart)
 			}
 			continue
 		}
 		if part.ToolResponse != nil {
-			if replayPart, ok := geminiServerToolReplayPart(geminiReplayKindServerToolResponse, part.ToolResponse); ok {
+			token := encodeGeminiThoughtSignature(part.ThoughtSignature)
+			if token == "" {
+				token = serverToolCallTokens[strings.TrimSpace(part.ToolResponse.ID)]
+			}
+			if replayPart, ok := geminiServerToolReplayPart(geminiReplayKindServerToolResponse, part.ToolResponse, token); ok {
 				parts = append(parts, replayPart)
 			}
 			continue
