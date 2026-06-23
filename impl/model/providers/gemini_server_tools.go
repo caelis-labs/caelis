@@ -14,23 +14,15 @@ const geminiReplayKindServerToolCall = "server_tool_call"
 const geminiReplayKindServerToolResponse = "server_tool_response"
 const geminiProviderDetailPart = "part"
 
-type geminiGoogleSearchPreference int
+var geminiGoogleSearchMatcher = providerExecutedToolMatcher{
+	ProviderAliases: []string{"", "gemini", "google"},
+	Names:           []string{geminiGoogleSearchToolName, "google-search", "googlesearch", "grounding_with_google_search"},
+	DetailKeys:      []string{"google_search", "googleSearch"},
+}
 
-const (
-	geminiGoogleSearchPrefUnspecified geminiGoogleSearchPreference = iota
-	geminiGoogleSearchPrefEnabled
-	geminiGoogleSearchPrefDisabled
-)
-
-func geminiGoogleSearchEnabled(modelName string, specs []model.ToolSpec) bool {
-	switch geminiGoogleSearchPreferenceFromToolSpecs(specs) {
-	case geminiGoogleSearchPrefEnabled:
-		return true
-	case geminiGoogleSearchPrefDisabled:
-		return false
-	default:
-		return geminiUsesCurrentGoogleSearchTool(modelName)
-	}
+func geminiGoogleSearchEnabled(_ string, specs []model.ToolSpec) bool {
+	match := providerExecutedToolMatchFromSpecs(specs, geminiGoogleSearchMatcher)
+	return match.Enabled && !match.Disabled
 }
 
 func (l *geminiLLM) UsesProviderExecutedTools(req *model.Request) bool {
@@ -38,14 +30,6 @@ func (l *geminiLLM) UsesProviderExecutedTools(req *model.Request) bool {
 		return false
 	}
 	return geminiGoogleSearchEnabled(l.name, req.Tools)
-}
-
-func geminiUsesCurrentGoogleSearchTool(modelName string) bool {
-	major, ok := geminiMajorVersion(modelName)
-	if !ok {
-		return false
-	}
-	return major >= 2
 }
 
 func toGeminiTools(specs []model.ToolSpec, groundingWithGoogleSearch bool) []*genai.Tool {
@@ -69,99 +53,6 @@ func toGeminiTools(specs []model.ToolSpec, groundingWithGoogleSearch bool) []*ge
 		return nil
 	}
 	return out
-}
-
-func geminiGoogleSearchPreferenceFromToolSpecs(specs []model.ToolSpec) geminiGoogleSearchPreference {
-	preference := geminiGoogleSearchPrefUnspecified
-	for _, spec := range specs {
-		if spec.Kind != model.ToolSpecKindProviderExecuted || spec.ProviderExecuted == nil {
-			continue
-		}
-		switch geminiGoogleSearchPreferenceFromToolSpec(spec.ProviderExecuted) {
-		case geminiGoogleSearchPrefDisabled:
-			return geminiGoogleSearchPrefDisabled
-		case geminiGoogleSearchPrefEnabled:
-			preference = geminiGoogleSearchPrefEnabled
-		}
-	}
-	return preference
-}
-
-func geminiGoogleSearchPreferenceFromToolSpec(tool *model.ProviderExecutedToolSpec) geminiGoogleSearchPreference {
-	if tool == nil || !geminiProviderMatches(tool.Provider) {
-		return geminiGoogleSearchPrefUnspecified
-	}
-	nameMatches := geminiGoogleSearchNameMatches(tool.Name)
-	detailsMatch := geminiGoogleSearchProviderDetails(tool.ProviderDetails)
-	if !nameMatches && !detailsMatch {
-		return geminiGoogleSearchPrefUnspecified
-	}
-	if geminiGoogleSearchDisabledByDetails(tool.ProviderDetails) {
-		return geminiGoogleSearchPrefDisabled
-	}
-	return geminiGoogleSearchPrefEnabled
-}
-
-func geminiProviderMatches(provider string) bool {
-	provider = strings.ToLower(strings.TrimSpace(provider))
-	return provider == "" || provider == "gemini" || provider == "google"
-}
-
-func geminiGoogleSearchNameMatches(name string) bool {
-	switch strings.ToLower(strings.TrimSpace(name)) {
-	case geminiGoogleSearchToolName, "google-search", "googlesearch", "grounding_with_google_search":
-		return true
-	default:
-		return false
-	}
-}
-
-func geminiGoogleSearchProviderDetails(details map[string]json.RawMessage) bool {
-	if len(details) == 0 {
-		return false
-	}
-	for _, key := range []string{"google_search", "googleSearch"} {
-		if raw, ok := details[key]; ok && raw != nil {
-			return true
-		}
-	}
-	if raw, ok := details["type"]; ok {
-		var typ string
-		if err := json.Unmarshal(raw, &typ); err == nil && geminiGoogleSearchNameMatches(typ) {
-			return true
-		}
-	}
-	return false
-}
-
-func geminiGoogleSearchDisabledByDetails(details map[string]json.RawMessage) bool {
-	if len(details) == 0 {
-		return false
-	}
-	if disabled, ok := geminiBoolProviderDetail(details, "disabled"); ok && disabled {
-		return true
-	}
-	if enabled, ok := geminiBoolProviderDetail(details, "enabled"); ok && !enabled {
-		return true
-	}
-	for _, key := range []string{"google_search", "googleSearch"} {
-		if enabled, ok := geminiBoolProviderDetail(details, key); ok && !enabled {
-			return true
-		}
-	}
-	return false
-}
-
-func geminiBoolProviderDetail(details map[string]json.RawMessage, key string) (bool, bool) {
-	raw, ok := details[key]
-	if !ok || raw == nil {
-		return false, false
-	}
-	var value bool
-	if err := json.Unmarshal(raw, &value); err != nil {
-		return false, false
-	}
-	return value, true
 }
 
 func geminiServerToolReplayPart(kind string, value any, token string) (model.Part, bool) {

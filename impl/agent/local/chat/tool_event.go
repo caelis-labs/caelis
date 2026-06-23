@@ -2,7 +2,6 @@ package chat
 
 import (
 	"encoding/json"
-	"fmt"
 	"maps"
 	"strings"
 
@@ -110,44 +109,13 @@ func successfulEmptyTerminalResult(name string, status string, isErr bool) bool 
 }
 
 func toolKindForName(name string) string {
-	switch strings.ToUpper(strings.TrimSpace(name)) {
-	case "READ":
-		return "read"
-	case "WRITE", "PATCH":
-		return "edit"
-	case "SEARCH", "GLOB", "LIST":
-		return "search"
-	case "PLAN":
-		return "other"
-	case "RUN_COMMAND", "SPAWN", "TASK":
-		return "execute"
-	default:
-		return "other"
-	}
+	return displaypolicy.ToolKindForName(name)
 }
 
 func toolCallTitle(call model.ToolCall) string {
 	name := strings.TrimSpace(call.Name)
-	args := mustObject(call.Args)
-	switch strings.ToUpper(name) {
-	case "READ", "WRITE", "PATCH", "SEARCH", "LIST", "GLOB":
-		if path, _ := args["path"].(string); strings.TrimSpace(path) != "" {
-			return fmt.Sprintf("%s %s", name, strings.TrimSpace(path))
-		}
-	case "RUN_COMMAND":
-		if command, _ := args["command"].(string); strings.TrimSpace(command) != "" {
-			return fmt.Sprintf("RUN_COMMAND %s", strings.TrimSpace(command))
-		}
-	case "SPAWN":
-		if title := displaypolicy.SummarizeToolCallTitle(name, args); strings.TrimSpace(title) != "" {
-			return title
-		}
-	case "TASK":
-		action, _ := args["action"].(string)
-		taskID, _ := args["task_id"].(string)
-		if strings.TrimSpace(action) != "" && strings.TrimSpace(taskID) != "" {
-			return fmt.Sprintf("TASK %s %s", strings.TrimSpace(action), strings.TrimSpace(taskID))
-		}
+	if title := displaypolicy.SummarizeToolCallTitle(name, mustObject(call.Args)); strings.TrimSpace(title) != "" {
+		return title
 	}
 	return name
 }

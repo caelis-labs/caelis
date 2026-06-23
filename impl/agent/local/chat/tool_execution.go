@@ -91,10 +91,11 @@ func (a *Agent) executeToolCall(ctx context.Context, call model.ToolCall, observ
 	}
 
 	result, err := selectedTool.Call(ctx, tool.Call{
-		ID:       strings.TrimSpace(call.ID),
-		Name:     strings.TrimSpace(call.Name),
-		Input:    json.RawMessage(strings.TrimSpace(call.Args)),
-		Observer: observer,
+		ID:           strings.TrimSpace(call.ID),
+		Name:         strings.TrimSpace(call.Name),
+		Input:        json.RawMessage(strings.TrimSpace(call.Args)),
+		RuntimeModel: a.model,
+		Observer:     observer,
 	})
 	if err != nil {
 		result = tool.Result{

@@ -627,7 +627,7 @@ func TestOpenAICompatProviderSpecificStructuredOutputStrategy(t *testing.T) {
 			llm: newMimo(Config{
 				Provider: "xiaomi",
 				Model:    "mimo-v2-pro",
-			}, "token").(*openAICompatLLM),
+			}, "token").(*mimoLLM).openAICompatLLM,
 			want: "json_object",
 		},
 		{
@@ -699,7 +699,7 @@ func TestOpenAICompatProviderSpecificStrictToolStrategy(t *testing.T) {
 			llm: newMimo(Config{
 				Provider: "xiaomi",
 				Model:    "mimo-v2-pro",
-			}, "token").(*openAICompatLLM),
+			}, "token").(*mimoLLM).openAICompatLLM,
 			wantStrict: false,
 		},
 		{
@@ -968,7 +968,7 @@ func TestMimoProviderUsesThinkingPayload(t *testing.T) {
 		Model:    "mimo",
 		BaseURL:  "https://api.xiaomimimo.com/v1",
 		Timeout:  time.Second,
-	}, "token").(*openAICompatLLM)
+	}, "token").(*mimoLLM).openAICompatLLM
 	payload := openAICompatRequest{
 		Model: "mimo",
 		Messages: llm.fromKernelMessages(nil, []model.Message{
@@ -981,6 +981,166 @@ func TestMimoProviderUsesThinkingPayload(t *testing.T) {
 	}
 	if payload.Reasoning != nil || payload.ReasoningEffort != "" {
 		t.Fatalf("did not expect openai reasoning fields for mimo payload")
+	}
+}
+
+func TestMimoRequest_DoesNotIncludeWebSearchByDefaultForSupportedModels(t *testing.T) {
+	var payload map[string]any
+	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode request payload: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"model":"mimo-v2.5-pro","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`)
+	}))
+	defer server.Close()
+
+	llm := newMimo(Config{
+		Provider:   "xiaomi",
+		Model:      "mimo-v2.5-pro",
+		BaseURL:    server.URL,
+		HTTPClient: server.Client(),
+		Timeout:    time.Second,
+	}, "token").(*mimoLLM)
+
+	if llm.UsesProviderExecutedTools(&model.Request{}) {
+		t.Fatal("UsesProviderExecutedTools() = true, want no implicit MiMo web_search")
+	}
+	for _, err := range llm.Generate(context.Background(), &model.Request{
+		Messages: []model.Message{model.NewTextMessage(model.RoleUser, "latest news")},
+	}) {
+		if err != nil {
+			t.Fatalf("Generate() error = %v", err)
+		}
+	}
+
+	if _, ok := payload["tools"]; ok {
+		t.Fatalf("payload tools = %#v, want no implicit MiMo web_search", payload["tools"])
+	}
+}
+
+func TestMimoRequest_DisabledProviderExecutedWebSearchSpecOmitsTool(t *testing.T) {
+	var payload map[string]any
+	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode request payload: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"model":"mimo-v2.5-pro","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`)
+	}))
+	defer server.Close()
+
+	llm := newMimo(Config{
+		Provider:   "xiaomi",
+		Model:      "mimo-v2.5-pro",
+		BaseURL:    server.URL,
+		HTTPClient: server.Client(),
+		Timeout:    time.Second,
+	}, "token").(*mimoLLM)
+	req := &model.Request{
+		Messages: []model.Message{model.NewTextMessage(model.RoleUser, "hello")},
+		Tools: []model.ToolSpec{
+			model.NewProviderExecutedToolSpec("xiaomi", mimoProviderWebSearchWireType, map[string]json.RawMessage{
+				"disabled": json.RawMessage(`true`),
+			}),
+		},
+	}
+
+	if llm.UsesProviderExecutedTools(req) {
+		t.Fatal("UsesProviderExecutedTools() = true, want disabled MiMo web_search hidden from retry policy")
+	}
+	for _, err := range llm.Generate(context.Background(), req) {
+		if err != nil {
+			t.Fatalf("Generate() error = %v", err)
+		}
+	}
+	if _, ok := payload["tools"]; ok {
+		t.Fatalf("payload tools = %#v, want omitted when MiMo web_search is disabled", payload["tools"])
+	}
+}
+
+func TestMimoRequest_ProviderExecutedWebSearchCombinesWithFunctionToolsAndDetails(t *testing.T) {
+	var payload map[string]any
+	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode request payload: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"model":"custom-mimo","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`)
+	}))
+	defer server.Close()
+
+	llm := newMimo(Config{
+		Provider:   "xiaomi",
+		Model:      "custom-mimo",
+		BaseURL:    server.URL,
+		HTTPClient: server.Client(),
+		Timeout:    time.Second,
+	}, "token").(*mimoLLM)
+	req := &model.Request{
+		Messages: []model.Message{model.NewTextMessage(model.RoleUser, "weather")},
+		Tools: []model.ToolSpec{
+			model.NewFunctionToolSpec("lookup", "Look up local data.", map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"query": map[string]any{"type": "string"},
+				},
+			}),
+			model.NewProviderExecutedToolSpec("xiaomi", mimoProviderWebSearchWireType, map[string]json.RawMessage{
+				"type":          json.RawMessage(`"web_search"`),
+				"max_keyword":   json.RawMessage(`3`),
+				"force_search":  json.RawMessage(`true`),
+				"limit":         json.RawMessage(`1`),
+				"user_location": json.RawMessage(`{"type":"approximate","country":"China","region":"Hubei","city":"Wuhan"}`),
+			}),
+		},
+	}
+
+	if !llm.UsesProviderExecutedTools(req) {
+		t.Fatal("UsesProviderExecutedTools() = false, want explicit MiMo web_search visible to retry policy")
+	}
+	for _, err := range llm.Generate(context.Background(), req) {
+		if err != nil {
+			t.Fatalf("Generate() error = %v", err)
+		}
+	}
+
+	tools, _ := payload["tools"].([]any)
+	if len(tools) != 2 {
+		t.Fatalf("tools len = %d, want function plus web_search: %#v", len(tools), payload["tools"])
+	}
+	functionTool, _ := tools[0].(map[string]any)
+	if got := functionTool["type"]; got != "function" {
+		t.Fatalf("first tool type = %#v, want function", got)
+	}
+	webSearch, _ := tools[1].(map[string]any)
+	if got := webSearch["type"]; got != "web_search" {
+		t.Fatalf("second tool type = %#v, want web_search", got)
+	}
+	if got := webSearch["max_keyword"]; got != float64(3) {
+		t.Fatalf("max_keyword = %#v, want 3", got)
+	}
+	if got := webSearch["force_search"]; got != true {
+		t.Fatalf("force_search = %#v, want true", got)
+	}
+	if got := webSearch["limit"]; got != float64(1) {
+		t.Fatalf("limit = %#v, want 1", got)
+	}
+	userLocation, _ := webSearch["user_location"].(map[string]any)
+	if got := userLocation["city"]; got != "Wuhan" {
+		t.Fatalf("user_location.city = %#v, want Wuhan", got)
 	}
 }
 

@@ -224,16 +224,36 @@ func fillFinalToolEventFromExisting(finalEvent *SubagentEvent, existing Subagent
 	if strings.TrimSpace(finalEvent.Name) == "" {
 		finalEvent.Name = strings.TrimSpace(existing.Name)
 	}
-	if strings.TrimSpace(finalEvent.Args) == "" || shouldReplaceSpawnDisplayArgs(finalEvent.Args, existing.Args) {
+	if shouldUseExistingArgsForFinal(*finalEvent, existing) {
 		finalEvent.Args = strings.TrimSpace(existing.Args)
 	}
 	mergeStartArgs(finalEvent, existing.StartArgs, existing.Args, finalEvent.Args)
-	if strings.TrimSpace(finalEvent.FullArgs) == "" || shouldReplaceSpawnDisplayArgs(finalEvent.FullArgs, existing.FullArgs) {
+	if shouldUseExistingFullArgsForFinal(*finalEvent, existing) {
 		finalEvent.FullArgs = strings.TrimSpace(existing.FullArgs)
 	}
 	if strings.TrimSpace(finalEvent.ToolKind) == "" {
 		finalEvent.ToolKind = strings.TrimSpace(existing.ToolKind)
 	}
+}
+
+func shouldUseExistingArgsForFinal(finalEvent SubagentEvent, existing SubagentEvent) bool {
+	if strings.TrimSpace(finalEvent.Args) == "" {
+		return true
+	}
+	if !strings.EqualFold(toolSemanticName(finalEvent.Name, finalEvent.ToolKind), "SPAWN") {
+		return false
+	}
+	return shouldReplaceSpawnDisplayArgs(finalEvent.Args, existing.Args)
+}
+
+func shouldUseExistingFullArgsForFinal(finalEvent SubagentEvent, existing SubagentEvent) bool {
+	if strings.TrimSpace(finalEvent.FullArgs) == "" {
+		return true
+	}
+	if !strings.EqualFold(toolSemanticName(finalEvent.Name, finalEvent.ToolKind), "SPAWN") {
+		return false
+	}
+	return shouldReplaceSpawnDisplayArgs(finalEvent.FullArgs, existing.FullArgs)
 }
 
 func fillMissingFinalToolEventFromExisting(finalEvent *SubagentEvent, existing SubagentEvent) {

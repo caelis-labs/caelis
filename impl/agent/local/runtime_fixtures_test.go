@@ -697,17 +697,17 @@ func (m *overflowRecoveryModel) Generate(_ context.Context, req *model.Request) 
 		compactionInput := strings.Join(requestMessageTexts(req), "\n")
 		if !strings.Contains(compactionInput, "## Tool Result") ||
 			!strings.Contains(compactionInput, "tool: ECHO") ||
-			!strings.Contains(compactionInput, "policy_action: deny") {
+			!strings.Contains(compactionInput, "value: pong") {
 			m.t.Fatalf("compaction input missing tool result continuity: %q", compactionInput)
 		}
 		body := `CONTEXT CHECKPOINT
 
 Objective: finish the tool-assisted turn after overflow
-Blocker: normal prompt overflowed after the tool denial result
+Blocker: normal prompt overflowed after the ECHO tool result
 Next action: resume from the compact checkpoint and return the final answer
 
 ## Current Progress
-- the ECHO tool result was denied by workspace-write policy
+- the ECHO tool result completed with value pong
 
 ## Next Actions
 1. resume from the compact checkpoint and return the final answer`
@@ -729,7 +729,7 @@ Next action: resume from the compact checkpoint and return the final answer
 		}
 	}
 	for _, text := range requestMessageTexts(req) {
-		if strings.Contains(text, "CONTEXT CHECKPOINT") && strings.Contains(strings.ToLower(text), "workspace-write policy") {
+		if strings.Contains(text, "CONTEXT CHECKPOINT") && strings.Contains(strings.ToLower(text), "echo tool result completed") {
 			m.sawCheckpointOnRetry = true
 			return func(yield func(*model.StreamEvent, error) bool) {
 				yield(&model.StreamEvent{

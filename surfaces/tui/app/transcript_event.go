@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/OnslaughtSnail/caelis/internal/displaypolicy"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/acpprojector"
 )
@@ -146,12 +147,7 @@ func suppressToolResultOutput(toolName string, toolKind string, output string, s
 }
 
 func isExplorationSummaryTool(toolName string, toolKind string) bool {
-	switch strings.ToUpper(strings.TrimSpace(toolSemanticName(toolName, toolKind))) {
-	case "READ", "LIST", "GLOB", "SEARCH", "RG", "FIND":
-		return true
-	default:
-		return false
-	}
+	return displaypolicy.IsExplorationTool(toolSemanticName(toolName, toolKind))
 }
 
 func terminalFinalWithoutContent(toolName string, toolKind string, status string, isErr bool) bool {

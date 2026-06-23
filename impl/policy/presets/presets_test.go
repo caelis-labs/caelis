@@ -94,42 +94,55 @@ func TestDefaultModeRejectsMalformedToolInput(t *testing.T) {
 	}
 }
 
-func TestDefaultModeAllowsMCPPluginTools(t *testing.T) {
+func TestDefaultModeAllowsExplicitWebAndMCPTools(t *testing.T) {
 	t.Parallel()
 
-	input := policy.ToolContext{
-		Tool: tool.Definition{
-			Name: "mcp__plugin__server__read_fixture",
-			Metadata: map[string]any{
-				tool.MetadataToolKind:  tool.MetadataToolKindMCP,
-				tool.MetadataPluginID:  "plugin",
-				tool.MetadataMCPServer: "server",
-			},
+	tests := []policy.ToolContext{
+		{
+			Tool: policyMCPToolDefinition("mcp__plugin__server__read_fixture"),
+			Call: policyToolCall("mcp__plugin__server__read_fixture", map[string]any{"name": "fixture"}),
 		},
-		Call: policyToolCall("mcp__plugin__server__read_fixture", map[string]any{"name": "fixture"}),
+		{
+			Tool: policyToolDefinition("WEB_SEARCH"),
+			Call: policyToolCall("WEB_SEARCH", map[string]any{"query": "latest release"}),
+		},
+		{
+			Tool: policyToolDefinition("WEB_FETCH"),
+			Call: policyToolCall("WEB_FETCH", map[string]any{"url": "https://example.com"}),
+		},
 	}
-	decision, err := AutoReviewMode().DecideTool(context.Background(), input)
-	if err != nil {
-		t.Fatalf("DecideTool() error = %v", err)
-	}
-	if decision.Action != policy.ActionAllow {
-		t.Fatalf("Action = %q, want allow (reason=%q)", decision.Action, decision.Reason)
+	for _, input := range tests {
+		decision, err := AutoReviewMode().DecideTool(context.Background(), input)
+		if err != nil {
+			t.Fatalf("%s DecideTool() error = %v", input.Tool.Name, err)
+		}
+		if decision.Action != policy.ActionAllow {
+			t.Fatalf("%s Action = %q, want allow (reason=%q)", input.Tool.Name, decision.Action, decision.Reason)
+		}
 	}
 }
 
-func TestDefaultModeStillDeniesUnknownToolsWithoutMCPMetadata(t *testing.T) {
+func TestDefaultModeDeniesUnknownNonMCPTools(t *testing.T) {
 	t.Parallel()
 
-	input := policy.ToolContext{
-		Tool: tool.Definition{Name: "mcp__plugin__server__read_fixture"},
-		Call: policyToolCall("mcp__plugin__server__read_fixture", map[string]any{"name": "fixture"}),
+	tests := []policy.ToolContext{
+		{
+			Tool: policyToolDefinition("CUSTOM_TOOL"),
+			Call: policyToolCall("CUSTOM_TOOL", map[string]any{"name": "fixture"}),
+		},
+		{
+			Tool: policyToolDefinition("mcp__plugin__server__read_fixture"),
+			Call: policyToolCall("mcp__plugin__server__read_fixture", map[string]any{"name": "fixture"}),
+		},
 	}
-	decision, err := AutoReviewMode().DecideTool(context.Background(), input)
-	if err != nil {
-		t.Fatalf("DecideTool() error = %v", err)
-	}
-	if decision.Action != policy.ActionDeny {
-		t.Fatalf("Action = %q, want deny", decision.Action)
+	for _, input := range tests {
+		decision, err := AutoReviewMode().DecideTool(context.Background(), input)
+		if err != nil {
+			t.Fatalf("%s DecideTool() error = %v", input.Tool.Name, err)
+		}
+		if decision.Action != policy.ActionDeny {
+			t.Fatalf("%s Action = %q, want deny", input.Tool.Name, decision.Action)
+		}
 	}
 }
 
@@ -869,6 +882,19 @@ func globCtx(pattern string) policy.ToolContext {
 func policyToolCall(name string, input map[string]any) tool.Call {
 	raw, _ := json.Marshal(input)
 	return tool.Call{Name: name, Input: raw}
+}
+
+func policyToolDefinition(name string) tool.Definition {
+	return tool.Definition{Name: name}
+}
+
+func policyMCPToolDefinition(name string) tool.Definition {
+	return tool.Definition{
+		Name: name,
+		Metadata: map[string]any{
+			tool.MetadataToolKind: tool.MetadataToolKindMCP,
+		},
+	}
 }
 
 func testWorkspaceRoot() string {

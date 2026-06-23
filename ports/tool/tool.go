@@ -29,11 +29,12 @@ const (
 
 // Call is one provider-neutral tool invocation.
 type Call struct {
-	ID       string          `json:"id,omitempty"`
-	Name     string          `json:"name,omitempty"`
-	Input    json.RawMessage `json:"input,omitempty"`
-	Metadata map[string]any  `json:"metadata,omitempty"`
-	Observer Observer        `json:"-"`
+	ID           string          `json:"id,omitempty"`
+	Name         string          `json:"name,omitempty"`
+	Input        json.RawMessage `json:"input,omitempty"`
+	Metadata     map[string]any  `json:"metadata,omitempty"`
+	RuntimeModel model.LLM       `json:"-"`
+	Observer     Observer        `json:"-"`
 }
 
 // Result is one provider-neutral tool execution result.
@@ -63,6 +64,16 @@ type Observer interface {
 type Registry interface {
 	List(context.Context) ([]Tool, error)
 	Lookup(context.Context, string) (Tool, bool, error)
+}
+
+// RuntimeModel returns the turn-local model associated with a call, when the
+// caller is an agent runtime that can provide one. It is intentionally outside
+// Metadata so it cannot leak into serialized tool calls.
+func RuntimeModel(call Call) (model.LLM, bool) {
+	if call.RuntimeModel == nil {
+		return nil, false
+	}
+	return call.RuntimeModel, true
 }
 
 // NamedTool is one lightweight adapter for tools that expose one static

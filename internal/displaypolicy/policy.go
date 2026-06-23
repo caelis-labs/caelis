@@ -2,7 +2,9 @@ package displaypolicy
 
 import (
 	"encoding/json"
+	"fmt"
 	"maps"
+	"strconv"
 	"strings"
 )
 
@@ -17,7 +19,7 @@ const (
 func SemanticToolName(name string, kind string) string {
 	name = strings.TrimSpace(name)
 	switch strings.ToUpper(name) {
-	case "RUN_COMMAND", "SPAWN", "TASK", "READ", "LIST", "GLOB", "SEARCH", "RG", "FIND", "WRITE", "PATCH":
+	case "RUN_COMMAND", "SPAWN", "TASK", "READ", "LIST", "GLOB", "SEARCH", "WEB_SEARCH", "WEB_FETCH", "RG", "FIND", "WRITE", "PATCH":
 		return strings.ToUpper(name)
 	}
 	switch strings.ToLower(strings.TrimSpace(kind)) {
@@ -68,6 +70,14 @@ func SummarizeToolCallTitle(name string, args map[string]any) string {
 		if path := MapString(args, "path"); strings.TrimSpace(path) != "" {
 			return strings.TrimSpace(name + " " + path)
 		}
+	case "WEB_SEARCH":
+		if query := MapString(args, "query"); strings.TrimSpace(query) != "" {
+			return strings.TrimSpace(name + " " + query)
+		}
+	case "WEB_FETCH":
+		if url := MapString(args, "url"); strings.TrimSpace(url) != "" {
+			return strings.TrimSpace(name + " " + url)
+		}
 	case "RUN_COMMAND", "TASK":
 		if command := MapString(args, "command"); strings.TrimSpace(command) != "" {
 			return strings.TrimSpace(name + " " + command)
@@ -92,13 +102,55 @@ func ToolKindForName(name string) string {
 		return ToolKindRead
 	case "WRITE", "PATCH":
 		return ToolKindEdit
-	case "SEARCH", "GLOB", "LIST":
+	case "SEARCH", "GLOB", "LIST", "WEB_SEARCH", "WEB_FETCH":
 		return ToolKindSearch
 	case "RUN_COMMAND", "SPAWN", "TASK":
 		return ToolKindExecute
 	default:
 		return ToolKindOther
 	}
+}
+
+func ExplorationVerbForTool(name string) string {
+	switch SemanticToolName(name, "") {
+	case "READ":
+		return "Read"
+	case "LIST":
+		return "List"
+	case "GLOB":
+		return "Glob"
+	case "SEARCH", "RG", "FIND", "WEB_SEARCH":
+		return "Search"
+	case "WEB_FETCH":
+		return "Fetch"
+	default:
+		return ""
+	}
+}
+
+func IsExplorationTool(name string) bool {
+	return ExplorationVerbForTool(name) != ""
+}
+
+func WebSearchSummary(input map[string]any, output map[string]any) string {
+	return firstNonEmpty(WebSearchDisplayArg(output), WebSearchDisplayArg(input))
+}
+
+func WebFetchSummary(input map[string]any, output map[string]any) string {
+	return firstNonEmpty(WebFetchDisplayArg(input), WebFetchDisplayArg(output))
+}
+
+func WebSearchDisplayArg(raw map[string]any) string {
+	query := firstNonEmpty(displayString(raw["query"]), displayString(raw["pattern"]), displayString(raw["text"]))
+	if query == "" {
+		return ""
+	}
+	return strconv.Quote(query)
+}
+
+func WebFetchDisplayArg(raw map[string]any) string {
+	url := firstNonEmpty(displayString(raw["url"]), displayString(raw["uri"]), displayString(raw["href"]), displayString(raw["final_url"]))
+	return truncateTailString(url, 120)
 }
 
 func SpawnDisplayArgs(raw map[string]any) string {
@@ -327,11 +379,36 @@ func MetaString(meta map[string]any, path ...string) string {
 
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
-		if trimmed := strings.TrimSpace(value); trimmed != "" {
+		if trimmed := strings.TrimSpace(value); trimmed != "" && trimmed != "<nil>" {
 			return trimmed
 		}
 	}
 	return ""
+}
+
+func displayString(value any) string {
+	if value == nil {
+		return ""
+	}
+	if text, ok := value.(string); ok {
+		return strings.TrimSpace(text)
+	}
+	return strings.TrimSpace(fmt.Sprint(value))
+}
+
+func truncateTailString(text string, width int) string {
+	text = strings.TrimSpace(text)
+	if text == "" || width <= 0 {
+		return ""
+	}
+	runes := []rune(text)
+	if len(runes) <= width {
+		return text
+	}
+	if width <= 3 {
+		return string(runes[:width])
+	}
+	return string(runes[:width-3]) + "..."
 }
 
 func cleanSubagentFinalLine(line string) (string, bool) {

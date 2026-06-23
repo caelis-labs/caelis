@@ -2,7 +2,6 @@ package model
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -56,13 +55,15 @@ func WithRetry(llm LLM, cfg RetryConfig) LLM {
 	if llm == nil {
 		return nil
 	}
-	if wrapped, ok := llm.(*retryingLLM); ok {
-		llm = wrapped.inner
-	}
-	return &retryingLLM{
+	llm = unwrapRetryingLLM(llm)
+	wrapped := &retryingLLM{
 		inner: llm,
 		cfg:   NormalizeRetryConfig(cfg),
 	}
+	if _, ok := llm.(WebSearcher); ok {
+		return &retryingSearchLLM{retryingLLM: wrapped}
+	}
+	return wrapped
 }
 
 // NormalizeRetryConfig fills retry defaults.
@@ -93,6 +94,27 @@ type retryingLLM struct {
 	cfg   RetryConfig
 }
 
+// retryingSearchLLM keeps WebSearcher optional on retry wrappers. retryingLLM
+// itself must not implement SearchWeb because unsupported providers rely on a
+// failed type assertion for non-error web_search fallback behavior.
+type retryingSearchLLM struct {
+	*retryingLLM
+}
+
+func unwrapRetryingLLM(llm LLM) LLM {
+	switch wrapped := llm.(type) {
+	case *retryingSearchLLM:
+		if wrapped != nil && wrapped.retryingLLM != nil && wrapped.inner != nil {
+			return wrapped.inner
+		}
+	case *retryingLLM:
+		if wrapped != nil && wrapped.inner != nil {
+			return wrapped.inner
+		}
+	}
+	return llm
+}
+
 // ProviderExecutedToolUsage is an optional LLM capability for providers that
 // can enable provider-executed tools implicitly from request/model policy. When
 // implemented, retry handling uses this hook instead of inspecting req.Tools
@@ -116,40 +138,42 @@ func (l *retryingLLM) Generate(ctx context.Context, req *Request) iter.Seq2[*Str
 			return
 		}
 		hasProviderTool := usesProviderExecutedTools(l.inner, req)
+		stopped := false
+		canRetryLastErr := true
 
-		for attempt := 0; ; attempt++ {
-			committed, semanticDeltaEmitted, stopped, err := l.runAttempt(ctx, req, yield)
-			if stopped {
-				return
+		err := l.retryUntilOK(ctx, func(int) error {
+			canRetryLastErr = true
+			committed, semanticDeltaEmitted, attemptStopped, err := l.runAttempt(ctx, req, yield)
+			if attemptStopped {
+				stopped = true
+				return nil
 			}
 			if err == nil {
-				return
+				return nil
 			}
-			cannotRetry := committed || (hasProviderTool && semanticDeltaEmitted)
-			if cannotRetry || !IsRetryableLLMError(err) {
-				yield(nil, err)
-				return
-			}
-			policy := retryPolicyForError(l.cfg, err)
-			if attempt >= policy.maxRetries {
-				yield(nil, retryExhaustedError(policy, err))
-				return
-			}
+			canRetryLastErr = !committed && (!hasProviderTool || !semanticDeltaEmitted)
+			return err
+		}, func(attempt int, err error) (bool, error) {
 			resetEvent := &StreamEvent{
 				Type: StreamEventAttemptReset,
 				AttemptReset: &AttemptReset{
-					Attempt:  attempt + 1,
+					Attempt:  attempt,
 					Cause:    err.Error(),
 					Retrying: true,
 				},
 			}
 			if !yield(resetEvent, nil) {
-				return
+				return false, nil
 			}
-			if sleepErr := sleepRetryDelay(ctx, RetryDelayForAttempt(attempt, policy.baseDelay, policy.maxDelay)); sleepErr != nil {
-				yield(nil, sleepErr)
-				return
-			}
+			return true, nil
+		}, func(err error) bool {
+			return canRetryLastErr && IsRetryableLLMError(err)
+		})
+		if stopped {
+			return
+		}
+		if err != nil {
+			yield(nil, err)
 		}
 	}
 }
@@ -178,23 +202,11 @@ func (l *retryingLLM) runAttempt(ctx context.Context, req *Request, yield func(*
 	return committed, semanticDeltaEmitted, false, nil
 }
 
-func hasProviderExecutedTools(req *Request) bool {
-	if req == nil {
-		return false
-	}
-	for _, spec := range req.Tools {
-		if spec.Kind == ToolSpecKindProviderExecuted || spec.ProviderExecuted != nil {
-			return true
-		}
-	}
-	return false
-}
-
 func usesProviderExecutedTools(llm LLM, req *Request) bool {
 	if usage, ok := llm.(ProviderExecutedToolUsage); ok {
 		return usage.UsesProviderExecutedTools(CloneRequest(req))
 	}
-	return hasProviderExecutedTools(req)
+	return false
 }
 
 func isFinalResponse(event *StreamEvent) bool {
@@ -243,6 +255,16 @@ func (l *retryingLLM) ProviderName() string {
 	return ""
 }
 
+func (l *retryingLLM) WebSearchUnavailableReason() string {
+	if l == nil || l.inner == nil {
+		return ""
+	}
+	if reasoner, ok := l.inner.(WebSearchAvailability); ok {
+		return strings.TrimSpace(reasoner.WebSearchUnavailableReason())
+	}
+	return ""
+}
+
 func (l *retryingLLM) ContextWindowTokens() int {
 	if l == nil || l.inner == nil {
 		return 0
@@ -251,6 +273,59 @@ func (l *retryingLLM) ContextWindowTokens() int {
 		return provider.ContextWindowTokens()
 	}
 	return 0
+}
+
+func (l *retryingSearchLLM) SearchWeb(ctx context.Context, req WebSearchRequest) (WebSearchResponse, error) {
+	if l == nil || l.retryingLLM == nil || l.inner == nil {
+		return WebSearchResponse{}, errors.New("model: llm is nil")
+	}
+	searcher, ok := l.inner.(WebSearcher)
+	if !ok {
+		return WebSearchResponse{}, errors.New("model: web search is unavailable for this provider")
+	}
+	var resp WebSearchResponse
+	err := l.retryUntilOK(ctx, func(int) error {
+		var err error
+		resp, err = searcher.SearchWeb(ctx, req)
+		return err
+	}, nil, nil)
+	return resp, err
+}
+
+func (l *retryingLLM) retryUntilOK(
+	ctx context.Context,
+	run func(attempt int) error,
+	beforeRetry func(attempt int, err error) (bool, error),
+	shouldRetry func(error) bool,
+) error {
+	if shouldRetry == nil {
+		shouldRetry = IsRetryableLLMError
+	}
+	for attempt := 0; ; attempt++ {
+		err := run(attempt)
+		if err == nil {
+			return nil
+		}
+		if !shouldRetry(err) {
+			return err
+		}
+		policy := retryPolicyForError(l.cfg, err)
+		if attempt >= policy.maxRetries {
+			return retryExhaustedError(policy, err)
+		}
+		if beforeRetry != nil {
+			keepGoing, hookErr := beforeRetry(attempt+1, err)
+			if hookErr != nil {
+				return hookErr
+			}
+			if !keepGoing {
+				return nil
+			}
+		}
+		if sleepErr := sleepRetryDelay(ctx, RetryDelayForAttempt(attempt, policy.baseDelay, policy.maxDelay)); sleepErr != nil {
+			return sleepErr
+		}
+	}
 }
 
 func retryExhaustedError(policy retryPolicy, err error) error {
@@ -428,96 +503,4 @@ func isLikelyNetworkError(err error) bool {
 		}
 	}
 	return false
-}
-
-// CloneRequest returns a deep copy of one provider-neutral model request.
-func CloneRequest(in *Request) *Request {
-	if in == nil {
-		return nil
-	}
-	out := *in
-	out.Instructions = CloneParts(in.Instructions)
-	out.Messages = CloneMessages(in.Messages)
-	out.Tools = CloneToolSpecs(in.Tools)
-	out.Output = CloneOutputSpec(in.Output)
-	return &out
-}
-
-// CloneOutputSpec returns a deep copy of one output spec.
-func CloneOutputSpec(in *OutputSpec) *OutputSpec {
-	if in == nil {
-		return nil
-	}
-	out := *in
-	out.JSONSchema = cloneJSONMap(in.JSONSchema)
-	return &out
-}
-
-// CloneToolSpecs returns a deep copy of model-visible tool declarations.
-func CloneToolSpecs(in []ToolSpec) []ToolSpec {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make([]ToolSpec, 0, len(in))
-	for _, spec := range in {
-		cp := spec
-		if spec.Function != nil {
-			fn := *spec.Function
-			fn.Parameters = cloneJSONMap(spec.Function.Parameters)
-			cp.Function = &fn
-		}
-		if spec.ProviderDefined != nil {
-			defined := *spec.ProviderDefined
-			defined.ProviderDetails = cloneRawMessageMap(spec.ProviderDefined.ProviderDetails)
-			cp.ProviderDefined = &defined
-		}
-		if spec.ProviderExecuted != nil {
-			executed := *spec.ProviderExecuted
-			executed.ProviderDetails = cloneRawMessageMap(spec.ProviderExecuted.ProviderDetails)
-			cp.ProviderExecuted = &executed
-		}
-		if spec.MCP != nil {
-			mcp := *spec.MCP
-			cp.MCP = &mcp
-		}
-		out = append(out, cp)
-	}
-	return out
-}
-
-func cloneRawMessageMap(in map[string]json.RawMessage) map[string]json.RawMessage {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make(map[string]json.RawMessage, len(in))
-	for key, value := range in {
-		out[key] = append(json.RawMessage(nil), value...)
-	}
-	return out
-}
-
-func cloneJSONMap(in map[string]any) map[string]any {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make(map[string]any, len(in))
-	for key, value := range in {
-		out[key] = cloneJSONValue(value)
-	}
-	return out
-}
-
-func cloneJSONValue(value any) any {
-	switch typed := value.(type) {
-	case map[string]any:
-		return cloneJSONMap(typed)
-	case []any:
-		out := make([]any, len(typed))
-		for i, item := range typed {
-			out[i] = cloneJSONValue(item)
-		}
-		return out
-	default:
-		return typed
-	}
 }

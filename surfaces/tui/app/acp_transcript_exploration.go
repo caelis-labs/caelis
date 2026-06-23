@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/OnslaughtSnail/caelis/internal/displaypolicy"
 )
 
 type explorationProjectionState struct {
@@ -519,7 +520,7 @@ func renderExplorationToolRow(blockID string, ev SubagentEvent, width int, ctx B
 }
 
 func renderExplorationToolRowWithMode(blockID string, ev SubagentEvent, width int, ctx BlockRenderContext, token string, first bool, mode explorationToolDetailMode) RenderedRow {
-	verb := explorationToolVerb(toolSemanticName(ev.Name, ev.ToolKind))
+	verb := displaypolicy.ExplorationVerbForTool(toolSemanticName(ev.Name, ev.ToolKind))
 	if verb == "" {
 		verb = strings.ToUpper(strings.TrimSpace(ev.Name))
 	}
@@ -584,7 +585,7 @@ func explorationGroupDetailRowsWithWorkspaceMode(events []SubagentEvent, width i
 	grouped := map[string][]string{}
 	order := make([]string, 0, 4)
 	for _, ev := range events {
-		verb := explorationToolVerb(toolSemanticName(ev.Name, ev.ToolKind))
+		verb := displaypolicy.ExplorationVerbForTool(toolSemanticName(ev.Name, ev.ToolKind))
 		if verb == "" {
 			continue
 		}
@@ -644,7 +645,7 @@ func explorationToolDetailForDisplay(ev SubagentEvent, workspace string, mode ex
 	}
 	fromOutput := !fromArgs && item != ""
 	if item == "" {
-		if explorationToolVerb(toolSemanticName(ev.Name, ev.ToolKind)) != "" {
+		if displaypolicy.ExplorationVerbForTool(toolSemanticName(ev.Name, ev.ToolKind)) != "" {
 			return ""
 		}
 		item = strings.ToUpper(strings.TrimSpace(ev.Name))
@@ -666,7 +667,11 @@ func compactExplorationToolDetailWithWorkspace(ev SubagentEvent, detail string, 
 	if detail == "" {
 		return ""
 	}
-	switch explorationToolVerb(toolSemanticName(ev.Name, ev.ToolKind)) {
+	semanticName := toolSemanticName(ev.Name, ev.ToolKind)
+	if strings.EqualFold(semanticName, "WEB_SEARCH") {
+		return detail
+	}
+	switch displaypolicy.ExplorationVerbForTool(semanticName) {
 	case "Read", "List", "Glob", "Search":
 		return compactExplorationPathDetailWithBase(detail, workspace)
 	default:
@@ -906,30 +911,15 @@ func isASCIIAlphaNum(ch byte) bool {
 
 func isExplorationSummaryVerb(verb string) bool {
 	switch strings.ToLower(strings.TrimSpace(verb)) {
-	case "read", "list", "glob", "search":
+	case "read", "list", "glob", "search", "fetch":
 		return true
 	default:
 		return false
 	}
 }
 
-func explorationToolVerb(name string) string {
-	switch strings.ToUpper(strings.TrimSpace(name)) {
-	case "READ":
-		return "Read"
-	case "LIST":
-		return "List"
-	case "GLOB":
-		return "Glob"
-	case "RG", "SEARCH", "FIND":
-		return "Search"
-	default:
-		return ""
-	}
-}
-
 func toolSignalDisplayVerb(name string) string {
-	if verb := explorationToolVerb(name); verb != "" {
+	if verb := displaypolicy.ExplorationVerbForTool(name); verb != "" {
 		return verb
 	}
 	switch strings.ToUpper(strings.TrimSpace(name)) {

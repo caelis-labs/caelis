@@ -8,6 +8,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/plan"
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/shell"
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/task"
+	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/web"
 	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 	"github.com/OnslaughtSnail/caelis/ports/tool"
 )
@@ -15,7 +16,8 @@ import (
 func isReservedCoreToolName(name string) bool {
 	switch strings.TrimSpace(strings.ToUpper(name)) {
 	case filesystem.ReadToolName, filesystem.WriteToolName, filesystem.PatchToolName,
-		filesystem.ListToolName, filesystem.GlobToolName, filesystem.SearchToolName, shell.RunCommandToolName, task.ToolName, plan.ToolName:
+		filesystem.ListToolName, filesystem.GlobToolName, filesystem.SearchToolName, shell.RunCommandToolName, task.ToolName, plan.ToolName,
+		strings.ToUpper(web.SearchToolName), strings.ToUpper(web.FetchToolName):
 		return true
 	default:
 		return false
@@ -60,8 +62,14 @@ func BuildCoreTools(cfg CoreToolsConfig) ([]tool.Tool, error) {
 	}
 	taskTool := task.New()
 	planTool := plan.New()
+	webSearchTool := web.NewSearch()
+	webFetchTool, err := web.NewFetch(web.FetchConfig{})
+	if err != nil {
+		return nil, err
+	}
 	return []tool.Tool{
 		readTool, writeTool, patchTool, listTool, globTool, searchTool, runCommandTool, taskTool, planTool,
+		webSearchTool, webFetchTool,
 	}, nil
 }
 

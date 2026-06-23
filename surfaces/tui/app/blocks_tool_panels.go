@@ -3,6 +3,8 @@ package tuiapp
 import (
 	"strings"
 	"time"
+
+	"github.com/OnslaughtSnail/caelis/internal/displaypolicy"
 )
 
 func toolPanelExpanded(state map[string]bool, callID string) bool {
@@ -523,12 +525,7 @@ func collectToolPanelCallIDs(events []SubagentEvent) []string {
 }
 
 func shouldDefaultCollapseToolPanel(name string) bool {
-	switch strings.ToUpper(strings.TrimSpace(name)) {
-	case "READ", "RG", "LIST", "GLOB", "SEARCH", "FIND":
-		return true
-	default:
-		return false
-	}
+	return displaypolicy.IsExplorationTool(name)
 }
 
 func shouldDefaultCollapseToolEvent(ev SubagentEvent) bool {

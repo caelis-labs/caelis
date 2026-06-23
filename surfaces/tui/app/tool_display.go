@@ -45,6 +45,14 @@ func toolDisplayArgs(name string, raw map[string]any, fallback ...string) string
 		case path != "":
 			return compactPathDisplay(path)
 		}
+	case "WEB_SEARCH":
+		if display := displaypolicy.WebSearchDisplayArg(raw); display != "" {
+			return display
+		}
+	case "WEB_FETCH":
+		if display := displaypolicy.WebFetchDisplayArg(raw); display != "" {
+			return display
+		}
 	case "WRITE", "PATCH":
 		if path := toolPath(raw); path != "" {
 			return filepath.Base(path)
@@ -791,6 +799,10 @@ func toolDisplaySummaryOutput(name string, output map[string]any, meta map[strin
 		keys = []string{"pattern", "count", "total_count"}
 	case "SEARCH", "RG", "FIND":
 		keys = []string{"query", "pattern", "count", "file_count"}
+	case "WEB_SEARCH":
+		keys = []string{"query", "provider", "model", "status", "answer", "results", "message"}
+	case "WEB_FETCH":
+		keys = []string{"url", "final_url", "title", "status", "status_code", "content_type", "format", "artifact_path", "message"}
 	default:
 		if len(out) == 0 {
 			return nil
@@ -821,6 +833,10 @@ func toolDisplayStructuredSummary(name string, input map[string]any, output map[
 		return globDisplaySummary(input, output)
 	case "SEARCH", "RG", "FIND":
 		return searchDisplaySummary(input, output)
+	case "WEB_SEARCH":
+		return displaypolicy.WebSearchSummary(input, output)
+	case "WEB_FETCH":
+		return displaypolicy.WebFetchSummary(input, output)
 	default:
 		return ""
 	}

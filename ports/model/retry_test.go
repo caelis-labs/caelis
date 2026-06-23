@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"iter"
 	"strings"
@@ -53,6 +54,30 @@ type retryProviderToolUsageLLM struct {
 
 func (m *retryProviderToolUsageLLM) UsesProviderExecutedTools(*Request) bool {
 	return m.usesProviderTools
+}
+
+type retrySearchLLM struct {
+	*retryTestLLM
+	searchCalls int
+	searchErrs  []error
+}
+
+func (m *retrySearchLLM) SearchWeb(_ context.Context, req WebSearchRequest) (WebSearchResponse, error) {
+	call := m.searchCalls
+	m.searchCalls++
+	if err := errForCall(m.searchErrs, call); err != nil {
+		return WebSearchResponse{}, err
+	}
+	return WebSearchResponse{Query: req.Query, Provider: "test", Answer: "ok"}, nil
+}
+
+type retryUnavailableReasonLLM struct {
+	*retryTestLLM
+	reason string
+}
+
+func (m *retryUnavailableReasonLLM) WebSearchUnavailableReason() string {
+	return m.reason
 }
 
 func TestWithRetryRetriesSameLLMRequestBeforeEmission(t *testing.T) {
@@ -119,6 +144,66 @@ func TestWithRetryRetriesSameLLMRequestBeforeEmission(t *testing.T) {
 	}
 }
 
+func TestWithRetryRetriesSearchWebTransientFailure(t *testing.T) {
+	t.Parallel()
+
+	inner := &retrySearchLLM{
+		retryTestLLM: &retryTestLLM{},
+		searchErrs: []error{
+			errors.New("model: http status 529 body={\"error\":\"overloaded_error\"}"),
+			nil,
+		},
+	}
+	llm := WithRetry(inner, RetryConfig{
+		MaxRetries:          2,
+		BaseDelay:           time.Nanosecond,
+		MaxDelay:            time.Nanosecond,
+		RateLimitMaxRetries: 2,
+		RateLimitBaseDelay:  time.Nanosecond,
+		RateLimitMaxDelay:   time.Nanosecond,
+	})
+	searcher, ok := llm.(WebSearcher)
+	if !ok {
+		t.Fatal("WithRetry() did not preserve WebSearcher capability")
+	}
+	resp, err := searcher.SearchWeb(context.Background(), WebSearchRequest{Query: "latest"})
+	if err != nil {
+		t.Fatalf("SearchWeb() error = %v", err)
+	}
+	if got, want := inner.searchCalls, 2; got != want {
+		t.Fatalf("search calls = %d, want %d", got, want)
+	}
+	if resp.Answer != "ok" {
+		t.Fatalf("answer = %q, want ok", resp.Answer)
+	}
+}
+
+func TestWithRetryDoesNotExposeWebSearcherForUnsupportedProvider(t *testing.T) {
+	t.Parallel()
+
+	llm := WithRetry(&retryTestLLM{}, RetryConfig{})
+	if _, ok := llm.(WebSearcher); ok {
+		t.Fatal("WithRetry() exposes WebSearcher for inner LLM without SearchWeb")
+	}
+}
+
+func TestWithRetryPreservesWebSearchUnavailableReason(t *testing.T) {
+	t.Parallel()
+
+	const want = "Xiaomi Token Plan endpoints do not support provider-native web_search"
+	llm := WithRetry(&retryUnavailableReasonLLM{
+		retryTestLLM: &retryTestLLM{},
+		reason:       want,
+	}, RetryConfig{})
+	reasoner, ok := llm.(WebSearchAvailability)
+	if !ok {
+		t.Fatal("WithRetry() did not preserve WebSearchUnavailableReason capability")
+	}
+	if got := reasoner.WebSearchUnavailableReason(); got != want {
+		t.Fatalf("WebSearchUnavailableReason() = %q, want %q", got, want)
+	}
+}
+
 func TestWithRetryNoRetryAfterImplicitProviderExecutedToolSemanticEmission(t *testing.T) {
 	t.Parallel()
 
@@ -164,15 +249,18 @@ func TestWithRetryNoRetryAfterImplicitProviderExecutedToolSemanticEmission(t *te
 func TestWithRetryDoesNotRetryAfterProviderExecutedToolSemanticEmission(t *testing.T) {
 	t.Parallel()
 
-	inner := &retryTestLLM{
-		events: [][]*StreamEvent{
-			{{Type: StreamEventPartDelta, PartDelta: &PartDelta{TextDelta: "partial"}}},
-			{StreamEventFromResponse(&Response{Message: NewTextMessage(RoleAssistant, "should-not-run"), TurnComplete: true})},
+	inner := &retryProviderToolUsageLLM{
+		retryTestLLM: &retryTestLLM{
+			events: [][]*StreamEvent{
+				{{Type: StreamEventPartDelta, PartDelta: &PartDelta{TextDelta: "partial"}}},
+				{StreamEventFromResponse(&Response{Message: NewTextMessage(RoleAssistant, "should-not-run"), TurnComplete: true})},
+			},
+			errs: []error{
+				errors.New("model: http status 529 body={\"error\":\"overloaded_error\"}"),
+				nil,
+			},
 		},
-		errs: []error{
-			errors.New("model: http status 529 body={\"error\":\"overloaded_error\"}"),
-			nil,
-		},
+		usesProviderTools: true,
 	}
 	llm := WithRetry(inner, RetryConfig{
 		MaxRetries:          2,
@@ -190,10 +278,7 @@ func TestWithRetryDoesNotRetryAfterProviderExecutedToolSemanticEmission(t *testi
 	req := &Request{
 		Messages: []Message{NewTextMessage(RoleUser, "hello")},
 		Tools: []ToolSpec{
-			{
-				Kind:             ToolSpecKindProviderExecuted,
-				ProviderExecuted: &ProviderExecutedToolSpec{},
-			},
+			NewProviderExecutedToolSpec("test-provider", "server_search", nil),
 		},
 	}
 	for event, err := range llm.Generate(context.Background(), req) {
@@ -446,19 +531,22 @@ func TestWithRetrySpeculativeAttemptRetry(t *testing.T) {
 func TestWithRetryNoRetryForProviderExecutedTools(t *testing.T) {
 	t.Parallel()
 
-	inner := &retryTestLLM{
-		events: [][]*StreamEvent{
-			{
-				{Type: StreamEventPartDelta, PartDelta: &PartDelta{TextDelta: "partial text"}},
+	inner := &retryProviderToolUsageLLM{
+		retryTestLLM: &retryTestLLM{
+			events: [][]*StreamEvent{
+				{
+					{Type: StreamEventPartDelta, PartDelta: &PartDelta{TextDelta: "partial text"}},
+				},
+				{
+					StreamEventFromResponse(&Response{Message: NewTextMessage(RoleAssistant, "should-not-reach"), TurnComplete: true}),
+				},
 			},
-			{
-				StreamEventFromResponse(&Response{Message: NewTextMessage(RoleAssistant, "should-not-reach"), TurnComplete: true}),
+			errs: []error{
+				errors.New("providers: sse scanner: unexpected EOF"),
+				nil,
 			},
 		},
-		errs: []error{
-			errors.New("providers: sse scanner: unexpected EOF"),
-			nil,
-		},
+		usesProviderTools: true,
 	}
 	llm := WithRetry(inner, RetryConfig{
 		MaxRetries: 2,
@@ -469,10 +557,7 @@ func TestWithRetryNoRetryForProviderExecutedTools(t *testing.T) {
 	req := &Request{
 		Messages: []Message{NewTextMessage(RoleUser, "hello")},
 		Tools: []ToolSpec{
-			{
-				Kind:             ToolSpecKindProviderExecuted,
-				ProviderExecuted: &ProviderExecutedToolSpec{},
-			},
+			NewProviderExecutedToolSpec("test-provider", "server_search", nil),
 		},
 	}
 
@@ -488,6 +573,79 @@ func TestWithRetryNoRetryForProviderExecutedTools(t *testing.T) {
 	}
 	if got, want := inner.calls, 1; got != want {
 		t.Fatalf("calls = %d, want %d (no retry should happen)", got, want)
+	}
+}
+
+func TestWithRetryRetriesWhenProviderHookReportsNoProviderExecutedTools(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		spec ToolSpec
+	}{
+		{
+			name: "active spec ignored without provider hook match",
+			spec: NewProviderExecutedToolSpec("test-provider", "server_search", nil),
+		},
+		{
+			name: "empty spec ignored without provider hook match",
+			spec: ToolSpec{
+				Kind:             ToolSpecKindProviderExecuted,
+				ProviderExecuted: &ProviderExecutedToolSpec{},
+			},
+		},
+		{
+			name: "disabled spec",
+			spec: NewProviderExecutedToolSpec("test-provider", "server_search", map[string]json.RawMessage{
+				"disabled": json.RawMessage(`true`),
+			}),
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			inner := &retryProviderToolUsageLLM{
+				retryTestLLM: &retryTestLLM{
+					events: [][]*StreamEvent{
+						{
+							{Type: StreamEventPartDelta, PartDelta: &PartDelta{TextDelta: "partial text"}},
+						},
+						{
+							StreamEventFromResponse(&Response{Message: NewTextMessage(RoleAssistant, "retried"), TurnComplete: true}),
+						},
+					},
+					errs: []error{
+						errors.New("providers: sse scanner: unexpected EOF"),
+						nil,
+					},
+				},
+				usesProviderTools: false,
+			}
+			llm := WithRetry(inner, RetryConfig{
+				MaxRetries: 2,
+				BaseDelay:  time.Nanosecond,
+				MaxDelay:   time.Nanosecond,
+			})
+			req := &Request{
+				Messages: []Message{NewTextMessage(RoleUser, "hello")},
+				Tools:    []ToolSpec{tc.spec},
+			}
+
+			var gotErr error
+			for _, err := range llm.Generate(context.Background(), req) {
+				if err != nil {
+					gotErr = err
+				}
+			}
+
+			if gotErr != nil {
+				t.Fatalf("Generate() error = %v, want retry to recover", gotErr)
+			}
+			if got, want := inner.calls, 2; got != want {
+				t.Fatalf("calls = %d, want %d", got, want)
+			}
+		})
 	}
 }
 

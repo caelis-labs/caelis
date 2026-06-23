@@ -821,6 +821,41 @@ func TestProjectGatewayEventACPFetchResultKeepsInputQueryWhenOutputHasText(t *te
 	}
 }
 
+func TestProjectGatewayEventWebFetchResultUsesStructuredSummary(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectGatewayEventToTranscriptEvents(gateway.Event{
+		Kind: gateway.EventKindToolResult,
+		ToolResult: &gateway.ToolResultPayload{
+			CallID:   "fetch-1",
+			ToolName: "web_fetch",
+			Status:   gateway.ToolStatusCompleted,
+			RawInput: map[string]any{
+				"url": "https://example.com/docs/web-search",
+			},
+			RawOutput: map[string]any{
+				"status":      "completed",
+				"url":         "https://example.com/docs/web-search",
+				"final_url":   "https://example.com/docs/web-search",
+				"title":       "Web Search Guide",
+				"status_code": 200,
+				"content":     "Full fetched page content.",
+			},
+			Content: testToolContent("Full fetched page content."),
+		},
+	})
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one tool event", events)
+	}
+	got := events[0]
+	if got.ToolArgs != "https://example.com/docs/web-search" {
+		t.Fatalf("tool args = %q, want structured web_fetch URL summary", got.ToolArgs)
+	}
+	if got.ToolName != "web_fetch" {
+		t.Fatalf("tool name = %q, want runtime tool name", got.ToolName)
+	}
+}
+
 func TestProjectGatewayEventACPToolArgsUseKindAndDoNotLeakTransportSource(t *testing.T) {
 	t.Parallel()
 

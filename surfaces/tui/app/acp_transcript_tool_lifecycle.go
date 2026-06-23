@@ -302,15 +302,10 @@ func standardToolLifecycleHeader(ev SubagentEvent, err bool) string {
 	case "WRITE", "PATCH":
 		ev.Name = semanticName
 		return mutationLifecycleHeader(ev, err)
-	case "READ":
-		return standardVerbLifecycleHeader("Read", ev.Args, err)
-	case "LIST":
-		return standardVerbLifecycleHeader("List", ev.Args, err)
-	case "GLOB":
-		return standardVerbLifecycleHeader("Glob", ev.Args, err)
-	case "SEARCH", "RG", "FIND":
-		return standardVerbLifecycleHeader("Search", ev.Args, err)
 	default:
+		if verb := displaypolicy.ExplorationVerbForTool(semanticName); verb != "" {
+			return standardVerbLifecycleHeader(verb, ev.Args, err)
+		}
 		return standardVerbLifecycleHeader(toolEventDisplayName(firstTrimmed(ev.Name, ev.ToolKind, "Tool")), ev.Args, err)
 	}
 }

@@ -45,6 +45,14 @@ func (u openAICompatUsage) toKernelUsage() model.Usage {
 	}
 }
 
+func (u openAICompatUsage) toKernelUsageOr(fallback model.Usage) model.Usage {
+	out := u.toKernelUsage()
+	if out.PromptTokens == 0 && out.CachedInputTokens == 0 && out.CompletionTokens == 0 && out.ReasoningTokens == 0 && out.TotalTokens == 0 {
+		return fallback
+	}
+	return out
+}
+
 func (u openAICompatUsage) cachedInputTokens() int {
 	if u.PromptCacheHitTokens != 0 {
 		return u.PromptCacheHitTokens

@@ -56,6 +56,10 @@ func toolResultDisplayText(name string, input map[string]any, output map[string]
 		return globResultSummary(input, output, meta)
 	case "SEARCH", "RG", "FIND":
 		return searchResultSummary(input, output, meta)
+	case "WEB_SEARCH":
+		return displaypolicy.WebSearchSummary(input, output)
+	case "WEB_FETCH":
+		return displaypolicy.WebFetchSummary(input, output)
 	case "WRITE", "PATCH":
 		if isErr || strings.EqualFold(status, "failed") {
 			return firstNonEmpty(toolString(output["error"]), toolString(output["summary"]))

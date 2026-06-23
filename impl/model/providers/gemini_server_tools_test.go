@@ -38,7 +38,7 @@ func payloadToolConfigBool(payload map[string]any, key string) bool {
 	return value
 }
 
-func TestGeminiRequest_IncludesGoogleSearchByDefaultForCurrentModels(t *testing.T) {
+func TestGeminiRequest_DoesNotIncludeGoogleSearchByDefaultForCurrentModels(t *testing.T) {
 	var payload map[string]any
 	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
@@ -65,11 +65,11 @@ func TestGeminiRequest_IncludesGoogleSearchByDefaultForCurrentModels(t *testing.
 		}
 	}
 
-	if !payloadHasToolKey(payloadTools(payload), "googleSearch", "google_search") {
-		t.Fatalf("payload tools = %#v, want Gemini Google Search tool", payload["tools"])
+	if payloadHasToolKey(payloadTools(payload), "googleSearch", "google_search") {
+		t.Fatalf("payload tools = %#v, want no implicit Gemini Google Search tool", payload["tools"])
 	}
-	if !payloadToolConfigBool(payload, "includeServerSideToolInvocations") {
-		t.Fatalf("payload toolConfig = %#v, want includeServerSideToolInvocations=true", payload["toolConfig"])
+	if payloadToolConfigBool(payload, "includeServerSideToolInvocations") {
+		t.Fatalf("payload toolConfig = %#v, want no implicit server-side invocation opt-in", payload["toolConfig"])
 	}
 }
 
@@ -193,13 +193,18 @@ func TestGeminiRequest_ProviderExecutedGoogleSearchCombinesWithFunctionTools(t *
 	}
 }
 
-func TestGeminiUsesProviderExecutedToolsReflectsDefaultAndOptOut(t *testing.T) {
+func TestGeminiUsesProviderExecutedToolsReflectsExplicitSearchOnly(t *testing.T) {
 	llm, ok := newGemini(Config{Provider: "gemini", Model: "gemini-2.5-flash"}, "token").(*geminiLLM)
 	if !ok {
 		t.Fatal("newGemini() did not return *geminiLLM")
 	}
-	if !llm.UsesProviderExecutedTools(&model.Request{}) {
-		t.Fatal("UsesProviderExecutedTools() = false, want Gemini 2+ default Google Search visible to retry policy")
+	if llm.UsesProviderExecutedTools(&model.Request{}) {
+		t.Fatal("UsesProviderExecutedTools() = true, want no implicit Gemini Google Search")
+	}
+	if !llm.UsesProviderExecutedTools(&model.Request{
+		Tools: []model.ToolSpec{model.NewProviderExecutedToolSpec("gemini", geminiGoogleSearchToolName, nil)},
+	}) {
+		t.Fatal("UsesProviderExecutedTools() = false, want explicit Gemini Google Search visible to retry policy")
 	}
 	if llm.UsesProviderExecutedTools(&model.Request{
 		Tools: []model.ToolSpec{

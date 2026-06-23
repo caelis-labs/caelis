@@ -523,6 +523,53 @@ func TestGatewayLiveExplorationDefersResultSummaryUntilStepSettles(t *testing.T)
 	if !strings.Contains(settledSearch, `Search "Needle" 3 hits in 2 files`) {
 		t.Fatalf("settled search rows = %q, want result summary after step boundary", settledSearch)
 	}
+
+	webSearchInput := map[string]any{"query": "上海 天气 2026-06-23"}
+	sendToolCall("web-search-live", "web_search", webSearchInput)
+	runningWebSearch := render()
+	if !strings.Contains(runningWebSearch, `Search "上海 天气 2026-06-23"`) || strings.Contains(runningWebSearch, "2 results") {
+		t.Fatalf("running web search rows = %q, want start args without result summary", runningWebSearch)
+	}
+	sendToolResult("web-search-live", "web_search", webSearchInput, map[string]any{
+		"status": "completed",
+		"query":  "上海 天气 2026-06-23",
+		"results": []any{
+			map[string]any{"title": "上海天气", "url": "https://example.com/weather"},
+			map[string]any{"title": "上海气象", "url": "https://example.com/meteo"},
+		},
+	}, "上海天气\nhttps://example.com/weather")
+	completedWebSearch := render()
+	if !strings.Contains(completedWebSearch, `Search "上海 天气 2026-06-23"`) || strings.Contains(completedWebSearch, "2 results") || strings.Contains(completedWebSearch, "WEB_SEARCH") {
+		t.Fatalf("completed web search rows = %q, want live step to keep start args and friendly verb", completedWebSearch)
+	}
+	sendReasoning("Now I can fetch a specific weather page.")
+	settledWebSearch := render()
+	if !strings.Contains(settledWebSearch, `"上海 天气 2026-06-23"`) || strings.Contains(settledWebSearch, "2 results") || strings.Contains(settledWebSearch, "WEB_SEARCH") {
+		t.Fatalf("settled web search rows = %q, want settled query-only summary with friendly verb", settledWebSearch)
+	}
+
+	webFetchInput := map[string]any{"url": "https://wttr.in/Shanghai?format=j1"}
+	sendToolCall("web-fetch-live", "web_fetch", webFetchInput)
+	runningWebFetch := render()
+	if !strings.Contains(runningWebFetch, "Fetch https://wttr.in/Shanghai?format=j1") || strings.Contains(runningWebFetch, "Shanghai weather 200") {
+		t.Fatalf("running web fetch rows = %q, want start args without result summary", runningWebFetch)
+	}
+	sendToolResult("web-fetch-live", "web_fetch", webFetchInput, map[string]any{
+		"status":      "completed",
+		"url":         "https://wttr.in/Shanghai?format=j1",
+		"title":       "Shanghai weather",
+		"status_code": 200,
+		"content":     "large fetched content",
+	}, "large fetched content")
+	completedWebFetch := render()
+	if !strings.Contains(completedWebFetch, "Fetch https://wttr.in/Shanghai?format=j1") || strings.Contains(completedWebFetch, "Shanghai weather 200") || strings.Contains(completedWebFetch, "WEB_FETCH") {
+		t.Fatalf("completed web fetch rows = %q, want live step to keep start args and friendly verb", completedWebFetch)
+	}
+	sendReasoning("Now I can answer from the fetched page.")
+	settledWebFetch := render()
+	if !strings.Contains(settledWebFetch, "Fetch https://wttr.in/Shanghai?format=j1") || strings.Contains(settledWebFetch, "Shanghai weather 200") || strings.Contains(settledWebFetch, "WEB_FETCH") {
+		t.Fatalf("settled web fetch rows = %q, want settled URL-only summary with friendly verb", settledWebFetch)
+	}
 }
 
 func TestGatewayAssistantExplorationStepSettlesOnlyAtStepBoundary(t *testing.T) {
@@ -972,6 +1019,53 @@ func TestGatewayFailedExplorationToolStaysInCompactSummary(t *testing.T) {
 	}
 }
 
+func TestGatewayWebExplorationToolsUseFriendlyExploredRows(t *testing.T) {
+	model := newGatewayEventTestModel()
+	block := NewMainACPTurnBlock("root-session")
+	block.Events = append(block.Events,
+		SubagentEvent{Kind: SEReasoning, Text: "需要查询实时天气，然后读取一个来源。"},
+		SubagentEvent{Kind: SEToolCall, CallID: "web-search-1", Name: "WEB_SEARCH", Args: `"上海 天气 2026-06-23"`, Output: "failed", Done: true, Err: true},
+		SubagentEvent{Kind: SEToolCall, CallID: "web-fetch-1", Name: "WEB_FETCH", Args: "上海天气预报 200", Output: "large fetched content", Done: true},
+	)
+	block.SetStatus("completed", "", "", time.Now())
+
+	ctx := BlockRenderContext{Width: 96, TermWidth: 96, Theme: model.theme}
+	joined := strings.Join(renderedPlainRows(block.Render(ctx)), "\n")
+	for _, want := range []string{
+		"• Explored",
+		`  └ Search "上海 天气 2026-06-23" failed`,
+		"    Fetch 上海天气预报 200",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("collapsed rows = %q, want %q", joined, want)
+		}
+	}
+	for _, forbidden := range []string{"WEB_SEARCH", "WEB_FETCH", "large fetched content", "需要查询实时天气"} {
+		if strings.Contains(joined, forbidden) {
+			t.Fatalf("collapsed rows = %q, should hide %q", joined, forbidden)
+		}
+	}
+
+	if !block.toggleExplorationExpanded(explorationStageKey(block.Events)) {
+		t.Fatal("expected web exploration group to expand")
+	}
+	joined = strings.Join(renderedPlainRows(block.Render(ctx)), "\n")
+	for _, want := range []string{
+		"  └ 需要查询实时天气，然后读取一个来源。",
+		`    Search "上海 天气 2026-06-23" failed`,
+		"    Fetch 上海天气预报 200",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("expanded rows = %q, want %q", joined, want)
+		}
+	}
+	for _, forbidden := range []string{"WEB_SEARCH", "WEB_FETCH", "large fetched content"} {
+		if strings.Contains(joined, forbidden) {
+			t.Fatalf("expanded rows = %q, should hide %q", joined, forbidden)
+		}
+	}
+}
+
 func TestExplorationToolDetailDoesNotDuplicateFailedStatus(t *testing.T) {
 	tests := []struct {
 		name string
@@ -1045,6 +1139,11 @@ func TestExplorationToolDetailCompactsWindowsWorkspacePaths(t *testing.T) {
 			name: "search query in path",
 			ev:   SubagentEvent{Name: "SEARCH", Args: `"needle" in D:\repo\src`},
 			want: `"needle" in src`,
+		},
+		{
+			name: "web search query keeps search operators",
+			ev:   SubagentEvent{Name: "WEB_SEARCH", Args: `"site:example.com/docs error"`},
+			want: `"site:example.com/docs error"`,
 		},
 		{
 			name: "workspace outside path falls back to basename",
@@ -1487,6 +1586,65 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 				Content: testToolContent("**/*.py 5 matches"),
 			},
 			want: []string{"• Glob **/*.py 5 matches"},
+		},
+		{
+			name: "web search summary",
+			call: &gateway.ToolCallPayload{
+				CallID:   "web-search-1",
+				ToolName: "web_search",
+				Status:   gateway.ToolStatusRunning,
+				Scope:    gateway.EventScopeMain,
+				RawInput: map[string]any{"query": "上海 天气 2026-06-23"},
+			},
+			result: &gateway.ToolResultPayload{
+				CallID:   "web-search-1",
+				ToolName: "web_search",
+				Status:   gateway.ToolStatusCompleted,
+				Scope:    gateway.EventScopeMain,
+				RawInput: map[string]any{"query": "上海 天气 2026-06-23"},
+				RawOutput: map[string]any{
+					"status":   "completed",
+					"query":    "上海 天气 2026-06-23",
+					"provider": "xiaomi",
+					"results": []any{
+						map[string]any{"title": "上海天气", "url": "https://example.com/weather", "snippet": "晴"},
+						map[string]any{"title": "上海气象", "url": "https://example.com/meteo", "snippet": "多云"},
+					},
+				},
+				Content: testToolContent("上海天气\n晴\nhttps://example.com/weather"),
+			},
+			want:      []string{`• Search "上海 天气 2026-06-23"`},
+			forbidden: []string{"▸ web_search", "2 results", "上海天气\n晴", "https://example.com/weather"},
+		},
+		{
+			name: "web fetch summary",
+			call: &gateway.ToolCallPayload{
+				CallID:   "web-fetch-1",
+				ToolName: "web_fetch",
+				Status:   gateway.ToolStatusRunning,
+				Scope:    gateway.EventScopeMain,
+				RawInput: map[string]any{"url": "https://example.com/docs/web-search"},
+			},
+			result: &gateway.ToolResultPayload{
+				CallID:   "web-fetch-1",
+				ToolName: "web_fetch",
+				Status:   gateway.ToolStatusCompleted,
+				Scope:    gateway.EventScopeMain,
+				RawInput: map[string]any{"url": "https://example.com/docs/web-search"},
+				RawOutput: map[string]any{
+					"status":        "completed",
+					"url":           "https://example.com/docs/web-search",
+					"final_url":     "https://example.com/docs/web-search",
+					"title":         "Web Search Guide",
+					"status_code":   200,
+					"content_type":  "text/html",
+					"artifact_path": "/tmp/caelis-web-fetch/web-fetch-1.json",
+					"content":       "Full fetched page content that should stay hidden while collapsed.",
+				},
+				Content: testToolContent("Full fetched page content that should stay hidden while collapsed."),
+			},
+			want:      []string{"• Fetch https://example.com/docs/web-search"},
+			forbidden: []string{"▸ web_fetch", "Full fetched page content", "artifact_path", "Web Search Guide 200"},
 		},
 		{
 			name: "command terminal panel",

@@ -66,22 +66,16 @@ func WorkspaceWriteMode() policy.Mode {
 				return allow(def), nil
 			case "RUN_COMMAND":
 				return decideCommand(input, def, "workspace-write policy")
+			case "WEB_SEARCH", "WEB_FETCH":
+				return allow(def), nil
 			default:
-				if isMCPTool(input) {
+				if isMCPTool(input.Tool) {
 					return allow(def), nil
 				}
-				return deny(fmt.Sprintf("tool %q is not allowed in workspace-write policy", input.Tool.Name)), nil
+				return deny("tool is not allowed by workspace-write policy"), nil
 			}
 		},
 	}
-}
-
-func isMCPTool(input policy.ToolContext) bool {
-	if len(input.Tool.Metadata) == 0 {
-		return false
-	}
-	kind, _ := input.Tool.Metadata[tool.MetadataToolKind].(string)
-	return strings.EqualFold(strings.TrimSpace(kind), tool.MetadataToolKindMCP)
 }
 
 func AutoReviewMode() policy.Mode {
@@ -204,6 +198,14 @@ func toolKind(name string) string {
 	default:
 		return "other"
 	}
+}
+
+func isMCPTool(def tool.Definition) bool {
+	if len(def.Metadata) == 0 {
+		return false
+	}
+	kind, _ := def.Metadata[tool.MetadataToolKind].(string)
+	return strings.EqualFold(strings.TrimSpace(kind), tool.MetadataToolKindMCP)
 }
 
 func approvalTitle(name string, call map[string]any) string {

@@ -13,6 +13,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/plan"
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/shell"
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/task"
+	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/web"
 	"github.com/OnslaughtSnail/caelis/impl/tool/registry"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/tool"
@@ -29,7 +30,7 @@ func TestBuildCoreToolsCreatesDefaultCodingGroup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildCoreTools() error = %v", err)
 	}
-	if got, want := len(tools), 9; got != want {
+	if got, want := len(tools), 11; got != want {
 		t.Fatalf("len(tools) = %d, want %d", got, want)
 	}
 	if got := tools[0].Definition().Name; got != filesystem.ReadToolName {
@@ -48,7 +49,13 @@ func TestBuildCoreToolsCreatesDefaultCodingGroup(t *testing.T) {
 		t.Fatalf("task tool = %q, want %q", got, task.ToolName)
 	}
 	if got := tools[8].Definition().Name; got != plan.ToolName {
-		t.Fatalf("last tool = %q, want %q", got, plan.ToolName)
+		t.Fatalf("plan tool = %q, want %q", got, plan.ToolName)
+	}
+	if got := tools[9].Definition().Name; got != web.SearchToolName {
+		t.Fatalf("web search tool = %q, want %q", got, web.SearchToolName)
+	}
+	if got := tools[10].Definition().Name; got != web.FetchToolName {
+		t.Fatalf("last tool = %q, want %q", got, web.FetchToolName)
 	}
 }
 
@@ -136,6 +143,16 @@ func TestCoreToolSchemasExposeGuidanceBoundsAndAnnotations(t *testing.T) {
 	requirePlanSchema(t, defs[plan.ToolName])
 	requireDescriptionContains(t, defs[plan.ToolName], "multi-step, risky, or ambiguous", "skip it for trivial")
 	requireAnnotations(t, defs[plan.ToolName], false, false, true, false)
+
+	requireStringMinLength(t, defs[web.SearchToolName], "query", 1)
+	requireIntegerBounds(t, defs[web.SearchToolName], "max_results", 1, ptrAny(10))
+	requireDescriptionContains(t, defs[web.SearchToolName], "Search the web", "concise keyword queries", "site:", "provider-native web search", "unavailable", "fall back to web_fetch")
+	requireAnnotations(t, defs[web.SearchToolName], true, false, false, true)
+
+	requireStringMinLength(t, defs[web.FetchToolName], "url", 1)
+	requireIntegerBounds(t, defs[web.FetchToolName], "timeout", 1, ptrAny(120))
+	requireDescriptionContains(t, defs[web.FetchToolName], "specific http or https URL", "cleaned markdown", "does not search", "artifact_path")
+	requireAnnotations(t, defs[web.FetchToolName], true, false, false, true)
 }
 
 func TestEnsureCoreToolsRejectsReservedBuiltinNames(t *testing.T) {
@@ -184,6 +201,8 @@ func TestCoreToolsRejectUnknownArgs(t *testing.T) {
 		}},
 		{shell.RunCommandToolName, map[string]any{"command": "printf ok", "unexpected": true}},
 		{plan.ToolName, map[string]any{"entries": []map[string]any{{"content": "Read", "status": "pending"}}, "unexpected": true}},
+		{web.SearchToolName, map[string]any{"query": "latest", "unexpected": true}},
+		{web.FetchToolName, map[string]any{"url": "https://example.com", "unexpected": true}},
 	}
 	for _, tt := range tests {
 		tt := tt
