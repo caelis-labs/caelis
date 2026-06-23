@@ -7,6 +7,7 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/ports/agent"
 	"github.com/OnslaughtSnail/caelis/ports/approval"
+	gatewayapi "github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
@@ -145,13 +146,23 @@ func (g *Gateway) persistApprovalReviewUsage(ctx context.Context, req *agent.App
 			accounting = map[string]any{}
 		}
 		total := UsageSnapshot{}
-		if existing := UsageSnapshotFromMap(anyMapValue(accounting["auto_review"])); existing != nil {
+		existingProvider := anyStringValue(accounting["auto_review_provider"])
+		if invocation != nil && strings.TrimSpace(invocation.Provider) != "" {
+			existingProvider = strings.TrimSpace(invocation.Provider)
+		}
+		if existing := gatewayapi.UsageSnapshotFromMapForProvider(anyMapValue(accounting["auto_review"]), existingProvider); existing != nil {
 			total = *existing
 		}
 		addUsageSnapshot(&total, usageCopy)
 		accounting["auto_review"] = usageSnapshotMeta(total)
 		accounting["auto_review_source"] = source
 		if invocation != nil {
+			if provider := strings.TrimSpace(invocation.Provider); provider != "" {
+				accounting["auto_review_provider"] = provider
+			}
+			if modelName := strings.TrimSpace(invocation.Model); modelName != "" {
+				accounting["auto_review_model"] = modelName
+			}
 			accounting["by_model"] = addUsageByModelState(accounting["by_model"], *invocation, usageCopy)
 		}
 		next[StateUsageAccounting] = accounting
@@ -175,15 +186,17 @@ func addUsageByModelState(existing any, invocation session.EventInvocation, usag
 			continue
 		}
 		total := UsageSnapshot{}
-		if existingUsage := UsageSnapshotFromMap(anyMapValue(item["usage"])); existingUsage != nil {
+		if existingUsage := gatewayapi.UsageSnapshotFromMapForProvider(anyMapValue(item["usage"]), invocation.Provider); existingUsage != nil {
 			total = *existingUsage
 		}
 		addUsageSnapshot(&total, usage)
+		item["category"] = "auto_review"
 		item["usage"] = usageSnapshotMeta(total)
 		rows[i] = item
 		return rows
 	}
 	rows = append(rows, map[string]any{
+		"category": "auto_review",
 		"provider": invocation.Provider,
 		"model":    invocation.Model,
 		"usage":    usageSnapshotMeta(usage),

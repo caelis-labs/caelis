@@ -6,34 +6,61 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/model"
 )
 
+const deepSeekDefaultAnthropicBaseURL = "https://api.deepseek.com/anthropic"
+const deepSeekDefaultMaxTokens = 32768
+const deepSeekMaxTokens = 393216
+const thinkingModeMinTokens = 32768
+
 var deepSeekCompatProfile = openAICompatProfile{
 	IncludeReasoningContent:        true,
 	EmitEmptyReasoningForToolCall:  true,
 	EmitEmptyReasoningForAssistant: true,
-	ApplyReasoning:                 applyThinkingReasoning,
+	ApplyReasoning:                 applyDeepSeekCompatThinkingReasoning,
 	StructuredOutput:               openAICompatStructuredOutputJSONOutput,
 }
 
 func newDeepSeek(cfg Config, token string) model.LLM {
-	return newOpenAICompatWithProfile(cfg, token, deepSeekCompatProfile)
+	if !deepSeekUsesAnthropicBaseURL(cfg.BaseURL) {
+		return newOpenAICompatWithProfile(cfg, token, deepSeekCompatProfile)
+	}
+	cfg.BaseURL = deepSeekAnthropicBaseURL(cfg.BaseURL)
+	if cfg.Auth.HeaderKey == "" && cfg.Auth.Type == AuthAPIKey {
+		cfg.Auth.Type = AuthBearerToken
+	}
+	return newAnthropicWithDefaults(cfg, token, anthropicProviderDefaults{
+		provider:     "deepseek",
+		baseURL:      deepSeekDefaultAnthropicBaseURL,
+		maxOutputTok: deepSeekDefaultMaxTokens,
+	})
 }
 
-// thinkingModeMinTokens is the minimum max_tokens value required for DeepSeek
-// thinking mode. The API defaults to 32K; sending a lower limit truncates the
-// reasoning chain.
-const thinkingModeMinTokens = 32768
+func deepSeekUsesAnthropicBaseURL(raw string) bool {
+	base := strings.TrimRight(strings.TrimSpace(raw), "/")
+	switch strings.ToLower(base) {
+	case "", "https://api.deepseek.com", "https://api.deepseek.com/v1", "https://api.deepseek.com/anthropic", "https://api.deepseek.com/anthropic/v1":
+		return true
+	default:
+		lower := strings.ToLower(base)
+		return strings.HasSuffix(lower, "/anthropic") || strings.HasSuffix(lower, "/anthropic/v1")
+	}
+}
 
-const (
-	deepSeekDefaultMaxTokens = 32768
-	deepSeekMaxTokens        = 393216
-)
+func deepSeekAnthropicBaseURL(raw string) string {
+	base := strings.TrimRight(strings.TrimSpace(raw), "/")
+	switch strings.ToLower(base) {
+	case "", "https://api.deepseek.com", "https://api.deepseek.com/v1", "https://api.deepseek.com/anthropic", "https://api.deepseek.com/anthropic/v1":
+		return deepSeekDefaultAnthropicBaseURL
+	default:
+		return base
+	}
+}
 
-func applyThinkingReasoning(payload *openAICompatRequest, cfg model.ReasoningConfig) {
+func applyDeepSeekCompatThinkingReasoning(payload *openAICompatRequest, cfg model.ReasoningConfig) {
 	if payload == nil {
 		return
 	}
 	if !deepSeekModelSupportsThinking(payload.Model) {
-		clearDeepSeekReasoningFields(payload)
+		clearDeepSeekCompatReasoningFields(payload)
 		payload.MaxTokens = clampDeepSeekMaxTokens(payload.MaxTokens)
 		return
 	}
@@ -41,15 +68,12 @@ func applyThinkingReasoning(payload *openAICompatRequest, cfg model.ReasoningCon
 	switch effort {
 	case "none":
 		payload.Thinking = &openAIThinking{Type: "disabled"}
-		clearDeepSeekReasoningFields(payload)
+		clearDeepSeekCompatReasoningFields(payload)
 		payload.MaxTokens = clampDeepSeekMaxTokens(payload.MaxTokens)
 	default:
 		payload.Thinking = &openAIThinking{Type: "enabled"}
 		payload.Reasoning = nil
 		payload.ReasoningEffort = effort
-		// Thinking mode needs a larger token budget. If the current limit is
-		// absent or below the API's default (32K), bump it up so the reasoning
-		// chain is not prematurely truncated.
 		payload.MaxTokens = clampDeepSeekReasonerMaxTokens(payload.MaxTokens)
 	}
 }
@@ -58,7 +82,7 @@ func normalizeDeepSeekReasoningEffort(effort string) string {
 	switch strings.ToLower(strings.TrimSpace(effort)) {
 	case "none":
 		return "none"
-	case "max", "xhigh", "very_high", "veryhigh":
+	case "max", "xhigh", "very_high", "very-high", "veryhigh":
 		return "max"
 	case "", "minimal", "low", "medium", "high":
 		return "high"
@@ -67,7 +91,7 @@ func normalizeDeepSeekReasoningEffort(effort string) string {
 	}
 }
 
-func clearDeepSeekReasoningFields(payload *openAICompatRequest) {
+func clearDeepSeekCompatReasoningFields(payload *openAICompatRequest) {
 	if payload == nil {
 		return
 	}

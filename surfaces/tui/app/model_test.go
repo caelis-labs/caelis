@@ -534,6 +534,45 @@ func TestMainLifecycleCompletionAppendsTurnDividerOnce(t *testing.T) {
 	}
 }
 
+func TestMainLifecycleCompletionUsesTranscriptTimingForDivider(t *testing.T) {
+	model := NewModel(Config{NoColor: true})
+	start := time.Now().Add(-7400 * time.Millisecond)
+	end := start.Add(7400 * time.Millisecond)
+	model.showTurnDivider = true
+
+	updated, _ := model.Update(TranscriptEventsMsg{Events: []TranscriptEvent{
+		{
+			Kind:       TranscriptEventLifecycle,
+			Scope:      ACPProjectionMain,
+			ScopeID:    "root-session",
+			State:      "running",
+			OccurredAt: start,
+		},
+		{
+			Kind:          TranscriptEventNarrative,
+			Scope:         ACPProjectionMain,
+			ScopeID:       "root-session",
+			NarrativeKind: TranscriptNarrativeAssistant,
+			Text:          "done",
+			Final:         true,
+			OccurredAt:    end,
+		},
+		{
+			Kind:       TranscriptEventLifecycle,
+			Scope:      ACPProjectionMain,
+			ScopeID:    "root-session",
+			State:      "completed",
+			OccurredAt: end,
+		},
+	}})
+	model = updated.(*Model)
+
+	divider, _ := model.doc.Last().(*DividerBlock)
+	if divider == nil || divider.Label != "7.4s" {
+		t.Fatalf("last block = %#v, want transcript-timed 7.4s divider", model.doc.Last())
+	}
+}
+
 func TestMainLifecycleFailureWaitsForTaskResultBeforeDivider(t *testing.T) {
 	model := NewModel(Config{NoColor: true})
 	start := time.Now().Add(-7400 * time.Millisecond)

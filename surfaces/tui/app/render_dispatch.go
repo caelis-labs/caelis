@@ -686,6 +686,17 @@ func (m *Model) captureLastRunDuration(endedAt time.Time) {
 	m.runStartedAt = time.Time{}
 }
 
+func (m *Model) captureLastRunDurationFromMainBlock(block *MainACPTurnBlock) {
+	if m == nil || block == nil || m.hasLastRunDuration {
+		return
+	}
+	if block.StartedAt.IsZero() || block.EndedAt.IsZero() || !block.EndedAt.After(block.StartedAt) {
+		return
+	}
+	m.lastRunDuration = block.EndedAt.Sub(block.StartedAt)
+	m.hasLastRunDuration = true
+}
+
 func (m *Model) appendUserTurnDividerIfNeeded(suppress bool) bool {
 	if m == nil || m.doc == nil || suppress || !m.showTurnDivider || m.doc.Len() == 0 {
 		return false

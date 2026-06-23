@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/OnslaughtSnail/caelis/ports/compact"
+	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
@@ -117,29 +118,59 @@ func providerPromptBaselineTokens(meta map[string]any) (int, bool, bool) {
 	}
 	if usage := nestedMap(meta, "caelis", "sdk", "usage"); len(usage) > 0 {
 		if value, ok := intFromAny(usage["prompt_tokens"]); ok && value > 0 {
-			return value, true, true
+			return providerPromptBaselineWithCachedInput(meta, usage, value), true, true
 		}
 		total, totalOK := intFromAny(usage["total_tokens"])
 		completion, completionOK := intFromAny(usage["completion_tokens"])
 		if totalOK && completionOK && total > 0 {
-			return max(total-completion, 0), true, true
+			return providerPromptBaselineWithCachedInput(meta, usage, max(total-completion, 0)), true, true
 		}
 		if totalOK && total > 0 {
 			return total, false, true
 		}
 	}
 	if value, ok := intFromAny(meta["prompt_tokens"]); ok && value > 0 {
-		return value, true, true
+		return providerPromptBaselineWithCachedInput(meta, meta, value), true, true
 	}
 	total, totalOK := intFromAny(meta["total_tokens"])
 	completion, completionOK := intFromAny(meta["completion_tokens"])
 	if totalOK && completionOK && total > 0 {
-		return max(total-completion, 0), true, true
+		return providerPromptBaselineWithCachedInput(meta, meta, max(total-completion, 0)), true, true
 	}
 	if totalOK && total > 0 {
 		return total, false, true
 	}
 	return 0, false, false
+}
+
+func providerPromptBaselineWithCachedInput(meta map[string]any, usage map[string]any, baseline int) int {
+	if baseline <= 0 || !providerUsageSeparatesCachedInputMeta(meta, usage) {
+		return baseline
+	}
+	cached := firstPositiveIntFromAny(
+		usage["cached_input_tokens"],
+		usage["cache_read_input_tokens"],
+		usage["cached_prompt_tokens"],
+		usage["prompt_cache_hit_tokens"],
+	)
+	return baseline + cached
+}
+
+func providerUsageSeparatesCachedInputMeta(meta map[string]any, usage map[string]any) bool {
+	provider := strings.TrimSpace(stringifyAny(meta["provider"]))
+	if sdkMeta := nestedMap(meta, "caelis", "sdk"); len(sdkMeta) > 0 {
+		provider = firstNonEmpty(provider, strings.TrimSpace(stringifyAny(sdkMeta["provider"])))
+	}
+	return gateway.ProviderSeparatesCachedInputForUsage(provider, usage)
+}
+
+func firstPositiveIntFromAny(values ...any) int {
+	for _, value := range values {
+		if n, ok := intFromAny(value); ok && n > 0 {
+			return n
+		}
+	}
+	return 0
 }
 
 func providerSnapshotGroupStart(events []*session.Event, end int) int {
@@ -167,6 +198,7 @@ func providerSnapshotSignature(event *session.Event) string {
 		return ""
 	}
 	prompt, _ := intFromAny(meta["prompt_tokens"])
+	cached, _ := intFromAny(meta["cached_input_tokens"])
 	completion, _ := intFromAny(meta["completion_tokens"])
 	total, _ := intFromAny(meta["total_tokens"])
 	provider := strings.TrimSpace(stringifyAny(meta["provider"]))
@@ -178,6 +210,12 @@ func providerSnapshotSignature(event *session.Event) string {
 			if value, ok := intFromAny(usage["prompt_tokens"]); ok {
 				prompt = value
 			}
+			if value, ok := intFromAny(usage["cached_input_tokens"]); ok {
+				cached = value
+			}
+			if value, ok := intFromAny(usage["cache_read_input_tokens"]); ok {
+				cached = value
+			}
 			if value, ok := intFromAny(usage["completion_tokens"]); ok {
 				completion = value
 			}
@@ -186,10 +224,10 @@ func providerSnapshotSignature(event *session.Event) string {
 			}
 		}
 	}
-	if prompt <= 0 && completion <= 0 && total <= 0 && provider == "" && model == "" {
+	if prompt <= 0 && cached <= 0 && completion <= 0 && total <= 0 && provider == "" && model == "" {
 		return ""
 	}
-	return fmt.Sprintf("%s|%s|%d|%d|%d", provider, model, prompt, completion, total)
+	return fmt.Sprintf("%s|%s|%d|%d|%d|%d", provider, model, prompt, cached, completion, total)
 }
 
 func eventUsageMetadata(event *session.Event) map[string]any {

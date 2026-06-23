@@ -1698,9 +1698,20 @@ func TestFormatSessionTokenUsageStatusOmitsEmptyBreakdownBuckets(t *testing.T) {
 	if strings.Contains(got, "main usage:") {
 		t.Fatalf("formatSessionTokenUsageStatus() = %q, should use table-style token usage", got)
 	}
-	for _, forbidden := range []string{"main", "sub-agent", "auto-review"} {
+	for _, forbidden := range []string{"Reasoning", "main", "sub-agent", "auto-review"} {
 		if strings.Contains(got, forbidden) {
 			t.Fatalf("formatSessionTokenUsageStatus() = %q, should omit %q", got, forbidden)
+		}
+	}
+}
+
+func TestFormatSessionTokenUsageStatusShowsReasoningWhenPresent(t *testing.T) {
+	got := formatSessionTokenUsageStatus(control.StatusSnapshot{
+		SessionUsageTotal: control.UsageSnapshot{PromptTokens: 100, CompletionTokens: 10, ReasoningTokens: 3, TotalTokens: 110},
+	})
+	for _, want := range []string{"Reasoning", "3"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("formatSessionTokenUsageStatus() = %q, want %q", got, want)
 		}
 	}
 }

@@ -387,7 +387,8 @@ func NormalizeEndpointID(provider string, endpointID string, baseURL string, api
 		}
 		return "custom-" + shortConfigHash(normalizedBaseURL)
 	case "deepseek":
-		if normalizedBaseURL == "" || normalizedBaseURL == "https://api.deepseek.com/v1" {
+		switch normalizedBaseURL {
+		case "", "https://api.deepseek.com/v1", "https://api.deepseek.com/anthropic":
 			return "default"
 		}
 		return "custom-" + shortConfigHash(normalizedBaseURL)

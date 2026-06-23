@@ -1029,6 +1029,7 @@ func (m *Model) finalizeActiveMainACPTurn(interrupted bool, err error) {
 		state = "failed"
 	}
 	block.SetStatus(state, "", "", time.Time{})
+	m.captureLastRunDurationFromMainBlock(block)
 	m.activeMainACPTurnID = ""
 	m.pendingMainACPSessionID = ""
 	m.pendingMainACPStartedAt = time.Time{}

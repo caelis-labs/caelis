@@ -1549,6 +1549,9 @@ func TestPersistApprovalReviewUsageUsesSessionStateNotHistory(t *testing.T) {
 	if got == nil || *got != *usage {
 		t.Fatalf("auto-review usage state = %+v, want %+v", got, usage)
 	}
+	if accounting["auto_review_provider"] != "deepseek" || accounting["auto_review_model"] != "deepseek-v4-pro" {
+		t.Fatalf("auto-review attribution = %#v/%#v, want deepseek/deepseek-v4-pro", accounting["auto_review_provider"], accounting["auto_review_model"])
+	}
 	rows, _ := accounting["by_model"].([]any)
 	if len(rows) != 1 {
 		t.Fatalf("by_model = %#v, want one row", accounting["by_model"])
@@ -1556,6 +1559,9 @@ func TestPersistApprovalReviewUsageUsesSessionStateNotHistory(t *testing.T) {
 	row := anyMapValue(rows[0])
 	if row["provider"] != "deepseek" || row["model"] != "deepseek-v4-pro" {
 		t.Fatalf("by_model row = %#v, want deepseek/deepseek-v4-pro", row)
+	}
+	if row["category"] != "auto_review" {
+		t.Fatalf("by_model category = %#v, want auto_review", row["category"])
 	}
 	modelUsage := UsageSnapshotFromMap(anyMapValue(row["usage"]))
 	if modelUsage == nil || *modelUsage != *usage {

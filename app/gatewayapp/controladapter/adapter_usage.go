@@ -64,7 +64,7 @@ func (d *Adapter) sessionTokenUsageBreakdown(ctx context.Context, ref session.Se
 	if state, err := d.stack.Sessions.SnapshotState(ctx, ref); err == nil {
 		breakdown.addBreakdown(sessionTokenUsageBreakdownFromState(state))
 	}
-	for _, childRef := range d.selfSubagentSessionRefs(ctx, ref) {
+	for _, childRef := range d.subagentSessionRefs(ctx, ref) {
 		childEvents, err := d.stack.Sessions.Events(ctx, session.EventsRequest{SessionRef: childRef})
 		if err != nil {
 			continue
@@ -96,9 +96,15 @@ func sessionTokenUsageBreakdownFromEvents(events []*session.Event, fallbackCateg
 		if isToolCall && lastUsageWasToolCall && usageKey != "" && usageKey == lastToolCallUsageKey {
 			continue
 		}
-		breakdown.add(usageCategoryFromSessionEvent(event, fallbackCategory), *one)
-		if invocation, ok := invocationFromSessionEvent(event); ok {
-			breakdown.addModel(invocation.Provider, invocation.Model, *one)
+		invocation, hasInvocation := invocationFromSessionEvent(event)
+		provider := gateway.UsageProviderFromSessionEvent(event)
+		if provider == "" && hasInvocation {
+			provider = invocation.Provider
+		}
+		usage := gateway.NormalizeUsageForDisplay(*one, provider)
+		breakdown.add(usageCategoryFromSessionEvent(event, fallbackCategory), usage)
+		if hasInvocation {
+			breakdown.addModel(invocation.Provider, invocation.Model, usage)
 		}
 		if isToolCall {
 			lastToolCallUsageKey = usageKey
@@ -114,19 +120,39 @@ func sessionTokenUsageBreakdownFromEvents(events []*session.Event, fallbackCateg
 func sessionTokenUsageBreakdownFromState(state map[string]any) sessionTokenUsageBreakdown {
 	var breakdown sessionTokenUsageBreakdown
 	accounting := mapAnyValue(state[gateway.StateUsageAccounting])
-	if usage := gateway.UsageSnapshotFromMap(mapAnyValue(accounting[tokenUsageCategoryAutoReview])); usage != nil {
-		breakdown.add(tokenUsageCategoryAutoReview, *usage)
-	}
+	autoReviewProvider := anyString(accounting["auto_review_provider"])
+	autoReviewModel := anyString(accounting["auto_review_model"])
+	autoReviewUsage := gateway.UsageSnapshotFromMapForProvider(mapAnyValue(accounting[tokenUsageCategoryAutoReview]), autoReviewProvider)
+	var autoReviewByModel gateway.UsageSnapshot
+	hasAutoReviewByModel := false
 	for _, item := range anySliceValue(accounting["by_model"]) {
 		row := mapAnyValue(item)
 		if row == nil {
 			continue
 		}
-		usage := gateway.UsageSnapshotFromMap(mapAnyValue(row["usage"]))
+		if category := normalizeUsageCategory(anyString(row["category"])); category != "" && category != tokenUsageCategoryAutoReview {
+			continue
+		}
+		invocation := session.EventInvocation{Provider: anyString(row["provider"]), Model: anyString(row["model"])}
+		usage := gateway.UsageSnapshotFromMapForProvider(mapAnyValue(row["usage"]), invocation.Provider)
 		if usage == nil {
 			continue
 		}
-		breakdown.addModel(anyString(row["provider"]), anyString(row["model"]), *usage)
+		normalized := gateway.NormalizeUsageForDisplay(*usage, invocation.Provider)
+		addUsageSnapshot(&autoReviewByModel, normalized)
+		hasAutoReviewByModel = true
+		breakdown.addModel(invocation.Provider, invocation.Model, normalized)
+	}
+	if autoReviewUsage != nil {
+		usage := gateway.NormalizeUsageForDisplay(*autoReviewUsage, autoReviewProvider)
+		if hasAutoReviewByModel {
+			// by_model rows are the authoritative auto-review attribution when
+			// present; the aggregate is retained only for older snapshots.
+			usage = autoReviewByModel
+		} else if autoReviewProvider != "" || autoReviewModel != "" {
+			breakdown.addModel(autoReviewProvider, autoReviewModel, usage)
+		}
+		breakdown.add(tokenUsageCategoryAutoReview, usage)
 	}
 	return breakdown
 }
@@ -317,7 +343,7 @@ func normalizeUsageCategory(category string) string {
 	}
 }
 
-func (d *Adapter) selfSubagentSessionRefs(ctx context.Context, ref session.SessionRef) []session.SessionRef {
+func (d *Adapter) subagentSessionRefs(ctx context.Context, ref session.SessionRef) []session.SessionRef {
 	if d == nil || d.stack == nil || d.stack.Sessions == nil {
 		return nil
 	}
@@ -331,9 +357,6 @@ func (d *Adapter) selfSubagentSessionRefs(ctx context.Context, ref session.Sessi
 		if participant.Kind != session.ParticipantKindSubagent {
 			continue
 		}
-		if !strings.EqualFold(strings.TrimSpace(participant.AgentName), "self") {
-			continue
-		}
 		sessionID := strings.TrimSpace(participant.SessionID)
 		if sessionID == "" {
 			continue
@@ -342,8 +365,11 @@ func (d *Adapter) selfSubagentSessionRefs(ctx context.Context, ref session.Sessi
 			continue
 		}
 		seen[sessionID] = struct{}{}
-		childRef := ref
-		childRef.SessionID = sessionID
+		childRef := session.SessionRef{
+			AppName:   ref.AppName,
+			UserID:    ref.UserID,
+			SessionID: sessionID,
+		}
 		out = append(out, session.NormalizeSessionRef(childRef))
 	}
 	return out

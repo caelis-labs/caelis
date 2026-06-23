@@ -348,9 +348,13 @@ func (m *Model) applyTranscriptLifecycle(event TranscriptEvent) (tea.Model, tea.
 		if event.State == "attempt_reset" {
 			block.ClearActiveBuffers()
 		} else {
+			if !event.OccurredAt.IsZero() && (block.StartedAt.IsZero() || event.OccurredAt.Before(block.StartedAt)) {
+				block.StartedAt = event.OccurredAt
+			}
 			block.SetStatus(event.State, "", "", event.OccurredAt)
 			if strings.EqualFold(strings.TrimSpace(event.State), "completed") {
 				m.captureLastRunDuration(event.OccurredAt)
+				m.captureLastRunDurationFromMainBlock(block)
 				if m.appendUserTurnDividerIfNeeded(false) {
 					m.showTurnDivider = false
 				}

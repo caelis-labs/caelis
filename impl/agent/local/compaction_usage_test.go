@@ -72,3 +72,48 @@ func TestComputeUsageSnapshotDoesNotDoubleCountPrefixWithProviderBaseline(t *tes
 		t.Fatalf("total tokens = %d, provider baseline should already include prompt prefix", got.TotalTokens)
 	}
 }
+
+func TestComputeUsageSnapshotIncludesAnthropicCachedInputBaseline(t *testing.T) {
+	user := model.NewTextMessage(model.RoleUser, "hello")
+	assistant := model.NewTextMessage(model.RoleAssistant, "answer")
+	events := []*session.Event{
+		{
+			ID:         "u1",
+			Type:       session.EventTypeUser,
+			Visibility: session.VisibilityCanonical,
+			Message:    &user,
+			Text:       user.TextContent(),
+		},
+		{
+			ID:         "a1",
+			Type:       session.EventTypeAssistant,
+			Visibility: session.VisibilityCanonical,
+			Message:    &assistant,
+			Text:       assistant.TextContent(),
+			Meta: map[string]any{
+				"caelis": map[string]any{
+					"sdk": map[string]any{
+						"provider": "deepseek",
+						"model":    "deepseek-v4-flash",
+						"usage": map[string]any{
+							"provider":            "deepseek-anthropic",
+							"prompt_tokens":       94,
+							"cached_input_tokens": 11008,
+							"completion_tokens":   194,
+							"total_tokens":        288,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	got := ComputeUsageSnapshot(events, nil, 1048576, CompactionConfig{})
+
+	if got.Source != compact.UsageSourceProvider {
+		t.Fatalf("usage source = %q, want provider", got.Source)
+	}
+	if got.TotalTokens < 11102 {
+		t.Fatalf("total tokens = %d, want provider baseline to include cached input", got.TotalTokens)
+	}
+}

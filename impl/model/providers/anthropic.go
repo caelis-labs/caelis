@@ -98,6 +98,13 @@ func (l *anthropicSDKLLM) ContextWindowTokens() int {
 	return l.contextWindowTokens
 }
 
+func (l *anthropicSDKLLM) UsesProviderExecutedTools(req *model.Request) bool {
+	if l == nil || req == nil {
+		return false
+	}
+	return anthropicUsesProviderExecutedTools(req.Tools)
+}
+
 func (l *anthropicSDKLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
 	return func(yield func(*model.StreamEvent, error) bool) {
 		if req == nil {
@@ -126,7 +133,11 @@ func (l *anthropicSDKLLM) generateNonStreaming(ctx context.Context, params anthr
 	}
 	defer cancel()
 
-	resp, err := cli.Messages.New(runCtx, params)
+	opts := []option.RequestOption(nil)
+	if l.requestTimeout > 0 {
+		opts = append(opts, option.WithRequestTimeout(l.requestTimeout))
+	}
+	resp, err := cli.Messages.New(runCtx, params, opts...)
 	if err != nil {
 		yield(nil, err)
 		return
@@ -174,6 +185,9 @@ func (l *anthropicSDKLLM) generateStreaming(ctx context.Context, params anthropi
 			acc.Usage.CacheCreationInputTokens = ev.Usage.CacheCreationInputTokens
 			acc.Usage.CacheReadInputTokens = ev.Usage.CacheReadInputTokens
 			acc.Usage.OutputTokens = ev.Usage.OutputTokens
+			if ev.Usage.JSON.OutputTokensDetails.Valid() {
+				acc.Usage.OutputTokensDetails = ev.Usage.OutputTokensDetails
+			}
 		case anthropic.ContentBlockStartEvent:
 			if !l.emitStreamingStartBlock(ev, yield) {
 				return
@@ -273,15 +287,37 @@ func (l *anthropicSDKLLM) buildRequest(req *model.Request) (anthropic.MessageNew
 		MaxTokens: int64(l.maxOutputTok),
 		Messages:  toAnthropicMessages(req.Messages),
 		System:    toAnthropicSystem(req.Instructions),
-		Tools:     toAnthropicTools(model.FunctionToolDefinitions(req.Tools)),
+		Tools:     toAnthropicTools(req.Tools),
 	}
 	if req.Output != nil && req.Output.MaxOutputTokens > 0 {
 		params.MaxTokens = int64(req.Output.MaxOutputTokens)
 	}
+	applyAnthropicOutputConfig(&params, req.Output)
 	if thinking := anthropicThinkingConfig(l.provider, req.Reasoning); thinking != nil {
 		params.Thinking = *thinking
+		applyAnthropicMaxTokensForThinking(&params)
 	}
 	return params, nil
+}
+
+func applyAnthropicOutputConfig(params *anthropic.MessageNewParams, output *model.OutputSpec) {
+	if params == nil || output == nil {
+		return
+	}
+	var schema map[string]any
+	switch output.Mode {
+	case model.OutputModeJSON:
+		schema = cloneAnyMap(output.JSONSchema)
+		if len(schema) == 0 {
+			schema = map[string]any{"type": "object"}
+		}
+	case model.OutputModeSchema:
+		schema = cloneAnyMap(output.JSONSchema)
+	}
+	if len(schema) == 0 {
+		return
+	}
+	params.OutputConfig.Format = anthropic.JSONOutputFormatParam{Schema: schema}
 }
 
 func (l *anthropicSDKLLM) clientOrZero() anthropic.Client {
@@ -316,14 +352,21 @@ func anthropicAuthOptions(cfg Config, token string) []option.RequestOption {
 func anthropicThinkingConfig(provider string, reasoning model.ReasoningConfig) *anthropic.ThinkingConfigParamUnion {
 	budget := reasoning.BudgetTokens
 	effort := strings.ToLower(strings.TrimSpace(reasoning.Effort))
+	if effort == "none" || effort == "off" || effort == "disabled" {
+		disabled := anthropic.NewThinkingConfigDisabledParam()
+		cfg := anthropic.ThinkingConfigParamUnion{OfDisabled: &disabled}
+		return &cfg
+	}
 	if budget <= 0 {
 		switch effort {
-		case "low":
+		case "low", "minimal":
 			budget = 1024
-		case "high":
-			budget = 8192
 		case "medium":
 			budget = 4096
+		case "high":
+			budget = 8192
+		case "max", "maximum", "xhigh", "very_high", "very-high":
+			budget = 16384
 		}
 	}
 	if strings.EqualFold(strings.TrimSpace(provider), "minimax") && budget <= 0 {
@@ -337,6 +380,16 @@ func anthropicThinkingConfig(provider string, reasoning model.ReasoningConfig) *
 	}
 	cfg := anthropic.ThinkingConfigParamOfEnabled(int64(budget))
 	return &cfg
+}
+
+func applyAnthropicMaxTokensForThinking(params *anthropic.MessageNewParams) {
+	if params == nil || params.Thinking.OfEnabled == nil {
+		return
+	}
+	budget := params.Thinking.OfEnabled.BudgetTokens
+	if budget > 0 && params.MaxTokens <= budget {
+		params.MaxTokens = budget + 1
+	}
 }
 
 func toAnthropicSystem(instructions []model.Part) []anthropic.TextBlockParam {
@@ -361,16 +414,26 @@ func toAnthropicMessages(messages []model.Message) []anthropic.MessageParam {
 		return nil
 	}
 	out := make([]anthropic.MessageParam, 0, len(messages))
+	var pendingToolResults []anthropic.ContentBlockParamUnion
+	flushToolResults := func() {
+		if len(pendingToolResults) == 0 {
+			return
+		}
+		out = append(out, anthropic.NewUserMessage(pendingToolResults...))
+		pendingToolResults = nil
+	}
 	for _, msg := range messages {
 		switch msg.Role {
 		case model.RoleSystem:
 			continue
 		case model.RoleUser:
+			flushToolResults()
 			blocks := toAnthropicContentBlocks(msg.Parts, true)
 			if len(blocks) > 0 {
 				out = append(out, anthropic.NewUserMessage(blocks...))
 			}
 		case model.RoleAssistant:
+			flushToolResults()
 			blocks := toAnthropicContentBlocks(msg.Parts, false)
 			if len(blocks) > 0 {
 				out = append(out, anthropic.NewAssistantMessage(blocks...))
@@ -378,10 +441,11 @@ func toAnthropicMessages(messages []model.Message) []anthropic.MessageParam {
 		case model.RoleTool:
 			blocks := toAnthropicToolResultBlocks(msg.Parts)
 			if len(blocks) > 0 {
-				out = append(out, anthropic.NewUserMessage(blocks...))
+				pendingToolResults = append(pendingToolResults, blocks...)
 			}
 		}
 	}
+	flushToolResults()
 	if len(out) == 0 {
 		return nil
 	}
@@ -401,6 +465,10 @@ func toAnthropicContentBlocks(parts []model.Part, userRole bool) []anthropic.Con
 			}
 		case model.PartKindReasoning:
 			if userRole || part.Reasoning == nil {
+				continue
+			}
+			if block, ok := anthropicReplayContentBlockFromPart(part); ok {
+				out = append(out, *block)
 				continue
 			}
 			text := ""
@@ -524,18 +592,21 @@ func toAnthropicToolResultContent(parts []model.Part) []anthropic.ToolResultBloc
 	return out
 }
 
-func toAnthropicTools(tools []model.ToolDefinition) []anthropic.ToolUnionParam {
-	if len(tools) == 0 {
-		return nil
-	}
-	out := make([]anthropic.ToolUnionParam, 0, len(tools))
-	for _, tool := range tools {
+func toAnthropicTools(specs []model.ToolSpec) []anthropic.ToolUnionParam {
+	functionTools := model.FunctionToolDefinitions(specs)
+	providerTools := anthropicProviderExecutedTools(specs)
+	out := make([]anthropic.ToolUnionParam, 0, len(functionTools)+len(providerTools))
+	for _, tool := range functionTools {
 		schema := anthropicToolInputSchema(tool.Parameters)
 		entry := anthropic.ToolUnionParamOfTool(schema, tool.Name)
 		if entry.OfTool != nil {
 			entry.OfTool.Description = anthropic.String(strings.TrimSpace(tool.Description))
 		}
 		out = append(out, entry)
+	}
+	out = append(out, providerTools...)
+	if len(out) == 0 {
+		return nil
 	}
 	return out
 }
@@ -599,6 +670,14 @@ func anthropicMessageToKernel(provider string, resp *anthropic.Message) (model.M
 			raw := append(json.RawMessage(nil), variant.Input...)
 			part := model.NewToolUsePart(variant.ID, variant.Name, raw)
 			parts = append(parts, part)
+		case anthropic.ServerToolUseBlock:
+			if part, ok := anthropicServerToolReplayPart(provider, anthropicReplayKindServerToolUse, variant); ok {
+				parts = append(parts, part)
+			}
+		case anthropic.WebSearchToolResultBlock:
+			if part, ok := anthropicServerToolReplayPart(provider, anthropicReplayKindWebSearch, variant); ok {
+				parts = append(parts, part)
+			}
 		}
 	}
 	out := model.Message{
@@ -614,11 +693,16 @@ func anthropicMessageToKernel(provider string, resp *anthropic.Message) (model.M
 }
 
 func anthropicUsageToKernel(usage anthropic.Usage) model.Usage {
+	promptTokens := usage.InputTokens + usage.CacheCreationInputTokens
+	cachedTokens := usage.CacheReadInputTokens
+	outputTokens := usage.OutputTokens
+	reasoningTokens := usage.OutputTokensDetails.ThinkingTokens
 	return model.Usage{
-		PromptTokens:      int(usage.InputTokens),
-		CachedInputTokens: int(usage.CacheReadInputTokens),
-		CompletionTokens:  int(usage.OutputTokens),
-		TotalTokens:       int(usage.InputTokens + usage.OutputTokens),
+		PromptTokens:      int(promptTokens),
+		CachedInputTokens: int(cachedTokens),
+		CompletionTokens:  int(outputTokens),
+		ReasoningTokens:   int(reasoningTokens),
+		TotalTokens:       int(promptTokens + cachedTokens + outputTokens),
 	}
 }
 

@@ -986,7 +986,7 @@ func TestAdapterConnectPersistsDeepSeekModelDefaults(t *testing.T) {
 		`"profile_id": "deepseek@default"`,
 		`"provider": "deepseek"`,
 		`"model": "deepseek-v4-flash"`,
-		`"base_url": "https://api.deepseek.com/v1"`,
+		`"base_url": "https://api.deepseek.com/anthropic"`,
 		`"token": "secret"`,
 		`"context_window_tokens": 1048576`,
 		`"reasoning_effort": "high"`,
@@ -1294,7 +1294,45 @@ func TestAdapterSessionTokenUsageDeduplicatesConsecutiveToolCallUsage(t *testing
 	}
 }
 
-func TestAdapterSessionTokenUsageBreakdownIncludesSelfSubagentAndAutoReview(t *testing.T) {
+func TestSessionTokenUsageBreakdownNormalizesAnthropicCachedInput(t *testing.T) {
+	t.Parallel()
+
+	assistant := model.NewTextMessage(model.RoleAssistant, "answer")
+	events := []*session.Event{{
+		Type:       session.EventTypeAssistant,
+		Visibility: session.VisibilityCanonical,
+		Message:    &assistant,
+		Invocation: &session.EventInvocation{
+			Provider: "deepseek",
+			Model:    "deepseek-v4-flash",
+		},
+		Meta: map[string]any{
+			"caelis": map[string]any{
+				"version": 1,
+				"sdk": map[string]any{
+					"usage": map[string]any{
+						"provider":            "deepseek-anthropic",
+						"prompt_tokens":       10,
+						"cached_input_tokens": 100,
+						"completion_tokens":   5,
+						"total_tokens":        15,
+					},
+				},
+			},
+		},
+	}}
+
+	usage := sessionTokenUsageBreakdownFromEvents(events, tokenUsageCategoryMain)
+	if usage.Main.PromptTokens != 110 || usage.Main.CachedInputTokens != 100 || usage.Main.CompletionTokens != 5 || usage.Main.TotalTokens != 115 {
+		t.Fatalf("main usage = %+v, want Anthropic-style cached input counted in input/total", usage.Main)
+	}
+	row := usage.ByModel["deepseek\x00deepseek-v4-flash"]
+	if row.Usage.PromptTokens != 110 || row.Usage.TotalTokens != 115 {
+		t.Fatalf("by-model usage = %+v, want normalized cached input", row)
+	}
+}
+
+func TestAdapterSessionTokenUsageBreakdownIncludesSubagentsAndAutoReview(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -1341,6 +1379,7 @@ func TestAdapterSessionTokenUsageBreakdownIncludesSelfSubagentAndAutoReview(t *t
 		}
 		next[gateway.StateUsageAccounting] = map[string]any{
 			"auto_review": map[string]any{
+				"provider":            "deepseek-anthropic",
 				"prompt_tokens":       7,
 				"cached_input_tokens": 1,
 				"completion_tokens":   2,
@@ -1351,6 +1390,7 @@ func TestAdapterSessionTokenUsageBreakdownIncludesSelfSubagentAndAutoReview(t *t
 				"provider": "deepseek",
 				"model":    "deepseek-v4-pro",
 				"usage": map[string]any{
+					"provider":            "deepseek-anthropic",
 					"prompt_tokens":       7,
 					"cached_input_tokens": 1,
 					"completion_tokens":   2,
@@ -1396,6 +1436,39 @@ func TestAdapterSessionTokenUsageBreakdownIncludesSelfSubagentAndAutoReview(t *t
 	}); err != nil {
 		t.Fatalf("AppendEvent(child) error = %v", err)
 	}
+	explorer, err := stack.Sessions.StartSession(ctx, session.StartSessionRequest{
+		AppName:            activeSession.AppName,
+		UserID:             activeSession.UserID,
+		Workspace:          session.WorkspaceRef{Key: filepath.Join(activeSession.CWD, "explorer"), CWD: activeSession.CWD},
+		PreferredSessionID: "child-explorer-usage",
+	})
+	if err != nil {
+		t.Fatalf("StartSession(explorer) error = %v", err)
+	}
+	if _, err := stack.Sessions.PutParticipant(ctx, session.PutParticipantRequest{
+		SessionRef: activeSession.SessionRef,
+		Binding: session.ParticipantBinding{
+			ID:           "explorer-1",
+			Kind:         session.ParticipantKindSubagent,
+			Role:         session.ParticipantRoleDelegated,
+			AgentName:    "explorer",
+			SessionID:    explorer.SessionID,
+			DelegationID: "task-2",
+		},
+	}); err != nil {
+		t.Fatalf("PutParticipant(explorer) error = %v", err)
+	}
+	if _, err := stack.Sessions.AppendEvent(ctx, session.AppendEventRequest{
+		SessionRef: explorer.SessionRef,
+		Event: &session.Event{
+			Type:    session.EventTypeAssistant,
+			Text:    "explorer answer",
+			Message: ptrRuntimeMessage(model.NewTextMessage(model.RoleAssistant, "explorer answer")),
+			Meta:    modelUsageMetaForRuntimeTest(30, 5, 4, 34, 2),
+		},
+	}); err != nil {
+		t.Fatalf("AppendEvent(explorer) error = %v", err)
+	}
 
 	usage, err := driver.sessionTokenUsageBreakdown(ctx, activeSession.SessionRef)
 	if err != nil {
@@ -1404,21 +1477,114 @@ func TestAdapterSessionTokenUsageBreakdownIncludesSelfSubagentAndAutoReview(t *t
 	if usage.Main.PromptTokens != 10 || usage.Main.ReasoningTokens != 1 || usage.Main.TotalTokens != 12 {
 		t.Fatalf("main usage = %+v, want parent model usage", usage.Main)
 	}
-	if usage.Subagents.PromptTokens != 20 || usage.Subagents.ReasoningTokens != 5 || usage.Subagents.TotalTokens != 26 {
-		t.Fatalf("subagent usage = %+v, want self child usage", usage.Subagents)
+	if usage.Subagents.PromptTokens != 50 || usage.Subagents.CachedInputTokens != 9 || usage.Subagents.ReasoningTokens != 7 || usage.Subagents.TotalTokens != 60 {
+		t.Fatalf("subagent usage = %+v, want all child subagent usage", usage.Subagents)
 	}
-	if usage.AutoReview.PromptTokens != 7 || usage.AutoReview.ReasoningTokens != 2 || usage.AutoReview.TotalTokens != 9 {
+	if usage.AutoReview.PromptTokens != 8 || usage.AutoReview.ReasoningTokens != 2 || usage.AutoReview.TotalTokens != 10 {
 		t.Fatalf("auto-review usage = %+v, want review usage", usage.AutoReview)
 	}
-	if usage.Total.PromptTokens != 37 || usage.Total.CachedInputTokens != 8 || usage.Total.CompletionTokens != 10 || usage.Total.ReasoningTokens != 8 || usage.Total.TotalTokens != 47 {
+	if usage.Total.PromptTokens != 68 || usage.Total.CachedInputTokens != 13 || usage.Total.CompletionTokens != 14 || usage.Total.ReasoningTokens != 10 || usage.Total.TotalTokens != 82 {
 		t.Fatalf("total usage = %+v, want all buckets", usage.Total)
 	}
 	if len(usage.ByModel) != 1 {
 		t.Fatalf("by-model usage = %#v, want one auto-review model row", usage.ByModel)
 	}
 	modelRow := usage.ByModel["deepseek\x00deepseek-v4-pro"]
-	if modelRow.Provider != "deepseek" || modelRow.Model != "deepseek-v4-pro" || modelRow.Usage.TotalTokens != 9 {
+	if modelRow.Provider != "deepseek" || modelRow.Model != "deepseek-v4-pro" || modelRow.Usage.PromptTokens != 8 || modelRow.Usage.TotalTokens != 10 {
 		t.Fatalf("by-model row = %+v, want deepseek/deepseek-v4-pro usage", modelRow)
+	}
+}
+
+func TestSessionTokenUsageBreakdownFromStateNormalizesAutoReviewAggregateProvider(t *testing.T) {
+	state := map[string]any{
+		gateway.StateUsageAccounting: map[string]any{
+			"auto_review_provider": "deepseek",
+			"auto_review_model":    "deepseek-v4-pro",
+			"auto_review": map[string]any{
+				"provider":            "deepseek-anthropic",
+				"prompt_tokens":       7,
+				"cached_input_tokens": 1,
+				"completion_tokens":   2,
+				"total_tokens":        10,
+			},
+		},
+	}
+
+	usage := sessionTokenUsageBreakdownFromState(state)
+	if usage.AutoReview.PromptTokens != 8 || usage.AutoReview.CachedInputTokens != 1 || usage.AutoReview.TotalTokens != 10 {
+		t.Fatalf("auto-review usage = %+v, want DeepSeek cached input folded into display input/total", usage.AutoReview)
+	}
+	row := usage.ByModel["deepseek\x00deepseek-v4-pro"]
+	if row.Provider != "deepseek" || row.Model != "deepseek-v4-pro" || row.Usage.PromptTokens != 8 || row.Usage.TotalTokens != 10 {
+		t.Fatalf("by-model row = %+v, want aggregate attribution", row)
+	}
+}
+
+func TestSessionTokenUsageBreakdownFromEventsNormalizesProviderWithoutInvocation(t *testing.T) {
+	events := []*session.Event{{
+		Type: session.EventTypeAssistant,
+		Meta: map[string]any{
+			"caelis": map[string]any{
+				"sdk": map[string]any{
+					"provider": "deepseek",
+					"usage": map[string]any{
+						"provider":            "deepseek-anthropic",
+						"prompt_tokens":       7,
+						"cached_input_tokens": 1,
+						"completion_tokens":   2,
+						"total_tokens":        10,
+					},
+				},
+			},
+		},
+	}}
+
+	usage := sessionTokenUsageBreakdownFromEvents(events, tokenUsageCategoryMain)
+	if usage.Main.PromptTokens != 8 || usage.Main.CachedInputTokens != 1 || usage.Main.TotalTokens != 10 {
+		t.Fatalf("main usage = %+v, want provider-normalized DeepSeek usage without invocation", usage.Main)
+	}
+	row := usage.ByModel["deepseek\x00"]
+	if row.Provider != "deepseek" || row.Usage.PromptTokens != 8 || row.Usage.TotalTokens != 10 {
+		t.Fatalf("by-model usage = %#v, want provider-only DeepSeek attribution", usage.ByModel)
+	}
+}
+
+func TestSessionTokenUsageBreakdownFromStatePrefersByModelAutoReviewRows(t *testing.T) {
+	state := map[string]any{
+		gateway.StateUsageAccounting: map[string]any{
+			"auto_review_provider": "deepseek",
+			"auto_review_model":    "deepseek-v4-pro",
+			"auto_review": map[string]any{
+				"prompt_tokens":     1,
+				"completion_tokens": 1,
+				"total_tokens":      2,
+			},
+			"by_model": []any{map[string]any{
+				"provider": "deepseek",
+				"model":    "deepseek-v4-pro",
+				"usage": map[string]any{
+					"provider":            "deepseek-anthropic",
+					"prompt_tokens":       7,
+					"cached_input_tokens": 1,
+					"completion_tokens":   2,
+					"total_tokens":        9,
+				},
+			}, map[string]any{
+				"category": "main",
+				"provider": "deepseek",
+				"model":    "deepseek-v4-pro",
+				"usage": map[string]any{
+					"prompt_tokens":     100,
+					"completion_tokens": 100,
+					"total_tokens":      200,
+				},
+			}},
+		},
+	}
+
+	usage := sessionTokenUsageBreakdownFromState(state)
+	if usage.AutoReview.PromptTokens != 8 || usage.AutoReview.TotalTokens != 10 {
+		t.Fatalf("auto-review usage = %+v, want authoritative by_model row", usage.AutoReview)
 	}
 }
 

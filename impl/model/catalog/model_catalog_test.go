@@ -288,6 +288,10 @@ func TestDeepSeekStaticModelsExposeThinkingEfforts(t *testing.T) {
 		if !caps.SupportsReasoning || caps.ReasoningMode != ReasoningModeToggle {
 			t.Fatalf("LookupModelCapabilities(deepseek, %q) = %#v, want toggle reasoning", model, caps)
 		}
+		if caps.ContextWindowTokens != 1048576 || caps.MaxOutputTokens != 393216 || caps.DefaultMaxOutputTokens != 32768 {
+			t.Fatalf("LookupModelCapabilities(deepseek, %q) limits = %d/%d default %d, want 1048576/393216 default 32768",
+				model, caps.ContextWindowTokens, caps.MaxOutputTokens, caps.DefaultMaxOutputTokens)
+		}
 		if !sameStrings(caps.ReasoningEfforts, []string{"high", "max"}) {
 			t.Fatalf("LookupModelCapabilities(deepseek, %q) efforts = %#v, want high/max", model, caps.ReasoningEfforts)
 		}

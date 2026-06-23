@@ -67,7 +67,7 @@ func defaultAuthType(api APIType) AuthType {
 	switch api {
 	case APIOllama, APICodeFree:
 		return AuthNone
-	case APIMiniMax:
+	case APIDeepSeek, APIMiniMax:
 		return AuthBearerToken
 	default:
 		return AuthAPIKey

@@ -192,18 +192,32 @@ func formatTokenUsageTable(rows []tokenUsageStatusRow) string {
 	if len(rows) == 0 {
 		return ""
 	}
+	showReasoning := false
+	for _, row := range rows {
+		if normalizedUsageSnapshot(row.usage).ReasoningTokens > 0 {
+			showReasoning = true
+			break
+		}
+	}
 	table := make([][]string, 0, len(rows)+2)
-	table = append(table, []string{"Scope", "Total", "Input", "Cached", "Output", "Reasoning"})
+	header := []string{"Scope", "Total", "Input", "Cached", "Output"}
+	if showReasoning {
+		header = append(header, "Reasoning")
+	}
+	table = append(table, header)
 	for _, row := range rows {
 		usage := normalizedUsageSnapshot(row.usage)
-		table = append(table, []string{
+		cols := []string{
 			row.scope,
 			formatTokenUsageNumber(usage.TotalTokens),
 			formatTokenUsageNumber(usage.PromptTokens),
 			formatTokenUsageNumber(usage.CachedInputTokens),
 			formatTokenUsageNumber(usage.CompletionTokens),
-			formatTokenUsageNumber(usage.ReasoningTokens),
-		})
+		}
+		if showReasoning {
+			cols = append(cols, formatTokenUsageNumber(usage.ReasoningTokens))
+		}
+		table = append(table, cols)
 	}
 	widths := make([]int, len(table[0]))
 	for _, cols := range table {

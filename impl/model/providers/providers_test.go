@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -121,6 +122,73 @@ func TestGeminiStream_DoesNotApplyRequestTimeout(t *testing.T) {
 		}
 		if resp != nil && resp.Response != nil && resp.TurnComplete {
 			finalText = resp.Response.Message.TextContent()
+		}
+	}
+	if gotErr != nil {
+		t.Fatalf("expected no stream error, got %v", gotErr)
+	}
+	if finalText != "hello!" {
+		t.Fatalf("unexpected final text %q", finalText)
+	}
+}
+
+func TestAnthropicSDKStream_DoesNotApplyRequestTimeout(t *testing.T) {
+	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/messages" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, _ := w.(http.Flusher)
+		_, _ = fmt.Fprint(w, "event: message_start\n")
+		_, _ = fmt.Fprint(w, "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_stream\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"test-model\",\"content\":[],\"stop_reason\":\"\",\"stop_sequence\":\"\",\"usage\":{\"input_tokens\":1,\"output_tokens\":0}}}\n\n")
+		if flusher != nil {
+			flusher.Flush()
+		}
+		time.Sleep(150 * time.Millisecond)
+		_, _ = fmt.Fprint(w, "event: content_block_start\n")
+		_, _ = fmt.Fprint(w, "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"hello\"}}\n\n")
+		_, _ = fmt.Fprint(w, "event: content_block_delta\n")
+		_, _ = fmt.Fprint(w, "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"!\"}}\n\n")
+		_, _ = fmt.Fprint(w, "event: content_block_stop\n")
+		_, _ = fmt.Fprint(w, "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n")
+		_, _ = fmt.Fprint(w, "event: message_delta\n")
+		_, _ = fmt.Fprint(w, "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":\"\"},\"usage\":{\"input_tokens\":1,\"output_tokens\":2}}\n\n")
+		_, _ = fmt.Fprint(w, "event: message_stop\n")
+		_, _ = fmt.Fprint(w, "data: {\"type\":\"message_stop\"}\n\n")
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}))
+	defer server.Close()
+
+	llm := newAnthropic(Config{
+		Provider:   "anthropic",
+		API:        APIAnthropic,
+		Model:      "test-model",
+		BaseURL:    server.URL,
+		HTTPClient: server.Client(),
+		Timeout:    50 * time.Millisecond,
+		Auth: AuthConfig{
+			Type:  AuthAPIKey,
+			Token: "sk-anthropic",
+		},
+	}, "sk-anthropic")
+
+	var (
+		gotErr    error
+		finalText string
+	)
+	for event, err := range llm.Generate(context.Background(), &model.Request{
+		Messages: []model.Message{model.NewTextMessage(model.RoleUser, "hi")},
+		Stream:   true,
+	}) {
+		if err != nil {
+			gotErr = err
+			continue
+		}
+		if event != nil && event.Response != nil && event.TurnComplete {
+			finalText = event.Response.Message.TextContent()
 		}
 	}
 	if gotErr != nil {
@@ -556,49 +624,349 @@ func TestToKernelMessage_OpenAICompatKeepsRawToolArgsOnDecodeFailure(t *testing.
 	}
 }
 
-func TestDeepSeekThinkingPayload(t *testing.T) {
+func TestDeepSeekUsesAnthropicCompatibleEndpointAndBearerAuth(t *testing.T) {
+	var payload map[string]any
+	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/anthropic/v1/messages" {
+			http.NotFound(w, r)
+			return
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer deepseek-token" {
+			t.Fatalf("Authorization = %q, want bearer token", got)
+		}
+		if got := r.Header.Get("x-api-key"); got != "" {
+			t.Fatalf("x-api-key = %q, want empty for DeepSeek Anthropic-compatible auth", got)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode request payload: %v", err)
+		}
+		if got := payload["max_tokens"]; got != float64(deepSeekDefaultMaxTokens) {
+			t.Fatalf("max_tokens = %#v, want DeepSeek default %d", got, deepSeekDefaultMaxTokens)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"id":"msg_1","type":"message","role":"assistant","model":"deepseek-v4-pro","stop_reason":"end_turn","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":42,"output_tokens":8,"cache_read_input_tokens":31,"output_tokens_details":{"thinking_tokens":3}}}`)
+	}))
+	defer server.Close()
+
+	llm := newDeepSeek(Config{
+		Provider:   "deepseek",
+		Model:      "deepseek-v4-pro",
+		BaseURL:    server.URL + "/anthropic",
+		HTTPClient: server.Client(),
+		Timeout:    time.Second,
+		Auth: AuthConfig{
+			Type:  AuthAPIKey,
+			Token: "deepseek-token",
+		},
+	}, "deepseek-token")
+
+	var final *model.Response
+	for event, err := range llm.Generate(context.Background(), &model.Request{
+		Messages: []model.Message{model.NewTextMessage(model.RoleUser, "hello")},
+	}) {
+		if err != nil {
+			t.Fatalf("Generate() error = %v", err)
+		}
+		if event != nil && event.Response != nil {
+			final = event.Response
+		}
+	}
+	if payload["model"] != "deepseek-v4-pro" {
+		t.Fatalf("model = %#v, want deepseek-v4-pro", payload["model"])
+	}
+	if final == nil {
+		t.Fatal("expected final response")
+	}
+	if final.Provider != "deepseek" {
+		t.Fatalf("provider = %q, want deepseek", final.Provider)
+	}
+	if got := final.Message.TextContent(); got != "ok" {
+		t.Fatalf("text = %q, want ok", got)
+	}
+	if final.Usage.PromptTokens != 42 || final.Usage.CachedInputTokens != 31 || final.Usage.CompletionTokens != 8 || final.Usage.ReasoningTokens != 3 || final.Usage.TotalTokens != 81 {
+		t.Fatalf("usage = %+v, want DeepSeek Anthropic usage propagated", final.Usage)
+	}
+}
+
+func TestDeepSeekThinkingConfigMapsEmptyMaxAndNone(t *testing.T) {
 	llm := newDeepSeek(Config{
 		Provider: "deepseek",
 		Model:    "deepseek-v4-pro",
-		BaseURL:  "https://api.deepseek.com/v1",
-		Timeout:  time.Second,
-	}, "token").(*openAICompatLLM)
-	req := &model.Request{
-		Messages: []model.Message{
-			model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
-				ID:   "c1",
-				Name: "echo",
-				Args: jsonArgs(map[string]any{"text": "hi"}),
-			}}, ""),
+		Auth: AuthConfig{
+			Type:  AuthAPIKey,
+			Token: "deepseek-token",
 		},
-		Reasoning: model.ReasoningConfig{Effort: "high"},
+	}, "deepseek-token")
+	typed, ok := llm.(*anthropicSDKLLM)
+	if !ok {
+		t.Fatalf("newDeepSeek() = %T, want *anthropicSDKLLM", llm)
 	}
-	payload := openAICompatRequest{
-		Model:    "deepseek-v4-pro",
-		Messages: llm.fromKernelMessages(nil, req.Messages),
+
+	params, err := typed.buildRequest(&model.Request{
+		Messages: []model.Message{model.NewTextMessage(model.RoleUser, "hello")},
+	})
+	if err != nil {
+		t.Fatalf("buildRequest(default) error = %v", err)
 	}
-	llm.options.ApplyReasoning(&payload, req.Reasoning)
-	if payload.Thinking == nil || payload.Thinking.Type != "enabled" {
-		t.Fatalf("expected deepseek thinking config, got %#v", payload.Thinking)
+	if params.Thinking.OfEnabled != nil || params.Thinking.OfDisabled != nil {
+		t.Fatalf("empty thinking = %#v, want no provider-level default", params.Thinking)
 	}
-	if payload.ReasoningEffort != "high" {
-		t.Fatalf("expected deepseek reasoning_effort=high, got %q", payload.ReasoningEffort)
+
+	params, err = typed.buildRequest(&model.Request{
+		Messages:  []model.Message{model.NewTextMessage(model.RoleUser, "hello")},
+		Reasoning: model.ReasoningConfig{Effort: "max"},
+		Output:    &model.OutputSpec{MaxOutputTokens: 393216},
+	})
+	if err != nil {
+		t.Fatalf("buildRequest(max) error = %v", err)
 	}
-	if payload.Reasoning != nil {
-		t.Fatalf("did not expect OpenAI reasoning block for deepseek payload")
+	if params.MaxTokens != 393216 {
+		t.Fatalf("MaxTokens = %d, want explicit DeepSeek max output", params.MaxTokens)
 	}
-	if len(payload.Messages) != 1 || payload.Messages[0].ReasoningContent == nil {
-		t.Fatalf("expected reasoning_content field for deepseek tool-call message")
+	if params.Thinking.OfEnabled == nil || params.Thinking.OfEnabled.BudgetTokens != 16384 {
+		t.Fatalf("max thinking = %#v, want enabled max budget", params.Thinking)
 	}
-	if got := *payload.Messages[0].ReasoningContent; got != "" {
-		t.Fatalf("expected empty reasoning_content for tool-call loop, got %q", got)
+
+	params, err = typed.buildRequest(&model.Request{
+		Messages:  []model.Message{model.NewTextMessage(model.RoleUser, "hello")},
+		Reasoning: model.ReasoningConfig{Effort: "none"},
+	})
+	if err != nil {
+		t.Fatalf("buildRequest(none) error = %v", err)
 	}
-	// When thinking is enabled the payload MaxTokens must be at least 32K so
-	// the reasoning chain is not prematurely truncated.
-	if payload.MaxTokens < thinkingModeMinTokens {
-		t.Fatalf("expected MaxTokens >= %d when thinking enabled, got %d",
-			thinkingModeMinTokens, payload.MaxTokens)
+	if params.Thinking.OfDisabled == nil {
+		t.Fatalf("none thinking = %#v, want disabled", params.Thinking)
 	}
+}
+
+func TestDeepSeekThinkingContentWithoutUsageDetailsDoesNotFabricateReasoningTokens(t *testing.T) {
+	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/anthropic/v1/messages" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"id":"msg_1","type":"message","role":"assistant","model":"deepseek-v4-pro","stop_reason":"end_turn","content":[{"type":"thinking","thinking":"visible reasoning","signature":"sig_1"},{"type":"text","text":"ok"}],"usage":{"input_tokens":42,"output_tokens":8}}`)
+	}))
+	defer server.Close()
+
+	llm := newDeepSeek(Config{
+		Provider:   "deepseek",
+		Model:      "deepseek-v4-pro",
+		BaseURL:    server.URL + "/anthropic",
+		HTTPClient: server.Client(),
+		Timeout:    time.Second,
+		Auth: AuthConfig{
+			Type:  AuthAPIKey,
+			Token: "deepseek-token",
+		},
+	}, "deepseek-token")
+
+	var final *model.Response
+	for event, err := range llm.Generate(context.Background(), &model.Request{
+		Messages: []model.Message{model.NewTextMessage(model.RoleUser, "hello")},
+	}) {
+		if err != nil {
+			t.Fatalf("Generate() error = %v", err)
+		}
+		if event != nil && event.Response != nil {
+			final = event.Response
+		}
+	}
+	if final == nil {
+		t.Fatal("expected final response")
+	}
+	if strings.TrimSpace(final.Message.ReasoningText()) == "" {
+		t.Fatalf("reasoning text = %q, want visible thinking content", final.Message.ReasoningText())
+	}
+	if final.Usage.ReasoningTokens != 0 {
+		t.Fatalf("ReasoningTokens = %d, want 0 without provider token details", final.Usage.ReasoningTokens)
+	}
+}
+
+func TestDeepSeekProviderExecutedWebSearchPOC(t *testing.T) {
+	var calls int
+	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.URL.Path != "/anthropic/v1/messages" {
+			http.NotFound(w, r)
+			return
+		}
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode request payload: %v", err)
+		}
+		tools, _ := payload["tools"].([]any)
+		if len(tools) != 1 {
+			t.Fatalf("tools len = %d, want DeepSeek web_search tool: %#v", len(tools), payload["tools"])
+		}
+		webSearch, _ := tools[0].(map[string]any)
+		if got := webSearch["type"]; got != anthropicWebSearchTool20260209 {
+			t.Fatalf("web_search type = %#v, want %s", got, anthropicWebSearchTool20260209)
+		}
+		if got := webSearch["name"]; got != anthropicWebSearchToolName {
+			t.Fatalf("web_search name = %#v, want %s", got, anthropicWebSearchToolName)
+		}
+		if got := webSearch["max_uses"]; got != float64(2) {
+			t.Fatalf("web_search max_uses = %#v, want 2", got)
+		}
+
+		switch calls {
+		case 1:
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprint(w, `{"id":"msg_1","type":"message","role":"assistant","model":"deepseek-v4-pro","stop_reason":"end_turn","content":[{"type":"server_tool_use","id":"srv_1","name":"web_search","input":{"query":"DeepSeek API docs"}},{"type":"web_search_tool_result","tool_use_id":"srv_1","content":[{"type":"web_search_result","title":"DeepSeek API Docs","url":"https://api-docs.deepseek.com/","encrypted_content":"encrypted","page_age":"2026-06-23"}]},{"type":"text","text":"search answer"}],"usage":{"input_tokens":10,"output_tokens":5}}`)
+		case 2:
+			messages, _ := payload["messages"].([]any)
+			if len(messages) != 3 {
+				t.Fatalf("messages len = %d, want prior assistant server-tool history replayed", len(messages))
+			}
+			assistantMsg, _ := messages[1].(map[string]any)
+			content, _ := assistantMsg["content"].([]any)
+			if len(content) != 3 {
+				t.Fatalf("assistant content len = %d, want server_tool_use + web_search_tool_result + text: %#v", len(content), assistantMsg["content"])
+			}
+			serverUse, _ := content[0].(map[string]any)
+			if got := serverUse["type"]; got != anthropicReplayKindServerToolUse {
+				t.Fatalf("assistant content[0].type = %#v, want server_tool_use", got)
+			}
+			result, _ := content[1].(map[string]any)
+			if got := result["type"]; got != anthropicReplayKindWebSearch {
+				t.Fatalf("assistant content[1].type = %#v, want web_search_tool_result", got)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprint(w, `{"id":"msg_2","type":"message","role":"assistant","model":"deepseek-v4-pro","stop_reason":"end_turn","content":[{"type":"text","text":"continued"}],"usage":{"input_tokens":20,"output_tokens":3}}`)
+		default:
+			t.Fatalf("unexpected request call %d", calls)
+		}
+	}))
+	defer server.Close()
+
+	llm := newDeepSeek(Config{
+		Provider:   "deepseek",
+		Model:      "deepseek-v4-pro",
+		BaseURL:    server.URL + "/anthropic",
+		HTTPClient: server.Client(),
+		Timeout:    time.Second,
+		Auth: AuthConfig{
+			Type:  AuthAPIKey,
+			Token: "deepseek-token",
+		},
+	}, "deepseek-token")
+	req := &model.Request{
+		Messages: []model.Message{model.NewTextMessage(model.RoleUser, "use web search")},
+		Tools: []model.ToolSpec{
+			model.NewProviderExecutedToolSpec("deepseek", anthropicWebSearchToolName, map[string]json.RawMessage{
+				"max_uses": json.RawMessage(`2`),
+			}),
+		},
+	}
+
+	providerTools, ok := llm.(interface{ UsesProviderExecutedTools(*model.Request) bool })
+	if !ok {
+		t.Fatalf("newDeepSeek() = %T, want provider-executed tool detection", llm)
+	}
+	if !providerTools.UsesProviderExecutedTools(req) {
+		t.Fatal("UsesProviderExecutedTools() = false, want explicit DeepSeek web_search visible to retry policy")
+	}
+
+	var first *model.Response
+	for event, err := range llm.Generate(context.Background(), req) {
+		if err != nil {
+			t.Fatalf("Generate() first call error = %v", err)
+		}
+		if event != nil && event.Response != nil {
+			first = event.Response
+		}
+	}
+	if first == nil {
+		t.Fatal("expected first response")
+	}
+	if got := first.Message.TextContent(); got != "search answer" {
+		t.Fatalf("first text = %q, want search answer", got)
+	}
+	if calls := first.Message.ToolCalls(); len(calls) != 0 {
+		t.Fatalf("tool calls = %+v, want no client-side tool calls for provider-executed web_search", calls)
+	}
+	reasoningParts := first.Message.ReasoningParts()
+	if len(reasoningParts) != 2 {
+		t.Fatalf("reasoning replay parts len = %d, want server tool use and result", len(reasoningParts))
+	}
+	if reasoningParts[0].Replay == nil || reasoningParts[0].Replay.Kind != anthropicReplayKindServerToolUse {
+		t.Fatalf("first replay part = %+v, want server_tool_use", reasoningParts[0])
+	}
+	if reasoningParts[1].Replay == nil || reasoningParts[1].Replay.Kind != anthropicReplayKindWebSearch {
+		t.Fatalf("second replay part = %+v, want web_search_tool_result", reasoningParts[1])
+	}
+
+	for event, err := range llm.Generate(context.Background(), &model.Request{
+		Messages: []model.Message{
+			model.NewTextMessage(model.RoleUser, "use web search"),
+			first.Message,
+			model.NewTextMessage(model.RoleUser, "continue from previous search"),
+		},
+		Tools: req.Tools,
+	}) {
+		if err != nil {
+			t.Fatalf("Generate() replay call error = %v", err)
+		}
+		if event != nil && event.Response != nil && event.Response.Message.TextContent() != "continued" {
+			t.Fatalf("replay text = %q, want continued", event.Response.Message.TextContent())
+		}
+	}
+	if calls != 2 {
+		t.Fatalf("server calls = %d, want 2", calls)
+	}
+}
+
+func TestDeepSeekLiveProviderExecutedWebSearch(t *testing.T) {
+	if os.Getenv("CAELIS_REAL_DEEPSEEK_WEB_SEARCH") != "1" {
+		t.Skip("set CAELIS_REAL_DEEPSEEK_WEB_SEARCH=1 with DeepSeek Anthropic-compatible credentials to run")
+	}
+	token := strings.TrimSpace(os.Getenv("ANTHROPIC_AUTH_TOKEN"))
+	if token == "" {
+		token = strings.TrimSpace(os.Getenv("DEEPSEEK_API_KEY"))
+	}
+	if token == "" {
+		t.Fatal("ANTHROPIC_AUTH_TOKEN or DEEPSEEK_API_KEY is required")
+	}
+	baseURL := strings.TrimSpace(os.Getenv("ANTHROPIC_BASE_URL"))
+	if baseURL == "" {
+		baseURL = deepSeekDefaultAnthropicBaseURL
+	}
+	modelName := strings.TrimSpace(os.Getenv("ANTHROPIC_MODEL"))
+	if modelName == "" {
+		modelName = "deepseek-v4-pro"
+	}
+
+	llm := newDeepSeek(Config{
+		Provider: "deepseek",
+		Model:    modelName,
+		BaseURL:  baseURL,
+		Timeout:  90 * time.Second,
+		Auth: AuthConfig{
+			Type:  AuthBearerToken,
+			Token: token,
+		},
+	}, token)
+	searcher, ok := llm.(model.WebSearcher)
+	if !ok {
+		t.Fatalf("newDeepSeek() = %T, want WebSearcher", llm)
+	}
+
+	resp, err := searcher.SearchWeb(context.Background(), model.WebSearchRequest{
+		Query:      "current official DeepSeek API documentation homepage URL",
+		MaxResults: 2,
+	})
+	if err != nil {
+		t.Fatalf("SearchWeb() live DeepSeek web_search error = %v", err)
+	}
+	if strings.TrimSpace(resp.Answer) == "" {
+		t.Fatal("expected live answer")
+	}
+	if len(resp.Results) == 0 {
+		t.Fatalf("expected live search results, answer=%q", resp.Answer)
+	}
+	t.Logf("live DeepSeek SearchWeb ok: answer=%q results=%+v", resp.Answer, resp.Results)
 }
 
 func TestOpenAICompatProviderSpecificStructuredOutputStrategy(t *testing.T) {
@@ -614,14 +982,6 @@ func TestOpenAICompatProviderSpecificStructuredOutputStrategy(t *testing.T) {
 		llm  *openAICompatLLM
 		want string
 	}{
-		{
-			name: "deepseek",
-			llm: newDeepSeek(Config{
-				Provider: "deepseek",
-				Model:    "deepseek-v4-pro",
-			}, "token").(*openAICompatLLM),
-			want: "json_object",
-		},
 		{
 			name: "mimo",
 			llm: newMimo(Config{
@@ -687,14 +1047,6 @@ func TestOpenAICompatProviderSpecificStrictToolStrategy(t *testing.T) {
 		wantStrict bool
 	}{
 		{
-			name: "deepseek",
-			llm: newDeepSeek(Config{
-				Provider: "deepseek",
-				Model:    "deepseek-v4-pro",
-			}, "token").(*openAICompatLLM),
-			wantStrict: false,
-		},
-		{
 			name: "mimo",
 			llm: newMimo(Config{
 				Provider: "xiaomi",
@@ -738,215 +1090,6 @@ func TestOpenAICompatProviderSpecificStrictToolStrategy(t *testing.T) {
 				t.Fatalf("Function.Strict = %v, want %v", tools[0].Function.Strict, tc.wantStrict)
 			}
 		})
-	}
-}
-
-func TestDeepSeekThinkingPayload_IncludesEmptyReasoningForPlainAssistantHistory(t *testing.T) {
-	llm := newDeepSeek(Config{
-		Provider: "deepseek",
-		Model:    "deepseek-v4-pro",
-		BaseURL:  "https://api.deepseek.com/v1",
-		Timeout:  time.Second,
-	}, "token").(*openAICompatLLM)
-	req := &model.Request{
-		Messages: []model.Message{
-			model.NewTextMessage(model.RoleAssistant, "plain assistant from controller handoff"),
-			model.NewTextMessage(model.RoleUser, "continue"),
-		},
-		Reasoning: model.ReasoningConfig{Effort: "high"},
-	}
-	payload := openAICompatRequest{
-		Model:    "deepseek-v4-pro",
-		Messages: llm.fromKernelMessages(nil, req.Messages),
-	}
-	llm.options.ApplyReasoning(&payload, req.Reasoning)
-	if len(payload.Messages) != 2 {
-		t.Fatalf("len(Messages) = %d, want 2", len(payload.Messages))
-	}
-	if payload.Messages[0].Role != string(model.RoleAssistant) || payload.Messages[0].ReasoningContent == nil {
-		t.Fatalf("assistant message = %#v, want explicit empty reasoning_content", payload.Messages[0])
-	}
-	if got := *payload.Messages[0].ReasoningContent; got != "" {
-		t.Fatalf("assistant reasoning_content = %q, want empty string", got)
-	}
-	if payload.Messages[1].ReasoningContent != nil {
-		t.Fatalf("user message reasoning_content = %#v, want nil", payload.Messages[1].ReasoningContent)
-	}
-}
-
-func TestDeepSeekThinkingPayload_SmallMaxTokensBumped(t *testing.T) {
-	llm := newDeepSeek(Config{
-		Provider:     "deepseek",
-		Model:        "deepseek-v4-pro",
-		BaseURL:      "https://api.deepseek.com/v1",
-		Timeout:      time.Second,
-		MaxOutputTok: 8192, // smaller than thinking min – must be bumped
-	}, "token").(*openAICompatLLM)
-	req := &model.Request{
-		Messages:  []model.Message{model.NewTextMessage(model.RoleUser, "hi")},
-		Reasoning: model.ReasoningConfig{Effort: "medium"},
-	}
-	payload := openAICompatRequest{
-		Model:     "deepseek-v4-pro",
-		Messages:  llm.fromKernelMessages(nil, req.Messages),
-		MaxTokens: llm.maxOutputTok, // 8192 from config
-	}
-	llm.options.ApplyReasoning(&payload, req.Reasoning)
-	if payload.Thinking == nil || payload.Thinking.Type != "enabled" {
-		t.Fatalf("expected thinking enabled")
-	}
-	if payload.ReasoningEffort != "high" {
-		t.Fatalf("expected medium to map to reasoning_effort=high, got %q", payload.ReasoningEffort)
-	}
-	if payload.MaxTokens < thinkingModeMinTokens {
-		t.Fatalf("expected MaxTokens bumped to >= %d, got %d",
-			thinkingModeMinTokens, payload.MaxTokens)
-	}
-}
-
-func TestDeepSeekThinkingPayload_DefaultUsesHighEffort(t *testing.T) {
-	llm := newDeepSeek(Config{
-		Provider:     "deepseek",
-		Model:        "deepseek-v4-pro",
-		BaseURL:      "https://api.deepseek.com/v1",
-		Timeout:      time.Second,
-		MaxOutputTok: 400000,
-	}, "token").(*openAICompatLLM)
-	req := &model.Request{
-		Messages:  []model.Message{model.NewTextMessage(model.RoleUser, "hi")},
-		Reasoning: model.ReasoningConfig{},
-	}
-	payload := openAICompatRequest{
-		Model:     "deepseek-v4-pro",
-		Messages:  llm.fromKernelMessages(nil, req.Messages),
-		MaxTokens: llm.maxOutputTok,
-	}
-	llm.options.ApplyReasoning(&payload, req.Reasoning)
-	if payload.Thinking == nil || payload.Thinking.Type != "enabled" {
-		t.Fatalf("expected thinking enabled")
-	}
-	if payload.ReasoningEffort != "high" {
-		t.Fatalf("expected default reasoning_effort=high, got %q", payload.ReasoningEffort)
-	}
-	if payload.MaxTokens != deepSeekMaxTokens {
-		t.Fatalf("expected MaxTokens capped to %d for default thinking, got %d", deepSeekMaxTokens, payload.MaxTokens)
-	}
-}
-
-func TestDeepSeekThinkingPayload_MaxEffort(t *testing.T) {
-	llm := newDeepSeek(Config{
-		Provider: "deepseek",
-		Model:    "deepseek-v4-pro",
-		BaseURL:  "https://api.deepseek.com/v1",
-		Timeout:  time.Second,
-	}, "token").(*openAICompatLLM)
-	payload := openAICompatRequest{
-		Model:    "deepseek-v4-pro",
-		Messages: llm.fromKernelMessages(nil, []model.Message{model.NewTextMessage(model.RoleUser, "hi")}),
-	}
-	llm.options.ApplyReasoning(&payload, model.ReasoningConfig{Effort: "xhigh"})
-	if payload.Thinking == nil || payload.Thinking.Type != "enabled" {
-		t.Fatalf("expected thinking enabled")
-	}
-	if payload.ReasoningEffort != "max" {
-		t.Fatalf("expected xhigh to map to reasoning_effort=max, got %q", payload.ReasoningEffort)
-	}
-}
-
-func TestDeepSeekThinkingPayload_DisabledCapsToChatRange(t *testing.T) {
-	llm := newDeepSeek(Config{
-		Provider:     "deepseek",
-		Model:        "deepseek-v4-pro",
-		BaseURL:      "https://api.deepseek.com/v1",
-		Timeout:      time.Second,
-		MaxOutputTok: 400000,
-	}, "token").(*openAICompatLLM)
-	req := &model.Request{
-		Messages: []model.Message{
-			model.NewTextMessage(model.RoleAssistant, "previous assistant"),
-			model.NewTextMessage(model.RoleUser, "hi"),
-		},
-		Reasoning: model.ReasoningConfig{Effort: "none"},
-	}
-	payload := openAICompatRequest{
-		Model:     "deepseek-v4-pro",
-		Messages:  llm.fromKernelMessages(nil, req.Messages),
-		MaxTokens: llm.maxOutputTok,
-	}
-	llm.options.ApplyReasoning(&payload, req.Reasoning)
-	if payload.Thinking == nil || payload.Thinking.Type != "disabled" {
-		t.Fatalf("expected thinking disabled")
-	}
-	if payload.MaxTokens != deepSeekMaxTokens {
-		t.Fatalf("expected MaxTokens capped to %d when thinking is disabled, got %d", deepSeekMaxTokens, payload.MaxTokens)
-	}
-	for i, msg := range payload.Messages {
-		if msg.ReasoningContent != nil {
-			t.Fatalf("message %d reasoning_content = %#v, want nil when thinking disabled", i, msg.ReasoningContent)
-		}
-	}
-}
-
-func TestDeepSeekV4FlashSupportsReasoningAndCapsTokens(t *testing.T) {
-	llm := newDeepSeek(Config{
-		Provider:     "deepseek",
-		Model:        "deepseek-v4-flash",
-		BaseURL:      "https://api.deepseek.com/v1",
-		Timeout:      time.Second,
-		MaxOutputTok: 400000,
-	}, "token").(*openAICompatLLM)
-	payload := openAICompatRequest{
-		Model:     "deepseek-v4-flash",
-		Messages:  llm.fromKernelMessages(nil, []model.Message{model.NewTextMessage(model.RoleUser, "hi")}),
-		MaxTokens: llm.maxOutputTok,
-	}
-	llm.options.ApplyReasoning(&payload, model.ReasoningConfig{Effort: "high"})
-	if payload.Thinking == nil || payload.Thinking.Type != "enabled" {
-		t.Fatalf("expected thinking payload for deepseek-v4-flash, got %#v", payload.Thinking)
-	}
-	if payload.ReasoningEffort != "high" {
-		t.Fatalf("expected deepseek-v4-flash reasoning_effort=high, got %q", payload.ReasoningEffort)
-	}
-	if payload.MaxTokens != deepSeekMaxTokens {
-		t.Fatalf("expected MaxTokens capped to %d for deepseek-v4-flash, got %d", deepSeekMaxTokens, payload.MaxTokens)
-	}
-}
-
-func TestDeepSeekUsagePropagatesPromptCacheHitTokens(t *testing.T) {
-	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/chat/completions" {
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprint(w, `{"model":"deepseek-v4-pro","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":42,"prompt_cache_hit_tokens":31,"prompt_cache_miss_tokens":11,"completion_tokens":8,"total_tokens":50}}`)
-	}))
-	defer server.Close()
-
-	llm := newDeepSeek(Config{
-		Provider:   "deepseek",
-		Model:      "deepseek-v4-pro",
-		BaseURL:    server.URL,
-		HTTPClient: server.Client(),
-		Timeout:    time.Second,
-	}, "token")
-
-	var final *model.Response
-	for event, err := range llm.Generate(context.Background(), &model.Request{
-		Messages: []model.Message{model.NewTextMessage(model.RoleUser, "hello")},
-	}) {
-		if err != nil {
-			t.Fatalf("Generate() error = %v", err)
-		}
-		if event != nil && event.Response != nil {
-			final = event.Response
-		}
-	}
-	if final == nil {
-		t.Fatal("expected final response")
-	}
-	if final.Usage.PromptTokens != 42 || final.Usage.CachedInputTokens != 31 || final.Usage.CompletionTokens != 8 || final.Usage.TotalTokens != 50 {
-		t.Fatalf("usage = %+v, want DeepSeek cache-hit usage propagated", final.Usage)
 	}
 }
 
@@ -1332,6 +1475,58 @@ func TestAnthropicMessageTransform(t *testing.T) {
 	}
 }
 
+func TestAnthropicMessageTransformMergesConsecutiveToolResults(t *testing.T) {
+	msgs := toAnthropicMessages([]model.Message{
+		model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{
+			{
+				ID:   "call1",
+				Name: "SEARCH",
+				Args: jsonArgs(map[string]any{"query": "tests"}),
+			},
+			{
+				ID:   "call2",
+				Name: "READ",
+				Args: jsonArgs(map[string]any{"path": "calculator/tests/test_basic.py"}),
+			},
+		}, ""),
+		{
+			Role: model.RoleTool,
+			Parts: []model.Part{model.NewToolResultJSONPart("call1", "SEARCH", map[string]any{
+				"matches": []any{"test_add"},
+			}, false)},
+		},
+		{
+			Role: model.RoleTool,
+			Parts: []model.Part{model.NewToolResultJSONPart("call2", "READ", map[string]any{
+				"content": "def test_add(): pass",
+			}, false)},
+		},
+		model.NewTextMessage(model.RoleUser, "continue"),
+	})
+	if len(msgs) != 3 {
+		t.Fatalf("len(messages) = %d, want assistant, merged tool results, user", len(msgs))
+	}
+	raw, err := json.Marshal(msgs[1])
+	if err != nil {
+		t.Fatalf("marshal merged tool result message: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("decode merged tool result message: %v", err)
+	}
+	content, _ := payload["content"].([]any)
+	if len(content) != 2 {
+		t.Fatalf("merged tool result content len = %d, want 2: %s", len(content), raw)
+	}
+	ids := []string{
+		fmt.Sprint(content[0].(map[string]any)["tool_use_id"]),
+		fmt.Sprint(content[1].(map[string]any)["tool_use_id"]),
+	}
+	if strings.Join(ids, ",") != "call1,call2" {
+		t.Fatalf("merged tool result ids = %v, want call1,call2", ids)
+	}
+}
+
 func TestAnthropicSDKNonStream_NormalizesBaseURLAndMapsParts(t *testing.T) {
 	var sawCustomTool bool
 	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1500,7 +1695,7 @@ func TestAnthropicSDKStream_MapsThinkingDeltasAndSignature(t *testing.T) {
 		_, _ = fmt.Fprint(w, "event: content_block_stop\n")
 		_, _ = fmt.Fprint(w, "data: {\"type\":\"content_block_stop\",\"index\":1}\n\n")
 		_, _ = fmt.Fprint(w, "event: message_delta\n")
-		_, _ = fmt.Fprint(w, "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":\"\"},\"usage\":{\"input_tokens\":11,\"output_tokens\":7,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":4,\"server_tool_use\":{\"web_fetch_requests\":0,\"web_search_requests\":0}}}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":\"\"},\"usage\":{\"input_tokens\":11,\"output_tokens\":7,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":4,\"output_tokens_details\":{\"thinking_tokens\":3},\"server_tool_use\":{\"web_fetch_requests\":0,\"web_search_requests\":0}}}\n\n")
 		_, _ = fmt.Fprint(w, "event: message_stop\n")
 		_, _ = fmt.Fprint(w, "data: {\"type\":\"message_stop\"}\n\n")
 	}))
@@ -1563,7 +1758,7 @@ func TestAnthropicSDKStream_MapsThinkingDeltasAndSignature(t *testing.T) {
 	if got := final.Message.TextContent(); got != "Hello world" {
 		t.Fatalf("unexpected final text %q", got)
 	}
-	if final.Usage.PromptTokens != 11 || final.Usage.CachedInputTokens != 4 || final.Usage.CompletionTokens != 7 || final.Usage.TotalTokens != 18 {
+	if final.Usage.PromptTokens != 11 || final.Usage.CachedInputTokens != 4 || final.Usage.CompletionTokens != 7 || final.Usage.ReasoningTokens != 3 || final.Usage.TotalTokens != 22 {
 		t.Fatalf("unexpected usage: %+v", final.Usage)
 	}
 	reasoningParts := final.Message.ReasoningParts()
@@ -1662,6 +1857,31 @@ func TestMiniMaxUsesAnthropicCompatibleConstructorDefaults(t *testing.T) {
 	}
 	if typed.maxOutputTok != 4096 {
 		t.Fatalf("maxOutputTok = %d, want 4096", typed.maxOutputTok)
+	}
+}
+
+func TestDeepSeekUsesAnthropicCompatibleConstructorDefaults(t *testing.T) {
+	llm := newDeepSeek(Config{
+		Provider: "deepseek",
+		API:      APIDeepSeek,
+		Model:    "deepseek-v4-pro",
+		Auth: AuthConfig{
+			Type:  AuthAPIKey,
+			Token: "deepseek-token",
+		},
+	}, "deepseek-token")
+	typed, ok := llm.(*anthropicSDKLLM)
+	if !ok {
+		t.Fatalf("newDeepSeek() = %T, want *anthropicSDKLLM", llm)
+	}
+	if typed.baseURL != deepSeekDefaultAnthropicBaseURL {
+		t.Fatalf("baseURL = %q, want %q", typed.baseURL, deepSeekDefaultAnthropicBaseURL)
+	}
+	if typed.maxOutputTok != deepSeekDefaultMaxTokens {
+		t.Fatalf("maxOutputTok = %d, want %d", typed.maxOutputTok, deepSeekDefaultMaxTokens)
+	}
+	if typed.auth.Type != AuthBearerToken {
+		t.Fatalf("auth type = %q, want bearer token", typed.auth.Type)
 	}
 }
 

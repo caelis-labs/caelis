@@ -149,6 +149,9 @@ func responseMeta(resp *model.Response) map[string]any {
 		"reasoning_tokens":    resp.Usage.ReasoningTokens,
 		"total_tokens":        resp.Usage.TotalTokens,
 	}
+	if provider := responseUsageAccountingProvider(resp); provider != "" {
+		usage["provider"] = provider
+	}
 	return map[string]any{
 		"caelis": map[string]any{
 			"version": 1,
@@ -160,6 +163,23 @@ func responseMeta(resp *model.Response) map[string]any {
 			},
 		},
 	}
+}
+
+func responseUsageAccountingProvider(resp *model.Response) string {
+	if resp == nil {
+		return ""
+	}
+	provider := strings.TrimSpace(resp.Provider)
+	if !strings.EqualFold(provider, "deepseek") {
+		return provider
+	}
+	usage := resp.Usage
+	if usage.CachedInputTokens > 0 &&
+		usage.TotalTokens >= usage.PromptTokens+usage.CachedInputTokens+usage.CompletionTokens &&
+		usage.PromptTokens+usage.CompletionTokens > 0 {
+		return "deepseek-anthropic"
+	}
+	return provider
 }
 
 func responseInvocation(resp *model.Response) *session.EventInvocation {
