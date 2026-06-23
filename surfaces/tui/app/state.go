@@ -9,6 +9,7 @@ import (
 	"charm.land/bubbles/v2/progress"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/colorprofile"
 
@@ -125,6 +126,7 @@ type Config struct {
 	ProgramSender          *ProgramSender
 	OnStart                func()
 	ExecuteLine            func(Submission) TaskResultMsg
+	executeLineCmd         func(Submission) tea.Msg
 	CanSubmitRunningPrompt func() bool
 	CancelRunning          func() bool
 	ToggleMode             func() (string, error)

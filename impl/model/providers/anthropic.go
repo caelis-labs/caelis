@@ -60,6 +60,9 @@ func newAnthropicWithDefaults(cfg Config, token string, defaults anthropicProvid
 		maxTok = 1024
 	}
 	opts := make([]option.RequestOption, 0, 8+len(cfg.Headers))
+	if strings.TrimSpace(cfg.Auth.HeaderKey) != "" {
+		opts = append(opts, option.WithoutEnvironmentDefaults())
+	}
 	opts = append(opts, option.WithBaseURL(baseURL))
 	opts = append(opts, option.WithHTTPClient(coalesceHTTPClient(cfg.HTTPClient)))
 	opts = append(opts, anthropicAuthOptions(cfg, token)...)
@@ -175,6 +178,9 @@ func (l *anthropicSDKLLM) generateStreaming(ctx context.Context, params anthropi
 	acc := anthropic.Message{}
 	for stream.Next() {
 		event := stream.Current()
+		if stop, ok := event.AsAny().(anthropic.ContentBlockStopEvent); ok {
+			normalizeAccumulatedToolUseInput(&acc, stop)
+		}
 		if err := acc.Accumulate(event); err != nil {
 			yield(nil, err)
 			return
@@ -221,6 +227,20 @@ func (l *anthropicSDKLLM) generateStreaming(ctx context.Context, params anthropi
 			Usage:           usage,
 		},
 	}, nil)
+}
+
+func normalizeAccumulatedToolUseInput(acc *anthropic.Message, stop anthropic.ContentBlockStopEvent) {
+	if acc == nil {
+		return
+	}
+	if stop.Index < 0 || stop.Index >= int64(len(acc.Content)) {
+		return
+	}
+	block := &acc.Content[stop.Index]
+	if strings.TrimSpace(block.Type) != "tool_use" || len(block.Input) == 0 || json.Valid(block.Input) {
+		return
+	}
+	block.Input = model.NormalizeToolUseInput(append(json.RawMessage(nil), block.Input...))
 }
 
 func (l *anthropicSDKLLM) emitStreamingStartBlock(ev anthropic.ContentBlockStartEvent, yield func(*model.StreamEvent, error) bool) bool {

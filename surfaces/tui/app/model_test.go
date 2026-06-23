@@ -501,6 +501,47 @@ func TestTaskResultDividerRendersImmediatelyWhenViewportHasDirtyBlock(t *testing
 	}
 }
 
+func TestDefaultPromptFinalAnswerUsesLocalTaskResultDivider(t *testing.T) {
+	model := NewModel(Config{
+		NoColor: true,
+		ExecuteLine: func(Submission) TaskResultMsg {
+			return TaskResultMsg{}
+		},
+	})
+	model.viewport.SetWidth(100)
+	model.viewport.SetHeight(30)
+
+	updated, cmd := model.submitLine("演示一下你的所有工具")
+	model = updated.(*Model)
+	if cmd == nil {
+		t.Fatal("submitLine() command = nil, want ExecuteLine command")
+	}
+	if !model.showTurnDivider {
+		t.Fatal("showTurnDivider = false, want local TUI divider for default prompt")
+	}
+
+	updated, _ = model.Update(TranscriptEventsMsg{Events: []TranscriptEvent{{
+		Kind:          TranscriptEventNarrative,
+		Scope:         ACPProjectionMain,
+		ScopeID:       "root-session",
+		NarrativeKind: TranscriptNarrativeAssistant,
+		Text:          "---\n\n# 所有工具演示完毕\n\n有需要的话随时告诉我。",
+		Final:         true,
+		OccurredAt:    time.Now(),
+	}}})
+	model = updated.(*Model)
+
+	updated, _ = model.Update(TaskResultMsg{})
+	model = updated.(*Model)
+
+	if got := countDividerBlocks(model); got != 1 {
+		t.Fatalf("divider blocks after local TaskResult = %d, want 1", got)
+	}
+	if _, ok := model.doc.Last().(*DividerBlock); !ok {
+		t.Fatalf("last block = %T, want local turn divider", model.doc.Last())
+	}
+}
+
 func TestMainLifecycleCompletionAppendsTurnDividerOnce(t *testing.T) {
 	model := NewModel(Config{NoColor: true})
 	start := time.Now().Add(-7400 * time.Millisecond)

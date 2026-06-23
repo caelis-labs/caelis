@@ -221,14 +221,20 @@ func ConfigFromControlService(service control.Service, sender *ProgramSender, ba
 	var statusCacheMu sync.Mutex
 
 	if base.ExecuteLine == nil {
-		base.ExecuteLine = func(sub Submission) TaskResultMsg {
+		runExecuteLine := func(sub Submission) executeLineResult {
 			runCtx := ctx
 			finish := func() {}
 			if sender != nil {
 				runCtx, finish = sender.beginRunContext(ctx)
 			}
 			defer finish()
-			return executeLineViaControlServiceWithContext(runCtx, service, sender, sub)
+			return executeLineViaControlServiceWithContextResult(runCtx, service, sender, sub)
+		}
+		base.ExecuteLine = func(sub Submission) TaskResultMsg {
+			return runExecuteLine(sub).completion
+		}
+		base.executeLineCmd = func(sub Submission) tea.Msg {
+			return runExecuteLine(sub).commandMessage()
 		}
 	}
 	if base.CanSubmitRunningPrompt == nil {
@@ -422,6 +428,22 @@ func executeLineViaControlService(service control.Service, sender *ProgramSender
 }
 
 func executeLineViaControlServiceWithContext(ctx context.Context, service control.Service, sender *ProgramSender, sub Submission) TaskResultMsg {
+	return executeLineViaControlServiceWithContextResult(ctx, service, sender, sub).completion
+}
+
+type executeLineResult struct {
+	completion TaskResultMsg
+	queued     bool
+}
+
+func (r executeLineResult) commandMessage() tea.Msg {
+	if r.queued {
+		return nil
+	}
+	return r.completion
+}
+
+func executeLineViaControlServiceWithContextResult(ctx context.Context, service control.Service, sender *ProgramSender, sub Submission) executeLineResult {
 	ctx = contextOrBackground(ctx)
 	if sender != nil {
 		ctx = sender.bindContext(ctx)
@@ -430,10 +452,10 @@ func executeLineViaControlServiceWithContext(ctx context.Context, service contro
 
 	// Slash command dispatch.
 	if isDispatchableSlashCommandWithContext(ctx, service, text) {
-		return dispatchSlashCommandWithContext(ctx, service, sender, text, sub.Attachments)
+		return dispatchSlashCommandWithContextResult(ctx, service, sender, text, sub.Attachments)
 	}
 	if strings.HasPrefix(text, "@") {
-		return dispatchMentionCommandWithContext(ctx, service, sender, text, sub.Attachments)
+		return dispatchMentionCommandWithContextResult(ctx, service, sender, text, sub.Attachments)
 	}
 
 	// Normal submission -> control.Service.Submit -> streaming events.
@@ -444,22 +466,22 @@ func executeLineViaControlServiceWithContext(ctx context.Context, service contro
 		Attachments: convertAttachments(sub.Attachments),
 	})
 	if err != nil {
-		return TaskResultMsg{Err: friendlyCommandError("submit", err)}
+		return executeLineResult{completion: TaskResultMsg{Err: friendlyCommandError("submit", err)}}
 	}
 	if turn == nil {
-		return TaskResultMsg{ContinueRunning: true, SuppressTurnDivider: true}
+		return executeLineResult{completion: TaskResultMsg{ContinueRunning: true, SuppressTurnDivider: true}}
 	}
 	defer turn.Close()
 
 	send := sender.sendFunc()
 	if send != nil {
-		forwardTurnEventStream(ctx, service, turn, sender)
+		return forwardTurnEventStream(ctx, service, turn, sender)
 	} else {
 		for range turn.Events() {
 		}
 	}
 
-	return TaskResultMsg{}
+	return executeLineResult{completion: TaskResultMsg{}}
 }
 
 // ---------------------------------------------------------------------------

@@ -3,8 +3,10 @@ package tuiapp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -14,35 +16,41 @@ import (
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
-const eventStreamBatchInterval = 16 * time.Millisecond
+const (
+	eventStreamBatchInterval          = 16 * time.Millisecond
+	eventStreamCompletionDrainTimeout = 100 * time.Millisecond
+)
 
 type eventStreamNarrativeBatcher struct {
 	pending *eventstream.Envelope
 	key     string
 }
 
-func forwardTurnEventStream(ctx context.Context, service control.Service, turn control.Turn, sender *ProgramSender) {
+func forwardTurnEventStream(ctx context.Context, service control.Service, turn control.Turn, sender *ProgramSender) executeLineResult {
 	ctx = contextOrBackground(ctx)
 	if sender != nil {
 		ctx = sender.bindContext(ctx)
 	}
 	send := sender.sendFunc()
 	if turn == nil || send == nil {
-		return
+		return executeLineResult{completion: TaskResultMsg{}}
 	}
 	events := turn.Events()
 	if events == nil {
-		return
+		return executeLineResult{completion: TaskResultMsg{}}
 	}
+	streamCtx, cancelStreams := context.WithCancel(ctx)
+	defer cancelStreams()
 	ticker := time.NewTicker(eventStreamBatchInterval)
 	defer ticker.Stop()
 
 	var batcher eventStreamNarrativeBatcher
+	drain := &turnForwarderDrain{}
 	for events != nil {
 		select {
 		case <-ctx.Done():
 			batcher.flush(send)
-			return
+			return finalizeForwardedTurn(drain, cancelStreams, send, taskResultForContextDone(ctx.Err()))
 		case <-ticker.C:
 			batcher.flush(send)
 		case env, ok := <-events:
@@ -53,14 +61,101 @@ func forwardTurnEventStream(ctx context.Context, service control.Service, turn c
 			if batcher.enqueue(env, send) {
 				continue
 			}
+			if eventStreamEnvelopeCompletesTurn(env) {
+				batcher.flush(send)
+				return finalizeForwardedTurn(drain, cancelStreams, send, taskResultFromEnvelope(env))
+			}
 			send(env)
-			startTerminalStreamForwarder(ctx, service, env, sender)
+			startTerminalStreamForwarder(streamCtx, service, env, sender, drain)
 			if req := approvalPayloadFromACPEvent(env); req != nil {
 				sendApprovalPrompt(ctx, turn, req, send)
 			}
 		}
 	}
 	batcher.flush(send)
+	return finalizeForwardedTurn(drain, cancelStreams, send, TaskResultMsg{})
+}
+
+func finalizeForwardedTurn(drain *turnForwarderDrain, cancelForwarders func(), send func(tea.Msg), completion TaskResultMsg) executeLineResult {
+	drain.wait(eventStreamCompletionDrainTimeout)
+	if cancelForwarders != nil {
+		cancelForwarders()
+		drain.wait(eventStreamBatchInterval)
+	}
+	if send == nil {
+		return executeLineResult{completion: completion}
+	}
+	// Queue completion in the same lane as streamed ACP envelopes so the TUI
+	// appends the turn divider after every final transcript/tool event.
+	send(completion)
+	return executeLineResult{queued: true}
+}
+
+type turnForwarderDrain struct {
+	wg sync.WaitGroup
+}
+
+func (d *turnForwarderDrain) add() {
+	if d != nil {
+		d.wg.Add(1)
+	}
+}
+
+func (d *turnForwarderDrain) done() {
+	if d != nil {
+		d.wg.Done()
+	}
+}
+
+// wait bounds completion on terminal stream forwarding. Terminal subscriptions
+// can remain open after the ACP turn closes, so timeout means "stop waiting";
+// finalizeForwardedTurn cancels those forwarders before queueing completion.
+func (d *turnForwarderDrain) wait(timeout time.Duration) {
+	if d == nil {
+		return
+	}
+	done := make(chan struct{})
+	go func() {
+		d.wg.Wait()
+		close(done)
+	}()
+	if timeout <= 0 {
+		<-done
+		return
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-done:
+	case <-timer.C:
+	}
+}
+
+func taskResultForContextDone(err error) TaskResultMsg {
+	if errors.Is(err, context.Canceled) {
+		return TaskResultMsg{Interrupted: true}
+	}
+	if err != nil {
+		return TaskResultMsg{Err: err}
+	}
+	return TaskResultMsg{}
+}
+
+func taskResultFromEnvelope(env eventstream.Envelope) TaskResultMsg {
+	if env.Err != nil {
+		if isUserInterruptError(env.Err) {
+			return TaskResultMsg{Err: env.Err, Interrupted: true}
+		}
+		return TaskResultMsg{Err: env.Err}
+	}
+	if env.Kind == eventstream.KindError && strings.TrimSpace(env.Error) != "" {
+		return TaskResultMsg{Err: errors.New(env.Error)}
+	}
+	return TaskResultMsg{}
+}
+
+func eventStreamEnvelopeCompletesTurn(env eventstream.Envelope) bool {
+	return env.Err != nil || (env.Kind == eventstream.KindError && strings.TrimSpace(env.Error) != "")
 }
 
 func approvalPayloadFromACPEvent(env eventstream.Envelope) *approvalPayload {
@@ -182,22 +277,22 @@ func mergeEventStreamNarrativeEnvelope(dst *eventstream.Envelope, src eventstrea
 	dst.Update = dstUpdate
 }
 
-func startTerminalStreamForwarder(ctx context.Context, service control.Service, env eventstream.Envelope, sender *ProgramSender) {
+func startTerminalStreamForwarder(ctx context.Context, service control.Service, env eventstream.Envelope, sender *ProgramSender, drain *turnForwarderDrain) bool {
 	ctx = contextOrBackground(ctx)
 	if sender != nil {
 		ctx = sender.bindContext(ctx)
 	}
 	send := sender.sendFunc()
 	if send == nil {
-		return
+		return false
 	}
 	streamer, ok := service.(control.StreamSubscriber)
 	if !ok {
-		return
+		return false
 	}
 	events, ok := streamer.SubscribeStream(ctx, env)
 	if !ok || events == nil {
-		return
+		return false
 	}
 	start := func() {
 		ticker := time.NewTicker(eventStreamBatchInterval)
@@ -215,6 +310,10 @@ func startTerminalStreamForwarder(ctx context.Context, service control.Service, 
 					events = nil
 					continue
 				}
+				if ctx.Err() != nil {
+					batcher.flush(send)
+					return
+				}
 				if batcher.enqueue(terminalEnv, send) {
 					continue
 				}
@@ -223,11 +322,20 @@ func startTerminalStreamForwarder(ctx context.Context, service control.Service, 
 		}
 		batcher.flush(send)
 	}
-	if sender != nil {
-		sender.startForwarder(start)
-		return
+	run := func() {
+		defer drain.done()
+		start()
 	}
-	go start()
+	drain.add()
+	if sender != nil {
+		if sender.startForwarder(run) {
+			return true
+		}
+		drain.done()
+		return false
+	}
+	go run()
+	return true
 }
 
 type eventStreamTerminalBatcher struct {

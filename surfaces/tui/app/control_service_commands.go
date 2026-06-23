@@ -21,6 +21,10 @@ func dispatchSlashCommand(service control.Service, sender *ProgramSender, text s
 }
 
 func dispatchSlashCommandWithContext(ctx context.Context, service control.Service, sender *ProgramSender, text string, attachments []Attachment) TaskResultMsg {
+	return dispatchSlashCommandWithContextResult(ctx, service, sender, text, attachments).completion
+}
+
+func dispatchSlashCommandWithContextResult(ctx context.Context, service control.Service, sender *ProgramSender, text string, attachments []Attachment) executeLineResult {
 	ctx = contextOrBackground(ctx)
 	if sender != nil {
 		ctx = sender.bindContext(ctx)
@@ -30,31 +34,31 @@ func dispatchSlashCommandWithContext(ctx context.Context, service control.Servic
 
 	switch cmd {
 	case "help":
-		return slashHelpWithContext(ctx, service, send)
+		return executeLineResult{completion: slashHelpWithContext(ctx, service, send)}
 	case "agent":
-		return slashAgentWithContext(ctx, service, send, args)
+		return executeLineResult{completion: slashAgentWithContext(ctx, service, send, args)}
 	case "plugin":
-		return slashPluginWithContext(ctx, service, send, args)
+		return executeLineResult{completion: slashPluginWithContext(ctx, service, send, args)}
 	case "subagent":
-		return slashSubagentWithContext(ctx, service, sender, args, argsStart, text, attachments)
+		return executeLineResult{completion: slashSubagentWithContext(ctx, service, sender, args, argsStart, text, attachments)}
 	case "new":
-		return slashNewWithContext(ctx, service, send)
+		return executeLineResult{completion: slashNewWithContext(ctx, service, send)}
 	case "resume":
-		return slashResumeWithContext(ctx, service, send, args)
+		return executeLineResult{completion: slashResumeWithContext(ctx, service, send, args)}
 	case "status":
-		return slashStatusWithContext(ctx, service, send)
+		return executeLineResult{completion: slashStatusWithContext(ctx, service, send)}
 	case "doctor":
-		return slashDoctorWithContext(ctx, service, send, args)
+		return executeLineResult{completion: slashDoctorWithContext(ctx, service, send, args)}
 	case "connect":
-		return slashConnectWithContext(ctx, service, send, args)
+		return executeLineResult{completion: slashConnectWithContext(ctx, service, send, args)}
 	case "model":
-		return slashModelWithContext(ctx, service, send, args)
+		return executeLineResult{completion: slashModelWithContext(ctx, service, send, args)}
 	case "compact":
-		return slashCompactWithContext(ctx, service, send, args)
+		return executeLineResult{completion: slashCompactWithContext(ctx, service, send, args)}
 	case "exit", "quit":
-		return TaskResultMsg{ExitNow: true}
+		return executeLineResult{completion: TaskResultMsg{ExitNow: true}}
 	default:
-		return slashDynamicAgentWithContext(ctx, service, sender, cmd, args, attachmentsForPromptRange(attachments, argsStart, len([]rune(strings.TrimSpace(text)))))
+		return slashDynamicAgentWithContextResult(ctx, service, sender, cmd, args, attachmentsForPromptRange(attachments, argsStart, len([]rune(strings.TrimSpace(text)))))
 	}
 }
 
@@ -123,6 +127,10 @@ func slashDynamicAgent(service control.Service, send func(tea.Msg), agent string
 }
 
 func slashDynamicAgentWithContext(ctx context.Context, service control.Service, sender *ProgramSender, agent string, prompt string, attachments []Attachment) TaskResultMsg {
+	return slashDynamicAgentWithContextResult(ctx, service, sender, agent, prompt, attachments).completion
+}
+
+func slashDynamicAgentWithContextResult(ctx context.Context, service control.Service, sender *ProgramSender, agent string, prompt string, attachments []Attachment) executeLineResult {
 	ctx = contextOrBackground(ctx)
 	if sender != nil {
 		ctx = sender.bindContext(ctx)
@@ -136,23 +144,23 @@ func slashDynamicAgentWithContext(ctx context.Context, service control.Service, 
 		} else {
 			sendNotice(send, fmt.Sprintf("unknown command: /%s\nrun /help to see supported commands", agent))
 		}
-		return TaskResultMsg{SuppressTurnDivider: true}
+		return executeLineResult{completion: TaskResultMsg{SuppressTurnDivider: true}}
 	}
 	turn, err := service.StartAgentSubagent(ctx, agent, prompt, convertAttachments(attachments))
 	if err != nil {
-		return TaskResultMsg{Err: friendlyCommandError("/"+agent, err)}
+		return executeLineResult{completion: TaskResultMsg{Err: friendlyCommandError("/"+agent, err)}}
 	}
 	if turn == nil {
-		return TaskResultMsg{SuppressTurnDivider: true}
+		return executeLineResult{completion: TaskResultMsg{SuppressTurnDivider: true}}
 	}
 	defer turn.Close()
 	if send != nil {
-		forwardTurnEventStream(ctx, service, turn, sender)
+		return forwardTurnEventStream(ctx, service, turn, sender)
 	} else {
 		for range turn.Events() {
 		}
 	}
-	return TaskResultMsg{}
+	return executeLineResult{completion: TaskResultMsg{}}
 }
 
 func isRegisteredAgentCommand(service control.Service, agent string) bool {
@@ -182,6 +190,10 @@ func dispatchMentionCommand(service control.Service, sender *ProgramSender, text
 }
 
 func dispatchMentionCommandWithContext(ctx context.Context, service control.Service, sender *ProgramSender, text string, attachments []Attachment) TaskResultMsg {
+	return dispatchMentionCommandWithContextResult(ctx, service, sender, text, attachments).completion
+}
+
+func dispatchMentionCommandWithContextResult(ctx context.Context, service control.Service, sender *ProgramSender, text string, attachments []Attachment) executeLineResult {
 	ctx = contextOrBackground(ctx)
 	if sender != nil {
 		ctx = sender.bindContext(ctx)
@@ -192,23 +204,23 @@ func dispatchMentionCommandWithContext(ctx context.Context, service control.Serv
 	attachments = attachmentsForPromptRange(attachments, promptStart, len([]rune(strings.TrimSpace(text))))
 	if handle == "" || (strings.TrimSpace(prompt) == "" && len(attachments) == 0) {
 		sendNotice(send, "usage: @handle <prompt>")
-		return TaskResultMsg{SuppressTurnDivider: true}
+		return executeLineResult{completion: TaskResultMsg{SuppressTurnDivider: true}}
 	}
 	turn, err := service.ContinueSubagent(ctx, handle, prompt, convertAttachments(attachments))
 	if err != nil {
-		return TaskResultMsg{Err: friendlyCommandError("@"+handle, err)}
+		return executeLineResult{completion: TaskResultMsg{Err: friendlyCommandError("@"+handle, err)}}
 	}
 	if turn == nil {
-		return TaskResultMsg{SuppressTurnDivider: true}
+		return executeLineResult{completion: TaskResultMsg{SuppressTurnDivider: true}}
 	}
 	defer turn.Close()
 	if send != nil {
-		forwardTurnEventStream(ctx, service, turn, sender)
+		return forwardTurnEventStream(ctx, service, turn, sender)
 	} else {
 		for range turn.Events() {
 		}
 	}
-	return TaskResultMsg{}
+	return executeLineResult{completion: TaskResultMsg{}}
 }
 
 func slashAgent(service control.Service, send func(tea.Msg), args string) TaskResultMsg {

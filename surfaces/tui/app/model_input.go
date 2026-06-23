@@ -1251,12 +1251,19 @@ func (m *Model) submitLineWithDisplayAndAttachmentsOptions(execLine string, disp
 		return m, nil
 	}
 	cmds := []tea.Cmd{
-		func() tea.Msg {
-			return m.cfg.ExecuteLine(submission)
-		},
+		m.executeLineCmd(submission),
 		m.scheduleSpinnerTick(),
 	}
 	return m, tea.Batch(cmds...)
+}
+
+func (m *Model) executeLineCmd(submission Submission) tea.Cmd {
+	return func() tea.Msg {
+		if m.cfg.executeLineCmd != nil {
+			return m.cfg.executeLineCmd(submission)
+		}
+		return m.cfg.ExecuteLine(submission)
+	}
 }
 
 func (m *Model) canSubmitRunningPromptNow() bool {

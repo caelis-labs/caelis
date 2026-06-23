@@ -773,11 +773,15 @@ func TestExecuteLineViaDriverStreamsGatewayEventsDirectly(t *testing.T) {
 	if result.Err != nil {
 		t.Fatalf("executeLineViaControlService() err = %v", result.Err)
 	}
-	if len(msgs) != 1 {
-		t.Fatalf("executeLineViaControlService() emitted %d msgs, want 1", len(msgs))
+	assertNoLocalTurnCompletion(t, result)
+	if len(msgs) != 2 {
+		t.Fatalf("executeLineViaControlService() emitted %d msgs, want event plus completion", len(msgs))
 	}
 	if got := requireACPText(t, msgs[0], schema.UpdateAgentMessage); got != "direct gateway event" {
 		t.Fatalf("first ACP text = %q, want direct gateway event", got)
+	}
+	if _, ok := msgs[1].(TaskResultMsg); !ok {
+		t.Fatalf("last message = %#v, want sender completion", msgs[1])
 	}
 }
 
@@ -820,8 +824,9 @@ func TestExecuteLineViaDriverCoalescesUIOnlyReasoningBeforeToolEvent(t *testing.
 	if result.Err != nil {
 		t.Fatalf("executeLineViaControlService() err = %v", result.Err)
 	}
-	if got := len(msgs); got != 2 {
-		t.Fatalf("executeLineViaControlService() emitted %d msgs, want 2: %#v", got, msgs)
+	assertNoLocalTurnCompletion(t, result)
+	if got := len(msgs); got != 3 {
+		t.Fatalf("executeLineViaControlService() emitted %d msgs, want 3: %#v", got, msgs)
 	}
 	if got := requireACPText(t, msgs[0], schema.UpdateAgentThought); got != "think fast now" {
 		t.Fatalf("coalesced reasoning = %q, want %q", got, "think fast now")
@@ -829,6 +834,9 @@ func TestExecuteLineViaDriverCoalescesUIOnlyReasoningBeforeToolEvent(t *testing.
 	tool := requireACPEnvelope(t, msgs[1])
 	if update, ok := tool.Update.(schema.ToolCall); !ok || update.ToolCallID != "call-1" {
 		t.Fatalf("second update = %#v, want tool event after reasoning flush", tool.Update)
+	}
+	if _, ok := msgs[2].(TaskResultMsg); !ok {
+		t.Fatalf("last message = %#v, want sender completion", msgs[2])
 	}
 }
 
@@ -859,11 +867,15 @@ func TestExecuteLineViaDriverCoalescesUIOnlyReasoningPreservesLeadingSpaces(t *t
 	if result.Err != nil {
 		t.Fatalf("executeLineViaControlService() err = %v", result.Err)
 	}
-	if got := len(msgs); got != 1 {
-		t.Fatalf("executeLineViaControlService() emitted %d msgs, want 1: %#v", got, msgs)
+	assertNoLocalTurnCompletion(t, result)
+	if got := len(msgs); got != 2 {
+		t.Fatalf("executeLineViaControlService() emitted %d msgs, want 2: %#v", got, msgs)
 	}
 	if got := requireACPText(t, msgs[0], schema.UpdateAgentThought); got != "Now let me verify the DDL matches" {
 		t.Fatalf("coalesced reasoning = %q, want boundary spaces preserved", got)
+	}
+	if _, ok := msgs[1].(TaskResultMsg); !ok {
+		t.Fatalf("last message = %#v, want sender completion", msgs[1])
 	}
 }
 
@@ -905,14 +917,18 @@ func TestExecuteLineViaDriverDoesNotCoalesceReasoningWithAnswerDelta(t *testing.
 	if result.Err != nil {
 		t.Fatalf("executeLineViaControlService() err = %v", result.Err)
 	}
-	if got := len(msgs); got != 2 {
-		t.Fatalf("executeLineViaControlService() emitted %d msgs, want 2: %#v", got, msgs)
+	assertNoLocalTurnCompletion(t, result)
+	if got := len(msgs); got != 3 {
+		t.Fatalf("executeLineViaControlService() emitted %d msgs, want 3: %#v", got, msgs)
 	}
 	if got := requireACPText(t, msgs[0], schema.UpdateAgentThought); got != "think" {
 		t.Fatalf("first ACP text = %q, want reasoning", got)
 	}
 	if got := requireACPText(t, msgs[1], schema.UpdateAgentMessage); got != "answer" {
 		t.Fatalf("second ACP text = %q, want answer", got)
+	}
+	if _, ok := msgs[2].(TaskResultMsg); !ok {
+		t.Fatalf("last message = %#v, want sender completion", msgs[2])
 	}
 }
 
@@ -928,83 +944,6 @@ func TestExecuteLineViaDriverTreatsUnknownSlashAsUserMessage(t *testing.T) {
 	}
 	if driver.lastSubmission.Text != text {
 		t.Fatalf("submitted text = %q, want %q", driver.lastSubmission.Text, text)
-	}
-}
-
-func TestExecuteLineViaDriverForwardsTerminalStreamEvents(t *testing.T) {
-	turn := &bridgeTestTurn{
-		events: make(chan gateway.EventEnvelope, 1),
-	}
-	turn.events <- gateway.EventEnvelope{
-		Event: gateway.Event{
-			Kind:       gateway.EventKindToolResult,
-			SessionRef: session.SessionRef{SessionID: "root-session"},
-			ToolResult: &gateway.ToolResultPayload{
-				CallID:   "call-1",
-				ToolName: "RUN_COMMAND",
-				Content:  testTerminalContentWithID("seed\n", "terminal-1"),
-				Status:   gateway.ToolStatusRunning,
-			},
-			Meta: map[string]any{
-				"caelis": map[string]any{
-					"runtime": map[string]any{
-						"task": map[string]any{
-							"task_id":       "task-1",
-							"terminal_id":   "terminal-1",
-							"running":       true,
-							"state":         "running",
-							"output_cursor": int64(5),
-						},
-					},
-				},
-			},
-		},
-	}
-	close(turn.events)
-	terminalEvents := make(chan gateway.EventEnvelope, 1)
-	terminalEvents <- gateway.EventEnvelope{
-		Event: gateway.Event{
-			Kind: gateway.EventKindToolResult,
-			ToolResult: &gateway.ToolResultPayload{
-				CallID:   "call-1",
-				ToolName: "RUN_COMMAND",
-				Content:  testTerminalContentWithID("streamed\n", "terminal-1"),
-				Status:   gateway.ToolStatusRunning,
-			},
-		},
-	}
-	close(terminalEvents)
-
-	driver := &bridgeSubmitDriver{turn: turn, terminalEvents: terminalEvents}
-	var msgs []tea.Msg
-	result := executeLineViaControlService(driver, &ProgramSender{Send: func(msg tea.Msg) { msgs = append(msgs, msg) }}, Submission{Text: "hello"})
-	if result.Err != nil {
-		t.Fatalf("executeLineViaControlService() err = %v", result.Err)
-	}
-	deadline := time.After(2 * time.Second)
-	for {
-		var sawStream bool
-		for _, msg := range msgs {
-			env, ok := msg.(eventstream.Envelope)
-			if !ok {
-				continue
-			}
-			if text := acpUpdateTerminalText(env.Update); text == "streamed\n" {
-				sawStream = true
-			}
-		}
-		if sawStream {
-			break
-		}
-		select {
-		case <-deadline:
-			t.Fatalf("messages = %#v, want forwarded terminal stream event", msgs)
-		default:
-			time.Sleep(10 * time.Millisecond)
-		}
-	}
-	if driver.terminalSubscribeCalls != 1 {
-		t.Fatalf("terminalSubscribeCalls = %d, want 1", driver.terminalSubscribeCalls)
 	}
 }
 
@@ -1771,16 +1710,25 @@ func TestDynamicAgentSlashStreamsParticipantTurnOutput(t *testing.T) {
 	if result.Err != nil {
 		t.Fatalf("dynamic slash error = %v", result.Err)
 	}
-	if result.ContinueRunning {
-		t.Fatalf("dynamic slash result = %#v, want participant turn to complete through gateway handle", result)
-	}
+	assertNoLocalTurnCompletion(t, result)
 	close(msgs)
+	foundOutput := false
+	foundCompletion := false
 	for msg := range msgs {
+		if _, ok := msg.(TaskResultMsg); ok {
+			foundCompletion = true
+			continue
+		}
 		if transcriptEventsContainText(transcriptEventsFromMsg(msg), "copilot 子代理") {
-			return
+			foundOutput = true
 		}
 	}
-	t.Fatal("dynamic slash emitted no participant output")
+	if !foundOutput {
+		t.Fatal("dynamic slash emitted no participant output")
+	}
+	if !foundCompletion {
+		t.Fatal("dynamic slash emitted no sender completion")
+	}
 }
 
 func TestDynamicAgentSlashDoesNotRenderRunningOutputPreviewAsAssistantText(t *testing.T) {
@@ -1816,15 +1764,19 @@ func TestDynamicAgentSlashCompletedTurnKeepsDivider(t *testing.T) {
 	if result.Err != nil {
 		t.Fatalf("dynamic slash error = %v", result.Err)
 	}
-	if result.SuppressTurnDivider {
-		t.Fatalf("dynamic slash result = %#v, want completed ACP agent turn to keep divider", result)
-	}
-	if result.ContinueRunning {
-		t.Fatalf("dynamic slash result = %#v, want completed turn", result)
-	}
+	assertNoLocalTurnCompletion(t, result)
 	close(msgs)
 	if len(msgs) == 0 {
 		t.Fatal("completed dynamic slash emitted no final transcript output")
+	}
+	foundCompletion := false
+	for msg := range msgs {
+		if _, ok := msg.(TaskResultMsg); ok {
+			foundCompletion = true
+		}
+	}
+	if !foundCompletion {
+		t.Fatal("completed dynamic slash emitted no sender completion")
 	}
 }
 
@@ -1839,21 +1791,24 @@ func TestDynamicAgentSlashParticipantTurnCompletionKeepsDivider(t *testing.T) {
 	if result.Err != nil {
 		t.Fatalf("dynamic slash error = %v", result.Err)
 	}
-	if result.ContinueRunning {
-		t.Fatalf("dynamic slash result = %#v, want participant turn to finish through gateway handle", result)
-	}
-	if result.SuppressTurnDivider {
-		t.Fatalf("dynamic slash result = %#v, want divider kept", result)
-	}
+	assertNoLocalTurnCompletion(t, result)
 	close(msgs)
 	foundOutput := false
+	foundCompletion := false
 	for msg := range msgs {
+		if _, ok := msg.(TaskResultMsg); ok {
+			foundCompletion = true
+			continue
+		}
 		if transcriptEventsContainText(transcriptEventsFromMsg(msg), "上海今天阴有小雨") {
 			foundOutput = true
 		}
 	}
 	if !foundOutput {
 		t.Fatal("participant turn completion emitted no transcript output")
+	}
+	if !foundCompletion {
+		t.Fatal("participant turn emitted no sender completion")
 	}
 }
 

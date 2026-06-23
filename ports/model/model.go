@@ -280,7 +280,7 @@ func NewToolUsePart(id, name string, input json.RawMessage) Part {
 		ToolUse: &ToolUsePart{
 			ID:    id,
 			Name:  name,
-			Input: normalizeToolUseInput(input),
+			Input: NormalizeToolUseInput(input),
 		},
 	}
 }
@@ -290,7 +290,10 @@ const (
 	rawToolUseInputWrappedKey = "__caelis_raw_tool_input_wrapped"
 )
 
-func normalizeToolUseInput(input json.RawMessage) json.RawMessage {
+// NormalizeToolUseInput returns model-canonical JSON for tool-use input.
+// Invalid provider fragments are preserved inside a valid wrapper object so
+// durable replay never stores malformed RawMessage bytes.
+func NormalizeToolUseInput(input json.RawMessage) json.RawMessage {
 	raw := strings.TrimSpace(string(input))
 	if raw == "" {
 		return nil

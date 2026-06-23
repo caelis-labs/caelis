@@ -1767,6 +1767,116 @@ func TestAnthropicSDKStream_MapsThinkingDeltasAndSignature(t *testing.T) {
 	}
 }
 
+func TestDeepSeekAnthropicStreamWrapsMalformedToolInputBeforeSDKMarshal(t *testing.T) {
+	const rawToolInput = "* 4 SEARCH - file content"
+
+	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/anthropic/v1/messages" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "event: message_start\n")
+		_, _ = fmt.Fprint(w, "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_stream\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"deepseek-v4-flash\",\"content\":[],\"stop_reason\":\"\",\"stop_sequence\":\"\",\"usage\":{\"input_tokens\":11,\"output_tokens\":0}}}\n\n")
+		_, _ = fmt.Fprint(w, "event: content_block_start\n")
+		_, _ = fmt.Fprint(w, "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"Now let me do SEARCH.\"}}\n\n")
+		_, _ = fmt.Fprint(w, "event: content_block_stop\n")
+		_, _ = fmt.Fprint(w, "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n")
+		_, _ = fmt.Fprint(w, "event: content_block_start\n")
+		_, _ = fmt.Fprint(w, "data: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"call_bad\",\"name\":\"SEARCH\",\"input\":{}}}\n\n")
+		_, _ = fmt.Fprint(w, "event: content_block_delta\n")
+		_, _ = fmt.Fprintf(w, "data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":%q}}\n\n", rawToolInput)
+		_, _ = fmt.Fprint(w, "event: content_block_stop\n")
+		_, _ = fmt.Fprint(w, "data: {\"type\":\"content_block_stop\",\"index\":1}\n\n")
+		_, _ = fmt.Fprint(w, "event: message_delta\n")
+		_, _ = fmt.Fprint(w, "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\",\"stop_sequence\":\"\"},\"usage\":{\"input_tokens\":11,\"output_tokens\":7}}\n\n")
+		_, _ = fmt.Fprint(w, "event: message_stop\n")
+		_, _ = fmt.Fprint(w, "data: {\"type\":\"message_stop\"}\n\n")
+	}))
+	defer server.Close()
+
+	llm := newDeepSeek(Config{
+		Provider:   "deepseek",
+		Model:      "deepseek-v4-flash",
+		BaseURL:    server.URL + "/anthropic",
+		HTTPClient: server.Client(),
+		Timeout:    time.Second,
+		Auth: AuthConfig{
+			Type:  AuthAPIKey,
+			Token: "deepseek-token",
+		},
+	}, "deepseek-token")
+
+	var final *model.Response
+	for event, err := range llm.Generate(context.Background(), &model.Request{
+		Messages: []model.Message{model.NewTextMessage(model.RoleUser, "hello")},
+		Tools: []model.ToolSpec{
+			model.NewFunctionToolSpec("SEARCH", "Search file content.", map[string]any{"type": "object"}),
+		},
+		Stream: true,
+	}) {
+		if err != nil {
+			t.Fatalf("Generate() error = %v", err)
+		}
+		if event != nil && event.Response != nil && event.TurnComplete {
+			final = event.Response
+		}
+	}
+	if final == nil {
+		t.Fatal("expected final response")
+	}
+	calls := final.Message.ToolCalls()
+	if len(calls) != 1 {
+		t.Fatalf("tool calls len = %d, want 1: %+v", len(calls), calls)
+	}
+	if got := calls[0].Args; got != rawToolInput {
+		t.Fatalf("tool call args = %q, want raw malformed input %q", got, rawToolInput)
+	}
+	if _, err := json.Marshal(final.Message); err != nil {
+		t.Fatalf("json.Marshal(final.Message) error = %v", err)
+	}
+}
+
+func TestAnthropicHeaderKeyDisablesEnvironmentDefaults(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "env-api-key")
+
+	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("x-minimax-api-key"); got != "compat-token" {
+			t.Fatalf("x-minimax-api-key = %q, want custom token", got)
+		}
+		if got := r.Header.Get("x-api-key"); got != "" {
+			t.Fatalf("x-api-key = %q, want no Anthropic env default", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"id":"msg_1","type":"message","role":"assistant","model":"test-model","stop_reason":"end_turn","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1}}`)
+	}))
+	defer server.Close()
+
+	llm := newAnthropic(Config{
+		Provider:   "anthropic-compatible",
+		API:        APIAnthropicCompatible,
+		Model:      "test-model",
+		BaseURL:    server.URL,
+		HTTPClient: server.Client(),
+		Timeout:    time.Second,
+		Auth: AuthConfig{
+			Type:      AuthAPIKey,
+			Token:     "compat-token",
+			HeaderKey: "x-minimax-api-key",
+		},
+	}, "compat-token")
+
+	for event, err := range llm.Generate(context.Background(), &model.Request{
+		Messages: []model.Message{model.NewTextMessage(model.RoleUser, "hello")},
+	}) {
+		if err != nil {
+			t.Fatalf("Generate() error = %v", err)
+		}
+		if event != nil && event.Response != nil && event.Response.Message.TextContent() != "ok" {
+			t.Fatalf("response text = %q, want ok", event.Response.Message.TextContent())
+		}
+	}
+}
+
 func TestMiniMaxStream_EmitsStartBlockTextWithoutSmoothingAtProviderLayer(t *testing.T) {
 	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/messages" && r.URL.Path != "/v1/messages" {
