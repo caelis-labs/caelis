@@ -91,20 +91,21 @@ func TestGatewayTaskControlsCompactConsecutiveWaits(t *testing.T) {
 	}
 	joined := strings.Join(plain, "\n")
 	if !strings.Contains(joined, "› 两个子任务已启动") ||
-		!strings.Contains(joined, `▸ TASK Write "Alice"`) ||
-		!strings.Contains(joined, `▸ TASK Wait ella 5s`) ||
-		!strings.Contains(joined, `▸ TASK Wait 8s`) ||
+		!strings.Contains(joined, `• Write "Alice"`) ||
+		!strings.Contains(joined, `• Wait ella 5s, 8s`) ||
 		strings.Contains(joined, "• Tasks") {
-		t.Fatalf("rendered rows = %q, want active TASK step to stay expanded until the next step", joined)
+		t.Fatalf("rendered rows = %q, want active TASK waits rendered with unified summary UI", joined)
 	}
-	if strings.Contains(joined, "task-9") {
-		t.Fatalf("rendered rows = %q, should hide raw TASK tool and task id", joined)
+	for _, forbidden := range []string{"task-9", "▸ TASK"} {
+		if strings.Contains(joined, forbidden) {
+			t.Fatalf("rendered rows = %q, should hide %q", joined, forbidden)
+		}
 	}
 	sendReasoning("继续处理")
 	rows = block.Render(BlockRenderContext{Width: 110, TermWidth: 110, Theme: model.theme})
 	joined = strings.Join(renderedPlainRows(rows), "\n")
 	if !strings.Contains(joined, `› 两个子任务已启动`) ||
-		!strings.Contains(joined, `▸ TASK Write "Alice"`) ||
+		!strings.Contains(joined, `• Write "Alice"`) ||
 		!strings.Contains(joined, `• Wait ella 5s, 8s`) ||
 		!strings.Contains(joined, `› 继续处理`) {
 		t.Fatalf("settled rows = %q, want previous wait controls settled before new reasoning", joined)
@@ -113,6 +114,57 @@ func TestGatewayTaskControlsCompactConsecutiveWaits(t *testing.T) {
 		strings.Contains(joined, "acp_task_stage") ||
 		strings.Contains(joined, `    Wait 8s`) {
 		t.Fatalf("settled rows = %q, should use a non-expandable wait summary", joined)
+	}
+}
+
+func TestGatewayTaskWaitPollingSummarizesAcrossReasoning(t *testing.T) {
+	model := newGatewayEventTestModel()
+	block := NewMainACPTurnBlock("root-session")
+	block.Events = append(block.Events,
+		SubagentEvent{Kind: SEReasoning, Text: "子会话正在运行。现在让我等待它完成。"},
+		SubagentEvent{Kind: SEToolCall, CallID: "wait-1", Name: "TASK", Args: "Wait leo 5s"},
+		SubagentEvent{Kind: SEReasoning, Text: "子会话还在运行。让我再等待一段时间。"},
+		SubagentEvent{Kind: SEToolCall, CallID: "wait-2", Name: "TASK", Args: "Wait leo 5s"},
+		SubagentEvent{Kind: SEReasoning, Text: "子会话还在运行，但已经有一些输出了。让我再等待一下。"},
+		SubagentEvent{Kind: SEToolCall, CallID: "wait-3", Name: "TASK", Args: "Wait leo 10s"},
+	)
+
+	rows := block.Render(BlockRenderContext{Width: 120, TermWidth: 120, Theme: model.theme})
+	joined := strings.Join(renderedPlainRows(rows), "\n")
+	if !strings.Contains(joined, "• Wait leo 5s, leo 5s, leo 10s") {
+		t.Fatalf("rendered rows = %q, want compact polling wait summary", joined)
+	}
+	for _, forbidden := range []string{"▸ TASK", "子会话还在运行", "\n›"} {
+		if strings.Contains(joined, forbidden) {
+			t.Fatalf("rendered rows = %q, should hide polling detail %q", joined, forbidden)
+		}
+	}
+}
+
+func TestGatewayTaskWaitPollingPreservesAssistantText(t *testing.T) {
+	model := newGatewayEventTestModel()
+	block := NewMainACPTurnBlock("root-session")
+	block.Events = append(block.Events,
+		SubagentEvent{Kind: SEAssistant, Text: "The child task is still running."},
+		SubagentEvent{Kind: SEToolCall, CallID: "wait-1", Name: "TASK", Args: "Wait leo 5s"},
+		SubagentEvent{Kind: SEAssistant, Text: "It produced visible output, so I will wait again."},
+		SubagentEvent{Kind: SEToolCall, CallID: "wait-2", Name: "TASK", Args: "Wait leo 10s"},
+	)
+
+	rows := block.Render(BlockRenderContext{Width: 120, TermWidth: 120, Theme: model.theme})
+	joined := strings.Join(renderedPlainRows(rows), "\n")
+	for _, want := range []string{
+		"The child task is still running.",
+		"It produced visible output, so I will wait again.",
+		"• Wait leo 5s",
+		"• Wait leo 10s",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("rendered rows = %q, want %q", joined, want)
+		}
+	}
+	if strings.Contains(joined, "• Wait leo 5s, leo 10s") {
+		t.Fatalf("rendered rows = %q, should not compact assistant-visible wait polling", joined)
 	}
 }
 
@@ -652,10 +704,10 @@ func TestGatewayTaskWaitSummaryCleansRawTaskFallbackRows(t *testing.T) {
 	rows := block.Render(BlockRenderContext{Width: 120, TermWidth: 120, Theme: model.theme})
 	joined := strings.Join(renderedPlainRows(rows), "\n")
 	if !strings.Contains(joined, "• Wait 5s, nora 3s, nora 3s, nora 3s") ||
-		!strings.Contains(joined, "▸ TASK Cancel nora") {
+		!strings.Contains(joined, "• Cancel nora") {
 		t.Fatalf("rendered rows = %q, want cleaned task action rows", joined)
 	}
-	for _, forbidden := range []string{"TASK wait", "task-12"} {
+	for _, forbidden := range []string{"TASK wait", "task-12", "▸ TASK"} {
 		if strings.Contains(joined, forbidden) {
 			t.Fatalf("rendered rows = %q, should not contain %q", joined, forbidden)
 		}
@@ -741,7 +793,7 @@ func TestGatewayTaskSnapshotDoesNotRefreshCommandPanelOutput(t *testing.T) {
 		plain = append(plain, row.Plain)
 	}
 	joined := strings.Join(plain, "\n")
-	for _, want := range []string{"• Ran for i in $(seq 1 30); do echo $i; sleep 1; done", "  └ 进度: 1/30", "▸ TASK Wait 5s"} {
+	for _, want := range []string{"• Ran for i in $(seq 1 30); do echo $i; sleep 1; done", "  └ 进度: 1/30", "• Wait 5s"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("rendered rows = %q, want %q", joined, want)
 		}

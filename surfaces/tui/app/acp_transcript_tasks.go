@@ -6,32 +6,61 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-func renderACPTaskStageRows(blockID string, events []SubagentEvent, idx int, status string, width int, ctx BlockRenderContext, _ acpTranscriptRenderOptions) ([]RenderedRow, int, bool) {
-	stage, end := compactTaskWaitRun(events, idx, status)
-	actions := taskControlEvents(stage)
-	if len(actions) == 0 {
-		return nil, idx, false
-	}
-	rows := make([]RenderedRow, 0, 1)
-	for _, detail := range taskWaitRunRows(actions, width) {
-		rows = append(rows, StyledPlainRow(blockID, detail, styleTaskSummaryRow(detail, ctx)))
-	}
-	return rows, end, true
+// A single wait after reasoning keeps the live reasoning visible; repeated waits
+// are polling filler and collapse into one summary row.
+const minWaitsForPollingSummary = 2
+
+type taskWaitRun struct {
+	waits []SubagentEvent
+	end   int
 }
 
-func compactTaskWaitRun(events []SubagentEvent, idx int, status string) ([]SubagentEvent, int) {
-	if idx < 0 || idx >= len(events) || !isTaskWaitControlEvent(events, idx) {
-		return nil, idx
+func renderACPTaskStageRows(blockID string, events []SubagentEvent, idx int, width int, ctx BlockRenderContext, _ acpTranscriptRenderOptions) ([]RenderedRow, int, bool) {
+	run, ok := compactTaskWaitRun(events, idx)
+	if !ok {
+		return nil, idx, false
 	}
-	end := idx
-	for end+1 < len(events) && isTaskWaitControlEvent(events, end+1) {
-		end++
+	return renderACPStandardToolCollapsedRows(blockID, taskWaitSummaryEvent(run.waits), "", width, ctx, false, ""), run.end, true
+}
+
+func compactTaskWaitRun(events []SubagentEvent, idx int) (taskWaitRun, bool) {
+	if run, ok := compactTaskPollingWaitRun(events, idx); ok {
+		return run, true
 	}
-	settled := isTerminalACPTranscriptStatus(status) || hasLaterTranscriptStep(events, end+1)
-	if !settled {
-		return nil, idx
+	if idx < 0 || idx >= len(events) || !isTaskWaitControlEvent(events[idx]) {
+		return taskWaitRun{}, false
 	}
-	return events[idx : end+1], end
+	step, ok := collectTaskTranscriptStepWith(events, idx, isTaskWaitControlEvent)
+	if !ok {
+		return taskWaitRun{}, false
+	}
+	waits := filterTaskControlEvents(events[step.start:step.end+1], isTaskWaitControlEvent)
+	if len(waits) == 0 {
+		return taskWaitRun{}, false
+	}
+	return taskWaitRun{waits: waits, end: step.end}, true
+}
+
+func compactTaskPollingWaitRun(events []SubagentEvent, idx int) (taskWaitRun, bool) {
+	if idx < 0 || idx >= len(events) {
+		return taskWaitRun{}, false
+	}
+	i := idx
+	end := idx - 1
+	waits := make([]SubagentEvent, 0, 3)
+	for i < len(events) {
+		step, ok := collectTaskTranscriptStepWithNarrative(events, i, isTaskWaitControlEvent, isTaskReasoningEvent)
+		if !ok {
+			break
+		}
+		waits = append(waits, filterTaskControlEvents(events[step.start:step.end+1], isTaskWaitControlEvent)...)
+		end = step.end
+		i = step.end + 1
+	}
+	if len(waits) < minWaitsForPollingSummary {
+		return taskWaitRun{}, false
+	}
+	return taskWaitRun{waits: waits, end: end}, true
 }
 
 func compactTaskStage(events []SubagentEvent, idx int, status string) ([]SubagentEvent, int) {
@@ -69,14 +98,22 @@ func collectTaskStage(events []SubagentEvent, idx int, status string, includeLiv
 }
 
 func collectTaskTranscriptStep(events []SubagentEvent, idx int) (transcriptStep, bool) {
+	return collectTaskTranscriptStepWith(events, idx, isGroupedTaskControlEvent)
+}
+
+func collectTaskTranscriptStepWith(events []SubagentEvent, idx int, accept func(SubagentEvent) bool) (transcriptStep, bool) {
+	return collectTaskTranscriptStepWithNarrative(events, idx, accept, isTaskNarrativeEvent)
+}
+
+func collectTaskTranscriptStepWithNarrative(events []SubagentEvent, idx int, accept func(SubagentEvent) bool, narrative func(SubagentEvent) bool) (transcriptStep, bool) {
 	if idx < 0 || idx >= len(events) {
 		return transcriptStep{}, false
 	}
 	i := idx
-	for i < len(events) && isTaskNarrativeEvent(events[i]) {
+	for i < len(events) && narrative(events[i]) {
 		i++
 	}
-	if i >= len(events) || !isGroupedTaskControlEvent(events, i) {
+	if i >= len(events) || !accept(events[i]) {
 		return transcriptStep{}, false
 	}
 	step := transcriptStep{
@@ -84,7 +121,10 @@ func collectTaskTranscriptStep(events []SubagentEvent, idx int) (transcriptStep,
 		end:     i,
 		allDone: true,
 	}
-	for i < len(events) && isGroupedTaskControlEvent(events, i) {
+	for i < len(events) && accept(events[i]) {
+		if !events[i].Done {
+			step.allDone = false
+		}
 		step.end = i
 		i++
 	}
@@ -92,10 +132,14 @@ func collectTaskTranscriptStep(events []SubagentEvent, idx int) (transcriptStep,
 }
 
 func taskControlEvents(events []SubagentEvent) []SubagentEvent {
+	return filterTaskControlEvents(events, isTaskControlEvent)
+}
+
+func filterTaskControlEvents(events []SubagentEvent, accept func(SubagentEvent) bool) []SubagentEvent {
 	out := make([]SubagentEvent, 0, len(events))
 	seen := map[string]struct{}{}
 	for _, ev := range events {
-		if !isTaskControlEvent(ev) {
+		if !accept(ev) {
 			continue
 		}
 		key := strings.TrimSpace(ev.CallID)
@@ -110,7 +154,7 @@ func taskControlEvents(events []SubagentEvent) []SubagentEvent {
 	return out
 }
 
-func taskWaitRunRows(events []SubagentEvent, width int) []string {
+func taskWaitSummaryEvent(events []SubagentEvent) SubagentEvent {
 	waits := make([]string, 0, len(events))
 	for _, ev := range events {
 		verb, detail := splitTaskAction(ev.Args)
@@ -120,7 +164,11 @@ func taskWaitRunRows(events []SubagentEvent, width int) []string {
 		waits = append(waits, detail)
 	}
 	detail := strings.Join(compactNonEmpty(waits), ", ")
-	return wrapExplorationSummaryDetail("• ", "Wait", detail, width)
+	args := "Wait"
+	if detail != "" {
+		args += " " + detail
+	}
+	return SubagentEvent{Kind: SEToolCall, Name: "TASK", Args: args}
 }
 
 func taskStageDetailRows(events []SubagentEvent, width int) []string {
@@ -276,6 +324,10 @@ func isTaskNarrativeEvent(ev SubagentEvent) bool {
 	return ev.Kind == SEReasoning || ev.Kind == SEAssistant
 }
 
+func isTaskReasoningEvent(ev SubagentEvent) bool {
+	return ev.Kind == SEReasoning
+}
+
 func hasTaskNarrative(events []SubagentEvent) bool {
 	for _, ev := range events {
 		if isTaskNarrativeEvent(ev) {
@@ -350,18 +402,12 @@ func isTaskControlEvent(ev SubagentEvent) bool {
 	return ev.Kind == SEToolCall && strings.EqualFold(strings.TrimSpace(ev.Name), "TASK")
 }
 
-func isGroupedTaskControlEvent(events []SubagentEvent, idx int) bool {
-	if idx < 0 || idx >= len(events) {
-		return false
-	}
-	return isTaskControlEvent(events[idx]) && taskEventAction(events[idx]) != "write"
+func isGroupedTaskControlEvent(ev SubagentEvent) bool {
+	return isTaskControlEvent(ev) && taskEventAction(ev) != "write"
 }
 
-func isTaskWaitControlEvent(events []SubagentEvent, idx int) bool {
-	if idx < 0 || idx >= len(events) {
-		return false
-	}
-	return isTaskControlEvent(events[idx]) && taskEventAction(events[idx]) == "wait"
+func isTaskWaitControlEvent(ev SubagentEvent) bool {
+	return isTaskControlEvent(ev) && taskEventAction(ev) == "wait"
 }
 
 func isSubagentTaskWriteEvent(events []SubagentEvent, idx int) bool {

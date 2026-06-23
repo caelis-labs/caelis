@@ -19,7 +19,7 @@ func renderACPToolLifecycleRows(blockID string, events []SubagentEvent, idx int,
 		if !shouldRenderToolEvent(ev) {
 			return nil, idx
 		}
-		return renderParticipantTurnToolRows(blockID, ev, width, ctx), idx
+		return renderACPStandardToolCollapsedRows(blockID, ev, "", width, ctx, ev.Err, ""), idx
 	}
 
 	end := idx
@@ -76,7 +76,7 @@ func renderACPToolLifecycleRows(blockID string, events []SubagentEvent, idx int,
 			return renderACPStandaloneFinalToolRows(blockID, final, width, ctx, opts), end
 		}
 		if shouldRenderToolEvent(ev) {
-			return renderParticipantTurnToolRows(blockID, ev, width, ctx), end
+			return renderACPStandardToolCollapsedRows(blockID, ev, callID, width, ctx, ev.Err, ""), end
 		}
 		return nil, end
 	}
@@ -94,7 +94,6 @@ func renderACPToolLifecycleRows(blockID string, events []SubagentEvent, idx int,
 	if opts.ToolPanelFullOutput != nil {
 		fullOutput = opts.ToolPanelFullOutput(start.CallID)
 	}
-	rows := renderParticipantTurnToolRows(blockID, start, width, ctx)
 	if opts.ToolOutputPanels {
 		panelText, panelErr := acpToolPanelText(preview, final, hasFinal)
 		if isSubagentTaskWriteEvent(events, idx) {
@@ -114,7 +113,7 @@ func renderACPToolLifecycleRows(blockID string, events []SubagentEvent, idx int,
 			return renderACPStandardToolCollapsedRows(blockID, toolLifecycleHeaderEvent(start, final, hasFinal), callID, width, ctx, panelErr, ""), end
 		}
 		if !shouldRenderACPToolPanel(panelText, panelErr) {
-			return renderParticipantTurnToolRows(blockID, toolLifecycleHeaderEvent(start, final, hasFinal), width, ctx), end
+			return renderACPStandardToolCollapsedRows(blockID, toolLifecycleHeaderEvent(start, final, hasFinal), callID, width, ctx, panelErr, ""), end
 		}
 		if !panelExpanded {
 			token := acpStandardCollapsedClickToken(callID, toolLifecycleHeaderEvent(start, final, hasFinal), panelText, panelErr)
@@ -122,6 +121,7 @@ func renderACPToolLifecycleRows(blockID string, events []SubagentEvent, idx int,
 		}
 		return renderACPStandardToolLifecycleRows(blockID, toolLifecycleHeaderEvent(start, final, hasFinal), callID, panelText, width, ctx, panelErr, hasFinal, fullOutput), end
 	}
+	rows := renderACPStandardToolCollapsedRows(blockID, start, callID, width, ctx, false, "")
 	if text := sanitizeRenderableText(preview); text != "" {
 		rows = append(rows, renderACPToolDetailRows(blockID, "· ", text, width, ctx, ctx.Theme.HelpHintTextStyle())...)
 	}
@@ -174,7 +174,7 @@ func renderACPStandaloneFinalToolRows(blockID string, ev SubagentEvent, width in
 		return renderACPStandardToolLifecycleRows(blockID, ev, ev.CallID, output, width, ctx, ev.Err, true, fullOutput)
 	}
 	if !renderableTextHasContent(output) || (!strings.Contains(output, "\n") && displayColumns(output) <= maxInt(24, width/2)) {
-		return renderParticipantTurnToolRows(blockID, ev, width, ctx)
+		return renderACPStandardToolCollapsedRows(blockID, ev, ev.CallID, width, ctx, ev.Err, "")
 	}
 	header := SubagentEvent{
 		Kind: SEToolCall,
@@ -182,7 +182,7 @@ func renderACPStandaloneFinalToolRows(blockID string, ev SubagentEvent, width in
 		Done: true,
 		Err:  ev.Err,
 	}
-	rows := renderParticipantTurnToolRows(blockID, header, width, ctx)
+	rows := renderACPStandardToolCollapsedRows(blockID, header, ev.CallID, width, ctx, ev.Err, "")
 	prefix := "✓ "
 	style := ctx.Theme.HelpHintTextStyle()
 	if ev.Err {
@@ -324,6 +324,9 @@ func taskControlLifecycleHeader(ev SubagentEvent) string {
 }
 
 func taskWriteLifecycleHeader(ev SubagentEvent, err bool) string {
+	if _, detail := splitTaskAction(ev.Args); detail != "" {
+		return standardVerbLifecycleHeader("Write", detail, err)
+	}
 	handle := taskHandleDisplay(ev.TaskID)
 	input := normalizeTaskWriteDisplayInput(ev.TaskInput)
 	if input == "" {

@@ -109,10 +109,6 @@ func alignParticipantNarrativeContinuationRows(rows []RenderedRow, continuationP
 	return out
 }
 
-func renderParticipantTurnToolRows(blockID string, ev SubagentEvent, width int, ctx BlockRenderContext) []RenderedRow {
-	return renderToolEventViewModelLines(blockID, buildToolEventViewModel(ev), width, ctx.Theme)
-}
-
 func collapseRepeatedNarrativeText(text string) string {
 	text = strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n")
 	if strings.TrimSpace(text) == "" {

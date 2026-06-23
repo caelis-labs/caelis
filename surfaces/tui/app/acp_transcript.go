@@ -81,7 +81,7 @@ func renderACPTranscriptRows(blockID string, events []SubagentEvent, status stri
 			hasContent = hasContent || len(ev.PlanEntries) > 0
 			lastGroup = acpTranscriptGroupPlan
 		case SEReasoning:
-			if taskRows, consumed, ok := renderACPTaskStageRows(blockID, visible, i, status, width, ctx, opts); ok {
+			if taskRows, consumed, ok := renderACPTaskStageRows(blockID, visible, i, width, ctx, opts); ok {
 				rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupTask, false)
 				rows = append(rows, taskRows...)
 				hasContent = true
@@ -97,7 +97,7 @@ func renderACPTranscriptRows(blockID string, events []SubagentEvent, status stri
 				i = consumed
 			}
 		case SEAssistant:
-			if taskRows, consumed, ok := renderACPTaskStageRows(blockID, visible, i, status, width, ctx, opts); ok {
+			if taskRows, consumed, ok := renderACPTaskStageRows(blockID, visible, i, width, ctx, opts); ok {
 				rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupTask, false)
 				rows = append(rows, taskRows...)
 				hasContent = true
@@ -112,7 +112,7 @@ func renderACPTranscriptRows(blockID string, events []SubagentEvent, status stri
 				lastGroup = acpTranscriptGroupNarrative
 			}
 		case SEToolCall:
-			if taskRows, consumed, ok := renderACPTaskStageRows(blockID, visible, i, status, width, ctx, opts); ok {
+			if taskRows, consumed, ok := renderACPTaskStageRows(blockID, visible, i, width, ctx, opts); ok {
 				rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupTask, false)
 				rows = append(rows, taskRows...)
 				hasContent = true

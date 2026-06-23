@@ -621,8 +621,11 @@ func TestLiveReasoningStaysExpandedBeforePendingTaskWait(t *testing.T) {
 	if !strings.Contains(joined, "\n  reasoning live line two") {
 		t.Fatalf("rendered rows = %q, want live reasoning body expanded before pending TASK wait", joined)
 	}
-	if !strings.Contains(joined, "▸ TASK Wait 5s") {
+	if !strings.Contains(joined, "• Wait 5s") {
 		t.Fatalf("rendered rows = %q, want pending TASK wait still visible", joined)
+	}
+	if strings.Contains(joined, "▸ TASK") {
+		t.Fatalf("rendered rows = %q, pending TASK wait should use unified tool UI", joined)
 	}
 }
 
