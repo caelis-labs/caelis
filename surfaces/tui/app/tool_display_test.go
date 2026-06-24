@@ -54,6 +54,65 @@ func TestToolTitleDisplayArgsCompactsMutationPaths(t *testing.T) {
 	}
 }
 
+func TestToolTitleDisplayArgsSearchPathScopesAndSlashQueries(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		title string
+		want  string
+	}{
+		{name: "current directory", title: "Search .", want: ""},
+		{name: "parent directory", title: "Search ..", want: ""},
+		{name: "explicit relative directory", title: "Search ./internal/foo", want: ""},
+		{name: "explicit parent directory", title: "Search ../storage", want: ""},
+		{name: "windows explicit relative directory", title: `Search .\internal\foo`, want: ""},
+		{name: "absolute path", title: "Search /home/xueyongzhi/WorkDir/ctstackcmp/storage", want: ""},
+		{name: "windows absolute path", title: `Search D:\repo\storage`, want: ""},
+		{name: "scoped relative query", title: "Search ./internal/foo Needle", want: `"./internal/foo Needle"`},
+		{name: "scoped absolute query", title: "Search /tmp/foo Needle", want: `"/tmp/foo Needle"`},
+		{name: "slash query", title: "Search foo/bar", want: `"foo/bar"`},
+		{name: "relative path looking query", title: "Search internal/foo", want: `"internal/foo"`},
+		{name: "web-style query", title: "Search site:example.com/docs", want: `"site:example.com/docs"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := toolTitleDisplayArgs("SEARCH", "search", tt.title); got != tt.want {
+				t.Fatalf("toolTitleDisplayArgs() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSearchTitleDetailIsPathOnly(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		detail string
+		want   bool
+	}{
+		{detail: ".", want: true},
+		{detail: "..", want: true},
+		{detail: "./internal/foo", want: true},
+		{detail: "../storage", want: true},
+		{detail: `.\internal\foo`, want: true},
+		{detail: "/abs/path", want: true},
+		{detail: `D:\repo\storage`, want: true},
+		{detail: "./internal/foo Needle", want: false},
+		{detail: "/tmp/foo Needle", want: false},
+		{detail: "foo/bar", want: false},
+		{detail: "internal/foo", want: false},
+		{detail: "site:example.com/docs", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.detail, func(t *testing.T) {
+			if got := searchTitleDetailIsPathOnly(tt.detail); got != tt.want {
+				t.Fatalf("searchTitleDetailIsPathOnly() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestToolDisplayResultHeaderCompactsWindowsReadPath(t *testing.T) {
 	t.Parallel()
 

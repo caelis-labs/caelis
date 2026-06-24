@@ -9,6 +9,8 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/charmbracelet/colorprofile"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestGatewayCompletedExplorationToolDefaultsCollapsedWithoutHeaderClick(t *testing.T) {
@@ -1103,6 +1105,68 @@ func TestExplorationToolDetailDoesNotDuplicateFailedStatus(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := explorationToolDetail(tt.ev); got != tt.want {
 				t.Fatalf("explorationToolDetail() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExplorationSearchTitlePathOnlyFallsBackToOutput(t *testing.T) {
+	args := toolTitleDisplayArgs("SEARCH", "search", "Search .")
+	if args != "" {
+		t.Fatalf("toolTitleDisplayArgs(Search .) = %q, want no query detail", args)
+	}
+	ev := SubagentEvent{
+		Name:   "SEARCH",
+		Args:   args,
+		Output: "30 hits in 3 files",
+		Done:   true,
+	}
+	if got := explorationToolDetail(ev); got != "30 hits in 3 files" {
+		t.Fatalf("explorationToolDetail() = %q, want output summary", got)
+	}
+}
+
+func TestExplorationDetailStylesNumbers(t *testing.T) {
+	model := NewModel(Config{ColorProfile: colorprofile.TrueColor})
+	ctx := BlockRenderContext{Width: 96, TermWidth: 96, Theme: model.theme}
+	detail := `file2.go "Needle" 30 hits in 3 files failed`
+	styled := styleExplorationDetail(detail, ctx)
+	if got := ansi.Strip(styled); got != detail {
+		t.Fatalf("strip(styled) = %q, want %q\nstyled=%q", got, detail, styled)
+	}
+	if !strings.Contains(styled, explorationNumberStyle(ctx).Render("30")) ||
+		!strings.Contains(styled, explorationNumberStyle(ctx).Render("3")) {
+		t.Fatalf("styled detail = %q, want highlighted numeric fragments", styled)
+	}
+	if strings.Contains(styled, explorationNumberStyle(ctx).Render("2")) {
+		t.Fatalf("styled detail = %q, filename digit should not be highlighted", styled)
+	}
+	if !strings.Contains(styled, model.theme.ToolErrorStyle().Render("failed")) {
+		t.Fatalf("styled detail = %q, want failed token styling preserved", styled)
+	}
+}
+
+func TestExplorationNumberIndexTargetsSummaryUnits(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		want string
+	}{
+		{name: "hits", text: `"Needle" 30 hits`, want: "30"},
+		{name: "files", text: `in 3 files`, want: "3"},
+		{name: "filename digit ignored", text: `file2.go`, want: ""},
+		{name: "quoted digit ignored", text: `"S3 upload"`, want: ""},
+		{name: "version digit ignored", text: `v1.2 release`, want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			idx, size := nextExplorationNumberIndex(tt.text)
+			got := ""
+			if idx >= 0 {
+				got = tt.text[idx : idx+size]
+			}
+			if got != tt.want {
+				t.Fatalf("nextExplorationNumberIndex() = %q, want %q", got, tt.want)
 			}
 		})
 	}

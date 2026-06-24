@@ -239,13 +239,7 @@ func toolTitleDisplayArgs(name string, kind string, title string) string {
 	case "READ", "LIST":
 		return prefixedTitleDetail(title, "Read", "List")
 	case "SEARCH", "RG", "FIND":
-		if detail := prefixedSearchTitleDetail(title); detail != "" {
-			return fmt.Sprintf("%q", detail)
-		}
-		if genericSearchTitle(title) {
-			return ""
-		}
-		return title
+		return searchTitleDisplayArgs(title)
 	case "WRITE", "PATCH":
 		return compactMutationTitleDetail(prefixedTitleDetail(title, "Write", "Edit", "Patch", "Delete", "Move"))
 	}
@@ -255,12 +249,7 @@ func toolTitleDisplayArgs(name string, kind string, title string) string {
 	case "read":
 		return prefixedTitleDetail(title, "Read")
 	case "search":
-		if detail := prefixedSearchTitleDetail(title); detail != "" {
-			return fmt.Sprintf("%q", detail)
-		}
-		if genericSearchTitle(title) {
-			return ""
-		}
+		return searchTitleDisplayArgs(title)
 	case "fetch":
 		if detail := prefixedTitleDetail(title, "Fetch", "Searching for:"); detail != "" {
 			return fmt.Sprintf("%q", detail)
@@ -314,12 +303,45 @@ func compactMutationTitleDetail(detail string) string {
 	return base + rest
 }
 
-func prefixedSearchTitleDetail(title string) string {
-	detail := prefixedTitleDetail(title, "Search", "Find", "Searching for:", "Finding:")
-	if genericSearchTitle(detail) {
+func searchTitleDisplayArgs(title string) string {
+	title = strings.TrimSpace(title)
+	if title == "" || genericSearchTitle(title) {
 		return ""
 	}
-	return detail
+	detail := prefixedTitleDetail(title, "Search", "Find", "Searching for:", "Finding:")
+	if detail == "" {
+		return title
+	}
+	if genericSearchTitle(detail) || searchTitleDetailIsPathOnly(detail) {
+		return ""
+	}
+	return fmt.Sprintf("%q", detail)
+}
+
+func searchTitleDetailIsPathOnly(detail string) bool {
+	detail = strings.TrimSpace(detail)
+	if detail == "" {
+		return false
+	}
+	if detail == "." || detail == ".." {
+		return true
+	}
+	pathPart, rest, ok, _ := splitLeadingPathHeaderParts(detail)
+	return ok && strings.TrimSpace(rest) == "" && searchTitlePathPartIsScope(pathPart)
+}
+
+func searchTitlePathPartIsScope(pathPart string) bool {
+	pathPart = strings.TrimSpace(pathPart)
+	if pathPart == "" {
+		return false
+	}
+	if isAbsoluteDisplayPath(pathPart) {
+		return true
+	}
+	return strings.HasPrefix(pathPart, "./") ||
+		strings.HasPrefix(pathPart, "../") ||
+		strings.HasPrefix(pathPart, ".\\") ||
+		strings.HasPrefix(pathPart, "..\\")
 }
 
 func genericSearchTitle(title string) bool {
