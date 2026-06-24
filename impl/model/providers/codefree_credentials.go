@@ -14,29 +14,18 @@ import (
 )
 
 type codeFreeCachedCredentials struct {
-	AccessToken               string `json:"access_token,omitempty"`
-	RefreshToken              string `json:"refresh_token,omitempty"`
-	UserID                    string `json:"id_token"`
-	APIKey                    string `json:"apikey"`
-	BaseURL                   string `json:"baseUrl,omitempty"`
-	TokenType                 string `json:"token_type,omitempty"`
-	ExpiresIn                 int64  `json:"expires_in,omitempty"`
-	RefreshTokenExpiresIn     int64  `json:"refresh_token_expires_in,omitempty"`
-	ObtainedAtUnixMilli       int64  `json:"obtained_at_unix_ms,omitempty"`
-	ExpiresAtUnixMilli        int64  `json:"expires_at_unix_ms,omitempty"`
-	RefreshExpiresAtUnixMilli int64  `json:"refresh_expires_at_unix_ms,omitempty"`
+	EncryptedAPIKey string `json:"encryptedApiKey"`
+	UserID          string `json:"userId"`
+	SessionID       string `json:"sessionId"`
+	BaseURLSnapshot string `json:"baseUrlSnapshot,omitempty"`
 }
 
 type codeFreeCredentials struct {
-	UserID           string
-	APIKey           string
-	AccessToken      string
-	RefreshToken     string
-	BaseURL          string
-	TokenType        string
-	ExpiresAt        time.Time
-	RefreshExpiresAt time.Time
-	CredentialPath   string
+	UserID         string
+	APIKey         string
+	SessionID      string
+	BaseURL        string
+	CredentialPath string
 }
 
 type codeFreeStoredCredentials struct {
@@ -47,21 +36,13 @@ type codeFreeStoredCredentials struct {
 
 var codeFreeCredentialMu sync.Mutex
 
-func loadCodeFreeCredentials(ctx context.Context) (codeFreeCredentials, error) {
+func loadCodeFreeCredentials(_ context.Context, baseURL string) (codeFreeCredentials, error) {
 	codeFreeCredentialMu.Lock()
 	defer codeFreeCredentialMu.Unlock()
 
-	stored, err := readCodeFreeStoredCredentials()
+	stored, err := loadCodeFreeStoredCredentialsLocked(baseURL, "")
 	if err != nil {
 		return codeFreeCredentials{}, err
-	}
-	if needsCodeFreeRefresh(stored.Cached, stored.ModTime) && strings.TrimSpace(stored.Cached.RefreshToken) != "" {
-		refreshed, err := refreshCodeFreeStoredCredentials(ctx, stored)
-		if err == nil {
-			stored = refreshed
-		} else if !canUseCodeFreeStoredCredentials(stored.Cached) {
-			return codeFreeCredentials{}, err
-		}
 	}
 	return finalizeCodeFreeCredentials(stored)
 }
@@ -111,18 +92,6 @@ func trimPKCS7Padding(buf []byte, blockSize int) ([]byte, error) {
 	return buf[:len(buf)-pad], nil
 }
 
-func resolveCodeFreeCredentialPath() (string, error) {
-	path := strings.TrimSpace(os.Getenv(codeFreeCredsPathEnv))
-	if path != "" {
-		return path, nil
-	}
-	primary, err := resolveCodeFreeDefaultCredentialPath()
-	if err != nil {
-		return "", err
-	}
-	return primary, nil
-}
-
 func resolveCodeFreeDefaultCredentialPath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -132,37 +101,154 @@ func resolveCodeFreeDefaultCredentialPath() (string, error) {
 	return primary, nil
 }
 
-func readCodeFreeStoredCredentials() (codeFreeStoredCredentials, error) {
-	path, err := resolveCodeFreeCredentialPath()
+func loadCodeFreeStoredCredentialsLocked(baseURL string, credentialPath string) (codeFreeStoredCredentials, error) {
+	path, explicit, err := resolveCodeFreeCredentialPathForLoad(credentialPath)
 	if err != nil {
 		return codeFreeStoredCredentials{}, err
 	}
-	return readCodeFreeStoredCredentialsAtPath(path)
+	stored, readErr := readCodeFreeStoredCredentialsAtPath(path)
+	if readErr == nil {
+		if err := validateCodeFreeStoredCredentials(stored, baseURL); err == nil {
+			return stored, nil
+		} else if explicit {
+			return codeFreeStoredCredentials{}, err
+		}
+	}
+	if explicit {
+		return codeFreeStoredCredentials{}, readErr
+	}
+	imported, importErr := importCodeFreeLocalCredentialsLocked(baseURL, path)
+	if importErr == nil {
+		return imported, nil
+	}
+	if readErr != nil {
+		return codeFreeStoredCredentials{}, readErr
+	}
+	return codeFreeStoredCredentials{}, importErr
+}
+
+func resolveCodeFreeCredentialPathForLoad(credentialPath string) (string, bool, error) {
+	if path := strings.TrimSpace(credentialPath); path != "" {
+		return path, true, nil
+	}
+	if path := strings.TrimSpace(os.Getenv(codeFreeCredsPathEnv)); path != "" {
+		return path, true, nil
+	}
+	path, err := resolveCodeFreeDefaultCredentialPath()
+	return path, false, err
 }
 
 func canUseCodeFreeStoredCredentials(cached codeFreeCachedCredentials) bool {
-	return strings.TrimSpace(cached.UserID) != "" && strings.TrimSpace(cached.APIKey) != ""
+	return strings.TrimSpace(cached.UserID) != "" &&
+		strings.TrimSpace(cached.EncryptedAPIKey) != "" &&
+		strings.TrimSpace(cached.SessionID) != ""
+}
+
+func validateCodeFreeStoredCredentials(stored codeFreeStoredCredentials, baseURL string) error {
+	if !canUseCodeFreeStoredCredentials(stored.Cached) {
+		return fmt.Errorf("providers: codefree credentials %q are incomplete", stored.Path)
+	}
+	if !codeFreeCredentialMatchesBaseURL(stored.Cached, baseURL) {
+		return fmt.Errorf("providers: codefree credentials %q were issued for %q, not %q", stored.Path, codeFreeCredentialBaseURL(stored.Cached), normalizeCodeFreeBaseURL(baseURL))
+	}
+	if _, err := decryptCodeFreeAPIKey(stored.Cached.EncryptedAPIKey); err != nil {
+		return err
+	}
+	return nil
+}
+
+func codeFreeCredentialMatchesBaseURL(cached codeFreeCachedCredentials, baseURL string) bool {
+	if strings.TrimSpace(cached.BaseURLSnapshot) == "" {
+		return true
+	}
+	requested := normalizeCodeFreeBaseURL(baseURL)
+	if requested == "" {
+		requested = codeFreeDefaultBaseURL
+	}
+	return normalizeCodeFreeBaseURL(codeFreeCredentialBaseURL(cached)) == requested
+}
+
+func codeFreeCredentialBaseURL(cached codeFreeCachedCredentials) string {
+	return codeFreeFirstNonEmpty(cached.BaseURLSnapshot, codeFreeDefaultBaseURL)
+}
+
+func importCodeFreeLocalCredentialsLocked(baseURL string, dest string) (codeFreeStoredCredentials, error) {
+	var lastErr error
+	for _, source := range codeFreeLocalCredentialPaths() {
+		if source == "" || source == dest {
+			continue
+		}
+		stored, err := readCodeFreeStoredCredentialsAtPath(source)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if err := validateCodeFreeStoredCredentials(stored, baseURL); err != nil {
+			lastErr = err
+			continue
+		}
+		cached := normalizeCodeFreeCachedCredentials(stored.Cached)
+		if cached.BaseURLSnapshot == "" {
+			cached.BaseURLSnapshot = normalizeCodeFreeBaseURL(baseURL)
+		}
+		if cached.BaseURLSnapshot == "" {
+			cached.BaseURLSnapshot = codeFreeDefaultBaseURL
+		}
+		if err := saveCodeFreeStoredCredentials(dest, cached); err != nil {
+			return codeFreeStoredCredentials{}, err
+		}
+		return readCodeFreeStoredCredentialsAtPath(dest)
+	}
+	if lastErr != nil {
+		return codeFreeStoredCredentials{}, lastErr
+	}
+	return codeFreeStoredCredentials{}, fmt.Errorf("providers: no usable codefree-o credentials found")
+}
+
+func normalizeCodeFreeCachedCredentials(cached codeFreeCachedCredentials) codeFreeCachedCredentials {
+	baseURLSnapshot := strings.TrimSpace(cached.BaseURLSnapshot)
+	if baseURLSnapshot != "" {
+		baseURLSnapshot = normalizeCodeFreeBaseURL(baseURLSnapshot)
+	}
+	return codeFreeCachedCredentials{
+		EncryptedAPIKey: strings.TrimSpace(cached.EncryptedAPIKey),
+		UserID:          strings.TrimSpace(cached.UserID),
+		SessionID:       strings.TrimSpace(cached.SessionID),
+		BaseURLSnapshot: baseURLSnapshot,
+	}
+}
+
+func codeFreeLocalCredentialPaths() []string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	return []string{
+		filepath.Join(home, ".codefree-o", ".local", "share", codeFreeDefaultCredentialFile),
+		filepath.Join(home, ".local", "share", "opencode", codeFreeDefaultCredentialFile),
+		filepath.Join(home, ".codefree", "common", "agent", "core", ".codefree-o", codeFreeDefaultCredentialFile),
+	}
 }
 
 func finalizeCodeFreeCredentials(stored codeFreeStoredCredentials) (codeFreeCredentials, error) {
 	userID := strings.TrimSpace(stored.Cached.UserID)
 	if userID == "" {
-		return codeFreeCredentials{}, fmt.Errorf("providers: codefree credentials missing id_token/userId")
+		return codeFreeCredentials{}, fmt.Errorf("providers: codefree credentials missing userId")
 	}
-	apiKey, err := decryptCodeFreeAPIKey(stored.Cached.APIKey)
+	sessionID := strings.TrimSpace(stored.Cached.SessionID)
+	if sessionID == "" {
+		return codeFreeCredentials{}, fmt.Errorf("providers: codefree credentials missing sessionId")
+	}
+	apiKey, err := decryptCodeFreeAPIKey(stored.Cached.EncryptedAPIKey)
 	if err != nil {
 		return codeFreeCredentials{}, err
 	}
 	return codeFreeCredentials{
-		UserID:           userID,
-		APIKey:           apiKey,
-		AccessToken:      strings.TrimSpace(stored.Cached.AccessToken),
-		RefreshToken:     strings.TrimSpace(stored.Cached.RefreshToken),
-		BaseURL:          codeFreeFirstNonEmpty(strings.TrimSpace(stored.Cached.BaseURL), codeFreeDefaultBaseURL),
-		TokenType:        strings.TrimSpace(stored.Cached.TokenType),
-		ExpiresAt:        codeFreeExpiresAt(stored.Cached, stored.ModTime),
-		RefreshExpiresAt: codeFreeRefreshExpiresAt(stored.Cached, stored.ModTime),
-		CredentialPath:   stored.Path,
+		UserID:         userID,
+		APIKey:         apiKey,
+		SessionID:      sessionID,
+		BaseURL:        codeFreeCredentialBaseURL(stored.Cached),
+		CredentialPath: stored.Path,
 	}, nil
 }
 
@@ -173,41 +259,4 @@ func codeFreeFirstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
-}
-
-func codeFreeExpiresAt(cached codeFreeCachedCredentials, modTime time.Time) time.Time {
-	if cached.ExpiresAtUnixMilli > 0 {
-		return time.UnixMilli(cached.ExpiresAtUnixMilli)
-	}
-	if cached.ObtainedAtUnixMilli > 0 && cached.ExpiresIn > 0 {
-		return time.UnixMilli(cached.ObtainedAtUnixMilli).Add(time.Duration(cached.ExpiresIn) * time.Second)
-	}
-	if !modTime.IsZero() && cached.ExpiresIn > 0 {
-		return modTime.Add(time.Duration(cached.ExpiresIn) * time.Second)
-	}
-	return time.Time{}
-}
-
-func codeFreeRefreshExpiresAt(cached codeFreeCachedCredentials, modTime time.Time) time.Time {
-	if cached.RefreshExpiresAtUnixMilli > 0 {
-		return time.UnixMilli(cached.RefreshExpiresAtUnixMilli)
-	}
-	if cached.ObtainedAtUnixMilli > 0 && cached.RefreshTokenExpiresIn > 0 {
-		return time.UnixMilli(cached.ObtainedAtUnixMilli).Add(time.Duration(cached.RefreshTokenExpiresIn) * time.Second)
-	}
-	if !modTime.IsZero() && cached.RefreshTokenExpiresIn > 0 {
-		return modTime.Add(time.Duration(cached.RefreshTokenExpiresIn) * time.Second)
-	}
-	return time.Time{}
-}
-
-func needsCodeFreeRefresh(cached codeFreeCachedCredentials, modTime time.Time) bool {
-	if strings.TrimSpace(cached.RefreshToken) == "" {
-		return false
-	}
-	if strings.TrimSpace(cached.UserID) == "" || strings.TrimSpace(cached.APIKey) == "" {
-		return true
-	}
-	expiresAt := codeFreeExpiresAt(cached, modTime)
-	return !expiresAt.IsZero() && !time.Now().Before(expiresAt)
 }

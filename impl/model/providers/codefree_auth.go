@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -44,15 +43,6 @@ type CodeFreeLoginOptions struct {
 	NotifyAuthURL    func(string)
 }
 
-type CodeFreeRefreshOptions struct {
-	BaseURL          string
-	HTTPClient       *http.Client
-	CredentialPath   string
-	ClientID         string
-	ClientSecret     string
-	ClientAuthMethod CodeFreeClientAuthMethod
-}
-
 type CodeFreeEnsureAuthOptions struct {
 	BaseURL          string
 	HTTPClient       *http.Client
@@ -68,12 +58,9 @@ type CodeFreeEnsureAuthOptions struct {
 }
 
 type CodeFreeAuthResult struct {
-	CredentialPath   string
-	BaseURL          string
-	UserID           string
-	ExpiresAt        time.Time
-	RefreshExpiresAt time.Time
-	HasRefreshToken  bool
+	CredentialPath string
+	BaseURL        string
+	UserID         string
 }
 
 type codeFreeOAuthTokenResponse struct {
@@ -115,12 +102,13 @@ func (e *codeFreeTokenEndpointError) Error() string {
 }
 
 type codeFreeOAuthConfig struct {
-	BaseURL          string
-	HTTPClient       *http.Client
-	CredentialPath   string
-	ClientID         string
-	ClientSecret     string
-	ClientAuthMethod CodeFreeClientAuthMethod
+	BaseURL                string
+	HTTPClient             *http.Client
+	CredentialPath         string
+	CredentialPathExplicit bool
+	ClientID               string
+	ClientSecret           string
+	ClientAuthMethod       CodeFreeClientAuthMethod
 }
 
 type codeFreeOAuthCallback struct {
@@ -168,7 +156,11 @@ func CodeFreeEnsureAuth(ctx context.Context, opts CodeFreeEnsureAuthOptions) (Co
 func loadExistingCodeFreeAuthResult(cfg codeFreeOAuthConfig) (CodeFreeAuthResult, bool) {
 	codeFreeCredentialMu.Lock()
 	defer codeFreeCredentialMu.Unlock()
-	stored, err := readCodeFreeStoredCredentialsAtPath(cfg.CredentialPath)
+	credentialPath := cfg.CredentialPath
+	if !cfg.CredentialPathExplicit {
+		credentialPath = ""
+	}
+	stored, err := loadCodeFreeStoredCredentialsLocked(cfg.BaseURL, credentialPath)
 	if err != nil {
 		return CodeFreeAuthResult{}, false
 	}
@@ -286,81 +278,27 @@ func CodeFreeLogin(ctx context.Context, opts CodeFreeLoginOptions) (CodeFreeAuth
 	}
 	codeFreeCredentialMu.Lock()
 	defer codeFreeCredentialMu.Unlock()
-	stored, err := persistCodeFreeTokenSet(ctx, cfg, codeFreeCachedCredentials{}, tokens)
+	stored, err := persistCodeFreeTokenSet(ctx, cfg, tokens)
 	if err != nil {
 		return CodeFreeAuthResult{}, err
 	}
 	return toCodeFreeAuthResult(stored), nil
 }
 
-func CodeFreeRefresh(ctx context.Context, opts CodeFreeRefreshOptions) (CodeFreeAuthResult, error) {
-	cfg, err := resolveCodeFreeOAuthConfig(opts.BaseURL, opts.HTTPClient, opts.CredentialPath, opts.ClientID, opts.ClientSecret, opts.ClientAuthMethod)
-	if err != nil {
-		return CodeFreeAuthResult{}, err
-	}
-	codeFreeCredentialMu.Lock()
-	defer codeFreeCredentialMu.Unlock()
-
-	stored, err := readCodeFreeStoredCredentialsAtPath(cfg.CredentialPath)
-	if err != nil {
-		return CodeFreeAuthResult{}, err
-	}
-	if strings.TrimSpace(stored.Cached.RefreshToken) == "" {
-		return CodeFreeAuthResult{}, fmt.Errorf("providers: codefree credentials %q do not contain refresh_token; relogin is required once to enable refresh", stored.Path)
-	}
-	refreshed, err := refreshCodeFreeStoredCredentialsWithConfig(ctx, cfg, stored)
-	if err != nil {
-		return CodeFreeAuthResult{}, err
-	}
-	return toCodeFreeAuthResult(refreshed), nil
-}
-
-func refreshCodeFreeStoredCredentials(ctx context.Context, stored codeFreeStoredCredentials) (codeFreeStoredCredentials, error) {
-	cfg, err := resolveCodeFreeOAuthConfig(codeFreeFirstNonEmpty(stored.Cached.BaseURL, codeFreeDefaultBaseURL), nil, stored.Path, "", "", "")
-	if err != nil {
-		return codeFreeStoredCredentials{}, err
-	}
-	return refreshCodeFreeStoredCredentialsWithConfig(ctx, cfg, stored)
-}
-
-func refreshCodeFreeStoredCredentialsWithConfig(ctx context.Context, cfg codeFreeOAuthConfig, stored codeFreeStoredCredentials) (codeFreeStoredCredentials, error) {
-	refreshToken := strings.TrimSpace(stored.Cached.RefreshToken)
-	if refreshToken == "" {
-		return stored, fmt.Errorf("providers: codefree credentials %q do not contain refresh_token", stored.Path)
-	}
-	tokens, err := refreshCodeFreeToken(ctx, cfg, refreshToken)
-	if err != nil {
-		var endpointErr *codeFreeTokenEndpointError
-		if ok := asCodeFreeTokenEndpointError(err, &endpointErr); ok && strings.EqualFold(strings.TrimSpace(endpointErr.Code), "need_not_refresh_token") {
-			if expiresAt := codeFreeExpiresAt(stored.Cached, stored.ModTime); expiresAt.IsZero() || time.Now().Before(expiresAt) {
-				return stored, nil
-			}
-		}
-		return stored, err
-	}
-	if strings.TrimSpace(tokens.RefreshToken) == "" {
-		tokens.RefreshToken = refreshToken
-	}
-	return persistCodeFreeTokenSet(ctx, cfg, stored.Cached, tokens)
-}
-
-func persistCodeFreeTokenSet(ctx context.Context, cfg codeFreeOAuthConfig, previous codeFreeCachedCredentials, tokens codeFreeOAuthTokenResponse) (codeFreeStoredCredentials, error) {
+func persistCodeFreeTokenSet(ctx context.Context, cfg codeFreeOAuthConfig, tokens codeFreeOAuthTokenResponse) (codeFreeStoredCredentials, error) {
 	userID := strings.TrimSpace(tokens.UserID)
 	if userID == "" {
-		userID = strings.TrimSpace(previous.UserID)
-	}
-	if userID == "" {
 		if strings.TrimSpace(tokens.RawDebug) != "" {
-			return codeFreeStoredCredentials{}, fmt.Errorf("providers: codefree oauth response missing id_token/userId; token response=%s", tokens.RawDebug)
+			return codeFreeStoredCredentials{}, fmt.Errorf("providers: codefree oauth response missing uid/userId; token response=%s", tokens.RawDebug)
 		}
-		return codeFreeStoredCredentials{}, fmt.Errorf("providers: codefree oauth response missing id_token/userId")
+		return codeFreeStoredCredentials{}, fmt.Errorf("providers: codefree oauth response missing uid/userId")
 	}
-	sessionID := strings.TrimSpace(codeFreeFirstNonEmpty(tokens.SessionID, tokens.AccessToken))
+	sessionID := strings.TrimSpace(tokens.SessionID)
 	if sessionID == "" {
-		sessionID = strings.TrimSpace(previous.AccessToken)
-	}
-	if sessionID == "" {
-		return codeFreeStoredCredentials{}, fmt.Errorf("providers: codefree oauth response missing session token")
+		if strings.TrimSpace(tokens.RawDebug) != "" {
+			return codeFreeStoredCredentials{}, fmt.Errorf("providers: codefree oauth response missing ori_session_id; token response=%s", tokens.RawDebug)
+		}
+		return codeFreeStoredCredentials{}, fmt.Errorf("providers: codefree oauth response missing ori_session_id")
 	}
 	encryptedAPIKey, err := fetchCodeFreeEncryptedAPIKey(ctx, cfg, sessionID, userID)
 	if err != nil {
@@ -369,26 +307,12 @@ func persistCodeFreeTokenSet(ctx context.Context, cfg codeFreeOAuthConfig, previ
 		}
 		return codeFreeStoredCredentials{}, err
 	}
-	now := time.Now()
-	cached := previous
-	cached.AccessToken = sessionID
-	if refreshToken := strings.TrimSpace(tokens.RefreshToken); refreshToken != "" {
-		cached.RefreshToken = refreshToken
+	cached := codeFreeCachedCredentials{
+		EncryptedAPIKey: encryptedAPIKey,
+		UserID:          userID,
+		SessionID:       sessionID,
+		BaseURLSnapshot: cfg.BaseURL,
 	}
-	cached.UserID = userID
-	cached.APIKey = encryptedAPIKey
-	cached.BaseURL = cfg.BaseURL
-	cached.TokenType = codeFreeFirstNonEmpty(tokens.TokenType, cached.TokenType, "bearer")
-	if tokens.ExpiresIn > 0 {
-		cached.ExpiresIn = tokens.ExpiresIn
-		cached.ExpiresAtUnixMilli = now.Add(time.Duration(tokens.ExpiresIn) * time.Second).UnixMilli()
-	}
-	if tokens.RefreshTokenExpiresIn > 0 {
-		cached.RefreshTokenExpiresIn = tokens.RefreshTokenExpiresIn
-		cached.RefreshExpiresAtUnixMilli = now.Add(time.Duration(tokens.RefreshTokenExpiresIn) * time.Second).UnixMilli()
-	}
-	cached.ObtainedAtUnixMilli = now.UnixMilli()
-
 	if err := saveCodeFreeStoredCredentials(cfg.CredentialPath, cached); err != nil {
 		return codeFreeStoredCredentials{}, err
 	}
@@ -439,14 +363,6 @@ func exchangeCodeFreeAuthorizationCode(ctx context.Context, cfg codeFreeOAuthCon
 	return doCodeFreeAuthCodeTokenRequest(ctx, cfg, values)
 }
 
-func refreshCodeFreeToken(ctx context.Context, cfg codeFreeOAuthConfig, refreshToken string) (codeFreeOAuthTokenResponse, error) {
-	values := url.Values{}
-	values.Set("refresh_token", strings.TrimSpace(refreshToken))
-	values.Set("client_id", cfg.ClientID)
-	values.Set("grant_type", "refresh_token")
-	return doCodeFreeTokenRequest(ctx, cfg, values)
-}
-
 func doCodeFreeAuthCodeTokenRequest(ctx context.Context, cfg codeFreeOAuthConfig, values url.Values) (codeFreeOAuthTokenResponse, error) {
 	endpoint := codeFreeTokenEndpoint(cfg.BaseURL)
 	if encoded := values.Encode(); encoded != "" {
@@ -456,41 +372,6 @@ func doCodeFreeAuthCodeTokenRequest(ctx context.Context, cfg codeFreeOAuthConfig
 	if err != nil {
 		return codeFreeOAuthTokenResponse{}, err
 	}
-	resp, err := coalesceCodeFreeControlHTTPClient(cfg.HTTPClient).Do(req)
-	if err != nil {
-		return codeFreeOAuthTokenResponse{}, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 300 {
-		return codeFreeOAuthTokenResponse{}, readCodeFreeTokenEndpointError(resp)
-	}
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return codeFreeOAuthTokenResponse{}, err
-	}
-	payload, err := decodeCodeFreeTokenResponse(raw)
-	if err != nil {
-		return codeFreeOAuthTokenResponse{}, fmt.Errorf("%w; token response=%s", err, redactCodeFreeTokenDebug(raw))
-	}
-	payload.RawDebug = redactCodeFreeTokenDebug(raw)
-	return payload, nil
-}
-
-func doCodeFreeTokenRequest(ctx context.Context, cfg codeFreeOAuthConfig, values url.Values) (codeFreeOAuthTokenResponse, error) {
-	headers := http.Header{}
-	headers.Set("Content-Type", "application/x-www-form-urlencoded")
-	switch cfg.ClientAuthMethod {
-	case CodeFreeClientAuthBasic:
-		basicToken := base64.StdEncoding.EncodeToString([]byte(cfg.ClientID + ":" + cfg.ClientSecret))
-		headers.Set("Authorization", "Basic "+basicToken)
-	case CodeFreeClientAuthBody:
-		values.Set("client_secret", cfg.ClientSecret)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, codeFreeTokenEndpoint(cfg.BaseURL), strings.NewReader(values.Encode()))
-	if err != nil {
-		return codeFreeOAuthTokenResponse{}, err
-	}
-	req.Header = headers
 	resp, err := coalesceCodeFreeControlHTTPClient(cfg.HTTPClient).Do(req)
 	if err != nil {
 		return codeFreeOAuthTokenResponse{}, err
@@ -533,13 +414,6 @@ func readCodeFreeTokenEndpointError(resp *http.Response) error {
 	return fmt.Errorf("providers: codefree token endpoint http status %d body=%s", resp.StatusCode, body)
 }
 
-func asCodeFreeTokenEndpointError(err error, target **codeFreeTokenEndpointError) bool {
-	if err == nil || target == nil {
-		return false
-	}
-	return errors.As(err, target)
-}
-
 func decodeCodeFreeTokenResponse(raw []byte) (codeFreeOAuthTokenResponse, error) {
 	body := strings.TrimSpace(string(raw))
 	if body == "" {
@@ -556,7 +430,12 @@ func decodeCodeFreeTokenResponse(raw []byte) (codeFreeOAuthTokenResponse, error)
 	if err != nil {
 		return codeFreeOAuthTokenResponse{}, err
 	}
-	if values.Get("access_token") == "" && values.Get("id_token") == "" && values.Get("refresh_token") == "" {
+	if values.Get("ori_session_id") == "" &&
+		values.Get("session_id") == "" &&
+		values.Get("uid") == "" &&
+		values.Get("userId") == "" &&
+		values.Get("user_id") == "" &&
+		values.Get("id_token") == "" {
 		return codeFreeOAuthTokenResponse{}, fmt.Errorf("providers: unsupported codefree token response format")
 	}
 	payload.AccessToken = strings.TrimSpace(values.Get("access_token"))
@@ -650,21 +529,30 @@ func extractCodeFreeJSONTokenField(raw []byte, key string) string {
 
 func resolveCodeFreeOAuthConfig(baseURL string, httpClient *http.Client, credentialPath string, clientID string, clientSecret string, authMethod CodeFreeClientAuthMethod) (codeFreeOAuthConfig, error) {
 	path := strings.TrimSpace(credentialPath)
+	pathExplicit := false
 	if path == "" {
-		var err error
-		path, err = resolveCodeFreeCredentialPath()
-		if err != nil {
-			return codeFreeOAuthConfig{}, err
+		if envPath := strings.TrimSpace(os.Getenv(codeFreeCredsPathEnv)); envPath != "" {
+			path = envPath
+			pathExplicit = true
+		} else {
+			var err error
+			path, err = resolveCodeFreeDefaultCredentialPath()
+			if err != nil {
+				return codeFreeOAuthConfig{}, err
+			}
 		}
+	} else {
+		pathExplicit = true
 	}
 	resolvedClientSecret := strings.TrimSpace(codeFreeFirstNonEmpty(clientSecret, os.Getenv(codeFreeClientSecretEnv)))
 	cfg := codeFreeOAuthConfig{
-		BaseURL:          normalizeCodeFreeBaseURL(baseURL),
-		HTTPClient:       httpClient,
-		CredentialPath:   path,
-		ClientID:         codeFreeFirstNonEmpty(clientID, os.Getenv(codeFreeClientIDEnv), codeFreeDefaultOAuthClientID),
-		ClientSecret:     resolvedClientSecret,
-		ClientAuthMethod: normalizeCodeFreeClientAuthMethod(authMethod, resolvedClientSecret),
+		BaseURL:                normalizeCodeFreeBaseURL(baseURL),
+		HTTPClient:             httpClient,
+		CredentialPath:         path,
+		CredentialPathExplicit: pathExplicit,
+		ClientID:               codeFreeFirstNonEmpty(clientID, os.Getenv(codeFreeClientIDEnv), codeFreeOAuthClientIDForBaseURL(baseURL)),
+		ClientSecret:           resolvedClientSecret,
+		ClientAuthMethod:       normalizeCodeFreeClientAuthMethod(authMethod, resolvedClientSecret),
 	}
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = codeFreeDefaultBaseURL
@@ -673,6 +561,18 @@ func resolveCodeFreeOAuthConfig(baseURL string, httpClient *http.Client, credent
 		return codeFreeOAuthConfig{}, fmt.Errorf("providers: codefree oauth client id is empty")
 	}
 	return cfg, nil
+}
+
+func codeFreeOAuthClientIDForBaseURL(baseURL string) string {
+	base := strings.ToLower(normalizeCodeFreeBaseURL(baseURL))
+	switch base {
+	case "https://dev.srdcloud.cn":
+		return codeFreeDevOAuthClientID
+	case "https://test.srdcloud.cn":
+		return codeFreeTestOAuthClientID
+	default:
+		return codeFreeDefaultOAuthClientID
+	}
 }
 
 func normalizeCodeFreeBaseURL(baseURL string) string {
@@ -742,8 +642,8 @@ func newCodeFreeLoginFlow(host string, port int) (*codeFreeLoginFlow, error) {
 		return nil, err
 	}
 	codeChallenge := codeFreeS256(codeVerifier)
-	localPath := "/" + callbackID
-	localURL := "http://" + listener.Addr().String() + localPath
+	localPath := "/oauth2callback"
+	localURL := "http://" + listener.Addr().String() + localPath + "?from=codefree-o&randomCode=" + callbackID
 	state := base64.StdEncoding.EncodeToString([]byte(localURL))
 	flow := &codeFreeLoginFlow{
 		listener:      listener,
@@ -757,6 +657,10 @@ func newCodeFreeLoginFlow(host string, port int) (*codeFreeLoginFlow, error) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if strings.TrimSpace(r.URL.Path) != flow.localPath {
+			http.NotFound(w, r)
+			return
+		}
+		if strings.TrimSpace(r.URL.Query().Get("from")) != "codefree-o" || strings.TrimSpace(r.URL.Query().Get("randomCode")) != callbackID {
 			http.NotFound(w, r)
 			return
 		}
@@ -898,6 +802,7 @@ func saveCodeFreeStoredCredentials(path string, cached codeFreeCachedCredentials
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("providers: ensure codefree credential dir %q: %w", dir, err)
 	}
+	cached = normalizeCodeFreeCachedCredentials(cached)
 	data, err := json.MarshalIndent(cached, "", "  ")
 	if err != nil {
 		return fmt.Errorf("providers: encode codefree credentials: %w", err)
@@ -926,11 +831,8 @@ func readCodeFreeStoredCredentialsAtPath(path string) (codeFreeStoredCredentials
 
 func toCodeFreeAuthResult(stored codeFreeStoredCredentials) CodeFreeAuthResult {
 	return CodeFreeAuthResult{
-		CredentialPath:   stored.Path,
-		BaseURL:          codeFreeFirstNonEmpty(stored.Cached.BaseURL, codeFreeDefaultBaseURL),
-		UserID:           strings.TrimSpace(stored.Cached.UserID),
-		ExpiresAt:        codeFreeExpiresAt(stored.Cached, stored.ModTime),
-		RefreshExpiresAt: codeFreeRefreshExpiresAt(stored.Cached, stored.ModTime),
-		HasRefreshToken:  strings.TrimSpace(stored.Cached.RefreshToken) != "",
+		CredentialPath: stored.Path,
+		BaseURL:        codeFreeCredentialBaseURL(stored.Cached),
+		UserID:         strings.TrimSpace(stored.Cached.UserID),
 	}
 }

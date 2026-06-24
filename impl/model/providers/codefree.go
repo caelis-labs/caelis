@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/ports/model"
-	"github.com/google/uuid"
 )
 
 func newCodeFreeHTTPClient(responseHeaderTimeout time.Duration) *http.Client {
@@ -29,7 +28,7 @@ func newCodeFreeHTTPClient(responseHeaderTimeout time.Duration) *http.Client {
 }
 
 func newCodeFreeChatHTTPClient() *http.Client {
-	return newCodeFreeHTTPClient(0)
+	return newCodeFreeHTTPClient(90 * time.Second)
 }
 
 func newCodeFreeControlHTTPClient() *http.Client {
@@ -39,25 +38,26 @@ func newCodeFreeControlHTTPClient() *http.Client {
 const (
 	codeFreeDefaultBaseURL        = "https://www.srdcloud.cn"
 	codeFreeChatCompletionsPath   = "/api/acbackend/codechat/v1/completions"
-	codeFreeVersionCheckPath      = "/api/acbackend/modelmgr/v1/clients/CLI/versions/0.3.6"
+	codeFreeVersionCheckPath      = "/api/acbackend/modelmgr/v1/clients/codefree-o/versions/1.3.1"
 	codeFreeUserAPIKeyPath        = "/api/acbackend/usermanager/v1/users/apikey"
 	codeFreeOAuthAuthorizePath    = "/login/oauth/authorize"
 	codeFreeOAuthTokenPath        = "/login/oauth/access_token"
 	codeFreeOAuthRedirectPath     = "/login/oauth-srdcloud-redirect"
 	codeFreeDefaultOAuthClientID  = "251384680635inwsxjcm"
-	codeFreeDefaultClientVersion  = "0.3.6"
+	codeFreeDefaultClientVersion  = "1.3.1"
 	codeFreeCredsPathEnv          = "CODEFREE_OAUTH_CREDS_PATH"
 	codeFreeClientVersionEnv      = "CODEFREE_CLIENT_VERSION"
 	codeFreeClientIDEnv           = "CODEFREE_OAUTH_CLIENT_ID"
 	codeFreeClientSecretEnv       = "CODEFREE_OAUTH_CLIENT_SECRET"
 	codeFreeClientAuthMethodEnv   = "CODEFREE_OAUTH_CLIENT_AUTH_METHOD"
-	codeFreeAuthorizationValue    = "Bearer codefree"
-	codeFreeDefaultClientType     = "codefree-cli"
-	codeFreeDefaultSubservice     = "cli_chat"
+	codeFreeDevOAuthClientID      = "2510a379050azejezeas"
+	codeFreeTestOAuthClientID     = "2512525649b2unrogn26"
+	codeFreeDefaultClientType     = "codefree-o"
+	codeFreeDefaultSubservice     = "codefree_o_chat"
 	codeFreeStreamAcceptValue     = "application/json, text/event-stream"
 	codeFreeAPIKeyDecryptKey      = "Xtpa6sS&+D.NAo%CP8LA:7pk"
 	codeFreeAPIKeyDecryptIV       = "%1KJIrl3!XUxr04V"
-	codeFreeDefaultCredentialFile = "oauth_creds.json"
+	codeFreeDefaultCredentialFile = "codefree.json"
 	codeFreeCredentialDir         = "providers/codefree"
 	codeFreeResponseSummaryLimit  = 2048
 )
@@ -127,13 +127,14 @@ func (l *codeFreeLLM) Generate(ctx context.Context, req *model.Request) iter.Seq
 			yield(nil, fmt.Errorf("model: request is nil"))
 			return
 		}
-		creds, err := loadCodeFreeCredentials(ctx)
+		creds, err := loadCodeFreeCredentials(ctx, l.baseURL)
 		if err != nil {
 			yield(nil, err)
 			return
 		}
 		payload := openAICompatRequest{
 			Model:       l.name,
+			ModelName:   l.name,
 			Messages:    l.fromKernelMessages(req.Instructions, req.Messages),
 			Tools:       fromKernelTools(model.FunctionToolDefinitions(req.Tools), l.options.StrictFunctionTools),
 			Stream:      req.Stream,
@@ -186,7 +187,7 @@ func (l *codeFreeLLM) generateOnce(
 		httpReq.Header.Set("Accept", "application/json")
 	}
 	applyDefaultAttributionHeaders(httpReq, APICodeFree)
-	applyCodeFreeHeaders(httpReq, creds, l.name)
+	applyCodeFreeHeaders(httpReq, creds, l.name, codeFreeSessionAffinityFromContext(ctx))
 
 	resp, err := l.client.Do(httpReq)
 	if err != nil {
@@ -214,7 +215,7 @@ func (l *codeFreeLLM) generateOnce(
 	finishReason := model.FinishReasonUnknown
 	emitted := false
 	stopped := false
-	if err := readSSEWithFirstEventTimeout(bodyReader, l.firstEventTimeout, func(data []byte) error {
+	if err := readSSEWithEventTimeout(bodyReader, l.firstEventTimeout, 0, func(data []byte) error {
 		if err := codeFreeResponseError(data, resp.Header.Get("Content-Type")); err != nil {
 			return err
 		}
@@ -304,20 +305,31 @@ func codeFreeFloat64Ptr(value float64) *float64 {
 }
 
 func codeFreeResponseLooksLikeSSE(resp *http.Response, reader *bufio.Reader) bool {
+	contentType := ""
+	if resp != nil {
+		contentType = strings.ToLower(strings.TrimSpace(resp.Header.Get("Content-Type")))
+	}
 	if reader == nil {
 		return true
 	}
-	sample, _ := reader.Peek(1024)
-	trimmed := strings.TrimSpace(string(sample))
+	sample, err := reader.Peek(1)
+	if err != nil {
+		return strings.Contains(contentType, "text/event-stream")
+	}
+	if buffered := reader.Buffered(); buffered > 1 {
+		if buffered > 1024 {
+			buffered = 1024
+		}
+		if expanded, err := reader.Peek(buffered); err == nil {
+			sample = expanded
+		}
+	}
+	trimmed := strings.TrimSpace(strings.TrimPrefix(string(sample), "\ufeff"))
 	switch {
 	case strings.HasPrefix(trimmed, "data:"), strings.HasPrefix(trimmed, "event:"):
 		return true
 	case strings.HasPrefix(trimmed, "{"), strings.HasPrefix(trimmed, "["):
 		return false
-	}
-	contentType := ""
-	if resp != nil {
-		contentType = strings.ToLower(strings.TrimSpace(resp.Header.Get("Content-Type")))
 	}
 	return strings.Contains(contentType, "text/event-stream")
 }
@@ -593,20 +605,29 @@ func (l *codeFreeLLM) fromKernelMessages(instructions []model.Part, msgs []model
 	return compat.fromKernelMessages(instructions, msgs)
 }
 
-func applyCodeFreeHeaders(req *http.Request, creds codeFreeCredentials, modelName string) {
+func applyCodeFreeHeaders(req *http.Request, creds codeFreeCredentials, modelName string, sessionAffinity string) {
 	if req == nil {
 		return
 	}
-	req.Header.Set("Authorization", codeFreeAuthorizationValue)
-	req.Header.Set("Subservice", codeFreeDefaultSubservice)
-	req.Header.Set("Clienttype", codeFreeDefaultClientType)
-	req.Header.Set("Clientversion", codeFreeClientVersion())
-	req.Header.Set("Userid", creds.UserID)
-	req.Header.Set("Apikey", creds.APIKey)
-	req.Header.Set("Sessionid", uuid.NewString())
-	if strings.TrimSpace(modelName) != "" {
-		req.Header.Set("Modelname", strings.TrimSpace(modelName))
+	req.Header.Set("subService", codeFreeDefaultSubservice)
+	req.Header.Set("clientType", codeFreeDefaultClientType)
+	req.Header.Set("clientVersion", codeFreeClientVersion())
+	req.Header.Set("userId", creds.UserID)
+	req.Header.Set("apiKey", creds.APIKey)
+	if sessionID := codeFreeFirstNonEmpty(sessionAffinity, creds.SessionID); sessionID != "" {
+		req.Header.Set("sessionId", sessionID)
 	}
+	if strings.TrimSpace(modelName) != "" {
+		req.Header.Set("modelName", strings.TrimSpace(modelName))
+	}
+}
+
+func codeFreeSessionAffinityFromContext(ctx context.Context) string {
+	metadata, ok := model.ProviderRequestMetadataFromContext(ctx)
+	if !ok {
+		return ""
+	}
+	return metadata.SessionAffinity
 }
 
 func codeFreeClientVersion() string {

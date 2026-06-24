@@ -151,7 +151,10 @@ func (a *Agent) collectCanonicalModelStep(
 		}
 		request.Instructions = append(request.Instructions, instructionsFromContext(ctx, a.systemPrompt)...)
 
-		final, err := collectFinalResponse(ctx, a.model, request, yield)
+		modelCtx := model.WithProviderRequestMetadata(ctx, model.ProviderRequestMetadata{
+			SessionAffinity: ctx.Session().SessionID,
+		})
+		final, err := collectFinalResponse(modelCtx, a.model, request, yield)
 		if err != nil {
 			return model.Message{}, nil, nil, true, err
 		}

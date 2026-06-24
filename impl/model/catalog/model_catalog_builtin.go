@@ -1,5 +1,7 @@
 package modelcatalog
 
+import "github.com/OnslaughtSnail/caelis/impl/model/internal/codefreecaps"
+
 // catalogEntry maps a provider+model pattern to capabilities.
 type catalogEntry struct {
 	provider string // provider name (e.g. "deepseek", "openai")
@@ -553,59 +555,6 @@ var builtinCatalog = []catalogEntry{
 			SupportsImages:         false,
 		},
 	},
-	// ── CodeFree ─────────────────────────────────────────────────────────
-	{
-		provider: "codefree",
-		pattern:  "GLM-4.7",
-		caps: ModelCapabilities{
-			ContextWindowTokens:    128000,
-			MaxOutputTokens:        8000,
-			DefaultMaxOutputTokens: 8000,
-			SupportsToolCalls:      true,
-			ReasoningMode:          ReasoningModeNone,
-			SupportsJSONOutput:     true,
-			SupportsImages:         false,
-		},
-	},
-	{
-		provider: "codefree",
-		pattern:  "DeepSeek-V3.1-Terminus",
-		caps: ModelCapabilities{
-			ContextWindowTokens:    128000,
-			MaxOutputTokens:        8000,
-			DefaultMaxOutputTokens: 8000,
-			SupportsToolCalls:      true,
-			ReasoningMode:          ReasoningModeNone,
-			SupportsJSONOutput:     true,
-			SupportsImages:         false,
-		},
-	},
-	{
-		provider: "codefree",
-		pattern:  "Qwen3.5-122B-A10B",
-		caps: ModelCapabilities{
-			ContextWindowTokens:    128000,
-			MaxOutputTokens:        8000,
-			DefaultMaxOutputTokens: 8000,
-			SupportsToolCalls:      true,
-			ReasoningMode:          ReasoningModeNone,
-			SupportsJSONOutput:     true,
-			SupportsImages:         false,
-		},
-	},
-	{
-		provider: "codefree",
-		pattern:  "GLM-5.1",
-		caps: ModelCapabilities{
-			ContextWindowTokens:    128000,
-			MaxOutputTokens:        8000,
-			DefaultMaxOutputTokens: 8000,
-			SupportsToolCalls:      true,
-			ReasoningMode:          ReasoningModeNone,
-			SupportsJSONOutput:     true,
-			SupportsImages:         false,
-		},
-	},
 	// ── Gemini ────────────────────────────────────────────────────────────
 	{
 		provider: "gemini",
@@ -967,4 +916,28 @@ var builtinCatalog = []catalogEntry{
 			SupportsJSONOutput:     true,
 		},
 	},
+}
+
+func init() {
+	builtinCatalog = append(builtinCatalog, codeFreeCatalogEntries()...)
+}
+
+func codeFreeCatalogEntries() []catalogEntry {
+	out := make([]catalogEntry, 0, len(codefreecaps.Models))
+	for _, item := range codefreecaps.Models {
+		out = append(out, catalogEntry{
+			provider: codefreecaps.Provider,
+			pattern:  item.ID,
+			caps: ModelCapabilities{
+				ContextWindowTokens:    item.ContextWindowTokens,
+				MaxOutputTokens:        item.MaxOutputTokens,
+				DefaultMaxOutputTokens: item.DefaultMaxOutputTokens,
+				SupportsToolCalls:      item.SupportsToolCalls,
+				ReasoningMode:          ReasoningModeNone,
+				SupportsJSONOutput:     item.SupportsJSONOutput,
+				SupportsImages:         item.SupportsImages,
+			},
+		})
+	}
+	return out
 }

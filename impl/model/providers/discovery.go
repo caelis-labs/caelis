@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/OnslaughtSnail/caelis/impl/model/internal/codefreecaps"
 )
 
 // RemoteModel describes one model discovered from provider list APIs.
@@ -257,7 +259,7 @@ func discoverAnthropicModels(ctx context.Context, client *http.Client, cfg Confi
 }
 
 func discoverCodeFreeModels(ctx context.Context, client *http.Client, cfg Config) ([]RemoteModel, error) {
-	creds, err := loadCodeFreeCredentials(ctx)
+	creds, err := loadCodeFreeCredentials(ctx, cfg.BaseURL)
 	if err != nil {
 		return nil, err
 	}
@@ -267,7 +269,7 @@ func discoverCodeFreeModels(ctx context.Context, client *http.Client, cfg Config
 		return nil, err
 	}
 	applyDefaultAttributionHeaders(req, APICodeFree)
-	applyCodeFreeHeaders(req, creds, strings.TrimSpace(cfg.Model))
+	applyCodeFreeHeaders(req, creds, strings.TrimSpace(cfg.Model), "")
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
@@ -283,9 +285,13 @@ func discoverCodeFreeModels(ctx context.Context, client *http.Client, cfg Config
 			MaxTokens       int    `json:"maxTokens"`
 			MaxOutputTokens int    `json:"maxOutputTokens"`
 		} `json:"data"`
+		OptResult int `json:"optResult"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		return nil, err
+	}
+	if payload.OptResult != 0 {
+		return nil, fmt.Errorf("providers: codefree model discovery failed optResult=%d", payload.OptResult)
 	}
 	models := make([]RemoteModel, 0, len(payload.Data))
 	for _, item := range payload.Data {
@@ -297,18 +303,27 @@ func discoverCodeFreeModels(ctx context.Context, client *http.Client, cfg Config
 		if kind := strings.TrimSpace(item.ModelType); kind != "" {
 			caps = append(caps, kind)
 		}
+		defaults, ok := codefreecaps.Lookup(name)
+		contextWindow := firstPositiveInt(item.MaxTokens)
+		maxOutput := firstPositiveInt(item.MaxOutputTokens)
+		if ok {
+			contextWindow = firstPositiveInt(contextWindow, defaults.ContextWindowTokens)
+			maxOutput = firstPositiveInt(maxOutput, defaults.MaxOutputTokens)
+			if defaults.SupportsImages {
+				caps = appendUniqueStrings(caps, "image")
+			}
+		} else {
+			contextWindow = firstPositiveInt(contextWindow, codefreecaps.UnknownContextWindowTokens)
+			maxOutput = firstPositiveInt(maxOutput, codefreecaps.UnknownMaxOutputTokens)
+		}
 		models = append(models, RemoteModel{
 			Name:                name,
-			ContextWindowTokens: codeFreeContextWindowTokens(name),
-			MaxOutputTokens:     item.MaxOutputTokens,
+			ContextWindowTokens: contextWindow,
+			MaxOutputTokens:     maxOutput,
 			Capabilities:        caps,
 		})
 	}
 	return normalizeRemoteModels(models), nil
-}
-
-func codeFreeContextWindowTokens(_ string) int {
-	return 128000
 }
 
 // discoverOllamaModels queries the Ollama /api/tags endpoint to list locally

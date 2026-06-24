@@ -42,13 +42,14 @@ func TestLookupSuggestedModelCapabilitiesSupportsOpenAICompatible(t *testing.T) 
 	}
 }
 
-func TestLookupSuggestedModelCapabilitiesUsesCodeFreeOverlayForGLM51(t *testing.T) {
+func TestLookupSuggestedModelCapabilitiesUsesCodeFreeCatalogForGLM51(t *testing.T) {
 	caps, ok := LookupSuggestedModelCapabilities("codefree", "GLM-5.1")
 	if !ok {
 		t.Fatal("LookupSuggestedModelCapabilities(codefree, GLM-5.1) = false, want true")
 	}
-	if caps.ContextWindowTokens != 128000 {
-		t.Fatalf("ContextWindowTokens = %d, want 128000", caps.ContextWindowTokens)
+	if caps.ContextWindowTokens != 128000 || caps.MaxOutputTokens != 16000 || caps.DefaultMaxOutputTokens != 16000 {
+		t.Fatalf("limits = %d/%d default %d, want 128000/16000 default 16000",
+			caps.ContextWindowTokens, caps.MaxOutputTokens, caps.DefaultMaxOutputTokens)
 	}
 	if caps.SupportsReasoning || caps.ReasoningMode != ReasoningModeNone {
 		t.Fatalf("reasoning caps = %#v, want no reasoning", caps)
@@ -255,26 +256,42 @@ func TestOllamaStaticDefaultsComeFromCatalog(t *testing.T) {
 
 func TestCodeFreeStaticModelsDoNotExposeReasoning(t *testing.T) {
 	models := ListCatalogModels("codefree")
-	want := []string{"GLM-4.7", "DeepSeek-V3.1-Terminus", "Qwen3.5-122B-A10B", "GLM-5.1"}
-	for _, model := range want {
-		if !containsString(models, model) {
-			t.Fatalf("ListCatalogModels(codefree) = %#v, missing %q", models, model)
+	if containsString(models, "DeepSeek-V3.1-Terminus") {
+		t.Fatalf("ListCatalogModels(codefree) = %#v, did not want retired DeepSeek-V3.1-Terminus", models)
+	}
+	tests := []struct {
+		model       string
+		context     int
+		maxOutput   int
+		imageInputs bool
+	}{
+		{model: "GLM-4.7", context: 88000, maxOutput: 8000, imageInputs: false},
+		{model: "Qwen3.5-122B-A10B", context: 128000, maxOutput: 16000, imageInputs: true},
+		{model: "GLM-5.1", context: 128000, maxOutput: 16000, imageInputs: false},
+	}
+	for _, tt := range tests {
+		if !containsString(models, tt.model) {
+			t.Fatalf("ListCatalogModels(codefree) = %#v, missing %q", models, tt.model)
 		}
-		caps, ok := LookupModelCapabilities("codefree", model)
+		caps, ok := LookupModelCapabilities("codefree", tt.model)
 		if !ok {
-			t.Fatalf("LookupModelCapabilities(codefree, %q) = false, want true", model)
+			t.Fatalf("LookupModelCapabilities(codefree, %q) = false, want true", tt.model)
 		}
 		if caps.SupportsReasoning || caps.ReasoningMode != ReasoningModeNone {
-			t.Fatalf("LookupModelCapabilities(codefree, %q) = %#v, want no reasoning", model, caps)
+			t.Fatalf("LookupModelCapabilities(codefree, %q) = %#v, want no reasoning", tt.model, caps)
 		}
-		if caps.ContextWindowTokens != 128000 {
-			t.Fatalf("LookupModelCapabilities(codefree, %q).ContextWindowTokens = %d, want 128000", model, caps.ContextWindowTokens)
+		if caps.ContextWindowTokens != tt.context || caps.MaxOutputTokens != tt.maxOutput || caps.DefaultMaxOutputTokens != tt.maxOutput {
+			t.Fatalf("LookupModelCapabilities(codefree, %q) limits = %d/%d default %d, want %d/%d default %d",
+				tt.model, caps.ContextWindowTokens, caps.MaxOutputTokens, caps.DefaultMaxOutputTokens, tt.context, tt.maxOutput, tt.maxOutput)
+		}
+		if caps.SupportsImages != tt.imageInputs {
+			t.Fatalf("LookupModelCapabilities(codefree, %q).SupportsImages = %v, want %v", tt.model, caps.SupportsImages, tt.imageInputs)
 		}
 		if len(caps.ReasoningEfforts) != 0 || caps.DefaultReasoningEffort != "" {
-			t.Fatalf("LookupModelCapabilities(codefree, %q) efforts = %#v/%q, want none", model, caps.ReasoningEfforts, caps.DefaultReasoningEffort)
+			t.Fatalf("LookupModelCapabilities(codefree, %q) efforts = %#v/%q, want none", tt.model, caps.ReasoningEfforts, caps.DefaultReasoningEffort)
 		}
-		if levels := ReasoningLevelsForModel("codefree", model); len(levels) != 0 {
-			t.Fatalf("ReasoningLevelsForModel(codefree, %q) = %#v, want empty", model, levels)
+		if levels := ReasoningLevelsForModel("codefree", tt.model); len(levels) != 0 {
+			t.Fatalf("ReasoningLevelsForModel(codefree, %q) = %#v, want empty", tt.model, levels)
 		}
 	}
 }

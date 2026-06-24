@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/aes"
@@ -10,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -38,16 +40,20 @@ func encryptCodeFreeAPIKeyForTest(t *testing.T, apiKey string) string {
 func writeCodeFreeCredsForTest(t *testing.T, userID string, apiKey string) string {
 	t.Helper()
 	dir := t.TempDir()
-	path := filepath.Join(dir, "oauth_creds.json")
-	writeCodeFreeCredsAtPathForTest(t, path, userID, apiKey)
+	path := filepath.Join(dir, codeFreeDefaultCredentialFile)
+	writeCodeFreeCredsAtPathForTest(t, path, userID, apiKey, "")
 	return path
 }
 
-func writeCodeFreeCredsAtPathForTest(t *testing.T, path string, userID string, apiKey string) {
+func writeCodeFreeCredsAtPathForTest(t *testing.T, path string, userID string, apiKey string, baseURL string) {
 	t.Helper()
 	payload := map[string]string{
-		"id_token": userID,
-		"apikey":   encryptCodeFreeAPIKeyForTest(t, apiKey),
+		"encryptedApiKey": encryptCodeFreeAPIKeyForTest(t, apiKey),
+		"userId":          userID,
+		"sessionId":       "login-session-" + userID,
+	}
+	if baseURL := strings.TrimSpace(baseURL); baseURL != "" {
+		payload["baseUrlSnapshot"] = baseURL
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
@@ -59,34 +65,6 @@ func writeCodeFreeCredsAtPathForTest(t *testing.T, path string, userID string, a
 	if err := os.WriteFile(path, raw, 0o600); err != nil {
 		t.Fatalf("write creds: %v", err)
 	}
-}
-
-func writeCodeFreeRefreshableCredsForTest(t *testing.T, baseURL string, userID string, apiKey string, refreshToken string, expiresAt time.Time) string {
-	t.Helper()
-	dir := t.TempDir()
-	path := filepath.Join(dir, "oauth_creds.json")
-	now := time.Now()
-	payload := map[string]any{
-		"access_token":               "stale-access-token",
-		"refresh_token":              refreshToken,
-		"id_token":                   userID,
-		"apikey":                     encryptCodeFreeAPIKeyForTest(t, apiKey),
-		"baseUrl":                    strings.TrimSpace(baseURL),
-		"token_type":                 "bearer",
-		"expires_in":                 int64(time.Until(expiresAt).Seconds()),
-		"refresh_token_expires_in":   int64((24 * time.Hour).Seconds()),
-		"obtained_at_unix_ms":        now.Add(-time.Hour).UnixMilli(),
-		"expires_at_unix_ms":         expiresAt.UnixMilli(),
-		"refresh_expires_at_unix_ms": now.Add(24 * time.Hour).UnixMilli(),
-	}
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		t.Fatalf("marshal refreshable creds: %v", err)
-	}
-	if err := os.WriteFile(path, raw, 0o600); err != nil {
-		t.Fatalf("write refreshable creds: %v", err)
-	}
-	return path
 }
 
 type codeFreeLoginFlowStub struct {
@@ -107,7 +85,7 @@ func (f *codeFreeLoginFlowStub) Wait(context.Context) (codeFreeOAuthCallback, er
 
 func withCodeFreeLoginFlowForTest(t *testing.T, callback func(state string) codeFreeOAuthCallback) {
 	t.Helper()
-	state := base64.StdEncoding.EncodeToString([]byte("http://127.0.0.1/callback"))
+	state := base64.StdEncoding.EncodeToString([]byte("http://127.0.0.1:12345/oauth2callback?from=codefree-o&randomCode=1234"))
 	old := newCodeFreeLoginFlowSession
 	newCodeFreeLoginFlowSession = func(string, int) (codeFreeLoginFlowSession, error) {
 		return &codeFreeLoginFlowStub{
@@ -130,11 +108,10 @@ func withCodeFreeControlHTTPClientForTest(t *testing.T, client *http.Client) {
 func TestCodeFreeNonStream_UsesLocalOAuthCredsAndEndpoint(t *testing.T) {
 	credsPath := writeCodeFreeCredsForTest(t, "272182", "76475baf-3659-488a-932d-0971ae103591")
 	t.Setenv(codeFreeCredsPathEnv, credsPath)
-	t.Setenv(codeFreeClientVersionEnv, "0.3.6")
 
 	var seenHeaders http.Header
 	var seenPayload map[string]any
-	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != codeFreeChatCompletionsPath {
 			http.NotFound(w, r)
 			return
@@ -161,7 +138,10 @@ func TestCodeFreeNonStream_UsesLocalOAuthCredsAndEndpoint(t *testing.T) {
 	})
 
 	var final *model.Response
-	for resp, err := range llm.Generate(context.Background(), &model.Request{
+	ctx := model.WithProviderRequestMetadata(context.Background(), model.ProviderRequestMetadata{
+		SessionAffinity: "caelis-session-1",
+	})
+	for resp, err := range llm.Generate(ctx, &model.Request{
 		Messages: []model.Message{model.NewTextMessage(model.RoleUser, "Reply with exactly pong.")},
 		Stream:   false,
 	}) {
@@ -178,29 +158,38 @@ func TestCodeFreeNonStream_UsesLocalOAuthCredsAndEndpoint(t *testing.T) {
 	if got := final.Message.TextContent(); got != "pong" {
 		t.Fatalf("final text = %q, want %q", got, "pong")
 	}
-	if got := seenHeaders.Get("Authorization"); got != codeFreeAuthorizationValue {
-		t.Fatalf("authorization = %q, want %q", got, codeFreeAuthorizationValue)
+	if got := seenHeaders.Get("Authorization"); got != "" {
+		t.Fatalf("authorization = %q, want empty", got)
 	}
 	if got := seenHeaders.Get("Accept"); got != "application/json" {
 		t.Fatalf("accept = %q, want application/json", got)
 	}
-	if got := seenHeaders.Get("Userid"); got != "272182" {
+	if got := seenHeaders.Get("userId"); got != "272182" {
 		t.Fatalf("userid = %q, want %q", got, "272182")
 	}
-	if got := seenHeaders.Get("Apikey"); got != "76475baf-3659-488a-932d-0971ae103591" {
+	if got := seenHeaders.Get("apiKey"); got != "76475baf-3659-488a-932d-0971ae103591" {
 		t.Fatalf("apikey = %q", got)
 	}
-	if got := seenHeaders.Get("Modelname"); got != "GLM-4.7" {
+	if got := seenHeaders.Get("modelName"); got != "GLM-4.7" {
 		t.Fatalf("modelname = %q, want GLM-4.7", got)
 	}
-	if got := seenHeaders.Get("Clientversion"); got != "0.3.6" {
-		t.Fatalf("clientversion = %q, want 0.3.6", got)
+	if got := seenHeaders.Get("clientType"); got != codeFreeDefaultClientType {
+		t.Fatalf("clienttype = %q, want %q", got, codeFreeDefaultClientType)
 	}
-	if strings.TrimSpace(seenHeaders.Get("Sessionid")) == "" {
-		t.Fatal("expected sessionid header")
+	if got := seenHeaders.Get("subService"); got != codeFreeDefaultSubservice {
+		t.Fatalf("subservice = %q, want %q", got, codeFreeDefaultSubservice)
+	}
+	if got := seenHeaders.Get("clientVersion"); got != "1.3.1" {
+		t.Fatalf("clientversion = %q, want 1.3.1", got)
+	}
+	if got := seenHeaders.Get("sessionId"); got != "caelis-session-1" {
+		t.Fatalf("sessionid = %q, want caelis-session-1", got)
 	}
 	if got := seenPayload["temperature"]; got != float64(0) {
 		t.Fatalf("temperature = %#v, want 0", got)
+	}
+	if got := seenPayload["modelName"]; got != "GLM-4.7" {
+		t.Fatalf("modelName payload = %#v, want GLM-4.7", got)
 	}
 	if got := seenPayload["top_p"]; got != float64(1) {
 		t.Fatalf("top_p = %#v, want 1", got)
@@ -210,14 +199,13 @@ func TestCodeFreeNonStream_UsesLocalOAuthCredsAndEndpoint(t *testing.T) {
 	}
 }
 
-func TestResolveCodeFreeCredentialPath_DefaultsToCaelisStore(t *testing.T) {
+func TestResolveCodeFreeDefaultCredentialPath_UsesCaelisStore(t *testing.T) {
 	home := t.TempDir()
 	setHomeForCodeFreeTest(t, home)
-	t.Setenv(codeFreeCredsPathEnv, "")
 
-	got, err := resolveCodeFreeCredentialPath()
+	got, err := resolveCodeFreeDefaultCredentialPath()
 	if err != nil {
-		t.Fatalf("resolveCodeFreeCredentialPath() error = %v", err)
+		t.Fatalf("resolveCodeFreeDefaultCredentialPath() error = %v", err)
 	}
 	want := filepath.Join(home, ".caelis", filepath.FromSlash(codeFreeCredentialDir), codeFreeDefaultCredentialFile)
 	if got != want {
@@ -225,7 +213,7 @@ func TestResolveCodeFreeCredentialPath_DefaultsToCaelisStore(t *testing.T) {
 	}
 }
 
-func TestReadCodeFreeStoredCredentialsIgnoresLegacyCodeFreeCreds(t *testing.T) {
+func TestLoadCodeFreeCredentialsImportsCodeFreeOLocalCredentials(t *testing.T) {
 	home := t.TempDir()
 	setHomeForCodeFreeTest(t, home)
 	t.Setenv(codeFreeCredsPathEnv, "")
@@ -234,17 +222,60 @@ func TestReadCodeFreeStoredCredentialsIgnoresLegacyCodeFreeCreds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveCodeFreeDefaultCredentialPath() error = %v", err)
 	}
-	legacy := filepath.Join(home, ".codefree-cli", codeFreeDefaultCredentialFile)
-	writeCodeFreeCredsAtPathForTest(t, legacy, "272182", "legacy-api-key")
+	source := filepath.Join(home, ".codefree-o", ".local", "share", codeFreeDefaultCredentialFile)
+	writeCodeFreeCredsAtPathForTest(t, source, "272182", "local-api-key", codeFreeDefaultBaseURL)
 
-	if _, err := readCodeFreeStoredCredentials(); err == nil {
-		t.Fatal("readCodeFreeStoredCredentials() error = nil, want missing current credentials")
+	creds, err := loadCodeFreeCredentials(context.Background(), codeFreeDefaultBaseURL)
+	if err != nil {
+		t.Fatalf("loadCodeFreeCredentials() error = %v", err)
 	}
-	if _, err := os.Stat(primary); err == nil {
-		t.Fatalf("unexpected imported credentials at %q", primary)
+	if creds.APIKey != "local-api-key" {
+		t.Fatalf("apikey = %q, want local-api-key", creds.APIKey)
 	}
-	if _, err := os.Stat(legacy); err != nil {
-		t.Fatalf("expected legacy credentials to remain at %q: %v", legacy, err)
+	if _, err := os.Stat(primary); err != nil {
+		t.Fatalf("expected imported credentials at %q: %v", primary, err)
+	}
+	stored, err := readCodeFreeStoredCredentialsAtPath(primary)
+	if err != nil {
+		t.Fatalf("read imported credentials: %v", err)
+	}
+	if got := stored.Cached.UserID; got != "272182" {
+		t.Fatalf("imported userId = %q, want 272182", got)
+	}
+}
+
+func TestLoadCodeFreeCredentialsImportsEmptySnapshotForRequestedBase(t *testing.T) {
+	home := t.TempDir()
+	setHomeForCodeFreeTest(t, home)
+	t.Setenv(codeFreeCredsPathEnv, "")
+
+	baseURL := "https://dev.srdcloud.cn"
+	primary, err := resolveCodeFreeDefaultCredentialPath()
+	if err != nil {
+		t.Fatalf("resolveCodeFreeDefaultCredentialPath() error = %v", err)
+	}
+	source := filepath.Join(home, ".codefree-o", ".local", "share", codeFreeDefaultCredentialFile)
+	writeCodeFreeCredsAtPathForTest(t, source, "272182", "local-api-key", "")
+
+	creds, err := loadCodeFreeCredentials(context.Background(), baseURL)
+	if err != nil {
+		t.Fatalf("loadCodeFreeCredentials() error = %v", err)
+	}
+	if creds.BaseURL != baseURL {
+		t.Fatalf("base url = %q, want %q", creds.BaseURL, baseURL)
+	}
+	stored, err := readCodeFreeStoredCredentialsAtPath(primary)
+	if err != nil {
+		t.Fatalf("read imported credentials: %v", err)
+	}
+	if got := stored.Cached.BaseURLSnapshot; got != baseURL {
+		t.Fatalf("imported baseUrlSnapshot = %q, want %q", got, baseURL)
+	}
+	if err := os.Remove(source); err != nil {
+		t.Fatalf("remove source credentials: %v", err)
+	}
+	if _, err := loadCodeFreeCredentials(context.Background(), baseURL); err != nil {
+		t.Fatalf("load imported credentials after source removal: %v", err)
 	}
 }
 
@@ -324,6 +355,9 @@ func TestCodeFreeStream_ParsesSSE(t *testing.T) {
 	if got := seenHeaders.Get("Accept"); got != codeFreeStreamAcceptValue {
 		t.Fatalf("accept = %q, want %q", got, codeFreeStreamAcceptValue)
 	}
+	if got := seenHeaders.Get("sessionId"); got != "login-session-272182" {
+		t.Fatalf("sessionid = %q, want stored login session", got)
+	}
 	if got := seenPayload["temperature"]; got != float64(0) {
 		t.Fatalf("temperature = %#v, want 0", got)
 	}
@@ -333,6 +367,46 @@ func TestCodeFreeStream_ParsesSSE(t *testing.T) {
 	streamOptions, _ := seenPayload["stream_options"].(map[string]any)
 	if streamOptions["include_usage"] != true {
 		t.Fatalf("stream_options = %#v, want include_usage=true", seenPayload["stream_options"])
+	}
+}
+
+func TestCodeFreeResponseLooksLikeSSE_DoesNotWaitForLargePeek(t *testing.T) {
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	defer writer.Close()
+
+	go func() {
+		_, _ = writer.Write([]byte("d"))
+	}()
+	done := make(chan bool, 1)
+	go func() {
+		resp := &http.Response{Header: http.Header{"Content-Type": []string{"text/event-stream"}}}
+		done <- codeFreeResponseLooksLikeSSE(resp, bufio.NewReader(reader))
+	}()
+
+	select {
+	case got := <-done:
+		if !got {
+			t.Fatal("codeFreeResponseLooksLikeSSE() = false, want true")
+		}
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("codeFreeResponseLooksLikeSSE() blocked waiting for more bytes")
+	}
+}
+
+func TestCodeFreeResponseLooksLikeSSE_RecognizesBufferedSSEAfterWhitespace(t *testing.T) {
+	reader := bufio.NewReader(strings.NewReader(" \n\tdata: {\"choices\":[]}\n\n"))
+	resp := &http.Response{Header: http.Header{"Content-Type": []string{"application/octet-stream"}}}
+	if !codeFreeResponseLooksLikeSSE(resp, reader) {
+		t.Fatal("codeFreeResponseLooksLikeSSE() = false, want true")
+	}
+}
+
+func TestCodeFreeResponseLooksLikeSSE_PrefersJSONPrefixOverContentType(t *testing.T) {
+	reader := bufio.NewReader(strings.NewReader(`{"id":"resp","choices":[]}`))
+	resp := &http.Response{Header: http.Header{"Content-Type": []string{"text/event-stream"}}}
+	if codeFreeResponseLooksLikeSSE(resp, reader) {
+		t.Fatal("codeFreeResponseLooksLikeSSE() = true, want false for JSON body")
 	}
 }
 
@@ -572,11 +646,11 @@ func TestCodeFreeEmptyChoicesIncludesRedactedResponseBody(t *testing.T) {
 	}
 }
 
-func TestCodeFreeLogin_PersistsRefreshableOAuthCredentials(t *testing.T) {
+func TestCodeFreeLogin_PersistsCodeFreeOCredentials(t *testing.T) {
 	oldOpenBrowser := codeFreeOpenBrowser
 	defer func() { codeFreeOpenBrowser = oldOpenBrowser }()
 
-	credsPath := filepath.Join(t.TempDir(), "oauth_creds.json")
+	credsPath := filepath.Join(t.TempDir(), codeFreeDefaultCredentialFile)
 	var tokenRequests int
 	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -598,11 +672,11 @@ func TestCodeFreeLogin_PersistsRefreshableOAuthCredentials(t *testing.T) {
 			if got := values.Get("client_secret"); got != "" {
 				t.Fatalf("client_secret = %q, want empty by default", got)
 			}
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = fmt.Fprint(w, `{"access_token":"login-access","refresh_token":"login-refresh","token_type":"bearer","expires_in":3600,"refresh_token_expires_in":7200,"id_token":"272182"}`)
+			w.Header().Set("Content-Type", "application/x-www-form-urlencoded")
+			_, _ = fmt.Fprint(w, "access_token=oauth-access&token_type=bearer&expires_in=3600&uid=272182&ori_session_id=session-short-123&ori_token=other-short-token")
 		case codeFreeUserAPIKeyPath:
-			if got := r.Header.Get("sessionId"); got != "login-access" {
-				t.Fatalf("sessionId = %q, want login-access", got)
+			if got := r.Header.Get("sessionId"); got != "session-short-123" {
+				t.Fatalf("sessionId = %q, want session-short-123", got)
 			}
 			if got := r.Header.Get("userId"); got != "272182" {
 				t.Fatalf("userId = %q, want 272182", got)
@@ -627,11 +701,7 @@ func TestCodeFreeLogin_PersistsRefreshableOAuthCredentials(t *testing.T) {
 			t.Fatalf("authorize path = %q, want %q", got, codeFreeOAuthAuthorizePath)
 		}
 		query := parsed.Query()
-		redirectURL := query.Get("redirect_uri")
-		if redirectURL == "" {
-			t.Fatal("expected redirect_uri in auth url")
-		}
-		if got := redirectURL; got != server.URL+codeFreeOAuthRedirectPath {
+		if got := query.Get("redirect_uri"); got != server.URL+codeFreeOAuthRedirectPath {
 			t.Fatalf("redirect_uri = %q, want %q", got, server.URL+codeFreeOAuthRedirectPath)
 		}
 		state := query.Get("state")
@@ -646,8 +716,14 @@ func TestCodeFreeLogin_PersistsRefreshableOAuthCredentials(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if callbackURL.Scheme != "http" || callbackURL.Host == "" || callbackURL.Path == "" {
-			t.Fatalf("decoded local callback url = %q, want http://host/path", callbackURL.String())
+		if callbackURL.Path != "/oauth2callback" {
+			t.Fatalf("callback path = %q, want /oauth2callback", callbackURL.Path)
+		}
+		if got := callbackURL.Query().Get("from"); got != "codefree-o" {
+			t.Fatalf("callback from = %q, want codefree-o", got)
+		}
+		if got := callbackURL.Query().Get("randomCode"); got != "1234" {
+			t.Fatalf("callback randomCode = %q, want 1234", got)
 		}
 		return nil
 	}
@@ -661,9 +737,6 @@ func TestCodeFreeLogin_PersistsRefreshableOAuthCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CodeFreeLogin() error = %v", err)
 	}
-	if !result.HasRefreshToken {
-		t.Fatal("expected login result to include refresh token")
-	}
 	if result.UserID != "272182" {
 		t.Fatalf("user id = %q, want 272182", result.UserID)
 	}
@@ -675,16 +748,19 @@ func TestCodeFreeLogin_PersistsRefreshableOAuthCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatalf("readCodeFreeStoredCredentialsAtPath() error = %v", err)
 	}
-	if got := stored.Cached.RefreshToken; got != "login-refresh" {
-		t.Fatalf("stored refresh_token = %q, want login-refresh", got)
+	if got := stored.Cached.SessionID; got != "session-short-123" {
+		t.Fatalf("stored sessionId = %q, want session-short-123", got)
 	}
-	if got := stored.Cached.AccessToken; got != "login-access" {
-		t.Fatalf("stored access_token = %q, want login-access", got)
+	if got := stored.Cached.UserID; got != "272182" {
+		t.Fatalf("stored userId = %q, want 272182", got)
+	}
+	if got := stored.Cached.BaseURLSnapshot; got != server.URL {
+		t.Fatalf("stored baseUrlSnapshot = %q, want %q", got, server.URL)
 	}
 }
 
 func TestResolveCodeFreeOAuthConfig_DefaultsAuthCodeExchangeToNoneWithoutClientSecret(t *testing.T) {
-	cfg, err := resolveCodeFreeOAuthConfig("https://www.srdcloud.cn", nil, filepath.Join(t.TempDir(), "oauth_creds.json"), "", "", "")
+	cfg, err := resolveCodeFreeOAuthConfig("https://www.srdcloud.cn", nil, filepath.Join(t.TempDir(), codeFreeDefaultCredentialFile), "", "", "")
 	if err != nil {
 		t.Fatalf("resolveCodeFreeOAuthConfig() error = %v", err)
 	}
@@ -693,16 +769,37 @@ func TestResolveCodeFreeOAuthConfig_DefaultsAuthCodeExchangeToNoneWithoutClientS
 	}
 }
 
+func TestResolveCodeFreeOAuthConfig_UsesCodeFreeOClientIDsByBaseURL(t *testing.T) {
+	tests := []struct {
+		baseURL string
+		want    string
+	}{
+		{baseURL: "https://dev.srdcloud.cn", want: codeFreeDevOAuthClientID},
+		{baseURL: "https://test.srdcloud.cn", want: codeFreeTestOAuthClientID},
+		{baseURL: "https://www.srdcloud.cn", want: codeFreeDefaultOAuthClientID},
+		{baseURL: "", want: codeFreeDefaultOAuthClientID},
+	}
+	for _, tt := range tests {
+		cfg, err := resolveCodeFreeOAuthConfig(tt.baseURL, nil, filepath.Join(t.TempDir(), codeFreeDefaultCredentialFile), "", "", "")
+		if err != nil {
+			t.Fatalf("resolveCodeFreeOAuthConfig(%q) error = %v", tt.baseURL, err)
+		}
+		if cfg.ClientID != tt.want {
+			t.Fatalf("resolveCodeFreeOAuthConfig(%q).ClientID = %q, want %q", tt.baseURL, cfg.ClientID, tt.want)
+		}
+	}
+}
+
 func TestCodeFreeLogin_AcceptsLocalCallbackWithoutState(t *testing.T) {
 	oldOpenBrowser := codeFreeOpenBrowser
 	defer func() { codeFreeOpenBrowser = oldOpenBrowser }()
 
-	credsPath := filepath.Join(t.TempDir(), "oauth_creds.json")
+	credsPath := filepath.Join(t.TempDir(), codeFreeDefaultCredentialFile)
 	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case codeFreeOAuthTokenPath:
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = fmt.Fprint(w, `{"access_token":"login-access","refresh_token":"login-refresh","token_type":"bearer","expires_in":3600,"refresh_token_expires_in":7200,"id_token":"272182"}`)
+			w.Header().Set("Content-Type", "application/x-www-form-urlencoded")
+			_, _ = fmt.Fprint(w, "uid=272182&ori_session_id=session-short-123")
 		case codeFreeUserAPIKeyPath:
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = fmt.Fprintf(w, `{"encryptedApiKey":%q,"optResult":0}`, encryptCodeFreeAPIKeyForTest(t, "live-api-key"))
@@ -720,19 +817,9 @@ func TestCodeFreeLogin_AcceptsLocalCallbackWithoutState(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		state := parsed.Query().Get("state")
-		if strings.TrimSpace(state) == "" {
+		if strings.TrimSpace(parsed.Query().Get("state")) == "" {
 			t.Fatal("expected oauth state in auth url")
 		}
-		localURLBytes, err := base64.StdEncoding.DecodeString(state)
-		if err != nil {
-			return err
-		}
-		callbackURL, err := url.Parse(string(localURLBytes))
-		if err != nil {
-			return err
-		}
-		_ = callbackURL
 		return nil
 	}
 
@@ -744,9 +831,6 @@ func TestCodeFreeLogin_AcceptsLocalCallbackWithoutState(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("CodeFreeLogin() error = %v", err)
-	}
-	if !result.HasRefreshToken {
-		t.Fatal("expected login result to include refresh token")
 	}
 	if result.UserID != "272182" {
 		t.Fatalf("user id = %q, want 272182", result.UserID)
@@ -757,12 +841,12 @@ func TestCodeFreeLogin_AcceptsFormEncodedTokenResponse(t *testing.T) {
 	oldOpenBrowser := codeFreeOpenBrowser
 	defer func() { codeFreeOpenBrowser = oldOpenBrowser }()
 
-	credsPath := filepath.Join(t.TempDir(), "oauth_creds.json")
+	credsPath := filepath.Join(t.TempDir(), codeFreeDefaultCredentialFile)
 	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case codeFreeOAuthTokenPath:
 			w.Header().Set("Content-Type", "application/x-www-form-urlencoded")
-			_, _ = fmt.Fprint(w, "access_token=login-access&refresh_token=login-refresh&token_type=bearer&expires_in=3600&refresh_token_expires_in=7200&id_token=272182")
+			_, _ = fmt.Fprint(w, "access_token=login-access&token_type=bearer&expires_in=3600&uid=272182&ori_session_id=session-short-123")
 		case codeFreeUserAPIKeyPath:
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = fmt.Fprintf(w, `{"encryptedApiKey":%q,"optResult":0}`, encryptCodeFreeAPIKeyForTest(t, "live-api-key"))
@@ -775,23 +859,7 @@ func TestCodeFreeLogin_AcceptsFormEncodedTokenResponse(t *testing.T) {
 		return codeFreeOAuthCallback{Code: "auth-code", State: state}
 	})
 
-	codeFreeOpenBrowser = func(authURL string) error {
-		parsed, err := url.Parse(authURL)
-		if err != nil {
-			return err
-		}
-		state := parsed.Query().Get("state")
-		localURLBytes, err := base64.StdEncoding.DecodeString(state)
-		if err != nil {
-			return err
-		}
-		callbackURL, err := url.Parse(string(localURLBytes))
-		if err != nil {
-			return err
-		}
-		_ = callbackURL
-		return nil
-	}
+	codeFreeOpenBrowser = func(string) error { return nil }
 
 	result, err := CodeFreeLogin(context.Background(), CodeFreeLoginOptions{
 		BaseURL:        server.URL,
@@ -805,167 +873,22 @@ func TestCodeFreeLogin_AcceptsFormEncodedTokenResponse(t *testing.T) {
 	if result.UserID != "272182" {
 		t.Fatalf("user id = %q, want 272182", result.UserID)
 	}
-	if !result.HasRefreshToken {
-		t.Fatal("expected login result to include refresh token")
+}
+
+func TestDecodeCodeFreeTokenResponse_AcceptsSnakeCaseFormAliases(t *testing.T) {
+	payload, err := decodeCodeFreeTokenResponse([]byte("access_token=login-access&token_type=bearer&expires_in=3600&user_id=272182&session_id=session-short-123"))
+	if err != nil {
+		t.Fatalf("decodeCodeFreeTokenResponse() error = %v", err)
+	}
+	if payload.UserID != "272182" {
+		t.Fatalf("user id = %q, want 272182", payload.UserID)
+	}
+	if payload.SessionID != "session-short-123" {
+		t.Fatalf("session id = %q, want session-short-123", payload.SessionID)
 	}
 }
 
-func TestCodeFreeLogin_UsesOriSessionIDForAPIKeyAndStoredAccessToken(t *testing.T) {
-	oldOpenBrowser := codeFreeOpenBrowser
-	defer func() { codeFreeOpenBrowser = oldOpenBrowser }()
-
-	credsPath := filepath.Join(t.TempDir(), "oauth_creds.json")
-	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case codeFreeOAuthTokenPath:
-			w.Header().Set("Content-Type", "application/x-www-form-urlencoded")
-			_, _ = fmt.Fprint(w, "access_token=oauth-access-long-token&token_type=bearer&expires_in=86400&id_token=&refresh_token=&uid=272182&ori_session_id=session-short-123&ori_token=other-short-token")
-		case codeFreeUserAPIKeyPath:
-			if got := r.Header.Get("sessionId"); got != "session-short-123" {
-				t.Fatalf("sessionId = %q, want session-short-123", got)
-			}
-			if got := r.Header.Get("userId"); got != "272182" {
-				t.Fatalf("userId = %q, want 272182", got)
-			}
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = fmt.Fprintf(w, `{"encryptedApiKey":%q,"optResult":0}`, encryptCodeFreeAPIKeyForTest(t, "live-api-key"))
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
-	withCodeFreeLoginFlowForTest(t, func(state string) codeFreeOAuthCallback {
-		return codeFreeOAuthCallback{Code: "auth-code", State: state}
-	})
-
-	codeFreeOpenBrowser = func(authURL string) error {
-		parsed, err := url.Parse(authURL)
-		if err != nil {
-			return err
-		}
-		state := parsed.Query().Get("state")
-		localURLBytes, err := base64.StdEncoding.DecodeString(state)
-		if err != nil {
-			return err
-		}
-		callbackURL, err := url.Parse(string(localURLBytes))
-		if err != nil {
-			return err
-		}
-		_ = callbackURL
-		return nil
-	}
-
-	result, err := CodeFreeLogin(context.Background(), CodeFreeLoginOptions{
-		BaseURL:        server.URL,
-		HTTPClient:     server.Client(),
-		CredentialPath: credsPath,
-		OpenBrowser:    true,
-	})
-	if err != nil {
-		t.Fatalf("CodeFreeLogin() error = %v", err)
-	}
-	if result.UserID != "272182" {
-		t.Fatalf("user id = %q, want 272182", result.UserID)
-	}
-	if result.HasRefreshToken {
-		t.Fatal("expected login result without refresh token")
-	}
-
-	stored, err := readCodeFreeStoredCredentialsAtPath(credsPath)
-	if err != nil {
-		t.Fatalf("readCodeFreeStoredCredentialsAtPath() error = %v", err)
-	}
-	if got := stored.Cached.AccessToken; got != "session-short-123" {
-		t.Fatalf("stored access_token = %q, want session-short-123", got)
-	}
-	if got := stored.Cached.UserID; got != "272182" {
-		t.Fatalf("stored user_id = %q, want 272182", got)
-	}
-}
-
-func TestLoadCodeFreeCredentials_RefreshesExpiredToken(t *testing.T) {
-	var tokenRequests int
-	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case codeFreeOAuthTokenPath:
-			tokenRequests++
-			body, _ := io.ReadAll(r.Body)
-			values, _ := url.ParseQuery(string(body))
-			if got := values.Get("grant_type"); got != "refresh_token" {
-				t.Fatalf("grant_type = %q, want refresh_token", got)
-			}
-			if got := values.Get("refresh_token"); got != "refresh-1" {
-				t.Fatalf("refresh_token = %q, want refresh-1", got)
-			}
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = fmt.Fprint(w, `{"access_token":"fresh-access","refresh_token":"refresh-2","token_type":"bearer","expires_in":3600,"refresh_token_expires_in":7200,"id_token":"272182"}`)
-		case codeFreeUserAPIKeyPath:
-			if got := r.Header.Get("sessionId"); got != "fresh-access" {
-				t.Fatalf("sessionId = %q, want fresh-access", got)
-			}
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = fmt.Fprintf(w, `{"encryptedApiKey":%q,"optResult":0}`, encryptCodeFreeAPIKeyForTest(t, "fresh-api-key"))
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
-	withCodeFreeControlHTTPClientForTest(t, server.Client())
-
-	credsPath := writeCodeFreeRefreshableCredsForTest(t, server.URL, "272182", "stale-api-key", "refresh-1", time.Now().Add(-time.Minute))
-	t.Setenv(codeFreeCredsPathEnv, credsPath)
-
-	creds, err := loadCodeFreeCredentials(context.Background())
-	if err != nil {
-		t.Fatalf("loadCodeFreeCredentials() error = %v", err)
-	}
-	if tokenRequests != 1 {
-		t.Fatalf("token request count = %d, want 1", tokenRequests)
-	}
-	if creds.APIKey != "fresh-api-key" {
-		t.Fatalf("apikey = %q, want fresh-api-key", creds.APIKey)
-	}
-	if creds.AccessToken != "fresh-access" {
-		t.Fatalf("access token = %q, want fresh-access", creds.AccessToken)
-	}
-
-	stored, err := readCodeFreeStoredCredentialsAtPath(credsPath)
-	if err != nil {
-		t.Fatalf("readCodeFreeStoredCredentialsAtPath() error = %v", err)
-	}
-	if got := stored.Cached.RefreshToken; got != "refresh-2" {
-		t.Fatalf("stored refresh_token = %q, want refresh-2", got)
-	}
-}
-
-func TestCodeFreeEnsureAuth_SkipsLoginWhenRefreshableCredsAlreadyExist(t *testing.T) {
-	oldOpenBrowser := codeFreeOpenBrowser
-	defer func() { codeFreeOpenBrowser = oldOpenBrowser }()
-
-	credsPath := writeCodeFreeRefreshableCredsForTest(t, "https://www.srdcloud.cn", "272182", "cached-api-key", "refresh-1", time.Now().Add(time.Hour))
-	var opened bool
-	codeFreeOpenBrowser = func(string) error {
-		opened = true
-		return nil
-	}
-
-	result, err := CodeFreeEnsureAuth(context.Background(), CodeFreeEnsureAuthOptions{
-		CredentialPath: credsPath,
-		OpenBrowser:    true,
-	})
-	if err != nil {
-		t.Fatalf("CodeFreeEnsureAuth() error = %v", err)
-	}
-	if opened {
-		t.Fatal("expected existing refreshable credentials to skip browser login")
-	}
-	if !result.HasRefreshToken {
-		t.Fatal("expected ensure auth result to report refresh token")
-	}
-}
-
-func TestCodeFreeEnsureAuth_SkipsLoginWhenUsableCredsLackRefreshToken(t *testing.T) {
+func TestCodeFreeEnsureAuth_SkipsLoginWhenCodeFreeOCredsAlreadyExist(t *testing.T) {
 	oldOpenBrowser := codeFreeOpenBrowser
 	defer func() { codeFreeOpenBrowser = oldOpenBrowser }()
 
@@ -976,7 +899,7 @@ func TestCodeFreeEnsureAuth_SkipsLoginWhenUsableCredsLackRefreshToken(t *testing
 		return nil
 	}
 
-	result, err := CodeFreeEnsureAuth(context.Background(), CodeFreeEnsureAuthOptions{
+	_, err := CodeFreeEnsureAuth(context.Background(), CodeFreeEnsureAuthOptions{
 		CredentialPath: credsPath,
 		OpenBrowser:    true,
 	})
@@ -984,9 +907,61 @@ func TestCodeFreeEnsureAuth_SkipsLoginWhenUsableCredsLackRefreshToken(t *testing
 		t.Fatalf("CodeFreeEnsureAuth() error = %v", err)
 	}
 	if opened {
-		t.Fatal("expected usable credentials without refresh token to skip browser login")
+		t.Fatal("expected existing codefree-o credentials to skip browser login")
 	}
-	if result.HasRefreshToken {
-		t.Fatal("expected ensure auth result without refresh token")
+}
+
+func TestCodeFreeEnsureAuth_ImportsCodeFreeOLocalCredentialsBeforeLogin(t *testing.T) {
+	oldOpenBrowser := codeFreeOpenBrowser
+	defer func() { codeFreeOpenBrowser = oldOpenBrowser }()
+
+	home := t.TempDir()
+	setHomeForCodeFreeTest(t, home)
+	credsPath, err := resolveCodeFreeDefaultCredentialPath()
+	if err != nil {
+		t.Fatalf("resolve default credential path: %v", err)
+	}
+	source := filepath.Join(home, ".codefree-o", ".local", "share", codeFreeDefaultCredentialFile)
+	writeCodeFreeCredsAtPathForTest(t, source, "272182", "imported-api-key", codeFreeDefaultBaseURL)
+	var opened bool
+	codeFreeOpenBrowser = func(string) error {
+		opened = true
+		return nil
+	}
+
+	result, err := CodeFreeEnsureAuth(context.Background(), CodeFreeEnsureAuthOptions{
+		OpenBrowser: true,
+	})
+	if err != nil {
+		t.Fatalf("CodeFreeEnsureAuth() error = %v", err)
+	}
+	if opened {
+		t.Fatal("expected imported codefree-o credentials to skip browser login")
+	}
+	if result.UserID != "272182" {
+		t.Fatalf("user id = %q, want 272182", result.UserID)
+	}
+	stored, err := readCodeFreeStoredCredentialsAtPath(credsPath)
+	if err != nil {
+		t.Fatalf("read imported credentials: %v", err)
+	}
+	if got := stored.Cached.UserID; got != "272182" {
+		t.Fatalf("imported userId = %q, want 272182", got)
+	}
+}
+
+func TestCodeFreeEnsureAuth_DoesNotImportWhenCredentialPathIsExplicit(t *testing.T) {
+	home := t.TempDir()
+	setHomeForCodeFreeTest(t, home)
+	source := filepath.Join(home, ".codefree-o", ".local", "share", codeFreeDefaultCredentialFile)
+	writeCodeFreeCredsAtPathForTest(t, source, "272182", "imported-api-key", codeFreeDefaultBaseURL)
+
+	credsPath := filepath.Join(t.TempDir(), codeFreeDefaultCredentialFile)
+	_, err := loadCodeFreeStoredCredentialsLocked(codeFreeDefaultBaseURL, credsPath)
+	if err == nil {
+		t.Fatal("loadCodeFreeStoredCredentialsLocked() error = nil, want missing explicit credentials")
+	}
+	if _, statErr := os.Stat(credsPath); statErr == nil {
+		t.Fatalf("explicit credential path was unexpectedly created at %q", credsPath)
 	}
 }

@@ -14,6 +14,8 @@ var errStopSSE = errors.New("providers: stop sse")
 
 var errStreamFirstEventTimeout = errors.New("providers: stream first event timeout")
 
+var errStreamIdleTimeout = errors.New("providers: stream idle timeout")
+
 const defaultStreamFirstEventTimeout = 5 * time.Minute
 
 type streamFirstEventTimeoutError struct {
@@ -47,6 +49,29 @@ func normalizeStreamFirstEventTimeout(timeout time.Duration) time.Duration {
 
 func newStreamFirstEventTimeoutError(timeout time.Duration) error {
 	return streamFirstEventTimeoutError{timeout: timeout}
+}
+
+type streamIdleTimeoutError struct {
+	timeout time.Duration
+}
+
+func (e streamIdleTimeoutError) Error() string {
+	if e.timeout > 0 {
+		return fmt.Sprintf("%s after %s", errStreamIdleTimeout.Error(), e.timeout)
+	}
+	return errStreamIdleTimeout.Error()
+}
+
+func (e streamIdleTimeoutError) Unwrap() error {
+	return errStreamIdleTimeout
+}
+
+func (e streamIdleTimeoutError) Retryable() bool {
+	return true
+}
+
+func newStreamIdleTimeoutError(timeout time.Duration) error {
+	return streamIdleTimeoutError{timeout: timeout}
 }
 
 // readSSEWithFirstEventTimeout only bounds the initial wait for a model-visible
@@ -90,6 +115,73 @@ func readSSEWithFirstEventTimeout(reader io.Reader, timeout time.Duration, onDat
 				_ = closer.Close()
 			}
 			return newStreamFirstEventTimeoutError(timeout)
+		}
+	}
+}
+
+func readSSEWithEventTimeout(reader io.Reader, firstEventTimeout time.Duration, idleTimeout time.Duration, onData func([]byte) error) error {
+	if firstEventTimeout <= 0 && idleTimeout <= 0 {
+		return readSSE(reader, onData)
+	}
+	errCh := make(chan error, 1)
+	eventCh := make(chan struct{}, 1)
+	go func() {
+		errCh <- readSSE(reader, func(data []byte) error {
+			select {
+			case eventCh <- struct{}{}:
+			default:
+			}
+			return onData(data)
+		})
+	}()
+
+	var timer *time.Timer
+	var timerCh <-chan time.Time
+	resetTimer := func(timeout time.Duration) {
+		if timeout <= 0 {
+			if timer != nil {
+				timer.Stop()
+			}
+			timerCh = nil
+			return
+		}
+		if timer == nil {
+			timer = time.NewTimer(timeout)
+		} else {
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			timer.Reset(timeout)
+		}
+		timerCh = timer.C
+	}
+	stopTimer := func() {
+		if timer != nil {
+			timer.Stop()
+		}
+	}
+	defer stopTimer()
+
+	seenEvent := false
+	resetTimer(firstEventTimeout)
+	for {
+		select {
+		case err := <-errCh:
+			return err
+		case <-eventCh:
+			seenEvent = true
+			resetTimer(idleTimeout)
+		case <-timerCh:
+			if closer, ok := reader.(interface{ Close() error }); ok {
+				_ = closer.Close()
+			}
+			if !seenEvent {
+				return newStreamFirstEventTimeoutError(firstEventTimeout)
+			}
+			return newStreamIdleTimeoutError(idleTimeout)
 		}
 	}
 }

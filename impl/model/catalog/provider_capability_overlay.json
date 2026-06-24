@@ -101,21 +101,5 @@
   "volcengine:doubao-seed-code": {
     "reasoning": true,
     "reasoning_mode": "toggle"
-  },
-  "codefree:glm-4.7": {
-    "context_window": 128000,
-    "reasoning": false
-  },
-  "codefree:deepseek-v3.1-terminus": {
-    "context_window": 128000,
-    "reasoning": false
-  },
-  "codefree:qwen3.5-122b-a10b": {
-    "context_window": 128000,
-    "reasoning": false
-  },
-  "codefree:glm-5.1": {
-    "context_window": 128000,
-    "reasoning": false
   }
 }

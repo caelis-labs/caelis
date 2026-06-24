@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
+
+	"github.com/OnslaughtSnail/caelis/impl/model/internal/codefreecaps"
 )
 
 func TestDiscoverGeminiModels_UsesAPIKeyHeader(t *testing.T) {
@@ -88,10 +90,95 @@ func TestDiscoverOpenRouterModels_ParsesOpenRouterShapeAndConfiguredHeaders(t *t
 	}
 }
 
-func TestCodeFreeContextWindowTokensAreUnifiedAt128K(t *testing.T) {
-	for _, model := range []string{"GLM-4.7", "DeepSeek-V3.1-Terminus", "Qwen3.5-122B-A10B", "GLM-5.1", "custom-codefree-model"} {
-		if got := codeFreeContextWindowTokens(model); got != 128000 {
-			t.Fatalf("codeFreeContextWindowTokens(%q) = %d, want 128000", model, got)
+func TestCodeFreeModelLimitsMatchCodeFreeODirectory(t *testing.T) {
+	tests := []struct {
+		model     string
+		context   int
+		maxOutput int
+		image     bool
+		known     bool
+	}{
+		{model: "GLM-4.7", context: 88000, maxOutput: 8000, image: false, known: true},
+		{model: "Qwen3.5-122B-A10B", context: 128000, maxOutput: 16000, image: true, known: true},
+		{model: "GLM-5.1", context: 128000, maxOutput: 16000, image: false, known: true},
+		{model: "custom-codefree-model", context: 128000, maxOutput: 8000, image: false, known: false},
+	}
+	for _, tt := range tests {
+		got, ok := codefreecaps.Lookup(tt.model)
+		if ok != tt.known {
+			t.Fatalf("codefreecaps.Lookup(%q) ok = %v, want %v", tt.model, ok, tt.known)
+		}
+		contextWindow := codefreecaps.UnknownContextWindowTokens
+		maxOutput := codefreecaps.UnknownMaxOutputTokens
+		image := false
+		if ok {
+			contextWindow = got.ContextWindowTokens
+			maxOutput = got.MaxOutputTokens
+			image = got.SupportsImages
+		}
+		if contextWindow != tt.context || maxOutput != tt.maxOutput || image != tt.image {
+			t.Fatalf("codefreecaps.Lookup(%q) = limits %d/%d image %v, want %d/%d image %v",
+				tt.model, contextWindow, maxOutput, image, tt.context, tt.maxOutput, tt.image)
 		}
 	}
+}
+
+func TestDiscoverCodeFreeModelsParsesLimits(t *testing.T) {
+	credsPath := writeCodeFreeCredsForTest(t, "272182", "api-key")
+	t.Setenv(codeFreeCredsPathEnv, credsPath)
+
+	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("sessionId"); got != "login-session-272182" {
+			t.Fatalf("sessionId = %q, want stored login session", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"optResult":0,"data":[{"modelName":"GLM-4.7","modelType":"text","maxTokens":88000,"maxOutputTokens":8000},{"modelName":"Qwen3.5-122B-A10B","modelType":"multimodal","maxTokens":128000,"maxOutputTokens":16000},{"modelName":"GLM-5.1","modelType":"text","maxTokens":128000,"maxOutputTokens":16000}]}`)
+	}))
+	defer server.Close()
+
+	got, err := discoverCodeFreeModels(context.Background(), server.Client(), Config{
+		Provider:   "codefree",
+		API:        APICodeFree,
+		BaseURL:    server.URL,
+		HTTPClient: server.Client(),
+		Model:      "GLM-4.7",
+	})
+	if err != nil {
+		t.Fatalf("discoverCodeFreeModels failed: %v", err)
+	}
+	byName := map[string]RemoteModel{}
+	for _, item := range got {
+		byName[item.Name] = item
+	}
+	for _, tt := range []struct {
+		model     string
+		context   int
+		maxOutput int
+		image     bool
+	}{
+		{model: "GLM-4.7", context: 88000, maxOutput: 8000, image: false},
+		{model: "Qwen3.5-122B-A10B", context: 128000, maxOutput: 16000, image: true},
+		{model: "GLM-5.1", context: 128000, maxOutput: 16000, image: false},
+	} {
+		item, ok := byName[tt.model]
+		if !ok {
+			t.Fatalf("discoverCodeFreeModels() missing %q in %+v", tt.model, got)
+		}
+		if item.ContextWindowTokens != tt.context || item.MaxOutputTokens != tt.maxOutput {
+			t.Fatalf("discoverCodeFreeModels(%q) limits = %d/%d, want %d/%d",
+				tt.model, item.ContextWindowTokens, item.MaxOutputTokens, tt.context, tt.maxOutput)
+		}
+		if hasImage := containsRemoteCapability(item.Capabilities, "image"); hasImage != tt.image {
+			t.Fatalf("discoverCodeFreeModels(%q) image capability = %v in %#v, want %v", tt.model, hasImage, item.Capabilities, tt.image)
+		}
+	}
+}
+
+func containsRemoteCapability(capabilities []string, want string) bool {
+	for _, capability := range capabilities {
+		if capability == want {
+			return true
+		}
+	}
+	return false
 }

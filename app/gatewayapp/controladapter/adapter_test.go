@@ -509,11 +509,12 @@ func TestAdapterListSessionsSkipsUntitledSessions(t *testing.T) {
 
 func TestAdapterCompleteSlashArgConnectFlowUsesLegacyCommands(t *testing.T) {
 	ctx := context.Background()
-	credsPath := filepath.Join(t.TempDir(), "oauth_creds.json")
+	credsPath := filepath.Join(t.TempDir(), "codefree.json")
 	rawCreds, err := json.Marshal(map[string]any{
-		"id_token": "272182",
-		"apikey":   encryptCodeFreeAPIKeyForRuntimeTest(t, "cached-api-key"),
-		"baseUrl":  "https://www.srdcloud.cn",
+		"encryptedApiKey": encryptCodeFreeAPIKeyForRuntimeTest(t, "cached-api-key"),
+		"userId":          "272182",
+		"sessionId":       "cached-session",
+		"baseUrlSnapshot": "https://www.srdcloud.cn",
 	})
 	if err != nil {
 		t.Fatalf("marshal creds: %v", err)
@@ -1095,14 +1096,12 @@ func TestAdapterCodeFreeModelHasNoReasoningLevels(t *testing.T) {
 
 func TestAdapterConnectCodeFreeUsesExistingOAuthCache(t *testing.T) {
 	ctx := context.Background()
-	credsPath := filepath.Join(t.TempDir(), "oauth_creds.json")
+	credsPath := filepath.Join(t.TempDir(), "codefree.json")
 	raw, err := json.Marshal(map[string]any{
-		"id_token":            "272182",
-		"apikey":              encryptCodeFreeAPIKeyForRuntimeTest(t, "cached-api-key"),
-		"refresh_token":       "refresh-token",
-		"baseUrl":             "https://www.srdcloud.cn",
-		"expires_at_unix_ms":  time.Now().Add(time.Hour).UnixMilli(),
-		"obtained_at_unix_ms": time.Now().UnixMilli(),
+		"encryptedApiKey": encryptCodeFreeAPIKeyForRuntimeTest(t, "cached-api-key"),
+		"userId":          "272182",
+		"sessionId":       "cached-session",
+		"baseUrlSnapshot": "https://www.srdcloud.cn",
 	})
 	if err != nil {
 		t.Fatalf("marshal creds: %v", err)

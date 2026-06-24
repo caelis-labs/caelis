@@ -335,6 +335,7 @@ func cloneHeaders(in map[string]string) map[string]string {
 
 type openAICompatRequest struct {
 	Model           string                     `json:"model"`
+	ModelName       string                     `json:"modelName,omitempty"`
 	Messages        []openAICompatReqMsg       `json:"messages"`
 	Tools           []openAICompatTool         `json:"tools,omitempty"`
 	Stream          bool                       `json:"stream"`
