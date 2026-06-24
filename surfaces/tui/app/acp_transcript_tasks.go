@@ -375,12 +375,13 @@ func styleTaskDetail(detail string, ctx BlockRenderContext) string {
 		if isTaskHandleDetail(detail) {
 			return lipgloss.NewStyle().Foreground(ctx.Theme.Focus).Render(detail)
 		}
-		return ctx.Theme.SecondaryTextStyle().Render(detail)
+		return styleToolDetailNumbers(detail, ctx, ctx.Theme.SecondaryTextStyle())
 	}
 	if !isTaskHandleDetail(first) {
-		return ctx.Theme.SecondaryTextStyle().Render(detail)
+		return styleToolDetailNumbers(detail, ctx, ctx.Theme.SecondaryTextStyle())
 	}
-	return lipgloss.NewStyle().Foreground(ctx.Theme.Focus).Render(first) + ctx.Theme.SecondaryTextStyle().Render(" "+rest)
+	return lipgloss.NewStyle().Foreground(ctx.Theme.Focus).Render(first) +
+		styleToolDetailNumbers(" "+rest, ctx, ctx.Theme.SecondaryTextStyle())
 }
 
 func isTaskHandleDetail(value string) bool {

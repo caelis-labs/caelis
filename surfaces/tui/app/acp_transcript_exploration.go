@@ -849,7 +849,7 @@ func styleExplorationSummaryRow(row string, ctx BlockRenderContext) string {
 
 func styleExplorationDetail(detail string, ctx BlockRenderContext) string {
 	failIdx := nextExplorationFailedWordIndex(detail)
-	numIdx, _ := nextExplorationNumberIndex(detail)
+	numIdx, _ := nextToolDetailNumberIndex(detail)
 	if failIdx < 0 && numIdx < 0 {
 		return ctx.Theme.SecondaryTextStyle().Render(detail)
 	}
@@ -857,7 +857,7 @@ func styleExplorationDetail(detail string, ctx BlockRenderContext) string {
 	remaining := detail
 	for len(remaining) > 0 {
 		nextFailIdx := nextExplorationFailedWordIndex(remaining)
-		nextNumIdx, nextNumLen := nextExplorationNumberIndex(remaining)
+		nextNumIdx, nextNumLen := nextToolDetailNumberIndex(remaining)
 		if nextFailIdx < 0 && nextNumIdx < 0 {
 			styled.WriteString(ctx.Theme.SecondaryTextStyle().Render(remaining))
 			break
@@ -868,7 +868,7 @@ func styleExplorationDetail(detail string, ctx BlockRenderContext) string {
 		if idx < 0 || (nextNumIdx >= 0 && nextNumIdx < idx) {
 			idx = nextNumIdx
 			tokenLen = nextNumLen
-			tokenStyle = explorationNumberStyle(ctx)
+			tokenStyle = toolDetailNumberStyle(ctx)
 		}
 		if idx > 0 {
 			styled.WriteString(ctx.Theme.SecondaryTextStyle().Render(remaining[:idx]))
@@ -877,20 +877,6 @@ func styleExplorationDetail(detail string, ctx BlockRenderContext) string {
 		remaining = remaining[idx+tokenLen:]
 	}
 	return styled.String()
-}
-
-func explorationNumberStyle(ctx BlockRenderContext) lipgloss.Style {
-	style := lipgloss.NewStyle().Bold(true)
-	switch {
-	case ctx.Theme.Warning != nil:
-		return style.Foreground(ctx.Theme.Warning)
-	case ctx.Theme.Accent != nil:
-		return style.Foreground(ctx.Theme.Accent)
-	case ctx.Theme.Focus != nil:
-		return style.Foreground(ctx.Theme.Focus)
-	default:
-		return style
-	}
 }
 
 func splitExplorationFailedStatus(detail string) (string, bool) {
@@ -904,43 +890,6 @@ func splitExplorationFailedStatus(detail string) (string, bool) {
 		return strings.TrimSpace(trimmed[:len(trimmed)-len(suffix)]), true
 	}
 	return "", false
-}
-
-func nextExplorationNumberIndex(detail string) (int, int) {
-	for i := 0; i < len(detail); i++ {
-		if detail[i] < '0' || detail[i] > '9' {
-			continue
-		}
-		end := i + 1
-		for end < len(detail) && detail[end] >= '0' && detail[end] <= '9' {
-			end++
-		}
-		if explorationNumberHasSummaryUnit(detail, i, end) {
-			return i, end - i
-		}
-		i = end - 1
-	}
-	return -1, 0
-}
-
-func explorationNumberHasSummaryUnit(detail string, start int, end int) bool {
-	if start > 0 && isASCIIAlphaNum(detail[start-1]) {
-		return false
-	}
-	rest := strings.TrimLeft(detail[end:], " \t")
-	if rest == "" {
-		return false
-	}
-	unitEnd := 0
-	for unitEnd < len(rest) && isASCIIAlphaNum(rest[unitEnd]) {
-		unitEnd++
-	}
-	switch strings.ToLower(rest[:unitEnd]) {
-	case "hit", "hits", "file", "files", "match", "matches", "entry", "entries", "result", "results", "line", "lines":
-		return true
-	default:
-		return false
-	}
 }
 
 func nextExplorationFailedWordIndex(detail string) int {

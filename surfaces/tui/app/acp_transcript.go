@@ -298,7 +298,124 @@ func styleACPTranscriptHeaderDetail(ctx BlockRenderContext, verb string, detail 
 	if strings.EqualFold(strings.TrimSpace(verb), "Spawned") {
 		return styleSpawnedHeaderDetail(ctx, detail)
 	}
-	return ctx.Theme.ToolArgsStyle().Render(detail)
+	return styleToolDetailNumbers(detail, ctx, ctx.Theme.ToolArgsStyle())
+}
+
+func styleToolDetailNumbers(detail string, ctx BlockRenderContext, baseStyle lipgloss.Style) string {
+	if idx, _ := nextToolDetailNumberIndex(detail); idx < 0 {
+		return baseStyle.Render(detail)
+	}
+	var styled strings.Builder
+	remaining := detail
+	for len(remaining) > 0 {
+		idx, tokenLen := nextToolDetailNumberIndex(remaining)
+		if idx < 0 {
+			styled.WriteString(baseStyle.Render(remaining))
+			break
+		}
+		if idx > 0 {
+			styled.WriteString(baseStyle.Render(remaining[:idx]))
+		}
+		styled.WriteString(toolDetailNumberStyle(ctx).Render(remaining[idx : idx+tokenLen]))
+		remaining = remaining[idx+tokenLen:]
+	}
+	return styled.String()
+}
+
+func toolDetailNumberStyle(ctx BlockRenderContext) lipgloss.Style {
+	return ctx.Theme.TextStyle().Bold(true)
+}
+
+func nextToolDetailNumberIndex(detail string) (int, int) {
+	for i := 0; i < len(detail); i++ {
+		if detail[i] < '0' || detail[i] > '9' {
+			continue
+		}
+		end := i + 1
+		for end < len(detail) && detail[end] >= '0' && detail[end] <= '9' {
+			end++
+		}
+		if toolDetailNumberHasSummaryUnit(detail, i, end) ||
+			toolDetailNumberInLineRange(detail, i, end) ||
+			toolDetailNumberHasDurationUnit(detail, i, end) {
+			return i, end - i
+		}
+		i = end - 1
+	}
+	return -1, 0
+}
+
+func toolDetailNumberHasSummaryUnit(detail string, start int, end int) bool {
+	if start > 0 && isASCIIAlphaNum(detail[start-1]) {
+		return false
+	}
+	rest := strings.TrimLeft(detail[end:], " \t")
+	if rest == "" {
+		return false
+	}
+	unitEnd := 0
+	for unitEnd < len(rest) && isASCIIAlphaNum(rest[unitEnd]) {
+		unitEnd++
+	}
+	switch strings.ToLower(rest[:unitEnd]) {
+	case "hit", "hits", "file", "files", "match", "matches", "entry", "entries", "result", "results", "line", "lines":
+		return true
+	default:
+		return false
+	}
+}
+
+func toolDetailNumberInLineRange(detail string, start int, end int) bool {
+	for i := end; i < len(detail); i++ {
+		switch detail[i] {
+		case ' ', '\t':
+			continue
+		case '~':
+			for j := i + 1; j < len(detail); j++ {
+				switch {
+				case detail[j] == ' ' || detail[j] == '\t':
+					continue
+				case detail[j] >= '0' && detail[j] <= '9':
+					return start == 0 || !isASCIIAlphaNum(detail[start-1])
+				default:
+					return false
+				}
+			}
+			return false
+		default:
+			break
+		}
+		break
+	}
+	for i := start - 1; i >= 0; i-- {
+		switch detail[i] {
+		case ' ', '\t':
+			continue
+		case '~':
+			return true
+		default:
+			return false
+		}
+	}
+	return false
+}
+
+func toolDetailNumberHasDurationUnit(detail string, start int, end int) bool {
+	if start > 0 && (isASCIIAlphaNum(detail[start-1]) || detail[start-1] == '.') {
+		return false
+	}
+	rest := detail[end:]
+	unitLen := 0
+	switch {
+	case strings.HasPrefix(rest, "ms"):
+		unitLen = len("ms")
+	case strings.HasPrefix(rest, "s"):
+		unitLen = len("s")
+	default:
+		return false
+	}
+	after := end + unitLen
+	return after >= len(detail) || !isASCIIAlphaNum(detail[after])
 }
 
 func styleSpawnedHeaderDetail(ctx BlockRenderContext, detail string) string {

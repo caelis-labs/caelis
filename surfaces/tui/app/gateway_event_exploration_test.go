@@ -1129,16 +1129,20 @@ func TestExplorationSearchTitlePathOnlyFallsBackToOutput(t *testing.T) {
 func TestExplorationDetailStylesNumbers(t *testing.T) {
 	model := NewModel(Config{ColorProfile: colorprofile.TrueColor})
 	ctx := BlockRenderContext{Width: 96, TermWidth: 96, Theme: model.theme}
-	detail := `file2.go "Needle" 30 hits in 3 files failed`
+	detail := `file2.go "Needle" 30 hits in 3 files demo.py 1~100 wait 500ms failed`
 	styled := styleExplorationDetail(detail, ctx)
 	if got := ansi.Strip(styled); got != detail {
 		t.Fatalf("strip(styled) = %q, want %q\nstyled=%q", got, detail, styled)
 	}
-	if !strings.Contains(styled, explorationNumberStyle(ctx).Render("30")) ||
-		!strings.Contains(styled, explorationNumberStyle(ctx).Render("3")) {
-		t.Fatalf("styled detail = %q, want highlighted numeric fragments", styled)
+	for _, want := range []string{"30", "3", "1", "100", "500"} {
+		if !strings.Contains(styled, toolDetailNumberStyle(ctx).Render(want)) {
+			t.Fatalf("styled detail = %q, want highlighted numeric fragment %q", styled, want)
+		}
 	}
-	if strings.Contains(styled, explorationNumberStyle(ctx).Render("2")) {
+	if got, want := ptrString(styleForegroundToAnsiPtr(toolDetailNumberStyle(ctx))), ptrString(styleForegroundToAnsiPtr(model.theme.TextStyle())); got != want {
+		t.Fatalf("tool detail number foreground = %q, want text foreground %q", got, want)
+	}
+	if strings.Contains(styled, toolDetailNumberStyle(ctx).Render("2")) {
 		t.Fatalf("styled detail = %q, filename digit should not be highlighted", styled)
 	}
 	if !strings.Contains(styled, model.theme.ToolErrorStyle().Render("failed")) {
@@ -1146,7 +1150,44 @@ func TestExplorationDetailStylesNumbers(t *testing.T) {
 	}
 }
 
-func TestExplorationNumberIndexTargetsSummaryUnits(t *testing.T) {
+func TestACPToolHeadersStyleDisplayNumbers(t *testing.T) {
+	model := NewModel(Config{ColorProfile: colorprofile.TrueColor})
+	ctx := BlockRenderContext{Width: 96, TermWidth: 96, Theme: model.theme}
+	for _, tt := range []struct {
+		name string
+		row  string
+		want []string
+	}{
+		{name: "read range", row: "• Read logger.go 1~110", want: []string{"1", "110"}},
+		{name: "wait duration", row: "• Wait leo 3s", want: []string{"3"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			styled := renderACPTranscriptHeaderRow("block", tt.row, 96, ctx, "").Styled
+			if got := ansi.Strip(styled); got != tt.row {
+				t.Fatalf("strip(styled) = %q, want %q\nstyled=%q", got, tt.row, styled)
+			}
+			for _, want := range tt.want {
+				if !strings.Contains(styled, toolDetailNumberStyle(ctx).Render(want)) {
+					t.Fatalf("styled row = %q, want highlighted numeric fragment %q", styled, want)
+				}
+			}
+		})
+	}
+}
+
+func TestTaskDetailStylesWaitDurationNumbers(t *testing.T) {
+	model := NewModel(Config{ColorProfile: colorprofile.TrueColor})
+	ctx := BlockRenderContext{Width: 96, TermWidth: 96, Theme: model.theme}
+	styled := styleTaskDetail("leo 3s", ctx)
+	if got := ansi.Strip(styled); got != "leo 3s" {
+		t.Fatalf("strip(styled) = %q, want leo 3s\nstyled=%q", got, styled)
+	}
+	if !strings.Contains(styled, toolDetailNumberStyle(ctx).Render("3")) {
+		t.Fatalf("styled detail = %q, want highlighted wait duration", styled)
+	}
+}
+
+func TestToolDetailNumberIndexTargetsDisplayNumbers(t *testing.T) {
 	tests := []struct {
 		name string
 		text string
@@ -1154,19 +1195,23 @@ func TestExplorationNumberIndexTargetsSummaryUnits(t *testing.T) {
 	}{
 		{name: "hits", text: `"Needle" 30 hits`, want: "30"},
 		{name: "files", text: `in 3 files`, want: "3"},
+		{name: "read range start", text: `logger.go 1~110`, want: "1"},
+		{name: "read range end", text: `~110`, want: "110"},
+		{name: "seconds duration", text: `leo 3s`, want: "3"},
+		{name: "milliseconds duration", text: `Wait 500ms`, want: "500"},
 		{name: "filename digit ignored", text: `file2.go`, want: ""},
 		{name: "quoted digit ignored", text: `"S3 upload"`, want: ""},
 		{name: "version digit ignored", text: `v1.2 release`, want: ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			idx, size := nextExplorationNumberIndex(tt.text)
+			idx, size := nextToolDetailNumberIndex(tt.text)
 			got := ""
 			if idx >= 0 {
 				got = tt.text[idx : idx+size]
 			}
 			if got != tt.want {
-				t.Fatalf("nextExplorationNumberIndex() = %q, want %q", got, tt.want)
+				t.Fatalf("nextToolDetailNumberIndex() = %q, want %q", got, tt.want)
 			}
 		})
 	}
