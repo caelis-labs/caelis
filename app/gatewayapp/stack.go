@@ -145,13 +145,6 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	if err != nil {
 		return nil, err
 	}
-	if doc.Sandbox.NetworkEnabled == nil {
-		networkEnabled := true
-		doc.Sandbox.NetworkEnabled = &networkEnabled
-		if err := configStore.Save(doc); err != nil {
-			return nil, err
-		}
-	}
 	effectiveApprovalMode := approvalMode(firstNonEmpty(cfg.ApprovalMode, doc.Runtime.ApprovalMode))
 	effectivePolicyProfile := policyProfile(firstNonEmpty(cfg.PolicyProfile, doc.Runtime.PolicyProfile))
 	baseAssembly := assembly.CloneResolvedAssembly(cfg.Assembly)

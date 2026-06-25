@@ -631,12 +631,105 @@ func TestNewLocalStackAllowsEmptyInitialModelConfig(t *testing.T) {
 	if got := stack.DefaultModelAlias(); got != "" {
 		t.Fatalf("DefaultModelAlias() = %q, want empty", got)
 	}
-	raw, err := os.ReadFile(filepath.Join(root, "config.json"))
-	if err != nil {
-		t.Fatalf("ReadFile(config.json) error = %v", err)
+	assertSandboxNetworkEnabledDefault(t, stack)
+	if _, err := os.Stat(filepath.Join(root, "config.json")); !os.IsNotExist(err) {
+		t.Fatalf("config.json stat error = %v, want no config write during stack construction", err)
 	}
-	if !strings.Contains(string(raw), `"network_enabled": true`) {
-		t.Fatalf("config.json = %s, want persisted sandbox network default", raw)
+}
+
+func TestNewLocalStackDoesNotPersistSandboxNetworkDefault(t *testing.T) {
+	root := t.TempDir()
+	workdir := t.TempDir()
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatalf("MkdirAll(root) error = %v", err)
+	}
+	const rawConfig = `{"runtime":{"approval_mode":"manual"}}`
+	configPath := filepath.Join(root, "config.json")
+	if err := os.WriteFile(configPath, []byte(rawConfig), 0o600); err != nil {
+		t.Fatalf("WriteFile(config.json) error = %v", err)
+	}
+
+	stack, err := newGatewayAppTestStack(t, Config{
+		AppName:      "caelis",
+		UserID:       "sandbox-default-test",
+		StoreDir:     root,
+		WorkspaceKey: workdir,
+		WorkspaceCWD: workdir,
+		Assembly:     assembly.ResolvedAssembly{},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+	assertSandboxNetworkEnabledDefault(t, stack)
+	assertConfigSandboxNetworkUnset(t, configPath)
+}
+
+func TestNewLocalStackProductionBootstrapDoesNotPersistSandboxNetworkDefault(t *testing.T) {
+	root := t.TempDir()
+	workdir := t.TempDir()
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatalf("MkdirAll(root) error = %v", err)
+	}
+	configPath := filepath.Join(root, "config.json")
+	if err := os.WriteFile(configPath, []byte(`{"runtime":{"approval_mode":"manual"}}`), 0o600); err != nil {
+		t.Fatalf("WriteFile(config.json) error = %v", err)
+	}
+
+	stack, err := NewLocalStack(Config{
+		AppName:                     "caelis",
+		UserID:                      "sandbox-bootstrap-test",
+		StoreDir:                    root,
+		WorkspaceKey:                workdir,
+		WorkspaceCWD:                workdir,
+		Assembly:                    assembly.ResolvedAssembly{},
+		Sandbox:                     SandboxConfig{RequestedType: "host"},
+		SkillDirs:                   []string{t.TempDir()},
+		DisableBuiltInAgentProfiles: false,
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+	assertSandboxNetworkEnabledDefault(t, stack)
+	assertConfigSandboxNetworkUnset(t, configPath)
+	doc, err := LoadAppConfig(root)
+	if err != nil {
+		t.Fatalf("LoadAppConfig() error = %v", err)
+	}
+	if len(doc.AgentBindings.Bindings) == 0 {
+		t.Fatal("agent bindings were not bootstrapped; test did not exercise production save path")
+	}
+}
+
+func assertSandboxNetworkEnabledDefault(t *testing.T, stack *Stack) {
+	t.Helper()
+	if stack == nil {
+		t.Fatal("stack is nil")
+	}
+	if stack.sandbox.NetworkEnabled == nil || !*stack.sandbox.NetworkEnabled {
+		t.Fatalf("stack sandbox NetworkEnabled = %#v, want runtime true default", stack.sandbox.NetworkEnabled)
+	}
+}
+
+func assertConfigSandboxNetworkUnset(t *testing.T, configPath string) {
+	t.Helper()
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%s) error = %v", configPath, err)
+	}
+	var root map[string]json.RawMessage
+	if err := json.Unmarshal(data, &root); err != nil {
+		t.Fatalf("Unmarshal(%s) error = %v\n%s", configPath, err, data)
+	}
+	rawSandbox, ok := root["sandbox"]
+	if !ok {
+		return
+	}
+	var sandbox map[string]json.RawMessage
+	if err := json.Unmarshal(rawSandbox, &sandbox); err != nil {
+		t.Fatalf("sandbox config is not a JSON object: %v\n%s", err, rawSandbox)
+	}
+	if _, ok := sandbox["network_enabled"]; ok {
+		t.Fatalf("config sandbox.network_enabled persisted unexpectedly:\n%s", data)
 	}
 }
 

@@ -172,7 +172,7 @@ func TestAppConfigStoreDoesNotPersistEnvHydratedToken(t *testing.T) {
 	}
 }
 
-func TestAppConfigStorePersistsSandboxNetworkEnabledDefault(t *testing.T) {
+func TestAppConfigStoreDoesNotPersistImplicitSandboxNetworkDefault(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -185,13 +185,14 @@ func TestAppConfigStorePersistsSandboxNetworkEnabledDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if doc.Sandbox.NetworkEnabled == nil || !*doc.Sandbox.NetworkEnabled {
-		t.Fatalf("Sandbox.NetworkEnabled = %#v, want persisted true default", doc.Sandbox.NetworkEnabled)
+	if doc.Sandbox.NetworkEnabled != nil {
+		t.Fatalf("Sandbox.NetworkEnabled = %#v, want unset persisted config value", doc.Sandbox.NetworkEnabled)
 	}
-	raw := readConfigFileForTest(t, root)
-	if !strings.Contains(raw, `"network_enabled": true`) {
-		t.Fatalf("config = %s, want sandbox network_enabled default", raw)
+	effective := effectiveSandboxConfig(doc.Sandbox, t.TempDir())
+	if effective.NetworkEnabled == nil || !*effective.NetworkEnabled {
+		t.Fatalf("effective Sandbox.NetworkEnabled = %#v, want semantic true default", effective.NetworkEnabled)
 	}
+	assertConfigSandboxNetworkUnset(t, filepath.Join(root, "config.json"))
 }
 
 func TestAppConfigStoreLoadsManualSandboxNetworkDisabled(t *testing.T) {

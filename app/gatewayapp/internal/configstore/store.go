@@ -274,7 +274,7 @@ func (s *Store) Save(doc AppConfig) error {
 	doc.Models.Profiles = dedupeModelProfilesForSave(doc.Models.Profiles)
 	doc.Agents = DedupeAgentConfigs(doc.Agents)
 	doc.AgentBindings = agentprofile.NormalizeBindingSet(doc.AgentBindings)
-	doc.Sandbox = DefaultSandboxConfig(doc.Sandbox)
+	doc.Sandbox = NormalizeSandboxConfig(doc.Sandbox)
 	doc.Runtime = NormalizeRuntimeConfig(doc.Runtime)
 	doc.Plugins = DedupePluginConfigs(doc.Plugins)
 	doc.PluginMarketplaces = DedupeMarketplaceConfigs(doc.PluginMarketplaces)
