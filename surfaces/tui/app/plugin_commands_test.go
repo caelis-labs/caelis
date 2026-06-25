@@ -12,11 +12,9 @@ import (
 	"github.com/OnslaughtSnail/caelis/protocol/acp/control"
 )
 
-// pluginStubService implements the plugin-relevant subset of control.Service
-// by embedding a bridgeTestDriver (which implements the full interface with
-// no-op stubs) and overriding only the plugin methods we care about.
+// pluginStubService implements only the plugin capability needed by /plugin
+// commands.
 type pluginStubService struct {
-	bridgeTestDriver
 	listFn              func(context.Context) ([]control.PluginSnapshot, error)
 	addMarketplaceFn    func(context.Context, string) (control.MarketplaceSnapshot, error)
 	listMarketplacesFn  func(context.Context) ([]control.MarketplaceSnapshot, error)
@@ -29,6 +27,8 @@ type pluginStubService struct {
 	removeFn            func(context.Context, string) error
 	inspectFn           func(context.Context, string) (control.PluginSnapshot, error)
 }
+
+var _ control.PluginService = (*pluginStubService)(nil)
 
 func (s *pluginStubService) ListPlugins(ctx context.Context) ([]control.PluginSnapshot, error) {
 	if s.listFn != nil {
@@ -97,16 +97,9 @@ func (s *pluginStubService) InspectPlugin(ctx context.Context, id string) (contr
 	return control.PluginSnapshot{}, nil
 }
 
-// capturedNotice captures the last notice text sent via sendNotice.
-func captureNotices(t *testing.T) (func(), *[]string) {
-	t.Helper()
-	var notices []string
-	return func() {}, &notices
-}
-
 // runPluginCmd invokes slashPluginWithContext with a no-op sender and returns
 // the TaskResultMsg and the notice text collected.
-func runPluginCmd(svc control.Service, args string) (TaskResultMsg, []string) {
+func runPluginCmd(svc control.PluginService, args string) (TaskResultMsg, []string) {
 	var notices []string
 	send := func(msg tea.Msg) {
 		if n, ok := msg.(LogChunkMsg); ok {

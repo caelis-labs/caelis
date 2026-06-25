@@ -10,7 +10,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/protocol/acp/control"
 )
 
-func slashPluginMarketplaceWithContext(ctx context.Context, service control.Service, send func(tea.Msg), args string) TaskResultMsg {
+func slashPluginMarketplaceWithContext(ctx context.Context, service control.PluginService, send func(tea.Msg), args string) TaskResultMsg {
 	action, rest := splitFirst(strings.TrimSpace(args))
 	switch action {
 	case "add":

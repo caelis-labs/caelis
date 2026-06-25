@@ -4,6 +4,15 @@ import "github.com/OnslaughtSnail/caelis/protocol/acp/control"
 
 var (
 	_ control.Service                   = (*Adapter)(nil)
+	_ control.StatusService             = (*Adapter)(nil)
+	_ control.TurnService               = (*Adapter)(nil)
+	_ control.SessionService            = (*Adapter)(nil)
+	_ control.SessionModeService        = (*Adapter)(nil)
+	_ control.ModelService              = (*Adapter)(nil)
+	_ control.SandboxService            = (*Adapter)(nil)
+	_ control.AgentService              = (*Adapter)(nil)
+	_ control.CompletionService         = (*Adapter)(nil)
+	_ control.PluginService             = (*Adapter)(nil)
 	_ control.StreamSubscriber          = (*Adapter)(nil)
 	_ control.LightweightStatusProvider = (*Adapter)(nil)
 )
