@@ -16,7 +16,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strings"
 	"sync"
 	"syscall"
