@@ -5,6 +5,7 @@ import (
 	"iter"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -12,6 +13,7 @@ import (
 	kernelimpl "github.com/OnslaughtSnail/caelis/internal/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/agent"
 	"github.com/OnslaughtSnail/caelis/ports/gateway"
+	"github.com/OnslaughtSnail/caelis/ports/plugin"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
@@ -150,6 +152,213 @@ func TestStackRejectsReconfigureWhileActiveTurn(t *testing.T) {
 
 	close(blocking.release)
 	for range handle.Handle.Events() {
+	}
+}
+
+func TestRebuildGatewayRejectsActiveTurnBeforePlanLoad(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	stack, activeSession := newLocalStateTestStack(t)
+	pluginRoot := filepath.Join(t.TempDir(), "malformed-plugin")
+	if err := os.MkdirAll(pluginRoot, 0o700); err != nil {
+		t.Fatalf("MkdirAll(pluginRoot) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginRoot, "gemini-extension.json"), []byte("invalid-json{"), 0o600); err != nil {
+		t.Fatalf("WriteFile(manifest) error = %v", err)
+	}
+	if err := stack.store.Save(AppConfig{
+		Plugins: []PluginConfig{{ID: "malformed-plugin", Root: pluginRoot, Enabled: true}},
+	}); err != nil {
+		t.Fatalf("store.Save() error = %v", err)
+	}
+
+	blocking := &blockingRuntime{session: activeSession, release: make(chan struct{})}
+	gw, err := kernelimpl.New(kernelimpl.Config{
+		Sessions: stack.Sessions,
+		Runtime:  blocking,
+		Resolver: blockingResolver{},
+	})
+	if err != nil {
+		t.Fatalf("kernel.New() error = %v", err)
+	}
+	stack.gateway = gw
+
+	handle, err := stack.currentGateway().BeginTurn(ctx, gateway.BeginTurnRequest{
+		SessionRef: activeSession.SessionRef,
+		Input:      "hold active",
+	})
+	if err != nil {
+		t.Fatalf("BeginTurn() error = %v", err)
+	}
+	defer handle.Handle.Close()
+	defer func() {
+		close(blocking.release)
+		for range handle.Handle.Events() {
+		}
+	}()
+
+	err = stack.rebuildGateway()
+	if err == nil {
+		t.Fatal("rebuildGateway() error = nil, want active-turn rejection")
+	}
+	if !strings.Contains(err.Error(), "active") {
+		t.Fatalf("rebuildGateway() error = %v, want active-turn rejection", err)
+	}
+	if strings.Contains(err.Error(), "parse enabled plugin") {
+		t.Fatalf("rebuildGateway() error = %v, want fail-fast before plugin parsing", err)
+	}
+}
+
+func TestLoadGatewayBuildPlanInvalidPluginDoesNotMutateStack(t *testing.T) {
+	t.Parallel()
+
+	stack, _ := newLocalStateTestStack(t)
+	beforeGateway := stack.gateway
+	beforeExec := stack.exec
+	beforeMCP := stack.mcpMgr
+	beforePlugins := clonePluginConfigs(stack.runtime.Plugins)
+	beforeBaseMetadata := cloneMap(stack.runtime.BaseMetadata)
+
+	pluginRoot := filepath.Join(t.TempDir(), "malformed-plugin")
+	if err := os.MkdirAll(pluginRoot, 0o700); err != nil {
+		t.Fatalf("MkdirAll(pluginRoot) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginRoot, "gemini-extension.json"), []byte("invalid-json{"), 0o600); err != nil {
+		t.Fatalf("WriteFile(manifest) error = %v", err)
+	}
+	if err := stack.store.Save(AppConfig{
+		Plugins: []PluginConfig{{ID: "malformed-plugin", Root: pluginRoot, Enabled: true}},
+	}); err != nil {
+		t.Fatalf("store.Save() error = %v", err)
+	}
+
+	sandboxCfg := effectiveSandboxConfig(stack.sandbox, stack.Workspace.CWD)
+	_, err := stack.loadGatewayBuildPlan(sandboxCfg, stack.runtime)
+	if err == nil {
+		t.Fatal("loadGatewayBuildPlan() error = nil, want plugin parse failure")
+	}
+	if !strings.Contains(err.Error(), "parse enabled plugin") {
+		t.Fatalf("loadGatewayBuildPlan() error = %v, want plugin parse failure", err)
+	}
+	if stack.gateway != beforeGateway {
+		t.Fatalf("gateway changed on plan failure: before=%p after=%p", beforeGateway, stack.gateway)
+	}
+	if stack.exec != beforeExec {
+		t.Fatalf("exec changed on plan failure: before=%p after=%p", beforeExec, stack.exec)
+	}
+	if stack.mcpMgr != beforeMCP {
+		t.Fatalf("mcp manager changed on plan failure: before=%p after=%p", beforeMCP, stack.mcpMgr)
+	}
+	if !reflect.DeepEqual(stack.runtime.Plugins, beforePlugins) {
+		t.Fatalf("runtime plugins = %+v, want unchanged %+v", stack.runtime.Plugins, beforePlugins)
+	}
+	if !reflect.DeepEqual(stack.runtime.BaseMetadata, beforeBaseMetadata) {
+		t.Fatalf("runtime base metadata = %+v, want unchanged %+v", stack.runtime.BaseMetadata, beforeBaseMetadata)
+	}
+}
+
+func TestBuildGatewayRuntimeMCPFailureDoesNotSwapStack(t *testing.T) {
+	t.Parallel()
+
+	stack, _ := newLocalStateTestStack(t)
+	beforeGateway := stack.gateway
+	beforeExec := stack.exec
+	beforeMCP := stack.mcpMgr
+	plan, err := stack.loadGatewayBuildPlan(effectiveSandboxConfig(stack.sandbox, stack.Workspace.CWD), stack.runtime)
+	if err != nil {
+		t.Fatalf("loadGatewayBuildPlan() error = %v", err)
+	}
+	plan.MCPServerSpecs = []plugin.MCPServerSpec{{
+		PluginID:  "broken",
+		Name:      "server",
+		Transport: plugin.MCPTransportStdio,
+	}}
+
+	bundle, err := stack.buildGatewayRuntime(plan)
+	if err == nil {
+		t.Fatal("buildGatewayRuntime() error = nil, want MCP init failure")
+	}
+	if bundle != nil {
+		t.Fatalf("buildGatewayRuntime() bundle = %+v, want nil on error", bundle)
+	}
+	if !strings.Contains(err.Error(), "failed to initialize MCP servers") {
+		t.Fatalf("buildGatewayRuntime() error = %v, want MCP init failure", err)
+	}
+	if stack.gateway != beforeGateway {
+		t.Fatalf("gateway changed on build failure: before=%p after=%p", beforeGateway, stack.gateway)
+	}
+	if stack.exec != beforeExec {
+		t.Fatalf("exec changed on build failure: before=%p after=%p", beforeExec, stack.exec)
+	}
+	if stack.mcpMgr != beforeMCP {
+		t.Fatalf("mcp manager changed on build failure: before=%p after=%p", beforeMCP, stack.mcpMgr)
+	}
+}
+
+func TestInstallGatewayRuntimeBundleRejectsLateActiveTurnAndClosesBundle(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	stack, activeSession := newLocalStateTestStack(t)
+	beforeExec := stack.exec
+	beforeMCP := stack.mcpMgr
+
+	blocking := &blockingRuntime{session: activeSession, release: make(chan struct{})}
+	oldGateway, err := kernelimpl.New(kernelimpl.Config{
+		Sessions: stack.Sessions,
+		Runtime:  blocking,
+		Resolver: blockingResolver{},
+	})
+	if err != nil {
+		t.Fatalf("kernel.New() error = %v", err)
+	}
+	stack.gateway = oldGateway
+
+	handle, err := stack.currentGateway().BeginTurn(ctx, gateway.BeginTurnRequest{
+		SessionRef: activeSession.SessionRef,
+		Input:      "hold active",
+	})
+	if err != nil {
+		t.Fatalf("BeginTurn() error = %v", err)
+	}
+	defer handle.Handle.Close()
+	defer func() {
+		close(blocking.release)
+		for range handle.Handle.Events() {
+		}
+	}()
+
+	plan, err := stack.loadGatewayBuildPlan(effectiveSandboxConfig(stack.sandbox, stack.Workspace.CWD), stack.runtime)
+	if err != nil {
+		t.Fatalf("loadGatewayBuildPlan() error = %v", err)
+	}
+	bundle, err := stack.buildGatewayRuntime(plan)
+	if err != nil {
+		t.Fatalf("buildGatewayRuntime() error = %v", err)
+	}
+	if bundle.Gateway == nil || bundle.Engine == nil || bundle.Exec == nil || bundle.MCP == nil {
+		t.Fatalf("buildGatewayRuntime() incomplete bundle: %+v", bundle)
+	}
+
+	err = stack.installGatewayRuntimeBundle(oldGateway, bundle)
+	if err == nil {
+		t.Fatal("installGatewayRuntimeBundle() error = nil, want active-turn rejection")
+	}
+	if !strings.Contains(err.Error(), "active") {
+		t.Fatalf("installGatewayRuntimeBundle() error = %v, want active-turn rejection", err)
+	}
+	if stack.gateway != oldGateway {
+		t.Fatalf("gateway swapped despite active turn: before=%p after=%p", oldGateway, stack.gateway)
+	}
+	if stack.exec != beforeExec {
+		t.Fatalf("exec swapped despite active turn: before=%p after=%p", beforeExec, stack.exec)
+	}
+	if stack.mcpMgr != beforeMCP {
+		t.Fatalf("mcp manager swapped despite active turn: before=%p after=%p", beforeMCP, stack.mcpMgr)
+	}
+	if bundle.Gateway != nil || bundle.Engine != nil || bundle.Exec != nil || bundle.MCP != nil {
+		t.Fatalf("installGatewayRuntimeBundle() left bundle resources open: %+v", bundle)
 	}
 }
 
