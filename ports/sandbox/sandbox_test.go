@@ -67,6 +67,100 @@ func TestSelectionStatusUsesLightweightProvider(t *testing.T) {
 	}
 }
 
+func TestLifecycleTargetForUsesCurrentMatchingRuntime(t *testing.T) {
+	current := &refreshRuntime{
+		fakeRuntime: fakeRuntime{
+			backend: BackendCustom,
+			status: Status{
+				RequestedBackend: "lifecycle-current",
+				ResolvedBackend:  "lifecycle-current",
+			},
+		},
+	}
+
+	target, err := LifecycleTargetFor(Config{RequestedBackend: "lifecycle-current"}, current)
+	if err != nil {
+		t.Fatalf("LifecycleTargetFor() error = %v", err)
+	}
+	if !target.Current || target.Runtime != current || target.NoOp {
+		t.Fatalf("target = %#v, want current runtime", target)
+	}
+}
+
+func TestLifecycleTargetForBuildsFactoryWhenCurrentLacksLifecycle(t *testing.T) {
+	backend := Backend("lifecycle-current-no-capability")
+	current := &fakeRuntime{
+		backend: backend,
+		status: Status{
+			RequestedBackend: backend,
+			ResolvedBackend:  backend,
+		},
+	}
+	runtime := &refreshRuntime{fakeRuntime: fakeRuntime{backend: backend}}
+	factory := &fakeLifecycleFactory{backend: backend, runtime: runtime}
+	lifecycleFactoriesMu.Lock()
+	original := maps.Clone(lifecycleFactories)
+	delete(lifecycleFactories, backend)
+	lifecycleFactoriesMu.Unlock()
+	t.Cleanup(func() {
+		lifecycleFactoriesMu.Lock()
+		lifecycleFactories = original
+		lifecycleFactoriesMu.Unlock()
+	})
+
+	if err := RegisterLifecycleFactory(factory); err != nil {
+		t.Fatalf("RegisterLifecycleFactory() error = %v", err)
+	}
+
+	target, err := LifecycleTargetFor(Config{RequestedBackend: backend}, current)
+	if err != nil {
+		t.Fatalf("LifecycleTargetFor() error = %v", err)
+	}
+	if target.Current || target.NoOp || target.Runtime != runtime {
+		t.Fatalf("target = %#v, want registered lifecycle runtime", target)
+	}
+}
+
+func TestLifecycleTargetForBuildsRegisteredFactory(t *testing.T) {
+	backend := Backend("lifecycle-factory-test")
+	runtime := &fakeRuntime{backend: backend}
+	factory := &fakeLifecycleFactory{backend: backend, runtime: runtime}
+	lifecycleFactoriesMu.Lock()
+	original := maps.Clone(lifecycleFactories)
+	delete(lifecycleFactories, backend)
+	lifecycleFactoriesMu.Unlock()
+	t.Cleanup(func() {
+		lifecycleFactoriesMu.Lock()
+		lifecycleFactories = original
+		lifecycleFactoriesMu.Unlock()
+	})
+
+	if err := RegisterLifecycleFactory(factory); err != nil {
+		t.Fatalf("RegisterLifecycleFactory() error = %v", err)
+	}
+
+	target, err := LifecycleTargetFor(Config{RequestedBackend: backend, CWD: " /tmp/work "}, &fakeRuntime{backend: BackendHost})
+	if err != nil {
+		t.Fatalf("LifecycleTargetFor() error = %v", err)
+	}
+	if target.Current || target.NoOp || target.Runtime != runtime {
+		t.Fatalf("target = %#v, want registered temporary runtime", target)
+	}
+	if factory.last.RequestedBackend != backend || !strings.HasSuffix(factory.last.CWD, "/tmp/work") {
+		t.Fatalf("factory config = %#v", factory.last)
+	}
+}
+
+func TestLifecycleTargetForHostNoops(t *testing.T) {
+	target, err := LifecycleTargetFor(Config{RequestedBackend: BackendHost}, &fakeRuntime{backend: BackendHost})
+	if err != nil {
+		t.Fatalf("LifecycleTargetFor() error = %v", err)
+	}
+	if !target.NoOp || target.Runtime != nil {
+		t.Fatalf("target = %#v, want host noop", target)
+	}
+}
+
 func TestFuncRunnerClonesRequestBeforeInvoke(t *testing.T) {
 	t.Parallel()
 
@@ -545,6 +639,23 @@ func (f fakeBackendFactory) Build(Config) (Runtime, error) {
 		return nil, f.err
 	}
 	return &fakeRuntime{backend: f.backend}, nil
+}
+
+type fakeLifecycleFactory struct {
+	backend Backend
+	runtime Runtime
+	err     error
+	last    Config
+}
+
+func (f *fakeLifecycleFactory) Backend() Backend { return f.backend }
+
+func (f *fakeLifecycleFactory) BuildLifecycle(cfg Config) (Runtime, error) {
+	f.last = cfg
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.runtime, nil
 }
 
 func removeBackendForTest(values []Backend, backend Backend) []Backend {

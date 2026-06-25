@@ -79,10 +79,10 @@ func TestBoundaryRuleRejectsPublicContractsImportingInternal(t *testing.T) {
 			want:       "protocol must not depend on internal packages",
 		},
 		{
-			name:       "acp server composition exception",
+			name:       "acp server must not import app",
 			rel:        "surfaces/acpserver/server.go",
 			importPath: modulePath + "/app/gatewayapp",
-			want:       "",
+			want:       "surfaces must not depend directly on app",
 		},
 		{
 			name:       "internal kernel tests may use existing session fixtures",

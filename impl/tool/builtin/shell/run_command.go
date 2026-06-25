@@ -134,9 +134,6 @@ func (t *RunCommandTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 			Command:     command,
 			Dir:         workingDir,
 			Timeout:     t.cfg.Timeout,
-			RouteHint:   constraints.Route,
-			Backend:     constraints.Backend,
-			Permission:  constraints.Permission,
 			Constraints: constraints,
 		}
 		result, err = t.runtime.Run(ctx, req)
@@ -146,9 +143,6 @@ func (t *RunCommandTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 			Command:     command,
 			Dir:         workingDir,
 			Timeout:     t.cfg.Timeout,
-			RouteHint:   constraints.Route,
-			Backend:     constraints.Backend,
-			Permission:  constraints.Permission,
 			Constraints: constraints,
 		})
 	}

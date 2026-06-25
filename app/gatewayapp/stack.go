@@ -67,6 +67,9 @@ type Stack struct {
 
 	// Optional test seam; nil uses the platform lifecycle runtime factory.
 	sandboxLifecycleFactory sandboxLifecycleRuntimeFactory
+
+	// Optional test seam; nil uses the configured agent refresh path.
+	refreshConfiguredAgentsHook func() error
 }
 
 func (s *Stack) CurrentGateway() GatewayRuntime {

@@ -1175,17 +1175,12 @@ func (r *approvalReviewRuntime) Run(ctx context.Context, req agent.RunRequest) (
 	activeSession := session.Session{
 		SessionRef: req.SessionRef,
 	}
-	mode := strings.TrimSpace(r.mode)
-	if mode == "" {
-		mode = "auto-review"
-	}
 	if req.ApprovalRequester != nil {
 		resp, err := req.ApprovalRequester.RequestApproval(ctx, agent.ApprovalRequest{
 			SessionRef: req.SessionRef,
 			Session:    activeSession,
 			RunID:      "run-1",
 			TurnID:     "turn-1",
-			Mode:       mode,
 			Tool:       tool.Definition{Name: "RUN_COMMAND"},
 			Call:       tool.Call{ID: "call-1", Name: "RUN_COMMAND"},
 			Approval: &session.ProtocolApproval{

@@ -2129,7 +2129,6 @@ func (r *approvalRuntime) Run(ctx context.Context, req agent.RunRequest) (agent.
 			Session:    r.session,
 			RunID:      "run-1",
 			TurnID:     "turn-1",
-			Mode:       strings.TrimSpace(r.mode),
 			Tool:       tool.Definition{Name: "RUN_COMMAND"},
 			Call:       tool.Call{ID: "approval-call", Name: "RUN_COMMAND"},
 			Approval: &session.ProtocolApproval{

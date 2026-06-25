@@ -2,9 +2,11 @@ package gatewayapp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
+	kernelimpl "github.com/OnslaughtSnail/caelis/internal/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
@@ -23,42 +25,23 @@ func (s *Stack) Connect(cfg ModelConfig) (string, error) {
 	if s.lookup == nil {
 		return "", fmt.Errorf("gatewayapp: model lookup unavailable")
 	}
-	gw := s.currentGateway()
-	if gw == nil {
-		return "", fmt.Errorf("gatewayapp: gateway is unavailable")
+	txn, err := s.beginModelConfigTransaction()
+	if err != nil {
+		return "", err
 	}
-	resolver := gw.Resolver()
-	if resolver == nil {
-		return "", fmt.Errorf("gatewayapp: resolver not available")
-	}
-	previousLookup := s.lookup.Snapshot()
-	s.lookup.mu.RLock()
-	previousContextWindow := s.lookup.contextWindow
-	s.lookup.mu.RUnlock()
-	s.mu.RLock()
-	previousRuntime := s.runtime
-	s.mu.RUnlock()
 	modelID, err := s.lookup.Upsert(cfg)
 	if err != nil {
 		return "", fmt.Errorf("gatewayapp: invalid model config: %w", err)
 	}
 	cfg, _ = s.lookup.Config(modelID)
-	s.mu.Lock()
-	runtimeCfg := s.runtime
-	runtimeCfg.Model = cfg
-	s.runtime = runtimeCfg
-	s.mu.Unlock()
-	resolver.SetModelLookup(s.lookup, s.lookup.DefaultID())
+	s.setRuntimeModel(cfg)
+	txn.applyResolver()
 	if err := s.saveModelConfigs(); err != nil {
-		s.lookup.Restore(previousLookup, previousContextWindow)
-		s.mu.Lock()
-		s.runtime = previousRuntime
-		s.mu.Unlock()
-		resolver.SetModelLookup(s.lookup, s.lookup.DefaultID())
-		return "", err
+		return "", txn.rollback(err)
 	}
+	txn.markStoreSaved()
 	if err := s.refreshConfiguredAgentsFromStore(); err != nil {
-		return "", err
+		return "", txn.rollback(err)
 	}
 	return modelID, nil
 }
@@ -93,43 +76,31 @@ func (s *Stack) UseModel(ctx context.Context, ref session.SessionRef, alias stri
 			}
 		}
 	}
-	if s.lookup != nil {
-		previousLookup := s.lookup.Snapshot()
-		s.lookup.mu.RLock()
-		previousContextWindow := s.lookup.contextWindow
-		s.lookup.mu.RUnlock()
-		if reasoning != "" {
-			cfg, err := s.lookup.ResolveConfig(alias)
-			if err != nil {
-				return err
-			}
-			cfg.ReasoningEffort = reasoning
-			if _, err := s.lookup.Upsert(cfg); err != nil {
-				return err
-			}
-		}
-		s.lookup.SetDefault(cfg.ID)
-		gw := s.currentGateway()
-		if gw == nil {
-			s.lookup.Restore(previousLookup, previousContextWindow)
-			return fmt.Errorf("gatewayapp: gateway is unavailable")
-		}
-		if resolver := gw.Resolver(); resolver != nil {
-			resolver.SetModelLookup(s.lookup, s.lookup.DefaultID())
-		}
-		if err := s.saveModelConfigs(); err != nil {
-			s.lookup.Restore(previousLookup, previousContextWindow)
-			if resolver := gw.Resolver(); resolver != nil {
-				resolver.SetModelLookup(s.lookup, s.lookup.DefaultID())
-			}
-			return err
-		}
-		s.setRuntimeDefaultModelFromLookup()
-		if err := s.refreshConfiguredAgentsFromStore(); err != nil {
+	previousState, err := s.Sessions.SnapshotState(ctx, ref)
+	if err != nil {
+		return err
+	}
+	txn, err := s.beginModelConfigTransaction()
+	if err != nil {
+		return err
+	}
+	if reasoning != "" {
+		cfg.ReasoningEffort = reasoning
+		if _, err := s.lookup.Upsert(cfg); err != nil {
 			return err
 		}
 	}
-	return s.Sessions.UpdateState(ctx, ref, func(state map[string]any) (map[string]any, error) {
+	s.lookup.SetDefault(cfg.ID)
+	txn.applyResolver()
+	if err := s.saveModelConfigs(); err != nil {
+		return txn.rollback(err)
+	}
+	txn.markStoreSaved()
+	s.setRuntimeDefaultModelFromLookup()
+	if err := s.refreshConfiguredAgentsFromStore(); err != nil {
+		return txn.rollback(err)
+	}
+	if err := s.Sessions.UpdateState(ctx, ref, func(state map[string]any) (map[string]any, error) {
 		next := session.CloneState(state)
 		if next == nil {
 			next = map[string]any{}
@@ -141,7 +112,10 @@ func (s *Stack) UseModel(ctx context.Context, ref session.SessionRef, alias stri
 			delete(next, gateway.StateCurrentReasoningEffort)
 		}
 		return next, nil
-	})
+	}); err != nil {
+		return txn.rollbackWithState(ctx, ref, previousState, err)
+	}
+	return nil
 }
 
 // DeleteModel clears one per-session model alias override when it matches the
@@ -166,34 +140,28 @@ func (s *Stack) DeleteModel(ctx context.Context, ref session.SessionRef, alias s
 	if err != nil {
 		return err
 	}
-	previousLookup := s.lookup.Snapshot()
-	s.lookup.mu.RLock()
-	previousContextWindow := s.lookup.contextWindow
-	s.lookup.mu.RUnlock()
+	previousState, err := s.Sessions.SnapshotState(ctx, ref)
+	if err != nil {
+		return err
+	}
+	txn, err := s.beginModelConfigTransaction()
+	if err != nil {
+		return err
+	}
 	if err := s.lookup.Delete(alias); err != nil {
 		return err
 	}
 	hasDefault := strings.TrimSpace(s.lookup.DefaultID()) != ""
-	gw := s.currentGateway()
-	if gw == nil {
-		s.lookup.Restore(previousLookup, previousContextWindow)
-		return fmt.Errorf("gatewayapp: gateway is unavailable")
-	}
-	if resolver := gw.Resolver(); resolver != nil {
-		resolver.SetModelLookup(s.lookup, s.lookup.DefaultID())
-	}
+	txn.applyResolver()
 	if err := s.saveModelConfigs(); err != nil {
-		s.lookup.Restore(previousLookup, previousContextWindow)
-		if resolver := gw.Resolver(); resolver != nil {
-			resolver.SetModelLookup(s.lookup, s.lookup.DefaultID())
-		}
-		return err
+		return txn.rollback(err)
 	}
+	txn.markStoreSaved()
 	s.setRuntimeDefaultModelFromLookup()
 	if err := s.refreshConfiguredAgentsFromStore(); err != nil {
-		return err
+		return txn.rollback(err)
 	}
-	return s.Sessions.UpdateState(ctx, ref, func(state map[string]any) (map[string]any, error) {
+	if err := s.Sessions.UpdateState(ctx, ref, func(state map[string]any) (map[string]any, error) {
 		next := session.CloneState(state)
 		if next == nil {
 			next = map[string]any{}
@@ -204,7 +172,84 @@ func (s *Stack) DeleteModel(ctx context.Context, ref session.SessionRef, alias s
 			delete(next, gateway.StateCurrentReasoningEffort)
 		}
 		return next, nil
-	})
+	}); err != nil {
+		return txn.rollbackWithState(ctx, ref, previousState, err)
+	}
+	return nil
+}
+
+type modelConfigTransaction struct {
+	stack                 *Stack
+	resolver              *kernelimpl.AssemblyResolver
+	previousLookup        persistedModelConfig
+	previousContextWindow int
+	previousRuntime       stackRuntimeConfig
+	storeSaved            bool
+}
+
+func (s *Stack) beginModelConfigTransaction() (modelConfigTransaction, error) {
+	gw := s.currentGateway()
+	if gw == nil {
+		return modelConfigTransaction{}, fmt.Errorf("gatewayapp: gateway is unavailable")
+	}
+	resolver := gw.Resolver()
+	if resolver == nil {
+		return modelConfigTransaction{}, fmt.Errorf("gatewayapp: resolver not available")
+	}
+	s.lookup.mu.RLock()
+	previousContextWindow := s.lookup.contextWindow
+	s.lookup.mu.RUnlock()
+	s.mu.RLock()
+	previousRuntime := s.runtime
+	s.mu.RUnlock()
+	return modelConfigTransaction{
+		stack:                 s,
+		resolver:              resolver,
+		previousLookup:        s.lookup.Snapshot(),
+		previousContextWindow: previousContextWindow,
+		previousRuntime:       previousRuntime,
+	}, nil
+}
+
+func (t *modelConfigTransaction) applyResolver() {
+	if t == nil || t.stack == nil || t.resolver == nil {
+		return
+	}
+	t.resolver.SetModelLookup(t.stack.lookup, t.stack.lookup.DefaultID())
+}
+
+func (t *modelConfigTransaction) markStoreSaved() {
+	if t != nil {
+		t.storeSaved = true
+	}
+}
+
+func (t *modelConfigTransaction) rollback(cause error) error {
+	if t == nil || t.stack == nil {
+		return cause
+	}
+	t.stack.lookup.Restore(t.previousLookup, t.previousContextWindow)
+	t.stack.mu.Lock()
+	t.stack.runtime = t.previousRuntime
+	t.stack.mu.Unlock()
+	t.applyResolver()
+	if t.storeSaved {
+		if err := t.stack.saveModelConfigs(); err != nil {
+			return errors.Join(cause, fmt.Errorf("gatewayapp: rollback model config save failed: %w", err))
+		}
+	}
+	return cause
+}
+
+func (t *modelConfigTransaction) rollbackWithState(ctx context.Context, ref session.SessionRef, previousState map[string]any, cause error) error {
+	err := t.rollback(cause)
+	if t == nil || t.stack == nil || t.stack.Sessions == nil {
+		return err
+	}
+	if restoreErr := t.stack.Sessions.ReplaceState(ctx, ref, previousState); restoreErr != nil {
+		return errors.Join(err, fmt.Errorf("gatewayapp: rollback session model state failed: %w", restoreErr))
+	}
+	return err
 }
 
 func (s *Stack) setRuntimeDefaultModelFromLookup() {
@@ -232,6 +277,9 @@ func (s *Stack) setRuntimeModel(cfg ModelConfig) {
 func (s *Stack) refreshConfiguredAgentsFromStore() error {
 	if s == nil {
 		return fmt.Errorf("gatewayapp: stack is unavailable")
+	}
+	if s.refreshConfiguredAgentsHook != nil {
+		return s.refreshConfiguredAgentsHook()
 	}
 	if s.store == nil {
 		return nil

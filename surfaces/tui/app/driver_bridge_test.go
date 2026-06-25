@@ -20,6 +20,13 @@ import (
 	"github.com/OnslaughtSnail/caelis/surfaces/transcript"
 )
 
+func testStatusSnapshot(model, mode, workspace string) control.StatusSnapshot {
+	return control.StatusSnapshot{
+		Session:     control.StatusSession{ModeLabel: mode, SessionMode: mode, Workspace: workspace},
+		ModelStatus: control.StatusModel{Display: model},
+	}
+}
+
 func TestProgramSenderDropsAfterClose(t *testing.T) {
 	sender := &ProgramSender{}
 	var sent atomic.Int64
@@ -167,7 +174,7 @@ func TestDiagnosticsReportsProgramSenderDropsAfterClose(t *testing.T) {
 
 func TestSlashNewClearsHistoryBeforeNotice(t *testing.T) {
 	driver := &bridgeTestDriver{
-		status:     control.StatusSnapshot{Model: "gpt-4o", ModeLabel: "default"},
+		status:     testStatusSnapshot("gpt-4o", "default", ""),
 		newSession: control.SessionSnapshot{SessionID: "new-session"},
 	}
 	var msgs []tea.Msg
@@ -201,7 +208,12 @@ func TestSlashHelpListsMinimalCoreCommands(t *testing.T) {
 }
 
 func TestModeToggleHintUsesRemoteACPModeLabel(t *testing.T) {
-	got := modeToggleHint(control.StatusSnapshot{SessionMode: "review", ModeLabel: "Review"})
+	got := modeToggleHint(control.StatusSnapshot{
+		Session: control.StatusSession{
+			SessionMode: "review",
+			ModeLabel:   "Review",
+		},
+	})
 	if got != "Review mode enabled" {
 		t.Fatalf("modeToggleHint() = %q, want Review mode enabled", got)
 	}
@@ -210,13 +222,15 @@ func TestModeToggleHintUsesRemoteACPModeLabel(t *testing.T) {
 func TestConfigFromControlServiceRefreshStatusUsesLightweightStatus(t *testing.T) {
 	driver := &bridgeLightweightStatusDriver{
 		bridgeTestDriver: bridgeTestDriver{
-			status: control.StatusSnapshot{Model: "full-model", ModeLabel: "full-mode"},
+			status: testStatusSnapshot("full-model", "full-mode", ""),
 		},
 		lightweightStatus: control.StatusSnapshot{
-			Model:               "light-model",
-			ModeLabel:           "light-mode",
-			TotalTokens:         12,
-			ContextWindowTokens: 100,
+			Session:     control.StatusSession{ModeLabel: "light-mode", SessionMode: "light-mode"},
+			ModelStatus: control.StatusModel{Display: "light-model"},
+			Usage: control.StatusUsage{
+				TotalTokens:         12,
+				ContextWindowTokens: 100,
+			},
 		},
 	}
 	cfg := ConfigFromControlService(driver, nil, Config{})
@@ -485,7 +499,7 @@ func TestDefaultCommandsAreRecognizedByDispatch(t *testing.T) {
 
 func TestSlashResumeClearsHistoryBeforeReplay(t *testing.T) {
 	driver := &bridgeTestDriver{
-		status:         control.StatusSnapshot{Model: "gpt-4o", ModeLabel: "default"},
+		status:         testStatusSnapshot("gpt-4o", "default", ""),
 		resumedSession: control.SessionSnapshot{SessionID: "resumed-session"},
 		replay: []gateway.EventEnvelope{
 			{
@@ -581,7 +595,7 @@ func TestSlashResumeClearsHistoryBeforeReplay(t *testing.T) {
 
 func TestSlashResumeReplaysSideACPFinalDialogueWithoutProcessTrace(t *testing.T) {
 	driver := &bridgeTestDriver{
-		status:         control.StatusSnapshot{Model: "gpt-4o", ModeLabel: "default"},
+		status:         testStatusSnapshot("gpt-4o", "default", ""),
 		resumedSession: control.SessionSnapshot{SessionID: "resumed-session"},
 		replay: []gateway.EventEnvelope{
 			{
@@ -691,7 +705,7 @@ func TestSlashResumeReplaysSideACPFinalDialogueWithoutProcessTrace(t *testing.T)
 
 func TestSlashResumeReplaysProcessEventsForInterruptedTurn(t *testing.T) {
 	driver := &bridgeTestDriver{
-		status:         control.StatusSnapshot{Model: "gpt-4o", ModeLabel: "default"},
+		status:         testStatusSnapshot("gpt-4o", "default", ""),
 		resumedSession: control.SessionSnapshot{SessionID: "resumed-session"},
 		replay: []gateway.EventEnvelope{
 			{
@@ -950,7 +964,7 @@ func TestExecuteLineViaDriverTreatsUnknownSlashAsUserMessage(t *testing.T) {
 
 func TestSlashResumeReplaysGatewayEventsDirectly(t *testing.T) {
 	driver := &bridgeTestDriver{
-		status:         control.StatusSnapshot{Model: "gpt-4o", ModeLabel: "default"},
+		status:         testStatusSnapshot("gpt-4o", "default", ""),
 		resumedSession: control.SessionSnapshot{SessionID: "resumed-session"},
 		replay: []gateway.EventEnvelope{{
 			Event: gateway.Event{
@@ -984,8 +998,8 @@ func TestSlashResumeReplaysGatewayEventsDirectly(t *testing.T) {
 
 func TestSlashConnectCallsDriverAndUpdatesStatus(t *testing.T) {
 	driver := &bridgeTestDriver{
-		status:        control.StatusSnapshot{Model: "minimax/MiniMax-M1", ModeLabel: "default", Workspace: "/tmp/ws"},
-		connectStatus: control.StatusSnapshot{Model: "minimax/MiniMax-M2", ModeLabel: "default", Workspace: "/tmp/ws"},
+		status:        testStatusSnapshot("minimax/MiniMax-M1", "default", "/tmp/ws"),
+		connectStatus: testStatusSnapshot("minimax/MiniMax-M2", "default", "/tmp/ws"),
 	}
 	var msgs []tea.Msg
 	slashConnect(driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "minimax MiniMax-M2 - 60 sk-test 204800 8192 low,medium")
@@ -1510,32 +1524,40 @@ func TestFormatAgentStatusSnapshotShowsDelegatedParticipants(t *testing.T) {
 
 func TestFormatStatusSnapshotUsesFriendlyThemeableLines(t *testing.T) {
 	got := formatStatusSnapshot(control.StatusSnapshot{
-		SessionID:              "sess-1",
-		Provider:               "acp",
-		ModelName:              "gpt-5.5",
-		Model:                  "gpt-5.5 [high]",
-		ModeLabel:              "Default",
-		SandboxType:            "seatbelt",
-		Route:                  "sandbox",
-		Workspace:              "/tmp/ws",
-		StoreDir:               "/tmp/store",
-		MissingAPIKey:          true,
-		HostExecution:          true,
-		FullAccessMode:         true,
-		SessionUsageTotal:      control.UsageSnapshot{PromptTokens: 12600, CachedInputTokens: 9000, CompletionTokens: 200, ReasoningTokens: 50, TotalTokens: 12800},
-		SessionUsageMain:       control.UsageSnapshot{PromptTokens: 10000, CachedInputTokens: 7000, CompletionTokens: 150, ReasoningTokens: 30, TotalTokens: 10150},
-		SessionUsageSubagents:  control.UsageSnapshot{PromptTokens: 2000, CachedInputTokens: 1800, CompletionTokens: 40, ReasoningTokens: 15, TotalTokens: 2040},
-		SessionUsageAutoReview: control.UsageSnapshot{PromptTokens: 600, CachedInputTokens: 200, CompletionTokens: 10, ReasoningTokens: 5, TotalTokens: 610},
-		SessionUsageByModel: []control.ModelUsageSnapshot{{
-			Provider: "deepseek",
-			Model:    "deepseek-v4-flash",
-			Usage:    control.UsageSnapshot{PromptTokens: 2000, CachedInputTokens: 1800, CompletionTokens: 40, ReasoningTokens: 15, TotalTokens: 2040},
-		}},
-		SessionInputTokens:       12600,
-		SessionCachedInputTokens: 9000,
-		SessionOutputTokens:      200,
-		SessionReasoningTokens:   50,
-		SessionTotalTokens:       12800,
+		Session: control.StatusSession{
+			ID:        "sess-1",
+			Workspace: "/tmp/ws",
+			StoreDir:  "/tmp/store",
+			ModeLabel: "Default",
+		},
+		ModelStatus: control.StatusModel{
+			Provider:      "acp",
+			Name:          "gpt-5.5",
+			Display:       "gpt-5.5 [high]",
+			MissingAPIKey: true,
+		},
+		SandboxStatus: control.StatusSandbox{
+			Type:           "seatbelt",
+			Route:          "sandbox",
+			HostExecution:  true,
+			FullAccessMode: true,
+		},
+		Usage: control.StatusUsage{
+			SessionUsageTotal:      control.UsageSnapshot{PromptTokens: 12600, CachedInputTokens: 9000, CompletionTokens: 200, ReasoningTokens: 50, TotalTokens: 12800},
+			SessionUsageMain:       control.UsageSnapshot{PromptTokens: 10000, CachedInputTokens: 7000, CompletionTokens: 150, ReasoningTokens: 30, TotalTokens: 10150},
+			SessionUsageSubagents:  control.UsageSnapshot{PromptTokens: 2000, CachedInputTokens: 1800, CompletionTokens: 40, ReasoningTokens: 15, TotalTokens: 2040},
+			SessionUsageAutoReview: control.UsageSnapshot{PromptTokens: 600, CachedInputTokens: 200, CompletionTokens: 10, ReasoningTokens: 5, TotalTokens: 610},
+			SessionUsageByModel: []control.ModelUsageSnapshot{{
+				Provider: "deepseek",
+				Model:    "deepseek-v4-flash",
+				Usage:    control.UsageSnapshot{PromptTokens: 2000, CachedInputTokens: 1800, CompletionTokens: 40, ReasoningTokens: 15, TotalTokens: 2040},
+			}},
+			SessionInputTokens:       12600,
+			SessionCachedInputTokens: 9000,
+			SessionOutputTokens:      200,
+			SessionReasoningTokens:   50,
+			SessionTotalTokens:       12800,
+		},
 	})
 	for _, forbidden := range []string{"Status", "Tokens", "Warnings", "status:", "provider:", "model:", "alias:", "Provider:", "Store:", "\n  Reason:"} {
 		if strings.Contains(got, forbidden) {
@@ -1570,13 +1592,14 @@ func TestFormatStatusSnapshotUsesFriendlyThemeableLines(t *testing.T) {
 
 func TestFormatStatusSnapshotOmitsSetupReasonDetails(t *testing.T) {
 	got := formatStatusSnapshot(control.StatusSnapshot{
-		Model:                       "mimo-v2.5-pro [high]",
-		ModeLabel:                   "auto-review",
-		SandboxResolvedBackend:      "windows",
-		Route:                       "sandbox",
-		Workspace:                   "D:\\xue\\code\\storage",
-		SandboxWorkspaceSetupReason: "workspace ACL manifest is stale and will be repaired lazily",
-		SandboxSetupMarkerReason:    "stale sandbox setup marker",
+		Session:     control.StatusSession{ModeLabel: "auto-review", Workspace: "D:\\xue\\code\\storage"},
+		ModelStatus: control.StatusModel{Display: "mimo-v2.5-pro [high]"},
+		SandboxStatus: control.StatusSandbox{
+			ResolvedBackend:      "windows",
+			Route:                "sandbox",
+			WorkspaceSetupReason: "workspace ACL manifest is stale and will be repaired lazily",
+			SetupMarkerReason:    "stale sandbox setup marker",
+		},
 	})
 	for _, forbidden := range []string{"Status", "Tokens", "\n  Reason:", "workspace ACL manifest", "stale sandbox setup marker", "Store:", "Provider:"} {
 		if strings.Contains(got, forbidden) {
@@ -1592,19 +1615,20 @@ func TestFormatStatusSnapshotOmitsSetupReasonDetails(t *testing.T) {
 
 func TestFormatStatusSnapshotShowsExplicitSandboxRepairFailure(t *testing.T) {
 	got := formatStatusSnapshot(control.StatusSnapshot{
-		Model:                  "mimo-v2.5-pro [high]",
-		ModeLabel:              "auto-review",
-		SandboxResolvedBackend: "windows",
-		Route:                  "sandbox",
-		Workspace:              "D:\\xue\\code\\cmpctl",
-		SandboxSetup: control.SandboxSetupStatus{Checks: []control.SandboxSetupCheck{{
-			Name:     "workspace",
-			Scope:    "workspace",
-			Required: true,
-			Error:    "acl: write D:\\xue\\code\\cmpctl DACL: Access is denied.",
-		}}},
-		SandboxWorkspaceSetupRequired: true,
-		SandboxSetupError:             "acl: write D:\\xue\\code\\cmpctl DACL: Access is denied.",
+		Session:     control.StatusSession{ModeLabel: "auto-review", Workspace: "D:\\xue\\code\\cmpctl"},
+		ModelStatus: control.StatusModel{Display: "mimo-v2.5-pro [high]"},
+		SandboxStatus: control.StatusSandbox{
+			ResolvedBackend: "windows",
+			Route:           "sandbox",
+			Setup: control.SandboxSetupStatus{Checks: []control.SandboxSetupCheck{{
+				Name:     "workspace",
+				Scope:    "workspace",
+				Required: true,
+				Error:    "acl: write D:\\xue\\code\\cmpctl DACL: Access is denied.",
+			}}},
+			WorkspaceSetupRequired: true,
+			SetupError:             "acl: write D:\\xue\\code\\cmpctl DACL: Access is denied.",
+		},
 	})
 	for _, want := range []string{"Setup:", "current workspace ACL repair failed", "Error:", "Access is denied", "Warning:", "/doctor fix"} {
 		if !strings.Contains(got, want) {
@@ -1618,8 +1642,10 @@ func TestFormatStatusSnapshotShowsExplicitSandboxRepairFailure(t *testing.T) {
 
 func TestFormatSessionTokenUsageStatusOmitsEmptyBreakdownBuckets(t *testing.T) {
 	got := formatSessionTokenUsageStatus(control.StatusSnapshot{
-		SessionUsageTotal: control.UsageSnapshot{PromptTokens: 100, CachedInputTokens: 20, CompletionTokens: 10, TotalTokens: 110},
-		SessionUsageMain:  control.UsageSnapshot{PromptTokens: 100, CachedInputTokens: 20, CompletionTokens: 10, TotalTokens: 110},
+		Usage: control.StatusUsage{
+			SessionUsageTotal: control.UsageSnapshot{PromptTokens: 100, CachedInputTokens: 20, CompletionTokens: 10, TotalTokens: 110},
+			SessionUsageMain:  control.UsageSnapshot{PromptTokens: 100, CachedInputTokens: 20, CompletionTokens: 10, TotalTokens: 110},
+		},
 	})
 	for _, want := range []string{"Scope", "Total", "Cached", "total", "110", "100", "20"} {
 		if !strings.Contains(got, want) {
@@ -1638,7 +1664,9 @@ func TestFormatSessionTokenUsageStatusOmitsEmptyBreakdownBuckets(t *testing.T) {
 
 func TestFormatSessionTokenUsageStatusShowsReasoningWhenPresent(t *testing.T) {
 	got := formatSessionTokenUsageStatus(control.StatusSnapshot{
-		SessionUsageTotal: control.UsageSnapshot{PromptTokens: 100, CompletionTokens: 10, ReasoningTokens: 3, TotalTokens: 110},
+		Usage: control.StatusUsage{
+			SessionUsageTotal: control.UsageSnapshot{PromptTokens: 100, CompletionTokens: 10, ReasoningTokens: 3, TotalTokens: 110},
+		},
 	})
 	for _, want := range []string{"Reasoning", "3"} {
 		if !strings.Contains(got, want) {
@@ -1882,7 +1910,7 @@ func TestDynamicAgentSlashParticipantTurnEmitsGatewayNarrative(t *testing.T) {
 
 func TestSlashConnectParsesEnvironmentVariableSecret(t *testing.T) {
 	driver := &bridgeTestDriver{
-		connectStatus: control.StatusSnapshot{Model: "openai/gpt-4o"},
+		connectStatus: testStatusSnapshot("openai/gpt-4o", "", ""),
 	}
 	slashConnect(driver, func(tea.Msg) {}, "openai gpt-4o - 60 env:OPENAI_API_KEY")
 	if got := driver.lastConnect.TokenEnv; got != "OPENAI_API_KEY" {
@@ -1895,8 +1923,8 @@ func TestSlashConnectParsesEnvironmentVariableSecret(t *testing.T) {
 
 func TestSlashModelUseCallsDriverAndUpdatesStatus(t *testing.T) {
 	driver := &bridgeTestDriver{
-		status:         control.StatusSnapshot{Model: "minimax/MiniMax-M1", ModeLabel: "default", Workspace: "/tmp/ws"},
-		useModelStatus: control.StatusSnapshot{Model: "minimax/MiniMax-M2", ModeLabel: "default", Workspace: "/tmp/ws"},
+		status:         testStatusSnapshot("minimax/MiniMax-M1", "default", "/tmp/ws"),
+		useModelStatus: testStatusSnapshot("minimax/MiniMax-M2", "default", "/tmp/ws"),
 	}
 	var msgs []tea.Msg
 	slashModel(driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "use minimax/MiniMax-M2")
@@ -1916,8 +1944,8 @@ func TestSlashModelUseCallsDriverAndUpdatesStatus(t *testing.T) {
 
 func TestSlashModelUsePassesReasoningLevel(t *testing.T) {
 	driver := &bridgeTestDriver{
-		status:         control.StatusSnapshot{Model: "deepseek/deepseek-v4-pro", ModeLabel: "default", Workspace: "/tmp/ws"},
-		useModelStatus: control.StatusSnapshot{Model: "deepseek/deepseek-v4-pro [high]", ModeLabel: "default", Workspace: "/tmp/ws"},
+		status:         testStatusSnapshot("deepseek/deepseek-v4-pro", "default", "/tmp/ws"),
+		useModelStatus: testStatusSnapshot("deepseek/deepseek-v4-pro [high]", "default", "/tmp/ws"),
 	}
 	slashModel(driver, func(tea.Msg) {}, "use deepseek/deepseek-v4-pro high")
 	if driver.useModelCalls != 1 {
@@ -1933,7 +1961,7 @@ func TestSlashModelUsePassesReasoningLevel(t *testing.T) {
 
 func TestSlashModelDeleteCallsDriverAndRefreshesStatus(t *testing.T) {
 	driver := &bridgeTestDriver{
-		status: control.StatusSnapshot{Model: "minimax/MiniMax-M1", ModeLabel: "default", Workspace: "/tmp/ws"},
+		status: testStatusSnapshot("minimax/MiniMax-M1", "default", "/tmp/ws"),
 	}
 	var msgs []tea.Msg
 	slashModel(driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "del minimax/MiniMax-M1")
@@ -1950,7 +1978,7 @@ func TestSlashModelDeleteCallsDriverAndRefreshesStatus(t *testing.T) {
 
 func TestSlashModelDeleteClearsStatusWhenNoModelRemains(t *testing.T) {
 	driver := &bridgeTestDriver{
-		status: control.StatusSnapshot{Workspace: "/tmp/ws"},
+		status: testStatusSnapshot("", "", "/tmp/ws"),
 	}
 	var msgs []tea.Msg
 	slashModel(driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "del codefree/glm-5.1")
@@ -1970,16 +1998,20 @@ func TestSlashModelDeleteClearsStatusWhenNoModelRemains(t *testing.T) {
 func TestSlashStatusShowsGuidanceAndWarnings(t *testing.T) {
 	driver := &bridgeTestDriver{
 		status: control.StatusSnapshot{
-			SessionID:               "sess-1",
-			StoreDir:                "/tmp/.caelis",
-			Workspace:               "/tmp/ws",
-			SandboxRequestedBackend: "seatbelt",
-			SandboxResolvedBackend:  "host",
-			Route:                   "host",
-			FallbackReason:          "seatbelt is unavailable",
-			HostExecution:           true,
-			FullAccessMode:          true,
-			MissingAPIKey:           true,
+			Session: control.StatusSession{
+				ID:        "sess-1",
+				StoreDir:  "/tmp/.caelis",
+				Workspace: "/tmp/ws",
+			},
+			ModelStatus: control.StatusModel{MissingAPIKey: true},
+			SandboxStatus: control.StatusSandbox{
+				RequestedBackend: "seatbelt",
+				ResolvedBackend:  "host",
+				Route:            "host",
+				FallbackReason:   "seatbelt is unavailable",
+				HostExecution:    true,
+				FullAccessMode:   true,
+			},
 		},
 	}
 	var msgs []tea.Msg
@@ -2006,15 +2038,14 @@ func TestSlashStatusShowsGuidanceAndWarnings(t *testing.T) {
 func TestSlashDoctorShowsReadinessChecklist(t *testing.T) {
 	driver := &bridgeTestDriver{
 		status: control.StatusSnapshot{
-			SessionID:               "sess-1",
-			Provider:                "openai",
-			ModelName:               "gpt-5.5",
-			StoreDir:                "/tmp/.caelis",
-			SandboxRequestedBackend: "seatbelt",
-			SandboxResolvedBackend:  "host",
-			Route:                   "host",
-			HostExecution:           true,
-			MissingAPIKey:           true,
+			Session:     control.StatusSession{ID: "sess-1", StoreDir: "/tmp/.caelis"},
+			ModelStatus: control.StatusModel{Provider: "openai", Name: "gpt-5.5", MissingAPIKey: true},
+			SandboxStatus: control.StatusSandbox{
+				RequestedBackend: "seatbelt",
+				ResolvedBackend:  "host",
+				Route:            "host",
+				HostExecution:    true,
+			},
 		},
 	}
 	var msgs []tea.Msg
@@ -2039,9 +2070,11 @@ func TestSlashDoctorShowsReadinessChecklist(t *testing.T) {
 func TestSlashDoctorFixRepairsSandbox(t *testing.T) {
 	driver := &bridgeTestDriver{
 		status: control.StatusSnapshot{
-			SandboxRequestedBackend: "windows",
-			SandboxResolvedBackend:  "windows",
-			Route:                   "sandbox",
+			SandboxStatus: control.StatusSandbox{
+				RequestedBackend: "windows",
+				ResolvedBackend:  "windows",
+				Route:            "sandbox",
+			},
 		},
 	}
 	var msgs []tea.Msg
@@ -2371,7 +2404,7 @@ func (d *bridgeTestDriver) Compact(context.Context) error {
 func (d *bridgeTestDriver) Connect(_ context.Context, cfg control.ConnectConfig) (control.StatusSnapshot, error) {
 	d.connectCalls++
 	d.lastConnect = cfg
-	if d.connectStatus.Model != "" || d.connectStatus.Workspace != "" || d.connectStatus.ModeLabel != "" {
+	if d.connectStatus.ModelStatus.Display != "" || d.connectStatus.Session.Workspace != "" || d.connectStatus.Session.ModeLabel != "" {
 		return d.connectStatus, nil
 	}
 	return d.status, nil
@@ -2382,7 +2415,7 @@ func (d *bridgeTestDriver) UseModel(_ context.Context, alias string, reasoningEf
 	if len(reasoningEffort) > 0 {
 		d.lastReasoningEffort = reasoningEffort[0]
 	}
-	if d.useModelStatus.Model != "" || d.useModelStatus.Workspace != "" || d.useModelStatus.ModeLabel != "" {
+	if d.useModelStatus.ModelStatus.Display != "" || d.useModelStatus.Session.Workspace != "" || d.useModelStatus.Session.ModeLabel != "" {
 		return d.useModelStatus, nil
 	}
 	return d.status, nil

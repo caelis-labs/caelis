@@ -571,54 +571,54 @@ func slashDoctorFixWithContext(ctx context.Context, service control.Service, sen
 }
 
 func sandboxSetupStillRequired(status control.StatusSnapshot) bool {
-	global, hasGlobal := status.SandboxSetup.Check("global")
-	workspace, hasWorkspace := status.SandboxSetup.Check("workspace")
-	return status.SandboxSetupRequired ||
-		status.SandboxGlobalSetupRequired ||
-		status.SandboxWorkspaceSetupRequired ||
+	global, hasGlobal := status.SandboxStatus.Setup.Check("global")
+	workspace, hasWorkspace := status.SandboxStatus.Setup.Check("workspace")
+	return status.SandboxStatus.SetupRequired ||
+		status.SandboxStatus.GlobalSetupRequired ||
+		status.SandboxStatus.WorkspaceSetupRequired ||
 		(hasGlobal && global.Required) ||
 		(hasWorkspace && workspace.Required)
 }
 
 func formatDoctorSnapshot(status control.StatusSnapshot) string {
 	lines := []string{"doctor:"}
-	provider := strings.TrimSpace(firstNonEmpty(status.Provider, status.Model))
-	modelName := strings.TrimSpace(firstNonEmpty(status.ModelName, status.Model))
+	provider := strings.TrimSpace(firstNonEmpty(status.ModelStatus.Provider, status.ModelStatus.Display))
+	modelName := strings.TrimSpace(firstNonEmpty(status.ModelStatus.Name, status.ModelStatus.Display))
 	switch {
-	case status.MissingAPIKey:
+	case status.ModelStatus.MissingAPIKey:
 		lines = append(lines, "  warn provider key missing - run /connect")
 	case provider == "" && modelName == "":
 		lines = append(lines, "  warn model not configured - run /connect")
 	default:
 		lines = append(lines, "  ok provider/model: "+joinNonEmpty([]string{provider, modelName}, " / "))
 	}
-	if storeDir := strings.TrimSpace(status.StoreDir); storeDir != "" {
+	if storeDir := strings.TrimSpace(status.Session.StoreDir); storeDir != "" {
 		lines = append(lines, "  ok session store: "+storeDir)
 	} else {
 		lines = append(lines, "  warn session store path unavailable")
 	}
-	if sessionID := strings.TrimSpace(status.SessionID); sessionID != "" {
+	if sessionID := strings.TrimSpace(status.Session.ID); sessionID != "" {
 		lines = append(lines, "  ok session: "+sessionID)
 	}
-	sandbox := strings.TrimSpace(firstNonEmpty(status.SandboxResolvedBackend, status.SandboxRequestedBackend, status.SandboxType))
-	globalSetup, hasGlobalSetup := status.SandboxSetup.Check("global")
-	workspaceSetup, hasWorkspaceSetup := status.SandboxSetup.Check("workspace")
-	globalSetupRequired := status.SandboxGlobalSetupRequired || (hasGlobalSetup && globalSetup.Required)
-	workspaceSetupRequired := status.SandboxWorkspaceSetupRequired || (hasWorkspaceSetup && workspaceSetup.Required)
+	sandbox := strings.TrimSpace(firstNonEmpty(status.SandboxStatus.ResolvedBackend, status.SandboxStatus.RequestedBackend, status.SandboxStatus.Type))
+	globalSetup, hasGlobalSetup := status.SandboxStatus.Setup.Check("global")
+	workspaceSetup, hasWorkspaceSetup := status.SandboxStatus.Setup.Check("workspace")
+	globalSetupRequired := status.SandboxStatus.GlobalSetupRequired || (hasGlobalSetup && globalSetup.Required)
+	workspaceSetupRequired := status.SandboxStatus.WorkspaceSetupRequired || (hasWorkspaceSetup && workspaceSetup.Required)
 	switch {
-	case status.HostExecution || status.FullAccessMode:
-		detail := strings.TrimSpace(firstNonEmpty(status.SecuritySummary, sandbox, "host execution"))
+	case status.SandboxStatus.HostExecution || status.SandboxStatus.FullAccessMode:
+		detail := strings.TrimSpace(firstNonEmpty(status.SandboxStatus.SecuritySummary, sandbox, "host execution"))
 		lines = append(lines, "  warn sandbox: "+detail)
 	case globalSetupRequired:
-		detail := strings.TrimSpace(firstNonEmpty(status.SandboxSetupError, globalSetup.Error, globalSetup.Reason, status.SandboxGlobalSetupReason, status.SandboxSetupMarkerReason, "global setup required"))
+		detail := strings.TrimSpace(firstNonEmpty(status.SandboxStatus.SetupError, globalSetup.Error, globalSetup.Reason, status.SandboxStatus.GlobalSetupReason, status.SandboxStatus.SetupMarkerReason, "global setup required"))
 		lines = append(lines, "  warn sandbox global repair pending: "+compactStatusDetail(detail, 180))
-		if strings.TrimSpace(firstNonEmpty(status.SandboxSetupError, globalSetup.Error)) != "" {
+		if strings.TrimSpace(firstNonEmpty(status.SandboxStatus.SetupError, globalSetup.Error)) != "" {
 			lines = append(lines, "  info fix: /doctor fix")
 		}
 	case workspaceSetupRequired:
-		detail := strings.TrimSpace(firstNonEmpty(status.SandboxSetupError, workspaceSetup.Error, workspaceSetup.Reason, status.SandboxWorkspaceSetupReason, "workspace ACL setup required"))
+		detail := strings.TrimSpace(firstNonEmpty(status.SandboxStatus.SetupError, workspaceSetup.Error, workspaceSetup.Reason, status.SandboxStatus.WorkspaceSetupReason, "workspace ACL setup required"))
 		lines = append(lines, "  warn sandbox workspace repair pending: "+compactStatusDetail(detail, 180))
-		if strings.TrimSpace(firstNonEmpty(status.SandboxSetupError, workspaceSetup.Error)) != "" {
+		if strings.TrimSpace(firstNonEmpty(status.SandboxStatus.SetupError, workspaceSetup.Error)) != "" {
 			lines = append(lines, "  info fix: /doctor fix")
 		}
 	case sandbox != "":
@@ -626,11 +626,11 @@ func formatDoctorSnapshot(status control.StatusSnapshot) string {
 	default:
 		lines = append(lines, "  warn sandbox status unavailable")
 	}
-	if route := strings.TrimSpace(status.Route); route != "" {
+	if route := strings.TrimSpace(status.SandboxStatus.Route); route != "" {
 		lines = append(lines, "  ok route: "+route)
 	}
-	if status.ActiveJobs > 0 || status.Running {
-		lines = append(lines, fmt.Sprintf("  info active jobs: %d", status.ActiveJobs))
+	if status.Runtime.ActiveJobs > 0 || status.Runtime.Running {
+		lines = append(lines, fmt.Sprintf("  info active jobs: %d", status.Runtime.ActiveJobs))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -653,7 +653,7 @@ func slashConnectWithContext(ctx context.Context, service control.Service, send 
 	if err != nil {
 		return TaskResultMsg{Err: friendlyCommandError("connect", err)}
 	}
-	sendNotice(send, fmt.Sprintf("connected: %s", status.Model))
+	sendNotice(send, fmt.Sprintf("connected: %s", status.ModelStatus.Display))
 	sendStatusUpdate(send, status)
 	return TaskResultMsg{SuppressTurnDivider: true}
 }
@@ -682,9 +682,9 @@ func slashModelWithContext(ctx context.Context, service control.Service, send fu
 			return TaskResultMsg{Err: friendlyCommandError("model use", err)}
 		}
 		if strings.TrimSpace(reasoning) != "" {
-			sendNotice(send, fmt.Sprintf("model switched to: %s (reasoning: %s)", status.Model, reasoning))
+			sendNotice(send, fmt.Sprintf("model switched to: %s (reasoning: %s)", status.ModelStatus.Display, reasoning))
 		} else {
-			sendNotice(send, fmt.Sprintf("model switched to: %s", status.Model))
+			sendNotice(send, fmt.Sprintf("model switched to: %s", status.ModelStatus.Display))
 		}
 		sendStatusUpdate(send, status)
 	case "del", "delete", "rm":

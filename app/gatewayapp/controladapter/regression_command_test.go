@@ -56,16 +56,16 @@ func TestRegressionCommandStatusSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Status() error = %v", err)
 	}
-	if status.SessionID == "" {
+	if status.Session.ID == "" {
 		t.Fatal("Status().SessionID should not be empty after driver creation with session")
 	}
-	if status.Model == "" {
+	if status.ModelStatus.Display == "" {
 		t.Fatal("Status().Model should not be empty")
 	}
-	if status.SandboxType == "" {
+	if status.SandboxStatus.Type == "" {
 		t.Fatal("Status().SandboxType should not be empty")
 	}
-	if status.SessionMode == "" {
+	if status.Session.SessionMode == "" {
 		t.Fatal("Status().SessionMode should not be empty")
 	}
 }
@@ -101,8 +101,8 @@ func TestRegressionCommandStatusAfterLazySession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Status() error = %v", err)
 	}
-	if status.SessionID != "" {
-		t.Fatalf("Status().SessionID = %q, want empty before first submission", status.SessionID)
+	if status.Session.ID != "" {
+		t.Fatalf("Status().SessionID = %q, want empty before first submission", status.Session.ID)
 	}
 
 	_, err = driver.ensureSession(ctx)
@@ -114,7 +114,7 @@ func TestRegressionCommandStatusAfterLazySession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Status() after ensureSession error = %v", err)
 	}
-	if status.SessionID == "" {
+	if status.Session.ID == "" {
 		t.Fatal("Status().SessionID should not be empty after ensureSession")
 	}
 }
@@ -469,7 +469,7 @@ func TestRegressionCommandNewDriverWithSandboxConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Status() error = %v", err)
 	}
-	if status.SandboxType == "" {
+	if status.SandboxStatus.Type == "" {
 		t.Fatal("Status().SandboxType should not be empty")
 	}
 }

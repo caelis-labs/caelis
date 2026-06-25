@@ -13,24 +13,24 @@ func formatStatusSnapshot(status control.StatusSnapshot) string {
 	model := statusViewModelFromSnapshot(status).HeaderModelText("")
 	lines := []string{}
 	appendStatusField(&lines, "Model", model)
-	appendStatusField(&lines, "Mode", firstNonEmpty(strings.TrimSpace(status.ModeLabel), "auto-review"))
+	appendStatusField(&lines, "Mode", firstNonEmpty(strings.TrimSpace(status.Session.ModeLabel), "auto-review"))
 	appendStatusField(&lines, "Sandbox", formatStatusSandbox(status))
-	appendStatusField(&lines, "Workspace", firstNonEmpty(strings.TrimSpace(status.Workspace), "-"))
-	appendStatusField(&lines, "Session", strings.TrimSpace(status.SessionID))
-	if usage := statusbar.FormatContextUsage(status.TotalTokens, status.ContextWindowTokens); usage != "" {
+	appendStatusField(&lines, "Workspace", firstNonEmpty(strings.TrimSpace(status.Session.Workspace), "-"))
+	appendStatusField(&lines, "Session", strings.TrimSpace(status.Session.ID))
+	if usage := statusbar.FormatContextUsage(status.Usage.TotalTokens, status.Usage.ContextWindowTokens); usage != "" {
 		appendStatusField(&lines, "Context", usage)
 	}
-	if status.FallbackReason != "" {
-		appendStatusField(&lines, "Fallback", strings.TrimSpace(status.FallbackReason))
+	if status.SandboxStatus.FallbackReason != "" {
+		appendStatusField(&lines, "Fallback", strings.TrimSpace(status.SandboxStatus.FallbackReason))
 	}
-	if status.SandboxInstallHint != "" {
-		appendStatusField(&lines, "Install", strings.TrimSpace(status.SandboxInstallHint))
+	if status.SandboxStatus.InstallHint != "" {
+		appendStatusField(&lines, "Install", strings.TrimSpace(status.SandboxStatus.InstallHint))
 	}
-	globalSetup, hasGlobalSetup := status.SandboxSetup.Check("global")
-	workspaceSetup, hasWorkspaceSetup := status.SandboxSetup.Check("workspace")
-	globalSetupRequired := status.SandboxGlobalSetupRequired || (hasGlobalSetup && globalSetup.Required)
-	workspaceSetupRequired := status.SandboxWorkspaceSetupRequired || (hasWorkspaceSetup && workspaceSetup.Required)
-	setupError := firstNonEmpty(status.SandboxSetup.Error, globalSetup.Error, workspaceSetup.Error, status.SandboxSetupError)
+	globalSetup, hasGlobalSetup := status.SandboxStatus.Setup.Check("global")
+	workspaceSetup, hasWorkspaceSetup := status.SandboxStatus.Setup.Check("workspace")
+	globalSetupRequired := status.SandboxStatus.GlobalSetupRequired || (hasGlobalSetup && globalSetup.Required)
+	workspaceSetupRequired := status.SandboxStatus.WorkspaceSetupRequired || (hasWorkspaceSetup && workspaceSetup.Required)
+	setupError := firstNonEmpty(status.SandboxStatus.Setup.Error, globalSetup.Error, workspaceSetup.Error, status.SandboxStatus.SetupError)
 	if globalSetupRequired {
 		if setupError != "" {
 			appendStatusField(&lines, "Setup", "Windows sandbox infrastructure repair failed")
@@ -48,13 +48,13 @@ func formatStatusSnapshot(status control.StatusSnapshot) string {
 		appendStatusField(&lines, "Error", compactStatusDetail(setupError, 180))
 	}
 	warnings := make([]string, 0, 6)
-	if strings.TrimSpace(status.Model) == "" && strings.TrimSpace(status.Provider) == "" && strings.TrimSpace(status.ModelName) == "" {
+	if strings.TrimSpace(status.ModelStatus.Display) == "" && strings.TrimSpace(status.ModelStatus.Provider) == "" && strings.TrimSpace(status.ModelStatus.Name) == "" {
 		warnings = append(warnings, "Run /connect to configure a provider and model")
 	}
-	if status.MissingAPIKey {
+	if status.ModelStatus.MissingAPIKey {
 		warnings = append(warnings, "API key is missing; reconnect with a key or use env:YOUR_API_KEY")
 	}
-	if status.HostExecution || status.FullAccessMode {
+	if status.SandboxStatus.HostExecution || status.SandboxStatus.FullAccessMode {
 		warnings = append(warnings, "Commands may run on the host with reduced sandbox isolation")
 		warnings = append(warnings, "Auto-Review remains enabled and can approve host execution; switch approval mode to manual for sensitive work")
 	}
@@ -71,7 +71,7 @@ func formatStatusSnapshot(status control.StatusSnapshot) string {
 			warnings = append(warnings, "Current workspace ACLs will be repaired lazily before sandboxed commands run")
 		}
 	}
-	if strings.TrimSpace(status.FallbackReason) != "" {
+	if strings.TrimSpace(status.SandboxStatus.FallbackReason) != "" {
 		warnings = append(warnings, "Requested sandbox backend is unavailable and a fallback is in effect")
 	}
 	if len(warnings) > 0 {
@@ -120,15 +120,15 @@ func appendStatusField(lines *[]string, label string, value string) {
 }
 
 func formatStatusSandbox(status control.StatusSnapshot) string {
-	sandbox := firstNonEmpty(strings.TrimSpace(status.SandboxResolvedBackend), strings.TrimSpace(status.SandboxType), strings.TrimSpace(status.SandboxRequestedBackend), "auto")
-	security := strings.TrimSpace(status.SecuritySummary)
+	sandbox := firstNonEmpty(strings.TrimSpace(status.SandboxStatus.ResolvedBackend), strings.TrimSpace(status.SandboxStatus.Type), strings.TrimSpace(status.SandboxStatus.RequestedBackend), "auto")
+	security := strings.TrimSpace(status.SandboxStatus.SecuritySummary)
 	switch {
-	case status.FullAccessMode:
+	case status.SandboxStatus.FullAccessMode:
 		return firstNonEmpty(security, "full access")
-	case status.HostExecution:
+	case status.SandboxStatus.HostExecution:
 		return firstNonEmpty(security, "host execution")
 	}
-	route := strings.ToLower(strings.TrimSpace(status.Route))
+	route := strings.ToLower(strings.TrimSpace(status.SandboxStatus.Route))
 	switch route {
 	case "", "-":
 		return sandbox
@@ -140,26 +140,26 @@ func formatStatusSandbox(status control.StatusSnapshot) string {
 	case "host":
 		return "host execution"
 	default:
-		return sandbox + " (" + strings.TrimSpace(status.Route) + ")"
+		return sandbox + " (" + strings.TrimSpace(status.SandboxStatus.Route) + ")"
 	}
 }
 
 func formatSessionTokenUsageStatus(status control.StatusSnapshot) string {
-	total := normalizedUsageSnapshot(status.SessionUsageTotal)
+	total := normalizedUsageSnapshot(status.Usage.SessionUsageTotal)
 	if usageSnapshotZero(total) {
 		total = normalizedUsageSnapshot(control.UsageSnapshot{
-			PromptTokens:      status.SessionInputTokens,
-			CachedInputTokens: status.SessionCachedInputTokens,
-			CompletionTokens:  status.SessionOutputTokens,
-			ReasoningTokens:   status.SessionReasoningTokens,
-			TotalTokens:       status.SessionTotalTokens,
+			PromptTokens:      status.Usage.SessionInputTokens,
+			CachedInputTokens: status.Usage.SessionCachedInputTokens,
+			CompletionTokens:  status.Usage.SessionOutputTokens,
+			ReasoningTokens:   status.Usage.SessionReasoningTokens,
+			TotalTokens:       status.Usage.SessionTotalTokens,
 		})
 	}
 	if usageSnapshotZero(total) {
 		return ""
 	}
 	rows := []tokenUsageStatusRow{{scope: "total", usage: total}}
-	for _, item := range status.SessionUsageByModel {
+	for _, item := range status.Usage.SessionUsageByModel {
 		usage := normalizedUsageSnapshot(item.Usage)
 		if usageSnapshotZero(usage) {
 			continue

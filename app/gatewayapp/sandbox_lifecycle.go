@@ -7,9 +7,9 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 )
 
-type sandboxLifecycleAction func(context.Context, sandbox.Runtime) error
+type sandboxLifecycleAction = sandbox.LifecycleAction
 
-type sandboxLifecycleRuntimeFactory func(SandboxConfig, string, string) (sandbox.Runtime, SandboxConfig, bool, error)
+type sandboxLifecycleRuntimeFactory func(sandbox.Config, sandbox.Runtime) (sandbox.LifecycleTarget, error)
 
 type sandboxLifecycleSnapshot struct {
 	exec         sandbox.Runtime
@@ -18,55 +18,41 @@ type sandboxLifecycleSnapshot struct {
 	storeDir     string
 }
 
-type sandboxLifecycleTarget struct {
-	runtime sandbox.Runtime
-	cfg     SandboxConfig
-	current bool
-	noOp    bool
-}
-
 func (s *Stack) runSandboxLifecycle(ctx context.Context, action sandboxLifecycleAction) (SandboxStatus, error) {
 	target, err := s.selectSandboxLifecycleTarget()
 	if err != nil {
 		return SandboxStatus{}, err
 	}
-	if target.noOp {
+	if target.NoOp {
 		return s.SandboxStatus(), nil
 	}
-	defer target.close()
-	err = action(ctx, target.runtime)
+	defer func() {
+		_ = target.Close()
+	}()
+	err = action(ctx, target.Runtime)
 	return s.sandboxLifecycleStatus(target), err
 }
 
-func (s *Stack) selectSandboxLifecycleTarget() (sandboxLifecycleTarget, error) {
+func (s *Stack) selectSandboxLifecycleTarget() (sandbox.LifecycleTarget, error) {
 	snapshot, err := s.sandboxLifecycleSnapshot()
 	if err != nil {
-		return sandboxLifecycleTarget{}, err
-	}
-	if shouldUseStackRuntimeForWindowsLifecycle(snapshot.exec) {
-		return sandboxLifecycleTarget{
-			runtime: snapshot.exec,
-			cfg:     snapshot.cfg,
-			current: true,
-		}, nil
+		return sandbox.LifecycleTarget{}, err
 	}
 	if isHostSandboxBackend(snapshot.cfg.RequestedType) {
-		return sandboxLifecycleTarget{noOp: true}, nil
+		cfg := sandboxConfigToPort(effectiveSandboxConfig(snapshot.cfg, snapshot.workspaceCWD), snapshot.workspaceCWD, snapshot.storeDir)
+		return sandbox.LifecycleTarget{Config: cfg, NoOp: true}, nil
 	}
-	runtime, runtimeCfg, ok, err := s.sandboxLifecycleRuntime(snapshot.cfg, snapshot.workspaceCWD, snapshot.storeDir)
+	target, err := s.sandboxLifecycleRuntime(snapshot.cfg, snapshot.exec, snapshot.workspaceCWD, snapshot.storeDir)
 	if err != nil {
-		return sandboxLifecycleTarget{}, err
+		return sandbox.LifecycleTarget{}, err
 	}
-	if !ok {
-		return sandboxLifecycleTarget{noOp: true}, nil
+	if target.NoOp {
+		return target, nil
 	}
-	if runtime == nil {
-		return sandboxLifecycleTarget{}, fmt.Errorf("gatewayapp: sandbox lifecycle runtime factory returned nil runtime")
+	if target.Runtime == nil {
+		return sandbox.LifecycleTarget{}, fmt.Errorf("gatewayapp: sandbox lifecycle runtime factory returned nil runtime")
 	}
-	return sandboxLifecycleTarget{
-		runtime: runtime,
-		cfg:     runtimeCfg,
-	}, nil
+	return target, nil
 }
 
 func (s *Stack) sandboxLifecycleSnapshot() (sandboxLifecycleSnapshot, error) {
@@ -86,59 +72,55 @@ func (s *Stack) sandboxLifecycleSnapshot() (sandboxLifecycleSnapshot, error) {
 	}, nil
 }
 
-func (s *Stack) sandboxLifecycleStatus(target sandboxLifecycleTarget) SandboxStatus {
-	if target.current {
+func (s *Stack) sandboxLifecycleStatus(target sandbox.LifecycleTarget) SandboxStatus {
+	if target.Current {
 		return s.SandboxStatus()
 	}
-	return sandboxStatusFromRuntime(target.cfg, target.runtime)
-}
-
-func (target sandboxLifecycleTarget) close() {
-	if target.current {
-		return
-	}
-	_ = target.runtime.Close()
+	return sandboxStatusFromRuntime(sandboxConfigFromPort(target.Config), target.Runtime)
 }
 
 func prepareSandboxRuntime(ctx context.Context, runtime sandbox.Runtime) error {
-	preparer, ok := runtime.(sandbox.PreparableRuntime)
-	if !ok {
-		return nil
-	}
-	return preparer.Prepare(ctx)
+	return sandbox.PrepareRuntime(ctx, runtime)
 }
 
 func repairSandboxRuntime(ctx context.Context, runtime sandbox.Runtime) error {
-	if repairer, ok := runtime.(sandbox.RepairableRuntime); ok {
-		return repairer.Repair(ctx)
-	}
-	return prepareSandboxRuntime(ctx, runtime)
+	return sandbox.RepairRuntime(ctx, runtime)
 }
 
 func resetSandboxRuntime(ctx context.Context, runtime sandbox.Runtime) error {
-	resetter, ok := runtime.(sandbox.ResettableRuntime)
-	if !ok {
-		return nil
-	}
-	return resetter.Reset(ctx)
-}
-
-func shouldUseStackRuntimeForWindowsLifecycle(exec sandbox.Runtime) bool {
-	if exec == nil {
-		return false
-	}
-	status := sandbox.SelectionStatus(exec)
-	return sandbox.CanonicalBackend(status.ResolvedBackend) == sandbox.BackendWindows ||
-		sandbox.CanonicalBackend(status.RequestedBackend) == sandbox.BackendWindows
+	return sandbox.ResetRuntime(ctx, runtime)
 }
 
 func isHostSandboxBackend(backend string) bool {
 	return sandbox.CanonicalBackend(sandbox.Backend(backend)) == sandbox.BackendHost
 }
 
-func (s *Stack) sandboxLifecycleRuntime(cfg SandboxConfig, workspaceCWD string, storeDir string) (sandbox.Runtime, SandboxConfig, bool, error) {
+func (s *Stack) sandboxLifecycleRuntime(cfg SandboxConfig, current sandbox.Runtime, workspaceCWD string, storeDir string) (sandbox.LifecycleTarget, error) {
+	portCfg := sandboxConfigToPort(effectiveSandboxConfig(cfg, workspaceCWD), workspaceCWD, storeDir)
 	if s != nil && s.sandboxLifecycleFactory != nil {
-		return s.sandboxLifecycleFactory(cfg, workspaceCWD, storeDir)
+		return s.sandboxLifecycleFactory(portCfg, current)
 	}
-	return windowsSandboxRuntime(cfg, workspaceCWD, storeDir)
+	return sandbox.LifecycleTargetFor(portCfg, current)
+}
+
+func sandboxConfigToPort(cfg SandboxConfig, workspaceCWD string, storeDir string) sandbox.Config {
+	return sandbox.Config{
+		CWD:              workspaceCWD,
+		RequestedBackend: sandbox.Backend(cfg.RequestedType),
+		HelperPath:       cfg.HelperPath,
+		StateDir:         storeDir,
+		ReadableRoots:    append([]string(nil), cfg.ReadableRoots...),
+		WritableRoots:    append([]string(nil), cfg.WritableRoots...),
+		ReadOnlySubpaths: append([]string(nil), cfg.ReadOnlySubpaths...),
+	}
+}
+
+func sandboxConfigFromPort(cfg sandbox.Config) SandboxConfig {
+	return SandboxConfig{
+		RequestedType:    string(cfg.RequestedBackend),
+		HelperPath:       cfg.HelperPath,
+		ReadableRoots:    append([]string(nil), cfg.ReadableRoots...),
+		WritableRoots:    append([]string(nil), cfg.WritableRoots...),
+		ReadOnlySubpaths: append([]string(nil), cfg.ReadOnlySubpaths...),
+	}
 }

@@ -431,6 +431,33 @@ func TestValidateDurableCoreEventAllowsMatchingToolMessageOutput(t *testing.T) {
 	}
 }
 
+func TestValidateDurableCoreEventRejectsAmbiguousToolResultMessageMatch(t *testing.T) {
+	t.Parallel()
+
+	message := model.Message{
+		Role: model.RoleTool,
+		Parts: []model.Part{
+			model.NewToolResultJSONPart("call-1", "RUN_COMMAND", map[string]any{"result": "one"}, false),
+			model.NewToolResultJSONPart("call-2", "RUN_COMMAND", map[string]any{"result": "two"}, false),
+		},
+	}
+	err := ValidateDurableCoreEvent(&Event{
+		Type:       EventTypeToolResult,
+		Visibility: VisibilityCanonical,
+		Tool: &EventTool{
+			Name:   "RUN_COMMAND",
+			Output: map[string]any{"result": "one"},
+		},
+		Message: &message,
+	})
+	if err == nil {
+		t.Fatal("ValidateDurableCoreEvent() error = nil, want missing Event.Tool id rejected")
+	}
+	if detail := EventValidationDetail(err); !strings.Contains(detail, "Event.Tool id") {
+		t.Fatalf("validation detail = %q, want Event.Tool id detail", detail)
+	}
+}
+
 func TestValidateDurableCoreEventRejectsToolResultNameCaseMismatch(t *testing.T) {
 	t.Parallel()
 

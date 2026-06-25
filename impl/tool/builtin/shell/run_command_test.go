@@ -244,8 +244,8 @@ func TestRunCommandCallDefaultsNetworkToRuntimeDefault(t *testing.T) {
 	if got := last.Constraints.Network; got != sandbox.NetworkEnabled {
 		t.Fatalf("default network = %q, want enabled", got)
 	}
-	if got := last.Backend; got != sandbox.BackendWindows {
-		t.Fatalf("backend = %q, want windows default", got)
+	if got := last.Constraints.Backend; got != sandbox.BackendWindows {
+		t.Fatalf("constraints backend = %q, want windows default", got)
 	}
 }
 

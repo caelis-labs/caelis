@@ -20,18 +20,14 @@ type ApprovalOption struct {
 // ApprovalRequest is one runtime-owned approval request emitted before one
 // sensitive tool execution continues.
 type ApprovalRequest struct {
-	SessionRef session.SessionRef `json:"session_ref"`
-	Session    session.Session    `json:"session"`
-	RunID      string             `json:"run_id,omitempty"`
-	TurnID     string             `json:"turn_id,omitempty"`
-	// Deprecated: approval routing is resolved from session state at the
-	// gateway boundary. Runtime implementations must not use this field to
-	// select manual vs automatic approval handling.
-	Mode     string                    `json:"mode,omitempty"`
-	Tool     tool.Definition           `json:"tool"`
-	Call     tool.Call                 `json:"call"`
-	Approval *session.ProtocolApproval `json:"approval,omitempty"`
-	Metadata map[string]any            `json:"metadata,omitempty"`
+	SessionRef session.SessionRef        `json:"session_ref"`
+	Session    session.Session           `json:"session"`
+	RunID      string                    `json:"run_id,omitempty"`
+	TurnID     string                    `json:"turn_id,omitempty"`
+	Tool       tool.Definition           `json:"tool"`
+	Call       tool.Call                 `json:"call"`
+	Approval   *session.ProtocolApproval `json:"approval,omitempty"`
+	Metadata   map[string]any            `json:"metadata,omitempty"`
 }
 
 // ApprovalResponse is one resolved approval outcome.
@@ -100,15 +96,6 @@ type PromptParticipantRequest struct {
 	Stream            bool                `json:"stream,omitempty"`
 	ApprovalRequester ApprovalRequester   `json:"-"`
 }
-
-// Deprecated: use AttachParticipantRequest.
-type AttachACPParticipantRequest = AttachParticipantRequest
-
-// Deprecated: use DetachParticipantRequest.
-type DetachACPParticipantRequest = DetachParticipantRequest
-
-// Deprecated: use PromptParticipantRequest.
-type PromptACPParticipantRequest = PromptParticipantRequest
 
 // HandoffControllerRequest switches the active controller for one session. The
 // request is app-owned and not exposed on the LLM-facing tool surface.

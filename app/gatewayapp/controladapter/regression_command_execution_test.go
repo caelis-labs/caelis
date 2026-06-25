@@ -53,16 +53,16 @@ func TestRegressionCommandExecStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Status() error = %v", err)
 	}
-	if status.SessionID == "" {
+	if status.Session.ID == "" {
 		t.Fatal("Status().SessionID empty")
 	}
-	if status.Model == "" {
+	if status.ModelStatus.Display == "" {
 		t.Fatal("Status().Model empty")
 	}
-	if status.SandboxType == "" {
+	if status.SandboxStatus.Type == "" {
 		t.Fatal("Status().SandboxType empty")
 	}
-	if status.SessionMode == "" {
+	if status.Session.SessionMode == "" {
 		t.Fatal("Status().SessionMode empty")
 	}
 }
@@ -86,16 +86,16 @@ func TestRegressionCommandExecModelUse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UseModel(ollama/alt-model) error = %v", err)
 	}
-	if status.Model != "ollama/alt-model" {
-		t.Fatalf("UseModel() status.Model = %q, want ollama/alt-model", status.Model)
+	if status.ModelStatus.Display != "ollama/alt-model" {
+		t.Fatalf("UseModel() status.ModelStatus.Display = %q, want ollama/alt-model", status.ModelStatus.Display)
 	}
 
 	current, err := driver.Status(ctx)
 	if err != nil {
 		t.Fatalf("Status() error = %v", err)
 	}
-	if current.Model != "ollama/alt-model" {
-		t.Fatalf("Status().Model = %q, want ollama/alt-model after UseModel", current.Model)
+	if current.ModelStatus.Display != "ollama/alt-model" {
+		t.Fatalf("Status().Model = %q, want ollama/alt-model after UseModel", current.ModelStatus.Display)
 	}
 }
 
@@ -130,8 +130,8 @@ func TestRegressionCommandExecModelUseWithReasoning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UseModel(ollama/llama3, high) error = %v", err)
 	}
-	if !strings.HasPrefix(status.Model, "ollama/llama3") {
-		t.Fatalf("status.Model = %q, want prefix ollama/llama3", status.Model)
+	if !strings.HasPrefix(status.ModelStatus.Display, "ollama/llama3") {
+		t.Fatalf("status.ModelStatus.Display = %q, want prefix ollama/llama3", status.ModelStatus.Display)
 	}
 }
 
@@ -152,8 +152,8 @@ func TestRegressionCommandExecModelUseCaseInsensitive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UseModel(case insensitive) error = %v", err)
 	}
-	if !strings.EqualFold(status.Model, "ollama/TestModel") {
-		t.Fatalf("UseModel case insensitive: status.Model = %q", status.Model)
+	if !strings.EqualFold(status.ModelStatus.Display, "ollama/TestModel") {
+		t.Fatalf("UseModel case insensitive: status.ModelStatus.Display = %q", status.ModelStatus.Display)
 	}
 }
 
@@ -250,7 +250,7 @@ func TestRegressionCommandExecApprovalMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Status() error = %v", err)
 	}
-	initialMode := status.SessionMode
+	initialMode := status.Session.SessionMode
 	if initialMode == "" {
 		initialMode = "auto-review"
 	}
@@ -264,16 +264,16 @@ func TestRegressionCommandExecApprovalMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SetSessionMode(%s) error = %v", newMode, err)
 	}
-	if updated.SessionMode != newMode {
-		t.Fatalf("SetSessionMode(%s): session_mode = %q", newMode, updated.SessionMode)
+	if updated.Session.SessionMode != newMode {
+		t.Fatalf("SetSessionMode(%s): session_mode = %q", newMode, updated.Session.SessionMode)
 	}
 
 	current, err := driver.Status(ctx)
 	if err != nil {
 		t.Fatalf("Status() error = %v", err)
 	}
-	if current.SessionMode != newMode {
-		t.Fatalf("Status().SessionMode = %q, want %q", current.SessionMode, newMode)
+	if current.Session.SessionMode != newMode {
+		t.Fatalf("Status().SessionMode = %q, want %q", current.Session.SessionMode, newMode)
 	}
 }
 
@@ -291,8 +291,8 @@ func TestRegressionCommandExecConnectNewProvider(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Connect() error = %v", err)
 	}
-	if status.Model == "" {
-		t.Fatal("Connect() status.Model empty")
+	if status.ModelStatus.Display == "" {
+		t.Fatal("Connect() status.ModelStatus.Display empty")
 	}
 
 	candidates, err := driver.CompleteSlashArg(ctx, "model use", "", 20)
@@ -323,8 +323,8 @@ func TestRegressionCommandExecConnectUpdatesStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Connect() error = %v", err)
 	}
-	if status.Model == "" {
-		t.Fatal("Connect() status.Model empty after connect")
+	if status.ModelStatus.Display == "" {
+		t.Fatal("Connect() status.ModelStatus.Display empty after connect")
 	}
 }
 
@@ -400,7 +400,7 @@ func TestRegressionCommandExecNewSession(t *testing.T) {
 	if newSess.SessionID == "" {
 		t.Fatal("NewSession().SessionID empty")
 	}
-	if newSess.SessionID == before.SessionID {
+	if newSess.SessionID == before.Session.ID {
 		t.Fatalf("NewSession() returned same ID %q", newSess.SessionID)
 	}
 
@@ -408,8 +408,8 @@ func TestRegressionCommandExecNewSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Status() error = %v", err)
 	}
-	if after.SessionID != newSess.SessionID {
-		t.Fatalf("Status().SessionID = %q, want %q after NewSession", after.SessionID, newSess.SessionID)
+	if after.Session.ID != newSess.SessionID {
+		t.Fatalf("Status().SessionID = %q, want %q after NewSession", after.Session.ID, newSess.SessionID)
 	}
 }
 
@@ -430,17 +430,17 @@ func TestRegressionCommandExecResumeSession(t *testing.T) {
 		t.Fatalf("NewSession() error = %v", err)
 	}
 
-	_, err = driver.ResumeSession(ctx, original.SessionID)
+	_, err = driver.ResumeSession(ctx, original.Session.ID)
 	if err != nil {
-		t.Fatalf("ResumeSession(%s) error = %v", original.SessionID, err)
+		t.Fatalf("ResumeSession(%s) error = %v", original.Session.ID, err)
 	}
 
 	current, err := driver.Status(ctx)
 	if err != nil {
 		t.Fatalf("Status() error = %v", err)
 	}
-	if current.SessionID != original.SessionID {
-		t.Fatalf("Status().SessionID = %q, want %q after resume", current.SessionID, original.SessionID)
+	if current.Session.ID != original.Session.ID {
+		t.Fatalf("Status().SessionID = %q, want %q after resume", current.Session.ID, original.Session.ID)
 	}
 }
 
@@ -507,8 +507,8 @@ func TestRegressionCommandExecModelAliasLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UseModel(alpha) error = %v", err)
 	}
-	if !strings.EqualFold(status.Model, "ollama/model-alpha") {
-		t.Fatalf("after UseModel(alpha): model = %q", status.Model)
+	if !strings.EqualFold(status.ModelStatus.Display, "ollama/model-alpha") {
+		t.Fatalf("after UseModel(alpha): model = %q", status.ModelStatus.Display)
 	}
 
 	if err := driver.DeleteModel(ctx, "ollama/model-alpha"); err != nil {
@@ -546,8 +546,8 @@ func TestRegressionCommandExecConnectFullConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Connect(full config) error = %v", err)
 	}
-	if status.Model == "" {
-		t.Fatal("Connect(full config) status.Model empty")
+	if status.ModelStatus.Display == "" {
+		t.Fatal("Connect(full config) status.ModelStatus.Display empty")
 	}
 	cfg, ok := stack.ModelConfig("ollama/custom-model")
 	if !ok {
@@ -577,8 +577,8 @@ func TestRegressionCommandExecConnectUseDeleteCycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UseModel() error = %v", err)
 	}
-	if !strings.EqualFold(status.Model, "ollama/cycle-model") {
-		t.Fatalf("UseModel() model = %q", status.Model)
+	if !strings.EqualFold(status.ModelStatus.Display, "ollama/cycle-model") {
+		t.Fatalf("UseModel() model = %q", status.ModelStatus.Display)
 	}
 
 	if err := driver.DeleteModel(ctx, "ollama/cycle-model"); err != nil {

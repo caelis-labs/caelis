@@ -168,8 +168,6 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 
 func temporaryArchitectureException(rel string, target string) bool {
 	switch {
-	case pathIn(rel, "surfaces/acpserver") && target == "app/gatewayapp":
-		return true
 	case strings.HasPrefix(rel, "internal/kernel/") &&
 		strings.HasSuffix(rel, "_test.go") &&
 		pathIn(target, "impl/session/file", "impl/session/memory"):

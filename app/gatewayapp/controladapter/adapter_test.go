@@ -256,8 +256,8 @@ func TestAdapterDefersBlankSessionUntilFirstSubmission(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Status() error = %v", err)
 	}
-	if status.SessionID != "" {
-		t.Fatalf("Status().SessionID = %q, want empty before first submission", status.SessionID)
+	if status.Session.ID != "" {
+		t.Fatalf("Status().SessionID = %q, want empty before first submission", status.Session.ID)
 	}
 	before, err := stack.Kernel().ListSessions(ctx, gateway.ListSessionsRequest{
 		AppName:      stack.AppName,
@@ -415,8 +415,8 @@ func TestAdapterLightweightStatusSkipsSandboxDiagnostics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LightweightStatus() error = %v", err)
 	}
-	if status.Model != "gpt-light" {
-		t.Fatalf("LightweightStatus().Model = %q, want default alias", status.Model)
+	if status.ModelStatus.Display != "gpt-light" {
+		t.Fatalf("LightweightStatus().Model = %q, want default alias", status.ModelStatus.Display)
 	}
 	if sandboxCalls != 0 {
 		t.Fatalf("SandboxStatus() calls = %d, want 0", sandboxCalls)
@@ -858,7 +858,7 @@ func TestAdapterCompletesAndPersistsModelReasoningLevel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Status() error = %v", err)
 	}
-	if got := strings.TrimSpace(status.Model); got != "deepseek/deepseek-v4-pro [high]" {
+	if got := strings.TrimSpace(status.ModelStatus.Display); got != "deepseek/deepseek-v4-pro [high]" {
 		t.Fatalf("status model = %q, want deepseek/deepseek-v4-pro [high]", got)
 	}
 	activeSession, ok := driver.currentSession()
@@ -911,11 +911,11 @@ func TestAdapterConnectPersistsDeepSeekModelDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Connect() error = %v", err)
 	}
-	if got := status.ContextWindowTokens; got != 1048576 {
-		t.Fatalf("status.ContextWindowTokens = %d, want 1048576", got)
+	if got := status.Usage.ContextWindowTokens; got != 1048576 {
+		t.Fatalf("status.Usage.ContextWindowTokens = %d, want 1048576", got)
 	}
-	if got := strings.TrimSpace(status.ReasoningEffort); got != "high" {
-		t.Fatalf("status.ReasoningEffort = %q, want high", got)
+	if got := strings.TrimSpace(status.ModelStatus.ReasoningEffort); got != "high" {
+		t.Fatalf("status.ModelStatus.ReasoningEffort = %q, want high", got)
 	}
 
 	doc, err := gatewayapp.LoadAppConfig(root)
@@ -1160,11 +1160,11 @@ func TestAdapterConnectCodeFreeUsesExistingOAuthCache(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Connect(codefree) error = %v", err)
 	}
-	if status.Provider != "codefree" {
-		t.Fatalf("provider = %q, want codefree", status.Provider)
+	if status.ModelStatus.Provider != "codefree" {
+		t.Fatalf("provider = %q, want codefree", status.ModelStatus.Provider)
 	}
-	if status.ModelName != "GLM-4.7" {
-		t.Fatalf("model name = %q, want GLM-4.7", status.ModelName)
+	if status.ModelStatus.Name != "GLM-4.7" {
+		t.Fatalf("model name = %q, want GLM-4.7", status.ModelStatus.Name)
 	}
 }
 
@@ -1234,22 +1234,22 @@ func TestAdapterStatusIncludesContextUsageSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Status() error = %v", err)
 	}
-	if status.TotalTokens <= 12600 {
-		t.Fatalf("status.TotalTokens = %d, want provider baseline plus estimated delta", status.TotalTokens)
+	if status.Usage.TotalTokens <= 12600 {
+		t.Fatalf("status.Usage.TotalTokens = %d, want provider baseline plus estimated delta", status.Usage.TotalTokens)
 	}
-	if status.ContextWindowTokens != 88000 {
-		t.Fatalf("status.ContextWindowTokens = %d, want 88000", status.ContextWindowTokens)
+	if status.Usage.ContextWindowTokens != 88000 {
+		t.Fatalf("status.Usage.ContextWindowTokens = %d, want 88000", status.Usage.ContextWindowTokens)
 	}
-	if status.SessionInputTokens != 12600 || status.SessionCachedInputTokens != 9000 || status.SessionOutputTokens != 200 || status.SessionReasoningTokens != 50 || status.SessionTotalTokens != 12800 {
-		t.Fatalf("session token usage = input %d cached %d output %d reasoning %d total %d", status.SessionInputTokens, status.SessionCachedInputTokens, status.SessionOutputTokens, status.SessionReasoningTokens, status.SessionTotalTokens)
+	if status.Usage.SessionInputTokens != 12600 || status.Usage.SessionCachedInputTokens != 9000 || status.Usage.SessionOutputTokens != 200 || status.Usage.SessionReasoningTokens != 50 || status.Usage.SessionTotalTokens != 12800 {
+		t.Fatalf("session token usage = input %d cached %d output %d reasoning %d total %d", status.Usage.SessionInputTokens, status.Usage.SessionCachedInputTokens, status.Usage.SessionOutputTokens, status.Usage.SessionReasoningTokens, status.Usage.SessionTotalTokens)
 	}
-	if status.SessionUsageMain.PromptTokens != 12600 || status.SessionUsageMain.ReasoningTokens != 50 {
-		t.Fatalf("main usage = %+v, want assistant usage", status.SessionUsageMain)
+	if status.Usage.SessionUsageMain.PromptTokens != 12600 || status.Usage.SessionUsageMain.ReasoningTokens != 50 {
+		t.Fatalf("main usage = %+v, want assistant usage", status.Usage.SessionUsageMain)
 	}
-	if len(status.SessionUsageByModel) != 1 {
-		t.Fatalf("SessionUsageByModel = %#v, want one model row", status.SessionUsageByModel)
+	if len(status.Usage.SessionUsageByModel) != 1 {
+		t.Fatalf("SessionUsageByModel = %#v, want one model row", status.Usage.SessionUsageByModel)
 	}
-	row := status.SessionUsageByModel[0]
+	row := status.Usage.SessionUsageByModel[0]
 	if row.Provider != "ollama" || row.Model != "llama3" || row.Usage.PromptTokens != 12600 || row.Usage.TotalTokens != 12800 {
 		t.Fatalf("model usage row = %+v, want ollama/llama3 usage", row)
 	}
@@ -1654,8 +1654,8 @@ func TestAdapterDeleteModelRemovesConfiguredAlias(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Status() error = %v", err)
 	}
-	if status.Model == "ollama/alt-model" {
-		t.Fatalf("status model = %q, want deleted alias removed", status.Model)
+	if status.ModelStatus.Display == "ollama/alt-model" {
+		t.Fatalf("status model = %q, want deleted alias removed", status.ModelStatus.Display)
 	}
 }
 
@@ -1699,8 +1699,8 @@ func TestAdapterDeleteOnlyModelClearsAliasCandidatesAndStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Status() error = %v", err)
 	}
-	if strings.TrimSpace(status.Model) != "" {
-		t.Fatalf("status model = %q, want empty after deleting only model", status.Model)
+	if strings.TrimSpace(status.ModelStatus.Display) != "" {
+		t.Fatalf("status model = %q, want empty after deleting only model", status.ModelStatus.Display)
 	}
 }
 
@@ -1740,8 +1740,8 @@ func TestAdapterUseModelResolvesCaseInsensitiveAlias(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UseModel() error = %v", err)
 	}
-	if got := strings.ToLower(strings.TrimSpace(status.Model)); got != "minimax/minimax-m2.7-highspeed" {
-		t.Fatalf("status model = %q, want minimax/minimax-m2.7-highspeed", status.Model)
+	if got := strings.ToLower(strings.TrimSpace(status.ModelStatus.Display)); got != "minimax/minimax-m2.7-highspeed" {
+		t.Fatalf("status model = %q, want minimax/minimax-m2.7-highspeed", status.ModelStatus.Display)
 	}
 }
 
@@ -2025,8 +2025,8 @@ func TestAdapterStatusUsesPersistedDefaultAliasOnStartup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Status() error = %v", err)
 	}
-	if got := strings.TrimSpace(status.Model); got != "deepseek/deepseek-v4-pro" {
-		t.Fatalf("status model = %q, want deepseek/deepseek-v4-pro", status.Model)
+	if got := strings.TrimSpace(status.ModelStatus.Display); got != "deepseek/deepseek-v4-pro" {
+		t.Fatalf("status model = %q, want deepseek/deepseek-v4-pro", status.ModelStatus.Display)
 	}
 }
 
@@ -2058,14 +2058,14 @@ func TestAdapterStartupUsesRequestedSessionID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Status() error = %v", err)
 	}
-	if strings.TrimSpace(status.SessionID) == "" {
+	if strings.TrimSpace(status.Session.ID) == "" {
 		t.Fatal("expected startup status to include active session id")
 	}
-	if status.SessionID != activeSession.SessionID {
-		t.Fatalf("status session = %q, want %q", status.SessionID, activeSession.SessionID)
+	if status.Session.ID != activeSession.SessionID {
+		t.Fatalf("status session = %q, want %q", status.Session.ID, activeSession.SessionID)
 	}
-	if status.SessionID != "sticky-session" {
-		t.Fatalf("session id = %q, want sticky-session from constructor hint", status.SessionID)
+	if status.Session.ID != "sticky-session" {
+		t.Fatalf("session id = %q, want sticky-session from constructor hint", status.Session.ID)
 	}
 }
 
@@ -2097,22 +2097,22 @@ func TestAdapterStartupBindsRequestedSessionInsteadOfFreshOne(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Status() error = %v", err)
 	}
-	if strings.TrimSpace(status.SessionID) == "" {
+	if strings.TrimSpace(status.Session.ID) == "" {
 		t.Fatal("expected startup driver to bind the requested session")
 	}
-	if status.SessionID != "sticky-session" {
-		t.Fatalf("startup session = %q, want sticky-session", status.SessionID)
+	if status.Session.ID != "sticky-session" {
+		t.Fatalf("startup session = %q, want sticky-session", status.Session.ID)
 	}
-	if status.SessionID == stale.SessionID {
-		t.Fatalf("startup session = %q, want sticky-session instead of stale bound session", status.SessionID)
+	if status.Session.ID == stale.SessionID {
+		t.Fatalf("startup session = %q, want sticky-session instead of stale bound session", status.Session.ID)
 	}
 	binding, err := stack.Kernel().LookupBinding(gateway.BindingStateRequest{BindingKey: "surface"})
 	if err != nil {
 		t.Fatalf("LookupBinding(surface) error = %v", err)
 	}
 	current := binding.SessionRef
-	if current.SessionID != status.SessionID {
-		t.Fatalf("current binding session = %q, want %q", current.SessionID, status.SessionID)
+	if current.SessionID != status.Session.ID {
+		t.Fatalf("current binding session = %q, want %q", current.SessionID, status.Session.ID)
 	}
 }
 
@@ -2145,8 +2145,8 @@ func TestAdapterStartupReusesExistingRequestedSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Status() error = %v", err)
 	}
-	if status.SessionID != existing.SessionID {
-		t.Fatalf("status session = %q, want existing session %q", status.SessionID, existing.SessionID)
+	if status.Session.ID != existing.SessionID {
+		t.Fatalf("status session = %q, want existing session %q", status.Session.ID, existing.SessionID)
 	}
 }
 
@@ -2178,14 +2178,14 @@ func TestAdapterCycleSessionModeUsesStartupSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CycleSessionMode() error = %v", err)
 	}
-	if strings.TrimSpace(status.SessionID) == "" {
+	if strings.TrimSpace(status.Session.ID) == "" {
 		t.Fatal("expected CycleSessionMode() to keep an active session")
 	}
-	if status.SessionID != startup.SessionID {
-		t.Fatalf("session id = %q, want startup session %q", status.SessionID, startup.SessionID)
+	if status.Session.ID != startup.SessionID {
+		t.Fatalf("session id = %q, want startup session %q", status.Session.ID, startup.SessionID)
 	}
-	if status.SessionMode != "manual" {
-		t.Fatalf("session mode = %q, want manual", status.SessionMode)
+	if status.Session.SessionMode != "manual" {
+		t.Fatalf("session mode = %q, want manual", status.Session.SessionMode)
 	}
 }
 
@@ -2237,8 +2237,8 @@ func TestAdapterSetSessionModeUpdatesLocalApprovalModeUnderACPController(t *test
 	if err != nil {
 		t.Fatalf("SetSessionMode(manual) error = %v", err)
 	}
-	if status.SessionMode != "manual" {
-		t.Fatalf("status.SessionMode = %q, want manual", status.SessionMode)
+	if status.Session.SessionMode != "manual" {
+		t.Fatalf("status.Session.SessionMode = %q, want manual", status.Session.SessionMode)
 	}
 	state, err := stack.SessionRuntimeState(ctx, activeSession.SessionRef)
 	if err != nil {
@@ -2251,8 +2251,8 @@ func TestAdapterSetSessionModeUpdatesLocalApprovalModeUnderACPController(t *test
 	if err != nil {
 		t.Fatalf("Status() error = %v", err)
 	}
-	if status.SessionMode != "manual" {
-		t.Fatalf("Status().SessionMode = %q, want manual", status.SessionMode)
+	if status.Session.SessionMode != "manual" {
+		t.Fatalf("Status().SessionMode = %q, want manual", status.Session.SessionMode)
 	}
 }
 
@@ -2333,8 +2333,8 @@ func TestAdapterCycleSessionModeUpdatesRemoteACPControllerMode(t *testing.T) {
 	if setRemoteMode != "code" {
 		t.Fatalf("remote mode set to %q, want code", setRemoteMode)
 	}
-	if status.SessionMode != "code" || status.ModeLabel != "Code" {
-		t.Fatalf("status mode = %q/%q, want code/Code", status.SessionMode, status.ModeLabel)
+	if status.Session.SessionMode != "code" || status.Session.ModeLabel != "Code" {
+		t.Fatalf("status mode = %q/%q, want code/Code", status.Session.SessionMode, status.Session.ModeLabel)
 	}
 }
 
@@ -2440,11 +2440,11 @@ func TestAdapterACPStatusPrefersRemoteModeOverLocalSessionMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Status() error = %v", err)
 	}
-	if status.SessionMode != "code" || status.ModeLabel != "Code" {
-		t.Fatalf("status mode/label = %q/%q, want remote code/Code", status.SessionMode, status.ModeLabel)
+	if status.Session.SessionMode != "code" || status.Session.ModeLabel != "Code" {
+		t.Fatalf("status mode/label = %q/%q, want remote code/Code", status.Session.SessionMode, status.Session.ModeLabel)
 	}
-	if status.Provider != "acp" || status.Model != "remote-model" {
-		t.Fatalf("status provider/model = %q/%q, want acp/remote-model", status.Provider, status.Model)
+	if status.ModelStatus.Provider != "acp" || status.ModelStatus.Display != "remote-model" {
+		t.Fatalf("status provider/model = %q/%q, want acp/remote-model", status.ModelStatus.Provider, status.ModelStatus.Display)
 	}
 }
 
@@ -2500,11 +2500,11 @@ func TestAdapterACPStatusKeepsAgentFallbackWithoutRemoteModel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Status() error = %v", err)
 	}
-	if status.Provider != "acp" {
-		t.Fatalf("provider = %q, want acp", status.Provider)
+	if status.ModelStatus.Provider != "acp" {
+		t.Fatalf("provider = %q, want acp", status.ModelStatus.Provider)
 	}
-	if status.Model != "Codex ACP" {
-		t.Fatalf("model = %q, want ACP agent fallback instead of local model", status.Model)
+	if status.ModelStatus.Display != "Codex ACP" {
+		t.Fatalf("model = %q, want ACP agent fallback instead of local model", status.ModelStatus.Display)
 	}
 }
 
@@ -2546,8 +2546,8 @@ func TestAdapterIgnoresStaleSessionAliasOutsideConfiguredModels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Status() error = %v", err)
 	}
-	if got := strings.TrimSpace(status.Model); got != "" {
-		t.Fatalf("status model = %q, want empty because alias is stale", status.Model)
+	if got := strings.TrimSpace(status.ModelStatus.Display); got != "" {
+		t.Fatalf("status model = %q, want empty because alias is stale", status.ModelStatus.Display)
 	}
 	candidates, err := driver.CompleteSlashArg(ctx, "model use", "", 10)
 	if err != nil {
@@ -3619,17 +3619,17 @@ func TestAdapterStatusIncludesDoctorDiagnostics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Status() error = %v", err)
 	}
-	if status.StoreDir != root {
-		t.Fatalf("status.StoreDir = %q, want %q", status.StoreDir, root)
+	if status.Session.StoreDir != root {
+		t.Fatalf("status.Session.StoreDir = %q, want %q", status.Session.StoreDir, root)
 	}
-	if status.Provider != "minimax" || status.ModelName != "MiniMax-M2.7-highspeed" {
-		t.Fatalf("status provider/model = %q/%q, want minimax/MiniMax-M2.7-highspeed", status.Provider, status.ModelName)
+	if status.ModelStatus.Provider != "minimax" || status.ModelStatus.Name != "MiniMax-M2.7-highspeed" {
+		t.Fatalf("status provider/model = %q/%q, want minimax/MiniMax-M2.7-highspeed", status.ModelStatus.Provider, status.ModelStatus.Name)
 	}
-	if !status.MissingAPIKey {
-		t.Fatal("status.MissingAPIKey = false, want true when token env is unset")
+	if !status.ModelStatus.MissingAPIKey {
+		t.Fatal("status.ModelStatus.MissingAPIKey = false, want true when token env is unset")
 	}
-	if !status.HostExecution || status.FullAccessMode {
-		t.Fatalf("status host/full_access = %v/%v, want true/false", status.HostExecution, status.FullAccessMode)
+	if !status.SandboxStatus.HostExecution || status.SandboxStatus.FullAccessMode {
+		t.Fatalf("status host/full_access = %v/%v, want true/false", status.SandboxStatus.HostExecution, status.SandboxStatus.FullAccessMode)
 	}
 }
 

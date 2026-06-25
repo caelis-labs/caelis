@@ -99,7 +99,7 @@ func parseReasoningLevels(raw string) []string {
 	parts := strings.Split(raw, ",")
 	out := make([]string, 0, len(parts))
 	for _, part := range parts {
-		if trimmed := strings.TrimSpace(part); trimmed != "" {
+		if trimmed := strings.ToLower(strings.TrimSpace(part)); trimmed != "" {
 			out = append(out, trimmed)
 		}
 	}
@@ -124,7 +124,7 @@ func (s ConnectWizardState) normalized() ConnectWizardState {
 	if len(s.ReasoningLevels) > 0 {
 		levels := make([]string, 0, len(s.ReasoningLevels))
 		for _, level := range s.ReasoningLevels {
-			if trimmed := strings.TrimSpace(level); trimmed != "" {
+			if trimmed := strings.ToLower(strings.TrimSpace(level)); trimmed != "" {
 				levels = append(levels, trimmed)
 			}
 		}

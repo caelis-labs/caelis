@@ -22,28 +22,28 @@ type ViewModel struct {
 }
 
 func FromSnapshot(status control.StatusSnapshot) ViewModel {
-	model := firstNonEmpty(strings.TrimSpace(status.Model), strings.TrimSpace(status.ModelName), "not configured")
-	provider := firstNonEmpty(strings.TrimSpace(status.Provider), deriveProviderFromAlias(status.Model), "not configured")
-	sandbox := firstNonEmpty(strings.TrimSpace(status.SandboxResolvedBackend), strings.TrimSpace(status.SandboxType), strings.TrimSpace(status.SandboxRequestedBackend), "auto")
-	security := strings.TrimSpace(status.SecuritySummary)
+	model := firstNonEmpty(strings.TrimSpace(status.ModelStatus.Display), strings.TrimSpace(status.ModelStatus.Name), "not configured")
+	provider := firstNonEmpty(strings.TrimSpace(status.ModelStatus.Provider), deriveProviderFromAlias(status.ModelStatus.Display), "not configured")
+	sandbox := firstNonEmpty(strings.TrimSpace(status.SandboxStatus.ResolvedBackend), strings.TrimSpace(status.SandboxStatus.Type), strings.TrimSpace(status.SandboxStatus.RequestedBackend), "auto")
+	security := strings.TrimSpace(status.SandboxStatus.SecuritySummary)
 	switch {
-	case status.FullAccessMode:
+	case status.SandboxStatus.FullAccessMode:
 		security = firstNonEmpty(security, "full access")
-	case status.HostExecution:
+	case status.SandboxStatus.HostExecution:
 		security = firstNonEmpty(security, "host")
 	}
 	return ViewModel{
-		Workspace:       strings.TrimSpace(status.Workspace),
+		Workspace:       strings.TrimSpace(status.Session.Workspace),
 		Model:           model,
 		Provider:        provider,
-		ReasoningEffort: strings.TrimSpace(status.ReasoningEffort),
-		Mode:            firstNonEmpty(strings.TrimSpace(status.ModeLabel), strings.TrimSpace(status.SessionMode), "auto-review"),
+		ReasoningEffort: strings.TrimSpace(status.ModelStatus.ReasoningEffort),
+		Mode:            firstNonEmpty(strings.TrimSpace(status.Session.ModeLabel), strings.TrimSpace(status.Session.SessionMode), "auto-review"),
 		Sandbox:         sandbox,
-		Route:           strings.TrimSpace(status.Route),
+		Route:           strings.TrimSpace(status.SandboxStatus.Route),
 		Security:        security,
-		Tokens:          FormatContextUsage(status.TotalTokens, status.ContextWindowTokens),
-		MissingAPIKey:   status.MissingAPIKey,
-		Running:         status.Running,
+		Tokens:          FormatContextUsage(status.Usage.TotalTokens, status.Usage.ContextWindowTokens),
+		MissingAPIKey:   status.ModelStatus.MissingAPIKey,
+		Running:         status.Runtime.Running,
 	}
 }
 

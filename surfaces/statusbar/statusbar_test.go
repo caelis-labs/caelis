@@ -9,10 +9,14 @@ import (
 
 func TestFromSnapshotFooterOmitsActiveJobs(t *testing.T) {
 	vm := FromSnapshot(control.StatusSnapshot{
-		TotalTokens:         42000,
-		ContextWindowTokens: 128000,
-		ActiveJobs:          3,
-		Running:             true,
+		Usage: control.StatusUsage{
+			TotalTokens:         42000,
+			ContextWindowTokens: 128000,
+		},
+		Runtime: control.StatusRuntime{
+			ActiveJobs: 3,
+			Running:    true,
+		},
 	})
 
 	got := vm.FooterContextText("")
@@ -41,10 +45,12 @@ func TestFormatContextUsage(t *testing.T) {
 
 func TestFromSnapshotFooterModeOmitsSandboxRuntimeDetails(t *testing.T) {
 	vm := FromSnapshot(control.StatusSnapshot{
-		ModeLabel:              "auto-review",
-		SandboxResolvedBackend: "bwrap",
-		Route:                  "sandbox",
-		SecuritySummary:        "bwrap",
+		Session: control.StatusSession{ModeLabel: "auto-review"},
+		SandboxStatus: control.StatusSandbox{
+			ResolvedBackend: "bwrap",
+			Route:           "sandbox",
+			SecuritySummary: "bwrap",
+		},
 	})
 
 	got := vm.FooterModeText("")
@@ -60,13 +66,47 @@ func TestFromSnapshotFooterModeOmitsSandboxRuntimeDetails(t *testing.T) {
 
 func TestHeaderModelTextDoesNotPrefixACPControllerProvider(t *testing.T) {
 	vm := FromSnapshot(control.StatusSnapshot{
-		Model:           "opencode/deepseek-v4-flash-free [low]",
-		Provider:        "acp",
-		ReasoningEffort: "low",
+		ModelStatus: control.StatusModel{
+			Display:         "opencode/deepseek-v4-flash-free [low]",
+			Provider:        "acp",
+			ReasoningEffort: "low",
+		},
 	})
 
 	got := vm.HeaderModelText("")
 	if got != "opencode/deepseek-v4-flash-free [low]" {
 		t.Fatalf("HeaderModelText() = %q, want remote ACP model without acp/ prefix", got)
+	}
+}
+
+func TestFromSnapshotUsesGroupedStatus(t *testing.T) {
+	vm := FromSnapshot(control.StatusSnapshot{
+		ModelStatus: control.StatusModel{
+			Display:         "grouped/model",
+			Provider:        "grouped-provider",
+			ReasoningEffort: "high",
+		},
+		Session: control.StatusSession{
+			ModeLabel: "manual",
+		},
+		SandboxStatus: control.StatusSandbox{
+			ResolvedBackend: "windows",
+			Route:           "sandbox",
+			SecuritySummary: "windows",
+		},
+		Usage: control.StatusUsage{
+			TotalTokens:         64000,
+			ContextWindowTokens: 128000,
+		},
+	})
+
+	if got := vm.HeaderModelText(""); got != "grouped-provider/grouped/model [high]" {
+		t.Fatalf("HeaderModelText() = %q, want grouped model", got)
+	}
+	if got := vm.FooterModeText(""); got != "manual" {
+		t.Fatalf("FooterModeText() = %q, want grouped mode", got)
+	}
+	if got := vm.FooterContextText(""); !strings.Contains(got, "64k / 128k · 50%") {
+		t.Fatalf("FooterContextText() = %q, want grouped usage", got)
 	}
 }

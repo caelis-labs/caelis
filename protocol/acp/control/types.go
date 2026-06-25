@@ -39,6 +39,73 @@ type ModelUsageSnapshot struct {
 	Usage    UsageSnapshot
 }
 
+type StatusSession struct {
+	ID          string
+	Workspace   string
+	StoreDir    string
+	ModeLabel   string
+	SessionMode string
+	Surface     string
+}
+
+type StatusModel struct {
+	Display         string
+	Provider        string
+	Name            string
+	ReasoningEffort string
+	MissingAPIKey   bool
+}
+
+type StatusSandbox struct {
+	Type                     string
+	RequestedBackend         string
+	ResolvedBackend          string
+	Route                    string
+	FallbackReason           string
+	InstallHint              string
+	Setup                    SandboxSetupStatus
+	SetupRequired            bool
+	SetupError               string
+	SetupMarkerCurrent       bool
+	SetupMarkerReason        string
+	GlobalSetupCurrent       bool
+	GlobalSetupRequired      bool
+	GlobalSetupReason        string
+	WorkspaceSetupCurrent    bool
+	WorkspaceSetupRequired   bool
+	WorkspaceSetupReason     string
+	WorkspaceSetupRoot       string
+	WorkspaceSetupWriteRoots int
+	WorkspaceSetupPolicyHash string
+	WorkspaceSetupUpdatedAt  time.Time
+	SecuritySummary          string
+	HostExecution            bool
+	FullAccessMode           bool
+}
+
+type StatusUsage struct {
+	PromptTokens             int
+	CompletionTokens         int
+	TotalTokens              int
+	ContextWindowTokens      int
+	SessionUsageTotal        UsageSnapshot
+	SessionUsageMain         UsageSnapshot
+	SessionUsageSubagents    UsageSnapshot
+	SessionUsageAutoReview   UsageSnapshot
+	SessionUsageByModel      []ModelUsageSnapshot
+	SessionInputTokens       int
+	SessionCachedInputTokens int
+	SessionOutputTokens      int
+	SessionReasoningTokens   int
+	SessionTotalTokens       int
+}
+
+type StatusRuntime struct {
+	ActiveJobs     int
+	ActiveTurnKind string
+	Running        bool
+}
+
 type SessionSnapshot struct {
 	SessionID string
 }
@@ -117,58 +184,11 @@ func cloneTrimmedStringMap(in map[string]string) map[string]string {
 }
 
 type StatusSnapshot struct {
-	SessionID                       string
-	Workspace                       string
-	StoreDir                        string
-	Model                           string
-	ReasoningEffort                 string
-	Provider                        string
-	ModelName                       string
-	ModeLabel                       string
-	SessionMode                     string
-	SandboxType                     string
-	SandboxRequestedBackend         string
-	SandboxResolvedBackend          string
-	Route                           string
-	FallbackReason                  string
-	SandboxInstallHint              string
-	SandboxSetup                    SandboxSetupStatus
-	SandboxSetupRequired            bool
-	SandboxSetupError               string
-	SandboxSetupMarkerCurrent       bool
-	SandboxSetupMarkerReason        string
-	SandboxGlobalSetupCurrent       bool
-	SandboxGlobalSetupRequired      bool
-	SandboxGlobalSetupReason        string
-	SandboxWorkspaceSetupCurrent    bool
-	SandboxWorkspaceSetupRequired   bool
-	SandboxWorkspaceSetupReason     string
-	SandboxWorkspaceSetupRoot       string
-	SandboxWorkspaceSetupWriteRoots int
-	SandboxWorkspaceSetupPolicyHash string
-	SandboxWorkspaceSetupUpdatedAt  time.Time
-	SecuritySummary                 string
-	MissingAPIKey                   bool
-	HostExecution                   bool
-	FullAccessMode                  bool
-	Surface                         string
-	PromptTokens                    int
-	CompletionTokens                int
-	TotalTokens                     int
-	ContextWindowTokens             int
-	SessionUsageTotal               UsageSnapshot
-	SessionUsageMain                UsageSnapshot
-	SessionUsageSubagents           UsageSnapshot
-	SessionUsageAutoReview          UsageSnapshot
-	SessionUsageByModel             []ModelUsageSnapshot
-	SessionInputTokens              int
-	SessionCachedInputTokens        int
-	SessionOutputTokens             int
-	SessionReasoningTokens          int
-	SessionTotalTokens              int
-	ActiveJobs                      int
-	ActiveTurnKind                  string
-	Running                         bool
+	Session       StatusSession
+	ModelStatus   StatusModel
+	SandboxStatus StatusSandbox
+	Usage         StatusUsage
+	Runtime       StatusRuntime
 }
 
 type ResumeCandidate struct {

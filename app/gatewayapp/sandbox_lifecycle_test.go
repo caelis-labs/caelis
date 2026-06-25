@@ -73,18 +73,21 @@ func TestSandboxLifecycleUsesTemporaryRuntimeWhenCurrentCannotHandleLifecycle(t 
 	stack.storeDir = "/store"
 
 	var factoryCalls int
-	stack.sandboxLifecycleFactory = func(cfg SandboxConfig, workspaceCWD string, storeDir string) (sandbox.Runtime, SandboxConfig, bool, error) {
+	stack.sandboxLifecycleFactory = func(cfg sandbox.Config, current sandbox.Runtime) (sandbox.LifecycleTarget, error) {
 		factoryCalls++
-		if cfg.RequestedType != "windows" {
-			t.Fatalf("factory cfg.RequestedType = %q, want windows", cfg.RequestedType)
+		if cfg.RequestedBackend != sandbox.BackendWindows {
+			t.Fatalf("factory cfg.RequestedBackend = %q, want windows", cfg.RequestedBackend)
 		}
-		if workspaceCWD != "/workspace" {
-			t.Fatalf("factory workspaceCWD = %q, want /workspace", workspaceCWD)
+		if cfg.CWD != "/workspace" {
+			t.Fatalf("factory cfg.CWD = %q, want /workspace", cfg.CWD)
 		}
-		if storeDir != "/store" {
-			t.Fatalf("factory storeDir = %q, want /store", storeDir)
+		if cfg.StateDir != "/store" {
+			t.Fatalf("factory cfg.StateDir = %q, want /store", cfg.StateDir)
 		}
-		return temp, SandboxConfig{RequestedType: "windows"}, true, nil
+		if current != stack.exec {
+			t.Fatalf("factory current runtime = %#v, want stack runtime", current)
+		}
+		return sandbox.LifecycleTarget{Runtime: temp, Config: cfg}, nil
 	}
 
 	status, err := stack.PrepareSandbox(context.Background())
@@ -112,9 +115,9 @@ func TestSandboxLifecycleSkipsHostBackend(t *testing.T) {
 	stack := sandboxLifecycleTestStack(runtime, "host")
 
 	var factoryCalls int
-	stack.sandboxLifecycleFactory = func(SandboxConfig, string, string) (sandbox.Runtime, SandboxConfig, bool, error) {
+	stack.sandboxLifecycleFactory = func(sandbox.Config, sandbox.Runtime) (sandbox.LifecycleTarget, error) {
 		factoryCalls++
-		return nil, SandboxConfig{}, false, nil
+		return sandbox.LifecycleTarget{NoOp: true}, nil
 	}
 
 	status, err := stack.ResetSandbox(context.Background())
@@ -136,8 +139,8 @@ func TestSandboxLifecycleFactoryError(t *testing.T) {
 	current := newSandboxLifecycleTestRuntime("", sandbox.BackendHost)
 	stack := sandboxLifecycleTestStack(current, "windows")
 	wantErr := errors.New("factory failed")
-	stack.sandboxLifecycleFactory = func(SandboxConfig, string, string) (sandbox.Runtime, SandboxConfig, bool, error) {
-		return nil, SandboxConfig{}, false, wantErr
+	stack.sandboxLifecycleFactory = func(sandbox.Config, sandbox.Runtime) (sandbox.LifecycleTarget, error) {
+		return sandbox.LifecycleTarget{}, wantErr
 	}
 
 	_, err := stack.ResetSandbox(context.Background())
@@ -174,8 +177,9 @@ func TestSandboxLifecycleTemporaryRuntimeWithoutCapabilityReturnsTemporaryStatus
 	current := newSandboxLifecycleTestRuntime("", sandbox.BackendHost)
 	temp := newSandboxLifecycleTestRuntime(sandbox.BackendWindows, sandbox.BackendCustom)
 	stack := sandboxLifecycleTestStack(current, "windows")
-	stack.sandboxLifecycleFactory = func(SandboxConfig, string, string) (sandbox.Runtime, SandboxConfig, bool, error) {
-		return temp, SandboxConfig{RequestedType: "windows"}, true, nil
+	stack.sandboxLifecycleFactory = func(cfg sandbox.Config, _ sandbox.Runtime) (sandbox.LifecycleTarget, error) {
+		cfg.RequestedBackend = sandbox.BackendWindows
+		return sandbox.LifecycleTarget{Runtime: temp, Config: cfg}, nil
 	}
 
 	status, err := stack.PrepareSandbox(context.Background())

@@ -170,7 +170,11 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 		return err
 	}
 	if acpSubcommand {
-		return acpserver.ServeStdio(ctx, stack, stdin, stdout)
+		agent, err := stack.ACPAgent()
+		if err != nil {
+			return err
+		}
+		return acpserver.ServeStdio(ctx, agent, stdin, stdout)
 	}
 	if doctorSubcommand || *doctor {
 		outFmt, err := parseOutputFormat(*format)

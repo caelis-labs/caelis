@@ -334,7 +334,7 @@ func (d *Adapter) SetSessionMode(ctx context.Context, mode string) (StatusSnapsh
 	if err != nil {
 		return StatusSnapshot{}, err
 	}
-	status.SessionMode = normalized
-	status.ModeLabel = normalized
+	status.Session.SessionMode = normalized
+	status.Session.ModeLabel = normalized
 	return status, nil
 }

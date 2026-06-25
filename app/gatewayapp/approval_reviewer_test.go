@@ -1044,7 +1044,6 @@ func approvalReviewerTestRequest(activeSession session.Session, llm model.LLM, r
 			Status:   gateway.ApprovalStatusPending,
 		},
 		RuntimeRequest: agent.ApprovalRequest{
-			Mode: "auto-review",
 			Tool: tool.Definition{Name: "custom_tool"},
 			Call: tool.Call{Name: "custom_tool", Input: raw},
 		},
