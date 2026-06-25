@@ -61,10 +61,10 @@ func TestBoundaryRuleRejectsPublicContractsImportingInternal(t *testing.T) {
 			want:       "",
 		},
 		{
-			name:       "protocol stdio winproc exception",
+			name:       "protocol must not import root internal winproc",
 			rel:        "protocol/acp/transport/stdio/transport.go",
 			importPath: modulePath + "/internal/winproc",
-			want:       "",
+			want:       "protocol must not depend on internal packages",
 		},
 		{
 			name:       "acp server composition exception",

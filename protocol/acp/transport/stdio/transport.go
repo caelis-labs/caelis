@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/internal/winproc"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/transport/internal/winproc"
 )
 
 type Config struct {
