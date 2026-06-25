@@ -2,8 +2,8 @@ package tuiapp
 
 import (
 	"strings"
-	"time"
 
+	"github.com/OnslaughtSnail/caelis/surfaces/transcript"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/acpprojector"
 )
 
@@ -16,33 +16,14 @@ const (
 	transcriptToolStatusCancelled   = "cancelled"
 )
 
-type transcriptToolProjection struct {
-	Scope      ACPProjectionScope
-	ScopeID    string
-	OccurredAt time.Time
-	Actor      string
-	Meta       map[string]any
-
-	CallID    string
-	ToolName  string
-	ToolKind  string
-	ToolTitle string
-	Status    string
-
-	RawInput  map[string]any
-	RawOutput map[string]any
-	Content   []acpprojector.ToolContent
-	Error     bool
-}
-
-func projectTranscriptToolCall(input transcriptToolProjection) TranscriptEvent {
+func projectTranscriptToolCall(input transcript.ToolProjectionInput) TranscriptEvent {
 	toolName := transcriptToolDisplayName(input.ToolName, input.ToolTitle, input.ToolKind)
 	status := strings.TrimSpace(input.Status)
 	if status == "" || strings.EqualFold(status, transcriptToolStatusStarted) {
 		status = transcriptToolStatusRunning
 	}
 	semanticName := toolSemanticName(toolName, input.ToolKind)
-	rawInput := cloneAnyMap(input.RawInput)
+	rawInput := transcript.CloneAnyMap(input.RawInput)
 	if refinedName := refinedToolDisplayName(semanticName, input.ToolKind, input.ToolTitle, rawInput); refinedName != "" {
 		toolName = refinedName
 		semanticName = refinedName
@@ -76,12 +57,13 @@ func projectTranscriptToolCall(input transcriptToolProjection) TranscriptEvent {
 	}
 }
 
-func projectTranscriptToolResult(input transcriptToolProjection, defaultSuccessStatus string) (TranscriptEvent, bool) {
+func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSuccessStatus string) (TranscriptEvent, bool) {
 	toolName := transcriptToolDisplayName(input.ToolName, input.ToolTitle, input.ToolKind)
 	status := strings.TrimSpace(input.Status)
 	toolErr := input.Error
 	if status == "" {
-		if inferred, ok := inferFinalStatusFromRawOutput(input.RawOutput); ok {
+		rawOutput := transcript.RawMap(input.RawOutput)
+		if inferred, ok := inferFinalStatusFromRawOutput(rawOutput); ok {
 			status = inferred
 		} else if toolErr {
 			status = transcriptToolStatusFailed
@@ -94,8 +76,12 @@ func projectTranscriptToolResult(input transcriptToolProjection, defaultSuccessS
 	}
 	toolErr = toolErr || strings.EqualFold(status, transcriptToolStatusFailed)
 	semanticName := toolSemanticName(toolName, input.ToolKind)
-	rawInput := cloneAnyMap(input.RawInput)
-	rawOutput := cloneAnyMap(input.RawOutput)
+	rawInput := transcript.CloneAnyMap(input.RawInput)
+	rawOutput := transcript.RawMap(input.RawOutput)
+	content := acpToolContentToDisplay(input.Content)
+	if len(content) == 0 && !input.GatewayProjection {
+		content = standardACPRawOutputContent(input.RawOutput, input.CallID)
+	}
 	if refinedName := refinedToolDisplayName(semanticName, input.ToolKind, input.ToolTitle, rawInput); refinedName != "" {
 		toolName = refinedName
 		semanticName = refinedName
@@ -109,15 +95,15 @@ func projectTranscriptToolResult(input transcriptToolProjection, defaultSuccessS
 	if strings.EqualFold(semanticName, "TASK") {
 		displayInput = taskDisplayInputForResult(rawInput, displayOutput)
 	}
-	toolOutput := acpprojector.FormatToolContent(input.Content)
+	toolOutput := acpprojector.FormatToolContent(content)
 	toolOutputSynthetic := false
 	if strings.TrimSpace(toolOutput) == "" {
-		if terminalOutput := terminalToolOutputText(semanticName, input.ToolKind, rawOutput, input.Meta, input.Content, status, toolErr); terminalOutput != "" {
+		if terminalOutput := terminalToolOutputText(semanticName, input.ToolKind, rawOutput, input.Meta, content, status, toolErr); terminalOutput != "" {
 			toolOutput = terminalOutput
 		} else if exitText := terminalExitCodeOutputText(semanticName, input.ToolKind, rawOutput, status, toolErr); exitText != "" {
 			toolOutput = exitText
 			toolOutputSynthetic = true
-		} else if terminalNoOutputPlaceholder(semanticName, input.ToolKind, rawOutput, input.Meta, input.Content, status, toolErr) {
+		} else if terminalNoOutputPlaceholder(semanticName, input.ToolKind, rawOutput, input.Meta, content, status, toolErr) {
 			toolOutput = "(no output)"
 			toolOutputSynthetic = true
 		} else if !terminalFinalWithoutContent(semanticName, input.ToolKind, status, toolErr) {

@@ -3,97 +3,41 @@ package tuiapp
 import (
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/OnslaughtSnail/caelis/internal/displaypolicy"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
+	"github.com/OnslaughtSnail/caelis/surfaces/transcript"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/acpprojector"
 )
 
-type TranscriptEventKind string
+// Transitional aliases keep the TUI renderer readable during the transcript
+// extraction. Shared surface code should use surfaces/transcript directly.
+type TranscriptEventKind = transcript.EventKind
 
 const (
-	TranscriptEventNarrative   TranscriptEventKind = "narrative"
-	TranscriptEventNotice      TranscriptEventKind = "notice"
-	TranscriptEventPlan        TranscriptEventKind = "plan"
-	TranscriptEventTool        TranscriptEventKind = "tool"
-	TranscriptEventApproval    TranscriptEventKind = "approval"
-	TranscriptEventParticipant TranscriptEventKind = "participant"
-	TranscriptEventLifecycle   TranscriptEventKind = "lifecycle"
-	TranscriptEventUsage       TranscriptEventKind = "usage"
+	TranscriptEventNarrative   = transcript.EventNarrative
+	TranscriptEventNotice      = transcript.EventNotice
+	TranscriptEventPlan        = transcript.EventPlan
+	TranscriptEventTool        = transcript.EventTool
+	TranscriptEventApproval    = transcript.EventApproval
+	TranscriptEventParticipant = transcript.EventParticipant
+	TranscriptEventLifecycle   = transcript.EventLifecycle
+	TranscriptEventUsage       = transcript.EventUsage
 )
 
-type TranscriptNarrativeKind string
+type TranscriptNarrativeKind = transcript.NarrativeKind
 
 const (
-	TranscriptNarrativeUser      TranscriptNarrativeKind = "user"
-	TranscriptNarrativeAssistant TranscriptNarrativeKind = "assistant"
-	TranscriptNarrativeReasoning TranscriptNarrativeKind = "reasoning"
-	TranscriptNarrativeSystem    TranscriptNarrativeKind = "system"
-	TranscriptNarrativeNotice    TranscriptNarrativeKind = "notice"
+	TranscriptNarrativeUser      = transcript.NarrativeUser
+	TranscriptNarrativeAssistant = transcript.NarrativeAssistant
+	TranscriptNarrativeReasoning = transcript.NarrativeReasoning
+	TranscriptNarrativeSystem    = transcript.NarrativeSystem
+	TranscriptNarrativeNotice    = transcript.NarrativeNotice
 )
 
-type TranscriptEvent struct {
-	Kind       TranscriptEventKind
-	Scope      ACPProjectionScope
-	ScopeID    string
-	TurnID     string
-	Actor      string
-	OccurredAt time.Time
-
-	NarrativeKind TranscriptNarrativeKind
-	Text          string
-	Final         bool
-
-	ToolCallID          string
-	ToolName            string
-	ToolKind            string
-	ToolTitle           string
-	ToolArgs            string
-	ToolFullArgs        string
-	ToolOutput          string
-	ToolStream          string
-	ToolStatus          string
-	ToolError           bool
-	ToolOutputSynthetic bool
-	ToolTaskID          string
-	ToolTaskAction      string
-	ToolTaskInput       string
-	ToolTaskTargetKind  string
-
-	PlanEntries []PlanEntry
-
-	ApprovalTool    string
-	ApprovalCommand string
-	ApprovalStatus  string
-	ApprovalRisk    string
-	ApprovalAuth    string
-	ApprovalText    string
-
-	State string
-
-	Usage *eventstream.UsageSnapshot
-
-	AnchorToolCallID     string
-	AnchorToolName       string
-	MirroredToParentTool bool
-}
+type TranscriptEvent = transcript.Event
 
 func mergeTranscriptMeta(base map[string]any, overlay map[string]any) map[string]any {
-	if len(base) == 0 {
-		return cloneAnyMap(overlay)
-	}
-	out := cloneAnyMap(base)
-	for key, value := range overlay {
-		if baseMap, ok := out[key].(map[string]any); ok {
-			if overlayMap, ok := value.(map[string]any); ok {
-				out[key] = mergeTranscriptMeta(baseMap, overlayMap)
-				continue
-			}
-		}
-		out[key] = value
-	}
-	return out
+	return transcript.MergeMeta(base, overlay)
 }
 
 func transcriptToolDisplayName(name string, title string, kind string) string {
@@ -300,7 +244,7 @@ func terminalContentText(content []acpprojector.ToolContent) string {
 		if !strings.EqualFold(strings.TrimSpace(item.Type), "terminal") {
 			continue
 		}
-		if text := protocolTextContent(item.Content); text != "" {
+		if text := transcript.ProtocolTextContent(item.Content); text != "" {
 			appendTerminalContentText(&out, text)
 		}
 	}

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/OnslaughtSnail/caelis/internal/displaypolicy"
+	"github.com/OnslaughtSnail/caelis/surfaces/transcript"
 )
 
 func toolDisplayArgs(name string, raw map[string]any, fallback ...string) string {
@@ -730,7 +731,7 @@ func taskDisplayInputForResult(input map[string]any, output map[string]any) map[
 	if len(output) == 0 {
 		return input
 	}
-	out := cloneAnyMap(input)
+	out := transcript.CloneAnyMap(input)
 	if out == nil {
 		out = map[string]any{}
 	}
@@ -800,7 +801,7 @@ func toolDisplayTaskTargetKind(input map[string]any, output map[string]any, meta
 }
 
 func toolDisplaySummaryOutput(name string, output map[string]any, meta map[string]any) map[string]any {
-	out := cloneAnyMap(output)
+	out := transcript.CloneAnyMap(output)
 	if out == nil {
 		out = map[string]any{}
 	}

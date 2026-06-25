@@ -3,7 +3,11 @@ package tuiapp
 // events.go keeps the TUI-internal message types in the app package. These were
 // previously in internal/cli/tuievents/messages.go.
 
-import "time"
+import (
+	"time"
+
+	"github.com/OnslaughtSnail/caelis/surfaces/transcript"
+)
 
 type HintPriority int
 
@@ -146,22 +150,22 @@ type ParticipantStatusMsg struct {
 	OccurredAt      time.Time
 }
 
-type ACPProjectionScope string
+// Transitional aliases keep existing TUI call sites stable while shared
+// transcript semantics move to surfaces/transcript. New cross-surface code
+// should import surfaces/transcript directly.
+type ACPProjectionScope = transcript.Scope
 
 const (
-	ACPProjectionMain        ACPProjectionScope = "main"
-	ACPProjectionParticipant ACPProjectionScope = "participant"
-	ACPProjectionSubagent    ACPProjectionScope = "subagent"
+	ACPProjectionMain        = transcript.ScopeMain
+	ACPProjectionParticipant = transcript.ScopeParticipant
+	ACPProjectionSubagent    = transcript.ScopeSubagent
 )
 
 type TranscriptEventsMsg struct {
 	Events []TranscriptEvent
 }
 
-type PlanEntry struct {
-	Content string
-	Status  string
-}
+type PlanEntry = transcript.PlanEntry
 
 type PlanUpdateMsg struct {
 	Entries []PlanEntry

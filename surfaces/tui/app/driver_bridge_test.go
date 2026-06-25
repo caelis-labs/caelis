@@ -17,6 +17,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
 	acpprojector "github.com/OnslaughtSnail/caelis/protocol/acp/projector"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
+	"github.com/OnslaughtSnail/caelis/surfaces/transcript"
 )
 
 func TestProgramSenderDropsAfterClose(t *testing.T) {
@@ -57,7 +58,7 @@ func requireACPText(t *testing.T, msg tea.Msg, updateType string) string {
 	if got := strings.TrimSpace(chunk.SessionUpdate); got != updateType {
 		t.Fatalf("sessionUpdate = %q, want %q", got, updateType)
 	}
-	return protocolTextContent(chunk.Content)
+	return transcript.ProtocolTextContent(chunk.Content)
 }
 
 func requireACPToolCall(t *testing.T, msg tea.Msg) schema.ToolCall {
@@ -100,7 +101,7 @@ func acpUpdateTerminalText(update schema.Update) string {
 		if !strings.EqualFold(strings.TrimSpace(item.Type), "terminal") {
 			continue
 		}
-		if text := protocolTextContent(item.Content); text != "" {
+		if text := transcript.ProtocolTextContent(item.Content); text != "" {
 			return text
 		}
 	}
@@ -266,7 +267,7 @@ func TestGatewayTerminalBatcherMergesRunningFrames(t *testing.T) {
 	if got, _ := acpTerminalContent(update); got != "hello world" {
 		t.Fatalf("merged text = %q, want hello world", got)
 	}
-	if rawOutput := acpRawMap(update.RawOutput); len(rawOutput) != 0 {
+	if rawOutput := transcript.RawMap(update.RawOutput); len(rawOutput) != 0 {
 		t.Fatalf("raw output = %#v, want terminal content only", rawOutput)
 	}
 }
@@ -394,7 +395,7 @@ func TestGatewayNarrativeBatcherSyncsProtocolUpdateContent(t *testing.T) {
 	if !ok {
 		t.Fatalf("update = %#v, want ContentChunk", env.Update)
 	}
-	if got := protocolTextContent(update.Content); got != "hello world" {
+	if got := transcript.ProtocolTextContent(update.Content); got != "hello world" {
 		t.Fatalf("narrative text = %q, want merged text", got)
 	}
 	events := ProjectACPEventToTranscriptEvents(env)
@@ -1334,13 +1335,13 @@ func TestSlashAgentInstallFailureEmitsRunCommandToolResult(t *testing.T) {
 		case schema.ToolCall:
 			if update.Kind == "RUN_COMMAND" &&
 				update.Status == schema.ToolStatusInProgress &&
-				strings.Contains(fmt.Sprint(acpRawMap(update.RawInput)["command"]), "npm install --prefix") {
+				strings.Contains(fmt.Sprint(transcript.RawMap(update.RawInput)["command"]), "npm install --prefix") {
 				sawCall = true
 			}
 		case schema.ToolCallUpdate:
-			if stringFromPtr(update.Kind) == "RUN_COMMAND" &&
-				stringFromPtr(update.Status) == schema.ToolStatusFailed &&
-				strings.Contains(fmt.Sprint(acpRawMap(update.RawOutput)["stderr"]), "npm ERR install failed") {
+			if transcript.StringFromPtr(update.Kind) == "RUN_COMMAND" &&
+				transcript.StringFromPtr(update.Status) == schema.ToolStatusFailed &&
+				strings.Contains(fmt.Sprint(transcript.RawMap(update.RawOutput)["stderr"]), "npm ERR install failed") {
 				sawResult = true
 			}
 		}

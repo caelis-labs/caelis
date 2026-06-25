@@ -2,7 +2,6 @@ package tuiapp
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -14,6 +13,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/protocol/acp/control"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
+	"github.com/OnslaughtSnail/caelis/surfaces/transcript"
 )
 
 const (
@@ -163,7 +163,7 @@ func approvalPayloadFromACPEvent(env eventstream.Envelope) *approvalPayload {
 		return nil
 	}
 	tool := env.Permission.ToolCall
-	rawInput := acpRawMap(tool.RawInput)
+	rawInput := transcript.RawMap(tool.RawInput)
 	options := make([]approvalOption, 0, len(env.Permission.Options))
 	for _, option := range env.Permission.Options {
 		options = append(options, approvalOption{
@@ -175,9 +175,9 @@ func approvalPayloadFromACPEvent(env eventstream.Envelope) *approvalPayload {
 	return &approvalPayload{
 		ToolCallID: strings.TrimSpace(tool.ToolCallID),
 		ToolName: firstNonEmpty(
-			metaString(mergeTranscriptMeta(acpUpdateMeta(tool), env.Meta), "caelis", "runtime", "tool", "name"),
-			stringFromPtr(tool.Title),
-			stringFromPtr(tool.Kind),
+			transcript.MetaString(transcript.MergeMeta(transcript.ACPUpdateMeta(tool), env.Meta), "caelis", "runtime", "tool", "name"),
+			transcript.StringFromPtr(tool.Title),
+			transcript.StringFromPtr(tool.Kind),
 		),
 		RawInput:           rawInput,
 		Reason:             firstNonEmpty(rawString(rawInput, "approval_reason"), rawString(rawInput, "reason")),
@@ -229,7 +229,7 @@ func eventStreamNarrativeBatchKey(env eventstream.Envelope) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	text := protocolTextContent(update.Content)
+	text := transcript.ProtocolTextContent(update.Content)
 	if text == "" {
 		return "", false
 	}
@@ -266,8 +266,8 @@ func mergeEventStreamNarrativeEnvelope(dst *eventstream.Envelope, src eventstrea
 	if !ok {
 		return
 	}
-	dstText := protocolTextContent(dstUpdate.Content)
-	srcText := protocolTextContent(srcUpdate.Content)
+	dstText := transcript.ProtocolTextContent(dstUpdate.Content)
+	srcText := transcript.ProtocolTextContent(srcUpdate.Content)
 	if srcText == "" {
 		return
 	}
@@ -385,14 +385,14 @@ func eventStreamTerminalBatchKey(env eventstream.Envelope) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	if stringFromPtr(update.Status) != schema.ToolStatusInProgress {
+	if transcript.StringFromPtr(update.Status) != schema.ToolStatusInProgress {
 		return "", false
 	}
 	text, terminalID := acpTerminalContent(update)
 	if text == "" {
 		return "", false
 	}
-	toolName := acpUpdateToolName(mergeTranscriptMeta(acpUpdateMeta(update), env.Meta), stringFromPtr(update.Title), stringFromPtr(update.Kind))
+	toolName := acpUpdateToolName(transcript.MergeMeta(transcript.ACPUpdateMeta(update), env.Meta), transcript.StringFromPtr(update.Title), transcript.StringFromPtr(update.Kind))
 	return strings.Join([]string{
 		strings.TrimSpace(env.HandleID),
 		strings.TrimSpace(env.RunID),
@@ -421,7 +421,7 @@ func mergeEventStreamTerminalEnvelope(dst *eventstream.Envelope, src eventstream
 	if srcUpdate, ok := src.Update.(schema.ToolCallUpdate); ok {
 		if text, terminalID := acpTerminalContent(srcUpdate); text != "" {
 			existing, existingTerminalID := acpTerminalContent(dstUpdate)
-			toolName := acpUpdateToolName(mergeTranscriptMeta(acpUpdateMeta(dstUpdate), dst.Meta), stringFromPtr(dstUpdate.Title), stringFromPtr(dstUpdate.Kind))
+			toolName := acpUpdateToolName(transcript.MergeMeta(transcript.ACPUpdateMeta(dstUpdate), dst.Meta), transcript.StringFromPtr(dstUpdate.Title), transcript.StringFromPtr(dstUpdate.Kind))
 			if strings.EqualFold(strings.TrimSpace(toolName), "RUN_COMMAND") {
 				text = mergeCommandStreamChunk(existing, text)
 			} else {
@@ -440,7 +440,7 @@ func acpTerminalContent(update schema.ToolCallUpdate) (string, string) {
 		if !strings.EqualFold(strings.TrimSpace(item.Type), "terminal") {
 			continue
 		}
-		if text := protocolTextContent(item.Content); text != "" {
+		if text := transcript.ProtocolTextContent(item.Content); text != "" {
 			return text, strings.TrimSpace(item.TerminalID)
 		}
 	}
@@ -466,35 +466,6 @@ func setACPTerminalEnvelopeContent(env *eventstream.Envelope, text string, termi
 			TerminalID: strings.TrimSpace(terminalID),
 		}}
 		env.Update = update
-	}
-}
-
-func protocolTextContent(raw any) string {
-	switch typed := raw.(type) {
-	case nil:
-		return ""
-	case map[string]any:
-		if typ, _ := typed["type"].(string); !strings.EqualFold(strings.TrimSpace(typ), "text") {
-			return ""
-		}
-		text, _ := typed["text"].(string)
-		return text
-	default:
-		data, err := json.Marshal(raw)
-		if err != nil {
-			return ""
-		}
-		var decoded struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
-		}
-		if err := json.Unmarshal(data, &decoded); err != nil {
-			return ""
-		}
-		if !strings.EqualFold(strings.TrimSpace(decoded.Type), "text") {
-			return ""
-		}
-		return decoded.Text
 	}
 }
 
@@ -524,15 +495,4 @@ func rawBool(values map[string]any, key string) bool {
 	default:
 		return false
 	}
-}
-
-func cloneAnyMap(values map[string]any) map[string]any {
-	if values == nil {
-		return nil
-	}
-	out := make(map[string]any, len(values))
-	for key, value := range values {
-		out[key] = value
-	}
-	return out
 }

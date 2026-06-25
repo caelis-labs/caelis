@@ -14,6 +14,7 @@ import (
 	controlcommands "github.com/OnslaughtSnail/caelis/protocol/acp/control/commands"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
+	"github.com/OnslaughtSnail/caelis/surfaces/transcript"
 )
 
 func dispatchSlashCommand(service control.Service, sender *ProgramSender, text string) TaskResultMsg {
@@ -566,13 +567,13 @@ func resumeParticipantUserACPTranscriptEvent(env eventstream.Envelope) (Transcri
 	if !ok || strings.TrimSpace(update.SessionUpdate) != schema.UpdateUserMessage {
 		return TranscriptEvent{}, false
 	}
-	text := strings.TrimSpace(protocolTextContent(update.Content))
+	text := strings.TrimSpace(transcript.ProtocolTextContent(update.Content))
 	if text == "" {
 		return TranscriptEvent{}, false
 	}
 	label := firstNonEmpty(
-		metaString(env.Meta, "mention"),
-		metaString(env.Meta, "handle"),
+		transcript.MetaString(env.Meta, "mention"),
+		transcript.MetaString(env.Meta, "handle"),
 	)
 	if label != "" && !strings.HasPrefix(label, "@") {
 		label = "@" + label
