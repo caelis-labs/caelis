@@ -137,38 +137,40 @@ func runtimeStack(stack *gatewayapp.Stack) *RuntimeStack {
 		BindAgentProfileFn: func(ctx context.Context, cfg AgentProfileBindingConfig) (AgentProfileStatusSnapshot, error) {
 			return toRuntimeAgentProfileStatus(profiles.Bind(ctx, toGatewayAgentProfileBinding(cfg)))
 		},
-		ListPluginsFn: func(ctx context.Context) ([]controladapter.PluginSnapshot, error) {
-			return toRuntimePluginSnapshots(stack.Plugins().List(ctx))
-		},
-		AddMarketplaceFn: func(ctx context.Context, source string) (controladapter.MarketplaceSnapshot, error) {
-			return toRuntimeMarketplaceSnapshotWithError(stack.Plugins().AddMarketplace(ctx, source))
-		},
-		ListMarketplacesFn: func(ctx context.Context) ([]controladapter.MarketplaceSnapshot, error) {
-			return toRuntimeMarketplaceSnapshots(stack.Plugins().ListMarketplaces(ctx))
-		},
-		UpdateMarketplaceFn: func(ctx context.Context, name string) (controladapter.MarketplaceSnapshot, error) {
-			return toRuntimeMarketplaceSnapshotWithError(stack.Plugins().UpdateMarketplace(ctx, name))
-		},
-		RemoveMarketplaceFn: func(ctx context.Context, name string) error {
-			return stack.Plugins().RemoveMarketplace(ctx, name)
-		},
-		AddPluginPathFn: func(ctx context.Context, path string) (controladapter.PluginSnapshot, error) {
-			return toRuntimePluginSnapshotWithError(stack.Plugins().AddPath(ctx, path))
-		},
-		InstallPluginFn: func(ctx context.Context, source string) (controladapter.PluginSnapshot, error) {
-			return toRuntimePluginSnapshotWithError(stack.Plugins().Install(ctx, source))
-		},
-		EnablePluginFn: func(ctx context.Context, id string) (controladapter.PluginSnapshot, error) {
-			return toRuntimePluginSnapshotWithError(stack.Plugins().Enable(ctx, id))
-		},
-		DisablePluginFn: func(ctx context.Context, id string) (controladapter.PluginSnapshot, error) {
-			return toRuntimePluginSnapshotWithError(stack.Plugins().Disable(ctx, id))
-		},
-		RemovePluginFn: func(ctx context.Context, id string) error {
-			return stack.Plugins().Remove(ctx, id)
-		},
-		InspectPluginFn: func(ctx context.Context, id string) (controladapter.PluginSnapshot, error) {
-			return toRuntimePluginSnapshotWithError(stack.Plugins().Inspect(ctx, id))
+		Plugin: controladapter.PluginRuntimeDeps{
+			ListPluginsFn: func(ctx context.Context) ([]controladapter.PluginSnapshot, error) {
+				return toRuntimePluginSnapshots(stack.Plugins().List(ctx))
+			},
+			AddMarketplaceFn: func(ctx context.Context, source string) (controladapter.MarketplaceSnapshot, error) {
+				return toRuntimeMarketplaceSnapshotWithError(stack.Plugins().AddMarketplace(ctx, source))
+			},
+			ListMarketplacesFn: func(ctx context.Context) ([]controladapter.MarketplaceSnapshot, error) {
+				return toRuntimeMarketplaceSnapshots(stack.Plugins().ListMarketplaces(ctx))
+			},
+			UpdateMarketplaceFn: func(ctx context.Context, name string) (controladapter.MarketplaceSnapshot, error) {
+				return toRuntimeMarketplaceSnapshotWithError(stack.Plugins().UpdateMarketplace(ctx, name))
+			},
+			RemoveMarketplaceFn: func(ctx context.Context, name string) error {
+				return stack.Plugins().RemoveMarketplace(ctx, name)
+			},
+			AddPluginPathFn: func(ctx context.Context, path string) (controladapter.PluginSnapshot, error) {
+				return toRuntimePluginSnapshotWithError(stack.Plugins().AddPath(ctx, path))
+			},
+			InstallPluginFn: func(ctx context.Context, source string) (controladapter.PluginSnapshot, error) {
+				return toRuntimePluginSnapshotWithError(stack.Plugins().Install(ctx, source))
+			},
+			EnablePluginFn: func(ctx context.Context, id string) (controladapter.PluginSnapshot, error) {
+				return toRuntimePluginSnapshotWithError(stack.Plugins().Enable(ctx, id))
+			},
+			DisablePluginFn: func(ctx context.Context, id string) (controladapter.PluginSnapshot, error) {
+				return toRuntimePluginSnapshotWithError(stack.Plugins().Disable(ctx, id))
+			},
+			RemovePluginFn: func(ctx context.Context, id string) error {
+				return stack.Plugins().Remove(ctx, id)
+			},
+			InspectPluginFn: func(ctx context.Context, id string) (controladapter.PluginSnapshot, error) {
+				return toRuntimePluginSnapshotWithError(stack.Plugins().Inspect(ctx, id))
+			},
 		},
 	}
 }

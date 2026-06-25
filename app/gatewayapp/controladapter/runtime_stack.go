@@ -162,6 +162,20 @@ type ACPAgentInfo struct {
 	Description string
 }
 
+type PluginRuntimeDeps struct {
+	ListPluginsFn       func(context.Context) ([]PluginSnapshot, error)
+	AddMarketplaceFn    func(context.Context, string) (MarketplaceSnapshot, error)
+	ListMarketplacesFn  func(context.Context) ([]MarketplaceSnapshot, error)
+	UpdateMarketplaceFn func(context.Context, string) (MarketplaceSnapshot, error)
+	RemoveMarketplaceFn func(context.Context, string) error
+	AddPluginPathFn     func(context.Context, string) (PluginSnapshot, error)
+	InstallPluginFn     func(context.Context, string) (PluginSnapshot, error)
+	EnablePluginFn      func(context.Context, string) (PluginSnapshot, error)
+	DisablePluginFn     func(context.Context, string) (PluginSnapshot, error)
+	RemovePluginFn      func(context.Context, string) error
+	InspectPluginFn     func(context.Context, string) (PluginSnapshot, error)
+}
+
 type ACPAgentAddOption struct {
 	Value   string
 	Display string
@@ -180,6 +194,7 @@ type RuntimeStack struct {
 	AppName   string
 	UserID    string
 	Workspace session.WorkspaceRef
+	Plugin    PluginRuntimeDeps
 
 	StartSessionFn                       func(context.Context, string, string) (session.Session, error)
 	ACPControllerStatusFn                func(context.Context, session.SessionRef) (controller.ControllerStatus, bool, error)
@@ -541,79 +556,131 @@ func (s *RuntimeStack) BindAgentProfile(ctx context.Context, cfg AgentProfileBin
 	return s.BindAgentProfileFn(ctx, cfg)
 }
 
+func (s *RuntimeStack) pluginRuntimeDeps() PluginRuntimeDeps {
+	if s == nil {
+		return PluginRuntimeDeps{}
+	}
+	deps := s.Plugin
+	if deps.ListPluginsFn == nil {
+		deps.ListPluginsFn = s.ListPluginsFn
+	}
+	if deps.AddMarketplaceFn == nil {
+		deps.AddMarketplaceFn = s.AddMarketplaceFn
+	}
+	if deps.ListMarketplacesFn == nil {
+		deps.ListMarketplacesFn = s.ListMarketplacesFn
+	}
+	if deps.UpdateMarketplaceFn == nil {
+		deps.UpdateMarketplaceFn = s.UpdateMarketplaceFn
+	}
+	if deps.RemoveMarketplaceFn == nil {
+		deps.RemoveMarketplaceFn = s.RemoveMarketplaceFn
+	}
+	if deps.AddPluginPathFn == nil {
+		deps.AddPluginPathFn = s.AddPluginPathFn
+	}
+	if deps.InstallPluginFn == nil {
+		deps.InstallPluginFn = s.InstallPluginFn
+	}
+	if deps.EnablePluginFn == nil {
+		deps.EnablePluginFn = s.EnablePluginFn
+	}
+	if deps.DisablePluginFn == nil {
+		deps.DisablePluginFn = s.DisablePluginFn
+	}
+	if deps.RemovePluginFn == nil {
+		deps.RemovePluginFn = s.RemovePluginFn
+	}
+	if deps.InspectPluginFn == nil {
+		deps.InspectPluginFn = s.InspectPluginFn
+	}
+	return deps
+}
+
 func (s *RuntimeStack) ListPlugins(ctx context.Context) ([]PluginSnapshot, error) {
-	if s == nil || s.ListPluginsFn == nil {
+	deps := s.pluginRuntimeDeps()
+	if deps.ListPluginsFn == nil {
 		return nil, fmt.Errorf("app/gatewayapp/controladapter: list plugins dependency is unavailable")
 	}
-	return s.ListPluginsFn(ctx)
+	return deps.ListPluginsFn(ctx)
 }
 
 func (s *RuntimeStack) AddMarketplace(ctx context.Context, source string) (MarketplaceSnapshot, error) {
-	if s == nil || s.AddMarketplaceFn == nil {
+	deps := s.pluginRuntimeDeps()
+	if deps.AddMarketplaceFn == nil {
 		return MarketplaceSnapshot{}, fmt.Errorf("app/gatewayapp/controladapter: add marketplace dependency is unavailable")
 	}
-	return s.AddMarketplaceFn(ctx, source)
+	return deps.AddMarketplaceFn(ctx, source)
 }
 
 func (s *RuntimeStack) ListMarketplaces(ctx context.Context) ([]MarketplaceSnapshot, error) {
-	if s == nil || s.ListMarketplacesFn == nil {
+	deps := s.pluginRuntimeDeps()
+	if deps.ListMarketplacesFn == nil {
 		return nil, fmt.Errorf("app/gatewayapp/controladapter: list marketplaces dependency is unavailable")
 	}
-	return s.ListMarketplacesFn(ctx)
+	return deps.ListMarketplacesFn(ctx)
 }
 
 func (s *RuntimeStack) UpdateMarketplace(ctx context.Context, name string) (MarketplaceSnapshot, error) {
-	if s == nil || s.UpdateMarketplaceFn == nil {
+	deps := s.pluginRuntimeDeps()
+	if deps.UpdateMarketplaceFn == nil {
 		return MarketplaceSnapshot{}, fmt.Errorf("app/gatewayapp/controladapter: update marketplace dependency is unavailable")
 	}
-	return s.UpdateMarketplaceFn(ctx, name)
+	return deps.UpdateMarketplaceFn(ctx, name)
 }
 
 func (s *RuntimeStack) RemoveMarketplace(ctx context.Context, name string) error {
-	if s == nil || s.RemoveMarketplaceFn == nil {
+	deps := s.pluginRuntimeDeps()
+	if deps.RemoveMarketplaceFn == nil {
 		return fmt.Errorf("app/gatewayapp/controladapter: remove marketplace dependency is unavailable")
 	}
-	return s.RemoveMarketplaceFn(ctx, name)
+	return deps.RemoveMarketplaceFn(ctx, name)
 }
 
 func (s *RuntimeStack) AddPluginPath(ctx context.Context, path string) (PluginSnapshot, error) {
-	if s == nil || s.AddPluginPathFn == nil {
+	deps := s.pluginRuntimeDeps()
+	if deps.AddPluginPathFn == nil {
 		return PluginSnapshot{}, fmt.Errorf("app/gatewayapp/controladapter: add plugin path dependency is unavailable")
 	}
-	return s.AddPluginPathFn(ctx, path)
+	return deps.AddPluginPathFn(ctx, path)
 }
 
 func (s *RuntimeStack) InstallPlugin(ctx context.Context, source string) (PluginSnapshot, error) {
-	if s == nil || s.InstallPluginFn == nil {
+	deps := s.pluginRuntimeDeps()
+	if deps.InstallPluginFn == nil {
 		return PluginSnapshot{}, fmt.Errorf("app/gatewayapp/controladapter: install plugin dependency is unavailable")
 	}
-	return s.InstallPluginFn(ctx, source)
+	return deps.InstallPluginFn(ctx, source)
 }
 
 func (s *RuntimeStack) EnablePlugin(ctx context.Context, id string) (PluginSnapshot, error) {
-	if s == nil || s.EnablePluginFn == nil {
+	deps := s.pluginRuntimeDeps()
+	if deps.EnablePluginFn == nil {
 		return PluginSnapshot{}, fmt.Errorf("app/gatewayapp/controladapter: enable plugin dependency is unavailable")
 	}
-	return s.EnablePluginFn(ctx, id)
+	return deps.EnablePluginFn(ctx, id)
 }
 
 func (s *RuntimeStack) DisablePlugin(ctx context.Context, id string) (PluginSnapshot, error) {
-	if s == nil || s.DisablePluginFn == nil {
+	deps := s.pluginRuntimeDeps()
+	if deps.DisablePluginFn == nil {
 		return PluginSnapshot{}, fmt.Errorf("app/gatewayapp/controladapter: disable plugin dependency is unavailable")
 	}
-	return s.DisablePluginFn(ctx, id)
+	return deps.DisablePluginFn(ctx, id)
 }
 
 func (s *RuntimeStack) RemovePlugin(ctx context.Context, id string) error {
-	if s == nil || s.RemovePluginFn == nil {
+	deps := s.pluginRuntimeDeps()
+	if deps.RemovePluginFn == nil {
 		return fmt.Errorf("app/gatewayapp/controladapter: remove plugin dependency is unavailable")
 	}
-	return s.RemovePluginFn(ctx, id)
+	return deps.RemovePluginFn(ctx, id)
 }
 
 func (s *RuntimeStack) InspectPlugin(ctx context.Context, id string) (PluginSnapshot, error) {
-	if s == nil || s.InspectPluginFn == nil {
+	deps := s.pluginRuntimeDeps()
+	if deps.InspectPluginFn == nil {
 		return PluginSnapshot{}, fmt.Errorf("app/gatewayapp/controladapter: inspect plugin dependency is unavailable")
 	}
-	return s.InspectPluginFn(ctx, id)
+	return deps.InspectPluginFn(ctx, id)
 }
