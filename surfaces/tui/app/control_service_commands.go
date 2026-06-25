@@ -508,7 +508,7 @@ func slashResumeWithContext(ctx context.Context, service control.Service, send f
 	if err != nil {
 		sendNotice(send, fmt.Sprintf("warning: replay failed: %v", err))
 	} else if len(events) > 0 {
-		if transcriptEvents := resumeTranscriptReplayTranscriptEvents(events); len(transcriptEvents) > 0 && send != nil {
+		if transcriptEvents := projectResumeReplayEvents(events); len(transcriptEvents) > 0 && send != nil {
 			send(TranscriptEventsMsg{Events: transcriptEvents})
 		}
 	}
@@ -517,77 +517,8 @@ func slashResumeWithContext(ctx context.Context, service control.Service, send f
 	return TaskResultMsg{SuppressTurnDivider: true}
 }
 
-func resumeTranscriptReplayTranscriptEvents(events []eventstream.Envelope) []TranscriptEvent {
-	if len(events) == 0 {
-		return nil
-	}
-	out := make([]TranscriptEvent, 0, len(events))
-	for _, env := range events {
-		projected := replayableACPTranscriptEvents(env)
-		if len(projected) == 0 {
-			if event, ok := resumeParticipantUserACPTranscriptEvent(env); ok {
-				projected = append(projected, event)
-			}
-		}
-		out = append(out, projected...)
-	}
-	return out
-}
-
-func replayableACPTranscriptEvents(env eventstream.Envelope) []TranscriptEvent {
-	if env.Kind != eventstream.KindSessionUpdate {
-		return nil
-	}
-	update, ok := env.Update.(schema.ContentChunk)
-	if !ok {
-		return nil
-	}
-	projected := ProjectACPEventToTranscriptEvents(env)
-	if len(projected) == 0 {
-		return nil
-	}
-	switch strings.TrimSpace(update.SessionUpdate) {
-	case schema.UpdateUserMessage:
-		return projected
-	case schema.UpdateAgentMessage, schema.UpdateAgentThought:
-		if !env.Final {
-			return nil
-		}
-		return projected
-	default:
-		return nil
-	}
-}
-
-func resumeParticipantUserACPTranscriptEvent(env eventstream.Envelope) (TranscriptEvent, bool) {
-	if env.Kind != eventstream.KindSessionUpdate || env.Scope != eventstream.ScopeParticipant {
-		return TranscriptEvent{}, false
-	}
-	update, ok := env.Update.(schema.ContentChunk)
-	if !ok || strings.TrimSpace(update.SessionUpdate) != schema.UpdateUserMessage {
-		return TranscriptEvent{}, false
-	}
-	text := strings.TrimSpace(transcript.ProtocolTextContent(update.Content))
-	if text == "" {
-		return TranscriptEvent{}, false
-	}
-	label := firstNonEmpty(
-		transcript.MetaString(env.Meta, "mention"),
-		transcript.MetaString(env.Meta, "handle"),
-	)
-	if label != "" && !strings.HasPrefix(label, "@") {
-		label = "@" + label
-	}
-	label = firstNonEmpty(label, env.ParticipantID, env.Actor, env.ScopeID)
-	label = firstNonEmpty(label, "side ACP")
-	return TranscriptEvent{
-		Kind:          TranscriptEventNarrative,
-		Scope:         ACPProjectionMain,
-		NarrativeKind: TranscriptNarrativeUser,
-		Text:          fmt.Sprintf("User to %s: %s", label, text),
-		Final:         true,
-		OccurredAt:    env.OccurredAt,
-	}, true
+func projectResumeReplayEvents(events []eventstream.Envelope) []TranscriptEvent {
+	return transcript.ProjectReplayEvents(events, tuiTranscriptProjector{})
 }
 
 func slashStatus(service control.Service, send func(tea.Msg)) TaskResultMsg {

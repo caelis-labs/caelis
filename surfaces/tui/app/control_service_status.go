@@ -6,17 +6,18 @@ import (
 	"strings"
 
 	"github.com/OnslaughtSnail/caelis/protocol/acp/control"
+	"github.com/OnslaughtSnail/caelis/surfaces/statusbar"
 )
 
 func formatStatusSnapshot(status control.StatusSnapshot) string {
-	model := statusViewModelFromSnapshot(status).HeaderModelText(firstNonEmpty(strings.TrimSpace(status.Model), strings.TrimSpace(status.ModelName), deriveModelNameFromAlias(status.Model), "not configured"))
+	model := statusViewModelFromSnapshot(status).HeaderModelText("")
 	lines := []string{}
 	appendStatusField(&lines, "Model", model)
 	appendStatusField(&lines, "Mode", firstNonEmpty(strings.TrimSpace(status.ModeLabel), "auto-review"))
 	appendStatusField(&lines, "Sandbox", formatStatusSandbox(status))
 	appendStatusField(&lines, "Workspace", firstNonEmpty(strings.TrimSpace(status.Workspace), "-"))
 	appendStatusField(&lines, "Session", strings.TrimSpace(status.SessionID))
-	if usage := formatContextUsageStatus(status.TotalTokens, status.ContextWindowTokens); usage != "" {
+	if usage := statusbar.FormatContextUsage(status.TotalTokens, status.ContextWindowTokens); usage != "" {
 		appendStatusField(&lines, "Context", usage)
 	}
 	if status.FallbackReason != "" {

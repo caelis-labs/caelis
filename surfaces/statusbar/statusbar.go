@@ -41,7 +41,7 @@ func FromSnapshot(status control.StatusSnapshot) ViewModel {
 		Sandbox:         sandbox,
 		Route:           strings.TrimSpace(status.Route),
 		Security:        security,
-		Tokens:          formatContextUsageStatus(status.TotalTokens, status.ContextWindowTokens),
+		Tokens:          FormatContextUsage(status.TotalTokens, status.ContextWindowTokens),
 		MissingAPIKey:   status.MissingAPIKey,
 		Running:         status.Running,
 	}
@@ -74,7 +74,7 @@ func (s ViewModel) FooterContextText(fallback string) string {
 	return tokens
 }
 
-func formatContextUsageStatus(totalTokens, contextWindowTokens int) string {
+func FormatContextUsage(totalTokens, contextWindowTokens int) string {
 	if contextWindowTokens <= 0 {
 		if totalTokens <= 0 {
 			return ""

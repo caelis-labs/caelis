@@ -1012,15 +1012,6 @@ func TestSlashConnectCallsDriverAndUpdatesStatus(t *testing.T) {
 	}
 }
 
-func TestFormatContextUsageStatus(t *testing.T) {
-	if got := formatContextUsageStatus(12600, 88000); got != "12.6k / 88k · 14%" {
-		t.Fatalf("formatContextUsageStatus() = %q, want %q", got, "12.6k / 88k · 14%")
-	}
-	if got := formatContextUsageStatus(0, 88000); got != "0 / 88k · 0%" {
-		t.Fatalf("formatContextUsageStatus() zero = %q, want %q", got, "0 / 88k · 0%")
-	}
-}
-
 func TestSlashAgentDispatchesPrimarySubcommands(t *testing.T) {
 	driver := &bridgeTestDriver{
 		agentList: []control.AgentCandidate{{

@@ -17,6 +17,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/OnslaughtSnail/caelis/protocol/acp/control"
+	"github.com/OnslaughtSnail/caelis/surfaces/statusbar"
 )
 
 // ProgramSender is set after the tea.Program is created so that the
@@ -257,7 +258,7 @@ func ConfigFromControlService(service control.Service, sender *ProgramSender, ba
 			cachedModeLabel = strings.TrimSpace(status.ModeLabel)
 			cachedStatusView = statusViewModelFromSnapshot(status)
 			statusCacheMu.Unlock()
-			return statusModelDisplay(status.Model), formatContextUsageStatus(status.TotalTokens, status.ContextWindowTokens)
+			return statusModelDisplay(status.Model), statusbar.FormatContextUsage(status.TotalTokens, status.ContextWindowTokens)
 		}
 	}
 	if base.RefreshStatusView == nil {
@@ -568,7 +569,7 @@ func sendStatusUpdate(send func(tea.Msg), status control.StatusSnapshot) {
 		send(SetStatusMsg{
 			Workspace: status.Workspace,
 			Model:     statusModelDisplay(status.Model),
-			Context:   formatContextUsageStatus(status.TotalTokens, status.ContextWindowTokens),
+			Context:   statusbar.FormatContextUsage(status.TotalTokens, status.ContextWindowTokens),
 			ModeLabel: strings.TrimSpace(status.ModeLabel),
 			Status:    statusViewModelFromSnapshot(status),
 		})
@@ -577,32 +578,6 @@ func sendStatusUpdate(send func(tea.Msg), status control.StatusSnapshot) {
 
 func statusModelDisplay(model string) string {
 	return normalizeStatusModel(model)
-}
-
-func formatContextUsageStatus(totalTokens int, contextWindow int) string {
-	if contextWindow <= 0 {
-		return ""
-	}
-	if totalTokens < 0 {
-		totalTokens = 0
-	}
-	percent := 0
-	if contextWindow > 0 {
-		percent = int(float64(totalTokens)*100/float64(contextWindow) + 0.5)
-		if percent < 0 {
-			percent = 0
-		}
-	}
-	return fmt.Sprintf("%s / %s · %d%%", formatCompactTokenCount(totalTokens), formatCompactTokenCount(contextWindow), percent)
-}
-
-func formatCompactTokenCount(tokens int) string {
-	if tokens < 1000 {
-		return strconv.Itoa(max(tokens, 0))
-	}
-	value := float64(tokens) / 1000.0
-	text := fmt.Sprintf("%.1fk", value)
-	return strings.Replace(text, ".0k", "k", 1)
 }
 
 func refreshStatusViaSend(service control.Service, send func(tea.Msg)) {
@@ -1095,22 +1070,6 @@ func displayableAgentParticipants(participants []control.AgentParticipantSnapsho
 		return nil
 	}
 	return append([]control.AgentParticipantSnapshot(nil), participants...)
-}
-
-func deriveProviderFromAlias(alias string) string {
-	left, _, ok := strings.Cut(strings.TrimSpace(alias), "/")
-	if !ok {
-		return ""
-	}
-	return strings.TrimSpace(left)
-}
-
-func deriveModelNameFromAlias(alias string) string {
-	_, right, ok := strings.Cut(strings.TrimSpace(alias), "/")
-	if !ok {
-		return ""
-	}
-	return strings.TrimSpace(right)
 }
 
 func modeToggleHint(status control.StatusSnapshot) string {
