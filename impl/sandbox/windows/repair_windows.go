@@ -267,7 +267,7 @@ func writeElevatedRepairResult(path string, opErr error) error {
 }
 
 func validateElevatedRepairConfig(cfg sandbox.Config) error {
-	if normalizeBackendAlias(cfg.RequestedBackend) != sandbox.BackendWindows {
+	if sandbox.CanonicalBackend(cfg.RequestedBackend) != sandbox.BackendWindows {
 		return fmt.Errorf("impl/sandbox/windows: elevated repair only supports the Windows sandbox backend")
 	}
 	workspaceRoot, err := pathutil.NormalizeWithBase("", cfg.CWD)

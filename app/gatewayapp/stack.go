@@ -64,6 +64,9 @@ type Stack struct {
 	taskStore     *taskfile.Store
 	gateway       *kernelimpl.Gateway
 	mcpMgr        *mcp.Manager
+
+	// Optional test seam; nil uses the platform lifecycle runtime factory.
+	sandboxLifecycleFactory sandboxLifecycleRuntimeFactory
 }
 
 func (s *Stack) CurrentGateway() GatewayRuntime {

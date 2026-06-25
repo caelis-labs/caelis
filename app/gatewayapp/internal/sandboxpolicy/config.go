@@ -7,22 +7,15 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/configstore"
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/promptassembly"
+	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 )
 
 func NormalizeBackend(backend string) (string, error) {
-	switch strings.ToLower(strings.TrimSpace(backend)) {
-	case "", "auto":
+	switch normalized := sandbox.CanonicalBackend(sandbox.Backend(backend)); normalized {
+	case "":
 		return "auto", nil
-	case "host":
-		return "host", nil
-	case "seatbelt":
-		return "seatbelt", nil
-	case "bwrap":
-		return "bwrap", nil
-	case "landlock":
-		return "landlock", nil
-	case "windows", "windows-restricted-token", "windows_restricted_token", "windows-elevated", "windows_elevated", "windows elevated", "elevated":
-		return "windows", nil
+	case sandbox.BackendHost, sandbox.BackendSeatbelt, sandbox.BackendBwrap, sandbox.BackendLandlock, sandbox.BackendWindows:
+		return string(normalized), nil
 	default:
 		return "", fmt.Errorf("gatewayapp: unknown sandbox backend %q", backend)
 	}

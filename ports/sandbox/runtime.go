@@ -42,8 +42,7 @@ func backendRegistrationError() error {
 }
 
 func New(cfg Config) (Runtime, error) {
-	rawRequested := strings.ToLower(strings.TrimSpace(string(cfg.RequestedBackend)))
-	autoRequested := rawRequested == "" || rawRequested == "auto" || rawRequested == "default"
+	autoRequested := CanonicalBackend(cfg.RequestedBackend) == ""
 	cfg = NormalizeConfig(cfg)
 
 	hostRuntime, err := buildRegisteredRuntime(BackendHost, cfg)
@@ -122,14 +121,7 @@ func NormalizeConfig(cfg Config) Config {
 			cfg.CWD = abs
 		}
 	}
-	switch strings.ToLower(strings.TrimSpace(string(cfg.RequestedBackend))) {
-	case "", "auto", "default":
-		cfg.RequestedBackend = ""
-	case "windows", "windows-restricted-token", "windows_restricted_token", "windows-elevated", "windows_elevated", "windows elevated", "elevated":
-		cfg.RequestedBackend = BackendWindows
-	default:
-		cfg.RequestedBackend = Backend(strings.TrimSpace(string(cfg.RequestedBackend)))
-	}
+	cfg.RequestedBackend = CanonicalBackend(cfg.RequestedBackend)
 	cfg.HelperPath = strings.TrimSpace(cfg.HelperPath)
 	cfg.StateDir = strings.TrimSpace(cfg.StateDir)
 	if cfg.StateDir != "" {
@@ -166,7 +158,7 @@ func buildRegisteredRuntime(backend Backend, cfg Config) (Runtime, error) {
 }
 
 func candidateBackends(cfg Config) ([]Backend, error) {
-	requested := Backend(strings.TrimSpace(string(cfg.RequestedBackend)))
+	requested := CanonicalBackend(cfg.RequestedBackend)
 	if requested != "" {
 		return []Backend{requested}, nil
 	}

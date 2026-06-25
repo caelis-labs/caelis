@@ -305,7 +305,7 @@ func (r *runtime) OpenSession(id string) (sandbox.Session, error) {
 
 func (r *runtime) OpenSessionRef(ref sandbox.SessionRef) (sandbox.Session, error) {
 	ref = sandbox.CloneSessionRef(ref)
-	backend := normalizeBackendAlias(ref.Backend)
+	backend := sandbox.CanonicalBackend(ref.Backend)
 	if backend != "" && backend != sandbox.BackendWindows {
 		return nil, fmt.Errorf("impl/sandbox/windows: backend %q is unsupported", ref.Backend)
 	}
@@ -2338,18 +2338,6 @@ func resolveStateRoot(raw string) (string, error) {
 		return "", fmt.Errorf("impl/sandbox/windows: resolve user home: %w", err)
 	}
 	return filepath.Join(home, ".caelis"), nil
-}
-
-func normalizeBackendAlias(backend sandbox.Backend) sandbox.Backend {
-	switch strings.ToLower(strings.TrimSpace(string(backend))) {
-	case "", "windows", "windows-restricted-token", "windows_restricted_token", "windows-elevated", "windows_elevated", "elevated":
-		if strings.TrimSpace(string(backend)) == "" {
-			return ""
-		}
-		return sandbox.BackendWindows
-	default:
-		return backend
-	}
 }
 
 func firstNonEmpty(values ...string) string {

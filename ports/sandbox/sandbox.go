@@ -47,6 +47,32 @@ const (
 	BackendCustom          Backend = "custom"
 )
 
+// CanonicalBackend normalizes backend names and legacy aliases into the stable
+// backend identifiers used by sandbox routing and diagnostics. Empty, auto, and
+// default all mean no explicit backend request. Unknown backends retain their
+// trimmed spelling so external factory registration keys remain addressable.
+func CanonicalBackend(backend Backend) Backend {
+	text := strings.ToLower(strings.TrimSpace(string(backend)))
+	switch text {
+	case "", "auto", "default":
+		return ""
+	case "host":
+		return BackendHost
+	case "seatbelt":
+		return BackendSeatbelt
+	case "bwrap":
+		return BackendBwrap
+	case "landlock":
+		return BackendLandlock
+	case "windows", "windows-restricted-token", "windows_restricted_token", "windows-elevated", "windows_elevated", "windows elevated", "elevated":
+		return BackendWindows
+	case "custom":
+		return BackendCustom
+	default:
+		return Backend(strings.TrimSpace(string(backend)))
+	}
+}
+
 // Route identifies one preferred execution route.
 type Route string
 
@@ -495,7 +521,7 @@ func normalizeBackendCandidates(values []Backend) []Backend {
 	out := make([]Backend, 0, len(values))
 	seen := map[Backend]struct{}{}
 	for _, value := range values {
-		backend := Backend(strings.TrimSpace(string(value)))
+		backend := CanonicalBackend(value)
 		if backend == "" || backend == BackendHost {
 			continue
 		}

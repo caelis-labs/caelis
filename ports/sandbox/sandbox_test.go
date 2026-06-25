@@ -241,6 +241,75 @@ func TestNormalizeConfigTreatsAutoBackendAsUnset(t *testing.T) {
 	}
 }
 
+func TestCanonicalBackendNormalizesAliases(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		raw  Backend
+		want Backend
+	}{
+		{name: "empty", raw: "", want: ""},
+		{name: "auto", raw: " auto ", want: ""},
+		{name: "default", raw: "DEFAULT", want: ""},
+		{name: "host", raw: " HOST ", want: BackendHost},
+		{name: "seatbelt", raw: "Seatbelt", want: BackendSeatbelt},
+		{name: "bwrap", raw: "BWRAP", want: BackendBwrap},
+		{name: "landlock", raw: "landlock", want: BackendLandlock},
+		{name: "windows", raw: "windows", want: BackendWindows},
+		{name: "windows restricted token dash", raw: "windows-restricted-token", want: BackendWindows},
+		{name: "windows restricted token underscore", raw: "windows_restricted_token", want: BackendWindows},
+		{name: "windows elevated dash", raw: BackendWindowsElevated, want: BackendWindows},
+		{name: "windows elevated underscore", raw: "windows_elevated", want: BackendWindows},
+		{name: "windows elevated space", raw: "windows elevated", want: BackendWindows},
+		{name: "elevated", raw: "elevated", want: BackendWindows},
+		{name: "custom", raw: "Custom", want: BackendCustom},
+		{name: "unknown preserved", raw: " VendorBackend ", want: "VendorBackend"},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := CanonicalBackend(tt.raw); got != tt.want {
+				t.Fatalf("CanonicalBackend(%q) = %q, want %q", tt.raw, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNewPreservesCustomBackendRegistrationKey(t *testing.T) {
+	want := Backend("VendorBackend")
+
+	backendFactoriesMu.Lock()
+	original := maps.Clone(backendFactories)
+	originalOrder := append([]Backend(nil), backendFactoryOrder...)
+	backendFactories = map[Backend]BackendFactory{
+		BackendHost: fakeBackendFactory{backend: BackendHost},
+		want:        fakeBackendFactory{backend: want},
+	}
+	backendFactoryOrder = []Backend{BackendHost, want}
+	backendFactoriesMu.Unlock()
+	t.Cleanup(func() {
+		backendFactoriesMu.Lock()
+		backendFactories = original
+		backendFactoryOrder = originalOrder
+		backendFactoriesMu.Unlock()
+	})
+
+	rt, err := New(Config{RequestedBackend: " VendorBackend "})
+	if err != nil {
+		t.Fatalf("New(custom mixed-case backend) error = %v", err)
+	}
+	t.Cleanup(func() {
+		_ = rt.Close()
+	})
+
+	status := rt.Status()
+	if status.ResolvedBackend != want {
+		t.Fatalf("Status().ResolvedBackend = %q, want %q", status.ResolvedBackend, want)
+	}
+}
+
 func TestRegisterBuiltInBackendFactoryRecordsDuplicateWithoutPanic(t *testing.T) {
 	backend := Backend("test-duplicate-backend")
 	backendFactoriesMu.Lock()

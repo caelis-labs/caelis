@@ -19,7 +19,7 @@ func Current(requested sandbox.Backend) (Route, error) {
 }
 
 func ForGOOS(goos string, requested sandbox.Backend) (Route, error) {
-	requested = normalizeRequestedBackend(requested)
+	requested = sandbox.CanonicalBackend(requested)
 	switch strings.TrimSpace(goos) {
 	case "darwin":
 		return routeForPlatform(goos, requested, []sandbox.Backend{sandbox.BackendSeatbelt}, darwinInstallHint())
@@ -48,18 +48,6 @@ func routeForPlatform(goos string, requested sandbox.Backend, candidates []sandb
 		}
 	}
 	return Route{}, fmt.Errorf("sandbox router: backend %q is unsupported on %s", requested, goos)
-}
-
-func normalizeRequestedBackend(value sandbox.Backend) sandbox.Backend {
-	text := strings.ToLower(strings.TrimSpace(string(value)))
-	switch text {
-	case "", "auto", "default":
-		return ""
-	case "windows", "windows-restricted-token", "windows_restricted_token", "windows-elevated", "windows_elevated", "windows elevated", "elevated":
-		return sandbox.BackendWindows
-	default:
-		return sandbox.Backend(text)
-	}
 }
 
 func linuxInstallHint() string {

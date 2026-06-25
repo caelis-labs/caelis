@@ -93,7 +93,7 @@ func isWindowsSandbox(input Input) bool {
 	if !isSandbox(input) {
 		return false
 	}
-	switch normalizeWindowsBackend(input.Backend) {
+	switch sandbox.CanonicalBackend(input.Backend) {
 	case sandbox.BackendWindows:
 		return true
 	default:
@@ -110,15 +110,6 @@ func isSandbox(input Input) bool {
 		return false
 	default:
 		return true
-	}
-}
-
-func normalizeWindowsBackend(backend sandbox.Backend) sandbox.Backend {
-	switch strings.ToLower(strings.TrimSpace(string(backend))) {
-	case "windows", "windows-restricted-token", "windows_restricted_token", "windows-elevated", "windows_elevated", "elevated":
-		return sandbox.BackendWindows
-	default:
-		return backend
 	}
 }
 
