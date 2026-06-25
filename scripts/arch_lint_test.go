@@ -24,6 +24,60 @@ func TestBoundaryRuleRejectsPublicContractsImportingInternal(t *testing.T) {
 			importPath: modulePath + "/internal/kernel",
 			want:       "kernel must not depend on internal/kernel",
 		},
+		{
+			name:       "internal kernel production code must not import impl",
+			rel:        "internal/kernel/gateway.go",
+			importPath: modulePath + "/impl/session/memory",
+			want:       "internal/kernel must not depend on app, impl, or surfaces",
+		},
+		{
+			name:       "protocol must not import internal packages",
+			rel:        "protocol/acp/client/client.go",
+			importPath: modulePath + "/internal/kernel",
+			want:       "protocol must not depend on internal packages",
+		},
+		{
+			name:       "protocol must not import surfaces",
+			rel:        "protocol/acp/projector/projector.go",
+			importPath: modulePath + "/surfaces/tui/app",
+			want:       "protocol must not depend on app, impl, or surfaces",
+		},
+		{
+			name:       "surfaces must not import app",
+			rel:        "surfaces/gui/app.go",
+			importPath: modulePath + "/app/gatewayapp",
+			want:       "surfaces must not depend directly on app",
+		},
+		{
+			name:       "surfaces must not import impl",
+			rel:        "surfaces/gui/app.go",
+			importPath: modulePath + "/impl/model/providers",
+			want:       "surfaces must not depend directly on impl",
+		},
+		{
+			name:       "protocol projector display policy exception",
+			rel:        "protocol/acp/projector/projector.go",
+			importPath: modulePath + "/internal/displaypolicy",
+			want:       "",
+		},
+		{
+			name:       "protocol stdio winproc exception",
+			rel:        "protocol/acp/transport/stdio/transport.go",
+			importPath: modulePath + "/internal/winproc",
+			want:       "",
+		},
+		{
+			name:       "acp server composition exception",
+			rel:        "surfaces/acpserver/server.go",
+			importPath: modulePath + "/app/gatewayapp",
+			want:       "",
+		},
+		{
+			name:       "internal kernel tests may use existing session fixtures",
+			rel:        "internal/kernel/gateway_test.go",
+			importPath: modulePath + "/impl/session/memory",
+			want:       "",
+		},
 	}
 
 	for _, tt := range tests {

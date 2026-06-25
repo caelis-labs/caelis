@@ -115,6 +115,9 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 		return ""
 	}
 	target := strings.TrimPrefix(importPath, modulePath+"/")
+	if temporaryArchitectureException(rel, target) {
+		return ""
+	}
 	switch {
 	case strings.HasPrefix(rel, "kernel/"):
 		if target == "internal/kernel" || strings.HasPrefix(target, "internal/kernel/") {
@@ -123,6 +126,10 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 		if startsWithAny(target, "impl/", "surfaces/") {
 			return "kernel must not depend on impl or surfaces"
 		}
+	case strings.HasPrefix(rel, "internal/kernel/"):
+		if startsWithAny(target, "app/", "impl/", "surfaces/") {
+			return "internal/kernel must not depend on app, impl, or surfaces"
+		}
 	case strings.HasPrefix(rel, "ports/"):
 		if strings.HasPrefix(target, "internal/") {
 			return "ports must not depend on internal packages"
@@ -130,11 +137,21 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 		if startsWithAny(target, "impl/", "surfaces/") {
 			return "ports must not depend on impl or surfaces"
 		}
+	case strings.HasPrefix(rel, "protocol/"):
+		if strings.HasPrefix(target, "internal/") {
+			return "protocol must not depend on internal packages"
+		}
+		if startsWithAny(target, "app/", "impl/", "surfaces/") {
+			return "protocol must not depend on app, impl, or surfaces"
+		}
 	case strings.HasPrefix(rel, "impl/"):
 		if strings.HasPrefix(target, "surfaces/") {
 			return "impl must not depend on surfaces"
 		}
 	case strings.HasPrefix(rel, "surfaces/"):
+		if strings.HasPrefix(target, "app/") {
+			return "surfaces must not depend directly on app"
+		}
 		if strings.HasPrefix(target, "impl/") {
 			return "surfaces must not depend directly on impl"
 		}
@@ -147,6 +164,23 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 		}
 	}
 	return ""
+}
+
+func temporaryArchitectureException(rel string, target string) bool {
+	switch {
+	case pathIn(rel, "protocol/acp/projector") && target == "internal/displaypolicy":
+		return true
+	case pathIn(rel, "protocol/acp/transport/stdio") && target == "internal/winproc":
+		return true
+	case pathIn(rel, "surfaces/acpserver") && target == "app/gatewayapp":
+		return true
+	case strings.HasPrefix(rel, "internal/kernel/") &&
+		strings.HasSuffix(rel, "_test.go") &&
+		pathIn(target, "impl/session/file", "impl/session/memory"):
+		return true
+	default:
+		return false
+	}
 }
 
 func pathIn(value string, prefixes ...string) bool {
