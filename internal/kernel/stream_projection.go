@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/OnslaughtSnail/caelis/ports/displaypolicy"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/stream"
 )
@@ -311,7 +312,7 @@ func subagentFinalFrameEvent(req StreamRequest, frame stream.Frame) EventEnvelop
 	if state := strings.TrimSpace(frame.State); state != "" {
 		metaOutput["state"] = state
 	}
-	finalMessage := CleanSubagentFinalOutput(frame.Text)
+	finalMessage := displaypolicy.CleanSubagentFinalOutput(frame.Text)
 	if finalMessage != "" {
 		metaOutput["result"] = finalMessage
 	}

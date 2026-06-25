@@ -31,6 +31,12 @@ func TestBoundaryRuleRejectsPublicContractsImportingInternal(t *testing.T) {
 			want:       "internal/kernel must not depend on app, impl, or surfaces",
 		},
 		{
+			name:       "internal kernel may import public display policy",
+			rel:        "internal/kernel/stream_projection.go",
+			importPath: modulePath + "/ports/displaypolicy",
+			want:       "",
+		},
+		{
 			name:       "protocol must not import internal packages",
 			rel:        "protocol/acp/client/client.go",
 			importPath: modulePath + "/internal/kernel",
@@ -55,9 +61,15 @@ func TestBoundaryRuleRejectsPublicContractsImportingInternal(t *testing.T) {
 			want:       "surfaces must not depend directly on impl",
 		},
 		{
-			name:       "protocol projector display policy exception",
+			name:       "protocol projector must not import old internal display policy",
 			rel:        "protocol/acp/projector/projector.go",
 			importPath: modulePath + "/internal/displaypolicy",
+			want:       "protocol must not depend on internal packages",
+		},
+		{
+			name:       "protocol projector may import public display policy",
+			rel:        "protocol/acp/projector/projector.go",
+			importPath: modulePath + "/ports/displaypolicy",
 			want:       "",
 		},
 		{

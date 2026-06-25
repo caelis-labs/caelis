@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-	"github.com/OnslaughtSnail/caelis/internal/displaypolicy"
+	"github.com/OnslaughtSnail/caelis/ports/displaypolicy"
 )
 
 type explorationProjectionState struct {

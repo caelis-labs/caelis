@@ -5,7 +5,7 @@ import (
 	"maps"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/internal/displaypolicy"
+	"github.com/OnslaughtSnail/caelis/ports/displaypolicy"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/tool"
@@ -106,10 +106,6 @@ func successfulEmptyTerminalResult(name string, status string, isErr bool) bool 
 	default:
 		return false
 	}
-}
-
-func toolKindForName(name string) string {
-	return displaypolicy.ToolKindForName(name)
 }
 
 func toolCallTitle(call model.ToolCall) string {
@@ -235,7 +231,7 @@ func toolEventPayload(call model.ToolCall, status string, rawInput map[string]an
 	payload := &session.EventTool{
 		ID:      strings.TrimSpace(call.ID),
 		Name:    strings.TrimSpace(call.Name),
-		Kind:    toolKindForName(call.Name),
+		Kind:    displaypolicy.ToolKindForName(call.Name),
 		Title:   toolCallTitle(call),
 		Status:  strings.TrimSpace(status),
 		Input:   maps.Clone(rawInput),

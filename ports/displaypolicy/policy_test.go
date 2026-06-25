@@ -2,7 +2,7 @@ package displaypolicy
 
 import "testing"
 
-func TestSpawnDisplayArgsUsesAgentAndPrompt(t *testing.T) {
+func TestSpawnFullDisplayArgsUsesAgentAndPrompt(t *testing.T) {
 	raw := map[string]any{
 		"agent":  "codex",
 		"prompt": "inspect the transcript",
@@ -12,7 +12,7 @@ func TestSpawnDisplayArgsUsesAgentAndPrompt(t *testing.T) {
 	}
 }
 
-func TestSpawnDisplayArgsUsesHandleWithAgentAnnotation(t *testing.T) {
+func TestSpawnFullDisplayArgsUsesHandleWithAgentAnnotation(t *testing.T) {
 	raw := map[string]any{
 		"agent":   "self",
 		"task_id": "jeff",

@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/internal/displaypolicy"
+	"github.com/OnslaughtSnail/caelis/ports/displaypolicy"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 )
 

@@ -3,7 +3,7 @@ package tuiapp
 import (
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/internal/displaypolicy"
+	"github.com/OnslaughtSnail/caelis/ports/displaypolicy"
 )
 
 const (

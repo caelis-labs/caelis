@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/internal/displaypolicy"
+	"github.com/OnslaughtSnail/caelis/ports/displaypolicy"
 	"github.com/OnslaughtSnail/caelis/surfaces/transcript"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/acpprojector"
 )
@@ -196,7 +196,7 @@ func taskControlResult(semanticName string, rawInput map[string]any, displayOutp
 	if !strings.EqualFold(strings.TrimSpace(semanticName), "TASK") {
 		return false
 	}
-	switch strings.ToLower(strings.TrimSpace(toolDisplayTaskAction(rawInput, displayOutput, meta))) {
+	switch strings.ToLower(strings.TrimSpace(displaypolicy.ToolTaskAction(rawInput, displayOutput, meta))) {
 	case "wait", "cancel":
 		return true
 	default:

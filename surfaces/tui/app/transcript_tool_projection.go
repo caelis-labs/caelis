@@ -3,6 +3,7 @@ package tuiapp
 import (
 	"strings"
 
+	"github.com/OnslaughtSnail/caelis/ports/displaypolicy"
 	"github.com/OnslaughtSnail/caelis/surfaces/transcript"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/acpprojector"
 )
@@ -28,7 +29,7 @@ func projectTranscriptToolCall(input transcript.ToolProjectionInput) TranscriptE
 		toolName = refinedName
 		semanticName = refinedName
 	}
-	toolTaskID := toolDisplayTaskID(rawInput, nil, input.Meta)
+	toolTaskID := displaypolicy.ToolTaskID(rawInput, nil, input.Meta)
 	displayInput := rawInput
 	if strings.EqualFold(semanticName, "TASK") {
 		displayInput = taskDisplayInputForResult(rawInput, toolDisplayMetaOutput(semanticName, input.Meta))
@@ -51,9 +52,9 @@ func projectTranscriptToolCall(input transcript.ToolProjectionInput) TranscriptE
 		ToolFullArgs:       toolDisplayFullArgs(semanticName, rawInput),
 		ToolStatus:         status,
 		ToolTaskID:         toolTaskID,
-		ToolTaskAction:     toolDisplayTaskAction(rawInput, nil, input.Meta),
-		ToolTaskInput:      toolDisplayTaskInput(rawInput, nil, input.Meta),
-		ToolTaskTargetKind: toolDisplayTaskTargetKind(rawInput, nil, input.Meta),
+		ToolTaskAction:     displaypolicy.ToolTaskAction(rawInput, nil, input.Meta),
+		ToolTaskInput:      displaypolicy.ToolTaskInput(rawInput, nil, input.Meta),
+		ToolTaskTargetKind: displaypolicy.ToolTaskTargetKind(rawInput, nil, input.Meta),
 	}
 }
 
@@ -120,7 +121,7 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 		toolOutputSynthetic = false
 	}
 	toolArgs := toolDisplayArgs(semanticName, displayInput, toolTitleDisplayArgs(semanticName, input.ToolKind, input.ToolTitle), acpprojector.FormatToolStart(toolName, displayInput))
-	toolTaskID := toolDisplayTaskID(rawInput, displayOutput, input.Meta)
+	toolTaskID := displaypolicy.ToolTaskID(rawInput, displayOutput, input.Meta)
 	if strings.EqualFold(semanticName, "TASK") {
 		toolArgs = taskDisplayArgsWithTaskID(toolArgs, toolTaskID)
 	}
@@ -154,9 +155,9 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 		ToolError:           toolErr,
 		ToolOutputSynthetic: toolOutputSynthetic,
 		ToolTaskID:          toolTaskID,
-		ToolTaskAction:      toolDisplayTaskAction(rawInput, displayOutput, input.Meta),
-		ToolTaskInput:       toolDisplayTaskInput(rawInput, displayOutput, input.Meta),
-		ToolTaskTargetKind:  toolDisplayTaskTargetKind(rawInput, displayOutput, input.Meta),
+		ToolTaskAction:      displaypolicy.ToolTaskAction(rawInput, displayOutput, input.Meta),
+		ToolTaskInput:       displaypolicy.ToolTaskInput(rawInput, displayOutput, input.Meta),
+		ToolTaskTargetKind:  displaypolicy.ToolTaskTargetKind(rawInput, displayOutput, input.Meta),
 		Final:               transcriptToolStatusFinal(status, toolErr),
 	}, true
 }

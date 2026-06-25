@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/internal/displaypolicy"
+	"github.com/OnslaughtSnail/caelis/ports/displaypolicy"
 	"github.com/OnslaughtSnail/caelis/surfaces/transcript"
 )
 
@@ -73,7 +73,7 @@ func toolDisplayArgs(name string, raw map[string]any, fallback ...string) string
 			}
 		}
 		if command := terminalCommandDisplay(raw); command != "" {
-			return normalizeToolDisplayArg(command)
+			return displaypolicy.NormalizeDisplayArg(command)
 		}
 	}
 	if summary := genericToolArgs(raw); summary != "" {
@@ -712,7 +712,7 @@ func looksLikeTaskDuration(value string) bool {
 }
 
 func spawnDisplayArgs(raw map[string]any) string {
-	full := displaypolicy.SpawnDisplayArgs(raw)
+	full := displaypolicy.SpawnFullDisplayArgs(raw)
 	if full == "" {
 		return ""
 	}
@@ -744,7 +744,7 @@ func taskDisplayInputForResult(input map[string]any, output map[string]any) map[
 }
 
 func normalizeTaskWriteDisplayInput(input string) string {
-	input = normalizeToolDisplayArg(input)
+	input = displaypolicy.NormalizeDisplayArg(input)
 	if input == "" {
 		return ""
 	}
@@ -752,15 +752,11 @@ func normalizeTaskWriteDisplayInput(input string) string {
 }
 
 func formatTaskWriteInput(input string) string {
-	input = normalizeToolDisplayArg(input)
+	input = displaypolicy.NormalizeDisplayArg(input)
 	if input == "" {
 		return ""
 	}
 	return strconv.Quote(input)
-}
-
-func normalizeToolDisplayArg(input string) string {
-	return strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(input, "\r\n", "\n"), "\r", "\n"))
 }
 
 func formatDurationMS(ms int) string {
@@ -782,22 +778,6 @@ func toolDisplayPanelOutput(name string, output string) string {
 		}
 	}
 	return output
-}
-
-func toolDisplayTaskID(input map[string]any, output map[string]any, meta map[string]any) string {
-	return displaypolicy.ToolTaskID(input, output, meta)
-}
-
-func toolDisplayTaskAction(input map[string]any, output map[string]any, meta map[string]any) string {
-	return displaypolicy.ToolTaskAction(input, output, meta)
-}
-
-func toolDisplayTaskInput(input map[string]any, output map[string]any, meta map[string]any) string {
-	return displaypolicy.ToolTaskInput(input, output, meta)
-}
-
-func toolDisplayTaskTargetKind(input map[string]any, output map[string]any, meta map[string]any) string {
-	return displaypolicy.ToolTaskTargetKind(input, output, meta)
 }
 
 func toolDisplaySummaryOutput(name string, output map[string]any, meta map[string]any) map[string]any {
