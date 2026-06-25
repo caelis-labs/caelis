@@ -7,6 +7,7 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/configstore"
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/modelregistry"
+	"github.com/OnslaughtSnail/caelis/internal/acpagentenv"
 	"github.com/OnslaughtSnail/caelis/ports/assembly"
 )
 
@@ -92,19 +93,13 @@ func PluginAgentToConfig(in assembly.AgentConfig, builtin bool) configstore.Agen
 	})
 }
 
-func DefaultSelfAgent(cfg DefaultSelfConfig) assembly.AgentConfig {
-	if cmd := strings.TrimSpace(os.Getenv("CAELIS_ACP_SELF_AGENT_CMD")); cmd != "" {
-		name := strings.TrimSpace(os.Getenv("CAELIS_ACP_SELF_AGENT_NAME"))
-		if name == "" {
-			name = "self"
-		}
-		return assembly.AgentConfig{
-			Name:        name,
-			Description: firstNonEmpty(strings.TrimSpace(os.Getenv("CAELIS_ACP_SELF_AGENT_DESC")), "Caelis self ACP agent"),
-			Command:     "bash",
-			Args:        []string{"-lc", cmd},
-			WorkDir:     strings.TrimSpace(os.Getenv("CAELIS_ACP_SELF_AGENT_WORKDIR")),
-		}
+func DefaultSelfAgent(cfg DefaultSelfConfig) (assembly.AgentConfig, error) {
+	agent, err := acpagentenv.SelfAgentFromOS("Caelis self ACP agent")
+	if err != nil {
+		return assembly.AgentConfig{}, err
+	}
+	if agent != nil {
+		return *agent, nil
 	}
 	executable, err := os.Executable()
 	if err != nil || strings.TrimSpace(executable) == "" {
@@ -126,7 +121,7 @@ func DefaultSelfAgent(cfg DefaultSelfConfig) assembly.AgentConfig {
 			"-policy-profile", strings.TrimSpace(cfg.Config.PolicyProfile),
 		}, args...),
 		Env: env,
-	}
+	}, nil
 }
 
 func SelfRuntimeArgs(cfg RuntimeConfig) []string {

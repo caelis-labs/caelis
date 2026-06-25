@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
+	"github.com/OnslaughtSnail/caelis/internal/acpagentenv"
 	"github.com/OnslaughtSnail/caelis/internal/testenv"
 	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/session"
@@ -66,6 +67,16 @@ func TestParseOutputFormat(t *testing.T) {
 	}
 	if _, err := parseOutputFormat("xml"); err == nil {
 		t.Fatal("parseOutputFormat(xml) error = nil")
+	}
+}
+
+func TestAssemblyFromEnvReturnsParserErrors(t *testing.T) {
+	clearSelfAgentEnv(t)
+	t.Setenv(acpagentenv.EnvCommand, "/opt/acp-child")
+	t.Setenv(acpagentenv.EnvArgsJSON, `{"bad":true}`)
+	_, err := assemblyFromEnv()
+	if err == nil || !strings.Contains(err.Error(), acpagentenv.EnvArgsJSON) {
+		t.Fatalf("assemblyFromEnv() error = %v, want parser error", err)
 	}
 }
 
@@ -143,6 +154,20 @@ func useFakeSandboxCommandsForCLITest(t *testing.T) {
 		runSandboxFixCommand = oldFix
 		runSandboxResetCommand = oldReset
 	})
+}
+
+func clearSelfAgentEnv(t *testing.T) {
+	t.Helper()
+	for _, key := range []string{
+		acpagentenv.EnvName,
+		acpagentenv.EnvDescription,
+		acpagentenv.EnvCommand,
+		acpagentenv.EnvArgsJSON,
+		acpagentenv.EnvLegacyCmd,
+		acpagentenv.EnvWorkDir,
+	} {
+		t.Setenv(key, "")
+	}
 }
 
 func TestStreamHandleWritesAssistantTextAndDeniesApproval(t *testing.T) {

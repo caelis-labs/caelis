@@ -113,7 +113,7 @@ type defaultSelfACPAgentConfig struct {
 	WorkspaceCWD string
 }
 
-func defaultSelfACPAgent(cfg defaultSelfACPAgentConfig) assembly.AgentConfig {
+func defaultSelfACPAgent(cfg defaultSelfACPAgentConfig) (assembly.AgentConfig, error) {
 	return agentregistry.DefaultSelfAgent(agentregistry.DefaultSelfConfig{
 		Config:       agentRuntimeConfig(cfg.Config),
 		AppName:      cfg.AppName,
@@ -424,7 +424,7 @@ func (s *Stack) setConfiguredAgentsWithBase(base assembly.ResolvedAssembly, conf
 }
 
 func (s *Stack) configuredAssembly(base assembly.ResolvedAssembly, configured []AgentConfig, plugins []PluginConfig, runtimeCfg stackRuntimeConfig) (assembly.ResolvedAssembly, error) {
-	resolved := withConfiguredACPAgents(base, configured, defaultSelfACPAgent(defaultSelfACPAgentConfig{
+	self, err := defaultSelfACPAgent(defaultSelfACPAgentConfig{
 		Config: Config{
 			AppName:       s.AppName,
 			UserID:        s.UserID,
@@ -442,8 +442,12 @@ func (s *Stack) configuredAssembly(base assembly.ResolvedAssembly, configured []
 		StoreDir:     s.storeDir,
 		WorkspaceKey: s.Workspace.Key,
 		WorkspaceCWD: s.Workspace.CWD,
-	}))
-	resolved, err := s.withPluginACPAgents(resolved, plugins)
+	})
+	if err != nil {
+		return assembly.ResolvedAssembly{}, err
+	}
+	resolved := withConfiguredACPAgents(base, configured, self)
+	resolved, err = s.withPluginACPAgents(resolved, plugins)
 	if err != nil {
 		return assembly.ResolvedAssembly{}, err
 	}
@@ -597,7 +601,7 @@ func (s *Stack) agentProfileACPAgent(profile agentprofile.Profile, binding agent
 				model.DefaultReasoningEffort = reasoning
 			}
 		}
-		agent := defaultSelfACPAgent(defaultSelfACPAgentConfig{
+		agent, err := defaultSelfACPAgent(defaultSelfACPAgentConfig{
 			Config: Config{
 				AppName:       s.AppName,
 				UserID:        s.UserID,
@@ -616,6 +620,9 @@ func (s *Stack) agentProfileACPAgent(profile agentprofile.Profile, binding agent
 			WorkspaceKey: s.Workspace.Key,
 			WorkspaceCWD: s.Workspace.CWD,
 		})
+		if err != nil {
+			return assembly.AgentConfig{}, false, err
+		}
 		agent.Name = profile.ID
 		agent.Description = firstNonEmpty(profile.Description, profile.Name, agent.Description)
 		agent.Env = withSubagentProfileEnv(agent.Env, profile.ID)

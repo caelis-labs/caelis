@@ -14,6 +14,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/impl/model/providers"
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/spawn"
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/task"
+	"github.com/OnslaughtSnail/caelis/internal/acpagentenv"
 	"github.com/OnslaughtSnail/caelis/internal/testenv"
 	"github.com/OnslaughtSnail/caelis/ports/agentprofile"
 	"github.com/OnslaughtSnail/caelis/ports/assembly"
@@ -290,7 +291,7 @@ func TestRegisterNativeOpenCodeFamilyBuiltinAgents(t *testing.T) {
 }
 
 func TestDefaultSelfACPAgentPassesLiteralTokenViaEnv(t *testing.T) {
-	agent := defaultSelfACPAgent(defaultSelfACPAgentConfig{
+	agent, err := defaultSelfACPAgent(defaultSelfACPAgentConfig{
 		Config: Config{
 			AppName:      "caelis",
 			UserID:       "u",
@@ -310,6 +311,9 @@ func TestDefaultSelfACPAgentPassesLiteralTokenViaEnv(t *testing.T) {
 		WorkspaceKey: "ws",
 		WorkspaceCWD: "/tmp/ws",
 	})
+	if err != nil {
+		t.Fatalf("defaultSelfACPAgent() error = %v", err)
+	}
 	if strings.Contains(strings.Join(agent.Args, " "), "super-secret-token") {
 		t.Fatalf("self ACP args leaked token: %#v", agent.Args)
 	}
@@ -325,7 +329,7 @@ func TestDefaultSelfACPAgentPassesLiteralTokenViaEnv(t *testing.T) {
 }
 
 func TestDefaultSelfACPAgentPreservesConfiguredTokenEnv(t *testing.T) {
-	agent := defaultSelfACPAgent(defaultSelfACPAgentConfig{
+	agent, err := defaultSelfACPAgent(defaultSelfACPAgentConfig{
 		Config: Config{
 			AppName:      "caelis",
 			UserID:       "u",
@@ -345,11 +349,39 @@ func TestDefaultSelfACPAgentPreservesConfiguredTokenEnv(t *testing.T) {
 		WorkspaceKey: "ws",
 		WorkspaceCWD: "/tmp/ws",
 	})
+	if err != nil {
+		t.Fatalf("defaultSelfACPAgent() error = %v", err)
+	}
 	if !slices.Contains(agent.Args, "DEEPSEEK_API_KEY") {
 		t.Fatalf("self ACP args = %#v, want configured token env", agent.Args)
 	}
 	if len(agent.Env) != 0 {
 		t.Fatalf("self ACP env = %#v, want none for configured token env", agent.Env)
+	}
+}
+
+func TestLocalStackFailsOnInvalidSelfAgentEnv(t *testing.T) {
+	t.Setenv(acpagentenv.EnvCommand, "/opt/acp-helper")
+	t.Setenv(acpagentenv.EnvArgsJSON, `{"bad":true}`)
+	workdir := t.TempDir()
+	_, err := NewLocalStack(Config{
+		AppName:                     "caelis",
+		UserID:                      "invalid-self-agent-env-test",
+		StoreDir:                    t.TempDir(),
+		WorkspaceKey:                workdir,
+		WorkspaceCWD:                workdir,
+		SkillDirs:                   []string{t.TempDir()},
+		DisableBuiltInAgentProfiles: true,
+		Sandbox: SandboxConfig{
+			RequestedType: "host",
+		},
+		Model: ModelConfig{
+			Provider: "ollama",
+			Model:    "llama3",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), acpagentenv.EnvArgsJSON) {
+		t.Fatalf("NewLocalStack() error = %v, want self-agent env parse error", err)
 	}
 }
 

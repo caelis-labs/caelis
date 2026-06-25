@@ -13,6 +13,7 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
 	"github.com/OnslaughtSnail/caelis/impl/model/providers"
+	"github.com/OnslaughtSnail/caelis/internal/acpagentenv"
 	"github.com/OnslaughtSnail/caelis/ports/assembly"
 	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/surfaces/acpserver"
@@ -145,7 +146,10 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 	if err != nil {
 		return err
 	}
-	cfg.Assembly = assemblyFromEnv()
+	cfg.Assembly, err = assemblyFromEnv()
+	if err != nil {
+		return err
+	}
 	if sandboxSubcommand != "" {
 		outFmt, err := parseOutputFormat(*format)
 		if err != nil {
@@ -191,24 +195,17 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 	return runInteractive(ctx, stack, preferredInteractiveSessionID(*sessionID), cfg, renderModelText(cfg), stdin, stdout, stderr)
 }
 
-func assemblyFromEnv() assembly.ResolvedAssembly {
-	cmd := strings.TrimSpace(envOr("CAELIS_ACP_SELF_AGENT_CMD", ""))
-	if cmd == "" {
-		return assembly.ResolvedAssembly{}
+func assemblyFromEnv() (assembly.ResolvedAssembly, error) {
+	agent, err := acpagentenv.SelfAgentFromOS("")
+	if err != nil {
+		return assembly.ResolvedAssembly{}, err
 	}
-	name := strings.TrimSpace(envOr("CAELIS_ACP_SELF_AGENT_NAME", "self"))
-	if name == "" {
-		name = "self"
+	if agent == nil {
+		return assembly.ResolvedAssembly{}, nil
 	}
 	return assembly.ResolvedAssembly{
-		Agents: []assembly.AgentConfig{{
-			Name:        name,
-			Description: strings.TrimSpace(envOr("CAELIS_ACP_SELF_AGENT_DESC", "")),
-			Command:     "bash",
-			Args:        []string{"-lc", cmd},
-			WorkDir:     strings.TrimSpace(envOr("CAELIS_ACP_SELF_AGENT_WORKDIR", "")),
-		}},
-	}
+		Agents: []assembly.AgentConfig{*agent},
+	}, nil
 }
 
 func defaultStoreDir(cwd string) string {
