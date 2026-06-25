@@ -72,7 +72,10 @@ func (d *Adapter) CompleteFile(ctx context.Context, query string, limit int) ([]
 func (d *Adapter) CompleteSkill(ctx context.Context, query string, limit int) ([]CompletionCandidate, error) {
 	limit = normalizeCompletionLimit(limit)
 
-	skills, err := d.stack.DiscoverSkills(ctx, d.WorkspaceDir())
+	if d.stack.Skill.DiscoverFn == nil {
+		return nil, missingRuntimeDependency("skill discovery")
+	}
+	skills, err := d.stack.Skill.DiscoverFn(ctx, d.WorkspaceDir())
 	if err != nil {
 		return nil, err
 	}
@@ -183,7 +186,10 @@ func (d *Adapter) CompleteSlashArg(ctx context.Context, command string, query st
 }
 
 func (d *Adapter) completeAgentProfiles(ctx context.Context, query string, limit int) ([]SlashArgCandidate, error) {
-	status, err := d.stack.AgentProfileStatus(ctx)
+	if d.stack.AgentProfile.StatusFn == nil {
+		return nil, nil
+	}
+	status, err := d.stack.AgentProfile.StatusFn(ctx)
 	if err != nil {
 		return nil, nil
 	}
@@ -209,7 +215,10 @@ func (d *Adapter) completeAgentProfiles(ctx context.Context, query string, limit
 }
 
 func (d *Adapter) completeRunnableAgentProfiles(ctx context.Context, query string, limit int) ([]SlashArgCandidate, error) {
-	status, err := d.stack.AgentProfileStatus(ctx)
+	if d.stack.AgentProfile.StatusFn == nil {
+		return nil, nil
+	}
+	status, err := d.stack.AgentProfile.StatusFn(ctx)
 	if err != nil {
 		return nil, nil
 	}
@@ -306,10 +315,12 @@ func subagentProfileBindingDetail(profile AgentProfileSnapshot) string {
 
 func (d *Adapter) completeSubagentACPBindTargets(ctx context.Context, query string, limit int) []SlashArgCandidate {
 	profileIDs := map[string]struct{}{}
-	if status, err := d.stack.AgentProfileStatus(ctx); err == nil {
-		for _, profile := range status.Profiles {
-			if id := strings.ToLower(strings.TrimSpace(profile.ID)); id != "" {
-				profileIDs[id] = struct{}{}
+	if d.stack.AgentProfile.StatusFn != nil {
+		if status, err := d.stack.AgentProfile.StatusFn(ctx); err == nil {
+			for _, profile := range status.Profiles {
+				if id := strings.ToLower(strings.TrimSpace(profile.ID)); id != "" {
+					profileIDs[id] = struct{}{}
+				}
 			}
 		}
 	}
@@ -375,7 +386,10 @@ func (d *Adapter) completeModelReasoningLevels(ctx context.Context, aliasQuery s
 	if err != nil {
 		return nil, nil
 	}
-	cfg, ok := d.stack.ModelConfig(alias)
+	if d.stack.Model.ConfigFn == nil {
+		return nil, nil
+	}
+	cfg, ok := d.stack.Model.ConfigFn(alias)
 	if !ok {
 		return nil, nil
 	}
@@ -398,7 +412,10 @@ func (d *Adapter) completeModelReasoningLevels(ctx context.Context, aliasQuery s
 }
 
 func (d *Adapter) modelAliasSupportsReasoningLevel(alias string, level string) bool {
-	cfg, ok := d.stack.ModelConfig(alias)
+	if d.stack.Model.ConfigFn == nil {
+		return false
+	}
+	cfg, ok := d.stack.Model.ConfigFn(alias)
 	if !ok {
 		return false
 	}
@@ -592,7 +609,7 @@ func (d *Adapter) completeModelAliases(ctx context.Context, query string, limit 
 	if activeSession, ok := d.currentSession(); ok {
 		ref = activeSession.SessionRef
 	}
-	choices, err := d.stack.ListModelChoices(ctx, ref)
+	choices, err := listModelChoices(ctx, d.stack.Model, ref)
 	if err != nil {
 		return nil, err
 	}
@@ -642,10 +659,12 @@ func (d *Adapter) completeAgentCatalog(query string, limit int) []SlashArgCandid
 
 func (d *Adapter) completeRemovableAgentCatalog(ctx context.Context, query string, limit int) []SlashArgCandidate {
 	profileIDs := map[string]struct{}{}
-	if status, err := d.stack.AgentProfileStatus(ctx); err == nil {
-		for _, profile := range status.Profiles {
-			if id := strings.ToLower(strings.TrimSpace(profile.ID)); id != "" {
-				profileIDs[id] = struct{}{}
+	if d.stack.AgentProfile.StatusFn != nil {
+		if status, err := d.stack.AgentProfile.StatusFn(ctx); err == nil {
+			for _, profile := range status.Profiles {
+				if id := strings.ToLower(strings.TrimSpace(profile.ID)); id != "" {
+					profileIDs[id] = struct{}{}
+				}
 			}
 		}
 	}
@@ -664,7 +683,10 @@ func (d *Adapter) completeRemovableAgentCatalog(ctx context.Context, query strin
 }
 
 func (d *Adapter) completeBuiltInAgentCatalog(query string, limit int) []SlashArgCandidate {
-	options := d.stack.ListBuiltinACPAgentAddOptions()
+	if d.stack.Agent.ListBuiltinAddOptionsFn == nil {
+		return nil
+	}
+	options := d.stack.Agent.ListBuiltinAddOptionsFn()
 	if len(options) == 0 {
 		return nil
 	}
@@ -686,7 +708,10 @@ func (d *Adapter) completeBuiltInAgentCatalog(query string, limit int) []SlashAr
 }
 
 func (d *Adapter) completeInstallableBuiltInAgentCatalog(query string, limit int) []SlashArgCandidate {
-	options := d.stack.ListInstallableACPAgentOptions()
+	if d.stack.Agent.ListInstallableOptionsFn == nil {
+		return nil
+	}
+	options := d.stack.Agent.ListInstallableOptionsFn()
 	if len(options) == 0 {
 		return nil
 	}
@@ -770,7 +795,10 @@ func (d *Adapter) completeAgentHandoffTargets(ctx context.Context, query string,
 }
 
 func (d *Adapter) agentCatalog(limit int) []AgentCandidate {
-	available := d.stack.ListACPAgents()
+	if d.stack.Agent.ListFn == nil {
+		return nil
+	}
+	available := d.stack.Agent.ListFn()
 	if len(available) == 0 {
 		return nil
 	}
@@ -905,7 +933,7 @@ func (d *Adapter) resolveStoredModelAlias(ctx context.Context, input string) (st
 	if activeSession, ok := d.currentSession(); ok {
 		ref = activeSession.SessionRef
 	}
-	choices, err := d.stack.ListModelChoices(ctx, ref)
+	choices, err := listModelChoices(ctx, d.stack.Model, ref)
 	if err != nil {
 		return "", err
 	}
@@ -970,7 +998,10 @@ func hasSlashArgPrefix(query string, values ...string) bool {
 }
 
 func (d *Adapter) completePluginIDs(ctx context.Context, query string, limit int) ([]SlashArgCandidate, error) {
-	plugins, err := d.stack.ListPlugins(ctx)
+	if d.stack.Plugin.ListPluginsFn == nil {
+		return nil, missingRuntimeDependency("list plugins")
+	}
+	plugins, err := d.stack.Plugin.ListPluginsFn(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -1001,7 +1032,10 @@ func pluginMarketplaceActionCandidates() []SlashArgCandidate {
 }
 
 func (d *Adapter) completeMarketplaceNames(ctx context.Context, query string, limit int) ([]SlashArgCandidate, error) {
-	marketplaces, err := d.stack.ListMarketplaces(ctx)
+	if d.stack.Plugin.ListMarketplacesFn == nil {
+		return nil, missingRuntimeDependency("list marketplaces")
+	}
+	marketplaces, err := d.stack.Plugin.ListMarketplacesFn(ctx)
 	if err != nil {
 		return nil, err
 	}

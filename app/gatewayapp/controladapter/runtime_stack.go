@@ -162,6 +162,8 @@ type ACPAgentInfo struct {
 	Description string
 }
 
+// PluginRuntimeDeps carries plugin and marketplace commands. Each hook fails
+// when its command is invoked but absent.
 type PluginRuntimeDeps struct {
 	ListPluginsFn       func(context.Context) ([]PluginSnapshot, error)
 	AddMarketplaceFn    func(context.Context, string) (MarketplaceSnapshot, error)
@@ -176,6 +178,78 @@ type PluginRuntimeDeps struct {
 	InspectPluginFn     func(context.Context, string) (PluginSnapshot, error)
 }
 
+// GatewayRuntimeDeps is required for turn/session stream operations.
+type GatewayRuntimeDeps struct {
+	ServiceFn func() GatewayService
+}
+
+// SessionRuntimeDeps owns durable session identity and storage dependencies.
+// Store is optional for lightweight adapters; StartFn and CompactFn are
+// required only when the corresponding session operation is invoked.
+type SessionRuntimeDeps struct {
+	Store     session.Service
+	AppName   string
+	UserID    string
+	Workspace session.WorkspaceRef
+	StartFn   func(context.Context, string, string) (session.Session, error)
+	CompactFn func(context.Context, session.SessionRef) error
+}
+
+// StatusRuntimeDeps carries runtime state lookups. Read-only status hooks may
+// be omitted for lightweight adapters; mutating mode hooks fail when absent.
+type StatusRuntimeDeps struct {
+	RuntimeStateFn   func(context.Context, session.SessionRef) (SessionRuntimeState, error)
+	DoctorFn         func(context.Context, DoctorRequest) (DoctorReport, error)
+	CycleModeFn      func(context.Context, session.SessionRef) (string, error)
+	SetSessionModeFn func(context.Context, session.SessionRef, string) (string, error)
+}
+
+// AgentRuntimeDeps carries ACP controller and registered-agent capabilities.
+// ControllerStatusFn is optional and degrades to the session binding; command
+// and mutation hooks fail when invoked but absent.
+type AgentRuntimeDeps struct {
+	ControllerStatusFn           func(context.Context, session.SessionRef) (controller.ControllerStatus, bool, error)
+	SetControllerModelFn         func(context.Context, session.SessionRef, string, string) (controller.ControllerStatus, error)
+	SetControllerModeFn          func(context.Context, session.SessionRef, string) (controller.ControllerStatus, error)
+	RegisterBuiltinWithOptionsFn func(context.Context, string, RegisterBuiltinACPAgentOptions) error
+	RegisterCustomFn             func(context.Context, CustomAgentConfig) error
+	UnregisterFn                 func(string) error
+	ListBuiltinAddOptionsFn      func() []ACPAgentAddOption
+	ListInstallableOptionsFn     func() []ACPAgentAddOption
+	ListFn                       func() []ACPAgentInfo
+}
+
+// ModelRuntimeDeps carries model catalog and mutation capabilities. Metadata
+// reads can return zero values when absent; connect/use/delete operations fail
+// when invoked without their backing hooks.
+type ModelRuntimeDeps struct {
+	DefaultAliasFn                     func() string
+	ConfigFn                           func(string) (ModelConfig, bool)
+	SessionUsageSnapshotFn             func(context.Context, session.SessionRef, string) (compact.UsageSnapshot, error)
+	ConnectFn                          func(ModelConfig) (string, error)
+	UseFn                              func(context.Context, session.SessionRef, string, ...string) error
+	DeleteFn                           func(context.Context, session.SessionRef, string) error
+	ListAliasesFn                      func(context.Context, session.SessionRef) ([]string, error)
+	ListChoicesFn                      func(context.Context, session.SessionRef) ([]ModelChoice, error)
+	Catalog                            RuntimeModelCatalog
+	EnsureCodeFreeAuthFn               func(context.Context, CodeFreeAuthRequest) error
+	EnsureCodeFreeModelSelectionAuthFn func(context.Context, CodeFreeAuthRequest) error
+}
+
+// SkillRuntimeDeps carries optional workspace skill discovery for completions.
+type SkillRuntimeDeps struct {
+	DiscoverFn func(context.Context, string) ([]skill.Meta, error)
+}
+
+// AgentProfileRuntimeDeps carries optional agent-profile status and binding.
+type AgentProfileRuntimeDeps struct {
+	StatusFn func(context.Context) (AgentProfileStatusSnapshot, error)
+	BindFn   func(context.Context, AgentProfileBindingConfig) (AgentProfileStatusSnapshot, error)
+}
+
+// SandboxRuntimeDeps carries sandbox status and lifecycle commands. Status and
+// preflight can degrade to zero-value status; mutating lifecycle hooks fail
+// when invoked but absent.
 type SandboxRuntimeDeps struct {
 	StatusFn     func() SandboxStatus
 	SetBackendFn func(context.Context, string) (SandboxStatus, error)
@@ -198,54 +272,15 @@ type CodeFreeAuthRequest struct {
 }
 
 type RuntimeStack struct {
-	GatewayFn func() GatewayService
-	Sessions  session.Service
-	AppName   string
-	UserID    string
-	Workspace session.WorkspaceRef
-	Plugin    PluginRuntimeDeps
-	Sandbox   SandboxRuntimeDeps
-
-	StartSessionFn                       func(context.Context, string, string) (session.Session, error)
-	ACPControllerStatusFn                func(context.Context, session.SessionRef) (controller.ControllerStatus, bool, error)
-	DefaultModelAliasFn                  func() string
-	SessionRuntimeStateFn                func(context.Context, session.SessionRef) (SessionRuntimeState, error)
-	DoctorFn                             func(context.Context, DoctorRequest) (DoctorReport, error)
-	ModelConfigFn                        func(string) (ModelConfig, bool)
-	SessionUsageSnapshotFn               func(context.Context, session.SessionRef, string) (compact.UsageSnapshot, error)
-	CompactSessionFn                     func(context.Context, session.SessionRef) error
-	ConnectFn                            func(ModelConfig) (string, error)
-	UseModelFn                           func(context.Context, session.SessionRef, string, ...string) error
-	DeleteModelFn                        func(context.Context, session.SessionRef, string) error
-	SetACPControllerModelFn              func(context.Context, session.SessionRef, string, string) (controller.ControllerStatus, error)
-	CycleSessionModeFn                   func(context.Context, session.SessionRef) (string, error)
-	SetACPControllerModeFn               func(context.Context, session.SessionRef, string) (controller.ControllerStatus, error)
-	SetSessionModeFn                     func(context.Context, session.SessionRef, string) (string, error)
-	RegisterBuiltinACPAgentWithOptionsFn func(context.Context, string, RegisterBuiltinACPAgentOptions) error
-	RegisterACPAgentFn                   func(context.Context, CustomAgentConfig) error
-	UnregisterACPAgentFn                 func(string) error
-	ListModelAliasesFn                   func(context.Context, session.SessionRef) ([]string, error)
-	ListModelChoicesFn                   func(context.Context, session.SessionRef) ([]ModelChoice, error)
-	ModelCatalog                         RuntimeModelCatalog
-	EnsureCodeFreeAuthFn                 func(context.Context, CodeFreeAuthRequest) error
-	EnsureCodeFreeModelSelectionAuthFn   func(context.Context, CodeFreeAuthRequest) error
-	DiscoverSkillsFn                     func(context.Context, string) ([]skill.Meta, error)
-	ListBuiltinACPAgentAddOptionsFn      func() []ACPAgentAddOption
-	ListInstallableACPAgentOptionsFn     func() []ACPAgentAddOption
-	ListACPAgentsFn                      func() []ACPAgentInfo
-	AgentProfileStatusFn                 func(context.Context) (AgentProfileStatusSnapshot, error)
-	BindAgentProfileFn                   func(context.Context, AgentProfileBindingConfig) (AgentProfileStatusSnapshot, error)
-	ListPluginsFn                        func(context.Context) ([]PluginSnapshot, error)
-	AddMarketplaceFn                     func(context.Context, string) (MarketplaceSnapshot, error)
-	ListMarketplacesFn                   func(context.Context) ([]MarketplaceSnapshot, error)
-	UpdateMarketplaceFn                  func(context.Context, string) (MarketplaceSnapshot, error)
-	RemoveMarketplaceFn                  func(context.Context, string) error
-	AddPluginPathFn                      func(context.Context, string) (PluginSnapshot, error)
-	InstallPluginFn                      func(context.Context, string) (PluginSnapshot, error)
-	EnablePluginFn                       func(context.Context, string) (PluginSnapshot, error)
-	DisablePluginFn                      func(context.Context, string) (PluginSnapshot, error)
-	RemovePluginFn                       func(context.Context, string) error
-	InspectPluginFn                      func(context.Context, string) (PluginSnapshot, error)
+	Gateway      GatewayRuntimeDeps
+	Session      SessionRuntimeDeps
+	Status       StatusRuntimeDeps
+	Agent        AgentRuntimeDeps
+	Model        ModelRuntimeDeps
+	Sandbox      SandboxRuntimeDeps
+	Skill        SkillRuntimeDeps
+	AgentProfile AgentProfileRuntimeDeps
+	Plugin       PluginRuntimeDeps
 }
 
 type RuntimeModelCatalog interface {
@@ -257,434 +292,49 @@ type RuntimeModelCatalog interface {
 	ReasoningLevels(provider string, modelName string) []string
 }
 
-func (s *RuntimeStack) gateway() (GatewayService, error) {
-	if s == nil || s.GatewayFn == nil {
-		return nil, fmt.Errorf("app/gatewayapp/controladapter: gateway dependency is unavailable")
-	}
-	gw := s.GatewayFn()
-	if gw == nil {
-		return nil, fmt.Errorf("app/gatewayapp/controladapter: gateway is unavailable")
-	}
-	return gw, nil
+func missingRuntimeDependency(name string) error {
+	return fmt.Errorf("app/gatewayapp/controladapter: %s dependency is unavailable", name)
 }
 
-func (s *RuntimeStack) StartSession(ctx context.Context, preferredSessionID string, bindingKey string) (session.Session, error) {
-	if s == nil || s.StartSessionFn == nil {
-		return session.Session{}, fmt.Errorf("app/gatewayapp/controladapter: start session dependency is unavailable")
+func listModelChoices(ctx context.Context, deps ModelRuntimeDeps, ref session.SessionRef) ([]ModelChoice, error) {
+	if deps.ListChoicesFn != nil {
+		return deps.ListChoicesFn(ctx, ref)
 	}
-	return s.StartSessionFn(ctx, preferredSessionID, bindingKey)
+	if deps.ListAliasesFn == nil {
+		return nil, missingRuntimeDependency("model alias")
+	}
+	aliases, err := deps.ListAliasesFn(ctx, ref)
+	if err != nil {
+		return nil, err
+	}
+	choices := make([]ModelChoice, 0, len(aliases))
+	for _, alias := range aliases {
+		choices = append(choices, ModelChoice{ID: alias, Alias: alias})
+	}
+	return choices, nil
 }
 
-func (s *RuntimeStack) ACPControllerStatus(ctx context.Context, ref session.SessionRef) (controller.ControllerStatus, bool, error) {
-	if s == nil || s.ACPControllerStatusFn == nil {
-		return controller.ControllerStatus{}, false, nil
-	}
-	return s.ACPControllerStatusFn(ctx, ref)
-}
-
-func (s *RuntimeStack) DefaultModelAlias() string {
-	if s == nil || s.DefaultModelAliasFn == nil {
-		return ""
-	}
-	return s.DefaultModelAliasFn()
-}
-
-func (s *RuntimeStack) SandboxStatus() SandboxStatus {
-	if s == nil || s.Sandbox.StatusFn == nil {
-		return SandboxStatus{}
-	}
-	return s.Sandbox.StatusFn()
-}
-
-func (s *RuntimeStack) SessionRuntimeState(ctx context.Context, ref session.SessionRef) (SessionRuntimeState, error) {
-	if s == nil || s.SessionRuntimeStateFn == nil {
-		return SessionRuntimeState{}, fmt.Errorf("app/gatewayapp/controladapter: session runtime state dependency is unavailable")
-	}
-	return s.SessionRuntimeStateFn(ctx, ref)
-}
-
-func (s *RuntimeStack) Doctor(ctx context.Context, req DoctorRequest) (DoctorReport, error) {
-	if s == nil || s.DoctorFn == nil {
-		return DoctorReport{}, fmt.Errorf("app/gatewayapp/controladapter: doctor dependency is unavailable")
-	}
-	return s.DoctorFn(ctx, req)
-}
-
-func (s *RuntimeStack) ModelConfig(alias string) (ModelConfig, bool) {
-	if s == nil || s.ModelConfigFn == nil {
-		return ModelConfig{}, false
-	}
-	return s.ModelConfigFn(alias)
-}
-
-func (s *RuntimeStack) SessionUsageSnapshot(ctx context.Context, ref session.SessionRef, modelText string) (compact.UsageSnapshot, error) {
-	if s == nil || s.SessionUsageSnapshotFn == nil {
-		return compact.UsageSnapshot{}, fmt.Errorf("app/gatewayapp/controladapter: session usage dependency is unavailable")
-	}
-	return s.SessionUsageSnapshotFn(ctx, ref, modelText)
-}
-
-func (s *RuntimeStack) CompactSession(ctx context.Context, ref session.SessionRef) error {
-	if s == nil || s.CompactSessionFn == nil {
-		return fmt.Errorf("app/gatewayapp/controladapter: compact dependency is unavailable")
-	}
-	return s.CompactSessionFn(ctx, ref)
-}
-
-func (s *RuntimeStack) Connect(cfg ModelConfig) (string, error) {
-	if s == nil || s.ConnectFn == nil {
-		return "", fmt.Errorf("app/gatewayapp/controladapter: connect dependency is unavailable")
-	}
-	return s.ConnectFn(cfg)
-}
-
-func (s *RuntimeStack) UseModel(ctx context.Context, ref session.SessionRef, alias string, reasoning ...string) error {
-	if s == nil || s.UseModelFn == nil {
-		return fmt.Errorf("app/gatewayapp/controladapter: use model dependency is unavailable")
-	}
-	return s.UseModelFn(ctx, ref, alias, reasoning...)
-}
-
-func (s *RuntimeStack) DeleteModel(ctx context.Context, ref session.SessionRef, alias string) error {
-	if s == nil || s.DeleteModelFn == nil {
-		return fmt.Errorf("app/gatewayapp/controladapter: delete model dependency is unavailable")
-	}
-	return s.DeleteModelFn(ctx, ref, alias)
-}
-
-func (s *RuntimeStack) SetACPControllerModel(ctx context.Context, ref session.SessionRef, model string, reasoning string) (controller.ControllerStatus, error) {
-	if s == nil || s.SetACPControllerModelFn == nil {
-		return controller.ControllerStatus{}, fmt.Errorf("app/gatewayapp/controladapter: ACP controller model dependency is unavailable")
-	}
-	return s.SetACPControllerModelFn(ctx, ref, model, reasoning)
-}
-
-func (s *RuntimeStack) CycleSessionMode(ctx context.Context, ref session.SessionRef) (string, error) {
-	if s == nil || s.CycleSessionModeFn == nil {
-		return "", fmt.Errorf("app/gatewayapp/controladapter: cycle mode dependency is unavailable")
-	}
-	return s.CycleSessionModeFn(ctx, ref)
-}
-
-func (s *RuntimeStack) SetSandboxBackend(ctx context.Context, backend string) (SandboxStatus, error) {
-	if s == nil || s.Sandbox.SetBackendFn == nil {
-		return SandboxStatus{}, fmt.Errorf("app/gatewayapp/controladapter: sandbox backend dependency is unavailable")
-	}
-	return s.Sandbox.SetBackendFn(ctx, backend)
-}
-
-func (s *RuntimeStack) PrepareSandbox(ctx context.Context) (SandboxStatus, error) {
-	if s == nil || s.Sandbox.PrepareFn == nil {
-		return SandboxStatus{}, fmt.Errorf("app/gatewayapp/controladapter: sandbox prepare dependency is unavailable")
-	}
-	return s.Sandbox.PrepareFn(ctx)
-}
-
-func (s *RuntimeStack) RepairSandbox(ctx context.Context) (SandboxStatus, error) {
-	if s == nil || s.Sandbox.RepairFn == nil {
-		return SandboxStatus{}, fmt.Errorf("app/gatewayapp/controladapter: sandbox repair dependency is unavailable")
-	}
-	return s.Sandbox.RepairFn(ctx)
-}
-
-func (s *RuntimeStack) PreflightSandbox(ctx context.Context, allowNonElevatedRepair bool) (SandboxStatus, error) {
-	if s == nil || s.Sandbox.PreflightFn == nil {
-		return s.SandboxStatus(), nil
-	}
-	return s.Sandbox.PreflightFn(ctx, allowNonElevatedRepair)
-}
-
-func (s *RuntimeStack) ResetSandbox(ctx context.Context) (SandboxStatus, error) {
-	if s == nil || s.Sandbox.ResetFn == nil {
-		return SandboxStatus{}, fmt.Errorf("app/gatewayapp/controladapter: sandbox reset dependency is unavailable")
-	}
-	return s.Sandbox.ResetFn(ctx)
-}
-
-func (s *RuntimeStack) SetACPControllerMode(ctx context.Context, ref session.SessionRef, mode string) (controller.ControllerStatus, error) {
-	if s == nil || s.SetACPControllerModeFn == nil {
-		return controller.ControllerStatus{}, fmt.Errorf("app/gatewayapp/controladapter: ACP controller mode dependency is unavailable")
-	}
-	return s.SetACPControllerModeFn(ctx, ref, mode)
-}
-
-func (s *RuntimeStack) SetSessionMode(ctx context.Context, ref session.SessionRef, mode string) (string, error) {
-	if s == nil || s.SetSessionModeFn == nil {
-		return "", fmt.Errorf("app/gatewayapp/controladapter: session mode dependency is unavailable")
-	}
-	return s.SetSessionModeFn(ctx, ref, mode)
-}
-
-func (s *RuntimeStack) RegisterBuiltinACPAgentWithOptions(ctx context.Context, target string, opts RegisterBuiltinACPAgentOptions) error {
-	if s == nil || s.RegisterBuiltinACPAgentWithOptionsFn == nil {
-		return fmt.Errorf("app/gatewayapp/controladapter: builtin ACP agent dependency is unavailable")
-	}
-	return s.RegisterBuiltinACPAgentWithOptionsFn(ctx, target, opts)
-}
-
-func (s *RuntimeStack) RegisterACPAgent(ctx context.Context, cfg CustomAgentConfig) error {
-	if s == nil || s.RegisterACPAgentFn == nil {
-		return fmt.Errorf("app/gatewayapp/controladapter: custom ACP agent dependency is unavailable")
-	}
-	return s.RegisterACPAgentFn(ctx, cfg)
-}
-
-func (s *RuntimeStack) UnregisterACPAgent(target string) error {
-	if s == nil || s.UnregisterACPAgentFn == nil {
-		return fmt.Errorf("app/gatewayapp/controladapter: ACP agent unregister dependency is unavailable")
-	}
-	return s.UnregisterACPAgentFn(target)
-}
-
-func (s *RuntimeStack) ListModelAliases(ctx context.Context, ref session.SessionRef) ([]string, error) {
-	if s == nil || s.ListModelAliasesFn == nil {
-		return nil, fmt.Errorf("app/gatewayapp/controladapter: model alias dependency is unavailable")
-	}
-	return s.ListModelAliasesFn(ctx, ref)
-}
-
-func (s *RuntimeStack) ListModelChoices(ctx context.Context, ref session.SessionRef) ([]ModelChoice, error) {
-	if s == nil || s.ListModelChoicesFn == nil {
-		aliases, err := s.ListModelAliases(ctx, ref)
-		if err != nil {
-			return nil, err
-		}
-		choices := make([]ModelChoice, 0, len(aliases))
-		for _, alias := range aliases {
-			choices = append(choices, ModelChoice{ID: alias, Alias: alias})
-		}
-		return choices, nil
-	}
-	return s.ListModelChoicesFn(ctx, ref)
-}
-
-func (s *RuntimeStack) ListProviderModels(provider string) []string {
-	if s == nil || s.ModelCatalog == nil {
-		return nil
-	}
-	return s.ModelCatalog.ListProviderModels(provider)
-}
-
-func (s *RuntimeStack) ListCatalogModels(provider string) []string {
-	if s == nil || s.ModelCatalog == nil {
-		return nil
-	}
-	return s.ModelCatalog.ListCatalogModels(provider)
-}
-
-func (s *RuntimeStack) ListModelDirectoryModels(provider string) []string {
-	if s == nil || s.ModelCatalog == nil {
-		return nil
-	}
-	return s.ModelCatalog.ListModelDirectoryModels(provider)
-}
-
-func (s *RuntimeStack) DefaultModelCapabilities() ModelCapabilityInfo {
-	if s == nil || s.ModelCatalog == nil {
+func defaultModelCapabilities(deps ModelRuntimeDeps) ModelCapabilityInfo {
+	if deps.Catalog == nil {
 		return ModelCapabilityInfo{
 			ContextWindowTokens:    128000,
 			DefaultMaxOutputTokens: 4096,
 			MaxOutputTokens:        4096,
 		}
 	}
-	return s.ModelCatalog.DefaultCapabilities()
+	return deps.Catalog.DefaultCapabilities()
 }
 
-func (s *RuntimeStack) LookupModelCapabilities(provider string, modelName string) (ModelCapabilityInfo, bool) {
-	if s == nil || s.ModelCatalog == nil {
+func lookupModelCapabilities(deps ModelRuntimeDeps, provider string, modelName string) (ModelCapabilityInfo, bool) {
+	if deps.Catalog == nil {
 		return ModelCapabilityInfo{}, false
 	}
-	return s.ModelCatalog.LookupCapabilities(provider, modelName)
+	return deps.Catalog.LookupCapabilities(provider, modelName)
 }
 
-func (s *RuntimeStack) ReasoningLevelsForModel(provider string, modelName string) []string {
-	if s == nil || s.ModelCatalog == nil {
+func reasoningLevelsForModelDeps(deps ModelRuntimeDeps, provider string, modelName string) []string {
+	if deps.Catalog == nil {
 		return nil
 	}
-	return s.ModelCatalog.ReasoningLevels(provider, modelName)
-}
-
-func (s *RuntimeStack) EnsureCodeFreeAuth(ctx context.Context, req CodeFreeAuthRequest) error {
-	if s == nil || s.EnsureCodeFreeAuthFn == nil {
-		return fmt.Errorf("app/gatewayapp/controladapter: codefree auth dependency is unavailable")
-	}
-	return s.EnsureCodeFreeAuthFn(ctx, req)
-}
-
-func (s *RuntimeStack) EnsureCodeFreeModelSelectionAuth(ctx context.Context, req CodeFreeAuthRequest) error {
-	if s == nil || s.EnsureCodeFreeModelSelectionAuthFn == nil {
-		return fmt.Errorf("app/gatewayapp/controladapter: codefree model auth dependency is unavailable")
-	}
-	return s.EnsureCodeFreeModelSelectionAuthFn(ctx, req)
-}
-
-func (s *RuntimeStack) DiscoverSkills(ctx context.Context, workspaceDir string) ([]skill.Meta, error) {
-	if s == nil || s.DiscoverSkillsFn == nil {
-		return nil, fmt.Errorf("app/gatewayapp/controladapter: skill discovery dependency is unavailable")
-	}
-	return s.DiscoverSkillsFn(ctx, workspaceDir)
-}
-
-func (s *RuntimeStack) ListBuiltinACPAgentAddOptions() []ACPAgentAddOption {
-	if s == nil || s.ListBuiltinACPAgentAddOptionsFn == nil {
-		return nil
-	}
-	return s.ListBuiltinACPAgentAddOptionsFn()
-}
-
-func (s *RuntimeStack) ListInstallableACPAgentOptions() []ACPAgentAddOption {
-	if s == nil || s.ListInstallableACPAgentOptionsFn == nil {
-		return nil
-	}
-	return s.ListInstallableACPAgentOptionsFn()
-}
-
-func (s *RuntimeStack) ListACPAgents() []ACPAgentInfo {
-	if s == nil || s.ListACPAgentsFn == nil {
-		return nil
-	}
-	return s.ListACPAgentsFn()
-}
-
-func (s *RuntimeStack) AgentProfileStatus(ctx context.Context) (AgentProfileStatusSnapshot, error) {
-	if s == nil || s.AgentProfileStatusFn == nil {
-		return AgentProfileStatusSnapshot{}, fmt.Errorf("app/gatewayapp/controladapter: agent profile dependency is unavailable")
-	}
-	return s.AgentProfileStatusFn(ctx)
-}
-
-func (s *RuntimeStack) BindAgentProfile(ctx context.Context, cfg AgentProfileBindingConfig) (AgentProfileStatusSnapshot, error) {
-	if s == nil || s.BindAgentProfileFn == nil {
-		return AgentProfileStatusSnapshot{}, fmt.Errorf("app/gatewayapp/controladapter: agent profile binding dependency is unavailable")
-	}
-	return s.BindAgentProfileFn(ctx, cfg)
-}
-
-func (s *RuntimeStack) pluginRuntimeDeps() PluginRuntimeDeps {
-	if s == nil {
-		return PluginRuntimeDeps{}
-	}
-	deps := s.Plugin
-	if deps.ListPluginsFn == nil {
-		deps.ListPluginsFn = s.ListPluginsFn
-	}
-	if deps.AddMarketplaceFn == nil {
-		deps.AddMarketplaceFn = s.AddMarketplaceFn
-	}
-	if deps.ListMarketplacesFn == nil {
-		deps.ListMarketplacesFn = s.ListMarketplacesFn
-	}
-	if deps.UpdateMarketplaceFn == nil {
-		deps.UpdateMarketplaceFn = s.UpdateMarketplaceFn
-	}
-	if deps.RemoveMarketplaceFn == nil {
-		deps.RemoveMarketplaceFn = s.RemoveMarketplaceFn
-	}
-	if deps.AddPluginPathFn == nil {
-		deps.AddPluginPathFn = s.AddPluginPathFn
-	}
-	if deps.InstallPluginFn == nil {
-		deps.InstallPluginFn = s.InstallPluginFn
-	}
-	if deps.EnablePluginFn == nil {
-		deps.EnablePluginFn = s.EnablePluginFn
-	}
-	if deps.DisablePluginFn == nil {
-		deps.DisablePluginFn = s.DisablePluginFn
-	}
-	if deps.RemovePluginFn == nil {
-		deps.RemovePluginFn = s.RemovePluginFn
-	}
-	if deps.InspectPluginFn == nil {
-		deps.InspectPluginFn = s.InspectPluginFn
-	}
-	return deps
-}
-
-func (s *RuntimeStack) ListPlugins(ctx context.Context) ([]PluginSnapshot, error) {
-	deps := s.pluginRuntimeDeps()
-	if deps.ListPluginsFn == nil {
-		return nil, fmt.Errorf("app/gatewayapp/controladapter: list plugins dependency is unavailable")
-	}
-	return deps.ListPluginsFn(ctx)
-}
-
-func (s *RuntimeStack) AddMarketplace(ctx context.Context, source string) (MarketplaceSnapshot, error) {
-	deps := s.pluginRuntimeDeps()
-	if deps.AddMarketplaceFn == nil {
-		return MarketplaceSnapshot{}, fmt.Errorf("app/gatewayapp/controladapter: add marketplace dependency is unavailable")
-	}
-	return deps.AddMarketplaceFn(ctx, source)
-}
-
-func (s *RuntimeStack) ListMarketplaces(ctx context.Context) ([]MarketplaceSnapshot, error) {
-	deps := s.pluginRuntimeDeps()
-	if deps.ListMarketplacesFn == nil {
-		return nil, fmt.Errorf("app/gatewayapp/controladapter: list marketplaces dependency is unavailable")
-	}
-	return deps.ListMarketplacesFn(ctx)
-}
-
-func (s *RuntimeStack) UpdateMarketplace(ctx context.Context, name string) (MarketplaceSnapshot, error) {
-	deps := s.pluginRuntimeDeps()
-	if deps.UpdateMarketplaceFn == nil {
-		return MarketplaceSnapshot{}, fmt.Errorf("app/gatewayapp/controladapter: update marketplace dependency is unavailable")
-	}
-	return deps.UpdateMarketplaceFn(ctx, name)
-}
-
-func (s *RuntimeStack) RemoveMarketplace(ctx context.Context, name string) error {
-	deps := s.pluginRuntimeDeps()
-	if deps.RemoveMarketplaceFn == nil {
-		return fmt.Errorf("app/gatewayapp/controladapter: remove marketplace dependency is unavailable")
-	}
-	return deps.RemoveMarketplaceFn(ctx, name)
-}
-
-func (s *RuntimeStack) AddPluginPath(ctx context.Context, path string) (PluginSnapshot, error) {
-	deps := s.pluginRuntimeDeps()
-	if deps.AddPluginPathFn == nil {
-		return PluginSnapshot{}, fmt.Errorf("app/gatewayapp/controladapter: add plugin path dependency is unavailable")
-	}
-	return deps.AddPluginPathFn(ctx, path)
-}
-
-func (s *RuntimeStack) InstallPlugin(ctx context.Context, source string) (PluginSnapshot, error) {
-	deps := s.pluginRuntimeDeps()
-	if deps.InstallPluginFn == nil {
-		return PluginSnapshot{}, fmt.Errorf("app/gatewayapp/controladapter: install plugin dependency is unavailable")
-	}
-	return deps.InstallPluginFn(ctx, source)
-}
-
-func (s *RuntimeStack) EnablePlugin(ctx context.Context, id string) (PluginSnapshot, error) {
-	deps := s.pluginRuntimeDeps()
-	if deps.EnablePluginFn == nil {
-		return PluginSnapshot{}, fmt.Errorf("app/gatewayapp/controladapter: enable plugin dependency is unavailable")
-	}
-	return deps.EnablePluginFn(ctx, id)
-}
-
-func (s *RuntimeStack) DisablePlugin(ctx context.Context, id string) (PluginSnapshot, error) {
-	deps := s.pluginRuntimeDeps()
-	if deps.DisablePluginFn == nil {
-		return PluginSnapshot{}, fmt.Errorf("app/gatewayapp/controladapter: disable plugin dependency is unavailable")
-	}
-	return deps.DisablePluginFn(ctx, id)
-}
-
-func (s *RuntimeStack) RemovePlugin(ctx context.Context, id string) error {
-	deps := s.pluginRuntimeDeps()
-	if deps.RemovePluginFn == nil {
-		return fmt.Errorf("app/gatewayapp/controladapter: remove plugin dependency is unavailable")
-	}
-	return deps.RemovePluginFn(ctx, id)
-}
-
-func (s *RuntimeStack) InspectPlugin(ctx context.Context, id string) (PluginSnapshot, error) {
-	deps := s.pluginRuntimeDeps()
-	if deps.InspectPluginFn == nil {
-		return PluginSnapshot{}, fmt.Errorf("app/gatewayapp/controladapter: inspect plugin dependency is unavailable")
-	}
-	return deps.InspectPluginFn(ctx, id)
+	return deps.Catalog.ReasoningLevels(provider, modelName)
 }

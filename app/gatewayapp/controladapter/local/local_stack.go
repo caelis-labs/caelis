@@ -8,7 +8,6 @@ import (
 	controladapter "github.com/OnslaughtSnail/caelis/app/gatewayapp/controladapter"
 	"github.com/OnslaughtSnail/caelis/ports/agentprofile"
 	"github.com/OnslaughtSnail/caelis/ports/sandbox"
-	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
 type Adapter = controladapter.Adapter
@@ -34,182 +33,24 @@ func NewLocalAdapter(ctx context.Context, stack *gatewayapp.Stack, preferredSess
 }
 
 func runtimeStack(stack *gatewayapp.Stack) *RuntimeStack {
-	if stack == nil {
-		return nil
-	}
-	models := stack.Models()
-	agents := stack.Agents()
-	profiles := stack.AgentProfiles()
-	skills := stack.Skills()
-	status := stack.Status()
-	return &RuntimeStack{
-		GatewayFn: func() GatewayService { return stack.CurrentGateway() },
-		Sessions:  stack.Sessions,
-		AppName:   stack.AppName,
-		UserID:    stack.UserID,
-		Workspace: stack.Workspace,
-
-		StartSessionFn:        stack.StartSession,
-		ACPControllerStatusFn: agents.ControllerStatus,
-		DefaultModelAliasFn:   models.DefaultAlias,
-		Sandbox: controladapter.SandboxRuntimeDeps{
-			StatusFn: func() SandboxStatus { return toRuntimeSandboxStatus(status.Sandbox()) },
-			SetBackendFn: func(ctx context.Context, backend string) (SandboxStatus, error) {
-				return toRuntimeSandboxStatusWithError(status.SetSandboxBackend(ctx, backend))
-			},
-			PrepareFn: func(ctx context.Context) (SandboxStatus, error) {
-				return toRuntimeSandboxStatusWithError(status.PrepareSandbox(ctx))
-			},
-			RepairFn: func(ctx context.Context) (SandboxStatus, error) {
-				return toRuntimeSandboxStatusWithError(status.RepairSandbox(ctx))
-			},
-			PreflightFn: func(ctx context.Context, allowNonElevatedRepair bool) (SandboxStatus, error) {
-				return toRuntimeSandboxStatusWithError(status.PreflightSandbox(ctx, allowNonElevatedRepair))
-			},
-			ResetFn: func(ctx context.Context) (SandboxStatus, error) {
-				return toRuntimeSandboxStatusWithError(status.ResetSandbox(ctx))
-			},
-		},
-		SessionRuntimeStateFn: func(ctx context.Context, ref session.SessionRef) (SessionRuntimeState, error) {
-			return toRuntimeSessionRuntimeState(status.SessionRuntimeState(ctx, ref))
-		},
-		DoctorFn: func(ctx context.Context, req DoctorRequest) (DoctorReport, error) {
-			return toRuntimeDoctorReport(status.Doctor(ctx, toGatewayDoctorRequest(req)))
-		},
-		ModelConfigFn: func(alias string) (ModelConfig, bool) {
-			return toRuntimeModelConfigWithOK(models.Config(alias))
-		},
-		SessionUsageSnapshotFn:  models.UsageSnapshot,
-		CompactSessionFn:        stack.CompactSession,
-		ConnectFn:               func(cfg ModelConfig) (string, error) { return models.Connect(toGatewayModelConfig(cfg)) },
-		UseModelFn:              models.Use,
-		DeleteModelFn:           models.Delete,
-		SetACPControllerModelFn: agents.SetControllerModel,
-		CycleSessionModeFn:      status.CycleSessionMode,
-		SetACPControllerModeFn:  agents.SetControllerMode,
-		SetSessionModeFn:        status.SetSessionMode,
-		RegisterBuiltinACPAgentWithOptionsFn: func(ctx context.Context, target string, opts RegisterBuiltinACPAgentOptions) error {
-			return agents.RegisterBuiltinWithOptions(ctx, target, gatewayapp.RegisterBuiltinACPAgentOptions{Install: opts.Install})
-		},
-		RegisterACPAgentFn: func(ctx context.Context, cfg CustomAgentConfig) error {
-			env := make(map[string]string, len(cfg.Env))
-			for key, value := range cfg.Env {
-				env[key] = value
-			}
-			return agents.RegisterCustom(ctx, gatewayapp.AgentConfig{
-				Name:        cfg.Name,
-				Description: cfg.Description,
-				Command:     cfg.Command,
-				Args:        append([]string(nil), cfg.Args...),
-				Env:         env,
-				WorkDir:     cfg.WorkDir,
-			})
-		},
-		UnregisterACPAgentFn: agents.Unregister,
-		ListModelAliasesFn:   models.ListAliases,
-		ListModelChoicesFn: func(ctx context.Context, ref session.SessionRef) ([]ModelChoice, error) {
-			return toRuntimeModelChoices(models.ListChoices(ctx, ref))
-		},
-		ModelCatalog: runtimeModelCatalog{models: models},
-		EnsureCodeFreeAuthFn: func(ctx context.Context, req CodeFreeAuthRequest) error {
-			return models.EnsureCodeFreeAuth(ctx, gatewayapp.CodeFreeAuthRequest{
-				BaseURL:         req.BaseURL,
-				OpenBrowser:     req.OpenBrowser,
-				CallbackTimeout: req.CallbackTimeout,
-			})
-		},
-		EnsureCodeFreeModelSelectionAuthFn: func(ctx context.Context, req CodeFreeAuthRequest) error {
-			return models.EnsureCodeFreeModelSelectionAuth(ctx, gatewayapp.CodeFreeAuthRequest{
-				BaseURL:         req.BaseURL,
-				OpenBrowser:     req.OpenBrowser,
-				CallbackTimeout: req.CallbackTimeout,
-			})
-		},
-		DiscoverSkillsFn: skills.Discover,
-		ListBuiltinACPAgentAddOptionsFn: func() []ACPAgentAddOption {
-			return toRuntimeACPAgentAddOptions(agents.BuiltinAddOptions())
-		},
-		ListInstallableACPAgentOptionsFn: func() []ACPAgentAddOption {
-			return toRuntimeACPAgentAddOptions(agents.InstallableOptions())
-		},
-		ListACPAgentsFn: func() []ACPAgentInfo { return toRuntimeACPAgents(agents.List()) },
-		AgentProfileStatusFn: func(ctx context.Context) (AgentProfileStatusSnapshot, error) {
-			return toRuntimeAgentProfileStatus(profiles.Status(ctx))
-		},
-		BindAgentProfileFn: func(ctx context.Context, cfg AgentProfileBindingConfig) (AgentProfileStatusSnapshot, error) {
-			return toRuntimeAgentProfileStatus(profiles.Bind(ctx, toGatewayAgentProfileBinding(cfg)))
-		},
-		Plugin: controladapter.PluginRuntimeDeps{
-			ListPluginsFn: func(ctx context.Context) ([]controladapter.PluginSnapshot, error) {
-				return toRuntimePluginSnapshots(stack.Plugins().List(ctx))
-			},
-			AddMarketplaceFn: func(ctx context.Context, source string) (controladapter.MarketplaceSnapshot, error) {
-				return toRuntimeMarketplaceSnapshotWithError(stack.Plugins().AddMarketplace(ctx, source))
-			},
-			ListMarketplacesFn: func(ctx context.Context) ([]controladapter.MarketplaceSnapshot, error) {
-				return toRuntimeMarketplaceSnapshots(stack.Plugins().ListMarketplaces(ctx))
-			},
-			UpdateMarketplaceFn: func(ctx context.Context, name string) (controladapter.MarketplaceSnapshot, error) {
-				return toRuntimeMarketplaceSnapshotWithError(stack.Plugins().UpdateMarketplace(ctx, name))
-			},
-			RemoveMarketplaceFn: func(ctx context.Context, name string) error {
-				return stack.Plugins().RemoveMarketplace(ctx, name)
-			},
-			AddPluginPathFn: func(ctx context.Context, path string) (controladapter.PluginSnapshot, error) {
-				return toRuntimePluginSnapshotWithError(stack.Plugins().AddPath(ctx, path))
-			},
-			InstallPluginFn: func(ctx context.Context, source string) (controladapter.PluginSnapshot, error) {
-				return toRuntimePluginSnapshotWithError(stack.Plugins().Install(ctx, source))
-			},
-			EnablePluginFn: func(ctx context.Context, id string) (controladapter.PluginSnapshot, error) {
-				return toRuntimePluginSnapshotWithError(stack.Plugins().Enable(ctx, id))
-			},
-			DisablePluginFn: func(ctx context.Context, id string) (controladapter.PluginSnapshot, error) {
-				return toRuntimePluginSnapshotWithError(stack.Plugins().Disable(ctx, id))
-			},
-			RemovePluginFn: func(ctx context.Context, id string) error {
-				return stack.Plugins().Remove(ctx, id)
-			},
-			InspectPluginFn: func(ctx context.Context, id string) (controladapter.PluginSnapshot, error) {
-				return toRuntimePluginSnapshotWithError(stack.Plugins().Inspect(ctx, id))
-			},
-		},
-	}
-}
-
-func toRuntimeModelConfigWithOK(cfg gatewayapp.ModelConfig, ok bool) (ModelConfig, bool) {
-	if !ok {
-		return ModelConfig{}, false
-	}
-	return toRuntimeModelConfig(cfg), true
-}
-
-type runtimeModelCatalog struct {
-	models gatewayapp.ModelService
-}
-
-func (c runtimeModelCatalog) ListProviderModels(provider string) []string {
-	return c.models.ListProviderModels(provider)
-}
-
-func (c runtimeModelCatalog) ListCatalogModels(provider string) []string {
-	return c.models.ListCatalogModels(provider)
-}
-
-func (c runtimeModelCatalog) ListModelDirectoryModels(provider string) []string {
-	return c.models.ListModelDirectoryModels(provider)
-}
-
-func (c runtimeModelCatalog) DefaultCapabilities() ModelCapabilityInfo {
-	return toRuntimeModelCapabilities(c.models.DefaultCapabilities())
-}
-
-func (c runtimeModelCatalog) LookupCapabilities(provider string, modelName string) (ModelCapabilityInfo, bool) {
-	return toRuntimeModelCapabilitiesWithOK(c.models.LookupCapabilities(provider, modelName))
-}
-
-func (c runtimeModelCatalog) ReasoningLevels(provider string, modelName string) []string {
-	return c.models.ReasoningLevels(provider, modelName)
+	return controladapter.NewRuntimeStackFromGatewayApp(stack, controladapter.RuntimeStackGatewayAppAdapters{
+		ModelConfig:          toRuntimeModelConfig,
+		GatewayModelConfig:   toGatewayModelConfig,
+		ModelCapabilities:    toRuntimeModelCapabilities,
+		SandboxStatus:        toRuntimeSandboxStatus,
+		SessionRuntimeState:  toRuntimeSessionRuntimeState,
+		ModelChoices:         toRuntimeModelChoices,
+		DoctorRequest:        toGatewayDoctorRequest,
+		DoctorReport:         toRuntimeDoctorReport,
+		ACPAgentAddOptions:   toRuntimeACPAgentAddOptions,
+		ACPAgents:            toRuntimeACPAgents,
+		AgentProfileStatus:   toRuntimeAgentProfileStatus,
+		AgentProfileBinding:  toGatewayAgentProfileBinding,
+		PluginSnapshots:      toRuntimePluginSnapshots,
+		PluginSnapshot:       toRuntimePluginSnapshotWithError,
+		MarketplaceSnapshots: toRuntimeMarketplaceSnapshots,
+		MarketplaceSnapshot:  toRuntimeMarketplaceSnapshotWithError,
+	})
 }
 
 func toRuntimeModelConfig(cfg gatewayapp.ModelConfig) ModelConfig {

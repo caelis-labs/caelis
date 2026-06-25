@@ -58,7 +58,10 @@ func NewAdapter(ctx context.Context, stack *RuntimeStack, preferredSessionID str
 		streamSubscriptions: map[string]struct{}{},
 	}
 	if preferredSessionID = strings.TrimSpace(preferredSessionID); preferredSessionID != "" {
-		activeSession, err := driver.stack.StartSession(ctx, preferredSessionID, driver.bindingKey)
+		if driver.stack.Session.StartFn == nil {
+			return nil, missingRuntimeDependency("start session")
+		}
+		activeSession, err := driver.stack.Session.StartFn(ctx, preferredSessionID, driver.bindingKey)
 		if err != nil {
 			return nil, err
 		}
@@ -73,7 +76,14 @@ func (d *Adapter) gateway() (GatewayService, error) {
 	if d == nil || d.stack == nil {
 		return nil, fmt.Errorf("app/gatewayapp/controladapter: stack is required")
 	}
-	return d.stack.gateway()
+	if d.stack.Gateway.ServiceFn == nil {
+		return nil, missingRuntimeDependency("gateway")
+	}
+	gw := d.stack.Gateway.ServiceFn()
+	if gw == nil {
+		return nil, fmt.Errorf("app/gatewayapp/controladapter: gateway is unavailable")
+	}
+	return gw, nil
 }
 
 func (d *Adapter) SubscribeStream(ctx context.Context, env eventstream.Envelope) (<-chan eventstream.Envelope, bool) {
@@ -304,7 +314,7 @@ func (d *Adapter) WorkspaceDir() string {
 	if d == nil || d.stack == nil {
 		return ""
 	}
-	return strings.TrimSpace(d.stack.Workspace.CWD)
+	return strings.TrimSpace(d.stack.Session.Workspace.CWD)
 }
 
 func (d *Adapter) ensureSession(ctx context.Context) (session.Session, error) {
@@ -314,7 +324,10 @@ func (d *Adapter) ensureSession(ctx context.Context) (session.Session, error) {
 	if d == nil || d.stack == nil {
 		return session.Session{}, fmt.Errorf("app/gatewayapp/controladapter: stack is unavailable")
 	}
-	activeSession, err := d.stack.StartSession(ctx, "", d.bindingKey)
+	if d.stack.Session.StartFn == nil {
+		return session.Session{}, missingRuntimeDependency("start session")
+	}
+	activeSession, err := d.stack.Session.StartFn(ctx, "", d.bindingKey)
 	if err != nil {
 		return session.Session{}, err
 	}
@@ -346,9 +359,14 @@ func (d *Adapter) activeACPControllerStatus(ctx context.Context) (controller.Con
 	if !ok || activeSession.Controller.Kind != session.ControllerKindACP {
 		return controller.ControllerStatus{}, false, nil
 	}
-	status, found, err := d.stack.ACPControllerStatus(ctx, activeSession.SessionRef)
-	if err != nil {
-		return controller.ControllerStatus{}, false, err
+	status := controller.ControllerStatus{}
+	found := false
+	if d.stack.Agent.ControllerStatusFn != nil {
+		var err error
+		status, found, err = d.stack.Agent.ControllerStatusFn(ctx, activeSession.SessionRef)
+		if err != nil {
+			return controller.ControllerStatus{}, false, err
+		}
 	}
 	if !found {
 		status = controller.ControllerStatus{
@@ -374,18 +392,18 @@ func (d *Adapter) status(ctx context.Context, includeDiagnostics bool) (StatusSn
 	}
 	modelText, sessionMode, sandboxType := d.defaultDisplays()
 	reasoningEffort := ""
-	if d.stack != nil {
-		if alias := strings.TrimSpace(d.stack.DefaultModelAlias()); alias != "" {
+	if d.stack != nil && d.stack.Model.DefaultAliasFn != nil {
+		if alias := strings.TrimSpace(d.stack.Model.DefaultAliasFn()); alias != "" {
 			modelText = alias
 		}
 	}
 	sandboxStatus := SandboxStatus{}
-	if includeDiagnostics && d.stack != nil {
-		sandboxStatus = d.stack.SandboxStatus()
+	if includeDiagnostics && d.stack != nil && d.stack.Sandbox.StatusFn != nil {
+		sandboxStatus = d.stack.Sandbox.StatusFn()
 	}
 	activeSession, ok := d.currentSession()
-	if ok && d.stack != nil {
-		if state, err := d.stack.SessionRuntimeState(context.Background(), activeSession.SessionRef); err == nil {
+	if ok && d.stack != nil && d.stack.Status.RuntimeStateFn != nil {
+		if state, err := d.stack.Status.RuntimeStateFn(context.Background(), activeSession.SessionRef); err == nil {
 			if strings.TrimSpace(state.ModelAlias) != "" {
 				modelText = strings.TrimSpace(state.ModelAlias)
 			}
@@ -425,7 +443,7 @@ func (d *Adapter) status(ctx context.Context, includeDiagnostics bool) (StatusSn
 	bindingKey := d.bindingKey
 	d.mu.Unlock()
 	rawModelText := firstNonEmpty(modelText, liveModelText)
-	workspaceCWD := strings.TrimSpace(d.stack.Workspace.CWD)
+	workspaceCWD := strings.TrimSpace(d.stack.Session.Workspace.CWD)
 
 	status := StatusSnapshot{
 		SessionID:                       sessionID,
@@ -465,8 +483,8 @@ func (d *Adapter) status(ctx context.Context, includeDiagnostics bool) (StatusSn
 		if ok {
 			req.SessionRef = activeSession.SessionRef
 		}
-		if includeDiagnostics {
-			if report, err := d.stack.Doctor(context.Background(), req); err == nil {
+		if includeDiagnostics && d.stack.Status.DoctorFn != nil {
+			if report, err := d.stack.Status.DoctorFn(context.Background(), req); err == nil {
 				status.StoreDir = strings.TrimSpace(report.StoreDir)
 				status.Provider = strings.TrimSpace(report.ActiveProvider)
 				status.ModelName = strings.TrimSpace(report.ActiveModel)
@@ -517,13 +535,15 @@ func (d *Adapter) status(ctx context.Context, includeDiagnostics bool) (StatusSn
 			if activeACP {
 				status.ReasoningEffort = strings.TrimSpace(acpStatus.ReasoningEffort)
 				status.Model = formatReasoningModelDisplay(firstNonEmpty(strings.TrimSpace(acpStatus.Model), rawModelText), status.ReasoningEffort)
-			} else if cfg, ok := d.stack.ModelConfig(rawModelText); ok {
-				status.ReasoningEffort = firstNonEmpty(cfg.ReasoningEffort, cfg.DefaultReasoningEffort)
-				status.Model = formatReasoningModelDisplay(rawModelText, status.ReasoningEffort)
+			} else if d.stack.Model.ConfigFn != nil {
+				if cfg, ok := d.stack.Model.ConfigFn(rawModelText); ok {
+					status.ReasoningEffort = firstNonEmpty(cfg.ReasoningEffort, cfg.DefaultReasoningEffort)
+					status.Model = formatReasoningModelDisplay(rawModelText, status.ReasoningEffort)
+				}
 			}
 		}
-		if ok && !activeACP {
-			if usage, err := d.stack.SessionUsageSnapshot(context.Background(), activeSession.SessionRef, rawModelText); err == nil {
+		if ok && !activeACP && d.stack.Model.SessionUsageSnapshotFn != nil {
+			if usage, err := d.stack.Model.SessionUsageSnapshotFn(context.Background(), activeSession.SessionRef, rawModelText); err == nil {
 				status.TotalTokens = usage.TotalTokens
 				status.ContextWindowTokens = usage.ContextWindowTokens
 			}
@@ -732,7 +752,10 @@ func (d *Adapter) activeCommandInterrupt() context.CancelFunc {
 }
 
 func (d *Adapter) NewSession(ctx context.Context) (SessionSnapshot, error) {
-	activeSession, err := d.stack.StartSession(ctx, "", d.bindingKey)
+	if d.stack.Session.StartFn == nil {
+		return SessionSnapshot{}, missingRuntimeDependency("start session")
+	}
+	activeSession, err := d.stack.Session.StartFn(ctx, "", d.bindingKey)
 	if err != nil {
 		return SessionSnapshot{}, err
 	}
@@ -750,14 +773,14 @@ func (d *Adapter) ResumeSession(ctx context.Context, sessionID string) (SessionS
 		return SessionSnapshot{}, err
 	}
 	result, err := gw.ResumeSession(ctx, gateway.ResumeSessionRequest{
-		AppName:    d.stack.AppName,
-		UserID:     d.stack.UserID,
-		Workspace:  d.stack.Workspace,
+		AppName:    d.stack.Session.AppName,
+		UserID:     d.stack.Session.UserID,
+		Workspace:  d.stack.Session.Workspace,
 		SessionID:  strings.TrimSpace(sessionID),
 		BindingKey: d.bindingKey,
 		Binding: gateway.BindingDescriptor{
 			Surface: d.bindingKey,
-			Owner:   d.stack.AppName,
+			Owner:   d.stack.Session.AppName,
 		},
 	})
 	if err != nil {
@@ -784,9 +807,9 @@ func (d *Adapter) ListSessions(ctx context.Context, limit int) ([]ResumeCandidat
 		return nil, err
 	}
 	result, err := gw.ListSessions(ctx, gateway.ListSessionsRequest{
-		AppName:      d.stack.AppName,
-		UserID:       d.stack.UserID,
-		WorkspaceKey: d.stack.Workspace.Key,
+		AppName:      d.stack.Session.AppName,
+		UserID:       d.stack.Session.UserID,
+		WorkspaceKey: d.stack.Session.Workspace.Key,
 		Limit:        limit,
 	})
 	if err != nil {
@@ -794,7 +817,7 @@ func (d *Adapter) ListSessions(ctx context.Context, limit int) ([]ResumeCandidat
 	}
 	out := make([]ResumeCandidate, 0, len(result.Sessions))
 	for _, session := range result.Sessions {
-		candidate := enrichResumeCandidate(ctx, d.stack.Sessions, session)
+		candidate := enrichResumeCandidate(ctx, d.stack.Session.Store, session)
 		if strings.TrimSpace(candidate.Prompt) == "" && strings.TrimSpace(candidate.Title) == "" {
 			continue
 		}
@@ -831,7 +854,10 @@ func (d *Adapter) Compact(ctx context.Context) error {
 	if !ok {
 		return fmt.Errorf("app/gatewayapp/controladapter: no active session")
 	}
-	return d.stack.CompactSession(ctx, activeSession.SessionRef)
+	if d.stack.Session.CompactFn == nil {
+		return missingRuntimeDependency("compact")
+	}
+	return d.stack.Session.CompactFn(ctx, activeSession.SessionRef)
 }
 
 func (d *Adapter) ListAgents(ctx context.Context, limit int) ([]AgentCandidate, error) {
@@ -907,7 +933,10 @@ func (d *Adapter) AddAgent(ctx context.Context, target string) (AgentStatusSnaps
 
 func (d *Adapter) AddAgentWithOptions(ctx context.Context, target string, opts AgentAddOptions) (AgentStatusSnapshot, error) {
 	if opts.Custom != nil {
-		if err := d.stack.RegisterACPAgent(ctx, *opts.Custom); err != nil {
+		if d.stack.Agent.RegisterCustomFn == nil {
+			return AgentStatusSnapshot{}, missingRuntimeDependency("custom ACP agent")
+		}
+		if err := d.stack.Agent.RegisterCustomFn(ctx, *opts.Custom); err != nil {
 			return AgentStatusSnapshot{}, err
 		}
 		return d.AgentStatus(ctx)
@@ -917,7 +946,10 @@ func (d *Adapter) AddAgentWithOptions(ctx context.Context, target string, opts A
 		ctx, finish = d.beginInterruptibleCommand(ctx)
 		defer finish()
 	}
-	if err := d.stack.RegisterBuiltinACPAgentWithOptions(ctx, target, RegisterBuiltinACPAgentOptions{Install: opts.Install}); err != nil {
+	if d.stack.Agent.RegisterBuiltinWithOptionsFn == nil {
+		return AgentStatusSnapshot{}, missingRuntimeDependency("builtin ACP agent")
+	}
+	if err := d.stack.Agent.RegisterBuiltinWithOptionsFn(ctx, target, RegisterBuiltinACPAgentOptions{Install: opts.Install}); err != nil {
 		if opts.Install && errors.Is(ctx.Err(), context.Canceled) {
 			return AgentStatusSnapshot{}, context.Canceled
 		}
@@ -935,7 +967,10 @@ func (d *Adapter) RemoveAgent(ctx context.Context, target string) (AgentStatusSn
 	if strings.EqualFold(strings.TrimSpace(status.ControllerKind), string(session.ControllerKindACP)) {
 		return AgentStatusSnapshot{}, fmt.Errorf("app/gatewayapp/controladapter: an ACP agent is the active controller; run /agent use local before removing registered agents")
 	}
-	if err := d.stack.UnregisterACPAgent(target); err != nil {
+	if d.stack.Agent.UnregisterFn == nil {
+		return AgentStatusSnapshot{}, missingRuntimeDependency("ACP agent unregister")
+	}
+	if err := d.stack.Agent.UnregisterFn(target); err != nil {
 		return AgentStatusSnapshot{}, err
 	}
 	return d.AgentStatus(ctx)
@@ -1351,15 +1386,19 @@ func (d *Adapter) refreshSessionDisplay(ctx context.Context, activeSession sessi
 		return
 	}
 	modelText, sessionMode, sandboxType := d.defaultDisplays()
-	if alias := strings.TrimSpace(d.stack.DefaultModelAlias()); alias != "" {
-		modelText = alias
-	}
-	if state, err := d.stack.SessionRuntimeState(ctx, activeSession.SessionRef); err == nil {
-		if strings.TrimSpace(state.ModelAlias) != "" {
-			modelText = strings.TrimSpace(state.ModelAlias)
+	if d.stack.Model.DefaultAliasFn != nil {
+		if alias := strings.TrimSpace(d.stack.Model.DefaultAliasFn()); alias != "" {
+			modelText = alias
 		}
-		if strings.TrimSpace(state.SessionMode) != "" {
-			sessionMode = strings.TrimSpace(state.SessionMode)
+	}
+	if d.stack.Status.RuntimeStateFn != nil {
+		if state, err := d.stack.Status.RuntimeStateFn(ctx, activeSession.SessionRef); err == nil {
+			if strings.TrimSpace(state.ModelAlias) != "" {
+				modelText = strings.TrimSpace(state.ModelAlias)
+			}
+			if strings.TrimSpace(state.SessionMode) != "" {
+				sessionMode = strings.TrimSpace(state.SessionMode)
+			}
 		}
 	}
 	d.mu.Lock()

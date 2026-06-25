@@ -311,13 +311,15 @@ func TestAdapterSubmitRoutesActiveSessionInputToActiveTurn(t *testing.T) {
 		}},
 	}
 	driver, err := NewAdapter(ctx, &RuntimeStack{
-		GatewayFn: func() GatewayService { return gw },
-		Workspace: session.WorkspaceRef{Key: "ws", CWD: activeSession.CWD},
+		Gateway: GatewayRuntimeDeps{ServiceFn: func() GatewayService { return gw }},
+		Session: SessionRuntimeDeps{
+			Workspace: session.WorkspaceRef{Key: "ws", CWD: activeSession.CWD},
+			StartFn: func(context.Context, string, string) (session.Session, error) {
+				return activeSession, nil
+			},
+		},
 		Sandbox: SandboxRuntimeDeps{
 			StatusFn: func() SandboxStatus { return SandboxStatus{RequestedBackend: "host"} },
-		},
-		StartSessionFn: func(context.Context, string, string) (session.Session, error) {
-			return activeSession, nil
 		},
 	}, activeSession.SessionID, "surface", "")
 	if err != nil {
@@ -354,15 +356,17 @@ func TestAdapterStartupDoesNotQuerySandboxStatus(t *testing.T) {
 		CWD: t.TempDir(),
 	}
 	driver, err := NewAdapter(ctx, &RuntimeStack{
-		Workspace: session.WorkspaceRef{Key: "ws", CWD: activeSession.CWD},
+		Session: SessionRuntimeDeps{
+			Workspace: session.WorkspaceRef{Key: "ws", CWD: activeSession.CWD},
+			StartFn: func(context.Context, string, string) (session.Session, error) {
+				return activeSession, nil
+			},
+		},
 		Sandbox: SandboxRuntimeDeps{
 			StatusFn: func() SandboxStatus {
 				statusCalls++
 				return SandboxStatus{RequestedBackend: "windows", ResolvedBackend: "windows"}
 			},
-		},
-		StartSessionFn: func(context.Context, string, string) (session.Session, error) {
-			return activeSession, nil
 		},
 	}, activeSession.SessionID, "surface", "")
 	if err != nil {
@@ -383,9 +387,13 @@ func TestAdapterLightweightStatusSkipsSandboxDiagnostics(t *testing.T) {
 	sandboxCalls := 0
 	doctorCalls := 0
 	driver, err := NewAdapter(ctx, &RuntimeStack{
-		Workspace: session.WorkspaceRef{Key: "ws", CWD: t.TempDir()},
-		DefaultModelAliasFn: func() string {
-			return "gpt-light"
+		Session: SessionRuntimeDeps{
+			Workspace: session.WorkspaceRef{Key: "ws", CWD: t.TempDir()},
+		},
+		Model: ModelRuntimeDeps{
+			DefaultAliasFn: func() string {
+				return "gpt-light"
+			},
 		},
 		Sandbox: SandboxRuntimeDeps{
 			StatusFn: func() SandboxStatus {
@@ -393,9 +401,11 @@ func TestAdapterLightweightStatusSkipsSandboxDiagnostics(t *testing.T) {
 				return SandboxStatus{RequestedBackend: "windows", ResolvedBackend: "windows"}
 			},
 		},
-		DoctorFn: func(context.Context, DoctorRequest) (DoctorReport, error) {
-			doctorCalls++
-			return DoctorReport{ActiveModelAlias: "doctor-model"}, nil
+		Status: StatusRuntimeDeps{
+			DoctorFn: func(context.Context, DoctorRequest) (DoctorReport, error) {
+				doctorCalls++
+				return DoctorReport{ActiveModelAlias: "doctor-model"}, nil
+			},
 		},
 	}, "", "surface", "")
 	if err != nil {
@@ -436,13 +446,15 @@ func TestAdapterSubmitDoesNotRouteParticipantActiveTurnInputToActiveTurn(t *test
 		}},
 	}
 	driver, err := NewAdapter(ctx, &RuntimeStack{
-		GatewayFn: func() GatewayService { return gw },
-		Workspace: session.WorkspaceRef{Key: "ws", CWD: activeSession.CWD},
+		Gateway: GatewayRuntimeDeps{ServiceFn: func() GatewayService { return gw }},
+		Session: SessionRuntimeDeps{
+			Workspace: session.WorkspaceRef{Key: "ws", CWD: activeSession.CWD},
+			StartFn: func(context.Context, string, string) (session.Session, error) {
+				return activeSession, nil
+			},
+		},
 		Sandbox: SandboxRuntimeDeps{
 			StatusFn: func() SandboxStatus { return SandboxStatus{RequestedBackend: "host"} },
-		},
-		StartSessionFn: func(context.Context, string, string) (session.Session, error) {
-			return activeSession, nil
 		},
 	}, activeSession.SessionID, "surface", "")
 	if err != nil {
@@ -1904,16 +1916,20 @@ func TestAdapterStartAgentSubagentRollsBackAttachmentOnPromptConflict(t *testing
 		},
 	}
 	driver, err := NewAdapter(ctx, &RuntimeStack{
-		GatewayFn: func() GatewayService { return gw },
-		Workspace: session.WorkspaceRef{
-			Key: "ws",
-			CWD: activeSession.CWD,
+		Gateway: GatewayRuntimeDeps{ServiceFn: func() GatewayService { return gw }},
+		Session: SessionRuntimeDeps{
+			Workspace: session.WorkspaceRef{
+				Key: "ws",
+				CWD: activeSession.CWD,
+			},
+			StartFn: func(context.Context, string, string) (session.Session, error) {
+				return session.CloneSession(gw.session), nil
+			},
 		},
-		StartSessionFn: func(context.Context, string, string) (session.Session, error) {
-			return session.CloneSession(gw.session), nil
-		},
-		ListACPAgentsFn: func() []ACPAgentInfo {
-			return []ACPAgentInfo{{Name: "copilot", Description: "ACP sidecar agent."}}
+		Agent: AgentRuntimeDeps{
+			ListFn: func() []ACPAgentInfo {
+				return []ACPAgentInfo{{Name: "copilot", Description: "ACP sidecar agent."}}
+			},
 		},
 	}, activeSession.SessionID, "surface", "ollama/llama3")
 	if err != nil {
@@ -2268,27 +2284,33 @@ func TestAdapterCycleSessionModeUpdatesRemoteACPControllerMode(t *testing.T) {
 	var setRemoteMode string
 	driver := &Adapter{
 		stack: &RuntimeStack{
-			Workspace: session.WorkspaceRef{CWD: activeSession.CWD},
-			GatewayFn: func() GatewayService {
-				return &activeSubmitGatewayService{}
+			Session: SessionRuntimeDeps{Workspace: session.WorkspaceRef{CWD: activeSession.CWD}},
+			Gateway: GatewayRuntimeDeps{
+				ServiceFn: func() GatewayService {
+					return &activeSubmitGatewayService{}
+				},
 			},
-			SessionRuntimeStateFn: func(context.Context, session.SessionRef) (SessionRuntimeState, error) {
-				return SessionRuntimeState{ModelAlias: "local/model", SessionMode: "auto-review"}, nil
+			Status: StatusRuntimeDeps{
+				RuntimeStateFn: func(context.Context, session.SessionRef) (SessionRuntimeState, error) {
+					return SessionRuntimeState{ModelAlias: "local/model", SessionMode: "auto-review"}, nil
+				},
+				CycleModeFn: func(context.Context, session.SessionRef) (string, error) {
+					localCycleCalled = true
+					return "manual", nil
+				},
 			},
-			ACPControllerStatusFn: func(context.Context, session.SessionRef) (gatewayapp.ACPControllerStatus, bool, error) {
-				return remoteStatus, true, nil
-			},
-			CycleSessionModeFn: func(context.Context, session.SessionRef) (string, error) {
-				localCycleCalled = true
-				return "manual", nil
-			},
-			SetACPControllerModeFn: func(_ context.Context, ref session.SessionRef, mode string) (gatewayapp.ACPControllerStatus, error) {
-				if ref.SessionID != activeSession.SessionID {
-					t.Fatalf("SetACPControllerMode ref = %#v, want session %q", ref, activeSession.SessionID)
-				}
-				setRemoteMode = mode
-				remoteStatus.Mode = mode
-				return remoteStatus, nil
+			Agent: AgentRuntimeDeps{
+				ControllerStatusFn: func(context.Context, session.SessionRef) (gatewayapp.ACPControllerStatus, bool, error) {
+					return remoteStatus, true, nil
+				},
+				SetControllerModeFn: func(_ context.Context, ref session.SessionRef, mode string) (gatewayapp.ACPControllerStatus, error) {
+					if ref.SessionID != activeSession.SessionID {
+						t.Fatalf("SetACPControllerMode ref = %#v, want session %q", ref, activeSession.SessionID)
+					}
+					setRemoteMode = mode
+					remoteStatus.Mode = mode
+					return remoteStatus, nil
+				},
 			},
 		},
 		session:             activeSession,
@@ -2379,22 +2401,30 @@ func TestAdapterACPStatusPrefersRemoteModeOverLocalSessionMode(t *testing.T) {
 	}
 	driver := &Adapter{
 		stack: &RuntimeStack{
-			Workspace: session.WorkspaceRef{CWD: activeSession.CWD},
-			GatewayFn: func() GatewayService {
-				return &activeSubmitGatewayService{}
+			Session: SessionRuntimeDeps{Workspace: session.WorkspaceRef{CWD: activeSession.CWD}},
+			Gateway: GatewayRuntimeDeps{
+				ServiceFn: func() GatewayService {
+					return &activeSubmitGatewayService{}
+				},
 			},
-			DefaultModelAliasFn: func() string { return "local/model" },
-			SessionRuntimeStateFn: func(context.Context, session.SessionRef) (SessionRuntimeState, error) {
-				return SessionRuntimeState{ModelAlias: "local/model", SessionMode: "local-default"}, nil
+			Model: ModelRuntimeDeps{
+				DefaultAliasFn: func() string { return "local/model" },
 			},
-			ACPControllerStatusFn: func(context.Context, session.SessionRef) (gatewayapp.ACPControllerStatus, bool, error) {
-				return gatewayapp.ACPControllerStatus{
-					Model: "remote-model",
-					Mode:  "code",
-					ModeOptions: []gatewayapp.ACPControllerMode{
-						{ID: "code", Name: "Code"},
-					},
-				}, true, nil
+			Status: StatusRuntimeDeps{
+				RuntimeStateFn: func(context.Context, session.SessionRef) (SessionRuntimeState, error) {
+					return SessionRuntimeState{ModelAlias: "local/model", SessionMode: "local-default"}, nil
+				},
+			},
+			Agent: AgentRuntimeDeps{
+				ControllerStatusFn: func(context.Context, session.SessionRef) (gatewayapp.ACPControllerStatus, bool, error) {
+					return gatewayapp.ACPControllerStatus{
+						Model: "remote-model",
+						Mode:  "code",
+						ModeOptions: []gatewayapp.ACPControllerMode{
+							{ID: "code", Name: "Code"},
+						},
+					}, true, nil
+				},
 			},
 		},
 		session:             activeSession,
@@ -2672,11 +2702,13 @@ func TestAdapterCompleteSlashArgPluginMarketplace(t *testing.T) {
 
 	ctx := context.Background()
 	driver, err := NewAdapter(ctx, &RuntimeStack{
-		ListMarketplacesFn: func(context.Context) ([]MarketplaceSnapshot, error) {
-			return []MarketplaceSnapshot{
-				{Name: "demo-market", Description: "Demo marketplace", Source: "acme/plugins", PluginCount: 2},
-				{Name: "internal", Description: "Internal plugins", Source: "/tmp/internal", PluginCount: 1},
-			}, nil
+		Plugin: PluginRuntimeDeps{
+			ListMarketplacesFn: func(context.Context) ([]MarketplaceSnapshot, error) {
+				return []MarketplaceSnapshot{
+					{Name: "demo-market", Description: "Demo marketplace", Source: "acme/plugins", PluginCount: 2},
+					{Name: "internal", Description: "Internal plugins", Source: "/tmp/internal", PluginCount: 1},
+				}, nil
+			},
 		},
 	}, "", "", "")
 	if err != nil {
@@ -2723,13 +2755,15 @@ func TestAdapterInterruptCancelsAgentInstall(t *testing.T) {
 	ctx := context.Background()
 	started := make(chan struct{})
 	driver, err := NewAdapter(ctx, &RuntimeStack{
-		RegisterBuiltinACPAgentWithOptionsFn: func(ctx context.Context, target string, opts RegisterBuiltinACPAgentOptions) error {
-			if target != "claude" || !opts.Install {
-				return errors.New("unexpected install request")
-			}
-			close(started)
-			<-ctx.Done()
-			return ctx.Err()
+		Agent: AgentRuntimeDeps{
+			RegisterBuiltinWithOptionsFn: func(ctx context.Context, target string, opts RegisterBuiltinACPAgentOptions) error {
+				if target != "claude" || !opts.Install {
+					return errors.New("unexpected install request")
+				}
+				close(started)
+				<-ctx.Done()
+				return ctx.Err()
+			},
 		},
 	}, "", "surface", "ollama/llama3")
 	if err != nil {

@@ -3,17 +3,14 @@ package controladapter
 import (
 	"context"
 	"testing"
+
+	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
-func TestRuntimeStackPluginDepsPreferGroupedField(t *testing.T) {
+func TestRuntimeStackPluginDepsUseGroupedField(t *testing.T) {
 	t.Parallel()
 
-	calledLegacy := false
 	stack := &RuntimeStack{
-		ListPluginsFn: func(context.Context) ([]PluginSnapshot, error) {
-			calledLegacy = true
-			return []PluginSnapshot{{ID: "legacy"}}, nil
-		},
 		Plugin: PluginRuntimeDeps{
 			ListPluginsFn: func(context.Context) ([]PluginSnapshot, error) {
 				return []PluginSnapshot{{ID: "grouped"}}, nil
@@ -21,33 +18,69 @@ func TestRuntimeStackPluginDepsPreferGroupedField(t *testing.T) {
 		},
 	}
 
-	plugins, err := stack.ListPlugins(context.Background())
+	plugins, err := stack.Plugin.ListPluginsFn(context.Background())
 	if err != nil {
 		t.Fatalf("ListPlugins() error = %v", err)
 	}
 	if len(plugins) != 1 || plugins[0].ID != "grouped" {
 		t.Fatalf("ListPlugins() = %#v, want grouped plugin", plugins)
 	}
-	if calledLegacy {
-		t.Fatal("ListPlugins() used legacy flat dependency despite grouped dependency")
+}
+
+func TestRuntimeStackPluginDepsMissingFieldErrors(t *testing.T) {
+	t.Parallel()
+
+	if err := missingRuntimeDependency("list plugins"); err == nil {
+		t.Fatal("missingRuntimeDependency() error = nil")
 	}
 }
 
-func TestRuntimeStackPluginDepsFallbackToLegacyField(t *testing.T) {
+func TestRuntimeStackModelDepsUseGroupedField(t *testing.T) {
 	t.Parallel()
 
 	stack := &RuntimeStack{
-		ListPluginsFn: func(context.Context) ([]PluginSnapshot, error) {
-			return []PluginSnapshot{{ID: "legacy"}}, nil
+		Model: ModelRuntimeDeps{
+			DefaultAliasFn: func() string {
+				return "grouped"
+			},
 		},
 	}
 
-	plugins, err := stack.ListPlugins(context.Background())
-	if err != nil {
-		t.Fatalf("ListPlugins() error = %v", err)
+	if got := stack.Model.DefaultAliasFn(); got != "grouped" {
+		t.Fatalf("Model.DefaultAliasFn() = %q, want grouped", got)
 	}
-	if len(plugins) != 1 || plugins[0].ID != "legacy" {
-		t.Fatalf("ListPlugins() = %#v, want legacy plugin", plugins)
+}
+
+func TestRuntimeStackModelDepsMissingFieldUsesEmptyDefault(t *testing.T) {
+	t.Parallel()
+
+	stack := &RuntimeStack{}
+	got := ""
+	if stack.Model.DefaultAliasFn != nil {
+		got = stack.Model.DefaultAliasFn()
+	}
+	if got != "" {
+		t.Fatalf("Model.DefaultAliasFn() = %q, want empty default", got)
+	}
+}
+
+func TestRuntimeStackModelChoicesFallbackUsesGroupedAliases(t *testing.T) {
+	t.Parallel()
+
+	stack := &RuntimeStack{
+		Model: ModelRuntimeDeps{
+			ListAliasesFn: func(context.Context, session.SessionRef) ([]string, error) {
+				return []string{"alpha", "beta"}, nil
+			},
+		},
+	}
+
+	choices, err := listModelChoices(context.Background(), stack.Model, session.SessionRef{})
+	if err != nil {
+		t.Fatalf("listModelChoices() error = %v", err)
+	}
+	if len(choices) != 2 || choices[0].Alias != "alpha" || choices[1].Alias != "beta" {
+		t.Fatalf("listModelChoices() = %#v, want alias-derived choices", choices)
 	}
 }
 
@@ -74,7 +107,7 @@ func TestRuntimeStackSandboxDepsUseGroupedFields(t *testing.T) {
 				}}
 			},
 			call: func(_ context.Context, stack *RuntimeStack) (SandboxStatus, error) {
-				return stack.SandboxStatus(), nil
+				return stack.Sandbox.StatusFn(), nil
 			},
 		},
 		{
@@ -92,7 +125,7 @@ func TestRuntimeStackSandboxDepsUseGroupedFields(t *testing.T) {
 				}}
 			},
 			call: func(ctx context.Context, stack *RuntimeStack) (SandboxStatus, error) {
-				return stack.SetSandboxBackend(ctx, "windows")
+				return stack.Sandbox.SetBackendFn(ctx, "windows")
 			},
 		},
 		{
@@ -107,7 +140,7 @@ func TestRuntimeStackSandboxDepsUseGroupedFields(t *testing.T) {
 				}}
 			},
 			call: func(ctx context.Context, stack *RuntimeStack) (SandboxStatus, error) {
-				return stack.PrepareSandbox(ctx)
+				return stack.Sandbox.PrepareFn(ctx)
 			},
 		},
 		{
@@ -122,7 +155,7 @@ func TestRuntimeStackSandboxDepsUseGroupedFields(t *testing.T) {
 				}}
 			},
 			call: func(ctx context.Context, stack *RuntimeStack) (SandboxStatus, error) {
-				return stack.RepairSandbox(ctx)
+				return stack.Sandbox.RepairFn(ctx)
 			},
 		},
 		{
@@ -140,7 +173,7 @@ func TestRuntimeStackSandboxDepsUseGroupedFields(t *testing.T) {
 				}}
 			},
 			call: func(ctx context.Context, stack *RuntimeStack) (SandboxStatus, error) {
-				return stack.PreflightSandbox(ctx, true)
+				return stack.Sandbox.PreflightFn(ctx, true)
 			},
 		},
 		{
@@ -155,7 +188,7 @@ func TestRuntimeStackSandboxDepsUseGroupedFields(t *testing.T) {
 				}}
 			},
 			call: func(ctx context.Context, stack *RuntimeStack) (SandboxStatus, error) {
-				return stack.ResetSandbox(ctx)
+				return stack.Sandbox.ResetFn(ctx)
 			},
 		},
 	}

@@ -191,10 +191,10 @@ func completeConnectModels(ctx context.Context, driver *Adapter, payload connect
 		if baseURL == "" {
 			baseURL = tpl.defaultBaseURL
 		}
-		if driver == nil || driver.stack == nil {
+		if driver == nil || driver.stack == nil || driver.stack.Model.EnsureCodeFreeModelSelectionAuthFn == nil {
 			return nil, fmt.Errorf("app/gatewayapp/controladapter: codefree model auth dependency is unavailable")
 		}
-		if err := driver.stack.EnsureCodeFreeModelSelectionAuth(ctx, CodeFreeAuthRequest{
+		if err := driver.stack.Model.EnsureCodeFreeModelSelectionAuthFn(ctx, CodeFreeAuthRequest{
 			BaseURL:         baseURL,
 			OpenBrowser:     true,
 			CallbackTimeout: 5 * time.Minute,
@@ -203,8 +203,8 @@ func completeConnectModels(ctx context.Context, driver *Adapter, payload connect
 		}
 	}
 	fallbackModels := fallbackConnectModels(stackForAdapter(driver), tpl)
-	if driver != nil && driver.stack != nil {
-		fallbackModels = append(fallbackModels, driver.stack.ListProviderModels(tpl.provider)...)
+	if driver != nil && driver.stack != nil && driver.stack.Model.Catalog != nil {
+		fallbackModels = append(fallbackModels, driver.stack.Model.Catalog.ListProviderModels(tpl.provider)...)
 	}
 	choices := buildConnectModelChoices(stackForAdapter(driver), tpl.provider, fallbackModels)
 	out := make([]SlashArgCandidate, 0, len(choices))
@@ -431,11 +431,15 @@ func buildConnectModelChoices(stack *RuntimeStack, provider string, fallbackMode
 func fallbackConnectModels(stack *RuntimeStack, tpl providerTemplate) []string {
 	if stack != nil {
 		if modelcatalog.ProviderUsesModelDirectory(tpl.provider) {
-			if models := stack.ListModelDirectoryModels(tpl.provider); len(models) > 0 {
+			if stack.Model.Catalog != nil {
+				if models := stack.Model.Catalog.ListModelDirectoryModels(tpl.provider); len(models) > 0 {
+					return models
+				}
+			}
+		} else if stack.Model.Catalog != nil {
+			if models := stack.Model.Catalog.ListCatalogModels(tpl.provider); len(models) > 0 {
 				return models
 			}
-		} else if models := stack.ListCatalogModels(tpl.provider); len(models) > 0 {
-			return models
 		}
 	}
 	return nil
@@ -506,21 +510,21 @@ func defaultConnectCapabilities(stack *RuntimeStack) ModelCapabilityInfo {
 			MaxOutputTokens:        4096,
 		}
 	}
-	return stack.DefaultModelCapabilities()
+	return defaultModelCapabilities(stack.Model)
 }
 
 func lookupConnectModelCapabilities(stack *RuntimeStack, provider string, modelName string) (ModelCapabilityInfo, bool) {
 	if stack == nil {
 		return ModelCapabilityInfo{}, false
 	}
-	return stack.LookupModelCapabilities(provider, modelName)
+	return lookupModelCapabilities(stack.Model, provider, modelName)
 }
 
 func reasoningLevelsForModel(stack *RuntimeStack, provider string, modelName string) []string {
 	if stack == nil {
 		return nil
 	}
-	return stack.ReasoningLevelsForModel(provider, modelName)
+	return reasoningLevelsForModelDeps(stack.Model, provider, modelName)
 }
 
 func compactNonEmpty(values []string) []string {

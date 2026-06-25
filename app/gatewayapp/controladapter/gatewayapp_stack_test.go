@@ -3,10 +3,10 @@ package controladapter
 import (
 	"context"
 	"strings"
+	"testing"
 
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
 	"github.com/OnslaughtSnail/caelis/ports/agentprofile"
-	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
 func newAdapterFromGatewayAppStack(ctx context.Context, stack *gatewayapp.Stack, preferredSessionID string, bindingKey string, modelText string) (*Adapter, error) {
@@ -14,89 +14,65 @@ func newAdapterFromGatewayAppStack(ctx context.Context, stack *gatewayapp.Stack,
 }
 
 func gatewayAppStackForRuntimeTest(stack *gatewayapp.Stack) *RuntimeStack {
-	if stack == nil {
-		return nil
-	}
-	profiles := stack.AgentProfiles()
-	return &RuntimeStack{
-		GatewayFn: func() GatewayService { return stack.CurrentGateway() },
-		Sessions:  stack.Sessions,
-		AppName:   stack.AppName,
-		UserID:    stack.UserID,
-		Workspace: stack.Workspace,
+	return NewRuntimeStackFromGatewayApp(stack, RuntimeStackGatewayAppAdapters{
+		ModelConfig:          testRuntimeModelConfig,
+		GatewayModelConfig:   testGatewayModelConfig,
+		ModelCapabilities:    testRuntimeModelCapabilities,
+		SandboxStatus:        testRuntimeSandboxStatus,
+		SessionRuntimeState:  testRuntimeSessionRuntimeState,
+		ModelChoices:         testRuntimeModelChoices,
+		DoctorRequest:        testGatewayDoctorRequest,
+		DoctorReport:         testRuntimeDoctorReport,
+		ACPAgentAddOptions:   testRuntimeACPAgentAddOptions,
+		ACPAgents:            testRuntimeACPAgents,
+		AgentProfileStatus:   testRuntimeAgentProfileStatus,
+		AgentProfileBinding:  testGatewayAgentProfileBinding,
+		PluginSnapshots:      testRuntimePluginSnapshots,
+		PluginSnapshot:       testRuntimePluginSnapshotWithError,
+		MarketplaceSnapshots: testRuntimeMarketplaceSnapshots,
+		MarketplaceSnapshot:  testRuntimeMarketplaceSnapshotWithError,
+	})
+}
 
-		StartSessionFn:        stack.StartSession,
-		ACPControllerStatusFn: stack.ACPControllerStatus,
-		DefaultModelAliasFn:   stack.DefaultModelAlias,
-		Sandbox: SandboxRuntimeDeps{
-			StatusFn: func() SandboxStatus { return testRuntimeSandboxStatus(stack.SandboxStatus()) },
-			SetBackendFn: func(ctx context.Context, backend string) (SandboxStatus, error) {
-				return testRuntimeSandboxStatusWithError(stack.SetSandboxBackend(ctx, backend))
-			},
-			PrepareFn: func(ctx context.Context) (SandboxStatus, error) {
-				return testRuntimeSandboxStatusWithError(stack.PrepareSandbox(ctx))
-			},
-		},
-		SessionRuntimeStateFn: func(ctx context.Context, ref session.SessionRef) (SessionRuntimeState, error) {
-			return testRuntimeSessionRuntimeState(stack.SessionRuntimeState(ctx, ref))
-		},
-		DoctorFn: func(ctx context.Context, req DoctorRequest) (DoctorReport, error) {
-			return testRuntimeDoctorReport(stack.Doctor(ctx, testGatewayDoctorRequest(req)))
-		},
-		ModelConfigFn:           func(alias string) (ModelConfig, bool) { return testRuntimeModelConfigWithOK(stack.ModelConfig(alias)) },
-		SessionUsageSnapshotFn:  stack.SessionUsageSnapshot,
-		CompactSessionFn:        stack.CompactSession,
-		ConnectFn:               func(cfg ModelConfig) (string, error) { return stack.Connect(testGatewayModelConfig(cfg)) },
-		UseModelFn:              stack.UseModel,
-		DeleteModelFn:           stack.DeleteModel,
-		SetACPControllerModelFn: stack.SetACPControllerModel,
-		CycleSessionModeFn:      stack.CycleSessionMode,
-		SetACPControllerModeFn:  stack.SetACPControllerMode,
-		SetSessionModeFn:        stack.SetSessionMode,
-		RegisterBuiltinACPAgentWithOptionsFn: func(ctx context.Context, target string, opts RegisterBuiltinACPAgentOptions) error {
-			return stack.RegisterBuiltinACPAgentWithOptions(ctx, target, gatewayapp.RegisterBuiltinACPAgentOptions{Install: opts.Install})
-		},
-		UnregisterACPAgentFn: stack.UnregisterACPAgent,
-		ListModelAliasesFn:   stack.ListModelAliases,
-		ListModelChoicesFn: func(ctx context.Context, ref session.SessionRef) ([]ModelChoice, error) {
-			return testRuntimeModelChoices(stack.ListModelChoices(ctx, ref))
-		},
-		ModelCatalog: testRuntimeModelCatalog{stack: stack},
-		EnsureCodeFreeAuthFn: func(ctx context.Context, req CodeFreeAuthRequest) error {
-			return stack.Models().EnsureCodeFreeAuth(ctx, gatewayapp.CodeFreeAuthRequest{
-				BaseURL:         req.BaseURL,
-				OpenBrowser:     req.OpenBrowser,
-				CallbackTimeout: req.CallbackTimeout,
-			})
-		},
-		EnsureCodeFreeModelSelectionAuthFn: func(ctx context.Context, req CodeFreeAuthRequest) error {
-			return stack.Models().EnsureCodeFreeModelSelectionAuth(ctx, gatewayapp.CodeFreeAuthRequest{
-				BaseURL:         req.BaseURL,
-				OpenBrowser:     req.OpenBrowser,
-				CallbackTimeout: req.CallbackTimeout,
-			})
-		},
-		DiscoverSkillsFn: stack.Skills().Discover,
-		ListBuiltinACPAgentAddOptionsFn: func() []ACPAgentAddOption {
-			return testRuntimeACPAgentAddOptions(stack.ListBuiltinACPAgentAddOptions())
-		},
-		ListInstallableACPAgentOptionsFn: func() []ACPAgentAddOption {
-			return testRuntimeACPAgentAddOptions(stack.ListInstallableACPAgentOptions())
-		},
-		ListACPAgentsFn: func() []ACPAgentInfo { return testRuntimeACPAgents(stack.ListACPAgents()) },
-		AgentProfileStatusFn: func(ctx context.Context) (AgentProfileStatusSnapshot, error) {
-			return testRuntimeAgentProfileStatus(profiles.Status(ctx))
-		},
-		BindAgentProfileFn: func(ctx context.Context, cfg AgentProfileBindingConfig) (AgentProfileStatusSnapshot, error) {
-			return testRuntimeAgentProfileStatus(profiles.Bind(ctx, gatewayapp.AgentProfileBindingConfig{
-				ProfileID:       cfg.ProfileID,
-				Target:          agentprofile.BindingTargetKind(strings.TrimSpace(cfg.Target)),
-				Model:           cfg.Model,
-				ACPAgent:        cfg.ACPAgent,
-				ACPModel:        cfg.ACPModel,
-				ReasoningEffort: cfg.ReasoningEffort,
-			}))
-		},
+func TestGatewayAppStackForRuntimeTestWiresFullRuntimeSurface(t *testing.T) {
+	t.Parallel()
+
+	stack := gatewayAppStackForRuntimeTest(&gatewayapp.Stack{})
+	if stack == nil {
+		t.Fatal("gatewayAppStackForRuntimeTest() returned nil")
+	}
+
+	sandboxHooks := map[string]bool{
+		"status":     stack.Sandbox.StatusFn != nil,
+		"setBackend": stack.Sandbox.SetBackendFn != nil,
+		"prepare":    stack.Sandbox.PrepareFn != nil,
+		"repair":     stack.Sandbox.RepairFn != nil,
+		"preflight":  stack.Sandbox.PreflightFn != nil,
+		"reset":      stack.Sandbox.ResetFn != nil,
+	}
+	for name, ok := range sandboxHooks {
+		if !ok {
+			t.Fatalf("sandbox hook %s is not wired", name)
+		}
+	}
+
+	pluginHooks := map[string]bool{
+		"listPlugins":       stack.Plugin.ListPluginsFn != nil,
+		"addMarketplace":    stack.Plugin.AddMarketplaceFn != nil,
+		"listMarketplaces":  stack.Plugin.ListMarketplacesFn != nil,
+		"updateMarketplace": stack.Plugin.UpdateMarketplaceFn != nil,
+		"removeMarketplace": stack.Plugin.RemoveMarketplaceFn != nil,
+		"addPluginPath":     stack.Plugin.AddPluginPathFn != nil,
+		"installPlugin":     stack.Plugin.InstallPluginFn != nil,
+		"enablePlugin":      stack.Plugin.EnablePluginFn != nil,
+		"disablePlugin":     stack.Plugin.DisablePluginFn != nil,
+		"removePlugin":      stack.Plugin.RemovePluginFn != nil,
+		"inspectPlugin":     stack.Plugin.InspectPluginFn != nil,
+	}
+	for name, ok := range pluginHooks {
+		if !ok {
+			t.Fatalf("plugin hook %s is not wired", name)
+		}
 	}
 }
 
@@ -167,41 +143,6 @@ func testRuntimeAgentProfileMetadataBool(metadata map[string]any, key string) bo
 	}
 }
 
-func testRuntimeModelConfigWithOK(cfg gatewayapp.ModelConfig, ok bool) (ModelConfig, bool) {
-	if !ok {
-		return ModelConfig{}, false
-	}
-	return testRuntimeModelConfig(cfg), true
-}
-
-type testRuntimeModelCatalog struct {
-	stack *gatewayapp.Stack
-}
-
-func (c testRuntimeModelCatalog) ListProviderModels(provider string) []string {
-	return c.stack.ListProviderModels(provider)
-}
-
-func (c testRuntimeModelCatalog) ListCatalogModels(provider string) []string {
-	return c.stack.Models().ListCatalogModels(provider)
-}
-
-func (c testRuntimeModelCatalog) ListModelDirectoryModels(provider string) []string {
-	return c.stack.Models().ListModelDirectoryModels(provider)
-}
-
-func (c testRuntimeModelCatalog) DefaultCapabilities() ModelCapabilityInfo {
-	return testRuntimeModelCapabilities(c.stack.Models().DefaultCapabilities())
-}
-
-func (c testRuntimeModelCatalog) LookupCapabilities(provider string, modelName string) (ModelCapabilityInfo, bool) {
-	return testRuntimeModelCapabilitiesWithOK(c.stack.Models().LookupCapabilities(provider, modelName))
-}
-
-func (c testRuntimeModelCatalog) ReasoningLevels(provider string, modelName string) []string {
-	return c.stack.Models().ReasoningLevels(provider, modelName)
-}
-
 func testRuntimeModelConfig(cfg gatewayapp.ModelConfig) ModelConfig {
 	return ModelConfig{
 		ID:                      cfg.ID,
@@ -227,6 +168,93 @@ func testRuntimeModelConfig(cfg gatewayapp.ModelConfig) ModelConfig {
 		Timeout:                 cfg.Timeout,
 		StreamFirstEventTimeout: cfg.StreamFirstEventTimeout,
 	}
+}
+
+func testGatewayAgentProfileBinding(cfg AgentProfileBindingConfig) gatewayapp.AgentProfileBindingConfig {
+	return gatewayapp.AgentProfileBindingConfig{
+		ProfileID:       cfg.ProfileID,
+		Target:          agentprofile.BindingTargetKind(strings.TrimSpace(cfg.Target)),
+		Model:           cfg.Model,
+		ACPAgent:        cfg.ACPAgent,
+		ACPModel:        cfg.ACPModel,
+		ReasoningEffort: cfg.ReasoningEffort,
+	}
+}
+
+func testRuntimePluginSnapshot(info gatewayapp.PluginInfo) PluginSnapshot {
+	mcpSnapshots := make([]MCPServerSnapshot, 0, len(info.MCPServers))
+	for _, mcpInfo := range info.MCPServers {
+		mcpSnapshots = append(mcpSnapshots, MCPServerSnapshot{
+			Name:    mcpInfo.Name,
+			Status:  mcpInfo.Status,
+			Tools:   append([]string(nil), mcpInfo.Tools...),
+			Warning: mcpInfo.Warning,
+		})
+	}
+	return PluginSnapshot{
+		ID:          info.ID,
+		Name:        info.Name,
+		Version:     info.Version,
+		Description: info.Description,
+		Root:        info.Root,
+		Enabled:     info.Enabled,
+		Skills:      append([]string(nil), info.Skills...),
+		Hooks:       append([]string(nil), info.Hooks...),
+		Agents:      append([]string(nil), info.Agents...),
+		MCPServers:  mcpSnapshots,
+		Status:      info.Status,
+		Warning:     info.Warning,
+	}
+}
+
+func testRuntimePluginSnapshots(list []gatewayapp.PluginInfo, err error) ([]PluginSnapshot, error) {
+	if err != nil {
+		return nil, err
+	}
+	out := make([]PluginSnapshot, 0, len(list))
+	for _, info := range list {
+		out = append(out, testRuntimePluginSnapshot(info))
+	}
+	return out, nil
+}
+
+func testRuntimePluginSnapshotWithError(info gatewayapp.PluginInfo, err error) (PluginSnapshot, error) {
+	if err != nil {
+		return PluginSnapshot{}, err
+	}
+	return testRuntimePluginSnapshot(info), nil
+}
+
+func testRuntimeMarketplaceSnapshot(info gatewayapp.MarketplaceInfo) MarketplaceSnapshot {
+	return MarketplaceSnapshot{
+		Name:                              info.Name,
+		Description:                       info.Description,
+		Owner:                             info.Owner,
+		Source:                            info.Source,
+		Root:                              info.Root,
+		Version:                           info.Version,
+		PluginRoot:                        info.PluginRoot,
+		AllowCrossMarketplaceDependencies: append([]string(nil), info.AllowCrossMarketplaceDependencies...),
+		PluginCount:                       info.PluginCount,
+	}
+}
+
+func testRuntimeMarketplaceSnapshots(list []gatewayapp.MarketplaceInfo, err error) ([]MarketplaceSnapshot, error) {
+	if err != nil {
+		return nil, err
+	}
+	out := make([]MarketplaceSnapshot, 0, len(list))
+	for _, info := range list {
+		out = append(out, testRuntimeMarketplaceSnapshot(info))
+	}
+	return out, nil
+}
+
+func testRuntimeMarketplaceSnapshotWithError(info gatewayapp.MarketplaceInfo, err error) (MarketplaceSnapshot, error) {
+	if err != nil {
+		return MarketplaceSnapshot{}, err
+	}
+	return testRuntimeMarketplaceSnapshot(info), nil
 }
 
 func testGatewayModelConfig(cfg ModelConfig) gatewayapp.ModelConfig {
@@ -256,10 +284,6 @@ func testGatewayModelConfig(cfg ModelConfig) gatewayapp.ModelConfig {
 	}
 }
 
-func testRuntimeModelCapabilitiesWithOK(caps gatewayapp.ModelCapabilityInfo, ok bool) (ModelCapabilityInfo, bool) {
-	return testRuntimeModelCapabilities(caps), ok
-}
-
 func testRuntimeModelCapabilities(caps gatewayapp.ModelCapabilityInfo) ModelCapabilityInfo {
 	return ModelCapabilityInfo{
 		ContextWindowTokens:    caps.ContextWindowTokens,
@@ -287,10 +311,6 @@ func testRuntimeSandboxStatus(status gatewayapp.SandboxStatus) SandboxStatus {
 		SetupMarkerReason:  status.SetupMarkerReason,
 		SecuritySummary:    status.SecuritySummary,
 	}
-}
-
-func testRuntimeSandboxStatusWithError(status gatewayapp.SandboxStatus, err error) (SandboxStatus, error) {
-	return testRuntimeSandboxStatus(status), err
 }
 
 func testRuntimeSessionRuntimeState(state gatewayapp.SessionRuntimeState, err error) (SessionRuntimeState, error) {
