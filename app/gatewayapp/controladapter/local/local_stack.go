@@ -52,7 +52,24 @@ func runtimeStack(stack *gatewayapp.Stack) *RuntimeStack {
 		StartSessionFn:        stack.StartSession,
 		ACPControllerStatusFn: agents.ControllerStatus,
 		DefaultModelAliasFn:   models.DefaultAlias,
-		SandboxStatusFn:       func() SandboxStatus { return toRuntimeSandboxStatus(status.Sandbox()) },
+		Sandbox: controladapter.SandboxRuntimeDeps{
+			StatusFn: func() SandboxStatus { return toRuntimeSandboxStatus(status.Sandbox()) },
+			SetBackendFn: func(ctx context.Context, backend string) (SandboxStatus, error) {
+				return toRuntimeSandboxStatusWithError(status.SetSandboxBackend(ctx, backend))
+			},
+			PrepareFn: func(ctx context.Context) (SandboxStatus, error) {
+				return toRuntimeSandboxStatusWithError(status.PrepareSandbox(ctx))
+			},
+			RepairFn: func(ctx context.Context) (SandboxStatus, error) {
+				return toRuntimeSandboxStatusWithError(status.RepairSandbox(ctx))
+			},
+			PreflightFn: func(ctx context.Context, allowNonElevatedRepair bool) (SandboxStatus, error) {
+				return toRuntimeSandboxStatusWithError(status.PreflightSandbox(ctx, allowNonElevatedRepair))
+			},
+			ResetFn: func(ctx context.Context) (SandboxStatus, error) {
+				return toRuntimeSandboxStatusWithError(status.ResetSandbox(ctx))
+			},
+		},
 		SessionRuntimeStateFn: func(ctx context.Context, ref session.SessionRef) (SessionRuntimeState, error) {
 			return toRuntimeSessionRuntimeState(status.SessionRuntimeState(ctx, ref))
 		},
@@ -69,23 +86,8 @@ func runtimeStack(stack *gatewayapp.Stack) *RuntimeStack {
 		DeleteModelFn:           models.Delete,
 		SetACPControllerModelFn: agents.SetControllerModel,
 		CycleSessionModeFn:      status.CycleSessionMode,
-		SetSandboxBackendFn: func(ctx context.Context, backend string) (SandboxStatus, error) {
-			return toRuntimeSandboxStatusWithError(status.SetSandboxBackend(ctx, backend))
-		},
-		PrepareSandboxFn: func(ctx context.Context) (SandboxStatus, error) {
-			return toRuntimeSandboxStatusWithError(status.PrepareSandbox(ctx))
-		},
-		RepairSandboxFn: func(ctx context.Context) (SandboxStatus, error) {
-			return toRuntimeSandboxStatusWithError(status.RepairSandbox(ctx))
-		},
-		PreflightSandboxFn: func(ctx context.Context, allowNonElevatedRepair bool) (SandboxStatus, error) {
-			return toRuntimeSandboxStatusWithError(status.PreflightSandbox(ctx, allowNonElevatedRepair))
-		},
-		ResetSandboxFn: func(ctx context.Context) (SandboxStatus, error) {
-			return toRuntimeSandboxStatusWithError(status.ResetSandbox(ctx))
-		},
-		SetACPControllerModeFn: agents.SetControllerMode,
-		SetSessionModeFn:       status.SetSessionMode,
+		SetACPControllerModeFn:  agents.SetControllerMode,
+		SetSessionModeFn:        status.SetSessionMode,
 		RegisterBuiltinACPAgentWithOptionsFn: func(ctx context.Context, target string, opts RegisterBuiltinACPAgentOptions) error {
 			return agents.RegisterBuiltinWithOptions(ctx, target, gatewayapp.RegisterBuiltinACPAgentOptions{Install: opts.Install})
 		},

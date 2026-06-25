@@ -28,7 +28,15 @@ func gatewayAppStackForRuntimeTest(stack *gatewayapp.Stack) *RuntimeStack {
 		StartSessionFn:        stack.StartSession,
 		ACPControllerStatusFn: stack.ACPControllerStatus,
 		DefaultModelAliasFn:   stack.DefaultModelAlias,
-		SandboxStatusFn:       func() SandboxStatus { return testRuntimeSandboxStatus(stack.SandboxStatus()) },
+		Sandbox: SandboxRuntimeDeps{
+			StatusFn: func() SandboxStatus { return testRuntimeSandboxStatus(stack.SandboxStatus()) },
+			SetBackendFn: func(ctx context.Context, backend string) (SandboxStatus, error) {
+				return testRuntimeSandboxStatusWithError(stack.SetSandboxBackend(ctx, backend))
+			},
+			PrepareFn: func(ctx context.Context) (SandboxStatus, error) {
+				return testRuntimeSandboxStatusWithError(stack.PrepareSandbox(ctx))
+			},
+		},
 		SessionRuntimeStateFn: func(ctx context.Context, ref session.SessionRef) (SessionRuntimeState, error) {
 			return testRuntimeSessionRuntimeState(stack.SessionRuntimeState(ctx, ref))
 		},
@@ -43,14 +51,8 @@ func gatewayAppStackForRuntimeTest(stack *gatewayapp.Stack) *RuntimeStack {
 		DeleteModelFn:           stack.DeleteModel,
 		SetACPControllerModelFn: stack.SetACPControllerModel,
 		CycleSessionModeFn:      stack.CycleSessionMode,
-		SetSandboxBackendFn: func(ctx context.Context, backend string) (SandboxStatus, error) {
-			return testRuntimeSandboxStatusWithError(stack.SetSandboxBackend(ctx, backend))
-		},
-		PrepareSandboxFn: func(ctx context.Context) (SandboxStatus, error) {
-			return testRuntimeSandboxStatusWithError(stack.PrepareSandbox(ctx))
-		},
-		SetACPControllerModeFn: stack.SetACPControllerMode,
-		SetSessionModeFn:       stack.SetSessionMode,
+		SetACPControllerModeFn:  stack.SetACPControllerMode,
+		SetSessionModeFn:        stack.SetSessionMode,
 		RegisterBuiltinACPAgentWithOptionsFn: func(ctx context.Context, target string, opts RegisterBuiltinACPAgentOptions) error {
 			return stack.RegisterBuiltinACPAgentWithOptions(ctx, target, gatewayapp.RegisterBuiltinACPAgentOptions{Install: opts.Install})
 		},

@@ -311,9 +311,11 @@ func TestAdapterSubmitRoutesActiveSessionInputToActiveTurn(t *testing.T) {
 		}},
 	}
 	driver, err := NewAdapter(ctx, &RuntimeStack{
-		GatewayFn:       func() GatewayService { return gw },
-		Workspace:       session.WorkspaceRef{Key: "ws", CWD: activeSession.CWD},
-		SandboxStatusFn: func() SandboxStatus { return SandboxStatus{RequestedBackend: "host"} },
+		GatewayFn: func() GatewayService { return gw },
+		Workspace: session.WorkspaceRef{Key: "ws", CWD: activeSession.CWD},
+		Sandbox: SandboxRuntimeDeps{
+			StatusFn: func() SandboxStatus { return SandboxStatus{RequestedBackend: "host"} },
+		},
 		StartSessionFn: func(context.Context, string, string) (session.Session, error) {
 			return activeSession, nil
 		},
@@ -353,9 +355,11 @@ func TestAdapterStartupDoesNotQuerySandboxStatus(t *testing.T) {
 	}
 	driver, err := NewAdapter(ctx, &RuntimeStack{
 		Workspace: session.WorkspaceRef{Key: "ws", CWD: activeSession.CWD},
-		SandboxStatusFn: func() SandboxStatus {
-			statusCalls++
-			return SandboxStatus{RequestedBackend: "windows", ResolvedBackend: "windows"}
+		Sandbox: SandboxRuntimeDeps{
+			StatusFn: func() SandboxStatus {
+				statusCalls++
+				return SandboxStatus{RequestedBackend: "windows", ResolvedBackend: "windows"}
+			},
 		},
 		StartSessionFn: func(context.Context, string, string) (session.Session, error) {
 			return activeSession, nil
@@ -383,9 +387,11 @@ func TestAdapterLightweightStatusSkipsSandboxDiagnostics(t *testing.T) {
 		DefaultModelAliasFn: func() string {
 			return "gpt-light"
 		},
-		SandboxStatusFn: func() SandboxStatus {
-			sandboxCalls++
-			return SandboxStatus{RequestedBackend: "windows", ResolvedBackend: "windows"}
+		Sandbox: SandboxRuntimeDeps{
+			StatusFn: func() SandboxStatus {
+				sandboxCalls++
+				return SandboxStatus{RequestedBackend: "windows", ResolvedBackend: "windows"}
+			},
 		},
 		DoctorFn: func(context.Context, DoctorRequest) (DoctorReport, error) {
 			doctorCalls++
@@ -430,9 +436,11 @@ func TestAdapterSubmitDoesNotRouteParticipantActiveTurnInputToActiveTurn(t *test
 		}},
 	}
 	driver, err := NewAdapter(ctx, &RuntimeStack{
-		GatewayFn:       func() GatewayService { return gw },
-		Workspace:       session.WorkspaceRef{Key: "ws", CWD: activeSession.CWD},
-		SandboxStatusFn: func() SandboxStatus { return SandboxStatus{RequestedBackend: "host"} },
+		GatewayFn: func() GatewayService { return gw },
+		Workspace: session.WorkspaceRef{Key: "ws", CWD: activeSession.CWD},
+		Sandbox: SandboxRuntimeDeps{
+			StatusFn: func() SandboxStatus { return SandboxStatus{RequestedBackend: "host"} },
+		},
 		StartSessionFn: func(context.Context, string, string) (session.Session, error) {
 			return activeSession, nil
 		},

@@ -176,6 +176,15 @@ type PluginRuntimeDeps struct {
 	InspectPluginFn     func(context.Context, string) (PluginSnapshot, error)
 }
 
+type SandboxRuntimeDeps struct {
+	StatusFn     func() SandboxStatus
+	SetBackendFn func(context.Context, string) (SandboxStatus, error)
+	PrepareFn    func(context.Context) (SandboxStatus, error)
+	RepairFn     func(context.Context) (SandboxStatus, error)
+	PreflightFn  func(context.Context, bool) (SandboxStatus, error)
+	ResetFn      func(context.Context) (SandboxStatus, error)
+}
+
 type ACPAgentAddOption struct {
 	Value   string
 	Display string
@@ -195,11 +204,11 @@ type RuntimeStack struct {
 	UserID    string
 	Workspace session.WorkspaceRef
 	Plugin    PluginRuntimeDeps
+	Sandbox   SandboxRuntimeDeps
 
 	StartSessionFn                       func(context.Context, string, string) (session.Session, error)
 	ACPControllerStatusFn                func(context.Context, session.SessionRef) (controller.ControllerStatus, bool, error)
 	DefaultModelAliasFn                  func() string
-	SandboxStatusFn                      func() SandboxStatus
 	SessionRuntimeStateFn                func(context.Context, session.SessionRef) (SessionRuntimeState, error)
 	DoctorFn                             func(context.Context, DoctorRequest) (DoctorReport, error)
 	ModelConfigFn                        func(string) (ModelConfig, bool)
@@ -210,11 +219,6 @@ type RuntimeStack struct {
 	DeleteModelFn                        func(context.Context, session.SessionRef, string) error
 	SetACPControllerModelFn              func(context.Context, session.SessionRef, string, string) (controller.ControllerStatus, error)
 	CycleSessionModeFn                   func(context.Context, session.SessionRef) (string, error)
-	SetSandboxBackendFn                  func(context.Context, string) (SandboxStatus, error)
-	PrepareSandboxFn                     func(context.Context) (SandboxStatus, error)
-	RepairSandboxFn                      func(context.Context) (SandboxStatus, error)
-	PreflightSandboxFn                   func(context.Context, bool) (SandboxStatus, error)
-	ResetSandboxFn                       func(context.Context) (SandboxStatus, error)
 	SetACPControllerModeFn               func(context.Context, session.SessionRef, string) (controller.ControllerStatus, error)
 	SetSessionModeFn                     func(context.Context, session.SessionRef, string) (string, error)
 	RegisterBuiltinACPAgentWithOptionsFn func(context.Context, string, RegisterBuiltinACPAgentOptions) error
@@ -286,10 +290,10 @@ func (s *RuntimeStack) DefaultModelAlias() string {
 }
 
 func (s *RuntimeStack) SandboxStatus() SandboxStatus {
-	if s == nil || s.SandboxStatusFn == nil {
+	if s == nil || s.Sandbox.StatusFn == nil {
 		return SandboxStatus{}
 	}
-	return s.SandboxStatusFn()
+	return s.Sandbox.StatusFn()
 }
 
 func (s *RuntimeStack) SessionRuntimeState(ctx context.Context, ref session.SessionRef) (SessionRuntimeState, error) {
@@ -363,38 +367,38 @@ func (s *RuntimeStack) CycleSessionMode(ctx context.Context, ref session.Session
 }
 
 func (s *RuntimeStack) SetSandboxBackend(ctx context.Context, backend string) (SandboxStatus, error) {
-	if s == nil || s.SetSandboxBackendFn == nil {
+	if s == nil || s.Sandbox.SetBackendFn == nil {
 		return SandboxStatus{}, fmt.Errorf("app/gatewayapp/controladapter: sandbox backend dependency is unavailable")
 	}
-	return s.SetSandboxBackendFn(ctx, backend)
+	return s.Sandbox.SetBackendFn(ctx, backend)
 }
 
 func (s *RuntimeStack) PrepareSandbox(ctx context.Context) (SandboxStatus, error) {
-	if s == nil || s.PrepareSandboxFn == nil {
-		return SandboxStatus{}, fmt.Errorf("app/gatewayapp/controladapter: sandbox repair dependency is unavailable")
+	if s == nil || s.Sandbox.PrepareFn == nil {
+		return SandboxStatus{}, fmt.Errorf("app/gatewayapp/controladapter: sandbox prepare dependency is unavailable")
 	}
-	return s.PrepareSandboxFn(ctx)
+	return s.Sandbox.PrepareFn(ctx)
 }
 
 func (s *RuntimeStack) RepairSandbox(ctx context.Context) (SandboxStatus, error) {
-	if s == nil || s.RepairSandboxFn == nil {
+	if s == nil || s.Sandbox.RepairFn == nil {
 		return SandboxStatus{}, fmt.Errorf("app/gatewayapp/controladapter: sandbox repair dependency is unavailable")
 	}
-	return s.RepairSandboxFn(ctx)
+	return s.Sandbox.RepairFn(ctx)
 }
 
 func (s *RuntimeStack) PreflightSandbox(ctx context.Context, allowNonElevatedRepair bool) (SandboxStatus, error) {
-	if s == nil || s.PreflightSandboxFn == nil {
+	if s == nil || s.Sandbox.PreflightFn == nil {
 		return s.SandboxStatus(), nil
 	}
-	return s.PreflightSandboxFn(ctx, allowNonElevatedRepair)
+	return s.Sandbox.PreflightFn(ctx, allowNonElevatedRepair)
 }
 
 func (s *RuntimeStack) ResetSandbox(ctx context.Context) (SandboxStatus, error) {
-	if s == nil || s.ResetSandboxFn == nil {
+	if s == nil || s.Sandbox.ResetFn == nil {
 		return SandboxStatus{}, fmt.Errorf("app/gatewayapp/controladapter: sandbox reset dependency is unavailable")
 	}
-	return s.ResetSandboxFn(ctx)
+	return s.Sandbox.ResetFn(ctx)
 }
 
 func (s *RuntimeStack) SetACPControllerMode(ctx context.Context, ref session.SessionRef, mode string) (controller.ControllerStatus, error) {
