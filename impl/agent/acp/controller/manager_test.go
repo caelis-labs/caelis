@@ -1817,6 +1817,93 @@ func TestControllerRunPublishesACPSourceEvent(t *testing.T) {
 	}
 }
 
+func TestControllerRunStripsConsoleFenceAtUpdateIngress(t *testing.T) {
+	t.Parallel()
+
+	handle := newTurnHandle(nil)
+	run := &controllerRun{
+		remoteSessionID: "remote-1",
+		binding: session.ControllerBinding{
+			Kind:         session.ControllerKindACP,
+			ControllerID: "ctrl-1",
+			Label:        "Remote",
+		},
+		turnID:     "turn-1",
+		turnStream: true,
+		handle:     handle,
+	}
+	fenced := "```console\ndiff --git a/file b/file\n```\n"
+	want := "diff --git a/file b/file\n"
+	run.handleUpdate(func() time.Time { return time.Unix(10, 0) }, client.UpdateEnvelope{
+		SessionID: "remote-1",
+		Update: client.ToolCallUpdate{
+			SessionUpdate: client.UpdateToolCallState,
+			ToolCallID:    "call-1",
+			Kind:          testStringPtr("execute"),
+			Status:        testStringPtr(schema.ToolStatusCompleted),
+			RawOutput:     map[string]any{"stdout": fenced},
+			Content: []client.ToolCallContent{{
+				Type:       "terminal",
+				TerminalID: "call-1",
+				Content:    client.TextContent{Type: "text", Text: fenced},
+			}},
+			Meta: map[string]any{
+				"terminal_output": map[string]any{
+					"terminal_id": "call-1",
+					"data":        fenced,
+				},
+			},
+		},
+	})
+	handle.finish()
+
+	var events []eventsource.Event
+	for event, err := range handle.SourceEvents() {
+		if err != nil {
+			t.Fatalf("source error = %v", err)
+		}
+		events = append(events, event)
+	}
+	if len(events) != 1 {
+		t.Fatalf("source events len = %d, want 1", len(events))
+	}
+	canonical := events[0].Canonical
+	if canonical == nil || canonical.Protocol == nil || canonical.Protocol.ToolCall == nil || canonical.Protocol.Update == nil {
+		t.Fatalf("canonical event = %#v, want protocol tool update", canonical)
+	}
+	if got := canonical.Protocol.ToolCall.RawOutput["stdout"]; got != want {
+		t.Fatalf("canonical raw output stdout = %#v, want %q", got, want)
+	}
+	if got := schema.ExtractTextValue(canonical.Protocol.ToolCall.Content[0].Content); got != want {
+		t.Fatalf("canonical terminal content = %q, want %q", got, want)
+	}
+	canonicalOutput, ok := canonical.Protocol.Update.Meta["terminal_output"].(map[string]any)
+	if !ok {
+		t.Fatalf("canonical meta = %#v, want terminal_output", canonical.Protocol.Update.Meta)
+	}
+	if got := canonicalOutput["data"]; got != want {
+		t.Fatalf("canonical terminal_output data = %#v, want %q", got, want)
+	}
+	acpUpdate, ok := events[0].ACP.Update.(schema.ToolCallUpdate)
+	if !ok {
+		t.Fatalf("ACP update = %T, want ToolCallUpdate", events[0].ACP.Update)
+	}
+	rawOutput, _ := acpUpdate.RawOutput.(map[string]any)
+	if got := rawOutput["stdout"]; got != want {
+		t.Fatalf("ACP raw output stdout = %#v, want %q", got, want)
+	}
+	if got := schema.ExtractTextValue(acpUpdate.Content[0].Content); got != want {
+		t.Fatalf("ACP terminal content = %q, want %q", got, want)
+	}
+	acpOutput, ok := acpUpdate.Meta["terminal_output"].(map[string]any)
+	if !ok {
+		t.Fatalf("ACP meta = %#v, want terminal_output", acpUpdate.Meta)
+	}
+	if got := acpOutput["data"]; got != want {
+		t.Fatalf("ACP terminal_output data = %#v, want %q", got, want)
+	}
+}
+
 func TestParticipantPassthroughOnlyACPUpdatePreservesScope(t *testing.T) {
 	t.Parallel()
 

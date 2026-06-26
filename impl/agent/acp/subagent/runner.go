@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/OnslaughtSnail/caelis/impl/agent/acp/internal/acpconvert"
 	"github.com/OnslaughtSnail/caelis/impl/agent/acp/internal/acputil"
 	"github.com/OnslaughtSnail/caelis/ports/delegation"
 	"github.com/OnslaughtSnail/caelis/ports/session"
@@ -460,6 +461,7 @@ func (r *Runner) handleUpdate(run *childRun, env client.UpdateEnvelope) {
 	if run == nil {
 		return
 	}
+	env.Update = acputil.StripTerminalConsoleFenceUpdate(env.Update)
 	var streamText string
 	var event *session.Event
 	var frame *stream.Frame
@@ -602,31 +604,31 @@ func (run *childRun) acpUpdateEvent(env client.UpdateEnvelope, at time.Time, tex
 		event := base(update.SessionUpdate, session.EventTypeToolCall, firstNonEmpty(strings.TrimSpace(update.Title), strings.TrimSpace(update.Kind), "tool call"))
 		tool := &session.ProtocolToolCall{
 			ID:       strings.TrimSpace(update.ToolCallID),
-			Name:     acpToolDisplayName(update.Kind, update.Title),
+			Name:     acpconvert.ToolDisplayName(update.Kind, update.Title),
 			Kind:     strings.TrimSpace(update.Kind),
 			Title:    strings.TrimSpace(update.Title),
 			Status:   firstNonEmpty(strings.TrimSpace(update.Status), "pending"),
-			RawInput: acpToolRawInput(update.Kind, update.Title, update.RawInput),
-			Content:  acpToolContent(update.Content),
+			RawInput: acpconvert.ToolRawInput(update.RawInput),
+			Content:  acpconvert.ToolContent(update.Content),
 		}
 		event.Protocol.ToolCall = tool
-		event.Protocol.Update = acpToolProtocolUpdate(update.SessionUpdate, tool, update.Meta)
+		event.Protocol.Update = acpconvert.ToolProtocolUpdate(update.SessionUpdate, tool, update.Meta)
 		return event
 	case client.ToolCallUpdate:
 		status := derefString(update.Status)
 		event := base(update.SessionUpdate, acpToolEventType(status), firstNonEmpty(derefString(update.Title), derefString(update.Kind), "tool update"))
 		tool := &session.ProtocolToolCall{
 			ID:        strings.TrimSpace(update.ToolCallID),
-			Name:      acpToolDisplayName(derefString(update.Kind), derefString(update.Title)),
+			Name:      acpconvert.ToolDisplayName(derefString(update.Kind), derefString(update.Title)),
 			Kind:      derefString(update.Kind),
 			Title:     derefString(update.Title),
 			Status:    status,
-			RawInput:  acpToolRawInput(derefString(update.Kind), derefString(update.Title), update.RawInput),
-			RawOutput: acpToolRawOutput(update.RawOutput),
-			Content:   acpToolContent(update.Content),
+			RawInput:  acpconvert.ToolRawInput(update.RawInput),
+			RawOutput: acpconvert.ToolRawOutput(update.RawOutput),
+			Content:   acpconvert.ToolContent(update.Content),
 		}
 		event.Protocol.ToolCall = tool
-		event.Protocol.Update = acpToolProtocolUpdate(update.SessionUpdate, tool, update.Meta)
+		event.Protocol.Update = acpconvert.ToolProtocolUpdate(update.SessionUpdate, tool, update.Meta)
 		return event
 	case client.PlanUpdate:
 		event := base(update.SessionUpdate, session.EventTypePlan, "plan updated")
@@ -648,72 +650,6 @@ func acpToolEventType(status string) session.EventType {
 	default:
 		return session.EventTypeToolCall
 	}
-}
-
-func acpToolDisplayName(kind string, title string) string {
-	if kind = strings.TrimSpace(kind); kind != "" {
-		return kind
-	}
-	return strings.TrimSpace(title)
-}
-
-func acpToolRawInput(kind string, title string, raw any) map[string]any {
-	out := acpschema.NormalizeRawMap(raw)
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
-
-func acpToolRawOutput(raw any) map[string]any {
-	out := acpschema.NormalizeRawMap(raw)
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
-
-func acpToolProtocolUpdate(updateType string, tool *session.ProtocolToolCall, meta map[string]any) *session.ProtocolUpdate {
-	if tool == nil {
-		return &session.ProtocolUpdate{SessionUpdate: strings.TrimSpace(updateType)}
-	}
-	update := &session.ProtocolUpdate{
-		SessionUpdate: strings.TrimSpace(updateType),
-		ToolCallID:    strings.TrimSpace(tool.ID),
-		Kind:          strings.TrimSpace(tool.Kind),
-		Title:         strings.TrimSpace(tool.Title),
-		Status:        strings.TrimSpace(tool.Status),
-		RawInput:      maps.Clone(tool.RawInput),
-		RawOutput:     maps.Clone(tool.RawOutput),
-		Meta:          maps.Clone(meta),
-	}
-	if len(tool.Content) > 0 {
-		update.Content = session.CloneProtocolToolCallContent(tool.Content)
-	}
-	return update
-}
-
-func acpToolContent(content []client.ToolCallContent) []session.ProtocolToolCallContent {
-	if len(content) == 0 {
-		return nil
-	}
-	out := make([]session.ProtocolToolCallContent, 0, len(content))
-	for _, item := range content {
-		var oldText *string
-		if item.OldText != nil {
-			value := *item.OldText
-			oldText = &value
-		}
-		out = append(out, session.ProtocolToolCallContent{
-			Type:       strings.TrimSpace(item.Type),
-			Content:    item.Content,
-			TerminalID: strings.TrimSpace(item.TerminalID),
-			Path:       strings.TrimSpace(item.Path),
-			OldText:    oldText,
-			NewText:    item.NewText,
-		})
-	}
-	return session.CloneProtocolToolCallContent(out)
 }
 
 func acpPlanEntries(in []client.PlanEntry) []session.ProtocolPlanEntry {

@@ -13,6 +13,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/stream"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/client"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
 func TestRunnerHandleUpdatePublishesChildStream(t *testing.T) {
@@ -256,6 +257,70 @@ func TestRunnerPublishesChildTerminalOutputMetaAsStreamText(t *testing.T) {
 	event := sink.frames[0].Event
 	if event == nil || event.Protocol == nil || event.Protocol.Update == nil || event.Protocol.Update.Meta["terminal_output"] == nil {
 		t.Fatalf("stream event = %#v, want structured terminal meta preserved", event)
+	}
+}
+
+func TestRunnerStripsConsoleFenceFromChildTerminalOutput(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingStreams{}
+	run := &childRun{
+		anchor:  delegation.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "codex", AgentID: "agent-1"},
+		taskID:  "task-1",
+		sink:    sink,
+		state:   delegation.StateRunning,
+		running: true,
+	}
+	runner := &Runner{clock: time.Now}
+	fenced := "```console\ndiff --git a/file b/file\n```\n"
+	want := "diff --git a/file b/file\n"
+
+	runner.handleUpdate(run, client.UpdateEnvelope{
+		SessionID: "child-1",
+		Update: client.ToolCallUpdate{
+			SessionUpdate: client.UpdateToolCallState,
+			ToolCallID:    "command-1",
+			Kind:          stringPtr("execute"),
+			Title:         stringPtr("Ran git diff HEAD -- file | head -300"),
+			Status:        stringPtr("completed"),
+			RawOutput:     map[string]any{"stdout": fenced},
+			Content: []client.ToolCallContent{{
+				Type:       "terminal",
+				TerminalID: "command-1",
+				Content:    client.TextContent{Type: "text", Text: fenced},
+			}},
+			Meta: map[string]any{
+				"terminal_output": map[string]any{
+					"terminal_id": "command-1",
+					"data":        fenced,
+				},
+			},
+		},
+	})
+
+	if got := len(sink.frames); got != 1 {
+		t.Fatalf("stream frames = %#v, want one terminal output frame", sink.frames)
+	}
+	frame := sink.frames[0]
+	if frame.Text != want {
+		t.Fatalf("stream frame text = %q, want stripped terminal output", frame.Text)
+	}
+	event := frame.Event
+	if event == nil || event.Protocol == nil || event.Protocol.ToolCall == nil || event.Protocol.Update == nil {
+		t.Fatalf("stream event = %#v, want structured tool result event", event)
+	}
+	if got := event.Protocol.ToolCall.RawOutput["stdout"]; got != want {
+		t.Fatalf("raw output stdout = %#v, want %q", got, want)
+	}
+	if got := schema.ExtractTextValue(event.Protocol.ToolCall.Content[0].Content); got != want {
+		t.Fatalf("terminal content = %q, want %q", got, want)
+	}
+	output, ok := event.Protocol.Update.Meta["terminal_output"].(map[string]any)
+	if !ok {
+		t.Fatalf("Protocol.Update.Meta = %#v, want terminal_output", event.Protocol.Update.Meta)
+	}
+	if got := output["data"]; got != want {
+		t.Fatalf("terminal_output data = %#v, want %q", got, want)
 	}
 }
 

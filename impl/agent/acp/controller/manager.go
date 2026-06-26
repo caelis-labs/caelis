@@ -973,6 +973,7 @@ func (r *controllerRun) handleUpdate(clock func() time.Time, env client.UpdateEn
 	if r == nil {
 		return
 	}
+	env.Update = acputil.StripTerminalConsoleFenceUpdate(env.Update)
 	r.mu.Lock()
 	r.applySessionUpdateLocked(clock, env.Update)
 	if r.turnID == "" {
@@ -1298,6 +1299,7 @@ func (r *participantRun) handleUpdate(clock func() time.Time, env client.UpdateE
 	if r == nil {
 		return
 	}
+	env.Update = acputil.StripTerminalConsoleFenceUpdate(env.Update)
 	r.mu.Lock()
 	if r.turnID == "" {
 		r.mu.Unlock()

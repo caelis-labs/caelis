@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/OnslaughtSnail/caelis/impl/agent/acp/internal/acpconvert"
 	"github.com/OnslaughtSnail/caelis/ports/controller"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/client"
@@ -70,12 +71,12 @@ func normalizeACPUpdateEvent(
 		scope.ACP.EventType = strings.TrimSpace(typed.SessionUpdate)
 		targetTool := &session.ProtocolToolCall{
 			ID:       strings.TrimSpace(typed.ToolCallID),
-			Name:     acpToolDisplayName(typed.Kind, typed.Title),
+			Name:     acpconvert.ToolDisplayName(typed.Kind, typed.Title),
 			Kind:     strings.TrimSpace(typed.Kind),
 			Title:    strings.TrimSpace(typed.Title),
 			Status:   strings.TrimSpace(typed.Status),
-			RawInput: acpToolRawInput(typed.Kind, typed.Title, typed.RawInput),
-			Content:  acpToolContent(typed.Content),
+			RawInput: acpconvert.ToolRawInput(typed.RawInput),
+			Content:  acpconvert.ToolContent(typed.Content),
 		}
 		return &session.Event{
 			Type:       session.EventTypeToolCall,
@@ -87,20 +88,20 @@ func normalizeACPUpdateEvent(
 			Protocol: &session.EventProtocol{
 				UpdateType: typed.SessionUpdate,
 				ToolCall:   targetTool,
-				Update:     acpToolProtocolUpdate(typed.SessionUpdate, targetTool, typed.Meta),
+				Update:     acpconvert.ToolProtocolUpdate(typed.SessionUpdate, targetTool, typed.Meta),
 			},
 		}
 	case client.ToolCallUpdate:
 		scope.ACP.EventType = strings.TrimSpace(typed.SessionUpdate)
 		targetTool := &session.ProtocolToolCall{
 			ID:        strings.TrimSpace(typed.ToolCallID),
-			Name:      acpToolDisplayName(derefString(typed.Kind), derefString(typed.Title)),
+			Name:      acpconvert.ToolDisplayName(derefString(typed.Kind), derefString(typed.Title)),
 			Kind:      strings.TrimSpace(derefString(typed.Kind)),
 			Title:     strings.TrimSpace(derefString(typed.Title)),
 			Status:    strings.TrimSpace(derefString(typed.Status)),
-			RawInput:  acpToolRawInput(derefString(typed.Kind), derefString(typed.Title), typed.RawInput),
-			RawOutput: acpToolRawOutput(typed.RawOutput),
-			Content:   acpToolContent(typed.Content),
+			RawInput:  acpconvert.ToolRawInput(typed.RawInput),
+			RawOutput: acpconvert.ToolRawOutput(typed.RawOutput),
+			Content:   acpconvert.ToolContent(typed.Content),
 		}
 		return &session.Event{
 			Type:       toolEventTypeFromStatus(derefString(typed.Status)),
@@ -112,7 +113,7 @@ func normalizeACPUpdateEvent(
 			Protocol: &session.EventProtocol{
 				UpdateType: typed.SessionUpdate,
 				ToolCall:   targetTool,
-				Update:     acpToolProtocolUpdate(typed.SessionUpdate, targetTool, typed.Meta),
+				Update:     acpconvert.ToolProtocolUpdate(typed.SessionUpdate, targetTool, typed.Meta),
 			},
 		}
 	case client.PlanUpdate:
