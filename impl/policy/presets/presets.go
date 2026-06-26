@@ -69,7 +69,7 @@ func WorkspaceWriteMode() policy.Mode {
 			case "WEB_SEARCH", "WEB_FETCH":
 				return allow(def), nil
 			default:
-				if isMCPTool(input.Tool) {
+				if isMCPTool(input.Tool) || tool.IsToolSearchDefinition(input.Tool) {
 					return allow(def), nil
 				}
 				return deny("tool is not allowed by workspace-write policy"), nil

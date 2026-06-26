@@ -2276,6 +2276,7 @@ func (m *recordingModel) Generate(_ context.Context, req *model.Request) iter.Se
 		m.last = *req
 		m.last.Messages = model.CloneMessages(req.Messages)
 		m.last.Instructions = model.CloneParts(req.Instructions)
+		m.last.Tools = model.CloneToolSpecs(req.Tools)
 		m.last.Output = agent.ModelRequestOptions{Output: req.Output}.OutputSpec()
 	}
 	return func(yield func(*model.StreamEvent, error) bool) {

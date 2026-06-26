@@ -10,6 +10,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/impl/agent/local/chat"
 	"github.com/OnslaughtSnail/caelis/impl/approval/agentreview"
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin"
+	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/toolsearch"
 	"github.com/OnslaughtSnail/caelis/impl/tool/mcp"
 	kernelimpl "github.com/OnslaughtSnail/caelis/internal/kernel"
 	"github.com/OnslaughtSnail/caelis/internal/sandboxrouter"
@@ -221,7 +222,11 @@ func (s *Stack) buildGatewayRuntime(plan gatewayBuildPlan) (*gatewayRuntimeBundl
 		bundle.Close()
 		return nil, err
 	}
-	tools = append(tools, mcpMgr.Tools()...)
+	mcpTools := mcpMgr.Tools()
+	if searchTool := toolsearch.New(mcpTools); searchTool != nil {
+		tools = append(tools, searchTool)
+	}
+	tools = append(tools, mcpTools...)
 
 	estimatedPrefixTokens := estimateModelPromptPrefixTokens(effectiveBaseMetadata, tools)
 	compactionCfg := defaultCompactionConfig(runtimeCfg.ContextWindow)

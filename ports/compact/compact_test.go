@@ -16,6 +16,7 @@ func TestCompactEventDataContractMetadataRoundTrip(t *testing.T) {
 		SourceEventCount:    8,
 		TotalTokens:         100,
 		ContextWindowTokens: 1000,
+		DiscoveredTools:     []string{"mcp__calendar__demo__create_event", "mcp__calendar__demo__create_event", ""},
 	}
 	value := CompactEventDataValue(data)
 	event := &session.Event{
@@ -29,6 +30,9 @@ func TestCompactEventDataContractMetadataRoundTrip(t *testing.T) {
 	}
 	if got.ContractVersion != CompactContractVersion || got.SourceEventCount != 8 {
 		t.Fatalf("contract/source metadata = %d/%d, want %d/8", got.ContractVersion, got.SourceEventCount, CompactContractVersion)
+	}
+	if len(got.DiscoveredTools) != 1 || got.DiscoveredTools[0] != "mcp__calendar__demo__create_event" {
+		t.Fatalf("discovered tools = %v, want normalized MCP tool", got.DiscoveredTools)
 	}
 }
 

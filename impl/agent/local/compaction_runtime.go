@@ -47,9 +47,10 @@ func (r *Runtime) prepareInvocationContext(
 		if appendErr != nil {
 			return nil, nil, appendErr
 		}
-		return compact.PromptEventsFromLatestCompact(append(events, persisted)), state, nil
+		sourceEvents := append(session.CloneEvents(events), persisted)
+		return promptEventsWithToolVisibilityMetadata(compact.PromptEventsFromLatestCompact(sourceEvents), sourceEvents), state, nil
 	}
-	return result.PromptEvents, state, nil
+	return promptEventsWithToolVisibilityMetadata(result.PromptEvents, events), state, nil
 }
 
 type CompactRequest struct {

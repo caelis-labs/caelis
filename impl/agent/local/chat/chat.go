@@ -81,8 +81,17 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 	return func(yield func(*session.Event, error) bool) {
 		messages := messagesFromContext(ctx)
 		stream := a.request.StreamEnabled(false)
+		visibility := tool.NewToolVisibility(a.tools)
+		for event := range ctx.Events().All() {
+			if event != nil {
+				visibility.ApplyDiscoveredToolNames(tool.DiscoveredToolNamesFromMetadata(event.Meta))
+			}
+			if event != nil && event.Tool != nil {
+				visibility.ApplyToolResult(event.Tool.Name, event.Tool.Output)
+			}
+		}
 		for {
-			assistantMessage, calls, final, ok, err := a.collectCanonicalModelStep(ctx, messages, stream, func(event *session.Event) bool {
+			assistantMessage, calls, final, ok, err := a.collectCanonicalModelStep(ctx, messages, stream, &visibility, func(event *session.Event) bool {
 				return yield(event, nil)
 			})
 			if !ok {
@@ -123,6 +132,9 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 				return
 			}
 			for _, toolEvent := range toolEvents {
+				if toolEvent != nil && toolEvent.Tool != nil {
+					visibility.ApplyToolResult(toolEvent.Tool.Name, toolEvent.Tool.Output)
+				}
 				if !yield(toolEvent, nil) {
 					return
 				}
@@ -139,12 +151,13 @@ func (a *Agent) collectCanonicalModelStep(
 	ctx agent.Context,
 	messages []model.Message,
 	stream bool,
+	visibility *tool.ToolVisibility,
 	yield func(*session.Event) bool,
 ) (model.Message, []model.ToolCall, *model.Response, bool, error) {
 	for attempt := 0; ; attempt++ {
 		request := &model.Request{
 			Messages:  messages,
-			Tools:     tool.ModelSpecs(a.tools),
+			Tools:     visibility.ModelSpecs(),
 			Reasoning: a.reasoning,
 			Output:    a.request.OutputSpec(),
 			Stream:    stream,

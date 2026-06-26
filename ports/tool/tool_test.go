@@ -88,6 +88,99 @@ func TestModelSpecsDoesNotInferStrictForOpenSchema(t *testing.T) {
 	}
 }
 
+func TestToolVisibilityDefersMCPToolsBehindToolSearch(t *testing.T) {
+	t.Parallel()
+
+	inspect := NamedTool{Def: Definition{Name: "inspect", Description: "Inspect", InputSchema: map[string]any{"type": "object"}}}
+	search := NamedTool{Def: Definition{
+		Name:        ToolSearchToolName,
+		Description: "Search deferred tools",
+		InputSchema: map[string]any{"type": "object"},
+		Metadata:    map[string]any{MetadataToolKind: MetadataToolKindToolSearch},
+	}}
+	mcp := NamedTool{Def: Definition{
+		Name:        "mcp__plugin__server__read",
+		Description: "Read external data",
+		InputSchema: map[string]any{"type": "object"},
+		Metadata: map[string]any{
+			MetadataToolKind:  MetadataToolKindMCP,
+			MetadataPluginID:  "plugin",
+			MetadataMCPServer: "server",
+		},
+	}}
+	tools := []Tool{inspect, search, mcp}
+
+	specs := ModelSpecs(tools)
+	if got, want := toolSpecNames(specs), []string{"inspect", ToolSearchToolName}; !equalStrings(got, want) {
+		t.Fatalf("ModelSpecs names = %v, want %v", got, want)
+	}
+
+	visibility := NewToolVisibility(tools)
+	visibility.Reveal("mcp__plugin__server__read")
+	specs = visibility.ModelSpecs()
+	if got, want := toolSpecNames(specs), []string{"inspect", ToolSearchToolName, "mcp__plugin__server__read"}; !equalStrings(got, want) {
+		t.Fatalf("ToolVisibility.ModelSpecs names = %v, want %v", got, want)
+	}
+
+	allSpecs := AllModelSpecs(tools)
+	if got, want := toolSpecNames(allSpecs), []string{"inspect", ToolSearchToolName, "mcp__plugin__server__read"}; !equalStrings(got, want) {
+		t.Fatalf("AllModelSpecs names = %v, want %v", got, want)
+	}
+}
+
+func TestToolSearchNameWithoutMetadataDoesNotEnableDeferral(t *testing.T) {
+	t.Parallel()
+
+	searchStub := NamedTool{Def: Definition{Name: ToolSearchToolName}}
+	mcp := NamedTool{Def: Definition{
+		Name:        "mcp__plugin__server__read",
+		Description: "Read external data",
+		InputSchema: map[string]any{"type": "object"},
+		Metadata:    map[string]any{MetadataToolKind: MetadataToolKindMCP},
+	}}
+	specs := ModelSpecs([]Tool{searchStub, mcp})
+	if got, want := toolSpecNames(specs), []string{ToolSearchToolName, "mcp__plugin__server__read"}; !equalStrings(got, want) {
+		t.Fatalf("ModelSpecs names = %v, want %v", got, want)
+	}
+}
+
+func TestParseToolSearchOutput(t *testing.T) {
+	t.Parallel()
+
+	result := ParseToolSearchOutput(map[string]any{
+		"tools": []any{
+			map[string]any{"name": "direct"},
+			map[string]any{"function": map[string]any{"name": "nested"}},
+			map[string]any{"name": "   "},
+		},
+	})
+	if got, want := result.DiscoveredToolNames(), []string{"direct", "nested"}; !equalStrings(got, want) {
+		t.Fatalf("DiscoveredToolNames = %v, want %v", got, want)
+	}
+
+	malformed := ParseToolSearchOutput(map[string]any{"tools": "not-an-array"})
+	if got := malformed.DiscoveredToolNames(); len(got) != 0 {
+		t.Fatalf("malformed DiscoveredToolNames = %v, want empty", got)
+	}
+}
+
+func TestDiscoveredToolNamesMetadataRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	value := DiscoveredToolNamesMetadataValue([]string{"mcp__a", "mcp__A", "", "mcp__b"})
+	got := DiscoveredToolNamesFromMetadata(map[string]any{MetadataDiscoveredToolNames: value})
+	if want := []string{"mcp__a", "mcp__b"}; !equalStrings(got, want) {
+		t.Fatalf("DiscoveredToolNamesFromMetadata = %v, want %v", got, want)
+	}
+
+	got = DiscoveredToolNamesFromMetadata(map[string]any{
+		MetadataDiscoveredToolNames: []any{"mcp__c", 42, " "},
+	})
+	if want := []string{"mcp__c"}; !equalStrings(got, want) {
+		t.Fatalf("DiscoveredToolNamesFromMetadata([]any) = %v, want %v", got, want)
+	}
+}
+
 func TestNamedToolClonesCallAndResult(t *testing.T) {
 	t.Parallel()
 
@@ -126,4 +219,26 @@ func TestNamedToolClonesCallAndResult(t *testing.T) {
 	if _, ok := call.Metadata["mutated"]; ok {
 		t.Fatal("input call metadata should be cloned")
 	}
+}
+
+func toolSpecNames(specs []model.ToolSpec) []string {
+	out := make([]string, 0, len(specs))
+	for _, spec := range specs {
+		if spec.Function != nil {
+			out = append(out, spec.Function.Name)
+		}
+	}
+	return out
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

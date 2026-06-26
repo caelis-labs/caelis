@@ -63,14 +63,15 @@ type ForceEngine interface {
 }
 
 type CompactEventData struct {
-	Revision            int    `json:"revision,omitempty"`
-	ContractVersion     int    `json:"contract_version,omitempty"`
-	SummarizedThroughID string `json:"summarized_through_id,omitempty"`
-	Generator           string `json:"generator,omitempty"`
-	Trigger             string `json:"trigger,omitempty"`
-	SourceEventCount    int    `json:"source_event_count,omitempty"`
-	TotalTokens         int    `json:"total_tokens,omitempty"`
-	ContextWindowTokens int    `json:"context_window_tokens,omitempty"`
+	Revision            int      `json:"revision,omitempty"`
+	ContractVersion     int      `json:"contract_version,omitempty"`
+	SummarizedThroughID string   `json:"summarized_through_id,omitempty"`
+	Generator           string   `json:"generator,omitempty"`
+	Trigger             string   `json:"trigger,omitempty"`
+	SourceEventCount    int      `json:"source_event_count,omitempty"`
+	TotalTokens         int      `json:"total_tokens,omitempty"`
+	ContextWindowTokens int      `json:"context_window_tokens,omitempty"`
+	DiscoveredTools     []string `json:"discovered_tools,omitempty"`
 }
 
 type ContextWindowProvider interface {
@@ -133,7 +134,29 @@ func normalizeCompactEventData(in CompactEventData) CompactEventData {
 	if in.SourceEventCount < 0 {
 		in.SourceEventCount = 0
 	}
+	in.DiscoveredTools = normalizeDiscoveredTools(in.DiscoveredTools)
 	return in
+}
+
+func normalizeDiscoveredTools(names []string) []string {
+	if len(names) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	out := make([]string, 0, len(names))
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		canonical := strings.ToUpper(name)
+		if seen[canonical] {
+			continue
+		}
+		seen[canonical] = true
+		out = append(out, name)
+	}
+	return out
 }
 
 func PromptEventsFromLatestCompact(events []*session.Event) []*session.Event {

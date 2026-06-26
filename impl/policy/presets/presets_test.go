@@ -99,6 +99,10 @@ func TestDefaultModeAllowsExplicitWebAndMCPTools(t *testing.T) {
 
 	tests := []policy.ToolContext{
 		{
+			Tool: policyToolSearchDefinition(),
+			Call: policyToolCall(tool.ToolSearchToolName, map[string]any{"query": "calendar"}),
+		},
+		{
 			Tool: policyMCPToolDefinition("mcp__plugin__server__read_fixture"),
 			Call: policyToolCall("mcp__plugin__server__read_fixture", map[string]any{"name": "fixture"}),
 		},
@@ -893,6 +897,15 @@ func policyMCPToolDefinition(name string) tool.Definition {
 		Name: name,
 		Metadata: map[string]any{
 			tool.MetadataToolKind: tool.MetadataToolKindMCP,
+		},
+	}
+}
+
+func policyToolSearchDefinition() tool.Definition {
+	return tool.Definition{
+		Name: tool.ToolSearchToolName,
+		Metadata: map[string]any{
+			tool.MetadataToolKind: tool.MetadataToolKindToolSearch,
 		},
 	}
 }

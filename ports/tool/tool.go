@@ -20,11 +20,16 @@ type Definition struct {
 }
 
 const (
-	MetadataToolKind  = "caelis.tool.kind"
-	MetadataPluginID  = "caelis.plugin.id"
-	MetadataMCPServer = "caelis.mcp.server"
+	MetadataToolKind            = "caelis.tool.kind"
+	MetadataPluginID            = "caelis.plugin.id"
+	MetadataMCPServer           = "caelis.mcp.server"
+	MetadataMCPTool             = "caelis.mcp.tool"
+	MetadataDiscoveredToolNames = "caelis.tool.discovered_names"
 
-	MetadataToolKindMCP = "mcp"
+	MetadataToolKindMCP        = "mcp"
+	MetadataToolKindToolSearch = "tool_search"
+
+	ToolSearchToolName = "tool_search"
 )
 
 // Call is one provider-neutral tool invocation.
@@ -109,9 +114,20 @@ func Definitions(tools []Tool) []Definition {
 	return out
 }
 
-// ModelSpecs converts tool definitions into provider-neutral model specs.
+// ModelSpecs converts the default model-visible tool set into provider-neutral
+// specs. Deferred tools remain hidden until ToolVisibility reveals them.
 func ModelSpecs(tools []Tool) []model.ToolSpec {
+	return NewToolVisibility(tools).ModelSpecs()
+}
+
+// AllModelSpecs converts every tool definition into provider-neutral model
+// specs without deferred-tool filtering.
+func AllModelSpecs(tools []Tool) []model.ToolSpec {
 	definitions := Definitions(tools)
+	return modelSpecsFromDefinitions(definitions)
+}
+
+func modelSpecsFromDefinitions(definitions []Definition) []model.ToolSpec {
 	if len(definitions) == 0 {
 		return nil
 	}
@@ -128,6 +144,25 @@ func ModelSpecs(tools []Tool) []model.ToolSpec {
 		out = append(out, spec)
 	}
 	return out
+}
+
+// CanonicalName normalizes a tool name for case-insensitive internal lookup.
+func CanonicalName(name string) string {
+	return strings.ToUpper(strings.TrimSpace(name))
+}
+
+func IsMCPDefinition(def Definition) bool {
+	return definitionKind(def) == MetadataToolKindMCP
+}
+
+func IsToolSearchDefinition(def Definition) bool {
+	return definitionKind(def) == MetadataToolKindToolSearch &&
+		strings.EqualFold(strings.TrimSpace(def.Name), ToolSearchToolName)
+}
+
+func definitionKind(def Definition) string {
+	kind, _ := def.Metadata[MetadataToolKind].(string)
+	return strings.ToLower(strings.TrimSpace(kind))
 }
 
 func inferStrictFunctionSchema(schema map[string]any) bool {

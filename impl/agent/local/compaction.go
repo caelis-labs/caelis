@@ -169,6 +169,7 @@ func (c *codexStyleCompactor) compact(ctx context.Context, req compact.Request, 
 		Generator:           "model_markdown",
 		Trigger:             strings.TrimSpace(trigger),
 		SourceEventCount:    len(summaryEvents),
+		DiscoveredTools:     discoveredToolNamesFromEvents(req.Events),
 	}
 	compactEvent := buildCompactEvent(req.Session, compactText, data)
 	promptEvents := compact.PromptEventsFromLatestCompact([]*session.Event{compactEvent})

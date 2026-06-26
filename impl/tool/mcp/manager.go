@@ -79,6 +79,7 @@ func NewManager(ctx context.Context, specs []plugin.MCPServerSpec) (*Manager, er
 						tool.MetadataToolKind:  tool.MetadataToolKindMCP,
 						tool.MetadataPluginID:  spec.PluginID,
 						tool.MetadataMCPServer: spec.Name,
+						tool.MetadataMCPTool:   info.Name,
 					},
 				},
 			}

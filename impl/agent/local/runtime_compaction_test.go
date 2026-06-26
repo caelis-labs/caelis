@@ -2,11 +2,15 @@ package local
 
 import (
 	"context"
+	"encoding/json"
+	"iter"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/OnslaughtSnail/caelis/impl/agent/local/chat"
 	sessionfile "github.com/OnslaughtSnail/caelis/impl/session/file"
+	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/toolsearch"
 	"github.com/OnslaughtSnail/caelis/ports/agent"
 	"github.com/OnslaughtSnail/caelis/ports/compact"
 	"github.com/OnslaughtSnail/caelis/ports/model"
@@ -301,6 +305,111 @@ func TestRuntimeManualCompactUsesPureTextCheckpointOverlay(t *testing.T) {
 	}
 	if strings.Contains(promptText, "Objective: make manual compact preserve context instead of truncating history") {
 		t.Fatalf("prompt events reconstructed labeled checkpoint fields instead of preserving markdown: %q", promptText)
+	}
+}
+
+func TestRuntimeCompactionPreservesDeferredMCPToolVisibility(t *testing.T) {
+	t.Parallel()
+
+	sessions, activeSession := newTestSessionService(t, "sess-compact-tool-search")
+	const mcpToolName = "mcp__calendar__demo__create_event"
+	mcpTool := tool.NamedTool{
+		Def: tool.Definition{
+			Name:        mcpToolName,
+			Description: "Create calendar events",
+			InputSchema: map[string]any{"type": "object"},
+			Metadata: map[string]any{
+				tool.MetadataToolKind:  tool.MetadataToolKindMCP,
+				tool.MetadataPluginID:  "calendar",
+				tool.MetadataMCPServer: "demo",
+				tool.MetadataMCPTool:   "create_event",
+			},
+		},
+	}
+	searchTool := toolsearch.New([]tool.Tool{mcpTool})
+	if searchTool == nil {
+		t.Fatal("toolsearch.New(MCP tool) = nil")
+	}
+	appendTestEvent(t, sessions, activeSession.SessionRef, userTextEvent("Find the calendar event tool."))
+	appendTestEvent(t, sessions, activeSession.SessionRef, &session.Event{
+		Type:       session.EventTypeToolResult,
+		Visibility: session.VisibilityCanonical,
+		Tool: &session.EventTool{
+			ID:     "call-search",
+			Name:   tool.ToolSearchToolName,
+			Status: "completed",
+			Output: toolSearchOutputMapForTest(t, mcpTool.Definition()),
+		},
+	})
+	appendTestEvent(t, sessions, activeSession.SessionRef, assistantEvent("Calendar tool is available."))
+
+	runtime, err := New(Config{
+		Sessions: sessions,
+		AgentFactory: chat.Factory{
+			SystemPrompt: "Be terse.",
+		},
+		Compaction: CompactionConfig{
+			SegmentTokenBudget: 80,
+		},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	compactModel := &contextProbeModel{
+		t: t,
+		compactBody: `CONTEXT CHECKPOINT
+
+## Current Objective
+- use the discovered calendar tool
+
+## Next Actions
+1. continue with the calendar MCP tool`,
+	}
+	result, err := runtime.Compact(context.Background(), CompactRequest{
+		SessionRef: activeSession.SessionRef,
+		Model:      compactModel,
+		Trigger:    "manual",
+	})
+	if err != nil {
+		t.Fatalf("Compact() error = %v", err)
+	}
+	if !result.Compacted {
+		t.Fatal("Compact() did not compact")
+	}
+	loaded, err := sessions.LoadSession(context.Background(), session.LoadSessionRequest{SessionRef: activeSession.SessionRef})
+	if err != nil {
+		t.Fatalf("LoadSession() error = %v", err)
+	}
+	compactEvent, ok := latestCompactEventForTest(loaded.Events)
+	if !ok {
+		t.Fatal("expected compact event")
+	}
+	data, ok := compact.CompactEventDataFromEvent(compactEvent)
+	if !ok {
+		t.Fatalf("compact event missing metadata: %+v", compactEvent.Meta)
+	}
+	if !slices.Equal(data.DiscoveredTools, []string{mcpToolName}) {
+		t.Fatalf("compact discovered tools = %v, want %v", data.DiscoveredTools, []string{mcpToolName})
+	}
+
+	probe := &toolListProbeModel{}
+	run, err := runtime.Run(context.Background(), agent.RunRequest{
+		SessionRef: activeSession.SessionRef,
+		Input:      "continue",
+		AgentSpec: agent.AgentSpec{
+			Name:  "chat",
+			Model: probe,
+			Tools: []tool.Tool{searchTool, mcpTool},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if _, err := drainRunnerEvents(t, run.Handle); err != nil {
+		t.Fatalf("runner error = %v", err)
+	}
+	if got, want := toolNamesFromRequestForTest(probe.last), []string{tool.ToolSearchToolName, mcpToolName}; !slices.Equal(got, want) {
+		t.Fatalf("post-compact request tools = %v, want %v", got, want)
 	}
 }
 
@@ -925,4 +1034,51 @@ func TestRuntimeRecoversFromContextOverflowByCompactingMidTurn(t *testing.T) {
 	if len(promptEvents) == 0 || !strings.Contains(strings.ToLower(session.EventText(promptEvents[0])), "echo tool result completed") {
 		t.Fatalf("prompt events after compact = %+v, want tool result continuity in checkpoint overlay", promptEvents)
 	}
+}
+
+type toolListProbeModel struct {
+	last model.Request
+}
+
+func (m *toolListProbeModel) Name() string { return "tool-list-probe" }
+
+func (m *toolListProbeModel) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
+	if req != nil {
+		m.last = *model.CloneRequest(req)
+	}
+	return func(yield func(*model.StreamEvent, error) bool) {
+		yield(&model.StreamEvent{
+			Type: model.StreamEventTurnDone,
+			Response: &model.Response{
+				Message:      model.NewTextMessage(model.RoleAssistant, "ok"),
+				TurnComplete: true,
+				StepComplete: true,
+				Status:       model.ResponseStatusCompleted,
+				FinishReason: model.FinishReasonStop,
+			},
+		}, nil)
+	}
+}
+
+func toolSearchOutputMapForTest(t *testing.T, definitions ...tool.Definition) map[string]any {
+	t.Helper()
+	raw, err := json.Marshal(tool.NewToolSearchResult(definitions))
+	if err != nil {
+		t.Fatalf("marshal tool_search result: %v", err)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("unmarshal tool_search result: %v", err)
+	}
+	return out
+}
+
+func toolNamesFromRequestForTest(req model.Request) []string {
+	out := make([]string, 0, len(req.Tools))
+	for _, spec := range req.Tools {
+		if spec.Function != nil {
+			out = append(out, spec.Function.Name)
+		}
+	}
+	return out
 }

@@ -192,14 +192,16 @@ func writePluginSystemE2EPlugin(t *testing.T, root string) {
 
 type pluginSystemE2EProvider struct {
 	*httptest.Server
-	mu               sync.Mutex
-	calls            int
-	payloadSummaries []string
-	sawSkill         bool
-	sawHook          bool
-	sawTool          bool
-	sawToolResult    bool
-	sawAuthorization bool
+	mu                  sync.Mutex
+	calls               int
+	payloadSummaries    []string
+	sawSkill            bool
+	sawHook             bool
+	sawToolSearch       bool
+	sawTool             bool
+	sawToolBeforeSearch bool
+	sawToolResult       bool
+	sawAuthorization    bool
 }
 
 func newPluginSystemE2EProvider(t *testing.T) *pluginSystemE2EProvider {
@@ -226,7 +228,7 @@ func (p *pluginSystemE2EProvider) handle(w http.ResponseWriter, r *http.Request)
 	if strings.TrimSpace(r.Header.Get("Authorization")) == "Bearer plugin-e2e-token" {
 		p.sawAuthorization = true
 	}
-	p.observePayload(payload)
+	p.observePayload(callIndex, payload)
 	p.mu.Unlock()
 
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -239,14 +241,14 @@ func (p *pluginSystemE2EProvider) handle(w http.ResponseWriter, r *http.Request)
 				"index": 0,
 				"delta": map[string]any{
 					"role":    "assistant",
-					"content": "Using plugin MCP.",
+					"content": "Searching plugin MCP.",
 					"tool_calls": []map[string]any{{
 						"index": 0,
-						"id":    "call_plugin_e2e",
+						"id":    "call_plugin_e2e_search",
 						"type":  "function",
 						"function": map[string]any{
-							"name":      pluginE2EToolName,
-							"arguments": `{"name":"fixture"}`,
+							"name":      "tool_search",
+							"arguments": `{"query":"read e2e fixture"}`,
 						},
 					}},
 				},
@@ -271,8 +273,49 @@ func (p *pluginSystemE2EProvider) handle(w http.ResponseWriter, r *http.Request)
 		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 		return
 	}
+	if callIndex == 2 {
+		writePluginSystemE2ESSE(w, map[string]any{
+			"id":     "plugin-e2e-2",
+			"object": "chat.completion.chunk",
+			"model":  "plugin-e2e-model",
+			"choices": []map[string]any{{
+				"index": 0,
+				"delta": map[string]any{
+					"role":    "assistant",
+					"content": "Using plugin MCP.",
+					"tool_calls": []map[string]any{{
+						"index": 0,
+						"id":    "call_plugin_e2e",
+						"type":  "function",
+						"function": map[string]any{
+							"name":      pluginE2EToolName,
+							"arguments": `{"name":"fixture"}`,
+						},
+					}},
+				},
+				"finish_reason": nil,
+			}},
+		})
+		writePluginSystemE2ESSE(w, map[string]any{
+			"id":     "plugin-e2e-2",
+			"object": "chat.completion.chunk",
+			"model":  "plugin-e2e-model",
+			"choices": []map[string]any{{
+				"index":         0,
+				"delta":         map[string]any{},
+				"finish_reason": "tool_calls",
+			}},
+			"usage": map[string]any{
+				"prompt_tokens":     13,
+				"completion_tokens": 7,
+				"total_tokens":      20,
+			},
+		})
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+		return
+	}
 	writePluginSystemE2ESSE(w, map[string]any{
-		"id":     "plugin-e2e-2",
+		"id":     "plugin-e2e-3",
 		"object": "chat.completion.chunk",
 		"model":  "plugin-e2e-model",
 		"choices": []map[string]any{{
@@ -285,7 +328,7 @@ func (p *pluginSystemE2EProvider) handle(w http.ResponseWriter, r *http.Request)
 		}},
 	})
 	writePluginSystemE2ESSE(w, map[string]any{
-		"id":     "plugin-e2e-2",
+		"id":     "plugin-e2e-3",
 		"object": "chat.completion.chunk",
 		"model":  "plugin-e2e-model",
 		"choices": []map[string]any{{
@@ -302,7 +345,7 @@ func (p *pluginSystemE2EProvider) handle(w http.ResponseWriter, r *http.Request)
 	_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 }
 
-func (p *pluginSystemE2EProvider) observePayload(payload map[string]any) {
+func (p *pluginSystemE2EProvider) observePayload(callIndex int, payload map[string]any) {
 	raw, _ := json.Marshal(payload)
 	text := string(raw)
 	p.payloadSummaries = append(p.payloadSummaries, summarizePluginSystemE2EPayload(payload))
@@ -319,8 +362,14 @@ func (p *pluginSystemE2EProvider) observePayload(payload map[string]any) {
 		for _, item := range tools {
 			toolMap, _ := item.(map[string]any)
 			fn, _ := toolMap["function"].(map[string]any)
+			if fn["name"] == "tool_search" {
+				p.sawToolSearch = true
+			}
 			if fn["name"] == pluginE2EToolName {
 				p.sawTool = true
+				if callIndex == 1 {
+					p.sawToolBeforeSearch = true
+				}
 			}
 		}
 	}
@@ -341,8 +390,8 @@ func (p *pluginSystemE2EProvider) Assert(t *testing.T, events string) {
 	t.Helper()
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.calls != 2 {
-		t.Fatalf("provider calls = %d, want 2; %s; events=%s", p.calls, p.summaryLocked(), events)
+	if p.calls != 3 {
+		t.Fatalf("provider calls = %d, want 3; %s; events=%s", p.calls, p.summaryLocked(), events)
 	}
 	if !p.sawAuthorization {
 		t.Fatalf("provider did not observe Authorization header; %s; events=%s", p.summaryLocked(), events)
@@ -353,8 +402,14 @@ func (p *pluginSystemE2EProvider) Assert(t *testing.T, events string) {
 	if !p.sawHook {
 		t.Fatalf("provider did not observe plugin hook context in model request; %s; events=%s", p.summaryLocked(), events)
 	}
+	if !p.sawToolSearch {
+		t.Fatalf("provider did not observe tool_search declaration; %s; events=%s", p.summaryLocked(), events)
+	}
+	if p.sawToolBeforeSearch {
+		t.Fatalf("provider observed concrete MCP tool before tool_search result; %s; events=%s", p.summaryLocked(), events)
+	}
 	if !p.sawTool {
-		t.Fatalf("provider did not observe plugin MCP tool declaration; %s; events=%s", p.summaryLocked(), events)
+		t.Fatalf("provider did not observe plugin MCP tool declaration after tool_search; %s; events=%s", p.summaryLocked(), events)
 	}
 	if !p.sawToolResult {
 		t.Fatalf("provider did not observe MCP tool result in follow-up model request; %s; events=%s", p.summaryLocked(), events)
@@ -369,12 +424,14 @@ func (p *pluginSystemE2EProvider) Summary() string {
 
 func (p *pluginSystemE2EProvider) summaryLocked() string {
 	return fmt.Sprintf(
-		"calls=%d auth=%t skill=%t hook=%t tool=%t tool_result=%t summaries=%q",
+		"calls=%d auth=%t skill=%t hook=%t tool_search=%t tool=%t tool_before_search=%t tool_result=%t summaries=%q",
 		p.calls,
 		p.sawAuthorization,
 		p.sawSkill,
 		p.sawHook,
+		p.sawToolSearch,
 		p.sawTool,
+		p.sawToolBeforeSearch,
 		p.sawToolResult,
 		p.payloadSummaries,
 	)
