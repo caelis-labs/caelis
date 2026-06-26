@@ -29,13 +29,29 @@ func ProjectReplayEvent(env eventstream.Envelope, surface SurfaceProjector) []Ev
 	return nil
 }
 
+// replayableACPEvents is a defensive projector boundary for replay envelopes
+// supplied directly as ACP events. Canonical session replay filtering lives in
+// ports/session.
 func replayableACPEvents(env eventstream.Envelope, surface SurfaceProjector) []Event {
-	if env.Kind != eventstream.KindSessionUpdate {
+	switch env.Kind {
+	case eventstream.KindSessionUpdate:
+		return replayableACPSessionUpdate(env, surface)
+	case eventstream.KindLifecycle:
+		return replayableACPTraceEvent(env, surface)
+	default:
 		return nil
 	}
+}
+
+func replayableACPSessionUpdate(env eventstream.Envelope, surface SurfaceProjector) []Event {
 	update, ok := env.Update.(schema.ContentChunk)
 	if !ok {
-		return nil
+		switch env.Update.(type) {
+		case schema.ToolCall, schema.ToolCallUpdate, schema.PlanUpdate:
+			return replayableACPTraceEvent(env, surface)
+		default:
+			return nil
+		}
 	}
 	projected := ProjectACPEventToEvents(env, surface)
 	if len(projected) == 0 {
@@ -52,6 +68,17 @@ func replayableACPEvents(env eventstream.Envelope, surface SurfaceProjector) []E
 	default:
 		return nil
 	}
+}
+
+func replayableACPTraceEvent(env eventstream.Envelope, surface SurfaceProjector) []Event {
+	if !replayableTraceScope(env) {
+		return nil
+	}
+	return ProjectACPEventToEvents(env, surface)
+}
+
+func replayableTraceScope(env eventstream.Envelope) bool {
+	return ACPEventScope(env.Scope) == ScopeMain
 }
 
 func participantUserReplayEvent(env eventstream.Envelope) (Event, bool) {

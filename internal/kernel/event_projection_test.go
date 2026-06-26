@@ -1112,18 +1112,18 @@ func TestEventEnvelopeJSONUsesStableErrorPayload(t *testing.T) {
 	}
 }
 
-func TestReplayAfterCursorReturnsCursorNotFound(t *testing.T) {
+func TestStartIndexAfterCursorReturnsCursorNotFound(t *testing.T) {
 	t.Parallel()
 
-	_, err := replayAfterCursor([]EventEnvelope{
+	_, err := startIndexAfterCursor([]EventEnvelope{
 		{Cursor: "e1"},
 		{Cursor: "e2"},
-	}, "missing", 0)
+	}, "missing")
 	if err == nil {
-		t.Fatal("replayAfterCursor() error = nil, want cursor_not_found")
+		t.Fatal("startIndexAfterCursor() error = nil, want cursor_not_found")
 	}
 	var gwErr *Error
 	if !As(err, &gwErr) || gwErr.Code != CodeCursorNotFound {
-		t.Fatalf("replayAfterCursor() error = %v, want cursor_not_found", err)
+		t.Fatalf("startIndexAfterCursor() error = %v, want cursor_not_found", err)
 	}
 }

@@ -1,6 +1,8 @@
 package session
 
 import (
+	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -130,6 +132,267 @@ func TestFilterEvents(t *testing.T) {
 	}
 	if got := withTransient[0].ID; got != "2" {
 		t.Fatalf("first limited event id = %q, want %q", got, "2")
+	}
+}
+
+func TestFilterReplayTranscriptEventsKeepsLatestTurnTraceOnly(t *testing.T) {
+	t.Parallel()
+
+	events := []*Event{
+		{
+			ID:      "turn-1-user",
+			Type:    EventTypeUser,
+			Message: ptrMessage(model.NewTextMessage(model.RoleUser, "first prompt")),
+			Scope:   &EventScope{TurnID: "turn-1"},
+		},
+		{
+			ID:    "turn-1-tool-call",
+			Type:  EventTypeToolCall,
+			Tool:  &EventTool{ID: "old-call", Name: "RUN_COMMAND", Status: "running"},
+			Scope: &EventScope{TurnID: "turn-1"},
+		},
+		{
+			ID:    "turn-1-tool-result",
+			Type:  EventTypeToolResult,
+			Tool:  &EventTool{ID: "old-call", Name: "RUN_COMMAND", Status: "completed", Output: map[string]any{"stdout": "old"}},
+			Scope: &EventScope{TurnID: "turn-1"},
+		},
+		{
+			ID:      "turn-1-assistant",
+			Type:    EventTypeAssistant,
+			Message: ptrMessage(model.NewTextMessage(model.RoleAssistant, "first reply")),
+			Scope:   &EventScope{TurnID: "turn-1"},
+		},
+		{
+			ID:      "turn-2-user",
+			Type:    EventTypeUser,
+			Message: ptrMessage(model.NewTextMessage(model.RoleUser, "second prompt")),
+			Scope:   &EventScope{TurnID: "turn-2"},
+		},
+		{
+			ID:   "turn-2-plan-old",
+			Type: EventTypePlan,
+			PlanPayload: &EventPlanPayload{Entries: []EventPlanEntry{{
+				Content: "old plan",
+				Status:  "completed",
+			}}},
+			Scope: &EventScope{TurnID: "turn-2"},
+		},
+		{
+			ID:   "turn-2-plan",
+			Type: EventTypePlan,
+			PlanPayload: &EventPlanPayload{Entries: []EventPlanEntry{{
+				Content: "run command",
+				Status:  "in_progress",
+			}}},
+			Scope: &EventScope{TurnID: "turn-2"},
+		},
+		{
+			ID:    "turn-2-tool-call",
+			Type:  EventTypeToolCall,
+			Tool:  &EventTool{ID: "latest-call", Name: "RUN_COMMAND", Status: "running"},
+			Scope: &EventScope{TurnID: "turn-2"},
+		},
+		{
+			ID:    "turn-2-tool-result-old",
+			Type:  EventTypeToolResult,
+			Tool:  &EventTool{ID: "latest-call", Name: "RUN_COMMAND", Status: "running", Output: map[string]any{"stdout": "partial"}},
+			Scope: &EventScope{TurnID: "turn-2"},
+		},
+		{
+			ID:    "turn-2-tool-result",
+			Type:  EventTypeToolResult,
+			Tool:  &EventTool{ID: "latest-call", Name: "RUN_COMMAND", Status: "interrupted", Output: map[string]any{"stderr": "stopped"}},
+			Scope: &EventScope{TurnID: "turn-2"},
+		},
+		{
+			ID:        "turn-2-lifecycle",
+			Type:      EventTypeLifecycle,
+			Lifecycle: &EventLifecycle{Status: "interrupted", Reason: "user interrupt"},
+			Scope:     &EventScope{TurnID: "turn-2"},
+		},
+		{
+			ID:    "turn-2-side-tool",
+			Type:  EventTypeToolCall,
+			Tool:  &EventTool{ID: "side-call", Name: "RUN_COMMAND", Status: "running"},
+			Scope: &EventScope{TurnID: "turn-2", Source: "acp_participant", Participant: ParticipantRef{ID: "participant-1", Kind: ParticipantKindACP}},
+		},
+	}
+
+	got := eventIDs(FilterReplayTranscriptEvents(events, false))
+	want := []string{
+		"turn-1-user",
+		"turn-1-assistant",
+		"turn-2-user",
+		"turn-2-plan",
+		"turn-2-tool-call",
+		"turn-2-tool-result",
+		"turn-2-lifecycle",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("replay event ids = %#v, want %#v", got, want)
+	}
+}
+
+func TestFilterReplayTranscriptEventsLatestTurnWithoutFinalAssistantIncludesDurableTrace(t *testing.T) {
+	t.Parallel()
+
+	events := []*Event{
+		{
+			ID:      "turn-1-user",
+			Type:    EventTypeUser,
+			Message: ptrMessage(model.NewTextMessage(model.RoleUser, "prompt")),
+			Scope:   &EventScope{TurnID: "turn-1"},
+		},
+		{
+			ID:    "turn-1-tool-call",
+			Type:  EventTypeToolCall,
+			Tool:  &EventTool{ID: "call-1", Name: "RUN_COMMAND", Status: "running", Input: map[string]any{"command": "sleep 10"}},
+			Scope: &EventScope{TurnID: "turn-1"},
+		},
+		{
+			ID:    "turn-1-tool-result",
+			Type:  EventTypeToolResult,
+			Tool:  &EventTool{ID: "call-1", Name: "RUN_COMMAND", Status: "running", Output: map[string]any{"running": true}},
+			Scope: &EventScope{TurnID: "turn-1"},
+		},
+	}
+
+	got := eventIDs(FilterReplayTranscriptEvents(events, false))
+	want := []string{"turn-1-user", "turn-1-tool-call", "turn-1-tool-result"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("replay event ids = %#v, want %#v", got, want)
+	}
+}
+
+func TestFilterReplayTranscriptEventsIncludeTransientUnchanged(t *testing.T) {
+	t.Parallel()
+
+	events := []*Event{
+		{ID: "user-1", Type: EventTypeUser, Message: ptrMessage(model.NewTextMessage(model.RoleUser, "prompt"))},
+		MarkUIOnly(&Event{ID: "ui-1", Type: EventTypeAssistant, Text: "partial"}),
+		{ID: "tool-1", Type: EventTypeToolCall, Tool: &EventTool{ID: "call-1", Name: "READ"}},
+	}
+
+	got := FilterReplayTranscriptEvents(events, true)
+	if len(got) != len(events) {
+		t.Fatalf("replay len = %d, want %d", len(got), len(events))
+	}
+	for i := range events {
+		if got[i] != events[i] {
+			t.Fatalf("replay[%d] = %#v, want original pointer %#v", i, got[i], events[i])
+		}
+	}
+}
+
+func TestFilterReplayTranscriptEventsBoundsLatestTurnTraceAndKeepsToolPairs(t *testing.T) {
+	t.Parallel()
+
+	events := []*Event{{
+		ID:      "turn-1-user",
+		Type:    EventTypeUser,
+		Message: ptrMessage(model.NewTextMessage(model.RoleUser, "prompt")),
+		Scope:   &EventScope{TurnID: "turn-1"},
+	}}
+	for i := 0; i < maxReplayTraceEvents; i++ {
+		callID := "call-" + strconv.Itoa(i)
+		events = append(events,
+			&Event{
+				ID:    "call-" + strconv.Itoa(i),
+				Type:  EventTypeToolCall,
+				Tool:  &EventTool{ID: callID, Name: "RUN_COMMAND", Status: "running"},
+				Scope: &EventScope{TurnID: "turn-1"},
+			},
+			&Event{
+				ID:    "result-" + strconv.Itoa(i),
+				Type:  EventTypeToolResult,
+				Tool:  &EventTool{ID: callID, Name: "RUN_COMMAND", Status: "completed", Output: map[string]any{"stdout": "ok"}},
+				Scope: &EventScope{TurnID: "turn-1"},
+			},
+		)
+	}
+	events = append(events, &Event{
+		ID:        "latest-lifecycle",
+		Type:      EventTypeLifecycle,
+		Lifecycle: &EventLifecycle{Status: "failed", Reason: "boom"},
+		Scope:     &EventScope{TurnID: "turn-1"},
+	})
+
+	got := FilterReplayTranscriptEvents(events, false)
+	traceCount := 0
+	sawLatest := false
+	selectedCalls := map[string]bool{}
+	selectedResults := map[string]bool{}
+	for _, event := range got {
+		if IsMainReplayTraceEvent(event) {
+			traceCount++
+		}
+		if event.ID == "latest-lifecycle" {
+			sawLatest = true
+		}
+		if event.Tool == nil {
+			continue
+		}
+		switch EventTypeOf(event) {
+		case EventTypeToolCall:
+			selectedCalls[event.Tool.ID] = true
+		case EventTypeToolResult:
+			selectedResults[event.Tool.ID] = true
+		}
+	}
+	if traceCount > maxReplayTraceEvents {
+		t.Fatalf("trace event count = %d, want <= %d", traceCount, maxReplayTraceEvents)
+	}
+	if !sawLatest {
+		t.Fatalf("replay ids = %#v, want latest durable lifecycle retained", eventIDs(got))
+	}
+	for callID := range selectedResults {
+		if !selectedCalls[callID] {
+			t.Fatalf("selected tool result %q without its tool call; replay ids = %#v", callID, eventIDs(got))
+		}
+	}
+}
+
+func TestFilterReplayTranscriptEventsIgnoresTrailingNonMainTurnForTrace(t *testing.T) {
+	t.Parallel()
+
+	events := []*Event{
+		{
+			ID:      "turn-1-user",
+			Type:    EventTypeUser,
+			Message: ptrMessage(model.NewTextMessage(model.RoleUser, "prompt")),
+			Scope:   &EventScope{TurnID: "turn-1"},
+		},
+		{
+			ID:    "turn-1-tool-call",
+			Type:  EventTypeToolCall,
+			Tool:  &EventTool{ID: "call-1", Name: "RUN_COMMAND", Status: "running"},
+			Scope: &EventScope{TurnID: "turn-1"},
+		},
+		{
+			ID:    "turn-2-compact",
+			Type:  EventTypeCompact,
+			Scope: &EventScope{TurnID: "turn-2"},
+		},
+		{
+			ID:      "turn-2-side-assistant",
+			Type:    EventTypeAssistant,
+			Message: ptrMessage(model.NewTextMessage(model.RoleAssistant, "side final")),
+			Scope: &EventScope{
+				TurnID: "turn-2",
+				Participant: ParticipantRef{
+					ID:   "side-agent",
+					Kind: ParticipantKindACP,
+					Role: ParticipantRoleSidecar,
+				},
+			},
+		},
+	}
+
+	got := eventIDs(FilterReplayTranscriptEvents(events, false))
+	want := []string{"turn-1-user", "turn-1-tool-call", "turn-2-side-assistant"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("replay event ids = %#v, want %#v", got, want)
 	}
 }
 
@@ -585,6 +848,17 @@ func TestValidateDurableCoreEventRejectsUntruncatedToolOutput(t *testing.T) {
 
 func ptrMessage(message model.Message) *model.Message {
 	return &message
+}
+
+func eventIDs(events []*Event) []string {
+	out := make([]string, 0, len(events))
+	for _, event := range events {
+		if event == nil {
+			continue
+		}
+		out = append(out, event.ID)
+	}
+	return out
 }
 
 func toolResultTestMeta(name string) map[string]any {

@@ -44,19 +44,7 @@ func projectSessionEvents(ref session.SessionRef, events []*session.Event) []Eve
 }
 
 func replayTranscriptEvents(events []*session.Event, includeTransient bool) []*session.Event {
-	if includeTransient {
-		return events
-	}
-	out := make([]*session.Event, 0, len(events))
-	for _, event := range events {
-		if event == nil {
-			continue
-		}
-		if session.IsCanonicalHistoryEvent(event) || session.IsMirror(event) {
-			out = append(out, event)
-		}
-	}
-	return out
+	return session.FilterReplayTranscriptEvents(events, includeTransient)
 }
 
 func replayControlPlaneEvents(events []*session.Event, includeTransient bool) []*session.Event {
@@ -90,19 +78,20 @@ func ProjectSessionEvent(ref session.SessionRef, event *session.Event) (EventEnv
 	return projected[0], true
 }
 
-func replayAfterCursor(events []EventEnvelope, cursor string, limit int) ([]EventEnvelope, error) {
-	if len(events) == 0 {
-		return nil, nil
+func sessionEventsAfterCursor(events []*session.Event, cursor string) ([]*session.Event, error) {
+	cursor = strings.TrimSpace(cursor)
+	if cursor == "" {
+		return events, nil
 	}
-	start, err := startIndexAfterCursor(events, cursor)
-	if err != nil {
-		return nil, err
+	for i, event := range events {
+		if event == nil {
+			continue
+		}
+		if event.ID == cursor {
+			return events[i+1:], nil
+		}
 	}
-	out := events[start:]
-	if limit > 0 && len(out) > limit {
-		out = out[:limit]
-	}
-	return out, nil
+	return nil, cursorNotFoundError(cursor)
 }
 
 func startIndexAfterCursor(events []EventEnvelope, cursor string) (int, error) {
@@ -115,7 +104,11 @@ func startIndexAfterCursor(events []EventEnvelope, cursor string) (int, error) {
 			return i + 1, nil
 		}
 	}
-	return 0, &Error{
+	return 0, cursorNotFoundError(cursor)
+}
+
+func cursorNotFoundError(cursor string) error {
+	return &Error{
 		Kind:        KindNotFound,
 		Code:        CodeCursorNotFound,
 		UserVisible: true,

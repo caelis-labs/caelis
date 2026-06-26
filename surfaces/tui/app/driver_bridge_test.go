@@ -559,6 +559,7 @@ func TestSlashResumeClearsHistoryBeforeReplay(t *testing.T) {
 	}
 	var sawUserReplay bool
 	var sawAssistantReplay bool
+	var sawToolReplay bool
 	var replayBatchCount int
 	for _, msg := range msgs {
 		if log, ok := msg.(LogChunkMsg); ok && (strings.Contains(log.Chunk, "resumed session") || strings.Contains(log.Chunk, "replayed")) {
@@ -570,11 +571,11 @@ func TestSlashResumeClearsHistoryBeforeReplay(t *testing.T) {
 		if batch, ok := msg.(TranscriptEventsMsg); ok {
 			replayBatchCount++
 			for _, event := range batch.Events {
-				if event.Kind == TranscriptEventTool {
-					t.Fatalf("slashResume() replayed tool process event: %#v", event)
-				}
 				if event.Text == "stream chunk" {
 					t.Fatalf("slashResume() replayed transient assistant chunk: %#v", event)
+				}
+				if event.Kind == TranscriptEventTool && event.ToolCallID == "command-1" {
+					sawToolReplay = true
 				}
 				if event.Text == "history prompt" {
 					sawUserReplay = true
@@ -588,8 +589,8 @@ func TestSlashResumeClearsHistoryBeforeReplay(t *testing.T) {
 	if replayBatchCount != 1 {
 		t.Fatalf("slashResume() replay batches = %d, want 1", replayBatchCount)
 	}
-	if !sawUserReplay || !sawAssistantReplay {
-		t.Fatalf("slashResume() messages = %#v, want user and final assistant replay", msgs)
+	if !sawUserReplay || !sawAssistantReplay || !sawToolReplay {
+		t.Fatalf("slashResume() messages = %#v, want user, latest tool, and final assistant replay", msgs)
 	}
 }
 
@@ -742,16 +743,31 @@ func TestSlashResumeReplaysProcessEventsForInterruptedTurn(t *testing.T) {
 					},
 				},
 			},
+			{
+				Event: gateway.Event{
+					Kind:   gateway.EventKindLifecycle,
+					TurnID: "turn-interrupted",
+					Lifecycle: &gateway.LifecyclePayload{
+						Status: gateway.LifecycleStatusInterrupted,
+						Reason: "user interrupt",
+					},
+				},
+			},
 		},
 	}
 	var msgs []tea.Msg
 	slashResume(driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "resumed-session")
 	var sawMirrorReplay bool
+	var sawToolReplay bool
+	var sawLifecycleReplay bool
 	for _, msg := range msgs {
 		if batch, ok := msg.(TranscriptEventsMsg); ok {
 			for _, event := range batch.Events {
-				if event.Kind == TranscriptEventTool {
-					t.Fatalf("slashResume() replayed interrupted process event: %#v", event)
+				if event.Kind == TranscriptEventTool && event.ToolCallID == "command-1" {
+					sawToolReplay = true
+				}
+				if event.Kind == TranscriptEventLifecycle && event.State == "interrupted" {
+					sawLifecycleReplay = true
 				}
 				if event.Text == "partial answer" {
 					sawMirrorReplay = true
@@ -759,8 +775,8 @@ func TestSlashResumeReplaysProcessEventsForInterruptedTurn(t *testing.T) {
 			}
 		}
 	}
-	if !sawMirrorReplay {
-		t.Fatalf("slashResume() messages = %#v, want interrupted assistant replay", msgs)
+	if !sawMirrorReplay || !sawToolReplay || !sawLifecycleReplay {
+		t.Fatalf("slashResume() messages = %#v, want interrupted assistant, latest tool, and lifecycle replay", msgs)
 	}
 }
 

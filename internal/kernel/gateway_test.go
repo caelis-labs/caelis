@@ -1899,13 +1899,15 @@ func TestReplayEventsReturnsSessionBackedCanonicalReplay(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReplayEvents() error = %v", err)
 	}
-	if len(replayed.Events) != 2 || replayed.Events[0].Cursor != "e2" || replayed.Events[1].Cursor != "e3" {
+	// Participant-scoped tool trace stays out of transcript replay; control
+	// plane continuity below still advances over e3.
+	if len(replayed.Events) != 1 || replayed.Events[0].Cursor != "e2" {
 		t.Fatalf("ReplayEvents() = %#v", replayed.Events)
 	}
 	if replayed.Events[0].Event.Kind != EventKindAssistantMessage || replayed.Events[0].Event.TurnID != "turn-1" {
 		t.Fatalf("first replay event = %+v", replayed.Events[0])
 	}
-	if !replayed.Durable || replayed.NextCursor != "e3" {
+	if !replayed.Durable || replayed.NextCursor != "e2" {
 		t.Fatalf("replay result = %+v", replayed)
 	}
 	if replayed.ControlPlane.Continuity.LastEventCursor != "e3" || replayed.ControlPlane.Continuity.ControllerCursor != "e3" {
@@ -2029,6 +2031,74 @@ func TestReplayEventsResolvesBindingAndAppliesCursorLimit(t *testing.T) {
 	}
 	if replayed.NextCursor != "e2" {
 		t.Fatalf("ReplayEvents().NextCursor = %q, want e2", replayed.NextCursor)
+	}
+}
+
+func TestReplayEventsAcceptsCursorFromTraceThatFellOutOfReplayFilter(t *testing.T) {
+	t.Parallel()
+
+	activeSession := session.Session{
+		SessionRef: session.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+		},
+	}
+	svc := &recordingSessionService{
+		sessionResult: activeSession,
+		eventsResult: []*session.Event{
+			{
+				ID:      "turn-1-user",
+				Type:    session.EventTypeUser,
+				Message: modelMessagePtr(model.NewTextMessage(model.RoleUser, "run command")),
+				Scope:   &session.EventScope{TurnID: "turn-1"},
+			},
+			{
+				ID:    "turn-1-tool-call",
+				Type:  session.EventTypeToolCall,
+				Tool:  &session.EventTool{ID: "call-1", Name: "RUN_COMMAND", Status: "running", Input: map[string]any{"command": "sleep 10"}},
+				Scope: &session.EventScope{TurnID: "turn-1"},
+			},
+			{
+				ID:    "turn-1-tool-result",
+				Type:  session.EventTypeToolResult,
+				Tool:  &session.EventTool{ID: "call-1", Name: "RUN_COMMAND", Status: "interrupted", Output: map[string]any{"stderr": "interrupted"}},
+				Scope: &session.EventScope{TurnID: "turn-1"},
+			},
+			{
+				ID:      "turn-2-user",
+				Type:    session.EventTypeUser,
+				Message: modelMessagePtr(model.NewTextMessage(model.RoleUser, "next prompt")),
+				Scope:   &session.EventScope{TurnID: "turn-2"},
+			},
+		},
+	}
+	gw, err := New(Config{
+		Sessions: svc,
+		Runtime:  mockRuntime{},
+		Resolver: staticResolver{},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := gw.BindSession(context.Background(), BindSessionRequest{
+		SessionRef: activeSession.SessionRef,
+		BindingKey: "surface-replay",
+		Binding:    BindingDescriptor{Surface: "cli-tui"},
+	}); err != nil {
+		t.Fatalf("BindSession() error = %v", err)
+	}
+
+	replayed, err := gw.ReplayEvents(context.Background(), ReplayEventsRequest{
+		BindingKey: "surface-replay",
+		Cursor:     "turn-1-tool-result",
+	})
+	if err != nil {
+		t.Fatalf("ReplayEvents() error = %v", err)
+	}
+	if len(replayed.Events) != 1 || replayed.Events[0].Cursor != "turn-2-user" {
+		t.Fatalf("ReplayEvents().Events = %#v, want turn-2 user after raw cursor", replayed.Events)
+	}
+	if replayed.NextCursor != "turn-2-user" {
+		t.Fatalf("ReplayEvents().NextCursor = %q, want turn-2-user", replayed.NextCursor)
 	}
 }
 

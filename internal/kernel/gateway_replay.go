@@ -33,11 +33,14 @@ func (g *Gateway) ReplayEvents(ctx context.Context, req ReplayEventsRequest) (Re
 		return ReplayEventsResult{}, err
 	}
 	hasLiveHandle := g.hasActiveHandle(ref.SessionID)
-	replayEvents := replayTranscriptEvents(events, req.IncludeTransient)
-	projected := projectSessionEvents(ref, replayEvents)
-	projected, err = replayAfterCursor(projected, req.Cursor, req.Limit)
+	cursorEvents, err := sessionEventsAfterCursor(events, req.Cursor)
 	if err != nil {
 		return ReplayEventsResult{}, err
+	}
+	replayEvents := replayTranscriptEvents(cursorEvents, req.IncludeTransient)
+	projected := projectSessionEvents(ref, replayEvents)
+	if req.Limit > 0 && len(projected) > req.Limit {
+		projected = projected[:req.Limit]
 	}
 	out := ReplayEventsResult{
 		SessionRef:    ref,
