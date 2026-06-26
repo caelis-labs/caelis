@@ -2,6 +2,7 @@ package tuiapp
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -140,6 +141,77 @@ func TestForwardTurnEventStreamShowsSubagentPermissionPrompt(t *testing.T) {
 	}
 }
 
+func TestForwardTurnEventStreamCloseWithoutTerminalQueuesFallbackLifecycle(t *testing.T) {
+	events := make(chan eventstream.Envelope)
+	close(events)
+	turn := &rawEventStreamTurn{events: events}
+	var msgs []tea.Msg
+
+	result := forwardTurnEventStream(context.Background(), nil, turn, &ProgramSender{Send: func(msg tea.Msg) {
+		msgs = append(msgs, msg)
+	}})
+
+	if !result.queued || result.completion != (TaskResultMsg{}) {
+		t.Fatalf("forwardTurnEventStream() result = %#v, want queued fallback lifecycle", result)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("messages = %#v, want fallback lifecycle only", msgs)
+	}
+	requireTerminalLifecycle(t, msgs[0], eventstream.LifecycleStateCompleted)
+}
+
+func TestForwardTurnEventStreamTerminalLifecycleReturnsBeforeChannelClose(t *testing.T) {
+	events := make(chan eventstream.Envelope, 1)
+	events <- eventstream.TurnCompleted("handle-1", "run-1", "turn-1", time.Now())
+	turn := &rawEventStreamTurn{events: events}
+	var msgs []tea.Msg
+
+	resultCh := make(chan executeLineResult, 1)
+	go func() {
+		resultCh <- forwardTurnEventStream(context.Background(), nil, turn, &ProgramSender{Send: func(msg tea.Msg) {
+			msgs = append(msgs, msg)
+		}})
+	}()
+
+	select {
+	case result := <-resultCh:
+		close(events)
+		if !result.queued || result.completion != (TaskResultMsg{}) {
+			t.Fatalf("forwardTurnEventStream() result = %#v, want queued terminal lifecycle", result)
+		}
+	case <-time.After(500 * time.Millisecond):
+		close(events)
+		t.Fatal("forwardTurnEventStream() waited for events channel close after terminal lifecycle")
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("messages = %#v, want terminal lifecycle only", msgs)
+	}
+	requireTerminalLifecycle(t, msgs[0], eventstream.LifecycleStateCompleted)
+}
+
+func TestForwardTurnEventStreamErrorCloseWithoutTerminalQueuesFailedLifecycle(t *testing.T) {
+	events := make(chan eventstream.Envelope, 1)
+	events <- eventstream.Error(errors.New("provider failed"))
+	close(events)
+	turn := &rawEventStreamTurn{events: events}
+	var msgs []tea.Msg
+
+	result := forwardTurnEventStream(context.Background(), nil, turn, &ProgramSender{Send: func(msg tea.Msg) {
+		msgs = append(msgs, msg)
+	}})
+
+	if !result.queued || result.completion != (TaskResultMsg{}) {
+		t.Fatalf("forwardTurnEventStream() result = %#v, want queued failure lifecycle", result)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("messages = %#v, want error event plus failure lifecycle", msgs)
+	}
+	failed := requireTerminalLifecycle(t, msgs[1], eventstream.LifecycleStateFailed)
+	if failed.Lifecycle == nil || failed.Lifecycle.Reason != "provider failed" {
+		t.Fatalf("lifecycle = %#v, want provider failure reason", failed.Lifecycle)
+	}
+}
+
 func TestSubagentAutomaticApprovalReviewShowsHint(t *testing.T) {
 	model := newGatewayEventTestModel()
 	updated, _ := model.Update(eventstream.Envelope{
@@ -171,7 +243,7 @@ func (t *eventStreamApprovalTurn) HandleID() string { return "handle-1" }
 func (t *eventStreamApprovalTurn) RunID() string    { return "run-1" }
 func (t *eventStreamApprovalTurn) TurnID() string   { return "turn-1" }
 func (t *eventStreamApprovalTurn) Events() <-chan eventstream.Envelope {
-	return t.events
+	return eventstream.EnsureTerminalLifecycle(t.events, t.HandleID(), t.RunID(), t.TurnID())
 }
 func (t *eventStreamApprovalTurn) SubmitApproval(_ context.Context, decision control.ApprovalDecision) error {
 	t.decisions <- decision
@@ -179,3 +251,19 @@ func (t *eventStreamApprovalTurn) SubmitApproval(_ context.Context, decision con
 }
 func (t *eventStreamApprovalTurn) Cancel()      {}
 func (t *eventStreamApprovalTurn) Close() error { return nil }
+
+type rawEventStreamTurn struct {
+	events <-chan eventstream.Envelope
+}
+
+func (t *rawEventStreamTurn) HandleID() string { return "handle-1" }
+func (t *rawEventStreamTurn) RunID() string    { return "run-1" }
+func (t *rawEventStreamTurn) TurnID() string   { return "turn-1" }
+func (t *rawEventStreamTurn) Events() <-chan eventstream.Envelope {
+	return t.events
+}
+func (t *rawEventStreamTurn) SubmitApproval(context.Context, control.ApprovalDecision) error {
+	return nil
+}
+func (t *rawEventStreamTurn) Cancel()      {}
+func (t *rawEventStreamTurn) Close() error { return nil }

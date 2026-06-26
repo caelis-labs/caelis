@@ -83,7 +83,7 @@ func TestWindowTitleShowsRunningTick(t *testing.T) {
 	m := NewModel(Config{
 		Workspace: `D:\xue\code\storage`,
 	})
-	m.running = true
+	m.liveTurn.Active = true
 
 	got := m.windowTitle()
 	if !strings.Contains(got, "storage") {

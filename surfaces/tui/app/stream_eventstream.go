@@ -1,8 +1,6 @@
 package tuiapp
 
 import (
-	"context"
-	"errors"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -12,31 +10,29 @@ import (
 )
 
 func (m *Model) handleACPEventEnvelope(env eventstream.Envelope) (tea.Model, tea.Cmd) {
-	if env.Err != nil {
-		if isUserInterruptError(env.Err) {
-			model, cmd := m.handleTaskResultMsg(TaskResultMsg{Err: env.Err, Interrupted: true})
-			return model, cmd
-		}
-		model, cmd := m.handleTaskResultMsg(TaskResultMsg{Err: env.Err})
-		return model, cmd
+	if env.Err != nil || env.Kind == eventstream.KindError {
+		return m, nil
 	}
-	if env.Kind == eventstream.KindError && env.Error != "" {
-		model, cmd := m.handleTaskResultMsg(TaskResultMsg{Err: errors.New(env.Error)})
-		return model, cmd
+	if eventstream.IsTerminalLifecycle(env) {
+		if !m.turnRunning() && !terminalLifecycleHasTranscriptIdentity(env) {
+			return m, nil
+		}
+		model, cmd := m.handleTranscriptEventsMsg(TranscriptEventsMsg{Events: ProjectACPEventToTranscriptEvents(env)})
+		if next, ok := model.(*Model); ok {
+			m = next
+		}
+		finishCmd, _ := m.finishLiveTurnFromEnvelope(env)
+		return m, tea.Batch(cmd, finishCmd)
 	}
 	model, cmd := m.handleTranscriptEventsMsg(TranscriptEventsMsg{Events: ProjectACPEventToTranscriptEvents(env)})
 	return model, tea.Batch(m.applyACPApprovalReviewHint(env), cmd)
 }
 
-func isUserInterruptError(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, context.Canceled) {
-		return true
-	}
-	text := strings.ToLower(strings.TrimSpace(err.Error()))
-	return text == "context canceled" || strings.Contains(text, "context canceled")
+func terminalLifecycleHasTranscriptIdentity(env eventstream.Envelope) bool {
+	return strings.TrimSpace(env.SessionID) != "" ||
+		strings.TrimSpace(env.ScopeID) != "" ||
+		strings.TrimSpace(env.ParticipantID) != "" ||
+		strings.TrimSpace(env.Actor) != ""
 }
 
 func (m *Model) appendEventStreamTranscriptText(text string) (tea.Model, tea.Cmd) {

@@ -159,7 +159,6 @@ func (m *Model) applyTranscriptPlan(event TranscriptEvent) (tea.Model, tea.Cmd) 
 		if block == nil {
 			return m, nil
 		}
-		m.activeParticipantTurnSessionID = strings.TrimSpace(block.SessionID)
 		if !event.OccurredAt.IsZero() && (block.StartedAt.IsZero() || event.OccurredAt.Before(block.StartedAt)) {
 			block.StartedAt = event.OccurredAt
 		}
@@ -368,11 +367,8 @@ func (m *Model) applyTranscriptLifecycle(event TranscriptEvent) (tea.Model, tea.
 			}
 			block.SetStatus(event.State, "", "", event.OccurredAt)
 			if strings.EqualFold(strings.TrimSpace(event.State), "completed") {
-				m.captureLastRunDuration(event.OccurredAt)
-				m.captureLastRunDurationFromMainBlock(block)
-				if m.appendUserTurnDividerIfNeeded(false) {
-					m.showTurnDivider = false
-				}
+				m.captureLiveTurnDuration(event.OccurredAt)
+				m.captureLiveTurnDurationFromMainBlock(block)
 			}
 		}
 		m.markViewportBlockDirty(block.BlockID())

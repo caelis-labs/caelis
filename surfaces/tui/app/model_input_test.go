@@ -444,7 +444,7 @@ func TestImagePasteWhileRunningShowsFeedback(t *testing.T) {
 			return nil, "", nil
 		},
 	})
-	model.running = true
+	model.liveTurn.Active = true
 
 	updated, cmd := model.handleKey(tea.KeyPressMsg(tea.Key{Text: imagePasteKeysForPlatform(runtime.GOOS, isWSL())[0]}))
 	m := updated.(*Model)
@@ -723,7 +723,7 @@ func TestWindowsCtrlVDoesNotFallbackToImageWhileRunning(t *testing.T) {
 			return []string{"shot.png"}, "shot.png", nil
 		},
 	})
-	model.running = true
+	model.liveTurn.Active = true
 	model.keys = defaultKeyMapForPlatform("windows", false)
 
 	updated, _ := model.handleKey(tea.KeyPressMsg(tea.Key{Code: 'v', Mod: tea.ModCtrl}))
@@ -780,7 +780,7 @@ func TestModeToggleRunsWhileRunning(t *testing.T) {
 			return "mode updated", nil
 		},
 	})
-	model.running = true
+	model.liveTurn.Active = true
 
 	updated, cmd := model.handleKey(keyPress("shift+tab"))
 	m := updated.(*Model)

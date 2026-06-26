@@ -57,7 +57,7 @@ func (m *Model) activateSlashArgPickerFromInput(command string) {
 }
 
 func (m *Model) syncSlashInputOverlays() {
-	if m.running {
+	if m.turnRunning() {
 		return
 	}
 	raw := m.textarea.Value()
@@ -81,7 +81,7 @@ func (m *Model) syncSlashInputOverlays() {
 }
 
 func (m *Model) updateSlashArgCandidates() {
-	if !m.slashArgActive || m.cfg.SlashArgComplete == nil || m.running {
+	if !m.slashArgActive || m.cfg.SlashArgComplete == nil || m.turnRunning() {
 		m.slashArgCandidates = nil
 		m.slashArgQuery = ""
 		m.slashArgIndex = 0
@@ -537,7 +537,7 @@ func (m *Model) handleSlashArgKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 		m.syncTextareaFromInput()
 		return true, cmd
 	case key.Matches(msg, m.keys.Accept):
-		if m.running || strings.TrimSpace(m.slashArgCommand) == "" {
+		if m.turnRunning() || strings.TrimSpace(m.slashArgCommand) == "" {
 			return true, nil
 		}
 		if !m.isWizardActive() {

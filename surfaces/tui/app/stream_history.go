@@ -2,7 +2,6 @@ package tuiapp
 
 import (
 	"strings"
-	"time"
 
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/tuikit"
 	"github.com/charmbracelet/x/ansi"
@@ -28,9 +27,7 @@ func (m *Model) resetConversationView() {
 	m.pendingQueue = nil
 	m.hintEntries = nil
 	m.hint = ""
-	m.runStartedAt = time.Time{}
-	m.lastRunDuration = 0
-	m.hasLastRunDuration = false
+	m.liveTurn = liveTurnState{}
 	m.clearSelection()
 	m.clearInputSelection()
 	m.setViewportFollowState(viewportFollowTail)

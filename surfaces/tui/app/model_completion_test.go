@@ -483,7 +483,7 @@ func TestSubagentBindFinalCandidateEnterSubmitsCompletedInput(t *testing.T) {
 		t.Fatal("handleSlashArgKey(enter) = false, want true")
 	}
 	if cmd == nil {
-		t.Fatalf("handleSlashArgKey(enter) command = nil, want submit command; input=%q active=%v command=%q candidates=%#v running=%v executeLineNil=%v", model.textarea.Value(), model.slashArgActive, model.slashArgCommand, model.slashArgCandidates, model.running, model.cfg.ExecuteLine == nil)
+		t.Fatalf("handleSlashArgKey(enter) command = nil, want submit command; input=%q active=%v command=%q candidates=%#v running=%v executeLineNil=%v", model.textarea.Value(), model.slashArgActive, model.slashArgCommand, model.slashArgCandidates, model.turnRunning(), model.cfg.ExecuteLine == nil)
 	}
 	findAndRunTaskResult(cmd(), model)
 	if submitted != "/subagent bind guardian default" {

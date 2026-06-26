@@ -978,18 +978,18 @@ func (m *Model) handleParticipantStatusMsg(msg ParticipantStatusMsg) (tea.Model,
 	return m, m.requestStreamViewportSync()
 }
 
-func (m *Model) finalizeActiveParticipantTurn(interrupted bool, err error) {
+func (m *Model) finalizeActiveParticipantTurn(interrupted bool, err error) bool {
 	if m == nil {
-		return
+		return false
 	}
 	sessionID := strings.TrimSpace(m.activeParticipantTurnSessionID)
 	if sessionID == "" {
-		return
+		return false
 	}
-	block := m.ensureParticipantTurnBlock(sessionID, "")
+	block := m.findParticipantTurnBlock(sessionID)
 	if block == nil {
 		m.activeParticipantTurnSessionID = ""
-		return
+		return false
 	}
 	if !participantTurnIsTerminal(block.Status) {
 		state := "completed"
@@ -1002,6 +1002,26 @@ func (m *Model) finalizeActiveParticipantTurn(interrupted bool, err error) {
 		block.SetStatus(state, "", "", time.Time{})
 	}
 	m.activeParticipantTurnSessionID = ""
+	return participantTurnHasFooter(block)
+}
+
+func (m *Model) findParticipantTurnBlock(sessionID string) *ParticipantTurnBlock {
+	if m == nil {
+		return nil
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil
+	}
+	blockID := ""
+	if m.participantTurnIDs != nil {
+		blockID = strings.TrimSpace(m.participantTurnIDs[sessionID])
+	}
+	if blockID == "" {
+		return nil
+	}
+	block, _ := m.doc.Find(blockID).(*ParticipantTurnBlock)
+	return block
 }
 
 func (m *Model) finalizeActiveMainACPTurn(interrupted bool, err error) {
@@ -1029,7 +1049,7 @@ func (m *Model) finalizeActiveMainACPTurn(interrupted bool, err error) {
 		state = "failed"
 	}
 	block.SetStatus(state, "", "", time.Time{})
-	m.captureLastRunDurationFromMainBlock(block)
+	m.captureLiveTurnDurationFromMainBlock(block)
 	m.activeMainACPTurnID = ""
 	m.pendingMainACPSessionID = ""
 	m.pendingMainACPStartedAt = time.Time{}

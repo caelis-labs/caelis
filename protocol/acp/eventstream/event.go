@@ -82,9 +82,18 @@ type Participant struct {
 }
 
 type Lifecycle struct {
-	State  string `json:"state,omitempty"`
-	Reason string `json:"reason,omitempty"`
+	State      string `json:"state,omitempty"`
+	Reason     string `json:"reason,omitempty"`
+	StopReason string `json:"stopReason,omitempty"`
 }
+
+const (
+	LifecycleStateRunning     = "running"
+	LifecycleStateCompleted   = "completed"
+	LifecycleStateFailed      = "failed"
+	LifecycleStateInterrupted = "interrupted"
+	LifecycleStateCancelled   = "cancelled"
+)
 
 func Error(err error) Envelope {
 	text := ""
@@ -92,6 +101,118 @@ func Error(err error) Envelope {
 		text = err.Error()
 	}
 	return Envelope{Kind: KindError, Err: err, Error: strings.TrimSpace(text)}
+}
+
+func TurnLifecycle(handleID string, runID string, turnID string, state string, reason string, stopReason string, occurredAt time.Time) Envelope {
+	if occurredAt.IsZero() {
+		occurredAt = time.Now()
+	}
+	return Envelope{
+		Kind:       KindLifecycle,
+		HandleID:   strings.TrimSpace(handleID),
+		RunID:      strings.TrimSpace(runID),
+		TurnID:     strings.TrimSpace(turnID),
+		OccurredAt: occurredAt,
+		Scope:      ScopeMain,
+		Lifecycle: &Lifecycle{
+			State:      strings.TrimSpace(state),
+			Reason:     strings.TrimSpace(reason),
+			StopReason: strings.TrimSpace(stopReason),
+		},
+	}
+}
+
+func TurnCompleted(handleID string, runID string, turnID string, occurredAt time.Time) Envelope {
+	return TurnLifecycle(handleID, runID, turnID, LifecycleStateCompleted, "", schema.StopReasonEndTurn, occurredAt)
+}
+
+func TurnFailed(handleID string, runID string, turnID string, reason string, occurredAt time.Time) Envelope {
+	return TurnLifecycle(handleID, runID, turnID, LifecycleStateFailed, reason, "", occurredAt)
+}
+
+func TurnCancelled(handleID string, runID string, turnID string, reason string, occurredAt time.Time) Envelope {
+	return TurnLifecycle(handleID, runID, turnID, LifecycleStateCancelled, reason, schema.StopReasonCancelled, occurredAt)
+}
+
+func EnsureTerminalLifecycle(events <-chan Envelope, handleID string, runID string, turnID string) <-chan Envelope {
+	out := make(chan Envelope, 32)
+	go func() {
+		defer close(out)
+		if events == nil {
+			out <- TurnCompleted(handleID, runID, turnID, time.Now())
+			return
+		}
+		terminalSeen := false
+		failureReason := ""
+		cancelled := false
+		for env := range events {
+			if terminalSeen {
+				continue
+			}
+			if IsTerminalLifecycle(env) {
+				terminalSeen = true
+				out <- env
+				continue
+			}
+			if env.Err != nil || env.Kind == KindError {
+				failureReason = strings.TrimSpace(firstNonEmpty(env.Error, errorString(env.Err)))
+				cancelled = IsCancelledReason(failureReason)
+			}
+			out <- env
+		}
+		if terminalSeen {
+			return
+		}
+		switch {
+		case cancelled:
+			out <- TurnCancelled(handleID, runID, turnID, failureReason, time.Now())
+		case failureReason != "":
+			out <- TurnFailed(handleID, runID, turnID, failureReason, time.Now())
+		default:
+			out <- TurnCompleted(handleID, runID, turnID, time.Now())
+		}
+	}()
+	return out
+}
+
+func IsTerminalLifecycle(env Envelope) bool {
+	if env.Kind != KindLifecycle || env.Lifecycle == nil {
+		return false
+	}
+	return IsTerminalLifecycleState(env.Lifecycle.State)
+}
+
+func IsCancelledReason(reason string) bool {
+	reason = strings.ToLower(strings.TrimSpace(reason))
+	return reason == "context canceled" ||
+		strings.Contains(reason, "context canceled") ||
+		strings.Contains(reason, "cancelled") ||
+		strings.Contains(reason, "canceled")
+}
+
+func IsTerminalLifecycleState(state string) bool {
+	switch strings.ToLower(strings.TrimSpace(state)) {
+	case LifecycleStateCompleted, LifecycleStateFailed, LifecycleStateInterrupted, LifecycleStateCancelled, "canceled", "terminated":
+		return true
+	default:
+		return false
+	}
+}
+
+func errorString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 func CloneEnvelope(in Envelope) Envelope {

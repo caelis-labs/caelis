@@ -1,14 +1,13 @@
 package tuiapp
 
 import (
-	"context"
-	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
 )
 
 func newGatewayEventTestModel() *Model {
@@ -157,11 +156,8 @@ func TestGatewayContextCanceledRendersUserInterrupt(t *testing.T) {
 		}}))
 
 	m := updated.(*Model)
-	updated, _ = m.Update(gatewayEventMsg(gateway.EventEnvelope{
-		Err: &gateway.Error{
-			Message: "providers: sse scanner: context canceled",
-			Cause:   context.Canceled,
-		}}))
+	m.liveTurn.Active = true
+	updated, _ = m.Update(eventstream.TurnCancelled("handle-1", "run-1", "turn-1", "context canceled", time.Now()))
 
 	m = updated.(*Model)
 
@@ -196,14 +192,52 @@ func TestGatewayContextCanceledRendersUserInterrupt(t *testing.T) {
 	}
 }
 
+func TestIdleCancelledLifecycleWithIdentityRendersInterruptedStatus(t *testing.T) {
+	model := newGatewayEventTestModel()
+
+	updated, _ := model.Update(gatewayEventMsg(gateway.EventEnvelope{
+		Event: gateway.Event{
+			Kind:       gateway.EventKindAssistantMessage,
+			SessionRef: session.SessionRef{SessionID: "root-session"},
+			Narrative: &gateway.NarrativePayload{
+				Role:  gateway.NarrativeRoleAssistant,
+				Text:  "partial answer",
+				Final: true,
+				Scope: gateway.EventScopeMain,
+			},
+		}}))
+	model = updated.(*Model)
+
+	cancelled := eventstream.TurnCancelled("handle-1", "run-1", "turn-1", "context canceled", time.Now())
+	cancelled.SessionID = "root-session"
+	updated, _ = model.Update(cancelled)
+	model = updated.(*Model)
+
+	var renderedMain string
+	for _, item := range model.doc.Blocks() {
+		block, ok := item.(*MainACPTurnBlock)
+		if !ok {
+			continue
+		}
+		rows := block.Render(BlockRenderContext{Width: 80, TermWidth: 80, Theme: model.theme})
+		plain := make([]string, 0, len(rows))
+		for _, row := range rows {
+			plain = append(plain, row.Plain)
+		}
+		renderedMain = strings.Join(plain, "\n")
+	}
+	if !strings.Contains(renderedMain, "⊘ interrupted") {
+		t.Fatalf("main turn render = %q, want cancelled lifecycle rendered as interrupted", renderedMain)
+	}
+}
+
 func TestTaskResultErrorRendersSingleLineFailure(t *testing.T) {
 	model := newGatewayEventTestModel()
 	block := model.ensureMainACPTurnBlock("root-session")
 	block.AppendStreamChunk(SEAssistant, "transient text")
+	model.liveTurn.Active = true
 
-	updated, _ := model.Update(TaskResultMsg{
-		Err: errors.New("invalid model tool call for RUN_COMMAND: unexpected EOF\nprovider detail"),
-	})
+	updated, _ := model.Update(eventstream.TurnFailed("handle-1", "run-1", "turn-1", "invalid model tool call for RUN_COMMAND: unexpected EOF\nprovider detail", time.Now()))
 	model = updated.(*Model)
 	model.syncViewportContent()
 

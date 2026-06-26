@@ -1,7 +1,6 @@
 package tuiapp
 
 import (
-	"errors"
 	"image/color"
 	"strings"
 	"testing"
@@ -11,6 +10,8 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
+	"github.com/OnslaughtSnail/caelis/surfaces/transcript"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/tuikit"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -229,7 +230,7 @@ func TestStatusTickSchedulesRefreshWithoutCallingDriverInUpdate(t *testing.T) {
 
 func TestRunningInterruptSchedulesCancelWithoutCallingDriverInUpdate(t *testing.T) {
 	model := NewModel(Config{})
-	model.running = true
+	model.liveTurn.Active = true
 	called := false
 	model.cfg.CancelRunning = func() bool {
 		called = true
@@ -345,8 +346,8 @@ func TestUnknownSlashUserMessageUsesNormalPromptBehavior(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("submitLine() command = nil, want ExecuteLine command")
 	}
-	if !model.showTurnDivider {
-		t.Fatal("showTurnDivider = false, want normal user prompt divider")
+	if !model.liveTurn.Divider {
+		t.Fatal("liveTurn.Divider = false, want normal user prompt divider")
 	}
 	if len(model.history) != 1 || model.history[0] != line {
 		t.Fatalf("history = %#v, want unknown slash user message recorded", model.history)
@@ -364,8 +365,8 @@ func TestKnownSlashCommandKeepsControlPromptBehavior(t *testing.T) {
 		t.Fatal("submitLine() command = nil, want ExecuteLine command")
 	}
 
-	if model.showTurnDivider {
-		t.Fatal("showTurnDivider = true, want control command to suppress user prompt divider")
+	if model.liveTurn.Divider {
+		t.Fatal("liveTurn.Divider = true, want control command to suppress user prompt divider")
 	}
 	if len(model.history) != 0 {
 		t.Fatalf("history = %#v, want control command omitted", model.history)
@@ -383,8 +384,8 @@ func TestDynamicAgentSlashCommandUsesNormalTurnBehavior(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("submitLine() command = nil, want ExecuteLine command")
 	}
-	if !model.showTurnDivider {
-		t.Fatal("showTurnDivider = false, want agent slash prompt to behave like a normal user turn")
+	if !model.liveTurn.Divider {
+		t.Fatal("liveTurn.Divider = false, want agent slash prompt to behave like a normal user turn")
 	}
 	if len(model.history) != 1 || model.history[0] != line {
 		t.Fatalf("history = %#v, want agent slash prompt recorded", model.history)
@@ -400,7 +401,7 @@ func TestRunningPromptSubmissionQueuesGuidanceForActiveTurn(t *testing.T) {
 			return TaskResultMsg{ContinueRunning: true, SuppressTurnDivider: true}
 		},
 	})
-	model.running = true
+	model.liveTurn.Active = true
 
 	updated, cmd := model.submitLine("new prompt while running")
 	model = updated.(*Model)
@@ -421,7 +422,7 @@ func TestRunningPromptSubmissionQueuesGuidanceForActiveTurn(t *testing.T) {
 	if submitted.Text != "new prompt while running" {
 		t.Fatalf("submitted = %#v, want running guidance submission", submitted)
 	}
-	if !model.running {
+	if !model.turnRunning() {
 		t.Fatal("running = false after guidance submit result, want active turn to continue")
 	}
 
@@ -441,7 +442,7 @@ func TestRunningPromptSubmissionDefersForNonBuiltInAgentUntilIdle(t *testing.T) 
 			return TaskResultMsg{ContinueRunning: true, SuppressTurnDivider: true}
 		},
 	})
-	model.running = true
+	model.liveTurn.Active = true
 
 	updated, cmd := model.submitLine("prompt for next idle")
 	model = updated.(*Model)
@@ -463,7 +464,7 @@ func TestRunningPromptSubmissionDefersForNonBuiltInAgentUntilIdle(t *testing.T) 
 	if cmd == nil {
 		t.Fatal("TaskResultMsg command = nil, want deferred prompt submission")
 	}
-	if !model.running {
+	if !model.turnRunning() {
 		t.Fatal("running = false after deferred prompt dispatch, want new turn running")
 	}
 	if len(model.pendingQueue) != 0 {
@@ -475,7 +476,7 @@ func TestRunningPromptSubmissionDefersForNonBuiltInAgentUntilIdle(t *testing.T) 
 	}
 }
 
-func TestTaskResultDividerRendersImmediatelyWhenViewportHasDirtyBlock(t *testing.T) {
+func TestTerminalLifecycleDividerRendersImmediatelyWhenViewportHasDirtyBlock(t *testing.T) {
 	model := NewModel(Config{NoColor: true})
 	model.viewport.SetWidth(72)
 	model.viewport.SetHeight(20)
@@ -487,11 +488,12 @@ func TestTaskResultDividerRendersImmediatelyWhenViewportHasDirtyBlock(t *testing
 	model.markViewportStructureDirty()
 	model.syncViewportContent()
 
-	model.showTurnDivider = true
-	model.runStartedAt = time.Now().Add(-3 * time.Second)
+	model.liveTurn.Divider = true
+	model.liveTurn.Active = true
+	model.liveTurn.StartedAt = time.Now().Add(-3 * time.Second)
 	model.markViewportBlockDirty(block.BlockID())
 
-	updated, _ := model.Update(TaskResultMsg{})
+	updated, _ := model.Update(eventstream.TurnCompleted("", "", "", time.Now()))
 	model = updated.(*Model)
 	model.syncViewportContent()
 
@@ -516,8 +518,8 @@ func TestDefaultPromptFinalAnswerUsesLocalTaskResultDivider(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("submitLine() command = nil, want ExecuteLine command")
 	}
-	if !model.showTurnDivider {
-		t.Fatal("showTurnDivider = false, want local TUI divider for default prompt")
+	if !model.liveTurn.Divider {
+		t.Fatal("liveTurn.Divider = false, want local TUI divider for default prompt")
 	}
 
 	updated, _ = model.Update(TranscriptEventsMsg{Events: []TranscriptEvent{{
@@ -548,16 +550,11 @@ func TestMainLifecycleCompletionAppendsTurnDividerOnce(t *testing.T) {
 	end := start.Add(7400 * time.Millisecond)
 	block := model.ensureMainACPTurnBlock("root-session")
 	block.Events = append(block.Events, SubagentEvent{Kind: SEAssistant, Text: "done", Done: true})
-	model.showTurnDivider = true
-	model.runStartedAt = start
+	model.liveTurn.Divider = true
+	model.liveTurn.StartedAt = start
+	model.liveTurn.Active = true
 
-	updated, _ := model.Update(TranscriptEventsMsg{Events: []TranscriptEvent{{
-		Kind:       TranscriptEventLifecycle,
-		Scope:      ACPProjectionMain,
-		ScopeID:    "root-session",
-		State:      "completed",
-		OccurredAt: end,
-	}}})
+	updated, _ := model.Update(eventstream.TurnCompleted("handle-1", "run-1", "turn-1", end))
 	model = updated.(*Model)
 
 	if got := countDividerBlocks(model); got != 1 {
@@ -568,10 +565,73 @@ func TestMainLifecycleCompletionAppendsTurnDividerOnce(t *testing.T) {
 		t.Fatalf("last block = %#v, want 7.4s divider", model.doc.Last())
 	}
 
-	updated, _ = model.Update(TaskResultMsg{})
+	updated, _ = model.Update(eventstream.TurnCompleted("handle-1", "run-1", "turn-1", end.Add(time.Second)))
 	model = updated.(*Model)
 	if got := countDividerBlocks(model); got != 1 {
-		t.Fatalf("divider blocks after TaskResult = %d, want lifecycle divider to be reused", got)
+		t.Fatalf("divider blocks after duplicate lifecycle = %d, want lifecycle divider to be reused", got)
+	}
+}
+
+func TestMainPlanUpdateDoesNotConsumeTurnDivider(t *testing.T) {
+	model := NewModel(Config{NoColor: true})
+	start := time.Now().Add(-4 * time.Second)
+	end := start.Add(4 * time.Second)
+	model.liveTurn.Divider = true
+	model.liveTurn.StartedAt = start
+	model.liveTurn.Active = true
+
+	updated, _ := model.Update(TranscriptEventsMsg{Events: []TranscriptEvent{
+		{
+			Kind:       TranscriptEventPlan,
+			Scope:      ACPProjectionMain,
+			ScopeID:    "root-session",
+			OccurredAt: start.Add(time.Second),
+			PlanEntries: []transcript.PlanEntry{{
+				Content: "check current changes",
+				Status:  "completed",
+			}},
+		},
+		{
+			Kind:          TranscriptEventNarrative,
+			Scope:         ACPProjectionMain,
+			ScopeID:       "root-session",
+			NarrativeKind: TranscriptNarrativeAssistant,
+			Text:          "done",
+			Final:         true,
+			OccurredAt:    end,
+		},
+	}})
+	model = updated.(*Model)
+
+	if model.activeParticipantTurnSessionID != "" {
+		t.Fatalf("activeParticipantTurnSessionID = %q, want main plan not to mark a participant turn active", model.activeParticipantTurnSessionID)
+	}
+
+	updated, _ = model.Update(eventstream.TurnCompleted("handle-1", "run-1", "turn-1", end))
+	model = updated.(*Model)
+
+	if got := countDividerBlocks(model); got != 1 {
+		t.Fatalf("divider blocks after main plan lifecycle = %d, want 1", got)
+	}
+	if _, ok := model.doc.Last().(*DividerBlock); !ok {
+		t.Fatalf("last block = %T, want divider after main plan lifecycle", model.doc.Last())
+	}
+	if got := countParticipantTurnBlocks(model); got != 0 {
+		t.Fatalf("participant turn blocks after main plan lifecycle = %d, want 0", got)
+	}
+}
+
+func TestIdleTerminalLifecycleDoesNotAppendTranscriptEvent(t *testing.T) {
+	model := NewModel(Config{NoColor: true})
+
+	updated, _ := model.Update(eventstream.TurnCompleted("handle-1", "run-1", "turn-1", time.Now()))
+	model = updated.(*Model)
+
+	if model.doc.Len() != 0 {
+		t.Fatalf("doc blocks = %#v, want idle terminal lifecycle ignored", model.doc.Blocks())
+	}
+	if model.turnRunning() {
+		t.Fatal("turnRunning = true, want idle terminal lifecycle to keep turn idle")
 	}
 }
 
@@ -579,7 +639,8 @@ func TestMainLifecycleCompletionUsesTranscriptTimingForDivider(t *testing.T) {
 	model := NewModel(Config{NoColor: true})
 	start := time.Now().Add(-7400 * time.Millisecond)
 	end := start.Add(7400 * time.Millisecond)
-	model.showTurnDivider = true
+	model.liveTurn.Divider = true
+	model.liveTurn.Active = true
 
 	updated, _ := model.Update(TranscriptEventsMsg{Events: []TranscriptEvent{
 		{
@@ -598,14 +659,10 @@ func TestMainLifecycleCompletionUsesTranscriptTimingForDivider(t *testing.T) {
 			Final:         true,
 			OccurredAt:    end,
 		},
-		{
-			Kind:       TranscriptEventLifecycle,
-			Scope:      ACPProjectionMain,
-			ScopeID:    "root-session",
-			State:      "completed",
-			OccurredAt: end,
-		},
 	}})
+	model = updated.(*Model)
+
+	updated, _ = model.Update(eventstream.TurnCompleted("handle-1", "run-1", "turn-1", end))
 	model = updated.(*Model)
 
 	divider, _ := model.doc.Last().(*DividerBlock)
@@ -614,34 +671,22 @@ func TestMainLifecycleCompletionUsesTranscriptTimingForDivider(t *testing.T) {
 	}
 }
 
-func TestMainLifecycleFailureWaitsForTaskResultBeforeDivider(t *testing.T) {
+func TestTerminalLifecycleFailureAppendsErrorBeforeDivider(t *testing.T) {
 	model := NewModel(Config{NoColor: true})
 	start := time.Now().Add(-7400 * time.Millisecond)
 	end := start.Add(7400 * time.Millisecond)
 	block := model.ensureMainACPTurnBlock("root-session")
 	block.Events = append(block.Events, SubagentEvent{Kind: SEAssistant, Text: "partial", Done: true})
-	model.showTurnDivider = true
-	model.runStartedAt = start
+	model.liveTurn.Divider = true
+	model.liveTurn.StartedAt = start
+	model.liveTurn.Active = true
 
-	updated, _ := model.Update(TranscriptEventsMsg{Events: []TranscriptEvent{{
-		Kind:       TranscriptEventLifecycle,
-		Scope:      ACPProjectionMain,
-		ScopeID:    "root-session",
-		State:      "failed",
-		OccurredAt: end,
-	}}})
-	model = updated.(*Model)
-
-	if got := countDividerBlocks(model); got != 0 {
-		t.Fatalf("divider blocks after failed lifecycle = %d, want 0", got)
-	}
-
-	updated, _ = model.Update(TaskResultMsg{Err: errors.New("provider failed")})
+	updated, _ := model.Update(eventstream.TurnFailed("handle-1", "run-1", "turn-1", "provider failed", end))
 	model = updated.(*Model)
 
 	blocks := model.doc.Blocks()
 	if got := countDividerBlocks(model); got != 1 {
-		t.Fatalf("divider blocks after TaskResult error = %d, want 1", got)
+		t.Fatalf("divider blocks after failed lifecycle = %d, want 1", got)
 	}
 	if len(blocks) < 2 {
 		t.Fatalf("doc blocks = %#v, want error block followed by divider", blocks)
@@ -659,6 +704,16 @@ func countDividerBlocks(model *Model) int {
 	count := 0
 	for _, block := range model.doc.Blocks() {
 		if _, ok := block.(*DividerBlock); ok {
+			count++
+		}
+	}
+	return count
+}
+
+func countParticipantTurnBlocks(model *Model) int {
+	count := 0
+	for _, block := range model.doc.Blocks() {
+		if _, ok := block.(*ParticipantTurnBlock); ok {
 			count++
 		}
 	}
@@ -794,8 +849,7 @@ func TestRunningGatewayToolCallIsVisibleBeforeTaskCompletes(t *testing.T) {
 
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
 	m := updated.(*Model)
-	updated, _ = m.Update(SetRunningMsg{Running: true})
-	m = updated.(*Model)
+	m.beginLiveTurn(SubmissionModeDefault, false, time.Now())
 	updated, _ = m.Update(gatewayEventMsg(gateway.EventEnvelope{
 		Event: gateway.Event{
 			Kind:       gateway.EventKindToolCall,
@@ -829,8 +883,7 @@ func TestPendingGatewayToolCallIsVisibleBeforeTaskCompletes(t *testing.T) {
 
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
 	m := updated.(*Model)
-	updated, _ = m.Update(SetRunningMsg{Running: true})
-	m = updated.(*Model)
+	m.beginLiveTurn(SubmissionModeDefault, false, time.Now())
 	updated, _ = m.Update(gatewayEventMsg(gateway.EventEnvelope{
 		Event: gateway.Event{
 			Kind:       gateway.EventKindToolCall,

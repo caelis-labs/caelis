@@ -43,7 +43,7 @@ func renderEventPolicyFor(msg tea.Msg) (renderEventPolicy, bool) {
 		return renderEventPolicy{lane: renderLaneLog, flushSmoothing: true, dismissHints: true}, true
 	case ParticipantStatusMsg:
 		return renderEventPolicy{lane: renderLaneParticipant, flushSmoothing: true, flushLogChunks: true}, true
-	case PlanUpdateMsg, SetHintMsg, ApprovalReviewHintMsg, SetRunningMsg,
+	case PlanUpdateMsg, SetHintMsg, ApprovalReviewHintMsg,
 		SetStatusMsg, StatusRefreshResultMsg, SetCommandsMsg, AttachmentCountMsg,
 		RunningInterruptResultMsg, SandboxProgressMsg:
 		return renderEventPolicy{lane: renderLaneUIState}, true
@@ -233,8 +233,6 @@ func (m *Model) dispatchRenderEvent(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	case ApprovalReviewHintMsg:
 		model, cmd := m.handleApprovalReviewHintMsg(typed)
 		return model, tea.Batch(policyCmd, cmd), true
-	case SetRunningMsg:
-		return m.handleSetRunningMsg(typed), policyCmd, true
 	case SetStatusMsg:
 		return m.handleSetStatusMsg(typed), policyCmd, true
 	case StatusRefreshResultMsg:
@@ -390,19 +388,6 @@ func (m *Model) handleApprovalReviewHintMsg(msg ApprovalReviewHintMsg) (tea.Mode
 	return m, m.resumeRunningAnimationIfNeeded()
 }
 
-func (m *Model) handleSetRunningMsg(msg SetRunningMsg) tea.Model {
-	wasRunning := m.running
-	m.running = msg.Running
-	if msg.Running && !wasRunning {
-		m.startRunningAnimation()
-	}
-	if !msg.Running {
-		m.stopRunningAnimation()
-		m.runStartedAt = time.Time{}
-	}
-	return m
-}
-
 func (m *Model) handleSetStatusMsg(msg SetStatusMsg) tea.Model {
 	welcomeMayChange := false
 	if workspace := strings.TrimSpace(msg.Workspace); workspace != "" {
@@ -551,56 +536,19 @@ func (m *Model) handleTaskResultMsg(msg TaskResultMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
-	if msg.Interrupted {
-		m.discardActiveAssistantStream()
-	} else {
-		m.flushStream()
-		m.finalizeAssistantBlock()
-		m.finalizeReasoningBlock()
+	if msg.SuppressTurnDivider {
+		m.liveTurn.Divider = false
 	}
-	m.finalizeActiveMainACPTurn(msg.Interrupted, msg.Err)
-	m.finalizeActiveParticipantTurn(msg.Interrupted, msg.Err)
-	m.captureLastRunDuration(time.Time{})
-	var nextPending pendingPrompt
-	hasNextPending := false
-	if msg.Err == nil && !msg.Interrupted && !msg.ExitNow {
-		nextPending, hasNextPending = m.takeNextDeferredPendingPrompt()
+	env := terminalLifecycleForTaskResult(msg, time.Now())
+	model, cmd := m.handleACPEventEnvelope(env)
+	if next, ok := model.(*Model); ok {
+		m = next
 	}
-	m.discardDispatchedPendingPrompts()
-	if !hasNextPending && (msg.Err != nil || msg.Interrupted || msg.ExitNow) {
-		m.pendingQueue = nil
-	}
-	m.running = false
-	m.runningInterruptRequested = false
-	m.sandboxProgress = nil
-	m.stopRunningAnimation()
-	m.planEntries = m.planEntries[:0]
-	m.clearInputAttachments()
-	m.syncTextareaChrome()
-	m.clearInputOverlays()
-	if msg.Err != nil && !msg.Interrupted {
-		errText := strings.TrimSpace(msg.Err.Error())
-		isPromptCancel := errText == "cli: input interrupted" ||
-			errText == "cli: input eof" ||
-			errText == PromptErrInterrupt ||
-			errText == PromptErrEOF
-		if !isPromptCancel {
-			errLine := terminalErrorLine(msg.Err)
-			m.commitLine(errLine)
-		}
-	}
-	m.appendUserTurnDividerIfNeeded(msg.SuppressTurnDivider)
-	m.showTurnDivider = false
-	m.ensureViewportLayout()
-	m.syncViewportContent()
 	if msg.ExitNow {
 		m.quit = true
-		return m, tea.Quit
+		return m, tea.Batch(cmd, tea.Quit)
 	}
-	if hasNextPending {
-		return m.submitPendingPrompt(nextPending)
-	}
-	return m, nil
+	return m, cmd
 }
 
 func terminalErrorLine(err error) string {
@@ -624,7 +572,7 @@ func (m *Model) handleRunningInterruptResultMsg(msg RunningInterruptResultMsg) (
 		return m, nil
 	}
 	m.runningInterruptRequested = false
-	if !m.running {
+	if !m.turnRunning() {
 		return m, nil
 	}
 	return m, m.showHint("interrupt request did not reach the running task", hintOptions{
@@ -677,31 +625,8 @@ func (m *Model) lastBlockHasParticipantTurnFooter() bool {
 	return participantTurnHasFooter(block)
 }
 
-func (m *Model) captureLastRunDuration(endedAt time.Time) {
-	if m == nil || m.runStartedAt.IsZero() {
-		return
-	}
-	if endedAt.IsZero() || endedAt.Before(m.runStartedAt) {
-		endedAt = time.Now()
-	}
-	m.lastRunDuration = endedAt.Sub(m.runStartedAt)
-	m.hasLastRunDuration = true
-	m.runStartedAt = time.Time{}
-}
-
-func (m *Model) captureLastRunDurationFromMainBlock(block *MainACPTurnBlock) {
-	if m == nil || block == nil || m.hasLastRunDuration {
-		return
-	}
-	if block.StartedAt.IsZero() || block.EndedAt.IsZero() || !block.EndedAt.After(block.StartedAt) {
-		return
-	}
-	m.lastRunDuration = block.EndedAt.Sub(block.StartedAt)
-	m.hasLastRunDuration = true
-}
-
 func (m *Model) appendUserTurnDividerIfNeeded(suppress bool) bool {
-	if m == nil || m.doc == nil || suppress || !m.showTurnDivider || m.doc.Len() == 0 {
+	if m == nil || m.doc == nil || suppress || !m.liveTurn.Divider || m.doc.Len() == 0 {
 		return false
 	}
 	if m.lastBlockHasParticipantTurnFooter() || m.lastBlockIsDivider() || !m.lastBlockHasContent() {

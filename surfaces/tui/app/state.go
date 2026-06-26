@@ -54,6 +54,15 @@ type hintEntry struct {
 	clearOnMessage bool
 }
 
+type liveTurnState struct {
+	Active          bool
+	Mode            SubmissionMode
+	Divider         bool
+	StartedAt       time.Time
+	LastDuration    time.Duration
+	HasLastDuration bool
+}
+
 var runningSpinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
 var runningCarouselLines = []string{
@@ -344,10 +353,7 @@ type Model struct {
 	hasCommittedLine    bool
 	planEntries         []planEntryState
 	welcomeCardPending  bool
-	runStartedAt        time.Time
-	lastRunDuration     time.Duration
-	hasLastRunDuration  bool
-	showTurnDivider     bool
+	liveTurn            liveTurnState
 
 	// Transient log replacement tracking — now uses block IDs.
 	transientBlockID string
@@ -387,7 +393,6 @@ type Model struct {
 	// --- Overlay state (unified overlay management) ---
 	OverlayState
 
-	running bool
 	spinner spinner.Model
 	quit    bool
 

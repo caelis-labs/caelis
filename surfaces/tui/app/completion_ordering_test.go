@@ -86,11 +86,9 @@ func TestControlServiceExecuteLineCmdReturnsNilWhenSenderQueuesCompletion(t *tes
 		t.Fatalf("executeLineCmd() = %#v, want nil after queued completion", msg)
 	}
 	if len(msgs) != 2 {
-		t.Fatalf("messages = %#v, want streamed event plus queued completion", msgs)
+		t.Fatalf("messages = %#v, want streamed event plus queued lifecycle completion", msgs)
 	}
-	if _, ok := msgs[1].(TaskResultMsg); !ok {
-		t.Fatalf("last message = %#v, want queued TaskResultMsg", msgs[1])
-	}
+	requireTerminalLifecycle(t, msgs[1], eventstream.LifecycleStateCompleted)
 }
 
 func TestExecuteLineViaDriverDoesNotWaitForTerminalStreamToClose(t *testing.T) {
@@ -203,13 +201,10 @@ func TestExecuteLineViaDriverQueuesErrorCompletion(t *testing.T) {
 		t.Fatalf("executeLineViaControlService() err = %v", result.Err)
 	}
 	assertNoLocalTurnCompletion(t, result)
-	if len(msgs) != 1 {
-		t.Fatalf("messages = %#v, want only provider error completion", msgs)
+	if len(msgs) != 2 {
+		t.Fatalf("messages = %#v, want provider error event plus failure lifecycle", msgs)
 	}
-	completion, ok := msgs[0].(TaskResultMsg)
-	if !ok || completion.Err == nil {
-		t.Fatalf("message = %#v, want error TaskResultMsg", msgs[0])
-	}
+	requireTerminalLifecycle(t, msgs[1], eventstream.LifecycleStateFailed)
 }
 
 func TestForwardTurnEventStreamCancelQueuesInterruptedCompletion(t *testing.T) {
@@ -228,15 +223,9 @@ func TestForwardTurnEventStreamCancelQueuesInterruptedCompletion(t *testing.T) {
 		t.Fatalf("forwardTurnEventStream() result = %#v, want queued command no-op", result)
 	}
 	if len(msgs) != 1 {
-		t.Fatalf("messages = %#v, want interrupted completion only", msgs)
+		t.Fatalf("messages = %#v, want cancelled lifecycle only", msgs)
 	}
-	completion, ok := msgs[0].(TaskResultMsg)
-	if !ok {
-		t.Fatalf("message = %#v, want TaskResultMsg", msgs[0])
-	}
-	if !completion.Interrupted || completion.Err != nil {
-		t.Fatalf("completion = %#v, want interrupted context cancellation", completion)
-	}
+	requireTerminalLifecycle(t, msgs[0], eventstream.LifecycleStateCancelled)
 }
 
 func terminalStreamEnvelope(callID string, terminalID string, text string) gateway.EventEnvelope {
@@ -309,7 +298,7 @@ func assertTerminalStreamBeforeSenderCompletion(t *testing.T, msgs []tea.Msg, wa
 		if env, ok := msg.(eventstream.Envelope); ok && acpUpdateTerminalText(env.Update) == want {
 			streamIndex = i
 		}
-		if _, ok := msg.(TaskResultMsg); ok {
+		if env, ok := msg.(eventstream.Envelope); ok && eventstream.IsTerminalLifecycle(env) {
 			completionIndex = i
 			break
 		}
@@ -318,11 +307,26 @@ func assertTerminalStreamBeforeSenderCompletion(t *testing.T, msgs []tea.Msg, wa
 		t.Fatalf("messages = %#v, want forwarded terminal stream event before completion", msgs)
 	}
 	if completionIndex < 0 {
-		t.Fatalf("messages = %#v, want sender TaskResultMsg completion", msgs)
+		t.Fatalf("messages = %#v, want sender terminal lifecycle completion", msgs)
 	}
 	if completionIndex < streamIndex {
-		t.Fatalf("messages = %#v, want terminal stream before sender TaskResultMsg", msgs)
+		t.Fatalf("messages = %#v, want terminal stream before sender terminal lifecycle", msgs)
 	}
+}
+
+func requireTerminalLifecycle(t *testing.T, msg tea.Msg, state string) eventstream.Envelope {
+	t.Helper()
+	env, ok := msg.(eventstream.Envelope)
+	if !ok {
+		t.Fatalf("message = %#v, want terminal lifecycle envelope", msg)
+	}
+	if !eventstream.IsTerminalLifecycle(env) {
+		t.Fatalf("envelope = %#v, want terminal lifecycle", env)
+	}
+	if env.Lifecycle == nil || env.Lifecycle.State != state {
+		t.Fatalf("lifecycle = %#v, want state %q", env.Lifecycle, state)
+	}
+	return env
 }
 
 func containsTerminalStream(msgs []tea.Msg, want string) bool {

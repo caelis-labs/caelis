@@ -103,7 +103,7 @@ func (d *Adapter) startSidecarTurn(ctx context.Context, req startSidecarTurnRequ
 	if result.Handle == nil {
 		return nil, nil
 	}
-	turn := gatewayTurn{handle: result.Handle}
+	turn := &gatewayTurn{handle: result.Handle}
 	if req.DetachOnComplete {
 		return newDetachOnCompleteTurn(turn, func() {
 			_ = d.detachSideAgent(ctx, updated.SessionRef, participantID, "side_agent_complete")
@@ -210,7 +210,7 @@ func (d *Adapter) ContinueSubagent(ctx context.Context, handle string, prompt st
 	if result.Handle == nil {
 		return nil, nil
 	}
-	return gatewayTurn{handle: result.Handle}, nil
+	return &gatewayTurn{handle: result.Handle}, nil
 }
 
 type detachOnCompleteTurn struct {

@@ -69,7 +69,7 @@ func (m *Model) handlePaletteKey(msg tea.KeyMsg) tea.Cmd {
 }
 
 func (m *Model) requestCompletionRefresh() tea.Cmd {
-	if m == nil || m.running {
+	if m == nil || m.turnRunning() {
 		return nil
 	}
 	m.completionRefreshSeq++
@@ -88,7 +88,7 @@ func (m *Model) handleCompletionRefreshMsg(msg completionRefreshMsg) (tea.Model,
 }
 
 func (m *Model) refreshCompletionOverlaysBeforeAccept(msg tea.KeyMsg) {
-	if m == nil || m.running || (!key.Matches(msg, m.keys.Accept) && !key.Matches(msg, m.keys.Complete)) {
+	if m == nil || m.turnRunning() || (!key.Matches(msg, m.keys.Accept) && !key.Matches(msg, m.keys.Complete)) {
 		return
 	}
 	switch {
@@ -154,7 +154,7 @@ func (m *Model) refreshMentionWithLimit(limit int) {
 		previousSelected = m.mentionCandidates[m.mentionIndex]
 	}
 	m.clearMention()
-	if m.cfg.MentionComplete == nil || m.running {
+	if m.cfg.MentionComplete == nil || m.turnRunning() {
 		return
 	}
 	start, end, query, prefix, ok := mentionQueryAtCursorWithPrefix(m.input, m.cursor)
@@ -305,7 +305,7 @@ func (m *Model) refreshSkillWithLimit(limit int) {
 		previousSelected = m.skillCandidates[m.skillIndex]
 	}
 	m.clearSkill()
-	if m.cfg.SkillComplete == nil || m.running {
+	if m.cfg.SkillComplete == nil || m.turnRunning() {
 		return
 	}
 	// Don't show skill popup if mention popup is active.
@@ -520,7 +520,7 @@ func (m *Model) activateResumePickerFromInput() {
 }
 
 func (m *Model) updateResumeCandidates() {
-	if !m.resumeActive || m.cfg.ResumeComplete == nil || m.running {
+	if !m.resumeActive || m.cfg.ResumeComplete == nil || m.turnRunning() {
 		m.resumeCandidates = nil
 		m.resumeQuery = ""
 		m.resumeIndex = 0
@@ -596,7 +596,7 @@ func (m *Model) handleResumeKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 		m.syncTextareaFromInput()
 		return true, nil
 	case key.Matches(msg, m.keys.Accept):
-		if m.running || len(m.resumeCandidates) == 0 {
+		if m.turnRunning() || len(m.resumeCandidates) == 0 {
 			return true, nil
 		}
 		selected := strings.TrimSpace(m.resumeCandidates[m.resumeIndex].SessionID)
@@ -672,7 +672,7 @@ func (m *Model) refreshSlashCommands() {
 		selected = strings.TrimSpace(m.slashCandidates[m.slashIndex])
 	}
 	m.clearSlashCompletion()
-	if m.running {
+	if m.turnRunning() {
 		return
 	}
 	// Avoid overlapping popups.
@@ -751,7 +751,7 @@ func (m *Model) handleSlashCommandKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 		m.syncTextareaFromInput()
 		return true, nil
 	case key.Matches(msg, m.keys.Accept):
-		if m.running || len(m.slashCandidates) == 0 {
+		if m.turnRunning() || len(m.slashCandidates) == 0 {
 			return true, nil
 		}
 		m.applySlashCommandCompletion()

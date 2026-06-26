@@ -378,7 +378,7 @@ func BenchmarkWrapNarrativeRowStyled(b *testing.B) {
 
 func BenchmarkRunningTickerText(b *testing.B) {
 	m := newPerfTestModel()
-	m.running = true
+	m.liveTurn.Active = true
 	text := "Review the latest tool output before sending follow-up guidance."
 	b.ReportAllocs()
 	b.ResetTimer()

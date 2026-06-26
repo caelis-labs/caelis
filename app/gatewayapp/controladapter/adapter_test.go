@@ -81,11 +81,12 @@ func closeAdapterTestTurn(t *testing.T, turn Turn) {
 		return
 	}
 	turn.Cancel()
+	events := turn.Events()
 	timer := time.NewTimer(2 * time.Second)
 	defer timer.Stop()
 	for {
 		select {
-		case _, ok := <-turn.Events():
+		case _, ok := <-events:
 			if !ok {
 				if err := turn.Close(); err != nil {
 					t.Fatalf("Close() error = %v", err)

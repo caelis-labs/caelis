@@ -812,9 +812,7 @@ func TestExecuteLineViaDriverStreamsGatewayEventsDirectly(t *testing.T) {
 	if got := requireACPText(t, msgs[0], schema.UpdateAgentMessage); got != "direct gateway event" {
 		t.Fatalf("first ACP text = %q, want direct gateway event", got)
 	}
-	if _, ok := msgs[1].(TaskResultMsg); !ok {
-		t.Fatalf("last message = %#v, want sender completion", msgs[1])
-	}
+	requireTerminalLifecycle(t, msgs[1], eventstream.LifecycleStateCompleted)
 }
 
 func TestExecuteLineViaDriverCoalescesUIOnlyReasoningBeforeToolEvent(t *testing.T) {
@@ -867,9 +865,7 @@ func TestExecuteLineViaDriverCoalescesUIOnlyReasoningBeforeToolEvent(t *testing.
 	if update, ok := tool.Update.(schema.ToolCall); !ok || update.ToolCallID != "call-1" {
 		t.Fatalf("second update = %#v, want tool event after reasoning flush", tool.Update)
 	}
-	if _, ok := msgs[2].(TaskResultMsg); !ok {
-		t.Fatalf("last message = %#v, want sender completion", msgs[2])
-	}
+	requireTerminalLifecycle(t, msgs[2], eventstream.LifecycleStateCompleted)
 }
 
 func TestExecuteLineViaDriverCoalescesUIOnlyReasoningPreservesLeadingSpaces(t *testing.T) {
@@ -906,9 +902,7 @@ func TestExecuteLineViaDriverCoalescesUIOnlyReasoningPreservesLeadingSpaces(t *t
 	if got := requireACPText(t, msgs[0], schema.UpdateAgentThought); got != "Now let me verify the DDL matches" {
 		t.Fatalf("coalesced reasoning = %q, want boundary spaces preserved", got)
 	}
-	if _, ok := msgs[1].(TaskResultMsg); !ok {
-		t.Fatalf("last message = %#v, want sender completion", msgs[1])
-	}
+	requireTerminalLifecycle(t, msgs[1], eventstream.LifecycleStateCompleted)
 }
 
 func TestExecuteLineViaDriverDoesNotCoalesceReasoningWithAnswerDelta(t *testing.T) {
@@ -959,9 +953,7 @@ func TestExecuteLineViaDriverDoesNotCoalesceReasoningWithAnswerDelta(t *testing.
 	if got := requireACPText(t, msgs[1], schema.UpdateAgentMessage); got != "answer" {
 		t.Fatalf("second ACP text = %q, want answer", got)
 	}
-	if _, ok := msgs[2].(TaskResultMsg); !ok {
-		t.Fatalf("last message = %#v, want sender completion", msgs[2])
-	}
+	requireTerminalLifecycle(t, msgs[2], eventstream.LifecycleStateCompleted)
 }
 
 func TestExecuteLineViaDriverTreatsUnknownSlashAsUserMessage(t *testing.T) {
@@ -1790,7 +1782,7 @@ func TestDynamicAgentSlashStreamsParticipantTurnOutput(t *testing.T) {
 	foundOutput := false
 	foundCompletion := false
 	for msg := range msgs {
-		if _, ok := msg.(TaskResultMsg); ok {
+		if env, ok := msg.(eventstream.Envelope); ok && eventstream.IsTerminalLifecycle(env) {
 			foundCompletion = true
 			continue
 		}
@@ -1846,7 +1838,7 @@ func TestDynamicAgentSlashCompletedTurnKeepsDivider(t *testing.T) {
 	}
 	foundCompletion := false
 	for msg := range msgs {
-		if _, ok := msg.(TaskResultMsg); ok {
+		if env, ok := msg.(eventstream.Envelope); ok && eventstream.IsTerminalLifecycle(env) {
 			foundCompletion = true
 		}
 	}
@@ -1871,7 +1863,7 @@ func TestDynamicAgentSlashParticipantTurnCompletionKeepsDivider(t *testing.T) {
 	foundOutput := false
 	foundCompletion := false
 	for msg := range msgs {
-		if _, ok := msg.(TaskResultMsg); ok {
+		if env, ok := msg.(eventstream.Envelope); ok && eventstream.IsTerminalLifecycle(env) {
 			foundCompletion = true
 			continue
 		}
@@ -2305,7 +2297,7 @@ func (t *bridgeTestTurn) Events() <-chan eventstream.Envelope {
 			}
 		}
 	}()
-	return out
+	return eventstream.EnsureTerminalLifecycle(out, t.HandleID(), t.RunID(), t.TurnID())
 }
 func (t *bridgeTestTurn) SubmitApproval(context.Context, control.ApprovalDecision) error {
 	return nil

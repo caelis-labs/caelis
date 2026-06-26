@@ -268,7 +268,8 @@ func TestGatewayParticipantPromptTurnsRenderAsSeparateBlocks(t *testing.T) {
 	sendParticipant("task-1:1", "first")
 	sendUser("@kate 帮我清理一下/tmp目录")
 	sendParticipant("task-1:2", "second")
-	updated, _ := model.Update(TaskResultMsg{SuppressTurnDivider: true})
+	model.liveTurn.Active = true
+	updated, _ := model.Update(eventstream.TurnCompleted("handle-1", "run-1", "turn-1", time.Now()))
 	model = updated.(*Model)
 
 	blocks := model.doc.Blocks()
@@ -588,10 +589,11 @@ func TestParticipantTurnCompletionDoesNotRenderTwoDurationDividers(t *testing.T)
 	model.doc.Append(block)
 	model.participantTurnIDs = map[string]string{block.SessionID: block.BlockID()}
 	model.activeParticipantTurnSessionID = block.SessionID
-	model.showTurnDivider = true
-	model.runStartedAt = time.Now().Add(-75 * time.Second)
+	model.liveTurn.Divider = true
+	model.liveTurn.Active = true
+	model.liveTurn.StartedAt = time.Now().Add(-75 * time.Second)
 
-	updated, _ := model.Update(TaskResultMsg{})
+	updated, _ := model.Update(eventstream.TurnCompleted("handle-1", "run-1", "turn-1", time.Now()))
 	model = updated.(*Model)
 	model.syncViewportContent()
 
@@ -619,10 +621,11 @@ func TestTerminalParticipantWithoutRenderableFooterStillGetsGlobalDivider(t *tes
 	model.doc.Append(block)
 	model.participantTurnIDs = map[string]string{block.SessionID: block.BlockID()}
 	model.activeParticipantTurnSessionID = block.SessionID
-	model.showTurnDivider = true
-	model.runStartedAt = time.Now().Add(-75 * time.Second)
+	model.liveTurn.Divider = true
+	model.liveTurn.Active = true
+	model.liveTurn.StartedAt = time.Now().Add(-75 * time.Second)
 
-	updated, _ := model.Update(TaskResultMsg{})
+	updated, _ := model.Update(eventstream.TurnCompleted("handle-1", "run-1", "turn-1", time.Now()))
 	model = updated.(*Model)
 	model.syncViewportContent()
 
@@ -648,6 +651,32 @@ func TestEmptyTerminalParticipantTurnDoesNotRenderArrowOrZeroDurationFooter(t *t
 	rows := block.Render(BlockRenderContext{Width: 96, TermWidth: 96, Theme: model.theme})
 	if len(rows) != 0 {
 		t.Fatalf("rendered rows = %#v, want empty terminal participant turn hidden", renderedPlainRows(rows))
+	}
+}
+
+func TestEmptyTerminalParticipantTurnDoesNotConsumeGlobalDivider(t *testing.T) {
+	model := NewModel(Config{NoColor: true})
+	start := time.Now().Add(-90 * time.Second)
+	end := start.Add(30 * time.Second)
+	block := NewParticipantTurnBlock("participant-empty", "")
+	block.StartedAt = start
+	block.EndedAt = end
+	block.Status = "completed"
+	model.doc.Append(block)
+	model.participantTurnIDs = map[string]string{block.SessionID: block.BlockID()}
+	model.activeParticipantTurnSessionID = block.SessionID
+	model.liveTurn.Divider = true
+	model.liveTurn.Active = true
+	model.liveTurn.StartedAt = start
+
+	updated, _ := model.Update(eventstream.TurnCompleted("handle-1", "run-1", "turn-1", end))
+	model = updated.(*Model)
+
+	if got := countDividerBlocks(model); got != 1 {
+		t.Fatalf("divider blocks after empty participant completion = %d, want 1", got)
+	}
+	if _, ok := model.doc.Last().(*DividerBlock); !ok {
+		t.Fatalf("last block = %T, want global divider after hidden participant turn", model.doc.Last())
 	}
 }
 

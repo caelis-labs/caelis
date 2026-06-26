@@ -959,7 +959,7 @@ func renderACPStatusRows(blockID string, status string, width int, ctx BlockRend
 		}
 		label = "✗ failed"
 		style = ctx.Theme.ErrorStyle().Width(width)
-	case "interrupted":
+	case "interrupted", "cancelled", "canceled":
 		label = "⊘ interrupted"
 		style = ctx.Theme.WarnStyle().Width(width)
 	case "timed_out":

@@ -201,7 +201,7 @@ func (m *Model) currentFooterHelp() helpBindings {
 			},
 		}
 	}
-	if m.running {
+	if m.turnRunning() {
 		return helpBindings{
 			short: enabledBindings(m.keys.Mode, m.keys.Interrupt),
 			full: [][]key.Binding{

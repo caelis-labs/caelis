@@ -112,7 +112,7 @@ func (m *Model) displayLineWithInputAttachments(line string, attachments []input
 }
 
 func (m *Model) shouldUseTextareaVerticalNavigation(direction int) bool {
-	if m.running {
+	if m.turnRunning() {
 		return false
 	}
 	if strings.TrimSpace(m.textarea.Value()) == "" {
@@ -133,8 +133,8 @@ func (m *Model) shouldUseTextareaVerticalNavigation(direction int) bool {
 }
 
 func (m *Model) userTurnDividerLabel() string {
-	if m.hasLastRunDuration {
-		return formatTurnDuration(m.lastRunDuration)
+	if m.liveTurn.HasLastDuration {
+		return formatTurnDuration(m.liveTurn.LastDuration)
 	}
 	return ""
 }

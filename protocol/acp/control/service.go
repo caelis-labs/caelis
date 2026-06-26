@@ -10,6 +10,10 @@ type Turn interface {
 	HandleID() string
 	RunID() string
 	TurnID() string
+	// Events returns the single-consumer live ACP-compatible stream for this
+	// turn. Implementations must emit exactly one terminal lifecycle envelope
+	// before closing the channel so clients can drive running state, timers, and
+	// final UI barriers from the stream itself.
 	Events() <-chan eventstream.Envelope
 	SubmitApproval(context.Context, ApprovalDecision) error
 	Cancel()

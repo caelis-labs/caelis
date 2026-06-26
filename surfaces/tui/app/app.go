@@ -367,7 +367,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case spinner.TickMsg:
 		m.spinnerTickScheduled = false
-		if m.running {
+		if m.turnRunning() {
 			if m.shouldThrottleRunningAnimation() {
 				return m, m.scheduleSpinnerTick()
 			}
@@ -376,7 +376,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if cmd != nil {
 				m.spinnerTickScheduled = true
 			}
-			if m.running && m.activePrompt == nil {
+			if m.turnRunning() && m.activePrompt == nil {
 				m.advanceRunningAnimation()
 			}
 			return m, cmd

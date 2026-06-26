@@ -26,7 +26,7 @@ func (m *Model) windowTitle() string {
 	if title == "" {
 		title = "CAELIS"
 	}
-	if m.running {
+	if m.turnRunning() {
 		if frame := strings.TrimSpace(ansi.Strip(m.spinner.View())); frame != "" {
 			return frame + " " + title
 		}
@@ -64,7 +64,7 @@ func (m *Model) buildHintText() string {
 	if h := strings.TrimSpace(m.approvalReviewHint); h != "" {
 		return m.renderApprovalReviewHintText(h)
 	}
-	if m.running && m.activePrompt == nil {
+	if m.turnRunning() && m.activePrompt == nil {
 		return m.buildRunningHintText()
 	}
 	if text := m.pendingQueueHintText(); text != "" {
@@ -404,7 +404,7 @@ func (m *Model) advanceRunningAnimation() {
 }
 
 func (m *Model) shouldThrottleRunningAnimation() bool {
-	if m == nil || !m.running {
+	if m == nil || !m.turnRunning() {
 		return false
 	}
 	return m.shouldDeferStreamViewportSync()
@@ -420,7 +420,7 @@ func (m *Model) shouldRenderStaticRunningHint() bool {
 }
 
 func (m *Model) scheduleSpinnerTick() tea.Cmd {
-	if m == nil || !m.running || m.spinnerTickScheduled {
+	if m == nil || !m.turnRunning() || m.spinnerTickScheduled {
 		return nil
 	}
 	m.spinnerTickScheduled = true
@@ -428,7 +428,7 @@ func (m *Model) scheduleSpinnerTick() tea.Cmd {
 }
 
 func (m *Model) resumeRunningAnimationIfNeeded() tea.Cmd {
-	if m == nil || !m.running || m.shouldThrottleRunningAnimation() {
+	if m == nil || !m.turnRunning() || m.shouldThrottleRunningAnimation() {
 		return nil
 	}
 	return m.scheduleSpinnerTick()
@@ -655,7 +655,7 @@ func (m *Model) inputPromptPrefix() string {
 }
 
 func (m *Model) currentInputGhostHint() string {
-	if m == nil || m.activePrompt != nil || m.running {
+	if m == nil || m.activePrompt != nil || m.turnRunning() {
 		return ""
 	}
 	value := m.textarea.Value()

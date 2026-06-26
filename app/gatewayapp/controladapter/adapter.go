@@ -429,7 +429,7 @@ func (d *Adapter) Submit(ctx context.Context, submission Submission) (Turn, erro
 	if result.Handle == nil {
 		return nil, nil
 	}
-	return gatewayTurn{handle: result.Handle}, nil
+	return &gatewayTurn{handle: result.Handle}, nil
 }
 
 func activeKernelTurnForSession(active []gateway.ActiveTurnState, ref session.SessionRef) bool {

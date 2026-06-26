@@ -292,7 +292,10 @@ func renderParticipantTurnFooter(b *ParticipantTurnBlock, ctx BlockRenderContext
 }
 
 func participantTurnHasFooter(b *ParticipantTurnBlock) bool {
-	return participantTurnFooterLabel(b) != ""
+	if participantTurnFooterLabel(b) == "" {
+		return false
+	}
+	return strings.TrimSpace(b.Actor) != "" || len(b.Events) > 0
 }
 
 func participantTurnFooterLabel(b *ParticipantTurnBlock) string {

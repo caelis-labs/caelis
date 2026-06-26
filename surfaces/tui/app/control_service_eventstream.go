@@ -2,7 +2,6 @@ package tuiapp
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -36,9 +35,6 @@ func forwardTurnEventStream(ctx context.Context, service control.Service, turn c
 		return executeLineResult{completion: TaskResultMsg{}}
 	}
 	events := turn.Events()
-	if events == nil {
-		return executeLineResult{completion: TaskResultMsg{}}
-	}
 	streamCtx, cancelStreams := context.WithCancel(ctx)
 	defer cancelStreams()
 	ticker := time.NewTicker(eventStreamBatchInterval)
@@ -46,11 +42,14 @@ func forwardTurnEventStream(ctx context.Context, service control.Service, turn c
 
 	var batcher eventStreamNarrativeBatcher
 	drain := &turnForwarderDrain{}
+	failureReason := ""
+	cancelled := false
 	for events != nil {
 		select {
 		case <-ctx.Done():
 			batcher.flush(send)
-			return finalizeForwardedTurn(drain, cancelStreams, send, taskResultForContextDone(ctx.Err()))
+			terminal := eventstream.TurnCancelled(turn.HandleID(), turn.RunID(), turn.TurnID(), ctx.Err().Error(), time.Now())
+			return finalizeForwardedTurn(drain, cancelStreams, send, &terminal)
 		case <-ticker.C:
 			batcher.flush(send)
 		case env, ok := <-events:
@@ -58,12 +57,17 @@ func forwardTurnEventStream(ctx context.Context, service control.Service, turn c
 				events = nil
 				continue
 			}
+			if reason := eventStreamEnvelopeErrorReason(env); reason != "" {
+				failureReason = reason
+				cancelled = eventstream.IsCancelledReason(reason)
+			}
 			if batcher.enqueue(env, send) {
 				continue
 			}
-			if eventStreamEnvelopeCompletesTurn(env) {
+			if eventstream.IsTerminalLifecycle(env) {
+				copy := eventstream.CloneEnvelope(env)
 				batcher.flush(send)
-				return finalizeForwardedTurn(drain, cancelStreams, send, taskResultFromEnvelope(env))
+				return finalizeForwardedTurn(drain, cancelStreams, send, &copy)
 			}
 			send(env)
 			startTerminalStreamForwarder(streamCtx, service, env, sender, drain)
@@ -73,21 +77,30 @@ func forwardTurnEventStream(ctx context.Context, service control.Service, turn c
 		}
 	}
 	batcher.flush(send)
-	return finalizeForwardedTurn(drain, cancelStreams, send, TaskResultMsg{})
+	var terminal eventstream.Envelope
+	switch {
+	case cancelled:
+		terminal = eventstream.TurnCancelled(turn.HandleID(), turn.RunID(), turn.TurnID(), failureReason, time.Now())
+	case failureReason != "":
+		terminal = eventstream.TurnFailed(turn.HandleID(), turn.RunID(), turn.TurnID(), failureReason, time.Now())
+	default:
+		terminal = eventstream.TurnCompleted(turn.HandleID(), turn.RunID(), turn.TurnID(), time.Now())
+	}
+	return finalizeForwardedTurn(drain, cancelStreams, send, &terminal)
 }
 
-func finalizeForwardedTurn(drain *turnForwarderDrain, cancelForwarders func(), send func(tea.Msg), completion TaskResultMsg) executeLineResult {
+func finalizeForwardedTurn(drain *turnForwarderDrain, cancelForwarders func(), send func(tea.Msg), terminal *eventstream.Envelope) executeLineResult {
 	drain.wait(eventStreamCompletionDrainTimeout)
 	if cancelForwarders != nil {
 		cancelForwarders()
 		drain.wait(eventStreamBatchInterval)
 	}
 	if send == nil {
-		return executeLineResult{completion: completion}
+		return executeLineResult{completion: TaskResultMsg{}}
 	}
-	// Queue completion in the same lane as streamed ACP envelopes so the TUI
-	// appends the turn divider after every final transcript/tool event.
-	send(completion)
+	if terminal != nil {
+		send(*terminal)
+	}
 	return executeLineResult{queued: true}
 }
 
@@ -131,31 +144,17 @@ func (d *turnForwarderDrain) wait(timeout time.Duration) {
 	}
 }
 
-func taskResultForContextDone(err error) TaskResultMsg {
-	if errors.Is(err, context.Canceled) {
-		return TaskResultMsg{Interrupted: true}
+func eventStreamEnvelopeErrorReason(env eventstream.Envelope) string {
+	if env.Err == nil && env.Kind != eventstream.KindError {
+		return ""
 	}
-	if err != nil {
-		return TaskResultMsg{Err: err}
+	if text := strings.TrimSpace(env.Error); text != "" {
+		return text
 	}
-	return TaskResultMsg{}
-}
-
-func taskResultFromEnvelope(env eventstream.Envelope) TaskResultMsg {
 	if env.Err != nil {
-		if isUserInterruptError(env.Err) {
-			return TaskResultMsg{Err: env.Err, Interrupted: true}
-		}
-		return TaskResultMsg{Err: env.Err}
+		return strings.TrimSpace(env.Err.Error())
 	}
-	if env.Kind == eventstream.KindError && strings.TrimSpace(env.Error) != "" {
-		return TaskResultMsg{Err: errors.New(env.Error)}
-	}
-	return TaskResultMsg{}
-}
-
-func eventStreamEnvelopeCompletesTurn(env eventstream.Envelope) bool {
-	return env.Err != nil || (env.Kind == eventstream.KindError && strings.TrimSpace(env.Error) != "")
+	return ""
 }
 
 func approvalPayloadFromACPEvent(env eventstream.Envelope) *approvalPayload {

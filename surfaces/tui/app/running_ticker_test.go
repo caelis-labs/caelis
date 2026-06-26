@@ -9,7 +9,7 @@ import (
 
 func TestRunningTickerUsesStaticHintWhenAnimationIsThrottled(t *testing.T) {
 	m := NewModel(Config{NoColor: true, NoAnimation: true})
-	m.running = true
+	m.liveTurn.Active = true
 
 	if !m.shouldRenderStaticRunningHint() {
 		t.Fatal("running hint should switch to static rendering when animation is disabled")
@@ -56,7 +56,7 @@ func TestRunningTickerStyleCacheInvalidatesOnThemeChange(t *testing.T) {
 
 func TestRunningHintPlainRowDoesNotExposeANSI(t *testing.T) {
 	m := NewModel(Config{})
-	m.running = true
+	m.liveTurn.Active = true
 
 	plain := m.hintRowText()
 	if plain != ansi.Strip(plain) || strings.Contains(plain, "[38;") {
@@ -66,7 +66,7 @@ func TestRunningHintPlainRowDoesNotExposeANSI(t *testing.T) {
 
 func TestSpinnerTickReschedulesWhenRunningAnimationIsThrottled(t *testing.T) {
 	m := NewModel(Config{})
-	m.running = true
+	m.liveTurn.Active = true
 	m.selecting = true
 	m.spinnerTickScheduled = true
 

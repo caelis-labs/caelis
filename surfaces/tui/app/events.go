@@ -59,10 +59,6 @@ type ApprovalReviewHintMsg struct {
 	Pending bool
 }
 
-type SetRunningMsg struct {
-	Running bool
-}
-
 type TaskResultMsg struct {
 	ExitNow             bool
 	Err                 error

@@ -420,7 +420,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.btwOverlay != nil {
 		return m.handleBTWOverlayKey(msg)
 	}
-	if m.running && key.Matches(msg, m.keys.Interrupt) {
+	if m.turnRunning() && key.Matches(msg, m.keys.Interrupt) {
 		return m.requestRunningInterrupt()
 	}
 	// Command palette overlay.
@@ -545,7 +545,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.touchViewportScrollbar(), resumeCmd)
 
 	case key.Matches(msg, m.keys.Quit):
-		if m.running {
+		if m.turnRunning() {
 			return m, m.showHint("press Esc to interrupt running task", hintOptions{
 				priority:       HintPriorityHigh,
 				clearOnMessage: true,
@@ -586,21 +586,21 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		)
 
 	case msg.String() == "ctrl+d":
-		if !m.running && len(m.input) == 0 && m.textarea.Value() == "" {
+		if !m.turnRunning() && len(m.input) == 0 && m.textarea.Value() == "" {
 			m.quit = true
 			return m, tea.Quit
 		}
 		return m, nil
 
 	case msg.String() == "ctrl+p":
-		if m.running {
+		if m.turnRunning() {
 			return m, nil
 		}
 		m.togglePalette()
 		return m, m.paletteAnimationCmd()
 
 	case key.Matches(msg, m.keys.Back):
-		if m.running {
+		if m.turnRunning() {
 			return m.requestRunningInterrupt()
 		}
 		m.clearInputOverlays()
@@ -613,7 +613,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.syncInputFromTextarea()
 			return m, cmd
 		}
-		if !m.running && len(m.history) > 0 {
+		if !m.turnRunning() && len(m.history) > 0 {
 			val := m.textarea.Value()
 			if m.historyIndex == -1 {
 				m.historyDraft = val
@@ -635,7 +635,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.syncInputFromTextarea()
 			return m, cmd
 		}
-		if !m.running && m.historyIndex != -1 {
+		if !m.turnRunning() && m.historyIndex != -1 {
 			if m.historyIndex < len(m.history)-1 {
 				m.historyIndex++
 				m.restoreHistoryEntry(m.history[m.historyIndex], m.historyAttachments[m.historyIndex])
@@ -687,7 +687,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		mode := m.submissionModeForLine(line)
-		if m.running {
+		if m.turnRunning() {
 			if m.isConfiguredSlashControlLine(line) && mode != SubmissionModeOverlay {
 				return m, m.showHint("slash commands are unavailable while running", hintOptions{
 					priority:       HintPriorityHigh,
@@ -725,7 +725,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case key.Matches(msg, m.keys.ImagePaste):
-		if m.running {
+		if m.turnRunning() {
 			return m, m.showHint("image paste unavailable while running; press Esc to interrupt first", hintOptions{
 				priority:       HintPriorityHigh,
 				clearOnMessage: true,
@@ -753,7 +753,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if textErr == nil && pasted {
 			return m, nil
 		}
-		if !m.running && m.shouldFallbackTextPasteToImage(msg) {
+		if !m.turnRunning() && m.shouldFallbackTextPasteToImage(msg) {
 			pastedImage, imageErr := m.pasteClipboardImage()
 			if imageErr == nil && pastedImage {
 				return m, nil
@@ -770,7 +770,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	default:
 		// Backspace should remove an attachment token when the visual cursor is
 		// sitting right after that token, before it edits surrounding text.
-		if !m.running && m.attachmentCount > 0 &&
+		if !m.turnRunning() && m.attachmentCount > 0 &&
 			(msg.String() == "backspace" || msg.String() == "ctrl+h") &&
 			m.removeAttachmentAtCursor() {
 			m.dismissVisibleHint()
@@ -1174,7 +1174,7 @@ type submitLineOptions struct {
 }
 
 func (m *Model) submitLineWithDisplayAndAttachmentsOptions(execLine string, displayLine string, attachments []Attachment, opts submitLineOptions) (tea.Model, tea.Cmd) {
-	alreadyRunning := m.running
+	alreadyRunning := m.turnRunning()
 	mode := m.submissionModeForLine(execLine)
 	if alreadyRunning && mode != SubmissionModeOverlay && m.isConfiguredSlashControlLine(execLine) {
 		return m, m.showHint("A turn is still running. Wait for it to finish or interrupt it before sending another prompt.", hintOptions{
@@ -1230,12 +1230,8 @@ func (m *Model) submitLineWithDisplayAndAttachmentsOptions(execLine string, disp
 		m.ensureViewportLayout()
 	}
 
-	m.running = true
-	if !alreadyRunning {
-		m.runStartedAt = time.Now()
-		m.hasLastRunDuration = false
-		m.showTurnDivider = mode == SubmissionModeDefault && !m.isConfiguredSlashControlLine(execLine)
-		m.startRunningAnimation()
+	if !alreadyRunning && mode != SubmissionModeOverlay {
+		m.beginLiveTurn(mode, mode == SubmissionModeDefault && !m.isConfiguredSlashControlLine(execLine), time.Now())
 	} else {
 		m.ensureViewportLayout()
 	}
@@ -1246,7 +1242,7 @@ func (m *Model) submitLineWithDisplayAndAttachmentsOptions(execLine string, disp
 	}
 	if m.cfg.ExecuteLine == nil {
 		if !alreadyRunning {
-			m.running = false
+			m.stopLiveTurn()
 		}
 		return m, nil
 	}
