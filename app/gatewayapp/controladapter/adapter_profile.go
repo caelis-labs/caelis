@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
+	"github.com/OnslaughtSnail/caelis/ports/agentprofile"
 )
 
 func (d *Adapter) AgentProfileStatus(ctx context.Context) (AgentProfileStatusSnapshot, error) {
@@ -27,13 +28,33 @@ func (d *Adapter) StartReviewSubagent(ctx context.Context, instructions string, 
 	if err != nil {
 		return nil, err
 	}
-	prompt, attachmentOffset := gatewayapp.ReviewSubagentPrompt(instructions)
+	prompt, attachmentOffset := gatewayapp.ReviewSubagentPromptForProfileTarget(instructions, agentprofile.BindingTargetKind(profile.Target))
 	return d.startSidecarTurn(ctx, startSidecarTurnRequest{
-		Agent:       profile.ID,
-		Prompt:      prompt,
-		Attachments: shiftControlAttachments(attachments, attachmentOffset),
-		Source:      "slash_review",
+		Agent:            profile.ID,
+		LabelBase:        reviewSidecarLabelBase(profile),
+		Prompt:           prompt,
+		DisplayInput:     displayInputWithAttachments(instructions, attachments),
+		DisplayTitle:     reviewDisplayTitle(instructions),
+		Attachments:      shiftControlAttachments(attachments, attachmentOffset),
+		Source:           "slash_review",
+		DetachOnComplete: true,
 	})
+}
+
+func reviewSidecarLabelBase(profile AgentProfileSnapshot) string {
+	if agentprofile.NormalizeBindingTarget(agentprofile.BindingTargetKind(profile.Target)) == agentprofile.BindingTargetACP {
+		if agent := strings.TrimSpace(profile.ACPAgent); agent != "" {
+			return agent
+		}
+	}
+	return strings.TrimSpace(profile.ID)
+}
+
+func reviewDisplayTitle(instructions string) string {
+	if strings.TrimSpace(instructions) != "" {
+		return ""
+	}
+	return "Code review requested"
 }
 
 func (d *Adapter) runnableReviewerProfile(ctx context.Context) (AgentProfileSnapshot, error) {

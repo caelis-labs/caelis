@@ -688,7 +688,7 @@ func TestSlashResumeReplaysSideACPFinalDialogueWithoutProcessTrace(t *testing.T)
 			if event.Kind == TranscriptEventTool {
 				t.Fatalf("slashResume() replayed side ACP process event: %#v", event)
 			}
-			if event.Scope == ACPProjectionMain && event.Text == "User to @codex: review this change" {
+			if event.Scope == ACPProjectionParticipant && event.NarrativeKind == TranscriptNarrativeUser && event.Text == "review this change" {
 				sawSidePrompt = true
 			}
 			if event.Scope == ACPProjectionParticipant && event.Text == "review final message" {

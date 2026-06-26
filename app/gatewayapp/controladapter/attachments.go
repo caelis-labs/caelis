@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"unicode"
 
 	"github.com/OnslaughtSnail/caelis/ports/model"
 )
@@ -19,12 +20,49 @@ func contentPartsFromSubmission(input string, items []Attachment, workspace stri
 	if len(items) == 0 {
 		return nil, nil
 	}
+	out := make([]model.ContentPart, 0, len(items)*2+1)
+	err := walkSubmissionAttachments(input, items, func(text string) error {
+		out = append(out, model.ContentPart{Type: model.ContentPartText, Text: text})
+		return nil
+	}, func(_ int, item Attachment) error {
+		part, err := imageContentPartFromAttachment(item, workspace)
+		if err != nil {
+			return err
+		}
+		out = append(out, part)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return out, nil
+}
+
+func displayInputWithAttachments(input string, items []Attachment) string {
+	input = strings.TrimSpace(input)
+	if len(items) == 0 {
+		return input
+	}
+	var out displayInputBuilder
+	_ = walkSubmissionAttachments(input, items, func(text string) error {
+		out.append(text)
+		return nil
+	}, func(index int, _ Attachment) error {
+		out.append(fmt.Sprintf("[image #%d]", index))
+		return nil
+	})
+	return out.String()
+}
+
+func walkSubmissionAttachments(input string, items []Attachment, text func(string) error, attachment func(int, Attachment) error) error {
 	input = strings.TrimSpace(input)
 	inputRunes := []rune(input)
 	items = cloneAndSortAttachments(items, len(inputRunes))
-	out := make([]model.ContentPart, 0, len(items)*2+1)
 	textPos := 0
-	for _, item := range items {
+	for i, item := range items {
 		offset := item.Offset
 		if offset < textPos {
 			offset = textPos
@@ -33,22 +71,78 @@ func contentPartsFromSubmission(input string, items []Attachment, workspace stri
 			offset = len(inputRunes)
 		}
 		if offset > textPos {
-			out = append(out, model.ContentPart{Type: model.ContentPartText, Text: string(inputRunes[textPos:offset])})
+			if text != nil {
+				if err := text(string(inputRunes[textPos:offset])); err != nil {
+					return err
+				}
+			}
 			textPos = offset
 		}
-		part, err := imageContentPartFromAttachment(item, workspace)
-		if err != nil {
-			return nil, err
+		if attachment != nil {
+			if err := attachment(i+1, item); err != nil {
+				return err
+			}
 		}
-		out = append(out, part)
 	}
 	if textPos < len(inputRunes) {
-		out = append(out, model.ContentPart{Type: model.ContentPartText, Text: string(inputRunes[textPos:])})
+		if text != nil {
+			if err := text(string(inputRunes[textPos:])); err != nil {
+				return err
+			}
+		}
 	}
-	if len(out) == 0 {
-		return nil, nil
+	return nil
+}
+
+type displayInputBuilder struct {
+	out     strings.Builder
+	last    rune
+	hasLast bool
+}
+
+func (b *displayInputBuilder) append(segment string) {
+	if b == nil {
+		return
 	}
-	return out, nil
+	segment = strings.TrimSpace(segment)
+	if segment == "" {
+		return
+	}
+	if b.hasLast {
+		first, _ := firstDisplayInputRune(segment)
+		if !unicode.IsSpace(b.last) && !unicode.IsSpace(first) {
+			b.out.WriteByte(' ')
+		}
+	}
+	b.out.WriteString(segment)
+	if last, ok := lastDisplayInputRune(segment); ok {
+		b.last = last
+		b.hasLast = true
+	}
+}
+
+func (b *displayInputBuilder) String() string {
+	if b == nil {
+		return ""
+	}
+	return strings.TrimSpace(b.out.String())
+}
+
+func firstDisplayInputRune(s string) (rune, bool) {
+	for _, r := range s {
+		return r, true
+	}
+	return 0, false
+}
+
+func lastDisplayInputRune(s string) (rune, bool) {
+	var out rune
+	ok := false
+	for _, r := range s {
+		out = r
+		ok = true
+	}
+	return out, ok
 }
 
 func imageContentPartFromAttachment(item Attachment, workspace string) (model.ContentPart, error) {

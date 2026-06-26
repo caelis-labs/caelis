@@ -533,7 +533,6 @@ type ParticipantTurnBlock struct {
 	SessionID             string
 	Actor                 string
 	Status                string
-	Expanded              bool
 	StartedAt             time.Time
 	EndedAt               time.Time
 	Events                []SubagentEvent
@@ -554,7 +553,6 @@ func NewParticipantTurnBlock(sessionID, actor string) *ParticipantTurnBlock {
 		SessionID:      strings.TrimSpace(sessionID),
 		Actor:          strings.TrimSpace(actor),
 		Status:         "running",
-		Expanded:       true,
 		StartedAt:      time.Now(),
 		toolEventIndex: map[string]int{},
 	}
@@ -694,34 +692,27 @@ func (b *ParticipantTurnBlock) Render(ctx BlockRenderContext) []RenderedRow {
 	if b == nil {
 		return nil
 	}
-	bodyRows := []RenderedRow(nil)
-	if b.Expanded {
-		bodyRows = renderACPTranscriptRows(b.id, b.Events, b.Status, maxInt(8, ctx.Width), ctx, acpTranscriptRenderOptions{
-			UseStatusPlaceholder:   true,
-			PlaceholderAsMeta:      true,
-			HideWaitingApprovalRow: true,
-			HideCompletedRow:       true,
-			ToolOutputPanels:       true,
-			ToolPanelExpanded:      b.toolPanelExpanded,
-			ToolPanelFullOutput:    b.toolPanelFullOutput,
-			ToolPanelRows:          b.renderToolPanelRows,
-			ExplorationExpanded:    b.explorationExpanded,
-			StableExplorationPrep:  b.explorationProjection.reconcile,
-			StableExplorationRows:  b.stableExplorationRows,
-			ToolPanelScrollState:   b.toolPanelScrollState,
-			ReasoningExpanded:      b.reasoningExpanded,
-		})
-	}
+	bodyRows := renderACPTranscriptRows(b.id, b.Events, b.Status, maxInt(8, ctx.Width), ctx, acpTranscriptRenderOptions{
+		UseStatusPlaceholder:   true,
+		PlaceholderAsMeta:      true,
+		HideWaitingApprovalRow: true,
+		HideCompletedRow:       true,
+		ToolOutputPanels:       true,
+		ToolPanelExpanded:      b.toolPanelExpanded,
+		ToolPanelFullOutput:    b.toolPanelFullOutput,
+		ToolPanelRows:          b.renderToolPanelRows,
+		ExplorationExpanded:    b.explorationExpanded,
+		StableExplorationPrep:  b.explorationProjection.reconcile,
+		StableExplorationRows:  b.stableExplorationRows,
+		ToolPanelScrollState:   b.toolPanelScrollState,
+		ReasoningExpanded:      b.reasoningExpanded,
+	})
 	if len(bodyRows) == 0 && participantTurnIsTerminal(b.Status) && strings.TrimSpace(b.Actor) == "" {
 		return nil
 	}
-	rows := []RenderedRow{StyledRow(b.id, renderParticipantTurnHeader(b, ctx))}
-	if !b.Expanded {
-		return rows
-	}
-	rows = append(rows, bodyRows...)
+	rows := append([]RenderedRow(nil), bodyRows...)
 	rows = b.compactHeightBudget.apply(b.id, rows, b.Events, b.Status, ctx)
-	if b.Expanded && participantTurnIsTerminal(b.Status) {
+	if participantTurnIsTerminal(b.Status) {
 		if footer := renderParticipantTurnFooter(b, ctx); strings.TrimSpace(ansi.Strip(footer)) != "" {
 			rows = append(rows, StyledRow(b.id, footer))
 		}

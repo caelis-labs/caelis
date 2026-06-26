@@ -707,7 +707,6 @@ func viewportBlockRenderKey(block Block, ctx BlockRenderContext) string {
 		builder.addString(b.SessionID)
 		builder.addString(b.Actor)
 		builder.addString(b.Status)
-		builder.addBool(b.Expanded)
 		builder.addTime(b.StartedAt)
 		builder.addTime(b.EndedAt)
 		writeExpandedTools(builder, b.ExpandedTools)

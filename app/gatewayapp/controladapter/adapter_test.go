@@ -1957,6 +1957,9 @@ func TestAdapterStartAgentSubagentRollsBackAttachmentOnPromptConflict(t *testing
 	if len(gw.promptReqs) != 1 || gw.promptReqs[0].Input != "second prompt" {
 		t.Fatalf("PromptParticipant requests = %#v, want trimmed prompt", gw.promptReqs)
 	}
+	if got := gw.promptReqs[0].DisplayInput; got != "second [image #1] prompt" {
+		t.Fatalf("PromptParticipant DisplayInput = %q, want image marker", got)
+	}
 	if parts := gw.promptReqs[0].ContentParts; len(parts) != 3 ||
 		parts[0].Type != model.ContentPartText || parts[0].Text != "second " ||
 		parts[1].Type != model.ContentPartImage || parts[1].FileName != "side.png" ||

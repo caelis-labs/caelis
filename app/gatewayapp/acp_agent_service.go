@@ -104,7 +104,7 @@ func pluginAgentToConfig(in assembly.AgentConfig, builtin bool) AgentConfig {
 	return agentregistry.PluginAgentToConfig(in, builtin)
 }
 
-type defaultSelfACPAgentConfig struct {
+type defaultSpawnedSelfACPAgentConfig struct {
 	Config       Config
 	AppName      string
 	UserID       string
@@ -113,9 +113,13 @@ type defaultSelfACPAgentConfig struct {
 	WorkspaceCWD string
 }
 
-func defaultSelfACPAgent(cfg defaultSelfACPAgentConfig) (assembly.AgentConfig, error) {
+func defaultSpawnedSelfACPAgent(cfg defaultSpawnedSelfACPAgentConfig) (assembly.AgentConfig, error) {
+	childConfig := cfg.Config
+	// Spawned Caelis children must bridge permission requests back to the
+	// parent session instead of performing their own automatic approval review.
+	childConfig.ApprovalMode = "manual"
 	return agentregistry.DefaultSelfAgent(agentregistry.DefaultSelfConfig{
-		Config:       agentRuntimeConfig(cfg.Config),
+		Config:       agentRuntimeConfig(childConfig),
 		AppName:      cfg.AppName,
 		UserID:       cfg.UserID,
 		StoreDir:     cfg.StoreDir,
@@ -424,14 +428,13 @@ func (s *Stack) setConfiguredAgentsWithBase(base assembly.ResolvedAssembly, conf
 }
 
 func (s *Stack) configuredAssembly(base assembly.ResolvedAssembly, configured []AgentConfig, plugins []PluginConfig, runtimeCfg stackRuntimeConfig) (assembly.ResolvedAssembly, error) {
-	self, err := defaultSelfACPAgent(defaultSelfACPAgentConfig{
+	self, err := defaultSpawnedSelfACPAgent(defaultSpawnedSelfACPAgentConfig{
 		Config: Config{
 			AppName:       s.AppName,
 			UserID:        s.UserID,
 			StoreDir:      s.storeDir,
 			WorkspaceKey:  s.Workspace.Key,
 			WorkspaceCWD:  s.Workspace.CWD,
-			ApprovalMode:  runtimeCfg.ApprovalMode,
 			PolicyProfile: runtimeCfg.PolicyProfile,
 			ContextWindow: runtimeCfg.ContextWindow,
 			SystemPrompt:  runtimeCfg.SystemPrompt,
@@ -601,14 +604,13 @@ func (s *Stack) agentProfileACPAgent(profile agentprofile.Profile, binding agent
 				model.DefaultReasoningEffort = reasoning
 			}
 		}
-		agent, err := defaultSelfACPAgent(defaultSelfACPAgentConfig{
+		agent, err := defaultSpawnedSelfACPAgent(defaultSpawnedSelfACPAgentConfig{
 			Config: Config{
 				AppName:       s.AppName,
 				UserID:        s.UserID,
 				StoreDir:      s.storeDir,
 				WorkspaceKey:  s.Workspace.Key,
 				WorkspaceCWD:  s.Workspace.CWD,
-				ApprovalMode:  runtimeCfg.ApprovalMode,
 				PolicyProfile: runtimeCfg.PolicyProfile,
 				ContextWindow: runtimeCfg.ContextWindow,
 				SystemPrompt:  strings.Join(compactAgentProfilePrompts(runtimeCfg.SystemPrompt, agentProfileSystemPrompt(profile)), "\n\n"),

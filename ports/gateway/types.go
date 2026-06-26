@@ -134,6 +134,8 @@ type PromptParticipantRequest struct {
 	BindingKey    string
 	ParticipantID string
 	Input         string
+	DisplayInput  string
+	DisplayTitle  string
 	ContentParts  []model.ContentPart
 	Source        string
 }

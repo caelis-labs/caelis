@@ -104,6 +104,9 @@ func (m *Model) syncViewportContent() {
 		m.lastViewportRenderContextKey == contextKey &&
 		m.viewportRenderCacheMatchesDocument(ctx) {
 		if m.streamLine == m.lastViewportStreamLine {
+			if m.isViewportFollowTail() && !m.viewportContentStale {
+				m.viewport.GotoBottom()
+			}
 			return
 		}
 		m.rebuildViewportLineCaches(ctx)

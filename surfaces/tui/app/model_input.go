@@ -250,13 +250,6 @@ func (m *Model) tryTogglePanelAtClick(mouse tea.Mouse) bool {
 	if blk == nil {
 		return false
 	}
-	if turn, ok := blk.(*ParticipantTurnBlock); ok {
-		if contentLine > 0 && m.viewportBlockIDs[contentLine-1] == bid {
-			return false
-		}
-		turn.Expanded = !turn.Expanded
-		return true
-	}
 	return false
 }
 
@@ -1198,6 +1191,7 @@ func (m *Model) submitLineWithDisplayAndAttachmentsOptions(execLine string, disp
 	case SubmissionModeOverlay:
 		m.openBTWOverlay(execLine)
 	default:
+		deferDisplayLine := m.deferLocalUserDisplayLine(execLine)
 		if alreadyRunning {
 			m.pendingQueue = append(m.pendingQueue, pendingPrompt{
 				execLine:    strings.TrimSpace(execLine),
@@ -1205,7 +1199,7 @@ func (m *Model) submitLineWithDisplayAndAttachmentsOptions(execLine string, disp
 				attachments: cloneAttachments(attachments),
 				dispatched:  !deferUntilIdle,
 			})
-		} else {
+		} else if !deferDisplayLine {
 			m.commitUserDisplayLine(displayLine)
 		}
 	}
@@ -1261,6 +1255,17 @@ func (m *Model) submitLineWithDisplayAndAttachmentsOptions(execLine string, disp
 		m.scheduleSpinnerTick(),
 	}
 	return m, tea.Batch(cmds...)
+}
+
+func (m *Model) deferLocalUserDisplayLine(line string) bool {
+	name := slashCommandName(line)
+	if name == "" {
+		return false
+	}
+	if strings.EqualFold(name, "review") && isCoreLocalSlashCommand(name) {
+		return true
+	}
+	return m.isKnownDynamicAgentSlashLine(line)
 }
 
 func (m *Model) executeLineCmd(submission Submission) tea.Cmd {

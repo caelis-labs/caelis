@@ -49,6 +49,7 @@ type Event struct {
 	TurnID     string
 	Actor      string
 	OccurredAt time.Time
+	Meta       map[string]any
 
 	NarrativeKind NarrativeKind
 	Text          string

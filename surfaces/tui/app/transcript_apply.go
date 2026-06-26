@@ -60,6 +60,9 @@ func (m *Model) prepareForTranscriptScope(scope ACPProjectionScope) {
 func (m *Model) applyTranscriptNarrative(event TranscriptEvent) (tea.Model, tea.Cmd) {
 	switch event.NarrativeKind {
 	case TranscriptNarrativeUser:
+		if event.Scope == ACPProjectionParticipant {
+			return m.handleDirectedParticipantUserMessage(event), nil
+		}
 		return m.handleUserMessageMsg(UserMessageMsg{Text: event.Text}), nil
 	case TranscriptNarrativeSystem, TranscriptNarrativeNotice:
 		return m.appendEventStreamTranscriptText(event.Text)
@@ -74,6 +77,18 @@ func (m *Model) applyTranscriptNarrative(event TranscriptEvent) (tea.Model, tea.
 	default:
 		return m.applyTranscriptMainNarrative(event)
 	}
+}
+
+func (m *Model) handleDirectedParticipantUserMessage(event TranscriptEvent) tea.Model {
+	text := directedParticipantUserDisplay(event)
+	if text == "" {
+		return m
+	}
+	m.dequeuePendingUserMessage(directedParticipantUserDequeueText(event))
+	m.commitUserDisplayLine(text)
+	m.ensureViewportLayout()
+	m.syncViewportContent()
+	return m
 }
 
 func transcriptNarrativeStreamKind(kind TranscriptNarrativeKind) string {

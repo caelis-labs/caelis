@@ -75,6 +75,18 @@ func TestContentPartsFromSubmissionInterleavesTextAndImages(t *testing.T) {
 	}
 }
 
+func TestDisplayInputWithAttachmentsUsesOrdinalMarkers(t *testing.T) {
+	t.Parallel()
+
+	got := displayInputWithAttachments("look here", []Attachment{
+		{Name: "first.png", Offset: 0},
+		{Name: "second.png", Offset: len([]rune("look "))},
+	})
+	if got != "[image #1] look [image #2] here" {
+		t.Fatalf("displayInputWithAttachments() = %q, want image markers", got)
+	}
+}
+
 func TestContentPartsFromAttachmentsRejectsNonImages(t *testing.T) {
 	t.Parallel()
 

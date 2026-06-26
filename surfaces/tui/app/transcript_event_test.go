@@ -111,18 +111,23 @@ func TestProjectGatewayEventToTranscriptEvents_ProjectsTerminalAutomaticApproval
 	}
 }
 
-func TestProjectGatewayEventToTranscriptEvents_SuppressesParticipantUserEcho(t *testing.T) {
+func TestProjectGatewayEventToTranscriptEvents_ProjectsParticipantUserPrompt(t *testing.T) {
 	t.Parallel()
 
 	for _, tc := range []struct {
-		name  string
-		event gateway.Event
+		name        string
+		event       gateway.Event
+		wantDisplay string
 	}{
 		{
 			name: "user event",
 			event: gateway.Event{
 				Kind:       gateway.EventKindUserMessage,
 				SessionRef: session.SessionRef{SessionID: "root-session"},
+				Meta: map[string]any{
+					"mention":       "jeff",
+					"display_input": "总结一下工作",
+				},
 				Origin: &gateway.EventOrigin{
 					Scope:         gateway.EventScopeParticipant,
 					ScopeID:       "participant-turn-1",
@@ -135,12 +140,17 @@ func TestProjectGatewayEventToTranscriptEvents_SuppressesParticipantUserEcho(t *
 					Scope: gateway.EventScopeParticipant,
 				},
 			},
+			wantDisplay: "@jeff 总结一下工作",
 		},
 		{
 			name: "assistant user role",
 			event: gateway.Event{
 				Kind:       gateway.EventKindAssistantMessage,
 				SessionRef: session.SessionRef{SessionID: "root-session"},
+				Meta: map[string]any{
+					"handle":        "jeff",
+					"display_input": "总结一下工作",
+				},
 				Origin: &gateway.EventOrigin{
 					Scope:         gateway.EventScopeParticipant,
 					ScopeID:       "participant-turn-1",
@@ -153,12 +163,17 @@ func TestProjectGatewayEventToTranscriptEvents_SuppressesParticipantUserEcho(t *
 					Scope: gateway.EventScopeParticipant,
 				},
 			},
+			wantDisplay: "@jeff 总结一下工作",
 		},
 		{
 			name: "payload scope without origin",
 			event: gateway.Event{
 				Kind:       gateway.EventKindUserMessage,
 				SessionRef: session.SessionRef{SessionID: "root-session"},
+				Meta: map[string]any{
+					"handle":        "jeff",
+					"display_input": "总结一下工作",
+				},
 				Narrative: &gateway.NarrativePayload{
 					Role:          gateway.NarrativeRoleUser,
 					Text:          "总结一下工作",
@@ -166,14 +181,22 @@ func TestProjectGatewayEventToTranscriptEvents_SuppressesParticipantUserEcho(t *
 					ParticipantID: "participant-1",
 				},
 			},
+			wantDisplay: "@jeff 总结一下工作",
 		},
 	} {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			if events := ProjectGatewayEventToTranscriptEvents(tc.event); len(events) != 0 {
-				t.Fatalf("ProjectGatewayEventToTranscriptEvents() = %#v, want no participant user echo", events)
+			events := ProjectGatewayEventToTranscriptEvents(tc.event)
+			if len(events) != 1 {
+				t.Fatalf("ProjectGatewayEventToTranscriptEvents() = %#v, want participant user prompt", events)
+			}
+			if events[0].Kind != TranscriptEventNarrative || events[0].Scope != ACPProjectionParticipant || events[0].NarrativeKind != TranscriptNarrativeUser {
+				t.Fatalf("event = %#v, want participant user narrative", events[0])
+			}
+			if got := directedParticipantUserDisplay(events[0]); got != tc.wantDisplay {
+				t.Fatalf("directedParticipantUserDisplay() = %q, want %q", got, tc.wantDisplay)
 			}
 		})
 	}

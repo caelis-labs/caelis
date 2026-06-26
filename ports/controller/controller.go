@@ -104,6 +104,8 @@ type ParticipantPromptRequest struct {
 	TurnID            string              `json:"turn_id,omitempty"`
 	ParticipantID     string              `json:"participant_id,omitempty"`
 	Input             string              `json:"input,omitempty"`
+	DisplayInput      string              `json:"display_input,omitempty"`
+	DisplayTitle      string              `json:"display_title,omitempty"`
 	ContentParts      []model.ContentPart `json:"content_parts,omitempty"`
 	ContextPrelude    string              `json:"context_prelude,omitempty"`
 	Stream            bool                `json:"stream,omitempty"`

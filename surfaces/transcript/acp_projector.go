@@ -113,7 +113,7 @@ func ProjectACPEventToEvents(env eventstream.Envelope, surface SurfaceProjector)
 func projectACPSessionUpdate(env eventstream.Envelope, meta map[string]any, scope Scope, scopeID string, surface SurfaceProjector) []Event {
 	switch update := env.Update.(type) {
 	case schema.ContentChunk:
-		return projectACPContentChunk(env, update, scope, scopeID)
+		return projectACPContentChunk(env, update, meta, scope, scopeID)
 	case schema.ToolCall:
 		if surface == nil || ToolIsPlan(update.Title, update.Kind) {
 			return nil
@@ -183,21 +183,23 @@ func projectACPSessionUpdate(env eventstream.Envelope, meta map[string]any, scop
 	}
 }
 
-func projectACPContentChunk(env eventstream.Envelope, update schema.ContentChunk, scope Scope, scopeID string) []Event {
+func projectACPContentChunk(env eventstream.Envelope, update schema.ContentChunk, meta map[string]any, scope Scope, scopeID string) []Event {
 	text := ProtocolTextContent(update.Content)
 	if text == "" {
 		return nil
 	}
 	switch strings.TrimSpace(update.SessionUpdate) {
 	case schema.UpdateUserMessage:
-		if scope != ScopeMain {
+		if scope != ScopeMain && scope != ScopeParticipant {
 			return nil
 		}
 		return []Event{{
 			Kind:          EventNarrative,
 			Scope:         scope,
 			ScopeID:       scopeID,
+			Actor:         strings.TrimSpace(env.Actor),
 			OccurredAt:    env.OccurredAt,
+			Meta:          meta,
 			NarrativeKind: NarrativeUser,
 			Text:          strings.TrimSpace(text),
 			Final:         true,

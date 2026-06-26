@@ -143,11 +143,11 @@ func (r *Runner) Spawn(ctx context.Context, spawn subagent.SpawnContext, req del
 		_ = client.Close(ctx)
 		return delegation.Anchor{}, delegation.Result{}, err
 	}
-	if err := r.configureChildSession(ctx, client, strings.TrimSpace(sessionResp.SessionID), spawn); err != nil {
-		childCancel()
-		_ = client.Close(ctx)
-		return delegation.Anchor{}, delegation.Result{}, err
-	}
+	// Do not call session/set_mode for spawned ACP children here. External ACP
+	// agents own their session-mode vocabulary, while Caelis approval modes
+	// (manual/auto-review) are parent-routing policy. Permission requests from
+	// the child still bridge through OnPermissionRequest above; Caelis self ACP
+	// children that need launch-time approval policy get it from assembly args.
 	anchor := delegation.Anchor{
 		TaskID:    strings.TrimSpace(spawn.TaskID),
 		SessionID: strings.TrimSpace(sessionResp.SessionID),
@@ -315,36 +315,6 @@ func (r *Runner) nextAgentID(name string) string {
 		name = "agent"
 	}
 	return fmt.Sprintf("%s-%03d", name, r.counter.Add(1))
-}
-
-func (r *Runner) configureChildSession(ctx context.Context, client *client.Client, sessionID string, spawn subagent.SpawnContext) error {
-	mode := normalizeApprovalMode(spawn.ApprovalMode)
-	if client == nil || strings.TrimSpace(sessionID) == "" || mode == "" {
-		return nil
-	}
-	if err := client.SetMode(ctx, sessionID, mode); err != nil && !isUnsupportedACPMethodError(err) {
-		return fmt.Errorf("impl/agent/acp/subagent: set child session approval mode %q: %w", mode, err)
-	}
-	return nil
-}
-
-func normalizeApprovalMode(mode string) string {
-	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case "manual":
-		return "manual"
-	case "auto", "auto-review", "auto_review", "autoreview":
-		return "auto-review"
-	default:
-		return ""
-	}
-}
-
-func isUnsupportedACPMethodError(err error) bool {
-	if err == nil {
-		return false
-	}
-	text := strings.ToLower(strings.TrimSpace(err.Error()))
-	return strings.Contains(text, "acp rpc error -32601") || strings.Contains(text, "method not found")
 }
 
 func (r *Runner) permissionCallback(spawn subagent.SpawnContext, cfg AgentConfig, agentID string) PermissionHandler {

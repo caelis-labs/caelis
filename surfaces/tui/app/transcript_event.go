@@ -57,6 +57,51 @@ func transcriptToolStream(status string, isErr bool) string {
 	return "stdout"
 }
 
+func directedParticipantUserDisplay(event TranscriptEvent) string {
+	if event.Scope != ACPProjectionParticipant {
+		return ""
+	}
+	handle := firstNonEmpty(
+		participantMentionFromHandle(asString(event.Meta["mention"])),
+		participantMentionFromHandle(asString(event.Meta["handle"])),
+		participantMentionFromHandle(event.Actor),
+	)
+	if handle == "" {
+		return ""
+	}
+	text := firstNonEmpty(
+		strings.TrimSpace(asString(event.Meta["display_input"])),
+		strings.TrimSpace(asString(event.Meta["display_title"])),
+		strings.TrimSpace(event.Text),
+	)
+	if text == "" {
+		return handle
+	}
+	return handle + " " + text
+}
+
+func directedParticipantUserDequeueText(event TranscriptEvent) string {
+	if event.Scope != ACPProjectionParticipant {
+		return strings.TrimSpace(event.Text)
+	}
+	return firstNonEmpty(
+		strings.TrimSpace(asString(event.Meta["display_input"])),
+		strings.TrimSpace(asString(event.Meta["display_title"])),
+		strings.TrimSpace(event.Text),
+	)
+}
+
+func participantMentionFromHandle(handle string) string {
+	handle = strings.TrimSpace(handle)
+	if handle == "" {
+		return ""
+	}
+	if strings.HasPrefix(handle, "@") {
+		return handle
+	}
+	return "@" + handle
+}
+
 func transcriptToolStatusFinal(status string, isErr bool) bool {
 	if isErr {
 		return true

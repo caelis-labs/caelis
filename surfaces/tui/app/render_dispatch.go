@@ -671,7 +671,7 @@ func (m *Model) lastBlockHasParticipantTurnFooter() bool {
 		return false
 	}
 	block, _ := m.doc.Last().(*ParticipantTurnBlock)
-	if block == nil || !block.Expanded {
+	if block == nil {
 		return false
 	}
 	return participantTurnHasFooter(block)

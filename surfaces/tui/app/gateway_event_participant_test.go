@@ -455,13 +455,18 @@ func withACPUpdate(env eventstream.Envelope, update schema.Update) eventstream.E
 
 func TestGatewayParticipantUserMessageDoesNotDuplicateDisplayedPrompt(t *testing.T) {
 	model := newGatewayEventTestModel()
+	model.setCommands(append(DefaultCommands(), "claude"))
 
-	updated, _ := model.Update(UserMessageMsg{Text: "/claude 总结一下工作"})
+	updated, _ := model.submitLine("/claude 总结一下工作")
 	model = updated.(*Model)
 	updated, _ = model.Update(gatewayEventMsg(gateway.EventEnvelope{
 		Event: gateway.Event{
 			Kind:       gateway.EventKindUserMessage,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
+			Meta: map[string]any{
+				"mention":       "@jeff",
+				"display_input": "总结一下工作",
+			},
 			Origin: &gateway.EventOrigin{
 				Scope:         gateway.EventScopeParticipant,
 				ScopeID:       "participant-turn-1",
@@ -477,22 +482,96 @@ func TestGatewayParticipantUserMessageDoesNotDuplicateDisplayedPrompt(t *testing
 
 	model = updated.(*Model)
 
-	var userLines []string
+	userLines := userDisplayLines(model)
+	if len(userLines) != 1 || !strings.Contains(userLines[0], "@jeff 总结一下工作") {
+		t.Fatalf("user lines = %#v, want directed participant prompt", userLines)
+	}
+	if strings.Contains(strings.Join(userLines, "\n"), "/claude 总结一下工作") {
+		t.Fatalf("user lines = %#v, should not render raw slash prompt", userLines)
+	}
+}
+
+func TestGatewayReviewUserMessageDefersDisplayWhenCommandHidden(t *testing.T) {
+	model := newGatewayEventTestModel()
+	model.setCommands([]string{"help", "agent", "status"})
+
+	updated, _ := model.submitLine("/review focus auth")
+	model = updated.(*Model)
+
+	if userLines := userDisplayLines(model); len(userLines) != 0 {
+		t.Fatalf("user lines after submit = %#v, want deferred local review display", userLines)
+	}
+
+	updated, _ = model.Update(gatewayEventMsg(gateway.EventEnvelope{
+		Event: gateway.Event{
+			Kind:       gateway.EventKindUserMessage,
+			SessionRef: session.SessionRef{SessionID: "root-session"},
+			Meta: map[string]any{
+				"mention":       "@reviewer",
+				"display_input": "focus auth",
+			},
+			Origin: &gateway.EventOrigin{
+				Scope:         gateway.EventScopeParticipant,
+				ScopeID:       "participant-turn-review",
+				ParticipantID: "reviewer",
+				Actor:         "@reviewer",
+			},
+			Narrative: &gateway.NarrativePayload{
+				Role:  gateway.NarrativeRoleUser,
+				Text:  "Review request:\nReview the current workspace changes, including staged, unstaged, and untracked files.\n\nUser review instructions:\nfocus auth",
+				Scope: gateway.EventScopeParticipant,
+			},
+		}}))
+
+	model = updated.(*Model)
+
+	userLines := userDisplayLines(model)
+	if len(userLines) != 1 || !strings.Contains(userLines[0], "@reviewer focus auth") {
+		t.Fatalf("user lines = %#v, want directed reviewer prompt", userLines)
+	}
+	if strings.Contains(strings.Join(userLines, "\n"), "/review focus auth") {
+		t.Fatalf("user lines = %#v, should not render raw review slash prompt", userLines)
+	}
+}
+
+func TestDirectedParticipantUserMessageDequeuesByDisplayText(t *testing.T) {
+	model := newGatewayEventTestModel()
+	model.pendingQueue = []pendingPrompt{
+		{execLine: "first prompt", displayLine: "first prompt", dispatched: true},
+		{execLine: "/review focus auth", displayLine: "focus auth", dispatched: true},
+	}
+
+	updated := model.handleDirectedParticipantUserMessage(TranscriptEvent{
+		Kind:          TranscriptEventNarrative,
+		Scope:         ACPProjectionParticipant,
+		Actor:         "@jeff",
+		Meta:          map[string]any{"display_input": "focus auth"},
+		NarrativeKind: TranscriptNarrativeUser,
+		Text:          "Review request:\nReview the current workspace changes, including staged, unstaged, and untracked files.\n\nUser review instructions:\nfocus auth",
+		Final:         true,
+	})
+	model = updated.(*Model)
+
+	if len(model.pendingQueue) != 1 || model.pendingQueue[0].displayLine != "first prompt" {
+		t.Fatalf("pendingQueue = %#v, want matched display prompt removed only", model.pendingQueue)
+	}
+}
+
+func userDisplayLines(model *Model) []string {
+	if model == nil {
+		return nil
+	}
+	var lines []string
 	for _, block := range model.doc.Blocks() {
 		if user, ok := block.(*UserNarrativeBlock); ok {
-			userLines = append(userLines, "▌ "+user.Raw)
+			lines = append(lines, "▌ "+user.Raw)
 			continue
 		}
 		if transcript, ok := block.(*TranscriptBlock); ok && strings.HasPrefix(strings.TrimSpace(transcript.Raw), ">") {
-			userLines = append(userLines, transcript.Raw)
+			lines = append(lines, transcript.Raw)
 		}
 	}
-	if len(userLines) != 1 || !strings.Contains(userLines[0], "/claude 总结一下工作") {
-		t.Fatalf("user lines = %#v, want only displayed slash prompt", userLines)
-	}
-	if strings.Contains(strings.Join(userLines, "\n"), "▌ 总结一下工作") || strings.Contains(strings.Join(userLines, "\n"), "> 总结一下工作") {
-		t.Fatalf("user lines = %#v, should not render participant prompt echo", userLines)
-	}
+	return lines
 }
 
 func TestParticipantTurnCompletionDoesNotRenderTwoDurationDividers(t *testing.T) {

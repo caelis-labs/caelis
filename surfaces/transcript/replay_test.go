@@ -133,25 +133,25 @@ func TestProjectReplayEventsSkipsSideACPProcessTrace(t *testing.T) {
 	}
 }
 
-func TestProjectReplayEventsSynthesizesParticipantUserPrompt(t *testing.T) {
+func TestProjectReplayEventsProjectsParticipantUserPrompt(t *testing.T) {
 	t.Parallel()
 
 	events := ProjectReplayEvents([]eventstream.Envelope{{
 		Kind:  eventstream.KindSessionUpdate,
 		Scope: eventstream.ScopeParticipant,
-		Meta:  map[string]any{"mention": "claude"},
+		Meta:  map[string]any{"mention": "@claude"},
 		Update: schema.ContentChunk{
 			SessionUpdate: schema.UpdateUserMessage,
 			Content:       schema.TextContent{Type: "text", Text: "summarize"},
 		},
 	}}, nil)
 	if len(events) != 1 {
-		t.Fatalf("events = %#v, want synthesized participant prompt", events)
+		t.Fatalf("events = %#v, want participant prompt", events)
 	}
-	if events[0].Kind != EventNarrative || events[0].Scope != ScopeMain || events[0].NarrativeKind != NarrativeUser {
-		t.Fatalf("event = %#v, want main user narrative", events[0])
+	if events[0].Kind != EventNarrative || events[0].Scope != ScopeParticipant || events[0].NarrativeKind != NarrativeUser {
+		t.Fatalf("event = %#v, want participant user narrative", events[0])
 	}
-	if events[0].Text != "User to @claude: summarize" {
-		t.Fatalf("event text = %q, want participant prompt label", events[0].Text)
+	if events[0].Text != "summarize" || MetaString(events[0].Meta, "mention") != "@claude" {
+		t.Fatalf("event = %#v, want participant prompt text and label metadata", events[0])
 	}
 }

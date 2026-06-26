@@ -429,6 +429,25 @@ func ReviewSubagentPrompt(instructions string) (string, int) {
 	return prefix + instructions, len([]rune(prefix))
 }
 
+func reviewSubagentPromptForACP(instructions string) (string, int) {
+	base := "Review request:\n" + reviewSubagentWorkspaceScopePrompt
+	instructions = strings.TrimSpace(instructions)
+	if instructions == "" {
+		return base, len([]rune(base))
+	}
+	prefix := base + "\n\nUser review instructions:\n"
+	return prefix + instructions, len([]rune(prefix))
+}
+
+// ReviewSubagentPromptForProfileTarget returns the /review prompt for the
+// configured reviewer runtime.
+func ReviewSubagentPromptForProfileTarget(instructions string, target agentprofile.BindingTargetKind) (string, int) {
+	if agentprofile.NormalizeBindingTarget(target) == agentprofile.BindingTargetACP {
+		return reviewSubagentPromptForACP(instructions)
+	}
+	return ReviewSubagentPrompt(instructions)
+}
+
 func builtInAgentProfiles() []agentprofile.Profile {
 	return []agentprofile.Profile{
 		{

@@ -329,8 +329,8 @@ func TestRegisterNativeOpenCodeFamilyBuiltinAgents(t *testing.T) {
 	}
 }
 
-func TestDefaultSelfACPAgentPassesLiteralTokenViaEnv(t *testing.T) {
-	agent, err := defaultSelfACPAgent(defaultSelfACPAgentConfig{
+func TestDefaultSpawnedSelfACPAgentPassesLiteralTokenViaEnv(t *testing.T) {
+	agent, err := defaultSpawnedSelfACPAgent(defaultSpawnedSelfACPAgentConfig{
 		Config: Config{
 			AppName:      "caelis",
 			UserID:       "u",
@@ -351,7 +351,7 @@ func TestDefaultSelfACPAgentPassesLiteralTokenViaEnv(t *testing.T) {
 		WorkspaceCWD: "/tmp/ws",
 	})
 	if err != nil {
-		t.Fatalf("defaultSelfACPAgent() error = %v", err)
+		t.Fatalf("defaultSpawnedSelfACPAgent() error = %v", err)
 	}
 	if strings.Contains(strings.Join(agent.Args, " "), "super-secret-token") {
 		t.Fatalf("self ACP args leaked token: %#v", agent.Args)
@@ -367,8 +367,8 @@ func TestDefaultSelfACPAgentPassesLiteralTokenViaEnv(t *testing.T) {
 	}
 }
 
-func TestDefaultSelfACPAgentPreservesConfiguredTokenEnv(t *testing.T) {
-	agent, err := defaultSelfACPAgent(defaultSelfACPAgentConfig{
+func TestDefaultSpawnedSelfACPAgentPreservesConfiguredTokenEnv(t *testing.T) {
+	agent, err := defaultSpawnedSelfACPAgent(defaultSpawnedSelfACPAgentConfig{
 		Config: Config{
 			AppName:      "caelis",
 			UserID:       "u",
@@ -389,13 +389,43 @@ func TestDefaultSelfACPAgentPreservesConfiguredTokenEnv(t *testing.T) {
 		WorkspaceCWD: "/tmp/ws",
 	})
 	if err != nil {
-		t.Fatalf("defaultSelfACPAgent() error = %v", err)
+		t.Fatalf("defaultSpawnedSelfACPAgent() error = %v", err)
 	}
 	if !slices.Contains(agent.Args, "DEEPSEEK_API_KEY") {
 		t.Fatalf("self ACP args = %#v, want configured token env", agent.Args)
 	}
 	if len(agent.Env) != 0 {
 		t.Fatalf("self ACP env = %#v, want none for configured token env", agent.Env)
+	}
+}
+
+func TestDefaultSpawnedSelfACPAgentForcesManualApprovalMode(t *testing.T) {
+	agent, err := defaultSpawnedSelfACPAgent(defaultSpawnedSelfACPAgentConfig{
+		Config: Config{
+			AppName:      "caelis",
+			UserID:       "u",
+			StoreDir:     "/tmp/store",
+			WorkspaceKey: "ws",
+			WorkspaceCWD: "/tmp/ws",
+			ApprovalMode: "auto-review",
+			Model: ModelConfig{
+				Provider: "deepseek",
+				API:      providers.APIDeepSeek,
+				Model:    "deepseek-reasoner",
+				TokenEnv: "DEEPSEEK_API_KEY",
+			},
+		},
+		AppName:      "caelis",
+		UserID:       "u",
+		StoreDir:     "/tmp/store",
+		WorkspaceKey: "ws",
+		WorkspaceCWD: "/tmp/ws",
+	})
+	if err != nil {
+		t.Fatalf("defaultSpawnedSelfACPAgent() error = %v", err)
+	}
+	if got, ok := argValue(agent.Args, "-approval-mode"); !ok || got != "manual" {
+		t.Fatalf("self ACP -approval-mode = %q (present %v), want manual in args %#v", got, ok, agent.Args)
 	}
 }
 
@@ -865,11 +895,13 @@ func TestLocalStackMaterializesBuiltInAgentProfiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
+	assertAgentArgValue(t, stack.runtime.Assembly.Agents, "self", "-approval-mode", "manual")
 	for _, name := range []string{"explorer", "reviewer"} {
 		agent, ok := agentConfigForToolTest(stack.runtime.Assembly.Agents, name)
 		if !ok {
 			t.Fatalf("%s profile agent missing from assembly: %#v", name, stack.runtime.Assembly.Agents)
 		}
+		assertAgentArgValue(t, stack.runtime.Assembly.Agents, name, "-approval-mode", "manual")
 		if agent.Env["SDK_ACP_ENABLE_SPAWN"] != "0" || agent.Env["SDK_ACP_CHILD_NO_SPAWN"] != "1" {
 			t.Fatalf("%s env = %#v, want SPAWN disabled", name, agent.Env)
 		}
@@ -1433,6 +1465,27 @@ func assertAgentArgsContain(t *testing.T, agents []assembly.AgentConfig, name st
 			t.Fatalf("%s args = %#v, missing %q", name, agent.Args, want)
 		}
 	}
+}
+
+func assertAgentArgValue(t *testing.T, agents []assembly.AgentConfig, name string, flag string, want string) {
+	t.Helper()
+	agent, ok := agentConfigForToolTest(agents, name)
+	if !ok {
+		t.Fatalf("%s agent missing from assembly: %#v", name, agents)
+	}
+	got, ok := argValue(agent.Args, flag)
+	if !ok || got != want {
+		t.Fatalf("%s %s = %q (present %v), want %q in args %#v", name, flag, got, ok, want, agent.Args)
+	}
+}
+
+func argValue(args []string, flag string) (string, bool) {
+	for i, arg := range args {
+		if arg == flag && i+1 < len(args) {
+			return args[i+1], true
+		}
+	}
+	return "", false
 }
 
 func profileSystemPromptArgContains(args []string, want string) bool {

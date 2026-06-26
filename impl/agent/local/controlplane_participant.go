@@ -138,7 +138,7 @@ func (r *Runtime) executeACPParticipantTurn(
 ) {
 	defer handle.finish()
 	participantID := strings.TrimSpace(req.ParticipantID)
-	if userEvent := participantPromptUserEvent(activeSession, binding, turnID, strings.TrimSpace(req.Source), req.Input, req.ContentParts, r.now()); userEvent != nil {
+	if userEvent := participantPromptUserEvent(activeSession, binding, turnID, strings.TrimSpace(req.Source), req.Input, req.DisplayInput, req.DisplayTitle, req.ContentParts, r.now()); userEvent != nil {
 		persisted, err := r.sessions.AppendEvent(ctx, session.AppendEventRequest{
 			SessionRef: ref,
 			Event:      userEvent,
@@ -155,6 +155,8 @@ func (r *Runtime) executeACPParticipantTurn(
 		TurnID:         turnID,
 		ParticipantID:  participantID,
 		Input:          strings.TrimSpace(req.Input),
+		DisplayInput:   strings.TrimSpace(req.DisplayInput),
+		DisplayTitle:   strings.TrimSpace(req.DisplayTitle),
 		ContentParts:   req.ContentParts,
 		ContextPrelude: contextPrelude,
 		Stream:         req.Stream,
@@ -291,6 +293,8 @@ func participantPromptUserEvent(
 	turnID string,
 	source string,
 	input string,
+	displayInput string,
+	displayTitle string,
 	parts []model.ContentPart,
 	now time.Time,
 ) *session.Event {
@@ -306,6 +310,12 @@ func participantPromptUserEvent(
 	}
 	if agent := strings.TrimSpace(binding.AgentName); agent != "" {
 		meta["agent"] = agent
+	}
+	if displayInput := strings.TrimSpace(displayInput); displayInput != "" {
+		meta["display_input"] = displayInput
+	}
+	if displayTitle := strings.TrimSpace(displayTitle); displayTitle != "" {
+		meta["display_title"] = displayTitle
 	}
 	kind := binding.Kind
 	if kind == "" {

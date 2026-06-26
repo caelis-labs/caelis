@@ -6,35 +6,6 @@ import (
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/tuikit"
 )
 
-func renderParticipantTurnHeader(b *ParticipantTurnBlock, ctx BlockRenderContext) string {
-	if b == nil {
-		return ""
-	}
-	icon := "▾"
-	if !b.Expanded {
-		icon = "▸"
-	}
-	iconText := ctx.Theme.PromptStyle().Bold(true).Render(icon)
-	actor := renderParticipantActorLabel(ctx.Theme, b.Actor)
-	left := iconText + " " + actor
-	switch strings.ToLower(strings.TrimSpace(b.Status)) {
-	case "waiting_approval":
-		left = ctx.Theme.WarnStyle().Bold(true).Render(icon) + " " + actor
-	case "failed":
-		left = ctx.Theme.ErrorStyle().Bold(true).Render(icon) + " " + actor
-	case "interrupted":
-		left = ctx.Theme.WarnStyle().Bold(true).Render(icon) + " " + actor
-	}
-	metaParts := make([]string, 0, 1)
-	if label := participantTurnStatusLabel(b.Status); label != "" {
-		metaParts = append(metaParts, label)
-	}
-	if len(metaParts) == 0 {
-		return left
-	}
-	return left + " " + ctx.Theme.TranscriptMetaStyle().Render("· "+strings.Join(metaParts, " · "))
-}
-
 func participantTurnStatusLabel(state string) string {
 	switch strings.ToLower(strings.TrimSpace(state)) {
 	case "", "running", "initializing", "prompting", "completed":

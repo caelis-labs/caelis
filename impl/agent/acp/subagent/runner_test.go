@@ -188,37 +188,6 @@ func TestRunnerKeepsCodexWebSearchToolIdentity(t *testing.T) {
 	}
 }
 
-func TestNormalizeApprovalModeForChildSession(t *testing.T) {
-	t.Parallel()
-
-	cases := []struct {
-		in   string
-		want string
-	}{
-		{in: "manual", want: "manual"},
-		{in: " auto_review ", want: "auto-review"},
-		{in: "auto", want: "auto-review"},
-		{in: "default", want: ""},
-		{in: "", want: ""},
-	}
-	for _, tc := range cases {
-		if got := normalizeApprovalMode(tc.in); got != tc.want {
-			t.Fatalf("normalizeApprovalMode(%q) = %q, want %q", tc.in, got, tc.want)
-		}
-	}
-}
-
-func TestUnsupportedACPMethodError(t *testing.T) {
-	t.Parallel()
-
-	if !isUnsupportedACPMethodError(errString("acp rpc error -32601: Method not found")) {
-		t.Fatal("method-not-found RPC error was not treated as unsupported")
-	}
-	if isUnsupportedACPMethodError(errString("acp rpc error -32000: permission denied")) {
-		t.Fatal("non-unsupported RPC error was ignored")
-	}
-}
-
 func TestRunnerPublishesChildTerminalOutputMetaAsStreamText(t *testing.T) {
 	t.Parallel()
 
@@ -640,10 +609,6 @@ func contentUpdate(t *testing.T, kind string, text string) client.UpdateEnvelope
 func stringPtr(value string) *string {
 	return &value
 }
-
-type errString string
-
-func (e errString) Error() string { return string(e) }
 
 type recordingStreams struct {
 	frames []stream.Frame

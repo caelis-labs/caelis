@@ -71,19 +71,19 @@ func TestAdapterStartReviewSubagentUsesHiddenReviewerProfile(t *testing.T) {
 	if turn == nil {
 		t.Fatal("StartReviewSubagent() turn = nil, want participant stream")
 	}
-	if len(gw.attachReqs) != 1 || gw.attachReqs[0].Agent != "reviewer" || gw.attachReqs[0].Source != "slash_review" {
+	if len(gw.attachReqs) != 1 || gw.attachReqs[0].Agent != "reviewer" || gw.attachReqs[0].Label == "" || gw.attachReqs[0].Source != "slash_review" {
 		t.Fatalf("AttachParticipant requests = %#v, want hidden reviewer slash_review attach", gw.attachReqs)
 	}
 	if len(gw.promptReqs) != 1 || gw.promptReqs[0].ParticipantID != "side-reviewer" || gw.promptReqs[0].Source != "slash_review" {
 		t.Fatalf("PromptParticipant requests = %#v, want reviewer participant prompt", gw.promptReqs)
 	}
+	if got := gw.promptReqs[0].DisplayInput; got != "inspect the [image #1] image" {
+		t.Fatalf("review DisplayInput = %q, want image marker", got)
+	}
 	for _, want := range []string{"Review the current workspace changes", "staged, unstaged, and untracked", "Additional review instructions", "inspect the image"} {
 		if !strings.Contains(gw.promptReqs[0].Input, want) {
 			t.Fatalf("review prompt = %q, want %q", gw.promptReqs[0].Input, want)
 		}
-	}
-	if strings.Contains(gw.promptReqs[0].Input, "$review") {
-		t.Fatalf("review prompt = %q, should not duplicate profile skill instructions", gw.promptReqs[0].Input)
 	}
 	if parts := gw.promptReqs[0].ContentParts; len(parts) != 3 ||
 		parts[0].Type != model.ContentPartText || !strings.HasSuffix(parts[0].Text, "inspect the ") ||
@@ -91,12 +91,80 @@ func TestAdapterStartReviewSubagentUsesHiddenReviewerProfile(t *testing.T) {
 		parts[2].Type != model.ContentPartText || parts[2].Text != "image" {
 		t.Fatalf("review prompt content parts = %#v, want prefixed text/image/text", parts)
 	}
-	env, ok := <-turn.Events()
-	if !ok {
+	events := drainReviewProfileTurnEvents(t, turn)
+	if len(events) == 0 {
 		t.Fatal("reviewer turn emitted no event")
 	}
-	if env.Scope != eventstream.ScopeParticipant {
-		t.Fatalf("event scope = %#v, want participant stream", env.Scope)
+	if events[0].Scope != eventstream.ScopeParticipant {
+		t.Fatalf("event scope = %#v, want participant stream", events[0].Scope)
+	}
+	if len(gw.detachReqs) != 1 || gw.detachReqs[0].ParticipantID != "side-reviewer" || gw.detachReqs[0].Source != "side_agent_complete" {
+		t.Fatalf("DetachParticipant requests = %#v, want review sidecar completion detach", gw.detachReqs)
+	}
+	status, err := driver.AgentStatus(ctx)
+	if err != nil {
+		t.Fatalf("AgentStatus() error = %v", err)
+	}
+	if len(status.Participants) != 0 {
+		t.Fatalf("AgentStatus().Participants = %#v, want completed review sidecar hidden", status.Participants)
+	}
+}
+
+func TestAdapterStartReviewSubagentExternalACPReviewerPrompts(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		input      string
+		wantPrompt string
+	}{
+		{
+			name:       "user prompt",
+			input:      "  focus on auth  ",
+			wantPrompt: "Review request:\nReview the current workspace changes, including staged, unstaged, and untracked files.\n\nUser review instructions:\nfocus on auth",
+		},
+		{
+			name:       "empty review request",
+			input:      "   ",
+			wantPrompt: "Review request:\nReview the current workspace changes, including staged, unstaged, and untracked files.",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			driver, gw := newReviewProfileAdapterForTest(t, ctx, "review-profile-acp-"+strings.ReplaceAll(tt.name, " ", "-"), AgentProfileStatusSnapshot{
+				Profiles: []AgentProfileSnapshot{{
+					ID:       "reviewer",
+					Enabled:  true,
+					Target:   "acp",
+					ACPAgent: "codex",
+					Status:   "ok",
+				}},
+			})
+
+			turn, err := driver.StartReviewSubagent(ctx, tt.input, nil)
+			if err != nil {
+				t.Fatalf("StartReviewSubagent() error = %v", err)
+			}
+			if turn == nil {
+				t.Fatal("StartReviewSubagent() turn = nil, want participant stream")
+			}
+			if len(gw.attachReqs) != 1 || gw.attachReqs[0].Agent != "reviewer" || gw.attachReqs[0].Label == "" || strings.EqualFold(strings.TrimPrefix(gw.attachReqs[0].Label, "@"), "reviewer") {
+				t.Fatalf("AttachParticipant requests = %#v, want reviewer profile attached with external ACP label", gw.attachReqs)
+			}
+			if len(gw.promptReqs) != 1 {
+				t.Fatalf("PromptParticipant requests = %#v, want one reviewer prompt", gw.promptReqs)
+			}
+			if prompt := gw.promptReqs[0].Input; prompt != tt.wantPrompt {
+				t.Fatalf("external review prompt = %q, want %q", prompt, tt.wantPrompt)
+			}
+			drainReviewProfileTurnEvents(t, turn)
+			if len(gw.detachReqs) != 1 || gw.detachReqs[0].ParticipantID != "side-reviewer" {
+				t.Fatalf("DetachParticipant requests = %#v, want review sidecar completion detach", gw.detachReqs)
+			}
+		})
 	}
 }
 
@@ -151,6 +219,10 @@ func TestAdapterStartReviewSubagentAllowsWarningReviewer(t *testing.T) {
 	}
 	if len(gw.attachReqs) != 1 || len(gw.promptReqs) != 1 {
 		t.Fatalf("gateway requests = attach %#v prompt %#v, want reviewer start", gw.attachReqs, gw.promptReqs)
+	}
+	drainReviewProfileTurnEvents(t, turn)
+	if len(gw.detachReqs) != 1 || gw.detachReqs[0].ParticipantID != "side-reviewer" {
+		t.Fatalf("DetachParticipant requests = %#v, want review sidecar completion detach", gw.detachReqs)
 	}
 }
 
@@ -230,12 +302,49 @@ func TestAdapterStartReviewSubagentRejectsUnavailableReviewer(t *testing.T) {
 	}
 }
 
+func newReviewProfileAdapterForTest(t *testing.T, ctx context.Context, sessionID string, status AgentProfileStatusSnapshot) (*Adapter, *reviewProfileGatewayService) {
+	t.Helper()
+	activeSession := session.Session{
+		SessionRef: session.SessionRef{
+			AppName:      "caelis",
+			UserID:       "review-profile-test",
+			SessionID:    sessionID,
+			WorkspaceKey: "ws",
+		},
+		CWD:        t.TempDir(),
+		Controller: session.ControllerBinding{Kind: session.ControllerKindKernel},
+	}
+	gw := &reviewProfileGatewayService{
+		session: activeSession,
+		handle:  reviewProfileTurnHandle(activeSession.SessionRef),
+	}
+	driver, err := NewAdapter(ctx, &RuntimeStack{
+		Gateway: GatewayRuntimeDeps{ServiceFn: func() GatewayService { return gw }},
+		Session: SessionRuntimeDeps{
+			Workspace: session.WorkspaceRef{Key: "ws", CWD: activeSession.CWD},
+			StartFn: func(context.Context, string, string) (session.Session, error) {
+				return session.CloneSession(gw.session), nil
+			},
+		},
+		AgentProfile: AgentProfileRuntimeDeps{
+			StatusFn: func(context.Context) (AgentProfileStatusSnapshot, error) {
+				return status, nil
+			},
+		},
+	}, activeSession.SessionID, "surface", "ollama/llama3")
+	if err != nil {
+		t.Fatalf("NewAdapter() error = %v", err)
+	}
+	return driver, gw
+}
+
 type reviewProfileGatewayService struct {
 	activeSubmitGatewayService
 	session    session.Session
 	handle     gateway.TurnHandle
 	attachReqs []gateway.AttachParticipantRequest
 	promptReqs []gateway.PromptParticipantRequest
+	detachReqs []gateway.DetachParticipantRequest
 }
 
 func (g *reviewProfileGatewayService) ControlPlaneState(context.Context, gateway.ControlPlaneStateRequest) (gateway.ControlPlaneState, error) {
@@ -275,6 +384,28 @@ func (g *reviewProfileGatewayService) AttachParticipant(_ context.Context, req g
 func (g *reviewProfileGatewayService) PromptParticipant(_ context.Context, req gateway.PromptParticipantRequest) (gateway.BeginTurnResult, error) {
 	g.promptReqs = append(g.promptReqs, req)
 	return gateway.BeginTurnResult{Session: session.CloneSession(g.session), Handle: g.handle}, nil
+}
+
+func (g *reviewProfileGatewayService) DetachParticipant(_ context.Context, req gateway.DetachParticipantRequest) (session.Session, error) {
+	g.detachReqs = append(g.detachReqs, req)
+	kept := g.session.Participants[:0]
+	for _, participant := range g.session.Participants {
+		if participant.ID == req.ParticipantID {
+			continue
+		}
+		kept = append(kept, participant)
+	}
+	g.session.Participants = kept
+	return session.CloneSession(g.session), nil
+}
+
+func drainReviewProfileTurnEvents(t *testing.T, turn Turn) []eventstream.Envelope {
+	t.Helper()
+	var out []eventstream.Envelope
+	for env := range turn.Events() {
+		out = append(out, env)
+	}
+	return out
 }
 
 type reviewProfileHandle struct {

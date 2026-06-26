@@ -206,6 +206,8 @@ func (g *Gateway) runParticipantTurn(
 		SessionRef:    session.SessionRef,
 		ParticipantID: strings.TrimSpace(req.ParticipantID),
 		Input:         strings.TrimSpace(req.Input),
+		DisplayInput:  strings.TrimSpace(req.DisplayInput),
+		DisplayTitle:  strings.TrimSpace(req.DisplayTitle),
 		ContentParts:  append([]model.ContentPart(nil), req.ContentParts...),
 		Source:        strings.TrimSpace(req.Source),
 		Stream:        true,

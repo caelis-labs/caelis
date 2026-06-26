@@ -62,7 +62,9 @@ type ApprovalRequester interface {
 
 // SpawnContext is the system-controlled parent session context inherited by one
 // child ACP agent. None of these fields are exposed on the LLM-facing SPAWN
-// tool surface.
+// tool surface. ApprovalMode is the parent session mode for runners that derive
+// child launch configuration from the spawn request; preassembled ACP runners
+// may already carry the effective child approval mode in their launch args.
 type SpawnContext struct {
 	SessionRef        session.SessionRef `json:"session_ref,omitempty"`
 	Session           session.Session    `json:"session,omitempty"`
