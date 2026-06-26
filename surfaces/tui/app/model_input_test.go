@@ -85,6 +85,308 @@ func TestViewportSelectionMotionDedupesSameEndpoint(t *testing.T) {
 	}
 }
 
+func TestViewportSelectionAutoScrollsAtVerticalEdges(t *testing.T) {
+	tests := []struct {
+		name        string
+		startOffset int
+		mouseY      int
+		wantOffset  int
+		wantLine    int
+	}{
+		{name: "bottom edge scrolls down", startOffset: 0, mouseY: 2, wantOffset: 1, wantLine: 3},
+		{name: "top edge scrolls up", startOffset: 3, mouseY: 0, wantOffset: 2, wantLine: 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			model := NewModel(Config{})
+			updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+			m := updated.(*Model)
+			m.viewport.SetWidth(40)
+			m.viewport.SetHeight(3)
+			m.viewportStyledLines = []string{
+				"line 0",
+				"line 1",
+				"line 2",
+				"line 3",
+				"line 4",
+				"line 5",
+			}
+			m.viewportPlainLines = append([]string(nil), m.viewportStyledLines...)
+			m.viewport.SetContentLines(m.viewportStyledLines)
+			m.viewport.SetYOffset(tt.startOffset)
+			m.selecting = true
+			m.selectionStart = textSelectionPoint{line: tt.startOffset, col: 0}
+			m.selectionEnd = m.selectionStart
+			m.enterViewportSelecting()
+
+			mouse := tea.Mouse{
+				Button: tea.MouseLeft,
+				X:      m.mainColumnX() + tuikit.GutterNarrative + 2,
+				Y:      tt.mouseY,
+			}
+			cmd := m.handleViewportMouseMotion(mouse)
+			if cmd == nil {
+				t.Fatal("edge motion should schedule selection auto-scroll")
+			}
+
+			updated, nextCmd := m.Update(frameTickMsg{kind: frameTickSelectionScroll, at: time.Now()})
+			m = updated.(*Model)
+			if got := m.viewport.YOffset(); got != tt.wantOffset {
+				t.Fatalf("viewport offset = %d, want %d", got, tt.wantOffset)
+			}
+			if got := m.selectionEnd.line; got != tt.wantLine {
+				t.Fatalf("selection end line = %d, want %d", got, tt.wantLine)
+			}
+			if m.viewportScrollbarVisibleUntil.IsZero() {
+				t.Fatal("edge auto-scroll should touch the viewport scrollbar")
+			}
+			if nextCmd == nil {
+				t.Fatal("held edge selection should schedule the next auto-scroll tick")
+			}
+		})
+	}
+}
+
+func TestViewportSelectionMouseWheelExtendsSelectionAfterScroll(t *testing.T) {
+	model := NewModel(Config{})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m := updated.(*Model)
+	m.viewport.SetWidth(40)
+	m.viewport.SetHeight(3)
+	m.viewport.MouseWheelDelta = 2
+	m.viewportStyledLines = []string{
+		"line 0",
+		"line 1",
+		"line 2",
+		"line 3",
+		"line 4",
+		"line 5",
+	}
+	m.viewportPlainLines = append([]string(nil), m.viewportStyledLines...)
+	m.viewport.SetContentLines(m.viewportStyledLines)
+	m.selecting = true
+	m.selectionStart = textSelectionPoint{line: 0, col: 0}
+	m.selectionEnd = textSelectionPoint{line: 1, col: 2}
+	m.enterViewportSelecting()
+
+	mouse := tea.Mouse{
+		Button: tea.MouseWheelDown,
+		X:      m.mainColumnX() + tuikit.GutterNarrative + 2,
+		Y:      1,
+	}
+	updated, _ = m.handleMouse(tea.MouseWheelMsg(mouse))
+	m = updated.(*Model)
+	if got := m.viewport.YOffset(); got != 2 {
+		t.Fatalf("viewport offset = %d, want 2", got)
+	}
+	if got := m.selectionEnd; got != (textSelectionPoint{line: 3, col: 2}) {
+		t.Fatalf("selection end = %#v, want line 3 col 2", got)
+	}
+	if got := m.viewportFollowState; got != viewportSelecting {
+		t.Fatalf("viewport follow state = %v, want selecting", got)
+	}
+	if m.viewportScrollbarVisibleUntil.IsZero() {
+		t.Fatal("selection wheel scroll should touch the viewport scrollbar")
+	}
+}
+
+func TestViewportSelectionAutoScrollUsesVisibleMouseYWhenFrameTopTrimmed(t *testing.T) {
+	model := NewModel(Config{})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m := updated.(*Model)
+	m.viewport.SetHeight(3)
+	m.frameTopTrim = 1
+
+	if got := m.selectionAutoScrollDelta(tea.Mouse{Y: 0}); got != -selectionScrollSlow {
+		t.Fatalf("top visible row delta = %d, want slow upward scroll", got)
+	}
+	if got := m.selectionAutoScrollDelta(tea.Mouse{Y: 1}); got != selectionScrollSlow {
+		t.Fatalf("bottom visible row delta = %d, want slow downward scroll", got)
+	}
+	if got := m.selectionAutoScrollDelta(tea.Mouse{Y: 2}); got != selectionScrollFast {
+		t.Fatalf("below visible viewport delta = %d, want fast downward scroll", got)
+	}
+}
+
+func TestViewportSelectionAutoScrollStopsAtDocumentBoundary(t *testing.T) {
+	model := NewModel(Config{})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m := updated.(*Model)
+	m.viewport.SetWidth(40)
+	m.viewport.SetHeight(3)
+	m.viewportStyledLines = []string{
+		"line 0",
+		"line 1",
+		"line 2",
+		"line 3",
+		"line 4",
+		"line 5",
+	}
+	m.viewportPlainLines = append([]string(nil), m.viewportStyledLines...)
+	m.viewport.SetContentLines(m.viewportStyledLines)
+	m.viewport.SetYOffset(3)
+	m.selecting = true
+	m.selectionStart = textSelectionPoint{line: 3, col: 0}
+	m.selectionEnd = textSelectionPoint{line: 5, col: 2}
+	m.selectionAutoScroll = selectionAutoScrollState{
+		active:        true,
+		tickScheduled: true,
+		mouse: tea.Mouse{
+			Button: tea.MouseLeft,
+			X:      m.mainColumnX() + tuikit.GutterNarrative + 2,
+			Y:      2,
+		},
+	}
+
+	updated, cmd := m.Update(frameTickMsg{kind: frameTickSelectionScroll, at: time.Now()})
+	m = updated.(*Model)
+	if got := m.viewport.YOffset(); got != 3 {
+		t.Fatalf("viewport offset = %d, want max offset 3", got)
+	}
+	if m.selectionAutoScroll.active || m.selectionAutoScroll.tickScheduled {
+		t.Fatalf("selection auto-scroll state = %#v, want inactive with no pending tick", m.selectionAutoScroll)
+	}
+	if cmd != nil {
+		t.Fatal("boundary stop should not schedule another auto-scroll tick")
+	}
+}
+
+func TestViewportSelectionAutoScrollPausesWhenMouseLeavesEdge(t *testing.T) {
+	model := NewModel(Config{})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m := updated.(*Model)
+	m.viewport.SetWidth(40)
+	m.viewport.SetHeight(3)
+	m.viewportStyledLines = []string{"line 0", "line 1", "line 2", "line 3"}
+	m.viewportPlainLines = append([]string(nil), m.viewportStyledLines...)
+	m.viewport.SetContentLines(m.viewportStyledLines)
+	m.selecting = true
+	m.selectionStart = textSelectionPoint{line: 0, col: 0}
+	m.selectionEnd = m.selectionStart
+	m.selectionAutoScroll = selectionAutoScrollState{active: true, tickScheduled: true, scheduledToken: 7, nextToken: 7}
+
+	cmd := m.handleViewportMouseMotion(tea.Mouse{
+		Button: tea.MouseLeft,
+		X:      m.mainColumnX() + tuikit.GutterNarrative + 2,
+		Y:      1,
+	})
+	if cmd != nil {
+		t.Fatal("leaving the edge should not schedule selection auto-scroll")
+	}
+	if m.selectionAutoScroll.active {
+		t.Fatalf("selection auto-scroll state = %#v, want inactive after leaving edge", m.selectionAutoScroll)
+	}
+	if !m.selectionAutoScroll.tickScheduled || m.selectionAutoScroll.scheduledToken != 7 {
+		t.Fatalf("selection auto-scroll state = %#v, want pending tick preserved", m.selectionAutoScroll)
+	}
+
+	updated, cmd = m.Update(frameTickMsg{kind: frameTickSelectionScroll, token: 7, at: time.Now()})
+	m = updated.(*Model)
+	if cmd != nil {
+		t.Fatal("paused auto-scroll tick should not schedule another tick")
+	}
+	if m.selectionAutoScroll.active || m.selectionAutoScroll.tickScheduled {
+		t.Fatalf("selection auto-scroll state = %#v, want cleared after pending tick drains", m.selectionAutoScroll)
+	}
+}
+
+func TestViewportSelectionAutoScrollDoesNotDuplicatePendingTickOnReentry(t *testing.T) {
+	model := NewModel(Config{})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m := updated.(*Model)
+	m.viewport.SetWidth(40)
+	m.viewport.SetHeight(3)
+	m.viewportStyledLines = []string{
+		"line 0",
+		"line 1",
+		"line 2",
+		"line 3",
+		"line 4",
+		"line 5",
+	}
+	m.viewportPlainLines = append([]string(nil), m.viewportStyledLines...)
+	m.viewport.SetContentLines(m.viewportStyledLines)
+	m.selecting = true
+	m.selectionStart = textSelectionPoint{line: 0, col: 0}
+	m.selectionEnd = m.selectionStart
+
+	edgeMouse := tea.Mouse{
+		Button: tea.MouseLeft,
+		X:      m.mainColumnX() + tuikit.GutterNarrative + 2,
+		Y:      2,
+	}
+	if cmd := m.handleViewportMouseMotion(edgeMouse); cmd == nil {
+		t.Fatal("first edge entry should schedule selection auto-scroll")
+	}
+	token := m.selectionAutoScroll.scheduledToken
+	if token == 0 || !m.selectionAutoScroll.tickScheduled {
+		t.Fatalf("selection auto-scroll state = %#v, want scheduled token", m.selectionAutoScroll)
+	}
+
+	_ = m.handleViewportMouseMotion(tea.Mouse{
+		Button: tea.MouseLeft,
+		X:      m.mainColumnX() + tuikit.GutterNarrative + 2,
+		Y:      1,
+	})
+	if m.selectionAutoScroll.active || !m.selectionAutoScroll.tickScheduled {
+		t.Fatalf("selection auto-scroll state = %#v, want paused pending tick", m.selectionAutoScroll)
+	}
+	if cmd := m.handleViewportMouseMotion(edgeMouse); cmd != nil {
+		t.Fatal("re-entering before the old tick drains should not schedule a duplicate tick")
+	}
+	if m.selectionAutoScroll.scheduledToken != token {
+		t.Fatalf("scheduled token = %d, want original token %d", m.selectionAutoScroll.scheduledToken, token)
+	}
+
+	updated, nextCmd := m.Update(frameTickMsg{kind: frameTickSelectionScroll, token: token, at: time.Now()})
+	m = updated.(*Model)
+	if got := m.viewport.YOffset(); got != 1 {
+		t.Fatalf("viewport offset = %d, want one scroll from the pending tick", got)
+	}
+	if nextCmd == nil {
+		t.Fatal("active edge after pending tick should schedule the next tick")
+	}
+	nextToken := m.selectionAutoScroll.scheduledToken
+	if nextToken == 0 || nextToken == token {
+		t.Fatalf("next scheduled token = %d, want new token after %d", nextToken, token)
+	}
+	if got := m.viewport.YOffset(); got != 1 {
+		t.Fatalf("viewport offset = %d, old tick should have scrolled only once", got)
+	}
+}
+
+func TestViewportSelectionReleaseCancelsPendingAutoScroll(t *testing.T) {
+	model := NewModel(Config{})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m := updated.(*Model)
+	m.viewport.SetWidth(40)
+	m.viewport.SetHeight(3)
+	m.viewportStyledLines = []string{"line 0", "line 1", "line 2", "line 3"}
+	m.viewportPlainLines = append([]string(nil), m.viewportStyledLines...)
+	m.viewport.SetContentLines(m.viewportStyledLines)
+	m.selecting = true
+	m.selectionStart = textSelectionPoint{line: 0, col: 0}
+	m.selectionEnd = textSelectionPoint{line: 1, col: 2}
+	m.selectionAutoScroll = selectionAutoScrollState{active: true, tickScheduled: true, scheduledToken: 7, nextToken: 7}
+
+	_ = m.handleViewportMouseRelease(tea.Mouse{
+		Button: tea.MouseLeft,
+		X:      m.mainColumnX() + tuikit.GutterNarrative + 2,
+		Y:      1,
+	})
+	if m.selectionAutoScroll.active || m.selectionAutoScroll.tickScheduled {
+		t.Fatalf("selection auto-scroll state = %#v, want cancelled on release", m.selectionAutoScroll)
+	}
+	if m.selectionAutoScroll.nextToken != 7 {
+		t.Fatalf("next token = %d, want preserved token counter", m.selectionAutoScroll.nextToken)
+	}
+	updated, _ = m.Update(frameTickMsg{kind: frameTickSelectionScroll, token: 7, at: time.Now()})
+	m = updated.(*Model)
+	if got := m.viewport.YOffset(); got != 0 {
+		t.Fatalf("viewport offset = %d, stale release tick should not scroll", got)
+	}
+}
+
 func TestViewportWhitespaceSelectionDoesNotToggleFoldToken(t *testing.T) {
 	model := NewModel(Config{
 		WriteClipboardText: func(text string) error {

@@ -448,6 +448,7 @@ func (m *Model) ensureViewportLayout() {
 func (m *Model) clearSelection() {
 	changed := m.selecting || m.selectionStart.line >= 0 || m.selectionEnd.line >= 0
 	m.selecting = false
+	m.cancelSelectionAutoScroll()
 	m.selectionStart = textSelectionPoint{line: -1, col: -1}
 	m.selectionEnd = textSelectionPoint{line: -1, col: -1}
 	if m.viewportFollowState == viewportSelecting {

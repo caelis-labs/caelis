@@ -22,6 +22,9 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		}
+		if m.selecting {
+			return m, m.handleViewportSelectionWheel(typed.Mouse())
+		}
 		if handled, changed := m.tryScrollPanelAtMouse(typed.Mouse()); handled {
 			if changed {
 				offset := m.viewport.YOffset()
@@ -179,22 +182,25 @@ func (m *Model) handleViewportMouseMotion(mouse tea.Mouse) tea.Cmd {
 	if !m.selecting {
 		return nil
 	}
+	m.selectionAutoScroll.mouse = mouse
+	cmd := m.updateViewportSelectionAutoScroll(mouse)
 	point, ok := m.mousePointToContentPoint(mouse.X, mouse.Y, true)
 	if !ok {
-		return nil
+		return cmd
 	}
 	if m.selectionEnd == point {
-		return nil
+		return cmd
 	}
 	m.selectionEnd = point
 	m.bumpViewportSelectionVersion()
-	return nil
+	return cmd
 }
 
 func (m *Model) handleViewportMouseRelease(mouse tea.Mouse) tea.Cmd {
 	if !m.selecting {
 		return nil
 	}
+	m.cancelSelectionAutoScroll()
 	point, ok := m.mousePointToContentPoint(mouse.X, mouse.Y, true)
 	if ok {
 		m.selectionEnd = point

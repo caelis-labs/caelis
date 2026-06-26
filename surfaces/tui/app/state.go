@@ -367,9 +367,10 @@ type Model struct {
 	viewportScrollbarVisibleUntil time.Time
 	scrollbarDrag                 scrollbarDragState
 
-	selecting      bool
-	selectionStart textSelectionPoint
-	selectionEnd   textSelectionPoint
+	selecting           bool
+	selectionStart      textSelectionPoint
+	selectionEnd        textSelectionPoint
+	selectionAutoScroll selectionAutoScrollState
 
 	inputSelecting      bool
 	inputSelectionStart textSelectionPoint

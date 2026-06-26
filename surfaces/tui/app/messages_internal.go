@@ -36,11 +36,13 @@ const (
 	frameTickStreamSmoothing  frameTickKind = "stream_smoothing"
 	frameTickRenderDrain      frameTickKind = "render_drain"
 	frameTickScrollbarVisible frameTickKind = "scrollbar_visibility"
+	frameTickSelectionScroll  frameTickKind = "selection_scroll"
 )
 
 type frameTickMsg struct {
-	at   time.Time
-	kind frameTickKind
+	at    time.Time
+	kind  frameTickKind
+	token uint64
 }
 
 type completionRefreshMsg struct {

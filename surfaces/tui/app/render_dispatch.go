@@ -299,6 +299,9 @@ func (m *Model) dispatchRenderEvent(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		if legacyBroadcast || typed.kind == frameTickScrollbarVisible {
 			cmds = append(cmds, m.advanceScrollbarVisibility(typed.at))
 		}
+		if legacyBroadcast || typed.kind == frameTickSelectionScroll {
+			cmds = append(cmds, m.advanceSelectionAutoScroll(typed.token))
+		}
 		return m, tea.Batch(append(cmds, policyCmd)...), true
 	case TickStatusMsg:
 		model, cmd := m.handleStatusTickMsg()
