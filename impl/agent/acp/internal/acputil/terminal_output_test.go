@@ -1,7 +1,6 @@
 package acputil
 
 import (
-	"encoding/json"
 	"testing"
 
 	"github.com/OnslaughtSnail/caelis/protocol/acp/client"
@@ -48,108 +47,14 @@ func TestStripTerminalConsoleFenceText(t *testing.T) {
 	}
 }
 
-func TestStripTerminalConsoleFenceOutputValue(t *testing.T) {
-	t.Parallel()
-
-	fenced := "```console\nline\n```\n"
-	cases := []struct {
-		name  string
-		in    any
-		check func(t *testing.T, got any)
-	}{
-		{
-			name: "map output keys",
-			in: map[string]any{
-				"stdout": fenced,
-				"id":     fenced,
-			},
-			check: func(t *testing.T, got any) {
-				t.Helper()
-				out, _ := got.(map[string]any)
-				if out["stdout"] != "line\n" {
-					t.Fatalf("stdout = %#v, want stripped output", out["stdout"])
-				}
-				if out["id"] != fenced {
-					t.Fatalf("id = %#v, want unrelated key preserved", out["id"])
-				}
-			},
-		},
-		{
-			name: "text content map",
-			in:   map[string]any{"type": "text", "text": fenced},
-			check: func(t *testing.T, got any) {
-				t.Helper()
-				out, _ := got.(map[string]any)
-				if out["text"] != "line\n" {
-					t.Fatalf("text = %#v, want stripped text content", out["text"])
-				}
-			},
-		},
-		{
-			name: "json raw message",
-			in:   json.RawMessage(`{"type":"text","text":"` + "```console\\nline\\n```\\n" + `"}`),
-			check: func(t *testing.T, got any) {
-				t.Helper()
-				out, _ := got.(map[string]any)
-				if out["text"] != "line\n" {
-					t.Fatalf("text = %#v, want stripped raw text content", out["text"])
-				}
-			},
-		},
-		{
-			name: "slice",
-			in:   []any{map[string]any{"stderr": fenced}, fenced},
-			check: func(t *testing.T, got any) {
-				t.Helper()
-				out, _ := got.([]any)
-				if out[0].(map[string]any)["stderr"] != "line\n" || out[1] != "line\n" {
-					t.Fatalf("slice = %#v, want stripped terminal output values", out)
-				}
-			},
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			tc.check(t, StripTerminalConsoleFenceOutputValue(tc.in))
-		})
-	}
-}
-
-func TestStripTerminalConsoleFenceMeta(t *testing.T) {
-	t.Parallel()
-
-	fenced := "```console\nline\n```\n"
-	meta := map[string]any{
-		"terminal_output": map[string]any{
-			"terminal_id": "call-1",
-			"data":        fenced,
-		},
-		"vendor": map[string]any{"trace": fenced},
-	}
-	got := StripTerminalConsoleFenceMeta(meta)
-
-	output, _ := got["terminal_output"].(map[string]any)
-	if output["data"] != "line\n" {
-		t.Fatalf("terminal_output data = %#v, want stripped output", output["data"])
-	}
-	if output["terminal_id"] != "call-1" {
-		t.Fatalf("terminal_id = %#v, want preserved id", output["terminal_id"])
-	}
-	if meta["terminal_output"].(map[string]any)["data"] != fenced {
-		t.Fatalf("original meta was mutated: %#v", meta)
-	}
-	if got["vendor"].(map[string]any)["trace"] != fenced {
-		t.Fatalf("vendor trace = %#v, want unrelated meta preserved", got["vendor"])
-	}
-}
-
 func TestStripTerminalConsoleFenceToolCallUpdate(t *testing.T) {
 	t.Parallel()
 
 	fenced := "```console\nline\n```\n"
 	title := fenced
+	meta := map[string]any{
+		"terminal_output": map[string]any{"data": fenced},
+	}
 	got := StripTerminalConsoleFenceToolCallUpdate(client.ToolCallUpdate{
 		Title:     &title,
 		RawOutput: map[string]any{"stdout": fenced},
@@ -160,16 +65,14 @@ func TestStripTerminalConsoleFenceToolCallUpdate(t *testing.T) {
 			Type:    "content",
 			Content: acpschema.TextContent{Type: "text", Text: fenced},
 		}},
-		Meta: map[string]any{
-			"terminal_output": map[string]any{"data": fenced},
-		},
+		Meta: meta,
 	})
 
 	if got.Title == nil || *got.Title != fenced {
 		t.Fatalf("title = %#v, want non-terminal title preserved", got.Title)
 	}
-	if got.RawOutput.(map[string]any)["stdout"] != "line\n" {
-		t.Fatalf("raw output = %#v, want stripped stdout", got.RawOutput)
+	if got.RawOutput.(map[string]any)["stdout"] != fenced {
+		t.Fatalf("raw output = %#v, want original stdout", got.RawOutput)
 	}
 	if text := acpschema.ExtractTextValue(got.Content[0].Content); text != "line\n" {
 		t.Fatalf("terminal content = %q, want stripped text", text)
@@ -177,8 +80,67 @@ func TestStripTerminalConsoleFenceToolCallUpdate(t *testing.T) {
 	if text := acpschema.ExtractTextValue(got.Content[1].Content); text != fenced {
 		t.Fatalf("non-terminal content = %q, want original text", text)
 	}
-	output, _ := got.Meta["terminal_output"].(map[string]any)
-	if output["data"] != "line\n" {
-		t.Fatalf("terminal meta = %#v, want stripped data", got.Meta)
+	if output, _ := got.Meta["terminal_output"].(map[string]any); output["data"] != fenced {
+		t.Fatalf("terminal meta = %#v, want original data", got.Meta)
+	}
+}
+
+func TestStripTerminalConsoleFenceToolCallUpdateStripsExecuteContent(t *testing.T) {
+	t.Parallel()
+
+	fenced := "```console\nclean\n```\n"
+	kind := acpschema.ToolKindExecute
+	got := StripTerminalConsoleFenceToolCallUpdate(client.ToolCallUpdate{
+		Kind: &kind,
+		Content: []client.ToolCallContent{{
+			Type:    "content",
+			Content: acpschema.TextContent{Type: "text", Text: fenced},
+		}},
+	})
+
+	if text := acpschema.ExtractTextValue(got.Content[0].Content); text != "clean\n" {
+		t.Fatalf("execute content = %q, want stripped console output", text)
+	}
+}
+
+func TestStripTerminalConsoleFenceToolCallUpdateStripsClaudeBashContent(t *testing.T) {
+	t.Parallel()
+
+	fenced := "```console\nFri Jun 26 14:35:27 CST 2026\n```\n"
+	want := "Fri Jun 26 14:35:27 CST 2026\n"
+	got := StripTerminalConsoleFenceToolCallUpdate(client.ToolCallUpdate{
+		RawOutput: "Fri Jun 26 14:35:27 CST 2026",
+		Content: []client.ToolCallContent{{
+			Type:    "content",
+			Content: acpschema.TextContent{Type: "text", Text: fenced},
+		}},
+		Meta: map[string]any{
+			"claudeCode": map[string]any{
+				"toolName": "Bash",
+			},
+		},
+	})
+
+	if text := acpschema.ExtractTextValue(got.Content[0].Content); text != want {
+		t.Fatalf("claude bash content = %q, want stripped console output", text)
+	}
+}
+
+func TestStripTerminalConsoleFenceToolCallUpdateStripsDecodedTextMapContent(t *testing.T) {
+	t.Parallel()
+
+	fenced := "```console\nhello\n```\n"
+	kind := acpschema.ToolKindExecute
+	got := StripTerminalConsoleFenceToolCallUpdate(client.ToolCallUpdate{
+		Kind: &kind,
+		Content: []client.ToolCallContent{{
+			Type:    "content",
+			Content: map[string]any{"type": "text", "text": fenced},
+		}},
+	})
+
+	content, _ := got.Content[0].Content.(map[string]any)
+	if content["text"] != "hello\n" {
+		t.Fatalf("decoded text content = %#v, want stripped console output", content)
 	}
 }

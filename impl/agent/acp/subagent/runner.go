@@ -730,10 +730,10 @@ func childToolTraceLine(title string, kind string, rawInput any, status string) 
 }
 
 func childToolCallUpdateTerminalText(update client.ToolCallUpdate) string {
-	if text := childTerminalOutputMetaText(update.Meta); text != "" {
+	if text := childTerminalContentText(update.Content); text != "" {
 		return text
 	}
-	return childTerminalContentText(update.Content)
+	return childTerminalOutputMetaText(update.Meta)
 }
 
 func childTerminalOutputMetaText(meta map[string]any) string {

@@ -309,8 +309,8 @@ func TestRunnerStripsConsoleFenceFromChildTerminalOutput(t *testing.T) {
 	if event == nil || event.Protocol == nil || event.Protocol.ToolCall == nil || event.Protocol.Update == nil {
 		t.Fatalf("stream event = %#v, want structured tool result event", event)
 	}
-	if got := event.Protocol.ToolCall.RawOutput["stdout"]; got != want {
-		t.Fatalf("raw output stdout = %#v, want %q", got, want)
+	if got := event.Protocol.ToolCall.RawOutput["stdout"]; got != fenced {
+		t.Fatalf("raw output stdout = %#v, want original %q", got, fenced)
 	}
 	if got := schema.ExtractTextValue(event.Protocol.ToolCall.Content[0].Content); got != want {
 		t.Fatalf("terminal content = %q, want %q", got, want)
@@ -319,8 +319,8 @@ func TestRunnerStripsConsoleFenceFromChildTerminalOutput(t *testing.T) {
 	if !ok {
 		t.Fatalf("Protocol.Update.Meta = %#v, want terminal_output", event.Protocol.Update.Meta)
 	}
-	if got := output["data"]; got != want {
-		t.Fatalf("terminal_output data = %#v, want %q", got, want)
+	if got := output["data"]; got != fenced {
+		t.Fatalf("terminal_output data = %#v, want original %q", got, fenced)
 	}
 }
 
