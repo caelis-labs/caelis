@@ -58,8 +58,11 @@ func TestNarrativeInlineCodeUsesCompactStyle(t *testing.T) {
 	if style.Code.Prefix != "" || style.Code.Suffix != "" {
 		t.Fatalf("inline code padding prefix=%q suffix=%q, want none", style.Code.Prefix, style.Code.Suffix)
 	}
-	if got, want := ptrString(style.Code.BackgroundColor), ptrString(styleBackgroundToAnsiPtr(theme.MarkdownInlineCodeStyle())); got != want {
-		t.Fatalf("inline code background = %q, want %q", got, want)
+	if got, want := ptrString(style.Code.Color), ptrString(styleForegroundToAnsiPtr(theme.MarkdownInlineCodeStyle())); got != want {
+		t.Fatalf("inline code foreground = %q, want %q", got, want)
+	}
+	if got := ptrString(style.Code.BackgroundColor); got != "" {
+		t.Fatalf("inline code background = %q, want none", got)
 	}
 
 	rendered := glamourRenderNarrative(raw, 80, theme, tuikit.LineStyleAssistant)
@@ -75,16 +78,16 @@ func TestNarrativeInlineCodeUsesCompactStyle(t *testing.T) {
 func TestNarrativeInlineCodeStyleScopesAfterCJKText(t *testing.T) {
 	raw := "- **事实优先**：比起猜测，我更倾向于读取仓库中的真实代码。在编辑之前先读或搜索，用 `shell` 验证结果。"
 	theme := tuikit.ResolveThemeWithState(false, false, colorprofile.TrueColor)
-	inlineBG := sgrBackgroundCode(t, theme.MarkdownInlineCodeStyle().GetBackground())
+	inlineFG := sgrForegroundCode(t, theme.MarkdownInlineCodeStyle().GetForeground())
 
 	t.Run("glamour finalized", func(t *testing.T) {
 		rendered := glamourRenderNarrative(raw, 180, theme, tuikit.LineStyleAssistant)
-		assertInlineCodeBackgroundScope(t, rendered, inlineBG, "shell")
+		assertInlineCodeForegroundScope(t, rendered, inlineFG, "shell")
 	})
 
 	t.Run("streaming tail", func(t *testing.T) {
 		rows := renderStreamingNarrativeTailRows("block-1", raw, "", tuikit.LineStyleAssistant, 180, theme)
-		assertInlineCodeBackgroundScope(t, joinRenderedStyled(rows), inlineBG, "shell")
+		assertInlineCodeForegroundScope(t, joinRenderedStyled(rows), inlineFG, "shell")
 	})
 
 	t.Run("main transcript active stream", func(t *testing.T) {
@@ -101,7 +104,7 @@ func TestNarrativeInlineCodeStyleScopesAfterCJKText(t *testing.T) {
 			Final:         false,
 		}}})
 		m.syncViewportContent()
-		assertInlineCodeBackgroundScope(t, strings.Join(m.viewportStyledLines, "\n"), sgrBackgroundCode(t, m.theme.MarkdownInlineCodeStyle().GetBackground()), "shell")
+		assertInlineCodeForegroundScope(t, strings.Join(m.viewportStyledLines, "\n"), sgrForegroundCode(t, m.theme.MarkdownInlineCodeStyle().GetForeground()), "shell")
 	})
 
 	t.Run("viewport stream line", func(t *testing.T) {
@@ -112,7 +115,7 @@ func TestNarrativeInlineCodeStyleScopesAfterCJKText(t *testing.T) {
 		m.lastCommittedStyle = tuikit.LineStyleAssistant
 		ctx := m.blockRenderContext(180)
 		styled, _, _ := m.renderStreamViewportLines(ctx)
-		assertInlineCodeBackgroundScope(t, strings.Join(styled, "\n"), sgrBackgroundCode(t, m.theme.MarkdownInlineCodeStyle().GetBackground()), "shell")
+		assertInlineCodeForegroundScope(t, strings.Join(styled, "\n"), sgrForegroundCode(t, m.theme.MarkdownInlineCodeStyle().GetForeground()), "shell")
 	})
 
 	t.Run("viewport stream line wrapped inline code", func(t *testing.T) {
@@ -123,24 +126,24 @@ func TestNarrativeInlineCodeStyleScopesAfterCJKText(t *testing.T) {
 		m.lastCommittedStyle = tuikit.LineStyleAssistant
 		ctx := m.blockRenderContext(24)
 		styled, _, _ := m.renderStreamViewportLines(ctx)
-		assertInlineCodeBackgroundScope(t, strings.Join(styled, "\n"), sgrBackgroundCode(t, m.theme.MarkdownInlineCodeStyle().GetBackground()), "shell command")
+		assertInlineCodeForegroundScope(t, strings.Join(styled, "\n"), sgrForegroundCode(t, m.theme.MarkdownInlineCodeStyle().GetForeground()), "shell command")
 	})
 }
 
-func TestFinalMarkdownDoesNotDecorateProseWithBackground(t *testing.T) {
-	raw := markdownBackgroundScopeFixture()
+func TestFinalMarkdownDoesNotDecorateProseWithInlineCodeColor(t *testing.T) {
+	raw := markdownInlineCodeScopeFixture()
 	theme := tuikit.ResolveThemeWithState(true, false, colorprofile.TrueColor)
 
 	rendered := glamourRenderNarrative(raw, 160, theme, tuikit.LineStyleAssistant)
-	assertMarkdownBackgroundScope(t, rendered, []string{"git status", "console.log(\"hello\")"})
+	assertMarkdownInlineCodeForegroundScope(t, rendered, sgrForegroundCode(t, theme.MarkdownInlineCodeStyle().GetForeground()), []string{"git status", "console.log(\"hello\")"})
 }
 
-func TestStreamingTailMarkdownDoesNotDecorateProseWithBackground(t *testing.T) {
-	raw := markdownBackgroundScopeFixture()
+func TestStreamingTailMarkdownDoesNotDecorateProseWithInlineCodeColor(t *testing.T) {
+	raw := markdownInlineCodeScopeFixture()
 	theme := tuikit.ResolveThemeWithState(true, false, colorprofile.TrueColor)
 
 	rows := renderStreamingNarrativeTailRows("block-1", raw, "", tuikit.LineStyleAssistant, 160, theme)
-	assertMarkdownBackgroundScope(t, joinRenderedStyled(rows), []string{"git status", "console.log(\"hello\")"})
+	assertMarkdownInlineCodeForegroundScope(t, joinRenderedStyled(rows), sgrForegroundCode(t, theme.MarkdownInlineCodeStyle().GetForeground()), []string{"git status", "console.log(\"hello\")"})
 }
 
 func TestNarrativeInlineCodeStyleScopesToolNamesInCJKLists(t *testing.T) {
@@ -155,23 +158,23 @@ func TestNarrativeInlineCodeStyleScopesToolNamesInCJKLists(t *testing.T) {
 		"- 通过 `SPAWN` 委托子任务",
 	}, "\n")
 	theme := tuikit.ResolveThemeWithState(false, false, colorprofile.TrueColor)
-	inlineBG := sgrBackgroundCode(t, theme.MarkdownInlineCodeStyle().GetBackground())
+	inlineFG := sgrForegroundCode(t, theme.MarkdownInlineCodeStyle().GetForeground())
 
-	assertToolCodeScopes := func(t *testing.T, styled string, bg string) {
+	assertToolCodeScopes := func(t *testing.T, styled string, fg string) {
 		t.Helper()
-		assertInlineCodeBackgroundScope(t, firstStyledLineContaining(styled, "验证"), bg, "Shell")
-		assertInlineCodeBackgroundScope(t, firstStyledLineContaining(styled, "命令"), bg, "Shell")
-		assertInlineCodeBackgroundScope(t, firstStyledLineContaining(styled, "委托"), bg, "SPAWN")
+		assertInlineCodeForegroundScope(t, firstStyledLineContaining(styled, "验证"), fg, "Shell")
+		assertInlineCodeForegroundScope(t, firstStyledLineContaining(styled, "命令"), fg, "Shell")
+		assertInlineCodeForegroundScope(t, firstStyledLineContaining(styled, "委托"), fg, "SPAWN")
 	}
 
 	t.Run("glamour finalized", func(t *testing.T) {
 		rendered := glamourRenderNarrative(raw, 180, theme, tuikit.LineStyleAssistant)
-		assertToolCodeScopes(t, rendered, inlineBG)
+		assertToolCodeScopes(t, rendered, inlineFG)
 	})
 
 	t.Run("streaming tail", func(t *testing.T) {
 		rows := renderStreamingNarrativeTailRows("block-1", raw, "", tuikit.LineStyleAssistant, 180, theme)
-		assertToolCodeScopes(t, joinRenderedStyled(rows), inlineBG)
+		assertToolCodeScopes(t, joinRenderedStyled(rows), inlineFG)
 	})
 
 	t.Run("main transcript active stream", func(t *testing.T) {
@@ -188,7 +191,7 @@ func TestNarrativeInlineCodeStyleScopesToolNamesInCJKLists(t *testing.T) {
 			Final:         false,
 		}}})
 		m.syncViewportContent()
-		assertToolCodeScopes(t, strings.Join(m.viewportStyledLines, "\n"), sgrBackgroundCode(t, m.theme.MarkdownInlineCodeStyle().GetBackground()))
+		assertToolCodeScopes(t, strings.Join(m.viewportStyledLines, "\n"), sgrForegroundCode(t, m.theme.MarkdownInlineCodeStyle().GetForeground()))
 	})
 }
 
@@ -208,24 +211,24 @@ func TestNarrativeInlineCodeStyleScopesShortCJKListAcronym(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			theme := tuikit.ResolveThemeWithState(tt.dark, false, colorprofile.TrueColor)
-			inlineBG := sgrBackgroundCode(t, theme.MarkdownInlineCodeStyle().GetBackground())
+			inlineFG := sgrForegroundCode(t, theme.MarkdownInlineCodeStyle().GetForeground())
 
-			assertAPICodeScope := func(t *testing.T, styled string, bg string) {
+			assertAPICodeScope := func(t *testing.T, styled string, fg string) {
 				t.Helper()
-				assertInlineCodeBackgroundScope(t, firstStyledLineContaining(styled, "API"), bg, "API")
+				assertInlineCodeForegroundScope(t, firstStyledLineContaining(styled, "API"), fg, "API")
 			}
 
 			for _, raw := range raws {
 				t.Run("raw="+raw, func(t *testing.T) {
 					t.Run("glamour finalized", func(t *testing.T) {
 						rendered := glamourRenderNarrative(raw, 80, theme, tuikit.LineStyleAssistant)
-						assertAPICodeScope(t, rendered, inlineBG)
+						assertAPICodeScope(t, rendered, inlineFG)
 					})
 
 					t.Run("glamour finalized with heading context", func(t *testing.T) {
 						text := strings.Join([]string{"无问题点", "", raw}, "\n")
 						rendered := glamourRenderNarrative(text, 80, theme, tuikit.LineStyleAssistant)
-						assertAPICodeScope(t, rendered, inlineBG)
+						assertAPICodeScope(t, rendered, inlineFG)
 					})
 
 					t.Run("render text stream with heading context", func(t *testing.T) {
@@ -240,24 +243,24 @@ func TestNarrativeInlineCodeStyleScopesShortCJKListAcronym(t *testing.T) {
 							BlockID:        "block-1",
 							LineStyle:      tuikit.LineStyleAssistant,
 						}).Rows
-						assertAPICodeScope(t, joinRenderedStyled(rows), inlineBG)
+						assertAPICodeScope(t, joinRenderedStyled(rows), inlineFG)
 					})
 
 					t.Run("streaming tail", func(t *testing.T) {
 						rows := renderStreamingNarrativeTailRows("block-1", raw, "", tuikit.LineStyleAssistant, 80, theme)
-						assertAPICodeScope(t, joinRenderedStyled(rows), inlineBG)
+						assertAPICodeScope(t, joinRenderedStyled(rows), inlineFG)
 					})
 
 					t.Run("streaming tail with heading context", func(t *testing.T) {
 						text := strings.Join([]string{"无问题点", "", raw}, "\n")
 						rows := renderStreamingNarrativeTailRows("block-1", text, "", tuikit.LineStyleAssistant, 80, theme)
-						assertAPICodeScope(t, joinRenderedStyled(rows), inlineBG)
+						assertAPICodeScope(t, joinRenderedStyled(rows), inlineFG)
 					})
 
 					t.Run("streaming tail with role prefix", func(t *testing.T) {
 						text := strings.Join([]string{"无问题点", "", raw}, "\n")
 						rows := renderStreamingNarrativeTailRows("block-1", text, "· ", tuikit.LineStyleAssistant, 80, theme)
-						assertAPICodeScope(t, joinRenderedStyled(rows), inlineBG)
+						assertAPICodeScope(t, joinRenderedStyled(rows), inlineFG)
 					})
 
 					t.Run("main transcript finalized", func(t *testing.T) {
@@ -278,9 +281,9 @@ func TestNarrativeInlineCodeStyleScopesShortCJKListAcronym(t *testing.T) {
 						if block == nil {
 							t.Fatal("expected main ACP turn block")
 						}
-						assertAPICodeScope(t, joinRenderedStyled(block.Render(m.blockRenderContext(80))), sgrBackgroundCode(t, m.theme.MarkdownInlineCodeStyle().GetBackground()))
+						assertAPICodeScope(t, joinRenderedStyled(block.Render(m.blockRenderContext(80))), sgrForegroundCode(t, m.theme.MarkdownInlineCodeStyle().GetForeground()))
 						m.syncViewportContent()
-						assertAPICodeScope(t, strings.Join(m.viewportStyledLines, "\n"), sgrBackgroundCode(t, m.theme.MarkdownInlineCodeStyle().GetBackground()))
+						assertAPICodeScope(t, strings.Join(m.viewportStyledLines, "\n"), sgrForegroundCode(t, m.theme.MarkdownInlineCodeStyle().GetForeground()))
 					})
 
 					t.Run("main transcript active stream", func(t *testing.T) {
@@ -298,7 +301,7 @@ func TestNarrativeInlineCodeStyleScopesShortCJKListAcronym(t *testing.T) {
 							Final:         false,
 						}}})
 						m.syncViewportContent()
-						assertAPICodeScope(t, strings.Join(m.viewportStyledLines, "\n"), sgrBackgroundCode(t, m.theme.MarkdownInlineCodeStyle().GetBackground()))
+						assertAPICodeScope(t, strings.Join(m.viewportStyledLines, "\n"), sgrForegroundCode(t, m.theme.MarkdownInlineCodeStyle().GetForeground()))
 					})
 				})
 			}
@@ -310,7 +313,7 @@ func TestActiveMarkdownStreamDoesNotStyleMultilineInlineCodeAcrossStablePrefix(t
 	theme := tuikit.ResolveThemeWithState(false, false, colorprofile.TrueColor)
 	stable := strings.Join([]string{
 		strings.Repeat("stable intro ", 12) + "`partial",
-		"ordinary text should not receive inline code background",
+		"ordinary text should not receive inline code color",
 		"more ordinary text should also stay body styled` after",
 		"",
 		"",
@@ -324,13 +327,13 @@ func TestActiveMarkdownStreamDoesNotStyleMultilineInlineCodeAcrossStablePrefix(t
 
 	rows := renderActiveNarrativeBufferTestRows("block-1", raw, "· ", tuikit.LineStyleAssistant, 120, theme)
 	styled := joinRenderedStyled(rows)
-	bgText := normalizeInlineStyleText(textWithSGRBackground(styled, sgrBackgroundCode(t, theme.MarkdownInlineCodeStyle().GetBackground())))
+	fgText := normalizeInlineStyleText(textWithSGRForeground(styled, sgrForegroundCode(t, theme.MarkdownInlineCodeStyle().GetForeground())))
 	for _, notWant := range []string{
-		"ordinary text should not receive inline code background",
+		"ordinary text should not receive inline code color",
 		"more ordinary text should also stay body styled",
 	} {
-		if strings.Contains(bgText, notWant) {
-			t.Fatalf("multiline inline-code background leaked onto ordinary text %q\nbgText=%q\nplain=%q\nstyled=%q", notWant, bgText, joinRenderedPlain(rows), styled)
+		if strings.Contains(fgText, notWant) {
+			t.Fatalf("multiline inline-code foreground leaked onto ordinary text %q\nfgText=%q\nplain=%q\nstyled=%q", notWant, fgText, joinRenderedPlain(rows), styled)
 		}
 	}
 }
@@ -358,16 +361,16 @@ func TestGlamourListStrongDoesNotStealToolCodeColor(t *testing.T) {
 		}
 	}
 
-	codeBG := sgrBackgroundCode(t, theme.MarkdownInlineCodeStyle().GetBackground())
-	codeText := textWithSGRBackground(rendered, codeBG)
+	codeFG := sgrForegroundCode(t, theme.MarkdownInlineCodeStyle().GetForeground())
+	codeText := textWithSGRForeground(rendered, codeFG)
 	for _, want := range []string{"READ", "WRITE", "PATCH", "SEARCH", "GLOB", "LIST", "Shell", "RUN_COMMAND", "PLAN", "TASK", "SPAWN"} {
 		if !strings.Contains(codeText, want) {
-			t.Fatalf("inline code %q should use code background\ncodeText=%q\nstyled=%q", want, codeText, rendered)
+			t.Fatalf("inline code %q should use code foreground\ncodeText=%q\nstyled=%q", want, codeText, rendered)
 		}
 	}
 	for _, notWant := range []string{"读/写/编辑文件", "搜索文件内容与路径", "执行", "命令", "管理多步骤任务"} {
 		if strings.Contains(codeText, notWant) {
-			t.Fatalf("strong list label %q should not use inline-code background\ncodeText=%q\nstyled=%q", notWant, codeText, rendered)
+			t.Fatalf("strong list label %q should not use inline-code foreground\ncodeText=%q\nstyled=%q", notWant, codeText, rendered)
 		}
 	}
 }
@@ -382,9 +385,9 @@ func TestNarrativeViewportWrapPreservesRenderedInlineCodeANSI(t *testing.T) {
 		BlockID: "assistant-row",
 	}, 24)
 
-	assertInlineCodeBackgroundScope(t,
+	assertInlineCodeForegroundScope(t,
 		firstStyledLineContaining(wrapped, "Shell"),
-		sgrBackgroundCode(t, m.theme.MarkdownInlineCodeStyle().GetBackground()),
+		sgrForegroundCode(t, m.theme.MarkdownInlineCodeStyle().GetForeground()),
 		"Shell")
 }
 
@@ -787,7 +790,7 @@ func stablePrefixFinalParityMarkdown() string {
 	return stable + tail
 }
 
-func markdownBackgroundScopeFixture() string {
+func markdownInlineCodeScopeFixture() string {
 	return strings.Join([]string{
 		"# Markdown 格式大全 — Rich Formatting Demo",
 		"",
@@ -811,12 +814,12 @@ func markdownBackgroundScopeFixture() string {
 	}, "\n")
 }
 
-func assertMarkdownBackgroundScope(t *testing.T, styled string, wantBackgroundText []string) {
+func assertMarkdownInlineCodeForegroundScope(t *testing.T, styled string, inlineFG string, wantForegroundText []string) {
 	t.Helper()
-	backgroundText := normalizeInlineStyleText(textWithAnySGRBackground(styled))
-	for _, want := range wantBackgroundText {
-		if !strings.Contains(backgroundText, want) {
-			t.Fatalf("background text missing expected code span %q\nbackground=%q\nplain=%q\nstyled=%q", want, backgroundText, ansi.Strip(styled), styled)
+	foregroundText := normalizeInlineStyleText(textWithSGRForeground(styled, inlineFG))
+	for _, want := range wantForegroundText {
+		if !strings.Contains(foregroundText, want) {
+			t.Fatalf("inline-code foreground text missing expected code span %q\nforeground=%q\nplain=%q\nstyled=%q", want, foregroundText, ansi.Strip(styled), styled)
 		}
 	}
 	for _, notWant := range []string{
@@ -836,8 +839,8 @@ func assertMarkdownBackgroundScope(t *testing.T, styled string, wantBackgroundTe
 		"苹果",
 		"红富士",
 	} {
-		if strings.Contains(backgroundText, notWant) {
-			t.Fatalf("markdown prose %q should not receive a background\nbackground=%q\nplain=%q\nstyled=%q", notWant, backgroundText, ansi.Strip(styled), styled)
+		if strings.Contains(foregroundText, notWant) {
+			t.Fatalf("markdown prose %q should not receive inline-code foreground\nforeground=%q\nplain=%q\nstyled=%q", notWant, foregroundText, ansi.Strip(styled), styled)
 		}
 	}
 }
@@ -952,15 +955,6 @@ func firstStyledLineContaining(styled string, needle string) string {
 	return ""
 }
 
-func sgrBackgroundCode(t *testing.T, c color.Color) string {
-	t.Helper()
-	if c == nil {
-		t.Fatal("expected inline code style to have a background color")
-	}
-	r, g, b, _ := c.RGBA()
-	return fmt.Sprintf("48;2;%d;%d;%d", r>>8, g>>8, b>>8)
-}
-
 func sgrForegroundCode(t *testing.T, c color.Color) string {
 	t.Helper()
 	if c == nil {
@@ -970,81 +964,20 @@ func sgrForegroundCode(t *testing.T, c color.Color) string {
 	return fmt.Sprintf("38;2;%d;%d;%d", r>>8, g>>8, b>>8)
 }
 
-func assertInlineCodeBackgroundScope(t *testing.T, styled, inlineBG, want string) {
+func assertInlineCodeForegroundScope(t *testing.T, styled, inlineFG, want string) {
 	t.Helper()
 	plain := ansi.Strip(styled)
-	bgText := textWithSGRBackground(styled, inlineBG)
+	fgText := textWithSGRForeground(styled, inlineFG)
 	if !strings.Contains(plain, want) {
 		t.Fatalf("rendered text missing %q\nplain=%q\nstyled=%q", want, plain, styled)
 	}
-	if normalizeInlineStyleText(bgText) != want {
-		t.Fatalf("inline code background covered %q, want only %q\nplain=%q\nstyled=%q", bgText, want, plain, styled)
+	if normalizeInlineStyleText(fgText) != want {
+		t.Fatalf("inline code foreground covered %q, want only %q\nplain=%q\nstyled=%q", fgText, want, plain, styled)
 	}
 }
 
 func normalizeInlineStyleText(text string) string {
 	return strings.Join(strings.Fields(text), " ")
-}
-
-func textWithSGRBackground(styled, inlineBG string) string {
-	var out strings.Builder
-	active := false
-	target, targetOK := parseSGRColorCode(inlineBG, "48")
-	for i := 0; i < len(styled); {
-		if styled[i] == '\x1b' && i+1 < len(styled) && styled[i+1] == '[' {
-			end := i + 2
-			for end < len(styled) && styled[end] != 'm' {
-				end++
-			}
-			if end < len(styled) {
-				params := styled[i+2 : end]
-				if resetsSGRBackground(params) {
-					active = false
-				}
-				if strings.Contains(params, inlineBG) || (targetOK && sgrParamsContainColor(params, "48", target, 1)) {
-					active = true
-				}
-				i = end + 1
-				continue
-			}
-		}
-		r, size := utf8.DecodeRuneInString(styled[i:])
-		if active {
-			out.WriteRune(r)
-		}
-		i += size
-	}
-	return out.String()
-}
-
-func textWithAnySGRBackground(styled string) string {
-	var out strings.Builder
-	active := false
-	for i := 0; i < len(styled); {
-		if styled[i] == '\x1b' && i+1 < len(styled) && styled[i+1] == '[' {
-			end := i + 2
-			for end < len(styled) && styled[end] != 'm' {
-				end++
-			}
-			if end < len(styled) {
-				params := styled[i+2 : end]
-				if resetsSGRBackground(params) {
-					active = false
-				}
-				if sgrSetsBackground(params) {
-					active = true
-				}
-				i = end + 1
-				continue
-			}
-		}
-		r, size := utf8.DecodeRuneInString(styled[i:])
-		if active {
-			out.WriteRune(r)
-		}
-		i += size
-	}
-	return out.String()
 }
 
 func textWithSGRForeground(styled, foreground string) string {
@@ -1128,19 +1061,6 @@ func absInt(v int) int {
 	return v
 }
 
-func resetsSGRBackground(params string) bool {
-	if params == "" {
-		return true
-	}
-	for _, part := range strings.Split(params, ";") {
-		switch part {
-		case "0", "49":
-			return true
-		}
-	}
-	return false
-}
-
 func resetsSGRForeground(params string) bool {
 	if params == "" {
 		return true
@@ -1163,21 +1083,6 @@ func sgrSetsForeground(params string) bool {
 		switch part {
 		case "30", "31", "32", "33", "34", "35", "36", "37",
 			"90", "91", "92", "93", "94", "95", "96", "97":
-			return true
-		}
-	}
-	return false
-}
-
-func sgrSetsBackground(params string) bool {
-	parts := strings.Split(params, ";")
-	for i, part := range parts {
-		if part == "48" && i+1 < len(parts) && (parts[i+1] == "2" || parts[i+1] == "5") {
-			return true
-		}
-		switch part {
-		case "40", "41", "42", "43", "44", "45", "46", "47",
-			"100", "101", "102", "103", "104", "105", "106", "107":
 			return true
 		}
 	}

@@ -216,8 +216,8 @@ func TestTokensIncludeToolAndMarkdownSemantics(t *testing.T) {
 	if got := stringifyColor(tokens.MarkdownInlineCode.GetForeground()); got != "#cdd6f4" {
 		t.Fatalf("inline code token foreground = %q", got)
 	}
-	if got := stringifyColor(tokens.MarkdownInlineCode.GetBackground()); got != "#181825" {
-		t.Fatalf("inline code token background = %q", got)
+	if got := tokens.MarkdownInlineCode.GetBackground(); colorIsPresent(got) {
+		t.Fatalf("inline code token background = %v, want none", got)
 	}
 	if got, want := stringifyColor(tokens.MarkdownTableHead.GetForeground()), stringifyColor(theme.TextPrimary); got != want {
 		t.Fatalf("markdown table header token foreground = %q, want body text %q", got, want)
@@ -233,15 +233,15 @@ func TestTokensIncludeToolAndMarkdownSemantics(t *testing.T) {
 	}
 }
 
-func TestInlineCodeBackgroundFallsBackToForegroundOnlyForLimitedColorProfiles(t *testing.T) {
-	for _, profile := range []colorprofile.Profile{colorprofile.ANSI256, colorprofile.ANSI} {
+func TestInlineCodeUsesForegroundOnlyAcrossColorProfiles(t *testing.T) {
+	for _, profile := range []colorprofile.Profile{colorprofile.TrueColor, colorprofile.ANSI256, colorprofile.ANSI} {
 		t.Run(fmt.Sprint(profile), func(t *testing.T) {
 			theme := ResolveThemeWithState(true, false, profile)
 			if got := theme.MarkdownInlineCodeStyle().GetBackground(); colorIsPresent(got) {
-				t.Fatalf("inline code background = %v, want nil for limited color profile", got)
+				t.Fatalf("inline code background = %v, want nil", got)
 			}
 			if got := theme.MarkdownInlineCodeStyle().GetForeground(); !colorIsPresent(got) {
-				t.Fatal("inline code should keep a foreground color for limited color profile")
+				t.Fatal("inline code should keep a foreground color")
 			}
 		})
 	}

@@ -283,7 +283,8 @@ func narrativeStyleConfig(theme tuikit.Theme, roleStyle tuikit.LineStyle) gansi.
 	style.Strikethrough.CrossedOut = boolPtr(true)
 
 	// ---------------------------------------------------------------
-	// Inline code — background highlight with padding (crush style)
+	// Inline code — foreground-only emphasis keeps short tool names readable
+	// without turning prose into visual blocks.
 	// ---------------------------------------------------------------
 	style.Code.Prefix = ""
 	style.Code.Suffix = ""

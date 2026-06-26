@@ -47,7 +47,7 @@ type Tokens struct {
 	// ── Purpose-specific surfaces ──────────────────────────────────
 	ChromeBg  lipgloss.Style // header / footer bar background
 	CardBg    lipgloss.Style // card / panel body
-	CodeBg    lipgloss.Style // code block / inline code background
+	CodeBg    lipgloss.Style // code block background
 	OverlayBg lipgloss.Style // modal / overlay backdrop
 
 	// ── Chrome text ────────────────────────────────────────────────
@@ -168,7 +168,7 @@ func resolveTokens(t Theme) Tokens {
 		// Markdown / prose
 		MarkdownHeading:    fgStyle(t.TextPrimary).Bold(true),
 		MarkdownLink:       fgStyle(t.LinkFg).Underline(true),
-		MarkdownInlineCode: withBg(fgStyle(t.CodeFg), t.CodeBg),
+		MarkdownInlineCode: fgStyle(t.CodeFg),
 		MarkdownCodeBlock:  withBg(fgStyle(t.CodeBlockFg), t.CodeBlockBg),
 		MarkdownQuote:      quietStyle(t, t.ReasoningFg).Italic(true),
 		MarkdownTableHead:  fgStyle(t.TextPrimary).Bold(true),
