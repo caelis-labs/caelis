@@ -9,6 +9,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/modelregistry"
 	"github.com/OnslaughtSnail/caelis/internal/acpagentenv"
 	"github.com/OnslaughtSnail/caelis/ports/assembly"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/control/commands"
 )
 
 type RuntimeConfig struct {
@@ -225,12 +226,8 @@ func LookupBuiltInAgent(name string) (assembly.AgentConfig, bool) {
 }
 
 func ReservedSlashCommandName(name string) bool {
-	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "help", "agent", "subagent", "connect", "model", "sandbox", "status", "doctor", "new", "resume", "compact", "exit", "quit":
-		return true
-	default:
-		return false
-	}
+	name = strings.TrimSpace(name)
+	return commands.IsKnown(name) || strings.EqualFold(name, "sandbox")
 }
 
 func cloneStringMap(in map[string]string) map[string]string {

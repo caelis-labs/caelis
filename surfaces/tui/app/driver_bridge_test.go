@@ -2191,10 +2191,15 @@ type bridgeTestDriver struct {
 	lastStartedAgent         string
 	lastStartedPrompt        string
 	lastStartedAttachments   []control.Attachment
+	lastReviewInstructions   string
+	lastReviewAttachments    []control.Attachment
+	agentProfileStatus       control.AgentProfileStatusSnapshot
+	lastAgentProfileBinding  control.AgentProfileBindingConfig
 	lastContinuedHandle      string
 	lastContinuedPrompt      string
 	lastContinuedAttachments []control.Attachment
 	subagentTurn             control.Turn
+	reviewTurn               control.Turn
 	agentList                []control.AgentCandidate
 	agentStatus              control.AgentStatusSnapshot
 	addAgentErr              error
@@ -2342,6 +2347,15 @@ func (d *bridgeSubmitDriver) ListAgents(context.Context, int) ([]control.AgentCa
 }
 func (d *bridgeSubmitDriver) AgentStatus(context.Context) (control.AgentStatusSnapshot, error) {
 	return control.AgentStatusSnapshot{}, nil
+}
+func (d *bridgeSubmitDriver) AgentProfileStatus(context.Context) (control.AgentProfileStatusSnapshot, error) {
+	return control.AgentProfileStatusSnapshot{}, nil
+}
+func (d *bridgeSubmitDriver) BindAgentProfile(context.Context, control.AgentProfileBindingConfig) (control.AgentProfileStatusSnapshot, error) {
+	return control.AgentProfileStatusSnapshot{}, nil
+}
+func (d *bridgeSubmitDriver) StartReviewSubagent(context.Context, string, []control.Attachment) (control.Turn, error) {
+	return nil, nil
 }
 func (d *bridgeSubmitDriver) AddAgent(context.Context, string) (control.AgentStatusSnapshot, error) {
 	return control.AgentStatusSnapshot{}, nil
@@ -2493,6 +2507,13 @@ func (d *bridgeTestDriver) AgentStatus(context.Context) (control.AgentStatusSnap
 	d.agentStatusCalls++
 	return d.agentStatus, nil
 }
+func (d *bridgeTestDriver) AgentProfileStatus(context.Context) (control.AgentProfileStatusSnapshot, error) {
+	return d.agentProfileStatus, nil
+}
+func (d *bridgeTestDriver) BindAgentProfile(_ context.Context, cfg control.AgentProfileBindingConfig) (control.AgentProfileStatusSnapshot, error) {
+	d.lastAgentProfileBinding = cfg
+	return d.agentProfileStatus, nil
+}
 func (d *bridgeTestDriver) AddAgent(_ context.Context, target string) (control.AgentStatusSnapshot, error) {
 	return d.AddAgentWithOptions(context.Background(), target, control.AgentAddOptions{})
 }
@@ -2521,6 +2542,14 @@ func (d *bridgeTestDriver) StartAgentSubagent(_ context.Context, agent string, p
 	d.lastStartedAttachments = cloneTUIDriverAttachments(attachments)
 	if d.subagentTurn != nil {
 		return d.subagentTurn, nil
+	}
+	return bridgeTurnWithEvents(), nil
+}
+func (d *bridgeTestDriver) StartReviewSubagent(_ context.Context, instructions string, attachments []control.Attachment) (control.Turn, error) {
+	d.lastReviewInstructions = instructions
+	d.lastReviewAttachments = cloneTUIDriverAttachments(attachments)
+	if d.reviewTurn != nil {
+		return d.reviewTurn, nil
 	}
 	return bridgeTurnWithEvents(), nil
 }

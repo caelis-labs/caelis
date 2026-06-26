@@ -586,7 +586,7 @@ func slashArgQueryAtCursor(input []rune, cursor int) (string, string, bool) {
 		if len(fields) == 2 {
 			if hasTrailingDelimiter {
 				switch action {
-				case "run", "bind":
+				case "bind":
 					return "subagent " + action, "", true
 				case "list":
 					return "", "", false
@@ -598,18 +598,13 @@ func slashArgQueryAtCursor(input []rune, cursor int) (string, string, bool) {
 				return "", "", false
 			}
 			switch action {
-			case "list", "run", "bind":
+			case "list", "bind":
 			default:
 				return "subagent", action, true
 			}
 			return "subagent", action, true
 		}
 		switch action {
-		case "run":
-			if len(fields) == 3 && !hasTrailingDelimiter {
-				return "subagent run", strings.TrimSpace(fields[2]), true
-			}
-			return "", "", false
 		case "bind":
 		default:
 			return "", "", false

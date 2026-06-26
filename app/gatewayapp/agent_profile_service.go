@@ -41,6 +41,11 @@ type AgentProfileBindingConfig struct {
 
 const guardianProfileID = "guardian"
 
+// ReviewerAgentProfileID is the built-in profile used by the /review command.
+const ReviewerAgentProfileID = "reviewer"
+
+const reviewSubagentWorkspaceScopePrompt = "Review the current workspace changes, including staged, unstaged, and untracked files."
+
 func (s *Stack) AgentProfiles() AgentProfileService {
 	return AgentProfileService{stack: s}
 }
@@ -412,6 +417,18 @@ func normalizeAgentProfileID(value string) string {
 	return agentprofile.NormalizeProfile(agentprofile.Profile{ID: value, Description: "x"}).ID
 }
 
+// ReviewSubagentPrompt returns the model-visible /review turn prompt and the
+// rune offset where user-provided instructions begin after the canonical scope.
+func ReviewSubagentPrompt(instructions string) (string, int) {
+	base := reviewSubagentWorkspaceScopePrompt
+	instructions = strings.TrimSpace(instructions)
+	if instructions == "" {
+		return base, len([]rune(base))
+	}
+	prefix := base + "\n\nAdditional review instructions:\n"
+	return prefix + instructions, len([]rune(prefix))
+}
+
 func builtInAgentProfiles() []agentprofile.Profile {
 	return []agentprofile.Profile{
 		{
@@ -425,12 +442,12 @@ You are an exploration subagent. Inspect the requested code or runtime path, gat
 			Metadata: map[string]any{"source": "caelis", "built_in": true},
 		},
 		{
-			ID:           "reviewer",
+			ID:           ReviewerAgentProfileID,
 			Name:         "Reviewer",
 			Description:  "Review a change for bugs, regressions, and missing validation.",
 			Capabilities: []string{"review", "testing"},
 			Instructions: strings.TrimSpace(`
-You are a code review subagent. Prioritize correctness bugs, regression risks, boundary violations, and missing tests. Return findings first, ordered by severity, with concrete file and line references where possible.
+You are a code review subagent. Use the $review skill for review methodology and output format. Stay scoped to the parent request.
 `),
 			Metadata: map[string]any{"source": "caelis", "built_in": true},
 		},

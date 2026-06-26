@@ -792,30 +792,54 @@ func (d *Adapter) HandoffAgent(ctx context.Context, target string) (AgentStatusS
 }
 
 func (d *Adapter) StartAgentSubagent(ctx context.Context, target string, prompt string, attachments []Attachment) (Turn, error) {
-	activeSession, err := d.ensureSession(ctx)
-	if err != nil {
-		return nil, err
-	}
-	prompt = strings.TrimSpace(prompt)
-	contentParts, err := contentPartsFromSubmission(prompt, attachments, d.WorkspaceDir())
-	if err != nil {
-		return nil, err
-	}
 	agent, err := d.resolveAgentName(target)
 	if err != nil {
 		return nil, err
 	}
-	label := d.allocateSideAgentLabel(ctx, activeSession.SessionRef, agent)
+	return d.startSidecarTurn(ctx, startSidecarTurnRequest{
+		Agent:       agent,
+		Prompt:      prompt,
+		Attachments: attachments,
+		Source:      "slash_" + agent,
+	})
+}
+
+type startSidecarTurnRequest struct {
+	Agent       string
+	Prompt      string
+	Attachments []Attachment
+	Source      string
+}
+
+func (d *Adapter) startSidecarTurn(ctx context.Context, req startSidecarTurnRequest) (Turn, error) {
+	activeSession, err := d.ensureSession(ctx)
+	if err != nil {
+		return nil, err
+	}
+	agent := strings.TrimSpace(req.Agent)
+	if agent == "" {
+		return nil, fmt.Errorf("app/gatewayapp/controladapter: agent name is required")
+	}
+	prompt := strings.TrimSpace(req.Prompt)
+	contentParts, err := contentPartsFromSubmission(prompt, req.Attachments, d.WorkspaceDir())
+	if err != nil {
+		return nil, err
+	}
+	source := strings.TrimSpace(req.Source)
+	if source == "" {
+		source = "slash_" + agent
+	}
 	gw, err := d.gateway()
 	if err != nil {
 		return nil, err
 	}
+	label := d.allocateSideAgentLabel(ctx, activeSession.SessionRef, agent)
 	updated, err := gw.AttachParticipant(ctx, gateway.AttachParticipantRequest{
 		SessionRef: activeSession.SessionRef,
 		BindingKey: d.bindingKey,
 		Agent:      agent,
 		Role:       session.ParticipantRoleSidecar,
-		Source:     "slash_" + agent,
+		Source:     source,
 		Label:      label,
 	})
 	if err != nil {
@@ -838,7 +862,7 @@ func (d *Adapter) StartAgentSubagent(ctx context.Context, target string, prompt 
 		ParticipantID: participantID,
 		Input:         prompt,
 		ContentParts:  contentParts,
-		Source:        "slash_" + agent,
+		Source:        source,
 	})
 	if err != nil {
 		if rollbackErr := d.detachSideAgentAfterPromptFailure(ctx, updated.SessionRef, participantID); rollbackErr != nil {

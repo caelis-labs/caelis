@@ -10,12 +10,13 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/agent"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/protocol/acp"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/control/commands"
 )
 
 func TestRuntimeAgentReservedSlashCommandsDoNotRunSideACP(t *testing.T) {
 	t.Parallel()
 
-	for _, command := range []string{"help", "agent", "connect", "model", "status", "doctor", "new", "resume", "compact", "exit", "quit"} {
+	for _, command := range append(commands.DefaultNames(), "sandbox") {
 		command := command
 		t.Run(command, func(t *testing.T) {
 			t.Parallel()

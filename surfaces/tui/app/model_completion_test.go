@@ -339,7 +339,6 @@ func TestSubagentBindSelectionOpensNestedPickers(t *testing.T) {
 			case "subagent":
 				return []SlashArgCandidate{
 					{Value: "list", Display: "list"},
-					{Value: "run", Display: "run"},
 					{Value: "bind", Display: "bind"},
 				}, nil
 			case "subagent bind":
@@ -620,7 +619,6 @@ func TestSlashCommandCompletionOpensSubagentArgPicker(t *testing.T) {
 			}
 			return []SlashArgCandidate{
 				{Value: "list", Display: "list"},
-				{Value: "run", Display: "run"},
 				{Value: "bind", Display: "bind"},
 			}, nil
 		},
@@ -641,8 +639,8 @@ func TestSlashCommandCompletionOpensSubagentArgPicker(t *testing.T) {
 	if got := model.slashArgCommand; got != "subagent" {
 		t.Fatalf("slashArgCommand = %q, want subagent", got)
 	}
-	if len(model.slashArgCandidates) != 3 || model.slashArgCandidates[0].Value != "list" {
-		t.Fatalf("slashArgCandidates = %#v, want list/run/bind", model.slashArgCandidates)
+	if len(model.slashArgCandidates) != 2 || model.slashArgCandidates[0].Value != "list" {
+		t.Fatalf("slashArgCandidates = %#v, want list/bind", model.slashArgCandidates)
 	}
 }
 

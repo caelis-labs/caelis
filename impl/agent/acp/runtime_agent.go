@@ -20,6 +20,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/stream"
 	"github.com/OnslaughtSnail/caelis/protocol/acp"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/control/commands"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/projector"
 )
 
@@ -513,12 +514,8 @@ func (a *RuntimeAgent) availableSideACPCommand(ctx context.Context, sessionID st
 }
 
 func reservedACPSlashCommand(command string) bool {
-	switch strings.ToLower(strings.TrimSpace(command)) {
-	case "help", "agent", "connect", "model", "status", "doctor", "new", "resume", "compact", "exit", "quit":
-		return true
-	default:
-		return false
-	}
+	command = strings.TrimSpace(command)
+	return commands.IsKnown(command) || strings.EqualFold(command, "sandbox")
 }
 
 func sideACPContentParts(parts []model.ContentPart, prompt string) []model.ContentPart {

@@ -253,7 +253,7 @@ func TestRegressionSlashCompletionAgentRemove(t *testing.T) {
 	_ = candidates
 }
 
-func TestRegressionSlashCompletionSubagentRunExcludesGuardian(t *testing.T) {
+func TestRegressionSlashCompletionSubagentRunIsRemoved(t *testing.T) {
 	t.Parallel()
 	driver, _ := newRegressionDriverWithOptions(t, adapterTestStackOptions{BuiltInAgentProfiles: true})
 	ctx := context.Background()
@@ -262,11 +262,8 @@ func TestRegressionSlashCompletionSubagentRunExcludesGuardian(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CompleteSlashArg(subagent run) error = %v", err)
 	}
-	if !slashArgCandidateHasValue(candidates, "explorer") || !slashArgCandidateHasValue(candidates, "reviewer") {
-		t.Fatalf("CompleteSlashArg(subagent run) = %#v, want explorer and reviewer", candidates)
-	}
-	if slashArgCandidateHasValue(candidates, "guardian") {
-		t.Fatalf("CompleteSlashArg(subagent run) = %#v, want no guardian", candidates)
+	if len(candidates) != 0 {
+		t.Fatalf("CompleteSlashArg(subagent run) = %#v, want no candidates for removed command", candidates)
 	}
 }
 

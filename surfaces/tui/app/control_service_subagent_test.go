@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/OnslaughtSnail/caelis/protocol/acp/control"
 )
 
@@ -56,6 +58,55 @@ func TestFormatSubagentListShowsReadableBindings(t *testing.T) {
 	for _, bad := range []string{"->", "guardian  disabled", "model deepseek"} {
 		if strings.Contains(got, bad) {
 			t.Fatalf("formatSubagentList() contains %q:\n%s", bad, got)
+		}
+	}
+}
+
+func TestSlashReviewStartsReviewerProfile(t *testing.T) {
+	driver := &bridgeTestDriver{}
+	result := dispatchSlashCommand(driver, &ProgramSender{}, "/review")
+	if result.Err != nil {
+		t.Fatalf("/review error = %v", result.Err)
+	}
+	if driver.lastReviewInstructions != "" {
+		t.Fatalf("review instructions = %q, want default empty instructions", driver.lastReviewInstructions)
+	}
+	if driver.lastStartedAgent != "" {
+		t.Fatalf("dynamic agent runner called with %q, want profile runner only", driver.lastStartedAgent)
+	}
+}
+
+func TestSlashReviewPassesCustomInstructions(t *testing.T) {
+	driver := &bridgeTestDriver{}
+	result := dispatchSlashCommand(driver, &ProgramSender{}, "/review focus on replay persistence")
+	if result.Err != nil {
+		t.Fatalf("/review custom error = %v", result.Err)
+	}
+	if driver.lastReviewInstructions != "focus on replay persistence" {
+		t.Fatalf("review instructions = %q, want custom instructions", driver.lastReviewInstructions)
+	}
+}
+
+func TestSubagentRunShowsRemovedNotice(t *testing.T) {
+	driver := &bridgeTestDriver{
+		agentList: []control.AgentCandidate{{Name: "reviewer"}},
+	}
+	var notices []string
+	result := dispatchSlashCommand(driver, &ProgramSender{Send: func(msg tea.Msg) {
+		if chunk, ok := msg.(LogChunkMsg); ok {
+			notices = append(notices, chunk.Chunk)
+		}
+	}}, "/subagent run reviewer inspect this")
+	if result.Err != nil {
+		t.Fatalf("/subagent run error = %v", result.Err)
+	}
+	if driver.lastStartedAgent != "" || driver.lastReviewInstructions != "" {
+		t.Fatalf("runner was called: dynamic=%q review=%q", driver.lastStartedAgent, driver.lastReviewInstructions)
+	}
+	combined := strings.Join(notices, "\n")
+	for _, want := range []string{"/subagent run has been removed", "/review [instructions]", "/<agent> <prompt>"} {
+		if !strings.Contains(combined, want) {
+			t.Fatalf("/subagent run notice = %q, want %q", combined, want)
 		}
 	}
 }

@@ -282,15 +282,11 @@ func (m *Model) applySlashArgCompletion() tea.Cmd {
 		m.setInputText("/subagent " + choice + " ")
 		m.syncTextareaFromInput()
 		switch choice {
-		case "run", "bind":
+		case "bind":
 			m.activateSlashArgPickerFromInput("subagent " + choice)
 		default:
 			m.clearSlashArg()
 		}
-		return nil
-	case "subagent run":
-		m.setInputText("/subagent run " + choice + " ")
-		m.clearSlashArg()
 		return nil
 	case "subagent bind":
 		m.setInputText("/subagent bind " + choice + " ")
@@ -393,8 +389,6 @@ func (m *Model) shouldExecuteSlashArgSelection(command string, choice string) bo
 		return true
 	case "subagent":
 		return false
-	case "subagent run":
-		return false
 	case "subagent bind":
 		return false
 	case "model":
@@ -492,8 +486,6 @@ func isExecutableSlashArgInput(line string) bool {
 		switch action {
 		case "list":
 			return len(fields) == 2
-		case "run":
-			return len(fields) >= 4
 		case "bind":
 			if len(fields) < 4 {
 				return false
@@ -582,7 +574,7 @@ func (m *Model) handleSlashArgKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 			_, submitCmd := m.submitLine(line)
 			return true, submitCmd
 		}
-		if command == "agent" || command == "plugin" || command == "plugin marketplace" || command == "plugin marketplace update" || command == "plugin marketplace rm" || command == "subagent" || command == "subagent run" || command == "subagent bind" || strings.HasPrefix(command, "subagent bind ") || command == "model" || command == "model use" || command == "model del" || strings.HasPrefix(command, "model use ") || strings.HasPrefix(command, "model del ") {
+		if command == "agent" || command == "plugin" || command == "plugin marketplace" || command == "plugin marketplace update" || command == "plugin marketplace rm" || command == "subagent" || command == "subagent bind" || strings.HasPrefix(command, "subagent bind ") || command == "model" || command == "model use" || command == "model del" || strings.HasPrefix(command, "model use ") || strings.HasPrefix(command, "model del ") {
 			cmd := m.applySlashArgCompletion()
 			m.syncTextareaFromInput()
 			return true, cmd

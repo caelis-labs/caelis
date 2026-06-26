@@ -41,7 +41,9 @@ func dispatchSlashCommandWithContextResult(ctx context.Context, service control.
 	case "plugin":
 		return executeLineResult{completion: slashPluginWithContext(ctx, service, send, args)}
 	case "subagent":
-		return executeLineResult{completion: slashSubagentWithContext(ctx, service, sender, args, argsStart, text, attachments)}
+		return executeLineResult{completion: slashSubagentWithContext(ctx, service, sender, args)}
+	case "review":
+		return slashReviewWithContext(ctx, service, sender, args, argsStart, text, attachments)
 	case "new":
 		return executeLineResult{completion: slashNewWithContext(ctx, service, send)}
 	case "resume":
@@ -151,17 +153,7 @@ func slashDynamicAgentWithContextResult(ctx context.Context, service control.Ser
 	if err != nil {
 		return executeLineResult{completion: TaskResultMsg{Err: friendlyCommandError("/"+agent, err)}}
 	}
-	if turn == nil {
-		return executeLineResult{completion: TaskResultMsg{SuppressTurnDivider: true}}
-	}
-	defer turn.Close()
-	if send != nil {
-		return forwardTurnEventStream(ctx, service, turn, sender)
-	} else {
-		for range turn.Events() {
-		}
-	}
-	return executeLineResult{completion: TaskResultMsg{}}
+	return runSubagentTurn(ctx, service, sender, turn)
 }
 
 func isRegisteredAgentCommand(service control.Service, agent string) bool {
@@ -211,15 +203,18 @@ func dispatchMentionCommandWithContextResult(ctx context.Context, service contro
 	if err != nil {
 		return executeLineResult{completion: TaskResultMsg{Err: friendlyCommandError("@"+handle, err)}}
 	}
+	return runSubagentTurn(ctx, service, sender, turn)
+}
+
+func runSubagentTurn(ctx context.Context, service control.Service, sender *ProgramSender, turn control.Turn) executeLineResult {
 	if turn == nil {
 		return executeLineResult{completion: TaskResultMsg{SuppressTurnDivider: true}}
 	}
 	defer turn.Close()
-	if send != nil {
+	if sender != nil && sender.sendFunc() != nil {
 		return forwardTurnEventStream(ctx, service, turn, sender)
-	} else {
-		for range turn.Events() {
-		}
+	}
+	for range turn.Events() {
 	}
 	return executeLineResult{completion: TaskResultMsg{}}
 }

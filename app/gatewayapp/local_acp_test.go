@@ -22,6 +22,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/tool"
 	"github.com/OnslaughtSnail/caelis/protocol/acp"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/control/commands"
 )
 
 func TestLocalStackInjectsSpawnForSelfAndAgentProfilesOnly(t *testing.T) {
@@ -176,13 +177,22 @@ func TestACPSurfaceAvailableCommandsExposeRegisteredACPAgents(t *testing.T) {
 
 func TestACPSurfaceAvailableCommandsHideReservedACPAgentNames(t *testing.T) {
 	stack, session := newStackWithAssemblyForToolTest(t, assembly.ResolvedAssembly{
-		Agents: []assembly.AgentConfig{{
-			Name:        "status",
-			Description: "reserved collision",
-			Command:     "go",
-			Args:        []string{"run", "./internal/acpe2eagent"},
-			WorkDir:     repoRootForGatewayAppTest(t),
-		}},
+		Agents: []assembly.AgentConfig{
+			{
+				Name:        "status",
+				Description: "reserved collision: status",
+				Command:     "go",
+				Args:        []string{"run", "./internal/acpe2eagent"},
+				WorkDir:     repoRootForGatewayAppTest(t),
+			},
+			{
+				Name:        "review",
+				Description: "reserved collision: review",
+				Command:     "go",
+				Args:        []string{"run", "./internal/acpe2eagent"},
+				WorkDir:     repoRootForGatewayAppTest(t),
+			},
+		},
 	})
 	commands, err := stack.ACPSurface(nil, false, nil).AvailableCommands(context.Background(), session.SessionID)
 	if err != nil {
@@ -192,10 +202,39 @@ func TestACPSurfaceAvailableCommandsHideReservedACPAgentNames(t *testing.T) {
 	if status == nil {
 		t.Fatalf("AvailableCommands() = %#v, want built-in /status command", commands)
 	}
-	for _, command := range commands {
-		if strings.EqualFold(strings.TrimSpace(command.Name), "status") && command.Description == "reserved collision" {
-			t.Fatalf("AvailableCommands() exposed reserved ACP agent command: %#v", command)
+	for _, reserved := range []string{"status", "review"} {
+		for _, command := range commands {
+			if strings.EqualFold(strings.TrimSpace(command.Name), reserved) && strings.HasPrefix(command.Description, "reserved collision:") {
+				t.Fatalf("AvailableCommands() exposed reserved ACP agent command: %#v", command)
+			}
 		}
+	}
+}
+
+func TestRegisterACPAgentRejectsReservedReviewName(t *testing.T) {
+	ctx := context.Background()
+	stack, _ := newStackWithAssemblyForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
+
+	err := stack.RegisterACPAgent(ctx, AgentConfig{
+		Name:    "review",
+		Command: "review-acp",
+	})
+	if err == nil {
+		t.Fatal("RegisterACPAgent(review) error = nil, want reserved slash command conflict")
+	}
+	if !strings.Contains(err.Error(), "conflicts with an existing slash command") {
+		t.Fatalf("RegisterACPAgent(review) error = %v, want slash command conflict", err)
+	}
+}
+
+func TestReservedSlashCommandNameTracksCoreRegistry(t *testing.T) {
+	for _, name := range commands.DefaultNames() {
+		if !reservedSlashCommandName(name) {
+			t.Fatalf("reservedSlashCommandName(%q) = false, want true for core command", name)
+		}
+	}
+	if !reservedSlashCommandName("sandbox") {
+		t.Fatal("reservedSlashCommandName(\"sandbox\") = false, want legacy reservation")
 	}
 }
 

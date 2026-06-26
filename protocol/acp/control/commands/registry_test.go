@@ -12,6 +12,7 @@ func TestDefaultNamesExposeCanonicalCoreCommandsOnly(t *testing.T) {
 		"help",
 		"agent",
 		"subagent",
+		"review",
 		"connect",
 		"plugin",
 		"model",
@@ -29,8 +30,8 @@ func TestDefaultNamesExposeCanonicalCoreCommandsOnly(t *testing.T) {
 }
 
 func TestHelpTextUsesRegistrySpecs(t *testing.T) {
-	got := HelpText([]string{"help", "agent", "custom"})
-	for _, want := range []string{"/help", "Show commands and shortcuts", "/agent <action>", "actions: list", "/custom <prompt>"} {
+	got := HelpText([]string{"help", "agent", "review", "custom"})
+	for _, want := range []string{"/help", "Show commands and shortcuts", "/agent <action>", "actions: list", "/review [instructions]", "/custom <prompt>"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("HelpText() = %q, want %q", got, want)
 		}
@@ -38,7 +39,7 @@ func TestHelpTextUsesRegistrySpecs(t *testing.T) {
 }
 
 func TestLocalDuringACPMatchesLegacyLocalCommands(t *testing.T) {
-	local := []string{"help", "agent", "subagent", "plugin", "status", "doctor", "resume", "model", "exit", "quit"}
+	local := []string{"help", "agent", "subagent", "review", "plugin", "status", "doctor", "resume", "model", "exit", "quit"}
 	for _, name := range local {
 		if !IsLocalDuringACP(name) {
 			t.Fatalf("IsLocalDuringACP(%q) = false, want true", name)
@@ -61,5 +62,13 @@ func TestRootArgCandidatesReturnsCopies(t *testing.T) {
 	second := RootArgCandidates("model")
 	if second[0].Value == "mutated" {
 		t.Fatalf("RootArgCandidates(model) leaked mutable backing slice: %#v", second)
+	}
+}
+
+func TestSubagentRootCandidatesExcludeRemovedRunAction(t *testing.T) {
+	for _, candidate := range RootArgCandidates("subagent") {
+		if candidate.Value == "run" {
+			t.Fatalf("RootArgCandidates(subagent) contains removed run action: %#v", candidate)
+		}
 	}
 }

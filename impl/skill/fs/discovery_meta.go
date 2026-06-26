@@ -53,6 +53,11 @@ func DiscoverMeta(dirs []string, workspaceDir string) ([]Meta, error) {
 		if err != nil {
 			dirs = withoutDiscoveryDir(dirs, systemRoot)
 		}
+	} else if systemDiscoveryRequested(dirs) {
+		systemRoot, err := system.Ensure()
+		if err != nil {
+			dirs = withoutDiscoveryDir(dirs, systemRoot)
+		}
 	}
 	out := make([]Meta, 0)
 	seenPaths := map[string]struct{}{}
@@ -109,6 +114,22 @@ func DiscoverMeta(dirs []string, workspaceDir string) ([]Meta, error) {
 		}
 	}
 	return out, nil
+}
+
+func systemDiscoveryRequested(dirs []string) bool {
+	systemRoot, rootErr := system.Root()
+	for _, dir := range dirs {
+		if rootErr == nil {
+			resolved, err := ResolvePath(dir)
+			if err == nil && sameDiscoveryPath(resolved, systemRoot) {
+				return true
+			}
+		}
+		if filepath.ToSlash(filepath.Clean(strings.TrimSpace(dir))) == "~/.caelis/skills/.system" {
+			return true
+		}
+	}
+	return false
 }
 
 func withoutDiscoveryDir(dirs []string, skip string) []string {

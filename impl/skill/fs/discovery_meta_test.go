@@ -71,6 +71,12 @@ func TestDiscoverMetaMaterializesSystemSkillsAndDedupesByPriority(t *testing.T) 
 	if got := byName["skill-installer"].Path; got != filepath.Join(systemRoot, "skill-installer", "SKILL.md") {
 		t.Fatalf("skill-installer path = %q, want system skill", got)
 	}
+	if got := byName["review"].Path; got != filepath.Join(systemRoot, "review", "SKILL.md") {
+		t.Fatalf("review path = %q, want system skill", got)
+	}
+	if got := byName["review"].Description; !strings.Contains(got, "review code changes") {
+		t.Fatalf("review description = %q, want code review trigger", got)
+	}
 	if got := byName["subagent-creator"].Description; !strings.Contains(got, "create or edit a reusable subagent markdown profile") || strings.Contains(got, "/agents") || strings.Contains(got, ".caelis") {
 		t.Fatalf("subagent-creator description = %q, want clear trigger without storage paths", got)
 	}
@@ -79,6 +85,24 @@ func TestDiscoverMetaMaterializesSystemSkillsAndDedupesByPriority(t *testing.T) 
 	}
 	if got := byName["dupe"].Description; got != "workspace dupe" {
 		t.Fatalf("dupe description = %q, want workspace skill over user skill", got)
+	}
+}
+
+func TestDiscoverMetaMaterializesSystemSkillsForExplicitDefaultDirs(t *testing.T) {
+	home := t.TempDir()
+	testenv.SetHome(t, home)
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	systemRoot := filepath.Join(home, ".caelis", "skills", ".system")
+
+	metas, err := DiscoverMeta(DefaultDiscoveryDirs(workspace), workspace)
+	if err != nil {
+		t.Fatalf("DiscoverMeta(explicit default dirs) error = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(systemRoot, "review", "SKILL.md")); err != nil {
+		t.Fatalf("review system skill was not materialized: %v", err)
+	}
+	if got := metaByNameForDiscoveryTest(metas, "review").Path; got != filepath.Join(systemRoot, "review", "SKILL.md") {
+		t.Fatalf("review path = %q, want materialized system skill", got)
 	}
 }
 
@@ -187,4 +211,13 @@ func writeSkillForDiscoveryTest(t *testing.T, dir string, name string, descripti
 	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0o600); err != nil {
 		t.Fatalf("write skill %s: %v", dir, err)
 	}
+}
+
+func metaByNameForDiscoveryTest(metas []Meta, name string) Meta {
+	for _, meta := range metas {
+		if meta.Name == name {
+			return meta
+		}
+	}
+	return Meta{}
 }

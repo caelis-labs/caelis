@@ -62,6 +62,12 @@ type AgentService interface {
 	ContinueSubagent(context.Context, string, string, []Attachment) (Turn, error)
 }
 
+type AgentProfileService interface {
+	AgentProfileStatus(context.Context) (AgentProfileStatusSnapshot, error)
+	BindAgentProfile(context.Context, AgentProfileBindingConfig) (AgentProfileStatusSnapshot, error)
+	StartReviewSubagent(context.Context, string, []Attachment) (Turn, error)
+}
+
 type CompletionService interface {
 	CompleteMention(context.Context, string, int) ([]CompletionCandidate, error)
 	CompleteFile(context.Context, string, int) ([]CompletionCandidate, error)
@@ -92,6 +98,7 @@ type Service interface {
 	ModelService
 	SandboxService
 	AgentService
+	AgentProfileService
 	CompletionService
 	PluginService
 }

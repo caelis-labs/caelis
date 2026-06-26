@@ -9,58 +9,36 @@ import (
 	"github.com/OnslaughtSnail/caelis/protocol/acp/control"
 )
 
-type subagentControlService interface {
-	AgentProfileStatus(context.Context) (control.AgentProfileStatusSnapshot, error)
-	BindAgentProfile(context.Context, control.AgentProfileBindingConfig) (control.AgentProfileStatusSnapshot, error)
-}
-
 const subagentListTableBudget = 112
 
-func slashSubagentWithContext(ctx context.Context, service control.Service, sender *ProgramSender, args string, argsStart int, fullText string, attachments []Attachment) TaskResultMsg {
+func slashSubagentWithContext(ctx context.Context, service control.Service, sender *ProgramSender, args string) TaskResultMsg {
 	ctx = contextOrBackground(ctx)
 	if sender != nil {
 		ctx = sender.bindContext(ctx)
 	}
 	send := sender.sendFunc()
-	sub, rest, restStart := splitFirstWithPromptSpan(strings.TrimSpace(args))
+	sub, rest := splitFirst(strings.TrimSpace(args))
 	switch strings.ToLower(strings.TrimSpace(sub)) {
 	case "", "help":
 		sendNotice(send, subagentUsageText())
 		return TaskResultMsg{SuppressTurnDivider: true}
 	case "list":
-		profileService, ok := service.(subagentControlService)
-		if !ok {
-			return TaskResultMsg{Err: friendlyCommandError("subagent list", fmt.Errorf("subagent profiles are unavailable"))}
-		}
-		status, err := profileService.AgentProfileStatus(ctx)
+		status, err := service.AgentProfileStatus(ctx)
 		if err != nil {
 			return TaskResultMsg{Err: friendlyCommandError("subagent list", err)}
 		}
 		sendNotice(send, formatSubagentList(status))
 		return TaskResultMsg{SuppressTurnDivider: true}
 	case "run":
-		target, prompt, promptStart := splitFirstWithPromptSpan(strings.TrimSpace(rest))
-		if strings.TrimSpace(target) == "" || strings.TrimSpace(prompt) == "" {
-			sendNotice(send, "usage: /subagent run <id> <prompt>")
-			return TaskResultMsg{SuppressTurnDivider: true}
-		}
-		promptAttachments := attachmentsForPromptRange(
-			attachments,
-			argsStart+restStart+promptStart,
-			len([]rune(strings.TrimSpace(fullText))),
-		)
-		return slashDynamicAgentWithContext(ctx, service, sender, target, prompt, promptAttachments)
+		sendNotice(send, subagentRunRemovedNotice())
+		return TaskResultMsg{SuppressTurnDivider: true}
 	case "bind":
-		profileService, ok := service.(subagentControlService)
-		if !ok {
-			return TaskResultMsg{Err: friendlyCommandError("subagent bind", fmt.Errorf("subagent profiles are unavailable"))}
-		}
 		cfg, ok := parseSubagentBindArgs(rest)
 		if !ok {
 			sendNotice(send, subagentBindUsageText())
 			return TaskResultMsg{SuppressTurnDivider: true}
 		}
-		status, err := profileService.BindAgentProfile(ctx, cfg)
+		status, err := service.BindAgentProfile(ctx, cfg)
 		if err != nil {
 			return TaskResultMsg{Err: friendlyCommandError("subagent bind", err)}
 		}
@@ -77,7 +55,6 @@ func subagentUsageText() string {
 	return strings.Join([]string{
 		"usage:",
 		"  /subagent list",
-		"  /subagent run <id> <prompt>",
 		"  " + subagentBindUsageLine(),
 		"  /subagent bind <id> model <alias> [reasoning]",
 		"  /subagent bind <id> acp <agent>",
@@ -95,6 +72,14 @@ func subagentBindUsageText() string {
 
 func subagentBindUsageLine() string {
 	return "/subagent bind <id> default"
+}
+
+func subagentRunRemovedNotice() string {
+	return strings.Join([]string{
+		"/subagent run has been removed.",
+		"Use /review [instructions] for code review.",
+		"Use /<agent> <prompt> for a registered ACP side agent.",
+	}, "\n")
 }
 
 func parseSubagentBindArgs(args string) (control.AgentProfileBindingConfig, bool) {

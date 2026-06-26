@@ -147,8 +147,6 @@ func (d *Adapter) CompleteSlashArg(ctx context.Context, command string, query st
 		return d.completeAgentHandoffTargets(ctx, query, limit)
 	case "agent remove":
 		return d.completeRemovableAgentCatalog(ctx, query, limit), nil
-	case "subagent run":
-		return d.completeRunnableAgentProfiles(ctx, query, limit)
 	case "subagent bind":
 		return d.completeAgentProfiles(ctx, query, limit)
 	case "model use", "model del":
@@ -197,35 +195,6 @@ func (d *Adapter) completeAgentProfiles(ctx context.Context, query string, limit
 	for _, profile := range status.Profiles {
 		id := strings.TrimSpace(profile.ID)
 		if id == "" {
-			continue
-		}
-		if query != "" && !hasSlashArgPrefix(query, id, profile.Name, profile.Description) {
-			continue
-		}
-		out = append(out, SlashArgCandidate{
-			Value:   id,
-			Display: firstNonEmpty(profile.Name, id),
-			Detail:  agentProfileCompletionDetail(profile),
-		})
-		if len(out) >= limit {
-			break
-		}
-	}
-	return out, nil
-}
-
-func (d *Adapter) completeRunnableAgentProfiles(ctx context.Context, query string, limit int) ([]SlashArgCandidate, error) {
-	if d.stack.AgentProfile.StatusFn == nil {
-		return nil, nil
-	}
-	status, err := d.stack.AgentProfile.StatusFn(ctx)
-	if err != nil {
-		return nil, nil
-	}
-	out := make([]SlashArgCandidate, 0, min(limit, len(status.Profiles)))
-	for _, profile := range status.Profiles {
-		id := strings.TrimSpace(profile.ID)
-		if id == "" || !profile.Enabled || profile.SystemManaged || strings.EqualFold(strings.TrimSpace(profile.Status), "stale") {
 			continue
 		}
 		if query != "" && !hasSlashArgPrefix(query, id, profile.Name, profile.Description) {
