@@ -54,7 +54,7 @@ func StripTerminalConsoleFenceToolContent(content []client.ToolCallContent, stri
 	copy(out, content)
 	for i := range out {
 		contentType := strings.TrimSpace(out[i].Type)
-		if !strings.EqualFold(contentType, "terminal") && !(stripContent && strings.EqualFold(contentType, "content")) {
+		if !strings.EqualFold(contentType, "terminal") && (!stripContent || !strings.EqualFold(contentType, "content")) {
 			continue
 		}
 		out[i].Content = stripTerminalConsoleFenceContentValue(out[i].Content)

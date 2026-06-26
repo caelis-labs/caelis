@@ -92,7 +92,7 @@ func IsReplayDialogueEvent(event *Event) bool {
 // IsMainReplayTraceEvent reports whether one event is durable main-run trace
 // that may be restored for the latest replayed turn.
 func IsMainReplayTraceEvent(event *Event) bool {
-	if event == nil || !(IsCanonicalHistoryEvent(event) || IsMirror(event)) {
+	if event == nil || (!IsCanonicalHistoryEvent(event) && !IsMirror(event)) {
 		return false
 	}
 	switch EventTypeOf(event) {
