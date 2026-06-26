@@ -174,7 +174,7 @@ Current built-in slash commands:
 - `/model use <alias>` or `/model del <alias>`
 - `/approval [auto-review|manual]`
 - `/status`
-- `/doctor`
+- `/doctor` (Windows sandbox repair/readiness)
 - `/new`
 - `/resume [session-id]`
 - `/compact`

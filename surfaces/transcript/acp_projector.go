@@ -226,6 +226,17 @@ func projectACPContentChunk(env eventstream.Envelope, update schema.ContentChunk
 			Text:          text,
 			Final:         env.Final,
 		}}
+	case schema.UpdateCompact:
+		return []Event{{
+			Kind:          EventNotice,
+			Scope:         scope,
+			ScopeID:       scopeID,
+			Actor:         strings.TrimSpace(env.Actor),
+			OccurredAt:    env.OccurredAt,
+			NarrativeKind: NarrativeNotice,
+			Text:          CompactNoticeLabel,
+			Final:         true,
+		}}
 	default:
 		return nil
 	}

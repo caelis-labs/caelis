@@ -4,10 +4,12 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	controlcommands "github.com/OnslaughtSnail/caelis/protocol/acp/control/commands"
 )
 
-func TestDefaultCommandsExposeCanonicalCoreCommandsOnly(t *testing.T) {
-	got := DefaultCommands()
+func TestDefaultCommandsExposePlatformCoreCommands(t *testing.T) {
+	got := controlcommands.DefaultNamesForPlatform("linux")
 	want := []string{
 		"help",
 		"agent",
@@ -17,7 +19,6 @@ func TestDefaultCommandsExposeCanonicalCoreCommandsOnly(t *testing.T) {
 		"plugin",
 		"model",
 		"status",
-		"doctor",
 		"new",
 		"resume",
 		"compact",
@@ -25,7 +26,15 @@ func TestDefaultCommandsExposeCanonicalCoreCommandsOnly(t *testing.T) {
 		"quit",
 	}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("DefaultCommands() = %#v, want %#v", got, want)
+		t.Fatalf("DefaultNamesForPlatform(linux) = %#v, want %#v", got, want)
+	}
+
+	windows := controlcommands.DefaultNamesForPlatform("windows")
+	if !sliceContainsString(windows, "doctor") {
+		t.Fatalf("DefaultNamesForPlatform(windows) = %#v, want doctor", windows)
+	}
+	if sliceContainsString(got, "doctor") {
+		t.Fatalf("DefaultNamesForPlatform(linux) = %#v, should hide doctor", got)
 	}
 }
 
@@ -71,6 +80,15 @@ func TestDefaultCommandsHideBTWFromDefaultTUI(t *testing.T) {
 			t.Fatalf("DefaultCommands() unexpectedly includes hidden command %q", command)
 		}
 	}
+}
+
+func sliceContainsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestShortcutHelpUsesPlatformImagePasteKeys(t *testing.T) {

@@ -32,6 +32,21 @@ func TestRenderStandardDiffPanelRowsUsesHunkLineNumbers(t *testing.T) {
 	}
 }
 
+func TestRenderStandardDiffPanelRowsKeepsHunkHeaderLightlyIndented(t *testing.T) {
+	t.Parallel()
+
+	m := newPerfTestModel()
+	ctx := BlockRenderContext{Width: 100, TermWidth: 100, Theme: m.theme}
+	rows := renderNumberedACPDiffPanelRows("patch-1", "diff / hunk\n@@ -1553,7 +1553,6 @@\n context\n-old\n+new", 100, ctx)
+	plain := strings.Join(renderedPlainRows(rows), "\n")
+	if !strings.Contains(plain, "\n  @@ -1553,7 +1553,6 @@") {
+		t.Fatalf("rendered rows = %q, want hunk header with two-space indent", plain)
+	}
+	if strings.Contains(plain, "\n            @@ -1553,7 +1553,6 @@") {
+		t.Fatalf("rendered rows = %q, should not indent hunk header to the numbered body column", plain)
+	}
+}
+
 func TestIsDiffPanelTextAcceptsStandardDiffWithHunk(t *testing.T) {
 	t.Parallel()
 

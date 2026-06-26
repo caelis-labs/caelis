@@ -3,6 +3,7 @@ package tuiapp
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -1646,13 +1647,30 @@ func TestFormatStatusSnapshotShowsExplicitSandboxRepairFailure(t *testing.T) {
 			SetupError:             "acl: write D:\\xue\\code\\cmpctl DACL: Access is denied.",
 		},
 	})
-	for _, want := range []string{"Setup:", "current workspace ACL repair failed", "Error:", "Access is denied", "Warning:", "/doctor fix"} {
+	for _, want := range []string{"Setup:", "current workspace ACL repair failed", "Error:", "Access is denied", "Warning:", "/doctor"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("formatStatusSnapshot() = %q, want %q", got, want)
 		}
 	}
 	if strings.Contains(got, "will be repaired lazily") {
 		t.Fatalf("formatStatusSnapshot() = %q, should not suggest lazy repair after explicit failure", got)
+	}
+}
+
+func TestFormatStatusSnapshotAlignsLazyRepairWithDoctorPolicy(t *testing.T) {
+	got := formatStatusSnapshot(control.StatusSnapshot{
+		Session:     control.StatusSession{ModeLabel: "auto-review", Workspace: "D:\\xue\\code\\cmpctl"},
+		ModelStatus: control.StatusModel{Display: "mimo-v2.5-pro [high]"},
+		SandboxStatus: control.StatusSandbox{
+			ResolvedBackend:        "windows",
+			Route:                  "sandbox",
+			WorkspaceSetupRequired: true,
+		},
+	})
+	for _, want := range []string{"Setup:", "current workspace ACL repair is pending", "Warning:", "Run /doctor to repair current workspace ACLs now", "repair lazily"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("formatStatusSnapshot() = %q, want %q", got, want)
+		}
 	}
 }
 
@@ -1733,6 +1751,27 @@ func TestDynamicAgentSlashAndHandleContinuation(t *testing.T) {
 	}
 	if len(msgs) == 0 {
 		t.Fatal("dynamic slash emitted no messages")
+	}
+}
+
+func TestHiddenDoctorCommandDoesNotShadowDynamicAgent(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("doctor is a local command on Windows")
+	}
+	driver := &bridgeTestDriver{
+		agentList:    []control.AgentCandidate{{Name: "doctor"}},
+		subagentTurn: bridgeTurnWithEvents(participantAssistantEnvelope("task-1", "@doctor", "child ok")),
+	}
+	var msgs []tea.Msg
+	result := dispatchSlashCommand(driver, &ProgramSender{Send: func(msg tea.Msg) { msgs = append(msgs, msg) }}, "/doctor inspect")
+	if result.Err != nil {
+		t.Fatalf("doctor agent slash error = %v", result.Err)
+	}
+	if driver.lastStartedAgent != "doctor" || driver.lastStartedPrompt != "inspect" {
+		t.Fatalf("started agent=%q prompt=%q", driver.lastStartedAgent, driver.lastStartedPrompt)
+	}
+	if driver.repairSandboxCalls != 0 {
+		t.Fatalf("local doctor repair path was used: repair=%d", driver.repairSandboxCalls)
 	}
 }
 
@@ -2083,26 +2122,60 @@ func TestSlashDoctorShowsReadinessChecklist(t *testing.T) {
 	}
 }
 
-func TestSlashDoctorFixRepairsSandbox(t *testing.T) {
+func TestSlashDoctorRepairsSandboxWhenRequired(t *testing.T) {
 	driver := &bridgeTestDriver{
 		status: control.StatusSnapshot{
+			SandboxStatus: control.StatusSandbox{
+				RequestedBackend:         "windows",
+				ResolvedBackend:          "windows",
+				Route:                    "sandbox",
+				WorkspaceSetupRequired:   true,
+				WorkspaceSetupReason:     "workspace ACL setup required",
+				WorkspaceSetupRoot:       "D:\\xue\\code\\caelis",
+				WorkspaceSetupWriteRoots: 1,
+			},
+		},
+		repairSandboxStatus: control.StatusSnapshot{
 			SandboxStatus: control.StatusSandbox{
 				RequestedBackend: "windows",
 				ResolvedBackend:  "windows",
 				Route:            "sandbox",
 			},
 		},
+		repairSandboxStatusSet: true,
 	}
+	var msgs []tea.Msg
+	result := slashDoctorWithContext(context.Background(), driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "")
+	if result.Err != nil {
+		t.Fatalf("slashDoctorWithContext() error = %v", result.Err)
+	}
+	if driver.repairSandboxCalls != 1 {
+		t.Fatalf("repairSandboxCalls = %d, want 1", driver.repairSandboxCalls)
+	}
+	if !noticeMessagesContain(msgs, "Windows sandbox repair started") || !noticeMessagesContain(msgs, "Windows sandbox repair complete") || !noticeMessagesContain(msgs, "doctor:") {
+		t.Fatalf("slashDoctorWithContext() messages = %#v, want start, complete, and doctor report notices", msgs)
+	}
+}
+
+func TestSlashDoctorRejectsRemovedFixArgument(t *testing.T) {
+	driver := &bridgeTestDriver{}
 	var msgs []tea.Msg
 	result := slashDoctorWithContext(context.Background(), driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "fix")
 	if result.Err != nil {
 		t.Fatalf("slashDoctorWithContext(fix) error = %v", result.Err)
 	}
-	if driver.repairSandboxCalls != 1 {
-		t.Fatalf("repairSandboxCalls = %d, want 1", driver.repairSandboxCalls)
+	if driver.repairSandboxCalls != 0 {
+		t.Fatalf("repairSandboxCalls = %d, want 0", driver.repairSandboxCalls)
 	}
-	if !noticeMessagesContain(msgs, "Windows sandbox repair started") || !noticeMessagesContain(msgs, "Windows sandbox repair complete") {
-		t.Fatalf("slashDoctorWithContext(fix) messages = %#v, want start and complete notices", msgs)
+	if !noticeMessagesContain(msgs, "usage: /doctor") {
+		t.Fatalf("slashDoctorWithContext(fix) messages = %#v, want usage", msgs)
+	}
+}
+
+func TestSlashDoctorNilServiceReturnsError(t *testing.T) {
+	result := slashDoctorWithContext(context.Background(), nil, func(tea.Msg) {}, "")
+	if result.Err == nil || !strings.Contains(result.Err.Error(), "service unavailable") {
+		t.Fatalf("slashDoctorWithContext(nil) error = %v, want service unavailable", result.Err)
 	}
 }
 
@@ -2163,6 +2236,8 @@ func sandboxProgressMessagesContain(messages []tea.Msg, text string) bool {
 
 type bridgeTestDriver struct {
 	status                   control.StatusSnapshot
+	repairSandboxStatus      control.StatusSnapshot
+	repairSandboxStatusSet   bool
 	connectStatus            control.StatusSnapshot
 	useModelStatus           control.StatusSnapshot
 	newSession               control.SessionSnapshot
@@ -2481,6 +2556,9 @@ func (d *bridgeTestDriver) RepairSandbox(ctx context.Context) (control.StatusSna
 		Step:    1,
 		Total:   1,
 	})
+	if d.repairSandboxStatusSet {
+		return d.repairSandboxStatus, nil
+	}
 	return d.status, nil
 }
 func (d *bridgeTestDriver) ResetSandbox(ctx context.Context) (control.StatusSnapshot, error) {

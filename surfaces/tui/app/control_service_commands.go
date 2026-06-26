@@ -51,7 +51,9 @@ func dispatchSlashCommandWithContextResult(ctx context.Context, service control.
 	case "status":
 		return executeLineResult{completion: slashStatusWithContext(ctx, service, send)}
 	case "doctor":
-		return executeLineResult{completion: slashDoctorWithContext(ctx, service, send, args)}
+		if controlcommands.IsKnown(cmd) {
+			return executeLineResult{completion: slashDoctorWithContext(ctx, service, send, args)}
+		}
 	case "connect":
 		return executeLineResult{completion: slashConnectWithContext(ctx, service, send, args)}
 	case "model":
@@ -60,9 +62,8 @@ func dispatchSlashCommandWithContextResult(ctx context.Context, service control.
 		return executeLineResult{completion: slashCompactWithContext(ctx, service, send, args)}
 	case "exit", "quit":
 		return executeLineResult{completion: TaskResultMsg{ExitNow: true}}
-	default:
-		return slashDynamicAgentWithContextResult(ctx, service, sender, cmd, args, attachmentsForPromptRange(attachments, argsStart, len([]rune(strings.TrimSpace(text)))))
 	}
+	return slashDynamicAgentWithContextResult(ctx, service, sender, cmd, args, attachmentsForPromptRange(attachments, argsStart, len([]rune(strings.TrimSpace(text)))))
 }
 
 func isDispatchableSlashCommand(service control.Service, text string) bool {
@@ -532,47 +533,34 @@ func slashStatusWithContext(ctx context.Context, service control.Service, send f
 
 func slashDoctorWithContext(ctx context.Context, service control.Service, send func(tea.Msg), args string) TaskResultMsg {
 	ctx = contextOrBackground(ctx)
-	switch strings.ToLower(strings.TrimSpace(args)) {
-	case "":
-	case "fix":
-		return slashDoctorFixWithContext(ctx, service, send)
-	default:
-		sendNotice(send, "usage: /doctor [fix]")
+	if strings.TrimSpace(args) != "" {
+		sendNotice(send, "usage: /doctor")
 		return TaskResultMsg{SuppressTurnDivider: true}
+	}
+	if service == nil {
+		return TaskResultMsg{Err: friendlyCommandError("doctor", fmt.Errorf("service unavailable"))}
 	}
 	status, err := service.Status(ctx)
 	if err != nil {
 		return TaskResultMsg{Err: friendlyCommandError("doctor", err)}
 	}
+	setup := sandboxSetupViewFromStatus(status)
+	if setup.RepairRequired {
+		sendNotice(send, "Windows sandbox repair started. Approve the UAC prompt if shown.")
+		repairedStatus, err := service.RepairSandbox(ctx)
+		if err != nil {
+			return TaskResultMsg{Err: friendlyCommandError("doctor", err)}
+		}
+		status = repairedStatus
+		setup = sandboxSetupViewFromStatus(status)
+		if setup.AnyRequired {
+			sendNotice(send, "Windows sandbox repair still needs attention. Run /doctor for details.")
+		} else {
+			sendNotice(send, "Windows sandbox repair complete.")
+		}
+	}
 	sendNotice(send, formatDoctorSnapshot(status))
 	return TaskResultMsg{SuppressTurnDivider: true}
-}
-
-func slashDoctorFixWithContext(ctx context.Context, service control.Service, send func(tea.Msg)) TaskResultMsg {
-	if service == nil {
-		return TaskResultMsg{Err: friendlyCommandError("doctor fix", fmt.Errorf("service unavailable"))}
-	}
-	sendNotice(send, "Windows sandbox repair started. Approve the UAC prompt if shown.")
-	status, err := service.RepairSandbox(ctx)
-	if err != nil {
-		return TaskResultMsg{Err: friendlyCommandError("doctor fix", err)}
-	}
-	if sandboxSetupStillRequired(status) {
-		sendNotice(send, "Windows sandbox repair still needs attention. Run /doctor for details.")
-	} else {
-		sendNotice(send, "Windows sandbox repair complete.")
-	}
-	return TaskResultMsg{SuppressTurnDivider: true}
-}
-
-func sandboxSetupStillRequired(status control.StatusSnapshot) bool {
-	global, hasGlobal := status.SandboxStatus.Setup.Check("global")
-	workspace, hasWorkspace := status.SandboxStatus.Setup.Check("workspace")
-	return status.SandboxStatus.SetupRequired ||
-		status.SandboxStatus.GlobalSetupRequired ||
-		status.SandboxStatus.WorkspaceSetupRequired ||
-		(hasGlobal && global.Required) ||
-		(hasWorkspace && workspace.Required)
 }
 
 func formatDoctorSnapshot(status control.StatusSnapshot) string {
@@ -596,25 +584,20 @@ func formatDoctorSnapshot(status control.StatusSnapshot) string {
 		lines = append(lines, "  ok session: "+sessionID)
 	}
 	sandbox := strings.TrimSpace(firstNonEmpty(status.SandboxStatus.ResolvedBackend, status.SandboxStatus.RequestedBackend, status.SandboxStatus.Type))
-	globalSetup, hasGlobalSetup := status.SandboxStatus.Setup.Check("global")
-	workspaceSetup, hasWorkspaceSetup := status.SandboxStatus.Setup.Check("workspace")
-	globalSetupRequired := status.SandboxStatus.GlobalSetupRequired || (hasGlobalSetup && globalSetup.Required)
-	workspaceSetupRequired := status.SandboxStatus.WorkspaceSetupRequired || (hasWorkspaceSetup && workspaceSetup.Required)
+	setup := sandboxSetupViewFromStatus(status)
 	switch {
 	case status.SandboxStatus.HostExecution || status.SandboxStatus.FullAccessMode:
 		detail := strings.TrimSpace(firstNonEmpty(status.SandboxStatus.SecuritySummary, sandbox, "host execution"))
 		lines = append(lines, "  warn sandbox: "+detail)
-	case globalSetupRequired:
-		detail := strings.TrimSpace(firstNonEmpty(status.SandboxStatus.SetupError, globalSetup.Error, globalSetup.Reason, status.SandboxStatus.GlobalSetupReason, status.SandboxStatus.SetupMarkerReason, "global setup required"))
-		lines = append(lines, "  warn sandbox global repair pending: "+compactStatusDetail(detail, 180))
-		if strings.TrimSpace(firstNonEmpty(status.SandboxStatus.SetupError, globalSetup.Error)) != "" {
-			lines = append(lines, "  info fix: /doctor fix")
+	case setup.GlobalRequired:
+		lines = append(lines, "  warn sandbox global repair pending: "+compactStatusDetail(setup.GlobalDetail, 180))
+		if setup.IsWindows {
+			lines = append(lines, "  info fix: /doctor")
 		}
-	case workspaceSetupRequired:
-		detail := strings.TrimSpace(firstNonEmpty(status.SandboxStatus.SetupError, workspaceSetup.Error, workspaceSetup.Reason, status.SandboxStatus.WorkspaceSetupReason, "workspace ACL setup required"))
-		lines = append(lines, "  warn sandbox workspace repair pending: "+compactStatusDetail(detail, 180))
-		if strings.TrimSpace(firstNonEmpty(status.SandboxStatus.SetupError, workspaceSetup.Error)) != "" {
-			lines = append(lines, "  info fix: /doctor fix")
+	case setup.WorkspaceRequired:
+		lines = append(lines, "  warn sandbox workspace repair pending: "+compactStatusDetail(setup.WorkspaceDetail, 180))
+		if setup.IsWindows {
+			lines = append(lines, "  info fix: /doctor")
 		}
 	case sandbox != "":
 		lines = append(lines, "  ok sandbox: "+sandbox)
@@ -725,6 +708,6 @@ func slashCompactWithContext(ctx context.Context, service control.Service, send 
 	if err := service.Compact(ctx); err != nil {
 		return TaskResultMsg{Err: friendlyCommandError("compact", err)}
 	}
-	sendNotice(send, "compaction completed")
+	sendNotice(send, transcript.CompactNoticeLabel)
 	return TaskResultMsg{SuppressTurnDivider: true}
 }

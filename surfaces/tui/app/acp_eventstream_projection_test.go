@@ -5,6 +5,7 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
+	"github.com/OnslaughtSnail/caelis/surfaces/transcript"
 )
 
 func TestProjectACPEventToTranscriptEventsUsesEnvelopeScope(t *testing.T) {
@@ -41,6 +42,25 @@ func TestProjectACPEventToTranscriptEventsProjectsNotice(t *testing.T) {
 	}
 	if events[0].Kind != TranscriptEventNotice || events[0].Text != "gateway notice" {
 		t.Fatalf("event = %#v, want notice text", events[0])
+	}
+}
+
+func TestProjectACPEventToTranscriptEventsProjectsCompactNotice(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectACPEventToTranscriptEvents(eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate,
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateCompact,
+			Content:       schema.TextContent{Type: "text", Text: "CONTEXT CHECKPOINT\nObjective: continue"},
+		},
+		Final: true,
+	})
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one compact notice", events)
+	}
+	if events[0].Kind != TranscriptEventNotice || events[0].Text != transcript.CompactNoticeLabel {
+		t.Fatalf("event = %#v, want compact notice", events[0])
 	}
 }
 

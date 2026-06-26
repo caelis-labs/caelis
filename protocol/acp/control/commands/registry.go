@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"runtime"
 	"strings"
 
 	"github.com/OnslaughtSnail/caelis/protocol/acp/control"
@@ -14,12 +15,28 @@ type CommandSpec struct {
 	Details          []string
 	Hidden           bool
 	LocalDuringACP   bool
+	Platforms        []string
 	ArgCandidates    []control.SlashArgCandidate
 	DynamicCompleter bool
 }
 
 // DefaultSpecs returns the canonical core slash command specs in display order.
 func DefaultSpecs() []CommandSpec {
+	return DefaultSpecsForPlatform(runtime.GOOS)
+}
+
+func DefaultSpecsForPlatform(goos string) []CommandSpec {
+	specs := defaultSpecs()
+	out := specs[:0]
+	for _, spec := range specs {
+		if commandSpecSupportsPlatform(spec, goos) {
+			out = append(out, spec)
+		}
+	}
+	return out
+}
+
+func defaultSpecs() []CommandSpec {
 	specs := []CommandSpec{
 		{Name: "help", Usage: "/help", Description: "Show commands and shortcuts", LocalDuringACP: true},
 		{Name: "agent", Usage: "/agent <action>", Description: "Manage ACP agents and controller switching", LocalDuringACP: true, Details: []string{"actions: list, add <builtin>, install <adapter>, use <agent|local>, remove <agent>"}, ArgCandidates: agentRootCandidates(), DynamicCompleter: true},
@@ -29,7 +46,7 @@ func DefaultSpecs() []CommandSpec {
 		{Name: "plugin", Usage: "/plugin <action>", Description: "Manage Caelis plugins", LocalDuringACP: true, Details: []string{"actions: install <plugin@marketplace|path>, marketplace add|list|update|rm, manage, rm <id>"}, ArgCandidates: pluginRootCandidates(), DynamicCompleter: true},
 		{Name: "model", Usage: "/model <action>", Description: "Switch or delete a configured model alias", LocalDuringACP: true, Details: []string{"actions: use <alias>, del <alias>"}, ArgCandidates: modelRootCandidates(), DynamicCompleter: true},
 		{Name: "status", Usage: "/status", Description: "Show current provider, model, session, sandbox, and store info", LocalDuringACP: true},
-		{Name: "doctor", Usage: "/doctor [fix]", Description: "Diagnose provider, model, session store, and sandbox readiness", LocalDuringACP: true, Details: []string{"fix: run explicit Windows sandbox ACL repair"}, ArgCandidates: doctorCandidates()},
+		{Name: "doctor", Usage: "/doctor", Description: "Diagnose and repair Windows sandbox readiness", LocalDuringACP: true, Platforms: []string{"windows"}},
 		{Name: "new", Usage: "/new", Description: "Start a fresh session"},
 		{Name: "resume", Usage: "/resume [session-id]", Description: "List recent sessions or resume one by id", LocalDuringACP: true, DynamicCompleter: true},
 		{Name: "compact", Usage: "/compact", Description: "Compact the current session transcript"},
@@ -39,9 +56,26 @@ func DefaultSpecs() []CommandSpec {
 	return specs
 }
 
+func commandSpecSupportsPlatform(spec CommandSpec, goos string) bool {
+	if len(spec.Platforms) == 0 {
+		return true
+	}
+	goos = strings.ToLower(strings.TrimSpace(goos))
+	for _, platform := range spec.Platforms {
+		if strings.EqualFold(strings.TrimSpace(platform), goos) {
+			return true
+		}
+	}
+	return false
+}
+
 // DefaultNames returns visible command names in canonical display order.
 func DefaultNames() []string {
-	specs := DefaultSpecs()
+	return DefaultNamesForPlatform(runtime.GOOS)
+}
+
+func DefaultNamesForPlatform(goos string) []string {
+	specs := DefaultSpecsForPlatform(goos)
 	out := make([]string, 0, len(specs))
 	for _, spec := range specs {
 		if spec.Hidden {
@@ -54,8 +88,12 @@ func DefaultNames() []string {
 
 // Lookup returns a core command spec by name.
 func Lookup(name string) (CommandSpec, bool) {
+	return LookupForPlatform(name, runtime.GOOS)
+}
+
+func LookupForPlatform(name string, goos string) (CommandSpec, bool) {
 	name = normalizeName(name)
-	for _, spec := range DefaultSpecs() {
+	for _, spec := range DefaultSpecsForPlatform(goos) {
 		if spec.Name == name {
 			return spec, true
 		}
@@ -65,14 +103,22 @@ func Lookup(name string) (CommandSpec, bool) {
 
 // IsKnown reports whether a core command exists.
 func IsKnown(name string) bool {
-	_, ok := Lookup(name)
+	return IsKnownForPlatform(name, runtime.GOOS)
+}
+
+func IsKnownForPlatform(name string, goos string) bool {
+	_, ok := LookupForPlatform(name, goos)
 	return ok
 }
 
 // IsLocalDuringACP reports whether the TUI should dispatch this command locally
 // while a remote ACP controller is active.
 func IsLocalDuringACP(name string) bool {
-	spec, ok := Lookup(name)
+	return IsLocalDuringACPForPlatform(name, runtime.GOOS)
+}
+
+func IsLocalDuringACPForPlatform(name string, goos string) bool {
+	spec, ok := LookupForPlatform(name, goos)
 	return ok && spec.LocalDuringACP
 }
 
@@ -163,7 +209,11 @@ func padRight(value string, width int) string {
 // Dynamic completions such as model aliases, agent catalogs, and connect wizard
 // values remain owned by the driver.
 func RootArgCandidates(command string) []control.SlashArgCandidate {
-	spec, ok := Lookup(command)
+	return RootArgCandidatesForPlatform(command, runtime.GOOS)
+}
+
+func RootArgCandidatesForPlatform(command string, goos string) []control.SlashArgCandidate {
+	spec, ok := LookupForPlatform(command, goos)
 	if !ok || len(spec.ArgCandidates) == 0 {
 		return nil
 	}
@@ -193,12 +243,6 @@ func modelRootCandidates() []control.SlashArgCandidate {
 	return []control.SlashArgCandidate{
 		{Value: "use", Display: "use", Detail: "Switch current model alias"},
 		{Value: "del", Display: "del", Detail: "Delete stored model alias"},
-	}
-}
-
-func doctorCandidates() []control.SlashArgCandidate {
-	return []control.SlashArgCandidate{
-		{Value: "fix", Display: "fix", Detail: "Repair Windows sandbox ACLs"},
 	}
 }
 

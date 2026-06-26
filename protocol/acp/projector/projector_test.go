@@ -272,6 +272,29 @@ func TestEventProjectorProjectsCanonicalMessages(t *testing.T) {
 	}
 }
 
+func TestEventProjectorProjectsCompactCheckpoint(t *testing.T) {
+	compactMessage := model.NewTextMessage(model.RoleUser, "CONTEXT CHECKPOINT\nObjective: continue")
+	event := session.CanonicalizeEvent(&session.Event{
+		SessionID: "session-1",
+		Type:      session.EventTypeCompact,
+		Message:   &compactMessage,
+	})
+	updates, err := (EventProjector{}).ProjectEvent(event)
+	if err != nil {
+		t.Fatalf("ProjectEvent(compact) error = %v", err)
+	}
+	if len(updates) != 1 {
+		t.Fatalf("ProjectEvent(compact) produced %d updates, want 1", len(updates))
+	}
+	chunk, ok := updates[0].(ContentChunk)
+	if !ok || chunk.SessionUpdate != UpdateCompact {
+		t.Fatalf("compact update = %#v, want compact content chunk", updates[0])
+	}
+	if content, ok := chunk.Content.(TextContent); !ok || !strings.Contains(content.Text, "CONTEXT CHECKPOINT") {
+		t.Fatalf("compact content = %#v, want checkpoint text", chunk.Content)
+	}
+}
+
 func TestEventProjectorProjectsCanonicalToolPayloads(t *testing.T) {
 	assistantMessage := model.MessageFromAssistantParts("I will run it.", "Need output first.", []model.ToolCall{{
 		ID:   "call-1",

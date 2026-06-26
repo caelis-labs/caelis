@@ -40,6 +40,7 @@ const (
 	UpdateToolCall     = schema.UpdateToolCall
 	UpdateToolCallInfo = schema.UpdateToolCallInfo
 	UpdatePlan         = schema.UpdatePlan
+	UpdateCompact      = schema.UpdateCompact
 
 	ToolStatusPending    = schema.ToolStatusPending
 	ToolStatusInProgress = schema.ToolStatusInProgress
@@ -197,6 +198,8 @@ func explicitUpdates(event *session.Event) []Update {
 			return nil
 		}
 		return []Update{update}
+	case UpdateCompact:
+		return singleContentUpdate(UpdateCompact, textForUserEvent(event))
 	case "":
 		return nil
 	default:
@@ -240,6 +243,8 @@ func inferredUpdates(event *session.Event) []Update {
 			return nil
 		}
 		return []Update{update}
+	case session.EventTypeCompact:
+		return singleContentUpdate(UpdateCompact, textForUserEvent(event))
 	default:
 		return nil
 	}

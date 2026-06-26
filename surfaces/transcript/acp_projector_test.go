@@ -1,6 +1,7 @@
 package transcript
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
@@ -121,6 +122,28 @@ func TestProjectACPEventToEventsProjectsApprovalReview(t *testing.T) {
 	event := events[0]
 	if event.Kind != EventApproval || event.ApprovalCommand != "git status" || event.ApprovalRisk != "low" || event.ApprovalAuth != "allow" {
 		t.Fatalf("event = %#v, want approval review projection", event)
+	}
+}
+
+func TestProjectACPEventToEventsProjectsCompactNoticeOnly(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectACPEventToEvents(eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate,
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateCompact,
+			Content:       schema.TextContent{Type: "text", Text: "CONTEXT CHECKPOINT\nObjective: continue"},
+		},
+		Final: true,
+	}, nil)
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one compact notice", events)
+	}
+	if events[0].Kind != EventNotice || events[0].Text != CompactNoticeLabel {
+		t.Fatalf("event = %#v, want lightweight compact notice", events[0])
+	}
+	if strings.Contains(events[0].Text, "CONTEXT CHECKPOINT") {
+		t.Fatalf("compact notice leaked checkpoint body: %#v", events[0])
 	}
 }
 

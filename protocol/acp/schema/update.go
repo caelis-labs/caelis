@@ -14,6 +14,7 @@ const (
 	UpdateToolCall     = "tool_call"
 	UpdateToolCallInfo = "tool_call_update"
 	UpdatePlan         = "plan"
+	UpdateCompact      = "compact"
 )
 
 const (

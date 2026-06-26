@@ -174,7 +174,7 @@ func renderNumberedACPDiffPanelLine(line diffPanelLine, oldWidth, newWidth, widt
 			Styled: ctx.Theme.TranscriptMetaStyle().Width(width).Render(plain),
 		}}
 	case diffPanelLineHunk:
-		plain := diffMetaPrefix(oldWidth, newWidth) + line.Text
+		plain := "  " + line.Text
 		return []renderedDiffPanelRow{{
 			Plain:  plain,
 			Styled: ctx.Theme.DiffHunkStyle().Width(width).Render(plain),
@@ -230,10 +230,6 @@ func diffGutterPlain(line diffPanelLine, oldWidth, newWidth int) string {
 
 func diffGutterStyled(gutter string, ctx BlockRenderContext) string {
 	return ctx.Theme.DiffLineNoStyle().Render(gutter)
-}
-
-func diffMetaPrefix(oldWidth, newWidth int) string {
-	return "  " + strings.Repeat(" ", oldWidth) + " " + strings.Repeat(" ", newWidth) + " "
 }
 
 func formatDiffLineNo(value int, width int) string {

@@ -38,7 +38,7 @@ func (r *runtime) workspaceSetupCheck() (check sandbox.SetupCheck) {
 		if check.Details == nil {
 			check.Details = map[string]string{}
 		}
-		check.Details["manual_fix_hint"] = "run `/doctor fix` in TUI or `caelis sandbox fix`"
+		check.Details["manual_fix_hint"] = "run `/doctor` in TUI or `caelis sandbox fix`"
 	}()
 	policy, err := r.inspectPolicyForRequest(sandbox.CommandRequest{Dir: r.cfg.CWD, Constraints: r.Describe().DefaultConstraints})
 	if err != nil {

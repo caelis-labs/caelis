@@ -288,7 +288,7 @@ func FriendlyCommandError(action string, err error) error {
 	case strings.Contains(lower, "uac prompt was cancelled"):
 		return fmt.Errorf("%s: Windows sandbox repair was cancelled", action)
 	case strings.Contains(lower, "acl: write") && strings.Contains(lower, "dacl"):
-		return fmt.Errorf("%s: Windows sandbox cannot repair workspace ACLs with the current token. Run /doctor fix", action)
+		return fmt.Errorf("%s: Windows sandbox cannot repair workspace ACLs with the current token. Run /doctor", action)
 	case strings.Contains(lower, "windows sandbox setup is required"):
 		return fmt.Errorf("%s: Windows sandbox repair is pending. Retry the command to let the sandbox repair workspace ACL state lazily", action)
 	case strings.Contains(lower, "session not found"):

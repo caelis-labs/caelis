@@ -63,7 +63,7 @@ func formatTUISandboxRefreshError(err error) string {
 	if errText := strings.TrimSpace(err.Error()); errText != "" {
 		lines = append(lines, errText)
 	}
-	lines = append(lines, "run /doctor fix")
+	lines = append(lines, "run /doctor")
 	return strings.Join(lines, "\n")
 }
 

@@ -23,7 +23,7 @@ const (
 	hintWindowsGitCredential     = "Git credential helpers can fail under the Windows restricted-token sandbox. Retry the same credentialed Git command with sandbox_permissions=require_escalated."
 	hintGoPrivateDependency      = "Go private dependency resolution can hit Windows sandbox TLS or credential-helper limits. Retry the same Go dependency/test command with sandbox_permissions=require_escalated."
 	hintSandboxCacheDenied       = "A sandboxed tool could not write its cache path. Retry the same necessary command with sandbox_permissions=require_escalated, or clean/reset the sandbox cache if the redirected cache is corrupt."
-	hintWindowsSandboxACLDenied  = "Windows sandbox ACL preparation failed for a required foreground path. Retry the same necessary command with sandbox_permissions=require_escalated, then run `/doctor fix` or `caelis sandbox fix` when convenient."
+	hintWindowsSandboxACLDenied  = "Windows sandbox ACL preparation failed for a required foreground path. Retry the same necessary command with sandbox_permissions=require_escalated, then run `/doctor` or `caelis sandbox fix` when convenient."
 )
 
 type Input struct {

@@ -37,6 +37,8 @@ const (
 	NarrativeNotice    NarrativeKind = "notice"
 )
 
+const CompactNoticeLabel = "Context Compact"
+
 type PlanEntry struct {
 	Content string
 	Status  string

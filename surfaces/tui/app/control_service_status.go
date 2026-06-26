@@ -26,26 +26,22 @@ func formatStatusSnapshot(status control.StatusSnapshot) string {
 	if status.SandboxStatus.InstallHint != "" {
 		appendStatusField(&lines, "Install", strings.TrimSpace(status.SandboxStatus.InstallHint))
 	}
-	globalSetup, hasGlobalSetup := status.SandboxStatus.Setup.Check("global")
-	workspaceSetup, hasWorkspaceSetup := status.SandboxStatus.Setup.Check("workspace")
-	globalSetupRequired := status.SandboxStatus.GlobalSetupRequired || (hasGlobalSetup && globalSetup.Required)
-	workspaceSetupRequired := status.SandboxStatus.WorkspaceSetupRequired || (hasWorkspaceSetup && workspaceSetup.Required)
-	setupError := firstNonEmpty(status.SandboxStatus.Setup.Error, globalSetup.Error, workspaceSetup.Error, status.SandboxStatus.SetupError)
-	if globalSetupRequired {
-		if setupError != "" {
+	setup := sandboxSetupViewFromStatus(status)
+	if setup.GlobalRequired {
+		if setup.SetupError != "" {
 			appendStatusField(&lines, "Setup", "Windows sandbox infrastructure repair failed")
 		} else {
 			appendStatusField(&lines, "Setup", "Windows sandbox infrastructure repair is pending")
 		}
-	} else if workspaceSetupRequired {
-		if setupError != "" {
+	} else if setup.WorkspaceRequired {
+		if setup.SetupError != "" {
 			appendStatusField(&lines, "Setup", "current workspace ACL repair failed")
 		} else {
 			appendStatusField(&lines, "Setup", "current workspace ACL repair is pending")
 		}
 	}
-	if setupError != "" {
-		appendStatusField(&lines, "Error", compactStatusDetail(setupError, 180))
+	if setup.SetupError != "" {
+		appendStatusField(&lines, "Error", compactStatusDetail(setup.SetupError, 180))
 	}
 	warnings := make([]string, 0, 6)
 	if strings.TrimSpace(status.ModelStatus.Display) == "" && strings.TrimSpace(status.ModelStatus.Provider) == "" && strings.TrimSpace(status.ModelStatus.Name) == "" {
@@ -58,18 +54,10 @@ func formatStatusSnapshot(status control.StatusSnapshot) string {
 		warnings = append(warnings, "Commands may run on the host with reduced sandbox isolation")
 		warnings = append(warnings, "Auto-Review remains enabled and can approve host execution; switch approval mode to manual for sensitive work")
 	}
-	if globalSetupRequired {
-		if setupError != "" {
-			warnings = append(warnings, "Run /doctor fix to repair Windows sandbox setup")
-		} else {
-			warnings = append(warnings, "Windows sandbox infrastructure will be repaired lazily before sandboxed commands run")
-		}
-	} else if workspaceSetupRequired {
-		if setupError != "" {
-			warnings = append(warnings, "Run /doctor fix to repair current workspace ACLs")
-		} else {
-			warnings = append(warnings, "Current workspace ACLs will be repaired lazily before sandboxed commands run")
-		}
+	if setup.GlobalRequired {
+		warnings = append(warnings, sandboxSetupWarning(setup, "Windows sandbox setup"))
+	} else if setup.WorkspaceRequired {
+		warnings = append(warnings, sandboxSetupWarning(setup, "current workspace ACLs"))
 	}
 	if strings.TrimSpace(status.SandboxStatus.FallbackReason) != "" {
 		warnings = append(warnings, "Requested sandbox backend is unavailable and a fallback is in effect")
@@ -94,6 +82,55 @@ func formatStatusSnapshot(status control.StatusSnapshot) string {
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+type sandboxSetupView struct {
+	GlobalRequired    bool
+	WorkspaceRequired bool
+	AnyRequired       bool
+	RepairRequired    bool
+	IsWindows         bool
+	SetupError        string
+	GlobalDetail      string
+	WorkspaceDetail   string
+}
+
+func sandboxSetupViewFromStatus(status control.StatusSnapshot) sandboxSetupView {
+	global, hasGlobal := status.SandboxStatus.Setup.Check("global")
+	workspace, hasWorkspace := status.SandboxStatus.Setup.Check("workspace")
+	view := sandboxSetupView{
+		GlobalRequired:    status.SandboxStatus.GlobalSetupRequired || (hasGlobal && global.Required),
+		WorkspaceRequired: status.SandboxStatus.WorkspaceSetupRequired || (hasWorkspace && workspace.Required),
+		IsWindows:         sandboxStatusIsWindows(status.SandboxStatus),
+		SetupError:        firstNonEmpty(status.SandboxStatus.Setup.Error, global.Error, workspace.Error, status.SandboxStatus.SetupError),
+		GlobalDetail:      firstNonEmpty(status.SandboxStatus.SetupError, global.Error, global.Reason, status.SandboxStatus.GlobalSetupReason, status.SandboxStatus.SetupMarkerReason, "global setup required"),
+		WorkspaceDetail:   firstNonEmpty(status.SandboxStatus.SetupError, workspace.Error, workspace.Reason, status.SandboxStatus.WorkspaceSetupReason, "workspace ACL setup required"),
+	}
+	view.AnyRequired = status.SandboxStatus.SetupRequired ||
+		status.SandboxStatus.Setup.Required ||
+		view.GlobalRequired ||
+		view.WorkspaceRequired
+	view.RepairRequired = view.IsWindows && view.AnyRequired
+	return view
+}
+
+func sandboxStatusIsWindows(status control.StatusSandbox) bool {
+	for _, value := range []string{status.ResolvedBackend, status.RequestedBackend, status.Type} {
+		if strings.EqualFold(strings.TrimSpace(value), "windows") {
+			return true
+		}
+	}
+	return false
+}
+
+func sandboxSetupWarning(view sandboxSetupView, target string) string {
+	if !view.IsWindows {
+		return target + " repair is pending"
+	}
+	if view.SetupError != "" {
+		return "Run /doctor to repair " + target
+	}
+	return "Run /doctor to repair " + target + " now, or retry a sandboxed command to repair lazily"
 }
 
 func compactStatusDetail(value string, maxRunes int) string {

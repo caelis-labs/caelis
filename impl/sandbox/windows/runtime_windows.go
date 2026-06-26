@@ -1002,7 +1002,7 @@ func diagnoseACLWriteFailure(path string, err error) error {
 			fmt.Sprintf("ace_count=%d", info.ACECount),
 		)
 		parts = append(parts, "file writes may still work through existing Modify rights, but sandbox preparation cannot proceed without DACL write access")
-		parts = append(parts, "manual fix: run `/doctor fix` in TUI or `caelis sandbox fix`")
+		parts = append(parts, "manual fix: run `/doctor` in TUI or `caelis sandbox fix`")
 		detail = strings.Join(parts, "; ")
 	} else {
 		detail += "; DACL diagnosis failed: " + inspectErr.Error()
