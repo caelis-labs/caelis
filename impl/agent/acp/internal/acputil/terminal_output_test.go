@@ -53,9 +53,7 @@ func TestStripTerminalConsoleFenceToolCallUpdate(t *testing.T) {
 
 	fenced := "```console\nline\n```\n"
 	title := fenced
-	meta := map[string]any{
-		"terminal_output": map[string]any{"data": fenced},
-	}
+	meta := metautil.WithRuntimeSection(nil, metautil.Terminal, map[string]any{"data": fenced})
 	got := StripTerminalConsoleFenceToolCallUpdate(client.ToolCallUpdate{
 		Title:     &title,
 		RawOutput: map[string]any{"stdout": fenced},
@@ -81,7 +79,7 @@ func TestStripTerminalConsoleFenceToolCallUpdate(t *testing.T) {
 	if text := acpschema.ExtractTextValue(got.Content[1].Content); text != fenced {
 		t.Fatalf("non-terminal content = %q, want original text", text)
 	}
-	if output := metautil.TerminalSection(got.Meta, metautil.LegacyTerminalOutput); output["data"] != fenced {
+	if output := metautil.RuntimeSection(got.Meta, metautil.Terminal); output["data"] != fenced {
 		t.Fatalf("terminal meta = %#v, want original data", got.Meta)
 	}
 }

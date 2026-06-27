@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/OnslaughtSnail/caelis/ports/gateway"
+	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
@@ -141,6 +142,64 @@ func TestProjectGatewayEventEnvelopeProjectsGatewayAssistantNarrative(t *testing
 	}
 	if content, ok := message.Content.(schema.TextContent); !ok || content.Text != "done" {
 		t.Fatalf("message content = %#v, want done text", message.Content)
+	}
+}
+
+func TestGatewayAndSessionAssistantProjectionParity(t *testing.T) {
+	message := model.NewMessage(
+		model.RoleAssistant,
+		model.NewReasoningPart("thinking", model.ReasoningVisibilityVisible),
+		model.NewTextPart("done"),
+	)
+	base := eventstream.Envelope{
+		Cursor:    "e1",
+		SessionID: "session-1",
+		Actor:     "codex",
+		Final:     true,
+	}
+	sessionEvents := ProjectSessionEventEnvelope(base, &session.Event{
+		ID:        "e1",
+		SessionID: "session-1",
+		Type:      session.EventTypeAssistant,
+		Message:   &message,
+	})
+	gatewayEvents := ProjectGatewayEventEnvelope(gateway.EventEnvelope{
+		Cursor: "e1",
+		Event: gateway.Event{
+			Kind:       gateway.EventKindAssistantMessage,
+			SessionRef: session.SessionRef{SessionID: "session-1"},
+			Narrative: &gateway.NarrativePayload{
+				Role:          gateway.NarrativeRoleAssistant,
+				Actor:         "codex",
+				ReasoningText: "thinking",
+				Text:          "done",
+				Final:         true,
+			},
+		},
+	})
+	if len(sessionEvents) != len(gatewayEvents) {
+		t.Fatalf("session events = %#v, gateway events = %#v", sessionEvents, gatewayEvents)
+	}
+	for i := range sessionEvents {
+		if sessionEvents[i].Kind != gatewayEvents[i].Kind ||
+			sessionEvents[i].Cursor != gatewayEvents[i].Cursor ||
+			sessionEvents[i].SessionID != gatewayEvents[i].SessionID ||
+			sessionEvents[i].Actor != gatewayEvents[i].Actor ||
+			sessionEvents[i].Final != gatewayEvents[i].Final ||
+			eventstream.UpdateType(sessionEvents[i].Update) != eventstream.UpdateType(gatewayEvents[i].Update) {
+			t.Fatalf("event[%d] session = %#v, gateway = %#v", i, sessionEvents[i], gatewayEvents[i])
+		}
+		sessionChunk, ok := sessionEvents[i].Update.(schema.ContentChunk)
+		if !ok {
+			t.Fatalf("session update[%d] = %#v, want content chunk", i, sessionEvents[i].Update)
+		}
+		gatewayChunk, ok := gatewayEvents[i].Update.(schema.ContentChunk)
+		if !ok {
+			t.Fatalf("gateway update[%d] = %#v, want content chunk", i, gatewayEvents[i].Update)
+		}
+		if schema.ExtractTextValue(sessionChunk.Content) != schema.ExtractTextValue(gatewayChunk.Content) {
+			t.Fatalf("content[%d] session = %#v, gateway = %#v", i, sessionChunk.Content, gatewayChunk.Content)
+		}
 	}
 }
 

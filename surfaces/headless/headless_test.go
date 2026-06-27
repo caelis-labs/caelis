@@ -273,45 +273,6 @@ func TestRunOnceIgnoresAutomaticApprovalReviewEvents(t *testing.T) {
 	}
 }
 
-func TestRunOnceFallsBackToGatewayEventBridge(t *testing.T) {
-	t.Parallel()
-
-	handle := newFakeLegacyHandle([]gateway.EventEnvelope{
-		{
-			Cursor: "e1",
-			Event: gateway.Event{
-				Kind: gateway.EventKindAssistantMessage,
-				Narrative: &gateway.NarrativePayload{
-					Role:  gateway.NarrativeRoleAssistant,
-					Text:  "done through bridge",
-					Final: true,
-				},
-			},
-		},
-	})
-	gw := fakeStarter{
-		result: gateway.BeginTurnResult{
-			Session: session.Session{SessionRef: session.SessionRef{
-				AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
-			}},
-			Handle: handle,
-		},
-	}
-
-	result, err := RunOnce(context.Background(), gw, gateway.BeginTurnRequest{
-		SessionRef: session.SessionRef{
-			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
-		},
-		Input: "hello",
-	}, Options{})
-	if err != nil {
-		t.Fatalf("RunOnce() error = %v", err)
-	}
-	if result.Output != "done through bridge" {
-		t.Fatalf("RunOnce() output = %q, want bridge output", result.Output)
-	}
-}
-
 type fakeStarter struct {
 	result gateway.BeginTurnResult
 	err    error
@@ -326,7 +287,7 @@ type fakeTurnHandle struct {
 	submissions []gateway.SubmitRequest
 }
 
-func newFakeLegacyHandle(events []gateway.EventEnvelope) *fakeTurnHandle {
+func newFakeTurnHandle(events []gateway.EventEnvelope) *fakeTurnHandle {
 	ch := make(chan gateway.EventEnvelope, len(events))
 	for _, env := range events {
 		ch <- env
@@ -347,7 +308,7 @@ func newFakeACPHandle(events []eventstream.Envelope) *fakeACPHandle {
 	}
 	close(ch)
 	return &fakeACPHandle{
-		fakeTurnHandle: newFakeLegacyHandle(nil),
+		fakeTurnHandle: newFakeTurnHandle(nil),
 		acpEvents:      ch,
 	}
 }
@@ -361,6 +322,7 @@ func (h *fakeTurnHandle) Events() <-chan gateway.EventEnvelope { return h.events
 func (h *fakeTurnHandle) EventsAfter(string) ([]gateway.EventEnvelope, string, error) {
 	return nil, "", nil
 }
+func (h *fakeTurnHandle) ACPEvents() <-chan eventstream.Envelope { return nil }
 func (h *fakeTurnHandle) Submit(_ context.Context, req gateway.SubmitRequest) error {
 	h.submissions = append(h.submissions, req)
 	return nil

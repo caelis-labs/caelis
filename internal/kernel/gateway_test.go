@@ -14,6 +14,8 @@ import (
 	policyapi "github.com/OnslaughtSnail/caelis/ports/policy"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/tool"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
 func modelMessagePtr(message model.Message) *model.Message {
@@ -1904,7 +1906,9 @@ func TestReplayEventsReturnsSessionBackedCanonicalReplay(t *testing.T) {
 	if len(replayed.Events) != 1 || replayed.Events[0].Cursor != "e2" {
 		t.Fatalf("ReplayEvents() = %#v", replayed.Events)
 	}
-	if replayed.Events[0].Event.Kind != EventKindAssistantMessage || replayed.Events[0].Event.TurnID != "turn-1" {
+	if replayed.Events[0].Kind != eventstream.KindSessionUpdate ||
+		eventstream.UpdateType(replayed.Events[0].Update) != schema.UpdateAgentMessage ||
+		replayed.Events[0].TurnID != "turn-1" {
 		t.Fatalf("first replay event = %+v", replayed.Events[0])
 	}
 	if !replayed.Durable || replayed.NextCursor != "e2" {
@@ -1971,12 +1975,16 @@ func TestReplayEventsIncludesDurableMirrorTranscriptEvents(t *testing.T) {
 	if !svc.eventsReq.IncludeTransient {
 		t.Fatal("ReplayEvents() did not request durable transcript events")
 	}
-	if len(replayed.Events) != 2 {
-		t.Fatalf("ReplayEvents().Events = %#v, want user + mirror assistant", replayed.Events)
+	if len(replayed.Events) != 3 {
+		t.Fatalf("ReplayEvents().Events = %#v, want user + mirror thought + mirror assistant", replayed.Events)
 	}
-	got := replayed.Events[1].Event.Narrative
-	if got == nil || got.Text != "partial answer" || got.ReasoningText != "partial thought" || got.Visibility != string(session.VisibilityMirror) || !got.Final {
-		t.Fatalf("mirror replay narrative = %#v, want final mirror assistant text and reasoning", got)
+	thought, ok := replayed.Events[1].Update.(schema.ContentChunk)
+	if !ok || thought.SessionUpdate != schema.UpdateAgentThought || schema.ExtractTextValue(thought.Content) != "partial thought" || !replayed.Events[1].Final {
+		t.Fatalf("mirror reasoning update = %#v final=%v, want final mirror thought", replayed.Events[1].Update, replayed.Events[1].Final)
+	}
+	got, ok := replayed.Events[2].Update.(schema.ContentChunk)
+	if !ok || got.SessionUpdate != schema.UpdateAgentMessage || schema.ExtractTextValue(got.Content) != "partial answer" || !replayed.Events[2].Final {
+		t.Fatalf("mirror replay update = %#v final=%v, want final mirror assistant text", replayed.Events[2].Update, replayed.Events[2].Final)
 	}
 	if replayed.ControlPlane.Continuity.LastEventCursor != "e1" {
 		t.Fatalf("control continuity = %+v, want mirror ignored", replayed.ControlPlane.Continuity)
@@ -2031,6 +2039,56 @@ func TestReplayEventsResolvesBindingAndAppliesCursorLimit(t *testing.T) {
 	}
 	if replayed.NextCursor != "e2" {
 		t.Fatalf("ReplayEvents().NextCursor = %q, want e2", replayed.NextCursor)
+	}
+}
+
+func TestReplayEventsLimitDoesNotSplitProjectedACPEnvelopes(t *testing.T) {
+	t.Parallel()
+
+	activeSession := session.Session{
+		SessionRef: session.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+		},
+	}
+	message := model.NewMessage(
+		model.RoleAssistant,
+		model.NewReasoningPart("thinking", model.ReasoningVisibilityVisible),
+		model.NewTextPart("done"),
+	)
+	svc := &recordingSessionService{
+		sessionResult: activeSession,
+		eventsResult: []*session.Event{
+			{ID: "e1", Type: session.EventTypeUser, Text: "first", Message: modelMessagePtr(model.NewTextMessage(model.RoleUser, "first"))},
+			{ID: "e2", Type: session.EventTypeAssistant, Text: "done", Message: &message, Visibility: session.VisibilityCanonical},
+			{ID: "e3", Type: session.EventTypeAssistant, Text: "third", Message: modelMessagePtr(model.NewTextMessage(model.RoleAssistant, "third")), Visibility: session.VisibilityCanonical},
+		},
+	}
+	gw, err := New(Config{
+		Sessions: svc,
+		Runtime:  mockRuntime{},
+		Resolver: staticResolver{},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	replayed, err := gw.ReplayEvents(context.Background(), ReplayEventsRequest{
+		SessionRef: activeSession.SessionRef,
+		Cursor:     "e1",
+		Limit:      1,
+	})
+	if err != nil {
+		t.Fatalf("ReplayEvents() error = %v", err)
+	}
+	if len(replayed.Events) != 2 {
+		t.Fatalf("ReplayEvents().Events len = %d, want full thought + message group: %#v", len(replayed.Events), replayed.Events)
+	}
+	if replayed.Events[0].Cursor != "e2" || replayed.Events[1].Cursor != "e2" || replayed.NextCursor != "e2" {
+		t.Fatalf("replay cursors = [%q %q] next=%q, want all e2", replayed.Events[0].Cursor, replayed.Events[1].Cursor, replayed.NextCursor)
+	}
+	if eventstream.UpdateType(replayed.Events[0].Update) != schema.UpdateAgentThought ||
+		eventstream.UpdateType(replayed.Events[1].Update) != schema.UpdateAgentMessage {
+		t.Fatalf("replay updates = %#v %#v, want thought + message", replayed.Events[0].Update, replayed.Events[1].Update)
 	}
 }
 

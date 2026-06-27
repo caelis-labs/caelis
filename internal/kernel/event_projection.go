@@ -153,27 +153,6 @@ func sessionEventKind(event *session.Event) EventKind {
 	}
 }
 
-func usageSnapshotFromSessionEvent(event *session.Event) *UsageSnapshot {
-	return gatewayapi.UsageSnapshotFromSessionEvent(event)
-}
-
-func canonicalInvocationPayload(event *session.Event) *session.EventInvocation {
-	if event == nil || event.Invocation == nil {
-		return nil
-	}
-	invocation := session.CloneEventInvocation(*event.Invocation)
-	if invocation.Provider == "" && invocation.Model == "" {
-		return nil
-	}
-	return &invocation
-}
-
-// UsageSnapshotFromSessionEvent projects provider token usage from a durable
-// session event into the canonical gateway usage contract.
-func UsageSnapshotFromSessionEvent(event *session.Event) *UsageSnapshot {
-	return gatewayapi.UsageSnapshotFromSessionEvent(event)
-}
-
 // UsageSnapshotFromMap projects one provider-style usage payload into the
 // canonical gateway usage contract.
 func UsageSnapshotFromMap(payload map[string]any) *UsageSnapshot {
@@ -449,9 +428,6 @@ func canonicalToolCallPayload(event *session.Event) *ToolCallPayload {
 		toolName = canonicalToolName(event, update)
 		rawStatus = strings.TrimSpace(update.Status)
 	}
-	if callID == "" && event.Protocol != nil && event.Protocol.ToolCall != nil {
-		callID = strings.TrimSpace(event.Protocol.ToolCall.ID)
-	}
 	if toolName == "" {
 		toolName = canonicalToolName(event, update)
 	}
@@ -489,9 +465,6 @@ func canonicalToolResultPayload(event *session.Event) *ToolResultPayload {
 		callID = strings.TrimSpace(update.ToolCallID)
 		toolName = canonicalToolName(event, update)
 		rawStatus = strings.TrimSpace(update.Status)
-	}
-	if callID == "" && event.Protocol != nil && event.Protocol.ToolCall != nil {
-		callID = strings.TrimSpace(event.Protocol.ToolCall.ID)
 	}
 	if toolName == "" {
 		toolName = canonicalToolName(event, update)
@@ -586,9 +559,6 @@ func canonicalPlanPayload(event *session.Event) *PlanPayload {
 		if update := session.ProtocolUpdateOf(event); update != nil {
 			entries = update.Entries
 		}
-		if len(entries) == 0 && event.Protocol.Plan != nil {
-			entries = event.Protocol.Plan.Entries
-		}
 	}
 	if len(entries) == 0 {
 		return nil
@@ -614,10 +584,14 @@ func canonicalPlanPayload(event *session.Event) *PlanPayload {
 }
 
 func canonicalParticipantPayload(event *session.Event) *ParticipantPayload {
-	if event == nil || event.Protocol == nil || event.Protocol.Participant == nil {
+	if event == nil || event.Protocol == nil {
 		return nil
 	}
-	action := strings.TrimSpace(event.Protocol.Participant.Action)
+	protocol := session.CloneEventProtocol(*event.Protocol)
+	if protocol.Participant == nil {
+		return nil
+	}
+	action := strings.TrimSpace(protocol.Participant.Action)
 	if action == "" && (event.Scope == nil || strings.TrimSpace(event.Scope.Participant.ID) == "") {
 		return nil
 	}
@@ -731,13 +705,7 @@ func reasoningTextFromProtocolContent(content any) string {
 }
 
 func updateTypeFromSessionEvent(event *session.Event) string {
-	if event == nil || event.Protocol == nil {
-		return ""
-	}
-	if update := session.ProtocolUpdateOf(event); update != nil {
-		return strings.TrimSpace(update.SessionUpdate)
-	}
-	return strings.TrimSpace(event.Protocol.UpdateType)
+	return session.ProtocolSessionUpdateType(event)
 }
 
 func actorIDFromSessionEvent(event *session.Event) string {
@@ -781,10 +749,7 @@ func canonicalToolKind(event *session.Event) string {
 	if update := session.ProtocolUpdateOf(event); update != nil {
 		return strings.TrimSpace(update.Kind)
 	}
-	if event == nil || event.Protocol == nil || event.Protocol.ToolCall == nil {
-		return ""
-	}
-	return strings.TrimSpace(event.Protocol.ToolCall.Kind)
+	return ""
 }
 
 func canonicalToolTitle(event *session.Event) string {
@@ -794,10 +759,7 @@ func canonicalToolTitle(event *session.Event) string {
 	if update := session.ProtocolUpdateOf(event); update != nil {
 		return strings.TrimSpace(update.Title)
 	}
-	if event == nil || event.Protocol == nil || event.Protocol.ToolCall == nil {
-		return ""
-	}
-	return strings.TrimSpace(event.Protocol.ToolCall.Title)
+	return ""
 }
 
 func canonicalToolRawInput(event *session.Event) map[string]any {
@@ -809,11 +771,6 @@ func canonicalToolRawInput(event *session.Event) map[string]any {
 	if update := session.ProtocolUpdateOf(event); update != nil {
 		if len(update.RawInput) > 0 {
 			return maps.Clone(update.RawInput)
-		}
-	}
-	if event != nil && event.Protocol != nil && event.Protocol.ToolCall != nil {
-		if len(event.Protocol.ToolCall.RawInput) > 0 {
-			return maps.Clone(event.Protocol.ToolCall.RawInput)
 		}
 	}
 	if raw := toolUseRawInputFromMessage(event); len(raw) > 0 {
@@ -833,11 +790,6 @@ func canonicalToolRawOutput(event *session.Event) map[string]any {
 			return maps.Clone(update.RawOutput)
 		}
 	}
-	if event != nil && event.Protocol != nil && event.Protocol.ToolCall != nil {
-		if len(event.Protocol.ToolCall.RawOutput) > 0 {
-			return maps.Clone(event.Protocol.ToolCall.RawOutput)
-		}
-	}
 	return nil
 }
 
@@ -849,9 +801,6 @@ func canonicalToolContent(event *session.Event) []session.ProtocolToolCallConten
 		if content := session.ProtocolToolCallContentOf(update); len(content) > 0 {
 			return content
 		}
-	}
-	if event != nil && event.Protocol != nil && event.Protocol.ToolCall != nil {
-		return session.CloneProtocolToolCallContent(event.Protocol.ToolCall.Content)
 	}
 	return nil
 }
@@ -901,10 +850,6 @@ func toolUseRawInputFromMessage(event *session.Event) map[string]any {
 		callID = strings.TrimSpace(update.ToolCallID)
 		toolName = canonicalToolName(event, update)
 	}
-	if event.Protocol != nil && event.Protocol.ToolCall != nil {
-		callID = firstNonEmpty(callID, strings.TrimSpace(event.Protocol.ToolCall.ID))
-		toolName = firstNonEmpty(toolName, strings.TrimSpace(event.Protocol.ToolCall.Name))
-	}
 	for _, call := range message.ToolCalls() {
 		if callID != "" && strings.TrimSpace(call.ID) != callID {
 			continue
@@ -926,11 +871,6 @@ func canonicalToolName(event *session.Event, update *session.ProtocolUpdate) str
 	}
 	if toolPayload := session.EventToolProjection(event); toolPayload != nil {
 		if name := strings.TrimSpace(toolPayload.Name); name != "" {
-			return name
-		}
-	}
-	if event != nil && event.Protocol != nil && event.Protocol.ToolCall != nil {
-		if name := strings.TrimSpace(event.Protocol.ToolCall.Name); name != "" {
 			return name
 		}
 	}

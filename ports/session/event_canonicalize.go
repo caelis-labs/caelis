@@ -15,9 +15,7 @@ func ensureProtocolText(event *Event) {
 	case EventTypeUser:
 		updateType = string(ProtocolUpdateTypeUserMessage)
 	case EventTypeAssistant:
-		if event.Protocol != nil {
-			updateType = firstNonEmpty(event.Protocol.UpdateType)
-		}
+		updateType = ProtocolSessionUpdateType(event)
 		if updateType == "" {
 			updateType = string(ProtocolUpdateTypeAgentMessage)
 		}

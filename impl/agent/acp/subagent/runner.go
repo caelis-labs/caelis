@@ -534,7 +534,6 @@ func (run *childRun) acpUpdateEvent(env client.UpdateEnvelope, at time.Time, tex
 			Scope:      &scopeCopy,
 			Text:       text,
 			Protocol: &session.EventProtocol{
-				UpdateType: strings.TrimSpace(updateType),
 				Update: &session.ProtocolUpdate{
 					SessionUpdate: strings.TrimSpace(updateType),
 				},
@@ -584,7 +583,6 @@ func (run *childRun) acpUpdateEvent(env client.UpdateEnvelope, at time.Time, tex
 			RawInput: acpconvert.ToolRawInput(update.RawInput),
 			Content:  acpconvert.ToolContent(update.Content),
 		}
-		event.Protocol.ToolCall = tool
 		event.Protocol.Update = acpconvert.ToolProtocolUpdate(update.SessionUpdate, tool, update.Meta)
 		return event
 	case client.ToolCallUpdate:
@@ -600,12 +598,10 @@ func (run *childRun) acpUpdateEvent(env client.UpdateEnvelope, at time.Time, tex
 			RawOutput: acpconvert.ToolRawOutput(update.RawOutput),
 			Content:   acpconvert.ToolContent(update.Content),
 		}
-		event.Protocol.ToolCall = tool
 		event.Protocol.Update = acpconvert.ToolProtocolUpdate(update.SessionUpdate, tool, update.Meta)
 		return event
 	case client.PlanUpdate:
 		event := base(update.SessionUpdate, session.EventTypePlan, "plan updated")
-		event.Protocol.Plan = &session.ProtocolPlan{Entries: acpPlanEntries(update.Entries)}
 		event.Protocol.Update = &session.ProtocolUpdate{
 			SessionUpdate: strings.TrimSpace(update.SessionUpdate),
 			Entries:       acpPlanEntries(update.Entries),
@@ -721,7 +717,7 @@ func childTerminalOutputMetaText(meta map[string]any) string {
 	if len(meta) == 0 {
 		return ""
 	}
-	output := metautil.TerminalSection(meta, metautil.LegacyTerminalOutput)
+	output := metautil.RuntimeSection(meta, metautil.Terminal)
 	if len(output) == 0 {
 		return ""
 	}

@@ -129,14 +129,6 @@ func RefFromEvent(event *session.Event) (stream.Ref, bool) {
 			ref.TerminalID = nestedString(meta, "caelis", "runtime", "task", "terminal_id")
 		}
 	}
-	if ref.TerminalID == "" && event.Protocol != nil && event.Protocol.ToolCall != nil {
-		for _, item := range event.Protocol.ToolCall.Content {
-			if terminalID := strings.TrimSpace(item.TerminalID); terminalID != "" {
-				ref.TerminalID = terminalID
-				break
-			}
-		}
-	}
 	if ref.TerminalID == "" {
 		toolPayload := session.EventToolProjection(event)
 		if toolPayload != nil {
@@ -199,13 +191,7 @@ func terminalEventMetadata(event *session.Event) []map[string]any {
 }
 
 func protocolTerminalMetaValue(meta map[string]any, key string) string {
-	for _, legacyKey := range []string{metautil.LegacyTerminalOutput, metautil.LegacyTerminalExit, metautil.LegacyTerminalInfo} {
-		section := metautil.TerminalSection(meta, legacyKey)
-		if value := mapString(section, key); value != "" {
-			return value
-		}
-	}
-	return ""
+	return mapString(metautil.RuntimeSection(meta, metautil.Terminal), key)
 }
 
 func mapString(values map[string]any, key string) string {

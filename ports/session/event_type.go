@@ -27,17 +27,8 @@ func EventTypeOf(event *Event) EventType {
 		return EventTypeLifecycle
 	}
 	if event.Protocol != nil {
-		switch strings.TrimSpace(event.Protocol.Method) {
-		case ProtocolMethodParticipantUpdate:
-			return EventTypeParticipant
-		case ProtocolMethodControllerHandoff:
-			return EventTypeHandoff
-		case ProtocolMethodRuntimeLifecycle, ProtocolMethodRequestPermission:
-			return EventTypeLifecycle
-		case ProtocolMethodContextCheckpoint:
-			return EventTypeCompact
-		}
-		if update := ProtocolUpdateOf(event); update != nil {
+		protocol := CloneEventProtocol(*event.Protocol)
+		if update := protocol.Update; update != nil {
 			switch strings.TrimSpace(update.SessionUpdate) {
 			case string(ProtocolUpdateTypeUserMessage):
 				return EventTypeUser
@@ -51,16 +42,26 @@ func EventTypeOf(event *Event) EventType {
 				return EventTypePlan
 			}
 		}
-		switch {
-		case event.Protocol.Plan != nil || strings.EqualFold(strings.TrimSpace(event.Protocol.UpdateType), "plan"):
-			return EventTypePlan
-		case event.Protocol.ToolCall != nil:
-			return EventTypeToolCall
-		case event.Protocol.Approval != nil:
-			return EventTypeLifecycle
-		case event.Protocol.Participant != nil:
+		switch strings.TrimSpace(protocol.Method) {
+		case ProtocolMethodParticipantUpdate:
 			return EventTypeParticipant
-		case event.Protocol.Handoff != nil:
+		case ProtocolMethodControllerHandoff:
+			return EventTypeHandoff
+		case ProtocolMethodRuntimeLifecycle, ProtocolMethodRequestPermission:
+			return EventTypeLifecycle
+		case ProtocolMethodContextCheckpoint:
+			return EventTypeCompact
+		}
+		switch {
+		case protocol.Plan != nil:
+			return EventTypePlan
+		case protocol.ToolCall != nil:
+			return EventTypeToolCall
+		case protocol.Permission != nil:
+			return EventTypeLifecycle
+		case protocol.Participant != nil:
+			return EventTypeParticipant
+		case protocol.Handoff != nil:
 			return EventTypeHandoff
 		}
 	}

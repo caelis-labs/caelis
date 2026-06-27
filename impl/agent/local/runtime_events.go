@@ -255,11 +255,6 @@ func planToolNameFromEvent(event *session.Event) string {
 			return name
 		}
 	}
-	if event.Protocol != nil && event.Protocol.ToolCall != nil {
-		if name := strings.TrimSpace(event.Protocol.ToolCall.Name); name != "" {
-			return name
-		}
-	}
 	if update := session.ProtocolUpdateOf(event); update != nil {
 		if title := strings.Fields(strings.TrimSpace(update.Title)); len(title) > 0 {
 			return title[0]

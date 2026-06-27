@@ -148,9 +148,14 @@ func TestProjectACPEventToTranscriptEventsDisplaysTerminalMetaWithoutToolKind(t 
 				TerminalID: "call-1",
 			}},
 			Meta: map[string]any{
-				"terminal_output": map[string]any{
-					"terminal_id": "call-1",
-					"data":        "terminal meta output\n",
+				"caelis": map[string]any{
+					"version": 1,
+					"runtime": map[string]any{
+						"terminal": map[string]any{
+							"terminal_id": "call-1",
+							"data":        "terminal meta output\n",
+						},
+					},
 				},
 			},
 		},

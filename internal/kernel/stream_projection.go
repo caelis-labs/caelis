@@ -9,6 +9,8 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/displaypolicy"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/stream"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
+	acpprojector "github.com/OnslaughtSnail/caelis/protocol/acp/projector"
 )
 
 // StreamRequest is one non-durable output subscription derived from a standard
@@ -110,14 +112,11 @@ func StreamRequestFromEvent(env EventEnvelope) (StreamRequest, bool) {
 }
 
 func gatewayToolContent(ev Event, fallback []session.ProtocolToolCallContent) []session.ProtocolToolCallContent {
-	if ev.Protocol != nil && ev.Protocol.Update != nil {
-		if content := session.ProtocolToolCallContentOf(ev.Protocol.Update); len(content) > 0 {
-			return content
-		}
-	}
-	if ev.Protocol != nil && ev.Protocol.ToolCall != nil {
-		if content := session.CloneProtocolToolCallContent(ev.Protocol.ToolCall.Content); len(content) > 0 {
-			return content
+	if ev.Protocol != nil {
+		if update := session.ProtocolUpdateOfProtocol(ev.Protocol); update != nil {
+			if content := session.ProtocolToolCallContentOf(update); len(content) > 0 {
+				return content
+			}
 		}
 	}
 	return session.CloneProtocolToolCallContent(fallback)
@@ -163,8 +162,7 @@ func StreamFrameEvent(req StreamRequest, frame stream.Frame) EventEnvelope {
 			Origin:     cloneEventOrigin(req.Origin),
 			Meta:       streamFrameToolMeta(streamFrameMeta("append"), req.RawInput, metaOutput, "", firstNonEmpty(frame.Ref.TaskID, req.Ref.TaskID)),
 			Protocol: &session.EventProtocol{
-				Method:     session.ProtocolMethodSessionUpdate,
-				UpdateType: string(session.ProtocolUpdateTypeToolUpdate),
+				Method: session.ProtocolMethodSessionUpdate,
 				Update: &session.ProtocolUpdate{
 					SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate),
 					ToolCallID:    req.CallID,
@@ -229,6 +227,18 @@ func StreamFrameEvents(req StreamRequest, frame stream.Frame) []EventEnvelope {
 	return out
 }
 
+// StreamFrameACPEvents projects one runtime stream frame into transient
+// ACP-native envelopes for live clients. The gateway DTO bridge stays inside
+// kernel while adapters consume only eventstream envelopes.
+func StreamFrameACPEvents(req StreamRequest, frame stream.Frame) []eventstream.Envelope {
+	events := StreamFrameEvents(req, frame)
+	out := make([]eventstream.Envelope, 0, len(events))
+	for _, env := range events {
+		out = append(out, acpprojector.ProjectGatewayEventEnvelope(env)...)
+	}
+	return out
+}
+
 func subagentStreamFrameEvent(req StreamRequest, frame stream.Frame) (EventEnvelope, bool) {
 	if frame.Closed {
 		return subagentFinalFrameEvent(req, frame), true
@@ -273,8 +283,7 @@ func streamFinalFrameEvent(req StreamRequest, frame stream.Frame) EventEnvelope 
 			Origin:     cloneEventOrigin(req.Origin),
 			Meta:       streamFrameToolMeta(streamFrameMeta("final"), req.RawInput, metaOutput, "", firstNonEmpty(req.Ref.TaskID, frame.Ref.TaskID)),
 			Protocol: &session.EventProtocol{
-				Method:     session.ProtocolMethodSessionUpdate,
-				UpdateType: string(session.ProtocolUpdateTypeToolUpdate),
+				Method: session.ProtocolMethodSessionUpdate,
 				Update: &session.ProtocolUpdate{
 					SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate),
 					ToolCallID:    req.CallID,
@@ -332,8 +341,7 @@ func subagentFinalFrameEvent(req StreamRequest, frame stream.Frame) EventEnvelop
 			Origin:     cloneEventOrigin(req.Origin),
 			Meta:       streamFrameToolMeta(streamFrameMeta("final"), req.RawInput, metaOutput, "", taskID),
 			Protocol: &session.EventProtocol{
-				Method:     session.ProtocolMethodSessionUpdate,
-				UpdateType: string(session.ProtocolUpdateTypeToolUpdate),
+				Method: session.ProtocolMethodSessionUpdate,
 				Update: &session.ProtocolUpdate{
 					SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate),
 					ToolCallID:    req.CallID,
@@ -434,12 +442,7 @@ func streamFrameToolMeta(meta map[string]any, input map[string]any, output map[s
 }
 
 func shouldProjectFrameTextToParentTool(frame stream.Frame) bool {
-	if update := session.ProtocolUpdateOf(frame.Event); update != nil &&
-		strings.TrimSpace(update.SessionUpdate) == string(session.ProtocolUpdateTypeAgentThought) {
-		return false
-	}
-	if frame.Event != nil && frame.Event.Protocol != nil &&
-		strings.TrimSpace(frame.Event.Protocol.UpdateType) == string(session.ProtocolUpdateTypeAgentThought) {
+	if frame.Event != nil && session.ProtocolSessionUpdateTypeOfProtocol(frame.Event.Protocol) == string(session.ProtocolUpdateTypeAgentThought) {
 		return false
 	}
 	return true

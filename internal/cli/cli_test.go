@@ -16,6 +16,8 @@ import (
 	"github.com/OnslaughtSnail/caelis/internal/testenv"
 	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
 func TestResolveInputFromPrompt(t *testing.T) {
@@ -171,21 +173,24 @@ func clearSelfAgentEnv(t *testing.T) {
 }
 
 func TestStreamHandleWritesAssistantTextAndDeniesApproval(t *testing.T) {
-	handle := newFakeHandle([]gateway.EventEnvelope{
+	title := "RUN_COMMAND"
+	handle := newFakeHandle([]eventstream.Envelope{
 		{
-			Event: gateway.Event{
-				Kind:            gateway.EventKindApprovalRequested,
-				ApprovalPayload: &gateway.ApprovalPayload{Status: gateway.ApprovalStatusPending},
+			Kind: eventstream.KindRequestPermission,
+			Permission: &schema.RequestPermissionRequest{
+				SessionID: "s1",
+				ToolCall: schema.ToolCallUpdate{
+					SessionUpdate: schema.UpdateToolCallInfo,
+					ToolCallID:    "call-1",
+					Title:         &title,
+				},
 			},
 		},
 		{
-			Event: gateway.Event{
-				Kind: gateway.EventKindAssistantMessage,
-				Narrative: &gateway.NarrativePayload{
-					Role:  gateway.NarrativeRoleAssistant,
-					Text:  "interactive ok",
-					Final: true,
-				},
+			Kind: eventstream.KindSessionUpdate,
+			Update: schema.ContentChunk{
+				SessionUpdate: schema.UpdateAgentMessage,
+				Content:       schema.TextContent{Type: "text", Text: "interactive ok"},
 			},
 		},
 	})
@@ -206,25 +211,18 @@ func TestStreamHandleWritesAssistantTextAndDeniesApproval(t *testing.T) {
 }
 
 func TestStreamHandleIgnoresAutomaticApprovalReviewEvents(t *testing.T) {
-	handle := newFakeHandle([]gateway.EventEnvelope{
+	handle := newFakeHandle([]eventstream.Envelope{
 		{
-			Event: gateway.Event{
-				Kind: gateway.EventKindApprovalReview,
-				ApprovalPayload: &gateway.ApprovalPayload{
-					Status:         gateway.ApprovalStatusPending,
-					ReviewStatus:   gateway.ApprovalReviewStatusInProgress,
-					DecisionSource: "auto-review",
-				},
+			Kind: eventstream.KindApprovalReview,
+			ApprovalReview: &eventstream.ApprovalReview{
+				Status: string(gateway.ApprovalReviewStatusInProgress),
 			},
 		},
 		{
-			Event: gateway.Event{
-				Kind: gateway.EventKindAssistantMessage,
-				Narrative: &gateway.NarrativePayload{
-					Role:  gateway.NarrativeRoleAssistant,
-					Text:  "interactive ok",
-					Final: true,
-				},
+			Kind: eventstream.KindSessionUpdate,
+			Update: schema.ContentChunk{
+				SessionUpdate: schema.UpdateAgentMessage,
+				Content:       schema.TextContent{Type: "text", Text: "interactive ok"},
 			},
 		},
 	})
@@ -455,14 +453,14 @@ func TestRunSandboxCleanSubcommandAliasesReset(t *testing.T) {
 }
 
 type fakeHandle struct {
-	events    chan gateway.EventEnvelope
+	events    chan eventstream.Envelope
 	submits   []gateway.SubmitRequest
 	closed    bool
 	cancelled bool
 }
 
-func newFakeHandle(events []gateway.EventEnvelope) *fakeHandle {
-	ch := make(chan gateway.EventEnvelope, len(events))
+func newFakeHandle(events []eventstream.Envelope) *fakeHandle {
+	ch := make(chan eventstream.Envelope, len(events))
 	for _, event := range events {
 		ch <- event
 	}
@@ -478,11 +476,14 @@ func (h *fakeHandle) SessionRef() session.SessionRef {
 }
 func (h *fakeHandle) CreatedAt() time.Time { return time.Time{} }
 func (h *fakeHandle) Events() <-chan gateway.EventEnvelope {
-	return h.events
+	ch := make(chan gateway.EventEnvelope)
+	close(ch)
+	return ch
 }
 func (h *fakeHandle) EventsAfter(string) ([]gateway.EventEnvelope, string, error) {
 	return nil, "", nil
 }
+func (h *fakeHandle) ACPEvents() <-chan eventstream.Envelope { return h.events }
 func (h *fakeHandle) Submit(_ context.Context, req gateway.SubmitRequest) error {
 	h.submits = append(h.submits, req)
 	return nil

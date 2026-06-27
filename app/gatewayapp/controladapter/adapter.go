@@ -16,7 +16,6 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/stream"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
-	acpprojector "github.com/OnslaughtSnail/caelis/protocol/acp/projector"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
@@ -128,13 +127,11 @@ func (d *Adapter) SubscribeStream(ctx context.Context, env eventstream.Envelope)
 			if frame.Text == "" && frame.Event == nil && !frame.Closed {
 				continue
 			}
-			for _, env := range kernelimpl.StreamFrameEvents(req, stream.CloneFrame(*frame)) {
-				for _, projected := range acpprojector.ProjectGatewayEventEnvelope(env) {
-					select {
-					case out <- projected:
-					case <-ctx.Done():
-						return
-					}
+			for _, projected := range kernelimpl.StreamFrameACPEvents(req, stream.CloneFrame(*frame)) {
+				select {
+				case out <- projected:
+				case <-ctx.Done():
+					return
 				}
 			}
 		}
@@ -616,11 +613,7 @@ func (d *Adapter) ReplayEvents(ctx context.Context) ([]eventstream.Envelope, err
 	if err != nil {
 		return nil, err
 	}
-	out := make([]eventstream.Envelope, 0, len(result.Events))
-	for _, env := range result.Events {
-		out = append(out, acpprojector.ProjectGatewayEventEnvelope(env)...)
-	}
-	return out, nil
+	return result.Events, nil
 }
 
 func (d *Adapter) Compact(ctx context.Context) error {

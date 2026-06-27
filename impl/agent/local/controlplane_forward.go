@@ -49,10 +49,7 @@ func (r *Runtime) forwardACPSourceEvent(ctx context.Context, req acpForwardReque
 	if normalized != nil {
 		if _, liveEvent, ok := accumulator.normalize(normalized); ok {
 			if liveEvent != nil {
-				updateType := ""
-				if liveEvent.Protocol != nil {
-					updateType = liveEvent.Protocol.UpdateType
-				}
+				updateType := acpEventUpdateType(liveEvent)
 				if liveACP := acpEnvelopeWithNarrativeText(sourceEvent.ACP, updateType, narrativeEventText(liveEvent, updateType)); liveACP != nil {
 					req.handle.publishSourceEvent(eventsource.Event{Canonical: liveEvent, ACP: liveACP})
 				} else {

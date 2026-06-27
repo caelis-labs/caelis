@@ -12,10 +12,6 @@ const (
 	Version  = gateway.EventMetaVersion
 	Runtime  = gateway.EventMetaRuntime
 	Terminal = gateway.EventMetaRuntimeTerminal
-
-	LegacyTerminalOutput = "terminal_output"
-	LegacyTerminalExit   = "terminal_exit"
-	LegacyTerminalInfo   = "terminal_info"
 )
 
 // WithRuntimeSection returns a copy of meta with one _meta.caelis.runtime
@@ -86,24 +82,8 @@ func RuntimeSection(meta map[string]any, section string) map[string]any {
 	return CloneMap(mapAt(runtime, section))
 }
 
-// TerminalSection returns canonical terminal metadata merged with one v0 legacy
-// terminal section. The legacy shim exists only for pre-v1 replay/read
-// compatibility; new writers must use _meta.caelis.runtime.terminal.
-func TerminalSection(meta map[string]any, legacyKey string) map[string]any {
-	terminal := RuntimeSection(meta, Terminal)
-	legacy := CloneMap(mapAt(meta, legacyKey))
-	if len(terminal) == 0 {
-		return legacy
-	}
-	if len(legacy) == 0 {
-		return terminal
-	}
-	return Merge(legacy, terminal)
-}
-
 func WithoutTerminalData(meta map[string]any) map[string]any {
 	out := WithoutRuntimeSectionKeys(meta, Terminal, "data")
-	delete(out, LegacyTerminalOutput)
 	if len(out) == 0 {
 		return nil
 	}

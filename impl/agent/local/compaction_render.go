@@ -254,11 +254,6 @@ func toolNameForCompaction(event *session.Event, update *session.ProtocolUpdate)
 				return name
 			}
 		}
-		if event.Protocol != nil && event.Protocol.ToolCall != nil {
-			if name := strings.TrimSpace(event.Protocol.ToolCall.Name); name != "" {
-				return name
-			}
-		}
 	}
 	if update != nil {
 		if title := strings.Fields(strings.TrimSpace(update.Title)); len(title) > 0 {
@@ -306,14 +301,8 @@ func planEntriesForCompaction(event *session.Event) []session.ProtocolPlanEntry 
 			return out
 		}
 	}
-	if event.Protocol == nil {
-		return nil
-	}
-	if event.Protocol.Plan != nil && len(event.Protocol.Plan.Entries) > 0 {
-		return event.Protocol.Plan.Entries
-	}
-	if event.Protocol.Update != nil && len(event.Protocol.Update.Entries) > 0 {
-		return event.Protocol.Update.Entries
+	if update := session.ProtocolUpdateOf(event); update != nil && len(update.Entries) > 0 {
+		return update.Entries
 	}
 	return nil
 }

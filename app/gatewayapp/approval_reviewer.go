@@ -890,11 +890,6 @@ func toolNameFromSessionEvent(event *session.Event) string {
 			return name
 		}
 	}
-	if event.Protocol != nil && event.Protocol.ToolCall != nil {
-		if name := strings.TrimSpace(event.Protocol.ToolCall.Name); name != "" {
-			return name
-		}
-	}
 	if update := session.ProtocolUpdateOf(event); update != nil {
 		if title := strings.TrimSpace(update.Title); title != "" {
 			return strings.Fields(title)[0]

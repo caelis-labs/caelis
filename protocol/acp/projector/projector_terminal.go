@@ -158,21 +158,22 @@ func withDisplayTerminal(call ToolCall, name string, args map[string]any) ToolCa
 }
 
 func protocolToolNameForUpdate(event *session.Event, update *session.ProtocolUpdate) string {
-	if event != nil && event.Protocol != nil && event.Protocol.ToolCall != nil {
-		if name := strings.TrimSpace(event.Protocol.ToolCall.Name); name != "" {
-			return name
-		}
-	}
 	if update != nil {
 		if name := terminalInfoToolName(update.Meta); name != "" {
 			return name
+		}
+		if kind := strings.TrimSpace(update.Kind); kind != "" {
+			return kind
+		}
+		if title := strings.Fields(strings.TrimSpace(update.Title)); len(title) > 0 {
+			return title[0]
 		}
 	}
 	return ""
 }
 
 func terminalInfoToolName(meta map[string]any) string {
-	info := metautil.TerminalSection(meta, metautil.LegacyTerminalInfo)
+	info := metautil.RuntimeSection(meta, metautil.Terminal)
 	return firstNonEmpty(
 		displaypolicy.MapString(info, "tool"),
 		displaypolicy.MapString(info, "tool_name"),

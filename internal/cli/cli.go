@@ -16,6 +16,9 @@ import (
 	"github.com/OnslaughtSnail/caelis/internal/acpagentenv"
 	"github.com/OnslaughtSnail/caelis/ports/assembly"
 	"github.com/OnslaughtSnail/caelis/ports/gateway"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
+	acpprojector "github.com/OnslaughtSnail/caelis/protocol/acp/projector"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 	"github.com/OnslaughtSnail/caelis/surfaces/acpserver"
 	"github.com/OnslaughtSnail/caelis/surfaces/headless"
 )
@@ -347,11 +350,12 @@ func streamHandle(ctx context.Context, handle gateway.TurnHandle, stdout io.Writ
 	}
 	defer handle.Close()
 
-	for env := range handle.Events() {
-		if env.Err != nil {
-			return env.Err
+	var assistant schema.FinalAssistantAccumulator
+	for env := range acpprojector.ACPEventsFromGatewayHandle(handle) {
+		if err := streamEnvelopeError(env); err != nil {
+			return err
 		}
-		if env.Event.Kind == gateway.EventKindApprovalRequested {
+		if env.Kind == eventstream.KindRequestPermission {
 			fmt.Fprintln(stderr, "[approval] denied by default")
 			if err := handle.Submit(ctx, gateway.SubmitRequest{
 				Kind:     gateway.SubmissionKindApproval,
@@ -359,10 +363,31 @@ func streamHandle(ctx context.Context, handle gateway.TurnHandle, stdout io.Writ
 			}); err != nil {
 				return err
 			}
+			continue
 		}
-		if text := gateway.AssistantText(env.Event); text != "" {
-			fmt.Fprintln(stdout, text)
+		if !streamMainSessionUpdate(env) {
+			continue
 		}
+		update := assistant.ObserveUpdate(env.Update)
+		if update.Assistant && update.Text != "" {
+			fmt.Fprintln(stdout, update.Text)
+		}
+	}
+	return nil
+}
+
+func streamMainSessionUpdate(env eventstream.Envelope) bool {
+	return env.Kind == eventstream.KindSessionUpdate &&
+		env.Update != nil &&
+		(env.Scope == "" || env.Scope == eventstream.ScopeMain)
+}
+
+func streamEnvelopeError(env eventstream.Envelope) error {
+	if env.Err != nil {
+		return env.Err
+	}
+	if env.Kind == eventstream.KindError && strings.TrimSpace(env.Error) != "" {
+		return errors.New(strings.TrimSpace(env.Error))
 	}
 	return nil
 }

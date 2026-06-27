@@ -314,7 +314,7 @@ func appendTerminalContentText(out *strings.Builder, text string) {
 }
 
 func terminalOutputMetaText(meta map[string]any) string {
-	output := metautil.TerminalSection(meta, metautil.LegacyTerminalOutput)
+	output := metautil.RuntimeSection(meta, metautil.Terminal)
 	return asString(output["data"])
 }
 
@@ -329,7 +329,7 @@ func terminalRuntimeOutputText(meta map[string]any) string {
 }
 
 func terminalInfoToolName(meta map[string]any) string {
-	info := metautil.TerminalSection(meta, metautil.LegacyTerminalInfo)
+	info := metautil.RuntimeSection(meta, metautil.Terminal)
 	return firstNonEmpty(asString(info["tool"]), asString(info["tool_name"]), asString(info["name"]))
 }
 

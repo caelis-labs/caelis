@@ -243,13 +243,15 @@ func TestProjectGatewayEventProtocolUpdateRendersTerminalOutputMeta(t *testing.T
 					TerminalID: "call-1",
 				}},
 				Meta: map[string]any{
-					"terminal_info": map[string]any{
-						"terminal_id": "call-1",
-						"tool":        "RUN_COMMAND",
-					},
-					"terminal_output": map[string]any{
-						"terminal_id": "call-1",
-						"data":        "line 1\n",
+					"caelis": map[string]any{
+						"version": 1,
+						"runtime": map[string]any{
+							"terminal": map[string]any{
+								"terminal_id": "call-1",
+								"tool":        "RUN_COMMAND",
+								"data":        "line 1\n",
+							},
+						},
 					},
 				},
 			},

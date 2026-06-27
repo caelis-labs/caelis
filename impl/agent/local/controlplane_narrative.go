@@ -19,7 +19,7 @@ func (a *acpNarrativeAccumulator) normalize(event *session.Event) (*session.Even
 	if a == nil || !isACPControllerNarrativeChunk(event) {
 		return event, nil, false
 	}
-	updateType := strings.TrimSpace(event.Protocol.UpdateType)
+	updateType := acpEventUpdateType(event)
 	raw := narrativeEventText(event, updateType)
 	a.lastNarrativeEvent = session.CloneEvent(event)
 	if updateType == string(session.ProtocolUpdateTypeAgentMessage) {
@@ -60,7 +60,7 @@ func (a *acpNarrativeAccumulator) observeBarrier(event *session.Event) {
 	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(event.Scope.Source)), "acp") {
 		return
 	}
-	switch strings.TrimSpace(event.Protocol.UpdateType) {
+	switch acpEventUpdateType(event) {
 	case string(session.ProtocolUpdateTypeToolCall), string(session.ProtocolUpdateTypeToolUpdate), string(session.ProtocolUpdateTypePlan):
 		a.final.Reset()
 	}
@@ -85,12 +85,16 @@ func isACPControllerNarrativeChunk(event *session.Event) bool {
 	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(event.Scope.Source)), "acp") {
 		return false
 	}
-	switch strings.TrimSpace(event.Protocol.UpdateType) {
+	switch acpEventUpdateType(event) {
 	case string(session.ProtocolUpdateTypeAgentMessage), string(session.ProtocolUpdateTypeAgentThought):
 		return true
 	default:
 		return false
 	}
+}
+
+func acpEventUpdateType(event *session.Event) string {
+	return session.ProtocolSessionUpdateType(event)
 }
 
 func shouldPersistExternalACPEvent(event *session.Event) bool {

@@ -183,8 +183,36 @@ func ProtocolUpdateOf(event *Event) *ProtocolUpdate {
 	if event == nil || event.Protocol == nil {
 		return nil
 	}
-	protocol := CloneEventProtocol(*event.Protocol)
-	return protocol.Update
+	return ProtocolUpdateOfProtocol(event.Protocol)
+}
+
+// ProtocolUpdateOfProtocol returns the normalized ACP session/update payload
+// for one protocol payload, accepting legacy in-memory aliases while keeping
+// readers centered on EventProtocol.Update.
+func ProtocolUpdateOfProtocol(protocol *EventProtocol) *ProtocolUpdate {
+	if protocol == nil {
+		return nil
+	}
+	normalized := CloneEventProtocol(*protocol)
+	return normalized.Update
+}
+
+// ProtocolSessionUpdateType returns the normalized ACP session/update type for
+// one event.
+func ProtocolSessionUpdateType(event *Event) string {
+	if update := ProtocolUpdateOf(event); update != nil {
+		return strings.TrimSpace(update.SessionUpdate)
+	}
+	return ""
+}
+
+// ProtocolSessionUpdateTypeOfProtocol returns the normalized ACP session/update
+// type for one protocol payload.
+func ProtocolSessionUpdateTypeOfProtocol(protocol *EventProtocol) string {
+	if update := ProtocolUpdateOfProtocol(protocol); update != nil {
+		return strings.TrimSpace(update.SessionUpdate)
+	}
+	return ""
 }
 
 func protocolContentIsText(content any, want string) bool {
@@ -393,6 +421,8 @@ func CloneEventProtocol(in EventProtocol) EventProtocol {
 				SessionUpdate: firstNonEmpty(out.UpdateType, string(ProtocolUpdateTypePlan)),
 				Entries:       cloneProtocolPlanEntries(in.Plan.Entries),
 			}
+		case out.UpdateType != "":
+			out.Update = &ProtocolUpdate{SessionUpdate: out.UpdateType}
 		}
 	}
 	if out.Update != nil {

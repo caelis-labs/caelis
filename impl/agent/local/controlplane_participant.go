@@ -347,7 +347,6 @@ func participantPromptUserEvent(
 		Message: &message,
 		Text:    message.TextContent(),
 		Protocol: &session.EventProtocol{
-			UpdateType: string(session.ProtocolUpdateTypeUserMessage),
 			Update: &session.ProtocolUpdate{
 				SessionUpdate: string(session.ProtocolUpdateTypeUserMessage),
 				Content:       session.ProtocolTextContent(message.TextContent()),

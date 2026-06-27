@@ -180,7 +180,7 @@ func explicitUpdates(event *session.Event) []Update {
 	case UpdateUserMessage:
 		return contentUpdateForEvent(event, UpdateUserMessage, textForUserEvent(event))
 	case UpdateAgentMessage:
-		return contentUpdateForEvent(event, UpdateAgentMessage, textForAssistantEvent(event))
+		return explicitAssistantMessageUpdates(event)
 	case UpdateAgentThought:
 		return contentUpdateForEvent(event, UpdateAgentThought, reasoningForAssistantEvent(event))
 	case UpdateToolCall:
@@ -213,16 +213,10 @@ func explicitUpdates(event *session.Event) []Update {
 }
 
 func protocolUpdateType(event *session.Event) string {
-	if event != nil && event.Protocol != nil && event.Protocol.Update != nil {
-		update := session.ProtocolUpdateOf(event)
-		if updateType := normalizeUpdateType(update.SessionUpdate); updateType != "" {
-			return updateType
-		}
+	if updateType := normalizeUpdateType(session.ProtocolSessionUpdateType(event)); updateType != "" {
+		return updateType
 	}
-	if event == nil || event.Protocol == nil {
-		return ""
-	}
-	return normalizeUpdateType(event.Protocol.UpdateType)
+	return ""
 }
 
 func inferredUpdates(event *session.Event) []Update {
@@ -278,6 +272,20 @@ func inferredAssistantUpdates(event *session.Event) []Update {
 	return out
 }
 
+func explicitAssistantMessageUpdates(event *session.Event) []Update {
+	if event == nil {
+		return nil
+	}
+	out := make([]Update, 0, 2)
+	if reasoning := reasoningForAssistantEvent(event); reasoning != "" {
+		out = append(out, contentChunkForEvent(event, UpdateAgentThought, reasoning))
+	}
+	if text := textForAssistantEvent(event); text != "" {
+		out = append(out, contentChunkForEvent(event, UpdateAgentMessage, text))
+	}
+	return out
+}
+
 func explicitToolCallUpdates(event *session.Event) []Update {
 	out := inferredAssistantMessageOnly(event)
 	call, ok, err := toolCallForEvent(event)
@@ -314,9 +322,6 @@ func inferredToolCallUpdates(event *session.Event) []Update {
 		return nil
 	}
 	if event.Tool != nil {
-		return explicitToolCallUpdates(event)
-	}
-	if event.Protocol != nil && event.Protocol.ToolCall != nil {
 		return explicitToolCallUpdates(event)
 	}
 	out := inferredAssistantMessageOnly(event)
@@ -377,28 +382,8 @@ func toolCallForEvent(event *session.Event) (ToolCall, bool, error) {
 	if event.Tool != nil {
 		return toolCallFromEventToolPayload(event.Tool), true, nil
 	}
-	if event.Protocol != nil && event.Protocol.Update != nil {
-		update := session.ProtocolUpdateOf(event)
-		if update != nil && normalizeUpdateType(update.SessionUpdate) == UpdateToolCall {
-			return toolCallFromProtocolUpdate(event, update), true, nil
-		}
-	}
-	if event.Protocol != nil && event.Protocol.ToolCall != nil {
-		call := event.Protocol.ToolCall
-		rawInput := cloneAnyMap(call.RawInput)
-		update := ToolCall{
-			SessionUpdate: UpdateToolCall,
-			ToolCallID:    strings.TrimSpace(call.ID),
-			Title:         firstNonEmpty(strings.TrimSpace(call.Title), displaypolicy.SummarizeToolCallTitle(call.Name, rawInput), strings.TrimSpace(call.Name)),
-			Kind:          firstNonEmpty(strings.TrimSpace(call.Kind), displaypolicy.ToolKindForName(call.Name)),
-			Status:        firstNonEmpty(strings.TrimSpace(call.Status), ToolStatusPending),
-			RawInput:      rawInput,
-			RawOutput:     cloneAnyMap(call.RawOutput),
-		}
-		displayTerminalID, _ := displaypolicy.DisplayTerminalID(call.ID, call.Name)
-		update.Content = projectToolContent(call.Content, displayTerminalID)
-		update.Meta = mergeMeta(terminalOutputMetaFromProtocolContent(call.Content, displayTerminalID), protocolUpdateMeta(event))
-		return withDisplayTerminal(update, call.Name, rawInput), true, nil
+	if update := session.ProtocolUpdateOf(event); update != nil && normalizeUpdateType(update.SessionUpdate) == UpdateToolCall {
+		return toolCallFromProtocolUpdate(event, update), true, nil
 	}
 	if event.Message == nil {
 		return ToolCall{}, false, nil
@@ -468,41 +453,17 @@ func toolCallUpdateForEvent(event *session.Event) (ToolCallUpdate, bool, error) 
 	if event.Tool != nil {
 		return toolCallUpdateFromEventToolPayload(event.Tool), true, nil
 	}
-	if event.Protocol != nil && event.Protocol.Update != nil {
-		update := session.ProtocolUpdateOf(event)
-		if update != nil && normalizeUpdateType(update.SessionUpdate) == UpdateToolCallInfo {
-			projected, err := toolCallUpdateFromProtocolUpdate(event, update)
-			if err != nil {
-				return ToolCallUpdate{}, false, err
-			}
-			return projected, true, nil
-		}
-	}
-	if event.Protocol != nil && event.Protocol.ToolCall != nil {
-		update, err := toolCallUpdateFromProtocol(*event.Protocol.ToolCall)
+	if update := session.ProtocolUpdateOf(event); update != nil && normalizeUpdateType(update.SessionUpdate) == UpdateToolCallInfo {
+		projected, err := toolCallUpdateFromProtocolUpdate(event, update)
 		if err != nil {
 			return ToolCallUpdate{}, false, err
 		}
-		update.Meta = mergeMeta(update.Meta, protocolUpdateMeta(event))
-		if len(update.Content) == 0 {
-			if terminal := terminalContentFromEvent(event); len(terminal) > 0 {
-				update.Content = append(update.Content, terminal...)
-			}
-		}
-		if len(update.Content) == 0 {
-			if updateFromProtocol := session.ProtocolUpdateOf(event); updateFromProtocol != nil {
-				content := session.ProtocolToolCallContentOf(updateFromProtocol)
-				update.Content = projectToolContentForTool(content, event.Protocol.ToolCall.ID, event.Protocol.ToolCall.Name)
-				displayTerminalID, _ := displaypolicy.DisplayTerminalID(event.Protocol.ToolCall.ID, event.Protocol.ToolCall.Name)
-				update.Meta = mergeMeta(update.Meta, terminalOutputMetaFromProtocolContent(content, displayTerminalID))
-			}
-		}
-		if len(update.Content) == 0 {
+		if len(projected.Content) == 0 {
 			if text := strings.TrimSpace(event.Text); text != "" {
-				update.Content = append(update.Content, ToolCallContent{Type: "content", Content: TextContent{Type: "text", Text: text}})
+				projected.Content = append(projected.Content, ToolCallContent{Type: "content", Content: TextContent{Type: "text", Text: text}})
 			}
 		}
-		return update, true, nil
+		return projected, true, nil
 	}
 	if event.Message == nil {
 		return ToolCallUpdate{}, false, nil
@@ -760,18 +721,6 @@ func terminalIDFromEvent(event *session.Event) string {
 			return terminalID
 		}
 	}
-	if event.Meta != nil {
-		if terminalID, _ := event.Meta["terminal_id"].(string); strings.TrimSpace(terminalID) != "" {
-			return strings.TrimSpace(terminalID)
-		}
-	}
-	if event.Protocol != nil && event.Protocol.ToolCall != nil {
-		for _, item := range event.Protocol.ToolCall.Content {
-			if terminalID := strings.TrimSpace(item.TerminalID); terminalID != "" {
-				return terminalID
-			}
-		}
-	}
 	if update := session.ProtocolUpdateOf(event); update != nil {
 		for _, item := range session.ProtocolToolCallContentOf(update) {
 			if terminalID := strings.TrimSpace(item.TerminalID); terminalID != "" {
@@ -804,9 +753,6 @@ func planUpdateForEvent(event *session.Event) (PlanUpdate, bool) {
 		return PlanUpdate{}, false
 	}
 	if event.Protocol != nil {
-		if event.Protocol.Plan != nil {
-			return planUpdateFromProtocol(*event.Protocol.Plan), true
-		}
 		if update := session.ProtocolUpdateOf(event); update != nil && (len(update.Entries) > 0 || normalizeUpdateType(update.SessionUpdate) == UpdatePlan) {
 			return planUpdateFromEntries(update.Entries), true
 		}
@@ -904,9 +850,6 @@ func reasoningForAssistantEvent(event *session.Event) string {
 		if normalizeUpdateType(update.SessionUpdate) == UpdateAgentThought {
 			return session.EventText(event)
 		}
-	}
-	if event.Protocol != nil && normalizeUpdateType(event.Protocol.UpdateType) == UpdateAgentThought {
-		return session.EventText(event)
 	}
 	return ""
 }

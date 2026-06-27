@@ -1719,7 +1719,7 @@ func terminalExit(notifications []acp.SessionNotification, terminalID string, st
 }
 
 func terminalOutputData(meta map[string]any, terminalID string) string {
-	output := metautil.TerminalSection(meta, metautil.LegacyTerminalOutput)
+	output := metautil.RuntimeSection(meta, metautil.Terminal)
 	if output == nil || output["terminal_id"] != terminalID {
 		return ""
 	}
@@ -1728,7 +1728,7 @@ func terminalOutputData(meta map[string]any, terminalID string) string {
 }
 
 func terminalExitMeta(meta map[string]any, terminalID string) map[string]any {
-	exit := metautil.TerminalSection(meta, metautil.LegacyTerminalExit)
+	exit := metautil.RuntimeSection(meta, metautil.Terminal)
 	if exit == nil || exit["terminal_id"] != terminalID {
 		return nil
 	}
@@ -1736,7 +1736,7 @@ func terminalExitMeta(meta map[string]any, terminalID string) map[string]any {
 }
 
 func terminalRuntimeMeta(meta map[string]any, terminalID string) map[string]any {
-	terminalMeta := metautil.TerminalSection(meta, "")
+	terminalMeta := metautil.RuntimeSection(meta, metautil.Terminal)
 	if terminalMeta == nil || terminalMeta["terminal_id"] != terminalID {
 		return nil
 	}

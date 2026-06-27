@@ -326,7 +326,11 @@ func (h *turnHandle) publishSessionEventWithACPProjection(event *session.Event, 
 			Lifecycle:   canonicalLifecyclePayload(event),
 		},
 	}
-	h.publishWithACPProjection(env, projectACP)
+	if !projectACP {
+		h.publishWithACPEnvelopes(env, nil, "")
+		return
+	}
+	h.publishWithACPEnvelopes(env, projectSessionACPEvent(h.sessionRef, event, h.handleID, h.runID, h.turnID), "")
 }
 
 func (h *turnHandle) publishApproval(req *agent.ApprovalRequest) <-chan ApprovalDecision {
@@ -407,6 +411,14 @@ func (h *turnHandle) publish(env EventEnvelope) {
 }
 
 func (h *turnHandle) publishWithACPProjection(env EventEnvelope, projectACP bool) {
+	var acpEnvs []eventstream.Envelope
+	if projectACP {
+		acpEnvs = acpprojector.ProjectGatewayEventEnvelope(env)
+	}
+	h.publishWithACPEnvelopes(env, acpEnvs, "gateway_projection")
+}
+
+func (h *turnHandle) publishWithACPEnvelopes(env EventEnvelope, acpEnvs []eventstream.Envelope, bridgeSource string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if env.Cursor == "" {
@@ -417,9 +429,12 @@ func (h *turnHandle) publishWithACPProjection(env EventEnvelope, projectACP bool
 		return
 	}
 	h.liveQueue = append(h.liveQueue, env)
-	if projectACP {
-		for _, acpEnv := range acpprojector.ProjectGatewayEventEnvelope(env) {
-			h.acpLiveQueue = append(h.acpLiveQueue, h.enrichACPEnvelopeLocked(acpEnv, "gateway_projection"))
+	if len(acpEnvs) > 0 {
+		for _, acpEnv := range acpEnvs {
+			if strings.TrimSpace(acpEnv.Cursor) == "" {
+				acpEnv.Cursor = env.Cursor
+			}
+			h.acpLiveQueue = append(h.acpLiveQueue, h.enrichACPEnvelopeLocked(acpEnv, bridgeSource))
 		}
 	}
 	h.eventsCond.Broadcast()

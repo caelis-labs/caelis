@@ -83,7 +83,6 @@ func chunkEventFromStreamEvent(event *model.StreamEvent) *session.Event {
 			Message: &message,
 			Text:    delta.TextDelta,
 			Protocol: &session.EventProtocol{
-				UpdateType: string(session.ProtocolUpdateTypeAgentThought),
 				Update: &session.ProtocolUpdate{
 					SessionUpdate: string(session.ProtocolUpdateTypeAgentThought),
 					Content:       session.ProtocolTextContent(delta.TextDelta),
@@ -100,7 +99,6 @@ func chunkEventFromStreamEvent(event *model.StreamEvent) *session.Event {
 			Message: &message,
 			Text:    delta.TextDelta,
 			Protocol: &session.EventProtocol{
-				UpdateType: string(session.ProtocolUpdateTypeAgentMessage),
 				Update: &session.ProtocolUpdate{
 					SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage),
 					Content:       session.ProtocolTextContent(delta.TextDelta),

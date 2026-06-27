@@ -52,7 +52,6 @@ func normalizeACPUpdateEvent(
 			Text:       text,
 			Message:    ptrMessage(messageForContentChunk(typed, text)),
 			Protocol: &session.EventProtocol{
-				UpdateType: typed.SessionUpdate,
 				Update: &session.ProtocolUpdate{
 					SessionUpdate: strings.TrimSpace(typed.SessionUpdate),
 					Content:       typed.Content,
@@ -89,9 +88,7 @@ func normalizeACPUpdateEvent(
 			Scope:      scope,
 			Text:       firstNonEmpty(strings.TrimSpace(typed.Title), strings.TrimSpace(typed.Kind), "tool call"),
 			Protocol: &session.EventProtocol{
-				UpdateType: typed.SessionUpdate,
-				ToolCall:   targetTool,
-				Update:     acpconvert.ToolProtocolUpdate(typed.SessionUpdate, targetTool, typed.Meta),
+				Update: acpconvert.ToolProtocolUpdate(typed.SessionUpdate, targetTool, typed.Meta),
 			},
 		}
 	case client.ToolCallUpdate:
@@ -114,9 +111,7 @@ func normalizeACPUpdateEvent(
 			Scope:      scope,
 			Text:       firstNonEmpty(strings.TrimSpace(derefString(typed.Title)), strings.TrimSpace(derefString(typed.Kind)), "tool update"),
 			Protocol: &session.EventProtocol{
-				UpdateType: typed.SessionUpdate,
-				ToolCall:   targetTool,
-				Update:     acpconvert.ToolProtocolUpdate(typed.SessionUpdate, targetTool, typed.Meta),
+				Update: acpconvert.ToolProtocolUpdate(typed.SessionUpdate, targetTool, typed.Meta),
 			},
 		}
 	case client.PlanUpdate:
@@ -129,8 +124,6 @@ func normalizeACPUpdateEvent(
 			Scope:      scope,
 			Text:       "plan updated",
 			Protocol: &session.EventProtocol{
-				UpdateType: typed.SessionUpdate,
-				Plan:       &session.ProtocolPlan{Entries: planEntries(typed.Entries)},
 				Update: &session.ProtocolUpdate{
 					SessionUpdate: strings.TrimSpace(typed.SessionUpdate),
 					Entries:       planEntries(typed.Entries),

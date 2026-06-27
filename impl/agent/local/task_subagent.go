@@ -827,9 +827,6 @@ func (tm *taskRuntime) appendSideSubagentUserEvent(ctx context.Context, task *su
 			},
 			Message: &message,
 			Text:    prompt,
-			Protocol: &session.EventProtocol{
-				UpdateType: string(session.ProtocolUpdateTypeUserMessage),
-			},
 			Meta: map[string]any{
 				"handle":  strings.TrimSpace(task.handle),
 				"mention": "@" + strings.TrimPrefix(strings.TrimSpace(task.handle), "@"),
@@ -881,9 +878,6 @@ func (tm *taskRuntime) appendSideSubagentFinalEvent(ctx context.Context, task *s
 		},
 		Message: &message,
 		Text:    text,
-		Protocol: &session.EventProtocol{
-			UpdateType: string(session.ProtocolUpdateTypeAgentMessage),
-		},
 		Meta: map[string]any{
 			"handle":  strings.TrimSpace(task.handle),
 			"mention": "@" + strings.TrimPrefix(strings.TrimSpace(task.handle), "@"),

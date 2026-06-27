@@ -14,6 +14,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
 func TestAdapterStartReviewSubagentUsesHiddenReviewerProfile(t *testing.T) {
@@ -409,30 +410,25 @@ func drainReviewProfileTurnEvents(t *testing.T, turn Turn) []eventstream.Envelop
 }
 
 type reviewProfileHandle struct {
-	ref    session.SessionRef
-	events chan gateway.EventEnvelope
+	ref       session.SessionRef
+	acpEvents chan eventstream.Envelope
 }
 
 func reviewProfileTurnHandle(ref session.SessionRef) *reviewProfileHandle {
-	events := make(chan gateway.EventEnvelope, 1)
-	events <- gateway.EventEnvelope{Event: gateway.Event{
-		Kind:       gateway.EventKindAssistantMessage,
-		SessionRef: ref,
-		Origin: &gateway.EventOrigin{
-			Scope:   gateway.EventScopeParticipant,
-			ScopeID: "side-reviewer",
-			Actor:   "@reviewer",
+	events := make(chan eventstream.Envelope, 1)
+	events <- eventstream.Envelope{
+		Kind:    eventstream.KindSessionUpdate,
+		Scope:   eventstream.ScopeParticipant,
+		ScopeID: "side-reviewer",
+		Actor:   "@reviewer",
+		Final:   true,
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateAgentMessage,
+			Content:       schema.TextContent{Type: "text", Text: "findings"},
 		},
-		Narrative: &gateway.NarrativePayload{
-			Role:  gateway.NarrativeRoleAssistant,
-			Actor: "@reviewer",
-			Text:  "findings",
-			Final: true,
-			Scope: gateway.EventScopeParticipant,
-		},
-	}}
+	}
 	close(events)
-	return &reviewProfileHandle{ref: ref, events: events}
+	return &reviewProfileHandle{ref: ref, acpEvents: events}
 }
 
 func (h *reviewProfileHandle) HandleID() string { return "review-handle" }
@@ -443,10 +439,15 @@ func (h *reviewProfileHandle) SessionRef() session.SessionRef {
 }
 func (h *reviewProfileHandle) CreatedAt() time.Time { return time.Time{} }
 func (h *reviewProfileHandle) Events() <-chan gateway.EventEnvelope {
-	return h.events
+	ch := make(chan gateway.EventEnvelope)
+	close(ch)
+	return ch
 }
 func (h *reviewProfileHandle) EventsAfter(string) ([]gateway.EventEnvelope, string, error) {
 	return nil, "", nil
+}
+func (h *reviewProfileHandle) ACPEvents() <-chan eventstream.Envelope {
+	return h.acpEvents
 }
 func (h *reviewProfileHandle) Submit(context.Context, gateway.SubmitRequest) error {
 	return nil

@@ -118,19 +118,20 @@ func TestNormalizeACPUpdateEventKeepsCodexWebSearchToolIdentity(t *testing.T) {
 		Status:        testStringPtr("in_progress"),
 		RawInput:      map[string]any{"query": "weather: Shanghai, China"},
 	})
-	if event == nil || event.Protocol == nil || event.Protocol.ToolCall == nil {
+	update := session.ProtocolUpdateOf(event)
+	if event == nil || event.Protocol == nil || update == nil {
 		t.Fatalf("event = %#v, want structured tool update", event)
 	}
-	if got := event.Protocol.ToolCall.Name; got != "fetch" {
+	if got := update.Kind; got != "fetch" {
 		t.Fatalf("tool name = %q, want ACP kind", got)
 	}
-	if got := event.Protocol.ToolCall.Title; got != "Searching for: weather: Shanghai, China" {
+	if got := update.Title; got != "Searching for: weather: Shanghai, China" {
 		t.Fatalf("tool title = %q, want ACP title", got)
 	}
-	if got := event.Protocol.ToolCall.Kind; got != "fetch" {
+	if got := update.Kind; got != "fetch" {
 		t.Fatalf("tool kind = %q, want fetch", got)
 	}
-	if got := event.Protocol.ToolCall.RawInput["query"]; got != "weather: Shanghai, China" {
+	if got := update.RawInput["query"]; got != "weather: Shanghai, China" {
 		t.Fatalf("raw input query = %#v", got)
 	}
 }
@@ -227,7 +228,7 @@ func TestNormalizeACPUpdateEventMarksOnlySharedDialogueDurable(t *testing.T) {
 		Status:        testStringPtr("completed"),
 		RawOutput:     map[string]any{"stdout": "ok"},
 	})
-	if targetTool == nil || targetTool.Visibility != session.VisibilityUIOnly || targetTool.Protocol == nil || targetTool.Protocol.ToolCall == nil {
+	if targetTool == nil || targetTool.Visibility != session.VisibilityUIOnly || targetTool.Protocol == nil || session.ProtocolUpdateOf(targetTool) == nil {
 		t.Fatalf("tool update = %#v, want ui-only structured tool update", targetTool)
 	}
 }

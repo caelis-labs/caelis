@@ -333,6 +333,44 @@ func TestEventProjectorProjectsCanonicalMessages(t *testing.T) {
 	}
 }
 
+func TestEventProjectorSplitsProtocolAssistantSnapshotReasoning(t *testing.T) {
+	updates, err := (EventProjector{}).ProjectEvent(&session.Event{
+		SessionID: "session-1",
+		Type:      session.EventTypeAssistant,
+		Text:      "partial answer",
+		Protocol: &session.EventProtocol{
+			Update: &session.ProtocolUpdate{
+				SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage),
+				Content: map[string]any{
+					"type":          "assistant_snapshot",
+					"text":          "partial answer",
+					"reasoningText": "partial thought",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ProjectEvent() error = %v", err)
+	}
+	if len(updates) != 2 {
+		t.Fatalf("ProjectEvent() produced %d updates, want thought + message: %#v", len(updates), updates)
+	}
+	thought, ok := updates[0].(ContentChunk)
+	if !ok || thought.SessionUpdate != UpdateAgentThought {
+		t.Fatalf("updates[0] = %#v, want thought chunk", updates[0])
+	}
+	if content, ok := thought.Content.(TextContent); !ok || content.Text != "partial thought" {
+		t.Fatalf("thought content = %#v, want partial thought", thought.Content)
+	}
+	message, ok := updates[1].(ContentChunk)
+	if !ok || message.SessionUpdate != UpdateAgentMessage {
+		t.Fatalf("updates[1] = %#v, want message chunk", updates[1])
+	}
+	if content, ok := message.Content.(TextContent); !ok || content.Text != "partial answer" {
+		t.Fatalf("message content = %#v, want partial answer", message.Content)
+	}
+}
+
 func TestEventProjectorProjectsDurableContentChunkMessageIDAndMeta(t *testing.T) {
 	t.Parallel()
 
@@ -808,17 +846,20 @@ func TestEventProjectorProjectsSpawnAsExecuteWithTerminalContent(t *testing.T) {
 		SessionID: "session-1",
 		Type:      session.EventTypeToolCall,
 		Protocol: &session.EventProtocol{
-			UpdateType: UpdateToolCallInfo,
-			ToolCall: &session.ProtocolToolCall{
-				ID:     "call-1",
-				Name:   "SPAWN",
-				Status: "running",
+			Update: &session.ProtocolUpdate{
+				SessionUpdate: UpdateToolCallInfo,
+				ToolCallID:    "call-1",
+				Kind:          ToolKindExecute,
+				Status:        "running",
 				RawInput: map[string]any{
 					"agent":  "codex",
 					"prompt": "child work",
 				},
 				RawOutput: map[string]any{"task_id": "task-1"},
 				Content:   []session.ProtocolToolCallContent{{Type: "terminal", TerminalID: "terminal-1"}},
+				Meta: metautil.WithRuntimeSection(nil, metautil.Terminal, map[string]any{
+					"tool": "SPAWN",
+				}),
 			},
 		},
 	})
@@ -851,15 +892,18 @@ func TestEventProjectorProjectsRunCommandDisplayTerminalMetadata(t *testing.T) {
 		SessionID: "session-1",
 		Type:      session.EventTypeToolCall,
 		Protocol: &session.EventProtocol{
-			UpdateType: UpdateToolCall,
-			ToolCall: &session.ProtocolToolCall{
-				ID:     "call-1",
-				Name:   "RUN_COMMAND",
-				Status: "pending",
+			Update: &session.ProtocolUpdate{
+				SessionUpdate: UpdateToolCall,
+				ToolCallID:    "call-1",
+				Kind:          ToolKindExecute,
+				Status:        "pending",
 				RawInput: map[string]any{
 					"command": "echo hi",
 					"workdir": "/tmp/work",
 				},
+				Meta: metautil.WithRuntimeSection(nil, metautil.Terminal, map[string]any{
+					"tool": "RUN_COMMAND",
+				}),
 			},
 		},
 	})

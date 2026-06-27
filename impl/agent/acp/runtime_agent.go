@@ -782,11 +782,16 @@ func (a *RuntimeAgent) terminalBridgePlan(event *session.Event) (terminalBridgeP
 		name = strings.TrimSpace(toolPayload.Name)
 		displayTerminalID = strings.TrimSpace(toolPayload.ID)
 	}
-	if name == "" && event.Protocol != nil && event.Protocol.ToolCall != nil {
-		name = strings.TrimSpace(event.Protocol.ToolCall.Name)
-	}
-	if displayTerminalID == "" && event.Protocol != nil && event.Protocol.ToolCall != nil {
-		displayTerminalID = strings.TrimSpace(event.Protocol.ToolCall.ID)
+	if update := session.ProtocolUpdateOf(event); update != nil {
+		if name == "" {
+			name = strings.TrimSpace(update.Kind)
+			if name == "" {
+				name = strings.TrimSpace(update.Title)
+			}
+		}
+		if displayTerminalID == "" {
+			displayTerminalID = strings.TrimSpace(update.ToolCallID)
+		}
 	}
 	if !terminalBridgeEligibleTool(name) {
 		return terminalBridgePlan{}, false
@@ -1024,11 +1029,6 @@ func terminalBridgeEventStatus(event *session.Event) string {
 			return status
 		}
 	}
-	if event.Protocol != nil && event.Protocol.ToolCall != nil {
-		if status := strings.TrimSpace(event.Protocol.ToolCall.Status); status != "" {
-			return status
-		}
-	}
 	if update := session.ProtocolUpdateOf(event); update != nil {
 		return strings.TrimSpace(update.Status)
 	}
@@ -1047,12 +1047,6 @@ func terminalBridgeEventOutput(event *session.Event) string {
 			}
 			appendTerminalBridgeTextPart(&out, item.Text)
 		}
-	}
-	if out.Len() > 0 {
-		return out.String()
-	}
-	if event.Protocol != nil && event.Protocol.ToolCall != nil {
-		appendTerminalBridgeProtocolOutput(&out, event.Protocol.ToolCall.Content)
 	}
 	if out.Len() > 0 {
 		return out.String()
@@ -1389,8 +1383,8 @@ func (r approvalRequester) requestClientPermission(
 	event := &session.Event{
 		SessionID: strings.TrimSpace(req.SessionRef.SessionID),
 		Protocol: &session.EventProtocol{
-			UpdateType: string(session.ProtocolUpdateTypePermission),
-			Approval:   cloneProtocolApproval(req.Approval),
+			Method:     session.ProtocolMethodRequestPermission,
+			Permission: cloneProtocolApproval(req.Approval),
 		},
 	}
 	request, ok, err := projector.ProjectPermissionRequest(event)

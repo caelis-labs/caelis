@@ -232,12 +232,12 @@ type BindingState struct {
 }
 
 type ReplayEventsResult struct {
-	SessionRef    session.SessionRef `json:"session_ref"`
-	Events        []EventEnvelope    `json:"events,omitempty"`
-	NextCursor    string             `json:"next_cursor,omitempty"`
-	Durable       bool               `json:"durable,omitempty"`
-	HasLiveHandle bool               `json:"has_live_handle,omitempty"`
-	ControlPlane  ControlPlaneState  `json:"control_plane"`
+	SessionRef    session.SessionRef     `json:"session_ref"`
+	Events        []eventstream.Envelope `json:"events,omitempty"`
+	NextCursor    string                 `json:"next_cursor,omitempty"`
+	Durable       bool                   `json:"durable,omitempty"`
+	HasLiveHandle bool                   `json:"has_live_handle,omitempty"`
+	ControlPlane  ControlPlaneState      `json:"control_plane"`
 }
 
 type ResolvedTurn struct {
@@ -489,11 +489,8 @@ type TurnHandle interface {
 	CreatedAt() time.Time
 	Events() <-chan EventEnvelope
 	EventsAfter(string) ([]EventEnvelope, string, error)
+	ACPEvents() <-chan eventstream.Envelope
 	Submit(context.Context, SubmitRequest) error
 	Cancel() agent.CancelResult
 	Close() error
-}
-
-type ACPEventStreamHandle interface {
-	ACPEvents() <-chan eventstream.Envelope
 }

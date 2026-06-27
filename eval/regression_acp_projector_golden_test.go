@@ -20,17 +20,19 @@ func TestRegressionACPProjectorGoldenTerminalOutput(t *testing.T) {
 		SessionID: "sess-1",
 		Type:      session.EventTypeToolResult,
 		Protocol: &session.EventProtocol{
-			UpdateType: projector.UpdateToolCallInfo,
-			ToolCall: &session.ProtocolToolCall{
-				ID:     "call-ls",
-				Name:   "RUN_COMMAND",
-				Kind:   projector.ToolKindExecute,
-				Status: "completed",
+			Update: &session.ProtocolUpdate{
+				SessionUpdate: projector.UpdateToolCallInfo,
+				ToolCallID:    "call-ls",
+				Kind:          projector.ToolKindExecute,
+				Status:        "completed",
 				Content: []session.ProtocolToolCallContent{{
 					Type:       "terminal",
 					TerminalID: "runtime-term-1",
 					Content:    session.ProtocolTextContent("total 0\n"),
 				}},
+				Meta: metautil.WithRuntimeSection(nil, metautil.Terminal, map[string]any{
+					"tool": "RUN_COMMAND",
+				}),
 			},
 		},
 	})

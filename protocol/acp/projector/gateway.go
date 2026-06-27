@@ -13,38 +13,12 @@ import (
 )
 
 // ACPEventsFromGatewayHandle returns the ACP-native event stream for one
-// gateway turn handle. Handles that already expose ACPEvents are passed through;
-// legacy gateway events are bridged with ProjectGatewayEventEnvelope.
+// gateway turn handle.
 func ACPEventsFromGatewayHandle(handle gateway.TurnHandle) <-chan eventstream.Envelope {
 	if handle == nil {
 		return eventstream.EnsureTerminalLifecycle(nil, "", "", "")
 	}
-	var events <-chan eventstream.Envelope
-	if acpHandle, ok := handle.(gateway.ACPEventStreamHandle); ok && acpHandle != nil {
-		events = acpHandle.ACPEvents()
-	} else {
-		events = ProjectGatewayEventStream(handle.Events())
-	}
-	return eventstream.EnsureTerminalLifecycle(events, handle.HandleID(), handle.RunID(), handle.TurnID())
-}
-
-// ProjectGatewayEventStream bridges legacy gateway events into eventstream
-// envelopes. New surfaces should consume ACPEventsFromGatewayHandle instead of
-// ranging over gateway.EventEnvelope directly.
-func ProjectGatewayEventStream(events <-chan gateway.EventEnvelope) <-chan eventstream.Envelope {
-	out := make(chan eventstream.Envelope, 32)
-	go func() {
-		defer close(out)
-		if events == nil {
-			return
-		}
-		for env := range events {
-			for _, projected := range ProjectGatewayEventEnvelope(env) {
-				out <- projected
-			}
-		}
-	}()
-	return out
+	return eventstream.EnsureTerminalLifecycle(handle.ACPEvents(), handle.HandleID(), handle.RunID(), handle.TurnID())
 }
 
 // ProjectGatewayEventEnvelope projects the gateway runtime event envelope into the
@@ -93,6 +67,13 @@ func projectGatewayStandardACPEvents(base eventstream.Envelope, ev gateway.Event
 		return nil
 	}
 	return projectSessionEventToACPEnvelopes(base, ev, sessionEvent)
+}
+
+// ProjectSessionEventEnvelope projects one canonical session event into
+// ACP-native client envelopes using the supplied envelope metadata as the
+// transport context.
+func ProjectSessionEventEnvelope(base eventstream.Envelope, event *session.Event) []eventstream.Envelope {
+	return projectSessionEventToACPEnvelopes(base, gateway.Event{}, event)
 }
 
 func projectSessionEventToACPEnvelopes(base eventstream.Envelope, ev gateway.Event, sessionEvent *session.Event) []eventstream.Envelope {
@@ -241,18 +222,8 @@ func gatewayToolCallProtocol(ev gateway.Event) *session.EventProtocol {
 		Meta:          acpMetaWithToolName(ev.Meta, toolName),
 	}
 	return &session.EventProtocol{
-		Method:     session.ProtocolMethodSessionUpdate,
-		UpdateType: string(session.ProtocolUpdateTypeToolCall),
-		Update:     update,
-		ToolCall: &session.ProtocolToolCall{
-			ID:       strings.TrimSpace(payload.CallID),
-			Name:     toolName,
-			Kind:     firstNonEmpty(payload.ToolKind, payload.ToolName),
-			Title:    firstNonEmpty(payload.ToolTitle, payload.ToolName, payload.ToolKind),
-			Status:   string(payload.Status),
-			RawInput: rawInput,
-			Content:  session.CloneProtocolToolCallContent(payload.Content),
-		},
+		Method: session.ProtocolMethodSessionUpdate,
+		Update: update,
 	}
 }
 
@@ -274,19 +245,8 @@ func gatewayToolResultProtocol(ev gateway.Event) *session.EventProtocol {
 		Meta:          acpMetaWithToolName(ev.Meta, toolName),
 	}
 	return &session.EventProtocol{
-		Method:     session.ProtocolMethodSessionUpdate,
-		UpdateType: string(session.ProtocolUpdateTypeToolUpdate),
-		Update:     update,
-		ToolCall: &session.ProtocolToolCall{
-			ID:        strings.TrimSpace(payload.CallID),
-			Name:      toolName,
-			Kind:      firstNonEmpty(payload.ToolKind, payload.ToolName),
-			Title:     firstNonEmpty(payload.ToolTitle, payload.ToolName, payload.ToolKind),
-			Status:    string(payload.Status),
-			RawInput:  cloneAnyMap(payload.RawInput),
-			RawOutput: cloneAnyMap(payload.RawOutput),
-			Content:   session.CloneProtocolToolCallContent(payload.Content),
-		},
+		Method: session.ProtocolMethodSessionUpdate,
+		Update: update,
 	}
 }
 
@@ -303,8 +263,7 @@ func gatewayPlanProtocol(plan *gateway.PlanPayload) *session.EventProtocol {
 		})
 	}
 	return &session.EventProtocol{
-		Method:     session.ProtocolMethodSessionUpdate,
-		UpdateType: string(session.ProtocolUpdateTypePlan),
+		Method: session.ProtocolMethodSessionUpdate,
 		Update: &session.ProtocolUpdate{
 			SessionUpdate: string(session.ProtocolUpdateTypePlan),
 			Entries:       entries,
@@ -332,7 +291,6 @@ func gatewayApprovalProtocol(payload *gateway.ApprovalPayload) *session.EventPro
 	return &session.EventProtocol{
 		Method:     session.ProtocolMethodRequestPermission,
 		Permission: &approval,
-		Approval:   &approval,
 	}
 }
 

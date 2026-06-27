@@ -291,9 +291,6 @@ func replayTraceToolCallID(event *Event) string {
 			return id
 		}
 	}
-	if event.Protocol != nil && event.Protocol.ToolCall != nil {
-		return strings.TrimSpace(event.Protocol.ToolCall.ID)
-	}
 	return ""
 }
 

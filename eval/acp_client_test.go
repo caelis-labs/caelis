@@ -119,20 +119,20 @@ func TestPublicClientPermissionAndTerminalE2E(t *testing.T) {
 		OnUpdate: func(update client.UpdateEnvelope) {
 			switch call := update.Update.(type) {
 			case client.ToolCall:
-				if info := metautil.TerminalSection(call.Meta, metautil.LegacyTerminalInfo); info["terminal_id"] == "command-approval-1" {
+				if info := metautil.RuntimeSection(call.Meta, metautil.Terminal); info["terminal_id"] == "command-approval-1" {
 					mu.Lock()
 					displayTerminalInfo = true
 					mu.Unlock()
 				}
 			case client.ToolCallUpdate:
-				if output := metautil.TerminalSection(call.Meta, metautil.LegacyTerminalOutput); output["terminal_id"] == "command-approval-1" {
+				if output := metautil.RuntimeSection(call.Meta, metautil.Terminal); output["terminal_id"] == "command-approval-1" {
 					if text, _ := output["data"].(string); strings.Contains(text, "child approval ok") {
 						mu.Lock()
 						displayTerminalOutput = true
 						mu.Unlock()
 					}
 				}
-				if exit := metautil.TerminalSection(call.Meta, metautil.LegacyTerminalExit); exit["terminal_id"] == "command-approval-1" {
+				if exit := metautil.RuntimeSection(call.Meta, metautil.Terminal); exit["terminal_id"] == "command-approval-1" {
 					mu.Lock()
 					displayTerminalExit = true
 					mu.Unlock()

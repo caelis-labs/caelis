@@ -2152,13 +2152,13 @@ func TestChatAgentStreamsAssistantChunksBeforeFinalMessage(t *testing.T) {
 	if got, want := len(events), 4; got != want {
 		t.Fatalf("len(events) = %d, want %d", got, want)
 	}
-	if events[0].Visibility != session.VisibilityUIOnly || events[0].Protocol == nil || events[0].Protocol.UpdateType != string(session.ProtocolUpdateTypeAgentThought) || events[0].Text != "thinking..." {
+	if events[0].Visibility != session.VisibilityUIOnly || eventUpdateType(events[0]) != string(session.ProtocolUpdateTypeAgentThought) || events[0].Text != "thinking..." {
 		t.Fatalf("events[0] = %+v, want ui-only reasoning chunk", events[0])
 	}
-	if events[1].Visibility != session.VisibilityUIOnly || events[1].Protocol == nil || events[1].Protocol.UpdateType != string(session.ProtocolUpdateTypeAgentMessage) || events[1].Text != "hel" {
+	if events[1].Visibility != session.VisibilityUIOnly || eventUpdateType(events[1]) != string(session.ProtocolUpdateTypeAgentMessage) || events[1].Text != "hel" {
 		t.Fatalf("events[1] = %+v, want ui-only assistant chunk hel", events[1])
 	}
-	if events[2].Visibility != session.VisibilityUIOnly || events[2].Protocol == nil || events[2].Protocol.UpdateType != string(session.ProtocolUpdateTypeAgentMessage) || events[2].Text != "lo" {
+	if events[2].Visibility != session.VisibilityUIOnly || eventUpdateType(events[2]) != string(session.ProtocolUpdateTypeAgentMessage) || events[2].Text != "lo" {
 		t.Fatalf("events[2] = %+v, want ui-only assistant chunk lo", events[2])
 	}
 	if events[3].Type != session.EventTypeAssistant || events[3].Text != "hello" {
@@ -2548,6 +2548,10 @@ func canonicalMessagesJSON(t *testing.T, messages []model.Message) string {
 		t.Fatalf("json.Marshal(messages) error = %v", err)
 	}
 	return string(raw)
+}
+
+func eventUpdateType(event *session.Event) string {
+	return session.ProtocolSessionUpdateType(event)
 }
 
 type streamingModel struct {

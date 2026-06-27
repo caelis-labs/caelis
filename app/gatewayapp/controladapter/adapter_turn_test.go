@@ -12,9 +12,9 @@ import (
 )
 
 func TestGatewayTurnEventsSynthesizesCompletedForEmptyStream(t *testing.T) {
-	events := make(chan gateway.EventEnvelope)
+	events := make(chan eventstream.Envelope)
 	close(events)
-	turn := &gatewayTurn{handle: &testGatewayTurnHandle{events: events}}
+	turn := &gatewayTurn{handle: &testGatewayTurnHandle{acpEvents: events}}
 
 	out := collectAdapterTurnEvents(turn.Events())
 	if len(out) != 1 {
@@ -24,10 +24,10 @@ func TestGatewayTurnEventsSynthesizesCompletedForEmptyStream(t *testing.T) {
 }
 
 func TestGatewayTurnEventsSynthesizesFailedAfterError(t *testing.T) {
-	events := make(chan gateway.EventEnvelope, 1)
-	events <- gateway.EventEnvelope{Err: gateway.EventError(errors.New("provider failed"))}
+	events := make(chan eventstream.Envelope, 1)
+	events <- eventstream.Error(errors.New("provider failed"))
 	close(events)
-	turn := &gatewayTurn{handle: &testGatewayTurnHandle{events: events}}
+	turn := &gatewayTurn{handle: &testGatewayTurnHandle{acpEvents: events}}
 
 	out := collectAdapterTurnEvents(turn.Events())
 	if len(out) != 2 {
@@ -40,10 +40,10 @@ func TestGatewayTurnEventsSynthesizesFailedAfterError(t *testing.T) {
 }
 
 func TestGatewayTurnEventsSynthesizesCancelledAfterCancelError(t *testing.T) {
-	events := make(chan gateway.EventEnvelope, 1)
-	events <- gateway.EventEnvelope{Err: gateway.EventError(errors.New("providers: context canceled"))}
+	events := make(chan eventstream.Envelope, 1)
+	events <- eventstream.Error(errors.New("providers: context canceled"))
 	close(events)
-	turn := &gatewayTurn{handle: &testGatewayTurnHandle{events: events}}
+	turn := &gatewayTurn{handle: &testGatewayTurnHandle{acpEvents: events}}
 
 	out := collectAdapterTurnEvents(turn.Events())
 	if len(out) != 2 {
@@ -57,7 +57,7 @@ func TestGatewayTurnEventsForwardsExplicitTerminalOnce(t *testing.T) {
 	acpEvents <- eventstream.TurnCompleted("handle-1", "run-1", "turn-1", time.Time{})
 	acpEvents <- eventstream.TurnFailed("handle-1", "run-1", "turn-1", "late", time.Time{})
 	close(acpEvents)
-	turn := &gatewayTurn{handle: &testACPEventStreamHandle{acpEvents: acpEvents}}
+	turn := &gatewayTurn{handle: &testGatewayTurnHandle{acpEvents: acpEvents}}
 
 	out := collectAdapterTurnEvents(turn.Events())
 	if len(out) != 1 {
@@ -67,9 +67,9 @@ func TestGatewayTurnEventsForwardsExplicitTerminalOnce(t *testing.T) {
 }
 
 func TestGatewayTurnEventsReturnsSameStream(t *testing.T) {
-	events := make(chan gateway.EventEnvelope)
+	events := make(chan eventstream.Envelope)
 	close(events)
-	turn := &gatewayTurn{handle: &testGatewayTurnHandle{events: events}}
+	turn := &gatewayTurn{handle: &testGatewayTurnHandle{acpEvents: events}}
 
 	first := turn.Events()
 	second := turn.Events()
@@ -79,7 +79,7 @@ func TestGatewayTurnEventsReturnsSameStream(t *testing.T) {
 }
 
 type testGatewayTurnHandle struct {
-	events <-chan gateway.EventEnvelope
+	acpEvents <-chan eventstream.Envelope
 }
 
 func (h *testGatewayTurnHandle) HandleID() string { return "handle-1" }
@@ -90,7 +90,9 @@ func (h *testGatewayTurnHandle) SessionRef() session.SessionRef {
 }
 func (h *testGatewayTurnHandle) CreatedAt() time.Time { return time.Time{} }
 func (h *testGatewayTurnHandle) Events() <-chan gateway.EventEnvelope {
-	return h.events
+	ch := make(chan gateway.EventEnvelope)
+	close(ch)
+	return ch
 }
 func (h *testGatewayTurnHandle) EventsAfter(string) ([]gateway.EventEnvelope, string, error) {
 	return nil, "", nil
@@ -100,13 +102,7 @@ func (h *testGatewayTurnHandle) Submit(context.Context, gateway.SubmitRequest) e
 }
 func (h *testGatewayTurnHandle) Cancel() gateway.CancelResult { return gateway.CancelResult{} }
 func (h *testGatewayTurnHandle) Close() error                 { return nil }
-
-type testACPEventStreamHandle struct {
-	testGatewayTurnHandle
-	acpEvents <-chan eventstream.Envelope
-}
-
-func (h *testACPEventStreamHandle) ACPEvents() <-chan eventstream.Envelope {
+func (h *testGatewayTurnHandle) ACPEvents() <-chan eventstream.Envelope {
 	return h.acpEvents
 }
 
