@@ -2,7 +2,6 @@ package acp
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -11,7 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/impl/agent/acp/internal/acpconvert"
+	"github.com/OnslaughtSnail/caelis/impl/agent/acp/internal/acpingress"
 	"github.com/OnslaughtSnail/caelis/impl/agent/acp/internal/acputil"
 	"github.com/OnslaughtSnail/caelis/ports/delegation"
 	"github.com/OnslaughtSnail/caelis/ports/session"
@@ -523,114 +522,29 @@ func (run *childRun) acpUpdateEvent(env client.UpdateEnvelope, at time.Time, tex
 		ID:   strings.TrimSpace(firstNonEmpty(run.anchor.AgentID, run.taskID, run.anchor.TaskID)),
 		Name: strings.TrimSpace(firstNonEmpty(run.anchor.Agent, run.anchor.AgentID)),
 	}
-	base := func(updateType string, eventType session.EventType, text string) *session.Event {
-		scopeCopy := session.CloneEventScope(*scope)
-		scopeCopy.ACP.EventType = strings.TrimSpace(updateType)
-		return &session.Event{
-			Type:       eventType,
-			Visibility: session.VisibilityUIOnly,
-			Time:       at,
-			Actor:      actor,
-			Scope:      &scopeCopy,
-			Text:       text,
-			Protocol: &session.EventProtocol{
-				Update: &session.ProtocolUpdate{
-					SessionUpdate: strings.TrimSpace(updateType),
-				},
-			},
-			Meta: map[string]any{
-				"caelis": map[string]any{
-					"version": 1,
-					"runtime": map[string]any{
-						"subagent": map[string]any{
-							"task_id":    strings.TrimSpace(firstNonEmpty(run.taskID, run.anchor.TaskID)),
-							"agent":      strings.TrimSpace(run.anchor.Agent),
-							"agent_id":   strings.TrimSpace(run.anchor.AgentID),
-							"session_id": strings.TrimSpace(firstNonEmpty(env.SessionID, run.anchor.SessionID)),
-						},
+	opts := acpingress.Options{
+		At:         at,
+		Scope:      *scope,
+		Actor:      actor,
+		Visibility: acpingress.UIOnlyVisibility,
+		Meta: map[string]any{
+			"caelis": map[string]any{
+				"version": 1,
+				"runtime": map[string]any{
+					"subagent": map[string]any{
+						"task_id":    strings.TrimSpace(firstNonEmpty(run.taskID, run.anchor.TaskID)),
+						"agent":      strings.TrimSpace(run.anchor.Agent),
+						"agent_id":   strings.TrimSpace(run.anchor.AgentID),
+						"session_id": strings.TrimSpace(firstNonEmpty(env.SessionID, run.anchor.SessionID)),
 					},
 				},
 			},
-		}
+		},
 	}
-	switch update := env.Update.(type) {
-	case client.ContentChunk:
-		text := chunkText(update)
-		if len(textOverride) > 0 {
-			text = textOverride[0]
-		}
-		if text == "" {
-			return nil
-		}
-		switch strings.TrimSpace(update.SessionUpdate) {
-		case client.UpdateAgentMessage, client.UpdateAgentThought:
-			event := base(update.SessionUpdate, session.EventTypeAssistant, text)
-			event.Protocol.Update.Content = update.Content
-			event.Protocol.Update.MessageID = strings.TrimSpace(update.MessageID)
-			event.Protocol.Update.Meta = metautil.CloneMap(update.Meta)
-			return event
-		default:
-			return nil
-		}
-	case client.ToolCall:
-		event := base(update.SessionUpdate, session.EventTypeToolCall, firstNonEmpty(strings.TrimSpace(update.Title), strings.TrimSpace(update.Kind), "tool call"))
-		tool := &session.ProtocolToolCall{
-			ID:       strings.TrimSpace(update.ToolCallID),
-			Name:     acpconvert.ToolDisplayName(update.Kind, update.Title),
-			Kind:     strings.TrimSpace(update.Kind),
-			Title:    strings.TrimSpace(update.Title),
-			Status:   firstNonEmpty(strings.TrimSpace(update.Status), "pending"),
-			RawInput: acpconvert.ToolRawInput(update.RawInput),
-			Content:  acpconvert.ToolContent(update.Content),
-		}
-		event.Protocol.Update = acpconvert.ToolProtocolUpdate(update.SessionUpdate, tool, update.Meta)
-		return event
-	case client.ToolCallUpdate:
-		status := derefString(update.Status)
-		event := base(update.SessionUpdate, acpToolEventType(status), firstNonEmpty(derefString(update.Title), derefString(update.Kind), "tool update"))
-		tool := &session.ProtocolToolCall{
-			ID:        strings.TrimSpace(update.ToolCallID),
-			Name:      acpconvert.ToolDisplayName(derefString(update.Kind), derefString(update.Title)),
-			Kind:      derefString(update.Kind),
-			Title:     derefString(update.Title),
-			Status:    status,
-			RawInput:  acpconvert.ToolRawInput(update.RawInput),
-			RawOutput: acpconvert.ToolRawOutput(update.RawOutput),
-			Content:   acpconvert.ToolContent(update.Content),
-		}
-		event.Protocol.Update = acpconvert.ToolProtocolUpdate(update.SessionUpdate, tool, update.Meta)
-		return event
-	case client.PlanUpdate:
-		event := base(update.SessionUpdate, session.EventTypePlan, "plan updated")
-		event.Protocol.Update = &session.ProtocolUpdate{
-			SessionUpdate: strings.TrimSpace(update.SessionUpdate),
-			Entries:       acpPlanEntries(update.Entries),
-		}
-		return event
-	default:
-		return nil
+	if len(textOverride) > 0 {
+		opts.TextOverride = textOverride[0]
 	}
-}
-
-func acpToolEventType(status string) session.EventType {
-	switch strings.ToLower(strings.TrimSpace(status)) {
-	case "completed", "failed", "cancelled", "canceled":
-		return session.EventTypeToolResult
-	default:
-		return session.EventTypeToolCall
-	}
-}
-
-func acpPlanEntries(in []client.PlanEntry) []session.ProtocolPlanEntry {
-	out := make([]session.ProtocolPlanEntry, 0, len(in))
-	for _, item := range in {
-		out = append(out, session.ProtocolPlanEntry{
-			Content:  strings.TrimSpace(item.Content),
-			Status:   strings.TrimSpace(item.Status),
-			Priority: strings.TrimSpace(item.Priority),
-		})
-	}
-	return out
+	return acpingress.NormalizeUpdate(env.Update, opts)
 }
 
 func (run *childRun) emit(frame stream.Frame) {
@@ -905,14 +819,7 @@ func normalizeTraceLine(text string) string {
 }
 
 func chunkText(chunk client.ContentChunk) string {
-	var text client.TextChunk
-	if err := json.Unmarshal(chunk.Content, &text); err == nil {
-		if text.Text != "" {
-			return text.Text
-		}
-		return acpschema.TextFromRawContent(chunk.Content)
-	}
-	return acpschema.TextFromRawContent(chunk.Content)
+	return acpingress.ContentChunkText(chunk)
 }
 
 func toolActivity(title string, kind string, status string) string {

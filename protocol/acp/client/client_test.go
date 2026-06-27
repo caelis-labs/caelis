@@ -68,6 +68,30 @@ func TestDecodeUpdatePreservesUnknownRawUpdate(t *testing.T) {
 	}
 }
 
+func TestDecodeUpdateRecognizesUsageUpdate(t *testing.T) {
+	t.Parallel()
+
+	raw := json.RawMessage(`{"sessionUpdate":"usage_update","size":200000,"used":42000,"cost":{"total":0.47,"currency":"USD"},"_meta":{"vendor":{"trace":"abc"}}}`)
+	update, err := decodeUpdate(raw)
+	if err != nil {
+		t.Fatalf("decodeUpdate() error = %v", err)
+	}
+	typed, ok := update.(schema.UsageUpdate)
+	if !ok {
+		t.Fatalf("update = %T, want UsageUpdate", update)
+	}
+	if typed.Size != 200000 || typed.Used != 42000 {
+		t.Fatalf("usage update = %#v, want size/used preserved", typed)
+	}
+	if typed.Cost == nil || typed.Cost.Total != 0.47 || typed.Cost.Currency != "USD" {
+		t.Fatalf("cost = %#v, want total/currency", typed.Cost)
+	}
+	vendor, _ := typed.Meta["vendor"].(map[string]any)
+	if vendor["trace"] != "abc" {
+		t.Fatalf("meta = %#v, want vendor trace", typed.Meta)
+	}
+}
+
 func TestStableSessionLifecycleMethodsSendExpectedRequests(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

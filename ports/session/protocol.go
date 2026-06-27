@@ -215,6 +215,35 @@ func ProtocolSessionUpdateTypeOfProtocol(protocol *EventProtocol) string {
 	return ""
 }
 
+// ProtocolPermissionOf returns the normalized ACP permission payload for one
+// event without exposing transitional json:"-" aliases to callers.
+func ProtocolPermissionOf(event *Event) *ProtocolApproval {
+	if event == nil || event.Protocol == nil {
+		return nil
+	}
+	normalized := CloneEventProtocol(*event.Protocol)
+	if normalized.Permission == nil {
+		return nil
+	}
+	out := cloneProtocolApproval(*normalized.Permission)
+	return &out
+}
+
+// ProtocolParticipantOf returns the normalized ACP participant payload for one
+// event without exposing transitional json:"-" aliases to callers.
+func ProtocolParticipantOf(event *Event) *ProtocolParticipant {
+	if event == nil || event.Protocol == nil {
+		return nil
+	}
+	normalized := CloneEventProtocol(*event.Protocol)
+	if normalized.Participant == nil {
+		return nil
+	}
+	out := *normalized.Participant
+	out.Action = strings.TrimSpace(out.Action)
+	return &out
+}
+
 func protocolContentIsText(content any, want string) bool {
 	want = strings.TrimSpace(want)
 	if want == "" || content == nil {
@@ -483,6 +512,12 @@ func CloneEventProtocol(in EventProtocol) EventProtocol {
 			out.Update = &ProtocolUpdate{
 				SessionUpdate: strings.TrimSpace(participant.Action),
 			}
+		}
+	}
+	if out.Participant == nil && out.Method == ProtocolMethodParticipantUpdate && out.Update != nil {
+		action := strings.TrimSpace(out.Update.SessionUpdate)
+		if action != "" {
+			out.Participant = &ProtocolParticipant{Action: action}
 		}
 	}
 	if in.Handoff != nil {

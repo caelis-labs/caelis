@@ -40,6 +40,7 @@ const (
 	UpdateToolCallState = schema.UpdateToolCallInfo
 	UpdateAvailableCmds = schema.UpdateAvailableCmds
 	UpdatePlan          = schema.UpdatePlan
+	UpdateUsage         = schema.UpdateUsage
 	UpdateCurrentMode   = schema.UpdateCurrentMode
 	UpdateConfigOption  = schema.UpdateConfigOption
 	UpdateSessionInfo   = schema.UpdateSessionInfo
@@ -82,6 +83,8 @@ type ToolCall = schema.ToolCall
 type ToolCallUpdate = schema.ToolCallUpdate
 type PlanEntry = schema.PlanEntry
 type PlanUpdate = schema.PlanUpdate
+type UsageUpdate = schema.UsageUpdate
+type UsageCost = schema.UsageCost
 type CurrentModeUpdate = schema.CurrentModeUpdate
 type SessionInfoUpdate = schema.SessionInfoUpdate
 type PermissionOption = schema.PermissionOption

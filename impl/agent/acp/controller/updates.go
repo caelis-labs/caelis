@@ -1,17 +1,14 @@
 package acp
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/impl/agent/acp/internal/acpconvert"
+	"github.com/OnslaughtSnail/caelis/impl/agent/acp/internal/acpingress"
 	"github.com/OnslaughtSnail/caelis/ports/controller"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/client"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
-	acpschema "github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
 func normalizeACPUpdateEvent(
@@ -34,124 +31,16 @@ func normalizeACPUpdateEvent(
 			SessionID: strings.TrimSpace(remoteSessionID),
 		},
 	}
-	now := time.Now
-	if clock != nil {
-		now = clock
-	}
-	switch typed := update.(type) {
-	case client.ContentChunk:
-		text := contentChunkText(typed)
-		if text == "" {
-			return nil
-		}
-		event := &session.Event{
-			Visibility: acpContentChunkVisibility(typed.SessionUpdate),
-			Time:       now(),
-			Actor:      session.ActorRef{Kind: session.ActorKindController, Name: strings.TrimSpace(binding.Label)},
-			Scope:      scope,
-			Text:       text,
-			Message:    ptrMessage(messageForContentChunk(typed, text)),
-			Protocol: &session.EventProtocol{
-				Update: &session.ProtocolUpdate{
-					SessionUpdate: strings.TrimSpace(typed.SessionUpdate),
-					Content:       typed.Content,
-					MessageID:     strings.TrimSpace(typed.MessageID),
-					Meta:          metautil.CloneMap(typed.Meta),
-				},
-			},
-		}
-		switch strings.TrimSpace(typed.SessionUpdate) {
-		case client.UpdateUserMessage:
-			event.Type = session.EventTypeUser
-			event.Actor = session.ActorRef{Kind: session.ActorKindUser, Name: "user"}
-		default:
-			event.Type = session.EventTypeAssistant
-		}
-		scope.ACP.EventType = strings.TrimSpace(typed.SessionUpdate)
-		return event
-	case client.ToolCall:
-		scope.ACP.EventType = strings.TrimSpace(typed.SessionUpdate)
-		targetTool := &session.ProtocolToolCall{
-			ID:       strings.TrimSpace(typed.ToolCallID),
-			Name:     acpconvert.ToolDisplayName(typed.Kind, typed.Title),
-			Kind:     strings.TrimSpace(typed.Kind),
-			Title:    strings.TrimSpace(typed.Title),
-			Status:   strings.TrimSpace(typed.Status),
-			RawInput: acpconvert.ToolRawInput(typed.RawInput),
-			Content:  acpconvert.ToolContent(typed.Content),
-		}
-		return &session.Event{
-			Type:       session.EventTypeToolCall,
-			Visibility: session.VisibilityUIOnly,
-			Time:       now(),
-			Actor:      session.ActorRef{Kind: session.ActorKindController, Name: strings.TrimSpace(binding.Label)},
-			Scope:      scope,
-			Text:       firstNonEmpty(strings.TrimSpace(typed.Title), strings.TrimSpace(typed.Kind), "tool call"),
-			Protocol: &session.EventProtocol{
-				Update: acpconvert.ToolProtocolUpdate(typed.SessionUpdate, targetTool, typed.Meta),
-			},
-		}
-	case client.ToolCallUpdate:
-		scope.ACP.EventType = strings.TrimSpace(typed.SessionUpdate)
-		targetTool := &session.ProtocolToolCall{
-			ID:        strings.TrimSpace(typed.ToolCallID),
-			Name:      acpconvert.ToolDisplayName(derefString(typed.Kind), derefString(typed.Title)),
-			Kind:      strings.TrimSpace(derefString(typed.Kind)),
-			Title:     strings.TrimSpace(derefString(typed.Title)),
-			Status:    strings.TrimSpace(derefString(typed.Status)),
-			RawInput:  acpconvert.ToolRawInput(typed.RawInput),
-			RawOutput: acpconvert.ToolRawOutput(typed.RawOutput),
-			Content:   acpconvert.ToolContent(typed.Content),
-		}
-		return &session.Event{
-			Type:       toolEventTypeFromStatus(derefString(typed.Status)),
-			Visibility: session.VisibilityUIOnly,
-			Time:       now(),
-			Actor:      session.ActorRef{Kind: session.ActorKindController, Name: strings.TrimSpace(binding.Label)},
-			Scope:      scope,
-			Text:       firstNonEmpty(strings.TrimSpace(derefString(typed.Title)), strings.TrimSpace(derefString(typed.Kind)), "tool update"),
-			Protocol: &session.EventProtocol{
-				Update: acpconvert.ToolProtocolUpdate(typed.SessionUpdate, targetTool, typed.Meta),
-			},
-		}
-	case client.PlanUpdate:
-		scope.ACP.EventType = strings.TrimSpace(typed.SessionUpdate)
-		return &session.Event{
-			Type:       session.EventTypePlan,
-			Visibility: session.VisibilityUIOnly,
-			Time:       now(),
-			Actor:      session.ActorRef{Kind: session.ActorKindController, Name: strings.TrimSpace(binding.Label)},
-			Scope:      scope,
-			Text:       "plan updated",
-			Protocol: &session.EventProtocol{
-				Update: &session.ProtocolUpdate{
-					SessionUpdate: strings.TrimSpace(typed.SessionUpdate),
-					Entries:       planEntries(typed.Entries),
-				},
-			},
-		}
-	}
-	return nil
-}
-
-func acpContentChunkVisibility(updateType string) session.Visibility {
-	switch strings.TrimSpace(updateType) {
-	case client.UpdateUserMessage:
-		return session.VisibilityCanonical
-	default:
-		return session.VisibilityUIOnly
-	}
+	return acpingress.NormalizeUpdate(update, acpingress.Options{
+		Clock:      clock,
+		Scope:      *scope,
+		Actor:      session.ActorRef{Kind: session.ActorKindController, Name: strings.TrimSpace(binding.Label)},
+		Visibility: acpingress.ControllerVisibility,
+	})
 }
 
 func contentChunkText(chunk client.ContentChunk) string {
-	var text client.TextChunk
-	if err := json.Unmarshal(chunk.Content, &text); err == nil {
-		if text.Text != "" {
-			return text.Text
-		}
-		return acpschema.TextFromRawContent(chunk.Content)
-	}
-	return acpschema.TextFromRawContent(chunk.Content)
+	return acpingress.ContentChunkText(chunk)
 }
 
 func controllerCommandsFromACP(in []map[string]any) []controller.ControllerCommand {

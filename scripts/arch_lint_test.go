@@ -1,6 +1,11 @@
 package main
 
-import "testing"
+import (
+	"go/parser"
+	"go/token"
+	"strings"
+	"testing"
+)
 
 func TestBoundaryRuleRejectsPublicContractsImportingInternal(t *testing.T) {
 	t.Parallel()
@@ -101,4 +106,131 @@ func TestBoundaryRuleRejectsPublicContractsImportingInternal(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSemanticBoundaryRuleRejectsEventProtocolAliasReads(t *testing.T) {
+	t.Parallel()
+
+	const modulePath = "github.com/OnslaughtSnail/caelis"
+	source := `package demo
+
+import "github.com/OnslaughtSnail/caelis/ports/session"
+
+func readAlias(event *session.Event) string {
+	protocol := session.CloneEventProtocol(*event.Protocol)
+	if protocol.Participant != nil {
+		return protocol.Participant.Action
+	}
+	return ""
+}
+`
+	rule, subject, _ := semanticRuleForSource(t, "internal/kernel/demo.go", source, modulePath)
+	if !strings.Contains(rule, "EventProtocol") || subject != "protocol.Participant" {
+		t.Fatalf("semantic rule = (%q, %q), want EventProtocol alias rejection", rule, subject)
+	}
+}
+
+func TestSemanticBoundaryRuleRejectsDirectEventProtocolAliasReads(t *testing.T) {
+	t.Parallel()
+
+	const modulePath = "github.com/OnslaughtSnail/caelis"
+	source := `package demo
+
+import "github.com/OnslaughtSnail/caelis/ports/session"
+
+func readAlias(event *session.Event) bool {
+	return event.Protocol.ToolCall != nil
+}
+`
+	rule, subject, _ := semanticRuleForSource(t, "protocol/acp/projector/demo.go", source, modulePath)
+	if !strings.Contains(rule, "EventProtocol") || subject != "EventProtocol.ToolCall" {
+		t.Fatalf("semantic rule = (%q, %q), want direct EventProtocol alias rejection", rule, subject)
+	}
+}
+
+func TestSemanticBoundaryRuleRejectsEventProtocolPointerAliasReads(t *testing.T) {
+	t.Parallel()
+
+	const modulePath = "github.com/OnslaughtSnail/caelis"
+	source := `package demo
+
+import "github.com/OnslaughtSnail/caelis/ports/session"
+
+func readAlias(event *session.Event) bool {
+	protocol := event.Protocol
+	return protocol.Plan != nil
+}
+`
+	rule, subject, _ := semanticRuleForSource(t, "internal/kernel/demo.go", source, modulePath)
+	if !strings.Contains(rule, "EventProtocol") || subject != "protocol.Plan" {
+		t.Fatalf("semantic rule = (%q, %q), want pointer alias EventProtocol rejection", rule, subject)
+	}
+}
+
+func TestSemanticBoundaryRuleAllowsPortsSessionEventProtocolAliases(t *testing.T) {
+	t.Parallel()
+
+	const modulePath = "github.com/OnslaughtSnail/caelis"
+	source := `package session
+
+func normalize(protocol EventProtocol) bool {
+	return protocol.Participant != nil
+}
+`
+	rule, subject, _ := semanticRuleForSource(t, "ports/session/protocol.go", source, modulePath)
+	if rule != "" || subject != "" {
+		t.Fatalf("semantic rule = (%q, %q), want ports/session alias access allowed", rule, subject)
+	}
+}
+
+func TestSemanticBoundaryRuleRejectsNonWhitelistedGatewayBridgeCall(t *testing.T) {
+	t.Parallel()
+
+	const modulePath = "github.com/OnslaughtSnail/caelis"
+	source := `package demo
+
+import (
+	"github.com/OnslaughtSnail/caelis/ports/gateway"
+	acpprojector "github.com/OnslaughtSnail/caelis/protocol/acp/projector"
+)
+
+func bridge(env gateway.EventEnvelope) {
+	_ = acpprojector.ProjectGatewayEventEnvelope(env)
+}
+`
+	rule, subject, _ := semanticRuleForSource(t, "app/gatewayapp/demo.go", source, modulePath)
+	if !strings.Contains(rule, "ProjectGatewayEventEnvelope") || subject != "acpprojector.ProjectGatewayEventEnvelope" {
+		t.Fatalf("semantic rule = (%q, %q), want gateway bridge rejection", rule, subject)
+	}
+}
+
+func TestSemanticBoundaryRuleAllowsWhitelistedGatewayBridgeCall(t *testing.T) {
+	t.Parallel()
+
+	const modulePath = "github.com/OnslaughtSnail/caelis"
+	source := `package kernel
+
+import (
+	"github.com/OnslaughtSnail/caelis/ports/gateway"
+	acpprojector "github.com/OnslaughtSnail/caelis/protocol/acp/projector"
+)
+
+func bridge(env gateway.EventEnvelope) {
+	_ = acpprojector.ProjectGatewayEventEnvelope(env)
+}
+`
+	rule, subject, _ := semanticRuleForSource(t, "internal/kernel/handle.go", source, modulePath)
+	if rule != "" || subject != "" {
+		t.Fatalf("semantic rule = (%q, %q), want whitelisted gateway bridge allowed", rule, subject)
+	}
+}
+
+func semanticRuleForSource(t *testing.T, rel string, source string, modulePath string) (string, string, int) {
+	t.Helper()
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, rel, source, 0)
+	if err != nil {
+		t.Fatalf("ParseFile() error = %v", err)
+	}
+	return semanticBoundaryRule(rel, file, fset, modulePath)
 }

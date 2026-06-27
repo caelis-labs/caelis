@@ -1,0 +1,24 @@
+{
+  "kind": "session/update",
+  "cursor": "turn-1:0007",
+  "session_id": "session-1",
+  "handle_id": "handle-1",
+  "run_id": "run-1",
+  "turn_id": "turn-1",
+  "occurred_at": "2026-06-27T12:00:06Z",
+  "scope": "main",
+  "update": {
+    "sessionUpdate": "usage_update",
+    "size": 200000,
+    "used": 42000,
+    "cost": {
+      "total": 0.47,
+      "currency": "USD"
+    },
+    "_meta": {
+      "vendor": {
+        "trace": "abc"
+      }
+    }
+  }
+}

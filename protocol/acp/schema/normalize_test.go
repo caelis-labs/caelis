@@ -119,3 +119,38 @@ func TestRequestPermissionRoundTripPreservesACPMetadata(t *testing.T) {
 		t.Fatalf("meta = %#v, want vendor trace", decoded.Meta)
 	}
 }
+
+func TestUsageUpdateRoundTripPreservesCostAndMetadata(t *testing.T) {
+	t.Parallel()
+
+	raw, err := json.Marshal(UsageUpdate{
+		SessionUpdate: UpdateUsage,
+		Size:          200000,
+		Used:          42000,
+		Cost: &UsageCost{
+			Input:     0.12,
+			Output:    0.34,
+			CacheRead: 0.01,
+			Total:     0.47,
+			Currency:  "USD",
+		},
+		Meta: map[string]any{"vendor": map[string]any{"trace": "abc"}},
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal(UsageUpdate) error = %v", err)
+	}
+	var decoded UsageUpdate
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal(UsageUpdate) error = %v", err)
+	}
+	if decoded.SessionUpdate != UpdateUsage || decoded.Size != 200000 || decoded.Used != 42000 {
+		t.Fatalf("decoded usage = %#v, want size/used preserved", decoded)
+	}
+	if decoded.Cost == nil || decoded.Cost.Total != 0.47 || decoded.Cost.Currency != "USD" {
+		t.Fatalf("decoded cost = %#v, want total/currency", decoded.Cost)
+	}
+	vendor, _ := decoded.Meta["vendor"].(map[string]any)
+	if vendor["trace"] != "abc" {
+		t.Fatalf("meta = %#v, want vendor trace", decoded.Meta)
+	}
+}

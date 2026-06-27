@@ -421,6 +421,12 @@ func decodeUpdate(raw json.RawMessage) (Update, error) {
 			return nil, err
 		}
 		return plan, nil
+	case UpdateUsage:
+		var update UsageUpdate
+		if err := json.Unmarshal(raw, &update); err != nil {
+			return nil, err
+		}
+		return update, nil
 	case UpdateAvailableCmds:
 		var update AvailableCommandsUpdate
 		if err := json.Unmarshal(raw, &update); err != nil {

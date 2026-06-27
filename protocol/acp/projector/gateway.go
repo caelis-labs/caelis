@@ -73,7 +73,11 @@ func projectGatewayStandardACPEvents(base eventstream.Envelope, ev gateway.Event
 // ACP-native client envelopes using the supplied envelope metadata as the
 // transport context.
 func ProjectSessionEventEnvelope(base eventstream.Envelope, event *session.Event) []eventstream.Envelope {
-	return projectSessionEventToACPEnvelopes(base, gateway.Event{}, event)
+	out := projectSessionEventToACPEnvelopes(base, gateway.Event{}, event)
+	if len(out) == 0 {
+		out = append(out, projectSessionEventstreamOnlyEvents(base, event)...)
+	}
+	return out
 }
 
 func projectSessionEventToACPEnvelopes(base eventstream.Envelope, ev gateway.Event, sessionEvent *session.Event) []eventstream.Envelope {
@@ -442,23 +446,12 @@ func projectGatewayEventstreamOnlyEvents(base eventstream.Envelope, ev gateway.E
 		if ev.Participant == nil {
 			return nil
 		}
-		next := base
-		next.Kind = eventstream.KindParticipant
-		next.Actor = acpEventActor(ev, ev.Participant.Actor)
-		next.Participant = &eventstream.Participant{State: strings.TrimSpace(string(ev.Participant.Action))}
-		return []eventstream.Envelope{next}
+		return participantEventstreamEnvelope(base, strings.TrimSpace(string(ev.Participant.Action)), acpEventActor(ev, ev.Participant.Actor))
 	case gateway.EventKindLifecycle:
 		if ev.Lifecycle == nil {
 			return nil
 		}
-		next := base
-		next.Kind = eventstream.KindLifecycle
-		next.Actor = acpEventActor(ev, ev.Lifecycle.Actor)
-		next.Lifecycle = &eventstream.Lifecycle{
-			State:  strings.ToLower(strings.TrimSpace(string(ev.Lifecycle.Status))),
-			Reason: strings.TrimSpace(ev.Lifecycle.Reason),
-		}
-		return []eventstream.Envelope{next}
+		return lifecycleEventstreamEnvelope(base, string(ev.Lifecycle.Status), ev.Lifecycle.Reason, acpEventActor(ev, ev.Lifecycle.Actor))
 	case gateway.EventKindNotice, gateway.EventKindSystemMessage:
 		text := ""
 		if ev.Narrative != nil {
@@ -474,6 +467,55 @@ func projectGatewayEventstreamOnlyEvents(base eventstream.Envelope, ev gateway.E
 	default:
 		return nil
 	}
+}
+
+func projectSessionEventstreamOnlyEvents(base eventstream.Envelope, event *session.Event) []eventstream.Envelope {
+	if event == nil {
+		return nil
+	}
+	switch session.EventTypeOf(event) {
+	case session.EventTypeParticipant:
+		participant := session.ProtocolParticipantOf(event)
+		if participant == nil {
+			return nil
+		}
+		return participantEventstreamEnvelope(base, participant.Action, firstNonEmpty(strings.TrimSpace(base.Actor), strings.TrimSpace(event.Actor.Name), strings.TrimSpace(event.Actor.ID)))
+	case session.EventTypeLifecycle:
+		if event.Lifecycle == nil {
+			return nil
+		}
+		return lifecycleEventstreamEnvelope(base, event.Lifecycle.Status, event.Lifecycle.Reason, firstNonEmpty(strings.TrimSpace(base.Actor), strings.TrimSpace(event.Actor.Name), strings.TrimSpace(event.Actor.ID)))
+	default:
+		return nil
+	}
+}
+
+func participantEventstreamEnvelope(base eventstream.Envelope, state string, actor string) []eventstream.Envelope {
+	state = strings.TrimSpace(state)
+	if state == "" {
+		return nil
+	}
+	next := base
+	next.Kind = eventstream.KindParticipant
+	next.Actor = strings.TrimSpace(actor)
+	next.Participant = &eventstream.Participant{State: state}
+	return []eventstream.Envelope{next}
+}
+
+func lifecycleEventstreamEnvelope(base eventstream.Envelope, state string, reason string, actor string) []eventstream.Envelope {
+	state = strings.TrimSpace(state)
+	reason = strings.TrimSpace(reason)
+	if state == "" && reason == "" {
+		return nil
+	}
+	next := base
+	next.Kind = eventstream.KindLifecycle
+	next.Actor = strings.TrimSpace(actor)
+	next.Lifecycle = &eventstream.Lifecycle{
+		State:  strings.ToLower(state),
+		Reason: reason,
+	}
+	return []eventstream.Envelope{next}
 }
 
 func acpApprovalRawInput(payload *gateway.ApprovalPayload) map[string]any {
@@ -608,9 +650,8 @@ func gatewayPermissionToolMeta(baseMeta map[string]any, ev gateway.Event, sessio
 		toolName = strings.TrimSpace(ev.ApprovalPayload.ToolName)
 	}
 	if toolName == "" && sessionEvent != nil && sessionEvent.Protocol != nil {
-		protocol := session.CloneEventProtocol(*sessionEvent.Protocol)
-		if protocol.Approval != nil {
-			toolName = strings.TrimSpace(protocol.Approval.ToolCall.Name)
+		if permission := session.ProtocolPermissionOf(sessionEvent); permission != nil {
+			toolName = strings.TrimSpace(permission.ToolCall.Name)
 		}
 	}
 	return acpMetaWithToolName(baseMeta, toolName)

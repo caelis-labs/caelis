@@ -5,41 +5,8 @@ import (
 	"strings"
 
 	"github.com/OnslaughtSnail/caelis/ports/model"
-	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/client"
 )
-
-func messageForContentChunk(chunk client.ContentChunk, text string) model.Message {
-	role := model.RoleAssistant
-	if strings.TrimSpace(chunk.SessionUpdate) == client.UpdateUserMessage {
-		role = model.RoleUser
-	}
-	if strings.TrimSpace(chunk.SessionUpdate) == client.UpdateAgentThought {
-		return model.NewReasoningMessage(role, text, model.ReasoningVisibilityVisible)
-	}
-	return model.NewTextMessage(role, text)
-}
-
-func planEntries(in []client.PlanEntry) []session.ProtocolPlanEntry {
-	out := make([]session.ProtocolPlanEntry, 0, len(in))
-	for _, item := range in {
-		out = append(out, session.ProtocolPlanEntry{
-			Content:  strings.TrimSpace(item.Content),
-			Status:   strings.TrimSpace(item.Status),
-			Priority: "",
-		})
-	}
-	return out
-}
-
-func toolEventTypeFromStatus(status string) session.EventType {
-	switch strings.ToLower(strings.TrimSpace(status)) {
-	case "completed", "failed", "cancelled":
-		return session.EventTypeToolResult
-	default:
-		return session.EventTypeToolCall
-	}
-}
 
 func buildPromptParts(input string, parts []model.ContentPart) []json.RawMessage {
 	if len(parts) == 0 {
@@ -84,10 +51,6 @@ func buildPromptParts(input string, parts []model.ContentPart) []json.RawMessage
 		out = append(out, raw)
 	}
 	return out
-}
-
-func ptrMessage(msg model.Message) *model.Message {
-	return &msg
 }
 
 func firstNonEmpty(values ...string) string {

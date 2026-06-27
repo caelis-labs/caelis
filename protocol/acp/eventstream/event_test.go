@@ -107,6 +107,169 @@ func TestEnvelopeV1RequestPermissionGolden(t *testing.T) {
 	assertGoldenJSON(t, "testdata/envelope_v1_request_permission.golden.json", env)
 }
 
+func TestEnvelopeV1ToolCallGolden(t *testing.T) {
+	t.Parallel()
+
+	line := 7
+	env := Envelope{
+		Kind:       KindSessionUpdate,
+		Cursor:     "turn-1:0003",
+		SessionID:  "session-1",
+		HandleID:   "handle-1",
+		RunID:      "run-1",
+		TurnID:     "turn-1",
+		OccurredAt: time.Date(2026, 6, 27, 12, 0, 2, 0, time.UTC),
+		Scope:      ScopeMain,
+		Update: schema.ToolCall{
+			SessionUpdate: schema.UpdateToolCall,
+			ToolCallID:    "call-1",
+			Title:         "Read file",
+			Kind:          schema.ToolKindRead,
+			Status:        schema.ToolStatusPending,
+			RawInput:      map[string]any{"path": "main.go"},
+			Locations:     []schema.ToolCallLocation{{Path: "main.go", Line: &line}},
+			Meta:          map[string]any{"vendor": map[string]any{"trace": "abc"}},
+		},
+	}
+	assertGoldenJSON(t, "testdata/envelope_v1_tool_call.golden.json", env)
+}
+
+func TestEnvelopeV1ToolCallUpdateGolden(t *testing.T) {
+	t.Parallel()
+
+	title := "Run tests"
+	kind := schema.ToolKindExecute
+	status := schema.ToolStatusInProgress
+	env := Envelope{
+		Kind:       KindSessionUpdate,
+		Cursor:     "turn-1:0004",
+		SessionID:  "session-1",
+		HandleID:   "handle-1",
+		RunID:      "run-1",
+		TurnID:     "turn-1",
+		OccurredAt: time.Date(2026, 6, 27, 12, 0, 3, 0, time.UTC),
+		Scope:      ScopeMain,
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo,
+			ToolCallID:    "call-1",
+			Title:         &title,
+			Kind:          &kind,
+			Status:        &status,
+			RawOutput:     map[string]any{"stdout": "ok\n"},
+			Content: []schema.ToolCallContent{{
+				Type:       "terminal",
+				TerminalID: "term-1",
+				Content:    schema.TextContent{Type: "text", Text: "ok\n"},
+			}},
+			Meta: map[string]any{
+				"caelis": map[string]any{
+					"runtime": map[string]any{
+						"tool": map[string]any{"status_detail": "streaming"},
+					},
+				},
+			},
+		},
+	}
+	assertGoldenJSON(t, "testdata/envelope_v1_tool_call_update.golden.json", env)
+}
+
+func TestEnvelopeV1PlanGolden(t *testing.T) {
+	t.Parallel()
+
+	env := Envelope{
+		Kind:       KindSessionUpdate,
+		Cursor:     "turn-1:0005",
+		SessionID:  "session-1",
+		HandleID:   "handle-1",
+		RunID:      "run-1",
+		TurnID:     "turn-1",
+		OccurredAt: time.Date(2026, 6, 27, 12, 0, 4, 0, time.UTC),
+		Scope:      ScopeMain,
+		Update: schema.PlanUpdate{
+			SessionUpdate: schema.UpdatePlan,
+			Entries: []schema.PlanEntry{{
+				Content:  "Inspect replay",
+				Status:   "completed",
+				Priority: "high",
+			}},
+		},
+	}
+	assertGoldenJSON(t, "testdata/envelope_v1_plan.golden.json", env)
+}
+
+func TestEnvelopeV1UsageGolden(t *testing.T) {
+	t.Parallel()
+
+	env := Envelope{
+		Kind:       KindUsage,
+		Cursor:     "turn-1:0006",
+		SessionID:  "session-1",
+		HandleID:   "handle-1",
+		RunID:      "run-1",
+		TurnID:     "turn-1",
+		OccurredAt: time.Date(2026, 6, 27, 12, 0, 5, 0, time.UTC),
+		Scope:      ScopeMain,
+		Usage: &UsageSnapshot{
+			PromptTokens:      12,
+			CachedInputTokens: 3,
+			CompletionTokens:  5,
+			ReasoningTokens:   2,
+			TotalTokens:       17,
+		},
+	}
+	assertGoldenJSON(t, "testdata/envelope_v1_usage_extension.golden.json", env)
+}
+
+func TestEnvelopeV1ACPUsageUpdateGolden(t *testing.T) {
+	t.Parallel()
+
+	env := Envelope{
+		Kind:       KindSessionUpdate,
+		Cursor:     "turn-1:0007",
+		SessionID:  "session-1",
+		HandleID:   "handle-1",
+		RunID:      "run-1",
+		TurnID:     "turn-1",
+		OccurredAt: time.Date(2026, 6, 27, 12, 0, 6, 0, time.UTC),
+		Scope:      ScopeMain,
+		Update: schema.UsageUpdate{
+			SessionUpdate: schema.UpdateUsage,
+			Size:          200000,
+			Used:          42000,
+			Cost:          &schema.UsageCost{Total: 0.47, Currency: "USD"},
+			Meta:          map[string]any{"vendor": map[string]any{"trace": "abc"}},
+		},
+	}
+	assertGoldenJSON(t, "testdata/envelope_v1_acp_usage_update.golden.json", env)
+}
+
+func TestEnvelopeV1ParticipantGolden(t *testing.T) {
+	t.Parallel()
+
+	env := Envelope{
+		Kind:          KindParticipant,
+		Cursor:        "turn-1:0008",
+		SessionID:     "session-1",
+		TurnID:        "turn-1",
+		OccurredAt:    time.Date(2026, 6, 27, 12, 0, 7, 0, time.UTC),
+		Scope:         ScopeParticipant,
+		ScopeID:       "participant-1",
+		Actor:         "@reviewer",
+		ParticipantID: "participant-1",
+		Participant:   &Participant{State: "attached"},
+	}
+	assertGoldenJSON(t, "testdata/envelope_v1_participant.golden.json", env)
+}
+
+func TestEnvelopeV1LifecycleGolden(t *testing.T) {
+	t.Parallel()
+
+	env := TurnCompleted("handle-1", "run-1", "turn-1", time.Date(2026, 6, 27, 12, 0, 8, 0, time.UTC))
+	env.Cursor = "turn-1:0009"
+	env.SessionID = "session-1"
+	assertGoldenJSON(t, "testdata/envelope_v1_lifecycle.golden.json", env)
+}
+
 func TestCloneEnvelopePreservesContentChunkMetadata(t *testing.T) {
 	t.Parallel()
 

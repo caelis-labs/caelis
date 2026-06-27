@@ -546,6 +546,38 @@ func TestEventProtocolRoundTripPreservesUpdateMessageID(t *testing.T) {
 	}
 }
 
+func TestEventProtocolRoundTripPreservesParticipantPayload(t *testing.T) {
+	t.Parallel()
+
+	source := EventProtocol{
+		Participant: &ProtocolParticipant{Action: " attached "},
+	}
+	raw, err := json.Marshal(source)
+	if err != nil {
+		t.Fatalf("json.Marshal(EventProtocol) error = %v", err)
+	}
+	var decoded EventProtocol
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal(EventProtocol) error = %v", err)
+	}
+	participant := ProtocolParticipantOf(&Event{
+		Type:     EventTypeParticipant,
+		Protocol: &decoded,
+	})
+	if participant == nil {
+		t.Fatal("ProtocolParticipantOf() = nil")
+	}
+	if participant.Action != "attached" {
+		t.Fatalf("participant.Action = %q, want attached", participant.Action)
+	}
+	if decoded.Method != ProtocolMethodParticipantUpdate {
+		t.Fatalf("decoded.Method = %q, want %q", decoded.Method, ProtocolMethodParticipantUpdate)
+	}
+	if got := ProtocolSessionUpdateTypeOfProtocol(&decoded); got != "attached" {
+		t.Fatalf("ProtocolSessionUpdateTypeOfProtocol() = %q, want attached", got)
+	}
+}
+
 func TestCloneEventDeepClonesNestedMeta(t *testing.T) {
 	t.Parallel()
 

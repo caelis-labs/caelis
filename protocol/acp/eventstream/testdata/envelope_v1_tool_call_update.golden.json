@@ -1,0 +1,39 @@
+{
+  "kind": "session/update",
+  "cursor": "turn-1:0004",
+  "session_id": "session-1",
+  "handle_id": "handle-1",
+  "run_id": "run-1",
+  "turn_id": "turn-1",
+  "occurred_at": "2026-06-27T12:00:03Z",
+  "scope": "main",
+  "update": {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "call-1",
+    "title": "Run tests",
+    "kind": "execute",
+    "status": "in_progress",
+    "rawOutput": {
+      "stdout": "ok\n"
+    },
+    "content": [
+      {
+        "type": "terminal",
+        "content": {
+          "type": "text",
+          "text": "ok\n"
+        },
+        "terminalId": "term-1"
+      }
+    ],
+    "_meta": {
+      "caelis": {
+        "runtime": {
+          "tool": {
+            "status_detail": "streaming"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "kind": "session/update",
+  "cursor": "turn-1:0005",
+  "session_id": "session-1",
+  "handle_id": "handle-1",
+  "run_id": "run-1",
+  "turn_id": "turn-1",
+  "occurred_at": "2026-06-27T12:00:04Z",
+  "scope": "main",
+  "update": {
+    "sessionUpdate": "plan",
+    "entries": [
+      {
+        "content": "Inspect replay",
+        "status": "completed",
+        "priority": "high"
+      }
+    ]
+  }
+}

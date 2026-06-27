@@ -124,6 +124,19 @@ func readModulePath(path string) (string, error) {
 }
 
 func semanticBoundaryRule(rel string, file *ast.File, fset *token.FileSet, modulePath string) (string, string, int) {
+	if rule, subject, line := surfaceGatewayConsumptionRule(rel, file, fset, modulePath); rule != "" {
+		return rule, subject, line
+	}
+	if rule, subject, line := eventProtocolAliasRule(rel, file, fset, modulePath); rule != "" {
+		return rule, subject, line
+	}
+	if rule, subject, line := gatewayBridgeCallRule(rel, file, fset, modulePath); rule != "" {
+		return rule, subject, line
+	}
+	return "", "", 0
+}
+
+func surfaceGatewayConsumptionRule(rel string, file *ast.File, fset *token.FileSet, modulePath string) (string, string, int) {
 	if !strings.HasPrefix(rel, "surfaces/") || strings.HasSuffix(rel, "_test.go") || file == nil {
 		return "", "", 0
 	}
@@ -173,6 +186,162 @@ func semanticBoundaryRule(rel string, file *ast.File, fset *token.FileSet, modul
 		return rule, subject, line
 	}
 	return "", "", 0
+}
+
+func eventProtocolAliasRule(rel string, file *ast.File, fset *token.FileSet, modulePath string) (string, string, int) {
+	if file == nil || strings.HasPrefix(rel, "ports/session/") || strings.HasSuffix(rel, "_test.go") {
+		return "", "", 0
+	}
+	sessionNames := importNames(file, modulePath+"/ports/session")
+	if len(sessionNames) == 0 {
+		return "", "", 0
+	}
+	aliasVars := eventProtocolAliasVars(file, sessionNames)
+	aliasFields := map[string]bool{
+		"UpdateType":  true,
+		"ToolCall":    true,
+		"Plan":        true,
+		"Approval":    true,
+		"Participant": true,
+		"Handoff":     true,
+	}
+	var subject string
+	var line int
+	ast.Inspect(file, func(node ast.Node) bool {
+		if subject != "" {
+			return false
+		}
+		selector, ok := node.(*ast.SelectorExpr)
+		if !ok || !aliasFields[selector.Sel.Name] {
+			return true
+		}
+		switch receiver := selector.X.(type) {
+		case *ast.Ident:
+			if aliasVars[receiver.Name] {
+				subject = receiver.Name + "." + selector.Sel.Name
+				line = fset.Position(selector.Pos()).Line
+				return false
+			}
+		case *ast.SelectorExpr:
+			if receiver.Sel.Name == "Protocol" {
+				subject = "EventProtocol." + selector.Sel.Name
+				line = fset.Position(selector.Pos()).Line
+				return false
+			}
+		}
+		return true
+	})
+	if subject == "" {
+		return "", "", 0
+	}
+	return "production code must use ports/session protocol helpers instead of EventProtocol json:\"-\" aliases", subject, line
+}
+
+func eventProtocolAliasVars(file *ast.File, sessionNames map[string]bool) map[string]bool {
+	out := map[string]bool{}
+	ast.Inspect(file, func(node ast.Node) bool {
+		switch typed := node.(type) {
+		case *ast.ValueSpec:
+			if isSessionEventProtocolType(typed.Type, sessionNames) {
+				for _, name := range typed.Names {
+					out[name.Name] = true
+				}
+			}
+			for i, value := range typed.Values {
+				if i >= len(typed.Names) || (!isCloneEventProtocolCall(value, sessionNames) && !isEventProtocolSelector(value)) {
+					continue
+				}
+				out[typed.Names[i].Name] = true
+			}
+		case *ast.AssignStmt:
+			for i, value := range typed.Rhs {
+				if i >= len(typed.Lhs) || (!isCloneEventProtocolCall(value, sessionNames) && !isEventProtocolSelector(value)) {
+					continue
+				}
+				if ident, ok := typed.Lhs[i].(*ast.Ident); ok {
+					out[ident.Name] = true
+				}
+			}
+		}
+		return true
+	})
+	return out
+}
+
+func isSessionEventProtocolType(expr ast.Expr, sessionNames map[string]bool) bool {
+	switch typed := expr.(type) {
+	case nil:
+		return false
+	case *ast.StarExpr:
+		return isSessionEventProtocolType(typed.X, sessionNames)
+	case *ast.SelectorExpr:
+		ident, ok := typed.X.(*ast.Ident)
+		return ok && sessionNames[ident.Name] && typed.Sel.Name == "EventProtocol"
+	default:
+		return false
+	}
+}
+
+func isCloneEventProtocolCall(expr ast.Expr, sessionNames map[string]bool) bool {
+	call, ok := expr.(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	selector, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok || selector.Sel.Name != "CloneEventProtocol" {
+		return false
+	}
+	ident, ok := selector.X.(*ast.Ident)
+	return ok && sessionNames[ident.Name]
+}
+
+func isEventProtocolSelector(expr ast.Expr) bool {
+	switch typed := expr.(type) {
+	case *ast.SelectorExpr:
+		return typed.Sel.Name == "Protocol"
+	case *ast.StarExpr:
+		return isEventProtocolSelector(typed.X)
+	case *ast.ParenExpr:
+		return isEventProtocolSelector(typed.X)
+	default:
+		return false
+	}
+}
+
+func gatewayBridgeCallRule(rel string, file *ast.File, fset *token.FileSet, modulePath string) (string, string, int) {
+	if file == nil || strings.HasSuffix(rel, "_test.go") || gatewayBridgeCallWhitelist(rel) {
+		return "", "", 0
+	}
+	projectorNames := importNames(file, modulePath+"/protocol/acp/projector")
+	if len(projectorNames) == 0 {
+		return "", "", 0
+	}
+	var subject string
+	var line int
+	ast.Inspect(file, func(node ast.Node) bool {
+		if subject != "" {
+			return false
+		}
+		selector, ok := node.(*ast.SelectorExpr)
+		if !ok || selector.Sel.Name != "ProjectGatewayEventEnvelope" {
+			return true
+		}
+		ident, ok := selector.X.(*ast.Ident)
+		if !ok || !projectorNames[ident.Name] {
+			return true
+		}
+		subject = ident.Name + ".ProjectGatewayEventEnvelope"
+		line = fset.Position(selector.Pos()).Line
+		return false
+	})
+	if subject == "" {
+		return "", "", 0
+	}
+	return "ProjectGatewayEventEnvelope is a transitional bridge; production calls are limited to kernel compatibility adapters", subject, line
+}
+
+func gatewayBridgeCallWhitelist(rel string) bool {
+	return pathIn(rel, "internal/kernel/handle.go", "internal/kernel/stream_projection.go")
 }
 
 func gatewayTurnHandleNames(file *ast.File, gatewayNames map[string]bool) map[string]bool {

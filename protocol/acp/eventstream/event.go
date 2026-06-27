@@ -271,6 +271,13 @@ func CloneUpdate(update schema.Update) schema.Update {
 	case schema.PlanUpdate:
 		typed.Entries = append([]schema.PlanEntry(nil), typed.Entries...)
 		return typed
+	case schema.UsageUpdate:
+		if typed.Cost != nil {
+			cost := *typed.Cost
+			typed.Cost = &cost
+		}
+		typed.Meta = cloneAnyMap(typed.Meta)
+		return typed
 	case schema.RawUpdate:
 		typed.Raw = append([]byte(nil), typed.Raw...)
 		return typed
@@ -293,6 +300,8 @@ func UpdateMeta(update schema.Update) map[string]any {
 	case schema.ToolCall:
 		return cloneAnyMap(typed.Meta)
 	case schema.ToolCallUpdate:
+		return cloneAnyMap(typed.Meta)
+	case schema.UsageUpdate:
 		return cloneAnyMap(typed.Meta)
 	default:
 		return nil

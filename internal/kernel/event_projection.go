@@ -584,14 +584,14 @@ func canonicalPlanPayload(event *session.Event) *PlanPayload {
 }
 
 func canonicalParticipantPayload(event *session.Event) *ParticipantPayload {
-	if event == nil || event.Protocol == nil {
+	if event == nil {
 		return nil
 	}
-	protocol := session.CloneEventProtocol(*event.Protocol)
-	if protocol.Participant == nil {
+	participant := session.ProtocolParticipantOf(event)
+	if participant == nil {
 		return nil
 	}
-	action := strings.TrimSpace(protocol.Participant.Action)
+	action := strings.TrimSpace(participant.Action)
 	if action == "" && (event.Scope == nil || strings.TrimSpace(event.Scope.Participant.ID) == "") {
 		return nil
 	}

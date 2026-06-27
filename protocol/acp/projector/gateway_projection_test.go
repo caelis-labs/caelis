@@ -203,6 +203,45 @@ func TestGatewayAndSessionAssistantProjectionParity(t *testing.T) {
 	}
 }
 
+func TestProjectSessionEventEnvelopeProjectsParticipantAndLifecycleExtensions(t *testing.T) {
+	participant := ProjectSessionEventEnvelope(eventstream.Envelope{
+		Cursor:        "participant-1",
+		SessionID:     "session-1",
+		Scope:         eventstream.ScopeParticipant,
+		ScopeID:       "agent-1",
+		ParticipantID: "agent-1",
+	}, &session.Event{
+		ID:    "participant-1",
+		Type:  session.EventTypeParticipant,
+		Actor: session.ActorRef{Kind: session.ActorKindParticipant, Name: "@agent"},
+		Scope: &session.EventScope{Participant: session.ParticipantRef{ID: "agent-1"}},
+		Protocol: &session.EventProtocol{
+			Participant: &session.ProtocolParticipant{Action: "attached"},
+		},
+	})
+	if len(participant) != 1 || participant[0].Kind != eventstream.KindParticipant || participant[0].Participant == nil || participant[0].Participant.State != "attached" {
+		t.Fatalf("participant projection = %#v, want participant attached", participant)
+	}
+	if participant[0].Actor != "@agent" || participant[0].ParticipantID != "agent-1" {
+		t.Fatalf("participant envelope = %#v, want actor and participant id", participant[0])
+	}
+
+	lifecycle := ProjectSessionEventEnvelope(eventstream.Envelope{
+		Cursor:    "lifecycle-1",
+		SessionID: "session-1",
+		Scope:     eventstream.ScopeMain,
+		Actor:     "codex",
+	}, &session.Event{
+		ID:        "lifecycle-1",
+		Type:      session.EventTypeLifecycle,
+		Actor:     session.ActorRef{Kind: session.ActorKindController, Name: "codex"},
+		Lifecycle: &session.EventLifecycle{Status: "COMPLETED", Reason: "done"},
+	})
+	if len(lifecycle) != 1 || lifecycle[0].Kind != eventstream.KindLifecycle || lifecycle[0].Lifecycle == nil || lifecycle[0].Lifecycle.State != "completed" || lifecycle[0].Lifecycle.Reason != "done" {
+		t.Fatalf("lifecycle projection = %#v, want lifecycle completed", lifecycle)
+	}
+}
+
 func TestProjectGatewayEventEnvelopeProjectsGatewayToolCall(t *testing.T) {
 	events := ProjectGatewayEventEnvelope(gateway.EventEnvelope{Event: gateway.Event{
 		Kind:       gateway.EventKindToolCall,
