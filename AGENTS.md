@@ -1,54 +1,29 @@
 # AGENTS.md
-## Working Rules
-- Main agent owns architecture, decomposition, integration, validation, and final judgment.
-- Sub-agents are allowed only for bounded sidecar work with clear ownership.
-- Prefer `rg` / `rg --files`; preserve unrelated user changes.
-- Avoid unnecessary import aliases.
-## Architecture Contract
-- One durable Agent SDK session is the source of truth for runtime context.
-- Store canonical model semantics, not UI transcript cache: user content,
-  assistant reasoning/text, tool calls/results, replay signatures, provider
-  metadata, compaction/system context, approvals, and lifecycle state.
-- Reloaded model input must match the runtime semantic message sequence, except
-  when system prompt, tools, or skills intentionally changed.
-- `session.Event.Message` is durable model-visible message state.
-- `session.Event.Tool` is durable tool execution state: ids, names, args,
-  status, output, content, truncation, and replay boundaries.
-- `session.Event.Protocol.Update` is the ACP client projection contract, not
-  the local Agent SDK replay source.
-- Gateway emits standard ACP `session/update` and `request_permission` for TUI,
-  `caelis acp`, and external ACP clients.
-- Caelis display hints belong in ACP `_meta`; `_meta` must not be the only copy
-  of model-critical data unless explicitly defined as replay metadata.
-- `VisibilityUIOnly` chunks are transient live rendering events; persisted final
-  canonical events must contain complete model-visible state.
-- Built-in agents and external ACP agents meet at the Gateway boundary; external
-  ACP input must normalize into canonical session events before storage.
-- TUI and ACP clients consume the same ACP-native event stream and may decorate
-  it, but must not invent a built-in-only protocol.
-## Layer Boundaries
-- Public extension contracts live in `ports/*`; private glue lives in `internal/*`.
-- `internal/kernel` owns local turn/session orchestration, canonical projection,
-  replay validation, approvals, participants, and lifecycle coordination.
-- `impl/*` provides concrete ports and must not import surfaces or `internal/kernel`.
-- `protocol/acp` owns ACP schema, JSON-RPC, client/server, terminal, and projector code.
-- `surfaces/*` adapt UI/CLI/ACP interactions to kernel or app services and must
-  not own model, sandbox, tool, or persistence semantics.
-- `app/gatewayapp` is the default composition root for concrete implementations and config.
-- Before `v1.0.0`, prefer clean schema and boundary fixes over compatibility
-  fallbacks or legacy replay guesses.
+
+## Working Style
+- Preserve unrelated user changes; check the worktree before broad edits.
+- Avoid import aliases unless they disambiguate or match local convention.
+- Read nearby docs, package comments, and tests before editing unfamiliar code. For session, gateway, ACP, replay, or surface work, read `docs/architecture.md` first.
+
+## Coding Preferences
+- Follow existing boundaries, helpers, and tests; scope edits to changed behavior.
+- Add abstractions only when they remove real complexity or match an established pattern.
+- Prefer public contracts in `ports/*`; keep private glue in `internal/*`; surfaces must not own model, tool, sandbox, or persistence semantics.
+- Avoid growing central orchestration files. For coherent features in large/high-touch files, prefer a nearby module with docs and tests.
+- Document new exported types, interfaces, and non-obvious contracts.
+- Persist semantic model state, not UI transcript cache. `_meta` is display/debug unless documented as replay metadata.
+- Normalize external ACP input before storage; keep transient UI/subagent traces out of durable parent context unless carried by canonical payloads.
+- Before `v1.0.0`, prefer clean schema and boundary fixes over compatibility fallbacks.
+
 ## Validation
-- Persistence changes require store round-trip tests comparing rebuilt model
-  context with runtime-produced context.
-- ACP/TUI reload tests verify projections, but do not replace model-context
-  round-trip tests.
-- Run affected `go test` packages and `git diff --check`.
-## Release Flow
-1. Confirm the worktree only contains intended changes.
-2. Confirm `main` is current with `origin/main`.
-3. Run `make quality`, then `git diff --check`.
-4. Run `make release-dry-run` when packaging changed.
-5. Commit and push release-ready code to `main`.
-6. Tag the exact published commit: `git tag -a vX.Y.Z -m vX.Y.Z`.
-7. Push the tag and verify the workflow, GitHub Release, npm versions, `HEAD`,
-   `origin/main`, and `vX.Y.Z^{}`.
+- Run `gofmt` on touched Go files, focused `go test` packages for changed behavior, and `git diff --check`.
+- Run `make arch-lint` after import, package ownership, gateway/eventstream, or session protocol changes.
+- Persistence or replay changes need round-trip tests comparing rebuilt model context with runtime-produced context.
+- Projection/UI reload tests do not replace model-context round-trip tests.
+- UI or text-output changes should include/update golden or regression coverage and review the rendered/output diff.
+- Tests should prefer whole-object/event comparisons and structured helpers over field-by-field assertions or ad hoc JSON/string digging.
+- Use `make quality` for release-ready changes and `make regression` when projection, TUI behavior, command execution, or ACP integration changes broadly.
+
+## Release
+- Keep release mechanics in `docs/release.md`; update that doc when the process changes.
+- When asked to release, follow `docs/release.md` and verify the worktree contains only intended changes.
