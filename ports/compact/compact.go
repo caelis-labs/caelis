@@ -181,6 +181,21 @@ func PromptEventsFromLatestCompact(events []*session.Event) []*session.Event {
 	return session.CloneEvents(visible[index:])
 }
 
+// EventsAfterLatestCompact returns prompt-visible source events after the last
+// compact checkpoint. It does not inject the compact checkpoint replacement
+// used by PromptEventsFromLatestCompact for model prompts.
+func EventsAfterLatestCompact(events []*session.Event) []*session.Event {
+	visible := filterPromptVisibleEvents(events)
+	if len(visible) == 0 {
+		return nil
+	}
+	index := lastCompactIndex(visible)
+	if index < 0 {
+		return session.CloneEvents(visible)
+	}
+	return session.CloneEvents(visible[index+1:])
+}
+
 func LatestCompactEvent(events []*session.Event) (*session.Event, CompactEventData, bool) {
 	visible := filterPromptVisibleEvents(events)
 	if len(visible) == 0 {
@@ -221,7 +236,7 @@ func replacementTextEvent(text string) *session.Event {
 	}
 	return &session.Event{
 		Type:       session.EventTypeUser,
-		Visibility: session.VisibilityOverlay,
+		Visibility: session.VisibilityCanonical,
 		Actor:      session.ActorRef{Kind: session.ActorKindUser, Name: "user"},
 		Text:       text,
 	}

@@ -230,7 +230,6 @@ func TestProjectGatewayEventProtocolUpdateRendersTerminalOutputMeta(t *testing.T
 	events := ProjectGatewayEventToTranscriptEvents(gateway.Event{
 		Kind: gateway.EventKindToolResult,
 		Protocol: &session.EventProtocol{
-			UpdateType: string(session.ProtocolUpdateTypeToolUpdate),
 			Update: &session.ProtocolUpdate{
 				SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate),
 				ToolCallID:    "call-1",
@@ -276,7 +275,6 @@ func TestProjectGatewayEventProtocolTaskWaitShowsActionWithoutOutput(t *testing.
 	events := ProjectGatewayEventToTranscriptEvents(gateway.Event{
 		Kind: gateway.EventKindToolResult,
 		Protocol: &session.EventProtocol{
-			UpdateType: string(session.ProtocolUpdateTypeToolUpdate),
 			Update: &session.ProtocolUpdate{
 				SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate),
 				ToolCallID:    "task-wait",
@@ -1454,7 +1452,6 @@ func TestProjectGatewayEventACPExecuteFinalDisplaysNoOutputPlaceholder(t *testin
 	events := ProjectGatewayEventToTranscriptEvents(gateway.Event{
 		Kind: gateway.EventKindToolResult,
 		Protocol: &session.EventProtocol{
-			UpdateType: string(session.ProtocolUpdateTypeToolUpdate),
 			Update: &session.ProtocolUpdate{
 				SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate),
 				ToolCallID:    "acp-empty",
@@ -1483,7 +1480,6 @@ func TestProjectGatewayEventACPExecuteInfersFinalNoOutputFromExitCode(t *testing
 	events := ProjectGatewayEventToTranscriptEvents(gateway.Event{
 		Kind: gateway.EventKindToolResult,
 		Protocol: &session.EventProtocol{
-			UpdateType: string(session.ProtocolUpdateTypeToolUpdate),
 			Update: &session.ProtocolUpdate{
 				SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate),
 				ToolCallID:    "acp-empty-no-status",
@@ -1514,7 +1510,6 @@ func TestProjectGatewayEventACPToolUpdateMapsTerminatedStateToFinalStatus(t *tes
 	events := ProjectGatewayEventToTranscriptEvents(gateway.Event{
 		Kind: gateway.EventKindToolResult,
 		Protocol: &session.EventProtocol{
-			UpdateType: string(session.ProtocolUpdateTypeToolUpdate),
 			Update: &session.ProtocolUpdate{
 				SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate),
 				ToolCallID:    "acp-terminated",
@@ -1543,7 +1538,6 @@ func TestProjectGatewayEventACPDiffCompactsEditTitleAndFileHeader(t *testing.T) 
 	events := ProjectGatewayEventToTranscriptEvents(gateway.Event{
 		Kind: gateway.EventKindToolResult,
 		Protocol: &session.EventProtocol{
-			UpdateType: string(session.ProtocolUpdateTypeToolUpdate),
 			Update: &session.ProtocolUpdate{
 				SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate),
 				ToolCallID:    "edit-1",

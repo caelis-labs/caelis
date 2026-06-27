@@ -39,18 +39,7 @@ func compactTextFromEvent(event *session.Event) string {
 }
 
 func compactableEvents(events []*session.Event) []*session.Event {
-	visible := compact.PromptEventsFromLatestCompact(events)
-	if len(visible) == 0 {
-		return nil
-	}
-	out := make([]*session.Event, 0, len(visible))
-	for _, event := range visible {
-		if event == nil || compact.IsCompactEvent(event) || event.Visibility == session.VisibilityOverlay {
-			continue
-		}
-		out = append(out, session.CloneEvent(event))
-	}
-	return out
+	return compact.EventsAfterLatestCompact(events)
 }
 
 func compactableEventCount(events []*session.Event) int {

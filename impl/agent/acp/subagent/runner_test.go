@@ -132,34 +132,37 @@ func TestRunnerHandleUpdatePublishesStructuredToolAndPlanEvents(t *testing.T) {
 		}
 	}
 	callEvent := sink.frames[0].Event
-	if callEvent == nil || callEvent.Type != session.EventTypeToolCall || callEvent.Protocol == nil || callEvent.Protocol.ToolCall == nil {
+	callUpdate := session.ProtocolUpdateOf(callEvent)
+	if callEvent == nil || callEvent.Type != session.EventTypeToolCall || callUpdate == nil {
 		t.Fatalf("tool call event = %#v", callEvent)
 	}
 	if callEvent.Visibility != session.VisibilityUIOnly || session.IsCanonicalHistoryEvent(callEvent) {
 		t.Fatalf("tool call visibility = %q, canonical=%v; want ui_only trace", callEvent.Visibility, session.IsCanonicalHistoryEvent(callEvent))
 	}
-	if callEvent.Protocol.ToolCall.Name != "execute" || callEvent.Protocol.ToolCall.Title != "run go test" || callEvent.Protocol.ToolCall.Kind != "execute" || callEvent.Protocol.ToolCall.RawInput["command"] != "go test ./surfaces/tui/app/..." {
-		t.Fatalf("tool call payload = %#v", callEvent.Protocol.ToolCall)
+	if callUpdate.Title != "run go test" || callUpdate.Kind != "execute" || callUpdate.RawInput["command"] != "go test ./surfaces/tui/app/..." {
+		t.Fatalf("tool call payload = %#v", callUpdate)
 	}
 	resultEvent := sink.frames[1].Event
-	if resultEvent == nil || resultEvent.Type != session.EventTypeToolResult || resultEvent.Protocol == nil || resultEvent.Protocol.ToolCall == nil {
+	resultUpdate := session.ProtocolUpdateOf(resultEvent)
+	if resultEvent == nil || resultEvent.Type != session.EventTypeToolResult || resultUpdate == nil {
 		t.Fatalf("tool result event = %#v", resultEvent)
 	}
 	if resultEvent.Visibility != session.VisibilityUIOnly || session.IsCanonicalHistoryEvent(resultEvent) {
 		t.Fatalf("tool result visibility = %q, canonical=%v; want ui_only trace", resultEvent.Visibility, session.IsCanonicalHistoryEvent(resultEvent))
 	}
-	if resultEvent.Protocol.ToolCall.RawOutput["stdout"] != "ok\n" {
-		t.Fatalf("tool result payload = %#v", resultEvent.Protocol.ToolCall)
+	if resultUpdate.RawOutput["stdout"] != "ok\n" {
+		t.Fatalf("tool result payload = %#v", resultUpdate)
 	}
 	planEvent := sink.frames[2].Event
-	if planEvent == nil || planEvent.Type != session.EventTypePlan || planEvent.Protocol == nil || planEvent.Protocol.Plan == nil {
+	planUpdate := session.ProtocolUpdateOf(planEvent)
+	if planEvent == nil || planEvent.Type != session.EventTypePlan || planUpdate == nil {
 		t.Fatalf("plan event = %#v", planEvent)
 	}
 	if planEvent.Visibility != session.VisibilityUIOnly || session.IsCanonicalHistoryEvent(planEvent) {
 		t.Fatalf("plan visibility = %q, canonical=%v; want ui_only trace", planEvent.Visibility, session.IsCanonicalHistoryEvent(planEvent))
 	}
-	if len(planEvent.Protocol.Plan.Entries) != 1 || planEvent.Protocol.Plan.Entries[0].Content != "Run tests" {
-		t.Fatalf("plan entries = %#v", planEvent.Protocol.Plan.Entries)
+	if len(planUpdate.Entries) != 1 || planUpdate.Entries[0].Content != "Run tests" {
+		t.Fatalf("plan entries = %#v", planUpdate.Entries)
 	}
 }
 
@@ -196,19 +199,17 @@ func TestRunnerKeepsCodexWebSearchToolIdentity(t *testing.T) {
 		t.Fatalf("stream frame text = %q, want readable search trace", frame.Text)
 	}
 	event := frame.Event
-	if event == nil || event.Protocol == nil || event.Protocol.ToolCall == nil {
+	update := session.ProtocolUpdateOf(event)
+	if event == nil || update == nil {
 		t.Fatalf("stream event = %#v, want structured tool call", event)
 	}
-	if got := event.Protocol.ToolCall.Name; got != "fetch" {
-		t.Fatalf("tool name = %q, want ACP kind", got)
-	}
-	if got := event.Protocol.ToolCall.Title; got != "Searching for: weather: Shanghai, China" {
+	if got := update.Title; got != "Searching for: weather: Shanghai, China" {
 		t.Fatalf("tool title = %q, want ACP title", got)
 	}
-	if got := event.Protocol.ToolCall.Kind; got != "fetch" {
+	if got := update.Kind; got != "fetch" {
 		t.Fatalf("tool kind = %q, want fetch", got)
 	}
-	if got := event.Protocol.ToolCall.RawInput["query"]; got != "weather: Shanghai, China" {
+	if got := update.RawInput["query"]; got != "weather: Shanghai, China" {
 		t.Fatalf("raw input query = %#v", got)
 	}
 }
@@ -297,16 +298,18 @@ func TestRunnerStripsConsoleFenceFromChildTerminalOutput(t *testing.T) {
 		t.Fatalf("stream frame text = %q, want stripped terminal output", frame.Text)
 	}
 	event := frame.Event
-	if event == nil || event.Protocol == nil || event.Protocol.ToolCall == nil || event.Protocol.Update == nil {
+	update := session.ProtocolUpdateOf(event)
+	if event == nil || update == nil {
 		t.Fatalf("stream event = %#v, want structured tool result event", event)
 	}
-	if got := event.Protocol.ToolCall.RawOutput["stdout"]; got != fenced {
+	if got := update.RawOutput["stdout"]; got != fenced {
 		t.Fatalf("raw output stdout = %#v, want original %q", got, fenced)
 	}
-	if got := schema.ExtractTextValue(event.Protocol.ToolCall.Content[0].Content); got != want {
+	content := session.ProtocolToolCallContentOf(update)
+	if got := schema.ExtractTextValue(content[0].Content); got != want {
 		t.Fatalf("terminal content = %q, want %q", got, want)
 	}
-	output := metautil.RuntimeSection(event.Protocol.Update.Meta, metautil.Terminal)
+	output := metautil.RuntimeSection(update.Meta, metautil.Terminal)
 	if len(output) == 0 {
 		t.Fatalf("Protocol.Update.Meta = %#v, want caelis.runtime.terminal", event.Protocol.Update.Meta)
 	}
@@ -524,7 +527,8 @@ func TestRunnerHandleUpdatePublishesStructuredThoughtEvent(t *testing.T) {
 	if got.Text != "" {
 		t.Fatalf("stream frame text = %q, want structured thought event only", got.Text)
 	}
-	if got.Event == nil || got.Event.Protocol == nil || got.Event.Protocol.UpdateType != client.UpdateAgentThought || got.Event.Text != "thinking about the command" {
+	update := session.ProtocolUpdateOf(got.Event)
+	if got.Event == nil || update == nil || update.SessionUpdate != client.UpdateAgentThought || got.Event.Text != "thinking about the command" {
 		t.Fatalf("stream event = %#v, want structured thought event", got.Event)
 	}
 }

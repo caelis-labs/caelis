@@ -19,12 +19,12 @@ func TestFrameEventJSONRoundTrip(t *testing.T) {
 			Visibility: session.VisibilityCanonical,
 			Text:       "run tests",
 			Protocol: &session.EventProtocol{
-				UpdateType: string(session.ProtocolUpdateTypeToolCall),
-				ToolCall: &session.ProtocolToolCall{
-					ID:       "call-1",
-					Name:     "RUN_COMMAND",
-					Status:   "pending",
-					RawInput: map[string]any{"command": "go test ./...", "limit": 3},
+				Update: &session.ProtocolUpdate{
+					SessionUpdate: string(session.ProtocolUpdateTypeToolCall),
+					ToolCallID:    "call-1",
+					Kind:          "RUN_COMMAND",
+					Status:        "pending",
+					RawInput:      map[string]any{"command": "go test ./...", "limit": 3},
 				},
 			},
 		},
@@ -38,16 +38,17 @@ func TestFrameEventJSONRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		t.Fatalf("json.Unmarshal(Frame) error = %v", err)
 	}
-	if decoded.Event == nil || decoded.Event.Protocol == nil || decoded.Event.Protocol.ToolCall == nil {
+	update := session.ProtocolUpdateOf(decoded.Event)
+	if decoded.Event == nil || decoded.Event.Protocol == nil || update == nil {
 		t.Fatalf("decoded.Event = %#v, want tool call event", decoded.Event)
 	}
-	if decoded.Event.Type != session.EventTypeToolCall || decoded.Event.Protocol.ToolCall.Name != "RUN_COMMAND" {
+	if decoded.Event.Type != session.EventTypeToolCall || update.Kind != "RUN_COMMAND" {
 		t.Fatalf("decoded.Event = %#v, want RUN_COMMAND tool call", decoded.Event)
 	}
-	if got := decoded.Event.Protocol.ToolCall.RawInput["command"]; got != "go test ./..." {
+	if got := update.RawInput["command"]; got != "go test ./..." {
 		t.Fatalf("decoded command = %#v, want go test ./...", got)
 	}
-	if got := decoded.Event.Protocol.ToolCall.RawInput["limit"]; got != float64(3) {
+	if got := update.RawInput["limit"]; got != float64(3) {
 		t.Fatalf("decoded limit = %#v, want JSON number 3", got)
 	}
 }
@@ -58,15 +59,16 @@ func TestCloneFrameClonesEvent(t *testing.T) {
 	frame := Frame{
 		Event: &session.Event{
 			Protocol: &session.EventProtocol{
-				ToolCall: &session.ProtocolToolCall{
-					RawInput: map[string]any{"command": "echo hi"},
+				Update: &session.ProtocolUpdate{
+					SessionUpdate: string(session.ProtocolUpdateTypeToolCall),
+					RawInput:      map[string]any{"command": "echo hi"},
 				},
 			},
 		},
 	}
 	cloned := CloneFrame(frame)
-	cloned.Event.Protocol.ToolCall.RawInput["command"] = "changed"
-	if got := frame.Event.Protocol.ToolCall.RawInput["command"]; got != "echo hi" {
+	cloned.Event.Protocol.Update.RawInput["command"] = "changed"
+	if got := frame.Event.Protocol.Update.RawInput["command"]; got != "echo hi" {
 		t.Fatalf("source command = %#v, want unchanged clone isolation", got)
 	}
 }

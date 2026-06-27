@@ -480,6 +480,12 @@ func projectSessionEventstreamOnlyEvents(base eventstream.Envelope, event *sessi
 			return nil
 		}
 		return participantEventstreamEnvelope(base, participant.Action, firstNonEmpty(strings.TrimSpace(base.Actor), strings.TrimSpace(event.Actor.Name), strings.TrimSpace(event.Actor.ID)))
+	case session.EventTypeHandoff:
+		handoff := session.ProtocolHandoffOf(event)
+		if handoff == nil {
+			return nil
+		}
+		return lifecycleEventstreamEnvelope(base, handoff.Phase, "", firstNonEmpty(strings.TrimSpace(base.Actor), strings.TrimSpace(event.Actor.Name), strings.TrimSpace(event.Actor.ID)))
 	case session.EventTypeLifecycle:
 		if event.Lifecycle == nil {
 			return nil

@@ -109,7 +109,7 @@ func MarkUIOnly(event *Event) *Event {
 	return event
 }
 
-// MarkOverlay annotates one event as invocation-only overlay state.
+// MarkOverlay annotates one event as transient display overlay state.
 func MarkOverlay(event *Event) *Event {
 	if event == nil {
 		return nil
@@ -154,7 +154,7 @@ func IsUIOnly(event *Event) bool {
 	return event != nil && event.Visibility == VisibilityUIOnly
 }
 
-// IsOverlay reports whether one event is invocation-only overlay state.
+// IsOverlay reports whether one event is transient display overlay state.
 func IsOverlay(event *Event) bool {
 	return event != nil && event.Visibility == VisibilityOverlay
 }

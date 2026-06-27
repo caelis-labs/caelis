@@ -15,12 +15,11 @@ func TestEventProjectorNormalizesRuntimeToolStatus(t *testing.T) {
 		SessionID: "session-1",
 		Type:      session.EventTypeToolCall,
 		Protocol: &session.EventProtocol{
-			UpdateType: UpdateToolCallInfo,
-			ToolCall: &session.ProtocolToolCall{
-				ID:     "call-1",
-				Name:   "SPAWN",
-				Kind:   ToolKindOther,
-				Status: "running",
+			Update: &session.ProtocolUpdate{
+				SessionUpdate: UpdateToolCallInfo,
+				ToolCallID:    "call-1",
+				Kind:          ToolKindOther,
+				Status:        "running",
 				RawInput: map[string]any{
 					"prompt": "child work",
 				},
@@ -82,8 +81,8 @@ func TestProjectPermissionRequestUsesDurablePermissionAfterRoundTrip(t *testing.
 	if err := json.Unmarshal(raw, &decoded); err != nil {
 		t.Fatalf("json.Unmarshal(event) error = %v", err)
 	}
-	if decoded.Protocol == nil || decoded.Protocol.Approval == nil {
-		t.Fatalf("decoded protocol = %#v, want normalized approval alias from durable permission", decoded.Protocol)
+	if decoded.Protocol == nil || session.ProtocolPermissionOf(&decoded) == nil {
+		t.Fatalf("decoded protocol = %#v, want durable permission", decoded.Protocol)
 	}
 
 	req, ok, err := (EventProjector{}).ProjectPermissionRequest(&decoded)
@@ -111,11 +110,11 @@ func TestEventProjectorRemapsBuiltinTerminalContentToDisplayID(t *testing.T) {
 		SessionID: "session-1",
 		Type:      session.EventTypeToolResult,
 		Protocol: &session.EventProtocol{
-			UpdateType: UpdateToolCallInfo,
-			ToolCall: &session.ProtocolToolCall{
-				ID:     "call-1",
-				Name:   "RUN_COMMAND",
-				Status: "running",
+			Update: &session.ProtocolUpdate{
+				SessionUpdate: UpdateToolCallInfo,
+				ToolCallID:    "call-1",
+				Kind:          "RUN_COMMAND",
+				Status:        "running",
 				Content: []session.ProtocolToolCallContent{{
 					Type:       "terminal",
 					TerminalID: "runtime-terminal-1",
@@ -157,11 +156,11 @@ func TestEventProjectorSeparatesMultipleTerminalContentItems(t *testing.T) {
 		SessionID: "session-1",
 		Type:      session.EventTypeToolResult,
 		Protocol: &session.EventProtocol{
-			UpdateType: UpdateToolCallInfo,
-			ToolCall: &session.ProtocolToolCall{
-				ID:     "call-1",
-				Name:   "RUN_COMMAND",
-				Status: "completed",
+			Update: &session.ProtocolUpdate{
+				SessionUpdate: UpdateToolCallInfo,
+				ToolCallID:    "call-1",
+				Kind:          "RUN_COMMAND",
+				Status:        "completed",
 				Content: []session.ProtocolToolCallContent{
 					{Type: "terminal", TerminalID: "call-1", Content: session.ProtocolTextContent("caelis")},
 					{Type: "terminal", TerminalID: "call-1", Content: session.ProtocolTextContent("codex")},
@@ -670,11 +669,11 @@ func TestEventProjectorPreservesStandardDiffContent(t *testing.T) {
 		SessionID: "session-1",
 		Type:      session.EventTypeToolResult,
 		Protocol: &session.EventProtocol{
-			UpdateType: UpdateToolCallInfo,
-			ToolCall: &session.ProtocolToolCall{
-				ID:     "call-1",
-				Name:   "PATCH",
-				Status: "completed",
+			Update: &session.ProtocolUpdate{
+				SessionUpdate: UpdateToolCallInfo,
+				ToolCallID:    "call-1",
+				Kind:          "PATCH",
+				Status:        "completed",
 				Content: []session.ProtocolToolCallContent{{
 					Type:    "diff",
 					Path:    "/workspace/demo.txt",
@@ -716,7 +715,6 @@ func TestEventProjectorReplaysDurableProtocolTextContent(t *testing.T) {
 				SessionID: "session-1",
 				Type:      session.EventTypeUser,
 				Protocol: &session.EventProtocol{
-					UpdateType: UpdateUserMessage,
 					Update: &session.ProtocolUpdate{
 						SessionUpdate: UpdateUserMessage,
 						Content:       session.ProtocolTextContent("stored user"),
@@ -732,7 +730,6 @@ func TestEventProjectorReplaysDurableProtocolTextContent(t *testing.T) {
 				SessionID: "session-1",
 				Type:      session.EventTypeAssistant,
 				Protocol: &session.EventProtocol{
-					UpdateType: UpdateAgentMessage,
 					Update: &session.ProtocolUpdate{
 						SessionUpdate: UpdateAgentMessage,
 						Content:       session.ProtocolTextContent("stored assistant"),
@@ -748,7 +745,6 @@ func TestEventProjectorReplaysDurableProtocolTextContent(t *testing.T) {
 				SessionID: "session-1",
 				Type:      session.EventTypeAssistant,
 				Protocol: &session.EventProtocol{
-					UpdateType: UpdateAgentThought,
 					Update: &session.ProtocolUpdate{
 						SessionUpdate: UpdateAgentThought,
 						Content: map[string]any{
@@ -943,7 +939,7 @@ func TestEventProjectorPreservesReasoningBoundaryWhitespace(t *testing.T) {
 		Message:   &message,
 		Text:      "think ",
 		Protocol: &session.EventProtocol{
-			UpdateType: UpdateAgentThought,
+			Update: &session.ProtocolUpdate{SessionUpdate: UpdateAgentThought},
 		},
 	})
 	if err != nil {

@@ -15,54 +15,73 @@ import (
 func TestVisibilityRules(t *testing.T) {
 	t.Parallel()
 
-	canonical := &Event{
-		Type:    EventTypeAssistant,
-		Message: ptrMessage(model.NewTextMessage(model.RoleAssistant, "ok")),
+	assistant := func(text string) *Event {
+		return &Event{
+			Type:    EventTypeAssistant,
+			Message: ptrMessage(model.NewTextMessage(model.RoleAssistant, text)),
+		}
 	}
-	if !IsCanonicalHistoryEvent(canonical) {
-		t.Fatal("expected assistant event to be canonical")
+	tests := []struct {
+		name             string
+		event            *Event
+		wantTransient    bool
+		wantPersist      bool
+		wantReplay       bool
+		wantModelVisible bool
+		wantSharedLedger bool
+		wantReplayTrace  bool
+	}{
+		{
+			name:             "canonical",
+			event:            assistant("canonical"),
+			wantPersist:      true,
+			wantReplay:       true,
+			wantModelVisible: true,
+			wantSharedLedger: true,
+		},
+		{
+			name:       "mirror",
+			event:      MarkMirror(assistant("mirror")),
+			wantReplay: true,
+		},
+		{
+			name:          "ui_only",
+			event:         MarkUIOnly(assistant("ui-only")),
+			wantTransient: true,
+		},
+		{
+			name:          "overlay",
+			event:         MarkOverlay(assistant("overlay")),
+			wantTransient: true,
+		},
+		{
+			name:          "notice",
+			event:         MarkNotice(assistant("notice"), "notice", "display only"),
+			wantTransient: true,
+		},
 	}
-	if !IsInvocationVisibleEvent(canonical) {
-		t.Fatal("expected assistant event to be invocation visible")
-	}
-
-	uiOnly := MarkUIOnly(&Event{
-		Type:    EventTypeNotice,
-		Message: ptrMessage(model.NewTextMessage(model.RoleSystem, "warn: retrying")),
-	})
-	if !IsTransient(uiOnly) {
-		t.Fatal("expected ui-only event to be transient")
-	}
-	if IsCanonicalHistoryEvent(uiOnly) {
-		t.Fatal("ui-only event must not be canonical")
-	}
-	if IsInvocationVisibleEvent(uiOnly) {
-		t.Fatal("ui-only event must not be invocation visible")
-	}
-
-	overlay := MarkOverlay(&Event{
-		Type:    EventTypeSystem,
-		Message: ptrMessage(model.NewTextMessage(model.RoleSystem, "overlay")),
-	})
-	if !IsTransient(overlay) {
-		t.Fatal("overlay event must be transient")
-	}
-	if !IsInvocationVisibleEvent(overlay) {
-		t.Fatal("overlay event should remain invocation visible")
-	}
-
-	mirror := MarkMirror(&Event{
-		Type:    EventTypeSystem,
-		Message: ptrMessage(model.NewTextMessage(model.RoleSystem, "mirror")),
-	})
-	if IsTransient(mirror) {
-		t.Fatal("mirror event must not be transient")
-	}
-	if IsCanonicalHistoryEvent(mirror) {
-		t.Fatal("mirror event must not be canonical")
-	}
-	if IsInvocationVisibleEvent(mirror) {
-		t.Fatal("mirror event must not be invocation visible")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := IsTransient(tt.event); got != tt.wantTransient {
+				t.Fatalf("IsTransient() = %v, want %v", got, tt.wantTransient)
+			}
+			if got := IsCanonicalHistoryEvent(tt.event); got != tt.wantPersist {
+				t.Fatalf("IsCanonicalHistoryEvent() = %v, want %v", got, tt.wantPersist)
+			}
+			if got := IsReplayDialogueEvent(tt.event); got != tt.wantReplay {
+				t.Fatalf("IsReplayDialogueEvent() = %v, want %v", got, tt.wantReplay)
+			}
+			if got := IsInvocationVisibleEvent(tt.event); got != tt.wantModelVisible {
+				t.Fatalf("IsInvocationVisibleEvent() = %v, want %v", got, tt.wantModelVisible)
+			}
+			if got := IsMainReplayTraceEvent(tt.event); got != tt.wantReplayTrace {
+				t.Fatalf("IsMainReplayTraceEvent() = %v, want %v", got, tt.wantReplayTrace)
+			}
+			if got := IsSharedDialogueEvent(tt.event); got != tt.wantSharedLedger {
+				t.Fatalf("IsSharedDialogueEvent() = %v, want %v", got, tt.wantSharedLedger)
+			}
+		})
 	}
 }
 
@@ -465,7 +484,7 @@ func TestCloneEventPreservesTextWhitespace(t *testing.T) {
 		Text:       " thought boundary ",
 		Visibility: VisibilityUIOnly,
 		Protocol: &EventProtocol{
-			UpdateType: string(ProtocolUpdateTypeAgentThought),
+			Update: &ProtocolUpdate{SessionUpdate: string(ProtocolUpdateTypeAgentThought)},
 		},
 	}
 
@@ -479,7 +498,7 @@ func TestCloneEventPreservesTextWhitespace(t *testing.T) {
 	}
 }
 
-func TestCloneEventProtocolPreservesRuntimeToolNameWithDurableUpdate(t *testing.T) {
+func TestCloneEventProtocolDeepClonesDurableToolUpdate(t *testing.T) {
 	t.Parallel()
 
 	protocol := CloneEventProtocol(EventProtocol{
@@ -491,26 +510,18 @@ func TestCloneEventProtocolPreservesRuntimeToolNameWithDurableUpdate(t *testing.
 			Status:        "pending",
 			RawInput:      map[string]any{"command": "echo hi"},
 		},
-		ToolCall: &ProtocolToolCall{
-			ID:     "call-1",
-			Name:   "RUN_COMMAND",
-			Kind:   "execute",
-			Title:  "RUN_COMMAND echo hi",
-			Status: "pending",
-			RawInput: map[string]any{
-				"command": "echo hi",
-			},
-		},
 	})
 
-	if protocol.ToolCall == nil {
-		t.Fatal("ToolCall = nil")
+	update := ProtocolUpdateOfProtocol(&protocol)
+	if update == nil {
+		t.Fatal("ProtocolUpdateOfProtocol() = nil")
 	}
-	if protocol.ToolCall.Name != "RUN_COMMAND" {
-		t.Fatalf("ToolCall.Name = %q, want original RUN_COMMAND", protocol.ToolCall.Name)
+	if update.ToolCallID != "call-1" || update.Kind != "execute" || update.Title != "RUN_COMMAND echo hi" {
+		t.Fatalf("update = %#v, want durable tool call fields", update)
 	}
-	if protocol.ToolCall.Kind != "execute" {
-		t.Fatalf("ToolCall.Kind = %q, want execute", protocol.ToolCall.Kind)
+	update.RawInput["command"] = "mutated"
+	if got := protocol.Update.RawInput["command"]; got != "echo hi" {
+		t.Fatalf("source update raw input = %#v, want clone isolation", got)
 	}
 }
 
@@ -550,7 +561,8 @@ func TestEventProtocolRoundTripPreservesParticipantPayload(t *testing.T) {
 	t.Parallel()
 
 	source := EventProtocol{
-		Participant: &ProtocolParticipant{Action: " attached "},
+		Method: ProtocolMethodParticipantUpdate,
+		Update: &ProtocolUpdate{SessionUpdate: " attached "},
 	}
 	raw, err := json.Marshal(source)
 	if err != nil {
@@ -582,7 +594,8 @@ func TestEventProtocolRoundTripPreservesHandoffPayload(t *testing.T) {
 	t.Parallel()
 
 	source := EventProtocol{
-		Handoff: &ProtocolHandoff{Phase: " activation "},
+		Method: ProtocolMethodControllerHandoff,
+		Update: &ProtocolUpdate{SessionUpdate: " activation "},
 	}
 	raw, err := json.Marshal(source)
 	if err != nil {
@@ -654,11 +667,11 @@ func TestEventTypeOfProtocolPlan(t *testing.T) {
 
 	event := &Event{
 		Protocol: &EventProtocol{
-			UpdateType: "plan",
-			Plan: &ProtocolPlan{
-				Entries: []ProtocolPlanEntry{{Content: "step 1", Status: "pending"}},
+			Update: &ProtocolUpdate{
+				SessionUpdate: "plan",
+				Entries:       []ProtocolPlanEntry{{Content: "step 1", Status: "pending"}},
 			},
-			Approval: &ProtocolApproval{
+			Permission: &ProtocolApproval{
 				ToolCall: ProtocolToolCall{
 					ID:     "call-1",
 					Name:   "RUN_COMMAND",
@@ -675,15 +688,15 @@ func TestEventTypeOfProtocolPlan(t *testing.T) {
 		t.Fatalf("EventTypeOf(plan) = %q, want %q", got, EventTypePlan)
 	}
 	cloned := CloneEvent(event)
-	if cloned == nil || cloned.Protocol == nil || cloned.Protocol.Plan == nil || cloned.Protocol.Approval == nil {
+	if cloned == nil || cloned.Protocol == nil || cloned.Protocol.Update == nil || cloned.Protocol.Permission == nil {
 		t.Fatal("CloneEvent() must preserve protocol payloads")
 	}
-	cloned.Protocol.Plan.Entries[0].Content = "changed"
-	cloned.Protocol.Approval.Options[0].ID = "reject_once"
-	if got := event.Protocol.Plan.Entries[0].Content; got != "step 1" {
+	cloned.Protocol.Update.Entries[0].Content = "changed"
+	cloned.Protocol.Permission.Options[0].ID = "reject_once"
+	if got := event.Protocol.Update.Entries[0].Content; got != "step 1" {
 		t.Fatalf("source plan content = %q, want %q", got, "step 1")
 	}
-	if got := event.Protocol.Approval.Options[0].ID; got != "allow_once" {
+	if got := event.Protocol.Permission.Options[0].ID; got != "allow_once" {
 		t.Fatalf("source approval option = %q, want %q", got, "allow_once")
 	}
 }

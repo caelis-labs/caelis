@@ -221,8 +221,7 @@ func testGatewayStreamFrameEvent(req testGatewayStreamRequest, frame stream.Fram
 			},
 		},
 		Protocol: &session.EventProtocol{
-			Method:     session.ProtocolMethodSessionUpdate,
-			UpdateType: string(session.ProtocolUpdateTypeToolUpdate),
+			Method: session.ProtocolMethodSessionUpdate,
 			Update: &session.ProtocolUpdate{
 				SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate),
 				ToolCallID:    strings.TrimSpace(req.CallID),

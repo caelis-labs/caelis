@@ -1512,8 +1512,7 @@ func TestGatewayACPClaudeReadLifecycleKeepsIncrementalInput(t *testing.T) {
 			SessionRef: session.SessionRef{SessionID: "root-session"},
 			Origin:     &gateway.EventOrigin{Scope: gateway.EventScopeMain, ScopeID: "root-session", Source: "acp"},
 			Protocol: &session.EventProtocol{
-				UpdateType: update.SessionUpdate,
-				Update:     &update,
+				Update: &update,
 			},
 		}}))
 

@@ -119,8 +119,7 @@ func TestStreamFrameEventsDoNotAppendReasoningTextToParentTool(t *testing.T) {
 		Event: &session.Event{
 			Type: session.EventTypeAssistant,
 			Protocol: &session.EventProtocol{
-				UpdateType: string(session.ProtocolUpdateTypeAgentThought),
-				Update:     &session.ProtocolUpdate{SessionUpdate: string(session.ProtocolUpdateTypeAgentThought)},
+				Update: &session.ProtocolUpdate{SessionUpdate: string(session.ProtocolUpdateTypeAgentThought)},
 			},
 		},
 	})
@@ -463,8 +462,7 @@ func TestStreamFrameEventsSuppressEmbeddedParentToolEcho(t *testing.T) {
 				ACP: session.ACPRef{SessionID: "child-session"},
 			},
 			Protocol: &session.EventProtocol{
-				Method:     session.ProtocolMethodSessionUpdate,
-				UpdateType: string(session.ProtocolUpdateTypeToolCall),
+				Method: session.ProtocolMethodSessionUpdate,
 				Update: &session.ProtocolUpdate{
 					SessionUpdate: string(session.ProtocolUpdateTypeToolCall),
 					ToolCallID:    "spawn-call-1",

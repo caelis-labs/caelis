@@ -457,7 +457,7 @@ func acpControllerChunk(text string) *session.Event {
 			},
 		},
 		Protocol: &session.EventProtocol{
-			UpdateType: string(session.ProtocolUpdateTypeAgentMessage),
+			Update: &session.ProtocolUpdate{SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage)},
 		},
 	}
 }

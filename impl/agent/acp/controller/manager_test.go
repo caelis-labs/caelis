@@ -1903,18 +1903,20 @@ func TestControllerRunStripsConsoleFenceAtUpdateIngress(t *testing.T) {
 		t.Fatalf("source events len = %d, want 1", len(events))
 	}
 	canonical := events[0].Canonical
-	if canonical == nil || canonical.Protocol == nil || canonical.Protocol.ToolCall == nil || canonical.Protocol.Update == nil {
+	canonicalUpdate := session.ProtocolUpdateOf(canonical)
+	if canonical == nil || canonicalUpdate == nil {
 		t.Fatalf("canonical event = %#v, want protocol tool update", canonical)
 	}
-	if got := canonical.Protocol.ToolCall.RawOutput["stdout"]; got != fenced {
+	if got := canonicalUpdate.RawOutput["stdout"]; got != fenced {
 		t.Fatalf("canonical raw output stdout = %#v, want original %q", got, fenced)
 	}
-	if got := schema.ExtractTextValue(canonical.Protocol.ToolCall.Content[0].Content); got != want {
+	canonicalContent := session.ProtocolToolCallContentOf(canonicalUpdate)
+	if got := schema.ExtractTextValue(canonicalContent[0].Content); got != want {
 		t.Fatalf("canonical terminal content = %q, want %q", got, want)
 	}
-	canonicalOutput := metautil.RuntimeSection(canonical.Protocol.Update.Meta, metautil.Terminal)
+	canonicalOutput := metautil.RuntimeSection(canonicalUpdate.Meta, metautil.Terminal)
 	if len(canonicalOutput) == 0 {
-		t.Fatalf("canonical meta = %#v, want caelis.runtime.terminal", canonical.Protocol.Update.Meta)
+		t.Fatalf("canonical meta = %#v, want caelis.runtime.terminal", canonicalUpdate.Meta)
 	}
 	if got := canonicalOutput["data"]; got != fenced {
 		t.Fatalf("canonical caelis.runtime.terminal data = %#v, want original %q", got, fenced)
@@ -1983,10 +1985,12 @@ func TestControllerRunStripsConsoleFenceFromExecuteContentAtUpdateIngress(t *tes
 		t.Fatalf("source events len = %d, want 1", len(events))
 	}
 	canonical := events[0].Canonical
-	if canonical == nil || canonical.Protocol == nil || canonical.Protocol.ToolCall == nil {
+	canonicalUpdate := session.ProtocolUpdateOf(canonical)
+	if canonical == nil || canonicalUpdate == nil {
 		t.Fatalf("canonical event = %#v, want protocol tool update", canonical)
 	}
-	if got := schema.ExtractTextValue(canonical.Protocol.ToolCall.Content[0].Content); got != want {
+	canonicalContent := session.ProtocolToolCallContentOf(canonicalUpdate)
+	if got := schema.ExtractTextValue(canonicalContent[0].Content); got != want {
 		t.Fatalf("canonical execute content = %q, want %q", got, want)
 	}
 	acpUpdate, ok := events[0].ACP.Update.(schema.ToolCallUpdate)
@@ -2046,10 +2050,12 @@ func TestControllerRunStripsConsoleFenceFromClaudeBashContentAtUpdateIngress(t *
 		t.Fatalf("source events len = %d, want 1", len(events))
 	}
 	canonical := events[0].Canonical
-	if canonical == nil || canonical.Protocol == nil || canonical.Protocol.ToolCall == nil {
+	canonicalUpdate := session.ProtocolUpdateOf(canonical)
+	if canonical == nil || canonicalUpdate == nil {
 		t.Fatalf("canonical event = %#v, want protocol tool update", canonical)
 	}
-	if got := schema.ExtractTextValue(canonical.Protocol.ToolCall.Content[0].Content); got != want {
+	canonicalContent := session.ProtocolToolCallContentOf(canonicalUpdate)
+	if got := schema.ExtractTextValue(canonicalContent[0].Content); got != want {
 		t.Fatalf("canonical claude bash content = %q, want %q", got, want)
 	}
 	acpUpdate, ok := events[0].ACP.Update.(schema.ToolCallUpdate)

@@ -437,7 +437,6 @@ func testNarrativeFrame(text string) gateway.EventEnvelope {
 				Scope:      gateway.EventScopeMain,
 			},
 			Protocol: &session.EventProtocol{
-				UpdateType: string(session.ProtocolUpdateTypeAgentMessage),
 				Update: &session.ProtocolUpdate{
 					SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage),
 					Content:       session.ProtocolTextContent(text),

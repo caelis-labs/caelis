@@ -90,11 +90,11 @@ func TestForwardACPControllerEventsPreservesLegacyUIOnlyWhenACPPresent(t *testin
 					Visibility: session.VisibilityUIOnly,
 					Text:       "external search",
 					Protocol: &session.EventProtocol{
-						UpdateType: string(session.ProtocolUpdateTypeToolCall),
-						ToolCall: &session.ProtocolToolCall{
-							ID:     "call-1",
-							Name:   "Search",
-							Status: "in_progress",
+						Update: &session.ProtocolUpdate{
+							SessionUpdate: string(session.ProtocolUpdateTypeToolCall),
+							ToolCallID:    "call-1",
+							Kind:          "Search",
+							Status:        "in_progress",
 						},
 					},
 				},

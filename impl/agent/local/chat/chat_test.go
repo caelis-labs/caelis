@@ -1280,12 +1280,6 @@ func TestMessagesFromContextSkipsDelegatedACPToolRawOutput(t *testing.T) {
 		Visibility: session.VisibilityCanonical,
 		Scope:      delegatedScope,
 		Protocol: &session.EventProtocol{
-			ToolCall: &session.ProtocolToolCall{
-				ID:        "call-1",
-				Name:      "execute",
-				Status:    "failed",
-				RawOutput: map[string]any{"stderr": large, "exit_code": 1},
-			},
 			Update: &session.ProtocolUpdate{
 				SessionUpdate: "tool_call_update",
 				ToolCallID:    "call-1",

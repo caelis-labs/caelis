@@ -52,17 +52,8 @@ func EventTypeOf(event *Event) EventType {
 		case ProtocolMethodContextCheckpoint:
 			return EventTypeCompact
 		}
-		switch {
-		case protocol.Plan != nil:
-			return EventTypePlan
-		case protocol.ToolCall != nil:
-			return EventTypeToolCall
-		case protocol.Permission != nil:
+		if protocol.Permission != nil {
 			return EventTypeLifecycle
-		case protocol.Participant != nil:
-			return EventTypeParticipant
-		case protocol.Handoff != nil:
-			return EventTypeHandoff
 		}
 	}
 	if event.Tool != nil {

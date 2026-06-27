@@ -4,8 +4,13 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/OnslaughtSnail/caelis/ports/gateway"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
 	acpprojector "github.com/OnslaughtSnail/caelis/protocol/acp/projector"
 )
+
+func acpEventMsg(env eventstream.Envelope) tea.Msg {
+	return eventstream.NormalizeEnvelope(env)
+}
 
 func gatewayEventMsg(env gateway.EventEnvelope) tea.Msg {
 	projected := acpprojector.ProjectGatewayEventEnvelope(env)

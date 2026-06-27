@@ -1938,7 +1938,6 @@ func TestReplayEventsIncludesDurableMirrorTranscriptEvents(t *testing.T) {
 			TurnID: "turn-1",
 		},
 		Protocol: &session.EventProtocol{
-			UpdateType: string(session.ProtocolUpdateTypeAgentMessage),
 			Update: &session.ProtocolUpdate{
 				SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage),
 				Content: map[string]any{

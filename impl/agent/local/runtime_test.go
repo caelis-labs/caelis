@@ -365,7 +365,7 @@ func TestRuntimeRunReturnsLiveRunnerBeforeModelCompletion(t *testing.T) {
 			switch {
 			case session.EventTypeOf(event) == session.EventTypeUser:
 				sawUser = true
-			case event.Protocol != nil && event.Protocol.UpdateType == string(session.ProtocolUpdateTypeAgentMessage) && session.EventText(event) == "hel":
+			case session.ProtocolSessionUpdateType(event) == string(session.ProtocolUpdateTypeAgentMessage) && session.EventText(event) == "hel":
 				sawChunk = true
 			}
 		case <-deadline:
@@ -529,7 +529,6 @@ func TestRuntimeRunDoesNotPersistInterruptedAssistantReplay(t *testing.T) {
 		Type: session.EventTypeAssistant,
 		Text: "partial thought",
 		Protocol: &session.EventProtocol{
-			UpdateType: thoughtType,
 			Update: &session.ProtocolUpdate{
 				SessionUpdate: thoughtType,
 				Content:       session.ProtocolTextContent("partial thought"),
@@ -541,7 +540,6 @@ func TestRuntimeRunDoesNotPersistInterruptedAssistantReplay(t *testing.T) {
 		Type: session.EventTypeAssistant,
 		Text: "partial answer",
 		Protocol: &session.EventProtocol{
-			UpdateType: answerType,
 			Update: &session.ProtocolUpdate{
 				SessionUpdate: answerType,
 				Content:       session.ProtocolTextContent("partial answer"),
@@ -637,13 +635,13 @@ func TestRuntimeACPControllerReturnsLiveRunnerBeforeTurnCompletion(t *testing.T)
 					Type: session.EventTypeAssistant,
 					Text: "hel",
 					Protocol: &session.EventProtocol{
-						UpdateType: string(session.ProtocolUpdateTypeAgentMessage),
+						Update: &session.ProtocolUpdate{SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage)},
 					},
 				}))
 				<-releaseFinal
 				event := assistantEvent("hello")
 				event.Protocol = &session.EventProtocol{
-					UpdateType: string(session.ProtocolUpdateTypeAgentMessage),
+					Update: &session.ProtocolUpdate{SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage)},
 				}
 				handle.publishEvent(event)
 				handle.finish()
@@ -725,7 +723,7 @@ func TestRuntimeACPControllerReturnsLiveRunnerBeforeTurnCompletion(t *testing.T)
 			switch {
 			case session.EventTypeOf(event) == session.EventTypeUser:
 				sawUser = true
-			case event.Protocol != nil && event.Protocol.UpdateType == string(session.ProtocolUpdateTypeAgentMessage) && event.Visibility == session.VisibilityUIOnly:
+			case session.ProtocolSessionUpdateType(event) == string(session.ProtocolUpdateTypeAgentMessage) && event.Visibility == session.VisibilityUIOnly:
 				sawChunk = true
 			}
 		case <-deadline:
@@ -807,7 +805,7 @@ func TestRuntimeACPControllerTurnSendsUnsyncedSharedDialogue(t *testing.T) {
 			go func() {
 				event := assistantEvent("main done")
 				event.Protocol = &session.EventProtocol{
-					UpdateType: string(session.ProtocolUpdateTypeAgentMessage),
+					Update: &session.ProtocolUpdate{SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage)},
 				}
 				handle.publishEvent(event)
 				handle.finish()
@@ -896,7 +894,7 @@ func TestRuntimePromptParticipantPersistsPublicDialogue(t *testing.T) {
 						},
 					},
 					Protocol: &session.EventProtocol{
-						UpdateType: string(session.ProtocolUpdateTypeUserMessage),
+						Update: &session.ProtocolUpdate{SessionUpdate: string(session.ProtocolUpdateTypeUserMessage)},
 					},
 				})
 				handle.publishEvent(&session.Event{
@@ -913,11 +911,11 @@ func TestRuntimePromptParticipantPersistsPublicDialogue(t *testing.T) {
 						},
 					},
 					Protocol: &session.EventProtocol{
-						UpdateType: string(session.ProtocolUpdateTypeToolCall),
-						ToolCall: &session.ProtocolToolCall{
-							ID:     "external-command",
-							Name:   "RUN_COMMAND",
-							Status: "completed",
+						Update: &session.ProtocolUpdate{
+							SessionUpdate: string(session.ProtocolUpdateTypeToolCall),
+							ToolCallID:    "external-command",
+							Kind:          "RUN_COMMAND",
+							Status:        "completed",
 						},
 					},
 				})
@@ -935,7 +933,7 @@ func TestRuntimePromptParticipantPersistsPublicDialogue(t *testing.T) {
 						},
 					},
 					Protocol: &session.EventProtocol{
-						UpdateType: string(session.ProtocolUpdateTypeAgentMessage),
+						Update: &session.ProtocolUpdate{SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage)},
 					},
 				})
 			}()
@@ -1219,11 +1217,11 @@ func TestRuntimeACPControllerPublishesChunksAsLiveDeltas(t *testing.T) {
 						Source: "acp",
 					},
 					Protocol: &session.EventProtocol{
-						UpdateType: string(session.ProtocolUpdateTypeToolCall),
-						ToolCall: &session.ProtocolToolCall{
-							ID:     "external-search",
-							Name:   "Search",
-							Status: "completed",
+						Update: &session.ProtocolUpdate{
+							SessionUpdate: string(session.ProtocolUpdateTypeToolCall),
+							ToolCallID:    "external-search",
+							Kind:          "Search",
+							Status:        "completed",
 						},
 					},
 				})
@@ -1262,7 +1260,7 @@ func TestRuntimeACPControllerPublishesChunksAsLiveDeltas(t *testing.T) {
 		if event == nil || event.Protocol == nil || event.Scope == nil {
 			continue
 		}
-		if event.Protocol.UpdateType == string(session.ProtocolUpdateTypeAgentMessage) && strings.HasPrefix(event.Scope.Source, "acp") && event.Visibility == session.VisibilityUIOnly {
+		if session.ProtocolSessionUpdateType(event) == string(session.ProtocolUpdateTypeAgentMessage) && strings.HasPrefix(event.Scope.Source, "acp") && event.Visibility == session.VisibilityUIOnly {
 			liveTexts = append(liveTexts, session.EventText(event))
 			if event.SessionID != activeSession.SessionID {
 				t.Fatalf("live ACP chunk session ID = %q, want %q", event.SessionID, activeSession.SessionID)

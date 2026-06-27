@@ -248,7 +248,8 @@ func TestProjectSessionEventEnvelopeProjectsParticipantAndLifecycleExtensions(t 
 		Actor: session.ActorRef{Kind: session.ActorKindParticipant, Name: "@agent"},
 		Scope: &session.EventScope{Participant: session.ParticipantRef{ID: "agent-1"}},
 		Protocol: &session.EventProtocol{
-			Participant: &session.ProtocolParticipant{Action: "attached"},
+			Method: session.ProtocolMethodParticipantUpdate,
+			Update: &session.ProtocolUpdate{SessionUpdate: "attached"},
 		},
 	})
 	if len(participant) != 1 || participant[0].Kind != eventstream.KindParticipant || participant[0].Participant == nil || participant[0].Participant.State != "attached" {
@@ -271,6 +272,23 @@ func TestProjectSessionEventEnvelopeProjectsParticipantAndLifecycleExtensions(t 
 	})
 	if len(lifecycle) != 1 || lifecycle[0].Kind != eventstream.KindLifecycle || lifecycle[0].Lifecycle == nil || lifecycle[0].Lifecycle.State != "completed" || lifecycle[0].Lifecycle.Reason != "done" {
 		t.Fatalf("lifecycle projection = %#v, want lifecycle completed", lifecycle)
+	}
+
+	handoff := ProjectSessionEventEnvelope(eventstream.Envelope{
+		Cursor:    "handoff-1",
+		SessionID: "session-1",
+		Scope:     eventstream.ScopeMain,
+	}, &session.Event{
+		ID:    "handoff-1",
+		Type:  session.EventTypeHandoff,
+		Actor: session.ActorRef{Kind: session.ActorKindSystem, Name: "runtime"},
+		Protocol: &session.EventProtocol{
+			Method: session.ProtocolMethodControllerHandoff,
+			Update: &session.ProtocolUpdate{SessionUpdate: "activation"},
+		},
+	})
+	if len(handoff) != 1 || handoff[0].Kind != eventstream.KindLifecycle || handoff[0].Lifecycle == nil || handoff[0].Lifecycle.State != "activation" {
+		t.Fatalf("handoff projection = %#v, want lifecycle activation", handoff)
 	}
 }
 

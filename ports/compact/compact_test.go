@@ -36,7 +36,7 @@ func TestCompactEventDataContractMetadataRoundTrip(t *testing.T) {
 	}
 }
 
-func TestPromptEventsFromLatestCompactUsesPureTextOverlay(t *testing.T) {
+func TestPromptEventsFromLatestCompactUsesPureTextPromptEvent(t *testing.T) {
 	compactText := "CONTEXT CHECKPOINT\n\n## Current Objective\n- continue from compact"
 	compactEvent := &session.Event{
 		Type:       session.EventTypeCompact,
@@ -59,8 +59,8 @@ func TestPromptEventsFromLatestCompactUsesPureTextOverlay(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("prompt event count = %d, want 2 (%+v)", len(got), got)
 	}
-	if got[0].Type != session.EventTypeUser || got[0].Visibility != session.VisibilityOverlay {
-		t.Fatalf("first prompt event = %+v, want overlay user text", got[0])
+	if got[0].Type != session.EventTypeUser || got[0].Visibility != session.VisibilityCanonical {
+		t.Fatalf("first prompt event = %+v, want canonical user prompt text", got[0])
 	}
 	if got[0].Message != nil || got[0].Protocol != nil {
 		t.Fatalf("first prompt event carries duplicated structured payload: message=%+v protocol=%+v", got[0].Message, got[0].Protocol)
@@ -70,6 +70,34 @@ func TestPromptEventsFromLatestCompactUsesPureTextOverlay(t *testing.T) {
 	}
 	if got[1].Text != "next user turn" {
 		t.Fatalf("second prompt text = %q, want next turn", got[1].Text)
+	}
+}
+
+func TestEventsAfterLatestCompactDoesNotInjectPromptReplacement(t *testing.T) {
+	compactText := "CONTEXT CHECKPOINT\n\n## Current Objective\n- continue from compact"
+	compactEvent := &session.Event{
+		Type:       session.EventTypeCompact,
+		Visibility: session.VisibilityCanonical,
+		Text:       compactText,
+		Meta: map[string]any{
+			MetaKeyCompact: CompactEventDataValue(CompactEventData{
+				ContractVersion: CompactContractVersion,
+				Generator:       "model_markdown",
+			}),
+		},
+	}
+	next := &session.Event{
+		Type:       session.EventTypeUser,
+		Visibility: session.VisibilityCanonical,
+		Text:       "next user turn",
+	}
+
+	got := EventsAfterLatestCompact([]*session.Event{compactEvent, next})
+	if len(got) != 1 {
+		t.Fatalf("event count = %d, want only post-compact event (%+v)", len(got), got)
+	}
+	if got[0].Text != "next user turn" {
+		t.Fatalf("first event text = %q, want next user turn", got[0].Text)
 	}
 }
 

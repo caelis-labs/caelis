@@ -97,6 +97,31 @@ func TestReplayEventsMatchesLiveACPProjectionSemantics(t *testing.T) {
 			}}},
 		},
 		{
+			ID:         "permission-1",
+			SessionID:  "s1",
+			Type:       session.EventTypeLifecycle,
+			Visibility: session.VisibilityCanonical,
+			Time:       time.Unix(13, 500000000),
+			Scope:      &session.EventScope{Source: "acp", TurnID: "turn-1"},
+			Protocol: &session.EventProtocol{
+				Method: session.ProtocolMethodRequestPermission,
+				Permission: &session.ProtocolApproval{
+					ToolCall: session.ProtocolToolCall{
+						ID:       "call-approve",
+						Name:     "RUN_COMMAND",
+						Kind:     schema.ToolKindExecute,
+						Title:    "RUN_COMMAND rm",
+						Status:   "pending",
+						RawInput: map[string]any{"command": "rm -rf tmp"},
+					},
+					Options: []session.ProtocolApprovalOption{
+						{ID: "allow_once", Name: "Allow once", Kind: "allow_once"},
+						{ID: "reject_once", Name: "Reject once", Kind: "reject_once"},
+					},
+				},
+			},
+		},
+		{
 			ID:         "participant-1",
 			SessionID:  "s1",
 			Type:       session.EventTypeParticipant,
@@ -109,7 +134,21 @@ func TestReplayEventsMatchesLiveACPProjectionSemantics(t *testing.T) {
 				Participant: session.ParticipantRef{ID: "agent-1", Kind: session.ParticipantKindACP, Role: session.ParticipantRoleSidecar},
 			},
 			Protocol: &session.EventProtocol{
-				Participant: &session.ProtocolParticipant{Action: "attached"},
+				Method: session.ProtocolMethodParticipantUpdate,
+				Update: &session.ProtocolUpdate{SessionUpdate: "attached"},
+			},
+		},
+		{
+			ID:         "handoff-1",
+			SessionID:  "s1",
+			Type:       session.EventTypeHandoff,
+			Visibility: session.VisibilityCanonical,
+			Time:       time.Unix(14, 500000000),
+			Actor:      session.ActorRef{Kind: session.ActorKindSystem, Name: "runtime"},
+			Scope:      &session.EventScope{Source: "handoff", TurnID: "turn-1"},
+			Protocol: &session.EventProtocol{
+				Method: session.ProtocolMethodControllerHandoff,
+				Update: &session.ProtocolUpdate{SessionUpdate: "activation"},
 			},
 		},
 		{
@@ -178,6 +217,7 @@ type semanticACPEnvelope struct {
 	ParticipantID string
 	Final         bool
 	Update        semanticACPUpdate
+	Permission    *schema.RequestPermissionRequest
 	Usage         *eventstream.UsageSnapshot
 	Participant   *eventstream.Participant
 	Lifecycle     *eventstream.Lifecycle
@@ -212,6 +252,7 @@ func semanticACPEnvelopes(events []eventstream.Envelope) []semanticACPEnvelope {
 			ParticipantID: env.ParticipantID,
 			Final:         env.Final,
 			Update:        semanticACPUpdateOf(env.Update),
+			Permission:    env.Permission,
 			Usage:         env.Usage,
 			Participant:   env.Participant,
 			Lifecycle:     env.Lifecycle,

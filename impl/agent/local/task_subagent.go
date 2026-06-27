@@ -732,7 +732,8 @@ func (tm *taskRuntime) attachSubagentParticipant(ctx context.Context, activeSess
 				Name: "spawn",
 			},
 			Protocol: &session.EventProtocol{
-				Participant: &session.ProtocolParticipant{Action: "attached"},
+				Method: session.ProtocolMethodParticipantUpdate,
+				Update: &session.ProtocolUpdate{SessionUpdate: "attached"},
 			},
 			Scope: &session.EventScope{
 				Participant: session.ParticipantRef{
@@ -773,7 +774,8 @@ func (tm *taskRuntime) updateSubagentParticipant(ctx context.Context, task *suba
 				Name: "spawn",
 			},
 			Protocol: &session.EventProtocol{
-				Participant: &session.ProtocolParticipant{Action: strings.TrimSpace(action)},
+				Method: session.ProtocolMethodParticipantUpdate,
+				Update: &session.ProtocolUpdate{SessionUpdate: strings.TrimSpace(action)},
 			},
 			Scope: &session.EventScope{
 				Participant: session.ParticipantRef{

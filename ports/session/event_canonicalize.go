@@ -79,12 +79,7 @@ func removeToolProjectionProtocol(event *Event) {
 		switch strings.TrimSpace(protocol.Update.SessionUpdate) {
 		case string(ProtocolUpdateTypeToolCall), string(ProtocolUpdateTypeToolUpdate):
 			protocol.Update = nil
-			protocol.ToolCall = nil
-			protocol.UpdateType = ""
 		}
-	}
-	if protocol.ToolCall != nil {
-		protocol.ToolCall = nil
 	}
 	if protocol.Method == ProtocolMethodSessionUpdate && protocol.Update == nil && protocol.Permission == nil {
 		event.Protocol = nil

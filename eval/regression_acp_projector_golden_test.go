@@ -87,12 +87,11 @@ func TestRegressionACPProjectorGoldenDiffTitle(t *testing.T) {
 		SessionID: "sess-1",
 		Type:      session.EventTypeToolCall,
 		Protocol: &session.EventProtocol{
-			UpdateType: projector.UpdateToolCallInfo,
-			ToolCall: &session.ProtocolToolCall{
-				ID:     "call-write",
-				Name:   "WRITE",
-				Kind:   projector.ToolKindEdit,
-				Status: "completed",
+			Update: &session.ProtocolUpdate{
+				SessionUpdate: projector.UpdateToolCallInfo,
+				ToolCallID:    "call-write",
+				Kind:          projector.ToolKindEdit,
+				Status:        "completed",
 				RawInput: map[string]any{
 					"path": "/workspace/main.go",
 				},
@@ -129,12 +128,11 @@ func TestRegressionACPProjectorGoldenApprovalRequest(t *testing.T) {
 		SessionID: "sess-1",
 		Type:      session.EventTypeToolCall,
 		Protocol: &session.EventProtocol{
-			UpdateType: projector.UpdateToolCallInfo,
-			ToolCall: &session.ProtocolToolCall{
-				ID:     "call-rm",
-				Name:   "RUN_COMMAND",
-				Kind:   projector.ToolKindExecute,
-				Status: "waiting_approval",
+			Update: &session.ProtocolUpdate{
+				SessionUpdate: projector.UpdateToolCallInfo,
+				ToolCallID:    "call-rm",
+				Kind:          projector.ToolKindExecute,
+				Status:        "waiting_approval",
 				RawInput: map[string]any{
 					"command": "rm -rf /tmp/demo",
 				},
@@ -189,12 +187,11 @@ func TestRegressionACPProjectorGoldenLifecycleStatusMapping(t *testing.T) {
 				SessionID: "sess-1",
 				Type:      session.EventTypeToolResult,
 				Protocol: &session.EventProtocol{
-					UpdateType: projector.UpdateToolCallInfo,
-					ToolCall: &session.ProtocolToolCall{
-						ID:     "call-1",
-						Name:   "RUN_COMMAND",
-						Kind:   projector.ToolKindExecute,
-						Status: tt.status,
+					Update: &session.ProtocolUpdate{
+						SessionUpdate: projector.UpdateToolCallInfo,
+						ToolCallID:    "call-1",
+						Kind:          projector.ToolKindExecute,
+						Status:        tt.status,
 					},
 				},
 			})
@@ -226,7 +223,6 @@ func TestRegressionACPProjectorGoldenAssistantMessage(t *testing.T) {
 		SessionID: "sess-1",
 		Type:      session.EventTypeAssistant,
 		Protocol: &session.EventProtocol{
-			UpdateType: projector.UpdateAgentMessage,
 			Update: &session.ProtocolUpdate{
 				SessionUpdate: projector.UpdateAgentMessage,
 				Content:       session.ProtocolTextContent("The answer is 42."),
@@ -291,7 +287,8 @@ func TestRegressionACPProjectorPermissionRequest(t *testing.T) {
 		SessionID: "sess-1",
 		Type:      session.EventTypeToolCall,
 		Protocol: &session.EventProtocol{
-			Approval: &session.ProtocolApproval{
+			Method: session.ProtocolMethodRequestPermission,
+			Permission: &session.ProtocolApproval{
 				ToolCall: session.ProtocolToolCall{
 					ID:   "call-rm",
 					Name: "RUN_COMMAND",
@@ -331,12 +328,11 @@ func TestRegressionACPProjectorNotifications(t *testing.T) {
 		SessionID: "sess-notif",
 		Type:      session.EventTypeToolResult,
 		Protocol: &session.EventProtocol{
-			UpdateType: projector.UpdateToolCallInfo,
-			ToolCall: &session.ProtocolToolCall{
-				ID:     "call-1",
-				Name:   "RUN_COMMAND",
-				Kind:   projector.ToolKindExecute,
-				Status: "completed",
+			Update: &session.ProtocolUpdate{
+				SessionUpdate: projector.UpdateToolCallInfo,
+				ToolCallID:    "call-1",
+				Kind:          projector.ToolKindExecute,
+				Status:        "completed",
 			},
 		},
 	})

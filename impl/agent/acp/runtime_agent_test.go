@@ -156,7 +156,7 @@ func TestRuntimeAgentLoadSessionReplaysDurableEvents(t *testing.T) {
 			Message: &assistant,
 			Text:    "world",
 			Protocol: &session.EventProtocol{
-				UpdateType: string(session.ProtocolUpdateTypeAgentMessage),
+				Update: &session.ProtocolUpdate{SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage)},
 			},
 		},
 	}); err != nil {
@@ -1123,7 +1123,7 @@ func (r *sideACPCommandRuntime) PromptParticipant(ctx context.Context, req agent
 		Message:    &msg,
 		Text:       msg.TextContent(),
 		Protocol: &session.EventProtocol{
-			UpdateType: acp.UpdateAgentMessage,
+			Update: &session.ProtocolUpdate{SessionUpdate: acp.UpdateAgentMessage},
 		},
 	}
 	return agent.RunResult{Session: activeSession, Handle: sideACPCommandRun{event: event}}, nil
@@ -1267,12 +1267,12 @@ func (r terminalBridgeRuntime) Run(_ context.Context, req agent.RunRequest) (age
 				SessionID: sessionID,
 				Type:      session.EventTypeToolCall,
 				Protocol: &session.EventProtocol{
-					UpdateType: string(session.ProtocolUpdateTypeToolCall),
-					ToolCall: &session.ProtocolToolCall{
-						ID:       "call-1",
-						Name:     toolName,
-						Status:   "pending",
-						RawInput: rawInput,
+					Update: &session.ProtocolUpdate{
+						SessionUpdate: string(session.ProtocolUpdateTypeToolCall),
+						ToolCallID:    "call-1",
+						Kind:          toolName,
+						Status:        "pending",
+						RawInput:      rawInput,
 					},
 				},
 			},
@@ -1281,12 +1281,12 @@ func (r terminalBridgeRuntime) Run(_ context.Context, req agent.RunRequest) (age
 				Type:       session.EventTypeToolResult,
 				Visibility: session.VisibilityUIOnly,
 				Protocol: &session.EventProtocol{
-					UpdateType: string(session.ProtocolUpdateTypeToolUpdate),
-					ToolCall: &session.ProtocolToolCall{
-						ID:      "call-1",
-						Name:    toolName,
-						Status:  "running",
-						Content: []session.ProtocolToolCallContent{{Type: "terminal", TerminalID: terminalID}},
+					Update: &session.ProtocolUpdate{
+						SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate),
+						ToolCallID:    "call-1",
+						Kind:          toolName,
+						Status:        "running",
+						Content:       []session.ProtocolToolCallContent{{Type: "terminal", TerminalID: terminalID}},
 					},
 				},
 				Meta: map[string]any{
@@ -1347,12 +1347,12 @@ func (r terminalBridgeFinalRuntime) Run(_ context.Context, req agent.RunRequest)
 				SessionID: sessionID,
 				Type:      session.EventTypeToolCall,
 				Protocol: &session.EventProtocol{
-					UpdateType: string(session.ProtocolUpdateTypeToolCall),
-					ToolCall: &session.ProtocolToolCall{
-						ID:       "call-1",
-						Name:     toolName,
-						Status:   "pending",
-						RawInput: rawInput,
+					Update: &session.ProtocolUpdate{
+						SessionUpdate: string(session.ProtocolUpdateTypeToolCall),
+						ToolCallID:    "call-1",
+						Kind:          toolName,
+						Status:        "pending",
+						RawInput:      rawInput,
 					},
 				},
 			},
@@ -1360,11 +1360,11 @@ func (r terminalBridgeFinalRuntime) Run(_ context.Context, req agent.RunRequest)
 				SessionID: sessionID,
 				Type:      session.EventTypeToolResult,
 				Protocol: &session.EventProtocol{
-					UpdateType: string(session.ProtocolUpdateTypeToolUpdate),
-					ToolCall: &session.ProtocolToolCall{
-						ID:     "call-1",
-						Name:   toolName,
-						Status: "completed",
+					Update: &session.ProtocolUpdate{
+						SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate),
+						ToolCallID:    "call-1",
+						Kind:          toolName,
+						Status:        "completed",
 						Content: []session.ProtocolToolCallContent{{
 							Type:       "terminal",
 							TerminalID: terminalID,
@@ -1413,7 +1413,7 @@ func (narrativeReplayRuntime) Run(_ context.Context, req agent.RunRequest) (agen
 				Text:       "hello",
 				Visibility: session.VisibilityUIOnly,
 				Protocol: &session.EventProtocol{
-					UpdateType: string(session.ProtocolUpdateTypeAgentMessage),
+					Update: &session.ProtocolUpdate{SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage)},
 				},
 			},
 			{
@@ -1423,7 +1423,7 @@ func (narrativeReplayRuntime) Run(_ context.Context, req agent.RunRequest) (agen
 				Text:       "hello world",
 				Visibility: session.VisibilityUIOnly,
 				Protocol: &session.EventProtocol{
-					UpdateType: string(session.ProtocolUpdateTypeAgentMessage),
+					Update: &session.ProtocolUpdate{SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage)},
 				},
 			},
 			{
@@ -1432,7 +1432,7 @@ func (narrativeReplayRuntime) Run(_ context.Context, req agent.RunRequest) (agen
 				Message:   &finalHelloWorld,
 				Text:      "hello world",
 				Protocol: &session.EventProtocol{
-					UpdateType: string(session.ProtocolUpdateTypeAgentMessage),
+					Update: &session.ProtocolUpdate{SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage)},
 				},
 			},
 		}},
@@ -1460,7 +1460,7 @@ func (narrativeThoughtReplayRuntime) Run(_ context.Context, req agent.RunRequest
 				Text:       "任务已",
 				Visibility: session.VisibilityUIOnly,
 				Protocol: &session.EventProtocol{
-					UpdateType: string(session.ProtocolUpdateTypeAgentThought),
+					Update: &session.ProtocolUpdate{SessionUpdate: string(session.ProtocolUpdateTypeAgentThought)},
 				},
 			},
 			{
@@ -1470,7 +1470,7 @@ func (narrativeThoughtReplayRuntime) Run(_ context.Context, req agent.RunRequest
 				Text:       "启动",
 				Visibility: session.VisibilityUIOnly,
 				Protocol: &session.EventProtocol{
-					UpdateType: string(session.ProtocolUpdateTypeAgentThought),
+					Update: &session.ProtocolUpdate{SessionUpdate: string(session.ProtocolUpdateTypeAgentThought)},
 				},
 			},
 			{
@@ -1479,7 +1479,7 @@ func (narrativeThoughtReplayRuntime) Run(_ context.Context, req agent.RunRequest
 				Message:   &finalStarted,
 				Text:      "任务已启动",
 				Protocol: &session.EventProtocol{
-					UpdateType: string(session.ProtocolUpdateTypeAgentThought),
+					Update: &session.ProtocolUpdate{SessionUpdate: string(session.ProtocolUpdateTypeAgentThought)},
 				},
 			},
 		}},

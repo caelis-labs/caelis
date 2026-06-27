@@ -213,7 +213,7 @@ func (r *sidecarLifecycleRuntime) PromptParticipant(ctx context.Context, req age
 		Message:    &msg,
 		Text:       msg.TextContent(),
 		Protocol: &session.EventProtocol{
-			UpdateType: acp.UpdateAgentMessage,
+			Update: &session.ProtocolUpdate{SessionUpdate: acp.UpdateAgentMessage},
 		},
 	}
 	return agent.RunResult{Session: activeSession, Handle: singleEventSidecarRun{event: event}}, nil

@@ -36,7 +36,8 @@ func participantLifecycleEvent(activeSession session.Session, binding session.Pa
 		Actor:      session.ActorRef{Kind: session.ActorKindSystem, Name: "runtime"},
 		Text:       text,
 		Protocol: &session.EventProtocol{
-			Participant: &session.ProtocolParticipant{Action: strings.TrimSpace(action)},
+			Method: session.ProtocolMethodParticipantUpdate,
+			Update: &session.ProtocolUpdate{SessionUpdate: strings.TrimSpace(action)},
 		},
 		Scope: &session.EventScope{
 			Source: "control_plane",

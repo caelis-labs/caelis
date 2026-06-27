@@ -27,9 +27,10 @@ func IsCanonicalHistoryEvent(event *Event) bool {
 }
 
 // IsInvocationVisibleEvent reports whether one event may participate in the
-// current invocation context.
+// current invocation context. Overlay events are transient display overlays, so
+// they are not model-visible even when they mirror otherwise canonical shapes.
 func IsInvocationVisibleEvent(event *Event) bool {
-	if event == nil || IsUIOnly(event) || IsNotice(event) || IsMirror(event) {
+	if event == nil || IsUIOnly(event) || IsOverlay(event) || IsNotice(event) || IsMirror(event) {
 		return false
 	}
 	return true

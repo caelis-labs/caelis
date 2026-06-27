@@ -633,12 +633,12 @@ func TestSubagentStreamsExposeStructuredEventFramesWithoutPreviewFallback(t *tes
 		State:   string(delegation.StateRunning),
 		Event: &session.Event{
 			Type: session.EventTypeToolCall,
-			Protocol: &session.EventProtocol{ToolCall: &session.ProtocolToolCall{
-				ID:     "ws-1",
-				Name:   "Searching the Web",
-				Kind:   "fetch",
-				Title:  "Searching the Web",
-				Status: "running",
+			Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
+				SessionUpdate: string(session.ProtocolUpdateTypeToolCall),
+				ToolCallID:    "ws-1",
+				Kind:          "fetch",
+				Title:         "Searching the Web",
+				Status:        "running",
 			}},
 		},
 	})
@@ -656,11 +656,12 @@ func TestSubagentStreamsExposeStructuredEventFramesWithoutPreviewFallback(t *tes
 	if frame.Text != "" {
 		t.Fatalf("structured event frame text = %q, want no preview fallback text", frame.Text)
 	}
-	if frame.Event == nil || frame.Event.Protocol == nil || frame.Event.Protocol.ToolCall == nil {
+	update := session.ProtocolUpdateOf(frame.Event)
+	if frame.Event == nil || update == nil {
 		t.Fatalf("structured event frame = %#v, want tool call event", frame)
 	}
-	if frame.Event.Protocol.ToolCall.Kind != "fetch" {
-		t.Fatalf("tool kind = %q, want fetch", frame.Event.Protocol.ToolCall.Kind)
+	if update.Kind != "fetch" {
+		t.Fatalf("tool kind = %q, want fetch", update.Kind)
 	}
 }
 
@@ -763,12 +764,12 @@ func TestSubagentStructuredToolFramesStillSurfaceFinalResult(t *testing.T) {
 		State:   string(delegation.StateRunning),
 		Event: &session.Event{
 			Type: session.EventTypeToolCall,
-			Protocol: &session.EventProtocol{ToolCall: &session.ProtocolToolCall{
-				ID:     "ws-1",
-				Name:   "Searching the Web",
-				Kind:   "fetch",
-				Title:  "Searching the Web",
-				Status: "running",
+			Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
+				SessionUpdate: string(session.ProtocolUpdateTypeToolCall),
+				ToolCallID:    "ws-1",
+				Kind:          "fetch",
+				Title:         "Searching the Web",
+				Status:        "running",
 			}},
 		},
 	})

@@ -55,7 +55,7 @@ func TestRuntimeAgentConformanceReplayOrdering(t *testing.T) {
 			Message: &assistant,
 			Text:    "world",
 			Protocol: &session.EventProtocol{
-				UpdateType: string(session.ProtocolUpdateTypeAgentMessage),
+				Update: &session.ProtocolUpdate{SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage)},
 			},
 		},
 	}); err != nil {

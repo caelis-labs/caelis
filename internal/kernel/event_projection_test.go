@@ -143,10 +143,11 @@ func TestProjectSessionEventPreservesMinimalCaelisMeta(t *testing.T) {
 			},
 		},
 		Protocol: &session.EventProtocol{
-			ToolCall: &session.ProtocolToolCall{
-				ID:     "call-task",
-				Name:   "TASK",
-				Status: "running",
+			Update: &session.ProtocolUpdate{
+				SessionUpdate: string(session.ProtocolUpdateTypeToolCall),
+				ToolCallID:    "call-task",
+				Kind:          "TASK",
+				Status:        "running",
 			},
 		},
 	})
@@ -299,13 +300,13 @@ func TestProjectSessionEventACPNativeGolden(t *testing.T) {
 					},
 				},
 				Protocol: &session.EventProtocol{
-					ToolCall: &session.ProtocolToolCall{
-						ID:       "call-command-1",
-						Name:     "RUN_COMMAND",
-						Kind:     "execute",
-						Title:    "RUN_COMMAND",
-						Status:   "running",
-						RawInput: map[string]any{"command": "echo hi"},
+					Update: &session.ProtocolUpdate{
+						SessionUpdate: string(session.ProtocolUpdateTypeToolCall),
+						ToolCallID:    "call-command-1",
+						Kind:          "execute",
+						Title:         "RUN_COMMAND",
+						Status:        "running",
+						RawInput:      map[string]any{"command": "echo hi"},
 					},
 				},
 			},
@@ -316,7 +317,8 @@ func TestProjectSessionEventACPNativeGolden(t *testing.T) {
 				ID:   "approval-event-1",
 				Type: session.EventTypeLifecycle,
 				Protocol: &session.EventProtocol{
-					Approval: &session.ProtocolApproval{
+					Method: session.ProtocolMethodRequestPermission,
+					Permission: &session.ProtocolApproval{
 						ToolCall: session.ProtocolToolCall{
 							ID:       "call-command-approval",
 							Name:     "RUN_COMMAND",
@@ -402,7 +404,7 @@ func TestProjectSessionEventsCanonicalPayloadsTableDriven(t *testing.T) {
 				Visibility: session.VisibilityUIOnly,
 				Message:    &reasoningMessage,
 				Protocol: &session.EventProtocol{
-					UpdateType: string(session.ProtocolUpdateTypeAgentThought),
+					Update: &session.ProtocolUpdate{SessionUpdate: string(session.ProtocolUpdateTypeAgentThought)},
 				},
 			},
 			want: func(t *testing.T, env EventEnvelope) {
@@ -427,7 +429,7 @@ func TestProjectSessionEventsCanonicalPayloadsTableDriven(t *testing.T) {
 				Visibility: session.VisibilityUIOnly,
 				Message:    &spaceReasoningMessage,
 				Protocol: &session.EventProtocol{
-					UpdateType: string(session.ProtocolUpdateTypeAgentThought),
+					Update: &session.ProtocolUpdate{SessionUpdate: string(session.ProtocolUpdateTypeAgentThought)},
 				},
 			},
 			want: func(t *testing.T, env EventEnvelope) {
@@ -448,7 +450,7 @@ func TestProjectSessionEventsCanonicalPayloadsTableDriven(t *testing.T) {
 				Text:       " ",
 				Visibility: session.VisibilityUIOnly,
 				Protocol: &session.EventProtocol{
-					UpdateType: string(session.ProtocolUpdateTypeAgentThought),
+					Update: &session.ProtocolUpdate{SessionUpdate: string(session.ProtocolUpdateTypeAgentThought)},
 				},
 			},
 			want: func(t *testing.T, env EventEnvelope) {
@@ -472,7 +474,7 @@ func TestProjectSessionEventsCanonicalPayloadsTableDriven(t *testing.T) {
 				Text:       " ",
 				Visibility: session.VisibilityUIOnly,
 				Protocol: &session.EventProtocol{
-					UpdateType: string(session.ProtocolUpdateTypeAgentMessage),
+					Update: &session.ProtocolUpdate{SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage)},
 				},
 			},
 			want: func(t *testing.T, env EventEnvelope) {
@@ -494,7 +496,8 @@ func TestProjectSessionEventsCanonicalPayloadsTableDriven(t *testing.T) {
 				ID:   "plan-1",
 				Type: session.EventTypePlan,
 				Protocol: &session.EventProtocol{
-					Plan: &session.ProtocolPlan{
+					Update: &session.ProtocolUpdate{
+						SessionUpdate: string(session.ProtocolUpdateTypePlan),
 						Entries: []session.ProtocolPlanEntry{
 							{Content: "Inspect gateway event flow", Status: "in_progress", Priority: "high"},
 						},
@@ -520,10 +523,11 @@ func TestProjectSessionEventsCanonicalPayloadsTableDriven(t *testing.T) {
 				ID:   "tool-call-started",
 				Type: session.EventTypeToolCall,
 				Protocol: &session.EventProtocol{
-					ToolCall: &session.ProtocolToolCall{
-						ID:       "call-1",
-						Name:     "READ",
-						RawInput: map[string]any{"path": "/tmp/demo.txt"},
+					Update: &session.ProtocolUpdate{
+						SessionUpdate: string(session.ProtocolUpdateTypeToolCall),
+						ToolCallID:    "call-1",
+						Kind:          "READ",
+						RawInput:      map[string]any{"path": "/tmp/demo.txt"},
 					},
 				},
 			},
@@ -546,11 +550,12 @@ func TestProjectSessionEventsCanonicalPayloadsTableDriven(t *testing.T) {
 				ID:   "tool-call-running",
 				Type: session.EventTypeToolCall,
 				Protocol: &session.EventProtocol{
-					ToolCall: &session.ProtocolToolCall{
-						ID:       "call-2",
-						Name:     "RUN_COMMAND",
-						Status:   "running",
-						RawInput: map[string]any{"command": "sleep 1"},
+					Update: &session.ProtocolUpdate{
+						SessionUpdate: string(session.ProtocolUpdateTypeToolCall),
+						ToolCallID:    "call-2",
+						Kind:          "RUN_COMMAND",
+						Status:        "running",
+						RawInput:      map[string]any{"command": "sleep 1"},
 					},
 				},
 			},
@@ -570,12 +575,13 @@ func TestProjectSessionEventsCanonicalPayloadsTableDriven(t *testing.T) {
 				ID:   "tool-result-completed",
 				Type: session.EventTypeToolResult,
 				Protocol: &session.EventProtocol{
-					ToolCall: &session.ProtocolToolCall{
-						ID:        "call-3",
-						Name:      "READ",
-						Status:    "completed",
-						RawInput:  map[string]any{"path": "/tmp/demo.txt"},
-						RawOutput: map[string]any{"path": "/tmp/demo.txt"},
+					Update: &session.ProtocolUpdate{
+						SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate),
+						ToolCallID:    "call-3",
+						Kind:          "READ",
+						Status:        "completed",
+						RawInput:      map[string]any{"path": "/tmp/demo.txt"},
+						RawOutput:     map[string]any{"path": "/tmp/demo.txt"},
 					},
 				},
 			},
@@ -595,11 +601,12 @@ func TestProjectSessionEventsCanonicalPayloadsTableDriven(t *testing.T) {
 				ID:   "tool-result-read-display",
 				Type: session.EventTypeToolResult,
 				Protocol: &session.EventProtocol{
-					ToolCall: &session.ProtocolToolCall{
-						ID:       "call-read",
-						Name:     "READ",
-						Status:   "completed",
-						RawInput: map[string]any{"path": "/tmp/demo.py", "offset": 0, "limit": 100},
+					Update: &session.ProtocolUpdate{
+						SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate),
+						ToolCallID:    "call-read",
+						Kind:          "READ",
+						Status:        "completed",
+						RawInput:      map[string]any{"path": "/tmp/demo.py", "offset": 0, "limit": 100},
 						RawOutput: map[string]any{
 							"path":       "/tmp/demo.py",
 							"start_line": 1,
@@ -639,12 +646,13 @@ func TestProjectSessionEventsCanonicalPayloadsTableDriven(t *testing.T) {
 				ID:   "tool-result-failed",
 				Type: session.EventTypeToolResult,
 				Protocol: &session.EventProtocol{
-					ToolCall: &session.ProtocolToolCall{
-						ID:        "call-4",
-						Name:      "RUN_COMMAND",
-						Status:    "error",
-						RawInput:  map[string]any{"command": "exit 1"},
-						RawOutput: map[string]any{"error": "exit status 1"},
+					Update: &session.ProtocolUpdate{
+						SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate),
+						ToolCallID:    "call-4",
+						Kind:          "RUN_COMMAND",
+						Status:        "error",
+						RawInput:      map[string]any{"command": "exit 1"},
+						RawOutput:     map[string]any{"error": "exit status 1"},
 					},
 				},
 			},
@@ -674,7 +682,8 @@ func TestProjectSessionEventsCanonicalPayloadsTableDriven(t *testing.T) {
 					ACP: session.ACPRef{SessionID: "remote-session-1"},
 				},
 				Protocol: &session.EventProtocol{
-					Participant: &session.ProtocolParticipant{Action: "attached"},
+					Method: session.ProtocolMethodParticipantUpdate,
+					Update: &session.ProtocolUpdate{SessionUpdate: "attached"},
 				},
 			},
 			want: func(t *testing.T, env EventEnvelope) {
@@ -866,11 +875,11 @@ func TestProjectSessionEventsFallsBackToMessageToolUseRawInput(t *testing.T) {
 		Message: &message,
 		Meta:    map[string]any{"caelis": map[string]any{"runtime": map[string]any{"tool": map[string]any{"name": "SPAWN"}}}},
 		Protocol: &session.EventProtocol{
-			ToolCall: &session.ProtocolToolCall{
-				ID:     "spawn-call",
-				Name:   "SPAWN",
-				Kind:   "execute",
-				Status: "running",
+			Update: &session.ProtocolUpdate{
+				SessionUpdate: string(session.ProtocolUpdateTypeToolCall),
+				ToolCallID:    "spawn-call",
+				Kind:          "execute",
+				Status:        "running",
 			},
 		},
 	}})
@@ -941,7 +950,9 @@ func TestProjectSessionEventACPMessageChunkIsStreamingDelta(t *testing.T) {
 		Visibility: session.VisibilityCanonical,
 		Text:       "上海",
 		Scope:      &session.EventScope{Source: "acp_participant"},
-		Protocol:   &session.EventProtocol{UpdateType: string(session.ProtocolUpdateTypeAgentMessage)},
+		Protocol: &session.EventProtocol{
+			Update: &session.ProtocolUpdate{SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage)},
+		},
 	})
 	if !ok {
 		t.Fatal("ProjectSessionEvent() ok = false, want true")
@@ -966,7 +977,9 @@ func TestProjectSessionEventPersistedACPMessageChunkIsReplayFinal(t *testing.T) 
 		Visibility: session.VisibilityCanonical,
 		Text:       "上海今天小雨。",
 		Scope:      &session.EventScope{Source: "acp_participant"},
-		Protocol:   &session.EventProtocol{UpdateType: string(session.ProtocolUpdateTypeAgentMessage)},
+		Protocol: &session.EventProtocol{
+			Update: &session.ProtocolUpdate{SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage)},
+		},
 	})
 	if !ok {
 		t.Fatal("ProjectSessionEvent() ok = false, want true")
@@ -990,7 +1003,7 @@ func TestProjectSessionEventProjectsThoughtTextWithoutMessage(t *testing.T) {
 		Visibility: session.VisibilityCanonical,
 		Text:       "thinking through side output",
 		Protocol: &session.EventProtocol{
-			UpdateType: string(session.ProtocolUpdateTypeAgentThought),
+			Update: &session.ProtocolUpdate{SessionUpdate: string(session.ProtocolUpdateTypeAgentThought)},
 		},
 	})
 	if !ok {

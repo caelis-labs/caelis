@@ -859,8 +859,8 @@ func TestRenderCompactionEventIncludesPlanEntries(t *testing.T) {
 		Visibility: session.VisibilityCanonical,
 		Text:       "execution plan refreshed",
 		Protocol: &session.EventProtocol{
-			UpdateType: string(session.ProtocolUpdateTypePlan),
-			Plan: &session.ProtocolPlan{
+			Update: &session.ProtocolUpdate{
+				SessionUpdate: string(session.ProtocolUpdateTypePlan),
 				Entries: []session.ProtocolPlanEntry{
 					{Content: "run provider compact e2e", Status: "in_progress"},
 					{Content: "verify append-only replay", Status: "pending"},
@@ -906,6 +906,38 @@ func TestCompactableEventsIgnoreReplacementOverlayHistory(t *testing.T) {
 	got := compactableEvents(events)
 	if len(got) != 1 {
 		t.Fatalf("compactableEvents() count = %d, want 1 (%v)", len(got), got)
+	}
+	if text := eventTextForCompaction(got[0]); text != "Fresh canonical user event after the latest compact." {
+		t.Fatalf("compactable event text = %q, want fresh canonical event", text)
+	}
+}
+
+func TestCompactableEventsIgnoreSyntheticCheckpointPromptReplacement(t *testing.T) {
+	t.Parallel()
+
+	compactText := "CONTEXT CHECKPOINT\n\n## Current Objective\n- continue from compact"
+	compactEvent := &session.Event{
+		Type:       session.EventTypeCompact,
+		Visibility: session.VisibilityCanonical,
+		Text:       compactText,
+		Meta: map[string]any{
+			compact.MetaKeyCompact: compact.CompactEventDataValue(compact.CompactEventData{
+				ContractVersion: compact.CompactContractVersion,
+				Generator:       "model_markdown",
+			}),
+		},
+	}
+	next := userTextEvent("Fresh canonical user event after the latest compact.")
+	events := []*session.Event{compactEvent, next}
+
+	promptEvents := compact.PromptEventsFromLatestCompact(events)
+	if len(promptEvents) != 2 || eventTextForCompaction(promptEvents[0]) != compactText {
+		t.Fatalf("PromptEventsFromLatestCompact() = %+v, want checkpoint replacement plus next event", promptEvents)
+	}
+
+	got := compactableEvents(events)
+	if len(got) != 1 {
+		t.Fatalf("compactableEvents() count = %d, want only post-compact event (%+v)", len(got), got)
 	}
 	if text := eventTextForCompaction(got[0]); text != "Fresh canonical user event after the latest compact." {
 		t.Fatalf("compactable event text = %q, want fresh canonical event", text)

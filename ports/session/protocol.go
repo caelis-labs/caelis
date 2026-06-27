@@ -140,15 +140,9 @@ type ProtocolHandoff struct {
 // It groups protocol-shaped extensions under one nested object so Event itself
 // stays small and stable.
 type EventProtocol struct {
-	Method      string               `json:"method,omitempty"`
-	Update      *ProtocolUpdate      `json:"update,omitempty"`
-	Permission  *ProtocolApproval    `json:"permission,omitempty"`
-	UpdateType  string               `json:"-"`
-	ToolCall    *ProtocolToolCall    `json:"-"`
-	Plan        *ProtocolPlan        `json:"-"`
-	Approval    *ProtocolApproval    `json:"-"`
-	Participant *ProtocolParticipant `json:"-"`
-	Handoff     *ProtocolHandoff     `json:"-"`
+	Method     string            `json:"method,omitempty"`
+	Update     *ProtocolUpdate   `json:"update,omitempty"`
+	Permission *ProtocolApproval `json:"permission,omitempty"`
 }
 
 func (p EventProtocol) MarshalJSON() ([]byte, error) {
@@ -158,11 +152,7 @@ func (p EventProtocol) MarshalJSON() ([]byte, error) {
 		Permission *ProtocolApproval `json:"permission,omitempty"`
 	}
 	normalized := CloneEventProtocol(p)
-	return json.Marshal(protocolJSON{
-		Method:     normalized.Method,
-		Update:     normalized.Update,
-		Permission: normalized.Permission,
-	})
+	return json.Marshal(protocolJSON(normalized))
 }
 
 func (p *EventProtocol) UnmarshalJSON(data []byte) error {
@@ -177,8 +167,7 @@ func (p *EventProtocol) UnmarshalJSON(data []byte) error {
 }
 
 // ProtocolUpdateOf returns the normalized ACP session/update payload for one
-// event, accepting legacy in-memory aliases while keeping the durable JSON shape
-// centered on EventProtocol.Update.
+// event.
 func ProtocolUpdateOf(event *Event) *ProtocolUpdate {
 	if event == nil || event.Protocol == nil {
 		return nil
@@ -187,8 +176,7 @@ func ProtocolUpdateOf(event *Event) *ProtocolUpdate {
 }
 
 // ProtocolUpdateOfProtocol returns the normalized ACP session/update payload
-// for one protocol payload, accepting legacy in-memory aliases while keeping
-// readers centered on EventProtocol.Update.
+// for one protocol payload.
 func ProtocolUpdateOfProtocol(protocol *EventProtocol) *ProtocolUpdate {
 	if protocol == nil {
 		return nil
@@ -216,7 +204,7 @@ func ProtocolSessionUpdateTypeOfProtocol(protocol *EventProtocol) string {
 }
 
 // ProtocolPermissionOf returns the normalized ACP permission payload for one
-// event without exposing transitional json:"-" aliases to callers.
+// event.
 func ProtocolPermissionOf(event *Event) *ProtocolApproval {
 	if event == nil || event.Protocol == nil {
 		return nil
@@ -230,32 +218,36 @@ func ProtocolPermissionOf(event *Event) *ProtocolApproval {
 }
 
 // ProtocolParticipantOf returns the normalized ACP participant payload for one
-// event without exposing transitional json:"-" aliases to callers.
+// event.
 func ProtocolParticipantOf(event *Event) *ProtocolParticipant {
 	if event == nil || event.Protocol == nil {
 		return nil
 	}
 	normalized := CloneEventProtocol(*event.Protocol)
-	if normalized.Participant == nil {
+	if normalized.Method != ProtocolMethodParticipantUpdate || normalized.Update == nil {
 		return nil
 	}
-	out := *normalized.Participant
-	out.Action = strings.TrimSpace(out.Action)
+	out := ProtocolParticipant{Action: strings.TrimSpace(normalized.Update.SessionUpdate)}
+	if out.Action == "" {
+		return nil
+	}
 	return &out
 }
 
 // ProtocolHandoffOf returns the normalized ACP controller-handoff payload for
-// one event without exposing transitional json:"-" aliases to callers.
+// one event.
 func ProtocolHandoffOf(event *Event) *ProtocolHandoff {
 	if event == nil || event.Protocol == nil {
 		return nil
 	}
 	normalized := CloneEventProtocol(*event.Protocol)
-	if normalized.Handoff == nil {
+	if normalized.Method != ProtocolMethodControllerHandoff || normalized.Update == nil {
 		return nil
 	}
-	out := *normalized.Handoff
-	out.Phase = strings.TrimSpace(out.Phase)
+	out := ProtocolHandoff{Phase: strings.TrimSpace(normalized.Update.SessionUpdate)}
+	if out.Phase == "" {
+		return nil
+	}
 	return &out
 }
 
@@ -431,125 +423,22 @@ func protocolOptionalString(value any) (string, bool) {
 // CloneEventProtocol returns one normalized event protocol payload copy.
 func CloneEventProtocol(in EventProtocol) EventProtocol {
 	out := EventProtocol{
-		Method:     strings.TrimSpace(in.Method),
-		UpdateType: strings.TrimSpace(in.UpdateType),
-	}
-	var sourceToolCall *ProtocolToolCall
-	if in.ToolCall != nil {
-		call := cloneProtocolToolCall(*in.ToolCall)
-		sourceToolCall = &call
+		Method: strings.TrimSpace(in.Method),
 	}
 	if in.Update != nil {
 		update := cloneProtocolUpdate(*in.Update)
 		out.Update = &update
 	}
-	if out.Update == nil {
-		switch {
-		case sourceToolCall != nil:
-			call := *sourceToolCall
-			update := &ProtocolUpdate{
-				SessionUpdate: firstNonEmpty(out.UpdateType, string(ProtocolUpdateTypeToolCall)),
-				ToolCallID:    call.ID,
-				Title:         call.Title,
-				Kind:          firstNonEmpty(call.Kind, call.Name),
-				Status:        call.Status,
-				RawInput:      maps.Clone(call.RawInput),
-				RawOutput:     maps.Clone(call.RawOutput),
-			}
-			if len(call.Content) > 0 {
-				update.Content = cloneProtocolToolCallContents(call.Content)
-			}
-			out.Update = update
-		case in.Plan != nil:
-			out.Update = &ProtocolUpdate{
-				SessionUpdate: firstNonEmpty(out.UpdateType, string(ProtocolUpdateTypePlan)),
-				Entries:       cloneProtocolPlanEntries(in.Plan.Entries),
-			}
-		case out.UpdateType != "":
-			out.Update = &ProtocolUpdate{SessionUpdate: out.UpdateType}
-		}
-	}
-	if out.Update != nil {
-		update := cloneProtocolUpdate(*out.Update)
-		if update.SessionUpdate == "" {
-			update.SessionUpdate = out.UpdateType
-		}
-		out.UpdateType = strings.TrimSpace(update.SessionUpdate)
-		out.Update = &update
-		switch update.SessionUpdate {
-		case string(ProtocolUpdateTypeToolCall), string(ProtocolUpdateTypeToolUpdate):
-			sourceName := ""
-			sourceKind := ""
-			sourceTitle := ""
-			if sourceToolCall != nil {
-				sourceName = sourceToolCall.Name
-				sourceKind = sourceToolCall.Kind
-				sourceTitle = sourceToolCall.Title
-			}
-			out.ToolCall = &ProtocolToolCall{
-				ID:        strings.TrimSpace(update.ToolCallID),
-				Name:      firstNonEmpty(sourceName, strings.TrimSpace(update.Kind), strings.TrimSpace(update.Title)),
-				Kind:      firstNonEmpty(strings.TrimSpace(update.Kind), sourceKind),
-				Title:     firstNonEmpty(strings.TrimSpace(update.Title), sourceTitle),
-				Status:    strings.TrimSpace(update.Status),
-				RawInput:  maps.Clone(update.RawInput),
-				RawOutput: maps.Clone(update.RawOutput),
-				Content:   ProtocolToolCallContentOf(&update),
-			}
-		case string(ProtocolUpdateTypePlan):
-			out.Plan = &ProtocolPlan{Entries: cloneProtocolPlanEntries(update.Entries)}
-		}
-	}
 	if in.Permission != nil {
 		approval := cloneProtocolApproval(*in.Permission)
 		out.Permission = &approval
-		out.Approval = &approval
-	}
-	if in.Approval != nil && out.Permission == nil {
-		approval := cloneProtocolApproval(*in.Approval)
-		out.Permission = &approval
-		out.Approval = &approval
 	}
 	if out.Method == "" {
 		switch {
 		case out.Permission != nil:
 			out.Method = ProtocolMethodRequestPermission
-		default:
+		case out.Update != nil:
 			out.Method = ProtocolMethodSessionUpdate
-		}
-	}
-	if in.Participant != nil {
-		participant := *in.Participant
-		participant.Action = strings.TrimSpace(participant.Action)
-		out.Participant = &participant
-		if out.Update == nil {
-			out.Method = ProtocolMethodParticipantUpdate
-			out.Update = &ProtocolUpdate{
-				SessionUpdate: strings.TrimSpace(participant.Action),
-			}
-		}
-	}
-	if out.Participant == nil && out.Method == ProtocolMethodParticipantUpdate && out.Update != nil {
-		action := strings.TrimSpace(out.Update.SessionUpdate)
-		if action != "" {
-			out.Participant = &ProtocolParticipant{Action: action}
-		}
-	}
-	if in.Handoff != nil {
-		handoff := *in.Handoff
-		handoff.Phase = strings.TrimSpace(handoff.Phase)
-		out.Handoff = &handoff
-		if out.Update == nil {
-			out.Method = ProtocolMethodControllerHandoff
-			out.Update = &ProtocolUpdate{
-				SessionUpdate: strings.TrimSpace(handoff.Phase),
-			}
-		}
-	}
-	if out.Handoff == nil && out.Method == ProtocolMethodControllerHandoff && out.Update != nil {
-		phase := strings.TrimSpace(out.Update.SessionUpdate)
-		if phase != "" {
-			out.Handoff = &ProtocolHandoff{Phase: phase}
 		}
 	}
 	return out
