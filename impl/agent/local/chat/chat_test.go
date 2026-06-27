@@ -2679,27 +2679,33 @@ func (m *streamingModel) Generate(_ context.Context, req *model.Request) iter.Se
 		m.last.Instructions = model.CloneParts(req.Instructions)
 	}
 	return func(yield func(*model.StreamEvent, error) bool) {
-		yield(&model.StreamEvent{
+		if !yield(&model.StreamEvent{
 			Type: model.StreamEventPartDelta,
 			PartDelta: &model.PartDelta{
 				Kind:      model.PartKindReasoning,
 				TextDelta: "thinking...",
 			},
-		}, nil)
-		yield(&model.StreamEvent{
+		}, nil) {
+			return
+		}
+		if !yield(&model.StreamEvent{
 			Type: model.StreamEventPartDelta,
 			PartDelta: &model.PartDelta{
 				Kind:      model.PartKindText,
 				TextDelta: "hel",
 			},
-		}, nil)
-		yield(&model.StreamEvent{
+		}, nil) {
+			return
+		}
+		if !yield(&model.StreamEvent{
 			Type: model.StreamEventPartDelta,
 			PartDelta: &model.PartDelta{
 				Kind:      model.PartKindText,
 				TextDelta: "lo",
 			},
-		}, nil)
+		}, nil) {
+			return
+		}
 		yield(&model.StreamEvent{
 			Type: model.StreamEventTurnDone,
 			Response: &model.Response{
@@ -2728,13 +2734,15 @@ func (m *blockingStreamingModel) Generate(_ context.Context, req *model.Request)
 				close(m.started)
 			}
 		}
-		yield(&model.StreamEvent{
+		if !yield(&model.StreamEvent{
 			Type: model.StreamEventPartDelta,
 			PartDelta: &model.PartDelta{
 				Kind:      model.PartKindText,
 				TextDelta: "hel",
 			},
-		}, nil)
+		}, nil) {
+			return
+		}
 		if m.releaseFinal != nil {
 			select {
 			case <-m.releaseFinal:
@@ -2821,13 +2829,15 @@ func (m *retryToolModel) Generate(_ context.Context, req *model.Request) iter.Se
 		}
 
 		if call == 1 {
-			yield(&model.StreamEvent{
+			if !yield(&model.StreamEvent{
 				Type: model.StreamEventPartDelta,
 				PartDelta: &model.PartDelta{
 					Kind:       model.PartKindToolUse,
 					InputDelta: `{"value":`,
 				},
-			}, nil)
+			}, nil) {
+				return
+			}
 			yield(nil, errors.New("providers: sse scanner: unexpected EOF"))
 			return
 		}
