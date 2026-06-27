@@ -2,12 +2,12 @@ package acp
 
 import (
 	"encoding/json"
-	"maps"
 	"strings"
 
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/client"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
@@ -62,7 +62,7 @@ func applyACPParticipantEnvelopeScope(env *eventstream.Envelope, binding session
 }
 
 func applyACPParticipantDisplayMeta(meta map[string]any, binding session.ParticipantBinding, agent string) map[string]any {
-	out := maps.Clone(meta)
+	out := metautil.CloneMap(meta)
 	if out == nil {
 		out = map[string]any{}
 	}
@@ -84,6 +84,8 @@ func schemaUpdateFromClientUpdate(env client.UpdateEnvelope) schema.Update {
 		return schema.ContentChunk{
 			SessionUpdate: strings.TrimSpace(typed.SessionUpdate),
 			Content:       rawContentValue(typed.Content),
+			MessageID:     strings.TrimSpace(typed.MessageID),
+			Meta:          metautil.CloneMap(typed.Meta),
 		}
 	case client.ToolCall:
 		return typed

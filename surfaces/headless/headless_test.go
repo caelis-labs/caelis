@@ -7,23 +7,26 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
 func TestRunOnceDrainsAssistantOutput(t *testing.T) {
 	t.Parallel()
 
-	handle := newFakeHandle([]gateway.EventEnvelope{
+	handle := newFakeACPHandle([]eventstream.Envelope{
 		{
 			Cursor: "e1",
-			Event: gateway.Event{
-				Kind: gateway.EventKindAssistantMessage,
-				Narrative: &gateway.NarrativePayload{
-					Role:  gateway.NarrativeRoleAssistant,
-					Text:  "done",
-					Final: true,
-				},
-				Usage: &gateway.UsageSnapshot{PromptTokens: 11},
+			Kind:   eventstream.KindSessionUpdate,
+			Update: schema.ContentChunk{
+				SessionUpdate: schema.UpdateAgentMessage,
+				Content:       schema.TextContent{Type: "text", Text: "done"},
 			},
+		},
+		{
+			Cursor: "u1",
+			Kind:   eventstream.KindUsage,
+			Usage:  &eventstream.UsageSnapshot{PromptTokens: 11},
 		},
 	})
 	gw := fakeStarter{
@@ -52,16 +55,82 @@ func TestRunOnceDrainsAssistantOutput(t *testing.T) {
 	}
 }
 
+func TestRunOnceIgnoresScopedTraceOutput(t *testing.T) {
+	t.Parallel()
+
+	handle := newFakeACPHandle([]eventstream.Envelope{
+		{
+			Cursor: "main-1",
+			Kind:   eventstream.KindSessionUpdate,
+			Scope:  eventstream.ScopeMain,
+			Update: schema.ContentChunk{
+				SessionUpdate: schema.UpdateAgentMessage,
+				Content:       schema.TextContent{Type: "text", Text: "main answer"},
+			},
+		},
+		{
+			Cursor: "usage-main",
+			Kind:   eventstream.KindUsage,
+			Scope:  eventstream.ScopeMain,
+			Usage:  &eventstream.UsageSnapshot{PromptTokens: 11},
+		},
+		{
+			Cursor:  "child-1",
+			Kind:    eventstream.KindSessionUpdate,
+			Scope:   eventstream.ScopeSubagent,
+			ScopeID: "task-1",
+			Update: schema.ContentChunk{
+				SessionUpdate: schema.UpdateAgentMessage,
+				Content:       schema.TextContent{Type: "text", Text: "child trace"},
+			},
+		},
+		{
+			Cursor: "usage-child",
+			Kind:   eventstream.KindUsage,
+			Scope:  eventstream.ScopeSubagent,
+			Usage:  &eventstream.UsageSnapshot{PromptTokens: 99},
+		},
+	})
+	gw := fakeStarter{
+		result: gateway.BeginTurnResult{
+			Session: session.Session{SessionRef: session.SessionRef{
+				AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+			}},
+			Handle: handle,
+		},
+	}
+
+	result, err := RunOnce(context.Background(), gw, gateway.BeginTurnRequest{
+		SessionRef: session.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+		},
+		Input: "hello",
+	}, Options{})
+	if err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if result.Output != "main answer" {
+		t.Fatalf("RunOnce() output = %q, want main answer", result.Output)
+	}
+	if result.PromptTokens != 11 {
+		t.Fatalf("RunOnce() prompt tokens = %d, want main-scope usage", result.PromptTokens)
+	}
+}
+
 func TestRunOnceAutoDeniesApprovalByDefault(t *testing.T) {
 	t.Parallel()
 
-	handle := newFakeHandle([]gateway.EventEnvelope{
+	title := "RUN_COMMAND"
+	handle := newFakeACPHandle([]eventstream.Envelope{
 		{
 			Cursor: "a1",
-			Event: gateway.Event{
-				Kind: gateway.EventKindApprovalRequested,
-				ApprovalPayload: &gateway.ApprovalPayload{
-					ToolName: "RUN_COMMAND",
+			Kind:   eventstream.KindRequestPermission,
+			Permission: &schema.RequestPermissionRequest{
+				SessionID: "s1",
+				ToolCall: schema.ToolCallUpdate{
+					SessionUpdate: schema.UpdateToolCallInfo,
+					ToolCallID:    "call-1",
+					Title:         &title,
 				},
 			},
 		},
@@ -91,30 +160,90 @@ func TestRunOnceAutoDeniesApprovalByDefault(t *testing.T) {
 	}
 }
 
+func TestRunOnceApprovalCallbackReceivesPromptFields(t *testing.T) {
+	t.Parallel()
+
+	title := "RUN_COMMAND"
+	handle := newFakeACPHandle([]eventstream.Envelope{
+		{
+			Cursor: "a1",
+			Kind:   eventstream.KindRequestPermission,
+			Permission: &schema.RequestPermissionRequest{
+				SessionID: "s1",
+				ToolCall: schema.ToolCallUpdate{
+					SessionUpdate: schema.UpdateToolCallInfo,
+					ToolCallID:    "call-1",
+					Title:         &title,
+					RawInput: map[string]any{
+						"command":             "go test ./...",
+						"approval_reason":     "needs execution",
+						"justification":       "requested by user",
+						"sandbox_permissions": "host",
+					},
+				},
+				Options: []schema.PermissionOption{{
+					OptionID: "allow_once",
+					Name:     "Allow once",
+					Kind:     "allow_once",
+				}},
+			},
+		},
+	})
+	gw := fakeStarter{
+		result: gateway.BeginTurnResult{
+			Session: session.Session{SessionRef: session.SessionRef{
+				AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+			}},
+			Handle: handle,
+		},
+	}
+	called := false
+	_, err := RunOnce(context.Background(), gw, gateway.BeginTurnRequest{
+		SessionRef: session.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+		},
+		Input: "hello",
+	}, Options{
+		ResolveApproval: func(_ context.Context, req *gateway.ApprovalPayload) (gateway.ApprovalDecision, error) {
+			called = true
+			if req == nil {
+				t.Fatal("approval payload = nil")
+			}
+			if req.Reason != "needs execution" || req.Justification != "requested by user" || req.SandboxPermissions != "host" {
+				t.Fatalf("approval fields = (%q, %q, %q), want restored prompt fields", req.Reason, req.Justification, req.SandboxPermissions)
+			}
+			return gateway.ApprovalDecision{Approved: true, Outcome: string(gateway.ApprovalStatusApproved)}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if !called {
+		t.Fatal("ResolveApproval was not called")
+	}
+	if len(handle.submissions) != 1 || handle.submissions[0].Approval == nil || !handle.submissions[0].Approval.Approved {
+		t.Fatalf("submissions = %#v, want approved decision", handle.submissions)
+	}
+}
+
 func TestRunOnceIgnoresAutomaticApprovalReviewEvents(t *testing.T) {
 	t.Parallel()
 
-	handle := newFakeHandle([]gateway.EventEnvelope{
+	handle := newFakeACPHandle([]eventstream.Envelope{
 		{
 			Cursor: "r1",
-			Event: gateway.Event{
-				Kind: gateway.EventKindApprovalReview,
-				ApprovalPayload: &gateway.ApprovalPayload{
-					ToolName:       "RUN_COMMAND",
-					ReviewStatus:   gateway.ApprovalReviewStatusInProgress,
-					DecisionSource: "auto-review",
-				},
+			Kind:   eventstream.KindApprovalReview,
+			ApprovalReview: &eventstream.ApprovalReview{
+				ToolName: "RUN_COMMAND",
+				Status:   string(gateway.ApprovalReviewStatusInProgress),
 			},
 		},
 		{
 			Cursor: "r2",
-			Event: gateway.Event{
-				Kind: gateway.EventKindAssistantMessage,
-				Narrative: &gateway.NarrativePayload{
-					Role:  gateway.NarrativeRoleAssistant,
-					Text:  "done",
-					Final: true,
-				},
+			Kind:   eventstream.KindSessionUpdate,
+			Update: schema.ContentChunk{
+				SessionUpdate: schema.UpdateAgentMessage,
+				Content:       schema.TextContent{Type: "text", Text: "done"},
 			},
 		},
 	})
@@ -144,6 +273,45 @@ func TestRunOnceIgnoresAutomaticApprovalReviewEvents(t *testing.T) {
 	}
 }
 
+func TestRunOnceFallsBackToGatewayEventBridge(t *testing.T) {
+	t.Parallel()
+
+	handle := newFakeLegacyHandle([]gateway.EventEnvelope{
+		{
+			Cursor: "e1",
+			Event: gateway.Event{
+				Kind: gateway.EventKindAssistantMessage,
+				Narrative: &gateway.NarrativePayload{
+					Role:  gateway.NarrativeRoleAssistant,
+					Text:  "done through bridge",
+					Final: true,
+				},
+			},
+		},
+	})
+	gw := fakeStarter{
+		result: gateway.BeginTurnResult{
+			Session: session.Session{SessionRef: session.SessionRef{
+				AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+			}},
+			Handle: handle,
+		},
+	}
+
+	result, err := RunOnce(context.Background(), gw, gateway.BeginTurnRequest{
+		SessionRef: session.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+		},
+		Input: "hello",
+	}, Options{})
+	if err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if result.Output != "done through bridge" {
+		t.Fatalf("RunOnce() output = %q, want bridge output", result.Output)
+	}
+}
+
 type fakeStarter struct {
 	result gateway.BeginTurnResult
 	err    error
@@ -153,34 +321,54 @@ func (f fakeStarter) BeginTurn(context.Context, gateway.BeginTurnRequest) (gatew
 	return f.result, f.err
 }
 
-type fakeHandle struct {
-	events      chan gateway.EventEnvelope
+type fakeTurnHandle struct {
+	events      <-chan gateway.EventEnvelope
 	submissions []gateway.SubmitRequest
 }
 
-func newFakeHandle(events []gateway.EventEnvelope) *fakeHandle {
+func newFakeLegacyHandle(events []gateway.EventEnvelope) *fakeTurnHandle {
 	ch := make(chan gateway.EventEnvelope, len(events))
 	for _, env := range events {
 		ch <- env
 	}
 	close(ch)
-	return &fakeHandle{events: ch}
+	return &fakeTurnHandle{events: ch}
 }
 
-func (h *fakeHandle) HandleID() string                     { return "h1" }
-func (h *fakeHandle) RunID() string                        { return "run-1" }
-func (h *fakeHandle) TurnID() string                       { return "turn-1" }
-func (h *fakeHandle) SessionRef() session.SessionRef       { return session.SessionRef{} }
-func (h *fakeHandle) CreatedAt() time.Time                 { return time.Time{} }
-func (h *fakeHandle) Events() <-chan gateway.EventEnvelope { return h.events }
-func (h *fakeHandle) EventsAfter(string) ([]gateway.EventEnvelope, string, error) {
+type fakeACPHandle struct {
+	*fakeTurnHandle
+	acpEvents <-chan eventstream.Envelope
+}
+
+func newFakeACPHandle(events []eventstream.Envelope) *fakeACPHandle {
+	ch := make(chan eventstream.Envelope, len(events))
+	for _, env := range events {
+		ch <- env
+	}
+	close(ch)
+	return &fakeACPHandle{
+		fakeTurnHandle: newFakeLegacyHandle(nil),
+		acpEvents:      ch,
+	}
+}
+
+func (h *fakeTurnHandle) HandleID() string                     { return "h1" }
+func (h *fakeTurnHandle) RunID() string                        { return "run-1" }
+func (h *fakeTurnHandle) TurnID() string                       { return "turn-1" }
+func (h *fakeTurnHandle) SessionRef() session.SessionRef       { return session.SessionRef{} }
+func (h *fakeTurnHandle) CreatedAt() time.Time                 { return time.Time{} }
+func (h *fakeTurnHandle) Events() <-chan gateway.EventEnvelope { return h.events }
+func (h *fakeTurnHandle) EventsAfter(string) ([]gateway.EventEnvelope, string, error) {
 	return nil, "", nil
 }
-func (h *fakeHandle) Submit(_ context.Context, req gateway.SubmitRequest) error {
+func (h *fakeTurnHandle) Submit(_ context.Context, req gateway.SubmitRequest) error {
 	h.submissions = append(h.submissions, req)
 	return nil
 }
-func (h *fakeHandle) Cancel() gateway.CancelResult {
+func (h *fakeTurnHandle) Cancel() gateway.CancelResult {
 	return gateway.CancelResult{Status: gateway.CancelStatusCancelled}
 }
-func (h *fakeHandle) Close() error { return nil }
+func (h *fakeTurnHandle) Close() error { return nil }
+func (h *fakeACPHandle) ACPEvents() <-chan eventstream.Envelope {
+	return h.acpEvents
+}

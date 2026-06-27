@@ -6,6 +6,7 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/client"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
 	acpschema "github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
@@ -44,7 +45,7 @@ func ToolProtocolUpdate(updateType string, tool *session.ProtocolToolCall, meta 
 		Status:        strings.TrimSpace(tool.Status),
 		RawInput:      maps.Clone(tool.RawInput),
 		RawOutput:     maps.Clone(tool.RawOutput),
-		Meta:          maps.Clone(meta),
+		Meta:          metautil.CloneMap(meta),
 	}
 	if len(tool.Content) > 0 {
 		update.Content = session.CloneProtocolToolCallContent(tool.Content)

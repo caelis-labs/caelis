@@ -24,6 +24,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/stream"
 	"github.com/OnslaughtSnail/caelis/ports/tool"
 	"github.com/OnslaughtSnail/caelis/protocol/acp"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
 )
 
 func TestRuntimeAgentInitializeCapabilitiesDefault(t *testing.T) {
@@ -1592,8 +1593,8 @@ func hasTerminalInfo(notifications []acp.SessionNotification, terminalID string)
 		if !ok {
 			continue
 		}
-		info, ok := call.Meta["terminal_info"].(map[string]any)
-		if ok && info["terminal_id"] == terminalID {
+		info := terminalRuntimeMeta(call.Meta, terminalID)
+		if info != nil {
 			return true
 		}
 	}
@@ -1619,8 +1620,7 @@ func hasAnyTerminalOutput(notifications []acp.SessionNotification, terminalID st
 		if !ok {
 			continue
 		}
-		output, _ := update.Meta["terminal_output"].(map[string]any)
-		if output != nil && output["terminal_id"] == terminalID {
+		if terminalOutputData(update.Meta, terminalID) != "" {
 			return true
 		}
 	}
@@ -1719,7 +1719,7 @@ func terminalExit(notifications []acp.SessionNotification, terminalID string, st
 }
 
 func terminalOutputData(meta map[string]any, terminalID string) string {
-	output, _ := meta["terminal_output"].(map[string]any)
+	output := metautil.TerminalSection(meta, metautil.LegacyTerminalOutput)
 	if output == nil || output["terminal_id"] != terminalID {
 		return ""
 	}
@@ -1728,11 +1728,19 @@ func terminalOutputData(meta map[string]any, terminalID string) string {
 }
 
 func terminalExitMeta(meta map[string]any, terminalID string) map[string]any {
-	exit, _ := meta["terminal_exit"].(map[string]any)
+	exit := metautil.TerminalSection(meta, metautil.LegacyTerminalExit)
 	if exit == nil || exit["terminal_id"] != terminalID {
 		return nil
 	}
 	return exit
+}
+
+func terminalRuntimeMeta(meta map[string]any, terminalID string) map[string]any {
+	terminalMeta := metautil.TerminalSection(meta, "")
+	if terminalMeta == nil || terminalMeta["terminal_id"] != terminalID {
+		return nil
+	}
+	return terminalMeta
 }
 
 func metaInt(value any) int {

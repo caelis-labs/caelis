@@ -17,6 +17,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/protocol/acp/client"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/jsonrpc"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
@@ -34,6 +35,43 @@ func TestContentChunkTextPreservesStreamWhitespace(t *testing.T) {
 	})
 	if got != "hello " {
 		t.Fatalf("contentChunkText() = %q, want trailing space preserved", got)
+	}
+}
+
+func TestNormalizeACPUpdateEventPreservesContentChunkMessageIDAndMeta(t *testing.T) {
+	t.Parallel()
+
+	raw, err := json.Marshal(client.TextContent{Type: "text", Text: "hello"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta := map[string]any{"vendor": map[string]any{"trace": "abc"}}
+	event := normalizeACPUpdateEvent(func() time.Time { return time.Unix(0, 0) }, session.ControllerBinding{
+		Kind:         session.ControllerKindACP,
+		ControllerID: "codex",
+		Label:        "codex",
+	}, "remote-1", "turn-1", client.ContentChunk{
+		SessionUpdate: client.UpdateAgentMessage,
+		Content:       raw,
+		MessageID:     "msg-1",
+		Meta:          meta,
+	})
+	if event == nil || event.Protocol == nil || event.Protocol.Update == nil {
+		t.Fatalf("event = %#v, want protocol update", event)
+	}
+	if event.Protocol.Update.MessageID != "msg-1" {
+		t.Fatalf("Protocol.Update.MessageID = %q, want msg-1", event.Protocol.Update.MessageID)
+	}
+	vendor, _ := event.Protocol.Update.Meta["vendor"].(map[string]any)
+	if vendor["trace"] != "abc" {
+		t.Fatalf("Protocol.Update.Meta = %#v, want vendor trace", event.Protocol.Update.Meta)
+	}
+	meta["vendor"].(map[string]any)["trace"] = "mutated"
+	if vendor["trace"] != "abc" {
+		t.Fatalf("Protocol.Update.Meta aliased input meta = %#v", event.Protocol.Update.Meta)
+	}
+	if event.Meta != nil {
+		t.Fatalf("Event.Meta = %#v, want no message id side channel", event.Meta)
 	}
 }
 
@@ -109,23 +147,21 @@ func TestNormalizeACPUpdateEventPreservesToolUpdateMeta(t *testing.T) {
 		ToolCallID:    "call-1",
 		Kind:          testStringPtr("execute"),
 		Status:        testStringPtr("in_progress"),
-		Meta: map[string]any{
-			"terminal_output": map[string]any{
-				"terminal_id": "call-1",
-				"data":        "line\n",
-			},
-		},
+		Meta: metautil.WithRuntimeSection(nil, metautil.Terminal, map[string]any{
+			"terminal_id": "call-1",
+			"data":        "line\n",
+		}),
 	})
 
 	if event == nil || event.Protocol == nil || event.Protocol.Update == nil {
 		t.Fatalf("event = %#v, want protocol update", event)
 	}
-	output, ok := event.Protocol.Update.Meta["terminal_output"].(map[string]any)
-	if !ok {
-		t.Fatalf("Protocol.Update.Meta = %#v, want terminal_output", event.Protocol.Update.Meta)
+	output := metautil.RuntimeSection(event.Protocol.Update.Meta, metautil.Terminal)
+	if len(output) == 0 {
+		t.Fatalf("Protocol.Update.Meta = %#v, want caelis.runtime.terminal", event.Protocol.Update.Meta)
 	}
 	if output["terminal_id"] != "call-1" || output["data"] != "line\n" {
-		t.Fatalf("terminal_output = %#v, want preserved ACP meta", output)
+		t.Fatalf("caelis.runtime.terminal = %#v, want preserved ACP meta", output)
 	}
 }
 
@@ -1847,12 +1883,10 @@ func TestControllerRunStripsConsoleFenceAtUpdateIngress(t *testing.T) {
 				TerminalID: "call-1",
 				Content:    client.TextContent{Type: "text", Text: fenced},
 			}},
-			Meta: map[string]any{
-				"terminal_output": map[string]any{
-					"terminal_id": "call-1",
-					"data":        fenced,
-				},
-			},
+			Meta: metautil.WithRuntimeSection(nil, metautil.Terminal, map[string]any{
+				"terminal_id": "call-1",
+				"data":        fenced,
+			}),
 		},
 	})
 	handle.finish()
@@ -1877,12 +1911,12 @@ func TestControllerRunStripsConsoleFenceAtUpdateIngress(t *testing.T) {
 	if got := schema.ExtractTextValue(canonical.Protocol.ToolCall.Content[0].Content); got != want {
 		t.Fatalf("canonical terminal content = %q, want %q", got, want)
 	}
-	canonicalOutput, ok := canonical.Protocol.Update.Meta["terminal_output"].(map[string]any)
-	if !ok {
-		t.Fatalf("canonical meta = %#v, want terminal_output", canonical.Protocol.Update.Meta)
+	canonicalOutput := metautil.RuntimeSection(canonical.Protocol.Update.Meta, metautil.Terminal)
+	if len(canonicalOutput) == 0 {
+		t.Fatalf("canonical meta = %#v, want caelis.runtime.terminal", canonical.Protocol.Update.Meta)
 	}
 	if got := canonicalOutput["data"]; got != fenced {
-		t.Fatalf("canonical terminal_output data = %#v, want original %q", got, fenced)
+		t.Fatalf("canonical caelis.runtime.terminal data = %#v, want original %q", got, fenced)
 	}
 	acpUpdate, ok := events[0].ACP.Update.(schema.ToolCallUpdate)
 	if !ok {
@@ -1895,12 +1929,12 @@ func TestControllerRunStripsConsoleFenceAtUpdateIngress(t *testing.T) {
 	if got := schema.ExtractTextValue(acpUpdate.Content[0].Content); got != want {
 		t.Fatalf("ACP terminal content = %q, want %q", got, want)
 	}
-	acpOutput, ok := acpUpdate.Meta["terminal_output"].(map[string]any)
-	if !ok {
-		t.Fatalf("ACP meta = %#v, want terminal_output", acpUpdate.Meta)
+	acpOutput := metautil.RuntimeSection(acpUpdate.Meta, metautil.Terminal)
+	if len(acpOutput) == 0 {
+		t.Fatalf("ACP meta = %#v, want caelis.runtime.terminal", acpUpdate.Meta)
 	}
 	if got := acpOutput["data"]; got != fenced {
-		t.Fatalf("ACP terminal_output data = %#v, want original %q", got, fenced)
+		t.Fatalf("ACP caelis.runtime.terminal data = %#v, want original %q", got, fenced)
 	}
 }
 

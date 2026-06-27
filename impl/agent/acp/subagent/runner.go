@@ -18,6 +18,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/stream"
 	"github.com/OnslaughtSnail/caelis/ports/subagent"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/client"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
 	acpschema "github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
@@ -442,7 +443,7 @@ func (r *Runner) handleUpdate(run *childRun, env client.UpdateEnvelope) {
 		if text := chunkText(update); text != "" {
 			switch strings.TrimSpace(update.SessionUpdate) {
 			case client.UpdateAgentMessage:
-				streamText = run.appendAgentMessageLocked(text)
+				streamText = run.appendAgentMessageChunkLocked(update.MessageID, text)
 				run.outputPreview = compactPreview(run.agentText)
 				if streamText != "" {
 					event = run.acpUpdateEvent(env, run.updatedAt, streamText)
@@ -527,7 +528,7 @@ func (run *childRun) acpUpdateEvent(env client.UpdateEnvelope, at time.Time, tex
 		scopeCopy.ACP.EventType = strings.TrimSpace(updateType)
 		return &session.Event{
 			Type:       eventType,
-			Visibility: session.VisibilityCanonical,
+			Visibility: session.VisibilityUIOnly,
 			Time:       at,
 			Actor:      actor,
 			Scope:      &scopeCopy,
@@ -566,6 +567,8 @@ func (run *childRun) acpUpdateEvent(env client.UpdateEnvelope, at time.Time, tex
 		case client.UpdateAgentMessage, client.UpdateAgentThought:
 			event := base(update.SessionUpdate, session.EventTypeAssistant, text)
 			event.Protocol.Update.Content = update.Content
+			event.Protocol.Update.MessageID = strings.TrimSpace(update.MessageID)
+			event.Protocol.Update.Meta = metautil.CloneMap(update.Meta)
 			return event
 		default:
 			return nil
@@ -642,10 +645,18 @@ func (run *childRun) emit(frame stream.Frame) {
 }
 
 func (run *childRun) appendAgentMessageLocked(text string) string {
+	return run.appendAgentMessageChunkLocked("", text)
+}
+
+func (run *childRun) appendAgentMessageChunkLocked(messageID string, text string) string {
 	if run == nil {
 		return ""
 	}
-	update := run.finalAssistant.ObserveContentChunk(acpschema.UpdateAgentMessage, text)
+	update := run.finalAssistant.ObserveUpdate(acpschema.ContentChunk{
+		SessionUpdate: acpschema.UpdateAgentMessage,
+		MessageID:     strings.TrimSpace(messageID),
+		Content:       text,
+	})
 	run.agentText = update.Text
 	run.result = update.Text
 	return update.Delta
@@ -710,7 +721,7 @@ func childTerminalOutputMetaText(meta map[string]any) string {
 	if len(meta) == 0 {
 		return ""
 	}
-	output, _ := meta["terminal_output"].(map[string]any)
+	output := metautil.TerminalSection(meta, metautil.LegacyTerminalOutput)
 	if len(output) == 0 {
 		return ""
 	}

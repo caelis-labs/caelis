@@ -1,0 +1,42 @@
+{
+  "kind": "session/request_permission",
+  "cursor": "turn-1:0002",
+  "session_id": "session-1",
+  "handle_id": "handle-1",
+  "run_id": "run-1",
+  "turn_id": "turn-1",
+  "occurred_at": "2026-06-27T12:00:01Z",
+  "scope": "main",
+  "permission": {
+    "sessionId": "session-1",
+    "toolCall": {
+      "sessionUpdate": "tool_call_update",
+      "toolCallId": "call-1",
+      "title": "RUN_COMMAND",
+      "kind": "execute",
+      "status": "pending",
+      "rawInput": {
+        "command": "make test"
+      }
+    },
+    "options": [
+      {
+        "optionId": "allow_once",
+        "name": "Allow once",
+        "kind": "allow_once"
+      },
+      {
+        "optionId": "reject_once",
+        "name": "Reject",
+        "kind": "reject_once"
+      }
+    ],
+    "_meta": {
+      "caelis": {
+        "approval": {
+          "mode": "manual"
+        }
+      }
+    }
+  }
+}

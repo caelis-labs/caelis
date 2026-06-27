@@ -69,3 +69,53 @@ func TestExtractTextValue(t *testing.T) {
 		t.Fatalf("ExtractTextValue = %q, want nested text", got)
 	}
 }
+
+func TestContentChunkRoundTripPreservesACPMetadata(t *testing.T) {
+	t.Parallel()
+
+	raw, err := json.Marshal(ContentChunk{
+		SessionUpdate: UpdateAgentMessage,
+		MessageID:     "msg-1",
+		Content:       TextContent{Type: "text", Text: "hello"},
+		Meta:          map[string]any{"vendor": map[string]any{"trace": "abc"}},
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal(ContentChunk) error = %v", err)
+	}
+	var decoded ContentChunk
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal(ContentChunk) error = %v", err)
+	}
+	if decoded.MessageID != "msg-1" {
+		t.Fatalf("message id = %q, want msg-1", decoded.MessageID)
+	}
+	vendor, _ := decoded.Meta["vendor"].(map[string]any)
+	if vendor["trace"] != "abc" {
+		t.Fatalf("meta = %#v, want vendor trace", decoded.Meta)
+	}
+}
+
+func TestRequestPermissionRoundTripPreservesACPMetadata(t *testing.T) {
+	t.Parallel()
+
+	raw, err := json.Marshal(RequestPermissionRequest{
+		SessionID: "session-1",
+		ToolCall: ToolCallUpdate{
+			SessionUpdate: UpdateToolCallInfo,
+			ToolCallID:    "call-1",
+		},
+		Options: []PermissionOption{{OptionID: "allow_once", Name: "Allow once", Kind: "allow_once"}},
+		Meta:    map[string]any{"vendor": map[string]any{"trace": "abc"}},
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal(RequestPermissionRequest) error = %v", err)
+	}
+	var decoded RequestPermissionRequest
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal(RequestPermissionRequest) error = %v", err)
+	}
+	vendor, _ := decoded.Meta["vendor"].(map[string]any)
+	if vendor["trace"] != "abc" {
+		t.Fatalf("meta = %#v, want vendor trace", decoded.Meta)
+	}
+}

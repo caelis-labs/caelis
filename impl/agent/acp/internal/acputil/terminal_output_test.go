@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/OnslaughtSnail/caelis/protocol/acp/client"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
 	acpschema "github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
@@ -80,7 +81,7 @@ func TestStripTerminalConsoleFenceToolCallUpdate(t *testing.T) {
 	if text := acpschema.ExtractTextValue(got.Content[1].Content); text != fenced {
 		t.Fatalf("non-terminal content = %q, want original text", text)
 	}
-	if output, _ := got.Meta["terminal_output"].(map[string]any); output["data"] != fenced {
+	if output := metautil.TerminalSection(got.Meta, metautil.LegacyTerminalOutput); output["data"] != fenced {
 		t.Fatalf("terminal meta = %#v, want original data", got.Meta)
 	}
 }

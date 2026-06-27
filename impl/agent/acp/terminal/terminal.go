@@ -8,6 +8,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/stream"
 	"github.com/OnslaughtSnail/caelis/protocol/acp"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
@@ -198,12 +199,21 @@ func terminalEventMetadata(event *session.Event) []map[string]any {
 }
 
 func protocolTerminalMetaValue(meta map[string]any, key string) string {
-	for _, section := range []string{"terminal_output", "terminal_exit", "terminal_info"} {
-		if value := nestedString(meta, section, key); value != "" {
+	for _, legacyKey := range []string{metautil.LegacyTerminalOutput, metautil.LegacyTerminalExit, metautil.LegacyTerminalInfo} {
+		section := metautil.TerminalSection(meta, legacyKey)
+		if value := mapString(section, key); value != "" {
 			return value
 		}
 	}
 	return ""
+}
+
+func mapString(values map[string]any, key string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	text, _ := values[key].(string)
+	return strings.TrimSpace(text)
 }
 
 func nestedString(values map[string]any, path ...string) string {

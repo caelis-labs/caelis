@@ -6,6 +6,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
@@ -77,15 +78,15 @@ func TestProjectGatewayEventEnvelopeProjectsGatewayToolResultTerminalOutput(t *t
 	if update.Content[0].TerminalID != "runtime-term-1" {
 		t.Fatalf("content terminal_id = %q, want runtime-term-1", update.Content[0].TerminalID)
 	}
-	terminalOutput, ok := update.Meta["terminal_output"].(map[string]any)
-	if !ok {
-		t.Fatalf("update meta = %#v, want terminal_output", update.Meta)
+	terminalOutput := metautil.RuntimeSection(update.Meta, metautil.Terminal)
+	if len(terminalOutput) == 0 {
+		t.Fatalf("update meta = %#v, want caelis.runtime.terminal", update.Meta)
 	}
 	if terminalOutput["terminal_id"] != "call-ls" {
-		t.Fatalf("terminal_output.terminal_id = %#v, want call-ls", terminalOutput["terminal_id"])
+		t.Fatalf("caelis.runtime.terminal.terminal_id = %#v, want call-ls", terminalOutput["terminal_id"])
 	}
 	if terminalOutput["data"] != "total 0\n" {
-		t.Fatalf("terminal_output.data = %#v, want terminal output", terminalOutput["data"])
+		t.Fatalf("caelis.runtime.terminal.data = %#v, want terminal output", terminalOutput["data"])
 	}
 }
 
@@ -272,6 +273,11 @@ func TestProjectGatewayEventEnvelopeProjectsManualApprovalPayloadPermission(t *t
 	events := ProjectGatewayEventEnvelope(gateway.EventEnvelope{Event: gateway.Event{
 		Kind:       gateway.EventKindApprovalRequested,
 		SessionRef: session.SessionRef{SessionID: "session-1"},
+		Meta: map[string]any{
+			"caelis": map[string]any{
+				"approval": map[string]any{"mode": "manual"},
+			},
+		},
 		ApprovalPayload: &gateway.ApprovalPayload{
 			ToolCallID:         "call-1",
 			ToolName:           "RUN_COMMAND",
@@ -323,6 +329,12 @@ func TestProjectGatewayEventEnvelopeProjectsManualApprovalPayloadPermission(t *t
 	}
 	if len(env.Permission.Options) != 2 || env.Permission.Options[0].OptionID != "allow_once" || env.Permission.Options[1].OptionID != "reject_once" {
 		t.Fatalf("options = %#v, want allow/reject", env.Permission.Options)
+	}
+	if got := metaString(env.Permission.Meta, "caelis", "approval", "mode"); got != "manual" {
+		t.Fatalf("permission meta approval mode = %q, want manual", got)
+	}
+	if got := metaString(env.Permission.Meta, "caelis", "bridge", "source"); got != "gateway_projection" {
+		t.Fatalf("permission meta bridge source = %q, want gateway_projection", got)
 	}
 }
 

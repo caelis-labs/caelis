@@ -93,6 +93,32 @@ Caelis display hints live in `_meta`. `_meta` may carry terminal output,
 terminal exit status, cwd, display names, and other UI-only annotations. It must
 not be the only durable location for model-critical data.
 
+`protocol/acp/eventstream.Envelope` is the v1 client event stream for local
+surfaces and app-server transports. SSE uses `cursor` as the event id,
+WebSocket transports serialize the envelope directly, and ACP stdio maps
+standard messages to `session/update` and `session/request_permission`.
+`ports/gateway.Event` is a transitional in-process DTO used by compatibility
+bridges; new surfaces must target `eventstream.Envelope` instead.
+
+## ACP Durability Matrix
+
+| Source | Durable canonical event | Client projection |
+| --- | --- | --- |
+| Built-in or ACP main-controller user input | `session.Event.Message` with role `user` | `user_message_chunk` |
+| Built-in or ACP main-controller final assistant response | `session.Event.Message` with assistant reasoning/text/tool-use semantics | `agent_thought_chunk`, `agent_message_chunk`, `tool_call` |
+| Built-in tool call/result | `session.Event.Tool` plus model tool-use/result parts when model-visible | `tool_call`, `tool_call_update` |
+| Permission request/decision | Durable typed approval/control state; `EventProtocol.Permission` is the ACP client projection source | `request_permission` plus approval review extension events |
+| Plan state | `session.Event.PlanPayload` when it is durable semantic plan state | `plan` |
+| Participant lifecycle and handoff | Durable session/controller state, not transcript text | participant and lifecycle extension events |
+| Subagent structured stream | Not parent model context; `VisibilityUIOnly` live trace only | scoped `eventstream.Envelope` with `ScopeSubagent` |
+| Subagent final product | Parent model sees the `SPAWN`/`TASK` tool result, not the child transcript | `tool_call_update` result plus optional scoped trace |
+
+Protocol-only canonical history is invalid for model-visible assistant, tool,
+and plan facts. ACP ingress must normalize durable facts into `Event.Message`,
+`Event.Tool`, or typed plan/approval/session state before persistence. Live
+subagent streams may be mirrored to clients, but they must not masquerade as
+`VisibilityCanonical` durable history in the parent session.
+
 ## Live Versus Replay
 
 Live streaming produces transient UI updates. `VisibilityUIOnly` chunks may be

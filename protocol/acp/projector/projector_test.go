@@ -1,11 +1,13 @@
 package projector
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
 )
 
 func TestEventProjectorNormalizesRuntimeToolStatus(t *testing.T) {
@@ -40,6 +42,67 @@ func TestEventProjectorNormalizesRuntimeToolStatus(t *testing.T) {
 	}
 	if update.Status == nil || *update.Status != ToolStatusInProgress {
 		t.Fatalf("status = %v, want %q", update.Status, ToolStatusInProgress)
+	}
+}
+
+func TestProjectPermissionRequestUsesDurablePermissionAfterRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	source := &session.Event{
+		SessionID: "session-1",
+		Type:      session.EventTypeLifecycle,
+		Meta: map[string]any{
+			"caelis": map[string]any{
+				"approval": map[string]any{"mode": "manual"},
+			},
+		},
+		Protocol: &session.EventProtocol{
+			Method: session.ProtocolMethodRequestPermission,
+			Permission: &session.ProtocolApproval{
+				ToolCall: session.ProtocolToolCall{
+					ID:       "call-rm",
+					Name:     "RUN_COMMAND",
+					Kind:     ToolKindExecute,
+					Title:    "RUN_COMMAND rm",
+					Status:   "waiting_approval",
+					RawInput: map[string]any{"command": "rm -rf tmp"},
+				},
+				Options: []session.ProtocolApprovalOption{
+					{ID: "allow_once", Name: "Allow once", Kind: "allow_once"},
+					{ID: "reject_once", Name: "Reject once", Kind: "reject_once"},
+				},
+			},
+		},
+	}
+	raw, err := json.Marshal(source)
+	if err != nil {
+		t.Fatalf("json.Marshal(event) error = %v", err)
+	}
+	var decoded session.Event
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal(event) error = %v", err)
+	}
+	if decoded.Protocol == nil || decoded.Protocol.Approval == nil {
+		t.Fatalf("decoded protocol = %#v, want normalized approval alias from durable permission", decoded.Protocol)
+	}
+
+	req, ok, err := (EventProjector{}).ProjectPermissionRequest(&decoded)
+	if err != nil {
+		t.Fatalf("ProjectPermissionRequest() error = %v", err)
+	}
+	if !ok || req == nil {
+		t.Fatal("ProjectPermissionRequest() did not project durable permission")
+	}
+	if req.SessionID != "session-1" || req.ToolCall.ToolCallID != "call-rm" {
+		t.Fatalf("permission request = %#v, want session/call ids", req)
+	}
+	if len(req.Options) != 2 || req.Options[0].OptionID != "allow_once" {
+		t.Fatalf("permission options = %#v", req.Options)
+	}
+	caelis, _ := req.Meta["caelis"].(map[string]any)
+	approvalMeta, _ := caelis["approval"].(map[string]any)
+	if approvalMeta["mode"] != "manual" {
+		t.Fatalf("permission meta = %#v, want approval mode", req.Meta)
 	}
 }
 
@@ -80,12 +143,12 @@ func TestEventProjectorRemapsBuiltinTerminalContentToDisplayID(t *testing.T) {
 	if update.Content[0].Content != nil {
 		t.Fatalf("terminal content body = %#v, want output carried in _meta", update.Content[0].Content)
 	}
-	output, ok := update.Meta["terminal_output"].(map[string]any)
-	if !ok {
-		t.Fatalf("meta = %#v, want terminal_output", update.Meta)
+	output := metautil.RuntimeSection(update.Meta, metautil.Terminal)
+	if len(output) == 0 {
+		t.Fatalf("meta = %#v, want caelis.runtime.terminal", update.Meta)
 	}
 	if output["terminal_id"] != "call-1" || output["data"] != "line\n" {
-		t.Fatalf("terminal_output = %#v, want display id call-1 and line output", output)
+		t.Fatalf("caelis.runtime.terminal = %#v, want display id call-1 and line output", output)
 	}
 }
 
@@ -117,12 +180,12 @@ func TestEventProjectorSeparatesMultipleTerminalContentItems(t *testing.T) {
 	if !ok {
 		t.Fatalf("update = %T, want ToolCallUpdate", updates[0])
 	}
-	output, ok := update.Meta["terminal_output"].(map[string]any)
-	if !ok {
-		t.Fatalf("meta = %#v, want terminal_output", update.Meta)
+	output := metautil.RuntimeSection(update.Meta, metautil.Terminal)
+	if len(output) == 0 {
+		t.Fatalf("meta = %#v, want caelis.runtime.terminal", update.Meta)
 	}
 	if got := output["data"]; got != "caelis\ncodex\ndemo" {
-		t.Fatalf("terminal_output data = %#v, want separated terminal records", got)
+		t.Fatalf("caelis.runtime.terminal data = %#v, want separated terminal records", got)
 	}
 }
 
@@ -153,12 +216,10 @@ func TestEventProjectorUsesDurableProtocolUpdateForTerminalToolCall(t *testing.T
 					TerminalID: "call-1",
 					Content:    session.ProtocolTextContent("ignored body\n"),
 				}},
-				Meta: map[string]any{
-					"terminal_info": map[string]any{
-						"terminal_id": "call-1",
-						"tool":        "RUN_COMMAND",
-					},
-				},
+				Meta: metautil.WithRuntimeSection(nil, metautil.Terminal, map[string]any{
+					"terminal_id": "call-1",
+					"tool":        "RUN_COMMAND",
+				}),
 			},
 		},
 	})
@@ -178,9 +239,9 @@ func TestEventProjectorUsesDurableProtocolUpdateForTerminalToolCall(t *testing.T
 	if len(call.Content) != 1 || call.Content[0].Type != "terminal" || call.Content[0].TerminalID != "call-1" || call.Content[0].Content != nil {
 		t.Fatalf("content = %#v, want standard terminal marker without body", call.Content)
 	}
-	output, ok := call.Meta["terminal_output"].(map[string]any)
-	if !ok || output["data"] != "ignored body\n" {
-		t.Fatalf("meta = %#v, want terminal body moved to _meta.terminal_output", call.Meta)
+	output := metautil.RuntimeSection(call.Meta, metautil.Terminal)
+	if len(output) == 0 || output["data"] != "ignored body\n" {
+		t.Fatalf("meta = %#v, want terminal body moved to _meta.caelis.runtime.terminal", call.Meta)
 	}
 }
 
@@ -269,6 +330,84 @@ func TestEventProjectorProjectsCanonicalMessages(t *testing.T) {
 	}
 	if len(systemUpdates) != 0 {
 		t.Fatalf("ProjectEvent(system) produced %#v, want no ACP session/update", systemUpdates)
+	}
+}
+
+func TestEventProjectorProjectsDurableContentChunkMessageIDAndMeta(t *testing.T) {
+	t.Parallel()
+
+	message := model.NewTextMessage(model.RoleAssistant, "hello")
+	event := session.CanonicalizeEvent(&session.Event{
+		SessionID: "session-1",
+		Type:      session.EventTypeAssistant,
+		Message:   &message,
+		Protocol: &session.EventProtocol{
+			Update: &session.ProtocolUpdate{
+				SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage),
+				MessageID:     "msg-1",
+				Meta:          map[string]any{"vendor": map[string]any{"trace": "abc"}},
+			},
+		},
+	})
+	updates, err := (EventProjector{}).ProjectEvent(event)
+	if err != nil {
+		t.Fatalf("ProjectEvent() error = %v", err)
+	}
+	if len(updates) != 1 {
+		t.Fatalf("ProjectEvent() produced %d updates, want 1: %#v", len(updates), updates)
+	}
+	chunk, ok := updates[0].(ContentChunk)
+	if !ok {
+		t.Fatalf("update = %T, want ContentChunk", updates[0])
+	}
+	if chunk.MessageID != "msg-1" {
+		t.Fatalf("MessageID = %q, want msg-1", chunk.MessageID)
+	}
+	vendor, _ := chunk.Meta["vendor"].(map[string]any)
+	if vendor["trace"] != "abc" {
+		t.Fatalf("Meta = %#v, want vendor trace", chunk.Meta)
+	}
+}
+
+func TestEventProjectorDoesNotAttachMismatchedProtocolMetaToAssistantChunk(t *testing.T) {
+	t.Parallel()
+
+	message := model.NewTextMessage(model.RoleAssistant, "hello")
+	event := session.CanonicalizeEvent(&session.Event{
+		SessionID: "session-1",
+		Type:      session.EventTypeToolCall,
+		Message:   &message,
+		Protocol: &session.EventProtocol{
+			Update: &session.ProtocolUpdate{
+				SessionUpdate: UpdateToolCall,
+				ToolCallID:    "call-1",
+				Kind:          ToolKindExecute,
+				Title:         "RUN_COMMAND date",
+				Meta:          map[string]any{"vendor": map[string]any{"trace": "tool-meta"}},
+			},
+		},
+	})
+	updates, err := (EventProjector{}).ProjectEvent(event)
+	if err != nil {
+		t.Fatalf("ProjectEvent() error = %v", err)
+	}
+	if len(updates) != 2 {
+		t.Fatalf("ProjectEvent() produced %d updates, want assistant chunk + tool call: %#v", len(updates), updates)
+	}
+	chunk, ok := updates[0].(ContentChunk)
+	if !ok {
+		t.Fatalf("first update = %T, want ContentChunk", updates[0])
+	}
+	if len(chunk.Meta) != 0 || chunk.MessageID != "" {
+		t.Fatalf("assistant chunk = %#v, want no mismatched tool metadata", chunk)
+	}
+	call, ok := updates[1].(ToolCall)
+	if !ok {
+		t.Fatalf("second update = %T, want ToolCall", updates[1])
+	}
+	vendor, _ := call.Meta["vendor"].(map[string]any)
+	if vendor["trace"] != "tool-meta" {
+		t.Fatalf("tool call meta = %#v, want vendor trace", call.Meta)
 	}
 }
 
@@ -383,7 +522,7 @@ func TestEventProjectorProjectsCanonicalToolPayloads(t *testing.T) {
 	if output, ok := result.RawOutput.(map[string]any); !ok || output["stdout"] != "ok\n" {
 		t.Fatalf("raw output = %#v, want stdout", result.RawOutput)
 	}
-	if meta, ok := result.Meta["terminal_output"].(map[string]any); !ok || meta["terminal_id"] != "call-1" || meta["data"] != "ok\n" {
+	if meta := metautil.RuntimeSection(result.Meta, metautil.Terminal); len(meta) == 0 || meta["terminal_id"] != "call-1" || meta["data"] != "ok\n" {
 		t.Fatalf("terminal meta = %#v, want terminal output", result.Meta)
 	}
 }
@@ -743,12 +882,12 @@ func TestEventProjectorProjectsRunCommandDisplayTerminalMetadata(t *testing.T) {
 	if call.Content[0].Content != nil {
 		t.Fatalf("terminal content body = %#v, want empty standard terminal marker", call.Content[0].Content)
 	}
-	info, ok := call.Meta["terminal_info"].(map[string]any)
-	if !ok {
-		t.Fatalf("meta = %#v, want terminal_info", call.Meta)
+	info := metautil.RuntimeSection(call.Meta, metautil.Terminal)
+	if len(info) == 0 {
+		t.Fatalf("meta = %#v, want caelis.runtime.terminal", call.Meta)
 	}
 	if info["terminal_id"] != "call-1" || info["cwd"] != "/tmp/work" || info["tool"] != "RUN_COMMAND" {
-		t.Fatalf("terminal_info = %#v, want terminal_id call-1 cwd /tmp/work tool RUN_COMMAND", info)
+		t.Fatalf("caelis.runtime.terminal = %#v, want terminal_id call-1 cwd /tmp/work tool RUN_COMMAND", info)
 	}
 }
 

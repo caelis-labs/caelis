@@ -3,7 +3,6 @@ package kernel
 import (
 	"context"
 	"fmt"
-	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -13,6 +12,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
 	acpprojector "github.com/OnslaughtSnail/caelis/protocol/acp/projector"
 )
 
@@ -538,29 +538,15 @@ func (h *turnHandle) enrichACPEnvelopeLocked(env eventstream.Envelope, bridgeSou
 }
 
 func mergeCaelisBridgeMeta(meta map[string]any, bridgeSource string) map[string]any {
-	out := maps.Clone(meta)
-	if out == nil {
-		out = map[string]any{}
+	caelis := map[string]any{
+		metautil.Version: 1,
 	}
-	caelis, _ := out["caelis"].(map[string]any)
-	if caelis == nil {
-		caelis = map[string]any{}
-	} else {
-		caelis = maps.Clone(caelis)
-	}
-	caelis["version"] = 1
 	if strings.TrimSpace(bridgeSource) != "" {
-		bridge, _ := caelis["bridge"].(map[string]any)
-		if bridge == nil {
-			bridge = map[string]any{}
-		} else {
-			bridge = maps.Clone(bridge)
+		caelis["bridge"] = map[string]any{
+			"source": strings.TrimSpace(bridgeSource),
 		}
-		bridge["source"] = strings.TrimSpace(bridgeSource)
-		caelis["bridge"] = bridge
 	}
-	out["caelis"] = caelis
-	return out
+	return metautil.Merge(meta, map[string]any{metautil.Root: caelis})
 }
 
 func cloneMap(in map[string]any) map[string]any {

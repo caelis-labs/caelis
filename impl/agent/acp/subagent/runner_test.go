@@ -13,6 +13,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/stream"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/client"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
@@ -40,6 +41,8 @@ func TestRunnerHandleUpdatePublishesChildStream(t *testing.T) {
 		Update: client.ContentChunk{
 			SessionUpdate: client.UpdateAgentMessage,
 			Content:       raw,
+			MessageID:     "msg-1",
+			Meta:          map[string]any{"vendor": map[string]any{"trace": "abc"}},
 		},
 	})
 
@@ -53,8 +56,21 @@ func TestRunnerHandleUpdatePublishesChildStream(t *testing.T) {
 	if got.Event == nil || got.Event.Type != session.EventTypeAssistant || got.Event.Text != "child output" {
 		t.Fatalf("stream event = %#v, want assistant child output", got.Event)
 	}
+	if got.Event.Visibility != session.VisibilityUIOnly || session.IsCanonicalHistoryEvent(got.Event) {
+		t.Fatalf("stream event visibility = %q, canonical=%v; want ui_only trace", got.Event.Visibility, session.IsCanonicalHistoryEvent(got.Event))
+	}
 	if got.Event.Scope == nil || got.Event.Scope.Participant.Kind != session.ParticipantKindSubagent || got.Event.Scope.Participant.DelegationID != "task-1" {
 		t.Fatalf("stream event scope = %#v, want subagent task scope", got.Event.Scope)
+	}
+	if got.Event.Protocol == nil || got.Event.Protocol.Update == nil {
+		t.Fatalf("stream event protocol = %#v, want protocol update", got.Event.Protocol)
+	}
+	if got.Event.Protocol.Update.MessageID != "msg-1" {
+		t.Fatalf("Protocol.Update.MessageID = %q, want msg-1", got.Event.Protocol.Update.MessageID)
+	}
+	vendor, _ := got.Event.Protocol.Update.Meta["vendor"].(map[string]any)
+	if vendor["trace"] != "abc" {
+		t.Fatalf("Protocol.Update.Meta = %#v, want vendor trace", got.Event.Protocol.Update.Meta)
 	}
 }
 
@@ -119,6 +135,9 @@ func TestRunnerHandleUpdatePublishesStructuredToolAndPlanEvents(t *testing.T) {
 	if callEvent == nil || callEvent.Type != session.EventTypeToolCall || callEvent.Protocol == nil || callEvent.Protocol.ToolCall == nil {
 		t.Fatalf("tool call event = %#v", callEvent)
 	}
+	if callEvent.Visibility != session.VisibilityUIOnly || session.IsCanonicalHistoryEvent(callEvent) {
+		t.Fatalf("tool call visibility = %q, canonical=%v; want ui_only trace", callEvent.Visibility, session.IsCanonicalHistoryEvent(callEvent))
+	}
 	if callEvent.Protocol.ToolCall.Name != "execute" || callEvent.Protocol.ToolCall.Title != "run go test" || callEvent.Protocol.ToolCall.Kind != "execute" || callEvent.Protocol.ToolCall.RawInput["command"] != "go test ./surfaces/tui/app/..." {
 		t.Fatalf("tool call payload = %#v", callEvent.Protocol.ToolCall)
 	}
@@ -126,12 +145,18 @@ func TestRunnerHandleUpdatePublishesStructuredToolAndPlanEvents(t *testing.T) {
 	if resultEvent == nil || resultEvent.Type != session.EventTypeToolResult || resultEvent.Protocol == nil || resultEvent.Protocol.ToolCall == nil {
 		t.Fatalf("tool result event = %#v", resultEvent)
 	}
+	if resultEvent.Visibility != session.VisibilityUIOnly || session.IsCanonicalHistoryEvent(resultEvent) {
+		t.Fatalf("tool result visibility = %q, canonical=%v; want ui_only trace", resultEvent.Visibility, session.IsCanonicalHistoryEvent(resultEvent))
+	}
 	if resultEvent.Protocol.ToolCall.RawOutput["stdout"] != "ok\n" {
 		t.Fatalf("tool result payload = %#v", resultEvent.Protocol.ToolCall)
 	}
 	planEvent := sink.frames[2].Event
 	if planEvent == nil || planEvent.Type != session.EventTypePlan || planEvent.Protocol == nil || planEvent.Protocol.Plan == nil {
 		t.Fatalf("plan event = %#v", planEvent)
+	}
+	if planEvent.Visibility != session.VisibilityUIOnly || session.IsCanonicalHistoryEvent(planEvent) {
+		t.Fatalf("plan visibility = %q, canonical=%v; want ui_only trace", planEvent.Visibility, session.IsCanonicalHistoryEvent(planEvent))
 	}
 	if len(planEvent.Protocol.Plan.Entries) != 1 || planEvent.Protocol.Plan.Entries[0].Content != "Run tests" {
 		t.Fatalf("plan entries = %#v", planEvent.Protocol.Plan.Entries)
@@ -208,12 +233,10 @@ func TestRunnerPublishesChildTerminalOutputMetaAsStreamText(t *testing.T) {
 			ToolCallID:    "command-1",
 			Kind:          stringPtr("execute"),
 			Title:         stringPtr("run date loop"),
-			Meta: map[string]any{
-				"terminal_output": map[string]any{
-					"terminal_id": "command-1",
-					"data":        "17:21:17\n",
-				},
-			},
+			Meta: metautil.WithRuntimeSection(nil, metautil.Terminal, map[string]any{
+				"terminal_id": "command-1",
+				"data":        "17:21:17\n",
+			}),
 		},
 	})
 
@@ -224,7 +247,8 @@ func TestRunnerPublishesChildTerminalOutputMetaAsStreamText(t *testing.T) {
 		t.Fatalf("stream frame text = %q, want terminal output data", got)
 	}
 	event := sink.frames[0].Event
-	if event == nil || event.Protocol == nil || event.Protocol.Update == nil || event.Protocol.Update.Meta["terminal_output"] == nil {
+	if event == nil || event.Protocol == nil || event.Protocol.Update == nil ||
+		len(metautil.RuntimeSection(event.Protocol.Update.Meta, metautil.Terminal)) == 0 {
 		t.Fatalf("stream event = %#v, want structured terminal meta preserved", event)
 	}
 }
@@ -258,12 +282,10 @@ func TestRunnerStripsConsoleFenceFromChildTerminalOutput(t *testing.T) {
 				TerminalID: "command-1",
 				Content:    client.TextContent{Type: "text", Text: fenced},
 			}},
-			Meta: map[string]any{
-				"terminal_output": map[string]any{
-					"terminal_id": "command-1",
-					"data":        fenced,
-				},
-			},
+			Meta: metautil.WithRuntimeSection(nil, metautil.Terminal, map[string]any{
+				"terminal_id": "command-1",
+				"data":        fenced,
+			}),
 		},
 	})
 
@@ -284,12 +306,12 @@ func TestRunnerStripsConsoleFenceFromChildTerminalOutput(t *testing.T) {
 	if got := schema.ExtractTextValue(event.Protocol.ToolCall.Content[0].Content); got != want {
 		t.Fatalf("terminal content = %q, want %q", got, want)
 	}
-	output, ok := event.Protocol.Update.Meta["terminal_output"].(map[string]any)
-	if !ok {
-		t.Fatalf("Protocol.Update.Meta = %#v, want terminal_output", event.Protocol.Update.Meta)
+	output := metautil.RuntimeSection(event.Protocol.Update.Meta, metautil.Terminal)
+	if len(output) == 0 {
+		t.Fatalf("Protocol.Update.Meta = %#v, want caelis.runtime.terminal", event.Protocol.Update.Meta)
 	}
 	if got := output["data"]; got != fenced {
-		t.Fatalf("terminal_output data = %#v, want original %q", got, fenced)
+		t.Fatalf("caelis.runtime.terminal data = %#v, want original %q", got, fenced)
 	}
 }
 
@@ -334,6 +356,36 @@ func TestRunnerHandleUpdateUsesAgentMessageDeltas(t *testing.T) {
 	run.mu.RUnlock()
 	if result != "我来按步骤执行这个任务。" {
 		t.Fatalf("run.result = %q, want deduped final text", result)
+	}
+}
+
+func TestRunnerHandleUpdateSeparatesAgentMessageIDs(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingStreams{}
+	run := &childRun{
+		anchor:  delegation.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "self", AgentID: "self-1"},
+		taskID:  "task-1",
+		sink:    sink,
+		state:   delegation.StateRunning,
+		running: true,
+	}
+	runner := &Runner{clock: time.Now}
+
+	runner.handleUpdate(run, contentUpdateWithMessageID(t, client.UpdateAgentMessage, "m1", "first message"))
+	runner.handleUpdate(run, contentUpdateWithMessageID(t, client.UpdateAgentMessage, "m2", "second message"))
+
+	if got := len(sink.frames); got != 2 {
+		t.Fatalf("stream frames = %#v, want two agent updates", sink.frames)
+	}
+	if sink.frames[0].Text != "first message" || sink.frames[1].Text != "second message" {
+		t.Fatalf("stream texts = %q / %q, want message-id separated chunks", sink.frames[0].Text, sink.frames[1].Text)
+	}
+	run.mu.RLock()
+	result := run.result
+	run.mu.RUnlock()
+	if result != "second message" {
+		t.Fatalf("run.result = %q, want latest message-id segment", result)
 	}
 }
 
@@ -593,6 +645,11 @@ func TestRunnerHandleUpdateAcceptsStringContentChunks(t *testing.T) {
 
 func contentUpdate(t *testing.T, kind string, text string) client.UpdateEnvelope {
 	t.Helper()
+	return contentUpdateWithMessageID(t, kind, "", text)
+}
+
+func contentUpdateWithMessageID(t *testing.T, kind string, messageID string, text string) client.UpdateEnvelope {
+	t.Helper()
 	raw, err := json.Marshal(client.TextChunk{Type: "text", Text: text})
 	if err != nil {
 		t.Fatalf("json.Marshal() error = %v", err)
@@ -602,6 +659,7 @@ func contentUpdate(t *testing.T, kind string, text string) client.UpdateEnvelope
 		Update: client.ContentChunk{
 			SessionUpdate: kind,
 			Content:       raw,
+			MessageID:     messageID,
 		},
 	}
 }

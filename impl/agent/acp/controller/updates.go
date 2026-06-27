@@ -10,6 +10,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/controller"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/client"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
 	acpschema "github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
@@ -55,6 +56,8 @@ func normalizeACPUpdateEvent(
 				Update: &session.ProtocolUpdate{
 					SessionUpdate: strings.TrimSpace(typed.SessionUpdate),
 					Content:       typed.Content,
+					MessageID:     strings.TrimSpace(typed.MessageID),
+					Meta:          metautil.CloneMap(typed.Meta),
 				},
 			},
 		}

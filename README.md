@@ -9,6 +9,12 @@ extension points; `impl/*` packages hold concrete local implementations; surface
 adapters project the shared state into the Bubble Tea TUI, ACP stdio, and the
 headless one-shot runner.
 
+The client event protocol is `protocol/acp/eventstream.Envelope`. TUI, GUI,
+app-server, headless, and ACP bridges should consume that ACP-native stream and
+project their own view models from it. `ports/gateway.Event` remains a
+transitional in-process DTO for legacy adapters and tests; it is not the target
+protocol for new surfaces.
+
 ## What It Does
 
 - Starts an interactive TUI when launched from a TTY with no prompt input.

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
+	"go/ast"
 	"go/parser"
 	"go/token"
 	"io/fs"
@@ -14,10 +15,10 @@ import (
 )
 
 type violation struct {
-	file       string
-	line       int
-	importPath string
-	rule       string
+	file    string
+	line    int
+	subject string
+	rule    string
 }
 
 func main() {
@@ -58,11 +59,23 @@ func main() {
 			return err
 		}
 		rel = filepath.ToSlash(rel)
-		file, err := parser.ParseFile(fset, path, nil, parser.ImportsOnly)
+		source, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		file, err := parser.ParseFile(fset, path, source, 0)
 		if err != nil {
 			return fmt.Errorf("%s: %w", rel, err)
 		}
 		filesChecked++
+		if rule, subject, line := semanticBoundaryRule(rel, file, fset, modulePath); rule != "" {
+			violations = append(violations, violation{
+				file:    rel,
+				line:    line,
+				subject: subject,
+				rule:    rule,
+			})
+		}
 		for _, spec := range file.Imports {
 			importPath, err := strconv.Unquote(spec.Path.Value)
 			if err != nil {
@@ -70,10 +83,10 @@ func main() {
 			}
 			if rule := boundaryRule(rel, importPath, modulePath); rule != "" {
 				violations = append(violations, violation{
-					file:       rel,
-					line:       fset.Position(spec.Pos()).Line,
-					importPath: importPath,
-					rule:       rule,
+					file:    rel,
+					line:    fset.Position(spec.Pos()).Line,
+					subject: importPath,
+					rule:    rule,
 				})
 			}
 		}
@@ -84,7 +97,7 @@ func main() {
 	}
 	if len(violations) > 0 {
 		for _, v := range violations {
-			fmt.Fprintf(os.Stderr, "%s:%d: %s imports %q\n", v.file, v.line, v.rule, v.importPath)
+			fmt.Fprintf(os.Stderr, "%s:%d: %s: %s\n", v.file, v.line, v.rule, v.subject)
 		}
 		os.Exit(1)
 	}
@@ -108,6 +121,136 @@ func readModulePath(path string) (string, error) {
 		return "", err
 	}
 	return "", fmt.Errorf("module path not found in %s", path)
+}
+
+func semanticBoundaryRule(rel string, file *ast.File, fset *token.FileSet, modulePath string) (string, string, int) {
+	if !strings.HasPrefix(rel, "surfaces/") || strings.HasSuffix(rel, "_test.go") || file == nil {
+		return "", "", 0
+	}
+	gatewayNames := importNames(file, modulePath+"/ports/gateway")
+	if len(gatewayNames) == 0 {
+		return "", "", 0
+	}
+	gatewayTurnHandles := gatewayTurnHandleNames(file, gatewayNames)
+	var subject string
+	var rule string
+	var line int
+	ast.Inspect(file, func(node ast.Node) bool {
+		if subject != "" {
+			return false
+		}
+		selector, ok := node.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		ident, ok := selector.X.(*ast.Ident)
+		if !ok {
+			return true
+		}
+		if gatewayNames[ident.Name] {
+			switch selector.Sel.Name {
+			case "Event", "EventEnvelope":
+				subject = ident.Name + "." + selector.Sel.Name
+				rule = "surfaces must consume eventstream.Envelope instead of gateway.Event/EventEnvelope"
+				line = fset.Position(selector.Pos()).Line
+				return false
+			case "AssistantText", "PromptTokens", "CompletionTokens", "ReasoningTokens", "TotalTokens":
+				subject = ident.Name + "." + selector.Sel.Name
+				rule = "surfaces must parse eventstream.Envelope instead of gateway payload helpers"
+				line = fset.Position(selector.Pos()).Line
+				return false
+			}
+		}
+		if selector.Sel.Name == "Events" && gatewayTurnHandles[ident.Name] {
+			subject = ident.Name + ".Events()"
+			rule = "surfaces must consume ACPEventsFromGatewayHandle/eventstream.Envelope instead of gateway.TurnHandle.Events"
+			line = fset.Position(selector.Pos()).Line
+			return false
+		}
+		return true
+	})
+	if subject != "" {
+		return rule, subject, line
+	}
+	return "", "", 0
+}
+
+func gatewayTurnHandleNames(file *ast.File, gatewayNames map[string]bool) map[string]bool {
+	out := map[string]bool{}
+	ast.Inspect(file, func(node ast.Node) bool {
+		switch typed := node.(type) {
+		case *ast.FuncDecl:
+			collectGatewayTurnHandleFields(out, typed.Type.Params, gatewayNames)
+		case *ast.FuncLit:
+			collectGatewayTurnHandleFields(out, typed.Type.Params, gatewayNames)
+		case *ast.ValueSpec:
+			if isGatewaySelectorType(typed.Type, gatewayNames, "TurnHandle") {
+				for _, name := range typed.Names {
+					out[name.Name] = true
+				}
+			}
+		case *ast.AssignStmt:
+			for i, rhs := range typed.Rhs {
+				if i >= len(typed.Lhs) || !isGatewayTurnHandleAssertion(rhs, gatewayNames) {
+					continue
+				}
+				if ident, ok := typed.Lhs[i].(*ast.Ident); ok {
+					out[ident.Name] = true
+				}
+			}
+		}
+		return true
+	})
+	return out
+}
+
+func collectGatewayTurnHandleFields(out map[string]bool, fields *ast.FieldList, gatewayNames map[string]bool) {
+	if fields == nil {
+		return
+	}
+	for _, field := range fields.List {
+		if !isGatewaySelectorType(field.Type, gatewayNames, "TurnHandle") {
+			continue
+		}
+		for _, name := range field.Names {
+			out[name.Name] = true
+		}
+	}
+}
+
+func isGatewayTurnHandleAssertion(expr ast.Expr, gatewayNames map[string]bool) bool {
+	assertion, ok := expr.(*ast.TypeAssertExpr)
+	return ok && isGatewaySelectorType(assertion.Type, gatewayNames, "TurnHandle")
+}
+
+func isGatewaySelectorType(expr ast.Expr, gatewayNames map[string]bool, selectorName string) bool {
+	switch typed := expr.(type) {
+	case *ast.StarExpr:
+		return isGatewaySelectorType(typed.X, gatewayNames, selectorName)
+	case *ast.SelectorExpr:
+		ident, ok := typed.X.(*ast.Ident)
+		return ok && gatewayNames[ident.Name] && typed.Sel.Name == selectorName
+	default:
+		return false
+	}
+}
+
+func importNames(file *ast.File, importPath string) map[string]bool {
+	out := map[string]bool{}
+	for _, spec := range file.Imports {
+		path, err := strconv.Unquote(spec.Path.Value)
+		if err != nil || path != importPath {
+			continue
+		}
+		if spec.Name != nil {
+			if spec.Name.Name != "." && spec.Name.Name != "_" {
+				out[spec.Name.Name] = true
+			}
+			continue
+		}
+		out[pathBase(path)] = true
+	}
+	return out
 }
 
 func boundaryRule(rel string, importPath string, modulePath string) string {
@@ -193,6 +336,14 @@ func startsWithAny(value string, prefixes ...string) bool {
 		}
 	}
 	return false
+}
+
+func pathBase(path string) string {
+	index := strings.LastIndex(path, "/")
+	if index < 0 {
+		return path
+	}
+	return path[index+1:]
 }
 
 func fatal(err error) {

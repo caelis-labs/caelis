@@ -66,3 +66,22 @@ func TestFinalAssistantAccumulatorComputesDelta(t *testing.T) {
 		t.Fatalf("deltas = %q/%q/%q final = %q", first.Delta, second.Delta, third.Delta, acc.FinalText())
 	}
 }
+
+func TestFinalAssistantAccumulatorSeparatesMessageIDs(t *testing.T) {
+	t.Parallel()
+
+	var acc FinalAssistantAccumulator
+	first := acc.ObserveUpdate(ContentChunk{
+		SessionUpdate: UpdateAgentMessage,
+		MessageID:     "m1",
+		Content:       TextContent{Type: "text", Text: "hello"},
+	})
+	second := acc.ObserveUpdate(ContentChunk{
+		SessionUpdate: UpdateAgentMessage,
+		MessageID:     "m2",
+		Content:       TextContent{Type: "text", Text: "world"},
+	})
+	if first.Delta != "hello" || second.Delta != "world" || acc.FinalText() != "world" {
+		t.Fatalf("updates = %#v / %#v final = %q, want message-id reset", first, second, acc.FinalText())
+	}
+}

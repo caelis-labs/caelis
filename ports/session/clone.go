@@ -37,7 +37,7 @@ func CloneEvent(in *Event) *Event {
 	}
 	out := *in
 	out.Text = in.Text
-	out.Meta = maps.Clone(in.Meta)
+	out.Meta = cloneProtocolAnyMap(in.Meta)
 	out.Actor = CloneActorRef(in.Actor)
 	if in.Invocation != nil {
 		invocation := CloneEventInvocation(*in.Invocation)
@@ -56,14 +56,14 @@ func CloneEvent(in *Event) *Event {
 		notice.Level = strings.TrimSpace(strings.ToLower(notice.Level))
 		notice.Text = strings.TrimSpace(notice.Text)
 		notice.Kind = strings.TrimSpace(notice.Kind)
-		notice.Meta = maps.Clone(notice.Meta)
+		notice.Meta = cloneProtocolAnyMap(notice.Meta)
 		out.Notice = &notice
 	}
 	if in.Lifecycle != nil {
 		lifecycle := *in.Lifecycle
 		lifecycle.Status = strings.TrimSpace(lifecycle.Status)
 		lifecycle.Reason = strings.TrimSpace(lifecycle.Reason)
-		lifecycle.Meta = maps.Clone(lifecycle.Meta)
+		lifecycle.Meta = cloneProtocolAnyMap(lifecycle.Meta)
 		out.Lifecycle = &lifecycle
 	}
 	if in.Protocol != nil {

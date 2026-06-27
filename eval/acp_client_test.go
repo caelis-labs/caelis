@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/protocol/acp/client"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
 )
 
 func TestPublicClientLifecycleAndLoadE2E(t *testing.T) {
@@ -118,20 +119,20 @@ func TestPublicClientPermissionAndTerminalE2E(t *testing.T) {
 		OnUpdate: func(update client.UpdateEnvelope) {
 			switch call := update.Update.(type) {
 			case client.ToolCall:
-				if info, ok := call.Meta["terminal_info"].(map[string]any); ok && info["terminal_id"] == "command-approval-1" {
+				if info := metautil.TerminalSection(call.Meta, metautil.LegacyTerminalInfo); info["terminal_id"] == "command-approval-1" {
 					mu.Lock()
 					displayTerminalInfo = true
 					mu.Unlock()
 				}
 			case client.ToolCallUpdate:
-				if output, ok := call.Meta["terminal_output"].(map[string]any); ok && output["terminal_id"] == "command-approval-1" {
+				if output := metautil.TerminalSection(call.Meta, metautil.LegacyTerminalOutput); output["terminal_id"] == "command-approval-1" {
 					if text, _ := output["data"].(string); strings.Contains(text, "child approval ok") {
 						mu.Lock()
 						displayTerminalOutput = true
 						mu.Unlock()
 					}
 				}
-				if exit, ok := call.Meta["terminal_exit"].(map[string]any); ok && exit["terminal_id"] == "command-approval-1" {
+				if exit := metautil.TerminalSection(call.Meta, metautil.LegacyTerminalExit); exit["terminal_id"] == "command-approval-1" {
 					mu.Lock()
 					displayTerminalExit = true
 					mu.Unlock()

@@ -88,8 +88,10 @@ type ToolCallContent struct {
 }
 
 type ContentChunk struct {
-	SessionUpdate string `json:"sessionUpdate"`
-	Content       any    `json:"content"`
+	SessionUpdate string         `json:"sessionUpdate"`
+	Content       any            `json:"content"`
+	MessageID     string         `json:"messageId,omitempty"`
+	Meta          map[string]any `json:"_meta,omitempty"`
 }
 
 func (u ContentChunk) SessionUpdateType() string { return u.SessionUpdate }
@@ -147,6 +149,7 @@ type RequestPermissionRequest struct {
 	SessionID string             `json:"sessionId"`
 	ToolCall  ToolCallUpdate     `json:"toolCall"`
 	Options   []PermissionOption `json:"options"`
+	Meta      map[string]any     `json:"_meta,omitempty"`
 }
 
 type PermissionOutcome struct {

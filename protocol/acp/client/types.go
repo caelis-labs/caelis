@@ -122,6 +122,8 @@ type SessionNotification struct {
 type ContentChunk struct {
 	SessionUpdate string          `json:"sessionUpdate"`
 	Content       json.RawMessage `json:"content"`
+	MessageID     string          `json:"messageId,omitempty"`
+	Meta          map[string]any  `json:"_meta,omitempty"`
 }
 
 type TextChunk struct {

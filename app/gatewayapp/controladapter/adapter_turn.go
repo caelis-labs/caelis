@@ -25,30 +25,7 @@ func (t *gatewayTurn) Events() <-chan eventstream.Envelope {
 }
 
 func (t *gatewayTurn) startEvents() {
-	var events <-chan eventstream.Envelope
-	if acpHandle, ok := t.handle.(gateway.ACPEventStreamHandle); ok && acpHandle != nil {
-		events = acpHandle.ACPEvents()
-	} else {
-		events = t.projectedGatewayEvents()
-	}
-	t.events = eventstream.EnsureTerminalLifecycle(events, t.HandleID(), t.RunID(), t.TurnID())
-}
-
-func (t *gatewayTurn) projectedGatewayEvents() <-chan eventstream.Envelope {
-	events := t.handle.Events()
-	out := make(chan eventstream.Envelope, 32)
-	go func() {
-		defer close(out)
-		if events == nil {
-			return
-		}
-		for env := range events {
-			for _, projected := range acpprojector.ProjectGatewayEventEnvelope(env) {
-				out <- projected
-			}
-		}
-	}()
-	return out
+	t.events = acpprojector.ACPEventsFromGatewayHandle(t.handle)
 }
 
 func (t *gatewayTurn) SubmitApproval(ctx context.Context, decision ApprovalDecision) error {

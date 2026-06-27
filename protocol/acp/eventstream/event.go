@@ -222,6 +222,7 @@ func CloneEnvelope(in Envelope) Envelope {
 		permission := *in.Permission
 		permission.Options = append([]schema.PermissionOption(nil), in.Permission.Options...)
 		permission.ToolCall = cloneToolCallUpdate(in.Permission.ToolCall)
+		permission.Meta = cloneAnyMap(in.Permission.Meta)
 		out.Permission = &permission
 	}
 	if in.ApprovalReview != nil {
@@ -250,6 +251,8 @@ func CloneUpdate(update schema.Update) schema.Update {
 	case nil:
 		return nil
 	case schema.ContentChunk:
+		typed.Content = cloneAny(typed.Content)
+		typed.Meta = cloneAnyMap(typed.Meta)
 		return typed
 	case schema.ToolCall:
 		typed.RawInput = cloneAny(typed.RawInput)
@@ -285,6 +288,8 @@ func UpdateType(update schema.Update) string {
 
 func UpdateMeta(update schema.Update) map[string]any {
 	switch typed := update.(type) {
+	case schema.ContentChunk:
+		return cloneAnyMap(typed.Meta)
 	case schema.ToolCall:
 		return cloneAnyMap(typed.Meta)
 	case schema.ToolCallUpdate:
@@ -328,6 +333,12 @@ func cloneAny(in any) any {
 	switch typed := in.(type) {
 	case map[string]any:
 		return cloneAnyMap(typed)
+	case []any:
+		out := make([]any, len(typed))
+		for i, item := range typed {
+			out[i] = cloneAny(item)
+		}
+		return out
 	default:
 		return in
 	}
@@ -337,5 +348,9 @@ func cloneAnyMap(in map[string]any) map[string]any {
 	if in == nil {
 		return nil
 	}
-	return maps.Clone(in)
+	out := maps.Clone(in)
+	for key, value := range out {
+		out[key] = cloneAny(value)
+	}
+	return out
 }

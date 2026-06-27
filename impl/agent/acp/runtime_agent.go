@@ -21,6 +21,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/stream"
 	"github.com/OnslaughtSnail/caelis/protocol/acp"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/control/commands"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/projector"
 )
 
@@ -942,54 +943,41 @@ func terminalExitNotification(sessionID string, terminalID string, status string
 			SessionUpdate: acp.UpdateToolCallInfo,
 			ToolCallID:    strings.TrimSpace(terminalID),
 			Status:        stringPtr(status),
-			Meta:          terminalExitMeta(terminalID, exitCode),
+			Meta:          terminalExitMeta(terminalID, status, exitCode),
 		},
 	}
 }
 
 func terminalOutputMeta(terminalID string, data string) map[string]any {
-	return map[string]any{
-		"terminal_output": map[string]any{
-			"terminal_id": strings.TrimSpace(terminalID),
-			"data":        data,
-		},
-	}
+	return metautil.WithRuntimeSection(nil, metautil.Terminal, map[string]any{
+		"terminal_id": strings.TrimSpace(terminalID),
+		"data":        data,
+	})
 }
 
 func withoutTerminalOutputProjection(notification acp.SessionNotification) acp.SessionNotification {
 	switch update := notification.Update.(type) {
 	case acp.ToolCall:
-		update.Meta = withoutMetaKey(update.Meta, "terminal_output")
+		update.Meta = metautil.WithoutTerminalData(update.Meta)
 		update.Content = nil
 		notification.Update = update
 	case acp.ToolCallUpdate:
-		update.Meta = withoutMetaKey(update.Meta, "terminal_output")
+		update.Meta = metautil.WithoutTerminalData(update.Meta)
 		update.Content = nil
 		notification.Update = update
 	}
 	return notification
 }
 
-func withoutMetaKey(meta map[string]any, key string) map[string]any {
-	if len(meta) == 0 {
-		return nil
-	}
-	out := maps.Clone(meta)
-	delete(out, key)
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
-
-func terminalExitMeta(terminalID string, exitCode int) map[string]any {
-	return map[string]any{
-		"terminal_exit": map[string]any{
-			"terminal_id": strings.TrimSpace(terminalID),
-			"exit_code":   exitCode,
-			"signal":      nil,
-		},
-	}
+func terminalExitMeta(terminalID string, status string, exitCode int) map[string]any {
+	meta := metautil.WithRuntimeSection(nil, metautil.Terminal, map[string]any{
+		"terminal_id": strings.TrimSpace(terminalID),
+		"exit_code":   exitCode,
+		"signal":      nil,
+	})
+	return metautil.WithRuntimeSection(meta, "tool", map[string]any{
+		"status_detail": strings.TrimSpace(status),
+	})
 }
 
 func terminalSnapshotFinalOutput(snap stream.Snapshot) string {

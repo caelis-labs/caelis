@@ -1,19 +1,20 @@
 package kernel
 
 import (
-	"maps"
 	"strings"
+
+	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
 )
 
 const (
 	// EventMetaRoot is the Caelis-owned ACP extension namespace. Renderers may
 	// consume values under this namespace, but should not treat provider-visible
 	// tool JSON as display metadata.
-	EventMetaRoot = "caelis"
+	EventMetaRoot = metautil.Root
 
-	EventMetaVersion   = "version"
+	EventMetaVersion   = metautil.Version
 	EventMetaTransient = "transient"
-	EventMetaRuntime   = "runtime"
+	EventMetaRuntime   = metautil.Runtime
 
 	EventMetaRuntimeTool       = "tool"
 	EventMetaRuntimeToolName   = "name"
@@ -59,80 +60,13 @@ func EventMetaBool(values map[string]any, path ...string) bool {
 }
 
 func withCaelisRuntimeSection(meta map[string]any, section string, values map[string]any) map[string]any {
-	out := maps.Clone(meta)
-	if out == nil {
-		out = map[string]any{}
-	}
-	caelis, _ := out[EventMetaRoot].(map[string]any)
-	caelis = maps.Clone(caelis)
-	if caelis == nil {
-		caelis = map[string]any{}
-	}
-	caelis[EventMetaVersion] = 1
-	runtimeMeta, _ := caelis[EventMetaRuntime].(map[string]any)
-	runtimeMeta = maps.Clone(runtimeMeta)
-	if runtimeMeta == nil {
-		runtimeMeta = map[string]any{}
-	}
-	sectionMeta, _ := runtimeMeta[section].(map[string]any)
-	sectionMeta = maps.Clone(sectionMeta)
-	if sectionMeta == nil {
-		sectionMeta = map[string]any{}
-	}
-	for key, value := range values {
-		if text, ok := value.(string); ok {
-			if strings.TrimSpace(text) == "" {
-				continue
-			}
-			sectionMeta[key] = strings.TrimSpace(text)
-			continue
-		}
-		if value != nil {
-			sectionMeta[key] = value
-		}
-	}
-	runtimeMeta[section] = sectionMeta
-	caelis[EventMetaRuntime] = runtimeMeta
-	out[EventMetaRoot] = caelis
-	return out
+	return metautil.WithCompactRuntimeSection(meta, section, values)
 }
 
 func mergeEventMeta(base map[string]any, overlay map[string]any) map[string]any {
-	if len(base) == 0 {
-		return cloneEventMetaMap(overlay)
-	}
-	if len(overlay) == 0 {
-		return cloneEventMetaMap(base)
-	}
-	out := cloneEventMetaMap(base)
-	for key, value := range overlay {
-		if baseMap, ok := out[key].(map[string]any); ok {
-			if overlayMap, ok := value.(map[string]any); ok {
-				out[key] = mergeEventMeta(baseMap, overlayMap)
-				continue
-			}
-		}
-		out[key] = cloneEventMetaValue(value)
-	}
-	return out
+	return metautil.Merge(base, overlay)
 }
 
 func cloneEventMetaMap(values map[string]any) map[string]any {
-	if len(values) == 0 {
-		return nil
-	}
-	out := make(map[string]any, len(values))
-	for key, value := range values {
-		out[key] = cloneEventMetaValue(value)
-	}
-	return out
-}
-
-func cloneEventMetaValue(value any) any {
-	switch typed := value.(type) {
-	case map[string]any:
-		return cloneEventMetaMap(typed)
-	default:
-		return value
-	}
+	return metautil.CloneMap(values)
 }

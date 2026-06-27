@@ -1,7 +1,6 @@
 package session
 
 import (
-	"maps"
 	"strings"
 	"time"
 
@@ -90,7 +89,7 @@ func NoticeOf(event *Event) (EventNotice, bool) {
 		out.Level = strings.TrimSpace(strings.ToLower(out.Level))
 		out.Text = strings.TrimSpace(out.Text)
 		out.Kind = strings.TrimSpace(out.Kind)
-		out.Meta = maps.Clone(out.Meta)
+		out.Meta = cloneProtocolAnyMap(out.Meta)
 		if out.Level != "" && out.Text != "" {
 			return out, true
 		}

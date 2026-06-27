@@ -7,6 +7,7 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/stream"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
 )
 
 func TestLocalTerminalAdapterOutputUsesCumulativeRead(t *testing.T) {
@@ -100,6 +101,32 @@ func TestRefFromEventUsesSemanticToolResultTaskMetadata(t *testing.T) {
 	}
 	if ref.SessionID != "root-session" || ref.TaskID != "reya" || ref.TerminalID != "subagent-task-1" {
 		t.Fatalf("RefFromEvent() = %#v, want root-session/reya/subagent-task-1", ref)
+	}
+}
+
+func TestRefFromEventUsesCanonicalProtocolTerminalMetadata(t *testing.T) {
+	t.Parallel()
+
+	event := &session.Event{
+		SessionID: "root-session",
+		Type:      session.EventTypeToolResult,
+		Protocol: &session.EventProtocol{
+			Update: &session.ProtocolUpdate{
+				SessionUpdate: "tool_call_update",
+				Meta: metautil.WithRuntimeSection(nil, metautil.Terminal, map[string]any{
+					"task_id":     "task-1",
+					"terminal_id": "terminal-1",
+				}),
+			},
+		},
+	}
+
+	ref, ok := RefFromEvent(event)
+	if !ok {
+		t.Fatal("RefFromEvent() ok = false, want canonical protocol terminal ref")
+	}
+	if ref.SessionID != "root-session" || ref.TaskID != "task-1" || ref.TerminalID != "terminal-1" {
+		t.Fatalf("RefFromEvent() = %#v, want root-session/task-1/terminal-1", ref)
 	}
 }
 

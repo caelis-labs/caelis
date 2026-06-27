@@ -1,6 +1,7 @@
 package session
 
 import (
+	"encoding/json"
 	"reflect"
 	"strconv"
 	"strings"
@@ -510,6 +511,77 @@ func TestCloneEventProtocolPreservesRuntimeToolNameWithDurableUpdate(t *testing.
 	}
 	if protocol.ToolCall.Kind != "execute" {
 		t.Fatalf("ToolCall.Kind = %q, want execute", protocol.ToolCall.Kind)
+	}
+}
+
+func TestEventProtocolRoundTripPreservesUpdateMessageID(t *testing.T) {
+	t.Parallel()
+
+	source := EventProtocol{
+		Update: &ProtocolUpdate{
+			SessionUpdate: string(ProtocolUpdateTypeAgentMessage),
+			MessageID:     "msg-1",
+			Content:       ProtocolTextContent("hello"),
+			Meta:          map[string]any{"vendor": map[string]any{"trace": "abc"}},
+		},
+	}
+	raw, err := json.Marshal(source)
+	if err != nil {
+		t.Fatalf("json.Marshal(EventProtocol) error = %v", err)
+	}
+	var decoded EventProtocol
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal(EventProtocol) error = %v", err)
+	}
+	update := ProtocolUpdateOf(&Event{Protocol: &decoded})
+	if update == nil {
+		t.Fatal("ProtocolUpdateOf() = nil")
+	}
+	if update.MessageID != "msg-1" {
+		t.Fatalf("MessageID = %q, want msg-1", update.MessageID)
+	}
+	vendor, _ := update.Meta["vendor"].(map[string]any)
+	if vendor["trace"] != "abc" {
+		t.Fatalf("Meta = %#v, want vendor trace", update.Meta)
+	}
+}
+
+func TestCloneEventDeepClonesNestedMeta(t *testing.T) {
+	t.Parallel()
+
+	event := &Event{
+		Type: EventTypeAssistant,
+		Meta: map[string]any{
+			"caelis": map[string]any{
+				"runtime": map[string]any{
+					"terminal": map[string]any{"terminal_id": "term-1"},
+				},
+			},
+		},
+		Protocol: &EventProtocol{
+			Update: &ProtocolUpdate{
+				SessionUpdate: string(ProtocolUpdateTypeAgentMessage),
+				Meta: map[string]any{
+					"vendor": map[string]any{"trace": "abc"},
+				},
+			},
+		},
+	}
+
+	cloned := CloneEvent(event)
+	if cloned == nil || cloned.Protocol == nil || cloned.Protocol.Update == nil {
+		t.Fatalf("CloneEvent() = %#v, want protocol update", cloned)
+	}
+	event.Meta["caelis"].(map[string]any)["runtime"].(map[string]any)["terminal"].(map[string]any)["terminal_id"] = "mutated"
+	event.Protocol.Update.Meta["vendor"].(map[string]any)["trace"] = "mutated"
+
+	terminal := cloned.Meta["caelis"].(map[string]any)["runtime"].(map[string]any)["terminal"].(map[string]any)
+	if terminal["terminal_id"] != "term-1" {
+		t.Fatalf("cloned event meta aliased source = %#v", cloned.Meta)
+	}
+	vendor := cloned.Protocol.Update.Meta["vendor"].(map[string]any)
+	if vendor["trace"] != "abc" {
+		t.Fatalf("cloned protocol update meta aliased source = %#v", cloned.Protocol.Update.Meta)
 	}
 }
 

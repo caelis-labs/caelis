@@ -3,12 +3,12 @@ package projector
 import (
 	"encoding/json"
 	"fmt"
-	"maps"
 	"strings"
 
 	"github.com/OnslaughtSnail/caelis/ports/displaypolicy"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
@@ -102,10 +102,14 @@ func (p EventProjector) ProjectNotifications(event *session.Event) ([]SessionNot
 // ProjectPermissionRequest converts one canonical approval event into one
 // ACP-compatible session/request_permission payload.
 func (EventProjector) ProjectPermissionRequest(event *session.Event) (*RequestPermissionRequest, bool, error) {
-	if event == nil || event.Protocol == nil || event.Protocol.Approval == nil {
+	if event == nil || event.Protocol == nil {
 		return nil, false, nil
 	}
-	approval := event.Protocol.Approval
+	protocol := session.CloneEventProtocol(*event.Protocol)
+	approval := protocol.Permission
+	if approval == nil {
+		return nil, false, nil
+	}
 	toolCall := permissionToolCallUpdateFromProtocol(approval.ToolCall)
 	if strings.TrimSpace(toolCall.ToolCallID) == "" &&
 		toolCall.Title == nil &&
@@ -126,6 +130,7 @@ func (EventProjector) ProjectPermissionRequest(event *session.Event) (*RequestPe
 		SessionID: strings.TrimSpace(event.SessionID),
 		ToolCall:  toolCall,
 		Options:   options,
+		Meta:      cloneAnyMap(event.Meta),
 	}, true, nil
 }
 
@@ -173,11 +178,11 @@ func explicitUpdates(event *session.Event) []Update {
 	}
 	switch protocolUpdateType(event) {
 	case UpdateUserMessage:
-		return singleContentUpdate(UpdateUserMessage, textForUserEvent(event))
+		return contentUpdateForEvent(event, UpdateUserMessage, textForUserEvent(event))
 	case UpdateAgentMessage:
-		return singleContentUpdate(UpdateAgentMessage, textForAssistantEvent(event))
+		return contentUpdateForEvent(event, UpdateAgentMessage, textForAssistantEvent(event))
 	case UpdateAgentThought:
-		return singleContentUpdate(UpdateAgentThought, reasoningForAssistantEvent(event))
+		return contentUpdateForEvent(event, UpdateAgentThought, reasoningForAssistantEvent(event))
 	case UpdateToolCall:
 		return explicitToolCallUpdates(event)
 	case UpdateToolCallInfo:
@@ -199,7 +204,7 @@ func explicitUpdates(event *session.Event) []Update {
 		}
 		return []Update{update}
 	case UpdateCompact:
-		return singleContentUpdate(UpdateCompact, textForUserEvent(event))
+		return contentUpdateForEvent(event, UpdateCompact, textForUserEvent(event))
 	case "":
 		return nil
 	default:
@@ -226,7 +231,7 @@ func inferredUpdates(event *session.Event) []Update {
 	}
 	switch session.EventTypeOf(event) {
 	case session.EventTypeUser:
-		return singleContentUpdate(UpdateUserMessage, textForUserEvent(event))
+		return contentUpdateForEvent(event, UpdateUserMessage, textForUserEvent(event))
 	case session.EventTypeAssistant:
 		return inferredAssistantUpdates(event)
 	case session.EventTypeToolCall:
@@ -244,7 +249,7 @@ func inferredUpdates(event *session.Event) []Update {
 		}
 		return []Update{update}
 	case session.EventTypeCompact:
-		return singleContentUpdate(UpdateCompact, textForUserEvent(event))
+		return contentUpdateForEvent(event, UpdateCompact, textForUserEvent(event))
 	default:
 		return nil
 	}
@@ -261,20 +266,14 @@ func inferredAssistantUpdates(event *session.Event) []Update {
 		}
 	}
 	if message == nil {
-		return singleContentUpdate(UpdateAgentMessage, textForAssistantEvent(event))
+		return contentUpdateForEvent(event, UpdateAgentMessage, textForAssistantEvent(event))
 	}
 	out := make([]Update, 0, 2)
 	if reasoning := reasoningForAssistantEvent(event); reasoning != "" {
-		out = append(out, ContentChunk{
-			SessionUpdate: UpdateAgentThought,
-			Content:       TextContent{Type: "text", Text: reasoning},
-		})
+		out = append(out, contentChunkForEvent(event, UpdateAgentThought, reasoning))
 	}
 	if text := textForAssistantEvent(event); text != "" {
-		out = append(out, ContentChunk{
-			SessionUpdate: UpdateAgentMessage,
-			Content:       TextContent{Type: "text", Text: text},
-		})
+		out = append(out, contentChunkForEvent(event, UpdateAgentMessage, text))
 	}
 	return out
 }
@@ -302,16 +301,10 @@ func inferredAssistantMessageOnly(event *session.Event) []Update {
 	}
 	out := make([]Update, 0, 2)
 	if reasoning := reasoningForAssistantEvent(event); reasoning != "" {
-		out = append(out, ContentChunk{
-			SessionUpdate: UpdateAgentThought,
-			Content:       TextContent{Type: "text", Text: reasoning},
-		})
+		out = append(out, contentChunkForEvent(event, UpdateAgentThought, reasoning))
 	}
 	if text := textForAssistantEvent(event); text != "" {
-		out = append(out, ContentChunk{
-			SessionUpdate: UpdateAgentMessage,
-			Content:       TextContent{Type: "text", Text: text},
-		})
+		out = append(out, contentChunkForEvent(event, UpdateAgentMessage, text))
 	}
 	return out
 }
@@ -352,14 +345,29 @@ func inferredToolCallUpdates(event *session.Event) []Update {
 	return out
 }
 
-func singleContentUpdate(kind string, text string) []Update {
+func contentUpdateForEvent(event *session.Event, kind string, text string) []Update {
 	if text == "" {
 		return nil
 	}
-	return []Update{ContentChunk{
+	return []Update{contentChunkForEvent(event, kind, text)}
+}
+
+func contentChunk(kind string, text string) ContentChunk {
+	return ContentChunk{
 		SessionUpdate: kind,
 		Content:       TextContent{Type: "text", Text: text},
-	}}
+	}
+}
+
+func contentChunkForEvent(event *session.Event, kind string, text string) ContentChunk {
+	chunk := contentChunk(kind, text)
+	// ProtocolUpdate metadata describes that exact ACP update. Do not attach
+	// tool/plan metadata to assistant chunks emitted from the durable Message.
+	if update := session.ProtocolUpdateOf(event); update != nil && normalizeUpdateType(update.SessionUpdate) == kind {
+		chunk.MessageID = strings.TrimSpace(update.MessageID)
+		chunk.Meta = cloneAnyMap(update.Meta)
+	}
+	return chunk
 }
 
 func toolCallForEvent(event *session.Event) (ToolCall, bool, error) {
@@ -735,135 +743,6 @@ func projectToolContent(content []session.ProtocolToolCallContent, displayTermin
 	return out
 }
 
-func terminalOutputMetaFromEventToolContent(content []session.EventToolContent, displayTerminalID string) map[string]any {
-	displayTerminalID = strings.TrimSpace(displayTerminalID)
-	var terminalID string
-	var text terminalTextAccumulator
-	for _, item := range content {
-		if !strings.EqualFold(strings.TrimSpace(item.Type), "terminal") {
-			continue
-		}
-		if terminalID == "" {
-			terminalID = firstNonEmpty(displayTerminalID, strings.TrimSpace(item.TerminalID))
-		}
-		if item.Text != "" {
-			text.appendPart(item.Text)
-		}
-	}
-	if terminalID == "" || text.len() == 0 {
-		return nil
-	}
-	return map[string]any{
-		"terminal_output": map[string]any{
-			"terminal_id": terminalID,
-			"data":        text.string(),
-		},
-	}
-}
-
-func terminalOutputMetaFromProtocolContent(content []session.ProtocolToolCallContent, displayTerminalID string) map[string]any {
-	displayTerminalID = strings.TrimSpace(displayTerminalID)
-	var terminalID string
-	var text terminalTextAccumulator
-	for _, item := range content {
-		if !strings.EqualFold(strings.TrimSpace(item.Type), "terminal") {
-			continue
-		}
-		if terminalID == "" {
-			terminalID = firstNonEmpty(displayTerminalID, strings.TrimSpace(item.TerminalID))
-		}
-		if part := terminalTextContent(item.Content); part != "" {
-			text.appendPart(part)
-		}
-	}
-	if terminalID == "" || text.len() == 0 {
-		return nil
-	}
-	return map[string]any{
-		"terminal_output": map[string]any{
-			"terminal_id": terminalID,
-			"data":        text.string(),
-		},
-	}
-}
-
-type terminalTextAccumulator struct {
-	buf      strings.Builder
-	lastByte byte
-	hasLast  bool
-}
-
-func (a *terminalTextAccumulator) len() int {
-	if a == nil {
-		return 0
-	}
-	return a.buf.Len()
-}
-
-func (a *terminalTextAccumulator) string() string {
-	if a == nil {
-		return ""
-	}
-	return a.buf.String()
-}
-
-func (a *terminalTextAccumulator) appendPart(part string) {
-	if a == nil || part == "" {
-		return
-	}
-	if a.hasLast && a.lastByte != '\n' && !strings.HasPrefix(part, "\n") {
-		a.buf.WriteByte('\n')
-		a.lastByte = '\n'
-		a.hasLast = true
-	}
-	a.buf.WriteString(part)
-	if n := len(part); n > 0 {
-		a.lastByte = part[n-1]
-		a.hasLast = true
-	}
-}
-
-func terminalTextContent(content any) string {
-	switch typed := content.(type) {
-	case nil:
-		return ""
-	case TextContent:
-		if strings.EqualFold(strings.TrimSpace(typed.Type), "text") {
-			return typed.Text
-		}
-		return ""
-	case map[string]any:
-		if typ, _ := typed["type"].(string); !strings.EqualFold(strings.TrimSpace(typ), "text") {
-			return ""
-		}
-		text, _ := typed["text"].(string)
-		return text
-	case json.RawMessage:
-		if len(typed) == 0 {
-			return ""
-		}
-		var decoded TextContent
-		if err := json.Unmarshal(typed, &decoded); err == nil && strings.EqualFold(strings.TrimSpace(decoded.Type), "text") {
-			return decoded.Text
-		}
-		var generic any
-		if err := json.Unmarshal(typed, &generic); err != nil {
-			return ""
-		}
-		return terminalTextContent(generic)
-	default:
-		raw, err := json.Marshal(typed)
-		if err != nil || len(raw) == 0 {
-			return ""
-		}
-		var decoded TextContent
-		if err := json.Unmarshal(raw, &decoded); err == nil && strings.EqualFold(strings.TrimSpace(decoded.Type), "text") {
-			return decoded.Text
-		}
-		return ""
-	}
-}
-
 func terminalIDFromEvent(event *session.Event) string {
 	if event == nil {
 		return ""
@@ -1075,63 +954,6 @@ func reasoningFromProtocolContent(content any) string {
 	return ""
 }
 
-func withDisplayTerminal(call ToolCall, name string, args map[string]any) ToolCall {
-	terminalID, ok := displaypolicy.DisplayTerminalID(call.ToolCallID, name)
-	if !ok {
-		return call
-	}
-	hasDisplayTerminal := false
-	for i := range call.Content {
-		if strings.EqualFold(strings.TrimSpace(call.Content[i].Type), "terminal") {
-			call.Content[i].TerminalID = terminalID
-			call.Content[i].Content = nil
-			hasDisplayTerminal = true
-		}
-	}
-	if !hasDisplayTerminal {
-		call.Content = append(call.Content, ToolCallContent{
-			Type:       "terminal",
-			TerminalID: terminalID,
-		})
-	}
-	call.Meta = mergeMeta(call.Meta, displayTerminalInfoMeta(terminalID, name, args))
-	return call
-}
-
-func protocolToolNameForUpdate(event *session.Event, update *session.ProtocolUpdate) string {
-	if event != nil && event.Protocol != nil && event.Protocol.ToolCall != nil {
-		if name := strings.TrimSpace(event.Protocol.ToolCall.Name); name != "" {
-			return name
-		}
-	}
-	if update != nil {
-		if name := terminalInfoToolName(update.Meta); name != "" {
-			return name
-		}
-	}
-	return ""
-}
-
-func terminalInfoToolName(meta map[string]any) string {
-	info, _ := meta["terminal_info"].(map[string]any)
-	return firstNonEmpty(displaypolicy.MapString(info, "tool"), displaypolicy.MapString(info, "tool_name"), displaypolicy.MapString(info, "name"))
-}
-
-func displayTerminalInfoMeta(terminalID string, name string, args map[string]any) map[string]any {
-	terminalID = strings.TrimSpace(terminalID)
-	if terminalID == "" {
-		return nil
-	}
-	info := map[string]any{"terminal_id": terminalID}
-	if name = strings.TrimSpace(name); name != "" {
-		info["tool"] = name
-	}
-	if cwd := firstNonEmpty(displaypolicy.MapString(args, "workdir"), displaypolicy.MapString(args, "cwd")); cwd != "" {
-		info["cwd"] = cwd
-	}
-	return map[string]any{"terminal_info": info}
-}
-
 func protocolUpdateMeta(event *session.Event) map[string]any {
 	if update := session.ProtocolUpdateOf(event); update != nil {
 		return cloneAnyMap(update.Meta)
@@ -1140,17 +962,7 @@ func protocolUpdateMeta(event *session.Event) map[string]any {
 }
 
 func mergeMeta(base map[string]any, extra map[string]any) map[string]any {
-	if len(extra) == 0 {
-		return base
-	}
-	out := maps.Clone(base)
-	if out == nil {
-		out = map[string]any{}
-	}
-	for key, value := range extra {
-		out[key] = value
-	}
-	return out
+	return metautil.Merge(base, extra)
 }
 
 func nestedString(values map[string]any, path ...string) string {
@@ -1184,8 +996,5 @@ func stringPtr(value string) *string {
 }
 
 func cloneAnyMap(values map[string]any) map[string]any {
-	if len(values) == 0 {
-		return nil
-	}
-	return maps.Clone(values)
+	return metautil.CloneMap(values)
 }

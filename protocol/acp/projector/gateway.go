@@ -8,8 +8,44 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
+
+// ACPEventsFromGatewayHandle returns the ACP-native event stream for one
+// gateway turn handle. Handles that already expose ACPEvents are passed through;
+// legacy gateway events are bridged with ProjectGatewayEventEnvelope.
+func ACPEventsFromGatewayHandle(handle gateway.TurnHandle) <-chan eventstream.Envelope {
+	if handle == nil {
+		return eventstream.EnsureTerminalLifecycle(nil, "", "", "")
+	}
+	var events <-chan eventstream.Envelope
+	if acpHandle, ok := handle.(gateway.ACPEventStreamHandle); ok && acpHandle != nil {
+		events = acpHandle.ACPEvents()
+	} else {
+		events = ProjectGatewayEventStream(handle.Events())
+	}
+	return eventstream.EnsureTerminalLifecycle(events, handle.HandleID(), handle.RunID(), handle.TurnID())
+}
+
+// ProjectGatewayEventStream bridges legacy gateway events into eventstream
+// envelopes. New surfaces should consume ACPEventsFromGatewayHandle instead of
+// ranging over gateway.EventEnvelope directly.
+func ProjectGatewayEventStream(events <-chan gateway.EventEnvelope) <-chan eventstream.Envelope {
+	out := make(chan eventstream.Envelope, 32)
+	go func() {
+		defer close(out)
+		if events == nil {
+			return
+		}
+		for env := range events {
+			for _, projected := range ProjectGatewayEventEnvelope(env) {
+				out <- projected
+			}
+		}
+	}()
+	return out
+}
 
 // ProjectGatewayEventEnvelope projects the gateway runtime event envelope into the
 // surface-facing ACP event stream. It is the compatibility bridge for current
@@ -45,7 +81,7 @@ func ProjectGatewayEventEnvelope(env gateway.EventEnvelope) []eventstream.Envelo
 				ReasoningTokens:   usage.ReasoningTokens,
 				TotalTokens:       usage.TotalTokens,
 			},
-			Meta: maps.Clone(base.Meta),
+			Meta: cloneAnyMap(base.Meta),
 		})
 	}
 	return out
@@ -67,6 +103,7 @@ func projectSessionEventToACPEnvelopes(base eventstream.Envelope, ev gateway.Eve
 	} else if ok && permission != nil {
 		next := base
 		next.Kind = eventstream.KindRequestPermission
+		permission.Meta = mergeACPEventMeta(permission.Meta, base.Meta)
 		if meta := gatewayPermissionToolMeta(base.Meta, ev, sessionEvent); len(meta) > 0 {
 			permission.ToolCall.Meta = mergeACPEventMeta(permission.ToolCall.Meta, meta)
 		}
@@ -102,7 +139,7 @@ func sessionEventFromGatewayEvent(base eventstream.Envelope, ev gateway.Event) (
 		Type:       sessionTypeFromEventKind(ev.Kind),
 		Time:       ev.OccurredAt,
 		Visibility: session.VisibilityCanonical,
-		Meta:       maps.Clone(ev.Meta),
+		Meta:       cloneAnyMap(ev.Meta),
 	}
 	if ev.Protocol != nil {
 		protocol := session.CloneEventProtocol(*ev.Protocol)
@@ -363,7 +400,7 @@ func acpEventBase(env gateway.EventEnvelope) eventstream.Envelope {
 }
 
 func acpEventMeta(ev gateway.Event) map[string]any {
-	meta := gatewayProjectionBridgeMeta(maps.Clone(ev.Meta))
+	meta := gatewayProjectionBridgeMeta(ev.Meta)
 	if ev.Invocation == nil {
 		return meta
 	}
@@ -378,7 +415,7 @@ func acpEventMeta(ev gateway.Event) map[string]any {
 	if caelis == nil {
 		caelis = map[string]any{}
 	} else {
-		caelis = maps.Clone(caelis)
+		caelis = cloneAnyMap(caelis)
 	}
 	caelis["invocation"] = map[string]any{
 		"provider": invocation.Provider,
@@ -389,25 +426,11 @@ func acpEventMeta(ev gateway.Event) map[string]any {
 }
 
 func gatewayProjectionBridgeMeta(meta map[string]any) map[string]any {
-	if meta == nil {
-		meta = map[string]any{}
-	}
-	caelis, _ := meta["caelis"].(map[string]any)
-	if caelis == nil {
-		caelis = map[string]any{}
-	} else {
-		caelis = maps.Clone(caelis)
-	}
-	bridge, _ := caelis["bridge"].(map[string]any)
-	if bridge == nil {
-		bridge = map[string]any{}
-	} else {
-		bridge = maps.Clone(bridge)
-	}
-	bridge["source"] = "gateway_projection"
-	caelis["bridge"] = bridge
-	meta["caelis"] = caelis
-	return meta
+	return metautil.Merge(meta, map[string]any{
+		"caelis": map[string]any{
+			"bridge": map[string]any{"source": "gateway_projection"},
+		},
+	})
 }
 
 func sessionTypeFromEventKind(kind gateway.EventKind) session.EventType {
@@ -618,23 +641,7 @@ func acpEventFinal(ev gateway.Event) bool {
 }
 
 func mergeACPEventMeta(base map[string]any, overlay map[string]any) map[string]any {
-	if len(base) == 0 && len(overlay) == 0 {
-		return nil
-	}
-	if len(base) == 0 {
-		return maps.Clone(overlay)
-	}
-	out := maps.Clone(base)
-	for key, value := range overlay {
-		if baseMap, ok := out[key].(map[string]any); ok {
-			if overlayMap, ok := value.(map[string]any); ok {
-				out[key] = mergeACPEventMeta(baseMap, overlayMap)
-				continue
-			}
-		}
-		out[key] = value
-	}
-	return out
+	return metautil.Merge(base, overlay)
 }
 
 func gatewayPermissionToolMeta(baseMeta map[string]any, ev gateway.Event, sessionEvent *session.Event) map[string]any {
@@ -654,39 +661,60 @@ func gatewayPermissionToolMeta(baseMeta map[string]any, ev gateway.Event, sessio
 func acpMetaWithToolName(meta map[string]any, toolName string) map[string]any {
 	toolName = strings.TrimSpace(toolName)
 	if toolName == "" {
-		return maps.Clone(meta)
+		return cloneAnyMap(meta)
 	}
-	return withCaelisRuntimeSection(meta, gateway.EventMetaRuntimeTool, map[string]any{
+	return metautil.WithRuntimeSection(meta, gateway.EventMetaRuntimeTool, map[string]any{
 		gateway.EventMetaRuntimeToolName: toolName,
 	})
 }
 
-func withCaelisRuntimeSection(meta map[string]any, section string, values map[string]any) map[string]any {
-	out := maps.Clone(meta)
-	if out == nil {
-		out = map[string]any{}
+func ApprovalPayloadFromPermission(req *schema.RequestPermissionRequest) *gateway.ApprovalPayload {
+	if req == nil {
+		return nil
 	}
-	caelis, _ := out[gateway.EventMetaRoot].(map[string]any)
-	caelis = maps.Clone(caelis)
-	if caelis == nil {
-		caelis = map[string]any{}
+	rawInput := rawInputMap(req.ToolCall.RawInput)
+	payload := &gateway.ApprovalPayload{
+		ToolCallID:         strings.TrimSpace(req.ToolCall.ToolCallID),
+		ToolName:           firstNonEmpty(stringFromPtr(req.ToolCall.Title), stringFromPtr(req.ToolCall.Kind)),
+		RawInput:           rawInput,
+		Reason:             firstNonEmpty(rawString(rawInput, "approval_reason"), rawString(rawInput, "reason")),
+		Justification:      rawString(rawInput, "justification"),
+		SandboxPermissions: rawString(rawInput, "sandbox_permissions"),
+		Status:             gateway.ApprovalStatusPending,
 	}
-	caelis[gateway.EventMetaVersion] = 1
-	runtime, _ := caelis[gateway.EventMetaRuntime].(map[string]any)
-	runtime = maps.Clone(runtime)
-	if runtime == nil {
-		runtime = map[string]any{}
+	if len(req.Options) > 0 {
+		payload.Options = make([]gateway.ApprovalOption, 0, len(req.Options))
+		for _, option := range req.Options {
+			payload.Options = append(payload.Options, gateway.ApprovalOption{
+				ID:   strings.TrimSpace(option.OptionID),
+				Name: strings.TrimSpace(option.Name),
+				Kind: strings.TrimSpace(option.Kind),
+			})
+		}
 	}
-	sectionMap, _ := runtime[section].(map[string]any)
-	sectionMap = maps.Clone(sectionMap)
-	if sectionMap == nil {
-		sectionMap = map[string]any{}
+	return payload
+}
+
+func rawString(values map[string]any, key string) string {
+	if len(values) == 0 {
+		return ""
 	}
-	for key, value := range values {
-		sectionMap[key] = value
+	text, _ := values[key].(string)
+	return strings.TrimSpace(text)
+}
+
+func rawInputMap(value any) map[string]any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return cloneAnyMap(typed)
+	default:
+		return nil
 	}
-	runtime[section] = sectionMap
-	caelis[gateway.EventMetaRuntime] = runtime
-	out[gateway.EventMetaRoot] = caelis
-	return out
+}
+
+func stringFromPtr(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return strings.TrimSpace(*value)
 }

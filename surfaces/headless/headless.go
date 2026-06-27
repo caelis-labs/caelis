@@ -2,9 +2,14 @@ package headless
 
 import (
 	"context"
+	"errors"
+	"strings"
 
 	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/projector"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
 type Starter interface {
@@ -41,13 +46,16 @@ func RunOnce(ctx context.Context, starter Starter, req gateway.BeginTurnRequest,
 	defer result.Handle.Close()
 
 	out := Result{Session: result.Session}
-	for env := range result.Handle.Events() {
-		out.LastCursor = env.Cursor
-		if env.Err != nil {
-			return out, env.Err
+	var assistant schema.FinalAssistantAccumulator
+	for env := range projector.ACPEventsFromGatewayHandle(result.Handle) {
+		if env.Cursor != "" {
+			out.LastCursor = env.Cursor
 		}
-		if env.Event.Kind == gateway.EventKindApprovalRequested {
-			decision, err := resolveApproval(ctx, opts, env.Event.ApprovalPayload)
+		if err := envelopeError(env); err != nil {
+			return out, err
+		}
+		if env.Kind == eventstream.KindRequestPermission {
+			decision, err := resolveApproval(ctx, opts, projector.ApprovalPayloadFromPermission(env.Permission))
 			if err != nil {
 				return out, err
 			}
@@ -59,14 +67,41 @@ func RunOnce(ctx context.Context, starter Starter, req gateway.BeginTurnRequest,
 			}
 			continue
 		}
-		if text := gateway.AssistantText(env.Event); text != "" {
-			out.Output = text
+		if env.Kind == eventstream.KindUsage {
+			if env.Usage != nil && env.Usage.PromptTokens > 0 && isMainScope(env) {
+				out.PromptTokens = env.Usage.PromptTokens
+			}
+			continue
 		}
-		if prompt := gateway.PromptTokens(env.Event); prompt > 0 {
-			out.PromptTokens = prompt
+		if !isMainSessionUpdate(env) {
+			continue
+		}
+		update := assistant.ObserveUpdate(env.Update)
+		if update.Assistant && update.Text != "" {
+			out.Output = update.Text
 		}
 	}
 	return out, nil
+}
+
+func isMainSessionUpdate(env eventstream.Envelope) bool {
+	return env.Kind == eventstream.KindSessionUpdate &&
+		env.Update != nil &&
+		isMainScope(env)
+}
+
+func isMainScope(env eventstream.Envelope) bool {
+	return env.Scope == "" || env.Scope == eventstream.ScopeMain
+}
+
+func envelopeError(env eventstream.Envelope) error {
+	if env.Err != nil {
+		return env.Err
+	}
+	if env.Kind == eventstream.KindError && strings.TrimSpace(env.Error) != "" {
+		return errors.New(strings.TrimSpace(env.Error))
+	}
+	return nil
 }
 
 func resolveApproval(ctx context.Context, opts Options, req *gateway.ApprovalPayload) (gateway.ApprovalDecision, error) {

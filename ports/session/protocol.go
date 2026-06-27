@@ -64,6 +64,7 @@ type ProtocolToolCallContent struct {
 type ProtocolUpdate struct {
 	SessionUpdate string                     `json:"sessionUpdate,omitempty"`
 	Content       any                        `json:"content,omitempty"`
+	MessageID     string                     `json:"messageId,omitempty"`
 	ToolCallID    string                     `json:"toolCallId,omitempty"`
 	Title         string                     `json:"title,omitempty"`
 	Kind          string                     `json:"kind,omitempty"`
@@ -202,6 +203,7 @@ func protocolUpdateHasOnlySessionUpdate(update *ProtocolUpdate) bool {
 		strings.TrimSpace(update.Title) == "" &&
 		strings.TrimSpace(update.Kind) == "" &&
 		strings.TrimSpace(update.Status) == "" &&
+		strings.TrimSpace(update.MessageID) == "" &&
 		update.Content == nil &&
 		len(update.RawInput) == 0 &&
 		len(update.RawOutput) == 0 &&
@@ -471,13 +473,14 @@ func cloneProtocolUpdate(in ProtocolUpdate) ProtocolUpdate {
 	out := ProtocolUpdate{
 		SessionUpdate: strings.TrimSpace(in.SessionUpdate),
 		Content:       cloneProtocolAny(in.Content),
+		MessageID:     strings.TrimSpace(in.MessageID),
 		ToolCallID:    strings.TrimSpace(in.ToolCallID),
 		Title:         strings.TrimSpace(in.Title),
 		Kind:          strings.TrimSpace(in.Kind),
 		Status:        strings.TrimSpace(in.Status),
 		RawInput:      maps.Clone(in.RawInput),
 		RawOutput:     maps.Clone(in.RawOutput),
-		Meta:          maps.Clone(in.Meta),
+		Meta:          cloneProtocolAnyMap(in.Meta),
 	}
 	if len(in.Locations) > 0 {
 		out.Locations = slices.Clone(in.Locations)
@@ -548,7 +551,7 @@ func cloneProtocolAny(in any) any {
 	case json.RawMessage:
 		return slices.Clone(typed)
 	case map[string]any:
-		return maps.Clone(typed)
+		return cloneProtocolAnyMap(typed)
 	case []ProtocolToolCallContent:
 		if len(typed) == 0 {
 			return nil
@@ -563,6 +566,17 @@ func cloneProtocolAny(in any) any {
 	default:
 		return typed
 	}
+}
+
+func cloneProtocolAnyMap(in map[string]any) map[string]any {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(in))
+	for key, value := range in {
+		out[key] = cloneProtocolAny(value)
+	}
+	return out
 }
 
 func firstNonEmpty(values ...string) string {

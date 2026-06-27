@@ -3,6 +3,7 @@ package eventstream
 import (
 	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -34,6 +35,124 @@ func TestEnvelopeMarshalIncludesACPUpdate(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Fatalf("json = %s, want %s", text, want)
 		}
+	}
+}
+
+func TestEnvelopeV1SessionUpdateGolden(t *testing.T) {
+	t.Parallel()
+
+	env := Envelope{
+		Kind:       KindSessionUpdate,
+		Cursor:     "turn-1:0001",
+		SessionID:  "session-1",
+		HandleID:   "handle-1",
+		RunID:      "run-1",
+		TurnID:     "turn-1",
+		OccurredAt: time.Date(2026, 6, 27, 12, 0, 0, 0, time.UTC),
+		Scope:      ScopeMain,
+		Final:      true,
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateAgentMessage,
+			Content:       schema.TextContent{Type: "text", Text: "hello"},
+			MessageID:     "msg-1",
+			Meta:          map[string]any{"vendor": map[string]any{"trace": "abc"}},
+		},
+		Meta: map[string]any{
+			"caelis": map[string]any{
+				"runtime": map[string]any{
+					"tool": map[string]any{"status_detail": "completed"},
+				},
+			},
+		},
+	}
+	assertGoldenJSON(t, "testdata/envelope_v1_session_update.golden.json", env)
+}
+
+func TestEnvelopeV1RequestPermissionGolden(t *testing.T) {
+	t.Parallel()
+
+	title := "RUN_COMMAND"
+	kind := schema.ToolKindExecute
+	status := schema.ToolStatusPending
+	env := Envelope{
+		Kind:       KindRequestPermission,
+		Cursor:     "turn-1:0002",
+		SessionID:  "session-1",
+		HandleID:   "handle-1",
+		RunID:      "run-1",
+		TurnID:     "turn-1",
+		OccurredAt: time.Date(2026, 6, 27, 12, 0, 1, 0, time.UTC),
+		Scope:      ScopeMain,
+		Permission: &schema.RequestPermissionRequest{
+			SessionID: "session-1",
+			ToolCall: schema.ToolCallUpdate{
+				SessionUpdate: schema.UpdateToolCallInfo,
+				ToolCallID:    "call-1",
+				Title:         &title,
+				Kind:          &kind,
+				Status:        &status,
+				RawInput:      map[string]any{"command": "make test"},
+			},
+			Options: []schema.PermissionOption{
+				{OptionID: schema.PermAllowOnce, Name: "Allow once", Kind: schema.PermAllowOnce},
+				{OptionID: schema.PermRejectOnce, Name: "Reject", Kind: schema.PermRejectOnce},
+			},
+			Meta: map[string]any{
+				"caelis": map[string]any{
+					"approval": map[string]any{"mode": "manual"},
+				},
+			},
+		},
+	}
+	assertGoldenJSON(t, "testdata/envelope_v1_request_permission.golden.json", env)
+}
+
+func TestCloneEnvelopePreservesContentChunkMetadata(t *testing.T) {
+	t.Parallel()
+
+	env := Envelope{
+		Kind:      KindSessionUpdate,
+		SessionID: "session-1",
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateAgentMessage,
+			MessageID:     "msg-1",
+			Content:       schema.TextContent{Type: "text", Text: "hello"},
+			Meta:          map[string]any{"vendor": map[string]any{"trace": "abc"}},
+		},
+	}
+	cloned := CloneEnvelope(env)
+	chunk, ok := cloned.Update.(schema.ContentChunk)
+	if !ok {
+		t.Fatalf("cloned update = %T, want ContentChunk", cloned.Update)
+	}
+	if chunk.MessageID != "msg-1" {
+		t.Fatalf("message id = %q, want msg-1", chunk.MessageID)
+	}
+	vendor, _ := chunk.Meta["vendor"].(map[string]any)
+	if vendor["trace"] != "abc" {
+		t.Fatalf("chunk meta = %#v, want vendor trace", chunk.Meta)
+	}
+	chunk.Meta["vendor"].(map[string]any)["trace"] = "mutated"
+	original := env.Update.(schema.ContentChunk)
+	originalVendor, _ := original.Meta["vendor"].(map[string]any)
+	if originalVendor["trace"] != "abc" {
+		t.Fatalf("original meta mutated = %#v", original.Meta)
+	}
+}
+
+func assertGoldenJSON(t *testing.T, path string, value any) {
+	t.Helper()
+	data, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		t.Fatalf("json.MarshalIndent() error = %v", err)
+	}
+	data = append(data, '\n')
+	want, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("os.ReadFile(%s) error = %v", path, err)
+	}
+	if string(data) != string(want) {
+		t.Fatalf("golden mismatch for %s\ngot:\n%s\nwant:\n%s", path, data, want)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/OnslaughtSnail/caelis/ports/displaypolicy"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
 	"github.com/OnslaughtSnail/caelis/surfaces/transcript"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/acpprojector"
 )
@@ -313,7 +314,7 @@ func appendTerminalContentText(out *strings.Builder, text string) {
 }
 
 func terminalOutputMetaText(meta map[string]any) string {
-	output := terminalMetaSection(meta, "terminal_output")
+	output := metautil.TerminalSection(meta, metautil.LegacyTerminalOutput)
 	return asString(output["data"])
 }
 
@@ -328,16 +329,8 @@ func terminalRuntimeOutputText(meta map[string]any) string {
 }
 
 func terminalInfoToolName(meta map[string]any) string {
-	info := terminalMetaSection(meta, "terminal_info")
+	info := metautil.TerminalSection(meta, metautil.LegacyTerminalInfo)
 	return firstNonEmpty(asString(info["tool"]), asString(info["tool_name"]), asString(info["name"]))
-}
-
-func terminalMetaSection(meta map[string]any, key string) map[string]any {
-	if len(meta) == 0 {
-		return nil
-	}
-	section, _ := meta[key].(map[string]any)
-	return section
 }
 
 func toolDisplayMetaOutput(toolName string, meta map[string]any) map[string]any {

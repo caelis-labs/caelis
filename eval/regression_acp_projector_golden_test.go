@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/projector"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/acpprojector"
 )
@@ -63,15 +64,15 @@ func TestRegressionACPProjectorGoldenTerminalOutput(t *testing.T) {
 	if update.Content[0].Content != nil {
 		t.Fatal("terminal content body should be nil (carried in _meta)")
 	}
-	terminalOutput, ok := update.Meta["terminal_output"].(map[string]any)
-	if !ok {
-		t.Fatalf("meta = %#v, want terminal_output", update.Meta)
+	terminalOutput := metautil.RuntimeSection(update.Meta, metautil.Terminal)
+	if len(terminalOutput) == 0 {
+		t.Fatalf("meta = %#v, want caelis.runtime.terminal", update.Meta)
 	}
 	if terminalOutput["terminal_id"] != "call-ls" {
-		t.Fatalf("terminal_output.terminal_id = %v, want call-ls", terminalOutput["terminal_id"])
+		t.Fatalf("caelis.runtime.terminal.terminal_id = %v, want call-ls", terminalOutput["terminal_id"])
 	}
 	if terminalOutput["data"] != "total 0\n" {
-		t.Fatalf("terminal_output.data = %v, want 'total 0\\n'", terminalOutput["data"])
+		t.Fatalf("caelis.runtime.terminal.data = %v, want 'total 0\\n'", terminalOutput["data"])
 	}
 }
 

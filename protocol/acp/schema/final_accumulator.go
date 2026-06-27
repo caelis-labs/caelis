@@ -3,7 +3,8 @@ package schema
 import "strings"
 
 type FinalAssistantAccumulator struct {
-	text string
+	messageID string
+	text      string
 }
 
 type AssistantTextUpdate struct {
@@ -19,12 +20,12 @@ func (a *FinalAssistantAccumulator) ObserveUpdate(update Update) AssistantTextUp
 	}
 	switch typed := update.(type) {
 	case ContentChunk:
-		return a.observeContentChunk(typed.SessionUpdate, typed.Content)
+		return a.observeContentChunk(typed.SessionUpdate, typed.Content, typed.MessageID)
 	case *ContentChunk:
 		if typed == nil {
 			return AssistantTextUpdate{}
 		}
-		return a.observeContentChunk(typed.SessionUpdate, typed.Content)
+		return a.observeContentChunk(typed.SessionUpdate, typed.Content, typed.MessageID)
 	case ToolCall, *ToolCall, ToolCallUpdate, *ToolCallUpdate, PlanUpdate, *PlanUpdate:
 		a.Reset()
 		return AssistantTextUpdate{Barrier: true}
@@ -37,7 +38,7 @@ func (a *FinalAssistantAccumulator) ObserveContentChunk(updateType string, conte
 	if a == nil {
 		return AssistantTextUpdate{}
 	}
-	return a.observeContentChunk(updateType, content)
+	return a.observeContentChunk(updateType, content, "")
 }
 
 func (a *FinalAssistantAccumulator) FinalText() string {
@@ -49,13 +50,21 @@ func (a *FinalAssistantAccumulator) FinalText() string {
 
 func (a *FinalAssistantAccumulator) Reset() {
 	if a != nil {
+		a.messageID = ""
 		a.text = ""
 	}
 }
 
-func (a *FinalAssistantAccumulator) observeContentChunk(updateType string, content any) AssistantTextUpdate {
+func (a *FinalAssistantAccumulator) observeContentChunk(updateType string, content any, messageID string) AssistantTextUpdate {
 	switch strings.TrimSpace(updateType) {
 	case UpdateAgentMessage:
+		messageID = strings.TrimSpace(messageID)
+		if messageID != "" {
+			if a.messageID != "" && a.messageID != messageID {
+				a.text = ""
+			}
+			a.messageID = messageID
+		}
 		text := ExtractTextValue(content)
 		cumulative, delta := AppendAssistantText(a.text, text)
 		a.text = cumulative
