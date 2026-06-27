@@ -3,7 +3,9 @@
 // Envelope is the stable stream container consumed by TUI, GUI, app-server,
 // headless, and compatibility bridges. It carries standard ACP
 // session/update and request_permission payloads plus Caelis extension events
-// for lifecycle, usage, participant state, approval review, and notices.
+// for lifecycle, participant state, approval review, and notices. Usage is a
+// standard ACP session/update usage_update; the legacy caelis/usage envelope is
+// accepted only as a compatibility input.
 //
 // This package is a client protocol boundary, not the durable session model.
 // Durable replay input is ports/session.Event: model-visible messages live in

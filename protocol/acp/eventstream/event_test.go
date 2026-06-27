@@ -243,6 +243,95 @@ func TestEnvelopeV1ACPUsageUpdateGolden(t *testing.T) {
 	assertGoldenJSON(t, "testdata/envelope_v1_acp_usage_update.golden.json", env)
 }
 
+func TestUsageUpdateFromSnapshotStoresBreakdownInMeta(t *testing.T) {
+	t.Parallel()
+
+	update := UsageUpdateFromSnapshot(UsageSnapshot{
+		PromptTokens:      12,
+		CachedInputTokens: 3,
+		CompletionTokens:  5,
+		ReasoningTokens:   2,
+		TotalTokens:       17,
+	}, map[string]any{"caelis": map[string]any{"invocation": map[string]any{"model": "m"}}})
+	if update.SessionUpdate != schema.UpdateUsage {
+		t.Fatalf("SessionUpdate = %q, want usage_update", update.SessionUpdate)
+	}
+	if update.Used != 17 || update.Size != 0 {
+		t.Fatalf("usage size/used = %d/%d, want omitted size and used total", update.Size, update.Used)
+	}
+	roundTripped := UsageSnapshotFromUpdate(update)
+	if roundTripped == nil || roundTripped.PromptTokens != 12 || roundTripped.CachedInputTokens != 3 || roundTripped.CompletionTokens != 5 || roundTripped.ReasoningTokens != 2 || roundTripped.TotalTokens != 17 {
+		t.Fatalf("UsageSnapshotFromUpdate() = %#v", roundTripped)
+	}
+	caelis, _ := update.Meta["caelis"].(map[string]any)
+	if caelis["version"] != 1 {
+		t.Fatalf("meta.caelis.version = %#v, want 1", caelis["version"])
+	}
+	invocation, _ := caelis["invocation"].(map[string]any)
+	if invocation["model"] != "m" {
+		t.Fatalf("meta.caelis.invocation = %#v, want preserved model", invocation)
+	}
+}
+
+func TestUsageUpdateFromSnapshotDoesNotPreserveStaleUsageMeta(t *testing.T) {
+	t.Parallel()
+
+	update := UsageUpdateFromSnapshot(UsageSnapshot{
+		PromptTokens: 12,
+		TotalTokens:  17,
+	}, map[string]any{
+		"caelis": map[string]any{
+			"invocation": map[string]any{"model": "m"},
+			"usage": map[string]any{
+				"completion_tokens": 99,
+				"reasoning_tokens":  88,
+			},
+		},
+	})
+	usage := UsageSnapshotFromUpdate(update)
+	if usage == nil || usage.PromptTokens != 12 || usage.TotalTokens != 17 {
+		t.Fatalf("UsageSnapshotFromUpdate() = %#v, want current prompt/total tokens", usage)
+	}
+	if usage.CompletionTokens != 0 || usage.ReasoningTokens != 0 {
+		t.Fatalf("UsageSnapshotFromUpdate() = %#v, want stale usage fields removed", usage)
+	}
+	caelis, _ := update.Meta["caelis"].(map[string]any)
+	if _, ok := caelis["invocation"].(map[string]any); !ok {
+		t.Fatalf("meta.caelis = %#v, want invocation sibling preserved", caelis)
+	}
+	usageMeta, _ := caelis["usage"].(map[string]any)
+	if usageMeta["completion_tokens"] != nil || usageMeta["reasoning_tokens"] != nil {
+		t.Fatalf("meta.caelis.usage = %#v, want stale fields removed", usageMeta)
+	}
+}
+
+func TestNormalizeEnvelopeConvertsLegacyUsageToACPUsageUpdate(t *testing.T) {
+	t.Parallel()
+
+	env := NormalizeEnvelope(Envelope{
+		Kind:      KindUsage,
+		Cursor:    "cursor-1",
+		SessionID: "session-1",
+		Scope:     ScopeMain,
+		Usage:     &UsageSnapshot{PromptTokens: 12, TotalTokens: 17},
+		Meta:      map[string]any{"caelis": map[string]any{"invocation": map[string]any{"model": "m"}}},
+	})
+	if env.Kind != KindSessionUpdate || env.Usage != nil {
+		t.Fatalf("normalized env = %#v, want session/update without legacy usage field", env)
+	}
+	update, ok := env.Update.(schema.UsageUpdate)
+	if !ok {
+		t.Fatalf("normalized update = %T, want UsageUpdate", env.Update)
+	}
+	if update.SessionUpdate != schema.UpdateUsage || update.Used != 17 {
+		t.Fatalf("usage update = %#v, want usage_update used=17", update)
+	}
+	usage := UsageSnapshotFromEnvelope(env)
+	if usage == nil || usage.PromptTokens != 12 || usage.TotalTokens != 17 {
+		t.Fatalf("UsageSnapshotFromEnvelope() = %#v, want normalized usage", usage)
+	}
+}
+
 func TestEnvelopeV1ParticipantGolden(t *testing.T) {
 	t.Parallel()
 

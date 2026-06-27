@@ -1,6 +1,7 @@
 package eventstream
 
 import (
+	"encoding/json"
 	"errors"
 	"maps"
 	"strings"
@@ -36,6 +37,75 @@ type UsageSnapshot struct {
 	CompletionTokens  int `json:"completion_tokens,omitempty"`
 	ReasoningTokens   int `json:"reasoning_tokens,omitempty"`
 	TotalTokens       int `json:"total_tokens,omitempty"`
+}
+
+func UsageUpdateFromSnapshot(usage UsageSnapshot, meta map[string]any) schema.UsageUpdate {
+	return schema.UsageUpdate{
+		SessionUpdate: schema.UpdateUsage,
+		Used:          usage.TotalTokens,
+		Meta:          usageUpdateMeta(meta, usage),
+	}
+}
+
+func UsageSnapshotFromUpdate(update schema.UsageUpdate) *UsageSnapshot {
+	usage := usageSnapshotFromMeta(update.Meta)
+	if usage == nil && update.Used == 0 {
+		return nil
+	}
+	if usage == nil {
+		usage = &UsageSnapshot{}
+	}
+	if usage.TotalTokens == 0 {
+		usage.TotalTokens = update.Used
+	}
+	if usageSnapshotEmpty(*usage) {
+		return nil
+	}
+	return usage
+}
+
+func UsageSnapshotFromEnvelope(env Envelope) *UsageSnapshot {
+	env = NormalizeEnvelope(env)
+	if env.Kind != KindSessionUpdate {
+		return nil
+	}
+	update, ok := env.Update.(schema.UsageUpdate)
+	if !ok {
+		return nil
+	}
+	return UsageSnapshotFromUpdate(update)
+}
+
+// NormalizeEnvelope maps legacy eventstream-only extensions to the ACP v1
+// client protocol shape. New producer paths should emit the normalized shape
+// directly; this function is only a read-side compatibility boundary.
+func NormalizeEnvelope(in Envelope) Envelope {
+	out := CloneEnvelope(in)
+	if out.Kind != KindUsage {
+		return out
+	}
+	if out.Usage == nil {
+		return out
+	}
+	usage := *out.Usage
+	out.Kind = KindSessionUpdate
+	out.Update = UsageUpdateFromSnapshot(usage, out.Meta)
+	out.Usage = nil
+	return out
+}
+
+func NormalizeEnvelopes(in <-chan Envelope) <-chan Envelope {
+	if in == nil {
+		return nil
+	}
+	out := make(chan Envelope, 32)
+	go func() {
+		defer close(out)
+		for env := range in {
+			out <- NormalizeEnvelope(env)
+		}
+	}()
+	return out
 }
 
 type Envelope struct {
@@ -246,6 +316,79 @@ func CloneEnvelope(in Envelope) Envelope {
 	return out
 }
 
+func usageUpdateMeta(meta map[string]any, usage UsageSnapshot) map[string]any {
+	out := cloneAnyMap(meta)
+	if out == nil {
+		out = map[string]any{}
+	}
+	caelis := cloneAnyMap(mapAt(out, "caelis"))
+	if caelis == nil {
+		caelis = map[string]any{}
+	}
+	caelis["version"] = 1
+	usageMeta := map[string]any{}
+	setPositiveInt(usageMeta, "prompt_tokens", usage.PromptTokens)
+	setPositiveInt(usageMeta, "cached_input_tokens", usage.CachedInputTokens)
+	setPositiveInt(usageMeta, "completion_tokens", usage.CompletionTokens)
+	setPositiveInt(usageMeta, "reasoning_tokens", usage.ReasoningTokens)
+	setPositiveInt(usageMeta, "total_tokens", usage.TotalTokens)
+	if len(usageMeta) > 0 {
+		caelis["usage"] = usageMeta
+	} else {
+		delete(caelis, "usage")
+	}
+	out["caelis"] = caelis
+	return out
+}
+
+func usageSnapshotFromMeta(meta map[string]any) *UsageSnapshot {
+	usageMeta := mapAt(mapAt(meta, "caelis"), "usage")
+	if len(usageMeta) == 0 {
+		return nil
+	}
+	usage := UsageSnapshot{
+		PromptTokens:      intFromAny(usageMeta["prompt_tokens"]),
+		CachedInputTokens: intFromAny(usageMeta["cached_input_tokens"]),
+		CompletionTokens:  intFromAny(usageMeta["completion_tokens"]),
+		ReasoningTokens:   intFromAny(usageMeta["reasoning_tokens"]),
+		TotalTokens:       intFromAny(usageMeta["total_tokens"]),
+	}
+	if usageSnapshotEmpty(usage) {
+		return nil
+	}
+	return &usage
+}
+
+func usageSnapshotEmpty(usage UsageSnapshot) bool {
+	return usage.PromptTokens == 0 &&
+		usage.CachedInputTokens == 0 &&
+		usage.CompletionTokens == 0 &&
+		usage.ReasoningTokens == 0 &&
+		usage.TotalTokens == 0
+}
+
+func setPositiveInt(values map[string]any, key string, value int) {
+	if value > 0 {
+		values[key] = value
+	}
+}
+
+func intFromAny(value any) int {
+	switch typed := value.(type) {
+	case int:
+		return typed
+	case int64:
+		return int(typed)
+	case float64:
+		return int(typed)
+	case json.Number:
+		n, _ := typed.Int64()
+		return int(n)
+	default:
+		return 0
+	}
+}
+
 func CloneUpdate(update schema.Update) schema.Update {
 	switch typed := update.(type) {
 	case nil:
@@ -361,5 +504,13 @@ func cloneAnyMap(in map[string]any) map[string]any {
 	for key, value := range out {
 		out[key] = cloneAny(value)
 	}
+	return out
+}
+
+func mapAt(values map[string]any, key string) map[string]any {
+	if len(values) == 0 {
+		return nil
+	}
+	out, _ := values[key].(map[string]any)
 	return out
 }

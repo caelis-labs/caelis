@@ -819,6 +819,39 @@ func TestProjectSessionEventsPreservesProtocolToolCallID(t *testing.T) {
 	}
 }
 
+func TestProjectSessionEventsToolNamePrefersCanonicalPayloadOverMeta(t *testing.T) {
+	t.Parallel()
+
+	events := projectSessionEvents(session.SessionRef{SessionID: "root-session"}, []*session.Event{{
+		ID:   "tool-1",
+		Type: session.EventTypeToolCall,
+		Tool: &session.EventTool{
+			ID:     "call-1",
+			Name:   "CANONICAL_TOOL",
+			Status: "running",
+			Input:  map[string]any{"value": "from-tool"},
+		},
+		Meta: map[string]any{"caelis": map[string]any{"runtime": map[string]any{"tool": map[string]any{"name": "META_TOOL"}}}},
+		Protocol: &session.EventProtocol{
+			Update: &session.ProtocolUpdate{
+				SessionUpdate: string(session.ProtocolUpdateTypeToolCall),
+				ToolCallID:    "call-1",
+				Kind:          "PROTOCOL_TOOL",
+			},
+		},
+	}})
+	if len(events) != 1 {
+		t.Fatalf("projectSessionEvents() len = %d, want 1", len(events))
+	}
+	payload := events[0].Event.ToolCall
+	if payload == nil {
+		t.Fatal("tool call payload = nil, want payload")
+	}
+	if payload.ToolName != "CANONICAL_TOOL" {
+		t.Fatalf("payload.ToolName = %q, want canonical tool name", payload.ToolName)
+	}
+}
+
 func TestProjectSessionEventsFallsBackToMessageToolUseRawInput(t *testing.T) {
 	t.Parallel()
 

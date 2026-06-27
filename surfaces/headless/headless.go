@@ -54,6 +54,12 @@ func RunOnce(ctx context.Context, starter Starter, req gateway.BeginTurnRequest,
 		if err := envelopeError(env); err != nil {
 			return out, err
 		}
+		if usage := eventstream.UsageSnapshotFromEnvelope(env); usage != nil && isMainScope(env) {
+			if usage.PromptTokens > 0 {
+				out.PromptTokens = usage.PromptTokens
+			}
+			continue
+		}
 		if env.Kind == eventstream.KindRequestPermission {
 			decision, err := resolveApproval(ctx, opts, projector.ApprovalPayloadFromPermission(env.Permission))
 			if err != nil {
@@ -64,12 +70,6 @@ func RunOnce(ctx context.Context, starter Starter, req gateway.BeginTurnRequest,
 				Approval: &decision,
 			}); err != nil {
 				return out, err
-			}
-			continue
-		}
-		if env.Kind == eventstream.KindUsage {
-			if env.Usage != nil && env.Usage.PromptTokens > 0 && isMainScope(env) {
-				out.PromptTokens = env.Usage.PromptTokens
 			}
 			continue
 		}

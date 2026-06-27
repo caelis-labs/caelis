@@ -1368,6 +1368,39 @@ func TestToolResultMessagePreservesCanonicalCommandPayloadForModel(t *testing.T)
 	}
 }
 
+func TestMessageFromDurableEventToolNamePrefersCanonicalPayloadOverMeta(t *testing.T) {
+	t.Parallel()
+
+	message, ok := messageFromDurableEvent(&session.Event{
+		Type:       session.EventTypeToolCall,
+		Visibility: session.VisibilityCanonical,
+		Tool: &session.EventTool{
+			ID:     "call-1",
+			Name:   "CANONICAL_TOOL",
+			Status: "running",
+			Input:  map[string]any{"value": "from-tool"},
+		},
+		Meta: map[string]any{"caelis": map[string]any{"runtime": map[string]any{"tool": map[string]any{"name": "META_TOOL"}}}},
+		Protocol: &session.EventProtocol{
+			Update: &session.ProtocolUpdate{
+				SessionUpdate: string(session.ProtocolUpdateTypeToolCall),
+				ToolCallID:    "call-1",
+				Kind:          "PROTOCOL_TOOL",
+			},
+		},
+	})
+	if !ok {
+		t.Fatal("messageFromDurableEvent() = false, want tool call message")
+	}
+	calls := message.ToolCalls()
+	if len(calls) != 1 {
+		t.Fatalf("tool calls = %#v, want one call", calls)
+	}
+	if calls[0].Name != "CANONICAL_TOOL" {
+		t.Fatalf("tool call name = %q, want canonical tool name", calls[0].Name)
+	}
+}
+
 func TestToolResultEventFallsBackToJSONContentForRawOutput(t *testing.T) {
 	t.Parallel()
 

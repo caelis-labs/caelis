@@ -52,6 +52,78 @@ func EventToolProjection(event *Event) *EventTool {
 	return &out
 }
 
+// CanonicalToolName resolves the durable tool name for one event using the
+// canonical precedence shared by replay and client projection:
+// Event.Tool / Message tool calls, then protocol projection, then display meta.
+func CanonicalToolName(event *Event, update *ProtocolUpdate) string {
+	if event == nil {
+		return ""
+	}
+	if toolPayload := EventToolProjection(event); toolPayload != nil {
+		if name := strings.TrimSpace(toolPayload.Name); name != "" {
+			return name
+		}
+	}
+	if update == nil {
+		update = ProtocolUpdateOf(event)
+	}
+	if name := messageToolCallName(event, update); name != "" {
+		return name
+	}
+	if update != nil {
+		if title := strings.Fields(strings.TrimSpace(update.Title)); len(title) > 0 {
+			return title[0]
+		}
+		if kind := strings.TrimSpace(update.Kind); kind != "" {
+			return kind
+		}
+	}
+	return stringFromNestedMap(event.Meta, "caelis", "runtime", "tool", "name")
+}
+
+func messageToolCallName(event *Event, update *ProtocolUpdate) string {
+	if event == nil || event.Message == nil {
+		return ""
+	}
+	callID := ""
+	if update != nil {
+		callID = strings.TrimSpace(update.ToolCallID)
+	}
+	if callID == "" && event.Tool != nil {
+		callID = strings.TrimSpace(event.Tool.ID)
+	}
+	calls := event.Message.ToolCalls()
+	if len(calls) == 0 {
+		return ""
+	}
+	if callID != "" {
+		for _, call := range calls {
+			if strings.TrimSpace(call.ID) != callID {
+				continue
+			}
+			return strings.TrimSpace(call.Name)
+		}
+		return ""
+	}
+	if len(calls) == 1 {
+		return strings.TrimSpace(calls[0].Name)
+	}
+	return ""
+}
+
+func stringFromNestedMap(values map[string]any, path ...string) string {
+	var current any = values
+	for _, key := range path {
+		mapped, ok := current.(map[string]any)
+		if !ok {
+			return ""
+		}
+		current = mapped[key]
+	}
+	text, _ := current.(string)
+	return strings.TrimSpace(text)
+}
+
 func cloneEventPlanPayload(in EventPlanPayload) EventPlanPayload {
 	out := in
 	if len(in.Entries) > 0 {

@@ -171,7 +171,7 @@ func toolCallFromEventTool(event *session.Event) (model.ToolCall, bool) {
 	}
 	call := model.ToolCall{
 		ID:   strings.TrimSpace(toolPayload.ID),
-		Name: toolNameFromEvent(event),
+		Name: session.CanonicalToolName(event, nil),
 		Args: string(mustJSON(toolPayload.Input)),
 	}
 	if call.ID == "" || call.Name == "" {
@@ -302,7 +302,7 @@ func messageFromDurableEvent(event *session.Event) (model.Message, bool) {
 		}
 		call := model.ToolCall{
 			ID:   strings.TrimSpace(toolPayload.ID),
-			Name: toolNameFromEvent(event),
+			Name: session.CanonicalToolName(event, nil),
 			Args: string(mustJSON(toolPayload.Input)),
 		}
 		if call.ID == "" || call.Name == "" {
@@ -314,7 +314,7 @@ func messageFromDurableEvent(event *session.Event) (model.Message, bool) {
 		if toolPayload == nil {
 			return model.Message{}, false
 		}
-		name := toolNameFromEvent(event)
+		name := session.CanonicalToolName(event, nil)
 		if toolPayload.ID == "" || name == "" {
 			return model.Message{}, false
 		}
@@ -359,34 +359,6 @@ func eventToolContentText(content []session.EventToolContent) string {
 		}
 	}
 	return strings.Join(parts, "\n")
-}
-
-func toolNameFromEvent(event *session.Event) string {
-	if event == nil {
-		return ""
-	}
-	if name := strings.TrimSpace(stringFromNestedMap(event.Meta, "caelis", "runtime", "tool", "name")); name != "" {
-		return name
-	}
-	if toolPayload := session.EventToolProjection(event); toolPayload != nil {
-		if name := strings.TrimSpace(toolPayload.Name); name != "" {
-			return name
-		}
-	}
-	return ""
-}
-
-func stringFromNestedMap(values map[string]any, path ...string) string {
-	var current any = values
-	for _, key := range path {
-		mapped, ok := current.(map[string]any)
-		if !ok {
-			return ""
-		}
-		current = mapped[key]
-	}
-	text, _ := current.(string)
-	return strings.TrimSpace(text)
 }
 
 func participantInvocationLabel(event session.Event) string {

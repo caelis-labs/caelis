@@ -91,6 +91,38 @@ func TestProjectGatewayEventEnvelopeProjectsGatewayToolResultTerminalOutput(t *t
 	}
 }
 
+func TestProjectGatewayEventEnvelopeProjectsUsageAsACPUsageUpdate(t *testing.T) {
+	events := ProjectGatewayEventEnvelope(gateway.EventEnvelope{Event: gateway.Event{
+		Kind:       gateway.EventKindAssistantMessage,
+		SessionRef: session.SessionRef{SessionID: "session-1"},
+		Usage: &gateway.UsageSnapshot{
+			PromptTokens:      12,
+			CachedInputTokens: 3,
+			CompletionTokens:  5,
+			ReasoningTokens:   2,
+			TotalTokens:       17,
+		},
+	}})
+	if len(events) != 1 {
+		t.Fatalf("ProjectGatewayEventEnvelope() returned %d events, want usage update: %#v", len(events), events)
+	}
+	env := events[0]
+	if env.Kind != eventstream.KindSessionUpdate {
+		t.Fatalf("kind = %q, want session/update", env.Kind)
+	}
+	update, ok := env.Update.(schema.UsageUpdate)
+	if !ok {
+		t.Fatalf("update = %#v, want UsageUpdate", env.Update)
+	}
+	if update.SessionUpdate != schema.UpdateUsage || update.Used != 17 || update.Size != 0 {
+		t.Fatalf("usage update = %#v, want usage_update used=17 without synthetic size", update)
+	}
+	usage := eventstream.UsageSnapshotFromUpdate(update)
+	if usage == nil || usage.PromptTokens != 12 || usage.CachedInputTokens != 3 || usage.CompletionTokens != 5 || usage.ReasoningTokens != 2 || usage.TotalTokens != 17 {
+		t.Fatalf("usage snapshot = %#v", usage)
+	}
+}
+
 func TestProjectGatewayEventEnvelopeAddsInvocationMeta(t *testing.T) {
 	events := ProjectGatewayEventEnvelope(gateway.EventEnvelope{Event: gateway.Event{
 		Kind:       gateway.EventKindAssistantMessage,

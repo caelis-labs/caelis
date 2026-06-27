@@ -18,7 +18,8 @@ func ACPEventsFromGatewayHandle(handle gateway.TurnHandle) <-chan eventstream.En
 	if handle == nil {
 		return eventstream.EnsureTerminalLifecycle(nil, "", "", "")
 	}
-	return eventstream.EnsureTerminalLifecycle(handle.ACPEvents(), handle.HandleID(), handle.RunID(), handle.TurnID())
+	events := eventstream.NormalizeEnvelopes(handle.ACPEvents())
+	return eventstream.EnsureTerminalLifecycle(events, handle.HandleID(), handle.RunID(), handle.TurnID())
 }
 
 // ProjectGatewayEventEnvelope projects the gateway runtime event envelope into the
@@ -38,7 +39,7 @@ func ProjectGatewayEventEnvelope(env gateway.EventEnvelope) []eventstream.Envelo
 	if env.Event.Usage != nil {
 		usage := *env.Event.Usage
 		out = append(out, eventstream.Envelope{
-			Kind:       eventstream.KindUsage,
+			Kind:       eventstream.KindSessionUpdate,
 			Cursor:     base.Cursor,
 			SessionID:  base.SessionID,
 			HandleID:   base.HandleID,
@@ -48,14 +49,13 @@ func ProjectGatewayEventEnvelope(env gateway.EventEnvelope) []eventstream.Envelo
 			Scope:      base.Scope,
 			ScopeID:    base.ScopeID,
 			Actor:      base.Actor,
-			Usage: &eventstream.UsageSnapshot{
+			Update: eventstream.UsageUpdateFromSnapshot(eventstream.UsageSnapshot{
 				PromptTokens:      usage.PromptTokens,
 				CachedInputTokens: usage.CachedInputTokens,
 				CompletionTokens:  usage.CompletionTokens,
 				ReasoningTokens:   usage.ReasoningTokens,
 				TotalTokens:       usage.TotalTokens,
-			},
-			Meta: cloneAnyMap(base.Meta),
+			}, base.Meta),
 		})
 	}
 	return out

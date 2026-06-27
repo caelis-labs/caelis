@@ -133,6 +133,9 @@ func semanticBoundaryRule(rel string, file *ast.File, fset *token.FileSet, modul
 	if rule, subject, line := gatewayBridgeCallRule(rel, file, fset, modulePath); rule != "" {
 		return rule, subject, line
 	}
+	if rule, subject, line := topLevelTerminalMetaRule(rel, file, fset); rule != "" {
+		return rule, subject, line
+	}
 	return "", "", 0
 }
 
@@ -211,6 +214,21 @@ func eventProtocolAliasRule(rel string, file *ast.File, fset *token.FileSet, mod
 		if subject != "" {
 			return false
 		}
+		if literal, ok := node.(*ast.CompositeLit); ok && isSessionEventProtocolType(literal.Type, sessionNames) {
+			for _, item := range literal.Elts {
+				kv, ok := item.(*ast.KeyValueExpr)
+				if !ok {
+					continue
+				}
+				key, ok := kv.Key.(*ast.Ident)
+				if !ok || key.Name != "Handoff" {
+					continue
+				}
+				subject = "EventProtocol." + key.Name
+				line = fset.Position(key.Pos()).Line
+				return false
+			}
+		}
 		selector, ok := node.(*ast.SelectorExpr)
 		if !ok || !aliasFields[selector.Sel.Name] {
 			return true
@@ -235,6 +253,39 @@ func eventProtocolAliasRule(rel string, file *ast.File, fset *token.FileSet, mod
 		return "", "", 0
 	}
 	return "production code must use ports/session protocol helpers instead of EventProtocol json:\"-\" aliases", subject, line
+}
+
+func topLevelTerminalMetaRule(rel string, file *ast.File, fset *token.FileSet) (string, string, int) {
+	if file == nil || strings.HasSuffix(rel, "_test.go") || rel == "scripts/arch_lint.go" {
+		return "", "", 0
+	}
+	var subject string
+	var line int
+	ast.Inspect(file, func(node ast.Node) bool {
+		if subject != "" {
+			return false
+		}
+		lit, ok := node.(*ast.BasicLit)
+		if !ok || lit.Kind != token.STRING {
+			return true
+		}
+		value, err := strconv.Unquote(lit.Value)
+		if err != nil {
+			return true
+		}
+		switch value {
+		case "terminal_info", "terminal_output":
+			subject = value
+			line = fset.Position(lit.Pos()).Line
+			return false
+		default:
+			return true
+		}
+	})
+	if subject == "" {
+		return "", "", 0
+	}
+	return "new code must store terminal metadata under _meta.caelis.runtime.terminal instead of top-level terminal_info/terminal_output", subject, line
 }
 
 func eventProtocolAliasVars(file *ast.File, sessionNames map[string]bool) map[string]bool {

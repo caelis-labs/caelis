@@ -244,6 +244,21 @@ func ProtocolParticipantOf(event *Event) *ProtocolParticipant {
 	return &out
 }
 
+// ProtocolHandoffOf returns the normalized ACP controller-handoff payload for
+// one event without exposing transitional json:"-" aliases to callers.
+func ProtocolHandoffOf(event *Event) *ProtocolHandoff {
+	if event == nil || event.Protocol == nil {
+		return nil
+	}
+	normalized := CloneEventProtocol(*event.Protocol)
+	if normalized.Handoff == nil {
+		return nil
+	}
+	out := *normalized.Handoff
+	out.Phase = strings.TrimSpace(out.Phase)
+	return &out
+}
+
 func protocolContentIsText(content any, want string) bool {
 	want = strings.TrimSpace(want)
 	if want == "" || content == nil {
@@ -529,6 +544,12 @@ func CloneEventProtocol(in EventProtocol) EventProtocol {
 			out.Update = &ProtocolUpdate{
 				SessionUpdate: strings.TrimSpace(handoff.Phase),
 			}
+		}
+	}
+	if out.Handoff == nil && out.Method == ProtocolMethodControllerHandoff && out.Update != nil {
+		phase := strings.TrimSpace(out.Update.SessionUpdate)
+		if phase != "" {
+			out.Handoff = &ProtocolHandoff{Phase: phase}
 		}
 	}
 	return out

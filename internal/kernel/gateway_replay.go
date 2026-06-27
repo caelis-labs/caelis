@@ -106,7 +106,7 @@ func sessionACPUsageEnvelope(base eventstream.Envelope, usage *UsageSnapshot) ev
 		return eventstream.Envelope{}
 	}
 	return eventstream.Envelope{
-		Kind:       eventstream.KindUsage,
+		Kind:       eventstream.KindSessionUpdate,
 		Cursor:     base.Cursor,
 		SessionID:  base.SessionID,
 		HandleID:   base.HandleID,
@@ -116,14 +116,13 @@ func sessionACPUsageEnvelope(base eventstream.Envelope, usage *UsageSnapshot) ev
 		Scope:      base.Scope,
 		ScopeID:    base.ScopeID,
 		Actor:      base.Actor,
-		Usage: &eventstream.UsageSnapshot{
+		Update: eventstream.UsageUpdateFromSnapshot(eventstream.UsageSnapshot{
 			PromptTokens:      usage.PromptTokens,
 			CachedInputTokens: usage.CachedInputTokens,
 			CompletionTokens:  usage.CompletionTokens,
 			ReasoningTokens:   usage.ReasoningTokens,
 			TotalTokens:       usage.TotalTokens,
-		},
-		Meta: base.Meta,
+		}, base.Meta),
 	}
 }
 

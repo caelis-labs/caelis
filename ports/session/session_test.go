@@ -578,6 +578,38 @@ func TestEventProtocolRoundTripPreservesParticipantPayload(t *testing.T) {
 	}
 }
 
+func TestEventProtocolRoundTripPreservesHandoffPayload(t *testing.T) {
+	t.Parallel()
+
+	source := EventProtocol{
+		Handoff: &ProtocolHandoff{Phase: " activation "},
+	}
+	raw, err := json.Marshal(source)
+	if err != nil {
+		t.Fatalf("json.Marshal(EventProtocol) error = %v", err)
+	}
+	var decoded EventProtocol
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal(EventProtocol) error = %v", err)
+	}
+	handoff := ProtocolHandoffOf(&Event{
+		Type:     EventTypeHandoff,
+		Protocol: &decoded,
+	})
+	if handoff == nil {
+		t.Fatal("ProtocolHandoffOf() = nil")
+	}
+	if handoff.Phase != "activation" {
+		t.Fatalf("handoff.Phase = %q, want activation", handoff.Phase)
+	}
+	if decoded.Method != ProtocolMethodControllerHandoff {
+		t.Fatalf("decoded.Method = %q, want %q", decoded.Method, ProtocolMethodControllerHandoff)
+	}
+	if got := ProtocolSessionUpdateTypeOfProtocol(&decoded); got != "activation" {
+		t.Fatalf("ProtocolSessionUpdateTypeOfProtocol() = %q, want activation", got)
+	}
+}
+
 func TestCloneEventDeepClonesNestedMeta(t *testing.T) {
 	t.Parallel()
 
@@ -680,6 +712,40 @@ func TestCanonicalizeEventDoesNotBuildCoreMessageFromProtocolText(t *testing.T) 
 	}
 	if got := EventText(event); got != "final answer" {
 		t.Fatalf("EventText() = %q, want protocol display text", got)
+	}
+}
+
+func TestCanonicalToolNamePrefersDurablePayloadAndMatchesMessageToolCallID(t *testing.T) {
+	t.Parallel()
+
+	message := model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{
+		{ID: "call-read", Name: "READ_FILE", Args: `{"path":"a.go"}`},
+		{ID: "call-run", Name: "RUN_COMMAND", Args: `{"command":"go test ./..."}`},
+	}, "")
+	event := &Event{
+		Type:    EventTypeToolCall,
+		Message: &message,
+		Tool:    &EventTool{ID: "call-run"},
+		Meta:    map[string]any{"caelis": map[string]any{"runtime": map[string]any{"tool": map[string]any{"name": "META_ONLY"}}}},
+	}
+
+	if got := CanonicalToolName(event, nil); got != "RUN_COMMAND" {
+		t.Fatalf("CanonicalToolName() = %q, want Event.Tool.ID matched message tool call name", got)
+	}
+	event.Protocol = &EventProtocol{
+		Update: &ProtocolUpdate{
+			SessionUpdate: string(ProtocolUpdateTypeToolCall),
+			ToolCallID:    "call-run",
+			Title:         "EXECUTE",
+			Kind:          "execute",
+		},
+	}
+	if got := CanonicalToolName(event, nil); got != "RUN_COMMAND" {
+		t.Fatalf("CanonicalToolName() = %q, want message tool call name", got)
+	}
+	event.Tool.Name = "CANONICAL_TOOL"
+	if got := CanonicalToolName(event, nil); got != "CANONICAL_TOOL" {
+		t.Fatalf("CanonicalToolName() = %q, want Event.Tool name", got)
 	}
 }
 

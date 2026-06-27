@@ -55,6 +55,19 @@ func TestRenderEventPolicyForACPEnvelopeUsesStructuredToolLane(t *testing.T) {
 	}
 }
 
+func TestRenderEventPolicyForACPUsageUpdateUsesUIStateLane(t *testing.T) {
+	policy, ok := renderEventPolicyFor(eventstream.Envelope{
+		Kind:   eventstream.KindSessionUpdate,
+		Update: schema.UsageUpdate{SessionUpdate: schema.UpdateUsage, Used: 17},
+	})
+	if !ok {
+		t.Fatal("renderEventPolicyFor() = not ok, want ok")
+	}
+	if policy.lane != renderLaneUIState {
+		t.Fatalf("renderEventPolicyFor() lane = %q, want %q", policy.lane, renderLaneUIState)
+	}
+}
+
 func TestRenderEventPolicyKeepsSmoothingForNonFinalNarrative(t *testing.T) {
 	policy, ok := renderEventPolicyFor(gatewayEventMsg(gateway.EventEnvelope{
 		Event: gateway.Event{

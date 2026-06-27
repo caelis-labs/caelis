@@ -36,7 +36,7 @@ type renderEventPolicy struct {
 func renderEventPolicyFor(msg tea.Msg) (renderEventPolicy, bool) {
 	switch typed := msg.(type) {
 	case eventstream.Envelope:
-		return renderEventPolicyForACPEnvelope(typed), true
+		return renderEventPolicyForACPEnvelope(eventstream.NormalizeEnvelope(typed)), true
 	case TranscriptEventsMsg:
 		return renderEventPolicyForTranscriptEvents(typed), true
 	case LogChunkMsg:
@@ -65,6 +65,7 @@ func renderEventPolicyFor(msg tea.Msg) (renderEventPolicy, bool) {
 }
 
 func renderEventPolicyForACPEnvelope(env eventstream.Envelope) renderEventPolicy {
+	env = eventstream.NormalizeEnvelope(env)
 	if env.Err != nil || env.Kind == eventstream.KindError {
 		return renderEventPolicy{lane: renderLaneLifecycle, flushSmoothing: true, flushLogChunks: true, dismissHints: true}
 	}
@@ -82,6 +83,8 @@ func renderEventPolicyForACPEnvelope(env eventstream.Envelope) renderEventPolicy
 			return renderEventPolicy{lane: renderLaneToolStream, flushSmoothing: true, flushLogChunks: true, dismissHints: true}
 		case schema.UpdatePlan:
 			return renderEventPolicy{lane: renderLaneUIState, flushSmoothing: true, flushLogChunks: true, dismissHints: true}
+		case schema.UpdateUsage:
+			return renderEventPolicy{lane: renderLaneUIState}
 		default:
 			return renderEventPolicy{lane: renderLaneLifecycle, flushSmoothing: true, flushLogChunks: true, dismissHints: true}
 		}
@@ -91,8 +94,6 @@ func renderEventPolicyForACPEnvelope(env eventstream.Envelope) renderEventPolicy
 		return renderEventPolicy{lane: renderLaneParticipant, flushSmoothing: true, flushLogChunks: true, dismissHints: true}
 	case eventstream.KindLifecycle, eventstream.KindNotice:
 		return renderEventPolicy{lane: renderLaneLifecycle, flushSmoothing: true, flushLogChunks: true, dismissHints: true}
-	case eventstream.KindUsage:
-		return renderEventPolicy{lane: renderLaneUIState}
 	default:
 		return renderEventPolicy{lane: renderLaneLifecycle, flushSmoothing: true, flushLogChunks: true, dismissHints: true}
 	}
@@ -184,6 +185,9 @@ func (m *Model) deferredBatchingEnabled() bool {
 }
 
 func (m *Model) dispatchRenderEvent(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
+	if env, ok := msg.(eventstream.Envelope); ok {
+		msg = eventstream.NormalizeEnvelope(env)
+	}
 	policy, ok := renderEventPolicyFor(msg)
 	if !ok {
 		return m, nil, false

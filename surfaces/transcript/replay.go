@@ -19,6 +19,7 @@ func ProjectReplayEvents(events []eventstream.Envelope, surface SurfaceProjector
 }
 
 func ProjectReplayEvent(env eventstream.Envelope, surface SurfaceProjector) []Event {
+	env = eventstream.NormalizeEnvelope(env)
 	if projected := replayableACPEvents(env, surface); len(projected) != 0 {
 		return projected
 	}
@@ -43,7 +44,7 @@ func replayableACPSessionUpdate(env eventstream.Envelope, surface SurfaceProject
 	update, ok := env.Update.(schema.ContentChunk)
 	if !ok {
 		switch env.Update.(type) {
-		case schema.ToolCall, schema.ToolCallUpdate, schema.PlanUpdate:
+		case schema.ToolCall, schema.ToolCallUpdate, schema.PlanUpdate, schema.UsageUpdate:
 			return replayableACPTraceEvent(env, surface)
 		default:
 			return nil

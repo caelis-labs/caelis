@@ -324,7 +324,7 @@ func toolStatusFinal(status string, isErr bool) bool {
 func toolResultTerminalID(call model.ToolCall, output map[string]any, meta map[string]any) string {
 	return firstNonEmpty(
 		toolString(output["terminal_id"]),
-		stringFromNestedMap(meta, "caelis", "runtime", "task", "terminal_id"),
+		toolNestedString(meta, "caelis", "runtime", "task", "terminal_id"),
 		strings.TrimSpace(call.ID),
 	)
 }
@@ -343,6 +343,18 @@ func toolPath(values map[string]any) string {
 func toolString(value any) string {
 	text, _ := value.(string)
 	return strings.TrimSpace(text)
+}
+
+func toolNestedString(values map[string]any, path ...string) string {
+	var current any = values
+	for _, key := range path {
+		mapped, ok := current.(map[string]any)
+		if !ok {
+			return ""
+		}
+		current = mapped[key]
+	}
+	return toolString(current)
 }
 
 func toolRawString(value any) string {

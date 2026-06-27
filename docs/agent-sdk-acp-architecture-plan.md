@@ -88,15 +88,20 @@ The Gateway emits standard ACP events:
 - `tool_call` from assistant tool-use parts.
 - `tool_call_update` from tool result/control payloads.
 - `plan` and `request_permission` from typed control events.
+- `usage_update` from canonical provider usage metadata.
 
 Caelis display hints live in `_meta`. `_meta` may carry terminal output,
 terminal exit status, cwd, display names, and other UI-only annotations. It must
-not be the only durable location for model-critical data.
+not be the only durable location for model-critical data. Canonical fields win:
+`Event.Tool` and model tool-use parts take precedence over protocol projection,
+and protocol projection takes precedence over `_meta` display hints.
 
 `protocol/acp/eventstream.Envelope` is the v1 client event stream for local
 surfaces and app-server transports. SSE uses `cursor` as the event id,
 WebSocket transports serialize the envelope directly, and ACP stdio maps
 standard messages to `session/update` and `session/request_permission`.
+Usage is emitted as standard ACP `session/update` `usage_update`; the older
+`caelis/usage` extension is a read-only compatibility input.
 `ports/gateway.Event` is a transitional in-process DTO used by compatibility
 bridges; new surfaces must target `eventstream.Envelope` instead.
 
@@ -109,7 +114,8 @@ bridges; new surfaces must target `eventstream.Envelope` instead.
 | Built-in tool call/result | `session.Event.Tool` plus model tool-use/result parts when model-visible | `tool_call`, `tool_call_update` |
 | Permission request/decision | Durable typed approval/control state; `EventProtocol.Permission` is the ACP client projection source | `request_permission` plus approval review extension events |
 | Plan state | `session.Event.PlanPayload` when it is durable semantic plan state | `plan` |
-| Participant lifecycle and handoff | Durable session/controller state, not transcript text | participant and lifecycle extension events |
+| Usage | Provider usage metadata attached to canonical events | standard ACP `usage_update`; token breakdown in `_meta.caelis.usage` |
+| Participant lifecycle and handoff | Durable session/controller state, not transcript text; handoff protocol helpers reconstruct from durable `method/update` | participant and lifecycle extension events |
 | Subagent structured stream | Not parent model context; `VisibilityUIOnly` live trace only | scoped `eventstream.Envelope` with `ScopeSubagent` |
 | Subagent final product | Parent model sees the `SPAWN`/`TASK` tool result, not the child transcript | `tool_call_update` result plus optional scoped trace |
 

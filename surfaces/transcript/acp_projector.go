@@ -38,6 +38,7 @@ type ToolProjectionInput struct {
 }
 
 func ProjectACPEventToEvents(env eventstream.Envelope, surface SurfaceProjector) []Event {
+	env = eventstream.NormalizeEnvelope(env)
 	scope := ACPEventScope(env.Scope)
 	scopeID := ACPEventScopeID(env)
 	occurredAt := env.OccurredAt
@@ -87,18 +88,6 @@ func ProjectACPEventToEvents(env eventstream.Envelope, surface SurfaceProjector)
 	case eventstream.KindApprovalReview:
 		if event, ok := projectACPApprovalReview(env, scope, scopeID, surface); ok {
 			out = append(out, event)
-		}
-	case eventstream.KindUsage:
-		if env.Usage != nil {
-			usage := *env.Usage
-			out = append(out, Event{
-				Kind:       EventUsage,
-				Scope:      scope,
-				ScopeID:    scopeID,
-				Actor:      strings.TrimSpace(env.Actor),
-				OccurredAt: occurredAt,
-				Usage:      &usage,
-			})
 		}
 	}
 	for i := range out {
@@ -177,6 +166,19 @@ func projectACPSessionUpdate(env eventstream.Envelope, meta map[string]any, scop
 			Actor:       strings.TrimSpace(env.Actor),
 			OccurredAt:  env.OccurredAt,
 			PlanEntries: entries,
+		}}
+	case schema.UsageUpdate:
+		usage := eventstream.UsageSnapshotFromEnvelope(env)
+		if usage == nil {
+			return nil
+		}
+		return []Event{{
+			Kind:       EventUsage,
+			Scope:      scope,
+			ScopeID:    scopeID,
+			Actor:      strings.TrimSpace(env.Actor),
+			OccurredAt: env.OccurredAt,
+			Usage:      usage,
 		}}
 	default:
 		return nil

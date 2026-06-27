@@ -69,7 +69,9 @@ Architecture plan:
 
 Current builds use canonical session events as the replay source:
 `session.Event.Message` for model-visible messages and `session.Event.Tool` for
-tool execution state. Older local data that only stored v2 semantic sidecar
+tool execution state. Replay emits ACP-native final envelopes derived from
+those durable events, including standard `usage_update` session updates for
+token usage. Older local data that only stored v2 semantic sidecar
 payloads (`user_message`, `assistant_message`, `system_context`, `tool_call`,
 `tool_result`) or embedded document `events` arrays is not migrated at read time;
 the file session store returns an unsupported legacy format error instead of
@@ -164,7 +166,7 @@ If no model is configured yet, start the TUI and use `/connect`.
 
 The TUI is the primary local interface. It keeps prompt turns, external ACP
 participants, subagent tasks, tool calls, output panels, approvals, plans, and
-usage updates in one transcript pipeline.
+standard ACP usage updates in one transcript pipeline.
 
 Current built-in slash commands:
 

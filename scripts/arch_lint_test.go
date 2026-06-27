@@ -183,6 +183,42 @@ func normalize(protocol EventProtocol) bool {
 	}
 }
 
+func TestSemanticBoundaryRuleRejectsEventProtocolHandoffAliasWrite(t *testing.T) {
+	t.Parallel()
+
+	const modulePath = "github.com/OnslaughtSnail/caelis"
+	source := `package demo
+
+import "github.com/OnslaughtSnail/caelis/ports/session"
+
+func writeAlias() *session.EventProtocol {
+	return &session.EventProtocol{
+		Handoff: &session.ProtocolHandoff{Phase: "activation"},
+	}
+}
+`
+	rule, subject, _ := semanticRuleForSource(t, "impl/agent/local/demo.go", source, modulePath)
+	if !strings.Contains(rule, "EventProtocol") || subject != "EventProtocol.Handoff" {
+		t.Fatalf("semantic rule = (%q, %q), want Handoff alias write rejection", rule, subject)
+	}
+}
+
+func TestSemanticBoundaryRuleRejectsTopLevelTerminalMetaKeys(t *testing.T) {
+	t.Parallel()
+
+	const modulePath = "github.com/OnslaughtSnail/caelis"
+	source := `package demo
+
+var meta = map[string]any{
+	"terminal_output": "stdout",
+}
+`
+	rule, subject, _ := semanticRuleForSource(t, "protocol/acp/projector/demo.go", source, modulePath)
+	if !strings.Contains(rule, "terminal metadata") || subject != "terminal_output" {
+		t.Fatalf("semantic rule = (%q, %q), want top-level terminal metadata rejection", rule, subject)
+	}
+}
+
 func TestSemanticBoundaryRuleRejectsNonWhitelistedGatewayBridgeCall(t *testing.T) {
 	t.Parallel()
 

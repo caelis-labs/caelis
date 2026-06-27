@@ -96,7 +96,8 @@ func handoffEvent(from session.ControllerBinding, to session.ControllerBinding, 
 		Actor:      session.ActorRef{Kind: session.ActorKindSystem, Name: "runtime"},
 		Text:       text,
 		Protocol: &session.EventProtocol{
-			Handoff: &session.ProtocolHandoff{Phase: "activation"},
+			Method: session.ProtocolMethodControllerHandoff,
+			Update: &session.ProtocolUpdate{SessionUpdate: "activation"},
 		},
 		Scope: &session.EventScope{
 			Source: "handoff",

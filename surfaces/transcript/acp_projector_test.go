@@ -125,6 +125,27 @@ func TestProjectACPEventToEventsProjectsApprovalReview(t *testing.T) {
 	}
 }
 
+func TestProjectACPEventToEventsProjectsUsageUpdate(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectACPEventToEvents(eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate,
+		Update: eventstream.UsageUpdateFromSnapshot(eventstream.UsageSnapshot{
+			PromptTokens:      12,
+			CachedInputTokens: 3,
+			CompletionTokens:  5,
+			ReasoningTokens:   2,
+			TotalTokens:       17,
+		}, nil),
+	}, nil)
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one usage event", events)
+	}
+	if events[0].Kind != EventUsage || events[0].Usage == nil || events[0].Usage.PromptTokens != 12 || events[0].Usage.TotalTokens != 17 {
+		t.Fatalf("event = %#v, want usage projection", events[0])
+	}
+}
+
 func TestProjectACPEventToEventsProjectsCompactNoticeOnly(t *testing.T) {
 	t.Parallel()
 

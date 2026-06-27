@@ -25,8 +25,8 @@ func TestRunOnceDrainsAssistantOutput(t *testing.T) {
 		},
 		{
 			Cursor: "u1",
-			Kind:   eventstream.KindUsage,
-			Usage:  &eventstream.UsageSnapshot{PromptTokens: 11},
+			Kind:   eventstream.KindSessionUpdate,
+			Update: eventstream.UsageUpdateFromSnapshot(eventstream.UsageSnapshot{PromptTokens: 11, TotalTokens: 17}, nil),
 		},
 	})
 	gw := fakeStarter{
@@ -70,9 +70,9 @@ func TestRunOnceIgnoresScopedTraceOutput(t *testing.T) {
 		},
 		{
 			Cursor: "usage-main",
-			Kind:   eventstream.KindUsage,
+			Kind:   eventstream.KindSessionUpdate,
 			Scope:  eventstream.ScopeMain,
-			Usage:  &eventstream.UsageSnapshot{PromptTokens: 11},
+			Update: eventstream.UsageUpdateFromSnapshot(eventstream.UsageSnapshot{PromptTokens: 11, TotalTokens: 17}, nil),
 		},
 		{
 			Cursor:  "child-1",
@@ -114,6 +114,33 @@ func TestRunOnceIgnoresScopedTraceOutput(t *testing.T) {
 	}
 	if result.PromptTokens != 11 {
 		t.Fatalf("RunOnce() prompt tokens = %d, want main-scope usage", result.PromptTokens)
+	}
+}
+
+func TestRunOnceReadsLegacyUsageExtension(t *testing.T) {
+	t.Parallel()
+
+	handle := newFakeACPHandle([]eventstream.Envelope{{
+		Cursor: "legacy-usage",
+		Kind:   eventstream.KindUsage,
+		Scope:  eventstream.ScopeMain,
+		Usage:  &eventstream.UsageSnapshot{PromptTokens: 13},
+	}})
+	gw := fakeStarter{
+		result: gateway.BeginTurnResult{
+			Session: session.Session{SessionRef: session.SessionRef{
+				AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+			}},
+			Handle: handle,
+		},
+	}
+
+	result, err := RunOnce(context.Background(), gw, gateway.BeginTurnRequest{}, Options{})
+	if err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if result.PromptTokens != 13 {
+		t.Fatalf("RunOnce() prompt tokens = %d, want legacy usage", result.PromptTokens)
 	}
 }
 

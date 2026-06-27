@@ -115,6 +115,24 @@ func TestProjectReplayEventsProjectsMainDurableTrace(t *testing.T) {
 	}
 }
 
+func TestProjectReplayEventsProjectsUsageUpdate(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectReplayEvents([]eventstream.Envelope{{
+		Kind: eventstream.KindSessionUpdate,
+		Update: eventstream.UsageUpdateFromSnapshot(eventstream.UsageSnapshot{
+			PromptTokens: 12,
+			TotalTokens:  17,
+		}, nil),
+	}}, nil)
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one usage replay event", events)
+	}
+	if events[0].Kind != EventUsage || events[0].Usage == nil || events[0].Usage.PromptTokens != 12 || events[0].Usage.TotalTokens != 17 {
+		t.Fatalf("event = %#v, want usage replay event", events[0])
+	}
+}
+
 func TestProjectReplayEventsSkipsSideACPProcessTrace(t *testing.T) {
 	t.Parallel()
 
