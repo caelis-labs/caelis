@@ -1903,7 +1903,7 @@ func TestReplayEventsReturnsSessionBackedCanonicalReplay(t *testing.T) {
 	}
 	// Participant-scoped tool trace stays out of transcript replay; control
 	// plane continuity below still advances over e3.
-	if len(replayed.Events) != 1 || replayed.Events[0].Cursor != "e2" {
+	if len(replayed.Events) != 1 || replayed.Events[0].Cursor != "acp-projection:ZTI:0" || replayed.Events[0].EventID != "e2" {
 		t.Fatalf("ReplayEvents() = %#v", replayed.Events)
 	}
 	if replayed.Events[0].Kind != eventstream.KindSessionUpdate ||
@@ -1911,7 +1911,7 @@ func TestReplayEventsReturnsSessionBackedCanonicalReplay(t *testing.T) {
 		replayed.Events[0].TurnID != "turn-1" {
 		t.Fatalf("first replay event = %+v", replayed.Events[0])
 	}
-	if !replayed.Durable || replayed.NextCursor != "e2" {
+	if !replayed.Durable || replayed.NextCursor != "acp-projection:ZTI:0" {
 		t.Fatalf("replay result = %+v", replayed)
 	}
 	if replayed.ControlPlane.Continuity.LastEventCursor != "e3" || replayed.ControlPlane.Continuity.ControllerCursor != "e3" {
@@ -2033,61 +2033,11 @@ func TestReplayEventsResolvesBindingAndAppliesCursorLimit(t *testing.T) {
 	if len(replayed.Events) != 1 {
 		t.Fatalf("ReplayEvents().Events len = %d, want 1", len(replayed.Events))
 	}
-	if got := replayed.Events[0].Cursor; got != "e2" {
-		t.Fatalf("ReplayEvents().Events[0].Cursor = %q, want e2", got)
+	if got := replayed.Events[0].Cursor; got != "acp-projection:ZTI:0" {
+		t.Fatalf("ReplayEvents().Events[0].Cursor = %q, want e2 projection cursor", got)
 	}
-	if replayed.NextCursor != "e2" {
-		t.Fatalf("ReplayEvents().NextCursor = %q, want e2", replayed.NextCursor)
-	}
-}
-
-func TestReplayEventsLimitDoesNotSplitProjectedACPEnvelopes(t *testing.T) {
-	t.Parallel()
-
-	activeSession := session.Session{
-		SessionRef: session.SessionRef{
-			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
-		},
-	}
-	message := model.NewMessage(
-		model.RoleAssistant,
-		model.NewReasoningPart("thinking", model.ReasoningVisibilityVisible),
-		model.NewTextPart("done"),
-	)
-	svc := &recordingSessionService{
-		sessionResult: activeSession,
-		eventsResult: []*session.Event{
-			{ID: "e1", Type: session.EventTypeUser, Text: "first", Message: modelMessagePtr(model.NewTextMessage(model.RoleUser, "first"))},
-			{ID: "e2", Type: session.EventTypeAssistant, Text: "done", Message: &message, Visibility: session.VisibilityCanonical},
-			{ID: "e3", Type: session.EventTypeAssistant, Text: "third", Message: modelMessagePtr(model.NewTextMessage(model.RoleAssistant, "third")), Visibility: session.VisibilityCanonical},
-		},
-	}
-	gw, err := New(Config{
-		Sessions: svc,
-		Runtime:  mockRuntime{},
-		Resolver: staticResolver{},
-	})
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-
-	replayed, err := gw.ReplayEvents(context.Background(), ReplayEventsRequest{
-		SessionRef: activeSession.SessionRef,
-		Cursor:     "e1",
-		Limit:      1,
-	})
-	if err != nil {
-		t.Fatalf("ReplayEvents() error = %v", err)
-	}
-	if len(replayed.Events) != 2 {
-		t.Fatalf("ReplayEvents().Events len = %d, want full thought + message group: %#v", len(replayed.Events), replayed.Events)
-	}
-	if replayed.Events[0].Cursor != "e2" || replayed.Events[1].Cursor != "e2" || replayed.NextCursor != "e2" {
-		t.Fatalf("replay cursors = [%q %q] next=%q, want all e2", replayed.Events[0].Cursor, replayed.Events[1].Cursor, replayed.NextCursor)
-	}
-	if eventstream.UpdateType(replayed.Events[0].Update) != schema.UpdateAgentThought ||
-		eventstream.UpdateType(replayed.Events[1].Update) != schema.UpdateAgentMessage {
-		t.Fatalf("replay updates = %#v %#v, want thought + message", replayed.Events[0].Update, replayed.Events[1].Update)
+	if replayed.NextCursor != "acp-projection:ZTI:0" {
+		t.Fatalf("ReplayEvents().NextCursor = %q, want e2 projection cursor", replayed.NextCursor)
 	}
 }
 
@@ -2151,11 +2101,11 @@ func TestReplayEventsAcceptsCursorFromTraceThatFellOutOfReplayFilter(t *testing.
 	if err != nil {
 		t.Fatalf("ReplayEvents() error = %v", err)
 	}
-	if len(replayed.Events) != 1 || replayed.Events[0].Cursor != "turn-2-user" {
+	if len(replayed.Events) != 1 || replayed.Events[0].Cursor != "acp-projection:dHVybi0yLXVzZXI:0" {
 		t.Fatalf("ReplayEvents().Events = %#v, want turn-2 user after raw cursor", replayed.Events)
 	}
-	if replayed.NextCursor != "turn-2-user" {
-		t.Fatalf("ReplayEvents().NextCursor = %q, want turn-2-user", replayed.NextCursor)
+	if replayed.NextCursor != "acp-projection:dHVybi0yLXVzZXI:0" {
+		t.Fatalf("ReplayEvents().NextCursor = %q, want turn-2-user projection cursor", replayed.NextCursor)
 	}
 }
 

@@ -866,6 +866,91 @@ func TestModelContextRoundTripsThroughSessionStore(t *testing.T) {
 	}
 }
 
+func TestProviderReplayMetadataRoundTripsThroughSessionStore(t *testing.T) {
+	t.Parallel()
+
+	sessions := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{
+		RootDir:            t.TempDir(),
+		SessionIDGenerator: func() string { return "sess-provider-replay-meta" },
+	}))
+	activeSession, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
+		AppName: "caelis",
+		UserID:  "user-1",
+		Workspace: session.WorkspaceRef{
+			Key: "ws-provider-replay-meta",
+			CWD: t.TempDir(),
+		},
+	})
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+
+	reasoning := model.NewReasoningPart("prior reasoning", model.ReasoningVisibilityVisible)
+	reasoning.Reasoning.Replay = &model.ReplayMeta{
+		Provider: "anthropic",
+		Kind:     "thinking_signature",
+		Token:    "sig-anthropic",
+	}
+	toolUse := model.NewToolUsePart("call-gemini", "LOOKUP", json.RawMessage(`{"query":"weather"}`))
+	toolUse.ToolUse.Replay = &model.ReplayMeta{
+		Provider: "gemini",
+		Kind:     "thought_signature",
+		Token:    "sig-gemini",
+	}
+	assistant := model.NewMessage(
+		model.RoleAssistant,
+		reasoning,
+		model.NewTextPart("checking"),
+		toolUse,
+	)
+	if _, err := sessions.AppendEvent(context.Background(), session.AppendEventRequest{
+		SessionRef: activeSession.SessionRef,
+		Event: &session.Event{
+			Type:    session.EventTypeAssistant,
+			Message: &assistant,
+			Meta: map[string]any{
+				"caelis": map[string]any{
+					"sdk": map[string]any{"debug": "display-only"},
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("AppendEvent() error = %v", err)
+	}
+	if _, err := sessions.AppendEvent(context.Background(), session.AppendEventRequest{
+		SessionRef: activeSession.SessionRef,
+		Event:      persistedToolResultEvent("call-gemini", "LOOKUP", map[string]any{"query": "weather"}, map[string]any{"result": "sunny"}),
+	}); err != nil {
+		t.Fatalf("AppendEvent(tool result) error = %v", err)
+	}
+
+	loaded, err := sessions.LoadSession(context.Background(), session.LoadSessionRequest{SessionRef: activeSession.SessionRef})
+	if err != nil {
+		t.Fatalf("LoadSession() error = %v", err)
+	}
+	ctx := agent.NewContext(agent.ContextSpec{
+		Context: context.Background(),
+		Session: activeSession,
+		Events:  loaded.Events,
+	})
+	messages := messagesFromContext(ctx)
+	if len(messages) != 2 {
+		t.Fatalf("len(messages) = %d, want assistant + tool result: %#v", len(messages), messages)
+	}
+	reasoningParts := messages[0].ReasoningParts()
+	if len(reasoningParts) != 1 ||
+		reasoningParts[0].Replay == nil ||
+		reasoningParts[0].Replay.Provider != "anthropic" ||
+		reasoningParts[0].Replay.Kind != "thinking_signature" ||
+		reasoningParts[0].Replay.Token != "sig-anthropic" {
+		t.Fatalf("reasoning replay metadata = %+v, want anthropic thinking signature", reasoningParts)
+	}
+	calls := messages[0].ToolCalls()
+	if len(calls) != 1 || calls[0].ThoughtSignature != "sig-gemini" {
+		t.Fatalf("tool calls = %#v, want Gemini thought signature", calls)
+	}
+}
+
 func TestServerSideToolReplayPartsRoundTripThroughSessionStore(t *testing.T) {
 	t.Parallel()
 

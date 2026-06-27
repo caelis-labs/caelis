@@ -130,6 +130,24 @@ func readAlias(event *session.Event) string {
 	}
 }
 
+func TestSemanticBoundaryRuleRejectsSurfaceGatewayEventEnvelopeConsumption(t *testing.T) {
+	t.Parallel()
+
+	const modulePath = "github.com/OnslaughtSnail/caelis"
+	source := `package demo
+
+import "github.com/OnslaughtSnail/caelis/ports/gateway"
+
+func consume(env gateway.EventEnvelope) string {
+	return env.Cursor
+}
+`
+	rule, subject, _ := semanticRuleForSource(t, "surfaces/gui/demo.go", source, modulePath)
+	if !strings.Contains(rule, "eventstream.Envelope") || subject != "gateway.EventEnvelope" {
+		t.Fatalf("semantic rule = (%q, %q), want gateway.EventEnvelope surface rejection", rule, subject)
+	}
+}
+
 func TestSemanticBoundaryRuleRejectsDirectEventProtocolAliasReads(t *testing.T) {
 	t.Parallel()
 

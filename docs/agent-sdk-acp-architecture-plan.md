@@ -99,7 +99,12 @@ and protocol projection takes precedence over `_meta` display hints.
 `protocol/acp/eventstream.Envelope` is the v1 client event stream for local
 surfaces and app-server transports. SSE uses `cursor` as the event id,
 WebSocket transports serialize the envelope directly, and ACP stdio maps
-standard messages to `session/update` and `session/request_permission`.
+standard messages to `session/update` and `session/request_permission`. `cursor`
+is the opaque per-envelope resume id. Live cursors are stream-local ordering
+ids; replay cursors are durable projection cursors. Session-derived envelopes
+also expose `event_id` for the durable source session event and `projection_id`
+for the per-source ACP projection. Clients moving from a live stream to durable
+replay should use `projection_id` when it is present.
 Usage is emitted as standard ACP `session/update` `usage_update`; the older
 `caelis/usage` extension is a read-only compatibility input.
 `ports/gateway.Event` is a transitional in-process DTO used by compatibility

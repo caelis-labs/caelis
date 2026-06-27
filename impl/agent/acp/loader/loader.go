@@ -6,6 +6,7 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/protocol/acp"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/projector"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
@@ -72,7 +73,9 @@ func (l *SessionServiceLoader) LoadSession(
 			if event == nil {
 				continue
 			}
-			notifications, err := l.projector.ProjectNotifications(event)
+			notifications, err := projector.ProjectSessionEventNotifications(eventstream.Envelope{
+				SessionID: strings.TrimSpace(req.SessionID),
+			}, event, l.projector)
 			if err != nil {
 				return schema.LoadSessionResponse{}, err
 			}

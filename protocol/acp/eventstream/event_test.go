@@ -42,15 +42,17 @@ func TestEnvelopeV1SessionUpdateGolden(t *testing.T) {
 	t.Parallel()
 
 	env := Envelope{
-		Kind:       KindSessionUpdate,
-		Cursor:     "turn-1:0001",
-		SessionID:  "session-1",
-		HandleID:   "handle-1",
-		RunID:      "run-1",
-		TurnID:     "turn-1",
-		OccurredAt: time.Date(2026, 6, 27, 12, 0, 0, 0, time.UTC),
-		Scope:      ScopeMain,
-		Final:      true,
+		Kind:         KindSessionUpdate,
+		Cursor:       "acp-projection:ZXZlbnQtMQ:0",
+		EventID:      "event-1",
+		ProjectionID: "acp-projection:ZXZlbnQtMQ:0",
+		SessionID:    "session-1",
+		HandleID:     "handle-1",
+		RunID:        "run-1",
+		TurnID:       "turn-1",
+		OccurredAt:   time.Date(2026, 6, 27, 12, 0, 0, 0, time.UTC),
+		Scope:        ScopeMain,
+		Final:        true,
 		Update: schema.ContentChunk{
 			SessionUpdate: schema.UpdateAgentMessage,
 			Content:       schema.TextContent{Type: "text", Text: "hello"},

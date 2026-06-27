@@ -2,7 +2,10 @@ package kernel
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
+	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/OnslaughtSnail/caelis/ports/session"
@@ -10,6 +13,8 @@ import (
 	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
 	acpprojector "github.com/OnslaughtSnail/caelis/protocol/acp/projector"
 )
+
+const acpProjectionCursorPrefix = "acp-projection:"
 
 func (g *Gateway) ReplayEvents(ctx context.Context, req ReplayEventsRequest) (ReplayEventsResult, error) {
 	ref, err := g.sessionTarget(req.SessionRef, req.BindingKey)
@@ -37,15 +42,15 @@ func (g *Gateway) ReplayEvents(ctx context.Context, req ReplayEventsRequest) (Re
 		return ReplayEventsResult{}, err
 	}
 	hasLiveHandle := g.hasActiveHandle(ref.SessionID)
-	cursorEvents, err := sessionEventsAfterCursor(events, req.Cursor)
+	cursorEvents, cursorState, err := sessionEventsForACPReplayCursor(events, req.Cursor)
 	if err != nil {
 		return ReplayEventsResult{}, err
 	}
 	replayEvents := replayTranscriptEvents(cursorEvents, req.IncludeTransient)
-	if req.Limit > 0 && len(replayEvents) > req.Limit {
-		replayEvents = replayEvents[:req.Limit]
+	projected, err := projectSessionACPReplayEvents(ref, replayEvents, cursorState, req.Limit)
+	if err != nil {
+		return ReplayEventsResult{}, err
 	}
-	projected := projectSessionACPEvents(ref, replayEvents)
 	out := ReplayEventsResult{
 		SessionRef:    ref,
 		Events:        projected,
@@ -71,21 +76,48 @@ func projectSessionACPEvents(ref session.SessionRef, events []*session.Event) []
 	return out
 }
 
+func projectSessionACPReplayEvents(ref session.SessionRef, events []*session.Event, cursor acpReplayCursorState, limit int) ([]eventstream.Envelope, error) {
+	if len(events) == 0 {
+		return nil, nil
+	}
+	out := make([]eventstream.Envelope, 0, len(events))
+	policy := acpReplayPolicy{cursor: cursor, sourceLimit: limit}
+	for _, event := range events {
+		if event == nil {
+			continue
+		}
+		projected := projectSessionACPEvent(ref, event, "", "", "")
+		var (
+			keep bool
+			err  error
+		)
+		projected, keep, err = policy.apply(event, projected)
+		if err != nil {
+			return nil, err
+		}
+		if !keep {
+			break
+		}
+		if len(projected) == 0 {
+			continue
+		}
+		out = append(out, projected...)
+	}
+	return out, nil
+}
+
 func projectSessionACPEvent(ref session.SessionRef, event *session.Event, handleID string, runID string, turnID string) []eventstream.Envelope {
 	base := sessionACPEventBase(ref, event)
 	base.HandleID = strings.TrimSpace(handleID)
 	base.RunID = strings.TrimSpace(runID)
 	base.TurnID = firstNonEmpty(base.TurnID, strings.TrimSpace(turnID))
 	out := acpprojector.ProjectSessionEventEnvelope(base, event)
-	if usage := usageSnapshotFromSessionEvent(event); usage != nil {
-		out = append(out, sessionACPUsageEnvelope(base, usage))
-	}
-	return out
+	return stampSessionACPProjectionIDs(strings.TrimSpace(event.ID), out)
 }
 
 func sessionACPEventBase(ref session.SessionRef, event *session.Event) eventstream.Envelope {
 	base := eventstream.Envelope{
-		Cursor:     strings.TrimSpace(event.ID),
+		EventID:    strings.TrimSpace(event.ID),
 		SessionID:  strings.TrimSpace(ref.SessionID),
 		TurnID:     turnIDFromSessionEvent(event),
 		OccurredAt: event.Time,
@@ -99,31 +131,6 @@ func sessionACPEventBase(ref session.SessionRef, event *session.Event) eventstre
 		base.ParticipantID = strings.TrimSpace(origin.ParticipantID)
 	}
 	return base
-}
-
-func sessionACPUsageEnvelope(base eventstream.Envelope, usage *UsageSnapshot) eventstream.Envelope {
-	if usage == nil {
-		return eventstream.Envelope{}
-	}
-	return eventstream.Envelope{
-		Kind:       eventstream.KindSessionUpdate,
-		Cursor:     base.Cursor,
-		SessionID:  base.SessionID,
-		HandleID:   base.HandleID,
-		RunID:      base.RunID,
-		TurnID:     base.TurnID,
-		OccurredAt: base.OccurredAt,
-		Scope:      base.Scope,
-		ScopeID:    base.ScopeID,
-		Actor:      base.Actor,
-		Update: eventstream.UsageUpdateFromSnapshot(eventstream.UsageSnapshot{
-			PromptTokens:      usage.PromptTokens,
-			CachedInputTokens: usage.CachedInputTokens,
-			CompletionTokens:  usage.CompletionTokens,
-			ReasoningTokens:   usage.ReasoningTokens,
-			TotalTokens:       usage.TotalTokens,
-		}, base.Meta),
-	}
 }
 
 func sessionACPEventFinal(event *session.Event) bool {
@@ -158,4 +165,126 @@ func lastACPEventCursor(events []eventstream.Envelope) string {
 		return ""
 	}
 	return strings.TrimSpace(events[len(events)-1].Cursor)
+}
+
+type acpReplayCursorState struct {
+	raw        string
+	eventID    string
+	projection bool
+}
+
+type acpReplayPolicy struct {
+	cursor      acpReplayCursorState
+	sourceLimit int
+	sourceCount int
+}
+
+func (p *acpReplayPolicy) apply(event *session.Event, projected []eventstream.Envelope) ([]eventstream.Envelope, bool, error) {
+	if p == nil {
+		return projected, true, nil
+	}
+	if p.cursor.projection && event != nil && strings.TrimSpace(event.ID) == p.cursor.eventID {
+		var err error
+		projected, err = trimACPReplayAfterCursor(projected, p.cursor)
+		if err != nil {
+			return nil, false, err
+		}
+	}
+	if len(projected) == 0 {
+		return nil, true, nil
+	}
+	if p.sourceLimit > 0 && p.sourceCount >= p.sourceLimit {
+		return nil, false, nil
+	}
+	p.sourceCount++
+	return projected, true, nil
+}
+
+func sessionEventsForACPReplayCursor(events []*session.Event, cursor string) ([]*session.Event, acpReplayCursorState, error) {
+	cursor = strings.TrimSpace(cursor)
+	if cursor == "" {
+		return events, acpReplayCursorState{}, nil
+	}
+	if eventID, _, ok := parseACPProjectionCursor(cursor); ok {
+		for i, event := range events {
+			if event == nil {
+				continue
+			}
+			if strings.TrimSpace(event.ID) == eventID {
+				return events[i:], acpReplayCursorState{raw: cursor, eventID: eventID, projection: true}, nil
+			}
+		}
+	}
+	for i, event := range events {
+		if event == nil {
+			continue
+		}
+		if strings.TrimSpace(event.ID) == cursor {
+			return events[i+1:], acpReplayCursorState{raw: cursor}, nil
+		}
+	}
+	return nil, acpReplayCursorState{}, cursorNotFoundError(cursor)
+}
+
+func parseACPProjectionCursor(cursor string) (string, int, bool) {
+	cursor = strings.TrimSpace(cursor)
+	if !strings.HasPrefix(cursor, acpProjectionCursorPrefix) {
+		return "", 0, false
+	}
+	payload := strings.TrimPrefix(cursor, acpProjectionCursorPrefix)
+	sep := strings.LastIndex(payload, ":")
+	if sep <= 0 || sep == len(payload)-1 {
+		return "", 0, false
+	}
+	index, err := strconv.Atoi(payload[sep+1:])
+	if err != nil || index < 0 {
+		return "", 0, false
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(payload[:sep])
+	if err != nil {
+		return "", 0, false
+	}
+	eventID := strings.TrimSpace(string(decoded))
+	if eventID == "" {
+		return "", 0, false
+	}
+	return eventID, index, true
+}
+
+func trimACPReplayAfterCursor(events []eventstream.Envelope, cursor acpReplayCursorState) ([]eventstream.Envelope, error) {
+	if !cursor.projection {
+		return events, nil
+	}
+	sawSource := false
+	for i, env := range events {
+		if strings.TrimSpace(env.EventID) == cursor.eventID {
+			sawSource = true
+		}
+		if strings.TrimSpace(env.Cursor) == cursor.raw || strings.TrimSpace(env.ProjectionID) == cursor.raw {
+			return events[i+1:], nil
+		}
+	}
+	if sawSource {
+		return nil, cursorNotFoundError(cursor.raw)
+	}
+	return events, nil
+}
+
+func stampSessionACPProjectionIDs(eventID string, events []eventstream.Envelope) []eventstream.Envelope {
+	eventID = strings.TrimSpace(eventID)
+	if eventID == "" || len(events) == 0 {
+		return events
+	}
+	out := make([]eventstream.Envelope, len(events))
+	for i, env := range events {
+		env.EventID = eventID
+		env.ProjectionID = formatACPProjectionCursor(eventID, i)
+		env.Cursor = env.ProjectionID
+		out[i] = env
+	}
+	return out
+}
+
+func formatACPProjectionCursor(eventID string, index int) string {
+	return fmt.Sprintf("%s%s:%d", acpProjectionCursorPrefix, base64.RawURLEncoding.EncodeToString([]byte(strings.TrimSpace(eventID))), index)
 }

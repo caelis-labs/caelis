@@ -123,6 +123,36 @@ func TestProjectGatewayEventEnvelopeProjectsUsageAsACPUsageUpdate(t *testing.T) 
 	}
 }
 
+func TestProjectSessionEventNotificationsPreservesCustomNotificationsAndAppendsUsage(t *testing.T) {
+	notifications, err := ProjectSessionEventNotifications(eventstream.Envelope{
+		SessionID: "base-session",
+	}, &session.Event{
+		SessionID: "event-session",
+		Type:      session.EventTypeAssistant,
+		Meta: map[string]any{
+			"usage": map[string]any{
+				"prompt_tokens":     3,
+				"completion_tokens": 4,
+				"total_tokens":      7,
+			},
+		},
+	}, notificationOverrideProjector{})
+	if err != nil {
+		t.Fatalf("ProjectSessionEventNotifications() error = %v", err)
+	}
+	if len(notifications) != 2 {
+		t.Fatalf("ProjectSessionEventNotifications() produced %d notifications, want custom notification + usage: %#v", len(notifications), notifications)
+	}
+	chunk, ok := notifications[0].Update.(schema.ContentChunk)
+	if !ok || notifications[0].SessionID != "custom-session" || schema.ExtractTextValue(chunk.Content) != "from notifications" {
+		t.Fatalf("first notification = %#v, want custom ProjectNotifications output", notifications[0])
+	}
+	usage, ok := notifications[1].Update.(schema.UsageUpdate)
+	if !ok || notifications[1].SessionID != "base-session" || usage.Used != 7 {
+		t.Fatalf("usage notification = %#v, want appended usage_update used=7 on base session", notifications[1])
+	}
+}
+
 func TestProjectGatewayEventEnvelopeAddsInvocationMeta(t *testing.T) {
 	events := ProjectGatewayEventEnvelope(gateway.EventEnvelope{Event: gateway.Event{
 		Kind:       gateway.EventKindAssistantMessage,
@@ -321,6 +351,29 @@ func TestProjectGatewayEventEnvelopeProjectsGatewayToolCall(t *testing.T) {
 	if got := metaString(update.Meta, "caelis", "runtime", "tool", "name"); got != "RUN_COMMAND" {
 		t.Fatalf("tool meta name = %q, want RUN_COMMAND", got)
 	}
+}
+
+type notificationOverrideProjector struct{}
+
+func (notificationOverrideProjector) ProjectEvent(*session.Event) ([]Update, error) {
+	return []Update{schema.ContentChunk{
+		SessionUpdate: schema.UpdateAgentMessage,
+		Content:       schema.TextContent{Type: "text", Text: "from event"},
+	}}, nil
+}
+
+func (notificationOverrideProjector) ProjectNotifications(*session.Event) ([]SessionNotification, error) {
+	return []SessionNotification{{
+		SessionID: "custom-session",
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateAgentMessage,
+			Content:       schema.TextContent{Type: "text", Text: "from notifications"},
+		},
+	}}, nil
+}
+
+func (notificationOverrideProjector) ProjectPermissionRequest(*session.Event) (*RequestPermissionRequest, bool, error) {
+	return nil, false, nil
 }
 
 func TestGatewayCanonicalPayloadNormalizesBeforeACPProjection(t *testing.T) {

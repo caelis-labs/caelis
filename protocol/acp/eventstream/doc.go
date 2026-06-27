@@ -22,8 +22,13 @@
 //     session/request_permission messages; Caelis extension events remain
 //     extension envelopes on non-stdio streams.
 //
-// Cursor values are opaque and monotonic only within one stream. Final marks a
-// completed semantic projection for the scoped actor/message, while lifecycle
-// terminal states close the turn stream. Caelis-specific display hints belong
-// under _meta.caelis and must not be the only copy of model-critical data.
+// Cursor values are opaque resume ids and are unique per envelope. Live cursors
+// are stream-local ordering ids; replay cursors are durable projection cursors.
+// Session-derived envelopes also carry EventID, the durable source session event
+// id, and ProjectionID, the stable per-source projection id. Clients that bridge
+// from a live stream to durable ReplayEvents should resume with ProjectionID
+// when it is present, not the live Cursor. Final marks a completed semantic
+// projection for the scoped actor/message, while lifecycle terminal states close
+// the turn stream. Caelis-specific display hints belong under _meta.caelis and
+// must not be the only copy of model-critical data.
 package eventstream

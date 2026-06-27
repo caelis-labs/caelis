@@ -1,6 +1,8 @@
 {
   "kind": "session/update",
-  "cursor": "turn-1:0001",
+  "cursor": "acp-projection:ZXZlbnQtMQ:0",
+  "event_id": "event-1",
+  "projection_id": "acp-projection:ZXZlbnQtMQ:0",
   "session_id": "session-1",
   "handle_id": "handle-1",
   "run_id": "run-1",

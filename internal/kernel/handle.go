@@ -56,6 +56,7 @@ type turnHandle struct {
 	pendingApprovalCh       chan ApprovalDecision
 
 	approvalReviewSeq uint64
+	acpCursorSeq      uint64
 }
 
 func newTurnHandle(cfg turnHandleConfig) *turnHandle {
@@ -431,9 +432,7 @@ func (h *turnHandle) publishWithACPEnvelopes(env EventEnvelope, acpEnvs []events
 	h.liveQueue = append(h.liveQueue, env)
 	if len(acpEnvs) > 0 {
 		for _, acpEnv := range acpEnvs {
-			if strings.TrimSpace(acpEnv.Cursor) == "" {
-				acpEnv.Cursor = env.Cursor
-			}
+			acpEnv.Cursor = h.allocateACPCursorLocked()
 			h.acpLiveQueue = append(h.acpLiveQueue, h.enrichACPEnvelopeLocked(acpEnv, bridgeSource))
 		}
 	}
@@ -443,9 +442,7 @@ func (h *turnHandle) publishWithACPEnvelopes(env EventEnvelope, acpEnvs []events
 func (h *turnHandle) publishACP(env eventstream.Envelope, bridgeSource string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if env.Cursor == "" {
-		env.Cursor = h.allocateCursorLocked()
-	}
+	env.Cursor = h.allocateACPCursorLocked()
 	env = h.enrichACPEnvelopeLocked(env, bridgeSource)
 	if h.closed || h.finished {
 		return
@@ -462,6 +459,15 @@ func (h *turnHandle) allocateCursor() string {
 
 func (h *turnHandle) allocateCursorLocked() string {
 	return h.handleID + "-cursor-" + time.Now().Format(time.RFC3339Nano)
+}
+
+func (h *turnHandle) allocateACPCursorLocked() string {
+	h.acpCursorSeq++
+	prefix := strings.TrimSpace(h.handleID)
+	if prefix == "" {
+		prefix = "acp"
+	}
+	return fmt.Sprintf("%s-acp-%06d", prefix, h.acpCursorSeq)
 }
 
 func lastCursor(events []EventEnvelope) string {

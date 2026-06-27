@@ -109,13 +109,15 @@ func NormalizeEnvelopes(in <-chan Envelope) <-chan Envelope {
 }
 
 type Envelope struct {
-	Kind       Kind      `json:"kind"`
-	Cursor     string    `json:"cursor,omitempty"`
-	SessionID  string    `json:"session_id,omitempty"`
-	HandleID   string    `json:"handle_id,omitempty"`
-	RunID      string    `json:"run_id,omitempty"`
-	TurnID     string    `json:"turn_id,omitempty"`
-	OccurredAt time.Time `json:"occurred_at,omitempty"`
+	Kind         Kind      `json:"kind"`
+	Cursor       string    `json:"cursor,omitempty"`
+	EventID      string    `json:"event_id,omitempty"`
+	ProjectionID string    `json:"projection_id,omitempty"`
+	SessionID    string    `json:"session_id,omitempty"`
+	HandleID     string    `json:"handle_id,omitempty"`
+	RunID        string    `json:"run_id,omitempty"`
+	TurnID       string    `json:"turn_id,omitempty"`
+	OccurredAt   time.Time `json:"occurred_at,omitempty"`
 
 	Scope         Scope  `json:"scope,omitempty"`
 	ScopeID       string `json:"scope_id,omitempty"`

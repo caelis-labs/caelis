@@ -77,6 +77,15 @@ func TestTurnHandleACPEventsProjectsCanonicalAndPassesThroughTransient(t *testin
 	if update, ok := got[1].Update.(schema.RawUpdate); !ok || update.SessionUpdate != "vendor/custom" {
 		t.Fatalf("second ACP update = %#v, want passthrough raw update", got[1].Update)
 	}
+	if got[0].Cursor != "h1-acp-000001" || got[1].Cursor != "h1-acp-000002" {
+		t.Fatalf("ACP cursors = %q, %q, want per-handle monotonic cursors", got[0].Cursor, got[1].Cursor)
+	}
+	if got[0].EventID != "e1" || got[0].ProjectionID != "acp-projection:ZTE:0" {
+		t.Fatalf("projected ACP source ids = event:%q projection:%q, want e1 projection cursor", got[0].EventID, got[0].ProjectionID)
+	}
+	if got[1].EventID != "" || got[1].ProjectionID != "" {
+		t.Fatalf("passthrough source ids = event:%q projection:%q, want empty", got[1].EventID, got[1].ProjectionID)
+	}
 	if got[1].SessionID != "s1" || got[1].HandleID != "h1" || got[1].RunID != "run-1" || got[1].TurnID != "turn-1" {
 		t.Fatalf("passthrough IDs = session:%q handle:%q run:%q turn:%q", got[1].SessionID, got[1].HandleID, got[1].RunID, got[1].TurnID)
 	}

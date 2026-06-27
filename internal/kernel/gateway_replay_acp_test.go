@@ -206,9 +206,214 @@ func TestReplayEventsMatchesLiveACPProjectionSemantics(t *testing.T) {
 	}
 }
 
+func TestReplayEventsLimitDoesNotSplitProjectedACPEnvelopes(t *testing.T) {
+	t.Parallel()
+
+	activeSession, events := replayCursorFixtureEvents()
+	gw, err := New(Config{
+		Sessions: &recordingSessionService{
+			sessionResult: activeSession,
+			eventsResult:  events,
+		},
+		Runtime:  mockRuntime{},
+		Resolver: staticResolver{},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	replayed, err := gw.ReplayEvents(context.Background(), ReplayEventsRequest{
+		SessionRef: activeSession.SessionRef,
+		Cursor:     "e1",
+		Limit:      1,
+	})
+	if err != nil {
+		t.Fatalf("ReplayEvents() error = %v", err)
+	}
+	if len(replayed.Events) != 2 {
+		t.Fatalf("ReplayEvents().Events len = %d, want full thought + message group: %#v", len(replayed.Events), replayed.Events)
+	}
+	if replayed.Events[0].Cursor != "acp-projection:ZTI:0" || replayed.Events[1].Cursor != "acp-projection:ZTI:1" || replayed.NextCursor != "acp-projection:ZTI:1" {
+		t.Fatalf("replay cursors = [%q %q] next=%q, want e2 projection cursors", replayed.Events[0].Cursor, replayed.Events[1].Cursor, replayed.NextCursor)
+	}
+	if replayed.Events[0].EventID != "e2" || replayed.Events[1].ProjectionID != "acp-projection:ZTI:1" {
+		t.Fatalf("replay projection ids = %#v %#v, want event_id/projection_id", replayed.Events[0], replayed.Events[1])
+	}
+	if eventstream.UpdateType(replayed.Events[0].Update) != schema.UpdateAgentThought ||
+		eventstream.UpdateType(replayed.Events[1].Update) != schema.UpdateAgentMessage {
+		t.Fatalf("replay updates = %#v %#v, want thought + message", replayed.Events[0].Update, replayed.Events[1].Update)
+	}
+}
+
+func TestReplayEventsResumesWithinMultiEnvelopeProjection(t *testing.T) {
+	t.Parallel()
+
+	activeSession, events := replayCursorFixtureEvents()
+	gw, err := New(Config{
+		Sessions: &recordingSessionService{
+			sessionResult: activeSession,
+			eventsResult:  events,
+		},
+		Runtime:  mockRuntime{},
+		Resolver: staticResolver{},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	replayed, err := gw.ReplayEvents(context.Background(), ReplayEventsRequest{
+		SessionRef: activeSession.SessionRef,
+		Cursor:     "acp-projection:ZTI:0",
+		Limit:      1,
+	})
+	if err != nil {
+		t.Fatalf("ReplayEvents() error = %v", err)
+	}
+	if len(replayed.Events) != 1 {
+		t.Fatalf("ReplayEvents().Events len = %d, want remaining message projection: %#v", len(replayed.Events), replayed.Events)
+	}
+	if replayed.Events[0].Cursor != "acp-projection:ZTI:1" ||
+		replayed.Events[0].EventID != "e2" ||
+		replayed.Events[0].ProjectionID != "acp-projection:ZTI:1" ||
+		eventstream.UpdateType(replayed.Events[0].Update) != schema.UpdateAgentMessage {
+		t.Fatalf("ReplayEvents().Events[0] = %#v, want remaining e2 message projection", replayed.Events[0])
+	}
+	if replayed.NextCursor != "acp-projection:ZTI:1" {
+		t.Fatalf("ReplayEvents().NextCursor = %q, want e2 projection cursor", replayed.NextCursor)
+	}
+
+	replayed, err = gw.ReplayEvents(context.Background(), ReplayEventsRequest{
+		SessionRef: activeSession.SessionRef,
+		Cursor:     "acp-projection:ZTI:1",
+		Limit:      1,
+	})
+	if err != nil {
+		t.Fatalf("ReplayEvents(after final projection) error = %v", err)
+	}
+	if len(replayed.Events) != 1 ||
+		replayed.Events[0].Cursor != "acp-projection:ZTM:0" ||
+		replayed.Events[0].EventID != "e3" ||
+		eventstream.UpdateType(replayed.Events[0].Update) != schema.UpdateAgentMessage {
+		t.Fatalf("ReplayEvents(after final projection).Events = %#v, want e3 message projection", replayed.Events)
+	}
+	if replayed.NextCursor != "acp-projection:ZTM:0" {
+		t.Fatalf("ReplayEvents(after final projection).NextCursor = %q, want e3 projection cursor", replayed.NextCursor)
+	}
+}
+
+func TestReplayEventsAcceptsLiveProjectionIDAsResumeCursor(t *testing.T) {
+	t.Parallel()
+
+	activeSession, events := replayCursorFixtureEvents()
+	handle := newTurnHandle(turnHandleConfig{
+		handleID:   "h1",
+		runID:      "run-1",
+		turnID:     "turn-1",
+		sessionRef: activeSession.SessionRef,
+		createdAt:  time.Unix(9, 0),
+	})
+	liveCh := handle.ACPEvents()
+	handle.publishSessionEvent(events[1])
+	handle.finish()
+	var live []eventstream.Envelope
+	for env := range liveCh {
+		live = append(live, env)
+	}
+	if len(live) < 2 || live[0].Cursor == live[0].ProjectionID || live[0].ProjectionID != "acp-projection:ZTI:0" {
+		t.Fatalf("live ACP identity = %#v, want stream cursor plus durable e2 projection_id", live)
+	}
+
+	gw, err := New(Config{
+		Sessions: &recordingSessionService{
+			sessionResult: activeSession,
+			eventsResult:  events,
+		},
+		Runtime:  mockRuntime{},
+		Resolver: staticResolver{},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	replayed, err := gw.ReplayEvents(context.Background(), ReplayEventsRequest{
+		SessionRef: activeSession.SessionRef,
+		Cursor:     live[0].ProjectionID,
+		Limit:      1,
+	})
+	if err != nil {
+		t.Fatalf("ReplayEvents(live projection_id) error = %v", err)
+	}
+	if len(replayed.Events) != 1 ||
+		replayed.Events[0].Cursor != "acp-projection:ZTI:1" ||
+		replayed.Events[0].ProjectionID != "acp-projection:ZTI:1" ||
+		eventstream.UpdateType(replayed.Events[0].Update) != schema.UpdateAgentMessage {
+		t.Fatalf("ReplayEvents(live projection_id).Events = %#v, want remaining e2 message projection", replayed.Events)
+	}
+}
+
+func TestReplayEventsProjectionCursorWinsOverCollidingSourceEventID(t *testing.T) {
+	t.Parallel()
+
+	activeSession, events := replayCursorFixtureEvents()
+	projectionCursor := formatACPProjectionCursor("e2", 0)
+	collision := &session.Event{
+		ID:         projectionCursor,
+		Type:       session.EventTypeAssistant,
+		Text:       "collision",
+		Message:    modelMessagePtr(model.NewTextMessage(model.RoleAssistant, "collision")),
+		Visibility: session.VisibilityCanonical,
+	}
+	events = append(events[:2], append([]*session.Event{collision}, events[2:]...)...)
+	gw, err := New(Config{
+		Sessions: &recordingSessionService{
+			sessionResult: activeSession,
+			eventsResult:  events,
+		},
+		Runtime:  mockRuntime{},
+		Resolver: staticResolver{},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	replayed, err := gw.ReplayEvents(context.Background(), ReplayEventsRequest{
+		SessionRef: activeSession.SessionRef,
+		Cursor:     projectionCursor,
+		Limit:      1,
+	})
+	if err != nil {
+		t.Fatalf("ReplayEvents(colliding projection cursor) error = %v", err)
+	}
+	if len(replayed.Events) != 1 ||
+		replayed.Events[0].EventID != "e2" ||
+		replayed.Events[0].ProjectionID != formatACPProjectionCursor("e2", 1) ||
+		eventstream.UpdateType(replayed.Events[0].Update) != schema.UpdateAgentMessage {
+		t.Fatalf("ReplayEvents(colliding projection cursor).Events = %#v, want remaining e2 projection", replayed.Events)
+	}
+}
+
+func replayCursorFixtureEvents() (session.Session, []*session.Event) {
+	activeSession := session.Session{
+		SessionRef: session.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+		},
+	}
+	message := model.NewMessage(
+		model.RoleAssistant,
+		model.NewReasoningPart("thinking", model.ReasoningVisibilityVisible),
+		model.NewTextPart("done"),
+	)
+	events := []*session.Event{
+		{ID: "e1", Type: session.EventTypeUser, Text: "first", Message: modelMessagePtr(model.NewTextMessage(model.RoleUser, "first"))},
+		{ID: "e2", Type: session.EventTypeAssistant, Text: "done", Message: &message, Visibility: session.VisibilityCanonical},
+		{ID: "e3", Type: session.EventTypeAssistant, Text: "third", Message: modelMessagePtr(model.NewTextMessage(model.RoleAssistant, "third")), Visibility: session.VisibilityCanonical},
+	}
+	return activeSession, events
+}
+
 type semanticACPEnvelope struct {
 	Kind          eventstream.Kind
-	Cursor        string
+	EventID       string
+	ProjectionID  string
 	SessionID     string
 	TurnID        string
 	Scope         eventstream.Scope
@@ -243,7 +448,8 @@ func semanticACPEnvelopes(events []eventstream.Envelope) []semanticACPEnvelope {
 	for _, env := range events {
 		next := semanticACPEnvelope{
 			Kind:          env.Kind,
-			Cursor:        env.Cursor,
+			EventID:       env.EventID,
+			ProjectionID:  env.ProjectionID,
 			SessionID:     env.SessionID,
 			TurnID:        env.TurnID,
 			Scope:         env.Scope,

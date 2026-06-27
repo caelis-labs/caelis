@@ -25,6 +25,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/tool"
 	"github.com/OnslaughtSnail/caelis/protocol/acp"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
 func TestRuntimeAgentInitializeCapabilitiesDefault(t *testing.T) {
@@ -155,6 +156,13 @@ func TestRuntimeAgentLoadSessionReplaysDurableEvents(t *testing.T) {
 			Type:    session.EventTypeAssistant,
 			Message: &assistant,
 			Text:    "world",
+			Meta: map[string]any{
+				"usage": map[string]any{
+					"prompt_tokens":     11,
+					"completion_tokens": 6,
+					"total_tokens":      17,
+				},
+			},
 			Protocol: &session.EventProtocol{
 				Update: &session.ProtocolUpdate{SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage)},
 			},
@@ -174,7 +182,7 @@ func TestRuntimeAgentLoadSessionReplaysDurableEvents(t *testing.T) {
 	if resp.Modes != nil || len(resp.ConfigOptions) != 0 {
 		t.Fatalf("LoadSession() returned unexpected optional metadata: %#v", resp)
 	}
-	if got, want := len(cb.notifications), 2; got != want {
+	if got, want := len(cb.notifications), 3; got != want {
 		t.Fatalf("len(notifications) = %d, want %d", got, want)
 	}
 	if got := cb.notifications[0].Update.SessionUpdateType(); got != acp.UpdateUserMessage {
@@ -182,6 +190,13 @@ func TestRuntimeAgentLoadSessionReplaysDurableEvents(t *testing.T) {
 	}
 	if got := cb.notifications[1].Update.SessionUpdateType(); got != acp.UpdateAgentMessage {
 		t.Fatalf("second replay update = %q, want %q", got, acp.UpdateAgentMessage)
+	}
+	if got := cb.notifications[2].Update.SessionUpdateType(); got != schema.UpdateUsage {
+		t.Fatalf("third replay update = %q, want usage_update", got)
+	}
+	usage, ok := cb.notifications[2].Update.(schema.UsageUpdate)
+	if !ok || usage.Used != 17 || usage.Size != 0 {
+		t.Fatalf("usage replay update = %#v, want usage_update used=17 without synthetic size", cb.notifications[2].Update)
 	}
 }
 

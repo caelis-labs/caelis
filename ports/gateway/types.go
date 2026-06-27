@@ -93,11 +93,16 @@ type BindSessionRequest struct {
 }
 
 type ReplayEventsRequest struct {
-	SessionRef       session.SessionRef `json:"session_ref"`
-	BindingKey       string             `json:"binding_key,omitempty"`
-	Cursor           string             `json:"cursor,omitempty"`
-	Limit            int                `json:"limit,omitempty"`
-	IncludeTransient bool               `json:"include_transient,omitempty"`
+	SessionRef session.SessionRef `json:"session_ref"`
+	BindingKey string             `json:"binding_key,omitempty"`
+	// Cursor accepts a durable replay cursor/projection_id or a legacy source
+	// session event id. Live eventstream cursors are stream-local; clients
+	// bridging from live to replay should pass projection_id when present.
+	Cursor string `json:"cursor,omitempty"`
+	// Limit caps source session events, not projected envelopes, so one source
+	// event may still expand to multiple semantic ACP envelopes.
+	Limit            int  `json:"limit,omitempty"`
+	IncludeTransient bool `json:"include_transient,omitempty"`
 }
 
 type HandoffControllerRequest struct {
@@ -392,6 +397,9 @@ type EventOrigin struct {
 	ParticipantSessionID string     `json:"participant_session_id,omitempty"`
 }
 
+// Event is a transitional in-process DTO used by legacy gateway adapters and
+// compatibility tests. New client-facing surfaces should consume
+// eventstream.Envelope instead of treating Event as a public wire protocol.
 type Event struct {
 	Kind       EventKind                `json:"kind"`
 	HandleID   string                   `json:"handle_id,omitempty"`
@@ -430,6 +438,8 @@ type Event struct {
 	Lifecycle *LifecyclePayload `json:"lifecycle,omitempty"`
 }
 
+// EventEnvelope wraps one transitional in-process gateway Event. It remains for
+// legacy adapters; stable client streams use eventstream.Envelope.
 type EventEnvelope struct {
 	Cursor string `json:"cursor,omitempty"`
 	Event  Event  `json:"event"`

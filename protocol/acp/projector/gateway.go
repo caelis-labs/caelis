@@ -37,26 +37,7 @@ func ProjectGatewayEventEnvelope(env gateway.EventEnvelope) []eventstream.Envelo
 		out = append(out, projectGatewayEventstreamOnlyEvents(base, env.Event)...)
 	}
 	if env.Event.Usage != nil {
-		usage := *env.Event.Usage
-		out = append(out, eventstream.Envelope{
-			Kind:       eventstream.KindSessionUpdate,
-			Cursor:     base.Cursor,
-			SessionID:  base.SessionID,
-			HandleID:   base.HandleID,
-			RunID:      base.RunID,
-			TurnID:     base.TurnID,
-			OccurredAt: base.OccurredAt,
-			Scope:      base.Scope,
-			ScopeID:    base.ScopeID,
-			Actor:      base.Actor,
-			Update: eventstream.UsageUpdateFromSnapshot(eventstream.UsageSnapshot{
-				PromptTokens:      usage.PromptTokens,
-				CachedInputTokens: usage.CachedInputTokens,
-				CompletionTokens:  usage.CompletionTokens,
-				ReasoningTokens:   usage.ReasoningTokens,
-				TotalTokens:       usage.TotalTokens,
-			}, base.Meta),
-		})
+		out = append(out, gatewayUsageEnvelope(base, env.Event.Usage))
 	}
 	return out
 }
@@ -66,22 +47,80 @@ func projectGatewayStandardACPEvents(base eventstream.Envelope, ev gateway.Event
 	if !ok {
 		return nil
 	}
-	return projectSessionEventToACPEnvelopes(base, ev, sessionEvent)
+	return projectSessionEventToACPEnvelopes(base, ev, sessionEvent, EventProjector{})
 }
 
 // ProjectSessionEventEnvelope projects one canonical session event into
 // ACP-native client envelopes using the supplied envelope metadata as the
 // transport context.
 func ProjectSessionEventEnvelope(base eventstream.Envelope, event *session.Event) []eventstream.Envelope {
-	out := projectSessionEventToACPEnvelopes(base, gateway.Event{}, event)
+	return ProjectSessionEventEnvelopeWithProjector(base, event, EventProjector{})
+}
+
+// ProjectSessionEventEnvelopeWithProjector projects one canonical session event
+// with a caller-supplied ACP projector, then appends standard usage_update when
+// provider usage is attached to the source event.
+func ProjectSessionEventEnvelopeWithProjector(base eventstream.Envelope, event *session.Event, projector Projector) []eventstream.Envelope {
+	if projector == nil {
+		projector = EventProjector{}
+	}
+	out := projectSessionEventToACPEnvelopes(base, gateway.Event{}, event, projector)
 	if len(out) == 0 {
 		out = append(out, projectSessionEventstreamOnlyEvents(base, event)...)
+	}
+	if usage := gateway.UsageSnapshotFromSessionEvent(event); usage != nil && !containsUsageUpdate(out) {
+		out = append(out, gatewayUsageEnvelope(base, usage))
 	}
 	return out
 }
 
-func projectSessionEventToACPEnvelopes(base eventstream.Envelope, ev gateway.Event, sessionEvent *session.Event) []eventstream.Envelope {
-	projector := EventProjector{}
+// ProjectSessionEventNotifications projects one canonical session event into
+// ACP session/update notifications. Eventstream-only extensions and historical
+// request_permission prompts are intentionally not replayed through session/load.
+func ProjectSessionEventNotifications(base eventstream.Envelope, event *session.Event, projector Projector) ([]SessionNotification, error) {
+	if projector == nil {
+		projector = EventProjector{}
+	}
+	notifications, err := projector.ProjectNotifications(event)
+	if err != nil {
+		return nil, err
+	}
+	out := cloneSessionNotifications(notifications, base, event)
+	if usage := gateway.UsageSnapshotFromSessionEvent(event); usage != nil && !containsUsageNotification(out) {
+		usageEnv := gatewayUsageEnvelope(base, usage)
+		out = append(out, SessionNotification{
+			SessionID: sessionNotificationID(usageEnv.SessionID, base, event),
+			Update:    eventstream.CloneUpdate(usageEnv.Update),
+		})
+	}
+	return out, nil
+}
+
+func cloneSessionNotifications(notifications []SessionNotification, base eventstream.Envelope, event *session.Event) []SessionNotification {
+	out := make([]SessionNotification, 0, len(notifications))
+	for _, notification := range notifications {
+		if notification.Update == nil {
+			continue
+		}
+		out = append(out, SessionNotification{
+			SessionID: sessionNotificationID(notification.SessionID, base, event),
+			Update:    eventstream.CloneUpdate(notification.Update),
+		})
+	}
+	return out
+}
+
+func sessionNotificationID(candidate string, base eventstream.Envelope, event *session.Event) string {
+	if sessionID := firstNonEmpty(candidate, base.SessionID); sessionID != "" {
+		return sessionID
+	}
+	if event == nil {
+		return ""
+	}
+	return strings.TrimSpace(event.SessionID)
+}
+
+func projectSessionEventToACPEnvelopes(base eventstream.Envelope, ev gateway.Event, sessionEvent *session.Event, projector Projector) []eventstream.Envelope {
 	out := make([]eventstream.Envelope, 0, 2)
 	if permission, ok, err := projector.ProjectPermissionRequest(sessionEvent); err != nil {
 		return []eventstream.Envelope{eventstream.Error(err)}
@@ -116,6 +155,52 @@ func projectSessionEventToACPEnvelopes(base eventstream.Envelope, ev gateway.Eve
 		out = append(out, next)
 	}
 	return out
+}
+
+func gatewayUsageEnvelope(base eventstream.Envelope, usage *gateway.UsageSnapshot) eventstream.Envelope {
+	if usage == nil {
+		return eventstream.Envelope{}
+	}
+	return eventstream.Envelope{
+		Kind:          eventstream.KindSessionUpdate,
+		Cursor:        base.Cursor,
+		EventID:       base.EventID,
+		ProjectionID:  base.ProjectionID,
+		SessionID:     base.SessionID,
+		HandleID:      base.HandleID,
+		RunID:         base.RunID,
+		TurnID:        base.TurnID,
+		OccurredAt:    base.OccurredAt,
+		Scope:         base.Scope,
+		ScopeID:       base.ScopeID,
+		Actor:         base.Actor,
+		ParticipantID: base.ParticipantID,
+		Update: eventstream.UsageUpdateFromSnapshot(eventstream.UsageSnapshot{
+			PromptTokens:      usage.PromptTokens,
+			CachedInputTokens: usage.CachedInputTokens,
+			CompletionTokens:  usage.CompletionTokens,
+			ReasoningTokens:   usage.ReasoningTokens,
+			TotalTokens:       usage.TotalTokens,
+		}, base.Meta),
+	}
+}
+
+func containsUsageUpdate(events []eventstream.Envelope) bool {
+	for _, env := range events {
+		if eventstream.UpdateType(env.Update) == schema.UpdateUsage {
+			return true
+		}
+	}
+	return false
+}
+
+func containsUsageNotification(notifications []SessionNotification) bool {
+	for _, notification := range notifications {
+		if eventstream.UpdateType(notification.Update) == schema.UpdateUsage {
+			return true
+		}
+	}
+	return false
 }
 
 func sessionEventFromGatewayEvent(base eventstream.Envelope, ev gateway.Event) (*session.Event, bool) {
