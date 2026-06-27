@@ -19,7 +19,6 @@ const (
 	KindParticipant       Kind = "caelis/participant"
 	KindLifecycle         Kind = "caelis/lifecycle"
 	KindApprovalReview    Kind = "caelis/approval_review"
-	KindUsage             Kind = "caelis/usage"
 	KindError             Kind = "caelis/error"
 )
 
@@ -65,7 +64,6 @@ func UsageSnapshotFromUpdate(update schema.UsageUpdate) *UsageSnapshot {
 }
 
 func UsageSnapshotFromEnvelope(env Envelope) *UsageSnapshot {
-	env = NormalizeEnvelope(env)
 	if env.Kind != KindSessionUpdate {
 		return nil
 	}
@@ -74,38 +72,6 @@ func UsageSnapshotFromEnvelope(env Envelope) *UsageSnapshot {
 		return nil
 	}
 	return UsageSnapshotFromUpdate(update)
-}
-
-// NormalizeEnvelope maps legacy eventstream-only extensions to the ACP v1
-// client protocol shape. New producer paths should emit the normalized shape
-// directly; this function is only a read-side compatibility boundary.
-func NormalizeEnvelope(in Envelope) Envelope {
-	out := CloneEnvelope(in)
-	if out.Kind != KindUsage {
-		return out
-	}
-	if out.Usage == nil {
-		return out
-	}
-	usage := *out.Usage
-	out.Kind = KindSessionUpdate
-	out.Update = UsageUpdateFromSnapshot(usage, out.Meta)
-	out.Usage = nil
-	return out
-}
-
-func NormalizeEnvelopes(in <-chan Envelope) <-chan Envelope {
-	if in == nil {
-		return nil
-	}
-	out := make(chan Envelope, 32)
-	go func() {
-		defer close(out)
-		for env := range in {
-			out <- NormalizeEnvelope(env)
-		}
-	}()
-	return out
 }
 
 type Envelope struct {
@@ -132,7 +98,6 @@ type Envelope struct {
 	ApprovalReview *ApprovalReview `json:"approval_review,omitempty"`
 	Participant    *Participant    `json:"participant,omitempty"`
 	Lifecycle      *Lifecycle      `json:"lifecycle,omitempty"`
-	Usage          *UsageSnapshot  `json:"usage,omitempty"`
 
 	Meta  map[string]any `json:"_meta,omitempty"`
 	Err   error          `json:"-"`
@@ -309,10 +274,6 @@ func CloneEnvelope(in Envelope) Envelope {
 	if in.Lifecycle != nil {
 		lifecycle := *in.Lifecycle
 		out.Lifecycle = &lifecycle
-	}
-	if in.Usage != nil {
-		usage := *in.Usage
-		out.Usage = &usage
 	}
 	out.Update = CloneUpdate(in.Update)
 	return out

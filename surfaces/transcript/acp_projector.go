@@ -38,7 +38,6 @@ type ToolProjectionInput struct {
 }
 
 func ProjectACPEventToEvents(env eventstream.Envelope, surface SurfaceProjector) []Event {
-	env = eventstream.NormalizeEnvelope(env)
 	scope := ACPEventScope(env.Scope)
 	scopeID := ACPEventScopeID(env)
 	occurredAt := env.OccurredAt

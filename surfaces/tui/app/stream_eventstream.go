@@ -10,7 +10,6 @@ import (
 )
 
 func (m *Model) handleACPEventEnvelope(env eventstream.Envelope) (tea.Model, tea.Cmd) {
-	env = eventstream.NormalizeEnvelope(env)
 	if env.Err != nil || env.Kind == eventstream.KindError {
 		return m, nil
 	}

@@ -36,7 +36,7 @@ type renderEventPolicy struct {
 func renderEventPolicyFor(msg tea.Msg) (renderEventPolicy, bool) {
 	switch typed := msg.(type) {
 	case eventstream.Envelope:
-		return renderEventPolicyForACPEnvelope(eventstream.NormalizeEnvelope(typed)), true
+		return renderEventPolicyForACPEnvelope(typed), true
 	case TranscriptEventsMsg:
 		return renderEventPolicyForTranscriptEvents(typed), true
 	case LogChunkMsg:
@@ -65,7 +65,6 @@ func renderEventPolicyFor(msg tea.Msg) (renderEventPolicy, bool) {
 }
 
 func renderEventPolicyForACPEnvelope(env eventstream.Envelope) renderEventPolicy {
-	env = eventstream.NormalizeEnvelope(env)
 	if env.Err != nil || env.Kind == eventstream.KindError {
 		return renderEventPolicy{lane: renderLaneLifecycle, flushSmoothing: true, flushLogChunks: true, dismissHints: true}
 	}
@@ -185,9 +184,6 @@ func (m *Model) deferredBatchingEnabled() bool {
 }
 
 func (m *Model) dispatchRenderEvent(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
-	if env, ok := msg.(eventstream.Envelope); ok {
-		msg = eventstream.NormalizeEnvelope(env)
-	}
 	policy, ok := renderEventPolicyFor(msg)
 	if !ok {
 		return m, nil, false

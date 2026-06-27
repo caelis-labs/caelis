@@ -199,29 +199,6 @@ func TestEnvelopeV1PlanGolden(t *testing.T) {
 	assertGoldenJSON(t, "testdata/envelope_v1_plan.golden.json", env)
 }
 
-func TestEnvelopeV1UsageGolden(t *testing.T) {
-	t.Parallel()
-
-	env := Envelope{
-		Kind:       KindUsage,
-		Cursor:     "turn-1:0006",
-		SessionID:  "session-1",
-		HandleID:   "handle-1",
-		RunID:      "run-1",
-		TurnID:     "turn-1",
-		OccurredAt: time.Date(2026, 6, 27, 12, 0, 5, 0, time.UTC),
-		Scope:      ScopeMain,
-		Usage: &UsageSnapshot{
-			PromptTokens:      12,
-			CachedInputTokens: 3,
-			CompletionTokens:  5,
-			ReasoningTokens:   2,
-			TotalTokens:       17,
-		},
-	}
-	assertGoldenJSON(t, "testdata/envelope_v1_usage_extension.golden.json", env)
-}
-
 func TestEnvelopeV1ACPUsageUpdateGolden(t *testing.T) {
 	t.Parallel()
 
@@ -304,33 +281,6 @@ func TestUsageUpdateFromSnapshotDoesNotPreserveStaleUsageMeta(t *testing.T) {
 	usageMeta, _ := caelis["usage"].(map[string]any)
 	if usageMeta["completion_tokens"] != nil || usageMeta["reasoning_tokens"] != nil {
 		t.Fatalf("meta.caelis.usage = %#v, want stale fields removed", usageMeta)
-	}
-}
-
-func TestNormalizeEnvelopeConvertsLegacyUsageToACPUsageUpdate(t *testing.T) {
-	t.Parallel()
-
-	env := NormalizeEnvelope(Envelope{
-		Kind:      KindUsage,
-		Cursor:    "cursor-1",
-		SessionID: "session-1",
-		Scope:     ScopeMain,
-		Usage:     &UsageSnapshot{PromptTokens: 12, TotalTokens: 17},
-		Meta:      map[string]any{"caelis": map[string]any{"invocation": map[string]any{"model": "m"}}},
-	})
-	if env.Kind != KindSessionUpdate || env.Usage != nil {
-		t.Fatalf("normalized env = %#v, want session/update without legacy usage field", env)
-	}
-	update, ok := env.Update.(schema.UsageUpdate)
-	if !ok {
-		t.Fatalf("normalized update = %T, want UsageUpdate", env.Update)
-	}
-	if update.SessionUpdate != schema.UpdateUsage || update.Used != 17 {
-		t.Fatalf("usage update = %#v, want usage_update used=17", update)
-	}
-	usage := UsageSnapshotFromEnvelope(env)
-	if usage == nil || usage.PromptTokens != 12 || usage.TotalTokens != 17 {
-		t.Fatalf("UsageSnapshotFromEnvelope() = %#v, want normalized usage", usage)
 	}
 }
 

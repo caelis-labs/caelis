@@ -423,7 +423,6 @@ type semanticACPEnvelope struct {
 	Final         bool
 	Update        semanticACPUpdate
 	Permission    *schema.RequestPermissionRequest
-	Usage         *eventstream.UsageSnapshot
 	Participant   *eventstream.Participant
 	Lifecycle     *eventstream.Lifecycle
 	Meta          map[string]any
@@ -459,7 +458,6 @@ func semanticACPEnvelopes(events []eventstream.Envelope) []semanticACPEnvelope {
 			Final:         env.Final,
 			Update:        semanticACPUpdateOf(env.Update),
 			Permission:    env.Permission,
-			Usage:         env.Usage,
 			Participant:   env.Participant,
 			Lifecycle:     env.Lifecycle,
 			Meta:          semanticEnvelopeMeta(env.Meta),

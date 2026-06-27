@@ -19,7 +19,6 @@ func ProjectReplayEvents(events []eventstream.Envelope, surface SurfaceProjector
 }
 
 func ProjectReplayEvent(env eventstream.Envelope, surface SurfaceProjector) []Event {
-	env = eventstream.NormalizeEnvelope(env)
 	if projected := replayableACPEvents(env, surface); len(projected) != 0 {
 		return projected
 	}

@@ -9,7 +9,7 @@ import (
 )
 
 func acpEventMsg(env eventstream.Envelope) tea.Msg {
-	return eventstream.NormalizeEnvelope(env)
+	return env
 }
 
 func gatewayEventMsg(env gateway.EventEnvelope) tea.Msg {

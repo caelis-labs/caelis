@@ -18,8 +18,7 @@ func ACPEventsFromGatewayHandle(handle gateway.TurnHandle) <-chan eventstream.En
 	if handle == nil {
 		return eventstream.EnsureTerminalLifecycle(nil, "", "", "")
 	}
-	events := eventstream.NormalizeEnvelopes(handle.ACPEvents())
-	return eventstream.EnsureTerminalLifecycle(events, handle.HandleID(), handle.RunID(), handle.TurnID())
+	return eventstream.EnsureTerminalLifecycle(handle.ACPEvents(), handle.HandleID(), handle.RunID(), handle.TurnID())
 }
 
 // ProjectGatewayEventEnvelope projects the gateway runtime event envelope into the
