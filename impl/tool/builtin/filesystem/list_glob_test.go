@@ -3,6 +3,7 @@ package filesystem
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -103,6 +104,110 @@ func TestGlobToolStopsAfterLimitPlusOneMatches(t *testing.T) {
 	meta := filesystemToolMeta(t, result)
 	if got := numericMetaValue(meta["total_count"]); got != 3 {
 		t.Fatalf("total_count = %v, want limit+1 sentinel count 3", meta["total_count"])
+	}
+}
+
+func TestGlobToolSupportsPathForRelativePattern(t *testing.T) {
+	dir := t.TempDir()
+	demoDir := filepath.Join(dir, "demo")
+	otherDir := filepath.Join(dir, "other")
+	if err := os.MkdirAll(filepath.Join(demoDir, "nested"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(demo nested) error = %v", err)
+	}
+	if err := os.MkdirAll(otherDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(other) error = %v", err)
+	}
+	for _, name := range []string{
+		filepath.Join(demoDir, "main.py"),
+		filepath.Join(demoDir, "nested", "deep.py"),
+		filepath.Join(otherDir, "main.py"),
+	} {
+		if err := os.WriteFile(name, []byte("print('ok')\n"), 0o644); err != nil {
+			t.Fatalf("WriteFile(%s) error = %v", name, err)
+		}
+	}
+	globTool, err := NewGlob(fakeRuntime{defaultFS: hostFileSystem{cwd: dir}})
+	if err != nil {
+		t.Fatalf("NewGlob() error = %v", err)
+	}
+	input, err := json.Marshal(map[string]any{
+		"pattern": "*.py",
+		"path":    demoDir,
+	})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+
+	result, err := globTool.Call(context.Background(), tool.Call{Input: input})
+	if err != nil {
+		t.Fatalf("Call() error = %v", err)
+	}
+	payload := filesystemToolPayload(t, result)
+	if got, _ := payload["pattern"].(string); got != "*.py" {
+		t.Fatalf("payload pattern = %q, want original pattern", got)
+	}
+	if got, _ := payload["path"].(string); got != demoDir {
+		t.Fatalf("payload path = %q, want search directory", got)
+	}
+	matches := stringSlicePayloadValue(t, payload["matches"])
+	if len(matches) != 1 || matches[0] != filepath.Join(demoDir, "main.py") {
+		t.Fatalf("matches = %#v, want only demo/main.py", matches)
+	}
+	meta := filesystemToolMeta(t, result)
+	if got, _ := meta["resolved_pattern"].(string); got != filepath.Join(demoDir, "*.py") {
+		t.Fatalf("metadata resolved_pattern = %q, want path-resolved pattern", got)
+	}
+}
+
+func TestGlobToolRejectsAbsolutePatternWhenPathProvided(t *testing.T) {
+	dir := t.TempDir()
+	globTool, err := NewGlob(fakeRuntime{defaultFS: hostFileSystem{cwd: dir}})
+	if err != nil {
+		t.Fatalf("NewGlob() error = %v", err)
+	}
+	input, err := json.Marshal(map[string]any{
+		"pattern": filepath.Join(dir, "*.py"),
+		"path":    dir,
+	})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+
+	_, err = globTool.Call(context.Background(), tool.Call{Input: input})
+	var toolErr *tool.ToolError
+	if !errors.As(err, &toolErr) {
+		t.Fatalf("Call() error = %T %v, want ToolError", err, err)
+	}
+	if toolErr.Code != tool.ErrorCodeInvalidInput {
+		t.Fatalf("error code = %s, want %s: %v", toolErr.Code, tool.ErrorCodeInvalidInput, err)
+	}
+}
+
+func TestGlobToolRejectsPatternEscapingPath(t *testing.T) {
+	dir := t.TempDir()
+	demoDir := filepath.Join(dir, "demo")
+	if err := os.MkdirAll(demoDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(demo) error = %v", err)
+	}
+	globTool, err := NewGlob(fakeRuntime{defaultFS: hostFileSystem{cwd: dir}})
+	if err != nil {
+		t.Fatalf("NewGlob() error = %v", err)
+	}
+	input, err := json.Marshal(map[string]any{
+		"pattern": "../*.py",
+		"path":    demoDir,
+	})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+
+	_, err = globTool.Call(context.Background(), tool.Call{Input: input})
+	var toolErr *tool.ToolError
+	if !errors.As(err, &toolErr) {
+		t.Fatalf("Call() error = %T %v, want ToolError", err, err)
+	}
+	if toolErr.Code != tool.ErrorCodeInvalidInput {
+		t.Fatalf("error code = %s, want %s: %v", toolErr.Code, tool.ErrorCodeInvalidInput, err)
 	}
 }
 

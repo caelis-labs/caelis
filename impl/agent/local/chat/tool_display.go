@@ -292,11 +292,19 @@ func genericResultText(output map[string]any, isErr bool) string {
 }
 
 func toolResultStatusText(status string, isErr bool) string {
-	if isErr || strings.EqualFold(strings.TrimSpace(status), "failed") {
+	normalized := strings.ToLower(strings.TrimSpace(status))
+	if isErr || normalized == "failed" {
 		return "failed"
 	}
-	if toolStatusFinal(status, isErr) {
+	switch normalized {
+	case "completed":
 		return "completed"
+	case "interrupted":
+		return "interrupted"
+	case "cancelled", "canceled":
+		return "cancelled"
+	case "terminated":
+		return "terminated"
 	}
 	return ""
 }

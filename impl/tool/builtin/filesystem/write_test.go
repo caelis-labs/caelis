@@ -34,6 +34,35 @@ func TestWriteToolCreatesWorkspaceParentDirectories(t *testing.T) {
 	}
 }
 
+func TestWriteToolReturnsRevisionUsableByPatch(t *testing.T) {
+	dir := t.TempDir()
+	writeTool, err := NewWrite(fakeRuntime{defaultFS: hostFileSystem{cwd: dir}})
+	if err != nil {
+		t.Fatalf("NewWrite() error = %v", err)
+	}
+	patchTool := newTestPatchTool(t, dir)
+
+	payload := runWritePayload(t, writeTool, map[string]any{
+		"path":    "notes.txt",
+		"content": "hello\n",
+	})
+	revision, _ := payload["revision"].(string)
+	if !strings.HasPrefix(revision, "sha256:") {
+		t.Fatalf("WRITE revision = %q, want sha256 revision", revision)
+	}
+
+	runPatch(t, patchTool, map[string]any{
+		"path":        "notes.txt",
+		"if_revision": revision,
+		"edits": []map[string]any{
+			{"old": "hello", "new": "hi"},
+		},
+	})
+	if got, want := readTestFile(t, filepath.Join(dir, "notes.txt")), "hi\n"; got != want {
+		t.Fatalf("patched content = %q, want %q", got, want)
+	}
+}
+
 func TestWriteToolDoesNotCreateParentsOutsideWorkspace(t *testing.T) {
 	dir := t.TempDir()
 	outside := filepath.Join(t.TempDir(), "missing", "outside.txt")
@@ -87,6 +116,19 @@ func runWrite(t *testing.T, writeTool *WriteTool, args map[string]any) {
 	if err := callWrite(writeTool, args); err != nil {
 		t.Fatalf("WRITE error = %v", err)
 	}
+}
+
+func runWritePayload(t *testing.T, writeTool *WriteTool, args map[string]any) map[string]any {
+	t.Helper()
+	input, err := json.Marshal(args)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	result, err := writeTool.Call(context.Background(), tool.Call{Input: input})
+	if err != nil {
+		t.Fatalf("WRITE error = %v", err)
+	}
+	return filesystemToolPayload(t, result)
 }
 
 func callWrite(writeTool *WriteTool, args map[string]any) error {

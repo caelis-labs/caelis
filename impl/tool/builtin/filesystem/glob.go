@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/internal/toolutil"
 	"github.com/OnslaughtSnail/caelis/impl/tool/internal/argparse"
@@ -35,11 +36,12 @@ func NewGlob(runtime sandbox.Runtime) (*GlobTool, error) {
 func (t *GlobTool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        GlobToolName,
-		Description: "Find filesystem paths matching a glob pattern, respecting workspace ignore rules. Use it when a filename, extension, directory shape, or path pattern is known but the exact path is not. Examples: **/*.txt, *.{go,md}. This does not inspect file contents; use SEARCH for text and READ for exact context. Use RUN_COMMAND for advanced path regex searches.",
+		Description: "Find filesystem paths matching a glob pattern under a search directory, respecting workspace ignore rules. Use it when a filename, extension, directory shape, or path pattern is known but the exact path is not. Examples: **/*.txt, *.{go,md}. Set path to choose the directory to search; pattern is resolved relative to that path. This does not inspect file contents; use SEARCH for text and READ for exact context. Use RUN_COMMAND for advanced path regex searches.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"pattern": map[string]any{"type": "string", "minLength": 1, "description": "Glob pattern."},
+				"path":    map[string]any{"type": "string", "minLength": 1, "description": "Directory to search in. Defaults to cwd."},
 				"exclude": map[string]any{
 					"type":        "array",
 					"description": "Relative exclude globs.",
@@ -62,10 +64,14 @@ func (t *GlobTool) Call(ctx context.Context, call tool.Call) (tool.Result, error
 	if err != nil {
 		return tool.Result{}, err
 	}
-	if err := tool.RejectUnknownArgs(args, "pattern", "exclude", "limit"); err != nil {
+	if err := tool.RejectUnknownArgs(args, "pattern", "path", "exclude", "limit"); err != nil {
 		return tool.Result{}, err
 	}
 	pattern, err := argparse.String(args, "pattern", true)
+	if err != nil {
+		return tool.Result{}, err
+	}
+	pathArg, err := argparse.String(args, "path", false)
 	if err != nil {
 		return tool.Result{}, err
 	}
@@ -84,38 +90,57 @@ func (t *GlobTool) Call(ctx context.Context, call tool.Call) (tool.Result, error
 		limit = maxGlobLimit
 	}
 	fsys := fileSystemFromRuntime(t.runtime, call.Metadata)
-	if !filepath.IsAbs(pattern) {
-		wd, err := fsys.Getwd()
-		if err != nil {
+	searchRoot, err := globSearchRoot(fsys, pathArg)
+	if err != nil {
+		return tool.Result{}, err
+	}
+	resolvedPattern := pattern
+	if filepath.IsAbs(pattern) {
+		if searchRoot != "" {
+			err := tool.NewError(tool.ErrorCodeInvalidInput, "GLOB pattern must be relative when path is provided")
+			err.Hint = "Use path for the search directory and pattern for a relative glob such as \"*.py\" or \"**/*.py\"."
 			return tool.Result{}, err
 		}
-		pattern = filepath.Join(wd, pattern)
+	} else {
+		if searchRoot == "" {
+			searchRoot, err = fsys.Getwd()
+			if err != nil {
+				return tool.Result{}, err
+			}
+			searchRoot = filepath.Clean(searchRoot)
+		}
+		resolvedPattern = filepath.Join(searchRoot, pattern)
 	}
-	pattern = filepath.Clean(pattern)
+	resolvedPattern = filepath.Clean(resolvedPattern)
+	if pathArg != "" {
+		if err := validateGlobPatternUnderSearchRoot(searchRoot, resolvedPattern); err != nil {
+			return tool.Result{}, err
+		}
+	}
 
 	matches := make([]string, 0, 16)
-	if !hasPathGlobMeta(filepath.ToSlash(pattern)) {
-		if info, err := fsys.Stat(pattern); err == nil {
-			root := filepath.Dir(pattern)
+	if !hasPathGlobMeta(filepath.ToSlash(resolvedPattern)) {
+		if info, err := fsys.Stat(resolvedPattern); err == nil {
+			root := filepath.Dir(resolvedPattern)
 			excludeRules := append(workspaceExcludeRules(fsys, root), excludeRulesFromPatterns(exclude)...)
-			if !shouldExcludePath(root, pattern, info.IsDir(), excludeRules) {
-				matches = append(matches, pattern)
+			if !shouldExcludePath(root, resolvedPattern, info.IsDir(), excludeRules) {
+				matches = append(matches, resolvedPattern)
 			}
 		} else if !errors.Is(err, fs.ErrNotExist) {
 			return tool.Result{}, err
 		}
 		sort.Strings(matches)
-		return globResult(pattern, matches, limit)
+		return globResult(pattern, searchRoot, resolvedPattern, matches, limit)
 	}
 
-	root, relPattern := splitAbsoluteGlobPattern(pattern)
+	root, relPattern := splitAbsoluteGlobPattern(resolvedPattern)
 	if relPattern == "" {
-		relPattern = filepath.Base(pattern)
+		relPattern = filepath.Base(resolvedPattern)
 	}
 	excludeRules := append(workspaceExcludeRules(fsys, root), excludeRulesFromPatterns(exclude)...)
 	if _, err := fsys.Stat(root); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return globResult(pattern, matches, limit)
+			return globResult(pattern, searchRoot, resolvedPattern, matches, limit)
 		}
 		return tool.Result{}, err
 	}
@@ -146,24 +171,63 @@ func (t *GlobTool) Call(ctx context.Context, call tool.Call) (tool.Result, error
 		return tool.Result{}, err
 	}
 	sort.Strings(matches)
-	return globResult(pattern, matches, limit)
+	return globResult(pattern, searchRoot, resolvedPattern, matches, limit)
 }
 
-func globResult(pattern string, matches []string, limit int) (tool.Result, error) {
+func globSearchRoot(fsys sandbox.FileSystem, pathArg string) (string, error) {
+	if pathArg == "" {
+		return "", nil
+	}
+	root, err := normalizePathWithFS(fsys, pathArg)
+	if err != nil {
+		return "", err
+	}
+	info, err := fsys.Stat(root)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return "", tool.NewError(tool.ErrorCodeNotFound, "GLOB path does not exist: "+root)
+		}
+		return "", err
+	}
+	if !info.IsDir() {
+		return "", tool.NewError(tool.ErrorCodeInvalidInput, "GLOB path must be a directory: "+root)
+	}
+	return root, nil
+}
+
+func validateGlobPatternUnderSearchRoot(searchRoot string, resolvedPattern string) error {
+	rel, err := filepath.Rel(searchRoot, resolvedPattern)
+	if err != nil || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		toolErr := tool.NewError(tool.ErrorCodeInvalidInput, "GLOB pattern must stay under path: "+searchRoot)
+		toolErr.Hint = "Use path for the search directory and a pattern inside it, such as \"*.py\" or \"**/*.py\"."
+		return toolErr
+	}
+	return nil
+}
+
+func globResult(pattern string, searchRoot string, resolvedPattern string, matches []string, limit int) (tool.Result, error) {
 	truncated := len(matches) > limit
 	visible := append([]string(nil), matches...)
 	if truncated {
 		visible = visible[:limit]
 	}
-	return toolutil.JSONResult(GlobToolName, map[string]any{
+	payload := map[string]any{
+		"pattern":   pattern,
 		"matches":   visible,
 		"count":     len(visible),
 		"truncated": truncated,
-	}, map[string]any{
-		"pattern":     pattern,
-		"matches":     append([]string(nil), matches...),
-		"total_count": len(matches),
-	})
+	}
+	meta := map[string]any{
+		"pattern":          pattern,
+		"resolved_pattern": resolvedPattern,
+		"matches":          append([]string(nil), matches...),
+		"total_count":      len(matches),
+	}
+	if searchRoot != "" {
+		payload["path"] = searchRoot
+		meta["path"] = searchRoot
+	}
+	return toolutil.JSONResult(GlobToolName, payload, meta)
 }
 
 var _ tool.Tool = (*GlobTool)(nil)

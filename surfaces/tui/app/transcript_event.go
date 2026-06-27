@@ -115,11 +115,17 @@ func transcriptToolStatusFinal(status string, isErr bool) bool {
 }
 
 func standardToolOutput(status string, isErr bool) string {
-	if isErr || strings.EqualFold(strings.TrimSpace(status), "failed") {
+	normalized := strings.ToLower(strings.TrimSpace(status))
+	if isErr || normalized == "failed" {
 		return "failed"
 	}
-	if transcriptToolStatusFinal(status, isErr) {
+	switch normalized {
+	case "completed":
 		return "completed"
+	case "cancelled", "canceled":
+		return "cancelled"
+	case "interrupted", "terminated":
+		return "interrupted"
 	}
 	return ""
 }
@@ -140,7 +146,7 @@ func isExplorationSummaryTool(toolName string, toolKind string) bool {
 }
 
 func terminalFinalWithoutContent(toolName string, toolKind string, status string, isErr bool) bool {
-	if !transcriptToolStatusFinal(status, isErr) {
+	if !strings.EqualFold(strings.TrimSpace(status), "completed") {
 		return false
 	}
 	if isErr || strings.EqualFold(strings.TrimSpace(status), "failed") {

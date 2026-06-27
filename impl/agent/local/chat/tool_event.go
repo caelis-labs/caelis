@@ -97,7 +97,7 @@ func successfulEmptyTerminalResult(name string, status string, isErr bool) bool 
 	if isErr || strings.EqualFold(strings.TrimSpace(status), "failed") {
 		return false
 	}
-	if !toolStatusFinal(status, isErr) {
+	if !strings.EqualFold(strings.TrimSpace(status), "completed") {
 		return false
 	}
 	switch strings.ToUpper(strings.TrimSpace(name)) {

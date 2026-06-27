@@ -1,6 +1,7 @@
 package tuiapp
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/OnslaughtSnail/caelis/ports/displaypolicy"
@@ -177,12 +178,54 @@ func inferFinalStatusFromRawOutput(rawOutput map[string]any) (string, bool) {
 			return transcriptToolStatusInterrupted, true
 		}
 	}
-	exitCode := displayInt(rawOutput["exit_code"])
-	if exitCode < 0 {
+	exitCode, ok := transcriptRawExitCode(rawOutput)
+	if !ok {
 		return "", false
+	}
+	if exitCode < 0 {
+		return transcriptToolStatusCancelled, true
 	}
 	if exitCode == 0 {
 		return transcriptToolStatusCompleted, true
 	}
 	return transcriptToolStatusFailed, true
+}
+
+func transcriptRawExitCode(rawOutput map[string]any) (int, bool) {
+	raw, ok := rawOutput["exit_code"]
+	if !ok || raw == nil {
+		return 0, false
+	}
+	switch typed := raw.(type) {
+	case int:
+		return typed, true
+	case int8:
+		return int(typed), true
+	case int16:
+		return int(typed), true
+	case int32:
+		return int(typed), true
+	case int64:
+		return int(typed), true
+	case uint:
+		return int(typed), true
+	case uint8:
+		return int(typed), true
+	case uint16:
+		return int(typed), true
+	case uint32:
+		return int(typed), true
+	case uint64:
+		return int(typed), true
+	case float64:
+		return int(typed), true
+	case float32:
+		return int(typed), true
+	case string:
+		parsed, err := strconv.Atoi(strings.TrimSpace(typed))
+		if err == nil {
+			return parsed, true
+		}
+	}
+	return 0, false
 }

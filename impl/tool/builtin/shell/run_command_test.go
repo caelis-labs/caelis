@@ -621,6 +621,33 @@ func TestRunCommandPayloadTreatsWindowsExitSummaryAsPlainExit(t *testing.T) {
 	}
 }
 
+func TestRunCommandPayloadTreatsNegativeExitCodeAsCancelled(t *testing.T) {
+	t.Parallel()
+
+	payload := runCommandPayload(sandbox.CommandResult{ExitCode: -1}, context.Canceled)
+	if got, _ := payload["state"].(string); got != "cancelled" {
+		t.Fatalf("state = %q, want cancelled", got)
+	}
+	if _, ok := payload["exit_code"]; ok {
+		t.Fatalf("exit_code = %#v, want omitted for cancellation", payload["exit_code"])
+	}
+}
+
+func TestRunCommandPayloadTreatsNegativeExitCodeWithNonCancelErrorAsFailed(t *testing.T) {
+	t.Parallel()
+
+	payload := runCommandPayload(sandbox.CommandResult{ExitCode: -1}, fmt.Errorf("prepare sandbox failed"))
+	if got, _ := payload["state"].(string); got != "failed" {
+		t.Fatalf("state = %q, want failed", got)
+	}
+	if got, _ := payload["error"].(string); got != "prepare sandbox failed" {
+		t.Fatalf("error = %q, want prepare sandbox failed", got)
+	}
+	if _, ok := payload["exit_code"]; ok {
+		t.Fatalf("exit_code = %#v, want omitted for negative exit code", payload["exit_code"])
+	}
+}
+
 func TestRunCommandPayloadDoesNotSynthesizeNoOutputPlaceholder(t *testing.T) {
 	t.Parallel()
 

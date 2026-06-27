@@ -3,6 +3,7 @@ package shell
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -245,7 +246,9 @@ func runCommandPayload(result sandbox.CommandResult, err error) map[string]any {
 func runCommandPayloadForCommand(command string, result sandbox.CommandResult, err error) map[string]any {
 	merged := runCommandMergedOutput(result.Stdout, result.Stderr)
 	payload := map[string]any{}
-	if err != nil || result.ExitCode != 0 {
+	if commandResultCancelled(result, err) {
+		payload["state"] = "cancelled"
+	} else if err != nil || result.ExitCode != 0 {
 		payload["state"] = "failed"
 	} else {
 		payload["state"] = "completed"
@@ -290,6 +293,10 @@ func runCommandPayloadForCommand(command string, result sandbox.CommandResult, e
 		}
 	}
 	return payload
+}
+
+func commandResultCancelled(result sandbox.CommandResult, err error) bool {
+	return result.ExitCode < 0 && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded))
 }
 
 func errorString(err error) string {

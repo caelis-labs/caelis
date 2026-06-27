@@ -1548,6 +1548,33 @@ func TestToolResultEventSuppressesTaskCancelACPContent(t *testing.T) {
 	}
 }
 
+func TestToolResultEventDisplaysCancelledCommandStatus(t *testing.T) {
+	t.Parallel()
+
+	event := toolResultEvent(model.ToolCall{
+		ID:   "command-cancel-1",
+		Name: "RUN_COMMAND",
+		Args: `{"command":"sleep 10"}`,
+	}, tool.Result{
+		ID:   "command-cancel-1",
+		Name: "RUN_COMMAND",
+		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
+			"state": "cancelled",
+		}))},
+	}, nil)
+
+	if event.Tool == nil {
+		t.Fatalf("event tool = nil, want tool update")
+	}
+	if got := event.Tool.Status; got != "cancelled" {
+		t.Fatalf("status = %q, want cancelled", got)
+	}
+	content := event.Tool.Content
+	if len(content) != 1 || content[0].Type != "terminal" || content[0].Text != "cancelled" {
+		t.Fatalf("content = %#v, want terminal cancelled status", content)
+	}
+}
+
 func TestToolResultEventPreservesCommandResultFieldAsACPContent(t *testing.T) {
 	t.Parallel()
 

@@ -1396,6 +1396,32 @@ func TestProjectGatewayEventSilentTerminalFailureDisplaysExitCode(t *testing.T) 
 	}
 }
 
+func TestProjectGatewayEventTerminalNegativeExitCodeInfersCancelled(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectGatewayEventToTranscriptEvents(gateway.Event{
+		Kind: gateway.EventKindToolResult,
+		ToolResult: &gateway.ToolResultPayload{
+			CallID:    "command-cancelled",
+			ToolName:  "RUN_COMMAND",
+			RawInput:  map[string]any{"command": "sleep 10"},
+			RawOutput: map[string]any{"exit_code": -1},
+		},
+	})
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one tool event", events)
+	}
+	if got := events[0].ToolStatus; got != transcriptToolStatusCancelled {
+		t.Fatalf("ToolStatus = %q, want cancelled", got)
+	}
+	if got := events[0].ToolOutput; got != "cancelled" {
+		t.Fatalf("ToolOutput = %q, want cancelled", got)
+	}
+	if events[0].ToolError {
+		t.Fatalf("ToolError = true, want false for cancellation")
+	}
+}
+
 func TestProjectGatewayEventTerminalFinalDisplaysNoOutputPlaceholder(t *testing.T) {
 	t.Parallel()
 
