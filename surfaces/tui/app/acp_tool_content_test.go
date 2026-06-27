@@ -41,6 +41,9 @@ func toolResultLabel(name string, input map[string]any) string {
 	case "LIST":
 		return baseNameFromInput(input)
 	case "RG", "SEARCH", "FIND":
+		if pattern, _ := input["pattern"].(string); pattern != "" {
+			return `"` + pattern + `"`
+		}
 		if query, _ := input["query"].(string); query != "" {
 			return `"` + query + `"`
 		}

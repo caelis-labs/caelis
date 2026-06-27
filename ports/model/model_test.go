@@ -56,7 +56,7 @@ func TestToolSpecsFromDefinitionsPreservesStrictCapability(t *testing.T) {
 }
 
 func TestMessageFromToolCallsKeepsValidJSONToolInput(t *testing.T) {
-	rawArgs := `{"query":"gm_license"}`
+	rawArgs := `{"pattern":"gm_license"}`
 	msg := MessageFromToolCalls(RoleAssistant, []ToolCall{{
 		ID:   "call-search",
 		Name: "SEARCH",

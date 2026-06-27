@@ -857,8 +857,8 @@ func listCtx(path string) policy.ToolContext {
 	}
 }
 
-func searchCtx(path string, query string) policy.ToolContext {
-	raw, _ := json.Marshal(map[string]any{"path": path, "query": query})
+func searchCtx(path string, pattern string) policy.ToolContext {
+	raw, _ := json.Marshal(map[string]any{"path": path, "pattern": pattern})
 	return policy.ToolContext{
 		Tool: tool.Definition{Name: "SEARCH"},
 		Call: tool.Call{Name: "SEARCH", Input: raw},

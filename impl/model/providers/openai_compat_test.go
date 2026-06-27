@@ -401,6 +401,12 @@ func TestOpenAICompatNonStream_IncludesStrictFunctionToolOnlyWhenCompatible(t *t
 							"path":  map[string]any{"type": "string"},
 							"limit": map[string]any{"type": "integer"},
 							"mode":  map[string]any{"type": "string", "enum": []string{"fast", "safe"}},
+							"include": map[string]any{
+								"anyOf": []any{
+									map[string]any{"type": "string"},
+									map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+								},
+							},
 						},
 						"required": []any{"path"},
 					},
@@ -442,8 +448,8 @@ func TestOpenAICompatNonStream_IncludesStrictFunctionToolOnlyWhenCompatible(t *t
 	}
 	optionalParams := optionalFunction["parameters"].(map[string]any)
 	required, _ := optionalParams["required"].([]any)
-	if got := strings.Join(stringSliceFromProviderAny(required), ","); got != "limit,mode,path" {
-		t.Fatalf("optional required = %#v, want limit,mode,path", required)
+	if got := strings.Join(stringSliceFromProviderAny(required), ","); got != "include,limit,mode,path" {
+		t.Fatalf("optional required = %#v, want include,limit,mode,path", required)
 	}
 	optionalProps := optionalParams["properties"].(map[string]any)
 	limitType, _ := optionalProps["limit"].(map[string]any)["type"].([]any)
@@ -453,6 +459,14 @@ func TestOpenAICompatNonStream_IncludesStrictFunctionToolOnlyWhenCompatible(t *t
 	modeEnum, _ := optionalProps["mode"].(map[string]any)["enum"].([]any)
 	if len(modeEnum) != 3 || modeEnum[0] != "fast" || modeEnum[1] != "safe" || modeEnum[2] != nil {
 		t.Fatalf("optional mode enum = %#v, want fast/safe/null", modeEnum)
+	}
+	includeAnyOf, _ := optionalProps["include"].(map[string]any)["anyOf"].([]any)
+	if len(includeAnyOf) != 3 {
+		t.Fatalf("optional include anyOf = %#v, want string/array/null", includeAnyOf)
+	}
+	includeNull, _ := includeAnyOf[2].(map[string]any)
+	if got := includeNull["type"]; got != "null" {
+		t.Fatalf("optional include null variant = %#v, want type null", includeNull)
 	}
 	openFunction := tools[2].(map[string]any)["function"].(map[string]any)
 	if _, ok := openFunction["strict"]; ok {

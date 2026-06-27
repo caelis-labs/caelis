@@ -801,7 +801,7 @@ func toolDisplaySummaryOutput(name string, output map[string]any, meta map[strin
 	case "GLOB":
 		keys = []string{"pattern", "count", "total_count"}
 	case "SEARCH", "RG", "FIND":
-		keys = []string{"query", "pattern", "count", "file_count"}
+		keys = []string{"pattern", "query", "count", "file_count"}
 	case "WEB_SEARCH":
 		keys = []string{"query", "provider", "model", "status", "answer", "results", "message"}
 	case "WEB_FETCH":
@@ -1140,21 +1140,21 @@ func toolPath(raw map[string]any) string {
 
 func toolQuery(raw map[string]any) string {
 	return firstTrimmed(
-		asString(raw["query"]),
 		asString(raw["pattern"]),
+		asString(raw["query"]),
 		asString(raw["text"]),
-		parsedCommandField(raw, "query"),
 		parsedCommandField(raw, "pattern"),
+		parsedCommandField(raw, "query"),
 		parsedCommandField(raw, "text"),
 	)
 }
 
 func toolResultQuery(raw map[string]any) string {
 	return firstTrimmed(
-		asString(raw["query"]),
 		asString(raw["pattern"]),
-		parsedCommandField(raw, "query"),
+		asString(raw["query"]),
 		parsedCommandField(raw, "pattern"),
+		parsedCommandField(raw, "query"),
 	)
 }
 

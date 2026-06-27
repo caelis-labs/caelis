@@ -97,9 +97,16 @@ func parseStringSliceArg(args map[string]any, key string) ([]string, error) {
 		return nil, nil
 	}
 	switch typed := raw.(type) {
+	case string:
+		typed = strings.TrimSpace(typed)
+		if typed == "" {
+			return nil, nil
+		}
+		return []string{typed}, nil
 	case []string:
 		out := make([]string, 0, len(typed))
 		for _, item := range typed {
+			item = strings.TrimSpace(item)
 			if item != "" {
 				out = append(out, item)
 			}
@@ -110,15 +117,29 @@ func parseStringSliceArg(args map[string]any, key string) ([]string, error) {
 		for _, item := range typed {
 			text, ok := item.(string)
 			if !ok {
-				return nil, fmt.Errorf("tool: arg %q must be an array of strings", key)
+				return nil, fmt.Errorf("tool: arg %q must be a string or array of strings", key)
 			}
+			text = strings.TrimSpace(text)
 			if text != "" {
 				out = append(out, text)
 			}
 		}
 		return out, nil
 	default:
-		return nil, fmt.Errorf("tool: arg %q must be an array of strings", key)
+		return nil, fmt.Errorf("tool: arg %q must be a string or array of strings", key)
+	}
+}
+
+func stringOrStringArraySchema(description string) map[string]any {
+	return map[string]any{
+		"description": strings.TrimSpace(description),
+		"anyOf": []any{
+			map[string]any{"type": "string", "minLength": 1},
+			map[string]any{
+				"type":  "array",
+				"items": map[string]any{"type": "string", "minLength": 1},
+			},
+		},
 	}
 }
 

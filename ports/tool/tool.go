@@ -176,6 +176,9 @@ func strictCompatibleSchema(schema map[string]any) bool {
 	if len(schema) == 0 {
 		return false
 	}
+	if _, ok := schema["anyOf"]; ok {
+		return strictCompatibleSchemaAnyOf(schema["anyOf"])
+	}
 	switch schemaPrimaryType(schema["type"]) {
 	case "object":
 		if additionalProperties, ok := schema["additionalProperties"].(bool); !ok || additionalProperties {
@@ -201,6 +204,20 @@ func strictCompatibleSchema(schema map[string]any) bool {
 	default:
 		return false
 	}
+}
+
+func strictCompatibleSchemaAnyOf(value any) bool {
+	variants, ok := value.([]any)
+	if !ok || len(variants) == 0 {
+		return false
+	}
+	for _, variant := range variants {
+		nested, _ := variant.(map[string]any)
+		if len(nested) == 0 || !strictCompatibleSchema(nested) {
+			return false
+		}
+	}
+	return true
 }
 
 func schemaPrimaryType(value any) string {

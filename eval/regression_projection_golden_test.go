@@ -168,7 +168,7 @@ func TestRegressionProjectionGoldenMultiTool(t *testing.T) {
 		}, model.ToolCall{
 			ID:   "call-b",
 			Name: "SEARCH",
-			Args: `{"path":".","query":"func main"}`,
+			Args: `{"path":".","pattern":"func main"}`,
 		}),
 		evalharness.TextStep("done"),
 	)

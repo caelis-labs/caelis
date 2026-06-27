@@ -36,18 +36,14 @@ func NewGlob(runtime sandbox.Runtime) (*GlobTool, error) {
 func (t *GlobTool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        GlobToolName,
-		Description: "Find filesystem paths matching a glob pattern under a search directory, respecting workspace ignore rules. Use it when a filename, extension, directory shape, or path pattern is known but the exact path is not. Examples: **/*.txt, *.{go,md}. Set path to choose the directory to search; pattern is resolved relative to that path. This does not inspect file contents; use SEARCH for text and READ for exact context. Use RUN_COMMAND for advanced path regex searches.",
+		Description: "Find filesystem paths matching a glob pattern under a search directory.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"pattern": map[string]any{"type": "string", "minLength": 1, "description": "Glob pattern."},
-				"path":    map[string]any{"type": "string", "minLength": 1, "description": "Directory to search in. Defaults to cwd."},
-				"exclude": map[string]any{
-					"type":        "array",
-					"description": "Relative exclude globs.",
-					"items":       map[string]any{"type": "string", "minLength": 1},
-				},
-				"limit": map[string]any{"type": "integer", "minimum": 1, "maximum": maxGlobLimit, "description": "Max matches."},
+				"pattern": map[string]any{"type": "string", "minLength": 1, "description": "Path glob to match, relative to path."},
+				"path":    map[string]any{"type": "string", "minLength": 1, "description": "Directory to search. Defaults to cwd."},
+				"exclude": stringOrStringArraySchema("File glob or globs to exclude, relative to path."),
+				"limit":   map[string]any{"type": "integer", "minimum": 1, "maximum": maxGlobLimit, "description": "Max matches."},
 			},
 			"required":             []string{"pattern"},
 			"additionalProperties": false,

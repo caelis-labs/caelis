@@ -99,7 +99,9 @@ func TestGatewayCompletedExplorationToolsRenderAsCompactSummary(t *testing.T) {
 	sendTool := func(id string, name string, args string, output string) {
 		rawInput := map[string]any{"path": args}
 		switch strings.ToUpper(name) {
-		case "RG", "SEARCH", "FIND":
+		case "SEARCH":
+			rawInput = map[string]any{"pattern": args}
+		case "RG", "FIND":
 			rawInput = map[string]any{"query": args}
 		case "LIST":
 			rawInput = map[string]any{"path": args}
@@ -505,14 +507,14 @@ func TestGatewayLiveExplorationDefersResultSummaryUntilStepSettles(t *testing.T)
 		t.Fatalf("settled read rows = %q, want result summary after step boundary", settledRead)
 	}
 
-	searchInput := map[string]any{"query": "Needle"}
+	searchInput := map[string]any{"pattern": "Needle"}
 	sendToolCall("search-live", "SEARCH", searchInput)
 	runningSearch := render()
 	if !strings.Contains(runningSearch, `Search "Needle"`) || strings.Contains(runningSearch, "3 hits") {
 		t.Fatalf("running search rows = %q, want start args without result summary", runningSearch)
 	}
 	sendToolResult("search-live", "SEARCH", searchInput, map[string]any{
-		"query":      "Needle",
+		"pattern":    "Needle",
 		"count":      3,
 		"file_count": 2,
 	}, `"Needle" 3 hits in 2 files`)
@@ -1370,7 +1372,7 @@ func TestGatewayACPExplorationNamedToolsCanRenderExploredGroup(t *testing.T) {
 	sendACPTool := func(id string, name string, args string, output string) {
 		rawInput := map[string]any{"path": args}
 		if strings.EqualFold(name, "SEARCH") {
-			rawInput = map[string]any{"query": args}
+			rawInput = map[string]any{"pattern": args}
 		}
 		updated, _ := model.Update(gatewayEventMsg(gateway.EventEnvelope{
 			Event: gateway.Event{

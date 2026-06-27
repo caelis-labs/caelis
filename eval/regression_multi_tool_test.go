@@ -21,7 +21,7 @@ func TestRegressionMultiToolCallOrderingTrace(t *testing.T) {
 		}, model.ToolCall{
 			ID:   "call-search",
 			Name: "SEARCH",
-			Args: `{"path":".","query":"func main"}`,
+			Args: `{"path":".","pattern":"func main"}`,
 		}, model.ToolCall{
 			ID:   "call-list",
 			Name: "LIST",

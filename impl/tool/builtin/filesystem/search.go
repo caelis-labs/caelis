@@ -40,27 +40,19 @@ func NewSearch(runtime sandbox.Runtime) (*SearchTool, error) {
 func (t *SearchTool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        SearchToolName,
-		Description: "Search file contents for text or regex matches in one file or directory and return matching lines. Use it to locate symbols, strings, error messages, config keys, or references before reading files. By default query is plain text with | alternatives; set regex=true for content regular expressions. Use GLOB for filenames, extensions, and path patterns; use include to restrict content search to file globs such as **/*.txt.",
+		Description: "Search file contents for text or regex matches in one file or directory.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"path":           map[string]any{"type": "string", "minLength": 1, "description": "File or directory path."},
-				"query":          map[string]any{"type": "string", "minLength": 1, "description": "Text or regex; use | for alternatives unless regex=true."},
+				"path":           map[string]any{"type": "string", "minLength": 1, "description": "File or directory to scan."},
+				"pattern":        map[string]any{"type": "string", "minLength": 1, "description": "Text or regex pattern to find inside files."},
 				"limit":          map[string]any{"type": "integer", "minimum": 1, "maximum": 200, "description": "Max results."},
 				"case_sensitive": map[string]any{"type": "boolean", "description": "Case-sensitive match."},
-				"regex":          map[string]any{"type": "boolean", "description": "Treat query as regex."},
-				"include": map[string]any{
-					"type":        "array",
-					"description": "Relative include globs for files to scan.",
-					"items":       map[string]any{"type": "string", "minLength": 1},
-				},
-				"exclude": map[string]any{
-					"type":        "array",
-					"description": "Relative exclude globs.",
-					"items":       map[string]any{"type": "string", "minLength": 1},
-				},
+				"regex":          map[string]any{"type": "boolean", "description": "Treat pattern as regex."},
+				"include":        stringOrStringArraySchema("File glob or globs to include, relative to path."),
+				"exclude":        stringOrStringArraySchema("File glob or globs to exclude, relative to path."),
 			},
-			"required":             []string{"path", "query"},
+			"required":             []string{"path", "pattern"},
 			"additionalProperties": false,
 		},
 		Metadata: toolutil.AnnotationMetadata(true, false, true, false),
@@ -75,14 +67,14 @@ func (t *SearchTool) Call(ctx context.Context, call tool.Call) (tool.Result, err
 	if err != nil {
 		return tool.Result{}, err
 	}
-	if err := tool.RejectUnknownArgs(args, "path", "query", "limit", "case_sensitive", "regex", "include", "exclude"); err != nil {
+	if err := tool.RejectUnknownArgs(args, "path", "pattern", "limit", "case_sensitive", "regex", "include", "exclude"); err != nil {
 		return tool.Result{}, err
 	}
 	pathArg, err := argparse.String(args, "path", true)
 	if err != nil {
 		return tool.Result{}, err
 	}
-	query, err := argparse.String(args, "query", true)
+	pattern, err := argparse.String(args, "pattern", true)
 	if err != nil {
 		return tool.Result{}, err
 	}
@@ -104,12 +96,12 @@ func (t *SearchTool) Call(ctx context.Context, call tool.Call) (tool.Result, err
 	if err != nil {
 		return tool.Result{}, err
 	}
-	terms, err := parseSearchTerms(query, caseSensitive, regexMode)
+	terms, err := parseSearchTerms(pattern, caseSensitive, regexMode)
 	if err != nil {
 		return tool.Result{}, err
 	}
 	if len(terms) == 0 {
-		return tool.Result{}, tool.NewError(tool.ErrorCodeInvalidInput, "SEARCH query must include at least one non-empty keyword")
+		return tool.Result{}, tool.NewError(tool.ErrorCodeInvalidInput, "SEARCH pattern must include at least one non-empty keyword")
 	}
 	exclude, err := parseStringSliceArg(args, "exclude")
 	if err != nil {
@@ -185,7 +177,7 @@ func (t *SearchTool) Call(ctx context.Context, call tool.Call) (tool.Result, err
 		if shouldExcludePath(root, target, false, excludeRules) || !shouldIncludeFilePath(root, target, includeRules) {
 			return toolutil.JSONResult(SearchToolName, map[string]any{
 				"path":       target,
-				"query":      query,
+				"pattern":    pattern,
 				"regex":      regexMode,
 				"count":      0,
 				"file_count": 0,
@@ -200,18 +192,18 @@ func (t *SearchTool) Call(ctx context.Context, call tool.Call) (tool.Result, err
 
 	return toolutil.JSONResult(SearchToolName, map[string]any{
 		"path":       target,
-		"query":      query,
+		"pattern":    pattern,
 		"regex":      regexMode,
 		"count":      len(hits),
 		"file_count": len(filesWithHits),
 		"truncated":  truncated,
 		"hits":       hits,
 	}, map[string]any{
-		"path":  target,
-		"query": query,
-		"regex": regexMode,
-		"terms": searchTermRawValues(terms),
-		"hits":  hits,
+		"path":    target,
+		"pattern": pattern,
+		"regex":   regexMode,
+		"terms":   searchTermRawValues(terms),
+		"hits":    hits,
 	})
 }
 
@@ -243,23 +235,23 @@ func searchInFile(fsys sandbox.FileSystem, path string, terms []searchTerm, case
 	return matched, false
 }
 
-func parseSearchTerms(query string, caseSensitive bool, regexMode bool) ([]searchTerm, error) {
-	query = strings.TrimSpace(query)
+func parseSearchTerms(pattern string, caseSensitive bool, regexMode bool) ([]searchTerm, error) {
+	pattern = strings.TrimSpace(pattern)
 	if regexMode {
-		if query == "" {
+		if pattern == "" {
 			return nil, nil
 		}
-		pattern := query
+		regexPattern := pattern
 		if !caseSensitive {
-			pattern = "(?i:" + query + ")"
+			regexPattern = "(?i:" + pattern + ")"
 		}
-		compiled, err := regexp.Compile(pattern)
+		compiled, err := regexp.Compile(regexPattern)
 		if err != nil {
-			return nil, tool.WrapError(tool.ErrorCodeInvalidInput, err, "SEARCH query is not a valid regular expression")
+			return nil, tool.WrapError(tool.ErrorCodeInvalidInput, err, "SEARCH pattern is not a valid regular expression")
 		}
-		return []searchTerm{{Raw: query, Regex: compiled}}, nil
+		return []searchTerm{{Raw: pattern, Regex: compiled}}, nil
 	}
-	parts := strings.Split(query, "|")
+	parts := strings.Split(pattern, "|")
 	out := make([]searchTerm, 0, len(parts))
 	for _, part := range parts {
 		raw := strings.TrimSpace(part)

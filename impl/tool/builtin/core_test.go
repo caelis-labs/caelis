@@ -106,17 +106,18 @@ func TestCoreToolSchemasExposeGuidanceBoundsAndAnnotations(t *testing.T) {
 	requireAnnotations(t, defs[filesystem.ListToolName], true, false, true, false)
 
 	requireStringMinLength(t, defs[filesystem.GlobToolName], "pattern", 1)
-	requireArrayItemMinLength(t, defs[filesystem.GlobToolName], "exclude", 1)
+	requireStringOrStringArray(t, defs[filesystem.GlobToolName], "exclude", 1)
 	requireIntegerBounds(t, defs[filesystem.GlobToolName], "limit", 1, ptrAny(1000))
-	requireDescriptionContains(t, defs[filesystem.GlobToolName], "**/*.txt", "*.{go,md}", "RUN_COMMAND")
+	requireDescriptionContains(t, defs[filesystem.GlobToolName], "Find filesystem paths", "glob pattern")
 	requireAnnotations(t, defs[filesystem.GlobToolName], true, false, true, false)
 
 	requireStringMinLength(t, defs[filesystem.SearchToolName], "path", 1)
-	requireStringMinLength(t, defs[filesystem.SearchToolName], "query", 1)
-	requireArrayItemMinLength(t, defs[filesystem.SearchToolName], "include", 1)
-	requireArrayItemMinLength(t, defs[filesystem.SearchToolName], "exclude", 1)
+	requireStringMinLength(t, defs[filesystem.SearchToolName], "pattern", 1)
+	requireNoProperty(t, defs[filesystem.SearchToolName], "query")
+	requireStringOrStringArray(t, defs[filesystem.SearchToolName], "include", 1)
+	requireStringOrStringArray(t, defs[filesystem.SearchToolName], "exclude", 1)
 	requireIntegerBounds(t, defs[filesystem.SearchToolName], "limit", 1, ptrAny(200))
-	requireDescriptionContains(t, defs[filesystem.SearchToolName], "locate symbols", "regex", "Use GLOB", "include")
+	requireDescriptionContains(t, defs[filesystem.SearchToolName], "Search file contents", "regex matches")
 	requireAnnotations(t, defs[filesystem.SearchToolName], true, false, true, false)
 
 	requireStringMinLength(t, defs[filesystem.WriteToolName], "path", 1)
@@ -153,6 +154,34 @@ func TestCoreToolSchemasExposeGuidanceBoundsAndAnnotations(t *testing.T) {
 	requireIntegerBounds(t, defs[web.FetchToolName], "timeout", 1, ptrAny(120))
 	requireDescriptionContains(t, defs[web.FetchToolName], "specific http or https URL", "cleaned markdown", "does not search", "artifact_path")
 	requireAnnotations(t, defs[web.FetchToolName], true, false, false, true)
+}
+
+func TestCoreSearchAndGlobSchemasRemainStrict(t *testing.T) {
+	t.Parallel()
+
+	rt, err := host.New(host.Config{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatalf("host.New() error = %v", err)
+	}
+	tools, err := BuildCoreTools(CoreToolsConfig{Runtime: rt})
+	if err != nil {
+		t.Fatalf("BuildCoreTools() error = %v", err)
+	}
+	specs := map[string]model.ToolSpec{}
+	for _, spec := range tool.ModelSpecs(tools) {
+		if spec.Function != nil {
+			specs[spec.Function.Name] = spec
+		}
+	}
+	for _, name := range []string{filesystem.GlobToolName, filesystem.SearchToolName} {
+		spec, ok := specs[name]
+		if !ok || spec.Function == nil {
+			t.Fatalf("%s missing from model specs", name)
+		}
+		if !spec.Function.Strict {
+			t.Fatalf("%s Function.Strict = false, want strict inferred from closed schema", name)
+		}
+	}
 }
 
 func TestEnsureCoreToolsRejectsReservedBuiltinNames(t *testing.T) {
@@ -192,7 +221,7 @@ func TestCoreToolsRejectUnknownArgs(t *testing.T) {
 		{filesystem.ReadToolName, map[string]any{"path": "notes.txt", "unexpected": true}},
 		{filesystem.ListToolName, map[string]any{"path": ".", "unexpected": true}},
 		{filesystem.GlobToolName, map[string]any{"pattern": "*.txt", "unexpected": true}},
-		{filesystem.SearchToolName, map[string]any{"path": ".", "query": "hello", "unexpected": true}},
+		{filesystem.SearchToolName, map[string]any{"path": ".", "pattern": "hello", "unexpected": true}},
 		{filesystem.WriteToolName, map[string]any{"path": "new.txt", "content": "new\n", "unexpected": true}},
 		{filesystem.PatchToolName, map[string]any{
 			"path":       "notes.txt",
@@ -315,8 +344,8 @@ func TestCoreCodingToolsE2E(t *testing.T) {
 
 	searchTool := mustLookupTool(t, reg, filesystem.SearchToolName)
 	searchResult := runToolJSON(t, searchTool, map[string]any{
-		"path":  dir,
-		"query": "missing|caelis",
+		"path":    dir,
+		"pattern": "missing|caelis",
 	})
 	if got := searchResult["count"]; got != float64(1) {
 		t.Fatalf("search count = %v, want 1", got)
@@ -330,9 +359,9 @@ func TestCoreCodingToolsE2E(t *testing.T) {
 		t.Fatalf("search hit = %#v, want column and match in payload", hit)
 	}
 	searchResult = runToolJSON(t, searchTool, map[string]any{
-		"path":  dir,
-		"query": `hello|Meta\[\"error\"\]`,
-		"regex": true,
+		"path":    dir,
+		"pattern": `hello|Meta\[\"error\"\]`,
+		"regex":   true,
 	})
 	if got := searchResult["count"]; got != float64(1) {
 		t.Fatalf("regex search count = %v, want 1", got)
@@ -344,8 +373,8 @@ func TestCoreCodingToolsE2E(t *testing.T) {
 		t.Fatalf("WriteFile(.git/index) error = %v", err)
 	}
 	searchResult = runToolJSON(t, searchTool, map[string]any{
-		"path":  dir,
-		"query": "caelis",
+		"path":    dir,
+		"pattern": "caelis",
 	})
 	if got := searchResult["count"]; got != float64(1) {
 		t.Fatalf("search count with .git index = %v, want 1", got)
@@ -374,8 +403,8 @@ func TestCoreCodingToolsE2E(t *testing.T) {
 		t.Fatalf("WriteFile(ignored mirror) error = %v", err)
 	}
 	searchResult = runToolJSON(t, searchTool, map[string]any{
-		"path":  dir,
-		"query": "caelis",
+		"path":    dir,
+		"pattern": "caelis",
 	})
 	if got := searchResult["count"]; got != float64(2) {
 		t.Fatalf("search count with mirror dir = %v, want 2", got)
@@ -384,8 +413,8 @@ func TestCoreCodingToolsE2E(t *testing.T) {
 		t.Fatalf("WriteFile(.gitignore) error = %v", err)
 	}
 	searchResult = runToolJSON(t, searchTool, map[string]any{
-		"path":  dir,
-		"query": "caelis",
+		"path":    dir,
+		"pattern": "caelis",
 	})
 	if got := searchResult["count"]; got != float64(1) {
 		t.Fatalf("search count with default gitignore = %v, want 1", got)
@@ -557,6 +586,38 @@ func requireArrayItemMinLength(t *testing.T, def tool.Definition, prop string, w
 	}
 	if got := items["minLength"]; got != want {
 		t.Fatalf("%s.%s.items minLength = %#v, want %d", def.Name, prop, got, want)
+	}
+}
+
+func requireStringOrStringArray(t *testing.T, def tool.Definition, prop string, wantMinLength int) {
+	t.Helper()
+	schemaProp := schemaProperty(t, def, prop)
+	rawVariants, _ := schemaProp["anyOf"].([]any)
+	if len(rawVariants) != 2 {
+		t.Fatalf("%s.%s anyOf = %#v, want string and array variants", def.Name, prop, schemaProp["anyOf"])
+	}
+	var foundString bool
+	var foundArray bool
+	for _, raw := range rawVariants {
+		variant, _ := raw.(map[string]any)
+		switch variant["type"] {
+		case "string":
+			foundString = true
+			if got := variant["minLength"]; got != wantMinLength {
+				t.Fatalf("%s.%s string minLength = %#v, want %d", def.Name, prop, got, wantMinLength)
+			}
+		case "array":
+			foundArray = true
+			items, _ := variant["items"].(map[string]any)
+			if got := items["minLength"]; got != wantMinLength {
+				t.Fatalf("%s.%s array item minLength = %#v, want %d", def.Name, prop, got, wantMinLength)
+			}
+		default:
+			t.Fatalf("%s.%s unexpected anyOf variant: %#v", def.Name, prop, variant)
+		}
+	}
+	if !foundString || !foundArray {
+		t.Fatalf("%s.%s anyOf missing string or array variant: %#v", def.Name, prop, rawVariants)
 	}
 }
 

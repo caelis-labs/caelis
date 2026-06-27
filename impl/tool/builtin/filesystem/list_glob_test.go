@@ -227,7 +227,7 @@ func TestGlobToolExcludeBarePatternMatchesNestedFiles(t *testing.T) {
 	}
 	input, err := json.Marshal(map[string]any{
 		"pattern": "**/*.go",
-		"exclude": []string{"*_test.go"},
+		"exclude": "*_test.go",
 	})
 	if err != nil {
 		t.Fatalf("Marshal() error = %v", err)
@@ -334,8 +334,8 @@ func TestSearchToolPlainTxtDollarDoesNotMatchFilenameAndRegexMatchesContent(t *t
 	}
 
 	input, err := json.Marshal(map[string]any{
-		"path":  ".",
-		"query": ".txt$",
+		"path":    ".",
+		"pattern": ".txt$",
 	})
 	if err != nil {
 		t.Fatalf("Marshal() error = %v", err)
@@ -350,9 +350,9 @@ func TestSearchToolPlainTxtDollarDoesNotMatchFilenameAndRegexMatchesContent(t *t
 	}
 
 	input, err = json.Marshal(map[string]any{
-		"path":  ".",
-		"query": ".txt$",
-		"regex": true,
+		"path":    ".",
+		"pattern": ".txt$",
+		"regex":   true,
 	})
 	if err != nil {
 		t.Fatalf("Marshal() error = %v", err)
@@ -368,8 +368,8 @@ func TestSearchToolPlainTxtDollarDoesNotMatchFilenameAndRegexMatchesContent(t *t
 	if got, _ := payload["path"].(string); filepath.Clean(got) != filepath.Clean(dir) {
 		t.Fatalf("payload path = %q, want %q", got, dir)
 	}
-	if got, _ := payload["query"].(string); got != ".txt$" {
-		t.Fatalf("payload query = %q, want .txt$", got)
+	if got, _ := payload["pattern"].(string); got != ".txt$" {
+		t.Fatalf("payload pattern = %q, want .txt$", got)
 	}
 	if got, _ := payload["regex"].(bool); !got {
 		t.Fatalf("payload regex = %v, want true", payload["regex"])
@@ -408,8 +408,8 @@ func TestSearchToolIncludeFiltersScannedFiles(t *testing.T) {
 	}
 	input, err := json.Marshal(map[string]any{
 		"path":    ".",
-		"query":   "needle",
-		"include": []string{"**/*.txt"},
+		"pattern": "needle",
+		"include": "**/*.txt",
 	})
 	if err != nil {
 		t.Fatalf("Marshal() error = %v", err)
@@ -453,8 +453,8 @@ func TestSearchToolExcludeBarePatternMatchesNestedFiles(t *testing.T) {
 	}
 	input, err := json.Marshal(map[string]any{
 		"path":    ".",
-		"query":   "needle",
-		"exclude": []string{"*_test.go"},
+		"pattern": "needle",
+		"exclude": "*_test.go",
 	})
 	if err != nil {
 		t.Fatalf("Marshal() error = %v", err)

@@ -390,6 +390,9 @@ func openAICompatStrictSchema(schema map[string]any) bool {
 	if len(schema) == 0 {
 		return false
 	}
+	if _, ok := schema["anyOf"]; ok {
+		return openAICompatStrictAnyOf(schema["anyOf"])
+	}
 	switch openAICompatSchemaPrimaryType(schema["type"]) {
 	case "object":
 		if additionalProperties, ok := schema["additionalProperties"].(bool); !ok || additionalProperties {
@@ -420,6 +423,20 @@ func openAICompatStrictSchema(schema map[string]any) bool {
 	default:
 		return true
 	}
+}
+
+func openAICompatStrictAnyOf(value any) bool {
+	variants, ok := value.([]any)
+	if !ok || len(variants) == 0 {
+		return false
+	}
+	for _, variant := range variants {
+		nested, _ := variant.(map[string]any)
+		if len(nested) == 0 || !openAICompatStrictSchema(nested) {
+			return false
+		}
+	}
+	return true
 }
 
 func openAICompatSchemaPrimaryType(value any) string {
@@ -468,6 +485,14 @@ func openAICompatStrictCompatibleSchema(schema map[string]any) (map[string]any, 
 		return nil, false
 	}
 	out := openAICompatCloneSchemaMap(schema)
+	if _, ok := out["anyOf"]; ok {
+		variants, ok := openAICompatStrictCompatibleAnyOf(out["anyOf"])
+		if !ok {
+			return nil, false
+		}
+		out["anyOf"] = variants
+		return out, true
+	}
 	switch openAICompatSchemaPrimaryType(out["type"]) {
 	case "object":
 		if additionalProperties, ok := out["additionalProperties"].(bool); !ok || additionalProperties {
@@ -520,8 +545,34 @@ func openAICompatStrictCompatibleSchema(schema map[string]any) (map[string]any, 
 	}
 }
 
+func openAICompatStrictCompatibleAnyOf(value any) ([]any, bool) {
+	variants, ok := value.([]any)
+	if !ok || len(variants) == 0 {
+		return nil, false
+	}
+	out := make([]any, 0, len(variants))
+	for _, variant := range variants {
+		nested, _ := variant.(map[string]any)
+		if len(nested) == 0 {
+			return nil, false
+		}
+		converted, ok := openAICompatStrictCompatibleSchema(nested)
+		if !ok {
+			return nil, false
+		}
+		out = append(out, converted)
+	}
+	return out, true
+}
+
 func openAICompatNullableSchema(schema map[string]any) map[string]any {
 	out := openAICompatCloneSchemaMap(schema)
+	if variants, _ := out["anyOf"].([]any); len(variants) > 0 {
+		if !openAICompatAnyOfHasNull(variants) {
+			out["anyOf"] = append(variants, map[string]any{"type": "null"})
+		}
+		return out
+	}
 	out["type"] = openAICompatNullableType(out["type"])
 	switch enumValues := out["enum"].(type) {
 	case []any:
@@ -532,6 +583,19 @@ func openAICompatNullableSchema(schema map[string]any) map[string]any {
 		out["enum"] = openAICompatNullableEnumStrings(enumValues)
 	}
 	return out
+}
+
+func openAICompatAnyOfHasNull(values []any) bool {
+	for _, value := range values {
+		nested, _ := value.(map[string]any)
+		if len(nested) == 0 {
+			continue
+		}
+		if openAICompatSchemaPrimaryType(nested["type"]) == "null" {
+			return true
+		}
+	}
+	return false
 }
 
 func openAICompatNullableType(value any) any {

@@ -1481,7 +1481,7 @@ func TestAnthropicMessageTransformMergesConsecutiveToolResults(t *testing.T) {
 			{
 				ID:   "call1",
 				Name: "SEARCH",
-				Args: jsonArgs(map[string]any{"query": "tests"}),
+				Args: jsonArgs(map[string]any{"pattern": "tests"}),
 			},
 			{
 				ID:   "call2",

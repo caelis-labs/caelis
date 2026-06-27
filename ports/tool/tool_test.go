@@ -88,6 +88,37 @@ func TestModelSpecsDoesNotInferStrictForOpenSchema(t *testing.T) {
 	}
 }
 
+func TestModelSpecsInfersStrictForClosedAnyOfSchema(t *testing.T) {
+	t.Parallel()
+
+	specs := ModelSpecs([]Tool{
+		NamedTool{
+			Def: Definition{
+				Name:        "search",
+				Description: "search schema",
+				InputSchema: map[string]any{
+					"type":                 "object",
+					"additionalProperties": false,
+					"properties": map[string]any{
+						"include": map[string]any{
+							"anyOf": []any{
+								map[string]any{"type": "string"},
+								map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+	if len(specs) != 1 || specs[0].Function == nil {
+		t.Fatalf("specs = %#v, want one function spec", specs)
+	}
+	if !specs[0].Function.Strict {
+		t.Fatal("Function.Strict = false, want strict for closed anyOf schema")
+	}
+}
+
 func TestToolVisibilityDefersMCPToolsBehindToolSearch(t *testing.T) {
 	t.Parallel()
 

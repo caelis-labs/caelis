@@ -130,7 +130,7 @@ func globResultSummary(input map[string]any, output map[string]any, meta map[str
 }
 
 func searchResultSummary(input map[string]any, output map[string]any, meta map[string]any) string {
-	query := firstNonEmpty(toolString(output["query"]), toolString(input["query"]), toolString(input["pattern"]), toolString(runtimeToolMeta(meta)["query"]))
+	query := firstNonEmpty(toolString(output["pattern"]), toolString(input["pattern"]), toolString(runtimeToolMeta(meta)["pattern"]), toolString(output["query"]), toolString(input["query"]), toolString(runtimeToolMeta(meta)["query"]))
 	count := toolInt(output["count"])
 	files := toolInt(output["file_count"])
 	if query == "" && count <= 0 {
