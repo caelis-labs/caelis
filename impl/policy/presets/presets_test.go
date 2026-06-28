@@ -423,6 +423,15 @@ func TestDefaultModeAllowsReadOnlyGitCommands(t *testing.T) {
 		"git status --short",
 		"git diff -- README.md",
 		"git log --oneline -3",
+		"git show --stat HEAD",
+		"git branch --show-current",
+		"git branch --list",
+		"git tag --list",
+		"git remote -v",
+		"git stash list",
+		"git add --help",
+		"git push --help",
+		"git unknown-subcommand --maybe-writes",
 		"git clean -n -fd",
 		"git clean -nfd",
 		"git -C repo status",
@@ -443,57 +452,73 @@ func TestDefaultModeAllowsReadOnlyGitCommands(t *testing.T) {
 	}
 }
 
-func TestDefaultModeAllowsNonDangerousGitMetadataCommandsInSandbox(t *testing.T) {
+func TestDefaultModeDeniesGitMetadataCommandsInSandbox(t *testing.T) {
 	t.Parallel()
 
-	tests := []string{
-		"git add .",
-		"git commit -m update",
-		"git tag v1.2.3",
-		"git merge feature",
-		"git rebase main",
-		"git cherry-pick abc123",
-		"git stash push",
-		"git reset HEAD README.md",
-		"git restore --staged README.md",
-		"git checkout main",
-		"git add . && git commit -m update",
-		"git push origin main",
-		"git add . && git push origin main",
-		"git add . & touch .git/index.lock",
-		"git add . | cat",
-		"git add . > staged.log",
-		"git add $(cat files)",
-		"./git add .",
-		"/usr/bin/git add .",
-		"PATH=.:$PATH git add .",
-		"env PATH=.:$PATH git add .",
-		"git add . && ./git commit -m update",
-		"sh -c 'git add .'",
-		"bash -lc 'git commit -m update'",
-		"cmd /c git add .",
-		"powershell -Command git add .",
-		"sudo -E git add .",
-		"sudo -u root git add .",
-		"sudo --user root git add .",
+	tests := []struct {
+		command string
+		denied  string
+	}{
+		{command: "git add .", denied: "git add ."},
+		{command: "git -C repo add .", denied: "git -C repo add ."},
+		{command: "git commit -m update", denied: "git commit -m update"},
+		{command: "git tag v1.2.3", denied: "git tag v1.2.3"},
+		{command: "git tag -d v1.2.3", denied: "git tag -d v1.2.3"},
+		{command: "git branch feature", denied: "git branch feature"},
+		{command: "git branch -d feature", denied: "git branch -d feature"},
+		{command: "git remote add origin https://example.com/repo.git", denied: "git remote add origin https://example.com/repo.git"},
+		{command: "git config user.name test", denied: "git config user.name test"},
+		{command: "git merge feature", denied: "git merge feature"},
+		{command: "git rebase main", denied: "git rebase main"},
+		{command: "git cherry-pick abc123", denied: "git cherry-pick abc123"},
+		{command: "git revert abc123", denied: "git revert abc123"},
+		{command: "git stash", denied: "git stash"},
+		{command: "git stash -p", denied: "git stash -p"},
+		{command: "git stash push", denied: "git stash push"},
+		{command: "git reset HEAD README.md", denied: "git reset HEAD README.md"},
+		{command: "git restore --staged README.md", denied: "git restore --staged README.md"},
+		{command: "git checkout main", denied: "git checkout main"},
+		{command: "git switch main", denied: "git switch main"},
+		{command: "git fetch origin", denied: "git fetch origin"},
+		{command: "git pull --rebase", denied: "git pull --rebase"},
+		{command: "git push origin main", denied: "git push origin main"},
+		{command: "git submodule update --init", denied: "git submodule update --init"},
+		{command: "git worktree add ../wt main", denied: "git worktree add ../wt main"},
+		{command: "git add . && git commit -m update", denied: "git add ."},
+		{command: "git add . && git push origin main", denied: "git add ."},
+		{command: "git add . & touch .git/index.lock", denied: "git add ."},
+		{command: "git add . | cat", denied: "git add ."},
+		{command: "git add . > staged.log", denied: "git add . > staged.log"},
+		{command: "git add $(cat files)", denied: "git add $(cat files)"},
+		{command: "./git add .", denied: "./git add ."},
+		{command: "/usr/bin/git add .", denied: "/usr/bin/git add ."},
+		{command: "PATH=.:$PATH git add .", denied: "git add ."},
+		{command: "env PATH=.:$PATH git add .", denied: "git add ."},
+		{command: "git add . && ./git commit -m update", denied: "git add ."},
+		{command: "sh -c 'git add .'", denied: "git add ."},
+		{command: "bash -lc 'git commit -m update'", denied: "git commit -m update"},
+		{command: "cmd /c git add .", denied: "git add ."},
+		{command: "powershell -Command git add .", denied: "git add ."},
+		{command: "sudo -E git add .", denied: "git add ."},
+		{command: "sudo -u root git add .", denied: "git add ."},
+		{command: "sudo --user root git add .", denied: "git add ."},
 	}
-	for _, command := range tests {
-		command := command
-		t.Run(command, func(t *testing.T) {
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.command, func(t *testing.T) {
 			t.Parallel()
 
-			decision, err := AutoReviewMode().DecideTool(context.Background(), commandCtx(command, false))
+			decision, err := AutoReviewMode().DecideTool(context.Background(), commandCtx(tt.command, false))
 			if err != nil {
 				t.Fatalf("DecideTool() error = %v", err)
 			}
-			if decision.Action != policy.ActionAllow {
-				t.Fatalf("Action = %q, want allow (reason=%q)", decision.Action, decision.Reason)
+			if decision.Action != policy.ActionDeny {
+				t.Fatalf("Action = %q, want deny (reason=%q)", decision.Action, decision.Reason)
 			}
-			if decision.Constraints.Route != sandbox.RouteSandbox {
-				t.Fatalf("Constraints.Route = %q, want sandbox", decision.Constraints.Route)
-			}
-			if hasPathRule(decision.Constraints.PathRules, testWorkspaceGitRoot(), sandbox.PathAccessReadWrite) {
-				t.Fatalf("PathRules = %#v, did not expect .git write grant for command %q", decision.Constraints.PathRules, command)
+			for _, want := range []string{"Denied:", tt.denied, "may write Git metadata under .git", "sandbox_permissions=require_escalated"} {
+				if !strings.Contains(decision.Reason, want) {
+					t.Fatalf("Reason = %q, want substring %q", decision.Reason, want)
+				}
 			}
 		})
 	}

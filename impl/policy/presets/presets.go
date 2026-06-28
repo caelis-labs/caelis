@@ -106,6 +106,11 @@ func decideCommand(input policy.ToolContext, def sandbox.Constraints, modeName s
 	if reason := commandHardDenyReason(command); reason != "" {
 		return deny(reason), nil
 	}
+	if !commandHostApprovalRequired(req, input.Sandbox) {
+		if reason := vcsSandboxDenyReason(command); reason != "" {
+			return deny(reason), nil
+		}
+	}
 	if commandHostApprovalRequired(req, input.Sandbox) {
 		return askEscalationApproval(input, req.withEscalation())
 	}
@@ -647,63 +652,6 @@ func commandContainsRecursiveDelete(command string) bool {
 	return false
 }
 
-func hardDenyGitCommandReason(command string) string {
-	for _, git := range gitCommands(command) {
-		switch git.Subcommand {
-		case "clean":
-			if !gitCleanDryRun(git.Args) {
-				return "git clean without dry-run is blocked"
-			}
-		case "reset":
-			if hasGitFlag(git.Args, "--hard", "") {
-				return "git reset --hard is blocked"
-			}
-		case "checkout":
-			if gitCheckoutDiscardsWorktree(git.Args) {
-				return "git checkout path restore is blocked"
-			}
-		case "restore":
-			if gitRestoreDiscardsWorktree(git.Args) {
-				return "git worktree restore is blocked"
-			}
-		case "push":
-			if gitPushForce(git.Args) {
-				return "forced git push is blocked"
-			}
-		}
-	}
-	return ""
-}
-
-type gitCommand struct {
-	Subcommand string
-	Args       []string
-}
-
-func gitCommands(command string) []gitCommand {
-	fields := shellishFields(command)
-	var out []gitCommand
-	for _, i := range commandStartIndexes(fields) {
-		if !isGitCommand(fields[i]) {
-			continue
-		}
-		subcommand, argsStart, ok := gitSubcommand(fields, i+1)
-		if !ok {
-			continue
-		}
-		args := []string{}
-		for j := argsStart; j < len(fields); j++ {
-			token := trimShellToken(fields[j])
-			if token == "" || isShellCommandSeparator(token) {
-				break
-			}
-			args = append(args, token)
-		}
-		out = append(out, gitCommand{Subcommand: subcommand, Args: args})
-	}
-	return out
-}
-
 func commandStartIndexes(fields []string) []int {
 	var out []int
 	for i := 0; i < len(fields); {
@@ -937,48 +885,6 @@ func powershellOptionNeedsValue(token string) bool {
 	}
 }
 
-func gitSubcommand(fields []string, start int) (string, int, bool) {
-	for i := start; i < len(fields); i++ {
-		token := trimShellToken(fields[i])
-		if token == "" || isShellCommandSeparator(token) {
-			return "", i, false
-		}
-		if isEnvAssignment(token) {
-			continue
-		}
-		if token == "env" || executableBase(token) == "env" || executableBase(token) == "env.exe" {
-			continue
-		}
-		if isGitGlobalOptionWithSeparateValue(token) {
-			i++
-			continue
-		}
-		if strings.HasPrefix(token, "-") {
-			continue
-		}
-		return strings.ToLower(token), i + 1, true
-	}
-	return "", len(fields), false
-}
-
-func isGitGlobalOptionWithSeparateValue(token string) bool {
-	lower := strings.ToLower(strings.TrimSpace(token))
-	if strings.Contains(lower, "=") {
-		return false
-	}
-	switch lower {
-	case "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path", "--config-env":
-		return true
-	default:
-		return false
-	}
-}
-
-func isGitCommand(token string) bool {
-	base := executableBase(token)
-	return base == "git" || base == "git.exe"
-}
-
 func executableBase(token string) string {
 	token = strings.ToLower(trimShellToken(token))
 	token = strings.ReplaceAll(token, "\\", "/")
@@ -1005,89 +911,6 @@ func isEnvAssignment(token string) bool {
 	}
 	idx := strings.Index(token, "=")
 	return idx > 0
-}
-
-func gitCleanDryRun(args []string) bool {
-	for _, arg := range args {
-		lower := strings.ToLower(trimShellToken(arg))
-		switch lower {
-		case "-n", "--dry-run":
-			return true
-		}
-		if strings.HasPrefix(lower, "-") && !strings.HasPrefix(lower, "--") && strings.Contains(lower, "n") {
-			return true
-		}
-	}
-	return false
-}
-
-func gitCheckoutDiscardsWorktree(args []string) bool {
-	afterDoubleDash := false
-	for _, arg := range args {
-		token := trimShellToken(arg)
-		if token == "--" {
-			afterDoubleDash = true
-			continue
-		}
-		if afterDoubleDash && token != "" {
-			return true
-		}
-		if token == "." || token == ":/" {
-			return true
-		}
-	}
-	return false
-}
-
-func gitRestoreDiscardsWorktree(args []string) bool {
-	staged := false
-	worktree := false
-	hasPath := false
-	for _, arg := range args {
-		token := trimShellToken(arg)
-		if token == "" {
-			continue
-		}
-		switch token {
-		case "--staged":
-			staged = true
-		case "--worktree":
-			worktree = true
-		case "--":
-			continue
-		default:
-			if !strings.HasPrefix(token, "-") {
-				hasPath = true
-			}
-		}
-	}
-	return hasPath && (!staged || worktree)
-}
-
-func gitPushForce(args []string) bool {
-	for _, arg := range args {
-		lower := strings.ToLower(trimShellToken(arg))
-		if lower == "--force" || strings.HasPrefix(lower, "--force-with-lease") || strings.HasPrefix(lower, "--force-if-includes") {
-			return true
-		}
-		if strings.HasPrefix(lower, "-") && !strings.HasPrefix(lower, "--") && strings.Contains(lower, "f") {
-			return true
-		}
-	}
-	return false
-}
-
-func hasGitFlag(args []string, long string, short string) bool {
-	for _, arg := range args {
-		lower := strings.ToLower(trimShellToken(arg))
-		if long != "" && lower == long {
-			return true
-		}
-		if short != "" && strings.HasPrefix(lower, "-") && !strings.HasPrefix(lower, "--") && strings.Contains(lower, short) {
-			return true
-		}
-	}
-	return false
 }
 
 func commandSegmentHasFlag(fields []string, names ...string) bool {
