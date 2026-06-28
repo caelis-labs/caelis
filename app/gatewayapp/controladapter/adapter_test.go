@@ -18,7 +18,6 @@ import (
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
 	"github.com/OnslaughtSnail/caelis/impl/model/providers"
 	"github.com/OnslaughtSnail/caelis/internal/agenthandle"
-	kernelimpl "github.com/OnslaughtSnail/caelis/internal/kernel"
 	"github.com/OnslaughtSnail/caelis/internal/testenv"
 	"github.com/OnslaughtSnail/caelis/ports/assembly"
 	"github.com/OnslaughtSnail/caelis/ports/gateway"
@@ -26,6 +25,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/stream"
 	controlcommands "github.com/OnslaughtSnail/caelis/protocol/acp/control/commands"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
 	acpprojector "github.com/OnslaughtSnail/caelis/protocol/acp/projector"
 )
 
@@ -134,11 +134,14 @@ func TestStreamRequestFromProjectedSemanticSpawnRunningEvent(t *testing.T) {
 			},
 		},
 	})
-	gatewayEnv, ok := kernelimpl.ProjectSessionEvent(session.SessionRef{SessionID: "root-session"}, event)
-	if !ok {
-		t.Fatal("ProjectSessionEvent() ok = false, want gateway event")
+	base := eventstream.Envelope{
+		SessionID: "root-session",
+		Scope:     eventstream.ScopeMain,
+		ScopeID:   "root-session",
+		Meta:      event.Meta,
 	}
-	for _, acpEnv := range acpprojector.ProjectGatewayEventEnvelope(gatewayEnv) {
+	events := acpprojector.ProjectSessionEventEnvelope(base, event)
+	for _, acpEnv := range events {
 		req, ok := streamRequestFromACPEvent(acpEnv)
 		if !ok {
 			continue
@@ -151,7 +154,7 @@ func TestStreamRequestFromProjectedSemanticSpawnRunningEvent(t *testing.T) {
 		}
 		return
 	}
-	t.Fatalf("projected ACP envelopes did not produce stream request: %#v", acpprojector.ProjectGatewayEventEnvelope(gatewayEnv))
+	t.Fatalf("projected ACP envelopes did not produce stream request: %#v", events)
 }
 
 func TestAdapterUsesCurrentGatewayAfterSandboxRebuild(t *testing.T) {

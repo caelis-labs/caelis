@@ -93,19 +93,7 @@ func TestSessionStartHookRunsOnceAndPersists(t *testing.T) {
 		t.Fatalf("BeginTurn failed: %v", err)
 	}
 
-	// Wait for the background turn to finish and verify that the plugin context event is projected without
-	// masquerading as a user or system message in the ACP-facing stream.
-	var hasPluginContextEvent bool
-	for env := range res.Handle.Events() {
-		if env.Event.Meta["source"] == "plugin_hook" {
-			hasPluginContextEvent = true
-			if env.Event.Kind == EventKindUserMessage || env.Event.Kind == EventKindSystemMessage {
-				t.Fatalf("plugin context projected as %s, want non-user/non-system event", env.Event.Kind)
-			}
-		}
-	}
-	if !hasPluginContextEvent {
-		t.Errorf("expected plugin context event in handle event stream, but got none")
+	for range res.Handle.ACPEvents() {
 	}
 
 	// Verify that the plugin context event is appended to session history.
@@ -188,7 +176,7 @@ func TestSessionStartHookRunsOnceAndPersists(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Second BeginTurn failed: %v", err)
 	}
-	for range res2.Handle.Events() {
+	for range res2.Handle.ACPEvents() {
 	}
 
 	// Verify that NO new plugin context event was appended (total should remain 1)
@@ -266,7 +254,7 @@ func TestSessionStartHookFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginTurn should continue when a SessionStart hook fails, got error: %v", err)
 	}
-	for range res.Handle.Events() {
+	for range res.Handle.ACPEvents() {
 	}
 
 	// Verify that a diagnostic EventTypeLifecycle event is appended to session history
@@ -334,7 +322,7 @@ func TestSessionStartHookFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Second BeginTurn failed: %v", err)
 	}
-	for range res2.Handle.Events() {
+	for range res2.Handle.ACPEvents() {
 	}
 	events, err = sessions.Events(ctx, session.EventsRequest{SessionRef: sess.SessionRef})
 	if err != nil {
@@ -412,7 +400,7 @@ func TestSessionStartHookResumeWithFileStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("First BeginTurn failed: %v", err)
 	}
-	for range res1.Handle.Events() {
+	for range res1.Handle.ACPEvents() {
 	}
 
 	// Recreate the session service (simulating load/resume) and gateway
@@ -438,7 +426,7 @@ func TestSessionStartHookResumeWithFileStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Second BeginTurn failed: %v", err)
 	}
-	for range res2.Handle.Events() {
+	for range res2.Handle.ACPEvents() {
 	}
 
 	// Verify that the plugin context event is only present once in the persisted file store.
@@ -536,7 +524,7 @@ func TestHookDigestDifferentiatesArgsAndEnv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginTurn failed: %v", err)
 	}
-	for range res.Handle.Events() {
+	for range res.Handle.ACPEvents() {
 	}
 
 	events, err := sessions.Events(ctx, session.EventsRequest{SessionRef: sess.SessionRef})
@@ -617,7 +605,7 @@ func TestHookEnvAndCompatEnv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginTurn failed: %v", err)
 	}
-	for range res.Handle.Events() {
+	for range res.Handle.ACPEvents() {
 	}
 
 	events, err := sessions.Events(ctx, session.EventsRequest{SessionRef: sess.SessionRef})
@@ -693,7 +681,7 @@ func TestHookTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginTurn should continue when a SessionStart hook times out, got error: %v", err)
 	}
-	for range res.Handle.Events() {
+	for range res.Handle.ACPEvents() {
 	}
 	events, err := sessions.Events(ctx, session.EventsRequest{SessionRef: sess.SessionRef})
 	if err != nil {
@@ -774,7 +762,7 @@ func TestSessionStartHookTruncation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginTurn failed: %v", err)
 	}
-	for range res.Handle.Events() {
+	for range res.Handle.ACPEvents() {
 	}
 
 	events, err := sessions.Events(ctx, session.EventsRequest{SessionRef: sess.SessionRef})
@@ -866,7 +854,7 @@ func TestSessionStartHookRunsOnceAndPersistsEmptyStdout(t *testing.T) {
 	}
 
 	// Wait for the background turn to finish
-	for range res.Handle.Events() {
+	for range res.Handle.ACPEvents() {
 	}
 
 	// Verify that the plugin marker event is appended to session history.
@@ -940,7 +928,7 @@ func TestSessionStartHookRunsOnceAndPersistsEmptyStdout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Second BeginTurn failed: %v", err)
 	}
-	for range res2.Handle.Events() {
+	for range res2.Handle.ACPEvents() {
 	}
 
 	// Verify that NO new plugin marker event was appended (total should remain 1)

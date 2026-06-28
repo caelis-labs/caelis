@@ -110,28 +110,11 @@ func (EventProjector) ProjectPermissionRequest(event *session.Event) (*RequestPe
 	if approval == nil {
 		return nil, false, nil
 	}
-	toolCall := permissionToolCallUpdateFromProtocol(approval.ToolCall)
-	if strings.TrimSpace(toolCall.ToolCallID) == "" &&
-		toolCall.Title == nil &&
-		toolCall.Kind == nil &&
-		len(approval.Options) == 0 &&
-		rawInputLen(toolCall.RawInput) == 0 {
+	req := permissionRequestFromProtocol(strings.TrimSpace(event.SessionID), event.Meta, approval)
+	if req == nil {
 		return nil, false, nil
 	}
-	options := make([]PermissionOption, 0, len(approval.Options))
-	for _, item := range approval.Options {
-		options = append(options, PermissionOption{
-			OptionID: strings.TrimSpace(item.ID),
-			Name:     strings.TrimSpace(item.Name),
-			Kind:     strings.TrimSpace(item.Kind),
-		})
-	}
-	return &RequestPermissionRequest{
-		SessionID: strings.TrimSpace(event.SessionID),
-		ToolCall:  toolCall,
-		Options:   options,
-		Meta:      cloneAnyMap(event.Meta),
-	}, true, nil
+	return req, true, nil
 }
 
 func permissionToolCallUpdateFromProtocol(call session.ProtocolToolCall) ToolCallUpdate {

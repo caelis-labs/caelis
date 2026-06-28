@@ -98,9 +98,9 @@ Canonical priority is:
 `surfaces/transcript.Event` is a UI view model. It is not a wire protocol,
 store schema, or app-server API.
 
-`ports/gateway.Event` and `EventEnvelope` are transitional in-process DTOs used
-by compatibility bridges and legacy tests. New production surfaces must consume
-`eventstream.Envelope`.
+`ports/gateway` exposes service contracts and internal payload helpers for
+kernel/app coordination. Client-facing surfaces consume `eventstream.Envelope`
+and standard ACP payloads directly.
 
 ## Compatibility Stance
 

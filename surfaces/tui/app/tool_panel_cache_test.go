@@ -4,30 +4,54 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
-func TestToolPanelRenderCacheReusesUnchangedTerminalBody(t *testing.T) {
-	m := newPerfTestModel()
-	ctx := BlockRenderContext{Width: 96, TermWidth: 96, Theme: m.theme}
-	block := NewMainACPTurnBlock("session-1")
+func TestACPToolPanelRenderCacheReusesUnchangedTerminalBody(t *testing.T) {
+	t.Parallel()
 
-	block.UpdateToolWithMeta("call-1", "RUN_COMMAND", "go test", strings.Join(numberedToolLines(24), "\n"), false, false, ToolUpdateMeta{TaskID: "task-1"})
-	_ = block.Render(ctx)
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model = applyACPEnvelopeForTest(t, model, acpToolPanelUpdate("call-1", "go test", strings.Join(numberedToolLines(24), "\n"), schema.ToolStatusCompleted))
+	block := requireMainACPTurnBlockForTest(t, model)
+	ctx := BlockRenderContext{Width: 96, TermWidth: 96, Theme: model.theme, ThemeKey: themeRenderCacheKey(model.theme)}
+
+	rows := block.Render(ctx)
+	if !renderedRowsContainPlain(rows, "line 024") {
+		t.Fatalf("initial rows missing terminal tail: %#v", renderedPlainRows(rows))
+	}
 	cache := block.toolPanelRenderCache["call-1"]
 	if cache.bodyRenders != 1 {
 		t.Fatalf("initial body renders = %d, want 1", cache.bodyRenders)
 	}
 
-	_ = block.Render(ctx)
+	rows = block.Render(ctx)
+	if !renderedRowsContainPlain(rows, "line 024") {
+		t.Fatalf("cached rows missing terminal tail: %#v", renderedPlainRows(rows))
+	}
 	cache = block.toolPanelRenderCache["call-1"]
 	if cache.bodyRenders != 1 {
 		t.Fatalf("unchanged body renders = %d, want cache reuse at 1", cache.bodyRenders)
 	}
+
+	model = applyACPEnvelopeForTest(t, model, acpToolPanelUpdate("call-1", "go test", strings.Join(numberedToolLines(25), "\n"), schema.ToolStatusCompleted))
+	block = requireMainACPTurnBlockForTest(t, model)
+	rows = block.Render(ctx)
+	if !renderedRowsContainPlain(rows, "line 025") {
+		t.Fatalf("updated rows missing terminal tail: %#v", renderedPlainRows(rows))
+	}
+	cache = block.toolPanelRenderCache["call-1"]
+	if cache.bodyRenders != 2 {
+		t.Fatalf("changed body renders = %d, want cache miss at 2", cache.bodyRenders)
+	}
 }
 
 func TestTerminalToolPanelCacheKeyUsesBoundedTail(t *testing.T) {
-	m := newPerfTestModel()
-	ctx := BlockRenderContext{Width: 96, TermWidth: 96, Theme: m.theme}
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	ctx := BlockRenderContext{Width: 96, TermWidth: 96, Theme: model.theme, ThemeKey: themeRenderCacheKey(model.theme)}
 	block := NewMainACPTurnBlock("session-1")
 
 	longOutput := strings.Join(numberedToolLines(500), "\n")
@@ -43,8 +67,15 @@ func TestTerminalToolPanelCacheKeyUsesBoundedTail(t *testing.T) {
 }
 
 func TestGenericToolPanelCacheKeyUsesBoundedText(t *testing.T) {
-	m := newPerfTestModel()
-	ctx := BlockRenderContext{Width: maxGenericToolPanelCacheBytes, TermWidth: maxGenericToolPanelCacheBytes, Theme: m.theme}
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	ctx := BlockRenderContext{
+		Width:     maxGenericToolPanelCacheBytes,
+		TermWidth: maxGenericToolPanelCacheBytes,
+		Theme:     model.theme,
+		ThemeKey:  themeRenderCacheKey(model.theme),
+	}
 	cacheByCall := map[string]toolOutputRenderCache{}
 
 	longOutput := strings.Repeat("x", maxGenericToolPanelCacheBytes*2)
@@ -65,88 +96,26 @@ func TestGenericToolPanelCacheKeyUsesBoundedText(t *testing.T) {
 	}
 }
 
-func TestParticipantToolPanelRenderCachePreservesHeaderToken(t *testing.T) {
-	m := newPerfTestModel()
-	ctx := BlockRenderContext{Width: 96, TermWidth: 96, Theme: m.theme}
-	block := NewParticipantTurnBlock("session-1", "worker")
-
-	block.UpdateToolWithMeta("call-1", "RUN_COMMAND", "go test", strings.Join(numberedToolLines(6), "\n"), true, false, ToolUpdateMeta{TaskID: "task-1"})
-	rows := block.Render(ctx)
-	if !rowsContainClickToken(rows, acpToolPanelClickToken("call-1")) {
-		t.Fatalf("initial rows missing panel click token: %#v", renderedPlainRows(rows))
+func acpToolPanelUpdate(callID string, command string, output string, status string) eventstream.Envelope {
+	return eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		Final:     status != schema.ToolStatusInProgress,
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo,
+			ToolCallID:    callID,
+			Title:         stringPtr(command),
+			Kind:          stringPtr(schema.ToolKindExecute),
+			Status:        stringPtr(status),
+			RawInput:      map[string]any{"command": command},
+			Content: []schema.ToolCallContent{{
+				Type:       "terminal",
+				TerminalID: "terminal-1",
+				Content:    schema.TextContent{Type: "text", Text: output},
+			}},
+			Meta: acpToolNameMeta("RUN_COMMAND"),
+		},
 	}
-	if cache := block.toolPanelRenderCache["call-1"]; cache.bodyRenders != 1 {
-		t.Fatalf("initial participant body renders = %d, want 1", cache.bodyRenders)
-	}
-
-	rows = block.Render(ctx)
-	if !rowsContainClickToken(rows, acpToolPanelClickToken("call-1")) {
-		t.Fatalf("cached rows missing panel click token: %#v", renderedPlainRows(rows))
-	}
-	if cache := block.toolPanelRenderCache["call-1"]; cache.bodyRenders != 1 {
-		t.Fatalf("cached participant body renders = %d, want 1", cache.bodyRenders)
-	}
-}
-
-func TestDiffToolPanelRowsAreNumberedAndPreWrapped(t *testing.T) {
-	m := newPerfTestModel()
-	ctx := BlockRenderContext{Width: 72, TermWidth: 72, Theme: m.theme}
-	block := NewMainACPTurnBlock("session-1")
-	output := strings.Join([]string{
-		"demo.go +1 -1",
-		"diff / hunk",
-		"@@ -10,2 +10,2 @@",
-		" context",
-		"-old line",
-		"+new line",
-	}, "\n")
-
-	block.UpdateTool("patch-1", "PATCH", "demo.go +1 -1", output, true, false)
-	block.setToolPanelExpanded("patch-1", true)
-	rows := block.Render(ctx)
-
-	removeRow, ok := renderedRowContaining(rows, "-old line")
-	if !ok {
-		t.Fatalf("rendered rows missing removed line: %#v", renderedPlainRows(rows))
-	}
-	if !removeRow.PreWrapped {
-		t.Fatalf("removed diff row was not prewrapped: %#v", removeRow)
-	}
-	if !strings.Contains(removeRow.Plain, "11") {
-		t.Fatalf("removed diff row missing old line number: %q", removeRow.Plain)
-	}
-
-	addRow, ok := renderedRowContaining(rows, "+new line")
-	if !ok {
-		t.Fatalf("rendered rows missing added line: %#v", renderedPlainRows(rows))
-	}
-	if !addRow.PreWrapped {
-		t.Fatalf("added diff row was not prewrapped: %#v", addRow)
-	}
-	if !strings.Contains(addRow.Plain, "11") {
-		t.Fatalf("added diff row missing new line number: %q", addRow.Plain)
-	}
-	if addRow.Styled == addRow.Plain || !strings.Contains(addRow.Styled, "\x1b[") {
-		t.Fatalf("added diff row is not styled: plain=%q styled=%q", addRow.Plain, addRow.Styled)
-	}
-}
-
-func rowsContainClickToken(rows []RenderedRow, token string) bool {
-	for _, row := range rows {
-		if row.ClickToken == token {
-			return true
-		}
-	}
-	return false
-}
-
-func renderedRowContaining(rows []RenderedRow, needle string) (RenderedRow, bool) {
-	for _, row := range rows {
-		if strings.Contains(row.Plain, needle) {
-			return row, true
-		}
-	}
-	return RenderedRow{}, false
 }
 
 func numberedToolLines(n int) []string {
@@ -155,4 +124,21 @@ func numberedToolLines(n int) []string {
 		lines[i] = fmt.Sprintf("line %03d", i+1)
 	}
 	return lines
+}
+
+func renderedPlainRows(rows []RenderedRow) []string {
+	out := make([]string, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, row.Plain)
+	}
+	return out
+}
+
+func renderedRowsContainPlain(rows []RenderedRow, needle string) bool {
+	for _, row := range rows {
+		if strings.Contains(row.Plain, needle) {
+			return true
+		}
+	}
+	return false
 }

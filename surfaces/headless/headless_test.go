@@ -283,46 +283,25 @@ func (f fakeStarter) BeginTurn(context.Context, gateway.BeginTurnRequest) (gatew
 }
 
 type fakeTurnHandle struct {
-	events      <-chan gateway.EventEnvelope
+	acpEvents   <-chan eventstream.Envelope
 	submissions []gateway.SubmitRequest
 }
 
-func newFakeTurnHandle(events []gateway.EventEnvelope) *fakeTurnHandle {
-	ch := make(chan gateway.EventEnvelope, len(events))
-	for _, env := range events {
-		ch <- env
-	}
-	close(ch)
-	return &fakeTurnHandle{events: ch}
-}
-
-type fakeACPHandle struct {
-	*fakeTurnHandle
-	acpEvents <-chan eventstream.Envelope
-}
-
-func newFakeACPHandle(events []eventstream.Envelope) *fakeACPHandle {
+func newFakeACPHandle(events []eventstream.Envelope) *fakeTurnHandle {
 	ch := make(chan eventstream.Envelope, len(events))
 	for _, env := range events {
 		ch <- env
 	}
 	close(ch)
-	return &fakeACPHandle{
-		fakeTurnHandle: newFakeTurnHandle(nil),
-		acpEvents:      ch,
-	}
+	return &fakeTurnHandle{acpEvents: ch}
 }
 
-func (h *fakeTurnHandle) HandleID() string                     { return "h1" }
-func (h *fakeTurnHandle) RunID() string                        { return "run-1" }
-func (h *fakeTurnHandle) TurnID() string                       { return "turn-1" }
-func (h *fakeTurnHandle) SessionRef() session.SessionRef       { return session.SessionRef{} }
-func (h *fakeTurnHandle) CreatedAt() time.Time                 { return time.Time{} }
-func (h *fakeTurnHandle) Events() <-chan gateway.EventEnvelope { return h.events }
-func (h *fakeTurnHandle) EventsAfter(string) ([]gateway.EventEnvelope, string, error) {
-	return nil, "", nil
-}
-func (h *fakeTurnHandle) ACPEvents() <-chan eventstream.Envelope { return nil }
+func (h *fakeTurnHandle) HandleID() string                       { return "h1" }
+func (h *fakeTurnHandle) RunID() string                          { return "run-1" }
+func (h *fakeTurnHandle) TurnID() string                         { return "turn-1" }
+func (h *fakeTurnHandle) SessionRef() session.SessionRef         { return session.SessionRef{} }
+func (h *fakeTurnHandle) CreatedAt() time.Time                   { return time.Time{} }
+func (h *fakeTurnHandle) ACPEvents() <-chan eventstream.Envelope { return h.acpEvents }
 func (h *fakeTurnHandle) Submit(_ context.Context, req gateway.SubmitRequest) error {
 	h.submissions = append(h.submissions, req)
 	return nil
@@ -331,6 +310,3 @@ func (h *fakeTurnHandle) Cancel() gateway.CancelResult {
 	return gateway.CancelResult{Status: gateway.CancelStatusCancelled}
 }
 func (h *fakeTurnHandle) Close() error { return nil }
-func (h *fakeACPHandle) ACPEvents() <-chan eventstream.Envelope {
-	return h.acpEvents
-}

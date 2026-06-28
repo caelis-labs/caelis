@@ -10,7 +10,7 @@ import (
 func (g *Gateway) forwardSourceEvents(activeSession session.Session, handle *turnHandle, source eventsource.Handle) {
 	for sourceEvent, seqErr := range source.SourceEvents() {
 		if seqErr != nil {
-			handle.publish(turnLifecycleError(handle, seqErr))
+			handle.publishError(seqErr)
 			return
 		}
 		if sourceEvent.Canonical != nil {
@@ -41,17 +41,4 @@ func isACPFinalAssistantMaterialization(event *session.Event) bool {
 		return false
 	}
 	return session.IsCanonicalHistoryEvent(event) && !session.IsUIOnly(event)
-}
-
-func turnLifecycleError(handle *turnHandle, err error) EventEnvelope {
-	return EventEnvelope{
-		Event: Event{
-			Kind:       EventKindLifecycle,
-			HandleID:   handle.handleID,
-			RunID:      handle.runID,
-			TurnID:     handle.turnID,
-			SessionRef: handle.sessionRef,
-		},
-		Err: EventError(err),
-	}
 }

@@ -438,14 +438,6 @@ func (h *reviewProfileHandle) SessionRef() session.SessionRef {
 	return h.ref
 }
 func (h *reviewProfileHandle) CreatedAt() time.Time { return time.Time{} }
-func (h *reviewProfileHandle) Events() <-chan gateway.EventEnvelope {
-	ch := make(chan gateway.EventEnvelope)
-	close(ch)
-	return ch
-}
-func (h *reviewProfileHandle) EventsAfter(string) ([]gateway.EventEnvelope, string, error) {
-	return nil, "", nil
-}
 func (h *reviewProfileHandle) ACPEvents() <-chan eventstream.Envelope {
 	return h.acpEvents
 }

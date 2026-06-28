@@ -517,7 +517,7 @@ func TestNewLocalStackRunsSessionStartHook(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginTurn failed: %v", err)
 	}
-	for range res.Handle.Events() {
+	for range res.Handle.ACPEvents() {
 	}
 
 	// Verify that the hook ran and appended plugin context as a user-role model message.

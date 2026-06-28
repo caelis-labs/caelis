@@ -7,27 +7,6 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
-func AssistantText(event Event) string {
-	if event.Narrative != nil && event.Narrative.Role == NarrativeRoleAssistant {
-		return strings.TrimSpace(event.Narrative.Text)
-	}
-	return ""
-}
-
-func PromptTokens(event Event) int {
-	if event.Usage == nil {
-		return 0
-	}
-	return event.Usage.PromptTokens
-}
-
-func CachedInputTokens(event Event) int {
-	if event.Usage == nil {
-		return 0
-	}
-	return event.Usage.CachedInputTokens
-}
-
 // UsageSnapshotFromSessionEvent projects provider token usage from a durable
 // session event into the canonical gateway usage contract.
 func UsageSnapshotFromSessionEvent(event *session.Event) *UsageSnapshot {

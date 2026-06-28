@@ -13,7 +13,8 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
 	"github.com/OnslaughtSnail/caelis/ports/gateway"
-	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
 func TestGatewayProviderLiveReasoningBoundaryFromLocalConfigE2E(t *testing.T) {
@@ -57,8 +58,8 @@ func TestGatewayProviderLiveReasoningBoundaryFromLocalConfigE2E(t *testing.T) {
 	defer result.Handle.Close()
 
 	var trace liveReasoningTrace
-	for env := range result.Handle.Events() {
-		if env.Err != nil {
+	for env := range result.Handle.ACPEvents() {
+		if env.Kind == eventstream.KindError {
 			t.Fatalf("handle event error = %v", env.Err)
 		}
 		trace.capture(env)
@@ -82,30 +83,29 @@ type liveReasoningTrace struct {
 	firstOverlapLayer string
 }
 
-func (t *liveReasoningTrace) capture(env gateway.EventEnvelope) {
-	if t == nil || env.Event.Narrative == nil {
+func (t *liveReasoningTrace) capture(env eventstream.Envelope) {
+	if t == nil || env.Kind != eventstream.KindSessionUpdate {
 		return
 	}
-	payload := env.Event.Narrative
-	if payload.Role != gateway.NarrativeRoleAssistant {
+	chunk, ok := env.Update.(schema.ContentChunk)
+	if !ok {
 		return
 	}
-	if payload.Visibility == string(session.VisibilityUIOnly) {
-		switch payload.UpdateType {
-		case string(session.ProtocolUpdateTypeAgentThought):
-			t.reasoningChunks = append(t.reasoningChunks, strings.TrimSpace(payload.ReasoningText))
-		case string(session.ProtocolUpdateTypeAgentMessage):
-			t.answerChunks = append(t.answerChunks, strings.TrimSpace(payload.Text))
+	text := strings.TrimSpace(schema.ExtractTextValue(chunk.Content))
+	switch chunk.SessionUpdate {
+	case schema.UpdateAgentThought:
+		t.reasoningChunks = append(t.reasoningChunks, text)
+		if env.Final {
+			t.finalRawReasoning = text
 		}
-		return
+	case schema.UpdateAgentMessage:
+		t.answerChunks = append(t.answerChunks, text)
+		if env.Final {
+			t.finalRawText = text
+			t.finalEventText = text
+			t.finalPayloadText = text
+		}
 	}
-	if payload.Visibility != string(session.VisibilityCanonical) {
-		return
-	}
-	t.finalRawReasoning = strings.TrimSpace(payload.ReasoningText)
-	t.finalRawText = strings.TrimSpace(payload.Text)
-	t.finalEventText = strings.TrimSpace(payload.Text)
-	t.finalPayloadText = strings.TrimSpace(payload.Text)
 	t.classify()
 }
 

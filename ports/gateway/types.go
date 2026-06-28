@@ -397,55 +397,6 @@ type EventOrigin struct {
 	ParticipantSessionID string     `json:"participant_session_id,omitempty"`
 }
 
-// Event is a transitional in-process DTO used by legacy gateway adapters and
-// compatibility tests. New client-facing surfaces should consume
-// eventstream.Envelope instead of treating Event as a public wire protocol.
-type Event struct {
-	Kind       EventKind                `json:"kind"`
-	HandleID   string                   `json:"handle_id,omitempty"`
-	RunID      string                   `json:"run_id,omitempty"`
-	TurnID     string                   `json:"turn_id,omitempty"`
-	OccurredAt time.Time                `json:"occurred_at,omitempty"`
-	SessionRef session.SessionRef       `json:"session_ref,omitempty"`
-	Origin     *EventOrigin             `json:"origin,omitempty"`
-	Meta       map[string]any           `json:"_meta,omitempty"`
-	Invocation *session.EventInvocation `json:"invocation,omitempty"`
-	// Protocol is the canonical ACP-shaped event payload. UI layers should use
-	// this plus _meta.caelis, not gateway display fallbacks, as their semantic
-	// source of truth.
-	Protocol *session.EventProtocol `json:"protocol,omitempty"`
-	// Usage is the canonical token snapshot projected from one runtime/session
-	// event. It is stable across UI, headless, and adapter boundaries.
-	Usage *UsageSnapshot `json:"usage,omitempty"`
-	// Narrative carries stable user/assistant/system/notice text. Assistant
-	// reasoning remains separate in ReasoningText so UIs can preserve the answer
-	// boundary without re-parsing raw provider events.
-	Narrative *NarrativePayload `json:"narrative,omitempty"`
-	// ToolCall is the stable canonical tool invocation view with normalized
-	// status and raw ACP-compatible input.
-	ToolCall *ToolCallPayload `json:"tool_call,omitempty"`
-	// ToolResult is the stable canonical tool result/update view with normalized
-	// status and raw ACP-compatible output.
-	ToolResult *ToolResultPayload `json:"tool_result,omitempty"`
-	// Plan is the stable canonical plan snapshot for one event.
-	Plan *PlanPayload `json:"plan,omitempty"`
-	// ApprovalPayload is the stable canonical approval request summary for one
-	// event.
-	ApprovalPayload *ApprovalPayload `json:"approval,omitempty"`
-	// Participant is the stable canonical participant lifecycle payload.
-	Participant *ParticipantPayload `json:"participant,omitempty"`
-	// Lifecycle is the stable canonical run/session lifecycle payload.
-	Lifecycle *LifecyclePayload `json:"lifecycle,omitempty"`
-}
-
-// EventEnvelope wraps one transitional in-process gateway Event. It remains for
-// legacy adapters; stable client streams use eventstream.Envelope.
-type EventEnvelope struct {
-	Cursor string `json:"cursor,omitempty"`
-	Event  Event  `json:"event"`
-	Err    *Error `json:"err,omitempty"`
-}
-
 type SubmissionKind = agent.SubmissionKind
 
 const (
@@ -497,8 +448,6 @@ type TurnHandle interface {
 	TurnID() string
 	SessionRef() session.SessionRef
 	CreatedAt() time.Time
-	Events() <-chan EventEnvelope
-	EventsAfter(string) ([]EventEnvelope, string, error)
 	ACPEvents() <-chan eventstream.Envelope
 	Submit(context.Context, SubmitRequest) error
 	Cancel() agent.CancelResult

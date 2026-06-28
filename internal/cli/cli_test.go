@@ -474,15 +474,7 @@ func (h *fakeHandle) TurnID() string   { return "t1" }
 func (h *fakeHandle) SessionRef() session.SessionRef {
 	return session.SessionRef{SessionID: "s1"}
 }
-func (h *fakeHandle) CreatedAt() time.Time { return time.Time{} }
-func (h *fakeHandle) Events() <-chan gateway.EventEnvelope {
-	ch := make(chan gateway.EventEnvelope)
-	close(ch)
-	return ch
-}
-func (h *fakeHandle) EventsAfter(string) ([]gateway.EventEnvelope, string, error) {
-	return nil, "", nil
-}
+func (h *fakeHandle) CreatedAt() time.Time                   { return time.Time{} }
 func (h *fakeHandle) ACPEvents() <-chan eventstream.Envelope { return h.events }
 func (h *fakeHandle) Submit(_ context.Context, req gateway.SubmitRequest) error {
 	h.submits = append(h.submits, req)

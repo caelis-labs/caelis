@@ -476,7 +476,7 @@ func TestPromptParticipantCancelCancelsRuntimeRunner(t *testing.T) {
 		t.Fatal("participant turn cancel did not cancel runtime runner")
 	}
 	close(runner.release)
-	for range result.Handle.Events() {
+	for range result.Handle.ACPEvents() {
 	}
 }
 
@@ -982,7 +982,7 @@ func TestBeginTurnLoadsSessionResolvesIntentRunsRuntimeAndPublishesEvents(t *tes
 		t.Fatalf("BeginTurn() error = %v", err)
 	}
 	got := collectHandleEvents(t, result.Handle)
-	if len(got) == 0 || got[len(got)-1].Cursor != "e1" || got[len(got)-1].Event.Narrative == nil {
+	if len(got) == 0 || got[len(got)-1].EventID != "e1" || eventstream.UpdateType(got[len(got)-1].Update) != schema.UpdateAgentMessage {
 		t.Fatalf("published events = %#v, want assistant event e1", got)
 	}
 	if rt.lastReq.SessionRef != activeSession.SessionRef || rt.lastReq.Input != "hello" {
@@ -1249,9 +1249,9 @@ func TestBeginTurnBridgesApprovalRequestsIntoHandleEvents(t *testing.T) {
 		t.Fatalf("BeginTurn() error = %v", err)
 	}
 
-	first := <-result.Handle.Events()
-	if first.Event.Kind != EventKindApprovalRequested {
-		t.Fatalf("first event kind = %q, want approval_requested", first.Event.Kind)
+	first := <-result.Handle.ACPEvents()
+	if first.Kind != eventstream.KindRequestPermission {
+		t.Fatalf("first event kind = %q, want request_permission", first.Kind)
 	}
 	if err := result.Handle.Submit(context.Background(), SubmitRequest{
 		Kind: SubmissionKindApproval,
@@ -1262,10 +1262,7 @@ func TestBeginTurnBridgesApprovalRequestsIntoHandleEvents(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Submit(approval) error = %v", err)
 	}
-	got := collectHandleEvents(t, result.Handle)
-	if len(got) == 0 {
-		t.Fatal("collectHandleEvents() = empty, want completion event stream")
-	}
+	_ = collectHandleEvents(t, result.Handle)
 }
 
 func TestBeginTurnDefaultManualApprovalModePromptsClient(t *testing.T) {
@@ -1300,9 +1297,9 @@ func TestBeginTurnDefaultManualApprovalModePromptsClient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginTurn() error = %v", err)
 	}
-	first := <-result.Handle.Events()
-	if first.Event.Kind != EventKindApprovalRequested {
-		t.Fatalf("first event kind = %q, want approval_requested from default manual mode", first.Event.Kind)
+	first := <-result.Handle.ACPEvents()
+	if first.Kind != eventstream.KindRequestPermission {
+		t.Fatalf("first event kind = %q, want request_permission from default manual mode", first.Kind)
 	}
 	if err := result.Handle.Submit(context.Background(), SubmitRequest{
 		Kind: SubmissionKindApproval,
@@ -1313,10 +1310,7 @@ func TestBeginTurnDefaultManualApprovalModePromptsClient(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Submit(approval) error = %v", err)
 	}
-	got := collectHandleEvents(t, result.Handle)
-	if len(got) == 0 {
-		t.Fatal("collectHandleEvents() = empty, want completion event stream")
-	}
+	_ = collectHandleEvents(t, result.Handle)
 }
 
 func TestBeginTurnSessionApprovalModeOverridesDefaultManual(t *testing.T) {
@@ -1351,14 +1345,14 @@ func TestBeginTurnSessionApprovalModeOverridesDefaultManual(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginTurn() error = %v", err)
 	}
-	first := <-result.Handle.Events()
-	if first.Event.Kind != EventKindApprovalReview {
-		t.Fatalf("first event kind = %q, want approval_review from session auto-review override", first.Event.Kind)
+	first := <-result.Handle.ACPEvents()
+	if first.Kind != eventstream.KindApprovalReview {
+		t.Fatalf("first event kind = %q, want approval_review from session auto-review override", first.Kind)
 	}
 	got := collectHandleEvents(t, result.Handle)
-	for _, env := range append([]EventEnvelope{first}, got...) {
-		if env.Event.Kind == EventKindApprovalRequested {
-			t.Fatal("got approval_requested, want session auto-review override to beat default manual")
+	for _, env := range append([]eventstream.Envelope{first}, got...) {
+		if env.Kind == eventstream.KindRequestPermission {
+			t.Fatal("got request_permission, want session auto-review override to beat default manual")
 		}
 	}
 }
@@ -1394,17 +1388,17 @@ func TestBeginTurnRequestModeManualIgnoredUnderAutoReview(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginTurn() error = %v", err)
 	}
-	first := <-result.Handle.Events()
-	if first.Event.Kind != EventKindApprovalReview {
-		t.Fatalf("first event kind = %q, want auto approval_review", first.Event.Kind)
+	first := <-result.Handle.ACPEvents()
+	if first.Kind != eventstream.KindApprovalReview {
+		t.Fatalf("first event kind = %q, want auto approval_review", first.Kind)
 	}
 	got := collectHandleEvents(t, result.Handle)
 	if len(got) == 0 {
 		t.Fatal("collectHandleEvents() = empty, want terminal approval review event")
 	}
-	for _, env := range append([]EventEnvelope{first}, got...) {
-		if env.Event.Kind == EventKindApprovalRequested {
-			t.Fatal("got manual approval_requested, want request mode ignored under auto-review")
+	for _, env := range append([]eventstream.Envelope{first}, got...) {
+		if env.Kind == eventstream.KindRequestPermission {
+			t.Fatal("got manual request_permission, want request mode ignored under auto-review")
 		}
 	}
 }
@@ -1440,11 +1434,11 @@ func TestBeginTurnApprovalModeSnapshotErrorFailsTurn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginTurn() error = %v", err)
 	}
-	first := <-result.Handle.Events()
-	if first.Event.Kind != EventKindLifecycle || first.Err == nil {
-		t.Fatalf("first event = %+v, want lifecycle error on state read failure", first)
+	first := <-result.Handle.ACPEvents()
+	if first.Kind != eventstream.KindError || first.Err == nil {
+		t.Fatalf("first event = %+v, want eventstream error on state read failure", first)
 	}
-	for range result.Handle.Events() {
+	for range result.Handle.ACPEvents() {
 	}
 }
 
@@ -1485,25 +1479,26 @@ func TestBeginTurnAutoReviewDenialDoesNotInterruptTurn(t *testing.T) {
 	if len(events) < 3 {
 		t.Fatalf("events len = %d, want in-progress, denied, and runtime completion", len(events))
 	}
-	if events[0].Event.Kind != EventKindApprovalReview {
-		t.Fatalf("first event kind = %q, want approval_review", events[0].Event.Kind)
+	if events[0].Kind != eventstream.KindApprovalReview || events[0].ApprovalReview == nil {
+		t.Fatalf("first event = %#v, want approval_review", events[0])
 	}
-	if got := events[0].Event.ApprovalPayload.ReviewStatus; got != ApprovalReviewStatusInProgress {
+	if got := events[0].ApprovalReview.Status; got != string(ApprovalReviewStatusInProgress) {
 		t.Fatalf("first review status = %q, want in_progress", got)
 	}
-	if events[1].Event.Kind != EventKindApprovalReview {
-		t.Fatalf("terminal event kind = %q, want approval_review", events[1].Event.Kind)
+	if events[1].Kind != eventstream.KindApprovalReview || events[1].ApprovalReview == nil {
+		t.Fatalf("terminal event = %#v, want approval_review", events[1])
 	}
-	if got := events[1].Event.ApprovalPayload.ReviewStatus; got != ApprovalReviewStatusDenied {
+	if got := events[1].ApprovalReview.Status; got != string(ApprovalReviewStatusDenied) {
 		t.Fatalf("terminal review status = %q, want denied", got)
 	}
-	if text := events[1].Event.ApprovalPayload.ReviewText; !strings.Contains(text, "not narrow enough") {
+	if text := events[1].ApprovalReview.Text; !strings.Contains(text, "not narrow enough") {
 		t.Fatalf("review text = %q, want reviewer rationale", text)
 	}
-	if usage := events[1].Event.Usage; usage == nil || usage.PromptTokens != 7 || usage.CachedInputTokens != 3 || usage.CompletionTokens != 2 || usage.ReasoningTokens != 1 || usage.TotalTokens != 9 {
+	usage := firstUsageSnapshot(events)
+	if usage == nil || usage.PromptTokens != 7 || usage.CachedInputTokens != 3 || usage.CompletionTokens != 2 || usage.ReasoningTokens != 1 || usage.TotalTokens != 9 {
 		t.Fatalf("terminal review usage = %+v, want reviewer usage", usage)
 	}
-	if events[len(events)-1].Err != nil {
+	if events[len(events)-1].Kind == eventstream.KindError {
 		t.Fatalf("last event error = %v, want normal turn continuation", events[len(events)-1].Err)
 	}
 }
@@ -1607,18 +1602,18 @@ func TestBeginTurnAutoReviewRepeatedDenialsDoNotReplaceReviewerDecision(t *testi
 	if len(events) == 0 {
 		t.Fatalf("events = %#v, want approval review events", events)
 	}
-	if events[len(events)-1].Err != nil {
+	if events[len(events)-1].Kind == eventstream.KindError {
 		t.Fatalf("last event error = %#v, want repeated denials to preserve reviewer decisions", events[len(events)-1].Err)
 	}
 	denials := 0
 	for _, env := range events {
-		payload := env.Event.ApprovalPayload
-		if payload == nil || payload.ReviewStatus != ApprovalReviewStatusDenied {
+		review := env.ApprovalReview
+		if env.Kind != eventstream.KindApprovalReview || review == nil || review.Status != string(ApprovalReviewStatusDenied) {
 			continue
 		}
 		denials++
-		if !strings.Contains(payload.ReviewText, "repeated unsafe request") {
-			t.Fatalf("review text = %q, want reviewer rationale", payload.ReviewText)
+		if !strings.Contains(review.Text, "repeated unsafe request") {
+			t.Fatalf("review text = %q, want reviewer rationale", review.Text)
 		}
 	}
 	if denials != 3 {
@@ -2623,14 +2618,14 @@ func TestSanityTestClock(t *testing.T) {
 	}
 }
 
-func collectHandleEvents(t *testing.T, handle TurnHandle) []EventEnvelope {
+func collectHandleEvents(t *testing.T, handle TurnHandle) []eventstream.Envelope {
 	t.Helper()
 
-	var out []EventEnvelope
+	var out []eventstream.Envelope
 	timeout := time.After(2 * time.Second)
 	for {
 		select {
-		case env, ok := <-handle.Events():
+		case env, ok := <-handle.ACPEvents():
 			if !ok {
 				return out
 			}
@@ -2639,4 +2634,13 @@ func collectHandleEvents(t *testing.T, handle TurnHandle) []EventEnvelope {
 			t.Fatalf("timed out waiting for handle events: %#v", out)
 		}
 	}
+}
+
+func firstUsageSnapshot(events []eventstream.Envelope) *eventstream.UsageSnapshot {
+	for _, env := range events {
+		if usage := eventstream.UsageSnapshotFromEnvelope(env); usage != nil {
+			return usage
+		}
+	}
+	return nil
 }

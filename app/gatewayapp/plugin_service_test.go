@@ -712,7 +712,7 @@ func TestPluginServiceRejectsWhileActiveTurn(t *testing.T) {
 	defer handle.Handle.Close()
 	defer func() {
 		close(blocking.release)
-		for range handle.Handle.Events() {
+		for range handle.Handle.ACPEvents() {
 		}
 	}()
 

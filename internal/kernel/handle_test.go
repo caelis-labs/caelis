@@ -4,12 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"iter"
 	"testing"
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/ports/agent"
-	"github.com/OnslaughtSnail/caelis/ports/eventsource"
+	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/tool"
@@ -17,42 +16,33 @@ import (
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
-func TestTurnHandleReplaysEventsAfterCursor(t *testing.T) {
+func TestTurnHandleReplaysEventstreamAfterCursor(t *testing.T) {
 	t.Parallel()
 
-	handle := newTurnHandle(turnHandleConfig{
-		handleID: "h1",
-		runID:    "run-1",
-		turnID:   "turn-1",
-		sessionRef: session.SessionRef{
-			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
-		},
-		createdAt: time.Unix(100, 0),
-	})
-	handle.publishSessionEvent(&session.Event{ID: "e1", Type: session.EventTypeUser})
-	handle.publishSessionEvent(&session.Event{ID: "e2", Type: session.EventTypeAssistant})
+	handle := newTestTurnHandle()
+	handle.publishACP(eventstream.Envelope{Kind: eventstream.KindNotice, Notice: "one"}, "")
+	handle.publishACP(eventstream.Envelope{Kind: eventstream.KindNotice, Notice: "two"}, "")
 
-	replayed, next, err := handle.EventsAfter("e1")
+	all, next, err := handle.eventsAfter("")
 	if err != nil {
-		t.Fatalf("EventsAfter() error = %v", err)
+		t.Fatalf("eventsAfter() error = %v", err)
 	}
-	if len(replayed) != 1 || replayed[0].Cursor != "e2" || next != "e2" {
-		t.Fatalf("EventsAfter() = %#v, %q, want only e2", replayed, next)
+	if len(all) != 2 || next != all[1].Cursor {
+		t.Fatalf("eventsAfter() = %#v, %q, want both events and latest cursor", all, next)
+	}
+	replayed, next, err := handle.eventsAfter(all[0].Cursor)
+	if err != nil {
+		t.Fatalf("eventsAfter(cursor) error = %v", err)
+	}
+	if len(replayed) != 1 || replayed[0].Notice != "two" || next != replayed[0].Cursor {
+		t.Fatalf("eventsAfter(cursor) = %#v, %q, want second event", replayed, next)
 	}
 }
 
 func TestTurnHandleACPEventsProjectsCanonicalAndPassesThroughTransient(t *testing.T) {
 	t.Parallel()
 
-	handle := newTurnHandle(turnHandleConfig{
-		handleID: "h1",
-		runID:    "run-1",
-		turnID:   "turn-1",
-		sessionRef: session.SessionRef{
-			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
-		},
-		createdAt: time.Unix(100, 0),
-	})
+	handle := newTestTurnHandle()
 	acpEvents := handle.ACPEvents()
 	msg := model.NewTextMessage(model.RoleAssistant, "done")
 	handle.publishSessionEvent(&session.Event{ID: "e1", Type: session.EventTypeAssistant, Message: &msg})
@@ -64,10 +54,7 @@ func TestTurnHandleACPEventsProjectsCanonicalAndPassesThroughTransient(t *testin
 	}, "acp_passthrough")
 	handle.finish()
 
-	var got []eventstream.Envelope
-	for env := range acpEvents {
-		got = append(got, env)
-	}
+	got := drainACPEvents(acpEvents)
 	if len(got) != 2 {
 		t.Fatalf("ACPEvents() produced %d events, want 2: %#v", len(got), got)
 	}
@@ -86,70 +73,12 @@ func TestTurnHandleACPEventsProjectsCanonicalAndPassesThroughTransient(t *testin
 	if got[1].EventID != "" || got[1].ProjectionID != "" {
 		t.Fatalf("passthrough source ids = event:%q projection:%q, want empty", got[1].EventID, got[1].ProjectionID)
 	}
-	if got[1].SessionID != "s1" || got[1].HandleID != "h1" || got[1].RunID != "run-1" || got[1].TurnID != "turn-1" {
-		t.Fatalf("passthrough IDs = session:%q handle:%q run:%q turn:%q", got[1].SessionID, got[1].HandleID, got[1].RunID, got[1].TurnID)
-	}
-	replayed, _, err := handle.EventsAfter("")
-	if err != nil {
-		t.Fatalf("EventsAfter() error = %v", err)
-	}
-	if len(replayed) != 1 || replayed[0].Cursor != "e1" {
-		t.Fatalf("EventsAfter() = %#v, want only canonical event e1", replayed)
-	}
 }
 
-func TestTurnHandlePublishWakesGatewayAndACPStreams(t *testing.T) {
+func TestTurnHandleCanSuppressCanonicalProjectionForNativePassthrough(t *testing.T) {
 	t.Parallel()
 
-	handle := newTurnHandle(turnHandleConfig{
-		handleID: "h1",
-		runID:    "run-1",
-		turnID:   "turn-1",
-		sessionRef: session.SessionRef{
-			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
-		},
-		createdAt: time.Unix(100, 0),
-	})
-	events := handle.Events()
-	acpEvents := handle.ACPEvents()
-	time.Sleep(20 * time.Millisecond)
-
-	msg := model.NewTextMessage(model.RoleAssistant, "done")
-	handle.publishSessionEvent(&session.Event{ID: "e1", Type: session.EventTypeAssistant, Message: &msg})
-
-	select {
-	case env := <-events:
-		if env.Cursor != "e1" {
-			t.Fatalf("event cursor = %q, want e1", env.Cursor)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for canonical live event")
-	}
-	select {
-	case env := <-acpEvents:
-		update, ok := env.Update.(schema.ContentChunk)
-		if !ok || update.SessionUpdate != schema.UpdateAgentMessage {
-			t.Fatalf("ACP update = %#v, want projected assistant chunk", env.Update)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for ACP live event")
-	}
-	handle.finish()
-}
-
-func TestTurnHandleACPEventsCanSuppressCanonicalProjectionForNativePassthrough(t *testing.T) {
-	t.Parallel()
-
-	handle := newTurnHandle(turnHandleConfig{
-		handleID: "h1",
-		runID:    "run-1",
-		turnID:   "turn-1",
-		sessionRef: session.SessionRef{
-			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
-		},
-		createdAt: time.Unix(100, 0),
-	})
-	acpEvents := handle.ACPEvents()
+	handle := newTestTurnHandle()
 	msg := model.NewTextMessage(model.RoleAssistant, "done")
 	handle.publishSessionEventWithACPProjection(&session.Event{ID: "e1", Type: session.EventTypeAssistant, Message: &msg}, false)
 	handle.publishACP(eventstream.Envelope{
@@ -158,218 +87,81 @@ func TestTurnHandleACPEventsCanSuppressCanonicalProjectionForNativePassthrough(t
 			SessionUpdate: "vendor/custom",
 		},
 	}, "acp_passthrough")
-	handle.finish()
 
-	var got []eventstream.Envelope
-	for env := range acpEvents {
-		got = append(got, env)
-	}
-	if len(got) != 1 {
-		t.Fatalf("ACPEvents() produced %d events, want only native passthrough: %#v", len(got), got)
-	}
-	if update, ok := got[0].Update.(schema.RawUpdate); !ok || update.SessionUpdate != "vendor/custom" {
-		t.Fatalf("ACP update = %#v, want native raw passthrough", got[0].Update)
-	}
-	replayed, _, err := handle.EventsAfter("")
+	replayed, _, err := handle.eventsAfter("")
 	if err != nil {
-		t.Fatalf("EventsAfter() error = %v", err)
+		t.Fatalf("eventsAfter() error = %v", err)
 	}
-	if len(replayed) != 1 || replayed[0].Cursor != "e1" {
-		t.Fatalf("EventsAfter() = %#v, want canonical gateway event e1", replayed)
+	if len(replayed) != 1 {
+		t.Fatalf("eventsAfter() = %#v, want only native passthrough", replayed)
+	}
+	if update, ok := replayed[0].Update.(schema.RawUpdate); !ok || update.SessionUpdate != "vendor/custom" {
+		t.Fatalf("ACP update = %#v, want native raw passthrough", replayed[0].Update)
 	}
 }
 
-func TestGatewayForwardSourceEventsDoesNotProjectACPFinalMaterialization(t *testing.T) {
+func TestTurnHandlePublishesApprovalAsACPPermission(t *testing.T) {
 	t.Parallel()
 
-	handle := newTurnHandle(turnHandleConfig{
-		handleID: "h1",
-		runID:    "run-1",
-		turnID:   "turn-1",
-		sessionRef: session.SessionRef{
-			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
-		},
-		createdAt: time.Unix(100, 0),
-	})
-	acpEvents := handle.ACPEvents()
-	msg := model.NewTextMessage(model.RoleAssistant, "final answer")
-	(&Gateway{}).forwardSourceEvents(session.Session{SessionRef: handle.sessionRef}, handle, staticSourceEvents{
-		events: []eventsource.Event{{
-			Canonical: &session.Event{
-				ID:         "e-final",
-				SessionID:  "s1",
-				Type:       session.EventTypeAssistant,
-				Visibility: session.VisibilityCanonical,
-				Message:    &msg,
-				Scope:      &session.EventScope{Source: "acp", TurnID: "turn-1"},
-			},
-		}},
-	})
-	handle.finish()
-
-	var got []eventstream.Envelope
-	for env := range acpEvents {
-		got = append(got, env)
-	}
-	if len(got) != 0 {
-		t.Fatalf("ACPEvents() = %#v, want no live projection for ACP final materialization", got)
-	}
-	replayed, _, err := handle.EventsAfter("")
-	if err != nil {
-		t.Fatalf("EventsAfter() error = %v", err)
-	}
-	if len(replayed) != 1 || replayed[0].Cursor != "e-final" {
-		t.Fatalf("EventsAfter() = %#v, want durable canonical final event", replayed)
-	}
-}
-
-func TestTurnHandleCanonicalizesAssistantEventAndUsage(t *testing.T) {
-	t.Parallel()
-
-	handle := newTurnHandle(turnHandleConfig{
-		handleID: "h1",
-		runID:    "run-1",
-		turnID:   "turn-1",
-		sessionRef: session.SessionRef{
-			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
-		},
-		createdAt: time.Unix(100, 0),
-	})
-	handle.publishSessionEvent(&session.Event{
-		ID:   "e1",
-		Type: session.EventTypeAssistant,
-		Text: "done",
-		Meta: map[string]any{
-			"usage": map[string]any{
-				"prompt_tokens":       12,
-				"cached_input_tokens": 7,
-				"completion_tokens":   5,
-				"total_tokens":        17,
-			},
-		},
-	})
-
-	replayed, next, err := handle.EventsAfter("")
-	if err != nil {
-		t.Fatalf("EventsAfter() error = %v", err)
-	}
-	if len(replayed) != 1 || next != "e1" {
-		t.Fatalf("EventsAfter() = %#v, %q", replayed, next)
-	}
-	if replayed[0].Event.Kind != EventKindAssistantMessage {
-		t.Fatalf("event kind = %q, want %q", replayed[0].Event.Kind, EventKindAssistantMessage)
-	}
-	if got := AssistantText(replayed[0].Event); got != "done" {
-		t.Fatalf("AssistantText() = %q, want %q", got, "done")
-	}
-	if replayed[0].Event.Usage == nil || replayed[0].Event.Usage.PromptTokens != 12 || replayed[0].Event.Usage.CachedInputTokens != 7 || replayed[0].Event.Usage.CompletionTokens != 5 || replayed[0].Event.Usage.TotalTokens != 17 {
-		t.Fatalf("usage = %+v", replayed[0].Event.Usage)
-	}
-	if replayed[0].Event.Narrative == nil {
-		t.Fatal("event narrative = nil, want canonical narrative payload")
-	}
-	if replayed[0].Event.Narrative.Role != NarrativeRoleAssistant {
-		t.Fatalf("event narrative role = %q, want %q", replayed[0].Event.Narrative.Role, NarrativeRoleAssistant)
-	}
-	if replayed[0].Event.Narrative.Text != "done" {
-		t.Fatalf("event narrative text = %q, want %q", replayed[0].Event.Narrative.Text, "done")
-	}
-}
-
-func TestTurnHandleCanonicalizesApprovalEvent(t *testing.T) {
-	t.Parallel()
-
-	handle := newTurnHandle(turnHandleConfig{
-		handleID: "h1",
-		runID:    "run-1",
-		turnID:   "turn-1",
-		sessionRef: session.SessionRef{
-			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
-		},
-		createdAt: time.Unix(100, 0),
-	})
-	wait := handle.publishApproval(&agent.ApprovalRequest{
+	handle := newTestTurnHandle()
+	handle.publishApproval(&agent.ApprovalRequest{
 		Tool: tool.Definition{Name: "RUN_COMMAND"},
+		Call: tool.Call{ID: "call-1", Input: []byte(`{"command":"go test ./..."}`)},
+		Approval: &session.ProtocolApproval{
+			Options: []session.ProtocolApprovalOption{{
+				ID:   "allow_once",
+				Name: "Allow once",
+				Kind: "allow_once",
+			}},
+		},
 	})
-	if wait == nil {
-		t.Fatal("publishApproval() returned nil wait channel")
-	}
-
-	replayed, _, err := handle.EventsAfter("")
+	replayed, _, err := handle.eventsAfter("")
 	if err != nil {
-		t.Fatalf("EventsAfter() error = %v", err)
+		t.Fatalf("eventsAfter() error = %v", err)
 	}
-	if len(replayed) != 1 {
-		t.Fatalf("EventsAfter() len = %d, want 1", len(replayed))
+	if len(replayed) != 1 || replayed[0].Kind != eventstream.KindRequestPermission || replayed[0].Permission == nil {
+		t.Fatalf("approval events = %#v, want request_permission", replayed)
 	}
-	if replayed[0].Event.ApprovalPayload == nil {
-		t.Fatal("approval payload = nil, want canonical approval payload")
+	permission := replayed[0].Permission
+	if permission.ToolCall.ToolCallID != "call-1" || stringPtrValue(permission.ToolCall.Kind) != schema.ToolKindExecute {
+		t.Fatalf("permission tool call = %#v, want execute call-1", permission.ToolCall)
 	}
-	if replayed[0].Event.ApprovalPayload.ToolName != "RUN_COMMAND" {
-		t.Fatalf("approval payload tool name = %q, want %q", replayed[0].Event.ApprovalPayload.ToolName, "RUN_COMMAND")
+	if got := gateway.EventMetaString(permission.ToolCall.Meta, gateway.EventMetaRoot, gateway.EventMetaRuntime, gateway.EventMetaRuntimeTool, gateway.EventMetaRuntimeToolName); got != "RUN_COMMAND" {
+		t.Fatalf("permission tool meta = %#v, want RUN_COMMAND tool name", permission.ToolCall.Meta)
 	}
-	if replayed[0].Event.Origin == nil || replayed[0].Event.Origin.Scope != EventScopeMain || replayed[0].Event.Origin.ScopeID != "s1" {
-		t.Fatalf("approval origin = %+v, want main session scope", replayed[0].Event.Origin)
+	if len(permission.Options) != 1 || permission.Options[0].OptionID != "allow_once" {
+		t.Fatalf("permission options = %#v, want allow_once", permission.Options)
 	}
 }
 
-func TestTurnHandleAnchorsSubagentApprovalToParentTool(t *testing.T) {
+func TestTurnHandlePublishErrorUsesEventstreamError(t *testing.T) {
 	t.Parallel()
 
-	handle := newTurnHandle(turnHandleConfig{
-		handleID: "h1",
-		runID:    "run-1",
-		turnID:   "turn-1",
-		sessionRef: session.SessionRef{
-			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
-		},
-		createdAt: time.Unix(100, 0),
-	})
-	handle.publishApprovalReviewPayload(&agent.ApprovalRequest{
-		Tool: tool.Definition{Name: "custom_tool"},
-		Metadata: map[string]any{
-			"subagent":       true,
-			"scope_id":       "task-1",
-			"parent_call_id": "spawn-1",
-			"parent_tool":    "SPAWN",
-		},
-	}, &ApprovalPayload{
-		ToolName:     "custom_tool",
-		ReviewStatus: ApprovalReviewStatusApproved,
-		ReviewText:   "Automatic approval review approved",
-	})
-
-	replayed, _, err := handle.EventsAfter("")
+	handle := newTestTurnHandle()
+	handle.publishError(errors.New("provider failed"))
+	replayed, _, err := handle.eventsAfter("")
 	if err != nil {
-		t.Fatalf("EventsAfter() error = %v", err)
+		t.Fatalf("eventsAfter() error = %v", err)
 	}
-	if len(replayed) != 1 {
-		t.Fatalf("EventsAfter() len = %d, want 1", len(replayed))
+	if len(replayed) != 1 || replayed[0].Kind != eventstream.KindError || replayed[0].Error != "provider failed" {
+		t.Fatalf("error event = %#v, want eventstream error", replayed)
 	}
-	event := replayed[0].Event
-	if event.Origin == nil || event.Origin.Scope != EventScopeSubagent || event.Origin.ScopeID != "task-1" {
-		t.Fatalf("approval origin = %+v, want subagent task scope", event.Origin)
+	if replayed[0].SessionID != "s1" || replayed[0].HandleID != "h1" || replayed[0].RunID != "run-1" || replayed[0].TurnID != "turn-1" {
+		t.Fatalf("error IDs = %#v", replayed[0])
 	}
-	if got := EventMetaString(event.Meta, EventMetaRoot, EventMetaRuntime, EventMetaRuntimeStream, EventMetaRuntimeStreamParentCallID); got != "spawn-1" {
-		t.Fatalf("parent_call_id meta = %q, want spawn-1", got)
+}
+
+func stringPtrValue(value *string) string {
+	if value == nil {
+		return ""
 	}
-	if got := EventMetaString(event.Meta, EventMetaRoot, EventMetaRuntime, EventMetaRuntimeStream, EventMetaRuntimeStreamParentTool); got != "SPAWN" {
-		t.Fatalf("parent_tool meta = %q, want SPAWN", got)
-	}
+	return *value
 }
 
 func TestTurnHandleSubmitRoutesApprovalAndContinuation(t *testing.T) {
 	t.Parallel()
 
-	handle := newTurnHandle(turnHandleConfig{
-		handleID: "h1",
-		runID:    "run-1",
-		turnID:   "turn-1",
-		sessionRef: session.SessionRef{
-			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
-		},
-		createdAt: time.Unix(100, 0),
-	})
+	handle := newTestTurnHandle()
 	runner := &recordingRunner{}
 	handle.setRunner(runner)
 
@@ -399,15 +191,7 @@ func TestTurnHandleSubmitRoutesApprovalAndContinuation(t *testing.T) {
 func TestTurnHandleSubmitRejectsUnknownSubmissionKind(t *testing.T) {
 	t.Parallel()
 
-	handle := newTurnHandle(turnHandleConfig{
-		handleID: "h1",
-		runID:    "run-1",
-		turnID:   "turn-1",
-		sessionRef: session.SessionRef{
-			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
-		},
-		createdAt: time.Unix(100, 0),
-	})
+	handle := newTestTurnHandle()
 	handle.setRunner(&recordingRunner{})
 
 	err := handle.Submit(context.Background(), SubmitRequest{
@@ -459,164 +243,55 @@ func TestTurnHandleCancelCancelsContextAndRunner(t *testing.T) {
 	}
 }
 
-func TestTurnHandleSetRunnerAfterCancelCancelsRunner(t *testing.T) {
+func TestTurnHandlePublishDoesNotBlockWithoutSubscriber(t *testing.T) {
 	t.Parallel()
 
-	handle := newTurnHandle(turnHandleConfig{
-		handleID: "h1",
-		runID:    "run-1",
-		turnID:   "turn-1",
-		sessionRef: session.SessionRef{
-			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
-		},
-		createdAt: time.Unix(100, 0),
-	})
-	result := handle.Cancel()
-	if result.Status != agent.CancelStatusCancelled {
-		t.Fatalf("Cancel().Status = %q, want %q", result.Status, agent.CancelStatusCancelled)
-	}
-	runner := &recordingRunner{}
-	handle.setRunner(runner)
-	if !runner.cancelled {
-		t.Fatal("late runner was not cancelled")
-	}
-}
-
-func TestTurnHandleCloseIsIdempotent(t *testing.T) {
-	t.Parallel()
-
-	handle := newTurnHandle(turnHandleConfig{
-		handleID: "h1",
-		runID:    "run-1",
-		turnID:   "turn-1",
-		sessionRef: session.SessionRef{
-			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
-		},
-		createdAt: time.Unix(100, 0),
-	})
-	if err := handle.Close(); err != nil {
-		t.Fatalf("Close(first) error = %v", err)
-	}
-	if err := handle.Close(); err != nil {
-		t.Fatalf("Close(second) error = %v", err)
-	}
-}
-
-func TestTurnHandleCloseAfterFinishDoesNotDoubleClose(t *testing.T) {
-	t.Parallel()
-
-	handle := newTurnHandle(turnHandleConfig{
-		handleID: "h1",
-		runID:    "run-1",
-		turnID:   "turn-1",
-		sessionRef: session.SessionRef{
-			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
-		},
-		createdAt: time.Unix(100, 0),
-	})
-
-	handle.finish()
-	if err := handle.Close(); err != nil {
-		t.Fatalf("Close(after finish) error = %v", err)
-	}
-}
-
-func TestTurnHandlePublishDoesNotBlockWhenEventChannelIsFull(t *testing.T) {
-	t.Parallel()
-
-	handle := newTurnHandle(turnHandleConfig{
-		handleID: "h1",
-		runID:    "run-1",
-		turnID:   "turn-1",
-		sessionRef: session.SessionRef{
-			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
-		},
-		createdAt: time.Unix(100, 0),
-	})
-
+	handle := newTestTurnHandle()
 	done := make(chan struct{})
 	go func() {
-		for i := 0; i < 64; i++ {
-			handle.publishSessionEvent(&session.Event{ID: fmt.Sprintf("e%d", i), Type: session.EventTypeAssistant})
+		for i := 0; i < 96; i++ {
+			handle.publishACP(eventstream.Envelope{Kind: eventstream.KindNotice, Notice: fmt.Sprintf("event-%d", i)}, "")
 		}
 		handle.finish()
-		handle.publishSessionEvent(&session.Event{ID: "late", Type: session.EventTypeAssistant})
 		close(done)
 	}()
 	select {
 	case <-done:
 	case <-time.After(time.Second):
-		t.Fatal("publish blocked with a full event channel")
+		t.Fatal("publish blocked without a live subscriber")
 	}
 
-	replayed, next, err := handle.EventsAfter("")
+	replayed, next, err := handle.eventsAfter("")
 	if err != nil {
-		t.Fatalf("EventsAfter() error = %v", err)
+		t.Fatalf("eventsAfter() error = %v", err)
 	}
-	if len(replayed) != 65 || next != "late" {
-		t.Fatalf("replayed len/next = %d/%q, want 65/late", len(replayed), next)
-	}
-}
-
-func TestTurnHandleDoesNotStartLiveDispatcherWithoutSubscriber(t *testing.T) {
-	t.Parallel()
-
-	handle := newTurnHandle(turnHandleConfig{
-		handleID: "h1",
-		runID:    "run-1",
-		turnID:   "turn-1",
-		sessionRef: session.SessionRef{
-			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
-		},
-		createdAt: time.Unix(100, 0),
-	})
-	for i := 0; i < 96; i++ {
-		handle.publishSessionEvent(&session.Event{ID: fmt.Sprintf("e%d", i), Type: session.EventTypeAssistant})
-	}
-	handle.finish()
-
-	handle.mu.Lock()
-	started := handle.eventsStarted
-	closed := handle.eventsClosed
-	handle.mu.Unlock()
-	if started || closed {
-		t.Fatalf("live dispatcher state = started:%t closed:%t, want unopened lazy stream", started, closed)
-	}
-	replayed, next, err := handle.EventsAfter("")
-	if err != nil {
-		t.Fatalf("EventsAfter() error = %v", err)
-	}
-	if len(replayed) != 96 || next != "e95" {
-		t.Fatalf("replayed len/next = %d/%q, want 96/e95", len(replayed), next)
+	if len(replayed) != 96 || next != replayed[len(replayed)-1].Cursor {
+		t.Fatalf("replayed len/next = %d/%q, want 96/latest", len(replayed), next)
 	}
 }
 
 func TestTurnHandleLiveStreamDoesNotDropApprovalWhenConsumerIsSlow(t *testing.T) {
 	t.Parallel()
 
-	handle := newTurnHandle(turnHandleConfig{
-		handleID: "h1",
-		runID:    "run-1",
-		turnID:   "turn-1",
-		sessionRef: session.SessionRef{
-			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
-		},
-		createdAt: time.Unix(100, 0),
-	})
+	handle := newTestTurnHandle()
 	for i := 0; i < 96; i++ {
-		handle.publishSessionEvent(&session.Event{ID: fmt.Sprintf("e%d", i), Type: session.EventTypeAssistant})
+		handle.publishACP(eventstream.Envelope{Kind: eventstream.KindNotice, Notice: fmt.Sprintf("event-%d", i)}, "")
 	}
-	handle.publishApproval(&agent.ApprovalRequest{Tool: tool.Definition{Name: "RUN_COMMAND"}})
+	handle.publishApproval(&agent.ApprovalRequest{
+		Tool: tool.Definition{Name: "RUN_COMMAND"},
+		Call: tool.Call{ID: "call-1"},
+	})
 	handle.finish()
 
 	deadline := time.After(time.Second)
+	events := handle.ACPEvents()
 	for {
 		select {
-		case env, ok := <-handle.Events():
+		case env, ok := <-events:
 			if !ok {
 				t.Fatal("live events closed before approval request was delivered")
 			}
-			if env.Event.Kind == EventKindApprovalRequested {
+			if env.Kind == eventstream.KindRequestPermission {
 				return
 			}
 		case <-deadline:
@@ -628,15 +303,7 @@ func TestTurnHandleLiveStreamDoesNotDropApprovalWhenConsumerIsSlow(t *testing.T)
 func TestTurnHandleSubmitRejectsUnsupportedWithoutRunner(t *testing.T) {
 	t.Parallel()
 
-	handle := newTurnHandle(turnHandleConfig{
-		handleID: "h1",
-		runID:    "run-1",
-		turnID:   "turn-1",
-		sessionRef: session.SessionRef{
-			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
-		},
-		createdAt: time.Unix(100, 0),
-	})
+	handle := newTestTurnHandle()
 	err := handle.Submit(context.Background(), SubmitRequest{
 		Kind: SubmissionKindConversation,
 		Text: "follow up",
@@ -677,46 +344,10 @@ func TestTurnHandlePendingSubmissionRespectsCancellation(t *testing.T) {
 	}
 }
 
-func TestTurnHandleCancelledBeforeRunnerDropsPendingSubmissions(t *testing.T) {
-	t.Parallel()
-
-	handle := newTurnHandle(turnHandleConfig{
-		handleID:                "h1",
-		runID:                   "run-1",
-		turnID:                  "turn-1",
-		activeKind:              ActiveTurnKindKernel,
-		sessionRef:              session.SessionRef{AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws"},
-		createdAt:               time.Unix(100, 0),
-		allowPendingSubmissions: true,
-	})
-	if err := handle.Submit(context.Background(), SubmitRequest{
-		Kind: SubmissionKindConversation,
-		Text: "queued follow up",
-	}); err != nil {
-		t.Fatalf("Submit() error = %v", err)
-	}
-	handle.Cancel()
-	runner := &recordingRunner{}
-	handle.setRunner(runner)
-
-	if got := len(runner.submissions); got != 0 {
-		t.Fatalf("runner submissions = %#v, want canceled pending submission dropped", runner.submissions)
-	}
-}
-
 func TestTurnHandleApprovalSubmitRejectsWithoutPendingRequest(t *testing.T) {
 	t.Parallel()
 
-	handle := newTurnHandle(turnHandleConfig{
-		handleID: "h1",
-		runID:    "run-1",
-		turnID:   "turn-1",
-		sessionRef: session.SessionRef{
-			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
-		},
-		createdAt: time.Unix(100, 0),
-	})
-
+	handle := newTestTurnHandle()
 	err := handle.Submit(context.Background(), SubmitRequest{
 		Kind:     SubmissionKindApproval,
 		Approval: &ApprovalDecision{Approved: true, Outcome: string(ApprovalStatusApproved)},
@@ -733,7 +364,21 @@ func TestTurnHandleApprovalSubmitRejectsWithoutPendingRequest(t *testing.T) {
 func TestTurnHandleEventsAfterReturnsCursorNotFound(t *testing.T) {
 	t.Parallel()
 
-	handle := newTurnHandle(turnHandleConfig{
+	handle := newTestTurnHandle()
+	handle.publishACP(eventstream.Envelope{Kind: eventstream.KindNotice, Notice: "one"}, "")
+
+	_, _, err := handle.eventsAfter("missing")
+	if err == nil {
+		t.Fatal("eventsAfter() error = nil, want cursor_not_found")
+	}
+	var gwErr *Error
+	if !As(err, &gwErr) || gwErr.Code != CodeCursorNotFound {
+		t.Fatalf("eventsAfter() error = %v, want cursor_not_found", err)
+	}
+}
+
+func newTestTurnHandle() *turnHandle {
+	return newTurnHandle(turnHandleConfig{
 		handleID: "h1",
 		runID:    "run-1",
 		turnID:   "turn-1",
@@ -742,30 +387,12 @@ func TestTurnHandleEventsAfterReturnsCursorNotFound(t *testing.T) {
 		},
 		createdAt: time.Unix(100, 0),
 	})
-	handle.publishSessionEvent(&session.Event{ID: "e1", Type: session.EventTypeUser})
-
-	_, _, err := handle.EventsAfter("missing")
-	if err == nil {
-		t.Fatal("EventsAfter() error = nil, want cursor_not_found")
-	}
-	var gwErr *Error
-	if !As(err, &gwErr) || gwErr.Code != CodeCursorNotFound {
-		t.Fatalf("EventsAfter() error = %v, want cursor_not_found", err)
-	}
 }
 
-type staticSourceEvents struct {
-	events []eventsource.Event
-}
-
-func (s staticSourceEvents) SourceEvents() iter.Seq2[eventsource.Event, error] {
-	return func(yield func(eventsource.Event, error) bool) {
-		for _, event := range s.events {
-			if !yield(event, nil) {
-				return
-			}
-		}
+func drainACPEvents(events <-chan eventstream.Envelope) []eventstream.Envelope {
+	var out []eventstream.Envelope
+	for env := range events {
+		out = append(out, env)
 	}
+	return out
 }
-
-var _ agent.Runner = (*recordingRunner)(nil)

@@ -37,16 +37,12 @@ type turnHandle struct {
 	cancelFn   func() bool
 
 	mu                      sync.Mutex
-	events                  []EventEnvelope
-	eventsCh                chan EventEnvelope
-	acpEventsCh             chan eventstream.Envelope
+	events                  []eventstream.Envelope
+	eventsCh                chan eventstream.Envelope
 	eventsCond              *sync.Cond
-	liveQueue               []EventEnvelope
-	acpLiveQueue            []eventstream.Envelope
+	liveQueue               []eventstream.Envelope
 	eventsStarted           bool
-	acpEventsStarted        bool
 	eventsClosed            bool
-	acpEventsClosed         bool
 	closed                  bool
 	finished                bool
 	cancelled               bool
@@ -69,8 +65,7 @@ func newTurnHandle(cfg turnHandleConfig) *turnHandle {
 		createdAt:               cfg.createdAt,
 		cancelFn:                cfg.cancel,
 		allowPendingSubmissions: cfg.allowPendingSubmissions,
-		eventsCh:                make(chan EventEnvelope, 32),
-		acpEventsCh:             make(chan eventstream.Envelope, 32),
+		eventsCh:                make(chan eventstream.Envelope, 32),
 	}
 	h.eventsCond = sync.NewCond(&h.mu)
 	return h
@@ -82,39 +77,29 @@ func (h *turnHandle) TurnID() string                 { return h.turnID }
 func (h *turnHandle) ActiveKind() ActiveTurnKind     { return h.activeKind }
 func (h *turnHandle) SessionRef() session.SessionRef { return h.sessionRef }
 func (h *turnHandle) CreatedAt() time.Time           { return h.createdAt }
-func (h *turnHandle) Events() <-chan EventEnvelope {
+func (h *turnHandle) ACPEvents() <-chan eventstream.Envelope {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if !h.eventsStarted && !h.eventsClosed {
 		h.eventsStarted = true
-		go h.dispatchLiveEvents()
+		go h.dispatchEvents()
 	}
 	return h.eventsCh
 }
 
-func (h *turnHandle) ACPEvents() <-chan eventstream.Envelope {
+func (h *turnHandle) eventsAfter(cursor string) ([]eventstream.Envelope, string, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if !h.acpEventsStarted && !h.acpEventsClosed {
-		h.acpEventsStarted = true
-		go h.dispatchACPEvents()
-	}
-	return h.acpEventsCh
-}
-
-func (h *turnHandle) EventsAfter(cursor string) ([]EventEnvelope, string, error) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	start, err := startIndexAfterCursor(h.events, cursor)
+	start, err := startEventstreamIndexAfterCursor(h.events, cursor)
 	if err != nil {
 		return nil, "", err
 	}
 	if start == 0 {
-		out := slices.Clone(h.events)
-		return out, lastCursor(out), nil
+		out := eventstream.CloneEnvelopes(h.events)
+		return out, lastEventstreamCursor(out), nil
 	}
-	out := slices.Clone(h.events[start:])
-	return out, lastCursor(out), nil
+	out := eventstream.CloneEnvelopes(h.events[start:])
+	return out, lastEventstreamCursor(out), nil
 }
 
 func (h *turnHandle) Submit(ctx context.Context, req SubmitRequest) error {
@@ -225,16 +210,7 @@ func (h *turnHandle) setRunner(runner agent.Runner) {
 	}
 	for _, req := range pending {
 		if err := runner.Submit(runnerSubmissionFromSubmitRequest(req)); err != nil {
-			h.publish(EventEnvelope{
-				Event: Event{
-					Kind:       EventKindLifecycle,
-					HandleID:   h.handleID,
-					RunID:      h.runID,
-					TurnID:     h.turnID,
-					SessionRef: h.sessionRef,
-				},
-				Err: EventError(err),
-			})
+			h.publishError(err)
 		}
 	}
 }
@@ -305,33 +281,9 @@ func (h *turnHandle) publishSessionEventWithACPProjection(event *session.Event, 
 	if event == nil {
 		return
 	}
-	env := EventEnvelope{
-		Cursor: event.ID,
-		Event: Event{
-			Kind:        sessionEventKind(event),
-			HandleID:    h.handleID,
-			RunID:       h.runID,
-			TurnID:      h.turnID,
-			OccurredAt:  event.Time,
-			SessionRef:  h.sessionRef,
-			Origin:      canonicalOriginFromSessionEvent(h.sessionRef, event),
-			Meta:        canonicalEventMeta(event),
-			Invocation:  canonicalInvocationPayload(event),
-			Protocol:    canonicalProtocolPayload(event),
-			Usage:       usageSnapshotFromSessionEvent(event),
-			Narrative:   canonicalNarrativePayload(event),
-			ToolCall:    canonicalToolCallPayload(event),
-			ToolResult:  canonicalToolResultPayload(event),
-			Plan:        canonicalPlanPayload(event),
-			Participant: canonicalParticipantPayload(event),
-			Lifecycle:   canonicalLifecyclePayload(event),
-		},
+	if projectACP {
+		h.publishEnvelopes(projectSessionACPEvent(h.sessionRef, event, h.handleID, h.runID, h.turnID), "")
 	}
-	if !projectACP {
-		h.publishWithACPEnvelopes(env, nil, "")
-		return
-	}
-	h.publishWithACPEnvelopes(env, projectSessionACPEvent(h.sessionRef, event, h.handleID, h.runID, h.turnID), "")
 }
 
 func (h *turnHandle) publishApproval(req *agent.ApprovalRequest) <-chan ApprovalDecision {
@@ -353,34 +305,83 @@ func (h *turnHandle) publishApprovalReviewPayloadWithUsage(req *agent.ApprovalRe
 }
 
 func (h *turnHandle) publishApprovalEvent(req *agent.ApprovalRequest, payload *ApprovalPayload, kind EventKind, usage *UsageSnapshot, invocation *session.EventInvocation) {
-	var eventUsage *UsageSnapshot
+	h.publishEnvelopes(h.approvalEventEnvelopes(req, payload, kind, usage, invocation), "")
+}
+
+func (h *turnHandle) approvalEventEnvelopes(req *agent.ApprovalRequest, payload *ApprovalPayload, kind EventKind, usage *UsageSnapshot, invocation *session.EventInvocation) []eventstream.Envelope {
+	payload = cloneApprovalPayload(payload)
+	base := eventstream.Envelope{
+		SessionID:  h.sessionRef.SessionID,
+		HandleID:   h.handleID,
+		RunID:      h.runID,
+		TurnID:     h.turnID,
+		OccurredAt: time.Now(),
+		Scope:      eventstream.ScopeMain,
+		ScopeID:    h.sessionRef.SessionID,
+		Meta:       approvalEventMeta(req, invocation),
+	}
+	if origin := canonicalOriginFromApproval(req, h.sessionRef, h.turnID); origin != nil {
+		base.Scope = eventstream.Scope(origin.Scope)
+		base.ScopeID = firstNonEmpty(strings.TrimSpace(origin.ScopeID), base.ScopeID)
+		base.Actor = strings.TrimSpace(origin.Actor)
+		base.ParticipantID = strings.TrimSpace(origin.ParticipantID)
+	}
+	var out []eventstream.Envelope
+	switch kind {
+	case EventKindApprovalRequested:
+		out = append(out, acpprojector.ProjectApprovalPayloadEnvelope(base, payload)...)
+	case EventKindApprovalReview:
+		if review := approvalReviewFromPayload(payload); review != nil {
+			next := base
+			next.Kind = eventstream.KindApprovalReview
+			next.ApprovalReview = review
+			out = append(out, next)
+		}
+	}
 	if usage != nil {
-		copy := *usage
-		eventUsage = &copy
+		next := base
+		next.Kind = eventstream.KindSessionUpdate
+		next.Update = eventstream.UsageUpdateFromSnapshot(eventstream.UsageSnapshot{
+			PromptTokens:      usage.PromptTokens,
+			CachedInputTokens: usage.CachedInputTokens,
+			CompletionTokens:  usage.CompletionTokens,
+			ReasoningTokens:   usage.ReasoningTokens,
+			TotalTokens:       usage.TotalTokens,
+		}, base.Meta)
+		out = append(out, next)
 	}
-	var eventInvocation *session.EventInvocation
-	if invocation != nil {
-		copy := session.CloneEventInvocation(*invocation)
-		eventInvocation = &copy
+	return out
+}
+
+func approvalEventMeta(req *agent.ApprovalRequest, invocation *session.EventInvocation) map[string]any {
+	meta := canonicalApprovalEventMeta(req)
+	if invocation == nil || (strings.TrimSpace(invocation.Provider) == "" && strings.TrimSpace(invocation.Model) == "") {
+		return meta
 	}
-	if eventInvocation != nil && eventInvocation.Provider == "" && eventInvocation.Model == "" {
-		eventInvocation = nil
-	}
-	h.publish(EventEnvelope{
-		Cursor: h.allocateCursor(),
-		Event: Event{
-			Kind:            kind,
-			HandleID:        h.handleID,
-			RunID:           h.runID,
-			TurnID:          h.turnID,
-			SessionRef:      h.sessionRef,
-			Origin:          canonicalOriginFromApproval(req, h.sessionRef, h.turnID),
-			Meta:            canonicalApprovalEventMeta(req),
-			Invocation:      eventInvocation,
-			Usage:           eventUsage,
-			ApprovalPayload: cloneApprovalPayload(payload),
+	invocationCopy := session.CloneEventInvocation(*invocation)
+	return metautil.Merge(meta, map[string]any{
+		metautil.Root: map[string]any{
+			"invocation": map[string]any{
+				"provider": strings.TrimSpace(invocationCopy.Provider),
+				"model":    strings.TrimSpace(invocationCopy.Model),
+			},
 		},
 	})
+}
+
+func approvalReviewFromPayload(payload *ApprovalPayload) *eventstream.ApprovalReview {
+	if payload == nil {
+		return nil
+	}
+	return &eventstream.ApprovalReview{
+		ToolCallID:    strings.TrimSpace(payload.ToolCallID),
+		ToolName:      strings.TrimSpace(payload.ToolName),
+		RawInput:      cloneMap(payload.RawInput),
+		Status:        strings.TrimSpace(string(payload.ReviewStatus)),
+		Text:          strings.TrimSpace(payload.ReviewText),
+		Risk:          strings.TrimSpace(payload.Risk),
+		Authorization: strings.TrimSpace(payload.Authorization),
+	}
 }
 
 func canonicalApprovalEventMeta(req *agent.ApprovalRequest) map[string]any {
@@ -407,61 +408,47 @@ func (h *turnHandle) nextApprovalReviewID() string {
 	return fmt.Sprintf("%s-approval-review-%d", h.handleID, h.approvalReviewSeq)
 }
 
-func (h *turnHandle) publish(env EventEnvelope) {
-	h.publishWithACPProjection(env, true)
-}
-
-func (h *turnHandle) publishWithACPProjection(env EventEnvelope, projectACP bool) {
-	var acpEnvs []eventstream.Envelope
-	if projectACP {
-		acpEnvs = acpprojector.ProjectGatewayEventEnvelope(env)
-	}
-	h.publishWithACPEnvelopes(env, acpEnvs, "gateway_projection")
-}
-
-func (h *turnHandle) publishWithACPEnvelopes(env EventEnvelope, acpEnvs []eventstream.Envelope, bridgeSource string) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if env.Cursor == "" {
-		env.Cursor = h.allocateCursorLocked()
-	}
-	h.events = append(h.events, env)
-	if h.closed || h.finished {
+func (h *turnHandle) publishError(err error) {
+	if err == nil {
 		return
 	}
-	h.liveQueue = append(h.liveQueue, env)
-	if len(acpEnvs) > 0 {
-		for _, acpEnv := range acpEnvs {
-			acpEnv.Cursor = h.allocateACPCursorLocked()
-			h.acpLiveQueue = append(h.acpLiveQueue, h.enrichACPEnvelopeLocked(acpEnv, bridgeSource))
+	env := eventstream.Error(err)
+	env.HandleID = h.handleID
+	env.RunID = h.runID
+	env.TurnID = h.turnID
+	env.SessionID = h.sessionRef.SessionID
+	h.publishEnvelope(env, "")
+}
+
+func (h *turnHandle) publishEnvelope(env eventstream.Envelope, bridgeSource string) {
+	h.publishEnvelopes([]eventstream.Envelope{env}, bridgeSource)
+}
+
+func (h *turnHandle) publishEnvelopes(events []eventstream.Envelope, bridgeSource string) {
+	if len(events) == 0 {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, env := range events {
+		if env.Cursor == "" || (env.ProjectionID != "" && env.Cursor == env.ProjectionID) {
+			env.Cursor = h.allocateEventCursorLocked()
 		}
+		env = h.enrichEnvelopeLocked(env, bridgeSource)
+		h.events = append(h.events, eventstream.CloneEnvelope(env))
+		if h.closed || h.finished {
+			continue
+		}
+		h.liveQueue = append(h.liveQueue, env)
 	}
 	h.eventsCond.Broadcast()
 }
 
 func (h *turnHandle) publishACP(env eventstream.Envelope, bridgeSource string) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	env.Cursor = h.allocateACPCursorLocked()
-	env = h.enrichACPEnvelopeLocked(env, bridgeSource)
-	if h.closed || h.finished {
-		return
-	}
-	h.acpLiveQueue = append(h.acpLiveQueue, env)
-	h.eventsCond.Broadcast()
+	h.publishEnvelope(env, bridgeSource)
 }
 
-func (h *turnHandle) allocateCursor() string {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	return h.allocateCursorLocked()
-}
-
-func (h *turnHandle) allocateCursorLocked() string {
-	return h.handleID + "-cursor-" + time.Now().Format(time.RFC3339Nano)
-}
-
-func (h *turnHandle) allocateACPCursorLocked() string {
+func (h *turnHandle) allocateEventCursorLocked() string {
 	h.acpCursorSeq++
 	prefix := strings.TrimSpace(h.handleID)
 	if prefix == "" {
@@ -470,11 +457,24 @@ func (h *turnHandle) allocateACPCursorLocked() string {
 	return fmt.Sprintf("%s-acp-%06d", prefix, h.acpCursorSeq)
 }
 
-func lastCursor(events []EventEnvelope) string {
+func lastEventstreamCursor(events []eventstream.Envelope) string {
 	if len(events) == 0 {
 		return ""
 	}
 	return events[len(events)-1].Cursor
+}
+
+func startEventstreamIndexAfterCursor(events []eventstream.Envelope, cursor string) (int, error) {
+	cursor = strings.TrimSpace(cursor)
+	if cursor == "" {
+		return 0, nil
+	}
+	for i, env := range events {
+		if env.Cursor == cursor {
+			return i + 1, nil
+		}
+	}
+	return 0, cursorNotFoundError(cursor)
 }
 
 func (h *turnHandle) finish() {
@@ -488,12 +488,12 @@ func (h *turnHandle) finish() {
 }
 
 func (h *turnHandle) closeEventsLocked() {
-	if (!h.eventsClosed && h.eventsStarted) || (!h.acpEventsClosed && h.acpEventsStarted) {
+	if !h.eventsClosed && h.eventsStarted {
 		h.eventsCond.Broadcast()
 	}
 }
 
-func (h *turnHandle) dispatchLiveEvents() {
+func (h *turnHandle) dispatchEvents() {
 	for {
 		h.mu.Lock()
 		for len(h.liveQueue) == 0 && !h.finished {
@@ -515,29 +515,7 @@ func (h *turnHandle) dispatchLiveEvents() {
 	}
 }
 
-func (h *turnHandle) dispatchACPEvents() {
-	for {
-		h.mu.Lock()
-		for len(h.acpLiveQueue) == 0 && !h.finished {
-			h.eventsCond.Wait()
-		}
-		if len(h.acpLiveQueue) == 0 && h.finished {
-			if !h.acpEventsClosed {
-				h.acpEventsClosed = true
-				close(h.acpEventsCh)
-			}
-			h.mu.Unlock()
-			return
-		}
-		env := h.acpLiveQueue[0]
-		copy(h.acpLiveQueue, h.acpLiveQueue[1:])
-		h.acpLiveQueue = h.acpLiveQueue[:len(h.acpLiveQueue)-1]
-		h.mu.Unlock()
-		h.acpEventsCh <- env
-	}
-}
-
-func (h *turnHandle) enrichACPEnvelopeLocked(env eventstream.Envelope, bridgeSource string) eventstream.Envelope {
+func (h *turnHandle) enrichEnvelopeLocked(env eventstream.Envelope, bridgeSource string) eventstream.Envelope {
 	env.SessionID = strings.TrimSpace(h.sessionRef.SessionID)
 	env.HandleID = strings.TrimSpace(h.handleID)
 	env.RunID = strings.TrimSpace(h.runID)

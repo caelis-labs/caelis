@@ -130,7 +130,7 @@ func readAlias(event *session.Event) string {
 	}
 }
 
-func TestSemanticBoundaryRuleRejectsSurfaceGatewayEventEnvelopeConsumption(t *testing.T) {
+func TestSemanticBoundaryRuleRejectsSurfaceGatewayEventConsumption(t *testing.T) {
 	t.Parallel()
 
 	const modulePath = "github.com/OnslaughtSnail/caelis"
@@ -138,13 +138,13 @@ func TestSemanticBoundaryRuleRejectsSurfaceGatewayEventEnvelopeConsumption(t *te
 
 import "github.com/OnslaughtSnail/caelis/ports/gateway"
 
-func consume(env gateway.EventEnvelope) string {
-	return env.Cursor
+func consume(event gateway.Event) string {
+	return string(event.Kind)
 }
 `
 	rule, subject, _ := semanticRuleForSource(t, "surfaces/gui/demo.go", source, modulePath)
-	if !strings.Contains(rule, "eventstream.Envelope") || subject != "gateway.EventEnvelope" {
-		t.Fatalf("semantic rule = (%q, %q), want gateway.EventEnvelope surface rejection", rule, subject)
+	if !strings.Contains(rule, "eventstream.Envelope") || subject != "gateway.Event" {
+		t.Fatalf("semantic rule = (%q, %q), want gateway.Event surface rejection", rule, subject)
 	}
 }
 
@@ -234,48 +234,6 @@ var meta = map[string]any{
 	rule, subject, _ := semanticRuleForSource(t, "protocol/acp/projector/demo.go", source, modulePath)
 	if !strings.Contains(rule, "terminal metadata") || subject != "terminal_output" {
 		t.Fatalf("semantic rule = (%q, %q), want top-level terminal metadata rejection", rule, subject)
-	}
-}
-
-func TestSemanticBoundaryRuleRejectsNonWhitelistedGatewayBridgeCall(t *testing.T) {
-	t.Parallel()
-
-	const modulePath = "github.com/OnslaughtSnail/caelis"
-	source := `package demo
-
-import (
-	"github.com/OnslaughtSnail/caelis/ports/gateway"
-	acpprojector "github.com/OnslaughtSnail/caelis/protocol/acp/projector"
-)
-
-func bridge(env gateway.EventEnvelope) {
-	_ = acpprojector.ProjectGatewayEventEnvelope(env)
-}
-`
-	rule, subject, _ := semanticRuleForSource(t, "app/gatewayapp/demo.go", source, modulePath)
-	if !strings.Contains(rule, "ProjectGatewayEventEnvelope") || subject != "acpprojector.ProjectGatewayEventEnvelope" {
-		t.Fatalf("semantic rule = (%q, %q), want gateway bridge rejection", rule, subject)
-	}
-}
-
-func TestSemanticBoundaryRuleAllowsWhitelistedGatewayBridgeCall(t *testing.T) {
-	t.Parallel()
-
-	const modulePath = "github.com/OnslaughtSnail/caelis"
-	source := `package kernel
-
-import (
-	"github.com/OnslaughtSnail/caelis/ports/gateway"
-	acpprojector "github.com/OnslaughtSnail/caelis/protocol/acp/projector"
-)
-
-func bridge(env gateway.EventEnvelope) {
-	_ = acpprojector.ProjectGatewayEventEnvelope(env)
-}
-`
-	rule, subject, _ := semanticRuleForSource(t, "internal/kernel/handle.go", source, modulePath)
-	if rule != "" || subject != "" {
-		t.Fatalf("semantic rule = (%q, %q), want whitelisted gateway bridge allowed", rule, subject)
 	}
 }
 

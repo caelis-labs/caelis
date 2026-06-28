@@ -107,41 +107,21 @@ func projectSessionACPReplayEvents(ref session.SessionRef, events []*session.Eve
 }
 
 func projectSessionACPEvent(ref session.SessionRef, event *session.Event, handleID string, runID string, turnID string) []eventstream.Envelope {
-	base := sessionACPEventBase(ref, event)
-	base.HandleID = strings.TrimSpace(handleID)
-	base.RunID = strings.TrimSpace(runID)
-	base.TurnID = firstNonEmpty(base.TurnID, strings.TrimSpace(turnID))
+	base := acpprojector.EnvelopeBaseFromSessionEvent(ref, event, acpprojector.SessionEventTransport{
+		HandleID: handleID,
+		RunID:    runID,
+		TurnID:   turnID,
+	})
+	base.Meta = sessionACPEventMeta(event)
 	out := acpprojector.ProjectSessionEventEnvelope(base, event)
 	return stampSessionACPProjectionIDs(strings.TrimSpace(event.ID), out)
 }
 
-func sessionACPEventBase(ref session.SessionRef, event *session.Event) eventstream.Envelope {
-	base := eventstream.Envelope{
-		EventID:    strings.TrimSpace(event.ID),
-		SessionID:  strings.TrimSpace(ref.SessionID),
-		TurnID:     turnIDFromSessionEvent(event),
-		OccurredAt: event.Time,
-		Final:      sessionACPEventFinal(event),
-		Meta:       sessionACPEventMeta(event),
-	}
-	if origin := canonicalOriginFromSessionEvent(ref, event); origin != nil {
-		base.Scope = eventstream.Scope(origin.Scope)
-		base.ScopeID = strings.TrimSpace(origin.ScopeID)
-		base.Actor = strings.TrimSpace(origin.Actor)
-		base.ParticipantID = strings.TrimSpace(origin.ParticipantID)
-	}
-	return base
-}
-
-func sessionACPEventFinal(event *session.Event) bool {
-	if narrative := canonicalNarrativePayload(event); narrative != nil {
-		return narrative.Final
-	}
-	return event != nil && event.Visibility != session.VisibilityUIOnly
-}
-
 func sessionACPEventMeta(event *session.Event) map[string]any {
-	meta := canonicalEventMeta(event)
+	var meta map[string]any
+	if event != nil {
+		meta = event.Meta
+	}
 	if event == nil || event.Invocation == nil {
 		return meta
 	}

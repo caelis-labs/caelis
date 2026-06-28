@@ -130,9 +130,6 @@ func semanticBoundaryRule(rel string, file *ast.File, fset *token.FileSet, modul
 	if rule, subject, line := eventProtocolAliasRule(rel, file, fset, modulePath); rule != "" {
 		return rule, subject, line
 	}
-	if rule, subject, line := gatewayBridgeCallRule(rel, file, fset, modulePath); rule != "" {
-		return rule, subject, line
-	}
 	if rule, subject, line := topLevelTerminalMetaRule(rel, file, fset); rule != "" {
 		return rule, subject, line
 	}
@@ -165,9 +162,9 @@ func surfaceGatewayConsumptionRule(rel string, file *ast.File, fset *token.FileS
 		}
 		if gatewayNames[ident.Name] {
 			switch selector.Sel.Name {
-			case "Event", "EventEnvelope":
+			case "Event":
 				subject = ident.Name + "." + selector.Sel.Name
-				rule = "surfaces must consume eventstream.Envelope instead of gateway.Event/EventEnvelope"
+				rule = "surfaces must consume eventstream.Envelope instead of gateway.Event"
 				line = fset.Position(selector.Pos()).Line
 				return false
 			case "AssistantText", "PromptTokens", "CompletionTokens", "ReasoningTokens", "TotalTokens":
@@ -357,42 +354,6 @@ func isEventProtocolSelector(expr ast.Expr) bool {
 	default:
 		return false
 	}
-}
-
-func gatewayBridgeCallRule(rel string, file *ast.File, fset *token.FileSet, modulePath string) (string, string, int) {
-	if file == nil || strings.HasSuffix(rel, "_test.go") || gatewayBridgeCallWhitelist(rel) {
-		return "", "", 0
-	}
-	projectorNames := importNames(file, modulePath+"/protocol/acp/projector")
-	if len(projectorNames) == 0 {
-		return "", "", 0
-	}
-	var subject string
-	var line int
-	ast.Inspect(file, func(node ast.Node) bool {
-		if subject != "" {
-			return false
-		}
-		selector, ok := node.(*ast.SelectorExpr)
-		if !ok || selector.Sel.Name != "ProjectGatewayEventEnvelope" {
-			return true
-		}
-		ident, ok := selector.X.(*ast.Ident)
-		if !ok || !projectorNames[ident.Name] {
-			return true
-		}
-		subject = ident.Name + ".ProjectGatewayEventEnvelope"
-		line = fset.Position(selector.Pos()).Line
-		return false
-	})
-	if subject == "" {
-		return "", "", 0
-	}
-	return "ProjectGatewayEventEnvelope is a transitional bridge; production calls are limited to kernel compatibility adapters", subject, line
-}
-
-func gatewayBridgeCallWhitelist(rel string) bool {
-	return pathIn(rel, "internal/kernel/handle.go", "internal/kernel/stream_projection.go")
 }
 
 func gatewayTurnHandleNames(file *ast.File, gatewayNames map[string]bool) map[string]bool {

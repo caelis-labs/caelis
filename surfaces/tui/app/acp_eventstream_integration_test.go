@@ -1,0 +1,466 @@
+package tuiapp
+
+import (
+	"context"
+	"strings"
+	"testing"
+	"time"
+
+	tea "charm.land/bubbletea/v2"
+
+	"github.com/OnslaughtSnail/caelis/ports/gateway"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/control"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
+)
+
+func TestHandleACPEventEnvelopeAppliesToolTerminalSequence(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	toolMeta := map[string]any{
+		"caelis": map[string]any{
+			"runtime": map[string]any{
+				"tool": map[string]any{"name": "RUN_COMMAND"},
+			},
+		},
+	}
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		Update: schema.ToolCall{
+			SessionUpdate: schema.UpdateToolCall,
+			ToolCallID:    "call-1",
+			Title:         "RUN_COMMAND echo ok",
+			Kind:          schema.ToolKindExecute,
+			Status:        schema.ToolStatusPending,
+			RawInput:      map[string]any{"command": "echo ok"},
+			Meta:          toolMeta,
+		},
+	})
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo,
+			ToolCallID:    "call-1",
+			Title:         stringPtr("RUN_COMMAND echo ok"),
+			Kind:          stringPtr(schema.ToolKindExecute),
+			Status:        stringPtr(schema.ToolStatusCompleted),
+			RawInput:      map[string]any{"command": "echo ok"},
+			Content: []schema.ToolCallContent{{
+				Type:       "terminal",
+				TerminalID: "terminal-1",
+				Content:    schema.TextContent{Type: "text", Text: "ok\n"},
+			}},
+			Meta: toolMeta,
+		},
+	})
+
+	block := requireMainACPTurnBlockForTest(t, model)
+	if len(block.Events) != 1 {
+		t.Fatalf("main events = %#v, want one tool event", block.Events)
+	}
+	event := block.Events[0]
+	if event.Kind != SEToolCall || event.CallID != "call-1" || event.Name != "RUN_COMMAND" || !event.Done {
+		t.Fatalf("tool event = %#v, want completed RUN_COMMAND call", event)
+	}
+	if !strings.Contains(event.Output, "ok") {
+		t.Fatalf("tool output = %q, want terminal output", event.Output)
+	}
+}
+
+func TestHandleACPEventEnvelopeAppliesParticipantSequence(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:          eventstream.KindParticipant,
+		SessionID:     "session-1",
+		Scope:         eventstream.ScopeParticipant,
+		ScopeID:       "participant-turn-1",
+		ParticipantID: "agent-1",
+		Actor:         "@agent",
+		Participant:   &eventstream.Participant{State: "attached"},
+	})
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:          eventstream.KindSessionUpdate,
+		SessionID:     "session-1",
+		Scope:         eventstream.ScopeParticipant,
+		ScopeID:       "participant-turn-1",
+		ParticipantID: "agent-1",
+		Actor:         "@agent",
+		Final:         true,
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateAgentMessage,
+			Content:       schema.TextContent{Type: "text", Text: "participant answer"},
+		},
+	})
+
+	block := model.findParticipantTurnBlock("participant-turn-1")
+	if block == nil {
+		t.Fatal("participant block missing")
+	}
+	if block.Actor != "@agent" || block.Status != "completed" {
+		t.Fatalf("participant block = %#v, want @agent completed", block)
+	}
+	if len(block.Events) != 1 || block.Events[0].Kind != SEAssistant || block.Events[0].Text != "participant answer" {
+		t.Fatalf("participant events = %#v, want assistant answer", block.Events)
+	}
+}
+
+func TestHandleACPEventEnvelopeAnchorsSubagentOutputToSpawnTool(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	spawnMeta := map[string]any{
+		gateway.EventMetaRoot: map[string]any{
+			gateway.EventMetaRuntime: map[string]any{
+				gateway.EventMetaRuntimeTool: map[string]any{gateway.EventMetaRuntimeToolName: "SPAWN"},
+			},
+		},
+	}
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		Update: schema.ToolCall{
+			SessionUpdate: schema.UpdateToolCall,
+			ToolCallID:    "spawn-1",
+			Title:         "SPAWN reviewer: inspect",
+			Kind:          schema.ToolKindExecute,
+			Status:        schema.ToolStatusPending,
+			RawInput:      map[string]any{"agent": "reviewer", "prompt": "inspect"},
+			Meta:          spawnMeta,
+		},
+	})
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		Scope:     eventstream.ScopeSubagent,
+		ScopeID:   "task-1",
+		Actor:     "reviewer",
+		Final:     true,
+		Meta: map[string]any{
+			gateway.EventMetaRoot: map[string]any{
+				gateway.EventMetaRuntime: map[string]any{
+					gateway.EventMetaRuntimeStream: map[string]any{
+						gateway.EventMetaRuntimeStreamParentCallID: "spawn-1",
+						gateway.EventMetaRuntimeStreamParentTool:   "SPAWN",
+					},
+				},
+			},
+		},
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateAgentMessage,
+			Content:       schema.TextContent{Type: "text", Text: "subagent found the issue"},
+		},
+	})
+
+	block := requireMainACPTurnBlockForTest(t, model)
+	if len(block.Events) != 1 {
+		t.Fatalf("main events = %#v, want anchored spawn event", block.Events)
+	}
+	event := block.Events[0]
+	if event.Kind != SEToolCall || event.CallID != "spawn-1" || event.Name != "SPAWN" {
+		t.Fatalf("spawn event = %#v, want SPAWN tool call", event)
+	}
+	if event.TaskID != "task-1" || !strings.Contains(event.Output, "subagent found the issue") {
+		t.Fatalf("spawn event = %#v, want anchored subagent output", event)
+	}
+}
+
+func TestHandleACPEventEnvelopeAppliesApprovalReview(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindApprovalReview,
+		SessionID: "session-1",
+		ApprovalReview: &eventstream.ApprovalReview{
+			ToolCallID: "call-1",
+			ToolName:   "RUN_COMMAND",
+			RawInput:   map[string]any{"command": "go test ./..."},
+			Status:     "in_progress",
+		},
+	})
+	if !strings.Contains(model.approvalReviewHint, "go test") {
+		t.Fatalf("approvalReviewHint = %q, want command hint", model.approvalReviewHint)
+	}
+
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindApprovalReview,
+		SessionID: "session-1",
+		ApprovalReview: &eventstream.ApprovalReview{
+			ToolCallID:    "call-1",
+			ToolName:      "RUN_COMMAND",
+			RawInput:      map[string]any{"command": "go test ./..."},
+			Status:        "approved",
+			Risk:          "low",
+			Authorization: "allow",
+			Text:          "approved by policy",
+		},
+	})
+	if model.approvalReviewHint != "" {
+		t.Fatalf("approvalReviewHint = %q, want cleared after terminal review", model.approvalReviewHint)
+	}
+	block := requireMainACPTurnBlockForTest(t, model)
+	if len(block.Events) != 1 || block.Events[0].Kind != SEApproval || block.Events[0].ApprovalStatus != "approved" {
+		t.Fatalf("main events = %#v, want approved approval review", block.Events)
+	}
+	if block.Events[0].ApprovalText != "approved by policy" || block.Events[0].ApprovalRisk != "low" || block.Events[0].ApprovalAuth != "allow" {
+		t.Fatalf("approval event = %#v, want review fields", block.Events[0])
+	}
+}
+
+func TestForwardTurnEventStreamQueuesLiveACPEnvelopes(t *testing.T) {
+	t.Parallel()
+
+	terminal := eventstream.TurnCompleted("handle-1", "run-1", "turn-1", time.Unix(124, 0))
+	terminal.SessionID = "session-1"
+	terminal.ScopeID = "session-1"
+	events := make(chan eventstream.Envelope, 2)
+	events <- eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		HandleID:  "handle-1",
+		RunID:     "run-1",
+		TurnID:    "turn-1",
+		Final:     true,
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateAgentMessage,
+			Content:       schema.TextContent{Type: "text", Text: "live answer"},
+		},
+	}
+	events <- terminal
+	close(events)
+
+	var sent []tea.Msg
+	result := forwardTurnEventStream(context.Background(), nil, &eventstreamIntegrationTurn{events: events}, &ProgramSender{
+		Send: func(msg tea.Msg) {
+			sent = append(sent, msg)
+		},
+	})
+	if !result.queued {
+		t.Fatalf("forwardTurnEventStream() queued = false, want true")
+	}
+	if len(sent) != 2 {
+		t.Fatalf("sent messages = %#v, want content + terminal lifecycle", sent)
+	}
+	first, ok := sent[0].(eventstream.Envelope)
+	if !ok || first.Kind != eventstream.KindSessionUpdate {
+		t.Fatalf("first message = %#v, want session/update envelope", sent[0])
+	}
+	last, ok := sent[1].(eventstream.Envelope)
+	if !ok || !eventstream.IsTerminalLifecycle(last) || last.Lifecycle.State != eventstream.LifecycleStateCompleted {
+		t.Fatalf("last message = %#v, want completed terminal lifecycle", sent[1])
+	}
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(120, 0))
+	for _, msg := range sent {
+		env, ok := msg.(eventstream.Envelope)
+		if !ok {
+			t.Fatalf("sent message = %T, want eventstream.Envelope", msg)
+		}
+		model = applyACPEnvelopeForTest(t, model, env)
+	}
+	block := requireMainACPTurnBlockForTest(t, model)
+	if block.Status != "completed" {
+		t.Fatalf("main ACP turn status = %q, want completed", block.Status)
+	}
+	if len(block.Events) != 1 || block.Events[0].Kind != SEAssistant || block.Events[0].Text != "live answer" {
+		t.Fatalf("main ACP events = %#v, want live assistant answer", block.Events)
+	}
+	if model.turnRunning() {
+		t.Fatal("model turn still running after terminal lifecycle")
+	}
+}
+
+func TestRenderEventPolicyForACPEnvelopeRoutesStandardUpdates(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		env  eventstream.Envelope
+		lane renderEventLane
+	}{
+		{
+			name: "tool",
+			env: eventstream.Envelope{
+				Kind: eventstream.KindSessionUpdate,
+				Update: schema.ToolCallUpdate{
+					SessionUpdate: schema.UpdateToolCallInfo,
+					ToolCallID:    "call-1",
+				},
+			},
+			lane: renderLaneToolStream,
+		},
+		{
+			name: "participant",
+			env: eventstream.Envelope{
+				Kind:        eventstream.KindParticipant,
+				Participant: &eventstream.Participant{State: "attached"},
+			},
+			lane: renderLaneParticipant,
+		},
+		{
+			name: "approval",
+			env: eventstream.Envelope{
+				Kind: eventstream.KindRequestPermission,
+				Permission: &schema.RequestPermissionRequest{
+					ToolCall: schema.ToolCallUpdate{SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "call-1"},
+				},
+			},
+			lane: renderLaneToolStream,
+		},
+		{
+			name: "lifecycle",
+			env: eventstream.Envelope{
+				Kind:      eventstream.KindLifecycle,
+				Lifecycle: &eventstream.Lifecycle{State: "completed"},
+			},
+			lane: renderLaneLifecycle,
+		},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			policy := renderEventPolicyForACPEnvelope(tt.env)
+			if policy.lane != tt.lane {
+				t.Fatalf("lane = %q, want %q", policy.lane, tt.lane)
+			}
+			if !policy.flushLogChunks {
+				t.Fatalf("policy = %#v, want log flush for ACP render event", policy)
+			}
+		})
+	}
+}
+
+func TestProjectResumeReplayEventsUsesACPEnvelopeTrace(t *testing.T) {
+	t.Parallel()
+
+	events := projectResumeReplayEvents([]eventstream.Envelope{{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo,
+			ToolCallID:    "call-1",
+			Title:         stringPtr("RUN_COMMAND echo ok"),
+			Kind:          stringPtr(schema.ToolKindExecute),
+			Status:        stringPtr(schema.ToolStatusCompleted),
+			RawInput:      map[string]any{"command": "echo ok"},
+			RawOutput:     map[string]any{"stdout": "ok\n"},
+			Meta: map[string]any{
+				gateway.EventMetaRoot: map[string]any{
+					gateway.EventMetaRuntime: map[string]any{
+						gateway.EventMetaRuntimeTool: map[string]any{gateway.EventMetaRuntimeToolName: "RUN_COMMAND"},
+					},
+				},
+			},
+		},
+	}, {
+		Kind:      eventstream.KindLifecycle,
+		SessionID: "session-1",
+		Lifecycle: &eventstream.Lifecycle{
+			State: "completed",
+		},
+	}})
+	if len(events) != 2 {
+		t.Fatalf("projectResumeReplayEvents() = %#v, want tool + lifecycle", events)
+	}
+	if events[0].Kind != TranscriptEventTool || events[0].ToolCallID != "call-1" || events[0].ToolName != "RUN_COMMAND" {
+		t.Fatalf("tool replay event = %#v, want RUN_COMMAND ACP tool event", events[0])
+	}
+	if events[1].Kind != TranscriptEventLifecycle || events[1].State != "completed" {
+		t.Fatalf("lifecycle replay event = %#v, want completed lifecycle", events[1])
+	}
+}
+
+func TestApprovalPayloadFromACPEventUsesStandardPermission(t *testing.T) {
+	t.Parallel()
+
+	req := approvalPayloadFromACPEvent(eventstream.Envelope{
+		Kind: eventstream.KindRequestPermission,
+		Permission: &schema.RequestPermissionRequest{
+			SessionID: "session-1",
+			ToolCall: schema.ToolCallUpdate{
+				SessionUpdate: schema.UpdateToolCallInfo,
+				ToolCallID:    "call-1",
+				Title:         stringPtr("RUN_COMMAND go test ./..."),
+				Kind:          stringPtr(schema.ToolKindExecute),
+				RawInput: map[string]any{
+					"command":             "go test ./...",
+					"approval_reason":     "needs execution",
+					"justification":       "requested by user",
+					"sandbox_permissions": "workspace-write",
+				},
+			},
+			Options: []schema.PermissionOption{{
+				OptionID: "allow_once",
+				Name:     "Allow once",
+				Kind:     "allow_once",
+			}},
+		},
+		Meta: map[string]any{
+			gateway.EventMetaRoot: map[string]any{
+				gateway.EventMetaRuntime: map[string]any{
+					gateway.EventMetaRuntimeTool: map[string]any{gateway.EventMetaRuntimeToolName: "RUN_COMMAND"},
+				},
+			},
+		},
+	})
+	if req == nil {
+		t.Fatal("approvalPayloadFromACPEvent() = nil")
+	}
+	if req.ToolCallID != "call-1" || req.ToolName != "RUN_COMMAND" || req.Reason != "needs execution" {
+		t.Fatalf("approval payload = %#v, want ACP permission fields", req)
+	}
+	if len(req.Options) != 1 || req.Options[0].ID != "allow_once" {
+		t.Fatalf("approval options = %#v, want allow_once", req.Options)
+	}
+}
+
+func applyACPEnvelopeForTest(t *testing.T, model *Model, env eventstream.Envelope) *Model {
+	t.Helper()
+	next, _ := model.handleACPEventEnvelope(env)
+	typed, ok := next.(*Model)
+	if !ok {
+		t.Fatalf("model = %T, want *Model", next)
+	}
+	return typed
+}
+
+func requireMainACPTurnBlockForTest(t *testing.T, model *Model) *MainACPTurnBlock {
+	t.Helper()
+	if id := strings.TrimSpace(model.activeMainACPTurnID); id != "" {
+		if block, _ := model.doc.Find(id).(*MainACPTurnBlock); block != nil {
+			return block
+		}
+	}
+	for _, docBlock := range model.doc.Blocks() {
+		if block, ok := docBlock.(*MainACPTurnBlock); ok {
+			return block
+		}
+	}
+	t.Fatal("main ACP turn block missing")
+	return nil
+}
+
+type eventstreamIntegrationTurn struct {
+	events <-chan eventstream.Envelope
+}
+
+func (t *eventstreamIntegrationTurn) HandleID() string { return "handle-1" }
+func (t *eventstreamIntegrationTurn) RunID() string    { return "run-1" }
+func (t *eventstreamIntegrationTurn) TurnID() string   { return "turn-1" }
+
+func (t *eventstreamIntegrationTurn) Events() <-chan eventstream.Envelope {
+	return t.events
+}
+
+func (t *eventstreamIntegrationTurn) SubmitApproval(context.Context, control.ApprovalDecision) error {
+	return nil
+}
+
+func (t *eventstreamIntegrationTurn) Cancel() {}
+
+func (t *eventstreamIntegrationTurn) Close() error { return nil }

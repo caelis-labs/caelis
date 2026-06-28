@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
 type Turn interface {
@@ -36,6 +37,15 @@ type SessionService interface {
 	ListSessions(context.Context, int) ([]ResumeCandidate, error)
 	ReplayEvents(context.Context) ([]eventstream.Envelope, error)
 	Compact(context.Context) error
+}
+
+// ClientProtocolService is the stable GUI/API protocol surface. It returns
+// eventstream envelopes and standard ACP schema payloads without exposing
+// transitional gateway envelopes or TUI transcript view models.
+type ClientProtocolService interface {
+	ListSessionSnapshots(context.Context, schema.SessionListRequest) (schema.SessionListResponse, error)
+	Replay(context.Context, eventstream.ReplayRequest) (eventstream.ReplayResult, error)
+	RunState(context.Context) (eventstream.RunState, error)
 }
 
 type SessionModeService interface {
@@ -98,6 +108,7 @@ type Service interface {
 	StatusService
 	TurnService
 	SessionService
+	ClientProtocolService
 	SessionModeService
 	ModelService
 	SandboxService

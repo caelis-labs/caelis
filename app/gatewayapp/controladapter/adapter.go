@@ -9,13 +9,13 @@ import (
 	"sync"
 	"time"
 
-	kernelimpl "github.com/OnslaughtSnail/caelis/internal/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/controller"
 	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/stream"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
+	acpprojector "github.com/OnslaughtSnail/caelis/protocol/acp/projector"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
@@ -127,7 +127,7 @@ func (d *Adapter) SubscribeStream(ctx context.Context, env eventstream.Envelope)
 			if frame.Text == "" && frame.Event == nil && !frame.Closed {
 				continue
 			}
-			for _, projected := range kernelimpl.StreamFrameACPEvents(req, stream.CloneFrame(*frame)) {
+			for _, projected := range acpprojector.ProjectStreamFrame(req, stream.CloneFrame(*frame)) {
 				select {
 				case out <- projected:
 				case <-ctx.Done():
@@ -139,40 +139,36 @@ func (d *Adapter) SubscribeStream(ctx context.Context, env eventstream.Envelope)
 	return out, true
 }
 
-func streamRequestFromACPEvent(env eventstream.Envelope) (kernelimpl.StreamRequest, bool) {
+func streamRequestFromACPEvent(env eventstream.Envelope) (acpprojector.StreamRequest, bool) {
 	update, ok := env.Update.(schema.ToolCallUpdate)
 	if !ok {
-		return kernelimpl.StreamRequest{}, false
+		return acpprojector.StreamRequest{}, false
 	}
 	status := strings.TrimSpace(stringFromPtr(update.Status))
 	if status != schema.ToolStatusInProgress {
-		return kernelimpl.StreamRequest{}, false
+		return acpprojector.StreamRequest{}, false
 	}
 	meta := mergeMeta(update.Meta, env.Meta)
-	toolName := strings.ToUpper(firstNonEmpty(
-		metaString(meta, gateway.EventMetaRoot, gateway.EventMetaRuntime, gateway.EventMetaRuntimeTool, gateway.EventMetaRuntimeToolName),
-		stringFromPtr(update.Title),
-		stringFromPtr(update.Kind),
-	))
-	if toolName != "RUN_COMMAND" && toolName != "SPAWN" {
-		return kernelimpl.StreamRequest{}, false
+	toolName := streamToolNameFromACPUpdate(meta, update)
+	if toolName == "" {
+		return acpprojector.StreamRequest{}, false
 	}
 	taskID := firstNonEmpty(
 		metaString(meta, gateway.EventMetaRoot, gateway.EventMetaRuntime, "task", "task_id"),
 		metaString(meta, gateway.EventMetaRoot, gateway.EventMetaRuntime, "task", "internal_task_id"),
 	)
 	terminalID := firstNonEmpty(
-		acpTerminalID(update.Content),
 		metaString(meta, gateway.EventMetaRoot, gateway.EventMetaRuntime, "task", "terminal_id"),
+		acpTerminalID(update.Content),
 	)
 	if taskID == "" && terminalID == "" {
-		return kernelimpl.StreamRequest{}, false
+		return acpprojector.StreamRequest{}, false
 	}
 	scope := gateway.EventScope(env.Scope)
 	if scope == "" {
 		scope = gateway.EventScopeMain
 	}
-	req := kernelimpl.StreamRequest{
+	req := acpprojector.StreamRequest{
 		HandleID: strings.TrimSpace(env.HandleID),
 		RunID:    strings.TrimSpace(env.RunID),
 		TurnID:   strings.TrimSpace(env.TurnID),
@@ -205,9 +201,38 @@ func streamRequestFromACPEvent(env eventstream.Envelope) (kernelimpl.StreamReque
 		ParticipantID: strings.TrimSpace(env.ParticipantID),
 	}
 	if req.SessionRef.SessionID == "" || req.Ref.SessionID == "" || req.CallID == "" || req.ToolName == "" {
-		return kernelimpl.StreamRequest{}, false
+		return acpprojector.StreamRequest{}, false
 	}
 	return req, true
+}
+
+func streamToolNameFromACPUpdate(meta map[string]any, update schema.ToolCallUpdate) string {
+	if name := streamToolName(metaString(meta, gateway.EventMetaRoot, gateway.EventMetaRuntime, gateway.EventMetaRuntimeTool, gateway.EventMetaRuntimeToolName)); name != "" {
+		return name
+	}
+	if name := streamToolNameFromTitle(stringFromPtr(update.Title)); name != "" {
+		return name
+	}
+	return streamToolName(stringFromPtr(update.Kind))
+}
+
+func streamToolNameFromTitle(title string) string {
+	fields := strings.Fields(strings.TrimSpace(title))
+	if len(fields) == 0 {
+		return ""
+	}
+	return streamToolName(strings.Trim(fields[0], ":"))
+}
+
+func streamToolName(candidate string) string {
+	switch strings.ToUpper(strings.TrimSpace(candidate)) {
+	case "RUN_COMMAND":
+		return "RUN_COMMAND"
+	case "SPAWN":
+		return "SPAWN"
+	default:
+		return ""
+	}
 }
 
 func acpTerminalID(content []schema.ToolCallContent) string {
@@ -438,16 +463,24 @@ func activeKernelTurnForSession(active []gateway.ActiveTurnState, ref session.Se
 }
 
 func activeTurnKindForSession(active []gateway.ActiveTurnState, ref session.SessionRef) (string, bool) {
+	state, ok := activeTurnStateForSession(active, ref)
+	if !ok {
+		return "", false
+	}
+	return strings.TrimSpace(string(state.Kind)), true
+}
+
+func activeTurnStateForSession(active []gateway.ActiveTurnState, ref session.SessionRef) (gateway.ActiveTurnState, bool) {
 	sessionID := strings.TrimSpace(ref.SessionID)
 	if sessionID == "" {
-		return "", false
+		return gateway.ActiveTurnState{}, false
 	}
 	for _, item := range active {
 		if strings.TrimSpace(item.SessionRef.SessionID) == sessionID {
-			return strings.TrimSpace(string(item.Kind)), true
+			return item, true
 		}
 	}
-	return "", false
+	return gateway.ActiveTurnState{}, false
 }
 
 func isBuiltInControllerSession(activeSession session.Session) bool {

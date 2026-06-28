@@ -89,14 +89,6 @@ func (h *testGatewayTurnHandle) SessionRef() session.SessionRef {
 	return session.SessionRef{SessionID: "session-1"}
 }
 func (h *testGatewayTurnHandle) CreatedAt() time.Time { return time.Time{} }
-func (h *testGatewayTurnHandle) Events() <-chan gateway.EventEnvelope {
-	ch := make(chan gateway.EventEnvelope)
-	close(ch)
-	return ch
-}
-func (h *testGatewayTurnHandle) EventsAfter(string) ([]gateway.EventEnvelope, string, error) {
-	return nil, "", nil
-}
 func (h *testGatewayTurnHandle) Submit(context.Context, gateway.SubmitRequest) error {
 	return nil
 }

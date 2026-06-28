@@ -279,6 +279,18 @@ func CloneEnvelope(in Envelope) Envelope {
 	return out
 }
 
+// CloneEnvelopes deep-clones a slice of envelopes.
+func CloneEnvelopes(in []Envelope) []Envelope {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]Envelope, 0, len(in))
+	for _, env := range in {
+		out = append(out, CloneEnvelope(env))
+	}
+	return out
+}
+
 func usageUpdateMeta(meta map[string]any, usage UsageSnapshot) map[string]any {
 	out := cloneAnyMap(meta)
 	if out == nil {
@@ -368,6 +380,9 @@ func CloneUpdate(update schema.Update) schema.Update {
 		typed.Meta = cloneAnyMap(typed.Meta)
 		return typed
 	case schema.ToolCallUpdate:
+		typed.Title = cloneStringPtr(typed.Title)
+		typed.Kind = cloneStringPtr(typed.Kind)
+		typed.Status = cloneStringPtr(typed.Status)
 		typed.RawInput = cloneAny(typed.RawInput)
 		typed.RawOutput = cloneAny(typed.RawOutput)
 		typed.Content = cloneToolCallContent(typed.Content)
@@ -419,12 +434,23 @@ func IsError(err error, target error) bool {
 }
 
 func cloneToolCallUpdate(in schema.ToolCallUpdate) schema.ToolCallUpdate {
+	in.Title = cloneStringPtr(in.Title)
+	in.Kind = cloneStringPtr(in.Kind)
+	in.Status = cloneStringPtr(in.Status)
 	in.RawInput = cloneAny(in.RawInput)
 	in.RawOutput = cloneAny(in.RawOutput)
 	in.Content = cloneToolCallContent(in.Content)
 	in.Locations = append([]schema.ToolCallLocation(nil), in.Locations...)
 	in.Meta = cloneAnyMap(in.Meta)
 	return in
+}
+
+func cloneStringPtr(in *string) *string {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	return &out
 }
 
 func cloneToolCallContent(in []schema.ToolCallContent) []schema.ToolCallContent {

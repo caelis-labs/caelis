@@ -137,16 +137,7 @@ func (g *Gateway) runTurn(
 
 	result, err := g.runtime.Run(ctx, runReq)
 	if err != nil {
-		handle.publish(EventEnvelope{
-			Event: Event{
-				Kind:       EventKindLifecycle,
-				HandleID:   handle.handleID,
-				RunID:      handle.runID,
-				TurnID:     handle.turnID,
-				SessionRef: handle.sessionRef,
-			},
-			Err: EventError(err),
-		})
+		handle.publishError(err)
 		return
 	}
 	if result.Handle == nil {
@@ -160,16 +151,7 @@ func (g *Gateway) runTurn(
 	}
 	for event, seqErr := range result.Handle.Events() {
 		if seqErr != nil {
-			handle.publish(EventEnvelope{
-				Event: Event{
-					Kind:       EventKindLifecycle,
-					HandleID:   handle.handleID,
-					RunID:      handle.runID,
-					TurnID:     handle.turnID,
-					SessionRef: handle.sessionRef,
-				},
-				Err: EventError(seqErr),
-			})
+			handle.publishError(seqErr)
 			return
 		}
 		handle.publishSessionEvent(event)
@@ -218,16 +200,7 @@ func (g *Gateway) runParticipantTurn(
 
 	result, err := g.control.PromptParticipant(ctx, runReq)
 	if err != nil {
-		handle.publish(EventEnvelope{
-			Event: Event{
-				Kind:       EventKindLifecycle,
-				HandleID:   handle.handleID,
-				RunID:      handle.runID,
-				TurnID:     handle.turnID,
-				SessionRef: handle.sessionRef,
-			},
-			Err: EventError(err),
-		})
+		handle.publishError(err)
 		return
 	}
 	if result.Handle == nil {
@@ -241,16 +214,7 @@ func (g *Gateway) runParticipantTurn(
 	}
 	for event, seqErr := range result.Handle.Events() {
 		if seqErr != nil {
-			handle.publish(EventEnvelope{
-				Event: Event{
-					Kind:       EventKindLifecycle,
-					HandleID:   handle.handleID,
-					RunID:      handle.runID,
-					TurnID:     handle.turnID,
-					SessionRef: handle.sessionRef,
-				},
-				Err: EventError(seqErr),
-			})
+			handle.publishError(seqErr)
 			return
 		}
 		handle.publishSessionEvent(event)
