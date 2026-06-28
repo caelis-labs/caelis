@@ -3244,6 +3244,7 @@ func TestAdapterCompleteSkillDiscoversGlobalAndWorkspaceSkills(t *testing.T) {
 		WorkspaceCWD: workspace,
 		ApprovalMode: "default",
 		Assembly:     assembly.ResolvedAssembly{},
+		SkillDirs:    gatewayapp.DefaultSkillDiscoveryDirs(workspace),
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)

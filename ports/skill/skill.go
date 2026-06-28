@@ -9,7 +9,16 @@ type Meta struct {
 	Name        string
 	Description string
 	Path        string
+	Source      string
+	PluginID    string
+	Namespace   string
+	LocalName   string
 }
+
+const (
+	SourceRegular = "regular"
+	SourcePlugin  = "plugin"
+)
 
 type Ref struct {
 	Name string
@@ -22,8 +31,17 @@ type Bundle struct {
 }
 
 type DiscoverRequest struct {
-	Dirs         []string
-	WorkspaceDir string
+	Dirs          []string
+	WorkspaceDir  string
+	PluginBundles []PluginBundle
+}
+
+type PluginBundle struct {
+	Plugin    string
+	Namespace string
+	Root      string
+	Disabled  []string
+	Enabled   bool
 }
 
 type Discovery interface {

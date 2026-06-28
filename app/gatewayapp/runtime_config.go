@@ -12,6 +12,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/delegation"
 	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/OnslaughtSnail/caelis/ports/skill"
 )
 
 type stackRuntimeConfig struct {
@@ -21,6 +22,7 @@ type stackRuntimeConfig struct {
 	SystemPrompt                string
 	Model                       ModelConfig
 	SkillDirs                   []string
+	PluginSkills                []skill.PluginBundle
 	DisableBuiltInAgentProfiles bool
 	Plugins                     []PluginConfig
 	BaseAssembly                assembly.ResolvedAssembly
@@ -154,6 +156,18 @@ func cloneStringSlicePreserveNil(in []string) []string {
 		return nil
 	}
 	return append([]string(nil), in...)
+}
+
+func clonePluginSkillBundles(in []skill.PluginBundle) []skill.PluginBundle {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]skill.PluginBundle, 0, len(in))
+	for _, bundle := range in {
+		bundle.Disabled = append([]string(nil), bundle.Disabled...)
+		out = append(out, bundle)
+	}
+	return out
 }
 
 func approvalMode(raw string) string {

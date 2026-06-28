@@ -47,6 +47,8 @@ type PluginConfig struct {
 	Enabled     bool   `json:"enabled"`
 	Version     string `json:"version,omitempty"`
 	Description string `json:"description,omitempty"`
+	Managed     bool   `json:"managed,omitempty"`
+	CacheRoot   string `json:"cache_root,omitempty"`
 }
 
 type AgentConfig struct {
@@ -699,5 +701,9 @@ func NormalizePluginConfig(in PluginConfig) PluginConfig {
 	out.Kind = strings.ToLower(strings.TrimSpace(in.Kind))
 	out.Version = strings.TrimSpace(in.Version)
 	out.Description = strings.TrimSpace(in.Description)
+	out.CacheRoot = strings.TrimSpace(in.CacheRoot)
+	if !out.Managed {
+		out.CacheRoot = ""
+	}
 	return out
 }

@@ -13,7 +13,6 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/agentprofiles"
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/agentregistry"
-	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/pluginregistry"
 	"github.com/OnslaughtSnail/caelis/ports/agentprofile"
 	"github.com/OnslaughtSnail/caelis/ports/assembly"
 	"github.com/OnslaughtSnail/caelis/ports/controller"
@@ -428,6 +427,14 @@ func (s *Stack) setConfiguredAgentsWithBase(base assembly.ResolvedAssembly, conf
 }
 
 func (s *Stack) configuredAssembly(base assembly.ResolvedAssembly, configured []AgentConfig, plugins []PluginConfig, runtimeCfg stackRuntimeConfig) (assembly.ResolvedAssembly, error) {
+	pluginAgents, err := s.resolvePluginAgentContributions(plugins)
+	if err != nil {
+		return assembly.ResolvedAssembly{}, err
+	}
+	return s.configuredAssemblyWithPluginAgents(base, configured, pluginAgents, runtimeCfg)
+}
+
+func (s *Stack) configuredAssemblyWithPluginAgents(base assembly.ResolvedAssembly, configured []AgentConfig, pluginAgents []pluginAgentContribution, runtimeCfg stackRuntimeConfig) (assembly.ResolvedAssembly, error) {
 	self, err := defaultSpawnedSelfACPAgent(defaultSpawnedSelfACPAgentConfig{
 		Config: Config{
 			AppName:       s.AppName,
@@ -450,14 +457,14 @@ func (s *Stack) configuredAssembly(base assembly.ResolvedAssembly, configured []
 		return assembly.ResolvedAssembly{}, err
 	}
 	resolved := withConfiguredACPAgents(base, configured, self)
-	resolved, err = s.withPluginACPAgents(resolved, plugins)
+	resolved, err = s.withPluginACPAgents(resolved, pluginAgents)
 	if err != nil {
 		return assembly.ResolvedAssembly{}, err
 	}
 	return s.withAgentProfileACPAgents(resolved, runtimeCfg)
 }
 
-func (s *Stack) withPluginACPAgents(resolved assembly.ResolvedAssembly, plugins []PluginConfig) (assembly.ResolvedAssembly, error) {
+func (s *Stack) withPluginACPAgents(resolved assembly.ResolvedAssembly, pluginAgents []pluginAgentContribution) (assembly.ResolvedAssembly, error) {
 	out := assembly.CloneResolvedAssembly(resolved)
 	seen := map[string]struct{}{}
 	for _, agent := range out.Agents {
@@ -465,29 +472,20 @@ func (s *Stack) withPluginACPAgents(resolved assembly.ResolvedAssembly, plugins 
 			seen[name] = struct{}{}
 		}
 	}
-	for _, pCfg := range plugins {
-		if !pCfg.Enabled {
+	for _, contributed := range pluginAgents {
+		agent, err := pluginAgentContributionToAssembly(contributed.PluginID, contributed.Agent)
+		if err != nil {
+			return out, err
+		}
+		nameKey := strings.ToLower(strings.TrimSpace(agent.Name))
+		if nameKey == "" {
 			continue
 		}
-		p, err := pluginregistry.ParsePlugin(pCfg.Root)
-		if err != nil {
-			return out, fmt.Errorf("gatewayapp: parse enabled plugin %q agents failed: %w", pCfg.ID, err)
+		if _, exists := seen[nameKey]; exists {
+			continue
 		}
-		for _, contributed := range p.Agents {
-			agent, err := pluginAgentContributionToAssembly(p.ID, contributed)
-			if err != nil {
-				return out, err
-			}
-			nameKey := strings.ToLower(strings.TrimSpace(agent.Name))
-			if nameKey == "" {
-				continue
-			}
-			if _, exists := seen[nameKey]; exists {
-				continue
-			}
-			out.Agents = append(out.Agents, agent)
-			seen[nameKey] = struct{}{}
-		}
+		out.Agents = append(out.Agents, agent)
+		seen[nameKey] = struct{}{}
 	}
 	return out, nil
 }

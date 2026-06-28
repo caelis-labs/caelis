@@ -18,6 +18,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/plugin"
 	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/OnslaughtSnail/caelis/ports/skill"
 )
 
 func (s *Stack) saveModelConfigs() error {
@@ -79,10 +80,9 @@ func (s *Stack) rebuildGateway() error {
 }
 
 type gatewayBuildPlan struct {
-	SandboxConfig     SandboxConfig
-	RuntimeConfig     stackRuntimeConfig
-	SessionStartHooks []plugin.HookSpec
-	MCPServerSpecs    []plugin.MCPServerSpec
+	SandboxConfig SandboxConfig
+	RuntimeConfig stackRuntimeConfig
+	Plugins       pluginContributions
 }
 
 type gatewayRuntimeBundle struct {
@@ -133,43 +133,27 @@ func (s *Stack) loadGatewayBuildPlan(sandboxCfg SandboxConfig, runtimeCfg stackR
 	if err != nil {
 		return gatewayBuildPlan{}, err
 	}
-	var sessionStartHooks []plugin.HookSpec
-	var mcpServerSpecs []plugin.MCPServerSpec
 	skillDirs := stackSkillDiscoveryDirs(s.Workspace.CWD, runtimeCfg.SkillDirs)
-	for _, pCfg := range doc.Plugins {
-		if !pCfg.Enabled {
-			continue
-		}
-		p, err := pluginregistry.ParsePlugin(pCfg.Root)
-		if err != nil {
-			return gatewayBuildPlan{}, fmt.Errorf("gatewayapp: parse enabled plugin %q failed: %w", pCfg.ID, err)
-		}
-		for _, hook := range p.Hooks {
-			if hook.Event == plugin.HookEventSessionStart {
-				sessionStartHooks = append(sessionStartHooks, hook)
-			}
-		}
-		for _, sc := range p.Skills {
-			skillDirs = append(skillDirs, sc.Root)
-		}
-		mcpServerSpecs = append(mcpServerSpecs, p.MCPServers...)
+	contribs, err := s.resolvePluginContributions(doc.Plugins)
+	if err != nil {
+		return gatewayBuildPlan{}, err
 	}
-	configuredAssembly, err := s.configuredAssembly(runtimeCfg.BaseAssembly, doc.Agents, doc.Plugins, runtimeCfg)
+	configuredAssembly, err := s.configuredAssemblyWithPluginAgents(runtimeCfg.BaseAssembly, doc.Agents, contribs.Agents, runtimeCfg)
 	if err != nil {
 		return gatewayBuildPlan{}, err
 	}
 	runtimeCfg.Assembly = configuredAssembly
 	runtimeCfg.Plugins = clonePluginConfigs(doc.Plugins)
-	baseMetadata, err := buildStackBaseMetadata(s.AppName, s.Workspace.CWD, runtimeCfg.SystemPrompt, runtimeCfg.Model, sandboxCfg, skillDirs)
+	runtimeCfg.PluginSkills = clonePluginSkillBundles(contribs.SkillBundles)
+	baseMetadata, err := buildStackBaseMetadata(s.AppName, s.Workspace.CWD, runtimeCfg.SystemPrompt, runtimeCfg.Model, sandboxCfg, skillDirs, runtimeCfg.PluginSkills)
 	if err != nil {
 		return gatewayBuildPlan{}, err
 	}
 	runtimeCfg.BaseMetadata = baseMetadata
 	return gatewayBuildPlan{
-		SandboxConfig:     sandboxCfg,
-		RuntimeConfig:     runtimeCfg,
-		SessionStartHooks: sessionStartHooks,
-		MCPServerSpecs:    mcpServerSpecs,
+		SandboxConfig: sandboxCfg,
+		RuntimeConfig: runtimeCfg,
+		Plugins:       contribs,
 	}, nil
 }
 
@@ -196,7 +180,7 @@ func (s *Stack) buildGatewayRuntime(plan gatewayBuildPlan) (*gatewayRuntimeBundl
 	}
 	bundle := &gatewayRuntimeBundle{Exec: sandboxRuntime}
 
-	mcpMgr, err := mcp.NewManager(context.Background(), plan.MCPServerSpecs)
+	mcpMgr, err := mcp.NewManager(context.Background(), plan.Plugins.MCPServerSpecs)
 	if err != nil {
 		bundle.Close()
 		return nil, fmt.Errorf("gatewayapp: failed to initialize MCP servers: %w", err)
@@ -289,7 +273,7 @@ func (s *Stack) buildGatewayRuntime(plan gatewayBuildPlan) (*gatewayRuntimeBundl
 		Resolver:            resolver,
 		DefaultApprovalMode: kernelimpl.NormalizeApprovalMode(runtimeCfg.ApprovalMode),
 		ApprovalApprover:    agentreview.Approver{Reviewer: s.newModelApprovalReviewer()},
-		SessionStartHooks:   plan.SessionStartHooks,
+		SessionStartHooks:   plan.Plugins.SessionStartHooks,
 	})
 	if err != nil {
 		bundle.Close()
@@ -318,6 +302,7 @@ func (s *Stack) swapGatewayRuntime(bundle *gatewayRuntimeBundle) {
 	currentRuntime := s.runtime
 	currentRuntime.Assembly = assembly.CloneResolvedAssembly(bundle.RuntimeConfig.Assembly)
 	currentRuntime.SkillDirs = cloneStringSlicePreserveNil(bundle.RuntimeConfig.SkillDirs)
+	currentRuntime.PluginSkills = clonePluginSkillBundles(bundle.RuntimeConfig.PluginSkills)
 	currentRuntime.Plugins = clonePluginConfigs(bundle.RuntimeConfig.Plugins)
 	currentRuntime.BaseMetadata = cloneMap(bundle.RuntimeConfig.BaseMetadata)
 	currentRuntime.EstimatedPromptPrefixTokens = bundle.EstimatedPromptPrefixTokens
@@ -340,4 +325,93 @@ func stackSkillDiscoveryDirs(workspaceDir string, configured []string) []string 
 		return cloneStringSlicePreserveNil(configured)
 	}
 	return DefaultSkillDiscoveryDirs(workspaceDir)
+}
+
+type pluginContributions struct {
+	SkillBundles      []skill.PluginBundle
+	SessionStartHooks []plugin.HookSpec
+	MCPServerSpecs    []plugin.MCPServerSpec
+	Agents            []pluginAgentContribution
+}
+
+type pluginAgentContribution struct {
+	PluginID string
+	Agent    plugin.AgentContribution
+}
+
+func (s *Stack) resolvePluginContributions(configs []PluginConfig) (pluginContributions, error) {
+	var out pluginContributions
+	for _, pCfg := range configs {
+		p, err := pluginregistry.ParsePlugin(pCfg.Root)
+		if err != nil {
+			if pCfg.Enabled {
+				return out, fmt.Errorf("gatewayapp: parse enabled plugin %q failed: %w", pCfg.ID, err)
+			}
+			continue
+		}
+		bundles := pluginSkillBundles(p, pCfg.Enabled)
+		out.SkillBundles = append(out.SkillBundles, bundles...)
+		if !pCfg.Enabled {
+			continue
+		}
+		for _, hook := range p.Hooks {
+			if hook.Event == plugin.HookEventSessionStart {
+				out.SessionStartHooks = append(out.SessionStartHooks, hook)
+			}
+		}
+		out.MCPServerSpecs = append(out.MCPServerSpecs, p.MCPServers...)
+		for _, contributed := range p.Agents {
+			out.Agents = append(out.Agents, pluginAgentContribution{
+				PluginID: p.ID,
+				Agent:    contributed,
+			})
+		}
+	}
+	return out, nil
+}
+
+func (s *Stack) resolvePluginAgentContributions(configs []PluginConfig) ([]pluginAgentContribution, error) {
+	var out []pluginAgentContribution
+	for _, pCfg := range configs {
+		if !pCfg.Enabled {
+			continue
+		}
+		p, err := pluginregistry.ParsePlugin(pCfg.Root)
+		if err != nil {
+			return nil, fmt.Errorf("gatewayapp: parse enabled plugin %q failed: %w", pCfg.ID, err)
+		}
+		for _, contributed := range p.Agents {
+			out = append(out, pluginAgentContribution{
+				PluginID: p.ID,
+				Agent:    contributed,
+			})
+		}
+	}
+	return out, nil
+}
+
+func pluginSkillBundles(p plugin.InstalledPlugin, enabled bool) []skill.PluginBundle {
+	if len(p.Skills) == 0 {
+		return nil
+	}
+	out := make([]skill.PluginBundle, 0, len(p.Skills))
+	pluginID := strings.TrimSpace(p.ID)
+	for _, sc := range p.Skills {
+		root := strings.TrimSpace(sc.Root)
+		if root == "" {
+			continue
+		}
+		namespace := strings.TrimSpace(sc.Namespace)
+		if namespace == "" {
+			namespace = pluginID
+		}
+		out = append(out, skill.PluginBundle{
+			Plugin:    pluginID,
+			Namespace: namespace,
+			Root:      root,
+			Disabled:  append([]string(nil), sc.Disabled...),
+			Enabled:   enabled,
+		})
+	}
+	return out
 }

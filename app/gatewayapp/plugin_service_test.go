@@ -301,7 +301,7 @@ func TestPluginServiceAddPathRefreshesSkillPrompt(t *testing.T) {
 		t.Fatalf("AddPath() error = %v", err)
 	}
 	systemPrompt, _ = stack.runtime.BaseMetadata["system_prompt"].(string)
-	if !strings.Contains(systemPrompt, "runtime-skill") {
+	if !strings.Contains(systemPrompt, "skillplugin:runtime-skill") {
 		t.Fatalf("runtime-skill missing after plugin add without restart:\n%s", systemPrompt)
 	}
 

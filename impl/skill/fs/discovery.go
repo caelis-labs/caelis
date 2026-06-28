@@ -16,7 +16,7 @@ func (Discovery) Discover(ctx context.Context, req skill.DiscoverRequest) ([]ski
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return DiscoverMeta(req.Dirs, req.WorkspaceDir)
+	return DiscoverMetaRequest(req)
 }
 
 type Loader struct{}

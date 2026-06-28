@@ -439,6 +439,8 @@ func TestAppConfigStoreCanPersistPlugins(t *testing.T) {
 				Enabled:     true,
 				Version:     "5.1.0",
 				Description: "A great plugin",
+				Managed:     true,
+				CacheRoot:   "/some/root",
 			},
 		},
 	})
@@ -455,7 +457,7 @@ func TestAppConfigStoreCanPersistPlugins(t *testing.T) {
 		t.Fatalf("len(doc.Plugins) = %d, want 1", len(doc.Plugins))
 	}
 	p := doc.Plugins[0]
-	if p.ID != "superpowers" || p.Name != "Superpowers" || p.Root != "/some/root/superpowers" || p.Kind != "gemini" || !p.Enabled {
+	if p.ID != "superpowers" || p.Name != "Superpowers" || p.Root != "/some/root/superpowers" || p.Kind != "gemini" || !p.Enabled || !p.Managed || p.CacheRoot != "/some/root" {
 		t.Errorf("unexpected plugin persisted contents: %+v", p)
 	}
 }

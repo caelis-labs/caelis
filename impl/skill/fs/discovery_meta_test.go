@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/OnslaughtSnail/caelis/internal/testenv"
+	"github.com/OnslaughtSnail/caelis/ports/skill"
 )
 
 func TestDefaultDiscoveryDirsPrioritizeSystemWorkspaceAndUserRoots(t *testing.T) {
@@ -85,6 +86,103 @@ func TestDiscoverMetaMaterializesSystemSkillsAndDedupesByPriority(t *testing.T) 
 	}
 	if got := byName["dupe"].Description; got != "workspace dupe" {
 		t.Fatalf("dupe description = %q, want workspace skill over user skill", got)
+	}
+}
+
+func TestDiscoverMetaIncludesPluginSkillsNamespacedAndSuppressesLegacyCopy(t *testing.T) {
+	home := t.TempDir()
+	testenv.SetHome(t, home)
+	root := t.TempDir()
+	regularRoot := filepath.Join(root, "regular")
+	pluginRoot := filepath.Join(root, "plugin-skills")
+
+	writeSkillForDiscoveryTest(t, filepath.Join(regularRoot, "ordinary"), "ordinary", "ordinary skill")
+	writeSkillForDiscoveryTest(t, filepath.Join(pluginRoot, "plan"), "plan", "plugin plan skill")
+	pluginSkillData, err := os.ReadFile(filepath.Join(pluginRoot, "plan", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read plugin skill: %v", err)
+	}
+	legacyCopy := filepath.Join(regularRoot, "plan")
+	if err := os.MkdirAll(legacyCopy, 0o755); err != nil {
+		t.Fatalf("mkdir legacy copy: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(legacyCopy, "SKILL.md"), pluginSkillData, 0o600); err != nil {
+		t.Fatalf("write legacy copy: %v", err)
+	}
+
+	metas, err := DiscoverMetaRequest(skill.DiscoverRequest{
+		Dirs: []string{regularRoot},
+		PluginBundles: []skill.PluginBundle{{
+			Plugin:    "superpowers",
+			Namespace: "superpowers",
+			Root:      pluginRoot,
+			Enabled:   true,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("DiscoverMetaRequest() error = %v", err)
+	}
+	if metaByNameForDiscoveryTest(metas, "ordinary").Source != skill.SourceRegular {
+		t.Fatalf("ordinary skill missing from %#v", metas)
+	}
+	if got := metaByNameForDiscoveryTest(metas, "superpowers:plan"); got.Source != skill.SourcePlugin || got.LocalName != "plan" || got.PluginID != "superpowers" {
+		t.Fatalf("plugin skill meta = %#v, want namespaced plugin meta", got)
+	}
+	if got := metaByNameForDiscoveryTest(metas, "plan"); got.Name != "" {
+		t.Fatalf("legacy regular plugin copy leaked as %#v", got)
+	}
+
+	copies, err := DiscoverLegacyPluginCopies(skill.DiscoverRequest{
+		Dirs: []string{regularRoot},
+		PluginBundles: []skill.PluginBundle{{
+			Plugin:    "superpowers",
+			Namespace: "superpowers",
+			Root:      pluginRoot,
+			Enabled:   true,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("DiscoverLegacyPluginCopies() error = %v", err)
+	}
+	if len(copies) != 1 || copies[0].Path != filepath.Join(legacyCopy, "SKILL.md") {
+		t.Fatalf("legacy copies = %#v, want copied plan skill", copies)
+	}
+}
+
+func TestDiscoverMetaSuppressesDisabledPluginSkillCopies(t *testing.T) {
+	home := t.TempDir()
+	testenv.SetHome(t, home)
+	root := t.TempDir()
+	regularRoot := filepath.Join(root, "regular")
+	pluginRoot := filepath.Join(root, "plugin-skills")
+
+	writeSkillForDiscoveryTest(t, filepath.Join(pluginRoot, "tooling"), "tooling", "plugin tooling skill")
+	pluginSkillData, err := os.ReadFile(filepath.Join(pluginRoot, "tooling", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read plugin skill: %v", err)
+	}
+	legacyCopy := filepath.Join(regularRoot, "tooling")
+	if err := os.MkdirAll(legacyCopy, 0o755); err != nil {
+		t.Fatalf("mkdir legacy copy: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(legacyCopy, "SKILL.md"), pluginSkillData, 0o600); err != nil {
+		t.Fatalf("write legacy copy: %v", err)
+	}
+
+	metas, err := DiscoverMetaRequest(skill.DiscoverRequest{
+		Dirs: []string{regularRoot},
+		PluginBundles: []skill.PluginBundle{{
+			Plugin:    "disabled-plugin",
+			Namespace: "disabled-plugin",
+			Root:      pluginRoot,
+			Enabled:   false,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("DiscoverMetaRequest() error = %v", err)
+	}
+	if len(metas) != 0 {
+		t.Fatalf("metas = %#v, want disabled plugin skill and legacy copy hidden", metas)
 	}
 }
 

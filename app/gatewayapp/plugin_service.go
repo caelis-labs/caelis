@@ -10,7 +10,9 @@ import (
 	"strings"
 
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/pluginregistry"
+	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/promptassembly"
 	"github.com/OnslaughtSnail/caelis/impl/tool/mcp"
+	pluginapi "github.com/OnslaughtSnail/caelis/ports/plugin"
 )
 
 type PluginService struct {
@@ -34,6 +36,11 @@ type PluginInfo struct {
 	MCPServers  []mcp.MCPServerInfo
 	Status      string
 	Warning     string
+}
+
+type pluginAddPathOptions struct {
+	Managed   bool
+	CacheRoot string
 }
 
 func (s PluginService) List(ctx context.Context) ([]PluginInfo, error) {
@@ -96,7 +103,11 @@ func (s PluginService) Install(ctx context.Context, source string) (PluginInfo, 
 	if err != nil {
 		return PluginInfo{}, err
 	}
-	return s.AddPath(ctx, pluginRoot)
+	cacheRoot := managedPluginInstallCacheRoot(s.stack.storeDir, pluginRoot)
+	return s.addPath(ctx, pluginRoot, pluginAddPathOptions{
+		Managed:   cacheRoot != "",
+		CacheRoot: cacheRoot,
+	})
 }
 
 func (s PluginService) installLocalPluginSource(ctx context.Context, source string) (PluginInfo, bool, error) {
@@ -115,6 +126,10 @@ func (s PluginService) installLocalPluginSource(ctx context.Context, source stri
 // AddPath registers or updates a local plugin directory, enables it, and
 // rebuilds the gateway. If the gateway rebuild fails the config is rolled back.
 func (s PluginService) AddPath(ctx context.Context, path string) (PluginInfo, error) {
+	return s.addPath(ctx, path, pluginAddPathOptions{})
+}
+
+func (s PluginService) addPath(ctx context.Context, path string, opts pluginAddPathOptions) (PluginInfo, error) {
 	if s.stack == nil || s.stack.store == nil {
 		return PluginInfo{}, fmt.Errorf("plugin service: stack store is unavailable")
 	}
@@ -158,6 +173,8 @@ func (s PluginService) AddPath(ctx context.Context, path string) (PluginInfo, er
 			doc.Plugins[i].Manifest = p.Manifest
 			doc.Plugins[i].Kind = string(p.Kind)
 			doc.Plugins[i].Enabled = true
+			doc.Plugins[i].Managed = opts.Managed
+			doc.Plugins[i].CacheRoot = strings.TrimSpace(opts.CacheRoot)
 			found = true
 			break
 		}
@@ -172,6 +189,8 @@ func (s PluginService) AddPath(ctx context.Context, path string) (PluginInfo, er
 			Enabled:     true,
 			Version:     p.Version,
 			Description: p.Description,
+			Managed:     opts.Managed,
+			CacheRoot:   strings.TrimSpace(opts.CacheRoot),
 		})
 	}
 
@@ -284,6 +303,7 @@ func (s PluginService) Remove(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
+	removed := doc.Plugins[foundIdx]
 
 	doc.Plugins = append(doc.Plugins[:foundIdx], doc.Plugins[foundIdx+1:]...)
 	if err := s.stack.store.Save(doc); err != nil {
@@ -292,6 +312,10 @@ func (s PluginService) Remove(ctx context.Context, id string) error {
 
 	if err := s.stack.rebuildGateway(); err != nil {
 		return s.handleRebuildError("rebuild gateway after removing plugin", err, oldDoc)
+	}
+
+	if err := s.removeManagedPluginCache(removed); err != nil {
+		return err
 	}
 
 	return nil
@@ -443,9 +467,7 @@ func (s PluginService) enrichPluginInfoFromManifest(info *PluginInfo, pCfg Plugi
 	info.Name = firstNonEmpty(info.Name, p.Name)
 	info.Version = firstNonEmpty(info.Version, p.Version)
 	info.Description = firstNonEmpty(info.Description, p.Description)
-	for _, sc := range p.Skills {
-		info.Skills = append(info.Skills, filepath.Base(sc.Root))
-	}
+	info.Skills = pluginSkillDisplayNames(p)
 	for _, hook := range p.Hooks {
 		info.Hooks = append(info.Hooks, string(hook.Event))
 	}
@@ -467,6 +489,30 @@ func (s PluginService) enrichPluginInfoFromManifest(info *PluginInfo, pCfg Plugi
 			Status: status,
 		})
 	}
+}
+
+func pluginSkillDisplayNames(p pluginapi.InstalledPlugin) []string {
+	bundles := pluginSkillBundles(p, true)
+	if len(bundles) == 0 {
+		return nil
+	}
+	metas, err := promptassembly.DiscoverPluginBundleMeta(bundles)
+	if err != nil {
+		out := make([]string, 0, len(p.Skills))
+		for _, sc := range p.Skills {
+			if root := strings.TrimSpace(sc.Root); root != "" {
+				out = append(out, filepath.Base(root))
+			}
+		}
+		return out
+	}
+	out := make([]string, 0, len(metas))
+	for _, meta := range metas {
+		if name := strings.TrimSpace(meta.Name); name != "" {
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 func pluginInfoHasMCPServer(info PluginInfo, name string) bool {
@@ -496,4 +542,61 @@ func (s PluginService) handleRebuildError(action string, err error, oldDoc AppCo
 		return fmt.Errorf("plugin service: failed to %s (rollback rebuild failed): %w, rollback error: %w", action, err, rbRebuildErr)
 	}
 	return fmt.Errorf("plugin service: failed to %s (rollback successful): %w", action, err)
+}
+
+func (s PluginService) removeManagedPluginCache(cfg PluginConfig) error {
+	if !cfg.Managed {
+		return nil
+	}
+	cacheRoot := strings.TrimSpace(cfg.CacheRoot)
+	if cacheRoot == "" {
+		cacheRoot = managedPluginInstallCacheRoot(s.stack.storeDir, cfg.Root)
+	}
+	if cacheRoot == "" {
+		return nil
+	}
+	installedRoot, err := filepath.Abs(filepath.Join(s.stack.storeDir, "plugins", "installed"))
+	if err != nil {
+		return err
+	}
+	cacheRoot, err = filepath.Abs(cacheRoot)
+	if err != nil {
+		return err
+	}
+	if !pluginregistry.PathWithinRoot(installedRoot, cacheRoot) || filepath.Clean(installedRoot) == filepath.Clean(cacheRoot) {
+		return fmt.Errorf("plugin service: refusing to remove unmanaged plugin cache path: %s", cacheRoot)
+	}
+	return os.RemoveAll(cacheRoot)
+}
+
+func managedPluginInstallCacheRoot(storeDir string, pluginRoot string) string {
+	storeDir = strings.TrimSpace(storeDir)
+	pluginRoot = strings.TrimSpace(pluginRoot)
+	if storeDir == "" || pluginRoot == "" {
+		return ""
+	}
+	installedRoot, err := filepath.Abs(filepath.Join(storeDir, "plugins", "installed"))
+	if err != nil {
+		return ""
+	}
+	pluginRoot, err = filepath.Abs(pluginRoot)
+	if err != nil {
+		return ""
+	}
+	if !pluginregistry.PathWithinRoot(installedRoot, pluginRoot) || filepath.Clean(installedRoot) == filepath.Clean(pluginRoot) {
+		return ""
+	}
+	rel, err := filepath.Rel(installedRoot, pluginRoot)
+	if err != nil || rel == "." || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
+		return ""
+	}
+	parts := strings.Split(filepath.Clean(rel), string(filepath.Separator))
+	if len(parts) == 0 || strings.TrimSpace(parts[0]) == "" || parts[0] == "." || parts[0] == ".." {
+		return ""
+	}
+	cacheRoot := filepath.Join(installedRoot, parts[0])
+	if !pluginregistry.PathWithinRoot(cacheRoot, pluginRoot) {
+		return ""
+	}
+	return cacheRoot
 }

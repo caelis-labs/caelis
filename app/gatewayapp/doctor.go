@@ -14,6 +14,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/impl/model/providers"
 	sandboxport "github.com/OnslaughtSnail/caelis/ports/sandbox"
 	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/OnslaughtSnail/caelis/ports/skill"
 )
 
 type DoctorRequest struct {
@@ -193,6 +194,7 @@ func (s *Stack) Doctor(ctx context.Context, req DoctorRequest) (DoctorReport, er
 	if !report.ConfigPermissionsSecure && strings.TrimSpace(report.ConfigPath) != "" {
 		report.Warnings = append(report.Warnings, "config file permissions are not secure")
 	}
+	report.Warnings = append(report.Warnings, s.legacyPluginSkillCopyWarnings()...)
 
 	if gw := s.CurrentGateway(); gw != nil {
 		active := gw.ActiveTurns()
@@ -209,6 +211,37 @@ func (s *Stack) Doctor(ctx context.Context, req DoctorRequest) (DoctorReport, er
 	}
 
 	return report, nil
+}
+
+func (s *Stack) legacyPluginSkillCopyWarnings() []string {
+	if s == nil {
+		return nil
+	}
+	s.mu.RLock()
+	runtimeCfg := s.runtime
+	workspace := s.Workspace.CWD
+	s.mu.RUnlock()
+	if len(runtimeCfg.PluginSkills) == 0 {
+		return nil
+	}
+	copies, err := DiscoverLegacyPluginSkillCopies(skill.DiscoverRequest{
+		Dirs:          stackSkillDiscoveryDirs(workspace, runtimeCfg.SkillDirs),
+		WorkspaceDir:  workspace,
+		PluginBundles: clonePluginSkillBundles(runtimeCfg.PluginSkills),
+	})
+	if err != nil {
+		return []string{"legacy plugin skill copy check failed: " + err.Error()}
+	}
+	if len(copies) == 0 {
+		return nil
+	}
+	warnings := make([]string, 0, len(copies))
+	for _, meta := range copies {
+		if path := strings.TrimSpace(meta.Path); path != "" {
+			warnings = append(warnings, "legacy plugin skill copy detected in regular skill directory: "+path)
+		}
+	}
+	return warnings
 }
 
 func FormatDoctorText(report DoctorReport) string {

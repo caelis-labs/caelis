@@ -12,6 +12,7 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/impl/skill/fs"
 	"github.com/OnslaughtSnail/caelis/ports/delegation"
+	"github.com/OnslaughtSnail/caelis/ports/skill"
 	"github.com/OnslaughtSnail/caelis/ports/tool"
 )
 
@@ -25,6 +26,7 @@ type Config struct {
 	WorkspaceDir      string
 	BasePrompt        string
 	SkillDirs         []string
+	PluginSkills      []skill.PluginBundle
 	DelegationAgents  []delegation.Agent
 	RuntimeOS         string
 	SandboxMode       string
@@ -66,7 +68,11 @@ func BuildSystemPrompt(cfg Config) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	skills, err := discoverSkillMeta(cfg.SkillDirs, workspaceDir)
+	skills, err := discoverSkillMeta(skill.DiscoverRequest{
+		Dirs:          cfg.SkillDirs,
+		WorkspaceDir:  workspaceDir,
+		PluginBundles: cfg.PluginSkills,
+	})
 	if err != nil {
 		return "", err
 	}
@@ -339,6 +345,18 @@ func DiscoverSkillMeta(dirs []string, workspaceDir string) ([]SkillMeta, error) 
 	return fs.DiscoverMeta(dirs, workspaceDir)
 }
 
+func DiscoverSkillMetaRequest(req skill.DiscoverRequest) ([]SkillMeta, error) {
+	return fs.DiscoverMetaRequest(req)
+}
+
+func DiscoverLegacyPluginSkillCopies(req skill.DiscoverRequest) ([]SkillMeta, error) {
+	return fs.DiscoverLegacyPluginCopies(req)
+}
+
+func DiscoverPluginBundleMeta(bundles []skill.PluginBundle) ([]SkillMeta, error) {
+	return fs.DiscoverPluginBundleMeta(bundles)
+}
+
 func ResolvePromptPath(path string) (string, error) {
 	return resolvePromptPath(path)
 }
@@ -380,8 +398,8 @@ func EstimatePromptTextTokens(text string) int {
 	return tokens
 }
 
-func discoverSkillMeta(dirs []string, workspaceDir string) ([]SkillMeta, error) {
-	return DiscoverSkillMeta(dirs, workspaceDir)
+func discoverSkillMeta(req skill.DiscoverRequest) ([]SkillMeta, error) {
+	return DiscoverSkillMetaRequest(req)
 }
 
 func readOptionalPromptFile(path string) (string, error) {

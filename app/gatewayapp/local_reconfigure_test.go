@@ -269,7 +269,7 @@ func TestBuildGatewayRuntimeMCPFailureDoesNotSwapStack(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadGatewayBuildPlan() error = %v", err)
 	}
-	plan.MCPServerSpecs = []plugin.MCPServerSpec{{
+	plan.Plugins.MCPServerSpecs = []plugin.MCPServerSpec{{
 		PluginID:  "broken",
 		Name:      "server",
 		Transport: plugin.MCPTransportStdio,

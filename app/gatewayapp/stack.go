@@ -19,6 +19,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/OnslaughtSnail/caelis/ports/skill"
 )
 
 type Config struct {
@@ -204,13 +205,14 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	return stack, nil
 }
 
-func buildStackBaseMetadata(appName, workspaceCWD, basePrompt string, model ModelConfig, sandboxCfg SandboxConfig, skillDirs []string) (map[string]any, error) {
+func buildStackBaseMetadata(appName, workspaceCWD, basePrompt string, model ModelConfig, sandboxCfg SandboxConfig, skillDirs []string, pluginSkills []skill.PluginBundle) (map[string]any, error) {
 	baseMetadata := map[string]any{}
 	systemPrompt, err := buildSystemPrompt(promptConfig{
 		AppName:           appName,
 		WorkspaceDir:      workspaceCWD,
 		BasePrompt:        basePrompt,
 		SkillDirs:         skillDirs,
+		PluginSkills:      pluginSkills,
 		SandboxMode:       promptSandboxContextMode(sandboxCfg),
 		DefaultPermission: promptDefaultPermissionSummary(sandboxCfg),
 	})

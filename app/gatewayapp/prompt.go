@@ -2,6 +2,7 @@ package gatewayapp
 
 import (
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/promptassembly"
+	"github.com/OnslaughtSnail/caelis/ports/skill"
 	"github.com/OnslaughtSnail/caelis/ports/tool"
 )
 
@@ -18,6 +19,14 @@ func DefaultSkillDiscoveryDirs(workspaceDir string) []string {
 
 func DiscoverSkillMeta(dirs []string, workspaceDir string) ([]SkillMeta, error) {
 	return promptassembly.DiscoverSkillMeta(dirs, workspaceDir)
+}
+
+func DiscoverSkillMetaRequest(req skill.DiscoverRequest) ([]SkillMeta, error) {
+	return promptassembly.DiscoverSkillMetaRequest(req)
+}
+
+func DiscoverLegacyPluginSkillCopies(req skill.DiscoverRequest) ([]SkillMeta, error) {
+	return promptassembly.DiscoverLegacyPluginSkillCopies(req)
 }
 
 func resolvePromptPath(path string) (string, error) {

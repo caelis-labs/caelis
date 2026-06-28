@@ -340,7 +340,7 @@ func TestNewLocalStackLoadsPluginSkills(t *testing.T) {
 	defer stack.Close()
 
 	systemPrompt, _ := stack.runtime.BaseMetadata["system_prompt"].(string)
-	if !strings.Contains(systemPrompt, "plugin-skill") {
+	if !strings.Contains(systemPrompt, "my-plugin:plugin-skill") {
 		t.Fatalf("expected system prompt to contain plugin skill, but it didn't.\nPrompt:\n%s", systemPrompt)
 	}
 }

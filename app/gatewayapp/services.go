@@ -2,6 +2,7 @@ package gatewayapp
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/impl/model/catalog"
@@ -10,6 +11,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/controller"
 	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/OnslaughtSnail/caelis/ports/skill"
 	"github.com/OnslaughtSnail/caelis/protocol/acp"
 )
 
@@ -21,7 +23,9 @@ type AgentService struct {
 	stack *Stack
 }
 
-type SkillService struct{}
+type SkillService struct {
+	stack *Stack
+}
 
 type StatusService struct {
 	stack *Stack
@@ -56,7 +60,7 @@ func (s *Stack) Agents() AgentService {
 }
 
 func (s *Stack) Skills() SkillService {
-	return SkillService{}
+	return SkillService{stack: s}
 }
 
 func (s *Stack) Status() StatusService {
@@ -197,13 +201,27 @@ func (s AgentService) InstallableOptions() []ACPAgentAddOption {
 	return s.stack.ListInstallableACPAgentOptions()
 }
 
-func (SkillService) Discover(ctx context.Context, workspaceDir string) ([]SkillMeta, error) {
+func (s SkillService) Discover(ctx context.Context, workspaceDir string) ([]SkillMeta, error) {
 	if ctx != nil {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 	}
-	return DiscoverSkillMeta(nil, workspaceDir)
+	if s.stack == nil {
+		return DiscoverSkillMeta(nil, workspaceDir)
+	}
+	s.stack.mu.RLock()
+	runtimeCfg := s.stack.runtime
+	defaultWorkspace := s.stack.Workspace.CWD
+	s.stack.mu.RUnlock()
+	if strings.TrimSpace(workspaceDir) == "" {
+		workspaceDir = defaultWorkspace
+	}
+	return DiscoverSkillMetaRequest(skill.DiscoverRequest{
+		Dirs:          stackSkillDiscoveryDirs(workspaceDir, runtimeCfg.SkillDirs),
+		WorkspaceDir:  workspaceDir,
+		PluginBundles: clonePluginSkillBundles(runtimeCfg.PluginSkills),
+	})
 }
 
 func (s StatusService) Doctor(ctx context.Context, req DoctorRequest) (DoctorReport, error) {

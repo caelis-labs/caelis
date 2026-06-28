@@ -1,6 +1,7 @@
 package fs
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -28,6 +29,7 @@ type metaCacheEntry struct {
 	modTime int64
 	used    uint64
 	meta    Meta
+	hash    string
 }
 
 func DefaultDiscoveryDirs(workspaceDir string) []string {
@@ -47,21 +49,70 @@ func DefaultDiscoveryDirs(workspaceDir string) []string {
 }
 
 func DiscoverMeta(dirs []string, workspaceDir string) ([]Meta, error) {
-	if len(dirs) == 0 {
-		systemRoot, err := system.Ensure()
-		dirs = DefaultDiscoveryDirs(workspaceDir)
-		if err != nil {
-			dirs = withoutDiscoveryDir(dirs, systemRoot)
-		}
-	} else if systemDiscoveryRequested(dirs) {
-		systemRoot, err := system.Ensure()
-		if err != nil {
-			dirs = withoutDiscoveryDir(dirs, systemRoot)
-		}
+	return DiscoverMetaRequest(skill.DiscoverRequest{
+		Dirs:         dirs,
+		WorkspaceDir: workspaceDir,
+	})
+}
+
+func DiscoverMetaRequest(req skill.DiscoverRequest) ([]Meta, error) {
+	dirs := discoveryDirs(req.Dirs, req.WorkspaceDir)
+	if systemRoot, err := maybeEnsureSystemSkills(dirs); err != nil {
+		dirs = withoutDiscoveryDir(dirs, systemRoot)
 	}
-	out := make([]Meta, 0)
-	seenPaths := map[string]struct{}{}
+	pluginMetas, suppressedRegular, err := discoverPluginBundleMeta(req.PluginBundles)
+	if err != nil {
+		return nil, err
+	}
 	seenNames := map[string]struct{}{}
+	out, err := scanRegularSkillDirs(dirs, func(meta Meta, hash string) (Meta, bool, error) {
+		nameKey := strings.ToLower(strings.TrimSpace(meta.Name))
+		if nameKey == "" {
+			return Meta{}, false, nil
+		}
+		if suppressedRegular[skillIdentityKey(meta.Name, hash)] {
+			return Meta{}, false, nil
+		}
+		if _, ok := seenNames[nameKey]; ok {
+			return Meta{}, false, nil
+		}
+		seenNames[nameKey] = struct{}{}
+		meta.Source = skill.SourceRegular
+		meta.LocalName = strings.TrimSpace(meta.Name)
+		return meta, true, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, pluginMetas...)
+	return out, nil
+}
+
+func DiscoverLegacyPluginCopies(req skill.DiscoverRequest) ([]Meta, error) {
+	dirs := discoveryDirs(req.Dirs, req.WorkspaceDir)
+	if systemRoot, err := maybeEnsureSystemSkills(dirs); err != nil {
+		dirs = withoutDiscoveryDir(dirs, systemRoot)
+	}
+	_, suppressedRegular, err := discoverPluginBundleMeta(req.PluginBundles)
+	if err != nil {
+		return nil, err
+	}
+	if len(suppressedRegular) == 0 {
+		return nil, nil
+	}
+	return scanRegularSkillDirs(dirs, func(meta Meta, hash string) (Meta, bool, error) {
+		if !suppressedRegular[skillIdentityKey(meta.Name, hash)] {
+			return Meta{}, false, nil
+		}
+		meta.Source = skill.SourceRegular
+		meta.LocalName = strings.TrimSpace(meta.Name)
+		return meta, true, nil
+	})
+}
+
+func scanRegularSkillDirs(dirs []string, visit func(Meta, string) (Meta, bool, error)) ([]Meta, error) {
+	var out []Meta
+	seenPaths := map[string]struct{}{}
 	for _, dir := range dirs {
 		resolvedDir, err := ResolvePath(dir)
 		if err != nil {
@@ -97,23 +148,37 @@ func DiscoverMeta(dirs []string, workspaceDir string) ([]Meta, error) {
 			if _, ok := seenPaths[skillPath]; ok {
 				continue
 			}
-			meta, err := parseMetaCached(skillPath, info)
+			seenPaths[skillPath] = struct{}{}
+			meta, hash, err := parseMetaHashCached(skillPath, info)
 			if err != nil {
 				return nil, err
 			}
-			nameKey := strings.ToLower(strings.TrimSpace(meta.Name))
-			if nameKey == "" {
+			meta, include, err := visit(meta, hash)
+			if err != nil {
+				return nil, err
+			}
+			if !include {
 				continue
 			}
-			seenPaths[skillPath] = struct{}{}
-			if _, ok := seenNames[nameKey]; ok {
-				continue
-			}
-			seenNames[nameKey] = struct{}{}
 			out = append(out, meta)
 		}
 	}
 	return out, nil
+}
+
+func discoveryDirs(dirs []string, workspaceDir string) []string {
+	if len(dirs) == 0 {
+		return DefaultDiscoveryDirs(workspaceDir)
+	}
+	return dirs
+}
+
+func maybeEnsureSystemSkills(dirs []string) (string, error) {
+	if len(dirs) == 0 || systemDiscoveryRequested(dirs) {
+		systemRoot, err := system.Ensure()
+		return systemRoot, err
+	}
+	return "", nil
 }
 
 func systemDiscoveryRequested(dirs []string) bool {
@@ -180,8 +245,13 @@ func ResolvePath(path string) (string, error) {
 }
 
 func parseMetaCached(path string, info os.FileInfo) (Meta, error) {
+	meta, _, err := parseMetaHashCached(path, info)
+	return meta, err
+}
+
+func parseMetaHashCached(path string, info os.FileInfo) (Meta, string, error) {
 	if info == nil {
-		return parseMeta(path)
+		return parseMetaHash(path)
 	}
 	entry := metaCacheEntry{
 		size:    info.Size(),
@@ -194,21 +264,22 @@ func parseMetaCached(path string, info os.FileInfo) (Meta, error) {
 		cached.used = metaCache.next
 		metaCache.entries[path] = cached
 		metaCache.Unlock()
-		return cached.meta, nil
+		return cached.meta, cached.hash, nil
 	}
 	metaCache.Unlock()
-	meta, err := parseMeta(path)
+	meta, hash, err := parseMetaHash(path)
 	if err != nil {
-		return Meta{}, err
+		return Meta{}, "", err
 	}
 	entry.meta = meta
+	entry.hash = hash
 	metaCache.Lock()
 	metaCache.next++
 	entry.used = metaCache.next
 	metaCache.entries[path] = entry
 	pruneMetaCacheLocked()
 	metaCache.Unlock()
-	return meta, nil
+	return meta, hash, nil
 }
 
 func pruneMetaCacheLocked() {
@@ -229,10 +300,24 @@ func pruneMetaCacheLocked() {
 }
 
 func parseMeta(path string) (Meta, error) {
+	meta, _, err := parseMetaHash(path)
+	return meta, err
+}
+
+func parseMetaHash(path string) (Meta, string, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return Meta{}, err
+		return Meta{}, "", err
 	}
+	meta, err := parseMetaContent(path, raw)
+	if err != nil {
+		return Meta{}, "", err
+	}
+	sum := sha256.Sum256(raw)
+	return meta, fmt.Sprintf("%x", sum[:]), nil
+}
+
+func parseMetaContent(path string, raw []byte) (Meta, error) {
 	content := normalizeText(string(raw))
 	if content == "" {
 		return Meta{}, fmt.Errorf("empty SKILL.md: %s", path)

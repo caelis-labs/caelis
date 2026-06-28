@@ -259,6 +259,166 @@ func TestParseClaudePluginMalformedHooks(t *testing.T) {
 	}
 }
 
+func TestParseCodexPluginContributions(t *testing.T) {
+	tmp := t.TempDir()
+	root := filepath.Join(tmp, "codex-demo")
+	if err := os.MkdirAll(filepath.Join(root, ".codex-plugin"), 0o700); err != nil {
+		t.Fatalf("mkdir codex manifest dir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "skills", "plan"), 0o700); err != nil {
+		t.Fatalf("mkdir skill dir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "hooks"), 0o700); err != nil {
+		t.Fatalf("mkdir hooks dir: %v", err)
+	}
+	manifest := `{
+		"name": "codex-demo",
+		"version": "1.0.0",
+		"description": "Codex demo",
+		"skills": "./skills",
+		"mcpServers": {
+			"manifest-server": {"command": "node", "args": ["server.js"]}
+		},
+		"agents": [
+			{"name": "helper", "command": "helper-bin", "workDir": "."}
+		]
+	}`
+	if err := os.WriteFile(filepath.Join(root, ".codex-plugin", "plugin.json"), []byte(manifest), 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	hooks := `{
+		"hooks": {
+			"SessionStart": [
+				{"hooks": [{"type": "command", "command": "bash hooks/start.sh"}]}
+			]
+		}
+	}`
+	if err := os.WriteFile(filepath.Join(root, "hooks", "hooks.json"), []byte(hooks), 0o600); err != nil {
+		t.Fatalf("write hooks: %v", err)
+	}
+	mcpJSON := `{
+		"mcpServers": {
+			"file-server": {"command": "python", "args": ["mcp.py"], "workDir": "."}
+		}
+	}`
+	if err := os.WriteFile(filepath.Join(root, ".mcp.json"), []byte(mcpJSON), 0o600); err != nil {
+		t.Fatalf("write .mcp.json: %v", err)
+	}
+
+	p, err := ParsePlugin(root)
+	if err != nil {
+		t.Fatalf("ParsePlugin() error = %v", err)
+	}
+	if p.Kind != plugin.ManifestKindCodex {
+		t.Fatalf("Kind = %q, want codex", p.Kind)
+	}
+	if len(p.Skills) != 1 || p.Skills[0].Root != filepath.Join(root, "skills") || p.Skills[0].Namespace != "codex-demo" {
+		t.Fatalf("Skills = %#v, want codex namespaced skills root", p.Skills)
+	}
+	if len(p.Hooks) != 1 || p.Hooks[0].Command != "bash" || !strings.Contains(strings.Join(p.Hooks[0].Args, " "), "hooks/start.sh") {
+		t.Fatalf("Hooks = %#v, want hook from hooks/hooks.json", p.Hooks)
+	}
+	if len(p.MCPServers) != 2 {
+		t.Fatalf("MCPServers = %#v, want manifest and .mcp.json servers", p.MCPServers)
+	}
+	if len(p.Agents) != 1 || p.Agents[0].Name != "helper" || p.Agents[0].WorkDir != root {
+		t.Fatalf("Agents = %#v, want helper agent rooted at plugin", p.Agents)
+	}
+}
+
+func TestParseCodexPluginPathContributionFields(t *testing.T) {
+	tmp := t.TempDir()
+	root := filepath.Join(tmp, "codex-paths")
+	if err := os.MkdirAll(filepath.Join(root, ".codex-plugin"), 0o700); err != nil {
+		t.Fatalf("mkdir codex manifest dir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "config"), 0o700); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "hooks"), 0o700); err != nil {
+		t.Fatalf("mkdir default hooks dir: %v", err)
+	}
+	manifest := `{
+		"name": "codex-paths",
+		"version": "1.0.0",
+		"hooks": "config/hooks.json",
+		"mcpServers": "config/mcp.json"
+	}`
+	if err := os.WriteFile(filepath.Join(root, ".codex-plugin", "plugin.json"), []byte(manifest), 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	pathHooks := `{
+		"hooks": {
+			"SessionStart": [
+				{"hooks": [{"type": "command", "command": "bash config/start.sh"}]}
+			]
+		}
+	}`
+	if err := os.WriteFile(filepath.Join(root, "config", "hooks.json"), []byte(pathHooks), 0o600); err != nil {
+		t.Fatalf("write path hooks: %v", err)
+	}
+	defaultHooks := `{
+		"hooks": {
+			"SessionStart": [
+				{"hooks": [{"type": "command", "command": "bash hooks/default.sh"}]}
+			]
+		}
+	}`
+	if err := os.WriteFile(filepath.Join(root, "hooks", "hooks.json"), []byte(defaultHooks), 0o600); err != nil {
+		t.Fatalf("write default hooks: %v", err)
+	}
+	pathMCP := `{
+		"servers": {
+			"path-server": {"command": "python", "args": ["config/mcp.py"]}
+		}
+	}`
+	if err := os.WriteFile(filepath.Join(root, "config", "mcp.json"), []byte(pathMCP), 0o600); err != nil {
+		t.Fatalf("write path mcp: %v", err)
+	}
+	defaultMCP := `{
+		"mcpServers": {
+			"default-server": {"command": "node", "args": ["default.js"]}
+		}
+	}`
+	if err := os.WriteFile(filepath.Join(root, ".mcp.json"), []byte(defaultMCP), 0o600); err != nil {
+		t.Fatalf("write default mcp: %v", err)
+	}
+
+	p, err := ParsePlugin(root)
+	if err != nil {
+		t.Fatalf("ParsePlugin() error = %v", err)
+	}
+	if len(p.Hooks) != 1 || p.Hooks[0].Command != "bash" || !strings.Contains(strings.Join(p.Hooks[0].Args, " "), "config/start.sh") {
+		t.Fatalf("Hooks = %#v, want only path hook", p.Hooks)
+	}
+	if len(p.MCPServers) != 1 || p.MCPServers[0].Name != "path-server" {
+		t.Fatalf("MCPServers = %#v, want only path server", p.MCPServers)
+	}
+}
+
+func TestParseCodexPluginRejectsEscapingSkillPath(t *testing.T) {
+	tmp := t.TempDir()
+	root := filepath.Join(tmp, "codex-escape")
+	if err := os.MkdirAll(filepath.Join(root, ".codex-plugin"), 0o700); err != nil {
+		t.Fatalf("mkdir codex manifest dir: %v", err)
+	}
+	manifest := `{
+		"name": "codex-escape",
+		"skills": "../outside"
+	}`
+	if err := os.WriteFile(filepath.Join(root, ".codex-plugin", "plugin.json"), []byte(manifest), 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	_, err := ParsePlugin(root)
+	if err == nil {
+		t.Fatal("ParsePlugin() error = nil, want escaping skill path rejection")
+	}
+	if !strings.Contains(err.Error(), "path traversal escape") {
+		t.Fatalf("ParsePlugin() error = %v, want path traversal escape", err)
+	}
+}
+
 func TestParseGeminiPlugin(t *testing.T) {
 	tmp, err := os.MkdirTemp("", "caelis-plugin-test-")
 	if err != nil {
