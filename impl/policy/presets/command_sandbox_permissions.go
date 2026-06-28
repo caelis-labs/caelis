@@ -20,6 +20,11 @@ type commandSandboxRequest struct {
 	Justification      string
 }
 
+func (r commandSandboxRequest) withEscalation() commandSandboxRequest {
+	r.SandboxPermissions = commandSandboxPermissionRequireEscalated
+	return r
+}
+
 func parseCommandSandboxRequest(input policy.ToolContext) (commandSandboxRequest, error) {
 	args, err := policy.CallArgs(input.Call)
 	if err != nil {

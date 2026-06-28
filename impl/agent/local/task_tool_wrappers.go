@@ -11,7 +11,9 @@ import (
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/shell"
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/spawn"
 	tasktool "github.com/OnslaughtSnail/caelis/impl/tool/builtin/task"
+	"github.com/OnslaughtSnail/caelis/internal/commanddiag"
 	"github.com/OnslaughtSnail/caelis/ports/agent"
+	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/subagent"
@@ -153,9 +155,54 @@ func (t runtimeCommandTool) Call(ctx context.Context, call tool.Call) (tool.Resu
 	}
 	snapshot, err := t.tasks.StartCommand(ctx, t.session, t.sessionRef, runtime, req)
 	if err != nil {
+		if result, ok := commandStartDiagnosticToolResult(call, t.base.Definition(), command, err); ok {
+			return result, nil
+		}
 		return tool.Result{}, err
 	}
 	return taskSnapshotToolResult(call, t.base.Definition(), snapshot), nil
+}
+
+func commandStartDiagnosticToolResult(call tool.Call, def tool.Definition, command string, err error) (tool.Result, bool) {
+	if err == nil {
+		return tool.Result{}, false
+	}
+	diag, ok := commanddiag.Best(commanddiag.Input{
+		ToolName: shell.RunCommandToolName,
+		Command:  command,
+		Error:    strings.TrimSpace(err.Error()),
+		ExitCode: 1,
+	})
+	if !ok {
+		return tool.Result{}, false
+	}
+	payload := map[string]any{
+		"state":      "failed",
+		"error":      strings.TrimSpace(err.Error()),
+		"hint_code":  diag.Code,
+		"hint":       diag.Hint,
+		"tool_name":  strings.TrimSpace(def.Name),
+		"error_code": string(tool.ErrorCodePermissionDenied),
+	}
+	if strings.TrimSpace(diag.Severity) != "" {
+		payload["hint_severity"] = diag.Severity
+	}
+	if diag.RetryableWithHost {
+		payload["retryable_with_host"] = true
+	}
+	if strings.TrimSpace(diag.SuggestedSandboxPermissions) != "" {
+		payload["suggested_sandbox_permissions"] = strings.TrimSpace(diag.SuggestedSandboxPermissions)
+	}
+	if len(diag.SuggestedPrefixRule) > 0 {
+		payload["suggested_prefix_rule"] = append([]string(nil), diag.SuggestedPrefixRule...)
+	}
+	raw, _ := json.Marshal(payload)
+	return tool.Result{
+		ID:      strings.TrimSpace(call.ID),
+		Name:    strings.TrimSpace(def.Name),
+		IsError: true,
+		Content: []model.Part{model.NewJSONPart(raw)},
+	}, true
 }
 
 type runtimeSpawnTool struct {

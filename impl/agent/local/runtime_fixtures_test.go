@@ -1448,7 +1448,8 @@ func (a seqAgent) Run(agent.Context) iter.Seq2[*session.Event, error] {
 }
 
 type yieldProbeSandboxRuntime struct {
-	session *yieldProbeSandboxSession
+	session  *yieldProbeSandboxSession
+	startErr error
 }
 
 func (r *yieldProbeSandboxRuntime) Describe() sandbox.Descriptor {
@@ -1473,6 +1474,9 @@ func (r *yieldProbeSandboxRuntime) Run(context.Context, sandbox.CommandRequest) 
 }
 
 func (r *yieldProbeSandboxRuntime) Start(_ context.Context, req sandbox.CommandRequest) (sandbox.Session, error) {
+	if r.startErr != nil {
+		return nil, r.startErr
+	}
 	if r.session == nil {
 		r.session = newYieldProbeSandboxSession()
 	}

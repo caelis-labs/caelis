@@ -30,6 +30,27 @@ fatal: Could not read from remote repository.`
 	}
 }
 
+func TestBestDetectsHostExecutionRequiresApproval(t *testing.T) {
+	input := Input{
+		Command:  "git log --oneline -3",
+		Error:    "ports/sandbox: " + sandbox.HostExecutionRequiresApprovalMessage,
+		ExitCode: 1,
+		Route:    sandbox.RouteHost,
+		Backend:  sandbox.BackendHost,
+	}
+
+	got, ok := Best(input)
+	if !ok {
+		t.Fatal("Best() ok = false, want host approval diagnostic")
+	}
+	if got.Code != CodeHostExecutionApproval {
+		t.Fatalf("Code = %q, want %q", got.Code, CodeHostExecutionApproval)
+	}
+	if got.SuggestedSandboxPermissions != "require_escalated" || !got.RetryableWithHost {
+		t.Fatalf("Diagnostic = %+v, want host approval retry metadata", got)
+	}
+}
+
 func TestBestDoesNotLabelNativeOpenSSHPublicKeyFailure(t *testing.T) {
 	input := windowsSandboxInput()
 	input.Stderr = "git@github.com: Permission denied (publickey).\nfatal: Could not read from remote repository."

@@ -33,21 +33,35 @@ func (r *compositeRuntime) FileSystemFor(constraints Constraints) FileSystem {
 
 func (r *compositeRuntime) Run(ctx context.Context, req CommandRequest) (CommandResult, error) {
 	constraints := EffectiveConstraints(req)
-	runtime := r.runtimeForConstraints(constraints)
+	selection := r.runtimeSelectionForConstraints(constraints)
+	runtime := selection.runtime
 	if runtime == nil {
 		return CommandResult{}, fmt.Errorf("ports/sandbox: runtime is unavailable")
 	}
+	if selection.implicitHost {
+		result := CommandResult{
+			Error:   HostExecutionRequiresApprovalMessage,
+			Route:   RouteHost,
+			Backend: BackendHost,
+		}
+		return result, fmt.Errorf("ports/sandbox: %s", HostExecutionRequiresApprovalMessage)
+	}
 	result, err := runtime.Run(ctx, req)
-	if runtime != r.host && constraints.Route != RouteHost && constraints.Permission != PermissionFullAccess {
+	if !ConstraintsRequestExplicitHost(constraints) {
 		return NormalizeSandboxPermissionFailure(result, err)
 	}
 	return result, err
 }
 
 func (r *compositeRuntime) Start(ctx context.Context, req CommandRequest) (Session, error) {
-	runtime := r.runtimeForConstraints(EffectiveConstraints(req))
+	constraints := EffectiveConstraints(req)
+	selection := r.runtimeSelectionForConstraints(constraints)
+	runtime := selection.runtime
 	if runtime == nil {
 		return nil, fmt.Errorf("ports/sandbox: runtime is unavailable")
+	}
+	if selection.implicitHost {
+		return nil, fmt.Errorf("ports/sandbox: %s", HostExecutionRequiresApprovalMessage)
 	}
 	return runtime.Start(ctx, req)
 }
@@ -183,19 +197,28 @@ func (r *compositeRuntime) Close() error {
 }
 
 func (r *compositeRuntime) runtimeForConstraints(constraints Constraints) Runtime {
+	return r.runtimeSelectionForConstraints(constraints).runtime
+}
+
+type runtimeSelection struct {
+	runtime      Runtime
+	implicitHost bool
+}
+
+func (r *compositeRuntime) runtimeSelectionForConstraints(constraints Constraints) runtimeSelection {
 	constraints = NormalizeConstraints(constraints)
-	if constraints.Backend == BackendHost || constraints.Route == RouteHost || constraints.Permission == PermissionFullAccess {
-		return r.host
+	if ConstraintsRequestExplicitHost(constraints) {
+		return runtimeSelection{runtime: r.host}
 	}
 	if constraints.Backend != "" {
 		if runtime := r.backends[constraints.Backend]; runtime != nil {
-			return runtime
+			return runtimeSelection{runtime: runtime}
 		}
 	}
 	if r.sandbox != nil {
-		return r.sandbox
+		return runtimeSelection{runtime: r.sandbox}
 	}
-	return r.host
+	return runtimeSelection{runtime: r.host, implicitHost: r.host != nil}
 }
 
 func splitSessionID(raw string) (SessionRef, error) {

@@ -14,6 +14,7 @@ const (
 	CodeGoPrivateDependency        = "go_private_dependency_sandbox_incompatible"
 	CodeSandboxCacheDenied         = "sandbox_cache_write_denied"
 	CodeWindowsSandboxACLDenied    = "windows_sandbox_acl_denied"
+	CodeHostExecutionApproval      = "host_execution_requires_approval"
 )
 
 const (
@@ -53,6 +54,9 @@ func Best(input Input) (Diagnostic, bool) {
 	}
 	text := diagnosticText(input)
 	lower := strings.ToLower(text)
+	if isHostExecutionApprovalRequired(lower) {
+		return hostRetryDiagnostic(input, CodeHostExecutionApproval, sandbox.HostExecutionRequiresApprovalMessage), true
+	}
 	if isGitIndexLockSandboxDenied(input, lower) {
 		return hostRetryDiagnostic(input, CodeGitIndexLockSandboxDenied, hintGitIndexLockSandbox), true
 	}
@@ -115,6 +119,11 @@ func isSandbox(input Input) bool {
 
 func isFailedCommand(input Input) bool {
 	return input.ExitCode != 0 || strings.TrimSpace(input.Error) != ""
+}
+
+func isHostExecutionApprovalRequired(lower string) bool {
+	return strings.Contains(lower, strings.ToLower(sandbox.HostExecutionRequiresApprovalMessage)) ||
+		strings.Contains(lower, "host execution requires approval")
 }
 
 func diagnosticText(input Input) string {

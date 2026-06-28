@@ -2,11 +2,14 @@ package local
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/shell"
 	tasktool "github.com/OnslaughtSnail/caelis/impl/tool/builtin/task"
+	"github.com/OnslaughtSnail/caelis/internal/commanddiag"
+	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/tool"
 )
@@ -62,6 +65,40 @@ func TestRuntimeRunCommandToolRejectsUnsupportedArgs(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "timeout_ms") {
 		t.Fatalf("RUN_COMMAND Call() error = %v, want timeout_ms mention", err)
+	}
+}
+
+func TestRuntimeRunCommandToolAddsHostApprovalHintWhenStartRejected(t *testing.T) {
+	t.Parallel()
+
+	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
+	fake := &yieldProbeSandboxRuntime{
+		startErr: fmt.Errorf("ports/sandbox: %s", sandbox.HostExecutionRequiresApprovalMessage),
+	}
+	targetTool := runtimeCommandTool{
+		base:       mustRuntimeRunCommandTool(t, fake),
+		session:    session.CloneSession(activeSession),
+		sessionRef: activeSession.SessionRef,
+		tasks:      runtime.tasks,
+	}
+
+	result := callRuntimeRunCommandTool(t, targetTool, map[string]any{
+		"command": "git log --oneline -3",
+		"workdir": activeSession.CWD,
+	})
+
+	if !result.IsError {
+		t.Fatal("result.IsError = false, want structured command start failure")
+	}
+	payload := testToolResultPayload(t, result)
+	if got, _ := payload["hint_code"].(string); got != commanddiag.CodeHostExecutionApproval {
+		t.Fatalf("hint_code = %q, want %q", got, commanddiag.CodeHostExecutionApproval)
+	}
+	if got, _ := payload["suggested_sandbox_permissions"].(string); got != "require_escalated" {
+		t.Fatalf("suggested_sandbox_permissions = %q, want require_escalated", got)
+	}
+	if got, _ := payload["retryable_with_host"].(bool); !got {
+		t.Fatalf("retryable_with_host = %#v, want true", payload["retryable_with_host"])
 	}
 }
 

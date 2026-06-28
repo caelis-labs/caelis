@@ -492,6 +492,44 @@ func TestRunCommandCallDoesNotHintNativeOpenSSHPublicKeyFailure(t *testing.T) {
 	}
 }
 
+func TestRunCommandCallAddsHostExecutionApprovalHint(t *testing.T) {
+	t.Parallel()
+
+	rt := sandboxPermissionRuntime{result: sandbox.CommandResult{
+		Error:   sandbox.HostExecutionRequiresApprovalMessage,
+		Route:   sandbox.RouteHost,
+		Backend: sandbox.BackendHost,
+	}, err: fmt.Errorf("ports/sandbox: %s", sandbox.HostExecutionRequiresApprovalMessage)}
+	runCommandTool, err := NewRunCommand(RunCommandConfig{Runtime: rt})
+	if err != nil {
+		t.Fatalf("NewRunCommand() error = %v", err)
+	}
+	raw, err := json.Marshal(map[string]any{"command": "git log --oneline -3"})
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	result, err := runCommandTool.Call(context.Background(), tool.Call{Name: RunCommandToolName, Input: raw})
+	if err != nil {
+		t.Fatalf("Call() error = %v, want structured tool result", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
+		t.Fatalf("json.Unmarshal(result) error = %v", err)
+	}
+	if got, _ := payload["hint_code"].(string); got != commanddiag.CodeHostExecutionApproval {
+		t.Fatalf("hint_code = %q, want %q", got, commanddiag.CodeHostExecutionApproval)
+	}
+	if got, _ := payload["hint"].(string); got != sandbox.HostExecutionRequiresApprovalMessage {
+		t.Fatalf("hint = %q, want host approval guidance", got)
+	}
+	if got, _ := payload["retryable_with_host"].(bool); !got {
+		t.Fatalf("retryable_with_host = %#v, want true", payload["retryable_with_host"])
+	}
+	if got, _ := payload["suggested_sandbox_permissions"].(string); got != "require_escalated" {
+		t.Fatalf("suggested_sandbox_permissions = %q, want require_escalated", got)
+	}
+}
+
 func TestRunCommandCallAddsGitIndexLockSandboxHint(t *testing.T) {
 	t.Parallel()
 

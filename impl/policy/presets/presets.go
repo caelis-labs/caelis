@@ -106,12 +106,8 @@ func decideCommand(input policy.ToolContext, def sandbox.Constraints, modeName s
 	if reason := commandHardDenyReason(command); reason != "" {
 		return deny(reason), nil
 	}
-	if gitControlMetadataCommand(command) && req.SandboxPermissions != commandSandboxPermissionRequireEscalated {
-		return deny("Git control metadata command requires sandbox_permissions=require_escalated"), nil
-	}
-	switch req.SandboxPermissions {
-	case commandSandboxPermissionRequireEscalated:
-		return askEscalationApproval(input, req)
+	if commandHostApprovalRequired(req, input.Sandbox) {
+		return askEscalationApproval(input, req.withEscalation())
 	}
 	return allow(def), nil
 }
@@ -173,6 +169,11 @@ func askEscalationApproval(input policy.ToolContext, req commandSandboxRequest) 
 	}
 	decision.Metadata = req.approvalMetadata(reason)
 	return decision, nil
+}
+
+func commandHostApprovalRequired(req commandSandboxRequest, desc sandbox.Descriptor) bool {
+	return req.SandboxPermissions == commandSandboxPermissionRequireEscalated ||
+		sandbox.DescriptorImpliesHostExecution(desc)
 }
 
 func hostExecutionConstraints() sandbox.Constraints {
@@ -672,25 +673,6 @@ func hardDenyGitCommandReason(command string) string {
 		}
 	}
 	return ""
-}
-
-func gitControlMetadataCommand(command string) bool {
-	for _, git := range gitCommands(command) {
-		switch git.Subcommand {
-		case "add", "commit", "tag", "merge", "rebase", "cherry-pick", "stash", "push", "reset", "checkout", "restore":
-			return true
-		case "clean":
-			if !gitCleanDryRun(git.Args) {
-				return true
-			}
-		}
-	}
-	for _, payload := range shellCommandPayloads(command) {
-		if gitControlMetadataCommand(payload) {
-			return true
-		}
-	}
-	return false
 }
 
 type gitCommand struct {

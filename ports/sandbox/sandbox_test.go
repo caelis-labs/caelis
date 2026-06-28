@@ -315,6 +315,193 @@ func TestCompositeRuntimeFileSystemForPreservesConstraints(t *testing.T) {
 	}
 }
 
+func TestCompositeRuntimeRejectsImplicitHostFallbackForSandboxRun(t *testing.T) {
+	t.Parallel()
+
+	hostRuntime := &fakeRuntime{backend: BackendHost}
+	rt := &compositeRuntime{
+		host: hostRuntime,
+		backends: map[Backend]Runtime{
+			BackendHost: hostRuntime,
+		},
+		status: Status{
+			RequestedBackend: "",
+			ResolvedBackend:  BackendHost,
+			FallbackToHost:   true,
+		},
+	}
+
+	result, err := rt.Run(context.Background(), CommandRequest{
+		Command: "echo ok",
+		Constraints: Constraints{
+			Route:      RouteSandbox,
+			Permission: PermissionWorkspaceWrite,
+		},
+	})
+	if err == nil {
+		t.Fatal("Run() error = nil, want host approval error")
+	}
+	if !strings.Contains(err.Error(), HostExecutionRequiresApprovalMessage) {
+		t.Fatalf("Run() error = %v, want host approval message", err)
+	}
+	if result.Route != RouteHost || result.Backend != BackendHost || result.Error != HostExecutionRequiresApprovalMessage {
+		t.Fatalf("Run() result = %+v, want host approval result", result)
+	}
+}
+
+func TestCompositeRuntimeRejectsImplicitHostFallbackForSandboxStart(t *testing.T) {
+	t.Parallel()
+
+	hostRuntime := &fakeRuntime{backend: BackendHost}
+	rt := &compositeRuntime{
+		host: hostRuntime,
+		backends: map[Backend]Runtime{
+			BackendHost: hostRuntime,
+		},
+		status: Status{
+			RequestedBackend: "",
+			ResolvedBackend:  BackendHost,
+			FallbackToHost:   true,
+		},
+	}
+
+	if _, err := rt.Start(context.Background(), CommandRequest{
+		Command: "sleep 1",
+		Constraints: Constraints{
+			Route:      RouteSandbox,
+			Permission: PermissionWorkspaceWrite,
+		},
+	}); err == nil || !strings.Contains(err.Error(), HostExecutionRequiresApprovalMessage) {
+		t.Fatalf("Start() error = %v, want host approval error", err)
+	}
+}
+
+func TestCompositeRuntimeRejectsImplicitHostFallbackWithNonComparableRuntime(t *testing.T) {
+	t.Parallel()
+
+	hostRuntime := fakeRuntime{backend: BackendHost}
+	rt := &compositeRuntime{
+		host: hostRuntime,
+		backends: map[Backend]Runtime{
+			BackendHost: hostRuntime,
+		},
+		status: Status{
+			ResolvedBackend: BackendHost,
+			FallbackToHost:  true,
+		},
+	}
+	req := CommandRequest{
+		Command: "echo ok",
+		Constraints: Constraints{
+			Route:      RouteSandbox,
+			Permission: PermissionWorkspaceWrite,
+		},
+	}
+
+	if _, err := rt.Run(context.Background(), req); err == nil || !strings.Contains(err.Error(), HostExecutionRequiresApprovalMessage) {
+		t.Fatalf("Run() error = %v, want host approval error", err)
+	}
+	if _, err := rt.Start(context.Background(), req); err == nil || !strings.Contains(err.Error(), HostExecutionRequiresApprovalMessage) {
+		t.Fatalf("Start() error = %v, want host approval error", err)
+	}
+}
+
+func TestCompositeRuntimeAllowsApprovedHostRun(t *testing.T) {
+	t.Parallel()
+
+	hostRuntime := &fakeRuntime{backend: BackendHost}
+	rt := &compositeRuntime{
+		host: hostRuntime,
+		backends: map[Backend]Runtime{
+			BackendHost: hostRuntime,
+		},
+		status: Status{
+			RequestedBackend: "",
+			ResolvedBackend:  BackendHost,
+			FallbackToHost:   true,
+		},
+	}
+
+	result, err := rt.Run(context.Background(), CommandRequest{
+		Command: "echo ok",
+		Constraints: Constraints{
+			Route:      RouteHost,
+			Backend:    BackendHost,
+			Permission: PermissionFullAccess,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.Backend != BackendHost {
+		t.Fatalf("Run() backend = %q, want host", result.Backend)
+	}
+}
+
+func TestCompositeRuntimeAllowsSandboxFallbackForUnavailableRequestedBackend(t *testing.T) {
+	t.Parallel()
+
+	hostRuntime := &fakeRuntime{backend: BackendHost}
+	sandboxRuntime := &fakeRuntime{backend: BackendBwrap}
+	rt := &compositeRuntime{
+		host:    hostRuntime,
+		sandbox: sandboxRuntime,
+		backends: map[Backend]Runtime{
+			BackendHost:  hostRuntime,
+			BackendBwrap: sandboxRuntime,
+		},
+		status: Status{
+			RequestedBackend: BackendBwrap,
+			ResolvedBackend:  BackendBwrap,
+		},
+	}
+
+	result, err := rt.Run(context.Background(), CommandRequest{
+		Command: "echo ok",
+		Constraints: Constraints{
+			Backend:    Backend("missing-test-backend"),
+			Route:      RouteSandbox,
+			Permission: PermissionWorkspaceWrite,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.Backend != BackendBwrap {
+		t.Fatalf("Run() backend = %q, want sandbox fallback backend %q", result.Backend, BackendBwrap)
+	}
+}
+
+func TestCompositeRuntimeAllowsSandboxStartFallbackForUnavailableRequestedBackend(t *testing.T) {
+	t.Parallel()
+
+	hostRuntime := &fakeRuntime{backend: BackendHost}
+	sandboxRuntime := &fakeRuntime{backend: BackendBwrap}
+	rt := &compositeRuntime{
+		host:    hostRuntime,
+		sandbox: sandboxRuntime,
+		backends: map[Backend]Runtime{
+			BackendHost:  hostRuntime,
+			BackendBwrap: sandboxRuntime,
+		},
+		status: Status{
+			RequestedBackend: BackendBwrap,
+			ResolvedBackend:  BackendBwrap,
+		},
+	}
+
+	if _, err := rt.Start(context.Background(), CommandRequest{
+		Command: "sleep 1",
+		Constraints: Constraints{
+			Backend:    Backend("missing-test-backend"),
+			Route:      RouteSandbox,
+			Permission: PermissionWorkspaceWrite,
+		},
+	}); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+}
+
 func TestNormalizeConfigTreatsAutoBackendAsUnset(t *testing.T) {
 	t.Parallel()
 
@@ -366,6 +553,58 @@ func TestCanonicalBackendNormalizesAliases(t *testing.T) {
 			t.Parallel()
 			if got := CanonicalBackend(tt.raw); got != tt.want {
 				t.Fatalf("CanonicalBackend(%q) = %q, want %q", tt.raw, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestConstraintsRequestExplicitHost(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		constraints Constraints
+		want        bool
+	}{
+		{name: "empty", constraints: Constraints{}, want: false},
+		{name: "sandbox route", constraints: Constraints{Route: RouteSandbox}, want: false},
+		{name: "host route", constraints: Constraints{Route: RouteHost}, want: true},
+		{name: "host backend", constraints: Constraints{Backend: BackendHost}, want: true},
+		{name: "full access", constraints: Constraints{Permission: PermissionFullAccess}, want: true},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := ConstraintsRequestExplicitHost(tt.constraints); got != tt.want {
+				t.Fatalf("ConstraintsRequestExplicitHost() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDescriptorImpliesHostExecution(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		desc Descriptor
+		want bool
+	}{
+		{name: "empty", desc: Descriptor{}, want: false},
+		{name: "sandbox backend", desc: Descriptor{Backend: BackendBwrap}, want: false},
+		{name: "host backend", desc: Descriptor{Backend: BackendHost}, want: true},
+		{name: "host route", desc: Descriptor{DefaultConstraints: Constraints{Route: RouteHost}}, want: true},
+		{name: "full access", desc: Descriptor{DefaultConstraints: Constraints{Permission: PermissionFullAccess}}, want: true},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := DescriptorImpliesHostExecution(tt.desc); got != tt.want {
+				t.Fatalf("DescriptorImpliesHostExecution() = %v, want %v", got, tt.want)
 			}
 		})
 	}

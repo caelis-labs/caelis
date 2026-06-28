@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	_ "github.com/OnslaughtSnail/caelis/impl/sandbox/host"
 	"github.com/OnslaughtSnail/caelis/internal/testenv"
 	"github.com/OnslaughtSnail/caelis/ports/policy"
 	"github.com/OnslaughtSnail/caelis/ports/sandbox"
@@ -442,7 +443,7 @@ func TestDefaultModeAllowsReadOnlyGitCommands(t *testing.T) {
 	}
 }
 
-func TestDefaultModeRequiresEscalationForGitControlMetadataCommands(t *testing.T) {
+func TestDefaultModeAllowsNonDangerousGitMetadataCommandsInSandbox(t *testing.T) {
 	t.Parallel()
 
 	tests := []string{
@@ -485,17 +486,21 @@ func TestDefaultModeRequiresEscalationForGitControlMetadataCommands(t *testing.T
 			if err != nil {
 				t.Fatalf("DecideTool() error = %v", err)
 			}
-			if decision.Action != policy.ActionDeny {
-				t.Fatalf("Action = %q, want deny", decision.Action)
+			if decision.Action != policy.ActionAllow {
+				t.Fatalf("Action = %q, want allow (reason=%q)", decision.Action, decision.Reason)
 			}
-			if !strings.Contains(decision.Reason, "require_escalated") {
-				t.Fatalf("Reason = %q, want escalation guidance", decision.Reason)
+			if decision.Constraints.Route != sandbox.RouteSandbox {
+				t.Fatalf("Constraints.Route = %q, want sandbox", decision.Constraints.Route)
 			}
 			if hasPathRule(decision.Constraints.PathRules, testWorkspaceGitRoot(), sandbox.PathAccessReadWrite) {
 				t.Fatalf("PathRules = %#v, did not expect .git write grant for command %q", decision.Constraints.PathRules, command)
 			}
 		})
 	}
+}
+
+func TestDefaultModeRequiresApprovalForExplicitGitEscalation(t *testing.T) {
+	t.Parallel()
 
 	for _, command := range []string{"git add .", "git push origin main", "sh -c 'git add .'", "sudo -E git add ."} {
 		command := command
@@ -516,6 +521,65 @@ func TestDefaultModeRequiresEscalationForGitControlMetadataCommands(t *testing.T
 				t.Fatalf("Metadata[sandbox_permissions] = %#v", got)
 			}
 		})
+	}
+}
+
+func TestDefaultModeRequiresApprovalWhenDefaultCommandWouldRunOnHost(t *testing.T) {
+	t.Parallel()
+
+	input := commandCtx("git log --oneline -3", false)
+	input.Sandbox = sandbox.Descriptor{
+		Backend: sandbox.BackendHost,
+		DefaultConstraints: sandbox.Constraints{
+			Route:      sandbox.RouteHost,
+			Backend:    sandbox.BackendHost,
+			Permission: sandbox.PermissionFullAccess,
+		},
+	}
+	decision, err := AutoReviewMode().DecideTool(context.Background(), input)
+	if err != nil {
+		t.Fatalf("DecideTool() error = %v", err)
+	}
+	if decision.Action != policy.ActionAskApproval {
+		t.Fatalf("Action = %q, want ask_approval", decision.Action)
+	}
+	if decision.Constraints.Route != sandbox.RouteHost || decision.Constraints.Permission != sandbox.PermissionFullAccess {
+		t.Fatalf("Constraints = %#v, want host full access", decision.Constraints)
+	}
+	if got := decision.Metadata["sandbox_permissions"]; got != "require_escalated" {
+		t.Fatalf("Metadata[sandbox_permissions] = %#v, want require_escalated", got)
+	}
+}
+
+func TestDefaultModeRequiresApprovalForCompositeHostFallbackDescriptor(t *testing.T) {
+	t.Parallel()
+
+	runtime, err := sandbox.New(sandbox.Config{
+		CWD:              testWorkspaceRoot(),
+		RequestedBackend: "auto",
+		BackendCandidates: []sandbox.Backend{
+			sandbox.Backend("unavailable-test-sandbox"),
+		},
+	})
+	if err != nil {
+		t.Fatalf("sandbox.New() error = %v", err)
+	}
+	t.Cleanup(func() {
+		_ = runtime.Close()
+	})
+	status := runtime.Status()
+	if !status.FallbackToHost {
+		t.Fatalf("runtime Status().FallbackToHost = false, want fallback host status: %+v", status)
+	}
+
+	input := commandCtx("git log --oneline -3", false)
+	input.Sandbox = runtime.Describe()
+	decision, err := AutoReviewMode().DecideTool(context.Background(), input)
+	if err != nil {
+		t.Fatalf("DecideTool() error = %v", err)
+	}
+	if decision.Action != policy.ActionAskApproval {
+		t.Fatalf("Action = %q, want ask_approval", decision.Action)
 	}
 }
 
@@ -818,7 +882,19 @@ func commandCtxWithArgs(args map[string]any) policy.ToolContext {
 			WorkspaceRoot: testWorkspaceRoot(),
 			TempRoot:      testTempRoot(),
 		},
-		Sandbox: sandbox.Descriptor{Backend: sandbox.BackendHost},
+		Sandbox: sandboxCommandDescriptor(),
+	}
+}
+
+func sandboxCommandDescriptor() sandbox.Descriptor {
+	return sandbox.Descriptor{
+		Backend: sandbox.BackendSeatbelt,
+		DefaultConstraints: sandbox.Constraints{
+			Route:      sandbox.RouteSandbox,
+			Backend:    sandbox.BackendSeatbelt,
+			Permission: sandbox.PermissionWorkspaceWrite,
+			Isolation:  sandbox.IsolationContainer,
+		},
 	}
 }
 

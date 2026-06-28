@@ -585,6 +585,22 @@ func NormalizeConstraints(in Constraints) Constraints {
 	return out
 }
 
+// ConstraintsRequestExplicitHost reports whether constraints intentionally ask
+// to leave sandbox isolation and execute on the host.
+func ConstraintsRequestExplicitHost(in Constraints) bool {
+	constraints := NormalizeConstraints(in)
+	return constraints.Backend == BackendHost ||
+		constraints.Route == RouteHost ||
+		constraints.Permission == PermissionFullAccess
+}
+
+// DescriptorImpliesHostExecution reports whether a backend descriptor indicates
+// commands execute on the host by default.
+func DescriptorImpliesHostExecution(in Descriptor) bool {
+	desc := CloneDescriptor(in)
+	return desc.Backend == BackendHost || ConstraintsRequestExplicitHost(desc.DefaultConstraints)
+}
+
 // CloneDescriptor returns one normalized descriptor copy.
 func CloneDescriptor(in Descriptor) Descriptor {
 	out := in
