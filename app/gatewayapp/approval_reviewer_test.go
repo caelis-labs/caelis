@@ -16,6 +16,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/impl/model/providers"
 	"github.com/OnslaughtSnail/caelis/impl/session/memory"
 	"github.com/OnslaughtSnail/caelis/ports/agent"
+	"github.com/OnslaughtSnail/caelis/ports/approval"
 	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
@@ -30,16 +31,18 @@ func TestApprovalReviewerUsesRequestModelAndSessionContext(t *testing.T) {
 		responses: []string{`{"outcome":"allow","risk_level":"low","user_authorization":"high","rationale":"narrow request"}`},
 	}
 	reviewer := newModelApprovalReviewer(service)
-
-	result, err := reviewer.ReviewApproval(ctx, approvalReviewerTestRequest(activeSession, testModel, "git push origin dev", map[string]any{
+	req := approvalReviewerTestRequest(activeSession, testModel, "git push origin dev", map[string]any{
 		"cmd":        "git push origin dev",
 		"call_id":    "call-123",
 		"session_id": "session-123",
 		"valid":      true,
-	}))
+	})
+
+	result, err := reviewer.ReviewApproval(ctx, req)
 	if err != nil {
 		t.Fatalf("ReviewApproval() error = %v", err)
 	}
+	result = finalizeApprovalReviewerTestResult(req, result)
 	if !result.Approved {
 		t.Fatal("Approved = false, want true")
 	}
@@ -51,29 +54,29 @@ func TestApprovalReviewerUsesRequestModelAndSessionContext(t *testing.T) {
 	if got, want := len(requests), 1; got != want {
 		t.Fatalf("model calls = %d, want %d", got, want)
 	}
-	req := requests[0]
-	if req.Stream {
+	modelReq := requests[0]
+	if modelReq.Stream {
 		t.Fatal("model request Stream = true, want false")
 	}
-	if got := len(req.Tools); got != 0 {
+	if got := len(modelReq.Tools); got != 0 {
 		t.Fatalf("len(Tools) = %d, want no reviewer tools", got)
 	}
-	if req.Output == nil || req.Output.Mode != model.OutputModeSchema {
-		t.Fatalf("Output = %#v, want schema output", req.Output)
+	if modelReq.Output == nil || modelReq.Output.Mode != model.OutputModeSchema {
+		t.Fatalf("Output = %#v, want schema output", modelReq.Output)
 	}
-	if req.Output.MaxOutputTokens != guardianMaxOutputTokens {
-		t.Fatalf("Output.MaxOutputTokens = %d, want %d", req.Output.MaxOutputTokens, guardianMaxOutputTokens)
+	if modelReq.Output.MaxOutputTokens != guardianMaxOutputTokens {
+		t.Fatalf("Output.MaxOutputTokens = %d, want %d", modelReq.Output.MaxOutputTokens, guardianMaxOutputTokens)
 	}
-	if got := len(req.Instructions); got != 1 {
+	if got := len(modelReq.Instructions); got != 1 {
 		t.Fatalf("len(Instructions) = %d, want guardian policy", got)
 	}
-	if !strings.Contains(req.Instructions[0].Text.Text, "You are judging one planned coding-agent action") {
-		t.Fatalf("instruction text = %q, want guardian policy", req.Instructions[0].Text.Text)
+	if !strings.Contains(modelReq.Instructions[0].Text.Text, "You are judging one planned coding-agent action") {
+		t.Fatalf("instruction text = %q, want guardian policy", modelReq.Instructions[0].Text.Text)
 	}
-	if !strings.Contains(req.Instructions[0].Text.Text, `return exactly {"outcome":"allow"}`) {
-		t.Fatalf("instruction text = %q, want low-risk compact output contract", req.Instructions[0].Text.Text)
+	if !strings.Contains(modelReq.Instructions[0].Text.Text, `return exactly {"outcome":"allow"}`) {
+		t.Fatalf("instruction text = %q, want low-risk compact output contract", modelReq.Instructions[0].Text.Text)
 	}
-	prompt := req.Messages[0].TextContent()
+	prompt := modelReq.Messages[0].TextContent()
 	for _, want := range []string{
 		">>> TRANSCRIPT START",
 		"Please push the current changes",
@@ -142,6 +145,91 @@ func TestApprovalReviewerUsesSystemManagedGuardianRunner(t *testing.T) {
 	}
 }
 
+func TestApprovalReviewerSelectsExplicitApprovalOption(t *testing.T) {
+	ctx := context.Background()
+	service, activeSession := newApprovalReviewerTestSession(t, ctx)
+	appendApprovalReviewerTextEvent(t, ctx, service, activeSession, session.EventTypeUser, model.RoleUser, "Please run the bounded command if needed.")
+	testModel := &approvalReviewerFakeModel{
+		responses: []string{`{"outcome":"allow","option_id":"allow_once","risk_level":"low","user_authorization":"medium","rationale":"bounded command"}`},
+	}
+	reviewer := newModelApprovalReviewer(service)
+	req := approvalReviewerTestRequest(activeSession, testModel, "run command", map[string]any{"cmd": "pwd"})
+	req.Approval.Options = []gateway.ApprovalOption{
+		{ID: "allow_once", Name: "Allow once", Kind: "allow"},
+		{ID: "reject", Name: "Reject", Kind: "reject"},
+	}
+
+	result, err := reviewer.ReviewApproval(ctx, req)
+	if err != nil {
+		t.Fatalf("ReviewApproval() error = %v", err)
+	}
+	result = finalizeApprovalReviewerTestResult(req, result)
+	if result.OptionID != "allow_once" {
+		t.Fatalf("OptionID = %q, want explicit model-selected option", result.OptionID)
+	}
+	requests := testModel.Requests()
+	if got, want := len(requests), 1; got != want {
+		t.Fatalf("model calls = %d, want %d", got, want)
+	}
+	prompt := requests[0].Messages[0].TextContent()
+	for _, want := range []string{"Available approval options JSON", "allow_once", "Reject"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("review prompt missing option content %q:\n%s", want, prompt)
+		}
+	}
+	props, _ := requests[0].Output.JSONSchema["properties"].(map[string]any)
+	optionSchema, _ := props["option_id"].(map[string]any)
+	enum, _ := optionSchema["enum"].([]any)
+	if !reflect.DeepEqual(enum, []any{"allow_once", "reject"}) {
+		t.Fatalf("option_id enum = %#v, want concrete approval options", enum)
+	}
+}
+
+func TestApprovalReviewerSelectedOptionOverridesOutcome(t *testing.T) {
+	ctx := context.Background()
+	service, activeSession := newApprovalReviewerTestSession(t, ctx)
+	appendApprovalReviewerTextEvent(t, ctx, service, activeSession, session.EventTypeUser, model.RoleUser, "Please ask before running the command.")
+	testModel := &approvalReviewerFakeModel{
+		responses: []string{`{"outcome":"allow","option_id":"reject_once","risk_level":"low","user_authorization":"medium","rationale":"model selected reject"}`},
+	}
+	reviewer := newModelApprovalReviewer(service)
+	req := approvalReviewerTestRequest(activeSession, testModel, "run command", map[string]any{"cmd": "pwd"})
+	req.Approval.Options = []gateway.ApprovalOption{
+		{ID: "allow_once", Name: "Allow once", Kind: "allow_once"},
+		{ID: "reject_once", Name: "Reject once", Kind: "reject_once"},
+	}
+
+	result, err := reviewer.ReviewApproval(ctx, req)
+	if err != nil {
+		t.Fatalf("ReviewApproval() error = %v", err)
+	}
+	result = finalizeApprovalReviewerTestResult(req, result)
+	if result.Approved || result.OptionID != "reject_once" || result.Outcome != string(gateway.ApprovalStatusSelected) {
+		t.Fatalf("result = %#v, want selected reject_once denial", result)
+	}
+	if !strings.Contains(result.DisplayText, "denied") {
+		t.Fatalf("DisplayText = %q, want normalized denial display", result.DisplayText)
+	}
+}
+
+func TestSystemManagedAgentPlanRejectsGuardianTools(t *testing.T) {
+	_, err := systemManagedAgentRunPlanFor(systemManagedAgentRunRequest{
+		AgentID: guardianProfileID,
+		Model:   &approvalReviewerFakeModel{},
+		ParentSession: session.Session{
+			SessionRef: session.SessionRef{
+				AppName:   "caelis",
+				UserID:    "user",
+				SessionID: "parent-session",
+			},
+		},
+		Tools: []tool.Tool{tool.NamedTool{Def: tool.Definition{Name: "unexpected_tool"}}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "does not allow tools") {
+		t.Fatalf("systemManagedAgentRunPlanFor() error = %v, want guardian no-tools rejection", err)
+	}
+}
+
 func TestSystemManagedAgentSessionKeepsExistingGuardianSession(t *testing.T) {
 	guardianSession := session.Session{
 		SessionRef: session.SessionRef{
@@ -176,7 +264,7 @@ func TestSystemManagedAgentSessionUsesGuardianDurableIDFromMetadata(t *testing.T
 	reuseKey := strings.Repeat("a", 64)
 
 	got := systemManagedAgentSessionForParent(parent, guardianSystemManagedAgentSpec(), map[string]any{
-		guardianStateReuseKey: reuseKey,
+		systemManagedAgentStateReuseKey: reuseKey,
 	})
 	want := guardianReviewSessionID(parent, reuseKey)
 	if got.SessionID != want {
@@ -184,6 +272,21 @@ func TestSystemManagedAgentSessionUsesGuardianDurableIDFromMetadata(t *testing.T
 	}
 	if !strings.HasSuffix(got.SessionID, reuseKey) {
 		t.Fatalf("system-managed session id = %q, want full reuse key suffix %q", got.SessionID, reuseKey)
+	}
+}
+
+func TestSystemManagedAgentSessionReadsLegacyGuardianState(t *testing.T) {
+	state := map[string]any{
+		legacyGuardianStateReuseKey:          "legacy-reuse",
+		legacyGuardianStateCursorEventCount:  3,
+		legacyGuardianStateCursorLastEventID: "event-3",
+	}
+	if got := systemManagedAgentStateString(state, systemManagedAgentStateReuseKey); got != "legacy-reuse" {
+		t.Fatalf("system-managed reuse key = %q, want legacy guardian reuse key", got)
+	}
+	cursor := systemManagedAgentCursorFromState(state)
+	if cursor.EventCount != 3 || cursor.LastEventID != "event-3" {
+		t.Fatalf("system-managed cursor = %#v, want legacy guardian cursor", cursor)
 	}
 }
 
@@ -331,7 +434,7 @@ func TestApprovalReviewerReloadsDurableGuardianContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("guardian SnapshotState() error = %v", err)
 	}
-	if got := guardianStateInt(state, guardianStateCursorEventCount); got == 0 {
+	if got := systemManagedAgentStateInt(state, systemManagedAgentStateCursorEventCount); got == 0 {
 		t.Fatalf("guardian cursor event count = %d, want persisted cursor", got)
 	}
 }
@@ -410,7 +513,7 @@ func TestApprovalReviewerRecoversGuardianCursorWhenStateUpdateFails(t *testing.T
 	if err != nil {
 		t.Fatalf("guardian SnapshotState(after failed state update) error = %v", err)
 	}
-	if got := guardianStateInt(state, guardianStateCursorEventCount); got != 0 {
+	if got := systemManagedAgentStateInt(state, systemManagedAgentStateCursorEventCount); got != 0 {
 		t.Fatalf("guardian cursor state after forced failure = %d, want missing state", got)
 	}
 
@@ -510,10 +613,7 @@ func TestApprovalReviewerRetriesInvalidJSONAssessment(t *testing.T) {
 		t.Fatal("retry prompt was polluted by the invalid reviewer response")
 	}
 
-	guardian := reviewer.(*guardianApprovalReviewer)
-	guardian.mu.Lock()
-	reviewSession := guardian.sessionsByParent[activeSession.SessionID]
-	guardian.mu.Unlock()
+	reviewSession := approvalReviewerSystemSession(t, reviewer, activeSession)
 	if reviewSession == nil {
 		t.Fatal("review session not recorded")
 		return
@@ -545,10 +645,7 @@ func TestApprovalReviewerStopsAfterInvalidJSONAssessmentRetries(t *testing.T) {
 		t.Fatalf("model calls = %d, want %d", got, want)
 	}
 
-	guardian := reviewer.(*guardianApprovalReviewer)
-	guardian.mu.Lock()
-	reviewSession := guardian.sessionsByParent[activeSession.SessionID]
-	guardian.mu.Unlock()
+	reviewSession := approvalReviewerSystemSession(t, reviewer, activeSession)
 	if reviewSession == nil {
 		t.Fatal("review session not recorded")
 		return
@@ -734,7 +831,6 @@ func TestApprovalReviewerConcurrentReviewsDoNotMutateParentSession(t *testing.T)
 		started: make(chan struct{}, 2),
 	}
 	reviewer := newModelApprovalReviewer(service)
-	guardian := reviewer.(*guardianApprovalReviewer)
 	readPath := t.TempDir()
 
 	errs := make(chan error, 2)
@@ -766,9 +862,7 @@ func TestApprovalReviewerConcurrentReviewsDoNotMutateParentSession(t *testing.T)
 	if got, want := len(events), 1; got != want {
 		t.Fatalf("parent session event count = %d, want %d", got, want)
 	}
-	guardian.mu.Lock()
-	reviewSession := guardian.sessionsByParent[activeSession.SessionID]
-	guardian.mu.Unlock()
+	reviewSession := approvalReviewerSystemSession(t, reviewer, activeSession)
 	if reviewSession == nil {
 		t.Fatal("review session not recorded")
 		return
@@ -1048,6 +1142,28 @@ func approvalReviewerTestRequest(activeSession session.Session, llm model.LLM, r
 			Call: tool.Call{Name: "custom_tool", Input: raw},
 		},
 	}
+}
+
+func finalizeApprovalReviewerTestResult(req gateway.ApprovalReviewRequest, result gateway.ApprovalReviewResult) gateway.ApprovalReviewResult {
+	return approval.FinalizeReviewResult(req.Approval, result)
+}
+
+func approvalReviewerSystemSession(t *testing.T, reviewer gateway.ApprovalReviewer, activeSession session.Session) *systemManagedAgentSession {
+	t.Helper()
+	guardian, ok := reviewer.(*guardianApprovalReviewer)
+	if !ok {
+		t.Fatalf("reviewer = %T, want guardianApprovalReviewer", reviewer)
+	}
+	if guardian.systemSessions == nil {
+		t.Fatal("guardian system session cache is nil")
+	}
+	req := normalizeSystemManagedAgentSessionRequest(systemManagedAgentSessionRequest{
+		ParentKey:     activeSession.SessionID,
+		ParentSession: activeSession,
+		Spec:          guardianSystemManagedAgentSpec(),
+		Purpose:       systemManagedAgentPurposeApprovalReview,
+	})
+	return guardian.systemSessions.cached(req)
 }
 
 func waitForApprovalReviewerCalls(t *testing.T, ch <-chan struct{}, count int) {

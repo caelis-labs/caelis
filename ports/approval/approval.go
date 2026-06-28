@@ -115,6 +115,9 @@ type ReviewResult struct {
 	Trace          *ReviewTrace
 }
 
+// Reviewer produces an approval assessment. Implementations may return raw
+// model output; callers that need an executable decision must pass the result
+// through FinalizeReviewResult or use ReviewerAdapter.
 type Reviewer interface {
 	ReviewApproval(context.Context, ReviewRequest) (ReviewResult, error)
 }
@@ -141,14 +144,7 @@ func PayloadFromRuntimeRequest(req agent.ApprovalRequest) *Payload {
 		}
 		payload.RawInput = maps.Clone(req.Approval.ToolCall.RawInput)
 		if len(req.Approval.Options) > 0 {
-			payload.Options = make([]Option, 0, len(req.Approval.Options))
-			for _, option := range req.Approval.Options {
-				payload.Options = append(payload.Options, Option{
-					ID:   strings.TrimSpace(option.ID),
-					Name: strings.TrimSpace(option.Name),
-					Kind: strings.TrimSpace(option.Kind),
-				})
-			}
+			payload.Options = NormalizeProtocolOptions(req.Approval.Options)
 		}
 	}
 	if len(payload.RawInput) == 0 {
@@ -163,28 +159,121 @@ func PayloadFromRuntimeRequest(req agent.ApprovalRequest) *Payload {
 	return payload
 }
 
-func RuntimeResponseFromReview(payload *Payload, result ReviewResult) agent.ApprovalResponse {
-	optionID := strings.TrimSpace(result.OptionID)
-	if optionID == "" && payload != nil {
-		optionID = optionIDForDecision(payload.Options, result.Approved)
+// NormalizeProtocolOptions converts protocol approval options into the stable
+// approval option shape and applies canonical option normalization.
+func NormalizeProtocolOptions(options []session.ProtocolApprovalOption) []Option {
+	if len(options) == 0 {
+		return nil
 	}
-	outcome := strings.TrimSpace(result.Outcome)
-	if optionID != "" {
-		outcome = string(StatusSelected)
-	} else if outcome == "" {
-		if result.Approved {
-			outcome = string(StatusApproved)
-		} else {
-			outcome = string(StatusRejected)
+	out := make([]Option, 0, len(options))
+	for _, option := range options {
+		out = append(out, Option{
+			ID:   option.ID,
+			Name: option.Name,
+			Kind: option.Kind,
+		})
+	}
+	return NormalizeOptions(out)
+}
+
+// NormalizeOptions returns the stable approval option shape used across
+// gateway, runtime, and system-managed reviewers.
+func NormalizeOptions(options []Option) []Option {
+	if len(options) == 0 {
+		return nil
+	}
+	out := make([]Option, 0, len(options))
+	for _, option := range options {
+		normalized := Option{
+			ID:   strings.TrimSpace(option.ID),
+			Name: strings.TrimSpace(option.Name),
+			Kind: strings.TrimSpace(option.Kind),
 		}
+		if normalized.ID == "" && normalized.Name == "" && normalized.Kind == "" {
+			continue
+		}
+		out = append(out, normalized)
 	}
+	return out
+}
+
+// OptionIDs returns the normalized, de-duplicated option identifiers in
+// encounter order.
+func OptionIDs(options []Option) []string {
+	options = NormalizeOptions(options)
+	if len(options) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(options))
+	seen := map[string]bool{}
+	for _, option := range options {
+		if option.ID == "" || seen[option.ID] {
+			continue
+		}
+		seen[option.ID] = true
+		out = append(out, option.ID)
+	}
+	return out
+}
+
+func RuntimeResponseFromReview(payload *Payload, result ReviewResult) agent.ApprovalResponse {
+	return RuntimeResponseFromFinalReview(FinalizeReviewResult(payload, result))
+}
+
+// RuntimeResponseFromFinalReview converts an already-finalized review result
+// into the runtime approval response shape.
+func RuntimeResponseFromFinalReview(result ReviewResult) agent.ApprovalResponse {
 	return agent.ApprovalResponse{
-		Outcome:    outcome,
-		OptionID:   optionID,
+		Outcome:    strings.TrimSpace(result.Outcome),
+		OptionID:   strings.TrimSpace(result.OptionID),
 		Approved:   result.Approved,
 		Reason:     strings.TrimSpace(result.Rationale),
 		ReviewText: strings.TrimSpace(firstNonEmpty(result.DisplayText, result.Rationale)),
 	}
+}
+
+// FinalizeReviewResult applies shared option/outcome resolution and fills the
+// display text when the reviewer did not provide one.
+func FinalizeReviewResult(payload *Payload, result ReviewResult) ReviewResult {
+	result = ResolveReviewResult(payload, result)
+	if strings.TrimSpace(result.DisplayText) == "" {
+		result.DisplayText = FormatReviewText(result.Approved, result.Risk, result.Authorization, result.Rationale)
+	}
+	return result
+}
+
+// ResolveReviewResult applies the shared approval decision precedence. A valid
+// selected option is authoritative; when no valid option is selected, the
+// review falls back to the approved/outcome decision and existing option
+// matching.
+func ResolveReviewResult(payload *Payload, result ReviewResult) ReviewResult {
+	options := []Option(nil)
+	if payload != nil {
+		options = payload.Options
+	}
+	optionID := strings.TrimSpace(result.OptionID)
+	if optionID != "" {
+		if option, ok := lookupOptionByID(options, optionID); ok {
+			result.OptionID = strings.TrimSpace(option.ID)
+			result.Approved = optionMatchesDecision(option, true)
+			result.Outcome = string(StatusSelected)
+			return result
+		}
+	}
+	result.Approved = approvedFromReviewOutcome(result)
+	result.OptionID = optionIDForDecision(options, result.Approved)
+	if result.OptionID != "" {
+		result.Outcome = string(StatusSelected)
+		return result
+	}
+	if strings.TrimSpace(result.Outcome) == "" {
+		if result.Approved {
+			result.Outcome = string(StatusApproved)
+		} else {
+			result.Outcome = string(StatusRejected)
+		}
+	}
+	return result
 }
 
 func ReviewID(prefix string, payload *Payload) string {
@@ -262,6 +351,30 @@ func optionMatchesDecision(option Option, approved bool) bool {
 	}
 	return strings.HasPrefix(value, "reject") || strings.Contains(value, " reject") ||
 		strings.HasPrefix(value, "deny") || strings.Contains(value, " deny")
+}
+
+func lookupOptionByID(options []Option, optionID string) (Option, bool) {
+	optionID = strings.TrimSpace(optionID)
+	if optionID == "" {
+		return Option{}, false
+	}
+	for _, option := range options {
+		if strings.TrimSpace(option.ID) == optionID {
+			return option, true
+		}
+	}
+	return Option{}, false
+}
+
+func approvedFromReviewOutcome(result ReviewResult) bool {
+	switch strings.ToLower(strings.TrimSpace(result.Outcome)) {
+	case "allow", "approved":
+		return true
+	case "deny", "denied", "reject", "rejected":
+		return false
+	default:
+		return result.Approved
+	}
 }
 
 func rawInputFromJSONString(text string) map[string]any {

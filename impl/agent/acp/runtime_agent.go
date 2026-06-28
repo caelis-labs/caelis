@@ -1344,7 +1344,7 @@ func (r approvalRequester) reviewApproval(ctx context.Context, req agent.Approva
 	if r.modelResolver != nil {
 		reviewModel, _ = r.modelResolver.ResolveApprovalModel(ctx, req.SessionRef)
 	}
-	result, err := r.reviewer.ReviewApproval(ctx, approval.ReviewRequest{
+	result, err := approval.ReviewerAdapter{Reviewer: r.reviewer}.Decide(ctx, approval.ReviewRequest{
 		SessionRef:     req.SessionRef,
 		RunID:          strings.TrimSpace(req.RunID),
 		TurnID:         strings.TrimSpace(req.TurnID),
@@ -1356,7 +1356,7 @@ func (r approvalRequester) reviewApproval(ctx context.Context, req agent.Approva
 	})
 	if err != nil {
 		rationale := "automatic approval review failed: " + err.Error()
-		result = approval.ReviewResult{
+		result = approval.FinalizeReviewResult(payload, approval.ReviewResult{
 			Approved:       false,
 			Outcome:        string(approval.StatusRejected),
 			Risk:           "unknown",
@@ -1364,12 +1364,9 @@ func (r approvalRequester) reviewApproval(ctx context.Context, req agent.Approva
 			Rationale:      rationale,
 			DisplayText:    approval.FormatReviewText(false, "unknown", "unknown", rationale),
 			DecisionSource: string(approval.ModeAutoReview),
-		}
+		})
 	}
-	if strings.TrimSpace(result.DisplayText) == "" {
-		result.DisplayText = approval.FormatReviewText(result.Approved, result.Risk, result.Authorization, result.Rationale)
-	}
-	return approval.RuntimeResponseFromReview(payload, result), nil
+	return approval.RuntimeResponseFromFinalReview(result), nil
 }
 
 func (r approvalRequester) requestClientPermission(

@@ -839,6 +839,54 @@ func TestRuntimeAgentPromptAutoReviewUsesReviewerInsteadOfClientPermission(t *te
 	}
 }
 
+func TestRuntimeAgentPromptAutoReviewNormalizesTextAfterSelectedOption(t *testing.T) {
+	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	runtime := &approvalReviewRuntime{}
+	reviewResult := approval.ReviewResult{
+		Approved:      true,
+		Outcome:       string(approval.StatusApproved),
+		OptionID:      acp.PermRejectOnce,
+		Risk:          "low",
+		Authorization: "explicit",
+		Rationale:     "model selected reject option",
+	}
+	reviewer := &recordingApprovalReviewer{
+		result: &reviewResult,
+	}
+	agent, err := runtimeacp.New(runtimeacp.Config{
+		Runtime:  runtime,
+		Sessions: sessions,
+		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
+			return agent.AgentSpec{Name: "chat", Metadata: map[string]any{"policy_mode": "workspace-write"}}, nil
+		},
+		AppName:               "caelis",
+		UserID:                "user-1",
+		ApprovalReviewer:      reviewer,
+		ApprovalModelResolver: staticApprovalModelResolver{model: runtimeAgentTestModel{text: "review"}},
+	})
+	if err != nil {
+		t.Fatalf("runtimeacp.New() error = %v", err)
+	}
+	sessionResp, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatalf("NewSession() error = %v", err)
+	}
+	cb := &permissionCountingCallbacks{}
+	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{
+		SessionID: sessionResp.SessionID,
+		Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"clean workspace"}`)},
+	}, cb); err != nil {
+		t.Fatalf("Prompt() error = %v", err)
+	}
+
+	if runtime.response.Approved || runtime.response.OptionID != acp.PermRejectOnce {
+		t.Fatalf("approval response = %#v, want selected reject_once denial", runtime.response)
+	}
+	if !strings.Contains(runtime.response.ReviewText, "denied") {
+		t.Fatalf("ReviewText = %q, want normalized denial text", runtime.response.ReviewText)
+	}
+}
+
 func TestRuntimeAgentPromptManualModeUsesClientPermission(t *testing.T) {
 	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
 	runtime := &approvalReviewRuntime{mode: "manual"}
@@ -1226,13 +1274,17 @@ func (*approvalReviewRuntime) RunState(context.Context, session.SessionRef) (age
 }
 
 type recordingApprovalReviewer struct {
-	calls int
-	last  approval.ReviewRequest
+	calls  int
+	last   approval.ReviewRequest
+	result *approval.ReviewResult
 }
 
 func (r *recordingApprovalReviewer) ReviewApproval(_ context.Context, req approval.ReviewRequest) (approval.ReviewResult, error) {
 	r.calls++
 	r.last = req
+	if r.result != nil {
+		return *r.result, nil
+	}
 	return approval.ReviewResult{
 		Approved:      true,
 		Risk:          "low",

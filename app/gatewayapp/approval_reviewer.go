@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/ports/gateway"
@@ -27,12 +26,10 @@ const (
 )
 
 type guardianApprovalReviewer struct {
-	sessions     session.Service
-	systemAgents systemManagedAgentRunner
-	timeout      time.Duration
-
-	mu               sync.Mutex
-	sessionsByParent map[string]*guardianReviewSession
+	sessions       session.Service
+	systemAgents   systemManagedAgentRunner
+	systemSessions *systemManagedAgentSessionCache
+	timeout        time.Duration
 }
 
 type guardianBindingApprovalReviewer struct {
@@ -42,19 +39,20 @@ type guardianBindingApprovalReviewer struct {
 
 type guardianPromptMode struct {
 	Delta  bool
-	Cursor guardianTranscriptCursor
+	Cursor systemManagedAgentTranscriptCursor
 }
 
 type guardianReviewModelOutput struct {
 	RiskLevel         string `json:"risk_level"`
 	UserAuthorization string `json:"user_authorization"`
 	Outcome           string `json:"outcome"`
+	OptionID          string `json:"option_id"`
 	Rationale         string `json:"rationale"`
 }
 
 type guardianPromptItems struct {
 	Text                    string
-	TranscriptCursor        guardianTranscriptCursor
+	TranscriptCursor        systemManagedAgentTranscriptCursor
 	ReviewedActionTruncated bool
 }
 
@@ -76,10 +74,10 @@ func newModelApprovalReviewer(sessions ...session.Service) gateway.ApprovalRevie
 
 func newGuardianApprovalReviewer(service session.Service) gateway.ApprovalReviewer {
 	return &guardianApprovalReviewer{
-		sessions:         service,
-		systemAgents:     newSystemManagedAgentRuntime(nil),
-		timeout:          defaultApprovalReviewTimeout,
-		sessionsByParent: map[string]*guardianReviewSession{},
+		sessions:       service,
+		systemAgents:   newSystemManagedAgentRuntime(nil),
+		systemSessions: newSystemManagedAgentSessionCache(service),
+		timeout:        defaultApprovalReviewTimeout,
 	}
 }
 
@@ -121,18 +119,19 @@ func (r *guardianApprovalReviewer) ReviewApproval(ctx context.Context, req gatew
 	risk := normalizeReviewLabel(parsed.RiskLevel, "unknown")
 	authorization := normalizeAuthorizationLabel(parsed.UserAuthorization, "unknown")
 	rationale := firstNonEmpty(parsed.Rationale, "approval reviewer returned no rationale")
-	return gateway.ApprovalReviewResult{
+	result := gateway.ApprovalReviewResult{
 		Approved:       approved,
 		Outcome:        approvalOutcome(approved),
 		Risk:           risk,
 		Authorization:  authorization,
+		OptionID:       strings.TrimSpace(parsed.OptionID),
 		Rationale:      rationale,
-		DisplayText:    gateway.FormatApprovalReviewText(approved, risk, authorization, rationale),
 		DecisionSource: "auto-review",
 		Usage:          gateway.UsageSnapshotFromSessionEvent(assistantEvent),
 		Invocation:     approvalInvocationFromEvent(assistantEvent),
 		Trace:          trace,
-	}, nil
+	}
+	return result, nil
 }
 
 func approvalInvocationFromEvent(event *session.Event) *session.EventInvocation {
@@ -158,7 +157,13 @@ func (r *guardianApprovalReviewer) runGuardianReview(
 	if err != nil {
 		return guardianPromptItems{}, nil, nil, guardianReviewModelOutput{}, nil, err
 	}
-	trunkEvents, promptMode, baseVersion := reviewSession.snapshot()
+	sessionSnapshot := reviewSession.snapshot()
+	trunkEvents := sessionSnapshot.Events
+	promptMode := guardianPromptMode{}
+	if sessionSnapshot.Delta {
+		promptMode = guardianPromptMode{Delta: true, Cursor: sessionSnapshot.Cursor}
+	}
+	baseVersion := sessionSnapshot.Version
 	parentEvents, err := r.sessions.Events(ctx, session.EventsRequest{SessionRef: req.SessionRef})
 	if err != nil {
 		return guardianPromptItems{}, nil, nil, guardianReviewModelOutput{}, nil, err
@@ -173,7 +178,7 @@ func (r *guardianApprovalReviewer) runGuardianReview(
 	var lastAssistantEvent *session.Event
 	var lastParseErr error
 	for attempt := 0; attempt < guardianAssessmentMaxAttempts; attempt++ {
-		assistantEvent, text, err := r.runGuardianAgent(ctx, req.Model, reviewSession.session, events, guardianOutputSpec())
+		assistantEvent, text, err := r.runGuardianAgent(ctx, req.Model, reviewSession.session, events, guardianOutputSpec(req.Approval))
 		if err != nil {
 			return promptItems, promptEvent, assistantEvent, guardianReviewModelOutput{}, nil, err
 		}
@@ -213,11 +218,13 @@ func (r *guardianApprovalReviewer) runGuardianAgent(
 		runner = newSystemManagedAgentRuntime(nil)
 	}
 	result, err := runner.Run(ctx, systemManagedAgentRunRequest{
-		AgentID:       guardianProfileID,
-		Model:         model,
-		ParentSession: guardianSession,
-		Events:        events,
-		Output:        output,
+		AgentID:           guardianProfileID,
+		Purpose:           systemManagedAgentPurposeApprovalReview,
+		Model:             model,
+		ParentSession:     guardianSession,
+		Events:            events,
+		Output:            output,
+		CapabilityProfile: systemManagedAgentCapabilityNone,
 	})
 	if err != nil {
 		return result.AssistantEvent, "", err
@@ -259,6 +266,10 @@ func buildGuardianPromptItems(
 	if err != nil {
 		return guardianPromptItems{}, err
 	}
+	optionsJSON, hasOptions, err := guardianApprovalOptionsJSON(req.Approval)
+	if err != nil {
+		return guardianPromptItems{}, err
+	}
 
 	var b strings.Builder
 	b.WriteString(headings.Intro)
@@ -282,6 +293,11 @@ func buildGuardianPromptItems(
 	b.WriteString("Assess the exact planned action below.\n")
 	b.WriteString("Planned action JSON:\n")
 	b.WriteString(action)
+	if hasOptions {
+		b.WriteString("\nAvailable approval options JSON:\n")
+		b.WriteString(optionsJSON)
+		b.WriteString("\nChoose option_id from this list when the JSON schema includes option_id. Do not invent option ids.\n")
+	}
 	b.WriteString("\n>>> APPROVAL REQUEST END\n")
 
 	return guardianPromptItems{Text: b.String(), TranscriptCursor: cursor, ReviewedActionTruncated: truncated}, nil
@@ -294,9 +310,9 @@ type guardianPromptHeadings struct {
 	ActionIntro     string
 }
 
-func collectGuardianTranscriptEntries(events []*session.Event) ([]guardianTranscriptEntry, guardianTranscriptCursor) {
+func collectGuardianTranscriptEntries(events []*session.Event) ([]guardianTranscriptEntry, systemManagedAgentTranscriptCursor) {
 	entries := make([]guardianTranscriptEntry, 0, len(events))
-	cursor := guardianTranscriptCursor{}
+	cursor := systemManagedAgentTranscriptCursor{}
 	for _, event := range events {
 		if event == nil || !session.IsCanonicalHistoryEvent(event) {
 			continue
@@ -343,7 +359,7 @@ func guardianTranscriptEntryFromEvent(event *session.Event) (guardianTranscriptE
 	return guardianTranscriptEntry{Kind: kind, Text: text}, true
 }
 
-func transcriptOffset(entries []guardianTranscriptEntry, cursor guardianTranscriptCursor) int {
+func transcriptOffset(entries []guardianTranscriptEntry, cursor systemManagedAgentTranscriptCursor) int {
 	if cursor.EventCount <= 0 {
 		return 0
 	}
@@ -564,33 +580,6 @@ func approxTokenCount(text string) int {
 	return len([]rune(text))/4 + 1
 }
 
-func guardianOutputSpec() *model.OutputSpec {
-	return &model.OutputSpec{
-		Mode: model.OutputModeSchema,
-		JSONSchema: map[string]any{
-			"type":                 "object",
-			"additionalProperties": false,
-			"properties": map[string]any{
-				"risk_level": map[string]any{
-					"type": "string",
-					"enum": []any{"low", "medium", "high", "critical"},
-				},
-				"user_authorization": map[string]any{
-					"type": "string",
-					"enum": []any{"unknown", "low", "medium", "high"},
-				},
-				"outcome": map[string]any{
-					"type": "string",
-					"enum": []any{"allow", "deny"},
-				},
-				"rationale": map[string]any{"type": "string"},
-			},
-			"required": []any{"outcome"},
-		},
-		MaxOutputTokens: guardianMaxOutputTokens,
-	}
-}
-
 func guardianPolicyPrompt() string {
 	return strings.Join([]string{
 		"You are judging one planned coding-agent action on behalf of the user.",
@@ -633,7 +622,8 @@ func guardianPolicyPrompt() string {
 		"- Return exactly one JSON object as plain text.",
 		"- Do not include markdown fences, prose, comments, or extra keys.",
 		"- If native JSON response formatting is unavailable, still output the same single JSON object as text.",
-		"- For clearly low-risk allowed actions, return exactly {\"outcome\":\"allow\"}. Do not include risk_level, user_authorization, or rationale.",
+		"- When approval options are provided, include option_id with the exact id of one listed option. Do not invent option ids.",
+		"- When no approval options are provided, for clearly low-risk allowed actions, return exactly {\"outcome\":\"allow\"}. Do not include risk_level, user_authorization, or rationale.",
 		"- For every denial and every non-low-risk decision, use this schema: {\"risk_level\":\"low|medium|high|critical\",\"user_authorization\":\"unknown|low|medium|high\",\"outcome\":\"allow|deny\",\"rationale\":\"short reason\"}.",
 		"- Keep rationale under 160 characters.",
 	}, "\n")
@@ -707,6 +697,8 @@ func normalizeGuardianAssessment(parsed guardianReviewModelOutput) (guardianRevi
 	} else {
 		parsed.Rationale = strings.TrimSpace(parsed.Rationale)
 	}
+
+	parsed.OptionID = strings.TrimSpace(parsed.OptionID)
 
 	return parsed, nil
 }

@@ -15,7 +15,11 @@ func (a Approver) Decide(ctx context.Context, req approval.Request) (approval.De
 	if a.Reviewer == nil {
 		return approval.Decision{}, nil
 	}
-	return a.Reviewer.ReviewApproval(ctx, req)
+	result, err := a.Reviewer.ReviewApproval(ctx, req)
+	if err != nil {
+		return result, err
+	}
+	return approval.FinalizeReviewResult(req.Approval, result), nil
 }
 
 var _ approval.Approver = Approver{}

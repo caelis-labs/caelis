@@ -90,7 +90,7 @@ func (g *Gateway) resolveApprovalRequest(
 	})
 	if err != nil {
 		rationale := "automatic approval review failed: " + err.Error()
-		result = ApprovalReviewResult{
+		result = approval.FinalizeReviewResult(payload, ApprovalReviewResult{
 			Approved:       false,
 			Outcome:        string(ApprovalStatusRejected),
 			Risk:           "unknown",
@@ -98,14 +98,9 @@ func (g *Gateway) resolveApprovalRequest(
 			Rationale:      rationale,
 			DisplayText:    FormatApprovalReviewText(false, "unknown", "unknown", rationale),
 			DecisionSource: string(ApprovalModeAutoReview),
-		}
+		})
 	}
-	response := approval.RuntimeResponseFromReview(payload, result)
-	result.OptionID = response.OptionID
-	result.Outcome = response.Outcome
-	if strings.TrimSpace(result.DisplayText) == "" {
-		result.DisplayText = FormatApprovalReviewText(result.Approved, result.Risk, result.Authorization, result.Rationale)
-	}
+	response := approval.RuntimeResponseFromFinalReview(result)
 	if strings.TrimSpace(result.DecisionSource) == "" {
 		result.DecisionSource = string(ApprovalModeAutoReview)
 	}
