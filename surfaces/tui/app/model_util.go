@@ -1005,10 +1005,7 @@ func normalizeFullscreenFrameWithTopTrim(view string, width int, height int) (st
 	}
 	if width > 0 {
 		for i, line := range lines {
-			if pad := width - displayColumns(line); pad > 0 {
-				lines[i] = line + strings.Repeat(" ", pad)
-			}
-			lines[i] = protectWideCellRepaintLine(lines[i], width)
+			lines[i] = normalizeFullscreenFrameLine(line, width)
 		}
 	}
 	if height > 0 && len(lines) < height {
@@ -1021,6 +1018,17 @@ func normalizeFullscreenFrameWithTopTrim(view string, width int, height int) (st
 		}
 	}
 	return strings.Join(lines, "\n"), topTrim
+}
+
+func normalizeFullscreenFrameLine(line string, width int) string {
+	if width <= 0 {
+		return line
+	}
+	if displayColumns(line) > width {
+		line = ansi.Truncate(line, width, "")
+	}
+	line = padRightDisplay(line, width)
+	return protectWideCellRepaintLine(line, width)
 }
 
 func protectWideCellRepaintBlock(text string, width int) string {

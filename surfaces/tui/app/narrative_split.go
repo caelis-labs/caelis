@@ -21,6 +21,8 @@ const (
 	NarrativeTableRule                         // "| --- | --- |"
 )
 
+const narrativeBlockquoteRail = "│ "
+
 // NarrativeLine is one output line from the block splitter, carrying both
 // the original text and the structural classification.
 type NarrativeLine struct {
@@ -300,13 +302,28 @@ func NarrativeToPlainRows(nls []NarrativeLine) []string {
 			rows = append(rows, formatTablePlainRow(nl.Text))
 		case NarrativeTableRule:
 			rows = append(rows, formatTableRuleRow(nl.Text))
-		case NarrativeListItem, NarrativeBlockquote:
+		case NarrativeBlockquote:
+			rows = append(rows, simplifyInlineMarkers(stripBlockquoteMarker(nl.Text)))
+		case NarrativeListItem:
 			rows = append(rows, simplifyInlineMarkers(strings.TrimRight(nl.Text, " \t")))
 		default:
 			rows = append(rows, simplifyInlineMarkers(strings.TrimRight(nl.Text, " \t")))
 		}
 	}
 	return rows
+}
+
+// stripBlockquoteMarker removes the leading Markdown quote marker from a
+// blockquote line while preserving the quoted body text.
+func stripBlockquoteMarker(line string) string {
+	trimmed := strings.TrimLeft(line, " \t")
+	if trimmed == ">" {
+		return ""
+	}
+	if strings.HasPrefix(trimmed, "> ") {
+		return strings.TrimRight(strings.TrimPrefix(trimmed, "> "), " \t")
+	}
+	return strings.TrimRight(trimmed, " \t")
 }
 
 // stripHeadingMarker removes the "#… " prefix and trims trailing whitespace.

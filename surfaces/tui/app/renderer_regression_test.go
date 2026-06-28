@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
@@ -48,6 +49,67 @@ func TestWideCellRepaintSentinelDoesNotEmitHyperlink(t *testing.T) {
 	}
 	if stripped := ansi.Strip(got); displayColumns(stripped) != 4 {
 		t.Fatalf("stripped width = %d, want 4; stripped=%q raw=%q", displayColumns(stripped), stripped, got)
+	}
+}
+
+func TestNormalizeFullscreenFrameLineFitsDisplayWidth(t *testing.T) {
+	tests := []struct {
+		name             string
+		input            string
+		width            int
+		wantPlain        string
+		wantANSI         bool
+		forbiddenPlain   string
+		wantVisibleGuard bool
+	}{
+		{
+			name:      "narrow_ascii_pads_without_guard",
+			input:     "abc",
+			width:     10,
+			wantPlain: "abc       ",
+		},
+		{
+			name:             "narrow_wide_cell_keeps_repaint_guard",
+			input:            "甲",
+			width:            4,
+			wantPlain:        "甲  ",
+			wantANSI:         true,
+			wantVisibleGuard: true,
+		},
+		{
+			name:             "overwide_styled_cjk_truncates_before_padding",
+			input:            "\x1b[31m甲乙丙\x1b[0m",
+			width:            5,
+			wantPlain:        "甲乙 ",
+			wantANSI:         true,
+			forbiddenPlain:   "丙",
+			wantVisibleGuard: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := normalizeFullscreenFrameLine(tt.input, tt.width)
+			stripped := ansi.Strip(got)
+			if !utf8.ValidString(stripped) {
+				t.Fatalf("normalized line is invalid UTF-8: %q", stripped)
+			}
+			if stripped != tt.wantPlain {
+				t.Fatalf("plain line = %q, want %q; raw=%q", stripped, tt.wantPlain, got)
+			}
+			if width := displayColumns(stripped); width != tt.width {
+				t.Fatalf("normalized width = %d, want %d; stripped=%q raw=%q", width, tt.width, stripped, got)
+			}
+			if tt.forbiddenPlain != "" && strings.Contains(stripped, tt.forbiddenPlain) {
+				t.Fatalf("normalized line kept forbidden text %q: stripped=%q raw=%q", tt.forbiddenPlain, stripped, got)
+			}
+			if hasANSI := got != stripped; hasANSI != tt.wantANSI {
+				t.Fatalf("ANSI presence = %v, want %v; stripped=%q raw=%q", hasANSI, tt.wantANSI, stripped, got)
+			}
+			if tt.wantVisibleGuard && !strings.Contains(got, "\x1b[8m \x1b[28m") {
+				t.Fatalf("normalized line missing wide-cell repaint guard: stripped=%q raw=%q", stripped, got)
+			}
+		})
 	}
 }
 

@@ -504,6 +504,94 @@ func TestGlamourNarrativeRendersNormalizedMarkdownTable(t *testing.T) {
 	}
 }
 
+func TestNarrativeBlockquoteUsesSingleRailInStreamAndFinal(t *testing.T) {
+	raw := "> **RUN_COMMAND** 运行了 pytest 测试套件。可以看到 36 个测试用例中有些导入错误（`caelis_demo` 模块不存在）。这展示了我执行测试和诊断问题的能力。"
+	theme := tuikit.ResolveThemeWithState(true, false, colorprofile.TrueColor)
+	ctx := BlockRenderContext{Width: 220, TermWidth: 220, Theme: theme, ThemeKey: themeRenderCacheKey(theme)}
+	body := "│ RUN_COMMAND 运行了 pytest 测试套件。可以看到 36 个测试用例中有些导入错误（caelis_demo 模块不存在）。这展示了我执行测试和诊断问题的能力。"
+
+	plainRows := NarrativeToPlainRows(SplitNarrativeBlocks(raw))
+	if len(plainRows) != 1 || plainRows[0] != "RUN_COMMAND 运行了 pytest 测试套件。可以看到 36 个测试用例中有些导入错误（caelis_demo 模块不存在）。这展示了我执行测试和诊断问题的能力。" {
+		t.Fatalf("canonical blockquote plain rows = %#v", plainRows)
+	}
+
+	tests := []struct {
+		name     string
+		role     tuikit.LineStyle
+		prefix   string
+		plain    string
+		semantic color.Color
+	}{
+		{
+			name:     "assistant",
+			role:     tuikit.LineStyleAssistant,
+			prefix:   "· ",
+			plain:    "· " + body,
+			semantic: theme.TextStyle().GetForeground(),
+		},
+		{
+			name:     "reasoning",
+			role:     tuikit.LineStyleReasoning,
+			prefix:   "› ",
+			plain:    "› " + body,
+			semantic: theme.ReasoningFg,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			render := func(mode RenderMode, policy MarkdownPolicy) RenderedRow {
+				t.Helper()
+				rows := RenderTextWithContext(ctx, TextRenderRequest{
+					Kind:           TextAssistant,
+					Mode:           mode,
+					MarkdownPolicy: policy,
+					Raw:            raw,
+					Prefix:         tt.prefix,
+					BlockID:        "block-1",
+					LineStyle:      tt.role,
+				}).Rows
+				if len(rows) == 0 {
+					t.Fatal("expected rendered blockquote row")
+				}
+				return rows[0]
+			}
+
+			stream := render(RenderStream, MarkdownStableTail)
+			final := render(RenderFinal, MarkdownFull)
+			for _, row := range []RenderedRow{stream, final} {
+				plain := strings.TrimRight(row.Plain, " ")
+				if plain != tt.plain {
+					t.Fatalf("blockquote row = %q, want %q", plain, tt.plain)
+				}
+				for _, forbidden := range []string{tt.prefix + ">", "│ │"} {
+					if strings.Contains(plain, forbidden) {
+						t.Fatalf("blockquote row contains forbidden marker %q: %q", forbidden, plain)
+					}
+				}
+			}
+
+			semanticFG := sgrForegroundCode(t, tt.semantic)
+			streamSemantic := normalizeInlineStyleText(textWithSGRForeground(stream.Styled, semanticFG))
+			finalSemantic := normalizeInlineStyleText(textWithSGRForeground(final.Styled, semanticFG))
+			if streamSemantic != finalSemantic {
+				t.Fatalf("stream/final semantic foreground mismatch\nstream=%q\nfinal=%q\nstream styled=%q\nfinal styled=%q", streamSemantic, finalSemantic, stream.Styled, final.Styled)
+			}
+			if !strings.Contains(streamSemantic, "RUN_COMMAND") || !strings.Contains(finalSemantic, "pytest") {
+				t.Fatalf("semantic foreground should cover blockquote body\nstream=%q\nfinal=%q", streamSemantic, finalSemantic)
+			}
+			if tt.role == tuikit.LineStyleAssistant {
+				for _, row := range []RenderedRow{stream, final} {
+					reasoningText := normalizeInlineStyleText(textWithSGRForeground(row.Styled, sgrForegroundCode(t, theme.ReasoningFg)))
+					if strings.Contains(reasoningText, "RUN_COMMAND") || strings.Contains(reasoningText, "pytest") {
+						t.Fatalf("assistant blockquote body should not use reasoning foreground; reasoning text=%q styled=%q", reasoningText, row.Styled)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestNarrativeChromaClearsDefaultErrorBackground(t *testing.T) {
 	dark := tuikit.ResolveThemeWithState(true, false, colorprofile.TrueColor)
 	light := tuikit.ResolveThemeWithState(false, false, colorprofile.TrueColor)
