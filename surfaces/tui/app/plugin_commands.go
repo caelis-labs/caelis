@@ -8,11 +8,12 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/OnslaughtSnail/caelis/protocol/acp/control"
+	controlprompt "github.com/OnslaughtSnail/caelis/protocol/acp/control/prompt"
 )
 
 func slashPluginWithContext(ctx context.Context, service control.PluginService, send func(tea.Msg), args string) TaskResultMsg {
 	ctx = contextOrBackground(ctx)
-	sub, rest := splitFirst(strings.TrimSpace(args))
+	sub, rest, _ := controlprompt.ParseFirst(strings.TrimSpace(args))
 	switch sub {
 	case "":
 		sendNotice(send, pluginUsageText())

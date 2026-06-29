@@ -23,9 +23,6 @@ func acpUpdateToolName(meta map[string]any, title string, kind string) string {
 	if name := transcript.MetaString(meta, "caelis", "runtime", "tool", "name"); name != "" {
 		return name
 	}
-	if name := terminalInfoToolName(meta); name != "" {
-		return name
-	}
 	return transcriptToolDisplayName("", title, kind)
 }
 
@@ -57,25 +54,4 @@ func acpToolContentToDisplay(in []schema.ToolCallContent) []acpprojector.ToolCon
 		})
 	}
 	return out
-}
-
-func standardACPRawOutputContent(raw any, toolCallID string) []acpprojector.ToolContent {
-	text := standardACPRawOutputText(transcript.RawMap(raw))
-	if text == "" {
-		return nil
-	}
-	return []acpprojector.ToolContent{{
-		Type:       "terminal",
-		Content:    schema.TextContent{Type: "text", Text: text},
-		TerminalID: strings.TrimSpace(toolCallID),
-	}}
-}
-
-func standardACPRawOutputText(raw map[string]any) string {
-	for _, key := range []string{"latest_output", "output_preview", "result", "output", "stdout", "stderr", "error", "final_message", "finalMessage", "text"} {
-		if text := asString(raw[key]); text != "" {
-			return text
-		}
-	}
-	return ""
 }

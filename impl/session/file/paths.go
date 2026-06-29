@@ -17,7 +17,8 @@ func (s *Store) resolveWritePath(sess session.Session) (string, error) {
 	if path, ok := s.pathCache[key]; ok && strings.TrimSpace(path) != "" {
 		return path, nil
 	}
-	if path, err := s.findDocumentPath(sess.SessionID, sess.WorkspaceKey); err == nil {
+	if entry, err := s.lookupSessionIndex(sess.SessionID); err == nil {
+		path := s.indexEntryPath(entry)
 		s.pathCache[key] = path
 		return path, nil
 	} else if !errors.Is(err, session.ErrSessionNotFound) {
@@ -27,16 +28,20 @@ func (s *Store) resolveWritePath(sess session.Session) (string, error) {
 }
 
 func (s *Store) resolveDocumentPath(sessionID string, workspaceKey string) (string, error) {
-	if strings.TrimSpace(workspaceKey) == "" {
-		return s.findDocumentPath(sessionID, workspaceKey)
-	}
 	key := pathCacheKey(sessionID, workspaceKey)
 	if path, ok := s.pathCache[key]; ok && strings.TrimSpace(path) != "" {
 		return path, nil
 	}
-	path, err := s.findDocumentPath(sessionID, workspaceKey)
+	entry, err := s.lookupSessionIndex(sessionID)
 	if err != nil {
 		return "", err
+	}
+	if key := strings.TrimSpace(workspaceKey); key != "" && entry.Session.WorkspaceKey != key {
+		return "", session.ErrSessionNotFound
+	}
+	path := s.indexEntryPath(entry)
+	if path == "" {
+		return "", session.ErrSessionNotFound
 	}
 	s.pathCache[key] = path
 	return path, nil

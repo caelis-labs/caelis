@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/stream"
 	"github.com/OnslaughtSnail/caelis/protocol/acp"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
@@ -116,17 +116,11 @@ func RefFromEvent(event *session.Event) (stream.Ref, bool) {
 		SessionID: strings.TrimSpace(event.SessionID),
 	}
 	for _, meta := range terminalEventMetadata(event) {
-		if taskID, _ := meta["task_id"].(string); strings.TrimSpace(taskID) != "" && ref.TaskID == "" {
-			ref.TaskID = strings.TrimSpace(taskID)
-		}
-		if terminalID, _ := meta["terminal_id"].(string); strings.TrimSpace(terminalID) != "" && ref.TerminalID == "" {
-			ref.TerminalID = strings.TrimSpace(terminalID)
-		}
 		if ref.TaskID == "" {
-			ref.TaskID = nestedString(meta, "caelis", "runtime", "task", "task_id")
+			ref.TaskID = firstNonEmpty(mapString(meta, "task_id"), runtimeTaskMetaValue(meta, gateway.EventMetaRuntimeTaskID))
 		}
 		if ref.TerminalID == "" {
-			ref.TerminalID = nestedString(meta, "caelis", "runtime", "task", "terminal_id")
+			ref.TerminalID = firstNonEmpty(mapString(meta, "terminal_id"), runtimeTaskMetaValue(meta, gateway.EventMetaRuntimeTaskTerminalID))
 		}
 	}
 	if ref.TerminalID == "" {
@@ -156,13 +150,10 @@ func RefFromEvent(event *session.Event) (stream.Ref, bool) {
 	}
 	if update := session.ProtocolUpdateOf(event); update != nil {
 		if ref.TaskID == "" {
-			ref.TaskID = protocolTerminalMetaValue(update.Meta, "task_id")
+			ref.TaskID = runtimeTaskMetaValue(update.Meta, gateway.EventMetaRuntimeTaskID)
 		}
 		if ref.TerminalID == "" {
-			ref.TerminalID = protocolTerminalMetaValue(update.Meta, "terminal_id")
-			if ref.TerminalID == "" {
-				ref.TerminalID = protocolTerminalMetaValue(update.Meta, "terminalId")
-			}
+			ref.TerminalID = runtimeTaskMetaValue(update.Meta, gateway.EventMetaRuntimeTaskTerminalID)
 		}
 		if ref.TerminalID == "" {
 			for _, item := range session.ProtocolToolCallContentOf(update) {
@@ -190,8 +181,8 @@ func terminalEventMetadata(event *session.Event) []map[string]any {
 	return out
 }
 
-func protocolTerminalMetaValue(meta map[string]any, key string) string {
-	return mapString(metautil.RuntimeSection(meta, metautil.Terminal), key)
+func runtimeTaskMetaValue(meta map[string]any, key string) string {
+	return gateway.EventMetaString(meta, gateway.EventMetaRoot, gateway.EventMetaRuntime, gateway.EventMetaRuntimeTask, key)
 }
 
 func mapString(values map[string]any, key string) string {
@@ -202,17 +193,13 @@ func mapString(values map[string]any, key string) string {
 	return strings.TrimSpace(text)
 }
 
-func nestedString(values map[string]any, path ...string) string {
-	var current any = values
-	for _, key := range path {
-		mapped, ok := current.(map[string]any)
-		if !ok {
-			return ""
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
 		}
-		current = mapped[key]
 	}
-	text, _ := current.(string)
-	return strings.TrimSpace(text)
+	return ""
 }
 
 func ContentFromEvent(event *session.Event) []ToolCallContent {

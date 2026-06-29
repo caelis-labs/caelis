@@ -1,9 +1,11 @@
 package tuiapp
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 	"github.com/OnslaughtSnail/caelis/surfaces/transcript"
 )
@@ -45,6 +47,37 @@ func TestProjectACPEventToTranscriptEventsProjectsNotice(t *testing.T) {
 	}
 }
 
+func TestProjectACPEventToTranscriptEventsProjectsAttemptResetNotice(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectACPEventToTranscriptEvents(eventstream.Envelope{
+		Kind: eventstream.KindLifecycle,
+		Lifecycle: &eventstream.Lifecycle{
+			State: "attempt_reset",
+		},
+		Meta: map[string]any{
+			"caelis": map[string]any{
+				"runtime": map[string]any{
+					"attempt_reset": map[string]any{
+						"attempt":  2,
+						"cause":    "model: http status 400",
+						"retrying": true,
+					},
+				},
+			},
+		},
+	})
+	if len(events) != 2 {
+		t.Fatalf("events = %#v, want lifecycle plus retry notice", events)
+	}
+	if events[0].Kind != TranscriptEventLifecycle || events[0].State != "attempt_reset" {
+		t.Fatalf("first event = %#v, want attempt_reset lifecycle", events[0])
+	}
+	if events[1].Kind != TranscriptEventNotice || !strings.Contains(events[1].Text, "retrying (attempt 2)") {
+		t.Fatalf("second event = %#v, want visible retry notice", events[1])
+	}
+}
+
 func TestProjectACPEventToTranscriptEventsProjectsCompactNotice(t *testing.T) {
 	t.Parallel()
 
@@ -77,6 +110,7 @@ func TestProjectACPEventToTranscriptEventsDisplaysStandardRawTerminalOutput(t *t
 			Kind:          &kind,
 			Status:        &status,
 			RawOutput:     map[string]any{"stdout": "side acp output\n"},
+			Meta:          metautil.WithTerminalInfo(acpToolNameMeta("RUN_COMMAND"), "call-1"),
 		},
 	})
 	if len(events) != 1 {
@@ -96,8 +130,10 @@ func TestProjectACPEventToTranscriptEventsDisplaysStandardRawOutputWithoutToolKi
 		Update: schema.ToolCallUpdate{
 			SessionUpdate: schema.UpdateToolCallInfo,
 			ToolCallID:    "call-1",
+			Kind:          stringPtr(schema.ToolKindExecute),
 			Status:        &status,
 			RawOutput:     map[string]any{"stdout": "side acp output\n"},
+			Meta:          metautil.WithTerminalInfo(acpToolNameMeta("RUN_COMMAND"), "call-1"),
 		},
 	})
 	if len(events) != 1 {
@@ -118,11 +154,8 @@ func TestProjectACPEventToTranscriptEventsDisplaysStandardTerminalContentWithout
 			SessionUpdate: schema.UpdateToolCallInfo,
 			ToolCallID:    "call-1",
 			Status:        &status,
-			Content: []schema.ToolCallContent{{
-				Type:       "terminal",
-				TerminalID: "terminal-1",
-				Content:    schema.TextContent{Type: "text", Text: "terminal content\n"},
-			}},
+			Kind:          stringPtr(schema.ToolKindExecute),
+			Meta:          metautil.WithTerminalOutput(acpToolNameMeta("RUN_COMMAND"), "call-1", "terminal content\n"),
 		},
 	})
 	if len(events) != 1 {
@@ -133,7 +166,7 @@ func TestProjectACPEventToTranscriptEventsDisplaysStandardTerminalContentWithout
 	}
 }
 
-func TestProjectACPEventToTranscriptEventsDisplaysTerminalMetaWithoutToolKind(t *testing.T) {
+func TestProjectACPEventToTranscriptEventsDisplaysTerminalContentWithoutToolKind(t *testing.T) {
 	t.Parallel()
 
 	status := schema.ToolStatusCompleted
@@ -143,28 +176,15 @@ func TestProjectACPEventToTranscriptEventsDisplaysTerminalMetaWithoutToolKind(t 
 			SessionUpdate: schema.UpdateToolCallInfo,
 			ToolCallID:    "call-1",
 			Status:        &status,
-			Content: []schema.ToolCallContent{{
-				Type:       "terminal",
-				TerminalID: "call-1",
-			}},
-			Meta: map[string]any{
-				"caelis": map[string]any{
-					"version": 1,
-					"runtime": map[string]any{
-						"terminal": map[string]any{
-							"terminal_id": "call-1",
-							"data":        "terminal meta output\n",
-						},
-					},
-				},
-			},
+			Kind:          stringPtr(schema.ToolKindExecute),
+			Meta:          metautil.WithTerminalOutput(acpToolNameMeta("RUN_COMMAND"), "call-1", "terminal content output\n"),
 		},
 	})
 	if len(events) != 1 {
 		t.Fatalf("events = %#v, want one transcript event", events)
 	}
-	if events[0].ToolOutput != "terminal meta output\n" {
-		t.Fatalf("ToolOutput = %q, want terminal meta output", events[0].ToolOutput)
+	if events[0].ToolOutput != "terminal content output\n" {
+		t.Fatalf("ToolOutput = %q, want terminal content output", events[0].ToolOutput)
 	}
 }
 
@@ -178,7 +198,9 @@ func TestProjectACPEventToTranscriptEventsDisplaysStringRawOutput(t *testing.T) 
 			SessionUpdate: schema.UpdateToolCallInfo,
 			ToolCallID:    "call-1",
 			Status:        &status,
+			Kind:          stringPtr(schema.ToolKindExecute),
 			RawOutput:     "string raw output\n",
+			Meta:          metautil.WithTerminalInfo(acpToolNameMeta("RUN_COMMAND"), "call-1"),
 		},
 	})
 	if len(events) != 1 {
@@ -215,4 +237,107 @@ func TestProjectACPEventToTranscriptEventsDoesNotDisplayGatewayProjectedRawTermi
 	if events[0].ToolOutput != "" {
 		t.Fatalf("ToolOutput = %q, want gateway-projected raw terminal output hidden without content", events[0].ToolOutput)
 	}
+}
+
+func TestProjectACPEventToTranscriptEventsSuppressesRunningSnapshotTerminalOutputWhenStreamable(t *testing.T) {
+	t.Parallel()
+
+	status := schema.ToolStatusInProgress
+	kind := schema.ToolKindExecute
+	events := ProjectACPEventToTranscriptEvents(eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate,
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo,
+			ToolCallID:    "call-1",
+			Title:         stringPtr("RUN_COMMAND echo ok"),
+			Kind:          &kind,
+			Status:        &status,
+			RawInput:      map[string]any{"command": "echo ok"},
+			RawOutput:     map[string]any{"latest_output": "Step 1/5\nStep 2/5\n", "state": "running"},
+			Meta:          runningSnapshotTerminalMeta("RUN_COMMAND", "task-1", "terminal-1", "Step 1/5\nStep 2/5\n", ""),
+		},
+	})
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one transcript event", events)
+	}
+	if events[0].ToolOutput != "" {
+		t.Fatalf("ToolOutput = %q, want running snapshot terminal output suppressed while live stream owns display", events[0].ToolOutput)
+	}
+	if events[0].Final {
+		t.Fatal("Final = true, want running snapshot to remain open")
+	}
+}
+
+func TestProjectACPEventToTranscriptEventsDisplaysTerminalStreamFrameOutput(t *testing.T) {
+	t.Parallel()
+
+	status := schema.ToolStatusInProgress
+	kind := schema.ToolKindExecute
+	events := ProjectACPEventToTranscriptEvents(eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate,
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo,
+			ToolCallID:    "call-1",
+			Title:         stringPtr("RUN_COMMAND echo ok"),
+			Kind:          &kind,
+			Status:        &status,
+			Meta:          runningSnapshotTerminalMeta("RUN_COMMAND", "task-1", "terminal-1", "Step 3/5\n", "append"),
+		},
+	})
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one transcript event", events)
+	}
+	if events[0].ToolOutput != "Step 3/5\n" {
+		t.Fatalf("ToolOutput = %q, want live terminal stream frame output", events[0].ToolOutput)
+	}
+}
+
+func TestProjectACPEventToTranscriptEventsPreservesTerminalNewlineFrameOutput(t *testing.T) {
+	t.Parallel()
+
+	status := schema.ToolStatusInProgress
+	kind := schema.ToolKindExecute
+	events := ProjectACPEventToTranscriptEvents(eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate,
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo,
+			ToolCallID:    "call-1",
+			Title:         stringPtr("RUN_COMMAND echo ok"),
+			Kind:          &kind,
+			Status:        &status,
+			Meta:          runningSnapshotTerminalMeta("RUN_COMMAND", "task-1", "terminal-1", "\n", "append"),
+		},
+	})
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one transcript event", events)
+	}
+	if events[0].ToolOutput != "\n" {
+		t.Fatalf("ToolOutput = %q, want newline terminal stream frame output", events[0].ToolOutput)
+	}
+}
+
+func runningSnapshotTerminalMeta(toolName string, taskID string, terminalID string, output string, streamMode string) map[string]any {
+	runtime := map[string]any{
+		"tool": map[string]any{"name": toolName},
+		"task": map[string]any{
+			"task_id":       taskID,
+			"terminal_id":   terminalID,
+			"output_cursor": int64(len([]byte(output))),
+			"running":       true,
+			"state":         "running",
+		},
+	}
+	if streamMode != "" {
+		runtime["stream"] = map[string]any{"mode": streamMode}
+	}
+	meta := map[string]any{
+		"caelis": map[string]any{
+			"runtime": runtime,
+		},
+	}
+	meta = metautil.WithTerminalInfo(meta, terminalID)
+	if streamMode != "" {
+		meta = metautil.WithTerminalOutput(meta, terminalID, output)
+	}
+	return meta
 }

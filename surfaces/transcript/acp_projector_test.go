@@ -146,6 +146,42 @@ func TestProjectACPEventToEventsProjectsUsageUpdate(t *testing.T) {
 	}
 }
 
+func TestProjectACPEventToEventsProjectsAttemptResetNotice(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectACPEventToEvents(eventstream.Envelope{
+		Kind:   eventstream.KindLifecycle,
+		TurnID: "turn-1",
+		Scope:  eventstream.ScopeMain,
+		Lifecycle: &eventstream.Lifecycle{
+			State: "attempt_reset",
+		},
+		Meta: map[string]any{
+			"caelis": map[string]any{
+				"runtime": map[string]any{
+					"attempt_reset": map[string]any{
+						"attempt":  1,
+						"cause":    "model: http status 400 body=bad request",
+						"retrying": true,
+					},
+				},
+			},
+		},
+	}, nil)
+	if len(events) != 2 {
+		t.Fatalf("events = %#v, want lifecycle plus retry notice", events)
+	}
+	if events[0].Kind != EventLifecycle || events[0].State != "attempt_reset" {
+		t.Fatalf("first event = %#v, want attempt_reset lifecycle", events[0])
+	}
+	if events[1].Kind != EventNotice || !strings.Contains(events[1].Text, "retrying (attempt 1)") || !strings.Contains(events[1].Text, "http status 400") {
+		t.Fatalf("second event = %#v, want visible retry notice", events[1])
+	}
+	if events[0].TurnID != "turn-1" || events[1].TurnID != "turn-1" {
+		t.Fatalf("turn ids = %q, %q; want turn-1", events[0].TurnID, events[1].TurnID)
+	}
+}
+
 func TestProjectACPEventToEventsProjectsCompactNoticeOnly(t *testing.T) {
 	t.Parallel()
 

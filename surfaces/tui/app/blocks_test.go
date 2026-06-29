@@ -70,6 +70,15 @@ func TestMergeCommandStreamChunkKeepsPrefixLikeDelta(t *testing.T) {
 	}
 }
 
+func TestMergeCommandStreamChunkDropsCumulativePrefixLines(t *testing.T) {
+	existing := "🚀 异步 BASH 启动\n  第 1 秒...\n  第 2 秒...\n  第 3 秒...\n"
+	incoming := "🚀 异步 BASH 启动\n  第 1 秒...\n  第 2 秒...\n  第 4 秒...\n  第 5 秒...\n✅ 异步 BASH 完成\n"
+	want := existing + "  第 4 秒...\n  第 5 秒...\n✅ 异步 BASH 完成\n"
+	if got := mergeCommandStreamChunk(existing, incoming); got != want {
+		t.Fatalf("merged cumulative command chunk = %q, want %q", got, want)
+	}
+}
+
 func TestRUNCommandOverlappingRunningTailDoesNotDuplicateOutput(t *testing.T) {
 	block := NewMainACPTurnBlock("session-1")
 	first := "步骤 1/5 - 21:53:13\n步骤 2/5 - 21:53:14\n步骤 3/5 - 21:53:15\n步骤 4/5 - 21:53:16\n"
@@ -83,6 +92,44 @@ func TestRUNCommandOverlappingRunningTailDoesNotDuplicateOutput(t *testing.T) {
 	want := first + "步骤 5/5 - 21:53:17\n"
 	if got := block.Events[0].Output; got != want {
 		t.Fatalf("RUN_COMMAND output = %q, want %q", got, want)
+	}
+}
+
+func TestRUNCommandSplitNewlineStreamChunkPreserved(t *testing.T) {
+	block := NewMainACPTurnBlock("session-1")
+	block.UpdateToolWithMeta("command-1", "RUN_COMMAND", "for i in 1 2", "Step 1/2", false, false, ToolUpdateMeta{TaskID: "task-1"})
+	block.UpdateToolWithMeta("command-1", "RUN_COMMAND", "for i in 1 2", "\n", false, false, ToolUpdateMeta{TaskID: "task-1"})
+	block.UpdateToolWithMeta("command-1", "RUN_COMMAND", "for i in 1 2", "Step 2/2\n", false, false, ToolUpdateMeta{TaskID: "task-1"})
+
+	if len(block.Events) != 1 {
+		t.Fatalf("events = %#v, want one RUN_COMMAND event", block.Events)
+	}
+	if got, want := block.Events[0].Output, "Step 1/2\nStep 2/2\n"; got != want {
+		t.Fatalf("RUN_COMMAND output = %q, want %q", got, want)
+	}
+}
+
+func TestToolPanelClickExpandsHiddenSummaryBeforeCollapse(t *testing.T) {
+	block := NewMainACPTurnBlock("session-1")
+	output := strings.Join([]string{
+		"Step 1/6",
+		"Step 2/6",
+		"Step 3/6",
+		"Step 4/6",
+		"Step 5/6",
+		"Step 6/6",
+	}, "\n")
+	block.UpdateToolWithMeta("command-1", "RUN_COMMAND", "for i in 1 2 3 4 5 6", output, true, false, ToolUpdateMeta{})
+	block.setToolPanelExpanded("command-1", true)
+
+	if !block.toggleToolPanelClick("command-1") {
+		t.Fatal("toggleToolPanelClick() = false, want hidden summary to expand")
+	}
+	if !block.toolPanelExpanded("command-1") {
+		t.Fatal("tool panel collapsed, want it to stay expanded while showing full output")
+	}
+	if !block.toolPanelFullOutput("command-1") {
+		t.Fatal("tool panel full output = false, want first click on hidden summary to show full output")
 	}
 }
 

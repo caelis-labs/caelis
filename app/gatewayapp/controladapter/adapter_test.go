@@ -2157,6 +2157,51 @@ func TestAdapterStartupReusesExistingRequestedSession(t *testing.T) {
 	}
 }
 
+func TestNewAdapterForSessionBindsResolvedWorkspaceWithoutStarting(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	stackWorkspace := t.TempDir()
+	clientWorkspace := t.TempDir()
+	stack, err := newAdapterTestStack(t, gatewayapp.Config{
+		AppName:      "caelis",
+		UserID:       "adapter-session-bind-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: stackWorkspace,
+		WorkspaceCWD: stackWorkspace,
+		ApprovalMode: "default",
+		Assembly:     assembly.ResolvedAssembly{},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+	runtimeStack := gatewayAppStackForRuntimeTest(stack)
+	runtimeStack.Session.StartFn = func(context.Context, string, string) (session.Session, error) {
+		t.Fatal("StartFn should not be called for an already resolved session")
+		return session.Session{}, nil
+	}
+	resolved := session.Session{
+		SessionRef: session.SessionRef{
+			AppName:      "caelis",
+			UserID:       "adapter-session-bind-test",
+			SessionID:    "shared-session",
+			WorkspaceKey: clientWorkspace,
+		},
+		CWD: clientWorkspace,
+	}
+	driver, err := NewAdapterForSession(ctx, runtimeStack, resolved, "acp", "")
+	if err != nil {
+		t.Fatalf("NewAdapterForSession() error = %v", err)
+	}
+	activeSession, ok := driver.currentSession()
+	if !ok {
+		t.Fatal("adapter has no active session")
+	}
+	if activeSession.SessionRef != resolved.SessionRef {
+		t.Fatalf("active session ref = %#v, want %#v", activeSession.SessionRef, resolved.SessionRef)
+	}
+}
+
 func TestAdapterCycleSessionModeUsesStartupSession(t *testing.T) {
 	t.Parallel()
 

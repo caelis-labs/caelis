@@ -59,6 +59,10 @@ func TestServeStdioSendsAvailableCommandsAfterNewSession(t *testing.T) {
 		if len(got.Update.AvailableCommands) != 1 || got.Update.AvailableCommands[0].Name != "agent" {
 			t.Fatalf("availableCommands = %#v, want agent command", got.Update.AvailableCommands)
 		}
+		input := got.Update.AvailableCommands[0].Input
+		if input == nil || input.Hint != "use|add|install|list|remove" {
+			t.Fatalf("available command input = %#v, want hint", input)
+		}
 	case <-ctx.Done():
 		t.Fatal("timed out waiting for available_commands_update")
 	}

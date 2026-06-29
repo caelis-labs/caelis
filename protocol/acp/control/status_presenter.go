@@ -1,23 +1,22 @@
-package tuiapp
+package control
 
 import (
 	"fmt"
 	"strconv"
 	"strings"
-
-	"github.com/OnslaughtSnail/caelis/protocol/acp/control"
-	"github.com/OnslaughtSnail/caelis/surfaces/statusbar"
 )
 
-func formatStatusSnapshot(status control.StatusSnapshot) string {
-	model := statusViewModelFromSnapshot(status).HeaderModelText("")
+// FormatStatusSnapshot renders the shared text status view used by prompt
+// surfaces.
+func FormatStatusSnapshot(status StatusSnapshot) string {
+	model := statusHeaderModelText(status)
 	lines := []string{}
 	appendStatusField(&lines, "Model", model)
 	appendStatusField(&lines, "Mode", firstNonEmpty(strings.TrimSpace(status.Session.ModeLabel), "auto-review"))
 	appendStatusField(&lines, "Sandbox", formatStatusSandbox(status))
 	appendStatusField(&lines, "Workspace", firstNonEmpty(strings.TrimSpace(status.Session.Workspace), "-"))
 	appendStatusField(&lines, "Session", strings.TrimSpace(status.Session.ID))
-	if usage := statusbar.FormatContextUsage(status.Usage.TotalTokens, status.Usage.ContextWindowTokens); usage != "" {
+	if usage := formatContextUsage(status.Usage.TotalTokens, status.Usage.ContextWindowTokens); usage != "" {
 		appendStatusField(&lines, "Context", usage)
 	}
 	if status.SandboxStatus.FallbackReason != "" {
@@ -26,7 +25,7 @@ func formatStatusSnapshot(status control.StatusSnapshot) string {
 	if status.SandboxStatus.InstallHint != "" {
 		appendStatusField(&lines, "Install", strings.TrimSpace(status.SandboxStatus.InstallHint))
 	}
-	setup := sandboxSetupViewFromStatus(status)
+	setup := SandboxSetupViewFromStatus(status)
 	if setup.GlobalRequired {
 		if setup.SetupError != "" {
 			appendStatusField(&lines, "Setup", "Windows sandbox infrastructure repair failed")
@@ -84,7 +83,60 @@ func formatStatusSnapshot(status control.StatusSnapshot) string {
 	return strings.Join(lines, "\n")
 }
 
-type sandboxSetupView struct {
+// FormatDoctorSnapshot renders the shared doctor output used by prompt
+// surfaces.
+func FormatDoctorSnapshot(status StatusSnapshot) string {
+	lines := []string{"doctor:"}
+	provider := strings.TrimSpace(firstNonEmpty(status.ModelStatus.Provider, status.ModelStatus.Display))
+	modelName := strings.TrimSpace(firstNonEmpty(status.ModelStatus.Name, status.ModelStatus.Display))
+	switch {
+	case status.ModelStatus.MissingAPIKey:
+		lines = append(lines, "  warn provider key missing - run /connect")
+	case provider == "" && modelName == "":
+		lines = append(lines, "  warn model not configured - run /connect")
+	default:
+		lines = append(lines, "  ok provider/model: "+joinNonEmpty([]string{provider, modelName}, " / "))
+	}
+	if storeDir := strings.TrimSpace(status.Session.StoreDir); storeDir != "" {
+		lines = append(lines, "  ok session store: "+storeDir)
+	} else {
+		lines = append(lines, "  warn session store path unavailable")
+	}
+	if sessionID := strings.TrimSpace(status.Session.ID); sessionID != "" {
+		lines = append(lines, "  ok session: "+sessionID)
+	}
+	sandbox := strings.TrimSpace(firstNonEmpty(status.SandboxStatus.ResolvedBackend, status.SandboxStatus.RequestedBackend, status.SandboxStatus.Type))
+	setup := SandboxSetupViewFromStatus(status)
+	switch {
+	case status.SandboxStatus.HostExecution || status.SandboxStatus.FullAccessMode:
+		detail := strings.TrimSpace(firstNonEmpty(status.SandboxStatus.SecuritySummary, sandbox, "host execution"))
+		lines = append(lines, "  warn sandbox: "+detail)
+	case setup.GlobalRequired:
+		lines = append(lines, "  warn sandbox global repair pending: "+compactStatusDetail(setup.GlobalDetail, 180))
+		if setup.IsWindows {
+			lines = append(lines, "  info fix: /doctor")
+		}
+	case setup.WorkspaceRequired:
+		lines = append(lines, "  warn sandbox workspace repair pending: "+compactStatusDetail(setup.WorkspaceDetail, 180))
+		if setup.IsWindows {
+			lines = append(lines, "  info fix: /doctor")
+		}
+	case sandbox != "":
+		lines = append(lines, "  ok sandbox: "+sandbox)
+	default:
+		lines = append(lines, "  warn sandbox status unavailable")
+	}
+	if route := strings.TrimSpace(status.SandboxStatus.Route); route != "" {
+		lines = append(lines, "  ok route: "+route)
+	}
+	if status.Runtime.ActiveJobs > 0 || status.Runtime.Running {
+		lines = append(lines, fmt.Sprintf("  info active jobs: %d", status.Runtime.ActiveJobs))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// SandboxSetupView describes whether the current sandbox needs setup or repair.
+type SandboxSetupView struct {
 	GlobalRequired    bool
 	WorkspaceRequired bool
 	AnyRequired       bool
@@ -95,10 +147,11 @@ type sandboxSetupView struct {
 	WorkspaceDetail   string
 }
 
-func sandboxSetupViewFromStatus(status control.StatusSnapshot) sandboxSetupView {
+// SandboxSetupViewFromStatus derives setup/repair state from a status snapshot.
+func SandboxSetupViewFromStatus(status StatusSnapshot) SandboxSetupView {
 	global, hasGlobal := status.SandboxStatus.Setup.Check("global")
 	workspace, hasWorkspace := status.SandboxStatus.Setup.Check("workspace")
-	view := sandboxSetupView{
+	view := SandboxSetupView{
 		GlobalRequired:    status.SandboxStatus.GlobalSetupRequired || (hasGlobal && global.Required),
 		WorkspaceRequired: status.SandboxStatus.WorkspaceSetupRequired || (hasWorkspace && workspace.Required),
 		IsWindows:         sandboxStatusIsWindows(status.SandboxStatus),
@@ -114,7 +167,7 @@ func sandboxSetupViewFromStatus(status control.StatusSnapshot) sandboxSetupView 
 	return view
 }
 
-func sandboxStatusIsWindows(status control.StatusSandbox) bool {
+func sandboxStatusIsWindows(status StatusSandbox) bool {
 	for _, value := range []string{status.ResolvedBackend, status.RequestedBackend, status.Type} {
 		if strings.EqualFold(strings.TrimSpace(value), "windows") {
 			return true
@@ -123,7 +176,7 @@ func sandboxStatusIsWindows(status control.StatusSandbox) bool {
 	return false
 }
 
-func sandboxSetupWarning(view sandboxSetupView, target string) string {
+func sandboxSetupWarning(view SandboxSetupView, target string) string {
 	if !view.IsWindows {
 		return target + " repair is pending"
 	}
@@ -156,7 +209,7 @@ func appendStatusField(lines *[]string, label string, value string) {
 	*lines = append(*lines, fmt.Sprintf("  %-10s %s", label+":", value))
 }
 
-func formatStatusSandbox(status control.StatusSnapshot) string {
+func formatStatusSandbox(status StatusSnapshot) string {
 	sandbox := firstNonEmpty(strings.TrimSpace(status.SandboxStatus.ResolvedBackend), strings.TrimSpace(status.SandboxStatus.Type), strings.TrimSpace(status.SandboxStatus.RequestedBackend), "auto")
 	security := strings.TrimSpace(status.SandboxStatus.SecuritySummary)
 	switch {
@@ -181,10 +234,10 @@ func formatStatusSandbox(status control.StatusSnapshot) string {
 	}
 }
 
-func formatSessionTokenUsageStatus(status control.StatusSnapshot) string {
+func formatSessionTokenUsageStatus(status StatusSnapshot) string {
 	total := normalizedUsageSnapshot(status.Usage.SessionUsageTotal)
 	if usageSnapshotZero(total) {
-		total = normalizedUsageSnapshot(control.UsageSnapshot{
+		total = normalizedUsageSnapshot(UsageSnapshot{
 			PromptTokens:      status.Usage.SessionInputTokens,
 			CachedInputTokens: status.Usage.SessionCachedInputTokens,
 			CompletionTokens:  status.Usage.SessionOutputTokens,
@@ -206,7 +259,7 @@ func formatSessionTokenUsageStatus(status control.StatusSnapshot) string {
 	return formatTokenUsageTable(rows)
 }
 
-func modelUsageStatusLabel(item control.ModelUsageSnapshot) string {
+func modelUsageStatusLabel(item ModelUsageSnapshot) string {
 	provider := strings.TrimSpace(item.Provider)
 	model := strings.TrimSpace(item.Model)
 	switch {
@@ -223,7 +276,7 @@ func modelUsageStatusLabel(item control.ModelUsageSnapshot) string {
 
 type tokenUsageStatusRow struct {
 	scope string
-	usage control.UsageSnapshot
+	usage UsageSnapshot
 }
 
 func formatTokenUsageTable(rows []tokenUsageStatusRow) string {
@@ -258,64 +311,32 @@ func formatTokenUsageTable(rows []tokenUsageStatusRow) string {
 		table = append(table, cols)
 	}
 	widths := make([]int, len(table[0]))
-	for _, cols := range table {
-		for i, col := range cols {
-			if len(col) > widths[i] {
-				widths[i] = len(col)
+	for _, row := range table {
+		for i, col := range row {
+			if n := len([]rune(col)); n > widths[i] {
+				widths[i] = n
 			}
 		}
 	}
-	var b strings.Builder
-	for rowIndex, cols := range table {
-		if rowIndex > 0 {
-			b.WriteByte('\n')
+	lines := make([]string, 0, len(table))
+	for _, row := range table {
+		parts := make([]string, len(row))
+		for i, col := range row {
+			parts[i] = padRightRunes(col, widths[i])
 		}
-		if rowIndex == 1 {
-			for colIndex, width := range widths {
-				if colIndex > 0 {
-					b.WriteString("  ")
-				}
-				b.WriteString(strings.Repeat("-", width))
-			}
-			b.WriteByte('\n')
-		}
-		for colIndex, col := range cols {
-			if colIndex > 0 {
-				b.WriteString("  ")
-			}
-			if colIndex == 0 {
-				fmt.Fprintf(&b, "%-*s", widths[colIndex], col)
-				continue
-			}
-			fmt.Fprintf(&b, "%*s", widths[colIndex], col)
-		}
+		lines = append(lines, strings.TrimRight(strings.Join(parts, "  "), " "))
 	}
-	return b.String()
+	return strings.Join(lines, "\n")
 }
 
-func normalizedUsageSnapshot(usage control.UsageSnapshot) control.UsageSnapshot {
-	if usage.PromptTokens < 0 {
-		usage.PromptTokens = 0
-	}
-	if usage.CachedInputTokens < 0 {
-		usage.CachedInputTokens = 0
-	}
-	if usage.CompletionTokens < 0 {
-		usage.CompletionTokens = 0
-	}
-	if usage.ReasoningTokens < 0 {
-		usage.ReasoningTokens = 0
-	}
-	if usage.TotalTokens < 0 {
-		usage.TotalTokens = 0
-	}
-	if usage.TotalTokens == 0 && (usage.PromptTokens != 0 || usage.CompletionTokens != 0) {
+func normalizedUsageSnapshot(usage UsageSnapshot) UsageSnapshot {
+	if usage.TotalTokens == 0 {
 		usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
 	}
 	return usage
 }
 
-func usageSnapshotZero(usage control.UsageSnapshot) bool {
+func usageSnapshotZero(usage UsageSnapshot) bool {
 	return usage.PromptTokens == 0 &&
 		usage.CachedInputTokens == 0 &&
 		usage.CompletionTokens == 0 &&
@@ -323,23 +344,86 @@ func usageSnapshotZero(usage control.UsageSnapshot) bool {
 		usage.TotalTokens == 0
 }
 
-func formatTokenUsageNumber(tokens int) string {
-	if tokens < 0 {
-		tokens = 0
+func formatTokenUsageNumber(value int) string {
+	if value <= 0 {
+		return "-"
 	}
-	text := strconv.Itoa(tokens)
-	if len(text) <= 3 {
-		return text
+	return strconv.Itoa(value)
+}
+
+func statusHeaderModelText(status StatusSnapshot) string {
+	model := firstNonEmpty(strings.TrimSpace(status.ModelStatus.Display), strings.TrimSpace(status.ModelStatus.Name), "not configured")
+	provider := firstNonEmpty(strings.TrimSpace(status.ModelStatus.Provider), deriveProviderFromAlias(status.ModelStatus.Display), "not configured")
+	if provider != "" && provider != "not configured" && !strings.EqualFold(provider, "acp") && !strings.Contains(strings.ToLower(model), strings.ToLower(provider)+"/") {
+		model = provider + "/" + model
 	}
-	var b strings.Builder
-	prefix := len(text) % 3
-	if prefix == 0 {
-		prefix = 3
+	if effort := strings.TrimSpace(status.ModelStatus.ReasoningEffort); effort != "" && !strings.Contains(model, "["+effort+"]") {
+		model += " [" + effort + "]"
 	}
-	b.WriteString(text[:prefix])
-	for i := prefix; i < len(text); i += 3 {
-		b.WriteByte(',')
-		b.WriteString(text[i : i+3])
+	if status.ModelStatus.MissingAPIKey {
+		model += " · key missing"
 	}
-	return b.String()
+	return strings.TrimSpace(model)
+}
+
+func deriveProviderFromAlias(model string) string {
+	model = strings.TrimSpace(model)
+	if before, _, ok := strings.Cut(model, "/"); ok {
+		return strings.TrimSpace(before)
+	}
+	return ""
+}
+
+func formatContextUsage(totalTokens, contextWindowTokens int) string {
+	if contextWindowTokens <= 0 {
+		if totalTokens <= 0 {
+			return ""
+		}
+		return compactTokenCount(totalTokens)
+	}
+	if totalTokens < 0 {
+		totalTokens = 0
+	}
+	percent := totalTokens * 100 / contextWindowTokens
+	return fmt.Sprintf("%s / %s · %d%%", compactTokenCount(totalTokens), compactTokenCount(contextWindowTokens), percent)
+}
+
+func compactTokenCount(tokens int) string {
+	switch {
+	case tokens >= 1_000_000:
+		return fmt.Sprintf("%.1fm", float64(tokens)/1_000_000)
+	case tokens >= 10_000:
+		return fmt.Sprintf("%.0fk", float64(tokens)/1_000)
+	case tokens >= 1_000:
+		return fmt.Sprintf("%.1fk", float64(tokens)/1_000)
+	default:
+		return fmt.Sprintf("%d", tokens)
+	}
+}
+
+func padRightRunes(value string, width int) string {
+	count := len([]rune(value))
+	if count >= width {
+		return value
+	}
+	return value + strings.Repeat(" ", width-count)
+}
+
+func joinNonEmpty(parts []string, sep string) string {
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if strings.TrimSpace(p) != "" {
+			out = append(out, strings.TrimSpace(p))
+		}
+	}
+	return strings.Join(out, sep)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }

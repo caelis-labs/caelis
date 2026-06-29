@@ -65,7 +65,7 @@ type AvailableCommandInput struct {
 type AvailableCommand struct {
 	Name        string                 `json:"name"`
 	Description string                 `json:"description,omitempty"`
-	Input       *AvailableCommandInput `json:"input"`
+	Input       *AvailableCommandInput `json:"input,omitempty"`
 }
 
 type AvailableCommandsUpdate struct {

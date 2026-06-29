@@ -122,7 +122,7 @@ func workspaceDirName(workspaceKey string) string {
 }
 
 func pathCacheKey(sessionID string, workspaceKey string) string {
-	return workspaceDirName(workspaceKey) + ":" + sanitizeSessionID(sessionID)
+	return sanitizeSessionID(sessionID)
 }
 
 func nextSessionID() string {

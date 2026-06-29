@@ -38,9 +38,13 @@ func SanitizeLogText(input string) string {
 			}
 			if b == '\n' {
 				out.WriteByte('\n')
+				i++
+				continue
 			}
 			if b == '\t' {
 				out.WriteString("    ")
+				i++
+				continue
 			}
 			i++
 			continue

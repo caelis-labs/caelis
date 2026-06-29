@@ -27,6 +27,21 @@ func TestDefinitionDoesNotExposeYieldTimeMS(t *testing.T) {
 	}
 }
 
+func TestDefinitionGuidesWaitingWithTaskTool(t *testing.T) {
+	t.Parallel()
+
+	desc := New([]delegation.Agent{{Name: "codex"}}).Definition().Description
+	for _, want := range []string{
+		"To observe or wait for an existing child task, use TASK wait",
+		"returned task_id",
+		"do not call SPAWN again",
+	} {
+		if !strings.Contains(desc, want) {
+			t.Fatalf("SPAWN description missing %q:\n%s", want, desc)
+		}
+	}
+}
+
 func TestDefinitionExposesOpenWorldAnnotations(t *testing.T) {
 	t.Parallel()
 

@@ -8,6 +8,7 @@ import (
 	"io"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/OnslaughtSnail/caelis/protocol/acp/jsonrpc"
 )
@@ -39,6 +40,10 @@ type serverConn struct {
 	clientTerminal atomic.Bool
 }
 
+// New-session clients may bind the UI thread only after session/new resolves,
+// so publish the first command catalog on a short delayed standard update.
+const availableCommandsAfterSessionNewDelay = 100 * time.Millisecond
+
 func (c *serverConn) handleRequest(ctx context.Context, msg jsonrpc.Message) (any, *jsonrpc.RPCError) {
 	switch msg.Method {
 	case MethodInitialize:
@@ -65,7 +70,7 @@ func (c *serverConn) handleRequest(ctx context.Context, msg jsonrpc.Message) (an
 		if err != nil {
 			return responseOrError(resp, err)
 		}
-		return c.withAvailableCommands(ctx, resp, resp.SessionID), nil
+		return c.withAvailableCommands(ctx, resp, resp.SessionID, availableCommandsAfterSessionNewDelay), nil
 	case MethodSessionList:
 		var req SessionListRequest
 		if err := decodeParams(msg.Params, &req); err != nil {
@@ -90,7 +95,7 @@ func (c *serverConn) handleRequest(ctx context.Context, msg jsonrpc.Message) (an
 		if err != nil {
 			return responseOrError(resp, err)
 		}
-		return c.withAvailableCommands(ctx, resp, req.SessionID), nil
+		return c.withAvailableCommands(ctx, resp, req.SessionID, 0), nil
 	case MethodSessionResume:
 		var req ResumeSessionRequest
 		if err := decodeParams(msg.Params, &req); err != nil {
@@ -104,7 +109,7 @@ func (c *serverConn) handleRequest(ctx context.Context, msg jsonrpc.Message) (an
 		if err != nil {
 			return responseOrError(resp, err)
 		}
-		return c.withAvailableCommands(ctx, resp, req.SessionID), nil
+		return c.withAvailableCommands(ctx, resp, req.SessionID, 0), nil
 	case MethodSessionClose:
 		var req CloseSessionRequest
 		if err := decodeParams(msg.Params, &req); err != nil {
@@ -218,7 +223,7 @@ func (c *serverConn) SessionUpdate(_ context.Context, notification SessionNotifi
 	return c.rpc.Notify(MethodSessionUpdate, notification)
 }
 
-func (c *serverConn) withAvailableCommands(ctx context.Context, payload any, sessionID string) any {
+func (c *serverConn) withAvailableCommands(ctx context.Context, payload any, sessionID string, delay time.Duration) any {
 	handler, ok := AsSessionCommandAdapter(c.agent)
 	sessionID = strings.TrimSpace(sessionID)
 	if !ok || sessionID == "" {
@@ -227,19 +232,38 @@ func (c *serverConn) withAvailableCommands(ctx context.Context, payload any, ses
 	return jsonrpc.PostWriteResult{
 		Payload: payload,
 		AfterWrite: func() {
-			cmds, err := handler.AvailableCommands(context.WithoutCancel(ctx), sessionID)
-			if err != nil || len(cmds) == 0 {
+			emit := func() {
+				c.emitAvailableCommands(context.WithoutCancel(ctx), handler, sessionID)
+			}
+			if delay <= 0 {
+				emit()
 				return
 			}
-			_ = c.SessionUpdate(context.WithoutCancel(ctx), SessionNotification{
-				SessionID: sessionID,
-				Update: AvailableCommandsUpdate{
-					SessionUpdate:     UpdateAvailableCmds,
-					AvailableCommands: cmds,
-				},
-			})
+			go func() {
+				timer := time.NewTimer(delay)
+				defer timer.Stop()
+				select {
+				case <-ctx.Done():
+				case <-timer.C:
+					emit()
+				}
+			}()
 		},
 	}
+}
+
+func (c *serverConn) emitAvailableCommands(ctx context.Context, handler SessionCommandAdapter, sessionID string) {
+	cmds, err := handler.AvailableCommands(ctx, sessionID)
+	if err != nil || len(cmds) == 0 {
+		return
+	}
+	_ = c.SessionUpdate(ctx, SessionNotification{
+		SessionID: sessionID,
+		Update: AvailableCommandsUpdate{
+			SessionUpdate:     UpdateAvailableCmds,
+			AvailableCommands: cmds,
+		},
+	})
 }
 
 func (c *serverConn) RequestPermission(ctx context.Context, req RequestPermissionRequest) (RequestPermissionResponse, error) {

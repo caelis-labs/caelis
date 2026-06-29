@@ -160,16 +160,13 @@ func terminalNoOutputPlaceholder(toolName string, toolKind string, rawOutput map
 	if !terminalFinalWithoutContent(toolName, toolKind, status, isErr) {
 		return false
 	}
-	if terminalContentText(content) != "" {
-		return false
-	}
 	if terminalRawOutputHasText(rawOutput) {
 		return false
 	}
-	if terminalRuntimeOutputText(meta) != "" || terminalOutputMetaText(meta) != "" {
+	if terminalRuntimeOutputText(meta) != "" {
 		return false
 	}
-	return len(content) == 0 || hasStandardTerminalContent(content)
+	return hasTerminalPanelMeta(meta)
 }
 
 func terminalExitCodeOutputText(toolName string, toolKind string, rawOutput map[string]any, status string, isErr bool) string {
@@ -203,13 +200,7 @@ func terminalToolOutputText(toolName string, toolKind string, rawOutput map[stri
 }
 
 func terminalUniversalOutputText(meta map[string]any, content []acpprojector.ToolContent) string {
-	if text := terminalOutputMetaText(meta); text != "" {
-		return text
-	}
 	if text := terminalRuntimeOutputText(meta); text != "" {
-		return text
-	}
-	if text := terminalContentText(content); text != "" {
 		return text
 	}
 	return ""
@@ -219,7 +210,7 @@ func terminalKindSpecificOutputText(toolName string, toolKind string, rawOutput 
 	if !isTerminalPanelToolKind(toolName, toolKind) && !strings.EqualFold(strings.TrimSpace(toolName), "TASK") {
 		return ""
 	}
-	if !hasStandardTerminalContent(content) {
+	if !hasTerminalPanelMeta(meta) {
 		return ""
 	}
 	name := strings.ToUpper(strings.TrimSpace(toolName))
@@ -238,7 +229,7 @@ func terminalKindSpecificOutputText(toolName string, toolKind string, rawOutput 
 	if !transcriptToolStatusFinal(status, isErr) {
 		return firstNonEmpty(asString(rawOutput["latest_output"]), asString(rawOutput["output_preview"]))
 	}
-	if text := firstNonEmpty(asString(rawOutput["result"]), asString(rawOutput["output"]), asString(rawOutput["stdout"]), asString(rawOutput["stderr"]), asString(rawOutput["error"])); text != "" {
+	if text := firstNonEmpty(asString(rawOutput["result"]), asString(rawOutput["output"]), asString(rawOutput["stdout"]), asString(rawOutput["stderr"]), asString(rawOutput["error"]), asString(rawOutput["text"])); text != "" {
 		return text
 	}
 	return ""
@@ -281,44 +272,23 @@ func boolValue(value any) bool {
 	}
 }
 
-func hasStandardTerminalContent(content []acpprojector.ToolContent) bool {
-	for _, item := range content {
-		if strings.EqualFold(strings.TrimSpace(item.Type), "terminal") && strings.TrimSpace(item.TerminalID) != "" {
-			return true
-		}
+func hasTerminalPanelMeta(meta map[string]any) bool {
+	if _, ok := metautil.TerminalInfo(meta); ok {
+		return true
+	}
+	if _, ok := metautil.TerminalOutput(meta); ok {
+		return true
+	}
+	if _, ok := metautil.TerminalExit(meta); ok {
+		return true
 	}
 	return false
 }
 
-func terminalContentText(content []acpprojector.ToolContent) string {
-	var out strings.Builder
-	for _, item := range content {
-		if !strings.EqualFold(strings.TrimSpace(item.Type), "terminal") {
-			continue
-		}
-		if text := transcript.ProtocolTextContent(item.Content); text != "" {
-			appendTerminalContentText(&out, text)
-		}
-	}
-	return out.String()
-}
-
-func appendTerminalContentText(out *strings.Builder, text string) {
-	if out == nil || text == "" {
-		return
-	}
-	if out.Len() > 0 && !strings.HasSuffix(out.String(), "\n") && !strings.HasPrefix(text, "\n") {
-		out.WriteByte('\n')
-	}
-	out.WriteString(text)
-}
-
-func terminalOutputMetaText(meta map[string]any) string {
-	output := metautil.RuntimeSection(meta, metautil.Terminal)
-	return asString(output["data"])
-}
-
 func terminalRuntimeOutputText(meta map[string]any) string {
+	if output, ok := metautil.TerminalOutput(meta); ok {
+		return output.Data
+	}
 	taskMeta := eventRuntimeTaskMeta(meta)
 	for _, key := range []string{"output_text", "latest_output", "output_preview", "result", "output", "stdout", "stderr", "error", "final_message", "finalMessage", "text"} {
 		if text := asString(taskMeta[key]); text != "" {
@@ -326,11 +296,6 @@ func terminalRuntimeOutputText(meta map[string]any) string {
 		}
 	}
 	return ""
-}
-
-func terminalInfoToolName(meta map[string]any) string {
-	info := metautil.RuntimeSection(meta, metautil.Terminal)
-	return firstNonEmpty(asString(info["tool"]), asString(info["tool_name"]), asString(info["name"]))
 }
 
 func toolDisplayMetaOutput(toolName string, meta map[string]any) map[string]any {

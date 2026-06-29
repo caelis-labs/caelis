@@ -148,7 +148,11 @@ func (p *modeProvider) SetSessionMode(ctx context.Context, req acp.SetSessionMod
 		return acp.SetSessionModeResponse{}, fmt.Errorf("impl/agent/acp/assembly: mode %q not found", modeID)
 	}
 	if p.sessions != nil {
-		if err := p.sessions.UpdateState(ctx, sessionRef(p.appName, p.userID, sessionID), func(state map[string]any) (map[string]any, error) {
+		ref, err := resolveProviderSessionRef(ctx, p.sessions, p.appName, p.userID, sessionID)
+		if err != nil {
+			return acp.SetSessionModeResponse{}, err
+		}
+		if err := p.sessions.UpdateState(ctx, ref, func(state map[string]any) (map[string]any, error) {
 			return assembly.SetCurrentModeID(state, modeID), nil
 		}); err != nil {
 			return acp.SetSessionModeResponse{}, err
@@ -277,7 +281,10 @@ func (p *configProvider) SetSessionConfigOption(ctx context.Context, req acp.Set
 		return acp.SetSessionConfigOptionResponse{}, fmt.Errorf("impl/agent/acp/assembly: invalid value %q for config %q", value, configID)
 	}
 	if p.sessions != nil {
-		ref := sessionRef(p.appName, p.userID, sessionID)
+		ref, err := resolveProviderSessionRef(ctx, p.sessions, p.appName, p.userID, sessionID)
+		if err != nil {
+			return acp.SetSessionConfigOptionResponse{}, err
+		}
 		if err := p.sessions.UpdateState(ctx, ref, func(state map[string]any) (map[string]any, error) {
 			return assembly.SetCurrentConfigValue(state, configID, value), nil
 		}); err != nil {
@@ -391,4 +398,22 @@ func sessionRef(appName string, userID string, sessionID string) session.Session
 		UserID:    strings.TrimSpace(userID),
 		SessionID: strings.TrimSpace(sessionID),
 	}, appName, userID)
+}
+
+func resolveProviderSessionRef(
+	ctx context.Context,
+	sessions session.Service,
+	appName string,
+	userID string,
+	sessionID string,
+) (session.SessionRef, error) {
+	if sessions == nil {
+		return sessionRef(appName, userID, sessionID), nil
+	}
+	ref := sessionRef(appName, userID, sessionID)
+	activeSession, err := sessions.Session(ctx, ref)
+	if err != nil {
+		return session.SessionRef{}, err
+	}
+	return activeSession.SessionRef, nil
 }

@@ -73,7 +73,10 @@ func (d *Adapter) status(ctx context.Context, includeDiagnostics bool) (StatusSn
 	d.mu.Unlock()
 	rawModelText := firstNonEmpty(modelText, liveModelText)
 	workspaceCWD := ""
-	if d.stack != nil {
+	if ok {
+		workspaceCWD = strings.TrimSpace(activeSession.CWD)
+	}
+	if workspaceCWD == "" && d.stack != nil {
 		workspaceCWD = strings.TrimSpace(d.stack.Session.Workspace.CWD)
 	}
 

@@ -13,9 +13,14 @@ const (
 	SubmissionModeOverlay SubmissionMode = "overlay"
 )
 
+// Attachment describes media associated with a prompt at a rune offset.
+// Name is used as the display name and, for local surfaces, as the image path.
+// ACP inline media should use MimeType and base64 Data instead of overloading Name.
 type Attachment struct {
-	Name   string
-	Offset int
+	Name     string
+	Offset   int
+	MimeType string
+	Data     string
 }
 
 type Submission struct {

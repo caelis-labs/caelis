@@ -68,6 +68,13 @@ SSE uses `cursor` as the event id and serializes the full envelope as event
 data. WebSocket transports serialize the envelope directly. ACP stdio maps
 standard payloads to JSON-RPC ACP messages.
 
+Terminal rendering and session identity are specified in
+[`docs/acp-projection-architecture.md`](acp-projection-architecture.md). In
+short, Caelis-owned RUN_COMMAND/Bash and SPAWN streams share one
+`_meta.terminal_*` projection path across ACP stdio, TUI, and future GUI
+surfaces; filestore-backed `session_id` values are globally unique within one
+store root.
+
 Cursor fields:
 
 - `cursor`: opaque per-envelope resume id.

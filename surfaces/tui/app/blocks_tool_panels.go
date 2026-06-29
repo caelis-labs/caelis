@@ -63,10 +63,6 @@ func toggleToolPanelClick(expandedState *map[string]bool, fullOutputState *map[s
 		}
 		return false
 	}
-	if toolPanelCanCollapseExpanded(events, callID) {
-		setToolPanelExpandedWithOutput(expandedState, fullOutputState, callID, false)
-		return true
-	}
 	if toolPanelHasHiddenToolArgs(events, callID) || toolPanelHasHiddenSummary(events, callID) {
 		if fullOutputState == nil {
 			return false
@@ -75,6 +71,10 @@ func toggleToolPanelClick(expandedState *map[string]bool, fullOutputState *map[s
 			*fullOutputState = map[string]bool{}
 		}
 		(*fullOutputState)[callID] = true
+		return true
+	}
+	if toolPanelCanCollapseExpanded(events, callID) {
+		setToolPanelExpandedWithOutput(expandedState, fullOutputState, callID, false)
 		return true
 	}
 	return false

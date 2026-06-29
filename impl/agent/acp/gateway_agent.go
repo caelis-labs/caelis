@@ -14,14 +14,16 @@ import (
 )
 
 type GatewayAgentConfig struct {
-	Runtime          agent.Runtime
-	Sessions         session.Service
-	Resolver         gateway.RuntimeResolver
-	ApprovalReviewer gateway.ApprovalReviewer
-	Assembly         assemblyapi.ResolvedAssembly
-	AppName          string
-	UserID           string
-	SurfaceBuilder   SurfaceBuilder
+	Runtime             agent.Runtime
+	Sessions            session.Service
+	Resolver            gateway.RuntimeResolver
+	ApprovalReviewer    gateway.ApprovalReviewer
+	Assembly            assemblyapi.ResolvedAssembly
+	AppName             string
+	UserID              string
+	WorkspaceKey        string
+	SurfaceBuilder      SurfaceBuilder
+	PromptRouterFactory PromptRouterFactory
 }
 
 type SurfaceRequest struct {
@@ -84,11 +86,13 @@ func NewGatewayAgent(cfg GatewayAgentConfig) (*RuntimeAgent, error) {
 		Config:                surface,
 		Models:                surface,
 		Commands:              surface,
+		PromptRouterFactory:   cfg.PromptRouterFactory,
 		PromptCaps:            surface,
 		ApprovalReviewer:      cfg.ApprovalReviewer,
 		ApprovalModelResolver: cfg.Resolver,
 		AppName:               cfg.AppName,
 		UserID:                cfg.UserID,
+		WorkspaceKey:          cfg.WorkspaceKey,
 		AgentInfo:             &acp.Implementation{Name: cfg.AppName, Version: version.String()},
 	})
 }

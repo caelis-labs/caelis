@@ -11,9 +11,8 @@ import (
 const (
 	documentKind    = "caelis.sdk.session"
 	documentVersion = 1
-	indexKind       = "caelis.sdk.session_index"
 	indexVersion    = 1
-	indexFilename   = ".sessions.index.json"
+	indexFilename   = ".sessions.index.sqlite"
 	lockFilename    = ".sessions.lock"
 )
 
@@ -59,15 +58,4 @@ type persistedDocument struct {
 	Version int             `json:"version"`
 	Session session.Session `json:"session"`
 	State   map[string]any  `json:"state"`
-}
-
-type persistedSessionIndex struct {
-	Kind     string                       `json:"kind"`
-	Version  int                          `json:"version"`
-	Sessions []persistedSessionIndexEntry `json:"sessions,omitempty"`
-}
-
-type persistedSessionIndexEntry struct {
-	Session session.SessionSummary `json:"session"`
-	Path    string                 `json:"path"`
 }

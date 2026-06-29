@@ -30,9 +30,6 @@ func TestRegressionACPProjectorGoldenTerminalOutput(t *testing.T) {
 					TerminalID: "runtime-term-1",
 					Content:    session.ProtocolTextContent("total 0\n"),
 				}},
-				Meta: metautil.WithRuntimeSection(nil, metautil.Terminal, map[string]any{
-					"tool": "RUN_COMMAND",
-				}),
 			},
 		},
 	})
@@ -57,24 +54,19 @@ func TestRegressionACPProjectorGoldenTerminalOutput(t *testing.T) {
 		}
 		t.Fatalf("status = %q, want %q", statusStr, projector.ToolStatusCompleted)
 	}
-	if len(update.Content) != 1 {
-		t.Fatalf("content items = %d, want 1", len(update.Content))
-	}
-	if update.Content[0].TerminalID != "call-ls" {
-		t.Fatalf("content terminal_id = %q, want call-ls (remapped from runtime)", update.Content[0].TerminalID)
+	if len(update.Content) != 1 || update.Content[0].Type != "terminal" || update.Content[0].TerminalID != "call-ls" {
+		t.Fatalf("content = %#v, want one terminal anchor", update.Content)
 	}
 	if update.Content[0].Content != nil {
-		t.Fatal("terminal content body should be nil (carried in _meta)")
+		t.Fatalf("terminal anchor content = %#v, want empty", update.Content[0].Content)
 	}
-	terminalOutput := metautil.RuntimeSection(update.Meta, metautil.Terminal)
-	if len(terminalOutput) == 0 {
-		t.Fatalf("meta = %#v, want caelis.runtime.terminal", update.Meta)
+	info, ok := metautil.TerminalInfo(update.Meta)
+	if !ok || info.TerminalID != "call-ls" {
+		t.Fatalf("terminal_info = %#v, want call-ls", update.Meta)
 	}
-	if terminalOutput["terminal_id"] != "call-ls" {
-		t.Fatalf("caelis.runtime.terminal.terminal_id = %v, want call-ls", terminalOutput["terminal_id"])
-	}
-	if terminalOutput["data"] != "total 0\n" {
-		t.Fatalf("caelis.runtime.terminal.data = %v, want 'total 0\\n'", terminalOutput["data"])
+	output, ok := metautil.TerminalOutput(update.Meta)
+	if !ok || output.TerminalID != "call-ls" || output.Data != "total 0\n" {
+		t.Fatalf("terminal_output = %#v, want total output for call-ls", update.Meta)
 	}
 }
 

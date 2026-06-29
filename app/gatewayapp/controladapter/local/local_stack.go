@@ -8,6 +8,7 @@ import (
 	controladapter "github.com/OnslaughtSnail/caelis/app/gatewayapp/controladapter"
 	"github.com/OnslaughtSnail/caelis/ports/agentprofile"
 	"github.com/OnslaughtSnail/caelis/ports/sandbox"
+	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
 type Adapter = controladapter.Adapter
@@ -30,6 +31,10 @@ type CustomAgentConfig = controladapter.CustomAgentConfig
 
 func NewLocalAdapter(ctx context.Context, stack *gatewayapp.Stack, preferredSessionID string, bindingKey string, modelText string) (*Adapter, error) {
 	return controladapter.NewAdapter(ctx, runtimeStack(stack), preferredSessionID, bindingKey, modelText)
+}
+
+func NewLocalAdapterForSession(ctx context.Context, stack *gatewayapp.Stack, activeSession session.Session, bindingKey string, modelText string) (*Adapter, error) {
+	return controladapter.NewAdapterForSession(ctx, runtimeStack(stack), activeSession, bindingKey, modelText)
 }
 
 func runtimeStack(stack *gatewayapp.Stack) *RuntimeStack {

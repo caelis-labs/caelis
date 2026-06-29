@@ -319,9 +319,6 @@ func (b *MainACPTurnBlock) UpdateToolWithMeta(callID, name, args, output string,
 	if b == nil {
 		return
 	}
-	if !isTerminalPanelToolKind(name, meta.ToolKind) {
-		output = strings.TrimSpace(output)
-	}
 	events, _, collapse := applyToolEventUpdate(b.Events, toolEventUpdate{
 		CallID: callID,
 		Name:   name,
@@ -612,9 +609,6 @@ func (b *ParticipantTurnBlock) UpdateToolWithMeta(callID, name, args, output str
 	if b == nil {
 		return
 	}
-	if !isTerminalPanelToolKind(name, meta.ToolKind) {
-		output = strings.TrimSpace(output)
-	}
 	events, _, collapse := applyToolEventUpdate(b.Events, toolEventUpdate{
 		CallID: callID,
 		Name:   name,
@@ -817,7 +811,7 @@ func updateLinkedTerminalEvent(events []SubagentEvent, callID string, toolName s
 
 func updateLinkedSpawnEvent(events []SubagentEvent, callID string, taskID string, output string, final bool, err bool) bool {
 	taskID = strings.TrimSpace(taskID)
-	if taskID == "" || (!renderableTextHasContent(output) && !final) {
+	if taskID == "" || (!shouldMergeOpenToolOutput("SPAWN", output) && !final) {
 		return false
 	}
 	for i := len(events) - 1; i >= 0; i-- {
@@ -831,7 +825,7 @@ func updateLinkedSpawnEvent(events []SubagentEvent, callID string, taskID string
 		if strings.TrimSpace(ev.CallID) == callID {
 			return false
 		}
-		if renderableTextHasContent(output) {
+		if shouldMergeOpenToolOutput("SPAWN", output) {
 			if final || ev.Done {
 				ev.Output = output
 			} else {
@@ -842,7 +836,7 @@ func updateLinkedSpawnEvent(events []SubagentEvent, callID string, taskID string
 		if final {
 			ev.Done = true
 			ev.Err = err
-		} else if renderableTextHasContent(output) {
+		} else if shouldMergeOpenToolOutput("SPAWN", output) {
 			ev.Done = false
 			ev.Err = false
 		}
@@ -888,7 +882,7 @@ func linkedTerminalCommandForTask(events []SubagentEvent, taskID string) string 
 
 func updateLinkedTaskWriteEvent(events []SubagentEvent, taskID string, output string, final bool, err bool) bool {
 	taskID = strings.TrimSpace(taskID)
-	if taskID == "" || (!renderableTextHasContent(output) && !final) {
+	if taskID == "" || (!shouldMergeOpenToolOutput("SPAWN", output) && !final) {
 		return false
 	}
 	for i := len(events) - 1; i >= 0; i-- {
@@ -905,7 +899,7 @@ func updateLinkedTaskWriteEvent(events []SubagentEvent, taskID string, output st
 		if !strings.EqualFold(strings.TrimSpace(ev.Name), "TASK") || taskEventAction(*ev) != "write" {
 			continue
 		}
-		if renderableTextHasContent(output) {
+		if shouldMergeOpenToolOutput("SPAWN", output) {
 			if final || ev.Done {
 				ev.Output = output
 			} else {
@@ -916,7 +910,7 @@ func updateLinkedTaskWriteEvent(events []SubagentEvent, taskID string, output st
 		if final {
 			ev.Done = true
 			ev.Err = err
-		} else if renderableTextHasContent(output) {
+		} else if shouldMergeOpenToolOutput("SPAWN", output) {
 			ev.Done = false
 			ev.Err = false
 		}

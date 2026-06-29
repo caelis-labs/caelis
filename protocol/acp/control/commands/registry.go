@@ -20,7 +20,11 @@ type CommandSpec struct {
 	DynamicCompleter bool
 }
 
-// DefaultSpecs returns the canonical core slash command specs in display order.
+var defaultACPCommandNames = []string{"status", "compact", "review"}
+
+// DefaultSpecs returns the canonical TUI slash command specs in display order.
+// Use DefaultSharedSpecs for commands that are safe for shared prompt routers,
+// and DefaultACPSpecs for commands exposed through ACP clients.
 func DefaultSpecs() []CommandSpec {
 	return DefaultSpecsForPlatform(runtime.GOOS)
 }
@@ -36,20 +40,101 @@ func DefaultSpecsForPlatform(goos string) []CommandSpec {
 	return out
 }
 
+// DefaultSharedSpecs returns slash commands whose behavior is surface-neutral.
+// Wizard/modal style commands remain TUI-only and must not be exposed by ACP.
+func DefaultSharedSpecs() []CommandSpec {
+	return DefaultSharedSpecsForPlatform(runtime.GOOS)
+}
+
+func DefaultSharedSpecsForPlatform(goos string) []CommandSpec {
+	specs := defaultSharedSpecs()
+	out := specs[:0]
+	for _, spec := range specs {
+		if commandSpecSupportsPlatform(spec, goos) {
+			out = append(out, spec)
+		}
+	}
+	return out
+}
+
+// DefaultTUISpecs returns commands that require TUI-owned interaction or app
+// lifecycle behavior.
+func DefaultTUISpecs() []CommandSpec {
+	return DefaultTUISpecsForPlatform(runtime.GOOS)
+}
+
+func DefaultTUISpecsForPlatform(goos string) []CommandSpec {
+	specs := defaultTUISpecs()
+	out := specs[:0]
+	for _, spec := range specs {
+		if commandSpecSupportsPlatform(spec, goos) {
+			out = append(out, spec)
+		}
+	}
+	return out
+}
+
+// DefaultACPSpecs returns the narrow slash command set exposed through ACP
+// clients. Session lifecycle and configuration flows should use ACP APIs or
+// client UI instead of slash commands.
+func DefaultACPSpecs() []CommandSpec {
+	return DefaultACPSpecsForPlatform(runtime.GOOS)
+}
+
+func DefaultACPSpecsForPlatform(goos string) []CommandSpec {
+	byName := map[string]CommandSpec{}
+	for _, spec := range DefaultSharedSpecsForPlatform(goos) {
+		byName[spec.Name] = spec
+	}
+	out := make([]CommandSpec, 0, len(defaultACPCommandNames))
+	for _, name := range defaultACPCommandNames {
+		if spec, ok := byName[name]; ok {
+			out = append(out, spec)
+		}
+	}
+	return out
+}
+
 func defaultSpecs() []CommandSpec {
+	byName := map[string]CommandSpec{}
+	for _, spec := range append(defaultSharedSpecs(), defaultTUISpecs()...) {
+		byName[spec.Name] = spec
+	}
+	if spec, ok := byName["agent"]; ok {
+		spec.Details = []string{"actions: list, add <builtin>, install <adapter>, use <agent|local>, remove <agent>"}
+		spec.ArgCandidates = agentTUIRootCandidates()
+		byName["agent"] = spec
+	}
+	order := []string{"help", "agent", "subagent", "review", "connect", "plugin", "model", "status", "doctor", "new", "resume", "compact", "exit", "quit"}
+	specs := make([]CommandSpec, 0, len(order))
+	for _, name := range order {
+		if spec, ok := byName[name]; ok {
+			specs = append(specs, spec)
+		}
+	}
+	return specs
+}
+
+func defaultSharedSpecs() []CommandSpec {
 	specs := []CommandSpec{
 		{Name: "help", Usage: "/help", Description: "Show commands and shortcuts", LocalDuringACP: true},
-		{Name: "agent", Usage: "/agent <action>", Description: "Manage ACP agents and controller switching", LocalDuringACP: true, Details: []string{"actions: list, add <builtin>, install <adapter>, use <agent|local>, remove <agent>"}, ArgCandidates: agentRootCandidates(), DynamicCompleter: true},
+		{Name: "agent", Usage: "/agent <action>", Description: "Manage ACP agents and controller switching", LocalDuringACP: true, Details: []string{"actions: list, add <builtin>, use <agent|local>, remove <agent>"}, ArgCandidates: agentSharedRootCandidates(), DynamicCompleter: true},
 		{Name: "subagent", Usage: "/subagent <action>", Description: "Manage subagents and runtime bindings", LocalDuringACP: true, Details: []string{"actions: list, bind <id> default|model|acp ..."}, ArgCandidates: subagentRootCandidates(), DynamicCompleter: true},
 		{Name: "review", Usage: "/review [instructions]", Description: "Review current workspace changes with the built-in reviewer", LocalDuringACP: true},
-		{Name: "connect", Usage: "/connect", Description: "Open the guided model/provider setup wizard", DynamicCompleter: true},
-		{Name: "plugin", Usage: "/plugin <action>", Description: "Manage Caelis plugins", LocalDuringACP: true, Details: []string{"actions: install <plugin@marketplace|path>, marketplace add|list|update|rm, manage, rm <id>"}, ArgCandidates: pluginRootCandidates(), DynamicCompleter: true},
 		{Name: "model", Usage: "/model <action>", Description: "Switch or delete a configured model alias", LocalDuringACP: true, Details: []string{"actions: use <alias>, del <alias>"}, ArgCandidates: modelRootCandidates(), DynamicCompleter: true},
 		{Name: "status", Usage: "/status", Description: "Show current provider, model, session, sandbox, and store info", LocalDuringACP: true},
 		{Name: "doctor", Usage: "/doctor", Description: "Diagnose and repair Windows sandbox readiness", LocalDuringACP: true, Platforms: []string{"windows"}},
 		{Name: "new", Usage: "/new", Description: "Start a fresh session"},
 		{Name: "resume", Usage: "/resume [session-id]", Description: "List recent sessions or resume one by id", LocalDuringACP: true, DynamicCompleter: true},
 		{Name: "compact", Usage: "/compact", Description: "Compact the current session transcript"},
+	}
+	return specs
+}
+
+func defaultTUISpecs() []CommandSpec {
+	specs := []CommandSpec{
+		{Name: "connect", Usage: "/connect", Description: "Open the guided model/provider setup wizard", DynamicCompleter: true},
+		{Name: "plugin", Usage: "/plugin <action>", Description: "Manage Caelis plugins", LocalDuringACP: true, Details: []string{"actions: install <plugin@marketplace|path>, marketplace add|list|update|rm, manage, rm <id>"}, ArgCandidates: pluginRootCandidates(), DynamicCompleter: true},
 		{Name: "exit", Usage: "/exit", Description: "Exit the TUI", LocalDuringACP: true},
 		{Name: "quit", Usage: "/quit", Description: "Exit the TUI", LocalDuringACP: true},
 	}
@@ -86,6 +171,38 @@ func DefaultNamesForPlatform(goos string) []string {
 	return out
 }
 
+func DefaultSharedNames() []string {
+	return DefaultSharedNamesForPlatform(runtime.GOOS)
+}
+
+func DefaultSharedNamesForPlatform(goos string) []string {
+	specs := DefaultSharedSpecsForPlatform(goos)
+	out := make([]string, 0, len(specs))
+	for _, spec := range specs {
+		if spec.Hidden {
+			continue
+		}
+		out = append(out, spec.Name)
+	}
+	return out
+}
+
+func DefaultACPNames() []string {
+	return DefaultACPNamesForPlatform(runtime.GOOS)
+}
+
+func DefaultACPNamesForPlatform(goos string) []string {
+	specs := DefaultACPSpecsForPlatform(goos)
+	out := make([]string, 0, len(specs))
+	for _, spec := range specs {
+		if spec.Hidden {
+			continue
+		}
+		out = append(out, spec.Name)
+	}
+	return out
+}
+
 // Lookup returns a core command spec by name.
 func Lookup(name string) (CommandSpec, bool) {
 	return LookupForPlatform(name, runtime.GOOS)
@@ -101,6 +218,34 @@ func LookupForPlatform(name string, goos string) (CommandSpec, bool) {
 	return CommandSpec{}, false
 }
 
+func LookupShared(name string) (CommandSpec, bool) {
+	return LookupSharedForPlatform(name, runtime.GOOS)
+}
+
+func LookupSharedForPlatform(name string, goos string) (CommandSpec, bool) {
+	name = normalizeName(name)
+	for _, spec := range DefaultSharedSpecsForPlatform(goos) {
+		if spec.Name == name {
+			return spec, true
+		}
+	}
+	return CommandSpec{}, false
+}
+
+func LookupACP(name string) (CommandSpec, bool) {
+	return LookupACPForPlatform(name, runtime.GOOS)
+}
+
+func LookupACPForPlatform(name string, goos string) (CommandSpec, bool) {
+	name = normalizeName(name)
+	for _, spec := range DefaultACPSpecsForPlatform(goos) {
+		if spec.Name == name {
+			return spec, true
+		}
+	}
+	return CommandSpec{}, false
+}
+
 // IsKnown reports whether a core command exists.
 func IsKnown(name string) bool {
 	return IsKnownForPlatform(name, runtime.GOOS)
@@ -108,6 +253,24 @@ func IsKnown(name string) bool {
 
 func IsKnownForPlatform(name string, goos string) bool {
 	_, ok := LookupForPlatform(name, goos)
+	return ok
+}
+
+func IsSharedKnown(name string) bool {
+	return IsSharedKnownForPlatform(name, runtime.GOOS)
+}
+
+func IsSharedKnownForPlatform(name string, goos string) bool {
+	_, ok := LookupSharedForPlatform(name, goos)
+	return ok
+}
+
+func IsACPKnown(name string) bool {
+	return IsACPKnownForPlatform(name, runtime.GOOS)
+}
+
+func IsACPKnownForPlatform(name string, goos string) bool {
+	_, ok := LookupACPForPlatform(name, goos)
 	return ok
 }
 
@@ -222,7 +385,16 @@ func RootArgCandidatesForPlatform(command string, goos string) []control.SlashAr
 	return out
 }
 
-func agentRootCandidates() []control.SlashArgCandidate {
+func agentSharedRootCandidates() []control.SlashArgCandidate {
+	return []control.SlashArgCandidate{
+		{Value: "use", Display: "use", Detail: "Switch the main controller"},
+		{Value: "add", Display: "add", Detail: "Register a built-in ACP agent"},
+		{Value: "list", Display: "list", Detail: "List registered ACP agents"},
+		{Value: "remove", Display: "remove", Detail: "Unregister an ACP agent"},
+	}
+}
+
+func agentTUIRootCandidates() []control.SlashArgCandidate {
 	return []control.SlashArgCandidate{
 		{Value: "use", Display: "use", Detail: "Switch the main controller"},
 		{Value: "add", Display: "add", Detail: "Register a built-in ACP agent"},

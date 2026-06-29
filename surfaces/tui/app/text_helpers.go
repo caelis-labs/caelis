@@ -1,6 +1,9 @@
 package tuiapp
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
@@ -29,4 +32,15 @@ func compactNonEmpty(values []string) []string {
 		}
 	}
 	return out
+}
+
+func padRightDisplay(value string, width int) string {
+	if width <= 0 {
+		return value
+	}
+	count := displayColumns(value)
+	if count >= width {
+		return value
+	}
+	return value + strings.Repeat(" ", width-count)
 }

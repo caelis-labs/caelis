@@ -9,90 +9,6 @@ import (
 	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
 )
 
-func terminalOutputMetaFromEventToolContent(content []session.EventToolContent, displayTerminalID string) map[string]any {
-	displayTerminalID = strings.TrimSpace(displayTerminalID)
-	var terminalID string
-	var text terminalTextAccumulator
-	for _, item := range content {
-		if !strings.EqualFold(strings.TrimSpace(item.Type), "terminal") {
-			continue
-		}
-		if terminalID == "" {
-			terminalID = firstNonEmpty(displayTerminalID, strings.TrimSpace(item.TerminalID))
-		}
-		if item.Text != "" {
-			text.appendPart(item.Text)
-		}
-	}
-	if terminalID == "" || text.len() == 0 {
-		return nil
-	}
-	return metautil.WithRuntimeSection(nil, metautil.Terminal, map[string]any{
-		"terminal_id": terminalID,
-		"data":        text.string(),
-	})
-}
-
-func terminalOutputMetaFromProtocolContent(content []session.ProtocolToolCallContent, displayTerminalID string) map[string]any {
-	displayTerminalID = strings.TrimSpace(displayTerminalID)
-	var terminalID string
-	var text terminalTextAccumulator
-	for _, item := range content {
-		if !strings.EqualFold(strings.TrimSpace(item.Type), "terminal") {
-			continue
-		}
-		if terminalID == "" {
-			terminalID = firstNonEmpty(displayTerminalID, strings.TrimSpace(item.TerminalID))
-		}
-		if part := terminalTextContent(item.Content); part != "" {
-			text.appendPart(part)
-		}
-	}
-	if terminalID == "" || text.len() == 0 {
-		return nil
-	}
-	return metautil.WithRuntimeSection(nil, metautil.Terminal, map[string]any{
-		"terminal_id": terminalID,
-		"data":        text.string(),
-	})
-}
-
-type terminalTextAccumulator struct {
-	buf      strings.Builder
-	lastByte byte
-	hasLast  bool
-}
-
-func (a *terminalTextAccumulator) len() int {
-	if a == nil {
-		return 0
-	}
-	return a.buf.Len()
-}
-
-func (a *terminalTextAccumulator) string() string {
-	if a == nil {
-		return ""
-	}
-	return a.buf.String()
-}
-
-func (a *terminalTextAccumulator) appendPart(part string) {
-	if a == nil || part == "" {
-		return
-	}
-	if a.hasLast && a.lastByte != '\n' && !strings.HasPrefix(part, "\n") {
-		a.buf.WriteByte('\n')
-		a.lastByte = '\n'
-		a.hasLast = true
-	}
-	a.buf.WriteString(part)
-	if n := len(part); n > 0 {
-		a.lastByte = part[n-1]
-		a.hasLast = true
-	}
-}
-
 func terminalTextContent(content any) string {
 	switch typed := content.(type) {
 	case nil:
@@ -139,59 +55,148 @@ func withDisplayTerminal(call ToolCall, name string, args map[string]any) ToolCa
 	if !ok {
 		return call
 	}
-	hasDisplayTerminal := false
-	for i := range call.Content {
-		if strings.EqualFold(strings.TrimSpace(call.Content[i].Type), "terminal") {
-			call.Content[i].TerminalID = terminalID
-			call.Content[i].Content = nil
-			hasDisplayTerminal = true
+	call.Meta = metautil.WithTerminalInfo(call.Meta, terminalID)
+	call.Meta, call.Content = terminalExtensionMetaFromContent(call.Meta, terminalID, call.Content)
+	return call
+}
+
+func withDisplayTerminalUpdate(update ToolCallUpdate, toolCallID string, name string) ToolCallUpdate {
+	terminalID, ok := displaypolicy.DisplayTerminalID(toolCallID, name)
+	if !ok || strings.TrimSpace(terminalID) == "" {
+		return update
+	}
+	update.Meta = metautil.WithTerminalInfo(update.Meta, terminalID)
+	update.Meta, update.Content = terminalExtensionMetaFromContent(update.Meta, terminalID, update.Content)
+	if updateStatusFinal(update.Status) {
+		update.Meta = metautil.WithTerminalExit(update.Meta, terminalID, terminalExitCode(update.RawOutput), nil)
+	}
+	return update
+}
+
+func terminalExtensionMetaFromContent(meta map[string]any, terminalID string, content []ToolCallContent) (map[string]any, []ToolCallContent) {
+	terminalID = strings.TrimSpace(terminalID)
+	if terminalID == "" {
+		return meta, content
+	}
+	if len(content) == 0 {
+		return metautil.WithTerminalInfo(meta, terminalID), []ToolCallContent{terminalAnchorContent(terminalID)}
+	}
+	out := make([]ToolCallContent, 0, len(content))
+	var text strings.Builder
+	for _, item := range content {
+		if !strings.EqualFold(strings.TrimSpace(item.Type), "terminal") {
+			out = append(out, item)
+			continue
+		}
+		if id := strings.TrimSpace(item.TerminalID); id != "" {
+			terminalID = id
+		}
+		if part := terminalTextContent(item.Content); part != "" {
+			text.WriteString(part)
 		}
 	}
-	if !hasDisplayTerminal {
-		call.Content = append(call.Content, ToolCallContent{
-			Type:       "terminal",
-			TerminalID: terminalID,
-		})
+	if terminalID == "" {
+		return meta, out
 	}
-	call.Meta = mergeMeta(call.Meta, displayTerminalInfoMeta(terminalID, name, args))
-	return call
+	meta = metautil.WithTerminalInfo(meta, terminalID)
+	if text.Len() > 0 {
+		meta = metautil.WithTerminalOutput(meta, terminalID, text.String())
+	}
+	out = append(out, terminalAnchorContent(terminalID))
+	return meta, out
+}
+
+func terminalAnchorContent(terminalID string) ToolCallContent {
+	return ToolCallContent{
+		Type:       "terminal",
+		TerminalID: strings.TrimSpace(terminalID),
+	}
+}
+
+func updateStatusFinal(status *string) bool {
+	if status == nil {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(*status)) {
+	case ToolStatusCompleted, ToolStatusFailed, "interrupted", "cancelled", "canceled", "terminated", "timed_out", "timeout":
+		return true
+	default:
+		return false
+	}
+}
+
+func terminalExitCode(raw any) *int {
+	values, ok := raw.(map[string]any)
+	if !ok || len(values) == 0 {
+		return nil
+	}
+	switch typed := values["exit_code"].(type) {
+	case int:
+		code := typed
+		return &code
+	case int64:
+		code := int(typed)
+		return &code
+	case float64:
+		code := int(typed)
+		return &code
+	default:
+		return nil
+	}
 }
 
 func protocolToolNameForUpdate(event *session.Event, update *session.ProtocolUpdate) string {
 	if update != nil {
-		if name := terminalInfoToolName(update.Meta); name != "" {
+		if name := protocolToolNameFromRawInput(update.RawInput); name != "" {
 			return name
 		}
-		if kind := strings.TrimSpace(update.Kind); kind != "" {
-			return kind
+		if name := protocolToolNameFromKind(update.Kind); name != "" {
+			return name
 		}
 		if title := strings.Fields(strings.TrimSpace(update.Title)); len(title) > 0 {
+			if name := protocolToolNameFromKind(title[0]); name != "" {
+				return name
+			}
 			return title[0]
 		}
 	}
 	return ""
 }
 
-func terminalInfoToolName(meta map[string]any) string {
-	info := metautil.RuntimeSection(meta, metautil.Terminal)
-	return firstNonEmpty(
-		displaypolicy.MapString(info, "tool"),
-		displaypolicy.MapString(info, "tool_name"),
-		displaypolicy.MapString(info, "name"),
-	)
+func protocolToolNameFromRawInput(rawInput map[string]any) string {
+	if len(rawInput) == 0 {
+		return ""
+	}
+	if command := displaypolicy.MapString(rawInput, "command"); command != "" {
+		return "RUN_COMMAND"
+	}
+	if agent := displaypolicy.MapString(rawInput, "agent"); agent != "" {
+		return "SPAWN"
+	}
+	if prompt := displaypolicy.MapString(rawInput, "prompt"); prompt != "" {
+		return "SPAWN"
+	}
+	return ""
 }
 
-func displayTerminalInfoMeta(terminalID string, name string, args map[string]any) map[string]any {
-	terminalID = strings.TrimSpace(terminalID)
-	if terminalID == "" {
-		return nil
+func protocolToolNameFromKind(kind string) string {
+	kind = strings.TrimSpace(kind)
+	if kind == "" {
+		return ""
 	}
-	info := map[string]any{"terminal_id": terminalID}
-	if name = strings.TrimSpace(name); name != "" {
-		info["tool"] = name
+	switch strings.ToUpper(kind) {
+	case "RUN_COMMAND", "SPAWN", "TASK", "READ", "LIST", "GLOB", "SEARCH", "WEB_SEARCH", "WEB_FETCH", "RG", "FIND", "WRITE", "PATCH":
+		return strings.ToUpper(kind)
 	}
-	if cwd := firstNonEmpty(displaypolicy.MapString(args, "workdir"), displaypolicy.MapString(args, "cwd")); cwd != "" {
-		info["cwd"] = cwd
+	switch strings.ToLower(kind) {
+	case ToolKindExecute:
+		return "RUN_COMMAND"
+	case ToolKindRead:
+		return "READ"
+	case ToolKindSearch, ToolKindFetch:
+		return "SEARCH"
+	case ToolKindEdit, ToolKindDelete, ToolKindMove:
+		return "PATCH"
 	}
-	return metautil.WithRuntimeSection(nil, metautil.Terminal, info)
+	return kind
 }

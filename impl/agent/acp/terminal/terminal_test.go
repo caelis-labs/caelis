@@ -7,7 +7,6 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/stream"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
 )
 
 func TestLocalTerminalAdapterOutputUsesCumulativeRead(t *testing.T) {
@@ -33,6 +32,39 @@ func TestLocalTerminalAdapterOutputUsesCumulativeRead(t *testing.T) {
 	}
 	if service.readReq.Cursor.Output != 0 {
 		t.Fatalf("Read cursor = %+v, want zero cursor for ACP cumulative output", service.readReq.Cursor)
+	}
+}
+
+func TestLocalTerminalAdapterOutputResolvesDisplayTerminalID(t *testing.T) {
+	t.Parallel()
+
+	service := &recordingTerminalService{
+		snapshot: stream.Snapshot{
+			Frames: []stream.Frame{{Text: "resolved\n"}},
+		},
+	}
+	adapter := LocalTerminalAdapter{
+		Streams: service,
+		ResolveRef: func(sessionID string, terminalID string) (stream.Ref, bool) {
+			if sessionID != "session-1" || terminalID != "call-1" {
+				t.Fatalf("ResolveRef(%q, %q), want session-1/call-1", sessionID, terminalID)
+			}
+			return stream.Ref{SessionID: sessionID, TaskID: "task-1", TerminalID: "runtime-terminal-1"}, true
+		},
+	}
+
+	resp, err := adapter.Output(context.Background(), TerminalOutputRequest{
+		SessionID:  "session-1",
+		TerminalID: "call-1",
+	})
+	if err != nil {
+		t.Fatalf("Output() error = %v", err)
+	}
+	if resp.Output != "resolved\n" {
+		t.Fatalf("Output() = %q, want resolved output", resp.Output)
+	}
+	if service.readReq.Ref.TerminalID != "runtime-terminal-1" || service.readReq.Ref.TaskID != "task-1" {
+		t.Fatalf("Read ref = %#v, want resolved runtime terminal ref", service.readReq.Ref)
 	}
 }
 
@@ -113,10 +145,18 @@ func TestRefFromEventUsesCanonicalProtocolTerminalMetadata(t *testing.T) {
 		Protocol: &session.EventProtocol{
 			Update: &session.ProtocolUpdate{
 				SessionUpdate: "tool_call_update",
-				Meta: metautil.WithRuntimeSection(nil, metautil.Terminal, map[string]any{
-					"task_id":     "task-1",
-					"terminal_id": "terminal-1",
-				}),
+				Content:       []session.ProtocolToolCallContent{{Type: "terminal", TerminalID: "terminal-1"}},
+				Meta: map[string]any{
+					"caelis": map[string]any{
+						"version": 1,
+						"runtime": map[string]any{
+							"task": map[string]any{
+								"task_id":     "task-1",
+								"terminal_id": "terminal-1",
+							},
+						},
+					},
+				},
 			},
 		},
 	}

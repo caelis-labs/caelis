@@ -17,7 +17,6 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/stream"
 	"github.com/OnslaughtSnail/caelis/ports/subagent"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/client"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
 	acpschema "github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
@@ -69,6 +68,8 @@ type childRun struct {
 	agentText      string
 	finalAssistant acpschema.FinalAssistantAccumulator
 	lastTraceText  string
+	streamStarted  bool
+	streamEndsLine bool
 	updatedAt      time.Time
 	running        bool
 	done           chan struct{}
@@ -433,6 +434,7 @@ func (r *Runner) handleUpdate(run *childRun, env client.UpdateEnvelope) {
 	}
 	env.Update = acputil.StripTerminalConsoleFenceUpdate(env.Update)
 	var streamText string
+	streamLineOriented := false
 	var event *session.Event
 	var frame *stream.Frame
 	run.mu.Lock()
@@ -449,6 +451,7 @@ func (r *Runner) handleUpdate(run *childRun, env client.UpdateEnvelope) {
 				}
 			case client.UpdateAgentThought:
 				run.clearFinalAssistantLocked()
+				streamText = childNarrativeTraceText(text)
 				event = run.acpUpdateEvent(env, run.updatedAt)
 			default:
 				break
@@ -458,22 +461,22 @@ func (r *Runner) handleUpdate(run *childRun, env client.UpdateEnvelope) {
 		run.clearFinalAssistantLocked()
 		run.outputPreview = compactPreview(toolActivity(update.Title, update.Kind, update.Status))
 		streamText = run.appendTraceTextLocked(childToolCallTraceText(update))
+		streamLineOriented = streamText != ""
 		event = run.acpUpdateEvent(env, run.updatedAt)
 	case client.ToolCallUpdate:
 		run.clearFinalAssistantLocked()
-		run.outputPreview = compactPreview(toolActivity(derefString(update.Title), derefString(update.Kind), derefString(update.Status)))
-		if text := childToolCallUpdateTerminalText(update); text != "" {
+		if text := run.appendTraceTextLocked(childToolCallUpdateTraceText(update)); text != "" {
 			streamText = text
-		} else {
-			streamText = run.appendTraceTextLocked(childToolCallUpdateTraceText(update))
+			streamLineOriented = true
+			run.outputPreview = compactPreview(toolActivity(derefString(update.Title), derefString(update.Kind), derefString(update.Status)))
 		}
 		event = run.acpUpdateEvent(env, run.updatedAt)
 	case client.PlanUpdate:
 		run.clearFinalAssistantLocked()
 		run.outputPreview = "updating plan"
-		streamText = run.appendTraceTextLocked(childPlanTraceText(update))
 		event = run.acpUpdateEvent(env, run.updatedAt)
 	}
+	streamText = run.prepareStreamTextLocked(streamText, streamLineOriented)
 	if streamText != "" || event != nil {
 		next := stream.Frame{
 			Ref: stream.Ref{
@@ -596,226 +599,16 @@ func (run *childRun) appendTraceTextLocked(text string) string {
 	return text
 }
 
-func childToolCallTraceText(update client.ToolCall) string {
-	line := childToolTraceLine(update.Title, update.Kind, update.RawInput, update.Status)
-	return normalizeTraceLine(line)
-}
-
-func childToolCallUpdateTraceText(update client.ToolCallUpdate) string {
-	line := childToolTraceLine(derefString(update.Title), derefString(update.Kind), update.RawInput, derefString(update.Status))
-	return normalizeTraceLine(line)
-}
-
-func childToolTraceLine(title string, kind string, rawInput any, status string) string {
-	label := childToolLabel(title, kind)
-	if label == "" {
-		label = "Tool"
-	}
-	if summary := childToolInputSummary(rawInput); shouldAppendChildToolSummary(label, summary, title, kind) {
-		label += " " + summary
-	}
-	if suffix := childToolStatusSuffix(status); suffix != "" && !containsFold(label, suffix) {
-		label += " " + suffix
-	}
-	return label
-}
-
-func childToolCallUpdateTerminalText(update client.ToolCallUpdate) string {
-	if text := childTerminalContentText(update.Content); text != "" {
+func (run *childRun) prepareStreamTextLocked(text string, lineOriented bool) string {
+	if run == nil || text == "" {
 		return text
 	}
-	return childTerminalOutputMetaText(update.Meta)
-}
-
-func childTerminalOutputMetaText(meta map[string]any) string {
-	if len(meta) == 0 {
-		return ""
+	if lineOriented && run.streamStarted && !run.streamEndsLine && !strings.HasPrefix(text, "\n") {
+		text = "\n" + text
 	}
-	output := metautil.RuntimeSection(meta, metautil.Terminal)
-	if len(output) == 0 {
-		return ""
-	}
-	return acpschema.ExtractTextValue(output["data"])
-}
-
-func childTerminalContentText(content []client.ToolCallContent) string {
-	var out strings.Builder
-	for _, item := range content {
-		if !strings.EqualFold(strings.TrimSpace(item.Type), "terminal") {
-			continue
-		}
-		out.WriteString(acpschema.ExtractTextValue(item.Content))
-	}
-	return out.String()
-}
-
-func childPlanTraceText(update client.PlanUpdate) string {
-	if len(update.Entries) == 0 {
-		return "Plan updated"
-	}
-	latest := update.Entries[len(update.Entries)-1]
-	content := strings.TrimSpace(latest.Content)
-	status := childToolStatusSuffix(latest.Status)
-	switch {
-	case content != "" && status != "":
-		return "Plan " + content + " " + status
-	case content != "":
-		return "Plan " + content
-	case status != "":
-		return "Plan " + status
-	default:
-		return "Plan updated"
-	}
-}
-
-func childToolLabel(title string, kind string) string {
-	if text := strings.TrimSpace(title); text != "" {
-		return text
-	}
-	kind = strings.TrimSpace(kind)
-	if kind == "" {
-		return ""
-	}
-	switch strings.ToLower(kind) {
-	case "think":
-		return "Think"
-	case "execute":
-		return "Run"
-	}
-	parts := strings.FieldsFunc(kind, func(r rune) bool {
-		return r == '_' || r == '-' || r == ' '
-	})
-	if len(parts) == 0 {
-		return kind
-	}
-	for i, part := range parts {
-		if part == "" {
-			continue
-		}
-		parts[i] = strings.ToUpper(part[:1]) + strings.ToLower(part[1:])
-	}
-	return strings.Join(parts, " ")
-}
-
-func childToolStatusSuffix(status string) string {
-	switch strings.ToLower(strings.TrimSpace(status)) {
-	case "completed", "complete", "succeeded", "success":
-		return "completed"
-	case "failed", "error":
-		return "failed"
-	case "cancelled", "canceled":
-		return "cancelled"
-	case "interrupted":
-		return "interrupted"
-	default:
-		return ""
-	}
-}
-
-func childToolInputSummary(raw any) string {
-	values := acpschema.NormalizeRawMap(raw)
-	if len(values) == 0 {
-		return ""
-	}
-	if query := rawValueString(values, "query"); query != "" {
-		if scope := firstNonEmpty(rawValueString(values, "path"), rawValueString(values, "cwd"), rawValueString(values, "directory")); scope != "" {
-			return truncateTraceText(quoteTraceValue(query)+" in "+scope, 140)
-		}
-		return truncateTraceText(quoteTraceValue(query), 140)
-	}
-	if pattern := rawValueString(values, "pattern"); pattern != "" {
-		if scope := firstNonEmpty(rawValueString(values, "path"), rawValueString(values, "cwd"), rawValueString(values, "directory")); scope != "" {
-			return truncateTraceText(quoteTraceValue(pattern)+" in "+scope, 140)
-		}
-		return truncateTraceText(quoteTraceValue(pattern), 140)
-	}
-	for _, key := range []string{"path", "file_path", "filePath", "uri", "url", "command", "cmd"} {
-		if value := rawValueString(values, key); value != "" {
-			return truncateTraceText(value, 140)
-		}
-	}
-	if prompt := rawValueString(values, "prompt"); prompt != "" {
-		if agent := rawValueString(values, "agent"); agent != "" {
-			return truncateTraceText(agent+": "+prompt, 140)
-		}
-		return truncateTraceText(prompt, 140)
-	}
-	if text := rawValueString(values, "text"); text != "" {
-		return truncateTraceText(text, 140)
-	}
-	return ""
-}
-
-func shouldAppendChildToolSummary(label string, summary string, title string, kind string) bool {
-	summary = strings.TrimSpace(summary)
-	if summary == "" {
-		return false
-	}
-	if containsFold(label, summary) || containsFold(label, strings.Trim(summary, `"`)) {
-		return false
-	}
-	if strings.TrimSpace(title) != "" && strings.EqualFold(strings.TrimSpace(kind), "execute") {
-		return false
-	}
-	return true
-}
-
-func rawValueString(values map[string]any, key string) string {
-	if len(values) == 0 {
-		return ""
-	}
-	value, ok := values[key]
-	if !ok {
-		return ""
-	}
-	text := acpschema.ExtractTextValue(value)
-	if text == "" {
-		text = strings.TrimSpace(fmt.Sprint(value))
-	}
-	if text == "<nil>" {
-		return ""
-	}
-	return strings.TrimSpace(text)
-}
-
-func quoteTraceValue(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return ""
-	}
-	if strings.ContainsAny(value, " \t") && !strings.HasPrefix(value, "\"") {
-		return `"` + value + `"`
-	}
-	return value
-}
-
-func truncateTraceText(text string, limit int) string {
-	text = strings.TrimSpace(text)
-	if text == "" || limit <= 0 {
-		return text
-	}
-	runes := []rune(text)
-	if len(runes) <= limit {
-		return text
-	}
-	if limit <= 1 {
-		return string(runes[:limit])
-	}
-	return strings.TrimSpace(string(runes[:limit-1])) + "..."
-}
-
-func containsFold(text string, part string) bool {
-	text = strings.ToLower(strings.TrimSpace(text))
-	part = strings.ToLower(strings.TrimSpace(part))
-	return text != "" && part != "" && strings.Contains(text, part)
-}
-
-func normalizeTraceLine(text string) string {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return ""
-	}
-	return text + "\n"
+	run.streamStarted = true
+	run.streamEndsLine = strings.HasSuffix(text, "\n") || strings.HasSuffix(text, "\r")
+	return text
 }
 
 func chunkText(chunk client.ContentChunk) string {

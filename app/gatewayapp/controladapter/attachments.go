@@ -146,6 +146,9 @@ func lastDisplayInputRune(s string) (rune, bool) {
 }
 
 func imageContentPartFromAttachment(item Attachment, workspace string) (model.ContentPart, error) {
+	if part, ok, err := imageContentPartFromInlineAttachment(item); ok || err != nil {
+		return part, err
+	}
 	raw := strings.TrimSpace(item.Name)
 	if raw == "" {
 		return model.ContentPart{}, fmt.Errorf("image attachment path is empty")
@@ -180,6 +183,33 @@ func imageContentPartFromAttachment(item Attachment, workspace string) (model.Co
 	}, nil
 }
 
+func imageContentPartFromInlineAttachment(item Attachment) (model.ContentPart, bool, error) {
+	data := strings.TrimSpace(item.Data)
+	if data == "" {
+		return model.ContentPart{}, false, nil
+	}
+	raw, err := base64.StdEncoding.DecodeString(data)
+	if err != nil {
+		return model.ContentPart{}, true, fmt.Errorf("decode inline image attachment %q: %w", strings.TrimSpace(item.Name), err)
+	}
+	if len(raw) == 0 {
+		return model.ContentPart{}, true, fmt.Errorf("inline image attachment %q is empty", strings.TrimSpace(item.Name))
+	}
+	if len(raw) > maxAttachmentImageBytes {
+		return model.ContentPart{}, true, fmt.Errorf("inline image attachment %q is too large (%d bytes, limit %d)", strings.TrimSpace(item.Name), len(raw), maxAttachmentImageBytes)
+	}
+	mimeType, ok := detectSupportedImageMimeType(raw)
+	if !ok {
+		return model.ContentPart{}, true, fmt.Errorf("inline attachment %q is not a supported image (detected %s)", strings.TrimSpace(item.Name), imageMimeType(raw))
+	}
+	return model.ContentPart{
+		Type:     model.ContentPartImage,
+		MimeType: mimeType,
+		Data:     data,
+		FileName: strings.TrimSpace(item.Name),
+	}, true, nil
+}
+
 func cloneAndSortAttachments(items []Attachment, textLen int) []Attachment {
 	if len(items) == 0 {
 		return nil
@@ -187,7 +217,8 @@ func cloneAndSortAttachments(items []Attachment, textLen int) []Attachment {
 	out := make([]Attachment, 0, len(items))
 	for _, item := range items {
 		name := strings.TrimSpace(item.Name)
-		if name == "" {
+		data := strings.TrimSpace(item.Data)
+		if name == "" && data == "" {
 			continue
 		}
 		offset := item.Offset
@@ -197,7 +228,12 @@ func cloneAndSortAttachments(items []Attachment, textLen int) []Attachment {
 		if offset > textLen {
 			offset = textLen
 		}
-		out = append(out, Attachment{Name: name, Offset: offset})
+		out = append(out, Attachment{
+			Name:     name,
+			Offset:   offset,
+			MimeType: strings.TrimSpace(item.MimeType),
+			Data:     data,
+		})
 	}
 	if len(out) <= 1 {
 		return out

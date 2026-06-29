@@ -34,8 +34,9 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 	taskAction := strings.ToLower(strings.TrimSpace(update.Meta.TaskAction))
 	taskInput := strings.TrimSpace(update.Meta.TaskInput)
 	taskTargetKind := strings.ToLower(strings.TrimSpace(update.Meta.TaskTargetKind))
-	semanticName := toolSemanticName(name, toolKind)
-	output := update.Output
+	effectiveName, effectiveToolKind, openIdx := effectiveToolEventIdentity(out, update, toolIndex, name, toolKind)
+	semanticName := toolSemanticName(effectiveName, effectiveToolKind)
+	output := normalizeToolEventOutput(update.Output, effectiveName, effectiveToolKind)
 	if strings.EqualFold(semanticName, "TASK") && taskAction == "cancel" {
 		args = taskCancelArgsWithLinkedCommand(args, out, taskID)
 	}
@@ -52,11 +53,11 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 		}
 		output = ""
 	}
-	if shouldIgnoreStaleTerminalUpdate(out, callID, name, toolKind, update.Final) {
+	if shouldIgnoreStaleTerminalUpdate(out, callID, effectiveName, effectiveToolKind, update.Final) {
 		return out, changed, false
 	}
 	if !update.Final {
-		if i := openToolEventIndexForUpdate(out, update, toolIndex); i >= 0 {
+		if i := openIdx; i >= 0 {
 			ev := &out[i]
 			mergeOpenToolEvent(ev, name, toolKind, args, fullArgs, output, taskID, taskAction, taskInput, taskTargetKind, semanticName)
 			return out, true, false
@@ -126,6 +127,28 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 		collapse = true
 	}
 	return out, true, collapse
+}
+
+func effectiveToolEventIdentity(events []SubagentEvent, update toolEventUpdate, toolIndex map[string]int, name string, toolKind string) (string, string, int) {
+	idx := openToolEventIndexForUpdate(events, update, toolIndex)
+	if idx < 0 {
+		return name, toolKind, idx
+	}
+	existing := events[idx]
+	if strings.TrimSpace(name) == "" {
+		name = strings.TrimSpace(existing.Name)
+	}
+	if strings.TrimSpace(toolKind) == "" {
+		toolKind = strings.TrimSpace(existing.ToolKind)
+	}
+	return name, toolKind, idx
+}
+
+func normalizeToolEventOutput(output string, effectiveName string, effectiveToolKind string) string {
+	if isTerminalPanelToolKind(effectiveName, effectiveToolKind) {
+		return output
+	}
+	return strings.TrimSpace(output)
 }
 
 func openToolEventIndexForUpdate(events []SubagentEvent, update toolEventUpdate, toolIndex map[string]int) int {
@@ -207,13 +230,28 @@ func mergeOpenToolEvent(ev *SubagentEvent, name, toolKind, args, fullArgs, outpu
 	if ev.TaskTargetKind == "" {
 		ev.TaskTargetKind = taskTargetKind
 	}
-	if renderableTextHasContent(output) {
+	if shouldMergeOpenToolOutput(semanticName, output) {
 		if strings.EqualFold(semanticName, "RUN_COMMAND") {
 			ev.Output = mergeCommandStreamChunk(ev.Output, output)
 		} else {
 			ev.Output = mergeSubagentStreamChunk(ev.Output, output)
 		}
 		ev.OutputSynthetic = false
+	}
+}
+
+func shouldMergeOpenToolOutput(semanticName string, output string) bool {
+	if output == "" {
+		return false
+	}
+	if renderableTextHasContent(output) {
+		return true
+	}
+	switch strings.ToUpper(strings.TrimSpace(semanticName)) {
+	case "RUN_COMMAND", "SPAWN":
+		return true
+	default:
+		return false
 	}
 }
 

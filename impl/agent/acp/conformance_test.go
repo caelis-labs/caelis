@@ -91,11 +91,35 @@ func TestRuntimeAgentConformancePromptOrdering(t *testing.T) {
 		t.Fatalf("Prompt() error = %v", err)
 	}
 	kinds := fixture.UpdateKinds(rec.Notifications())
-	if len(kinds) < 2 {
-		t.Fatalf("prompt update kinds = %v, want at least user + assistant", kinds)
+	if slices.Contains(kinds, acp.UpdateUserMessage) {
+		t.Fatalf("prompt update kinds = %v, live session/prompt should not echo user_message_chunk", kinds)
 	}
-	if kinds[0] != acp.UpdateUserMessage {
-		t.Fatalf("first prompt update = %q, want %q", kinds[0], acp.UpdateUserMessage)
+	if !slices.Contains(kinds, acp.UpdateAgentMessage) {
+		t.Fatalf("prompt update kinds = %v, want assistant message update", kinds)
+	}
+}
+
+func TestRuntimeAgentConformancePromptWithImageDoesNotEchoUserMessage(t *testing.T) {
+	agent, _ := newTestRuntimeAgent(t, staticModel{text: "ok"})
+	rec := fixture.NewRecorder(acp.RequestPermissionResponse{
+		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: acp.PermAllowOnce},
+	})
+	resp, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatalf("NewSession() error = %v", err)
+	}
+	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{
+		SessionID: resp.SessionID,
+		Prompt: []json.RawMessage{
+			json.RawMessage(`{"type":"image","mimeType":"image/png","data":"aW1n","name":"icon.png"}`),
+			json.RawMessage(`{"type":"text","text":"这是什么app的图标"}`),
+		},
+	}, rec); err != nil {
+		t.Fatalf("Prompt() error = %v", err)
+	}
+	kinds := fixture.UpdateKinds(rec.Notifications())
+	if slices.Contains(kinds, acp.UpdateUserMessage) {
+		t.Fatalf("prompt update kinds = %v, image prompts should not echo user text back to ACP clients", kinds)
 	}
 	if !slices.Contains(kinds, acp.UpdateAgentMessage) {
 		t.Fatalf("prompt update kinds = %v, want assistant message update", kinds)

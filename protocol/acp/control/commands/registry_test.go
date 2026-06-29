@@ -1,9 +1,12 @@
 package commands
 
 import (
+	"context"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/OnslaughtSnail/caelis/protocol/acp/control"
 )
 
 func TestDefaultNamesExposePlatformCoreCommandsOnly(t *testing.T) {
@@ -38,12 +41,67 @@ func TestDefaultNamesExposePlatformCoreCommandsOnly(t *testing.T) {
 	}
 }
 
+func TestDefaultSharedNamesExcludeTUIPrivateCommands(t *testing.T) {
+	got := DefaultSharedNamesForPlatform("linux")
+	for _, want := range []string{"help", "agent", "subagent", "review", "model", "status", "new", "resume", "compact"} {
+		if !sliceContainsString(got, want) {
+			t.Fatalf("DefaultSharedNamesForPlatform(linux) = %#v, want %q", got, want)
+		}
+	}
+	for _, hidden := range []string{"connect", "plugin", "exit", "quit"} {
+		if sliceContainsString(got, hidden) {
+			t.Fatalf("DefaultSharedNamesForPlatform(linux) = %#v, should exclude TUI-private %q", got, hidden)
+		}
+		if IsSharedKnownForPlatform(hidden, "linux") {
+			t.Fatalf("IsSharedKnownForPlatform(%q, linux) = true, want false", hidden)
+		}
+	}
+}
+
+func TestDefaultACPNamesExposeACPPromptCommandsOnly(t *testing.T) {
+	got := DefaultACPNamesForPlatform("linux")
+	want := []string{"status", "compact", "review"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("DefaultACPNamesForPlatform(linux) = %#v, want %#v", got, want)
+	}
+	for _, hidden := range []string{"help", "agent", "subagent", "model", "new", "resume", "connect", "plugin", "exit", "quit"} {
+		if sliceContainsString(got, hidden) {
+			t.Fatalf("DefaultACPNamesForPlatform(linux) = %#v, should exclude %q", got, hidden)
+		}
+		if IsACPKnownForPlatform(hidden, "linux") {
+			t.Fatalf("IsACPKnownForPlatform(%q, linux) = true, want false", hidden)
+		}
+	}
+}
+
 func TestHelpTextUsesRegistrySpecs(t *testing.T) {
 	got := HelpText([]string{"help", "agent", "review", "custom"})
 	for _, want := range []string{"/help", "Show commands and shortcuts", "/agent <action>", "actions: list", "/review [instructions]", "/custom <prompt>"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("HelpText() = %q, want %q", got, want)
 		}
+	}
+}
+
+func TestAppendRegisteredAgentNamesDedupesAndFilters(t *testing.T) {
+	lister := staticAgentLister{
+		{Name: "Helper"},
+		{Name: "status"},
+		{Name: "helper"},
+		{Name: "  "},
+	}
+	got := AppendRegisteredAgentNames(context.Background(), lister, []string{"status"}, func(name string) bool {
+		return name != "status"
+	})
+	want := []string{"status", "helper"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("AppendRegisteredAgentNames() = %#v, want %#v", got, want)
+	}
+	if !RegisteredAgentNameAllowed(context.Background(), lister, "helper") {
+		t.Fatal("RegisteredAgentNameAllowed(helper) = false, want true")
+	}
+	if AgentNameAllowed([]string{"helper"}, "status", func(name string) bool { return name != "status" }) {
+		t.Fatal("AgentNameAllowed(status) = true despite filter")
 	}
 }
 
@@ -80,6 +138,19 @@ func TestRootArgCandidatesReturnsCopies(t *testing.T) {
 	}
 }
 
+func TestAgentInstallCandidateIsTUIOnly(t *testing.T) {
+	shared, ok := LookupSharedForPlatform("agent", "linux")
+	if !ok {
+		t.Fatal("LookupSharedForPlatform(agent, linux) = false, want true")
+	}
+	if slashCandidatesContainValue(shared.ArgCandidates, "install") {
+		t.Fatalf("shared agent candidates = %#v, should exclude install", shared.ArgCandidates)
+	}
+	if !slashCandidatesContainValue(RootArgCandidatesForPlatform("agent", "linux"), "install") {
+		t.Fatalf("TUI agent candidates = %#v, want install", RootArgCandidatesForPlatform("agent", "linux"))
+	}
+}
+
 func TestSubagentRootCandidatesExcludeRemovedRunAction(t *testing.T) {
 	for _, candidate := range RootArgCandidates("subagent") {
 		if candidate.Value == "run" {
@@ -94,9 +165,24 @@ func TestDoctorRootCandidatesExcludeRemovedFixAction(t *testing.T) {
 	}
 }
 
+type staticAgentLister []control.AgentCandidate
+
+func (l staticAgentLister) ListAgents(context.Context, int) ([]control.AgentCandidate, error) {
+	return append([]control.AgentCandidate(nil), l...), nil
+}
+
 func sliceContainsString(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func slashCandidatesContainValue(values []control.SlashArgCandidate, want string) bool {
+	for _, value := range values {
+		if value.Value == want {
 			return true
 		}
 	}

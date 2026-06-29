@@ -11,6 +11,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/control"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
@@ -48,12 +49,7 @@ func TestHandleACPEventEnvelopeAppliesToolTerminalSequence(t *testing.T) {
 			Kind:          stringPtr(schema.ToolKindExecute),
 			Status:        stringPtr(schema.ToolStatusCompleted),
 			RawInput:      map[string]any{"command": "echo ok"},
-			Content: []schema.ToolCallContent{{
-				Type:       "terminal",
-				TerminalID: "terminal-1",
-				Content:    schema.TextContent{Type: "text", Text: "ok\n"},
-			}},
-			Meta: toolMeta,
+			Meta:          metautil.WithTerminalOutput(toolMeta, "call-1", "ok\n"),
 		},
 	})
 
@@ -67,6 +63,129 @@ func TestHandleACPEventEnvelopeAppliesToolTerminalSequence(t *testing.T) {
 	}
 	if !strings.Contains(event.Output, "ok") {
 		t.Fatalf("tool output = %q, want terminal output", event.Output)
+	}
+}
+
+func TestHandleACPEventEnvelopeDoesNotDuplicateRunningSnapshotAfterTerminalStream(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	kind := schema.ToolKindExecute
+	status := schema.ToolStatusInProgress
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		Update: schema.ToolCall{
+			SessionUpdate: schema.UpdateToolCall,
+			ToolCallID:    "call-1",
+			Title:         "RUN_COMMAND echo ok",
+			Kind:          schema.ToolKindExecute,
+			Status:        schema.ToolStatusInProgress,
+			RawInput:      map[string]any{"command": "echo ok"},
+			Meta:          runningSnapshotTerminalMeta("RUN_COMMAND", "task-1", "terminal-1", "", ""),
+		},
+	})
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo,
+			ToolCallID:    "call-1",
+			Title:         stringPtr("RUN_COMMAND echo ok"),
+			Kind:          &kind,
+			Meta:          runningSnapshotTerminalMeta("RUN_COMMAND", "task-1", "terminal-1", "Step 1/5\nStep 2/5\n", "append"),
+		},
+	})
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo,
+			ToolCallID:    "call-1",
+			Title:         stringPtr("RUN_COMMAND echo ok"),
+			Kind:          &kind,
+			Status:        &status,
+			RawInput:      map[string]any{"command": "echo ok"},
+			RawOutput:     map[string]any{"latest_output": "Step 1/5\nStep 2/5\n", "state": "running"},
+			Meta:          runningSnapshotTerminalMeta("RUN_COMMAND", "task-1", "terminal-1", "Step 1/5\nStep 2/5\n", ""),
+		},
+	})
+
+	block := requireMainACPTurnBlockForTest(t, model)
+	if len(block.Events) != 1 {
+		t.Fatalf("main events = %#v, want one RUN_COMMAND event", block.Events)
+	}
+	if got, want := block.Events[0].Output, "Step 1/5\nStep 2/5\n"; got != want {
+		t.Fatalf("tool output = %q, want live stream output once %q", got, want)
+	}
+}
+
+func TestHandleACPEventEnvelopePreservesSplitTerminalNewlineFrame(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		Update: schema.ToolCall{
+			SessionUpdate: schema.UpdateToolCall,
+			ToolCallID:    "call-1",
+			Title:         "RUN_COMMAND for i in 1 2",
+			Kind:          schema.ToolKindExecute,
+			Status:        schema.ToolStatusInProgress,
+			RawInput:      map[string]any{"command": "for i in 1 2; do echo Step $i/2; done"},
+			Meta:          runningSnapshotTerminalMeta("RUN_COMMAND", "task-1", "terminal-1", "", ""),
+		},
+	})
+	for _, text := range []string{"Step 1/2", "\n", "Step 2/2\n"} {
+		model = applyACPEnvelopeForTest(t, model, terminalMetaStreamEnvelope("call-1", text))
+	}
+
+	block := requireMainACPTurnBlockForTest(t, model)
+	if len(block.Events) != 1 {
+		t.Fatalf("main events = %#v, want one RUN_COMMAND event", block.Events)
+	}
+	if got, want := block.Events[0].Output, "Step 1/2\nStep 2/2\n"; got != want {
+		t.Fatalf("tool output = %q, want %q", got, want)
+	}
+}
+
+func TestHandleACPEventEnvelopePreservesStandardTerminalPatchNewlines(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		Update: schema.ToolCall{
+			SessionUpdate: schema.UpdateToolCall,
+			ToolCallID:    "call-1",
+			Title:         "RUN_COMMAND for i in 1 2",
+			Kind:          schema.ToolKindExecute,
+			Status:        schema.ToolStatusInProgress,
+			RawInput:      map[string]any{"command": "for i in 1 2; do echo Step $i/2; done"},
+			Meta:          runningSnapshotTerminalMeta("RUN_COMMAND", "task-1", "terminal-1", "", ""),
+		},
+	})
+	for _, text := range []string{"[1/2] 14:57:57\n", "[2/2] 14:57:58\n"} {
+		model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+			Kind:      eventstream.KindSessionUpdate,
+			SessionID: "session-1",
+			Update: schema.ToolCallUpdate{
+				SessionUpdate: schema.UpdateToolCallInfo,
+				ToolCallID:    "call-1",
+				Meta:          metautil.WithTerminalOutput(acpToolNameMeta("RUN_COMMAND"), "call-1", text),
+			},
+		})
+	}
+
+	block := requireMainACPTurnBlockForTest(t, model)
+	if len(block.Events) != 1 {
+		t.Fatalf("main events = %#v, want one RUN_COMMAND event", block.Events)
+	}
+	const want = "[1/2] 14:57:57\n[2/2] 14:57:58\n"
+	if got := block.Events[0].Output; got != want {
+		t.Fatalf("tool output = %q, want %q", got, want)
 	}
 }
 
@@ -166,6 +285,118 @@ func TestHandleACPEventEnvelopeAnchorsSubagentOutputToSpawnTool(t *testing.T) {
 	}
 	if event.TaskID != "task-1" || !strings.Contains(event.Output, "subagent found the issue") {
 		t.Fatalf("spawn event = %#v, want anchored subagent output", event)
+	}
+}
+
+func TestHandleACPEventEnvelopeReplacesSpawnStreamWithFinalRuntimeResult(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	spawnMeta := map[string]any{
+		gateway.EventMetaRoot: map[string]any{
+			gateway.EventMetaRuntime: map[string]any{
+				gateway.EventMetaRuntimeTool: map[string]any{gateway.EventMetaRuntimeToolName: "SPAWN"},
+				gateway.EventMetaRuntimeTask: map[string]any{
+					gateway.EventMetaRuntimeTaskID:         "task-1",
+					gateway.EventMetaRuntimeTaskTerminalID: "subagent-task-1",
+				},
+			},
+		},
+	}
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		Update: schema.ToolCall{
+			SessionUpdate: schema.UpdateToolCall,
+			ToolCallID:    "spawn-1",
+			Title:         "SPAWN reviewer: inspect",
+			Kind:          schema.ToolKindExecute,
+			Status:        schema.ToolStatusPending,
+			RawInput:      map[string]any{"agent": "reviewer", "prompt": "inspect"},
+			Meta:          spawnMeta,
+		},
+	})
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo,
+			ToolCallID:    "spawn-1",
+			Meta:          metautil.WithTerminalOutput(spawnMeta, "spawn-1", "LIST /tmp completed"),
+		},
+	})
+	completed := schema.ToolStatusCompleted
+	finalMeta := map[string]any{
+		gateway.EventMetaRoot: map[string]any{
+			gateway.EventMetaRuntime: map[string]any{
+				gateway.EventMetaRuntimeTool: map[string]any{gateway.EventMetaRuntimeToolName: "SPAWN"},
+				gateway.EventMetaRuntimeTask: map[string]any{
+					gateway.EventMetaRuntimeTaskID:         "task-1",
+					gateway.EventMetaRuntimeTaskTerminalID: "subagent-task-1",
+					"running":                              false,
+					"state":                                "completed",
+					"result":                               "Final child result",
+				},
+			},
+		},
+	}
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo,
+			ToolCallID:    "spawn-1",
+			Status:        &completed,
+			Meta:          finalMeta,
+		},
+	})
+
+	block := requireMainACPTurnBlockForTest(t, model)
+	if len(block.Events) != 1 {
+		t.Fatalf("main events = %#v, want one SPAWN tool event", block.Events)
+	}
+	event := block.Events[0]
+	if !event.Done || event.Output != "Final child result" {
+		t.Fatalf("spawn event = %#v, want final result to replace streamed output", event)
+	}
+}
+
+func TestHandleACPEventEnvelopePreservesSpawnTerminalPatchNewlines(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		Update: schema.ToolCall{
+			SessionUpdate: schema.UpdateToolCall,
+			ToolCallID:    "spawn-1",
+			Title:         "SPAWN reviewer: inspect",
+			Kind:          schema.ToolKindExecute,
+			Status:        schema.ToolStatusInProgress,
+			RawInput:      map[string]any{"agent": "reviewer", "prompt": "inspect"},
+			Meta:          runningSnapshotTerminalMeta("SPAWN", "task-1", "terminal-1", "", ""),
+		},
+	})
+	for _, text := range []string{"LIST /tmp completed\n", "READ /tmp/file completed\n"} {
+		model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+			Kind:      eventstream.KindSessionUpdate,
+			SessionID: "session-1",
+			Update: schema.ToolCallUpdate{
+				SessionUpdate: schema.UpdateToolCallInfo,
+				ToolCallID:    "spawn-1",
+				Meta:          metautil.WithTerminalOutput(acpToolNameMeta("SPAWN"), "spawn-1", text),
+			},
+		})
+	}
+
+	block := requireMainACPTurnBlockForTest(t, model)
+	if len(block.Events) != 1 {
+		t.Fatalf("main events = %#v, want one SPAWN event", block.Events)
+	}
+	const want = "LIST /tmp completed\nREAD /tmp/file completed\n"
+	if got := block.Events[0].Output; got != want {
+		t.Fatalf("spawn output = %q, want %q", got, want)
 	}
 }
 

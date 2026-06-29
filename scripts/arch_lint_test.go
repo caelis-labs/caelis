@@ -232,7 +232,7 @@ var meta = map[string]any{
 }
 `
 	rule, subject, _ := semanticRuleForSource(t, "protocol/acp/projector/demo.go", source, modulePath)
-	if !strings.Contains(rule, "terminal metadata") || subject != "terminal_output" {
+	if !strings.Contains(rule, "metautil terminal helpers") || subject != "terminal_output" {
 		t.Fatalf("semantic rule = (%q, %q), want top-level terminal metadata rejection", rule, subject)
 	}
 }

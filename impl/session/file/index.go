@@ -1,6 +1,7 @@
 package file
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,173 +9,150 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/OnslaughtSnail/caelis/ports/session"
+	_ "modernc.org/sqlite"
 )
 
-func (s *Store) listFromDocuments(req session.ListSessionsRequest) (session.SessionList, error) {
-	index, err := s.rebuildSessionIndexFromDocuments()
-	if err != nil {
-		return session.SessionList{}, err
-	}
-	return s.listFromSessionIndex(index, req), nil
-}
-
-func (s *Store) rebuildSessionIndexFromDocuments() (persistedSessionIndex, error) {
-	paths, err := s.listDocumentPaths()
-	if err != nil {
-		return persistedSessionIndex{}, err
-	}
-
-	entries := make([]persistedSessionIndexEntry, 0, len(paths))
-	for _, path := range paths {
-		doc, err := s.readDocumentAt(path)
-		if err != nil {
-			return persistedSessionIndex{}, err
-		}
-		s.pathCache[pathCacheKey(doc.Session.SessionID, doc.Session.WorkspaceKey)] = path
-		entries = append(entries, s.sessionIndexEntry(doc.Session, path))
-	}
-	index := persistedSessionIndex{Sessions: entries}
-	if err := s.writeSessionIndex(index); err != nil {
-		return persistedSessionIndex{}, err
-	}
-	index.Kind = indexKind
-	index.Version = indexVersion
-	index.Sessions = cloneSessionIndexEntries(entries)
-	return index, nil
-}
-
-func (s *Store) listFromSessionIndex(index persistedSessionIndex, req session.ListSessionsRequest) session.SessionList {
-	summaries := make([]session.SessionSummary, 0, len(index.Sessions))
-	appName := strings.TrimSpace(req.AppName)
-	userID := strings.TrimSpace(req.UserID)
-	workspaceKey := strings.TrimSpace(req.WorkspaceKey)
-	for _, entry := range index.Sessions {
-		summary := session.CloneSessionSummaries([]session.SessionSummary{entry.Session})[0]
-		if appName != "" && summary.AppName != appName {
-			continue
-		}
-		if userID != "" && summary.UserID != userID {
-			continue
-		}
-		if workspaceKey != "" && summary.WorkspaceKey != workspaceKey {
-			continue
-		}
-		if path := s.indexEntryPath(entry); path != "" {
-			s.pathCache[pathCacheKey(summary.SessionID, summary.WorkspaceKey)] = path
-		}
-		summaries = append(summaries, summary)
-	}
-	sort.Slice(summaries, func(i, j int) bool {
-		return summaries[i].UpdatedAt.After(summaries[j].UpdatedAt)
-	})
-	if req.Limit > 0 && len(summaries) > req.Limit {
-		summaries = summaries[:req.Limit]
-	}
-	return session.SessionList{Sessions: session.CloneSessionSummaries(summaries)}
+type sessionIndexEntry struct {
+	Session   session.SessionSummary
+	Path      string
+	CreatedAt time.Time
 }
 
 func (s *Store) sessionIndexPath() string {
 	return filepath.Join(s.rootDir, indexFilename)
 }
 
-func (s *Store) readSessionIndex() (persistedSessionIndex, error) {
-	data, err := os.ReadFile(s.sessionIndexPath())
+func (s *Store) listFromSessionIndex(req session.ListSessionsRequest) (session.SessionList, error) {
+	db, err := s.openSessionIndex()
 	if err != nil {
-		return persistedSessionIndex{}, err
+		return session.SessionList{}, err
 	}
-	var index persistedSessionIndex
-	if err := json.Unmarshal(data, &index); err != nil {
-		return persistedSessionIndex{}, fmt.Errorf("impl/session/file: decode session index: %w", err)
+	defer db.Close()
+
+	query := `SELECT session_id, app_name, user_id, workspace_key, cwd, title, metadata_json, path, created_at_ns, updated_at_ns FROM sessions`
+	args := make([]any, 0, 3)
+	clauses := make([]string, 0, 3)
+	if appName := strings.TrimSpace(req.AppName); appName != "" {
+		clauses = append(clauses, "app_name = ?")
+		args = append(args, appName)
 	}
-	if index.Kind != indexKind || index.Version != indexVersion {
-		return persistedSessionIndex{}, fmt.Errorf(
-			"impl/session/file: unsupported session index %q version %d",
-			index.Kind,
-			index.Version,
-		)
+	if userID := strings.TrimSpace(req.UserID); userID != "" {
+		clauses = append(clauses, "user_id = ?")
+		args = append(args, userID)
 	}
-	index.Sessions = cloneSessionIndexEntries(index.Sessions)
-	return index, nil
+	if workspaceKey := strings.TrimSpace(req.WorkspaceKey); workspaceKey != "" {
+		clauses = append(clauses, "workspace_key = ?")
+		args = append(args, workspaceKey)
+	}
+	if len(clauses) > 0 {
+		query += " WHERE " + strings.Join(clauses, " AND ")
+	}
+	query += " ORDER BY updated_at_ns DESC, session_id ASC"
+	if req.Limit > 0 {
+		query += " LIMIT ?"
+		args = append(args, req.Limit)
+	}
+
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		return session.SessionList{}, fmt.Errorf("impl/session/file: list session index: %w", err)
+	}
+	defer rows.Close()
+
+	summaries := make([]session.SessionSummary, 0)
+	for rows.Next() {
+		entry, err := scanSessionIndexEntry(rows)
+		if err != nil {
+			return session.SessionList{}, err
+		}
+		if path := s.indexEntryPath(entry); path != "" {
+			s.pathCache[pathCacheKey(entry.Session.SessionID, entry.Session.WorkspaceKey)] = path
+		}
+		summaries = append(summaries, entry.Session)
+	}
+	if err := rows.Err(); err != nil {
+		return session.SessionList{}, fmt.Errorf("impl/session/file: scan session index: %w", err)
+	}
+	return session.SessionList{Sessions: session.CloneSessionSummaries(summaries)}, nil
 }
 
-func (s *Store) writeSessionIndex(index persistedSessionIndex) error {
-	index.Kind = indexKind
-	index.Version = indexVersion
-	index.Sessions = cloneSessionIndexEntries(index.Sessions)
-	sort.Slice(index.Sessions, func(i, j int) bool {
-		return index.Sessions[i].Session.UpdatedAt.After(index.Sessions[j].Session.UpdatedAt)
-	})
-	data, err := json.Marshal(index)
+func (s *Store) lookupSessionIndex(sessionID string) (sessionIndexEntry, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return sessionIndexEntry{}, session.ErrInvalidSession
+	}
+	db, err := s.openSessionIndex()
 	if err != nil {
-		return fmt.Errorf("impl/session/file: encode session index: %w", err)
+		return sessionIndexEntry{}, err
 	}
-	data = append(data, '\n')
-	path := s.sessionIndexPath()
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
+	defer db.Close()
+
+	row := db.QueryRow(
+		`SELECT session_id, app_name, user_id, workspace_key, cwd, title, metadata_json, path, created_at_ns, updated_at_ns FROM sessions WHERE session_id = ?`,
+		sessionID,
+	)
+	entry, err := scanSessionIndexEntry(row)
 	if err != nil {
-		return err
+		if errors.Is(err, sql.ErrNoRows) {
+			return sessionIndexEntry{}, session.ErrSessionNotFound
+		}
+		return sessionIndexEntry{}, err
 	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		return err
-	}
-	if err := os.Chmod(path, 0o600); err != nil {
-		return err
-	}
-	return syncDir(filepath.Dir(path))
+	return entry, nil
 }
 
 func (s *Store) upsertSessionIndex(sess session.Session, documentPath string) error {
-	index, err := s.readSessionIndex()
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			index = persistedSessionIndex{}
-		} else {
-			index, err = s.rebuildSessionIndexFromDocuments()
-			if err != nil {
-				return err
-			}
-		}
-	}
 	entry := s.sessionIndexEntry(sess, documentPath)
-	key := pathCacheKey(sess.SessionID, sess.WorkspaceKey)
-	replaced := false
-	for i := range index.Sessions {
-		if pathCacheKey(index.Sessions[i].Session.SessionID, index.Sessions[i].Session.WorkspaceKey) == key {
-			index.Sessions[i] = entry
-			replaced = true
-			break
-		}
+	db, err := s.openSessionIndex()
+	if err != nil {
+		return err
 	}
-	if !replaced {
-		index.Sessions = append(index.Sessions, entry)
+	defer db.Close()
+
+	metadata, err := json.Marshal(entry.Session.Metadata)
+	if err != nil {
+		return fmt.Errorf("impl/session/file: encode session index metadata: %w", err)
 	}
-	return s.writeSessionIndex(index)
+	_, err = db.Exec(
+		`INSERT INTO sessions (
+			session_id, app_name, user_id, workspace_key, cwd, title, metadata_json, path, created_at_ns, updated_at_ns
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(session_id) DO UPDATE SET
+			app_name = excluded.app_name,
+			user_id = excluded.user_id,
+			workspace_key = excluded.workspace_key,
+			cwd = excluded.cwd,
+			title = excluded.title,
+			metadata_json = excluded.metadata_json,
+			path = excluded.path,
+			created_at_ns = excluded.created_at_ns,
+			updated_at_ns = excluded.updated_at_ns`,
+		entry.Session.SessionID,
+		entry.Session.AppName,
+		entry.Session.UserID,
+		entry.Session.WorkspaceKey,
+		entry.Session.CWD,
+		entry.Session.Title,
+		string(metadata),
+		entry.Path,
+		timeToUnixNano(entry.CreatedAt),
+		timeToUnixNano(entry.Session.UpdatedAt),
+	)
+	if err != nil {
+		return fmt.Errorf("impl/session/file: upsert session index: %w", err)
+	}
+	return syncDir(filepath.Dir(s.sessionIndexPath()))
 }
 
-func (s *Store) sessionIndexEntry(sess session.Session, documentPath string) persistedSessionIndexEntry {
+func (s *Store) sessionIndexEntry(sess session.Session, documentPath string) sessionIndexEntry {
 	relPath := documentPath
 	if rel, err := filepath.Rel(s.rootDir, documentPath); err == nil && rel != "." && !strings.HasPrefix(rel, "..") {
 		relPath = rel
 	}
-	return persistedSessionIndexEntry{
+	return sessionIndexEntry{
 		Session: session.SessionSummary{
 			SessionRef: sess.SessionRef,
 			CWD:        sess.CWD,
@@ -182,11 +160,12 @@ func (s *Store) sessionIndexEntry(sess session.Session, documentPath string) per
 			Metadata:   session.CloneState(sess.Metadata),
 			UpdatedAt:  sess.UpdatedAt,
 		},
-		Path: relPath,
+		Path:      relPath,
+		CreatedAt: sess.CreatedAt,
 	}
 }
 
-func (s *Store) indexEntryPath(entry persistedSessionIndexEntry) string {
+func (s *Store) indexEntryPath(entry sessionIndexEntry) string {
 	path := strings.TrimSpace(entry.Path)
 	if path == "" {
 		return ""
@@ -197,16 +176,133 @@ func (s *Store) indexEntryPath(entry persistedSessionIndexEntry) string {
 	return filepath.Join(s.rootDir, path)
 }
 
-func cloneSessionIndexEntries(entries []persistedSessionIndexEntry) []persistedSessionIndexEntry {
-	if len(entries) == 0 {
-		return nil
+type sessionIndexScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanSessionIndexEntry(scanner sessionIndexScanner) (sessionIndexEntry, error) {
+	var (
+		sessionID    string
+		appName      string
+		userID       string
+		workspaceKey string
+		cwd          string
+		title        string
+		metadataRaw  string
+		path         string
+		createdAtNS  int64
+		updatedAtNS  int64
+	)
+	if err := scanner.Scan(
+		&sessionID,
+		&appName,
+		&userID,
+		&workspaceKey,
+		&cwd,
+		&title,
+		&metadataRaw,
+		&path,
+		&createdAtNS,
+		&updatedAtNS,
+	); err != nil {
+		return sessionIndexEntry{}, err
 	}
-	out := make([]persistedSessionIndexEntry, len(entries))
-	for i, entry := range entries {
-		out[i] = persistedSessionIndexEntry{
-			Session: session.CloneSessionSummaries([]session.SessionSummary{entry.Session})[0],
-			Path:    strings.TrimSpace(entry.Path),
+	metadata := map[string]any(nil)
+	if strings.TrimSpace(metadataRaw) != "" && strings.TrimSpace(metadataRaw) != "null" {
+		if err := json.Unmarshal([]byte(metadataRaw), &metadata); err != nil {
+			return sessionIndexEntry{}, fmt.Errorf("impl/session/file: decode session index metadata: %w", err)
 		}
 	}
-	return out
+	return sessionIndexEntry{
+		Session: session.SessionSummary{
+			SessionRef: session.NormalizeSessionRef(session.SessionRef{
+				AppName:      appName,
+				UserID:       userID,
+				SessionID:    sessionID,
+				WorkspaceKey: workspaceKey,
+			}),
+			CWD:       strings.TrimSpace(cwd),
+			Title:     strings.TrimSpace(title),
+			Metadata:  session.CloneState(metadata),
+			UpdatedAt: unixNanoToTime(updatedAtNS),
+		},
+		Path:      strings.TrimSpace(path),
+		CreatedAt: unixNanoToTime(createdAtNS),
+	}, nil
+}
+
+func (s *Store) openSessionIndex() (*sql.DB, error) {
+	path := s.sessionIndexPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return nil, err
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		return nil, fmt.Errorf("impl/session/file: open session index: %w", err)
+	}
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec(`PRAGMA busy_timeout = 5000`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("impl/session/file: configure session index busy timeout: %w", err)
+	}
+	if err := ensureSessionIndexSchema(db); err != nil {
+		db.Close()
+		return nil, err
+	}
+	return db, nil
+}
+
+func ensureSessionIndexSchema(db *sql.DB) error {
+	var version int
+	if err := db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		return fmt.Errorf("impl/session/file: read session index version: %w", err)
+	}
+	_, err := db.Exec(`
+CREATE TABLE IF NOT EXISTS sessions (
+	session_id TEXT PRIMARY KEY,
+	app_name TEXT NOT NULL,
+	user_id TEXT NOT NULL,
+	workspace_key TEXT NOT NULL,
+	cwd TEXT NOT NULL,
+	title TEXT NOT NULL,
+	metadata_json TEXT NOT NULL,
+	path TEXT NOT NULL,
+	created_at_ns INTEGER NOT NULL,
+	updated_at_ns INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS sessions_workspace_updated_idx ON sessions(workspace_key, updated_at_ns DESC);
+CREATE INDEX IF NOT EXISTS sessions_app_user_updated_idx ON sessions(app_name, user_id, updated_at_ns DESC);
+`)
+	if err != nil {
+		return fmt.Errorf("impl/session/file: initialize session index: %w", err)
+	}
+	if version != indexVersion {
+		if _, err := db.Exec(`PRAGMA user_version = ` + fmt.Sprint(indexVersion)); err != nil {
+			return fmt.Errorf("impl/session/file: set session index version: %w", err)
+		}
+	}
+	return nil
+}
+
+func timeToUnixNano(t time.Time) int64 {
+	if t.IsZero() {
+		return 0
+	}
+	return t.UTC().UnixNano()
+}
+
+func unixNanoToTime(ns int64) time.Time {
+	if ns == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, ns).UTC()
+}
+
+func sortSessionSummaries(summaries []session.SessionSummary) {
+	sort.Slice(summaries, func(i, j int) bool {
+		if !summaries[i].UpdatedAt.Equal(summaries[j].UpdatedAt) {
+			return summaries[i].UpdatedAt.After(summaries[j].UpdatedAt)
+		}
+		return summaries[i].SessionID < summaries[j].SessionID
+	})
 }

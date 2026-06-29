@@ -2,9 +2,6 @@ package controladapter
 
 import (
 	"context"
-	"encoding/base64"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -57,15 +54,13 @@ func TestAdapterStartReviewSubagentUsesHiddenReviewerProfile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAdapter() error = %v", err)
 	}
-	imageRaw, err := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(activeSession.CWD, "review.png"), imageRaw, 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	turn, err := driver.StartReviewSubagent(ctx, "  inspect the image  ", []Attachment{{Name: "review.png", Offset: len([]rune("inspect the "))}})
+	imageData := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+	turn, err := driver.StartReviewSubagent(ctx, "  inspect the image  ", []Attachment{{
+		Name:     "review.png",
+		Offset:   len([]rune("inspect the ")),
+		MimeType: "image/png",
+		Data:     imageData,
+	}})
 	if err != nil {
 		t.Fatalf("StartReviewSubagent() error = %v", err)
 	}
@@ -88,7 +83,7 @@ func TestAdapterStartReviewSubagentUsesHiddenReviewerProfile(t *testing.T) {
 	}
 	if parts := gw.promptReqs[0].ContentParts; len(parts) != 3 ||
 		parts[0].Type != model.ContentPartText || !strings.HasSuffix(parts[0].Text, "inspect the ") ||
-		parts[1].Type != model.ContentPartImage || parts[1].FileName != "review.png" ||
+		parts[1].Type != model.ContentPartImage || parts[1].FileName != "review.png" || parts[1].MimeType != "image/png" || parts[1].Data != imageData ||
 		parts[2].Type != model.ContentPartText || parts[2].Text != "image" {
 		t.Fatalf("review prompt content parts = %#v, want prefixed text/image/text", parts)
 	}

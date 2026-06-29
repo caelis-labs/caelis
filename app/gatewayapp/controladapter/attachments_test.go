@@ -44,6 +44,27 @@ func TestContentPartsFromAttachmentsReadsImageFiles(t *testing.T) {
 	}
 }
 
+func TestContentPartsFromAttachmentsReadsInlineImageData(t *testing.T) {
+	t.Parallel()
+
+	imageData := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+	parts, err := contentPartsFromAttachments([]Attachment{{
+		Name:     "inline.png",
+		MimeType: "image/png",
+		Data:     imageData,
+	}}, t.TempDir())
+	if err != nil {
+		t.Fatalf("contentPartsFromAttachments(inline data) error = %v", err)
+	}
+	if len(parts) != 1 {
+		t.Fatalf("len(parts) = %d, want 1", len(parts))
+	}
+	part := parts[0]
+	if part.Type != model.ContentPartImage || part.MimeType != "image/png" || part.Data != imageData || part.FileName != "inline.png" {
+		t.Fatalf("part = %#v, want inline png image", part)
+	}
+}
+
 func TestContentPartsFromSubmissionInterleavesTextAndImages(t *testing.T) {
 	t.Parallel()
 

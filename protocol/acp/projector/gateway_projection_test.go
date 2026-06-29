@@ -3,8 +3,10 @@ package projector
 import (
 	"testing"
 
+	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
@@ -44,8 +46,12 @@ func TestProjectSessionEventEnvelopeProjectsToolUpdate(t *testing.T) {
 	if update.ToolCallID != "call-1" || stringPtrValue(update.Kind) != "RUN_COMMAND" || stringPtrValue(update.Status) != schema.ToolStatusInProgress {
 		t.Fatalf("tool update = %#v, want RUN_COMMAND in_progress call-1", update)
 	}
-	if len(update.Content) != 1 || update.Content[0].Type != "terminal" {
-		t.Fatalf("content = %#v, want terminal content", update.Content)
+	assertTerminalAnchor(t, update.Content, "call-1")
+	if info, ok := metautil.TerminalInfo(update.Meta); !ok || info.TerminalID != "call-1" {
+		t.Fatalf("terminal_info = %#v, want call-1", update.Meta)
+	}
+	if output, ok := metautil.TerminalOutput(update.Meta); !ok || output.TerminalID != "call-1" || output.Data != "ok\n" {
+		t.Fatalf("terminal_output = %#v, want ok output", update.Meta)
 	}
 }
 
@@ -113,6 +119,78 @@ func TestProjectSessionEventEnvelopeProjectsUsageAsACPUsageUpdate(t *testing.T) 
 	usage := eventstream.UsageSnapshotFromUpdate(update)
 	if usage == nil || usage.PromptTokens != 12 || usage.CachedInputTokens != 3 || usage.CompletionTokens != 5 || usage.ReasoningTokens != 2 || usage.TotalTokens != 17 {
 		t.Fatalf("usage snapshot = %#v", usage)
+	}
+}
+
+func TestProjectSessionEventEnvelopeKeepsUserMessagesForGatewayConsumers(t *testing.T) {
+	user := model.NewTextMessage(model.RoleUser, "hello")
+	events := ProjectSessionEventEnvelope(eventstream.Envelope{
+		SessionID: "session-1",
+		HandleID:  "handle-1",
+		RunID:     "run-1",
+		Scope:     eventstream.ScopeMain,
+		ScopeID:   "session-1",
+	}, &session.Event{
+		ID:        "event-user-1",
+		SessionID: "session-1",
+		Type:      session.EventTypeUser,
+		Text:      "hello",
+		Message:   &user,
+	})
+	if len(events) != 1 {
+		t.Fatalf("ProjectSessionEventEnvelope(user) returned %d events, want 1: %#v", len(events), events)
+	}
+	chunk, ok := events[0].Update.(schema.ContentChunk)
+	if !ok || chunk.SessionUpdate != schema.UpdateUserMessage {
+		t.Fatalf("update = %#v, want user_message_chunk for gateway/TUI consumers", events[0].Update)
+	}
+	content, ok := chunk.Content.(schema.TextContent)
+	if !ok || content.Text != "hello" {
+		t.Fatalf("content = %#v, want hello text", chunk.Content)
+	}
+}
+
+func TestProjectSessionEventEnvelopeKeepsLiveAndReplayNarrativeAligned(t *testing.T) {
+	message := model.MessageFromAssistantParts("I will run pwd.", "Need inspect cwd.", []model.ToolCall{{
+		ID:   "call-1",
+		Name: "RUN_COMMAND",
+		Args: `{"command":"pwd"}`,
+	}})
+	event := &session.Event{
+		ID:        "event-1",
+		SessionID: "session-1",
+		Type:      session.EventTypeToolCall,
+		Message:   &message,
+	}
+
+	live := ProjectSessionEventEnvelope(eventstream.Envelope{
+		SessionID: "session-1",
+		HandleID:  "handle-1",
+		RunID:     "run-1",
+		Scope:     eventstream.ScopeMain,
+		ScopeID:   "session-1",
+	}, event)
+	if len(live) != 3 {
+		t.Fatalf("live projection produced %d events, want thought, message, and tool call: %#v", len(live), live)
+	}
+	if eventstream.UpdateType(live[0].Update) != schema.UpdateAgentThought ||
+		eventstream.UpdateType(live[1].Update) != schema.UpdateAgentMessage ||
+		eventstream.UpdateType(live[2].Update) != schema.UpdateToolCall {
+		t.Fatalf("live projection = %#v, want narrative chunks followed by tool call", live)
+	}
+
+	replay := ProjectSessionEventEnvelope(eventstream.Envelope{
+		SessionID: "session-1",
+		Scope:     eventstream.ScopeMain,
+		ScopeID:   "session-1",
+	}, event)
+	if len(replay) != len(live) {
+		t.Fatalf("replay projection produced %d events, want %d: %#v", len(replay), len(live), replay)
+	}
+	for i := range live {
+		if eventstream.UpdateType(replay[i].Update) != eventstream.UpdateType(live[i].Update) {
+			t.Fatalf("projection[%d] live=%q replay=%q", i, eventstream.UpdateType(live[i].Update), eventstream.UpdateType(replay[i].Update))
+		}
 	}
 }
 

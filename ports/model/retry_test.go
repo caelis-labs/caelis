@@ -345,10 +345,11 @@ func TestWithRetryRetriesAfterEmptyEventEmission(t *testing.T) {
 	}
 }
 
-func TestWithRetryReturnsNonRetryableErrorUnwrapped(t *testing.T) {
+func TestWithRetryRetriesProviderBadRequestUntilExhausted(t *testing.T) {
 	t.Parallel()
 
-	inner := &retryTestLLM{errs: []error{errors.New("model: http status 400 body={\"error\":\"bad request\"}")}}
+	err := errors.New("model: http status 400 body={\"error\":\"bad request\"}")
+	inner := &retryTestLLM{errs: []error{err, err, err}}
 	llm := WithRetry(inner, RetryConfig{MaxRetries: 2, BaseDelay: time.Nanosecond, MaxDelay: time.Nanosecond})
 
 	var gotErr error
@@ -358,12 +359,12 @@ func TestWithRetryReturnsNonRetryableErrorUnwrapped(t *testing.T) {
 		}
 	}
 	if gotErr == nil {
-		t.Fatal("Generate() error = nil, want non-retryable error")
+		t.Fatal("Generate() error = nil, want exhausted retry error")
 	}
-	if got, want := gotErr.Error(), "model: http status 400 body={\"error\":\"bad request\"}"; got != want {
-		t.Fatalf("error = %q, want %q", got, want)
+	if got := gotErr.Error(); !strings.Contains(got, "failed after 2 retries") || !strings.Contains(got, "http status 400") {
+		t.Fatalf("error = %q, want exhausted retry wrapping 400", got)
 	}
-	if got, want := inner.calls, 1; got != want {
+	if got, want := inner.calls, 3; got != want {
 		t.Fatalf("calls = %d, want %d", got, want)
 	}
 }
@@ -374,6 +375,20 @@ func TestIsRetryableLLMErrorTreatsStreamFirstEventTimeoutAsTransient(t *testing.
 	err := errors.New("providers: stream first event timeout after 5m0s")
 	if !IsRetryableLLMError(err) {
 		t.Fatalf("IsRetryableLLMError(%q) = false, want true", err)
+	}
+}
+
+func TestIsRetryableLLMErrorRetriesBadRequestButNotOverflow(t *testing.T) {
+	t.Parallel()
+
+	badRequest := errors.New("model: http status 400 body={\"error\":{\"message\":\"Multimodal data is corrupted or cannot be processed.\"}}")
+	if !IsRetryableLLMError(badRequest) {
+		t.Fatalf("IsRetryableLLMError(%q) = false, want true", badRequest)
+	}
+
+	overflow := &ContextOverflowError{Cause: errors.New("model: http status 400 body={\"error\":\"context length exceeded\"}")}
+	if IsRetryableLLMError(overflow) {
+		t.Fatalf("IsRetryableLLMError(%q) = true, want false for compaction overflow", overflow)
 	}
 }
 

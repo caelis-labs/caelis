@@ -3,7 +3,6 @@ package gatewayapp
 import (
 	"fmt"
 
-	"github.com/OnslaughtSnail/caelis/impl/agent/acp"
 	"github.com/OnslaughtSnail/caelis/ports/agent"
 	"github.com/OnslaughtSnail/caelis/ports/assembly"
 	"github.com/OnslaughtSnail/caelis/ports/gateway"
@@ -48,23 +47,4 @@ func (s *Stack) ACPAgentDependencies() (ACPAgentDependencies, error) {
 		return ACPAgentDependencies{}, fmt.Errorf("gatewayapp: gateway resolver is unavailable")
 	}
 	return deps, nil
-}
-
-func (s *Stack) ACPAgent() (*acp.RuntimeAgent, error) {
-	deps, err := s.ACPAgentDependencies()
-	if err != nil {
-		return nil, err
-	}
-	return acp.NewGatewayAgent(acp.GatewayAgentConfig{
-		Runtime:          deps.Runtime,
-		Sessions:         deps.Sessions,
-		Resolver:         deps.Resolver,
-		ApprovalReviewer: deps.ApprovalReviewer,
-		Assembly:         deps.Assembly,
-		AppName:          deps.AppName,
-		UserID:           deps.UserID,
-		SurfaceBuilder: func(req acp.SurfaceRequest) acp.Surface {
-			return s.ACPSurface(req.Modes, req.UseFallbackModes, req.Config)
-		},
-	})
 }

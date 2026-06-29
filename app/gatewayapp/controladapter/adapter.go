@@ -40,11 +40,51 @@ func NewAdapter(ctx context.Context, stack *RuntimeStack, preferredSessionID str
 	if stack == nil {
 		return nil, fmt.Errorf("app/gatewayapp/controladapter: stack is required")
 	}
-	key := firstNonEmpty(strings.TrimSpace(bindingKey), "cli-tui")
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	driver := &Adapter{
+	driver := newAdapterForStack(stack, bindingKey, modelText)
+	if preferredSessionID = strings.TrimSpace(preferredSessionID); preferredSessionID != "" {
+		if driver.stack.Session.StartFn == nil {
+			return nil, missingRuntimeDependency("start session")
+		}
+		activeSession, err := driver.stack.Session.StartFn(ctx, preferredSessionID, driver.bindingKey)
+		if err != nil {
+			return nil, err
+		}
+		driver.bindSession(ctx, activeSession)
+	}
+	return driver, nil
+}
+
+// NewAdapterForSession constructs an adapter bound to an already resolved
+// session. It is used by ACP prompt routing, where the session lookup has
+// already applied the client workspace and must not be repeated via StartFn.
+func NewAdapterForSession(ctx context.Context, stack *RuntimeStack, activeSession session.Session, bindingKey string, modelText string) (*Adapter, error) {
+	if stack == nil {
+		return nil, fmt.Errorf("app/gatewayapp/controladapter: stack is required")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	activeSession = session.CloneSession(activeSession)
+	if strings.TrimSpace(activeSession.SessionID) == "" {
+		return nil, fmt.Errorf("app/gatewayapp/controladapter: session id is required")
+	}
+	if activeSession.AppName == "" {
+		activeSession.AppName = strings.TrimSpace(stack.Session.AppName)
+	}
+	if activeSession.UserID == "" {
+		activeSession.UserID = strings.TrimSpace(stack.Session.UserID)
+	}
+	driver := newAdapterForStack(stack, bindingKey, modelText)
+	driver.bindSession(ctx, activeSession)
+	return driver, nil
+}
+
+func newAdapterForStack(stack *RuntimeStack, bindingKey string, modelText string) *Adapter {
+	key := firstNonEmpty(strings.TrimSpace(bindingKey), "cli-tui")
+	return &Adapter{
 		stack:               stack,
 		bindingKey:          key,
 		defaultModelText:    strings.TrimSpace(modelText),
@@ -55,19 +95,13 @@ func NewAdapter(ctx context.Context, stack *RuntimeStack, preferredSessionID str
 		sandboxType:         "auto",
 		streamSubscriptions: map[string]struct{}{},
 	}
-	if preferredSessionID = strings.TrimSpace(preferredSessionID); preferredSessionID != "" {
-		if driver.stack.Session.StartFn == nil {
-			return nil, missingRuntimeDependency("start session")
-		}
-		activeSession, err := driver.stack.Session.StartFn(ctx, preferredSessionID, driver.bindingKey)
-		if err != nil {
-			return nil, err
-		}
-		driver.session = activeSession
-		driver.hasSession = true
-		driver.refreshSessionDisplay(ctx, activeSession)
-	}
-	return driver, nil
+}
+
+func (d *Adapter) bindSession(ctx context.Context, activeSession session.Session) {
+	activeSession = session.CloneSession(activeSession)
+	d.session = activeSession
+	d.hasSession = true
+	d.refreshSessionDisplay(ctx, activeSession)
 }
 
 func (d *Adapter) gateway() (GatewayService, error) {
@@ -157,9 +191,10 @@ func streamRequestFromACPEvent(env eventstream.Envelope) (acpprojector.StreamReq
 		metaString(meta, gateway.EventMetaRoot, gateway.EventMetaRuntime, "task", "task_id"),
 		metaString(meta, gateway.EventMetaRoot, gateway.EventMetaRuntime, "task", "internal_task_id"),
 	)
+	displayTerminalID := acpTerminalID(update.Content)
 	terminalID := firstNonEmpty(
 		metaString(meta, gateway.EventMetaRoot, gateway.EventMetaRuntime, "task", "terminal_id"),
-		acpTerminalID(update.Content),
+		displayTerminalID,
 	)
 	if taskID == "" && terminalID == "" {
 		return acpprojector.StreamRequest{}, false
@@ -187,6 +222,7 @@ func streamRequestFromACPEvent(env eventstream.Envelope) (acpprojector.StreamReq
 			TaskID:     taskID,
 			TerminalID: terminalID,
 		},
+		DisplayTerminalID: firstNonEmpty(displayTerminalID, strings.TrimSpace(update.ToolCallID)),
 		Cursor: stream.Cursor{
 			Output: int64FromAny(metaAny(meta, gateway.EventMetaRoot, gateway.EventMetaRuntime, "task", "output_cursor")),
 		},
@@ -334,6 +370,11 @@ func anyString(value any) string {
 func (d *Adapter) WorkspaceDir() string {
 	if d == nil || d.stack == nil {
 		return ""
+	}
+	if activeSession, ok := d.currentSession(); ok {
+		if cwd := strings.TrimSpace(activeSession.CWD); cwd != "" {
+			return cwd
+		}
 	}
 	return strings.TrimSpace(d.stack.Session.Workspace.CWD)
 }

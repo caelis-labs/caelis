@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
+	"github.com/OnslaughtSnail/caelis/app/gatewayapp/acpagent"
 	"github.com/OnslaughtSnail/caelis/impl/model/providers"
 	"github.com/OnslaughtSnail/caelis/internal/acpagentenv"
 	"github.com/OnslaughtSnail/caelis/ports/assembly"
@@ -173,7 +174,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 		return err
 	}
 	if acpSubcommand {
-		agent, err := stack.ACPAgent()
+		agent, err := acpagent.NewFromStack(stack)
 		if err != nil {
 			return err
 		}

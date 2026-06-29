@@ -2,6 +2,7 @@ package transcript
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -75,14 +76,29 @@ func ProjectACPEventToEvents(env eventstream.Envelope, surface SurfaceProjector)
 		}
 	case eventstream.KindLifecycle:
 		if env.Lifecycle != nil && strings.TrimSpace(env.Lifecycle.State) != "" {
+			state := strings.TrimSpace(env.Lifecycle.State)
 			out = append(out, Event{
 				Kind:       EventLifecycle,
 				Scope:      scope,
 				ScopeID:    scopeID,
 				Actor:      strings.TrimSpace(env.Actor),
 				OccurredAt: occurredAt,
-				State:      strings.TrimSpace(env.Lifecycle.State),
+				Meta:       meta,
+				State:      state,
 			})
+			if notice := attemptResetNoticeText(state, meta); notice != "" {
+				out = append(out, Event{
+					Kind:          EventNotice,
+					Scope:         scope,
+					ScopeID:       scopeID,
+					Actor:         strings.TrimSpace(env.Actor),
+					OccurredAt:    occurredAt,
+					Meta:          meta,
+					NarrativeKind: NarrativeNotice,
+					Text:          notice,
+					Final:         true,
+				})
+			}
 		}
 	case eventstream.KindApprovalReview:
 		if event, ok := projectACPApprovalReview(env, scope, scopeID, surface); ok {
@@ -96,6 +112,27 @@ func ProjectACPEventToEvents(env eventstream.Envelope, surface SurfaceProjector)
 		out[i].MirroredToParentTool = mirroredToParentTool
 	}
 	return out
+}
+
+func attemptResetNoticeText(state string, meta map[string]any) string {
+	if !strings.EqualFold(strings.TrimSpace(state), "attempt_reset") {
+		return ""
+	}
+	if !MetaBool(meta, "caelis", "runtime", "attempt_reset", "retrying") {
+		return ""
+	}
+	attempt := MetaInt(meta, "caelis", "runtime", "attempt_reset", "attempt")
+	cause := MetaString(meta, "caelis", "runtime", "attempt_reset", "cause")
+	switch {
+	case attempt > 0 && cause != "":
+		return fmt.Sprintf("! model request failed, retrying (attempt %d): %s", attempt, cause)
+	case attempt > 0:
+		return fmt.Sprintf("! model request failed, retrying (attempt %d)", attempt)
+	case cause != "":
+		return "! model request failed, retrying: " + cause
+	default:
+		return "! model request failed, retrying"
+	}
 }
 
 func projectACPSessionUpdate(env eventstream.Envelope, meta map[string]any, scope Scope, scopeID string, surface SurfaceProjector) []Event {
@@ -397,6 +434,42 @@ func MetaBool(meta map[string]any, path ...string) bool {
 	}
 	value, _ := current.(bool)
 	return value
+}
+
+func MetaInt(meta map[string]any, path ...string) int {
+	if len(meta) == 0 {
+		return 0
+	}
+	var current any = meta
+	for _, key := range path {
+		mapped, ok := current.(map[string]any)
+		if !ok {
+			return 0
+		}
+		current = mapped[strings.TrimSpace(key)]
+	}
+	switch value := current.(type) {
+	case int:
+		return value
+	case int64:
+		return int(value)
+	case float64:
+		return int(value)
+	case json.Number:
+		parsed, err := value.Int64()
+		if err != nil {
+			return 0
+		}
+		return int(parsed)
+	case string:
+		var parsed int
+		if _, err := fmt.Sscanf(strings.TrimSpace(value), "%d", &parsed); err != nil {
+			return 0
+		}
+		return parsed
+	default:
+		return 0
+	}
 }
 
 func MergeMeta(base map[string]any, overlay map[string]any) map[string]any {

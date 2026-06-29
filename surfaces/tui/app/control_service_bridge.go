@@ -15,6 +15,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/OnslaughtSnail/caelis/protocol/acp/control"
+	controlcommands "github.com/OnslaughtSnail/caelis/protocol/acp/control/commands"
+	controlprompt "github.com/OnslaughtSnail/caelis/protocol/acp/control/prompt"
 	"github.com/OnslaughtSnail/caelis/surfaces/statusbar"
 )
 
@@ -447,14 +449,38 @@ func executeLineViaControlServiceWithContextResult(ctx context.Context, service 
 	if sender != nil {
 		ctx = sender.bindContext(ctx)
 	}
-	text := strings.TrimSpace(sub.Text)
 
-	// Slash command dispatch.
-	if isDispatchableSlashCommandWithContext(ctx, service, text) {
-		return dispatchSlashCommandWithContextResult(ctx, service, sender, text, sub.Attachments)
+	router := controlprompt.NewRouter(controlprompt.Config{
+		Service: service,
+		CommandNames: func(ctx context.Context, service control.Service) []string {
+			return appendAgentSlashCommandsWithContext(ctx, service, DefaultCommands())
+		},
+		PrivateSlashHandler: func(ctx context.Context, req controlprompt.PrivateSlashRequest) (controlprompt.Result, bool, error) {
+			result, ok := executeTUIPrivateSlashCommandWithContext(ctx, service, sender, req.Command, req.Args)
+			if !ok {
+				return controlprompt.Result{}, false, nil
+			}
+			return controlprompt.Result{
+				Handled:             true,
+				SuppressTurnDivider: result.completion.SuppressTurnDivider,
+				PrivateResult:       result,
+			}, true, nil
+		},
+	})
+	promptResult, err := router.Route(ctx, controlprompt.Request{Submission: control.Submission{
+		Text:        sub.Text,
+		DisplayText: "",
+		Mode:        control.SubmissionMode(sub.Mode),
+		Attachments: convertAttachments(sub.Attachments),
+	}})
+	if err != nil {
+		return executeLineResult{completion: TaskResultMsg{Err: err}}
 	}
-	if strings.HasPrefix(text, "@") {
-		return dispatchMentionCommandWithContextResult(ctx, service, sender, text, sub.Attachments)
+	if privateResult, ok := promptResult.PrivateResult.(executeLineResult); ok {
+		return privateResult
+	}
+	if promptResult.Handled {
+		return executeControlPromptResult(ctx, service, sender, promptResult)
 	}
 
 	// Normal submission -> control.Service.Submit -> streaming events.
@@ -483,6 +509,36 @@ func executeLineViaControlServiceWithContextResult(ctx context.Context, service 
 	return executeLineResult{completion: TaskResultMsg{}}
 }
 
+func executeControlPromptResult(ctx context.Context, service control.Service, sender *ProgramSender, result controlprompt.Result) executeLineResult {
+	send := sender.sendFunc()
+	if result.ClearHistory && send != nil {
+		send(ClearHistoryMsg{})
+	}
+	if len(result.ReplayEvents) > 0 && send != nil {
+		if transcriptEvents := projectResumeReplayEvents(result.ReplayEvents); len(transcriptEvents) > 0 {
+			send(TranscriptEventsMsg{Events: transcriptEvents})
+		}
+	}
+	for _, event := range result.Events {
+		if send != nil {
+			send(event)
+		}
+	}
+	if result.StatusUpdate != nil {
+		sendStatusUpdate(send, *result.StatusUpdate)
+	}
+	if result.RefreshCommands {
+		refreshAgentSlashCommandsViaSendWithContext(ctx, service, send)
+	}
+	if result.Turn != nil {
+		return runSubagentTurn(ctx, service, sender, result.Turn)
+	}
+	if result.ContinueRunning {
+		return executeLineResult{completion: TaskResultMsg{ContinueRunning: true, SuppressTurnDivider: true}}
+	}
+	return executeLineResult{completion: TaskResultMsg{SuppressTurnDivider: result.SuppressTurnDivider}}
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -502,30 +558,10 @@ func appendAgentSlashCommandsWithContext(ctx context.Context, service control.Se
 	if len(commands) == 0 {
 		commands = DefaultCommands()
 	}
-	if status, activeACP := activeACPAgentStatus(ctx, service); activeACP {
+	if status, activeACP := control.ActiveACPStatus(ctx, service); activeACP {
 		return acpSlashCommands(status)
 	}
-	out := append([]string(nil), commands...)
-	seen := map[string]struct{}{}
-	for _, command := range out {
-		seen[strings.ToLower(strings.TrimSpace(command))] = struct{}{}
-	}
-	agents, err := service.ListAgents(ctx, 200)
-	if err != nil {
-		return out
-	}
-	for _, agent := range agents {
-		name := strings.ToLower(strings.TrimSpace(agent.Name))
-		if name == "" {
-			continue
-		}
-		if _, exists := seen[name]; exists {
-			continue
-		}
-		out = append(out, name)
-		seen[name] = struct{}{}
-	}
-	return out
+	return controlcommands.AppendRegisteredAgentNames(ctx, service, commands)
 }
 
 func acpSlashCommands(status control.AgentStatusSnapshot) []string {

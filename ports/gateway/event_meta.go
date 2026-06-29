@@ -19,7 +19,10 @@ const (
 	EventMetaRuntimeToolStatusDetail = "status_detail"
 	EventMetaRuntimeTargetKind       = "target_kind"
 	EventMetaRuntimeTargetID         = "target_id"
-	EventMetaRuntimeTerminal         = "terminal"
+
+	EventMetaRuntimeTask           = "task"
+	EventMetaRuntimeTaskID         = "task_id"
+	EventMetaRuntimeTaskTerminalID = "terminal_id"
 
 	EventMetaRuntimeStream                     = "stream"
 	EventMetaRuntimeStreamMode                 = "mode"

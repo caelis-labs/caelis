@@ -253,7 +253,7 @@ func eventProtocolAliasRule(rel string, file *ast.File, fset *token.FileSet, mod
 }
 
 func topLevelTerminalMetaRule(rel string, file *ast.File, fset *token.FileSet) (string, string, int) {
-	if file == nil || strings.HasSuffix(rel, "_test.go") || rel == "scripts/arch_lint.go" {
+	if file == nil || strings.HasSuffix(rel, "_test.go") || rel == "scripts/arch_lint.go" || rel == "protocol/acp/metautil/terminal.go" {
 		return "", "", 0
 	}
 	var subject string
@@ -271,7 +271,7 @@ func topLevelTerminalMetaRule(rel string, file *ast.File, fset *token.FileSet) (
 			return true
 		}
 		switch value {
-		case "terminal_info", "terminal_output":
+		case "terminal_info", "terminal_output", "terminal_exit":
 			subject = value
 			line = fset.Position(lit.Pos()).Line
 			return false
@@ -282,7 +282,7 @@ func topLevelTerminalMetaRule(rel string, file *ast.File, fset *token.FileSet) (
 	if subject == "" {
 		return "", "", 0
 	}
-	return "new code must store terminal metadata under _meta.caelis.runtime.terminal instead of top-level terminal_info/terminal_output", subject, line
+	return "production code must use protocol/acp/metautil terminal helpers instead of raw top-level terminal metadata keys", subject, line
 }
 
 func eventProtocolAliasVars(file *ast.File, sessionNames map[string]bool) map[string]bool {

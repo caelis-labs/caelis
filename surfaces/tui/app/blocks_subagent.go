@@ -165,7 +165,37 @@ func mergeCommandStreamChunk(existing string, incoming string) string {
 	if overlap := commandLineOverlap(existing, incoming); overlap > 0 {
 		return existing + incoming[overlap:]
 	}
+	if overlap := commandCumulativePrefixOverlap(existing, incoming); overlap > 0 {
+		return existing + incoming[overlap:]
+	}
 	return existing + incoming
+}
+
+func commandCumulativePrefixOverlap(existing string, incoming string) int {
+	common := commonPrefixBytes(existing, incoming)
+	if common == 0 || common >= len(incoming) {
+		return 0
+	}
+	prefix := incoming[:common]
+	if !strings.Contains(prefix, "\n") {
+		return 0
+	}
+	if !strings.HasSuffix(prefix, "\n") {
+		if idx := strings.LastIndex(prefix, "\n"); idx >= 0 {
+			return idx + 1
+		}
+		return 0
+	}
+	return common
+}
+
+func commonPrefixBytes(left string, right string) int {
+	max := min(len(left), len(right))
+	idx := 0
+	for idx < max && left[idx] == right[idx] {
+		idx++
+	}
+	return idx
 }
 
 func appendDeltaStreamChunk(existing string, incoming string) string {

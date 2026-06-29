@@ -952,8 +952,9 @@ func TestBeginTurnLoadsSessionResolvesIntentRunsRuntimeAndPublishesEvents(t *tes
 			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
 		},
 	}
+	msg := model.NewTextMessage(model.RoleAssistant, "ok")
 	runner := &recordingRunner{
-		events: []*session.Event{{ID: "e1", Type: session.EventTypeAssistant, Text: "ok"}},
+		events: []*session.Event{{ID: "e1", Type: session.EventTypeAssistant, Message: &msg, Text: "ok"}},
 	}
 	rt := &recordingRuntime{
 		session: activeSession,

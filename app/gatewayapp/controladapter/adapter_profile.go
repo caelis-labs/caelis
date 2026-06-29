@@ -94,10 +94,16 @@ func shiftControlAttachments(items []Attachment, offset int) []Attachment {
 	out := make([]Attachment, 0, len(items))
 	for _, item := range items {
 		name := strings.TrimSpace(item.Name)
-		if name == "" {
+		data := strings.TrimSpace(item.Data)
+		if name == "" && data == "" {
 			continue
 		}
-		out = append(out, Attachment{Name: name, Offset: max(item.Offset, 0) + offset})
+		out = append(out, Attachment{
+			Name:     name,
+			Offset:   max(item.Offset, 0) + offset,
+			MimeType: strings.TrimSpace(item.MimeType),
+			Data:     data,
+		})
 	}
 	return out
 }

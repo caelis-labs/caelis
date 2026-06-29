@@ -9,6 +9,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/stream"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
@@ -75,9 +76,10 @@ func TestProjectStreamFrameBuildsStandardToolUpdateEnvelope(t *testing.T) {
 		Ref: stream.Ref{
 			SessionID:  "session-1",
 			TaskID:     "task-1",
-			TerminalID: "terminal-1",
+			TerminalID: "internal-terminal-1",
 		},
-		Scope: gateway.EventScopeMain,
+		DisplayTerminalID: "call-1",
+		Scope:             gateway.EventScopeMain,
 	}
 
 	events := ProjectStreamFrame(req, stream.Frame{
@@ -98,18 +100,86 @@ func TestProjectStreamFrameBuildsStandardToolUpdateEnvelope(t *testing.T) {
 	if !ok {
 		t.Fatalf("env.Update = %#v, want ToolCallUpdate", env.Update)
 	}
-	if update.ToolCallID != "call-1" || stringPtrValue(update.Kind) != "RUN_COMMAND" || stringPtrValue(update.Status) != string(gateway.ToolStatusRunning) {
-		t.Fatalf("tool update = %#v, want running RUN_COMMAND call-1", update)
+	if update.ToolCallID != "call-1" {
+		t.Fatalf("tool update = %#v, want call-1", update)
 	}
-	if len(update.Content) != 1 || update.Content[0].Type != "terminal" || update.Content[0].TerminalID != "terminal-1" || schema.ExtractTextValue(update.Content[0].Content) != "ok\n" {
-		t.Fatalf("content = %#v, want terminal output content", update.Content)
+	if update.Kind != nil || update.Title != nil || update.RawInput != nil {
+		t.Fatalf("tool update = %#v, stream append should not repeat stable tool fields", update)
+	}
+	if got := stringPtrValue(update.Status); got != schema.ToolStatusInProgress {
+		t.Fatalf("status = %q, want in_progress for terminal append", got)
+	}
+	assertTerminalAnchor(t, update.Content, "call-1")
+	if got := toolTerminalOutputText(t, update); got != "ok\n" {
+		t.Fatalf("terminal output = %q, want ok output", got)
 	}
 	if !gateway.EventMetaBool(update.Meta, gateway.EventMetaRoot, gateway.EventMetaTransient) {
 		t.Fatalf("update.Meta = %#v, want transient stream update", update.Meta)
 	}
 }
 
-func TestProjectStreamFrameDoesNotAppendReasoningTextToParentTool(t *testing.T) {
+func TestProjectStreamFramePreservesSplitNewlineFrame(t *testing.T) {
+	t.Parallel()
+
+	req := StreamRequest{
+		SessionRef: session.SessionRef{SessionID: "session-1"},
+		CallID:     "call-1",
+		ToolName:   "RUN_COMMAND",
+		RawInput:   map[string]any{"command": "echo lines"},
+		Ref:        stream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "terminal-1"},
+		Scope:      gateway.EventScopeMain,
+	}
+	var projected strings.Builder
+	for _, frame := range []stream.Frame{
+		{Ref: req.Ref, Text: "Step 1/2", Cursor: stream.Cursor{Output: 8}, Running: true},
+		{Ref: req.Ref, Text: "\n", Cursor: stream.Cursor{Output: 9}, Running: true},
+		{Ref: req.Ref, Text: "Step 2/2\n", Cursor: stream.Cursor{Output: 18}, Running: true},
+	} {
+		events := ProjectStreamFrame(req, frame)
+		if len(events) != 1 {
+			t.Fatalf("ProjectStreamFrame(%q) returned %d events: %#v", frame.Text, len(events), events)
+		}
+		update, ok := events[0].Update.(schema.ToolCallUpdate)
+		if !ok {
+			t.Fatalf("Update = %T, want ToolCallUpdate", events[0].Update)
+		}
+		projected.WriteString(toolTerminalOutputText(t, update))
+	}
+	if got, want := projected.String(), "Step 1/2\nStep 2/2\n"; got != want {
+		t.Fatalf("projected terminal output = %q, want %q", got, want)
+	}
+}
+
+func TestProjectStreamFrameFinalDoesNotRepeatStreamedOutput(t *testing.T) {
+	t.Parallel()
+
+	req := StreamRequest{
+		SessionRef: session.SessionRef{SessionID: "root-session"},
+		CallID:     "command-1",
+		ToolName:   "RUN_COMMAND",
+		RawInput:   map[string]any{"command": "printf ok"},
+		Ref:        stream.Ref{SessionID: "root-session", TaskID: "task-1", TerminalID: "terminal-1"},
+		Scope:      gateway.EventScopeMain,
+	}
+	events := ProjectStreamFrame(req, stream.Frame{
+		Ref:     req.Ref,
+		Text:    "ok\n",
+		Cursor:  stream.Cursor{Output: 3},
+		Closed:  true,
+		Running: false,
+		State:   "completed",
+	})
+	if len(events) != 1 {
+		t.Fatalf("ProjectStreamFrame(RUN_COMMAND closed) returned %d events: %#v", len(events), events)
+	}
+	update := requireToolUpdate(t, events[0])
+	if got := stringPtrValue(update.Status); got != schema.ToolStatusCompleted {
+		t.Fatalf("status = %q, want completed", got)
+	}
+	assertTerminalAnchor(t, update.Content, "command-1")
+}
+
+func TestProjectStreamFrameAppendsSubagentReasoningToParentTerminal(t *testing.T) {
 	t.Parallel()
 
 	req := StreamRequest{
@@ -132,10 +202,15 @@ func TestProjectStreamFrameDoesNotAppendReasoningTextToParentTool(t *testing.T) 
 			},
 		},
 	})
-	for _, env := range events {
-		if eventstream.UpdateType(env.Update) == schema.UpdateToolCallInfo {
-			t.Fatalf("reasoning frame events = %#v, should not append parent tool update", events)
-		}
+	if len(events) != 1 {
+		t.Fatalf("reasoning frame events = %#v, want one parent tool update", events)
+	}
+	update := requireToolUpdate(t, events[0])
+	if update.ToolCallID != "spawn-1" {
+		t.Fatalf("tool update = %#v, want parent spawn call", update)
+	}
+	if got := toolTerminalOutputText(t, update); got != "The user wants me to inspect files." {
+		t.Fatalf("terminal output = %q, want reasoning text", got)
 	}
 
 	events = ProjectStreamFrame(req, stream.Frame{
@@ -146,7 +221,7 @@ func TestProjectStreamFrameDoesNotAppendReasoningTextToParentTool(t *testing.T) 
 	if len(events) != 1 {
 		t.Fatalf("stdout frame events = %#v, want one parent tool update", events)
 	}
-	update := requireToolUpdate(t, events[0])
+	update = requireToolUpdate(t, events[0])
 	if update.ToolCallID != "spawn-1" {
 		t.Fatalf("tool update = %#v, want parent spawn call", update)
 	}
@@ -173,34 +248,35 @@ func TestProjectStreamFrameUsesNoOutputPlaceholderForSilentCommandFailure(t *tes
 		t.Fatalf("ProjectStreamFrame(RUN_COMMAND closed) returned %d events: %#v", len(events), events)
 	}
 	update := requireToolUpdate(t, events[0])
-	if stringPtrValue(update.Status) != string(gateway.ToolStatusFailed) {
+	if stringPtrValue(update.Status) != schema.ToolStatusFailed {
 		t.Fatalf("update = %+v, want failed RUN_COMMAND result", update)
 	}
-	if strings.Contains(toolContentText(t, update.Content), "exit 1") {
-		t.Fatalf("content = %#v, should not expose exit code as terminal output", update.Content)
+	if strings.Contains(toolTerminalOutputText(t, update), "exit 1") {
+		t.Fatalf("meta = %#v, should not expose exit code as terminal output", update.Meta)
 	}
-	if got := toolContentText(t, update.Content); got != "(no output)" {
-		t.Fatalf("content text = %q, want no-output placeholder", got)
+	if got := toolTerminalOutputText(t, update); got != "(no output)" {
+		t.Fatalf("terminal output = %q, want no-output placeholder", got)
 	}
 }
 
-func TestProjectStreamFramePreservesEmbeddedSubagentEventAndToolUpdate(t *testing.T) {
+func TestProjectStreamFrameProjectsSubagentStreamToParentTerminalOnly(t *testing.T) {
 	t.Parallel()
 
 	req := StreamRequest{
-		HandleID:   "handle-1",
-		RunID:      "run-1",
-		TurnID:     "turn-1",
-		SessionRef: session.SessionRef{SessionID: "root-session"},
-		CallID:     "spawn-call-1",
-		ToolName:   "SPAWN",
-		RawInput:   map[string]any{"agent": "self", "prompt": "inspect"},
-		Ref:        stream.Ref{SessionID: "root-session", TaskID: "jack"},
-		Origin:     &gateway.EventOrigin{Scope: gateway.EventScopeMain, ScopeID: "root-session", Actor: "assistant"},
-		Scope:      gateway.EventScopeMain,
+		HandleID:          "handle-1",
+		RunID:             "run-1",
+		TurnID:            "turn-1",
+		SessionRef:        session.SessionRef{SessionID: "root-session"},
+		CallID:            "spawn-call-1",
+		ToolName:          "SPAWN",
+		RawInput:          map[string]any{"agent": "self", "prompt": "inspect"},
+		Ref:               stream.Ref{SessionID: "root-session", TaskID: "jack", TerminalID: "subagent-jack"},
+		DisplayTerminalID: "spawn-call-1",
+		Origin:            &gateway.EventOrigin{Scope: gateway.EventScopeMain, ScopeID: "root-session", Actor: "assistant"},
+		Scope:             gateway.EventScopeMain,
 	}
 	frame := stream.Frame{
-		Ref:       req.Ref,
+		Ref:       stream.Ref{SessionID: "root-session", TaskID: "jack", TerminalID: "subagent-jack-turn-1"},
 		Text:      "The user wants a file",
 		Cursor:    stream.Cursor{Output: 21, Events: 1},
 		Running:   true,
@@ -223,23 +299,87 @@ func TestProjectStreamFramePreservesEmbeddedSubagentEventAndToolUpdate(t *testin
 	}
 
 	events := ProjectStreamFrame(req, frame)
-	if len(events) != 2 {
-		t.Fatalf("ProjectStreamFrame() returned %d events, want embedded child event and tool update: %#v", len(events), events)
+	if len(events) != 1 {
+		t.Fatalf("ProjectStreamFrame() returned %d events, want parent terminal update only: %#v", len(events), events)
 	}
-	child := events[0]
-	if child.Kind != eventstream.KindSessionUpdate || child.Scope != eventstream.ScopeSubagent || child.ScopeID != "jack" {
-		t.Fatalf("child envelope = %#v, want subagent session/update keyed by SPAWN task", child)
+	if eventstream.UpdateType(events[0].Update) != schema.UpdateToolCallInfo {
+		t.Fatalf("event update = %#v, want tool_call_update", events[0].Update)
 	}
-	chunk, ok := child.Update.(schema.ContentChunk)
-	if !ok || schema.ExtractTextValue(chunk.Content) != "The user wants a file" {
-		t.Fatalf("child update = %#v, want assistant content chunk", child.Update)
+	tool := requireToolUpdate(t, events[0])
+	if got := toolTerminalOutputText(t, tool); got != "The user wants a file" {
+		t.Fatalf("terminal output = %q, want original stream text", got)
 	}
-	if !gateway.EventMetaBool(child.Meta, gateway.EventMetaRoot, gateway.EventMetaRuntime, gateway.EventMetaRuntimeStream, gateway.EventMetaRuntimeStreamMirroredToParentTool) {
-		t.Fatalf("child meta = %#v, want mirrored_to_parent_tool marker when parent SPAWN update is also projected", child.Meta)
+	assertTerminalAnchor(t, tool.Content, "spawn-call-1")
+	assertStreamTerminalInfo(t, tool.Meta, "spawn-call-1")
+}
+
+func TestProjectStreamFrameProjectsSubagentFinalToParentTerminal(t *testing.T) {
+	t.Parallel()
+
+	req := StreamRequest{
+		SessionRef:        session.SessionRef{SessionID: "root-session"},
+		CallID:            "spawn-call-1",
+		ToolName:          "SPAWN",
+		RawInput:          map[string]any{"agent": "self", "prompt": "inspect"},
+		Ref:               stream.Ref{SessionID: "root-session", TaskID: "jack", TerminalID: "subagent-jack"},
+		DisplayTerminalID: "spawn-call-1",
+		Scope:             gateway.EventScopeMain,
 	}
-	tool := requireToolUpdate(t, events[1])
-	if got := toolContentText(t, tool.Content); got != "The user wants a file" {
-		t.Fatalf("tool content = %q, want original stream text", got)
+	events := ProjectStreamFrame(req, stream.Frame{
+		Ref:     stream.Ref{SessionID: "root-session", TaskID: "jack", TerminalID: "subagent-jack-turn-1"},
+		Text:    "Final child result\n",
+		Closed:  true,
+		Running: false,
+		State:   "completed",
+	})
+	if len(events) != 1 {
+		t.Fatalf("ProjectStreamFrame() returned %d events, want parent terminal final update: %#v", len(events), events)
+	}
+	tool := requireToolUpdate(t, events[0])
+	if stringPtrValue(tool.Status) != schema.ToolStatusCompleted {
+		t.Fatalf("tool update = %#v, want completed SPAWN", tool)
+	}
+	if got := toolTerminalOutputText(t, tool); got != "Final child result" {
+		t.Fatalf("terminal output = %q, want cleaned final result", got)
+	}
+	assertTerminalAnchor(t, tool.Content, "spawn-call-1")
+	assertStreamTerminalInfo(t, tool.Meta, "spawn-call-1")
+}
+
+func TestProjectStreamFrameSubagentFinalWithStreamKeepsResultWithoutTerminalReplay(t *testing.T) {
+	t.Parallel()
+
+	req := StreamRequest{
+		SessionRef:        session.SessionRef{SessionID: "root-session"},
+		CallID:            "spawn-call-1",
+		ToolName:          "SPAWN",
+		RawInput:          map[string]any{"agent": "self", "prompt": "inspect"},
+		Ref:               stream.Ref{SessionID: "root-session", TaskID: "jack", TerminalID: "subagent-jack"},
+		DisplayTerminalID: "spawn-call-1",
+		Scope:             gateway.EventScopeMain,
+	}
+	events := ProjectStreamFrame(req, stream.Frame{
+		Ref:     stream.Ref{SessionID: "root-session", TaskID: "jack", TerminalID: "subagent-jack-turn-1"},
+		Text:    "### Final child result\n",
+		Cursor:  stream.Cursor{Output: 19},
+		Closed:  true,
+		Running: false,
+		State:   "completed",
+	})
+	if len(events) != 1 {
+		t.Fatalf("ProjectStreamFrame() returned %d events, want parent terminal final update: %#v", len(events), events)
+	}
+	tool := requireToolUpdate(t, events[0])
+	if stringPtrValue(tool.Status) != schema.ToolStatusCompleted {
+		t.Fatalf("tool update = %#v, want completed SPAWN", tool)
+	}
+	assertTerminalAnchor(t, tool.Content, "spawn-call-1")
+	taskMeta := runtimeTaskMeta(tool.Meta)
+	if got := taskMeta["result"]; got != "Final child result" {
+		t.Fatalf("runtime task result = %#v, want cleaned final child result; meta=%#v", got, tool.Meta)
+	}
+	if got := taskMeta["running"]; got != false {
+		t.Fatalf("runtime task running = %#v, want false; meta=%#v", got, tool.Meta)
 	}
 }
 
@@ -296,10 +436,26 @@ func requireToolUpdate(t *testing.T, env eventstream.Envelope) schema.ToolCallUp
 	return update
 }
 
-func toolContentText(t *testing.T, content []schema.ToolCallContent) string {
+func toolTerminalOutputText(t *testing.T, update schema.ToolCallUpdate) string {
 	t.Helper()
-	if len(content) != 1 {
-		t.Fatalf("content = %#v, want one item", content)
+	output, ok := metautil.TerminalOutput(update.Meta)
+	if !ok {
+		t.Fatalf("meta = %#v, want terminal_output", update.Meta)
 	}
-	return schema.ExtractTextValue(content[0].Content)
+	return output.Data
+}
+
+func assertStreamTerminalInfo(t *testing.T, meta map[string]any, terminalID string) {
+	t.Helper()
+	info, ok := metautil.TerminalInfo(meta)
+	if !ok || info.TerminalID != terminalID {
+		t.Fatalf("terminal_info = %#v, want %q", meta, terminalID)
+	}
+}
+
+func runtimeTaskMeta(meta map[string]any) map[string]any {
+	caelis, _ := meta[gateway.EventMetaRoot].(map[string]any)
+	runtimeMeta, _ := caelis[gateway.EventMetaRuntime].(map[string]any)
+	taskMeta, _ := runtimeMeta[gateway.EventMetaRuntimeTask].(map[string]any)
+	return taskMeta
 }

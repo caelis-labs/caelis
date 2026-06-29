@@ -17,7 +17,6 @@ import (
 	"github.com/OnslaughtSnail/caelis/protocol/acp/client"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/jsonrpc"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
@@ -148,21 +147,19 @@ func TestNormalizeACPUpdateEventPreservesToolUpdateMeta(t *testing.T) {
 		ToolCallID:    "call-1",
 		Kind:          testStringPtr("execute"),
 		Status:        testStringPtr("in_progress"),
-		Meta: metautil.WithRuntimeSection(nil, metautil.Terminal, map[string]any{
-			"terminal_id": "call-1",
-			"data":        "line\n",
-		}),
+		Content: []client.ToolCallContent{{
+			Type:       "terminal",
+			TerminalID: "call-1",
+			Content:    client.TextContent{Type: "text", Text: "line\n"},
+		}},
 	})
 
 	if event == nil || event.Protocol == nil || event.Protocol.Update == nil {
 		t.Fatalf("event = %#v, want protocol update", event)
 	}
-	output := metautil.RuntimeSection(event.Protocol.Update.Meta, metautil.Terminal)
-	if len(output) == 0 {
-		t.Fatalf("Protocol.Update.Meta = %#v, want caelis.runtime.terminal", event.Protocol.Update.Meta)
-	}
-	if output["terminal_id"] != "call-1" || output["data"] != "line\n" {
-		t.Fatalf("caelis.runtime.terminal = %#v, want preserved ACP meta", output)
+	content := session.ProtocolToolCallContentOf(event.Protocol.Update)
+	if len(content) != 1 || content[0].TerminalID != "call-1" || schema.ExtractTextValue(content[0].Content) != "line\n" {
+		t.Fatalf("Protocol.Update.Content = %#v, want terminal content", event.Protocol.Update.Content)
 	}
 }
 
@@ -1884,10 +1881,6 @@ func TestControllerRunStripsConsoleFenceAtUpdateIngress(t *testing.T) {
 				TerminalID: "call-1",
 				Content:    client.TextContent{Type: "text", Text: fenced},
 			}},
-			Meta: metautil.WithRuntimeSection(nil, metautil.Terminal, map[string]any{
-				"terminal_id": "call-1",
-				"data":        fenced,
-			}),
 		},
 	})
 	handle.finish()
@@ -1914,13 +1907,6 @@ func TestControllerRunStripsConsoleFenceAtUpdateIngress(t *testing.T) {
 	if got := schema.ExtractTextValue(canonicalContent[0].Content); got != want {
 		t.Fatalf("canonical terminal content = %q, want %q", got, want)
 	}
-	canonicalOutput := metautil.RuntimeSection(canonicalUpdate.Meta, metautil.Terminal)
-	if len(canonicalOutput) == 0 {
-		t.Fatalf("canonical meta = %#v, want caelis.runtime.terminal", canonicalUpdate.Meta)
-	}
-	if got := canonicalOutput["data"]; got != fenced {
-		t.Fatalf("canonical caelis.runtime.terminal data = %#v, want original %q", got, fenced)
-	}
 	acpUpdate, ok := events[0].ACP.Update.(schema.ToolCallUpdate)
 	if !ok {
 		t.Fatalf("ACP update = %T, want ToolCallUpdate", events[0].ACP.Update)
@@ -1931,13 +1917,6 @@ func TestControllerRunStripsConsoleFenceAtUpdateIngress(t *testing.T) {
 	}
 	if got := schema.ExtractTextValue(acpUpdate.Content[0].Content); got != want {
 		t.Fatalf("ACP terminal content = %q, want %q", got, want)
-	}
-	acpOutput := metautil.RuntimeSection(acpUpdate.Meta, metautil.Terminal)
-	if len(acpOutput) == 0 {
-		t.Fatalf("ACP meta = %#v, want caelis.runtime.terminal", acpUpdate.Meta)
-	}
-	if got := acpOutput["data"]; got != fenced {
-		t.Fatalf("ACP caelis.runtime.terminal data = %#v, want original %q", got, fenced)
 	}
 }
 

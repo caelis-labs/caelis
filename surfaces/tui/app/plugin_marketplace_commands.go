@@ -8,10 +8,11 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/OnslaughtSnail/caelis/protocol/acp/control"
+	controlprompt "github.com/OnslaughtSnail/caelis/protocol/acp/control/prompt"
 )
 
 func slashPluginMarketplaceWithContext(ctx context.Context, service control.PluginService, send func(tea.Msg), args string) TaskResultMsg {
-	action, rest := splitFirst(strings.TrimSpace(args))
+	action, rest, _ := controlprompt.ParseFirst(strings.TrimSpace(args))
 	switch action {
 	case "add":
 		source := strings.TrimSpace(rest)

@@ -9,6 +9,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/internal/evalharness"
 	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
@@ -63,11 +64,7 @@ func TestRegressionACPEventstreamToolCallFrame120x32(t *testing.T) {
 				Status:        stringPtr(schema.ToolStatusCompleted),
 				RawInput:      map[string]any{"command": "go test ./surfaces/tui/app"},
 				RawOutput:     map[string]any{"exit_code": 0},
-				Content: []schema.ToolCallContent{{
-					Type:    "terminal",
-					Content: schema.TextContent{Type: "text", Text: "ok\nPASS\n"},
-				}},
-				Meta: acpToolNameMeta("RUN_COMMAND"),
+				Meta:          metautil.WithTerminalOutput(acpToolNameMeta("RUN_COMMAND"), "call-1", "ok\nPASS\n"),
 			},
 		},
 		{

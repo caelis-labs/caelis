@@ -2,23 +2,41 @@ package metautil
 
 import "testing"
 
-func TestRuntimeSectionReadsCanonicalTerminalFields(t *testing.T) {
+func TestRuntimeSectionReadsCanonicalToolFields(t *testing.T) {
 	t.Parallel()
 
-	meta := WithRuntimeSection(nil, Terminal, map[string]any{
-		"terminal_id": "call-1",
-		"tool":        "RUN_COMMAND",
-		"data":        "line 1\n",
+	meta := WithRuntimeSection(nil, "tool", map[string]any{
+		"name":   "RUN_COMMAND",
+		"status": "completed",
 	})
 
-	got := RuntimeSection(meta, Terminal)
-	if got["terminal_id"] != "call-1" {
-		t.Fatalf("terminal_id = %#v, want canonical terminal id", got["terminal_id"])
+	got := RuntimeSection(meta, "tool")
+	if got["name"] != "RUN_COMMAND" {
+		t.Fatalf("name = %#v, want canonical tool name", got["name"])
 	}
-	if got["tool"] != "RUN_COMMAND" {
-		t.Fatalf("tool = %#v, want canonical tool", got["tool"])
+	if got["status"] != "completed" {
+		t.Fatalf("status = %#v, want completed", got["status"])
 	}
-	if got["data"] != "line 1\n" {
-		t.Fatalf("data = %#v, want terminal output data", got["data"])
+}
+
+func TestTerminalMetaRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	meta := WithTerminalInfo(nil, "call-1")
+	meta = WithTerminalOutput(meta, "call-1", "line 1\n")
+	code := 0
+	meta = WithTerminalExit(meta, "call-1", &code, nil)
+
+	info, ok := TerminalInfo(meta)
+	if !ok || info.TerminalID != "call-1" {
+		t.Fatalf("TerminalInfo() = %+v, %v; want call-1", info, ok)
+	}
+	output, ok := TerminalOutput(meta)
+	if !ok || output.TerminalID != "call-1" || output.Data != "line 1\n" {
+		t.Fatalf("TerminalOutput() = %+v, %v; want line output", output, ok)
+	}
+	exit, ok := TerminalExit(meta)
+	if !ok || exit.TerminalID != "call-1" || exit.ExitCode == nil || *exit.ExitCode != 0 {
+		t.Fatalf("TerminalExit() = %+v, %v; want exit code 0", exit, ok)
 	}
 }

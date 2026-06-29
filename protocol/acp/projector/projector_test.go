@@ -133,25 +133,50 @@ func TestEventProjectorRemapsBuiltinTerminalContentToDisplayID(t *testing.T) {
 	if !ok {
 		t.Fatalf("update = %T, want ToolCallUpdate", updates[0])
 	}
-	if len(update.Content) != 1 {
-		t.Fatalf("content = %#v, want one terminal content item", update.Content)
+	assertTerminalAnchor(t, update.Content, "call-1")
+	assertTerminalInfo(t, update.Meta, "call-1")
+	assertTerminalOutput(t, update.Meta, "call-1", "line\n")
+}
+
+func assertTerminalAnchor(t *testing.T, content []ToolCallContent, terminalID string) {
+	t.Helper()
+	if len(content) != 1 {
+		t.Fatalf("content = %#v, want one terminal anchor", content)
 	}
-	if got := update.Content[0].TerminalID; got != "call-1" {
-		t.Fatalf("terminal id = %q, want display tool call id", got)
+	item := content[0]
+	if item.Type != "terminal" || item.TerminalID != terminalID {
+		t.Fatalf("content = %#v, want terminal anchor %q", content, terminalID)
 	}
-	if update.Content[0].Content != nil {
-		t.Fatalf("terminal content body = %#v, want output carried in _meta", update.Content[0].Content)
-	}
-	output := metautil.RuntimeSection(update.Meta, metautil.Terminal)
-	if len(output) == 0 {
-		t.Fatalf("meta = %#v, want caelis.runtime.terminal", update.Meta)
-	}
-	if output["terminal_id"] != "call-1" || output["data"] != "line\n" {
-		t.Fatalf("caelis.runtime.terminal = %#v, want display id call-1 and line output", output)
+	if text := terminalTextContent(item.Content); text != "" {
+		t.Fatalf("terminal anchor content text = %q, want empty", text)
 	}
 }
 
-func TestEventProjectorSeparatesMultipleTerminalContentItems(t *testing.T) {
+func assertTerminalInfo(t *testing.T, meta map[string]any, terminalID string) {
+	t.Helper()
+	info, ok := metautil.TerminalInfo(meta)
+	if !ok || info.TerminalID != terminalID {
+		t.Fatalf("terminal_info = %#v, want terminal id %q", meta, terminalID)
+	}
+}
+
+func assertTerminalOutput(t *testing.T, meta map[string]any, terminalID string, text string) {
+	t.Helper()
+	output, ok := metautil.TerminalOutput(meta)
+	if !ok || output.TerminalID != terminalID || output.Data != text {
+		t.Fatalf("terminal_output = %#v, want terminal id %q text %q", meta, terminalID, text)
+	}
+}
+
+func assertTerminalExit(t *testing.T, meta map[string]any, terminalID string) {
+	t.Helper()
+	exit, ok := metautil.TerminalExit(meta)
+	if !ok || exit.TerminalID != terminalID {
+		t.Fatalf("terminal_exit = %#v, want terminal id %q", meta, terminalID)
+	}
+}
+
+func TestEventProjectorConcatenatesMultipleTerminalContentItems(t *testing.T) {
 	updates, err := (EventProjector{}).ProjectEvent(&session.Event{
 		SessionID: "session-1",
 		Type:      session.EventTypeToolResult,
@@ -179,23 +204,10 @@ func TestEventProjectorSeparatesMultipleTerminalContentItems(t *testing.T) {
 	if !ok {
 		t.Fatalf("update = %T, want ToolCallUpdate", updates[0])
 	}
-	output := metautil.RuntimeSection(update.Meta, metautil.Terminal)
-	if len(output) == 0 {
-		t.Fatalf("meta = %#v, want caelis.runtime.terminal", update.Meta)
-	}
-	if got := output["data"]; got != "caelis\ncodex\ndemo" {
-		t.Fatalf("caelis.runtime.terminal data = %#v, want separated terminal records", got)
-	}
-}
-
-func TestTerminalTextAccumulatorAppendsManyChunksWithoutFullRescan(t *testing.T) {
-	var acc terminalTextAccumulator
-	for i := 0; i < 128; i++ {
-		acc.appendPart("chunk")
-	}
-	if got := acc.string(); got != strings.Repeat("chunk\n", 127)+"chunk" {
-		t.Fatalf("accumulator = %q, want newline-separated chunks", got)
-	}
+	assertTerminalAnchor(t, update.Content, "call-1")
+	assertTerminalInfo(t, update.Meta, "call-1")
+	assertTerminalOutput(t, update.Meta, "call-1", "caeliscodexdemo")
+	assertTerminalExit(t, update.Meta, "call-1")
 }
 
 func TestEventProjectorUsesDurableProtocolUpdateForTerminalToolCall(t *testing.T) {
@@ -215,10 +227,6 @@ func TestEventProjectorUsesDurableProtocolUpdateForTerminalToolCall(t *testing.T
 					TerminalID: "call-1",
 					Content:    session.ProtocolTextContent("ignored body\n"),
 				}},
-				Meta: metautil.WithRuntimeSection(nil, metautil.Terminal, map[string]any{
-					"terminal_id": "call-1",
-					"tool":        "RUN_COMMAND",
-				}),
 			},
 		},
 	})
@@ -235,13 +243,9 @@ func TestEventProjectorUsesDurableProtocolUpdateForTerminalToolCall(t *testing.T
 	if call.ToolCallID != "call-1" || call.Kind != ToolKindExecute || call.Title != "RUN_COMMAND date" {
 		t.Fatalf("tool call = %#v, want durable protocol identity", call)
 	}
-	if len(call.Content) != 1 || call.Content[0].Type != "terminal" || call.Content[0].TerminalID != "call-1" || call.Content[0].Content != nil {
-		t.Fatalf("content = %#v, want standard terminal marker without body", call.Content)
-	}
-	output := metautil.RuntimeSection(call.Meta, metautil.Terminal)
-	if len(output) == 0 || output["data"] != "ignored body\n" {
-		t.Fatalf("meta = %#v, want terminal body moved to _meta.caelis.runtime.terminal", call.Meta)
-	}
+	assertTerminalAnchor(t, call.Content, "call-1")
+	assertTerminalInfo(t, call.Meta, "call-1")
+	assertTerminalOutput(t, call.Meta, "call-1", "ignored body\n")
 }
 
 func TestEventProjectorProjectsCanonicalMessages(t *testing.T) {
@@ -511,9 +515,8 @@ func TestEventProjectorProjectsCanonicalToolPayloads(t *testing.T) {
 	if call.ToolCallID != "call-1" || call.Kind != ToolKindExecute || call.Title != "RUN_COMMAND date" {
 		t.Fatalf("tool call = %#v, want RUN_COMMAND execute call", call)
 	}
-	if len(call.Content) != 1 || call.Content[0].Type != "terminal" || call.Content[0].TerminalID != "call-1" {
-		t.Fatalf("tool call content = %#v, want display terminal marker", call.Content)
-	}
+	assertTerminalAnchor(t, call.Content, "call-1")
+	assertTerminalInfo(t, call.Meta, "call-1")
 
 	toolMessage := model.MessageFromToolResponse(&model.ToolResponse{
 		ID:     "call-1",
@@ -559,9 +562,10 @@ func TestEventProjectorProjectsCanonicalToolPayloads(t *testing.T) {
 	if output, ok := result.RawOutput.(map[string]any); !ok || output["stdout"] != "ok\n" {
 		t.Fatalf("raw output = %#v, want stdout", result.RawOutput)
 	}
-	if meta := metautil.RuntimeSection(result.Meta, metautil.Terminal); len(meta) == 0 || meta["terminal_id"] != "call-1" || meta["data"] != "ok\n" {
-		t.Fatalf("terminal meta = %#v, want terminal output", result.Meta)
-	}
+	assertTerminalAnchor(t, result.Content, "call-1")
+	assertTerminalInfo(t, result.Meta, "call-1")
+	assertTerminalOutput(t, result.Meta, "call-1", "ok\n")
+	assertTerminalExit(t, result.Meta, "call-1")
 }
 
 func TestEventProjectorProjectsPlanPayload(t *testing.T) {
@@ -825,9 +829,8 @@ func TestEventProjectorProjectsCanonicalAssistantMessageWithToolCalls(t *testing
 	if firstCall.ToolCallID != "call-1" || firstCall.Kind != ToolKindExecute {
 		t.Fatalf("first call = %#v, want RUN_COMMAND execute call", firstCall)
 	}
-	if len(firstCall.Content) != 1 || firstCall.Content[0].Type != "terminal" || firstCall.Content[0].TerminalID != "call-1" {
-		t.Fatalf("first call content = %#v, want display terminal marker", firstCall.Content)
-	}
+	assertTerminalAnchor(t, firstCall.Content, "call-1")
+	assertTerminalInfo(t, firstCall.Meta, "call-1")
 	secondCall, ok := updates[3].(ToolCall)
 	if !ok {
 		t.Fatalf("updates[3] = %T, want ToolCall", updates[3])
@@ -837,7 +840,7 @@ func TestEventProjectorProjectsCanonicalAssistantMessageWithToolCalls(t *testing
 	}
 }
 
-func TestEventProjectorProjectsSpawnAsExecuteWithTerminalContent(t *testing.T) {
+func TestEventProjectorProjectsSpawnAsExecuteWithTerminalMeta(t *testing.T) {
 	updates, err := (EventProjector{}).ProjectEvent(&session.Event{
 		SessionID: "session-1",
 		Type:      session.EventTypeToolCall,
@@ -853,9 +856,6 @@ func TestEventProjectorProjectsSpawnAsExecuteWithTerminalContent(t *testing.T) {
 				},
 				RawOutput: map[string]any{"task_id": "task-1"},
 				Content:   []session.ProtocolToolCallContent{{Type: "terminal", TerminalID: "terminal-1"}},
-				Meta: metautil.WithRuntimeSection(nil, metautil.Terminal, map[string]any{
-					"tool": "SPAWN",
-				}),
 			},
 		},
 	})
@@ -875,12 +875,51 @@ func TestEventProjectorProjectsSpawnAsExecuteWithTerminalContent(t *testing.T) {
 	if update.Title == nil || *update.Title != "SPAWN codex: child work" {
 		t.Fatalf("title = %v, want SPAWN codex: child work", update.Title)
 	}
-	if len(update.Content) != 1 || update.Content[0].Type != "terminal" || update.Content[0].TerminalID != "call-1" {
-		t.Fatalf("content = %#v, want terminal content remapped to display id call-1", update.Content)
+	assertTerminalAnchor(t, update.Content, "call-1")
+	assertTerminalInfo(t, update.Meta, "call-1")
+}
+
+func TestEventProjectorAddsTerminalInfoToRunningToolUpdate(t *testing.T) {
+	updates, err := (EventProjector{}).ProjectEvent(&session.Event{
+		SessionID: "session-1",
+		Type:      session.EventTypeToolResult,
+		Protocol: &session.EventProtocol{
+			Update: &session.ProtocolUpdate{
+				SessionUpdate: UpdateToolCallInfo,
+				ToolCallID:    "call-1",
+				Kind:          ToolKindExecute,
+				Status:        "running",
+				RawInput:      map[string]any{"command": "echo hi"},
+				RawOutput:     map[string]any{"state": "running", "task_id": "task-1"},
+			},
+		},
+		Meta: map[string]any{
+			"caelis": map[string]any{
+				"runtime": map[string]any{
+					"task": map[string]any{
+						"task_id":     "task-1",
+						"terminal_id": "runtime-terminal-1",
+						"running":     true,
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ProjectEvent() error = %v", err)
 	}
-	if update.Content[0].Content != nil {
-		t.Fatalf("terminal content body = %#v, want empty standard terminal marker", update.Content[0].Content)
+	if len(updates) != 1 {
+		t.Fatalf("ProjectEvent() produced %d updates, want 1", len(updates))
 	}
+	update, ok := updates[0].(ToolCallUpdate)
+	if !ok {
+		t.Fatalf("update = %T, want ToolCallUpdate", updates[0])
+	}
+	if got := stringPtrValue(update.Status); got != ToolStatusInProgress {
+		t.Fatalf("status = %q, want in_progress", got)
+	}
+	assertTerminalAnchor(t, update.Content, "call-1")
+	assertTerminalInfo(t, update.Meta, "call-1")
 }
 
 func TestEventProjectorProjectsRunCommandDisplayTerminalMetadata(t *testing.T) {
@@ -897,9 +936,6 @@ func TestEventProjectorProjectsRunCommandDisplayTerminalMetadata(t *testing.T) {
 					"command": "echo hi",
 					"workdir": "/tmp/work",
 				},
-				Meta: metautil.WithRuntimeSection(nil, metautil.Terminal, map[string]any{
-					"tool": "RUN_COMMAND",
-				}),
 			},
 		},
 	})
@@ -916,19 +952,8 @@ func TestEventProjectorProjectsRunCommandDisplayTerminalMetadata(t *testing.T) {
 	if call.Kind != ToolKindExecute {
 		t.Fatalf("kind = %q, want %q", call.Kind, ToolKindExecute)
 	}
-	if len(call.Content) != 1 || call.Content[0].Type != "terminal" || call.Content[0].TerminalID != "call-1" {
-		t.Fatalf("content = %#v, want display terminal content for call-1", call.Content)
-	}
-	if call.Content[0].Content != nil {
-		t.Fatalf("terminal content body = %#v, want empty standard terminal marker", call.Content[0].Content)
-	}
-	info := metautil.RuntimeSection(call.Meta, metautil.Terminal)
-	if len(info) == 0 {
-		t.Fatalf("meta = %#v, want caelis.runtime.terminal", call.Meta)
-	}
-	if info["terminal_id"] != "call-1" || info["cwd"] != "/tmp/work" || info["tool"] != "RUN_COMMAND" {
-		t.Fatalf("caelis.runtime.terminal = %#v, want terminal_id call-1 cwd /tmp/work tool RUN_COMMAND", info)
-	}
+	assertTerminalAnchor(t, call.Content, "call-1")
+	assertTerminalInfo(t, call.Meta, "call-1")
 }
 
 func TestEventProjectorPreservesReasoningBoundaryWhitespace(t *testing.T) {

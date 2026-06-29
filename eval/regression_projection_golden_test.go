@@ -242,14 +242,8 @@ func TestRegressionProjectionGoldenFullEnvelopes(t *testing.T) {
         }
       ],
       "_meta": {
-        "caelis": {
-          "runtime": {
-            "terminal": {
-              "terminal_id": "call-1",
-              "tool": "RUN_COMMAND"
-            }
-          },
-          "version": 1
+        "terminal_info": {
+          "terminal_id": "call-1"
         }
       }
     }
@@ -282,14 +276,17 @@ func TestRegressionProjectionGoldenFullEnvelopes(t *testing.T) {
         }
       ],
       "_meta": {
-        "caelis": {
-          "runtime": {
-            "terminal": {
-              "data": "ok\n",
-              "terminal_id": "call-1"
-            }
-          },
-          "version": 1
+        "terminal_exit": {
+          "exit_code": 0,
+          "signal": null,
+          "terminal_id": "call-1"
+        },
+        "terminal_info": {
+          "terminal_id": "call-1"
+        },
+        "terminal_output": {
+          "data": "ok\n",
+          "terminal_id": "call-1"
         }
       }
     }
@@ -339,6 +336,12 @@ func TestRegressionProjectionGoldenFullEnvelopes(t *testing.T) {
         "rawInput": {
           "command": "make arch-lint"
         },
+        "content": [
+          {
+            "type": "terminal",
+            "terminalId": "call-2"
+          }
+        ],
         "_meta": {
           "caelis": {
             "runtime": {
@@ -347,6 +350,9 @@ func TestRegressionProjectionGoldenFullEnvelopes(t *testing.T) {
               }
             },
             "version": 1
+          },
+          "terminal_info": {
+            "terminal_id": "call-2"
           }
         }
       },

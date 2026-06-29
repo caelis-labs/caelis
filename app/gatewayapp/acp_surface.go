@@ -8,6 +8,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/impl/model/catalog"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/protocol/acp"
+	controlcommands "github.com/OnslaughtSnail/caelis/protocol/acp/control/commands"
 )
 
 const (
@@ -62,7 +63,11 @@ func (p gatewayACPSurface) SetSessionMode(ctx context.Context, req acp.SetSessio
 	if strings.TrimSpace(req.SessionID) == "" {
 		return acp.SetSessionModeResponse{}, fmt.Errorf("gatewayapp: session id is required")
 	}
-	_, err := p.stack.SetSessionMode(ctx, p.sessionRef(req.SessionID), req.ModeID)
+	activeSession, err := p.session(ctx, req.SessionID)
+	if err != nil {
+		return acp.SetSessionModeResponse{}, err
+	}
+	_, err = p.stack.SetSessionMode(ctx, activeSession.SessionRef, req.ModeID)
 	return acp.SetSessionModeResponse{}, err
 }
 
@@ -201,13 +206,19 @@ func (p gatewayACPSurface) PromptCapabilities(context.Context) (acp.PromptCapabi
 }
 
 func (p gatewayACPSurface) AvailableCommands(context.Context, string) ([]acp.AvailableCommand, error) {
-	commands := []acp.AvailableCommand{
-		{Name: "agent", Description: "Manage ACP agents", Input: commandInput("use|add|install|list|remove")},
-		{Name: "connect", Description: "Configure a model provider", Input: commandInput("provider model [base-url] [timeout] [token] [context] [max-output] [reasoning-levels] [first-event-timeout]")},
-		{Name: "model", Description: "Switch or inspect models", Input: commandInput("use <alias> [reasoning]")},
-		{Name: "status", Description: "Show current runtime status", Input: nil},
-		{Name: "resume", Description: "Resume a previous session", Input: commandInput("session id")},
-		{Name: "compact", Description: "Compact the current conversation", Input: nil},
+	commands := make([]acp.AvailableCommand, 0, len(controlcommands.DefaultACPSpecs()))
+	for _, spec := range controlcommands.DefaultACPSpecs() {
+		if spec.Hidden {
+			continue
+		}
+		cmd := acp.AvailableCommand{
+			Name:        spec.Name,
+			Description: spec.Description,
+		}
+		if hint := availableCommandHint(spec.Usage); hint != "" {
+			cmd.Input = commandInput(hint)
+		}
+		commands = append(commands, cmd)
 	}
 	if p.stack != nil {
 		for _, agent := range p.stack.ListACPAgents() {
@@ -334,7 +345,11 @@ func (p gatewayACPSurface) setSessionModel(ctx context.Context, sessionID string
 	if alias == "" {
 		return fmt.Errorf("gatewayapp: model id is required")
 	}
-	return p.stack.UseModel(ctx, p.sessionRef(sessionID), alias, reasoning)
+	activeSession, err := p.session(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	return p.stack.UseModel(ctx, activeSession.SessionRef, alias, reasoning)
 }
 
 func (p gatewayACPSurface) session(ctx context.Context, sessionID string) (session.Session, error) {
@@ -345,7 +360,8 @@ func (p gatewayACPSurface) session(ctx context.Context, sessionID string) (sessi
 	if sessionID == "" {
 		return session.Session{}, fmt.Errorf("gatewayapp: session id is required")
 	}
-	return p.stack.Sessions.Session(ctx, p.sessionRef(sessionID))
+	ref := p.sessionRef(sessionID)
+	return p.stack.Sessions.Session(ctx, ref)
 }
 
 func (p gatewayACPSurface) sessionRef(sessionID string) session.SessionRef {
@@ -464,6 +480,18 @@ func reasoningDisplayName(level string) string {
 
 func commandInput(hint string) *acp.AvailableCommandInput {
 	return &acp.AvailableCommandInput{Hint: hint}
+}
+
+func availableCommandHint(usage string) string {
+	usage = strings.TrimSpace(usage)
+	if usage == "" {
+		return ""
+	}
+	fields := strings.Fields(usage)
+	if len(fields) <= 1 {
+		return ""
+	}
+	return strings.Join(fields[1:], " ")
 }
 
 func containsACPStringFold(values []string, needle string) bool {

@@ -13,7 +13,6 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/stream"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/client"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
@@ -123,8 +122,8 @@ func TestRunnerHandleUpdatePublishesStructuredToolAndPlanEvents(t *testing.T) {
 	}
 	wantText := []string{
 		"run go test\n",
-		"run go test completed\n",
-		"Plan Run tests completed\n",
+		"",
+		"",
 	}
 	for i, frame := range sink.frames {
 		if frame.Text != wantText[i] {
@@ -195,8 +194,8 @@ func TestRunnerKeepsCodexWebSearchToolIdentity(t *testing.T) {
 		t.Fatalf("stream frames = %#v, want one structured search update", sink.frames)
 	}
 	frame := sink.frames[0]
-	if frame.Text != "Searching for: weather: Shanghai, China\n" {
-		t.Fatalf("stream frame text = %q, want readable search trace", frame.Text)
+	if frame.Text != "SEARCH \"weather: Shanghai, China\"\n" {
+		t.Fatalf("stream frame text = %q, want compact search trace", frame.Text)
 	}
 	event := frame.Event
 	update := session.ProtocolUpdateOf(event)
@@ -214,7 +213,7 @@ func TestRunnerKeepsCodexWebSearchToolIdentity(t *testing.T) {
 	}
 }
 
-func TestRunnerPublishesChildTerminalOutputMetaAsStreamText(t *testing.T) {
+func TestRunnerPreservesChildTerminalContentWithoutParentTraceText(t *testing.T) {
 	t.Parallel()
 
 	sink := &recordingStreams{}
@@ -234,23 +233,24 @@ func TestRunnerPublishesChildTerminalOutputMetaAsStreamText(t *testing.T) {
 			ToolCallID:    "command-1",
 			Kind:          stringPtr("execute"),
 			Title:         stringPtr("run date loop"),
-			Meta: metautil.WithRuntimeSection(nil, metautil.Terminal, map[string]any{
-				"terminal_id": "command-1",
-				"data":        "17:21:17\n",
-			}),
+			Content: []client.ToolCallContent{{
+				Type:       "terminal",
+				TerminalID: "command-1",
+				Content:    client.TextContent{Type: "text", Text: "17:21:17\n"},
+			}},
 		},
 	})
 
 	if got := len(sink.frames); got != 1 {
 		t.Fatalf("stream frames = %#v, want one terminal output frame", sink.frames)
 	}
-	if got := sink.frames[0].Text; got != "17:21:17\n" {
-		t.Fatalf("stream frame text = %q, want terminal output data", got)
+	if got := sink.frames[0].Text; got != "" {
+		t.Fatalf("stream frame text = %q, want child terminal result omitted from parent SPAWN trace", got)
 	}
 	event := sink.frames[0].Event
 	if event == nil || event.Protocol == nil || event.Protocol.Update == nil ||
-		len(metautil.RuntimeSection(event.Protocol.Update.Meta, metautil.Terminal)) == 0 {
-		t.Fatalf("stream event = %#v, want structured terminal meta preserved", event)
+		len(session.ProtocolToolCallContentOf(event.Protocol.Update)) == 0 {
+		t.Fatalf("stream event = %#v, want structured terminal content preserved", event)
 	}
 }
 
@@ -283,10 +283,6 @@ func TestRunnerStripsConsoleFenceFromChildTerminalOutput(t *testing.T) {
 				TerminalID: "command-1",
 				Content:    client.TextContent{Type: "text", Text: fenced},
 			}},
-			Meta: metautil.WithRuntimeSection(nil, metautil.Terminal, map[string]any{
-				"terminal_id": "command-1",
-				"data":        fenced,
-			}),
 		},
 	})
 
@@ -294,8 +290,8 @@ func TestRunnerStripsConsoleFenceFromChildTerminalOutput(t *testing.T) {
 		t.Fatalf("stream frames = %#v, want one terminal output frame", sink.frames)
 	}
 	frame := sink.frames[0]
-	if frame.Text != want {
-		t.Fatalf("stream frame text = %q, want stripped terminal output", frame.Text)
+	if frame.Text != "" {
+		t.Fatalf("stream frame text = %q, want child terminal result omitted from parent SPAWN trace", frame.Text)
 	}
 	event := frame.Event
 	update := session.ProtocolUpdateOf(event)
@@ -308,13 +304,6 @@ func TestRunnerStripsConsoleFenceFromChildTerminalOutput(t *testing.T) {
 	content := session.ProtocolToolCallContentOf(update)
 	if got := schema.ExtractTextValue(content[0].Content); got != want {
 		t.Fatalf("terminal content = %q, want %q", got, want)
-	}
-	output := metautil.RuntimeSection(update.Meta, metautil.Terminal)
-	if len(output) == 0 {
-		t.Fatalf("Protocol.Update.Meta = %#v, want caelis.runtime.terminal", event.Protocol.Update.Meta)
-	}
-	if got := output["data"]; got != fenced {
-		t.Fatalf("caelis.runtime.terminal data = %#v, want original %q", got, fenced)
 	}
 }
 
@@ -439,10 +428,66 @@ func TestRunnerResultKeepsOnlyLatestAssistantSegmentAfterTools(t *testing.T) {
 	for _, frame := range sink.frames {
 		streamed += frame.Text
 	}
-	for _, want := range []string{"我先读取文件。", "Read hello_spawn.txt", "总结一下执行结果"} {
+	for _, want := range []string{"我先读取文件。", "READ hello_spawn.txt", "总结一下执行结果"} {
 		if !strings.Contains(streamed, want) {
 			t.Fatalf("streamed text = %q, want %q preserved in running trace", streamed, want)
 		}
+	}
+}
+
+func TestRunnerFormatsCompactSubagentTraceWithBoundaries(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingStreams{}
+	run := &childRun{
+		anchor:  delegation.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "claude", AgentID: "agent-1"},
+		taskID:  "task-1",
+		sink:    sink,
+		state:   delegation.StateRunning,
+		running: true,
+	}
+	runner := &Runner{clock: time.Now}
+
+	runner.handleUpdate(run, contentUpdate(t, client.UpdateAgentMessage, "先看一下文件"))
+	runner.handleUpdate(run, client.UpdateEnvelope{
+		SessionID: "child-1",
+		Update: client.ToolCall{
+			SessionUpdate: client.UpdateToolCall,
+			ToolCallID:    "list-1",
+			Kind:          "search",
+			Title:         "LIST /Users/xueyongzhi/WorkDir/xueyongzhi/demo",
+			Status:        "in_progress",
+			RawInput:      map[string]any{"path": "/Users/xueyongzhi/WorkDir/xueyongzhi/demo"},
+		},
+	})
+	runner.handleUpdate(run, client.UpdateEnvelope{
+		SessionID: "child-1",
+		Update: client.ToolCallUpdate{
+			SessionUpdate: client.UpdateToolCallState,
+			ToolCallID:    "list-1",
+			Kind:          stringPtr("search"),
+			Title:         stringPtr("LIST /Users/xueyongzhi/WorkDir/xueyongzhi/demo"),
+			Status:        stringPtr("completed"),
+			RawInput:      map[string]any{"path": "/Users/xueyongzhi/WorkDir/xueyongzhi/demo"},
+		},
+	})
+	runner.handleUpdate(run, client.UpdateEnvelope{
+		SessionID: "child-1",
+		Update: client.ToolCall{
+			SessionUpdate: client.UpdateToolCall,
+			ToolCallID:    "glob-1",
+			Kind:          "search",
+			Title:         "GLOB **/*.md in /Users/xueyongzhi/WorkDir/xueyongzhi/demo",
+			Status:        "in_progress",
+			RawInput:      map[string]any{"pattern": "**/*.md", "path": "/Users/xueyongzhi/WorkDir/xueyongzhi/demo"},
+		},
+	})
+
+	if got := len(sink.frames); got != 4 {
+		t.Fatalf("stream frames = %#v, want assistant, tool call, completed event, tool call", sink.frames)
+	}
+	if got := sink.frames[0].Text + sink.frames[1].Text + sink.frames[2].Text + sink.frames[3].Text; got != "先看一下文件\nLIST demo\nGLOB **/*.md in demo\n" {
+		t.Fatalf("combined trace = %q, want compact line-oriented subagent trace", got)
 	}
 }
 
@@ -524,8 +569,8 @@ func TestRunnerHandleUpdatePublishesStructuredThoughtEvent(t *testing.T) {
 		t.Fatalf("stream frames = %#v, want one thought frame", sink.frames)
 	}
 	got := sink.frames[0]
-	if got.Text != "" {
-		t.Fatalf("stream frame text = %q, want structured thought event only", got.Text)
+	if got.Text != "thinking about the command" {
+		t.Fatalf("stream frame text = %q, want reasoning trace text", got.Text)
 	}
 	update := session.ProtocolUpdateOf(got.Event)
 	if got.Event == nil || update == nil || update.SessionUpdate != client.UpdateAgentThought || got.Event.Text != "thinking about the command" {

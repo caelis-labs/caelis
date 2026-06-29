@@ -9,12 +9,12 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	runtimeacp "github.com/OnslaughtSnail/caelis/impl/agent/acp"
 	bridgeassembly "github.com/OnslaughtSnail/caelis/impl/agent/acp/assembly"
 	"github.com/OnslaughtSnail/caelis/impl/agent/local"
 	"github.com/OnslaughtSnail/caelis/impl/agent/local/chat"
+	sessionfile "github.com/OnslaughtSnail/caelis/impl/session/file"
 	"github.com/OnslaughtSnail/caelis/impl/session/memory"
 	"github.com/OnslaughtSnail/caelis/ports/agent"
 	"github.com/OnslaughtSnail/caelis/ports/approval"
@@ -24,6 +24,8 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/stream"
 	"github.com/OnslaughtSnail/caelis/ports/tool"
 	"github.com/OnslaughtSnail/caelis/protocol/acp"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/control"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
@@ -243,18 +245,168 @@ func TestRuntimeAgentListResumeAndCloseSession(t *testing.T) {
 	}
 }
 
-func TestRuntimeAgentPromptSlashCommandRunsSideACPAndForwardsEvents(t *testing.T) {
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
-	runtime := &sideACPCommandRuntime{sessions: sessions}
+func TestRuntimeAgentPromptPassesResolvedWorkspaceRefToMainRuntime(t *testing.T) {
+	ctx := context.Background()
+	sessions := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()}))
+	if _, err := sessions.StartSession(ctx, session.StartSessionRequest{
+		AppName:            "caelis",
+		UserID:             "user-1",
+		PreferredSessionID: "shared-session",
+		Workspace: session.WorkspaceRef{
+			Key: "ws-b",
+			CWD: "/tmp/ws-b",
+		},
+	}); err != nil {
+		t.Fatalf("StartSession(ws-b) error = %v", err)
+	}
+	runtime := &recordingRunRuntime{}
+	agent, err := runtimeacp.New(runtimeacp.Config{
+		Runtime:      runtime,
+		Sessions:     sessions,
+		WorkspaceKey: "ws-a",
+		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
+			return agent.AgentSpec{Name: "chat"}, nil
+		},
+		AppName: "caelis",
+		UserID:  "user-1",
+	})
+	if err != nil {
+		t.Fatalf("runtimeacp.New() error = %v", err)
+	}
+	resp, err := agent.Prompt(ctx, acp.PromptRequest{
+		SessionID: "shared-session",
+		Prompt: []json.RawMessage{
+			json.RawMessage(`{"type":"text","text":"hello"}`),
+		},
+	}, &recordingPromptCallbacks{})
+	if err != nil {
+		t.Fatalf("Prompt() error = %v", err)
+	}
+	if resp.StopReason != acp.StopReasonEndTurn {
+		t.Fatalf("StopReason = %q, want %q", resp.StopReason, acp.StopReasonEndTurn)
+	}
+	if got := runtime.request.SessionRef.WorkspaceKey; got != "ws-b" {
+		t.Fatalf("runtime SessionRef.WorkspaceKey = %q, want ws-b", got)
+	}
+	if got := runtime.request.SessionRef.SessionID; got != "shared-session" {
+		t.Fatalf("runtime SessionRef.SessionID = %q, want shared-session", got)
+	}
+}
+
+func TestRuntimeAgentResumeSessionIgnoresCWDForIdentity(t *testing.T) {
+	ctx := context.Background()
+	sessions := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()}))
+	if _, err := sessions.StartSession(ctx, session.StartSessionRequest{
+		AppName:            "caelis",
+		UserID:             "user-1",
+		PreferredSessionID: "shared-session",
+		Workspace: session.WorkspaceRef{
+			Key: "ws-b",
+			CWD: "/tmp/ws-b",
+		},
+	}); err != nil {
+		t.Fatalf("StartSession(ws-b) error = %v", err)
+	}
+	modes := &recordingModeProvider{}
+	agent, err := runtimeacp.New(runtimeacp.Config{
+		Runtime:      &recordingRunRuntime{},
+		Sessions:     sessions,
+		Modes:        modes,
+		WorkspaceKey: "ws-a",
+		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
+			return agent.AgentSpec{Name: "chat"}, nil
+		},
+		AppName: "caelis",
+		UserID:  "user-1",
+	})
+	if err != nil {
+		t.Fatalf("runtimeacp.New() error = %v", err)
+	}
+	if _, err := agent.ResumeSession(ctx, acp.ResumeSessionRequest{
+		SessionID: "shared-session",
+		CWD:       "ws-a",
+	}); err != nil {
+		t.Fatalf("ResumeSession(ws-a) error = %v", err)
+	}
+	if _, err := agent.ResumeSession(ctx, acp.ResumeSessionRequest{
+		SessionID: "shared-session",
+		CWD:       "ws-b",
+	}); err != nil {
+		t.Fatalf("ResumeSession(ws-b) error = %v", err)
+	}
+	if got, want := len(modes.sessions), 2; got != want {
+		t.Fatalf("recorded mode sessions = %d, want %d", got, want)
+	}
+	if got := modes.sessions[0].WorkspaceKey; got != "ws-b" {
+		t.Fatalf("first ResumeSession workspace = %q, want ws-b", got)
+	}
+	if got := modes.sessions[1].WorkspaceKey; got != "ws-b" {
+		t.Fatalf("second ResumeSession workspace = %q, want ws-b", got)
+	}
+}
+
+func TestRuntimeAgentUnscopedPromptUsesGlobalSessionIDAfterResumeWithDifferentCWD(t *testing.T) {
+	ctx := context.Background()
+	sessions := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()}))
+	if _, err := sessions.StartSession(ctx, session.StartSessionRequest{
+		AppName:            "caelis",
+		UserID:             "user-1",
+		PreferredSessionID: "shared-session",
+		Workspace: session.WorkspaceRef{
+			Key: "ws-b",
+			CWD: "/tmp/ws-b",
+		},
+	}); err != nil {
+		t.Fatalf("StartSession(ws-b) error = %v", err)
+	}
+	runtime := &recordingRunRuntime{}
 	agent, err := runtimeacp.New(runtimeacp.Config{
 		Runtime:  runtime,
 		Sessions: sessions,
 		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
-			return agent.AgentSpec{}, errors.New("main agent spec should not be built for side ACP slash command")
+			return agent.AgentSpec{Name: "chat"}, nil
 		},
-		Commands: sideACPCommandProvider{{Name: "helper", Description: "bounded helper"}},
-		AppName:  "caelis",
-		UserID:   "user-1",
+		AppName: "caelis",
+		UserID:  "user-1",
+	})
+	if err != nil {
+		t.Fatalf("runtimeacp.New() error = %v", err)
+	}
+	for _, workspaceKey := range []string{"ws-a", "ws-b", "ws-b"} {
+		if _, err := agent.ResumeSession(ctx, acp.ResumeSessionRequest{
+			SessionID: "shared-session",
+			CWD:       workspaceKey,
+		}); err != nil {
+			t.Fatalf("ResumeSession(%s) error = %v", workspaceKey, err)
+		}
+	}
+	resp, err := agent.Prompt(ctx, acp.PromptRequest{
+		SessionID: "shared-session",
+		Prompt: []json.RawMessage{
+			json.RawMessage(`{"type":"text","text":"hello"}`),
+		},
+	}, &recordingPromptCallbacks{})
+	if err != nil {
+		t.Fatalf("Prompt() error = %v", err)
+	}
+	if resp.StopReason != acp.StopReasonEndTurn {
+		t.Fatalf("StopReason = %q, want %q", resp.StopReason, acp.StopReasonEndTurn)
+	}
+	if got := runtime.request.SessionRef.WorkspaceKey; got != "ws-b" {
+		t.Fatalf("runtime SessionRef.WorkspaceKey = %q, want ws-b", got)
+	}
+}
+
+func TestRuntimeAgentPromptConvertsLocalTerminalTextToTerminalMetaForACPStdio(t *testing.T) {
+	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	agent, err := runtimeacp.New(runtimeacp.Config{
+		Runtime:  terminalBridgeRuntime{includeFinalEvent: true},
+		Sessions: sessions,
+		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
+			return agent.AgentSpec{Name: "fake"}, nil
+		},
+		AppName: "caelis",
+		UserID:  "user-1",
 		AgentInfo: &acp.Implementation{
 			Name:    "caelis-sdk",
 			Version: "0.1.0",
@@ -268,449 +420,14 @@ func TestRuntimeAgentPromptSlashCommandRunsSideACPAndForwardsEvents(t *testing.T
 		t.Fatalf("NewSession() error = %v", err)
 	}
 	cb := &recordingPromptCallbacks{}
-	resp, err := agent.Prompt(context.Background(), acp.PromptRequest{
-		SessionID: activeSession.SessionID,
-		Prompt: []json.RawMessage{
-			json.RawMessage(`{"type":"text","text":"/helper inspect the repo"}`),
-		},
-	}, cb)
-	if err != nil {
-		t.Fatalf("Prompt(/helper) error = %v", err)
-	}
-	if resp.StopReason != acp.StopReasonEndTurn {
-		t.Fatalf("StopReason = %q, want %q", resp.StopReason, acp.StopReasonEndTurn)
-	}
-	if runtime.runCalled {
-		t.Fatal("main runtime Run was called for side ACP slash command")
-	}
-	if runtime.attach.Agent != "helper" || runtime.attach.Source != "slash_helper" {
-		t.Fatalf("attach request = %#v, want helper slash attach", runtime.attach)
-	}
-	if runtime.prompt.Input != "inspect the repo" || runtime.prompt.Source != "slash_helper" {
-		t.Fatalf("prompt request = %#v, want trimmed side ACP prompt", runtime.prompt)
-	}
-	if got := firstAgentMessageChunk(cb.notifications); got != "side acp output" {
-		t.Fatalf("agent message updates = %#v, want side ACP output", cb.notifications)
-	}
-}
-
-func TestRuntimeAgentPromptSlashCommandAcceptsSplitTextParts(t *testing.T) {
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
-	runtime := &sideACPCommandRuntime{sessions: sessions}
-	agent, err := runtimeacp.New(runtimeacp.Config{
-		Runtime:  runtime,
-		Sessions: sessions,
-		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
-			return agent.AgentSpec{}, errors.New("main agent spec should not be built for side ACP slash command")
-		},
-		Commands: sideACPCommandProvider{{Name: "helper", Description: "bounded helper"}},
-		AppName:  "caelis",
-		UserID:   "user-1",
-	})
-	if err != nil {
-		t.Fatalf("runtimeacp.New() error = %v", err)
-	}
-	activeSession, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
-	if err != nil {
-		t.Fatalf("NewSession() error = %v", err)
-	}
-	resp, err := agent.Prompt(context.Background(), acp.PromptRequest{
-		SessionID: activeSession.SessionID,
-		Prompt: []json.RawMessage{
-			json.RawMessage(`{"type":"text","text":"/helper"}`),
-			json.RawMessage(`{"type":"text","text":"inspect the repo"}`),
-			json.RawMessage(`{"type":"image","mimeType":"image/png","data":"aW1n"}`),
-		},
-	}, &recordingPromptCallbacks{})
-	if err != nil {
-		t.Fatalf("Prompt(split /helper) error = %v", err)
-	}
-	if resp.StopReason != acp.StopReasonEndTurn {
-		t.Fatalf("StopReason = %q, want %q", resp.StopReason, acp.StopReasonEndTurn)
-	}
-	if runtime.runCalled {
-		t.Fatal("main runtime Run was called for split side ACP slash command")
-	}
-	if runtime.prompt.Input != "inspect the repo" {
-		t.Fatalf("prompt input = %q, want split prompt text", runtime.prompt.Input)
-	}
-	if got, want := len(runtime.prompt.ContentParts), 2; got != want {
-		t.Fatalf("len(ContentParts) = %d, want %d: %#v", got, want, runtime.prompt.ContentParts)
-	}
-	if part := runtime.prompt.ContentParts[0]; part.Type != model.ContentPartText || part.Text != "inspect the repo" {
-		t.Fatalf("ContentParts[0] = %#v, want rewritten prompt text", part)
-	}
-	if part := runtime.prompt.ContentParts[1]; part.Type != model.ContentPartImage || part.Data != "aW1n" {
-		t.Fatalf("ContentParts[1] = %#v, want original image", part)
-	}
-}
-
-func TestRuntimeAgentPromptSlashCommandPreservesRegisteredACPAgentName(t *testing.T) {
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
-	runtime := &sideACPCommandRuntime{sessions: sessions, expectedAgent: "MixedHelper"}
-	agent, err := runtimeacp.New(runtimeacp.Config{
-		Runtime:  runtime,
-		Sessions: sessions,
-		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
-			return agent.AgentSpec{}, errors.New("main agent spec should not be built for side ACP slash command")
-		},
-		Commands: sideACPCommandProvider{{Name: "MixedHelper", Description: "case-sensitive helper"}},
-		AppName:  "caelis",
-		UserID:   "user-1",
-		AgentInfo: &acp.Implementation{
-			Name:    "caelis-sdk",
-			Version: "0.1.0",
-		},
-	})
-	if err != nil {
-		t.Fatalf("runtimeacp.New() error = %v", err)
-	}
-	activeSession, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
-	if err != nil {
-		t.Fatalf("NewSession() error = %v", err)
-	}
-	resp, err := agent.Prompt(context.Background(), acp.PromptRequest{
-		SessionID: activeSession.SessionID,
-		Prompt: []json.RawMessage{
-			json.RawMessage(`{"type":"text","text":"/MixedHelper inspect the repo"}`),
-		},
-	}, &recordingPromptCallbacks{})
-	if err != nil {
-		t.Fatalf("Prompt(/MixedHelper) error = %v", err)
-	}
-	if resp.StopReason != acp.StopReasonEndTurn {
-		t.Fatalf("StopReason = %q, want %q", resp.StopReason, acp.StopReasonEndTurn)
-	}
-	if runtime.attach.Agent != "MixedHelper" {
-		t.Fatalf("attach agent = %q, want canonical registered name", runtime.attach.Agent)
-	}
-}
-
-func TestRuntimeAgentBridgesTerminalStreamToACPTerminalContent(t *testing.T) {
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
-	runtime := terminalBridgeRuntime{}
-	agent, err := runtimeacp.New(runtimeacp.Config{
-		Runtime:  runtime,
-		Sessions: sessions,
-		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
-			return agent.AgentSpec{Name: "fake"}, nil
-		},
-		AppName: "caelis",
-		UserID:  "user-1",
-		AgentInfo: &acp.Implementation{
-			Name:    "caelis-sdk",
-			Version: "0.1.0",
-		},
-	})
-	if err != nil {
-		t.Fatalf("runtimeacp.New() error = %v", err)
-	}
-	activeSession, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
-	if err != nil {
-		t.Fatalf("NewSession() error = %v", err)
-	}
-	cb := &terminalBridgeCallbacks{}
 	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{SessionID: activeSession.SessionID}, cb); err != nil {
 		t.Fatalf("Prompt() error = %v", err)
 	}
-
-	deadline := time.After(2 * time.Second)
-	for {
-		notes := cb.snapshot()
-		if hasTerminalInfo(notes, "call-1") && hasTerminalOutput(notes, "call-1", "streamed output\n") && hasCompletedTerminalExit(notes, "call-1", 0) {
-			return
-		}
-		select {
-		case <-deadline:
-			t.Fatalf("notifications = %#v, want terminal info, streamed terminal content, and completed terminal status", notes)
-		case <-time.After(10 * time.Millisecond):
-		}
+	if !hasTerminalInfo(cb.notifications, "call-1", "call-1") {
+		t.Fatalf("notifications = %#v, want local terminal info for ACP stdio", cb.notifications)
 	}
-}
-
-func TestRuntimeAgentBridgesSpawnTerminalStreamToACPTerminalContent(t *testing.T) {
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
-	runtime := terminalBridgeRuntime{toolName: "SPAWN", taskID: "task-spawn-1", terminalID: "subagent-task-spawn-1"}
-	agent, err := runtimeacp.New(runtimeacp.Config{
-		Runtime:  runtime,
-		Sessions: sessions,
-		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
-			return agent.AgentSpec{Name: "fake"}, nil
-		},
-		AppName: "caelis",
-		UserID:  "user-1",
-		AgentInfo: &acp.Implementation{
-			Name:    "caelis-sdk",
-			Version: "0.1.0",
-		},
-	})
-	if err != nil {
-		t.Fatalf("runtimeacp.New() error = %v", err)
-	}
-	activeSession, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
-	if err != nil {
-		t.Fatalf("NewSession() error = %v", err)
-	}
-	cb := &terminalBridgeCallbacks{}
-	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{SessionID: activeSession.SessionID}, cb); err != nil {
-		t.Fatalf("Prompt() error = %v", err)
-	}
-
-	deadline := time.After(2 * time.Second)
-	for {
-		notes := cb.snapshot()
-		if hasTerminalInfo(notes, "call-1") && hasTerminalOutput(notes, "call-1", "streamed output\n") && hasCompletedTerminalExit(notes, "call-1", 0) {
-			return
-		}
-		select {
-		case <-deadline:
-			t.Fatalf("notifications = %#v, want SPAWN terminal info, streamed terminal content, and completed terminal status", notes)
-		case <-time.After(10 * time.Millisecond):
-		}
-	}
-}
-
-func TestRuntimeAgentDoesNotRepeatTerminalFinalTextAfterStreamOutput(t *testing.T) {
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
-	runtime := terminalBridgeRuntime{closedText: "final summary\n"}
-	agent, err := runtimeacp.New(runtimeacp.Config{
-		Runtime:  runtime,
-		Sessions: sessions,
-		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
-			return agent.AgentSpec{Name: "fake"}, nil
-		},
-		AppName: "caelis",
-		UserID:  "user-1",
-		AgentInfo: &acp.Implementation{
-			Name:    "caelis-sdk",
-			Version: "0.1.0",
-		},
-	})
-	if err != nil {
-		t.Fatalf("runtimeacp.New() error = %v", err)
-	}
-	activeSession, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
-	if err != nil {
-		t.Fatalf("NewSession() error = %v", err)
-	}
-	cb := &terminalBridgeCallbacks{}
-	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{SessionID: activeSession.SessionID}, cb); err != nil {
-		t.Fatalf("Prompt() error = %v", err)
-	}
-
-	deadline := time.After(2 * time.Second)
-	for {
-		notes := cb.snapshot()
-		if hasCompletedTerminalExit(notes, "call-1", 0) {
-			if hasTerminalOutput(notes, "call-1", "final summary\n") {
-				t.Fatalf("notifications = %#v, terminal bridge should not append final summary after streamed output", notes)
-			}
-			if !hasTerminalOutput(notes, "call-1", "streamed output\n") {
-				t.Fatalf("notifications = %#v, want streamed output", notes)
-			}
-			return
-		}
-		select {
-		case <-deadline:
-			t.Fatalf("notifications = %#v, want completed terminal status", notes)
-		case <-time.After(10 * time.Millisecond):
-		}
-	}
-}
-
-func TestRuntimeAgentSuppressesProjectedTerminalOutputWhenBridgeOwnsTerminal(t *testing.T) {
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
-	runtime := terminalBridgeFinalRuntime{}
-	agent, err := runtimeacp.New(runtimeacp.Config{
-		Runtime:  runtime,
-		Sessions: sessions,
-		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
-			return agent.AgentSpec{Name: "fake"}, nil
-		},
-		AppName: "caelis",
-		UserID:  "user-1",
-		AgentInfo: &acp.Implementation{
-			Name:    "caelis-sdk",
-			Version: "0.1.0",
-		},
-	})
-	if err != nil {
-		t.Fatalf("runtimeacp.New() error = %v", err)
-	}
-	activeSession, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
-	if err != nil {
-		t.Fatalf("NewSession() error = %v", err)
-	}
-	cb := &terminalBridgeCallbacks{}
-	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{SessionID: activeSession.SessionID}, cb); err != nil {
-		t.Fatalf("Prompt() error = %v", err)
-	}
-
-	deadline := time.After(2 * time.Second)
-	for {
-		notes := cb.snapshot()
-		if hasCompletedTerminalExit(notes, "call-1", 0) {
-			outputs := terminalOutputPayloads(notes, "call-1")
-			if got, want := len(outputs), 1; got != want {
-				t.Fatalf("terminal outputs = %#v, want exactly one bridged output update", outputs)
-			}
-			if outputs[0] != "streamed output\n" {
-				t.Fatalf("terminal output = %q, want streamed output", outputs[0])
-			}
-			if hasToolUpdateContent(notes, "call-1") {
-				t.Fatalf("notifications = %#v, bridged terminal tool update should not also carry content", notes)
-			}
-			outputIndex := firstTerminalOutputIndex(notes, "call-1")
-			completedIndex := firstCompletedToolUpdateIndex(notes, "call-1")
-			if outputIndex < 0 || completedIndex < 0 || outputIndex > completedIndex {
-				t.Fatalf("terminal output index = %d, first completed status index = %d; output must arrive before completion: %#v", outputIndex, completedIndex, notes)
-			}
-			return
-		}
-		select {
-		case <-deadline:
-			t.Fatalf("notifications = %#v, want completed terminal status", notes)
-		case <-time.After(10 * time.Millisecond):
-		}
-	}
-}
-
-func TestRuntimeAgentSuppressesSpawnFinalContentWhenBridgeOwnsTerminal(t *testing.T) {
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
-	runtime := terminalBridgeFinalRuntime{toolName: "SPAWN", taskID: "task-spawn-1", terminalID: "subagent-task-spawn-1"}
-	agent, err := runtimeacp.New(runtimeacp.Config{
-		Runtime:  runtime,
-		Sessions: sessions,
-		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
-			return agent.AgentSpec{Name: "fake"}, nil
-		},
-		AppName: "caelis",
-		UserID:  "user-1",
-		AgentInfo: &acp.Implementation{
-			Name:    "caelis-sdk",
-			Version: "0.1.0",
-		},
-	})
-	if err != nil {
-		t.Fatalf("runtimeacp.New() error = %v", err)
-	}
-	activeSession, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
-	if err != nil {
-		t.Fatalf("NewSession() error = %v", err)
-	}
-	cb := &terminalBridgeCallbacks{}
-	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{SessionID: activeSession.SessionID}, cb); err != nil {
-		t.Fatalf("Prompt() error = %v", err)
-	}
-
-	deadline := time.After(2 * time.Second)
-	for {
-		notes := cb.snapshot()
-		if hasCompletedTerminalExit(notes, "call-1", 0) {
-			outputs := terminalOutputPayloads(notes, "call-1")
-			if got, want := len(outputs), 1; got != want {
-				t.Fatalf("terminal outputs = %#v, want exactly one bridged SPAWN output update", outputs)
-			}
-			if outputs[0] != "streamed output\n" {
-				t.Fatalf("terminal output = %q, want streamed output", outputs[0])
-			}
-			if hasToolUpdateContent(notes, "call-1") {
-				t.Fatalf("notifications = %#v, bridged SPAWN final update should not also carry content", notes)
-			}
-			return
-		}
-		select {
-		case <-deadline:
-			t.Fatalf("notifications = %#v, want completed SPAWN terminal status", notes)
-		case <-time.After(10 * time.Millisecond):
-		}
-	}
-}
-
-func TestRuntimeAgentDoesNotEmitNoOutputTerminalPlaceholder(t *testing.T) {
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
-	runtime := terminalBridgeRuntime{omitStreamedOutput: true}
-	agent, err := runtimeacp.New(runtimeacp.Config{
-		Runtime:  runtime,
-		Sessions: sessions,
-		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
-			return agent.AgentSpec{Name: "fake"}, nil
-		},
-		AppName: "caelis",
-		UserID:  "user-1",
-		AgentInfo: &acp.Implementation{
-			Name:    "caelis-sdk",
-			Version: "0.1.0",
-		},
-	})
-	if err != nil {
-		t.Fatalf("runtimeacp.New() error = %v", err)
-	}
-	activeSession, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
-	if err != nil {
-		t.Fatalf("NewSession() error = %v", err)
-	}
-	cb := &terminalBridgeCallbacks{}
-	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{SessionID: activeSession.SessionID}, cb); err != nil {
-		t.Fatalf("Prompt() error = %v", err)
-	}
-
-	deadline := time.After(2 * time.Second)
-	for {
-		notes := cb.snapshot()
-		if hasCompletedTerminalExit(notes, "call-1", 0) {
-			if hasAnyTerminalOutput(notes, "call-1") {
-				t.Fatalf("notifications = %#v, terminal bridge must not synthesize terminal output", notes)
-			}
-			return
-		}
-		select {
-		case <-deadline:
-			t.Fatalf("notifications = %#v, want completed terminal status without synthetic output", notes)
-		case <-time.After(10 * time.Millisecond):
-		}
-	}
-}
-
-func TestRuntimeAgentMapsCancelledTerminalCloseToFailed(t *testing.T) {
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
-	runtime := terminalBridgeRuntime{closedState: "cancelled"}
-	agent, err := runtimeacp.New(runtimeacp.Config{
-		Runtime:  runtime,
-		Sessions: sessions,
-		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
-			return agent.AgentSpec{Name: "fake"}, nil
-		},
-		AppName: "caelis",
-		UserID:  "user-1",
-		AgentInfo: &acp.Implementation{
-			Name:    "caelis-sdk",
-			Version: "0.1.0",
-		},
-	})
-	if err != nil {
-		t.Fatalf("runtimeacp.New() error = %v", err)
-	}
-	activeSession, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
-	if err != nil {
-		t.Fatalf("NewSession() error = %v", err)
-	}
-	cb := &terminalBridgeCallbacks{}
-	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{SessionID: activeSession.SessionID}, cb); err != nil {
-		t.Fatalf("Prompt() error = %v", err)
-	}
-
-	deadline := time.After(2 * time.Second)
-	for {
-		notes := cb.snapshot()
-		if hasFailedTerminalExit(notes, "call-1") {
-			return
-		}
-		select {
-		case <-deadline:
-			t.Fatalf("notifications = %#v, want cancelled terminal close mapped to failed status", notes)
-		case <-time.After(10 * time.Millisecond):
-		}
+	if got := terminalOutputPayloads(cb.notifications, "call-1"); strings.Join(got, "") != "streamed output\n" {
+		t.Fatalf("terminal output payloads = %#v, want terminal output meta", got)
 	}
 }
 
@@ -777,6 +494,40 @@ func TestRuntimeAgentPromptDeduplicatesFinalReasoningReplay(t *testing.T) {
 	want := []string{"任务已", "启动"}
 	if strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Fatalf("thought chunks = %#v, want final replay suppressed with %#v", got, want)
+	}
+}
+
+func TestRuntimeAgentPromptDeduplicatesNarrativeReplayAcrossToolBoundary(t *testing.T) {
+	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	agent, err := runtimeacp.New(runtimeacp.Config{
+		Runtime:  narrativeToolBoundaryReplayRuntime{},
+		Sessions: sessions,
+		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
+			return agent.AgentSpec{Name: "fake"}, nil
+		},
+		AppName: "caelis",
+		UserID:  "user-1",
+		AgentInfo: &acp.Implementation{
+			Name:    "caelis-sdk",
+			Version: "0.1.0",
+		},
+	})
+	if err != nil {
+		t.Fatalf("runtimeacp.New() error = %v", err)
+	}
+	activeSession, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatalf("NewSession() error = %v", err)
+	}
+	cb := &recordingPromptCallbacks{}
+	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{SessionID: activeSession.SessionID}, cb); err != nil {
+		t.Fatalf("Prompt() error = %v", err)
+	}
+	if got, want := agentThoughtChunks(cb.notifications), []string{"thinking"}; strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("thought chunks = %#v, want %#v", got, want)
+	}
+	if got, want := agentMessageChunks(cb.notifications), []string{"hello"}; strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("assistant chunks = %#v, want final replay across tool boundary suppressed with %#v", got, want)
 	}
 }
 
@@ -999,13 +750,14 @@ func newRuntimeAgentWithSessionsAndConfig(t *testing.T, sessions session.Service
 			Name:    "caelis-sdk",
 			Version: "0.1.0",
 		},
-		Loader:        override.Loader,
-		Modes:         override.Modes,
-		ApprovalModes: override.ApprovalModes,
-		Config:        override.Config,
-		Models:        override.Models,
-		Commands:      override.Commands,
-		PromptCaps:    override.PromptCaps,
+		Loader:              override.Loader,
+		Modes:               override.Modes,
+		ApprovalModes:       override.ApprovalModes,
+		Config:              override.Config,
+		Models:              override.Models,
+		Commands:            override.Commands,
+		PromptRouterFactory: override.PromptRouterFactory,
+		PromptCaps:          override.PromptCaps,
 	}
 	if override.AgentInfo != nil {
 		cfg.AgentInfo = override.AgentInfo
@@ -1045,6 +797,22 @@ func (testModeProvider) SessionModes(context.Context, session.Session) (*acp.Ses
 }
 
 func (testModeProvider) SetSessionMode(context.Context, acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error) {
+	return acp.SetSessionModeResponse{}, nil
+}
+
+type recordingModeProvider struct {
+	sessions []session.Session
+}
+
+func (p *recordingModeProvider) SessionModes(_ context.Context, activeSession session.Session) (*acp.SessionModeState, error) {
+	p.sessions = append(p.sessions, session.CloneSession(activeSession))
+	return &acp.SessionModeState{
+		AvailableModes: []acp.SessionMode{{ID: "default", Name: "Default"}},
+		CurrentModeID:  "default",
+	}, nil
+}
+
+func (p *recordingModeProvider) SetSessionMode(context.Context, acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error) {
 	return acp.SetSessionModeResponse{}, nil
 }
 
@@ -1089,10 +857,60 @@ func (testConfigProvider) SetSessionConfigOption(context.Context, acp.SetSession
 	return acp.SetSessionConfigOptionResponse{}, nil
 }
 
-type sideACPCommandProvider []acp.AvailableCommand
+type availableCommandProvider []acp.AvailableCommand
 
-func (p sideACPCommandProvider) AvailableCommands(context.Context, string) ([]acp.AvailableCommand, error) {
+func (p availableCommandProvider) AvailableCommands(context.Context, string) ([]acp.AvailableCommand, error) {
 	return append([]acp.AvailableCommand(nil), p...), nil
+}
+
+type testControlTurn struct {
+	events chan eventstream.Envelope
+	closed bool
+}
+
+func newTestControlTurn(events ...eventstream.Envelope) *testControlTurn {
+	ch := make(chan eventstream.Envelope, len(events))
+	for _, env := range events {
+		ch <- env
+	}
+	close(ch)
+	return &testControlTurn{events: ch}
+}
+
+func (t *testControlTurn) HandleID() string { return "handle-1" }
+func (t *testControlTurn) RunID() string    { return "run-1" }
+func (t *testControlTurn) TurnID() string   { return "turn-1" }
+
+func (t *testControlTurn) Events() <-chan eventstream.Envelope {
+	return t.events
+}
+
+func (t *testControlTurn) SubmitApproval(context.Context, control.ApprovalDecision) error {
+	return nil
+}
+
+func (t *testControlTurn) Cancel() {}
+
+func (t *testControlTurn) Close() error {
+	t.closed = true
+	return nil
+}
+
+type testPromptStreamSubscriber struct {
+	events []eventstream.Envelope
+}
+
+func (s testPromptStreamSubscriber) SubscribeStream(_ context.Context, env eventstream.Envelope) (<-chan eventstream.Envelope, bool) {
+	update, ok := eventstream.ToolCallUpdateFromEnvelope(env)
+	if !ok || update.Status == nil || *update.Status != acp.ToolStatusInProgress {
+		return nil, false
+	}
+	ch := make(chan eventstream.Envelope, len(s.events))
+	for _, env := range s.events {
+		ch <- env
+	}
+	close(ch)
+	return ch, true
 }
 
 type recordingPromptCallbacks struct {
@@ -1110,6 +928,21 @@ func (c *recordingPromptCallbacks) RequestPermission(context.Context, acp.Reques
 	}, nil
 }
 
+type errorOnAgentMessageCallbacks struct {
+	err error
+}
+
+func (c *errorOnAgentMessageCallbacks) SessionUpdate(_ context.Context, notification acp.SessionNotification) error {
+	if chunk, ok := notification.Update.(acp.ContentChunk); ok && chunk.SessionUpdate == acp.UpdateAgentMessage {
+		return c.err
+	}
+	return nil
+}
+
+func (c *errorOnAgentMessageCallbacks) RequestPermission(context.Context, acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error) {
+	return acp.RequestPermissionResponse{}, nil
+}
+
 func firstAgentMessageChunk(notifications []acp.SessionNotification) string {
 	for _, notification := range notifications {
 		chunk, ok := notification.Update.(acp.ContentChunk)
@@ -1124,7 +957,7 @@ func firstAgentMessageChunk(notifications []acp.SessionNotification) string {
 	return ""
 }
 
-type sideACPCommandRuntime struct {
+type promptRouterRuntime struct {
 	sessions      session.Service
 	expectedAgent string
 	runCalled     bool
@@ -1132,16 +965,32 @@ type sideACPCommandRuntime struct {
 	prompt        agent.PromptParticipantRequest
 }
 
-func (r *sideACPCommandRuntime) Run(context.Context, agent.RunRequest) (agent.RunResult, error) {
+type recordingRunRuntime struct {
+	request agent.RunRequest
+}
+
+func (r *recordingRunRuntime) Run(_ context.Context, req agent.RunRequest) (agent.RunResult, error) {
+	r.request = req
+	return agent.RunResult{
+		Session: session.Session{SessionRef: req.SessionRef},
+		Handle:  terminalBridgeRun{},
+	}, nil
+}
+
+func (r *recordingRunRuntime) RunState(context.Context, session.SessionRef) (agent.RunState, error) {
+	return agent.RunState{}, nil
+}
+
+func (r *promptRouterRuntime) Run(context.Context, agent.RunRequest) (agent.RunResult, error) {
 	r.runCalled = true
 	return agent.RunResult{}, errors.New("main runtime should not run side ACP slash command")
 }
 
-func (r *sideACPCommandRuntime) RunState(context.Context, session.SessionRef) (agent.RunState, error) {
+func (r *promptRouterRuntime) RunState(context.Context, session.SessionRef) (agent.RunState, error) {
 	return agent.RunState{}, nil
 }
 
-func (r *sideACPCommandRuntime) AttachParticipant(ctx context.Context, req agent.AttachParticipantRequest) (session.Session, error) {
+func (r *promptRouterRuntime) AttachParticipant(ctx context.Context, req agent.AttachParticipantRequest) (session.Session, error) {
 	r.attach = req
 	if r.expectedAgent != "" && req.Agent != r.expectedAgent {
 		return session.Session{}, fmt.Errorf("agent %q not found", req.Agent)
@@ -1172,7 +1021,7 @@ func (r *sideACPCommandRuntime) AttachParticipant(ctx context.Context, req agent
 	})
 }
 
-func (r *sideACPCommandRuntime) PromptParticipant(ctx context.Context, req agent.PromptParticipantRequest) (agent.RunResult, error) {
+func (r *promptRouterRuntime) PromptParticipant(ctx context.Context, req agent.PromptParticipantRequest) (agent.RunResult, error) {
 	r.prompt = req
 	activeSession, err := r.sessions.Session(ctx, req.SessionRef)
 	if err != nil {
@@ -1189,34 +1038,34 @@ func (r *sideACPCommandRuntime) PromptParticipant(ctx context.Context, req agent
 			Update: &session.ProtocolUpdate{SessionUpdate: acp.UpdateAgentMessage},
 		},
 	}
-	return agent.RunResult{Session: activeSession, Handle: sideACPCommandRun{event: event}}, nil
+	return agent.RunResult{Session: activeSession, Handle: promptRouterRun{event: event}}, nil
 }
 
-func (r *sideACPCommandRuntime) DetachParticipant(context.Context, agent.DetachParticipantRequest) (session.Session, error) {
+func (r *promptRouterRuntime) DetachParticipant(context.Context, agent.DetachParticipantRequest) (session.Session, error) {
 	return session.Session{}, nil
 }
 
-func (r *sideACPCommandRuntime) HandoffController(context.Context, agent.HandoffControllerRequest) (session.Session, error) {
+func (r *promptRouterRuntime) HandoffController(context.Context, agent.HandoffControllerRequest) (session.Session, error) {
 	return session.Session{}, errors.New("handoff not implemented")
 }
 
-type sideACPCommandRun struct {
+type promptRouterRun struct {
 	event *session.Event
 }
 
-func (r sideACPCommandRun) RunID() string { return "side-run-1" }
+func (r promptRouterRun) RunID() string { return "prompt-router-run-1" }
 
-func (r sideACPCommandRun) Events() iter.Seq2[*session.Event, error] {
+func (r promptRouterRun) Events() iter.Seq2[*session.Event, error] {
 	return func(yield func(*session.Event, error) bool) {
 		yield(r.event, nil)
 	}
 }
 
-func (r sideACPCommandRun) Submit(agent.Submission) error { return nil }
-func (r sideACPCommandRun) Cancel() agent.CancelResult {
+func (r promptRouterRun) Submit(agent.Submission) error { return nil }
+func (r promptRouterRun) Cancel() agent.CancelResult {
 	return agent.CancelResult{Status: agent.CancelStatusCancelled}
 }
-func (r sideACPCommandRun) Close() error { return nil }
+func (r promptRouterRun) Close() error { return nil }
 
 type permissionCountingCallbacks struct {
 	recordingPromptCallbacks
@@ -1308,6 +1157,7 @@ type terminalBridgeRuntime struct {
 	taskID             string
 	terminalID         string
 	omitStreamedOutput bool
+	includeFinalEvent  bool
 }
 
 func (r terminalBridgeRuntime) Run(_ context.Context, req agent.RunRequest) (agent.RunResult, error) {
@@ -1328,48 +1178,77 @@ func (r terminalBridgeRuntime) Run(_ context.Context, req agent.RunRequest) (age
 	if strings.EqualFold(toolName, "SPAWN") {
 		rawInput = map[string]any{"agent": "claude", "prompt": "stream child output"}
 	}
-	return agent.RunResult{
-		Handle: terminalBridgeRun{events: []*session.Event{
-			{
-				SessionID: sessionID,
-				Type:      session.EventTypeToolCall,
-				Protocol: &session.EventProtocol{
-					Update: &session.ProtocolUpdate{
-						SessionUpdate: string(session.ProtocolUpdateTypeToolCall),
-						ToolCallID:    "call-1",
-						Kind:          toolName,
-						Status:        "pending",
-						RawInput:      rawInput,
-					},
+	events := []*session.Event{
+		{
+			SessionID: sessionID,
+			Type:      session.EventTypeToolCall,
+			Protocol: &session.EventProtocol{
+				Update: &session.ProtocolUpdate{
+					SessionUpdate: string(session.ProtocolUpdateTypeToolCall),
+					ToolCallID:    "call-1",
+					Kind:          toolName,
+					Status:        "pending",
+					RawInput:      rawInput,
 				},
 			},
-			{
-				SessionID:  sessionID,
-				Type:       session.EventTypeToolResult,
-				Visibility: session.VisibilityUIOnly,
-				Protocol: &session.EventProtocol{
-					Update: &session.ProtocolUpdate{
-						SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate),
-						ToolCallID:    "call-1",
-						Kind:          toolName,
-						Status:        "running",
-						Content:       []session.ProtocolToolCallContent{{Type: "terminal", TerminalID: terminalID}},
-					},
+		},
+		{
+			SessionID:  sessionID,
+			Type:       session.EventTypeToolResult,
+			Visibility: session.VisibilityUIOnly,
+			Protocol: &session.EventProtocol{
+				Update: &session.ProtocolUpdate{
+					SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate),
+					ToolCallID:    "call-1",
+					Kind:          toolName,
+					Status:        "running",
+					Content:       []session.ProtocolToolCallContent{{Type: "terminal", TerminalID: terminalID}},
 				},
-				Meta: map[string]any{
-					"caelis": map[string]any{
-						"runtime": map[string]any{
-							"task": map[string]any{
-								"task_id":     taskID,
-								"terminal_id": terminalID,
-								"running":     true,
-							},
+			},
+			Meta: map[string]any{
+				"caelis": map[string]any{
+					"runtime": map[string]any{
+						"task": map[string]any{
+							"task_id":     taskID,
+							"terminal_id": terminalID,
+							"running":     true,
 						},
 					},
 				},
 			},
-		}},
-	}, nil
+		},
+	}
+	if r.includeFinalEvent {
+		events = append(events, &session.Event{
+			SessionID: sessionID,
+			Type:      session.EventTypeToolResult,
+			Protocol: &session.EventProtocol{
+				Update: &session.ProtocolUpdate{
+					SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate),
+					ToolCallID:    "call-1",
+					Kind:          toolName,
+					Status:        "completed",
+					Content: []session.ProtocolToolCallContent{{
+						Type:       "terminal",
+						TerminalID: terminalID,
+						Content:    session.ProtocolTextContent("streamed output\n"),
+					}},
+				},
+			},
+			Meta: map[string]any{
+				"caelis": map[string]any{
+					"runtime": map[string]any{
+						"task": map[string]any{
+							"task_id":     taskID,
+							"terminal_id": terminalID,
+							"running":     false,
+						},
+					},
+				},
+			},
+		})
+	}
+	return agent.RunResult{Handle: terminalBridgeRun{events: events}}, nil
 }
 
 func (terminalBridgeRuntime) RunState(context.Context, session.SessionRef) (agent.RunState, error) {
@@ -1557,6 +1436,67 @@ func (narrativeThoughtReplayRuntime) RunState(context.Context, session.SessionRe
 	return agent.RunState{}, nil
 }
 
+type narrativeToolBoundaryReplayRuntime struct{}
+
+func (narrativeToolBoundaryReplayRuntime) Run(_ context.Context, req agent.RunRequest) (agent.RunResult, error) {
+	sessionID := req.SessionRef.SessionID
+	liveThought := model.NewReasoningMessage(model.RoleAssistant, "thinking", model.ReasoningVisibilityVisible)
+	liveMessage := model.NewTextMessage(model.RoleAssistant, "hello")
+	finalMessage := model.NewMessage(
+		model.RoleAssistant,
+		model.NewReasoningPart("thinking", model.ReasoningVisibilityVisible),
+		model.NewTextPart("hello"),
+	)
+	return agent.RunResult{
+		Session: session.Session{SessionRef: req.SessionRef},
+		Handle: terminalBridgeRun{events: []*session.Event{
+			{
+				SessionID:  sessionID,
+				Type:       session.EventTypeAssistant,
+				Message:    &liveThought,
+				Text:       "thinking",
+				Visibility: session.VisibilityUIOnly,
+				Protocol: &session.EventProtocol{
+					Update: &session.ProtocolUpdate{SessionUpdate: string(session.ProtocolUpdateTypeAgentThought)},
+				},
+			},
+			{
+				SessionID:  sessionID,
+				Type:       session.EventTypeAssistant,
+				Message:    &liveMessage,
+				Text:       "hello",
+				Visibility: session.VisibilityUIOnly,
+				Protocol: &session.EventProtocol{
+					Update: &session.ProtocolUpdate{SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage)},
+				},
+			},
+			{
+				SessionID:  sessionID,
+				Type:       session.EventTypeToolCall,
+				Visibility: session.VisibilityUIOnly,
+				Protocol: &session.EventProtocol{
+					Update: &session.ProtocolUpdate{
+						SessionUpdate: string(session.ProtocolUpdateTypeToolCall),
+						ToolCallID:    "call-1",
+						Kind:          "READ",
+						Status:        "completed",
+					},
+				},
+			},
+			{
+				SessionID: sessionID,
+				Type:      session.EventTypeAssistant,
+				Message:   &finalMessage,
+				Text:      "hello",
+			},
+		}},
+	}, nil
+}
+
+func (narrativeToolBoundaryReplayRuntime) RunState(context.Context, session.SessionRef) (agent.RunState, error) {
+	return agent.RunState{}, nil
+}
+
 type terminalBridgeRun struct {
 	events []*session.Event
 }
@@ -1654,55 +1594,15 @@ func (c *terminalBridgeCallbacks) snapshot() []acp.SessionNotification {
 	return append([]acp.SessionNotification(nil), c.notifications...)
 }
 
-func hasTerminalInfo(notifications []acp.SessionNotification, terminalID string) bool {
-	for _, notification := range notifications {
-		call, ok := notification.Update.(acp.ToolCall)
-		if !ok {
-			continue
-		}
-		info := terminalRuntimeMeta(call.Meta, terminalID)
-		if info != nil {
-			return true
-		}
-	}
-	return false
-}
-
-func hasTerminalOutput(notifications []acp.SessionNotification, terminalID string, data string) bool {
-	for _, notification := range notifications {
-		update, ok := notification.Update.(acp.ToolCallUpdate)
-		if !ok {
-			continue
-		}
-		if terminalOutputData(update.Meta, terminalID) == data {
-			return true
-		}
-	}
-	return false
-}
-
-func hasAnyTerminalOutput(notifications []acp.SessionNotification, terminalID string) bool {
-	for _, notification := range notifications {
-		update, ok := notification.Update.(acp.ToolCallUpdate)
-		if !ok {
-			continue
-		}
-		if terminalOutputData(update.Meta, terminalID) != "" {
-			return true
-		}
-	}
-	return false
-}
-
-func terminalOutputPayloads(notifications []acp.SessionNotification, terminalID string) []string {
+func terminalOutputPayloads(notifications []acp.SessionNotification, toolCallID string) []string {
 	out := []string{}
 	for _, notification := range notifications {
 		update, ok := notification.Update.(acp.ToolCallUpdate)
-		if !ok {
+		if !ok || strings.TrimSpace(update.ToolCallID) != toolCallID {
 			continue
 		}
-		if text := terminalOutputData(update.Meta, terminalID); text != "" {
-			out = append(out, text)
+		if output, ok := metautil.TerminalOutput(update.Meta); ok {
+			out = append(out, output.Data)
 		}
 	}
 	return out
@@ -1721,17 +1621,83 @@ func hasToolUpdateContent(notifications []acp.SessionNotification, toolCallID st
 	return false
 }
 
-func firstTerminalOutputIndex(notifications []acp.SessionNotification, terminalID string) int {
-	for i, notification := range notifications {
-		update, ok := notification.Update.(acp.ToolCallUpdate)
-		if !ok {
-			continue
-		}
-		if terminalOutputData(update.Meta, terminalID) != "" {
-			return i
+func hasToolCallNotification(notifications []acp.SessionNotification, toolCallID string) bool {
+	for _, notification := range notifications {
+		switch update := notification.Update.(type) {
+		case acp.ToolCall:
+			if strings.TrimSpace(update.ToolCallID) == toolCallID {
+				return true
+			}
+		case acp.ToolCallUpdate:
+			if strings.TrimSpace(update.ToolCallID) == toolCallID {
+				return true
+			}
 		}
 	}
-	return -1
+	return false
+}
+
+func hasTerminalContent(notifications []acp.SessionNotification, toolCallID string, terminalID string, text string) bool {
+	for _, notification := range notifications {
+		update, ok := notification.Update.(acp.ToolCallUpdate)
+		if !ok || strings.TrimSpace(update.ToolCallID) != toolCallID {
+			continue
+		}
+		output, ok := metautil.TerminalOutput(update.Meta)
+		if ok && strings.TrimSpace(output.TerminalID) == terminalID && strings.Contains(output.Data, text) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasTerminalInfo(notifications []acp.SessionNotification, toolCallID string, terminalID string) bool {
+	for _, notification := range notifications {
+		switch update := notification.Update.(type) {
+		case acp.ToolCall:
+			if strings.TrimSpace(update.ToolCallID) != toolCallID {
+				continue
+			}
+			if info, ok := metautil.TerminalInfo(update.Meta); ok && strings.TrimSpace(info.TerminalID) == terminalID {
+				return true
+			}
+		case acp.ToolCallUpdate:
+			if strings.TrimSpace(update.ToolCallID) != toolCallID {
+				continue
+			}
+			if info, ok := metautil.TerminalInfo(update.Meta); ok && strings.TrimSpace(info.TerminalID) == terminalID {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func transientTerminalStreamMetaForTest(mode string) map[string]any {
+	return map[string]any{
+		"caelis": map[string]any{
+			"transient": true,
+			"runtime": map[string]any{
+				"stream": map[string]any{
+					"mode": strings.TrimSpace(mode),
+				},
+			},
+		},
+	}
+}
+
+func mirroredSubagentStreamMetaForTest(parentCallID string, parentTool string) map[string]any {
+	return map[string]any{
+		"caelis": map[string]any{
+			"runtime": map[string]any{
+				"stream": map[string]any{
+					"parent_call_id":          strings.TrimSpace(parentCallID),
+					"parent_tool":             strings.TrimSpace(parentTool),
+					"mirrored_to_parent_tool": true,
+				},
+			},
+		},
+	}
 }
 
 func firstCompletedToolUpdateIndex(notifications []acp.SessionNotification, terminalID string) int {
@@ -1745,82 +1711,6 @@ func firstCompletedToolUpdateIndex(notifications []acp.SessionNotification, term
 		}
 	}
 	return -1
-}
-
-func hasTerminalExit(notifications []acp.SessionNotification, terminalID string, exitCode int) bool {
-	return terminalExit(notifications, terminalID, "", exitCode, true) != nil
-}
-
-func hasCompletedTerminalExit(notifications []acp.SessionNotification, terminalID string, exitCode int) bool {
-	return terminalExit(notifications, terminalID, acp.ToolStatusCompleted, exitCode, true) != nil
-}
-
-func hasFailedTerminalExit(notifications []acp.SessionNotification, terminalID string) bool {
-	return terminalExit(notifications, terminalID, acp.ToolStatusFailed, 0, false) != nil
-}
-
-func terminalExit(notifications []acp.SessionNotification, terminalID string, status string, exitCode int, checkExitCode bool) *acp.ToolCallUpdate {
-	for _, notification := range notifications {
-		update, ok := notification.Update.(acp.ToolCallUpdate)
-		if !ok {
-			continue
-		}
-		if update.Status == nil {
-			continue
-		}
-		if status != "" && *update.Status != status {
-			continue
-		}
-		exit := terminalExitMeta(update.Meta, terminalID)
-		if exit == nil {
-			continue
-		}
-		if checkExitCode && metaInt(exit["exit_code"]) != exitCode {
-			continue
-		}
-		if strings.TrimSpace(update.ToolCallID) == terminalID {
-			return &update
-		}
-	}
-	return nil
-}
-
-func terminalOutputData(meta map[string]any, terminalID string) string {
-	output := metautil.RuntimeSection(meta, metautil.Terminal)
-	if output == nil || output["terminal_id"] != terminalID {
-		return ""
-	}
-	text, _ := output["data"].(string)
-	return text
-}
-
-func terminalExitMeta(meta map[string]any, terminalID string) map[string]any {
-	exit := metautil.RuntimeSection(meta, metautil.Terminal)
-	if exit == nil || exit["terminal_id"] != terminalID {
-		return nil
-	}
-	return exit
-}
-
-func terminalRuntimeMeta(meta map[string]any, terminalID string) map[string]any {
-	terminalMeta := metautil.RuntimeSection(meta, metautil.Terminal)
-	if terminalMeta == nil || terminalMeta["terminal_id"] != terminalID {
-		return nil
-	}
-	return terminalMeta
-}
-
-func metaInt(value any) int {
-	switch typed := value.(type) {
-	case int:
-		return typed
-	case int64:
-		return int(typed)
-	case float64:
-		return int(typed)
-	default:
-		return 0
-	}
 }
 
 func agentMessageChunks(notifications []acp.SessionNotification) []string {

@@ -442,7 +442,7 @@ func TestStoreListUsesSessionMetadataIndex(t *testing.T) {
 	}
 }
 
-func TestStoreListRebuildsFromDocumentsWhenSessionIndexIsCorrupt(t *testing.T) {
+func TestStoreListSurfacesCorruptSessionIndex(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -473,23 +473,20 @@ func TestStoreListRebuildsFromDocumentsWhenSessionIndexIsCorrupt(t *testing.T) {
 		t.Fatalf("WriteFile(index) error = %v", err)
 	}
 
-	list, err := store.List(ctx, session.ListSessionsRequest{
+	_, err = store.List(ctx, session.ListSessionsRequest{
 		AppName:      "caelis",
 		UserID:       "user-1",
 		WorkspaceKey: "ws-1",
 	})
-	if err != nil {
-		t.Fatalf("List() error = %v", err)
+	if err == nil {
+		t.Fatal("List() error = nil, want corrupt SQLite index failure")
 	}
-	if got, want := len(list.Sessions), 1; got != want {
-		t.Fatalf("len(List().Sessions) = %d, want %d", got, want)
-	}
-	if got := list.Sessions[0].Title; got != "valid document" {
-		t.Fatalf("List title = %q, want valid document", got)
+	if !strings.Contains(strings.ToLower(err.Error()), "session index") {
+		t.Fatalf("List() error = %v, want session index failure", err)
 	}
 }
 
-func TestStoreListSurfacesIndexRenameError(t *testing.T) {
+func TestStoreListSurfacesSessionIndexOpenError(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -504,14 +501,14 @@ func TestStoreListSurfacesIndexRenameError(t *testing.T) {
 		UserID:  "user-1",
 	})
 	if err == nil {
-		t.Fatal("List() error = nil, want rename failure")
+		t.Fatal("List() error = nil, want index open failure")
 	}
-	if !strings.Contains(strings.ToLower(err.Error()), "rename") {
-		t.Fatalf("List() error = %v, want rename failure to be surfaced", err)
+	if !strings.Contains(strings.ToLower(err.Error()), "database") {
+		t.Fatalf("List() error = %v, want database open failure to be surfaced", err)
 	}
 }
 
-func TestStoreWriteRebuildsCorruptSessionIndexBeforeUpsert(t *testing.T) {
+func TestStoreWriteSurfacesCorruptSessionIndexBeforeUpsert(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -546,19 +543,10 @@ func TestStoreWriteRebuildsCorruptSessionIndexBeforeUpsert(t *testing.T) {
 		UserID:       "user-1",
 		SessionID:    "sess-2",
 		WorkspaceKey: "ws-1",
-	}, session.ControllerBinding{ControllerID: "controller-1"}); err != nil {
-		t.Fatalf("BindController() error = %v", err)
-	}
-	list, err := store.List(ctx, session.ListSessionsRequest{
-		AppName:      "caelis",
-		UserID:       "user-1",
-		WorkspaceKey: "ws-1",
-	})
-	if err != nil {
-		t.Fatalf("List() error = %v", err)
-	}
-	if got, want := len(list.Sessions), 2; got != want {
-		t.Fatalf("len(List().Sessions) = %d, want %d", got, want)
+	}, session.ControllerBinding{ControllerID: "controller-1"}); err == nil {
+		t.Fatal("BindController() error = nil, want corrupt SQLite index failure")
+	} else if !strings.Contains(strings.ToLower(err.Error()), "session index") {
+		t.Fatalf("BindController() error = %v, want session index failure", err)
 	}
 }
 
@@ -999,21 +987,31 @@ func TestStoreSnapshotStateRepairsMissingDocumentState(t *testing.T) {
 
 	root := t.TempDir()
 	at := time.Date(2026, time.April, 19, 11, 22, 33, 0, time.UTC)
-	ref := session.SessionRef{
-		AppName:      "caelis",
-		UserID:       "user-1",
-		SessionID:    "sess-1",
-		WorkspaceKey: "ws-1",
+	store := NewStore(Config{
+		RootDir:            root,
+		SessionIDGenerator: func() string { return "sess-1" },
+		Clock:              func() time.Time { return at },
+	})
+	ref, err := store.GetOrCreate(context.Background(), session.StartSessionRequest{
+		AppName: "caelis",
+		UserID:  "user-1",
+		Workspace: session.WorkspaceRef{
+			Key: "ws-1",
+			CWD: "/tmp/ws-1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("GetOrCreate() error = %v", err)
 	}
-	docPath := rolloutDocumentPath(root, "ws-1", at, "sess-1")
-	if err := os.MkdirAll(filepath.Dir(docPath), 0o700); err != nil {
-		t.Fatalf("MkdirAll(doc dir) error = %v", err)
+	docPath, err := store.resolveDocumentPath(ref.SessionID, ref.WorkspaceKey)
+	if err != nil {
+		t.Fatalf("resolveDocumentPath() error = %v", err)
 	}
 	data, err := json.MarshalIndent(map[string]any{
 		"kind":    documentKind,
 		"version": documentVersion,
 		"session": session.Session{
-			SessionRef: ref,
+			SessionRef: ref.SessionRef,
 			CreatedAt:  at,
 			UpdatedAt:  at,
 		},
@@ -1025,11 +1023,11 @@ func TestStoreSnapshotStateRepairsMissingDocumentState(t *testing.T) {
 		t.Fatalf("WriteFile(doc) error = %v", err)
 	}
 
-	store := NewStore(Config{
+	reloaded := NewStore(Config{
 		RootDir: root,
 		Clock:   func() time.Time { return at.Add(time.Minute) },
 	})
-	state, err := store.SnapshotState(context.Background(), ref)
+	state, err := reloaded.SnapshotState(context.Background(), ref.SessionRef)
 	if err != nil {
 		t.Fatalf("SnapshotState() error = %v", err)
 	}
@@ -1215,7 +1213,7 @@ func TestStoreListSessionsRecursesRolloutDirectories(t *testing.T) {
 	}
 }
 
-func TestStoreGetOrCreateIsolatesSameSessionIDAcrossWorkspaces(t *testing.T) {
+func TestStoreGetOrCreateRejectsSameSessionIDAcrossWorkspaces(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -1238,7 +1236,7 @@ func TestStoreGetOrCreateIsolatesSameSessionIDAcrossWorkspaces(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetOrCreate(ws-a) error = %v", err)
 	}
-	second, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+	_, err = store.GetOrCreate(ctx, session.StartSessionRequest{
 		AppName:            "caelis",
 		UserID:             "user-1",
 		PreferredSessionID: "default",
@@ -1247,26 +1245,22 @@ func TestStoreGetOrCreateIsolatesSameSessionIDAcrossWorkspaces(t *testing.T) {
 			CWD: "/tmp/ws-b",
 		},
 	})
-	if err != nil {
-		t.Fatalf("GetOrCreate(ws-b) error = %v", err)
+	if !errors.Is(err, session.ErrInvalidSession) {
+		t.Fatalf("GetOrCreate(ws-b) error = %v, want ErrInvalidSession", err)
 	}
 
 	if first.WorkspaceKey != "ws-a" {
 		t.Fatalf("first.WorkspaceKey = %q, want ws-a", first.WorkspaceKey)
 	}
-	if second.WorkspaceKey != "ws-b" {
-		t.Fatalf("second.WorkspaceKey = %q, want ws-b", second.WorkspaceKey)
-	}
 
 	firstPath := rolloutDocumentPath(root, "ws-a", at, "default")
-	secondPath := rolloutDocumentPath(root, "ws-b", at, "default")
 	firstDoc := readPersistedDocument(t, firstPath)
-	secondDoc := readPersistedDocument(t, secondPath)
 	if firstDoc.Session.WorkspaceKey != "ws-a" {
 		t.Fatalf("first document workspace = %q, want ws-a", firstDoc.Session.WorkspaceKey)
 	}
-	if secondDoc.Session.WorkspaceKey != "ws-b" {
-		t.Fatalf("second document workspace = %q, want ws-b", secondDoc.Session.WorkspaceKey)
+	secondPath := rolloutDocumentPath(root, "ws-b", at, "default")
+	if _, err := os.Stat(secondPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("second document stat error = %v, want not exist", err)
 	}
 }
 
@@ -1305,47 +1299,39 @@ func TestStoreGetLoadsSessionWithoutWorkspaceKey(t *testing.T) {
 	}
 }
 
-func TestStoreRequiresWorkspaceKeyWhenSessionIDMatchesMultipleWorkspaces(t *testing.T) {
+func TestStoreGlobalSessionIDResolvesAcrossStoreReopen(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
 	store := NewStore(Config{RootDir: root})
 	ctx := context.Background()
-	for _, workspaceKey := range []string{"ws-a", "ws-b"} {
-		if _, err := store.GetOrCreate(ctx, session.StartSessionRequest{
-			AppName:            "caelis",
-			UserID:             "user-1",
-			PreferredSessionID: "shared",
-			Workspace: session.WorkspaceRef{
-				Key: workspaceKey,
-				CWD: "/tmp/" + workspaceKey,
-			},
-		}); err != nil {
-			t.Fatalf("GetOrCreate(%s) error = %v", workspaceKey, err)
-		}
+	created, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+		AppName:            "caelis",
+		UserID:             "user-1",
+		PreferredSessionID: "shared",
+		Workspace: session.WorkspaceRef{
+			Key: "ws-a",
+			CWD: "/tmp/ws-a",
+		},
+	})
+	if err != nil {
+		t.Fatalf("GetOrCreate(shared) error = %v", err)
 	}
 
 	reloaded := NewService(NewStore(Config{RootDir: root}))
-	_, err := reloaded.Session(ctx, session.SessionRef{
+	loaded, err := reloaded.Session(ctx, session.SessionRef{
 		AppName:   "caelis",
 		UserID:    "user-1",
 		SessionID: "shared",
 	})
-	if !errors.Is(err, session.ErrAmbiguousSession) {
-		t.Fatalf("Session(without workspace) error = %v, want ErrAmbiguousSession", err)
-	}
-
-	loaded, err := reloaded.Session(ctx, session.SessionRef{
-		AppName:      "caelis",
-		UserID:       "user-1",
-		SessionID:    "shared",
-		WorkspaceKey: "ws-b",
-	})
 	if err != nil {
-		t.Fatalf("Session(ws-b) error = %v", err)
+		t.Fatalf("Session(without workspace) error = %v", err)
 	}
-	if got := loaded.WorkspaceKey; got != "ws-b" {
-		t.Fatalf("loaded workspace = %q, want ws-b", got)
+	if loaded.SessionID != created.SessionID {
+		t.Fatalf("loaded session id = %q, want %q", loaded.SessionID, created.SessionID)
+	}
+	if got := loaded.WorkspaceKey; got != "ws-a" {
+		t.Fatalf("loaded workspace = %q, want ws-a", got)
 	}
 }
 

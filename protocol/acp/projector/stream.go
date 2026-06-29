@@ -16,19 +16,20 @@ import (
 // running tool update. The kernel extracts this request from runtime state;
 // projector owns the ACP envelope shape emitted for live clients.
 type StreamRequest struct {
-	HandleID      string
-	RunID         string
-	TurnID        string
-	SessionRef    session.SessionRef
-	CallID        string
-	ToolName      string
-	RawInput      map[string]any
-	Ref           stream.Ref
-	Cursor        stream.Cursor
-	Origin        *gateway.EventOrigin
-	Actor         string
-	Scope         gateway.EventScope
-	ParticipantID string
+	HandleID          string
+	RunID             string
+	TurnID            string
+	SessionRef        session.SessionRef
+	CallID            string
+	ToolName          string
+	RawInput          map[string]any
+	Ref               stream.Ref
+	DisplayTerminalID string
+	Cursor            stream.Cursor
+	Origin            *gateway.EventOrigin
+	Actor             string
+	Scope             gateway.EventScope
+	ParticipantID     string
 }
 
 // Key returns one stable subscription identity for deduplicating live output
@@ -46,20 +47,10 @@ func (r StreamRequest) Key() string {
 // ACP-native envelopes for live clients.
 func ProjectStreamFrame(req StreamRequest, frame stream.Frame) []eventstream.Envelope {
 	out := make([]eventstream.Envelope, 0, 2)
-	embedded := streamFrameEmbeddedEvents(req, frame)
 	if strings.EqualFold(strings.TrimSpace(req.ToolName), "SPAWN") {
-		parent := subagentStreamFrameEvents(req, frame)
-		if len(embedded) > 0 {
-			if len(parent) > 0 {
-				for i := range embedded {
-					embedded[i].Meta = markStreamFrameMirroredToParentTool(embedded[i].Meta)
-				}
-			}
-			out = append(out, embedded...)
-		}
-		out = append(out, parent...)
-		return out
+		return subagentStreamFrameEvents(req, frame)
 	}
+	embedded := streamFrameEmbeddedEvents(req, frame)
 	out = append(out, embedded...)
 	if frame.Closed {
 		out = append(out, streamFinalFrameEvent(req, frame))
@@ -75,46 +66,70 @@ func subagentStreamFrameEvents(req StreamRequest, frame stream.Frame) []eventstr
 	if frame.Closed {
 		return []eventstream.Envelope{subagentFinalFrameEvent(req, frame)}
 	}
-	if !frame.Running || frame.Text == "" || !shouldProjectFrameTextToParentTool(frame) {
+	if !frame.Running || frame.Text == "" {
 		return nil
 	}
 	if taskID := strings.TrimSpace(req.Ref.TaskID); taskID != "" {
 		frame = stream.CloneFrame(frame)
 		frame.Ref.TaskID = taskID
+		if terminalID := strings.TrimSpace(req.Ref.TerminalID); terminalID != "" {
+			frame.Ref.TerminalID = terminalID
+		}
 	}
 	return []eventstream.Envelope{streamFrameEvent(req, frame)}
 }
 
 func streamFrameEvent(req StreamRequest, frame stream.Frame) eventstream.Envelope {
-	terminalID := firstNonEmpty(frame.Ref.TerminalID, req.Ref.TerminalID)
-	return streamToolUpdateEnvelope(req, frame, gateway.ToolStatusRunning, false, terminalACPContent(frame.Text, terminalID), streamFrameMeta("append"))
+	return streamToolUpdateEnvelope(req, frame, gateway.ToolStatusRunning, true, false, frame.Text, streamFrameMeta("append"))
 }
 
 func streamFinalFrameEvent(req StreamRequest, frame stream.Frame) eventstream.Envelope {
 	status, isErr := subagentFinalToolStatus(frame)
-	terminalID := firstNonEmpty(frame.Ref.TerminalID, req.Ref.TerminalID)
-	finalText := streamFinalTerminalText(frame.Text, frame.Cursor, status)
-	return streamToolUpdateEnvelope(req, frame, status, isErr, terminalACPContent(finalText, terminalID), streamFrameMeta("final"))
+	finalText := ""
+	if frame.Cursor.Output == 0 {
+		finalText = streamFinalTerminalText(frame.Text, frame.Cursor, status)
+	}
+	return streamToolUpdateEnvelope(req, frame, status, true, isErr, finalText, streamFrameMeta("final"))
 }
 
 func subagentFinalFrameEvent(req StreamRequest, frame stream.Frame) eventstream.Envelope {
 	status, isErr := subagentFinalToolStatus(frame)
 	finalMessage := displaypolicy.CleanSubagentFinalOutput(frame.Text)
-	env := streamToolUpdateEnvelope(req, frame, status, isErr, textACPContent(finalMessage), streamFrameMeta("final"))
+	terminalText := ""
+	if frame.Cursor.Output == 0 {
+		terminalText = finalMessage
+	}
+	if terminalID := strings.TrimSpace(req.Ref.TerminalID); terminalID != "" {
+		frame = stream.CloneFrame(frame)
+		frame.Ref.TerminalID = terminalID
+	}
+	env := streamToolUpdateEnvelope(req, frame, status, true, isErr, terminalText, streamFrameMeta("final"))
 	update, _ := env.Update.(ToolCallUpdate)
 	taskID := firstNonEmpty(req.Ref.TaskID, frame.Ref.TaskID)
 	update.Meta = streamFrameToolMeta(update.Meta, req.RawInput, map[string]any{
 		"task_id":     taskID,
-		"terminal_id": firstNonEmpty(frame.Ref.TerminalID, req.Ref.TerminalID),
+		"terminal_id": firstNonEmpty(req.Ref.TerminalID, frame.Ref.TerminalID),
 		"running":     false,
 		"state":       string(status),
 		"result":      finalMessage,
 	}, "", taskID)
+	update.Meta = metautil.WithCompactRuntimeSection(update.Meta, gateway.EventMetaRuntimeTask, map[string]any{
+		gateway.EventMetaRuntimeTaskID:         taskID,
+		gateway.EventMetaRuntimeTaskTerminalID: firstNonEmpty(req.Ref.TerminalID, frame.Ref.TerminalID),
+		"output_cursor":                        frame.Cursor.Output,
+		"running":                              false,
+		"state":                                string(status),
+		"result":                               finalMessage,
+	})
 	env.Update = update
 	return env
 }
 
-func streamToolUpdateEnvelope(req StreamRequest, frame stream.Frame, status gateway.ToolStatus, isErr bool, content []session.ProtocolToolCallContent, meta map[string]any) eventstream.Envelope {
+func streamDisplayTerminalID(req StreamRequest, frame stream.Frame) string {
+	return firstNonEmpty(req.DisplayTerminalID, frame.Ref.TerminalID, req.Ref.TerminalID, req.CallID)
+}
+
+func streamToolUpdateEnvelope(req StreamRequest, frame stream.Frame, status gateway.ToolStatus, includeStatus bool, isErr bool, terminalText string, meta map[string]any) eventstream.Envelope {
 	terminalID := firstNonEmpty(frame.Ref.TerminalID, req.Ref.TerminalID)
 	metaOutput := map[string]any{
 		"task_id":       firstNonEmpty(frame.Ref.TaskID, req.Ref.TaskID),
@@ -125,7 +140,7 @@ func streamToolUpdateEnvelope(req StreamRequest, frame stream.Frame, status gate
 	}
 	if status != gateway.ToolStatusRunning {
 		metaOutput["running"] = false
-		metaOutput["state"] = string(status)
+		metaOutput["state"] = acpToolStatus(string(status))
 	}
 	if state := strings.TrimSpace(frame.State); state != "" {
 		metaOutput["state"] = state
@@ -134,21 +149,19 @@ func streamToolUpdateEnvelope(req StreamRequest, frame stream.Frame, status gate
 	if occurredAt.IsZero() {
 		occurredAt = time.Now()
 	}
-	toolName := strings.TrimSpace(req.ToolName)
 	update := ToolCallUpdate{
 		SessionUpdate: UpdateToolCallInfo,
 		ToolCallID:    strings.TrimSpace(req.CallID),
-		RawInput:      cloneAnyMap(req.RawInput),
-		Content:       schemaToolCallContent(content),
 		Meta:          streamFrameToolMeta(meta, req.RawInput, metaOutput, "", firstNonEmpty(frame.Ref.TaskID, req.Ref.TaskID)),
 	}
-	if toolName != "" {
-		update.Title = stringPtr(toolName)
-		update.Kind = stringPtr(toolName)
+	if terminalText != "" {
+		update.Meta = metautil.WithTerminalOutput(update.Meta, streamDisplayTerminalID(req, frame), terminalText)
 	}
-	if statusText := strings.TrimSpace(string(status)); statusText != "" {
+	if includeStatus {
+		statusText := acpToolStatus(string(status))
 		update.Status = stringPtr(statusText)
 	}
+	update = withDisplayTerminalUpdate(update, req.CallID, req.ToolName)
 	scope := eventstream.Scope(req.Scope)
 	if scope == "" {
 		scope = eventstream.ScopeMain
@@ -183,24 +196,6 @@ func streamFrameMetaForEnvelope(isErr bool) map[string]any {
 	return metautil.WithCompactRuntimeSection(nil, gateway.EventMetaRuntimeTool, map[string]any{"error": true})
 }
 
-func schemaToolCallContent(in []session.ProtocolToolCallContent) []ToolCallContent {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make([]ToolCallContent, 0, len(in))
-	for _, item := range in {
-		out = append(out, ToolCallContent{
-			Type:       strings.TrimSpace(item.Type),
-			Content:    item.Content,
-			TerminalID: strings.TrimSpace(item.TerminalID),
-			Path:       strings.TrimSpace(item.Path),
-			OldText:    item.OldText,
-			NewText:    item.NewText,
-		})
-	}
-	return out
-}
-
 func subagentFinalToolStatus(frame stream.Frame) (gateway.ToolStatus, bool) {
 	state := strings.ToLower(strings.TrimSpace(frame.State))
 	switch state {
@@ -212,28 +207,6 @@ func subagentFinalToolStatus(frame stream.Frame) (gateway.ToolStatus, bool) {
 		return gateway.ToolStatusCancelled, true
 	}
 	return gateway.ToolStatusCompleted, false
-}
-
-func terminalACPContent(text string, terminalID string) []session.ProtocolToolCallContent {
-	if !terminalStreamTextHasContent(text) {
-		return nil
-	}
-	item := session.ProtocolToolCallContent{
-		Type:       "terminal",
-		Content:    session.ProtocolTextContent(text),
-		TerminalID: strings.TrimSpace(terminalID),
-	}
-	return []session.ProtocolToolCallContent{item}
-}
-
-func textACPContent(text string) []session.ProtocolToolCallContent {
-	if text == "" {
-		return nil
-	}
-	return []session.ProtocolToolCallContent{{
-		Type:    "content",
-		Content: session.ProtocolTextContent(text),
-	}}
 }
 
 func streamFinalTerminalText(text string, cursor stream.Cursor, status gateway.ToolStatus) string {
@@ -377,12 +350,6 @@ func markStreamFrameAnchor(meta map[string]any, callID string, toolName string) 
 	caelis[gateway.EventMetaRuntime] = runtimeMeta
 	out[gateway.EventMetaRoot] = caelis
 	return out
-}
-
-func markStreamFrameMirroredToParentTool(meta map[string]any) map[string]any {
-	return metautil.WithCompactRuntimeSection(meta, gateway.EventMetaRuntimeStream, map[string]any{
-		gateway.EventMetaRuntimeStreamMirroredToParentTool: true,
-	})
 }
 
 func streamFrameState(frame stream.Frame) string {

@@ -3,6 +3,7 @@ package file
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -109,11 +110,15 @@ func (s *Store) GetOrCreate(
 
 	var out session.Session
 	if err := s.withRootWriteLock(func() error {
-		doc, err := s.readDocument(ref.SessionID, ref.WorkspaceKey)
+		doc, err := s.readDocument(ref.SessionID)
 		switch {
 		case err == nil:
 			if !matchesRef(doc.Session, ref) {
-				return session.ErrSessionNotFound
+				return fmt.Errorf(
+					"impl/session/file: session %q already exists with different identity: %w",
+					ref.SessionID,
+					session.ErrInvalidSession,
+				)
 			}
 			out = session.CloneSession(doc.Session)
 			return nil
@@ -178,23 +183,7 @@ func (s *Store) List(
 
 	var out session.SessionList
 	if err := s.withRootReadLock(func() error {
-		index, err := s.readSessionIndex()
-		if err != nil {
-			return err
-		}
-		out = s.listFromSessionIndex(index, req)
-		return nil
-	}); err == nil {
-		return out, nil
-	}
-
-	if err := s.withRootWriteLock(func() error {
-		index, err := s.readSessionIndex()
-		if err == nil {
-			out = s.listFromSessionIndex(index, req)
-			return nil
-		}
-		list, err := s.listFromDocuments(req)
+		list, err := s.listFromSessionIndex(req)
 		if err != nil {
 			return err
 		}

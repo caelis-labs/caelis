@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/protocol/acp/client"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
 )
 
 func TestPublicClientLifecycleAndLoadE2E(t *testing.T) {
@@ -94,9 +93,9 @@ func TestPublicClientPermissionAndTerminalE2E(t *testing.T) {
 		mu                    sync.Mutex
 		permissionCount       int
 		terminalID            string
-		displayTerminalInfo   bool
+		displayTerminalOpen   bool
 		displayTerminalOutput bool
-		displayTerminalExit   bool
+		displayTerminalFinal  bool
 		displayTerminalDone   bool
 	)
 	acpClient := startE2EClient(ctx, t, e2eClientConfig{
@@ -119,24 +118,15 @@ func TestPublicClientPermissionAndTerminalE2E(t *testing.T) {
 		OnUpdate: func(update client.UpdateEnvelope) {
 			switch call := update.Update.(type) {
 			case client.ToolCall:
-				if info := metautil.RuntimeSection(call.Meta, metautil.Terminal); info["terminal_id"] == "command-approval-1" {
-					mu.Lock()
-					displayTerminalInfo = true
-					mu.Unlock()
-				}
-			case client.ToolCallUpdate:
-				if output := metautil.RuntimeSection(call.Meta, metautil.Terminal); output["terminal_id"] == "command-approval-1" {
-					if text, _ := output["data"].(string); strings.Contains(text, "child approval ok") {
+				for _, content := range call.Content {
+					if strings.TrimSpace(content.Type) == "terminal" && strings.TrimSpace(content.TerminalID) == "command-approval-1" {
 						mu.Lock()
-						displayTerminalOutput = true
+						displayTerminalOpen = true
+						terminalID = strings.TrimSpace(content.TerminalID)
 						mu.Unlock()
 					}
 				}
-				if exit := metautil.RuntimeSection(call.Meta, metautil.Terminal); exit["terminal_id"] == "command-approval-1" {
-					mu.Lock()
-					displayTerminalExit = true
-					mu.Unlock()
-				}
+			case client.ToolCallUpdate:
 				if strings.TrimSpace(call.ToolCallID) == "command-approval-1" && call.Status != nil && *call.Status == "completed" {
 					mu.Lock()
 					displayTerminalDone = true
@@ -146,11 +136,17 @@ func TestPublicClientPermissionAndTerminalE2E(t *testing.T) {
 					if content.Type == "terminal" && strings.TrimSpace(content.TerminalID) != "" {
 						if strings.TrimSpace(content.TerminalID) == "command-approval-1" {
 							mu.Lock()
+							displayTerminalOpen = true
 							terminalID = strings.TrimSpace(content.TerminalID)
 							mu.Unlock()
 							if text := clientTerminalContentText(content); strings.Contains(text, "child approval ok") {
 								mu.Lock()
 								displayTerminalOutput = true
+								mu.Unlock()
+							}
+							if call.Status != nil && *call.Status == "completed" {
+								mu.Lock()
+								displayTerminalFinal = true
 								mu.Unlock()
 							}
 						}
@@ -203,17 +199,17 @@ func TestPublicClientPermissionAndTerminalE2E(t *testing.T) {
 	deadline := time.After(2 * time.Second)
 	for {
 		mu.Lock()
-		gotInfo := displayTerminalInfo
+		gotOpen := displayTerminalOpen
 		gotOutput := displayTerminalOutput
-		gotExit := displayTerminalExit
+		gotFinal := displayTerminalFinal
 		gotDone := displayTerminalDone
 		mu.Unlock()
-		if gotInfo && gotOutput && gotExit && gotDone {
+		if gotOpen && gotOutput && gotFinal && gotDone {
 			break
 		}
 		select {
 		case <-deadline:
-			t.Fatalf("display terminal meta info=%v output=%v exit=%v done=%v, want all true", gotInfo, gotOutput, gotExit, gotDone)
+			t.Fatalf("display terminal open=%v output=%v final=%v done=%v, want all true", gotOpen, gotOutput, gotFinal, gotDone)
 		case <-time.After(10 * time.Millisecond):
 		}
 	}

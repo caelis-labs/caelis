@@ -8,10 +8,9 @@ import (
 )
 
 const (
-	Root     = gateway.EventMetaRoot
-	Version  = gateway.EventMetaVersion
-	Runtime  = gateway.EventMetaRuntime
-	Terminal = gateway.EventMetaRuntimeTerminal
+	Root    = gateway.EventMetaRoot
+	Version = gateway.EventMetaVersion
+	Runtime = gateway.EventMetaRuntime
 )
 
 // WithRuntimeSection returns a copy of meta with one _meta.caelis.runtime
@@ -80,14 +79,6 @@ func RuntimeSection(meta map[string]any, section string) map[string]any {
 	caelis := mapAt(meta, Root)
 	runtime := mapAt(caelis, Runtime)
 	return CloneMap(mapAt(runtime, section))
-}
-
-func WithoutTerminalData(meta map[string]any) map[string]any {
-	out := WithoutRuntimeSectionKeys(meta, Terminal, "data")
-	if len(out) == 0 {
-		return nil
-	}
-	return out
 }
 
 func WithoutRuntimeSectionKeys(meta map[string]any, section string, keys ...string) map[string]any {

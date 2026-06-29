@@ -2957,6 +2957,62 @@ func TestRuntimeTerminalSubscribeStreamsRunningTask(t *testing.T) {
 	}
 }
 
+func TestRuntimeTerminalSubscribePreservesEchoNewlines(t *testing.T) {
+	t.Parallel()
+
+	sessions, activeSession := newTestSessionService(t, "sess-terminal-newlines")
+	runtime, err := New(Config{
+		Sessions: sessions,
+		AgentFactory: chat.Factory{
+			SystemPrompt: "Use tools when necessary.",
+		},
+		DefaultPolicyMode: presets.ModeAutoReview,
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	sandbox := hostRuntimeForTest(t, activeSession.CWD)
+	command := `for i in 1 2 3; do echo "Step ${i}/3"; sleep 0.02; done`
+	snapshot, err := runtime.tasks.StartCommand(context.Background(), activeSession, activeSession.SessionRef, sandbox, taskapi.CommandStartRequest{
+		Command: command,
+		Workdir: activeSession.CWD,
+		Yield:   1 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("StartCommand() error = %v", err)
+	}
+	terminals := runtime.Streams()
+	if terminals == nil {
+		t.Fatal("Streams() = nil")
+	}
+	subscribeTimeout := 2 * time.Second
+	if goruntime.GOOS == "windows" {
+		subscribeTimeout = 8 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), subscribeTimeout)
+	defer cancel()
+
+	var text strings.Builder
+	for frame, seqErr := range terminals.Subscribe(ctx, stream.SubscribeRequest{
+		Ref: stream.Ref{
+			SessionID: activeSession.SessionID,
+			TaskID:    snapshot.Ref.TaskID,
+		},
+		PollInterval: 5 * time.Millisecond,
+	}) {
+		if seqErr != nil {
+			t.Fatalf("terminal Subscribe() error = %v", seqErr)
+		}
+		if frame == nil {
+			continue
+		}
+		text.WriteString(frame.Text)
+	}
+	if got, want := text.String(), "Step 1/3\nStep 2/3\nStep 3/3\n"; got != want {
+		t.Fatalf("terminal stream text = %q, want %q", got, want)
+	}
+}
+
 func TestRuntimeRunCommandToolUsesDefaultYieldWhenOmitted(t *testing.T) {
 	t.Parallel()
 

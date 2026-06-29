@@ -141,8 +141,7 @@ func permissionToolCallUpdateFromProtocol(call session.ProtocolToolCall) ToolCal
 	}
 	displayTerminalID, _ := displaypolicy.DisplayTerminalID(call.ID, call.Name)
 	update.Content = projectToolContent(call.Content, displayTerminalID)
-	update.Meta = terminalOutputMetaFromProtocolContent(call.Content, displayTerminalID)
-	return update
+	return withDisplayTerminalUpdate(update, call.ID, call.Name)
 }
 
 func rawInputLen(raw any) int {
@@ -404,7 +403,6 @@ func toolCallFromEventToolPayload(tool *session.EventTool) ToolCall {
 		RawOutput:     cloneAnyMap(tool.Output),
 		Content:       projectEventToolContent(tool.Content, displayTerminalID),
 		Locations:     projectEventToolLocations(tool.Locations),
-		Meta:          terminalOutputMetaFromEventToolContent(tool.Content, displayTerminalID),
 	}
 	return withDisplayTerminal(call, tool.Name, rawInput)
 }
@@ -424,7 +422,7 @@ func toolCallFromProtocolUpdate(event *session.Event, update *session.ProtocolUp
 		RawOutput:     cloneAnyMap(update.RawOutput),
 		Content:       projectToolContent(content, displayTerminalID),
 		Locations:     projectToolLocations(update.Locations),
-		Meta:          mergeMeta(terminalOutputMetaFromProtocolContent(content, displayTerminalID), cloneAnyMap(update.Meta)),
+		Meta:          cloneAnyMap(update.Meta),
 	}
 	return withDisplayTerminal(call, name, rawInput)
 }
@@ -434,7 +432,7 @@ func toolCallUpdateForEvent(event *session.Event) (ToolCallUpdate, bool, error) 
 		return ToolCallUpdate{}, false, nil
 	}
 	if event.Tool != nil {
-		return toolCallUpdateFromEventToolPayload(event.Tool), true, nil
+		return toolCallUpdateFromEventToolPayload(event.Tool, event.Meta), true, nil
 	}
 	if update := session.ProtocolUpdateOf(event); update != nil && normalizeUpdateType(update.SessionUpdate) == UpdateToolCallInfo {
 		projected, err := toolCallUpdateFromProtocolUpdate(event, update)
@@ -461,18 +459,18 @@ func toolCallUpdateForEvent(event *session.Event) (ToolCallUpdate, bool, error) 
 	}
 	name := strings.TrimSpace(resp.Name)
 	kind := displaypolicy.ToolKindForName(name)
-	return ToolCallUpdate{
+	out := ToolCallUpdate{
 		SessionUpdate: UpdateToolCallInfo,
 		ToolCallID:    strings.TrimSpace(resp.ID),
 		Kind:          stringPtr(kind),
 		Status:        stringPtr(status),
 		RawOutput:     cloneAnyMap(resp.Result),
-		Content:       terminalContentFromEvent(event),
 		Meta:          protocolUpdateMeta(event),
-	}, true, nil
+	}
+	return withDisplayTerminalUpdate(out, resp.ID, name), true, nil
 }
 
-func toolCallUpdateFromEventToolPayload(tool *session.EventTool) ToolCallUpdate {
+func toolCallUpdateFromEventToolPayload(tool *session.EventTool, meta map[string]any) ToolCallUpdate {
 	if tool == nil {
 		return ToolCallUpdate{SessionUpdate: UpdateToolCallInfo}
 	}
@@ -484,7 +482,6 @@ func toolCallUpdateFromEventToolPayload(tool *session.EventTool) ToolCallUpdate 
 		RawOutput:     cloneAnyMap(tool.Output),
 		Content:       projectEventToolContent(tool.Content, displayTerminalID),
 		Locations:     projectEventToolLocations(tool.Locations),
-		Meta:          terminalOutputMetaFromEventToolContent(tool.Content, displayTerminalID),
 	}
 	if title := strings.TrimSpace(tool.Title); title != "" {
 		out.Title = stringPtr(title)
@@ -497,7 +494,7 @@ func toolCallUpdateFromEventToolPayload(tool *session.EventTool) ToolCallUpdate 
 	if status := acpToolStatus(tool.Status); status != "" {
 		out.Status = stringPtr(status)
 	}
-	return out
+	return withDisplayTerminalUpdate(out, tool.ID, tool.Name)
 }
 
 func toolCallUpdateFromProtocolUpdate(event *session.Event, update *session.ProtocolUpdate) (ToolCallUpdate, error) {
@@ -515,7 +512,7 @@ func toolCallUpdateFromProtocolUpdate(event *session.Event, update *session.Prot
 		RawOutput:     cloneAnyMap(update.RawOutput),
 		Content:       projectToolContent(content, displayTerminalID),
 		Locations:     projectToolLocations(update.Locations),
-		Meta:          mergeMeta(terminalOutputMetaFromProtocolContent(content, displayTerminalID), cloneAnyMap(update.Meta)),
+		Meta:          cloneAnyMap(update.Meta),
 	}
 	if title := strings.TrimSpace(update.Title); title != "" {
 		out.Title = stringPtr(title)
@@ -532,7 +529,7 @@ func toolCallUpdateFromProtocolUpdate(event *session.Event, update *session.Prot
 	if status := acpToolStatus(update.Status); status != "" {
 		out.Status = stringPtr(status)
 	}
-	return out, nil
+	return withDisplayTerminalUpdate(out, id, name), nil
 }
 
 func toolCallUpdateFromProtocol(call session.ProtocolToolCall) (ToolCallUpdate, error) {
@@ -563,19 +560,7 @@ func toolCallUpdateFromProtocol(call session.ProtocolToolCall) (ToolCallUpdate, 
 	}
 	displayTerminalID, _ := displaypolicy.DisplayTerminalID(call.ID, call.Name)
 	update.Content = projectToolContent(call.Content, displayTerminalID)
-	update.Meta = terminalOutputMetaFromProtocolContent(call.Content, displayTerminalID)
-	return update, nil
-}
-
-func terminalContentFromEvent(event *session.Event) []ToolCallContent {
-	terminalID := terminalIDFromEvent(event)
-	if terminalID == "" {
-		return nil
-	}
-	return []ToolCallContent{{
-		Type:       "terminal",
-		TerminalID: terminalID,
-	}}
+	return withDisplayTerminalUpdate(update, call.ID, call.Name), nil
 }
 
 func projectToolContentForTool(content []session.ProtocolToolCallContent, toolCallID string, name string) []ToolCallContent {
@@ -630,7 +615,7 @@ func projectEventToolContent(content []session.EventToolContent, displayTerminal
 		contentType := strings.TrimSpace(item.Type)
 		terminalID := strings.TrimSpace(item.TerminalID)
 		var payload any
-		if !strings.EqualFold(contentType, "terminal") && strings.TrimSpace(item.Text) != "" {
+		if strings.TrimSpace(item.Text) != "" {
 			payload = TextContent{Type: "text", Text: item.Text}
 		}
 		if strings.EqualFold(contentType, "terminal") {
@@ -665,7 +650,6 @@ func projectToolContent(content []session.ProtocolToolCallContent, displayTermin
 		terminalID := strings.TrimSpace(item.TerminalID)
 		contentPayload := item.Content
 		if strings.EqualFold(contentType, "terminal") {
-			contentPayload = nil
 			if strings.TrimSpace(displayTerminalID) != "" {
 				terminalID = strings.TrimSpace(displayTerminalID)
 			}
@@ -687,31 +671,11 @@ func projectToolContent(content []session.ProtocolToolCallContent, displayTermin
 	return out
 }
 
-func terminalIDFromEvent(event *session.Event) string {
+func eventMeta(event *session.Event) map[string]any {
 	if event == nil {
-		return ""
+		return nil
 	}
-	if event.Tool != nil {
-		for _, item := range event.Tool.Content {
-			if !strings.EqualFold(strings.TrimSpace(item.Type), "terminal") {
-				continue
-			}
-			if terminalID := strings.TrimSpace(item.TerminalID); terminalID != "" {
-				return terminalID
-			}
-		}
-		if terminalID, ok := displaypolicy.DisplayTerminalID(event.Tool.ID, event.Tool.Name); ok {
-			return terminalID
-		}
-	}
-	if update := session.ProtocolUpdateOf(event); update != nil {
-		for _, item := range session.ProtocolToolCallContentOf(update) {
-			if terminalID := strings.TrimSpace(item.TerminalID); terminalID != "" {
-				return terminalID
-			}
-		}
-	}
-	return ""
+	return event.Meta
 }
 
 func acpToolStatus(status string) string {

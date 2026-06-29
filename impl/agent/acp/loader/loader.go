@@ -14,23 +14,25 @@ import (
 // SessionServiceLoaderConfig configures one default ACP session/load adapter
 // backed by the SDK session service.
 type SessionServiceLoaderConfig struct {
-	Sessions  session.Service
-	Projector projector.Projector
-	AppName   string
-	UserID    string
-	Modes     acp.ModeProvider
-	Config    acp.ConfigProvider
+	Sessions     session.Service
+	Projector    projector.Projector
+	AppName      string
+	UserID       string
+	WorkspaceKey string
+	Modes        acp.ModeProvider
+	Config       acp.ConfigProvider
 }
 
 // SessionServiceLoader replays one durable SDK session through ACP
 // session/update notifications.
 type SessionServiceLoader struct {
-	sessions  session.Service
-	projector projector.Projector
-	appName   string
-	userID    string
-	modes     acp.ModeProvider
-	config    acp.ConfigProvider
+	sessions     session.Service
+	projector    projector.Projector
+	appName      string
+	userID       string
+	workspaceKey string
+	modes        acp.ModeProvider
+	config       acp.ConfigProvider
 }
 
 // NewSessionServiceLoader constructs one default session/load adapter.
@@ -40,13 +42,23 @@ func NewSessionServiceLoader(cfg SessionServiceLoaderConfig) *SessionServiceLoad
 		eventProjector = projector.EventProjector{}
 	}
 	return &SessionServiceLoader{
-		sessions:  cfg.Sessions,
-		projector: eventProjector,
-		appName:   strings.TrimSpace(cfg.AppName),
-		userID:    strings.TrimSpace(cfg.UserID),
-		modes:     cfg.Modes,
-		config:    cfg.Config,
+		sessions:     cfg.Sessions,
+		projector:    eventProjector,
+		appName:      strings.TrimSpace(cfg.AppName),
+		userID:       strings.TrimSpace(cfg.UserID),
+		workspaceKey: strings.TrimSpace(cfg.WorkspaceKey),
+		modes:        cfg.Modes,
+		config:       cfg.Config,
 	}
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 // LoadSession replays durable canonical history through session/update and

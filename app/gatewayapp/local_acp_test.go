@@ -211,6 +211,86 @@ func TestACPSurfaceAvailableCommandsHideReservedACPAgentNames(t *testing.T) {
 	}
 }
 
+func TestACPSurfaceAvailableCommandsExcludeTUIPrivateCommands(t *testing.T) {
+	ctx := context.Background()
+	stack, activeSession := newStackWithAssemblyForToolTest(t, assembly.ResolvedAssembly{})
+	commands, err := stack.ACPSurface(nil, false, nil).AvailableCommands(ctx, activeSession.SessionID)
+	if err != nil {
+		t.Fatalf("AvailableCommands() error = %v", err)
+	}
+	if acpCommandForToolTest(commands, "status") == nil {
+		t.Fatalf("AvailableCommands() = %#v, want shared status command", commands)
+	}
+	for _, name := range []string{"compact", "review"} {
+		if acpCommandForToolTest(commands, name) == nil {
+			t.Fatalf("AvailableCommands() = %#v, want ACP command %q", commands, name)
+		}
+	}
+	for _, name := range []string{"help", "agent", "subagent", "model", "new", "resume", "connect", "plugin", "exit", "quit"} {
+		if acpCommandForToolTest(commands, name) != nil {
+			t.Fatalf("AvailableCommands() exposed non-ACP command %q: %#v", name, commands)
+		}
+	}
+}
+
+func TestACPSurfaceSetConfigOptionUsesGlobalSessionID(t *testing.T) {
+	ctx := context.Background()
+	stack, err := NewLocalStack(Config{
+		AppName:      "caelis",
+		UserID:       "acp-workspace-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: "ws-b",
+		WorkspaceCWD: "/tmp/ws-b",
+		ApprovalMode: "auto-review",
+		SkillDirs:    []string{t.TempDir()},
+		Sandbox: SandboxConfig{
+			RequestedType: "host",
+		},
+		Model: ModelConfig{
+			Provider: "ollama",
+			Model:    "llama3",
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+	if _, err := stack.Sessions.StartSession(ctx, session.StartSessionRequest{
+		AppName:            stack.AppName,
+		UserID:             stack.UserID,
+		PreferredSessionID: "shared-session",
+		Workspace: session.WorkspaceRef{
+			Key: "ws-b",
+			CWD: "/tmp/ws-b",
+		},
+	}); err != nil {
+		t.Fatalf("StartSession(ws-b) error = %v", err)
+	}
+	surface := stack.ACPSurface(nil, false, nil)
+	resp, err := surface.SetSessionConfigOption(ctx, acp.SetSessionConfigOptionRequest{
+		SessionID: "shared-session",
+		ConfigID:  "mode",
+		Value:     "manual",
+	})
+	if err != nil {
+		t.Fatalf("SetSessionConfigOption(mode) error = %v", err)
+	}
+	if len(resp.ConfigOptions) == 0 {
+		t.Fatalf("SetSessionConfigOption() returned no config options")
+	}
+	wsBState, err := stack.SessionRuntimeState(ctx, session.SessionRef{
+		AppName:      stack.AppName,
+		UserID:       stack.UserID,
+		SessionID:    "shared-session",
+		WorkspaceKey: "ws-b",
+	})
+	if err != nil {
+		t.Fatalf("SessionRuntimeState(ws-b) error = %v", err)
+	}
+	if wsBState.SessionMode != "manual" {
+		t.Fatalf("ws-b session mode = %q, want manual", wsBState.SessionMode)
+	}
+}
+
 func TestRegisterACPAgentRejectsReservedReviewName(t *testing.T) {
 	ctx := context.Background()
 	stack, _ := newStackWithAssemblyForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})

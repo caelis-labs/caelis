@@ -49,6 +49,9 @@ func TestStreamRequestFromACPEventAcceptsInProgressTaskRefWithoutRunningFlag(t *
 	if req.CallID != "call-1" || req.ToolName != "RUN_COMMAND" {
 		t.Fatalf("request = %+v, want RUN_COMMAND call-1", req)
 	}
+	if req.DisplayTerminalID != "call-1" {
+		t.Fatalf("display terminal id = %q, want tool call id fallback", req.DisplayTerminalID)
+	}
 }
 
 func TestStreamRequestFromACPEventDerivesStreamToolFromStandardTitle(t *testing.T) {
@@ -193,6 +196,9 @@ func TestStreamRequestFromACPEventTerminalIDPrecedence(t *testing.T) {
 			}
 			if req.Ref.TerminalID != tt.wantTerminalID {
 				t.Fatalf("terminal id = %q, want %q", req.Ref.TerminalID, tt.wantTerminalID)
+			}
+			if tt.contentTerminalID != "" && req.DisplayTerminalID != tt.contentTerminalID {
+				t.Fatalf("display terminal id = %q, want content terminal id %q", req.DisplayTerminalID, tt.contentTerminalID)
 			}
 		})
 	}

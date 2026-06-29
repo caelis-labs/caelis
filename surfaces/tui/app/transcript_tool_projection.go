@@ -81,9 +81,7 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 	rawInput := transcript.CloneAnyMap(input.RawInput)
 	rawOutput := transcript.RawMap(input.RawOutput)
 	content := acpToolContentToDisplay(input.Content)
-	if len(content) == 0 && !input.GatewayProjection {
-		content = standardACPRawOutputContent(input.RawOutput, input.CallID)
-	}
+	suppressRunningSnapshotOutput := suppressRunningTerminalSnapshotOutput(semanticName, input.ToolKind, input.Meta, status, toolErr)
 	if refinedName := refinedToolDisplayName(semanticName, input.ToolKind, input.ToolTitle, rawInput); refinedName != "" {
 		toolName = refinedName
 		semanticName = refinedName
@@ -98,11 +96,16 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 		displayInput = taskDisplayInputForResult(rawInput, displayOutput)
 	}
 	toolOutput := acpprojector.FormatToolContent(content)
+	toolOutputHasTerminalData := false
 	toolOutputSynthetic := false
-	if strings.TrimSpace(toolOutput) == "" {
+	if strings.TrimSpace(toolOutput) == "" && !suppressRunningSnapshotOutput {
 		if terminalOutput := terminalToolOutputText(semanticName, input.ToolKind, rawOutput, input.Meta, content, status, toolErr); terminalOutput != "" {
 			toolOutput = terminalOutput
-		} else if exitText := terminalExitCodeOutputText(semanticName, input.ToolKind, rawOutput, status, toolErr); exitText != "" {
+			toolOutputHasTerminalData = isTerminalPanelToolKind(semanticName, input.ToolKind)
+		}
+	}
+	if strings.TrimSpace(toolOutput) == "" && !toolOutputHasTerminalData {
+		if exitText := terminalExitCodeOutputText(semanticName, input.ToolKind, rawOutput, status, toolErr); exitText != "" {
 			toolOutput = exitText
 			toolOutputSynthetic = true
 		} else if terminalNoOutputPlaceholder(semanticName, input.ToolKind, rawOutput, input.Meta, content, status, toolErr) {
@@ -161,6 +164,20 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 		ToolTaskTargetKind:  displaypolicy.ToolTaskTargetKind(rawInput, displayOutput, input.Meta),
 		Final:               transcriptToolStatusFinal(status, toolErr),
 	}, true
+}
+
+func suppressRunningTerminalSnapshotOutput(toolName string, toolKind string, meta map[string]any, status string, isErr bool) bool {
+	if isErr || transcriptToolStatusFinal(status, isErr) {
+		return false
+	}
+	if !isTerminalPanelToolKind(toolName, toolKind) {
+		return false
+	}
+	if transcript.MetaString(meta, "caelis", "runtime", "stream", "mode") != "" {
+		return false
+	}
+	taskMeta := eventRuntimeTaskMeta(meta)
+	return firstNonEmpty(asString(taskMeta["task_id"]), asString(taskMeta["internal_task_id"]), asString(taskMeta["terminal_id"])) != ""
 }
 
 func inferFinalStatusFromRawOutput(rawOutput map[string]any) (string, bool) {

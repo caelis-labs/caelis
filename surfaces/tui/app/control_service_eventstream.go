@@ -11,6 +11,7 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/protocol/acp/control"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 	"github.com/OnslaughtSnail/caelis/surfaces/transcript"
 )
@@ -387,7 +388,7 @@ func eventStreamTerminalBatchKey(env eventstream.Envelope) (string, bool) {
 	if transcript.StringFromPtr(update.Status) != schema.ToolStatusInProgress {
 		return "", false
 	}
-	text, terminalID := acpTerminalContent(update)
+	text, terminalID := acpTerminalOutput(update)
 	if text == "" {
 		return "", false
 	}
@@ -418,8 +419,8 @@ func mergeEventStreamTerminalEnvelope(dst *eventstream.Envelope, src eventstream
 	dst.Cursor = src.Cursor
 	dst.OccurredAt = src.OccurredAt
 	if srcUpdate, ok := src.Update.(schema.ToolCallUpdate); ok {
-		if text, terminalID := acpTerminalContent(srcUpdate); text != "" {
-			existing, existingTerminalID := acpTerminalContent(dstUpdate)
+		if text, terminalID := acpTerminalOutput(srcUpdate); text != "" {
+			existing, existingTerminalID := acpTerminalOutput(dstUpdate)
 			toolName := acpUpdateToolName(transcript.MergeMeta(transcript.ACPUpdateMeta(dstUpdate), dst.Meta), transcript.StringFromPtr(dstUpdate.Title), transcript.StringFromPtr(dstUpdate.Kind))
 			if strings.EqualFold(strings.TrimSpace(toolName), "RUN_COMMAND") {
 				text = mergeCommandStreamChunk(existing, text)
@@ -429,41 +430,33 @@ func mergeEventStreamTerminalEnvelope(dst *eventstream.Envelope, src eventstream
 			if terminalID == "" {
 				terminalID = existingTerminalID
 			}
-			setACPTerminalEnvelopeContent(dst, text, terminalID)
+			setACPTerminalEnvelopeOutput(dst, text, terminalID)
 		}
 	}
 }
 
-func acpTerminalContent(update schema.ToolCallUpdate) (string, string) {
-	for _, item := range update.Content {
-		if !strings.EqualFold(strings.TrimSpace(item.Type), "terminal") {
-			continue
-		}
-		if text := transcript.ProtocolTextContent(item.Content); text != "" {
-			return text, strings.TrimSpace(item.TerminalID)
-		}
+func acpTerminalOutput(update schema.ToolCallUpdate) (string, string) {
+	output, ok := metautil.TerminalOutput(update.Meta)
+	if ok {
+		return output.Data, output.TerminalID
+	}
+	info, ok := metautil.TerminalInfo(update.Meta)
+	if ok {
+		return "", info.TerminalID
 	}
 	return "", ""
 }
 
-func setACPTerminalEnvelopeContent(env *eventstream.Envelope, text string, terminalID string) {
+func setACPTerminalEnvelopeOutput(env *eventstream.Envelope, text string, terminalID string) {
 	if env == nil || text == "" {
 		return
 	}
 	switch update := env.Update.(type) {
 	case schema.ToolCallUpdate:
-		update.Content = []schema.ToolCallContent{{
-			Type:       "terminal",
-			Content:    schema.TextContent{Type: "text", Text: text},
-			TerminalID: strings.TrimSpace(terminalID),
-		}}
+		update.Meta = metautil.WithTerminalOutput(update.Meta, terminalID, text)
 		env.Update = update
 	case schema.ToolCall:
-		update.Content = []schema.ToolCallContent{{
-			Type:       "terminal",
-			Content:    schema.TextContent{Type: "text", Text: text},
-			TerminalID: strings.TrimSpace(terminalID),
-		}}
+		update.Meta = metautil.WithTerminalOutput(update.Meta, terminalID, text)
 		env.Update = update
 	}
 }

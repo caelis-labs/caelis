@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
@@ -108,12 +109,7 @@ func acpToolPanelUpdate(callID string, command string, output string, status str
 			Kind:          stringPtr(schema.ToolKindExecute),
 			Status:        stringPtr(status),
 			RawInput:      map[string]any{"command": command},
-			Content: []schema.ToolCallContent{{
-				Type:       "terminal",
-				TerminalID: "terminal-1",
-				Content:    schema.TextContent{Type: "text", Text: output},
-			}},
-			Meta: acpToolNameMeta("RUN_COMMAND"),
+			Meta:          metautil.WithTerminalOutput(acpToolNameMeta("RUN_COMMAND"), callID, output),
 		},
 	}
 }

@@ -393,7 +393,11 @@ func sleepRetryDelay(ctx context.Context, delay time.Duration) error {
 	}
 }
 
-// IsRetryableLLMError classifies transient provider and transport failures.
+// IsRetryableLLMError classifies model request failures that are safe to retry.
+// Provider request errors are retried broadly because some compatible gateways
+// occasionally return malformed 4xx responses for otherwise valid payloads. We
+// still exclude caller cancellation, deadlines, and context overflow so control
+// flow and compaction recovery stay immediate.
 func IsRetryableLLMError(err error) bool {
 	if err == nil {
 		return false
@@ -405,18 +409,7 @@ func IsRetryableLLMError(err error) bool {
 	if errors.As(err, &retryable) {
 		return retryable.Retryable()
 	}
-	if status, ok := httpStatusCodeFromError(err); ok {
-		if status >= 500 {
-			return true
-		}
-		switch status {
-		case 408, 409, 425, 429:
-			return true
-		default:
-			return false
-		}
-	}
-	return IsBackpressureLLMError(err) || isLikelyNetworkError(err)
+	return true
 }
 
 // IsBackpressureLLMError classifies provider-side rate limit or overload.
