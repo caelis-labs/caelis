@@ -42,7 +42,10 @@ func statusError(resp *http.Response) error {
 }
 
 func looksLikeContextOverflow(body string, statusCode int) bool {
-	if statusCode != http.StatusBadRequest && statusCode != http.StatusRequestEntityTooLarge {
+	if statusCode != http.StatusBadRequest && statusCode != http.StatusRequestEntityTooLarge && statusCode != http.StatusFailedDependency {
+		return false
+	}
+	if strings.TrimSpace(body) == "" {
 		return false
 	}
 	lower := strings.ToLower(body)

@@ -63,6 +63,22 @@ func TestProjectReplayEventsKeepsFinalThoughtChunksOnly(t *testing.T) {
 	}
 }
 
+func TestProjectReplayEventsSkipsCompactNotice(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectReplayEvents([]eventstream.Envelope{{
+		Kind: eventstream.KindSessionUpdate,
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateCompact,
+			Content:       schema.TextContent{Type: "text", Text: "CONTEXT CHECKPOINT\nObjective: continue"},
+		},
+		Final: true,
+	}}, nil)
+	if len(events) != 0 {
+		t.Fatalf("events = %#v, want compact notice skipped during replay", events)
+	}
+}
+
 func TestProjectReplayEventsProjectsMainDurableTrace(t *testing.T) {
 	t.Parallel()
 

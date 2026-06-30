@@ -36,7 +36,7 @@ func terminalLifecycleHasTranscriptIdentity(env eventstream.Envelope) bool {
 }
 
 func (m *Model) appendEventStreamTranscriptText(text string) (tea.Model, tea.Cmd) {
-	text = strings.TrimSpace(text)
+	text = formatTranscriptNoticeText(text)
 	if text == "" {
 		return m, nil
 	}

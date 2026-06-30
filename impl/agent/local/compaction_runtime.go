@@ -16,18 +16,18 @@ func (r *Runtime) prepareInvocationContext(
 	ref session.SessionRef,
 	req agent.RunRequest,
 	pendingInput *session.Event,
-) ([]*session.Event, map[string]any, error) {
+) (invocationContext, error) {
 	if err := r.recoverRuntimeState(ctx, ref); err != nil {
-		return nil, nil, err
+		return invocationContext{}, err
 	}
 	events, err := r.sessions.Events(ctx, session.EventsRequest{SessionRef: ref})
 	if err != nil {
-		return nil, nil, err
+		return invocationContext{}, err
 	}
 	events = mainInvocationEvents(events)
 	state, err := r.sessions.SnapshotState(ctx, ref)
 	if err != nil {
-		return nil, nil, err
+		return invocationContext{}, err
 	}
 	if state == nil {
 		state = map[string]any{}
@@ -40,17 +40,30 @@ func (r *Runtime) prepareInvocationContext(
 		Model:         req.AgentSpec.Model,
 	})
 	if err != nil {
-		return nil, nil, err
+		return invocationContext{}, err
 	}
 	if result.Compacted && result.CompactEvent != nil {
 		persisted, appendErr := r.persistCompactionArtifacts(ctx, activeSession, ref, result)
 		if appendErr != nil {
-			return nil, nil, appendErr
+			return invocationContext{}, appendErr
 		}
 		sourceEvents := append(session.CloneEvents(events), persisted)
-		return promptEventsWithToolVisibilityMetadata(compact.PromptEventsFromLatestCompact(sourceEvents), sourceEvents), state, nil
+		return invocationContext{
+			PromptEvents: promptEventsWithToolVisibilityMetadata(compact.PromptEventsFromLatestCompact(sourceEvents), sourceEvents),
+			State:        state,
+			LiveCompact:  persisted,
+		}, nil
 	}
-	return promptEventsWithToolVisibilityMetadata(result.PromptEvents, events), state, nil
+	return invocationContext{
+		PromptEvents: promptEventsWithToolVisibilityMetadata(result.PromptEvents, events),
+		State:        state,
+	}, nil
+}
+
+type invocationContext struct {
+	PromptEvents []*session.Event
+	State        map[string]any
+	LiveCompact  *session.Event
 }
 
 type CompactRequest struct {

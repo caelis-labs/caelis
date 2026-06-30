@@ -73,8 +73,23 @@ func TestRuntimeCompactionInjectsCheckpointAndTrimsOldHistory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	if _, err := drainRunnerEvents(t, result.Handle); err != nil {
+	runEvents, err := drainRunnerEvents(t, result.Handle)
+	if err != nil {
 		t.Fatalf("runner error = %v", err)
+	}
+	if !slices.ContainsFunc(runEvents, func(event *session.Event) bool {
+		return event != nil && event.Type == session.EventTypeCompact
+	}) {
+		t.Fatalf("runner events = %#v, want live compact event", runEvents)
+	}
+	userIndex := slices.IndexFunc(runEvents, func(event *session.Event) bool {
+		return event != nil && event.Type == session.EventTypeUser && strings.Contains(session.EventText(event), "continue")
+	})
+	compactIndex := slices.IndexFunc(runEvents, func(event *session.Event) bool {
+		return event != nil && event.Type == session.EventTypeCompact
+	})
+	if userIndex < 0 || compactIndex < 0 || userIndex > compactIndex {
+		t.Fatalf("runner event order = %#v, want user echo before compact notice", runEvents)
 	}
 
 	if testModel.compactionCalls != 1 {

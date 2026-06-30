@@ -13,6 +13,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
+	"github.com/OnslaughtSnail/caelis/surfaces/transcript"
 )
 
 func TestHandleACPEventEnvelopeAppliesToolTerminalSequence(t *testing.T) {
@@ -504,6 +505,90 @@ func TestForwardTurnEventStreamQueuesLiveACPEnvelopes(t *testing.T) {
 	}
 	if model.turnRunning() {
 		t.Fatal("model turn still running after terminal lifecycle")
+	}
+}
+
+func TestHandleACPEventEnvelopeAnchorsAttemptResetNoticeInMainTurn(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(120, 0))
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		ScopeID:   "session-1",
+		TurnID:    "turn-1",
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateAgentMessage,
+			Content:       schema.TextContent{Type: "text", Text: "partial"},
+		},
+	})
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindLifecycle,
+		SessionID: "session-1",
+		ScopeID:   "session-1",
+		TurnID:    "turn-1",
+		Lifecycle: &eventstream.Lifecycle{State: "attempt_reset"},
+		Meta: map[string]any{
+			"caelis": map[string]any{
+				"runtime": map[string]any{
+					"attempt_reset": map[string]any{
+						"attempt":  1,
+						"cause":    "model: http status 424 body=exceeds the context window",
+						"retrying": true,
+					},
+				},
+			},
+		},
+	})
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		ScopeID:   "session-1",
+		TurnID:    "turn-1",
+		Final:     true,
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateAgentMessage,
+			Content:       schema.TextContent{Type: "text", Text: "final"},
+		},
+	})
+
+	block := requireMainACPTurnBlockForTest(t, model)
+	if len(block.Events) != 2 {
+		t.Fatalf("main ACP events = %#v, want retry notice then final answer", block.Events)
+	}
+	if block.Events[0].Kind != SENotice || !strings.Contains(block.Events[0].Text, "retrying (attempt 1)") {
+		t.Fatalf("first event = %#v, want retry notice", block.Events[0])
+	}
+	if block.Events[1].Kind != SEAssistant || block.Events[1].Text != "final" {
+		t.Fatalf("second event = %#v, want final assistant", block.Events[1])
+	}
+}
+
+func TestHandleACPEventEnvelopeAnchorsCompactNoticeInMainTurn(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(120, 0))
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		ScopeID:   "session-1",
+		TurnID:    "turn-1",
+		Final:     true,
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateCompact,
+			Content:       schema.TextContent{Type: "text", Text: "CONTEXT CHECKPOINT\nObjective: continue"},
+		},
+	})
+
+	block := requireMainACPTurnBlockForTest(t, model)
+	if len(block.Events) != 1 || block.Events[0].Kind != SENotice || block.Events[0].Text != "• "+transcript.CompactNoticeLabel {
+		t.Fatalf("main ACP events = %#v, want compact notice", block.Events)
+	}
+	rows := block.Render(BlockRenderContext{Width: 96, TermWidth: 96, Theme: model.theme, ThemeKey: themeRenderCacheKey(model.theme)})
+	if plain := joinRenderedPlain(rows); !strings.Contains(plain, "• "+transcript.CompactNoticeLabel) {
+		t.Fatalf("rendered compact notice = %q", plain)
 	}
 }
 

@@ -17,6 +17,7 @@ const (
 	SEToolCall
 	SEPlan
 	SEApproval
+	SENotice
 )
 
 // SubagentEvent is a single event in a subagent's chronological event stream.

@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/OnslaughtSnail/caelis/surfaces/transcript"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/tuikit"
 )
 
@@ -31,7 +32,7 @@ func (m *Model) applyTranscriptEvent(event TranscriptEvent) (tea.Model, tea.Cmd)
 	case TranscriptEventNarrative:
 		return m.applyTranscriptNarrative(event)
 	case TranscriptEventNotice:
-		return m.appendEventStreamTranscriptText(event.Text)
+		return m.applyTranscriptNotice(event)
 	case TranscriptEventPlan:
 		return m.applyTranscriptPlan(event)
 	case TranscriptEventTool:
@@ -47,6 +48,38 @@ func (m *Model) applyTranscriptEvent(event TranscriptEvent) (tea.Model, tea.Cmd)
 	default:
 		return m, nil
 	}
+}
+
+func (m *Model) applyTranscriptNotice(event TranscriptEvent) (tea.Model, tea.Cmd) {
+	text := formatTranscriptNoticeText(event.Text)
+	if text == "" {
+		return m, nil
+	}
+	if shouldAnchorMainNotice(event) {
+		m.prepareForTranscriptScope(event.Scope)
+		block := m.ensureMainACPTurnBlock(strings.TrimSpace(event.ScopeID))
+		if block != nil {
+			block.AddNotice(text, event.OccurredAt)
+			m.markViewportBlockDirty(block.BlockID())
+			return m, m.requestStreamViewportSync()
+		}
+	}
+	return m.appendEventStreamTranscriptText(text)
+}
+
+func shouldAnchorMainNotice(event TranscriptEvent) bool {
+	return event.Scope == ACPProjectionMain && strings.TrimSpace(event.ScopeID) != ""
+}
+
+func formatTranscriptNoticeText(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	if text == transcript.CompactNoticeLabel {
+		return "• " + transcript.CompactNoticeLabel
+	}
+	return text
 }
 
 func (m *Model) prepareForTranscriptScope(scope ACPProjectionScope) {

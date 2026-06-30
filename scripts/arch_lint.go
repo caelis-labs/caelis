@@ -43,7 +43,7 @@ func main() {
 		}
 		if d.IsDir() {
 			switch d.Name() {
-			case ".git", ".tmp", "node_modules", "vendor":
+			case ".git", ".tmp", ".claude", "node_modules", "vendor":
 				return filepath.SkipDir
 			}
 			return nil

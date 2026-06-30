@@ -26,9 +26,15 @@ func workspaceStatusDisplay(ctx context.Context, cwd string) string {
 	}
 	status, ok := readGitWorkspaceStatusForDisplay(ctx, cwd)
 	if !ok {
-		return compactHomePath(cwd, userHomeDir())
+		return FormatWorkspacePathForDisplay(cwd)
 	}
 	return formatWorkspaceStatusDisplay(cwd, status)
+}
+
+// FormatWorkspacePathForDisplay compacts a workspace path for status output
+// without adding repository state decorations.
+func FormatWorkspacePathForDisplay(cwd string) string {
+	return compactHomePath(cwd, userHomeDir())
 }
 
 func formatWorkspaceStatusDisplay(cwd string, status gitWorkspaceStatus) string {

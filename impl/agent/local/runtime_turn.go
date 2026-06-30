@@ -116,7 +116,7 @@ func (r *Runtime) runAttempt(
 	pendingInput *session.Event,
 	sink *runner,
 ) ([]*session.Event, bool, bool, error) {
-	events, state, err := r.prepareInvocationContext(ctx, activeSession, ref, req, pendingInput)
+	invocation, err := r.prepareInvocationContext(ctx, activeSession, ref, req, pendingInput)
 	if err != nil {
 		return nil, false, false, err
 	}
@@ -129,14 +129,20 @@ func (r *Runtime) runAttempt(
 			return nil, false, false, appendErr
 		}
 		batch = append(batch, persisted)
-		events = append(events, session.CloneEvent(persisted))
+		invocation.PromptEvents = append(invocation.PromptEvents, session.CloneEvent(persisted))
 		inputPersisted = true
 		if sink != nil {
 			sink.publishEvent(persisted)
 		}
 	}
+	if invocation.LiveCompact != nil {
+		batch = append(batch, session.CloneEvent(invocation.LiveCompact))
+		if sink != nil {
+			sink.publishEvent(invocation.LiveCompact)
+		}
+	}
 
-	activeAgent, err := r.resolveAgent(ctx, activeSession, ref, state, runID, turnID, req)
+	activeAgent, err := r.resolveAgent(ctx, activeSession, ref, invocation.State, runID, turnID, req)
 	if err != nil {
 		return batch, false, inputPersisted, err
 	}
@@ -147,8 +153,8 @@ func (r *Runtime) runAttempt(
 	runCtx := agent.NewContext(agent.ContextSpec{
 		Context:          ctx,
 		Session:          activeSession,
-		Events:           events,
-		State:            state,
+		Events:           invocation.PromptEvents,
+		State:            invocation.State,
 		DrainSubmissions: drainSubmissions,
 	})
 

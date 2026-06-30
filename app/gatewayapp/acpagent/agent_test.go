@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
+	"github.com/OnslaughtSnail/caelis/app/gatewayapp/controladapter"
 	"github.com/OnslaughtSnail/caelis/ports/assembly"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/protocol/acp"
@@ -104,11 +105,13 @@ func TestNewFromStackStatusSlashUsesClientWorkspaceSession(t *testing.T) {
 		t.Fatalf("StopReason = %q, want %q", resp.StopReason, acp.StopReasonEndTurn)
 	}
 	message := cb.firstAgentMessage()
-	if !strings.Contains(message, "Workspace: "+clientWorkspace) {
-		t.Fatalf("status output = %q, want client workspace %q", message, clientWorkspace)
+	clientWorkspaceDisplay := controladapter.FormatWorkspacePathForDisplay(clientWorkspace)
+	if !strings.Contains(message, "Workspace: "+clientWorkspaceDisplay) {
+		t.Fatalf("status output = %q, want client workspace %q", message, clientWorkspaceDisplay)
 	}
-	if strings.Contains(message, "Workspace: "+stackWorkspace) {
-		t.Fatalf("status output = %q, should not use stack workspace %q", message, stackWorkspace)
+	stackWorkspaceDisplay := controladapter.FormatWorkspacePathForDisplay(stackWorkspace)
+	if strings.Contains(message, "Workspace: "+stackWorkspaceDisplay) {
+		t.Fatalf("status output = %q, should not use stack workspace %q", message, stackWorkspaceDisplay)
 	}
 }
 

@@ -137,6 +137,14 @@ func renderACPTranscriptRows(blockID string, events []SubagentEvent, status stri
 				hasContent = true
 				lastGroup = acpTranscriptGroupApproval
 			}
+		case SENotice:
+			noticeRows := renderACPNoticeRows(blockID, ev, width, ctx)
+			if len(noticeRows) > 0 {
+				rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupNotice, false)
+				rows = append(rows, noticeRows...)
+				hasContent = true
+				lastGroup = acpTranscriptGroupNotice
+			}
 		}
 	}
 	if !hasContent {
@@ -166,6 +174,7 @@ const (
 	acpTranscriptGroupApproval
 	acpTranscriptGroupTask
 	acpTranscriptGroupPlan
+	acpTranscriptGroupNotice
 )
 
 func appendACPTranscriptGroupGap(rows []RenderedRow, blockID string, previous acpTranscriptGroupKind, current acpTranscriptGroupKind, attached bool) []RenderedRow {
