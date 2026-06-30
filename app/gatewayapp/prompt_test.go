@@ -81,7 +81,8 @@ func TestBuildSystemPromptIncludesPromptAssets(t *testing.T) {
 		"<os>",
 		"<sandbox>restricted sandbox</sandbox>",
 		"<default_permission>workspace-write sandbox; Host execution requires explicit escalation</default_permission>",
-		"Use a skill only when its description clearly matches the task.",
+		"Skills provide specialized instructions and workflows for specific tasks.",
+		"read that skill's `SKILL.md` first and follow its routing instructions.",
 		"### Available skills",
 		"echo",
 	} {
@@ -114,7 +115,7 @@ func TestBuildSystemPromptIncludesPromptAssets(t *testing.T) {
 	if got := strings.Index(prompt, "<environment_context>"); got < strings.Index(prompt, "### Available skills") {
 		t.Fatalf("environment context rendered before skills metadata:\n%s", prompt)
 	}
-	if got := strings.Count(prompt, "Use a skill only when its description clearly matches the task."); got != 1 {
+	if got := strings.Count(prompt, "read that skill's `SKILL.md` first and follow its routing instructions."); got != 1 {
 		t.Fatalf("skill activation guidance count = %d, want 1:\n%s", got, prompt)
 	}
 }

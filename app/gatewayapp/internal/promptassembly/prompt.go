@@ -261,7 +261,8 @@ func buildSkillsMetaPrompt(metas []fs.Meta) string {
 	}
 	var b bytes.Buffer
 	b.WriteString("## Skills\n")
-	b.WriteString("Use a skill only when its description clearly matches the task. Read the minimum needed from its `SKILL.md`.\n")
+	b.WriteString("Skills provide specialized instructions and workflows for specific tasks.\n")
+	b.WriteString("When the user names a listed skill or the task matches a listed skill's description, read that skill's `SKILL.md` first and follow its routing instructions.\n")
 	b.WriteString("### Available skills\n")
 	for _, meta := range metas {
 		fmt.Fprintf(&b, "- %s: %s (file: %s)\n", promptSingleLine(meta.Name), promptSingleLine(meta.Description), strings.TrimSpace(meta.Path))
