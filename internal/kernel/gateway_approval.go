@@ -88,8 +88,10 @@ func (g *Gateway) resolveApprovalRequest(
 		Approval:       cloneApprovalPayload(payload),
 		RuntimeRequest: *req,
 	})
+	var reviewErrStatus ApprovalReviewStatus
 	if err != nil {
-		rationale := "automatic approval review failed: " + err.Error()
+		status, rationale, _ := approval.ReviewErrorOutcome(err)
+		reviewErrStatus = status
 		result = approval.FinalizeReviewResult(payload, ApprovalReviewResult{
 			Approved:       false,
 			Outcome:        string(ApprovalStatusRejected),
@@ -111,6 +113,9 @@ func (g *Gateway) resolveApprovalRequest(
 		terminal.Status = ApprovalStatusApproved
 	}
 	terminal.ReviewStatus = approvalReviewTerminalStatus(result)
+	if reviewErrStatus != "" {
+		terminal.ReviewStatus = reviewErrStatus
+	}
 	terminal.ReviewText = strings.TrimSpace(result.DisplayText)
 	terminal.Risk = strings.TrimSpace(result.Risk)
 	terminal.Authorization = strings.TrimSpace(result.Authorization)

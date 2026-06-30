@@ -2,7 +2,6 @@ package tuiapp
 
 import (
 	"fmt"
-	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -10,7 +9,6 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textarea"
-	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/tuikit"
@@ -27,7 +25,7 @@ func (m *Model) windowTitle() string {
 		title = "CAELIS"
 	}
 	if m.turnRunning() {
-		if frame := strings.TrimSpace(ansi.Strip(m.spinner.View())); frame != "" {
+		if frame := m.runningFrame(); frame != "" {
 			return frame + " " + title
 		}
 		return "loading " + title
@@ -61,9 +59,6 @@ func (m *Model) buildHintText() string {
 	if m.activePrompt != nil {
 		return m.promptHintText()
 	}
-	if h := strings.TrimSpace(m.approvalReviewHint); h != "" {
-		return m.renderApprovalReviewHintText(h)
-	}
 	if m.turnRunning() && m.activePrompt == nil {
 		return m.buildRunningHintText()
 	}
@@ -92,22 +87,6 @@ func (m *Model) buildHintText() string {
 		return m.overlayHintText("/")
 	}
 	return ""
-}
-
-func (m *Model) renderApprovalReviewHintText(text string) string {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return ""
-	}
-	text = compactString(text, 0)
-	if m.width > 0 {
-		text = truncateTailDisplay(text, maxInt(1, m.fixedRowContentWidth()-2))
-	}
-	frame := strings.TrimSpace(ansi.Strip(m.spinner.View()))
-	if frame == "" {
-		frame = "⠋"
-	}
-	return m.theme.SpinnerStyle().Render(frame) + " " + m.theme.WarnStyle().Render(text)
 }
 
 func (m *Model) primaryDrawerHeight() int {
@@ -372,148 +351,6 @@ func visiblePlanEntries(entries []planEntryState, limit int) ([]planEntryState, 
 	end := minInt(len(entries), start+limit)
 	visible := append([]planEntryState(nil), entries[start:end]...)
 	return visible, len(entries) - len(visible), start
-}
-
-func (m *Model) startRunningAnimation() {
-	m.runningTick = 0
-	m.spinnerTickScheduled = false
-	if len(runningCarouselLines) > 0 {
-		seed := int(time.Now().UnixNano() % int64(len(runningCarouselLines)))
-		if seed < 0 {
-			seed = -seed
-		}
-		m.runningTip = seed
-	} else {
-		m.runningTip = 0
-	}
-}
-
-func (m *Model) stopRunningAnimation() {
-	m.runningTick = 0
-	m.runningTip = 0
-	m.spinnerTickScheduled = false
-}
-
-func (m *Model) advanceRunningAnimation() {
-	if len(runningCarouselLines) > 0 {
-		m.runningTick++
-		if m.runningTick%runningHintRotateEveryTicks == 0 {
-			m.runningTip = (m.runningTip + 1) % len(runningCarouselLines)
-		}
-	}
-}
-
-func (m *Model) shouldThrottleRunningAnimation() bool {
-	if m == nil || !m.turnRunning() {
-		return false
-	}
-	return m.shouldDeferStreamViewportSync()
-}
-
-func (m *Model) shouldRenderStaticRunningHint() bool {
-	if m == nil {
-		return true
-	}
-	return m.noAnimation ||
-		m.shouldThrottleRunningAnimation() ||
-		m.streamPlayback.LastFrameRenderCost >= runningTickerStaticFrameCostThreshold
-}
-
-func (m *Model) scheduleSpinnerTick() tea.Cmd {
-	if m == nil || !m.turnRunning() || m.spinnerTickScheduled {
-		return nil
-	}
-	m.spinnerTickScheduled = true
-	return m.spinner.Tick
-}
-
-func (m *Model) resumeRunningAnimationIfNeeded() tea.Cmd {
-	if m == nil || !m.turnRunning() || m.shouldThrottleRunningAnimation() {
-		return nil
-	}
-	return m.scheduleSpinnerTick()
-}
-
-func (m *Model) buildRunningHintText() string {
-	frame := strings.TrimSpace(ansi.Strip(m.spinner.View()))
-	if frame == "" {
-		frame = "⠋"
-	}
-	if len(runningCarouselLines) > 0 {
-		rawText := runningCarouselLines[m.runningTip%len(runningCarouselLines)]
-		text := ""
-		if m.shouldRenderStaticRunningHint() {
-			m.diag.RunningTickerStaticRenders++
-			text = m.theme.HelpHintTextStyle().Render(strings.TrimSpace(rawText))
-		} else {
-			text = m.renderRunningTickerText(rawText)
-		}
-		prefix := m.theme.SpinnerStyle().Render(frame)
-		return prefix + " " + text
-	}
-	return m.theme.SpinnerStyle().Render(frame)
-}
-
-func (m *Model) runningTickerStyleSet() []lipgloss.Style {
-	if m == nil {
-		return nil
-	}
-	themeKey := m.cachedThemeRenderKey()
-	if len(m.runningTickerStyles) == 5 && m.runningTickerThemeKey == themeKey {
-		return m.runningTickerStyles
-	}
-	m.diag.RunningTickerStyleCacheMisses++
-	m.runningTickerThemeKey = themeKey
-	m.runningTickerStyles = []lipgloss.Style{
-		m.theme.HelpHintTextStyle(),
-		m.theme.SecondaryTextStyle(),
-		lipgloss.NewStyle().Foreground(m.theme.Info),
-		lipgloss.NewStyle().Foreground(m.theme.SpinnerFg),
-		lipgloss.NewStyle().Foreground(m.theme.Focus),
-	}
-	return m.runningTickerStyles
-}
-
-func (m *Model) renderRunningTickerText(text string) string {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return ""
-	}
-	runes := []rune(text)
-	if len(runes) == 0 {
-		return ""
-	}
-	totalWidth := maxInt(1, displayColumns(text))
-	pathWidth := float64(totalWidth) + (runningLightLead * 2)
-	head := math.Mod(float64(m.runningTick)*runningLightSpeed, pathWidth) - runningLightLead
-	styles := m.runningTickerStyleSet()
-	if len(styles) < 5 {
-		return text
-	}
-	m.diag.RunningTickerAnimatedRenders++
-
-	var out strings.Builder
-	column := 0
-	for _, r := range runes {
-		runeWidth := maxInt(1, displayColumns(string(r)))
-		center := float64(column) + (float64(runeWidth) / 2)
-		distance := math.Abs(center - head)
-		level := 0
-		intensity := 1 - (distance / runningLightBandRadius)
-		switch {
-		case intensity >= 0.82:
-			level = 4
-		case intensity >= 0.62:
-			level = 3
-		case intensity >= 0.42:
-			level = 2
-		case intensity >= 0.22:
-			level = 1
-		}
-		out.WriteString(styles[level].Render(string(r)))
-		column += runeWidth
-	}
-	return out.String()
 }
 
 func (m *Model) pendingQueueHintText() string {

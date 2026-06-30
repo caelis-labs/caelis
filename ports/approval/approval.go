@@ -3,6 +3,7 @@ package approval
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"strings"
@@ -333,6 +334,22 @@ func ReviewTerminalStatus(result ReviewResult) ReviewStatus {
 		return ReviewStatusApproved
 	}
 	return ReviewStatusDenied
+}
+
+// ReviewErrorOutcome maps reviewer execution errors to terminal review status
+// and user-visible rationale text.
+func ReviewErrorOutcome(err error) (ReviewStatus, string, bool) {
+	if err == nil {
+		return "", "", false
+	}
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return ReviewStatusTimedOut, "automatic approval review timed out: " + err.Error(), true
+	case errors.Is(err, context.Canceled):
+		return ReviewStatusFailed, "automatic approval review cancelled", true
+	default:
+		return ReviewStatusFailed, "automatic approval review failed: " + err.Error(), true
+	}
 }
 
 func optionIDForDecision(options []Option, approved bool) string {

@@ -54,9 +54,10 @@ type SetHintMsg struct {
 	ClearOnMessage bool
 }
 
-type ApprovalReviewHintMsg struct {
-	Text    string
-	Pending bool
+type RunningActivityMsg struct {
+	Kind   runningActivityKind
+	Detail string
+	Active bool
 }
 
 type TaskResultMsg struct {

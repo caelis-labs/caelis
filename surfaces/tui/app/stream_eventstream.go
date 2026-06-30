@@ -25,7 +25,7 @@ func (m *Model) handleACPEventEnvelope(env eventstream.Envelope) (tea.Model, tea
 		return m, tea.Batch(cmd, finishCmd)
 	}
 	model, cmd := m.handleTranscriptEventsMsg(TranscriptEventsMsg{Events: ProjectACPEventToTranscriptEvents(env)})
-	return model, tea.Batch(m.applyACPApprovalReviewHint(env), cmd)
+	return model, tea.Batch(m.applyACPRunningActivity(env), cmd)
 }
 
 func terminalLifecycleHasTranscriptIdentity(env eventstream.Envelope) bool {
@@ -50,20 +50,21 @@ func (m *Model) appendEventStreamTranscriptText(text string) (tea.Model, tea.Cmd
 	return m, nil
 }
 
-func (m *Model) applyACPApprovalReviewHint(env eventstream.Envelope) tea.Cmd {
+func (m *Model) applyACPRunningActivity(env eventstream.Envelope) tea.Cmd {
 	if m == nil || env.Kind != eventstream.KindApprovalReview || env.ApprovalReview == nil {
 		return nil
 	}
 	switch strings.ToLower(strings.TrimSpace(env.ApprovalReview.Status)) {
 	case "in_progress":
-		msg := ApprovalReviewHintMsg{
-			Text:    approvalReviewPendingHint(env.ApprovalReview.ToolName, env.ApprovalReview.RawInput, 0),
-			Pending: true,
+		msg := RunningActivityMsg{
+			Kind:   runningActivityApprovalReview,
+			Detail: approvalReviewPendingHint(env.ApprovalReview.ToolName, env.ApprovalReview.RawInput, 0),
+			Active: true,
 		}
-		m.handleApprovalReviewHintMsg(msg)
+		m.handleRunningActivityMsg(msg)
 		return m.resumeRunningAnimationIfNeeded()
 	case "approved", "denied", "timed_out", "failed":
-		m.handleApprovalReviewHintMsg(ApprovalReviewHintMsg{})
+		m.handleRunningActivityMsg(RunningActivityMsg{Kind: runningActivityApprovalReview})
 		return nil
 	default:
 		return nil

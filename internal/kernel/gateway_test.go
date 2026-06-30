@@ -1504,6 +1504,69 @@ func TestBeginTurnAutoReviewDenialDoesNotInterruptTurn(t *testing.T) {
 	}
 }
 
+func TestBeginTurnAutoReviewCancelPublishesTerminalReview(t *testing.T) {
+	t.Parallel()
+
+	activeSession := session.Session{
+		SessionRef: session.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+		},
+	}
+	reviewer := &contextBlockingApprovalReviewer{started: make(chan struct{})}
+	rt := &approvalRuntime{session: activeSession}
+	gw, err := New(Config{
+		Sessions:         staticSessionService{session: activeSession},
+		Runtime:          rt,
+		Resolver:         staticResolver{resolved: ResolvedTurn{RunRequest: agent.RunRequest{}}},
+		ApprovalReviewer: reviewer,
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	result, err := gw.BeginTurn(context.Background(), BeginTurnRequest{
+		SessionRef: activeSession.SessionRef,
+		Input:      "hello",
+	})
+	if err != nil {
+		t.Fatalf("BeginTurn() error = %v", err)
+	}
+	events := result.Handle.ACPEvents()
+	var got []eventstream.Envelope
+	timeout := time.After(2 * time.Second)
+	select {
+	case first := <-events:
+		got = append(got, first)
+		if first.Kind != eventstream.KindApprovalReview || first.ApprovalReview == nil || first.ApprovalReview.Status != string(ApprovalReviewStatusInProgress) {
+			t.Fatalf("first event = %#v, want in-progress approval review", first)
+		}
+	case <-timeout:
+		t.Fatal("timed out waiting for in-progress approval review")
+	}
+	select {
+	case <-reviewer.started:
+	case <-timeout:
+		t.Fatal("timed out waiting for blocking reviewer")
+	}
+	result.Handle.Cancel()
+	for {
+		select {
+		case env, ok := <-events:
+			if !ok {
+				for _, event := range got {
+					review := event.ApprovalReview
+					if event.Kind == eventstream.KindApprovalReview && review != nil && review.Status == string(ApprovalReviewStatusFailed) {
+						return
+					}
+				}
+				t.Fatalf("events = %#v, want failed terminal approval review after cancel", got)
+			}
+			got = append(got, env)
+		case <-timeout:
+			t.Fatalf("timed out waiting for terminal approval review: %#v", got)
+		}
+	}
+}
+
 func TestPersistApprovalReviewUsageUsesSessionStateNotHistory(t *testing.T) {
 	t.Parallel()
 
@@ -2240,6 +2303,18 @@ type staticApprovalReviewer struct {
 
 func (r staticApprovalReviewer) ReviewApproval(context.Context, ApprovalReviewRequest) (ApprovalReviewResult, error) {
 	return r.result, nil
+}
+
+type contextBlockingApprovalReviewer struct {
+	started chan struct{}
+}
+
+func (r *contextBlockingApprovalReviewer) ReviewApproval(ctx context.Context, _ ApprovalReviewRequest) (ApprovalReviewResult, error) {
+	if r != nil && r.started != nil {
+		close(r.started)
+	}
+	<-ctx.Done()
+	return ApprovalReviewResult{}, ctx.Err()
 }
 
 type blockingRuntime struct {

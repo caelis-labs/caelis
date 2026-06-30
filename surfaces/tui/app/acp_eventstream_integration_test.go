@@ -415,8 +415,8 @@ func TestHandleACPEventEnvelopeAppliesApprovalReview(t *testing.T) {
 			Status:     "in_progress",
 		},
 	})
-	if !strings.Contains(model.approvalReviewHint, "go test") {
-		t.Fatalf("approvalReviewHint = %q, want command hint", model.approvalReviewHint)
+	if model.runningActivity.Kind != runningActivityApprovalReview || !strings.Contains(model.runningActivity.Detail, "go test") {
+		t.Fatalf("runningActivity = %#v, want approval review command hint", model.runningActivity)
 	}
 
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
@@ -432,8 +432,8 @@ func TestHandleACPEventEnvelopeAppliesApprovalReview(t *testing.T) {
 			Text:          "approved by policy",
 		},
 	})
-	if model.approvalReviewHint != "" {
-		t.Fatalf("approvalReviewHint = %q, want cleared after terminal review", model.approvalReviewHint)
+	if model.runningActivity.Kind == runningActivityApprovalReview {
+		t.Fatalf("runningActivity = %#v, want cleared after terminal review", model.runningActivity)
 	}
 	block := requireMainACPTurnBlockForTest(t, model)
 	if len(block.Events) != 1 || block.Events[0].Kind != SEApproval || block.Events[0].ApprovalStatus != "approved" {

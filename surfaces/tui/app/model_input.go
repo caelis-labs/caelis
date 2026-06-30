@@ -1149,6 +1149,7 @@ func (m *Model) requestRunningInterrupt() (tea.Model, tea.Cmd) {
 	}
 	cancel := m.cfg.CancelRunning
 	m.runningInterruptRequested = true
+	m.setRunningInterruptActivity()
 	return m, tea.Batch(
 		m.showHint("interrupt requested", hintOptions{
 			priority:       HintPriorityCritical,

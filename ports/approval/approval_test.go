@@ -1,7 +1,10 @@
 package approval
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/OnslaughtSnail/caelis/ports/agent"
@@ -105,6 +108,35 @@ func TestRuntimeResponseFromReviewSelectsMatchingOption(t *testing.T) {
 	}
 	if resp.ReviewText != "Automatic approval review approved" || resp.Reason != "matches request" {
 		t.Fatalf("response text = %#v", resp)
+	}
+}
+
+func TestReviewErrorOutcome(t *testing.T) {
+	cases := []struct {
+		name       string
+		err        error
+		wantStatus ReviewStatus
+		wantText   string
+		wantOK     bool
+	}{
+		{name: "nil", wantOK: false},
+		{name: "deadline", err: context.DeadlineExceeded, wantStatus: ReviewStatusTimedOut, wantText: "timed out", wantOK: true},
+		{name: "cancelled", err: context.Canceled, wantStatus: ReviewStatusFailed, wantText: "cancelled", wantOK: true},
+		{name: "failed", err: errors.New("model failed"), wantStatus: ReviewStatusFailed, wantText: "model failed", wantOK: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			status, rationale, ok := ReviewErrorOutcome(tc.err)
+			if ok != tc.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, tc.wantOK)
+			}
+			if status != tc.wantStatus {
+				t.Fatalf("status = %q, want %q", status, tc.wantStatus)
+			}
+			if tc.wantText != "" && !strings.Contains(rationale, tc.wantText) {
+				t.Fatalf("rationale = %q, want %q", rationale, tc.wantText)
+			}
+		})
 	}
 }
 

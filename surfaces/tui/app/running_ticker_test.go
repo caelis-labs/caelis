@@ -4,14 +4,15 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
-func TestRunningTickerUsesStaticHintWhenAnimationIsThrottled(t *testing.T) {
+func TestRunningTickerUsesStaticCarouselWhenViewportSyncIsDeferred(t *testing.T) {
 	m := NewModel(Config{NoColor: true, NoAnimation: true})
 	m.liveTurn.Active = true
 
-	if !m.shouldRenderStaticRunningHint() {
+	if !m.shouldUseStaticRunningCarousel() {
 		t.Fatal("running hint should switch to static rendering when animation is disabled")
 	}
 
@@ -64,7 +65,7 @@ func TestRunningHintPlainRowDoesNotExposeANSI(t *testing.T) {
 	}
 }
 
-func TestSpinnerTickReschedulesWhenRunningAnimationIsThrottled(t *testing.T) {
+func TestSpinnerTickReschedulesWhenCarouselIsStatic(t *testing.T) {
 	m := NewModel(Config{})
 	m.liveTurn.Active = true
 	m.selecting = true
@@ -73,9 +74,74 @@ func TestSpinnerTickReschedulesWhenRunningAnimationIsThrottled(t *testing.T) {
 	updated, cmd := m.Update(m.spinner.Tick())
 	next := updated.(*Model)
 	if cmd == nil {
-		t.Fatal("throttled spinner tick should keep scheduling future ticks")
+		t.Fatal("static-carousel spinner tick should keep scheduling future ticks")
 	}
 	if !next.spinnerTickScheduled {
 		t.Fatal("spinnerTickScheduled = false, want true after throttled tick")
+	}
+}
+
+func TestRunningTickerContinuesWhenViewportPinned(t *testing.T) {
+	m := NewModel(Config{Workspace: "/tmp/storage"})
+	m.liveTurn.Active = true
+	m.viewportFollowState = viewportPinnedHistory
+	m.spinnerTickScheduled = true
+
+	before := m.windowTitle()
+	updated, cmd := m.Update(m.spinner.Tick())
+	next := updated.(*Model)
+	after := next.windowTitle()
+
+	if cmd == nil {
+		t.Fatal("pinned viewport running tick should schedule the next tick")
+	}
+	if !next.spinnerTickScheduled {
+		t.Fatal("spinnerTickScheduled = false, want true after pinned viewport tick")
+	}
+	if before == after {
+		t.Fatalf("windowTitle did not advance while viewport was pinned: %q", before)
+	}
+	if !strings.Contains(after, "storage") {
+		t.Fatalf("windowTitle() = %q, want workspace title", after)
+	}
+}
+
+func TestResumeRunningAnimationIgnoresViewportPin(t *testing.T) {
+	m := NewModel(Config{})
+	m.liveTurn.Active = true
+	m.viewportFollowState = viewportPinnedHistory
+
+	if cmd := m.resumeRunningAnimationIfNeeded(); cmd == nil {
+		t.Fatal("resumeRunningAnimationIfNeeded() = nil, want tick command while viewport is pinned")
+	}
+}
+
+func TestInterruptReplacesApprovalReviewActivity(t *testing.T) {
+	cancelled := false
+	m := NewModel(Config{
+		CancelRunning: func() bool {
+			cancelled = true
+			return true
+		},
+	})
+	m.liveTurn.Active = true
+	m.runningActivity = runningActivityState{
+		Kind:   runningActivityApprovalReview,
+		Detail: "Reviewing approval request: command: go test ./...",
+	}
+
+	updated, cmd := m.handleKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEsc}))
+	next := updated.(*Model)
+	if cmd == nil {
+		t.Fatal("interrupt should return a cancel command")
+	}
+	if cancelled {
+		t.Fatal("cancel command should not run synchronously")
+	}
+	if next.runningActivity.Kind != runningActivityInterrupting {
+		t.Fatalf("runningActivity = %#v, want interrupting", next.runningActivity)
+	}
+	if strings.Contains(next.buildHintText(), "go test") {
+		t.Fatalf("hint = %q, want stale approval text cleared", next.buildHintText())
 	}
 }

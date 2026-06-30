@@ -43,7 +43,7 @@ func renderEventPolicyFor(msg tea.Msg) (renderEventPolicy, bool) {
 		return renderEventPolicy{lane: renderLaneLog, flushSmoothing: true, dismissHints: true}, true
 	case ParticipantStatusMsg:
 		return renderEventPolicy{lane: renderLaneParticipant, flushSmoothing: true, flushLogChunks: true}, true
-	case PlanUpdateMsg, SetHintMsg, ApprovalReviewHintMsg,
+	case PlanUpdateMsg, SetHintMsg, RunningActivityMsg,
 		SetStatusMsg, StatusRefreshResultMsg, SetCommandsMsg, AttachmentCountMsg,
 		RunningInterruptResultMsg, SandboxProgressMsg:
 		return renderEventPolicy{lane: renderLaneUIState}, true
@@ -230,8 +230,8 @@ func (m *Model) dispatchRenderEvent(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	case SetHintMsg:
 		model, cmd := m.handleSetHintMsg(typed)
 		return model, tea.Batch(policyCmd, cmd), true
-	case ApprovalReviewHintMsg:
-		model, cmd := m.handleApprovalReviewHintMsg(typed)
+	case RunningActivityMsg:
+		model, cmd := m.handleRunningActivityMsg(typed)
 		return model, tea.Batch(policyCmd, cmd), true
 	case SetStatusMsg:
 		return m.handleSetStatusMsg(typed), policyCmd, true
@@ -376,16 +376,6 @@ func (m *Model) handleSetHintMsg(msg SetHintMsg) (tea.Model, tea.Cmd) {
 		clearOnMessage: msg.ClearOnMessage,
 		clearAfter:     after,
 	})
-}
-
-func (m *Model) handleApprovalReviewHintMsg(msg ApprovalReviewHintMsg) (tea.Model, tea.Cmd) {
-	if msg.Pending {
-		m.approvalReviewHint = strings.TrimSpace(msg.Text)
-	} else {
-		m.approvalReviewHint = ""
-	}
-	m.ensureViewportLayout()
-	return m, m.resumeRunningAnimationIfNeeded()
 }
 
 func (m *Model) handleSetStatusMsg(msg SetStatusMsg) tea.Model {
@@ -572,6 +562,7 @@ func (m *Model) handleRunningInterruptResultMsg(msg RunningInterruptResultMsg) (
 		return m, nil
 	}
 	m.runningInterruptRequested = false
+	m.clearRunningInterruptActivity()
 	if !m.turnRunning() {
 		return m, nil
 	}

@@ -368,9 +368,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case spinner.TickMsg:
 		m.spinnerTickScheduled = false
 		if m.turnRunning() {
-			if m.shouldThrottleRunningAnimation() {
-				return m, m.scheduleSpinnerTick()
-			}
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			if cmd != nil {

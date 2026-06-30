@@ -21,7 +21,7 @@ const maxInputBarRows = 4
 const ctrlCExitWindow = 2 * time.Second
 const terminalResponseGuardDuration = 1500 * time.Millisecond
 const terminalResponsePendingFlushDelay = 120 * time.Millisecond
-const runningHintRotateEveryTicks = 60
+const runningHintRotateEveryTicks = 90
 const runningLightSpeed = 0.55
 const runningLightBandRadius = 5.5
 const runningLightLead = 4.0
@@ -66,11 +66,23 @@ type liveTurnState struct {
 var runningSpinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
 var runningCarouselLines = []string{
-	"Send follow-up guidance while the current run is still active.",
-	"Use #path to anchor the model on exact files.",
-	"/model can switch both model and reasoning level.",
-	"Press Esc to interrupt, Enter to submit another message.",
-	"Review the latest tool output before sending follow-up guidance.",
+	"Working on the turn...",
+	"You can add a follow-up while this runs.",
+	"Esc interrupts the current turn.",
+	"Use #path when a specific file matters.",
+	"Reviewing the latest context and tool output.",
+}
+
+type runningActivityKind string
+
+const (
+	runningActivityApprovalReview runningActivityKind = "approval_review"
+	runningActivityInterrupting   runningActivityKind = "interrupting"
+)
+
+type runningActivityState struct {
+	Kind   runningActivityKind
+	Detail string
 }
 
 type Diagnostics struct {
@@ -399,6 +411,7 @@ type Model struct {
 	runningInterruptRequested bool
 	runningTick               uint64
 	runningTip                int
+	runningActivity           runningActivityState
 	runningTickerStyles       []lipgloss.Style
 	runningTickerThemeKey     string
 
@@ -410,7 +423,6 @@ type Model struct {
 	statusRefreshInFlight  bool
 	sandboxProgress        *sandboxProgressState
 	sandboxProgressBar     progress.Model
-	approvalReviewHint     string
 	hint                   string
 	hintEntries            []hintEntry
 	nextHintID             uint64
