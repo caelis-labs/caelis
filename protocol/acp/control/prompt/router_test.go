@@ -37,8 +37,17 @@ func TestRouterStatusModelAndCompactCommands(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Route(/status) error = %v", err)
 	}
-	if !status.Handled || !strings.Contains(firstNotice(status), "ollama/llama3") {
+	if !status.Handled {
 		t.Fatalf("Route(/status) = %#v", status)
+	}
+	if status.SlashResult == nil || status.SlashResult.Kind != control.SlashCommandResultStatus || status.SlashResult.Status.ModelStatus.Display != "ollama/llama3" {
+		t.Fatalf("Route(/status).SlashResult = %#v, want structured status payload", status.SlashResult)
+	}
+	if len(status.Events) != 0 {
+		t.Fatalf("Route(/status).Events = %#v, want no eager fallback events", status.Events)
+	}
+	if text := control.FormatSlashResult(*status.SlashResult); !strings.Contains(text, "ollama/llama3") {
+		t.Fatalf("FormatSlashResult(/status) = %q, want model text", text)
 	}
 	model, err := router.Route(context.Background(), Request{Submission: control.Submission{Text: "/model use fast high"}})
 	if err != nil {
@@ -53,6 +62,60 @@ func TestRouterStatusModelAndCompactCommands(t *testing.T) {
 	}
 	if !svc.compacted || firstNotice(compact) != compactNoticeLabel {
 		t.Fatalf("compact route compacted=%v notice=%q", svc.compacted, firstNotice(compact))
+	}
+}
+
+func TestRouterHelpAndSubagentListReturnStructuredPayloads(t *testing.T) {
+	svc := &fakeService{
+		profileStatus: control.AgentProfileStatusSnapshot{
+			Profiles: []control.AgentProfileSnapshot{{
+				ID:          "reviewer",
+				Enabled:     true,
+				Target:      "self",
+				Model:       "deepseek/deepseek-v4-flash",
+				Description: "review current changes",
+			}},
+		},
+	}
+	router := NewRouter(Config{
+		Service: svc,
+		CommandNames: func(context.Context, control.Service) []string {
+			return []string{"help", "status", "subagent", "helper"}
+		},
+	})
+
+	help, err := router.Route(context.Background(), Request{Submission: control.Submission{Text: "/help"}})
+	if err != nil {
+		t.Fatalf("Route(/help) error = %v", err)
+	}
+	if help.SlashResult == nil || help.SlashResult.Kind != control.SlashCommandResultHelp {
+		t.Fatalf("Route(/help).SlashResult = %#v, want help payload", help.SlashResult)
+	}
+	if got := len(help.SlashResult.Help.Items); got != 4 {
+		t.Fatalf("help items = %d, want 4", got)
+	}
+	if !help.SlashResult.Help.Items[3].Dynamic || help.SlashResult.Help.Items[3].Usage != "/helper <prompt>" {
+		t.Fatalf("dynamic help item = %#v, want helper prompt command", help.SlashResult.Help.Items[3])
+	}
+	if len(help.Events) != 0 {
+		t.Fatalf("Route(/help).Events = %#v, want no eager fallback events", help.Events)
+	}
+	if text := control.FormatSlashResult(*help.SlashResult); !strings.Contains(text, "/helper <prompt>") {
+		t.Fatalf("FormatSlashResult(/help) = %q, want helper command", text)
+	}
+
+	subagents, err := router.Route(context.Background(), Request{Submission: control.Submission{Text: "/subagent list"}})
+	if err != nil {
+		t.Fatalf("Route(/subagent list) error = %v", err)
+	}
+	if subagents.SlashResult == nil || subagents.SlashResult.Kind != control.SlashCommandResultSubagentProfiles {
+		t.Fatalf("Route(/subagent list).SlashResult = %#v, want profile payload", subagents.SlashResult)
+	}
+	if got := subagents.SlashResult.AgentProfiles.Profiles[0].ID; got != "reviewer" {
+		t.Fatalf("subagent profile id = %q, want reviewer", got)
+	}
+	if len(subagents.Events) != 0 {
+		t.Fatalf("Route(/subagent list).Events = %#v, want no eager fallback events", subagents.Events)
 	}
 }
 
@@ -213,7 +276,7 @@ func TestRouterCoreCommandAllowedFiltersSharedSlash(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Route(/status) error = %v", err)
 	}
-	if !status.Handled || !strings.Contains(firstNotice(status), "ollama/llama3") {
+	if !status.Handled || status.SlashResult == nil || !strings.Contains(control.FormatSlashResult(*status.SlashResult), "ollama/llama3") {
 		t.Fatalf("Route(/status) = %#v, want handled status", status)
 	}
 	newSession, err := router.Route(context.Background(), Request{Submission: control.Submission{Text: "/new"}})
@@ -269,6 +332,7 @@ type fakeService struct {
 	controllerKind     string
 	addedAgent         string
 	addedOptions       control.AgentAddOptions
+	profileStatus      control.AgentProfileStatusSnapshot
 }
 
 func (s *fakeService) Status(context.Context) (control.StatusSnapshot, error) { return s.status, nil }
@@ -360,7 +424,7 @@ func (s *fakeService) ContinueSubagent(_ context.Context, handle string, prompt 
 	return s.turn, nil
 }
 func (s *fakeService) AgentProfileStatus(context.Context) (control.AgentProfileStatusSnapshot, error) {
-	return control.AgentProfileStatusSnapshot{}, nil
+	return s.profileStatus, nil
 }
 func (s *fakeService) BindAgentProfile(context.Context, control.AgentProfileBindingConfig) (control.AgentProfileStatusSnapshot, error) {
 	return control.AgentProfileStatusSnapshot{}, nil

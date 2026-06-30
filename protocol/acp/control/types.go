@@ -220,6 +220,43 @@ type SlashArgCandidate struct {
 	NoAuth  bool
 }
 
+// SlashCommandResultKind identifies the domain payload produced by a slash
+// command. Surfaces decide how to render each payload.
+type SlashCommandResultKind string
+
+const (
+	SlashCommandResultHelp             SlashCommandResultKind = "help"
+	SlashCommandResultStatus           SlashCommandResultKind = "status"
+	SlashCommandResultSubagentProfiles SlashCommandResultKind = "subagent_profiles"
+)
+
+// SlashCommandResult carries structured slash-command data without prescribing
+// table, list, card, or selection rendering.
+type SlashCommandResult struct {
+	Command       string                     `json:"command,omitempty"`
+	Kind          SlashCommandResultKind     `json:"kind,omitempty"`
+	Status        StatusSnapshot             `json:"status,omitempty"`
+	Help          CommandHelpSnapshot        `json:"help,omitempty"`
+	AgentProfiles AgentProfileStatusSnapshot `json:"agent_profiles,omitempty"`
+}
+
+// CommandHelpSnapshot is the slash command catalog available to the current
+// surface/session.
+type CommandHelpSnapshot struct {
+	Items []CommandHelpItem `json:"items,omitempty"`
+}
+
+// CommandHelpItem describes one slash command or dynamic agent command.
+type CommandHelpItem struct {
+	Name           string   `json:"name,omitempty"`
+	Usage          string   `json:"usage,omitempty"`
+	Description    string   `json:"description,omitempty"`
+	Details        []string `json:"details,omitempty"`
+	Dynamic        bool     `json:"dynamic,omitempty"`
+	Known          bool     `json:"known,omitempty"`
+	LocalDuringACP bool     `json:"local_during_acp,omitempty"`
+}
+
 type AgentCandidate struct {
 	Name        string
 	Description string

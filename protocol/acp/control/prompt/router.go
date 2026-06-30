@@ -75,14 +75,18 @@ type PrivateSlashHandler func(context.Context, PrivateSlashRequest) (Result, boo
 //
 // The boolean fields are semantic side effects, not UI instructions. TUI maps
 // ClearHistory to transcript clearing and StatusUpdate to its status bar; ACP
-// maps those same intents to standard session/update state refreshes. Do not
-// add wizard/modal rendering state here; interactive workflows stay owned by
-// their surface. PrivateResult is only populated by a PrivateSlashHandler and
-// must be interpreted by the surface that installed that handler.
+// maps those same intents to standard session/update state refreshes.
+// SlashResult carries structured command data; surfaces decide how to render it
+// or serialize it with control.FormatSlashResult for plain text. Events remain
+// available for additional non-redundant notices. Do not add wizard/modal
+// rendering state here; interactive workflows stay owned by their surface.
+// PrivateResult is only populated by a PrivateSlashHandler and must be
+// interpreted by the surface that installed that handler.
 type Result struct {
 	Handled             bool
 	Turn                control.Turn
 	Events              []eventstream.Envelope
+	SlashResult         *control.SlashCommandResult
 	ClearHistory        bool
 	ReplayEvents        []eventstream.Envelope
 	RefreshCommands     bool
@@ -190,6 +194,14 @@ func (r Router) noticeResult(text string) Result {
 	return Result{
 		Handled:             true,
 		Events:              []eventstream.Envelope{notice(text)},
+		SuppressTurnDivider: true,
+	}
+}
+
+func (r Router) slashResult(result control.SlashCommandResult) Result {
+	return Result{
+		Handled:             true,
+		SlashResult:         &result,
 		SuppressTurnDivider: true,
 	}
 }

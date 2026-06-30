@@ -14,7 +14,9 @@ const compactNoticeLabel = "Context Compact"
 func (r Router) dispatchSlash(ctx context.Context, cmd string, args string, argsStart int, fullText string, attachments []control.Attachment) (Result, error) {
 	switch strings.ToLower(strings.TrimSpace(cmd)) {
 	case "help":
-		return r.noticeResult(controlcommands.HelpText(r.helpCommandNames(ctx))), nil
+		names := r.helpCommandNames(ctx)
+		help := controlcommands.HelpSnapshot(names)
+		return r.slashResult(control.NewHelpSlashResult(help)), nil
 	case "agent":
 		return r.dispatchAgent(ctx, args)
 	case "subagent":
@@ -117,7 +119,7 @@ func (r Router) dispatchSubagent(ctx context.Context, args string) (Result, erro
 		if err != nil {
 			return Result{}, controlcommands.FriendlyCommandError("subagent list", err)
 		}
-		return r.noticeResult(control.FormatSubagentList(status)), nil
+		return r.slashResult(control.NewSubagentProfilesSlashResult(status)), nil
 	case "run":
 		return r.noticeResult(strings.Join([]string{
 			"/subagent run has been removed.",
@@ -209,7 +211,7 @@ func (r Router) dispatchStatus(ctx context.Context, args string) (Result, error)
 	if err != nil {
 		return Result{}, controlcommands.FriendlyCommandError("status", err)
 	}
-	return r.noticeResult(control.FormatStatusSnapshot(status)), nil
+	return r.slashResult(control.NewStatusSlashResult(status)), nil
 }
 
 func (r Router) dispatchDoctor(ctx context.Context, args string) (Result, error) {

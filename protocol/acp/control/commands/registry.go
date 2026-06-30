@@ -288,15 +288,16 @@ func IsLocalDuringACPForPlatform(name string, goos string) bool {
 // HelpText renders help text from the canonical specs. Unknown command names
 // are retained so dynamic ACP child commands can appear in the same list.
 func HelpText(names []string) string {
+	return control.FormatCommandHelp(HelpSnapshot(names))
+}
+
+// HelpSnapshot returns the current slash command catalog as domain data. It
+// intentionally does not describe columns, grouping, or visual layout.
+func HelpSnapshot(names []string) control.CommandHelpSnapshot {
 	if len(names) == 0 {
 		names = DefaultNames()
 	}
-	type row struct {
-		usage       string
-		description string
-		details     []string
-	}
-	rows := make([]row, 0, len(names))
+	out := control.CommandHelpSnapshot{Items: make([]control.CommandHelpItem, 0, len(names))}
 	seen := map[string]struct{}{}
 	for _, command := range names {
 		name := normalizeName(command)
@@ -309,63 +310,42 @@ func HelpText(names []string) string {
 		seen[name] = struct{}{}
 		spec, known := Lookup(name)
 		if !known {
-			rows = append(rows, row{
-				usage:       "/" + name + " <prompt>",
-				description: "Send a prompt to the registered ACP agent",
+			out.Items = append(out.Items, control.CommandHelpItem{
+				Name:        name,
+				Usage:       "/" + name + " <prompt>",
+				Description: "Send a prompt to the registered ACP agent",
+				Dynamic:     true,
+				Known:       false,
 			})
 			continue
 		}
 		usage := strings.TrimSpace(spec.Usage)
-		description := strings.TrimSpace(spec.Description)
-		switch {
-		case usage == "":
-			rows = append(rows, row{usage: "/" + spec.Name})
-		case description == "":
-			rows = append(rows, row{usage: usage})
-		default:
-			rows = append(rows, row{usage: usage, description: description, details: spec.Details})
+		if usage == "" {
+			usage = "/" + spec.Name
 		}
+		out.Items = append(out.Items, control.CommandHelpItem{
+			Name:           spec.Name,
+			Usage:          usage,
+			Description:    strings.TrimSpace(spec.Description),
+			Details:        cleanHelpDetails(spec.Details),
+			Known:          true,
+			LocalDuringACP: spec.LocalDuringACP,
+		})
 	}
-	width := 0
-	for _, row := range rows {
-		if n := len([]rune(row.usage)); n > width {
-			width = n
-		}
-	}
-	if width < 12 {
-		width = 12
-	}
-	if width > 24 {
-		width = 24
-	}
-	lines := []string{"Commands:"}
-	for _, row := range rows {
-		usage := strings.TrimSpace(row.usage)
-		description := strings.TrimSpace(row.description)
-		if description == "" {
-			lines = append(lines, "  "+usage)
-		} else {
-			lines = append(lines, "  "+padRight(usage, width)+"  "+description)
-		}
-		for _, detail := range row.details {
-			detail = strings.TrimSpace(detail)
-			if detail != "" {
-				lines = append(lines, "  "+strings.Repeat(" ", width)+"  "+detail)
-			}
-		}
-	}
-	return strings.Join(lines, "\n")
+	return out
 }
 
-func padRight(value string, width int) string {
-	if width <= 0 {
-		return value
+func cleanHelpDetails(details []string) []string {
+	if len(details) == 0 {
+		return nil
 	}
-	count := len([]rune(value))
-	if count >= width {
-		return value
+	out := make([]string, 0, len(details))
+	for _, detail := range details {
+		if detail = strings.TrimSpace(detail); detail != "" {
+			out = append(out, detail)
+		}
 	}
-	return value + strings.Repeat(" ", width-count)
+	return out
 }
 
 // RootArgCandidates returns static first-level argument candidates for command.

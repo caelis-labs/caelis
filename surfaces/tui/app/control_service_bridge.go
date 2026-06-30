@@ -519,10 +519,14 @@ func executeControlPromptResult(ctx context.Context, service control.Service, se
 			send(TranscriptEventsMsg{Events: transcriptEvents})
 		}
 	}
+	if result.SlashResult != nil && send != nil {
+		send(SlashCommandResultMsg{Result: *result.SlashResult})
+	}
 	for _, event := range result.Events {
-		if send != nil {
-			send(event)
+		if send == nil {
+			continue
 		}
+		send(event)
 	}
 	if result.StatusUpdate != nil {
 		sendStatusUpdate(send, *result.StatusUpdate)

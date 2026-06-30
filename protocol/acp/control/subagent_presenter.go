@@ -6,35 +6,70 @@ import (
 	"strings"
 )
 
+// AgentProfileDisplay is the canonical display model for /subagent list.
+type AgentProfileDisplay struct {
+	Rows     []AgentProfileDisplayRow `json:"rows,omitempty"`
+	Warnings []string                 `json:"warnings,omitempty"`
+}
+
+// AgentProfileDisplayRow describes one subagent profile row without choosing a
+// table, card, or list treatment.
+type AgentProfileDisplayRow struct {
+	ID          string `json:"id,omitempty"`
+	Binding     string `json:"binding,omitempty"`
+	Status      string `json:"status,omitempty"`
+	Description string `json:"description,omitempty"`
+	Warning     string `json:"warning,omitempty"`
+}
+
+// AgentProfileDisplayFromSnapshot derives display rows from subagent profile
+// status. Sorting, filtering, and binding labels are canonical here so surfaces
+// do not duplicate presenter logic.
+func AgentProfileDisplayFromSnapshot(status AgentProfileStatusSnapshot) AgentProfileDisplay {
+	profiles := make([]AgentProfileSnapshot, 0, len(status.Profiles))
+	for _, profile := range status.Profiles {
+		if strings.TrimSpace(profile.ID) != "" {
+			profiles = append(profiles, profile)
+		}
+	}
+	sort.SliceStable(profiles, func(i, j int) bool {
+		return strings.ToLower(profiles[i].ID) < strings.ToLower(profiles[j].ID)
+	})
+	display := AgentProfileDisplay{
+		Rows:     make([]AgentProfileDisplayRow, 0, len(profiles)),
+		Warnings: cleanSubagentWarnings(status.Warnings),
+	}
+	for _, profile := range profiles {
+		display.Rows = append(display.Rows, AgentProfileDisplayRow{
+			ID:          strings.TrimSpace(profile.ID),
+			Binding:     subagentRuntimeLabel(profile),
+			Status:      subagentRuntimeStatus(profile),
+			Description: strings.Join(strings.Fields(strings.TrimSpace(profile.Description)), " "),
+			Warning:     strings.TrimSpace(profile.Warning),
+		})
+	}
+	return display
+}
+
 // FormatSubagentList renders subagent profile status for slash-command output.
 func FormatSubagentList(status AgentProfileStatusSnapshot) string {
-	if len(status.Profiles) == 0 && len(status.Warnings) == 0 {
+	display := AgentProfileDisplayFromSnapshot(status)
+	if len(display.Rows) == 0 && len(display.Warnings) == 0 {
 		return "no subagent profiles found"
 	}
 	lines := []string{"Subagents:"}
-	rows := make([]AgentProfileSnapshot, 0, len(status.Profiles))
-	for _, profile := range status.Profiles {
-		if strings.TrimSpace(profile.ID) != "" {
-			rows = append(rows, profile)
+	for _, row := range display.Rows {
+		line := "  " + row.ID + "  " + row.Binding
+		if row.Description != "" {
+			line += "  " + row.Description
 		}
-	}
-	sort.SliceStable(rows, func(i, j int) bool {
-		return strings.ToLower(rows[i].ID) < strings.ToLower(rows[j].ID)
-	})
-	for _, profile := range rows {
-		line := "  " + strings.TrimSpace(profile.ID) + "  " + subagentRuntimeLabel(profile)
-		if desc := strings.Join(strings.Fields(strings.TrimSpace(profile.Description)), " "); desc != "" {
-			line += "  " + desc
-		}
-		if warning := strings.TrimSpace(profile.Warning); warning != "" {
-			line += "  warning: " + warning
+		if row.Warning != "" {
+			line += "  warning: " + row.Warning
 		}
 		lines = append(lines, line)
 	}
-	for _, warning := range status.Warnings {
-		if warning = strings.TrimSpace(warning); warning != "" {
-			lines = append(lines, "  warning: "+warning)
-		}
+	for _, warning := range display.Warnings {
+		lines = append(lines, "  warning: "+warning)
 	}
 	return strings.Join(lines, "\n")
 }
@@ -68,12 +103,25 @@ func subagentRuntimeLabel(profile AgentProfileSnapshot) string {
 			model = "session default"
 		}
 		if reasoning := strings.TrimSpace(profile.ReasoningEffort); reasoning != "" {
-			model += "[" + reasoning + "]"
+			model += " [" + reasoning + "]"
 		}
 		return model
 	default:
 		return strings.TrimSpace(profile.Target)
 	}
+}
+
+func subagentRuntimeStatus(profile AgentProfileSnapshot) string {
+	if !profile.Enabled {
+		return "disabled"
+	}
+	if status := strings.TrimSpace(profile.Status); status != "" {
+		return status
+	}
+	if strings.TrimSpace(profile.Warning) != "" {
+		return "warning"
+	}
+	return "ready"
 }
 
 func subagentBindingLabel(profile AgentProfileSnapshot) string {
@@ -95,4 +143,17 @@ func subagentBindingLabel(profile AgentProfileSnapshot) string {
 	default:
 		return strings.TrimSpace(profile.Target)
 	}
+}
+
+func cleanSubagentWarnings(warnings []string) []string {
+	if len(warnings) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(warnings))
+	for _, warning := range warnings {
+		if warning = strings.TrimSpace(warning); warning != "" {
+			out = append(out, warning)
+		}
+	}
+	return out
 }

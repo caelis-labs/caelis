@@ -1,0 +1,298 @@
+package tuiapp
+
+import (
+	"strings"
+
+	tea "charm.land/bubbletea/v2"
+
+	"github.com/OnslaughtSnail/caelis/protocol/acp/control"
+	"github.com/OnslaughtSnail/caelis/surfaces/tui/tuikit"
+)
+
+type slashOutputLine struct {
+	Text  string
+	Style tuikit.LineStyle
+}
+
+type slashOutputBlock struct {
+	id    string
+	lines []slashOutputLine
+}
+
+func newSlashOutputBlock(lines []slashOutputLine) *slashOutputBlock {
+	out := make([]slashOutputLine, 0, len(lines))
+	for _, line := range lines {
+		out = append(out, slashOutputLine{
+			Text:  strings.TrimRight(line.Text, " \t"),
+			Style: line.Style,
+		})
+	}
+	return &slashOutputBlock{id: nextBlockID(), lines: out}
+}
+
+func (b *slashOutputBlock) BlockID() string { return b.id }
+func (b *slashOutputBlock) Kind() BlockKind { return BlockTranscript }
+func (b *slashOutputBlock) Render(ctx BlockRenderContext) []RenderedRow {
+	rows := make([]RenderedRow, 0, len(b.lines))
+	for _, line := range b.lines {
+		if strings.TrimSpace(line.Text) == "" {
+			rows = append(rows, PlainRow(b.id, ""))
+			continue
+		}
+		style := line.Style
+		if style == 0 {
+			style = tuikit.DetectLineStyle(line.Text)
+		}
+		plain := line.Text
+		styled := tuikit.LineExtraGutter(style) + tuikit.ColorizeLogLine(line.Text, style, ctx.Theme)
+		rows = append(rows, StyledPlainRow(b.id, plain, styled))
+	}
+	return rows
+}
+
+func (m *Model) handleSlashCommandResultMsg(msg SlashCommandResultMsg) (tea.Model, tea.Cmd) {
+	lines := renderSlashCommandResultLines(msg.Result)
+	if len(lines) == 0 {
+		return m, nil
+	}
+	m.finalizeAssistantBlock()
+	m.finalizeReasoningBlock()
+	if m.hasCommittedLine {
+		m.insertSpacing(tuikit.LineStyleSection, firstSlashOutputLine(lines))
+	}
+	block := newSlashOutputBlock(lines)
+	m.doc.Append(block)
+	m.lastCommittedStyle = lastSlashOutputStyle(lines)
+	m.lastCommittedRaw = lastSlashOutputText(lines)
+	m.hasCommittedLine = true
+	m.markViewportStructureDirty()
+	m.ensureViewportLayout()
+	return m, m.requestStreamViewportSync()
+}
+
+func firstSlashOutputLine(lines []slashOutputLine) string {
+	for _, line := range lines {
+		if strings.TrimSpace(line.Text) != "" {
+			return line.Text
+		}
+	}
+	return ""
+}
+
+func lastSlashOutputText(lines []slashOutputLine) string {
+	for i := len(lines) - 1; i >= 0; i-- {
+		if strings.TrimSpace(lines[i].Text) != "" {
+			return lines[i].Text
+		}
+	}
+	return ""
+}
+
+func lastSlashOutputStyle(lines []slashOutputLine) tuikit.LineStyle {
+	for i := len(lines) - 1; i >= 0; i-- {
+		if strings.TrimSpace(lines[i].Text) != "" {
+			return lines[i].Style
+		}
+	}
+	return tuikit.LineStyleDefault
+}
+
+func renderSlashCommandResultLines(result control.SlashCommandResult) []slashOutputLine {
+	switch result.Kind {
+	case control.SlashCommandResultStatus:
+		return renderSlashStatusLines(result.Status)
+	case control.SlashCommandResultHelp:
+		return renderSlashHelpLines(result.Help)
+	case control.SlashCommandResultSubagentProfiles:
+		return renderSlashSubagentProfileLines(result.AgentProfiles)
+	default:
+		return []slashOutputLine{slashField("Slash", control.FormatSlashResult(result))}
+	}
+}
+
+func renderSlashStatusLines(status control.StatusSnapshot) []slashOutputLine {
+	view := control.StatusDisplayFromSnapshot(status)
+	lines := []slashOutputLine{slashSection("Status")}
+	for _, field := range view.Fields {
+		lines = append(lines, slashField(field.Label, field.Value))
+	}
+	if len(view.Warnings) > 0 {
+		lines = append(lines, slashBlank(), slashSection("Warnings"))
+		for _, warning := range view.Warnings {
+			lines = append(lines, slashField("Warning", warning))
+		}
+	}
+	if !view.Usage.Empty() {
+		lines = append(lines, slashBlank(), slashSection("Usage"))
+		lines = append(lines, renderSlashTokenUsage(view.Usage)...)
+	}
+	return lines
+}
+
+func renderSlashHelpLines(help control.CommandHelpSnapshot) []slashOutputLine {
+	lines := []slashOutputLine{slashSection("Commands")}
+	groups := slashHelpGroups(help.Items)
+	writtenGroups := 0
+	for _, group := range groups {
+		if len(group.items) == 0 {
+			continue
+		}
+		if writtenGroups > 0 {
+			lines = append(lines, slashBlank())
+		}
+		lines = append(lines, slashSection(group.title))
+		table := make([][]string, 0, len(group.items))
+		for _, item := range group.items {
+			table = append(table, []string{strings.TrimSpace(item.Usage), strings.TrimSpace(item.Description)})
+			for _, detail := range item.Details {
+				if detail = strings.TrimSpace(detail); detail != "" {
+					table = append(table, []string{"", detail})
+				}
+			}
+		}
+		lines = append(lines, renderSlashPaddedRows(table)...)
+		writtenGroups++
+	}
+	return lines
+}
+
+type slashHelpGroup struct {
+	title string
+	items []control.CommandHelpItem
+}
+
+func slashHelpGroups(items []control.CommandHelpItem) []slashHelpGroup {
+	groupOrder := []string{"Core", "Model & Session", "Agents", "Plugins & Tools", "Lifecycle"}
+	groups := make(map[string][]control.CommandHelpItem, len(groupOrder))
+	for _, item := range items {
+		if strings.TrimSpace(item.Usage) == "" {
+			continue
+		}
+		group := slashHelpGroupTitle(item)
+		groups[group] = append(groups[group], item)
+	}
+	out := make([]slashHelpGroup, 0, len(groupOrder))
+	for _, title := range groupOrder {
+		out = append(out, slashHelpGroup{title: title, items: groups[title]})
+	}
+	return out
+}
+
+func slashHelpGroupTitle(item control.CommandHelpItem) string {
+	if item.Dynamic {
+		return "Agents"
+	}
+	switch strings.ToLower(strings.TrimSpace(item.Name)) {
+	case "help", "status", "doctor":
+		return "Core"
+	case "model", "connect", "new", "resume", "compact":
+		return "Model & Session"
+	case "agent", "subagent", "review":
+		return "Agents"
+	case "plugin":
+		return "Plugins & Tools"
+	case "exit", "quit":
+		return "Lifecycle"
+	default:
+		return "Core"
+	}
+}
+
+func renderSlashSubagentProfileLines(status control.AgentProfileStatusSnapshot) []slashOutputLine {
+	lines := []slashOutputLine{slashSection("Subagents")}
+	view := control.AgentProfileDisplayFromSnapshot(status)
+	if len(view.Rows) == 0 && len(view.Warnings) == 0 {
+		return append(lines, slashField("Profiles", "none"))
+	}
+	if len(view.Rows) > 0 {
+		table := [][]string{{"Profile", "Binding", "Status", "Description"}}
+		for _, row := range view.Rows {
+			table = append(table, []string{
+				row.ID,
+				row.Binding,
+				row.Status,
+				row.Description,
+			})
+		}
+		lines = append(lines, renderSlashPaddedRows(table)...)
+	}
+	var warnings []string
+	for _, row := range view.Rows {
+		if row.Warning != "" {
+			warnings = append(warnings, row.ID+": "+row.Warning)
+		}
+	}
+	for _, warning := range view.Warnings {
+		if warning = strings.TrimSpace(warning); warning != "" {
+			warnings = append(warnings, warning)
+		}
+	}
+	if len(warnings) > 0 {
+		lines = append(lines, slashBlank(), slashSection("Warnings"))
+		for _, warning := range warnings {
+			lines = append(lines, slashField("Warning", warning))
+		}
+	}
+	return lines
+}
+
+func renderSlashTokenUsage(usage control.TokenUsageView) []slashOutputLine {
+	table := [][]string{{"Scope", "Total", "Input", "Cached", "Output"}}
+	if usage.ShowReasoning {
+		table[0] = append(table[0], "Reasoning")
+	}
+	for _, row := range usage.Rows {
+		values := []string{row.Scope, row.Total, row.Input, row.Cached, row.Output}
+		if usage.ShowReasoning {
+			values = append(values, row.Reasoning)
+		}
+		table = append(table, values)
+	}
+	return renderSlashPaddedRows(table)
+}
+
+func renderSlashPaddedRows(table [][]string) []slashOutputLine {
+	if len(table) == 0 {
+		return nil
+	}
+	widths := make([]int, 0)
+	for _, row := range table {
+		for len(widths) < len(row) {
+			widths = append(widths, 0)
+		}
+		for i, col := range row {
+			if n := len([]rune(col)); n > widths[i] {
+				widths[i] = n
+			}
+		}
+	}
+	lines := make([]slashOutputLine, 0, len(table))
+	for _, row := range table {
+		parts := make([]string, len(row))
+		for i, col := range row {
+			parts[i] = padRightRunes(col, widths[i])
+		}
+		lines = append(lines, slashOutputLine{
+			Text:  "  " + strings.TrimRight(strings.Join(parts, "  "), " "),
+			Style: tuikit.LineStyleKeyValue,
+		})
+	}
+	return lines
+}
+
+func slashField(label, value string) slashOutputLine {
+	label = strings.TrimSpace(label)
+	value = strings.TrimSpace(value)
+	if label == "" {
+		return slashOutputLine{Text: value, Style: tuikit.LineStyleDefault}
+	}
+	return slashOutputLine{Text: "  " + padRightRunes(label+":", 10) + " " + value, Style: tuikit.LineStyleKeyValue}
+}
+
+func slashSection(text string) slashOutputLine {
+	return slashOutputLine{Text: strings.TrimSpace(text), Style: tuikit.LineStyleSection}
+}
+
+func slashBlank() slashOutputLine {
+	return slashOutputLine{Style: tuikit.LineStyleDefault}
+}

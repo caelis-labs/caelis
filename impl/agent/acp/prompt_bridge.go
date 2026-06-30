@@ -88,6 +88,17 @@ func (a *RuntimeAgent) emitPromptRouterResult(ctx context.Context, activeSession
 	}
 	sessionID := promptRouterResultSessionID(activeSession, result)
 	outboundFilter := newACPNarrativeFilter(suppressUserEcho)
+	if result.SlashResult != nil {
+		text := strings.TrimSpace(control.FormatSlashResult(*result.SlashResult))
+		if text != "" {
+			if err := a.emitControlEnvelope(ctx, cb, sessionID, nil, eventstream.Envelope{
+				Kind:   eventstream.KindNotice,
+				Notice: text,
+			}, outboundFilter); err != nil {
+				return err
+			}
+		}
+	}
 	for _, env := range result.Events {
 		if err := a.emitControlEnvelope(ctx, cb, sessionID, nil, env, outboundFilter); err != nil {
 			return err

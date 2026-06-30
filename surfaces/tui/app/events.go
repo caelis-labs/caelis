@@ -6,6 +6,7 @@ package tuiapp
 import (
 	"time"
 
+	"github.com/OnslaughtSnail/caelis/protocol/acp/control"
 	"github.com/OnslaughtSnail/caelis/surfaces/transcript"
 )
 
@@ -21,6 +22,10 @@ const (
 
 type LogChunkMsg struct {
 	Chunk string
+}
+
+type SlashCommandResultMsg struct {
+	Result control.SlashCommandResult
 }
 
 type SetStatusMsg struct {

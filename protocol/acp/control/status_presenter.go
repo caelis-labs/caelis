@@ -9,38 +9,106 @@ import (
 // FormatStatusSnapshot renders the shared text status view used by prompt
 // surfaces.
 func FormatStatusSnapshot(status StatusSnapshot) string {
-	model := statusHeaderModelText(status)
-	lines := []string{}
-	appendStatusField(&lines, "Model", model)
-	appendStatusField(&lines, "Mode", firstNonEmpty(strings.TrimSpace(status.Session.ModeLabel), "auto-review"))
-	appendStatusField(&lines, "Sandbox", formatStatusSandbox(status))
-	appendStatusField(&lines, "Workspace", firstNonEmpty(strings.TrimSpace(status.Session.Workspace), "-"))
-	appendStatusField(&lines, "Session", strings.TrimSpace(status.Session.ID))
-	if usage := formatContextUsage(status.Usage.TotalTokens, status.Usage.ContextWindowTokens); usage != "" {
-		appendStatusField(&lines, "Context", usage)
+	view := StatusDisplayFromSnapshot(status)
+	lines := make([]string, 0, len(view.Fields)+len(view.Warnings)+len(view.Usage.Rows)+4)
+	for _, field := range view.Fields {
+		appendStatusField(&lines, field.Label, field.Value)
 	}
+	if len(view.Warnings) > 0 {
+		if len(lines) > 0 {
+			lines = append(lines, "")
+		}
+		for _, warning := range view.Warnings {
+			appendStatusField(&lines, "Warning", warning)
+		}
+	}
+	if usage := FormatTokenUsageDisplay(view.Usage); usage != "" {
+		if len(lines) > 0 {
+			lines = append(lines, "")
+		}
+		for _, line := range strings.Split(usage, "\n") {
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+			lines = append(lines, "  "+line)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// DisplayField is a surface-neutral label/value row.
+type DisplayField struct {
+	Label string `json:"label,omitempty"`
+	Value string `json:"value,omitempty"`
+}
+
+// StatusDisplay is the canonical display model for /status. It contains
+// derived user-facing strings but no surface-specific layout or styling.
+type StatusDisplay struct {
+	Fields   []DisplayField `json:"fields,omitempty"`
+	Warnings []string       `json:"warnings,omitempty"`
+	Usage    TokenUsageView `json:"usage,omitempty"`
+}
+
+// TokenUsageView is the canonical display model for session token usage.
+type TokenUsageView struct {
+	Rows          []TokenUsageViewRow `json:"rows,omitempty"`
+	ShowReasoning bool                `json:"show_reasoning,omitempty"`
+}
+
+// Empty reports whether the usage view has no visible rows.
+func (v TokenUsageView) Empty() bool {
+	return len(v.Rows) == 0
+}
+
+// TokenUsageViewRow carries preformatted token usage cells.
+type TokenUsageViewRow struct {
+	Scope     string `json:"scope,omitempty"`
+	Total     string `json:"total,omitempty"`
+	Input     string `json:"input,omitempty"`
+	Cached    string `json:"cached,omitempty"`
+	Output    string `json:"output,omitempty"`
+	Reasoning string `json:"reasoning,omitempty"`
+}
+
+// StatusDisplayFromSnapshot derives the canonical display model for /status.
+func StatusDisplayFromSnapshot(status StatusSnapshot) StatusDisplay {
+	fields := make([]DisplayField, 0, 10)
+	appendDisplayField := func(label, value string) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return
+		}
+		fields = append(fields, DisplayField{Label: strings.TrimSpace(label), Value: value})
+	}
+	appendDisplayField("Model", statusHeaderModelText(status))
+	appendDisplayField("Mode", firstNonEmpty(strings.TrimSpace(status.Session.ModeLabel), strings.TrimSpace(status.Session.SessionMode), "auto-review"))
+	appendDisplayField("Sandbox", formatStatusSandbox(status))
+	appendDisplayField("Workspace", firstNonEmpty(strings.TrimSpace(status.Session.Workspace), "-"))
+	appendDisplayField("Session", strings.TrimSpace(status.Session.ID))
+	appendDisplayField("Context", formatContextUsage(status.Usage.TotalTokens, status.Usage.ContextWindowTokens))
 	if status.SandboxStatus.FallbackReason != "" {
-		appendStatusField(&lines, "Fallback", strings.TrimSpace(status.SandboxStatus.FallbackReason))
+		appendDisplayField("Fallback", strings.TrimSpace(status.SandboxStatus.FallbackReason))
 	}
 	if status.SandboxStatus.InstallHint != "" {
-		appendStatusField(&lines, "Install", strings.TrimSpace(status.SandboxStatus.InstallHint))
+		appendDisplayField("Install", strings.TrimSpace(status.SandboxStatus.InstallHint))
 	}
 	setup := SandboxSetupViewFromStatus(status)
 	if setup.GlobalRequired {
 		if setup.SetupError != "" {
-			appendStatusField(&lines, "Setup", "Windows sandbox infrastructure repair failed")
+			appendDisplayField("Setup", "Windows sandbox infrastructure repair failed")
 		} else {
-			appendStatusField(&lines, "Setup", "Windows sandbox infrastructure repair is pending")
+			appendDisplayField("Setup", "Windows sandbox infrastructure repair is pending")
 		}
 	} else if setup.WorkspaceRequired {
 		if setup.SetupError != "" {
-			appendStatusField(&lines, "Setup", "current workspace ACL repair failed")
+			appendDisplayField("Setup", "current workspace ACL repair failed")
 		} else {
-			appendStatusField(&lines, "Setup", "current workspace ACL repair is pending")
+			appendDisplayField("Setup", "current workspace ACL repair is pending")
 		}
 	}
 	if setup.SetupError != "" {
-		appendStatusField(&lines, "Error", compactStatusDetail(setup.SetupError, 180))
+		appendDisplayField("Error", compactStatusDetail(setup.SetupError, 180))
 	}
 	warnings := make([]string, 0, 6)
 	if strings.TrimSpace(status.ModelStatus.Display) == "" && strings.TrimSpace(status.ModelStatus.Provider) == "" && strings.TrimSpace(status.ModelStatus.Name) == "" {
@@ -61,26 +129,7 @@ func FormatStatusSnapshot(status StatusSnapshot) string {
 	if strings.TrimSpace(status.SandboxStatus.FallbackReason) != "" {
 		warnings = append(warnings, "Requested sandbox backend is unavailable and a fallback is in effect")
 	}
-	if len(warnings) > 0 {
-		if len(lines) > 0 {
-			lines = append(lines, "")
-		}
-		for _, warning := range warnings {
-			appendStatusField(&lines, "Warning", warning)
-		}
-	}
-	if usage := formatSessionTokenUsageStatus(status); usage != "" {
-		if len(lines) > 0 {
-			lines = append(lines, "")
-		}
-		for _, line := range strings.Split(usage, "\n") {
-			if strings.TrimSpace(line) == "" {
-				continue
-			}
-			lines = append(lines, "  "+line)
-		}
-	}
-	return strings.Join(lines, "\n")
+	return StatusDisplay{Fields: fields, Warnings: warnings, Usage: sessionTokenUsageView(status)}
 }
 
 // FormatDoctorSnapshot renders the shared doctor output used by prompt
@@ -234,7 +283,7 @@ func formatStatusSandbox(status StatusSnapshot) string {
 	}
 }
 
-func formatSessionTokenUsageStatus(status StatusSnapshot) string {
+func sessionTokenUsageView(status StatusSnapshot) TokenUsageView {
 	total := normalizedUsageSnapshot(status.Usage.SessionUsageTotal)
 	if usageSnapshotZero(total) {
 		total = normalizedUsageSnapshot(UsageSnapshot{
@@ -246,7 +295,7 @@ func formatSessionTokenUsageStatus(status StatusSnapshot) string {
 		})
 	}
 	if usageSnapshotZero(total) {
-		return ""
+		return TokenUsageView{}
 	}
 	rows := []tokenUsageStatusRow{{scope: "total", usage: total}}
 	for _, item := range status.Usage.SessionUsageByModel {
@@ -256,7 +305,7 @@ func formatSessionTokenUsageStatus(status StatusSnapshot) string {
 		}
 		rows = append(rows, tokenUsageStatusRow{scope: modelUsageStatusLabel(item), usage: usage})
 	}
-	return formatTokenUsageTable(rows)
+	return tokenUsageView(rows)
 }
 
 func modelUsageStatusLabel(item ModelUsageSnapshot) string {
@@ -279,9 +328,9 @@ type tokenUsageStatusRow struct {
 	usage UsageSnapshot
 }
 
-func formatTokenUsageTable(rows []tokenUsageStatusRow) string {
+func tokenUsageView(rows []tokenUsageStatusRow) TokenUsageView {
 	if len(rows) == 0 {
-		return ""
+		return TokenUsageView{}
 	}
 	showReasoning := false
 	for _, row := range rows {
@@ -290,36 +339,53 @@ func formatTokenUsageTable(rows []tokenUsageStatusRow) string {
 			break
 		}
 	}
-	table := make([][]string, 0, len(rows)+2)
-	header := []string{"Scope", "Total", "Input", "Cached", "Output"}
-	if showReasoning {
-		header = append(header, "Reasoning")
-	}
-	table = append(table, header)
+	view := TokenUsageView{Rows: make([]TokenUsageViewRow, 0, len(rows)), ShowReasoning: showReasoning}
 	for _, row := range rows {
 		usage := normalizedUsageSnapshot(row.usage)
-		cols := []string{
-			row.scope,
-			formatTokenUsageNumber(usage.TotalTokens),
-			formatTokenUsageNumber(usage.PromptTokens),
-			formatTokenUsageNumber(usage.CachedInputTokens),
-			formatTokenUsageNumber(usage.CompletionTokens),
-		}
-		if showReasoning {
-			cols = append(cols, formatTokenUsageNumber(usage.ReasoningTokens))
-		}
-		table = append(table, cols)
+		view.Rows = append(view.Rows, TokenUsageViewRow{
+			Scope:     row.scope,
+			Total:     formatTokenUsageNumber(usage.TotalTokens),
+			Input:     formatTokenUsageNumber(usage.PromptTokens),
+			Cached:    formatTokenUsageNumber(usage.CachedInputTokens),
+			Output:    formatTokenUsageNumber(usage.CompletionTokens),
+			Reasoning: formatTokenUsageNumber(usage.ReasoningTokens),
+		})
 	}
-	widths := make([]int, len(table[0]))
-	for _, row := range table {
-		for i, col := range row {
-			if n := len([]rune(col)); n > widths[i] {
-				widths[i] = n
-			}
-		}
+	return view
+}
+
+// FormatTokenUsageDisplay renders token usage rows as padded plain text.
+func FormatTokenUsageDisplay(usage TokenUsageView) string {
+	if usage.Empty() {
+		return ""
 	}
-	lines := make([]string, 0, len(table))
-	for _, row := range table {
+	return formatPaddedRows(tokenUsagePlainRows(usage))
+}
+
+func tokenUsagePlainRows(usage TokenUsageView) [][]string {
+	header := []string{"Scope", "Total", "Input", "Cached", "Output"}
+	if usage.ShowReasoning {
+		header = append(header, "Reasoning")
+	}
+	rows := make([][]string, 0, len(usage.Rows)+1)
+	rows = append(rows, header)
+	for _, row := range usage.Rows {
+		values := []string{row.Scope, row.Total, row.Input, row.Cached, row.Output}
+		if usage.ShowReasoning {
+			values = append(values, row.Reasoning)
+		}
+		rows = append(rows, values)
+	}
+	return rows
+}
+
+func formatPaddedRows(rows [][]string) string {
+	if len(rows) == 0 {
+		return ""
+	}
+	widths := paddedRowWidths(rows)
+	lines := make([]string, 0, len(rows))
+	for _, row := range rows {
 		parts := make([]string, len(row))
 		for i, col := range row {
 			parts[i] = padRightRunes(col, widths[i])
@@ -327,6 +393,21 @@ func formatTokenUsageTable(rows []tokenUsageStatusRow) string {
 		lines = append(lines, strings.TrimRight(strings.Join(parts, "  "), " "))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func paddedRowWidths(rows [][]string) []int {
+	widths := make([]int, 0)
+	for _, row := range rows {
+		for len(widths) < len(row) {
+			widths = append(widths, 0)
+		}
+		for i, col := range row {
+			if n := len([]rune(col)); n > widths[i] {
+				widths[i] = n
+			}
+		}
+	}
+	return widths
 }
 
 func normalizedUsageSnapshot(usage UsageSnapshot) UsageSnapshot {

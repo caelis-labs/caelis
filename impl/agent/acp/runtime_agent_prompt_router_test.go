@@ -22,13 +22,14 @@ import (
 func TestRuntimeAgentPromptSlashCommandUsesPromptRouterBeforeMainRuntime(t *testing.T) {
 	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
 	runtime := &promptRouterRuntime{sessions: sessions}
+	statusSlash := control.NewStatusSlashResult(control.StatusSnapshot{
+		Session:     control.StatusSession{ID: "session-1"},
+		ModelStatus: control.StatusModel{Display: "ollama/llama3"},
+	})
 	router := &testPromptRouter{
 		result: controlprompt.Result{
-			Handled: true,
-			Events: []eventstream.Envelope{{
-				Kind:   eventstream.KindNotice,
-				Notice: "Model: ollama/llama3\nSession: session-1",
-			}},
+			Handled:             true,
+			SlashResult:         &statusSlash,
 			SuppressTurnDivider: true,
 		},
 	}
