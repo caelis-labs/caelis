@@ -22,21 +22,25 @@ type Config struct {
 	DefaultApprovalMode ApprovalMode
 	ApprovalApprover    approval.Approver
 	ApprovalReviewer    ApprovalReviewer
-	Clock               func() time.Time
-	SessionStartHooks   []plugin.HookSpec
+	// SubmissionReferences projects surface shorthand such as $skill or #file
+	// before a turn reaches the model/runtime boundary.
+	SubmissionReferences SubmissionReferenceProjector
+	Clock                func() time.Time
+	SessionStartHooks    []plugin.HookSpec
 }
 
 type Gateway struct {
-	sessions            session.Service
-	runtime             agent.Runtime
-	control             agent.SessionControlPlane
-	resolver            TurnResolver
-	request             RequestPolicy
-	defaultApprovalMode ApprovalMode
-	approvalApprover    approval.Approver
-	approvalReviewer    ApprovalReviewer
-	clock               func() time.Time
-	sessionStartHooks   []plugin.HookSpec
+	sessions             session.Service
+	runtime              agent.Runtime
+	control              agent.SessionControlPlane
+	resolver             TurnResolver
+	request              RequestPolicy
+	defaultApprovalMode  ApprovalMode
+	approvalApprover     approval.Approver
+	approvalReviewer     ApprovalReviewer
+	submissionReferences SubmissionReferenceProjector
+	clock                func() time.Time
+	sessionStartHooks    []plugin.HookSpec
 
 	mu       sync.Mutex
 	active   map[string]*turnHandle
@@ -86,18 +90,19 @@ func New(cfg Config) (*Gateway, error) {
 		cfg.ApprovalReviewer = approval.ApproverAdapter{Approver: cfg.ApprovalApprover}
 	}
 	return &Gateway{
-		sessions:            cfg.Sessions,
-		runtime:             cfg.Runtime,
-		control:             resolveControlPlane(cfg.Runtime),
-		resolver:            cfg.Resolver,
-		request:             cfg.RequestPolicy,
-		defaultApprovalMode: NormalizeApprovalMode(string(cfg.DefaultApprovalMode)),
-		approvalApprover:    cfg.ApprovalApprover,
-		approvalReviewer:    cfg.ApprovalReviewer,
-		clock:               cfg.Clock,
-		sessionStartHooks:   cfg.SessionStartHooks,
-		active:              map[string]*turnHandle{},
-		bindings:            map[string]sessionBinding{},
+		sessions:             cfg.Sessions,
+		runtime:              cfg.Runtime,
+		control:              resolveControlPlane(cfg.Runtime),
+		resolver:             cfg.Resolver,
+		request:              cfg.RequestPolicy,
+		defaultApprovalMode:  NormalizeApprovalMode(string(cfg.DefaultApprovalMode)),
+		approvalApprover:     cfg.ApprovalApprover,
+		approvalReviewer:     cfg.ApprovalReviewer,
+		submissionReferences: cfg.SubmissionReferences,
+		clock:                cfg.Clock,
+		sessionStartHooks:    cfg.SessionStartHooks,
+		active:               map[string]*turnHandle{},
+		bindings:             map[string]sessionBinding{},
 	}, nil
 }
 

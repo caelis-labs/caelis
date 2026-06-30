@@ -330,7 +330,7 @@ func TestAdapterSubmitRoutesActiveSessionInputToActiveTurn(t *testing.T) {
 		t.Fatalf("NewAdapter() error = %v", err)
 	}
 
-	turn, err := driver.Submit(ctx, Submission{Text: "  steer next step  "})
+	turn, err := driver.Submit(ctx, Submission{Text: "  steer next step  ", DisplayText: "$cmpctl steer next step"})
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
@@ -345,6 +345,66 @@ func TestAdapterSubmitRoutesActiveSessionInputToActiveTurn(t *testing.T) {
 	}
 	if got := gw.activeSubmits[0].Text; got != "steer next step" {
 		t.Fatalf("active submit text = %q, want trimmed guidance", got)
+	}
+	if got := gw.activeSubmits[0].DisplayText; got != "$cmpctl steer next step" {
+		t.Fatalf("active submit display text = %q, want original display text", got)
+	}
+	if _, ok := gw.activeSubmits[0].Metadata["display_text"]; ok {
+		t.Fatalf("active submit metadata contains legacy display_text: %#v", gw.activeSubmits[0].Metadata)
+	}
+}
+
+func TestAdapterSubmitForwardsReferencesToGateway(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "dict.go"), []byte("package main\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	activeSession := session.Session{
+		SessionRef: session.SessionRef{
+			AppName: "caelis", UserID: "user-1", SessionID: "reference-session", WorkspaceKey: "ws",
+		},
+		CWD: workspace,
+	}
+	gw := &activeSubmitGatewayService{}
+	driver, err := NewAdapter(ctx, &RuntimeStack{
+		Gateway: GatewayRuntimeDeps{ServiceFn: func() GatewayService { return gw }},
+		Session: SessionRuntimeDeps{
+			Workspace: session.WorkspaceRef{Key: "ws", CWD: workspace},
+			StartFn: func(context.Context, string, string) (session.Session, error) {
+				return activeSession, nil
+			},
+		},
+		Sandbox: SandboxRuntimeDeps{
+			StatusFn: func() SandboxStatus { return SandboxStatus{RequestedBackend: "host"} },
+		},
+	}, activeSession.SessionID, "surface", "")
+	if err != nil {
+		t.Fatalf("NewAdapter() error = %v", err)
+	}
+
+	raw := "$CMPCTL inspect #dict.go"
+	turn, err := driver.Submit(ctx, Submission{Text: raw, DisplayText: raw})
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	if turn != nil {
+		t.Fatalf("Submit() turn = %#v, want nil for fake BeginTurn", turn)
+	}
+	if got, want := len(gw.beginReqs), 1; got != want {
+		t.Fatalf("BeginTurn calls = %d, want %d", got, want)
+	}
+	req := gw.beginReqs[0]
+	if req.Input != raw {
+		t.Fatalf("BeginTurn Input = %q, want raw input forwarded to gateway", req.Input)
+	}
+	if req.DisplayInput != "" {
+		t.Fatalf("DisplayInput = %q, want empty when display matches raw input", req.DisplayInput)
+	}
+	if _, ok := req.Metadata["display_text"]; ok {
+		t.Fatalf("metadata contains legacy display_text: %#v", req.Metadata)
 	}
 }
 
@@ -3765,13 +3825,15 @@ func (g *sideAgentRollbackGatewayService) DetachParticipant(_ context.Context, r
 type activeSubmitGatewayService struct {
 	active        []gateway.ActiveTurnState
 	activeSubmits []gateway.SubmitActiveTurnRequest
+	beginReqs     []gateway.BeginTurnRequest
 	beginCalls    int
 }
 
 func (g *activeSubmitGatewayService) Streams() stream.Service { return nil }
 
-func (g *activeSubmitGatewayService) BeginTurn(context.Context, gateway.BeginTurnRequest) (gateway.BeginTurnResult, error) {
+func (g *activeSubmitGatewayService) BeginTurn(_ context.Context, req gateway.BeginTurnRequest) (gateway.BeginTurnResult, error) {
 	g.beginCalls++
+	g.beginReqs = append(g.beginReqs, req)
 	return gateway.BeginTurnResult{}, nil
 }
 

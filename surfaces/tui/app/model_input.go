@@ -1215,6 +1215,7 @@ func (m *Model) submitLineWithDisplayAndAttachmentsOptions(execLine string, disp
 	}
 	submission := Submission{
 		Text:        strings.TrimSpace(execLine),
+		DisplayText: displayLine,
 		Attachments: attachments,
 		Mode:        mode,
 	}

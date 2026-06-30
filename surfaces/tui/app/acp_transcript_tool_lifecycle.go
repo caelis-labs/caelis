@@ -423,7 +423,7 @@ func isTerminalPanelToolKind(name string, kind string) bool {
 }
 
 func isTerminalPanelToolEvent(ev SubagentEvent) bool {
-	return isTerminalPanelToolKind(ev.Name, ev.ToolKind)
+	return ev.Terminal || isTerminalPanelToolKind(ev.Name, ev.ToolKind)
 }
 
 func isMutationPanelTool(name string) bool {

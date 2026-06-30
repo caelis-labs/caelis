@@ -31,6 +31,8 @@ func projectTranscriptToolCall(input transcript.ToolProjectionInput) TranscriptE
 		semanticName = refinedName
 	}
 	toolTaskID := displaypolicy.ToolTaskID(rawInput, nil, input.Meta)
+	content := acpToolContentToDisplay(input.Content)
+	toolTerminal := transcriptToolHasTerminal(input.Meta, content)
 	displayInput := rawInput
 	if strings.EqualFold(semanticName, "TASK") {
 		displayInput = taskDisplayInputForResult(rawInput, toolDisplayMetaOutput(semanticName, input.Meta))
@@ -52,6 +54,7 @@ func projectTranscriptToolCall(input transcript.ToolProjectionInput) TranscriptE
 		ToolArgs:           toolArgs,
 		ToolFullArgs:       toolDisplayFullArgs(semanticName, rawInput),
 		ToolStatus:         status,
+		ToolTerminal:       toolTerminal,
 		ToolTaskID:         toolTaskID,
 		ToolTaskAction:     displaypolicy.ToolTaskAction(rawInput, nil, input.Meta),
 		ToolTaskInput:      displaypolicy.ToolTaskInput(rawInput, nil, input.Meta),
@@ -81,6 +84,7 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 	rawInput := transcript.CloneAnyMap(input.RawInput)
 	rawOutput := transcript.RawMap(input.RawOutput)
 	content := acpToolContentToDisplay(input.Content)
+	toolTerminal := transcriptToolHasTerminal(input.Meta, content)
 	suppressRunningSnapshotOutput := suppressRunningTerminalSnapshotOutput(semanticName, input.ToolKind, input.Meta, status, toolErr)
 	if refinedName := refinedToolDisplayName(semanticName, input.ToolKind, input.ToolTitle, rawInput); refinedName != "" {
 		toolName = refinedName
@@ -98,10 +102,13 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 	toolOutput := acpprojector.FormatToolContent(content)
 	toolOutputHasTerminalData := false
 	toolOutputSynthetic := false
-	if strings.TrimSpace(toolOutput) == "" && !suppressRunningSnapshotOutput {
-		if terminalOutput := terminalToolOutputText(semanticName, input.ToolKind, rawOutput, input.Meta, content, status, toolErr); terminalOutput != "" {
-			toolOutput = terminalOutput
-			toolOutputHasTerminalData = isTerminalPanelToolKind(semanticName, input.ToolKind)
+	if !suppressRunningSnapshotOutput {
+		terminalOutput := terminalToolOutputText(semanticName, input.ToolKind, rawOutput, input.Meta, content, status, toolErr)
+		if terminalOutput != "" {
+			toolOutputHasTerminalData = toolTerminal
+			if strings.TrimSpace(toolOutput) == "" {
+				toolOutput = terminalOutput
+			}
 		}
 	}
 	if strings.TrimSpace(toolOutput) == "" && !toolOutputHasTerminalData {
@@ -157,13 +164,27 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 		ToolStream:          transcriptToolStream(status, toolErr),
 		ToolStatus:          status,
 		ToolError:           toolErr,
+		ToolTerminal:        toolTerminal,
 		ToolOutputSynthetic: toolOutputSynthetic,
+		ToolOutputTerminal:  toolOutputHasTerminalData,
 		ToolTaskID:          toolTaskID,
 		ToolTaskAction:      displaypolicy.ToolTaskAction(rawInput, displayOutput, input.Meta),
 		ToolTaskInput:       displaypolicy.ToolTaskInput(rawInput, displayOutput, input.Meta),
 		ToolTaskTargetKind:  displaypolicy.ToolTaskTargetKind(rawInput, displayOutput, input.Meta),
 		Final:               transcriptToolStatusFinal(status, toolErr),
 	}, true
+}
+
+func transcriptToolHasTerminal(meta map[string]any, content []acpprojector.ToolContent) bool {
+	if hasTerminalPanelMeta(meta) {
+		return true
+	}
+	for _, item := range content {
+		if strings.EqualFold(strings.TrimSpace(item.Type), "terminal") {
+			return true
+		}
+	}
+	return false
 }
 
 func suppressRunningTerminalSnapshotOutput(toolName string, toolKind string, meta map[string]any, status string, isErr bool) bool {

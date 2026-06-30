@@ -46,6 +46,9 @@ func (g *Gateway) BeginTurn(ctx context.Context, req BeginTurnRequest) (BeginTur
 		sessionRef:              session.SessionRef,
 		createdAt:               g.clock(),
 		allowPendingSubmissions: true,
+		prepareSubmission: func(submitCtx context.Context, submitReq SubmitRequest) (SubmitRequest, error) {
+			return g.prepareSubmitRequest(submitCtx, session, submitReq)
+		},
 		cancel: func() bool {
 			return cancelFn()
 		},
@@ -62,6 +65,13 @@ func (g *Gateway) BeginTurn(ctx context.Context, req BeginTurnRequest) (BeginTur
 		return BeginTurnResult{}, fmt.Errorf("gateway: failed to dispatch SessionStart hooks: %w", err)
 	}
 
+	req, err = g.prepareBeginTurnRequest(ctx, session, req)
+	if err != nil {
+		cancelFn()
+		handle.finish()
+		g.releaseActive(session.SessionID, handle)
+		return BeginTurnResult{}, err
+	}
 	resolved, err := g.resolveBeginTurn(ctx, session, req)
 	if err != nil {
 		cancelFn()
@@ -93,6 +103,7 @@ func (g *Gateway) resolveBeginTurn(ctx context.Context, activeSession session.Se
 			RunRequest: agent.RunRequest{
 				SessionRef:   activeSession.SessionRef,
 				Input:        req.Input,
+				DisplayInput: strings.TrimSpace(req.DisplayInput),
 				ContentParts: append([]model.ContentPart(nil), req.ContentParts...),
 			},
 		}, nil
@@ -126,6 +137,9 @@ func (g *Gateway) runTurn(
 	runReq.SessionRef = session.SessionRef
 	if strings.TrimSpace(runReq.Input) == "" {
 		runReq.Input = req.Input
+	}
+	if strings.TrimSpace(runReq.DisplayInput) == "" {
+		runReq.DisplayInput = strings.TrimSpace(req.DisplayInput)
 	}
 	if len(runReq.ContentParts) == 0 && len(req.ContentParts) > 0 {
 		runReq.ContentParts = append([]model.ContentPart(nil), req.ContentParts...)

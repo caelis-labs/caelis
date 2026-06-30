@@ -188,6 +188,38 @@ func TestTurnHandleSubmitRoutesApprovalAndContinuation(t *testing.T) {
 	}
 }
 
+func TestTurnHandleSubmitNormalizesConversationSubmissions(t *testing.T) {
+	t.Parallel()
+
+	handle := newTurnHandle(turnHandleConfig{
+		handleID:   "h1",
+		runID:      "run-1",
+		turnID:     "turn-1",
+		sessionRef: session.SessionRef{AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws"},
+		createdAt:  time.Unix(100, 0),
+		prepareSubmission: func(_ context.Context, req SubmitRequest) (SubmitRequest, error) {
+			req.Text = "projected follow up"
+			req.DisplayText = "$cmpctl follow up"
+			return req, nil
+		},
+	})
+	runner := &recordingRunner{}
+	handle.setRunner(runner)
+
+	if err := handle.Submit(context.Background(), SubmitRequest{
+		Kind: SubmissionKindConversation,
+		Text: "$cmpctl follow up",
+	}); err != nil {
+		t.Fatalf("Submit(conversation) error = %v", err)
+	}
+	if got := len(runner.submissions); got != 1 {
+		t.Fatalf("runner submissions = %#v, want one", runner.submissions)
+	}
+	if got := runner.submissions[0]; got.Text != "projected follow up" || got.DisplayInput != "$cmpctl follow up" {
+		t.Fatalf("runner submission = %#v, want normalized text/display", got)
+	}
+}
+
 func TestTurnHandleSubmitRejectsUnknownSubmissionKind(t *testing.T) {
 	t.Parallel()
 

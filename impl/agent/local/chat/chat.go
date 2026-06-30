@@ -12,6 +12,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/tool"
+	"github.com/OnslaughtSnail/caelis/ports/userdisplay"
 )
 
 // Factory constructs baseline chat agents from one runtime.AgentSpec.
@@ -343,14 +344,18 @@ func (a *Agent) drainPendingSubmissions(ctx agent.Context, messages *[]model.Mes
 		if text == "" && len(submission.ContentParts) == 0 {
 			continue
 		}
-		message := model.MessageFromTextAndContentParts(model.RoleUser, text, submission.ContentParts)
+		message, displayText, meta := userdisplay.Resolve(text, submission.DisplayInput, submission.ContentParts, submission.Metadata)
 		event := &session.Event{
 			Type:       session.EventTypeUser,
 			Visibility: session.VisibilityCanonical,
 			Actor:      session.ActorRef{Kind: session.ActorKindUser, Name: "user"},
 			Message:    &message,
-			Text:       message.TextContent(),
-			Meta:       pendingSubmissionMeta(submission),
+			Text:       displayText,
+			Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
+				SessionUpdate: string(session.ProtocolUpdateTypeUserMessage),
+				Content:       session.ProtocolTextContent(displayText),
+			}},
+			Meta: meta,
 		}
 		if !yield(event) {
 			return accepted
@@ -368,14 +373,6 @@ func isConversationSubmission(sub agent.Submission) bool {
 	default:
 		return false
 	}
-}
-
-func pendingSubmissionMeta(sub agent.Submission) map[string]any {
-	meta := maps.Clone(sub.Metadata)
-	if len(meta) == 0 {
-		return nil
-	}
-	return meta
 }
 
 func instructionsFromContext(_ agent.Context, systemPrompt string) []model.Part {

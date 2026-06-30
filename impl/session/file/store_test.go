@@ -269,6 +269,46 @@ func TestStoreAppendSkipsHiddenPluginContextForGeneratedTitle(t *testing.T) {
 	}
 }
 
+func TestStoreAppendUsesDisplayTextForGeneratedTitle(t *testing.T) {
+	t.Parallel()
+
+	store := NewStore(Config{
+		RootDir:            t.TempDir(),
+		SessionIDGenerator: func() string { return "sess-1" },
+	})
+	ctx := context.Background()
+	createdSession, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+		AppName: "caelis",
+		UserID:  "user-1",
+		Workspace: session.WorkspaceRef{
+			Key: "ws-1",
+			CWD: "/tmp/ws",
+		},
+	})
+	if err != nil {
+		t.Fatalf("GetOrCreate() error = %v", err)
+	}
+
+	modelText := "The user referenced these resources. Treat them as explicit instructions for this turn:\n- Load and follow the `cmpctl` skill before taking task actions.\n\nUser request:\narchive preflight"
+	displayText := "$cmpctl archive preflight"
+	if _, err := store.AppendEvent(ctx, createdSession.SessionRef, &session.Event{
+		Type:       session.EventTypeUser,
+		Visibility: session.VisibilityCanonical,
+		Message:    ptrMessage(model.NewTextMessage(model.RoleUser, modelText)),
+		Text:       displayText,
+	}); err != nil {
+		t.Fatalf("AppendEvent(user) error = %v", err)
+	}
+
+	gotSession, err := store.Get(ctx, createdSession.SessionRef)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if gotSession.Title != displayText {
+		t.Fatalf("session title = %q, want display text %q", gotSession.Title, displayText)
+	}
+}
+
 func TestStoreLoadRejectsToolResultNameMismatch(t *testing.T) {
 	t.Parallel()
 

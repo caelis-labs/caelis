@@ -115,6 +115,104 @@ func TestRuntimeRunPersistsMinimalChatTurn(t *testing.T) {
 	}
 }
 
+func TestRuntimeRunPersistsDisplayInputSeparateFromModelInput(t *testing.T) {
+	t.Parallel()
+
+	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{
+		SessionIDGenerator: func() string { return "sess-display-input" },
+	}))
+	activeSession, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
+		AppName: "caelis",
+		UserID:  "user-1",
+		Workspace: session.WorkspaceRef{
+			Key: "ws-display-input",
+			CWD: t.TempDir(),
+		},
+	})
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	runtime, err := New(Config{
+		Sessions: sessions,
+		AgentFactory: chat.Factory{
+			SystemPrompt: "Be terse.",
+		},
+		RunIDGenerator: func() string { return "run-display-input" },
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	modelInput := "Load and follow the `cmpctl` skill before taking task actions.\n\nUser request:\narchive preflight"
+	displayInput := "$cmpctl archive preflight"
+	result, err := runtime.Run(context.Background(), agent.RunRequest{
+		SessionRef:   activeSession.SessionRef,
+		Input:        modelInput,
+		DisplayInput: displayInput,
+		AgentSpec: agent.AgentSpec{
+			Name:  "chat",
+			Model: staticModel{text: "done"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	for _, seqErr := range result.Handle.Events() {
+		if seqErr != nil {
+			t.Fatalf("runner error = %v", seqErr)
+		}
+	}
+	loaded, err := sessions.LoadSession(context.Background(), session.LoadSessionRequest{
+		SessionRef: activeSession.SessionRef,
+	})
+	if err != nil {
+		t.Fatalf("LoadSession() error = %v", err)
+	}
+	if got, want := len(loaded.Events), 2; got != want {
+		t.Fatalf("len(loaded.Events) = %d, want %d", got, want)
+	}
+	user := loaded.Events[0]
+	if user.Message == nil || user.Message.TextContent() != modelInput {
+		t.Fatalf("user message text = %#v, want model input", user.Message)
+	}
+	if got := user.Text; got != displayInput {
+		t.Fatalf("user display text = %q, want %q", got, displayInput)
+	}
+	if got := user.Meta["display_input"]; got != displayInput {
+		t.Fatalf("user display_input metadata = %#v, want %q", got, displayInput)
+	}
+	summary, err := sessions.Session(context.Background(), activeSession.SessionRef)
+	if err != nil {
+		t.Fatalf("Session() error = %v", err)
+	}
+	if summary.Title != displayInput {
+		t.Fatalf("session title = %q, want display input %q", summary.Title, displayInput)
+	}
+
+	replayModel := &historyReplayModel{
+		t:         t,
+		wantTexts: []string{modelInput, "done", "follow-up"},
+		replyText: "roundtrip ok",
+	}
+	result, err = runtime.Run(context.Background(), agent.RunRequest{
+		SessionRef: activeSession.SessionRef,
+		Input:      "follow-up",
+		AgentSpec: agent.AgentSpec{
+			Name:  "chat",
+			Model: replayModel,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run(second) error = %v", err)
+	}
+	if _, err := drainRunnerEvents(t, result.Handle); err != nil {
+		t.Fatalf("second runner error = %v", err)
+	}
+	if replayModel.calls != 1 {
+		t.Fatalf("history replay model calls = %d, want 1", replayModel.calls)
+	}
+}
+
 func TestRuntimePropagatesInvalidModelVisibleAppend(t *testing.T) {
 	t.Parallel()
 
@@ -456,8 +554,9 @@ func TestRuntimeSubmitQueuesGuidanceForNextModelStep(t *testing.T) {
 	}
 
 	if err := result.Handle.Submit(agent.Submission{
-		Kind: agent.SubmissionKindConversation,
-		Text: "steer next step",
+		Kind:         agent.SubmissionKindConversation,
+		Text:         "steer next step",
+		DisplayInput: "$cmpctl steer next step",
 	}); err != nil {
 		t.Fatalf("Submit() while running error = %v", err)
 	}
@@ -500,6 +599,14 @@ func TestRuntimeSubmitQueuesGuidanceForNextModelStep(t *testing.T) {
 	}
 	if !reflect.DeepEqual(gotPersisted, wantTexts) {
 		t.Fatalf("persisted user/assistant texts = %#v, want %#v", gotPersisted, wantTexts)
+	}
+	for _, event := range loaded.Events {
+		if event == nil || event.Message == nil || event.Message.TextContent() != "steer next step" {
+			continue
+		}
+		if got := event.Text; got != "$cmpctl steer next step" {
+			t.Fatalf("pending submission display text = %q, want original display text", got)
+		}
 	}
 	if err := result.Handle.Submit(agent.Submission{Kind: agent.SubmissionKindConversation, Text: "too late"}); err == nil {
 		t.Fatal("Submit() after runner completion error = nil, want closed-runner error")

@@ -37,6 +37,7 @@ const (
 type Submission struct {
 	Kind         SubmissionKind      `json:"kind,omitempty"`
 	Text         string              `json:"text,omitempty"`
+	DisplayInput string              `json:"display_input,omitempty"`
 	ContentParts []model.ContentPart `json:"content_parts,omitempty"`
 	Metadata     map[string]any      `json:"metadata,omitempty"`
 }
@@ -321,6 +322,7 @@ func CloneSubmission(sub Submission) Submission {
 	return Submission{
 		Kind:         sub.Kind,
 		Text:         sub.Text,
+		DisplayInput: sub.DisplayInput,
 		ContentParts: append([]model.ContentPart(nil), sub.ContentParts...),
 		Metadata:     maps.Clone(sub.Metadata),
 	}

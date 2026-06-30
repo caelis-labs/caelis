@@ -67,7 +67,9 @@ type Event struct {
 	ToolStream          string
 	ToolStatus          string
 	ToolError           bool
+	ToolTerminal        bool
 	ToolOutputSynthetic bool
+	ToolOutputTerminal  bool
 	ToolTaskID          string
 	ToolTaskAction      string
 	ToolTaskInput       string

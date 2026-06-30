@@ -25,6 +25,7 @@ type turnHandleConfig struct {
 	createdAt               time.Time
 	cancel                  func() bool
 	allowPendingSubmissions bool
+	prepareSubmission       func(context.Context, SubmitRequest) (SubmitRequest, error)
 }
 
 type turnHandle struct {
@@ -49,6 +50,7 @@ type turnHandle struct {
 	runner                  agent.Runner
 	pendingSubmissions      []SubmitRequest
 	allowPendingSubmissions bool
+	prepareSubmission       func(context.Context, SubmitRequest) (SubmitRequest, error)
 	pendingApprovalCh       chan ApprovalDecision
 
 	approvalReviewSeq uint64
@@ -65,6 +67,7 @@ func newTurnHandle(cfg turnHandleConfig) *turnHandle {
 		createdAt:               cfg.createdAt,
 		cancelFn:                cfg.cancel,
 		allowPendingSubmissions: cfg.allowPendingSubmissions,
+		prepareSubmission:       cfg.prepareSubmission,
 		eventsCh:                make(chan eventstream.Envelope, 32),
 	}
 	h.eventsCond = sync.NewCond(&h.mu)
@@ -128,6 +131,13 @@ func (h *turnHandle) Submit(ctx context.Context, req SubmitRequest) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		}
+	}
+	if h.prepareSubmission != nil {
+		prepared, err := h.prepareSubmission(ctx, req)
+		if err != nil {
+			return err
+		}
+		req = prepared
 	}
 
 	h.mu.Lock()
@@ -219,6 +229,7 @@ func cloneSubmitRequest(req SubmitRequest) SubmitRequest {
 	out := SubmitRequest{
 		Kind:         req.Kind,
 		Text:         req.Text,
+		DisplayText:  req.DisplayText,
 		ContentParts: append([]model.ContentPart(nil), req.ContentParts...),
 		Metadata:     cloneMap(req.Metadata),
 	}
@@ -233,6 +244,7 @@ func runnerSubmissionFromSubmitRequest(req SubmitRequest) agent.Submission {
 	return agent.Submission{
 		Kind:         req.Kind,
 		Text:         req.Text,
+		DisplayInput: strings.TrimSpace(req.DisplayText),
 		ContentParts: append([]model.ContentPart(nil), req.ContentParts...),
 		Metadata:     cloneMap(req.Metadata),
 	}

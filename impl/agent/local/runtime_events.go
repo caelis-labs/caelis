@@ -10,13 +10,14 @@ import (
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/plan"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/OnslaughtSnail/caelis/ports/userdisplay"
 )
 
-func buildUserEvent(activeSession session.Session, turnID string, input string, parts []model.ContentPart) *session.Event {
+func buildUserEvent(activeSession session.Session, turnID string, input string, displayInput string, parts []model.ContentPart) *session.Event {
 	if strings.TrimSpace(input) == "" && len(parts) == 0 {
 		return nil
 	}
-	message := model.MessageFromTextAndContentParts(model.RoleUser, strings.TrimSpace(input), parts)
+	message, displayText, meta := userdisplay.Resolve(input, displayInput, parts, nil)
 	return &session.Event{
 		Type:       session.EventTypeUser,
 		Visibility: session.VisibilityCanonical,
@@ -25,11 +26,12 @@ func buildUserEvent(activeSession session.Session, turnID string, input string, 
 		Protocol: &session.EventProtocol{
 			Update: &session.ProtocolUpdate{
 				SessionUpdate: string(session.ProtocolUpdateTypeUserMessage),
-				Content:       session.ProtocolTextContent(message.TextContent()),
+				Content:       session.ProtocolTextContent(displayText),
 			},
 		},
 		Message: &message,
-		Text:    message.TextContent(),
+		Text:    displayText,
+		Meta:    meta,
 	}
 }
 

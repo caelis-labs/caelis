@@ -20,24 +20,18 @@ func TestHandleACPEventEnvelopeAppliesToolTerminalSequence(t *testing.T) {
 	t.Parallel()
 
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
-	toolMeta := map[string]any{
-		"caelis": map[string]any{
-			"runtime": map[string]any{
-				"tool": map[string]any{"name": "RUN_COMMAND"},
-			},
-		},
-	}
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind:      eventstream.KindSessionUpdate,
 		SessionID: "session-1",
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall,
 			ToolCallID:    "call-1",
-			Title:         "RUN_COMMAND echo ok",
+			Title:         "echo ok",
 			Kind:          schema.ToolKindExecute,
 			Status:        schema.ToolStatusPending,
 			RawInput:      map[string]any{"command": "echo ok"},
-			Meta:          toolMeta,
+			Content:       []schema.ToolCallContent{{Type: "terminal", TerminalID: "call-1"}},
+			Meta:          metautil.WithTerminalInfo(nil, "call-1"),
 		},
 	})
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
@@ -46,11 +40,12 @@ func TestHandleACPEventEnvelopeAppliesToolTerminalSequence(t *testing.T) {
 		Update: schema.ToolCallUpdate{
 			SessionUpdate: schema.UpdateToolCallInfo,
 			ToolCallID:    "call-1",
-			Title:         stringPtr("RUN_COMMAND echo ok"),
+			Title:         stringPtr("echo ok"),
 			Kind:          stringPtr(schema.ToolKindExecute),
 			Status:        stringPtr(schema.ToolStatusCompleted),
 			RawInput:      map[string]any{"command": "echo ok"},
-			Meta:          metautil.WithTerminalOutput(toolMeta, "call-1", "ok\n"),
+			Content:       []schema.ToolCallContent{{Type: "terminal", TerminalID: "call-1"}},
+			Meta:          metautil.WithTerminalOutput(nil, "call-1", "ok\n"),
 		},
 	})
 
@@ -59,11 +54,15 @@ func TestHandleACPEventEnvelopeAppliesToolTerminalSequence(t *testing.T) {
 		t.Fatalf("main events = %#v, want one tool event", block.Events)
 	}
 	event := block.Events[0]
-	if event.Kind != SEToolCall || event.CallID != "call-1" || event.Name != "RUN_COMMAND" || !event.Done {
-		t.Fatalf("tool event = %#v, want completed RUN_COMMAND call", event)
+	if event.Kind != SEToolCall || event.CallID != "call-1" || !event.Terminal || !event.Done {
+		t.Fatalf("tool event = %#v, want completed ACP terminal call", event)
 	}
 	if !strings.Contains(event.Output, "ok") {
 		t.Fatalf("tool output = %q, want terminal output", event.Output)
+	}
+	model.syncViewportContent()
+	if strings.Contains(strings.Join(model.viewportPlainLines, "\n"), "• Tool") {
+		t.Fatalf("viewport rendered generic Tool header: %#v", model.viewportPlainLines)
 	}
 }
 

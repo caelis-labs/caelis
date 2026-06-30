@@ -75,6 +75,68 @@ func TestEventStreamTerminalBatcherPreservesSplitNewlineFrame(t *testing.T) {
 	}
 }
 
+func TestEventStreamTerminalBatcherMergesGenericTerminalOverlap(t *testing.T) {
+	t.Parallel()
+
+	var sent []tea.Msg
+	send := func(msg tea.Msg) {
+		sent = append(sent, msg)
+	}
+	var batcher eventStreamTerminalBatcher
+	for _, text := range []string{"line 1\nline 2\n", "line 2\nline 3\n"} {
+		if !batcher.enqueue(genericTerminalStreamEnvelope("call-1", text), send) {
+			t.Fatalf("generic terminal frame %q was not batched", text)
+		}
+	}
+	batcher.flush(send)
+
+	if len(sent) != 1 {
+		t.Fatalf("sent messages = %#v, want one merged terminal update", sent)
+	}
+	env, ok := sent[0].(eventstream.Envelope)
+	if !ok {
+		t.Fatalf("sent[0] = %T, want eventstream.Envelope", sent[0])
+	}
+	update, ok := env.Update.(schema.ToolCallUpdate)
+	if !ok {
+		t.Fatalf("env.Update = %T, want ToolCallUpdate", env.Update)
+	}
+	if got, _ := acpTerminalOutput(update); got != "line 1\nline 2\nline 3\n" {
+		t.Fatalf("acpTerminalOutput() = %q, want overlapped command stream merged", got)
+	}
+}
+
+func TestEventStreamTerminalBatcherMergesGenericCumulativeSameLine(t *testing.T) {
+	t.Parallel()
+
+	var sent []tea.Msg
+	send := func(msg tea.Msg) {
+		sent = append(sent, msg)
+	}
+	var batcher eventStreamTerminalBatcher
+	for _, text := range []string{"abc", "abcd"} {
+		if !batcher.enqueue(genericTerminalStreamEnvelope("call-1", text), send) {
+			t.Fatalf("generic terminal frame %q was not batched", text)
+		}
+	}
+	batcher.flush(send)
+
+	if len(sent) != 1 {
+		t.Fatalf("sent messages = %#v, want one merged terminal update", sent)
+	}
+	env, ok := sent[0].(eventstream.Envelope)
+	if !ok {
+		t.Fatalf("sent[0] = %T, want eventstream.Envelope", sent[0])
+	}
+	update, ok := env.Update.(schema.ToolCallUpdate)
+	if !ok {
+		t.Fatalf("env.Update = %T, want ToolCallUpdate", env.Update)
+	}
+	if got, _ := acpTerminalOutput(update); got != "abcd" {
+		t.Fatalf("acpTerminalOutput() = %q, want cumulative terminal frame", got)
+	}
+}
+
 func terminalMetaStreamEnvelope(callID string, text string) eventstream.Envelope {
 	return eventstream.Envelope{
 		Kind:      eventstream.KindSessionUpdate,
@@ -89,6 +151,24 @@ func terminalMetaStreamEnvelope(callID string, text string) eventstream.Envelope
 			Kind:          stringPtr(schema.ToolKindExecute),
 			Status:        stringPtr(schema.ToolStatusInProgress),
 			Meta:          metautil.WithTerminalOutput(acpToolNameMeta("RUN_COMMAND"), "terminal-1", text),
+		},
+	}
+}
+
+func genericTerminalStreamEnvelope(callID string, text string) eventstream.Envelope {
+	return eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		HandleID:  "handle-1",
+		RunID:     "run-1",
+		TurnID:    "turn-1",
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo,
+			ToolCallID:    callID,
+			Title:         stringPtr("shell output"),
+			Kind:          stringPtr(schema.ToolKindExecute),
+			Status:        stringPtr(schema.ToolStatusInProgress),
+			Meta:          metautil.WithTerminalOutput(nil, "terminal-1", text),
 		},
 	}
 }

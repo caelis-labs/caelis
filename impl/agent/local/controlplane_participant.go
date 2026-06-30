@@ -10,6 +10,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/controller"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/OnslaughtSnail/caelis/ports/userdisplay"
 )
 
 func (r *Runtime) AttachParticipant(ctx context.Context, req agent.AttachParticipantRequest) (session.Session, error) {
@@ -301,7 +302,6 @@ func participantPromptUserEvent(
 	if strings.TrimSpace(input) == "" && len(parts) == 0 {
 		return nil
 	}
-	message := model.MessageFromTextAndContentParts(model.RoleUser, strings.TrimSpace(input), parts)
 	label := participantBindingLabel(binding)
 	meta := map[string]any{}
 	if label != "" {
@@ -311,12 +311,10 @@ func participantPromptUserEvent(
 	if agent := strings.TrimSpace(binding.AgentName); agent != "" {
 		meta["agent"] = agent
 	}
-	if displayInput := strings.TrimSpace(displayInput); displayInput != "" {
-		meta["display_input"] = displayInput
-	}
 	if displayTitle := strings.TrimSpace(displayTitle); displayTitle != "" {
 		meta["display_title"] = displayTitle
 	}
+	message, displayText, meta := userdisplay.Resolve(input, displayInput, parts, meta)
 	kind := binding.Kind
 	if kind == "" {
 		kind = session.ParticipantKindACP
@@ -345,11 +343,11 @@ func participantPromptUserEvent(
 			},
 		},
 		Message: &message,
-		Text:    message.TextContent(),
+		Text:    displayText,
 		Protocol: &session.EventProtocol{
 			Update: &session.ProtocolUpdate{
 				SessionUpdate: string(session.ProtocolUpdateTypeUserMessage),
-				Content:       session.ProtocolTextContent(message.TextContent()),
+				Content:       session.ProtocolTextContent(displayText),
 			},
 		},
 		Meta: meta,

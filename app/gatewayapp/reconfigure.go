@@ -268,12 +268,13 @@ func (s *Stack) buildGatewayRuntime(plan gatewayBuildPlan) (*gatewayRuntimeBundl
 		return nil, err
 	}
 	gw, err := kernelimpl.New(kernelimpl.Config{
-		Sessions:            s.Sessions,
-		Runtime:             rt,
-		Resolver:            resolver,
-		DefaultApprovalMode: kernelimpl.NormalizeApprovalMode(runtimeCfg.ApprovalMode),
-		ApprovalApprover:    agentreview.Approver{Reviewer: s.newModelApprovalReviewer()},
-		SessionStartHooks:   plan.Plugins.SessionStartHooks,
+		Sessions:             s.Sessions,
+		Runtime:              rt,
+		Resolver:             resolver,
+		DefaultApprovalMode:  kernelimpl.NormalizeApprovalMode(runtimeCfg.ApprovalMode),
+		ApprovalApprover:     agentreview.Approver{Reviewer: s.newModelApprovalReviewer()},
+		SubmissionReferences: s.submissionReferenceProjector(),
+		SessionStartHooks:    plan.Plugins.SessionStartHooks,
 	})
 	if err != nil {
 		bundle.Close()

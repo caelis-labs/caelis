@@ -241,7 +241,7 @@ func (r *Runtime) executeKernelTurn(
 	defer handle.finish()
 
 	batch := make([]*session.Event, 0, 4)
-	userEvent := buildUserEvent(activeSession, turnID, req.Input, req.ContentParts)
+	userEvent := buildUserEvent(activeSession, turnID, req.Input, req.DisplayInput, req.ContentParts)
 	if err := r.runWithOverflowRecovery(ctx, activeSession, ref, runID, turnID, req, userEvent, &batch, handle); err != nil {
 		r.setRunState(ref.SessionID, agent.RunState{
 			Status:      interruptedOrFailedStatus(ctx, err),

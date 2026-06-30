@@ -19,6 +19,7 @@ type Attachment struct {
 // Submission is the structured payload emitted by the composer.
 type Submission struct {
 	Text        string
+	DisplayText string
 	Attachments []Attachment
 	Mode        SubmissionMode
 }

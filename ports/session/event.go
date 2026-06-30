@@ -196,6 +196,19 @@ func EventText(event *Event) string {
 	return ""
 }
 
+// EventDisplayText returns the user-visible text for display-only consumers
+// such as generated session titles. It preserves EventText's model-visible
+// fallback order when no display override is present.
+func EventDisplayText(event *Event) string {
+	if event == nil {
+		return ""
+	}
+	if event.Text != "" {
+		return event.Text
+	}
+	return EventText(event)
+}
+
 // CanonicalizeEvent returns a normalized event copy. It preserves the canonical
 // Message/Tool durable state and removes redundant ACP projection content when
 // the canonical state already carries the same fact.

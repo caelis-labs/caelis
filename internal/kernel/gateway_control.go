@@ -106,6 +106,10 @@ func (g *Gateway) PromptParticipant(ctx context.Context, req PromptParticipantRe
 	if err != nil {
 		return BeginTurnResult{}, wrapSessionError(err)
 	}
+	req, err = g.preparePromptParticipantRequest(ctx, session, req)
+	if err != nil {
+		return BeginTurnResult{}, err
+	}
 	g.bind(req.BindingKey, session.SessionRef, BindingDescriptor{})
 	runCtx, cancel := context.WithCancel(ctx)
 	cancelFn := sync.OnceValue(func() bool {
@@ -130,6 +134,9 @@ func (g *Gateway) PromptParticipant(ctx context.Context, req PromptParticipantRe
 		sessionRef:              session.SessionRef,
 		createdAt:               g.clock(),
 		allowPendingSubmissions: true,
+		prepareSubmission: func(submitCtx context.Context, submitReq SubmitRequest) (SubmitRequest, error) {
+			return g.prepareSubmitRequest(submitCtx, session, submitReq)
+		},
 		cancel: func() bool {
 			return cancelFn()
 		},

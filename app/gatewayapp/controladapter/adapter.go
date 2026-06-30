@@ -243,32 +243,26 @@ func streamRequestFromACPEvent(env eventstream.Envelope) (acpprojector.StreamReq
 }
 
 func streamToolNameFromACPUpdate(meta map[string]any, update schema.ToolCallUpdate) string {
-	if name := streamToolName(metaString(meta, gateway.EventMetaRoot, gateway.EventMetaRuntime, gateway.EventMetaRuntimeTool, gateway.EventMetaRuntimeToolName)); name != "" {
+	if name := strings.TrimSpace(metaString(meta, gateway.EventMetaRoot, gateway.EventMetaRuntime, gateway.EventMetaRuntimeTool, gateway.EventMetaRuntimeToolName)); name != "" {
 		return name
 	}
 	if name := streamToolNameFromTitle(stringFromPtr(update.Title)); name != "" {
 		return name
 	}
-	return streamToolName(stringFromPtr(update.Kind))
+	return strings.TrimSpace(stringFromPtr(update.Kind))
 }
 
 func streamToolNameFromTitle(title string) string {
-	fields := strings.Fields(strings.TrimSpace(title))
+	title = strings.TrimSpace(title)
+	fields := strings.Fields(title)
 	if len(fields) == 0 {
 		return ""
 	}
-	return streamToolName(strings.Trim(fields[0], ":"))
-}
-
-func streamToolName(candidate string) string {
-	switch strings.ToUpper(strings.TrimSpace(candidate)) {
-	case "RUN_COMMAND":
-		return "RUN_COMMAND"
-	case "SPAWN":
-		return "SPAWN"
-	default:
-		return ""
+	switch strings.ToUpper(strings.Trim(fields[0], ":")) {
+	case "RUN_COMMAND", "SPAWN":
+		return strings.ToUpper(strings.Trim(fields[0], ":"))
 	}
+	return ""
 }
 
 func acpTerminalID(content []schema.ToolCallContent) string {
@@ -445,8 +439,12 @@ func (d *Adapter) Submit(ctx context.Context, submission Submission) (Turn, erro
 	if err != nil {
 		return nil, err
 	}
-	input := strings.TrimSpace(submission.Text)
-	contentParts, err := contentPartsFromSubmission(input, submission.Attachments, d.WorkspaceDir())
+	rawInput := strings.TrimSpace(submission.Text)
+	displayInput := strings.TrimSpace(submission.DisplayText)
+	if displayInput == rawInput {
+		displayInput = ""
+	}
+	contentParts, err := contentPartsFromSubmission(rawInput, submission.Attachments, d.WorkspaceDir())
 	if err != nil {
 		return nil, err
 	}
@@ -458,11 +456,11 @@ func (d *Adapter) Submit(ctx context.Context, submission Submission) (Turn, erro
 		err := gw.SubmitActiveTurn(ctx, gateway.SubmitActiveTurnRequest{
 			SessionRef:   activeSession.SessionRef,
 			Kind:         gateway.SubmissionKindConversation,
-			Text:         input,
+			Text:         rawInput,
+			DisplayText:  displayInput,
 			ContentParts: contentParts,
 			Metadata: map[string]any{
 				"submission_mode": string(submission.Mode),
-				"display_text":    strings.TrimSpace(submission.DisplayText),
 			},
 		})
 		if err == nil {
@@ -474,12 +472,12 @@ func (d *Adapter) Submit(ctx context.Context, submission Submission) (Turn, erro
 	}
 	result, err := gw.BeginTurn(ctx, gateway.BeginTurnRequest{
 		SessionRef:   activeSession.SessionRef,
-		Input:        input,
+		Input:        rawInput,
+		DisplayInput: displayInput,
 		ContentParts: contentParts,
 		Surface:      d.bindingKey,
 		Metadata: map[string]any{
 			"submission_mode": string(submission.Mode),
-			"display_text":    strings.TrimSpace(submission.DisplayText),
 		},
 	})
 	if err != nil {

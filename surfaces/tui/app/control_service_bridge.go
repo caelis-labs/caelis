@@ -467,9 +467,10 @@ func executeLineViaControlServiceWithContextResult(ctx context.Context, service 
 			}, true, nil
 		},
 	})
+	displayText := strings.TrimSpace(firstNonEmpty(sub.DisplayText, sub.Text))
 	promptResult, err := router.Route(ctx, controlprompt.Request{Submission: control.Submission{
 		Text:        sub.Text,
-		DisplayText: "",
+		DisplayText: displayText,
 		Mode:        control.SubmissionMode(sub.Mode),
 		Attachments: convertAttachments(sub.Attachments),
 	}})
@@ -484,9 +485,10 @@ func executeLineViaControlServiceWithContextResult(ctx context.Context, service 
 	}
 
 	// Normal submission -> control.Service.Submit -> streaming events.
+	submitText := strings.TrimSpace(sub.Text)
 	turn, err := service.Submit(ctx, control.Submission{
-		Text:        sub.Text,
-		DisplayText: "",
+		Text:        submitText,
+		DisplayText: displayText,
 		Mode:        control.SubmissionMode(sub.Mode),
 		Attachments: convertAttachments(sub.Attachments),
 	})

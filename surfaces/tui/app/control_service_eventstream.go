@@ -421,12 +421,7 @@ func mergeEventStreamTerminalEnvelope(dst *eventstream.Envelope, src eventstream
 	if srcUpdate, ok := src.Update.(schema.ToolCallUpdate); ok {
 		if text, terminalID := acpTerminalOutput(srcUpdate); text != "" {
 			existing, existingTerminalID := acpTerminalOutput(dstUpdate)
-			toolName := acpUpdateToolName(transcript.MergeMeta(transcript.ACPUpdateMeta(dstUpdate), dst.Meta), transcript.StringFromPtr(dstUpdate.Title), transcript.StringFromPtr(dstUpdate.Kind))
-			if strings.EqualFold(strings.TrimSpace(toolName), "RUN_COMMAND") {
-				text = mergeCommandStreamChunk(existing, text)
-			} else {
-				text = mergeSubagentStreamChunk(existing, text)
-			}
+			text = mergeTerminalStreamChunk(existing, text)
 			if terminalID == "" {
 				terminalID = existingTerminalID
 			}

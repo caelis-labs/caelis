@@ -42,7 +42,9 @@ type SubagentEvent struct {
 	StartArgs       string
 	FullArgs        string
 	Output          string
+	Terminal        bool
 	OutputSynthetic bool
+	OutputTerminal  bool
 	TaskID          string
 	TaskAction      string
 	TaskInput       string
@@ -162,6 +164,32 @@ func mergeCommandStreamChunk(existing string, incoming string) string {
 	}
 	if existing == "" {
 		return incoming
+	}
+	if overlap := commandLineOverlap(existing, incoming); overlap > 0 {
+		return existing + incoming[overlap:]
+	}
+	if overlap := commandCumulativePrefixOverlap(existing, incoming); overlap > 0 {
+		return existing + incoming[overlap:]
+	}
+	return existing + incoming
+}
+
+func mergeTerminalStreamChunk(existing string, incoming string) string {
+	incoming = normalizeSubagentChunkBoundary(existing, incoming)
+	if incoming == "" {
+		return existing
+	}
+	if existing == "" {
+		return incoming
+	}
+	if incoming == existing {
+		return existing
+	}
+	if strings.HasPrefix(incoming, existing) {
+		return incoming
+	}
+	if strings.HasPrefix(existing, incoming) {
+		return existing
 	}
 	if overlap := commandLineOverlap(existing, incoming); overlap > 0 {
 		return existing + incoming[overlap:]

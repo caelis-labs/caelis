@@ -109,13 +109,13 @@ func TestStreamRequestFromACPEventDerivesStreamToolFromStandardTitle(t *testing.
 	}
 }
 
-func TestStreamRequestFromACPEventDoesNotTreatExecuteKindAsToolName(t *testing.T) {
+func TestStreamRequestFromACPEventAcceptsStandardExecuteTerminalUpdate(t *testing.T) {
 	t.Parallel()
 
 	status := schema.ToolStatusInProgress
 	kind := schema.ToolKindExecute
 	title := "Run tests"
-	_, ok := streamRequestFromACPEvent(eventstream.Envelope{
+	req, ok := streamRequestFromACPEvent(eventstream.Envelope{
 		Kind:      eventstream.KindSessionUpdate,
 		SessionID: "session-1",
 		Update: schema.ToolCallUpdate{
@@ -136,8 +136,11 @@ func TestStreamRequestFromACPEventDoesNotTreatExecuteKindAsToolName(t *testing.T
 			},
 		},
 	})
-	if ok {
-		t.Fatal("streamRequestFromACPEvent() ok = true, want false without a stream-capable tool name")
+	if !ok {
+		t.Fatal("streamRequestFromACPEvent() ok = false, want true for ACP execute terminal update")
+	}
+	if req.ToolName != schema.ToolKindExecute {
+		t.Fatalf("tool name = %q, want ACP kind", req.ToolName)
 	}
 }
 

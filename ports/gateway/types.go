@@ -14,6 +14,7 @@ import (
 type BeginTurnRequest struct {
 	SessionRef   session.SessionRef
 	Input        string
+	DisplayInput string
 	ContentParts []model.ContentPart
 	ModeName     string
 	ModelHint    string
@@ -423,6 +424,7 @@ type ApprovalDecision struct {
 type SubmitRequest struct {
 	Kind         SubmissionKind
 	Text         string
+	DisplayText  string
 	ContentParts []model.ContentPart
 	Metadata     map[string]any
 	Approval     *ApprovalDecision
@@ -432,6 +434,7 @@ type SubmitActiveTurnRequest struct {
 	SessionRef   session.SessionRef
 	Kind         SubmissionKind
 	Text         string
+	DisplayText  string
 	ContentParts []model.ContentPart
 	Metadata     map[string]any
 	Approval     *ApprovalDecision

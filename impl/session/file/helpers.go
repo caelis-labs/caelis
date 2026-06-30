@@ -165,7 +165,7 @@ func generatedTitleText(event *session.Event) string {
 	if event == nil || titleHiddenEvent(event) {
 		return ""
 	}
-	return session.EventText(event)
+	return session.EventDisplayText(event)
 }
 
 func titleHiddenEvent(event *session.Event) bool {

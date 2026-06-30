@@ -480,6 +480,63 @@ func TestPromptParticipantCancelCancelsRuntimeRunner(t *testing.T) {
 	}
 }
 
+func TestPromptParticipantProjectsSubmissionReferencesBeforeRuntime(t *testing.T) {
+	t.Parallel()
+
+	activeSession := session.Session{
+		SessionRef: session.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+		},
+		CWD: "/workspace",
+	}
+	runner := &recordingRunner{}
+	rt := &controlPlaneRuntime{
+		session:    activeSession,
+		attachResp: activeSession,
+		promptResp: agent.RunResult{Session: activeSession, Handle: runner},
+	}
+	gw, err := New(Config{
+		Sessions: staticSessionService{session: activeSession},
+		Runtime:  rt,
+		Resolver: staticResolver{resolved: ResolvedTurn{}},
+		SubmissionReferences: SubmissionReferenceProjectorFunc(func(_ context.Context, req SubmissionReferenceProjectionRequest) (SubmissionReferenceProjection, error) {
+			if req.Session.CWD != "/workspace" {
+				t.Fatalf("projection session cwd = %q, want /workspace", req.Session.CWD)
+			}
+			return SubmissionReferenceProjection{Input: "projected participant input", Changed: true}, nil
+		}),
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	result, err := gw.PromptParticipant(context.Background(), PromptParticipantRequest{
+		SessionRef:    activeSession.SessionRef,
+		ParticipantID: "side-1",
+		Input:         "$cmpctl inspect #dict.go",
+		ContentParts: []model.ContentPart{
+			{Type: model.ContentPartText, Text: "$cmpctl inspect #dict.go"},
+			{Type: model.ContentPartImage, MimeType: "image/png", Data: "iVBORw0KGgo=", FileName: "shot.png"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("PromptParticipant() error = %v", err)
+	}
+	_ = collectHandleEvents(t, result.Handle)
+
+	if rt.promptReq.Input != "projected participant input" {
+		t.Fatalf("prompt input = %q, want projected participant input", rt.promptReq.Input)
+	}
+	if rt.promptReq.DisplayInput != "$cmpctl inspect #dict.go" {
+		t.Fatalf("prompt DisplayInput = %q, want raw input", rt.promptReq.DisplayInput)
+	}
+	if got := rt.promptReq.ContentParts; len(got) != 2 ||
+		got[0].Type != model.ContentPartText || got[0].Text != "projected participant input" ||
+		got[1].Type != model.ContentPartImage {
+		t.Fatalf("prompt ContentParts = %#v, want projected text plus original image", got)
+	}
+}
+
 func TestHandoffControllerDelegatesToRuntimeControlPlaneAndUpdatesBinding(t *testing.T) {
 	t.Parallel()
 
@@ -833,6 +890,77 @@ func TestBeginTurnPassesIntentToResolver(t *testing.T) {
 
 	if resolver.lastIntent.ModeName != "main" || resolver.lastIntent.ModelHint != "mini" || resolver.lastIntent.Surface != "headless" {
 		t.Fatalf("resolver intent = %+v, want propagated fields", resolver.lastIntent)
+	}
+}
+
+func TestBeginTurnProjectsSubmissionReferencesBeforeResolver(t *testing.T) {
+	t.Parallel()
+
+	activeSession := session.Session{
+		SessionRef: session.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+		},
+		CWD: "/workspace",
+	}
+	resolver := &recordingResolver{resolved: ResolvedTurn{}}
+	rt := &recordingRuntime{session: activeSession, ran: make(chan struct{})}
+	projectorCalls := 0
+	gw, err := New(Config{
+		Sessions: staticSessionService{session: activeSession},
+		Runtime:  rt,
+		Resolver: resolver,
+		SubmissionReferences: SubmissionReferenceProjectorFunc(func(_ context.Context, req SubmissionReferenceProjectionRequest) (SubmissionReferenceProjection, error) {
+			projectorCalls++
+			if req.Session.CWD != "/workspace" {
+				t.Fatalf("projection session cwd = %q, want /workspace", req.Session.CWD)
+			}
+			if req.Input != "$cmpctl inspect #dict.go" {
+				t.Fatalf("projection input = %q, want raw trimmed input", req.Input)
+			}
+			return SubmissionReferenceProjection{
+				Input:   "projected model input",
+				Changed: true,
+			}, nil
+		}),
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	result, err := gw.BeginTurn(context.Background(), BeginTurnRequest{
+		SessionRef: activeSession.SessionRef,
+		Input:      "  $cmpctl inspect #dict.go  ",
+		ContentParts: []model.ContentPart{
+			{Type: model.ContentPartText, Text: "$cmpctl inspect #dict.go"},
+			{Type: model.ContentPartImage, MimeType: "image/png", Data: "iVBORw0KGgo=", FileName: "shot.png"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("BeginTurn() error = %v", err)
+	}
+	defer result.Handle.Close()
+	select {
+	case <-rt.ran:
+	case <-time.After(2 * time.Second):
+		t.Fatal("runtime did not run")
+	}
+
+	if projectorCalls != 1 {
+		t.Fatalf("projection calls = %d, want 1", projectorCalls)
+	}
+	if resolver.lastIntent.Input != "projected model input" {
+		t.Fatalf("resolver input = %q, want projected model input", resolver.lastIntent.Input)
+	}
+	if resolver.lastIntent.DisplayInput != "$cmpctl inspect #dict.go" {
+		t.Fatalf("resolver DisplayInput = %q, want raw input", resolver.lastIntent.DisplayInput)
+	}
+	if got := resolver.lastIntent.ContentParts; len(got) != 2 ||
+		got[0].Type != model.ContentPartText || got[0].Text != "projected model input" ||
+		got[1].Type != model.ContentPartImage {
+		t.Fatalf("resolver ContentParts = %#v, want projected text part plus original image", got)
+	}
+	if rt.lastReq.Input != "projected model input" || rt.lastReq.DisplayInput != "$cmpctl inspect #dict.go" {
+		t.Fatalf("runtime request input/display = %q/%q, want projected/raw", rt.lastReq.Input, rt.lastReq.DisplayInput)
 	}
 }
 

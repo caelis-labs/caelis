@@ -119,6 +119,9 @@ func TestProjectACPEventToTranscriptEventsDisplaysStandardRawTerminalOutput(t *t
 	if events[0].ToolOutput != "side acp output\n" {
 		t.Fatalf("ToolOutput = %q, want standard raw terminal output", events[0].ToolOutput)
 	}
+	if !events[0].ToolOutputTerminal {
+		t.Fatal("ToolOutputTerminal = false, want terminal raw output marked as terminal")
+	}
 }
 
 func TestProjectACPEventToTranscriptEventsDisplaysStandardRawOutputWithoutToolKind(t *testing.T) {
@@ -185,6 +188,9 @@ func TestProjectACPEventToTranscriptEventsDisplaysTerminalContentWithoutToolKind
 	}
 	if events[0].ToolOutput != "terminal content output\n" {
 		t.Fatalf("ToolOutput = %q, want terminal content output", events[0].ToolOutput)
+	}
+	if !events[0].ToolOutputTerminal {
+		t.Fatal("ToolOutputTerminal = false, want terminal content marked as terminal")
 	}
 }
 
@@ -289,6 +295,9 @@ func TestProjectACPEventToTranscriptEventsDisplaysTerminalStreamFrameOutput(t *t
 	}
 	if events[0].ToolOutput != "Step 3/5\n" {
 		t.Fatalf("ToolOutput = %q, want live terminal stream frame output", events[0].ToolOutput)
+	}
+	if !events[0].ToolOutputTerminal {
+		t.Fatal("ToolOutputTerminal = false, want live terminal stream output marked as terminal")
 	}
 }
 

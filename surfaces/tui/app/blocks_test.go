@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/tuikit"
 	"github.com/charmbracelet/colorprofile"
 )
@@ -130,6 +132,153 @@ func TestToolPanelClickExpandsHiddenSummaryBeforeCollapse(t *testing.T) {
 	}
 	if !block.toolPanelFullOutput("command-1") {
 		t.Fatal("tool panel full output = false, want first click on hidden summary to show full output")
+	}
+}
+
+func TestTerminalToolSummaryRowsCarryClickTokenAndExpandToFullOutput(t *testing.T) {
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	model = updated.(*Model)
+	block := NewMainACPTurnBlock("session-1")
+	output := strings.Join([]string{
+		"{",
+		`  "status": "success",`,
+		`  "checks": [`,
+		`    {"name": "archive", "ok": true},`,
+		`    {"name": "schema", "ok": true},`,
+		`    {"name": "metadata", "ok": true},`,
+		`    {"name": "index", "ok": true},`,
+		`    {"name": "documents", "ok": true},`,
+		`    {"name": "checksum", "ok": true},`,
+		`    {"name": "upload", "ok": true}`,
+		"  ]",
+		"}",
+	}, "\n")
+	block.UpdateToolWithMeta("command-1", "RUN_COMMAND", "/home/xueyongzhi/go/bin/cmpctl dict archive preflight --output json", output, true, false, ToolUpdateMeta{})
+	model.doc.Append(block)
+	model.syncViewportContent()
+
+	var token string
+	contentLine := -1
+	for i, line := range model.viewportPlainLines {
+		if !strings.Contains(line, "... +") {
+			continue
+		}
+		if i >= len(model.viewportClickTokens) {
+			t.Fatalf("summary line %d has no matching click token entry", i)
+		}
+		token = model.viewportClickTokens[i]
+		contentLine = i
+		break
+	}
+	if token == "" {
+		t.Fatalf("collapsed terminal summary line has no click token\nplain rows: %#v\ntokens: %#v", model.viewportPlainLines, model.viewportClickTokens)
+	}
+	mouse := tea.Mouse{
+		Button: tea.MouseLeft,
+		X:      model.mainColumnX() + tuikit.GutterNarrative + 2,
+		Y:      contentLine - model.viewportVisibleOffset(),
+	}
+	_ = model.handleViewportMousePress(mouse)
+	_ = model.handleViewportMouseRelease(mouse)
+	if !block.toolPanelFullOutput("command-1") {
+		t.Fatal("tool panel full output = false after clicking summary token")
+	}
+	foundMiddleLine := false
+	for _, line := range model.viewportPlainLines {
+		if strings.Contains(line, `{"name": "metadata", "ok": true}`) {
+			foundMiddleLine = true
+			break
+		}
+	}
+	if !foundMiddleLine {
+		t.Fatalf("expanded viewport missing middle JSON row\nplain rows: %#v", model.viewportPlainLines)
+	}
+}
+
+func TestAnonymousSyntheticFinalToolUpdateDoesNotAppendGenericFailedRow(t *testing.T) {
+	block := NewMainACPTurnBlock("session-1")
+
+	block.UpdateToolWithMeta("command-1", "", "", "failed", true, true, ToolUpdateMeta{
+		OutputSynthetic: true,
+	})
+
+	if len(block.Events) != 0 {
+		t.Fatalf("anonymous synthetic final update appended events: %#v", block.Events)
+	}
+}
+
+func TestAnonymousSyntheticFinalToolUpdatePreservesStreamedOutput(t *testing.T) {
+	block := NewMainACPTurnBlock("session-1")
+	output := "{\n  \"status\": \"error\"\n}\n"
+	block.UpdateToolWithMeta("command-1", "", "", output, false, false, ToolUpdateMeta{})
+
+	block.UpdateToolWithMeta("command-1", "", "", "failed", true, true, ToolUpdateMeta{
+		OutputSynthetic: true,
+	})
+
+	if len(block.Events) != 1 {
+		t.Fatalf("events = %#v, want one merged event", block.Events)
+	}
+	event := block.Events[0]
+	if !event.Done || !event.Err {
+		t.Fatalf("event = %#v, want failed final event", event)
+	}
+	if event.Output != strings.TrimSpace(output) {
+		t.Fatalf("event output = %q, want streamed output %q", event.Output, strings.TrimSpace(output))
+	}
+}
+
+func TestTerminalToolFinalRawResultDoesNotReplaceTerminalOutput(t *testing.T) {
+	block := NewMainACPTurnBlock("session-1")
+	terminalOutput := "preflight ok\n"
+	rawResult := "{\n  \"status\": \"success\",\n  \"details\": [\"final raw result\"]\n}"
+	block.UpdateToolWithMeta("command-1", "", "cmpctl dict archive preflight --output json", terminalOutput, false, false, ToolUpdateMeta{
+		ToolKind:       "execute",
+		Terminal:       true,
+		OutputTerminal: true,
+	})
+
+	block.UpdateToolWithMeta("command-1", "", "", rawResult, true, false, ToolUpdateMeta{ToolKind: "execute"})
+
+	if len(block.Events) != 1 {
+		t.Fatalf("events = %#v, want one merged terminal event", block.Events)
+	}
+	event := block.Events[0]
+	if !event.Done || event.Err {
+		t.Fatalf("event = %#v, want successful final event", event)
+	}
+	if !event.Terminal {
+		t.Fatalf("event = %#v, want terminal event", event)
+	}
+	if event.Output != terminalOutput {
+		t.Fatalf("event output = %q, want terminal output %q", event.Output, terminalOutput)
+	}
+}
+
+func TestTerminalToolFinalOutputReplacesStreamedOutput(t *testing.T) {
+	block := NewMainACPTurnBlock("session-1")
+	block.UpdateToolWithMeta("command-1", "", "printf streaming", "partial\n", false, false, ToolUpdateMeta{
+		ToolKind:       "execute",
+		Terminal:       true,
+		OutputTerminal: true,
+	})
+
+	block.UpdateToolWithMeta("command-1", "", "", "partial\ncomplete\n", true, false, ToolUpdateMeta{
+		ToolKind:       "execute",
+		Terminal:       true,
+		OutputTerminal: true,
+	})
+
+	if len(block.Events) != 1 {
+		t.Fatalf("events = %#v, want one merged terminal event", block.Events)
+	}
+	event := block.Events[0]
+	if !event.Done || !event.Terminal {
+		t.Fatalf("event = %#v, want completed terminal event", event)
+	}
+	if got, want := event.Output, "partial\ncomplete\n"; got != want {
+		t.Fatalf("event output = %q, want final terminal output %q", got, want)
 	}
 }
 

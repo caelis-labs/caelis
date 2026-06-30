@@ -516,6 +516,8 @@ func transcriptToolUpdateMeta(event TranscriptEvent) ToolUpdateMeta {
 		TaskTargetKind:  event.ToolTaskTargetKind,
 		ToolKind:        event.ToolKind,
 		FullArgs:        event.ToolFullArgs,
+		Terminal:        event.ToolTerminal,
 		OutputSynthetic: event.ToolOutputSynthetic,
+		OutputTerminal:  event.ToolOutputTerminal,
 	}
 }

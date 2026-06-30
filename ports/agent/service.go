@@ -49,6 +49,7 @@ type ApprovalRequester interface {
 type RunRequest struct {
 	SessionRef        session.SessionRef  `json:"session_ref"`
 	Input             string              `json:"input,omitempty"`
+	DisplayInput      string              `json:"display_input,omitempty"`
 	ContentParts      []model.ContentPart `json:"content_parts,omitempty"`
 	Request           ModelRequestOptions `json:"request,omitempty"`
 	ApprovalRequester ApprovalRequester   `json:"-"`

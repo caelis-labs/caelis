@@ -150,6 +150,34 @@ func TestProjectSessionEventEnvelopeKeepsUserMessagesForGatewayConsumers(t *test
 	}
 }
 
+func TestProjectSessionEventEnvelopeUsesUserDisplayTextWhenMessageIsProjected(t *testing.T) {
+	modelVisible := model.NewTextMessage(model.RoleUser, "Load and follow the `cmpctl` skill before taking task actions.\n\nUser request:\narchive preflight")
+	events := ProjectSessionEventEnvelope(eventstream.Envelope{
+		SessionID: "session-1",
+		HandleID:  "handle-1",
+		RunID:     "run-1",
+		Scope:     eventstream.ScopeMain,
+		ScopeID:   "session-1",
+	}, &session.Event{
+		ID:        "event-user-1",
+		SessionID: "session-1",
+		Type:      session.EventTypeUser,
+		Text:      "$cmpctl archive preflight",
+		Message:   &modelVisible,
+	})
+	if len(events) != 1 {
+		t.Fatalf("ProjectSessionEventEnvelope(user) returned %d events, want 1: %#v", len(events), events)
+	}
+	chunk, ok := events[0].Update.(schema.ContentChunk)
+	if !ok || chunk.SessionUpdate != schema.UpdateUserMessage {
+		t.Fatalf("update = %#v, want user_message_chunk for gateway/TUI consumers", events[0].Update)
+	}
+	content, ok := chunk.Content.(schema.TextContent)
+	if !ok || content.Text != "$cmpctl archive preflight" {
+		t.Fatalf("content = %#v, want display text", chunk.Content)
+	}
+}
+
 func TestProjectSessionEventEnvelopeKeepsLiveAndReplayNarrativeAligned(t *testing.T) {
 	message := model.MessageFromAssistantParts("I will run pwd.", "Need inspect cwd.", []model.ToolCall{{
 		ID:   "call-1",
