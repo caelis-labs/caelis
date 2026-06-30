@@ -113,6 +113,33 @@ func TestSlashHelpOutputUsesTUIGrouping(t *testing.T) {
 	}
 }
 
+func TestSlashOutputAddsBlankLineAfterUserCommand(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{})
+	model.handleUserMessageMsg(UserMessageMsg{Text: "/help"})
+	next, _ := model.handleSlashCommandResultMsg(SlashCommandResultMsg{
+		Result: control.SlashCommandResult{
+			Kind: control.SlashCommandResultHelp,
+			Help: control.CommandHelpSnapshot{Items: []control.CommandHelpItem{
+				{Name: "help", Usage: "/help", Description: "Show commands and shortcuts", Known: true},
+			}},
+		},
+	})
+	model = next.(*Model)
+
+	if model.doc.Len() != 3 {
+		t.Fatalf("document blocks = %d, want user, spacer, slash output", model.doc.Len())
+	}
+	spacer, ok := model.doc.blocks[1].(*TranscriptBlock)
+	if !ok || strings.TrimSpace(spacer.Raw) != "" {
+		t.Fatalf("middle block = %#v, want blank spacer after user command", model.doc.blocks[1])
+	}
+	if _, ok := model.doc.blocks[2].(*slashOutputBlock); !ok {
+		t.Fatalf("third block = %#v, want slash output block", model.doc.blocks[2])
+	}
+}
+
 func TestSlashSubagentOutputRendersProfileData(t *testing.T) {
 	t.Parallel()
 

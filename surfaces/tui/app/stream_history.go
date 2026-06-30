@@ -209,6 +209,9 @@ func shouldInsertBlockGap(prev tuikit.LineStyle, current tuikit.LineStyle) bool 
 	if current == tuikit.LineStyleUser {
 		return true
 	}
+	if prev == tuikit.LineStyleUser && current == tuikit.LineStyleSection {
+		return true
+	}
 	return false
 }
 
