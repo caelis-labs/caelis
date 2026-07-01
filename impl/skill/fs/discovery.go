@@ -29,20 +29,61 @@ func (Loader) Load(ctx context.Context, ref skill.Ref) (skill.Bundle, error) {
 	if err != nil {
 		return skill.Bundle{}, err
 	}
-	metas, err := DiscoverMeta([]string{filepath.Dir(root)}, "")
+	raw, err := os.ReadFile(skillPath)
 	if err != nil {
 		return skill.Bundle{}, err
 	}
+	meta, body, err := parseSkillContent(skillPath, raw)
+	if err != nil {
+		return skill.Bundle{}, err
+	}
+	meta, err = metaForSkillRef(meta, ref)
+	if err != nil {
+		return skill.Bundle{}, err
+	}
+	return skill.Bundle{
+		Meta:    meta,
+		Root:    root,
+		Content: strings.TrimSpace(body),
+	}, nil
+}
+
+func metaForSkillRef(meta skill.Meta, ref skill.Ref) (skill.Meta, error) {
 	name := strings.TrimSpace(ref.Name)
-	for _, meta := range metas {
-		if filepath.Clean(meta.Path) == skillPath || (name != "" && strings.EqualFold(meta.Name, name)) {
-			return skill.Bundle{
-				Meta: meta,
-				Root: root,
-			}, nil
+	if name == "" {
+		return meta, nil
+	}
+	if skill.MatchesName(meta, name) {
+		meta.Name = name
+		return meta, nil
+	}
+	namespace, localName, ok := strings.Cut(name, ":")
+	if ok && strings.EqualFold(strings.TrimSpace(localName), strings.TrimSpace(meta.LocalName)) && refNamespaceMatches(ref, namespace) {
+		meta.Name = name
+		meta.Namespace = firstNonEmptyString(ref.Namespace, strings.TrimSpace(namespace))
+		meta.PluginID = strings.TrimSpace(ref.PluginID)
+		meta.LocalName = firstNonEmptyString(strings.TrimSpace(ref.LocalName), meta.LocalName)
+		return meta, nil
+	}
+	return skill.Meta{}, fmt.Errorf("skill ref %q does not match %s", name, meta.Path)
+}
+
+func refNamespaceMatches(ref skill.Ref, namespace string) bool {
+	namespace = strings.TrimSpace(namespace)
+	if namespace == "" {
+		return false
+	}
+	return strings.EqualFold(namespace, strings.TrimSpace(ref.Namespace)) ||
+		strings.EqualFold(namespace, strings.TrimSpace(ref.PluginID))
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
 		}
 	}
-	return skill.Bundle{}, fmt.Errorf("skill %q not found at %s", name, root)
+	return ""
 }
 
 func resolveSkillRef(ref skill.Ref) (string, string, error) {

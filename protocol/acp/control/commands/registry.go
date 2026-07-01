@@ -400,7 +400,7 @@ func modelRootCandidates() []control.SlashArgCandidate {
 
 func pluginRootCandidates() []control.SlashArgCandidate {
 	return []control.SlashArgCandidate{
-		{Value: "install", Display: "install", Detail: "Install a Claude/Codex compatible plugin"},
+		{Value: "install", Display: "install", Detail: "Install a Claude-compatible or native Caelis plugin"},
 		{Value: "marketplace", Display: "marketplace", Detail: "Manage plugin marketplaces"},
 		{Value: "manage", Display: "manage", Detail: "List, enable, or disable installed plugins"},
 		{Value: "rm", Display: "rm", Detail: "Remove a plugin by ID"},

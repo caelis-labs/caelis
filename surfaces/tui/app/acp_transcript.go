@@ -472,7 +472,7 @@ func styleSpawnedHeaderTarget(ctx BlockRenderContext, target string) string {
 func toolActionStyle(ctx BlockRenderContext, action string) lipgloss.Style {
 	style := lipgloss.NewStyle().Bold(true)
 	switch strings.ToLower(strings.TrimSpace(action)) {
-	case "ran", "spawned", "task", "tasks", "wait", "write", "cancel", "explored", "read", "list", "glob", "search":
+	case "ran", "spawned", "task", "tasks", "wait", "write", "cancel", "explored", "read", "list", "glob", "search", "skill":
 		return style.Foreground(ctx.Theme.Focus)
 	case "wrote", "patched", "updated":
 		return style.Foreground(ctx.Theme.Success)

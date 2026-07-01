@@ -13,7 +13,7 @@ const (
 func SemanticToolName(name string, kind string) string {
 	name = strings.TrimSpace(name)
 	switch strings.ToUpper(name) {
-	case "RUN_COMMAND", "SPAWN", "TASK", "READ", "LIST", "GLOB", "SEARCH", "WEB_SEARCH", "WEB_FETCH", "RG", "FIND", "WRITE", "PATCH":
+	case "RUN_COMMAND", "SPAWN", "TASK", "SKILL", "READ", "LIST", "GLOB", "SEARCH", "WEB_SEARCH", "WEB_FETCH", "RG", "FIND", "WRITE", "PATCH":
 		return strings.ToUpper(name)
 	}
 	switch strings.ToLower(strings.TrimSpace(kind)) {
@@ -36,6 +36,10 @@ func SummarizeToolCallTitle(name string, args map[string]any) string {
 	case "READ", "WRITE", "PATCH", "SEARCH", "LIST", "GLOB":
 		if path := MapString(args, "path"); strings.TrimSpace(path) != "" {
 			return strings.TrimSpace(name + " " + path)
+		}
+	case "SKILL":
+		if skillName := MapString(args, "name"); strings.TrimSpace(skillName) != "" {
+			return strings.TrimSpace(name + " " + skillName)
 		}
 	case "WEB_SEARCH":
 		if query := MapString(args, "query"); strings.TrimSpace(query) != "" {
@@ -65,7 +69,7 @@ func SummarizeToolCallTitle(name string, args map[string]any) string {
 
 func ToolKindForName(name string) string {
 	switch strings.ToUpper(strings.TrimSpace(name)) {
-	case "READ":
+	case "READ", "SKILL":
 		return ToolKindRead
 	case "WRITE", "PATCH":
 		return ToolKindEdit

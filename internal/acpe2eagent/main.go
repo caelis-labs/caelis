@@ -245,7 +245,9 @@ func buildSpec(_ context.Context, session session.Session, llm model.LLM, assemb
 	if err != nil {
 		return agent.AgentSpec{}, err
 	}
-	tools, err := builtin.BuildCoreTools(builtin.CoreToolsConfig{Runtime: rt})
+	tools, err := builtin.BuildCoreTools(builtin.CoreToolsConfig{
+		Runtime: rt,
+	})
 	if err != nil {
 		return agent.AgentSpec{}, err
 	}

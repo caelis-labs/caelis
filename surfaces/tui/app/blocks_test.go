@@ -196,6 +196,59 @@ func TestTerminalToolSummaryRowsCarryClickTokenAndExpandToFullOutput(t *testing.
 	}
 }
 
+func TestExplorationSummaryDisplaysSkillName(t *testing.T) {
+	block := NewMainACPTurnBlock("session-1")
+	block.Status = "completed"
+	block.UpdateToolWithMeta("skill-1", "SKILL", "superpowers:brainstorming", "", true, false, ToolUpdateMeta{ToolKind: "read"})
+	block.UpdateToolWithMeta("list-1", "LIST", "demo 9 entries", "", true, false, ToolUpdateMeta{ToolKind: "search"})
+
+	rows := block.Render(BlockRenderContext{
+		Width:     100,
+		TermWidth: 100,
+		Theme:     tuikit.ResolveThemeFromOptions(true, colorprofile.NoTTY),
+	})
+	plain := joinRenderedPlain(rows)
+	if !strings.Contains(plain, "Skill superpowers:brainstorming") {
+		t.Fatalf("rendered rows missing skill summary\nplain:\n%s", plain)
+	}
+	if strings.Contains(plain, "Load skill") {
+		t.Fatalf("rendered rows still use Load skill\nplain:\n%s", plain)
+	}
+}
+
+func TestToolOnlyExploredGroupWithoutHiddenContentHasNoClickToken(t *testing.T) {
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	model = updated.(*Model)
+
+	block := NewMainACPTurnBlock("session-1")
+	block.Status = "completed"
+	block.UpdateToolWithMeta("skill-1", "SKILL", "superpowers:brainstorming", "", true, false, ToolUpdateMeta{ToolKind: "read"})
+	block.UpdateToolWithMeta("list-1", "LIST", "demo 9 entries", "", true, false, ToolUpdateMeta{ToolKind: "search"})
+	model.doc.Append(block)
+	model.syncViewportContent()
+
+	found := false
+	for i, line := range model.viewportPlainLines {
+		if !strings.Contains(line, "Skill superpowers:brainstorming") && !strings.Contains(line, "List demo 9 entries") {
+			continue
+		}
+		found = true
+		if i >= len(model.viewportClickTokens) {
+			t.Fatalf("line %d has no matching click token entry", i)
+		}
+		if token := strings.TrimSpace(model.viewportClickTokens[i]); token != "" {
+			t.Fatalf("tool-only explored row %q has click token %q", line, token)
+		}
+	}
+	if !found {
+		t.Fatalf("viewport missing explored summary rows\nplain rows: %#v", model.viewportPlainLines)
+	}
+	if len(block.ExpandedExplore) != 0 {
+		t.Fatalf("ExpandedExplore = %#v, want no expansion state", block.ExpandedExplore)
+	}
+}
+
 func TestAnonymousSyntheticFinalToolUpdateDoesNotAppendGenericFailedRow(t *testing.T) {
 	block := NewMainACPTurnBlock("session-1")
 

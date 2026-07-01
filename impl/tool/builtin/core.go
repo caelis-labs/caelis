@@ -7,9 +7,11 @@ import (
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/filesystem"
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/plan"
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/shell"
+	skilltool "github.com/OnslaughtSnail/caelis/impl/tool/builtin/skill"
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/task"
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/web"
 	"github.com/OnslaughtSnail/caelis/ports/sandbox"
+	skillport "github.com/OnslaughtSnail/caelis/ports/skill"
 	"github.com/OnslaughtSnail/caelis/ports/tool"
 )
 
@@ -17,6 +19,7 @@ func isReservedCoreToolName(name string) bool {
 	switch strings.TrimSpace(strings.ToUpper(name)) {
 	case filesystem.ReadToolName, filesystem.WriteToolName, filesystem.PatchToolName,
 		filesystem.ListToolName, filesystem.GlobToolName, filesystem.SearchToolName, shell.RunCommandToolName, task.ToolName, plan.ToolName,
+		strings.ToUpper(skilltool.ToolName),
 		strings.ToUpper(web.SearchToolName), strings.ToUpper(web.FetchToolName):
 		return true
 	default:
@@ -26,8 +29,10 @@ func isReservedCoreToolName(name string) bool {
 
 // CoreToolsConfig configures default core coding tools.
 type CoreToolsConfig struct {
-	Runtime sandbox.Runtime
-	Read    filesystem.ReadConfig
+	Runtime      sandbox.Runtime
+	Read         filesystem.ReadConfig
+	SkillLoader  skillport.Loader
+	SkillCatalog skillport.Catalog
 }
 
 // BuildCoreTools constructs the default coding tool group for the new SDK.
@@ -62,6 +67,10 @@ func BuildCoreTools(cfg CoreToolsConfig) ([]tool.Tool, error) {
 	}
 	taskTool := task.New()
 	planTool := plan.New()
+	skillTool := skilltool.New(skilltool.Config{
+		Loader:  cfg.SkillLoader,
+		Catalog: cfg.SkillCatalog,
+	})
 	webSearchTool := web.NewSearch()
 	webFetchTool, err := web.NewFetch(web.FetchConfig{})
 	if err != nil {
@@ -69,7 +78,7 @@ func BuildCoreTools(cfg CoreToolsConfig) ([]tool.Tool, error) {
 	}
 	return []tool.Tool{
 		readTool, writeTool, patchTool, listTool, globTool, searchTool, runCommandTool, taskTool, planTool,
-		webSearchTool, webFetchTool,
+		skillTool, webSearchTool, webFetchTool,
 	}, nil
 }
 

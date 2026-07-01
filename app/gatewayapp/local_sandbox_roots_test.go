@@ -14,9 +14,15 @@ func TestDefaultSkillSandboxRootsIncludeSystemUserGlobalAndWorkspaceSkillDirs(t 
 	got := defaultSkillSandboxRoots(workspace)
 	want := []string{
 		filepath.Join(home, ".caelis", "skills", ".system"),
+		filepath.Join(workspace, ".claude", "skills"),
+		filepath.Join(workspace, ".opencode", "skills"),
+		filepath.Join(workspace, ".opencode", "skill"),
 		filepath.Join(workspace, ".agents", "skills"),
 		filepath.Join(workspace, "skills"),
 		filepath.Join(home, ".caelis", "skills"),
+		filepath.Join(home, ".claude", "skills"),
+		filepath.Join(home, ".config", "opencode", "skills"),
+		filepath.Join(home, ".config", "opencode", "skill"),
 		filepath.Join(home, ".agents", "skills"),
 	}
 	for _, root := range want {
@@ -54,10 +60,16 @@ func TestSandboxPolicyRootMetadataIncludesConfiguredAndSkillWriteRoots(t *testin
 		"/existing-write",
 		"/configured-write",
 		filepath.Join(home, ".caelis", "skills", ".system"),
+		filepath.Join(workspace, ".claude", "skills"),
+		filepath.Join(workspace, ".opencode", "skills"),
+		filepath.Join(workspace, ".opencode", "skill"),
 		filepath.Join(home, ".agents", "skills"),
 		filepath.Join(workspace, ".agents", "skills"),
 		filepath.Join(workspace, "skills"),
 		filepath.Join(home, ".caelis", "skills"),
+		filepath.Join(home, ".claude", "skills"),
+		filepath.Join(home, ".config", "opencode", "skills"),
+		filepath.Join(home, ".config", "opencode", "skill"),
 	} {
 		if !slices.Contains(writeRoots, root) {
 			t.Fatalf("policy_extra_write_roots = %#v, want %q", writeRoots, root)
@@ -78,10 +90,16 @@ func TestEffectiveSandboxConfigAddsSkillWritableRootsWithoutMutatingStoredConfig
 	for _, root := range []string{
 		"/configured-write",
 		filepath.Join(home, ".caelis", "skills", ".system"),
+		filepath.Join(workspace, ".claude", "skills"),
+		filepath.Join(workspace, ".opencode", "skills"),
+		filepath.Join(workspace, ".opencode", "skill"),
 		filepath.Join(home, ".agents", "skills"),
 		filepath.Join(workspace, ".agents", "skills"),
 		filepath.Join(workspace, "skills"),
 		filepath.Join(home, ".caelis", "skills"),
+		filepath.Join(home, ".claude", "skills"),
+		filepath.Join(home, ".config", "opencode", "skills"),
+		filepath.Join(home, ".config", "opencode", "skill"),
 	} {
 		if !slices.Contains(got.WritableRoots, root) {
 			t.Fatalf("effective WritableRoots = %#v, want %q", got.WritableRoots, root)

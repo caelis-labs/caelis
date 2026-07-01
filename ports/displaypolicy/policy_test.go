@@ -33,6 +33,21 @@ func TestSummarizeToolCallTitleIncludesSpawnPrompt(t *testing.T) {
 	}
 }
 
+func TestSkillToolKeepsDistinctSemanticName(t *testing.T) {
+	if got := SemanticToolName("skill", ToolKindForName("skill")); got != "SKILL" {
+		t.Fatalf("SemanticToolName(skill) = %q, want SKILL", got)
+	}
+	if got := ToolKindForName("skill"); got != ToolKindRead {
+		t.Fatalf("ToolKindForName(skill) = %q, want %q", got, ToolKindRead)
+	}
+	if got := ExplorationVerbForTool("skill"); got != "Skill" {
+		t.Fatalf("ExplorationVerbForTool(skill) = %q, want Skill", got)
+	}
+	if got := SummarizeToolCallTitle("skill", map[string]any{"name": "brainstorm"}); got != "SKILL brainstorm" {
+		t.Fatalf("SummarizeToolCallTitle(skill) = %q, want SKILL brainstorm", got)
+	}
+}
+
 func TestSpawnDisplayInputForResultMergesPromptFromLifecycleOutput(t *testing.T) {
 	input := map[string]any{"agent": "codex"}
 	output := map[string]any{"text": `{"prompt":"inspect repo","task_id":"task-1"} running`}

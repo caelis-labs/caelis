@@ -10,7 +10,7 @@ import (
 func TestParticipantPromptUserEventUsesDisplayInputForProjection(t *testing.T) {
 	t.Parallel()
 
-	modelInput := "Load and follow the `cmpctl` skill before taking task actions.\n\nUser request:\narchive preflight"
+	modelInput := "Load skill `cmpctl` before taking task actions, then follow its instructions.\n\nUser request:\narchive preflight"
 	displayInput := "$cmpctl archive preflight"
 	event := participantPromptUserEvent(
 		session.Session{Controller: session.ControllerBinding{Kind: session.ControllerKindKernel, ControllerID: "kernel-1"}},

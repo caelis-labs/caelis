@@ -125,7 +125,7 @@ func NewRuntimeStackFromGatewayApp(stack *gatewayapp.Stack, adapters RuntimeStac
 			},
 		},
 		Skill: SkillRuntimeDeps{
-			DiscoverFn: skills.Discover,
+			SnapshotFn: skills.Snapshot,
 		},
 		AgentProfile: AgentProfileRuntimeDeps{
 			StatusFn: func(ctx context.Context) (AgentProfileStatusSnapshot, error) {

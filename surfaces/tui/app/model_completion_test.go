@@ -1134,9 +1134,10 @@ func TestSkillCompletionLoadsNextPageAtBottomThenWrapsWhenExhausted(t *testing.T
 
 func TestSkillCompletionListKeepsRowsCompact(t *testing.T) {
 	model := NewModel(Config{})
+	model.width = 120
 	longDetail := "This skill should be used when the user asks to generate a very detailed report with many phases and validation requirements. · ~/.agents/skills/report/SKILL.md"
 	model.skillCandidates = []CompletionCandidate{
-		{Value: "story-init", Display: "story-init", Detail: "Start a new story project. · ~/.agents/skills/story-init/SKILL.md"},
+		{Value: "story-init", Display: "story-init", Detail: "Start a new story project."},
 		{Value: "report-builder", Display: "report-builder", Detail: longDetail},
 	}
 	model.skillIndex = 0
@@ -1159,9 +1160,10 @@ func TestSkillCompletionListKeepsRowsCompact(t *testing.T) {
 
 func TestSkillCompletionListKeepsHeightStableAcrossSelection(t *testing.T) {
 	model := NewModel(Config{})
+	model.width = 120
 	fullDetail := "Assist writers with story planning, character development, plot structuring, chapter writing, timeline tracking, and consistency checking. · ~/.agents/skills/storyboard-manager/SKILL.md"
 	model.skillCandidates = []CompletionCandidate{
-		{Value: "story-init", Display: "story-init", Detail: "Start a new story project."},
+		{Value: "story-init", Display: "story-init", Detail: "Start a story project."},
 		{Value: "storyboard-manager", Display: "storyboard-manager", Detail: fullDetail},
 	}
 	model.skillIndex = 0
@@ -1183,6 +1185,84 @@ func TestSkillCompletionListKeepsHeightStableAcrossSelection(t *testing.T) {
 	}
 	if strings.Contains(plain, "SKILL.md") {
 		t.Fatalf("renderSkillList() = %q, selected detail should not include path metadata", plain)
+	}
+}
+
+func TestSlashCompletionRendersDescriptionsWithoutHeaderOrBorder(t *testing.T) {
+	model := NewModel(Config{Commands: []string{"model", "status"}})
+	model.width = 120
+	model.slashCandidates = []string{"/model", "/status"}
+	model.slashIndex = 0
+
+	rendered := ansi.Strip(model.renderSlashCommandList())
+	if strings.Contains(rendered, "Commands") {
+		t.Fatalf("renderSlashCommandList() = %q, should not show a header", rendered)
+	}
+	if strings.ContainsAny(rendered, "╭╮╰╯│─") {
+		t.Fatalf("renderSlashCommandList() = %q, should not show borders", rendered)
+	}
+	for _, want := range []string{"/model", "Switch or delete a configured model alias", "/status", "Show current provider"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("renderSlashCommandList() = %q, want %q", rendered, want)
+		}
+	}
+	lines := strings.Split(strings.TrimRight(rendered, "\n"), "\n")
+	if len(lines) != 4 {
+		t.Fatalf("renderSlashCommandList() lines = %#v, want mask rows plus two candidate rows", lines)
+	}
+	if strings.TrimSpace(lines[0]) != "" || strings.TrimSpace(lines[len(lines)-1]) != "" {
+		t.Fatalf("renderSlashCommandList() lines = %#v, want blank mask rows", lines)
+	}
+	for _, line := range lines[1 : len(lines)-1] {
+		if width := displayColumns(line); width != model.completionOverlayInnerWidth() {
+			t.Fatalf("renderSlashCommandList() row width = %d, want %d: %q", width, model.completionOverlayInnerWidth(), line)
+		}
+	}
+}
+
+func TestWizardSuppressesRootSlashCompletion(t *testing.T) {
+	model := NewModel(Config{
+		Commands: DefaultCommands(),
+		Wizards:  DefaultWizards(),
+	})
+	def := model.findWizard("connect")
+	if def == nil {
+		t.Fatalf("connect wizard not found")
+	}
+	model.wizard = &wizardRuntime{
+		def:       def,
+		stepIndex: 0,
+		state:     map[string]string{},
+	}
+	model.slashArgActive = true
+	model.slashArgCommand = "connect"
+	model.setInputText("/")
+	model.syncTextareaFromInput()
+
+	model.refreshCompletionOverlaysNow()
+	if len(model.slashCandidates) != 0 {
+		t.Fatalf("slashCandidates = %#v, want none while wizard is active", model.slashCandidates)
+	}
+}
+
+func TestModelUseCompletionUsesWideDisplayForLongAliases(t *testing.T) {
+	const alias = "openai-compatible/team-platform-evaluation-gpt-5.5-coding-preview-with-extended-context-and-tool-router"
+
+	model := NewModel(Config{Commands: DefaultCommands()})
+	model.width = 140
+	model.slashArgActive = true
+	model.slashArgCommand = "model use"
+	model.slashArgCandidates = []SlashArgCandidate{
+		{Value: alias, Display: alias, Detail: "configured model alias"},
+	}
+	model.slashArgIndex = 0
+
+	rendered := ansi.Strip(model.renderSlashArgList())
+	if !strings.Contains(rendered, alias) {
+		t.Fatalf("renderSlashArgList() = %q, want full model alias %q", rendered, alias)
+	}
+	if !strings.Contains(rendered, "configured model alias") {
+		t.Fatalf("renderSlashArgList() = %q, want model alias detail", rendered)
 	}
 }
 
@@ -1337,20 +1417,22 @@ func TestFileCompletionAcceptPreservesSelectedCandidateAcrossRefresh(t *testing.
 
 func TestFileCompletionListHidesPrefixAndTypeDetail(t *testing.T) {
 	model := NewModel(Config{})
+	model.width = 120
 	model.mentionPrefix = "#"
 	model.mentionCandidates = []CompletionCandidate{
 		{Value: "docs/", Display: "docs/", Detail: "directory"},
 		{Value: "docs/message.sql", Display: "docs/message.sql", Detail: "file"},
+		{Value: "docs/providers/openai-compatible/base-url-reference.md", Display: "docs/providers/openai-compatible/base-url-reference.md", Detail: "file"},
 	}
 
 	rendered := ansi.Strip(model.renderMentionList())
 
-	for _, unwanted := range []string{"#docs/", "#docs/message.sql", "directory", "file"} {
+	for _, unwanted := range []string{"#docs/", "#docs/message.sql", "#docs/providers", "directory", "file"} {
 		if strings.Contains(rendered, unwanted) {
 			t.Fatalf("renderMentionList() = %q, should not contain %q", rendered, unwanted)
 		}
 	}
-	for _, want := range []string{"docs/", "docs/message.sql"} {
+	for _, want := range []string{"docs/", "docs/message.sql", "docs/providers/openai-compatible/base-url-reference.md"} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("renderMentionList() = %q, want %q", rendered, want)
 		}
@@ -1527,32 +1609,96 @@ func TestMentionCompletionLoadsNextPageAtBottomThenWrapsWhenExhausted(t *testing
 	}
 }
 
-func TestRenderResumeListShowsMetadata(t *testing.T) {
+func TestRenderResumeListShowsTitleAndAge(t *testing.T) {
 	model := NewModel(Config{Commands: DefaultCommands()})
+	model.width = 120
 	model.resumeCandidates = []ResumeCandidate{
 		{
 			SessionID: "session-123",
 			Title:     "Gateway cleanup",
 			Model:     "openai/gpt-4o-mini",
 			Workspace: "/tmp/workspace-alpha",
-			Age:       "2m ago",
+			Age:       "2h44m5s ago",
+		},
+		{
+			SessionID: "session-456",
+			Title:     "A longer planning session",
+			Model:     "anthropic/claude",
+			Workspace: "/tmp/workspace-beta",
+			Age:       "25h ago",
 		},
 	}
 	model.resumeActive = true
 
-	normalized := strings.Map(func(r rune) rune {
-		switch r {
-		case '\n', ' ', '│', '╭', '╮', '╰', '╯', '─':
-			return -1
-		default:
-			return r
-		}
-	}, ansi.Strip(model.renderResumeList()))
-	for _, want := range []string{"Gateway cleanup", "openai/gpt-4o-mini", "workspace-alpha", "id:session-123"} {
-		if !strings.Contains(normalized, strings.ReplaceAll(want, " ", "")) {
-			t.Fatalf("renderResumeList() = %q, want substring %q", normalized, want)
+	rendered := ansi.Strip(model.renderResumeList())
+	for _, want := range []string{"Gateway cleanup", "A longer planning session", "2h ago", "1d ago"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("renderResumeList() = %q, want substring %q", rendered, want)
 		}
 	}
+	for _, unwanted := range []string{"openai/gpt-4o-mini", "anthropic/claude", "workspace-alpha", "workspace-beta", "session-123", "session-456", "id:session-123", "2h44m5s", "25h ago"} {
+		if strings.Contains(rendered, unwanted) {
+			t.Fatalf("renderResumeList() = %q, should not contain %q", rendered, unwanted)
+		}
+	}
+	lines := strings.Split(strings.TrimRight(rendered, "\n"), "\n")
+	first := lineContaining(lines, "Gateway cleanup")
+	second := lineContaining(lines, "A longer planning session")
+	if first == "" || second == "" {
+		t.Fatalf("renderResumeList() lines = %#v, want both resume rows", lines)
+	}
+	if got, want := strings.Index(first, "2h ago"), strings.Index(second, "1d ago"); got != want {
+		t.Fatalf("resume age columns = %d and %d, want aligned\nfirst=%q\nsecond=%q", got, want, first, second)
+	}
+	if gap := strings.Index(second, "1d ago") - (strings.Index(second, "A longer planning session") + len("A longer planning session")); gap > 4 {
+		t.Fatalf("resume age gap after longest title = %d, want compact column spacing\nsecond=%q", gap, second)
+	}
+}
+
+func TestRenderResumeListUsesWideDisplayForLongTitles(t *testing.T) {
+	const title = "Investigate completion drawer width allocation across connect model resume and file candidate surfaces"
+
+	model := NewModel(Config{Commands: DefaultCommands()})
+	model.width = 140
+	model.resumeCandidates = []ResumeCandidate{
+		{
+			SessionID: "session-very-long-title",
+			Title:     title,
+			Model:     "openai/gpt-4o-mini",
+			Workspace: "/tmp/workspace-alpha",
+			Age:       "1h ago",
+		},
+	}
+	model.resumeActive = true
+
+	rendered := ansi.Strip(model.renderResumeList())
+	if !strings.Contains(rendered, title) {
+		t.Fatalf("renderResumeList() = %q, want full title %q", rendered, title)
+	}
+	if !strings.Contains(rendered, "1h ago") {
+		t.Fatalf("renderResumeList() = %q, want age", rendered)
+	}
+	row := lineContaining(strings.Split(strings.TrimRight(rendered, "\n"), "\n"), title)
+	if row == "" {
+		t.Fatalf("renderResumeList() = %q, want title row", rendered)
+	}
+	if gap := strings.Index(row, "1h ago") - (strings.Index(row, title) + len(title)); gap > 4 {
+		t.Fatalf("resume age gap after title = %d, want compact column spacing\nrow=%q", gap, row)
+	}
+	for _, line := range strings.Split(strings.TrimRight(rendered, "\n"), "\n") {
+		if width := displayColumns(line); width > model.completionOverlayInnerWidth() {
+			t.Fatalf("renderResumeList() row width = %d, want <= %d: %q", width, model.completionOverlayInnerWidth(), line)
+		}
+	}
+}
+
+func lineContaining(lines []string, needle string) string {
+	for _, line := range lines {
+		if strings.Contains(line, needle) {
+			return line
+		}
+	}
+	return ""
 }
 
 func TestModelActionPrefixTypingFiltersCandidatesDuringPaste(t *testing.T) {

@@ -418,13 +418,13 @@ func (m *Model) renderSkillList() string {
 	if len(m.skillCandidates) == 0 {
 		return ""
 	}
-	contentWidth := maxInt(24, m.promptModalInnerWidth())
+	contentWidth := maxInt(24, m.completionOverlayInnerWidth())
 	maxItems := minInt(completionOverlayVisibleItems, len(m.skillCandidates))
 	start, end := completionWindowRange(m.skillIndex, len(m.skillCandidates), maxItems)
 	var lines []string
 	if start > 0 {
 		lines = append(lines, m.theme.HelpHintTextStyle().Render(
-			fmt.Sprintf("  … and %d earlier", start),
+			fmt.Sprintf("… and %d earlier", start),
 		))
 	}
 	for i := start; i < end; i++ {
@@ -433,55 +433,67 @@ func (m *Model) renderSkillList() string {
 	}
 	if end < len(m.skillCandidates) {
 		lines = append(lines, m.theme.HelpHintTextStyle().Render(
-			fmt.Sprintf("  … and %d more", len(m.skillCandidates)-end),
+			fmt.Sprintf("… and %d more", len(m.skillCandidates)-end),
 		))
 	}
-	return m.renderCompletionOverlay("Skills", lines)
+	return m.renderCompletionOverlay("", lines)
 }
 
 func (m *Model) renderSkillCandidateLine(candidate CompletionCandidate, selected bool, width int) string {
-	gutter := "  "
-	if selected {
-		gutter = "▸ "
-	}
 	display := completionCandidateDisplay(candidate)
-	nameBudget := maxInt(8, minInt(32, width-displayColumns(gutter)))
-	display = truncateTailDisplay(display, nameBudget)
-	gutterStyle := m.theme.HelpHintTextStyle()
+	kind := completionCandidateKind(candidate)
+	detail := completionCandidateDetail(candidate)
+	return m.renderCompletionCandidateRow(display, kind, detail, selected, width)
+}
+
+func (m *Model) renderCompletionCandidateRow(display string, kind string, detail string, selected bool, width int) string {
+	display = strings.Join(strings.Fields(strings.TrimSpace(display)), " ")
+	kind = strings.Join(strings.Fields(strings.TrimSpace(kind)), " ")
+	detail = strings.Join(strings.Fields(strings.TrimSpace(detail)), " ")
 	nameStyle := m.theme.CommandStyle()
 	if selected {
 		nameStyle = m.theme.CommandActiveStyle()
-		display = gutter + display
-		gutter = ""
 	}
-	line := gutterStyle.Render(gutter) + nameStyle.Render(display)
-	description := truncateSkillListDescription(skillCandidateDescription(candidate), width-displayColumns(gutter)-displayColumns(display)-4)
-	if description != "" {
-		line += "  " + m.theme.HelpHintTextStyle().Render(description)
-	}
-	return line
-}
 
-func truncateSkillListDescription(description string, budget int) string {
-	description = strings.Join(strings.Fields(strings.TrimSpace(description)), " ")
-	if description == "" || budget < 16 {
-		return ""
+	if kind == "" && detail == "" {
+		return nameStyle.Render(truncateTailDisplay(display, maxInt(1, width-2)))
 	}
-	budget = minInt(budget, 56)
-	return truncateTailDisplay(description, budget)
-}
 
-func skillCandidateDescription(candidate CompletionCandidate) string {
-	detail := completionCandidateDetail(candidate)
-	for _, sep := range []string{" · ", " • ", " 路 "} {
-		if before, _, ok := strings.Cut(detail, sep); ok {
-			return strings.TrimSpace(before)
+	nameColumn := minInt(20, maxInt(10, width/5))
+	if width < 72 {
+		nameColumn = minInt(16, maxInt(8, width/4))
+	}
+
+	name := truncateTailDisplay(display, nameColumn)
+	renderedName := nameStyle.Render(name)
+	targetWidth := nameColumn + 2
+
+	line := renderedName
+	used := displayColumns(line)
+
+	if used < targetWidth {
+		line += strings.Repeat(" ", targetWidth-used)
+		used = targetWidth
+	}
+	line += " "
+	used += 1
+
+	if kind != "" {
+		badge := "[" + kind + "]"
+		line += m.theme.HelpHintTextStyle().Render(badge)
+		used += displayColumns(badge)
+		if detail != "" {
+			line += "  "
+			used += 2
 		}
 	}
-	if idx := strings.Index(detail, " ~/"); idx > 0 && strings.Contains(detail[idx:], "SKILL.md") {
-		return strings.TrimSpace(detail[:idx])
+	if detail != "" {
+		detailBudget := maxInt(0, width-used)
+		if detailBudget > 0 {
+			line += m.theme.HelpHintTextStyle().Render(truncateTailDisplay(detail, detailBudget))
+		}
 	}
-	return detail
+	return line
 }
 
 // ---------------------------------------------------------------------------
@@ -610,58 +622,6 @@ func (m *Model) handleResumeKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 	}
 }
 
-func (m *Model) renderResumeList() string {
-	if len(m.resumeCandidates) == 0 {
-		return ""
-	}
-	maxItems := minInt(8, len(m.resumeCandidates))
-	start := 0
-	if m.resumeIndex >= maxItems {
-		start = m.resumeIndex - maxItems + 1
-	}
-	maxStart := maxInt(0, len(m.resumeCandidates)-maxItems)
-	if start > maxStart {
-		start = maxStart
-	}
-	end := minInt(len(m.resumeCandidates), start+maxItems)
-	var lines []string
-	if start > 0 {
-		lines = append(lines, m.theme.HelpHintTextStyle().Render(
-			fmt.Sprintf("  … and %d earlier", start),
-		))
-	}
-	for i := start; i < end; i++ {
-		item := m.resumeCandidates[i]
-		title := firstNonEmpty(strings.TrimSpace(item.Title), strings.TrimSpace(item.Prompt), strings.TrimSpace(item.SessionID))
-		age := strings.TrimSpace(item.Age)
-		if age == "" {
-			age = "-"
-		}
-		meta := compactNonEmpty([]string{
-			age,
-			strings.TrimSpace(item.Model),
-			shortWorkspaceLabel(item.Workspace),
-			shortSessionLabel(item.SessionID),
-		})
-		display := title
-		if len(meta) > 0 {
-			display += "  " + strings.Join(meta, " · ")
-		}
-		prefix := "  "
-		if i == m.resumeIndex {
-			lines = append(lines, m.renderCompletionSelectedText(display))
-		} else {
-			lines = append(lines, prefix+m.theme.HelpHintTextStyle().Render(display))
-		}
-	}
-	if end < len(m.resumeCandidates) {
-		lines = append(lines, m.theme.HelpHintTextStyle().Render(
-			fmt.Sprintf("  … and %d more", len(m.resumeCandidates)-end),
-		))
-	}
-	return m.renderCompletionOverlay("Recent", lines)
-}
-
 // ---------------------------------------------------------------------------
 // Slash command completion
 // ---------------------------------------------------------------------------
@@ -672,7 +632,7 @@ func (m *Model) refreshSlashCommands() {
 		selected = strings.TrimSpace(m.slashCandidates[m.slashIndex])
 	}
 	m.clearSlashCompletion()
-	if m.turnRunning() {
+	if m.turnRunning() || m.slashArgActive || m.isWizardActive() {
 		return
 	}
 	// Avoid overlapping popups.
@@ -779,20 +739,16 @@ func (m *Model) renderSlashCommandList() string {
 	var lines []string
 	if start > 0 {
 		lines = append(lines, m.theme.HelpHintTextStyle().Render(
-			fmt.Sprintf("  … and %d earlier", start),
+			fmt.Sprintf("… and %d earlier", start),
 		))
 	}
 	for i := start; i < end; i++ {
-		prefix := "  "
-		if i == m.slashIndex {
-			lines = append(lines, m.renderCompletionSelectedText(m.slashCandidates[i]))
-		} else {
-			lines = append(lines, prefix+m.theme.HelpHintTextStyle().Render(m.slashCandidates[i]))
-		}
+		display := m.slashCandidates[i]
+		lines = append(lines, m.renderCompletionTextLine(display, slashCommandCompletionDetail(display), i == m.slashIndex))
 	}
 	if end < len(m.slashCandidates) {
 		lines = append(lines, m.theme.HelpHintTextStyle().Render(
-			fmt.Sprintf("  … and %d more", len(m.slashCandidates)-end),
+			fmt.Sprintf("… and %d more", len(m.slashCandidates)-end),
 		))
 	}
 	return m.renderCompletionOverlay("Commands", lines)
@@ -838,22 +794,6 @@ func filterResumeCandidates(query string, candidates []ResumeCandidate) []Resume
 			strings.TrimSpace(one.Age),
 		}
 	})
-}
-
-func completionCandidateDisplay(candidate CompletionCandidate) string {
-	display := strings.TrimSpace(candidate.Display)
-	if display != "" {
-		return display
-	}
-	return strings.TrimSpace(candidate.Value)
-}
-
-func (m *Model) renderCompletionSelectedText(text string) string {
-	return m.theme.CommandActiveStyle().Render("▸ " + strings.TrimSpace(text))
-}
-
-func completionCandidateDetail(candidate CompletionCandidate) string {
-	return strings.TrimSpace(candidate.Detail)
 }
 
 func preservedCompletionIndex(previousQuery string, query string, previousPrefix string, prefix string, previousSelected CompletionCandidate, candidates []CompletionCandidate) int {

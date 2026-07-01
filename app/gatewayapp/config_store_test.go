@@ -434,8 +434,8 @@ func TestAppConfigStoreCanPersistPlugins(t *testing.T) {
 				ID:          "superpowers",
 				Name:        "Superpowers",
 				Root:        "/some/root/superpowers",
-				Manifest:    "/some/root/superpowers/gemini-extension.json",
-				Kind:        "gemini",
+				Manifest:    "/some/root/superpowers/.caelis-plugin/plugin.json",
+				Kind:        "caelis",
 				Enabled:     true,
 				Version:     "5.1.0",
 				Description: "A great plugin",
@@ -457,7 +457,7 @@ func TestAppConfigStoreCanPersistPlugins(t *testing.T) {
 		t.Fatalf("len(doc.Plugins) = %d, want 1", len(doc.Plugins))
 	}
 	p := doc.Plugins[0]
-	if p.ID != "superpowers" || p.Name != "Superpowers" || p.Root != "/some/root/superpowers" || p.Kind != "gemini" || !p.Enabled || !p.Managed || p.CacheRoot != "/some/root" {
+	if p.ID != "superpowers" || p.Name != "Superpowers" || p.Root != "/some/root/superpowers" || p.Kind != "caelis" || !p.Enabled || !p.Managed || p.CacheRoot != "/some/root" {
 		t.Errorf("unexpected plugin persisted contents: %+v", p)
 	}
 }

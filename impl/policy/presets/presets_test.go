@@ -100,6 +100,10 @@ func TestDefaultModeAllowsExplicitWebAndMCPTools(t *testing.T) {
 
 	tests := []policy.ToolContext{
 		{
+			Tool: policyToolDefinition("SKILL"),
+			Call: policyToolCall("SKILL", map[string]any{"name": "superpowers:brainstorming"}),
+		},
+		{
 			Tool: policyToolSearchDefinition(),
 			Call: policyToolCall(tool.ToolSearchToolName, map[string]any{"query": "calendar"}),
 		},

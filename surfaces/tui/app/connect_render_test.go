@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
+
 	controlcommands "github.com/OnslaughtSnail/caelis/protocol/acp/control/commands"
 )
 
@@ -39,8 +41,11 @@ func TestRenderSlashArgListUsesWizardHintInsteadOfInternalConnectPayload(t *test
 	if strings.Contains(rendered, "sk-secret") {
 		t.Fatalf("rendered slash arg list leaked api key: %q", rendered)
 	}
-	if !strings.Contains(rendered, "/connect context_window_tokens") {
-		t.Fatalf("rendered slash arg list = %q, want wizard step label", rendered)
+	if strings.Contains(rendered, "/connect context_window_tokens") || strings.Contains(rendered, "/connect provider") {
+		t.Fatalf("rendered slash arg list = %q, should not show wizard step header", rendered)
+	}
+	if !strings.Contains(rendered, "204800") || !strings.Contains(rendered, "context window tokens") {
+		t.Fatalf("rendered slash arg list = %q, want candidate text and detail", rendered)
 	}
 }
 
@@ -74,6 +79,63 @@ func TestRenderSlashArgListDistinguishesCandidateTextFromDetail(t *testing.T) {
 	}
 	if !strings.Contains(rendered, wantDetail) {
 		t.Fatalf("rendered slash arg list = %q, want detail text styled with HelpHintTextStyle %q", rendered, wantDetail)
+	}
+}
+
+func TestRenderSlashArgListNarrowWidthKeepsANSIIntact(t *testing.T) {
+	model := NewModel(Config{
+		Commands: DefaultCommands(),
+		Wizards:  DefaultWizards(),
+	})
+	model.width = 44
+	model.slashArgActive = true
+	model.slashArgCommand = "connect"
+	model.slashArgCandidates = []SlashArgCandidate{
+		{Value: "anthropic-compatible", Display: "anthropic-compatible", Detail: "OpenAI-compatible endpoint with custom base URL"},
+		{Value: "openai-compatible", Display: "openai-compatible", Detail: "OpenAI-compatible endpoint with custom base URL"},
+	}
+	model.slashArgIndex = 0
+
+	rendered := model.renderSlashArgList()
+	plain := ansi.Strip(rendered)
+	for _, fragment := range []string{"[38;", "[48;", "[0m", "\x1b"} {
+		if strings.Contains(plain, fragment) {
+			t.Fatalf("renderSlashArgList() plain output leaked ANSI fragment %q: raw=%q plain=%q", fragment, rendered, plain)
+		}
+	}
+	for _, line := range strings.Split(strings.TrimRight(plain, "\n"), "\n") {
+		if width := displayColumns(line); width > model.completionOverlayInnerWidth() {
+			t.Fatalf("renderSlashArgList() row width = %d, want <= %d: %q", width, model.completionOverlayInnerWidth(), line)
+		}
+	}
+}
+
+func TestRenderSlashArgListUsesWideDisplayForBaseURL(t *testing.T) {
+	const baseURL = "https://proxy.example.test/v1/organizations/acme/projects/caelis/openai-compatible"
+
+	model := NewModel(Config{
+		Commands: DefaultCommands(),
+		Wizards:  DefaultWizards(),
+	})
+	model.width = 140
+	model.slashArgActive = true
+	model.slashArgCommand = "connect-baseurl:openai-compatible"
+	model.slashArgCandidates = []SlashArgCandidate{
+		{Value: baseURL, Display: baseURL, Detail: "default base URL"},
+	}
+	model.slashArgIndex = 0
+
+	rendered := ansi.Strip(model.renderSlashArgList())
+	if !strings.Contains(rendered, baseURL) {
+		t.Fatalf("renderSlashArgList() = %q, want full base URL %q", rendered, baseURL)
+	}
+	if !strings.Contains(rendered, "default base URL") {
+		t.Fatalf("renderSlashArgList() = %q, want base URL detail", rendered)
+	}
+	for _, line := range strings.Split(strings.TrimRight(rendered, "\n"), "\n") {
+		if width := displayColumns(line); width > model.completionOverlayInnerWidth() {
+			t.Fatalf("renderSlashArgList() row width = %d, want <= %d: %q", width, model.completionOverlayInnerWidth(), line)
+		}
 	}
 }
 

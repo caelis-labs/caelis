@@ -54,6 +54,10 @@ func toolDisplayArgs(name string, raw map[string]any, fallback ...string) string
 		if display := displaypolicy.WebFetchDisplayArg(raw); display != "" {
 			return display
 		}
+	case "SKILL":
+		if name := strings.TrimSpace(asString(raw["name"])); name != "" {
+			return name
+		}
 	case "WRITE", "PATCH":
 		if path := toolPath(raw); path != "" {
 			return filepath.Base(path)

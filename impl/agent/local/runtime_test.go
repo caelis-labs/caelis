@@ -143,7 +143,7 @@ func TestRuntimeRunPersistsDisplayInputSeparateFromModelInput(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	modelInput := "Load and follow the `cmpctl` skill before taking task actions.\n\nUser request:\narchive preflight"
+	modelInput := "Load skill `cmpctl` before taking task actions, then follow its instructions.\n\nUser request:\narchive preflight"
 	displayInput := "$cmpctl archive preflight"
 	result, err := runtime.Run(context.Background(), agent.RunRequest{
 		SessionRef:   activeSession.SessionRef,

@@ -51,22 +51,32 @@ type fragment struct {
 
 type SkillMeta = fs.Meta
 
+type Result struct {
+	Prompt       string
+	SkillCatalog skill.Catalog
+}
+
 func BuildSystemPrompt(cfg Config) (string, error) {
+	result, err := BuildSystemPromptResult(cfg)
+	return result.Prompt, err
+}
+
+func BuildSystemPromptResult(cfg Config) (Result, error) {
 	workspaceDir, err := resolvePromptPath(cfg.WorkspaceDir)
 	if err != nil {
-		return "", err
+		return Result{}, err
 	}
 	globalAgentsPath, err := resolvePromptPath(globalAgentsFilePath)
 	if err != nil {
-		return "", err
+		return Result{}, err
 	}
 	globalAgents, err := readOptionalPromptFile(globalAgentsPath)
 	if err != nil {
-		return "", err
+		return Result{}, err
 	}
 	workspaceAgents, err := readOptionalPromptFile(filepath.Join(workspaceDir, workspaceAgentsFile))
 	if err != nil {
-		return "", err
+		return Result{}, err
 	}
 	skills, err := discoverSkillMeta(skill.DiscoverRequest{
 		Dirs:          cfg.SkillDirs,
@@ -74,7 +84,7 @@ func BuildSystemPrompt(cfg Config) (string, error) {
 		PluginBundles: cfg.PluginSkills,
 	})
 	if err != nil {
-		return "", err
+		return Result{}, err
 	}
 	sort.Slice(skills, func(i, j int) bool {
 		return skills[i].Path < skills[j].Path
@@ -123,7 +133,10 @@ func BuildSystemPrompt(cfg Config) (string, error) {
 			Content: buildSkillsMetaPrompt(skills),
 		},
 	}
-	return renderPromptFragments(fragments), nil
+	return Result{
+		Prompt:       renderPromptFragments(fragments),
+		SkillCatalog: skill.NewCatalog(skills),
+	}, nil
 }
 
 func builtInSystemIdentityPrompt(appName string) string {
@@ -262,10 +275,10 @@ func buildSkillsMetaPrompt(metas []fs.Meta) string {
 	var b bytes.Buffer
 	b.WriteString("## Skills\n")
 	b.WriteString("Skills provide specialized instructions and workflows for specific tasks.\n")
-	b.WriteString("When the user names a listed skill or the task matches a listed skill's description, read that skill's `SKILL.md` first and follow its routing instructions.\n")
+	b.WriteString("When the user names a listed skill or the task matches a listed skill's description, use the `skill` tool to load it before taking task actions, then follow its routing instructions.\n")
 	b.WriteString("### Available skills\n")
 	for _, meta := range metas {
-		fmt.Fprintf(&b, "- %s: %s (file: %s)\n", promptSingleLine(meta.Name), promptSingleLine(meta.Description), strings.TrimSpace(meta.Path))
+		fmt.Fprintf(&b, "- %s: %s\n", promptSingleLine(meta.Name), promptSingleLine(meta.Description))
 	}
 	return strings.TrimSpace(b.String())
 }

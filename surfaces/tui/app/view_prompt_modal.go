@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/tuikit"
 )
@@ -157,19 +158,23 @@ func (m *Model) renderPromptChoiceLine(choice promptChoice, selected bool) strin
 }
 
 func (m *Model) renderPromptModalBox(lines []string) string {
+	return m.renderPromptModalBoxWithWidth(lines, m.promptModalOuterWidth())
+}
+
+func (m *Model) renderPromptModalBoxWithWidth(lines []string, width int) string {
+	if width <= 0 {
+		width = 72
+	}
+	innerWidth := maxInt(8, width-4)
 	filtered := make([]string, 0, len(lines))
 	for _, line := range lines {
-		filtered = append(filtered, wrapPromptModalLine(line, m.promptModalInnerWidth())...)
+		filtered = append(filtered, wrapPromptModalLine(line, innerWidth)...)
 	}
 	filtered = clampPromptModalLines(filtered, m.promptModalLineBudget(), m.theme)
 	if len(filtered) == 0 {
 		filtered = []string{""}
 	}
 	body := strings.Join(filtered, "\n")
-	width := minInt(maxInt(44, m.fixedRowWidth()-4), 96)
-	if width <= 0 {
-		width = 72
-	}
 	box := lipgloss.NewStyle().
 		BorderStyle(lipgloss.RoundedBorder()).
 		BorderForeground(m.theme.PanelBorder).
@@ -190,11 +195,15 @@ func (m *Model) promptDetailLineBudget() int {
 }
 
 func (m *Model) promptModalInnerWidth() int {
+	return maxInt(8, m.promptModalOuterWidth()-4)
+}
+
+func (m *Model) promptModalOuterWidth() int {
 	width := minInt(maxInt(44, m.fixedRowWidth()-4), 96)
 	if width <= 0 {
 		width = 72
 	}
-	return maxInt(8, width-4)
+	return width
 }
 
 func (m *Model) promptModalLineBudget() int {
@@ -238,16 +247,49 @@ func sanitizePromptModalText(value string) string {
 	return value
 }
 
-func (m *Model) renderCompletionOverlay(title string, lines []string) string {
+func (m *Model) renderCompletionOverlay(_ string, lines []string) string {
 	if len(lines) == 0 {
 		return ""
 	}
-	bodyLines := make([]string, 0, len(lines)+2)
-	if title = strings.TrimSpace(title); title != "" {
-		bodyLines = append(bodyLines, m.theme.TitleStyle().Render(title), "")
+	innerWidth := m.completionOverlayInnerWidth()
+
+	blank := strings.Repeat(" ", innerWidth)
+	filtered := make([]string, 0, len(lines)+2)
+	filtered = append(filtered, blank)
+	for _, line := range lines {
+		if cols := displayColumns(line); cols > innerWidth {
+			if innerWidth <= 3 {
+				line = ansi.Truncate(line, innerWidth, "")
+			} else {
+				line = ansi.Truncate(line, innerWidth, "...")
+			}
+		}
+		if pad := innerWidth - displayColumns(line); pad > 0 {
+			line += strings.Repeat(" ", pad)
+		}
+		filtered = append(filtered, line)
 	}
-	bodyLines = append(bodyLines, lines...)
-	return m.renderPromptModalBox(bodyLines)
+	filtered = append(filtered, blank)
+	filtered = clampPromptModalLines(filtered, m.promptModalLineBudget(), m.theme)
+	if len(filtered) == 0 {
+		filtered = []string{""}
+	}
+	return lipgloss.NewStyle().Render(strings.Join(filtered, "\n"))
+}
+
+func (m *Model) completionOverlayInnerWidth() int {
+	return maxInt(1, m.completionOverlayWidth())
+}
+
+func (m *Model) completionOverlayWidth() int {
+	width := maxInt(44, m.fixedRowWidth()-4)
+	if m.width > 0 {
+		width = minInt(width, maxInt(44, m.width-4))
+	}
+	if width <= 0 {
+		width = 72
+	}
+	return width
 }
 
 func (m *Model) renderInputOverlay() string {

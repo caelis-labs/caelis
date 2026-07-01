@@ -227,7 +227,7 @@ func (s *Stack) legacyPluginSkillCopyWarnings() []string {
 	copies, err := DiscoverLegacyPluginSkillCopies(skill.DiscoverRequest{
 		Dirs:          stackSkillDiscoveryDirs(workspace, runtimeCfg.SkillDirs),
 		WorkspaceDir:  workspace,
-		PluginBundles: clonePluginSkillBundles(runtimeCfg.PluginSkills),
+		PluginBundles: skill.ClonePluginBundles(runtimeCfg.PluginSkills),
 	})
 	if err != nil {
 		return []string{"legacy plugin skill copy check failed: " + err.Error()}

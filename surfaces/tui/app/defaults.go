@@ -186,6 +186,17 @@ func DefaultCommands() []string {
 	return controlcommands.DefaultNames()
 }
 
+func slashCommandCompletionDetail(command string) string {
+	name := strings.TrimPrefix(strings.TrimSpace(command), "/")
+	if name == "" {
+		return ""
+	}
+	if spec, ok := controlcommands.Lookup(name); ok {
+		return strings.TrimSpace(spec.Description)
+	}
+	return "Send a prompt to the registered ACP agent"
+}
+
 // DefaultWizards returns the set of multi-step wizard flows for the TUI.
 func DefaultWizards() []WizardDef {
 	return []WizardDef{

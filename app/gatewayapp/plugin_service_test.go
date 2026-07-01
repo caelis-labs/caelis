@@ -19,10 +19,11 @@ import (
 
 func buildMinimalPluginDir(t *testing.T, root string, manifestJSON string) {
 	t.Helper()
-	if err := os.MkdirAll(root, 0o700); err != nil {
-		t.Fatalf("mkdir plugin root: %v", err)
+	manifestDir := filepath.Join(root, ".caelis-plugin")
+	if err := os.MkdirAll(manifestDir, 0o700); err != nil {
+		t.Fatalf("mkdir plugin manifest dir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "gemini-extension.json"), []byte(manifestJSON), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(manifestDir, "plugin.json"), []byte(manifestJSON), 0o600); err != nil {
 		t.Fatalf("write plugin manifest: %v", err)
 	}
 }
@@ -95,8 +96,8 @@ func TestPluginServiceAddPathHappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load config after AddPath: %v", err)
 	}
-	if len(doc.Plugins) != 1 || doc.Plugins[0].Manifest == "" || doc.Plugins[0].Kind != "gemini" {
-		t.Fatalf("persisted plugin manifest metadata = %+v, want gemini manifest metadata", doc.Plugins)
+	if len(doc.Plugins) != 1 || doc.Plugins[0].Manifest == "" || doc.Plugins[0].Kind != "caelis" {
+		t.Fatalf("persisted plugin manifest metadata = %+v, want caelis manifest metadata", doc.Plugins)
 	}
 
 	// Verify Inspect

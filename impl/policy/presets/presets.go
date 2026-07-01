@@ -57,6 +57,8 @@ func WorkspaceWriteMode() policy.Mode {
 					return policyErrorOrDeny(err)
 				}
 				return allow(filesystemReadToolConstraints(def)), nil
+			case "SKILL":
+				return allow(filesystemReadToolConstraints(def)), nil
 			case "WRITE", "PATCH":
 				if err := ensureWritePathsWithinRoots(input); err != nil {
 					return policyErrorOrDeny(err)

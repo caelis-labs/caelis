@@ -12,6 +12,8 @@ func ExplorationVerbForTool(name string) string {
 		return "Search"
 	case "WEB_FETCH":
 		return "Fetch"
+	case "SKILL":
+		return "Skill"
 	default:
 		return ""
 	}

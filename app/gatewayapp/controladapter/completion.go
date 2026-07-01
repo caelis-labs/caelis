@@ -289,9 +289,22 @@ func scoreResumeCandidate(query string, candidate ResumeCandidate) (int, bool) {
 func scoreSkillMeta(query string, meta skill.Meta, workspace string) (int, bool) {
 	return fuzzyMatchScore(query,
 		meta.Name,
+		meta.LocalName,
+		meta.Namespace,
+		meta.PluginID,
 		meta.Description,
 		displayPathHint(workspace, meta.Path),
 	)
+}
+
+func skillCompletionCandidate(meta skill.Meta) CompletionCandidate {
+	return CompletionCandidate{
+		Value:   strings.TrimSpace(meta.Name),
+		Display: skill.DisplayName(meta),
+		Kind:    skill.DisplayKind(meta),
+		Detail:  skill.DisplayDetail(meta),
+		Path:    strings.TrimSpace(meta.Path),
+	}
 }
 
 func completeWorkspaceFiles(ctx context.Context, root string, query string, limit int) ([]CompletionCandidate, error) {

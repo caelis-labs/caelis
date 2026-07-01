@@ -8,9 +8,14 @@ import (
 
 type promptConfig = promptassembly.Config
 type SkillMeta = promptassembly.SkillMeta
+type promptResult = promptassembly.Result
 
 func buildSystemPrompt(cfg promptConfig) (string, error) {
 	return promptassembly.BuildSystemPrompt(cfg)
+}
+
+func buildSystemPromptResult(cfg promptConfig) (promptResult, error) {
+	return promptassembly.BuildSystemPromptResult(cfg)
 }
 
 func DefaultSkillDiscoveryDirs(workspaceDir string) []string {

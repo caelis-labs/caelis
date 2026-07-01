@@ -8,6 +8,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/controller"
 	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/OnslaughtSnail/caelis/ports/skill"
 	controlcommands "github.com/OnslaughtSnail/caelis/protocol/acp/control/commands"
 )
 
@@ -72,10 +73,7 @@ func (d *Adapter) CompleteFile(ctx context.Context, query string, limit int) ([]
 func (d *Adapter) CompleteSkill(ctx context.Context, query string, limit int) ([]CompletionCandidate, error) {
 	limit = normalizeCompletionLimit(limit)
 
-	if d.stack.Skill.DiscoverFn == nil {
-		return nil, missingRuntimeDependency("skill discovery")
-	}
-	skills, err := d.stack.Skill.DiscoverFn(ctx, d.WorkspaceDir())
+	skills, err := d.skillCompletionMetas(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -86,19 +84,24 @@ func (d *Adapter) CompleteSkill(ctx context.Context, query string, limit int) ([
 		if !ok {
 			continue
 		}
-		pathHint := displayPathHint(workspace, skill.Path)
-		detail := strings.Join(compactNonEmpty([]string{strings.TrimSpace(skill.Description), pathHint}), " · ")
 		scored = append(scored, scoredCompletion{
-			candidate: CompletionCandidate{
-				Value:   strings.TrimSpace(skill.Name),
-				Display: strings.TrimSpace(skill.Name),
-				Detail:  strings.TrimSpace(detail),
-				Path:    strings.TrimSpace(skill.Path),
-			},
-			score: score,
+			candidate: skillCompletionCandidate(skill),
+			score:     score,
 		})
 	}
 	return sortAndTrimCandidates(scored, limit), nil
+}
+
+func (d *Adapter) skillCompletionMetas(ctx context.Context) ([]skill.Meta, error) {
+	if d == nil || d.stack == nil {
+		return nil, missingRuntimeDependency("skill discovery")
+	}
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+	}
+	return d.stack.Skill.Snapshot().Metas(), nil
 }
 
 func (d *Adapter) CompleteResume(ctx context.Context, query string, limit int) ([]ResumeCandidate, error) {

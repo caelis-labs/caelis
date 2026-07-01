@@ -82,7 +82,7 @@ func TestBuildSystemPromptIncludesPromptAssets(t *testing.T) {
 		"<sandbox>restricted sandbox</sandbox>",
 		"<default_permission>workspace-write sandbox; Host execution requires explicit escalation</default_permission>",
 		"Skills provide specialized instructions and workflows for specific tasks.",
-		"read that skill's `SKILL.md` first and follow its routing instructions.",
+		"use the `skill` tool to load it before taking task actions, then follow its routing instructions.",
 		"### Available skills",
 		"echo",
 	} {
@@ -115,7 +115,7 @@ func TestBuildSystemPromptIncludesPromptAssets(t *testing.T) {
 	if got := strings.Index(prompt, "<environment_context>"); got < strings.Index(prompt, "### Available skills") {
 		t.Fatalf("environment context rendered before skills metadata:\n%s", prompt)
 	}
-	if got := strings.Count(prompt, "read that skill's `SKILL.md` first and follow its routing instructions."); got != 1 {
+	if got := strings.Count(prompt, "use the `skill` tool to load it before taking task actions, then follow its routing instructions."); got != 1 {
 		t.Fatalf("skill activation guidance count = %d, want 1:\n%s", got, prompt)
 	}
 }
@@ -294,13 +294,17 @@ func TestNewLocalStackLoadsPluginSkills(t *testing.T) {
 	if err := os.MkdirAll(skillsDir, 0700); err != nil {
 		t.Fatalf("mkdir plugin skills: %v", err)
 	}
-	// Write gemini-extension.json
+	// Write native Caelis plugin manifest.
+	metaDir := filepath.Join(pluginRoot, ".caelis-plugin")
+	if err := os.MkdirAll(metaDir, 0700); err != nil {
+		t.Fatalf("mkdir plugin metadata: %v", err)
+	}
 	manifest := `{
 		"name": "my-plugin",
 		"version": "1.0.0",
 		"description": "A test plugin with skills"
 	}`
-	if err := os.WriteFile(filepath.Join(pluginRoot, "gemini-extension.json"), []byte(manifest), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(metaDir, "plugin.json"), []byte(manifest), 0600); err != nil {
 		t.Fatalf("write manifest: %v", err)
 	}
 	// Write SKILL.md
@@ -364,7 +368,11 @@ func TestNewLocalStackMalformedPluginFails(t *testing.T) {
 	if err := os.MkdirAll(pluginRoot, 0700); err != nil {
 		t.Fatalf("mkdir plugin root: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(pluginRoot, "gemini-extension.json"), []byte("invalid-json{"), 0600); err != nil {
+	metaDir := filepath.Join(pluginRoot, ".caelis-plugin")
+	if err := os.MkdirAll(metaDir, 0700); err != nil {
+		t.Fatalf("mkdir plugin metadata: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(metaDir, "plugin.json"), []byte("invalid-json{"), 0600); err != nil {
 		t.Fatalf("write manifest: %v", err)
 	}
 

@@ -9,6 +9,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/impl/agent/local"
 	"github.com/OnslaughtSnail/caelis/impl/agent/local/chat"
 	"github.com/OnslaughtSnail/caelis/impl/approval/agentreview"
+	skillfs "github.com/OnslaughtSnail/caelis/impl/skill/fs"
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin"
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/toolsearch"
 	"github.com/OnslaughtSnail/caelis/impl/tool/mcp"
@@ -144,12 +145,13 @@ func (s *Stack) loadGatewayBuildPlan(sandboxCfg SandboxConfig, runtimeCfg stackR
 	}
 	runtimeCfg.Assembly = configuredAssembly
 	runtimeCfg.Plugins = clonePluginConfigs(doc.Plugins)
-	runtimeCfg.PluginSkills = clonePluginSkillBundles(contribs.SkillBundles)
+	runtimeCfg.PluginSkills = skill.ClonePluginBundles(contribs.SkillBundles)
 	baseMetadata, err := buildStackBaseMetadata(s.AppName, s.Workspace.CWD, runtimeCfg.SystemPrompt, runtimeCfg.Model, sandboxCfg, skillDirs, runtimeCfg.PluginSkills)
 	if err != nil {
 		return gatewayBuildPlan{}, err
 	}
-	runtimeCfg.BaseMetadata = baseMetadata
+	runtimeCfg.BaseMetadata = baseMetadata.Metadata
+	runtimeCfg.SkillCatalog = baseMetadata.SkillCatalog
 	return gatewayBuildPlan{
 		SandboxConfig: sandboxCfg,
 		RuntimeConfig: runtimeCfg,
@@ -201,7 +203,11 @@ func (s *Stack) buildGatewayRuntime(plan gatewayBuildPlan) (*gatewayRuntimeBundl
 			effectiveBaseMetadata["sandbox_fallback_reason"] = reason
 		}
 	}
-	tools, err := builtin.BuildCoreTools(builtin.CoreToolsConfig{Runtime: sandboxRuntime})
+	tools, err := builtin.BuildCoreTools(builtin.CoreToolsConfig{
+		Runtime:      sandboxRuntime,
+		SkillLoader:  skillfs.Loader{},
+		SkillCatalog: runtimeCfg.SkillCatalog,
+	})
 	if err != nil {
 		bundle.Close()
 		return nil, err
@@ -303,7 +309,8 @@ func (s *Stack) swapGatewayRuntime(bundle *gatewayRuntimeBundle) {
 	currentRuntime := s.runtime
 	currentRuntime.Assembly = assembly.CloneResolvedAssembly(bundle.RuntimeConfig.Assembly)
 	currentRuntime.SkillDirs = cloneStringSlicePreserveNil(bundle.RuntimeConfig.SkillDirs)
-	currentRuntime.PluginSkills = clonePluginSkillBundles(bundle.RuntimeConfig.PluginSkills)
+	currentRuntime.PluginSkills = skill.ClonePluginBundles(bundle.RuntimeConfig.PluginSkills)
+	currentRuntime.SkillCatalog = bundle.RuntimeConfig.SkillCatalog
 	currentRuntime.Plugins = clonePluginConfigs(bundle.RuntimeConfig.Plugins)
 	currentRuntime.BaseMetadata = cloneMap(bundle.RuntimeConfig.BaseMetadata)
 	currentRuntime.EstimatedPromptPrefixTokens = bundle.EstimatedPromptPrefixTokens

@@ -54,7 +54,7 @@ func TestProjectSubmissionReferences(t *testing.T) {
 		t.Fatal("ProjectSubmissionReferences() changed = false, want true")
 	}
 	for _, want := range []string{
-		"Load and follow the `cmpctl` skill before taking task actions.",
+		"Load skill `cmpctl` before taking task actions, then follow its instructions.",
 		"Read `dict.go` before answering or editing.",
 		"User request:\ninspect `dict.go`",
 	} {
@@ -88,8 +88,11 @@ func TestProjectSubmissionReferencesAllowsNamespacedSkills(t *testing.T) {
 	if !projected.Changed {
 		t.Fatal("ProjectSubmissionReferences() changed = false, want namespaced skill projection")
 	}
-	if !strings.Contains(projected.Text, "Load and follow the `figma:figma-use` skill before taking task actions.") {
+	if !strings.Contains(projected.Text, "Load skill `figma:figma-use` before taking task actions, then follow its instructions.") {
 		t.Fatalf("projected namespaced skill input missing load instruction:\n%s", projected.Text)
+	}
+	if strings.Contains(projected.Text, "`skill` tool") {
+		t.Fatalf("projected namespaced skill input should stay tool-agnostic:\n%s", projected.Text)
 	}
 	if strings.Contains(projected.Text, "$figma:figma-use") {
 		t.Fatalf("projected namespaced skill input leaked raw skill token:\n%s", projected.Text)

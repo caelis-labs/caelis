@@ -20,11 +20,14 @@ import (
 func TestRegressionAgentGuidanceReachesModelBoundary(t *testing.T) {
 	t.Parallel()
 
-	rt, err := host.New(host.Config{CWD: t.TempDir()})
+	cwd := t.TempDir()
+	rt, err := host.New(host.Config{CWD: cwd})
 	if err != nil {
 		t.Fatalf("host.New() error = %v", err)
 	}
-	coreTools, err := builtin.BuildCoreTools(builtin.CoreToolsConfig{Runtime: rt})
+	coreTools, err := builtin.BuildCoreTools(builtin.CoreToolsConfig{
+		Runtime: rt,
+	})
 	if err != nil {
 		t.Fatalf("BuildCoreTools() error = %v", err)
 	}

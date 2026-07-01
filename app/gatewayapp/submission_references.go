@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	kernelimpl "github.com/OnslaughtSnail/caelis/internal/kernel"
-	"github.com/OnslaughtSnail/caelis/ports/skill"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/control/promptrefs"
 )
 
@@ -27,12 +26,10 @@ func (s *Stack) projectSubmissionReferences(ctx context.Context, req kernelimpl.
 	}
 	var skillNames map[string]string
 	if submissionReferenceTokensContain(tokens, promptrefs.KindSkill) {
-		// Skill shorthand is opportunistic: an unavailable catalog must not
-		// turn ordinary prompts containing $NAME into submission failures.
-		skills, err := s.Skills().Discover(ctx, req.Session.CWD)
-		if err == nil {
-			skillNames = canonicalSkillNameMap(skills)
-		}
+		// Skill shorthand uses the runtime prompt snapshot. Skills added after
+		// runtime assembly become available after a runtime rebuild, not midway
+		// through the current runtime context.
+		skillNames = s.skillCatalogSnapshot().NameLookup()
 	}
 	projected := promptrefs.ProjectSubmissionReferences(text, promptrefs.ProjectionOptions{
 		WorkspaceDir: req.Session.CWD,
@@ -51,19 +48,4 @@ func submissionReferenceTokensContain(tokens []promptrefs.Token, kind promptrefs
 		}
 	}
 	return false
-}
-
-func canonicalSkillNameMap(skills []skill.Meta) map[string]string {
-	if len(skills) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(skills))
-	for _, one := range skills {
-		name := strings.TrimSpace(one.Name)
-		if name == "" {
-			continue
-		}
-		out[strings.ToLower(name)] = name
-	}
-	return out
 }

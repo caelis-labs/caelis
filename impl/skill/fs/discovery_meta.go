@@ -37,12 +37,18 @@ func DefaultDiscoveryDirs(workspaceDir string) []string {
 	workspaceDir = strings.TrimSpace(workspaceDir)
 	if workspaceDir != "" {
 		out = append(out,
+			filepath.Join(workspaceDir, ".claude", "skills"),
+			filepath.Join(workspaceDir, ".opencode", "skills"),
+			filepath.Join(workspaceDir, ".opencode", "skill"),
 			filepath.Join(workspaceDir, ".agents", "skills"),
 			filepath.Join(workspaceDir, "skills"),
 		)
 	}
 	out = append(out,
 		"~/.caelis/skills",
+		"~/.claude/skills",
+		"~/.config/opencode/skills",
+		"~/.config/opencode/skill",
 		"~/.agents/skills",
 	)
 	return out
@@ -318,9 +324,14 @@ func parseMetaHash(path string) (Meta, string, error) {
 }
 
 func parseMetaContent(path string, raw []byte) (Meta, error) {
+	meta, _, err := parseSkillContent(path, raw)
+	return meta, err
+}
+
+func parseSkillContent(path string, raw []byte) (Meta, string, error) {
 	content := normalizeText(string(raw))
 	if content == "" {
-		return Meta{}, fmt.Errorf("empty SKILL.md: %s", path)
+		return Meta{}, "", fmt.Errorf("empty SKILL.md: %s", path)
 	}
 	frontMatter, body := parseFrontMatter(content)
 	name := firstNonEmpty(
@@ -333,13 +344,14 @@ func parseMetaContent(path string, raw []byte) (Meta, error) {
 		firstParagraph(body),
 	)
 	if name == "" || description == "" {
-		return Meta{}, fmt.Errorf("invalid skill metadata: %s", path)
+		return Meta{}, "", fmt.Errorf("invalid skill metadata: %s", path)
 	}
 	return Meta{
 		Name:        strings.TrimSpace(name),
 		Description: strings.TrimSpace(description),
 		Path:        path,
-	}, nil
+		LocalName:   strings.TrimSpace(name),
+	}, strings.TrimSpace(body), nil
 }
 
 func parseFrontMatter(content string) (map[string]string, string) {

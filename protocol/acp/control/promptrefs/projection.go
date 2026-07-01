@@ -57,9 +57,9 @@ func ProjectSubmissionReferences(text string, opts ProjectionOptions) Projection
 	out.WriteString("The user referenced these resources. Treat them as explicit instructions for this turn:")
 	for _, skill := range skills {
 		out.WriteByte('\n')
-		out.WriteString("- Load and follow the `")
+		out.WriteString("- Load skill `")
 		out.WriteString(skill)
-		out.WriteString("` skill before taking task actions.")
+		out.WriteString("` before taking task actions, then follow its instructions.")
 	}
 	for _, file := range files {
 		out.WriteByte('\n')

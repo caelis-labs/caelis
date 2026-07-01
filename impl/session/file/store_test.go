@@ -289,7 +289,7 @@ func TestStoreAppendUsesDisplayTextForGeneratedTitle(t *testing.T) {
 		t.Fatalf("GetOrCreate() error = %v", err)
 	}
 
-	modelText := "The user referenced these resources. Treat them as explicit instructions for this turn:\n- Load and follow the `cmpctl` skill before taking task actions.\n\nUser request:\narchive preflight"
+	modelText := "The user referenced these resources. Treat them as explicit instructions for this turn:\n- Load skill `cmpctl` before taking task actions, then follow its instructions.\n\nUser request:\narchive preflight"
 	displayText := "$cmpctl archive preflight"
 	if _, err := store.AppendEvent(ctx, createdSession.SessionRef, &session.Event{
 		Type:       session.EventTypeUser,

@@ -220,8 +220,26 @@ func (s SkillService) Discover(ctx context.Context, workspaceDir string) ([]Skil
 	return DiscoverSkillMetaRequest(skill.DiscoverRequest{
 		Dirs:          stackSkillDiscoveryDirs(workspaceDir, runtimeCfg.SkillDirs),
 		WorkspaceDir:  workspaceDir,
-		PluginBundles: clonePluginSkillBundles(runtimeCfg.PluginSkills),
+		PluginBundles: skill.ClonePluginBundles(runtimeCfg.PluginSkills),
 	})
+}
+
+// Snapshot returns the skill catalog captured when the current runtime prompt
+// was assembled. It is stable for the runtime lifetime.
+func (s SkillService) Snapshot() skill.Catalog {
+	if s.stack == nil {
+		return skill.Catalog{}
+	}
+	return s.stack.skillCatalogSnapshot()
+}
+
+func (s *Stack) skillCatalogSnapshot() skill.Catalog {
+	if s == nil {
+		return skill.Catalog{}
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.runtime.SkillCatalog
 }
 
 func (s StatusService) Doctor(ctx context.Context, req DoctorRequest) (DoctorReport, error) {

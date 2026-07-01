@@ -161,10 +161,11 @@ func TestRebuildGatewayRejectsActiveTurnBeforePlanLoad(t *testing.T) {
 	ctx := context.Background()
 	stack, activeSession := newLocalStateTestStack(t)
 	pluginRoot := filepath.Join(t.TempDir(), "malformed-plugin")
-	if err := os.MkdirAll(pluginRoot, 0o700); err != nil {
-		t.Fatalf("MkdirAll(pluginRoot) error = %v", err)
+	manifestDir := filepath.Join(pluginRoot, ".caelis-plugin")
+	if err := os.MkdirAll(manifestDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll(manifestDir) error = %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(pluginRoot, "gemini-extension.json"), []byte("invalid-json{"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(manifestDir, "plugin.json"), []byte("invalid-json{"), 0o600); err != nil {
 		t.Fatalf("WriteFile(manifest) error = %v", err)
 	}
 	if err := stack.store.Save(AppConfig{
@@ -221,10 +222,11 @@ func TestLoadGatewayBuildPlanInvalidPluginDoesNotMutateStack(t *testing.T) {
 	beforeBaseMetadata := cloneMap(stack.runtime.BaseMetadata)
 
 	pluginRoot := filepath.Join(t.TempDir(), "malformed-plugin")
-	if err := os.MkdirAll(pluginRoot, 0o700); err != nil {
-		t.Fatalf("MkdirAll(pluginRoot) error = %v", err)
+	manifestDir := filepath.Join(pluginRoot, ".caelis-plugin")
+	if err := os.MkdirAll(manifestDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll(manifestDir) error = %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(pluginRoot, "gemini-extension.json"), []byte("invalid-json{"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(manifestDir, "plugin.json"), []byte("invalid-json{"), 0o600); err != nil {
 		t.Fatalf("WriteFile(manifest) error = %v", err)
 	}
 	if err := stack.store.Save(AppConfig{

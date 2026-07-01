@@ -606,7 +606,7 @@ func (m *Model) renderSlashArgList() string {
 	var lines []string
 	if start > 0 {
 		lines = append(lines, m.theme.HelpHintTextStyle().Render(
-			fmt.Sprintf("  … and %d earlier", start),
+			fmt.Sprintf("… and %d earlier", start),
 		))
 	}
 	for i := start; i < end; i++ {
@@ -615,24 +615,11 @@ func (m *Model) renderSlashArgList() string {
 			display = strings.TrimSpace(candidates[i].Value)
 		}
 		detail := strings.TrimSpace(candidates[i].Detail)
-		prefix := "  "
-		if i == index {
-			line := m.renderCompletionSelectedText(display)
-			if detail != "" {
-				line += "  " + m.theme.HelpHintTextStyle().Render(detail)
-			}
-			lines = append(lines, line)
-		} else {
-			line := prefix + m.theme.CommandStyle().Render(display)
-			if detail != "" {
-				line += "  " + m.theme.HelpHintTextStyle().Render(detail)
-			}
-			lines = append(lines, line)
-		}
+		lines = append(lines, m.renderCompletionValueLine(display, detail, i == index))
 	}
 	if end < len(candidates) {
 		lines = append(lines, m.theme.HelpHintTextStyle().Render(
-			fmt.Sprintf("  … and %d more", len(candidates)-end),
+			fmt.Sprintf("… and %d more", len(candidates)-end),
 		))
 	}
 	title := "Options"

@@ -23,6 +23,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/OnslaughtSnail/caelis/ports/skill"
 	"github.com/OnslaughtSnail/caelis/ports/stream"
 	controlcommands "github.com/OnslaughtSnail/caelis/protocol/acp/control/commands"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
@@ -3374,13 +3375,186 @@ func TestAdapterCompleteSkillDiscoversGlobalAndWorkspaceSkills(t *testing.T) {
 	for _, item := range candidates {
 		switch item.Value {
 		case "echo":
-			foundEcho = strings.Contains(item.Detail, "Echo text") && strings.TrimSpace(item.Path) != ""
+			foundEcho = item.Kind == "Skill" && strings.Contains(item.Detail, "Echo text") && strings.TrimSpace(item.Path) != ""
 		case "lint":
-			foundLint = strings.Contains(item.Detail, "Run lint checks") && strings.TrimSpace(item.Path) != ""
+			foundLint = item.Kind == "Skill" && strings.Contains(item.Detail, "Run lint checks") && strings.TrimSpace(item.Path) != ""
 		}
 	}
 	if !foundEcho || !foundLint {
 		t.Fatalf("CompleteSkill() = %#v, want echo and lint metadata", candidates)
+	}
+}
+
+func TestAdapterCompleteSkillUsesRuntimeSnapshot(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	workspace := t.TempDir()
+	setHomeForAdapterTest(t, home)
+
+	initialSkill := filepath.Join(workspace, ".agents", "skills", "initial")
+	if err := os.MkdirAll(initialSkill, 0o700); err != nil {
+		t.Fatalf("MkdirAll(initial skill) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(initialSkill, "SKILL.md"), []byte("---\nname: initial\ndescription: Initial skill.\n---\n# Initial\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile(initial SKILL.md) error = %v", err)
+	}
+
+	stack, err := newAdapterTestStack(t, gatewayapp.Config{
+		AppName:      "caelis",
+		UserID:       "skill-snapshot-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: workspace,
+		WorkspaceCWD: workspace,
+		ApprovalMode: "default",
+		Assembly:     assembly.ResolvedAssembly{},
+		SkillDirs:    gatewayapp.DefaultSkillDiscoveryDirs(workspace),
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+
+	lateSkill := filepath.Join(workspace, ".agents", "skills", "late")
+	if err := os.MkdirAll(lateSkill, 0o700); err != nil {
+		t.Fatalf("MkdirAll(late skill) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(lateSkill, "SKILL.md"), []byte("---\nname: late\ndescription: Late skill.\n---\n# Late\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile(late SKILL.md) error = %v", err)
+	}
+
+	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "skill-snapshot-session", "surface", "")
+	if err != nil {
+		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
+	}
+	candidates, err := driver.CompleteSkill(ctx, "", 10)
+	if err != nil {
+		t.Fatalf("CompleteSkill() error = %v", err)
+	}
+	foundInitial := false
+	for _, item := range candidates {
+		switch item.Value {
+		case "initial":
+			foundInitial = true
+		case "late":
+			t.Fatalf("CompleteSkill() = %#v, should not include skill added after runtime snapshot", candidates)
+		}
+	}
+	if !foundInitial {
+		t.Fatalf("CompleteSkill() = %#v, want initial skill from runtime snapshot", candidates)
+	}
+}
+
+func TestAdapterCompleteSkillRefreshesAfterRuntimeRebuild(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	workspace := t.TempDir()
+	setHomeForAdapterTest(t, home)
+
+	stack, err := newAdapterTestStack(t, gatewayapp.Config{
+		AppName:      "caelis",
+		UserID:       "skill-reconfigure-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: workspace,
+		WorkspaceCWD: workspace,
+		ApprovalMode: "default",
+		Assembly:     assembly.ResolvedAssembly{},
+		SkillDirs:    gatewayapp.DefaultSkillDiscoveryDirs(workspace),
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+
+	driver, err := newAdapterFromGatewayAppStack(ctx, stack, "skill-reconfigure-session", "surface", "")
+	if err != nil {
+		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
+	}
+
+	initialCandidates, err := driver.CompleteSkill(ctx, "", 10)
+	if err != nil {
+		t.Fatalf("CompleteSkill() before plugin add error = %v", err)
+	}
+	if completionCandidatesContainValue(initialCandidates, "skillplugin:runtime-skill") {
+		t.Fatalf("CompleteSkill() before plugin add = %#v, should not include plugin skill", initialCandidates)
+	}
+
+	pluginDir := filepath.Join(t.TempDir(), "skillplugin")
+	writeAdapterTestPluginSkill(t, pluginDir, "runtime-skill", "Runtime plugin skill.")
+	if _, err := stack.Plugins().AddPath(ctx, pluginDir); err != nil {
+		t.Fatalf("Plugins().AddPath() error = %v", err)
+	}
+
+	refreshedCandidates, err := driver.CompleteSkill(ctx, "", 10)
+	if err != nil {
+		t.Fatalf("CompleteSkill() after plugin add error = %v", err)
+	}
+	if !completionCandidatesContainValue(refreshedCandidates, "skillplugin:runtime-skill") {
+		t.Fatalf("CompleteSkill() after runtime rebuild = %#v, want plugin skill", refreshedCandidates)
+	}
+}
+
+func writeAdapterTestPluginSkill(t *testing.T, root string, name string, description string) {
+	t.Helper()
+	manifestDir := filepath.Join(root, ".caelis-plugin")
+	skillDir := filepath.Join(root, "skills", name)
+	for _, dir := range []string{manifestDir, skillDir} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatalf("MkdirAll(%s) error = %v", dir, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(manifestDir, "plugin.json"), []byte(`{"name":"skill-plugin","version":"1.0.0"}`), 0o600); err != nil {
+		t.Fatalf("WriteFile(plugin.json) error = %v", err)
+	}
+	content := []byte("---\nname: " + name + "\ndescription: " + description + "\n---\n# " + name + "\n")
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), content, 0o600); err != nil {
+		t.Fatalf("WriteFile(SKILL.md) error = %v", err)
+	}
+}
+
+func completionCandidatesContainValue(candidates []CompletionCandidate, value string) bool {
+	value = strings.TrimSpace(value)
+	for _, candidate := range candidates {
+		if strings.TrimSpace(candidate.Value) == value {
+			return true
+		}
+	}
+	return false
+}
+
+func TestSkillCompletionCandidatePrefersLocalNameForPluginSkill(t *testing.T) {
+	workspace := t.TempDir()
+	meta := skill.Meta{
+		Name:        "superpowers-abc123:brainstorm",
+		Description: "Generate alternatives before implementation.",
+		Path:        filepath.Join(workspace, ".caelis", "plugins", "superpowers", "skills", "brainstorm", "SKILL.md"),
+		Source:      skill.SourcePlugin,
+		PluginID:    "superpowers-abc123",
+		Namespace:   "superpowers-abc123",
+		LocalName:   "brainstorm",
+	}
+
+	candidate := skillCompletionCandidate(meta)
+	if candidate.Value != "superpowers-abc123:brainstorm" {
+		t.Fatalf("candidate.Value = %q, want namespaced skill value", candidate.Value)
+	}
+	if candidate.Display != "brainstorm" {
+		t.Fatalf("candidate.Display = %q, want local skill name", candidate.Display)
+	}
+	if candidate.Kind != "Plugin" {
+		t.Fatalf("candidate.Kind = %q, want plugin badge", candidate.Kind)
+	}
+	if candidate.Detail != "superpowers-abc123 · Generate alternatives before implementation." {
+		t.Fatalf("candidate.Detail = %q, want plugin source and skill description", candidate.Detail)
+	}
+	if strings.Contains(candidate.Detail, "namespace") {
+		t.Fatalf("candidate.Detail = %q, should not include namespace hint", candidate.Detail)
+	}
+	if strings.Contains(candidate.Detail, "SKILL.md") {
+		t.Fatalf("candidate.Detail = %q, should not include path metadata", candidate.Detail)
+	}
+	if _, ok := scoreSkillMeta("brainstorm", meta, workspace); !ok {
+		t.Fatal("scoreSkillMeta(\"brainstorm\") did not match local skill name")
+	}
+	if _, ok := scoreSkillMeta("superpowers", meta, workspace); !ok {
+		t.Fatal("scoreSkillMeta(\"superpowers\") did not match namespace")
 	}
 }
 

@@ -236,9 +236,17 @@ type ModelRuntimeDeps struct {
 	EnsureCodeFreeModelSelectionAuthFn func(context.Context, CodeFreeAuthRequest) error
 }
 
-// SkillRuntimeDeps carries optional workspace skill discovery for completions.
+// SkillRuntimeDeps carries access to the current runtime skill catalog used for
+// completions.
 type SkillRuntimeDeps struct {
-	DiscoverFn func(context.Context, string) ([]skill.Meta, error)
+	SnapshotFn func() skill.Catalog
+}
+
+func (deps SkillRuntimeDeps) Snapshot() skill.Catalog {
+	if deps.SnapshotFn == nil {
+		return skill.Catalog{}
+	}
+	return deps.SnapshotFn()
 }
 
 // AgentProfileRuntimeDeps carries optional agent-profile status and binding.

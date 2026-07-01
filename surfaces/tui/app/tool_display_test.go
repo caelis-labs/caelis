@@ -44,6 +44,14 @@ func TestToolDisplayArgsHidesMetadataOnlyListArgs(t *testing.T) {
 	}
 }
 
+func TestToolDisplayArgsSkillUsesName(t *testing.T) {
+	t.Parallel()
+
+	if got := toolDisplayArgs("SKILL", map[string]any{"name": "superpowers:brainstorming"}); got != "superpowers:brainstorming" {
+		t.Fatalf("toolDisplayArgs(SKILL) = %q, want skill name", got)
+	}
+}
+
 func TestToolTitleDisplayArgsCompactsMutationPaths(t *testing.T) {
 	t.Parallel()
 

@@ -23,6 +23,7 @@ type stackRuntimeConfig struct {
 	Model                       ModelConfig
 	SkillDirs                   []string
 	PluginSkills                []skill.PluginBundle
+	SkillCatalog                skill.Catalog
 	DisableBuiltInAgentProfiles bool
 	Plugins                     []PluginConfig
 	BaseAssembly                assembly.ResolvedAssembly
@@ -156,18 +157,6 @@ func cloneStringSlicePreserveNil(in []string) []string {
 		return nil
 	}
 	return append([]string(nil), in...)
-}
-
-func clonePluginSkillBundles(in []skill.PluginBundle) []skill.PluginBundle {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make([]skill.PluginBundle, 0, len(in))
-	for _, bundle := range in {
-		bundle.Disabled = append([]string(nil), bundle.Disabled...)
-		out = append(out, bundle)
-	}
-	return out
 }
 
 func approvalMode(raw string) string {

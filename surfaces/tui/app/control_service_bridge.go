@@ -293,6 +293,7 @@ func ConfigFromControlService(service control.Service, sender *ProgramSender, ba
 				out[i] = CompletionCandidate{
 					Value:   c.Value,
 					Display: c.Display,
+					Kind:    c.Kind,
 					Detail:  c.Detail,
 					Path:    c.Path,
 				}
@@ -312,6 +313,7 @@ func ConfigFromControlService(service control.Service, sender *ProgramSender, ba
 				out[i] = CompletionCandidate{
 					Value:   c.Value,
 					Display: c.Display,
+					Kind:    c.Kind,
 					Detail:  c.Detail,
 					Path:    c.Path,
 				}
@@ -331,6 +333,7 @@ func ConfigFromControlService(service control.Service, sender *ProgramSender, ba
 				out[i] = CompletionCandidate{
 					Value:   c.Value,
 					Display: c.Display,
+					Kind:    c.Kind,
 					Detail:  c.Detail,
 					Path:    c.Path,
 				}

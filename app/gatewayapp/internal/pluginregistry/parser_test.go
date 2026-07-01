@@ -209,6 +209,47 @@ func TestParseClaudePlugin(t *testing.T) {
 	}
 }
 
+func TestParseClaudePluginImplicitSkillsIncludesClaudeSkillsDir(t *testing.T) {
+	tmp := t.TempDir()
+	root := filepath.Join(tmp, "test-claude-skills")
+	if err := os.MkdirAll(filepath.Join(root, ".claude-plugin"), 0o700); err != nil {
+		t.Fatalf("mkdir manifest dir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "skills", "plain"), 0o700); err != nil {
+		t.Fatalf("mkdir plain skills dir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, ".claude", "skills", "community"), 0o700); err != nil {
+		t.Fatalf("mkdir claude skills dir: %v", err)
+	}
+	manifest := `{
+		"name": "Test Claude Plugin",
+		"version": "2.0.0",
+		"description": "Claude Code plugin"
+	}`
+	if err := os.WriteFile(filepath.Join(root, ".claude-plugin", "plugin.json"), []byte(manifest), 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	p, err := ParsePlugin(root)
+	if err != nil {
+		t.Fatalf("ParsePlugin() error = %v", err)
+	}
+	wantRoots := map[string]bool{
+		filepath.Join(root, "skills"):            false,
+		filepath.Join(root, ".claude", "skills"): false,
+	}
+	for _, contribution := range p.Skills {
+		if _, ok := wantRoots[contribution.Root]; ok && contribution.Namespace == "test-claude-skills" {
+			wantRoots[contribution.Root] = true
+		}
+	}
+	for root, found := range wantRoots {
+		if !found {
+			t.Fatalf("implicit skill root %q missing from %#v", root, p.Skills)
+		}
+	}
+}
+
 func TestParseClaudePluginMalformedHooks(t *testing.T) {
 	tmp, err := os.MkdirTemp("", "caelis-plugin-test-")
 	if err != nil {
@@ -259,154 +300,17 @@ func TestParseClaudePluginMalformedHooks(t *testing.T) {
 	}
 }
 
-func TestParseCodexPluginContributions(t *testing.T) {
+func TestParseCaelisPluginRejectsEscapingSkillPath(t *testing.T) {
 	tmp := t.TempDir()
-	root := filepath.Join(tmp, "codex-demo")
-	if err := os.MkdirAll(filepath.Join(root, ".codex-plugin"), 0o700); err != nil {
-		t.Fatalf("mkdir codex manifest dir: %v", err)
-	}
-	if err := os.MkdirAll(filepath.Join(root, "skills", "plan"), 0o700); err != nil {
-		t.Fatalf("mkdir skill dir: %v", err)
-	}
-	if err := os.MkdirAll(filepath.Join(root, "hooks"), 0o700); err != nil {
-		t.Fatalf("mkdir hooks dir: %v", err)
+	root := filepath.Join(tmp, "caelis-escape")
+	if err := os.MkdirAll(filepath.Join(root, ".caelis-plugin"), 0o700); err != nil {
+		t.Fatalf("mkdir caelis manifest dir: %v", err)
 	}
 	manifest := `{
-		"name": "codex-demo",
-		"version": "1.0.0",
-		"description": "Codex demo",
-		"skills": "./skills",
-		"mcpServers": {
-			"manifest-server": {"command": "node", "args": ["server.js"]}
-		},
-		"agents": [
-			{"name": "helper", "command": "helper-bin", "workDir": "."}
-		]
+		"name": "caelis-escape",
+		"skills": [{"root": "../outside"}]
 	}`
-	if err := os.WriteFile(filepath.Join(root, ".codex-plugin", "plugin.json"), []byte(manifest), 0o600); err != nil {
-		t.Fatalf("write manifest: %v", err)
-	}
-	hooks := `{
-		"hooks": {
-			"SessionStart": [
-				{"hooks": [{"type": "command", "command": "bash hooks/start.sh"}]}
-			]
-		}
-	}`
-	if err := os.WriteFile(filepath.Join(root, "hooks", "hooks.json"), []byte(hooks), 0o600); err != nil {
-		t.Fatalf("write hooks: %v", err)
-	}
-	mcpJSON := `{
-		"mcpServers": {
-			"file-server": {"command": "python", "args": ["mcp.py"], "workDir": "."}
-		}
-	}`
-	if err := os.WriteFile(filepath.Join(root, ".mcp.json"), []byte(mcpJSON), 0o600); err != nil {
-		t.Fatalf("write .mcp.json: %v", err)
-	}
-
-	p, err := ParsePlugin(root)
-	if err != nil {
-		t.Fatalf("ParsePlugin() error = %v", err)
-	}
-	if p.Kind != plugin.ManifestKindCodex {
-		t.Fatalf("Kind = %q, want codex", p.Kind)
-	}
-	if len(p.Skills) != 1 || p.Skills[0].Root != filepath.Join(root, "skills") || p.Skills[0].Namespace != "codex-demo" {
-		t.Fatalf("Skills = %#v, want codex namespaced skills root", p.Skills)
-	}
-	if len(p.Hooks) != 1 || p.Hooks[0].Command != "bash" || !strings.Contains(strings.Join(p.Hooks[0].Args, " "), "hooks/start.sh") {
-		t.Fatalf("Hooks = %#v, want hook from hooks/hooks.json", p.Hooks)
-	}
-	if len(p.MCPServers) != 2 {
-		t.Fatalf("MCPServers = %#v, want manifest and .mcp.json servers", p.MCPServers)
-	}
-	if len(p.Agents) != 1 || p.Agents[0].Name != "helper" || p.Agents[0].WorkDir != root {
-		t.Fatalf("Agents = %#v, want helper agent rooted at plugin", p.Agents)
-	}
-}
-
-func TestParseCodexPluginPathContributionFields(t *testing.T) {
-	tmp := t.TempDir()
-	root := filepath.Join(tmp, "codex-paths")
-	if err := os.MkdirAll(filepath.Join(root, ".codex-plugin"), 0o700); err != nil {
-		t.Fatalf("mkdir codex manifest dir: %v", err)
-	}
-	if err := os.MkdirAll(filepath.Join(root, "config"), 0o700); err != nil {
-		t.Fatalf("mkdir config dir: %v", err)
-	}
-	if err := os.MkdirAll(filepath.Join(root, "hooks"), 0o700); err != nil {
-		t.Fatalf("mkdir default hooks dir: %v", err)
-	}
-	manifest := `{
-		"name": "codex-paths",
-		"version": "1.0.0",
-		"hooks": "config/hooks.json",
-		"mcpServers": "config/mcp.json"
-	}`
-	if err := os.WriteFile(filepath.Join(root, ".codex-plugin", "plugin.json"), []byte(manifest), 0o600); err != nil {
-		t.Fatalf("write manifest: %v", err)
-	}
-	pathHooks := `{
-		"hooks": {
-			"SessionStart": [
-				{"hooks": [{"type": "command", "command": "bash config/start.sh"}]}
-			]
-		}
-	}`
-	if err := os.WriteFile(filepath.Join(root, "config", "hooks.json"), []byte(pathHooks), 0o600); err != nil {
-		t.Fatalf("write path hooks: %v", err)
-	}
-	defaultHooks := `{
-		"hooks": {
-			"SessionStart": [
-				{"hooks": [{"type": "command", "command": "bash hooks/default.sh"}]}
-			]
-		}
-	}`
-	if err := os.WriteFile(filepath.Join(root, "hooks", "hooks.json"), []byte(defaultHooks), 0o600); err != nil {
-		t.Fatalf("write default hooks: %v", err)
-	}
-	pathMCP := `{
-		"servers": {
-			"path-server": {"command": "python", "args": ["config/mcp.py"]}
-		}
-	}`
-	if err := os.WriteFile(filepath.Join(root, "config", "mcp.json"), []byte(pathMCP), 0o600); err != nil {
-		t.Fatalf("write path mcp: %v", err)
-	}
-	defaultMCP := `{
-		"mcpServers": {
-			"default-server": {"command": "node", "args": ["default.js"]}
-		}
-	}`
-	if err := os.WriteFile(filepath.Join(root, ".mcp.json"), []byte(defaultMCP), 0o600); err != nil {
-		t.Fatalf("write default mcp: %v", err)
-	}
-
-	p, err := ParsePlugin(root)
-	if err != nil {
-		t.Fatalf("ParsePlugin() error = %v", err)
-	}
-	if len(p.Hooks) != 1 || p.Hooks[0].Command != "bash" || !strings.Contains(strings.Join(p.Hooks[0].Args, " "), "config/start.sh") {
-		t.Fatalf("Hooks = %#v, want only path hook", p.Hooks)
-	}
-	if len(p.MCPServers) != 1 || p.MCPServers[0].Name != "path-server" {
-		t.Fatalf("MCPServers = %#v, want only path server", p.MCPServers)
-	}
-}
-
-func TestParseCodexPluginRejectsEscapingSkillPath(t *testing.T) {
-	tmp := t.TempDir()
-	root := filepath.Join(tmp, "codex-escape")
-	if err := os.MkdirAll(filepath.Join(root, ".codex-plugin"), 0o700); err != nil {
-		t.Fatalf("mkdir codex manifest dir: %v", err)
-	}
-	manifest := `{
-		"name": "codex-escape",
-		"skills": "../outside"
-	}`
-	if err := os.WriteFile(filepath.Join(root, ".codex-plugin", "plugin.json"), []byte(manifest), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, ".caelis-plugin", "plugin.json"), []byte(manifest), 0o600); err != nil {
 		t.Fatalf("write manifest: %v", err)
 	}
 
@@ -416,50 +320,6 @@ func TestParseCodexPluginRejectsEscapingSkillPath(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "path traversal escape") {
 		t.Fatalf("ParsePlugin() error = %v, want path traversal escape", err)
-	}
-}
-
-func TestParseGeminiPlugin(t *testing.T) {
-	tmp, err := os.MkdirTemp("", "caelis-plugin-test-")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmp)
-
-	root := filepath.Join(tmp, "test-gemini")
-	if err := os.MkdirAll(root, 0700); err != nil {
-		t.Fatalf("failed to create dirs: %v", err)
-	}
-
-	manifest := `{
-		"name": "superpowers",
-		"version": "5.1.0",
-		"description": "Gemini Extension",
-		"mcpServers": {
-			"server": {
-				"command": "node",
-				"args": ["server.js"]
-			}
-		}
-	}`
-
-	if err := os.WriteFile(filepath.Join(root, "gemini-extension.json"), []byte(manifest), 0600); err != nil {
-		t.Fatalf("failed to write manifest: %v", err)
-	}
-
-	p, err := ParsePlugin(root)
-	if err != nil {
-		t.Fatalf("ParsePlugin failed: %v", err)
-	}
-
-	if p.Name != "superpowers" {
-		t.Errorf("Name = %q, want %q", p.Name, "superpowers")
-	}
-	if p.Kind != plugin.ManifestKindGemini {
-		t.Errorf("Kind = %q, want %q", p.Kind, plugin.ManifestKindGemini)
-	}
-	if len(p.MCPServers) != 1 || p.MCPServers[0].Name != "server" {
-		t.Errorf("unexpected MCP servers: %+v", p.MCPServers)
 	}
 }
 
@@ -518,43 +378,7 @@ func TestParseMCPRemoteTransports(t *testing.T) {
 	}
 }
 
-func TestParseCodexPlugin(t *testing.T) {
-	tmp, err := os.MkdirTemp("", "caelis-plugin-test-")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmp)
-
-	root := filepath.Join(tmp, "test-codex")
-	metaDir := filepath.Join(root, ".codex-plugin")
-	if err := os.MkdirAll(metaDir, 0700); err != nil {
-		t.Fatalf("failed to create dirs: %v", err)
-	}
-
-	manifest := `{
-		"name": "Test Codex Plugin",
-		"version": "3.0.0",
-		"description": "Codex plugin"
-	}`
-
-	if err := os.WriteFile(filepath.Join(metaDir, "plugin.json"), []byte(manifest), 0600); err != nil {
-		t.Fatalf("failed to write manifest: %v", err)
-	}
-
-	p, err := ParsePlugin(root)
-	if err != nil {
-		t.Fatalf("ParsePlugin failed: %v", err)
-	}
-
-	if p.Name != "Test Codex Plugin" {
-		t.Errorf("Name = %q, want %q", p.Name, "Test Codex Plugin")
-	}
-	if p.Kind != plugin.ManifestKindCodex {
-		t.Errorf("Kind = %q, want %q", p.Kind, plugin.ManifestKindCodex)
-	}
-}
-
-func TestParseMultiManifestMerging(t *testing.T) {
+func TestParseSupportedManifestIgnoresUnsupportedLegacyManifest(t *testing.T) {
 	tmp, err := os.MkdirTemp("", "caelis-plugin-test-")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
@@ -599,11 +423,11 @@ func TestParseMultiManifestMerging(t *testing.T) {
 		t.Fatalf("failed to write hooks: %v", err)
 	}
 
-	// Write Gemini manifest
-	geminiManifest := `{
-		"name": "Gemini superpowers",
+	// Write an unsupported legacy manifest next to the supported Claude one.
+	legacyManifest := `{
+		"name": "Legacy superpowers",
 		"version": "5.1.0",
-		"description": "Gemini superpowers version",
+		"description": "Legacy superpowers version",
 		"mcpServers": {
 			"myserver": {
 				"command": "node",
@@ -611,8 +435,8 @@ func TestParseMultiManifestMerging(t *testing.T) {
 			}
 		}
 	}`
-	if err := os.WriteFile(filepath.Join(root, "gemini-extension.json"), []byte(geminiManifest), 0600); err != nil {
-		t.Fatalf("failed to write gemini manifest: %v", err)
+	if err := os.WriteFile(filepath.Join(root, "gemini-extension.json"), []byte(legacyManifest), 0600); err != nil {
+		t.Fatalf("failed to write legacy manifest: %v", err)
 	}
 
 	p, err := ParsePlugin(root)
@@ -620,12 +444,14 @@ func TestParseMultiManifestMerging(t *testing.T) {
 		t.Fatalf("ParsePlugin failed: %v", err)
 	}
 
-	// Kind can be Claude or Gemini, but both contributions should be merged.
+	if p.Kind != plugin.ManifestKindClaude {
+		t.Fatalf("Kind = %q, want %q", p.Kind, plugin.ManifestKindClaude)
+	}
 	if len(p.Hooks) != 1 || p.Hooks[0].RawCommand != "bash session-start.sh" {
 		t.Errorf("lost Claude SessionStart hook: %+v", p.Hooks)
 	}
-	if len(p.MCPServers) != 1 || p.MCPServers[0].Name != "myserver" {
-		t.Errorf("lost Gemini MCP server: %+v", p.MCPServers)
+	if len(p.MCPServers) != 0 {
+		t.Errorf("MCPServers = %+v, want unsupported legacy manifest ignored", p.MCPServers)
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/filesystem"
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/plan"
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/shell"
+	skilltool "github.com/OnslaughtSnail/caelis/impl/tool/builtin/skill"
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/task"
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/web"
 	"github.com/OnslaughtSnail/caelis/impl/tool/registry"
@@ -30,7 +31,7 @@ func TestBuildCoreToolsCreatesDefaultCodingGroup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildCoreTools() error = %v", err)
 	}
-	if got, want := len(tools), 11; got != want {
+	if got, want := len(tools), 12; got != want {
 		t.Fatalf("len(tools) = %d, want %d", got, want)
 	}
 	if got := tools[0].Definition().Name; got != filesystem.ReadToolName {
@@ -51,10 +52,13 @@ func TestBuildCoreToolsCreatesDefaultCodingGroup(t *testing.T) {
 	if got := tools[8].Definition().Name; got != plan.ToolName {
 		t.Fatalf("plan tool = %q, want %q", got, plan.ToolName)
 	}
-	if got := tools[9].Definition().Name; got != web.SearchToolName {
+	if got := tools[9].Definition().Name; got != skilltool.ToolName {
+		t.Fatalf("skill tool = %q, want %q", got, skilltool.ToolName)
+	}
+	if got := tools[10].Definition().Name; got != web.SearchToolName {
 		t.Fatalf("web search tool = %q, want %q", got, web.SearchToolName)
 	}
-	if got := tools[10].Definition().Name; got != web.FetchToolName {
+	if got := tools[11].Definition().Name; got != web.FetchToolName {
 		t.Fatalf("last tool = %q, want %q", got, web.FetchToolName)
 	}
 }
@@ -145,6 +149,10 @@ func TestCoreToolSchemasExposeGuidanceBoundsAndAnnotations(t *testing.T) {
 	requireDescriptionContains(t, defs[plan.ToolName], "multi-step, risky, or ambiguous", "skip it for trivial")
 	requireAnnotations(t, defs[plan.ToolName], false, false, true, false)
 
+	requireStringMinLength(t, defs[skilltool.ToolName], "name", 1)
+	requireDescriptionContains(t, defs[skilltool.ToolName], "Load a specialized skill", "available skills", "SKILL.md")
+	requireAnnotations(t, defs[skilltool.ToolName], true, false, true, false)
+
 	requireStringMinLength(t, defs[web.SearchToolName], "query", 1)
 	requireIntegerBounds(t, defs[web.SearchToolName], "max_results", 1, ptrAny(10))
 	requireDescriptionContains(t, defs[web.SearchToolName], "Search the web", "concise keyword queries", "site:", "provider-native web search", "unavailable", "fall back to web_fetch")
@@ -230,6 +238,7 @@ func TestCoreToolsRejectUnknownArgs(t *testing.T) {
 		}},
 		{shell.RunCommandToolName, map[string]any{"command": "printf ok", "unexpected": true}},
 		{plan.ToolName, map[string]any{"entries": []map[string]any{{"content": "Read", "status": "pending"}}, "unexpected": true}},
+		{skilltool.ToolName, map[string]any{"name": "unknown", "unexpected": true}},
 		{web.SearchToolName, map[string]any{"query": "latest", "unexpected": true}},
 		{web.FetchToolName, map[string]any{"url": "https://example.com", "unexpected": true}},
 	}

@@ -205,9 +205,14 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	return stack, nil
 }
 
-func buildStackBaseMetadata(appName, workspaceCWD, basePrompt string, model ModelConfig, sandboxCfg SandboxConfig, skillDirs []string, pluginSkills []skill.PluginBundle) (map[string]any, error) {
+type stackBaseMetadata struct {
+	Metadata     map[string]any
+	SkillCatalog skill.Catalog
+}
+
+func buildStackBaseMetadata(appName, workspaceCWD, basePrompt string, model ModelConfig, sandboxCfg SandboxConfig, skillDirs []string, pluginSkills []skill.PluginBundle) (stackBaseMetadata, error) {
 	baseMetadata := map[string]any{}
-	systemPrompt, err := buildSystemPrompt(promptConfig{
+	result, err := buildSystemPromptResult(promptConfig{
 		AppName:           appName,
 		WorkspaceDir:      workspaceCWD,
 		BasePrompt:        basePrompt,
@@ -217,15 +222,18 @@ func buildStackBaseMetadata(appName, workspaceCWD, basePrompt string, model Mode
 		DefaultPermission: promptDefaultPermissionSummary(sandboxCfg),
 	})
 	if err != nil {
-		return nil, err
+		return stackBaseMetadata{}, err
 	}
-	if strings.TrimSpace(systemPrompt) != "" {
-		baseMetadata["system_prompt"] = systemPrompt
+	if strings.TrimSpace(result.Prompt) != "" {
+		baseMetadata["system_prompt"] = result.Prompt
 	}
 	if reasoning := strings.TrimSpace(model.ReasoningEffort); reasoning != "" {
 		baseMetadata["reasoning_effort"] = reasoning
 	}
-	return withSandboxPolicyRootMetadata(baseMetadata, sandboxCfg, workspaceCWD), nil
+	return stackBaseMetadata{
+		Metadata:     withSandboxPolicyRootMetadata(baseMetadata, sandboxCfg, workspaceCWD),
+		SkillCatalog: result.SkillCatalog,
+	}, nil
 }
 
 func promptSandboxContextMode(cfg SandboxConfig) string {

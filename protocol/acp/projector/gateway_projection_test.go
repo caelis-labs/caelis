@@ -151,7 +151,7 @@ func TestProjectSessionEventEnvelopeKeepsUserMessagesForGatewayConsumers(t *test
 }
 
 func TestProjectSessionEventEnvelopeUsesUserDisplayTextWhenMessageIsProjected(t *testing.T) {
-	modelVisible := model.NewTextMessage(model.RoleUser, "Load and follow the `cmpctl` skill before taking task actions.\n\nUser request:\narchive preflight")
+	modelVisible := model.NewTextMessage(model.RoleUser, "Load skill `cmpctl` before taking task actions, then follow its instructions.\n\nUser request:\narchive preflight")
 	events := ProjectSessionEventEnvelope(eventstream.Envelope{
 		SessionID: "session-1",
 		HandleID:  "handle-1",

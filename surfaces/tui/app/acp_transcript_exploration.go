@@ -275,9 +275,13 @@ func (s *explorationProjectionState) renderContainerAt(blockID string, events []
 	if key == "" {
 		return nil, end, false
 	}
-	token := acpStableExplorationClickToken(key)
+	expandable := explorationContainerCanExpand(events, width, ctx)
+	token := ""
+	if expandable {
+		token = acpStableExplorationClickToken(key)
+	}
 	expanded := false
-	if opts.ExplorationExpanded != nil {
+	if expandable && opts.ExplorationExpanded != nil {
 		expanded = opts.ExplorationExpanded(key) || opts.ExplorationExpanded(explorationStageKey(events))
 	}
 	header := "• Explored"
@@ -322,6 +326,28 @@ func explorationContainerToolEvents(events []SubagentEvent, callIDs []string) []
 		if ev.Kind == SEToolCall && needed[strings.TrimSpace(ev.CallID)] {
 			out = append(out, ev)
 		}
+	}
+	return out
+}
+
+func explorationContainerCanExpand(events []SubagentEvent, width int, ctx BlockRenderContext) bool {
+	collapsed := explorationGroupDetailRowsWithWorkspace(events, width, ctx.Workspace)
+	expanded := explorationRenderedPlainRows(explorationContainerExpandedRows("", events, width, ctx, ""))
+	if len(collapsed) != len(expanded) {
+		return true
+	}
+	for i := range collapsed {
+		if collapsed[i] != expanded[i] {
+			return true
+		}
+	}
+	return false
+}
+
+func explorationRenderedPlainRows(rows []RenderedRow) []string {
+	out := make([]string, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, row.Plain)
 	}
 	return out
 }
@@ -918,7 +944,7 @@ func isASCIIAlphaNum(ch byte) bool {
 
 func isExplorationSummaryVerb(verb string) bool {
 	switch strings.ToLower(strings.TrimSpace(verb)) {
-	case "read", "list", "glob", "search", "fetch":
+	case "read", "list", "glob", "search", "fetch", "skill":
 		return true
 	default:
 		return false

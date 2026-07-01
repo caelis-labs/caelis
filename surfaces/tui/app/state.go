@@ -186,6 +186,7 @@ type Config struct {
 type CompletionCandidate struct {
 	Value   string
 	Display string
+	Kind    string
 	Detail  string
 	Path    string
 }
