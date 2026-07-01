@@ -150,8 +150,10 @@ func (r *Runtime) compactAfterOverflow(
 	ctx context.Context,
 	activeSession session.Session,
 	ref session.SessionRef,
+	turnID string,
 	req agent.RunRequest,
 	cause error,
+	sink *runner,
 ) (bool, error) {
 	events, err := r.sessions.Events(ctx, session.EventsRequest{SessionRef: ref})
 	if err != nil {
@@ -172,6 +174,10 @@ func (r *Runtime) compactAfterOverflow(
 	_, err = r.persistCompactionArtifacts(ctx, activeSession, ref, result)
 	if err != nil {
 		return false, err
+	}
+	if sink != nil {
+		notice := buildCompactNoticeEvent(activeSession, turnID, r.now())
+		sink.publishEvent(normalizeEvent(activeSession, turnID, notice))
 	}
 	return true, nil
 }

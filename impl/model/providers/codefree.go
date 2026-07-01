@@ -215,7 +215,10 @@ func (l *codeFreeLLM) generateOnce(
 	finishReason := model.FinishReasonUnknown
 	emitted := false
 	stopped := false
-	if err := readSSEWithEventTimeout(bodyReader, l.firstEventTimeout, 0, func(data []byte) error {
+	// CodeFree can stall before the first SSE event or between SSE events. Use
+	// the stream timeout for both waits until the provider grows a separate
+	// idle-timeout knob.
+	if err := readSSEWithEventTimeout(bodyReader, l.firstEventTimeout, l.firstEventTimeout, func(data []byte) error {
 		if err := codeFreeResponseError(data, resp.Header.Get("Content-Type")); err != nil {
 			return err
 		}

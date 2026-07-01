@@ -570,10 +570,153 @@ func TestCodeFreeRetCode51ExhaustionIsBackpressureError(t *testing.T) {
 	}
 }
 
+func TestCodeFreeStreamRetriesHeaderTimeoutBeforeEmission(t *testing.T) {
+	credsPath := writeCodeFreeCredsForTest(t, "272182", "76475baf-3659-488a-932d-0971ae103591")
+	t.Setenv(codeFreeCredsPathEnv, credsPath)
+
+	requests := 0
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requests++
+		if requests == 1 {
+			return nil, fmt.Errorf(`Post "https://www.srdcloud.cn/api/acbackend/codechat/v1/completions": net/http: timeout awaiting response headers: %w`, context.DeadlineExceeded)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body: io.NopCloser(strings.NewReader(
+				"data: {\"id\":\"chunk-1\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"GLM-5.1\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\",\"role\":\"assistant\"},\"finish_reason\":\"\"}]}\n\n" +
+					"data: {\"id\":\"chunk-1\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"GLM-5.1\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"},\"finish_reason\":\"stop\"}]}\n\n" +
+					"data: [DONE]\n\n")),
+			Request: req,
+		}, nil
+	})}
+	llm := newCodeFreeRetryTestModelWithConfig(t, Config{
+		Alias:      "codefree/glm-5.1",
+		Provider:   "codefree",
+		API:        APICodeFree,
+		Model:      "GLM-5.1",
+		BaseURL:    "https://www.srdcloud.cn",
+		HTTPClient: client,
+		Timeout:    2 * time.Second,
+	}, 2)
+
+	var (
+		gotErr      error
+		final       *model.Response
+		resetCauses []string
+	)
+	for event, err := range llm.Generate(context.Background(), &model.Request{
+		Messages: []model.Message{model.NewTextMessage(model.RoleUser, "hello")},
+		Stream:   true,
+	}) {
+		if err != nil {
+			gotErr = err
+			continue
+		}
+		if event == nil {
+			continue
+		}
+		if event.AttemptReset != nil {
+			resetCauses = append(resetCauses, event.AttemptReset.Cause)
+		}
+		if event.Response != nil && event.TurnComplete {
+			final = event.Response
+		}
+	}
+	if gotErr != nil {
+		t.Fatalf("stream generate error: %v", gotErr)
+	}
+	if requests != 2 {
+		t.Fatalf("requests = %d, want 2", requests)
+	}
+	if len(resetCauses) != 1 || !strings.Contains(resetCauses[0], "timeout awaiting response headers") {
+		t.Fatalf("attempt reset causes = %#v, want header timeout retry notice cause", resetCauses)
+	}
+	if final == nil || final.Message.TextContent() != "ok" {
+		t.Fatalf("final response = %#v, want ok after retry", final)
+	}
+}
+
+func TestCodeFreeStreamRetriesIdleTimeoutBetweenSSEEvents(t *testing.T) {
+	credsPath := writeCodeFreeCredsForTest(t, "272182", "76475baf-3659-488a-932d-0971ae103591")
+	t.Setenv(codeFreeCredsPathEnv, credsPath)
+
+	requests := 0
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requests++
+		if requests == 1 {
+			reader, writer := io.Pipe()
+			go func() {
+				_, _ = fmt.Fprint(writer, "data: {\"id\":\"chunk-1\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"GLM-5.1\",\"choices\":[]}\n\n")
+			}()
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+				Body:       reader,
+				Request:    req,
+			}, nil
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body: io.NopCloser(strings.NewReader(
+				"data: {\"id\":\"chunk-2\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"GLM-5.1\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\",\"role\":\"assistant\"},\"finish_reason\":\"\"}]}\n\n" +
+					"data: {\"id\":\"chunk-2\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"GLM-5.1\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"},\"finish_reason\":\"stop\"}]}\n\n" +
+					"data: [DONE]\n\n")),
+			Request: req,
+		}, nil
+	})}
+	llm := newCodeFreeRetryTestModelWithConfig(t, Config{
+		Alias:                   "codefree/glm-5.1",
+		Provider:                "codefree",
+		API:                     APICodeFree,
+		Model:                   "GLM-5.1",
+		BaseURL:                 "https://www.srdcloud.cn",
+		HTTPClient:              client,
+		Timeout:                 2 * time.Second,
+		StreamFirstEventTimeout: 20 * time.Millisecond,
+	}, 2)
+
+	var (
+		gotErr      error
+		final       *model.Response
+		resetCauses []string
+	)
+	for event, err := range llm.Generate(context.Background(), &model.Request{
+		Messages: []model.Message{model.NewTextMessage(model.RoleUser, "hello")},
+		Stream:   true,
+	}) {
+		if err != nil {
+			gotErr = err
+			continue
+		}
+		if event == nil {
+			continue
+		}
+		if event.AttemptReset != nil {
+			resetCauses = append(resetCauses, event.AttemptReset.Cause)
+		}
+		if event.Response != nil && event.TurnComplete {
+			final = event.Response
+		}
+	}
+	if gotErr != nil {
+		t.Fatalf("stream generate error: %v", gotErr)
+	}
+	if requests != 2 {
+		t.Fatalf("requests = %d, want 2", requests)
+	}
+	if len(resetCauses) != 1 || !strings.Contains(resetCauses[0], "stream idle timeout") {
+		t.Fatalf("attempt reset causes = %#v, want idle timeout retry notice cause", resetCauses)
+	}
+	if final == nil || final.Message.TextContent() != "ok" {
+		t.Fatalf("final response = %#v, want ok after retry", final)
+	}
+}
+
 func newCodeFreeRetryTestModel(t *testing.T, server *providerTestServer, retryMax int) model.LLM {
 	t.Helper()
-	factory := NewFactory()
-	cfg := Config{
+	return newCodeFreeRetryTestModelWithConfig(t, Config{
 		Alias:      "codefree/glm-5.1",
 		Provider:   "codefree",
 		API:        APICodeFree,
@@ -581,14 +724,19 @@ func newCodeFreeRetryTestModel(t *testing.T, server *providerTestServer, retryMa
 		BaseURL:    server.URL,
 		HTTPClient: server.Client(),
 		Timeout:    2 * time.Second,
-		Retry: model.RetryConfig{
-			MaxRetries:          retryMax,
-			BaseDelay:           time.Nanosecond,
-			MaxDelay:            time.Nanosecond,
-			RateLimitMaxRetries: retryMax,
-			RateLimitBaseDelay:  time.Nanosecond,
-			RateLimitMaxDelay:   time.Nanosecond,
-		},
+	}, retryMax)
+}
+
+func newCodeFreeRetryTestModelWithConfig(t *testing.T, cfg Config, retryMax int) model.LLM {
+	t.Helper()
+	factory := NewFactory()
+	cfg.Retry = model.RetryConfig{
+		MaxRetries:          retryMax,
+		BaseDelay:           time.Nanosecond,
+		MaxDelay:            time.Nanosecond,
+		RateLimitMaxRetries: retryMax,
+		RateLimitBaseDelay:  time.Nanosecond,
+		RateLimitMaxDelay:   time.Nanosecond,
 	}
 	if err := factory.Register(cfg); err != nil {
 		t.Fatalf("register codefree retry provider: %v", err)

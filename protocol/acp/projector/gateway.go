@@ -276,6 +276,15 @@ func projectSessionEventstreamOnlyEvents(base eventstream.Envelope, event *sessi
 		return nil
 	}
 	switch session.EventTypeOf(event) {
+	case session.EventTypeNotice:
+		notice, ok := session.NoticeOf(event)
+		if !ok || strings.TrimSpace(notice.Text) == "" {
+			return nil
+		}
+		next := base
+		next.Kind = eventstream.KindNotice
+		next.Notice = strings.TrimSpace(notice.Text)
+		return []eventstream.Envelope{next}
 	case session.EventTypeParticipant:
 		participant := session.ProtocolParticipantOf(event)
 		if participant == nil {

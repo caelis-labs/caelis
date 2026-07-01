@@ -3,6 +3,7 @@ package local
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"iter"
 	"slices"
 	"strings"
@@ -77,19 +78,20 @@ func TestRuntimeCompactionInjectsCheckpointAndTrimsOldHistory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runner error = %v", err)
 	}
-	if !slices.ContainsFunc(runEvents, func(event *session.Event) bool {
-		return event != nil && event.Type == session.EventTypeCompact
-	}) {
-		t.Fatalf("runner events = %#v, want live compact event", runEvents)
-	}
 	userIndex := slices.IndexFunc(runEvents, func(event *session.Event) bool {
 		return event != nil && event.Type == session.EventTypeUser && strings.Contains(session.EventText(event), "continue")
 	})
-	compactIndex := slices.IndexFunc(runEvents, func(event *session.Event) bool {
-		return event != nil && event.Type == session.EventTypeCompact
+	noticeIndex := slices.IndexFunc(runEvents, func(event *session.Event) bool {
+		notice, ok := session.NoticeOf(event)
+		return ok && notice.Text == compact.CompactNoticeLabel
 	})
-	if userIndex < 0 || compactIndex < 0 || userIndex > compactIndex {
+	if userIndex < 0 || noticeIndex < 0 || userIndex > noticeIndex {
 		t.Fatalf("runner event order = %#v, want user echo before compact notice", runEvents)
+	}
+	if slices.ContainsFunc(runEvents, func(event *session.Event) bool {
+		return event != nil && event.Type == session.EventTypeCompact
+	}) {
+		t.Fatalf("runner events = %#v, did not want durable compact checkpoint in live stream", runEvents)
 	}
 
 	if testModel.compactionCalls != 1 {
@@ -787,6 +789,28 @@ Next action: fit the pending user turn inside the compacted prompt
 	}
 }
 
+func TestGenerateCompactMarkdownOnceStopsWhenCallerContextDone(t *testing.T) {
+	t.Parallel()
+
+	compactor := &codexStyleCompactor{cfg: normalizeCompactionConfig(CompactionConfig{
+		Enabled:                    true,
+		DefaultContextWindowTokens: 192,
+	})}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	testModel := &compactDeadlineModel{}
+
+	_, err := compactor.generateCompactMarkdownOnce(ctx, testModel, "base", []*session.Event{
+		userTextEvent("content that would otherwise be compacted"),
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("generateCompactMarkdownOnce() error = %v, want provider deadline from stopped attempt", err)
+	}
+	if testModel.calls != 1 {
+		t.Fatalf("model calls = %d, want 1 after caller context ended", testModel.calls)
+	}
+}
+
 func TestRuntimeCompactionIgnoresStateOnlyPlanSnapshot(t *testing.T) {
 	t.Parallel()
 
@@ -1030,6 +1054,7 @@ func TestRuntimeRecoversFromContextOverflowByCompactingMidTurn(t *testing.T) {
 	}
 
 	var finalText string
+	sawCompactNotice := false
 	for event, seqErr := range result.Handle.Events() {
 		if seqErr != nil {
 			t.Fatalf("runner error = %v", seqErr)
@@ -1037,9 +1062,15 @@ func TestRuntimeRecoversFromContextOverflowByCompactingMidTurn(t *testing.T) {
 		if event != nil && event.Type == session.EventTypeAssistant {
 			finalText = strings.TrimSpace(session.EventText(event))
 		}
+		if notice, ok := session.NoticeOf(event); ok && notice.Text == compact.CompactNoticeLabel {
+			sawCompactNotice = true
+		}
 	}
 	if finalText != "recovered after compact" {
 		t.Fatalf("finalText = %q, want %q", finalText, "recovered after compact")
+	}
+	if !sawCompactNotice {
+		t.Fatal("expected live compact notice after overflow recovery")
 	}
 	if testModel.compactionCalls != 1 {
 		t.Fatalf("compactionCalls = %d, want 1", testModel.compactionCalls)
@@ -1080,6 +1111,19 @@ func TestRuntimeRecoversFromContextOverflowByCompactingMidTurn(t *testing.T) {
 	promptEvents := compact.PromptEventsFromLatestCompact(loaded.Events)
 	if len(promptEvents) == 0 || !strings.Contains(strings.ToLower(session.EventText(promptEvents[0])), "echo tool result completed") {
 		t.Fatalf("prompt events after compact = %+v, want tool result continuity in checkpoint overlay", promptEvents)
+	}
+}
+
+type compactDeadlineModel struct {
+	calls int
+}
+
+func (m *compactDeadlineModel) Name() string { return "compact-deadline" }
+
+func (m *compactDeadlineModel) Generate(context.Context, *model.Request) iter.Seq2[*model.StreamEvent, error] {
+	return func(yield func(*model.StreamEvent, error) bool) {
+		m.calls++
+		yield(nil, context.DeadlineExceeded)
 	}
 }
 

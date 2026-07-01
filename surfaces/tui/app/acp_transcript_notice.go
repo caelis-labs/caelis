@@ -3,6 +3,7 @@ package tuiapp
 import (
 	"strings"
 
+	"github.com/OnslaughtSnail/caelis/surfaces/transcript"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/tuikit"
 )
 
@@ -17,4 +18,8 @@ func renderACPNoticeRows(blockID string, ev SubagentEvent, width int, ctx BlockR
 		styled = ctx.Theme.TranscriptMetaStyle().Width(width).Render(text)
 	}
 	return []RenderedRow{StyledPlainRow(blockID, text, styled)}
+}
+
+func isCompactNoticeText(text string) bool {
+	return strings.TrimSpace(text) == "• "+transcript.CompactNoticeLabel
 }

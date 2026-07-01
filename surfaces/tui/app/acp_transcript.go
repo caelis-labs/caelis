@@ -140,8 +140,12 @@ func renderACPTranscriptRows(blockID string, events []SubagentEvent, status stri
 		case SENotice:
 			noticeRows := renderACPNoticeRows(blockID, ev, width, ctx)
 			if len(noticeRows) > 0 {
-				rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupNotice, false)
-				rows = append(rows, noticeRows...)
+				if isCompactNoticeText(ev.Text) {
+					rows = appendACPCompactNoticeRows(rows, blockID, noticeRows)
+				} else {
+					rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupNotice, false)
+					rows = append(rows, noticeRows...)
+				}
 				hasContent = true
 				lastGroup = acpTranscriptGroupNotice
 			}
@@ -187,6 +191,19 @@ func appendACPTranscriptGroupGap(rows []RenderedRow, blockID string, previous ac
 	if previous == acpTranscriptGroupNarrative && current == acpTranscriptGroupNarrative {
 		return rows
 	}
+	return appendBlankRowIfNeeded(rows, blockID)
+}
+
+func appendACPCompactNoticeRows(rows []RenderedRow, blockID string, noticeRows []RenderedRow) []RenderedRow {
+	if len(noticeRows) == 0 {
+		return rows
+	}
+	if len(rows) == 0 {
+		rows = append(rows, PlainRow(blockID, ""))
+	} else {
+		rows = appendBlankRowIfNeeded(rows, blockID)
+	}
+	rows = append(rows, noticeRows...)
 	return appendBlankRowIfNeeded(rows, blockID)
 }
 

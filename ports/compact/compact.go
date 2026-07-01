@@ -12,6 +12,7 @@ import (
 const (
 	MetaKeyCompact         = "compact"
 	CompactContractVersion = 1
+	CompactNoticeLabel     = "Context Compact"
 )
 
 type UsageSource string

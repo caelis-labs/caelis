@@ -3,6 +3,7 @@ package projector
 import (
 	"testing"
 
+	"github.com/OnslaughtSnail/caelis/ports/compact"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
@@ -52,6 +53,28 @@ func TestProjectSessionEventEnvelopeProjectsToolUpdate(t *testing.T) {
 	}
 	if output, ok := metautil.TerminalOutput(update.Meta); !ok || output.TerminalID != "call-1" || output.Data != "ok\n" {
 		t.Fatalf("terminal_output = %#v, want ok output", update.Meta)
+	}
+}
+
+func TestProjectSessionEventEnvelopeProjectsNoticeEventstreamOnly(t *testing.T) {
+	event := session.MarkNotice(&session.Event{
+		ID:        "notice-1",
+		SessionID: "session-1",
+		Type:      session.EventTypeNotice,
+	}, "notice", compact.CompactNoticeLabel)
+	events := ProjectSessionEventEnvelope(eventstream.Envelope{
+		SessionID: "session-1",
+		Scope:     eventstream.ScopeMain,
+		ScopeID:   "session-1",
+	}, event)
+	if len(events) != 1 {
+		t.Fatalf("ProjectSessionEventEnvelope() returned %d events, want 1: %#v", len(events), events)
+	}
+	if events[0].Kind != eventstream.KindNotice || events[0].Notice != compact.CompactNoticeLabel {
+		t.Fatalf("projected notice = %#v, want eventstream notice", events[0])
+	}
+	if eventstream.UpdateType(events[0].Update) != "" {
+		t.Fatalf("projected notice update = %#v, want eventstream-only notice", events[0].Update)
 	}
 }
 

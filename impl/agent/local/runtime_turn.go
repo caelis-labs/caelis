@@ -91,7 +91,7 @@ func (r *Runtime) runWithOverflowRecovery(
 			if overflowRecoveries >= overflowCompactionRecoveryLimit {
 				return fmt.Errorf("impl/agent/local: context overflow persisted after %d compaction recoveries: %w", overflowCompactionRecoveryLimit, err)
 			}
-			compacted, compactErr := r.compactAfterOverflow(ctx, activeSession, ref, req, err)
+			compacted, compactErr := r.compactAfterOverflow(ctx, activeSession, ref, turnID, req, err, sink)
 			if compactErr != nil {
 				return compactErr
 			}
@@ -138,7 +138,8 @@ func (r *Runtime) runAttempt(
 	if invocation.LiveCompact != nil {
 		batch = append(batch, session.CloneEvent(invocation.LiveCompact))
 		if sink != nil {
-			sink.publishEvent(invocation.LiveCompact)
+			notice := buildCompactNoticeEvent(activeSession, turnID, r.now())
+			sink.publishEvent(normalizeEvent(activeSession, turnID, notice))
 		}
 	}
 

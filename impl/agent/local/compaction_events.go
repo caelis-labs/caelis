@@ -2,6 +2,7 @@ package local
 
 import (
 	"strings"
+	"time"
 
 	"github.com/OnslaughtSnail/caelis/ports/compact"
 	"github.com/OnslaughtSnail/caelis/ports/model"
@@ -29,6 +30,17 @@ func buildCompactEvent(activeSession session.Session, compactText string, data c
 			compact.MetaKeyCompact: compact.CompactEventDataValue(data),
 		},
 	}
+}
+
+func buildCompactNoticeEvent(activeSession session.Session, turnID string, occurredAt time.Time) *session.Event {
+	scope := defaultScope(activeSession, turnID)
+	event := &session.Event{
+		Type:  session.EventTypeNotice,
+		Time:  occurredAt,
+		Actor: session.ActorRef{Kind: session.ActorKindSystem, Name: "runtime"},
+		Scope: &scope,
+	}
+	return session.MarkNotice(event, "notice", compact.CompactNoticeLabel)
 }
 
 func compactTextFromEvent(event *session.Event) string {

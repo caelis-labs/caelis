@@ -5,11 +5,10 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/OnslaughtSnail/caelis/ports/compact"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/control"
 	controlcommands "github.com/OnslaughtSnail/caelis/protocol/acp/control/commands"
 )
-
-const compactNoticeLabel = "Context Compact"
 
 func (r Router) dispatchSlash(ctx context.Context, cmd string, args string, argsStart int, fullText string, attachments []control.Attachment) (Result, error) {
 	switch strings.ToLower(strings.TrimSpace(cmd)) {
@@ -296,7 +295,7 @@ func (r Router) dispatchCompact(ctx context.Context, args string) (Result, error
 	if err := r.service.Compact(ctx); err != nil {
 		return Result{}, controlcommands.FriendlyCommandError("compact", err)
 	}
-	return r.noticeResult(compactNoticeLabel), nil
+	return r.noticeResult(compact.CompactNoticeLabel), nil
 }
 
 func (r Router) dispatchDynamicAgent(ctx context.Context, agent string, promptText string, attachments []control.Attachment) (Result, error) {

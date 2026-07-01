@@ -570,15 +570,10 @@ func TestHandleACPEventEnvelopeAnchorsCompactNoticeInMainTurn(t *testing.T) {
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
 	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(120, 0))
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
-		Kind:      eventstream.KindSessionUpdate,
+		Kind:      eventstream.KindNotice,
 		SessionID: "session-1",
-		ScopeID:   "session-1",
 		TurnID:    "turn-1",
-		Final:     true,
-		Update: schema.ContentChunk{
-			SessionUpdate: schema.UpdateCompact,
-			Content:       schema.TextContent{Type: "text", Text: "CONTEXT CHECKPOINT\nObjective: continue"},
-		},
+		Notice:    transcript.CompactNoticeLabel,
 	})
 
 	block := requireMainACPTurnBlockForTest(t, model)
@@ -588,6 +583,22 @@ func TestHandleACPEventEnvelopeAnchorsCompactNoticeInMainTurn(t *testing.T) {
 	rows := block.Render(BlockRenderContext{Width: 96, TermWidth: 96, Theme: model.theme, ThemeKey: themeRenderCacheKey(model.theme)})
 	if plain := joinRenderedPlain(rows); !strings.Contains(plain, "• "+transcript.CompactNoticeLabel) {
 		t.Fatalf("rendered compact notice = %q", plain)
+	}
+	if len(rows) < 3 {
+		t.Fatalf("rendered compact notice rows = %#v, want blank, notice, blank", rows)
+	}
+	noticeIndex := -1
+	for i, row := range rows {
+		if row.Plain == "• "+transcript.CompactNoticeLabel {
+			noticeIndex = i
+			break
+		}
+	}
+	if noticeIndex <= 0 || noticeIndex >= len(rows)-1 {
+		t.Fatalf("compact notice index = %d rows=%#v, want surrounding blank rows", noticeIndex, rows)
+	}
+	if strings.TrimSpace(rows[noticeIndex-1].Plain) != "" || strings.TrimSpace(rows[noticeIndex+1].Plain) != "" {
+		t.Fatalf("compact notice rows = %#v, want surrounding blank rows", rows)
 	}
 }
 

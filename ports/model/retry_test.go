@@ -378,6 +378,70 @@ func TestIsRetryableLLMErrorTreatsStreamFirstEventTimeoutAsTransient(t *testing.
 	}
 }
 
+func TestWithRetryRetriesProviderDeadlineExceededButStopsWhenCallerContextDone(t *testing.T) {
+	t.Parallel()
+
+	if !IsRetryableLLMError(context.DeadlineExceeded) {
+		t.Fatal("IsRetryableLLMError(context.DeadlineExceeded) = false, want true for provider-layer deadline")
+	}
+
+	final := StreamEventFromResponse(&Response{
+		Message:      NewTextMessage(RoleAssistant, "ok"),
+		TurnComplete: true,
+	})
+	inner := &retryTestLLM{
+		events: [][]*StreamEvent{
+			nil,
+			{final},
+		},
+		errs: []error{
+			context.DeadlineExceeded,
+			nil,
+		},
+	}
+	llm := WithRetry(inner, RetryConfig{MaxRetries: 2, BaseDelay: time.Nanosecond, MaxDelay: time.Nanosecond})
+
+	var gotText string
+	for event, err := range llm.Generate(context.Background(), &Request{Messages: []Message{NewTextMessage(RoleUser, "hello")}}) {
+		if err != nil {
+			t.Fatalf("Generate() error = %v", err)
+		}
+		if event != nil && event.Response != nil {
+			gotText = event.Response.Message.TextContent()
+		}
+	}
+	if inner.calls != 2 {
+		t.Fatalf("calls = %d, want 2", inner.calls)
+	}
+	if gotText != "ok" {
+		t.Fatalf("final text = %q, want ok", gotText)
+	}
+
+	expiredCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	expiredInner := &retryTestLLM{errs: []error{context.DeadlineExceeded, nil}}
+	expiredLLM := WithRetry(expiredInner, RetryConfig{MaxRetries: 2, BaseDelay: time.Nanosecond, MaxDelay: time.Nanosecond})
+	var gotErr error
+	var gotReset bool
+	for event, err := range expiredLLM.Generate(expiredCtx, &Request{Messages: []Message{NewTextMessage(RoleUser, "hello")}}) {
+		if err != nil {
+			gotErr = err
+		}
+		if event != nil && event.AttemptReset != nil {
+			gotReset = true
+		}
+	}
+	if gotErr == nil || !errors.Is(gotErr, context.Canceled) {
+		t.Fatalf("Generate() error = %v, want caller cancellation returned", gotErr)
+	}
+	if expiredInner.calls != 1 {
+		t.Fatalf("expired calls = %d, want 1", expiredInner.calls)
+	}
+	if gotReset {
+		t.Fatal("received attempt reset for already-expired caller context")
+	}
+}
+
 func TestIsRetryableLLMErrorRetriesBadRequestButNotOverflow(t *testing.T) {
 	t.Parallel()
 

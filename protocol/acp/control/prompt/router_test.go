@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/OnslaughtSnail/caelis/ports/compact"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/control"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
@@ -56,12 +57,12 @@ func TestRouterStatusModelAndCompactCommands(t *testing.T) {
 	if svc.usedModel != "fast" || svc.usedReasoning != "high" || model.StatusUpdate == nil {
 		t.Fatalf("model route used model=%q reasoning=%q status=%#v", svc.usedModel, svc.usedReasoning, model.StatusUpdate)
 	}
-	compact, err := router.Route(context.Background(), Request{Submission: control.Submission{Text: "/compact"}})
+	compactResult, err := router.Route(context.Background(), Request{Submission: control.Submission{Text: "/compact"}})
 	if err != nil {
 		t.Fatalf("Route(/compact) error = %v", err)
 	}
-	if !svc.compacted || firstNotice(compact) != compactNoticeLabel {
-		t.Fatalf("compact route compacted=%v notice=%q", svc.compacted, firstNotice(compact))
+	if !svc.compacted || firstNotice(compactResult) != compact.CompactNoticeLabel {
+		t.Fatalf("compact route compacted=%v notice=%q", svc.compacted, firstNotice(compactResult))
 	}
 }
 

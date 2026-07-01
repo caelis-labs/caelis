@@ -92,6 +92,9 @@ func (c *codexStyleCompactor) generateCompactMarkdownOnce(
 			return "", err
 		}
 		lastErr = err
+		if ctx.Err() != nil {
+			return "", lastErr
+		}
 		if !model.IsRetryableLLMError(err) {
 			break
 		}

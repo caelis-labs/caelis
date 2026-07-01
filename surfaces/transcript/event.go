@@ -3,6 +3,7 @@ package transcript
 import (
 	"time"
 
+	"github.com/OnslaughtSnail/caelis/ports/compact"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
 )
 
@@ -37,7 +38,7 @@ const (
 	NarrativeNotice    NarrativeKind = "notice"
 )
 
-const CompactNoticeLabel = "Context Compact"
+const CompactNoticeLabel = compact.CompactNoticeLabel
 
 type PlanEntry struct {
 	Content string

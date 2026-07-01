@@ -306,6 +306,9 @@ func (l *retryingLLM) retryUntilOK(
 		if err == nil {
 			return nil
 		}
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
 		if !shouldRetry(err) {
 			return err
 		}
@@ -396,13 +399,15 @@ func sleepRetryDelay(ctx context.Context, delay time.Duration) error {
 // IsRetryableLLMError classifies model request failures that are safe to retry.
 // Provider request errors are retried broadly because some compatible gateways
 // occasionally return malformed 4xx responses for otherwise valid payloads. We
-// still exclude caller cancellation, deadlines, and context overflow so control
-// flow and compaction recovery stay immediate.
+// still exclude caller cancellation and context overflow so control flow and
+// compaction recovery stay immediate. Caller context deadlines are handled by
+// retryUntilOK before consulting this classifier; provider-layer deadlines are
+// retryable when the caller context is still active.
 func IsRetryableLLMError(err error) bool {
 	if err == nil {
 		return false
 	}
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || IsContextOverflow(err) {
+	if errors.Is(err, context.Canceled) || IsContextOverflow(err) {
 		return false
 	}
 	var retryable RetryableError
