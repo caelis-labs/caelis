@@ -275,6 +275,7 @@ func (s *Stack) buildGatewayRuntime(plan gatewayBuildPlan) (*gatewayRuntimeBundl
 	}
 	gw, err := kernelimpl.New(kernelimpl.Config{
 		Sessions:             s.Sessions,
+		Tasks:                s.taskStore,
 		Runtime:              rt,
 		Resolver:             resolver,
 		DefaultApprovalMode:  kernelimpl.NormalizeApprovalMode(runtimeCfg.ApprovalMode),

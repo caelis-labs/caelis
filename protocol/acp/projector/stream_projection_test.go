@@ -179,6 +179,59 @@ func TestProjectStreamFrameFinalDoesNotRepeatStreamedOutput(t *testing.T) {
 	assertTerminalAnchor(t, update.Content, "command-1")
 }
 
+func TestProjectStreamFrameMarksEmbeddedEventsMirroredToParentTool(t *testing.T) {
+	t.Parallel()
+
+	req := StreamRequest{
+		SessionRef:        session.SessionRef{SessionID: "root-session"},
+		CallID:            "task-call-1",
+		ToolName:          "TASK",
+		RawInput:          map[string]any{"action": "write", "task_id": "jack"},
+		Ref:               stream.Ref{SessionID: "root-session", TaskID: "jack", TerminalID: "subagent-jack"},
+		DisplayTerminalID: "task-call-1",
+		Scope:             gateway.EventScopeMain,
+	}
+	events := ProjectStreamFrame(req, stream.Frame{
+		Ref:       req.Ref,
+		Text:      "child output\n",
+		Cursor:    stream.Cursor{Output: 13, Events: 1},
+		Running:   true,
+		UpdatedAt: time.Unix(150, 0),
+		Event: &session.Event{
+			ID:         "child-event-1",
+			Type:       session.EventTypeAssistant,
+			Visibility: session.VisibilityCanonical,
+			Text:       "child output\n",
+			Scope: &session.EventScope{
+				Participant: session.ParticipantRef{
+					ID:           "agent-1",
+					Kind:         session.ParticipantKindSubagent,
+					Role:         session.ParticipantRoleDelegated,
+					DelegationID: "jack",
+				},
+				ACP: session.ACPRef{SessionID: "child-session"},
+			},
+		},
+	})
+	if len(events) != 2 {
+		t.Fatalf("ProjectStreamFrame() returned %d events: %#v, want embedded child event plus parent tool update", len(events), events)
+	}
+	embedded := events[0]
+	if embedded.Scope != eventstream.ScopeSubagent || embedded.ScopeID != "jack" || eventstream.UpdateType(embedded.Update) != schema.UpdateAgentMessage {
+		t.Fatalf("embedded event = %#v, want subagent agent message", embedded)
+	}
+	if got := gateway.EventMetaString(embedded.Meta, gateway.EventMetaRoot, gateway.EventMetaRuntime, gateway.EventMetaRuntimeStream, gateway.EventMetaRuntimeStreamParentCallID); got != "task-call-1" {
+		t.Fatalf("embedded meta parent_call_id = %q, want task-call-1; meta=%#v", got, embedded.Meta)
+	}
+	if !gateway.EventMetaBool(embedded.Meta, gateway.EventMetaRoot, gateway.EventMetaRuntime, gateway.EventMetaRuntimeStream, gateway.EventMetaRuntimeStreamMirroredToParentTool) {
+		t.Fatalf("embedded meta = %#v, want mirrored_to_parent_tool=true", embedded.Meta)
+	}
+	update := requireToolUpdate(t, events[1])
+	if update.ToolCallID != "task-call-1" || toolTerminalOutputText(t, update) != "child output\n" {
+		t.Fatalf("parent tool update = %#v, want child output in parent panel", update)
+	}
+}
+
 func TestProjectStreamFrameAppendsSubagentReasoningToParentTerminal(t *testing.T) {
 	t.Parallel()
 

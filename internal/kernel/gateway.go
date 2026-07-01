@@ -12,10 +12,15 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/plugin"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/stream"
+	"github.com/OnslaughtSnail/caelis/ports/task"
 )
 
 type Config struct {
-	Sessions            session.Service
+	Sessions session.Service
+	// Tasks is optional for basic replay. When present, resume can restore
+	// completed asynchronous RUN_COMMAND/SPAWN output into the original tool
+	// panel when the durable session stream only contains the running update.
+	Tasks               task.Store
 	Runtime             agent.Runtime
 	Resolver            TurnResolver
 	RequestPolicy       RequestPolicy
@@ -31,6 +36,7 @@ type Config struct {
 
 type Gateway struct {
 	sessions             session.Service
+	tasks                task.Store
 	runtime              agent.Runtime
 	control              agent.SessionControlPlane
 	resolver             TurnResolver
@@ -91,6 +97,7 @@ func New(cfg Config) (*Gateway, error) {
 	}
 	return &Gateway{
 		sessions:             cfg.Sessions,
+		tasks:                cfg.Tasks,
 		runtime:              cfg.Runtime,
 		control:              resolveControlPlane(cfg.Runtime),
 		resolver:             cfg.Resolver,

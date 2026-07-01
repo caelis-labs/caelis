@@ -97,7 +97,7 @@ func TestLocalStackInjectsSpawnForSelfAndAgentProfilesOnly(t *testing.T) {
 	if !agentConfigSetHas(withoutAgents.runtime.Assembly.Agents, "self") {
 		t.Fatalf("self agent missing from assembly: %#v", withoutAgents.runtime.Assembly.Agents)
 	}
-	for _, removed := range []string{"claude", "codex", "opencode", "codefree-o", "copilot", "gemini"} {
+	for _, removed := range []string{"claude", "codex", "opencode", "codefree-o", "copilot", "grok"} {
 		if agentConfigSetHas(withoutAgents.runtime.Assembly.Agents, removed) {
 			t.Fatalf("unregistered built-in agent %q unexpectedly present: %#v", removed, withoutAgents.runtime.Assembly.Agents)
 		}
@@ -140,6 +140,69 @@ func TestLookupBuiltInACPAgentIncludesClaude(t *testing.T) {
 	}
 	if len(agent.Env) != 0 {
 		t.Fatalf("claude env = %#v, want none", agent.Env)
+	}
+}
+
+func TestLookupBuiltInACPAgentIncludesGrokBuild(t *testing.T) {
+	agent, ok := lookupBuiltInACPAgent("grok")
+	if !ok {
+		t.Fatal("lookupBuiltInACPAgent(grok) ok = false")
+	}
+	if agent.Name != "grok" {
+		t.Fatalf("grok agent name = %q", agent.Name)
+	}
+	if agent.Description != "Grok Build ACP agent" {
+		t.Fatalf("grok description = %q, want Grok Build ACP agent", agent.Description)
+	}
+	if agent.Command != "grok" {
+		t.Fatalf("grok command = %q, want grok", agent.Command)
+	}
+	if got, want := strings.Join(agent.Args, " "), "agent stdio"; got != want {
+		t.Fatalf("grok args = %q, want %q", got, want)
+	}
+	if len(agent.Env) != 0 {
+		t.Fatalf("grok env = %#v, want none", agent.Env)
+	}
+	if _, ok := builtinACPAdapterPackageFor("grok"); ok {
+		t.Fatal("grok unexpectedly has an npm adapter package")
+	}
+}
+
+func TestLookupBuiltInACPAgentExcludesGeminiCLI(t *testing.T) {
+	if agent, ok := lookupBuiltInACPAgent("gemini"); ok {
+		t.Fatalf("lookupBuiltInACPAgent(gemini) = %#v, true; want unsupported", agent)
+	}
+}
+
+func TestUnsupportedBuiltinACPAgentConfigDoesNotMaterialize(t *testing.T) {
+	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
+	if err := stack.setConfiguredAgents([]AgentConfig{
+		{
+			Name:        "gemini",
+			Description: "Gemini ACP agent",
+			Command:     "gemini",
+			Args:        []string{"--acp"},
+			Builtin:     true,
+		},
+		{
+			Name:        "helper",
+			Description: "custom helper",
+			Command:     "helper-acp",
+		},
+	}); err != nil {
+		t.Fatalf("setConfiguredAgents(stale gemini builtin) error = %v", err)
+	}
+	if agentConfigSetHas(stack.runtime.Assembly.Agents, "gemini") {
+		t.Fatalf("stale gemini builtin materialized in assembly: %#v", stack.runtime.Assembly.Agents)
+	}
+	if !agentConfigSetHas(stack.runtime.Assembly.Agents, "helper") {
+		t.Fatalf("custom helper missing from assembly: %#v", stack.runtime.Assembly.Agents)
+	}
+	listedAgents := stack.ListACPAgents()
+	for _, agent := range listedAgents {
+		if strings.EqualFold(strings.TrimSpace(agent.Name), "gemini") {
+			t.Fatalf("ListACPAgents exposed stale gemini builtin: %#v", listedAgents)
+		}
 	}
 }
 
@@ -363,11 +426,11 @@ func acpCommandForToolTest(commands []acp.AvailableCommand, name string) *acp.Av
 	return nil
 }
 
-func TestNativeOpenCodeFamilyBuiltinOptionsAreAddOnly(t *testing.T) {
+func TestNativeBuiltinACPAgentOptionsAreAddOnly(t *testing.T) {
 	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
 	addOptions := stack.ListBuiltinACPAgentAddOptions()
 	installOptions := stack.ListInstallableACPAgentOptions()
-	for _, name := range []string{"opencode", "codefree-o"} {
+	for _, name := range []string{"opencode", "codefree-o", "grok"} {
 		option, ok := acpAgentAddOptionForToolTest(addOptions, name)
 		if !ok {
 			t.Fatalf("builtin add options missing %s: %#v", name, addOptions)
@@ -384,9 +447,9 @@ func TestNativeOpenCodeFamilyBuiltinOptionsAreAddOnly(t *testing.T) {
 	}
 }
 
-func TestRegisterNativeOpenCodeFamilyBuiltinAgents(t *testing.T) {
+func TestRegisterNativeBuiltinACPAgents(t *testing.T) {
 	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
-	for _, name := range []string{"opencode", "codefree-o"} {
+	for _, name := range []string{"opencode", "codefree-o", "grok"} {
 		if err := stack.RegisterBuiltinACPAgent(name); err != nil {
 			t.Fatalf("RegisterBuiltinACPAgent(%s) error = %v", name, err)
 		}
@@ -395,7 +458,7 @@ func TestRegisterNativeOpenCodeFamilyBuiltinAgents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadAppConfig() error = %v", err)
 	}
-	for _, name := range []string{"opencode", "codefree-o"} {
+	for _, name := range []string{"opencode", "codefree-o", "grok"} {
 		agent, ok := storedAgentConfigForToolTest(doc.Agents, name)
 		if !ok {
 			t.Fatalf("stored agents missing %s: %#v", name, doc.Agents)
@@ -403,7 +466,11 @@ func TestRegisterNativeOpenCodeFamilyBuiltinAgents(t *testing.T) {
 		if agent.Command != name {
 			t.Fatalf("%s stored command = %q, want %q", name, agent.Command, name)
 		}
-		if got, want := strings.Join(agent.Args, " "), "acp"; got != want {
+		wantArgs := "acp"
+		if name == "grok" {
+			wantArgs = "agent stdio"
+		}
+		if got, want := strings.Join(agent.Args, " "), wantArgs; got != want {
 			t.Fatalf("%s stored args = %q, want %q", name, got, want)
 		}
 	}

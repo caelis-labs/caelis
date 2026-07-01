@@ -207,26 +207,18 @@ func mergeOpenToolEvent(ev *SubagentEvent, name, toolKind, args, fullArgs, outpu
 	if ev == nil {
 		return
 	}
-	if strings.TrimSpace(ev.Name) == "" {
+	if strings.TrimSpace(name) != "" {
 		ev.Name = name
 	}
-	if strings.TrimSpace(ev.ToolKind) == "" {
+	if strings.TrimSpace(toolKind) != "" {
 		ev.ToolKind = toolKind
 	}
 	preferredTaskID := preferredDisplayTaskID(ev.TaskID, taskID)
-	if strings.TrimSpace(ev.Args) == "" {
-		ev.Args = args
-	} else if strings.EqualFold(semanticName, "SPAWN") && shouldReplaceSpawnDisplayArgs(ev.Args, args) {
-		ev.Args = args
-	} else if strings.EqualFold(semanticName, "TASK") && preferredTaskID != strings.TrimSpace(ev.TaskID) && strings.TrimSpace(args) != "" {
+	if strings.TrimSpace(args) != "" {
 		ev.Args = args
 	}
 	mergeStartArgs(ev, args, ev.Args)
-	if strings.TrimSpace(ev.FullArgs) == "" {
-		ev.FullArgs = fullArgs
-	} else if strings.EqualFold(semanticName, "SPAWN") && shouldReplaceSpawnDisplayArgs(ev.FullArgs, fullArgs) {
-		ev.FullArgs = fullArgs
-	} else if strings.EqualFold(semanticName, "TASK") && preferredTaskID != strings.TrimSpace(ev.TaskID) && strings.TrimSpace(fullArgs) != "" {
+	if strings.TrimSpace(fullArgs) != "" {
 		ev.FullArgs = fullArgs
 	}
 	ev.TaskID = preferredTaskID

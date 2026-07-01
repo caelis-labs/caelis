@@ -66,6 +66,136 @@ func TestHandleACPEventEnvelopeAppliesToolTerminalSequence(t *testing.T) {
 	}
 }
 
+func TestHandleACPEventEnvelopeMergesGrokGlobUpdate(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		Update: schema.ToolCall{
+			SessionUpdate: schema.UpdateToolCall,
+			ToolCallID:    "glob-1",
+			Title:         "Glob",
+		},
+	})
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo,
+			ToolCallID:    "glob-1",
+			Title:         stringPtr("Glob `**/*.py`"),
+			Kind:          stringPtr(schema.ToolKindSearch),
+			RawInput:      map[string]any{"variant": "CursorGlob", "glob_pattern": "**/*.py"},
+		},
+	})
+
+	block := requireMainACPTurnBlockForTest(t, model)
+	if len(block.Events) != 1 {
+		t.Fatalf("main events = %#v, want one Grok glob event", block.Events)
+	}
+	event := block.Events[0]
+	if event.Name != schema.ToolKindSearch || event.ToolKind != schema.ToolKindSearch || event.Args != "`**/*.py`" {
+		t.Fatalf("glob event = %#v, want merged search update with pattern args", event)
+	}
+	model.syncViewportContent()
+	plain := strings.Join(model.viewportPlainLines, "\n")
+	if !strings.Contains(plain, "Search `**/*.py`") || strings.Contains(plain, "Glob Glob") {
+		t.Fatalf("viewport rendered unexpected glob header:\n%s", plain)
+	}
+}
+
+func TestHandleACPEventEnvelopeMergesGrokShellUpdate(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		Update: schema.ToolCall{
+			SessionUpdate: schema.UpdateToolCall,
+			ToolCallID:    "shell-1",
+			Title:         "Shell",
+			RawInput: map[string]any{
+				"command":     "pwd",
+				"description": "Print current working directory",
+			},
+		},
+	})
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo,
+			ToolCallID:    "shell-1",
+			Title:         stringPtr("Execute `pwd`"),
+			Kind:          stringPtr(schema.ToolKindExecute),
+			RawInput: map[string]any{
+				"variant":     "CursorShell",
+				"command":     "pwd",
+				"description": "Print current working directory",
+			},
+		},
+	})
+
+	block := requireMainACPTurnBlockForTest(t, model)
+	if len(block.Events) != 1 {
+		t.Fatalf("main events = %#v, want one Grok shell event", block.Events)
+	}
+	event := block.Events[0]
+	if event.Name != schema.ToolKindExecute || event.Args != "pwd" || event.ToolKind != schema.ToolKindExecute {
+		t.Fatalf("shell event = %#v, want merged execute kind with command args", event)
+	}
+	model.syncViewportContent()
+	plain := strings.Join(model.viewportPlainLines, "\n")
+	if !strings.Contains(plain, "Ran pwd") || strings.Contains(plain, "Ran Shell") {
+		t.Fatalf("viewport rendered unexpected shell header:\n%s", plain)
+	}
+}
+
+func TestHandleACPEventEnvelopeMergesPartialToolUpdateFromCaelisOutput(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		Update: schema.ToolCall{
+			SessionUpdate: schema.UpdateToolCall,
+			ToolCallID:    "call-1",
+			Title:         "RUN_COMMAND pwd",
+			Kind:          schema.ToolKindExecute,
+			Status:        schema.ToolStatusInProgress,
+			RawInput:      map[string]any{"command": "pwd"},
+		},
+	})
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo,
+			ToolCallID:    "call-1",
+			Status:        stringPtr(schema.ToolStatusCompleted),
+			RawOutput:     map[string]any{"stdout": "/tmp/work\n", "exit_code": 0},
+		},
+	})
+
+	block := requireMainACPTurnBlockForTest(t, model)
+	if len(block.Events) != 1 {
+		t.Fatalf("main events = %#v, want one merged tool event", block.Events)
+	}
+	event := block.Events[0]
+	if event.Name != schema.ToolKindExecute || event.ToolKind != schema.ToolKindExecute || event.Args != "pwd" || !event.Done {
+		t.Fatalf("tool event = %#v, want partial update to preserve existing identity and complete", event)
+	}
+	model.syncViewportContent()
+	plain := strings.Join(model.viewportPlainLines, "\n")
+	if !strings.Contains(plain, "Ran pwd") || strings.Contains(plain, "Ran Tool") {
+		t.Fatalf("viewport rendered unexpected partial update header:\n%s", plain)
+	}
+}
+
 func TestHandleACPEventEnvelopeDoesNotDuplicateRunningSnapshotAfterTerminalStream(t *testing.T) {
 	t.Parallel()
 
@@ -285,6 +415,122 @@ func TestHandleACPEventEnvelopeAnchorsSubagentOutputToSpawnTool(t *testing.T) {
 	}
 	if event.TaskID != "task-1" || !strings.Contains(event.Output, "subagent found the issue") {
 		t.Fatalf("spawn event = %#v, want anchored subagent output", event)
+	}
+}
+
+func TestHandleACPEventEnvelopeSuppressesSubagentEventsMirroredToParentPanel(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		Update: schema.ToolCall{
+			SessionUpdate: schema.UpdateToolCall,
+			ToolCallID:    "task-call-1",
+			Title:         "TASK wait akio",
+			Kind:          schema.ToolKindExecute,
+			Status:        schema.ToolStatusInProgress,
+			RawInput:      map[string]any{"action": "wait", "task_id": "akio"},
+			Meta:          acpToolNameMeta("TASK"),
+		},
+	})
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo,
+			ToolCallID:    "task-call-1",
+			Meta:          metautil.WithTerminalOutput(acpToolNameMeta("TASK"), "task-call-1", "child stream summary\n"),
+		},
+	})
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		Scope:     eventstream.ScopeSubagent,
+		ScopeID:   "akio",
+		Actor:     "explorer",
+		Meta:      parentToolStreamMeta("task-call-1", "TASK", true),
+		Update: schema.ToolCall{
+			SessionUpdate: schema.UpdateToolCall,
+			ToolCallID:    "child-read-1",
+			Title:         "READ README.md",
+			Kind:          schema.ToolKindRead,
+			Status:        schema.ToolStatusCompleted,
+			RawInput:      map[string]any{"path": "README.md"},
+		},
+	})
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		Scope:     eventstream.ScopeSubagent,
+		ScopeID:   "akio",
+		Actor:     "explorer",
+		Final:     true,
+		Meta:      parentToolStreamMeta("task-call-1", "TASK", true),
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateAgentMessage,
+			Content:       schema.TextContent{Type: "text", Text: "child final answer"},
+		},
+	})
+
+	block := requireMainACPTurnBlockForTest(t, model)
+	if len(block.Events) != 1 {
+		t.Fatalf("main events = %#v, want only parent TASK event", block.Events)
+	}
+	if event := block.Events[0]; event.CallID != "task-call-1" || !strings.Contains(event.Output, "child stream summary") {
+		t.Fatalf("task event = %#v, want parent TASK output only", event)
+	}
+	if participant := model.findParticipantTurnBlock("akio"); participant != nil {
+		t.Fatalf("subagent participant block = %#v, want mirrored TASK events suppressed", participant)
+	}
+	for _, docBlock := range model.doc.Blocks() {
+		if participant, ok := docBlock.(*ParticipantTurnBlock); ok {
+			t.Fatalf("unexpected participant block = %#v", participant)
+		}
+	}
+}
+
+func TestHandleACPEventEnvelopeRoutesAnchoredSubagentOutputToParentPanel(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		Update: schema.ToolCall{
+			SessionUpdate: schema.UpdateToolCall,
+			ToolCallID:    "task-call-1",
+			Title:         "TASK write akio",
+			Kind:          schema.ToolKindExecute,
+			Status:        schema.ToolStatusInProgress,
+			RawInput:      map[string]any{"action": "write", "task_id": "akio"},
+			Meta:          acpToolNameMeta("TASK"),
+		},
+	})
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		Scope:     eventstream.ScopeSubagent,
+		ScopeID:   "akio",
+		Actor:     "explorer",
+		Final:     true,
+		Meta:      parentToolStreamMeta("task-call-1", "TASK", false),
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateAgentMessage,
+			Content:       schema.TextContent{Type: "text", Text: "child write response"},
+		},
+	})
+
+	block := requireMainACPTurnBlockForTest(t, model)
+	if len(block.Events) != 1 {
+		t.Fatalf("main events = %#v, want only parent panel event", block.Events)
+	}
+	if event := block.Events[0]; event.CallID != "task-call-1" || !strings.Contains(event.Output, "child write response") {
+		t.Fatalf("task event = %#v, want anchored subagent output in parent panel", event)
+	}
+	if participant := model.findParticipantTurnBlock("akio"); participant != nil {
+		t.Fatalf("subagent participant block = %#v, want anchored output kept in parent panel", participant)
 	}
 }
 
@@ -742,6 +988,20 @@ func TestApprovalPayloadFromACPEventUsesStandardPermission(t *testing.T) {
 	}
 	if len(req.Options) != 1 || req.Options[0].ID != "allow_once" {
 		t.Fatalf("approval options = %#v, want allow_once", req.Options)
+	}
+}
+
+func parentToolStreamMeta(callID string, toolName string, mirrored bool) map[string]any {
+	return map[string]any{
+		gateway.EventMetaRoot: map[string]any{
+			gateway.EventMetaRuntime: map[string]any{
+				gateway.EventMetaRuntimeStream: map[string]any{
+					gateway.EventMetaRuntimeStreamParentCallID:         strings.TrimSpace(callID),
+					gateway.EventMetaRuntimeStreamParentTool:           strings.TrimSpace(toolName),
+					gateway.EventMetaRuntimeStreamMirroredToParentTool: mirrored,
+				},
+			},
+		},
 	}
 }
 

@@ -219,7 +219,7 @@ func terminalKindSpecificOutputText(toolName string, toolKind string, rawOutput 
 			return firstNonEmpty(asString(rawOutput["stderr"]), asString(rawOutput["error"]))
 		}
 		if transcriptToolStatusFinal(status, isErr) {
-			return firstNonEmpty(asString(rawOutput["final_message"]), asString(rawOutput["finalMessage"]), asString(rawOutput["result"]), asString(rawOutput["output"]), asString(rawOutput["text"]))
+			return displaypolicy.SubagentTaskOutputText(rawOutput)
 		}
 		return firstNonEmpty(asString(rawOutput["text"]), asString(rawOutput["stdout"]), asString(rawOutput["output_preview"]), asString(rawOutput["stderr"]))
 	}
@@ -229,7 +229,7 @@ func terminalKindSpecificOutputText(toolName string, toolKind string, rawOutput 
 	if !transcriptToolStatusFinal(status, isErr) {
 		return firstNonEmpty(asString(rawOutput["latest_output"]), asString(rawOutput["output_preview"]))
 	}
-	if text := firstNonEmpty(asString(rawOutput["result"]), asString(rawOutput["output"]), asString(rawOutput["stdout"]), asString(rawOutput["stderr"]), asString(rawOutput["error"]), asString(rawOutput["text"])); text != "" {
+	if text := displaypolicy.CommandTaskOutputText(rawOutput); text != "" {
 		return text
 	}
 	return ""

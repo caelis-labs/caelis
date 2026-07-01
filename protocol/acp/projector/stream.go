@@ -342,6 +342,11 @@ func markStreamFrameAnchor(meta map[string]any, callID string, toolName string) 
 	streamMeta, _ := runtimeMeta[gateway.EventMetaRuntimeStream].(map[string]any)
 	if callID != "" {
 		streamMeta[gateway.EventMetaRuntimeStreamParentCallID] = callID
+		// Embedded stream events are only projected here after their visible
+		// output has been mirrored into the parent tool update. Consumers should
+		// keep them available for scoped panels but suppress them from the main
+		// transcript.
+		streamMeta[gateway.EventMetaRuntimeStreamMirroredToParentTool] = true
 	}
 	if toolName != "" {
 		streamMeta[gateway.EventMetaRuntimeStreamParentTool] = toolName

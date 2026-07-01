@@ -234,7 +234,6 @@ func TestRegressionProjectionGoldenFullEnvelopes(t *testing.T) {
       "rawInput": {
         "command": "go test ./protocol/acp/projector"
       },
-      "rawOutput": null,
       "content": [
         {
           "type": "terminal",

@@ -324,7 +324,7 @@ func inferredToolCallUpdates(event *session.Event) []Update {
 			Title:         displaypolicy.SummarizeToolCallTitle(call.Name, args),
 			Kind:          displaypolicy.ToolKindForName(call.Name),
 			Status:        ToolStatusPending,
-			RawInput:      args,
+			RawInput:      cloneAnyMapPayload(args),
 		}
 		update = withDisplayTerminal(update, call.Name, args)
 		out = append(out, update)
@@ -381,7 +381,7 @@ func toolCallForEvent(event *session.Event) (ToolCall, bool, error) {
 		Title:         displaypolicy.SummarizeToolCallTitle(calls[0].Name, args),
 		Kind:          displaypolicy.ToolKindForName(calls[0].Name),
 		Status:        ToolStatusPending,
-		RawInput:      args,
+		RawInput:      cloneAnyMapPayload(args),
 	}
 	call = withDisplayTerminal(call, calls[0].Name, args)
 	return call, true, nil
@@ -399,8 +399,8 @@ func toolCallFromEventToolPayload(tool *session.EventTool) ToolCall {
 		Title:         firstNonEmpty(strings.TrimSpace(tool.Title), displaypolicy.SummarizeToolCallTitle(tool.Name, rawInput), strings.TrimSpace(tool.Name)),
 		Kind:          firstNonEmpty(strings.TrimSpace(tool.Kind), displaypolicy.ToolKindForName(tool.Name)),
 		Status:        firstNonEmpty(acpToolStatus(tool.Status), ToolStatusPending),
-		RawInput:      rawInput,
-		RawOutput:     cloneAnyMap(tool.Output),
+		RawInput:      cloneAnyMapPayload(rawInput),
+		RawOutput:     cloneAnyMapPayload(tool.Output),
 		Content:       projectEventToolContent(tool.Content, displayTerminalID),
 		Locations:     projectEventToolLocations(tool.Locations),
 	}
@@ -418,8 +418,8 @@ func toolCallFromProtocolUpdate(event *session.Event, update *session.ProtocolUp
 		Title:         firstNonEmpty(strings.TrimSpace(update.Title), displaypolicy.SummarizeToolCallTitle(name, rawInput), strings.TrimSpace(name)),
 		Kind:          firstNonEmpty(strings.TrimSpace(update.Kind), displaypolicy.ToolKindForName(name)),
 		Status:        firstNonEmpty(acpToolStatus(update.Status), ToolStatusPending),
-		RawInput:      rawInput,
-		RawOutput:     cloneAnyMap(update.RawOutput),
+		RawInput:      cloneAnyMapPayload(rawInput),
+		RawOutput:     cloneAnyMapPayload(update.RawOutput),
 		Content:       projectToolContent(content, displayTerminalID),
 		Locations:     projectToolLocations(update.Locations),
 		Meta:          cloneAnyMap(update.Meta),
@@ -464,7 +464,7 @@ func toolCallUpdateForEvent(event *session.Event) (ToolCallUpdate, bool, error) 
 		ToolCallID:    strings.TrimSpace(resp.ID),
 		Kind:          stringPtr(kind),
 		Status:        stringPtr(status),
-		RawOutput:     cloneAnyMap(resp.Result),
+		RawOutput:     cloneAnyMapPayload(resp.Result),
 		Meta:          protocolUpdateMeta(event),
 	}
 	return withDisplayTerminalUpdate(out, resp.ID, name), true, nil
@@ -478,8 +478,8 @@ func toolCallUpdateFromEventToolPayload(tool *session.EventTool, meta map[string
 	out := ToolCallUpdate{
 		SessionUpdate: UpdateToolCallInfo,
 		ToolCallID:    strings.TrimSpace(tool.ID),
-		RawInput:      cloneAnyMap(tool.Input),
-		RawOutput:     cloneAnyMap(tool.Output),
+		RawInput:      cloneAnyMapPayload(tool.Input),
+		RawOutput:     cloneAnyMapPayload(tool.Output),
 		Content:       projectEventToolContent(tool.Content, displayTerminalID),
 		Locations:     projectEventToolLocations(tool.Locations),
 	}
@@ -508,8 +508,8 @@ func toolCallUpdateFromProtocolUpdate(event *session.Event, update *session.Prot
 	out := ToolCallUpdate{
 		SessionUpdate: UpdateToolCallInfo,
 		ToolCallID:    id,
-		RawInput:      cloneAnyMap(update.RawInput),
-		RawOutput:     cloneAnyMap(update.RawOutput),
+		RawInput:      cloneAnyMapPayload(update.RawInput),
+		RawOutput:     cloneAnyMapPayload(update.RawOutput),
 		Content:       projectToolContent(content, displayTerminalID),
 		Locations:     projectToolLocations(update.Locations),
 		Meta:          cloneAnyMap(update.Meta),
@@ -887,4 +887,15 @@ func stringPtr(value string) *string {
 
 func cloneAnyMap(values map[string]any) map[string]any {
 	return metautil.CloneMap(values)
+}
+
+func cloneAnyMapPayload(values map[string]any) any {
+	cloned := cloneAnyMap(values)
+	if len(cloned) == 0 {
+		// ACP tool payload fields are optional. Keep empty maps omitted instead
+		// of serializing rawInput/rawOutput as {}, and avoid typed-nil maps
+		// becoming explicit null values.
+		return nil
+	}
+	return cloned
 }

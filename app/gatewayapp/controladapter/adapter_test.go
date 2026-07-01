@@ -1862,10 +1862,13 @@ func TestAdapterAgentRegistryAndControllerUse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CompleteSlashArg(agent add) error = %v", err)
 	}
-	for _, want := range []string{"claude", "codex", "opencode", "codefree-o", "copilot", "gemini"} {
+	for _, want := range []string{"claude", "codex", "opencode", "codefree-o", "copilot", "grok"} {
 		if !slashCandidatesHaveValue(addCandidates, want) {
 			t.Fatalf("agent add candidates = %#v, want %q", addCandidates, want)
 		}
+	}
+	if slashCandidatesHaveValue(addCandidates, "gemini") {
+		t.Fatalf("agent add candidates = %#v, want gemini unsupported", addCandidates)
 	}
 	if slashCandidatesHaveValue(addCandidates, "--install claude") || slashCandidatesHaveValue(addCandidates, "--install codex") {
 		t.Fatalf("agent add candidates = %#v, want no install variants", addCandidates)
@@ -1879,7 +1882,7 @@ func TestAdapterAgentRegistryAndControllerUse(t *testing.T) {
 			t.Fatalf("agent install candidates = %#v, want %q", installCandidates, want)
 		}
 	}
-	for _, notInstallable := range []string{"opencode", "codefree-o", "copilot", "gemini"} {
+	for _, notInstallable := range []string{"opencode", "codefree-o", "copilot", "grok", "gemini"} {
 		if slashCandidatesHaveValue(installCandidates, notInstallable) {
 			t.Fatalf("agent install candidates = %#v, want no %q", installCandidates, notInstallable)
 		}

@@ -553,7 +553,7 @@ func shouldPrefixExecuteToolName(rawName string, args string) bool {
 		return false
 	}
 	switch strings.ToLower(rawName) {
-	case "bash", "sh", "zsh", "fish", "execute", "tool":
+	case "bash", "sh", "zsh", "fish", "execute", "tool", "shell", "terminal", "command", "run", "running":
 		return false
 	}
 	first := firstShellExecutableToken(args)

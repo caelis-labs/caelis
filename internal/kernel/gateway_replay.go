@@ -51,10 +51,19 @@ func (g *Gateway) ReplayEvents(ctx context.Context, req ReplayEventsRequest) (Re
 	if err != nil {
 		return ReplayEventsResult{}, err
 	}
+	taskPanelTargetHistory, err := projectSessionACPReplayTaskPanelHistory(ref, events, cursorState)
+	if err != nil {
+		return ReplayEventsResult{}, err
+	}
+	// Replay-only task panel augmentation must not advance the durable cursor:
+	// it is derived from the task store to make resumed async panels look like
+	// their live final state, not a new persisted session event.
+	nextCursor := lastACPEventCursor(projected)
+	projected = g.augmentReplayTaskPanelEvents(ctx, ref, projected, taskPanelTargetHistory)
 	out := ReplayEventsResult{
 		SessionRef:    ref,
 		Events:        projected,
-		NextCursor:    lastACPEventCursor(projected),
+		NextCursor:    nextCursor,
 		Durable:       true,
 		HasLiveHandle: hasLiveHandle,
 		ControlPlane:  buildControlPlaneState(activeSession, runState, controlEvents),
@@ -104,6 +113,43 @@ func projectSessionACPReplayEvents(ref session.SessionRef, events []*session.Eve
 		out = append(out, projected...)
 	}
 	return out, nil
+}
+
+func projectSessionACPReplayTaskPanelHistory(ref session.SessionRef, events []*session.Event, cursor acpReplayCursorState) ([]eventstream.Envelope, error) {
+	if strings.TrimSpace(cursor.raw) == "" {
+		return nil, nil
+	}
+	historyEvents := sessionEventsThroughACPReplayCursor(events, cursor)
+	if len(historyEvents) == 0 {
+		return nil, nil
+	}
+	projected := projectSessionACPEvents(ref, historyEvents)
+	if len(projected) == 0 {
+		return nil, nil
+	}
+	if !cursor.projection {
+		return projected, nil
+	}
+	return trimACPReplayThroughCursor(projected, cursor)
+}
+
+func sessionEventsThroughACPReplayCursor(events []*session.Event, cursor acpReplayCursorState) []*session.Event {
+	eventID := strings.TrimSpace(cursor.eventID)
+	if eventID == "" {
+		eventID = strings.TrimSpace(cursor.raw)
+	}
+	if eventID == "" {
+		return nil
+	}
+	for i, event := range events {
+		if event == nil {
+			continue
+		}
+		if strings.TrimSpace(event.ID) == eventID {
+			return events[:i+1]
+		}
+	}
+	return nil
 }
 
 func projectSessionACPEvent(ref session.SessionRef, event *session.Event, handleID string, runID string, turnID string) []eventstream.Envelope {
@@ -242,6 +288,25 @@ func trimACPReplayAfterCursor(events []eventstream.Envelope, cursor acpReplayCur
 		}
 		if strings.TrimSpace(env.Cursor) == cursor.raw || strings.TrimSpace(env.ProjectionID) == cursor.raw {
 			return events[i+1:], nil
+		}
+	}
+	if sawSource {
+		return nil, cursorNotFoundError(cursor.raw)
+	}
+	return events, nil
+}
+
+func trimACPReplayThroughCursor(events []eventstream.Envelope, cursor acpReplayCursorState) ([]eventstream.Envelope, error) {
+	if !cursor.projection {
+		return events, nil
+	}
+	sawSource := false
+	for i, env := range events {
+		if strings.TrimSpace(env.EventID) == cursor.eventID {
+			sawSource = true
+		}
+		if strings.TrimSpace(env.Cursor) == cursor.raw || strings.TrimSpace(env.ProjectionID) == cursor.raw {
+			return events[:i+1], nil
 		}
 	}
 	if sawSource {

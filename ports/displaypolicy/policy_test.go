@@ -101,6 +101,28 @@ func TestTaskMetadataDisplayPolicy(t *testing.T) {
 	}
 }
 
+func TestTaskOutputDisplayPolicyPreservesTerminalText(t *testing.T) {
+	command := map[string]any{
+		"stdout": "one\n",
+		"stderr": "two\n",
+	}
+	if got := CommandTaskFinalText("completed", command); got != "one\ntwo\n" {
+		t.Fatalf("CommandTaskFinalText() = %q", got)
+	}
+	if got := CommandTaskOutputText(map[string]any{"stdout": "raw\n"}); got != "raw\n" {
+		t.Fatalf("CommandTaskOutputText() = %q", got)
+	}
+	if got := CommandTaskFinalText("completed", nil); got != "(no output)" {
+		t.Fatalf("CommandTaskFinalText(no output) = %q", got)
+	}
+	if got := SubagentTaskFinalText("completed", map[string]any{"final_message": "done\n"}); got != "done\n" {
+		t.Fatalf("SubagentTaskFinalText() = %q", got)
+	}
+	if got := SubagentTaskFinalText("failed", map[string]any{"error": "failed\n", "result": "ignored"}); got != "failed\n" {
+		t.Fatalf("SubagentTaskFinalText(failed) = %q", got)
+	}
+}
+
 func TestWebSearchSummaryShowsQueryOnly(t *testing.T) {
 	input := map[string]any{"query": "上海 天气"}
 	output := map[string]any{

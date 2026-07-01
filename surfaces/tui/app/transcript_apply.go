@@ -183,7 +183,7 @@ func (m *Model) applyTranscriptPlan(event TranscriptEvent) (tea.Model, tea.Cmd) 
 		m.markViewportBlockDirty(block.BlockID())
 		return m, m.requestStreamViewportSync()
 	case ACPProjectionSubagent:
-		if eventAnchorsSpawnSubagentTool(event) {
+		if eventTargetsParentToolPanel(event) {
 			return m, nil
 		}
 		return m.applyTranscriptPlanToParticipantTurn(event, entries)
@@ -229,7 +229,7 @@ func (m *Model) applyTranscriptApproval(event TranscriptEvent) (tea.Model, tea.C
 			OccurredAt:      event.OccurredAt,
 		})
 	case ACPProjectionSubagent:
-		if eventAnchorsSpawnSubagentTool(event) {
+		if eventTargetsParentToolPanel(event) {
 			return m, nil
 		}
 		return m.applyTranscriptStatusToParticipantTurn(event, firstNonEmpty(strings.TrimSpace(event.State), "waiting_approval"), event.ApprovalTool, event.ApprovalCommand)
@@ -260,7 +260,7 @@ func (m *Model) applyTranscriptApprovalReview(event TranscriptEvent) (tea.Model,
 		m.markViewportBlockDirty(block.BlockID())
 		return m, m.requestStreamViewportSync()
 	case ACPProjectionSubagent:
-		if eventAnchorsSpawnSubagentTool(event) {
+		if eventTargetsParentToolPanel(event) {
 			return m, nil
 		}
 		return m.applyTranscriptApprovalReviewToParticipantTurn(event)
@@ -290,7 +290,7 @@ func (m *Model) applyAnchoredApprovalReviewToTool(event TranscriptEvent) (bool, 
 	if output == "" {
 		return true, nil
 	}
-	toolName := firstNonEmpty(strings.TrimSpace(event.AnchorToolName), "SPAWN")
+	toolName := strings.TrimSpace(event.AnchorToolName)
 	for _, docBlock := range m.doc.Blocks() {
 		block, ok := docBlock.(*MainACPTurnBlock)
 		if !ok || !mainACPBlockHasToolCall(block, callID) {
@@ -360,7 +360,7 @@ func (m *Model) applyTranscriptParticipant(event TranscriptEvent) (tea.Model, te
 	m.prepareForTranscriptScope(event.Scope)
 	switch event.Scope {
 	case ACPProjectionSubagent:
-		if eventAnchorsSpawnSubagentTool(event) {
+		if eventTargetsParentToolPanel(event) {
 			return m, nil
 		}
 		return m.applyTranscriptStatusToParticipantTurn(event, event.State, "", "")
@@ -383,7 +383,7 @@ func (m *Model) applyTranscriptLifecycle(event TranscriptEvent) (tea.Model, tea.
 			OccurredAt: event.OccurredAt,
 		})
 	case ACPProjectionSubagent:
-		if eventAnchorsSpawnSubagentTool(event) {
+		if eventTargetsParentToolPanel(event) {
 			return m, nil
 		}
 		return m.applyTranscriptStatusToParticipantTurn(event, event.State, "", "")
@@ -410,23 +410,22 @@ func (m *Model) applyTranscriptLifecycle(event TranscriptEvent) (tea.Model, tea.
 }
 
 func (m *Model) applyTranscriptSubagentNarrative(event TranscriptEvent) (tea.Model, tea.Cmd) {
-	if eventAnchorsSpawnSubagentTool(event) {
-		if event.MirroredToParentTool {
-			return m, nil
-		}
-		if event.NarrativeKind != TranscriptNarrativeAssistant {
-			return m, nil
-		}
-		return m.applyAnchoredSubagentNarrativeToTool(event)
+	if !eventTargetsParentToolPanel(event) {
+		return m.handleParticipantTurnStream(event.ScopeID, transcriptNarrativeStreamKind(event.NarrativeKind), subagentTranscriptActor(event), event.Text, event.Final, event.OccurredAt)
 	}
-	return m.handleParticipantTurnStream(event.ScopeID, transcriptNarrativeStreamKind(event.NarrativeKind), subagentTranscriptActor(event), event.Text, event.Final, event.OccurredAt)
+	if event.MirroredToParentTool {
+		return m, nil
+	}
+	if event.NarrativeKind != TranscriptNarrativeAssistant {
+		return m, nil
+	}
+	return m.applyAnchoredSubagentNarrativeToTool(event)
 }
 
-func eventAnchorsSpawnSubagentTool(event TranscriptEvent) bool {
+func eventTargetsParentToolPanel(event TranscriptEvent) bool {
 	return event.Scope == ACPProjectionSubagent &&
 		strings.TrimSpace(event.ScopeID) != "" &&
-		strings.TrimSpace(event.AnchorToolCallID) != "" &&
-		strings.EqualFold(firstNonEmpty(strings.TrimSpace(event.AnchorToolName), "SPAWN"), "SPAWN")
+		strings.TrimSpace(event.AnchorToolCallID) != ""
 }
 
 func (m *Model) applyAnchoredSubagentNarrativeToTool(event TranscriptEvent) (tea.Model, tea.Cmd) {
@@ -441,7 +440,7 @@ func (m *Model) applyAnchoredSubagentNarrativeToTool(event TranscriptEvent) (tea
 	if strings.TrimSpace(text) == "" {
 		return m, nil
 	}
-	toolName := firstNonEmpty(strings.TrimSpace(event.AnchorToolName), "SPAWN")
+	toolName := strings.TrimSpace(event.AnchorToolName)
 	for _, docBlock := range m.doc.Blocks() {
 		block, ok := docBlock.(*MainACPTurnBlock)
 		if !ok || !mainACPBlockHasToolCall(block, callID) {

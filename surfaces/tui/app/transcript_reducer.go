@@ -47,7 +47,7 @@ func (m *Model) applyTranscriptToolToParticipant(event TranscriptEvent, mutation
 }
 
 func (m *Model) applyTranscriptToolToSubagent(event TranscriptEvent, mutation transcriptToolMutation) (tea.Model, tea.Cmd) {
-	if eventAnchorsSpawnSubagentTool(event) {
+	if eventTargetsParentToolPanel(event) {
 		return m, nil
 	}
 	return m.applyTranscriptToolToParticipant(event, mutation)

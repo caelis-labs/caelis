@@ -52,6 +52,38 @@ func TestToolDisplayArgsSkillUsesName(t *testing.T) {
 	}
 }
 
+func TestToolDisplayArgsGlobUsesProviderPatternAlias(t *testing.T) {
+	t.Parallel()
+
+	if got := toolDisplayArgs("GLOB", map[string]any{"glob_pattern": "**/*.py"}); got != "**/*.py" {
+		t.Fatalf("toolDisplayArgs(GLOB glob_pattern) = %q, want pattern", got)
+	}
+}
+
+func TestToolTitleDisplayArgsSuppressesGenericProviderTitles(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		tool  string
+		kind  string
+		title string
+		want  string
+	}{
+		{name: "glob", tool: "GLOB", title: "Glob", want: ""},
+		{name: "shell", tool: "RUN_COMMAND", kind: "execute", title: "Shell", want: ""},
+		{name: "terminal", tool: "RUN_COMMAND", kind: "execute", title: "Terminal", want: ""},
+		{name: "execute detail", tool: "RUN_COMMAND", kind: "execute", title: "Execute `pwd`", want: "`pwd`"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := toolTitleDisplayArgs(tt.tool, tt.kind, tt.title); got != tt.want {
+				t.Fatalf("toolTitleDisplayArgs() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestToolTitleDisplayArgsCompactsMutationPaths(t *testing.T) {
 	t.Parallel()
 

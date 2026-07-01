@@ -58,6 +58,9 @@ func WithConfiguredAgents(resolved assembly.ResolvedAssembly, configured []confi
 		}
 	}
 	for _, agent := range configured {
+		if !configuredAgentSupported(agent) {
+			continue
+		}
 		cfg := AgentConfigToPlugin(agent)
 		name := strings.ToLower(strings.TrimSpace(cfg.Name))
 		if name != "" {
@@ -68,6 +71,14 @@ func WithConfiguredAgents(resolved assembly.ResolvedAssembly, configured []confi
 		}
 	}
 	return out
+}
+
+func configuredAgentSupported(agent configstore.AgentConfig) bool {
+	if !agent.Builtin {
+		return true
+	}
+	_, ok := LookupBuiltInAgent(agent.Name)
+	return ok
 }
 
 func AgentConfigToPlugin(in configstore.AgentConfig) assembly.AgentConfig {
@@ -178,10 +189,10 @@ func BuiltInAgents() []assembly.AgentConfig {
 			Args:        []string{"--acp", "--stdio"},
 		},
 		{
-			Name:        "gemini",
-			Description: "Gemini ACP agent",
-			Command:     "gemini",
-			Args:        []string{"--acp"},
+			Name:        "grok",
+			Description: "Grok Build ACP agent",
+			Command:     "grok",
+			Args:        []string{"agent", "stdio"},
 		},
 	}
 }

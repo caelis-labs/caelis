@@ -32,7 +32,7 @@ func toolDisplayArgs(name string, raw map[string]any, fallback ...string) string
 			return ""
 		}
 	case "GLOB":
-		if pattern := strings.TrimSpace(asString(raw["pattern"])); pattern != "" {
+		if pattern := globPattern(raw); pattern != "" {
 			return pattern
 		}
 	case "SEARCH", "RG", "FIND":
@@ -238,9 +238,14 @@ func toolTitleDisplayArgs(name string, kind string, title string) string {
 		return ""
 	}
 	name = strings.ToUpper(strings.TrimSpace(name))
+	if titleEqualsToolName(title, name) {
+		return ""
+	}
 	switch name {
 	case "RUN_COMMAND":
 		return executeTitleDisplayArgs(title)
+	case "GLOB":
+		return globTitleDisplayArgs(title)
 	case "READ", "LIST":
 		return prefixedTitleDetail(title, "Read", "List")
 	case "SEARCH", "RG", "FIND":
@@ -310,8 +315,11 @@ func compactMutationTitleDetail(detail string) string {
 
 func searchTitleDisplayArgs(title string) string {
 	title = strings.TrimSpace(title)
-	if title == "" || genericSearchTitle(title) {
+	if title == "" || genericSearchTitle(title) || genericGlobTitle(title) {
 		return ""
+	}
+	if detail := prefixedTitleDetail(title, "Glob", "Globbing"); detail != "" {
+		return detail
 	}
 	detail := prefixedTitleDetail(title, "Search", "Find", "Searching for:", "Finding:")
 	if detail == "" {
@@ -321,6 +329,26 @@ func searchTitleDisplayArgs(title string) string {
 		return ""
 	}
 	return fmt.Sprintf("%q", detail)
+}
+
+func globTitleDisplayArgs(title string) string {
+	title = strings.TrimSpace(title)
+	if title == "" || genericGlobTitle(title) {
+		return ""
+	}
+	if detail := prefixedTitleDetail(title, "Glob", "Globbing", "Find files matching:"); detail != "" {
+		return detail
+	}
+	return title
+}
+
+func genericGlobTitle(title string) bool {
+	switch strings.ToLower(strings.TrimSpace(title)) {
+	case "glob", "glob files", "find files by pattern":
+		return true
+	default:
+		return false
+	}
 }
 
 func searchTitleDetailIsPathOnly(detail string) bool {
@@ -360,13 +388,31 @@ func genericSearchTitle(title string) bool {
 
 func executeTitleDisplayArgs(title string) string {
 	title = strings.TrimSpace(title)
-	if strings.EqualFold(title, "Terminal") {
+	if genericExecuteTitle(title) {
 		return ""
 	}
-	if detail := prefixedTitleDetail(title, "Terminal", "Run", "Running"); detail != "" {
+	if detail := prefixedTitleDetail(title, "Terminal", "Shell", "Command", "Execute", "Run", "Running"); detail != "" {
 		return detail
 	}
 	return title
+}
+
+func genericExecuteTitle(title string) bool {
+	switch strings.ToLower(strings.TrimSpace(title)) {
+	case "terminal", "shell", "command", "execute", "run", "running":
+		return true
+	default:
+		return false
+	}
+}
+
+func titleEqualsToolName(title string, name string) bool {
+	title = strings.TrimSpace(title)
+	name = strings.TrimSpace(name)
+	if title == "" || name == "" {
+		return false
+	}
+	return strings.EqualFold(strings.ReplaceAll(title, "_", " "), strings.ReplaceAll(name, "_", " "))
 }
 
 func prefixedTitleDetail(title string, prefixes ...string) string {
@@ -389,7 +435,7 @@ func prefixedTitleDetail(title string, prefixes ...string) string {
 		if len(title) > len(withSpace) && strings.EqualFold(title[:len(withSpace)], withSpace) {
 			detail := strings.TrimSpace(title[len(withSpace):])
 			switch strings.ToLower(detail) {
-			case "", "file", "files", "repository", "terminal":
+			case "", "file", "files", "repository", "terminal", "shell", "command":
 				return ""
 			default:
 				return detail
@@ -397,6 +443,17 @@ func prefixedTitleDetail(title string, prefixes ...string) string {
 		}
 	}
 	return ""
+}
+
+func globPattern(raw map[string]any) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	return firstTrimmed(
+		asString(raw["pattern"]),
+		asString(raw["glob_pattern"]),
+		asString(raw["globPattern"]),
+	)
 }
 
 func terminalCommandDisplay(raw map[string]any) string {

@@ -667,6 +667,41 @@ func TestEventProjectorPreservesPartialProtocolToolUpdate(t *testing.T) {
 	}
 }
 
+func TestEventProjectorNotificationsSerializePartialToolUpdate(t *testing.T) {
+	notifications, err := (EventProjector{}).ProjectNotifications(&session.Event{
+		SessionID: "session-1",
+		Type:      session.EventTypeToolResult,
+		Protocol: &session.EventProtocol{
+			Update: &session.ProtocolUpdate{
+				SessionUpdate: UpdateToolCallInfo,
+				ToolCallID:    "call-1",
+				Status:        ToolStatusCompleted,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ProjectNotifications() error = %v", err)
+	}
+	if len(notifications) != 1 {
+		t.Fatalf("ProjectNotifications() produced %d notifications, want 1", len(notifications))
+	}
+	raw, err := json.Marshal(notifications[0])
+	if err != nil {
+		t.Fatalf("json.Marshal(notification) error = %v", err)
+	}
+	text := string(raw)
+	for _, field := range []string{`"title"`, `"kind"`, `"rawInput"`, `"rawOutput"`, `"content"`, `"locations"`} {
+		if strings.Contains(text, field) {
+			t.Fatalf("serialized partial update = %s, unexpectedly contains %s", text, field)
+		}
+	}
+	if !strings.Contains(text, `"sessionUpdate":"tool_call_update"`) ||
+		!strings.Contains(text, `"toolCallId":"call-1"`) ||
+		!strings.Contains(text, `"status":"completed"`) {
+		t.Fatalf("serialized partial update = %s, want id and changed status only", text)
+	}
+}
+
 func TestEventProjectorPreservesStandardDiffContent(t *testing.T) {
 	oldText := "old line\n"
 	updates, err := (EventProjector{}).ProjectEvent(&session.Event{
