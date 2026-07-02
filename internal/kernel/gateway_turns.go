@@ -11,7 +11,6 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/internal/kernel/hooks"
 	"github.com/OnslaughtSnail/caelis/ports/agent"
-	"github.com/OnslaughtSnail/caelis/ports/eventsource"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	policyapi "github.com/OnslaughtSnail/caelis/ports/policy"
 	"github.com/OnslaughtSnail/caelis/ports/session"
@@ -159,18 +158,7 @@ func (g *Gateway) runTurn(
 	}
 	handle.setRunner(result.Handle)
 	defer result.Handle.Close()
-	if sourceHandle, ok := result.Handle.(eventsource.Handle); ok && sourceHandle != nil {
-		g.forwardSourceEvents(session, handle, sourceHandle)
-		return
-	}
-	for event, seqErr := range result.Handle.Events() {
-		if seqErr != nil {
-			handle.publishError(seqErr)
-			return
-		}
-		handle.publishSessionEvent(event)
-		g.noteSessionCursor(session.SessionID, event.ID)
-	}
+	g.forwardHandleSourceEvents(session, handle, result.Handle)
 }
 
 func normalizeRunRequestPolicyProfile(req *agent.RunRequest) {
@@ -222,18 +210,7 @@ func (g *Gateway) runParticipantTurn(
 	}
 	handle.setRunner(result.Handle)
 	defer result.Handle.Close()
-	if sourceHandle, ok := result.Handle.(eventsource.Handle); ok && sourceHandle != nil {
-		g.forwardSourceEvents(session, handle, sourceHandle)
-		return
-	}
-	for event, seqErr := range result.Handle.Events() {
-		if seqErr != nil {
-			handle.publishError(seqErr)
-			return
-		}
-		handle.publishSessionEvent(event)
-		g.noteSessionCursor(session.SessionID, event.ID)
-	}
+	g.forwardHandleSourceEvents(session, handle, result.Handle)
 }
 
 func (g *Gateway) dispatchSessionStartHooks(ctx context.Context, sessionObj session.Session, handle *turnHandle) error {

@@ -2,10 +2,9 @@ package local
 
 import (
 	"context"
-	"iter"
 
+	"github.com/OnslaughtSnail/caelis/internal/acpbridge"
 	"github.com/OnslaughtSnail/caelis/ports/controller"
-	"github.com/OnslaughtSnail/caelis/ports/eventsource"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
@@ -20,7 +19,7 @@ type acpForwardRequest struct {
 
 func (r *Runtime) forwardACPControllerEvents(ctx context.Context, req acpForwardRequest) error {
 	accumulator := acpNarrativeAccumulator{}
-	for sourceEvent, seqErr := range controllerSourceEvents(req.source) {
+	for sourceEvent, seqErr := range acpbridge.SourceEventsFrom(req.source) {
 		if seqErr != nil {
 			return seqErr
 		}
@@ -41,7 +40,7 @@ func (r *Runtime) forwardACPControllerEvents(ctx context.Context, req acpForward
 	return nil
 }
 
-func (r *Runtime) forwardACPSourceEvent(ctx context.Context, req acpForwardRequest, accumulator *acpNarrativeAccumulator, sourceEvent eventsource.Event) error {
+func (r *Runtime) forwardACPSourceEvent(ctx context.Context, req acpForwardRequest, accumulator *acpNarrativeAccumulator, sourceEvent acpbridge.SourceEvent) error {
 	normalized := normalizeEvent(req.activeSession, req.turnID, sourceEvent.Canonical)
 	if normalized != nil && req.isUserEcho != nil && req.isUserEcho(normalized) {
 		return nil
@@ -51,7 +50,7 @@ func (r *Runtime) forwardACPSourceEvent(ctx context.Context, req acpForwardReque
 			if liveEvent != nil {
 				updateType := acpEventUpdateType(liveEvent)
 				if liveACP := acpEnvelopeWithNarrativeText(sourceEvent.ACP, updateType, narrativeEventText(liveEvent, updateType)); liveACP != nil {
-					req.handle.publishSourceEvent(eventsource.Event{Canonical: liveEvent, ACP: liveACP})
+					req.handle.publishSourceEvent(acpbridge.SourceEvent{Canonical: liveEvent, ACP: liveACP})
 				} else {
 					req.handle.publishEvent(liveEvent)
 				}
@@ -71,7 +70,7 @@ func (r *Runtime) forwardACPSourceEvent(ctx context.Context, req acpForwardReque
 			normalized = persisted
 		}
 		if sourceEvent.ACP != nil {
-			req.handle.publishSourceEvent(eventsource.Event{Canonical: normalized, ACP: sourceEvent.ACP})
+			req.handle.publishSourceEvent(acpbridge.SourceEvent{Canonical: normalized, ACP: sourceEvent.ACP})
 			return nil
 		}
 		if normalized != nil {
@@ -80,20 +79,7 @@ func (r *Runtime) forwardACPSourceEvent(ctx context.Context, req acpForwardReque
 		return nil
 	}
 	if sourceEvent.ACP != nil {
-		req.handle.publishSourceEvent(eventsource.Event{ACP: sourceEvent.ACP})
+		req.handle.publishSourceEvent(acpbridge.SourceEvent{ACP: sourceEvent.ACP})
 	}
 	return nil
-}
-
-func controllerSourceEvents(handle controller.TurnHandle) iter.Seq2[eventsource.Event, error] {
-	if sourceHandle, ok := handle.(eventsource.Handle); ok && sourceHandle != nil {
-		return sourceHandle.SourceEvents()
-	}
-	return func(yield func(eventsource.Event, error) bool) {
-		for event, err := range handle.Events() {
-			if !yield(eventsource.Event{Canonical: event}, err) {
-				return
-			}
-		}
-	}
 }

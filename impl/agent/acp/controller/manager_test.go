@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/impl/agent/acp/subagent"
+	"github.com/OnslaughtSnail/caelis/internal/acpbridge"
 	"github.com/OnslaughtSnail/caelis/ports/controller"
-	"github.com/OnslaughtSnail/caelis/ports/eventsource"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/client"
@@ -1823,7 +1823,7 @@ func TestControllerRunPublishesACPSourceEvent(t *testing.T) {
 
 	handle.finish()
 
-	var events []eventsource.Event
+	var events []acpbridge.SourceEvent
 	for event, err := range handle.SourceEvents() {
 		if err != nil {
 			t.Fatalf("source error = %v", err)
@@ -1885,7 +1885,7 @@ func TestControllerRunStripsConsoleFenceAtUpdateIngress(t *testing.T) {
 	})
 	handle.finish()
 
-	var events []eventsource.Event
+	var events []acpbridge.SourceEvent
 	for event, err := range handle.SourceEvents() {
 		if err != nil {
 			t.Fatalf("source error = %v", err)
@@ -1953,7 +1953,7 @@ func TestControllerRunStripsConsoleFenceFromExecuteContentAtUpdateIngress(t *tes
 	})
 	handle.finish()
 
-	var events []eventsource.Event
+	var events []acpbridge.SourceEvent
 	for event, err := range handle.SourceEvents() {
 		if err != nil {
 			t.Fatalf("source error = %v", err)
@@ -2018,7 +2018,7 @@ func TestControllerRunStripsConsoleFenceFromClaudeBashContentAtUpdateIngress(t *
 	})
 	handle.finish()
 
-	var events []eventsource.Event
+	var events []acpbridge.SourceEvent
 	for event, err := range handle.SourceEvents() {
 		if err != nil {
 			t.Fatalf("source error = %v", err)
@@ -2077,7 +2077,7 @@ func TestParticipantPassthroughOnlyACPUpdatePreservesScope(t *testing.T) {
 
 	handle.finish()
 
-	var events []eventsource.Event
+	var events []acpbridge.SourceEvent
 	for event, err := range handle.SourceEvents() {
 		if err != nil {
 			t.Fatalf("source error = %v", err)

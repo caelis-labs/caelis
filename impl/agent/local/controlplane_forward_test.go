@@ -5,8 +5,8 @@ import (
 	"iter"
 	"testing"
 
+	"github.com/OnslaughtSnail/caelis/internal/acpbridge"
 	"github.com/OnslaughtSnail/caelis/ports/controller"
-	"github.com/OnslaughtSnail/caelis/ports/eventsource"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
@@ -20,7 +20,7 @@ func TestForwardACPControllerEventsPublishesPersistedCanonicalWhenACPPresent(t *
 	runtime := &Runtime{sessions: sessions}
 	runner := newRunner("run-1", func() {})
 	message := model.NewTextMessage(model.RoleAssistant, "done")
-	source := scriptedSourceHandle{events: []eventsource.Event{{
+	source := scriptedSourceHandle{events: []acpbridge.SourceEvent{{
 		Canonical: &session.Event{
 			Type:       session.EventTypeAssistant,
 			Visibility: session.VisibilityCanonical,
@@ -84,7 +84,7 @@ func TestForwardACPControllerEventsPreservesLegacyUIOnlyWhenACPPresent(t *testin
 			sessions, activeSession := newTestSessionService(t, "sess-acp-forward-ui-only")
 			runtime := &Runtime{sessions: sessions}
 			runner := newRunner("run-1", func() {})
-			source := scriptedSourceHandle{events: []eventsource.Event{{
+			source := scriptedSourceHandle{events: []acpbridge.SourceEvent{{
 				Canonical: &session.Event{
 					Type:       session.EventTypeToolCall,
 					Visibility: session.VisibilityUIOnly,
@@ -153,7 +153,7 @@ func TestForwardACPControllerEventsPreservesLegacyUIOnlyWhenACPPresent(t *testin
 }
 
 type scriptedSourceHandle struct {
-	events []eventsource.Event
+	events []acpbridge.SourceEvent
 }
 
 func (h scriptedSourceHandle) Events() iter.Seq2[*session.Event, error] {
@@ -166,10 +166,10 @@ func (h scriptedSourceHandle) Events() iter.Seq2[*session.Event, error] {
 	}
 }
 
-func (h scriptedSourceHandle) SourceEvents() iter.Seq2[eventsource.Event, error] {
-	return func(yield func(eventsource.Event, error) bool) {
+func (h scriptedSourceHandle) SourceEvents() iter.Seq2[acpbridge.SourceEvent, error] {
+	return func(yield func(acpbridge.SourceEvent, error) bool) {
 		for _, event := range h.events {
-			if !yield(eventsource.CloneEvent(event), nil) {
+			if !yield(acpbridge.CloneSourceEvent(event), nil) {
 				return
 			}
 		}

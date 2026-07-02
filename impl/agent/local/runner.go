@@ -7,9 +7,9 @@ import (
 	"iter"
 	"sync"
 
+	"github.com/OnslaughtSnail/caelis/internal/acpbridge"
 	"github.com/OnslaughtSnail/caelis/internal/eventqueue"
 	"github.com/OnslaughtSnail/caelis/ports/agent"
-	"github.com/OnslaughtSnail/caelis/ports/eventsource"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
@@ -26,7 +26,7 @@ type runner struct {
 }
 
 type runnerEvent struct {
-	event eventsource.Event
+	event acpbridge.SourceEvent
 	err   error
 }
 
@@ -66,8 +66,8 @@ func (r *runner) Events() iter.Seq2[*session.Event, error] {
 	}
 }
 
-func (r *runner) SourceEvents() iter.Seq2[eventsource.Event, error] {
-	return func(yield func(eventsource.Event, error) bool) {
+func (r *runner) SourceEvents() iter.Seq2[acpbridge.SourceEvent, error] {
+	return func(yield func(acpbridge.SourceEvent, error) bool) {
 		if r == nil {
 			return
 		}
@@ -76,7 +76,7 @@ func (r *runner) SourceEvents() iter.Seq2[eventsource.Event, error] {
 			if !ok {
 				return
 			}
-			if !yield(cloneSourceEvent(item.event), item.err) {
+			if !yield(acpbridge.CloneSourceEvent(item.event), item.err) {
 				return
 			}
 		}
@@ -158,14 +158,14 @@ func (r *runner) publishEvent(event *session.Event) {
 	if r == nil || event == nil {
 		return
 	}
-	r.publishSourceEvent(eventsource.Event{Canonical: session.CloneEvent(event)})
+	r.publishSourceEvent(acpbridge.SourceEvent{Canonical: session.CloneEvent(event)})
 }
 
-func (r *runner) publishSourceEvent(event eventsource.Event) {
+func (r *runner) publishSourceEvent(event acpbridge.SourceEvent) {
 	if r == nil || (event.Canonical == nil && event.ACP == nil) {
 		return
 	}
-	r.publish(runnerEvent{event: eventsource.CloneEvent(event)})
+	r.publish(runnerEvent{event: acpbridge.CloneSourceEvent(event)})
 }
 
 func (r *runner) publishError(err error) {

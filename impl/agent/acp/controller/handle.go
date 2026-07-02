@@ -5,9 +5,9 @@ import (
 	"iter"
 	"sync"
 
+	"github.com/OnslaughtSnail/caelis/internal/acpbridge"
 	"github.com/OnslaughtSnail/caelis/internal/eventqueue"
 	"github.com/OnslaughtSnail/caelis/ports/controller"
-	"github.com/OnslaughtSnail/caelis/ports/eventsource"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
 )
@@ -21,7 +21,7 @@ type turnHandle struct {
 }
 
 type turnHandleEvent struct {
-	event eventsource.Event
+	event acpbridge.SourceEvent
 	err   error
 }
 
@@ -55,14 +55,14 @@ func (h *turnHandle) Events() iter.Seq2[*session.Event, error] {
 	}
 }
 
-func (h *turnHandle) SourceEvents() iter.Seq2[eventsource.Event, error] {
-	return func(yield func(eventsource.Event, error) bool) {
+func (h *turnHandle) SourceEvents() iter.Seq2[acpbridge.SourceEvent, error] {
+	return func(yield func(acpbridge.SourceEvent, error) bool) {
 		for {
 			item, ok := h.events.Pop()
 			if !ok {
 				return
 			}
-			if !yield(eventsource.CloneEvent(item.event), item.err) {
+			if !yield(acpbridge.CloneSourceEvent(item.event), item.err) {
 				return
 			}
 		}
@@ -88,16 +88,16 @@ func (h *turnHandle) publishEvent(event *session.Event) {
 	if h == nil || event == nil {
 		return
 	}
-	h.publish(turnHandleEvent{event: eventsource.Event{Canonical: session.CloneEvent(event)}})
+	h.publish(turnHandleEvent{event: acpbridge.SourceEvent{Canonical: session.CloneEvent(event)}})
 }
 
 func (h *turnHandle) publishSourceEvent(event *session.Event, acp *eventstream.Envelope) {
 	if h == nil {
 		return
 	}
-	h.publish(turnHandleEvent{event: eventsource.Event{
+	h.publish(turnHandleEvent{event: acpbridge.SourceEvent{
 		Canonical: session.CloneEvent(event),
-		ACP:       eventsource.CloneACPEnvelopePtr(acp),
+		ACP:       acpbridge.CloneEnvelopePtr(acp),
 	}})
 }
 
