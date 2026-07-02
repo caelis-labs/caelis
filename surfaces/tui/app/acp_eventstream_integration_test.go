@@ -2,6 +2,7 @@ package tuiapp
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -1119,6 +1120,72 @@ func TestProjectResumeReplayEventsUsesACPEnvelopeTrace(t *testing.T) {
 	}
 }
 
+func TestResumeReplayTerminalLifecycleDoesNotKeepMainTurnActive(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	replayEvents := projectResumeReplayEvents([]eventstream.Envelope{
+		{
+			Kind:      eventstream.KindSessionUpdate,
+			SessionID: "session-1",
+			ScopeID:   "session-1",
+			TurnID:    "turn-1",
+			Final:     true,
+			Update: schema.ContentChunk{
+				SessionUpdate: schema.UpdateAgentMessage,
+				Content:       schema.TextContent{Type: "text", Text: "interrupted output"},
+			},
+		},
+		{
+			Kind:      eventstream.KindLifecycle,
+			SessionID: "session-1",
+			ScopeID:   "session-1",
+			TurnID:    "turn-1",
+			Lifecycle: &eventstream.Lifecycle{State: eventstream.LifecycleStateInterrupted},
+		},
+	})
+	next, _ := model.handleTranscriptEventsMsg(TranscriptEventsMsg{Events: replayEvents})
+	model = next.(*Model)
+	if id := strings.TrimSpace(model.activeMainACPTurnID); id != "" {
+		t.Fatalf("activeMainACPTurnID after interrupted replay = %q, want empty", id)
+	}
+
+	model.commitUserDisplayLine("continue after resume")
+	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(130, 0))
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		ScopeID:   "session-1",
+		TurnID:    "turn-2",
+		Final:     true,
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateAgentMessage,
+			Content:       schema.TextContent{Type: "text", Text: "new answer"},
+		},
+	})
+
+	var order []string
+	for _, docBlock := range model.doc.Blocks() {
+		switch block := docBlock.(type) {
+		case *MainACPTurnBlock:
+			switch {
+			case mainACPBlockContainsText(block, "interrupted output"):
+				order = append(order, "interrupted")
+			case mainACPBlockContainsText(block, "new answer"):
+				order = append(order, "new")
+			}
+		case *UserNarrativeBlock:
+			if strings.TrimSpace(block.Raw) == "continue after resume" {
+				order = append(order, "user")
+			}
+		}
+	}
+	want := []string{"interrupted", "user", "new"}
+	if !slices.Equal(order, want) {
+		t.Fatalf("document order = %#v, want %#v", order, want)
+	}
+}
+
 func TestApprovalPayloadFromACPEventUsesStandardPermission(t *testing.T) {
 	t.Parallel()
 
@@ -1201,6 +1268,19 @@ func requireMainACPTurnBlockForTest(t *testing.T, model *Model) *MainACPTurnBloc
 	}
 	t.Fatal("main ACP turn block missing")
 	return nil
+}
+
+func mainACPBlockContainsText(block *MainACPTurnBlock, text string) bool {
+	text = strings.TrimSpace(text)
+	if block == nil || text == "" {
+		return false
+	}
+	for _, event := range block.Events {
+		if strings.Contains(event.Text, text) {
+			return true
+		}
+	}
+	return false
 }
 
 type eventstreamIntegrationTurn struct {

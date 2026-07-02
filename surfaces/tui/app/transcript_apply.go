@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
 	"github.com/OnslaughtSnail/caelis/surfaces/transcript"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/tuikit"
 )
@@ -376,6 +377,9 @@ func (m *Model) applyTranscriptLifecycle(event TranscriptEvent) (tea.Model, tea.
 			if strings.EqualFold(strings.TrimSpace(event.State), "completed") {
 				m.captureLiveTurnDuration(event.OccurredAt)
 				m.captureLiveTurnDurationFromMainBlock(block)
+			}
+			if !m.turnRunning() && eventstream.IsTerminalLifecycleState(event.State) && strings.TrimSpace(m.activeMainACPTurnID) == block.BlockID() {
+				m.activeMainACPTurnID = ""
 			}
 		}
 		m.markViewportBlockDirty(block.BlockID())
