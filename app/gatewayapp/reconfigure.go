@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/pluginregistry"
 	"github.com/OnslaughtSnail/caelis/impl/agent/local"
 	"github.com/OnslaughtSnail/caelis/impl/agent/local/chat"
 	"github.com/OnslaughtSnail/caelis/impl/approval/agentreview"
@@ -351,7 +350,7 @@ type pluginAgentContribution struct {
 func (s *Stack) resolvePluginContributions(configs []PluginConfig) (pluginContributions, error) {
 	var out pluginContributions
 	for _, pCfg := range configs {
-		p, err := pluginregistry.ParsePlugin(pCfg.Root)
+		p, err := parseConfiguredPlugin(pCfg)
 		if err != nil {
 			if pCfg.Enabled {
 				return out, fmt.Errorf("gatewayapp: parse enabled plugin %q failed: %w", pCfg.ID, err)
@@ -380,23 +379,11 @@ func (s *Stack) resolvePluginContributions(configs []PluginConfig) (pluginContri
 }
 
 func (s *Stack) resolvePluginAgentContributions(configs []PluginConfig) ([]pluginAgentContribution, error) {
-	var out []pluginAgentContribution
-	for _, pCfg := range configs {
-		if !pCfg.Enabled {
-			continue
-		}
-		p, err := pluginregistry.ParsePlugin(pCfg.Root)
-		if err != nil {
-			return nil, fmt.Errorf("gatewayapp: parse enabled plugin %q failed: %w", pCfg.ID, err)
-		}
-		for _, contributed := range p.Agents {
-			out = append(out, pluginAgentContribution{
-				PluginID: p.ID,
-				Agent:    contributed,
-			})
-		}
+	contribs, err := s.resolvePluginContributions(configs)
+	if err != nil {
+		return nil, err
 	}
-	return out, nil
+	return contribs.Agents, nil
 }
 
 func pluginSkillBundles(p plugin.InstalledPlugin, enabled bool) []skill.PluginBundle {

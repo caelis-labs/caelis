@@ -39,9 +39,18 @@ type PluginInfo struct {
 }
 
 type pluginAddPathOptions struct {
-	Managed   bool
-	CacheRoot string
+	Managed    bool
+	CacheRoot  string
+	ConfigID   string
+	UpsertMode pluginInstallUpsertMode
 }
+
+type pluginInstallUpsertMode int
+
+const (
+	pluginInstallUpsertByID pluginInstallUpsertMode = iota
+	pluginInstallUpsertByRoot
+)
 
 func (s PluginService) List(ctx context.Context) ([]PluginInfo, error) {
 	if s.stack == nil || s.stack.store == nil {
@@ -105,8 +114,10 @@ func (s PluginService) Install(ctx context.Context, source string) (PluginInfo, 
 	}
 	cacheRoot := managedPluginInstallCacheRoot(s.stack.storeDir, pluginRoot)
 	return s.addPath(ctx, pluginRoot, pluginAddPathOptions{
-		Managed:   cacheRoot != "",
-		CacheRoot: cacheRoot,
+		Managed:    cacheRoot != "",
+		CacheRoot:  cacheRoot,
+		ConfigID:   entry.Name,
+		UpsertMode: pluginInstallUpsertByRoot,
 	})
 }
 
@@ -145,7 +156,11 @@ func (s PluginService) addPath(ctx context.Context, path string, opts pluginAddP
 		return PluginInfo{}, fmt.Errorf("plugin service: path is not a directory: %s", absPath)
 	}
 
-	p, err := pluginregistry.ParsePlugin(absPath)
+	id := pluginConfigID(absPath, opts.ConfigID)
+	p, err := parseConfiguredPlugin(PluginConfig{
+		ID:   id,
+		Root: absPath,
+	})
 	if err != nil {
 		return PluginInfo{}, fmt.Errorf("plugin service: parse plugin failed: %w", err)
 	}
@@ -162,36 +177,27 @@ func (s PluginService) addPath(ctx context.Context, path string, opts pluginAddP
 	}
 	doc := cloneAppConfig(oldDoc)
 
-	id := strings.ToLower(filepath.Base(absPath))
-	var found bool
-	for i, pCfg := range doc.Plugins {
-		if strings.ToLower(pCfg.ID) == id {
-			doc.Plugins[i].Root = absPath
-			doc.Plugins[i].Name = p.Name
-			doc.Plugins[i].Version = p.Version
-			doc.Plugins[i].Description = p.Description
-			doc.Plugins[i].Manifest = p.Manifest
-			doc.Plugins[i].Kind = string(p.Kind)
-			doc.Plugins[i].Enabled = true
-			doc.Plugins[i].Managed = opts.Managed
-			doc.Plugins[i].CacheRoot = strings.TrimSpace(opts.CacheRoot)
-			found = true
-			break
-		}
+	next := PluginConfig{
+		ID:          id,
+		Name:        p.Name,
+		Root:        absPath,
+		Manifest:    p.Manifest,
+		Kind:        string(p.Kind),
+		Enabled:     true,
+		Version:     p.Version,
+		Description: p.Description,
+		Managed:     opts.Managed,
+		CacheRoot:   strings.TrimSpace(opts.CacheRoot),
 	}
-	if !found {
-		doc.Plugins = append(doc.Plugins, PluginConfig{
-			ID:          id,
-			Name:        p.Name,
-			Root:        absPath,
-			Manifest:    p.Manifest,
-			Kind:        string(p.Kind),
-			Enabled:     true,
-			Version:     p.Version,
-			Description: p.Description,
-			Managed:     opts.Managed,
-			CacheRoot:   strings.TrimSpace(opts.CacheRoot),
-		})
+	var upsertErr error
+	switch opts.UpsertMode {
+	case pluginInstallUpsertByRoot:
+		upsertErr = upsertMarketplacePluginConfig(&doc, next)
+	default:
+		upsertLocalPluginConfig(&doc, next)
+	}
+	if upsertErr != nil {
+		return PluginInfo{}, upsertErr
 	}
 
 	if err := s.stack.store.Save(doc); err != nil {
@@ -458,7 +464,7 @@ func (s PluginService) enrichPluginInfoFromManifest(info *PluginInfo, pCfg Plugi
 	if info == nil {
 		return
 	}
-	p, err := pluginregistry.ParsePlugin(pCfg.Root)
+	p, err := parseConfiguredPlugin(pCfg)
 	if err != nil {
 		info.Status = "error"
 		info.Warning = err.Error()

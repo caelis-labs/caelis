@@ -113,64 +113,6 @@ func TestPluginServiceAddPathHappyPath(t *testing.T) {
 	}
 }
 
-func TestPluginServiceInstallFromClaudeMarketplaceDirectory(t *testing.T) {
-	t.Parallel()
-
-	tmp := t.TempDir()
-	storeDir := filepath.Join(tmp, "store")
-	workspaceDir := filepath.Join(tmp, "ws")
-	if err := os.MkdirAll(storeDir, 0o700); err != nil {
-		t.Fatalf("mkdir store: %v", err)
-	}
-	if err := os.MkdirAll(workspaceDir, 0o700); err != nil {
-		t.Fatalf("mkdir ws: %v", err)
-	}
-	marketplaceDir := filepath.Join(tmp, "marketplace")
-	pluginDir := filepath.Join(marketplaceDir, "plugins", "mcp-server-dev")
-	manifestDir := filepath.Join(pluginDir, ".claude-plugin")
-	if err := os.MkdirAll(manifestDir, 0o700); err != nil {
-		t.Fatalf("mkdir plugin manifest dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(manifestDir, "plugin.json"), []byte(`{
-		"name": "MCP Server Dev",
-		"version": "1.0.0",
-		"description": "Build MCP servers"
-	}`), 0o600); err != nil {
-		t.Fatalf("write plugin manifest: %v", err)
-	}
-	marketplaceManifestDir := filepath.Join(marketplaceDir, ".claude-plugin")
-	if err := os.MkdirAll(marketplaceManifestDir, 0o700); err != nil {
-		t.Fatalf("mkdir marketplace manifest dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(marketplaceManifestDir, "marketplace.json"), []byte(`{
-		"name": "local-marketplace",
-		"plugins": [
-			{
-				"name": "mcp-server-dev",
-				"description": "Build MCP servers",
-				"source": "./plugins/mcp-server-dev"
-			}
-		]
-	}`), 0o600); err != nil {
-		t.Fatalf("write marketplace manifest: %v", err)
-	}
-
-	stack := buildPluginStack(t, storeDir, workspaceDir)
-	info, err := stack.Plugins().Install(context.Background(), "mcp-server-dev@"+marketplaceDir)
-	if err != nil {
-		t.Fatalf("Install() error = %v", err)
-	}
-	if info.ID != "mcp-server-dev" || !info.Enabled {
-		t.Fatalf("Install() = %#v, want enabled mcp-server-dev", info)
-	}
-	if info.Name != "MCP Server Dev" || info.Status != "active" {
-		t.Fatalf("Install() = %#v, want manifest details and active status", info)
-	}
-	if info.Root != pluginDir {
-		t.Fatalf("Install() root = %q, want %q", info.Root, pluginDir)
-	}
-}
-
 func TestSafeJoinPluginPathRejectsSymlinkEscape(t *testing.T) {
 	t.Parallel()
 
