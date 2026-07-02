@@ -3080,6 +3080,11 @@ func TestRuntimeTerminalSubscribePreservesEchoNewlines(t *testing.T) {
 	}
 	sandbox := hostRuntimeForTest(t, activeSession.CWD)
 	command := `for i in 1 2 3; do echo "Step ${i}/3"; sleep 0.02; done`
+	want := "Step 1/3\nStep 2/3\nStep 3/3\n"
+	if goruntime.GOOS == "windows" {
+		command = `1..3 | ForEach-Object { Write-Output "Step $_/3"; Start-Sleep -Milliseconds 20 }`
+		want = "Step 1/3\r\nStep 2/3\r\nStep 3/3\r\n"
+	}
 	snapshot, err := runtime.tasks.StartCommand(context.Background(), activeSession, activeSession.SessionRef, sandbox, taskapi.CommandStartRequest{
 		Command: command,
 		Workdir: activeSession.CWD,
@@ -3115,7 +3120,7 @@ func TestRuntimeTerminalSubscribePreservesEchoNewlines(t *testing.T) {
 		}
 		text.WriteString(frame.Text)
 	}
-	if got, want := text.String(), "Step 1/3\nStep 2/3\nStep 3/3\n"; got != want {
+	if got := text.String(); got != want {
 		t.Fatalf("terminal stream text = %q, want %q", got, want)
 	}
 }
@@ -3292,8 +3297,8 @@ func TestStartCommandDoesNotExposePlainExitSummaryAsError(t *testing.T) {
 	if snapshot.State != taskapi.StateFailed {
 		t.Fatalf("snapshot.State = %q, want failed", snapshot.State)
 	}
-	if got, _ := snapshot.Result["result"].(string); got != "(no output)" {
-		t.Fatalf("snapshot.Result[result] = %q, want no-output placeholder", got)
+	if got, exists := snapshot.Result["result"]; exists {
+		t.Fatalf("snapshot.Result[result] = %#v, want no durable no-output placeholder", got)
 	}
 	if got, _ := snapshot.Result["exit_code"].(int); got != 1 {
 		t.Fatalf("snapshot.Result[exit_code] = %v, want 1", snapshot.Result["exit_code"])

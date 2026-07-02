@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"maps"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -146,7 +147,7 @@ func TestLifecycleTargetForBuildsRegisteredFactory(t *testing.T) {
 	if target.Current || target.NoOp || target.Runtime != runtime {
 		t.Fatalf("target = %#v, want registered temporary runtime", target)
 	}
-	if factory.last.RequestedBackend != backend || !strings.HasSuffix(factory.last.CWD, "/tmp/work") {
+	if factory.last.RequestedBackend != backend || !strings.HasSuffix(filepath.ToSlash(factory.last.CWD), "/tmp/work") {
 		t.Fatalf("factory config = %#v", factory.last)
 	}
 }

@@ -83,6 +83,29 @@ func TestCommandDoesNotPropagateStaleNativeExitCode(t *testing.T) {
 	}
 }
 
+func TestCommandPropagatesFinalPowerShellFailure(t *testing.T) {
+	exitCode, stdout, stderr := runEncodedPowerShellCommand(t, "if (Test-Path $null) { Write-Output unreachable }")
+	if exitCode != 1 {
+		t.Fatalf("exit code = %d stdout=%q stderr=%q, want 1", exitCode, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "Test-Path") {
+		t.Fatalf("stderr = %q, want PowerShell error text", stderr)
+	}
+}
+
+func TestCommandDoesNotPropagateEarlierPowerShellFailure(t *testing.T) {
+	exitCode, stdout, stderr := runEncodedPowerShellCommand(t, "Test-Path $null; Write-Output ok")
+	if exitCode != 0 {
+		t.Fatalf("exit code = %d stdout=%q stderr=%q, want 0", exitCode, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "ok") {
+		t.Fatalf("stdout = %q, want ok", stdout)
+	}
+	if !strings.Contains(stderr, "Test-Path") {
+		t.Fatalf("stderr = %q, want earlier PowerShell error text", stderr)
+	}
+}
+
 func TestCommandPreservesNativeStdoutNewlinesWithRedirect(t *testing.T) {
 	exitCode, stdout, stderr := runEncodedPowerShellCommand(t, "python -c \"print('a'); print('b')\" 2>&1")
 	if exitCode != 0 {

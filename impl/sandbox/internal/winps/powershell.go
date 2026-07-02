@@ -46,7 +46,9 @@ func Command(command string) string {
 		"if ($__caelisLastCommand -ne $null -and $__caelisLastCommand.CommandType -eq [System.Management.Automation.CommandTypes]::Application) { $__caelisPropagateNativeExit = $true; }; " +
 		"}; }; }; }; " +
 		"} catch { $__caelisPropagateNativeExit = $false; }; " +
-		"if ($__caelisPropagateNativeExit) { $__caelisScriptBlock = [ScriptBlock]::Create($__caelisUserCommand + \"`r`nif (`$global:LASTEXITCODE -is [int]) { exit `$global:LASTEXITCODE }\"); }; " +
+		"$__caelisStatusSuffix = \"`r`nif (-not `$?) { exit 1 }\"; " +
+		"if ($__caelisPropagateNativeExit) { $__caelisStatusSuffix = \"`r`nif (`$global:LASTEXITCODE -is [int]) { exit `$global:LASTEXITCODE }`r`nif (-not `$?) { exit 1 }\"; }; " +
+		"$__caelisScriptBlock = [ScriptBlock]::Create($__caelisUserCommand + $__caelisStatusSuffix); " +
 		"& $__caelisScriptBlock; " +
 		"$__caelisCommandSuccess = $?; " +
 		"if (-not $__caelisCommandSuccess) { exit 1; }"

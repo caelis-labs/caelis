@@ -1,4 +1,4 @@
-package win32
+package consoleoutput
 
 import (
 	"encoding/binary"
@@ -226,25 +226,32 @@ func powerShellCLIXMLMarkerSuffixStart(text string) int {
 func convertPowerShellCLIXML(text string) string {
 	start := strings.Index(text, "<Objs")
 	if start < 0 {
-		return ""
+		return text
 	}
-	converted, ok := parsePowerShellCLIXML(text[start:])
+	converted, ok, displayStream := parsePowerShellCLIXML(text[start:])
 	if !ok {
+		if displayStream || converted != "" {
+			return converted
+		}
 		return text
 	}
 	return converted
 }
 
-func parsePowerShellCLIXML(text string) (string, bool) {
+func parsePowerShellCLIXML(text string) (string, bool, bool) {
 	decoder := xml.NewDecoder(strings.NewReader(text))
 	var out strings.Builder
+	displayStream := false
 	for {
 		token, err := decoder.Token()
 		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
-			return "", false
+			if out.Len() > 0 {
+				return out.String(), true, displayStream
+			}
+			return "", false, displayStream
 		}
 		start, ok := token.(xml.StartElement)
 		if !ok || start.Name.Local != "S" {
@@ -254,13 +261,17 @@ func parsePowerShellCLIXML(text string) (string, bool) {
 		if !displayCLIXMLStream(stream) {
 			continue
 		}
+		displayStream = true
 		var value string
 		if err := decoder.DecodeElement(&value, &start); err != nil {
-			return "", false
+			if out.Len() > 0 {
+				return out.String(), true, displayStream
+			}
+			return "", false, displayStream
 		}
 		appendCLIXMLText(&out, decodePowerShellEscapes(value))
 	}
-	return out.String(), true
+	return out.String(), true, displayStream
 }
 
 func clixmlStreamAttribute(start xml.StartElement) string {

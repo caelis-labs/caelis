@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/impl/sandbox/internal/textstream"
+	"github.com/OnslaughtSnail/caelis/impl/sandbox/internal/consoleoutput"
 	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 )
 
@@ -107,8 +107,8 @@ func (r *Runtime) Run(ctx context.Context, req sandbox.CommandRequest) (sandbox.
 	if len(req.Stdin) > 0 {
 		cmd.Stdin = bytes.NewReader(req.Stdin)
 	}
-	stdout := &cappedOutputBuffer{max: hostOutputCap}
-	stderr := &cappedOutputBuffer{max: hostOutputCap}
+	stdout := newCappedOutputBuffer(hostOutputCap)
+	stderr := newCappedOutputBuffer(hostOutputCap)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	err := cmd.Run()
@@ -282,8 +282,8 @@ type hostSession struct {
 	stderr        []byte
 	stdoutTotal   int64
 	stderrTotal   int64
-	stdoutText    textstream.UTF8Decoder
-	stderrText    textstream.UTF8Decoder
+	stdoutText    hostOutputDecoder
+	stderrText    hostOutputDecoder
 	running       bool
 	supportsInput bool
 	exitCode      int
@@ -327,8 +327,8 @@ func (s *hostSession) ReadOutput(_ context.Context, stdoutMarker, stderrMarker i
 	if stderrMarker < 0 {
 		stderrMarker = 0
 	}
-	stdout, newStdoutMarker = cappedOutputSince(s.stdout, s.stdoutTotal, stdoutMarker)
-	stderr, newStderrMarker = cappedOutputSince(s.stderr, s.stderrTotal, stderrMarker)
+	stdout, newStdoutMarker = consoleoutput.CappedOutputSince(s.stdout, s.stdoutTotal, stdoutMarker)
+	stderr, newStderrMarker = consoleoutput.CappedOutputSince(s.stderr, s.stderrTotal, stderrMarker)
 	return stdout, stderr, newStdoutMarker, newStderrMarker, nil
 }
 
@@ -401,21 +401,21 @@ func (s *hostSession) readStream(reader io.Reader, stream string) {
 		if n > 0 {
 			chunk := append([]byte(nil), buf[:n]...)
 			s.mu.Lock()
-			text := ""
+			var decoded consoleoutput.StreamChunk
 			switch stream {
 			case "stderr":
-				s.stderr = appendCappedBytes(s.stderr, chunk, hostOutputCap)
-				s.stderrTotal += int64(len(chunk))
-				text = s.stderrText.Decode(chunk)
+				decoded = s.stderrText.Decode(chunk)
+				s.stderr = consoleoutput.AppendCappedBytes(s.stderr, decoded.Stored, hostOutputCap)
+				s.stderrTotal += int64(len(decoded.Stored))
 			default:
-				s.stdout = appendCappedBytes(s.stdout, chunk, hostOutputCap)
-				s.stdoutTotal += int64(len(chunk))
-				text = s.stdoutText.Decode(chunk)
+				decoded = s.stdoutText.Decode(chunk)
+				s.stdout = consoleoutput.AppendCappedBytes(s.stdout, decoded.Stored, hostOutputCap)
+				s.stdoutTotal += int64(len(decoded.Stored))
 			}
 			s.updatedAt = time.Now()
 			s.mu.Unlock()
-			if s.onOutput != nil && text != "" {
-				s.onOutput(sandbox.OutputChunk{Stream: stream, Text: text})
+			if s.onOutput != nil && len(decoded.Emit) > 0 {
+				s.onOutput(sandbox.OutputChunk{Stream: stream, Text: string(decoded.Emit)})
 			}
 		}
 		if err != nil {
@@ -432,6 +432,14 @@ func (s *hostSession) waitForExit() {
 	s.mu.Lock()
 	stdoutTail := s.stdoutText.Flush()
 	stderrTail := s.stderrText.Flush()
+	if len(stdoutTail.Stored) > 0 {
+		s.stdout = consoleoutput.AppendCappedBytes(s.stdout, stdoutTail.Stored, hostOutputCap)
+		s.stdoutTotal += int64(len(stdoutTail.Stored))
+	}
+	if len(stderrTail.Stored) > 0 {
+		s.stderr = consoleoutput.AppendCappedBytes(s.stderr, stderrTail.Stored, hostOutputCap)
+		s.stderrTotal += int64(len(stderrTail.Stored))
+	}
 	if s.stdin != nil {
 		_ = s.stdin.Close()
 		s.stdin = nil
@@ -445,11 +453,11 @@ func (s *hostSession) waitForExit() {
 	close(s.done)
 	s.mu.Unlock()
 	if s.onOutput != nil {
-		if stdoutTail != "" {
-			s.onOutput(sandbox.OutputChunk{Stream: "stdout", Text: stdoutTail})
+		if len(stdoutTail.Emit) > 0 {
+			s.onOutput(sandbox.OutputChunk{Stream: "stdout", Text: string(stdoutTail.Emit)})
 		}
-		if stderrTail != "" {
-			s.onOutput(sandbox.OutputChunk{Stream: "stderr", Text: stderrTail})
+		if len(stderrTail.Emit) > 0 {
+			s.onOutput(sandbox.OutputChunk{Stream: "stderr", Text: string(stderrTail.Emit)})
 		}
 	}
 }
@@ -507,59 +515,6 @@ func mergeEnv(extra map[string]string) []string {
 }
 
 const hostOutputCap = 1024 * 1024
-
-type cappedOutputBuffer struct {
-	max int
-	buf []byte
-}
-
-func (b *cappedOutputBuffer) Write(p []byte) (int, error) {
-	b.buf = appendCappedBytes(b.buf, p, b.max)
-	return len(p), nil
-}
-
-func (b *cappedOutputBuffer) String() string {
-	return string(b.buf)
-}
-
-func appendCappedBytes(dst []byte, src []byte, max int) []byte {
-	if max <= 0 {
-		return append(dst, src...)
-	}
-	if len(src) >= max {
-		return append([]byte(nil), src[len(src)-max:]...)
-	}
-	keep := max - len(src)
-	if len(dst) > keep {
-		dst = dst[len(dst)-keep:]
-	}
-	out := append([]byte(nil), dst...)
-	return append(out, src...)
-}
-
-func cappedOutputSince(buf []byte, total int64, marker int64) ([]byte, int64) {
-	if total < 0 {
-		total = 0
-	}
-	base := total - int64(len(buf))
-	if base < 0 {
-		base = 0
-	}
-	if marker < base {
-		marker = base
-	}
-	if marker > total {
-		marker = total
-	}
-	start := marker - base
-	if start < 0 {
-		start = 0
-	}
-	if start > int64(len(buf)) {
-		start = int64(len(buf))
-	}
-	return append([]byte(nil), buf[start:]...), total
-}
 
 var _ sandbox.Runtime = (*Runtime)(nil)
 var _ sandbox.Session = (*hostSession)(nil)

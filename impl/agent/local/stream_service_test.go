@@ -219,6 +219,130 @@ func TestStreamReadRehydratedLiteralNoOutputTextKeepsTerminalFrame(t *testing.T)
 	}
 }
 
+func TestCompleteCommandTaskStoresSeparateTerminalStreams(t *testing.T) {
+	t.Parallel()
+
+	sess := &liveOutputRaceSession{stdout: "out\n", stderr: "err\n", completed: true}
+	status, err := sess.Status(context.Background())
+	if err != nil {
+		t.Fatalf("Status() error = %v", err)
+	}
+	task := &commandTask{
+		ref:        taskapi.Ref{TaskID: "task-1", SessionID: "term-session", TerminalID: "term-1"},
+		sessionRef: session.SessionRef{SessionID: "session-1"},
+		session:    sess,
+		state:      taskapi.StateRunning,
+		running:    true,
+		createdAt:  time.Now(),
+	}
+	tm := newTaskRuntime(&Runtime{clock: time.Now}, nil)
+	snap, err := tm.completeCommandTaskWithStatus(context.Background(), task, status)
+	if err != nil {
+		t.Fatalf("completeCommandTaskWithStatus() error = %v", err)
+	}
+	if got, _ := snap.Result["stdout"].(string); got != "out\n" {
+		t.Fatalf("snapshot stdout = %q, want out stream", got)
+	}
+	if got, _ := snap.Result["stderr"].(string); got != "err\n" {
+		t.Fatalf("snapshot stderr = %q, want err stream", got)
+	}
+	if got, _ := snap.Result["result"].(string); got != "out\nerr\n" {
+		t.Fatalf("snapshot result = %q, want merged terminal summary", got)
+	}
+	if got := snap.Metadata["output_cursor"]; got != int64(len("out\nerr\n")) {
+		t.Fatalf("metadata output_cursor = %#v, want terminal byte length", got)
+	}
+}
+
+func TestCompleteCommandTaskDoesNotPersistNoOutputPlaceholder(t *testing.T) {
+	t.Parallel()
+
+	sess := &liveOutputRaceSession{completed: true}
+	status, err := sess.Status(context.Background())
+	if err != nil {
+		t.Fatalf("Status() error = %v", err)
+	}
+	task := &commandTask{
+		ref:        taskapi.Ref{TaskID: "task-1", SessionID: "term-session", TerminalID: "term-1"},
+		sessionRef: session.SessionRef{SessionID: "session-1"},
+		session:    sess,
+		state:      taskapi.StateRunning,
+		running:    true,
+		createdAt:  time.Now(),
+	}
+	tm := newTaskRuntime(&Runtime{clock: time.Now}, nil)
+	snap, err := tm.completeCommandTaskWithStatus(context.Background(), task, status)
+	if err != nil {
+		t.Fatalf("completeCommandTaskWithStatus() error = %v", err)
+	}
+	if got, exists := snap.Result["result"]; exists {
+		t.Fatalf("snapshot result = %#v, want no durable no-output placeholder", got)
+	}
+	if got := snap.Metadata["output_cursor"]; got != int64(0) {
+		t.Fatalf("metadata output_cursor = %#v, want zero terminal bytes", got)
+	}
+	streamSnap, err := (&streamService{}).readCommand(context.Background(), task, stream.Cursor{})
+	if err != nil {
+		t.Fatalf("readCommand() error = %v", err)
+	}
+	if streamSnap.FinalText != noOutputPlaceholder {
+		t.Fatalf("stream FinalText = %q, want display placeholder", streamSnap.FinalText)
+	}
+}
+
+func TestCompleteCommandTaskPreservesBlankOnlyOutputCursorWithoutResult(t *testing.T) {
+	t.Parallel()
+
+	sess := &liveOutputRaceSession{stdout: "\n", completed: true}
+	status, err := sess.Status(context.Background())
+	if err != nil {
+		t.Fatalf("Status() error = %v", err)
+	}
+	task := &commandTask{
+		ref:        taskapi.Ref{TaskID: "task-1", SessionID: "term-session", TerminalID: "term-1"},
+		sessionRef: session.SessionRef{SessionID: "session-1"},
+		session:    sess,
+		state:      taskapi.StateRunning,
+		running:    true,
+		createdAt:  time.Now(),
+	}
+	tm := newTaskRuntime(&Runtime{clock: time.Now}, nil)
+	snap, err := tm.completeCommandTaskWithStatus(context.Background(), task, status)
+	if err != nil {
+		t.Fatalf("completeCommandTaskWithStatus() error = %v", err)
+	}
+	if got, exists := snap.Result["result"]; exists {
+		t.Fatalf("snapshot result = %#v, want no durable blank-only result", got)
+	}
+	if got, _ := snap.Result["stdout"].(string); got != "\n" {
+		t.Fatalf("snapshot stdout = %q, want preserved terminal stream", got)
+	}
+	if got := snap.Metadata["output_cursor"]; got != int64(1) {
+		t.Fatalf("metadata output_cursor = %#v, want blank output byte length", got)
+	}
+}
+
+func TestCompletedTaskSessionPrefersStoredStreamsOverMergedResult(t *testing.T) {
+	t.Parallel()
+
+	sess := completedTaskSession{entry: &taskapi.Entry{
+		State: taskapi.StateCompleted,
+		Result: map[string]any{
+			"stdout": "out\n",
+			"stderr": "err\n",
+			"result": "out\nerr\n",
+		},
+		Terminal: sandbox.TerminalRef{Backend: sandbox.BackendHost, SessionID: "term-session", TerminalID: "term-1"},
+	}}
+	result, err := sess.Result(context.Background())
+	if err != nil {
+		t.Fatalf("Result() error = %v", err)
+	}
+	if result.Stdout != "out\n" || result.Stderr != "err\n" {
+		t.Fatalf("Result() streams = %q/%q, want separate streams", result.Stdout, result.Stderr)
+	}
+}
+
 func TestCommandLiveOutputBufferIsBoundedAndCursorStable(t *testing.T) {
 	t.Parallel()
 
@@ -257,6 +381,17 @@ func TestTerminalFinalTextPreservesNonBlankWhitespaceAndDropsBlankOnlyOutput(t *
 	}
 	if got := terminalFinalText("", "stdout", "stderr\n", errors.New("exit status 1")); got != "stdout\nstderr\n" {
 		t.Fatalf("terminalFinalText(stdout+stderr) = %q, want separated streams without trimming", got)
+	}
+}
+
+func TestTerminalOutputTextPreservesBlankOnlyTerminalBytes(t *testing.T) {
+	t.Parallel()
+
+	if got := terminalOutputText("   ", "", ""); got != "   " {
+		t.Fatalf("terminalOutputText(blank live output) = %q, want exact output", got)
+	}
+	if got := terminalOutputText("", "\n", ""); got != "\n" {
+		t.Fatalf("terminalOutputText(blank stdout) = %q, want exact stdout", got)
 	}
 }
 
@@ -439,6 +574,7 @@ func streamFrameText(frames []stream.Frame) string {
 
 type liveOutputRaceSession struct {
 	stdout    string
+	stderr    string
 	completed bool
 	exitCode  int
 	onRead    func()
@@ -459,6 +595,7 @@ func (s *liveOutputRaceSession) ReadOutput(_ context.Context, stdoutMarker, stde
 		s.onRead()
 	}
 	stdout := []byte(s.stdout)
+	stderr := []byte(s.stderr)
 	if stdoutMarker < 0 {
 		stdoutMarker = 0
 	}
@@ -468,7 +605,10 @@ func (s *liveOutputRaceSession) ReadOutput(_ context.Context, stdoutMarker, stde
 	if stderrMarker < 0 {
 		stderrMarker = 0
 	}
-	return append([]byte(nil), stdout[stdoutMarker:]...), nil, int64(len(stdout)), stderrMarker, nil
+	if stderrMarker > int64(len(stderr)) {
+		stderrMarker = int64(len(stderr))
+	}
+	return append([]byte(nil), stdout[stdoutMarker:]...), append([]byte(nil), stderr[stderrMarker:]...), int64(len(stdout)), int64(len(stderr)), nil
 }
 
 func (s *liveOutputRaceSession) Status(context.Context) (sandbox.SessionStatus, error) {
@@ -488,7 +628,7 @@ func (s *liveOutputRaceSession) Wait(context.Context, time.Duration) (sandbox.Se
 }
 
 func (s *liveOutputRaceSession) Result(context.Context) (sandbox.CommandResult, error) {
-	return sandbox.CommandResult{Stdout: s.stdout}, nil
+	return sandbox.CommandResult{Stdout: s.stdout, Stderr: s.stderr, ExitCode: s.exitCode}, nil
 }
 
 func (s *liveOutputRaceSession) Terminate(context.Context) error { return nil }

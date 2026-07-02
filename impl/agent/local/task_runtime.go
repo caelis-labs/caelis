@@ -119,6 +119,22 @@ func canonicalTaskResult(result map[string]any) map[string]any {
 	return out
 }
 
+func canonicalTaskEntryResult(result map[string]any) map[string]any {
+	out := canonicalTaskResult(result)
+	if result == nil {
+		return out
+	}
+	if out == nil {
+		out = map[string]any{}
+	}
+	for _, key := range []string{"stdout", "stderr"} {
+		if text, ok := result[key].(string); ok {
+			out[key] = text
+		}
+	}
+	return out
+}
+
 func taskSnapshotToolResult(call tool.Call, def tool.Definition, snapshot taskapi.Snapshot) tool.Result {
 	return taskSnapshotToolResultWithPayload(call, def, snapshot, taskToolPayload(snapshot))
 }

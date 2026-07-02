@@ -236,7 +236,7 @@ func (s *Store) writeFinalBlobs(entry *task.Entry) (map[string]string, error) {
 	}
 	stdout, _ := entry.Result["stdout"].(string)
 	stderr, _ := entry.Result["stderr"].(string)
-	if strings.TrimSpace(stdout) == "" && strings.TrimSpace(stderr) == "" {
+	if stdout == "" && stderr == "" {
 		return map[string]string{}, nil
 	}
 	records, err := s.readBlobs(entry.Session)
@@ -247,7 +247,7 @@ func (s *Store) writeFinalBlobs(entry *task.Entry) (map[string]string, error) {
 		records = map[string]blobRecord{}
 	}
 	upsertBlob := func(stream string, text string) string {
-		if strings.TrimSpace(text) == "" {
+		if text == "" {
 			return ""
 		}
 		id := fmt.Sprintf("blob-%s-%s-final", strings.TrimSpace(entry.TaskID), stream)

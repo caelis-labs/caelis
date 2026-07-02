@@ -183,11 +183,20 @@ func (tm *taskRuntime) completeCommandTaskWithStatus(ctx context.Context, task *
 	stdoutText := result.Stdout
 	stderrText := result.Stderr
 	finalText := terminalFinalText(outputText, stdoutText, stderrText, resultErr)
-	task.metadata["output_cursor"] = int64(len([]byte(finalText)))
-	task.metadata["model_output_cursor"] = int64(len([]byte(finalText)))
+	finalOutputText := terminalOutputText(outputText, stdoutText, stderrText)
+	task.metadata["output_cursor"] = int64(len([]byte(finalOutputText)))
+	task.metadata["model_output_cursor"] = int64(len([]byte(finalOutputText)))
 	task.result = map[string]any{
-		"result": finalText,
-		"state":  string(state),
+		"state": string(state),
+	}
+	if taskOutputHasNonBlankLine(finalText) && strings.TrimSpace(finalText) != noOutputPlaceholder {
+		task.result["result"] = finalText
+	}
+	if stdoutText != "" {
+		task.result["stdout"] = stdoutText
+	}
+	if stderrText != "" {
+		task.result["stderr"] = stderrText
 	}
 	if commandExitCodeAvailable(state, result.ExitCode, resultErr) {
 		task.result["exit_code"] = result.ExitCode
@@ -195,7 +204,7 @@ func (tm *taskRuntime) completeCommandTaskWithStatus(ctx context.Context, task *
 	if detail, ok := sandbox.SandboxPermissionDetail(result, resultErr); ok {
 		task.result["error"] = detail
 		task.result["error_code"] = string(tool.ErrorCodeSandboxDenied)
-	} else if resultErr != nil && strings.TrimSpace(finalText) == "(no output)" && !plainTerminalExitError(resultErr) {
+	} else if resultErr != nil && strings.TrimSpace(finalText) == noOutputPlaceholder && !plainTerminalExitError(resultErr) {
 		task.result["error"] = strings.TrimSpace(resultErr.Error())
 		if code, _ := tool.ErrorPayload(resultErr)["error_code"].(string); code != "" {
 			task.result["error_code"] = code
@@ -492,7 +501,7 @@ func (t *commandTask) entrySnapshot(now time.Time) *taskapi.Entry {
 			"workdir":    t.workdir,
 			"session_id": t.ref.SessionID,
 		},
-		Result:   canonicalTaskResult(t.result),
+		Result:   canonicalTaskEntryResult(t.result),
 		Metadata: maps.Clone(t.metadata),
 		Terminal: t.session.Terminal(),
 	}

@@ -111,6 +111,58 @@ func TestStoreUpsertCompletedTaskSplitsIndexAndBlob(t *testing.T) {
 	}
 }
 
+func TestStoreUpsertCompletedTaskBlobsWhitespaceOnlyStreams(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := NewStore(Config{RootDir: root, Clock: fixedClock})
+	entry := &task.Entry{
+		TaskID:    "task-blank",
+		Kind:      task.KindCommand,
+		Session:   sessionRef("sess-blank"),
+		State:     task.StateCompleted,
+		Running:   false,
+		CreatedAt: time.Unix(10, 0),
+		UpdatedAt: time.Unix(20, 0),
+		Result: map[string]any{
+			"stdout": "\n\n",
+			"stderr": "   ",
+			"state":  "completed",
+		},
+		Terminal: sandbox.TerminalRef{
+			Backend:    sandbox.BackendHost,
+			SessionID:  "exec-blank",
+			TerminalID: "term-blank",
+		},
+	}
+	if err := store.Upsert(context.Background(), entry); err != nil {
+		t.Fatalf("Upsert() error = %v", err)
+	}
+	listed, err := store.ListSession(context.Background(), sessionRef("sess-blank"))
+	if err != nil {
+		t.Fatalf("ListSession() error = %v", err)
+	}
+	if len(listed) != 1 {
+		t.Fatalf("len(listed) = %d, want 1", len(listed))
+	}
+	if _, ok := listed[0].Result["stdout"]; ok {
+		t.Fatalf("ListSession result unexpectedly hydrated stdout: %#v", listed[0].Result)
+	}
+	if listed[0].Result["stdout_blob"] == nil || listed[0].Result["stderr_blob"] == nil {
+		t.Fatalf("stream blobs missing from index result: %#v", listed[0].Result)
+	}
+	got, err := store.Get(context.Background(), "task-blank")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if gotStdout, _ := got.Result["stdout"].(string); gotStdout != "\n\n" {
+		t.Fatalf("hydrated stdout = %q, want blank-only stream", gotStdout)
+	}
+	if gotStderr, _ := got.Result["stderr"].(string); gotStderr != "   " {
+		t.Fatalf("hydrated stderr = %q, want blank-only stream", gotStderr)
+	}
+}
+
 func TestStoreUpsertRunningTaskKeepsIndexOnly(t *testing.T) {
 	t.Parallel()
 

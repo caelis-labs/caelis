@@ -99,12 +99,15 @@ func completedTaskOutput(result map[string]any) (string, string) {
 	if result == nil {
 		return "", ""
 	}
+	stdout, stdoutOK := result["stdout"].(string)
+	stderr, stderrOK := result["stderr"].(string)
+	if stdoutOK || stderrOK {
+		return stdout, stderr
+	}
 	if text, _ := result["result"].(string); text != "" {
 		return text, ""
 	}
-	stdout, _ := result["stdout"].(string)
-	stderr, _ := result["stderr"].(string)
-	return stdout, stderr
+	return "", ""
 }
 
 func completedTaskExitCode(entry *taskapi.Entry) int {
@@ -325,6 +328,13 @@ func terminalDeltaText(stdout string, stderr string) string {
 	default:
 		return ""
 	}
+}
+
+func terminalOutputText(output string, stdout string, stderr string) string {
+	if text := terminalDeltaText(stdout, stderr); text != "" {
+		return text
+	}
+	return output
 }
 
 func terminalFinalText(output string, stdout string, stderr string, resultErr error) string {

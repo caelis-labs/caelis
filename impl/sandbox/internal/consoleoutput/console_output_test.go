@@ -1,4 +1,4 @@
-package win32
+package consoleoutput
 
 import (
 	"encoding/binary"
@@ -115,6 +115,34 @@ func TestConsoleOutputDecoderKeepsSplitPowerShellCLIXMLPending(t *testing.T) {
 <Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04"><S S="Error">` + errText + `_x000D__x000A_</S></Objs>after`))
 	if string(second) != errText+"\r\nafter" {
 		t.Fatalf("Decode(CLIXML suffix) = %q, want decoded CLIXML then trailing text", string(second))
+	}
+}
+
+func TestConsoleOutputDecoderDoesNotLeakTruncatedPowerShellCLIXML(t *testing.T) {
+	t.Parallel()
+
+	errText := "\u9519\u8bef"
+	raw := "#< CLIXML\r\n" +
+		`<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">` +
+		`<S S="Error">` + errText + `_x000D__x000A_</S>`
+	var decoder ConsoleOutputDecoder
+	got := string(decoder.Decode([]byte(raw))) + string(decoder.Flush())
+	if got != errText+"\r\n" {
+		t.Fatalf("Decode(truncated CLIXML) = %q, want decoded error text", got)
+	}
+	if strings.Contains(got, "#< CLIXML") || strings.Contains(got, "<Objs") {
+		t.Fatalf("Decode(truncated CLIXML) = %q, want XML stripped", got)
+	}
+}
+
+func TestConsoleOutputDecoderPreservesMalformedCLIXMLLikeOutput(t *testing.T) {
+	t.Parallel()
+
+	raw := "#< CLIXML\r\n<Objs><NotPowerShell"
+	var decoder ConsoleOutputDecoder
+	got := string(decoder.Decode([]byte(raw))) + string(decoder.Flush())
+	if got != raw {
+		t.Fatalf("Decode(malformed CLIXML-like output) = %q, want original text", got)
 	}
 }
 

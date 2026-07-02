@@ -69,7 +69,7 @@ func (s *streamService) readCommand(ctx context.Context, task *commandTask, curs
 	finalText := ""
 	if !status.Running {
 		finalText = terminalFinalText(task.output, result.Stdout, result.Stderr, resultErr)
-		outputCursor = int64(len([]byte(finalText)))
+		outputCursor = int64(len([]byte(terminalOutputText(task.output, result.Stdout, result.Stderr))))
 	}
 	snap := stream.Snapshot{
 		Ref: stream.Ref{

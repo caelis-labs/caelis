@@ -1137,25 +1137,6 @@ func TestPolicySkipsBroadWritableRootsInsteadOfFailing(t *testing.T) {
 	}
 }
 
-func TestCappedOutputBufferDecodesPowerShellCLIXML(t *testing.T) {
-	raw := "#< CLIXML\r\n" +
-		`<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">` +
-		`<Obj S="progress" RefId="0"><MS><PR N="Record"><AV>Preparing modules for first use.</AV></PR></MS></Obj>` +
-		`<S S="Error">Property Length cannot be found._x000D__x000A_</S>` +
-		`</Objs>`
-	buf := &cappedOutputBuffer{max: windowsOutputCap}
-	if _, err := buf.Write([]byte(raw)); err != nil {
-		t.Fatalf("Write() error = %v", err)
-	}
-	got := buf.String()
-	if !strings.Contains(got, "Property Length cannot be found.\r\n") {
-		t.Fatalf("String() = %q, want decoded PowerShell error", got)
-	}
-	if strings.Contains(got, "<Objs") || strings.Contains(got, "Preparing modules") {
-		t.Fatalf("String() = %q, want XML/progress stripped", got)
-	}
-}
-
 func TestCleanupPlanIncludesNewManifestAndLegacyArtifacts(t *testing.T) {
 	stateDir := t.TempDir()
 	workspace := t.TempDir()

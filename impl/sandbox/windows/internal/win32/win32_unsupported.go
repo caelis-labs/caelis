@@ -16,10 +16,3 @@ func RestrictedCurrentProcessTokenWithSIDs([]string) (Token, error) {
 func (t Token) Close() error {
 	return nil
 }
-
-func DecodeConsoleOutputToUTF8(data []byte) ([]byte, error) {
-	if len(data) == 0 {
-		return nil, nil
-	}
-	return append([]byte(nil), data...), nil
-}
