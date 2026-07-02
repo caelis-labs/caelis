@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
@@ -191,9 +192,6 @@ func (m *Model) dispatchRenderEvent(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		return m, nil, false
 	}
 	m.observeRenderMessage(msg, policy)
-	if shouldInvalidateUserDisplayDedup(msg) {
-		m.invalidateUserDisplayDedup()
-	}
 	if m.shouldEnqueueRenderEvent(msg, policy) {
 		if policy.dismissHints {
 			m.dismissMessageHints()
@@ -333,23 +331,6 @@ func (m *Model) flushImmediateViewportSyncForMsg(msg tea.Msg) tea.Cmd {
 	return nil
 }
 
-func (m *Model) invalidateUserDisplayDedup() {
-	if m == nil {
-		return
-	}
-	m.userDisplayDedupOK = false
-}
-
-func shouldInvalidateUserDisplayDedup(msg tea.Msg) bool {
-	switch msg.(type) {
-	case TranscriptEventsMsg,
-		ParticipantStatusMsg:
-		return true
-	default:
-		return false
-	}
-}
-
 func (m *Model) handlePlanUpdateMsg(msg PlanUpdateMsg) tea.Model {
 	m.planEntries = m.planEntries[:0]
 	hasIncomplete := false
@@ -458,12 +439,64 @@ func (m *Model) handleAttachmentCountMsg(msg AttachmentCountMsg) tea.Model {
 }
 
 func (m *Model) handleUserMessageMsg(msg UserMessageMsg) tea.Model {
-	m.dequeuePendingUserMessage(msg.Text)
+	matchedPending := m.dequeuePendingUserMessage(msg.Text)
+	if !matchedPending && m.lastVisibleUserNarrativeMatches(msg.Text) {
+		m.ensureViewportLayout()
+		m.syncViewportContent()
+		return m
+	}
 	m.finalizeActiveMainACPTurn(false, nil)
 	m.commitUserDisplayLine(msg.Text)
 	m.ensureViewportLayout()
 	m.syncViewportContent()
 	return m
+}
+
+// lastVisibleUserNarrativeMatches applies gateway-user echo dedup. Local
+// submission rendering uses commitUserDisplayLine directly; ACP/user transcript
+// messages enter here so a late echo can be matched even after the current main
+// turn block has started.
+func (m *Model) lastVisibleUserNarrativeMatches(text string) bool {
+	if m == nil || m.doc == nil {
+		return false
+	}
+	normalized := normalizeUserDisplayLine(text)
+	if normalized == "" {
+		return false
+	}
+	blocks := m.doc.Blocks()
+	if len(blocks) == 0 {
+		return false
+	}
+	for i := len(blocks) - 1; i >= 0; i-- {
+		switch block := blocks[i].(type) {
+		case *UserNarrativeBlock:
+			return userDisplayLinesMatchForDedup(block.Raw, text)
+		case *MainACPTurnBlock:
+			if m.mainACPTurnBlockAllowsUserEchoDedup(block) {
+				continue
+			}
+			return false
+		case *TranscriptBlock:
+			if strings.TrimSpace(block.Raw) == "" {
+				continue
+			}
+			return false
+		default:
+			return false
+		}
+	}
+	return false
+}
+
+func (m *Model) mainACPTurnBlockAllowsUserEchoDedup(block *MainACPTurnBlock) bool {
+	if m == nil || block == nil {
+		return false
+	}
+	if strings.TrimSpace(m.activeMainACPTurnID) == strings.TrimSpace(block.BlockID()) {
+		return true
+	}
+	return block.EndedAt.IsZero() && len(block.Events) == 0
 }
 
 func (m *Model) handleBTWErrorMsg(msg BTWErrorMsg) tea.Model {
@@ -550,7 +583,7 @@ func terminalErrorLine(err error) string {
 	if err == nil {
 		return ""
 	}
-	text := singleLineErrorText(err.Error())
+	text := singleLineErrorText(model.UserVisibleError(err))
 	if text == "" {
 		return ""
 	}

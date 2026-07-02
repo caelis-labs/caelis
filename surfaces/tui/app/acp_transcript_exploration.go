@@ -862,7 +862,7 @@ func styleExplorationSummaryRow(row string, ctx BlockRenderContext) string {
 	verb, detail, _ := strings.Cut(strings.TrimSpace(content), " ")
 	styled := ctx.Theme.TranscriptMetaStyle().Render(plainPrefix)
 	if verb != "" && !isExplorationSummaryVerb(verb) {
-		return styled + ctx.Theme.SecondaryTextStyle().Render(content)
+		return styled + styleExplorationDetail(content, ctx)
 	}
 	if verb != "" {
 		styled += toolActionStyle(ctx, verb).Render(verb)

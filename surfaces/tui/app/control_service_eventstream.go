@@ -9,6 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/control"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
@@ -149,11 +150,11 @@ func eventStreamEnvelopeErrorReason(env eventstream.Envelope) string {
 	if env.Err == nil && env.Kind != eventstream.KindError {
 		return ""
 	}
+	if env.Err != nil {
+		return model.UserVisibleError(env.Err)
+	}
 	if text := strings.TrimSpace(env.Error); text != "" {
 		return text
-	}
-	if env.Err != nil {
-		return strings.TrimSpace(env.Err.Error())
 	}
 	return ""
 }

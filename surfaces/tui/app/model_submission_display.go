@@ -10,20 +10,13 @@ import (
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/tuikit"
 )
 
+// commitUserDisplayLine appends a local user display line without deduping.
+// Gateway/user transcript echoes must enter through handleUserMessageMsg so
+// they can be matched against the document before rendering.
 func (m *Model) commitUserDisplayLine(displayLine string) {
 	displayLine = strings.TrimSpace(displayLine)
 	if displayLine == "" {
 		return
-	}
-	normalized := normalizeUserDisplayLine(displayLine)
-	if m.userDisplayDedupOK && normalized != "" {
-		lastNormalized := normalizeUserDisplayLine(m.lastUserDisplayLine)
-		if lastNormalized == normalized {
-			return
-		}
-		if !hasImageDisplayToken(displayLine) && normalizeUserDisplayLine(stripImageDisplayTokens(m.lastUserDisplayLine)) == normalized {
-			return
-		}
 	}
 	userLine := "▌ " + displayLine
 	if m.hasCommittedLine {
@@ -33,13 +26,25 @@ func (m *Model) commitUserDisplayLine(displayLine string) {
 	m.doc.Append(block)
 	m.lastCommittedStyle = tuikit.LineStyleUser
 	m.lastCommittedRaw = userLine
-	m.lastUserDisplayLine = displayLine
-	m.userDisplayDedupOK = true
 	m.hasCommittedLine = true
 }
 
 func normalizeUserDisplayLine(text string) string {
 	return strings.Join(strings.Fields(strings.TrimSpace(text)), " ")
+}
+
+func userDisplayLinesMatchForDedup(existing string, incoming string) bool {
+	existingNormalized := normalizeUserDisplayLine(existing)
+	incomingNormalized := normalizeUserDisplayLine(incoming)
+	if existingNormalized == "" || incomingNormalized == "" {
+		return false
+	}
+	if existingNormalized == incomingNormalized {
+		return true
+	}
+	existingWithoutImages := normalizeUserDisplayLine(stripImageDisplayTokens(existing))
+	incomingWithoutImages := normalizeUserDisplayLine(stripImageDisplayTokens(incoming))
+	return existingWithoutImages != "" && existingWithoutImages == incomingWithoutImages
 }
 
 func stripImageDisplayTokens(text string) string {
@@ -72,23 +77,6 @@ func stripImageDisplayTokens(text string) string {
 		cursor = idx + 1
 	}
 	return out.String()
-}
-
-func hasImageDisplayToken(text string) bool {
-	for {
-		idx := strings.Index(text, "[image")
-		if idx < 0 {
-			return false
-		}
-		end := strings.Index(text[idx:], "]")
-		if end < 0 {
-			return false
-		}
-		if isImageDisplayToken(text[idx : idx+end+1]) {
-			return true
-		}
-		text = text[idx+1:]
-	}
 }
 
 func isImageDisplayToken(token string) bool {

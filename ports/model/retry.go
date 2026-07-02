@@ -153,14 +153,10 @@ func (l *retryingLLM) Generate(ctx context.Context, req *Request) iter.Seq2[*Str
 			}
 			canRetryLastErr = !committed && (!hasProviderTool || !semanticDeltaEmitted)
 			return err
-		}, func(attempt int, err error) (bool, error) {
+		}, func(reset AttemptReset) (bool, error) {
 			resetEvent := &StreamEvent{
-				Type: StreamEventAttemptReset,
-				AttemptReset: &AttemptReset{
-					Attempt:  attempt,
-					Cause:    err.Error(),
-					Retrying: true,
-				},
+				Type:         StreamEventAttemptReset,
+				AttemptReset: &reset,
 			}
 			if !yield(resetEvent, nil) {
 				return false, nil
@@ -295,7 +291,7 @@ func (l *retryingSearchLLM) SearchWeb(ctx context.Context, req WebSearchRequest)
 func (l *retryingLLM) retryUntilOK(
 	ctx context.Context,
 	run func(attempt int) error,
-	beforeRetry func(attempt int, err error) (bool, error),
+	beforeRetry func(AttemptReset) (bool, error),
 	shouldRetry func(error) bool,
 ) error {
 	if shouldRetry == nil {
@@ -316,8 +312,14 @@ func (l *retryingLLM) retryUntilOK(
 		if attempt >= policy.maxRetries {
 			return retryExhaustedError(policy, err)
 		}
+		delay := RetryDelayForAttempt(attempt, policy.baseDelay, policy.maxDelay)
 		if beforeRetry != nil {
-			keepGoing, hookErr := beforeRetry(attempt+1, err)
+			keepGoing, hookErr := beforeRetry(AttemptReset{
+				Attempt:          attempt + 1,
+				Retrying:         true,
+				MaxRetries:       policy.maxRetries,
+				RetryDelayMillis: delay.Milliseconds(),
+			})
 			if hookErr != nil {
 				return hookErr
 			}
@@ -325,7 +327,7 @@ func (l *retryingLLM) retryUntilOK(
 				return nil
 			}
 		}
-		if sleepErr := sleepRetryDelay(ctx, RetryDelayForAttempt(attempt, policy.baseDelay, policy.maxDelay)); sleepErr != nil {
+		if sleepErr := sleepRetryDelay(ctx, delay); sleepErr != nil {
 			return sleepErr
 		}
 	}
@@ -335,10 +337,60 @@ func retryExhaustedError(policy retryPolicy, err error) error {
 	if err == nil {
 		return nil
 	}
-	if policy.backpressure {
-		return fmt.Errorf("model: llm request hit provider backpressure after %d retries: %w", policy.maxRetries, err)
+	return &RetryExhaustedError{
+		MaxRetries:   policy.maxRetries,
+		Backpressure: policy.backpressure,
+		Cause:        err,
 	}
-	return fmt.Errorf("model: llm request failed after %d retries: %w", policy.maxRetries, err)
+}
+
+// RetryExhaustedError reports that one model request exhausted its retry budget.
+type RetryExhaustedError struct {
+	MaxRetries   int
+	Backpressure bool
+	Cause        error
+}
+
+func (e *RetryExhaustedError) Error() string {
+	if e == nil {
+		return ""
+	}
+	message := retryExhaustedMessage(e.MaxRetries, e.Backpressure, true)
+	if e.Cause == nil {
+		return message
+	}
+	return fmt.Sprintf("%s: %v", message, e.Cause)
+}
+
+func (e *RetryExhaustedError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Cause
+}
+
+// DisplayMessage returns the provider-detail-free retry failure summary.
+func (e *RetryExhaustedError) DisplayMessage() string {
+	if e == nil {
+		return ""
+	}
+	return retryExhaustedMessage(e.MaxRetries, e.Backpressure, false)
+}
+
+func retryExhaustedMessage(maxRetries int, backpressure bool, includeRuntimePrefix bool) string {
+	label := "request failed"
+	if backpressure {
+		label = "request hit provider backpressure"
+	}
+	if includeRuntimePrefix {
+		label = "model: llm " + label
+	} else {
+		label = "model " + label
+	}
+	if maxRetries <= 0 {
+		return label
+	}
+	return fmt.Sprintf("%s after %d retries", label, maxRetries)
 }
 
 func retryPolicyForError(cfg RetryConfig, err error) retryPolicy {

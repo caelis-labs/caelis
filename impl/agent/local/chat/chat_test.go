@@ -2938,9 +2938,11 @@ func TestChatAgentSpeculativeToolCallRetry(t *testing.T) {
 	// - matching tool_result (canonical)
 	var resetEventCount int
 	var canonicalToolCallsCount int
+	var resetEvent *session.Event
 	for _, ev := range gotEvents {
 		if ev.Type == session.EventTypeLifecycle && ev.Lifecycle != nil && ev.Lifecycle.Status == "attempt_reset" {
 			resetEventCount++
+			resetEvent = ev
 		}
 		if ev.Type == session.EventTypeToolCall && ev.Visibility == session.VisibilityCanonical {
 			canonicalToolCallsCount++
@@ -2949,6 +2951,13 @@ func TestChatAgentSpeculativeToolCallRetry(t *testing.T) {
 
 	if got, want := resetEventCount, 1; got != want {
 		t.Fatalf("resetEventCount = %d, want %d", got, want)
+	}
+	attemptMeta := nestedMap(resetEvent.Meta, "caelis", "runtime", "attempt_reset")
+	if attemptMeta == nil {
+		t.Fatalf("resetEvent.Meta = %#v, want attempt_reset meta", resetEvent.Meta)
+	}
+	if cause, ok := attemptMeta["cause"]; ok {
+		t.Fatalf("attempt_reset meta leaked cause = %#v", cause)
 	}
 	if got, want := canonicalToolCallsCount, 1; got != want {
 		t.Fatalf("canonicalToolCallsCount = %d, want %d", got, want)

@@ -381,18 +381,21 @@ func (m *Model) renderPendingQueueDrawer() string {
 	return insetRenderedBlock(strings.Join(lines, "\n"), inputHorizontalInset)
 }
 
-func (m *Model) dequeuePendingUserMessage(text string) {
+// dequeuePendingUserMessage removes the matching pending prompt and reports
+// whether the gateway user echo corresponds to an explicitly queued prompt.
+func (m *Model) dequeuePendingUserMessage(text string) bool {
 	if len(m.pendingQueue) == 0 {
-		return
+		return false
 	}
 	needle := strings.TrimSpace(text)
 	for i, pending := range m.pendingQueue {
 		if pending.matchesUserMessage(needle) {
 			m.pendingQueue = append(m.pendingQueue[:i], m.pendingQueue[i+1:]...)
-			return
+			return true
 		}
 	}
 	m.pendingQueue = m.pendingQueue[1:]
+	return false
 }
 
 func (m *Model) takeNextDeferredPendingPrompt() (pendingPrompt, bool) {

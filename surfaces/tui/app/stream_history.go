@@ -21,8 +21,6 @@ func (m *Model) resetConversationView() {
 	m.hasCommittedLine = false
 	m.lastCommittedStyle = tuikit.LineStyleDefault
 	m.lastCommittedRaw = ""
-	m.lastUserDisplayLine = ""
-	m.userDisplayDedupOK = false
 	m.transientIsRetry = false
 	m.pendingQueue = nil
 	m.hintEntries = nil
@@ -46,8 +44,6 @@ func (m *Model) resetConversationView() {
 func (m *Model) refreshHistoryTailState() {
 	m.lastCommittedStyle = tuikit.LineStyleDefault
 	m.lastCommittedRaw = ""
-	m.lastUserDisplayLine = ""
-	m.userDisplayDedupOK = false
 	m.hasCommittedLine = false
 	blocks := m.doc.Blocks()
 	for i := len(blocks) - 1; i >= 0; i-- {
@@ -58,7 +54,6 @@ func (m *Model) refreshHistoryTailState() {
 			}
 			m.lastCommittedRaw = raw
 			m.lastCommittedStyle = tuikit.LineStyleUser
-			m.lastUserDisplayLine = strings.TrimSpace(ub.Raw)
 			m.hasCommittedLine = true
 			return
 		}
@@ -74,9 +69,6 @@ func (m *Model) refreshHistoryTailState() {
 		}
 		m.lastCommittedRaw = raw
 		m.lastCommittedStyle = tuikit.DetectLineStyle(raw)
-		if m.lastCommittedStyle == tuikit.LineStyleUser {
-			m.lastUserDisplayLine = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(strings.TrimSpace(raw), ">"), "▌"))
-		}
 		m.hasCommittedLine = true
 		return
 	}

@@ -1,10 +1,13 @@
 package tuiapp
 
 import (
+	"errors"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
@@ -134,6 +137,25 @@ func TestEventStreamTerminalBatcherMergesGenericCumulativeSameLine(t *testing.T)
 	}
 	if got, _ := acpTerminalOutput(update); got != "abcd" {
 		t.Fatalf("acpTerminalOutput() = %q, want cumulative terminal frame", got)
+	}
+}
+
+func TestEventStreamEnvelopeErrorReasonPrefersStructuredRedaction(t *testing.T) {
+	t.Parallel()
+
+	env := eventstream.Error(&model.RetryExhaustedError{
+		MaxRetries: 5,
+		Cause:      errors.New("model: http status 500 body=Internal Server Error"),
+	})
+	if !strings.Contains(env.Error, "Internal Server Error") {
+		t.Fatalf("test setup error text = %q, want raw provider detail", env.Error)
+	}
+	reason := eventStreamEnvelopeErrorReason(env)
+	if reason != "model request failed after 5 retries" {
+		t.Fatalf("eventStreamEnvelopeErrorReason() = %q, want redacted retry error", reason)
+	}
+	if strings.Contains(reason, "Internal Server Error") || strings.Contains(reason, "http status 500") {
+		t.Fatalf("failure reason leaked provider detail: %q", reason)
 	}
 }
 

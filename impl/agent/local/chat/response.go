@@ -58,15 +58,11 @@ func chunkEventFromStreamEvent(event *model.StreamEvent) *session.Event {
 		return nil
 	}
 	if event.Type == model.StreamEventAttemptReset {
-		attempt := 0
-		cause := ""
-		retrying := false
+		reset := model.AttemptReset{}
 		if event.AttemptReset != nil {
-			attempt = event.AttemptReset.Attempt
-			cause = event.AttemptReset.Cause
-			retrying = event.AttemptReset.Retrying
+			reset = *event.AttemptReset
 		}
-		return modelAttemptResetEvent(attempt, cause, retrying)
+		return modelAttemptResetEvent(reset)
 	}
 	if event.PartDelta == nil {
 		return nil
@@ -110,7 +106,7 @@ func chunkEventFromStreamEvent(event *model.StreamEvent) *session.Event {
 	}
 }
 
-func modelAttemptResetEvent(attempt int, cause string, retrying bool) *session.Event {
+func modelAttemptResetEvent(reset model.AttemptReset) *session.Event {
 	meta := map[string]any{
 		"caelis": map[string]any{
 			"version": 1,
@@ -122,13 +118,16 @@ func modelAttemptResetEvent(attempt int, cause string, retrying bool) *session.E
 	resetMeta, _ := meta["caelis"].(map[string]any)
 	runtimeMeta, _ := resetMeta["runtime"].(map[string]any)
 	attemptMeta, _ := runtimeMeta["attempt_reset"].(map[string]any)
-	if attempt > 0 {
-		attemptMeta["attempt"] = attempt
+	if reset.Attempt > 0 {
+		attemptMeta["attempt"] = reset.Attempt
 	}
-	if cause := strings.TrimSpace(cause); cause != "" {
-		attemptMeta["cause"] = cause
+	if reset.MaxRetries > 0 {
+		attemptMeta["max_retries"] = reset.MaxRetries
 	}
-	attemptMeta["retrying"] = retrying
+	if reset.RetryDelayMillis > 0 {
+		attemptMeta["retry_delay_ms"] = reset.RetryDelayMillis
+	}
+	attemptMeta["retrying"] = reset.Retrying
 	return session.MarkUIOnly(&session.Event{
 		Type: session.EventTypeLifecycle,
 		Text: "model attempt reset",

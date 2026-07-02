@@ -358,17 +358,15 @@ type Model struct {
 	participantTurnIDs             map[string]string
 	activeParticipantTurnSessionID string
 
-	streamLine          string
-	pendingLogBuffer    logChunkBuffer
-	logStreamBuffer     logStreamBuffer
-	lastCommittedStyle  tuikit.LineStyle
-	lastCommittedRaw    string
-	lastUserDisplayLine string
-	userDisplayDedupOK  bool
-	hasCommittedLine    bool
-	planEntries         []planEntryState
-	welcomeCardPending  bool
-	liveTurn            liveTurnState
+	streamLine         string
+	pendingLogBuffer   logChunkBuffer
+	logStreamBuffer    logStreamBuffer
+	lastCommittedStyle tuikit.LineStyle
+	lastCommittedRaw   string
+	hasCommittedLine   bool
+	planEntries        []planEntryState
+	welcomeCardPending bool
+	liveTurn           liveTurnState
 
 	// Transient log replacement tracking — now uses block IDs.
 	transientBlockID string

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"charm.land/lipgloss/v2"
+	"github.com/OnslaughtSnail/caelis/surfaces/transcript"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/tuikit"
 )
 
@@ -25,9 +26,10 @@ type SubagentEvent struct {
 	Kind SubagentEventKind
 
 	// Assistant/Reasoning: accumulated text.
-	Text      string
-	StartedAt time.Time
-	EndedAt   time.Time
+	Text       string
+	NoticeKind transcript.NoticeKind
+	StartedAt  time.Time
+	EndedAt    time.Time
 
 	// ActiveBuffer is transient UI state derived from Text for streaming
 	// narrative rendering. It is not canonical session data.

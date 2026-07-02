@@ -132,8 +132,11 @@ func invalidToolCallWarningEvents(message model.Message, err error, includeNarra
 	return out
 }
 
-func invalidToolCallAttemptResetEvent(attempt int, err error) *session.Event {
-	return modelAttemptResetEvent(attempt, invalidToolCallReason(err), true)
+func invalidToolCallAttemptResetEvent(attempt int) *session.Event {
+	return modelAttemptResetEvent(model.AttemptReset{
+		Attempt:  attempt,
+		Retrying: true,
+	})
 }
 
 func invalidToolCallNarrativeEvent(message model.Message) *session.Event {

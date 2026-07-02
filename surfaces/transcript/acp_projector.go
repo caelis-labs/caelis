@@ -77,24 +77,26 @@ func ProjectACPEventToEvents(env eventstream.Envelope, surface SurfaceProjector)
 	case eventstream.KindLifecycle:
 		if env.Lifecycle != nil && strings.TrimSpace(env.Lifecycle.State) != "" {
 			state := strings.TrimSpace(env.Lifecycle.State)
+			eventMeta := attemptResetSurfaceMeta(state, meta)
 			out = append(out, Event{
 				Kind:       EventLifecycle,
 				Scope:      scope,
 				ScopeID:    scopeID,
 				Actor:      strings.TrimSpace(env.Actor),
 				OccurredAt: occurredAt,
-				Meta:       meta,
+				Meta:       eventMeta,
 				State:      state,
 			})
-			if notice := attemptResetNoticeText(state, meta); notice != "" {
+			if notice := attemptResetNoticeText(state, eventMeta); notice != "" {
 				out = append(out, Event{
 					Kind:          EventNotice,
 					Scope:         scope,
 					ScopeID:       scopeID,
 					Actor:         strings.TrimSpace(env.Actor),
 					OccurredAt:    occurredAt,
-					Meta:          meta,
+					Meta:          eventMeta,
 					NarrativeKind: NarrativeNotice,
+					NoticeKind:    NoticeKindModelRetry,
 					Text:          notice,
 					Final:         true,
 				})
@@ -114,6 +116,38 @@ func ProjectACPEventToEvents(env eventstream.Envelope, surface SurfaceProjector)
 	return out
 }
 
+func attemptResetSurfaceMeta(state string, meta map[string]any) map[string]any {
+	if !strings.EqualFold(strings.TrimSpace(state), "attempt_reset") {
+		return meta
+	}
+	caelis, ok := meta["caelis"].(map[string]any)
+	if !ok {
+		return meta
+	}
+	runtimeMeta, ok := caelis["runtime"].(map[string]any)
+	if !ok {
+		return meta
+	}
+	attemptMeta, ok := runtimeMeta["attempt_reset"].(map[string]any)
+	if !ok {
+		return meta
+	}
+	if _, ok := attemptMeta["cause"]; !ok {
+		return meta
+	}
+	// Legacy/replay defense: current runtime no longer writes provider causes
+	// into attempt_reset meta, but older streams may still carry them.
+	out := CloneAnyMap(meta)
+	caelisOut := CloneAnyMap(caelis)
+	runtimeOut := CloneAnyMap(runtimeMeta)
+	attemptOut := CloneAnyMap(attemptMeta)
+	delete(attemptOut, "cause")
+	runtimeOut["attempt_reset"] = attemptOut
+	caelisOut["runtime"] = runtimeOut
+	out["caelis"] = caelisOut
+	return out
+}
+
 func attemptResetNoticeText(state string, meta map[string]any) string {
 	if !strings.EqualFold(strings.TrimSpace(state), "attempt_reset") {
 		return ""
@@ -122,17 +156,42 @@ func attemptResetNoticeText(state string, meta map[string]any) string {
 		return ""
 	}
 	attempt := MetaInt(meta, "caelis", "runtime", "attempt_reset", "attempt")
-	cause := MetaString(meta, "caelis", "runtime", "attempt_reset", "cause")
+	maxRetries := MetaInt(meta, "caelis", "runtime", "attempt_reset", "max_retries")
+	retryDelayMillis := MetaInt(meta, "caelis", "runtime", "attempt_reset", "retry_delay_ms")
+	parts := make([]string, 0, 2)
 	switch {
-	case attempt > 0 && cause != "":
-		return fmt.Sprintf("! model request failed, retrying (attempt %d): %s", attempt, cause)
+	case attempt > 0 && maxRetries > 0:
+		parts = append(parts, fmt.Sprintf("%d/%d", attempt, maxRetries))
 	case attempt > 0:
-		return fmt.Sprintf("! model request failed, retrying (attempt %d)", attempt)
-	case cause != "":
-		return "! model request failed, retrying: " + cause
-	default:
-		return "! model request failed, retrying"
+		parts = append(parts, fmt.Sprintf("attempt %d", attempt))
 	}
+	if retryDelay := retryNoticeDelayText(retryDelayMillis); retryDelay != "" {
+		parts = append(parts, retryDelay)
+	}
+	if len(parts) == 0 {
+		return "Retrying model request"
+	}
+	return "Retrying model request (" + strings.Join(parts, ", ") + ")"
+}
+
+func retryNoticeDelayText(milliseconds int) string {
+	if milliseconds <= 0 {
+		return ""
+	}
+	delay := time.Duration(milliseconds) * time.Millisecond
+	rounded := delay.Round(time.Second)
+	if rounded < time.Second {
+		rounded = time.Second
+	}
+	if rounded < time.Minute {
+		return fmt.Sprintf("retry in %ds", int(rounded/time.Second))
+	}
+	minutes := int(rounded / time.Minute)
+	seconds := int((rounded % time.Minute) / time.Second)
+	if seconds == 0 {
+		return fmt.Sprintf("retry in %dm", minutes)
+	}
+	return fmt.Sprintf("retry in %dm%02ds", minutes, seconds)
 }
 
 func projectACPSessionUpdate(env eventstream.Envelope, meta map[string]any, scope Scope, scopeID string, surface SurfaceProjector) []Event {
@@ -272,6 +331,7 @@ func projectACPContentChunk(env eventstream.Envelope, update schema.ContentChunk
 			Actor:         strings.TrimSpace(env.Actor),
 			OccurredAt:    env.OccurredAt,
 			NarrativeKind: NarrativeNotice,
+			NoticeKind:    NoticeKindCompact,
 			Text:          CompactNoticeLabel,
 			Final:         true,
 		}}

@@ -160,9 +160,11 @@ func TestProjectACPEventToEventsProjectsAttemptResetNotice(t *testing.T) {
 			"caelis": map[string]any{
 				"runtime": map[string]any{
 					"attempt_reset": map[string]any{
-						"attempt":  1,
-						"cause":    "model: http status 400 body=bad request",
-						"retrying": true,
+						"attempt":        1,
+						"cause":          "model: http status 400 body=bad request",
+						"max_retries":    5,
+						"retry_delay_ms": 1000,
+						"retrying":       true,
 					},
 				},
 			},
@@ -174,8 +176,20 @@ func TestProjectACPEventToEventsProjectsAttemptResetNotice(t *testing.T) {
 	if events[0].Kind != EventLifecycle || events[0].State != "attempt_reset" {
 		t.Fatalf("first event = %#v, want attempt_reset lifecycle", events[0])
 	}
-	if events[1].Kind != EventNotice || !strings.Contains(events[1].Text, "retrying (attempt 1)") || !strings.Contains(events[1].Text, "http status 400") {
-		t.Fatalf("second event = %#v, want visible retry notice", events[1])
+	if events[1].Kind != EventNotice || events[1].Text != "Retrying model request (1/5, retry in 1s)" {
+		t.Fatalf("second event = %#v, want product retry notice", events[1])
+	}
+	if events[1].NoticeKind != NoticeKindModelRetry {
+		t.Fatalf("second event notice kind = %q, want model retry", events[1].NoticeKind)
+	}
+	if strings.Contains(events[1].Text, "http status 400") || strings.Contains(events[1].Text, "bad request") {
+		t.Fatalf("retry notice leaked provider error: %q", events[1].Text)
+	}
+	if cause := MetaString(events[0].Meta, "caelis", "runtime", "attempt_reset", "cause"); cause != "" {
+		t.Fatalf("lifecycle meta leaked retry cause: %q", cause)
+	}
+	if cause := MetaString(events[1].Meta, "caelis", "runtime", "attempt_reset", "cause"); cause != "" {
+		t.Fatalf("notice meta leaked retry cause: %q", cause)
 	}
 	if events[0].TurnID != "turn-1" || events[1].TurnID != "turn-1" {
 		t.Fatalf("turn ids = %q, %q; want turn-1", events[0].TurnID, events[1].TurnID)
@@ -198,6 +212,9 @@ func TestProjectACPEventToEventsProjectsCompactNoticeOnly(t *testing.T) {
 	}
 	if events[0].Kind != EventNotice || events[0].Text != CompactNoticeLabel {
 		t.Fatalf("event = %#v, want lightweight compact notice", events[0])
+	}
+	if events[0].NoticeKind != NoticeKindCompact {
+		t.Fatalf("event notice kind = %q, want compact", events[0].NoticeKind)
 	}
 	if strings.Contains(events[0].Text, "CONTEXT CHECKPOINT") {
 		t.Fatalf("compact notice leaked checkpoint body: %#v", events[0])

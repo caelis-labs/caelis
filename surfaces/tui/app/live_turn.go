@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
 )
 
@@ -53,11 +54,11 @@ func terminalLifecycleForTaskResult(msg TaskResultMsg, occurredAt time.Time) eve
 	case msg.Interrupted:
 		reason := "interrupted"
 		if msg.Err != nil {
-			reason = strings.TrimSpace(msg.Err.Error())
+			reason = model.UserVisibleError(msg.Err)
 		}
 		return eventstream.TurnCancelled("", "", "", reason, occurredAt)
 	case msg.Err != nil:
-		return eventstream.TurnFailed("", "", "", strings.TrimSpace(msg.Err.Error()), occurredAt)
+		return eventstream.TurnFailed("", "", "", model.UserVisibleError(msg.Err), occurredAt)
 	default:
 		return eventstream.TurnCompleted("", "", "", occurredAt)
 	}

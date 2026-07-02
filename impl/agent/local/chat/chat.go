@@ -180,7 +180,7 @@ func (a *Agent) collectCanonicalModelStep(
 		if attempt >= maxInvalidToolCallRepairAttempts {
 			return model.Message{}, nil, nil, true, err
 		}
-		if reset := invalidToolCallAttemptResetEvent(attempt+1, err); reset != nil {
+		if reset := invalidToolCallAttemptResetEvent(attempt + 1); reset != nil {
 			if yield != nil && !yield(reset) {
 				return model.Message{}, nil, nil, false, nil
 			}

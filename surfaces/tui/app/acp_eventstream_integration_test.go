@@ -753,7 +753,7 @@ func TestForwardTurnEventStreamQueuesLiveACPEnvelopes(t *testing.T) {
 	}
 }
 
-func TestHandleACPEventEnvelopeAnchorsAttemptResetNoticeInMainTurn(t *testing.T) {
+func TestHandleACPEventEnvelopeMergesAttemptResetNoticeInMainTurn(t *testing.T) {
 	t.Parallel()
 
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
@@ -778,9 +778,31 @@ func TestHandleACPEventEnvelopeAnchorsAttemptResetNoticeInMainTurn(t *testing.T)
 			"caelis": map[string]any{
 				"runtime": map[string]any{
 					"attempt_reset": map[string]any{
-						"attempt":  1,
-						"cause":    "model: http status 424 body=exceeds the context window",
-						"retrying": true,
+						"attempt":        1,
+						"cause":          "model: http status 424 body=exceeds the context window",
+						"max_retries":    5,
+						"retry_delay_ms": 1000,
+						"retrying":       true,
+					},
+				},
+			},
+		},
+	})
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindLifecycle,
+		SessionID: "session-1",
+		ScopeID:   "session-1",
+		TurnID:    "turn-1",
+		Lifecycle: &eventstream.Lifecycle{State: "attempt_reset"},
+		Meta: map[string]any{
+			"caelis": map[string]any{
+				"runtime": map[string]any{
+					"attempt_reset": map[string]any{
+						"attempt":        2,
+						"cause":          "model: http status 500 body=Internal Server Error",
+						"max_retries":    5,
+						"retry_delay_ms": 5000,
+						"retrying":       true,
 					},
 				},
 			},
@@ -802,11 +824,154 @@ func TestHandleACPEventEnvelopeAnchorsAttemptResetNoticeInMainTurn(t *testing.T)
 	if len(block.Events) != 2 {
 		t.Fatalf("main ACP events = %#v, want retry notice then final answer", block.Events)
 	}
-	if block.Events[0].Kind != SENotice || !strings.Contains(block.Events[0].Text, "retrying (attempt 1)") {
-		t.Fatalf("first event = %#v, want retry notice", block.Events[0])
+	if block.Events[0].Kind != SENotice || block.Events[0].Text != "Retrying model request (2/5, retry in 5s)" {
+		t.Fatalf("first event = %#v, want merged retry notice", block.Events[0])
+	}
+	if block.Events[0].NoticeKind != transcript.NoticeKindModelRetry {
+		t.Fatalf("first event notice kind = %q, want model retry", block.Events[0].NoticeKind)
+	}
+	if strings.Contains(block.Events[0].Text, "Internal Server Error") {
+		t.Fatalf("retry notice leaked provider error: %q", block.Events[0].Text)
 	}
 	if block.Events[1].Kind != SEAssistant || block.Events[1].Text != "final" {
 		t.Fatalf("second event = %#v, want final assistant", block.Events[1])
+	}
+}
+
+func TestHandleACPEventEnvelopeSuppressesAdjacentDuplicateUserMessage(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	for range 2 {
+		model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+			Kind:      eventstream.KindSessionUpdate,
+			SessionID: "session-1",
+			ScopeID:   "session-1",
+			TurnID:    "turn-1",
+			Update: schema.ContentChunk{
+				SessionUpdate: schema.UpdateUserMessage,
+				Content:       schema.TextContent{Type: "text", Text: "继续"},
+			},
+		})
+	}
+
+	userBlocks := 0
+	for _, block := range model.doc.Blocks() {
+		if user, ok := block.(*UserNarrativeBlock); ok && strings.TrimSpace(user.Raw) == "继续" {
+			userBlocks++
+		}
+	}
+	if userBlocks != 1 {
+		t.Fatalf("userBlocks = %d, want one gateway user echo", userBlocks)
+	}
+}
+
+func TestHandleACPEventEnvelopeSuppressesDuplicateUserMessageAfterMainTurnStarts(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.commitUserDisplayLine("继续")
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindLifecycle,
+		SessionID: "session-1",
+		ScopeID:   "session-1",
+		TurnID:    "turn-1",
+		Lifecycle: &eventstream.Lifecycle{State: "running"},
+	})
+	if strings.TrimSpace(model.activeMainACPTurnID) == "" {
+		t.Fatal("main ACP turn did not start before user echo")
+	}
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		ScopeID:   "session-1",
+		TurnID:    "turn-1",
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateUserMessage,
+			Content:       schema.TextContent{Type: "text", Text: "继续"},
+		},
+	})
+
+	userBlocks := 0
+	for _, block := range model.doc.Blocks() {
+		if user, ok := block.(*UserNarrativeBlock); ok && strings.TrimSpace(user.Raw) == "继续" {
+			userBlocks++
+		}
+	}
+	if userBlocks != 1 {
+		t.Fatalf("userBlocks = %d, want started main ACP turn to absorb gateway user echo", userBlocks)
+	}
+	if strings.TrimSpace(model.activeMainACPTurnID) == "" {
+		t.Fatal("duplicate user echo closed the active main ACP turn")
+	}
+}
+
+func TestHandleACPEventEnvelopeRendersQueuedRepeatedUserMessage(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.commitUserDisplayLine("继续")
+	model.pendingQueue = append(model.pendingQueue, pendingPrompt{
+		execLine:    "继续",
+		displayLine: "继续",
+		dispatched:  true,
+	})
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindLifecycle,
+		SessionID: "session-1",
+		ScopeID:   "session-1",
+		TurnID:    "turn-1",
+		Lifecycle: &eventstream.Lifecycle{State: "running"},
+	})
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		ScopeID:   "session-1",
+		TurnID:    "turn-1",
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateUserMessage,
+			Content:       schema.TextContent{Type: "text", Text: "继续"},
+		},
+	})
+
+	userBlocks := 0
+	for _, block := range model.doc.Blocks() {
+		if user, ok := block.(*UserNarrativeBlock); ok && strings.TrimSpace(user.Raw) == "继续" {
+			userBlocks++
+		}
+	}
+	if userBlocks != 2 {
+		t.Fatalf("userBlocks = %d, want queued repeated prompt rendered as a new user message", userBlocks)
+	}
+	if len(model.pendingQueue) != 0 {
+		t.Fatalf("pendingQueue = %#v, want queued prompt dequeued after gateway echo", model.pendingQueue)
+	}
+}
+
+func TestHandleACPEventEnvelopeSuppressesImageAttachmentUserEcho(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.commitUserDisplayLine("[image #1] hello")
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		ScopeID:   "session-1",
+		TurnID:    "turn-1",
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateUserMessage,
+			Content:       schema.TextContent{Type: "text", Text: "hello"},
+		},
+	})
+
+	userBlocks := 0
+	for _, block := range model.doc.Blocks() {
+		if _, ok := block.(*UserNarrativeBlock); ok {
+			userBlocks++
+		}
+	}
+	if userBlocks != 1 {
+		t.Fatalf("userBlocks = %d, want local image display line to absorb gateway echo", userBlocks)
 	}
 }
 
@@ -816,15 +981,22 @@ func TestHandleACPEventEnvelopeAnchorsCompactNoticeInMainTurn(t *testing.T) {
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
 	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(120, 0))
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
-		Kind:      eventstream.KindNotice,
+		Kind:      eventstream.KindSessionUpdate,
 		SessionID: "session-1",
 		TurnID:    "turn-1",
-		Notice:    transcript.CompactNoticeLabel,
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateCompact,
+			Content:       schema.TextContent{Type: "text", Text: "CONTEXT CHECKPOINT\nObjective: continue"},
+		},
+		Final: true,
 	})
 
 	block := requireMainACPTurnBlockForTest(t, model)
 	if len(block.Events) != 1 || block.Events[0].Kind != SENotice || block.Events[0].Text != "• "+transcript.CompactNoticeLabel {
 		t.Fatalf("main ACP events = %#v, want compact notice", block.Events)
+	}
+	if block.Events[0].NoticeKind != transcript.NoticeKindCompact {
+		t.Fatalf("compact notice kind = %q, want compact", block.Events[0].NoticeKind)
 	}
 	rows := block.Render(BlockRenderContext{Width: 96, TermWidth: 96, Theme: model.theme, ThemeKey: themeRenderCacheKey(model.theme)})
 	if plain := joinRenderedPlain(rows); !strings.Contains(plain, "• "+transcript.CompactNoticeLabel) {

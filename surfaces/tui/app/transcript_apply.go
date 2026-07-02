@@ -59,7 +59,7 @@ func (m *Model) applyTranscriptNotice(event TranscriptEvent) (tea.Model, tea.Cmd
 		m.prepareForTranscriptScope(event.Scope)
 		block := m.ensureMainACPTurnBlock(strings.TrimSpace(event.ScopeID))
 		if block != nil {
-			block.AddNotice(text, event.OccurredAt)
+			block.AddNotice(text, event.OccurredAt, event.NoticeKind)
 			m.markViewportBlockDirty(block.BlockID())
 			return m, m.requestStreamViewportSync()
 		}

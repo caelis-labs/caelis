@@ -601,9 +601,9 @@ func TestCodeFreeStreamRetriesHeaderTimeoutBeforeEmission(t *testing.T) {
 	}, 2)
 
 	var (
-		gotErr      error
-		final       *model.Response
-		resetCauses []string
+		gotErr error
+		final  *model.Response
+		resets []*model.AttemptReset
 	)
 	for event, err := range llm.Generate(context.Background(), &model.Request{
 		Messages: []model.Message{model.NewTextMessage(model.RoleUser, "hello")},
@@ -617,7 +617,7 @@ func TestCodeFreeStreamRetriesHeaderTimeoutBeforeEmission(t *testing.T) {
 			continue
 		}
 		if event.AttemptReset != nil {
-			resetCauses = append(resetCauses, event.AttemptReset.Cause)
+			resets = append(resets, event.AttemptReset)
 		}
 		if event.Response != nil && event.TurnComplete {
 			final = event.Response
@@ -629,8 +629,8 @@ func TestCodeFreeStreamRetriesHeaderTimeoutBeforeEmission(t *testing.T) {
 	if requests != 2 {
 		t.Fatalf("requests = %d, want 2", requests)
 	}
-	if len(resetCauses) != 1 || !strings.Contains(resetCauses[0], "timeout awaiting response headers") {
-		t.Fatalf("attempt reset causes = %#v, want header timeout retry notice cause", resetCauses)
+	if len(resets) != 1 || resets[0].Attempt != 1 || resets[0].MaxRetries != 2 || !resets[0].Retrying {
+		t.Fatalf("attempt reset events = %#v, want structured retry reset metadata", resets)
 	}
 	if final == nil || final.Message.TextContent() != "ok" {
 		t.Fatalf("final response = %#v, want ok after retry", final)
@@ -678,9 +678,9 @@ func TestCodeFreeStreamRetriesIdleTimeoutBetweenSSEEvents(t *testing.T) {
 	}, 2)
 
 	var (
-		gotErr      error
-		final       *model.Response
-		resetCauses []string
+		gotErr error
+		final  *model.Response
+		resets []*model.AttemptReset
 	)
 	for event, err := range llm.Generate(context.Background(), &model.Request{
 		Messages: []model.Message{model.NewTextMessage(model.RoleUser, "hello")},
@@ -694,7 +694,7 @@ func TestCodeFreeStreamRetriesIdleTimeoutBetweenSSEEvents(t *testing.T) {
 			continue
 		}
 		if event.AttemptReset != nil {
-			resetCauses = append(resetCauses, event.AttemptReset.Cause)
+			resets = append(resets, event.AttemptReset)
 		}
 		if event.Response != nil && event.TurnComplete {
 			final = event.Response
@@ -706,8 +706,8 @@ func TestCodeFreeStreamRetriesIdleTimeoutBetweenSSEEvents(t *testing.T) {
 	if requests != 2 {
 		t.Fatalf("requests = %d, want 2", requests)
 	}
-	if len(resetCauses) != 1 || !strings.Contains(resetCauses[0], "stream idle timeout") {
-		t.Fatalf("attempt reset causes = %#v, want idle timeout retry notice cause", resetCauses)
+	if len(resets) != 1 || resets[0].Attempt != 1 || resets[0].MaxRetries != 2 || !resets[0].Retrying {
+		t.Fatalf("attempt reset events = %#v, want structured retry reset metadata", resets)
 	}
 	if final == nil || final.Message.TextContent() != "ok" {
 		t.Fatalf("final response = %#v, want ok after retry", final)

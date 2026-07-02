@@ -173,9 +173,10 @@ const (
 
 // AttemptReset carries retry attempt information for client side speculative buffer clearing.
 type AttemptReset struct {
-	Attempt  int    `json:"attempt"`
-	Cause    string `json:"cause,omitempty"`
-	Retrying bool   `json:"retrying"`
+	Attempt          int   `json:"attempt"`
+	Retrying         bool  `json:"retrying"`
+	MaxRetries       int   `json:"max_retries,omitempty"`
+	RetryDelayMillis int64 `json:"retry_delay_ms,omitempty"`
 }
 
 // ReplayMeta preserves replay metadata such as reasoning signatures.

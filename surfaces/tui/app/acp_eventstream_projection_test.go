@@ -59,9 +59,11 @@ func TestProjectACPEventToTranscriptEventsProjectsAttemptResetNotice(t *testing.
 			"caelis": map[string]any{
 				"runtime": map[string]any{
 					"attempt_reset": map[string]any{
-						"attempt":  2,
-						"cause":    "model: http status 400",
-						"retrying": true,
+						"attempt":        2,
+						"cause":          "model: http status 400",
+						"max_retries":    5,
+						"retry_delay_ms": 5000,
+						"retrying":       true,
 					},
 				},
 			},
@@ -73,8 +75,17 @@ func TestProjectACPEventToTranscriptEventsProjectsAttemptResetNotice(t *testing.
 	if events[0].Kind != TranscriptEventLifecycle || events[0].State != "attempt_reset" {
 		t.Fatalf("first event = %#v, want attempt_reset lifecycle", events[0])
 	}
-	if events[1].Kind != TranscriptEventNotice || !strings.Contains(events[1].Text, "retrying (attempt 2)") {
+	if events[1].Kind != TranscriptEventNotice || events[1].Text != "Retrying model request (2/5, retry in 5s)" {
 		t.Fatalf("second event = %#v, want visible retry notice", events[1])
+	}
+	if events[1].NoticeKind != transcript.NoticeKindModelRetry {
+		t.Fatalf("second event notice kind = %q, want model retry", events[1].NoticeKind)
+	}
+	if strings.Contains(events[1].Text, "http status 400") {
+		t.Fatalf("retry notice leaked provider error: %q", events[1].Text)
+	}
+	if cause := transcript.MetaString(events[0].Meta, "caelis", "runtime", "attempt_reset", "cause"); cause != "" {
+		t.Fatalf("lifecycle meta leaked retry cause: %q", cause)
 	}
 }
 

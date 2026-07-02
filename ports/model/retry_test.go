@@ -522,6 +522,32 @@ func TestRetryPolicyForErrorUsesBackpressureBudgetForProviderOverload(t *testing
 	}
 }
 
+func TestRetryExhaustedErrorKeepsCauseOutOfDisplayMessage(t *testing.T) {
+	t.Parallel()
+
+	cause := errors.New("model: http status 500 body=Internal Server Error")
+	err := retryExhaustedError(retryPolicy{maxRetries: 5}, cause)
+	var exhausted *RetryExhaustedError
+	if !errors.As(err, &exhausted) {
+		t.Fatalf("retryExhaustedError() = %T, want RetryExhaustedError", err)
+	}
+	if !errors.Is(err, cause) {
+		t.Fatalf("retryExhaustedError() does not unwrap cause")
+	}
+	if got, want := exhausted.DisplayMessage(), "model request failed after 5 retries"; got != want {
+		t.Fatalf("DisplayMessage() = %q, want %q", got, want)
+	}
+	if got, want := UserVisibleError(err), "model request failed after 5 retries"; got != want {
+		t.Fatalf("UserVisibleError() = %q, want %q", got, want)
+	}
+	if !strings.Contains(err.Error(), "Internal Server Error") {
+		t.Fatalf("Error() = %q, want runtime error chain to retain cause", err)
+	}
+	if strings.Contains(exhausted.DisplayMessage(), "Internal Server Error") || strings.Contains(exhausted.DisplayMessage(), "http status 500") {
+		t.Fatalf("DisplayMessage() leaked provider detail: %q", exhausted.DisplayMessage())
+	}
+}
+
 func firstRequestText(req *Request) string {
 	if req == nil || len(req.Messages) == 0 {
 		return ""
@@ -564,8 +590,8 @@ func TestWithRetrySpeculativeAttemptRetry(t *testing.T) {
 	}
 	llm := WithRetry(inner, RetryConfig{
 		MaxRetries: 2,
-		BaseDelay:  time.Nanosecond,
-		MaxDelay:   time.Nanosecond,
+		BaseDelay:  time.Millisecond,
+		MaxDelay:   time.Millisecond,
 	})
 
 	var (
@@ -601,6 +627,9 @@ func TestWithRetrySpeculativeAttemptRetry(t *testing.T) {
 	}
 	if gotEvents[1].Type != StreamEventAttemptReset || gotEvents[1].AttemptReset == nil || gotEvents[1].AttemptReset.Attempt != 1 {
 		t.Errorf("gotEvents[1] = %#v, want attempt_reset", gotEvents[1])
+	}
+	if gotEvents[1].AttemptReset.MaxRetries != 2 || gotEvents[1].AttemptReset.RetryDelayMillis <= 0 {
+		t.Errorf("attempt reset retry metadata = %#v, want max retries and delay", gotEvents[1].AttemptReset)
 	}
 	if gotEvents[2].Response == nil || gotEvents[2].Response.Message.TextContent() != "final-ok" {
 		t.Errorf("gotEvents[2] = %#v, want final-ok response", gotEvents[2])

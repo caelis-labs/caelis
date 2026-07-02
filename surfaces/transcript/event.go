@@ -40,6 +40,14 @@ const (
 
 const CompactNoticeLabel = compact.CompactNoticeLabel
 
+// NoticeKind identifies structured notices that need behavior beyond display.
+type NoticeKind string
+
+const (
+	NoticeKindCompact    NoticeKind = "compact"
+	NoticeKindModelRetry NoticeKind = "model_retry"
+)
+
 type PlanEntry struct {
 	Content string
 	Status  string
@@ -55,6 +63,7 @@ type Event struct {
 	Meta       map[string]any
 
 	NarrativeKind NarrativeKind
+	NoticeKind    NoticeKind
 	Text          string
 	Final         bool
 

@@ -1,9 +1,12 @@
 package tuiapp
 
 import (
+	"errors"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/tuikit"
 	"github.com/charmbracelet/colorprofile"
 	"github.com/charmbracelet/x/ansi"
@@ -89,5 +92,56 @@ func TestACPHeaderAndToolLineSanitizeSourceANSI(t *testing.T) {
 	}
 	if strings.Contains(line, "[31m") {
 		t.Fatalf("source ANSI color leaked into tool line: %q", line)
+	}
+}
+
+func TestExplorationSummaryWrappedDetailStylesContinuationNumbers(t *testing.T) {
+	model := NewModel(Config{ColorProfile: colorprofile.TrueColor})
+	ctx := BlockRenderContext{Width: 58, TermWidth: 58, Theme: model.theme}
+	rows := wrapExplorationSummaryDetail("  └ ", "Read", "common.go 1~200, common.go 201~400, ebs_snapshot.go 901~1100", 58)
+	if len(rows) < 2 {
+		t.Fatalf("rows = %#v, want wrapped continuation", rows)
+	}
+	styled := styleExplorationSummaryRow(rows[1], ctx)
+	if got := strings.TrimRight(ansi.Strip(styled), " "); got != rows[1] {
+		t.Fatalf("styled strips to %q, want %q", got, rows[1])
+	}
+	numberFG := sgrForegroundCode(t, model.theme.TextStyle().GetForeground())
+	numberText := normalizeInlineStyleText(textWithSGRForeground(styled, numberFG))
+	if !strings.Contains(numberText, "901") || !strings.Contains(numberText, "1100") {
+		t.Fatalf("continuation numbers not styled with number foreground\nnumbers=%q\nstyled=%q", numberText, styled)
+	}
+}
+
+func TestTerminalErrorLineRedactsModelRetryDetails(t *testing.T) {
+	line := terminalErrorLine(&model.RetryExhaustedError{
+		MaxRetries: 5,
+		Cause:      errors.New("model: http status 500 body=Internal Server Error"),
+	})
+	if line != "✗ model request failed after 5 retries" {
+		t.Fatalf("terminalErrorLine() = %q, want redacted retry failure", line)
+	}
+	if strings.Contains(line, "Internal Server Error") || strings.Contains(line, "http status 500") {
+		t.Fatalf("terminal error leaked provider detail: %q", line)
+	}
+}
+
+func TestTerminalLifecycleForTaskResultRedactsModelRetryDetails(t *testing.T) {
+	env := terminalLifecycleForTaskResult(TaskResultMsg{
+		Err: &model.RetryExhaustedError{
+			MaxRetries: 5,
+			Cause:      errors.New("model: http status 500 body=Internal Server Error"),
+		},
+	}, time.Unix(120, 0))
+	if env.Lifecycle == nil || env.Lifecycle.Reason != "model request failed after 5 retries" {
+		t.Fatalf("terminal lifecycle = %#v, want redacted retry reason", env.Lifecycle)
+	}
+	line := terminalErrorLine(errorFromTerminalLifecycle(env))
+	if line != "✗ model request failed after 5 retries" {
+		t.Fatalf("terminalErrorLine(errorFromTerminalLifecycle()) = %q, want redacted retry failure", line)
+	}
+	if strings.Contains(line, "Internal Server Error") || strings.Contains(line, "http status 500") ||
+		strings.Contains(env.Lifecycle.Reason, "Internal Server Error") || strings.Contains(env.Lifecycle.Reason, "http status 500") {
+		t.Fatalf("terminal lifecycle leaked provider detail: reason=%q line=%q", env.Lifecycle.Reason, line)
 	}
 }
