@@ -101,8 +101,6 @@ is provided.
 Caelis requires the Go version declared in `go.mod`.
 
 ```bash
-make quality
-make test
-make build
-make arch-lint
+make install
+make commit-check
 ```

@@ -1,117 +1,76 @@
 # Caelis Architecture
 
-Caelis keeps one durable session model and projects that model to ACP-native
-client streams. The durable store owns model semantics; client protocols and UI
-view models are projections.
+Target direction:
+
+```text
+Presentation surfaces -> Control layer -> Agent Runtime / SDK
+```
+
+Current packages are transitional. Do not treat today's
+`cmd/caelis -> internal/cli -> app/gatewayapp -> internal/kernel ->
+ports/impl/protocol/surfaces` path as the desired end state.
 
 ## Layers
 
-- `cmd/caelis` is the binary entrypoint.
-- `internal/cli` selects doctor, ACP stdio, headless, or TUI mode.
-- `app/gatewayapp` wires concrete implementations into the local runtime.
-- `internal/kernel` owns turns, replay, approvals, active handles, participants,
-  lifecycle, and gateway orchestration.
-- `ports/*` define public extension contracts.
-- `impl/*` contains concrete providers, tools, stores, sandbox backends, policy,
-  prompt, stream, and agent implementations.
-- `protocol/acp` owns ACP schema, JSON-RPC, eventstream envelopes, terminal
-  metadata, and projection helpers.
-- `surfaces/*` adapt the kernel gateway to user interfaces. Surfaces do not own
-  model, tool, sandbox, or persistence semantics.
+- **Presentation surfaces**: TUI, ACP stdio/server, headless CLI, and future
+  GUI. Surfaces consume ACP-style `eventstream.Envelope` payloads plus
+  documented `_meta` extensions. They render and collect input; they must not
+  own model, tool, sandbox, policy, persistence, or runtime semantics.
+- **Control layer**: application orchestration. It assembles runnable agents,
+  owns lifecycle, permissions, policy/review routing, Guardian/Reviewer/system
+  agents, future Agent Manage Loop coordination, and external ACP-agent bridges.
+- **Agent Runtime / SDK**: reusable agent-building modules such as model, tools,
+  skills, sandbox, stream, task, subagent, provider adapters, and turn mechanics.
+  Runtime modules should not depend on presentation or one controller.
 
-## Durable Session Contract
+ACP is the surface-facing protocol, not necessarily the only internal event
+model. The control layer may use runtime/control events internally and project
+them to ACP-style surface events.
+
+## Current Map
+
+- `cmd/caelis`, `internal/cli`: process entry and mode selection.
+- `surfaces/*`: presentation adapters.
+- `protocol/acp`: ACP schema, eventstream envelopes, projection helpers, and
+  documented `_meta` contracts.
+- `app/gatewayapp`, `internal/kernel`, `protocol/acp/control`: current control
+  layer hotspots.
+- `ports/*`: public contracts. Keep runtime contracts separate from app-control
+  contracts as boundaries become clearer.
+- `impl/*`: concrete runtime implementations. Avoid surface/controller imports
+  unless a package is explicitly an adapter.
+
+## Durable State
 
 `ports/session.Event` is the source of truth for persisted runtime context.
-Durable model-visible facts must be stored as canonical payloads:
+Durable model-visible facts require canonical payloads:
 
-- `Event.Message` for user and assistant model messages, including text,
-  reasoning, tool-use parts, and provider replay metadata.
-- `Event.Tool` for durable tool call/result state, including ids, names, args,
-  status, output, content, truncation, and replay boundaries.
-- `PlanPayload` for durable plan state.
-- `EventProtocol{Method, Update, Permission}` for ACP/control-plane projection
-  payloads such as permission, participant, and handoff state.
+- `Event.Message` for model messages;
+- `Event.Tool` for tool calls and results;
+- `PlanPayload` for plan state;
+- `EventProtocol{Method, Update, Permission}` for control-plane projection.
 
-`Event.Protocol.Update` is not the local Agent SDK replay source. Protocol-only
-canonical assistant, tool, or plan facts are invalid unless the corresponding
-durable semantic payload is present.
+`Event.Protocol.Update` and `_meta` are not substitutes for canonical model
+state. `_meta` is display/debug or documented replay metadata.
 
-## Visibility
+Visibility categories:
 
-- `canonical`: persisted, replayed, and model-visible when the event carries
-  model semantics.
-- `mirror`: persisted/replayed as a client-facing mirror, not a second copy of
-  parent model context.
-- `ui_only`: transient live trace; not durable parent model context.
-- `overlay`: transient UI state; not invocation-visible.
-- `notice`: client notification state; not model-visible history.
+- `canonical`: persisted, replayed, and model-visible when it carries model
+  semantics.
+- `mirror`: persisted/replayed as a client-facing mirror, not a second model
+  context.
+- `ui_only`, `overlay`, `notice`: not durable parent model context.
 
-Subagent structured stream events are `ui_only` trace. The parent model receives
-subagent output through the durable `SPAWN`/`TASK` tool result, not through child
-assistant stream chunks.
+Subagent stream chunks are `ui_only`; the parent receives subagent output
+through durable `SPAWN`/`TASK` tool results.
 
-## Client Event Protocol
+## Migration Rules
 
-`protocol/acp/eventstream.Envelope` is the v1 client stream container for TUI,
-headless, ACP bridges, and future GUI/app-server surfaces. It carries:
-
-- standard ACP `session/update` payloads;
-- standard ACP `request_permission` payloads;
-- Caelis extension events for lifecycle, participant state, approval review,
-  notices, and errors.
-
-Usage is emitted only as standard ACP `session/update` `usage_update`. Token
-breakdown is stored under `_meta.caelis.usage`; `size` is only set when a real
-context window or budget is known.
-
-SSE uses `cursor` as the event id and serializes the full envelope as event
-data. WebSocket transports serialize the envelope directly. ACP stdio maps
-standard payloads to JSON-RPC ACP messages.
-
-Terminal rendering and session identity are specified in
-[`docs/acp-projection-architecture.md`](acp-projection-architecture.md). In
-short, Caelis-owned RUN_COMMAND/Bash and SPAWN streams share one
-`_meta.terminal_*` projection path across ACP stdio, TUI, and future GUI
-surfaces; filestore-backed `session_id` values are globally unique within one
-store root.
-
-Cursor fields:
-
-- `cursor`: opaque per-envelope resume id.
-- `event_id`: durable source session event id when the envelope comes from
-  session replay/projection.
-- `projection_id`: stable per-source projection id for clients that need
-  cross-mode deduplication or replay resume.
-
-Replay cursors use durable projection identity. Live cursors are stream-local,
-but session-derived live envelopes expose `projection_id` when available.
-
-## ACP Ingress
-
-External ACP updates are normalized at ingress before they enter durable
-history. Main-controller final user/assistant semantics become canonical
-session events. Controller assistant/tool/plan stream updates default to
-client trace unless they carry durable semantic payloads. Subagent structured
-streams remain `ui_only` trace.
-
-## Projection Boundaries
-
-Canonical priority is:
-
-1. `Event.Tool` and `Event.Message` semantic payloads;
-2. `Event.Protocol` ACP/control-plane projection payloads;
-3. `_meta.caelis` display/debug hints.
-
-`surfaces/transcript.Event` is a UI view model. It is not a wire protocol,
-store schema, or app-server API.
-
-`ports/gateway` exposes service contracts and internal payload helpers for
-kernel/app coordination. Client-facing surfaces consume `eventstream.Envelope`
-and standard ACP payloads directly.
-
-## Compatibility Stance
-
-Before `v1.0.0`, Caelis prefers a clear canonical schema over preserving old
-wire or store fallbacks. Unsupported legacy session formats and protocol-only
-canonical history should fail explicitly instead of being replayed with guessed
-semantics.
+- Prefer bounded, high-ROI boundary improvements over broad rewrites.
+- Do not add abstractions only for future possibilities.
+- When compatibility fallbacks are necessary, document owner, scope, and removal
+  condition.
+- Keep surfaces on the shared ACP-style protocol; avoid surface-private replay
+  or terminal paths.
+- Persistence/replay changes need round-trip tests comparing rebuilt model
+  context with runtime-produced context.

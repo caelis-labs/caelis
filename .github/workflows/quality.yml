@@ -37,8 +37,11 @@ jobs:
       - name: Vet
         run: make vet
 
-      - name: Build
-        run: make build
+      - name: Architecture lint
+        run: make arch-lint
 
       - name: Test
         run: make test
+
+      - name: Build
+        run: make build

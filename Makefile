@@ -13,7 +13,7 @@ GOTMPDIR ?= $(CACHE_ROOT)/gotmp
 GOLANGCI_LINT_CACHE ?= $(CACHE_ROOT)/golangci-lint
 XDG_CACHE_HOME ?= $(CACHE_ROOT)/xdg
 export GOMODCACHE GOCACHE GOTMPDIR GOLANGCI_LINT_CACHE XDG_CACHE_HOME
-.PHONY: arch-lint bench-regression bench-threshold build build-cli cache-dirs command-regression command-execution-regression eval-smoke fmt fmt-check install lint quality regression size-report test tui-golden tui-interaction tui-bench vet release-dry-run
+.PHONY: arch-lint build build-cli cache-dirs command-regression command-execution-regression commit-check eval-smoke fmt fmt-check install lint quality regression test tui-golden tui-interaction vet release-dry-run
 
 cache-dirs:
 	mkdir -p "$(GOMODCACHE)" "$(GOCACHE)" "$(GOTMPDIR)" "$(GOLANGCI_LINT_CACHE)" "$(XDG_CACHE_HOME)"
@@ -40,13 +40,12 @@ vet: cache-dirs
 lint: cache-dirs
 	golangci-lint run ./...
 
-arch-lint:
+arch-lint: cache-dirs
 	go run ./scripts/arch_lint.go
 
-size-report:
-	bash scripts/size_report.sh
+quality: fmt-check lint arch-lint vet test
 
-quality: fmt-check lint vet test build
+commit-check: quality build
 
 regression: eval-smoke tui-golden tui-interaction command-regression command-execution-regression
 
@@ -65,14 +64,8 @@ command-regression: cache-dirs
 command-execution-regression: cache-dirs
 	go test -timeout $(GO_TEST_TIMEOUT) ./app/gatewayapp/controladapter -run 'TestRegressionCommandExec'
 
-tui-bench: cache-dirs
-	CAELIS_BENCH_REGRESSION=1 go test ./surfaces/tui/app -run 'TestRegressionBenchThresholds' -v
-
-bench-regression: cache-dirs
-	go test -timeout $(GO_TEST_TIMEOUT) ./surfaces/tui/app -run '^$$' -bench 'Benchmark(ViewportSyncLongTranscript|AssistantTailIncrementalSync|AssistantStablePrefixTailMarkdownStream|ToolOutputStream10kChunks|VisibleSelectionRenderLongTranscript|RenderSchedulerMixedStreams)' -benchmem
-
 test: cache-dirs
 	go test -timeout $(GO_TEST_TIMEOUT) ./...
 
-release-dry-run: cache-dirs
+release-dry-run: quality
 	goreleaser release --clean --snapshot
