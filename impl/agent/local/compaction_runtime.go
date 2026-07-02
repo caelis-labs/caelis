@@ -3,6 +3,7 @@ package local
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/OnslaughtSnail/caelis/ports/agent"
 	"github.com/OnslaughtSnail/caelis/ports/compact"
@@ -155,16 +156,66 @@ func (r *Runtime) compactAfterOverflow(
 	cause error,
 	sink *runner,
 ) (bool, error) {
-	events, err := r.sessions.Events(ctx, session.EventsRequest{SessionRef: ref})
-	if err != nil {
-		return false, err
+	return r.compactAndNotify(ctx, activeSession, ref, turnID, nil, sink, func(events []*session.Event) (compact.Result, error) {
+		return r.compactor.CompactOnOverflow(ctx, compact.Request{
+			Session:    activeSession,
+			SessionRef: ref,
+			Events:     events,
+			Model:      req.AgentSpec.Model,
+		}, cause)
+	})
+}
+
+func (r *Runtime) compactAfterModelRequestWatermark(
+	ctx context.Context,
+	activeSession session.Session,
+	ref session.SessionRef,
+	turnID string,
+	decision autoCompactDecision,
+	sink *runner,
+) (bool, error) {
+	forceCompactor, ok := r.compactor.(compact.ForceEngine)
+	if !ok {
+		return false, errors.New("impl/agent/local: compactor does not support forced model-request compaction")
 	}
-	result, err := r.compactor.CompactOnOverflow(ctx, compact.Request{
-		Session:    activeSession,
-		SessionRef: ref,
-		Events:     events,
-		Model:      req.AgentSpec.Model,
-	}, cause)
+	trigger := strings.TrimSpace(decision.Reason)
+	if trigger == "" {
+		trigger = "model_request_context_watermark"
+	}
+	var events []*session.Event
+	if decision.Events != nil {
+		events = decision.Events
+	}
+	return r.compactAndNotify(ctx, activeSession, ref, turnID, events, sink, func(events []*session.Event) (compact.Result, error) {
+		return forceCompactor.Force(ctx, compact.Request{
+			Session:    activeSession,
+			SessionRef: ref,
+			Events:     events,
+			Model:      decision.Model,
+		}, trigger)
+	})
+}
+
+func (r *Runtime) compactAndNotify(
+	ctx context.Context,
+	activeSession session.Session,
+	ref session.SessionRef,
+	turnID string,
+	events []*session.Event,
+	sink *runner,
+	compactFn func([]*session.Event) (compact.Result, error),
+) (bool, error) {
+	if compactFn == nil {
+		return false, errors.New("impl/agent/local: compact function is required")
+	}
+	var err error
+	if events == nil {
+		events, err = r.sessions.Events(ctx, session.EventsRequest{SessionRef: ref})
+		if err != nil {
+			return false, err
+		}
+	}
+	result, err := compactFn(events)
 	if err != nil {
 		return false, err
 	}

@@ -283,6 +283,15 @@ func estimatePromptEventTokens(event *session.Event) int {
 }
 
 func estimateMessageTokens(message model.Message) int {
+	structural := 0
+	for _, part := range message.Parts {
+		structural += estimatePartTokens(part)
+	}
+	legacy := estimateLegacyMessageTokens(message)
+	return max(max(structural, legacy), 1)
+}
+
+func estimateLegacyMessageTokens(message model.Message) int {
 	total := 0
 	if text := strings.TrimSpace(message.TextContent()); text != "" {
 		total += estimateTextTokens(text)
@@ -305,7 +314,7 @@ func estimateMessageTokens(message model.Message) int {
 			total += max(estimated+32, int(float64(estimated)*1.25))
 		}
 	}
-	return max(total, 1)
+	return total
 }
 
 func resolveContextWindowTokens(llm model.LLM, fallback int) int {
@@ -319,7 +328,7 @@ func resolveContextWindowTokens(llm model.LLM, fallback int) int {
 
 func resolveReserveOutputTokens(window int, configured int) int {
 	if configured <= 0 {
-		configured = 5000
+		configured = defaultReserveOutputTokens(window)
 	}
 	if window <= 0 {
 		return configured
@@ -331,9 +340,13 @@ func resolveReserveOutputTokens(window int, configured int) int {
 	return configured
 }
 
+func defaultReserveOutputTokens(window int) int {
+	return policyForContextWindow(window).reserveOutputTokens
+}
+
 func resolveSafetyMarginTokens(window int, configured int) int {
 	if configured <= 0 {
-		configured = 2048
+		configured = defaultSafetyMarginTokens(window)
 	}
 	if window <= 0 {
 		return configured
@@ -343,6 +356,10 @@ func resolveSafetyMarginTokens(window int, configured int) int {
 		return maxSafety
 	}
 	return configured
+}
+
+func defaultSafetyMarginTokens(window int) int {
+	return policyForContextWindow(window).safetyMarginTokens
 }
 
 func resolveEffectiveInputBudget(window, reserve, safety int) int {
@@ -366,18 +383,263 @@ func dynamicWatermarks(window int, configuredSoft, configuredForce float64) (flo
 		}
 		return configuredSoft, configuredForce
 	}
-	switch {
-	case window >= 200000:
-		return 0.95, 0.985
-	case window >= 128000:
-		return 0.93, 0.975
-	case window >= 64000:
-		return 0.90, 0.96
-	case window >= 32000:
-		return 0.85, 0.93
-	default:
-		return 0.78, 0.88
+	policy := policyForContextWindow(window)
+	return policy.softWatermark, policy.forceWatermark
+}
+
+func dynamicEmergencyWatermark(window int, configuredForce float64) float64 {
+	base := policyForContextWindow(window).emergencyWatermark
+	if configuredForce > base {
+		return min(configuredForce, 0.99)
 	}
+	return base
+}
+
+type contextWindowPolicy struct {
+	reserveOutputTokens int
+	safetyMarginTokens  int
+	softWatermark       float64
+	forceWatermark      float64
+	emergencyWatermark  float64
+}
+
+func policyForContextWindow(window int) contextWindowPolicy {
+	switch {
+	case window >= 1_000_000:
+		return contextWindowPolicy{
+			reserveOutputTokens: min(max(window/16, 32000), 64000),
+			safetyMarginTokens:  min(max(window/64, 16000), 32000),
+			softWatermark:       0.90,
+			forceWatermark:      0.96,
+			emergencyWatermark:  0.98,
+		}
+	case window >= 200000:
+		return contextWindowPolicy{
+			reserveOutputTokens: min(max(window/12, 16000), 24000),
+			safetyMarginTokens:  8000,
+			softWatermark:       0.86,
+			forceWatermark:      0.93,
+			emergencyWatermark:  0.96,
+		}
+	case window >= 128000:
+		return contextWindowPolicy{
+			reserveOutputTokens: 12000,
+			safetyMarginTokens:  4096,
+			softWatermark:       0.82,
+			forceWatermark:      0.90,
+			emergencyWatermark:  0.94,
+		}
+	case window >= 64000:
+		return contextWindowPolicy{
+			reserveOutputTokens: 6000,
+			safetyMarginTokens:  2048,
+			softWatermark:       0.76,
+			forceWatermark:      0.86,
+			emergencyWatermark:  0.92,
+		}
+	case window >= 32000:
+		return contextWindowPolicy{
+			reserveOutputTokens: 4000,
+			safetyMarginTokens:  1536,
+			softWatermark:       0.70,
+			forceWatermark:      0.80,
+			emergencyWatermark:  0.88,
+		}
+	default:
+		return contextWindowPolicy{
+			reserveOutputTokens: 2048,
+			safetyMarginTokens:  1024,
+			softWatermark:       0.65,
+			forceWatermark:      0.75,
+			emergencyWatermark:  0.84,
+		}
+	}
+}
+
+func evaluateWatermark(usage compact.UsageSnapshot, cfg CompactionConfig) compact.TriggerDecision {
+	if usage.EffectiveInputBudget <= 0 {
+		return compact.TriggerDecision{}
+	}
+	softRatio, forceRatio := dynamicWatermarks(usage.ContextWindowTokens, cfg.WatermarkRatio, cfg.ForceWatermarkRatio)
+	ratio := usageRatio(usage)
+	switch {
+	case ratio >= forceRatio:
+		return compact.TriggerDecision{ShouldCompact: true, Reason: "context_limit"}
+	case ratio >= softRatio:
+		return compact.TriggerDecision{ShouldCompact: true, Reason: "context_watermark"}
+	default:
+		return compact.TriggerDecision{}
+	}
+}
+
+func evaluateEmergencyWatermark(usage compact.UsageSnapshot, cfg CompactionConfig) bool {
+	if usage.EffectiveInputBudget <= 0 {
+		return false
+	}
+	return usageRatio(usage) >= dynamicEmergencyWatermark(usage.ContextWindowTokens, cfg.ForceWatermarkRatio)
+}
+
+func usageRatio(usage compact.UsageSnapshot) float64 {
+	if usage.EffectiveInputBudget <= 0 {
+		return 0
+	}
+	return float64(usage.TotalTokens) / float64(usage.EffectiveInputBudget)
+}
+
+func usageForModelRequest(events []*session.Event, llm model.LLM, req *model.Request, cfg CompactionConfig) (compact.UsageSnapshot, int) {
+	window := resolveContextWindowTokens(llm, cfg.DefaultContextWindowTokens)
+	promptEvents := compact.PromptEventsFromLatestCompact(events)
+	usage := snapshotUsageWithResolvedWindow(promptEvents, window, cfg)
+	return usageWithModelRequestEstimate(usage, req)
+}
+
+func usageWithModelRequestEstimate(usage compact.UsageSnapshot, req *model.Request) (compact.UsageSnapshot, int) {
+	requestTokens := estimateModelRequestTokens(req)
+	if requestTokens > usage.TotalTokens {
+		usage.TotalTokens = requestTokens
+		if usage.Source == "" {
+			usage.Source = compact.UsageSourceEstimated
+		}
+	}
+	return usage, requestTokens
+}
+
+func estimateModelRequestTokens(req *model.Request) int {
+	if req == nil {
+		return 0
+	}
+	total := 0
+	for _, part := range req.Instructions {
+		total += estimatePartTokens(part)
+	}
+	for _, message := range req.Messages {
+		total += estimateMessageTokens(message)
+	}
+	for _, spec := range req.Tools {
+		total += estimateToolSpecTokens(spec)
+	}
+	if req.Output != nil {
+		total += estimateOutputSpecTokens(req.Output)
+	}
+	return max(total, 0)
+}
+
+func estimatePartTokens(part model.Part) int {
+	total := 0
+	if part.Text != nil {
+		total += estimateTextTokens(part.Text.Text)
+	}
+	if part.Reasoning != nil && part.Reasoning.VisibleText != nil {
+		total += estimateTextTokens(*part.Reasoning.VisibleText)
+	}
+	if part.ToolUse != nil {
+		total += estimateTextTokens(part.ToolUse.Name)
+		total += estimateTextTokens(string(part.ToolUse.Input))
+	}
+	if part.ToolResult != nil {
+		total += estimateTextTokens(part.ToolResult.Name)
+		for _, nested := range part.ToolResult.Content {
+			total += estimatePartTokens(nested)
+		}
+	}
+	if part.Media != nil {
+		total += estimateTextTokens(string(part.Media.Modality))
+		total += estimateTextTokens(part.Media.MimeType)
+		total += estimateTextTokens(part.Media.Name)
+		total += estimateTextTokens(part.Media.Source.URI)
+		total += estimateTextTokens(part.Media.Source.FileID)
+		total += estimateTextTokens(part.Media.Source.LocalRef)
+		total += estimateTextTokens(part.Media.Source.Data)
+	}
+	if part.JSON != nil {
+		total += estimateTextTokens(string(part.JSON.Value))
+	}
+	if part.FileRef != nil {
+		total += estimateTextTokens(part.FileRef.Name)
+		total += estimateTextTokens(part.FileRef.MimeType)
+		total += estimateTextTokens(part.FileRef.URI)
+		total += estimateTextTokens(part.FileRef.FileID)
+		total += estimateTextTokens(part.FileRef.LocalRef)
+	}
+	if total > 0 {
+		return total
+	}
+	raw, err := json.Marshal(part)
+	if err != nil {
+		return 0
+	}
+	return estimateTextTokens(string(raw))
+}
+
+func estimateToolSpecTokens(spec model.ToolSpec) int {
+	total := estimateTextTokens(string(spec.Kind))
+	if spec.Function != nil {
+		total += estimateTextTokens(spec.Function.Name)
+		total += estimateTextTokens(spec.Function.Description)
+		total += estimateAnyTokens(spec.Function.Parameters)
+	}
+	if spec.ProviderDefined != nil {
+		total += estimateTextTokens(spec.ProviderDefined.Name)
+		total += estimateTextTokens(spec.ProviderDefined.Provider)
+		total += estimateRawMessageMapTokens(spec.ProviderDefined.ProviderDetails)
+	}
+	if spec.ProviderExecuted != nil {
+		total += estimateTextTokens(spec.ProviderExecuted.Name)
+		total += estimateTextTokens(spec.ProviderExecuted.Provider)
+		total += estimateRawMessageMapTokens(spec.ProviderExecuted.ProviderDetails)
+	}
+	if spec.MCP != nil {
+		total += estimateTextTokens(spec.MCP.Name)
+		total += estimateTextTokens(spec.MCP.Server)
+		total += estimateTextTokens(spec.MCP.Tool)
+	}
+	if total > 0 {
+		return total
+	}
+	raw, err := json.Marshal(spec)
+	if err != nil {
+		return 0
+	}
+	return estimateTextTokens(string(raw))
+}
+
+func estimateOutputSpecTokens(spec *model.OutputSpec) int {
+	if spec == nil {
+		return 0
+	}
+	total := estimateTextTokens(string(spec.Mode))
+	total += estimateAnyTokens(spec.JSONSchema)
+	if spec.MaxOutputTokens > 0 {
+		total += estimateTextTokens(fmt.Sprintf("%d", spec.MaxOutputTokens))
+	}
+	if total > 0 {
+		return total
+	}
+	raw, err := json.Marshal(spec)
+	if err != nil {
+		return 0
+	}
+	return estimateTextTokens(string(raw))
+}
+
+func estimateAnyTokens(value any) int {
+	if value == nil {
+		return 0
+	}
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return 0
+	}
+	return estimateTextTokens(string(raw))
+}
+
+func estimateRawMessageMapTokens(values map[string]json.RawMessage) int {
+	total := 0
+	for key, value := range values {
+		total += estimateTextTokens(key)
+		total += estimateTextTokens(string(value))
+	}
+	return total
 }
 
 func lastEventID(events []*session.Event) string {

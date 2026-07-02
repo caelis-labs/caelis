@@ -1114,6 +1114,219 @@ func TestRuntimeRecoversFromContextOverflowByCompactingMidTurn(t *testing.T) {
 	}
 }
 
+func TestRuntimeAutoCompactsBeforePostToolModelRequest(t *testing.T) {
+	t.Parallel()
+
+	sessions, activeSession := newTestSessionService(t, "sess-compact-step-watermark")
+	testModel := &stepWatermarkModel{t: t}
+	targetTool := tool.NamedTool{
+		Def: tool.Definition{
+			Name:        "ECHO",
+			Description: "echo input",
+			InputSchema: map[string]any{"type": "object"},
+		},
+		Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
+			return tool.Result{
+				ID:   call.ID,
+				Name: call.Name,
+				Content: []model.Part{
+					model.NewJSONPart([]byte(`{"value":"pong","detail":"tool result that must survive step-level compact"}`)),
+				},
+			}, nil
+		},
+	}
+
+	runtime, err := New(Config{
+		Sessions: sessions,
+		AgentFactory: chat.Factory{
+			SystemPrompt: "Use tools when necessary.",
+		},
+		Compaction: CompactionConfig{
+			Enabled:                    true,
+			WatermarkRatio:             0.80,
+			ForceWatermarkRatio:        0.90,
+			DefaultContextWindowTokens: 256,
+			ReserveOutputTokens:        32,
+			SafetyMarginTokens:         16,
+			SegmentTokenBudget:         80,
+		},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	result, err := runtime.Run(context.Background(), agent.RunRequest{
+		SessionRef: activeSession.SessionRef,
+		Input:      "Use ECHO and then finish.",
+		AgentSpec: agent.AgentSpec{
+			Name:  "chat",
+			Model: testModel,
+			Tools: []tool.Tool{targetTool},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	var finalText string
+	sawCompactNotice := false
+	for event, seqErr := range result.Handle.Events() {
+		if seqErr != nil {
+			t.Fatalf("runner error = %v", seqErr)
+		}
+		if event != nil && event.Type == session.EventTypeAssistant {
+			finalText = strings.TrimSpace(session.EventText(event))
+		}
+		if notice, ok := session.NoticeOf(event); ok && notice.Text == compact.CompactNoticeLabel {
+			sawCompactNotice = true
+		}
+	}
+	if finalText != "recovered after step compact" {
+		t.Fatalf("finalText = %q, want %q", finalText, "recovered after step compact")
+	}
+	if !sawCompactNotice {
+		t.Fatal("expected live compact notice before post-tool model request")
+	}
+	if testModel.compactionCalls != 1 {
+		t.Fatalf("compactionCalls = %d, want 1", testModel.compactionCalls)
+	}
+	if testModel.normalCalls != 2 {
+		t.Fatalf("normalCalls = %d, want 2 (initial tool call plus post-compact retry)", testModel.normalCalls)
+	}
+	if !testModel.sawCheckpointOnRetry {
+		t.Fatal("expected post-compact model request to see checkpoint")
+	}
+
+	loaded, err := sessions.LoadSession(context.Background(), session.LoadSessionRequest{
+		SessionRef: activeSession.SessionRef,
+	})
+	if err != nil {
+		t.Fatalf("LoadSession() error = %v", err)
+	}
+	compactEvent, ok := latestCompactEventForTest(loaded.Events)
+	if !ok {
+		t.Fatal("expected durable compact event")
+	}
+	data, ok := compact.CompactEventDataFromEvent(compactEvent)
+	if !ok {
+		t.Fatalf("compact metadata missing compact payload: %+v", compactEvent.Meta)
+	}
+	if data.Trigger != "model_request_context_limit" {
+		t.Fatalf("compact trigger = %q, want model_request_context_limit", data.Trigger)
+	}
+	if !strings.Contains(strings.ToLower(session.EventText(compactEvent)), "tool result") {
+		t.Fatalf("compact event text = %q, want tool result continuity", session.EventText(compactEvent))
+	}
+}
+
+func TestRuntimeCompactsAfterRetryExhaustedAtHighWater(t *testing.T) {
+	t.Parallel()
+
+	sessions, activeSession := newTestSessionService(t, "sess-compact-retry-exhausted-high-water")
+	testModel := &retryExhaustedHighWaterModel{t: t}
+	targetTool := tool.NamedTool{
+		Def: tool.Definition{
+			Name:        "ECHO",
+			Description: "echo input",
+			InputSchema: map[string]any{"type": "object"},
+		},
+		Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
+			return tool.Result{
+				ID:   call.ID,
+				Name: call.Name,
+				Content: []model.Part{
+					model.NewJSONPart([]byte(`{"value":"pong","detail":"retry exhausted high-water tool result"}`)),
+				},
+			}, nil
+		},
+	}
+
+	runtime, err := New(Config{
+		Sessions: sessions,
+		AgentFactory: chat.Factory{
+			SystemPrompt: "Use tools when necessary.",
+		},
+		Compaction: CompactionConfig{
+			Enabled:                    true,
+			WatermarkRatio:             10.0,
+			ForceWatermarkRatio:        10.0,
+			DefaultContextWindowTokens: 256,
+			ReserveOutputTokens:        8,
+			SafetyMarginTokens:         4,
+			SegmentTokenBudget:         80,
+		},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	result, err := runtime.Run(context.Background(), agent.RunRequest{
+		SessionRef: activeSession.SessionRef,
+		Input:      "Use ECHO and then finish.",
+		AgentSpec: agent.AgentSpec{
+			Name:  "chat",
+			Model: testModel,
+			Tools: []tool.Tool{targetTool},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	var finalText string
+	sawCompactNotice := false
+	for event, seqErr := range result.Handle.Events() {
+		if seqErr != nil {
+			t.Fatalf("runner error = %v", seqErr)
+		}
+		if event != nil && event.Type == session.EventTypeAssistant {
+			finalText = strings.TrimSpace(session.EventText(event))
+		}
+		if notice, ok := session.NoticeOf(event); ok && notice.Text == compact.CompactNoticeLabel {
+			sawCompactNotice = true
+		}
+	}
+	if finalText != "recovered after retry exhausted compact" {
+		t.Fatalf("finalText = %q, want %q", finalText, "recovered after retry exhausted compact")
+	}
+	if !sawCompactNotice {
+		t.Fatal("expected live compact notice after retry-exhausted high-water failure")
+	}
+	if testModel.compactionCalls != 1 {
+		t.Fatalf("compactionCalls = %d, want 1", testModel.compactionCalls)
+	}
+	if testModel.normalCalls != 3 {
+		t.Fatalf("normalCalls = %d, want 3 (initial tool call, failed post-tool request, retry after compact)", testModel.normalCalls)
+	}
+	if !testModel.sawPostToolRetryRequest {
+		t.Fatal("expected high-water request to reach model before retry-exhausted fallback")
+	}
+	if !testModel.sawCheckpointOnRetry {
+		t.Fatal("expected retry after compact to see checkpoint")
+	}
+
+	loaded, err := sessions.LoadSession(context.Background(), session.LoadSessionRequest{
+		SessionRef: activeSession.SessionRef,
+	})
+	if err != nil {
+		t.Fatalf("LoadSession() error = %v", err)
+	}
+	compactEvent, ok := latestCompactEventForTest(loaded.Events)
+	if !ok {
+		t.Fatal("expected durable compact event")
+	}
+	data, ok := compact.CompactEventDataFromEvent(compactEvent)
+	if !ok {
+		t.Fatalf("compact metadata missing compact payload: %+v", compactEvent.Meta)
+	}
+	if data.Trigger != "model_request_retry_exhausted_high_water" {
+		t.Fatalf("compact trigger = %q, want model_request_retry_exhausted_high_water", data.Trigger)
+	}
+	if !strings.Contains(strings.ToLower(session.EventText(compactEvent)), "retry exhausted high-water tool result") {
+		t.Fatalf("compact event text = %q, want tool result continuity", session.EventText(compactEvent))
+	}
+}
+
 type compactDeadlineModel struct {
 	calls int
 }

@@ -30,12 +30,6 @@ func normalizeCompactionConfig(cfg CompactionConfig) CompactionConfig {
 	if cfg.DefaultContextWindowTokens <= 0 {
 		cfg.DefaultContextWindowTokens = 200000
 	}
-	if cfg.ReserveOutputTokens <= 0 {
-		cfg.ReserveOutputTokens = 5000
-	}
-	if cfg.SafetyMarginTokens <= 0 {
-		cfg.SafetyMarginTokens = 2048
-	}
 	if cfg.SegmentTokenBudget <= 0 {
 		cfg.SegmentTokenBudget = 24000
 	}
@@ -126,16 +120,7 @@ func (c *codexStyleCompactor) decide(_ context.Context, usage compact.UsageSnaps
 	if compactableEventCount(req.Events) == 0 {
 		return compact.TriggerDecision{}, nil
 	}
-	softRatio, forceRatio := dynamicWatermarks(usage.ContextWindowTokens, c.cfg.WatermarkRatio, c.cfg.ForceWatermarkRatio)
-	ratio := float64(usage.TotalTokens) / float64(usage.EffectiveInputBudget)
-	switch {
-	case ratio >= forceRatio:
-		return compact.TriggerDecision{ShouldCompact: true, Reason: "context_limit"}, nil
-	case ratio >= softRatio:
-		return compact.TriggerDecision{ShouldCompact: true, Reason: "context_watermark"}, nil
-	default:
-		return compact.TriggerDecision{}, nil
-	}
+	return evaluateWatermark(usage, c.cfg), nil
 }
 
 func (c *codexStyleCompactor) compact(ctx context.Context, req compact.Request, trigger string) (compact.Result, error) {

@@ -3,7 +3,6 @@ package local
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 
 	"github.com/OnslaughtSnail/caelis/ports/agent"
@@ -40,6 +39,7 @@ func (r *Runtime) resolveAgent(
 	spec := r.applyAssemblySpec(state, req.AgentSpec)
 	spec.Request = req.Request.WithDefaults(spec.Request)
 	modeName, _ := r.policyForName(ctx, r.policyMode(spec))
+	spec.Model = r.wrapModelForAutoCompaction(ref, spec.Model)
 	spec.Tools = r.wrapToolsForRuntime(activeSession, ref, spec, runtimeToolContext{
 		mode:              modeName,
 		approvalMode:      string(r.currentApprovalMode(state)),
@@ -76,7 +76,7 @@ func (r *Runtime) runWithOverflowRecovery(
 	batch *[]*session.Event,
 	sink *runner,
 ) error {
-	overflowRecoveries := 0
+	compactionRecoveries := 0
 	for {
 		attemptBatch, _, inputPersisted, err := r.runAttempt(ctx, activeSession, ref, runID, turnID, req, pendingInput, sink)
 		if inputPersisted {
@@ -86,19 +86,19 @@ func (r *Runtime) runWithOverflowRecovery(
 			*batch = append(*batch, attemptBatch...)
 			return nil
 		}
-		if isCompactionOverflowError(err) {
+		if recovery, ok := compactionRecoveryFromError(err); ok {
 			*batch = append(*batch, attemptBatch...)
-			if overflowRecoveries >= overflowCompactionRecoveryLimit {
-				return fmt.Errorf("impl/agent/local: context overflow persisted after %d compaction recoveries: %w", overflowCompactionRecoveryLimit, err)
+			if compactionRecoveries >= overflowCompactionRecoveryLimit {
+				return recovery.limitError(overflowCompactionRecoveryLimit, err)
 			}
-			compacted, compactErr := r.compactAfterOverflow(ctx, activeSession, ref, turnID, req, err, sink)
+			compacted, compactErr := r.recoverByCompacting(ctx, activeSession, ref, turnID, req, recovery, sink)
 			if compactErr != nil {
 				return compactErr
 			}
 			if !compacted {
 				return err
 			}
-			overflowRecoveries++
+			compactionRecoveries++
 			continue
 		}
 		*batch = append(*batch, attemptBatch...)
