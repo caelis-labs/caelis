@@ -217,14 +217,18 @@ func (r *guardianApprovalReviewer) runGuardianAgent(
 	if runner == nil {
 		runner = newSystemManagedAgentRuntime(nil)
 	}
+	spec, ok := systemManagedAgentSpecFor(guardianProfileID)
+	if !ok {
+		return nil, "", fmt.Errorf("gatewayapp: missing %q system-managed agent", guardianProfileID)
+	}
 	result, err := runner.Run(ctx, systemManagedAgentRunRequest{
-		AgentID:           guardianProfileID,
-		Purpose:           systemManagedAgentPurposeApprovalReview,
+		AgentID:           spec.ID,
+		Purpose:           spec.Purpose,
 		Model:             model,
 		ParentSession:     guardianSession,
 		Events:            events,
 		Output:            output,
-		CapabilityProfile: systemManagedAgentCapabilityNone,
+		CapabilityProfile: spec.CapabilityProfile,
 	})
 	if err != nil {
 		return result.AssistantEvent, "", err

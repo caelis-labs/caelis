@@ -244,7 +244,7 @@ func TestSystemManagedAgentSessionKeepsExistingGuardianSession(t *testing.T) {
 		}},
 	}
 
-	got := systemManagedAgentSessionForParent(guardianSession, guardianSystemManagedAgentSpec(), nil)
+	got := systemManagedAgentSessionForParent(guardianSession, guardianSpecForTest(t), nil)
 	if got.SessionID != guardianSession.SessionID {
 		t.Fatalf("system-managed session id = %q, want existing guardian session %q", got.SessionID, guardianSession.SessionID)
 	}
@@ -263,7 +263,7 @@ func TestSystemManagedAgentSessionUsesGuardianDurableIDFromMetadata(t *testing.T
 	}
 	reuseKey := strings.Repeat("a", 64)
 
-	got := systemManagedAgentSessionForParent(parent, guardianSystemManagedAgentSpec(), map[string]any{
+	got := systemManagedAgentSessionForParent(parent, guardianSpecForTest(t), map[string]any{
 		systemManagedAgentStateReuseKey: reuseKey,
 	})
 	want := guardianReviewSessionID(parent, reuseKey)
@@ -1157,13 +1157,23 @@ func approvalReviewerSystemSession(t *testing.T, reviewer gateway.ApprovalReview
 	if guardian.systemSessions == nil {
 		t.Fatal("guardian system session cache is nil")
 	}
+	spec := guardianSpecForTest(t)
 	req := normalizeSystemManagedAgentSessionRequest(systemManagedAgentSessionRequest{
 		ParentKey:     activeSession.SessionID,
 		ParentSession: activeSession,
-		Spec:          guardianSystemManagedAgentSpec(),
-		Purpose:       systemManagedAgentPurposeApprovalReview,
+		Spec:          spec,
+		Purpose:       spec.Purpose,
 	})
 	return guardian.systemSessions.cached(req)
+}
+
+func guardianSpecForTest(t *testing.T) systemManagedAgentSpec {
+	t.Helper()
+	spec, ok := systemManagedAgentSpecFor(guardianProfileID)
+	if !ok {
+		t.Fatal("guardian system-managed spec missing")
+	}
+	return spec
 }
 
 func waitForApprovalReviewerCalls(t *testing.T, ch <-chan struct{}, count int) {

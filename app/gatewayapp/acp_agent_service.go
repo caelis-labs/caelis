@@ -543,7 +543,7 @@ func (s *Stack) withAgentProfileACPAgents(resolved assembly.ResolvedAssembly, ru
 	}
 	for _, profile := range profileStatus.Profiles {
 		profile = agentprofile.NormalizeProfile(profile)
-		if profile.ID == "" || profile.ID == guardianProfileID {
+		if profile.ID == "" || isSystemManagedAgentProfileID(profile.ID) {
 			continue
 		}
 		if _, exists := seen[profile.ID]; exists {

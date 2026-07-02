@@ -52,8 +52,10 @@ func (s *Stack) AgentProfiles() AgentProfileService {
 
 func (s *Stack) newModelApprovalReviewer() gateway.ApprovalReviewer {
 	return guardianBindingApprovalReviewer{
-		base:    newModelApprovalReviewer(s.Sessions),
-		resolve: s.resolveGuardianReviewModel,
+		base: newModelApprovalReviewer(s.Sessions),
+		resolve: func(ctx context.Context, ref session.SessionRef) (model.LLM, error) {
+			return s.resolveSystemManagedAgentModel(ctx, ref, guardianProfileID)
+		},
 	}
 }
 
@@ -89,7 +91,7 @@ func (s AgentProfileService) Bind(ctx context.Context, cfg AgentProfileBindingCo
 		return AgentProfileStatus{}, err
 	}
 	profileID := normalizeAgentProfileID(cfg.ProfileID)
-	if _, ok := profiles[profileID]; !ok && profileID != guardianProfileID {
+	if _, ok := profiles[profileID]; !ok && !isSystemManagedAgentProfileID(profileID) {
 		return AgentProfileStatus{}, fmt.Errorf("gatewayapp: unknown subagent profile %q", strings.TrimSpace(cfg.ProfileID))
 	}
 	binding := agentprofile.NormalizeBinding(agentprofile.Binding{
@@ -101,8 +103,13 @@ func (s AgentProfileService) Bind(ctx context.Context, cfg AgentProfileBindingCo
 		ReasoningEffort: cfg.ReasoningEffort,
 		Enabled:         boolPtr(true),
 	})
+	// Validate before system-managed normalization so new invalid requests fail
+	// explicitly; status normalization only coerces legacy stored bindings.
 	if err := s.stack.validateAgentProfileBinding(binding); err != nil {
 		return AgentProfileStatus{}, err
+	}
+	if spec, ok := systemManagedAgentSpecFor(profileID); ok {
+		binding = normalizeSystemManagedAgentBinding(spec, binding)
 	}
 	doc, err := s.stack.store.Load()
 	if err != nil {
@@ -220,15 +227,17 @@ func (s *Stack) agentProfileStatus(ctx context.Context) (AgentProfileStatus, err
 			Binding: binding,
 		})
 	}
-	guardianBinding, ok := agentprofile.LookupBinding(doc.AgentBindings, guardianProfileID)
-	if !ok {
-		guardianBinding = defaultAgentProfileBinding(guardianProfileID)
+	for _, spec := range systemManagedAgentSpecs() {
+		binding, ok := agentprofile.LookupBinding(doc.AgentBindings, spec.ID)
+		if !ok {
+			binding = defaultSystemManagedAgentBinding(spec)
+		}
+		binding = normalizeSystemManagedAgentBinding(spec, binding)
+		out.Profiles = append(out.Profiles, agentprofile.Snapshot{
+			Profile: systemManagedAgentProfileFromSpec(spec),
+			Binding: s.annotateAgentProfileBinding(binding),
+		})
 	}
-	guardianBinding = normalizeGuardianProfileBinding(guardianBinding)
-	out.Profiles = append(out.Profiles, agentprofile.Snapshot{
-		Profile: guardianVirtualProfile(),
-		Binding: s.annotateAgentProfileBinding(guardianBinding),
-	})
 	sort.SliceStable(out.Profiles, func(i, j int) bool {
 		return strings.ToLower(out.Profiles[i].Profile.ID) < strings.ToLower(out.Profiles[j].Profile.ID)
 	})
@@ -243,7 +252,7 @@ func (s *Stack) loadAgentProfiles() (map[string]agentprofile.Profile, []AgentPro
 	profiles := make(map[string]agentprofile.Profile, len(status.Profiles))
 	for _, profile := range status.Profiles {
 		profile = agentprofile.NormalizeProfile(profile)
-		if profile.ID == guardianProfileID {
+		if isSystemManagedAgentProfileID(profile.ID) {
 			continue
 		}
 		if profile.ID != "" {
@@ -265,6 +274,11 @@ func (s *Stack) validateAgentProfileBinding(binding agentprofile.Binding) error 
 	if err := agentprofile.ValidateBinding(binding); err != nil {
 		return err
 	}
+	if spec, ok := systemManagedAgentSpecFor(binding.ProfileID); ok {
+		if err := validateSystemManagedAgentBinding(spec, binding); err != nil {
+			return err
+		}
+	}
 	switch binding.Target {
 	case agentprofile.BindingTargetSelf, agentprofile.BindingTargetBuiltIn:
 		if binding.Model != "" {
@@ -277,9 +291,6 @@ func (s *Stack) validateAgentProfileBinding(binding agentprofile.Binding) error 
 			}
 		}
 	case agentprofile.BindingTargetACP:
-		if binding.ProfileID == guardianProfileID {
-			return fmt.Errorf("gatewayapp: guardian cannot bind to an external ACP agent")
-		}
 		if !s.acpAgentExists(binding.ACPAgent) {
 			return fmt.Errorf("gatewayapp: unknown ACP agent %q", binding.ACPAgent)
 		}
@@ -355,19 +366,23 @@ func (s *Stack) acpAgentExists(name string) bool {
 	return false
 }
 
-func (s *Stack) resolveGuardianReviewModel(ctx context.Context, _ session.SessionRef) (model.LLM, error) {
+func (s *Stack) resolveSystemManagedAgentModel(ctx context.Context, _ session.SessionRef, agentID string) (model.LLM, error) {
 	if s == nil || s.store == nil || s.lookup == nil {
+		return nil, nil
+	}
+	spec, ok := systemManagedAgentSpecFor(agentID)
+	if !ok {
 		return nil, nil
 	}
 	doc, err := s.store.Load()
 	if err != nil {
 		return nil, err
 	}
-	binding, ok := agentprofile.LookupBinding(doc.AgentBindings, guardianProfileID)
+	binding, ok := agentprofile.LookupBinding(doc.AgentBindings, spec.ID)
 	if !ok {
 		return nil, nil
 	}
-	binding = normalizeGuardianProfileBinding(binding)
+	binding = normalizeSystemManagedAgentBinding(spec, binding)
 	if strings.TrimSpace(binding.Model) == "" {
 		return nil, nil
 	}
@@ -395,22 +410,6 @@ func defaultAgentProfileBinding(profileID string) agentprofile.Binding {
 		Target:    agentprofile.BindingTargetBuiltIn,
 		Enabled:   boolPtr(true),
 	})
-}
-
-func normalizeGuardianProfileBinding(binding agentprofile.Binding) agentprofile.Binding {
-	binding.ProfileID = guardianProfileID
-	binding = agentprofile.NormalizeBinding(binding)
-	binding.Enabled = boolPtr(true)
-	binding.Status = agentprofile.BindingStatusOK
-	binding.Warning = ""
-	if binding.Target == agentprofile.BindingTargetACP {
-		binding.Target = agentprofile.BindingTargetSelf
-		binding.Model = ""
-		binding.ACPAgent = ""
-		binding.ACPModel = ""
-		binding.ReasoningEffort = ""
-	}
-	return binding
 }
 
 func normalizeAgentProfileID(value string) string {
@@ -471,9 +470,4 @@ You are a code review subagent. Use the $review skill for review methodology and
 			Metadata: map[string]any{"source": "caelis", "built_in": true},
 		},
 	}
-}
-
-func guardianVirtualProfile() agentprofile.Profile {
-	profile, _ := systemManagedAgentProfile(guardianProfileID)
-	return profile
 }

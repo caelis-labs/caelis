@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"sort"
 	"strings"
+	"sync"
 
 	"github.com/OnslaughtSnail/caelis/impl/agent/local/chat"
 	"github.com/OnslaughtSnail/caelis/ports/agent"
@@ -31,6 +33,11 @@ const (
 	systemManagedAgentCapabilityController systemManagedAgentCapabilityProfile = "controller"
 )
 
+type systemManagedAgentBindingPolicy struct {
+	ForceEnabled     bool
+	AllowExternalACP bool
+}
+
 // systemManagedAgentSpec describes one built-in system-owned agent profile and
 // its default runtime cuts. It is intentionally app-private until another layer
 // needs a stable public system-agent contract.
@@ -46,6 +53,7 @@ type systemManagedAgentSpec struct {
 	SessionMetadata   map[string]any
 	Purpose           systemManagedAgentPurpose
 	CapabilityProfile systemManagedAgentCapabilityProfile
+	BindingPolicy     systemManagedAgentBindingPolicy
 	ReasoningEffort   string
 	Tools             []tool.Tool
 }
@@ -94,6 +102,16 @@ type systemManagedAgentRunner interface {
 type systemManagedAgentRuntime struct {
 	factory agent.AgentFactory
 }
+
+type systemManagedAgentRegistry struct {
+	byID       map[string]systemManagedAgentSpec
+	orderedIDs []string
+}
+
+var (
+	systemManagedAgentRegistryOnce  sync.Once
+	systemManagedAgentRegistryValue systemManagedAgentRegistry
+)
 
 func newSystemManagedAgentRuntime(factory agent.AgentFactory) *systemManagedAgentRuntime {
 	if factory == nil {
@@ -214,6 +232,52 @@ func systemManagedAgentRunPlanFor(req systemManagedAgentRunRequest) (systemManag
 	}, nil
 }
 
+func systemManagedAgentSpecs() []systemManagedAgentSpec {
+	registry := systemManagedAgentRegistrySnapshot()
+	out := make([]systemManagedAgentSpec, 0, len(registry.orderedIDs))
+	for _, id := range registry.orderedIDs {
+		out = append(out, registry.byID[id])
+	}
+	return out
+}
+
+func systemManagedAgentRegistrySnapshot() systemManagedAgentRegistry {
+	systemManagedAgentRegistryOnce.Do(func() {
+		systemManagedAgentRegistryValue = buildSystemManagedAgentRegistry([]systemManagedAgentSpec{
+			guardianSystemManagedAgentSpec(),
+		})
+	})
+	return systemManagedAgentRegistryValue
+}
+
+func buildSystemManagedAgentRegistry(specs []systemManagedAgentSpec) systemManagedAgentRegistry {
+	byID := make(map[string]systemManagedAgentSpec, len(specs))
+	for _, spec := range specs {
+		spec = normalizeSystemManagedAgentSpec(spec)
+		if spec.ID == "" {
+			continue
+		}
+		byID[spec.ID] = spec
+	}
+	orderedIDs := make([]string, 0, len(byID))
+	for id := range byID {
+		orderedIDs = append(orderedIDs, id)
+	}
+	sort.Strings(orderedIDs)
+	return systemManagedAgentRegistry{byID: byID, orderedIDs: orderedIDs}
+}
+
+func normalizeSystemManagedAgentSpec(spec systemManagedAgentSpec) systemManagedAgentSpec {
+	spec.ID = normalizeAgentProfileID(spec.ID)
+	spec.Name = strings.TrimSpace(spec.Name)
+	spec.Description = strings.TrimSpace(spec.Description)
+	spec.Capabilities = append([]string(nil), spec.Capabilities...)
+	spec.ProfileMetadata = maps.Clone(spec.ProfileMetadata)
+	spec.SessionMetadata = maps.Clone(spec.SessionMetadata)
+	spec.Tools = append([]tool.Tool(nil), spec.Tools...)
+	return spec
+}
+
 func systemManagedAgentToolsForCapability(
 	spec systemManagedAgentSpec,
 	requestTools []tool.Tool,
@@ -238,6 +302,10 @@ func systemManagedAgentProfile(agentID string) (agentprofile.Profile, bool) {
 	if !ok {
 		return agentprofile.Profile{}, false
 	}
+	return systemManagedAgentProfileFromSpec(spec), true
+}
+
+func systemManagedAgentProfileFromSpec(spec systemManagedAgentSpec) agentprofile.Profile {
 	return agentprofile.NormalizeProfile(agentprofile.Profile{
 		ID:           spec.ID,
 		Name:         spec.Name,
@@ -245,16 +313,62 @@ func systemManagedAgentProfile(agentID string) (agentprofile.Profile, bool) {
 		Capabilities: append([]string(nil), spec.Capabilities...),
 		Instructions: spec.Instructions,
 		Metadata:     maps.Clone(spec.ProfileMetadata),
-	}), true
+	})
 }
 
 func systemManagedAgentSpecFor(agentID string) (systemManagedAgentSpec, bool) {
-	switch normalizeAgentProfileID(agentID) {
-	case guardianProfileID:
-		return guardianSystemManagedAgentSpec(), true
-	default:
+	agentID = normalizeAgentProfileID(agentID)
+	if agentID == "" {
 		return systemManagedAgentSpec{}, false
 	}
+	spec, ok := systemManagedAgentRegistrySnapshot().byID[agentID]
+	return spec, ok
+}
+
+func isSystemManagedAgentProfileID(profileID string) bool {
+	profileID = normalizeAgentProfileID(profileID)
+	if profileID == "" {
+		return false
+	}
+	_, ok := systemManagedAgentRegistrySnapshot().byID[profileID]
+	return ok
+}
+
+func defaultSystemManagedAgentBinding(spec systemManagedAgentSpec) agentprofile.Binding {
+	return normalizeSystemManagedAgentBinding(spec, defaultAgentProfileBinding(spec.ID))
+}
+
+// normalizeSystemManagedAgentBinding reads only the registry-owned immutable
+// spec identity and binding policy; profile/runtime fields stay out of this path.
+func normalizeSystemManagedAgentBinding(spec systemManagedAgentSpec, binding agentprofile.Binding) agentprofile.Binding {
+	agentID := normalizeAgentProfileID(spec.ID)
+	policy := spec.BindingPolicy
+	binding.ProfileID = agentID
+	binding = agentprofile.NormalizeBinding(binding)
+	binding.ProfileID = agentID
+	if policy.ForceEnabled {
+		binding.Enabled = boolPtr(true)
+	}
+	binding.Status = agentprofile.BindingStatusOK
+	binding.Warning = ""
+	if binding.Target == agentprofile.BindingTargetACP && !policy.AllowExternalACP {
+		binding.Target = agentprofile.BindingTargetSelf
+		binding.Model = ""
+		binding.ACPAgent = ""
+		binding.ACPModel = ""
+		binding.ReasoningEffort = ""
+	}
+	return binding
+}
+
+func validateSystemManagedAgentBinding(spec systemManagedAgentSpec, binding agentprofile.Binding) error {
+	agentID := normalizeAgentProfileID(spec.ID)
+	policy := spec.BindingPolicy
+	binding = agentprofile.NormalizeBinding(binding)
+	if binding.Target == agentprofile.BindingTargetACP && !policy.AllowExternalACP {
+		return fmt.Errorf("gatewayapp: %s cannot bind to an external ACP agent", agentID)
+	}
+	return nil
 }
 
 func guardianSystemManagedAgentSpec() systemManagedAgentSpec {
@@ -272,7 +386,11 @@ func guardianSystemManagedAgentSpec() systemManagedAgentSpec {
 		SessionID:         guardianReviewSessionIDFromMetadata,
 		Purpose:           systemManagedAgentPurposeApprovalReview,
 		CapabilityProfile: systemManagedAgentCapabilityNone,
-		ReasoningEffort:   "none",
+		BindingPolicy: systemManagedAgentBindingPolicy{
+			ForceEnabled:     true,
+			AllowExternalACP: false,
+		},
+		ReasoningEffort: "none",
 		SessionMetadata: map[string]any{
 			"guardian": true,
 			"source":   "auto-review",

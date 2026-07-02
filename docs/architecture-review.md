@@ -38,11 +38,15 @@ checklist until the items are either implemented or replaced by a newer review.
   tests and remaining app seams. Remaining work: shrink public stack/kernel
   exposure and split replay/control-plane app contracts only where consumers
   need them.
-- [ ] `P1` Turn system-managed agents into a small registry instead of Guardian
+- [x] `P1` Turn system-managed agents into a small registry instead of Guardian
   special cases. Failure mode: Guardian, Reviewer, and future Agent Manage Loop
   agents would duplicate profile, binding, and run-plan rules. Bounded repair:
   make the app-private `systemManagedAgentSpec` registry the single source for
   status, binding policy, and run planning without changing Guardian behavior.
+  Implemented by making `systemManagedAgentSpec` entries drive virtual profile
+  status, system-managed profile filtering, binding policy, and run-plan
+  defaults while leaving Guardian approval prompt/assessment logic
+  Guardian-specific.
 - [ ] `P2` Consolidate transcript/TUI display fallback normalization. Failure
   mode: approval review, retry, terminal, and tool-result display derivation is
   spread across transcript projection and TUI rendering. Bounded repair: move
