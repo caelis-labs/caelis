@@ -1,4 +1,4 @@
-package prompt
+package controlprompt
 
 import (
 	"context"
@@ -6,8 +6,8 @@ import (
 	"strings"
 	"unicode"
 
+	controlcommands "github.com/OnslaughtSnail/caelis/ports/controlcommand"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/control"
-	controlcommands "github.com/OnslaughtSnail/caelis/protocol/acp/control/commands"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
 )
 

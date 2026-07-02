@@ -18,11 +18,11 @@ import (
 	"github.com/OnslaughtSnail/caelis/internal/testenv"
 	"github.com/OnslaughtSnail/caelis/ports/agentprofile"
 	"github.com/OnslaughtSnail/caelis/ports/assembly"
+	commands "github.com/OnslaughtSnail/caelis/ports/controlcommand"
 	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/tool"
 	"github.com/OnslaughtSnail/caelis/protocol/acp"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/control/commands"
 )
 
 func TestLocalStackInjectsSpawnForSelfAndAgentProfilesOnly(t *testing.T) {

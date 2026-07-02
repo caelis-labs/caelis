@@ -1,4 +1,4 @@
-package commands
+package controlcommand
 
 import (
 	"fmt"
@@ -314,6 +314,21 @@ func dashAsEmpty(value string) string {
 		return ""
 	}
 	return value
+}
+
+func parseReasoningLevels(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "-" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if trimmed := strings.ToLower(strings.TrimSpace(part)); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }
 
 func agentSlashCommand(agent string) string {

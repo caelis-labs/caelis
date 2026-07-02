@@ -14,9 +14,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	controlcommands "github.com/OnslaughtSnail/caelis/ports/controlcommand"
+	controlprompt "github.com/OnslaughtSnail/caelis/ports/controlprompt"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/control"
-	controlcommands "github.com/OnslaughtSnail/caelis/protocol/acp/control/commands"
-	controlprompt "github.com/OnslaughtSnail/caelis/protocol/acp/control/prompt"
 	"github.com/OnslaughtSnail/caelis/surfaces/statusbar"
 )
 

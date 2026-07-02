@@ -8,10 +8,10 @@ import (
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp/controladapter/local"
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/agentregistry"
 	runtimeacp "github.com/OnslaughtSnail/caelis/impl/agent/acp"
+	controlcommands "github.com/OnslaughtSnail/caelis/ports/controlcommand"
+	controlprompt "github.com/OnslaughtSnail/caelis/ports/controlprompt"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/control"
-	controlcommands "github.com/OnslaughtSnail/caelis/protocol/acp/control/commands"
-	controlprompt "github.com/OnslaughtSnail/caelis/protocol/acp/control/prompt"
 )
 
 func NewFromStack(stack *gatewayapp.Stack) (*runtimeacp.RuntimeAgent, error) {

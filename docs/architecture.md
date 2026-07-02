@@ -33,6 +33,8 @@ them to ACP-style surface events.
 - `surfaces/*`: presentation adapters.
 - `protocol/acp`: ACP schema, eventstream envelopes, projection helpers, and
   documented `_meta` contracts.
+- `ports/controlcommand`, `ports/controlprompt`: transitional command catalog
+  and prompt routing contracts.
 - `app/gatewayapp`, `internal/kernel`, `protocol/acp/control`: current control
   layer hotspots.
 - `ports/*`: public contracts. Keep runtime contracts separate from app-control

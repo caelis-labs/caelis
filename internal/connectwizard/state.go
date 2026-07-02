@@ -1,4 +1,4 @@
-package commands
+package connectwizard
 
 import (
 	"encoding/json"

@@ -5,7 +5,8 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	controlcommands "github.com/OnslaughtSnail/caelis/protocol/acp/control/commands"
+
+	"github.com/OnslaughtSnail/caelis/internal/connectwizard"
 )
 
 func TestConnectEnterStartsInteractiveWizardAndIgnoresTypedArgs(t *testing.T) {
@@ -152,7 +153,7 @@ func TestConnectWizardSkipsAPIKeyForNoAuthProvider(t *testing.T) {
 		cmd()
 	}
 	state := requireConnectModelCommandState(t, m.slashArgCommand)
-	if state.Provider != "ollama" || state.TimeoutSeconds != controlcommands.DefaultConnectTimeoutSeconds || state.TokenRef != "" {
+	if state.Provider != "ollama" || state.TimeoutSeconds != connectwizard.DefaultConnectTimeoutSeconds || state.TokenRef != "" {
 		t.Fatalf("connect model state after ollama provider = %#v, want provider without auth", state)
 	}
 	if got := m.textarea.Value(); got != "" {
@@ -687,7 +688,7 @@ func TestConnectWizardTypedKnownModelAlsoSkipsAdvancedSteps(t *testing.T) {
 	}
 }
 
-func requireConnectModelCommandState(t *testing.T, command string) controlcommands.ConnectWizardState {
+func requireConnectModelCommandState(t *testing.T, command string) connectwizard.ConnectWizardState {
 	t.Helper()
 	state, ok := connectModelCommandState(command)
 	if !ok {
@@ -696,13 +697,13 @@ func requireConnectModelCommandState(t *testing.T, command string) controlcomman
 	return state
 }
 
-func connectModelCommandState(command string) (controlcommands.ConnectWizardState, bool) {
+func connectModelCommandState(command string) (connectwizard.ConnectWizardState, bool) {
 	const prefix = "connect-model:"
 	command = strings.TrimSpace(command)
 	if !strings.HasPrefix(command, prefix) {
-		return controlcommands.ConnectWizardState{}, false
+		return connectwizard.ConnectWizardState{}, false
 	}
-	return controlcommands.ParseConnectWizardStatePayload(strings.TrimPrefix(command, prefix)), true
+	return connectwizard.ParseConnectWizardStatePayload(strings.TrimPrefix(command, prefix)), true
 }
 
 func findAndRunTaskResult(msg tea.Msg, m *Model) bool {

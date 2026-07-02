@@ -6,7 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	controlcommands "github.com/OnslaughtSnail/caelis/protocol/acp/control/commands"
+	"github.com/OnslaughtSnail/caelis/internal/connectwizard"
+	controlcommands "github.com/OnslaughtSnail/caelis/ports/controlcommand"
 )
 
 // defaults.go provides DefaultCommands and DefaultWizards for the TUI shell.
@@ -406,11 +407,11 @@ func connectWizardProviderHasBaseURLStep(provider string) bool {
 }
 
 func buildConnectWizardPayload(state map[string]string) string {
-	return controlcommands.ConnectWizardStateFromMap(state).EncodeCompletionState()
+	return connectwizard.ConnectWizardStateFromMap(state).EncodeCompletionState()
 }
 
 func connectWizardTimeout() string {
-	return strconv.Itoa(controlcommands.DefaultConnectTimeoutSeconds)
+	return strconv.Itoa(connectwizard.DefaultConnectTimeoutSeconds)
 }
 
 func emptyAsDash(value string) string {

@@ -11,10 +11,10 @@ import (
 	sessionfile "github.com/OnslaughtSnail/caelis/impl/session/file"
 	"github.com/OnslaughtSnail/caelis/impl/session/memory"
 	"github.com/OnslaughtSnail/caelis/ports/agent"
+	controlprompt "github.com/OnslaughtSnail/caelis/ports/controlprompt"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/protocol/acp"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/control"
-	controlprompt "github.com/OnslaughtSnail/caelis/protocol/acp/control/prompt"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )

@@ -6,9 +6,9 @@ import (
 	"strings"
 
 	"github.com/OnslaughtSnail/caelis/impl/model/catalog"
+	controlcommands "github.com/OnslaughtSnail/caelis/ports/controlcommand"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/protocol/acp"
-	controlcommands "github.com/OnslaughtSnail/caelis/protocol/acp/control/commands"
 )
 
 const (

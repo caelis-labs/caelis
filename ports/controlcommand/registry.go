@@ -1,4 +1,4 @@
-package commands
+package controlcommand
 
 import (
 	"runtime"
@@ -30,14 +30,7 @@ func DefaultSpecs() []CommandSpec {
 }
 
 func DefaultSpecsForPlatform(goos string) []CommandSpec {
-	specs := defaultSpecs()
-	out := specs[:0]
-	for _, spec := range specs {
-		if commandSpecSupportsPlatform(spec, goos) {
-			out = append(out, spec)
-		}
-	}
-	return out
+	return filterSpecsForPlatform(defaultSpecs(), goos)
 }
 
 // DefaultSharedSpecs returns slash commands whose behavior is surface-neutral.
@@ -47,14 +40,7 @@ func DefaultSharedSpecs() []CommandSpec {
 }
 
 func DefaultSharedSpecsForPlatform(goos string) []CommandSpec {
-	specs := defaultSharedSpecs()
-	out := specs[:0]
-	for _, spec := range specs {
-		if commandSpecSupportsPlatform(spec, goos) {
-			out = append(out, spec)
-		}
-	}
-	return out
+	return filterSpecsForPlatform(defaultSharedSpecs(), goos)
 }
 
 // DefaultTUISpecs returns commands that require TUI-owned interaction or app
@@ -64,14 +50,7 @@ func DefaultTUISpecs() []CommandSpec {
 }
 
 func DefaultTUISpecsForPlatform(goos string) []CommandSpec {
-	specs := defaultTUISpecs()
-	out := specs[:0]
-	for _, spec := range specs {
-		if commandSpecSupportsPlatform(spec, goos) {
-			out = append(out, spec)
-		}
-	}
-	return out
+	return filterSpecsForPlatform(defaultTUISpecs(), goos)
 }
 
 // DefaultACPSpecs returns the narrow slash command set exposed through ACP
@@ -152,6 +131,16 @@ func commandSpecSupportsPlatform(spec CommandSpec, goos string) bool {
 		}
 	}
 	return false
+}
+
+func filterSpecsForPlatform(specs []CommandSpec, goos string) []CommandSpec {
+	out := specs[:0]
+	for _, spec := range specs {
+		if commandSpecSupportsPlatform(spec, goos) {
+			out = append(out, spec)
+		}
+	}
+	return out
 }
 
 // DefaultNames returns visible command names in canonical display order.

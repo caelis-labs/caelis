@@ -1,4 +1,4 @@
-package prompt
+package controlprompt
 
 import (
 	"context"
@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"github.com/OnslaughtSnail/caelis/ports/compact"
+	controlcommands "github.com/OnslaughtSnail/caelis/ports/controlcommand"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/control"
-	controlcommands "github.com/OnslaughtSnail/caelis/protocol/acp/control/commands"
 )
 
 func (r Router) dispatchSlash(ctx context.Context, cmd string, args string, argsStart int, fullText string, attachments []control.Attachment) (Result, error) {
@@ -58,11 +58,10 @@ func (r Router) dispatchAgent(ctx context.Context, args string) (Result, error) 
 			return r.noticeResult("usage: /agent add <name> | /agent add custom <name> -- <command> [args...]"), nil
 		}
 		if addArgs.Install {
-			return r.agentInstallTUIOnlyResult(), nil
+			return r.noticeResult("usage: /agent add <name> | /agent add custom <name> -- <command> [args...]"), nil
 		}
 		_, err := r.service.AddAgentWithOptions(ctx, addArgs.Target, control.AgentAddOptions{
-			Install: addArgs.Install,
-			Custom:  addArgs.Custom,
+			Custom: addArgs.Custom,
 		})
 		if err != nil {
 			return Result{}, controlcommands.FriendlyCommandError("agent add", err)
@@ -70,8 +69,6 @@ func (r Router) dispatchAgent(ctx context.Context, args string) (Result, error) 
 		result := r.noticeResult(controlcommands.FormatAgentReadyNotice(addArgs.Target))
 		result.RefreshCommands = true
 		return result, nil
-	case "install":
-		return r.agentInstallTUIOnlyResult(), nil
 	case "remove":
 		target := strings.TrimSpace(rest)
 		if target == "" {
@@ -102,10 +99,6 @@ func (r Router) dispatchAgent(ctx context.Context, args string) (Result, error) 
 	default:
 		return r.noticeResult("usage: /agent list | add <builtin> | use <agent|local> | remove <agent>"), nil
 	}
-}
-
-func (r Router) agentInstallTUIOnlyResult() Result {
-	return r.noticeResult("agent install is available in the TUI only")
 }
 
 func (r Router) dispatchSubagent(ctx context.Context, args string) (Result, error) {

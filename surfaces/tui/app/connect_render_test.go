@@ -6,7 +6,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	controlcommands "github.com/OnslaughtSnail/caelis/protocol/acp/control/commands"
+	"github.com/OnslaughtSnail/caelis/internal/connectwizard"
 )
 
 func TestRenderSlashArgListUsesWizardHintInsteadOfInternalConnectPayload(t *testing.T) {
@@ -24,10 +24,10 @@ func TestRenderSlashArgListUsesWizardHintInsteadOfInternalConnectPayload(t *test
 		state:     map[string]string{},
 	}
 	model.slashArgActive = true
-	model.slashArgCommand = "connect-context:" + controlcommands.ConnectWizardState{
+	model.slashArgCommand = "connect-context:" + connectwizard.ConnectWizardState{
 		Provider:       "minimax",
 		BaseURL:        "https://api.minimaxi.com/anthropic",
-		TimeoutSeconds: controlcommands.DefaultConnectTimeoutSeconds,
+		TimeoutSeconds: connectwizard.DefaultConnectTimeoutSeconds,
 		TokenRef:       "sk-secret",
 		Model:          "MiniMax-M2.7-highspeed",
 	}.EncodeCompletionState()

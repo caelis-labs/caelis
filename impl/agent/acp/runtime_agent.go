@@ -13,11 +13,11 @@ import (
 	"github.com/OnslaughtSnail/caelis/internal/version"
 	"github.com/OnslaughtSnail/caelis/ports/agent"
 	"github.com/OnslaughtSnail/caelis/ports/approval"
+	controlprompt "github.com/OnslaughtSnail/caelis/ports/controlprompt"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/stream"
 	"github.com/OnslaughtSnail/caelis/protocol/acp"
-	controlprompt "github.com/OnslaughtSnail/caelis/protocol/acp/control/prompt"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/projector"
 )
 

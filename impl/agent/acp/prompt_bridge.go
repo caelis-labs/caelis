@@ -6,11 +6,11 @@ import (
 	"strings"
 	"sync"
 
+	controlprompt "github.com/OnslaughtSnail/caelis/ports/controlprompt"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/protocol/acp"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/control"
-	controlprompt "github.com/OnslaughtSnail/caelis/protocol/acp/control/prompt"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
 )
 

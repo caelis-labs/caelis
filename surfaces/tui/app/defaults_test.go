@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	controlcommands "github.com/OnslaughtSnail/caelis/protocol/acp/control/commands"
+	controlcommands "github.com/OnslaughtSnail/caelis/ports/controlcommand"
 )
 
 func TestDefaultCommandsExposePlatformCoreCommands(t *testing.T) {

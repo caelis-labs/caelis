@@ -9,7 +9,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/modelregistry"
 	"github.com/OnslaughtSnail/caelis/internal/acpagentenv"
 	"github.com/OnslaughtSnail/caelis/ports/assembly"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/control/commands"
+	commands "github.com/OnslaughtSnail/caelis/ports/controlcommand"
 )
 
 type RuntimeConfig struct {

@@ -1,4 +1,4 @@
-package prompt
+package controlprompt
 
 import (
 	"context"
@@ -219,7 +219,7 @@ func TestRouterReviewForwardsAttachmentsForPromptRange(t *testing.T) {
 	}
 }
 
-func TestRouterAgentInstallIsExplicitlyTUIOnlyWithoutPrivateHandler(t *testing.T) {
+func TestRouterAgentInstallRemainsPrivateToSurfaceHandler(t *testing.T) {
 	svc := &fakeService{}
 	privateCalls := 0
 	router := NewRouter(Config{Service: svc})
@@ -228,16 +228,16 @@ func TestRouterAgentInstallIsExplicitlyTUIOnlyWithoutPrivateHandler(t *testing.T
 	if err != nil {
 		t.Fatalf("Route(/agent install) error = %v", err)
 	}
-	if !install.Handled || !strings.Contains(firstNotice(install), "TUI only") || svc.addedAgent != "" || svc.addedOptions.Install {
-		t.Fatalf("Route(/agent install) = %#v added=%q opts=%#v, want explicit TUI-only notice without install", install, svc.addedAgent, svc.addedOptions)
+	if !install.Handled || !strings.Contains(firstNotice(install), "usage: /agent") || svc.addedAgent != "" || svc.addedOptions.Install {
+		t.Fatalf("Route(/agent install) = %#v added=%q opts=%#v, want usage without install", install, svc.addedAgent, svc.addedOptions)
 	}
 
 	addInstall, err := router.Route(context.Background(), Request{Submission: control.Submission{Text: "/agent add --install claude"}})
 	if err != nil {
 		t.Fatalf("Route(/agent add --install) error = %v", err)
 	}
-	if !addInstall.Handled || !strings.Contains(firstNotice(addInstall), "TUI only") || svc.addedAgent != "" || svc.addedOptions.Install {
-		t.Fatalf("Route(/agent add --install) = %#v added=%q opts=%#v, want explicit TUI-only notice without install", addInstall, svc.addedAgent, svc.addedOptions)
+	if !addInstall.Handled || !strings.Contains(firstNotice(addInstall), "usage: /agent add") || svc.addedAgent != "" || svc.addedOptions.Install {
+		t.Fatalf("Route(/agent add --install) = %#v added=%q opts=%#v, want usage without install", addInstall, svc.addedAgent, svc.addedOptions)
 	}
 
 	privatePayload := struct{ command string }{command: "agent install"}

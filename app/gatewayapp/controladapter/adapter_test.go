@@ -18,6 +18,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
 	"github.com/OnslaughtSnail/caelis/impl/model/providers"
 	"github.com/OnslaughtSnail/caelis/internal/agenthandle"
+	"github.com/OnslaughtSnail/caelis/internal/connectwizard"
 	"github.com/OnslaughtSnail/caelis/internal/testenv"
 	"github.com/OnslaughtSnail/caelis/ports/assembly"
 	"github.com/OnslaughtSnail/caelis/ports/gateway"
@@ -25,7 +26,6 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/skill"
 	"github.com/OnslaughtSnail/caelis/ports/stream"
-	controlcommands "github.com/OnslaughtSnail/caelis/protocol/acp/control/commands"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
 	acpprojector "github.com/OnslaughtSnail/caelis/protocol/acp/projector"
 )
@@ -655,10 +655,10 @@ func TestAdapterCompleteSlashArgConnectFlowUsesLegacyCommands(t *testing.T) {
 		t.Fatalf("xiaomi endpoint candidates = %#v, missing token-plan CN OpenAI detail", xiaomiEndpoints)
 	}
 
-	models, err := driver.CompleteSlashArg(ctx, connectModelCompletionCommand(controlcommands.ConnectWizardState{
+	models, err := driver.CompleteSlashArg(ctx, connectModelCompletionCommand(connectwizard.ConnectWizardState{
 		Provider:       "minimax",
 		BaseURL:        "https://api.minimaxi.com/anthropic",
-		TimeoutSeconds: controlcommands.DefaultConnectTimeoutSeconds,
+		TimeoutSeconds: connectwizard.DefaultConnectTimeoutSeconds,
 	}), "", 20)
 	if err != nil {
 		t.Fatalf("CompleteSlashArg(connect-model) error = %v", err)
@@ -674,10 +674,10 @@ func TestAdapterCompleteSlashArgConnectFlowUsesLegacyCommands(t *testing.T) {
 		t.Fatalf("connect model candidates = %#v, want built-in MiniMax-M2.7-highspeed", models)
 	}
 
-	deepseekModels, err := driver.CompleteSlashArg(ctx, connectModelCompletionCommand(controlcommands.ConnectWizardState{
+	deepseekModels, err := driver.CompleteSlashArg(ctx, connectModelCompletionCommand(connectwizard.ConnectWizardState{
 		Provider:       "deepseek",
 		BaseURL:        "https://api.deepseek.com/v1",
-		TimeoutSeconds: controlcommands.DefaultConnectTimeoutSeconds,
+		TimeoutSeconds: connectwizard.DefaultConnectTimeoutSeconds,
 	}), "", 20)
 	if err != nil {
 		t.Fatalf("CompleteSlashArg(connect-model deepseek) error = %v", err)
@@ -693,10 +693,10 @@ func TestAdapterCompleteSlashArgConnectFlowUsesLegacyCommands(t *testing.T) {
 			t.Fatalf("deepseek connect model candidate = %#v, want catalog preset detail", item)
 		}
 	}
-	openAICompatModels, err := driver.CompleteSlashArg(ctx, connectModelCompletionCommand(controlcommands.ConnectWizardState{
+	openAICompatModels, err := driver.CompleteSlashArg(ctx, connectModelCompletionCommand(connectwizard.ConnectWizardState{
 		Provider:       "openai-compatible",
 		BaseURL:        "https://api.openai.com/v1",
-		TimeoutSeconds: controlcommands.DefaultConnectTimeoutSeconds,
+		TimeoutSeconds: connectwizard.DefaultConnectTimeoutSeconds,
 	}), "gpt-5.5", 20)
 	if err != nil {
 		t.Fatalf("CompleteSlashArg(connect-model openai-compatible) error = %v", err)
@@ -711,10 +711,10 @@ func TestAdapterCompleteSlashArgConnectFlowUsesLegacyCommands(t *testing.T) {
 	if !foundOpenAICompatDirectoryModel {
 		t.Fatalf("openai-compatible connect model candidates = %#v, want gpt-5.5 from model directory", openAICompatModels)
 	}
-	openAIModels, err := driver.CompleteSlashArg(ctx, connectModelCompletionCommand(controlcommands.ConnectWizardState{
+	openAIModels, err := driver.CompleteSlashArg(ctx, connectModelCompletionCommand(connectwizard.ConnectWizardState{
 		Provider:       "openai",
 		BaseURL:        "https://api.openai.com/v1",
-		TimeoutSeconds: controlcommands.DefaultConnectTimeoutSeconds,
+		TimeoutSeconds: connectwizard.DefaultConnectTimeoutSeconds,
 	}), "gpt-5.1-codex", 20)
 	if err != nil {
 		t.Fatalf("CompleteSlashArg(connect-model openai) error = %v", err)
@@ -723,10 +723,10 @@ func TestAdapterCompleteSlashArgConnectFlowUsesLegacyCommands(t *testing.T) {
 		t.Fatalf("openai connect model candidates = %#v, did not want models.dev-only model for explicit provider", openAIModels)
 	}
 
-	codefreeModels, err := driver.CompleteSlashArg(ctx, connectModelCompletionCommand(controlcommands.ConnectWizardState{
+	codefreeModels, err := driver.CompleteSlashArg(ctx, connectModelCompletionCommand(connectwizard.ConnectWizardState{
 		Provider:       "codefree",
 		BaseURL:        "https://www.srdcloud.cn",
-		TimeoutSeconds: controlcommands.DefaultConnectTimeoutSeconds,
+		TimeoutSeconds: connectwizard.DefaultConnectTimeoutSeconds,
 	}), "", 20)
 	if err != nil {
 		t.Fatalf("CompleteSlashArg(connect-model codefree) error = %v", err)
@@ -3794,10 +3794,10 @@ func TestAdapterConnectModelCandidatesIncludeConfiguredProviderModels(t *testing
 		t.Fatalf("Connect() error = %v", err)
 	}
 
-	models, err := driver.CompleteSlashArg(ctx, connectModelCompletionCommand(controlcommands.ConnectWizardState{
+	models, err := driver.CompleteSlashArg(ctx, connectModelCompletionCommand(connectwizard.ConnectWizardState{
 		Provider:       "minimax",
 		BaseURL:        "https://api.minimaxi.com/anthropic",
-		TimeoutSeconds: controlcommands.DefaultConnectTimeoutSeconds,
+		TimeoutSeconds: connectwizard.DefaultConnectTimeoutSeconds,
 		TokenRef:       "secret",
 	}), "", 20)
 	if err != nil {
@@ -4101,7 +4101,7 @@ func slashCandidatesHaveValue(candidates []SlashArgCandidate, value string) bool
 	return false
 }
 
-func connectModelCompletionCommand(state controlcommands.ConnectWizardState) string {
+func connectModelCompletionCommand(state connectwizard.ConnectWizardState) string {
 	return "connect-model:" + state.EncodeCompletionState()
 }
 
