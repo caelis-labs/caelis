@@ -320,40 +320,14 @@ func mainACPBlockHasToolCall(block *MainACPTurnBlock, callID string) bool {
 }
 
 func approvalReviewTailOutput(event TranscriptEvent) string {
-	review := SubagentEvent{
-		ApprovalTool:    strings.TrimSpace(event.ApprovalTool),
-		ApprovalCommand: strings.TrimSpace(event.ApprovalCommand),
-		ApprovalStatus:  strings.TrimSpace(event.ApprovalStatus),
-		ApprovalRisk:    strings.TrimSpace(event.ApprovalRisk),
-		ApprovalAuth:    strings.TrimSpace(event.ApprovalAuth),
-		ApprovalText:    strings.TrimSpace(event.ApprovalText),
-	}
-	display := approvalReviewDisplayParts(review)
-	status := strings.TrimSpace(display.Status)
-	if status == "" {
-		status = "reviewed"
-	}
-	line := "Approval review " + status
-	if tool := strings.TrimSpace(event.ApprovalTool); tool != "" {
-		line += " " + tool
-	}
-	if command := strings.TrimSpace(event.ApprovalCommand); command != "" {
-		line += " " + command
-	}
-	meta := make([]string, 0, 2)
-	if risk := strings.TrimSpace(display.Risk); risk != "" {
-		meta = append(meta, "risk: "+risk)
-	}
-	if authorization := strings.TrimSpace(display.Authorization); authorization != "" {
-		meta = append(meta, "authorization: "+authorization)
-	}
-	if len(meta) > 0 {
-		line += " (" + strings.Join(meta, ", ") + ")"
-	}
-	if rationale := strings.TrimSpace(display.Rationale); rationale != "" {
-		line += "\n" + rationale
-	}
-	return line + "\n"
+	return transcript.ApprovalReviewTailOutput(transcript.ApprovalReviewFields{
+		Tool:          event.ApprovalTool,
+		Command:       event.ApprovalCommand,
+		Status:        event.ApprovalStatus,
+		Risk:          event.ApprovalRisk,
+		Authorization: event.ApprovalAuth,
+		Text:          event.ApprovalText,
+	})
 }
 
 func (m *Model) applyTranscriptParticipant(event TranscriptEvent) (tea.Model, tea.Cmd) {

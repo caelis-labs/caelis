@@ -15,6 +15,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
+	"github.com/OnslaughtSnail/caelis/surfaces/transcript"
 )
 
 func isTUIPrivateAgentSlash(args string) bool {
@@ -58,7 +59,7 @@ func slashAgentInstallWithContext(ctx context.Context, service control.Service, 
 	_, err := service.AddAgentWithOptions(ctx, target, control.AgentAddOptions{Install: true})
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
-			sendAgentInstallToolResult(send, callID, command, transcriptToolStatusInterrupted, false, agentInstallErrorOutput(err))
+			sendAgentInstallToolResult(send, callID, command, transcript.ToolStatusInterrupted, false, agentInstallErrorOutput(err))
 			return TaskResultMsg{Interrupted: true, SuppressTurnDivider: true}
 		}
 		sendAgentInstallToolResult(send, callID, command, schema.ToolStatusFailed, true, agentInstallErrorOutput(err))
@@ -155,7 +156,7 @@ func sendAgentInstallToolResult(send func(tea.Msg), callID string, command strin
 
 func agentInstallACPStatus(status string) string {
 	switch status {
-	case transcriptToolStatusStarted, transcriptToolStatusRunning:
+	case transcript.ToolStatusStarted, transcript.ToolStatusRunning:
 		return schema.ToolStatusInProgress
 	case schema.ToolStatusCompleted:
 		return schema.ToolStatusCompleted

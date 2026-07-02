@@ -71,6 +71,36 @@ func TestDisplayTerminalInitialOutputForSpawn(t *testing.T) {
 	}
 }
 
+func TestIsTerminalPanelTool(t *testing.T) {
+	tests := []struct {
+		name string
+		kind string
+		want bool
+	}{
+		{name: "RUN_COMMAND", want: true},
+		{name: "SPAWN", want: true},
+		{name: "TASK", kind: ToolKindExecute, want: false},
+		{name: "external", kind: ToolKindExecute, want: true},
+		{name: "READ", kind: ToolKindRead, want: false},
+	}
+	for _, tt := range tests {
+		if got := IsTerminalPanelTool(tt.name, tt.kind); got != tt.want {
+			t.Fatalf("IsTerminalPanelTool(%q, %q) = %v, want %v", tt.name, tt.kind, got, tt.want)
+		}
+	}
+}
+
+func TestDisplayTerminalIDUsesTerminalPanelToolTable(t *testing.T) {
+	t.Parallel()
+
+	if id, ok := DisplayTerminalID("call-1", "SPAWN"); id != "call-1" || !ok {
+		t.Fatalf("DisplayTerminalID(SPAWN) = %q/%v, want call-1/true", id, ok)
+	}
+	if id, ok := DisplayTerminalID("task-1", "TASK"); id != "" || ok {
+		t.Fatalf("DisplayTerminalID(TASK) = %q/%v, want empty/false", id, ok)
+	}
+}
+
 func TestCleanSubagentFinalOutput(t *testing.T) {
 	raw := "### Done\n- `hello.txt` **created**\n| File | State |\n| --- | --- |\n| `hello.txt` | **ok** |"
 	got := CleanSubagentFinalOutput(raw)

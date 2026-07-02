@@ -398,7 +398,7 @@ func (r toolPanelRenderRequest) renderUncached() []RenderedRow {
 	if isDiffPanelText(text) && !err {
 		return applyClickTokenToRows(renderACPDiffPanelRows(blockID, text, width, ctx), token)
 	}
-	if isTerminalPanelTool(toolName) {
+	if displaypolicy.IsTerminalPanelTool(toolName, "") {
 		return renderACPTerminalPanelRows(blockID, callID, text, width, ctx, err, token)
 	}
 	style := ctx.Theme.HelpHintTextStyle()
@@ -408,22 +408,8 @@ func (r toolPanelRenderRequest) renderUncached() []RenderedRow {
 	return renderACPToolOutputRowsWithToken(blockID, "  └ ", text, width, ctx, style, token)
 }
 
-func isTerminalPanelTool(name string) bool {
-	return isTerminalPanelToolKind(name, "")
-}
-
-func isTerminalPanelToolKind(name string, kind string) bool {
-	switch strings.ToUpper(strings.TrimSpace(name)) {
-	case "RUN_COMMAND", "SPAWN":
-		return true
-	case "TASK":
-		return false
-	}
-	return strings.EqualFold(strings.TrimSpace(kind), "execute")
-}
-
 func isTerminalPanelToolEvent(ev SubagentEvent) bool {
-	return ev.Terminal || isTerminalPanelToolKind(ev.Name, ev.ToolKind)
+	return ev.Terminal || displaypolicy.IsTerminalPanelTool(ev.Name, ev.ToolKind)
 }
 
 func isMutationPanelTool(name string) bool {

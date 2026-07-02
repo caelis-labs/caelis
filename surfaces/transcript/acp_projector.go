@@ -292,6 +292,7 @@ func projectACPApprovalReview(env eventstream.Envelope, scope Scope, scopeID str
 	if surface != nil {
 		preview = surface.ApprovalCommandPreview(env.ApprovalReview.RawInput)
 	}
+	display := ApprovalReviewDisplayParts(env.ApprovalReview.Status, env.ApprovalReview.Risk, env.ApprovalReview.Authorization, text)
 	return Event{
 		Kind:            EventApproval,
 		Scope:           scope,
@@ -301,9 +302,9 @@ func projectACPApprovalReview(env eventstream.Envelope, scope Scope, scopeID str
 		ToolCallID:      strings.TrimSpace(env.ApprovalReview.ToolCallID),
 		ApprovalTool:    strings.TrimSpace(env.ApprovalReview.ToolName),
 		ApprovalCommand: preview,
-		ApprovalStatus:  strings.TrimSpace(env.ApprovalReview.Status),
-		ApprovalRisk:    FirstNonEmpty(strings.TrimSpace(env.ApprovalReview.Risk), ApprovalReviewValueFromText(text, "risk")),
-		ApprovalAuth:    FirstNonEmpty(strings.TrimSpace(env.ApprovalReview.Authorization), ApprovalReviewValueFromText(text, "authorization")),
+		ApprovalStatus:  display.Status,
+		ApprovalRisk:    display.Risk,
+		ApprovalAuth:    display.Authorization,
 		ApprovalText:    text,
 		Final:           true,
 	}, true
@@ -527,27 +528,6 @@ func ProtocolTextContent(raw any) string {
 		}
 		return decoded.Text
 	}
-}
-
-func ApprovalReviewValueFromText(text string, key string) string {
-	key = strings.ToLower(strings.TrimSpace(key))
-	if key == "" {
-		return ""
-	}
-	lower := strings.ToLower(text)
-	needle := key + ":"
-	idx := strings.Index(lower, needle)
-	if idx < 0 {
-		return ""
-	}
-	valueStart := idx + len(needle)
-	value := strings.TrimSpace(text[valueStart:])
-	for _, sep := range []string{",", ")"} {
-		if cut := strings.Index(value, sep); cut >= 0 {
-			value = value[:cut]
-		}
-	}
-	return strings.TrimSpace(value)
 }
 
 func FirstNonEmpty(values ...string) string {

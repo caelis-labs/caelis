@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/OnslaughtSnail/caelis/ports/displaypolicy"
 )
 
 const maxGenericToolPanelCacheBytes = 64 * 1024
@@ -69,7 +71,7 @@ func toolPanelRenderCacheKey(request toolPanelRenderRequest, scroll toolPanelScr
 
 func toolPanelCacheText(toolName string, text string, width int) string {
 	text = strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n")
-	if !isTerminalPanelTool(toolName) {
+	if !displaypolicy.IsTerminalPanelTool(toolName, "") {
 		return boundedGenericToolPanelText(text)
 	}
 	segments := tailWrappedTerminalSegmentsFromEnd(text, maxInt(1, width), acpTerminalPanelMaxLines)

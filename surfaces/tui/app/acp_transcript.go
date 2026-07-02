@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/OnslaughtSnail/caelis/ports/displaypolicy"
+	"github.com/OnslaughtSnail/caelis/surfaces/transcript"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/tuikit"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -711,7 +713,7 @@ func acpToolPanelScrollToken(callID string) string {
 
 func terminalToolPanelLineCount(events []SubagentEvent, callID string, ctx BlockRenderContext) int {
 	toolName, text, err, ok := terminalToolPanelPayload(events, callID)
-	if !ok || !shouldRenderACPToolPanel(text, err) || !isTerminalPanelTool(toolName) {
+	if !ok || !shouldRenderACPToolPanel(text, err) || !displaypolicy.IsTerminalPanelTool(toolName, "") {
 		return 0
 	}
 	return len(renderACPTerminalPanelBody(text, maxInt(1, ctx.Width-2), ctx, err))
@@ -1002,7 +1004,7 @@ func renderACPApprovalReviewRows(blockID string, ev SubagentEvent, width int, ct
 	if strings.TrimSpace(ev.ApprovalText) == "" && strings.TrimSpace(ev.ApprovalStatus) == "" {
 		return nil
 	}
-	display := approvalReviewDisplayParts(ev)
+	display := transcript.ApprovalReviewDisplayParts(ev.ApprovalStatus, ev.ApprovalRisk, ev.ApprovalAuth, ev.ApprovalText)
 	if display.Status == "" && display.Rationale == "" {
 		return nil
 	}
@@ -1033,25 +1035,7 @@ func renderACPApprovalReviewRows(blockID string, ev SubagentEvent, width int, ct
 	return rows
 }
 
-type approvalReviewDisplay struct {
-	Status        string
-	Risk          string
-	Authorization string
-	Rationale     string
-}
-
-func approvalReviewDisplayParts(ev SubagentEvent) approvalReviewDisplay {
-	text := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(ev.ApprovalText), "⚠"))
-	status := firstNonEmpty(strings.TrimSpace(ev.ApprovalStatus), approvalReviewStatusFromText(text), "reviewed")
-	return approvalReviewDisplay{
-		Status:        status,
-		Risk:          firstNonEmpty(strings.TrimSpace(ev.ApprovalRisk), approvalReviewValueFromText(text, "risk")),
-		Authorization: firstNonEmpty(strings.TrimSpace(ev.ApprovalAuth), approvalReviewValueFromText(text, "authorization")),
-		Rationale:     approvalReviewRationaleFromText(text),
-	}
-}
-
-func approvalReviewPrefix(display approvalReviewDisplay, ctx BlockRenderContext) (string, string) {
+func approvalReviewPrefix(display transcript.ApprovalReviewDisplay, ctx BlockRenderContext) (string, string) {
 	status := strings.TrimSpace(display.Status)
 	plain := "• Automatic approval review"
 	styled := ctx.Theme.ToolStyle().Render("•") + " " + ctx.Theme.TranscriptMetaStyle().Render("Automatic approval review")
@@ -1110,54 +1094,6 @@ func approvalReviewValueStyle(ctx BlockRenderContext, value string) lipgloss.Sty
 	default:
 		return ctx.Theme.TranscriptMetaStyle()
 	}
-}
-
-func approvalReviewStatusFromText(text string) string {
-	lower := strings.ToLower(strings.TrimSpace(text))
-	for _, status := range []string{"approved", "denied", "failed", "timed_out"} {
-		if strings.Contains(lower, "approval review "+status) {
-			return status
-		}
-	}
-	return ""
-}
-
-func approvalReviewValueFromText(text string, key string) string {
-	key = strings.ToLower(strings.TrimSpace(key))
-	if key == "" {
-		return ""
-	}
-	lower := strings.ToLower(text)
-	needle := key + ":"
-	idx := strings.Index(lower, needle)
-	if idx < 0 {
-		return ""
-	}
-	valueStart := idx + len(needle)
-	value := strings.TrimSpace(text[valueStart:])
-	for _, sep := range []string{",", ")"} {
-		if cut := strings.Index(value, sep); cut >= 0 {
-			value = value[:cut]
-		}
-	}
-	return strings.TrimSpace(value)
-}
-
-func approvalReviewRationaleFromText(text string) string {
-	text = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(text), "⚠"))
-	if text == "" {
-		return ""
-	}
-	if before, after, ok := strings.Cut(text, "):"); ok && strings.Contains(strings.ToLower(before), "approval review") {
-		return strings.TrimSpace(after)
-	}
-	if before, after, ok := strings.Cut(text, ":"); ok && strings.Contains(strings.ToLower(before), "approval review") {
-		return strings.TrimSpace(after)
-	}
-	if strings.Contains(strings.ToLower(text), "approval review") {
-		return ""
-	}
-	return text
 }
 
 func participantTurnEmptyPlaceholder(status string) string {

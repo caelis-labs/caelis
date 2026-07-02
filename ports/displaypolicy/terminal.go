@@ -2,14 +2,31 @@ package displaypolicy
 
 import "strings"
 
+var terminalPanelToolNames = map[string]bool{
+	"RUN_COMMAND": true,
+	"SPAWN":       true,
+	"TASK":        false,
+}
+
+func IsTerminalPanelTool(name string, kind string) bool {
+	if terminal, ok := terminalPanelToolName(name); ok {
+		return terminal
+	}
+	return strings.EqualFold(strings.TrimSpace(kind), ToolKindExecute)
+}
+
 func DisplayTerminalID(toolCallID string, name string) (string, bool) {
-	switch strings.ToUpper(strings.TrimSpace(name)) {
-	case "RUN_COMMAND", "SPAWN":
+	if terminal, ok := terminalPanelToolName(name); ok && terminal {
 		if id := strings.TrimSpace(toolCallID); id != "" {
 			return id, true
 		}
 	}
 	return "", false
+}
+
+func terminalPanelToolName(name string) (bool, bool) {
+	terminal, ok := terminalPanelToolNames[strings.ToUpper(strings.TrimSpace(name))]
+	return terminal, ok
 }
 
 func DisplayTerminalInitialOutput(name string, args map[string]any) string {

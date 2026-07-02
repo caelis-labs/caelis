@@ -1,6 +1,10 @@
 package tuiapp
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/OnslaughtSnail/caelis/ports/displaypolicy"
+)
 
 type ToolUpdateMeta struct {
 	TaskID          string
@@ -154,7 +158,7 @@ func effectiveToolEventIdentity(events []SubagentEvent, update toolEventUpdate, 
 }
 
 func normalizeToolEventOutput(output string, effectiveName string, effectiveToolKind string, terminal bool) string {
-	if terminal || isTerminalPanelToolKind(effectiveName, effectiveToolKind) {
+	if terminal || displaypolicy.IsTerminalPanelTool(effectiveName, effectiveToolKind) {
 		return output
 	}
 	return strings.TrimSpace(output)

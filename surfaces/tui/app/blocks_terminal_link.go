@@ -1,6 +1,10 @@
 package tuiapp
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/OnslaughtSnail/caelis/ports/displaypolicy"
+)
 
 func updateLinkedTerminalEvent(events []SubagentEvent, callID string, toolName string, taskID string, output string, final bool, err bool, meta ToolUpdateMeta) bool {
 	toolName = strings.TrimSpace(toolName)
@@ -145,7 +149,7 @@ func spawnContinuationDisplayArgs(existing string, prompt string) string {
 }
 
 func shouldIgnoreStaleTerminalUpdate(events []SubagentEvent, callID string, name string, toolKind string, terminal bool, final bool) bool {
-	if final || strings.TrimSpace(callID) == "" || (!terminal && !isTerminalPanelToolKind(name, toolKind)) {
+	if final || strings.TrimSpace(callID) == "" || (!terminal && !displaypolicy.IsTerminalPanelTool(name, toolKind)) {
 		return false
 	}
 	for i := len(events) - 1; i >= 0; i-- {

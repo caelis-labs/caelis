@@ -846,7 +846,7 @@ func toolDisplaySummaryOutput(name string, output map[string]any, meta map[strin
 	if out == nil {
 		out = map[string]any{}
 	}
-	toolMeta := eventRuntimeToolMeta(meta)
+	toolMeta := transcript.RuntimeToolMeta(meta)
 	if len(toolMeta) == 0 {
 		if len(out) == 0 {
 			return nil

@@ -14,7 +14,6 @@ fix.
 - `AGENTS.md`
 - `docs/architecture.md`
 - `docs/acp-projection-architecture.md`
-- `docs/architecture-review.md` when present
 - `scripts/arch_lint.go` when boundary rules matter
 
 ## Architecture Lens
