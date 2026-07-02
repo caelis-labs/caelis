@@ -42,6 +42,18 @@ func TestGatewayAppStackForRuntimeTestWiresFullRuntimeSurface(t *testing.T) {
 		t.Fatal("gatewayAppStackForRuntimeTest() returned nil")
 	}
 
+	gatewayHooks := map[string]bool{
+		"turn":          stack.Gateway.TurnServiceFn != nil,
+		"session":       stack.Gateway.SessionServiceFn != nil,
+		"control-plane": stack.Gateway.ControlPlaneServiceFn != nil,
+		"stream":        stack.Gateway.StreamProviderFn != nil,
+	}
+	for name, ok := range gatewayHooks {
+		if !ok {
+			t.Fatalf("gateway %s hook is not wired", name)
+		}
+	}
+
 	sandboxHooks := map[string]bool{
 		"status":     stack.Sandbox.StatusFn != nil,
 		"setBackend": stack.Sandbox.SetBackendFn != nil,

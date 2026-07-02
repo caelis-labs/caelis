@@ -61,7 +61,7 @@ func TestLocalStackGatewayACPMainE2E(t *testing.T) {
 		t.Fatalf("StartSession() error = %v", err)
 	}
 
-	updated, err := stack.Kernel().HandoffController(context.Background(), gateway.HandoffControllerRequest{
+	updated, err := stack.KernelControlPlane().HandoffController(context.Background(), gateway.HandoffControllerRequest{
 		SessionRef: activeSession.SessionRef,
 		Kind:       session.ControllerKindACP,
 		Agent:      "codex",
@@ -75,7 +75,7 @@ func TestLocalStackGatewayACPMainE2E(t *testing.T) {
 		t.Fatalf("controller kind = %q, want %q", updated.Controller.Kind, session.ControllerKindACP)
 	}
 
-	state, err := stack.Kernel().ControlPlaneState(context.Background(), gateway.ControlPlaneStateRequest{
+	state, err := stack.KernelControlPlane().ControlPlaneState(context.Background(), gateway.ControlPlaneStateRequest{
 		SessionRef: activeSession.SessionRef,
 	})
 	if err != nil {
@@ -108,7 +108,7 @@ func TestLocalStackGatewayACPMainE2E(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 
-	result, err := headless.RunOnce(ctx, stack.Kernel(), gateway.BeginTurnRequest{
+	result, err := headless.RunOnce(ctx, stack.KernelTurns(), gateway.BeginTurnRequest{
 		SessionRef: activeSession.SessionRef,
 		Input:      "run through acp controller",
 		Surface:    "headless-acp-main-e2e",
@@ -179,7 +179,7 @@ func TestLocalStackGatewayACPCommandEventShapeE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
 	}
-	updated, err := stack.Kernel().HandoffController(context.Background(), gateway.HandoffControllerRequest{
+	updated, err := stack.KernelControlPlane().HandoffController(context.Background(), gateway.HandoffControllerRequest{
 		SessionRef: activeSession.SessionRef,
 		Kind:       session.ControllerKindACP,
 		Agent:      "codex",
@@ -191,7 +191,7 @@ func TestLocalStackGatewayACPCommandEventShapeE2E(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
-	result, err := stack.Kernel().BeginTurn(ctx, gateway.BeginTurnRequest{
+	result, err := stack.KernelTurns().BeginTurn(ctx, gateway.BeginTurnRequest{
 		SessionRef: updated.SessionRef,
 		Input:      "run a simple command",
 		Surface:    "headless-acp-command-shape-e2e",

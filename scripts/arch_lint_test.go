@@ -237,6 +237,72 @@ var meta = map[string]any{
 	}
 }
 
+func TestSemanticBoundaryRuleRejectsGatewayAggregateAccessors(t *testing.T) {
+	t.Parallel()
+
+	const modulePath = "github.com/OnslaughtSnail/caelis"
+	tests := []struct {
+		name        string
+		source      string
+		wantSubject string
+	}{
+		{
+			name: "Kernel",
+			source: `package demo
+
+type stackish interface{ Kernel() any }
+
+func run(stack stackish) any {
+	return stack.Kernel()
+}
+`,
+			wantSubject: "stack.Kernel()",
+		},
+		{
+			name: "CurrentGateway",
+			source: `package demo
+
+type stackish interface{ CurrentGateway() any }
+
+func run(stack stackish) any {
+	return stack.CurrentGateway()
+}
+`,
+			wantSubject: "stack.CurrentGateway()",
+		},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			rule, subject, _ := semanticRuleForSource(t, "internal/cli/demo.go", tt.source, modulePath)
+			if !strings.Contains(rule, "narrow Stack gateway accessors") || subject != tt.wantSubject {
+				t.Fatalf("semantic rule = (%q, %q), want aggregate accessor rejection for %s", rule, subject, tt.wantSubject)
+			}
+		})
+	}
+}
+
+func TestSemanticBoundaryRuleAllowsGatewayAggregateAccessorsInTestsAndShims(t *testing.T) {
+	t.Parallel()
+
+	const modulePath = "github.com/OnslaughtSnail/caelis"
+	source := `package demo
+
+type stackish interface{ Kernel() any }
+
+func run(stack stackish) any {
+	return stack.Kernel()
+}
+`
+	for _, rel := range []string{"internal/cli/demo_test.go", "app/gatewayapp/services.go"} {
+		rule, subject, _ := semanticRuleForSource(t, rel, source, modulePath)
+		if rule != "" || subject != "" {
+			t.Fatalf("semantic rule for %s = (%q, %q), want aggregate accessor allowed", rel, rule, subject)
+		}
+	}
+}
+
 func semanticRuleForSource(t *testing.T, rel string, source string, modulePath string) (string, string, int) {
 	t.Helper()
 	fset := token.NewFileSet()

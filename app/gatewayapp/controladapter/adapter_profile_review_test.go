@@ -33,7 +33,7 @@ func TestAdapterStartReviewSubagentUsesHiddenReviewerProfile(t *testing.T) {
 		handle:  reviewProfileTurnHandle(activeSession.SessionRef),
 	}
 	driver, err := NewAdapter(ctx, &RuntimeStack{
-		Gateway: GatewayRuntimeDeps{ServiceFn: func() GatewayService { return gw }},
+		Gateway: gatewayRuntimeDepsForTest(gw),
 		Session: SessionRuntimeDeps{
 			Workspace: session.WorkspaceRef{Key: "ws", CWD: activeSession.CWD},
 			StartFn: func(context.Context, string, string) (session.Session, error) {
@@ -183,7 +183,7 @@ func TestAdapterStartReviewSubagentAllowsWarningReviewer(t *testing.T) {
 		handle:  reviewProfileTurnHandle(activeSession.SessionRef),
 	}
 	driver, err := NewAdapter(ctx, &RuntimeStack{
-		Gateway: GatewayRuntimeDeps{ServiceFn: func() GatewayService { return gw }},
+		Gateway: gatewayRuntimeDepsForTest(gw),
 		Session: SessionRuntimeDeps{
 			Workspace: session.WorkspaceRef{Key: "ws", CWD: activeSession.CWD},
 			StartFn: func(context.Context, string, string) (session.Session, error) {
@@ -270,7 +270,7 @@ func TestAdapterStartReviewSubagentRejectsUnavailableReviewer(t *testing.T) {
 			}
 			gw := &reviewProfileGatewayService{session: activeSession}
 			driver, err := NewAdapter(ctx, &RuntimeStack{
-				Gateway: GatewayRuntimeDeps{ServiceFn: func() GatewayService { return gw }},
+				Gateway: gatewayRuntimeDepsForTest(gw),
 				Session: SessionRuntimeDeps{
 					Workspace: session.WorkspaceRef{Key: "ws", CWD: activeSession.CWD},
 					StartFn: func(context.Context, string, string) (session.Session, error) {
@@ -315,7 +315,7 @@ func newReviewProfileAdapterForTest(t *testing.T, ctx context.Context, sessionID
 		handle:  reviewProfileTurnHandle(activeSession.SessionRef),
 	}
 	driver, err := NewAdapter(ctx, &RuntimeStack{
-		Gateway: GatewayRuntimeDeps{ServiceFn: func() GatewayService { return gw }},
+		Gateway: gatewayRuntimeDepsForTest(gw),
 		Session: SessionRuntimeDeps{
 			Workspace: session.WorkspaceRef{Key: "ws", CWD: activeSession.CWD},
 			StartFn: func(context.Context, string, string) (session.Session, error) {

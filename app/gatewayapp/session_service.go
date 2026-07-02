@@ -21,7 +21,7 @@ func (s *Stack) StartSession(ctx context.Context, preferredSessionID string, bin
 	if s == nil {
 		return session.Session{}, fmt.Errorf("gatewayapp: stack is unavailable")
 	}
-	gw := s.CurrentGateway()
+	gw := s.KernelSessions()
 	if gw == nil {
 		return session.Session{}, fmt.Errorf("gatewayapp: gateway is unavailable")
 	}

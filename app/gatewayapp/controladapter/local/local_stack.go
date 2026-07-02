@@ -13,7 +13,6 @@ import (
 
 type Adapter = controladapter.Adapter
 type RuntimeStack = controladapter.RuntimeStack
-type GatewayService = controladapter.GatewayService
 type ModelConfig = controladapter.ModelConfig
 type ModelCapabilityInfo = controladapter.ModelCapabilityInfo
 type ModelChoice = controladapter.ModelChoice

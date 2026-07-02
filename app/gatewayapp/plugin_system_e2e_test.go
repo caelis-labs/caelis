@@ -108,7 +108,7 @@ func TestRealConfigPluginSystemE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
 	}
-	result, err := headless.RunOnce(context.Background(), stack.Kernel(), gateway.BeginTurnRequest{
+	result, err := headless.RunOnce(context.Background(), stack.KernelTurns(), gateway.BeginTurnRequest{
 		SessionRef: session.SessionRef,
 		Input:      "Run the Caelis plugin system E2E. Use the available MCP tool.",
 		Surface:    "plugin-e2e",

@@ -36,15 +36,8 @@ func NewRuntimeStackFromGatewayApp(stack *gatewayapp.Stack, adapters RuntimeStac
 	skills := stack.Skills()
 	status := stack.Status()
 	plugins := stack.Plugins()
-	gatewayService := func() GatewayService { return stack.CurrentGateway() }
 	return &RuntimeStack{
-		Gateway: GatewayRuntimeDeps{
-			ServiceFn:             gatewayService,
-			TurnServiceFn:         func() GatewayTurnService { return stack.CurrentGateway() },
-			SessionServiceFn:      func() GatewaySessionService { return stack.CurrentGateway() },
-			ControlPlaneServiceFn: func() GatewayControlPlaneService { return stack.CurrentGateway() },
-			StreamProviderFn:      func() GatewayStreamProvider { return stack.CurrentGateway() },
-		},
+		Gateway: gatewayDepsFromStack(stack),
 		Session: SessionRuntimeDeps{
 			Store:     stack.Sessions,
 			AppName:   stack.AppName,
@@ -198,6 +191,15 @@ func NewRuntimeStackFromGatewayApp(stack *gatewayapp.Stack, adapters RuntimeStac
 				return adapters.PluginSnapshot(plugins.Inspect(ctx, id))
 			},
 		},
+	}
+}
+
+func gatewayDepsFromStack(stack *gatewayapp.Stack) GatewayRuntimeDeps {
+	return GatewayRuntimeDeps{
+		TurnServiceFn:         func() GatewayTurnService { return stack.KernelTurns() },
+		SessionServiceFn:      func() GatewaySessionService { return stack.KernelSessions() },
+		ControlPlaneServiceFn: func() GatewayControlPlaneService { return stack.KernelControlPlane() },
+		StreamProviderFn:      func() GatewayStreamProvider { return stack.KernelStreams() },
 	}
 }
 

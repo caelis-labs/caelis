@@ -236,7 +236,7 @@ func runHeadless(ctx context.Context, stack *gatewayapp.Stack, sessionID string,
 	if err != nil {
 		return err
 	}
-	result, err := headless.RunOnce(ctx, stack.Kernel(), gateway.BeginTurnRequest{
+	result, err := headless.RunOnce(ctx, stack.KernelTurns(), gateway.BeginTurnRequest{
 		SessionRef: session.SessionRef,
 		Input:      input,
 		Surface:    "headless",

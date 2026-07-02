@@ -55,6 +55,29 @@ func ptrRuntimeMessage(message model.Message) *model.Message {
 	return &message
 }
 
+func gatewayRuntimeDepsForTest(gw GatewayService) GatewayRuntimeDeps {
+	return gatewayRuntimeDepsProviderForTest(func() GatewayService {
+		return gw
+	})
+}
+
+func gatewayRuntimeDepsProviderForTest(provider func() GatewayService) GatewayRuntimeDeps {
+	return GatewayRuntimeDeps{
+		TurnServiceFn: func() GatewayTurnService {
+			return provider()
+		},
+		SessionServiceFn: func() GatewaySessionService {
+			return provider()
+		},
+		ControlPlaneServiceFn: func() GatewayControlPlaneService {
+			return provider()
+		},
+		StreamProviderFn: func() GatewayStreamProvider {
+			return provider()
+		},
+	}
+}
+
 func modelUsageMetaForRuntimeTest(prompt int, cached int, completion int, total int, reasoning ...int) map[string]any {
 	reasoningTokens := 0
 	if len(reasoning) > 0 {
@@ -158,7 +181,7 @@ func TestStreamRequestFromProjectedSemanticSpawnRunningEvent(t *testing.T) {
 	t.Fatalf("projected ACP envelopes did not produce stream request: %#v", events)
 }
 
-func TestAdapterUsesCurrentGatewayAfterSandboxRebuild(t *testing.T) {
+func TestAdapterUsesCurrentTurnServiceAfterSandboxRebuild(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -185,21 +208,21 @@ func TestAdapterUsesCurrentGatewayAfterSandboxRebuild(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
 	}
-	before := stack.CurrentGateway()
-	if got, err := driver.gatewayService(); err != nil || got != before {
-		t.Fatalf("driver.gatewayService() before rebuild = %p, %v; want %p", got, err, before)
+	beforeTurns := stack.KernelTurns()
+	if got, err := driver.gatewayTurns(); err != nil || got != beforeTurns {
+		t.Fatalf("driver.gatewayTurns() before rebuild = %p, %v; want %p", got, err, beforeTurns)
 	}
 	// This test only needs to force a gateway rebuild; the missing helper keeps
 	// auto landlock fallback from recursively executing this test binary in CI.
 	if _, err := stack.SetSandboxBackend(ctx, "auto"); err != nil {
 		t.Fatalf("SetSandboxBackend(auto) error = %v", err)
 	}
-	after := stack.CurrentGateway()
-	if after == nil || after == before {
-		t.Fatalf("CurrentGateway() after rebuild = %p, before %p; want replacement", after, before)
+	afterTurns := stack.KernelTurns()
+	if afterTurns == nil || afterTurns == beforeTurns {
+		t.Fatalf("KernelTurns() after rebuild = %p, before %p; want replacement", afterTurns, beforeTurns)
 	}
-	if got, err := driver.gatewayService(); err != nil || got != after {
-		t.Fatalf("driver.gatewayService() after rebuild = %p, %v; want current %p", got, err, after)
+	if got, err := driver.gatewayTurns(); err != nil || got != afterTurns {
+		t.Fatalf("driver.gatewayTurns() after rebuild = %p, %v; want current %p", got, err, afterTurns)
 	}
 }
 
@@ -264,7 +287,7 @@ func TestAdapterDefersBlankSessionUntilFirstSubmission(t *testing.T) {
 	if status.Session.ID != "" {
 		t.Fatalf("Status().SessionID = %q, want empty before first submission", status.Session.ID)
 	}
-	before, err := stack.Kernel().ListSessions(ctx, gateway.ListSessionsRequest{
+	before, err := stack.KernelSessions().ListSessions(ctx, gateway.ListSessionsRequest{
 		AppName:      stack.AppName,
 		UserID:       stack.UserID,
 		WorkspaceKey: stack.Workspace.Key,
@@ -282,7 +305,7 @@ func TestAdapterDefersBlankSessionUntilFirstSubmission(t *testing.T) {
 		t.Fatalf("Submit() error = %v", err)
 	}
 	closeAdapterTestTurn(t, turn)
-	after, err := stack.Kernel().ListSessions(ctx, gateway.ListSessionsRequest{
+	after, err := stack.KernelSessions().ListSessions(ctx, gateway.ListSessionsRequest{
 		AppName:      stack.AppName,
 		UserID:       stack.UserID,
 		WorkspaceKey: stack.Workspace.Key,
@@ -316,7 +339,7 @@ func TestAdapterSubmitRoutesActiveSessionInputToActiveTurn(t *testing.T) {
 		}},
 	}
 	driver, err := NewAdapter(ctx, &RuntimeStack{
-		Gateway: GatewayRuntimeDeps{ServiceFn: func() GatewayService { return gw }},
+		Gateway: gatewayRuntimeDepsForTest(gw),
 		Session: SessionRuntimeDeps{
 			Workspace: session.WorkspaceRef{Key: "ws", CWD: activeSession.CWD},
 			StartFn: func(context.Context, string, string) (session.Session, error) {
@@ -371,7 +394,7 @@ func TestAdapterSubmitForwardsReferencesToGateway(t *testing.T) {
 	}
 	gw := &activeSubmitGatewayService{}
 	driver, err := NewAdapter(ctx, &RuntimeStack{
-		Gateway: GatewayRuntimeDeps{ServiceFn: func() GatewayService { return gw }},
+		Gateway: gatewayRuntimeDepsForTest(gw),
 		Session: SessionRuntimeDeps{
 			Workspace: session.WorkspaceRef{Key: "ws", CWD: workspace},
 			StartFn: func(context.Context, string, string) (session.Session, error) {
@@ -511,7 +534,7 @@ func TestAdapterSubmitDoesNotRouteParticipantActiveTurnInputToActiveTurn(t *test
 		}},
 	}
 	driver, err := NewAdapter(ctx, &RuntimeStack{
-		Gateway: GatewayRuntimeDeps{ServiceFn: func() GatewayService { return gw }},
+		Gateway: gatewayRuntimeDepsForTest(gw),
 		Session: SessionRuntimeDeps{
 			Workspace: session.WorkspaceRef{Key: "ws", CWD: activeSession.CWD},
 			StartFn: func(context.Context, string, string) (session.Session, error) {
@@ -560,14 +583,14 @@ func TestAdapterListSessionsSkipsUntitledSessions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	if _, err := stack.Kernel().StartSession(ctx, gateway.StartSessionRequest{
+	if _, err := stack.KernelSessions().StartSession(ctx, gateway.StartSessionRequest{
 		AppName:   stack.AppName,
 		UserID:    stack.UserID,
 		Workspace: stack.Workspace,
 	}); err != nil {
 		t.Fatalf("StartSession(blank) error = %v", err)
 	}
-	titled, err := stack.Kernel().StartSession(ctx, gateway.StartSessionRequest{
+	titled, err := stack.KernelSessions().StartSession(ctx, gateway.StartSessionRequest{
 		AppName:   stack.AppName,
 		UserID:    stack.UserID,
 		Workspace: stack.Workspace,
@@ -1984,7 +2007,7 @@ func TestAdapterStartAgentSubagentRollsBackAttachmentOnPromptConflict(t *testing
 		},
 	}
 	driver, err := NewAdapter(ctx, &RuntimeStack{
-		Gateway: GatewayRuntimeDeps{ServiceFn: func() GatewayService { return gw }},
+		Gateway: gatewayRuntimeDepsForTest(gw),
 		Session: SessionRuntimeDeps{
 			Workspace: session.WorkspaceRef{
 				Key: "ws",
@@ -2177,7 +2200,7 @@ func TestAdapterStartupBindsRequestedSessionInsteadOfFreshOne(t *testing.T) {
 	if status.Session.ID == stale.SessionID {
 		t.Fatalf("startup session = %q, want sticky-session instead of stale bound session", status.Session.ID)
 	}
-	binding, err := stack.Kernel().LookupBinding(gateway.BindingStateRequest{BindingKey: "surface"})
+	binding, err := stack.KernelSessions().LookupBinding(gateway.BindingStateRequest{BindingKey: "surface"})
 	if err != nil {
 		t.Fatalf("LookupBinding(surface) error = %v", err)
 	}
@@ -2401,11 +2424,7 @@ func TestAdapterCycleSessionModeUpdatesRemoteACPControllerMode(t *testing.T) {
 	driver := &Adapter{
 		stack: &RuntimeStack{
 			Session: SessionRuntimeDeps{Workspace: session.WorkspaceRef{CWD: activeSession.CWD}},
-			Gateway: GatewayRuntimeDeps{
-				ServiceFn: func() GatewayService {
-					return &activeSubmitGatewayService{}
-				},
-			},
+			Gateway: gatewayRuntimeDepsForTest(&activeSubmitGatewayService{}),
 			Status: StatusRuntimeDeps{
 				RuntimeStateFn: func(context.Context, session.SessionRef) (SessionRuntimeState, error) {
 					return SessionRuntimeState{ModelAlias: "local/model", SessionMode: "auto-review"}, nil
@@ -2518,11 +2537,7 @@ func TestAdapterACPStatusPrefersRemoteModeOverLocalSessionMode(t *testing.T) {
 	driver := &Adapter{
 		stack: &RuntimeStack{
 			Session: SessionRuntimeDeps{Workspace: session.WorkspaceRef{CWD: activeSession.CWD}},
-			Gateway: GatewayRuntimeDeps{
-				ServiceFn: func() GatewayService {
-					return &activeSubmitGatewayService{}
-				},
-			},
+			Gateway: gatewayRuntimeDepsForTest(&activeSubmitGatewayService{}),
 			Model: ModelRuntimeDeps{
 				DefaultAliasFn: func() string { return "local/model" },
 			},
@@ -3677,7 +3692,7 @@ func TestAdapterCompleteResumeIncludesMetadataAndRecentFirst(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	first, err := stack.Kernel().StartSession(ctx, gateway.StartSessionRequest{
+	first, err := stack.KernelSessions().StartSession(ctx, gateway.StartSessionRequest{
 		AppName:    stack.AppName,
 		UserID:     stack.UserID,
 		Workspace:  stack.Workspace,
@@ -3694,7 +3709,7 @@ func TestAdapterCompleteResumeIncludesMetadataAndRecentFirst(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("UpdateState(first) error = %v", err)
 	}
-	second, err := stack.Kernel().StartSession(ctx, gateway.StartSessionRequest{
+	second, err := stack.KernelSessions().StartSession(ctx, gateway.StartSessionRequest{
 		AppName:    stack.AppName,
 		UserID:     stack.UserID,
 		Workspace:  stack.Workspace,

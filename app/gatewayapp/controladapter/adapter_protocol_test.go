@@ -111,7 +111,7 @@ func TestAdapterRunStateReturnsIdleWithoutSession(t *testing.T) {
 	t.Parallel()
 
 	driver, err := NewAdapter(context.Background(), &RuntimeStack{
-		Gateway: GatewayRuntimeDeps{ServiceFn: func() GatewayService { return &protocolGatewayService{} }},
+		Gateway: gatewayRuntimeDepsForTest(&protocolGatewayService{}),
 		Session: SessionRuntimeDeps{
 			AppName:   "caelis",
 			UserID:    "user-1",
@@ -133,7 +133,7 @@ func TestAdapterRunStateReturnsIdleWithoutSession(t *testing.T) {
 func newProtocolTestAdapter(t *testing.T, gw *protocolGatewayService, activeSession session.Session) *Adapter {
 	t.Helper()
 	driver, err := NewAdapter(context.Background(), &RuntimeStack{
-		Gateway: GatewayRuntimeDeps{ServiceFn: func() GatewayService { return gw }},
+		Gateway: gatewayRuntimeDepsForTest(gw),
 		Session: SessionRuntimeDeps{
 			AppName:   "caelis",
 			UserID:    "user-1",

@@ -27,7 +27,7 @@ checklist until the items are either implemented or replaced by a newer review.
   completion payload to `internal/connectwizard`. `protocol/acp/control`
   remains a transitional control contract/presenter package, not the owner of
   product command routing.
-- [ ] `P1` Narrow `ports/gateway.Service` consumers. Failure mode: one stable
+- [x] `P1` Narrow `ports/gateway.Service` consumers. Failure mode: one stable
   port still spans session, turn, replay, control-plane, and request policy.
   Bounded repair: move callers onto the smallest consumer-facing interfaces
   first, reusing existing subinterfaces where they are already narrow, then
@@ -37,7 +37,14 @@ checklist until the items are either implemented or replaced by a newer review.
   and `GatewayStreamProvider` providers while keeping the aggregate fallback for
   tests and remaining app seams. Remaining work: shrink public stack/kernel
   exposure and split replay/control-plane app contracts only where consumers
-  need them.
+  need them. Phase 2 added narrow `Stack` kernel accessors, moved production and
+  eval callers onto turn/session/control-plane/stream-specific contracts, and
+  stopped wiring the controladapter production stack through the aggregate.
+  Phase 3 deprecated the aggregate stack accessors, added arch-lint coverage
+  that rejects production `Kernel()`/`CurrentGateway()` calls, removed the
+  controladapter `ServiceFn` fallback, and migrated fixtures onto narrow gateway
+  providers. Replay/control-plane contract splitting remains conditional on
+  future consumers proving a smaller surface.
 - [x] `P1` Turn system-managed agents into a small registry instead of Guardian
   special cases. Failure mode: Guardian, Reviewer, and future Agent Manage Loop
   agents would duplicate profile, binding, and run-plan rules. Bounded repair:

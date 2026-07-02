@@ -71,15 +71,12 @@ func (s *Stack) ACPSurface(modes acp.ModeProvider, useFallbackModes bool, config
 	return newGatewayACPSurface(s, modes, useFallbackModes, configs)
 }
 
+// Kernel returns the current aggregate gateway service.
+//
+// Deprecated: use KernelTurns, KernelSessions, KernelControlPlane, or
+// KernelStreams so production callers depend on the narrow service they need.
 func (s *Stack) Kernel() gateway.Service {
-	if s == nil {
-		return nil
-	}
-	gateway := s.CurrentGateway()
-	if gateway == nil {
-		return nil
-	}
-	return gateway
+	return s.kernelRuntime()
 }
 
 func (s ModelService) Connect(cfg ModelConfig) (string, error) {

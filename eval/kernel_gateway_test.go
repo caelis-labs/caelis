@@ -47,7 +47,7 @@ func TestGatewayProviderLiveReasoningBoundaryFromLocalConfigE2E(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
-	result, err := stack.Kernel().BeginTurn(ctx, gateway.BeginTurnRequest{
+	result, err := stack.KernelTurns().BeginTurn(ctx, gateway.BeginTurnRequest{
 		SessionRef: activeSession.SessionRef,
 		Input:      "介绍一下你自己。",
 		Surface:    "cli-tui",

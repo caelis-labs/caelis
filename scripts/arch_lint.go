@@ -133,6 +133,9 @@ func semanticBoundaryRule(rel string, file *ast.File, fset *token.FileSet, modul
 	if rule, subject, line := topLevelTerminalMetaRule(rel, file, fset); rule != "" {
 		return rule, subject, line
 	}
+	if rule, subject, line := gatewayAggregateAccessorRule(rel, file, fset); rule != "" {
+		return rule, subject, line
+	}
 	return "", "", 0
 }
 
@@ -283,6 +286,46 @@ func topLevelTerminalMetaRule(rel string, file *ast.File, fset *token.FileSet) (
 		return "", "", 0
 	}
 	return "production code must use protocol/acp/metautil terminal helpers instead of raw top-level terminal metadata keys", subject, line
+}
+
+func gatewayAggregateAccessorRule(rel string, file *ast.File, fset *token.FileSet) (string, string, int) {
+	if file == nil || strings.HasSuffix(rel, "_test.go") || rel == "app/gatewayapp/stack.go" || rel == "app/gatewayapp/services.go" {
+		return "", "", 0
+	}
+	var subject string
+	var line int
+	ast.Inspect(file, func(node ast.Node) bool {
+		if subject != "" {
+			return false
+		}
+		call, ok := node.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		selector, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		switch selector.Sel.Name {
+		case "Kernel", "CurrentGateway":
+			subject = gatewayAggregateAccessorSubject(selector)
+			line = fset.Position(selector.Pos()).Line
+			return false
+		default:
+			return true
+		}
+	})
+	if subject == "" {
+		return "", "", 0
+	}
+	return "production code must use narrow Stack gateway accessors instead of aggregate gateway escape hatches", subject, line
+}
+
+func gatewayAggregateAccessorSubject(selector *ast.SelectorExpr) string {
+	if ident, ok := selector.X.(*ast.Ident); ok {
+		return ident.Name + "." + selector.Sel.Name + "()"
+	}
+	return "." + selector.Sel.Name + "()"
 }
 
 func eventProtocolAliasVars(file *ast.File, sessionNames map[string]bool) map[string]bool {

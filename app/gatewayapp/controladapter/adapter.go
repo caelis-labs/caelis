@@ -104,70 +104,51 @@ func (d *Adapter) bindSession(ctx context.Context, activeSession session.Session
 	d.refreshSessionDisplay(ctx, activeSession)
 }
 
-func (d *Adapter) gatewayService() (GatewayService, error) {
-	if d == nil || d.stack == nil {
-		return nil, fmt.Errorf("app/gatewayapp/controladapter: stack is required")
-	}
-	if d.stack.Gateway.ServiceFn == nil {
-		return nil, missingRuntimeDependency("gateway")
-	}
-	gw := d.stack.Gateway.ServiceFn()
-	if gw == nil {
-		return nil, fmt.Errorf("app/gatewayapp/controladapter: gateway is unavailable")
-	}
-	return gw, nil
-}
-
 func (d *Adapter) gatewayTurns() (GatewayTurnService, error) {
-	if d == nil || d.stack == nil {
-		return nil, fmt.Errorf("app/gatewayapp/controladapter: stack is required")
-	}
-	if d.stack.Gateway.TurnServiceFn != nil {
-		if gw := d.stack.Gateway.TurnServiceFn(); gw != nil {
-			return gw, nil
-		}
-		return nil, fmt.Errorf("app/gatewayapp/controladapter: gateway turn service is unavailable")
-	}
-	return d.gatewayService()
+	return resolveGatewayDep(d, gatewayTurnServiceFn, "gateway turn service", "gateway turn service is unavailable")
 }
 
 func (d *Adapter) gatewaySessions() (GatewaySessionService, error) {
-	if d == nil || d.stack == nil {
-		return nil, fmt.Errorf("app/gatewayapp/controladapter: stack is required")
-	}
-	if d.stack.Gateway.SessionServiceFn != nil {
-		if gw := d.stack.Gateway.SessionServiceFn(); gw != nil {
-			return gw, nil
-		}
-		return nil, fmt.Errorf("app/gatewayapp/controladapter: gateway session service is unavailable")
-	}
-	return d.gatewayService()
+	return resolveGatewayDep(d, gatewaySessionServiceFn, "gateway session service", "gateway session service is unavailable")
 }
 
 func (d *Adapter) gatewayControlPlane() (GatewayControlPlaneService, error) {
-	if d == nil || d.stack == nil {
-		return nil, fmt.Errorf("app/gatewayapp/controladapter: stack is required")
-	}
-	if d.stack.Gateway.ControlPlaneServiceFn != nil {
-		if gw := d.stack.Gateway.ControlPlaneServiceFn(); gw != nil {
-			return gw, nil
-		}
-		return nil, fmt.Errorf("app/gatewayapp/controladapter: gateway control-plane service is unavailable")
-	}
-	return d.gatewayService()
+	return resolveGatewayDep(d, gatewayControlPlaneServiceFn, "gateway control-plane service", "gateway control-plane service is unavailable")
 }
 
 func (d *Adapter) gatewayStreams() (GatewayStreamProvider, error) {
-	if d == nil || d.stack == nil {
-		return nil, fmt.Errorf("app/gatewayapp/controladapter: stack is required")
+	return resolveGatewayDep(d, gatewayStreamProviderFn, "gateway stream provider", "gateway stream provider is unavailable")
+}
+
+func resolveGatewayDep[T any](driver *Adapter, provider func(GatewayRuntimeDeps) func() T, depName, unavailable string) (T, error) {
+	var zero T
+	if driver == nil || driver.stack == nil {
+		return zero, fmt.Errorf("app/gatewayapp/controladapter: stack is required")
 	}
-	if d.stack.Gateway.StreamProviderFn != nil {
-		if gw := d.stack.Gateway.StreamProviderFn(); gw != nil {
-			return gw, nil
-		}
-		return nil, fmt.Errorf("app/gatewayapp/controladapter: gateway stream provider is unavailable")
+	fn := provider(driver.stack.Gateway)
+	if fn == nil {
+		return zero, missingRuntimeDependency(depName)
 	}
-	return d.gatewayService()
+	if gw := fn(); any(gw) != nil {
+		return gw, nil
+	}
+	return zero, fmt.Errorf("app/gatewayapp/controladapter: %s", unavailable)
+}
+
+func gatewayTurnServiceFn(deps GatewayRuntimeDeps) func() GatewayTurnService {
+	return deps.TurnServiceFn
+}
+
+func gatewaySessionServiceFn(deps GatewayRuntimeDeps) func() GatewaySessionService {
+	return deps.SessionServiceFn
+}
+
+func gatewayControlPlaneServiceFn(deps GatewayRuntimeDeps) func() GatewayControlPlaneService {
+	return deps.ControlPlaneServiceFn
+}
+
+func gatewayStreamProviderFn(deps GatewayRuntimeDeps) func() GatewayStreamProvider {
+	return deps.StreamProviderFn
 }
 
 func (d *Adapter) SubscribeStream(ctx context.Context, env eventstream.Envelope) (<-chan eventstream.Envelope, bool) {

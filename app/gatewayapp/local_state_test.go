@@ -766,7 +766,7 @@ func TestLocalStackDefaultRuntimeAutoCompactionEnabled(t *testing.T) {
 	appendGatewayAppEvent(t, stack, activeSession.SessionRef, gatewayAppAssistantEvent("ack"))
 	appendGatewayAppEvent(t, stack, activeSession.SessionRef, gatewayAppUserEvent("Next action: verify the default app runtime invokes model-backed compact before the turn."))
 
-	if _, err := headless.RunOnce(ctx, stack.Kernel(), gateway.BeginTurnRequest{
+	if _, err := headless.RunOnce(ctx, stack.KernelTurns(), gateway.BeginTurnRequest{
 		SessionRef: activeSession.SessionRef,
 		Input:      "continue after app auto compact",
 		Surface:    "headless-auto-compact-test",
@@ -824,7 +824,7 @@ func TestLocalStackAutoCompactCountsPromptPrefix(t *testing.T) {
 	}
 	appendGatewayAppEvent(t, stack, activeSession.SessionRef, gatewayAppUserEvent("Short durable event."))
 
-	if _, err := headless.RunOnce(ctx, stack.Kernel(), gateway.BeginTurnRequest{
+	if _, err := headless.RunOnce(ctx, stack.KernelTurns(), gateway.BeginTurnRequest{
 		SessionRef: activeSession.SessionRef,
 		Input:      "continue after prefix pressure",
 		Surface:    "headless-auto-compact-prefix-test",

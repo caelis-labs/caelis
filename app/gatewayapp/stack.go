@@ -73,12 +73,44 @@ type Stack struct {
 	refreshConfiguredAgentsHook func() error
 }
 
+// CurrentGateway returns the current aggregate gateway runtime.
+//
+// Deprecated: use KernelTurns, KernelSessions, KernelControlPlane, or
+// KernelStreams so production callers depend on the narrow service they need.
 func (s *Stack) CurrentGateway() GatewayRuntime {
+	return s.kernelRuntime()
+}
+
+func (s *Stack) kernelRuntime() GatewayRuntime {
 	gw := s.currentGateway()
 	if gw == nil {
 		return nil
 	}
 	return gw
+}
+
+// KernelTurns returns the current gateway turn service without exposing the
+// broader session/control-plane aggregate to callers that only submit turns.
+func (s *Stack) KernelTurns() gateway.TurnService {
+	return s.kernelRuntime()
+}
+
+// KernelSessions returns the current gateway session service without exposing
+// turn or control-plane operations to session-only callers.
+func (s *Stack) KernelSessions() gateway.SessionService {
+	return s.kernelRuntime()
+}
+
+// KernelControlPlane returns the current gateway control-plane service without
+// exposing turn/session operations to controller-only callers.
+func (s *Stack) KernelControlPlane() gateway.ControlPlaneService {
+	return s.kernelRuntime()
+}
+
+// KernelStreams returns the current gateway stream provider without exposing
+// gateway control or session operations.
+func (s *Stack) KernelStreams() gateway.StreamProvider {
+	return s.kernelRuntime()
 }
 
 func (s *Stack) currentGateway() *kernelimpl.Gateway {

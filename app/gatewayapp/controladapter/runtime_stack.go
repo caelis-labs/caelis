@@ -15,7 +15,8 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/skill"
 )
 
-// GatewayService is the compatibility aggregate for tests and older app seams.
+// GatewayService is a test compatibility aggregate for fakes that implement
+// every gateway-facing narrow interface.
 type GatewayService interface {
 	GatewayTurnService
 	GatewaySessionService
@@ -200,7 +201,6 @@ type PluginRuntimeDeps struct {
 
 // GatewayRuntimeDeps is required for turn/session stream operations.
 type GatewayRuntimeDeps struct {
-	ServiceFn             func() GatewayService
 	TurnServiceFn         func() GatewayTurnService
 	SessionServiceFn      func() GatewaySessionService
 	ControlPlaneServiceFn func() GatewayControlPlaneService

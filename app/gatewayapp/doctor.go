@@ -196,7 +196,7 @@ func (s *Stack) Doctor(ctx context.Context, req DoctorRequest) (DoctorReport, er
 	}
 	report.Warnings = append(report.Warnings, s.legacyPluginSkillCopyWarnings()...)
 
-	if gw := s.CurrentGateway(); gw != nil {
+	if gw := s.KernelTurns(); gw != nil {
 		active := gw.ActiveTurns()
 		report.ActiveTurnCount = len(active)
 		report.HasActiveTurn = len(active) > 0
