@@ -15,7 +15,7 @@ import (
 const clientProtocolSessionListLimit = 200
 
 func (d *Adapter) ListSessionSnapshots(ctx context.Context, req schema.SessionListRequest) (schema.SessionListResponse, error) {
-	gw, err := d.gateway()
+	gw, err := d.gatewaySessions()
 	if err != nil {
 		return schema.SessionListResponse{}, err
 	}
@@ -44,7 +44,7 @@ func (d *Adapter) Replay(ctx context.Context, req eventstream.ReplayRequest) (ev
 	if err != nil {
 		return eventstream.ReplayResult{}, err
 	}
-	gw, err := d.gateway()
+	gw, err := d.gatewaySessions()
 	if err != nil {
 		return eventstream.ReplayResult{}, err
 	}
@@ -58,7 +58,11 @@ func (d *Adapter) Replay(ctx context.Context, req eventstream.ReplayRequest) (ev
 	if err != nil {
 		return eventstream.ReplayResult{}, err
 	}
-	active, hasActive := activeTurnStateForSession(gw.ActiveTurns(), result.SessionRef)
+	var active gateway.ActiveTurnState
+	var hasActive bool
+	if turns, err := d.gatewayTurns(); err == nil && turns != nil {
+		active, hasActive = activeTurnStateForSession(turns.ActiveTurns(), result.SessionRef)
+	}
 	runState := protocolRunStateFromGateway(result.ControlPlane, active, hasActive)
 	return eventstream.ReplayResult{
 		SessionID:     strings.TrimSpace(result.SessionRef.SessionID),
@@ -75,7 +79,7 @@ func (d *Adapter) RunState(ctx context.Context) (eventstream.RunState, error) {
 	if !ok {
 		return eventstream.RunState{Status: eventstream.RunStateIdle}, nil
 	}
-	gw, err := d.gateway()
+	gw, err := d.gatewayControlPlane()
 	if err != nil {
 		return eventstream.RunState{}, err
 	}
@@ -86,7 +90,11 @@ func (d *Adapter) RunState(ctx context.Context) (eventstream.RunState, error) {
 	if err != nil {
 		return eventstream.RunState{}, err
 	}
-	active, hasActive := activeTurnStateForSession(gw.ActiveTurns(), activeSession.SessionRef)
+	var active gateway.ActiveTurnState
+	var hasActive bool
+	if turns, err := d.gatewayTurns(); err == nil && turns != nil {
+		active, hasActive = activeTurnStateForSession(turns.ActiveTurns(), activeSession.SessionRef)
+	}
 	return protocolRunStateFromGateway(state, active, hasActive), nil
 }
 

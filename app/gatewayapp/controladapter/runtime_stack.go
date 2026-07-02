@@ -13,23 +13,43 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/skill"
-	"github.com/OnslaughtSnail/caelis/ports/stream"
 )
 
+// GatewayService is the compatibility aggregate for tests and older app seams.
 type GatewayService interface {
-	Streams() stream.Service
+	GatewayTurnService
+	GatewaySessionService
+	GatewayControlPlaneService
+	GatewayStreamProvider
+}
+
+// GatewayTurnService exposes the turn operations used by Adapter.
+type GatewayTurnService interface {
 	BeginTurn(context.Context, gateway.BeginTurnRequest) (gateway.BeginTurnResult, error)
 	SubmitActiveTurn(context.Context, gateway.SubmitActiveTurnRequest) error
 	Interrupt(context.Context, gateway.InterruptRequest) error
+	ActiveTurns() []gateway.ActiveTurnState
+}
+
+// GatewaySessionService exposes the session operations used by Adapter.
+type GatewaySessionService interface {
 	ResumeSession(context.Context, gateway.ResumeSessionRequest) (session.LoadedSession, error)
 	ListSessions(context.Context, gateway.ListSessionsRequest) (session.SessionList, error)
 	ReplayEvents(context.Context, gateway.ReplayEventsRequest) (gateway.ReplayEventsResult, error)
+}
+
+// GatewayControlPlaneService exposes controller and participant operations used by Adapter.
+type GatewayControlPlaneService interface {
 	ControlPlaneState(context.Context, gateway.ControlPlaneStateRequest) (gateway.ControlPlaneState, error)
 	HandoffController(context.Context, gateway.HandoffControllerRequest) (session.Session, error)
 	AttachParticipant(context.Context, gateway.AttachParticipantRequest) (session.Session, error)
 	PromptParticipant(context.Context, gateway.PromptParticipantRequest) (gateway.BeginTurnResult, error)
 	DetachParticipant(context.Context, gateway.DetachParticipantRequest) (session.Session, error)
-	ActiveTurns() []gateway.ActiveTurnState
+}
+
+// GatewayStreamProvider exposes stream subscription access used by Adapter.
+type GatewayStreamProvider interface {
+	gateway.StreamProvider
 }
 
 type ModelConfig struct {
@@ -180,7 +200,11 @@ type PluginRuntimeDeps struct {
 
 // GatewayRuntimeDeps is required for turn/session stream operations.
 type GatewayRuntimeDeps struct {
-	ServiceFn func() GatewayService
+	ServiceFn             func() GatewayService
+	TurnServiceFn         func() GatewayTurnService
+	SessionServiceFn      func() GatewaySessionService
+	ControlPlaneServiceFn func() GatewayControlPlaneService
+	StreamProviderFn      func() GatewayStreamProvider
 }
 
 // SessionRuntimeDeps owns durable session identity and storage dependencies.

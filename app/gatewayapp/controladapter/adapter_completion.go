@@ -18,7 +18,7 @@ func (d *Adapter) CompleteMention(ctx context.Context, query string, limit int) 
 	if !ok {
 		return []CompletionCandidate{}, nil
 	}
-	gw, err := d.gateway()
+	gw, err := d.gatewayControlPlane()
 	if err != nil {
 		return nil, err
 	}
@@ -709,7 +709,7 @@ func (d *Adapter) completeAgentParticipants(ctx context.Context, query string, l
 	if !ok {
 		return nil, nil
 	}
-	gw, err := d.gateway()
+	gw, err := d.gatewayControlPlane()
 	if err != nil {
 		return nil, err
 	}
@@ -798,7 +798,7 @@ func (d *Adapter) resolveHandoffAgentName(ctx context.Context, ref session.Sessi
 	if err != nil {
 		return "", err
 	}
-	gw, err := d.gateway()
+	gw, err := d.gatewayControlPlane()
 	if err != nil {
 		return "", err
 	}
@@ -853,7 +853,7 @@ func (d *Adapter) resolveParticipantID(ctx context.Context, ref session.SessionR
 	if input == "" {
 		return "", fmt.Errorf("app/gatewayapp/controladapter: participant id is required")
 	}
-	gw, err := d.gateway()
+	gw, err := d.gatewayControlPlane()
 	if err != nil {
 		return "", err
 	}

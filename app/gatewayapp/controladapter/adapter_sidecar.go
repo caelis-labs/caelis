@@ -56,7 +56,7 @@ func (d *Adapter) startSidecarTurn(ctx context.Context, req startSidecarTurnRequ
 	if source == "" {
 		source = "slash_" + agent
 	}
-	gw, err := d.gateway()
+	gw, err := d.gatewayControlPlane()
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +117,7 @@ func (d *Adapter) detachSideAgent(ctx context.Context, ref session.SessionRef, p
 	if participantID == "" || d == nil || d.stack == nil {
 		return nil
 	}
-	gw, err := d.gateway()
+	gw, err := d.gatewayControlPlane()
 	if err != nil {
 		return err
 	}
@@ -139,7 +139,7 @@ func (d *Adapter) detachSideAgent(ctx context.Context, ref session.SessionRef, p
 
 func (d *Adapter) allocateSideAgentLabel(ctx context.Context, ref session.SessionRef, agent string) string {
 	used := map[string]struct{}{}
-	if gw, err := d.gateway(); err == nil {
+	if gw, err := d.gatewayControlPlane(); err == nil {
 		if state, err := gw.ControlPlaneState(ctx, gateway.ControlPlaneStateRequest{SessionRef: ref}); err == nil {
 			for _, participant := range state.Participants {
 				label := agenthandle.Normalize(participant.Label)
@@ -191,7 +191,7 @@ func (d *Adapter) ContinueSubagent(ctx context.Context, handle string, prompt st
 	if err != nil {
 		return nil, err
 	}
-	gw, err := d.gateway()
+	gw, err := d.gatewayControlPlane()
 	if err != nil {
 		return nil, err
 	}

@@ -104,7 +104,7 @@ func (d *Adapter) bindSession(ctx context.Context, activeSession session.Session
 	d.refreshSessionDisplay(ctx, activeSession)
 }
 
-func (d *Adapter) gateway() (GatewayService, error) {
+func (d *Adapter) gatewayService() (GatewayService, error) {
 	if d == nil || d.stack == nil {
 		return nil, fmt.Errorf("app/gatewayapp/controladapter: stack is required")
 	}
@@ -118,8 +118,60 @@ func (d *Adapter) gateway() (GatewayService, error) {
 	return gw, nil
 }
 
+func (d *Adapter) gatewayTurns() (GatewayTurnService, error) {
+	if d == nil || d.stack == nil {
+		return nil, fmt.Errorf("app/gatewayapp/controladapter: stack is required")
+	}
+	if d.stack.Gateway.TurnServiceFn != nil {
+		if gw := d.stack.Gateway.TurnServiceFn(); gw != nil {
+			return gw, nil
+		}
+		return nil, fmt.Errorf("app/gatewayapp/controladapter: gateway turn service is unavailable")
+	}
+	return d.gatewayService()
+}
+
+func (d *Adapter) gatewaySessions() (GatewaySessionService, error) {
+	if d == nil || d.stack == nil {
+		return nil, fmt.Errorf("app/gatewayapp/controladapter: stack is required")
+	}
+	if d.stack.Gateway.SessionServiceFn != nil {
+		if gw := d.stack.Gateway.SessionServiceFn(); gw != nil {
+			return gw, nil
+		}
+		return nil, fmt.Errorf("app/gatewayapp/controladapter: gateway session service is unavailable")
+	}
+	return d.gatewayService()
+}
+
+func (d *Adapter) gatewayControlPlane() (GatewayControlPlaneService, error) {
+	if d == nil || d.stack == nil {
+		return nil, fmt.Errorf("app/gatewayapp/controladapter: stack is required")
+	}
+	if d.stack.Gateway.ControlPlaneServiceFn != nil {
+		if gw := d.stack.Gateway.ControlPlaneServiceFn(); gw != nil {
+			return gw, nil
+		}
+		return nil, fmt.Errorf("app/gatewayapp/controladapter: gateway control-plane service is unavailable")
+	}
+	return d.gatewayService()
+}
+
+func (d *Adapter) gatewayStreams() (GatewayStreamProvider, error) {
+	if d == nil || d.stack == nil {
+		return nil, fmt.Errorf("app/gatewayapp/controladapter: stack is required")
+	}
+	if d.stack.Gateway.StreamProviderFn != nil {
+		if gw := d.stack.Gateway.StreamProviderFn(); gw != nil {
+			return gw, nil
+		}
+		return nil, fmt.Errorf("app/gatewayapp/controladapter: gateway stream provider is unavailable")
+	}
+	return d.gatewayService()
+}
+
 func (d *Adapter) SubscribeStream(ctx context.Context, env eventstream.Envelope) (<-chan eventstream.Envelope, bool) {
-	gw, err := d.gateway()
+	gw, err := d.gatewayStreams()
 	if err != nil {
 		return nil, false
 	}
@@ -448,7 +500,7 @@ func (d *Adapter) Submit(ctx context.Context, submission Submission) (Turn, erro
 	if err != nil {
 		return nil, err
 	}
-	gw, err := d.gateway()
+	gw, err := d.gatewayTurns()
 	if err != nil {
 		return nil, err
 	}
@@ -548,7 +600,7 @@ func (d *Adapter) Interrupt(ctx context.Context) error {
 		}
 		return fmt.Errorf("app/gatewayapp/controladapter: no active session")
 	}
-	gw, err := d.gateway()
+	gw, err := d.gatewayTurns()
 	if err != nil {
 		return err
 	}
@@ -611,7 +663,7 @@ func (d *Adapter) NewSession(ctx context.Context) (SessionSnapshot, error) {
 }
 
 func (d *Adapter) ResumeSession(ctx context.Context, sessionID string) (SessionSnapshot, error) {
-	gw, err := d.gateway()
+	gw, err := d.gatewaySessions()
 	if err != nil {
 		return SessionSnapshot{}, err
 	}
@@ -645,7 +697,7 @@ func (d *Adapter) ListSessions(ctx context.Context, limit int) ([]ResumeCandidat
 	limit = normalizeCompletionLimit(limit)
 	ctx, cancel := completionContext(ctx, resumeCompletionTimeout)
 	defer cancel()
-	gw, err := d.gateway()
+	gw, err := d.gatewaySessions()
 	if err != nil {
 		return nil, err
 	}
@@ -674,7 +726,7 @@ func (d *Adapter) ReplayEvents(ctx context.Context) ([]eventstream.Envelope, err
 	if !ok {
 		return nil, fmt.Errorf("app/gatewayapp/controladapter: no active session")
 	}
-	gw, err := d.gateway()
+	gw, err := d.gatewaySessions()
 	if err != nil {
 		return nil, err
 	}
@@ -712,7 +764,7 @@ func (d *Adapter) AgentStatus(ctx context.Context) (AgentStatusSnapshot, error) 
 	if !ok {
 		return status, nil
 	}
-	gw, err := d.gateway()
+	gw, err := d.gatewayControlPlane()
 	if err != nil {
 		return AgentStatusSnapshot{}, err
 	}
@@ -727,9 +779,11 @@ func (d *Adapter) AgentStatus(ctx context.Context) (AgentStatusSnapshot, error) 
 	status.ControllerLabel = strings.TrimSpace(firstNonEmpty(state.Controller.AgentName, state.Controller.Label, state.Controller.ControllerID, string(state.Controller.Kind)))
 	status.ControllerEpoch = strings.TrimSpace(state.Controller.EpochID)
 	status.HasActiveTurn = state.HasActiveTurn
-	if kind, ok := activeTurnKindForSession(gw.ActiveTurns(), activeSession.SessionRef); ok {
-		status.HasActiveTurn = true
-		status.ActiveTurnKind = kind
+	if turns, err := d.gatewayTurns(); err == nil && turns != nil {
+		if kind, ok := activeTurnKindForSession(turns.ActiveTurns(), activeSession.SessionRef); ok {
+			status.HasActiveTurn = true
+			status.ActiveTurnKind = kind
+		}
 	}
 	if state.Controller.Kind == session.ControllerKindACP {
 		if controllerStatus, ok, err := d.activeACPControllerStatus(ctx); err != nil {
@@ -839,7 +893,7 @@ func (d *Adapter) HandoffAgent(ctx context.Context, target string) (AgentStatusS
 		req.Agent = agent
 		req.Reason = "handoff to agent"
 	}
-	gw, err := d.gateway()
+	gw, err := d.gatewayControlPlane()
 	if err != nil {
 		return AgentStatusSnapshot{}, err
 	}

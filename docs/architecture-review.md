@@ -29,8 +29,15 @@ checklist until the items are either implemented or replaced by a newer review.
   product command routing.
 - [ ] `P1` Narrow `ports/gateway.Service` consumers. Failure mode: one stable
   port still spans session, turn, replay, control-plane, and request policy.
-  Bounded repair: move callers onto the smallest existing subinterfaces first,
-  then split replay/control-plane app contracts only where consumers prove it.
+  Bounded repair: move callers onto the smallest consumer-facing interfaces
+  first, reusing existing subinterfaces where they are already narrow, then
+  split replay/control-plane app contracts only where consumers prove it.
+  Phase 1 moved `app/gatewayapp/controladapter` production callers onto
+  `GatewayTurnService`, `GatewaySessionService`, `GatewayControlPlaneService`,
+  and `GatewayStreamProvider` providers while keeping the aggregate fallback for
+  tests and remaining app seams. Remaining work: shrink public stack/kernel
+  exposure and split replay/control-plane app contracts only where consumers
+  need them.
 - [ ] `P1` Turn system-managed agents into a small registry instead of Guardian
   special cases. Failure mode: Guardian, Reviewer, and future Agent Manage Loop
   agents would duplicate profile, binding, and run-plan rules. Bounded repair:

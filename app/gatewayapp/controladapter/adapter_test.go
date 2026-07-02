@@ -186,8 +186,8 @@ func TestAdapterUsesCurrentGatewayAfterSandboxRebuild(t *testing.T) {
 		t.Fatalf("newAdapterFromGatewayAppStack() error = %v", err)
 	}
 	before := stack.CurrentGateway()
-	if got, err := driver.gateway(); err != nil || got != before {
-		t.Fatalf("driver.gateway() before rebuild = %p, %v; want %p", got, err, before)
+	if got, err := driver.gatewayService(); err != nil || got != before {
+		t.Fatalf("driver.gatewayService() before rebuild = %p, %v; want %p", got, err, before)
 	}
 	// This test only needs to force a gateway rebuild; the missing helper keeps
 	// auto landlock fallback from recursively executing this test binary in CI.
@@ -198,8 +198,8 @@ func TestAdapterUsesCurrentGatewayAfterSandboxRebuild(t *testing.T) {
 	if after == nil || after == before {
 		t.Fatalf("CurrentGateway() after rebuild = %p, before %p; want replacement", after, before)
 	}
-	if got, err := driver.gateway(); err != nil || got != after {
-		t.Fatalf("driver.gateway() after rebuild = %p, %v; want current %p", got, err, after)
+	if got, err := driver.gatewayService(); err != nil || got != after {
+		t.Fatalf("driver.gatewayService() after rebuild = %p, %v; want current %p", got, err, after)
 	}
 }
 

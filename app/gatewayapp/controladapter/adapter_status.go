@@ -193,7 +193,7 @@ func (d *Adapter) status(ctx context.Context, includeDiagnostics bool) (StatusSn
 			status.SandboxStatus.Route = "host"
 		}
 	}
-	if gw, err := d.gateway(); err == nil && gw != nil {
+	if gw, err := d.gatewayTurns(); err == nil && gw != nil {
 		active := gw.ActiveTurns()
 		status.Runtime.ActiveJobs = len(active)
 		status.Runtime.Running = len(active) > 0
