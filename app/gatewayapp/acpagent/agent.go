@@ -8,6 +8,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp/controladapter/local"
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/agentregistry"
 	runtimeacp "github.com/OnslaughtSnail/caelis/impl/agent/acp"
+	controlpromptrouter "github.com/OnslaughtSnail/caelis/internal/controlpromptrouter"
 	controlcommands "github.com/OnslaughtSnail/caelis/ports/controlcommand"
 	controlprompt "github.com/OnslaughtSnail/caelis/ports/controlprompt"
 	"github.com/OnslaughtSnail/caelis/ports/session"
@@ -31,12 +32,12 @@ func NewFromStack(stack *gatewayapp.Stack) (*runtimeacp.RuntimeAgent, error) {
 		SurfaceBuilder: func(req runtimeacp.SurfaceRequest) runtimeacp.Surface {
 			return stack.ACPSurface(req.Modes, req.UseFallbackModes, req.Config)
 		},
-		PromptRouterFactory: func(ctx context.Context, activeSession session.Session) (runtimeacp.PromptRouter, error) {
+		PromptRouterFactory: func(ctx context.Context, activeSession session.Session) (controlprompt.Router, error) {
 			driver, err := local.NewLocalAdapterForSession(ctx, stack, activeSession, "acp", "")
 			if err != nil {
 				return nil, err
 			}
-			router := controlprompt.NewRouter(controlprompt.Config{
+			router := controlpromptrouter.New(controlprompt.RouterConfig{
 				Service: driver,
 				CommandNames: func(ctx context.Context, service control.Service) []string {
 					return acpPromptCommandNames(stack)

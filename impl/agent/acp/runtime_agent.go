@@ -28,11 +28,7 @@ type BuildAgentSpecFunc func(context.Context, session.Session, acp.PromptRequest
 // ApprovalModelResolver resolves the model used by automatic approval review.
 type ApprovalModelResolver = approval.ModelResolver
 
-type PromptRouter interface {
-	Route(context.Context, controlprompt.Request) (controlprompt.Result, error)
-}
-
-type PromptRouterFactory func(context.Context, session.Session) (PromptRouter, error)
+type PromptRouterFactory func(context.Context, session.Session) (controlprompt.Router, error)
 
 // Config configures one runtime-backed ACP agent adapter.
 type Config struct {

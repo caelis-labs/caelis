@@ -11,6 +11,7 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp/controladapter/local"
+	controlpromptrouter "github.com/OnslaughtSnail/caelis/internal/controlpromptrouter"
 	"github.com/OnslaughtSnail/caelis/internal/version"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/app"
 )
@@ -24,15 +25,16 @@ func runTUI(ctx context.Context, stack *gatewayapp.Stack, sessionID string, mode
 	defer cancel()
 	sender := &tuiapp.ProgramSender{}
 	cfg := tuiapp.ConfigFromControlService(driver, sender, tuiapp.Config{
-		Context:         programCtx,
-		AppName:         "CAELIS",
-		Version:         version.String(),
-		Workspace:       stack.Workspace.CWD,
-		ModelAlias:      modelText,
-		ShowWelcomeCard: true,
-		Commands:        tuiapp.DefaultCommands(),
-		Wizards:         tuiapp.DefaultWizards(),
-		RenderFPS:       envInt("CAELIS_TUI_RENDER_FPS", 0),
+		Context:             programCtx,
+		AppName:             "CAELIS",
+		Version:             version.String(),
+		Workspace:           stack.Workspace.CWD,
+		ModelAlias:          modelText,
+		ShowWelcomeCard:     true,
+		Commands:            tuiapp.DefaultCommands(),
+		Wizards:             tuiapp.DefaultWizards(),
+		PromptRouterFactory: controlpromptrouter.New,
+		RenderFPS:           envInt("CAELIS_TUI_RENDER_FPS", 0),
 		OnStart: func() {
 			startTUISandboxRefresh(programCtx, stack, sender)
 		},

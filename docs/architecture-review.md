@@ -16,17 +16,17 @@ checklist until the items are either implemented or replaced by a newer review.
   passthrough to an internal bridge owned by the control/kernel publication
   path, and preserve external ACP live fidelity. Implemented by moving the
   source-event bridge to `internal/acpbridge`.
-- [ ] `P1` Split product command/control semantics out of
+- [x] `P1` Split product command/control semantics out of
   `protocol/acp/control`. Failure mode: protocol packages own app commands,
   plugin/model/sandbox controls, and slash routing. Bounded repair: move command
   registry/router ownership toward app/control while retaining ACP schema,
   eventstream, projection, and client protocol contracts in `protocol/acp`.
-  Phase 1 moved the command catalog to `ports/controlcommand`, prompt routing
-  to `ports/controlprompt`, and the connect wizard completion payload to
-  `internal/connectwizard`. Remaining work: move slash orchestration out of
-  `ports/controlprompt` or extract the app-control types it depends on so ports
-  no longer depend on `protocol/acp/control` for service and presenter
-  contracts.
+  Implemented by moving the command catalog to `ports/controlcommand`, prompt
+  request/result parsing contracts to `ports/controlprompt`, shared slash
+  orchestration to `internal/controlpromptrouter`, and the connect wizard
+  completion payload to `internal/connectwizard`. `protocol/acp/control`
+  remains a transitional control contract/presenter package, not the owner of
+  product command routing.
 - [ ] `P1` Narrow `ports/gateway.Service` consumers. Failure mode: one stable
   port still spans session, turn, replay, control-plane, and request policy.
   Bounded repair: move callers onto the smallest existing subinterfaces first,

@@ -217,6 +217,7 @@ func ConfigFromControlService(service control.Service, sender *ProgramSender, ba
 		base.ProgramSender = sender
 	}
 	base.Commands = appendAgentSlashCommandsWithContext(ctx, service, base.Commands)
+	promptRouterFactory := base.PromptRouterFactory
 	var cachedModeLabel string
 	var cachedStatusView StatusViewModel
 	var statusCacheMu sync.Mutex
@@ -229,7 +230,7 @@ func ConfigFromControlService(service control.Service, sender *ProgramSender, ba
 				runCtx, finish = sender.beginRunContext(ctx)
 			}
 			defer finish()
-			return executeLineViaControlServiceWithContextResult(runCtx, service, sender, sub)
+			return executeLineViaControlServiceWithContextResult(runCtx, service, sender, sub, promptRouterFactory)
 		}
 		base.ExecuteLine = func(sub Submission) TaskResultMsg {
 			return runExecuteLine(sub).completion
@@ -432,7 +433,7 @@ func executeLineViaControlService(service control.Service, sender *ProgramSender
 }
 
 func executeLineViaControlServiceWithContext(ctx context.Context, service control.Service, sender *ProgramSender, sub Submission) TaskResultMsg {
-	return executeLineViaControlServiceWithContextResult(ctx, service, sender, sub).completion
+	return executeLineViaControlServiceWithContextResult(ctx, service, sender, sub, nil).completion
 }
 
 type executeLineResult struct {
@@ -447,13 +448,16 @@ func (r executeLineResult) commandMessage() tea.Msg {
 	return r.completion
 }
 
-func executeLineViaControlServiceWithContextResult(ctx context.Context, service control.Service, sender *ProgramSender, sub Submission) executeLineResult {
+func executeLineViaControlServiceWithContextResult(ctx context.Context, service control.Service, sender *ProgramSender, sub Submission, routerFactory controlprompt.RouterFactory) executeLineResult {
 	ctx = contextOrBackground(ctx)
 	if sender != nil {
 		ctx = sender.bindContext(ctx)
 	}
+	if routerFactory == nil {
+		return executeLineResult{completion: TaskResultMsg{Err: fmt.Errorf("control prompt router factory is required")}}
+	}
 
-	router := controlprompt.NewRouter(controlprompt.Config{
+	router := routerFactory(controlprompt.RouterConfig{
 		Service: service,
 		CommandNames: func(ctx context.Context, service control.Service) []string {
 			return appendAgentSlashCommandsWithContext(ctx, service, DefaultCommands())
@@ -470,6 +474,9 @@ func executeLineViaControlServiceWithContextResult(ctx context.Context, service 
 			}, true, nil
 		},
 	})
+	if router == nil {
+		return executeLineResult{completion: TaskResultMsg{Err: fmt.Errorf("control prompt router factory returned nil")}}
+	}
 	displayText := strings.TrimSpace(firstNonEmpty(sub.DisplayText, sub.Text))
 	promptResult, err := router.Route(ctx, controlprompt.Request{Submission: control.Submission{
 		Text:        sub.Text,
@@ -487,7 +494,7 @@ func executeLineViaControlServiceWithContextResult(ctx context.Context, service 
 		return executeControlPromptResult(ctx, service, sender, promptResult)
 	}
 
-	// Normal submission -> control.Service.Submit -> streaming events.
+	// Router-declined slash input falls back to a normal prompt submission.
 	submitText := strings.TrimSpace(sub.Text)
 	turn, err := service.Submit(ctx, control.Submission{
 		Text:        submitText,

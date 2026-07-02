@@ -39,7 +39,7 @@ func TestRuntimeAgentPromptSlashCommandUsesPromptRouterBeforeMainRuntime(t *test
 		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
 			return agent.AgentSpec{}, errors.New("main agent spec should not be built for slash command")
 		},
-		PromptRouterFactory: func(context.Context, session.Session) (runtimeacp.PromptRouter, error) {
+		PromptRouterFactory: func(context.Context, session.Session) (controlprompt.Router, error) {
 			return router, nil
 		},
 		AppName: "caelis",
@@ -104,7 +104,7 @@ func TestRuntimeAgentPromptRouterSuppressesLiveUserMessageEcho(t *testing.T) {
 		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
 			return agent.AgentSpec{}, errors.New("main agent spec should not be built for routed prompt")
 		},
-		PromptRouterFactory: func(context.Context, session.Session) (runtimeacp.PromptRouter, error) {
+		PromptRouterFactory: func(context.Context, session.Session) (controlprompt.Router, error) {
 			return router, nil
 		},
 		AppName: "caelis",
@@ -160,7 +160,7 @@ func TestRuntimeAgentPromptRouterHandlesSharedSlashWithImagePart(t *testing.T) {
 		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
 			return agent.AgentSpec{}, errors.New("main agent spec should not be built for shared slash command")
 		},
-		PromptRouterFactory: func(context.Context, session.Session) (runtimeacp.PromptRouter, error) {
+		PromptRouterFactory: func(context.Context, session.Session) (controlprompt.Router, error) {
 			return router, nil
 		},
 		AppName: "caelis",
@@ -228,7 +228,7 @@ func TestRuntimeAgentPromptRouterHandlesDynamicSlashWithImagePart(t *testing.T) 
 		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
 			return agent.AgentSpec{}, errors.New("main agent spec should not be built for dynamic slash command")
 		},
-		PromptRouterFactory: func(context.Context, session.Session) (runtimeacp.PromptRouter, error) {
+		PromptRouterFactory: func(context.Context, session.Session) (controlprompt.Router, error) {
 			return router, nil
 		},
 		Commands: availableCommandProvider{{Name: "helper", Description: "bounded helper"}},
@@ -291,7 +291,7 @@ func TestRuntimeAgentPromptRouterHandlesNormalPromptWithImagePart(t *testing.T) 
 		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
 			return agent.AgentSpec{}, errors.New("main agent spec should not be built for normal image prompt")
 		},
-		PromptRouterFactory: func(context.Context, session.Session) (runtimeacp.PromptRouter, error) {
+		PromptRouterFactory: func(context.Context, session.Session) (controlprompt.Router, error) {
 			return router, nil
 		},
 		AppName: "caelis",
@@ -368,7 +368,7 @@ func TestRuntimeAgentPromptResolvesSessionByGlobalID(t *testing.T) {
 		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
 			return agent.AgentSpec{}, errors.New("main agent spec should not be built for routed prompt")
 		},
-		PromptRouterFactory: func(_ context.Context, activeSession session.Session) (runtimeacp.PromptRouter, error) {
+		PromptRouterFactory: func(_ context.Context, activeSession session.Session) (controlprompt.Router, error) {
 			if activeSession.WorkspaceKey != "ws-b" {
 				t.Fatalf("active session workspace = %q, want ws-b", activeSession.WorkspaceKey)
 			}
@@ -415,7 +415,7 @@ func TestRuntimeAgentPromptRouterAppliesSideEffectsWithoutTurn(t *testing.T) {
 		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
 			return agent.AgentSpec{}, errors.New("main agent spec should not be built for handled slash command")
 		},
-		PromptRouterFactory: func(context.Context, session.Session) (runtimeacp.PromptRouter, error) {
+		PromptRouterFactory: func(context.Context, session.Session) (controlprompt.Router, error) {
 			return router, nil
 		},
 		Modes:    testModeProvider{},
@@ -501,7 +501,7 @@ func TestRuntimeAgentPromptRouterStreamBridgeReturnsEmitErrors(t *testing.T) {
 		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
 			return agent.AgentSpec{}, errors.New("main agent spec should not be built for handled slash command")
 		},
-		PromptRouterFactory: func(context.Context, session.Session) (runtimeacp.PromptRouter, error) {
+		PromptRouterFactory: func(context.Context, session.Session) (controlprompt.Router, error) {
 			return router, nil
 		},
 		AppName: "caelis",
@@ -587,7 +587,7 @@ func TestRuntimeAgentPromptRouterStreamBridgeEmitsTerminalMetaForACPStdio(t *tes
 		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
 			return agent.AgentSpec{}, errors.New("main agent spec should not be built for handled slash command")
 		},
-		PromptRouterFactory: func(context.Context, session.Session) (runtimeacp.PromptRouter, error) {
+		PromptRouterFactory: func(context.Context, session.Session) (controlprompt.Router, error) {
 			return router, nil
 		},
 		AppName: "caelis",
@@ -674,7 +674,7 @@ func TestRuntimeAgentPromptRouterDeduplicatesFinalNarrativeReplay(t *testing.T) 
 		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
 			return agent.AgentSpec{}, errors.New("main agent spec should not be built for handled slash command")
 		},
-		PromptRouterFactory: func(context.Context, session.Session) (runtimeacp.PromptRouter, error) {
+		PromptRouterFactory: func(context.Context, session.Session) (controlprompt.Router, error) {
 			return router, nil
 		},
 		AppName: "caelis",
@@ -774,7 +774,7 @@ func TestRuntimeAgentPromptRouterStreamBridgeSuppressesMirroredSubagentEvents(t 
 		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
 			return agent.AgentSpec{}, errors.New("main agent spec should not be built for handled slash command")
 		},
-		PromptRouterFactory: func(context.Context, session.Session) (runtimeacp.PromptRouter, error) {
+		PromptRouterFactory: func(context.Context, session.Session) (controlprompt.Router, error) {
 			return router, nil
 		},
 		AppName: "caelis",

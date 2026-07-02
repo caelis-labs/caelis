@@ -78,11 +78,7 @@ func promptRouterAttachmentsFromContentParts(input string, parts []model.Content
 	return out
 }
 
-type promptRouterStreamSubscriber interface {
-	StreamSubscriber() (control.StreamSubscriber, bool)
-}
-
-func (a *RuntimeAgent) emitPromptRouterResult(ctx context.Context, activeSession session.Session, router PromptRouter, result controlprompt.Result, cb acp.PromptCallbacks, suppressUserEcho bool) error {
+func (a *RuntimeAgent) emitPromptRouterResult(ctx context.Context, activeSession session.Session, router controlprompt.Router, result controlprompt.Result, cb acp.PromptCallbacks, suppressUserEcho bool) error {
 	if cb == nil {
 		return nil
 	}
@@ -116,7 +112,7 @@ func (a *RuntimeAgent) emitPromptRouterResult(ctx context.Context, activeSession
 		return nil
 	}
 	var streamer control.StreamSubscriber
-	if provider, ok := router.(promptRouterStreamSubscriber); ok {
+	if provider, ok := router.(controlprompt.StreamSubscriberProvider); ok {
 		streamer, _ = provider.StreamSubscriber()
 	}
 	bridge := newControlStreamBridge(ctx, a, cb, sessionID, streamer, outboundFilter)

@@ -1,12 +1,12 @@
-package controlprompt
+package controlpromptrouter
 
 import (
 	"context"
 	"fmt"
 	"strings"
-	"unicode"
 
 	controlcommands "github.com/OnslaughtSnail/caelis/ports/controlcommand"
+	prompt "github.com/OnslaughtSnail/caelis/ports/controlprompt"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/control"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
 )
@@ -17,28 +17,10 @@ type Router struct {
 	commandNames          func(context.Context, control.Service) []string
 	coreCommandAllowed    func(context.Context, string) bool
 	dynamicCommandAllowed func(context.Context, string) bool
-	privateSlashHandler   PrivateSlashHandler
+	privateSlashHandler   prompt.PrivateSlashHandler
 }
 
-type Config struct {
-	Service control.Service
-	// CommandNames controls /help rendering. When nil, shared command names and
-	// registered ACP agent commands are used.
-	CommandNames func(context.Context, control.Service) []string
-	// CoreCommandAllowed optionally narrows which shared core slash commands this
-	// router may execute. Dynamic ACP agent slashes are checked separately.
-	CoreCommandAllowed func(context.Context, string) bool
-	// DynamicCommandAllowed optionally narrows which registered agent slash
-	// commands this router may execute. When nil, all registered agents from the
-	// control service are accepted.
-	DynamicCommandAllowed func(context.Context, string) bool
-	// PrivateSlashHandler handles surface-owned slash commands after ParseSlash
-	// and before shared/dynamic routing. It keeps private commands on the same
-	// parse path without making protocol/control depend on a surface type.
-	PrivateSlashHandler PrivateSlashHandler
-}
-
-func NewRouter(cfg Config) Router {
+func New(cfg prompt.RouterConfig) prompt.Router {
 	return Router{
 		service:               cfg.Service,
 		commandNames:          cfg.CommandNames,
@@ -53,57 +35,14 @@ func (r Router) StreamSubscriber() (control.StreamSubscriber, bool) {
 	return streamer, ok
 }
 
-type Request struct {
-	Submission control.Submission
-}
-
-type PrivateSlashRequest struct {
-	Command     string
-	Args        string
-	ArgsStart   int
-	FullText    string
-	Attachments []control.Attachment
-}
-
-type PrivateSlashHandler func(context.Context, PrivateSlashRequest) (Result, bool, error)
-
-// Result is the surface-neutral outcome of routing one prompt submission.
-//
-// Events and ReplayEvents are already ACP/eventstream-shaped and should be
-// forwarded by every surface that can display them. Turn carries live streaming
-// work and remains owned by the caller until it is closed.
-//
-// The boolean fields are semantic side effects, not UI instructions. TUI maps
-// ClearHistory to transcript clearing and StatusUpdate to its status bar; ACP
-// maps those same intents to standard session/update state refreshes.
-// SlashResult carries structured command data; surfaces decide how to render it
-// or serialize it with control.FormatSlashResult for plain text. Events remain
-// available for additional non-redundant notices. Do not add wizard/modal
-// rendering state here; interactive workflows stay owned by their surface.
-// PrivateResult is only populated by a PrivateSlashHandler and must be
-// interpreted by the surface that installed that handler.
-type Result struct {
-	Handled             bool
-	Turn                control.Turn
-	Events              []eventstream.Envelope
-	SlashResult         *control.SlashCommandResult
-	ClearHistory        bool
-	ReplayEvents        []eventstream.Envelope
-	RefreshCommands     bool
-	StatusUpdate        *control.StatusSnapshot
-	SuppressTurnDivider bool
-	ContinueRunning     bool
-	PrivateResult       any
-}
-
-func (r Router) Route(ctx context.Context, req Request) (Result, error) {
+func (r Router) Route(ctx context.Context, req prompt.Request) (prompt.Result, error) {
 	ctx = contextOrBackground(ctx)
 	if r.service == nil {
-		return Result{}, fmt.Errorf("control prompt: service is required")
+		return prompt.Result{}, fmt.Errorf("control prompt: service is required")
 	}
 	text := strings.TrimSpace(req.Submission.Text)
-	if cmd, args, argsStart, ok := ParseSlash(text); ok {
-		if result, handled, err := r.dispatchPrivateSlash(ctx, PrivateSlashRequest{
+	if cmd, args, argsStart, ok := prompt.ParseSlash(text); ok {
+		if result, handled, err := r.dispatchPrivateSlash(ctx, prompt.PrivateSlashRequest{
 			Command:     cmd,
 			Args:        args,
 			ArgsStart:   argsStart,
@@ -113,7 +52,7 @@ func (r Router) Route(ctx context.Context, req Request) (Result, error) {
 			return result, err
 		}
 		if !r.shouldDispatchSlash(ctx, cmd) {
-			return Result{}, nil
+			return prompt.Result{}, nil
 		}
 		return r.dispatchSlash(ctx, cmd, args, argsStart, text, req.Submission.Attachments)
 	}
@@ -122,12 +61,12 @@ func (r Router) Route(ctx context.Context, req Request) (Result, error) {
 	}
 	turn, err := r.service.Submit(ctx, req.Submission)
 	if err != nil {
-		return Result{}, controlcommands.FriendlyCommandError("submit", err)
+		return prompt.Result{}, controlcommands.FriendlyCommandError("submit", err)
 	}
 	if turn == nil {
-		return Result{Handled: true, ContinueRunning: true, SuppressTurnDivider: true}, nil
+		return prompt.Result{Handled: true, ContinueRunning: true, SuppressTurnDivider: true}, nil
 	}
-	return Result{Handled: true, Turn: turn}, nil
+	return prompt.Result{Handled: true, Turn: turn}, nil
 }
 
 func (r Router) shouldDispatchSlash(ctx context.Context, cmd string) bool {
@@ -155,9 +94,9 @@ func (r Router) shouldDispatchSlash(ctx context.Context, cmd string) bool {
 	return r.isRegisteredAgent(ctx, cmd)
 }
 
-func (r Router) dispatchPrivateSlash(ctx context.Context, req PrivateSlashRequest) (Result, bool, error) {
+func (r Router) dispatchPrivateSlash(ctx context.Context, req prompt.PrivateSlashRequest) (prompt.Result, bool, error) {
 	if r.privateSlashHandler == nil {
-		return Result{}, false, nil
+		return prompt.Result{}, false, nil
 	}
 	result, handled, err := r.privateSlashHandler(contextOrBackground(ctx), req)
 	if !handled || err != nil {
@@ -190,16 +129,16 @@ func (r Router) helpCommandNames(ctx context.Context) []string {
 	return controlcommands.AppendRegisteredAgentNames(ctx, r.service, controlcommands.DefaultSharedNames())
 }
 
-func (r Router) noticeResult(text string) Result {
-	return Result{
+func (r Router) noticeResult(text string) prompt.Result {
+	return prompt.Result{
 		Handled:             true,
 		Events:              []eventstream.Envelope{notice(text)},
 		SuppressTurnDivider: true,
 	}
 }
 
-func (r Router) slashResult(result control.SlashCommandResult) Result {
-	return Result{
+func (r Router) slashResult(result control.SlashCommandResult) prompt.Result {
+	return prompt.Result{
 		Handled:             true,
 		SlashResult:         &result,
 		SuppressTurnDivider: true,
@@ -215,66 +154,6 @@ func notice(text string) eventstream.Envelope {
 		Kind:   eventstream.KindNotice,
 		Notice: strings.TrimSpace(text),
 	}
-}
-
-func ParseSlash(text string) (cmd, args string, argsStart int, ok bool) {
-	textRunes := []rune(strings.TrimSpace(text))
-	idx := 0
-	if idx >= len(textRunes) || textRunes[idx] != '/' {
-		return "", "", 0, false
-	}
-	idx++
-	cmdStart := idx
-	for idx < len(textRunes) && !unicode.IsSpace(textRunes[idx]) {
-		idx++
-	}
-	cmd = strings.TrimSpace(strings.ToLower(string(textRunes[cmdStart:idx])))
-	for idx < len(textRunes) && unicode.IsSpace(textRunes[idx]) {
-		idx++
-	}
-	argsStart = idx
-	args = strings.TrimSpace(string(textRunes[idx:]))
-	return cmd, args, argsStart, cmd != ""
-}
-
-func ParseFirst(text string) (first, rest string, restStart int) {
-	textRunes := []rune(strings.TrimSpace(text))
-	idx := 0
-	for idx < len(textRunes) && !unicode.IsSpace(textRunes[idx]) {
-		idx++
-	}
-	first = strings.TrimSpace(string(textRunes[:idx]))
-	for idx < len(textRunes) && unicode.IsSpace(textRunes[idx]) {
-		idx++
-	}
-	restStart = idx
-	rest = strings.TrimSpace(string(textRunes[idx:]))
-	return
-}
-
-func AttachmentsForPromptRange(items []control.Attachment, start int, end int) []control.Attachment {
-	if len(items) == 0 {
-		return nil
-	}
-	if start < 0 {
-		start = 0
-	}
-	if end < start {
-		end = start
-	}
-	out := make([]control.Attachment, 0, len(items))
-	for _, item := range items {
-		if item.Offset < start || item.Offset > end {
-			continue
-		}
-		out = append(out, control.Attachment{
-			Name:     item.Name,
-			Offset:   item.Offset - start,
-			MimeType: item.MimeType,
-			Data:     item.Data,
-		})
-	}
-	return out
 }
 
 func contextOrBackground(ctx context.Context) context.Context {

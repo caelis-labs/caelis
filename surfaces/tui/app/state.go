@@ -13,6 +13,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/colorprofile"
 
+	controlprompt "github.com/OnslaughtSnail/caelis/ports/controlprompt"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/control"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/tuikit"
 )
@@ -145,6 +146,7 @@ type Config struct {
 	Wizards                []WizardDef
 	ControlService         control.Service
 	ProgramSender          *ProgramSender
+	PromptRouterFactory    controlprompt.RouterFactory
 	OnStart                func()
 	ExecuteLine            func(Submission) TaskResultMsg
 	executeLineCmd         func(Submission) tea.Msg

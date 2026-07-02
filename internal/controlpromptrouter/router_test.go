@@ -1,4 +1,4 @@
-package controlprompt
+package controlpromptrouter
 
 import (
 	"context"
@@ -6,24 +6,11 @@ import (
 	"testing"
 
 	"github.com/OnslaughtSnail/caelis/ports/compact"
+	prompt "github.com/OnslaughtSnail/caelis/ports/controlprompt"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/control"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
-
-func TestParseSlashAndAttachmentRange(t *testing.T) {
-	cmd, args, start, ok := ParseSlash("  /review check this  ")
-	if !ok || cmd != "review" || args != "check this" || start != len([]rune("/review ")) {
-		t.Fatalf("ParseSlash() = %q %q %d %v", cmd, args, start, ok)
-	}
-	attachments := AttachmentsForPromptRange([]control.Attachment{
-		{Name: "before", Offset: 1},
-		{Name: "inside", Offset: start + 2},
-	}, start, len([]rune("/review check this")))
-	if len(attachments) != 1 || attachments[0].Name != "inside" || attachments[0].Offset != 2 {
-		t.Fatalf("AttachmentsForPromptRange() = %#v", attachments)
-	}
-}
 
 func TestRouterStatusModelAndCompactCommands(t *testing.T) {
 	svc := &fakeService{status: control.StatusSnapshot{
@@ -33,8 +20,8 @@ func TestRouterStatusModelAndCompactCommands(t *testing.T) {
 		},
 		SandboxStatus: control.StatusSandbox{ResolvedBackend: "seatbelt"},
 	}}
-	router := NewRouter(Config{Service: svc})
-	status, err := router.Route(context.Background(), Request{Submission: control.Submission{Text: "/status"}})
+	router := New(prompt.RouterConfig{Service: svc})
+	status, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/status"}})
 	if err != nil {
 		t.Fatalf("Route(/status) error = %v", err)
 	}
@@ -50,14 +37,14 @@ func TestRouterStatusModelAndCompactCommands(t *testing.T) {
 	if text := control.FormatSlashResult(*status.SlashResult); !strings.Contains(text, "ollama/llama3") {
 		t.Fatalf("FormatSlashResult(/status) = %q, want model text", text)
 	}
-	model, err := router.Route(context.Background(), Request{Submission: control.Submission{Text: "/model use fast high"}})
+	model, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/model use fast high"}})
 	if err != nil {
 		t.Fatalf("Route(/model use) error = %v", err)
 	}
 	if svc.usedModel != "fast" || svc.usedReasoning != "high" || model.StatusUpdate == nil {
 		t.Fatalf("model route used model=%q reasoning=%q status=%#v", svc.usedModel, svc.usedReasoning, model.StatusUpdate)
 	}
-	compactResult, err := router.Route(context.Background(), Request{Submission: control.Submission{Text: "/compact"}})
+	compactResult, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/compact"}})
 	if err != nil {
 		t.Fatalf("Route(/compact) error = %v", err)
 	}
@@ -78,14 +65,14 @@ func TestRouterHelpAndSubagentListReturnStructuredPayloads(t *testing.T) {
 			}},
 		},
 	}
-	router := NewRouter(Config{
+	router := New(prompt.RouterConfig{
 		Service: svc,
 		CommandNames: func(context.Context, control.Service) []string {
 			return []string{"help", "status", "subagent", "helper"}
 		},
 	})
 
-	help, err := router.Route(context.Background(), Request{Submission: control.Submission{Text: "/help"}})
+	help, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/help"}})
 	if err != nil {
 		t.Fatalf("Route(/help) error = %v", err)
 	}
@@ -105,7 +92,7 @@ func TestRouterHelpAndSubagentListReturnStructuredPayloads(t *testing.T) {
 		t.Fatalf("FormatSlashResult(/help) = %q, want helper command", text)
 	}
 
-	subagents, err := router.Route(context.Background(), Request{Submission: control.Submission{Text: "/subagent list"}})
+	subagents, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/subagent list"}})
 	if err != nil {
 		t.Fatalf("Route(/subagent list) error = %v", err)
 	}
@@ -126,8 +113,8 @@ func TestRouterDynamicAgentMentionUnknownAndNormalPrompt(t *testing.T) {
 		agents: []control.AgentCandidate{{Name: "helper", Description: "bounded helper"}},
 		turn:   &fakeTurn{id: "turn-1"},
 	}
-	router := NewRouter(Config{Service: svc})
-	dynamic, err := router.Route(context.Background(), Request{Submission: control.Submission{
+	router := New(prompt.RouterConfig{Service: svc})
+	dynamic, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{
 		Text:        "/helper inspect repo",
 		Attachments: []control.Attachment{{Name: "img.png", Offset: len([]rune("/helper inspect "))}},
 	}})
@@ -140,21 +127,21 @@ func TestRouterDynamicAgentMentionUnknownAndNormalPrompt(t *testing.T) {
 	if len(svc.startedAttachments) != 1 || svc.startedAttachments[0].Offset != len([]rune("inspect ")) {
 		t.Fatalf("dynamic attachments = %#v", svc.startedAttachments)
 	}
-	mention, err := router.Route(context.Background(), Request{Submission: control.Submission{Text: "@side continue"}})
+	mention, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "@side continue"}})
 	if err != nil {
 		t.Fatalf("Route(@side) error = %v", err)
 	}
 	if mention.Turn == nil || svc.continuedHandle != "side" || svc.continuedPrompt != "continue" {
 		t.Fatalf("mention route turn=%#v handle=%q prompt=%q", mention.Turn, svc.continuedHandle, svc.continuedPrompt)
 	}
-	unknown, err := router.Route(context.Background(), Request{Submission: control.Submission{Text: "/unknown command"}})
+	unknown, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/unknown command"}})
 	if err != nil {
 		t.Fatalf("Route(/unknown) error = %v", err)
 	}
 	if unknown.Handled {
 		t.Fatalf("Route(/unknown).Handled = true, want false")
 	}
-	normal, err := router.Route(context.Background(), Request{Submission: control.Submission{Text: "hello"}})
+	normal, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "hello"}})
 	if err != nil {
 		t.Fatalf("Route(normal) error = %v", err)
 	}
@@ -168,20 +155,20 @@ func TestRouterDynamicCommandAllowedFiltersRegisteredAgents(t *testing.T) {
 		agents: []control.AgentCandidate{{Name: "reviewer"}, {Name: "helper"}},
 		turn:   &fakeTurn{id: "turn-1"},
 	}
-	router := NewRouter(Config{
+	router := New(prompt.RouterConfig{
 		Service: svc,
 		DynamicCommandAllowed: func(_ context.Context, command string) bool {
 			return command == "helper"
 		},
 	})
-	hidden, err := router.Route(context.Background(), Request{Submission: control.Submission{Text: "/reviewer inspect"}})
+	hidden, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/reviewer inspect"}})
 	if err != nil {
 		t.Fatalf("Route(/reviewer) error = %v", err)
 	}
 	if hidden.Handled || svc.startedAgent != "" {
 		t.Fatalf("Route(/reviewer) = %#v startedAgent=%q, want unhandled", hidden, svc.startedAgent)
 	}
-	allowed, err := router.Route(context.Background(), Request{Submission: control.Submission{Text: "/helper inspect"}})
+	allowed, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/helper inspect"}})
 	if err != nil {
 		t.Fatalf("Route(/helper) error = %v", err)
 	}
@@ -192,8 +179,8 @@ func TestRouterDynamicCommandAllowedFiltersRegisteredAgents(t *testing.T) {
 
 func TestRouterReviewForwardsAttachmentsForPromptRange(t *testing.T) {
 	svc := &fakeService{turn: &fakeTurn{id: "turn-1"}}
-	router := NewRouter(Config{Service: svc})
-	result, err := router.Route(context.Background(), Request{Submission: control.Submission{
+	router := New(prompt.RouterConfig{Service: svc})
+	result, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{
 		Text: "/review inspect screenshot",
 		Attachments: []control.Attachment{{
 			Name:     "inline.png",
@@ -222,9 +209,9 @@ func TestRouterReviewForwardsAttachmentsForPromptRange(t *testing.T) {
 func TestRouterAgentInstallRemainsPrivateToSurfaceHandler(t *testing.T) {
 	svc := &fakeService{}
 	privateCalls := 0
-	router := NewRouter(Config{Service: svc})
+	router := New(prompt.RouterConfig{Service: svc})
 
-	install, err := router.Route(context.Background(), Request{Submission: control.Submission{Text: "/agent install claude"}})
+	install, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/agent install claude"}})
 	if err != nil {
 		t.Fatalf("Route(/agent install) error = %v", err)
 	}
@@ -232,7 +219,7 @@ func TestRouterAgentInstallRemainsPrivateToSurfaceHandler(t *testing.T) {
 		t.Fatalf("Route(/agent install) = %#v added=%q opts=%#v, want usage without install", install, svc.addedAgent, svc.addedOptions)
 	}
 
-	addInstall, err := router.Route(context.Background(), Request{Submission: control.Submission{Text: "/agent add --install claude"}})
+	addInstall, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/agent add --install claude"}})
 	if err != nil {
 		t.Fatalf("Route(/agent add --install) error = %v", err)
 	}
@@ -241,17 +228,17 @@ func TestRouterAgentInstallRemainsPrivateToSurfaceHandler(t *testing.T) {
 	}
 
 	privatePayload := struct{ command string }{command: "agent install"}
-	privateRouter := NewRouter(Config{
+	privateRouter := New(prompt.RouterConfig{
 		Service: svc,
-		PrivateSlashHandler: func(_ context.Context, req PrivateSlashRequest) (Result, bool, error) {
+		PrivateSlashHandler: func(_ context.Context, req prompt.PrivateSlashRequest) (prompt.Result, bool, error) {
 			if req.Command != "agent" || !strings.HasPrefix(req.Args, "install ") {
-				return Result{}, false, nil
+				return prompt.Result{}, false, nil
 			}
 			privateCalls++
-			return Result{Handled: true, SuppressTurnDivider: true, PrivateResult: privatePayload}, true, nil
+			return prompt.Result{Handled: true, SuppressTurnDivider: true, PrivateResult: privatePayload}, true, nil
 		},
 	})
-	privateInstall, err := privateRouter.Route(context.Background(), Request{Submission: control.Submission{Text: "/agent install claude"}})
+	privateInstall, err := privateRouter.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/agent install claude"}})
 	if err != nil {
 		t.Fatalf("private Route(/agent install) error = %v", err)
 	}
@@ -267,20 +254,20 @@ func TestRouterCoreCommandAllowedFiltersSharedSlash(t *testing.T) {
 	svc := &fakeService{status: control.StatusSnapshot{
 		ModelStatus: control.StatusModel{Display: "ollama/llama3"},
 	}}
-	router := NewRouter(Config{
+	router := New(prompt.RouterConfig{
 		Service: svc,
 		CoreCommandAllowed: func(_ context.Context, command string) bool {
 			return command == "status"
 		},
 	})
-	status, err := router.Route(context.Background(), Request{Submission: control.Submission{Text: "/status"}})
+	status, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/status"}})
 	if err != nil {
 		t.Fatalf("Route(/status) error = %v", err)
 	}
 	if !status.Handled || status.SlashResult == nil || !strings.Contains(control.FormatSlashResult(*status.SlashResult), "ollama/llama3") {
 		t.Fatalf("Route(/status) = %#v, want handled status", status)
 	}
-	newSession, err := router.Route(context.Background(), Request{Submission: control.Submission{Text: "/new"}})
+	newSession, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/new"}})
 	if err != nil {
 		t.Fatalf("Route(/new) error = %v", err)
 	}
@@ -291,13 +278,13 @@ func TestRouterCoreCommandAllowedFiltersSharedSlash(t *testing.T) {
 
 func TestRouterCoreCommandAllowedBypassesTUIActiveACPGate(t *testing.T) {
 	svc := &fakeService{controllerKind: "acp"}
-	router := NewRouter(Config{
+	router := New(prompt.RouterConfig{
 		Service: svc,
 		CoreCommandAllowed: func(_ context.Context, command string) bool {
 			return command == "compact"
 		},
 	})
-	result, err := router.Route(context.Background(), Request{Submission: control.Submission{Text: "/compact"}})
+	result, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/compact"}})
 	if err != nil {
 		t.Fatalf("Route(/compact) error = %v", err)
 	}
@@ -306,7 +293,7 @@ func TestRouterCoreCommandAllowedBypassesTUIActiveACPGate(t *testing.T) {
 	}
 }
 
-func firstNotice(result Result) string {
+func firstNotice(result prompt.Result) string {
 	for _, env := range result.Events {
 		if env.Kind == eventstream.KindNotice {
 			return strings.TrimSpace(env.Notice)
