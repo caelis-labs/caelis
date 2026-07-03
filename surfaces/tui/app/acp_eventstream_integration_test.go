@@ -1120,69 +1120,164 @@ func TestProjectResumeReplayEventsUsesACPEnvelopeTrace(t *testing.T) {
 	}
 }
 
-func TestResumeReplayTerminalLifecycleDoesNotKeepMainTurnActive(t *testing.T) {
+func TestResumeReplayMainTurnBlockIsolation(t *testing.T) {
 	t.Parallel()
 
-	model := NewModel(Config{NoColor: true, NoAnimation: true})
-	replayEvents := projectResumeReplayEvents([]eventstream.Envelope{
+	cases := []struct {
+		name    string
+		replay  []eventstream.Envelope
+		prompt  string
+		live    eventstream.Envelope
+		oldText string
+		newText string
+	}{
 		{
-			Kind:      eventstream.KindSessionUpdate,
-			SessionID: "session-1",
-			ScopeID:   "session-1",
-			TurnID:    "turn-1",
-			Final:     true,
-			Update: schema.ContentChunk{
-				SessionUpdate: schema.UpdateAgentMessage,
-				Content:       schema.TextContent{Type: "text", Text: "interrupted output"},
+			name: "lifecycle terminated replay",
+			replay: []eventstream.Envelope{
+				{
+					Kind:      eventstream.KindSessionUpdate,
+					SessionID: "session-1",
+					ScopeID:   "session-1",
+					TurnID:    "turn-1",
+					Final:     true,
+					Update: schema.ContentChunk{
+						SessionUpdate: schema.UpdateAgentMessage,
+						Content:       schema.TextContent{Type: "text", Text: "interrupted output"},
+					},
+				},
+				{
+					Kind:      eventstream.KindLifecycle,
+					SessionID: "session-1",
+					ScopeID:   "session-1",
+					TurnID:    "turn-1",
+					Lifecycle: &eventstream.Lifecycle{State: eventstream.LifecycleStateInterrupted},
+				},
 			},
+			prompt: "continue after resume",
+			live: eventstream.Envelope{
+				Kind:      eventstream.KindSessionUpdate,
+				SessionID: "session-1",
+				ScopeID:   "session-1",
+				TurnID:    "turn-2",
+				Final:     true,
+				Update: schema.ContentChunk{
+					SessionUpdate: schema.UpdateAgentMessage,
+					Content:       schema.TextContent{Type: "text", Text: "new answer"},
+				},
+			},
+			oldText: "interrupted output",
+			newText: "new answer",
 		},
 		{
-			Kind:      eventstream.KindLifecycle,
-			SessionID: "session-1",
-			ScopeID:   "session-1",
-			TurnID:    "turn-1",
-			Lifecycle: &eventstream.Lifecycle{State: eventstream.LifecycleStateInterrupted},
+			name: "final message only replay",
+			replay: []eventstream.Envelope{
+				{
+					Kind:      eventstream.KindSessionUpdate,
+					SessionID: "session-1",
+					Scope:     eventstream.ScopeMain,
+					ScopeID:   "turn-5",
+					TurnID:    "turn-5",
+					Final:     true,
+					Update: schema.ContentChunk{
+						SessionUpdate: schema.UpdateAgentMessage,
+						Content:       schema.TextContent{Type: "text", Text: "old async bash summary"},
+					},
+				},
+			},
+			prompt: "new replay check prompt",
+			live: eventstream.Envelope{
+				Kind:      eventstream.KindSessionUpdate,
+				SessionID: "session-1",
+				Scope:     eventstream.ScopeMain,
+				ScopeID:   "turn-9",
+				TurnID:    "turn-9",
+				Final:     true,
+				Update: schema.ContentChunk{
+					SessionUpdate: schema.UpdateAgentMessage,
+					Content:       schema.TextContent{Type: "text", Text: "new replay check answer"},
+				},
+			},
+			oldText: "old async bash summary",
+			newText: "new replay check answer",
 		},
-	})
-	next, _ := model.handleTranscriptEventsMsg(TranscriptEventsMsg{Events: replayEvents})
-	model = next.(*Model)
-	if id := strings.TrimSpace(model.activeMainACPTurnID); id != "" {
-		t.Fatalf("activeMainACPTurnID after interrupted replay = %q, want empty", id)
 	}
 
-	model.commitUserDisplayLine("continue after resume")
-	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(130, 0))
-	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
-		Kind:      eventstream.KindSessionUpdate,
-		SessionID: "session-1",
-		ScopeID:   "session-1",
-		TurnID:    "turn-2",
-		Final:     true,
-		Update: schema.ContentChunk{
-			SessionUpdate: schema.UpdateAgentMessage,
-			Content:       schema.TextContent{Type: "text", Text: "new answer"},
-		},
-	})
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
+			model := NewModel(Config{NoColor: true, NoAnimation: true})
+			replayEvents := projectResumeReplayEvents(tc.replay)
+			next, _ := model.handleTranscriptEventsMsg(TranscriptEventsMsg{Events: replayEvents})
+			model = next.(*Model)
+			if id := strings.TrimSpace(model.activeMainACPTurnID); id != "" {
+				t.Fatalf("activeMainACPTurnID after replay = %q, want empty", id)
+			}
+
+			model.commitUserDisplayLine(tc.prompt)
+			model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(130, 0))
+			model = applyACPEnvelopeForTest(t, model, tc.live)
+			assertMainTurnDocumentOrder(t, model, tc.oldText, tc.prompt, tc.newText)
+		})
+	}
+}
+
+func assertMainTurnDocumentOrder(t *testing.T, model *Model, oldText string, prompt string, newText string) {
+	t.Helper()
 	var order []string
 	for _, docBlock := range model.doc.Blocks() {
 		switch block := docBlock.(type) {
 		case *MainACPTurnBlock:
 			switch {
-			case mainACPBlockContainsText(block, "interrupted output"):
-				order = append(order, "interrupted")
-			case mainACPBlockContainsText(block, "new answer"):
+			case mainACPBlockContainsText(block, oldText):
+				order = append(order, "old")
+				if mainACPBlockContainsText(block, newText) {
+					t.Fatalf("old replay block contains new turn answer: %#v", block.Events)
+				}
+			case mainACPBlockContainsText(block, newText):
 				order = append(order, "new")
 			}
 		case *UserNarrativeBlock:
-			if strings.TrimSpace(block.Raw) == "continue after resume" {
+			if strings.TrimSpace(block.Raw) == prompt {
 				order = append(order, "user")
 			}
 		}
 	}
-	want := []string{"interrupted", "user", "new"}
+	want := []string{"old", "user", "new"}
 	if !slices.Equal(order, want) {
 		t.Fatalf("document order = %#v, want %#v", order, want)
+	}
+}
+
+func TestTranscriptMainTurnKey(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		scope   ACPProjectionScope
+		turnID  string
+		scopeID string
+		want    string
+	}{
+		{name: "main prefers turn id", scope: ACPProjectionMain, turnID: "turn-9", scopeID: "session-1", want: "turn-9"},
+		{name: "main falls back to scope id", scope: ACPProjectionMain, scopeID: "session-1", want: "session-1"},
+		{name: "participant keeps scope id", scope: ACPProjectionParticipant, turnID: "participant-turn-1", scopeID: "agent-session-1", want: "agent-session-1"},
+		{name: "empty", scope: ACPProjectionMain},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := transcriptMainTurnKey(TranscriptEvent{
+				Scope:   tc.scope,
+				TurnID:  tc.turnID,
+				ScopeID: tc.scopeID,
+			})
+			if got != tc.want {
+				t.Fatalf("transcriptMainTurnKey() = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 

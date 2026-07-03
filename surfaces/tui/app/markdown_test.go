@@ -277,10 +277,7 @@ func TestNarrativeInlineCodeStyleScopesShortCJKListAcronym(t *testing.T) {
 							Text:          strings.Join([]string{"无问题点", "", raw}, "\n"),
 							Final:         true,
 						}}})
-						block, _ := m.doc.Find(strings.TrimSpace(m.activeMainACPTurnID)).(*MainACPTurnBlock)
-						if block == nil {
-							t.Fatal("expected main ACP turn block")
-						}
+						block := requireMainACPTurnBlockForTest(t, m)
 						assertAPICodeScope(t, joinRenderedStyled(block.Render(m.blockRenderContext(80))), sgrForegroundCode(t, m.theme.MarkdownInlineCodeStyle().GetForeground()))
 						m.syncViewportContent()
 						assertAPICodeScope(t, strings.Join(m.viewportStyledLines, "\n"), sgrForegroundCode(t, m.theme.MarkdownInlineCodeStyle().GetForeground()))

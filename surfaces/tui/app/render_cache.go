@@ -720,7 +720,7 @@ func viewportBlockRenderKey(block Block, ctx BlockRenderContext) string {
 		builder.addString(b.Label)
 		builder.addString(b.Text)
 	case *MainACPTurnBlock:
-		builder.addString(b.SessionID)
+		builder.addString(b.TurnKey)
 		builder.addString(b.Status)
 		builder.addTime(b.StartedAt)
 		builder.addTime(b.EndedAt)

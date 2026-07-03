@@ -219,7 +219,7 @@ func (b *ReasoningBlock) Render(ctx BlockRenderContext) []RenderedRow {
 
 type MainACPTurnBlock struct {
 	id                    string
-	SessionID             string
+	TurnKey               string
 	Status                string
 	StartedAt             time.Time
 	EndedAt               time.Time
@@ -235,10 +235,10 @@ type MainACPTurnBlock struct {
 	compactHeightBudget   compactHeightBudgetState
 }
 
-func NewMainACPTurnBlock(sessionID string) *MainACPTurnBlock {
+func NewMainACPTurnBlock(turnKey string) *MainACPTurnBlock {
 	return &MainACPTurnBlock{
 		id:             nextBlockID(),
-		SessionID:      strings.TrimSpace(sessionID),
+		TurnKey:        strings.TrimSpace(turnKey),
 		Status:         "running",
 		StartedAt:      time.Now(),
 		toolEventIndex: map[string]int{},

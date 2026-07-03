@@ -54,7 +54,7 @@ func (m *Model) applyTranscriptToolToSubagent(event TranscriptEvent, mutation tr
 }
 
 func (m *Model) applyTranscriptToolToMain(event TranscriptEvent, mutation transcriptToolMutation) (tea.Model, tea.Cmd) {
-	block := m.ensureMainACPTurnBlock(strings.TrimSpace(event.ScopeID))
+	block := m.ensureMainACPTurnBlock(transcriptMainTurnKey(event))
 	if block == nil {
 		return m, nil
 	}

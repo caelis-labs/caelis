@@ -353,8 +353,7 @@ type Model struct {
 
 	// Maps external keys to doc block IDs.
 	activeMainACPTurnID            string
-	pendingMainACPSessionID        string
-	pendingMainACPStartedAt        time.Time
+	mainACPTurnIDs                 map[string]string
 	participantTurnIDs             map[string]string
 	activeParticipantTurnSessionID string
 

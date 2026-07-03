@@ -885,38 +885,6 @@ func (m *Model) ensureParticipantTurnBlock(sessionID string, actor string) *Part
 	return block
 }
 
-func (m *Model) ensureMainACPTurnBlock(sessionID string) *MainACPTurnBlock {
-	if m == nil {
-		return nil
-	}
-	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" {
-		sessionID = strings.TrimSpace(m.pendingMainACPSessionID)
-	}
-	if sessionID == "" {
-		return nil
-	}
-	if blockID := strings.TrimSpace(m.activeMainACPTurnID); blockID != "" {
-		if block, _ := m.doc.Find(blockID).(*MainACPTurnBlock); block != nil {
-			if strings.TrimSpace(block.SessionID) == "" {
-				block.SessionID = sessionID
-				m.markViewportBlockDirty(block.BlockID())
-			}
-			return block
-		}
-	}
-	block := NewMainACPTurnBlock(sessionID)
-	if strings.EqualFold(strings.TrimSpace(m.pendingMainACPSessionID), sessionID) && !m.pendingMainACPStartedAt.IsZero() {
-		block.StartedAt = m.pendingMainACPStartedAt
-	}
-	m.doc.Append(block)
-	m.activeMainACPTurnID = block.BlockID()
-	m.pendingMainACPSessionID = ""
-	m.pendingMainACPStartedAt = time.Time{}
-	m.markViewportStructureDirty()
-	return block
-}
-
 func (m *Model) handleParticipantTurnStream(sessionID, kind, actor, text string, final bool, occurredAt ...time.Time) (tea.Model, tea.Cmd) {
 	m.finalizeAssistantBlock()
 	m.finalizeReasoningBlock()
@@ -1022,35 +990,4 @@ func (m *Model) findParticipantTurnBlock(sessionID string) *ParticipantTurnBlock
 	}
 	block, _ := m.doc.Find(blockID).(*ParticipantTurnBlock)
 	return block
-}
-
-func (m *Model) finalizeActiveMainACPTurn(interrupted bool, err error) {
-	if m == nil {
-		return
-	}
-	blockID := strings.TrimSpace(m.activeMainACPTurnID)
-	if blockID == "" {
-		m.pendingMainACPSessionID = ""
-		m.pendingMainACPStartedAt = time.Time{}
-		return
-	}
-	block, _ := m.doc.Find(blockID).(*MainACPTurnBlock)
-	if block == nil {
-		m.activeMainACPTurnID = ""
-		m.pendingMainACPSessionID = ""
-		m.pendingMainACPStartedAt = time.Time{}
-		return
-	}
-	state := "completed"
-	switch {
-	case interrupted:
-		state = "interrupted"
-	case err != nil:
-		state = "failed"
-	}
-	block.SetStatus(state, "", "", time.Time{})
-	m.captureLiveTurnDurationFromMainBlock(block)
-	m.activeMainACPTurnID = ""
-	m.pendingMainACPSessionID = ""
-	m.pendingMainACPStartedAt = time.Time{}
 }

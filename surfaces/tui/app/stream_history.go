@@ -13,6 +13,7 @@ func (m *Model) resetConversationView() {
 	m.activeReasoningID = ""
 	m.transientBlockID = ""
 	m.activeMainACPTurnID = ""
+	m.mainACPTurnIDs = nil
 	m.participantTurnIDs = nil
 	m.activeParticipantTurnSessionID = ""
 	m.doc.Clear()

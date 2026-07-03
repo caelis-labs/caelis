@@ -58,7 +58,7 @@ func (m *Model) applyTranscriptNotice(event TranscriptEvent) (tea.Model, tea.Cmd
 	}
 	if shouldAnchorMainNotice(event) {
 		m.prepareForTranscriptScope(event.Scope)
-		block := m.ensureMainACPTurnBlock(strings.TrimSpace(event.ScopeID))
+		block := m.ensureMainACPTurnBlock(transcriptMainTurnKey(event))
 		if block != nil {
 			block.AddNotice(text, event.OccurredAt, event.NoticeKind)
 			m.markViewportBlockDirty(block.BlockID())
@@ -69,7 +69,7 @@ func (m *Model) applyTranscriptNotice(event TranscriptEvent) (tea.Model, tea.Cmd
 }
 
 func shouldAnchorMainNotice(event TranscriptEvent) bool {
-	return event.Scope == ACPProjectionMain && strings.TrimSpace(event.ScopeID) != ""
+	return event.Scope == ACPProjectionMain && transcriptMainTurnKey(event) != ""
 }
 
 func formatTranscriptNoticeText(text string) string {
@@ -133,7 +133,7 @@ func transcriptNarrativeStreamKind(kind TranscriptNarrativeKind) string {
 }
 
 func (m *Model) applyTranscriptMainNarrative(event TranscriptEvent) (tea.Model, tea.Cmd) {
-	block := m.ensureMainACPTurnBlock(strings.TrimSpace(event.ScopeID))
+	block := m.ensureMainACPTurnBlock(transcriptMainTurnKey(event))
 	if block == nil {
 		return m, nil
 	}
@@ -153,6 +153,7 @@ func (m *Model) applyTranscriptMainNarrative(event TranscriptEvent) (tea.Model, 
 		}
 		if event.Final {
 			block.ReplaceFinalStreamChunk(SEAssistant, text, event.OccurredAt)
+			m.releaseReplayedMainACPTurn(block, event.OccurredAt, "completed")
 		} else if text != "" {
 			block.AppendStreamChunk(SEAssistant, text, event.OccurredAt)
 		}
@@ -189,7 +190,7 @@ func (m *Model) applyTranscriptPlan(event TranscriptEvent) (tea.Model, tea.Cmd) 
 		}
 		return m.applyTranscriptPlanToParticipantTurn(event, entries)
 	default:
-		block := m.ensureMainACPTurnBlock(strings.TrimSpace(event.ScopeID))
+		block := m.ensureMainACPTurnBlock(transcriptMainTurnKey(event))
 		if block == nil {
 			return m, nil
 		}
@@ -235,7 +236,7 @@ func (m *Model) applyTranscriptApproval(event TranscriptEvent) (tea.Model, tea.C
 		}
 		return m.applyTranscriptStatusToParticipantTurn(event, firstNonEmpty(strings.TrimSpace(event.State), "waiting_approval"), event.ApprovalTool, event.ApprovalCommand)
 	default:
-		block := m.ensureMainACPTurnBlock(strings.TrimSpace(event.ScopeID))
+		block := m.ensureMainACPTurnBlock(transcriptMainTurnKey(event))
 		if block == nil {
 			return m, nil
 		}
@@ -266,7 +267,7 @@ func (m *Model) applyTranscriptApprovalReview(event TranscriptEvent) (tea.Model,
 		}
 		return m.applyTranscriptApprovalReviewToParticipantTurn(event)
 	default:
-		block := m.ensureMainACPTurnBlock(strings.TrimSpace(event.ScopeID))
+		block := m.ensureMainACPTurnBlock(transcriptMainTurnKey(event))
 		if block == nil {
 			return m, nil
 		}
@@ -363,7 +364,7 @@ func (m *Model) applyTranscriptLifecycle(event TranscriptEvent) (tea.Model, tea.
 		}
 		return m.applyTranscriptStatusToParticipantTurn(event, event.State, "", "")
 	default:
-		block := m.ensureMainACPTurnBlock(strings.TrimSpace(event.ScopeID))
+		block := m.ensureMainACPTurnBlock(transcriptMainTurnKey(event))
 		if block == nil {
 			return m, nil
 		}
@@ -373,13 +374,14 @@ func (m *Model) applyTranscriptLifecycle(event TranscriptEvent) (tea.Model, tea.
 			if !event.OccurredAt.IsZero() && (block.StartedAt.IsZero() || event.OccurredAt.Before(block.StartedAt)) {
 				block.StartedAt = event.OccurredAt
 			}
-			block.SetStatus(event.State, "", "", event.OccurredAt)
+			if !m.turnRunning() && eventstream.IsTerminalLifecycleState(event.State) {
+				m.releaseReplayedMainACPTurn(block, event.OccurredAt, event.State)
+			} else {
+				block.SetStatus(event.State, "", "", event.OccurredAt)
+			}
 			if strings.EqualFold(strings.TrimSpace(event.State), "completed") {
 				m.captureLiveTurnDuration(event.OccurredAt)
 				m.captureLiveTurnDurationFromMainBlock(block)
-			}
-			if !m.turnRunning() && eventstream.IsTerminalLifecycleState(event.State) && strings.TrimSpace(m.activeMainACPTurnID) == block.BlockID() {
-				m.activeMainACPTurnID = ""
 			}
 		}
 		m.markViewportBlockDirty(block.BlockID())
@@ -472,6 +474,13 @@ func (m *Model) applyTranscriptApprovalReviewToParticipantTurn(event TranscriptE
 	block.AddApprovalReviewEvent(event.ToolCallID, event.ApprovalTool, event.ApprovalCommand, event.ApprovalStatus, event.ApprovalRisk, event.ApprovalAuth, event.ApprovalText)
 	m.markViewportBlockDirty(block.BlockID())
 	return m, m.requestStreamViewportSync()
+}
+
+func transcriptMainTurnKey(event TranscriptEvent) string {
+	if event.Scope != ACPProjectionMain {
+		return strings.TrimSpace(event.ScopeID)
+	}
+	return firstNonEmpty(strings.TrimSpace(event.TurnID), strings.TrimSpace(event.ScopeID))
 }
 
 func subagentTranscriptActor(event TranscriptEvent) string {
