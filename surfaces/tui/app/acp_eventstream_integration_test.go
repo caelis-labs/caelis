@@ -907,6 +907,241 @@ func TestHandleACPEventEnvelopeSuppressesDuplicateUserMessageAfterMainTurnStarts
 	}
 }
 
+func TestHandleACPEventEnvelopeSuppressesDuplicateParticipantUserMessage(t *testing.T) {
+	t.Parallel()
+
+	const prompt = "搜一下上海明天的天气如何"
+	const display = "@bela " + prompt
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.commitUserDisplayLine(display)
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:          eventstream.KindSessionUpdate,
+		SessionID:     "session-1",
+		Scope:         eventstream.ScopeParticipant,
+		ScopeID:       "participant-turn-1",
+		TurnID:        "participant-turn-1",
+		ParticipantID: "grok-1",
+		Actor:         "@bela",
+		Meta:          map[string]any{"mention": "@bela", "handle": "bela"},
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateUserMessage,
+			Content:       schema.TextContent{Type: "text", Text: prompt},
+		},
+	})
+
+	userBlocks := 0
+	for _, block := range model.doc.Blocks() {
+		if user, ok := block.(*UserNarrativeBlock); ok && strings.TrimSpace(user.Raw) == display {
+			userBlocks++
+		}
+	}
+	if userBlocks != 1 {
+		t.Fatalf("userBlocks = %d, want participant user echo deduped", userBlocks)
+	}
+}
+
+func TestHandleACPEventEnvelopeSuppressesLateParticipantUserEchoAfterTurnStarts(t *testing.T) {
+	t.Parallel()
+
+	const prompt = "搜一下上海明天的天气如何"
+	const display = "@bela " + prompt
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.commitUserDisplayLine(display)
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:          eventstream.KindSessionUpdate,
+		SessionID:     "session-1",
+		Scope:         eventstream.ScopeParticipant,
+		ScopeID:       "participant-turn-1",
+		TurnID:        "participant-turn-1",
+		ParticipantID: "grok-1",
+		Actor:         "@bela",
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateAgentMessage,
+			Content:       schema.TextContent{Type: "text", Text: "checking weather"},
+		},
+	})
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:          eventstream.KindSessionUpdate,
+		SessionID:     "session-1",
+		Scope:         eventstream.ScopeParticipant,
+		ScopeID:       "participant-turn-1",
+		TurnID:        "participant-turn-1",
+		ParticipantID: "grok-1",
+		Actor:         "@bela",
+		Meta:          map[string]any{"mention": "@bela", "handle": "bela"},
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateUserMessage,
+			Content:       schema.TextContent{Type: "text", Text: prompt},
+		},
+	})
+
+	userBlocks := 0
+	for _, block := range model.doc.Blocks() {
+		if user, ok := block.(*UserNarrativeBlock); ok && strings.TrimSpace(user.Raw) == display {
+			userBlocks++
+		}
+	}
+	if userBlocks != 1 {
+		t.Fatalf("userBlocks = %d, want late participant user echo deduped", userBlocks)
+	}
+	if got := strings.TrimSpace(model.activeParticipantTurnSessionID); got != "participant-turn-1" {
+		t.Fatalf("activeParticipantTurnSessionID = %q, want participant-turn-1", got)
+	}
+}
+
+func TestHandleACPEventEnvelopeSuppressesLateParticipantUserEchoAfterTurnCompletes(t *testing.T) {
+	t.Parallel()
+
+	const prompt = "搜一下上海明天的天气如何"
+	const display = "@bela " + prompt
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.commitUserDisplayLine(display)
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:          eventstream.KindSessionUpdate,
+		SessionID:     "session-1",
+		Scope:         eventstream.ScopeParticipant,
+		ScopeID:       "participant-turn-1",
+		TurnID:        "participant-turn-1",
+		ParticipantID: "grok-1",
+		Actor:         "@bela",
+		Final:         true,
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateAgentMessage,
+			Content:       schema.TextContent{Type: "text", Text: "weather result"},
+		},
+	})
+	if got := strings.TrimSpace(model.activeParticipantTurnSessionID); got != "" {
+		t.Fatalf("activeParticipantTurnSessionID = %q, want cleared after completion", got)
+	}
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:          eventstream.KindSessionUpdate,
+		SessionID:     "session-1",
+		Scope:         eventstream.ScopeParticipant,
+		ScopeID:       "participant-turn-1",
+		TurnID:        "participant-turn-1",
+		ParticipantID: "grok-1",
+		Actor:         "@bela",
+		Meta:          map[string]any{"mention": "@bela", "handle": "bela"},
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateUserMessage,
+			Content:       schema.TextContent{Type: "text", Text: prompt},
+		},
+	})
+
+	userBlocks := 0
+	for _, block := range model.doc.Blocks() {
+		if user, ok := block.(*UserNarrativeBlock); ok && strings.TrimSpace(user.Raw) == display {
+			userBlocks++
+		}
+	}
+	if userBlocks != 1 {
+		t.Fatalf("userBlocks = %d, want completed participant turn to absorb late user echo", userBlocks)
+	}
+}
+
+func TestHandleACPEventEnvelopeRendersQueuedRepeatedParticipantUserMessage(t *testing.T) {
+	t.Parallel()
+
+	const prompt = "搜一下上海明天的天气如何"
+	const display = "@bela " + prompt
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.commitUserDisplayLine(display)
+	model.pendingQueue = append(model.pendingQueue, pendingPrompt{
+		execLine:    display,
+		displayLine: display,
+		dispatched:  true,
+	})
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:          eventstream.KindSessionUpdate,
+		SessionID:     "session-1",
+		Scope:         eventstream.ScopeParticipant,
+		ScopeID:       "participant-turn-1",
+		TurnID:        "participant-turn-1",
+		ParticipantID: "grok-1",
+		Actor:         "@bela",
+		Meta:          map[string]any{"mention": "@bela", "handle": "bela"},
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateUserMessage,
+			Content:       schema.TextContent{Type: "text", Text: prompt},
+		},
+	})
+
+	userBlocks := 0
+	for _, block := range model.doc.Blocks() {
+		if user, ok := block.(*UserNarrativeBlock); ok && strings.TrimSpace(user.Raw) == display {
+			userBlocks++
+		}
+	}
+	if userBlocks != 2 {
+		t.Fatalf("userBlocks = %d, want queued repeated participant prompt rendered", userBlocks)
+	}
+	if len(model.pendingQueue) != 0 {
+		t.Fatalf("pendingQueue = %#v, want queued participant prompt dequeued after echo", model.pendingQueue)
+	}
+}
+
+func TestHandleACPEventEnvelopeRendersRepeatedParticipantUserMessageAcrossEmptyTurns(t *testing.T) {
+	t.Parallel()
+
+	const prompt = "搜一下上海明天的天气如何"
+	const display = "@bela " + prompt
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.commitUserDisplayLine(display)
+	for _, turnID := range []string{"participant-turn-1", "participant-turn-2"} {
+		model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+			Kind:          eventstream.KindParticipant,
+			SessionID:     "session-1",
+			Scope:         eventstream.ScopeParticipant,
+			ScopeID:       turnID,
+			TurnID:        turnID,
+			ParticipantID: "grok-1",
+			Actor:         "@bela",
+			Participant:   &eventstream.Participant{State: "attached"},
+		})
+	}
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:          eventstream.KindSessionUpdate,
+		SessionID:     "session-1",
+		Scope:         eventstream.ScopeParticipant,
+		ScopeID:       "participant-turn-2",
+		TurnID:        "participant-turn-2",
+		ParticipantID: "grok-1",
+		Actor:         "@bela",
+		Meta:          map[string]any{"mention": "@bela", "handle": "bela"},
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateUserMessage,
+			Content:       schema.TextContent{Type: "text", Text: prompt},
+		},
+	})
+
+	userBlocks := 0
+	for _, block := range model.doc.Blocks() {
+		if user, ok := block.(*UserNarrativeBlock); ok && strings.TrimSpace(user.Raw) == display {
+			userBlocks++
+		}
+	}
+	if userBlocks != 2 {
+		t.Fatalf("userBlocks = %d, want repeated prompt preserved across unrelated empty participant turns", userBlocks)
+	}
+}
+
+func TestDequeuePendingUserMessageAnyIgnoresEmptyNeedles(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.pendingQueue = append(model.pendingQueue, pendingPrompt{
+		execLine:    "@bela hello",
+		displayLine: "@bela hello",
+		dispatched:  true,
+	})
+	if model.dequeuePendingUserMessageAny("", "   ") {
+		t.Fatal("dequeuePendingUserMessageAny(empty) = true, want false")
+	}
+	if len(model.pendingQueue) != 1 {
+		t.Fatalf("pendingQueue = %#v, want preserved queue", model.pendingQueue)
+	}
+}
+
 func TestHandleACPEventEnvelopeRendersQueuedRepeatedUserMessage(t *testing.T) {
 	t.Parallel()
 

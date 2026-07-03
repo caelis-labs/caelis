@@ -29,6 +29,60 @@ func (m *Model) commitUserDisplayLine(displayLine string) {
 	m.hasCommittedLine = true
 }
 
+type gatewayUserEchoOptions struct {
+	displayLine        string
+	dequeueNeedles     []string
+	participantTurnKey string
+	finalizeMainTurn   bool
+}
+
+func (m *Model) applyGatewayUserEcho(opts gatewayUserEchoOptions) tea.Model {
+	displayLine := strings.TrimSpace(opts.displayLine)
+	if displayLine == "" {
+		return m
+	}
+	needles := append([]string(nil), opts.dequeueNeedles...)
+	needles = append(needles, displayLine)
+	matchedPending := m.dequeuePendingUserMessageAny(needles...)
+	if !matchedPending && m.lastVisibleUserNarrativeMatchesForEcho(displayLine, opts.participantTurnKey) {
+		m.ensureViewportLayout()
+		m.syncViewportContent()
+		return m
+	}
+	if opts.finalizeMainTurn {
+		m.finalizeActiveMainACPTurn(false, nil)
+	}
+	m.commitUserDisplayLine(displayLine)
+	m.ensureViewportLayout()
+	m.syncViewportContent()
+	return m
+}
+
+func (m *Model) dequeuePendingUserMessageAny(texts ...string) bool {
+	if len(m.pendingQueue) == 0 {
+		return false
+	}
+	needles := make([]string, 0, len(texts))
+	for _, text := range texts {
+		if needle := strings.TrimSpace(text); needle != "" {
+			needles = append(needles, needle)
+		}
+	}
+	if len(needles) == 0 {
+		return false
+	}
+	for i, pending := range m.pendingQueue {
+		for _, needle := range needles {
+			if pending.matchesUserMessage(needle) {
+				m.pendingQueue = append(m.pendingQueue[:i], m.pendingQueue[i+1:]...)
+				return true
+			}
+		}
+	}
+	m.pendingQueue = m.pendingQueue[1:]
+	return false
+}
+
 func normalizeUserDisplayLine(text string) string {
 	return strings.Join(strings.Fields(strings.TrimSpace(text)), " ")
 }

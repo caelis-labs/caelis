@@ -439,24 +439,17 @@ func (m *Model) handleAttachmentCountMsg(msg AttachmentCountMsg) tea.Model {
 }
 
 func (m *Model) handleUserMessageMsg(msg UserMessageMsg) tea.Model {
-	matchedPending := m.dequeuePendingUserMessage(msg.Text)
-	if !matchedPending && m.lastVisibleUserNarrativeMatches(msg.Text) {
-		m.ensureViewportLayout()
-		m.syncViewportContent()
-		return m
-	}
-	m.finalizeActiveMainACPTurn(false, nil)
-	m.commitUserDisplayLine(msg.Text)
-	m.ensureViewportLayout()
-	m.syncViewportContent()
-	return m
+	return m.applyGatewayUserEcho(gatewayUserEchoOptions{
+		displayLine:      msg.Text,
+		finalizeMainTurn: true,
+	})
 }
 
-// lastVisibleUserNarrativeMatches applies gateway-user echo dedup. Local
+// lastVisibleUserNarrativeMatchesForEcho applies gateway-user echo dedup. Local
 // submission rendering uses commitUserDisplayLine directly; ACP/user transcript
 // messages enter here so a late echo can be matched even after the current main
 // turn block has started.
-func (m *Model) lastVisibleUserNarrativeMatches(text string) bool {
+func (m *Model) lastVisibleUserNarrativeMatchesForEcho(text string, participantTurnKey string) bool {
 	if m == nil || m.doc == nil {
 		return false
 	}
@@ -477,6 +470,11 @@ func (m *Model) lastVisibleUserNarrativeMatches(text string) bool {
 				continue
 			}
 			return false
+		case *ParticipantTurnBlock:
+			if strings.TrimSpace(participantTurnKey) != "" && m.participantTurnBlockAllowsUserEchoDedup(block, participantTurnKey) {
+				continue
+			}
+			return false
 		case *TranscriptBlock:
 			if strings.TrimSpace(block.Raw) == "" {
 				continue
@@ -493,10 +491,24 @@ func (m *Model) mainACPTurnBlockAllowsUserEchoDedup(block *MainACPTurnBlock) boo
 	if m == nil || block == nil {
 		return false
 	}
-	if strings.TrimSpace(m.activeMainACPTurnID) == strings.TrimSpace(block.BlockID()) {
+	return turnBlockAllowsUserEchoDedup(m.activeMainACPTurnID, block.BlockID(), block.EndedAt, len(block.Events))
+}
+
+func (m *Model) participantTurnBlockAllowsUserEchoDedup(block *ParticipantTurnBlock, participantTurnKey string) bool {
+	if m == nil || block == nil {
+		return false
+	}
+	if strings.TrimSpace(participantTurnKey) == "" || strings.TrimSpace(participantTurnKey) != strings.TrimSpace(block.SessionID) {
+		return false
+	}
+	return turnBlockAllowsUserEchoDedup(participantTurnKey, block.SessionID, block.EndedAt, len(block.Events))
+}
+
+func turnBlockAllowsUserEchoDedup(activeKey, blockKey string, endedAt time.Time, eventCount int) bool {
+	if strings.TrimSpace(activeKey) != "" && strings.TrimSpace(activeKey) == strings.TrimSpace(blockKey) {
 		return true
 	}
-	return block.EndedAt.IsZero() && len(block.Events) == 0
+	return endedAt.IsZero() && eventCount == 0
 }
 
 func (m *Model) handleBTWErrorMsg(msg BTWErrorMsg) tea.Model {

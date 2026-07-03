@@ -118,11 +118,13 @@ func (m *Model) handleDirectedParticipantUserMessage(event TranscriptEvent) tea.
 	if text == "" {
 		return m
 	}
-	m.dequeuePendingUserMessage(directedParticipantUserDequeueText(event))
-	m.commitUserDisplayLine(text)
-	m.ensureViewportLayout()
-	m.syncViewportContent()
-	return m
+	// Participant echoes are directed side-agent prompts; they must not close
+	// or finalize any active main ACP turn.
+	return m.applyGatewayUserEcho(gatewayUserEchoOptions{
+		displayLine:        text,
+		dequeueNeedles:     []string{directedParticipantUserDequeueText(event)},
+		participantTurnKey: transcriptParticipantTurnKey(event),
+	})
 }
 
 func transcriptNarrativeStreamKind(kind TranscriptNarrativeKind) string {
