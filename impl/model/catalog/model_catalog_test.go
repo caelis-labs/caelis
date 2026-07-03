@@ -47,8 +47,8 @@ func TestLookupSuggestedModelCapabilitiesUsesCodeFreeCatalogForGLM51(t *testing.
 	if !ok {
 		t.Fatal("LookupSuggestedModelCapabilities(codefree, GLM-5.1) = false, want true")
 	}
-	if caps.ContextWindowTokens != 128000 || caps.MaxOutputTokens != 16000 || caps.DefaultMaxOutputTokens != 16000 {
-		t.Fatalf("limits = %d/%d default %d, want 128000/16000 default 16000",
+	if caps.ContextWindowTokens != 112000 || caps.MaxOutputTokens != 16000 || caps.DefaultMaxOutputTokens != 16000 {
+		t.Fatalf("limits = %d/%d default %d, want 112000/16000 default 16000",
 			caps.ContextWindowTokens, caps.MaxOutputTokens, caps.DefaultMaxOutputTokens)
 	}
 	if caps.SupportsReasoning || caps.ReasoningMode != ReasoningModeNone {
@@ -265,9 +265,12 @@ func TestCodeFreeStaticModelsDoNotExposeReasoning(t *testing.T) {
 		maxOutput   int
 		imageInputs bool
 	}{
-		{model: "GLM-4.7", context: 88000, maxOutput: 8000, imageInputs: false},
-		{model: "Qwen3.5-122B-A10B", context: 128000, maxOutput: 16000, imageInputs: true},
-		{model: "GLM-5.1", context: 128000, maxOutput: 16000, imageInputs: false},
+		{model: "DeepSeek-V4-Flash-ctyun-oc", context: 112000, maxOutput: 16000, imageInputs: false},
+		{model: "GLM-4.7", context: 80000, maxOutput: 8000, imageInputs: false},
+		{model: "GLM-5-ctyun-oc", context: 112000, maxOutput: 16000, imageInputs: false},
+		{model: "GLM-5.1", context: 112000, maxOutput: 16000, imageInputs: false},
+		{model: "GLM-5.1-ctyun-oc", context: 112000, maxOutput: 16000, imageInputs: false},
+		{model: "Qwen3.5-122B-A10B", context: 112000, maxOutput: 16000, imageInputs: true},
 	}
 	for _, tt := range tests {
 		if !containsString(models, tt.model) {

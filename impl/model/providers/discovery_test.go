@@ -98,9 +98,13 @@ func TestCodeFreeModelLimitsMatchCodeFreeODirectory(t *testing.T) {
 		image     bool
 		known     bool
 	}{
-		{model: "GLM-4.7", context: 88000, maxOutput: 8000, image: false, known: true},
-		{model: "Qwen3.5-122B-A10B", context: 128000, maxOutput: 16000, image: true, known: true},
-		{model: "GLM-5.1", context: 128000, maxOutput: 16000, image: false, known: true},
+		{model: "DeepSeek-V4-Flash-ctyun-oc", context: 112000, maxOutput: 16000, image: false, known: true},
+		{model: "deepseek-v4-flash-ctyun-oc", context: 112000, maxOutput: 16000, image: false, known: true},
+		{model: "GLM-4.7", context: 80000, maxOutput: 8000, image: false, known: true},
+		{model: "GLM-5-ctyun-oc", context: 112000, maxOutput: 16000, image: false, known: true},
+		{model: "GLM-5.1", context: 112000, maxOutput: 16000, image: false, known: true},
+		{model: "GLM-5.1-ctyun-oc", context: 112000, maxOutput: 16000, image: false, known: true},
+		{model: "Qwen3.5-122B-A10B", context: 112000, maxOutput: 16000, image: true, known: true},
 		{model: "custom-codefree-model", context: 128000, maxOutput: 8000, image: false, known: false},
 	}
 	for _, tt := range tests {
@@ -132,7 +136,7 @@ func TestDiscoverCodeFreeModelsParsesLimits(t *testing.T) {
 			t.Fatalf("sessionId = %q, want stored login session", got)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprint(w, `{"optResult":0,"data":[{"modelName":"GLM-4.7","modelType":"text","maxTokens":88000,"maxOutputTokens":8000},{"modelName":"Qwen3.5-122B-A10B","modelType":"multimodal","maxTokens":128000,"maxOutputTokens":16000},{"modelName":"GLM-5.1","modelType":"text","maxTokens":128000,"maxOutputTokens":16000}]}`)
+		_, _ = fmt.Fprint(w, `{"optResult":0,"data":[{"modelName":"DeepSeek-V4-Flash-ctyun-oc","modelType":"chat","maxTokens":112000,"maxOutputTokens":16000},{"modelName":"GLM-5.1-ctyun-oc","modelType":"chat","maxTokens":112000,"maxOutputTokens":16000},{"modelName":"GLM-5-ctyun-oc","modelType":"chat","maxTokens":112000,"maxOutputTokens":16000},{"modelName":"GLM-4.7","modelType":"chat","maxTokens":80000,"maxOutputTokens":8000},{"modelName":"GLM-5.1","modelType":"chat","maxTokens":112000,"maxOutputTokens":16000},{"modelName":"Qwen3.5-122B-A10B","modelType":"multimodal","maxTokens":112000,"maxOutputTokens":16000}]}`)
 	}))
 	defer server.Close()
 
@@ -156,9 +160,12 @@ func TestDiscoverCodeFreeModelsParsesLimits(t *testing.T) {
 		maxOutput int
 		image     bool
 	}{
-		{model: "GLM-4.7", context: 88000, maxOutput: 8000, image: false},
-		{model: "Qwen3.5-122B-A10B", context: 128000, maxOutput: 16000, image: true},
-		{model: "GLM-5.1", context: 128000, maxOutput: 16000, image: false},
+		{model: "DeepSeek-V4-Flash-ctyun-oc", context: 112000, maxOutput: 16000, image: false},
+		{model: "GLM-4.7", context: 80000, maxOutput: 8000, image: false},
+		{model: "GLM-5-ctyun-oc", context: 112000, maxOutput: 16000, image: false},
+		{model: "GLM-5.1", context: 112000, maxOutput: 16000, image: false},
+		{model: "GLM-5.1-ctyun-oc", context: 112000, maxOutput: 16000, image: false},
+		{model: "Qwen3.5-122B-A10B", context: 112000, maxOutput: 16000, image: true},
 	} {
 		item, ok := byName[tt.model]
 		if !ok {

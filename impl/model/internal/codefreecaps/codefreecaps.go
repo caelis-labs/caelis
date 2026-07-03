@@ -22,7 +22,7 @@ type Model struct {
 var Models = []Model{
 	{
 		ID:                     "GLM-4.7",
-		ContextWindowTokens:    88000,
+		ContextWindowTokens:    80000,
 		MaxOutputTokens:        8000,
 		DefaultMaxOutputTokens: 8000,
 		SupportsToolCalls:      true,
@@ -30,7 +30,7 @@ var Models = []Model{
 	},
 	{
 		ID:                     "Qwen3.5-122B-A10B",
-		ContextWindowTokens:    128000,
+		ContextWindowTokens:    112000,
 		MaxOutputTokens:        16000,
 		DefaultMaxOutputTokens: 16000,
 		SupportsToolCalls:      true,
@@ -38,8 +38,32 @@ var Models = []Model{
 		SupportsImages:         true,
 	},
 	{
+		ID:                     "DeepSeek-V4-Flash-ctyun-oc",
+		ContextWindowTokens:    112000,
+		MaxOutputTokens:        16000,
+		DefaultMaxOutputTokens: 16000,
+		SupportsToolCalls:      true,
+		SupportsJSONOutput:     true,
+	},
+	{
+		ID:                     "GLM-5.1-ctyun-oc",
+		ContextWindowTokens:    112000,
+		MaxOutputTokens:        16000,
+		DefaultMaxOutputTokens: 16000,
+		SupportsToolCalls:      true,
+		SupportsJSONOutput:     true,
+	},
+	{
+		ID:                     "GLM-5-ctyun-oc",
+		ContextWindowTokens:    112000,
+		MaxOutputTokens:        16000,
+		DefaultMaxOutputTokens: 16000,
+		SupportsToolCalls:      true,
+		SupportsJSONOutput:     true,
+	},
+	{
 		ID:                     "GLM-5.1",
-		ContextWindowTokens:    128000,
+		ContextWindowTokens:    112000,
 		MaxOutputTokens:        16000,
 		DefaultMaxOutputTokens: 16000,
 		SupportsToolCalls:      true,
@@ -52,11 +76,20 @@ func Lookup(modelName string) (Model, bool) {
 	if modelName == "" {
 		return Model{}, false
 	}
+	var best Model
+	bestLen := 0
 	for _, model := range Models {
 		id := strings.ToLower(model.ID)
-		if modelName == id || strings.HasPrefix(modelName, id) {
+		if modelName == id {
 			return model, true
 		}
+		if strings.HasPrefix(modelName, id) && len(id) > bestLen {
+			best = model
+			bestLen = len(id)
+		}
+	}
+	if bestLen > 0 {
+		return best, true
 	}
 	return Model{}, false
 }
