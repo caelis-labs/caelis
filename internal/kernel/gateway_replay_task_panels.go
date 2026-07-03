@@ -404,8 +404,6 @@ func replayTaskMeta(entry *taskapi.Entry, finalText string, status string, visib
 		taskMeta[EventMetaRuntimeTaskError] = finalText
 	} else {
 		taskMeta[EventMetaRuntimeTaskFinal] = finalText
-		// terminalRuntimeOutputText already understands result and uses it to
-		// restore the panel body during replay.
 		taskMeta[EventMetaRuntimeTaskResult] = finalText
 	}
 	return taskMeta

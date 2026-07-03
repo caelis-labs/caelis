@@ -594,7 +594,7 @@ func TestHandleACPEventEnvelopeReplacesSpawnStreamWithFinalRuntimeResult(t *test
 			SessionUpdate: schema.UpdateToolCallInfo,
 			ToolCallID:    "spawn-1",
 			Status:        &completed,
-			Meta:          finalMeta,
+			Meta:          metautil.WithTerminalOutput(finalMeta, "spawn-1", "Final child result"),
 		},
 	})
 

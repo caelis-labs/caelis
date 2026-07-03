@@ -45,6 +45,7 @@ type GatewayControlPlaneService interface {
 	HandoffController(context.Context, gateway.HandoffControllerRequest) (session.Session, error)
 	AttachParticipant(context.Context, gateway.AttachParticipantRequest) (session.Session, error)
 	PromptParticipant(context.Context, gateway.PromptParticipantRequest) (gateway.BeginTurnResult, error)
+	StartParticipant(context.Context, gateway.StartParticipantRequest) (gateway.BeginTurnResult, error)
 	DetachParticipant(context.Context, gateway.DetachParticipantRequest) (session.Session, error)
 }
 

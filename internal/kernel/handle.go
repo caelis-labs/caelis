@@ -45,13 +45,16 @@ type turnHandle struct {
 	eventsStarted           bool
 	eventsClosed            bool
 	closed                  bool
+	finishing               bool
 	finished                bool
+	failed                  bool
 	cancelled               bool
 	runner                  agent.Runner
 	pendingSubmissions      []SubmitRequest
 	allowPendingSubmissions bool
 	prepareSubmission       func(context.Context, SubmitRequest) (SubmitRequest, error)
 	pendingApprovalCh       chan ApprovalDecision
+	finishHooks             []func()
 
 	approvalReviewSeq uint64
 	acpCursorSeq      uint64
@@ -223,6 +226,26 @@ func (h *turnHandle) setRunner(runner agent.Runner) {
 			h.publishError(err)
 		}
 	}
+}
+
+func (h *turnHandle) onFinish(fn func()) {
+	if fn == nil {
+		return
+	}
+	h.mu.Lock()
+	if h.finished || h.finishing {
+		h.mu.Unlock()
+		fn()
+		return
+	}
+	h.finishHooks = append(h.finishHooks, fn)
+	h.mu.Unlock()
+}
+
+func (h *turnHandle) didFail() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.failed
 }
 
 func cloneSubmitRequest(req SubmitRequest) SubmitRequest {
@@ -424,6 +447,9 @@ func (h *turnHandle) publishError(err error) {
 	if err == nil {
 		return
 	}
+	h.mu.Lock()
+	h.failed = true
+	h.mu.Unlock()
 	env := eventstream.Error(err)
 	env.HandleID = h.handleID
 	env.RunID = h.runID
@@ -491,12 +517,22 @@ func startEventstreamIndexAfterCursor(events []eventstream.Envelope, cursor stri
 
 func (h *turnHandle) finish() {
 	h.mu.Lock()
-	defer h.mu.Unlock()
-	if h.finished {
+	if h.finished || h.finishing {
+		h.mu.Unlock()
 		return
 	}
+	h.finishing = true
+	hooks := append([]func(){}, h.finishHooks...)
+	h.finishHooks = nil
+	h.mu.Unlock()
+	for _, hook := range hooks {
+		hook()
+	}
+	h.mu.Lock()
+	h.finishing = false
 	h.finished = true
 	h.closeEventsLocked()
+	h.mu.Unlock()
 }
 
 func (h *turnHandle) closeEventsLocked() {

@@ -317,9 +317,11 @@ func (g *Gateway) dispatchSessionStartHooks(ctx context.Context, sessionObj sess
 
 		stdoutTrimmed := strings.TrimSpace(res.Stdout)
 		vis := session.VisibilityCanonical
+		eventType := session.EventTypeContext
 		text := ""
 		if stdoutTrimmed == "" {
 			vis = session.VisibilityMirror
+			eventType = session.EventTypeCustom
 		} else {
 			text = fmt.Sprintf("[Plugin context: %s]\n%s", hook.PluginID, stdoutTrimmed)
 			if res.StdoutTruncated {
@@ -328,7 +330,7 @@ func (g *Gateway) dispatchSessionStartHooks(ctx context.Context, sessionObj sess
 		}
 		message := model.NewTextMessage(model.RoleUser, text)
 		pluginContextEvent := &session.Event{
-			Type:       session.EventTypeCustom,
+			Type:       eventType,
 			Visibility: vis,
 			Message:    &message,
 			Text:       text,

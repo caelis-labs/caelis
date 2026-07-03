@@ -214,47 +214,149 @@ func (s *Store) AppendEvent(
 			return err
 		}
 
-		normalized := session.CanonicalizeEvent(event)
-		normalized.SessionID = doc.Session.SessionID
-		if normalized.Time.IsZero() {
-			normalized.Time = s.now()
-		}
-		if normalized.Type == "" {
-			normalized.Type = session.EventTypeOf(normalized)
-		}
-		if normalized.Visibility == "" {
-			normalized.Visibility = session.VisibilityCanonical
-		}
-		if err := session.ValidateDurableCoreEvent(normalized); err != nil {
-			return err
-		}
-		if !shouldPersistEvent(normalized) {
-			out = session.CloneEvent(normalized)
-			return nil
-		}
-
 		existingEvents, err := s.eventsForDocument(doc)
 		if err != nil {
 			return err
 		}
-		s.ensureUniqueEventID(normalized, existingEventIDSet(existingEvents))
-		path, err := s.resolveWritePath(doc.Session)
+		nextDoc, tx, err := s.prepareAppendTransactionForDocument(doc, []*session.Event{event}, existingEvents, nil, nil)
 		if err != nil {
 			return err
 		}
-		if err := s.appendEventLog(path, []*session.Event{normalized}); err != nil {
-			return err
+		normalized := tx.Prepared.Events[0]
+		if !tx.Changed {
+			out = session.CloneEvent(normalized)
+			return nil
 		}
-		doc.Session.UpdatedAt = normalized.Time
-		if doc.Session.Title == "" {
-			if text := generatedTitleText(normalized); text != "" {
-				doc.Session.Title = truncateTitle(text)
-			}
-		}
-		if err := s.writeDocument(doc); err != nil {
+		if err := s.writeDocumentWithEvents(nextDoc, tx.Prepared.Persisted); err != nil {
 			return err
 		}
 		out = session.CloneEvent(normalized)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (s *Store) prepareAppendTransactionForDocument(
+	doc persistedDocument,
+	events []*session.Event,
+	existingEvents []*session.Event,
+	mutate session.AppendSessionMutation,
+	updateState session.AppendStateUpdate,
+) (persistedDocument, session.PreparedAppendTransaction, error) {
+	tx, err := session.PrepareAppendTransaction(session.PrepareAppendTransactionRequest{
+		Session:         doc.Session,
+		State:           doc.State,
+		Events:          events,
+		ExistingIDs:     existingEventIDSet(existingEvents),
+		Now:             s.now(),
+		AllocateEventID: s.ensureUniqueEventID,
+		MutateSession:   mutate,
+		UpdateState:     updateState,
+	})
+	if err != nil {
+		return persistedDocument{}, session.PreparedAppendTransaction{}, err
+	}
+	doc.Session = tx.Session
+	doc.State = cloneState(tx.State)
+	return doc, tx, nil
+}
+
+func (s *Store) writeDocumentWithEvents(doc persistedDocument, events []*session.Event) error {
+	events = persistedEvents(events)
+	if len(events) == 0 {
+		return s.writeDocument(doc)
+	}
+	path, err := s.resolveWritePath(doc.Session)
+	if err != nil {
+		return err
+	}
+	rollbackLog, err := s.appendEventLogTransaction(path, events)
+	if err != nil {
+		return err
+	}
+	if err := s.writeDocument(doc); err != nil {
+		if documentWriteCommitted(err) {
+			return err
+		}
+		if rollbackErr := rollbackLog(); rollbackErr != nil {
+			return errors.Join(err, rollbackErr)
+		}
+		return err
+	}
+	return nil
+}
+
+func (s *Store) AppendEvents(
+	_ context.Context,
+	req session.AppendEventsRequest,
+) ([]*session.Event, error) {
+	if len(req.Events) == 0 {
+		return nil, nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var out []*session.Event
+	if err := s.withRootWriteLock(func() error {
+		doc, err := s.readDocumentForRef(req.SessionRef)
+		if err != nil {
+			return err
+		}
+		existingEvents, err := s.eventsForDocument(doc)
+		if err != nil {
+			return err
+		}
+		nextDoc, tx, err := s.prepareAppendTransactionForDocument(doc, req.Events, existingEvents, nil, nil)
+		if err != nil {
+			return err
+		}
+		if tx.Changed {
+			if err := s.writeDocumentWithEvents(nextDoc, tx.Prepared.Persisted); err != nil {
+				return err
+			}
+		}
+		out = session.CloneEvents(tx.Prepared.Events)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (s *Store) AppendEventsAndUpdateState(
+	_ context.Context,
+	req session.AppendEventsAndUpdateStateRequest,
+) ([]*session.Event, error) {
+	if len(req.Events) == 0 && req.UpdateState == nil {
+		return nil, nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var out []*session.Event
+	if err := s.withRootWriteLock(func() error {
+		doc, err := s.readDocumentForRef(req.SessionRef)
+		if err != nil {
+			return err
+		}
+		existingEvents, err := s.eventsForDocument(doc)
+		if err != nil {
+			return err
+		}
+		nextDoc, tx, err := s.prepareAppendTransactionForDocument(doc, req.Events, existingEvents, nil, req.UpdateState)
+		if err != nil {
+			return err
+		}
+		if tx.Changed {
+			if err := s.writeDocumentWithEvents(nextDoc, tx.Prepared.Persisted); err != nil {
+				return err
+			}
+		}
+		out = session.CloneEvents(tx.Prepared.Events)
 		return nil
 	}); err != nil {
 		return nil, err
@@ -328,22 +430,11 @@ func (s *Store) PutParticipant(
 		if err != nil {
 			return err
 		}
-		normalized := session.CloneParticipantBinding(binding)
-		for i := range doc.Session.Participants {
-			if doc.Session.Participants[i].ID == normalized.ID && normalized.ID != "" {
-				doc.Session.Participants[i] = normalized
-				doc.Session.UpdatedAt = s.now()
-				if err := s.writeDocument(doc); err != nil {
-					return err
-				}
-				out = session.CloneSession(doc.Session)
-				return nil
+		if session.PutParticipantBinding(&doc.Session, binding) {
+			doc.Session.UpdatedAt = s.now()
+			if err := s.writeDocument(doc); err != nil {
+				return err
 			}
-		}
-		doc.Session.Participants = append(doc.Session.Participants, normalized)
-		doc.Session.UpdatedAt = s.now()
-		if err := s.writeDocument(doc); err != nil {
-			return err
 		}
 		out = session.CloneSession(doc.Session)
 		return nil
@@ -351,6 +442,49 @@ func (s *Store) PutParticipant(
 		return session.Session{}, err
 	}
 	return out, nil
+}
+
+func (s *Store) PutParticipantWithEvent(
+	_ context.Context,
+	req session.PutParticipantWithEventRequest,
+) (session.Session, *session.Event, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var out session.Session
+	var outEvent *session.Event
+	if err := s.withRootWriteLock(func() error {
+		doc, err := s.readDocumentForRef(req.SessionRef)
+		if err != nil {
+			return err
+		}
+		existingEvents, err := s.eventsForDocument(doc)
+		if err != nil {
+			return err
+		}
+		nextDoc, tx, err := s.prepareAppendTransactionForDocument(
+			doc,
+			[]*session.Event{req.Event},
+			existingEvents,
+			func(activeSession *session.Session, _ session.PreparedAppendEvents) (bool, error) {
+				return session.PutParticipantBinding(activeSession, req.Binding), nil
+			},
+			nil,
+		)
+		if err != nil {
+			return err
+		}
+		normalizedEvent := tx.Prepared.Events[0]
+		if err := s.writeDocumentWithEvents(nextDoc, tx.Prepared.Persisted); err != nil {
+			return err
+		}
+		out = session.CloneSession(nextDoc.Session)
+		outEvent = session.CloneEvent(normalizedEvent)
+		return nil
+	}); err != nil {
+		return session.Session{}, nil, err
+	}
+	return out, outEvent, nil
 }
 
 func (s *Store) RemoveParticipant(
@@ -367,22 +501,11 @@ func (s *Store) RemoveParticipant(
 		if err != nil {
 			return err
 		}
-		participantID = strings.TrimSpace(participantID)
-		if participantID == "" {
-			out = session.CloneSession(doc.Session)
-			return nil
-		}
-		filtered := doc.Session.Participants[:0]
-		for _, item := range doc.Session.Participants {
-			if strings.TrimSpace(item.ID) == participantID {
-				continue
+		if session.RemoveParticipantBinding(&doc.Session, participantID) {
+			doc.Session.UpdatedAt = s.now()
+			if err := s.writeDocument(doc); err != nil {
+				return err
 			}
-			filtered = append(filtered, item)
-		}
-		doc.Session.Participants = append([]session.ParticipantBinding(nil), filtered...)
-		doc.Session.UpdatedAt = s.now()
-		if err := s.writeDocument(doc); err != nil {
-			return err
 		}
 		out = session.CloneSession(doc.Session)
 		return nil
@@ -390,6 +513,49 @@ func (s *Store) RemoveParticipant(
 		return session.Session{}, err
 	}
 	return out, nil
+}
+
+func (s *Store) RemoveParticipantWithEvent(
+	_ context.Context,
+	req session.RemoveParticipantWithEventRequest,
+) (session.Session, *session.Event, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var out session.Session
+	var outEvent *session.Event
+	if err := s.withRootWriteLock(func() error {
+		doc, err := s.readDocumentForRef(req.SessionRef)
+		if err != nil {
+			return err
+		}
+		existingEvents, err := s.eventsForDocument(doc)
+		if err != nil {
+			return err
+		}
+		nextDoc, tx, err := s.prepareAppendTransactionForDocument(
+			doc,
+			[]*session.Event{req.Event},
+			existingEvents,
+			func(activeSession *session.Session, _ session.PreparedAppendEvents) (bool, error) {
+				return session.RemoveParticipantBinding(activeSession, req.ParticipantID), nil
+			},
+			nil,
+		)
+		if err != nil {
+			return err
+		}
+		normalizedEvent := tx.Prepared.Events[0]
+		if err := s.writeDocumentWithEvents(nextDoc, tx.Prepared.Persisted); err != nil {
+			return err
+		}
+		out = session.CloneSession(nextDoc.Session)
+		outEvent = session.CloneEvent(normalizedEvent)
+		return nil
+	}); err != nil {
+		return session.Session{}, nil, err
+	}
+	return out, outEvent, nil
 }
 
 func (s *Store) SnapshotState(

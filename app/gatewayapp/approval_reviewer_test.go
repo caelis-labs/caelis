@@ -506,7 +506,7 @@ func TestApprovalReviewerRecoversGuardianCursorWhenStateUpdateFails(t *testing.T
 	if err != nil {
 		t.Fatalf("guardian Events(after failed state update) error = %v", err)
 	}
-	if got, want := len(guardianEvents), 2; got != want {
+	if got, want := len(guardianEvents), 0; got != want {
 		t.Fatalf("guardian event count after failed state update = %d, want %d", got, want)
 	}
 	state, err := baseService.SnapshotState(ctx, guardianRef)
@@ -531,15 +531,15 @@ func TestApprovalReviewerRecoversGuardianCursorWhenStateUpdateFails(t *testing.T
 	if got, want := len(requests), 2; got != want {
 		t.Fatalf("model calls = %d, want %d", got, want)
 	}
-	if got, want := len(requests[1].Messages), len(requests[0].Messages)+2; got != want {
-		t.Fatalf("recovered second len(Messages) = %d, want first prompt + first answer + second prompt", got)
+	if got, want := len(requests[1].Messages), 1; got != want {
+		t.Fatalf("recovered second len(Messages) = %d, want clean first prompt after failed atomic commit", got)
 	}
-	prompt := requests[1].Messages[len(requests[1].Messages)-1].TextContent()
-	if !strings.Contains(prompt, ">>> TRANSCRIPT DELTA START") || !strings.Contains(prompt, "Focused tests passed") {
-		t.Fatalf("recovered guardian prompt missing transcript delta:\n%s", prompt)
+	prompt := requests[1].Messages[0].TextContent()
+	if !strings.Contains(prompt, ">>> TRANSCRIPT START") || !strings.Contains(prompt, "Focused tests passed") {
+		t.Fatalf("recovered guardian prompt missing full transcript:\n%s", prompt)
 	}
-	if strings.Contains(prompt, "Please commit the prepared fix.") {
-		t.Fatalf("recovered guardian prompt repeated old transcript instead of delta:\n%s", prompt)
+	if strings.Contains(prompt, "git commit -m fix") {
+		t.Fatalf("recovered guardian prompt included failed prior action:\n%s", prompt)
 	}
 }
 
@@ -575,15 +575,83 @@ func TestApprovalReviewerKeepsGuardianCacheWhenStateUpdateFails(t *testing.T) {
 	if got, want := len(requests), 2; got != want {
 		t.Fatalf("model calls = %d, want %d", got, want)
 	}
-	if got, want := len(requests[1].Messages), len(requests[0].Messages)+2; got != want {
-		t.Fatalf("same-reviewer recovery len(Messages) = %d, want first prompt + first answer + second prompt", got)
+	if got, want := len(requests[1].Messages), 1; got != want {
+		t.Fatalf("same-reviewer recovery len(Messages) = %d, want clean first prompt after failed atomic commit", got)
 	}
-	prompt := requests[1].Messages[len(requests[1].Messages)-1].TextContent()
-	if !strings.Contains(prompt, ">>> TRANSCRIPT DELTA START") || !strings.Contains(prompt, "Focused tests passed") {
-		t.Fatalf("same-reviewer recovery prompt missing transcript delta:\n%s", prompt)
+	prompt := requests[1].Messages[0].TextContent()
+	if !strings.Contains(prompt, ">>> TRANSCRIPT START") || !strings.Contains(prompt, "Focused tests passed") {
+		t.Fatalf("same-reviewer recovery prompt missing full transcript:\n%s", prompt)
 	}
-	if strings.Contains(prompt, "Please commit the prepared fix.") {
-		t.Fatalf("same-reviewer recovery prompt repeated old transcript instead of delta:\n%s", prompt)
+	if strings.Contains(prompt, "git commit -m fix") {
+		t.Fatalf("same-reviewer recovery prompt included failed prior action:\n%s", prompt)
+	}
+}
+
+func TestApprovalReviewerDoesNotPersistGuardianPromptWhenAssistantAppendFails(t *testing.T) {
+	ctx := context.Background()
+	baseService, activeSession := newApprovalReviewerTestSession(t, ctx)
+	service := &approvalReviewerAppendFailSessionService{
+		Service:      baseService,
+		failOnAppend: 2,
+	}
+	appendApprovalReviewerTextEvent(t, ctx, baseService, activeSession, session.EventTypeUser, model.RoleUser, "Please commit the prepared fix.")
+	testModel := &approvalReviewerFakeModel{responses: []string{
+		`{"outcome":"allow","risk_level":"medium","user_authorization":"high","rationale":"commit is user requested"}`,
+		`{"outcome":"allow","risk_level":"medium","user_authorization":"high","rationale":"push is user requested"}`,
+	}}
+
+	firstReviewer := newModelApprovalReviewer(service)
+	_, err := firstReviewer.ReviewApproval(ctx, approvalReviewerTestRequest(activeSession, testModel, "git commit -m fix", map[string]any{"cmd": "git commit -m fix"}))
+	if err == nil || !strings.Contains(err.Error(), "forced guardian append failure") {
+		t.Fatalf("first ReviewApproval() error = %v, want forced append failure", err)
+	}
+	guardianRef := activeSession.SessionRef
+	guardianRef.SessionID = guardianReviewSessionID(activeSession, guardianReuseKey(testModel, guardianPolicyPrompt()))
+	guardianEvents, err := baseService.Events(ctx, session.EventsRequest{SessionRef: guardianRef})
+	if err != nil {
+		t.Fatalf("guardian Events(after failed assistant append) error = %v", err)
+	}
+	if got, want := len(guardianEvents), 0; got != want {
+		t.Fatalf("guardian event count after failed assistant append = %d, want no partial prompt", got)
+	}
+
+	appendApprovalReviewerTextEvent(t, ctx, baseService, activeSession, session.EventTypeAssistant, model.RoleAssistant, "Focused tests passed; next I will push.")
+	secondReviewer := newModelApprovalReviewer(service)
+	second, err := secondReviewer.ReviewApproval(ctx, approvalReviewerTestRequest(activeSession, testModel, "git push origin dev", map[string]any{"cmd": "git push origin dev"}))
+	if err != nil {
+		t.Fatalf("second ReviewApproval() error = %v", err)
+	}
+	if second.Trace == nil || second.Trace.SessionID != guardianRef.SessionID {
+		t.Fatalf("second trace = %#v, want recovered guardian session %q", second.Trace, guardianRef.SessionID)
+	}
+	requests := testModel.Requests()
+	if got, want := len(requests), 2; got != want {
+		t.Fatalf("model calls = %d, want failed call plus recovered call", got)
+	}
+	if got, want := len(requests[1].Messages), 1; got != want {
+		t.Fatalf("recovered guardian len(Messages) = %d, want clean first prompt after failed batch", got)
+	}
+	prompt := requests[1].Messages[0].TextContent()
+	if strings.Contains(prompt, "git commit -m fix") {
+		t.Fatalf("recovered guardian prompt included orphan prior action:\n%s", prompt)
+	}
+}
+
+func TestCompleteSystemManagedAgentEventsKeepsNonGuardianOrphanUserEvent(t *testing.T) {
+	message := model.NewTextMessage(model.RoleUser, "ordinary prompt")
+	event := &session.Event{
+		Type:    session.EventTypeUser,
+		Message: &message,
+		Text:    message.TextContent(),
+		Meta: map[string]any{
+			systemManagedAgentStateCursorEventCount:  12,
+			systemManagedAgentStateCursorLastEventID: "evt-12",
+		},
+	}
+
+	events := completeSystemManagedAgentEvents([]*session.Event{event})
+	if len(events) != 1 || events[0].Text != "ordinary prompt" {
+		t.Fatalf("completeSystemManagedAgentEvents() = %#v, want non-guardian orphan preserved", events)
 	}
 }
 
@@ -949,12 +1017,77 @@ type approvalReviewerUpdateFailSessionService struct {
 	failures int
 }
 
+func (s *approvalReviewerUpdateFailSessionService) AppendEvents(ctx context.Context, req session.AppendEventsRequest) ([]*session.Event, error) {
+	batch, ok := s.Service.(session.EventBatchService)
+	if !ok {
+		return nil, fmt.Errorf("test session service does not support AppendEvents")
+	}
+	return batch.AppendEvents(ctx, req)
+}
+
+func (s *approvalReviewerUpdateFailSessionService) AppendEventsAndUpdateState(ctx context.Context, req session.AppendEventsAndUpdateStateRequest) ([]*session.Event, error) {
+	batch, ok := s.Service.(session.EventBatchStateService)
+	if !ok {
+		return nil, fmt.Errorf("test session service does not support AppendEventsAndUpdateState")
+	}
+	wrapped := req
+	if s.failures > 0 {
+		wrapped.UpdateState = func([]*session.Event, map[string]any) (map[string]any, error) {
+			s.failures--
+			return nil, fmt.Errorf("forced guardian state update failure")
+		}
+	}
+	return batch.AppendEventsAndUpdateState(ctx, wrapped)
+}
+
 func (s *approvalReviewerUpdateFailSessionService) UpdateState(ctx context.Context, ref session.SessionRef, update func(map[string]any) (map[string]any, error)) error {
 	if s.failures > 0 {
 		s.failures--
 		return fmt.Errorf("forced guardian state update failure")
 	}
 	return s.Service.UpdateState(ctx, ref, update)
+}
+
+type approvalReviewerAppendFailSessionService struct {
+	session.Service
+	appendCalls  int
+	failOnAppend int
+}
+
+func (s *approvalReviewerAppendFailSessionService) AppendEvent(ctx context.Context, req session.AppendEventRequest) (*session.Event, error) {
+	s.appendCalls++
+	if s.failOnAppend > 0 && s.appendCalls == s.failOnAppend {
+		return nil, fmt.Errorf("forced guardian append failure")
+	}
+	return s.Service.AppendEvent(ctx, req)
+}
+
+func (s *approvalReviewerAppendFailSessionService) AppendEvents(ctx context.Context, req session.AppendEventsRequest) ([]*session.Event, error) {
+	for range req.Events {
+		s.appendCalls++
+		if s.failOnAppend > 0 && s.appendCalls == s.failOnAppend {
+			return nil, fmt.Errorf("forced guardian append failure")
+		}
+	}
+	batch, ok := s.Service.(session.EventBatchService)
+	if !ok {
+		return nil, fmt.Errorf("test session service does not support AppendEvents")
+	}
+	return batch.AppendEvents(ctx, req)
+}
+
+func (s *approvalReviewerAppendFailSessionService) AppendEventsAndUpdateState(ctx context.Context, req session.AppendEventsAndUpdateStateRequest) ([]*session.Event, error) {
+	for range req.Events {
+		s.appendCalls++
+		if s.failOnAppend > 0 && s.appendCalls == s.failOnAppend {
+			return nil, fmt.Errorf("forced guardian append failure")
+		}
+	}
+	batch, ok := s.Service.(session.EventBatchStateService)
+	if !ok {
+		return nil, fmt.Errorf("test session service does not support AppendEventsAndUpdateState")
+	}
+	return batch.AppendEventsAndUpdateState(ctx, req)
 }
 
 func (m *approvalReviewerFakeModel) Generate(ctx context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {

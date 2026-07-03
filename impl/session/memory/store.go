@@ -163,32 +163,91 @@ func (s *Store) AppendEvent(
 		return nil, session.ErrSessionNotFound
 	}
 
-	normalized := session.CanonicalizeEvent(event)
-	normalized.SessionID = record.session.SessionID
-	if normalized.Time.IsZero() {
-		normalized.Time = s.now()
-	}
-	if normalized.Type == "" {
-		normalized.Type = session.EventTypeOf(normalized)
-	}
-	if normalized.Visibility == "" {
-		normalized.Visibility = session.VisibilityCanonical
-	}
-	if err := session.ValidateDurableCoreEvent(normalized); err != nil {
+	tx, err := s.prepareAppendTransactionForRecord(record, []*session.Event{event}, nil, nil)
+	if err != nil {
 		return nil, err
 	}
-	if !shouldPersistEvent(normalized) {
-		return session.CloneEvent(normalized), nil
-	}
-	s.ensureUniqueEventID(normalized, existingEventIDSet(record.events))
-	record.events = append(record.events, normalized)
-	record.session.UpdatedAt = normalized.Time
-	if record.session.Title == "" {
-		if text := generatedTitleText(normalized); text != "" {
-			record.session.Title = truncateTitle(text)
-		}
-	}
+	normalized := tx.Prepared.Events[0]
+	s.applyAppendTransactionToRecord(record, tx)
 	return session.CloneEvent(normalized), nil
+}
+
+func (s *Store) prepareAppendTransactionForRecord(
+	record *record,
+	events []*session.Event,
+	mutate session.AppendSessionMutation,
+	updateState session.AppendStateUpdate,
+) (session.PreparedAppendTransaction, error) {
+	if record == nil {
+		return session.PreparedAppendTransaction{}, session.ErrSessionNotFound
+	}
+	return session.PrepareAppendTransaction(session.PrepareAppendTransactionRequest{
+		Session:         record.session,
+		State:           record.state,
+		Events:          events,
+		ExistingIDs:     existingEventIDSet(record.events),
+		Now:             s.now(),
+		AllocateEventID: s.ensureUniqueEventID,
+		MutateSession:   mutate,
+		UpdateState:     updateState,
+	})
+}
+
+func (s *Store) applyAppendTransactionToRecord(record *record, tx session.PreparedAppendTransaction) {
+	if record == nil || !tx.Changed {
+		return
+	}
+	record.session = session.CloneSession(tx.Session)
+	record.state = cloneState(tx.State)
+	if len(tx.Prepared.Persisted) > 0 {
+		record.events = append(record.events, session.CloneEvents(tx.Prepared.Persisted)...)
+	}
+}
+
+func (s *Store) AppendEvents(
+	_ context.Context,
+	req session.AppendEventsRequest,
+) ([]*session.Event, error) {
+	if len(req.Events) == 0 {
+		return nil, nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	record, ok := s.lookupLocked(req.SessionRef)
+	if !ok {
+		return nil, session.ErrSessionNotFound
+	}
+	tx, err := s.prepareAppendTransactionForRecord(record, req.Events, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	s.applyAppendTransactionToRecord(record, tx)
+	return session.CloneEvents(tx.Prepared.Events), nil
+}
+
+func (s *Store) AppendEventsAndUpdateState(
+	_ context.Context,
+	req session.AppendEventsAndUpdateStateRequest,
+) ([]*session.Event, error) {
+	if len(req.Events) == 0 && req.UpdateState == nil {
+		return nil, nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	record, ok := s.lookupLocked(req.SessionRef)
+	if !ok {
+		return nil, session.ErrSessionNotFound
+	}
+	tx, err := s.prepareAppendTransactionForRecord(record, req.Events, nil, req.UpdateState)
+	if err != nil {
+		return nil, err
+	}
+	s.applyAppendTransactionToRecord(record, tx)
+	return session.CloneEvents(tx.Prepared.Events), nil
 }
 
 func (s *Store) Events(
@@ -231,17 +290,37 @@ func (s *Store) PutParticipant(
 	if !ok {
 		return session.Session{}, session.ErrSessionNotFound
 	}
-	normalized := session.CloneParticipantBinding(binding)
-	for i := range record.session.Participants {
-		if record.session.Participants[i].ID == normalized.ID && normalized.ID != "" {
-			record.session.Participants[i] = normalized
-			record.session.UpdatedAt = s.now()
-			return record.cloneSession(), nil
-		}
+	if session.PutParticipantBinding(&record.session, binding) {
+		record.session.UpdatedAt = s.now()
 	}
-	record.session.Participants = append(record.session.Participants, normalized)
-	record.session.UpdatedAt = s.now()
 	return record.cloneSession(), nil
+}
+
+func (s *Store) PutParticipantWithEvent(
+	_ context.Context,
+	req session.PutParticipantWithEventRequest,
+) (session.Session, *session.Event, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	record, ok := s.lookupLocked(req.SessionRef)
+	if !ok {
+		return session.Session{}, nil, session.ErrSessionNotFound
+	}
+	tx, err := s.prepareAppendTransactionForRecord(
+		record,
+		[]*session.Event{req.Event},
+		func(activeSession *session.Session, _ session.PreparedAppendEvents) (bool, error) {
+			return session.PutParticipantBinding(activeSession, req.Binding), nil
+		},
+		nil,
+	)
+	if err != nil {
+		return session.Session{}, nil, err
+	}
+	normalizedEvent := tx.Prepared.Events[0]
+	s.applyAppendTransactionToRecord(record, tx)
+	return record.cloneSession(), session.CloneEvent(normalizedEvent), nil
 }
 
 func (s *Store) RemoveParticipant(
@@ -256,20 +335,37 @@ func (s *Store) RemoveParticipant(
 	if !ok {
 		return session.Session{}, session.ErrSessionNotFound
 	}
-	participantID = strings.TrimSpace(participantID)
-	if participantID == "" {
-		return record.cloneSession(), nil
+	if session.RemoveParticipantBinding(&record.session, participantID) {
+		record.session.UpdatedAt = s.now()
 	}
-	filtered := record.session.Participants[:0]
-	for _, item := range record.session.Participants {
-		if strings.TrimSpace(item.ID) == participantID {
-			continue
-		}
-		filtered = append(filtered, item)
-	}
-	record.session.Participants = append([]session.ParticipantBinding(nil), filtered...)
-	record.session.UpdatedAt = s.now()
 	return record.cloneSession(), nil
+}
+
+func (s *Store) RemoveParticipantWithEvent(
+	_ context.Context,
+	req session.RemoveParticipantWithEventRequest,
+) (session.Session, *session.Event, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	record, ok := s.lookupLocked(req.SessionRef)
+	if !ok {
+		return session.Session{}, nil, session.ErrSessionNotFound
+	}
+	tx, err := s.prepareAppendTransactionForRecord(
+		record,
+		[]*session.Event{req.Event},
+		func(activeSession *session.Session, _ session.PreparedAppendEvents) (bool, error) {
+			return session.RemoveParticipantBinding(activeSession, req.ParticipantID), nil
+		},
+		nil,
+	)
+	if err != nil {
+		return session.Session{}, nil, err
+	}
+	normalizedEvent := tx.Prepared.Events[0]
+	s.applyAppendTransactionToRecord(record, tx)
+	return record.cloneSession(), session.CloneEvent(normalizedEvent), nil
 }
 
 func (s *Store) SnapshotState(
@@ -376,6 +472,20 @@ func (s *Service) AppendEvent(
 	return s.store.AppendEvent(ctx, req.SessionRef, req.Event)
 }
 
+func (s *Service) AppendEvents(
+	ctx context.Context,
+	req session.AppendEventsRequest,
+) ([]*session.Event, error) {
+	return s.store.AppendEvents(ctx, req)
+}
+
+func (s *Service) AppendEventsAndUpdateState(
+	ctx context.Context,
+	req session.AppendEventsAndUpdateStateRequest,
+) ([]*session.Event, error) {
+	return s.store.AppendEventsAndUpdateState(ctx, req)
+}
+
 func (s *Service) Events(
 	ctx context.Context,
 	req session.EventsRequest,
@@ -404,11 +514,25 @@ func (s *Service) PutParticipant(
 	return s.store.PutParticipant(ctx, req.SessionRef, req.Binding)
 }
 
+func (s *Service) PutParticipantWithEvent(
+	ctx context.Context,
+	req session.PutParticipantWithEventRequest,
+) (session.Session, *session.Event, error) {
+	return s.store.PutParticipantWithEvent(ctx, req)
+}
+
 func (s *Service) RemoveParticipant(
 	ctx context.Context,
 	req session.RemoveParticipantRequest,
 ) (session.Session, error) {
 	return s.store.RemoveParticipant(ctx, req.SessionRef, req.ParticipantID)
+}
+
+func (s *Service) RemoveParticipantWithEvent(
+	ctx context.Context,
+	req session.RemoveParticipantWithEventRequest,
+) (session.Session, *session.Event, error) {
+	return s.store.RemoveParticipantWithEvent(ctx, req)
 }
 
 func (s *Service) SnapshotState(
@@ -521,10 +645,6 @@ func existingEventIDSet(events []*session.Event) map[string]struct{} {
 	return out
 }
 
-func shouldPersistEvent(event *session.Event) bool {
-	return event != nil && !session.IsTransient(event)
-}
-
 func cloneState(state map[string]any) map[string]any {
 	out := session.CloneState(state)
 	if out == nil {
@@ -535,37 +655,4 @@ func cloneState(state map[string]any) map[string]any {
 
 func (s *Store) now() time.Time {
 	return s.clock()
-}
-
-func truncateTitle(text string) string {
-	text = strings.TrimSpace(text)
-	if len(text) > 80 {
-		return text[:80]
-	}
-	return text
-}
-
-func generatedTitleText(event *session.Event) string {
-	if event == nil || titleHiddenEvent(event) {
-		return ""
-	}
-	return session.EventDisplayText(event)
-}
-
-func titleHiddenEvent(event *session.Event) bool {
-	if event == nil {
-		return false
-	}
-	return hiddenTranscriptMeta(event.Meta["hidden_from_transcript"]) || event.Meta["source"] == "plugin_hook"
-}
-
-func hiddenTranscriptMeta(value any) bool {
-	switch typed := value.(type) {
-	case bool:
-		return typed
-	case string:
-		return strings.EqualFold(strings.TrimSpace(typed), "true")
-	default:
-		return false
-	}
 }

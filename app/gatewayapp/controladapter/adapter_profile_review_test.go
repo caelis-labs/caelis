@@ -3,6 +3,7 @@ package controladapter
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -382,6 +383,59 @@ func (g *reviewProfileGatewayService) PromptParticipant(_ context.Context, req g
 	return gateway.BeginTurnResult{Session: session.CloneSession(g.session), Handle: g.handle}, nil
 }
 
+func (g *reviewProfileGatewayService) StartParticipant(ctx context.Context, req gateway.StartParticipantRequest) (gateway.BeginTurnResult, error) {
+	updated, err := g.AttachParticipant(ctx, gateway.AttachParticipantRequest{
+		SessionRef: req.SessionRef,
+		BindingKey: req.BindingKey,
+		Agent:      req.Agent,
+		Role:       req.Role,
+		Source:     req.Source,
+		Label:      req.Label,
+	})
+	if err != nil {
+		return gateway.BeginTurnResult{}, err
+	}
+	result, err := g.PromptParticipant(ctx, gateway.PromptParticipantRequest{
+		SessionRef:    updated.SessionRef,
+		BindingKey:    req.BindingKey,
+		ParticipantID: "side-reviewer",
+		Input:         req.Input,
+		DisplayInput:  req.DisplayInput,
+		DisplayTitle:  req.DisplayTitle,
+		ContentParts:  req.ContentParts,
+		Source:        req.Source,
+	})
+	if err != nil {
+		_, _ = g.DetachParticipant(ctx, gateway.DetachParticipantRequest{
+			SessionRef:    updated.SessionRef,
+			BindingKey:    req.BindingKey,
+			ParticipantID: "side-reviewer",
+			Source:        "side_agent_prompt_rollback",
+		})
+		return gateway.BeginTurnResult{}, err
+	}
+	if req.Lifecycle == gateway.ParticipantLifecycleTransient {
+		if result.Handle == nil {
+			_, _ = g.DetachParticipant(ctx, gateway.DetachParticipantRequest{
+				SessionRef:    updated.SessionRef,
+				BindingKey:    req.BindingKey,
+				ParticipantID: "side-reviewer",
+				Source:        firstNonEmpty(req.DetachSource, "side_agent_complete"),
+			})
+		} else if handle, ok := result.Handle.(*reviewProfileHandle); ok {
+			handle.onFinish(func() {
+				_, _ = g.DetachParticipant(ctx, gateway.DetachParticipantRequest{
+					SessionRef:    updated.SessionRef,
+					BindingKey:    req.BindingKey,
+					ParticipantID: "side-reviewer",
+					Source:        firstNonEmpty(req.DetachSource, "side_agent_complete"),
+				})
+			})
+		}
+	}
+	return result, nil
+}
+
 func (g *reviewProfileGatewayService) DetachParticipant(_ context.Context, req gateway.DetachParticipantRequest) (session.Session, error) {
 	g.detachReqs = append(g.detachReqs, req)
 	kept := g.session.Participants[:0]
@@ -405,25 +459,31 @@ func drainReviewProfileTurnEvents(t *testing.T, turn Turn) []eventstream.Envelop
 }
 
 type reviewProfileHandle struct {
-	ref       session.SessionRef
-	acpEvents chan eventstream.Envelope
+	ref         session.SessionRef
+	acpEvents   chan eventstream.Envelope
+	mu          sync.Mutex
+	finished    bool
+	finishHooks []func()
 }
 
 func reviewProfileTurnHandle(ref session.SessionRef) *reviewProfileHandle {
-	events := make(chan eventstream.Envelope, 1)
-	events <- eventstream.Envelope{
-		Kind:    eventstream.KindSessionUpdate,
-		Scope:   eventstream.ScopeParticipant,
-		ScopeID: "side-reviewer",
-		Actor:   "@reviewer",
-		Final:   true,
-		Update: schema.ContentChunk{
-			SessionUpdate: schema.UpdateAgentMessage,
-			Content:       schema.TextContent{Type: "text", Text: "findings"},
-		},
-	}
-	close(events)
-	return &reviewProfileHandle{ref: ref, acpEvents: events}
+	handle := &reviewProfileHandle{ref: ref, acpEvents: make(chan eventstream.Envelope, 1)}
+	go func() {
+		defer close(handle.acpEvents)
+		defer handle.finish()
+		handle.acpEvents <- eventstream.Envelope{
+			Kind:    eventstream.KindSessionUpdate,
+			Scope:   eventstream.ScopeParticipant,
+			ScopeID: "side-reviewer",
+			Actor:   "@reviewer",
+			Final:   true,
+			Update: schema.ContentChunk{
+				SessionUpdate: schema.UpdateAgentMessage,
+				Content:       schema.TextContent{Type: "text", Text: "findings"},
+			},
+		}
+	}()
+	return handle
 }
 
 func (h *reviewProfileHandle) HandleID() string { return "review-handle" }
@@ -443,3 +503,32 @@ func (h *reviewProfileHandle) Cancel() agent.CancelResult {
 	return agent.CancelResult{}
 }
 func (h *reviewProfileHandle) Close() error { return nil }
+
+func (h *reviewProfileHandle) onFinish(fn func()) {
+	if fn == nil {
+		return
+	}
+	h.mu.Lock()
+	if h.finished {
+		h.mu.Unlock()
+		fn()
+		return
+	}
+	h.finishHooks = append(h.finishHooks, fn)
+	h.mu.Unlock()
+}
+
+func (h *reviewProfileHandle) finish() {
+	h.mu.Lock()
+	if h.finished {
+		h.mu.Unlock()
+		return
+	}
+	h.finished = true
+	hooks := append([]func(){}, h.finishHooks...)
+	h.finishHooks = nil
+	h.mu.Unlock()
+	for _, hook := range hooks {
+		hook()
+	}
+}

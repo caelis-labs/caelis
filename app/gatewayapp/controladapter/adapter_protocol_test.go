@@ -193,6 +193,9 @@ func (g *protocolGatewayService) AttachParticipant(context.Context, gateway.Atta
 func (g *protocolGatewayService) PromptParticipant(context.Context, gateway.PromptParticipantRequest) (gateway.BeginTurnResult, error) {
 	return gateway.BeginTurnResult{}, nil
 }
+func (g *protocolGatewayService) StartParticipant(context.Context, gateway.StartParticipantRequest) (gateway.BeginTurnResult, error) {
+	return gateway.BeginTurnResult{}, nil
+}
 func (g *protocolGatewayService) DetachParticipant(context.Context, gateway.DetachParticipantRequest) (session.Session, error) {
 	return session.Session{}, nil
 }

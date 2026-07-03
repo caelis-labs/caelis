@@ -809,6 +809,7 @@ func TestModelContextRoundTripsThroughSessionStore(t *testing.T) {
 		t.Fatalf("StartSession() error = %v", err)
 	}
 
+	contextMessage := model.NewTextMessage(model.RoleUser, "[Plugin context: prompt-plugin]\nprefer concise answers")
 	user := model.NewTextMessage(model.RoleUser, "inspect both values")
 	appendEvent := func(event *session.Event) {
 		t.Helper()
@@ -819,6 +820,13 @@ func TestModelContextRoundTripsThroughSessionStore(t *testing.T) {
 			t.Fatalf("AppendEvent() error = %v", err)
 		}
 	}
+	appendEvent(&session.Event{
+		Type:       session.EventTypeContext,
+		Visibility: session.VisibilityCanonical,
+		Message:    &contextMessage,
+		Text:       contextMessage.TextContent(),
+		Meta:       map[string]any{"source": "plugin_hook"},
+	})
 	appendEvent(&session.Event{Type: session.EventTypeUser, Message: &user})
 
 	assistant := model.MessageFromAssistantParts("I will inspect both values.", "Need both tool results.", []model.ToolCall{{
@@ -848,20 +856,23 @@ func TestModelContextRoundTripsThroughSessionStore(t *testing.T) {
 		Events:  loaded.Events,
 	})
 	messages := messagesFromContext(ctx)
-	if got, want := len(messages), 4; got != want {
+	if got, want := len(messages), 5; got != want {
 		t.Fatalf("len(messages) = %d, want %d: %#v", got, want, messages)
 	}
-	if got := messages[0].TextContent(); got != "inspect both values" {
+	if got := messages[0].TextContent(); !strings.Contains(got, "prefer concise answers") {
+		t.Fatalf("context text = %q, want durable plugin context", got)
+	}
+	if got := messages[1].TextContent(); got != "inspect both values" {
 		t.Fatalf("user text = %q, want original text", got)
 	}
-	if got := messages[1].ReasoningText(); got != "Need both tool results." {
+	if got := messages[2].ReasoningText(); got != "Need both tool results." {
 		t.Fatalf("assistant reasoning = %q, want original reasoning", got)
 	}
-	calls := messages[1].ToolCalls()
+	calls := messages[2].ToolCalls()
 	if len(calls) != 2 || calls[0].ThoughtSignature != "sig-one" || calls[1].ThoughtSignature != "sig-two" {
 		t.Fatalf("assistant tool calls = %#v, want calls with replay signatures", calls)
 	}
-	if got := len(messages[2].ToolResults()) + len(messages[3].ToolResults()); got != 2 {
+	if got := len(messages[3].ToolResults()) + len(messages[4].ToolResults()); got != 2 {
 		t.Fatalf("tool result count = %d, want 2", got)
 	}
 }

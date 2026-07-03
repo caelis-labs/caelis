@@ -23,36 +23,41 @@ func (s *Store) eventsForDocument(doc persistedDocument) ([]*session.Event, erro
 }
 
 func (s *Store) appendEventLog(documentPath string, events []*session.Event) error {
+	_, err := s.appendEventLogTransaction(documentPath, events)
+	return err
+}
+
+func (s *Store) appendEventLogTransaction(documentPath string, events []*session.Event) (func() error, error) {
 	events = persistedEvents(events)
 	if len(events) == 0 {
-		return nil
+		return func() error { return nil }, nil
 	}
 	path := eventLogPath(documentPath)
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
+		return nil, err
 	}
 	if err := os.Chmod(dir, 0o700); err != nil {
-		return err
+		return nil, err
 	}
 	if err := truncatePartialEventLogTail(path); err != nil {
-		return err
+		return nil, err
 	}
 	var buf bytes.Buffer
 	encoder := json.NewEncoder(&buf)
 	for _, event := range events {
 		if err := encoder.Encode(session.CloneEvent(event)); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o600)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	offset, err := file.Seek(0, io.SeekEnd)
 	if err != nil {
 		file.Close()
-		return err
+		return nil, err
 	}
 	written, err := file.Write(buf.Bytes())
 	if err != nil || written != buf.Len() {
@@ -62,20 +67,49 @@ func (s *Store) appendEventLog(documentPath string, events []*session.Event) err
 		_ = file.Truncate(offset)
 		_ = file.Sync()
 		file.Close()
-		return err
+		return nil, err
 	}
 	if err := file.Sync(); err != nil {
 		_ = file.Truncate(offset)
+		file.Close()
+		return nil, err
+	}
+	if err := file.Close(); err != nil {
+		return nil, err
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		_ = rollbackEventLogAppend(path, offset)
+		return nil, err
+	}
+	if err := syncDir(dir); err != nil {
+		_ = rollbackEventLogAppend(path, offset)
+		return nil, err
+	}
+	return func() error {
+		return rollbackEventLogAppend(path, offset)
+	}, nil
+}
+
+func rollbackEventLogAppend(path string, offset int64) error {
+	file, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		if os.IsNotExist(err) && offset == 0 {
+			return nil
+		}
+		return err
+	}
+	if err := file.Truncate(offset); err != nil {
+		file.Close()
+		return err
+	}
+	if err := file.Sync(); err != nil {
 		file.Close()
 		return err
 	}
 	if err := file.Close(); err != nil {
 		return err
 	}
-	if err := os.Chmod(path, 0o600); err != nil {
-		return err
-	}
-	return syncDir(dir)
+	return syncDir(filepath.Dir(path))
 }
 
 func (s *Store) readEventLog(documentPath string) ([]*session.Event, error) {
@@ -109,6 +143,7 @@ func (s *Store) readEventLog(documentPath string) ([]*session.Event, error) {
 				}
 				return nil, fmt.Errorf("impl/session/file: decode event log %s: %w", path, err)
 			}
+			event = normalizeLegacyEventLogEvent(event)
 			if err := session.ValidateDurableCoreEvent(&event); err != nil {
 				return nil, fmt.Errorf("impl/session/file: invalid event log %s line %d: %w", path, lineNo, err)
 			}
@@ -207,6 +242,25 @@ func (s *Store) readEventLogIDs(documentPath string) (map[string]bool, error) {
 		}
 	}
 	return ids, nil
+}
+
+func normalizeLegacyEventLogEvent(event session.Event) session.Event {
+	if session.EventTypeOf(&event) != session.EventTypeCustom || event.Message == nil {
+		return event
+	}
+	if !legacyPluginContextEvent(&event) {
+		return event
+	}
+	event.Type = session.EventTypeContext
+	return event
+}
+
+func legacyPluginContextEvent(event *session.Event) bool {
+	if event == nil {
+		return false
+	}
+	source := strings.TrimSpace(fmt.Sprint(event.Meta["source"]))
+	return strings.EqualFold(source, "plugin_hook")
 }
 
 func eventLogPath(documentPath string) string {

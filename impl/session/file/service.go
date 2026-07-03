@@ -34,6 +34,20 @@ func (s *Service) AppendEvent(
 	return s.store.AppendEvent(ctx, req.SessionRef, req.Event)
 }
 
+func (s *Service) AppendEvents(
+	ctx context.Context,
+	req session.AppendEventsRequest,
+) ([]*session.Event, error) {
+	return s.store.AppendEvents(ctx, req)
+}
+
+func (s *Service) AppendEventsAndUpdateState(
+	ctx context.Context,
+	req session.AppendEventsAndUpdateStateRequest,
+) ([]*session.Event, error) {
+	return s.store.AppendEventsAndUpdateState(ctx, req)
+}
+
 func (s *Service) Events(
 	ctx context.Context,
 	req session.EventsRequest,
@@ -62,11 +76,25 @@ func (s *Service) PutParticipant(
 	return s.store.PutParticipant(ctx, req.SessionRef, req.Binding)
 }
 
+func (s *Service) PutParticipantWithEvent(
+	ctx context.Context,
+	req session.PutParticipantWithEventRequest,
+) (session.Session, *session.Event, error) {
+	return s.store.PutParticipantWithEvent(ctx, req)
+}
+
 func (s *Service) RemoveParticipant(
 	ctx context.Context,
 	req session.RemoveParticipantRequest,
 ) (session.Session, error) {
 	return s.store.RemoveParticipant(ctx, req.SessionRef, req.ParticipantID)
+}
+
+func (s *Service) RemoveParticipantWithEvent(
+	ctx context.Context,
+	req session.RemoveParticipantWithEventRequest,
+) (session.Session, *session.Event, error) {
+	return s.store.RemoveParticipantWithEvent(ctx, req)
 }
 
 func (s *Service) SnapshotState(

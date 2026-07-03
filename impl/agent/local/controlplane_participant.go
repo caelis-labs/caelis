@@ -2,6 +2,7 @@ package local
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -26,6 +27,10 @@ func (r *Runtime) AttachParticipant(ctx context.Context, req agent.AttachPartici
 	if err != nil {
 		return session.Session{}, err
 	}
+	lifecycle, ok := r.sessions.(session.ParticipantLifecycleService)
+	if !ok {
+		return session.Session{}, fmt.Errorf("impl/agent/local: participant lifecycle store does not support atomic event persistence")
+	}
 	binding, err := r.controllers.Attach(ctx, controller.AttachRequest{
 		SessionRef: ref,
 		Session:    activeSession,
@@ -37,20 +42,22 @@ func (r *Runtime) AttachParticipant(ctx context.Context, req agent.AttachPartici
 	if err != nil {
 		return session.Session{}, err
 	}
-	activeSession, err = r.sessions.PutParticipant(ctx, session.PutParticipantRequest{
+	lifecycleEvent := participantLifecycleEvent(activeSession, binding, "attached", r.now())
+	activeSession, _, err = lifecycle.PutParticipantWithEvent(ctx, session.PutParticipantWithEventRequest{
 		SessionRef: ref,
 		Binding:    binding,
+		Event:      lifecycleEvent,
 	})
 	if err != nil {
+		_ = r.controllers.Detach(context.WithoutCancel(ctx), controller.DetachRequest{
+			SessionRef:    ref,
+			Session:       activeSession,
+			ParticipantID: strings.TrimSpace(binding.ID),
+			Source:        strings.TrimSpace(req.Source),
+		})
 		return session.Session{}, err
 	}
-	if _, err := r.sessions.AppendEvent(ctx, session.AppendEventRequest{
-		SessionRef: ref,
-		Event:      participantLifecycleEvent(activeSession, binding, "attached", r.now()),
-	}); err != nil {
-		return session.Session{}, err
-	}
-	return r.sessions.Session(ctx, ref)
+	return activeSession, nil
 }
 
 func (r *Runtime) DetachParticipant(ctx context.Context, req agent.DetachParticipantRequest) (session.Session, error) {
@@ -66,6 +73,10 @@ func (r *Runtime) DetachParticipant(ctx context.Context, req agent.DetachPartici
 	if err != nil {
 		return session.Session{}, err
 	}
+	lifecycle, ok := r.sessions.(session.ParticipantLifecycleService)
+	if !ok {
+		return session.Session{}, fmt.Errorf("impl/agent/local: participant lifecycle store does not support atomic event persistence")
+	}
 	binding, _ := participantBinding(activeSession, req.ParticipantID)
 	if err := r.controllers.Detach(ctx, controller.DetachRequest{
 		SessionRef:    ref,
@@ -75,20 +86,37 @@ func (r *Runtime) DetachParticipant(ctx context.Context, req agent.DetachPartici
 	}); err != nil {
 		return session.Session{}, err
 	}
-	activeSession, err = r.sessions.RemoveParticipant(ctx, session.RemoveParticipantRequest{
+	if binding.ID != "" {
+		lifecycleEvent := participantLifecycleEvent(activeSession, binding, "detached", r.now())
+		updatedSession, _, err := lifecycle.RemoveParticipantWithEvent(ctx, session.RemoveParticipantWithEventRequest{
+			SessionRef:    ref,
+			ParticipantID: strings.TrimSpace(req.ParticipantID),
+			Event:         lifecycleEvent,
+		})
+		if err != nil {
+			_, reattachErr := r.controllers.Attach(context.WithoutCancel(ctx), controller.AttachRequest{
+				SessionRef: ref,
+				Session:    activeSession,
+				Binding:    binding,
+				Agent:      acpParticipantAgentName(binding),
+				Role:       binding.Role,
+				Source:     strings.TrimSpace(req.Source),
+				Label:      binding.Label,
+			})
+			if reattachErr != nil {
+				return session.Session{}, errors.Join(err, reattachErr)
+			}
+			return session.Session{}, err
+		}
+		activeSession = updatedSession
+		return activeSession, nil
+	}
+	_, err = r.sessions.RemoveParticipant(ctx, session.RemoveParticipantRequest{
 		SessionRef:    ref,
 		ParticipantID: strings.TrimSpace(req.ParticipantID),
 	})
 	if err != nil {
 		return session.Session{}, err
-	}
-	if binding.ID != "" {
-		if _, err := r.sessions.AppendEvent(ctx, session.AppendEventRequest{
-			SessionRef: ref,
-			Event:      participantLifecycleEvent(activeSession, binding, "detached", r.now()),
-		}); err != nil {
-			return session.Session{}, err
-		}
 	}
 	return r.sessions.Session(ctx, ref)
 }

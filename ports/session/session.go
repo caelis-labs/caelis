@@ -40,6 +40,7 @@ const (
 	EventTypeNotice      EventType = "notice"
 	EventTypeLifecycle   EventType = "lifecycle"
 	EventTypeSystem      EventType = "system"
+	EventTypeContext     EventType = "context"
 	EventTypeCustom      EventType = "custom"
 )
 
@@ -190,6 +191,22 @@ type AppendEventRequest struct {
 	Event      *Event     `json:"event"`
 }
 
+// AppendEventsRequest appends multiple events to one session as one batch.
+// Implementations must validate the full batch before making any event durable.
+type AppendEventsRequest struct {
+	SessionRef SessionRef `json:"session_ref"`
+	Events     []*Event   `json:"events"`
+}
+
+// AppendEventsAndUpdateStateRequest appends multiple events and derives the
+// next session state in one store transaction. UpdateState receives the
+// normalized events that will be returned to the caller.
+type AppendEventsAndUpdateStateRequest struct {
+	SessionRef  SessionRef
+	Events      []*Event
+	UpdateState func(storedEvents []*Event, state map[string]any) (map[string]any, error)
+}
+
 // EventsRequest lists events for one session.
 type EventsRequest struct {
 	SessionRef       SessionRef `json:"session_ref"`
@@ -213,6 +230,22 @@ type PutParticipantRequest struct {
 type RemoveParticipantRequest struct {
 	SessionRef    SessionRef `json:"session_ref"`
 	ParticipantID string     `json:"participant_id,omitempty"`
+}
+
+// PutParticipantWithEventRequest creates or updates one participant binding and
+// appends the matching lifecycle event in one store transaction.
+type PutParticipantWithEventRequest struct {
+	SessionRef SessionRef         `json:"session_ref"`
+	Binding    ParticipantBinding `json:"binding"`
+	Event      *Event             `json:"event"`
+}
+
+// RemoveParticipantWithEventRequest removes one participant binding and appends
+// the matching lifecycle event in one store transaction.
+type RemoveParticipantWithEventRequest struct {
+	SessionRef    SessionRef `json:"session_ref"`
+	ParticipantID string     `json:"participant_id,omitempty"`
+	Event         *Event     `json:"event"`
 }
 
 // ListSessionsRequest lists sessions in one workspace or user namespace.
@@ -301,4 +334,23 @@ type Service interface {
 	SnapshotState(context.Context, SessionRef) (map[string]any, error)
 	ReplaceState(context.Context, SessionRef, map[string]any) error
 	UpdateState(context.Context, SessionRef, func(map[string]any) (map[string]any, error)) error
+}
+
+// ParticipantLifecycleService is implemented by stores that can atomically
+// change participant bindings and append their replayable lifecycle events.
+type ParticipantLifecycleService interface {
+	PutParticipantWithEvent(context.Context, PutParticipantWithEventRequest) (Session, *Event, error)
+	RemoveParticipantWithEvent(context.Context, RemoveParticipantWithEventRequest) (Session, *Event, error)
+}
+
+// EventBatchService is implemented by stores that can validate and append a
+// batch of events without exposing partially appended durable history.
+type EventBatchService interface {
+	AppendEvents(context.Context, AppendEventsRequest) ([]*Event, error)
+}
+
+// EventBatchStateService is implemented by stores that can append an event
+// batch and update session state without exposing only one side of the commit.
+type EventBatchStateService interface {
+	AppendEventsAndUpdateState(context.Context, AppendEventsAndUpdateStateRequest) ([]*Event, error)
 }

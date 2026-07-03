@@ -46,6 +46,7 @@ type Store struct {
 	clock              func() time.Time
 	idCounter          atomic.Uint64
 	pathCache          map[string]string
+	writeDocumentFault func() error
 }
 
 // Service is the file-backed implementation of session.Service.

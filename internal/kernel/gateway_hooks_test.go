@@ -124,8 +124,8 @@ func TestSessionStartHookRunsOnceAndPersists(t *testing.T) {
 	if ev.Visibility != session.VisibilityCanonical {
 		t.Errorf("expected VisibilityCanonical, got %q", ev.Visibility)
 	}
-	if ev.Type != session.EventTypeCustom {
-		t.Fatalf("event type = %q, want custom", ev.Type)
+	if ev.Type != session.EventTypeContext {
+		t.Fatalf("event type = %q, want context", ev.Type)
 	}
 	msg, ok := session.ModelMessageOf(ev)
 	if !ok {

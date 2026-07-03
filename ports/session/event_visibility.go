@@ -57,6 +57,9 @@ func IsMainInvocationVisibleEvent(event *Event) bool {
 	if !IsInvocationVisibleEvent(event) {
 		return false
 	}
+	if EventTypeOf(event) == EventTypeContext {
+		return true
+	}
 	if event.Scope == nil {
 		return true
 	}

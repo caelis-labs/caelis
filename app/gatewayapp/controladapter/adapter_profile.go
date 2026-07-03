@@ -30,14 +30,14 @@ func (d *Adapter) StartReviewSubagent(ctx context.Context, instructions string, 
 	}
 	prompt, attachmentOffset := gatewayapp.ReviewSubagentPromptForProfileTarget(instructions, agentprofile.BindingTargetKind(profile.Target))
 	return d.startSidecarTurn(ctx, startSidecarTurnRequest{
-		Agent:            profile.ID,
-		LabelBase:        reviewSidecarLabelBase(profile),
-		Prompt:           prompt,
-		DisplayInput:     displayInputWithAttachments(instructions, attachments),
-		DisplayTitle:     reviewDisplayTitle(instructions),
-		Attachments:      shiftControlAttachments(attachments, attachmentOffset),
-		Source:           "slash_review",
-		DetachOnComplete: true,
+		Agent:        profile.ID,
+		LabelBase:    reviewSidecarLabelBase(profile),
+		Prompt:       prompt,
+		DisplayInput: displayInputWithAttachments(instructions, attachments),
+		DisplayTitle: reviewDisplayTitle(instructions),
+		Attachments:  shiftControlAttachments(attachments, attachmentOffset),
+		Source:       "slash_review",
+		Transient:    true,
 	})
 }
 

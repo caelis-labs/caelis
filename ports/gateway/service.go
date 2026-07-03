@@ -38,6 +38,7 @@ type ControlPlaneService interface {
 	HandoffController(context.Context, HandoffControllerRequest) (session.Session, error)
 	AttachParticipant(context.Context, AttachParticipantRequest) (session.Session, error)
 	PromptParticipant(context.Context, PromptParticipantRequest) (BeginTurnResult, error)
+	StartParticipant(context.Context, StartParticipantRequest) (BeginTurnResult, error)
 	DetachParticipant(context.Context, DetachParticipantRequest) (session.Session, error)
 }
 

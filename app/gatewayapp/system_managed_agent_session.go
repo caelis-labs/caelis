@@ -153,6 +153,7 @@ func (c *systemManagedAgentSessionCache) load(ctx context.Context, req systemMan
 		if err != nil {
 			return nil, err
 		}
+		events = completeSystemManagedAgentEvents(events)
 		cursor = systemManagedAgentCursorFromState(state)
 		if cursor.EventCount == 0 {
 			cursor = systemManagedAgentCursorFromEvents(events)
@@ -173,6 +174,39 @@ func (c *systemManagedAgentSessionCache) load(ctx context.Context, req systemMan
 		events:   session.CloneEvents(events),
 		cursor:   cursor,
 	}, nil
+}
+
+func completeSystemManagedAgentEvents(events []*session.Event) []*session.Event {
+	if len(events) == 0 {
+		return nil
+	}
+	// One-release recovery shim for pre-batch guardian histories: keep only
+	// explicitly annotated prompt/assistant pairs now that new commits use
+	// AppendEventsAndUpdateState. Remove after the first release that can no
+	// longer load non-atomic guardian prompt writes from prior builds.
+	out := make([]*session.Event, 0, len(events))
+	for i := 0; i < len(events); i++ {
+		event := events[i]
+		if !isSystemManagedAgentPromptEvent(event) {
+			out = append(out, event)
+			continue
+		}
+		if i+1 >= len(events) || session.EventTypeOf(events[i+1]) != session.EventTypeAssistant {
+			continue
+		}
+		out = append(out, event, events[i+1])
+		i++
+	}
+	return out
+}
+
+func isSystemManagedAgentPromptEvent(event *session.Event) bool {
+	if event == nil || session.EventTypeOf(event) != session.EventTypeUser {
+		return false
+	}
+	return systemManagedAgentStateString(event.Meta, systemManagedAgentStateAgentID) == guardianProfileID &&
+		systemManagedAgentStateString(event.Meta, systemManagedAgentStatePurpose) == string(systemManagedAgentPurposeApprovalReview) &&
+		systemManagedAgentStateString(event.Meta, systemManagedAgentStateReuseKey) != ""
 }
 
 func (c *systemManagedAgentSessionCache) start(ctx context.Context, req systemManagedAgentSessionRequest) (session.Session, error) {
@@ -224,45 +258,53 @@ func (s *systemManagedAgentSession) commit(
 	if service == nil {
 		return nil, false, fmt.Errorf("approval reviewer requires session history")
 	}
+	batch, ok := service.(session.EventBatchStateService)
+	if !ok {
+		return nil, false, fmt.Errorf("approval reviewer requires atomic session event/state batch support")
+	}
 	promptToStore := session.CloneEvent(promptEvent)
 	annotateSystemManagedAgentPromptState(promptToStore, s.agentID, s.purpose, s.reuseKey, cursor)
-	storedPrompt, err := service.AppendEvent(ctx, session.AppendEventRequest{
+	storedEvents, err := batch.AppendEventsAndUpdateState(ctx, session.AppendEventsAndUpdateStateRequest{
 		SessionRef: s.session.SessionRef,
-		Event:      promptToStore,
+		Events: []*session.Event{
+			promptToStore,
+			session.CloneEvent(assistantEvent),
+		},
+		UpdateState: func(storedEvents []*session.Event, state map[string]any) (map[string]any, error) {
+			if len(storedEvents) != 2 {
+				return nil, fmt.Errorf("approval reviewer stored %d events, want prompt and assistant", len(storedEvents))
+			}
+			storedPrompt := storedEvents[0]
+			storedAssistant := storedEvents[1]
+			next := session.CloneState(state)
+			if next == nil {
+				next = map[string]any{}
+			}
+			next[systemManagedAgentStateAgentID] = strings.TrimSpace(s.agentID)
+			next[systemManagedAgentStatePurpose] = strings.TrimSpace(string(s.purpose))
+			next[systemManagedAgentStateParentSessionID] = firstNonEmpty(
+				systemManagedAgentStateString(s.session.Metadata, systemManagedAgentStateParentSessionID),
+				systemManagedAgentStateString(s.session.Metadata, "parent_session_id"),
+			)
+			next[systemManagedAgentStateReuseKey] = strings.TrimSpace(s.reuseKey)
+			next[systemManagedAgentStateCursorEventCount] = cursor.EventCount
+			next[systemManagedAgentStateCursorLastEventID] = strings.TrimSpace(cursor.LastEventID)
+			next[systemManagedAgentStateLastPromptEventID] = strings.TrimSpace(storedPrompt.ID)
+			next[systemManagedAgentStateLastAssistantEventID] = strings.TrimSpace(storedAssistant.ID)
+			return next, nil
+		},
 	})
 	if err != nil {
 		return nil, false, err
 	}
-	storedAssistant, err := service.AppendEvent(ctx, session.AppendEventRequest{
-		SessionRef: s.session.SessionRef,
-		Event:      session.CloneEvent(assistantEvent),
-	})
-	if err != nil {
-		return nil, false, err
+	if len(storedEvents) != 2 {
+		return nil, false, fmt.Errorf("approval reviewer stored %d events, want prompt and assistant", len(storedEvents))
 	}
+	storedPrompt := storedEvents[0]
+	storedAssistant := storedEvents[1]
 	s.events = append(s.events, session.CloneEvent(storedPrompt), session.CloneEvent(storedAssistant))
 	s.cursor = cursor
 	s.version++
-	if err := service.UpdateState(ctx, s.session.SessionRef, func(state map[string]any) (map[string]any, error) {
-		next := session.CloneState(state)
-		if next == nil {
-			next = map[string]any{}
-		}
-		next[systemManagedAgentStateAgentID] = strings.TrimSpace(s.agentID)
-		next[systemManagedAgentStatePurpose] = strings.TrimSpace(string(s.purpose))
-		next[systemManagedAgentStateParentSessionID] = firstNonEmpty(
-			systemManagedAgentStateString(s.session.Metadata, systemManagedAgentStateParentSessionID),
-			systemManagedAgentStateString(s.session.Metadata, "parent_session_id"),
-		)
-		next[systemManagedAgentStateReuseKey] = strings.TrimSpace(s.reuseKey)
-		next[systemManagedAgentStateCursorEventCount] = cursor.EventCount
-		next[systemManagedAgentStateCursorLastEventID] = strings.TrimSpace(cursor.LastEventID)
-		next[systemManagedAgentStateLastPromptEventID] = strings.TrimSpace(storedPrompt.ID)
-		next[systemManagedAgentStateLastAssistantEventID] = strings.TrimSpace(storedAssistant.ID)
-		return next, nil
-	}); err != nil {
-		return nil, false, err
-	}
 	trace := &gateway.ApprovalReviewTrace{
 		SessionID:        strings.TrimSpace(s.session.SessionID),
 		PromptEventID:    strings.TrimSpace(storedPrompt.ID),

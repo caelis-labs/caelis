@@ -146,6 +146,30 @@ type PromptParticipantRequest struct {
 	Source        string
 }
 
+// ParticipantLifecycle controls whether one started participant remains
+// attached after the first prompt turn or detaches when that turn finishes.
+type ParticipantLifecycle string
+
+const (
+	ParticipantLifecyclePersistent ParticipantLifecycle = "persistent"
+	ParticipantLifecycleTransient  ParticipantLifecycle = "transient"
+)
+
+type StartParticipantRequest struct {
+	SessionRef   session.SessionRef
+	BindingKey   string
+	Agent        string
+	Role         session.ParticipantRole
+	Label        string
+	Input        string
+	DisplayInput string
+	DisplayTitle string
+	ContentParts []model.ContentPart
+	Source       string
+	Lifecycle    ParticipantLifecycle
+	DetachSource string
+}
+
 type ControlPlaneStateRequest struct {
 	SessionRef session.SessionRef
 	BindingKey string

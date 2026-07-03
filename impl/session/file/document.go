@@ -2,6 +2,7 @@ package file
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -85,6 +86,30 @@ func rejectUnsupportedLegacyDocument(data []byte, path string) error {
 	return fmt.Errorf("impl/session/file: %w: session document %s has legacy embedded events", session.ErrUnsupportedLegacyFormat, path)
 }
 
+type committedDocumentWriteError struct {
+	err error
+}
+
+func (e *committedDocumentWriteError) Error() string {
+	return e.err.Error()
+}
+
+func (e *committedDocumentWriteError) Unwrap() error {
+	return e.err
+}
+
+func documentWriteCommitted(err error) bool {
+	var committed *committedDocumentWriteError
+	return errors.As(err, &committed)
+}
+
+func committedDocumentWrite(err error) error {
+	if err == nil {
+		return nil
+	}
+	return &committedDocumentWriteError{err: err}
+}
+
 func (s *Store) writeDocument(doc persistedDocument) error {
 	doc.Kind = documentKind
 	doc.Version = documentVersion
@@ -100,6 +125,11 @@ func (s *Store) writeDocument(doc persistedDocument) error {
 	path, err := s.resolveWritePath(doc.Session)
 	if err != nil {
 		return err
+	}
+	if s.writeDocumentFault != nil {
+		if err := s.writeDocumentFault(); err != nil {
+			return err
+		}
 	}
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -129,14 +159,14 @@ func (s *Store) writeDocument(doc persistedDocument) error {
 		return err
 	}
 	if err := os.Chmod(path, 0o600); err != nil {
-		return err
+		return committedDocumentWrite(err)
 	}
 	if err := syncDir(dir); err != nil {
-		return err
+		return committedDocumentWrite(err)
 	}
 	s.pathCache[pathCacheKey(doc.Session.SessionID, doc.Session.WorkspaceKey)] = path
 	if err := s.upsertSessionIndex(doc.Session, path); err != nil {
-		return err
+		return committedDocumentWrite(err)
 	}
 	return nil
 }

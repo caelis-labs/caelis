@@ -2490,8 +2490,10 @@ type controlPlaneRuntime struct {
 	attachResp  session.Session
 	promptReq   agent.PromptParticipantRequest
 	promptResp  agent.RunResult
+	promptErr   error
 	detachReq   agent.DetachParticipantRequest
 	detachResp  session.Session
+	detachErr   error
 }
 
 func (r *controlPlaneRuntime) Run(context.Context, agent.RunRequest) (agent.RunResult, error) {
@@ -2514,6 +2516,9 @@ func (r *controlPlaneRuntime) AttachParticipant(_ context.Context, req agent.Att
 
 func (r *controlPlaneRuntime) PromptParticipant(_ context.Context, req agent.PromptParticipantRequest) (agent.RunResult, error) {
 	r.promptReq = req
+	if r.promptErr != nil {
+		return agent.RunResult{}, r.promptErr
+	}
 	if r.promptResp.Handle != nil || r.promptResp.Session.SessionID != "" {
 		return r.promptResp, nil
 	}
@@ -2522,6 +2527,9 @@ func (r *controlPlaneRuntime) PromptParticipant(_ context.Context, req agent.Pro
 
 func (r *controlPlaneRuntime) DetachParticipant(_ context.Context, req agent.DetachParticipantRequest) (session.Session, error) {
 	r.detachReq = req
+	if r.detachErr != nil {
+		return session.Session{}, r.detachErr
+	}
 	return r.detachResp, nil
 }
 

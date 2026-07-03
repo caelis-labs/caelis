@@ -16,6 +16,7 @@ type ReplayEventsRequest = gateway.ReplayEventsRequest
 type HandoffControllerRequest = gateway.HandoffControllerRequest
 type AttachParticipantRequest = gateway.AttachParticipantRequest
 type PromptParticipantRequest = gateway.PromptParticipantRequest
+type StartParticipantRequest = gateway.StartParticipantRequest
 type DetachParticipantRequest = gateway.DetachParticipantRequest
 type ControlPlaneStateRequest = gateway.ControlPlaneStateRequest
 type BindingStateRequest = gateway.BindingStateRequest
@@ -48,6 +49,7 @@ type ApprovalStatus = gateway.ApprovalStatus
 type ApprovalReviewStatus = gateway.ApprovalReviewStatus
 type ApprovalPayload = gateway.ApprovalPayload
 type ParticipantAction = gateway.ParticipantAction
+type ParticipantLifecycle = gateway.ParticipantLifecycle
 type ParticipantPayload = gateway.ParticipantPayload
 type LifecycleStatus = gateway.LifecycleStatus
 type LifecyclePayload = gateway.LifecyclePayload
@@ -64,6 +66,11 @@ type TurnHandle = gateway.TurnHandle
 const (
 	ActiveTurnKindKernel      = gateway.ActiveTurnKindKernel
 	ActiveTurnKindParticipant = gateway.ActiveTurnKindParticipant
+)
+
+const (
+	ParticipantLifecyclePersistent = gateway.ParticipantLifecyclePersistent
+	ParticipantLifecycleTransient  = gateway.ParticipantLifecycleTransient
 )
 
 const (

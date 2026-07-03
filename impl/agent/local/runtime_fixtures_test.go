@@ -33,6 +33,7 @@ import (
 
 type stubACPController struct {
 	attach            func(context.Context, controller.AttachRequest) (session.ParticipantBinding, error)
+	detach            func(context.Context, controller.DetachRequest) error
 	runTurn           func(context.Context, controller.TurnRequest) (controller.TurnResult, error)
 	promptParticipant func(context.Context, controller.ParticipantPromptRequest) (controller.TurnResult, error)
 }
@@ -70,7 +71,10 @@ func (s stubACPController) PromptParticipant(ctx context.Context, req controller
 	return controller.TurnResult{Handle: handle}, nil
 }
 
-func (stubACPController) Detach(context.Context, controller.DetachRequest) error {
+func (s stubACPController) Detach(ctx context.Context, req controller.DetachRequest) error {
+	if s.detach != nil {
+		return s.detach(ctx, req)
+	}
 	return nil
 }
 

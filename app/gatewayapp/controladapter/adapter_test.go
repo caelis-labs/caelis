@@ -2072,6 +2072,80 @@ func TestAdapterStartAgentSubagentRollsBackAttachmentOnPromptConflict(t *testing
 	}
 }
 
+func TestAdapterStartAgentSubagentKeepsDynamicSidecarAttachedForFollowUp(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	activeSession := session.Session{
+		SessionRef: session.SessionRef{
+			AppName:      "caelis",
+			UserID:       "agent-follow-up-test",
+			SessionID:    "agent-follow-up-session",
+			WorkspaceKey: "ws",
+		},
+		CWD:        t.TempDir(),
+		Controller: session.ControllerBinding{Kind: session.ControllerKindKernel},
+	}
+	gw := &sideAgentRollbackGatewayService{
+		session: activeSession,
+	}
+	driver, err := NewAdapter(ctx, &RuntimeStack{
+		Gateway: gatewayRuntimeDepsForTest(gw),
+		Session: SessionRuntimeDeps{
+			Workspace: session.WorkspaceRef{
+				Key: "ws",
+				CWD: activeSession.CWD,
+			},
+			StartFn: func(context.Context, string, string) (session.Session, error) {
+				return session.CloneSession(gw.session), nil
+			},
+		},
+		Agent: AgentRuntimeDeps{
+			ListFn: func() []ACPAgentInfo {
+				return []ACPAgentInfo{{Name: "copilot", Description: "ACP sidecar agent."}}
+			},
+		},
+	}, activeSession.SessionID, "surface", "ollama/llama3")
+	if err != nil {
+		t.Fatalf("NewAdapter() error = %v", err)
+	}
+
+	turn, err := driver.StartAgentSubagent(ctx, "copilot", "first prompt", nil)
+	if err != nil {
+		t.Fatalf("StartAgentSubagent() error = %v", err)
+	}
+	if turn != nil {
+		t.Fatalf("StartAgentSubagent() turn = %#v, want nil fake turn", turn)
+	}
+	if len(gw.detachReqs) != 0 {
+		t.Fatalf("DetachParticipant requests after first prompt = %#v, want persistent sidecar", gw.detachReqs)
+	}
+	if len(gw.session.Participants) != 1 || gw.session.Participants[0].ID != "side-new" || !agenthandle.ContainsPoolName(strings.TrimPrefix(gw.session.Participants[0].Label, "@")) {
+		t.Fatalf("Participants after first prompt = %#v, want attached copilot sidecar with pool label", gw.session.Participants)
+	}
+	handle := gw.session.Participants[0].Label
+
+	turn, err = driver.ContinueSubagent(ctx, handle, "follow up", nil)
+	if err != nil {
+		t.Fatalf("ContinueSubagent(%s) error = %v", handle, err)
+	}
+	if turn != nil {
+		t.Fatalf("ContinueSubagent() turn = %#v, want nil fake turn", turn)
+	}
+	if len(gw.attachReqs) != 1 {
+		t.Fatalf("AttachParticipant requests = %#v, want only initial attach", gw.attachReqs)
+	}
+	if got, want := len(gw.promptReqs), 2; got != want {
+		t.Fatalf("PromptParticipant requests = %d, want %d", got, want)
+	}
+	if got := gw.promptReqs[1].ParticipantID; got != "side-new" {
+		t.Fatalf("follow-up ParticipantID = %q, want side-new", got)
+	}
+	if got := gw.promptReqs[1].Input; got != "follow up" {
+		t.Fatalf("follow-up input = %q, want trimmed prompt", got)
+	}
+}
+
 func TestAdapterStatusUsesPersistedDefaultAliasOnStartup(t *testing.T) {
 	t.Parallel()
 
@@ -4001,6 +4075,53 @@ func (g *sideAgentRollbackGatewayService) PromptParticipant(_ context.Context, r
 	return gateway.BeginTurnResult{}, g.promptErr
 }
 
+func (g *sideAgentRollbackGatewayService) StartParticipant(ctx context.Context, req gateway.StartParticipantRequest) (gateway.BeginTurnResult, error) {
+	updated, err := g.AttachParticipant(ctx, gateway.AttachParticipantRequest{
+		SessionRef: req.SessionRef,
+		BindingKey: req.BindingKey,
+		Agent:      req.Agent,
+		Role:       req.Role,
+		Source:     req.Source,
+		Label:      req.Label,
+	})
+	if err != nil {
+		return gateway.BeginTurnResult{}, err
+	}
+	result, err := g.PromptParticipant(ctx, gateway.PromptParticipantRequest{
+		SessionRef:    updated.SessionRef,
+		BindingKey:    req.BindingKey,
+		ParticipantID: "side-new",
+		Input:         req.Input,
+		DisplayInput:  req.DisplayInput,
+		DisplayTitle:  req.DisplayTitle,
+		ContentParts:  req.ContentParts,
+		Source:        req.Source,
+	})
+	if err != nil {
+		if _, detachErr := g.DetachParticipant(ctx, gateway.DetachParticipantRequest{
+			SessionRef:    updated.SessionRef,
+			BindingKey:    req.BindingKey,
+			ParticipantID: "side-new",
+			Source:        "side_agent_prompt_rollback",
+		}); detachErr != nil {
+			return gateway.BeginTurnResult{}, errors.Join(err, detachErr)
+		}
+		return gateway.BeginTurnResult{}, err
+	}
+	if result.Session.SessionID == "" {
+		result.Session = updated
+	}
+	if req.Lifecycle == gateway.ParticipantLifecycleTransient && result.Handle == nil {
+		_, _ = g.DetachParticipant(ctx, gateway.DetachParticipantRequest{
+			SessionRef:    updated.SessionRef,
+			BindingKey:    req.BindingKey,
+			ParticipantID: "side-new",
+			Source:        firstNonEmpty(req.DetachSource, "side_agent_complete"),
+		})
+	}
+	return result, nil
+}
+
 func (g *sideAgentRollbackGatewayService) DetachParticipant(_ context.Context, req gateway.DetachParticipantRequest) (session.Session, error) {
 	g.detachReqs = append(g.detachReqs, req)
 	kept := g.session.Participants[:0]
@@ -4063,6 +4184,10 @@ func (g *activeSubmitGatewayService) AttachParticipant(context.Context, gateway.
 }
 
 func (g *activeSubmitGatewayService) PromptParticipant(context.Context, gateway.PromptParticipantRequest) (gateway.BeginTurnResult, error) {
+	return gateway.BeginTurnResult{}, nil
+}
+
+func (g *activeSubmitGatewayService) StartParticipant(context.Context, gateway.StartParticipantRequest) (gateway.BeginTurnResult, error) {
 	return gateway.BeginTurnResult{}, nil
 }
 

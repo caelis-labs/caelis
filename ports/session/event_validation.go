@@ -45,7 +45,7 @@ func ValidateDurableCoreEvent(event *Event) error {
 		return nil
 	}
 	switch EventTypeOf(event) {
-	case EventTypeUser, EventTypeAssistant, EventTypeSystem:
+	case EventTypeUser, EventTypeAssistant, EventTypeSystem, EventTypeContext:
 		if event.Message == nil {
 			return coreEventValidationError("model-visible event is missing durable Event.Message")
 		}
@@ -59,6 +59,10 @@ func ValidateDurableCoreEvent(event *Event) error {
 		return validateDurableCoreMeta(event.Meta)
 	case EventTypeToolResult:
 		return validateDurableCoreToolResult(event)
+	case EventTypeCustom:
+		if event.Message != nil {
+			return coreEventValidationError("custom model-visible event with Event.Message must use an explicit model-context event type")
+		}
 	}
 	return nil
 }

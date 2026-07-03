@@ -117,11 +117,5 @@ func TerminalRuntimeOutputText(meta map[string]any) string {
 	if output, ok := metautil.TerminalOutput(meta); ok {
 		return output.Data
 	}
-	taskMeta := RuntimeTaskMeta(meta)
-	for _, key := range []string{"output_text", "latest_output", "output_preview", "result", "output", "stdout", "stderr", "error", "final_message", "finalMessage", "text"} {
-		if text := rawDisplayString(taskMeta[key]); text != "" {
-			return text
-		}
-	}
 	return ""
 }

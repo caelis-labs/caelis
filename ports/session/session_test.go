@@ -129,6 +129,114 @@ func TestMainInvocationVisibleSharesSideDialogueAndExcludesDelegatedWork(t *test
 	if IsMainInvocationVisibleEvent(delegatedAssistant) {
 		t.Fatal("delegated subagent event must not be visible to the main invocation")
 	}
+
+	scopedContextMessage := model.NewTextMessage(model.RoleUser, "plugin context")
+	scopedContext := &Event{
+		Type:    EventTypeContext,
+		Message: &scopedContextMessage,
+		Scope: &EventScope{
+			Source: "plugin_hook",
+			Participant: ParticipantRef{
+				ID:   "context-source",
+				Kind: ParticipantKindSubagent,
+				Role: ParticipantRoleDelegated,
+			},
+		},
+	}
+	if !IsMainInvocationVisibleEvent(scopedContext) {
+		t.Fatal("scoped context event should be visible to the main invocation")
+	}
+}
+
+func TestPrepareAppendTransactionAppliesSessionMutationStateAndMetadata(t *testing.T) {
+	t.Parallel()
+
+	now := time.Unix(20, 0)
+	message := model.NewTextMessage(model.RoleUser, "hello from transaction")
+	tx, err := PrepareAppendTransaction(PrepareAppendTransactionRequest{
+		Session: Session{SessionRef: SessionRef{SessionID: "sess-1"}},
+		State:   map[string]any{"cursor": float64(1)},
+		Events: []*Event{{
+			Type:    EventTypeUser,
+			Message: &message,
+			Text:    "hello from transaction",
+		}},
+		ExistingIDs: map[string]struct{}{},
+		Now:         now,
+		AllocateEventID: func(event *Event, _ map[string]struct{}) {
+			event.ID = "event-1"
+		},
+		MutateSession: func(activeSession *Session, _ PreparedAppendEvents) (bool, error) {
+			return PutParticipantBinding(activeSession, ParticipantBinding{
+				ID:        "side-1",
+				Kind:      ParticipantKindACP,
+				Role:      ParticipantRoleSidecar,
+				AgentName: "reviewer",
+			}), nil
+		},
+		UpdateState: func(events []*Event, state map[string]any) (map[string]any, error) {
+			if len(events) != 1 || events[0].ID != "event-1" {
+				t.Fatalf("prepared events = %#v, want allocated event-1", events)
+			}
+			state["cursor"] = float64(2)
+			return state, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("PrepareAppendTransaction() error = %v", err)
+	}
+	if !tx.Changed {
+		t.Fatal("PrepareAppendTransaction().Changed = false, want true")
+	}
+	if tx.Session.UpdatedAt != now {
+		t.Fatalf("UpdatedAt = %s, want %s", tx.Session.UpdatedAt, now)
+	}
+	if tx.Session.Title != "hello from transaction" {
+		t.Fatalf("Title = %q, want generated title", tx.Session.Title)
+	}
+	if len(tx.Session.Participants) != 1 || tx.Session.Participants[0].ID != "side-1" {
+		t.Fatalf("Participants = %#v, want side-1", tx.Session.Participants)
+	}
+	if got := tx.State["cursor"]; got != float64(2) {
+		t.Fatalf("State[cursor] = %#v, want 2", got)
+	}
+	if len(tx.Prepared.Persisted) != 1 || tx.Prepared.Persisted[0].ID != "event-1" {
+		t.Fatalf("Persisted = %#v, want allocated event", tx.Prepared.Persisted)
+	}
+}
+
+func TestParticipantBindingHelpersPreserveStoreSemantics(t *testing.T) {
+	t.Parallel()
+
+	activeSession := Session{Participants: []ParticipantBinding{{ID: "p1", Label: "@old"}}}
+	if !PutParticipantBinding(&activeSession, ParticipantBinding{ID: "p1", Label: "@new"}) {
+		t.Fatal("PutParticipantBinding() = false, want true")
+	}
+	if len(activeSession.Participants) != 1 || activeSession.Participants[0].Label != "@new" {
+		t.Fatalf("Participants after replace = %#v, want one @new binding", activeSession.Participants)
+	}
+	if !PutParticipantBinding(&activeSession, ParticipantBinding{Label: "@empty"}) ||
+		!PutParticipantBinding(&activeSession, ParticipantBinding{Label: "@empty-again"}) {
+		t.Fatal("PutParticipantBinding(empty ID) = false, want append")
+	}
+	if len(activeSession.Participants) != 3 {
+		t.Fatalf("Participants after empty IDs = %#v, want appended empty-ID bindings", activeSession.Participants)
+	}
+	if RemoveParticipantBinding(&activeSession, " ") {
+		t.Fatal("RemoveParticipantBinding(empty ID) = true, want false")
+	}
+	if !RemoveParticipantBinding(&activeSession, "missing") {
+		t.Fatal("RemoveParticipantBinding(missing) = false, want detach-request semantics")
+	}
+	if len(activeSession.Participants) != 3 {
+		t.Fatalf("Participants after missing remove = %#v, want unchanged bindings", activeSession.Participants)
+	}
+	if !RemoveParticipantBinding(&activeSession, "p1") {
+		t.Fatal("RemoveParticipantBinding(p1) = false, want true")
+	}
+	if len(activeSession.Participants) != 2 || activeSession.Participants[0].ID == "p1" {
+		t.Fatalf("Participants after remove = %#v, want p1 removed", activeSession.Participants)
+	}
 }
 
 func TestFilterEvents(t *testing.T) {
@@ -779,6 +887,39 @@ func TestValidateDurableCoreEventRejectsProtocolOnlyMessage(t *testing.T) {
 	}
 	if detail := EventValidationDetail(err); !strings.Contains(detail, "Event.Message") {
 		t.Fatalf("validation detail = %q, want missing Event.Message", detail)
+	}
+}
+
+func TestValidateDurableCoreEventAllowsExplicitContextMessage(t *testing.T) {
+	t.Parallel()
+
+	message := model.NewTextMessage(model.RoleUser, "plugin-provided context")
+	err := ValidateDurableCoreEvent(CanonicalizeEvent(&Event{
+		Type:       EventTypeContext,
+		Visibility: VisibilityCanonical,
+		Message:    &message,
+		Text:       "plugin-provided context",
+	}))
+	if err != nil {
+		t.Fatalf("ValidateDurableCoreEvent(context) error = %v", err)
+	}
+}
+
+func TestValidateDurableCoreEventRejectsCustomMessage(t *testing.T) {
+	t.Parallel()
+
+	message := model.NewTextMessage(model.RoleUser, "implicit custom context")
+	err := ValidateDurableCoreEvent(CanonicalizeEvent(&Event{
+		Type:       EventTypeCustom,
+		Visibility: VisibilityCanonical,
+		Message:    &message,
+		Text:       "implicit custom context",
+	}))
+	if err == nil {
+		t.Fatal("ValidateDurableCoreEvent(custom message) error = nil, want explicit context type")
+	}
+	if detail := EventValidationDetail(err); !strings.Contains(detail, "explicit model-context event type") {
+		t.Fatalf("validation detail = %q, want explicit context type", detail)
 	}
 }
 

@@ -191,6 +191,64 @@ func TestStoreEventsRejectsLegacyEmbeddedDocumentEvents(t *testing.T) {
 	}
 }
 
+func TestStoreEventsUpgradesLegacyCustomPluginContextEvent(t *testing.T) {
+	t.Parallel()
+
+	store := NewStore(Config{
+		RootDir:            t.TempDir(),
+		SessionIDGenerator: func() string { return "sess-1" },
+	})
+	ctx := context.Background()
+	createdSession, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+		AppName: "caelis",
+		UserID:  "user-1",
+	})
+	if err != nil {
+		t.Fatalf("GetOrCreate() error = %v", err)
+	}
+	text := "[Plugin context: prompt-plugin]\nlegacy hook context"
+	message := model.NewTextMessage(model.RoleUser, text)
+	legacy := session.Event{
+		ID:         "evt-legacy-plugin-context",
+		SessionID:  createdSession.SessionID,
+		Type:       session.EventTypeCustom,
+		Visibility: session.VisibilityCanonical,
+		Message:    &message,
+		Text:       text,
+		Meta: map[string]any{
+			"source":                 "plugin_hook",
+			"hidden_from_transcript": true,
+		},
+	}
+	raw, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatalf("Marshal(legacy event) error = %v", err)
+	}
+	writeRawEventLogForTest(t, store, createdSession, string(raw))
+
+	events, err := store.Events(ctx, session.EventsRequest{SessionRef: createdSession.SessionRef})
+	if err != nil {
+		t.Fatalf("Events() error = %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("Events() len = %d, want 1", len(events))
+	}
+	if events[0].Type != session.EventTypeContext {
+		t.Fatalf("legacy event type = %q, want context", events[0].Type)
+	}
+	if events[0].Message == nil || events[0].Message.TextContent() != text {
+		t.Fatalf("legacy event message = %#v, want preserved plugin context", events[0].Message)
+	}
+
+	loaded, err := NewService(store).LoadSession(ctx, session.LoadSessionRequest{SessionRef: createdSession.SessionRef})
+	if err != nil {
+		t.Fatalf("LoadSession() error = %v", err)
+	}
+	if len(loaded.Events) != 1 || loaded.Events[0].Type != session.EventTypeContext {
+		t.Fatalf("LoadSession() events = %#v, want upgraded context event", loaded.Events)
+	}
+}
+
 func TestStoreEventsRejectsInvalidEventLog(t *testing.T) {
 	t.Parallel()
 
@@ -239,7 +297,7 @@ func TestStoreAppendSkipsHiddenPluginContextForGeneratedTitle(t *testing.T) {
 
 	hookText := "[Plugin context: prompt-plugin]\nHOOK PREFIX"
 	if _, err := store.AppendEvent(ctx, createdSession.SessionRef, &session.Event{
-		Type:       session.EventTypeCustom,
+		Type:       session.EventTypeContext,
 		Visibility: session.VisibilityCanonical,
 		Message:    ptrMessage(model.NewTextMessage(model.RoleUser, hookText)),
 		Text:       hookText,
@@ -960,6 +1018,326 @@ func TestStoreUpdateStateAndParticipantAnchor(t *testing.T) {
 	text := string(data)
 	if !strings.Contains(text, "\"session_id\": \"child-1\"") {
 		t.Fatal("persisted participant anchor must include child session id")
+	}
+}
+
+func TestStorePutParticipantWithEventRejectsInvalidEventAtomically(t *testing.T) {
+	t.Parallel()
+
+	store := NewStore(Config{
+		RootDir:            t.TempDir(),
+		SessionIDGenerator: func() string { return "sess-participant-atomic" },
+	})
+	ctx := context.Background()
+	createdSession, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+		AppName: "caelis",
+		UserID:  "user-1",
+		Workspace: session.WorkspaceRef{
+			Key: "ws-1",
+			CWD: "/tmp/ws",
+		},
+	})
+	if err != nil {
+		t.Fatalf("GetOrCreate() error = %v", err)
+	}
+
+	_, _, err = store.PutParticipantWithEvent(ctx, session.PutParticipantWithEventRequest{
+		SessionRef: createdSession.SessionRef,
+		Binding: session.ParticipantBinding{
+			ID:        "reviewer",
+			Kind:      session.ParticipantKindACP,
+			Role:      session.ParticipantRoleSidecar,
+			AgentName: "reviewer",
+			Label:     "@reviewer",
+		},
+		Event: &session.Event{
+			Type:       session.EventTypeUser,
+			Visibility: session.VisibilityCanonical,
+			Text:       "missing durable message",
+		},
+	})
+	if err == nil {
+		t.Fatal("PutParticipantWithEvent() error = nil, want invalid event rejection")
+	}
+	loaded, err := store.Get(ctx, createdSession.SessionRef)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if len(loaded.Participants) != 0 {
+		t.Fatalf("Participants after failed atomic put = %#v, want none", loaded.Participants)
+	}
+	events, err := store.Events(ctx, session.EventsRequest{SessionRef: createdSession.SessionRef})
+	if err != nil {
+		t.Fatalf("Events() error = %v", err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("Events after failed atomic put = %#v, want none", events)
+	}
+}
+
+func TestStorePutParticipantWithEventDoesNotAppendLogWhenDocumentWriteFails(t *testing.T) {
+	t.Parallel()
+
+	store := NewStore(Config{
+		RootDir:            t.TempDir(),
+		SessionIDGenerator: func() string { return "sess-participant-write-failure" },
+		EventIDGenerator:   func() string { return "evt-participant" },
+	})
+	ctx := context.Background()
+	createdSession, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+		AppName: "caelis",
+		UserID:  "user-1",
+		Workspace: session.WorkspaceRef{
+			Key: "ws-1",
+			CWD: "/tmp/ws",
+		},
+	})
+	if err != nil {
+		t.Fatalf("GetOrCreate() error = %v", err)
+	}
+
+	store.writeDocumentFault = func() error {
+		return errors.New("forced document write failure")
+	}
+	lifecycleMessage := model.NewTextMessage(model.RoleSystem, "participant attached")
+	_, _, err = store.PutParticipantWithEvent(ctx, session.PutParticipantWithEventRequest{
+		SessionRef: createdSession.SessionRef,
+		Binding: session.ParticipantBinding{
+			ID:        "reviewer",
+			Kind:      session.ParticipantKindACP,
+			Role:      session.ParticipantRoleSidecar,
+			AgentName: "reviewer",
+			Label:     "@reviewer",
+		},
+		Event: &session.Event{
+			Type:       session.EventTypeLifecycle,
+			Visibility: session.VisibilityCanonical,
+			Message:    &lifecycleMessage,
+			Text:       lifecycleMessage.TextContent(),
+			Lifecycle:  &session.EventLifecycle{Status: "attached"},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "forced document write failure") {
+		t.Fatalf("PutParticipantWithEvent() error = %v, want forced write failure", err)
+	}
+	store.writeDocumentFault = nil
+
+	loaded, err := store.Get(ctx, createdSession.SessionRef)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if len(loaded.Participants) != 0 {
+		t.Fatalf("Participants after failed atomic put = %#v, want none", loaded.Participants)
+	}
+	events, err := store.Events(ctx, session.EventsRequest{SessionRef: createdSession.SessionRef})
+	if err != nil {
+		t.Fatalf("Events() error = %v", err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("Events after failed document write = %#v, want none", events)
+	}
+}
+
+func TestStoreAppendEventDoesNotAppendLogWhenDocumentWriteFails(t *testing.T) {
+	t.Parallel()
+
+	store := NewStore(Config{
+		RootDir:            t.TempDir(),
+		SessionIDGenerator: func() string { return "sess-append-write-failure" },
+		EventIDGenerator:   func() string { return "evt-append" },
+	})
+	ctx := context.Background()
+	createdSession, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+		AppName: "caelis",
+		UserID:  "user-1",
+		Workspace: session.WorkspaceRef{
+			Key: "ws-1",
+			CWD: "/tmp/ws",
+		},
+	})
+	if err != nil {
+		t.Fatalf("GetOrCreate() error = %v", err)
+	}
+
+	store.writeDocumentFault = func() error {
+		return errors.New("forced document write failure")
+	}
+	message := model.NewTextMessage(model.RoleUser, "hello")
+	_, err = store.AppendEvent(ctx, createdSession.SessionRef, &session.Event{
+		Type:    session.EventTypeUser,
+		Message: &message,
+		Text:    message.TextContent(),
+	})
+	if err == nil || !strings.Contains(err.Error(), "forced document write failure") {
+		t.Fatalf("AppendEvent() error = %v, want forced write failure", err)
+	}
+	store.writeDocumentFault = nil
+
+	events, err := store.Events(ctx, session.EventsRequest{SessionRef: createdSession.SessionRef})
+	if err != nil {
+		t.Fatalf("Events() error = %v", err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("Events after failed append write = %#v, want none", events)
+	}
+}
+
+func TestStoreAppendEventKeepsLogWhenDocumentWriteFailsAfterCommit(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := NewStore(Config{
+		RootDir:            root,
+		SessionIDGenerator: func() string { return "sess-late-document-failure" },
+		EventIDGenerator:   func() string { return "evt-late-document-failure" },
+	})
+	ctx := context.Background()
+	createdSession, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+		AppName: "caelis",
+		UserID:  "user-1",
+		Workspace: session.WorkspaceRef{
+			Key: "ws-1",
+			CWD: "/tmp/ws",
+		},
+	})
+	if err != nil {
+		t.Fatalf("GetOrCreate() error = %v", err)
+	}
+
+	indexPath := filepath.Join(root, indexFilename)
+	if err := os.Remove(indexPath); err != nil {
+		t.Fatalf("Remove(index) error = %v", err)
+	}
+	if err := os.Mkdir(indexPath, 0o700); err != nil {
+		t.Fatalf("Mkdir(index path) error = %v", err)
+	}
+
+	message := model.NewTextMessage(model.RoleUser, "hello after commit")
+	_, err = store.AppendEvent(ctx, createdSession.SessionRef, &session.Event{
+		Type:    session.EventTypeUser,
+		Message: &message,
+		Text:    message.TextContent(),
+	})
+	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "session index") {
+		t.Fatalf("AppendEvent() error = %v, want late session index failure", err)
+	}
+
+	events, err := store.Events(ctx, session.EventsRequest{SessionRef: createdSession.SessionRef})
+	if err != nil {
+		t.Fatalf("Events() error = %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("Events after late document write failure = %#v, want committed event", events)
+	}
+	if events[0].ID != "evt-late-document-failure" {
+		t.Fatalf("Event ID after late document write failure = %q, want generated ID", events[0].ID)
+	}
+	loaded, err := store.Get(ctx, createdSession.SessionRef)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if loaded.Title == "" {
+		t.Fatal("Session title after late document write failure is empty, want committed document update")
+	}
+}
+
+func TestStoreAppendEventsDoesNotAppendLogWhenDocumentWriteFails(t *testing.T) {
+	t.Parallel()
+
+	store := NewStore(Config{
+		RootDir:            t.TempDir(),
+		SessionIDGenerator: func() string { return "sess-batch-write-failure" },
+		EventIDGenerator:   func() string { return "evt-batch" },
+	})
+	ctx := context.Background()
+	createdSession, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+		AppName: "caelis",
+		UserID:  "user-1",
+		Workspace: session.WorkspaceRef{
+			Key: "ws-1",
+			CWD: "/tmp/ws",
+		},
+	})
+	if err != nil {
+		t.Fatalf("GetOrCreate() error = %v", err)
+	}
+
+	store.writeDocumentFault = func() error {
+		return errors.New("forced document write failure")
+	}
+	prompt := model.NewTextMessage(model.RoleUser, "review this change")
+	assistant := model.NewTextMessage(model.RoleAssistant, "allow")
+	_, err = store.AppendEvents(ctx, session.AppendEventsRequest{
+		SessionRef: createdSession.SessionRef,
+		Events: []*session.Event{
+			{Type: session.EventTypeUser, Message: &prompt, Text: prompt.TextContent()},
+			{Type: session.EventTypeAssistant, Message: &assistant, Text: assistant.TextContent()},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "forced document write failure") {
+		t.Fatalf("AppendEvents() error = %v, want forced write failure", err)
+	}
+	store.writeDocumentFault = nil
+
+	events, err := store.Events(ctx, session.EventsRequest{SessionRef: createdSession.SessionRef})
+	if err != nil {
+		t.Fatalf("Events() error = %v", err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("Events after failed batch write = %#v, want none", events)
+	}
+}
+
+func TestStoreAppendEventsAndUpdateStateDoesNotAppendLogWhenStateUpdateFails(t *testing.T) {
+	t.Parallel()
+
+	store := NewStore(Config{
+		RootDir:            t.TempDir(),
+		SessionIDGenerator: func() string { return "sess-batch-state-failure" },
+		EventIDGenerator:   func() string { return "evt-batch-state" },
+	})
+	ctx := context.Background()
+	createdSession, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+		AppName: "caelis",
+		UserID:  "user-1",
+		Workspace: session.WorkspaceRef{
+			Key: "ws-1",
+			CWD: "/tmp/ws",
+		},
+	})
+	if err != nil {
+		t.Fatalf("GetOrCreate() error = %v", err)
+	}
+
+	prompt := model.NewTextMessage(model.RoleUser, "review this change")
+	assistant := model.NewTextMessage(model.RoleAssistant, "allow")
+	_, err = store.AppendEventsAndUpdateState(ctx, session.AppendEventsAndUpdateStateRequest{
+		SessionRef: createdSession.SessionRef,
+		Events: []*session.Event{
+			{Type: session.EventTypeUser, Message: &prompt, Text: prompt.TextContent()},
+			{Type: session.EventTypeAssistant, Message: &assistant, Text: assistant.TextContent()},
+		},
+		UpdateState: func([]*session.Event, map[string]any) (map[string]any, error) {
+			return nil, errors.New("forced state update failure")
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "forced state update failure") {
+		t.Fatalf("AppendEventsAndUpdateState() error = %v, want forced state update failure", err)
+	}
+
+	events, err := store.Events(ctx, session.EventsRequest{SessionRef: createdSession.SessionRef})
+	if err != nil {
+		t.Fatalf("Events() error = %v", err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("Events after failed batch state update = %#v, want none", events)
+	}
+	state, err := store.SnapshotState(ctx, createdSession.SessionRef)
+	if err != nil {
+		t.Fatalf("SnapshotState() error = %v", err)
+	}
+	if len(state) != 0 {
+		t.Fatalf("State after failed batch state update = %#v, want empty", state)
 	}
 }
 
