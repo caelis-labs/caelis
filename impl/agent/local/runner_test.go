@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/caelis-labs/caelis/ports/session"
 )
 
 func TestRunnerSourceEventsDoesNotBlockOnUndrainedLegacyEvents(t *testing.T) {

@@ -5,8 +5,8 @@ import (
 	"iter"
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/ports/stream"
+	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/ports/stream"
 )
 
 func TestLocalTerminalAdapterOutputUsesCumulativeRead(t *testing.T) {

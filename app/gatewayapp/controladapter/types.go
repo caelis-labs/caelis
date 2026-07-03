@@ -1,6 +1,6 @@
 package controladapter
 
-import "github.com/OnslaughtSnail/caelis/protocol/acp/control"
+import "github.com/caelis-labs/caelis/protocol/acp/control"
 
 var (
 	_ control.Service                   = (*Adapter)(nil)

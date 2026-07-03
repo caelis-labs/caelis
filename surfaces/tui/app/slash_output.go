@@ -5,8 +5,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/OnslaughtSnail/caelis/protocol/acp/control"
-	"github.com/OnslaughtSnail/caelis/surfaces/tui/tuikit"
+	"github.com/caelis-labs/caelis/protocol/acp/control"
+	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
 
 type slashOutputLine struct {

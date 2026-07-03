@@ -3,8 +3,8 @@ package transcript
 import (
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
+	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
+	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func ProjectReplayEvents(events []eventstream.Envelope, surface SurfaceProjector) []Event {

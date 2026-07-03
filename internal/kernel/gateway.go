@@ -7,12 +7,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/ports/agent"
-	"github.com/OnslaughtSnail/caelis/ports/approval"
-	"github.com/OnslaughtSnail/caelis/ports/plugin"
-	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/ports/stream"
-	"github.com/OnslaughtSnail/caelis/ports/task"
+	"github.com/caelis-labs/caelis/ports/agent"
+	"github.com/caelis-labs/caelis/ports/approval"
+	"github.com/caelis-labs/caelis/ports/plugin"
+	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/ports/stream"
+	"github.com/caelis-labs/caelis/ports/task"
 )
 
 type Config struct {

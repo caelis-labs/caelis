@@ -12,13 +12,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/impl/agent/acp/internal/acputil"
-	"github.com/OnslaughtSnail/caelis/impl/agent/acp/subagent"
-	"github.com/OnslaughtSnail/caelis/ports/controller"
-	"github.com/OnslaughtSnail/caelis/ports/model"
-	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/client"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
+	"github.com/caelis-labs/caelis/impl/agent/acp/internal/acputil"
+	"github.com/caelis-labs/caelis/impl/agent/acp/subagent"
+	"github.com/caelis-labs/caelis/ports/controller"
+	"github.com/caelis-labs/caelis/ports/model"
+	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/protocol/acp/client"
+	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 type Config struct {

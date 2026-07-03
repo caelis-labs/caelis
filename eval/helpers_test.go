@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/ports/stream"
+	"github.com/caelis-labs/caelis/ports/stream"
 )
 
 func repoRootForEval(t *testing.T) string {

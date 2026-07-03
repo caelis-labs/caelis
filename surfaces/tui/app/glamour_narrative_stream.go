@@ -7,7 +7,7 @@ import (
 	"charm.land/lipgloss/v2"
 	xansi "github.com/charmbracelet/x/ansi"
 
-	"github.com/OnslaughtSnail/caelis/surfaces/tui/tuikit"
+	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
 
 // ---------------------------------------------------------------------------

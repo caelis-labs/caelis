@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	acpclient "github.com/OnslaughtSnail/caelis/protocol/acp/client"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/jsonrpc"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
+	acpclient "github.com/caelis-labs/caelis/protocol/acp/client"
+	"github.com/caelis-labs/caelis/protocol/acp/jsonrpc"
+	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestAdapterACPHelperProcess(t *testing.T) {

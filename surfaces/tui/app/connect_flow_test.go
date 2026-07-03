@@ -6,7 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/OnslaughtSnail/caelis/internal/connectwizard"
+	"github.com/caelis-labs/caelis/internal/connectwizard"
 )
 
 func TestConnectEnterStartsInteractiveWizardAndIgnoresTypedArgs(t *testing.T) {

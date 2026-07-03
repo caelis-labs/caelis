@@ -3,12 +3,12 @@ package projector
 import (
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/ports/compact"
-	"github.com/OnslaughtSnail/caelis/ports/model"
-	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
+	"github.com/caelis-labs/caelis/ports/compact"
+	"github.com/caelis-labs/caelis/ports/model"
+	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
+	"github.com/caelis-labs/caelis/protocol/acp/metautil"
+	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestProjectSessionEventEnvelopeProjectsToolUpdate(t *testing.T) {

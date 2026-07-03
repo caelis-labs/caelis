@@ -6,7 +6,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/OnslaughtSnail/caelis/internal/connectwizard"
+	"github.com/caelis-labs/caelis/internal/connectwizard"
 )
 
 func TestRenderSlashArgListUsesWizardHintInsteadOfInternalConnectPayload(t *testing.T) {

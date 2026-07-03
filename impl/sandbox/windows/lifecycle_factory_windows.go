@@ -2,7 +2,7 @@
 
 package windows
 
-import "github.com/OnslaughtSnail/caelis/ports/sandbox"
+import "github.com/caelis-labs/caelis/ports/sandbox"
 
 type lifecycleFactory struct{}
 

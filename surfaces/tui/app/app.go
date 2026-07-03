@@ -15,7 +15,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/colorprofile"
 
-	"github.com/OnslaughtSnail/caelis/surfaces/tui/tuikit"
+	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
 
 func requestBackgroundColorCmd() tea.Cmd {

@@ -3,9 +3,9 @@ package local
 import (
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/ports/model"
-	"github.com/OnslaughtSnail/caelis/ports/session"
-	acpschema "github.com/OnslaughtSnail/caelis/protocol/acp/schema"
+	"github.com/caelis-labs/caelis/ports/model"
+	"github.com/caelis-labs/caelis/ports/session"
+	acpschema "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 type acpNarrativeAccumulator struct {

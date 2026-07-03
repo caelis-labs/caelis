@@ -19,8 +19,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/internal/testenv"
-	"github.com/OnslaughtSnail/caelis/ports/model"
+	"github.com/caelis-labs/caelis/internal/testenv"
+	"github.com/caelis-labs/caelis/ports/model"
 )
 
 func encryptCodeFreeAPIKeyForTest(t *testing.T, apiKey string) string {

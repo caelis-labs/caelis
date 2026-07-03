@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/ports/compact"
-	"github.com/OnslaughtSnail/caelis/ports/model"
-	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/caelis-labs/caelis/ports/compact"
+	"github.com/caelis-labs/caelis/ports/model"
+	"github.com/caelis-labs/caelis/ports/session"
 )
 
 func TestComputeUsageSnapshotIncludesEstimatedPromptPrefix(t *testing.T) {

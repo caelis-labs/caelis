@@ -6,11 +6,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
-	"github.com/OnslaughtSnail/caelis/app/gatewayapp/controladapter"
-	"github.com/OnslaughtSnail/caelis/ports/assembly"
-	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/protocol/acp"
+	"github.com/caelis-labs/caelis/app/gatewayapp"
+	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter"
+	"github.com/caelis-labs/caelis/ports/assembly"
+	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/protocol/acp"
 )
 
 func TestNewFromStackRoutesStatusSlashThroughSharedPromptRouter(t *testing.T) {

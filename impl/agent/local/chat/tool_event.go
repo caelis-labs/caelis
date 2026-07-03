@@ -5,10 +5,10 @@ import (
 	"maps"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/ports/displaypolicy"
-	"github.com/OnslaughtSnail/caelis/ports/model"
-	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/ports/tool"
+	"github.com/caelis-labs/caelis/ports/displaypolicy"
+	"github.com/caelis-labs/caelis/ports/model"
+	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/ports/tool"
 )
 
 func toolResultEvent(call model.ToolCall, result tool.Result, message *model.Message, extraMeta ...map[string]any) *session.Event {

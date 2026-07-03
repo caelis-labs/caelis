@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	modelcatalog "github.com/OnslaughtSnail/caelis/impl/model/catalog"
-	"github.com/OnslaughtSnail/caelis/internal/connectwizard"
-	"github.com/OnslaughtSnail/caelis/ports/model"
+	modelcatalog "github.com/caelis-labs/caelis/impl/model/catalog"
+	"github.com/caelis-labs/caelis/internal/connectwizard"
+	"github.com/caelis-labs/caelis/ports/model"
 )
 
 const (

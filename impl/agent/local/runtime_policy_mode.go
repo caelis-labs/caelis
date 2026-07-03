@@ -4,10 +4,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/impl/policy/presets"
-	"github.com/OnslaughtSnail/caelis/ports/agent"
-	"github.com/OnslaughtSnail/caelis/ports/policy"
-	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/caelis-labs/caelis/impl/policy/presets"
+	"github.com/caelis-labs/caelis/ports/agent"
+	"github.com/caelis-labs/caelis/ports/policy"
+	"github.com/caelis-labs/caelis/ports/session"
 )
 
 func (r *Runtime) policyMode(spec agent.AgentSpec) string {

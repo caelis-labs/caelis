@@ -1,6 +1,6 @@
 package kernel
 
-import gateway "github.com/OnslaughtSnail/caelis/ports/gateway"
+import gateway "github.com/caelis-labs/caelis/ports/gateway"
 
 type ErrorKind = gateway.ErrorKind
 

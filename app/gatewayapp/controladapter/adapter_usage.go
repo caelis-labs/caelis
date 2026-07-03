@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/ports/gateway"
-	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/caelis-labs/caelis/ports/gateway"
+	"github.com/caelis-labs/caelis/ports/session"
 )
 
 func (d *Adapter) sessionTokenUsage(ctx context.Context, ref session.SessionRef) (gateway.UsageSnapshot, error) {

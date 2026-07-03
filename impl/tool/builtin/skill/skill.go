@@ -6,12 +6,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	skillfs "github.com/OnslaughtSnail/caelis/impl/skill/fs"
-	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/internal/toolutil"
-	"github.com/OnslaughtSnail/caelis/impl/tool/internal/argparse"
-	"github.com/OnslaughtSnail/caelis/ports/model"
-	"github.com/OnslaughtSnail/caelis/ports/skill"
-	"github.com/OnslaughtSnail/caelis/ports/tool"
+	skillfs "github.com/caelis-labs/caelis/impl/skill/fs"
+	"github.com/caelis-labs/caelis/impl/tool/builtin/internal/toolutil"
+	"github.com/caelis-labs/caelis/impl/tool/internal/argparse"
+	"github.com/caelis-labs/caelis/ports/model"
+	"github.com/caelis-labs/caelis/ports/skill"
+	"github.com/caelis-labs/caelis/ports/tool"
 )
 
 const ToolName = "skill"

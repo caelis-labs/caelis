@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/ports/model"
-	"github.com/OnslaughtSnail/caelis/ports/tool"
+	"github.com/caelis-labs/caelis/ports/model"
+	"github.com/caelis-labs/caelis/ports/tool"
 )
 
 // EventValidationError reports a canonical session event that cannot be used to

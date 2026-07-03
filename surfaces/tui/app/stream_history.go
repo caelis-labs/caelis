@@ -3,7 +3,7 @@ package tuiapp
 import (
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/surfaces/tui/tuikit"
+	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 	"github.com/charmbracelet/x/ansi"
 )
 

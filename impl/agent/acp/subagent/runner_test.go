@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/ports/delegation"
-	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/ports/stream"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/client"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
+	"github.com/caelis-labs/caelis/ports/delegation"
+	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/ports/stream"
+	"github.com/caelis-labs/caelis/protocol/acp/client"
+	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestRunnerHandleUpdatePublishesChildStream(t *testing.T) {

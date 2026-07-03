@@ -9,13 +9,13 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	controlcommands "github.com/OnslaughtSnail/caelis/ports/controlcommand"
-	controlprompt "github.com/OnslaughtSnail/caelis/ports/controlprompt"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/control"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
-	"github.com/OnslaughtSnail/caelis/surfaces/transcript"
+	controlcommands "github.com/caelis-labs/caelis/ports/controlcommand"
+	controlprompt "github.com/caelis-labs/caelis/ports/controlprompt"
+	"github.com/caelis-labs/caelis/protocol/acp/control"
+	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
+	"github.com/caelis-labs/caelis/protocol/acp/metautil"
+	"github.com/caelis-labs/caelis/protocol/acp/schema"
+	"github.com/caelis-labs/caelis/surfaces/transcript"
 )
 
 func isTUIPrivateAgentSlash(args string) bool {

@@ -1,8 +1,8 @@
 package tuiapp
 
 import (
-	"github.com/OnslaughtSnail/caelis/protocol/acp/control"
-	"github.com/OnslaughtSnail/caelis/surfaces/statusbar"
+	"github.com/caelis-labs/caelis/protocol/acp/control"
+	"github.com/caelis-labs/caelis/surfaces/statusbar"
 )
 
 type StatusViewModel = statusbar.ViewModel

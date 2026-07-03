@@ -10,10 +10,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/impl/skill/fs"
-	"github.com/OnslaughtSnail/caelis/ports/delegation"
-	"github.com/OnslaughtSnail/caelis/ports/skill"
-	"github.com/OnslaughtSnail/caelis/ports/tool"
+	"github.com/caelis-labs/caelis/impl/skill/fs"
+	"github.com/caelis-labs/caelis/ports/delegation"
+	"github.com/caelis-labs/caelis/ports/skill"
+	"github.com/caelis-labs/caelis/ports/tool"
 )
 
 const (

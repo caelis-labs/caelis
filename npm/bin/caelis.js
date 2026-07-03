@@ -5,12 +5,12 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const packageMap = {
-  'darwin:arm64': '@onslaughtsnail/caelis-darwin-arm64',
-  'darwin:x64': '@onslaughtsnail/caelis-darwin-x64',
-  'linux:arm64': '@onslaughtsnail/caelis-linux-arm64',
-  'linux:x64': '@onslaughtsnail/caelis-linux-x64',
-  'win32:arm64': '@onslaughtsnail/caelis-windows-arm64',
-  'win32:x64': '@onslaughtsnail/caelis-windows-x64',
+  'darwin:arm64': '@caelis/caelis-darwin-arm64',
+  'darwin:x64': '@caelis/caelis-darwin-x64',
+  'linux:arm64': '@caelis/caelis-linux-arm64',
+  'linux:x64': '@caelis/caelis-linux-x64',
+  'win32:arm64': '@caelis/caelis-windows-arm64',
+  'win32:x64': '@caelis/caelis-windows-x64',
 };
 
 function resolvePackageName() {

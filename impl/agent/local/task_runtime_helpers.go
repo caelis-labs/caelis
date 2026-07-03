@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
-	taskapi "github.com/OnslaughtSnail/caelis/ports/task"
-	"github.com/OnslaughtSnail/caelis/ports/tool"
+	"github.com/caelis-labs/caelis/ports/sandbox"
+	taskapi "github.com/caelis-labs/caelis/ports/task"
+	"github.com/caelis-labs/caelis/ports/tool"
 )
 
 const noOutputPlaceholder = "(no output)"

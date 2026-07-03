@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
+	"github.com/caelis-labs/caelis/ports/sandbox"
 )
 
 type sandboxLifecycleAction = sandbox.LifecycleAction

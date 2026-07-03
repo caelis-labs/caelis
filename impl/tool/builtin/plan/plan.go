@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/internal/toolutil"
-	"github.com/OnslaughtSnail/caelis/ports/model"
-	"github.com/OnslaughtSnail/caelis/ports/tool"
+	"github.com/caelis-labs/caelis/impl/tool/builtin/internal/toolutil"
+	"github.com/caelis-labs/caelis/ports/model"
+	"github.com/caelis-labs/caelis/ports/tool"
 )
 
 const ToolName = "PLAN"

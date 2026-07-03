@@ -10,14 +10,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
-	"github.com/OnslaughtSnail/caelis/ports/assembly"
-	"github.com/OnslaughtSnail/caelis/ports/gateway"
-	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/projector"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
-	"github.com/OnslaughtSnail/caelis/surfaces/headless"
+	"github.com/caelis-labs/caelis/app/gatewayapp"
+	"github.com/caelis-labs/caelis/ports/assembly"
+	"github.com/caelis-labs/caelis/ports/gateway"
+	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/protocol/acp/metautil"
+	"github.com/caelis-labs/caelis/protocol/acp/projector"
+	"github.com/caelis-labs/caelis/protocol/acp/schema"
+	"github.com/caelis-labs/caelis/surfaces/headless"
 )
 
 func TestLocalStackGatewayACPMainE2E(t *testing.T) {

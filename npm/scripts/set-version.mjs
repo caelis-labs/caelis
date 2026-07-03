@@ -7,12 +7,12 @@ const __dirname = path.dirname(__filename);
 const packageRoot = path.resolve(__dirname, '..');
 
 const platformPackages = [
-  '@onslaughtsnail/caelis-darwin-arm64',
-  '@onslaughtsnail/caelis-darwin-x64',
-  '@onslaughtsnail/caelis-linux-arm64',
-  '@onslaughtsnail/caelis-linux-x64',
-  '@onslaughtsnail/caelis-windows-arm64',
-  '@onslaughtsnail/caelis-windows-x64',
+  '@caelis/caelis-darwin-arm64',
+  '@caelis/caelis-darwin-x64',
+  '@caelis/caelis-linux-arm64',
+  '@caelis/caelis-linux-x64',
+  '@caelis/caelis-windows-arm64',
+  '@caelis/caelis-windows-x64',
 ];
 
 const manifestPaths = [
@@ -37,7 +37,7 @@ async function updateManifest(manifestPath, version) {
   const raw = await fs.readFile(manifestPath, 'utf8');
   const manifest = JSON.parse(raw);
   manifest.version = version;
-  if (manifest.name === '@onslaughtsnail/caelis') {
+  if (manifest.name === '@caelis/caelis') {
     manifest.optionalDependencies = Object.fromEntries(
       platformPackages.map((packageName) => [packageName, version]),
     );

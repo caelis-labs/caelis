@@ -5,7 +5,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/OnslaughtSnail/caelis/protocol/acp"
+	"github.com/caelis-labs/caelis/protocol/acp"
 )
 
 // Recorder implements acp.PromptCallbacks and captures ACP updates and

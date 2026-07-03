@@ -13,7 +13,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/ports/tool"
+	"github.com/caelis-labs/caelis/ports/tool"
 )
 
 func TestFetchToolReturnsCleanMarkdown(t *testing.T) {

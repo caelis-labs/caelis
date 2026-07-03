@@ -6,13 +6,13 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/impl/policy/presets"
-	kernelimpl "github.com/OnslaughtSnail/caelis/internal/kernel"
-	"github.com/OnslaughtSnail/caelis/ports/assembly"
-	"github.com/OnslaughtSnail/caelis/ports/delegation"
-	"github.com/OnslaughtSnail/caelis/ports/gateway"
-	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/ports/skill"
+	"github.com/caelis-labs/caelis/impl/policy/presets"
+	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
+	"github.com/caelis-labs/caelis/ports/assembly"
+	"github.com/caelis-labs/caelis/ports/delegation"
+	"github.com/caelis-labs/caelis/ports/gateway"
+	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/ports/skill"
 )
 
 type stackRuntimeConfig struct {

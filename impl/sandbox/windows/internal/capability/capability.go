@@ -13,7 +13,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/pathutil"
+	"github.com/caelis-labs/caelis/impl/sandbox/windows/internal/pathutil"
 )
 
 const (

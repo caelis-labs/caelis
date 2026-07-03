@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/ports/plugin"
-	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/caelis-labs/caelis/ports/plugin"
+	"github.com/caelis-labs/caelis/ports/session"
 )
 
 func TestHookHelperProcess(t *testing.T) {

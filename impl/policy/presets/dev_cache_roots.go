@@ -3,7 +3,7 @@ package presets
 import (
 	"runtime"
 
-	"github.com/OnslaughtSnail/caelis/impl/policy/devcache"
+	"github.com/caelis-labs/caelis/impl/policy/devcache"
 )
 
 func defaultDeveloperWritableRoots() []string {

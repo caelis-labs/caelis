@@ -3,7 +3,7 @@ package providers
 import (
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/ports/model"
+	"github.com/caelis-labs/caelis/ports/model"
 )
 
 func newVolcengineCodingPlan(cfg Config, token string) model.LLM {

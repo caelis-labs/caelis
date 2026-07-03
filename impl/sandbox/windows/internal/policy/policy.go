@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/pathutil"
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
+	"github.com/caelis-labs/caelis/impl/sandbox/windows/internal/pathutil"
+	"github.com/caelis-labs/caelis/ports/sandbox"
 )
 
 type NetworkIdentity string

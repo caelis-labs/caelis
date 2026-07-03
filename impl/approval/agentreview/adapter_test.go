@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/ports/approval"
+	"github.com/caelis-labs/caelis/ports/approval"
 )
 
 func TestApproverFinalizesReviewResult(t *testing.T) {

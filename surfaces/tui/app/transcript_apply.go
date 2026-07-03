@@ -4,9 +4,9 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
-	"github.com/OnslaughtSnail/caelis/surfaces/transcript"
-	"github.com/OnslaughtSnail/caelis/surfaces/tui/tuikit"
+	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
+	"github.com/caelis-labs/caelis/surfaces/transcript"
+	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
 
 func (m *Model) handleTranscriptEventsMsg(msg TranscriptEventsMsg) (tea.Model, tea.Cmd) {

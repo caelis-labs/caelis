@@ -3,7 +3,7 @@ package eventstream
 import (
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
+	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestReplayCursorPrefersProjectionID(t *testing.T) {

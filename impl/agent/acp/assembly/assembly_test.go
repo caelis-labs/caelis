@@ -4,11 +4,11 @@ import (
 	"context"
 	"testing"
 
-	bridgeassembly "github.com/OnslaughtSnail/caelis/impl/agent/acp/assembly"
-	"github.com/OnslaughtSnail/caelis/impl/session/memory"
-	assemblyapi "github.com/OnslaughtSnail/caelis/ports/assembly"
-	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/protocol/acp"
+	bridgeassembly "github.com/caelis-labs/caelis/impl/agent/acp/assembly"
+	"github.com/caelis-labs/caelis/impl/session/memory"
+	assemblyapi "github.com/caelis-labs/caelis/ports/assembly"
+	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/protocol/acp"
 )
 
 func TestProvidersFromAssemblyModeAndConfig(t *testing.T) {

@@ -4,7 +4,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/protocol/acp/control"
+	"github.com/caelis-labs/caelis/protocol/acp/control"
 )
 
 // CommandSpec describes one slash command exposed by the TUI command registry.

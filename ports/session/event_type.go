@@ -3,7 +3,7 @@ package session
 import (
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/ports/model"
+	"github.com/caelis-labs/caelis/ports/model"
 )
 
 // EventTypeOf backfills an event type for deserialized or adapter-produced

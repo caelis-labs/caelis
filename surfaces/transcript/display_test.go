@@ -3,7 +3,7 @@ package transcript
 import (
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
+	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
 func TestApprovalReviewDisplayPartsParsesFallbackText(t *testing.T) {

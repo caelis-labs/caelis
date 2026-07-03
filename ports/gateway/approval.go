@@ -1,6 +1,6 @@
 package gateway
 
-import "github.com/OnslaughtSnail/caelis/ports/approval"
+import "github.com/caelis-labs/caelis/ports/approval"
 
 type ApprovalMode = approval.Mode
 

@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/ports/model"
+	"github.com/caelis-labs/caelis/ports/model"
 )
 
 // isOllamaProvider returns true when the provider string identifies Ollama.

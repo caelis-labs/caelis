@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/internal/testenv"
+	"github.com/caelis-labs/caelis/internal/testenv"
 )
 
 func TestEnsureRejectsSystemRootSymlink(t *testing.T) {

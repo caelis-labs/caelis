@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/ports/model"
+	"github.com/caelis-labs/caelis/ports/model"
 )
 
 type stepWatermarkModel struct {

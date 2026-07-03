@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
+	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestEnvelopeMarshalIncludesACPUpdate(t *testing.T) {

@@ -8,10 +8,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
-	acpprojector "github.com/OnslaughtSnail/caelis/protocol/acp/projector"
+	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
+	"github.com/caelis-labs/caelis/protocol/acp/metautil"
+	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
 )
 
 const acpProjectionCursorPrefix = "acp-projection:"

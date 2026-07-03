@@ -3,7 +3,7 @@ package gatewayapp
 import (
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/internal/testenv"
+	"github.com/caelis-labs/caelis/internal/testenv"
 )
 
 func setHomeForGatewayAppTest(t *testing.T, home string) {

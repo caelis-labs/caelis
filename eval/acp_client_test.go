@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/protocol/acp/client"
+	"github.com/caelis-labs/caelis/protocol/acp/client"
 )
 
 func TestPublicClientLifecycleAndLoadE2E(t *testing.T) {

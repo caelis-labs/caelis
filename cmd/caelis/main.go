@@ -6,8 +6,8 @@ import (
 	"io"
 	"os"
 
-	"github.com/OnslaughtSnail/caelis/internal/bootstrap"
-	"github.com/OnslaughtSnail/caelis/internal/cli"
+	"github.com/caelis-labs/caelis/internal/bootstrap"
+	"github.com/caelis-labs/caelis/internal/cli"
 )
 
 func main() {

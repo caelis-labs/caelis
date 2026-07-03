@@ -7,10 +7,10 @@ import (
 	"maps"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/plan"
-	"github.com/OnslaughtSnail/caelis/ports/model"
-	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/ports/userdisplay"
+	"github.com/caelis-labs/caelis/impl/tool/builtin/plan"
+	"github.com/caelis-labs/caelis/ports/model"
+	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/ports/userdisplay"
 )
 
 func buildUserEvent(activeSession session.Session, turnID string, input string, displayInput string, parts []model.ContentPart) *session.Event {

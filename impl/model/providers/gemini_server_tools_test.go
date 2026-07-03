@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	sessionfile "github.com/OnslaughtSnail/caelis/impl/session/file"
-	"github.com/OnslaughtSnail/caelis/ports/model"
-	"github.com/OnslaughtSnail/caelis/ports/session"
+	sessionfile "github.com/caelis-labs/caelis/impl/session/file"
+	"github.com/caelis-labs/caelis/ports/model"
+	"github.com/caelis-labs/caelis/ports/session"
 	"google.golang.org/genai"
 )
 

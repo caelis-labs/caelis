@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/caelis-labs/caelis/ports/session"
 )
 
 // Ref identifies one output stream owned by one task in one session.

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/ports/model"
-	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/caelis-labs/caelis/ports/model"
+	"github.com/caelis-labs/caelis/ports/session"
 )
 
 func (d *Adapter) Connect(ctx context.Context, cfg ConnectConfig) (StatusSnapshot, error) {

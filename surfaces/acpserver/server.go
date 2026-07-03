@@ -4,7 +4,7 @@ import (
 	"context"
 	"io"
 
-	"github.com/OnslaughtSnail/caelis/protocol/acp/server"
+	"github.com/caelis-labs/caelis/protocol/acp/server"
 )
 
 func ServeStdio(ctx context.Context, agent server.Agent, in io.Reader, out io.Writer) error {

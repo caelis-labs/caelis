@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/protocol/acp/control"
+	"github.com/caelis-labs/caelis/protocol/acp/control"
 )
 
 // AgentNameFilter decides whether a normalized registered-agent slash command

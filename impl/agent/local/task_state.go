@@ -5,13 +5,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/ports/agent"
-	"github.com/OnslaughtSnail/caelis/ports/delegation"
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
-	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/ports/stream"
-	"github.com/OnslaughtSnail/caelis/ports/subagent"
-	taskapi "github.com/OnslaughtSnail/caelis/ports/task"
+	"github.com/caelis-labs/caelis/ports/agent"
+	"github.com/caelis-labs/caelis/ports/delegation"
+	"github.com/caelis-labs/caelis/ports/sandbox"
+	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/ports/stream"
+	"github.com/caelis-labs/caelis/ports/subagent"
+	taskapi "github.com/caelis-labs/caelis/ports/task"
 )
 
 const (

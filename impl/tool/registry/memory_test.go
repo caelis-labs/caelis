@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/ports/tool"
+	"github.com/caelis-labs/caelis/ports/tool"
 )
 
 func TestMemoryRegistryRegistersAndLooksUpTools(t *testing.T) {

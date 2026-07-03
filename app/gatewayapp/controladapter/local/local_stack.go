@@ -4,11 +4,11 @@ import (
 	"context"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
-	controladapter "github.com/OnslaughtSnail/caelis/app/gatewayapp/controladapter"
-	"github.com/OnslaughtSnail/caelis/ports/agentprofile"
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
-	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/caelis-labs/caelis/app/gatewayapp"
+	controladapter "github.com/caelis-labs/caelis/app/gatewayapp/controladapter"
+	"github.com/caelis-labs/caelis/ports/agentprofile"
+	"github.com/caelis-labs/caelis/ports/sandbox"
+	"github.com/caelis-labs/caelis/ports/session"
 )
 
 type Adapter = controladapter.Adapter

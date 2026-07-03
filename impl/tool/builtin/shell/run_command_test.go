@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/impl/sandbox/host"
-	"github.com/OnslaughtSnail/caelis/internal/commanddiag"
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
-	"github.com/OnslaughtSnail/caelis/ports/tool"
+	"github.com/caelis-labs/caelis/impl/sandbox/host"
+	"github.com/caelis-labs/caelis/internal/commanddiag"
+	"github.com/caelis-labs/caelis/ports/sandbox"
+	"github.com/caelis-labs/caelis/ports/tool"
 )
 
 func TestRunCommandDefinitionExposesMinimalArguments(t *testing.T) {

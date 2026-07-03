@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/configstore"
+	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 )
 
 type MarketplaceInfo struct {

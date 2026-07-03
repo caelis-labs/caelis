@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/ports/model"
+	"github.com/caelis-labs/caelis/ports/model"
 )
 
 // contextOverflowKeywords are vendor-agnostic patterns that indicate a context

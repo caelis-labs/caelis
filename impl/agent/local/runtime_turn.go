@@ -5,8 +5,8 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/ports/agent"
-	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/caelis-labs/caelis/ports/agent"
+	"github.com/caelis-labs/caelis/ports/session"
 )
 
 // RunState returns the last known run state for one session.

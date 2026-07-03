@@ -11,7 +11,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/OnslaughtSnail/caelis/ports/model"
+	"github.com/caelis-labs/caelis/ports/model"
 )
 
 const maxAttachmentImageBytes = 20_000_000

@@ -3,8 +3,8 @@ package tuiapp
 import (
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/ports/displaypolicy"
-	"github.com/OnslaughtSnail/caelis/surfaces/transcript"
+	"github.com/caelis-labs/caelis/ports/displaypolicy"
+	"github.com/caelis-labs/caelis/surfaces/transcript"
 )
 
 // Transitional aliases keep the TUI renderer readable during the transcript

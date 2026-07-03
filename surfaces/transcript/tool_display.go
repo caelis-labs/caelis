@@ -3,7 +3,7 @@ package transcript
 import (
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/ports/displaypolicy"
+	"github.com/caelis-labs/caelis/ports/displaypolicy"
 )
 
 func NormalizeToolStartStatus(status string) string {

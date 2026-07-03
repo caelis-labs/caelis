@@ -1,16 +1,16 @@
 {
-  "name": "@onslaughtsnail/caelis-darwin-arm64",
+  "name": "@caelis/caelis-darwin-arm64",
   "version": "0.0.0-dev",
   "description": "Platform-specific caelis binary for darwin arm64",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/OnslaughtSnail/caelis.git",
+    "url": "git+https://github.com/caelis-labs/caelis.git",
     "directory": "npm/packages/caelis-darwin-arm64"
   },
-  "homepage": "https://github.com/OnslaughtSnail/caelis",
+  "homepage": "https://github.com/caelis-labs/caelis",
   "bugs": {
-    "url": "https://github.com/OnslaughtSnail/caelis/issues"
+    "url": "https://github.com/caelis-labs/caelis/issues"
   },
   "files": [
     "runtime/caelis",

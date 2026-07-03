@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/ports/gateway"
-	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/ports/stream"
-	"github.com/OnslaughtSnail/caelis/protocol/acp"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
+	"github.com/caelis-labs/caelis/ports/gateway"
+	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/ports/stream"
+	"github.com/caelis-labs/caelis/protocol/acp"
+	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 type TerminalOutputRequest = schema.TerminalOutputRequest

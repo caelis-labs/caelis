@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/ports/displaypolicy"
+	"github.com/caelis-labs/caelis/ports/displaypolicy"
 	"github.com/charmbracelet/x/ansi"
 )
 

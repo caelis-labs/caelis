@@ -5,11 +5,11 @@ import (
 	"iter"
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/ports/delegation"
-	"github.com/OnslaughtSnail/caelis/ports/model"
-	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/ports/subagent"
-	"github.com/OnslaughtSnail/caelis/ports/tool"
+	"github.com/caelis-labs/caelis/ports/delegation"
+	"github.com/caelis-labs/caelis/ports/model"
+	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/ports/subagent"
+	"github.com/caelis-labs/caelis/ports/tool"
 )
 
 func TestNewContextProvidesStableReadonlyViews(t *testing.T) {

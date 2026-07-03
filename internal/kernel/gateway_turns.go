@@ -9,11 +9,11 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/OnslaughtSnail/caelis/internal/kernel/hooks"
-	"github.com/OnslaughtSnail/caelis/ports/agent"
-	"github.com/OnslaughtSnail/caelis/ports/model"
-	policyapi "github.com/OnslaughtSnail/caelis/ports/policy"
-	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/caelis-labs/caelis/internal/kernel/hooks"
+	"github.com/caelis-labs/caelis/ports/agent"
+	"github.com/caelis-labs/caelis/ports/model"
+	policyapi "github.com/caelis-labs/caelis/ports/policy"
+	"github.com/caelis-labs/caelis/ports/session"
 )
 
 func (g *Gateway) BeginTurn(ctx context.Context, req BeginTurnRequest) (BeginTurnResult, error) {

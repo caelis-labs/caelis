@@ -5,9 +5,9 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/configstore"
-	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/promptassembly"
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
+	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
+	"github.com/caelis-labs/caelis/app/gatewayapp/internal/promptassembly"
+	"github.com/caelis-labs/caelis/ports/sandbox"
 )
 
 func NormalizeBackend(backend string) (string, error) {

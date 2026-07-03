@@ -4,10 +4,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/projector"
-	"github.com/OnslaughtSnail/caelis/surfaces/tui/acpprojector"
+	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/protocol/acp/metautil"
+	"github.com/caelis-labs/caelis/protocol/acp/projector"
+	"github.com/caelis-labs/caelis/surfaces/tui/acpprojector"
 )
 
 func ptrStr(s string) *string { return &s }

@@ -3,7 +3,7 @@ GIT_DIRTY ?= $(shell test -z "$$(git status --porcelain 2>/dev/null)" || echo di
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 BUILD_VERSION ?= $(if $(and $(strip $(GIT_TAG)),$(filter-out dirty,$(GIT_DIRTY))),$(strip $(GIT_TAG)),dev)
-LDFLAGS ?= -X github.com/OnslaughtSnail/caelis/internal/version.Version=$(BUILD_VERSION) -X github.com/OnslaughtSnail/caelis/internal/version.Commit=$(COMMIT) -X github.com/OnslaughtSnail/caelis/internal/version.Date=$(DATE)
+LDFLAGS ?= -X github.com/caelis-labs/caelis/internal/version.Version=$(BUILD_VERSION) -X github.com/caelis-labs/caelis/internal/version.Commit=$(COMMIT) -X github.com/caelis-labs/caelis/internal/version.Date=$(DATE)
 GOFILES_CMD = if command -v rg >/dev/null 2>&1; then rg --files -0 -g '*.go'; else find . -type f -name '*.go' -print0; fi
 GO_TEST_TIMEOUT ?= 5m
 CACHE_ROOT ?= $(CURDIR)/.tmp/cache

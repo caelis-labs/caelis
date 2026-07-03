@@ -3,7 +3,7 @@ package tuiapp
 import (
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/ports/displaypolicy"
+	"github.com/caelis-labs/caelis/ports/displaypolicy"
 )
 
 func renderACPToolLifecycleRows(blockID string, events []SubagentEvent, idx int, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) ([]RenderedRow, int) {

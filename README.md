@@ -12,13 +12,13 @@ filesystem/search/shell tools, subagent tasks, and ACP-backed participants.
 From npm:
 
 ```bash
-npm i -g @onslaughtsnail/caelis
+npm i -g @caelis/caelis
 ```
 
 or without a global install:
 
 ```bash
-npx @onslaughtsnail/caelis --help
+npx @caelis/caelis --help
 ```
 
 From source:

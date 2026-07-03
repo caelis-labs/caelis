@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/impl/model/internal/codefreecaps"
+	"github.com/caelis-labs/caelis/impl/model/internal/codefreecaps"
 )
 
 // RemoteModel describes one model discovered from provider list APIs.

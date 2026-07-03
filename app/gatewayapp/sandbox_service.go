@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/sandboxpolicy"
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
+	"github.com/caelis-labs/caelis/app/gatewayapp/internal/sandboxpolicy"
+	"github.com/caelis-labs/caelis/ports/sandbox"
 )
 
 func (s *Stack) SetSandboxBackend(_ context.Context, backend string) (SandboxStatus, error) {

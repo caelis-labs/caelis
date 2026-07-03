@@ -5,12 +5,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/impl/agent/acp/internal/acpconvert"
-	"github.com/OnslaughtSnail/caelis/ports/model"
-	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/client"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
-	acpschema "github.com/OnslaughtSnail/caelis/protocol/acp/schema"
+	"github.com/caelis-labs/caelis/impl/agent/acp/internal/acpconvert"
+	"github.com/caelis-labs/caelis/ports/model"
+	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/protocol/acp/client"
+	"github.com/caelis-labs/caelis/protocol/acp/metautil"
+	acpschema "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 type VisibilityPolicy func(updateType string, eventType session.EventType) session.Visibility

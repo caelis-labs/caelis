@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/ports/displaypolicy"
-	"github.com/OnslaughtSnail/caelis/surfaces/transcript"
+	"github.com/caelis-labs/caelis/ports/displaypolicy"
+	"github.com/caelis-labs/caelis/surfaces/transcript"
 )
 
 func toolDisplayArgs(name string, raw map[string]any, fallback ...string) string {

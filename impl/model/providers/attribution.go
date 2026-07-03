@@ -4,11 +4,11 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/internal/version"
+	"github.com/caelis-labs/caelis/internal/version"
 )
 
 const (
-	caelisOpenRouterReferer = "https://github.com/OnslaughtSnail/caelis"
+	caelisOpenRouterReferer = "https://github.com/caelis-labs/caelis"
 	caelisOpenRouterTitle   = "Caelis"
 )
 

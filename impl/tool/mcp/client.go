@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/ports/plugin"
+	"github.com/caelis-labs/caelis/ports/plugin"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 

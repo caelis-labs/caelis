@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
+	"github.com/caelis-labs/caelis/ports/sandbox"
 )
 
 func TestBestDetectsWindowsMSYSSSHSignalPipe(t *testing.T) {

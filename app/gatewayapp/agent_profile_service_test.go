@@ -3,7 +3,7 @@ package gatewayapp
 import (
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/ports/agentprofile"
+	"github.com/caelis-labs/caelis/ports/agentprofile"
 )
 
 func TestReviewSubagentPromptScopesWorkspaceReview(t *testing.T) {

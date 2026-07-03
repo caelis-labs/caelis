@@ -7,8 +7,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	controlprompt "github.com/OnslaughtSnail/caelis/ports/controlprompt"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/control"
+	controlprompt "github.com/caelis-labs/caelis/ports/controlprompt"
+	"github.com/caelis-labs/caelis/protocol/acp/control"
 )
 
 func slashPluginWithContext(ctx context.Context, service control.PluginService, send func(tea.Msg), args string) TaskResultMsg {

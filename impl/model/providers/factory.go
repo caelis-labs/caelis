@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/ports/model"
+	"github.com/caelis-labs/caelis/ports/model"
 )
 
 // Factory builds model providers from alias configs.

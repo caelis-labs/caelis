@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"strings"
 
-	controlcommands "github.com/OnslaughtSnail/caelis/ports/controlcommand"
-	prompt "github.com/OnslaughtSnail/caelis/ports/controlprompt"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/control"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
+	controlcommands "github.com/caelis-labs/caelis/ports/controlcommand"
+	prompt "github.com/caelis-labs/caelis/ports/controlprompt"
+	"github.com/caelis-labs/caelis/protocol/acp/control"
+	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
 // Router dispatches surface-neutral prompt input through control.Service.

@@ -5,14 +5,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/impl/model/catalog"
-	"github.com/OnslaughtSnail/caelis/impl/model/providers"
-	"github.com/OnslaughtSnail/caelis/ports/compact"
-	"github.com/OnslaughtSnail/caelis/ports/controller"
-	"github.com/OnslaughtSnail/caelis/ports/gateway"
-	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/ports/skill"
-	"github.com/OnslaughtSnail/caelis/protocol/acp"
+	"github.com/caelis-labs/caelis/impl/model/catalog"
+	"github.com/caelis-labs/caelis/impl/model/providers"
+	"github.com/caelis-labs/caelis/ports/compact"
+	"github.com/caelis-labs/caelis/ports/controller"
+	"github.com/caelis-labs/caelis/ports/gateway"
+	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/ports/skill"
+	"github.com/caelis-labs/caelis/protocol/acp"
 )
 
 type ModelService struct {

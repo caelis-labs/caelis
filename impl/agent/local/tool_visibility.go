@@ -3,9 +3,9 @@ package local
 import (
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/ports/compact"
-	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/ports/tool"
+	"github.com/caelis-labs/caelis/ports/compact"
+	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/ports/tool"
 )
 
 func promptEventsWithToolVisibilityMetadata(promptEvents []*session.Event, sourceEvents []*session.Event) []*session.Event {

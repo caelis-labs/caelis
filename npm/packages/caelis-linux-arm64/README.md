@@ -1,5 +1,5 @@
-# @onslaughtsnail/caelis-linux-arm64
+# @caelis/caelis-linux-arm64
 
 Platform-specific `caelis` binary package for Linux arm64.
 
-This package is an internal install target for `@onslaughtsnail/caelis`.
+This package is an internal install target for `@caelis/caelis`.

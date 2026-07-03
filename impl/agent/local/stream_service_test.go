@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/ports/delegation"
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
-	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/ports/stream"
-	taskapi "github.com/OnslaughtSnail/caelis/ports/task"
+	"github.com/caelis-labs/caelis/ports/delegation"
+	"github.com/caelis-labs/caelis/ports/sandbox"
+	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/ports/stream"
+	taskapi "github.com/caelis-labs/caelis/ports/task"
 )
 
 func TestStreamReadCommandUsesCallbackOutputWithoutReadFallback(t *testing.T) {

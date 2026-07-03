@@ -9,11 +9,11 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/OnslaughtSnail/caelis/impl/agent/local/chat"
-	"github.com/OnslaughtSnail/caelis/ports/agent"
-	"github.com/OnslaughtSnail/caelis/ports/model"
-	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/ports/tool"
+	"github.com/caelis-labs/caelis/impl/agent/local/chat"
+	"github.com/caelis-labs/caelis/ports/agent"
+	"github.com/caelis-labs/caelis/ports/model"
+	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/ports/tool"
 )
 
 // ScriptedModel is a deterministic model.Client for regression scenarios. Each

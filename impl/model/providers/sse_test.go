@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/ports/model"
+	"github.com/caelis-labs/caelis/ports/model"
 )
 
 func TestReadSSEWithFirstEventTimeout(t *testing.T) {

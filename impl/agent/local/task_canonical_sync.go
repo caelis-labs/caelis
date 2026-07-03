@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/ports/session"
-	taskapi "github.com/OnslaughtSnail/caelis/ports/task"
+	"github.com/caelis-labs/caelis/ports/session"
+	taskapi "github.com/caelis-labs/caelis/ports/task"
 )
 
 func (tm *taskRuntime) syncCanonicalToolResult(ctx context.Context, ref session.SessionRef, event *session.Event) error {

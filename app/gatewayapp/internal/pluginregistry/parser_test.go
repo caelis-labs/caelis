@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/ports/plugin"
+	"github.com/caelis-labs/caelis/ports/plugin"
 )
 
 func TestResolveSafePath(t *testing.T) {

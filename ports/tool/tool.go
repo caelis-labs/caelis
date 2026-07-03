@@ -7,7 +7,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/ports/model"
+	"github.com/caelis-labs/caelis/ports/model"
 )
 
 // Definition is the stable tool declaration exposed to runtimes and model

@@ -1,6 +1,6 @@
 package tuiapp
 
-import "github.com/OnslaughtSnail/caelis/surfaces/tui/displaymodel"
+import "github.com/caelis-labs/caelis/surfaces/tui/displaymodel"
 
 type WelcomeBlock struct {
 	id        string

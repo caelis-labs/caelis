@@ -4,8 +4,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/ports/displaypolicy"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
+	"github.com/caelis-labs/caelis/ports/displaypolicy"
+	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
 func TerminalFinalWithoutContent(input ToolOutputFallbackInput) bool {

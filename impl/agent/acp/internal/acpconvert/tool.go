@@ -4,10 +4,10 @@ import (
 	"maps"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/client"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
-	acpschema "github.com/OnslaughtSnail/caelis/protocol/acp/schema"
+	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/protocol/acp/client"
+	"github.com/caelis-labs/caelis/protocol/acp/metautil"
+	acpschema "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func ToolDisplayName(kind string, title string) string {

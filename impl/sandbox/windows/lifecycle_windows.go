@@ -11,8 +11,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/acl"
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
+	"github.com/caelis-labs/caelis/impl/sandbox/windows/internal/acl"
+	"github.com/caelis-labs/caelis/ports/sandbox"
 )
 
 func (r *runtime) Status() sandbox.Status {

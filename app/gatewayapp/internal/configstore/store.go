@@ -10,9 +10,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/modelregistry"
-	"github.com/OnslaughtSnail/caelis/ports/agentprofile"
-	policyapi "github.com/OnslaughtSnail/caelis/ports/policy"
+	"github.com/caelis-labs/caelis/app/gatewayapp/internal/modelregistry"
+	"github.com/caelis-labs/caelis/ports/agentprofile"
+	policyapi "github.com/caelis-labs/caelis/ports/policy"
 )
 
 type AppConfig struct {

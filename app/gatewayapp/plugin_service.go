@@ -9,10 +9,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/pluginregistry"
-	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/promptassembly"
-	"github.com/OnslaughtSnail/caelis/impl/tool/mcp"
-	pluginapi "github.com/OnslaughtSnail/caelis/ports/plugin"
+	"github.com/caelis-labs/caelis/app/gatewayapp/internal/pluginregistry"
+	"github.com/caelis-labs/caelis/app/gatewayapp/internal/promptassembly"
+	"github.com/caelis-labs/caelis/impl/tool/mcp"
+	pluginapi "github.com/caelis-labs/caelis/ports/plugin"
 )
 
 type PluginService struct {

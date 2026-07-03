@@ -7,7 +7,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/ports/assembly"
+	"github.com/caelis-labs/caelis/ports/assembly"
 )
 
 const (

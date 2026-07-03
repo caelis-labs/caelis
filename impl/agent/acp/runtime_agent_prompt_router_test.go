@@ -7,16 +7,16 @@ import (
 	"strings"
 	"testing"
 
-	runtimeacp "github.com/OnslaughtSnail/caelis/impl/agent/acp"
-	sessionfile "github.com/OnslaughtSnail/caelis/impl/session/file"
-	"github.com/OnslaughtSnail/caelis/impl/session/memory"
-	"github.com/OnslaughtSnail/caelis/ports/agent"
-	controlprompt "github.com/OnslaughtSnail/caelis/ports/controlprompt"
-	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/protocol/acp"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/control"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
+	runtimeacp "github.com/caelis-labs/caelis/impl/agent/acp"
+	sessionfile "github.com/caelis-labs/caelis/impl/session/file"
+	"github.com/caelis-labs/caelis/impl/session/memory"
+	"github.com/caelis-labs/caelis/ports/agent"
+	controlprompt "github.com/caelis-labs/caelis/ports/controlprompt"
+	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/protocol/acp"
+	"github.com/caelis-labs/caelis/protocol/acp/control"
+	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
+	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestRuntimeAgentPromptSlashCommandUsesPromptRouterBeforeMainRuntime(t *testing.T) {

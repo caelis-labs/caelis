@@ -15,8 +15,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/impl/sandbox/internal/consoleoutput"
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
+	"github.com/caelis-labs/caelis/impl/sandbox/internal/consoleoutput"
+	"github.com/caelis-labs/caelis/ports/sandbox"
 )
 
 // Config defines one host-backed sandbox runtime.

@@ -3,7 +3,7 @@ package file
 import (
 	"context"
 
-	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/caelis-labs/caelis/ports/session"
 )
 
 func (s *Service) StartSession(

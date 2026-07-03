@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/protocol/acp"
+	"github.com/caelis-labs/caelis/protocol/acp"
 )
 
 func TestCLIACPXExecE2E(t *testing.T) {

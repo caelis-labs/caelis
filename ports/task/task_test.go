@@ -3,8 +3,8 @@ package task
 import (
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
-	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/caelis-labs/caelis/ports/sandbox"
+	"github.com/caelis-labs/caelis/ports/session"
 )
 
 func TestCloneEntryNormalizesMutableFields(t *testing.T) {

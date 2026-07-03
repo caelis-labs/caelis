@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/ports/model"
+	"github.com/caelis-labs/caelis/ports/model"
 )
 
 // APIType defines protocol dialect used by a model provider.

@@ -3,8 +3,8 @@ package acp
 import (
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/protocol/acp/client"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
+	"github.com/caelis-labs/caelis/protocol/acp/client"
+	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestACPEnvelopeFromUpdatePassesThroughUsageUpdate(t *testing.T) {

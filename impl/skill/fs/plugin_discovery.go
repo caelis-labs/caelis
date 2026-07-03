@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/ports/skill"
+	"github.com/caelis-labs/caelis/ports/skill"
 )
 
 // DiscoverPluginBundleMeta discovers only plugin-managed skill bundles.

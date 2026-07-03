@@ -5,11 +5,11 @@ import (
 	"os"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/configstore"
-	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/modelregistry"
-	"github.com/OnslaughtSnail/caelis/internal/acpagentenv"
-	"github.com/OnslaughtSnail/caelis/ports/assembly"
-	commands "github.com/OnslaughtSnail/caelis/ports/controlcommand"
+	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
+	"github.com/caelis-labs/caelis/app/gatewayapp/internal/modelregistry"
+	"github.com/caelis-labs/caelis/internal/acpagentenv"
+	"github.com/caelis-labs/caelis/ports/assembly"
+	commands "github.com/caelis-labs/caelis/ports/controlcommand"
 )
 
 type RuntimeConfig struct {

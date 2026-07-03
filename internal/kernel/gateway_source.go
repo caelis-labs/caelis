@@ -3,8 +3,8 @@ package kernel
 import (
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/internal/acpbridge"
-	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/caelis-labs/caelis/internal/acpbridge"
+	"github.com/caelis-labs/caelis/ports/session"
 )
 
 func (g *Gateway) forwardHandleSourceEvents(activeSession session.Session, handle *turnHandle, source acpbridge.EventHandle) {

@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	pluginapi "github.com/OnslaughtSnail/caelis/ports/plugin"
+	pluginapi "github.com/caelis-labs/caelis/ports/plugin"
 )
 
 func TestPluginConfigID(t *testing.T) {

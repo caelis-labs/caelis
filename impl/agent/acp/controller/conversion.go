@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/ports/model"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/client"
+	"github.com/caelis-labs/caelis/ports/model"
+	"github.com/caelis-labs/caelis/protocol/acp/client"
 )
 
 func buildPromptParts(input string, parts []model.ContentPart) []json.RawMessage {

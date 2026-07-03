@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/caelis-labs/caelis/ports/session"
 )
 
 func (s *Store) resolveWritePath(sess session.Session) (string, error) {

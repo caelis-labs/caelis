@@ -7,11 +7,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/web"
-	"github.com/OnslaughtSnail/caelis/ports/compact"
-	"github.com/OnslaughtSnail/caelis/ports/model"
-	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/ports/tool"
+	"github.com/caelis-labs/caelis/impl/tool/builtin/web"
+	"github.com/caelis-labs/caelis/ports/compact"
+	"github.com/caelis-labs/caelis/ports/model"
+	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/ports/tool"
 )
 
 func TestAutoCompactModelWrapperPreservesWebSearcher(t *testing.T) {

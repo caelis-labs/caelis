@@ -4,15 +4,15 @@ import (
 	"context"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
-	"github.com/OnslaughtSnail/caelis/app/gatewayapp/controladapter/local"
-	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/agentregistry"
-	runtimeacp "github.com/OnslaughtSnail/caelis/impl/agent/acp"
-	controlpromptrouter "github.com/OnslaughtSnail/caelis/internal/controlpromptrouter"
-	controlcommands "github.com/OnslaughtSnail/caelis/ports/controlcommand"
-	controlprompt "github.com/OnslaughtSnail/caelis/ports/controlprompt"
-	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/control"
+	"github.com/caelis-labs/caelis/app/gatewayapp"
+	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter/local"
+	"github.com/caelis-labs/caelis/app/gatewayapp/internal/agentregistry"
+	runtimeacp "github.com/caelis-labs/caelis/impl/agent/acp"
+	controlpromptrouter "github.com/caelis-labs/caelis/internal/controlpromptrouter"
+	controlcommands "github.com/caelis-labs/caelis/ports/controlcommand"
+	controlprompt "github.com/caelis-labs/caelis/ports/controlprompt"
+	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/protocol/acp/control"
 )
 
 func NewFromStack(stack *gatewayapp.Stack) (*runtimeacp.RuntimeAgent, error) {

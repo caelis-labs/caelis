@@ -5,10 +5,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/impl/agent/acp/internal/acpingress"
-	"github.com/OnslaughtSnail/caelis/ports/controller"
-	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/client"
+	"github.com/caelis-labs/caelis/impl/agent/acp/internal/acpingress"
+	"github.com/caelis-labs/caelis/ports/controller"
+	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/protocol/acp/client"
 )
 
 func normalizeACPUpdateEvent(

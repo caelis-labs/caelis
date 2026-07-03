@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
+	"github.com/caelis-labs/caelis/ports/sandbox"
 )
 
 var (

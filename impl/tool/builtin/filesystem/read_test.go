@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/ports/model"
-	"github.com/OnslaughtSnail/caelis/ports/tool"
+	"github.com/caelis-labs/caelis/ports/model"
+	"github.com/caelis-labs/caelis/ports/tool"
 )
 
 func TestReadToolDoesNotScanOversizedTailPastLimit(t *testing.T) {

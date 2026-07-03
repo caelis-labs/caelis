@@ -7,7 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/OnslaughtSnail/caelis/surfaces/tui/tuikit"
+	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
 
 // commitUserDisplayLine appends a local user display line without deduping.

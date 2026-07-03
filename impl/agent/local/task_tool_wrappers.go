@@ -8,17 +8,17 @@ import (
 	"strings"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/shell"
-	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/spawn"
-	tasktool "github.com/OnslaughtSnail/caelis/impl/tool/builtin/task"
-	"github.com/OnslaughtSnail/caelis/internal/commanddiag"
-	"github.com/OnslaughtSnail/caelis/ports/agent"
-	"github.com/OnslaughtSnail/caelis/ports/model"
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
-	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/ports/subagent"
-	taskapi "github.com/OnslaughtSnail/caelis/ports/task"
-	"github.com/OnslaughtSnail/caelis/ports/tool"
+	"github.com/caelis-labs/caelis/impl/tool/builtin/shell"
+	"github.com/caelis-labs/caelis/impl/tool/builtin/spawn"
+	tasktool "github.com/caelis-labs/caelis/impl/tool/builtin/task"
+	"github.com/caelis-labs/caelis/internal/commanddiag"
+	"github.com/caelis-labs/caelis/ports/agent"
+	"github.com/caelis-labs/caelis/ports/model"
+	"github.com/caelis-labs/caelis/ports/sandbox"
+	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/ports/subagent"
+	taskapi "github.com/caelis-labs/caelis/ports/task"
+	"github.com/caelis-labs/caelis/ports/tool"
 )
 
 func (r *Runtime) wrapToolsForRuntime(activeSession session.Session, ref session.SessionRef, spec agent.AgentSpec, toolCtx runtimeToolContext) []tool.Tool {

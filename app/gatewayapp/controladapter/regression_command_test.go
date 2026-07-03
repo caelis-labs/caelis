@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
-	"github.com/OnslaughtSnail/caelis/impl/model/providers"
-	"github.com/OnslaughtSnail/caelis/ports/assembly"
+	"github.com/caelis-labs/caelis/app/gatewayapp"
+	"github.com/caelis-labs/caelis/impl/model/providers"
+	"github.com/caelis-labs/caelis/ports/assembly"
 )
 
 func newRegressionDriver(t *testing.T) (*Adapter, *gatewayapp.Stack) {

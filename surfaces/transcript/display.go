@@ -1,6 +1,6 @@
 package transcript
 
-import "github.com/OnslaughtSnail/caelis/protocol/acp/schema"
+import "github.com/caelis-labs/caelis/protocol/acp/schema"
 
 // ToolStatusStarted and ToolStatusRunning are runtime-facing intermediate
 // states. Completed and failed intentionally reuse ACP schema values; the

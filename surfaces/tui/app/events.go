@@ -6,8 +6,8 @@ package tuiapp
 import (
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/protocol/acp/control"
-	"github.com/OnslaughtSnail/caelis/surfaces/transcript"
+	"github.com/caelis-labs/caelis/protocol/acp/control"
+	"github.com/caelis-labs/caelis/surfaces/transcript"
 )
 
 type HintPriority int

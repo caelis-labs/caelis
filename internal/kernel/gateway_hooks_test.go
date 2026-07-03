@@ -11,13 +11,13 @@ import (
 	"testing"
 	"time"
 
-	sessionfile "github.com/OnslaughtSnail/caelis/impl/session/file"
-	inmemory "github.com/OnslaughtSnail/caelis/impl/session/memory"
-	"github.com/OnslaughtSnail/caelis/internal/kernel/hooks"
-	"github.com/OnslaughtSnail/caelis/ports/agent"
-	"github.com/OnslaughtSnail/caelis/ports/model"
-	"github.com/OnslaughtSnail/caelis/ports/plugin"
-	"github.com/OnslaughtSnail/caelis/ports/session"
+	sessionfile "github.com/caelis-labs/caelis/impl/session/file"
+	inmemory "github.com/caelis-labs/caelis/impl/session/memory"
+	"github.com/caelis-labs/caelis/internal/kernel/hooks"
+	"github.com/caelis-labs/caelis/ports/agent"
+	"github.com/caelis-labs/caelis/ports/model"
+	"github.com/caelis-labs/caelis/ports/plugin"
+	"github.com/caelis-labs/caelis/ports/session"
 )
 
 func pluginHookEvents(events []*session.Event) []*session.Event {

@@ -4,8 +4,8 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/OnslaughtSnail/caelis/protocol/acp/client"
-	acpschema "github.com/OnslaughtSnail/caelis/protocol/acp/schema"
+	"github.com/caelis-labs/caelis/protocol/acp/client"
+	acpschema "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 // StripTerminalConsoleFenceText removes a whole-output ```console fence added

@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/impl/model/internal/codefreecaps"
+	"github.com/caelis-labs/caelis/impl/model/internal/codefreecaps"
 )
 
 func TestDiscoverGeminiModels_UsesAPIKeyHeader(t *testing.T) {

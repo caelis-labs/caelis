@@ -8,17 +8,17 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/OnslaughtSnail/caelis/impl/agent/acp/loader"
-	"github.com/OnslaughtSnail/caelis/impl/agent/acp/terminal"
-	"github.com/OnslaughtSnail/caelis/internal/version"
-	"github.com/OnslaughtSnail/caelis/ports/agent"
-	"github.com/OnslaughtSnail/caelis/ports/approval"
-	controlprompt "github.com/OnslaughtSnail/caelis/ports/controlprompt"
-	"github.com/OnslaughtSnail/caelis/ports/model"
-	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/ports/stream"
-	"github.com/OnslaughtSnail/caelis/protocol/acp"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/projector"
+	"github.com/caelis-labs/caelis/impl/agent/acp/loader"
+	"github.com/caelis-labs/caelis/impl/agent/acp/terminal"
+	"github.com/caelis-labs/caelis/internal/version"
+	"github.com/caelis-labs/caelis/ports/agent"
+	"github.com/caelis-labs/caelis/ports/approval"
+	controlprompt "github.com/caelis-labs/caelis/ports/controlprompt"
+	"github.com/caelis-labs/caelis/ports/model"
+	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/ports/stream"
+	"github.com/caelis-labs/caelis/protocol/acp"
+	"github.com/caelis-labs/caelis/protocol/acp/projector"
 )
 
 // BuildAgentSpecFunc assembles the runtime-facing agent spec for one ACP

@@ -1,6 +1,6 @@
 package tuiapp
 
-import "github.com/OnslaughtSnail/caelis/ports/session"
+import "github.com/caelis-labs/caelis/ports/session"
 
 func testToolContent(text string) []session.ProtocolToolCallContent {
 	return []session.ProtocolToolCallContent{{

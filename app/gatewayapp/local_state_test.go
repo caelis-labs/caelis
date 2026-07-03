@@ -13,15 +13,15 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/impl/model/providers"
-	"github.com/OnslaughtSnail/caelis/ports/assembly"
-	"github.com/OnslaughtSnail/caelis/ports/compact"
-	"github.com/OnslaughtSnail/caelis/ports/gateway"
-	"github.com/OnslaughtSnail/caelis/ports/model"
-	"github.com/OnslaughtSnail/caelis/ports/session"
-	taskapi "github.com/OnslaughtSnail/caelis/ports/task"
-	"github.com/OnslaughtSnail/caelis/protocol/acp"
-	"github.com/OnslaughtSnail/caelis/surfaces/headless"
+	"github.com/caelis-labs/caelis/impl/model/providers"
+	"github.com/caelis-labs/caelis/ports/assembly"
+	"github.com/caelis-labs/caelis/ports/compact"
+	"github.com/caelis-labs/caelis/ports/gateway"
+	"github.com/caelis-labs/caelis/ports/model"
+	"github.com/caelis-labs/caelis/ports/session"
+	taskapi "github.com/caelis-labs/caelis/ports/task"
+	"github.com/caelis-labs/caelis/protocol/acp"
+	"github.com/caelis-labs/caelis/surfaces/headless"
 )
 
 func TestStackSessionRuntimeStateTracksModelAndSessionModeOverrides(t *testing.T) {

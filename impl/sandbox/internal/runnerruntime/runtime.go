@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/impl/sandbox/internal/cmdsession"
-	"github.com/OnslaughtSnail/caelis/impl/sandbox/internal/policy"
-	"github.com/OnslaughtSnail/caelis/impl/sandbox/internal/policyfs"
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
+	"github.com/caelis-labs/caelis/impl/sandbox/internal/cmdsession"
+	"github.com/caelis-labs/caelis/impl/sandbox/internal/policy"
+	"github.com/caelis-labs/caelis/impl/sandbox/internal/policyfs"
+	"github.com/caelis-labs/caelis/ports/sandbox"
 )
 
 type OutputChunk struct {

@@ -8,9 +8,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/modelregistry"
-	"github.com/OnslaughtSnail/caelis/impl/model/providers"
-	kernelimpl "github.com/OnslaughtSnail/caelis/internal/kernel"
+	"github.com/caelis-labs/caelis/app/gatewayapp/internal/modelregistry"
+	"github.com/caelis-labs/caelis/impl/model/providers"
+	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 )
 
 var errAmbiguousModelAlias = errors.New("ambiguous model alias")

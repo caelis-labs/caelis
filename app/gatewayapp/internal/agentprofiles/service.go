@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/ports/agentprofile"
+	"github.com/caelis-labs/caelis/ports/agentprofile"
 )
 
 const DefaultAgentsDirName = agentprofile.DefaultAgentsDirName

@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/ports/plugin"
+	"github.com/caelis-labs/caelis/ports/plugin"
 )
 
 type CaelisPluginJSON struct {

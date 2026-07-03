@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
-	"github.com/OnslaughtSnail/caelis/ports/gateway"
-	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/surfaces/headless"
+	"github.com/caelis-labs/caelis/app/gatewayapp"
+	"github.com/caelis-labs/caelis/ports/gateway"
+	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/surfaces/headless"
 )
 
 func TestLocalStackClaudeBuiltInACPE2E(t *testing.T) {

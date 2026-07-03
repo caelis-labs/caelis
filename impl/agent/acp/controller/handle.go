@@ -5,11 +5,11 @@ import (
 	"iter"
 	"sync"
 
-	"github.com/OnslaughtSnail/caelis/internal/acpbridge"
-	"github.com/OnslaughtSnail/caelis/internal/eventqueue"
-	"github.com/OnslaughtSnail/caelis/ports/controller"
-	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
+	"github.com/caelis-labs/caelis/internal/acpbridge"
+	"github.com/caelis-labs/caelis/internal/eventqueue"
+	"github.com/caelis-labs/caelis/ports/controller"
+	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
 type turnHandle struct {

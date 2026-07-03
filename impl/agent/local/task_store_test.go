@@ -3,8 +3,8 @@ package local
 import (
 	"testing"
 
-	sessionfile "github.com/OnslaughtSnail/caelis/impl/session/file"
-	taskapi "github.com/OnslaughtSnail/caelis/ports/task"
+	sessionfile "github.com/caelis-labs/caelis/impl/session/file"
+	taskapi "github.com/caelis-labs/caelis/ports/task"
 )
 
 func newFileTaskStoreForTest(t testing.TB) taskapi.Store {

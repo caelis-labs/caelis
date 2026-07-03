@@ -5,8 +5,8 @@ import (
 	"time"
 
 	"charm.land/lipgloss/v2"
-	"github.com/OnslaughtSnail/caelis/surfaces/transcript"
-	"github.com/OnslaughtSnail/caelis/surfaces/tui/tuikit"
+	"github.com/caelis-labs/caelis/surfaces/transcript"
+	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
 
 // SubagentEventKind identifies the type of a child session event.

@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/pathutil"
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
+	"github.com/caelis-labs/caelis/impl/sandbox/windows/internal/pathutil"
+	"github.com/caelis-labs/caelis/ports/sandbox"
 )
 
 func TestBuildUsesOnlyWritableRootsAndDenyWriteCarveouts(t *testing.T) {

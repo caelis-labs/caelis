@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/ports/model"
-	porttool "github.com/OnslaughtSnail/caelis/ports/tool"
+	"github.com/caelis-labs/caelis/ports/model"
+	porttool "github.com/caelis-labs/caelis/ports/tool"
 )
 
 func TestOpenAICompatStream_PropagatesSSEErrorsWithoutTurnComplete(t *testing.T) {

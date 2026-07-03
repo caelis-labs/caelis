@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/internal/evalharness"
-	"github.com/OnslaughtSnail/caelis/ports/model"
-	"github.com/OnslaughtSnail/caelis/ports/tool"
+	"github.com/caelis-labs/caelis/internal/evalharness"
+	"github.com/caelis-labs/caelis/ports/model"
+	"github.com/caelis-labs/caelis/ports/tool"
 )
 
 func TestRegressionMultiToolCallOrderingTrace(t *testing.T) {

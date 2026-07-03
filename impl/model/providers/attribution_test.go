@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/internal/version"
+	"github.com/caelis-labs/caelis/internal/version"
 )
 
 func TestApplyDefaultAttributionHeadersAddsCaelisIdentity(t *testing.T) {

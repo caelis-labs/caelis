@@ -5,7 +5,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/ports/model"
+	"github.com/caelis-labs/caelis/ports/model"
 )
 
 // NormalizeSessionRef returns one normalized session ref.

@@ -7,8 +7,8 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/OnslaughtSnail/caelis/impl/sandbox/internal/winps"
-	"github.com/OnslaughtSnail/caelis/internal/winproc"
+	"github.com/caelis-labs/caelis/impl/sandbox/internal/winps"
+	"github.com/caelis-labs/caelis/internal/winproc"
 )
 
 func newShellCommand(ctx context.Context, command string, interactive bool) *exec.Cmd {

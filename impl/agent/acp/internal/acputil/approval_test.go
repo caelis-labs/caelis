@@ -3,7 +3,7 @@ package acputil
 import (
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/protocol/acp/client"
+	"github.com/caelis-labs/caelis/protocol/acp/client"
 )
 
 func TestToolCallNameInfersSemanticExecuteName(t *testing.T) {

@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/ports/stream"
+	"github.com/caelis-labs/caelis/ports/stream"
 )
 
 type Service struct {

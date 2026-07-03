@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/ports/compact"
-	controlcommands "github.com/OnslaughtSnail/caelis/ports/controlcommand"
-	prompt "github.com/OnslaughtSnail/caelis/ports/controlprompt"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/control"
+	"github.com/caelis-labs/caelis/ports/compact"
+	controlcommands "github.com/caelis-labs/caelis/ports/controlcommand"
+	prompt "github.com/caelis-labs/caelis/ports/controlprompt"
+	"github.com/caelis-labs/caelis/protocol/acp/control"
 )
 
 func (r Router) dispatchSlash(ctx context.Context, cmd string, args string, argsStart int, fullText string, attachments []control.Attachment) (prompt.Result, error) {

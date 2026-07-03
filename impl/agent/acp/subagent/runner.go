@@ -10,14 +10,14 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/impl/agent/acp/internal/acpingress"
-	"github.com/OnslaughtSnail/caelis/impl/agent/acp/internal/acputil"
-	"github.com/OnslaughtSnail/caelis/ports/delegation"
-	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/ports/stream"
-	"github.com/OnslaughtSnail/caelis/ports/subagent"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/client"
-	acpschema "github.com/OnslaughtSnail/caelis/protocol/acp/schema"
+	"github.com/caelis-labs/caelis/impl/agent/acp/internal/acpingress"
+	"github.com/caelis-labs/caelis/impl/agent/acp/internal/acputil"
+	"github.com/caelis-labs/caelis/ports/delegation"
+	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/ports/stream"
+	"github.com/caelis-labs/caelis/ports/subagent"
+	"github.com/caelis-labs/caelis/protocol/acp/client"
+	acpschema "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 type PermissionHandler func(context.Context, client.RequestPermissionRequest) (client.RequestPermissionResponse, error)

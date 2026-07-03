@@ -4,10 +4,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
-	"github.com/OnslaughtSnail/caelis/surfaces/transcript"
+	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
+	"github.com/caelis-labs/caelis/protocol/acp/metautil"
+	"github.com/caelis-labs/caelis/protocol/acp/schema"
+	"github.com/caelis-labs/caelis/surfaces/transcript"
 )
 
 func TestProjectACPEventToTranscriptEventsUsesEnvelopeScope(t *testing.T) {

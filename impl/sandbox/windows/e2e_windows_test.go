@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
+	"github.com/caelis-labs/caelis/ports/sandbox"
 )
 
 func TestWindowsWorkspaceWriteSandboxE2E(t *testing.T) {

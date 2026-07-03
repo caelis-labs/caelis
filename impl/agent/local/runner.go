@@ -7,10 +7,10 @@ import (
 	"iter"
 	"sync"
 
-	"github.com/OnslaughtSnail/caelis/internal/acpbridge"
-	"github.com/OnslaughtSnail/caelis/internal/eventqueue"
-	"github.com/OnslaughtSnail/caelis/ports/agent"
-	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/caelis-labs/caelis/internal/acpbridge"
+	"github.com/caelis-labs/caelis/internal/eventqueue"
+	"github.com/caelis-labs/caelis/ports/agent"
+	"github.com/caelis-labs/caelis/ports/session"
 )
 
 type runner struct {

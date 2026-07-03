@@ -10,7 +10,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/pathutil"
+	"github.com/caelis-labs/caelis/impl/sandbox/windows/internal/pathutil"
 )
 
 func TestBindWriteRootsPersistsStableRootSIDs(t *testing.T) {

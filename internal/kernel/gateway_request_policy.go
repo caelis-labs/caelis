@@ -1,7 +1,7 @@
 package kernel
 
 import (
-	"github.com/OnslaughtSnail/caelis/ports/agent"
+	"github.com/caelis-labs/caelis/ports/agent"
 )
 
 type defaultRequestPolicy struct{}

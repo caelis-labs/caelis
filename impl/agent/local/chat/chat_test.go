@@ -12,11 +12,11 @@ import (
 	"testing"
 	"time"
 
-	sessionfile "github.com/OnslaughtSnail/caelis/impl/session/file"
-	"github.com/OnslaughtSnail/caelis/ports/agent"
-	"github.com/OnslaughtSnail/caelis/ports/model"
-	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/ports/tool"
+	sessionfile "github.com/caelis-labs/caelis/impl/session/file"
+	"github.com/caelis-labs/caelis/ports/agent"
+	"github.com/caelis-labs/caelis/ports/model"
+	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/ports/tool"
 )
 
 func TestChatAgentUsesSessionMessages(t *testing.T) {

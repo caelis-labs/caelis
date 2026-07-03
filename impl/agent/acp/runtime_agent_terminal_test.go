@@ -3,8 +3,8 @@ package acp
 import (
 	"testing"
 
-	protocolacp "github.com/OnslaughtSnail/caelis/protocol/acp"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
+	protocolacp "github.com/caelis-labs/caelis/protocol/acp"
+	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
 func TestNormalizeACPStdioTerminalExtensionDoesNotInventTerminalForPlainTool(t *testing.T) {

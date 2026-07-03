@@ -8,8 +8,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/OnslaughtSnail/caelis/impl/skill/system"
-	"github.com/OnslaughtSnail/caelis/ports/skill"
+	"github.com/caelis-labs/caelis/impl/skill/system"
+	"github.com/caelis-labs/caelis/ports/skill"
 )
 
 type Meta = skill.Meta

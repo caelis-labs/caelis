@@ -3,7 +3,7 @@ package sandboxpolicy
 import (
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/configstore"
+	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 )
 
 func TestNormalizeBackendAcceptsWindowsAliases(t *testing.T) {

@@ -1,6 +1,6 @@
 package terminal
 
-import "github.com/OnslaughtSnail/caelis/protocol/acp"
+import "github.com/caelis-labs/caelis/protocol/acp"
 
 const (
 	MethodTerminalCreate      = acp.MethodTerminalCreate

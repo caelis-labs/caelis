@@ -3,7 +3,7 @@ package acp
 import (
 	"context"
 
-	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
+	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 const (

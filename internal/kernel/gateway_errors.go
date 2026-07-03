@@ -3,7 +3,7 @@ package kernel
 import (
 	"errors"
 
-	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/caelis-labs/caelis/ports/session"
 )
 
 func wrapSessionError(err error) error {

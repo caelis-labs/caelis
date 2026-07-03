@@ -9,12 +9,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/impl/model/providers"
-	kernelimpl "github.com/OnslaughtSnail/caelis/internal/kernel"
-	"github.com/OnslaughtSnail/caelis/ports/agent"
-	"github.com/OnslaughtSnail/caelis/ports/gateway"
-	"github.com/OnslaughtSnail/caelis/ports/plugin"
-	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/caelis-labs/caelis/impl/model/providers"
+	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
+	"github.com/caelis-labs/caelis/ports/agent"
+	"github.com/caelis-labs/caelis/ports/gateway"
+	"github.com/caelis-labs/caelis/ports/plugin"
+	"github.com/caelis-labs/caelis/ports/session"
 )
 
 func TestStackRejectsReconfigureWhileActiveTurn(t *testing.T) {

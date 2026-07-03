@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/impl/agent/local/chat"
-	"github.com/OnslaughtSnail/caelis/ports/agent"
-	"github.com/OnslaughtSnail/caelis/ports/controller"
-	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/caelis-labs/caelis/impl/agent/local/chat"
+	"github.com/caelis-labs/caelis/ports/agent"
+	"github.com/caelis-labs/caelis/ports/controller"
+	"github.com/caelis-labs/caelis/ports/session"
 )
 
 func TestRuntimeDetachParticipantRollbackPreservesActiveSessionOnRemoveFailure(t *testing.T) {

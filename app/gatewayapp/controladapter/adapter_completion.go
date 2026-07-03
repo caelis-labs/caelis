@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"strings"
 
-	controlcommands "github.com/OnslaughtSnail/caelis/ports/controlcommand"
-	"github.com/OnslaughtSnail/caelis/ports/controller"
-	"github.com/OnslaughtSnail/caelis/ports/gateway"
-	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/ports/skill"
+	controlcommands "github.com/caelis-labs/caelis/ports/controlcommand"
+	"github.com/caelis-labs/caelis/ports/controller"
+	"github.com/caelis-labs/caelis/ports/gateway"
+	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/ports/skill"
 )
 
 func (d *Adapter) CompleteMention(ctx context.Context, query string, limit int) ([]CompletionCandidate, error) {

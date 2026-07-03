@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/ports/delegation"
-	"github.com/OnslaughtSnail/caelis/ports/tool"
+	"github.com/caelis-labs/caelis/ports/delegation"
+	"github.com/caelis-labs/caelis/ports/tool"
 )
 
 func TestDefinitionDoesNotExposeYieldTimeMS(t *testing.T) {

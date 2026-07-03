@@ -5,7 +5,7 @@ import (
 	"maps"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/ports/model"
+	"github.com/caelis-labs/caelis/ports/model"
 )
 
 // ToolVisibility owns the current model-visible tool set for one run. It keeps

@@ -3,9 +3,9 @@ package local
 import (
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/ports/agent"
-	"github.com/OnslaughtSnail/caelis/ports/assembly"
-	"github.com/OnslaughtSnail/caelis/ports/policy"
+	"github.com/caelis-labs/caelis/ports/agent"
+	"github.com/caelis-labs/caelis/ports/assembly"
+	"github.com/caelis-labs/caelis/ports/policy"
 )
 
 func (r *Runtime) applyAssemblySpec(state map[string]any, spec agent.AgentSpec) agent.AgentSpec {

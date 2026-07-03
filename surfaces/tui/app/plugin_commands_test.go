@@ -9,7 +9,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/control"
+	"github.com/caelis-labs/caelis/protocol/acp/control"
 )
 
 // pluginStubService implements only the plugin capability needed by /plugin

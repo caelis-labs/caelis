@@ -5,7 +5,7 @@ import (
 	"unicode"
 
 	"charm.land/lipgloss/v2"
-	"github.com/OnslaughtSnail/caelis/surfaces/tui/tuikit"
+	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
 
 type inlineStyleState struct {

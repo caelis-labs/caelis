@@ -3,8 +3,8 @@ package transcript
 import (
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/ports/compact"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
+	"github.com/caelis-labs/caelis/ports/compact"
+	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
 type Scope string

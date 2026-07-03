@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/ports/task"
+	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/ports/task"
 )
 
 func (r *Runtime) recoverRuntimeState(ctx context.Context, ref session.SessionRef) error {

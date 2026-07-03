@@ -7,7 +7,7 @@ import (
 	"hash"
 	"os"
 
-	"github.com/OnslaughtSnail/caelis/ports/tool"
+	"github.com/caelis-labs/caelis/ports/tool"
 )
 
 func contentRevision(data []byte) string {

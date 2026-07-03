@@ -3,7 +3,7 @@ package commanddiag
 import (
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
+	"github.com/caelis-labs/caelis/ports/sandbox"
 )
 
 const (

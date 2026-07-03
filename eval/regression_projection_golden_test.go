@@ -5,13 +5,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/internal/evalharness"
-	"github.com/OnslaughtSnail/caelis/ports/model"
-	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/ports/tool"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
-	acpprojector "github.com/OnslaughtSnail/caelis/protocol/acp/projector"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
+	"github.com/caelis-labs/caelis/internal/evalharness"
+	"github.com/caelis-labs/caelis/ports/model"
+	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/ports/tool"
+	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
+	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
+	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 type projectionTraceEntry struct {

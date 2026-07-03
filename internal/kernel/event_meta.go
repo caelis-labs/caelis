@@ -3,7 +3,7 @@ package kernel
 import (
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/protocol/acp/metautil"
+	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
 const (

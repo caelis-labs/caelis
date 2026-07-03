@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/caelis-labs/caelis/ports/session"
 )
 
 func TestRuntimeStackPluginDepsUseGroupedField(t *testing.T) {

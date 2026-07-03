@@ -16,8 +16,8 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/pathutil"
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
+	"github.com/caelis-labs/caelis/impl/sandbox/windows/internal/pathutil"
+	"github.com/caelis-labs/caelis/ports/sandbox"
 	"golang.org/x/sys/windows"
 )
 

@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/protocol/acp/jsonrpc"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
+	"github.com/caelis-labs/caelis/protocol/acp/jsonrpc"
+	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestCancelSendsNotification(t *testing.T) {

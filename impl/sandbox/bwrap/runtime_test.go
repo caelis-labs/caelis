@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/impl/sandbox/internal/policy"
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
+	"github.com/caelis-labs/caelis/impl/sandbox/internal/policy"
+	"github.com/caelis-labs/caelis/ports/sandbox"
 )
 
 func TestBuildScopedBwrapArgsKeepsManagedDevMount(t *testing.T) {

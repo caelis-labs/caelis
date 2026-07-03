@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/impl/model/catalog"
-	controlcommands "github.com/OnslaughtSnail/caelis/ports/controlcommand"
-	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/protocol/acp"
+	"github.com/caelis-labs/caelis/impl/model/catalog"
+	controlcommands "github.com/caelis-labs/caelis/ports/controlcommand"
+	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/protocol/acp"
 )
 
 const (

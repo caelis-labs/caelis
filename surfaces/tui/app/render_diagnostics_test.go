@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/surfaces/tui/tuikit"
+	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
 
 func TestRenderDiagnosticsCountsMessageLaneAndViewportSetContent(t *testing.T) {

@@ -3,7 +3,7 @@ package modelcatalog
 import (
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/impl/model/providers"
+	"github.com/caelis-labs/caelis/impl/model/providers"
 )
 
 // ModelCapabilities describes known capabilities and limits for a specific model.

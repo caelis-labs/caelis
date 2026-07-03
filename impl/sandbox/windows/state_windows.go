@@ -15,9 +15,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/capability"
-	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/pathutil"
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
+	"github.com/caelis-labs/caelis/impl/sandbox/windows/internal/capability"
+	"github.com/caelis-labs/caelis/impl/sandbox/windows/internal/pathutil"
+	"github.com/caelis-labs/caelis/ports/sandbox"
 )
 
 func (r *runtime) workspaceSetupCheck() (check sandbox.SetupCheck) {

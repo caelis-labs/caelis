@@ -4,7 +4,7 @@ package agentreview
 import (
 	"context"
 
-	"github.com/OnslaughtSnail/caelis/ports/approval"
+	"github.com/caelis-labs/caelis/ports/approval"
 )
 
 type Approver struct {

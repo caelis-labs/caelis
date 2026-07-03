@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/OnslaughtSnail/caelis/ports/agent"
-	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/caelis-labs/caelis/ports/agent"
+	"github.com/caelis-labs/caelis/ports/session"
 )
 
 type compactionRecoveryKind string

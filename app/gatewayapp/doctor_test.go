@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/impl/model/providers"
-	"github.com/OnslaughtSnail/caelis/ports/assembly"
+	"github.com/caelis-labs/caelis/impl/model/providers"
+	"github.com/caelis-labs/caelis/ports/assembly"
 )
 
 func TestDoctorReportFlagsMissingAPIKeyAfterRedactedPersistence(t *testing.T) {

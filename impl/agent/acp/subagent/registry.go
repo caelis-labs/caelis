@@ -7,8 +7,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/OnslaughtSnail/caelis/ports/assembly"
-	"github.com/OnslaughtSnail/caelis/ports/delegation"
+	"github.com/caelis-labs/caelis/ports/assembly"
+	"github.com/caelis-labs/caelis/ports/delegation"
 )
 
 // AgentConfig aliases the app-owned ACP agent declaration shape used by

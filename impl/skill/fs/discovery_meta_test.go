@@ -10,8 +10,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/internal/testenv"
-	"github.com/OnslaughtSnail/caelis/ports/skill"
+	"github.com/caelis-labs/caelis/internal/testenv"
+	"github.com/caelis-labs/caelis/ports/skill"
 )
 
 func TestDefaultDiscoveryDirsPrioritizeSystemWorkspaceAndUserRoots(t *testing.T) {

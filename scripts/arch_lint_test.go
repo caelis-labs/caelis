@@ -10,7 +10,7 @@ import (
 func TestBoundaryRuleRejectsPublicContractsImportingInternal(t *testing.T) {
 	t.Parallel()
 
-	const modulePath = "github.com/OnslaughtSnail/caelis"
+	const modulePath = "github.com/caelis-labs/caelis"
 	tests := []struct {
 		name       string
 		rel        string
@@ -111,10 +111,10 @@ func TestBoundaryRuleRejectsPublicContractsImportingInternal(t *testing.T) {
 func TestSemanticBoundaryRuleRejectsEventProtocolAliasReads(t *testing.T) {
 	t.Parallel()
 
-	const modulePath = "github.com/OnslaughtSnail/caelis"
+	const modulePath = "github.com/caelis-labs/caelis"
 	source := `package demo
 
-import "github.com/OnslaughtSnail/caelis/ports/session"
+import "github.com/caelis-labs/caelis/ports/session"
 
 func readAlias(event *session.Event) string {
 	protocol := session.CloneEventProtocol(*event.Protocol)
@@ -133,10 +133,10 @@ func readAlias(event *session.Event) string {
 func TestSemanticBoundaryRuleRejectsSurfaceGatewayEventConsumption(t *testing.T) {
 	t.Parallel()
 
-	const modulePath = "github.com/OnslaughtSnail/caelis"
+	const modulePath = "github.com/caelis-labs/caelis"
 	source := `package demo
 
-import "github.com/OnslaughtSnail/caelis/ports/gateway"
+import "github.com/caelis-labs/caelis/ports/gateway"
 
 func consume(event gateway.Event) string {
 	return string(event.Kind)
@@ -151,10 +151,10 @@ func consume(event gateway.Event) string {
 func TestSemanticBoundaryRuleRejectsDirectEventProtocolAliasReads(t *testing.T) {
 	t.Parallel()
 
-	const modulePath = "github.com/OnslaughtSnail/caelis"
+	const modulePath = "github.com/caelis-labs/caelis"
 	source := `package demo
 
-import "github.com/OnslaughtSnail/caelis/ports/session"
+import "github.com/caelis-labs/caelis/ports/session"
 
 func readAlias(event *session.Event) bool {
 	return event.Protocol.ToolCall != nil
@@ -169,10 +169,10 @@ func readAlias(event *session.Event) bool {
 func TestSemanticBoundaryRuleRejectsEventProtocolPointerAliasReads(t *testing.T) {
 	t.Parallel()
 
-	const modulePath = "github.com/OnslaughtSnail/caelis"
+	const modulePath = "github.com/caelis-labs/caelis"
 	source := `package demo
 
-import "github.com/OnslaughtSnail/caelis/ports/session"
+import "github.com/caelis-labs/caelis/ports/session"
 
 func readAlias(event *session.Event) bool {
 	protocol := event.Protocol
@@ -188,7 +188,7 @@ func readAlias(event *session.Event) bool {
 func TestSemanticBoundaryRuleAllowsPortsSessionEventProtocolAliases(t *testing.T) {
 	t.Parallel()
 
-	const modulePath = "github.com/OnslaughtSnail/caelis"
+	const modulePath = "github.com/caelis-labs/caelis"
 	source := `package session
 
 func normalize(protocol EventProtocol) bool {
@@ -204,10 +204,10 @@ func normalize(protocol EventProtocol) bool {
 func TestSemanticBoundaryRuleRejectsEventProtocolHandoffAliasWrite(t *testing.T) {
 	t.Parallel()
 
-	const modulePath = "github.com/OnslaughtSnail/caelis"
+	const modulePath = "github.com/caelis-labs/caelis"
 	source := `package demo
 
-import "github.com/OnslaughtSnail/caelis/ports/session"
+import "github.com/caelis-labs/caelis/ports/session"
 
 func writeAlias() *session.EventProtocol {
 	return &session.EventProtocol{
@@ -224,7 +224,7 @@ func writeAlias() *session.EventProtocol {
 func TestSemanticBoundaryRuleRejectsTopLevelTerminalMetaKeys(t *testing.T) {
 	t.Parallel()
 
-	const modulePath = "github.com/OnslaughtSnail/caelis"
+	const modulePath = "github.com/caelis-labs/caelis"
 	source := `package demo
 
 var meta = map[string]any{
@@ -240,7 +240,7 @@ var meta = map[string]any{
 func TestSemanticBoundaryRuleRejectsGatewayAggregateAccessors(t *testing.T) {
 	t.Parallel()
 
-	const modulePath = "github.com/OnslaughtSnail/caelis"
+	const modulePath = "github.com/caelis-labs/caelis"
 	tests := []struct {
 		name        string
 		source      string
@@ -286,7 +286,7 @@ func run(stack stackish) any {
 func TestSemanticBoundaryRuleAllowsGatewayAggregateAccessorsInTestsAndShims(t *testing.T) {
 	t.Parallel()
 
-	const modulePath = "github.com/OnslaughtSnail/caelis"
+	const modulePath = "github.com/caelis-labs/caelis"
 	source := `package demo
 
 type stackish interface{ Kernel() any }

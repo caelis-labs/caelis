@@ -1,15 +1,15 @@
 {
-  "name": "@onslaughtsnail/caelis",
+  "name": "@caelis/caelis",
   "version": "0.0.0-dev",
   "description": "caelis CLI distributed via npm",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/OnslaughtSnail/caelis.git"
+    "url": "git+https://github.com/caelis-labs/caelis.git"
   },
-  "homepage": "https://github.com/OnslaughtSnail/caelis",
+  "homepage": "https://github.com/caelis-labs/caelis",
   "bugs": {
-    "url": "https://github.com/OnslaughtSnail/caelis/issues"
+    "url": "https://github.com/caelis-labs/caelis/issues"
   },
   "bin": {
     "caelis": "bin/caelis.js"
@@ -35,12 +35,12 @@
     "publish-release": "node ./scripts/publish-release.mjs"
   },
   "optionalDependencies": {
-    "@onslaughtsnail/caelis-darwin-arm64": "0.0.0-dev",
-    "@onslaughtsnail/caelis-darwin-x64": "0.0.0-dev",
-    "@onslaughtsnail/caelis-linux-arm64": "0.0.0-dev",
-    "@onslaughtsnail/caelis-linux-x64": "0.0.0-dev",
-    "@onslaughtsnail/caelis-windows-arm64": "0.0.0-dev",
-    "@onslaughtsnail/caelis-windows-x64": "0.0.0-dev"
+    "@caelis/caelis-darwin-arm64": "0.0.0-dev",
+    "@caelis/caelis-darwin-x64": "0.0.0-dev",
+    "@caelis/caelis-linux-arm64": "0.0.0-dev",
+    "@caelis/caelis-linux-x64": "0.0.0-dev",
+    "@caelis/caelis-windows-arm64": "0.0.0-dev",
+    "@caelis/caelis-windows-x64": "0.0.0-dev"
   },
   "publishConfig": {
     "access": "public",

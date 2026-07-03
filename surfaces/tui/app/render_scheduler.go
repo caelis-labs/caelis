@@ -5,7 +5,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
+	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
 type pendingRenderEvent struct {

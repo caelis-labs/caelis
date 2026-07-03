@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
+	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
+	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestProjectACPEventToEventsProjectsNarrativeScopeAndAnchors(t *testing.T) {

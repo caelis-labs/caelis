@@ -3,8 +3,8 @@ package controladapter
 import (
 	"context"
 
-	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
-	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/caelis-labs/caelis/app/gatewayapp"
+	"github.com/caelis-labs/caelis/ports/session"
 )
 
 type RuntimeStackGatewayAppAdapters struct {

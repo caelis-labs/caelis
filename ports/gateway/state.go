@@ -3,7 +3,7 @@ package gateway
 import (
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/ports/policy"
+	"github.com/caelis-labs/caelis/ports/policy"
 )
 
 const (

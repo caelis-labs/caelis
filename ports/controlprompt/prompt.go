@@ -5,8 +5,8 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/OnslaughtSnail/caelis/protocol/acp/control"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
+	"github.com/caelis-labs/caelis/protocol/acp/control"
+	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
 // Router routes one prompt submission through the app-control prompt layer.

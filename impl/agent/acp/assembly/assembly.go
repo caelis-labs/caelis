@@ -7,9 +7,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/OnslaughtSnail/caelis/ports/assembly"
-	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/protocol/acp"
+	"github.com/caelis-labs/caelis/ports/assembly"
+	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/protocol/acp"
 )
 
 // ProviderConfig configures one set of app-owned ACP providers built from pure

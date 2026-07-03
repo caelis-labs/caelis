@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/agentprofiles"
-	"github.com/OnslaughtSnail/caelis/ports/agentprofile"
-	"github.com/OnslaughtSnail/caelis/ports/gateway"
-	"github.com/OnslaughtSnail/caelis/ports/model"
-	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/caelis-labs/caelis/app/gatewayapp/internal/agentprofiles"
+	"github.com/caelis-labs/caelis/ports/agentprofile"
+	"github.com/caelis-labs/caelis/ports/gateway"
+	"github.com/caelis-labs/caelis/ports/model"
+	"github.com/caelis-labs/caelis/ports/session"
 )
 
 type AgentProfileService struct {

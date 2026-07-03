@@ -4,15 +4,15 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/filesystem"
-	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/plan"
-	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/shell"
-	skilltool "github.com/OnslaughtSnail/caelis/impl/tool/builtin/skill"
-	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/task"
-	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/web"
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
-	skillport "github.com/OnslaughtSnail/caelis/ports/skill"
-	"github.com/OnslaughtSnail/caelis/ports/tool"
+	"github.com/caelis-labs/caelis/impl/tool/builtin/filesystem"
+	"github.com/caelis-labs/caelis/impl/tool/builtin/plan"
+	"github.com/caelis-labs/caelis/impl/tool/builtin/shell"
+	skilltool "github.com/caelis-labs/caelis/impl/tool/builtin/skill"
+	"github.com/caelis-labs/caelis/impl/tool/builtin/task"
+	"github.com/caelis-labs/caelis/impl/tool/builtin/web"
+	"github.com/caelis-labs/caelis/ports/sandbox"
+	skillport "github.com/caelis-labs/caelis/ports/skill"
+	"github.com/caelis-labs/caelis/ports/tool"
 )
 
 func isReservedCoreToolName(name string) bool {

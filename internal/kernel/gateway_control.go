@@ -6,8 +6,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/OnslaughtSnail/caelis/ports/agent"
-	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/caelis-labs/caelis/ports/agent"
+	"github.com/caelis-labs/caelis/ports/session"
 )
 
 func (g *Gateway) HandoffController(ctx context.Context, req HandoffControllerRequest) (session.Session, error) {

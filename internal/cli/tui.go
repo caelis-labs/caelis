@@ -9,11 +9,11 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
-	"github.com/OnslaughtSnail/caelis/app/gatewayapp/controladapter/local"
-	controlpromptrouter "github.com/OnslaughtSnail/caelis/internal/controlpromptrouter"
-	"github.com/OnslaughtSnail/caelis/internal/version"
-	"github.com/OnslaughtSnail/caelis/surfaces/tui/app"
+	"github.com/caelis-labs/caelis/app/gatewayapp"
+	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter/local"
+	controlpromptrouter "github.com/caelis-labs/caelis/internal/controlpromptrouter"
+	"github.com/caelis-labs/caelis/internal/version"
+	"github.com/caelis-labs/caelis/surfaces/tui/app"
 )
 
 func runTUI(ctx context.Context, stack *gatewayapp.Stack, sessionID string, modelText string, stdin io.Reader, stdout io.Writer) error {

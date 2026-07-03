@@ -8,11 +8,11 @@ import (
 	"strings"
 	"testing"
 
-	_ "github.com/OnslaughtSnail/caelis/impl/sandbox/host"
-	"github.com/OnslaughtSnail/caelis/internal/testenv"
-	"github.com/OnslaughtSnail/caelis/ports/policy"
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
-	"github.com/OnslaughtSnail/caelis/ports/tool"
+	_ "github.com/caelis-labs/caelis/impl/sandbox/host"
+	"github.com/caelis-labs/caelis/internal/testenv"
+	"github.com/caelis-labs/caelis/ports/policy"
+	"github.com/caelis-labs/caelis/ports/sandbox"
+	"github.com/caelis-labs/caelis/ports/tool"
 )
 
 func TestAutoReviewModeAllowsWorkspaceWrites(t *testing.T) {

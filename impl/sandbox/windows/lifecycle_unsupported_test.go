@@ -5,7 +5,7 @@ package windows
 import (
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
+	"github.com/caelis-labs/caelis/ports/sandbox"
 )
 
 func TestLifecycleTargetForWindowsNoopsOnUnsupportedPlatform(t *testing.T) {

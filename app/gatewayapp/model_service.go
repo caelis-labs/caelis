@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"strings"
 
-	kernelimpl "github.com/OnslaughtSnail/caelis/internal/kernel"
-	"github.com/OnslaughtSnail/caelis/ports/gateway"
-	"github.com/OnslaughtSnail/caelis/ports/session"
+	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
+	"github.com/caelis-labs/caelis/ports/gateway"
+	"github.com/caelis-labs/caelis/ports/session"
 )
 
 // Connect reconfigures the model provider on the live stack. The new config

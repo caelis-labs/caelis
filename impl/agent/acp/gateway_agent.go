@@ -4,13 +4,13 @@ import (
 	"context"
 	"fmt"
 
-	bridgeassembly "github.com/OnslaughtSnail/caelis/impl/agent/acp/assembly"
-	"github.com/OnslaughtSnail/caelis/internal/version"
-	"github.com/OnslaughtSnail/caelis/ports/agent"
-	assemblyapi "github.com/OnslaughtSnail/caelis/ports/assembly"
-	"github.com/OnslaughtSnail/caelis/ports/gateway"
-	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/protocol/acp"
+	bridgeassembly "github.com/caelis-labs/caelis/impl/agent/acp/assembly"
+	"github.com/caelis-labs/caelis/internal/version"
+	"github.com/caelis-labs/caelis/ports/agent"
+	assemblyapi "github.com/caelis-labs/caelis/ports/assembly"
+	"github.com/caelis-labs/caelis/ports/gateway"
+	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/protocol/acp"
 )
 
 type GatewayAgentConfig struct {

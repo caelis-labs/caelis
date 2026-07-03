@@ -3,8 +3,8 @@ package local
 import (
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
+	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
+	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func acpEnvelopeWithNarrativeText(env *eventstream.Envelope, updateType string, text string) *eventstream.Envelope {

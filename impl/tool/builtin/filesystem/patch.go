@@ -3,9 +3,9 @@ package filesystem
 import (
 	"context"
 
-	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/internal/toolutil"
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
-	"github.com/OnslaughtSnail/caelis/ports/tool"
+	"github.com/caelis-labs/caelis/impl/tool/builtin/internal/toolutil"
+	"github.com/caelis-labs/caelis/ports/sandbox"
+	"github.com/caelis-labs/caelis/ports/tool"
 )
 
 const PatchToolName = "PATCH"

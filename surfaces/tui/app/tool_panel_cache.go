@@ -6,7 +6,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/OnslaughtSnail/caelis/ports/displaypolicy"
+	"github.com/caelis-labs/caelis/ports/displaypolicy"
 )
 
 const maxGenericToolPanelCacheBytes = 64 * 1024

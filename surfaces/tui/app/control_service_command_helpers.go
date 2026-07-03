@@ -1,8 +1,8 @@
 package tuiapp
 
 import (
-	controlcommands "github.com/OnslaughtSnail/caelis/ports/controlcommand"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/control"
+	controlcommands "github.com/caelis-labs/caelis/ports/controlcommand"
+	"github.com/caelis-labs/caelis/protocol/acp/control"
 )
 
 func parseConnectArgs(args string) control.ConnectConfig {

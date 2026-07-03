@@ -3,7 +3,7 @@ package gatewayapp
 import (
 	"os"
 
-	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/configstore"
+	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 )
 
 type AppConfig = configstore.AppConfig

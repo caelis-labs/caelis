@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/ports/model"
-	"github.com/OnslaughtSnail/caelis/ports/session"
-	taskapi "github.com/OnslaughtSnail/caelis/ports/task"
-	"github.com/OnslaughtSnail/caelis/ports/tool"
+	"github.com/caelis-labs/caelis/ports/model"
+	"github.com/caelis-labs/caelis/ports/session"
+	taskapi "github.com/caelis-labs/caelis/ports/task"
+	"github.com/caelis-labs/caelis/ports/tool"
 )
 
 const taskIDRandomBytes = 6

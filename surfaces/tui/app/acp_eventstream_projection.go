@@ -3,10 +3,10 @@ package tuiapp
 import (
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
-	"github.com/OnslaughtSnail/caelis/surfaces/transcript"
-	"github.com/OnslaughtSnail/caelis/surfaces/tui/acpprojector"
+	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
+	"github.com/caelis-labs/caelis/protocol/acp/schema"
+	"github.com/caelis-labs/caelis/surfaces/transcript"
+	"github.com/caelis-labs/caelis/surfaces/tui/acpprojector"
 )
 
 func ProjectACPEventToTranscriptEvents(env eventstream.Envelope) []TranscriptEvent {

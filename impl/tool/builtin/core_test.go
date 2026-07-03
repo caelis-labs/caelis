@@ -8,16 +8,16 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/impl/sandbox/host"
-	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/filesystem"
-	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/plan"
-	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/shell"
-	skilltool "github.com/OnslaughtSnail/caelis/impl/tool/builtin/skill"
-	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/task"
-	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/web"
-	"github.com/OnslaughtSnail/caelis/impl/tool/registry"
-	"github.com/OnslaughtSnail/caelis/ports/model"
-	"github.com/OnslaughtSnail/caelis/ports/tool"
+	"github.com/caelis-labs/caelis/impl/sandbox/host"
+	"github.com/caelis-labs/caelis/impl/tool/builtin/filesystem"
+	"github.com/caelis-labs/caelis/impl/tool/builtin/plan"
+	"github.com/caelis-labs/caelis/impl/tool/builtin/shell"
+	skilltool "github.com/caelis-labs/caelis/impl/tool/builtin/skill"
+	"github.com/caelis-labs/caelis/impl/tool/builtin/task"
+	"github.com/caelis-labs/caelis/impl/tool/builtin/web"
+	"github.com/caelis-labs/caelis/impl/tool/registry"
+	"github.com/caelis-labs/caelis/ports/model"
+	"github.com/caelis-labs/caelis/ports/tool"
 )
 
 func TestBuildCoreToolsCreatesDefaultCodingGroup(t *testing.T) {

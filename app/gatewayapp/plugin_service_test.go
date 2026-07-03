@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	kernelimpl "github.com/OnslaughtSnail/caelis/internal/kernel"
-	"github.com/OnslaughtSnail/caelis/ports/assembly"
-	"github.com/OnslaughtSnail/caelis/ports/gateway"
+	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
+	"github.com/caelis-labs/caelis/ports/assembly"
+	"github.com/caelis-labs/caelis/ports/gateway"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 

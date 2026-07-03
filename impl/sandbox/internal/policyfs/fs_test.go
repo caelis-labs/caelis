@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/impl/sandbox/internal/policy"
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
+	"github.com/caelis-labs/caelis/impl/sandbox/internal/policy"
+	"github.com/caelis-labs/caelis/ports/sandbox"
 )
 
 type testFileSystem struct {

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
+	"github.com/caelis-labs/caelis/app/gatewayapp"
 )
 
 func newAdapterTestStack(t *testing.T, cfg gatewayapp.Config) (*gatewayapp.Stack, error) {

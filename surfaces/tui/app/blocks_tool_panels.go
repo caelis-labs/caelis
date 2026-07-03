@@ -4,7 +4,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/ports/displaypolicy"
+	"github.com/caelis-labs/caelis/ports/displaypolicy"
 )
 
 func toolPanelExpanded(state map[string]bool, callID string) bool {

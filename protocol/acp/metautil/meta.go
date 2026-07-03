@@ -4,7 +4,7 @@ import (
 	"maps"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/ports/gateway"
+	"github.com/caelis-labs/caelis/ports/gateway"
 )
 
 const (

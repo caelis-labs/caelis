@@ -3,8 +3,8 @@ package tuiapp
 import (
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/surfaces/transcript"
-	"github.com/OnslaughtSnail/caelis/surfaces/tui/tuikit"
+	"github.com/caelis-labs/caelis/surfaces/transcript"
+	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
 
 func renderACPNoticeRows(blockID string, ev SubagentEvent, width int, ctx BlockRenderContext) []RenderedRow {

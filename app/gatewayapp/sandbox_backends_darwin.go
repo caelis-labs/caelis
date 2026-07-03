@@ -3,6 +3,6 @@
 package gatewayapp
 
 import (
-	_ "github.com/OnslaughtSnail/caelis/impl/sandbox/host"
-	_ "github.com/OnslaughtSnail/caelis/impl/sandbox/seatbelt"
+	_ "github.com/caelis-labs/caelis/impl/sandbox/host"
+	_ "github.com/caelis-labs/caelis/impl/sandbox/seatbelt"
 )

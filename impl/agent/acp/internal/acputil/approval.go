@@ -3,8 +3,8 @@ package acputil
 import (
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/ports/displaypolicy"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/client"
+	"github.com/caelis-labs/caelis/ports/displaypolicy"
+	"github.com/caelis-labs/caelis/protocol/acp/client"
 )
 
 func SelectedOutcome(

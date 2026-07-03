@@ -6,12 +6,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/shell"
-	tasktool "github.com/OnslaughtSnail/caelis/impl/tool/builtin/task"
-	"github.com/OnslaughtSnail/caelis/internal/commanddiag"
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
-	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/ports/tool"
+	"github.com/caelis-labs/caelis/impl/tool/builtin/shell"
+	tasktool "github.com/caelis-labs/caelis/impl/tool/builtin/task"
+	"github.com/caelis-labs/caelis/internal/commanddiag"
+	"github.com/caelis-labs/caelis/ports/sandbox"
+	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/ports/tool"
 )
 
 func TestRuntimeRunCommandToolAcceptsLegacyAdditionalPermissionsMode(t *testing.T) {

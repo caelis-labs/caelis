@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
-	"github.com/OnslaughtSnail/caelis/ports/agentprofile"
+	"github.com/caelis-labs/caelis/app/gatewayapp"
+	"github.com/caelis-labs/caelis/ports/agentprofile"
 )
 
 func (d *Adapter) AgentProfileStatus(ctx context.Context) (AgentProfileStatusSnapshot, error) {

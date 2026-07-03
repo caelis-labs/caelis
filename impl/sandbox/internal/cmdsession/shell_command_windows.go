@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"os/exec"
 
-	"github.com/OnslaughtSnail/caelis/impl/sandbox/internal/winps"
-	"github.com/OnslaughtSnail/caelis/internal/winproc"
+	"github.com/caelis-labs/caelis/impl/sandbox/internal/winps"
+	"github.com/caelis-labs/caelis/internal/winproc"
 )
 
 func buildPlatformShellCommand(ctx context.Context, command string, tty bool) (*exec.Cmd, error) {

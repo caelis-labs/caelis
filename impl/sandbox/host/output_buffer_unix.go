@@ -3,8 +3,8 @@
 package host
 
 import (
-	"github.com/OnslaughtSnail/caelis/impl/sandbox/internal/consoleoutput"
-	"github.com/OnslaughtSnail/caelis/impl/sandbox/internal/textstream"
+	"github.com/caelis-labs/caelis/impl/sandbox/internal/consoleoutput"
+	"github.com/caelis-labs/caelis/impl/sandbox/internal/textstream"
 )
 
 // hostOutputDecoder preserves raw bytes in non-Windows host storage and uses a

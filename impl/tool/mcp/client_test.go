@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/ports/plugin"
-	"github.com/OnslaughtSnail/caelis/ports/tool"
+	"github.com/caelis-labs/caelis/ports/plugin"
+	"github.com/caelis-labs/caelis/ports/tool"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 

@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/protocol/acp/jsonrpc"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/transport/stdio"
+	"github.com/caelis-labs/caelis/protocol/acp/jsonrpc"
+	"github.com/caelis-labs/caelis/protocol/acp/transport/stdio"
 )
 
 type RequestHandler func(context.Context, jsonrpc.Message) (any, *jsonrpc.RPCError)

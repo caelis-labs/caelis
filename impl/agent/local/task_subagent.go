@@ -7,14 +7,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/spawn"
-	"github.com/OnslaughtSnail/caelis/internal/agenthandle"
-	"github.com/OnslaughtSnail/caelis/ports/delegation"
-	"github.com/OnslaughtSnail/caelis/ports/model"
-	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/ports/stream"
-	"github.com/OnslaughtSnail/caelis/ports/subagent"
-	taskapi "github.com/OnslaughtSnail/caelis/ports/task"
+	"github.com/caelis-labs/caelis/impl/tool/builtin/spawn"
+	"github.com/caelis-labs/caelis/internal/agenthandle"
+	"github.com/caelis-labs/caelis/ports/delegation"
+	"github.com/caelis-labs/caelis/ports/model"
+	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/ports/stream"
+	"github.com/caelis-labs/caelis/ports/subagent"
+	taskapi "github.com/caelis-labs/caelis/ports/task"
 )
 
 func (tm *taskRuntime) StartSubagent(

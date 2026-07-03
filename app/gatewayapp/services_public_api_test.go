@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/ports/gateway"
+	"github.com/caelis-labs/caelis/ports/gateway"
 )
 
 func TestStackExposesNarrowKernelServices(t *testing.T) {

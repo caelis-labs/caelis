@@ -1,6 +1,6 @@
 package providers
 
-import "github.com/OnslaughtSnail/caelis/ports/model"
+import "github.com/caelis-labs/caelis/ports/model"
 
 var volcengineCompatProfile = openAICompatProfile{
 	IncludeReasoningContent:       true,

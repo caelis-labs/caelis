@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/pathutil"
+	"github.com/caelis-labs/caelis/impl/sandbox/windows/internal/pathutil"
 )
 
 type sandboxCacheEnvMode int

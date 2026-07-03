@@ -7,7 +7,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
+	"github.com/caelis-labs/caelis/ports/sandbox"
 )
 
 func TestDefaultMergesConstraintPathRules(t *testing.T) {

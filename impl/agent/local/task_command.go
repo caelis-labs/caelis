@@ -9,12 +9,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/shell"
-	"github.com/OnslaughtSnail/caelis/internal/commanddiag"
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
-	"github.com/OnslaughtSnail/caelis/ports/session"
-	taskapi "github.com/OnslaughtSnail/caelis/ports/task"
-	"github.com/OnslaughtSnail/caelis/ports/tool"
+	"github.com/caelis-labs/caelis/impl/tool/builtin/shell"
+	"github.com/caelis-labs/caelis/internal/commanddiag"
+	"github.com/caelis-labs/caelis/ports/sandbox"
+	"github.com/caelis-labs/caelis/ports/session"
+	taskapi "github.com/caelis-labs/caelis/ports/task"
+	"github.com/caelis-labs/caelis/ports/tool"
 )
 
 func (tm *taskRuntime) StartCommand(

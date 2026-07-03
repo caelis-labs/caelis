@@ -5,9 +5,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/OnslaughtSnail/caelis/ports/gateway"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
-	acpprojector "github.com/OnslaughtSnail/caelis/protocol/acp/projector"
+	"github.com/caelis-labs/caelis/ports/gateway"
+	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
+	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
 )
 
 type gatewayTurn struct {

@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/ports/session"
-	taskapi "github.com/OnslaughtSnail/caelis/ports/task"
+	"github.com/caelis-labs/caelis/ports/session"
+	taskapi "github.com/caelis-labs/caelis/ports/task"
 )
 
 type taskControlTarget interface {

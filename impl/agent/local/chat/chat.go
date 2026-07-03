@@ -8,11 +8,11 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/OnslaughtSnail/caelis/ports/agent"
-	"github.com/OnslaughtSnail/caelis/ports/model"
-	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/ports/tool"
-	"github.com/OnslaughtSnail/caelis/ports/userdisplay"
+	"github.com/caelis-labs/caelis/ports/agent"
+	"github.com/caelis-labs/caelis/ports/model"
+	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/ports/tool"
+	"github.com/caelis-labs/caelis/ports/userdisplay"
 )
 
 // Factory constructs baseline chat agents from one runtime.AgentSpec.

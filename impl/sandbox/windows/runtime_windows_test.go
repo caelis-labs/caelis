@@ -14,10 +14,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/acl"
-	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/pathutil"
-	"github.com/OnslaughtSnail/caelis/internal/testenv"
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
+	"github.com/caelis-labs/caelis/impl/sandbox/windows/internal/acl"
+	"github.com/caelis-labs/caelis/impl/sandbox/windows/internal/pathutil"
+	"github.com/caelis-labs/caelis/internal/testenv"
+	"github.com/caelis-labs/caelis/ports/sandbox"
 )
 
 func TestRuntimeDescribeReportsRestrictedTokenCapabilities(t *testing.T) {

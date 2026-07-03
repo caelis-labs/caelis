@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/protocol/acp/jsonrpc"
+	"github.com/caelis-labs/caelis/protocol/acp/jsonrpc"
 )
 
 func TestServeStdioSendsAvailableCommandsAfterNewSession(t *testing.T) {

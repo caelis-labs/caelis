@@ -1,4 +1,4 @@
-module github.com/OnslaughtSnail/caelis
+module github.com/caelis-labs/caelis
 
 go 1.25.1
 

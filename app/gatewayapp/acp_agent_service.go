@@ -11,13 +11,13 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/agentprofiles"
-	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/agentregistry"
-	"github.com/OnslaughtSnail/caelis/ports/agentprofile"
-	"github.com/OnslaughtSnail/caelis/ports/assembly"
-	"github.com/OnslaughtSnail/caelis/ports/controller"
-	pluginapi "github.com/OnslaughtSnail/caelis/ports/plugin"
-	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/caelis-labs/caelis/app/gatewayapp/internal/agentprofiles"
+	"github.com/caelis-labs/caelis/app/gatewayapp/internal/agentregistry"
+	"github.com/caelis-labs/caelis/ports/agentprofile"
+	"github.com/caelis-labs/caelis/ports/assembly"
+	"github.com/caelis-labs/caelis/ports/controller"
+	pluginapi "github.com/caelis-labs/caelis/ports/plugin"
+	"github.com/caelis-labs/caelis/ports/session"
 )
 
 type ACPAgentInfo struct {

@@ -5,8 +5,8 @@ package acpbridge
 import (
 	"iter"
 
-	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
+	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
 // SourceEvent is one live source event before the kernel chooses the durable or

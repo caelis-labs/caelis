@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/ports/displaypolicy"
-	"github.com/OnslaughtSnail/caelis/ports/model"
+	"github.com/caelis-labs/caelis/ports/displaypolicy"
+	"github.com/caelis-labs/caelis/ports/model"
 )
 
 func toolResultDisplayOutput(name string, output map[string]any, meta map[string]any) map[string]any {

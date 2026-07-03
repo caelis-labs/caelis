@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/pluginregistry"
-	pluginapi "github.com/OnslaughtSnail/caelis/ports/plugin"
+	"github.com/caelis-labs/caelis/app/gatewayapp/internal/pluginregistry"
+	pluginapi "github.com/caelis-labs/caelis/ports/plugin"
 )
 
 func pluginConfigID(absPath string, override string) string {

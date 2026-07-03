@@ -5,16 +5,16 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/impl/sandbox/host"
-	"github.com/OnslaughtSnail/caelis/impl/tool/builtin"
-	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/filesystem"
-	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/shell"
-	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/spawn"
-	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/task"
-	"github.com/OnslaughtSnail/caelis/internal/evalharness"
-	"github.com/OnslaughtSnail/caelis/ports/delegation"
-	"github.com/OnslaughtSnail/caelis/ports/model"
-	"github.com/OnslaughtSnail/caelis/ports/tool"
+	"github.com/caelis-labs/caelis/impl/sandbox/host"
+	"github.com/caelis-labs/caelis/impl/tool/builtin"
+	"github.com/caelis-labs/caelis/impl/tool/builtin/filesystem"
+	"github.com/caelis-labs/caelis/impl/tool/builtin/shell"
+	"github.com/caelis-labs/caelis/impl/tool/builtin/spawn"
+	"github.com/caelis-labs/caelis/impl/tool/builtin/task"
+	"github.com/caelis-labs/caelis/internal/evalharness"
+	"github.com/caelis-labs/caelis/ports/delegation"
+	"github.com/caelis-labs/caelis/ports/model"
+	"github.com/caelis-labs/caelis/ports/tool"
 )
 
 func TestRegressionAgentGuidanceReachesModelBoundary(t *testing.T) {

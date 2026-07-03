@@ -3,7 +3,7 @@ package providers
 import (
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/ports/model"
+	"github.com/caelis-labs/caelis/ports/model"
 )
 
 func dedupToolCalls(calls []model.ToolCall) []model.ToolCall {
