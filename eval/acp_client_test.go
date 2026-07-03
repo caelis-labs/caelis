@@ -28,7 +28,6 @@ func TestPublicClientLifecycleAndLoadE2E(t *testing.T) {
 	)
 	acpClient := startE2EClient(ctx, t, e2eClientConfig{
 		SessionRoot: filepath.Join(root, "sessions"),
-		TaskRoot:    filepath.Join(root, "tasks"),
 		Env: map[string]string{
 			"SDK_ACP_STUB_REPLY": "client lifecycle ok",
 		},
@@ -62,7 +61,6 @@ func TestPublicClientLifecycleAndLoadE2E(t *testing.T) {
 	var replay []client.UpdateEnvelope
 	reload := startE2EClient(ctx, t, e2eClientConfig{
 		SessionRoot: filepath.Join(root, "sessions"),
-		TaskRoot:    filepath.Join(root, "tasks"),
 		Env: map[string]string{
 			"SDK_ACP_STUB_REPLY": "client lifecycle ok",
 		},
@@ -100,7 +98,6 @@ func TestPublicClientPermissionAndTerminalE2E(t *testing.T) {
 	)
 	acpClient := startE2EClient(ctx, t, e2eClientConfig{
 		SessionRoot: filepath.Join(root, "sessions"),
-		TaskRoot:    filepath.Join(root, "tasks"),
 		Env: map[string]string{
 			"SDK_ACP_SCRIPTED_MODE": "approval_command",
 		},
@@ -248,7 +245,6 @@ func TestPublicClientModeAndConfigE2E(t *testing.T) {
 	var updates []client.UpdateEnvelope
 	acpClient := startE2EClient(ctx, t, e2eClientConfig{
 		SessionRoot: filepath.Join(root, "sessions"),
-		TaskRoot:    filepath.Join(root, "tasks"),
 		Env: map[string]string{
 			"SDK_ACP_SCRIPTED_MODE":      "mode_config",
 			"SDK_ACP_ENABLE_MODE_CONFIG": "1",
@@ -316,7 +312,6 @@ func TestPublicClientModeAndConfigE2E(t *testing.T) {
 
 type e2eClientConfig struct {
 	SessionRoot         string
-	TaskRoot            string
 	Env                 map[string]string
 	OnUpdate            func(client.UpdateEnvelope)
 	OnPermissionRequest client.PermissionHandler
@@ -326,7 +321,6 @@ func startE2EClient(ctx context.Context, t *testing.T, cfg e2eClientConfig) *cli
 	t.Helper()
 	env := map[string]string{
 		"SDK_ACP_SESSION_ROOT": cfg.SessionRoot,
-		"SDK_ACP_TASK_ROOT":    cfg.TaskRoot,
 	}
 	for k, v := range cfg.Env {
 		env[k] = v

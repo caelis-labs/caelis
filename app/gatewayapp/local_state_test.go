@@ -19,6 +19,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
+	taskapi "github.com/OnslaughtSnail/caelis/ports/task"
 	"github.com/OnslaughtSnail/caelis/protocol/acp"
 	"github.com/OnslaughtSnail/caelis/surfaces/headless"
 )
@@ -165,6 +166,58 @@ func TestNewLocalStackUsesRuntimeConfigApprovalAndPolicyProfile(t *testing.T) {
 	}
 	if state.SessionMode != "manual" {
 		t.Fatalf("SessionRuntimeState().SessionMode = %q, want configured manual default", state.SessionMode)
+	}
+}
+
+func TestNewLocalStackPersistsTasksInSessionSQLiteIndex(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workdir := t.TempDir()
+	stack, err := newGatewayAppTestStack(t, Config{
+		AppName:      "caelis",
+		UserID:       "task-store-test",
+		StoreDir:     root,
+		WorkspaceKey: workdir,
+		WorkspaceCWD: workdir,
+		Assembly:     assembly.ResolvedAssembly{},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+	activeSession, err := stack.StartSession(context.Background(), "task store session", "surface-task-store")
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	if err := stack.taskStore.Upsert(context.Background(), &taskapi.Entry{
+		TaskID:  "task-stack",
+		Kind:    taskapi.KindCommand,
+		Session: activeSession.SessionRef,
+		Title:   "RUN_COMMAND echo ok",
+		State:   taskapi.StateCompleted,
+		Result: map[string]any{
+			"stdout": "transient\n",
+			"result": "ok\n",
+			"state":  "completed",
+		},
+	}); err != nil {
+		t.Fatalf("taskStore.Upsert() error = %v", err)
+	}
+	got, err := stack.taskStore.Get(context.Background(), "task-stack")
+	if err != nil {
+		t.Fatalf("taskStore.Get() error = %v", err)
+	}
+	if _, ok := got.Result["stdout"]; ok {
+		t.Fatalf("taskStore.Get() result unexpectedly contains stdout: %#v", got.Result)
+	}
+	if gotResult, _ := got.Result["result"].(string); gotResult != "ok\n" {
+		t.Fatalf("taskStore.Get() result = %q, want canonical result", gotResult)
+	}
+	if _, err := os.Stat(filepath.Join(root, "sessions", ".sessions.index.sqlite")); err != nil {
+		t.Fatalf("session sqlite index missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "tasks")); !os.IsNotExist(err) {
+		t.Fatalf("legacy task store dir should not exist, stat err = %v", err)
 	}
 }
 

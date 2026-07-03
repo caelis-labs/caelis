@@ -19,7 +19,6 @@ import (
 	"github.com/OnslaughtSnail/caelis/impl/agent/local/chat"
 	"github.com/OnslaughtSnail/caelis/impl/sandbox/host"
 	sessionfile "github.com/OnslaughtSnail/caelis/impl/session/file"
-	taskfile "github.com/OnslaughtSnail/caelis/impl/task/file"
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin"
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/spawn"
 	"github.com/OnslaughtSnail/caelis/ports/agent"
@@ -35,10 +34,11 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	sessions := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{
+	sessionStore := sessionfile.NewStore(sessionfile.Config{
 		RootDir:            sessionRootDir(),
 		SessionIDGenerator: newSessionID,
-	}))
+	})
+	sessions := sessionfile.NewService(sessionStore)
 	assembly, err := resolveAssembly()
 	if err != nil {
 		log.Fatal(err)
@@ -50,11 +50,9 @@ func main() {
 		UserID:   "acp",
 	})
 	runtime, err := local.New(local.Config{
-		Sessions: sessions,
-		TaskStore: taskfile.NewStore(taskfile.Config{
-			RootDir: taskRootDir(),
-		}),
-		Assembly: assembly,
+		Sessions:  sessions,
+		TaskStore: sessionfile.NewTaskStore(sessionStore),
+		Assembly:  assembly,
 		AgentFactory: chat.Factory{
 			SystemPrompt: strings.TrimSpace(os.Getenv("SDK_ACP_SYSTEM_PROMPT")),
 		},
@@ -120,13 +118,6 @@ func sessionRootDir() string {
 		return root
 	}
 	return filepath.Join(os.TempDir(), "caelis-sdk-acp-sessions")
-}
-
-func taskRootDir() string {
-	if root := strings.TrimSpace(os.Getenv("SDK_ACP_TASK_ROOT")); root != "" {
-		return root
-	}
-	return filepath.Join(os.TempDir(), "caelis-sdk-acp-tasks")
 }
 
 func resolveAssembly() (assemblyapi.ResolvedAssembly, error) {

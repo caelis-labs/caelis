@@ -48,7 +48,7 @@ func TestCLIACPXSpawnE2E(t *testing.T) {
 	dir := t.TempDir()
 	output := runCLIACPXCommand(t, repo, dir,
 		`export CAELIS_ACP_SELF_AGENT_DESC="Spawn a bounded ACP child session"`+"\n"+
-			`export CAELIS_ACP_SELF_AGENT_CMD="cd `+repo+` && SDK_ACP_STUB_REPLY='cli spawn child ok' SDK_ACP_STUB_DELAY_MS=60 SDK_ACP_SESSION_ROOT='$WORKDIR/child-sessions' SDK_ACP_TASK_ROOT='$WORKDIR/child-tasks' go run ./internal/acpe2eagent"`+"\n"+
+			`export CAELIS_ACP_SELF_AGENT_CMD="cd `+repo+` && SDK_ACP_STUB_REPLY='cli spawn child ok' SDK_ACP_STUB_DELAY_MS=60 SDK_ACP_SESSION_ROOT='$WORKDIR/child-sessions' go run ./internal/acpe2eagent"`+"\n"+
 			`acpx --agent "$ACP_AGENT_CMD" --cwd "$WORKDIR" --timeout 180 exec 'Use SPAWN to ask the self child agent to reply with exactly: cli spawn child ok. Then TASK wait for the result and reply with exactly the child result.'`)
 	if !strings.Contains(output, "cli spawn child ok") {
 		t.Fatalf("acpx output = %q, want spawned child result", output)

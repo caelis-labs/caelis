@@ -875,6 +875,28 @@ func (s replayTaskStore) ListSession(context.Context, session.SessionRef) ([]*ta
 	return out, nil
 }
 
+func (s replayTaskStore) GetSessionTaskByHandle(_ context.Context, ref session.SessionRef, kind taskapi.Kind, handle string) (*taskapi.Entry, error) {
+	handle = taskapi.NormalizeHandle(handle)
+	for _, entry := range s.entries {
+		if entry == nil || entry.Kind != kind {
+			continue
+		}
+		if strings.TrimSpace(ref.SessionID) != "" && strings.TrimSpace(entry.Session.SessionID) != strings.TrimSpace(ref.SessionID) {
+			continue
+		}
+		for _, value := range []string{
+			replayAnyString(entry.Spec["handle"]),
+			replayAnyString(entry.Metadata["handle"]),
+			replayAnyString(entry.Result["handle"]),
+		} {
+			if taskapi.NormalizeHandle(value) == handle {
+				return taskapi.CloneEntry(entry), nil
+			}
+		}
+	}
+	return nil, nil
+}
+
 type semanticACPEnvelope struct {
 	Kind          eventstream.Kind
 	EventID       string

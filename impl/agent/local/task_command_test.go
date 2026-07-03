@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	taskfile "github.com/OnslaughtSnail/caelis/impl/task/file"
 	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	taskapi "github.com/OnslaughtSnail/caelis/ports/task"
@@ -27,7 +26,7 @@ func TestStartCommandDefersCompletedCommandResultPersistenceToAgentLoop(t *testi
 		},
 	}
 	fake := &yieldProbeSandboxRuntime{session: fakeSession}
-	taskStore := taskfile.NewStore(taskfile.Config{RootDir: t.TempDir()})
+	taskStore := newFileTaskStoreForTest(t)
 	runtime.tasks.store = taskStore
 
 	snapshot, err := runtime.tasks.StartCommand(context.Background(), activeSession, activeSession.SessionRef, fake, taskapi.CommandStartRequest{
@@ -87,7 +86,7 @@ func TestTaskRuntimeSyncCanonicalToolResultPersistsCommandResult(t *testing.T) {
 		},
 	}
 	fake := &yieldProbeSandboxRuntime{session: fakeSession}
-	taskStore := taskfile.NewStore(taskfile.Config{RootDir: t.TempDir()})
+	taskStore := newFileTaskStoreForTest(t)
 	runtime.tasks.store = taskStore
 
 	snapshot, err := runtime.tasks.StartCommand(context.Background(), activeSession, activeSession.SessionRef, fake, taskapi.CommandStartRequest{
@@ -137,7 +136,7 @@ func TestTaskRuntimeSyncCanonicalToolResultPersistsBatchTaskResults(t *testing.T
 	t.Parallel()
 
 	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
-	taskStore := taskfile.NewStore(taskfile.Config{RootDir: t.TempDir()})
+	taskStore := newFileTaskStoreForTest(t)
 	runtime.tasks.store = taskStore
 	for _, id := range []string{"task-a", "task-b", "task-error"} {
 		if err := taskStore.Upsert(context.Background(), &taskapi.Entry{
@@ -208,7 +207,7 @@ func TestLookupCommandBackfillsCanonicalResultFromSessionHistory(t *testing.T) {
 	t.Parallel()
 
 	sessions, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
-	taskStore := taskfile.NewStore(taskfile.Config{RootDir: t.TempDir()})
+	taskStore := newFileTaskStoreForTest(t)
 	runtime.tasks.store = taskStore
 	entry := &taskapi.Entry{
 		TaskID:  "task-backfill",

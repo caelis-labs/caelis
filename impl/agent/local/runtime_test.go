@@ -17,7 +17,6 @@ import (
 	"github.com/OnslaughtSnail/caelis/impl/policy/presets"
 	sessionfile "github.com/OnslaughtSnail/caelis/impl/session/file"
 	"github.com/OnslaughtSnail/caelis/impl/session/memory"
-	taskfile "github.com/OnslaughtSnail/caelis/impl/task/file"
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/filesystem"
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/plan"
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/shell"
@@ -2020,11 +2019,12 @@ func TestRuntimeRecoveryInterruptsOrphanedCommandTask(t *testing.T) {
 
 	root := t.TempDir()
 	workdir := t.TempDir()
-	sessions := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{
+	sessionStore := sessionfile.NewStore(sessionfile.Config{
 		RootDir:            root,
 		SessionIDGenerator: func() string { return "sess-orphan-command" },
-	}))
-	tasks := taskfile.NewStore(taskfile.Config{RootDir: filepath.Join(root, "tasks")})
+	})
+	sessions := sessionfile.NewService(sessionStore)
+	tasks := sessionfile.NewTaskStore(sessionStore)
 	activeSession, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
@@ -2068,10 +2068,11 @@ func TestRuntimeRecoveryInterruptsOrphanedCommandTask(t *testing.T) {
 		}
 	})
 
-	reopenedSessions := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{RootDir: root}))
+	reopenedStore := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	reopenedSessions := sessionfile.NewService(reopenedStore)
 	runtime2, err := New(Config{
 		Sessions:  reopenedSessions,
-		TaskStore: tasks,
+		TaskStore: sessionfile.NewTaskStore(reopenedStore),
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Be terse.",
 		},
@@ -2342,7 +2343,7 @@ func TestRuntimeRunDoesNotFailWhenCanonicalTaskIndexSyncFails(t *testing.T) {
 	t.Parallel()
 
 	sessions, activeSession := newTestSessionService(t, "sess-task-index-sync-fails")
-	baseStore := taskfile.NewStore(taskfile.Config{RootDir: t.TempDir()})
+	baseStore := newFileTaskStoreForTest(t)
 	if err := baseStore.Upsert(context.Background(), &taskapi.Entry{
 		TaskID:  "task-sync-fails",
 		Kind:    taskapi.KindCommand,
@@ -2880,7 +2881,7 @@ func TestRuntimeCommandYieldThenTaskWaitLoop(t *testing.T) {
 	t.Parallel()
 
 	sessions, activeSession := newTestSessionService(t, "sess-command-task-loop")
-	taskStore := taskfile.NewStore(taskfile.Config{RootDir: t.TempDir()})
+	taskStore := newFileTaskStoreForTest(t)
 	runtime, err := New(Config{
 		Sessions:  sessions,
 		TaskStore: taskStore,
@@ -3301,7 +3302,7 @@ func TestStartCommandMarksTaskFailedWhenInitialWaitErrors(t *testing.T) {
 	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
 	waitErr := errors.New("terminal session failed")
 	fake := &yieldProbeSandboxRuntime{session: &yieldProbeSandboxSession{waitErr: waitErr, statusRunning: boolPtr(false)}}
-	taskStore := taskfile.NewStore(taskfile.Config{RootDir: t.TempDir()})
+	taskStore := newFileTaskStoreForTest(t)
 	runtime.tasks.store = taskStore
 
 	snapshot, err := runtime.tasks.StartCommand(context.Background(), activeSession, activeSession.SessionRef, fake, taskapi.CommandStartRequest{
@@ -3351,7 +3352,7 @@ func TestStartCommandDoesNotExposePlainExitSummaryAsError(t *testing.T) {
 		resultErr:     errors.New("process exited with code 1"),
 	}
 	fake := &yieldProbeSandboxRuntime{session: fakeSession}
-	taskStore := taskfile.NewStore(taskfile.Config{RootDir: t.TempDir()})
+	taskStore := newFileTaskStoreForTest(t)
 	runtime.tasks.store = taskStore
 
 	snapshot, err := runtime.tasks.StartCommand(context.Background(), activeSession, activeSession.SessionRef, fake, taskapi.CommandStartRequest{

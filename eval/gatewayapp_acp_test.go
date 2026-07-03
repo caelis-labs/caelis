@@ -43,7 +43,6 @@ func TestLocalStackGatewayACPMainE2E(t *testing.T) {
 					"SDK_ACP_STUB_REPLY":         "gateway acp main ok",
 					"SDK_ACP_ENABLE_MODE_CONFIG": "1",
 					"SDK_ACP_SESSION_ROOT":       filepath.Join(root, "controller-sessions"),
-					"SDK_ACP_TASK_ROOT":          filepath.Join(root, "controller-tasks"),
 				},
 			}},
 		},
@@ -163,7 +162,6 @@ func TestLocalStackGatewayACPCommandEventShapeE2E(t *testing.T) {
 				Env: map[string]string{
 					"SDK_ACP_SCRIPTED_MODE": "async_command",
 					"SDK_ACP_SESSION_ROOT":  filepath.Join(root, "controller-sessions"),
-					"SDK_ACP_TASK_ROOT":     filepath.Join(root, "controller-tasks"),
 				},
 			}},
 		},

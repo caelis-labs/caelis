@@ -503,22 +503,11 @@ func (t *commandTask) entrySnapshot(now time.Time) *taskapi.Entry {
 }
 
 func commandTaskEntryResult(result map[string]any, running bool) map[string]any {
-	if result == nil {
-		return nil
-	}
-	out := maps.Clone(result)
-	for _, key := range []string{"stdout", "stderr"} {
-		delete(out, key)
-	}
+	mode := taskapi.ResultPersistenceCanonical
 	if !running {
-		for _, key := range []string{"result", "output", "text", "latest_output", "output_preview"} {
-			delete(out, key)
-		}
+		mode = taskapi.ResultPersistenceDeferred
 	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
+	return taskapi.SanitizeResultForPersistence(result, mode)
 }
 
 func commandTaskEntryMetadata(metadata map[string]any, running bool) map[string]any {

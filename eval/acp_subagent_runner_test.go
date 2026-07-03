@@ -32,7 +32,6 @@ func TestRunnerSpawnChildSurvivesCallerContextCancelAfterYield(t *testing.T) {
 			"SDK_ACP_STUB_REPLY":    "child survived caller cancel",
 			"SDK_ACP_STUB_DELAY_MS": "150",
 			"SDK_ACP_SESSION_ROOT":  filepath.Join(root, "child-sessions"),
-			"SDK_ACP_TASK_ROOT":     filepath.Join(root, "child-tasks"),
 		},
 	}})
 	if err != nil {

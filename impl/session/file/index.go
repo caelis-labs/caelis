@@ -272,6 +272,32 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 CREATE INDEX IF NOT EXISTS sessions_workspace_updated_idx ON sessions(workspace_key, updated_at_ns DESC);
 CREATE INDEX IF NOT EXISTS sessions_app_user_updated_idx ON sessions(app_name, user_id, updated_at_ns DESC);
+CREATE TABLE IF NOT EXISTS tasks (
+	task_id TEXT PRIMARY KEY,
+	kind TEXT NOT NULL,
+	app_name TEXT NOT NULL,
+	user_id TEXT NOT NULL,
+	session_id TEXT NOT NULL,
+	workspace_key TEXT NOT NULL,
+	title TEXT NOT NULL,
+	state TEXT NOT NULL,
+	running INTEGER NOT NULL,
+	supports_input INTEGER NOT NULL,
+	supports_cancel INTEGER NOT NULL,
+	created_at_ns INTEGER NOT NULL,
+	updated_at_ns INTEGER NOT NULL,
+	heartbeat_at_ns INTEGER NOT NULL,
+	stdout_cursor INTEGER NOT NULL,
+	stderr_cursor INTEGER NOT NULL,
+	event_cursor INTEGER NOT NULL,
+	handle TEXT NOT NULL,
+	spec_json TEXT NOT NULL,
+	result_json TEXT NOT NULL,
+	metadata_json TEXT NOT NULL,
+	terminal_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS tasks_session_updated_idx ON tasks(session_id, updated_at_ns DESC);
+CREATE INDEX IF NOT EXISTS tasks_session_kind_handle_idx ON tasks(session_id, kind, handle);
 `)
 	if err != nil {
 		return fmt.Errorf("impl/session/file: initialize session index: %w", err)

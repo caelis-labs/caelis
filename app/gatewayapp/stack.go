@@ -11,7 +11,6 @@ import (
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/modelregistry"
 	"github.com/OnslaughtSnail/caelis/impl/agent/local"
 	sessionfile "github.com/OnslaughtSnail/caelis/impl/session/file"
-	taskfile "github.com/OnslaughtSnail/caelis/impl/task/file"
 	"github.com/OnslaughtSnail/caelis/impl/tool/mcp"
 	kernelimpl "github.com/OnslaughtSnail/caelis/internal/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/agent"
@@ -20,6 +19,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/skill"
+	"github.com/OnslaughtSnail/caelis/ports/task"
 )
 
 type Config struct {
@@ -62,7 +62,7 @@ type Stack struct {
 	sandbox       SandboxConfig
 	exec          sandbox.Runtime
 	engine        *local.Runtime
-	taskStore     *taskfile.Store
+	taskStore     task.Store
 	gateway       *kernelimpl.Gateway
 	mcpMgr        *mcp.Manager
 
@@ -187,10 +187,11 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	effectiveApprovalMode := approvalMode(firstNonEmpty(cfg.ApprovalMode, doc.Runtime.ApprovalMode))
 	effectivePolicyProfile := policyProfile(firstNonEmpty(cfg.PolicyProfile, doc.Runtime.PolicyProfile))
 	baseAssembly := assembly.CloneResolvedAssembly(cfg.Assembly)
-	sessions := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{
+	sessionStore := sessionfile.NewStore(sessionfile.Config{
 		RootDir: filepath.Join(storeDir, "sessions"),
-	}))
-	taskStore := taskfile.NewStore(taskfile.Config{RootDir: filepath.Join(storeDir, "tasks")})
+	})
+	sessions := sessionfile.NewService(sessionStore)
+	taskStore := sessionfile.NewTaskStore(sessionStore)
 	lookup, err := newModelLookup(configStore, cfg.Model, cfg.ContextWindow)
 	if err != nil {
 		return nil, err

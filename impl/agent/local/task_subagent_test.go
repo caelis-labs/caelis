@@ -9,7 +9,6 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/impl/agent/local/chat"
 	"github.com/OnslaughtSnail/caelis/impl/session/memory"
-	taskfile "github.com/OnslaughtSnail/caelis/impl/task/file"
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/spawn"
 	"github.com/OnslaughtSnail/caelis/internal/agenthandle"
 	"github.com/OnslaughtSnail/caelis/ports/assembly"
@@ -33,7 +32,7 @@ func TestSlashSideSubagentReceivesSharedContextAndPublishesPublicDialogue(t *tes
 		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "review result"},
 	}
 	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
-	taskStore := taskfile.NewStore(taskfile.Config{RootDir: t.TempDir()})
+	taskStore := newFileTaskStoreForTest(t)
 	runtime.tasks.store = taskStore
 	userMessage := model.NewTextMessage(model.RoleUser, "previous request")
 	assistantMessage := model.NewTextMessage(model.RoleAssistant, "previous answer")
@@ -268,7 +267,7 @@ func TestTaskRuntimeSyncCanonicalToolResultPersistsSubagentResult(t *testing.T) 
 		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "raw full child answer\n"},
 	}
 	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
-	runtime.tasks.store = taskfile.NewStore(taskfile.Config{RootDir: t.TempDir()})
+	runtime.tasks.store = newFileTaskStoreForTest(t)
 
 	snapshot, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
 		Agent:      "helper",
@@ -319,6 +318,63 @@ func TestTaskRuntimeSyncCanonicalToolResultPersistsSubagentResult(t *testing.T) 
 	if _, exists := entry.Result["result"]; exists {
 		t.Fatalf("stored result unexpectedly kept pre-canonical field: %#v", entry.Result)
 	}
+}
+
+func TestLookupStoredSubagentByHandleUsesStoreHandleLookup(t *testing.T) {
+	ctx := context.Background()
+	runtime, activeSession := newSubagentTaskTestRuntime(t, &recordingSubagentRunner{})
+	store := &handleLookupTaskStore{
+		entry: &task.Entry{
+			TaskID:  "task-indexed",
+			Kind:    task.KindSubagent,
+			Session: activeSession.SessionRef,
+			State:   task.StateCompleted,
+			Spec:    map[string]any{"handle": "maya"},
+			Result:  map[string]any{"state": "completed"},
+		},
+	}
+	runtime.tasks.store = store
+
+	entry, err := runtime.tasks.lookupStoredSubagentByHandle(ctx, activeSession.SessionRef, "@maya")
+	if err != nil {
+		t.Fatalf("lookupStoredSubagentByHandle() error = %v", err)
+	}
+	if entry.TaskID != "task-indexed" {
+		t.Fatalf("lookupStoredSubagentByHandle() task = %q, want task-indexed", entry.TaskID)
+	}
+	if !store.handleLookupCalled {
+		t.Fatal("store handle lookup was not used")
+	}
+	if store.listCalled {
+		t.Fatal("ListSession was used for handle lookup")
+	}
+}
+
+type handleLookupTaskStore struct {
+	entry              *task.Entry
+	handleLookupCalled bool
+	listCalled         bool
+}
+
+func (s *handleLookupTaskStore) Upsert(context.Context, *task.Entry) error {
+	return nil
+}
+
+func (s *handleLookupTaskStore) Get(context.Context, string) (*task.Entry, error) {
+	return nil, errors.New("not found")
+}
+
+func (s *handleLookupTaskStore) ListSession(context.Context, session.SessionRef) ([]*task.Entry, error) {
+	s.listCalled = true
+	return nil, errors.New("ListSession should not be used for handle lookup")
+}
+
+func (s *handleLookupTaskStore) GetSessionTaskByHandle(_ context.Context, ref session.SessionRef, kind task.Kind, handle string) (*task.Entry, error) {
+	s.handleLookupCalled = true
+	if kind != task.KindSubagent || task.NormalizeHandle(handle) != "maya" {
+		return nil, errors.New("not found")
+	}
+	return task.CloneEntry(s.entry), nil
 }
 
 func TestTaskToolResultEventMetaMarksSubagentWriteTarget(t *testing.T) {

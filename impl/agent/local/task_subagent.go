@@ -564,28 +564,11 @@ func (tm *taskRuntime) lookupStoredSubagentByHandle(ctx context.Context, ref ses
 	if handle == "" {
 		return nil, fmt.Errorf("impl/agent/local: task %q not found", handle)
 	}
-	entries, err := tm.store.ListSession(ctx, ref)
+	entry, err := tm.store.GetSessionTaskByHandle(ctx, ref, taskapi.KindSubagent, handle)
 	if err != nil {
 		return nil, err
 	}
-	var matches []*taskapi.Entry
-	for _, entry := range entries {
-		if entry == nil || entry.Kind != taskapi.KindSubagent {
-			continue
-		}
-		if normalizeSubagentHandle(taskSpecString(entry.Spec, "handle")) == handle ||
-			normalizeSubagentHandle(taskStringValue(entry.Metadata["handle"])) == handle ||
-			normalizeSubagentHandle(taskStringValue(entry.Result["handle"])) == handle {
-			matches = append(matches, entry)
-		}
-	}
-	if len(matches) == 1 {
-		return taskapi.CloneEntry(matches[0]), nil
-	}
-	if len(matches) > 1 {
-		return nil, fmt.Errorf("impl/agent/local: subagent handle %q is ambiguous; use the task id", handle)
-	}
-	return nil, fmt.Errorf("impl/agent/local: task %q not found", handle)
+	return taskapi.CloneEntry(entry), nil
 }
 
 func (tm *taskRuntime) hasActiveSubagentTask(entry *taskapi.Entry) bool {
@@ -971,7 +954,7 @@ func subagentHandlesFromSession(activeSession session.Session) map[string]struct
 }
 
 func normalizeSubagentHandle(value string) string {
-	return agenthandle.Normalize(value)
+	return taskapi.NormalizeHandle(value)
 }
 
 func (t *subagentTask) applyResult(result delegation.Result) {
@@ -1135,19 +1118,11 @@ func (t *subagentTask) entrySnapshot(now time.Time) *taskapi.Entry {
 }
 
 func subagentTaskEntryResult(result map[string]any, running bool) map[string]any {
-	if result == nil {
-		return nil
-	}
-	out := maps.Clone(result)
+	mode := taskapi.ResultPersistenceCanonical
 	if !running {
-		for _, key := range []string{"result", "final_message", "output", "text", "latest_output", "output_preview"} {
-			delete(out, key)
-		}
+		mode = taskapi.ResultPersistenceDeferred
 	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
+	return taskapi.SanitizeResultForPersistence(result, mode)
 }
 
 func subagentTurnID(taskID string, seq int64) string {

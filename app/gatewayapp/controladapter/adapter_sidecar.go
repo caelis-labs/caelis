@@ -10,6 +10,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/internal/agenthandle"
 	"github.com/OnslaughtSnail/caelis/ports/gateway"
 	"github.com/OnslaughtSnail/caelis/ports/session"
+	taskapi "github.com/OnslaughtSnail/caelis/ports/task"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/eventstream"
 )
 
@@ -142,7 +143,7 @@ func (d *Adapter) allocateSideAgentLabel(ctx context.Context, ref session.Sessio
 	if gw, err := d.gatewayControlPlane(); err == nil {
 		if state, err := gw.ControlPlaneState(ctx, gateway.ControlPlaneStateRequest{SessionRef: ref}); err == nil {
 			for _, participant := range state.Participants {
-				label := agenthandle.Normalize(participant.Label)
+				label := taskapi.NormalizeHandle(participant.Label)
 				if label != "" {
 					used[label] = struct{}{}
 				}

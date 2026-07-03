@@ -122,11 +122,76 @@ type Entry struct {
 	Terminal       sandbox.TerminalRef `json:"terminal,omitempty"`
 }
 
-// Store persists task records for one owning session.
+// Store persists task records for one owning session. Upsert callers that have
+// not yet observed the canonical tool-result payload should sanitize entries
+// with ResultPersistenceDeferred before persisting them; store implementations
+// may still enforce ResultPersistenceCanonical to strip transient display data
+// at the storage boundary.
 type Store interface {
 	Upsert(context.Context, *Entry) error
 	Get(context.Context, string) (*Entry, error)
 	ListSession(context.Context, session.SessionRef) ([]*Entry, error)
+	GetSessionTaskByHandle(context.Context, session.SessionRef, Kind, string) (*Entry, error)
+}
+
+// ResultPersistenceMode controls which task result fields are allowed in a
+// durable task index entry.
+type ResultPersistenceMode int
+
+const (
+	// ResultPersistenceCanonical preserves canonical final result fields while
+	// removing transient display/stream fields.
+	ResultPersistenceCanonical ResultPersistenceMode = iota
+	// ResultPersistenceDeferred is used after task completion but before the
+	// agent loop has synced the canonical tool-result payload into the index.
+	ResultPersistenceDeferred
+)
+
+var (
+	transientResultKeys     = []string{"stdout", "stderr", "output", "text", "latest_output", "output_preview"}
+	deferredFinalResultKeys = []string{"result", "final_message"}
+)
+
+// TransientResultKeys returns task result keys that are display-only and must
+// not be persisted in durable task indexes.
+func TransientResultKeys() []string {
+	return append([]string(nil), transientResultKeys...)
+}
+
+// NormalizeHandle returns the canonical comparable form of a task handle.
+func NormalizeHandle(value string) string {
+	return strings.ToLower(strings.TrimPrefix(strings.TrimSpace(value), "@"))
+}
+
+// SanitizeResultForPersistence returns a copy of result with non-durable fields
+// removed for the requested persistence mode.
+func SanitizeResultForPersistence(result map[string]any, mode ResultPersistenceMode) map[string]any {
+	if result == nil {
+		return nil
+	}
+	out := maps.Clone(result)
+	for _, key := range transientResultKeys {
+		delete(out, key)
+	}
+	if mode == ResultPersistenceDeferred {
+		for _, key := range deferredFinalResultKeys {
+			delete(out, key)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// SanitizeEntryForPersistence returns a cloned entry with a sanitized Result.
+func SanitizeEntryForPersistence(entry *Entry, mode ResultPersistenceMode) *Entry {
+	out := CloneEntry(entry)
+	if out == nil {
+		return nil
+	}
+	out.Result = SanitizeResultForPersistence(out.Result, mode)
+	return out
 }
 
 // Manager is the runtime-owned task control surface used by yielded tools.

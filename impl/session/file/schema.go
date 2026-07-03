@@ -11,7 +11,7 @@ import (
 const (
 	documentKind    = "caelis.sdk.session"
 	documentVersion = 1
-	indexVersion    = 1
+	indexVersion    = 2
 	indexFilename   = ".sessions.index.sqlite"
 	lockFilename    = ".sessions.lock"
 )
@@ -50,6 +50,11 @@ type Store struct {
 
 // Service is the file-backed implementation of session.Service.
 type Service struct {
+	store *Store
+}
+
+// TaskStore is the task.Store facade backed by the same file store index.
+type TaskStore struct {
 	store *Store
 }
 
