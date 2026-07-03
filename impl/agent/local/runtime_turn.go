@@ -174,6 +174,7 @@ func (r *Runtime) runAttempt(
 			if err != nil {
 				return batch, emitted, inputPersisted, err
 			}
+			_ = r.tasks.syncCanonicalToolResult(ctx, ref, normalized)
 		}
 		batch = append(batch, session.CloneEvent(normalized))
 		if sink != nil {

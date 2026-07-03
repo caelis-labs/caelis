@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -15,7 +14,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/task"
 )
 
-func TestStoreUpsertCompletedTaskSplitsIndexAndBlob(t *testing.T) {
+func TestStoreUpsertCompletedTaskKeepsCanonicalResultInIndex(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -32,6 +31,7 @@ func TestStoreUpsertCompletedTaskSplitsIndexAndBlob(t *testing.T) {
 		Result: map[string]any{
 			"stdout":    "hello\n",
 			"stderr":    "warn\n",
+			"result":    "hello\nwarn\n",
 			"exit_code": 0,
 			"state":     "completed",
 		},
@@ -53,36 +53,42 @@ func TestStoreUpsertCompletedTaskSplitsIndexAndBlob(t *testing.T) {
 		t.Fatalf("len(listed) = %d, want %d", got, want)
 	}
 	if _, ok := listed[0].Result["stdout"]; ok {
-		t.Fatalf("ListSession result unexpectedly hydrated stdout: %#v", listed[0].Result)
+		t.Fatalf("ListSession result unexpectedly contains stdout: %#v", listed[0].Result)
 	}
-	if got := listed[0].Result["stdout_blob"]; got == nil {
-		t.Fatalf("stdout_blob missing from index result: %#v", listed[0].Result)
+	if _, ok := listed[0].Result["stderr"]; ok {
+		t.Fatalf("ListSession result unexpectedly contains stderr: %#v", listed[0].Result)
+	}
+	if got, _ := listed[0].Result["result"].(string); got != "hello\nwarn\n" {
+		t.Fatalf("ListSession result = %q, want canonical result", got)
 	}
 
 	got, err := store.Get(context.Background(), "task-1")
 	if err != nil {
 		t.Fatalf("Get() error = %v", err)
 	}
-	if gotStdout, _ := got.Result["stdout"].(string); gotStdout != "hello\n" {
-		t.Fatalf("hydrated stdout = %q, want %q", gotStdout, "hello\n")
+	if gotStdout, ok := got.Result["stdout"]; ok {
+		t.Fatalf("Get() result unexpectedly contains stdout: %#v", gotStdout)
 	}
-	if gotStderr, _ := got.Result["stderr"].(string); gotStderr != "warn\n" {
-		t.Fatalf("hydrated stderr = %q, want %q", gotStderr, "warn\n")
+	if gotStderr, ok := got.Result["stderr"]; ok {
+		t.Fatalf("Get() result unexpectedly contains stderr: %#v", gotStderr)
+	}
+	if gotResult, _ := got.Result["result"].(string); gotResult != "hello\nwarn\n" {
+		t.Fatalf("Get() result = %q, want canonical result", gotResult)
 	}
 
 	index := readJSONFile(t, filepath.Join(root, "sess-1.index.json"))
 	if index["kind"] != indexKind {
 		t.Fatalf("index kind = %#v, want %q", index["kind"], indexKind)
 	}
-	blobs := readLines(t, filepath.Join(root, "sess-1.blobs.jsonl"))
-	if got, want := len(blobs), 2; got != want {
-		t.Fatalf("blob line count = %d, want %d", got, want)
+	if _, err := os.Stat(filepath.Join(root, "sess-1.blobs.jsonl")); !os.IsNotExist(err) {
+		t.Fatalf("blob file should not exist, stat err = %v", err)
 	}
 
 	entry.UpdatedAt = time.Unix(30, 0)
 	entry.Result = map[string]any{
 		"stdout": "hello again\n",
 		"stderr": "warn again\n",
+		"result": "hello again\nwarn again\n",
 		"state":  "completed",
 	}
 	if err := store.Upsert(context.Background(), entry); err != nil {
@@ -99,19 +105,15 @@ func TestStoreUpsertCompletedTaskSplitsIndexAndBlob(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get(after repeated upsert) error = %v", err)
 	}
-	if gotStdout, _ := got.Result["stdout"].(string); gotStdout != "hello again\n" {
-		t.Fatalf("hydrated repeated stdout = %q, want %q", gotStdout, "hello again\n")
+	if gotResult, _ := got.Result["result"].(string); gotResult != "hello again\nwarn again\n" {
+		t.Fatalf("Get(after repeated upsert) result = %q, want canonical result", gotResult)
 	}
-	if gotStderr, _ := got.Result["stderr"].(string); gotStderr != "warn again\n" {
-		t.Fatalf("hydrated repeated stderr = %q, want %q", gotStderr, "warn again\n")
-	}
-	blobs = readLines(t, filepath.Join(root, "sess-1.blobs.jsonl"))
-	if got, want := len(blobs), 2; got != want {
-		t.Fatalf("blob line count after repeated upsert = %d, want %d", got, want)
+	if _, err := os.Stat(filepath.Join(root, "sess-1.blobs.jsonl")); !os.IsNotExist(err) {
+		t.Fatalf("blob file should still not exist after repeated upsert, stat err = %v", err)
 	}
 }
 
-func TestStoreUpsertCompletedTaskBlobsWhitespaceOnlyStreams(t *testing.T) {
+func TestStoreUpsertCompletedTaskDropsWhitespaceOnlyStreams(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -146,20 +148,23 @@ func TestStoreUpsertCompletedTaskBlobsWhitespaceOnlyStreams(t *testing.T) {
 		t.Fatalf("len(listed) = %d, want 1", len(listed))
 	}
 	if _, ok := listed[0].Result["stdout"]; ok {
-		t.Fatalf("ListSession result unexpectedly hydrated stdout: %#v", listed[0].Result)
+		t.Fatalf("ListSession result unexpectedly contains stdout: %#v", listed[0].Result)
 	}
-	if listed[0].Result["stdout_blob"] == nil || listed[0].Result["stderr_blob"] == nil {
-		t.Fatalf("stream blobs missing from index result: %#v", listed[0].Result)
+	if _, ok := listed[0].Result["stderr"]; ok {
+		t.Fatalf("ListSession result unexpectedly contains stderr: %#v", listed[0].Result)
 	}
 	got, err := store.Get(context.Background(), "task-blank")
 	if err != nil {
 		t.Fatalf("Get() error = %v", err)
 	}
-	if gotStdout, _ := got.Result["stdout"].(string); gotStdout != "\n\n" {
-		t.Fatalf("hydrated stdout = %q, want blank-only stream", gotStdout)
+	if _, ok := got.Result["stdout"]; ok {
+		t.Fatalf("Get() result unexpectedly contains stdout: %#v", got.Result)
 	}
-	if gotStderr, _ := got.Result["stderr"].(string); gotStderr != "   " {
-		t.Fatalf("hydrated stderr = %q, want blank-only stream", gotStderr)
+	if _, ok := got.Result["stderr"]; ok {
+		t.Fatalf("Get() result unexpectedly contains stderr: %#v", got.Result)
+	}
+	if _, err := os.Stat(filepath.Join(root, "sess-blank.blobs.jsonl")); !os.IsNotExist(err) {
+		t.Fatalf("blob file should not exist for blank-only streams, stat err = %v", err)
 	}
 }
 
@@ -312,17 +317,4 @@ func readJSONFile(t *testing.T, path string) map[string]any {
 		t.Fatalf("json.Unmarshal(%q) error = %v", path, err)
 	}
 	return out
-}
-
-func readLines(t *testing.T, path string) []string {
-	t.Helper()
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("os.ReadFile(%q) error = %v", path, err)
-	}
-	text := strings.TrimSpace(string(data))
-	if text == "" {
-		return nil
-	}
-	return strings.Split(text, "\n")
 }

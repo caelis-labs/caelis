@@ -608,9 +608,9 @@ func TestReplayEventsRestoresCompletedCommandTaskPanel(t *testing.T) {
 			"terminal_id": "cmd-terminal",
 		},
 		Result: map[string]any{
-			"state":       "completed",
-			"exit_code":   0,
-			"stdout_blob": "blob-cmd-task-1-stdout-final",
+			"state":     "completed",
+			"exit_code": 0,
+			"result":    "BASH task running (1/2)\nBASH task running (2/2)\nBASH task complete\n",
 		},
 		Metadata: map[string]any{
 			"task_id":     "cmd-task-1",
@@ -619,20 +619,13 @@ func TestReplayEventsRestoresCompletedCommandTaskPanel(t *testing.T) {
 			"terminal_id": "cmd-terminal",
 		},
 	}
-	hydratedEntry := taskapi.CloneEntry(indexEntry)
-	hydratedEntry.Result = map[string]any{
-		"state":     "completed",
-		"exit_code": 0,
-		"stdout":    "BASH task running (1/2)\nBASH task running (2/2)\nBASH task complete\n",
-	}
 	gw, err := New(Config{
 		Sessions: &recordingSessionService{
 			sessionResult: activeSession,
 			eventsResult:  events,
 		},
 		Tasks: replayTaskStore{
-			entries:  []*taskapi.Entry{indexEntry},
-			hydrated: map[string]*taskapi.Entry{"cmd-task-1": hydratedEntry},
+			entries: []*taskapi.Entry{indexEntry},
 		},
 		Runtime:  mockRuntime{},
 		Resolver: staticResolver{},
@@ -667,7 +660,7 @@ func TestReplayEventsRestoresCompletedCommandTaskPanel(t *testing.T) {
 	rawOutput := schema.NormalizeRawMap(update.RawOutput)
 	wantOutput := "BASH task running (1/2)\nBASH task running (2/2)\nBASH task complete\n"
 	if rawOutput["result"] != wantOutput || rawOutput["task_id"] != "cmd-task-1" || rawOutput["exit_code"] != 0 {
-		t.Fatalf("restored raw output = %#v, want hydrated command result", rawOutput)
+		t.Fatalf("restored raw output = %#v, want canonical command result", rawOutput)
 	}
 	if got := EventMetaString(update.Meta, EventMetaRoot, EventMetaRuntime, EventMetaRuntimeTool, EventMetaRuntimeToolName); got != "RUN_COMMAND" {
 		t.Fatalf("restored runtime tool name = %q, want RUN_COMMAND from parent tool metadata; meta=%#v", got, update.Meta)
@@ -858,8 +851,7 @@ func replayCursorFixtureEvents() (session.Session, []*session.Event) {
 }
 
 type replayTaskStore struct {
-	entries  []*taskapi.Entry
-	hydrated map[string]*taskapi.Entry
+	entries []*taskapi.Entry
 }
 
 func (s replayTaskStore) Upsert(context.Context, *taskapi.Entry) error {
@@ -867,11 +859,6 @@ func (s replayTaskStore) Upsert(context.Context, *taskapi.Entry) error {
 }
 
 func (s replayTaskStore) Get(_ context.Context, taskID string) (*taskapi.Entry, error) {
-	if s.hydrated != nil {
-		if entry := s.hydrated[strings.TrimSpace(taskID)]; entry != nil {
-			return taskapi.CloneEntry(entry), nil
-		}
-	}
 	for _, entry := range s.entries {
 		if entry != nil && strings.TrimSpace(entry.TaskID) == strings.TrimSpace(taskID) {
 			return taskapi.CloneEntry(entry), nil

@@ -9,6 +9,7 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/impl/agent/local/chat"
 	"github.com/OnslaughtSnail/caelis/impl/session/memory"
+	taskfile "github.com/OnslaughtSnail/caelis/impl/task/file"
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/spawn"
 	"github.com/OnslaughtSnail/caelis/internal/agenthandle"
 	"github.com/OnslaughtSnail/caelis/ports/assembly"
@@ -32,6 +33,8 @@ func TestSlashSideSubagentReceivesSharedContextAndPublishesPublicDialogue(t *tes
 		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "review result"},
 	}
 	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
+	taskStore := taskfile.NewStore(taskfile.Config{RootDir: t.TempDir()})
+	runtime.tasks.store = taskStore
 	userMessage := model.NewTextMessage(model.RoleUser, "previous request")
 	assistantMessage := model.NewTextMessage(model.RoleAssistant, "previous answer")
 	for _, event := range []*session.Event{{
@@ -87,6 +90,15 @@ func TestSlashSideSubagentReceivesSharedContextAndPublishesPublicDialogue(t *tes
 	}
 	if sideAssistant == nil || strings.TrimSpace(sideAssistant.Text) != "review result" || !session.IsMainInvocationVisibleEvent(sideAssistant) {
 		t.Fatalf("side assistant event = %#v, want public final result", sideAssistant)
+	}
+	entry, err := taskStore.Get(ctx, snapshot.Ref.TaskID)
+	if err != nil {
+		t.Fatalf("task store Get() error = %v", err)
+	}
+	for _, key := range []string{"result", "final_message", "output", "text", "latest_output", "output_preview"} {
+		if _, exists := entry.Result[key]; exists {
+			t.Fatalf("side task index unexpectedly contains %q: %#v", key, entry.Result)
+		}
 	}
 	updated, err := runtime.sessions.Session(ctx, activeSession.SessionRef)
 	if err != nil {
@@ -247,6 +259,65 @@ func TestStartSubagentAllocatesUniqueHandlesFromRuntimeReservations(t *testing.T
 	}
 	if firstHandle == secondHandle {
 		t.Fatalf("handles = %q and %q, want unique runtime reservations", firstHandle, secondHandle)
+	}
+}
+
+func TestTaskRuntimeSyncCanonicalToolResultPersistsSubagentResult(t *testing.T) {
+	ctx := context.Background()
+	runner := &recordingSubagentRunner{
+		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "raw full child answer\n"},
+	}
+	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
+	runtime.tasks.store = taskfile.NewStore(taskfile.Config{RootDir: t.TempDir()})
+
+	snapshot, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
+		Agent:      "helper",
+		Prompt:     "review",
+		Source:     "agent_spawn",
+		ParentTool: "SPAWN",
+	})
+	if err != nil {
+		t.Fatalf("StartSubagent() error = %v", err)
+	}
+	handle := taskStringValue(snapshot.Result["handle"])
+	if handle == "" {
+		t.Fatalf("snapshot handle empty: %#v", snapshot.Result)
+	}
+	entry, err := runtime.tasks.store.Get(ctx, snapshot.Ref.TaskID)
+	if err != nil {
+		t.Fatalf("task store Get(before sync) error = %v", err)
+	}
+	if _, exists := entry.Result["result"]; exists {
+		t.Fatalf("stored pre-canonical delegated result unexpectedly contains raw output: %#v", entry.Result)
+	}
+
+	canonicalText := "canonical truncated child answer\n"
+	err = runtime.tasks.syncCanonicalToolResult(ctx, activeSession.SessionRef, &session.Event{
+		Type: session.EventTypeToolResult,
+		Tool: &session.EventTool{
+			Name:   "SPAWN",
+			Status: "completed",
+			Output: map[string]any{
+				"task_id":       handle,
+				"handle":        handle,
+				"state":         string(task.StateCompleted),
+				"agent":         "helper",
+				"final_message": canonicalText,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("syncCanonicalToolResult() error = %v", err)
+	}
+	entry, err = runtime.tasks.store.Get(ctx, snapshot.Ref.TaskID)
+	if err != nil {
+		t.Fatalf("task store Get(after sync) error = %v", err)
+	}
+	if got, _ := entry.Result["final_message"].(string); got != canonicalText {
+		t.Fatalf("stored final_message = %q, want canonical result", got)
+	}
+	if _, exists := entry.Result["result"]; exists {
+		t.Fatalf("stored result unexpectedly kept pre-canonical field: %#v", entry.Result)
 	}
 }
 

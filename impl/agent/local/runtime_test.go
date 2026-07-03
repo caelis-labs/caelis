@@ -2338,6 +2338,77 @@ func TestRuntimeRunPersistsToolLoopEvents(t *testing.T) {
 	}
 }
 
+func TestRuntimeRunDoesNotFailWhenCanonicalTaskIndexSyncFails(t *testing.T) {
+	t.Parallel()
+
+	sessions, activeSession := newTestSessionService(t, "sess-task-index-sync-fails")
+	baseStore := taskfile.NewStore(taskfile.Config{RootDir: t.TempDir()})
+	if err := baseStore.Upsert(context.Background(), &taskapi.Entry{
+		TaskID:  "task-sync-fails",
+		Kind:    taskapi.KindCommand,
+		Session: activeSession.SessionRef,
+		State:   taskapi.StateCompleted,
+		Result:  map[string]any{"state": string(taskapi.StateCompleted), "exit_code": 0},
+		Terminal: sandbox.TerminalRef{
+			Backend:    sandbox.BackendHost,
+			SessionID:  "sync-fails-session",
+			TerminalID: "sync-fails-terminal",
+		},
+	}); err != nil {
+		t.Fatalf("preseed task store: %v", err)
+	}
+	runtime, err := New(Config{
+		Sessions:     sessions,
+		TaskStore:    failingUpsertTaskStore{Store: baseStore, err: errors.New("task index unavailable")},
+		AgentFactory: chat.Factory{},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	run, err := runtime.Run(context.Background(), agent.RunRequest{
+		SessionRef: activeSession.SessionRef,
+		Input:      "emit canonical tool result",
+		Agent: seqAgent{events: []*session.Event{{
+			Type: session.EventTypeToolResult,
+			Tool: &session.EventTool{
+				Name:   "RUN_COMMAND",
+				Status: "completed",
+				Output: map[string]any{
+					"task_id":   "task-sync-fails",
+					"state":     string(taskapi.StateCompleted),
+					"result":    "canonical survives\n",
+					"exit_code": 0,
+				},
+			},
+		}}},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	events, seqErr := drainRunnerEvents(t, run.Handle)
+	if seqErr != nil {
+		t.Fatalf("runner error = %v", seqErr)
+	}
+	var sawToolResult bool
+	for _, event := range events {
+		if event != nil && event.Type == session.EventTypeToolResult {
+			sawToolResult = true
+		}
+	}
+	if !sawToolResult {
+		t.Fatalf("runner events = %#v, want canonical tool result despite task index sync failure", events)
+	}
+}
+
+type failingUpsertTaskStore struct {
+	taskapi.Store
+	err error
+}
+
+func (s failingUpsertTaskStore) Upsert(context.Context, *taskapi.Entry) error {
+	return s.err
+}
+
 func TestRuntimeRunPersistsPlanLoopAndState(t *testing.T) {
 	t.Parallel()
 
@@ -4020,7 +4091,7 @@ func TestTaskControlSnapshotToolResultSimplifiesCancelPayload(t *testing.T) {
 	}
 }
 
-func TestTaskSnapshotToolResultTruncatesTerminalStreamsForDisplayAndModel(t *testing.T) {
+func TestTaskSnapshotToolResultLeavesTruncationToAgentLoop(t *testing.T) {
 	t.Parallel()
 
 	hugeStderr := strings.Repeat("permission denied\n", tool.DefaultTruncationPolicy().ByteBudget()/2)
@@ -4045,15 +4116,9 @@ func TestTaskSnapshotToolResultTruncatesTerminalStreamsForDisplayAndModel(t *tes
 	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
 		t.Fatalf("unmarshal result payload: %v", err)
 	}
-	gotText := taskStringValue(payload["result"])
-	if gotText == hugeStderr {
-		t.Fatalf("payload result kept original huge output, want canonical truncated result")
-	}
-	if len(gotText) > tool.DefaultTruncationPolicy().ByteBudget()+1024 {
-		t.Fatalf("payload result len = %d, want bounded", len(gotText))
-	}
-	if !strings.Contains(gotText, "lines omitted") {
-		t.Fatalf("payload result = %q, want omitted line marker", gotText)
+	gotText, _ := payload["result"].(string)
+	if gotText != hugeStderr {
+		t.Fatalf("payload result len = %d, want untruncated tool output len %d", len(gotText), len(hugeStderr))
 	}
 	if _, exists := result.Meta["text"]; exists {
 		t.Fatalf("result.Meta duplicated terminal text: %#v", result.Meta)

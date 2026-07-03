@@ -62,7 +62,6 @@ func (g *Gateway) augmentReplayTaskPanelEvents(ctx context.Context, ref session.
 	prepends := []replayTaskPanelInsert{}
 	restoredCallIDs := map[string]bool{}
 	for _, entry := range entries {
-		entry = g.replayHydratedTaskEntry(ctx, entry)
 		finalPanel, ok := replayTaskPanelFinalFromEntry(entry)
 		if !ok {
 			continue
@@ -429,12 +428,6 @@ func replayCommandTaskRawOutput(out map[string]any, entry *taskapi.Entry, finalT
 			out[key] = value
 		}
 	}
-	if stdout := replayAnyText(entry.Result["stdout"]); strings.TrimSpace(stdout) != "" {
-		out["stdout"] = stdout
-	}
-	if stderr := replayAnyText(entry.Result["stderr"]); strings.TrimSpace(stderr) != "" {
-		out["stderr"] = stderr
-	}
 	for _, key := range []string{"command", "workdir", EventMetaRuntimeTaskSessionID, EventMetaRuntimeTaskTerminalID} {
 		if value := replayTaskValue(entry, key); value != "" {
 			out[key] = value
@@ -554,31 +547,6 @@ func replayTaskUpdatedAt(entry *taskapi.Entry) time.Time {
 	return entry.CreatedAt
 }
 
-func (g *Gateway) replayHydratedTaskEntry(ctx context.Context, entry *taskapi.Entry) *taskapi.Entry {
-	entry = taskapi.CloneEntry(entry)
-	if entry == nil || g == nil || g.tasks == nil {
-		return entry
-	}
-	if !replayTaskEntryNeedsHydration(entry) {
-		return entry
-	}
-	hydrated, err := g.tasks.Get(ctx, strings.TrimSpace(entry.TaskID))
-	if err != nil || hydrated == nil {
-		return entry
-	}
-	return taskapi.CloneEntry(hydrated)
-}
-
-func replayTaskEntryNeedsHydration(entry *taskapi.Entry) bool {
-	if entry == nil || entry.Kind != taskapi.KindCommand {
-		return false
-	}
-	if replayAnyString(entry.Result["stdout_blob"]) != "" || replayAnyString(entry.Result["stderr_blob"]) != "" {
-		return true
-	}
-	return false
-}
-
 func replayRuntimeToolName(meta map[string]any, title string) string {
 	if name := replayAnyString(replayRuntimeSection(meta, EventMetaRuntimeTool)[EventMetaRuntimeToolName]); name != "" {
 		return name
@@ -629,11 +597,6 @@ func replayAnyString(value any) string {
 	default:
 		return ""
 	}
-}
-
-func replayAnyText(value any) string {
-	text, _ := value.(string)
-	return text
 }
 
 func replayStringPtr(value string) *string {

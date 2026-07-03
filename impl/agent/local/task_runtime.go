@@ -111,30 +111,6 @@ func minDuration(a, b time.Duration) time.Duration {
 	return b
 }
 
-func canonicalTaskResult(result map[string]any) map[string]any {
-	if result == nil {
-		return nil
-	}
-	out, _ := tool.TruncateMap(result, tool.DefaultTruncationPolicy())
-	return out
-}
-
-func canonicalTaskEntryResult(result map[string]any) map[string]any {
-	out := canonicalTaskResult(result)
-	if result == nil {
-		return out
-	}
-	if out == nil {
-		out = map[string]any{}
-	}
-	for _, key := range []string{"stdout", "stderr"} {
-		if text, ok := result[key].(string); ok {
-			out[key] = text
-		}
-	}
-	return out
-}
-
 func taskSnapshotToolResult(call tool.Call, def tool.Definition, snapshot taskapi.Snapshot) tool.Result {
 	return taskSnapshotToolResultWithPayload(call, def, snapshot, taskToolPayload(snapshot))
 }
@@ -162,7 +138,6 @@ type taskBatchControlItem struct {
 
 func taskBatchControlToolResult(call tool.Call, def tool.Definition, items []taskBatchControlItem, action string, waitUntilDone bool, actualWaitMS int) tool.Result {
 	payload := taskBatchControlPayload(items, action, waitUntilDone, actualWaitMS)
-	payload, _ = tool.TruncateMap(payload, tool.DefaultTruncationPolicy())
 	raw, _ := json.Marshal(payload)
 	return tool.Result{
 		ID:      strings.TrimSpace(call.ID),
@@ -176,7 +151,6 @@ func taskSnapshotToolResultWithPayload(call tool.Call, def tool.Definition, snap
 	if payload == nil {
 		payload = map[string]any{}
 	}
-	payload, _ = tool.TruncateMap(payload, tool.DefaultTruncationPolicy())
 	meta := taskToolMeta(snapshot)
 	raw, _ := json.Marshal(payload)
 	return tool.Result{

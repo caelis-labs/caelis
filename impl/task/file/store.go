@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -20,7 +19,6 @@ import (
 const (
 	indexKind    = "caelis.sdk.task_index"
 	indexVersion = 1
-	blobKind     = "caelis.sdk.task_blob"
 	lookupKind   = "caelis.sdk.task_lookup"
 )
 
@@ -30,7 +28,7 @@ type Config struct {
 	Clock   func() time.Time
 }
 
-// Store persists session-scoped task indexes and finalized task output blobs.
+// Store persists session-scoped task indexes.
 type Store struct {
 	mu      sync.Mutex
 	rootDir string
@@ -44,15 +42,6 @@ type indexDocument struct {
 	UpdatedAt time.Time          `json:"updated_at"`
 	Tasks     []*task.Entry      `json:"tasks"`
 	Metadata  map[string]any     `json:"metadata,omitempty"`
-}
-
-type blobRecord struct {
-	ID        string    `json:"id"`
-	Kind      string    `json:"kind"`
-	TaskID    string    `json:"task_id"`
-	Stream    string    `json:"stream"`
-	Text      string    `json:"text"`
-	CreatedAt time.Time `json:"created_at"`
 }
 
 type lookupDocument struct {
@@ -76,7 +65,7 @@ func NewStore(cfg Config) *Store {
 }
 
 func (s *Store) Upsert(_ context.Context, entry *task.Entry) error {
-	entry = task.CloneEntry(entry)
+	entry = sanitizeIndexEntry(task.CloneEntry(entry))
 	if entry == nil {
 		return nil
 	}
@@ -99,21 +88,6 @@ func (s *Store) Upsert(_ context.Context, entry *task.Entry) error {
 			UpdatedAt: s.now(),
 			Tasks:     nil,
 		}
-	}
-
-	blobIDs, err := s.writeFinalBlobs(entry)
-	if err != nil {
-		return err
-	}
-	if len(blobIDs) != 0 {
-		if entry.Result == nil {
-			entry.Result = map[string]any{}
-		}
-		for key, value := range blobIDs {
-			entry.Result[key] = value
-		}
-		delete(entry.Result, "stdout")
-		delete(entry.Result, "stderr")
 	}
 
 	replaced := false
@@ -179,7 +153,7 @@ func (s *Store) Get(_ context.Context, taskID string) (*task.Entry, error) {
 			if err := s.upsertLookup(taskID, doc.Session); err != nil {
 				return nil, err
 			}
-			return s.hydrateEntry(doc.Session, item)
+			return task.CloneEntry(item), nil
 		}
 	}
 	return nil, fmt.Errorf("impl/task/file: task %q not found", taskID)
@@ -197,11 +171,7 @@ func (s *Store) getFromSessionIndex(ref session.SessionRef, taskID string) (*tas
 		if item == nil || strings.TrimSpace(item.TaskID) != taskID {
 			continue
 		}
-		hydrated, err := s.hydrateEntry(doc.Session, item)
-		if err != nil {
-			return nil, false, err
-		}
-		return hydrated, true, nil
+		return task.CloneEntry(item), true, nil
 	}
 	return nil, false, nil
 }
@@ -227,85 +197,6 @@ func (s *Store) ListSession(_ context.Context, ref session.SessionRef) ([]*task.
 	return out, nil
 }
 
-func (s *Store) writeFinalBlobs(entry *task.Entry) (map[string]string, error) {
-	if entry == nil || entry.Result == nil {
-		return map[string]string{}, nil
-	}
-	if entry.Running {
-		return map[string]string{}, nil
-	}
-	stdout, _ := entry.Result["stdout"].(string)
-	stderr, _ := entry.Result["stderr"].(string)
-	if stdout == "" && stderr == "" {
-		return map[string]string{}, nil
-	}
-	records, err := s.readBlobs(entry.Session)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return nil, err
-	}
-	if records == nil {
-		records = map[string]blobRecord{}
-	}
-	upsertBlob := func(stream string, text string) string {
-		if text == "" {
-			return ""
-		}
-		id := fmt.Sprintf("blob-%s-%s-final", strings.TrimSpace(entry.TaskID), stream)
-		records[id] = blobRecord{
-			ID:        id,
-			Kind:      blobKind,
-			TaskID:    strings.TrimSpace(entry.TaskID),
-			Stream:    stream,
-			Text:      text,
-			CreatedAt: s.now(),
-		}
-		return id
-	}
-	stdoutID := upsertBlob("stdout", stdout)
-	stderrID := upsertBlob("stderr", stderr)
-	if err := s.writeBlobs(entry.Session, records); err != nil {
-		return nil, err
-	}
-	out := map[string]string{}
-	if stdoutID != "" {
-		out["stdout_blob"] = stdoutID
-	}
-	if stderrID != "" {
-		out["stderr_blob"] = stderrID
-	}
-	return out, nil
-}
-
-func (s *Store) hydrateEntry(session session.SessionRef, entry *task.Entry) (*task.Entry, error) {
-	entry = task.CloneEntry(entry)
-	if entry == nil {
-		return nil, fmt.Errorf("impl/task/file: entry is required")
-	}
-	stdoutBlob, _ := entry.Result["stdout_blob"].(string)
-	stderrBlob, _ := entry.Result["stderr_blob"].(string)
-	if stdoutBlob == "" && stderrBlob == "" {
-		return entry, nil
-	}
-	records, err := s.readBlobs(session)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return nil, err
-	}
-	if entry.Result == nil {
-		entry.Result = map[string]any{}
-	}
-	if stdoutBlob != "" {
-		if record, ok := records[stdoutBlob]; ok {
-			entry.Result["stdout"] = record.Text
-		}
-	}
-	if stderrBlob != "" {
-		if record, ok := records[stderrBlob]; ok {
-			entry.Result["stderr"] = record.Text
-		}
-	}
-	return entry, nil
-}
-
 func (s *Store) readIndex(ref session.SessionRef) (indexDocument, error) {
 	return s.readIndexByPath(s.indexPath(ref.SessionID))
 }
@@ -324,6 +215,16 @@ func (s *Store) readIndexByPath(path string) (indexDocument, error) {
 		doc.Tasks[i] = task.CloneEntry(entry)
 	}
 	return doc, nil
+}
+
+func sanitizeIndexEntry(entry *task.Entry) *task.Entry {
+	if entry == nil || entry.Result == nil {
+		return entry
+	}
+	for _, key := range []string{"stdout", "stderr"} {
+		delete(entry.Result, key)
+	}
+	return entry
 }
 
 func (s *Store) writeIndex(doc indexDocument) error {
@@ -462,64 +363,8 @@ func (s *Store) writeLookup(doc lookupDocument) error {
 	return os.Rename(tmp, path)
 }
 
-func (s *Store) readBlobs(ref session.SessionRef) (map[string]blobRecord, error) {
-	path := s.blobPath(ref.SessionID)
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	records := map[string]blobRecord{}
-	decoder := json.NewDecoder(file)
-	for {
-		var record blobRecord
-		if err := decoder.Decode(&record); err != nil {
-			if errors.Is(err, io.EOF) {
-				break
-			}
-			return nil, err
-		}
-		records[strings.TrimSpace(record.ID)] = record
-	}
-	return records, nil
-}
-
-func (s *Store) writeBlobs(ref session.SessionRef, records map[string]blobRecord) error {
-	if err := os.MkdirAll(s.rootDir, 0o755); err != nil {
-		return err
-	}
-	ids := make([]string, 0, len(records))
-	for id := range records {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	var lines []string
-	for _, id := range ids {
-		raw, err := json.Marshal(records[id])
-		if err != nil {
-			return err
-		}
-		lines = append(lines, string(raw))
-	}
-	path := s.blobPath(ref.SessionID)
-	tmp := path + ".tmp"
-	content := strings.Join(lines, "\n")
-	if content != "" {
-		content += "\n"
-	}
-	if err := os.WriteFile(tmp, []byte(content), 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
-}
-
 func (s *Store) indexPath(sessionID string) string {
 	return filepath.Join(s.rootDir, strings.TrimSpace(sessionID)+".index.json")
-}
-
-func (s *Store) blobPath(sessionID string) string {
-	return filepath.Join(s.rootDir, strings.TrimSpace(sessionID)+".blobs.jsonl")
 }
 
 func (s *Store) lookupPath() string {

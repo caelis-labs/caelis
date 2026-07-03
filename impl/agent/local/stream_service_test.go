@@ -219,7 +219,7 @@ func TestStreamReadRehydratedLiteralNoOutputTextKeepsTerminalFrame(t *testing.T)
 	}
 }
 
-func TestCompleteCommandTaskStoresSeparateTerminalStreams(t *testing.T) {
+func TestCompleteCommandTaskReturnsMergedResultOnly(t *testing.T) {
 	t.Parallel()
 
 	sess := &liveOutputRaceSession{stdout: "out\n", stderr: "err\n", completed: true}
@@ -240,11 +240,11 @@ func TestCompleteCommandTaskStoresSeparateTerminalStreams(t *testing.T) {
 	if err != nil {
 		t.Fatalf("completeCommandTaskWithStatus() error = %v", err)
 	}
-	if got, _ := snap.Result["stdout"].(string); got != "out\n" {
-		t.Fatalf("snapshot stdout = %q, want out stream", got)
+	if _, exists := snap.Result["stdout"]; exists {
+		t.Fatalf("snapshot result unexpectedly contains stdout: %#v", snap.Result)
 	}
-	if got, _ := snap.Result["stderr"].(string); got != "err\n" {
-		t.Fatalf("snapshot stderr = %q, want err stream", got)
+	if _, exists := snap.Result["stderr"]; exists {
+		t.Fatalf("snapshot result unexpectedly contains stderr: %#v", snap.Result)
 	}
 	if got, _ := snap.Result["result"].(string); got != "out\nerr\n" {
 		t.Fatalf("snapshot result = %q, want merged terminal summary", got)
@@ -290,7 +290,7 @@ func TestCompleteCommandTaskDoesNotPersistNoOutputPlaceholder(t *testing.T) {
 	}
 }
 
-func TestCompleteCommandTaskPreservesBlankOnlyOutputCursorWithoutResult(t *testing.T) {
+func TestCompleteCommandTaskKeepsBlankOnlyCursorWithoutResult(t *testing.T) {
 	t.Parallel()
 
 	sess := &liveOutputRaceSession{stdout: "\n", completed: true}
@@ -314,15 +314,18 @@ func TestCompleteCommandTaskPreservesBlankOnlyOutputCursorWithoutResult(t *testi
 	if got, exists := snap.Result["result"]; exists {
 		t.Fatalf("snapshot result = %#v, want no durable blank-only result", got)
 	}
-	if got, _ := snap.Result["stdout"].(string); got != "\n" {
-		t.Fatalf("snapshot stdout = %q, want preserved terminal stream", got)
+	if _, exists := snap.Result["stdout"]; exists {
+		t.Fatalf("snapshot result unexpectedly contains stdout: %#v", snap.Result)
+	}
+	if _, exists := snap.Result["stderr"]; exists {
+		t.Fatalf("snapshot result unexpectedly contains stderr: %#v", snap.Result)
 	}
 	if got := snap.Metadata["output_cursor"]; got != int64(1) {
 		t.Fatalf("metadata output_cursor = %#v, want blank output byte length", got)
 	}
 }
 
-func TestCompletedTaskSessionPrefersStoredStreamsOverMergedResult(t *testing.T) {
+func TestCompletedTaskSessionReadsCanonicalResult(t *testing.T) {
 	t.Parallel()
 
 	sess := completedTaskSession{entry: &taskapi.Entry{
@@ -338,8 +341,8 @@ func TestCompletedTaskSessionPrefersStoredStreamsOverMergedResult(t *testing.T) 
 	if err != nil {
 		t.Fatalf("Result() error = %v", err)
 	}
-	if result.Stdout != "out\n" || result.Stderr != "err\n" {
-		t.Fatalf("Result() streams = %q/%q, want separate streams", result.Stdout, result.Stderr)
+	if result.Stdout != "out\nerr\n" || result.Stderr != "" {
+		t.Fatalf("Result() streams = %q/%q, want canonical result as stdout", result.Stdout, result.Stderr)
 	}
 }
 
@@ -484,7 +487,7 @@ func TestPublishStreamDoesNotRouteAmbiguousSharedChildSessionWithoutTaskID(t *te
 	}
 }
 
-func TestCompletedTaskSessionReadsLegacyStdoutStderr(t *testing.T) {
+func TestCompletedTaskSessionIgnoresLegacyStdoutStderr(t *testing.T) {
 	t.Parallel()
 
 	sess := completedTaskSession{entry: &taskapi.Entry{
@@ -500,18 +503,18 @@ func TestCompletedTaskSessionReadsLegacyStdoutStderr(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadOutput() error = %v", err)
 	}
-	if string(stdout) != "out\n" || string(stderr) != "err\n" {
-		t.Fatalf("ReadOutput() stdout/stderr = %q/%q, want legacy output", stdout, stderr)
+	if string(stdout) != "" || string(stderr) != "" {
+		t.Fatalf("ReadOutput() stdout/stderr = %q/%q, want legacy streams ignored", stdout, stderr)
 	}
-	if nextStdout != int64(len("out\n")) || nextStderr != int64(len("err\n")) {
-		t.Fatalf("ReadOutput() cursors = %d/%d, want legacy output lengths", nextStdout, nextStderr)
+	if nextStdout != 0 || nextStderr != 0 {
+		t.Fatalf("ReadOutput() cursors = %d/%d, want zero", nextStdout, nextStderr)
 	}
 	result, err := sess.Result(context.Background())
 	if err != nil {
 		t.Fatalf("Result() error = %v", err)
 	}
-	if result.Stdout != "out\n" || result.Stderr != "err\n" || result.ExitCode != 7 {
-		t.Fatalf("Result() = %#v, want legacy stdout/stderr/exit code", result)
+	if result.Stdout != "" || result.Stderr != "" || result.ExitCode != 7 {
+		t.Fatalf("Result() = %#v, want legacy streams ignored with exit code", result)
 	}
 }
 

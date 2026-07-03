@@ -547,6 +547,7 @@ func (tm *taskRuntime) lookupSubagent(ctx context.Context, ref session.SessionRe
 	if strings.TrimSpace(entry.Session.SessionID) != strings.TrimSpace(ref.SessionID) || entry.Kind != taskapi.KindSubagent {
 		return nil, fmt.Errorf("impl/agent/local: task %q not found", taskID)
 	}
+	entry = tm.backfillCanonicalTaskEntry(ctx, ref, entry)
 	rehydrated := tm.rehydrateSubagentTask(entry)
 	tm.mu.Lock()
 	tm.subagents[rehydrated.ref.TaskID] = rehydrated
@@ -1097,7 +1098,7 @@ func (t *subagentTask) snapshot() taskapi.Snapshot {
 		StdoutCursor:   t.stdoutCursor,
 		StderrCursor:   t.stderrCursor,
 		EventCursor:    int64(len(t.streamFrames)),
-		Result:         canonicalTaskResult(result),
+		Result:         result,
 		Metadata:       metadata,
 	})
 }
@@ -1128,9 +1129,25 @@ func (t *subagentTask) entrySnapshot(now time.Time) *taskapi.Entry {
 			"turn_seq":    t.turnSeq,
 			"turn_id":     subagentTurnID(t.ref.TaskID, t.turnSeq),
 		},
-		Result:   canonicalTaskResult(t.result),
+		Result:   subagentTaskEntryResult(t.result, t.running),
 		Metadata: maps.Clone(t.metadata),
 	}
+}
+
+func subagentTaskEntryResult(result map[string]any, running bool) map[string]any {
+	if result == nil {
+		return nil
+	}
+	out := maps.Clone(result)
+	if !running {
+		for _, key := range []string{"result", "final_message", "output", "text", "latest_output", "output_preview"} {
+			delete(out, key)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func subagentTurnID(taskID string, seq int64) string {

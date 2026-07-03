@@ -99,11 +99,6 @@ func completedTaskOutput(result map[string]any) (string, string) {
 	if result == nil {
 		return "", ""
 	}
-	stdout, stdoutOK := result["stdout"].(string)
-	stderr, stderrOK := result["stderr"].(string)
-	if stdoutOK || stderrOK {
-		return stdout, stderr
-	}
 	if text, _ := result["result"].(string); text != "" {
 		return text, ""
 	}

@@ -192,12 +192,6 @@ func (tm *taskRuntime) completeCommandTaskWithStatus(ctx context.Context, task *
 	if taskOutputHasNonBlankLine(finalText) && strings.TrimSpace(finalText) != noOutputPlaceholder {
 		task.result["result"] = finalText
 	}
-	if stdoutText != "" {
-		task.result["stdout"] = stdoutText
-	}
-	if stderrText != "" {
-		task.result["stderr"] = stderrText
-	}
 	if commandExitCodeAvailable(state, result.ExitCode, resultErr) {
 		task.result["exit_code"] = result.ExitCode
 	}
@@ -348,6 +342,7 @@ func (tm *taskRuntime) lookupCommand(ctx context.Context, ref session.SessionRef
 	if entry.Kind != taskapi.KindCommand {
 		return nil, fmt.Errorf("impl/agent/local: task %q not found", taskID)
 	}
+	entry = tm.backfillCanonicalTaskEntry(ctx, ref, entry)
 	rehydrated, err := tm.rehydrateCommandTask(entry)
 	if err != nil {
 		return nil, err
@@ -371,7 +366,7 @@ func (t *commandTask) snapshotLocked(status sandbox.SessionStatus) taskapi.Snaps
 		UpdatedAt:      status.UpdatedAt,
 		StdoutCursor:   t.stdoutCursor,
 		StderrCursor:   t.stderrCursor,
-		Result:         canonicalTaskResult(t.result),
+		Result:         maps.Clone(t.result),
 		Metadata:       maps.Clone(t.metadata),
 		Terminal:       status.Terminal,
 	})
@@ -501,10 +496,39 @@ func (t *commandTask) entrySnapshot(now time.Time) *taskapi.Entry {
 			"workdir":    t.workdir,
 			"session_id": t.ref.SessionID,
 		},
-		Result:   canonicalTaskEntryResult(t.result),
-		Metadata: maps.Clone(t.metadata),
+		Result:   commandTaskEntryResult(t.result, t.running),
+		Metadata: commandTaskEntryMetadata(t.metadata, t.running),
 		Terminal: t.session.Terminal(),
 	}
+}
+
+func commandTaskEntryResult(result map[string]any, running bool) map[string]any {
+	if result == nil {
+		return nil
+	}
+	out := maps.Clone(result)
+	for _, key := range []string{"stdout", "stderr"} {
+		delete(out, key)
+	}
+	if !running {
+		for _, key := range []string{"result", "output", "text", "latest_output", "output_preview"} {
+			delete(out, key)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func commandTaskEntryMetadata(metadata map[string]any, running bool) map[string]any {
+	out := maps.Clone(metadata)
+	if running {
+		return out
+	}
+	delete(out, "output_cursor")
+	delete(out, "model_output_cursor")
+	return out
 }
 
 func (t *commandTask) appendOutput(text string) {
