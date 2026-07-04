@@ -13,7 +13,7 @@ func projectTranscriptToolCall(input transcript.ToolProjectionInput) TranscriptE
 	status := transcript.NormalizeToolStartStatus(input.Status)
 	semanticName := toolSemanticName(toolName, input.ToolKind)
 	rawInput := transcript.CloneAnyMap(input.RawInput)
-	if refinedName := refinedToolDisplayName(semanticName, input.ToolKind, input.ToolTitle, rawInput); refinedName != "" {
+	if refinedName := toolDisplaySemanticOverride(semanticName, input.ToolKind, input.ToolTitle, rawInput); refinedName != "" {
 		toolName = refinedName
 		semanticName = refinedName
 	}
@@ -58,7 +58,7 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 	content := acpToolContentToDisplay(input.Content)
 	toolTerminal := transcriptToolHasTerminal(input.Meta, content)
 	suppressRunningSnapshotOutput := suppressRunningTerminalSnapshotOutput(semanticName, input.ToolKind, input.Meta, status, toolErr)
-	if refinedName := refinedToolDisplayName(semanticName, input.ToolKind, input.ToolTitle, rawInput); refinedName != "" {
+	if refinedName := toolDisplaySemanticOverride(semanticName, input.ToolKind, input.ToolTitle, rawInput); refinedName != "" {
 		toolName = refinedName
 		semanticName = refinedName
 	}

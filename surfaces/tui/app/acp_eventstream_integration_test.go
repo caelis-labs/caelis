@@ -359,6 +359,55 @@ func TestHandleACPEventEnvelopeAppliesParticipantSequence(t *testing.T) {
 	}
 }
 
+func TestHandleACPEventEnvelopeDisplaysParticipantSkillContentReadAsSkill(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:          eventstream.KindSessionUpdate,
+		SessionID:     "session-1",
+		Scope:         eventstream.ScopeParticipant,
+		ScopeID:       "side-reviewer",
+		ParticipantID: "side-reviewer",
+		Actor:         "@reviewer",
+		Update: schema.ToolCall{
+			SessionUpdate: schema.UpdateToolCall,
+			ToolCallID:    "skill-review-1",
+			Title:         `Read <skill_content name="review">`,
+			Kind:          schema.ToolKindRead,
+			Status:        schema.ToolStatusInProgress,
+		},
+	})
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:          eventstream.KindSessionUpdate,
+		SessionID:     "session-1",
+		Scope:         eventstream.ScopeParticipant,
+		ScopeID:       "side-reviewer",
+		ParticipantID: "side-reviewer",
+		Actor:         "@reviewer",
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo,
+			ToolCallID:    "skill-review-1",
+			Title:         stringPtr(`Read <skill_content name="review">`),
+			Kind:          stringPtr(schema.ToolKindRead),
+			Status:        stringPtr(schema.ToolStatusCompleted),
+		},
+	})
+
+	block := model.findParticipantTurnBlock("side-reviewer")
+	if block == nil {
+		t.Fatal("participant block missing")
+	}
+	if len(block.Events) != 1 || block.Events[0].Name != "SKILL" || block.Events[0].Args != "review" || !block.Events[0].Done {
+		t.Fatalf("participant events = %#v, want completed Skill review", block.Events)
+	}
+	rows := block.Render(BlockRenderContext{Width: 96, TermWidth: 96, Theme: model.theme, ThemeKey: themeRenderCacheKey(model.theme)})
+	plain := joinRenderedPlain(rows)
+	if !strings.Contains(plain, "Skill review") || strings.Contains(plain, "<skill_content") {
+		t.Fatalf("rendered participant skill rows:\n%s", plain)
+	}
+}
+
 func TestHandleACPEventEnvelopeAnchorsSubagentOutputToSpawnTool(t *testing.T) {
 	t.Parallel()
 

@@ -52,6 +52,42 @@ func TestToolDisplayArgsSkillUsesName(t *testing.T) {
 	}
 }
 
+func TestToolDisplayArgsSkillContentReadUsesSkillName(t *testing.T) {
+	t.Parallel()
+
+	title := `Read <skill_content name="review">`
+	if got := toolDisplaySemanticOverride("READ", "read", title, nil); got != "SKILL" {
+		t.Fatalf("toolDisplaySemanticOverride() = %q, want SKILL", got)
+	}
+	if got := toolTitleDisplayArgs("SKILL", "read", title); got != "review" {
+		t.Fatalf("toolTitleDisplayArgs(SKILL skill_content) = %q, want review", got)
+	}
+	if got := toolDisplayArgs("SKILL", map[string]any{"path": `<skill_content name="review">`}); got != "review" {
+		t.Fatalf("toolDisplayArgs(SKILL skill_content path) = %q, want review", got)
+	}
+}
+
+func TestToolDisplayArgsSkillContentRawInputOnlyUsesToolPathAliases(t *testing.T) {
+	t.Parallel()
+
+	raw := map[string]any{"filePath": `<skill_content name="superpowers:brainstorm">`}
+	if got := toolDisplaySemanticOverride("READ", "read", "", raw); got != "SKILL" {
+		t.Fatalf("toolDisplaySemanticOverride(raw only) = %q, want SKILL", got)
+	}
+	if got := toolDisplayArgs("SKILL", raw); got != "superpowers:brainstorm" {
+		t.Fatalf("toolDisplayArgs(SKILL raw only) = %q, want namespaced skill", got)
+	}
+}
+
+func TestToolDisplaySemanticOverrideDoesNotTreatOrdinaryReadAsSkill(t *testing.T) {
+	t.Parallel()
+
+	raw := map[string]any{"path": "src/foo.go"}
+	if got := toolDisplaySemanticOverride("READ", "read", "Read src/foo.go", raw); got != "" {
+		t.Fatalf("toolDisplaySemanticOverride(ordinary read) = %q, want empty", got)
+	}
+}
+
 func TestToolDisplayArgsGlobUsesProviderPatternAlias(t *testing.T) {
 	t.Parallel()
 

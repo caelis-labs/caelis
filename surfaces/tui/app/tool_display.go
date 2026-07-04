@@ -58,6 +58,9 @@ func toolDisplayArgs(name string, raw map[string]any, fallback ...string) string
 		if name := strings.TrimSpace(asString(raw["name"])); name != "" {
 			return name
 		}
+		if name := skillContentDisplayNameFromRaw(raw); name != "" {
+			return name
+		}
 	case "WRITE", "PATCH":
 		if path := toolPath(raw); path != "" {
 			return filepath.Base(path)
@@ -221,15 +224,32 @@ func toolDisplayFullArgs(name string, raw map[string]any) string {
 	}
 }
 
-func refinedToolDisplayName(semanticName string, kind string, title string, raw map[string]any) string {
+type toolDisplaySemanticOverrideFunc func(semanticName string, kind string, title string, raw map[string]any) string
+
+var toolDisplaySemanticOverrides = []toolDisplaySemanticOverrideFunc{
+	overrideSkillContentRead,
+	overrideSearchListFiles,
+}
+
+func toolDisplaySemanticOverride(semanticName string, kind string, title string, raw map[string]any) string {
+	for _, override := range toolDisplaySemanticOverrides {
+		if name := override(semanticName, kind, title, raw); name != "" {
+			return name
+		}
+	}
+	return ""
+}
+
+func overrideSearchListFiles(semanticName string, kind string, title string, raw map[string]any) string {
 	if !strings.EqualFold(strings.TrimSpace(kind), "search") && !strings.EqualFold(strings.TrimSpace(semanticName), "SEARCH") {
 		return ""
 	}
 	switch parsedCommandType(raw) {
 	case "list_files":
 		return "LIST"
+	default:
+		return ""
 	}
-	return ""
 }
 
 func toolTitleDisplayArgs(name string, kind string, title string) string {
@@ -242,6 +262,8 @@ func toolTitleDisplayArgs(name string, kind string, title string) string {
 		return ""
 	}
 	switch name {
+	case "SKILL":
+		return displaypolicy.SkillContentNameFromTitle(title)
 	case "RUN_COMMAND":
 		return executeTitleDisplayArgs(title)
 	case "GLOB":

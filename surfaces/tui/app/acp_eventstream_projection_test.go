@@ -108,6 +108,28 @@ func TestProjectACPEventToTranscriptEventsProjectsCompactNotice(t *testing.T) {
 	}
 }
 
+func TestProjectACPEventToTranscriptEventsDisplaysSkillContentReadAsSkill(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectACPEventToTranscriptEvents(eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate,
+		Update: schema.ToolCall{
+			SessionUpdate: schema.UpdateToolCall,
+			ToolCallID:    "skill-review-1",
+			Title:         `Read <skill_content name="review">`,
+			Kind:          schema.ToolKindRead,
+			Status:        schema.ToolStatusInProgress,
+		},
+	})
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one transcript event", events)
+	}
+	event := events[0]
+	if event.Kind != TranscriptEventTool || event.ToolName != "SKILL" || event.ToolArgs != "review" || event.ToolKind != schema.ToolKindRead {
+		t.Fatalf("event = %#v, want Skill review tool event", event)
+	}
+}
+
 func TestProjectACPEventToTranscriptEventsDisplaysStandardRawTerminalOutput(t *testing.T) {
 	t.Parallel()
 
