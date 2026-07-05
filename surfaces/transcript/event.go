@@ -3,7 +3,7 @@ package transcript
 import (
 	"time"
 
-	"github.com/caelis-labs/caelis/ports/compact"
+	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
@@ -38,7 +38,7 @@ const (
 	NarrativeNotice    NarrativeKind = "notice"
 )
 
-const CompactNoticeLabel = compact.CompactNoticeLabel
+const CompactNoticeLabel = display.CompactNoticeLabel
 
 // NoticeKind identifies structured notices that need behavior beyond display.
 type NoticeKind string

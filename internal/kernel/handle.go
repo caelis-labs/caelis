@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/caelis-labs/caelis/ports/agent"
-	"github.com/caelis-labs/caelis/ports/model"
-	"github.com/caelis-labs/caelis/ports/session"
+	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
@@ -377,11 +377,12 @@ func (h *turnHandle) approvalEventEnvelopes(req *agent.ApprovalRequest, payload 
 		next := base
 		next.Kind = eventstream.KindSessionUpdate
 		next.Update = eventstream.UsageUpdateFromSnapshot(eventstream.UsageSnapshot{
-			PromptTokens:      usage.PromptTokens,
-			CachedInputTokens: usage.CachedInputTokens,
-			CompletionTokens:  usage.CompletionTokens,
-			ReasoningTokens:   usage.ReasoningTokens,
-			TotalTokens:       usage.TotalTokens,
+			PromptTokens:        usage.PromptTokens,
+			CachedInputTokens:   usage.CachedInputTokens,
+			CompletionTokens:    usage.CompletionTokens,
+			ReasoningTokens:     usage.ReasoningTokens,
+			TotalTokens:         usage.TotalTokens,
+			ContextWindowTokens: usage.ContextWindowTokens,
 		}, base.Meta)
 		out = append(out, next)
 	}

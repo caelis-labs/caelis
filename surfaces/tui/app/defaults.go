@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/caelis-labs/caelis/internal/connectwizard"
 	controlcommands "github.com/caelis-labs/caelis/ports/controlcommand"
+	"github.com/caelis-labs/caelis/ports/controlprompt/connectwizard"
 )
 
 // defaults.go provides DefaultCommands and DefaultWizards for the TUI shell.

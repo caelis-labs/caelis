@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/internal/evalharness"
-	"github.com/caelis-labs/caelis/ports/model"
-	"github.com/caelis-labs/caelis/ports/tool"
 )
 
 func TestRegressionChatMinimalToolLoopTrace(t *testing.T) {

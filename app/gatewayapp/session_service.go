@@ -6,15 +6,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/caelis-labs/caelis/impl/agent/local"
-	"github.com/caelis-labs/caelis/impl/tool/builtin/spawn"
-	"github.com/caelis-labs/caelis/ports/assembly"
-	"github.com/caelis-labs/caelis/ports/compact"
-	"github.com/caelis-labs/caelis/ports/delegation"
+	sdkruntime "github.com/caelis-labs/caelis/agent-sdk/runtime"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/assembly"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
+	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	"github.com/caelis-labs/caelis/ports/gateway"
-	"github.com/caelis-labs/caelis/ports/session"
-	"github.com/caelis-labs/caelis/ports/task"
-	"github.com/caelis-labs/caelis/ports/tool"
 )
 
 func (s *Stack) StartSession(ctx context.Context, preferredSessionID string, bindingKey string) (session.Session, error) {
@@ -65,7 +65,7 @@ func (s *Stack) StartSubagentWithOptions(
 	if engine == nil {
 		return task.Snapshot{}, fmt.Errorf("gatewayapp: runtime is unavailable")
 	}
-	return engine.StartSubagentWithOptions(ctx, ref, agent, prompt, source, local.StartSubagentOptions{
+	return engine.StartSubagentWithOptions(ctx, ref, agent, prompt, source, sdkruntime.StartSubagentOptions{
 		ApprovalRequester: opts.ApprovalRequester,
 		ApprovalMode:      opts.ApprovalMode,
 	})
@@ -128,7 +128,7 @@ func (s *Stack) CompactSession(ctx context.Context, ref session.SessionRef) erro
 	if err != nil {
 		return err
 	}
-	_, err = engine.Compact(ctx, local.CompactRequest{
+	_, err = engine.Compact(ctx, sdkruntime.CompactRequest{
 		SessionRef: ref,
 		Model:      resolved.RunRequest.AgentSpec.Model,
 		Trigger:    "manual",
@@ -136,8 +136,8 @@ func (s *Stack) CompactSession(ctx context.Context, ref session.SessionRef) erro
 	return err
 }
 
-func defaultCompactionConfig(contextWindow int) local.CompactionConfig {
-	return local.CompactionConfig{
+func defaultCompactionConfig(contextWindow int) sdkruntime.CompactionConfig {
+	return sdkruntime.CompactionConfig{
 		Enabled:                    true,
 		DefaultContextWindowTokens: contextWindow,
 	}
@@ -161,7 +161,7 @@ func (s *Stack) SessionUsageSnapshot(ctx context.Context, ref session.SessionRef
 	contextWindow := s.currentContextWindowTokensForAlias(alias)
 	cfg := defaultCompactionConfig(contextWindow)
 	cfg.EstimatedPromptPrefixTokens = s.estimatedPromptPrefixTokens(ctx, ref)
-	return local.ComputeUsageSnapshot(events, nil, contextWindow, cfg), nil
+	return sdkruntime.ComputeUsageSnapshot(events, nil, contextWindow, cfg), nil
 }
 
 func (s *Stack) estimatedPromptPrefixTokens(ctx context.Context, ref session.SessionRef) int {

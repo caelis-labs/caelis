@@ -13,13 +13,12 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/caelis-labs/caelis/impl/model/providers"
-	"github.com/caelis-labs/caelis/ports/assembly"
-	"github.com/caelis-labs/caelis/ports/compact"
-	"github.com/caelis-labs/caelis/ports/gateway"
-	"github.com/caelis-labs/caelis/ports/model"
-	"github.com/caelis-labs/caelis/ports/session"
-	taskapi "github.com/caelis-labs/caelis/ports/task"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/assembly"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
+	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/protocol/acp"
 	"github.com/caelis-labs/caelis/surfaces/headless"
 )
@@ -819,11 +818,7 @@ func TestLocalStackDefaultRuntimeAutoCompactionEnabled(t *testing.T) {
 	appendGatewayAppEvent(t, stack, activeSession.SessionRef, gatewayAppAssistantEvent("ack"))
 	appendGatewayAppEvent(t, stack, activeSession.SessionRef, gatewayAppUserEvent("Next action: verify the default app runtime invokes model-backed compact before the turn."))
 
-	if _, err := headless.RunOnce(ctx, stack.KernelTurns(), gateway.BeginTurnRequest{
-		SessionRef: activeSession.SessionRef,
-		Input:      "continue after app auto compact",
-		Surface:    "headless-auto-compact-test",
-	}, headless.Options{}); err != nil {
+	if _, err := runHeadlessOnceForGatewayAppTest(ctx, stack, activeSession, "headless-auto-compact-test", "continue after app auto compact", headless.Options{}); err != nil {
 		t.Fatalf("RunOnce() error = %v", err)
 	}
 	if got := server.compactionCalls.Load(); got == 0 {
@@ -877,11 +872,7 @@ func TestLocalStackAutoCompactCountsPromptPrefix(t *testing.T) {
 	}
 	appendGatewayAppEvent(t, stack, activeSession.SessionRef, gatewayAppUserEvent("Short durable event."))
 
-	if _, err := headless.RunOnce(ctx, stack.KernelTurns(), gateway.BeginTurnRequest{
-		SessionRef: activeSession.SessionRef,
-		Input:      "continue after prefix pressure",
-		Surface:    "headless-auto-compact-prefix-test",
-	}, headless.Options{}); err != nil {
+	if _, err := runHeadlessOnceForGatewayAppTest(ctx, stack, activeSession, "headless-auto-compact-prefix-test", "continue after prefix pressure", headless.Options{}); err != nil {
 		t.Fatalf("RunOnce() error = %v", err)
 	}
 	if got := server.compactionCalls.Load(); got == 0 {

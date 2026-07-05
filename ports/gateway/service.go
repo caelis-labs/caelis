@@ -3,10 +3,10 @@ package gateway
 import (
 	"context"
 
-	"github.com/caelis-labs/caelis/ports/agent"
-	"github.com/caelis-labs/caelis/ports/approval"
-	"github.com/caelis-labs/caelis/ports/session"
-	"github.com/caelis-labs/caelis/ports/stream"
+	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 )
 
 type Service interface {

@@ -3,9 +3,9 @@ package gatewayapp
 import (
 	"encoding/json"
 
-	"github.com/caelis-labs/caelis/ports/approval"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/ports/gateway"
-	"github.com/caelis-labs/caelis/ports/model"
 )
 
 func guardianApprovalOptionsJSON(payload *gateway.ApprovalPayload) (string, bool, error) {

@@ -5,7 +5,8 @@ package acpbridge
 import (
 	"iter"
 
-	"github.com/caelis-labs/caelis/ports/session"
+	agentsdk "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
@@ -37,11 +38,15 @@ type SourceStream struct {
 	NativeACP bool
 }
 
-// SourceStreamFrom selects a native ACP source stream when the handle provides
-// one, otherwise it wraps the canonical event stream.
+// SourceStreamFrom selects a native source stream when the handle provides one,
+// otherwise it wraps the canonical event stream. It recognizes both the legacy
+// acpbridge.SourceHandle and the SDK-owned agentsdk.SourceHandle shape.
 func SourceStreamFrom(handle EventHandle) SourceStream {
 	if sourceHandle, ok := handle.(SourceHandle); ok && sourceHandle != nil {
 		return SourceStream{Events: sourceHandle.SourceEvents(), NativeACP: true}
+	}
+	if sourceHandle, ok := handle.(agentsdk.SourceHandle); ok && sourceHandle != nil {
+		return SourceStream{Events: adaptedAgentSourceEvents(sourceHandle.SourceEvents()), NativeACP: true}
 	}
 	return SourceStream{Events: canonicalSourceEvents(handle)}
 }

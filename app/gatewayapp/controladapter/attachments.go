@@ -11,7 +11,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/caelis-labs/caelis/ports/model"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
 const maxAttachmentImageBytes = 20_000_000

@@ -3,7 +3,7 @@ package kernel
 import (
 	"errors"
 
-	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
 func wrapSessionError(err error) error {

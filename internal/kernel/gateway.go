@@ -7,12 +7,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/caelis-labs/caelis/ports/agent"
-	"github.com/caelis-labs/caelis/ports/approval"
+	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
+	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/ports/plugin"
-	"github.com/caelis-labs/caelis/ports/session"
-	"github.com/caelis-labs/caelis/ports/stream"
-	"github.com/caelis-labs/caelis/ports/task"
 )
 
 type Config struct {

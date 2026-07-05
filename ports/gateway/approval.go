@@ -1,6 +1,6 @@
 package gateway
 
-import "github.com/caelis-labs/caelis/ports/approval"
+import "github.com/caelis-labs/caelis/agent-sdk/approval"
 
 type ApprovalMode = approval.Mode
 
@@ -14,14 +14,11 @@ func NormalizeApprovalMode(mode string) ApprovalMode {
 }
 
 func CurrentApprovalMode(state map[string]any) ApprovalMode {
-	return CurrentApprovalModeOrDefault(state, ApprovalModeAutoReview)
+	return approval.CurrentMode(state)
 }
 
 func CurrentApprovalModeOrDefault(state map[string]any, fallback ApprovalMode) ApprovalMode {
-	if mode, ok := currentApprovalModeOverride(state); ok {
-		return mode
-	}
-	return NormalizeApprovalMode(string(fallback))
+	return approval.CurrentModeOrDefault(state, fallback)
 }
 
 type ApprovalOption = approval.Option

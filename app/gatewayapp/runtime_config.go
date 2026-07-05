@@ -6,13 +6,13 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/caelis-labs/caelis/impl/policy/presets"
+	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/assembly"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/skill"
+	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
-	"github.com/caelis-labs/caelis/ports/assembly"
-	"github.com/caelis-labs/caelis/ports/delegation"
 	"github.com/caelis-labs/caelis/ports/gateway"
-	"github.com/caelis-labs/caelis/ports/session"
-	"github.com/caelis-labs/caelis/ports/skill"
 )
 
 type stackRuntimeConfig struct {

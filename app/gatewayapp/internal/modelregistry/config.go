@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/caelis-labs/caelis/impl/model/providers"
+	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 )
 
 type Config struct {

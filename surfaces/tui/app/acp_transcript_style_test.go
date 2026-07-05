@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/caelis-labs/caelis/ports/model"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 	"github.com/charmbracelet/colorprofile"
 	"github.com/charmbracelet/x/ansi"

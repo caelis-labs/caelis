@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/aymanbagabas/go-osc52/v2"
-	"github.com/caelis-labs/caelis/internal/winproc"
+	"github.com/caelis-labs/caelis/platform/winproc"
 )
 
 type clipboardCommand struct {

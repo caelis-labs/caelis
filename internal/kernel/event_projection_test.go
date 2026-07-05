@@ -3,9 +3,9 @@ package kernel
 import (
 	"testing"
 
-	"github.com/caelis-labs/caelis/ports/agent"
-	"github.com/caelis-labs/caelis/ports/session"
-	"github.com/caelis-labs/caelis/ports/tool"
+	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
 func TestCanonicalApprovalPayloadPreservesPromptFields(t *testing.T) {

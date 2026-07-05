@@ -13,8 +13,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/ports/plugin"
-	"github.com/caelis-labs/caelis/ports/session"
 )
 
 const MaxHookOutputBytes = 32768

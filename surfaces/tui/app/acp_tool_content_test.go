@@ -1,6 +1,6 @@
 package tuiapp
 
-import "github.com/caelis-labs/caelis/ports/session"
+import "github.com/caelis-labs/caelis/agent-sdk/session"
 
 func testToolContent(text string) []session.ProtocolToolCallContent {
 	return []session.ProtocolToolCallContent{{

@@ -3,7 +3,7 @@ package tuiapp
 import (
 	"strings"
 
-	"github.com/caelis-labs/caelis/ports/displaypolicy"
+	"github.com/caelis-labs/caelis/agent-sdk/display"
 )
 
 const (
@@ -124,7 +124,7 @@ func approvalReviewToolName(toolName string) string {
 }
 
 func approvalToolDisplayLabel(toolName string) string {
-	semanticName := displaypolicy.SemanticToolName(toolName, toolName)
+	semanticName := display.SemanticToolName(toolName, toolName)
 	switch strings.ToUpper(strings.TrimSpace(semanticName)) {
 	case "":
 		return ""

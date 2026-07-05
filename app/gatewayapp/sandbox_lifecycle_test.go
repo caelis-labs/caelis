@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/caelis-labs/caelis/ports/sandbox"
-	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
 func TestPrepareSandboxUsesCurrentLifecycleRuntime(t *testing.T) {

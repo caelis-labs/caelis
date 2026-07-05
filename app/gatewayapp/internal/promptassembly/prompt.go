@@ -10,10 +10,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/caelis-labs/caelis/impl/skill/fs"
-	"github.com/caelis-labs/caelis/ports/delegation"
-	"github.com/caelis-labs/caelis/ports/skill"
-	"github.com/caelis-labs/caelis/ports/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/skill"
+	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/app/gatewayapp/internal/skilldiscovery"
 )
 
 const (
@@ -49,7 +49,7 @@ type fragment struct {
 	Content string
 }
 
-type SkillMeta = fs.Meta
+type SkillMeta = skill.Meta
 
 type Result struct {
 	Prompt       string
@@ -268,7 +268,7 @@ func buildUserCustomInstructionsPrompt(sessionPrompt string, workspaceAgents str
 	return strings.Join(lines, "\n\n")
 }
 
-func buildSkillsMetaPrompt(metas []fs.Meta) string {
+func buildSkillsMetaPrompt(metas []skill.Meta) string {
 	if len(metas) == 0 {
 		return ""
 	}
@@ -352,23 +352,23 @@ func renderRawFragments(fragments []fragment) string {
 }
 
 func DefaultSkillDiscoveryDirs(workspaceDir string) []string {
-	return fs.DefaultDiscoveryDirs(workspaceDir)
+	return skilldiscovery.DefaultDiscoveryDirs(workspaceDir)
 }
 
 func DiscoverSkillMeta(dirs []string, workspaceDir string) ([]SkillMeta, error) {
-	return fs.DiscoverMeta(dirs, workspaceDir)
+	return skilldiscovery.DiscoverMeta(dirs, workspaceDir)
 }
 
 func DiscoverSkillMetaRequest(req skill.DiscoverRequest) ([]SkillMeta, error) {
-	return fs.DiscoverMetaRequest(req)
+	return skilldiscovery.DiscoverMetaRequest(req)
 }
 
 func DiscoverLegacyPluginSkillCopies(req skill.DiscoverRequest) ([]SkillMeta, error) {
-	return fs.DiscoverLegacyPluginCopies(req)
+	return skilldiscovery.DiscoverLegacyPluginCopies(req)
 }
 
 func DiscoverPluginBundleMeta(bundles []skill.PluginBundle) ([]SkillMeta, error) {
-	return fs.DiscoverPluginBundleMeta(bundles)
+	return skilldiscovery.DiscoverPluginBundleMeta(bundles)
 }
 
 func ResolvePromptPath(path string) (string, error) {

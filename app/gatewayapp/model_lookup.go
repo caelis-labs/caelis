@@ -8,8 +8,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/modelregistry"
-	"github.com/caelis-labs/caelis/impl/model/providers"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 )
 

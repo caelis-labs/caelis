@@ -3,7 +3,7 @@ package tuiapp
 import (
 	"strings"
 
-	"github.com/caelis-labs/caelis/ports/displaypolicy"
+	"github.com/caelis-labs/caelis/agent-sdk/display"
 )
 
 func updateLinkedTerminalEvent(events []SubagentEvent, callID string, toolName string, taskID string, output string, final bool, err bool, meta ToolUpdateMeta) bool {
@@ -149,7 +149,7 @@ func spawnContinuationDisplayArgs(existing string, prompt string) string {
 }
 
 func shouldIgnoreStaleTerminalUpdate(events []SubagentEvent, callID string, name string, toolKind string, terminal bool, final bool) bool {
-	if final || strings.TrimSpace(callID) == "" || (!terminal && !displaypolicy.IsTerminalPanelTool(name, toolKind)) {
+	if final || strings.TrimSpace(callID) == "" || (!terminal && !display.IsTerminalPanelTool(name, toolKind)) {
 		return false
 	}
 	for i := len(events) - 1; i >= 0; i-- {

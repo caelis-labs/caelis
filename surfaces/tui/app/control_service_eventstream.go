@@ -9,7 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/caelis-labs/caelis/ports/model"
+	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
@@ -151,7 +151,7 @@ func eventStreamEnvelopeErrorReason(env eventstream.Envelope) string {
 		return ""
 	}
 	if env.Err != nil {
-		return model.UserVisibleError(env.Err)
+		return display.UserVisibleError(env.Err)
 	}
 	if text := strings.TrimSpace(env.Error); text != "" {
 		return text

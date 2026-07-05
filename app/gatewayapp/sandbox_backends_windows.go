@@ -3,6 +3,6 @@
 package gatewayapp
 
 import (
-	_ "github.com/caelis-labs/caelis/impl/sandbox/host"
-	_ "github.com/caelis-labs/caelis/impl/sandbox/windows"
+	_ "github.com/caelis-labs/caelis/agent-sdk/sandbox/host"
+	_ "github.com/caelis-labs/caelis/agent-sdk/sandbox/windows"
 )

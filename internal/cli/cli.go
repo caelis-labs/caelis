@@ -11,12 +11,15 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/assembly"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/app/gatewayapp/acpagent"
-	"github.com/caelis-labs/caelis/impl/model/providers"
+	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter/local"
 	"github.com/caelis-labs/caelis/internal/acpagentenv"
-	"github.com/caelis-labs/caelis/ports/assembly"
+	"github.com/caelis-labs/caelis/internal/version"
 	"github.com/caelis-labs/caelis/ports/gateway"
+	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -48,6 +51,7 @@ var (
 )
 
 func Run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
+	providers.SetAttributionBuildVersion(version.String())
 	return run(ctx, args, stdin, stdout, stderr)
 }
 
@@ -236,11 +240,11 @@ func runHeadless(ctx context.Context, stack *gatewayapp.Stack, sessionID string,
 	if err != nil {
 		return err
 	}
-	result, err := headless.RunOnce(ctx, stack.KernelTurns(), gateway.BeginTurnRequest{
-		SessionRef: session.SessionRef,
-		Input:      input,
-		Surface:    "headless",
-	}, headless.Options{})
+	driver, err := local.NewLocalAdapterForSession(ctx, stack, session, "headless", "")
+	if err != nil {
+		return err
+	}
+	result, err := headless.RunOnce(ctx, driver, control.Submission{Text: input}, headless.Options{})
 	if err != nil {
 		return err
 	}

@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/caelis-labs/caelis/ports/stream"
+	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 )
 
 func repoRootForEval(t *testing.T) string {

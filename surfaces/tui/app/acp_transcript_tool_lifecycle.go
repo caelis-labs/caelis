@@ -3,7 +3,7 @@ package tuiapp
 import (
 	"strings"
 
-	"github.com/caelis-labs/caelis/ports/displaypolicy"
+	"github.com/caelis-labs/caelis/agent-sdk/display"
 )
 
 func renderACPToolLifecycleRows(blockID string, events []SubagentEvent, idx int, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) ([]RenderedRow, int) {
@@ -303,7 +303,7 @@ func standardToolLifecycleHeader(ev SubagentEvent, err bool) string {
 		ev.Name = semanticName
 		return mutationLifecycleHeader(ev, err)
 	default:
-		if verb := displaypolicy.ExplorationVerbForTool(semanticName); verb != "" {
+		if verb := display.ExplorationVerbForTool(semanticName); verb != "" {
 			return standardVerbLifecycleHeader(verb, ev.Args, err)
 		}
 		return standardVerbLifecycleHeader(toolEventDisplayName(firstTrimmed(ev.Name, ev.ToolKind, "Tool")), ev.Args, err)
@@ -398,7 +398,7 @@ func (r toolPanelRenderRequest) renderUncached() []RenderedRow {
 	if isDiffPanelText(text) && !err {
 		return applyClickTokenToRows(renderACPDiffPanelRows(blockID, text, width, ctx), token)
 	}
-	if displaypolicy.IsTerminalPanelTool(toolName, "") {
+	if display.IsTerminalPanelTool(toolName, "") {
 		return renderACPTerminalPanelRows(blockID, callID, text, width, ctx, err, token)
 	}
 	style := ctx.Theme.HelpHintTextStyle()
@@ -409,7 +409,7 @@ func (r toolPanelRenderRequest) renderUncached() []RenderedRow {
 }
 
 func isTerminalPanelToolEvent(ev SubagentEvent) bool {
-	return ev.Terminal || displaypolicy.IsTerminalPanelTool(ev.Name, ev.ToolKind)
+	return ev.Terminal || display.IsTerminalPanelTool(ev.Name, ev.ToolKind)
 }
 
 func isMutationPanelTool(name string) bool {
@@ -434,7 +434,7 @@ func isMutationPanelToolEvent(ev SubagentEvent) bool {
 }
 
 func toolSemanticName(name string, kind string) string {
-	return displaypolicy.SemanticToolName(name, kind)
+	return display.SemanticToolName(name, kind)
 }
 
 func isAttentionLoopTool(name string) bool {
@@ -491,7 +491,7 @@ func terminalLifecycleHeader(ev SubagentEvent) string {
 		}
 		return "• Ran"
 	case "SPAWN":
-		args = displaypolicy.SanitizeSpawnHeaderArgs(args)
+		args = display.SanitizeSpawnHeaderArgs(args)
 		if args != "" {
 			return "• Spawned " + args
 		}
@@ -511,7 +511,7 @@ func terminalLifecycleHeader(ev SubagentEvent) string {
 }
 
 func sanitizeSpawnHeaderArgs(args string) string {
-	return displaypolicy.SanitizeSpawnHeaderArgs(args)
+	return display.SanitizeSpawnHeaderArgs(args)
 }
 
 func isExecuteToolKind(kind string) bool {

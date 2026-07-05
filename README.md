@@ -7,7 +7,21 @@ It stores local state under `~/.caelis` by default and supports model provider
 configuration, session persistence, approval-aware tool execution, built-in
 filesystem/search/shell tools, subagent tasks, and ACP-backed participants.
 
+Official site: <https://caelis.dev>
+
 ## Install
+
+From the official install script on macOS or Linux:
+
+```bash
+curl -fsSL https://caelis.dev/install.sh | sh
+```
+
+From the official install script on Windows PowerShell:
+
+```powershell
+irm https://caelis.dev/install.ps1 | iex
+```
 
 From npm:
 

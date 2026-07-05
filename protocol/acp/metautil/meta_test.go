@@ -19,6 +19,22 @@ func TestRuntimeSectionReadsCanonicalToolFields(t *testing.T) {
 	}
 }
 
+func TestStringAndBoolReadNestedMeta(t *testing.T) {
+	t.Parallel()
+
+	meta := WithRuntimeSection(nil, RuntimeStream, map[string]any{
+		RuntimeStreamParentTool:           "  SPAWN  ",
+		RuntimeStreamMirroredToParentTool: true,
+	})
+
+	if got := String(meta, Root, Runtime, RuntimeStream, RuntimeStreamParentTool); got != "SPAWN" {
+		t.Fatalf("String() = %q, want trimmed tool name", got)
+	}
+	if !Bool(meta, Root, Runtime, RuntimeStream, RuntimeStreamMirroredToParentTool) {
+		t.Fatal("Bool() = false, want true")
+	}
+}
+
 func TestTerminalMetaRoundTrip(t *testing.T) {
 	t.Parallel()
 

@@ -1,6 +1,6 @@
 package plugin
 
-import "strings"
+import sdkmcp "github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 
 type ManifestKind string
 
@@ -52,41 +52,16 @@ type HookSpec struct {
 	PluginDir  string
 }
 
-type MCPServerSpec struct {
-	PluginID  string
-	Name      string
-	Transport string
-	Command   string
-	Args      []string
-	Env       map[string]string
-	WorkDir   string
-	URL       string
-	Headers   map[string]string
-}
+type MCPServerSpec = sdkmcp.ServerSpec
 
 const (
-	MCPTransportStdio          = "stdio"
-	MCPTransportStreamableHTTP = "streamable_http"
-	MCPTransportSSE            = "sse"
+	MCPTransportStdio          = sdkmcp.TransportStdio
+	MCPTransportStreamableHTTP = sdkmcp.TransportStreamableHTTP
+	MCPTransportSSE            = sdkmcp.TransportSSE
 )
 
 func NormalizeMCPTransport(transport, command, url string) string {
-	transport = strings.TrimSpace(transport)
-	command = strings.TrimSpace(command)
-	url = strings.TrimSpace(url)
-	switch transport {
-	case "", "stdio", "command":
-		if command != "" || url == "" {
-			return MCPTransportStdio
-		}
-		return MCPTransportStreamableHTTP
-	case "http", "streamable", "streamable-http", "streamable_http":
-		return MCPTransportStreamableHTTP
-	case "sse":
-		return MCPTransportSSE
-	default:
-		return transport
-	}
+	return sdkmcp.NormalizeTransport(transport, command, url)
 }
 
 type AgentContribution struct {

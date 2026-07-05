@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/caelis-labs/caelis/ports/model"
-	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 

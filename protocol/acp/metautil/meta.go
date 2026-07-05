@@ -3,15 +3,65 @@ package metautil
 import (
 	"maps"
 	"strings"
-
-	"github.com/caelis-labs/caelis/ports/gateway"
 )
 
 const (
-	Root    = gateway.EventMetaRoot
-	Version = gateway.EventMetaVersion
-	Runtime = gateway.EventMetaRuntime
+	// Root is the Caelis-owned ACP extension namespace. Renderers may consume
+	// values under this namespace, but provider-visible tool JSON must not be
+	// treated as display metadata.
+	Root = "caelis"
+
+	Version   = "version"
+	Transient = "transient"
+	Runtime   = "runtime"
+
+	RuntimeTool             = "tool"
+	RuntimeToolName         = "name"
+	RuntimeToolAction       = "action"
+	RuntimeToolInput        = "input"
+	RuntimeToolStatusDetail = "status_detail"
+	RuntimeTargetKind       = "target_kind"
+	RuntimeTargetID         = "target_id"
+
+	RuntimeTask           = "task"
+	RuntimeTaskID         = "task_id"
+	RuntimeTaskTerminalID = "terminal_id"
+
+	RuntimeStream                     = "stream"
+	RuntimeStreamMode                 = "mode"
+	RuntimeStreamParentCallID         = "parent_call_id"
+	RuntimeStreamParentTool           = "parent_tool"
+	RuntimeStreamParentTaskID         = "parent_task_id"
+	RuntimeStreamMirroredToParentTool = "mirrored_to_parent_tool"
 )
+
+// String returns a trimmed string from _meta using a stable path.
+func String(values map[string]any, path ...string) string {
+	var current any = values
+	for _, key := range path {
+		mapped, ok := current.(map[string]any)
+		if !ok {
+			return ""
+		}
+		current = mapped[key]
+	}
+	text, _ := current.(string)
+	return strings.TrimSpace(text)
+}
+
+// Bool returns a boolean from _meta using a stable path.
+func Bool(values map[string]any, path ...string) bool {
+	var current any = values
+	for _, key := range path {
+		mapped, ok := current.(map[string]any)
+		if !ok {
+			return false
+		}
+		current = mapped[key]
+	}
+	value, _ := current.(bool)
+	return value
+}
 
 // WithRuntimeSection returns a copy of meta with one _meta.caelis.runtime
 // section merged in. It preserves sibling runtime sections.

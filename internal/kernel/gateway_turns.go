@@ -9,11 +9,11 @@ import (
 	"strings"
 	"sync"
 
+	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
+	policyapi "github.com/caelis-labs/caelis/agent-sdk/policy"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/internal/kernel/hooks"
-	"github.com/caelis-labs/caelis/ports/agent"
-	"github.com/caelis-labs/caelis/ports/model"
-	policyapi "github.com/caelis-labs/caelis/ports/policy"
-	"github.com/caelis-labs/caelis/ports/session"
 )
 
 func (g *Gateway) BeginTurn(ctx context.Context, req BeginTurnRequest) (BeginTurnResult, error) {

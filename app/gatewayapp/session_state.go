@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/ports/gateway"
-	"github.com/caelis-labs/caelis/ports/session"
 )
 
 // SetSessionMode persists one per-session approval routing mode override for

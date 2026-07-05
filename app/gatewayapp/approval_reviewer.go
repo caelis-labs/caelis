@@ -5,11 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/ports/gateway"
-	"github.com/caelis-labs/caelis/ports/model"
-	"github.com/caelis-labs/caelis/ports/session"
 )
 
 const (
@@ -30,6 +31,8 @@ type guardianApprovalReviewer struct {
 	systemAgents   systemManagedAgentRunner
 	systemSessions *systemManagedAgentSessionCache
 	timeout        time.Duration
+	accountingMu   sync.Mutex
+	accounting     map[string]approvalReviewAccounting
 }
 
 type guardianBindingApprovalReviewer struct {
@@ -40,6 +43,11 @@ type guardianBindingApprovalReviewer struct {
 type guardianPromptMode struct {
 	Delta  bool
 	Cursor systemManagedAgentTranscriptCursor
+}
+
+type approvalReviewAccounting struct {
+	usage      *gateway.UsageSnapshot
+	invocation *session.EventInvocation
 }
 
 type guardianReviewModelOutput struct {
@@ -78,6 +86,7 @@ func newGuardianApprovalReviewer(service session.Service) gateway.ApprovalReview
 		systemAgents:   newSystemManagedAgentRuntime(nil),
 		systemSessions: newSystemManagedAgentSessionCache(service),
 		timeout:        defaultApprovalReviewTimeout,
+		accounting:     map[string]approvalReviewAccounting{},
 	}
 }
 
@@ -95,6 +104,20 @@ func (r guardianBindingApprovalReviewer) ReviewApproval(ctx context.Context, req
 		return gateway.ApprovalReviewResult{}, fmt.Errorf("approval reviewer is unavailable")
 	}
 	return r.base.ReviewApproval(ctx, req)
+}
+
+func (r guardianBindingApprovalReviewer) ApprovalReviewAccounting(
+	ctx context.Context,
+	req gateway.ApprovalReviewRequest,
+	result gateway.ApprovalReviewResult,
+) (*gateway.UsageSnapshot, *session.EventInvocation, error) {
+	provider, ok := r.base.(interface {
+		ApprovalReviewAccounting(context.Context, gateway.ApprovalReviewRequest, gateway.ApprovalReviewResult) (*gateway.UsageSnapshot, *session.EventInvocation, error)
+	})
+	if !ok {
+		return nil, nil, nil
+	}
+	return provider.ApprovalReviewAccounting(ctx, req, result)
 }
 
 func (r *guardianApprovalReviewer) ReviewApproval(ctx context.Context, req gateway.ApprovalReviewRequest) (gateway.ApprovalReviewResult, error) {
@@ -115,6 +138,7 @@ func (r *guardianApprovalReviewer) ReviewApproval(ctx context.Context, req gatew
 	if err != nil {
 		return gateway.ApprovalReviewResult{}, err
 	}
+	r.storeApprovalReviewAccounting(req.ReviewID, approvalReviewAccountingFromEvent(assistantEvent))
 	approved := strings.EqualFold(strings.TrimSpace(parsed.Outcome), "allow")
 	risk := normalizeReviewLabel(parsed.RiskLevel, "unknown")
 	authorization := normalizeAuthorizationLabel(parsed.UserAuthorization, "unknown")
@@ -127,11 +151,53 @@ func (r *guardianApprovalReviewer) ReviewApproval(ctx context.Context, req gatew
 		OptionID:       strings.TrimSpace(parsed.OptionID),
 		Rationale:      rationale,
 		DecisionSource: "auto-review",
-		Usage:          gateway.UsageSnapshotFromSessionEvent(assistantEvent),
-		Invocation:     approvalInvocationFromEvent(assistantEvent),
 		Trace:          trace,
 	}
 	return result, nil
+}
+
+func (r *guardianApprovalReviewer) ApprovalReviewAccounting(
+	_ context.Context,
+	req gateway.ApprovalReviewRequest,
+	_ gateway.ApprovalReviewResult,
+) (*gateway.UsageSnapshot, *session.EventInvocation, error) {
+	accounting, ok := r.takeApprovalReviewAccounting(req.ReviewID)
+	if !ok {
+		return nil, nil, nil
+	}
+	return accounting.usage, accounting.invocation, nil
+}
+
+func (r *guardianApprovalReviewer) storeApprovalReviewAccounting(reviewID string, accounting approvalReviewAccounting) {
+	if r == nil || strings.TrimSpace(reviewID) == "" || accounting.usage == nil {
+		return
+	}
+	r.accountingMu.Lock()
+	defer r.accountingMu.Unlock()
+	if r.accounting == nil {
+		r.accounting = map[string]approvalReviewAccounting{}
+	}
+	r.accounting[strings.TrimSpace(reviewID)] = accounting
+}
+
+func (r *guardianApprovalReviewer) takeApprovalReviewAccounting(reviewID string) (approvalReviewAccounting, bool) {
+	if r == nil || strings.TrimSpace(reviewID) == "" {
+		return approvalReviewAccounting{}, false
+	}
+	r.accountingMu.Lock()
+	defer r.accountingMu.Unlock()
+	accounting, ok := r.accounting[strings.TrimSpace(reviewID)]
+	if ok {
+		delete(r.accounting, strings.TrimSpace(reviewID))
+	}
+	return accounting, ok
+}
+
+func approvalReviewAccountingFromEvent(event *session.Event) approvalReviewAccounting {
+	return approvalReviewAccounting{
+		usage:      gateway.UsageSnapshotFromSessionEvent(event),
+		invocation: approvalInvocationFromEvent(event),
+	}
 }
 
 func approvalInvocationFromEvent(event *session.Event) *session.EventInvocation {

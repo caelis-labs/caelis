@@ -4,10 +4,10 @@ import (
 	"maps"
 	"strings"
 
-	"github.com/caelis-labs/caelis/ports/agent"
-	"github.com/caelis-labs/caelis/ports/approval"
+	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	gatewayapi "github.com/caelis-labs/caelis/ports/gateway"
-	"github.com/caelis-labs/caelis/ports/session"
 )
 
 func replayTranscriptEvents(events []*session.Event, includeTransient bool) []*session.Event {

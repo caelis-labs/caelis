@@ -4,14 +4,14 @@ import (
 	"context"
 	"strings"
 
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter/local"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/agentregistry"
-	runtimeacp "github.com/caelis-labs/caelis/impl/agent/acp"
+	runtimeacp "github.com/caelis-labs/caelis/internal/acpagentbridge"
 	controlpromptrouter "github.com/caelis-labs/caelis/internal/controlpromptrouter"
 	controlcommands "github.com/caelis-labs/caelis/ports/controlcommand"
 	controlprompt "github.com/caelis-labs/caelis/ports/controlprompt"
-	"github.com/caelis-labs/caelis/ports/session"
 	"github.com/caelis-labs/caelis/protocol/acp/control"
 )
 

@@ -5,13 +5,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/caelis-labs/caelis/impl/model/catalog"
-	"github.com/caelis-labs/caelis/impl/model/providers"
-	"github.com/caelis-labs/caelis/ports/compact"
-	"github.com/caelis-labs/caelis/ports/controller"
+	"github.com/caelis-labs/caelis/agent-sdk/model/catalog"
+	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	"github.com/caelis-labs/caelis/ports/gateway"
-	"github.com/caelis-labs/caelis/ports/session"
-	"github.com/caelis-labs/caelis/ports/skill"
 	"github.com/caelis-labs/caelis/protocol/acp"
 )
 

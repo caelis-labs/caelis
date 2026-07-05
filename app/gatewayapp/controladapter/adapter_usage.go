@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/ports/gateway"
-	"github.com/caelis-labs/caelis/ports/session"
 )
 
 func (d *Adapter) sessionTokenUsage(ctx context.Context, ref session.SessionRef) (gateway.UsageSnapshot, error) {
@@ -214,6 +214,9 @@ func addUsageSnapshot(total *gateway.UsageSnapshot, usage gateway.UsageSnapshot)
 	total.CompletionTokens += usage.CompletionTokens
 	total.ReasoningTokens += usage.ReasoningTokens
 	total.TotalTokens += usage.TotalTokens
+	if usage.ContextWindowTokens > total.ContextWindowTokens {
+		total.ContextWindowTokens = usage.ContextWindowTokens
+	}
 }
 
 func usageCategoryFromSessionEvent(event *session.Event, fallback string) string {

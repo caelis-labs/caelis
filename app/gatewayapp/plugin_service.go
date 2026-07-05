@@ -9,9 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/pluginregistry"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/promptassembly"
-	"github.com/caelis-labs/caelis/impl/tool/mcp"
 	pluginapi "github.com/caelis-labs/caelis/ports/plugin"
 )
 

@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-	"github.com/caelis-labs/caelis/ports/displaypolicy"
+	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/surfaces/transcript"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 	"github.com/charmbracelet/x/ansi"
@@ -713,7 +713,7 @@ func acpToolPanelScrollToken(callID string) string {
 
 func terminalToolPanelLineCount(events []SubagentEvent, callID string, ctx BlockRenderContext) int {
 	toolName, text, err, ok := terminalToolPanelPayload(events, callID)
-	if !ok || !shouldRenderACPToolPanel(text, err) || !displaypolicy.IsTerminalPanelTool(toolName, "") {
+	if !ok || !shouldRenderACPToolPanel(text, err) || !display.IsTerminalPanelTool(toolName, "") {
 		return 0
 	}
 	return len(renderACPTerminalPanelBody(text, maxInt(1, ctx.Width-2), ctx, err))

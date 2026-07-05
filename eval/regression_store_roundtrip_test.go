@@ -5,11 +5,11 @@ import (
 	"strings"
 	"testing"
 
-	inmemory "github.com/caelis-labs/caelis/impl/session/memory"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
+	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/internal/evalharness"
-	"github.com/caelis-labs/caelis/ports/model"
-	"github.com/caelis-labs/caelis/ports/session"
-	"github.com/caelis-labs/caelis/ports/tool"
 )
 
 func TestRegressionStoreRoundTripMinimalToolLoop(t *testing.T) {

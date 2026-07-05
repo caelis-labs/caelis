@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/caelis-labs/caelis/impl/model/providers"
+	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 )
 
 func TestAppConfigStoreSaveUsesSecurePermissionsAndRedactsTokenByDefault(t *testing.T) {

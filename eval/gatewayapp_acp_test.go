@@ -10,10 +10,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/assembly"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
-	"github.com/caelis-labs/caelis/ports/assembly"
+	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter/local"
 	"github.com/caelis-labs/caelis/ports/gateway"
-	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/projector"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -107,11 +109,11 @@ func TestLocalStackGatewayACPMainE2E(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 
-	result, err := headless.RunOnce(ctx, stack.KernelTurns(), gateway.BeginTurnRequest{
-		SessionRef: activeSession.SessionRef,
-		Input:      "run through acp controller",
-		Surface:    "headless-acp-main-e2e",
-	}, headless.Options{})
+	driver, err := local.NewLocalAdapterForSession(ctx, stack, updated, "headless-acp-main-e2e", "")
+	if err != nil {
+		t.Fatalf("NewLocalAdapterForSession() error = %v", err)
+	}
+	result, err := headless.RunOnce(ctx, driver, control.Submission{Text: "run through acp controller"}, headless.Options{})
 	if err != nil {
 		t.Fatalf("RunOnce() error = %v", err)
 	}

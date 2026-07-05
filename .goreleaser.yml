@@ -22,9 +22,9 @@ builds:
       - arm64
     ldflags:
       - -s -w
-      - -X github.com/OnslaughtSnail/caelis/internal/version.Version={{ .Tag }}
-      - -X github.com/OnslaughtSnail/caelis/internal/version.Commit={{ .Commit }}
-      - -X github.com/OnslaughtSnail/caelis/internal/version.Date={{ .Date }}
+      - -X github.com/caelis-labs/caelis/internal/version.Version={{ .Tag }}
+      - -X github.com/caelis-labs/caelis/internal/version.Commit={{ .Commit }}
+      - -X github.com/caelis-labs/caelis/internal/version.Date={{ .Date }}
 
 archives:
   - name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"

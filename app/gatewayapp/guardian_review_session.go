@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/ports/gateway"
-	"github.com/caelis-labs/caelis/ports/model"
-	"github.com/caelis-labs/caelis/ports/session"
 )
 
 func (r *guardianApprovalReviewer) reviewSessionFor(ctx context.Context, req gateway.ApprovalReviewRequest, activeSession session.Session) (*systemManagedAgentSession, error) {

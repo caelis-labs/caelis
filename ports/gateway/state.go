@@ -3,7 +3,8 @@ package gateway
 import (
 	"strings"
 
-	"github.com/caelis-labs/caelis/ports/policy"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	"github.com/caelis-labs/caelis/agent-sdk/policy"
 )
 
 const (
@@ -13,7 +14,7 @@ const (
 	StateCurrentModelAlias = "gateway.current_model_alias"
 	// StateCurrentApprovalMode is the durable session-state key for a
 	// per-session approval routing override selected by the TUI.
-	StateCurrentApprovalMode = "gateway.current_approval_mode"
+	StateCurrentApprovalMode = approval.StateCurrentApprovalMode
 	// StateCurrentPolicyProfile is the durable session-state key for a
 	// per-session policy profile override.
 	StateCurrentPolicyProfile = "gateway.current_policy_profile"
@@ -64,11 +65,11 @@ func CurrentReasoningEffort(state map[string]any) string {
 }
 
 func CurrentSessionMode(state map[string]any) string {
-	return string(CurrentApprovalMode(state))
+	return string(approval.CurrentMode(state))
 }
 
 func CurrentSessionModeOrDefault(state map[string]any, fallback string) string {
-	return string(CurrentApprovalModeOrDefault(state, NormalizeApprovalMode(fallback)))
+	return string(approval.CurrentModeOrDefault(state, NormalizeApprovalMode(fallback)))
 }
 
 func CurrentPolicyProfile(state map[string]any) string {
@@ -84,13 +85,6 @@ func UnsupportedLegacyStateKey(state map[string]any) string {
 		}
 	}
 	return ""
-}
-
-func currentApprovalModeOverride(state map[string]any) (ApprovalMode, bool) {
-	if mode := strings.TrimSpace(stringFromState(state, StateCurrentApprovalMode)); mode != "" {
-		return NormalizeApprovalMode(mode), true
-	}
-	return "", false
 }
 
 func stringFromState(state map[string]any, key string) string {

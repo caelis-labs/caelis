@@ -9,7 +9,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/caelis-labs/caelis/ports/gateway"
 	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
@@ -412,13 +411,9 @@ func TestHandleACPEventEnvelopeAnchorsSubagentOutputToSpawnTool(t *testing.T) {
 	t.Parallel()
 
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
-	spawnMeta := map[string]any{
-		gateway.EventMetaRoot: map[string]any{
-			gateway.EventMetaRuntime: map[string]any{
-				gateway.EventMetaRuntimeTool: map[string]any{gateway.EventMetaRuntimeToolName: "SPAWN"},
-			},
-		},
-	}
+	spawnMeta := metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
+		metautil.RuntimeToolName: "SPAWN",
+	})
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind:      eventstream.KindSessionUpdate,
 		SessionID: "session-1",
@@ -439,16 +434,10 @@ func TestHandleACPEventEnvelopeAnchorsSubagentOutputToSpawnTool(t *testing.T) {
 		ScopeID:   "task-1",
 		Actor:     "reviewer",
 		Final:     true,
-		Meta: map[string]any{
-			gateway.EventMetaRoot: map[string]any{
-				gateway.EventMetaRuntime: map[string]any{
-					gateway.EventMetaRuntimeStream: map[string]any{
-						gateway.EventMetaRuntimeStreamParentCallID: "spawn-1",
-						gateway.EventMetaRuntimeStreamParentTool:   "SPAWN",
-					},
-				},
-			},
-		},
+		Meta: metautil.WithRuntimeSection(nil, metautil.RuntimeStream, map[string]any{
+			metautil.RuntimeStreamParentCallID: "spawn-1",
+			metautil.RuntimeStreamParentTool:   "SPAWN",
+		}),
 		Update: schema.ContentChunk{
 			SessionUpdate: schema.UpdateAgentMessage,
 			Content:       schema.TextContent{Type: "text", Text: "subagent found the issue"},
@@ -588,17 +577,13 @@ func TestHandleACPEventEnvelopeReplacesSpawnStreamWithFinalRuntimeResult(t *test
 	t.Parallel()
 
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
-	spawnMeta := map[string]any{
-		gateway.EventMetaRoot: map[string]any{
-			gateway.EventMetaRuntime: map[string]any{
-				gateway.EventMetaRuntimeTool: map[string]any{gateway.EventMetaRuntimeToolName: "SPAWN"},
-				gateway.EventMetaRuntimeTask: map[string]any{
-					gateway.EventMetaRuntimeTaskID:         "task-1",
-					gateway.EventMetaRuntimeTaskTerminalID: "subagent-task-1",
-				},
-			},
-		},
-	}
+	spawnMeta := metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
+		metautil.RuntimeToolName: "SPAWN",
+	})
+	spawnMeta = metautil.WithRuntimeSection(spawnMeta, metautil.RuntimeTask, map[string]any{
+		metautil.RuntimeTaskID:         "task-1",
+		metautil.RuntimeTaskTerminalID: "subagent-task-1",
+	})
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind:      eventstream.KindSessionUpdate,
 		SessionID: "session-1",
@@ -622,20 +607,13 @@ func TestHandleACPEventEnvelopeReplacesSpawnStreamWithFinalRuntimeResult(t *test
 		},
 	})
 	completed := schema.ToolStatusCompleted
-	finalMeta := map[string]any{
-		gateway.EventMetaRoot: map[string]any{
-			gateway.EventMetaRuntime: map[string]any{
-				gateway.EventMetaRuntimeTool: map[string]any{gateway.EventMetaRuntimeToolName: "SPAWN"},
-				gateway.EventMetaRuntimeTask: map[string]any{
-					gateway.EventMetaRuntimeTaskID:         "task-1",
-					gateway.EventMetaRuntimeTaskTerminalID: "subagent-task-1",
-					"running":                              false,
-					"state":                                "completed",
-					"result":                               "Final child result",
-				},
-			},
-		},
-	}
+	finalMeta := metautil.WithRuntimeSection(spawnMeta, metautil.RuntimeTask, map[string]any{
+		metautil.RuntimeTaskID:         "task-1",
+		metautil.RuntimeTaskTerminalID: "subagent-task-1",
+		"running":                      false,
+		"state":                        "completed",
+		"result":                       "Final child result",
+	})
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind:      eventstream.KindSessionUpdate,
 		SessionID: "session-1",
@@ -1378,13 +1356,7 @@ func TestProjectResumeReplayEventsUsesACPEnvelopeTrace(t *testing.T) {
 			Status:        stringPtr(schema.ToolStatusCompleted),
 			RawInput:      map[string]any{"command": "echo ok"},
 			RawOutput:     map[string]any{"stdout": "ok\n"},
-			Meta: map[string]any{
-				gateway.EventMetaRoot: map[string]any{
-					gateway.EventMetaRuntime: map[string]any{
-						gateway.EventMetaRuntimeTool: map[string]any{gateway.EventMetaRuntimeToolName: "RUN_COMMAND"},
-					},
-				},
-			},
+			Meta:          acpToolNameMeta("RUN_COMMAND"),
 		},
 	}, {
 		Kind:      eventstream.KindLifecycle,
@@ -1590,13 +1562,7 @@ func TestApprovalPayloadFromACPEventUsesStandardPermission(t *testing.T) {
 				Kind:     "allow_once",
 			}},
 		},
-		Meta: map[string]any{
-			gateway.EventMetaRoot: map[string]any{
-				gateway.EventMetaRuntime: map[string]any{
-					gateway.EventMetaRuntimeTool: map[string]any{gateway.EventMetaRuntimeToolName: "RUN_COMMAND"},
-				},
-			},
-		},
+		Meta: acpToolNameMeta("RUN_COMMAND"),
 	})
 	if req == nil {
 		t.Fatal("approvalPayloadFromACPEvent() = nil")
@@ -1610,17 +1576,11 @@ func TestApprovalPayloadFromACPEventUsesStandardPermission(t *testing.T) {
 }
 
 func parentToolStreamMeta(callID string, toolName string, mirrored bool) map[string]any {
-	return map[string]any{
-		gateway.EventMetaRoot: map[string]any{
-			gateway.EventMetaRuntime: map[string]any{
-				gateway.EventMetaRuntimeStream: map[string]any{
-					gateway.EventMetaRuntimeStreamParentCallID:         strings.TrimSpace(callID),
-					gateway.EventMetaRuntimeStreamParentTool:           strings.TrimSpace(toolName),
-					gateway.EventMetaRuntimeStreamMirroredToParentTool: mirrored,
-				},
-			},
-		},
-	}
+	return metautil.WithRuntimeSection(nil, metautil.RuntimeStream, map[string]any{
+		metautil.RuntimeStreamParentCallID:         strings.TrimSpace(callID),
+		metautil.RuntimeStreamParentTool:           strings.TrimSpace(toolName),
+		metautil.RuntimeStreamMirroredToParentTool: mirrored,
+	})
 }
 
 func applyACPEnvelopeForTest(t *testing.T, model *Model, env eventstream.Envelope) *Model {

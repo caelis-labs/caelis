@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
-	"github.com/caelis-labs/caelis/ports/session"
-	"github.com/caelis-labs/caelis/ports/skill"
 )
 
 func TestProjectSubmissionReferencesDoesNotBlockOnSkillDiscoveryError(t *testing.T) {

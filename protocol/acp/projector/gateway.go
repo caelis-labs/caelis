@@ -3,16 +3,25 @@ package projector
 import (
 	"strings"
 
-	"github.com/caelis-labs/caelis/ports/gateway"
-	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
+// ACPEventHandle is the protocol-facing subset needed to consume one live ACP
+// event stream.
+type ACPEventHandle interface {
+	HandleID() string
+	RunID() string
+	TurnID() string
+	ACPEvents() <-chan eventstream.Envelope
+}
+
 // ACPEventsFromGatewayHandle returns the ACP-native event stream for one
 // gateway turn handle.
-func ACPEventsFromGatewayHandle(handle gateway.TurnHandle) <-chan eventstream.Envelope {
+func ACPEventsFromGatewayHandle(handle ACPEventHandle) <-chan eventstream.Envelope {
 	if handle == nil {
 		return eventstream.EnsureTerminalLifecycle(nil, "", "", "")
 	}
@@ -28,7 +37,7 @@ func ProjectSessionEventEnvelope(base eventstream.Envelope, event *session.Event
 
 // ProjectApprovalPayloadEnvelope projects one live gateway approval request
 // through the same ACP permission path used for durable replay.
-func ProjectApprovalPayloadEnvelope(base eventstream.Envelope, payload *gateway.ApprovalPayload) []eventstream.Envelope {
+func ProjectApprovalPayloadEnvelope(base eventstream.Envelope, payload *approval.Payload) []eventstream.Envelope {
 	approval := protocolApprovalFromPayload(payload)
 	if approval == nil {
 		return nil
@@ -136,7 +145,7 @@ func ProjectSessionEventEnvelopeWithProjector(base eventstream.Envelope, event *
 	if len(out) == 0 {
 		out = append(out, projectSessionEventstreamOnlyEvents(base, event)...)
 	}
-	if usage := gateway.UsageSnapshotFromSessionEvent(event); usage != nil && !containsUsageUpdate(out) {
+	if usage := session.UsageSnapshotFromSessionEvent(event); usage != nil && !containsUsageUpdate(out) {
 		out = append(out, gatewayUsageEnvelope(base, usage))
 	}
 	return out
@@ -154,7 +163,7 @@ func ProjectSessionEventNotifications(base eventstream.Envelope, event *session.
 		return nil, err
 	}
 	out := cloneSessionNotifications(notifications, base, event)
-	if usage := gateway.UsageSnapshotFromSessionEvent(event); usage != nil && !containsUsageNotification(out) {
+	if usage := session.UsageSnapshotFromSessionEvent(event); usage != nil && !containsUsageNotification(out) {
 		usageEnv := gatewayUsageEnvelope(base, usage)
 		out = append(out, SessionNotification{
 			SessionID: sessionNotificationID(usageEnv.SessionID, base, event),
@@ -225,7 +234,7 @@ func projectSessionEventToACPEnvelopes(base eventstream.Envelope, sessionEvent *
 	return out
 }
 
-func gatewayUsageEnvelope(base eventstream.Envelope, usage *gateway.UsageSnapshot) eventstream.Envelope {
+func gatewayUsageEnvelope(base eventstream.Envelope, usage *session.UsageSnapshot) eventstream.Envelope {
 	if usage == nil {
 		return eventstream.Envelope{}
 	}
@@ -244,11 +253,12 @@ func gatewayUsageEnvelope(base eventstream.Envelope, usage *gateway.UsageSnapsho
 		Actor:         base.Actor,
 		ParticipantID: base.ParticipantID,
 		Update: eventstream.UsageUpdateFromSnapshot(eventstream.UsageSnapshot{
-			PromptTokens:      usage.PromptTokens,
-			CachedInputTokens: usage.CachedInputTokens,
-			CompletionTokens:  usage.CompletionTokens,
-			ReasoningTokens:   usage.ReasoningTokens,
-			TotalTokens:       usage.TotalTokens,
+			PromptTokens:        usage.PromptTokens,
+			CachedInputTokens:   usage.CachedInputTokens,
+			CompletionTokens:    usage.CompletionTokens,
+			ReasoningTokens:     usage.ReasoningTokens,
+			TotalTokens:         usage.TotalTokens,
+			ContextWindowTokens: usage.ContextWindowTokens,
 		}, base.Meta),
 	}
 }
@@ -354,8 +364,8 @@ func acpMetaWithToolName(meta map[string]any, toolName string) map[string]any {
 	if toolName == "" {
 		return cloneAnyMap(meta)
 	}
-	return metautil.WithRuntimeSection(meta, gateway.EventMetaRuntimeTool, map[string]any{
-		gateway.EventMetaRuntimeToolName: toolName,
+	return metautil.WithRuntimeSection(meta, metautil.RuntimeTool, map[string]any{
+		metautil.RuntimeToolName: toolName,
 	})
 }
 
@@ -391,24 +401,24 @@ func permissionRequestFromProtocol(sessionID string, meta map[string]any, approv
 	return req
 }
 
-func ApprovalPayloadFromPermission(req *schema.RequestPermissionRequest) *gateway.ApprovalPayload {
+func ApprovalPayloadFromPermission(req *schema.RequestPermissionRequest) *approval.Payload {
 	if req == nil {
 		return nil
 	}
 	rawInput := rawInputMap(req.ToolCall.RawInput)
-	payload := &gateway.ApprovalPayload{
+	payload := &approval.Payload{
 		ToolCallID:         strings.TrimSpace(req.ToolCall.ToolCallID),
 		ToolName:           permissionToolName(req),
 		RawInput:           rawInput,
 		Reason:             firstNonEmpty(rawString(rawInput, "approval_reason"), rawString(rawInput, "reason")),
 		Justification:      rawString(rawInput, "justification"),
 		SandboxPermissions: rawString(rawInput, "sandbox_permissions"),
-		Status:             gateway.ApprovalStatusPending,
+		Status:             approval.StatusPending,
 	}
 	if len(req.Options) > 0 {
-		payload.Options = make([]gateway.ApprovalOption, 0, len(req.Options))
+		payload.Options = make([]approval.Option, 0, len(req.Options))
 		for _, option := range req.Options {
-			payload.Options = append(payload.Options, gateway.ApprovalOption{
+			payload.Options = append(payload.Options, approval.Option{
 				ID:   strings.TrimSpace(option.OptionID),
 				Name: strings.TrimSpace(option.Name),
 				Kind: strings.TrimSpace(option.Kind),
@@ -424,13 +434,13 @@ func permissionToolName(req *schema.RequestPermissionRequest) string {
 	}
 	meta := metautil.Merge(req.ToolCall.Meta, req.Meta)
 	return firstNonEmpty(
-		gateway.EventMetaString(meta, gateway.EventMetaRoot, gateway.EventMetaRuntime, gateway.EventMetaRuntimeTool, gateway.EventMetaRuntimeToolName),
+		metautil.String(meta, metautil.Root, metautil.Runtime, metautil.RuntimeTool, metautil.RuntimeToolName),
 		stringFromPtr(req.ToolCall.Title),
 		stringFromPtr(req.ToolCall.Kind),
 	)
 }
 
-func protocolApprovalFromPayload(payload *gateway.ApprovalPayload) *session.ProtocolApproval {
+func protocolApprovalFromPayload(payload *approval.Payload) *session.ProtocolApproval {
 	if payload == nil {
 		return nil
 	}
@@ -454,7 +464,7 @@ func protocolApprovalFromPayload(payload *gateway.ApprovalPayload) *session.Prot
 	}
 }
 
-func approvalRawInput(payload *gateway.ApprovalPayload) map[string]any {
+func approvalRawInput(payload *approval.Payload) map[string]any {
 	if payload == nil {
 		return nil
 	}

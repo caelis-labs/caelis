@@ -6,7 +6,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/caelis-labs/caelis/ports/sandbox"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 )
 
 type Route struct {

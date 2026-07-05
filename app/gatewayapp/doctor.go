@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/caelis-labs/caelis/impl/model/providers"
-	sandboxport "github.com/caelis-labs/caelis/ports/sandbox"
-	"github.com/caelis-labs/caelis/ports/session"
-	"github.com/caelis-labs/caelis/ports/skill"
+	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
+	sandboxport "github.com/caelis-labs/caelis/agent-sdk/sandbox"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/skill"
 )
 
 type DoctorRequest struct {

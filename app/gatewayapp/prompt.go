@@ -1,9 +1,9 @@
 package gatewayapp
 
 import (
+	"github.com/caelis-labs/caelis/agent-sdk/skill"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/promptassembly"
-	"github.com/caelis-labs/caelis/ports/skill"
-	"github.com/caelis-labs/caelis/ports/tool"
 )
 
 type promptConfig = promptassembly.Config

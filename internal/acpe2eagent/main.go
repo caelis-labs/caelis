@@ -13,19 +13,20 @@ import (
 	"strings"
 	"time"
 
-	runtimeacp "github.com/caelis-labs/caelis/impl/agent/acp"
-	bridgeassembly "github.com/caelis-labs/caelis/impl/agent/acp/assembly"
-	"github.com/caelis-labs/caelis/impl/agent/local"
-	"github.com/caelis-labs/caelis/impl/agent/local/chat"
-	"github.com/caelis-labs/caelis/impl/sandbox/host"
-	sessionfile "github.com/caelis-labs/caelis/impl/session/file"
-	"github.com/caelis-labs/caelis/impl/tool/builtin"
-	"github.com/caelis-labs/caelis/impl/tool/builtin/spawn"
-	"github.com/caelis-labs/caelis/ports/agent"
-	assemblyapi "github.com/caelis-labs/caelis/ports/assembly"
-	"github.com/caelis-labs/caelis/ports/delegation"
-	"github.com/caelis-labs/caelis/ports/model"
-	"github.com/caelis-labs/caelis/ports/session"
+	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime"
+	assemblyapi "github.com/caelis-labs/caelis/agent-sdk/runtime/assembly"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox/host"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
+	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
+	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
+	runtimeacp "github.com/caelis-labs/caelis/internal/acpagentbridge"
+	bridgeassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
+	"github.com/caelis-labs/caelis/internal/acpbridge"
 	"github.com/caelis-labs/caelis/protocol/acp"
 )
 
@@ -49,19 +50,32 @@ func main() {
 		AppName:  "caelis",
 		UserID:   "acp",
 	})
-	runtime, err := local.New(local.Config{
-		Sessions:  sessions,
-		TaskStore: sessionfile.NewTaskStore(sessionStore),
-		Assembly:  assembly,
+	localCfg := runtime.Config{
+		Sessions:                 sessions,
+		TaskStore:                sessionfile.NewTaskStore(sessionStore),
+		Assembly:                 assembly,
+		ControllerEventForwarder: acpbridge.NewControllerForwarder(sessions),
 		AgentFactory: chat.Factory{
 			SystemPrompt: strings.TrimSpace(os.Getenv("SDK_ACP_SYSTEM_PROMPT")),
 		},
-	})
+	}
+	if len(assembly.Agents) > 0 {
+		controlPlane, cpErr := bridgeassembly.NewControlPlane(bridgeassembly.ControlPlaneConfig{
+			Agents: assembly.Agents,
+		})
+		if cpErr != nil {
+			log.Fatal(cpErr)
+		}
+		localCfg.Controllers = controlPlane.Controllers
+		localCfg.Subagents = controlPlane.Subagents
+		localCfg.AgentConfigUpdater = controlPlane.Updater
+	}
+	rt, err := runtime.New(localCfg)
 	if err != nil {
 		log.Fatal(err)
 	}
 	agent, err := runtimeacp.New(runtimeacp.Config{
-		Runtime:  runtime,
+		Runtime:  rt,
 		Sessions: sessions,
 		AgentInfo: &acp.Implementation{
 			Name:    "caelis-sdk",

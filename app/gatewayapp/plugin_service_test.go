@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/assembly"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
-	"github.com/caelis-labs/caelis/ports/assembly"
 	"github.com/caelis-labs/caelis/ports/gateway"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )

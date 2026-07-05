@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/caelis-labs/caelis/internal/agenthandle"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
+	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
+	"github.com/caelis-labs/caelis/agent-sdk/task/agenthandle"
 	"github.com/caelis-labs/caelis/ports/gateway"
-	"github.com/caelis-labs/caelis/ports/session"
-	taskapi "github.com/caelis-labs/caelis/ports/task"
 )
 
 func (d *Adapter) StartAgentSubagent(ctx context.Context, target string, prompt string, attachments []Attachment) (Turn, error) {

@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/caelis-labs/caelis/impl/model/catalog"
+	"github.com/caelis-labs/caelis/agent-sdk/model/catalog"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	controlcommands "github.com/caelis-labs/caelis/ports/controlcommand"
-	"github.com/caelis-labs/caelis/ports/session"
 	"github.com/caelis-labs/caelis/protocol/acp"
 )
 

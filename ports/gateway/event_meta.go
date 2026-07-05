@@ -1,61 +1,41 @@
 package gateway
 
-import "strings"
+import "github.com/caelis-labs/caelis/protocol/acp/metautil"
 
 const (
-	// EventMetaRoot is the Caelis-owned ACP extension namespace. Renderers may
-	// consume values under this namespace, but should not treat provider-visible
-	// tool JSON as display metadata.
-	EventMetaRoot = "caelis"
+	// EventMetaRoot is the Caelis-owned ACP extension namespace.
+	EventMetaRoot = metautil.Root
 
-	EventMetaVersion   = "version"
-	EventMetaTransient = "transient"
-	EventMetaRuntime   = "runtime"
+	EventMetaVersion   = metautil.Version
+	EventMetaTransient = metautil.Transient
+	EventMetaRuntime   = metautil.Runtime
 
-	EventMetaRuntimeTool             = "tool"
-	EventMetaRuntimeToolName         = "name"
-	EventMetaRuntimeToolAction       = "action"
-	EventMetaRuntimeToolInput        = "input"
-	EventMetaRuntimeToolStatusDetail = "status_detail"
-	EventMetaRuntimeTargetKind       = "target_kind"
-	EventMetaRuntimeTargetID         = "target_id"
+	EventMetaRuntimeTool             = metautil.RuntimeTool
+	EventMetaRuntimeToolName         = metautil.RuntimeToolName
+	EventMetaRuntimeToolAction       = metautil.RuntimeToolAction
+	EventMetaRuntimeToolInput        = metautil.RuntimeToolInput
+	EventMetaRuntimeToolStatusDetail = metautil.RuntimeToolStatusDetail
+	EventMetaRuntimeTargetKind       = metautil.RuntimeTargetKind
+	EventMetaRuntimeTargetID         = metautil.RuntimeTargetID
 
-	EventMetaRuntimeTask           = "task"
-	EventMetaRuntimeTaskID         = "task_id"
-	EventMetaRuntimeTaskTerminalID = "terminal_id"
+	EventMetaRuntimeTask           = metautil.RuntimeTask
+	EventMetaRuntimeTaskID         = metautil.RuntimeTaskID
+	EventMetaRuntimeTaskTerminalID = metautil.RuntimeTaskTerminalID
 
-	EventMetaRuntimeStream                     = "stream"
-	EventMetaRuntimeStreamMode                 = "mode"
-	EventMetaRuntimeStreamParentCallID         = "parent_call_id"
-	EventMetaRuntimeStreamParentTool           = "parent_tool"
-	EventMetaRuntimeStreamParentTaskID         = "parent_task_id"
-	EventMetaRuntimeStreamMirroredToParentTool = "mirrored_to_parent_tool"
+	EventMetaRuntimeStream                     = metautil.RuntimeStream
+	EventMetaRuntimeStreamMode                 = metautil.RuntimeStreamMode
+	EventMetaRuntimeStreamParentCallID         = metautil.RuntimeStreamParentCallID
+	EventMetaRuntimeStreamParentTool           = metautil.RuntimeStreamParentTool
+	EventMetaRuntimeStreamParentTaskID         = metautil.RuntimeStreamParentTaskID
+	EventMetaRuntimeStreamMirroredToParentTool = metautil.RuntimeStreamMirroredToParentTool
 )
 
 // EventMetaString returns a trimmed string from _meta using a stable path.
 func EventMetaString(values map[string]any, path ...string) string {
-	var current any = values
-	for _, key := range path {
-		mapped, ok := current.(map[string]any)
-		if !ok {
-			return ""
-		}
-		current = mapped[key]
-	}
-	text, _ := current.(string)
-	return strings.TrimSpace(text)
+	return metautil.String(values, path...)
 }
 
 // EventMetaBool returns a boolean from _meta using a stable path.
 func EventMetaBool(values map[string]any, path ...string) bool {
-	var current any = values
-	for _, key := range path {
-		mapped, ok := current.(map[string]any)
-		if !ok {
-			return false
-		}
-		current = mapped[key]
-	}
-	value, _ := current.(bool)
-	return value
+	return metautil.Bool(values, path...)
 }

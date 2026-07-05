@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/caelis-labs/caelis/impl/model/providers"
+	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/ports/gateway"
-	"github.com/caelis-labs/caelis/ports/session"
 )
 
 func TestConnectRollsBackLookupRuntimeAndStoreWhenAgentRefreshFails(t *testing.T) {

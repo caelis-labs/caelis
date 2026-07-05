@@ -3,7 +3,7 @@ package tuiapp
 import (
 	"strings"
 
-	"github.com/caelis-labs/caelis/ports/displaypolicy"
+	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
 
@@ -60,7 +60,7 @@ func renderACPLiveExplorationStageRows(blockID string, events []SubagentEvent, i
 }
 
 func renderLiveExplorationToolHeaderRow(blockID string, ev SubagentEvent, width int, ctx BlockRenderContext) RenderedRow {
-	verb := displaypolicy.ExplorationVerbForTool(toolSemanticName(ev.Name, ev.ToolKind))
+	verb := display.ExplorationVerbForTool(toolSemanticName(ev.Name, ev.ToolKind))
 	if verb == "" {
 		verb = strings.ToUpper(strings.TrimSpace(ev.Name))
 	}
@@ -75,7 +75,7 @@ func liveExplorationRepeatedToolSummary(stage []SubagentEvent) ([]SubagentEvent,
 		if !isExplorationToolEvent(ev) {
 			continue
 		}
-		nextVerb := displaypolicy.ExplorationVerbForTool(toolSemanticName(ev.Name, ev.ToolKind))
+		nextVerb := display.ExplorationVerbForTool(toolSemanticName(ev.Name, ev.ToolKind))
 		if nextVerb == "" {
 			return nil, "", false
 		}

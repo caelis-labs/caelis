@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/caelis-labs/caelis/internal/winproc"
+	"github.com/caelis-labs/caelis/platform/winproc"
 )
 
 const gitWorkspaceStatusTimeout = 500 * time.Millisecond

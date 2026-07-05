@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/caelis-labs/caelis/impl/agent/acp/subagent"
-	"github.com/caelis-labs/caelis/ports/delegation"
-	"github.com/caelis-labs/caelis/ports/subagent"
+	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
+	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
+	bridgesubagent "github.com/caelis-labs/caelis/internal/acpagentbridge/subagent"
 )
 
 func TestRunnerSpawnChildSurvivesCallerContextCancelAfterYield(t *testing.T) {
@@ -23,7 +23,7 @@ func TestRunnerSpawnChildSurvivesCallerContextCancelAfterYield(t *testing.T) {
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build e2eagent: %v\n%s", err, string(output))
 	}
-	registry, err := acp.NewRegistry([]acp.AgentConfig{{
+	registry, err := bridgesubagent.NewRegistry([]bridgesubagent.AgentConfig{{
 		Name:        "self",
 		Description: "self child",
 		Command:     childBin,
@@ -37,7 +37,7 @@ func TestRunnerSpawnChildSurvivesCallerContextCancelAfterYield(t *testing.T) {
 	if err != nil {
 		t.Fatalf("acpsubagent.NewRegistry() error = %v", err)
 	}
-	runner, err := acp.NewRunner(acp.RunnerConfig{Registry: registry})
+	runner, err := bridgesubagent.NewRunner(bridgesubagent.RunnerConfig{Registry: registry})
 	if err != nil {
 		t.Fatalf("acpsubagent.NewRunner() error = %v", err)
 	}

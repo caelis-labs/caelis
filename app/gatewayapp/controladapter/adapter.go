@@ -9,11 +9,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/caelis-labs/caelis/ports/controller"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/ports/gateway"
-	"github.com/caelis-labs/caelis/ports/model"
-	"github.com/caelis-labs/caelis/ports/session"
-	"github.com/caelis-labs/caelis/ports/stream"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -232,9 +232,9 @@ func streamRequestFromACPEvent(env eventstream.Envelope) (acpprojector.StreamReq
 	if taskID == "" && terminalID == "" {
 		return acpprojector.StreamRequest{}, false
 	}
-	scope := gateway.EventScope(env.Scope)
+	scope := env.Scope
 	if scope == "" {
-		scope = gateway.EventScopeMain
+		scope = eventstream.ScopeMain
 	}
 	req := acpprojector.StreamRequest{
 		HandleID: strings.TrimSpace(env.HandleID),
@@ -259,7 +259,7 @@ func streamRequestFromACPEvent(env eventstream.Envelope) (acpprojector.StreamReq
 		Cursor: stream.Cursor{
 			Output: int64FromAny(metaAny(meta, gateway.EventMetaRoot, gateway.EventMetaRuntime, "task", "output_cursor")),
 		},
-		Origin: &gateway.EventOrigin{
+		Origin: &acpprojector.StreamOrigin{
 			Scope:         scope,
 			ScopeID:       strings.TrimSpace(env.ScopeID),
 			Actor:         strings.TrimSpace(env.Actor),

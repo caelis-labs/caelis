@@ -5,15 +5,15 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/caelis-labs/caelis/ports/gateway"
-	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/projector"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 type Starter interface {
-	BeginTurn(context.Context, gateway.BeginTurnRequest) (gateway.BeginTurnResult, error)
+	Submit(context.Context, control.Submission) (control.Turn, error)
 }
 
 type ApprovalPolicy string
@@ -25,29 +25,28 @@ const (
 
 type Options struct {
 	ApprovalPolicy  ApprovalPolicy
-	ResolveApproval func(context.Context, *gateway.ApprovalPayload) (gateway.ApprovalDecision, error)
+	ResolveApproval func(context.Context, *approval.Payload) (approval.Decision, error)
 }
 
 type Result struct {
-	Session      session.Session
 	Output       string
 	LastCursor   string
 	PromptTokens int
 }
 
-func RunOnce(ctx context.Context, starter Starter, req gateway.BeginTurnRequest, opts Options) (Result, error) {
-	result, err := starter.BeginTurn(ctx, req)
+func RunOnce(ctx context.Context, starter Starter, submission control.Submission, opts Options) (Result, error) {
+	turn, err := starter.Submit(ctx, submission)
 	if err != nil {
 		return Result{}, err
 	}
-	if result.Handle == nil {
-		return Result{Session: result.Session}, nil
+	if turn == nil {
+		return Result{}, nil
 	}
-	defer result.Handle.Close()
+	defer turn.Close()
 
-	out := Result{Session: result.Session}
+	out := Result{}
 	var assistant schema.FinalAssistantAccumulator
-	for env := range projector.ACPEventsFromGatewayHandle(result.Handle) {
+	for env := range turn.Events() {
 		if env.Cursor != "" {
 			out.LastCursor = env.Cursor
 		}
@@ -61,14 +60,12 @@ func RunOnce(ctx context.Context, starter Starter, req gateway.BeginTurnRequest,
 			continue
 		}
 		if env.Kind == eventstream.KindRequestPermission {
-			decision, err := resolveApproval(ctx, opts, projector.ApprovalPayloadFromPermission(env.Permission))
+			payload := projector.ApprovalPayloadFromPermission(env.Permission)
+			decision, err := resolveApproval(ctx, opts, payload)
 			if err != nil {
 				return out, err
 			}
-			if err := result.Handle.Submit(ctx, gateway.SubmitRequest{
-				Kind:     gateway.SubmissionKindApproval,
-				Approval: &decision,
-			}); err != nil {
+			if err := turn.SubmitApproval(ctx, controlApprovalDecision(payload, decision)); err != nil {
 				return out, err
 			}
 			continue
@@ -104,12 +101,23 @@ func envelopeError(env eventstream.Envelope) error {
 	return nil
 }
 
-func resolveApproval(ctx context.Context, opts Options, req *gateway.ApprovalPayload) (gateway.ApprovalDecision, error) {
+func resolveApproval(ctx context.Context, opts Options, req *approval.Payload) (approval.Decision, error) {
 	if opts.ResolveApproval != nil {
 		return opts.ResolveApproval(ctx, req)
 	}
 	if opts.ApprovalPolicy == ApprovalPolicyApproveAll {
-		return gateway.ApprovalDecision{Approved: true, Outcome: string(gateway.ApprovalStatusApproved)}, nil
+		return approval.Decision{Approved: true, Outcome: string(approval.StatusApproved)}, nil
 	}
-	return gateway.ApprovalDecision{Approved: false, Outcome: string(gateway.ApprovalStatusRejected)}, nil
+	return approval.Decision{Approved: false, Outcome: string(approval.StatusRejected)}, nil
+}
+
+func controlApprovalDecision(payload *approval.Payload, decision approval.Decision) control.ApprovalDecision {
+	response := approval.RuntimeResponseFromFinalReview(approval.FinalizeReviewResult(payload, decision))
+	return control.ApprovalDecision{
+		Outcome:    response.Outcome,
+		OptionID:   response.OptionID,
+		Approved:   response.Approved,
+		Reason:     response.Reason,
+		ReviewText: response.ReviewText,
+	}
 }

@@ -226,20 +226,21 @@ func TestUsageUpdateFromSnapshotStoresBreakdownInMeta(t *testing.T) {
 	t.Parallel()
 
 	update := UsageUpdateFromSnapshot(UsageSnapshot{
-		PromptTokens:      12,
-		CachedInputTokens: 3,
-		CompletionTokens:  5,
-		ReasoningTokens:   2,
-		TotalTokens:       17,
+		PromptTokens:        12,
+		CachedInputTokens:   3,
+		CompletionTokens:    5,
+		ReasoningTokens:     2,
+		TotalTokens:         17,
+		ContextWindowTokens: 200000,
 	}, map[string]any{"caelis": map[string]any{"invocation": map[string]any{"model": "m"}}})
 	if update.SessionUpdate != schema.UpdateUsage {
 		t.Fatalf("SessionUpdate = %q, want usage_update", update.SessionUpdate)
 	}
-	if update.Used != 17 || update.Size != 0 {
-		t.Fatalf("usage size/used = %d/%d, want omitted size and used total", update.Size, update.Used)
+	if update.Used != 17 || update.Size != 200000 {
+		t.Fatalf("usage size/used = %d/%d, want context window size and used total", update.Size, update.Used)
 	}
 	roundTripped := UsageSnapshotFromUpdate(update)
-	if roundTripped == nil || roundTripped.PromptTokens != 12 || roundTripped.CachedInputTokens != 3 || roundTripped.CompletionTokens != 5 || roundTripped.ReasoningTokens != 2 || roundTripped.TotalTokens != 17 {
+	if roundTripped == nil || roundTripped.PromptTokens != 12 || roundTripped.CachedInputTokens != 3 || roundTripped.CompletionTokens != 5 || roundTripped.ReasoningTokens != 2 || roundTripped.TotalTokens != 17 || roundTripped.ContextWindowTokens != 200000 {
 		t.Fatalf("UsageSnapshotFromUpdate() = %#v", roundTripped)
 	}
 	caelis, _ := update.Meta["caelis"].(map[string]any)
@@ -249,6 +250,15 @@ func TestUsageUpdateFromSnapshotStoresBreakdownInMeta(t *testing.T) {
 	invocation, _ := caelis["invocation"].(map[string]any)
 	if invocation["model"] != "m" {
 		t.Fatalf("meta.caelis.invocation = %#v, want preserved model", invocation)
+	}
+}
+
+func TestUsageUpdateFromSnapshotDefaultsUnknownSizeToUsed(t *testing.T) {
+	t.Parallel()
+
+	update := UsageUpdateFromSnapshot(UsageSnapshot{TotalTokens: 17}, nil)
+	if update.Used != 17 || update.Size != 17 {
+		t.Fatalf("usage size/used = %d/%d, want required size fallback to used total", update.Size, update.Used)
 	}
 }
 

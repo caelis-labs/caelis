@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/caelis-labs/caelis/ports/agent"
-	"github.com/caelis-labs/caelis/ports/approval"
+	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	gatewayapi "github.com/caelis-labs/caelis/ports/gateway"
-	"github.com/caelis-labs/caelis/ports/model"
-	"github.com/caelis-labs/caelis/ports/session"
 )
 
 type approvalRequesterFunc func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error)
@@ -19,6 +19,10 @@ func (f approvalRequesterFunc) RequestApproval(ctx context.Context, req agent.Ap
 		ctx = context.Background()
 	}
 	return f(ctx, req)
+}
+
+type approvalReviewAccountingProvider interface {
+	ApprovalReviewAccounting(context.Context, ApprovalReviewRequest, ApprovalReviewResult) (*UsageSnapshot, *session.EventInvocation, error)
 }
 
 func (g *Gateway) resolveApprovalRequest(
@@ -78,7 +82,7 @@ func (g *Gateway) resolveApprovalRequest(
 	if reviewModel == nil {
 		reviewModel, _ = g.approvalReviewModel(turnCtx, req.SessionRef)
 	}
-	result, err := approver.Decide(approvalCtx, ApprovalReviewRequest{
+	reviewReq := ApprovalReviewRequest{
 		SessionRef:     req.SessionRef,
 		RunID:          req.RunID,
 		TurnID:         req.TurnID,
@@ -87,7 +91,8 @@ func (g *Gateway) resolveApprovalRequest(
 		Model:          reviewModel,
 		Approval:       cloneApprovalPayload(payload),
 		RuntimeRequest: *req,
-	})
+	}
+	result, err := approver.Decide(approvalCtx, reviewReq)
 	var reviewErrStatus ApprovalReviewStatus
 	if err != nil {
 		status, rationale, _ := approval.ReviewErrorOutcome(err)
@@ -121,8 +126,9 @@ func (g *Gateway) resolveApprovalRequest(
 	terminal.Authorization = strings.TrimSpace(result.Authorization)
 	terminal.DecisionSource = strings.TrimSpace(result.DecisionSource)
 	terminal.ReviewTrace = approval.CloneReviewTrace(result.Trace)
-	handle.publishApprovalReviewPayloadWithUsage(req, terminal, result.Usage, result.Invocation)
-	_ = g.persistApprovalReviewUsage(context.WithoutCancel(turnCtx), req, result.Usage, terminal.DecisionSource, result.Invocation)
+	usage, invocation := g.approvalReviewSessionAccounting(context.WithoutCancel(turnCtx), reviewReq, result)
+	handle.publishApprovalReviewPayloadWithUsage(req, terminal, usage, invocation)
+	_ = g.persistApprovalReviewSessionAccounting(context.WithoutCancel(turnCtx), req, usage, terminal.DecisionSource, invocation)
 
 	// Do not abort the turn after repeated denials: a per-turn circuit breaker
 	// overwrote the reviewer's rationale with a generic "too many approval requests" error.
@@ -130,7 +136,59 @@ func (g *Gateway) resolveApprovalRequest(
 	return response, nil
 }
 
-func (g *Gateway) persistApprovalReviewUsage(ctx context.Context, req *agent.ApprovalRequest, usage *UsageSnapshot, source string, invocation *session.EventInvocation) error {
+func (g *Gateway) approvalReviewSessionAccounting(ctx context.Context, req ApprovalReviewRequest, result ApprovalReviewResult) (*UsageSnapshot, *session.EventInvocation) {
+	for _, candidate := range []any{g.approvalReviewer, g.approvalApprover} {
+		provider, ok := candidate.(approvalReviewAccountingProvider)
+		if !ok {
+			continue
+		}
+		usage, invocation, err := provider.ApprovalReviewAccounting(ctx, req, result)
+		if err != nil || usage == nil || usageSnapshotEmpty(*usage) {
+			continue
+		}
+		return usage, invocation
+	}
+	usage, invocation, _ := g.approvalReviewTraceSessionAccounting(ctx, result.Trace)
+	return usage, invocation
+}
+
+func (g *Gateway) approvalReviewTraceSessionAccounting(ctx context.Context, trace *approval.ReviewTrace) (*UsageSnapshot, *session.EventInvocation, error) {
+	if g == nil || g.sessions == nil || trace == nil {
+		return nil, nil, nil
+	}
+	sessionID := strings.TrimSpace(trace.SessionID)
+	assistantEventID := strings.TrimSpace(trace.AssistantEventID)
+	if sessionID == "" || assistantEventID == "" {
+		return nil, nil, nil
+	}
+	events, err := g.sessions.Events(ctx, session.EventsRequest{
+		SessionRef:       session.SessionRef{SessionID: sessionID},
+		IncludeTransient: true,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, event := range events {
+		if event == nil || strings.TrimSpace(event.ID) != assistantEventID {
+			continue
+		}
+		return gatewayapi.UsageSnapshotFromSessionEvent(event), approvalReviewAccountingInvocationFromSessionEvent(event), nil
+	}
+	return nil, nil, nil
+}
+
+func approvalReviewAccountingInvocationFromSessionEvent(event *session.Event) *session.EventInvocation {
+	if event == nil || event.Invocation == nil {
+		return nil
+	}
+	invocation := session.CloneEventInvocation(*event.Invocation)
+	if invocation.Provider == "" && invocation.Model == "" {
+		return nil
+	}
+	return &invocation
+}
+
+func (g *Gateway) persistApprovalReviewSessionAccounting(ctx context.Context, req *agent.ApprovalRequest, usage *UsageSnapshot, source string, invocation *session.EventInvocation) error {
 	if g == nil || g.sessions == nil || req == nil || usage == nil || usageSnapshotEmpty(*usage) {
 		return nil
 	}
@@ -229,11 +287,12 @@ func anyStringValue(value any) string {
 
 func usageSnapshotMeta(usage UsageSnapshot) map[string]any {
 	return map[string]any{
-		"prompt_tokens":       usage.PromptTokens,
-		"cached_input_tokens": usage.CachedInputTokens,
-		"completion_tokens":   usage.CompletionTokens,
-		"reasoning_tokens":    usage.ReasoningTokens,
-		"total_tokens":        usage.TotalTokens,
+		"prompt_tokens":         usage.PromptTokens,
+		"cached_input_tokens":   usage.CachedInputTokens,
+		"completion_tokens":     usage.CompletionTokens,
+		"reasoning_tokens":      usage.ReasoningTokens,
+		"total_tokens":          usage.TotalTokens,
+		"context_window_tokens": usage.ContextWindowTokens,
 	}
 }
 
@@ -254,6 +313,9 @@ func addUsageSnapshot(total *UsageSnapshot, usage UsageSnapshot) {
 	total.CompletionTokens += usage.CompletionTokens
 	total.ReasoningTokens += usage.ReasoningTokens
 	total.TotalTokens += usage.TotalTokens
+	if usage.ContextWindowTokens > total.ContextWindowTokens {
+		total.ContextWindowTokens = usage.ContextWindowTokens
+	}
 }
 
 func approvalOptionIDForDecision(options []ApprovalOption, approved bool) string {

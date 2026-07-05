@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/caelis-labs/caelis/ports/displaypolicy"
+	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
@@ -15,7 +15,7 @@ func TerminalFinalWithoutContent(input ToolOutputFallbackInput) bool {
 	if input.Error || strings.EqualFold(strings.TrimSpace(input.Status), ToolStatusFailed) {
 		return false
 	}
-	return displaypolicy.IsTerminalPanelTool(input.ToolName, input.ToolKind)
+	return display.IsTerminalPanelTool(input.ToolName, input.ToolKind)
 }
 
 func TerminalNoOutputPlaceholder(input ToolOutputFallbackInput) bool {
@@ -32,7 +32,7 @@ func TerminalNoOutputPlaceholder(input ToolOutputFallbackInput) bool {
 }
 
 func TerminalExitCodeOutputText(input ToolOutputFallbackInput) string {
-	if !displaypolicy.IsTerminalPanelTool(input.ToolName, input.ToolKind) {
+	if !display.IsTerminalPanelTool(input.ToolName, input.ToolKind) {
 		return ""
 	}
 	if !input.Error && !strings.EqualFold(strings.TrimSpace(input.Status), ToolStatusFailed) {
@@ -58,7 +58,7 @@ func TerminalToolOutputText(input ToolOutputFallbackInput) string {
 	if text := TerminalRuntimeOutputText(input.Meta); text != "" {
 		return text
 	}
-	if !displaypolicy.IsTerminalPanelTool(input.ToolName, input.ToolKind) && !strings.EqualFold(strings.TrimSpace(input.ToolName), "TASK") {
+	if !display.IsTerminalPanelTool(input.ToolName, input.ToolKind) && !strings.EqualFold(strings.TrimSpace(input.ToolName), "TASK") {
 		return ""
 	}
 	if !HasTerminalPanelMeta(input.Meta) {
@@ -70,7 +70,7 @@ func TerminalToolOutputText(input ToolOutputFallbackInput) string {
 			return firstRawNonEmpty(rawDisplayString(input.RawOutput["stderr"]), rawDisplayString(input.RawOutput["error"]))
 		}
 		if ToolStatusFinal(input.Status, input.Error) {
-			return displaypolicy.SubagentTaskOutputText(input.RawOutput)
+			return display.SubagentTaskOutputText(input.RawOutput)
 		}
 		return firstRawNonEmpty(rawDisplayString(input.RawOutput["text"]), rawDisplayString(input.RawOutput["stdout"]), rawDisplayString(input.RawOutput["output_preview"]), rawDisplayString(input.RawOutput["stderr"]))
 	}
@@ -80,7 +80,7 @@ func TerminalToolOutputText(input ToolOutputFallbackInput) string {
 	if !ToolStatusFinal(input.Status, input.Error) {
 		return firstRawNonEmpty(rawDisplayString(input.RawOutput["latest_output"]), rawDisplayString(input.RawOutput["output_preview"]))
 	}
-	if text := displaypolicy.CommandTaskOutputText(input.RawOutput); text != "" {
+	if text := display.CommandTaskOutputText(input.RawOutput); text != "" {
 		return text
 	}
 	return ""

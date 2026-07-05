@@ -4,7 +4,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/caelis-labs/caelis/ports/displaypolicy"
+	"github.com/caelis-labs/caelis/agent-sdk/display"
 )
 
 func toolPanelExpanded(state map[string]bool, callID string) bool {
@@ -525,7 +525,7 @@ func collectToolPanelCallIDs(events []SubagentEvent) []string {
 }
 
 func shouldDefaultCollapseToolPanel(name string) bool {
-	return displaypolicy.IsExplorationTool(name)
+	return display.IsExplorationTool(name)
 }
 
 func shouldDefaultCollapseToolEvent(ev SubagentEvent) bool {

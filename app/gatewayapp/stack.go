@@ -8,18 +8,19 @@ import (
 	"sync"
 	"time"
 
+	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/assembly"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
+	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
+	"github.com/caelis-labs/caelis/agent-sdk/skill"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/modelregistry"
-	"github.com/caelis-labs/caelis/impl/agent/local"
-	sessionfile "github.com/caelis-labs/caelis/impl/session/file"
-	"github.com/caelis-labs/caelis/impl/tool/mcp"
+	acpassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
-	"github.com/caelis-labs/caelis/ports/agent"
-	"github.com/caelis-labs/caelis/ports/assembly"
 	"github.com/caelis-labs/caelis/ports/gateway"
-	"github.com/caelis-labs/caelis/ports/sandbox"
-	"github.com/caelis-labs/caelis/ports/session"
-	"github.com/caelis-labs/caelis/ports/skill"
-	"github.com/caelis-labs/caelis/ports/task"
 )
 
 type Config struct {
@@ -49,22 +50,23 @@ type GatewayRuntime interface {
 }
 
 type Stack struct {
-	Sessions      session.Service
-	AppName       string
-	UserID        string
-	Workspace     session.WorkspaceRef
-	lookup        *modelLookup
-	store         *appConfigStore
-	storeDir      string
-	mu            sync.RWMutex
-	reconfigureMu sync.Mutex
-	runtime       stackRuntimeConfig
-	sandbox       SandboxConfig
-	exec          sandbox.Runtime
-	engine        *local.Runtime
-	taskStore     task.Store
-	gateway       *kernelimpl.Gateway
-	mcpMgr        *mcp.Manager
+	Sessions        session.Service
+	AppName         string
+	UserID          string
+	Workspace       session.WorkspaceRef
+	lookup          *modelLookup
+	store           *appConfigStore
+	storeDir        string
+	mu              sync.RWMutex
+	reconfigureMu   sync.Mutex
+	runtime         stackRuntimeConfig
+	sandbox         SandboxConfig
+	exec            sandbox.Runtime
+	engine          *runtime.Runtime
+	acpControlPlane *acpassembly.ControlPlane
+	taskStore       task.Store
+	gateway         *kernelimpl.Gateway
+	mcpMgr          *mcp.Manager
 
 	// Optional test seam; nil uses the platform lifecycle runtime factory.
 	sandboxLifecycleFactory sandboxLifecycleRuntimeFactory

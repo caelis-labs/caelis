@@ -4,7 +4,7 @@ import (
 	"maps"
 	"strings"
 
-	"github.com/caelis-labs/caelis/ports/sandbox"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 )
 
 func sandboxSetupStatusFromPort(in sandbox.SetupStatus) SandboxSetupStatus {

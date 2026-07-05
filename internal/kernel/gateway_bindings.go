@@ -3,7 +3,7 @@ package kernel
 import (
 	"strings"
 
-	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
 func (g *Gateway) LookupBinding(req BindingStateRequest) (BindingState, error) {

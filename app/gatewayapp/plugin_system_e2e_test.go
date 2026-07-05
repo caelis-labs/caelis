@@ -13,9 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/caelis-labs/caelis/impl/model/providers"
-	"github.com/caelis-labs/caelis/ports/gateway"
-	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/surfaces/headless"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -108,11 +107,7 @@ func TestRealConfigPluginSystemE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
 	}
-	result, err := headless.RunOnce(context.Background(), stack.KernelTurns(), gateway.BeginTurnRequest{
-		SessionRef: session.SessionRef,
-		Input:      "Run the Caelis plugin system E2E. Use the available MCP tool.",
-		Surface:    "plugin-e2e",
-	}, headless.Options{})
+	result, err := runHeadlessOnceForGatewayAppTest(context.Background(), stack, session, "plugin-e2e", "Run the Caelis plugin system E2E. Use the available MCP tool.", headless.Options{})
 	if err != nil {
 		t.Fatalf("headless RunOnce() error = %v", err)
 	}

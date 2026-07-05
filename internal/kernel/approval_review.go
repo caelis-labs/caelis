@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/caelis-labs/caelis/ports/approval"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 )
 
 type ApprovalMode = approval.Mode

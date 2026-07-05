@@ -11,13 +11,13 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/assembly"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/agentprofiles"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/agentregistry"
 	"github.com/caelis-labs/caelis/ports/agentprofile"
-	"github.com/caelis-labs/caelis/ports/assembly"
-	"github.com/caelis-labs/caelis/ports/controller"
 	pluginapi "github.com/caelis-labs/caelis/ports/plugin"
-	"github.com/caelis-labs/caelis/ports/session"
 )
 
 type ACPAgentInfo struct {
@@ -404,6 +404,7 @@ func (s *Stack) setConfiguredAgentsWithBase(base assembly.ResolvedAssembly, conf
 	s.mu.RLock()
 	runtimeCfg := s.runtime
 	engine := s.engine
+	controlPlane := s.acpControlPlane
 	s.mu.RUnlock()
 	runtimeCfg.BaseAssembly = assembly.CloneResolvedAssembly(base)
 	resolvedAssembly, err := s.configuredAssembly(runtimeCfg.BaseAssembly, configured, runtimeCfg.Plugins, runtimeCfg)
@@ -413,6 +414,9 @@ func (s *Stack) setConfiguredAgentsWithBase(base assembly.ResolvedAssembly, conf
 	runtimeCfg.Assembly = resolvedAssembly
 	if engine == nil {
 		return fmt.Errorf("gatewayapp: runtime is unavailable")
+	}
+	if len(runtimeCfg.Assembly.Agents) > 0 && controlPlane == nil {
+		return fmt.Errorf("gatewayapp: ACP control plane is unavailable")
 	}
 	if err := engine.UpdateACPAgents(runtimeCfg.Assembly.Agents); err != nil {
 		return err

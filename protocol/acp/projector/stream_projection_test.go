@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/caelis-labs/caelis/ports/gateway"
-	"github.com/caelis-labs/caelis/ports/session"
-	"github.com/caelis-labs/caelis/ports/stream"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -21,15 +21,15 @@ func TestProjectApprovalPayloadEnvelopeUsesPermissionProjectorPolicy(t *testing.
 		Meta: map[string]any{
 			"request_id": "approval-1",
 		},
-	}, &gateway.ApprovalPayload{
+	}, &approval.Payload{
 		ToolCallID:         "call-1",
 		ToolName:           "RUN_COMMAND",
 		RawInput:           map[string]any{"command": "go test ./..."},
 		Reason:             "needs execution",
 		Justification:      "requested by user",
 		SandboxPermissions: "workspace-write",
-		Status:             gateway.ApprovalStatusPending,
-		Options: []gateway.ApprovalOption{{
+		Status:             approval.StatusPending,
+		Options: []approval.Option{{
 			ID:   "allow_once",
 			Name: "Allow once",
 			Kind: "allow_once",
@@ -79,7 +79,7 @@ func TestProjectStreamFrameBuildsStandardToolUpdateEnvelope(t *testing.T) {
 			TerminalID: "internal-terminal-1",
 		},
 		DisplayTerminalID: "call-1",
-		Scope:             gateway.EventScopeMain,
+		Scope:             eventstream.ScopeMain,
 	}
 
 	events := ProjectStreamFrame(req, stream.Frame{
@@ -113,7 +113,7 @@ func TestProjectStreamFrameBuildsStandardToolUpdateEnvelope(t *testing.T) {
 	if got := toolTerminalOutputText(t, update); got != "ok\n" {
 		t.Fatalf("terminal output = %q, want ok output", got)
 	}
-	if !gateway.EventMetaBool(update.Meta, gateway.EventMetaRoot, gateway.EventMetaTransient) {
+	if !metautil.Bool(update.Meta, metautil.Root, metautil.Transient) {
 		t.Fatalf("update.Meta = %#v, want transient stream update", update.Meta)
 	}
 }
@@ -127,7 +127,7 @@ func TestProjectStreamFramePreservesSplitNewlineFrame(t *testing.T) {
 		ToolName:   "RUN_COMMAND",
 		RawInput:   map[string]any{"command": "echo lines"},
 		Ref:        stream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "terminal-1"},
-		Scope:      gateway.EventScopeMain,
+		Scope:      eventstream.ScopeMain,
 	}
 	var projected strings.Builder
 	for _, frame := range []stream.Frame{
@@ -159,7 +159,7 @@ func TestProjectStreamFrameFinalDoesNotRepeatStreamedOutput(t *testing.T) {
 		ToolName:   "RUN_COMMAND",
 		RawInput:   map[string]any{"command": "printf ok"},
 		Ref:        stream.Ref{SessionID: "root-session", TaskID: "task-1", TerminalID: "terminal-1"},
-		Scope:      gateway.EventScopeMain,
+		Scope:      eventstream.ScopeMain,
 	}
 	events := ProjectStreamFrame(req, stream.Frame{
 		Ref:     req.Ref,
@@ -189,7 +189,7 @@ func TestProjectStreamFrameMarksEmbeddedEventsMirroredToParentTool(t *testing.T)
 		RawInput:          map[string]any{"action": "write", "task_id": "jack"},
 		Ref:               stream.Ref{SessionID: "root-session", TaskID: "jack", TerminalID: "subagent-jack"},
 		DisplayTerminalID: "task-call-1",
-		Scope:             gateway.EventScopeMain,
+		Scope:             eventstream.ScopeMain,
 	}
 	events := ProjectStreamFrame(req, stream.Frame{
 		Ref:       req.Ref,
@@ -220,10 +220,10 @@ func TestProjectStreamFrameMarksEmbeddedEventsMirroredToParentTool(t *testing.T)
 	if embedded.Scope != eventstream.ScopeSubagent || embedded.ScopeID != "jack" || eventstream.UpdateType(embedded.Update) != schema.UpdateAgentMessage {
 		t.Fatalf("embedded event = %#v, want subagent agent message", embedded)
 	}
-	if got := gateway.EventMetaString(embedded.Meta, gateway.EventMetaRoot, gateway.EventMetaRuntime, gateway.EventMetaRuntimeStream, gateway.EventMetaRuntimeStreamParentCallID); got != "task-call-1" {
+	if got := metautil.String(embedded.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeStream, metautil.RuntimeStreamParentCallID); got != "task-call-1" {
 		t.Fatalf("embedded meta parent_call_id = %q, want task-call-1; meta=%#v", got, embedded.Meta)
 	}
-	if !gateway.EventMetaBool(embedded.Meta, gateway.EventMetaRoot, gateway.EventMetaRuntime, gateway.EventMetaRuntimeStream, gateway.EventMetaRuntimeStreamMirroredToParentTool) {
+	if !metautil.Bool(embedded.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeStream, metautil.RuntimeStreamMirroredToParentTool) {
 		t.Fatalf("embedded meta = %#v, want mirrored_to_parent_tool=true", embedded.Meta)
 	}
 	update := requireToolUpdate(t, events[1])
@@ -241,7 +241,7 @@ func TestProjectStreamFrameAppendsSubagentReasoningToParentTerminal(t *testing.T
 		ToolName:   "SPAWN",
 		RawInput:   map[string]any{"agent": "self", "prompt": "demo"},
 		Ref:        stream.Ref{SessionID: "root-session", TaskID: "amy"},
-		Scope:      gateway.EventScopeMain,
+		Scope:      eventstream.ScopeMain,
 	}
 	events := ProjectStreamFrame(req, stream.Frame{
 		Ref:     req.Ref,
@@ -289,7 +289,7 @@ func TestProjectStreamFrameUsesNoOutputPlaceholderForSilentCommandFailure(t *tes
 		ToolName:   "RUN_COMMAND",
 		RawInput:   map[string]any{"command": "false"},
 		Ref:        stream.Ref{SessionID: "root-session", TaskID: "task-1", TerminalID: "terminal-1"},
-		Scope:      gateway.EventScopeMain,
+		Scope:      eventstream.ScopeMain,
 	}
 	events := ProjectStreamFrame(req, stream.Frame{
 		Ref:     req.Ref,
@@ -325,8 +325,8 @@ func TestProjectStreamFrameProjectsSubagentStreamToParentTerminalOnly(t *testing
 		RawInput:          map[string]any{"agent": "self", "prompt": "inspect"},
 		Ref:               stream.Ref{SessionID: "root-session", TaskID: "jack", TerminalID: "subagent-jack"},
 		DisplayTerminalID: "spawn-call-1",
-		Origin:            &gateway.EventOrigin{Scope: gateway.EventScopeMain, ScopeID: "root-session", Actor: "assistant"},
-		Scope:             gateway.EventScopeMain,
+		Origin:            &StreamOrigin{Scope: eventstream.ScopeMain, ScopeID: "root-session", Actor: "assistant"},
+		Scope:             eventstream.ScopeMain,
 	}
 	frame := stream.Frame{
 		Ref:       stream.Ref{SessionID: "root-session", TaskID: "jack", TerminalID: "subagent-jack-turn-1"},
@@ -376,7 +376,7 @@ func TestProjectStreamFrameProjectsSubagentFinalToParentTerminal(t *testing.T) {
 		RawInput:          map[string]any{"agent": "self", "prompt": "inspect"},
 		Ref:               stream.Ref{SessionID: "root-session", TaskID: "jack", TerminalID: "subagent-jack"},
 		DisplayTerminalID: "spawn-call-1",
-		Scope:             gateway.EventScopeMain,
+		Scope:             eventstream.ScopeMain,
 	}
 	events := ProjectStreamFrame(req, stream.Frame{
 		Ref:     stream.Ref{SessionID: "root-session", TaskID: "jack", TerminalID: "subagent-jack-turn-1"},
@@ -409,7 +409,7 @@ func TestProjectStreamFrameSubagentFinalWithStreamKeepsResultWithoutTerminalRepl
 		RawInput:          map[string]any{"agent": "self", "prompt": "inspect"},
 		Ref:               stream.Ref{SessionID: "root-session", TaskID: "jack", TerminalID: "subagent-jack"},
 		DisplayTerminalID: "spawn-call-1",
-		Scope:             gateway.EventScopeMain,
+		Scope:             eventstream.ScopeMain,
 	}
 	events := ProjectStreamFrame(req, stream.Frame{
 		Ref:     stream.Ref{SessionID: "root-session", TaskID: "jack", TerminalID: "subagent-jack-turn-1"},
@@ -445,7 +445,7 @@ func TestProjectStreamFrameSuppressesEmbeddedParentToolEcho(t *testing.T) {
 		ToolName:   "SPAWN",
 		RawInput:   map[string]any{"agent": "self", "prompt": "inspect"},
 		Ref:        stream.Ref{SessionID: "root-session", TaskID: "jack"},
-		Scope:      gateway.EventScopeMain,
+		Scope:      eventstream.ScopeMain,
 	}
 	events := ProjectStreamFrame(req, stream.Frame{
 		Ref:     req.Ref,
@@ -507,8 +507,8 @@ func assertStreamTerminalInfo(t *testing.T, meta map[string]any, terminalID stri
 }
 
 func runtimeTaskMeta(meta map[string]any) map[string]any {
-	caelis, _ := meta[gateway.EventMetaRoot].(map[string]any)
-	runtimeMeta, _ := caelis[gateway.EventMetaRuntime].(map[string]any)
-	taskMeta, _ := runtimeMeta[gateway.EventMetaRuntimeTask].(map[string]any)
+	caelis, _ := meta[metautil.Root].(map[string]any)
+	runtimeMeta, _ := caelis[metautil.Runtime].(map[string]any)
+	taskMeta, _ := runtimeMeta[metautil.RuntimeTask].(map[string]any)
 	return taskMeta
 }

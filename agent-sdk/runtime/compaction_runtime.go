@@ -1,0 +1,244 @@
+package runtime
+
+import (
+	"context"
+	"errors"
+	"strings"
+
+	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
+)
+
+func (r *Runtime) prepareInvocationContext(
+	ctx context.Context,
+	activeSession session.Session,
+	ref session.SessionRef,
+	req agent.RunRequest,
+	pendingInput *session.Event,
+) (invocationContext, error) {
+	if err := r.recoverRuntimeState(ctx, ref); err != nil {
+		return invocationContext{}, err
+	}
+	events, err := r.sessions.Events(ctx, session.EventsRequest{SessionRef: ref})
+	if err != nil {
+		return invocationContext{}, err
+	}
+	events = mainInvocationEvents(events)
+	state, err := r.sessions.SnapshotState(ctx, ref)
+	if err != nil {
+		return invocationContext{}, err
+	}
+	if state == nil {
+		state = map[string]any{}
+	}
+	result, err := r.compactor.Prepare(ctx, compact.Request{
+		Session:       activeSession,
+		SessionRef:    ref,
+		Events:        events,
+		PendingEvents: pendingEventsForCompaction(pendingInput),
+		Model:         req.AgentSpec.Model,
+	})
+	if err != nil {
+		return invocationContext{}, wrapCompactionFailure("prepare", err)
+	}
+	if result.Compacted && result.CompactEvent != nil {
+		persisted, appendErr := r.persistCompactionArtifacts(ctx, activeSession, ref, result)
+		if appendErr != nil {
+			return invocationContext{}, wrapCompactionFailure("persist", appendErr)
+		}
+		sourceEvents := append(session.CloneEvents(events), persisted)
+		return invocationContext{
+			PromptEvents: promptEventsWithToolVisibilityMetadata(compact.PromptEventsFromLatestCompact(sourceEvents), sourceEvents),
+			State:        state,
+			LiveCompact:  persisted,
+		}, nil
+	}
+	return invocationContext{
+		PromptEvents: promptEventsWithToolVisibilityMetadata(result.PromptEvents, events),
+		State:        state,
+	}, nil
+}
+
+type invocationContext struct {
+	PromptEvents []*session.Event
+	State        map[string]any
+	LiveCompact  *session.Event
+}
+
+type CompactRequest struct {
+	SessionRef session.SessionRef
+	Model      model.LLM
+	Trigger    string
+}
+
+type CompactResult struct {
+	Session   session.Session
+	Compacted bool
+	Event     *session.Event
+	Usage     compact.UsageSnapshot
+}
+
+func (r *Runtime) Compact(ctx context.Context, req CompactRequest) (CompactResult, error) {
+	if r == nil {
+		return CompactResult{}, errors.New("agent-sdk/runtime: runtime is unavailable")
+	}
+	ref := session.NormalizeSessionRef(req.SessionRef)
+	activeSession, err := r.sessions.Session(ctx, ref)
+	if err != nil {
+		return CompactResult{}, err
+	}
+	if err := r.recoverRuntimeState(ctx, ref); err != nil {
+		return CompactResult{}, err
+	}
+	events, err := r.sessions.Events(ctx, session.EventsRequest{SessionRef: ref})
+	if err != nil {
+		return CompactResult{}, err
+	}
+	forceCompactor, ok := r.compactor.(compact.ForceEngine)
+	if !ok {
+		return CompactResult{}, errors.New("agent-sdk/runtime: compactor does not support forced compaction")
+	}
+	result, err := forceCompactor.Force(ctx, compact.Request{
+		Session:    activeSession,
+		SessionRef: ref,
+		Events:     events,
+		Model:      req.Model,
+	}, req.Trigger)
+	if err != nil {
+		return CompactResult{}, err
+	}
+	out := CompactResult{
+		Session:   activeSession,
+		Compacted: result.Compacted,
+		Usage:     result.Usage,
+	}
+	if result.Compacted && result.CompactEvent != nil {
+		persisted, appendErr := r.persistCompactionArtifacts(ctx, activeSession, ref, result)
+		if appendErr != nil {
+			return CompactResult{}, appendErr
+		}
+		out.Event = persisted
+	}
+	return out, nil
+}
+
+func (r *Runtime) updateCompactionUsageFromBatch(_ context.Context, _ session.SessionRef, _ []*session.Event) error {
+	return nil
+}
+
+func (r *Runtime) persistCompactionArtifacts(
+	ctx context.Context,
+	activeSession session.Session,
+	ref session.SessionRef,
+	result compact.Result,
+) (*session.Event, error) {
+	if result.CompactEvent == nil {
+		return nil, errors.New("agent-sdk/runtime: compact event is required")
+	}
+	persisted, err := r.sessions.AppendEvent(ctx, session.AppendEventRequest{
+		SessionRef: ref,
+		Event:      normalizeEvent(activeSession, "", result.CompactEvent),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return persisted, nil
+}
+
+func (r *Runtime) compactAfterOverflow(
+	ctx context.Context,
+	activeSession session.Session,
+	ref session.SessionRef,
+	turnID string,
+	req agent.RunRequest,
+	cause error,
+	sink *runner,
+) (bool, error) {
+	return r.compactAndNotify(ctx, activeSession, ref, turnID, nil, sink, func(events []*session.Event) (compact.Result, error) {
+		return r.compactor.CompactOnOverflow(ctx, compact.Request{
+			Session:    activeSession,
+			SessionRef: ref,
+			Events:     events,
+			Model:      req.AgentSpec.Model,
+		}, cause)
+	})
+}
+
+func (r *Runtime) compactAfterModelRequestWatermark(
+	ctx context.Context,
+	activeSession session.Session,
+	ref session.SessionRef,
+	turnID string,
+	decision autoCompactDecision,
+	sink *runner,
+) (bool, error) {
+	forceCompactor, ok := r.compactor.(compact.ForceEngine)
+	if !ok {
+		return false, errors.New("agent-sdk/runtime: compactor does not support forced model-request compaction")
+	}
+	trigger := strings.TrimSpace(decision.Reason)
+	if trigger == "" {
+		trigger = "model_request_context_watermark"
+	}
+	var events []*session.Event
+	if decision.Events != nil {
+		events = decision.Events
+	}
+	return r.compactAndNotify(ctx, activeSession, ref, turnID, events, sink, func(events []*session.Event) (compact.Result, error) {
+		return forceCompactor.Force(ctx, compact.Request{
+			Session:    activeSession,
+			SessionRef: ref,
+			Events:     events,
+			Model:      decision.Model,
+		}, trigger)
+	})
+}
+
+func (r *Runtime) compactAndNotify(
+	ctx context.Context,
+	activeSession session.Session,
+	ref session.SessionRef,
+	turnID string,
+	events []*session.Event,
+	sink *runner,
+	compactFn func([]*session.Event) (compact.Result, error),
+) (bool, error) {
+	if compactFn == nil {
+		return false, errors.New("agent-sdk/runtime: compact function is required")
+	}
+	var err error
+	if events == nil {
+		events, err = r.sessions.Events(ctx, session.EventsRequest{SessionRef: ref})
+		if err != nil {
+			return false, err
+		}
+	}
+	result, err := compactFn(events)
+	if err != nil {
+		r.publishCompactFailureNotice(activeSession, turnID, sink, err)
+		return false, err
+	}
+	if !result.Compacted || result.CompactEvent == nil {
+		return false, nil
+	}
+	_, err = r.persistCompactionArtifacts(ctx, activeSession, ref, result)
+	if err != nil {
+		r.publishCompactFailureNotice(activeSession, turnID, sink, err)
+		return false, err
+	}
+	if sink != nil {
+		notice := buildCompactNoticeEvent(activeSession, turnID, r.now())
+		sink.publishEvent(normalizeEvent(activeSession, turnID, notice))
+	}
+	return true, nil
+}
+
+func (r *Runtime) publishCompactFailureNotice(activeSession session.Session, turnID string, sink *runner, cause error) {
+	if sink == nil || cause == nil {
+		return
+	}
+	notice := buildCompactFailureNoticeEvent(activeSession, turnID, r.now(), cause)
+	sink.publishEvent(normalizeEvent(activeSession, turnID, notice))
+}

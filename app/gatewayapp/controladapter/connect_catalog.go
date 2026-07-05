@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	modelcatalog "github.com/caelis-labs/caelis/impl/model/catalog"
-	"github.com/caelis-labs/caelis/internal/connectwizard"
-	"github.com/caelis-labs/caelis/ports/model"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
+	modelcatalog "github.com/caelis-labs/caelis/agent-sdk/model/catalog"
+	"github.com/caelis-labs/caelis/ports/controlprompt/connectwizard"
 )
 
 const (

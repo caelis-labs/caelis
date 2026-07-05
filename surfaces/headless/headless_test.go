@@ -3,10 +3,9 @@ package headless
 import (
 	"context"
 	"testing"
-	"time"
 
-	"github.com/caelis-labs/caelis/ports/gateway"
-	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
@@ -30,20 +29,10 @@ func TestRunOnceDrainsAssistantOutput(t *testing.T) {
 		},
 	})
 	gw := fakeStarter{
-		result: gateway.BeginTurnResult{
-			Session: session.Session{SessionRef: session.SessionRef{
-				AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
-			}},
-			Handle: handle,
-		},
+		turn: handle,
 	}
 
-	result, err := RunOnce(context.Background(), gw, gateway.BeginTurnRequest{
-		SessionRef: session.SessionRef{
-			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
-		},
-		Input: "hello",
-	}, Options{})
+	result, err := RunOnce(context.Background(), gw, control.Submission{Text: "hello"}, Options{})
 	if err != nil {
 		t.Fatalf("RunOnce() error = %v", err)
 	}
@@ -92,20 +81,10 @@ func TestRunOnceIgnoresScopedTraceOutput(t *testing.T) {
 		},
 	})
 	gw := fakeStarter{
-		result: gateway.BeginTurnResult{
-			Session: session.Session{SessionRef: session.SessionRef{
-				AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
-			}},
-			Handle: handle,
-		},
+		turn: handle,
 	}
 
-	result, err := RunOnce(context.Background(), gw, gateway.BeginTurnRequest{
-		SessionRef: session.SessionRef{
-			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
-		},
-		Input: "hello",
-	}, Options{})
+	result, err := RunOnce(context.Background(), gw, control.Submission{Text: "hello"}, Options{})
 	if err != nil {
 		t.Fatalf("RunOnce() error = %v", err)
 	}
@@ -136,26 +115,16 @@ func TestRunOnceAutoDeniesApprovalByDefault(t *testing.T) {
 		},
 	})
 	gw := fakeStarter{
-		result: gateway.BeginTurnResult{
-			Session: session.Session{SessionRef: session.SessionRef{
-				AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
-			}},
-			Handle: handle,
-		},
+		turn: handle,
 	}
 
-	if _, err := RunOnce(context.Background(), gw, gateway.BeginTurnRequest{
-		SessionRef: session.SessionRef{
-			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
-		},
-		Input: "hello",
-	}, Options{}); err != nil {
+	if _, err := RunOnce(context.Background(), gw, control.Submission{Text: "hello"}, Options{}); err != nil {
 		t.Fatalf("RunOnce() error = %v", err)
 	}
 	if len(handle.submissions) != 1 {
 		t.Fatalf("submissions = %d, want 1", len(handle.submissions))
 	}
-	if got := handle.submissions[0]; got.Kind != gateway.SubmissionKindApproval || got.Approval == nil || got.Approval.Approved {
+	if got := handle.submissions[0]; got.Approved {
 		t.Fatalf("approval submission = %+v, want auto-deny", got)
 	}
 }
@@ -190,21 +159,11 @@ func TestRunOnceApprovalCallbackReceivesPromptFields(t *testing.T) {
 		},
 	})
 	gw := fakeStarter{
-		result: gateway.BeginTurnResult{
-			Session: session.Session{SessionRef: session.SessionRef{
-				AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
-			}},
-			Handle: handle,
-		},
+		turn: handle,
 	}
 	called := false
-	_, err := RunOnce(context.Background(), gw, gateway.BeginTurnRequest{
-		SessionRef: session.SessionRef{
-			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
-		},
-		Input: "hello",
-	}, Options{
-		ResolveApproval: func(_ context.Context, req *gateway.ApprovalPayload) (gateway.ApprovalDecision, error) {
+	_, err := RunOnce(context.Background(), gw, control.Submission{Text: "hello"}, Options{
+		ResolveApproval: func(_ context.Context, req *approval.Payload) (approval.Decision, error) {
 			called = true
 			if req == nil {
 				t.Fatal("approval payload = nil")
@@ -212,7 +171,7 @@ func TestRunOnceApprovalCallbackReceivesPromptFields(t *testing.T) {
 			if req.Reason != "needs execution" || req.Justification != "requested by user" || req.SandboxPermissions != "host" {
 				t.Fatalf("approval fields = (%q, %q, %q), want restored prompt fields", req.Reason, req.Justification, req.SandboxPermissions)
 			}
-			return gateway.ApprovalDecision{Approved: true, Outcome: string(gateway.ApprovalStatusApproved)}, nil
+			return approval.Decision{Approved: true, Outcome: string(approval.StatusApproved)}, nil
 		},
 	})
 	if err != nil {
@@ -221,7 +180,7 @@ func TestRunOnceApprovalCallbackReceivesPromptFields(t *testing.T) {
 	if !called {
 		t.Fatal("ResolveApproval was not called")
 	}
-	if len(handle.submissions) != 1 || handle.submissions[0].Approval == nil || !handle.submissions[0].Approval.Approved {
+	if len(handle.submissions) != 1 || !handle.submissions[0].Approved {
 		t.Fatalf("submissions = %#v, want approved decision", handle.submissions)
 	}
 }
@@ -235,7 +194,7 @@ func TestRunOnceIgnoresAutomaticApprovalReviewEvents(t *testing.T) {
 			Kind:   eventstream.KindApprovalReview,
 			ApprovalReview: &eventstream.ApprovalReview{
 				ToolName: "RUN_COMMAND",
-				Status:   string(gateway.ApprovalReviewStatusInProgress),
+				Status:   string(approval.ReviewStatusInProgress),
 			},
 		},
 		{
@@ -248,20 +207,10 @@ func TestRunOnceIgnoresAutomaticApprovalReviewEvents(t *testing.T) {
 		},
 	})
 	gw := fakeStarter{
-		result: gateway.BeginTurnResult{
-			Session: session.Session{SessionRef: session.SessionRef{
-				AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
-			}},
-			Handle: handle,
-		},
+		turn: handle,
 	}
 
-	result, err := RunOnce(context.Background(), gw, gateway.BeginTurnRequest{
-		SessionRef: session.SessionRef{
-			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
-		},
-		Input: "hello",
-	}, Options{})
+	result, err := RunOnce(context.Background(), gw, control.Submission{Text: "hello"}, Options{})
 	if err != nil {
 		t.Fatalf("RunOnce() error = %v", err)
 	}
@@ -274,17 +223,17 @@ func TestRunOnceIgnoresAutomaticApprovalReviewEvents(t *testing.T) {
 }
 
 type fakeStarter struct {
-	result gateway.BeginTurnResult
-	err    error
+	turn control.Turn
+	err  error
 }
 
-func (f fakeStarter) BeginTurn(context.Context, gateway.BeginTurnRequest) (gateway.BeginTurnResult, error) {
-	return f.result, f.err
+func (f fakeStarter) Submit(context.Context, control.Submission) (control.Turn, error) {
+	return f.turn, f.err
 }
 
 type fakeTurnHandle struct {
 	acpEvents   <-chan eventstream.Envelope
-	submissions []gateway.SubmitRequest
+	submissions []control.ApprovalDecision
 }
 
 func newFakeACPHandle(events []eventstream.Envelope) *fakeTurnHandle {
@@ -299,14 +248,11 @@ func newFakeACPHandle(events []eventstream.Envelope) *fakeTurnHandle {
 func (h *fakeTurnHandle) HandleID() string                       { return "h1" }
 func (h *fakeTurnHandle) RunID() string                          { return "run-1" }
 func (h *fakeTurnHandle) TurnID() string                         { return "turn-1" }
-func (h *fakeTurnHandle) SessionRef() session.SessionRef         { return session.SessionRef{} }
-func (h *fakeTurnHandle) CreatedAt() time.Time                   { return time.Time{} }
 func (h *fakeTurnHandle) ACPEvents() <-chan eventstream.Envelope { return h.acpEvents }
-func (h *fakeTurnHandle) Submit(_ context.Context, req gateway.SubmitRequest) error {
-	h.submissions = append(h.submissions, req)
+func (h *fakeTurnHandle) Events() <-chan eventstream.Envelope    { return h.acpEvents }
+func (h *fakeTurnHandle) SubmitApproval(_ context.Context, decision control.ApprovalDecision) error {
+	h.submissions = append(h.submissions, decision)
 	return nil
 }
-func (h *fakeTurnHandle) Cancel() gateway.CancelResult {
-	return gateway.CancelResult{Status: gateway.CancelStatusCancelled}
-}
+func (h *fakeTurnHandle) Cancel()      {}
 func (h *fakeTurnHandle) Close() error { return nil }

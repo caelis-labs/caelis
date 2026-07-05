@@ -7,8 +7,8 @@
 // represented only as standard ACP session/update usage_update.
 //
 // This package is a client protocol boundary, not the durable session model.
-// Durable replay input is ports/session.Event: model-visible messages live in
-// Event.Message and durable tool execution state lives in Event.Tool. ACP
+// Durable replay input is agent-sdk/session.Event: model-visible messages live
+// in Event.Message and durable tool execution state lives in Event.Tool. ACP
 // updates in an Envelope are projections of those canonical facts, or live
 // transient trace events when Scope/visibility identify subagent or UI-only
 // streams.

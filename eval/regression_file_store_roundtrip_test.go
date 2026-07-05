@@ -6,12 +6,12 @@ import (
 	"strings"
 	"testing"
 
-	filestore "github.com/caelis-labs/caelis/impl/session/file"
-	"github.com/caelis-labs/caelis/impl/tool/builtin/toolsearch"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
+	filestore "github.com/caelis-labs/caelis/agent-sdk/session/file"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 	"github.com/caelis-labs/caelis/internal/evalharness"
-	"github.com/caelis-labs/caelis/ports/model"
-	"github.com/caelis-labs/caelis/ports/session"
-	"github.com/caelis-labs/caelis/ports/tool"
 )
 
 func newFileStoreForTest(t *testing.T) *filestore.Store {

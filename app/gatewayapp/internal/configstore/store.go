@@ -10,9 +10,9 @@ import (
 	"strings"
 	"sync"
 
+	policyapi "github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/modelregistry"
 	"github.com/caelis-labs/caelis/ports/agentprofile"
-	policyapi "github.com/caelis-labs/caelis/ports/policy"
 )
 
 type AppConfig struct {

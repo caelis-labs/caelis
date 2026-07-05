@@ -4,13 +4,13 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/caelis-labs/caelis/ports/displaypolicy"
+	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/charmbracelet/x/ansi"
 )
 
 func summarizeSubagentTerminalPanelText(text string, final bool) string {
 	if final {
-		if cleaned := strings.TrimSpace(displaypolicy.CleanSubagentFinalOutput(text)); cleaned != "" {
+		if cleaned := strings.TrimSpace(display.CleanSubagentFinalOutput(text)); cleaned != "" {
 			text = cleaned
 		}
 	}
@@ -146,7 +146,7 @@ func cleanSubagentTerminalPreviewLine(raw string, final bool) (string, bool) {
 		return "", true
 	}
 	if final {
-		line = strings.TrimSpace(displaypolicy.CleanSubagentFinalOutput(line))
+		line = strings.TrimSpace(display.CleanSubagentFinalOutput(line))
 	}
 	line = strings.TrimSpace(line)
 	return line, line != ""

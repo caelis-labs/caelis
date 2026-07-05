@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/caelis-labs/caelis/ports/compact"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	prompt "github.com/caelis-labs/caelis/ports/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"

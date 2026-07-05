@@ -31,17 +31,24 @@ const (
 )
 
 type UsageSnapshot struct {
-	PromptTokens      int `json:"prompt_tokens,omitempty"`
-	CachedInputTokens int `json:"cached_input_tokens,omitempty"`
-	CompletionTokens  int `json:"completion_tokens,omitempty"`
-	ReasoningTokens   int `json:"reasoning_tokens,omitempty"`
-	TotalTokens       int `json:"total_tokens,omitempty"`
+	PromptTokens        int `json:"prompt_tokens,omitempty"`
+	CachedInputTokens   int `json:"cached_input_tokens,omitempty"`
+	CompletionTokens    int `json:"completion_tokens,omitempty"`
+	ReasoningTokens     int `json:"reasoning_tokens,omitempty"`
+	TotalTokens         int `json:"total_tokens,omitempty"`
+	ContextWindowTokens int `json:"context_window_tokens,omitempty"`
 }
 
 func UsageUpdateFromSnapshot(usage UsageSnapshot, meta map[string]any) schema.UsageUpdate {
+	used := usage.TotalTokens
+	size := usage.ContextWindowTokens
+	if size <= 0 {
+		size = used
+	}
 	return schema.UsageUpdate{
 		SessionUpdate: schema.UpdateUsage,
-		Used:          usage.TotalTokens,
+		Size:          size,
+		Used:          used,
 		Meta:          usageUpdateMeta(meta, usage),
 	}
 }
@@ -307,6 +314,7 @@ func usageUpdateMeta(meta map[string]any, usage UsageSnapshot) map[string]any {
 	setPositiveInt(usageMeta, "completion_tokens", usage.CompletionTokens)
 	setPositiveInt(usageMeta, "reasoning_tokens", usage.ReasoningTokens)
 	setPositiveInt(usageMeta, "total_tokens", usage.TotalTokens)
+	setPositiveInt(usageMeta, "context_window_tokens", usage.ContextWindowTokens)
 	if len(usageMeta) > 0 {
 		caelis["usage"] = usageMeta
 	} else {
@@ -322,11 +330,12 @@ func usageSnapshotFromMeta(meta map[string]any) *UsageSnapshot {
 		return nil
 	}
 	usage := UsageSnapshot{
-		PromptTokens:      intFromAny(usageMeta["prompt_tokens"]),
-		CachedInputTokens: intFromAny(usageMeta["cached_input_tokens"]),
-		CompletionTokens:  intFromAny(usageMeta["completion_tokens"]),
-		ReasoningTokens:   intFromAny(usageMeta["reasoning_tokens"]),
-		TotalTokens:       intFromAny(usageMeta["total_tokens"]),
+		PromptTokens:        intFromAny(usageMeta["prompt_tokens"]),
+		CachedInputTokens:   intFromAny(usageMeta["cached_input_tokens"]),
+		CompletionTokens:    intFromAny(usageMeta["completion_tokens"]),
+		ReasoningTokens:     intFromAny(usageMeta["reasoning_tokens"]),
+		TotalTokens:         intFromAny(usageMeta["total_tokens"]),
+		ContextWindowTokens: intFromAny(usageMeta["context_window_tokens"]),
 	}
 	if usageSnapshotEmpty(usage) {
 		return nil
@@ -339,7 +348,8 @@ func usageSnapshotEmpty(usage UsageSnapshot) bool {
 		usage.CachedInputTokens == 0 &&
 		usage.CompletionTokens == 0 &&
 		usage.ReasoningTokens == 0 &&
-		usage.TotalTokens == 0
+		usage.TotalTokens == 0 &&
+		usage.ContextWindowTokens == 0
 }
 
 func setPositiveInt(values map[string]any, key string, value int) {

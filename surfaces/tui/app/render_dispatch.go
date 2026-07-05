@@ -6,7 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/caelis-labs/caelis/ports/model"
+	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
@@ -595,7 +595,7 @@ func terminalErrorLine(err error) string {
 	if err == nil {
 		return ""
 	}
-	text := singleLineErrorText(model.UserVisibleError(err))
+	text := singleLineErrorText(display.UserVisibleError(err))
 	if text == "" {
 		return ""
 	}

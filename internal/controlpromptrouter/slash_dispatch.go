@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/caelis-labs/caelis/ports/compact"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	controlcommands "github.com/caelis-labs/caelis/ports/controlcommand"
 	prompt "github.com/caelis-labs/caelis/ports/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/control"

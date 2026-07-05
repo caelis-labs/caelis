@@ -12,9 +12,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
+	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter/local"
 	"github.com/caelis-labs/caelis/ports/gateway"
-	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/surfaces/headless"
 )
 
@@ -109,11 +111,11 @@ func TestLocalStackClaudeACPMainResumeOrNewE2E(t *testing.T) {
 	const marker = "caelis claude acp resume e2e"
 	const wantFirst = marker + " first ok"
 	prompt := "Reply with exactly this text and no markdown: " + wantFirst
-	result, err := headless.RunOnce(ctx, stack.KernelTurns(), gateway.BeginTurnRequest{
-		SessionRef: activeSession.SessionRef,
-		Input:      prompt,
-		Surface:    "headless-claude-acp-resume-e2e",
-	}, headless.Options{})
+	driver, err := local.NewLocalAdapterForSession(ctx, stack, updated, "headless-claude-acp-resume-e2e", "")
+	if err != nil {
+		t.Fatalf("NewLocalAdapterForSession(first) error = %v", err)
+	}
+	result, err := headless.RunOnce(ctx, driver, control.Submission{Text: prompt}, headless.Options{})
 	if err != nil {
 		t.Fatalf("RunOnce(claude) error = %v", err)
 	}
@@ -140,11 +142,11 @@ func TestLocalStackClaudeACPMainResumeOrNewE2E(t *testing.T) {
 	}
 
 	const wantSecond = marker + " second ok"
-	result, err = headless.RunOnce(ctx, stack.KernelTurns(), gateway.BeginTurnRequest{
-		SessionRef: activeSession.SessionRef,
-		Input:      "Reply with exactly this text and no markdown: " + wantSecond,
-		Surface:    "headless-claude-acp-resume-e2e",
-	}, headless.Options{})
+	driver, err = local.NewLocalAdapterForSession(ctx, stack, resumed, "headless-claude-acp-resume-e2e", "")
+	if err != nil {
+		t.Fatalf("NewLocalAdapterForSession(second) error = %v", err)
+	}
+	result, err = headless.RunOnce(ctx, driver, control.Submission{Text: "Reply with exactly this text and no markdown: " + wantSecond}, headless.Options{})
 	if err != nil {
 		t.Fatalf("RunOnce(second Claude turn) error = %v", err)
 	}

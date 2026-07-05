@@ -5,16 +5,16 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/caelis-labs/caelis/impl/sandbox/host"
-	"github.com/caelis-labs/caelis/impl/tool/builtin"
-	"github.com/caelis-labs/caelis/impl/tool/builtin/filesystem"
-	"github.com/caelis-labs/caelis/impl/tool/builtin/shell"
-	"github.com/caelis-labs/caelis/impl/tool/builtin/spawn"
-	"github.com/caelis-labs/caelis/impl/tool/builtin/task"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox/host"
+	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/filesystem"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 	"github.com/caelis-labs/caelis/internal/evalharness"
-	"github.com/caelis-labs/caelis/ports/delegation"
-	"github.com/caelis-labs/caelis/ports/model"
-	"github.com/caelis-labs/caelis/ports/tool"
 )
 
 func TestRegressionAgentGuidanceReachesModelBoundary(t *testing.T) {

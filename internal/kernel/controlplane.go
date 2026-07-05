@@ -1,8 +1,8 @@
 package kernel
 
 import (
-	"github.com/caelis-labs/caelis/ports/agent"
-	"github.com/caelis-labs/caelis/ports/session"
+	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
 func buildControlPlaneState(session session.Session, runState agent.RunState, events []*session.Event) ControlPlaneState {

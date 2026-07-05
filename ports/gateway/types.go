@@ -4,10 +4,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/caelis-labs/caelis/ports/agent"
-	"github.com/caelis-labs/caelis/ports/approval"
-	"github.com/caelis-labs/caelis/ports/model"
-	"github.com/caelis-labs/caelis/ports/session"
+	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
@@ -292,7 +291,7 @@ const (
 	EventKindLifecycle         EventKind = "lifecycle"
 )
 
-type UsageSnapshot = approval.UsageSnapshot
+type UsageSnapshot = session.UsageSnapshot
 
 type NarrativeRole string
 

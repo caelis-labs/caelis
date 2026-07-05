@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/caelis-labs/caelis/ports/displaypolicy"
-	"github.com/caelis-labs/caelis/ports/session"
-	taskapi "github.com/caelis-labs/caelis/ports/task"
+	"github.com/caelis-labs/caelis/agent-sdk/display"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
+	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -477,9 +477,9 @@ func replayTaskFinalText(entry *taskapi.Entry) string {
 	}
 	switch entry.Kind {
 	case taskapi.KindCommand:
-		return displaypolicy.CommandTaskFinalText(string(entry.State), entry.Result)
+		return display.CommandTaskFinalText(string(entry.State), entry.Result)
 	case taskapi.KindSubagent:
-		return displaypolicy.SubagentTaskFinalText(string(entry.State), entry.Result)
+		return display.SubagentTaskFinalText(string(entry.State), entry.Result)
 	default:
 		return ""
 	}

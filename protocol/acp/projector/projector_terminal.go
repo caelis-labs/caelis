@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/caelis-labs/caelis/ports/displaypolicy"
-	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/agent-sdk/display"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
@@ -51,7 +51,7 @@ func terminalTextContent(content any) string {
 }
 
 func withDisplayTerminal(call ToolCall, name string, args map[string]any) ToolCall {
-	terminalID, ok := displaypolicy.DisplayTerminalID(call.ToolCallID, name)
+	terminalID, ok := display.DisplayTerminalID(call.ToolCallID, name)
 	if !ok {
 		return call
 	}
@@ -61,7 +61,7 @@ func withDisplayTerminal(call ToolCall, name string, args map[string]any) ToolCa
 }
 
 func withDisplayTerminalUpdate(update ToolCallUpdate, toolCallID string, name string) ToolCallUpdate {
-	terminalID, ok := displaypolicy.DisplayTerminalID(toolCallID, name)
+	terminalID, ok := display.DisplayTerminalID(toolCallID, name)
 	if !ok || strings.TrimSpace(terminalID) == "" {
 		return update
 	}
@@ -167,13 +167,13 @@ func protocolToolNameFromRawInput(rawInput map[string]any) string {
 	if len(rawInput) == 0 {
 		return ""
 	}
-	if command := displaypolicy.MapString(rawInput, "command"); command != "" {
+	if command := display.MapString(rawInput, "command"); command != "" {
 		return "RUN_COMMAND"
 	}
-	if agent := displaypolicy.MapString(rawInput, "agent"); agent != "" {
+	if agent := display.MapString(rawInput, "agent"); agent != "" {
 		return "SPAWN"
 	}
-	if prompt := displaypolicy.MapString(rawInput, "prompt"); prompt != "" {
+	if prompt := display.MapString(rawInput, "prompt"); prompt != "" {
 		return "SPAWN"
 	}
 	return ""

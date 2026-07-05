@@ -6,12 +6,12 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/caelis-labs/caelis/ports/agent"
-	"github.com/caelis-labs/caelis/ports/assembly"
-	"github.com/caelis-labs/caelis/ports/model"
-	policyapi "github.com/caelis-labs/caelis/ports/policy"
-	"github.com/caelis-labs/caelis/ports/session"
-	"github.com/caelis-labs/caelis/ports/tool"
+	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
+	policyapi "github.com/caelis-labs/caelis/agent-sdk/policy"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/assembly"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
 const (

@@ -4,12 +4,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/caelis-labs/caelis/ports/displaypolicy"
-	"github.com/caelis-labs/caelis/ports/gateway"
-	"github.com/caelis-labs/caelis/ports/session"
-	"github.com/caelis-labs/caelis/ports/stream"
+	"github.com/caelis-labs/caelis/agent-sdk/display"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
+	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 // StreamRequest is one non-durable output subscription derived from a standard
@@ -26,10 +26,21 @@ type StreamRequest struct {
 	Ref               stream.Ref
 	DisplayTerminalID string
 	Cursor            stream.Cursor
-	Origin            *gateway.EventOrigin
+	Origin            *StreamOrigin
 	Actor             string
-	Scope             gateway.EventScope
+	Scope             eventstream.Scope
 	ParticipantID     string
+}
+
+// StreamOrigin carries the protocol-level source scope for live stream frames.
+type StreamOrigin struct {
+	Scope                eventstream.Scope
+	ScopeID              string
+	Source               string
+	Actor                string
+	ParticipantID        string
+	ParticipantKind      string
+	ParticipantSessionID string
 }
 
 // Key returns one stable subscription identity for deduplicating live output
@@ -80,7 +91,7 @@ func subagentStreamFrameEvents(req StreamRequest, frame stream.Frame) []eventstr
 }
 
 func streamFrameEvent(req StreamRequest, frame stream.Frame) eventstream.Envelope {
-	return streamToolUpdateEnvelope(req, frame, gateway.ToolStatusRunning, true, false, frame.Text, streamFrameMeta("append"))
+	return streamToolUpdateEnvelope(req, frame, toolStatusRunning, true, false, frame.Text, streamFrameMeta("append"))
 }
 
 func streamFinalFrameEvent(req StreamRequest, frame stream.Frame) eventstream.Envelope {
@@ -94,7 +105,7 @@ func streamFinalFrameEvent(req StreamRequest, frame stream.Frame) eventstream.En
 
 func subagentFinalFrameEvent(req StreamRequest, frame stream.Frame) eventstream.Envelope {
 	status, isErr := subagentFinalToolStatus(frame)
-	finalMessage := displaypolicy.CleanSubagentFinalOutput(frame.Text)
+	finalMessage := display.CleanSubagentFinalOutput(frame.Text)
 	terminalText := ""
 	if frame.Cursor.Output == 0 {
 		terminalText = finalMessage
@@ -110,16 +121,16 @@ func subagentFinalFrameEvent(req StreamRequest, frame stream.Frame) eventstream.
 		"task_id":     taskID,
 		"terminal_id": firstNonEmpty(req.Ref.TerminalID, frame.Ref.TerminalID),
 		"running":     false,
-		"state":       string(status),
+		"state":       status,
 		"result":      finalMessage,
 	}, "", taskID)
-	update.Meta = metautil.WithCompactRuntimeSection(update.Meta, gateway.EventMetaRuntimeTask, map[string]any{
-		gateway.EventMetaRuntimeTaskID:         taskID,
-		gateway.EventMetaRuntimeTaskTerminalID: firstNonEmpty(req.Ref.TerminalID, frame.Ref.TerminalID),
-		"output_cursor":                        frame.Cursor.Output,
-		"running":                              false,
-		"state":                                string(status),
-		"result":                               finalMessage,
+	update.Meta = metautil.WithCompactRuntimeSection(update.Meta, metautil.RuntimeTask, map[string]any{
+		metautil.RuntimeTaskID:         taskID,
+		metautil.RuntimeTaskTerminalID: firstNonEmpty(req.Ref.TerminalID, frame.Ref.TerminalID),
+		"output_cursor":                frame.Cursor.Output,
+		"running":                      false,
+		"state":                        status,
+		"result":                       finalMessage,
 	})
 	env.Update = update
 	return env
@@ -129,18 +140,18 @@ func streamDisplayTerminalID(req StreamRequest, frame stream.Frame) string {
 	return firstNonEmpty(req.DisplayTerminalID, frame.Ref.TerminalID, req.Ref.TerminalID, req.CallID)
 }
 
-func streamToolUpdateEnvelope(req StreamRequest, frame stream.Frame, status gateway.ToolStatus, includeStatus bool, isErr bool, terminalText string, meta map[string]any) eventstream.Envelope {
+func streamToolUpdateEnvelope(req StreamRequest, frame stream.Frame, status string, includeStatus bool, isErr bool, terminalText string, meta map[string]any) eventstream.Envelope {
 	terminalID := firstNonEmpty(frame.Ref.TerminalID, req.Ref.TerminalID)
 	metaOutput := map[string]any{
 		"task_id":       firstNonEmpty(frame.Ref.TaskID, req.Ref.TaskID),
 		"terminal_id":   terminalID,
-		"running":       status == gateway.ToolStatusRunning,
+		"running":       status == toolStatusRunning,
 		"state":         streamFrameState(frame),
 		"output_cursor": frame.Cursor.Output,
 	}
-	if status != gateway.ToolStatusRunning {
+	if status != toolStatusRunning {
 		metaOutput["running"] = false
-		metaOutput["state"] = acpToolStatus(string(status))
+		metaOutput["state"] = acpToolStatus(status)
 	}
 	if state := strings.TrimSpace(frame.State); state != "" {
 		metaOutput["state"] = state
@@ -158,11 +169,11 @@ func streamToolUpdateEnvelope(req StreamRequest, frame stream.Frame, status gate
 		update.Meta = metautil.WithTerminalOutput(update.Meta, streamDisplayTerminalID(req, frame), terminalText)
 	}
 	if includeStatus {
-		statusText := acpToolStatus(string(status))
+		statusText := acpToolStatus(status)
 		update.Status = stringPtr(statusText)
 	}
 	update = withDisplayTerminalUpdate(update, req.CallID, req.ToolName)
-	scope := eventstream.Scope(req.Scope)
+	scope := req.Scope
 	if scope == "" {
 		scope = eventstream.ScopeMain
 	}
@@ -193,27 +204,27 @@ func streamFrameMetaForEnvelope(isErr bool) map[string]any {
 	if !isErr {
 		return nil
 	}
-	return metautil.WithCompactRuntimeSection(nil, gateway.EventMetaRuntimeTool, map[string]any{"error": true})
+	return metautil.WithCompactRuntimeSection(nil, metautil.RuntimeTool, map[string]any{"error": true})
 }
 
-func subagentFinalToolStatus(frame stream.Frame) (gateway.ToolStatus, bool) {
+func subagentFinalToolStatus(frame stream.Frame) (string, bool) {
 	state := strings.ToLower(strings.TrimSpace(frame.State))
 	switch state {
 	case "failed":
-		return gateway.ToolStatusFailed, true
+		return schema.ToolStatusFailed, true
 	case "interrupted":
-		return gateway.ToolStatusInterrupted, true
+		return toolStatusInterrupted, true
 	case "cancelled", "canceled":
-		return gateway.ToolStatusCancelled, true
+		return toolStatusCancelled, true
 	}
-	return gateway.ToolStatusCompleted, false
+	return schema.ToolStatusCompleted, false
 }
 
-func streamFinalTerminalText(text string, cursor stream.Cursor, status gateway.ToolStatus) string {
+func streamFinalTerminalText(text string, cursor stream.Cursor, status string) string {
 	if terminalStreamTextHasContent(text) {
 		return text
 	}
-	if cursor.Output == 0 && (status == gateway.ToolStatusCompleted || status == gateway.ToolStatusFailed) {
+	if cursor.Output == 0 && (status == schema.ToolStatusCompleted || status == schema.ToolStatusFailed) {
 		return "(no output)"
 	}
 	return ""
@@ -232,10 +243,10 @@ func terminalStreamTextHasContent(text string) bool {
 func streamFrameToolMeta(meta map[string]any, input map[string]any, output map[string]any, action string, taskID string) map[string]any {
 	values := map[string]any{}
 	if action = firstNonEmpty(action, stringValue(output["action"]), stringValue(input["action"])); action != "" {
-		values[gateway.EventMetaRuntimeToolAction] = action
+		values[metautil.RuntimeToolAction] = action
 	}
 	if taskID = firstNonEmpty(taskID, stringValue(output["handle"]), stringValue(output["task_id"]), stringValue(input["task_id"])); taskID != "" {
-		values[gateway.EventMetaRuntimeTargetID] = taskID
+		values[metautil.RuntimeTargetID] = taskID
 	}
 	for _, key := range []string{"agent", "handle", "mention", "prompt", "target_kind", "input"} {
 		if value := firstNonEmpty(stringValue(output[key]), stringValue(input[key])); value != "" {
@@ -245,7 +256,7 @@ func streamFrameToolMeta(meta map[string]any, input map[string]any, output map[s
 	if len(values) == 0 {
 		return meta
 	}
-	return metautil.WithCompactRuntimeSection(meta, gateway.EventMetaRuntimeTool, values)
+	return metautil.WithCompactRuntimeSection(meta, metautil.RuntimeTool, values)
 }
 
 func shouldProjectFrameTextToParentTool(frame stream.Frame) bool {
@@ -313,20 +324,20 @@ func streamFrameSessionEventIsParentToolEcho(req StreamRequest, event *session.E
 }
 
 func markStreamFrameTransient(meta map[string]any) map[string]any {
-	out := metautil.WithCompactRuntimeSection(meta, gateway.EventMetaRuntimeStream, map[string]any{
-		gateway.EventMetaRuntimeStreamMode: "append",
+	out := metautil.WithCompactRuntimeSection(meta, metautil.RuntimeStream, map[string]any{
+		metautil.RuntimeStreamMode: "append",
 	})
-	caelis, _ := out[gateway.EventMetaRoot].(map[string]any)
-	caelis[gateway.EventMetaTransient] = true
+	caelis, _ := out[metautil.Root].(map[string]any)
+	caelis[metautil.Transient] = true
 	return out
 }
 
 func streamFrameMeta(mode string) map[string]any {
-	out := metautil.WithCompactRuntimeSection(nil, gateway.EventMetaRuntimeStream, map[string]any{
-		gateway.EventMetaRuntimeStreamMode: strings.TrimSpace(mode),
+	out := metautil.WithCompactRuntimeSection(nil, metautil.RuntimeStream, map[string]any{
+		metautil.RuntimeStreamMode: strings.TrimSpace(mode),
 	})
-	caelis, _ := out[gateway.EventMetaRoot].(map[string]any)
-	caelis[gateway.EventMetaTransient] = true
+	caelis, _ := out[metautil.Root].(map[string]any)
+	caelis[metautil.Transient] = true
 	return out
 }
 
@@ -337,25 +348,31 @@ func markStreamFrameAnchor(meta map[string]any, callID string, toolName string) 
 		return meta
 	}
 	out := markStreamFrameTransient(meta)
-	caelis, _ := out[gateway.EventMetaRoot].(map[string]any)
-	runtimeMeta, _ := caelis[gateway.EventMetaRuntime].(map[string]any)
-	streamMeta, _ := runtimeMeta[gateway.EventMetaRuntimeStream].(map[string]any)
+	caelis, _ := out[metautil.Root].(map[string]any)
+	runtimeMeta, _ := caelis[metautil.Runtime].(map[string]any)
+	streamMeta, _ := runtimeMeta[metautil.RuntimeStream].(map[string]any)
 	if callID != "" {
-		streamMeta[gateway.EventMetaRuntimeStreamParentCallID] = callID
+		streamMeta[metautil.RuntimeStreamParentCallID] = callID
 		// Embedded stream events are only projected here after their visible
 		// output has been mirrored into the parent tool update. Consumers should
 		// keep them available for scoped panels but suppress them from the main
 		// transcript.
-		streamMeta[gateway.EventMetaRuntimeStreamMirroredToParentTool] = true
+		streamMeta[metautil.RuntimeStreamMirroredToParentTool] = true
 	}
 	if toolName != "" {
-		streamMeta[gateway.EventMetaRuntimeStreamParentTool] = toolName
+		streamMeta[metautil.RuntimeStreamParentTool] = toolName
 	}
-	runtimeMeta[gateway.EventMetaRuntimeStream] = streamMeta
-	caelis[gateway.EventMetaRuntime] = runtimeMeta
-	out[gateway.EventMetaRoot] = caelis
+	runtimeMeta[metautil.RuntimeStream] = streamMeta
+	caelis[metautil.Runtime] = runtimeMeta
+	out[metautil.Root] = caelis
 	return out
 }
+
+const (
+	toolStatusRunning     = "running"
+	toolStatusInterrupted = "interrupted"
+	toolStatusCancelled   = "cancelled"
+)
 
 func streamFrameState(frame stream.Frame) string {
 	if frame.Running {

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/caelis-labs/caelis/ports/sandbox"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 )
 
 func TestForGOOSWindowsDefaultsToSandbox(t *testing.T) {

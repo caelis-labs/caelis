@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/caelis-labs/caelis/ports/displaypolicy"
+	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/surfaces/transcript"
 )
 
@@ -47,11 +47,11 @@ func toolDisplayArgs(name string, raw map[string]any, fallback ...string) string
 			return compactPathDisplay(path)
 		}
 	case "WEB_SEARCH":
-		if display := displaypolicy.WebSearchDisplayArg(raw); display != "" {
+		if display := display.WebSearchDisplayArg(raw); display != "" {
 			return display
 		}
 	case "WEB_FETCH":
-		if display := displaypolicy.WebFetchDisplayArg(raw); display != "" {
+		if display := display.WebFetchDisplayArg(raw); display != "" {
 			return display
 		}
 	case "SKILL":
@@ -80,7 +80,7 @@ func toolDisplayArgs(name string, raw map[string]any, fallback ...string) string
 			}
 		}
 		if command := terminalCommandDisplay(raw); command != "" {
-			return displaypolicy.NormalizeDisplayArg(command)
+			return display.NormalizeDisplayArg(command)
 		}
 	}
 	if summary := genericToolArgs(raw); summary != "" {
@@ -263,7 +263,7 @@ func toolTitleDisplayArgs(name string, kind string, title string) string {
 	}
 	switch name {
 	case "SKILL":
-		return displaypolicy.SkillContentNameFromTitle(title)
+		return display.SkillContentNameFromTitle(title)
 	case "RUN_COMMAND":
 		return executeTitleDisplayArgs(title)
 	case "GLOB":
@@ -795,7 +795,7 @@ func looksLikeTaskDuration(value string) bool {
 }
 
 func spawnDisplayArgs(raw map[string]any) string {
-	full := displaypolicy.SpawnFullDisplayArgs(raw)
+	full := display.SpawnFullDisplayArgs(raw)
 	if full == "" {
 		return ""
 	}
@@ -803,11 +803,11 @@ func spawnDisplayArgs(raw map[string]any) string {
 }
 
 func spawnFullDisplayArgs(raw map[string]any) string {
-	return displaypolicy.SpawnFullDisplayArgs(raw)
+	return display.SpawnFullDisplayArgs(raw)
 }
 
 func spawnDisplayInputForResult(input map[string]any, output map[string]any) map[string]any {
-	return displaypolicy.SpawnDisplayInputForResult(input, output)
+	return display.SpawnDisplayInputForResult(input, output)
 }
 
 func taskDisplayInputForResult(input map[string]any, output map[string]any) map[string]any {
@@ -827,7 +827,7 @@ func taskDisplayInputForResult(input map[string]any, output map[string]any) map[
 }
 
 func normalizeTaskWriteDisplayInput(input string) string {
-	input = displaypolicy.NormalizeDisplayArg(input)
+	input = display.NormalizeDisplayArg(input)
 	if input == "" {
 		return ""
 	}
@@ -835,7 +835,7 @@ func normalizeTaskWriteDisplayInput(input string) string {
 }
 
 func formatTaskWriteInput(input string) string {
-	input = displaypolicy.NormalizeDisplayArg(input)
+	input = display.NormalizeDisplayArg(input)
 	if input == "" {
 		return ""
 	}
@@ -920,9 +920,9 @@ func toolDisplayStructuredSummary(name string, input map[string]any, output map[
 	case "SEARCH", "RG", "FIND":
 		return searchDisplaySummary(input, output)
 	case "WEB_SEARCH":
-		return displaypolicy.WebSearchSummary(input, output)
+		return display.WebSearchSummary(input, output)
 	case "WEB_FETCH":
-		return displaypolicy.WebFetchSummary(input, output)
+		return display.WebFetchSummary(input, output)
 	default:
 		return ""
 	}

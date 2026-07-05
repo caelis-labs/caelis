@@ -3,7 +3,7 @@ package tuiapp
 import (
 	"strings"
 
-	"github.com/caelis-labs/caelis/ports/displaypolicy"
+	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/surfaces/transcript"
 )
 
@@ -97,7 +97,7 @@ func taskControlResult(semanticName string, rawInput map[string]any, displayOutp
 	if !strings.EqualFold(strings.TrimSpace(semanticName), "TASK") {
 		return false
 	}
-	switch strings.ToLower(strings.TrimSpace(displaypolicy.ToolTaskAction(rawInput, displayOutput, meta))) {
+	switch strings.ToLower(strings.TrimSpace(display.ToolTaskAction(rawInput, displayOutput, meta))) {
 	case "wait", "cancel":
 		return true
 	default:

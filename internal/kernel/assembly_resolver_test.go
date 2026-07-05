@@ -8,10 +8,10 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/caelis-labs/caelis/ports/assembly"
-	"github.com/caelis-labs/caelis/ports/model"
-	policyapi "github.com/caelis-labs/caelis/ports/policy"
-	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
+	policyapi "github.com/caelis-labs/caelis/agent-sdk/policy"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/assembly"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
 func TestAssemblyResolverAppliesAssemblyStateAndModelDefaults(t *testing.T) {

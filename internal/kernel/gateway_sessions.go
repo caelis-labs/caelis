@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
 func (g *Gateway) StartSession(ctx context.Context, req StartSessionRequest) (session.Session, error) {

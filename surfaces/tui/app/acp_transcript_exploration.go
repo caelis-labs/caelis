@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-	"github.com/caelis-labs/caelis/ports/displaypolicy"
+	"github.com/caelis-labs/caelis/agent-sdk/display"
 )
 
 type explorationProjectionState struct {
@@ -546,7 +546,7 @@ func renderExplorationToolRow(blockID string, ev SubagentEvent, width int, ctx B
 }
 
 func renderExplorationToolRowWithMode(blockID string, ev SubagentEvent, width int, ctx BlockRenderContext, token string, first bool, mode explorationToolDetailMode) RenderedRow {
-	verb := displaypolicy.ExplorationVerbForTool(toolSemanticName(ev.Name, ev.ToolKind))
+	verb := display.ExplorationVerbForTool(toolSemanticName(ev.Name, ev.ToolKind))
 	if verb == "" {
 		verb = strings.ToUpper(strings.TrimSpace(ev.Name))
 	}
@@ -611,7 +611,7 @@ func explorationGroupDetailRowsWithWorkspaceMode(events []SubagentEvent, width i
 	grouped := map[string][]string{}
 	order := make([]string, 0, 4)
 	for _, ev := range events {
-		verb := displaypolicy.ExplorationVerbForTool(toolSemanticName(ev.Name, ev.ToolKind))
+		verb := display.ExplorationVerbForTool(toolSemanticName(ev.Name, ev.ToolKind))
 		if verb == "" {
 			continue
 		}
@@ -671,7 +671,7 @@ func explorationToolDetailForDisplay(ev SubagentEvent, workspace string, mode ex
 	}
 	fromOutput := !fromArgs && item != ""
 	if item == "" {
-		if displaypolicy.ExplorationVerbForTool(toolSemanticName(ev.Name, ev.ToolKind)) != "" {
+		if display.ExplorationVerbForTool(toolSemanticName(ev.Name, ev.ToolKind)) != "" {
 			return ""
 		}
 		item = strings.ToUpper(strings.TrimSpace(ev.Name))
@@ -697,7 +697,7 @@ func compactExplorationToolDetailWithWorkspace(ev SubagentEvent, detail string, 
 	if strings.EqualFold(semanticName, "WEB_SEARCH") {
 		return detail
 	}
-	switch displaypolicy.ExplorationVerbForTool(semanticName) {
+	switch display.ExplorationVerbForTool(semanticName) {
 	case "Read", "List", "Glob", "Search":
 		return compactExplorationPathDetailWithBase(detail, workspace)
 	default:
@@ -952,7 +952,7 @@ func isExplorationSummaryVerb(verb string) bool {
 }
 
 func toolSignalDisplayVerb(name string) string {
-	if verb := displaypolicy.ExplorationVerbForTool(name); verb != "" {
+	if verb := display.ExplorationVerbForTool(name); verb != "" {
 		return verb
 	}
 	switch strings.ToUpper(strings.TrimSpace(name)) {

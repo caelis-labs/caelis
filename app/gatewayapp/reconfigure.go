@@ -5,20 +5,22 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/caelis-labs/caelis/impl/agent/local"
-	"github.com/caelis-labs/caelis/impl/agent/local/chat"
-	"github.com/caelis-labs/caelis/impl/approval/agentreview"
-	skillfs "github.com/caelis-labs/caelis/impl/skill/fs"
-	"github.com/caelis-labs/caelis/impl/tool/builtin"
-	"github.com/caelis-labs/caelis/impl/tool/builtin/toolsearch"
-	"github.com/caelis-labs/caelis/impl/tool/mcp"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/assembly"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/skill"
+	skillfs "github.com/caelis-labs/caelis/agent-sdk/skill/fs"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
+	acpassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
+	"github.com/caelis-labs/caelis/internal/acpbridge"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/internal/sandboxrouter"
-	"github.com/caelis-labs/caelis/ports/assembly"
 	"github.com/caelis-labs/caelis/ports/plugin"
-	"github.com/caelis-labs/caelis/ports/sandbox"
-	"github.com/caelis-labs/caelis/ports/session"
-	"github.com/caelis-labs/caelis/ports/skill"
 )
 
 func (s *Stack) saveModelConfigs() error {
@@ -88,7 +90,8 @@ type gatewayBuildPlan struct {
 type gatewayRuntimeBundle struct {
 	Gateway                     *kernelimpl.Gateway
 	Exec                        sandbox.Runtime
-	Engine                      *local.Runtime
+	Engine                      *runtime.Runtime
+	ACPControlPlane             *acpassembly.ControlPlane
 	MCP                         *mcp.Manager
 	RuntimeConfig               stackRuntimeConfig
 	EstimatedPromptPrefixTokens int
@@ -220,20 +223,29 @@ func (s *Stack) buildGatewayRuntime(plan gatewayBuildPlan) (*gatewayRuntimeBundl
 	estimatedPrefixTokens := estimateModelPromptPrefixTokens(effectiveBaseMetadata, tools)
 	compactionCfg := defaultCompactionConfig(runtimeCfg.ContextWindow)
 	compactionCfg.EstimatedPromptPrefixTokens = estimatedPrefixTokens
-	rt, err := local.New(local.Config{
-		Sessions:            s.Sessions,
-		AgentFactory:        chat.Factory{},
-		DefaultPolicyMode:   effectivePolicyProfile,
-		DefaultApprovalMode: string(kernelimpl.NormalizeApprovalMode(runtimeCfg.ApprovalMode)),
-		Compaction:          compactionCfg,
-		Assembly:            runtimeCfg.Assembly,
-		TaskStore:           s.taskStore,
-	})
+	localCfg := runtime.Config{
+		Sessions:                 s.Sessions,
+		AgentFactory:             chat.Factory{},
+		DefaultPolicyMode:        effectivePolicyProfile,
+		DefaultApprovalMode:      string(kernelimpl.NormalizeApprovalMode(runtimeCfg.ApprovalMode)),
+		Compaction:               compactionCfg,
+		Assembly:                 runtimeCfg.Assembly,
+		ControllerEventForwarder: acpbridge.NewControllerForwarder(s.Sessions),
+		TaskStore:                s.taskStore,
+	}
+	var acpControlPlane *acpassembly.ControlPlane
+	localCfg, acpControlPlane, err = injectACPControlPlane(localCfg, runtimeCfg.Assembly)
+	if err != nil {
+		bundle.Close()
+		return nil, err
+	}
+	rt, err := runtime.New(localCfg)
 	if err != nil {
 		bundle.Close()
 		return nil, err
 	}
 	bundle.Engine = rt
+	bundle.ACPControlPlane = acpControlPlane
 	resolver, err := kernelimpl.NewAssemblyResolver(kernelimpl.AssemblyResolverConfig{
 		Sessions:          s.Sessions,
 		Assembly:          runtimeCfg.Assembly,
@@ -272,13 +284,15 @@ func (s *Stack) buildGatewayRuntime(plan gatewayBuildPlan) (*gatewayRuntimeBundl
 		bundle.Close()
 		return nil, err
 	}
+	approvalReviewer := s.newModelApprovalReviewer()
 	gw, err := kernelimpl.New(kernelimpl.Config{
 		Sessions:             s.Sessions,
 		Tasks:                s.taskStore,
 		Runtime:              rt,
 		Resolver:             resolver,
 		DefaultApprovalMode:  kernelimpl.NormalizeApprovalMode(runtimeCfg.ApprovalMode),
-		ApprovalApprover:     agentreview.Approver{Reviewer: s.newModelApprovalReviewer()},
+		ApprovalApprover:     approval.ReviewerAdapter{Reviewer: approvalReviewer},
+		ApprovalReviewer:     approvalReviewer,
 		SubmissionReferences: s.submissionReferenceProjector(),
 		SessionStartHooks:    plan.Plugins.SessionStartHooks,
 	})
@@ -318,6 +332,7 @@ func (s *Stack) swapGatewayRuntime(bundle *gatewayRuntimeBundle) {
 	s.gateway = bundle.Gateway
 	s.exec = bundle.Exec
 	s.engine = bundle.Engine
+	s.acpControlPlane = bundle.ACPControlPlane
 	s.mcpMgr = bundle.MCP
 	s.mu.Unlock()
 	if oldExec != nil {

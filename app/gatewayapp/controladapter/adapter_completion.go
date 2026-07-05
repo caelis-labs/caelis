@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	controlcommands "github.com/caelis-labs/caelis/ports/controlcommand"
-	"github.com/caelis-labs/caelis/ports/controller"
 	"github.com/caelis-labs/caelis/ports/gateway"
-	"github.com/caelis-labs/caelis/ports/session"
-	"github.com/caelis-labs/caelis/ports/skill"
 )
 
 func (d *Adapter) CompleteMention(ctx context.Context, query string, limit int) ([]CompletionCandidate, error) {

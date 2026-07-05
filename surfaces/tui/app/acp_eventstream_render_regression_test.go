@@ -7,7 +7,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/caelis-labs/caelis/internal/evalharness"
-	"github.com/caelis-labs/caelis/ports/gateway"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -99,15 +98,9 @@ func TestRegressionACPEventstreamToolCallFrame120x32(t *testing.T) {
 }
 
 func acpToolNameMeta(name string) map[string]any {
-	return map[string]any{
-		gateway.EventMetaRoot: map[string]any{
-			gateway.EventMetaRuntime: map[string]any{
-				gateway.EventMetaRuntimeTool: map[string]any{
-					gateway.EventMetaRuntimeToolName: name,
-				},
-			},
-		},
-	}
+	return metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
+		metautil.RuntimeToolName: name,
+	})
 }
 
 func assertFrameContainsInOrder(t *testing.T, name string, frame string, want []string) {

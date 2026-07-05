@@ -3,7 +3,7 @@ package tuiapp
 import (
 	"strings"
 
-	"github.com/caelis-labs/caelis/ports/displaypolicy"
+	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/surfaces/transcript"
 	"github.com/caelis-labs/caelis/surfaces/tui/acpprojector"
 )
@@ -17,7 +17,7 @@ func projectTranscriptToolCall(input transcript.ToolProjectionInput) TranscriptE
 		toolName = refinedName
 		semanticName = refinedName
 	}
-	toolTaskID := displaypolicy.ToolTaskID(rawInput, nil, input.Meta)
+	toolTaskID := display.ToolTaskID(rawInput, nil, input.Meta)
 	content := acpToolContentToDisplay(input.Content)
 	toolTerminal := transcriptToolHasTerminal(input.Meta, content)
 	displayInput := rawInput
@@ -43,9 +43,9 @@ func projectTranscriptToolCall(input transcript.ToolProjectionInput) TranscriptE
 		ToolStatus:         status,
 		ToolTerminal:       toolTerminal,
 		ToolTaskID:         toolTaskID,
-		ToolTaskAction:     displaypolicy.ToolTaskAction(rawInput, nil, input.Meta),
-		ToolTaskInput:      displaypolicy.ToolTaskInput(rawInput, nil, input.Meta),
-		ToolTaskTargetKind: displaypolicy.ToolTaskTargetKind(rawInput, nil, input.Meta),
+		ToolTaskAction:     display.ToolTaskAction(rawInput, nil, input.Meta),
+		ToolTaskInput:      display.ToolTaskInput(rawInput, nil, input.Meta),
+		ToolTaskTargetKind: display.ToolTaskTargetKind(rawInput, nil, input.Meta),
 	}
 }
 
@@ -112,7 +112,7 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 		toolOutputSynthetic = false
 	}
 	toolArgs := toolDisplayArgs(semanticName, displayInput, toolTitleDisplayArgs(semanticName, input.ToolKind, input.ToolTitle), acpprojector.FormatToolStart(toolName, displayInput))
-	toolTaskID := displaypolicy.ToolTaskID(rawInput, displayOutput, input.Meta)
+	toolTaskID := display.ToolTaskID(rawInput, displayOutput, input.Meta)
 	if strings.EqualFold(semanticName, "TASK") {
 		toolArgs = taskDisplayArgsWithTaskID(toolArgs, toolTaskID)
 	}
@@ -148,9 +148,9 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 		ToolOutputSynthetic: toolOutputSynthetic,
 		ToolOutputTerminal:  toolOutputHasTerminalData,
 		ToolTaskID:          toolTaskID,
-		ToolTaskAction:      displaypolicy.ToolTaskAction(rawInput, displayOutput, input.Meta),
-		ToolTaskInput:       displaypolicy.ToolTaskInput(rawInput, displayOutput, input.Meta),
-		ToolTaskTargetKind:  displaypolicy.ToolTaskTargetKind(rawInput, displayOutput, input.Meta),
+		ToolTaskAction:      display.ToolTaskAction(rawInput, displayOutput, input.Meta),
+		ToolTaskInput:       display.ToolTaskInput(rawInput, displayOutput, input.Meta),
+		ToolTaskTargetKind:  display.ToolTaskTargetKind(rawInput, displayOutput, input.Meta),
 		Final:               transcript.ToolStatusFinal(status, toolErr),
 	}, true
 }
@@ -175,7 +175,7 @@ func suppressRunningTerminalSnapshotOutput(toolName string, toolKind string, met
 	if isErr || transcript.ToolStatusFinal(status, isErr) {
 		return false
 	}
-	if !displaypolicy.IsTerminalPanelTool(toolName, toolKind) {
+	if !display.IsTerminalPanelTool(toolName, toolKind) {
 		return false
 	}
 	if transcript.MetaString(meta, "caelis", "runtime", "stream", "mode") != "" {

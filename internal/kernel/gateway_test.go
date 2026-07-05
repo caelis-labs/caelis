@@ -8,12 +8,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/caelis-labs/caelis/impl/session/memory"
-	"github.com/caelis-labs/caelis/ports/agent"
-	"github.com/caelis-labs/caelis/ports/model"
-	policyapi "github.com/caelis-labs/caelis/ports/policy"
-	"github.com/caelis-labs/caelis/ports/session"
-	"github.com/caelis-labs/caelis/ports/tool"
+	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
+	policyapi "github.com/caelis-labs/caelis/agent-sdk/policy"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/session/memory"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
@@ -1590,8 +1590,8 @@ func TestBeginTurnAutoReviewDenialDoesNotInterruptTurn(t *testing.T) {
 				Risk:          "medium",
 				Authorization: "medium",
 				Rationale:     "not narrow enough",
-				Usage:         &UsageSnapshot{PromptTokens: 7, CachedInputTokens: 3, CompletionTokens: 2, ReasoningTokens: 1, TotalTokens: 9},
 			},
+			sessionAccounting: &UsageSnapshot{PromptTokens: 7, CachedInputTokens: 3, CompletionTokens: 2, ReasoningTokens: 1, TotalTokens: 9},
 		},
 	})
 	if err != nil {
@@ -1625,7 +1625,7 @@ func TestBeginTurnAutoReviewDenialDoesNotInterruptTurn(t *testing.T) {
 	}
 	usage := firstUsageSnapshot(events)
 	if usage == nil || usage.PromptTokens != 7 || usage.CachedInputTokens != 3 || usage.CompletionTokens != 2 || usage.ReasoningTokens != 1 || usage.TotalTokens != 9 {
-		t.Fatalf("terminal review usage = %+v, want reviewer usage", usage)
+		t.Fatalf("terminal review session accounting = %+v, want reviewer session accounting", usage)
 	}
 	if events[len(events)-1].Kind == eventstream.KindError {
 		t.Fatalf("last event error = %v, want normal turn continuation", events[len(events)-1].Err)
@@ -1695,7 +1695,7 @@ func TestBeginTurnAutoReviewCancelPublishesTerminalReview(t *testing.T) {
 	}
 }
 
-func TestPersistApprovalReviewUsageUsesSessionStateNotHistory(t *testing.T) {
+func TestPersistApprovalReviewSessionAccountingUsesSessionStateNotHistory(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -1719,8 +1719,8 @@ func TestPersistApprovalReviewUsageUsesSessionStateNotHistory(t *testing.T) {
 	}
 	usage := &UsageSnapshot{PromptTokens: 7, CachedInputTokens: 3, CompletionTokens: 2, ReasoningTokens: 1, TotalTokens: 9}
 	invocation := &session.EventInvocation{Provider: "deepseek", Model: "deepseek-v4-pro"}
-	if err := gw.persistApprovalReviewUsage(ctx, req, usage, string(ApprovalModeAutoReview), invocation); err != nil {
-		t.Fatalf("persistApprovalReviewUsage() error = %v", err)
+	if err := gw.persistApprovalReviewSessionAccounting(ctx, req, usage, string(ApprovalModeAutoReview), invocation); err != nil {
+		t.Fatalf("persistApprovalReviewSessionAccounting() error = %v", err)
 	}
 	events, err := sessions.Events(ctx, session.EventsRequest{SessionRef: activeSession.SessionRef})
 	if err != nil {
@@ -2426,11 +2426,16 @@ func (r *approvalRuntime) RunState(context.Context, session.SessionRef) (agent.R
 }
 
 type staticApprovalReviewer struct {
-	result ApprovalReviewResult
+	result            ApprovalReviewResult
+	sessionAccounting *UsageSnapshot
 }
 
 func (r staticApprovalReviewer) ReviewApproval(context.Context, ApprovalReviewRequest) (ApprovalReviewResult, error) {
 	return r.result, nil
+}
+
+func (r staticApprovalReviewer) ApprovalReviewAccounting(context.Context, ApprovalReviewRequest, ApprovalReviewResult) (*UsageSnapshot, *session.EventInvocation, error) {
+	return r.sessionAccounting, nil, nil
 }
 
 type contextBlockingApprovalReviewer struct {

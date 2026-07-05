@@ -3,7 +3,7 @@ package kernel
 import (
 	"strings"
 
-	"github.com/caelis-labs/caelis/ports/session"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
 func validateReplaySessionEvents(events []*session.Event) error {

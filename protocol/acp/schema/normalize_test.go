@@ -155,6 +155,25 @@ func TestUsageUpdateRoundTripPreservesCostAndMetadata(t *testing.T) {
 	}
 }
 
+func TestUsageUpdateMarshalIncludesZeroSize(t *testing.T) {
+	t.Parallel()
+
+	raw, err := json.Marshal(UsageUpdate{
+		SessionUpdate: UpdateUsage,
+		Used:          42,
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal(UsageUpdate) error = %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal(raw) error = %v", err)
+	}
+	if _, ok := decoded["size"]; !ok {
+		t.Fatalf("usage_update JSON = %s, want required size field present", raw)
+	}
+}
+
 func TestAvailableCommandsUpdateMarshalUsesACPCommandInputShape(t *testing.T) {
 	t.Parallel()
 

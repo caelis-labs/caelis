@@ -27,7 +27,7 @@ func ProjectReplayEvent(env eventstream.Envelope, surface SurfaceProjector) []Ev
 
 // replayableACPEvents is a defensive projector boundary for replay envelopes
 // supplied directly as ACP events. Canonical session replay filtering lives in
-// ports/session.
+// agent-sdk/session.
 func replayableACPEvents(env eventstream.Envelope, surface SurfaceProjector) []Event {
 	switch env.Kind {
 	case eventstream.KindSessionUpdate:

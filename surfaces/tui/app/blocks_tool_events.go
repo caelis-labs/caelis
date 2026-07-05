@@ -3,7 +3,7 @@ package tuiapp
 import (
 	"strings"
 
-	"github.com/caelis-labs/caelis/ports/displaypolicy"
+	"github.com/caelis-labs/caelis/agent-sdk/display"
 )
 
 type ToolUpdateMeta struct {
@@ -158,7 +158,7 @@ func effectiveToolEventIdentity(events []SubagentEvent, update toolEventUpdate, 
 }
 
 func normalizeToolEventOutput(output string, effectiveName string, effectiveToolKind string, terminal bool) string {
-	if terminal || displaypolicy.IsTerminalPanelTool(effectiveName, effectiveToolKind) {
+	if terminal || display.IsTerminalPanelTool(effectiveName, effectiveToolKind) {
 		return output
 	}
 	return strings.TrimSpace(output)
