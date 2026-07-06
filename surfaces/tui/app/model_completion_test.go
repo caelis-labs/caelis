@@ -1190,7 +1190,7 @@ func TestSkillCompletionListKeepsHeightStableAcrossSelection(t *testing.T) {
 
 func TestSlashCompletionRendersDescriptionsWithoutHeaderOrBorder(t *testing.T) {
 	model := NewModel(Config{Commands: []string{"model", "status"}})
-	model.width = 120
+	model.width = 79 // 设为 79 以测试无边框响应式降级
 	model.slashCandidates = []string{"/model", "/status"}
 	model.slashIndex = 0
 
@@ -1198,7 +1198,7 @@ func TestSlashCompletionRendersDescriptionsWithoutHeaderOrBorder(t *testing.T) {
 	if strings.Contains(rendered, "Commands") {
 		t.Fatalf("renderSlashCommandList() = %q, should not show a header", rendered)
 	}
-	if strings.ContainsAny(rendered, "╭╮╰╯│─") {
+	if strings.ContainsAny(rendered, "┌┐└┘│─") || strings.ContainsAny(rendered, "╭╮╰╯│─") {
 		t.Fatalf("renderSlashCommandList() = %q, should not show borders", rendered)
 	}
 	for _, want := range []string{"/model", "Switch or delete a configured model alias", "/status", "Show current provider"} {
@@ -1207,16 +1207,20 @@ func TestSlashCompletionRendersDescriptionsWithoutHeaderOrBorder(t *testing.T) {
 		}
 	}
 	lines := strings.Split(strings.TrimRight(rendered, "\n"), "\n")
-	if len(lines) != 4 {
-		t.Fatalf("renderSlashCommandList() lines = %#v, want mask rows plus two candidate rows", lines)
+	if len(lines) != 2 {
+		t.Fatalf("renderSlashCommandList() lines = %#v, want two candidate rows (no border means no mask rows)", lines)
 	}
-	if strings.TrimSpace(lines[0]) != "" || strings.TrimSpace(lines[len(lines)-1]) != "" {
-		t.Fatalf("renderSlashCommandList() lines = %#v, want blank mask rows", lines)
-	}
-	for _, line := range lines[1 : len(lines)-1] {
-		if width := displayColumns(line); width != model.completionOverlayInnerWidth() {
-			t.Fatalf("renderSlashCommandList() row width = %d, want %d: %q", width, model.completionOverlayInnerWidth(), line)
+	for _, line := range lines {
+		if width := displayColumns(line); width != model.completionOverlayRenderedRowWidth() {
+			t.Fatalf("renderSlashCommandList() row width = %d, want %d: %q", width, model.completionOverlayRenderedRowWidth(), line)
 		}
+	}
+
+	// 测试大屏幕宽度 >=80 时有边框
+	model.width = 120
+	renderedWithBorder := ansi.Strip(model.renderSlashCommandList())
+	if !strings.ContainsAny(renderedWithBorder, "┌┐└┘│─") && !strings.ContainsAny(renderedWithBorder, "╭╮╰╯│─") {
+		t.Fatalf("renderSlashCommandList() with width 120 = %q, expected to show borders", renderedWithBorder)
 	}
 }
 

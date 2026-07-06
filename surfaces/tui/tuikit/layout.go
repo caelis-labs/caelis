@@ -60,6 +60,18 @@ const (
 	// InputInset is the left indent for the composer input bar.
 	InputInset = 3
 
+	// WelcomeLogoMinWidth is the terminal width at which the welcome block renders
+	// the block ASCII logo instead of the compact title line.
+	WelcomeLogoMinWidth = 55
+
+	// OverlayBorderMinWidth is the terminal width at which prompt/completion overlays
+	// render a rounded border and horizontal padding.
+	OverlayBorderMinWidth = 80
+
+	// OverlayBorderChromeWidth is the total horizontal space consumed by overlay
+	// border (2) plus inner padding (2) on each rendered row.
+	OverlayBorderChromeWidth = 4
+
 	// StatusInset is the horizontal padding inside status/footer rows
 	// (applied via lipgloss Padding).
 	StatusInset = InputInset

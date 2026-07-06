@@ -17,8 +17,6 @@ type PanelViewModel struct {
 
 type ToolEventViewModel = displaymodel.ToolEventViewModel
 
-type WelcomeViewModel = displaymodel.WelcomeViewModel
-
 type renderedSegment struct {
 	Plain  string
 	Styled string
@@ -42,37 +40,6 @@ func renderPanelViewModel(theme tuikit.Theme, vm PanelViewModel) []string {
 		Body:    vm.Body,
 		Footer:  strings.TrimSpace(vm.Footer),
 	})
-}
-
-func buildWelcomePanelViewModel(w WelcomeViewModel, width int, theme tuikit.Theme) PanelViewModel {
-	tok := theme.Tokens()
-	contentWidth := maxInt(1, width-4)
-	valueWidth := maxInt(8, contentWidth-11)
-	titleLine := theme.PromptStyle().Render(">_") +
-		" " + tok.ChromeTitle.Render("CAELIS") +
-		" " + tok.ChromeMeta.Render("("+w.VersionLabel+")")
-	renderField := func(label string, value string, style func(...string) string) string {
-		labelText := tok.ComposerLabel.Render(label + ":")
-		padding := maxInt(0, 11-displayColumns(label+":"))
-		if label == "workspace" {
-			value = truncateWorkspaceStatusDisplay(value, valueWidth)
-		} else {
-			value = truncateTailDisplay(value, valueWidth)
-		}
-		return labelText + strings.Repeat(" ", padding) + style(value)
-	}
-	body := []string{
-		titleLine,
-		"",
-		renderField("model", w.ModelAlias, tok.TextPrimary.Render),
-		renderField("workspace", w.Workspace, tok.TextSecondary.Render),
-		renderField("tip", "type / for command list", tok.TextMuted.Render),
-	}
-	return PanelViewModel{
-		Variant: tuikit.PanelShellVariantCard,
-		Width:   width,
-		Body:    body,
-	}
 }
 
 func truncateTailDisplay(text string, width int) string {

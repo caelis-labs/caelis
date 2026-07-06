@@ -32,12 +32,17 @@ func SyntaxPaletteForTheme(theme Theme) SyntaxPalette {
 	return catppuccinSyntaxPalette(theme.IsDark, theme.Profile)
 }
 
+// applyCatppuccinCodeColors is the single source of truth for adaptive-theme inline code color.
 func applyCatppuccinCodeColors(theme *Theme) {
 	if theme == nil || theme.NoColor {
 		return
 	}
 	palette := SyntaxPaletteForTheme(*theme)
-	theme.CodeFg = palette.Text
+	if theme.IsDark {
+		theme.CodeFg = syntaxColor(theme.Profile, "#b4befe", "147", "5")
+	} else {
+		theme.CodeFg = syntaxColor(theme.Profile, "#7287fd", "63", "5")
+	}
 	theme.CodeBg = palette.InlineBackground
 	theme.CodeBlockFg = palette.Text
 	theme.CodeBlockBg = palette.Background

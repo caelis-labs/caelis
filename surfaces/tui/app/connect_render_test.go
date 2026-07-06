@@ -132,9 +132,10 @@ func TestRenderSlashArgListUsesWideDisplayForBaseURL(t *testing.T) {
 	if !strings.Contains(rendered, "default base URL") {
 		t.Fatalf("renderSlashArgList() = %q, want base URL detail", rendered)
 	}
+	limit := model.completionOverlayRenderedRowWidth()
 	for _, line := range strings.Split(strings.TrimRight(rendered, "\n"), "\n") {
-		if width := displayColumns(line); width > model.completionOverlayInnerWidth() {
-			t.Fatalf("renderSlashArgList() row width = %d, want <= %d: %q", width, model.completionOverlayInnerWidth(), line)
+		if width := displayColumns(line); width > limit {
+			t.Fatalf("renderSlashArgList() row width = %d, want <= %d: %q", width, limit, line)
 		}
 	}
 }

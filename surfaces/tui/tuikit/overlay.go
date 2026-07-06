@@ -28,6 +28,30 @@ type OverlayFrameModel struct {
 	Width int      // desired frame width
 }
 
+// ResponsiveOverlayFrameModel renders overlay body lines with optional border chrome.
+type ResponsiveOverlayFrameModel struct {
+	Body      []string
+	Width     int
+	UseBorder bool
+}
+
+// RenderResponsiveOverlayFrame renders overlay content with border chrome only when requested.
+func RenderResponsiveOverlayFrame(theme Theme, m ResponsiveOverlayFrameModel) string {
+	width := maxInt(20, m.Width)
+	body := strings.Join(m.Body, "\n")
+	box := lipgloss.NewStyle()
+	if m.UseBorder {
+		tok := theme.Tokens()
+		box = box.BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(tok.OverlayBorder.GetForeground()).
+			Padding(0, 1).
+			Width(width)
+	} else {
+		box = box.Width(width)
+	}
+	return box.Render(body)
+}
+
 // RenderOverlayFrame renders a bordered overlay frame with optional title.
 func RenderOverlayFrame(theme Theme, m OverlayFrameModel) string {
 	tok := theme.Tokens()
@@ -39,13 +63,11 @@ func RenderOverlayFrame(theme Theme, m OverlayFrameModel) string {
 	}
 	content = append(content, m.Body...)
 
-	boxStyle := lipgloss.NewStyle().
-		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(tok.OverlayBorder.GetForeground()).
-		Padding(0, 1).
-		Width(width)
-
-	return boxStyle.Render(strings.Join(content, "\n"))
+	return RenderResponsiveOverlayFrame(theme, ResponsiveOverlayFrameModel{
+		Body:      content,
+		Width:     width,
+		UseBorder: true,
+	})
 }
 
 // OverlayCompletionModel defines a completion/suggestion list overlay.

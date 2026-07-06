@@ -56,9 +56,9 @@ func (m *Model) View() tea.View {
 	sections = append(sections, m.placeInMainColumn(m.renderStatusHeader()))
 
 	// 4. Separator above the composer input.
-	if width := m.fixedRowWidth(); width > 0 {
+	if width := m.fixedRowWidth() - (inputHorizontalInset * 2); width > 0 {
 		sep := m.theme.SeparatorStyle().Render(strings.Repeat("─", width))
-		sections = append(sections, m.placeInMainColumn(sep))
+		sections = append(sections, m.placeInMainColumn(insetRenderedBlock(sep, inputHorizontalInset)))
 	}
 
 	// 5. Composer top padding before input.
@@ -75,9 +75,9 @@ func (m *Model) View() tea.View {
 	}
 
 	// 8. Lower separator + secondary status bar.
-	if width := m.fixedRowWidth(); width > 0 {
+	if width := m.fixedRowWidth() - (inputHorizontalInset * 2); width > 0 {
 		sep := m.theme.SeparatorStyle().Render(strings.Repeat("─", width))
-		sections = append(sections, m.placeInMainColumn(sep))
+		sections = append(sections, m.placeInMainColumn(insetRenderedBlock(sep, inputHorizontalInset)))
 	}
 	sections = append(sections, m.placeInMainColumn(m.renderStatusFooter()))
 

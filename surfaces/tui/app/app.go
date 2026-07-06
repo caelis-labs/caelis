@@ -213,43 +213,9 @@ func (m *Model) Init() tea.Cmd {
 }
 
 func (m *Model) appendWelcomeCard() {
-	m.doc.Append(NewWelcomeBlock(m.cfg.Version, m.cfg.Workspace, m.currentWelcomeModelName()))
+	m.doc.Append(NewWelcomeBlock(m.cfg.Version))
 	m.hasCommittedLine = true
 	m.lastCommittedStyle = tuikit.LineStyleDefault
-}
-
-func (m *Model) currentWelcomeModelName() string {
-	modelName := strings.TrimSpace(m.statusModel)
-	if modelName == "" {
-		modelName = strings.TrimSpace(m.cfg.ModelAlias)
-	}
-	if modelName == "" {
-		modelName = "not configured (/connect)"
-	}
-	return modelName
-}
-
-func (m *Model) syncWelcomeCardBlock() bool {
-	if m == nil || m.doc == nil {
-		return false
-	}
-	blocks := m.doc.FindByKind(BlockWelcome)
-	if len(blocks) == 0 {
-		return false
-	}
-	welcome, ok := blocks[0].(*WelcomeBlock)
-	if !ok {
-		return false
-	}
-	workspace := strings.TrimSpace(m.cfg.Workspace)
-	modelName := m.currentWelcomeModelName()
-	if welcome.Workspace == workspace && welcome.ModelName == modelName {
-		return false
-	}
-	welcome.Workspace = workspace
-	welcome.ModelName = modelName
-	m.markViewportBlockDirty(welcome.BlockID())
-	return true
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {

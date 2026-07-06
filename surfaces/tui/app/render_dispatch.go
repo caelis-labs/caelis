@@ -368,58 +368,40 @@ func (m *Model) handleSetHintMsg(msg SetHintMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) handleSetStatusMsg(msg SetStatusMsg) tea.Model {
-	welcomeMayChange := false
 	if workspace := strings.TrimSpace(msg.Workspace); workspace != "" {
-		if _, changed := m.setWorkspaceDisplay(workspace); changed {
-			welcomeMayChange = true
-		}
+		m.setWorkspaceDisplay(workspace)
 	}
 	nextModel := normalizeStatusModel(msg.Model)
 	if nextModel != m.statusModel {
 		m.statusModel = nextModel
-		welcomeMayChange = true
 	}
 	m.statusContext = strings.TrimSpace(msg.Context)
 	m.statusModeLabel = strings.TrimSpace(msg.ModeLabel)
 	m.statusView = msg.Status
-	if m.normalizeStatusViewWorkspace() {
-		welcomeMayChange = true
-	}
-	if welcomeMayChange && m.syncWelcomeCardBlock() {
-		m.syncViewportContent()
-	}
+	m.normalizeStatusViewWorkspace()
 	return m
 }
 
 func (m *Model) handleStatusRefreshResultMsg(msg StatusRefreshResultMsg) tea.Model {
 	m.statusRefreshInFlight = false
-	welcomeMayChange := false
 	if msg.HasWorkspace {
 		if workspace := strings.TrimSpace(msg.Workspace); workspace != "" {
-			if _, changed := m.setWorkspaceDisplay(workspace); changed {
-				welcomeMayChange = true
-			}
+			m.setWorkspaceDisplay(workspace)
 		}
 	}
 	if msg.HasStatus {
 		nextModel := normalizeStatusModel(msg.Model)
 		if nextModel != m.statusModel {
 			m.statusModel = nextModel
-			welcomeMayChange = true
 		}
 		m.statusContext = strings.TrimSpace(msg.Context)
 	}
 	if msg.HasView {
 		m.statusView = msg.Status
-		if m.normalizeStatusViewWorkspace() {
-			welcomeMayChange = true
-		}
+		m.normalizeStatusViewWorkspace()
 	}
 	if msg.HasModeLabel {
 		m.statusModeLabel = strings.TrimSpace(msg.ModeLabel)
-	}
-	if welcomeMayChange && m.syncWelcomeCardBlock() {
-		m.syncViewportContent()
 	}
 	return m
 }

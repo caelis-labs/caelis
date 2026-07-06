@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
@@ -165,7 +164,9 @@ func (m *Model) renderPromptModalBoxWithWidth(lines []string, width int) string 
 	if width <= 0 {
 		width = 72
 	}
-	innerWidth := maxInt(8, width-4)
+	hasBorder := m.overlayUsesBorder()
+	chrome := m.overlayBorderChromeWidth()
+	innerWidth := maxInt(8, width-chrome)
 	filtered := make([]string, 0, len(lines))
 	for _, line := range lines {
 		filtered = append(filtered, wrapPromptModalLine(line, innerWidth)...)
@@ -174,13 +175,11 @@ func (m *Model) renderPromptModalBoxWithWidth(lines []string, width int) string 
 	if len(filtered) == 0 {
 		filtered = []string{""}
 	}
-	body := strings.Join(filtered, "\n")
-	box := lipgloss.NewStyle().
-		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(m.theme.PanelBorder).
-		Padding(0, 1).
-		Width(width)
-	return box.Render(body)
+	return tuikit.RenderResponsiveOverlayFrame(m.theme, tuikit.ResponsiveOverlayFrameModel{
+		Body:      filtered,
+		Width:     width,
+		UseBorder: hasBorder,
+	})
 }
 
 func (m *Model) promptDetailLineBudget() int {
@@ -195,7 +194,7 @@ func (m *Model) promptDetailLineBudget() int {
 }
 
 func (m *Model) promptModalInnerWidth() int {
-	return maxInt(8, m.promptModalOuterWidth()-4)
+	return maxInt(8, m.promptModalOuterWidth()-m.overlayBorderChromeWidth())
 }
 
 func (m *Model) promptModalOuterWidth() int {
@@ -253,9 +252,12 @@ func (m *Model) renderCompletionOverlay(_ string, lines []string) string {
 	}
 	innerWidth := m.completionOverlayInnerWidth()
 
-	blank := strings.Repeat(" ", innerWidth)
+	hasBorder := m.overlayUsesBorder()
 	filtered := make([]string, 0, len(lines)+2)
-	filtered = append(filtered, blank)
+	if hasBorder {
+		blank := strings.Repeat(" ", innerWidth)
+		filtered = append(filtered, blank)
+	}
 	for _, line := range lines {
 		if cols := displayColumns(line); cols > innerWidth {
 			if innerWidth <= 3 {
@@ -269,12 +271,19 @@ func (m *Model) renderCompletionOverlay(_ string, lines []string) string {
 		}
 		filtered = append(filtered, line)
 	}
-	filtered = append(filtered, blank)
+	if hasBorder {
+		blank := strings.Repeat(" ", innerWidth)
+		filtered = append(filtered, blank)
+	}
 	filtered = clampPromptModalLines(filtered, m.promptModalLineBudget(), m.theme)
 	if len(filtered) == 0 {
 		filtered = []string{""}
 	}
-	return lipgloss.NewStyle().Render(strings.Join(filtered, "\n"))
+	return tuikit.RenderResponsiveOverlayFrame(m.theme, tuikit.ResponsiveOverlayFrameModel{
+		Body:      filtered,
+		Width:     innerWidth,
+		UseBorder: hasBorder,
+	})
 }
 
 func (m *Model) completionOverlayInnerWidth() int {
@@ -282,9 +291,10 @@ func (m *Model) completionOverlayInnerWidth() int {
 }
 
 func (m *Model) completionOverlayWidth() int {
-	width := maxInt(44, m.fixedRowWidth()-4)
+	chrome := m.overlayBorderChromeWidth()
+	width := maxInt(44, m.fixedRowWidth()-chrome)
 	if m.width > 0 {
-		width = minInt(width, maxInt(44, m.width-4))
+		width = minInt(width, maxInt(44, m.width-chrome))
 	}
 	if width <= 0 {
 		width = 72

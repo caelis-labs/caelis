@@ -1,6 +1,8 @@
 package tuiapp
 
-import "strings"
+import (
+	"strings"
+)
 
 func completionCandidateDisplay(candidate CompletionCandidate) string {
 	display := strings.TrimSpace(candidate.Display)
@@ -10,55 +12,119 @@ func completionCandidateDisplay(candidate CompletionCandidate) string {
 	return strings.TrimSpace(candidate.Value)
 }
 
+func padLineToDisplayWidth(text string, width int) string {
+	if pad := width - displayColumns(text); pad > 0 {
+		return text + strings.Repeat(" ", pad)
+	}
+	return text
+}
+
+func (m *Model) renderCompletionSelectedLine(innerWidth int, line string) string {
+	return m.theme.CommandActiveStyle().Render(padLineToDisplayWidth(line, innerWidth))
+}
+
+func (m *Model) renderCompletionUnselectedLine(innerWidth int, parts ...string) string {
+	return " " + padLineToDisplayWidth(strings.Join(parts, ""), innerWidth) + " "
+}
+
+func (m *Model) completionRowInnerWidth() int {
+	return maxInt(1, m.completionOverlayInnerWidth()-2)
+}
+
+type completionLineLayout int
+
+const (
+	completionLayoutNameColumn completionLineLayout = iota
+	completionLayoutValueReserve
+)
+
 func (m *Model) renderCompletionTextLine(display string, detail string, selected bool) string {
-	display = strings.TrimSpace(display)
-	detail = strings.Join(strings.Fields(strings.TrimSpace(detail)), " ")
-	style := m.theme.CommandStyle()
-	if selected {
-		style = m.theme.CommandActiveStyle()
-	}
-	width := m.completionOverlayInnerWidth()
-	if detail == "" {
-		return style.Render(truncateTailDisplay(display, width))
-	}
-	nameColumn := completionNameColumnWidth(width)
-	name := truncateTailDisplay(display, nameColumn)
-	line := style.Render(name)
-	if pad := nameColumn - displayColumns(name); pad > 0 {
-		line += strings.Repeat(" ", pad)
-	}
-	separator := "  "
-	detailBudget := maxInt(0, width-nameColumn-displayColumns(separator))
-	if detailBudget <= 0 {
-		return line
-	}
-	line += separator + m.theme.HelpHintTextStyle().Render(truncateTailDisplay(detail, detailBudget))
-	return line
+	return m.renderCompletionLine(display, detail, selected, completionLayoutNameColumn)
 }
 
 func (m *Model) renderCompletionValueLine(display string, detail string, selected bool) string {
+	return m.renderCompletionLine(display, detail, selected, completionLayoutValueReserve)
+}
+
+func (m *Model) renderCompletionLine(display string, detail string, selected bool, layout completionLineLayout) string {
 	display = strings.TrimSpace(display)
 	detail = strings.Join(strings.Fields(strings.TrimSpace(detail)), " ")
-	style := m.theme.CommandStyle()
-	if selected {
-		style = m.theme.CommandActiveStyle()
+	innerWidth := m.completionRowInnerWidth()
+
+	switch layout {
+	case completionLayoutNameColumn:
+		nameBudget := completionNameColumnWidth(innerWidth)
+		if detail == "" {
+			nameBudget = innerWidth
+		}
+		primary := truncateTailDisplay(display, nameBudget)
+		primaryPad := ""
+		if pad := nameBudget - displayColumns(primary); pad > 0 {
+			primaryPad = strings.Repeat(" ", pad)
+		}
+		if selected {
+			line := primary + primaryPad
+			if detail != "" {
+				separator := "  "
+				line += separator
+				detailBudget := maxInt(0, innerWidth-nameBudget-displayColumns(separator))
+				if detailBudget > 0 {
+					line += truncateTailDisplay(detail, detailBudget)
+				}
+			}
+			return m.renderCompletionSelectedLine(innerWidth, line)
+		}
+		primaryPart := m.theme.CommandStyle().Padding(0, 0).Render(primary)
+		if detail == "" {
+			return m.renderCompletionUnselectedLine(innerWidth, primaryPart, primaryPad)
+		}
+		separator := "  "
+		detailBudget := maxInt(0, innerWidth-nameBudget-displayColumns(separator))
+		detailText := truncateTailDisplay(detail, detailBudget)
+		detailPart := m.theme.HelpHintTextStyle().Render(detailText)
+		return m.renderCompletionUnselectedLine(innerWidth, primaryPart, primaryPad, separator, detailPart)
+
+	case completionLayoutValueReserve:
+		if selected {
+			displayText := truncateTailDisplay(display, innerWidth)
+			line := displayText
+			if detail != "" {
+				separator := "  "
+				separatorWidth := displayColumns(separator)
+				detailReserve := minInt(completionValueDetailReserve(innerWidth), displayColumns(detail))
+				displayBudget := maxInt(1, innerWidth-separatorWidth-detailReserve)
+				displayText = truncateTailDisplay(display, displayBudget)
+				detailBudget := maxInt(0, innerWidth-displayColumns(displayText)-separatorWidth)
+
+				line = displayText
+				if detailBudget > 0 {
+					line += separator + truncateTailDisplay(detail, detailBudget)
+				}
+			}
+			return m.renderCompletionSelectedLine(innerWidth, line)
+		}
+		if detail == "" {
+			displayText := truncateTailDisplay(display, innerWidth)
+			primaryPart := m.theme.CommandStyle().Padding(0, 0).Render(displayText)
+			return m.renderCompletionUnselectedLine(innerWidth, primaryPart)
+		}
+		separator := "  "
+		separatorWidth := displayColumns(separator)
+		detailReserve := minInt(completionValueDetailReserve(innerWidth), displayColumns(detail))
+		displayBudget := maxInt(1, innerWidth-separatorWidth-detailReserve)
+		displayText := truncateTailDisplay(display, displayBudget)
+		detailBudget := maxInt(0, innerWidth-displayColumns(displayText)-separatorWidth)
+
+		primaryPart := m.theme.CommandStyle().Padding(0, 0).Render(displayText)
+		if detailBudget <= 0 {
+			return m.renderCompletionUnselectedLine(innerWidth, primaryPart)
+		}
+		detailText := truncateTailDisplay(detail, detailBudget)
+		detailPart := m.theme.HelpHintTextStyle().Render(detailText)
+		return m.renderCompletionUnselectedLine(innerWidth, primaryPart, separator, detailPart)
+	default:
+		return ""
 	}
-	width := m.completionOverlayInnerWidth()
-	if detail == "" {
-		return style.Render(truncateTailDisplay(display, width))
-	}
-	separator := "  "
-	separatorWidth := displayColumns(separator)
-	detailReserve := minInt(completionValueDetailReserve(width), displayColumns(detail))
-	displayBudget := maxInt(1, width-separatorWidth-detailReserve)
-	displayText := truncateTailDisplay(display, displayBudget)
-	detailBudget := maxInt(0, width-displayColumns(displayText)-separatorWidth)
-	line := style.Render(displayText)
-	if detailBudget <= 0 {
-		return line
-	}
-	line += separator + m.theme.HelpHintTextStyle().Render(truncateTailDisplay(detail, detailBudget))
-	return line
 }
 
 func completionValueDetailReserve(width int) int {

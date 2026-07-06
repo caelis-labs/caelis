@@ -27,6 +27,22 @@ func TestRenderOverlayFrame_BasicContent(t *testing.T) {
 	}
 }
 
+func TestRenderResponsiveOverlayFrame_Borderless(t *testing.T) {
+	theme := DefaultTheme()
+	frame := RenderResponsiveOverlayFrame(theme, ResponsiveOverlayFrameModel{
+		Body:      []string{"option 1", "option 2"},
+		Width:     40,
+		UseBorder: false,
+	})
+	plain := ansi.Strip(frame)
+	if strings.ContainsAny(plain, "╭╮╰╯┌┐└┘│─") {
+		t.Fatalf("borderless overlay should not render chrome, got %q", plain)
+	}
+	if !strings.Contains(plain, "option 1") || !strings.Contains(plain, "option 2") {
+		t.Fatalf("expected body content, got %q", plain)
+	}
+}
+
 func TestRenderOverlayFrame_NoTitle(t *testing.T) {
 	theme := DefaultTheme()
 	frame := RenderOverlayFrame(theme, OverlayFrameModel{
