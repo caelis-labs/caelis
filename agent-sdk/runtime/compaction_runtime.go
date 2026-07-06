@@ -155,7 +155,7 @@ func (r *Runtime) compactAfterOverflow(
 	req agent.RunRequest,
 	cause error,
 	sink *runner,
-) (bool, error) {
+) (compactionProgress, bool, error) {
 	return r.compactAndNotify(ctx, activeSession, ref, turnID, nil, sink, func(events []*session.Event) (compact.Result, error) {
 		return r.compactor.CompactOnOverflow(ctx, compact.Request{
 			Session:    activeSession,
@@ -173,10 +173,10 @@ func (r *Runtime) compactAfterModelRequestWatermark(
 	turnID string,
 	decision autoCompactDecision,
 	sink *runner,
-) (bool, error) {
+) (compactionProgress, bool, error) {
 	forceCompactor, ok := r.compactor.(compact.ForceEngine)
 	if !ok {
-		return false, errors.New("agent-sdk/runtime: compactor does not support forced model-request compaction")
+		return compactionProgress{}, false, errors.New("agent-sdk/runtime: compactor does not support forced model-request compaction")
 	}
 	trigger := strings.TrimSpace(decision.Reason)
 	if trigger == "" {
@@ -204,35 +204,74 @@ func (r *Runtime) compactAndNotify(
 	events []*session.Event,
 	sink *runner,
 	compactFn func([]*session.Event) (compact.Result, error),
-) (bool, error) {
+) (compactionProgress, bool, error) {
 	if compactFn == nil {
-		return false, errors.New("agent-sdk/runtime: compact function is required")
+		return compactionProgress{}, false, errors.New("agent-sdk/runtime: compact function is required")
 	}
 	var err error
 	if events == nil {
 		events, err = r.sessions.Events(ctx, session.EventsRequest{SessionRef: ref})
 		if err != nil {
-			return false, err
+			return compactionProgress{}, false, err
 		}
 	}
 	result, err := compactFn(events)
 	if err != nil {
 		r.publishCompactFailureNotice(activeSession, turnID, sink, err)
-		return false, err
+		return compactionProgress{}, false, err
 	}
 	if !result.Compacted || result.CompactEvent == nil {
-		return false, nil
+		return compactionProgress{}, false, nil
 	}
-	_, err = r.persistCompactionArtifacts(ctx, activeSession, ref, result)
+	if progress := compactionProgressFromEvent(result.CompactEvent); progress.hasCompactData && !progress.hasSourceProgress() {
+		return compactionProgress{}, true, nil
+	}
+	persisted, err := r.persistCompactionArtifacts(ctx, activeSession, ref, result)
 	if err != nil {
 		r.publishCompactFailureNotice(activeSession, turnID, sink, err)
-		return false, err
+		return compactionProgress{}, false, err
 	}
 	if sink != nil {
 		notice := buildCompactNoticeEvent(activeSession, turnID, r.now())
 		sink.publishEvent(normalizeEvent(activeSession, turnID, notice))
 	}
-	return true, nil
+	return compactionProgressFromEvent(persisted), true, nil
+}
+
+type compactionProgress struct {
+	eventID             string
+	hasCompactData      bool
+	sourceEventCount    int
+	summarizedThroughID string
+}
+
+func compactionProgressFromEvent(event *session.Event) compactionProgress {
+	if event == nil {
+		return compactionProgress{}
+	}
+	progress := compactionProgress{
+		eventID: strings.TrimSpace(event.ID),
+	}
+	if data, ok := compact.CompactEventDataFromEvent(event); ok {
+		progress.hasCompactData = true
+		progress.sourceEventCount = data.SourceEventCount
+		progress.summarizedThroughID = strings.TrimSpace(data.SummarizedThroughID)
+	}
+	return progress
+}
+
+func (p compactionProgress) madeDurableProgress() bool {
+	if strings.TrimSpace(p.eventID) == "" {
+		return false
+	}
+	if !p.hasCompactData {
+		return true
+	}
+	return p.hasSourceProgress()
+}
+
+func (p compactionProgress) hasSourceProgress() bool {
+	return p.sourceEventCount > 0 || p.summarizedThroughID != ""
 }
 
 func (r *Runtime) publishCompactFailureNotice(activeSession session.Session, turnID string, sink *runner, cause error) {

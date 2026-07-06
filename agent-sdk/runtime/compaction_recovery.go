@@ -74,26 +74,26 @@ func (r *Runtime) recoverByCompacting(
 	req agent.RunRequest,
 	recovery compactionRecovery,
 	sink *runner,
-) (bool, error) {
+) (compactionProgress, bool, error) {
 	switch recovery.kind {
 	case compactionRecoveryKindWatermark, compactionRecoveryKindRetryExhausted:
 		return r.compactAfterModelRequestWatermark(ctx, activeSession, ref, turnID, recovery.decision, sink)
 	case compactionRecoveryKindOverflow:
 		return r.compactAfterOverflow(ctx, activeSession, ref, turnID, req, recovery.cause, sink)
 	default:
-		return false, fmt.Errorf("agent-sdk/runtime: unknown compaction recovery kind %q", recovery.kind)
+		return compactionProgress{}, false, fmt.Errorf("agent-sdk/runtime: unknown compaction recovery kind %q", recovery.kind)
 	}
 }
 
-func (r compactionRecovery) limitError(limit int, cause error) error {
+func (r compactionRecovery) noProgressError(cause error) error {
 	switch r.kind {
 	case compactionRecoveryKindWatermark:
-		return fmt.Errorf("agent-sdk/runtime: model-request watermark persisted after %d compaction recoveries: %w", limit, cause)
+		return fmt.Errorf("agent-sdk/runtime: model-request watermark recovery made no durable compact progress: %w", cause)
 	case compactionRecoveryKindRetryExhausted:
-		return fmt.Errorf("agent-sdk/runtime: high-water retry exhaustion persisted after %d compaction recoveries: %w", limit, cause)
+		return fmt.Errorf("agent-sdk/runtime: high-water retry exhaustion recovery made no durable compact progress: %w", cause)
 	case compactionRecoveryKindOverflow:
-		return fmt.Errorf("agent-sdk/runtime: context overflow persisted after %d compaction recoveries: %w", limit, cause)
+		return fmt.Errorf("agent-sdk/runtime: context overflow recovery made no durable compact progress: %w", cause)
 	default:
-		return fmt.Errorf("agent-sdk/runtime: compaction recovery %q persisted after %d compaction recoveries: %w", r.kind, limit, cause)
+		return fmt.Errorf("agent-sdk/runtime: compaction recovery %q made no durable compact progress: %w", r.kind, cause)
 	}
 }

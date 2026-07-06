@@ -22,8 +22,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 )
 
-const overflowCompactionRecoveryLimit = 3
-
 // Config defines one baseline local runtime instance.
 type Config struct {
 	Sessions                 session.Service

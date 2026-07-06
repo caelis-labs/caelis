@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"iter"
 	"strings"
 	"testing"
@@ -98,6 +99,82 @@ type retryExhaustedHighWaterModel struct {
 	compactionCalls         int
 	sawPostToolRetryRequest bool
 	sawCheckpointOnRetry    bool
+}
+
+type repeatedWatermarkModel struct {
+	t                    *testing.T
+	toolCallsBeforeFinal int
+	normalCalls          int
+	compactionCalls      int
+	checkpointRequests   int
+}
+
+func (m *repeatedWatermarkModel) Name() string { return "repeated-watermark" }
+
+func (m *repeatedWatermarkModel) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
+	if strings.Contains(requestInstructionsText(req), "CONTEXT CHECKPOINT COMPACTION") {
+		m.compactionCalls++
+		return func(yield func(*model.StreamEvent, error) bool) {
+			yield(model.StreamEventFromResponse(&model.Response{
+				Message: model.NewTextMessage(model.RoleAssistant, `CONTEXT CHECKPOINT
+
+## Current Objective
+- Continue a long tool-assisted turn that may require repeated compaction.
+
+## Progress
+- Prior ECHO tool progress has been summarized.
+
+## Next Actions
+1. Continue the turn from this checkpoint.`),
+				TurnComplete: true,
+				StepComplete: true,
+				Status:       model.ResponseStatusCompleted,
+			}), nil)
+		}
+	}
+
+	m.normalCalls++
+	callIndex := m.normalCalls
+	if callIndex > 1 {
+		requestText := strings.Join(requestMessageTexts(req), "\n")
+		if !strings.Contains(requestText, "CONTEXT CHECKPOINT") {
+			m.t.Fatalf("request %d missing compact checkpoint: %s", callIndex, requestText)
+		}
+		m.checkpointRequests++
+	}
+	return func(yield func(*model.StreamEvent, error) bool) {
+		if callIndex <= m.toolCallsBeforeFinal {
+			yield(model.StreamEventFromResponse(&model.Response{
+				Message: model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
+					ID:   fmt.Sprintf("call-repeated-%d", callIndex),
+					Name: "ECHO",
+					Args: fmt.Sprintf(`{"step":%d}`, callIndex),
+				}}, ""),
+				TurnComplete: true,
+				StepComplete: true,
+				Status:       model.ResponseStatusCompleted,
+				FinishReason: model.FinishReasonToolCalls,
+				Usage: model.Usage{
+					PromptTokens:     190,
+					CompletionTokens: 5,
+					TotalTokens:      195,
+				},
+			}), nil)
+			return
+		}
+		yield(model.StreamEventFromResponse(&model.Response{
+			Message:      model.NewTextMessage(model.RoleAssistant, "finished after repeated compactions"),
+			TurnComplete: true,
+			StepComplete: true,
+			Status:       model.ResponseStatusCompleted,
+			FinishReason: model.FinishReasonStop,
+			Usage: model.Usage{
+				PromptTokens:     80,
+				CompletionTokens: 5,
+				TotalTokens:      85,
+			},
+		}), nil)
+	}
 }
 
 func (m *retryExhaustedHighWaterModel) Name() string { return "retry-exhausted-high-water" }

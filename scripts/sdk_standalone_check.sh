@@ -7,11 +7,17 @@ cd "${ROOT}"
 SDK_SRC="${ROOT}/agent-sdk"
 
 CACHE_ROOT="${CACHE_ROOT:-${ROOT}/.tmp/cache}"
+export GOPATH="${CACHE_ROOT}/gopath"
 export GOMODCACHE="${GOMODCACHE:-${CACHE_ROOT}/gomod}"
 export GOCACHE="${GOCACHE:-${CACHE_ROOT}/gocache}"
 export GOTMPDIR="${GOTMPDIR:-${CACHE_ROOT}/gotmp}"
 export GOWORK=off
-mkdir -p "${GOMODCACHE}" "${GOCACHE}" "${GOTMPDIR}"
+if [[ -n "${GOFLAGS:-}" ]]; then
+  export GOFLAGS="${GOFLAGS} -buildvcs=false"
+else
+  export GOFLAGS="-buildvcs=false"
+fi
+mkdir -p "${GOPATH}" "${GOMODCACHE}" "${GOCACHE}" "${GOTMPDIR}"
 
 CAELIS_MODULE="github.com/caelis-labs/caelis"
 SDK_MODULE="github.com/caelis-labs/caelis/agent-sdk"

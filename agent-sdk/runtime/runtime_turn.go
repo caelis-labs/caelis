@@ -76,7 +76,6 @@ func (r *Runtime) runWithOverflowRecovery(
 	batch *[]*session.Event,
 	sink *runner,
 ) error {
-	compactionRecoveries := 0
 	for {
 		attemptBatch, _, inputPersisted, err := r.runAttempt(ctx, activeSession, ref, runID, turnID, req, pendingInput, sink)
 		if inputPersisted {
@@ -88,17 +87,16 @@ func (r *Runtime) runWithOverflowRecovery(
 		}
 		if recovery, ok := compactionRecoveryFromError(err); ok {
 			*batch = append(*batch, attemptBatch...)
-			if compactionRecoveries >= overflowCompactionRecoveryLimit {
-				return recovery.limitError(overflowCompactionRecoveryLimit, err)
-			}
-			compacted, compactErr := r.recoverByCompacting(ctx, activeSession, ref, turnID, req, recovery, sink)
+			progress, compacted, compactErr := r.recoverByCompacting(ctx, activeSession, ref, turnID, req, recovery, sink)
 			if compactErr != nil {
 				return compactErr
 			}
 			if !compacted {
 				return err
 			}
-			compactionRecoveries++
+			if !progress.madeDurableProgress() {
+				return recovery.noProgressError(err)
+			}
 			continue
 		}
 		*batch = append(*batch, attemptBatch...)

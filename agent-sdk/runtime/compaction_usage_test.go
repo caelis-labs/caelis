@@ -136,52 +136,52 @@ func TestDynamicCompactionDefaultsByContextWindow(t *testing.T) {
 		{
 			name:          "1m",
 			window:        1_000_000,
-			wantReserve:   62500,
-			wantSafety:    16000,
-			wantEffective: 921500,
-			wantSoft:      0.90,
-			wantForce:     0.96,
-			wantEmergency: 0.98,
+			wantReserve:   32000,
+			wantSafety:    8000,
+			wantEffective: 960000,
+			wantSoft:      0.99,
+			wantForce:     0.995,
+			wantEmergency: 0.998,
 		},
 		{
 			name:          "200k",
 			window:        200000,
-			wantReserve:   16666,
-			wantSafety:    8000,
-			wantEffective: 175334,
-			wantSoft:      0.86,
-			wantForce:     0.93,
-			wantEmergency: 0.96,
+			wantReserve:   8000,
+			wantSafety:    2048,
+			wantEffective: 189952,
+			wantSoft:      0.95,
+			wantForce:     0.98,
+			wantEmergency: 0.99,
 		},
 		{
 			name:          "128k",
 			window:        128000,
-			wantReserve:   12000,
-			wantSafety:    4096,
-			wantEffective: 111904,
-			wantSoft:      0.82,
-			wantForce:     0.90,
-			wantEmergency: 0.94,
+			wantReserve:   4096,
+			wantSafety:    1536,
+			wantEffective: 122368,
+			wantSoft:      0.90,
+			wantForce:     0.94,
+			wantEmergency: 0.97,
 		},
 		{
 			name:          "64k",
 			window:        64000,
-			wantReserve:   6000,
-			wantSafety:    2048,
-			wantEffective: 55952,
-			wantSoft:      0.76,
-			wantForce:     0.86,
-			wantEmergency: 0.92,
+			wantReserve:   4096,
+			wantSafety:    1536,
+			wantEffective: 58368,
+			wantSoft:      0.88,
+			wantForce:     0.93,
+			wantEmergency: 0.96,
 		},
 		{
 			name:          "32k",
 			window:        32000,
-			wantReserve:   4000,
-			wantSafety:    1536,
-			wantEffective: 26464,
-			wantSoft:      0.70,
-			wantForce:     0.80,
-			wantEmergency: 0.88,
+			wantReserve:   2048,
+			wantSafety:    1024,
+			wantEffective: 28928,
+			wantSoft:      0.82,
+			wantForce:     0.90,
+			wantEmergency: 0.94,
 		},
 		{
 			name:          "small",
@@ -189,9 +189,9 @@ func TestDynamicCompactionDefaultsByContextWindow(t *testing.T) {
 			wantReserve:   2048,
 			wantSafety:    1024,
 			wantEffective: 12928,
-			wantSoft:      0.65,
-			wantForce:     0.75,
-			wantEmergency: 0.84,
+			wantSoft:      0.78,
+			wantForce:     0.88,
+			wantEmergency: 0.92,
 		},
 	}
 
@@ -219,6 +219,37 @@ func TestDynamicCompactionDefaultsByContextWindow(t *testing.T) {
 	}
 }
 
+func TestDynamicCompactionDefaultsFor112KTriggerNear85PercentRaw(t *testing.T) {
+	t.Parallel()
+
+	const (
+		window       = 112000
+		wantSoftRaw  = 0.855
+		wantForceRaw = 0.892
+		tolerance    = 0.01
+	)
+	reserve := resolveReserveOutputTokens(window, 0)
+	safety := resolveSafetyMarginTokens(window, 0)
+	effective := resolveEffectiveInputBudget(window, reserve, safety)
+	soft, force := dynamicWatermarks(window, 0, 0)
+
+	softRaw := float64(effective) * soft / float64(window)
+	forceRaw := float64(effective) * force / float64(window)
+	if diff := absFloat64(softRaw - wantSoftRaw); diff > tolerance {
+		t.Fatalf("112k soft raw trigger = %.4f, want %.4f +/- %.4f", softRaw, wantSoftRaw, tolerance)
+	}
+	if diff := absFloat64(forceRaw - wantForceRaw); diff > tolerance {
+		t.Fatalf("112k force raw trigger = %.4f, want %.4f +/- %.4f", forceRaw, wantForceRaw, tolerance)
+	}
+}
+
+func absFloat64(value float64) float64 {
+	if value < 0 {
+		return -value
+	}
+	return value
+}
+
 func TestEvaluateWatermarkUsesSharedThresholds(t *testing.T) {
 	t.Parallel()
 
@@ -233,9 +264,9 @@ func TestEvaluateWatermarkUsesSharedThresholds(t *testing.T) {
 		want       bool
 		wantReason string
 	}{
-		{name: "below", total: 819},
-		{name: "soft", total: 820, want: true, wantReason: "context_watermark"},
-		{name: "force", total: 900, want: true, wantReason: "context_limit"},
+		{name: "below", total: 899},
+		{name: "soft", total: 900, want: true, wantReason: "context_watermark"},
+		{name: "force", total: 940, want: true, wantReason: "context_limit"},
 	}
 
 	for _, tt := range tests {

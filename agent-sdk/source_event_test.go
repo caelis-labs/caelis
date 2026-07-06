@@ -9,9 +9,10 @@ import (
 func TestCloneSourceEventClonesCanonicalOnly(t *testing.T) {
 	t.Parallel()
 
+	native := map[string]any{"opaque": true}
 	original := SourceEvent{
 		Canonical: &session.Event{ID: "e1", Type: session.EventTypeAssistant, Text: "hi"},
-		Native:    map[string]any{"opaque": true},
+		Native:    native,
 	}
 	cloned := CloneSourceEvent(original)
 	if cloned.Canonical == nil || cloned.Canonical.ID != "e1" {
@@ -20,7 +21,12 @@ func TestCloneSourceEventClonesCanonicalOnly(t *testing.T) {
 	if cloned.Canonical == original.Canonical {
 		t.Fatal("cloned canonical should be a deep copy")
 	}
-	if cloned.Native != original.Native {
-		t.Fatalf("cloned native = %#v, want opaque passthrough by reference", cloned.Native)
+	clonedNative, ok := cloned.Native.(map[string]any)
+	if !ok {
+		t.Fatalf("cloned native = %T, want opaque map passthrough", cloned.Native)
+	}
+	native["opaque"] = false
+	if got := clonedNative["opaque"]; got != false {
+		t.Fatalf("cloned native opaque = %#v, want passthrough by reference", got)
 	}
 }

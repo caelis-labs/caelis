@@ -406,51 +406,53 @@ func policyForContextWindow(window int) contextWindowPolicy {
 	switch {
 	case window >= 1_000_000:
 		return contextWindowPolicy{
-			reserveOutputTokens: min(max(window/16, 32000), 64000),
-			safetyMarginTokens:  min(max(window/64, 16000), 32000),
-			softWatermark:       0.90,
-			forceWatermark:      0.96,
-			emergencyWatermark:  0.98,
+			reserveOutputTokens: min(max(window/32, 32000), 64000),
+			safetyMarginTokens:  min(max(window/128, 8000), 16000),
+			softWatermark:       0.99,
+			forceWatermark:      0.995,
+			emergencyWatermark:  0.998,
 		}
 	case window >= 200000:
 		return contextWindowPolicy{
-			reserveOutputTokens: min(max(window/12, 16000), 24000),
-			safetyMarginTokens:  8000,
-			softWatermark:       0.86,
-			forceWatermark:      0.93,
-			emergencyWatermark:  0.96,
+			reserveOutputTokens: min(max(window/32, 8000), 24000),
+			safetyMarginTokens:  min(max(window/256, 2048), 8000),
+			softWatermark:       0.95,
+			forceWatermark:      0.98,
+			emergencyWatermark:  0.99,
 		}
-	case window >= 128000:
+	case window >= 96000:
+		// Keep 96k-199k models around an 85% raw-window soft trigger after
+		// output reserve and safety margin are accounted for.
 		return contextWindowPolicy{
-			reserveOutputTokens: 12000,
-			safetyMarginTokens:  4096,
-			softWatermark:       0.82,
-			forceWatermark:      0.90,
-			emergencyWatermark:  0.94,
+			reserveOutputTokens: 4096,
+			safetyMarginTokens:  1536,
+			softWatermark:       0.90,
+			forceWatermark:      0.94,
+			emergencyWatermark:  0.97,
 		}
 	case window >= 64000:
 		return contextWindowPolicy{
-			reserveOutputTokens: 6000,
-			safetyMarginTokens:  2048,
-			softWatermark:       0.76,
-			forceWatermark:      0.86,
-			emergencyWatermark:  0.92,
+			reserveOutputTokens: 4096,
+			safetyMarginTokens:  1536,
+			softWatermark:       0.88,
+			forceWatermark:      0.93,
+			emergencyWatermark:  0.96,
 		}
 	case window >= 32000:
 		return contextWindowPolicy{
-			reserveOutputTokens: 4000,
-			safetyMarginTokens:  1536,
-			softWatermark:       0.70,
-			forceWatermark:      0.80,
-			emergencyWatermark:  0.88,
+			reserveOutputTokens: 2048,
+			safetyMarginTokens:  1024,
+			softWatermark:       0.82,
+			forceWatermark:      0.90,
+			emergencyWatermark:  0.94,
 		}
 	default:
 		return contextWindowPolicy{
 			reserveOutputTokens: 2048,
 			safetyMarginTokens:  1024,
-			softWatermark:       0.65,
-			forceWatermark:      0.75,
-			emergencyWatermark:  0.84,
+			softWatermark:       0.78,
+			forceWatermark:      0.88,
+			emergencyWatermark:  0.92,
 		}
 	}
 }
