@@ -319,6 +319,14 @@ func cleanExistingPath(path string) string {
 	if resolved, err := filepath.EvalSymlinks(path); err == nil {
 		return filepath.Clean(resolved)
 	}
+	// Walk up to the nearest existing ancestor so that symlinked
+	// prefixes (e.g. /var → /private/var on macOS) are resolved even
+	// when the full target path does not exist yet.
+	parent := filepath.Dir(path)
+	if parent != path {
+		resolvedParent := cleanExistingPath(parent)
+		return filepath.Join(resolvedParent, filepath.Base(path))
+	}
 	return path
 }
 
