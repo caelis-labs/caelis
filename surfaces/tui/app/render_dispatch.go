@@ -443,8 +443,7 @@ func (m *Model) handleAttachmentCountMsg(msg AttachmentCountMsg) tea.Model {
 
 func (m *Model) handleUserMessageMsg(msg UserMessageMsg) tea.Model {
 	return m.applyGatewayUserEcho(gatewayUserEchoOptions{
-		displayLine:      msg.Text,
-		finalizeMainTurn: true,
+		displayLine: msg.Text,
 	})
 }
 
@@ -494,7 +493,7 @@ func (m *Model) mainACPTurnBlockAllowsUserEchoDedup(block *MainACPTurnBlock) boo
 	if m == nil || block == nil {
 		return false
 	}
-	return turnBlockAllowsUserEchoDedup(m.activeMainACPTurnID, block.BlockID(), block.EndedAt, len(block.Events))
+	return turnBlockAllowsUserEchoDedup(m.mainTimelineTailID, block.BlockID(), block.EndedAt, len(block.Events))
 }
 
 func (m *Model) participantTurnBlockAllowsUserEchoDedup(block *ParticipantTurnBlock, participantTurnKey string) bool {
@@ -576,6 +575,8 @@ func (m *Model) handleTaskResultMsg(msg TaskResultMsg) (tea.Model, tea.Cmd) {
 			m.commitLine(errLine)
 			m.ensureViewportLayout()
 			m.syncViewportContent()
+		} else {
+			m.renderNextAcceptedPendingPrompt()
 		}
 		return m, nil
 	}

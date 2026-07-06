@@ -6,11 +6,18 @@ import (
 	"time"
 )
 
+// SubmissionMode controls how a surface routes a user submission.
+//
+// The default mode starts a new turn. Surfaces that intend to steer a running
+// turn must opt in with SubmissionModeActiveTurn; adapters must not infer that
+// from ambient active-run state.
 type SubmissionMode string
 
 const (
 	SubmissionModeDefault SubmissionMode = ""
 	SubmissionModeOverlay SubmissionMode = "overlay"
+	// SubmissionModeActiveTurn appends input to the currently running turn.
+	SubmissionModeActiveTurn SubmissionMode = "active_turn"
 )
 
 // Attachment describes media associated with a prompt at a rune offset.

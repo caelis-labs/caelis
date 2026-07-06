@@ -1,7 +1,6 @@
 package tuiapp
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -351,61 +350,6 @@ func visiblePlanEntries(entries []planEntryState, limit int) ([]planEntryState, 
 	end := minInt(len(entries), start+limit)
 	visible := append([]planEntryState(nil), entries[start:end]...)
 	return visible, len(entries) - len(visible), start
-}
-
-func (m *Model) pendingQueueHintText() string {
-	count := len(m.pendingQueue)
-	if count == 0 {
-		return ""
-	}
-	if count > 1 {
-		return fmt.Sprintf("%d pending messages", count)
-	}
-	return "1 pending message"
-}
-
-func (m *Model) renderPendingQueueDrawer() string {
-	if len(m.pendingQueue) == 0 || m.width <= 0 {
-		return ""
-	}
-	contentWidth := maxInt(1, m.mainColumnWidth()-(inputHorizontalInset*2))
-	lines := []string{m.theme.SeparatorStyle().Render(strings.Repeat("─", contentWidth))}
-	pending := m.pendingQueue[len(m.pendingQueue)-1]
-	text := strings.TrimSpace(pending.displayLine)
-	if text == "" {
-		text = strings.TrimSpace(pending.execLine)
-	}
-	if pendingLine := m.renderPendingSubmissionLine(text); pendingLine != "" {
-		lines = append(lines, pendingLine)
-	}
-	return insetRenderedBlock(strings.Join(lines, "\n"), inputHorizontalInset)
-}
-
-func (m *Model) takeNextDeferredPendingPrompt() (pendingPrompt, bool) {
-	if len(m.pendingQueue) == 0 {
-		return pendingPrompt{}, false
-	}
-	for i, pending := range m.pendingQueue {
-		if pending.dispatched {
-			continue
-		}
-		m.pendingQueue = append(m.pendingQueue[:i], m.pendingQueue[i+1:]...)
-		return pending, true
-	}
-	return pendingPrompt{}, false
-}
-
-func (m *Model) discardDispatchedPendingPrompts() {
-	if len(m.pendingQueue) == 0 {
-		return
-	}
-	out := m.pendingQueue[:0]
-	for _, pending := range m.pendingQueue {
-		if !pending.dispatched {
-			out = append(out, pending)
-		}
-	}
-	m.pendingQueue = out
 }
 
 func (m *Model) renderInputBar() string {

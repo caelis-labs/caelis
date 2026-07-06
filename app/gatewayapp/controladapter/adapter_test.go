@@ -354,7 +354,7 @@ func TestAdapterSubmitRoutesActiveSessionInputToActiveTurn(t *testing.T) {
 		t.Fatalf("NewAdapter() error = %v", err)
 	}
 
-	turn, err := driver.Submit(ctx, Submission{Text: "  steer next step  ", DisplayText: "$cmpctl steer next step"})
+	turn, err := driver.Submit(ctx, Submission{Text: "  steer next step  ", DisplayText: "$cmpctl steer next step", Mode: SubmissionModeActiveTurn})
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
@@ -375,6 +375,183 @@ func TestAdapterSubmitRoutesActiveSessionInputToActiveTurn(t *testing.T) {
 	}
 	if _, ok := gw.activeSubmits[0].Metadata["display_text"]; ok {
 		t.Fatalf("active submit metadata contains legacy display_text: %#v", gw.activeSubmits[0].Metadata)
+	}
+}
+
+func TestAdapterSubmitDefaultModeStartsNewTurnDespiteActiveKernelTurn(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	activeSession := session.Session{
+		SessionRef: session.SessionRef{
+			AppName: "caelis", UserID: "user-1", SessionID: "active-session", WorkspaceKey: "ws",
+		},
+		CWD: t.TempDir(),
+	}
+	gw := &activeSubmitGatewayService{
+		active: []gateway.ActiveTurnState{{
+			SessionRef: activeSession.SessionRef,
+			Kind:       gateway.ActiveTurnKindKernel,
+			HandleID:   "handle-1",
+			RunID:      "run-1",
+			TurnID:     "turn-1",
+		}},
+	}
+	driver, err := NewAdapter(ctx, &RuntimeStack{
+		Gateway: gatewayRuntimeDepsForTest(gw),
+		Session: SessionRuntimeDeps{
+			Workspace: session.WorkspaceRef{Key: "ws", CWD: activeSession.CWD},
+			StartFn: func(context.Context, string, string) (session.Session, error) {
+				return activeSession, nil
+			},
+		},
+		Sandbox: SandboxRuntimeDeps{
+			StatusFn: func() SandboxStatus { return SandboxStatus{RequestedBackend: "host"} },
+		},
+	}, activeSession.SessionID, "surface", "")
+	if err != nil {
+		t.Fatalf("NewAdapter() error = %v", err)
+	}
+
+	_, err = driver.Submit(ctx, Submission{Text: "  fresh prompt after resume  "})
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	if got := len(gw.activeSubmits); got != 0 {
+		t.Fatalf("active submits = %d, want 0 for default submission", got)
+	}
+	if gw.beginCalls != 1 {
+		t.Fatalf("BeginTurn calls = %d, want 1 default main turn", gw.beginCalls)
+	}
+	if got := gw.beginReqs[0].Input; got != "fresh prompt after resume" {
+		t.Fatalf("BeginTurn Input = %q, want trimmed prompt", got)
+	}
+}
+
+func TestAdapterSubmitActiveTurnRequiresActiveKernelTurn(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name           string
+		controllerKind session.ControllerKind
+		active         []gateway.ActiveTurnState
+	}{
+		{name: "no active turn"},
+		{name: "acp controller session", controllerKind: session.ControllerKindACP, active: []gateway.ActiveTurnState{{
+			SessionRef: session.SessionRef{AppName: "caelis", UserID: "user-1", SessionID: "active-session", WorkspaceKey: "ws"},
+			Kind:       gateway.ActiveTurnKindKernel,
+			HandleID:   "handle-1",
+			RunID:      "run-1",
+			TurnID:     "turn-1",
+		}}},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx := context.Background()
+			activeSession := session.Session{
+				SessionRef: session.SessionRef{
+					AppName: "caelis", UserID: "user-1", SessionID: "active-session", WorkspaceKey: "ws",
+				},
+				CWD:        t.TempDir(),
+				Controller: session.ControllerBinding{Kind: tc.controllerKind},
+			}
+			gw := &activeSubmitGatewayService{active: tc.active}
+			driver, err := NewAdapter(ctx, &RuntimeStack{
+				Gateway: gatewayRuntimeDepsForTest(gw),
+				Session: SessionRuntimeDeps{
+					Workspace: session.WorkspaceRef{Key: "ws", CWD: activeSession.CWD},
+					StartFn: func(context.Context, string, string) (session.Session, error) {
+						return activeSession, nil
+					},
+				},
+				Sandbox: SandboxRuntimeDeps{
+					StatusFn: func() SandboxStatus { return SandboxStatus{RequestedBackend: "host"} },
+				},
+			}, activeSession.SessionID, "surface", "")
+			if err != nil {
+				t.Fatalf("NewAdapter() error = %v", err)
+			}
+
+			turn, err := driver.Submit(ctx, Submission{Text: "steer running turn", Mode: SubmissionModeActiveTurn})
+			assertNoActiveRunError(t, err)
+			if turn != nil {
+				t.Fatalf("Submit() turn = %#v, want nil", turn)
+			}
+			if got := len(gw.activeSubmits); got != 0 {
+				t.Fatalf("active submits = %d, want 0", got)
+			}
+			if gw.beginCalls != 0 {
+				t.Fatalf("BeginTurn calls = %d, want 0", gw.beginCalls)
+			}
+		})
+	}
+}
+
+func TestAdapterSubmitActiveTurnNoActiveRunErrorDoesNotBeginTurn(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	activeSession := session.Session{
+		SessionRef: session.SessionRef{
+			AppName: "caelis", UserID: "user-1", SessionID: "active-session", WorkspaceKey: "ws",
+		},
+		CWD: t.TempDir(),
+	}
+	gw := &activeSubmitGatewayService{
+		active: []gateway.ActiveTurnState{{
+			SessionRef: activeSession.SessionRef,
+			Kind:       gateway.ActiveTurnKindKernel,
+			HandleID:   "handle-1",
+			RunID:      "run-1",
+			TurnID:     "turn-1",
+		}},
+		activeErr: &gateway.Error{
+			Kind:        gateway.KindConflict,
+			Code:        gateway.CodeNoActiveRun,
+			UserVisible: true,
+			Message:     "gateway: no active run is available for this session",
+		},
+	}
+	driver, err := NewAdapter(ctx, &RuntimeStack{
+		Gateway: gatewayRuntimeDepsForTest(gw),
+		Session: SessionRuntimeDeps{
+			Workspace: session.WorkspaceRef{Key: "ws", CWD: activeSession.CWD},
+			StartFn: func(context.Context, string, string) (session.Session, error) {
+				return activeSession, nil
+			},
+		},
+		Sandbox: SandboxRuntimeDeps{
+			StatusFn: func() SandboxStatus { return SandboxStatus{RequestedBackend: "host"} },
+		},
+	}, activeSession.SessionID, "surface", "")
+	if err != nil {
+		t.Fatalf("NewAdapter() error = %v", err)
+	}
+
+	turn, err := driver.Submit(ctx, Submission{Text: "steer running turn", Mode: SubmissionModeActiveTurn})
+	assertNoActiveRunError(t, err)
+	if turn != nil {
+		t.Fatalf("Submit() turn = %#v, want nil", turn)
+	}
+	if got := len(gw.activeSubmits); got != 1 {
+		t.Fatalf("active submits = %d, want 1 attempted active submit", got)
+	}
+	if gw.beginCalls != 0 {
+		t.Fatalf("BeginTurn calls = %d, want 0 after no_active_run", gw.beginCalls)
+	}
+}
+
+func assertNoActiveRunError(t *testing.T, err error) {
+	t.Helper()
+	var gwErr *gateway.Error
+	if !errors.As(err, &gwErr) {
+		t.Fatalf("Submit() error = %v, want gateway error", err)
+	}
+	if gwErr.Code != gateway.CodeNoActiveRun {
+		t.Fatalf("gateway error code = %q, want %q", gwErr.Code, gateway.CodeNoActiveRun)
 	}
 }
 
@@ -4138,6 +4315,7 @@ func (g *sideAgentRollbackGatewayService) DetachParticipant(_ context.Context, r
 type activeSubmitGatewayService struct {
 	active        []gateway.ActiveTurnState
 	activeSubmits []gateway.SubmitActiveTurnRequest
+	activeErr     error
 	beginReqs     []gateway.BeginTurnRequest
 	beginCalls    int
 }
@@ -4152,7 +4330,7 @@ func (g *activeSubmitGatewayService) BeginTurn(_ context.Context, req gateway.Be
 
 func (g *activeSubmitGatewayService) SubmitActiveTurn(_ context.Context, req gateway.SubmitActiveTurnRequest) error {
 	g.activeSubmits = append(g.activeSubmits, req)
-	return nil
+	return g.activeErr
 }
 
 func (g *activeSubmitGatewayService) Interrupt(context.Context, gateway.InterruptRequest) error {

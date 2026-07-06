@@ -9,7 +9,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -910,7 +909,7 @@ func TestHandleACPEventEnvelopeSuppressesDuplicateUserMessageAfterMainTurnStarts
 		TurnID:    "turn-1",
 		Lifecycle: &eventstream.Lifecycle{State: "running"},
 	})
-	if strings.TrimSpace(model.activeMainACPTurnID) == "" {
+	if strings.TrimSpace(model.mainTimelineTailID) == "" {
 		t.Fatal("main ACP turn did not start before user echo")
 	}
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
@@ -933,7 +932,7 @@ func TestHandleACPEventEnvelopeSuppressesDuplicateUserMessageAfterMainTurnStarts
 	if userBlocks != 1 {
 		t.Fatalf("userBlocks = %d, want started main ACP turn to absorb gateway user echo", userBlocks)
 	}
-	if strings.TrimSpace(model.activeMainACPTurnID) == "" {
+	if strings.TrimSpace(model.mainTimelineTailID) == "" {
 		t.Fatal("duplicate user echo closed the active main ACP turn")
 	}
 }
@@ -1080,7 +1079,7 @@ func TestHandleACPEventEnvelopeRendersQueuedRepeatedParticipantUserMessage(t *te
 	model.pendingQueue = append(model.pendingQueue, pendingPrompt{
 		execLine:    display,
 		displayLine: display,
-		dispatched:  true,
+		state:       pendingPromptDispatched,
 	})
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind:          eventstream.KindSessionUpdate,
@@ -1163,13 +1162,32 @@ func TestDequeuePendingUserMessageAnyIgnoresEmptyNeedles(t *testing.T) {
 	model.pendingQueue = append(model.pendingQueue, pendingPrompt{
 		execLine:    "@bela hello",
 		displayLine: "@bela hello",
-		dispatched:  true,
+		state:       pendingPromptDispatched,
 	})
-	if model.dequeuePendingUserMessageAny("", "   ") {
-		t.Fatal("dequeuePendingUserMessageAny(empty) = true, want false")
+	if _, matched := model.pendingQueue.matchGatewayEcho("", "   "); matched {
+		t.Fatal("pendingQueue.matchGatewayEcho(empty) = true, want false")
 	}
 	if len(model.pendingQueue) != 1 {
 		t.Fatalf("pendingQueue = %#v, want preserved queue", model.pendingQueue)
+	}
+}
+
+func TestDequeuePendingUserMessageAnyPreservesQueueOnMismatch(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.pendingQueue = append(model.pendingQueue,
+		pendingPrompt{execLine: "first pending", displayLine: "first pending", state: pendingPromptDispatched},
+		pendingPrompt{execLine: "second pending", displayLine: "second pending", state: pendingPromptDispatched},
+	)
+	if _, matched := model.pendingQueue.matchGatewayEcho("unrelated echo"); matched {
+		t.Fatal("pendingQueue.matchGatewayEcho(unrelated) = true, want false")
+	}
+	if len(model.pendingQueue) != 2 {
+		t.Fatalf("pendingQueue = %#v, want preserved queue on mismatch", model.pendingQueue)
+	}
+	if got := model.pendingQueue[0].displayText(); got != "first pending" {
+		t.Fatalf("first pending = %q, want preserved queue head", got)
 	}
 }
 
@@ -1181,7 +1199,7 @@ func TestHandleACPEventEnvelopeRendersQueuedRepeatedUserMessage(t *testing.T) {
 	model.pendingQueue = append(model.pendingQueue, pendingPrompt{
 		execLine:    "继续",
 		displayLine: "继续",
-		dispatched:  true,
+		state:       pendingPromptDispatched,
 	})
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind:      eventstream.KindLifecycle,
@@ -1212,6 +1230,211 @@ func TestHandleACPEventEnvelopeRendersQueuedRepeatedUserMessage(t *testing.T) {
 	}
 	if len(model.pendingQueue) != 0 {
 		t.Fatalf("pendingQueue = %#v, want queued prompt dequeued after gateway echo", model.pendingQueue)
+	}
+}
+
+func TestAcceptedActiveTurnPromptDisplaysBeforeFollowupMainOutput(t *testing.T) {
+	t.Parallel()
+
+	const prompt = "切换到国内源继续"
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(130, 0))
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		ScopeID:   "session-1",
+		TurnID:    "turn-1",
+		Final:     true,
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateAgentMessage,
+			Content:       schema.TextContent{Type: "text", Text: "before guidance"},
+		},
+	})
+	model.pendingQueue = append(model.pendingQueue, pendingPrompt{
+		execLine:    prompt,
+		displayLine: prompt,
+		state:       pendingPromptAwaitingActiveDisplay,
+	})
+
+	next, _ := model.handleTaskResultMsg(TaskResultMsg{ContinueRunning: true})
+	model = next.(*Model)
+	if got := model.pendingQueue.visibleCount(); got != 0 {
+		t.Fatalf("visible pending prompts = %d, want 0 after accepted active prompt display", got)
+	}
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		ScopeID:   "session-1",
+		TurnID:    "turn-1",
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateUserMessage,
+			Content:       schema.TextContent{Type: "text", Text: prompt},
+		},
+	})
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		ScopeID:   "session-1",
+		TurnID:    "turn-1",
+		Final:     true,
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateAgentMessage,
+			Content:       schema.TextContent{Type: "text", Text: "after guidance"},
+		},
+	})
+
+	assertMainTurnDocumentOrder(t, model, "before guidance", prompt, "after guidance")
+	if got := countUserNarrativeBlocksForTest(model, prompt); got != 1 {
+		t.Fatalf("user prompt blocks = %d, want one local display despite gateway echo", got)
+	}
+	if len(model.pendingQueue) != 0 {
+		t.Fatalf("pendingQueue = %#v, want active prompt dequeued by gateway echo", model.pendingQueue)
+	}
+}
+
+func TestActiveTurnPromptEchoBeforeContinueRunningDisplaysBeforeFollowupMainOutput(t *testing.T) {
+	t.Parallel()
+
+	const prompt = "切换到国内源继续"
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(130, 0))
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		ScopeID:   "session-1",
+		TurnID:    "turn-1",
+		Final:     true,
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateAgentMessage,
+			Content:       schema.TextContent{Type: "text", Text: "before guidance"},
+		},
+	})
+	model.pendingQueue = append(model.pendingQueue, pendingPrompt{
+		execLine:    prompt,
+		displayLine: prompt,
+		state:       pendingPromptAwaitingActiveDisplay,
+	})
+
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		ScopeID:   "session-1",
+		TurnID:    "turn-1",
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateUserMessage,
+			Content:       schema.TextContent{Type: "text", Text: prompt},
+		},
+	})
+	next, _ := model.handleTaskResultMsg(TaskResultMsg{ContinueRunning: true})
+	model = next.(*Model)
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		ScopeID:   "session-1",
+		TurnID:    "turn-1",
+		Final:     true,
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateAgentMessage,
+			Content:       schema.TextContent{Type: "text", Text: "after guidance"},
+		},
+	})
+
+	assertMainTurnDocumentOrder(t, model, "before guidance", prompt, "after guidance")
+	if got := countUserNarrativeBlocksForTest(model, prompt); got != 1 {
+		t.Fatalf("user prompt blocks = %d, want one gateway display", got)
+	}
+	if len(model.pendingQueue) != 0 {
+		t.Fatalf("pendingQueue = %#v, want active prompt dequeued by gateway echo", model.pendingQueue)
+	}
+}
+
+func TestActiveTurnPromptSurvivesTerminalBeforeContinueRunning(t *testing.T) {
+	t.Parallel()
+
+	const prompt = "继续补充约束"
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(130, 0))
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		ScopeID:   "session-1",
+		TurnID:    "turn-1",
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateAgentMessage,
+			Content:       schema.TextContent{Type: "text", Text: "before guidance"},
+		},
+	})
+	model.pendingQueue = append(model.pendingQueue, pendingPrompt{
+		execLine:    prompt,
+		displayLine: prompt,
+		state:       pendingPromptAwaitingActiveDisplay,
+	})
+
+	next, _ := model.handleTaskResultMsg(TaskResultMsg{SuppressTurnDivider: true})
+	model = next.(*Model)
+	if len(model.pendingQueue) != 1 || !model.pendingQueue[0].awaitsAcceptedActiveDisplay() {
+		t.Fatalf("pendingQueue after terminal = %#v, want active-turn correlation retained", model.pendingQueue)
+	}
+
+	next, _ = model.handleTaskResultMsg(TaskResultMsg{ContinueRunning: true})
+	model = next.(*Model)
+	if got := countUserNarrativeBlocksForTest(model, prompt); got != 1 {
+		t.Fatalf("user prompt blocks after accepted render = %d, want one", got)
+	}
+	if len(model.pendingQueue) != 1 || !model.pendingQueue[0].isLocallyRendered() {
+		t.Fatalf("pendingQueue after accepted render = %#v, want rendered correlation retained", model.pendingQueue)
+	}
+
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		ScopeID:   "session-1",
+		TurnID:    "turn-1",
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateUserMessage,
+			Content:       schema.TextContent{Type: "text", Text: prompt},
+		},
+	})
+	if got := countUserNarrativeBlocksForTest(model, prompt); got != 1 {
+		t.Fatalf("user prompt blocks after late echo = %d, want deduped local display", got)
+	}
+	if len(model.pendingQueue) != 0 {
+		t.Fatalf("pendingQueue after late echo = %#v, want correlation removed", model.pendingQueue)
+	}
+}
+
+func TestAcceptedActiveTurnPendingPromptUsesFIFOSelection(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.pendingQueue = append(model.pendingQueue,
+		pendingPrompt{execLine: "first guidance", displayLine: "first guidance", state: pendingPromptAwaitingActiveDisplay},
+		pendingPrompt{execLine: "second guidance", displayLine: "second guidance", state: pendingPromptAwaitingActiveDisplay},
+	)
+	visible, ok := model.pendingQueue.nextVisible()
+	if !ok || visible.displayText() != "first guidance" {
+		t.Fatalf("next visible pending = %#v/%v, want first guidance", visible, ok)
+	}
+
+	if !model.renderNextAcceptedPendingPrompt() {
+		t.Fatal("renderNextAcceptedPendingPrompt() = false, want first prompt rendered")
+	}
+	if got := countUserNarrativeBlocksForTest(model, "first guidance"); got != 1 {
+		t.Fatalf("first guidance blocks = %d, want one", got)
+	}
+	visible, ok = model.pendingQueue.nextVisible()
+	if !ok || visible.displayText() != "second guidance" {
+		t.Fatalf("next visible pending after first render = %#v/%v, want second guidance", visible, ok)
+	}
+
+	if !model.renderNextAcceptedPendingPrompt() {
+		t.Fatal("renderNextAcceptedPendingPrompt() second = false, want second prompt rendered")
+	}
+	if got := countUserNarrativeBlocksForTest(model, "second guidance"); got != 1 {
+		t.Fatalf("second guidance blocks = %d, want one", got)
+	}
+	if got := model.pendingQueue.visibleCount(); got != 0 {
+		t.Fatalf("visible pending prompts = %d, want none after both render", got)
 	}
 }
 
@@ -1471,14 +1694,250 @@ func TestResumeReplayMainTurnBlockIsolation(t *testing.T) {
 			replayEvents := projectResumeReplayEvents(tc.replay)
 			next, _ := model.handleTranscriptEventsMsg(TranscriptEventsMsg{Events: replayEvents})
 			model = next.(*Model)
-			if id := strings.TrimSpace(model.activeMainACPTurnID); id != "" {
-				t.Fatalf("activeMainACPTurnID after replay = %q, want empty", id)
+			if id := strings.TrimSpace(model.mainTimelineTailID); id != "" {
+				t.Fatalf("mainTimelineTailID after replay = %q, want empty", id)
 			}
 
 			model.commitUserDisplayLine(tc.prompt)
 			model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(130, 0))
 			model = applyACPEnvelopeForTest(t, model, tc.live)
 			assertMainTurnDocumentOrder(t, model, tc.oldText, tc.prompt, tc.newText)
+		})
+	}
+}
+
+func TestMainACPEventWithoutTurnIDDoesNotReuseSessionBlock(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		ScopeID:   "session-1",
+		TurnID:    "turn-1",
+		Final:     true,
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateAgentMessage,
+			Content:       schema.TextContent{Type: "text", Text: "old answer"},
+		},
+	})
+
+	model.commitUserDisplayLine("continue")
+	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(130, 0))
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		ScopeID:   "session-1",
+		Final:     true,
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateAgentMessage,
+			Content:       schema.TextContent{Type: "text", Text: "missing turn answer"},
+		},
+	})
+
+	assertMainTurnDocumentOrder(t, model, "old answer", "continue", "missing turn answer")
+}
+
+func TestMainACPKeyedThenKeylessEventsStayInOneLiveTurnBlock(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(130, 0))
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		ScopeID:   "session-1",
+		TurnID:    "turn-1",
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateAgentMessage,
+			Content:       schema.TextContent{Type: "text", Text: "keyed chunk"},
+		},
+	})
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		ScopeID:   "session-1",
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateAgentMessage,
+			Content:       schema.TextContent{Type: "text", Text: "keyless chunk"},
+		},
+	})
+
+	blocks := mainACPTurnBlocksForTest(model)
+	if len(blocks) != 1 {
+		t.Fatalf("main ACP turn blocks = %d, want 1", len(blocks))
+	}
+	block := blocks[0]
+	if got := strings.TrimSpace(block.TurnKey); got != "turn-1" {
+		t.Fatalf("main ACP turn key = %q, want server turn id", got)
+	}
+	if !mainACPBlockContainsText(block, "keyed chunk") || !mainACPBlockContainsText(block, "keyless chunk") {
+		t.Fatalf("main ACP events = %#v, want keyed and keyless chunks in one block", block.Events)
+	}
+}
+
+func TestMainTimelineDoesNotRouteUnanchoredEventsByTurnID(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(130, 0))
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		ScopeID:   "session-1",
+		TurnID:    "turn-1",
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateAgentMessage,
+			Content:       schema.TextContent{Type: "text", Text: "before guidance"},
+		},
+	})
+	model.commitUserDisplayLine("guide the running turn")
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		ScopeID:   "session-1",
+		TurnID:    "turn-1",
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateAgentMessage,
+			Content:       schema.TextContent{Type: "text", Text: "after guidance"},
+		},
+	})
+
+	assertMainTurnDocumentOrder(t, model, "before guidance", "guide the running turn", "after guidance")
+}
+
+func TestMainTimelineStableToolAnchorUpdatesOriginalBlockAcrossUserBarrier(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model = applyTranscriptEventForTest(t, model, TranscriptEvent{
+		Kind:       TranscriptEventTool,
+		Scope:      ACPProjectionMain,
+		ToolCallID: "call-1",
+		ToolName:   "RUN_COMMAND",
+		ToolArgs:   "slow task",
+		ToolOutput: "started\n",
+	})
+	model.commitUserDisplayLine("guide the running task")
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateAgentMessage,
+			Content:       schema.TextContent{Type: "text", Text: "after guidance"},
+		},
+	})
+	model = applyTranscriptEventForTest(t, model, TranscriptEvent{
+		Kind:       TranscriptEventTool,
+		Scope:      ACPProjectionMain,
+		ToolCallID: "call-1",
+		ToolName:   "RUN_COMMAND",
+		ToolArgs:   "slow task",
+		ToolOutput: "finished\n",
+		Final:      true,
+	})
+
+	blocks := mainACPTurnBlocksForTest(model)
+	if len(blocks) != 2 {
+		t.Fatalf("main ACP turn blocks = %d, want 2", len(blocks))
+	}
+	if !mainACPBlockHasToolOutput(blocks[0], "finished") {
+		t.Fatalf("first block events = %#v, want anchored tool output updated before user barrier", blocks[0].Events)
+	}
+	if mainACPBlockHasToolCall(blocks[1], "call-1") {
+		t.Fatalf("second block events = %#v, want no duplicate anchored tool event after user barrier", blocks[1].Events)
+	}
+	if !mainACPBlockContainsText(blocks[1], "after guidance") {
+		t.Fatalf("second block events = %#v, want follow-up main output after user barrier", blocks[1].Events)
+	}
+}
+
+func TestMainTimelineRepeatedToolCallIDAfterTerminalStartsNewBlock(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model = applyTranscriptEventForTest(t, model, TranscriptEvent{
+		Kind:       TranscriptEventTool,
+		Scope:      ACPProjectionMain,
+		TurnID:     "turn-1",
+		ToolCallID: "RUN_COMMAND",
+		ToolName:   "RUN_COMMAND",
+		ToolArgs:   "first command",
+		ToolOutput: "first output\n",
+		Final:      true,
+	})
+	model = applyTranscriptEventForTest(t, model, TranscriptEvent{
+		Kind:   TranscriptEventLifecycle,
+		Scope:  ACPProjectionMain,
+		TurnID: "turn-1",
+		State:  eventstream.LifecycleStateCompleted,
+	})
+
+	model.commitUserDisplayLine("next prompt")
+	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(140, 0))
+	model = applyTranscriptEventForTest(t, model, TranscriptEvent{
+		Kind:       TranscriptEventTool,
+		Scope:      ACPProjectionMain,
+		TurnID:     "turn-2",
+		ToolCallID: "RUN_COMMAND",
+		ToolName:   "RUN_COMMAND",
+		ToolArgs:   "second command",
+		ToolOutput: "second output\n",
+		Final:      true,
+	})
+
+	blocks := mainACPTurnBlocksForTest(model)
+	if len(blocks) != 2 {
+		t.Fatalf("main ACP turn blocks = %d, want 2", len(blocks))
+	}
+	if !mainACPBlockHasToolOutput(blocks[0], "first output") || mainACPBlockHasToolOutput(blocks[0], "second output") {
+		t.Fatalf("first block events = %#v, want only first reused call output", blocks[0].Events)
+	}
+	if !mainACPBlockHasToolOutput(blocks[1], "second output") {
+		t.Fatalf("second block events = %#v, want repeated call id routed to new turn block", blocks[1].Events)
+	}
+}
+
+func TestMainNoticeWithoutTurnIDUsesTimelineBlock(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		running bool
+	}{
+		{name: "idle"},
+		{name: "running", running: true},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			model := NewModel(Config{NoColor: true, NoAnimation: true})
+			if tc.running {
+				model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(130, 0))
+			}
+			model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+				Kind:      eventstream.KindNotice,
+				SessionID: "session-1",
+				ScopeID:   "session-1",
+				Notice:    "retry notice",
+			})
+
+			blocks := mainACPTurnBlocksForTest(model)
+			if len(blocks) != 1 {
+				t.Fatalf("main ACP turn blocks = %d, want 1", len(blocks))
+			}
+			block := blocks[0]
+			if len(block.Events) != 1 || block.Events[0].Kind != SENotice || block.Events[0].Text != "retry notice" {
+				t.Fatalf("main ACP events = %#v, want notice", block.Events)
+			}
+			if got := strings.TrimSpace(block.TurnKey); got != "" {
+				t.Fatalf("notice turn key = %q, want empty without a server turn id", got)
+			}
+			if got := strings.TrimSpace(model.mainTimelineTailID); got != strings.TrimSpace(block.BlockID()) {
+				t.Fatalf("main timeline tail = %q, want notice block %q", got, block.BlockID())
+			}
 		})
 	}
 }
@@ -1507,37 +1966,6 @@ func assertMainTurnDocumentOrder(t *testing.T, model *Model, oldText string, pro
 	want := []string{"old", "user", "new"}
 	if !slices.Equal(order, want) {
 		t.Fatalf("document order = %#v, want %#v", order, want)
-	}
-}
-
-func TestTranscriptMainTurnKey(t *testing.T) {
-	t.Parallel()
-
-	cases := []struct {
-		name    string
-		scope   ACPProjectionScope
-		turnID  string
-		scopeID string
-		want    string
-	}{
-		{name: "main prefers turn id", scope: ACPProjectionMain, turnID: "turn-9", scopeID: "session-1", want: "turn-9"},
-		{name: "main falls back to scope id", scope: ACPProjectionMain, scopeID: "session-1", want: "session-1"},
-		{name: "participant keeps scope id", scope: ACPProjectionParticipant, turnID: "participant-turn-1", scopeID: "agent-session-1", want: "agent-session-1"},
-		{name: "empty", scope: ACPProjectionMain},
-	}
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			got := transcriptMainTurnKey(TranscriptEvent{
-				Scope:   tc.scope,
-				TurnID:  tc.turnID,
-				ScopeID: tc.scopeID,
-			})
-			if got != tc.want {
-				t.Fatalf("transcriptMainTurnKey() = %q, want %q", got, tc.want)
-			}
-		})
 	}
 }
 
@@ -1578,70 +2006,3 @@ func TestApprovalPayloadFromACPEventUsesStandardPermission(t *testing.T) {
 		t.Fatalf("approval options = %#v, want allow_once", req.Options)
 	}
 }
-
-func parentToolStreamMeta(callID string, toolName string, mirrored bool) map[string]any {
-	return metautil.WithRuntimeSection(nil, metautil.RuntimeStream, map[string]any{
-		metautil.RuntimeStreamParentCallID:         strings.TrimSpace(callID),
-		metautil.RuntimeStreamParentTool:           strings.TrimSpace(toolName),
-		metautil.RuntimeStreamMirroredToParentTool: mirrored,
-	})
-}
-
-func applyACPEnvelopeForTest(t *testing.T, model *Model, env eventstream.Envelope) *Model {
-	t.Helper()
-	next, _ := model.handleACPEventEnvelope(env)
-	typed, ok := next.(*Model)
-	if !ok {
-		t.Fatalf("model = %T, want *Model", next)
-	}
-	return typed
-}
-
-func requireMainACPTurnBlockForTest(t *testing.T, model *Model) *MainACPTurnBlock {
-	t.Helper()
-	if id := strings.TrimSpace(model.activeMainACPTurnID); id != "" {
-		if block, _ := model.doc.Find(id).(*MainACPTurnBlock); block != nil {
-			return block
-		}
-	}
-	for _, docBlock := range model.doc.Blocks() {
-		if block, ok := docBlock.(*MainACPTurnBlock); ok {
-			return block
-		}
-	}
-	t.Fatal("main ACP turn block missing")
-	return nil
-}
-
-func mainACPBlockContainsText(block *MainACPTurnBlock, text string) bool {
-	text = strings.TrimSpace(text)
-	if block == nil || text == "" {
-		return false
-	}
-	for _, event := range block.Events {
-		if strings.Contains(event.Text, text) {
-			return true
-		}
-	}
-	return false
-}
-
-type eventstreamIntegrationTurn struct {
-	events <-chan eventstream.Envelope
-}
-
-func (t *eventstreamIntegrationTurn) HandleID() string { return "handle-1" }
-func (t *eventstreamIntegrationTurn) RunID() string    { return "run-1" }
-func (t *eventstreamIntegrationTurn) TurnID() string   { return "turn-1" }
-
-func (t *eventstreamIntegrationTurn) Events() <-chan eventstream.Envelope {
-	return t.events
-}
-
-func (t *eventstreamIntegrationTurn) SubmitApproval(context.Context, control.ApprovalDecision) error {
-	return nil
-}
-
-func (t *eventstreamIntegrationTurn) Cancel() {}
-
-func (t *eventstreamIntegrationTurn) Close() error { return nil }

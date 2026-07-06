@@ -78,18 +78,10 @@ func (m *Model) finishLiveTurn(endedAt time.Time, interrupted bool, err error) t
 		m.finalizeAssistantBlock()
 		m.finalizeReasoningBlock()
 	}
-	m.finalizeActiveMainACPTurn(interrupted, err)
+	m.finalizeMainTimelineTail(interrupted, err)
 	participantFooterAlreadyRendered := m.finalizeActiveParticipantTurn(interrupted, err)
 	m.captureLiveTurnDuration(endedAt)
-	var nextPending pendingPrompt
-	hasNextPending := false
-	if err == nil && !interrupted {
-		nextPending, hasNextPending = m.takeNextDeferredPendingPrompt()
-	}
-	m.discardDispatchedPendingPrompts()
-	if !hasNextPending && (err != nil || interrupted) {
-		m.pendingQueue = nil
-	}
+	nextPending, hasNextPending := m.pendingQueue.onTurnEnd(err == nil && !interrupted, err != nil || interrupted)
 	m.runningInterruptRequested = false
 	m.sandboxProgress = nil
 	m.stopLiveTurn()

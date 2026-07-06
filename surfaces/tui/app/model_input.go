@@ -1164,10 +1164,17 @@ type submitLineOptions struct {
 	recordHistory bool
 }
 
+type resolvedSubmission struct {
+	uiMode         SubmissionMode
+	gatewayMode    SubmissionMode
+	deferUntilIdle bool
+}
+
 func (m *Model) submitLineWithDisplayAndAttachmentsOptions(execLine string, displayLine string, attachments []Attachment, opts submitLineOptions) (tea.Model, tea.Cmd) {
 	m.revokeUpdateOffer()
 	alreadyRunning := m.turnRunning()
-	mode := m.submissionModeForLine(execLine)
+	resolved := m.resolveSubmission(execLine, alreadyRunning)
+	mode := resolved.uiMode
 	if alreadyRunning && mode != SubmissionModeOverlay && m.isConfiguredSlashControlLine(execLine) {
 		return m, m.showHint("A turn is still running. Wait for it to finish or interrupt it before sending another prompt.", hintOptions{
 			priority:       HintPriorityHigh,
@@ -1175,7 +1182,7 @@ func (m *Model) submitLineWithDisplayAndAttachmentsOptions(execLine string, disp
 			clearAfter:     copyHintDuration,
 		})
 	}
-	deferUntilIdle := alreadyRunning && mode != SubmissionModeOverlay && !m.canSubmitRunningPromptNow()
+	deferUntilIdle := resolved.deferUntilIdle
 	layoutMayChange := mode == SubmissionModeOverlay
 	attachments = cloneAttachments(attachments)
 	displayLine = strings.TrimSpace(displayLine)
@@ -1185,11 +1192,13 @@ func (m *Model) submitLineWithDisplayAndAttachmentsOptions(execLine string, disp
 	default:
 		deferDisplayLine := m.deferLocalUserDisplayLine(execLine)
 		if alreadyRunning {
-			m.pendingQueue = append(m.pendingQueue, pendingPrompt{
-				execLine:    strings.TrimSpace(execLine),
-				displayLine: displayLine,
-				attachments: cloneAttachments(attachments),
-				dispatched:  !deferUntilIdle,
+			m.pendingQueue.enqueue(pendingPromptEnqueueOptions{
+				execLine:       execLine,
+				displayLine:    displayLine,
+				attachments:    attachments,
+				deferUntilIdle: deferUntilIdle,
+				deferDisplay:   deferDisplayLine,
+				submissionMode: resolved.gatewayMode,
 			})
 		} else if !deferDisplayLine {
 			m.commitUserDisplayLine(displayLine)
@@ -1208,7 +1217,7 @@ func (m *Model) submitLineWithDisplayAndAttachmentsOptions(execLine string, disp
 		Text:        strings.TrimSpace(execLine),
 		DisplayText: displayLine,
 		Attachments: attachments,
-		Mode:        mode,
+		Mode:        resolved.gatewayMode,
 	}
 
 	// Clear input.
@@ -1244,6 +1253,31 @@ func (m *Model) submitLineWithDisplayAndAttachmentsOptions(execLine string, disp
 		m.scheduleSpinnerTick(),
 	}
 	return m, tea.Batch(cmds...)
+}
+
+func (m *Model) resolveSubmission(execLine string, alreadyRunning bool) resolvedSubmission {
+	uiMode := m.submissionModeForLine(execLine)
+	canSubmitNow := true
+	if alreadyRunning && uiMode != SubmissionModeOverlay {
+		canSubmitNow = m.canSubmitRunningPromptNow()
+	}
+	return resolveSubmissionModes(uiMode, alreadyRunning, canSubmitNow)
+}
+
+func resolveSubmissionModes(uiMode SubmissionMode, alreadyRunning bool, canSubmitNow bool) resolvedSubmission {
+	if !alreadyRunning && uiMode == SubmissionModeActiveTurn {
+		uiMode = SubmissionModeDefault
+	}
+	deferUntilIdle := alreadyRunning && uiMode != SubmissionModeOverlay && !canSubmitNow
+	gatewayMode := uiMode
+	if alreadyRunning && uiMode == SubmissionModeDefault && !deferUntilIdle {
+		gatewayMode = SubmissionModeActiveTurn
+	}
+	return resolvedSubmission{
+		uiMode:         uiMode,
+		gatewayMode:    gatewayMode,
+		deferUntilIdle: deferUntilIdle,
+	}
 }
 
 func (m *Model) deferLocalUserDisplayLine(line string) bool {

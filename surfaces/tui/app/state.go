@@ -2,7 +2,6 @@ package tuiapp
 
 import (
 	"context"
-	"strings"
 	"time"
 
 	"charm.land/bubbles/v2/help"
@@ -284,18 +283,6 @@ const (
 	fixedSelectionFooter fixedSelectionArea = "footer"
 )
 
-type pendingPrompt struct {
-	execLine    string
-	displayLine string
-	attachments []Attachment
-	dispatched  bool
-}
-
-func (p pendingPrompt) matchesUserMessage(text string) bool {
-	text = strings.TrimSpace(text)
-	return text != "" && (text == strings.TrimSpace(p.execLine) || text == strings.TrimSpace(p.displayLine))
-}
-
 type inputAttachment struct {
 	Name   string
 	Offset int
@@ -352,9 +339,10 @@ type Model struct {
 	activeReasoningID    string
 	activeReasoningActor string
 
-	// Maps external keys to doc block IDs.
-	activeMainACPTurnID            string
-	mainACPTurnIDs                 map[string]string
+	// Main transcript routing is timeline-first. Unanchored main events append
+	// to mainTimelineTailID; only stable entity anchors use mainAnchorBlockIDs.
+	mainTimelineTailID             string
+	mainAnchorBlockIDs             map[string]string
 	participantTurnIDs             map[string]string
 	activeParticipantTurnSessionID string
 

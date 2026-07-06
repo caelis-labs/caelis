@@ -55,6 +55,18 @@ func (e *Error) Error() string {
 
 func (e *Error) Unwrap() error { return e.Cause }
 
+func NoActiveRunError(message string) *Error {
+	if message == "" {
+		message = "gateway: no active run is available for this session"
+	}
+	return &Error{
+		Kind:        KindConflict,
+		Code:        CodeNoActiveRun,
+		UserVisible: true,
+		Message:     message,
+	}
+}
+
 func EventError(err error) *Error {
 	if err == nil {
 		return nil

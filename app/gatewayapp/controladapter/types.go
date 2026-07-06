@@ -21,8 +21,9 @@ var (
 type SubmissionMode = control.SubmissionMode
 
 const (
-	SubmissionModeDefault = control.SubmissionModeDefault
-	SubmissionModeOverlay = control.SubmissionModeOverlay
+	SubmissionModeDefault    = control.SubmissionModeDefault
+	SubmissionModeOverlay    = control.SubmissionModeOverlay
+	SubmissionModeActiveTurn = control.SubmissionModeActiveTurn
 )
 
 type Attachment = control.Attachment

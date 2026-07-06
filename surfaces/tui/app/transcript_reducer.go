@@ -54,12 +54,9 @@ func (m *Model) applyTranscriptToolToSubagent(event TranscriptEvent, mutation tr
 }
 
 func (m *Model) applyTranscriptToolToMain(event TranscriptEvent, mutation transcriptToolMutation) (tea.Model, tea.Cmd) {
-	block := m.ensureMainACPTurnBlock(transcriptMainTurnKey(event))
+	block := m.mainBlockForAnchor(event, mainToolAnchor(mutation.callID))
 	if block == nil {
 		return m, nil
-	}
-	if !event.OccurredAt.IsZero() && (block.StartedAt.IsZero() || event.OccurredAt.Before(block.StartedAt)) {
-		block.StartedAt = event.OccurredAt
 	}
 	block.UpdateToolWithMeta(mutation.callID, mutation.name, mutation.args, mutation.output, mutation.final, mutation.err, mutation.meta)
 	m.markViewportBlockDirty(block.BlockID())

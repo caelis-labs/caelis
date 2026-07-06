@@ -1,12 +1,17 @@
 package tuiapp
 
-import "strings"
+import (
+	"strings"
 
-type SubmissionMode string
+	"github.com/caelis-labs/caelis/protocol/acp/control"
+)
+
+type SubmissionMode = control.SubmissionMode
 
 const (
-	SubmissionModeDefault SubmissionMode = ""
-	SubmissionModeOverlay SubmissionMode = "overlay"
+	SubmissionModeDefault    = control.SubmissionModeDefault
+	SubmissionModeOverlay    = control.SubmissionModeOverlay
+	SubmissionModeActiveTurn = control.SubmissionModeActiveTurn
 )
 
 // Attachment describes one inline attachment token in the composer.

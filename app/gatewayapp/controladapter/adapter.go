@@ -485,7 +485,10 @@ func (d *Adapter) Submit(ctx context.Context, submission Submission) (Turn, erro
 	if err != nil {
 		return nil, err
 	}
-	if isBuiltInControllerSession(activeSession) && activeKernelTurnForSession(gw.ActiveTurns(), activeSession.SessionRef) {
+	if submission.Mode == SubmissionModeActiveTurn {
+		if !isBuiltInControllerSession(activeSession) || !activeKernelTurnForSession(gw.ActiveTurns(), activeSession.SessionRef) {
+			return nil, noActiveTurnSubmissionError()
+		}
 		err := gw.SubmitActiveTurn(ctx, gateway.SubmitActiveTurnRequest{
 			SessionRef:   activeSession.SessionRef,
 			Kind:         gateway.SubmissionKindConversation,
@@ -499,9 +502,7 @@ func (d *Adapter) Submit(ctx context.Context, submission Submission) (Turn, erro
 		if err == nil {
 			return nil, nil
 		}
-		if !isNoActiveRunError(err) {
-			return nil, err
-		}
+		return nil, err
 	}
 	result, err := gw.BeginTurn(ctx, gateway.BeginTurnRequest{
 		SessionRef:   activeSession.SessionRef,
@@ -564,9 +565,8 @@ func isBuiltInControllerSession(activeSession session.Session) bool {
 	}
 }
 
-func isNoActiveRunError(err error) bool {
-	var gwErr *gateway.Error
-	return errors.As(err, &gwErr) && gwErr.Code == gateway.CodeNoActiveRun
+func noActiveTurnSubmissionError() error {
+	return gateway.NoActiveRunError("")
 }
 
 func (d *Adapter) Interrupt(ctx context.Context) error {

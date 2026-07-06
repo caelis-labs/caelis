@@ -481,7 +481,7 @@ func executeLineViaControlServiceWithContextResult(ctx context.Context, service 
 	promptResult, err := router.Route(ctx, controlprompt.Request{Submission: control.Submission{
 		Text:        sub.Text,
 		DisplayText: displayText,
-		Mode:        control.SubmissionMode(sub.Mode),
+		Mode:        sub.Mode,
 		Attachments: convertAttachments(sub.Attachments),
 	}})
 	if err != nil {
@@ -499,7 +499,7 @@ func executeLineViaControlServiceWithContextResult(ctx context.Context, service 
 	turn, err := service.Submit(ctx, control.Submission{
 		Text:        submitText,
 		DisplayText: displayText,
-		Mode:        control.SubmissionMode(sub.Mode),
+		Mode:        sub.Mode,
 		Attachments: convertAttachments(sub.Attachments),
 	})
 	if err != nil {

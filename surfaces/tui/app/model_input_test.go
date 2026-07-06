@@ -820,3 +820,114 @@ func TestModeToggleRunsWhileRunning(t *testing.T) {
 		t.Fatalf("model hint = %q, want mode update feedback", m.hint)
 	}
 }
+
+func TestSubmitLineUsesActiveTurnModeOnlyWhileRunning(t *testing.T) {
+	var submissions []Submission
+	model := NewModel(Config{
+		NoColor:     true,
+		NoAnimation: true,
+		ExecuteLine: func(submission Submission) TaskResultMsg {
+			submissions = append(submissions, submission)
+			return TaskResultMsg{SuppressTurnDivider: true}
+		},
+		CanSubmitRunningPrompt: func() bool { return true },
+	})
+
+	next, cmd := model.submitLine("new prompt")
+	model = next.(*Model)
+	if cmd == nil || !findAndRunTaskResult(cmd(), model) {
+		t.Fatal("submitLine(new prompt) did not execute")
+	}
+	if got := submissions[0].Mode; got != SubmissionModeDefault {
+		t.Fatalf("idle submission mode = %q, want default", got)
+	}
+
+	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(120, 0))
+	next, cmd = model.submitLine("steer running turn")
+	model = next.(*Model)
+	if cmd == nil || !findAndRunTaskResult(cmd(), model) {
+		t.Fatal("submitLine(steer running turn) did not execute")
+	}
+	if got := submissions[1].Mode; got != SubmissionModeActiveTurn {
+		t.Fatalf("running submission mode = %q, want active_turn", got)
+	}
+}
+
+func TestResolveSubmissionModes(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{Commands: []string{"btw"}})
+	cases := []struct {
+		name          string
+		line          string
+		running       bool
+		canSubmitNow  bool
+		wantUI        SubmissionMode
+		wantGateway   SubmissionMode
+		wantDeferIdle bool
+	}{
+		{
+			name:         "idle default starts new turn",
+			line:         "new prompt",
+			canSubmitNow: true,
+			wantUI:       SubmissionModeDefault,
+			wantGateway:  SubmissionModeDefault,
+		},
+		{
+			name:         "running default steers active turn when accepted",
+			line:         "guide running turn",
+			running:      true,
+			canSubmitNow: true,
+			wantUI:       SubmissionModeDefault,
+			wantGateway:  SubmissionModeActiveTurn,
+		},
+		{
+			name:          "running default stays deferred when not accepted",
+			line:          "queue after current turn",
+			running:       true,
+			canSubmitNow:  false,
+			wantUI:        SubmissionModeDefault,
+			wantGateway:   SubmissionModeDefault,
+			wantDeferIdle: true,
+		},
+		{
+			name:         "overlay keeps overlay mode while running",
+			line:         "/btw side note",
+			running:      true,
+			canSubmitNow: true,
+			wantUI:       SubmissionModeOverlay,
+			wantGateway:  SubmissionModeOverlay,
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := resolveSubmissionModes(model.submissionModeForLine(tc.line), tc.running, tc.canSubmitNow)
+			if got.uiMode != tc.wantUI || got.gatewayMode != tc.wantGateway || got.deferUntilIdle != tc.wantDeferIdle {
+				t.Fatalf("resolveSubmission() = %#v, want ui=%q gateway=%q defer=%v", got, tc.wantUI, tc.wantGateway, tc.wantDeferIdle)
+			}
+		})
+	}
+}
+
+func TestResolveSubmissionSkipsRunningPromptGateForOverlay(t *testing.T) {
+	t.Parallel()
+
+	called := false
+	model := NewModel(Config{
+		Commands: []string{"btw"},
+		CanSubmitRunningPrompt: func() bool {
+			called = true
+			return false
+		},
+	})
+	got := model.resolveSubmission("/btw side note", true)
+	if called {
+		t.Fatal("resolveSubmission() called running prompt gate for overlay submission")
+	}
+	if got.uiMode != SubmissionModeOverlay || got.gatewayMode != SubmissionModeOverlay || got.deferUntilIdle {
+		t.Fatalf("resolveSubmission() = %#v, want overlay without defer", got)
+	}
+}

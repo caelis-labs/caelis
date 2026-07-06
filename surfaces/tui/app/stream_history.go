@@ -12,8 +12,8 @@ func (m *Model) resetConversationView() {
 	m.activeAssistantID = ""
 	m.activeReasoningID = ""
 	m.transientBlockID = ""
-	m.activeMainACPTurnID = ""
-	m.mainACPTurnIDs = nil
+	m.mainTimelineTailID = ""
+	m.mainAnchorBlockIDs = nil
 	m.participantTurnIDs = nil
 	m.activeParticipantTurnSessionID = ""
 	m.doc.Clear()
