@@ -56,6 +56,16 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 }
 
 func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
+	cwd, _ := os.Getwd()
+	defaultStore := defaultStoreDir(cwd)
+	if len(args) > 0 {
+		switch strings.ToLower(strings.TrimSpace(args[0])) {
+		case "version":
+			return runVersionSubcommand(args[1:], stdout)
+		case "update":
+			return runUpdateSubcommand(ctx, args[1:], defaultStore, stdout, stderr)
+		}
+	}
 	acpSubcommand := len(args) > 0 && strings.EqualFold(strings.TrimSpace(args[0]), "acp")
 	if acpSubcommand {
 		args = args[1:]
@@ -80,7 +90,6 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 	fs := flag.NewFlagSet("caelis", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
-	cwd, _ := os.Getwd()
 	defaultWorkspaceKey := filepath.Base(cwd)
 	if defaultWorkspaceKey == "" || defaultWorkspaceKey == "." || defaultWorkspaceKey == string(filepath.Separator) {
 		defaultWorkspaceKey = "workspace"
@@ -314,9 +323,7 @@ func runSandboxReset(ctx context.Context, stack *gatewayapp.Stack, format output
 }
 
 func runInteractive(ctx context.Context, stack *gatewayapp.Stack, sessionID string, cfg gatewayapp.Config, displayModelText string, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
-	_ = stderr
-	_ = cfg
-	return runTUI(ctx, stack, strings.TrimSpace(sessionID), displayModelText, stdin, stdout)
+	return runTUI(ctx, stack, strings.TrimSpace(sessionID), cfg, displayModelText, stdin, stdout, stderr)
 }
 
 func renderModelText(cfg gatewayapp.Config) string {

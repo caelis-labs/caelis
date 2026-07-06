@@ -24,7 +24,7 @@ type appKeyMap struct {
 	Complete      key.Binding
 	ImagePaste    key.Binding
 	TextPaste     key.Binding
-	Clear         key.Binding
+	Update        key.Binding
 	Back          key.Binding
 	OverlayScroll key.Binding
 	OverlayClose  key.Binding
@@ -74,7 +74,7 @@ func defaultKeyMapForPlatform(goos string, isWSL bool) appKeyMap {
 		Complete:      key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "fill")),
 		ImagePaste:    key.NewBinding(key.WithKeys(imagePasteKeys...), key.WithHelp(imagePasteHelp, "image")),
 		TextPaste:     key.NewBinding(key.WithKeys(textPasteKeys...), key.WithHelp(textPasteHelp, "text")),
-		Clear:         key.NewBinding(key.WithKeys("ctrl+u"), key.WithHelp("ctrl+u", "clear")),
+		Update:        key.NewBinding(key.WithKeys("ctrl+u"), key.WithHelp("ctrl+u", "update")),
 		Back:          key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "close")),
 		OverlayScroll: key.NewBinding(key.WithKeys("up", "down"), key.WithHelp("↑/↓", "scroll")),
 		OverlayClose:  key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "close")),

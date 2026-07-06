@@ -3,6 +3,7 @@ package tuiapp
 import (
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -75,6 +76,7 @@ func TestRegressionACPEventstreamToolCallFrame120x32(t *testing.T) {
 				Content:       schema.TextContent{Type: "text", Text: "Smoke check passed."},
 			},
 		},
+		completedRegressionTurn("sess-regression", ""),
 	} {
 		updated, _ = model.Update(env)
 		model = updated.(*Model)
@@ -163,6 +165,7 @@ func TestRegressionACPEventstreamWhitespaceOnlyAssistantChunkDoesNotRenderBefore
 				Content:       schema.TextContent{Type: "text", Text: "没有查到云硬盘。"},
 			},
 		},
+		completedRegressionTurn("sess-regression", "turn-whitespace-tool"),
 	} {
 		updated, _ = model.Update(env)
 		model = updated.(*Model)
@@ -203,6 +206,13 @@ func acpToolNameMeta(name string) map[string]any {
 	return metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
 		metautil.RuntimeToolName: name,
 	})
+}
+
+func completedRegressionTurn(sessionID string, turnID string) eventstream.Envelope {
+	env := eventstream.TurnCompleted("", "", turnID, time.Unix(1, 0))
+	env.SessionID = sessionID
+	env.ScopeID = sessionID
+	return env
 }
 
 func assertFrameContainsInOrder(t *testing.T, name string, frame string, want []string) {

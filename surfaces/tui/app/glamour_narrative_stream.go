@@ -233,17 +233,19 @@ func cachedStreamingNarrativePrefixRows(blockID, stableRaw, rolePrefix string, r
 	if blockID == "" || strings.TrimSpace(stableRaw) == "" {
 		return nil, 0, false
 	}
+	themeKey := themeRenderCacheKey(theme)
 	glamourStreamingCache.Lock()
-	defer glamourStreamingCache.Unlock()
 	if glamourStreamingCache.entries == nil {
 		glamourStreamingCache.entries = map[string]streamingNarrativeCacheEntry{}
 	}
 	if entry, ok := glamourStreamingCache.entries[blockID]; ok {
-		themeKey := themeRenderCacheKey(theme)
 		if entry.width == width && entry.themeKey == themeKey && entry.role == roleStyle && entry.rendererVersion == streamingNarrativeRendererVersion && entry.stableRaw == stableRaw && entry.rolePrefix == rolePrefix {
+			glamourStreamingCache.Unlock()
 			return cloneRenderedRows(entry.renderedRows), 0, true
 		}
 	}
+	glamourStreamingCache.Unlock()
+
 	if observeGlamour != nil {
 		observeGlamour()
 	}
@@ -251,15 +253,20 @@ func cachedStreamingNarrativePrefixRows(blockID, stableRaw, rolePrefix string, r
 	if len(rows) == 0 {
 		return nil, 1, false
 	}
+	glamourStreamingCache.Lock()
+	if glamourStreamingCache.entries == nil {
+		glamourStreamingCache.entries = map[string]streamingNarrativeCacheEntry{}
+	}
 	glamourStreamingCache.entries[blockID] = streamingNarrativeCacheEntry{
 		width:           width,
-		themeKey:        themeRenderCacheKey(theme),
+		themeKey:        themeKey,
 		role:            roleStyle,
 		rendererVersion: streamingNarrativeRendererVersion,
 		stableRaw:       stableRaw,
 		rolePrefix:      rolePrefix,
 		renderedRows:    cloneRenderedRows(rows),
 	}
+	glamourStreamingCache.Unlock()
 	return rows, 1, false
 }
 

@@ -93,10 +93,6 @@ func (m *Model) handlePromptKey(msg tea.KeyMsg) tea.Cmd {
 			m.activePrompt.input = append(m.activePrompt.input[:m.activePrompt.cursor], m.activePrompt.input[m.activePrompt.cursor+1:]...)
 		}
 		return nil
-	case "ctrl+u":
-		m.activePrompt.input = m.activePrompt.input[:0]
-		m.activePrompt.cursor = 0
-		return nil
 	}
 	if text := msg.Key().Text; text != "" {
 		for _, r := range text {
@@ -279,13 +275,6 @@ func (m *Model) handlePromptChoiceKey(msg tea.KeyMsg) tea.Cmd {
 	case "delete":
 		if m.activePrompt.filterable && m.activePrompt.cursor >= 0 && m.activePrompt.cursor < len(m.activePrompt.filter) {
 			m.activePrompt.filter = append(m.activePrompt.filter[:m.activePrompt.cursor], m.activePrompt.filter[m.activePrompt.cursor+1:]...)
-			m.clampPromptChoiceIndex()
-		}
-		return nil
-	case "ctrl+u":
-		if m.activePrompt.filterable {
-			m.activePrompt.filter = m.activePrompt.filter[:0]
-			m.activePrompt.cursor = 0
 			m.clampPromptChoiceIndex()
 		}
 		return nil

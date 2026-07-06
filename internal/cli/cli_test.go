@@ -15,6 +15,8 @@ import (
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/internal/acpagentenv"
 	"github.com/caelis-labs/caelis/internal/testenv"
+	"github.com/caelis-labs/caelis/internal/updater"
+	"github.com/caelis-labs/caelis/internal/version"
 	"github.com/caelis-labs/caelis/ports/gateway"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -97,6 +99,91 @@ func TestRunHelpReturnsNil(t *testing.T) {
 		!strings.Contains(got, "Approval mode: auto-review|manual") ||
 		!strings.Contains(got, "Policy profile: workspace-write") {
 		t.Fatalf("stderr = %q, want help usage with approval mode and policy profile", got)
+	}
+}
+
+func TestRunVersionText(t *testing.T) {
+	oldVersion, oldCommit, oldDate := version.Version, version.Commit, version.Date
+	version.Version, version.Commit, version.Date = "v1.2.3", "abc123", "2026-07-06T00:00:00Z"
+	t.Cleanup(func() {
+		version.Version, version.Commit, version.Date = oldVersion, oldCommit, oldDate
+	})
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if err := run(context.Background(), []string{"version"}, strings.NewReader(""), &stdout, &stderr); err != nil {
+		t.Fatalf("run(version) error = %v", err)
+	}
+	got := stdout.String()
+	for _, want := range []string{"version: v1.2.3", "commit: abc123", "date: 2026-07-06T00:00:00Z"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("version output = %q, want %q", got, want)
+		}
+	}
+}
+
+func TestRunVersionJSON(t *testing.T) {
+	oldVersion, oldCommit, oldDate := version.Version, version.Commit, version.Date
+	version.Version, version.Commit, version.Date = "v1.2.3", "abc123", "2026-07-06T00:00:00Z"
+	t.Cleanup(func() {
+		version.Version, version.Commit, version.Date = oldVersion, oldCommit, oldDate
+	})
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if err := run(context.Background(), []string{"version", "-format", "json"}, strings.NewReader(""), &stdout, &stderr); err != nil {
+		t.Fatalf("run(version json) error = %v", err)
+	}
+	var decoded versionResult
+	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
+		t.Fatalf("decode version json: %v", err)
+	}
+	if decoded.Version != "v1.2.3" || decoded.Commit != "abc123" || decoded.Date == "" {
+		t.Fatalf("decoded version = %#v", decoded)
+	}
+}
+
+func TestRunUpdateCheckUsesUpdater(t *testing.T) {
+	old := runUpdateOperation
+	runUpdateOperation = func(_ context.Context, cfg updater.Config, opts updater.UpdateOptions) (updater.Result, error) {
+		if !opts.CheckOnly {
+			t.Fatal("update --check did not set CheckOnly")
+		}
+		if strings.TrimSpace(cfg.StoreDir) == "" {
+			t.Fatal("update config StoreDir is empty")
+		}
+		return updater.Result{
+			CurrentVersion: "v1.0.0",
+			LatestVersion:  "v1.1.0",
+			InstallMethod:  updater.MethodRaw,
+			Available:      true,
+		}, nil
+	}
+	t.Cleanup(func() { runUpdateOperation = old })
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if err := run(context.Background(), []string{"update", "--check"}, strings.NewReader(""), &stdout, &stderr); err != nil {
+		t.Fatalf("run(update --check) error = %v", err)
+	}
+	if got := stdout.String(); !strings.Contains(got, "update available: v1.0.0 -> v1.1.0 (raw)") {
+		t.Fatalf("update output = %q", got)
+	}
+}
+
+func TestRunUpdateDoesNotSupportJSONFormat(t *testing.T) {
+	old := runUpdateOperation
+	called := false
+	runUpdateOperation = func(context.Context, updater.Config, updater.UpdateOptions) (updater.Result, error) {
+		called = true
+		return updater.Result{}, nil
+	}
+	t.Cleanup(func() { runUpdateOperation = old })
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	err := run(context.Background(), []string{"update", "-format", "json"}, strings.NewReader(""), &stdout, &stderr)
+	if err == nil || !strings.Contains(err.Error(), "flag provided but not defined") {
+		t.Fatalf("run(update -format json) error = %v, want unsupported flag", err)
+	}
+	if called {
+		t.Fatal("runUpdateOperation was called for unsupported update format flag")
 	}
 }
 

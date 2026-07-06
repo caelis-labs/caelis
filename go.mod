@@ -14,6 +14,7 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.7
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/rivo/uniseg v0.4.7
+	golang.org/x/mod v0.36.0
 	golang.org/x/sys v0.45.0
 )
 

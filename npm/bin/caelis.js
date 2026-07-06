@@ -38,6 +38,8 @@ function resolveBinaryPath(packageName) {
 
 const packageName = resolvePackageName();
 const binPath = resolveBinaryPath(packageName);
+const packageRoot = path.resolve(__dirname, '..');
+const platformPackageRoot = path.dirname(require.resolve(`${packageName}/package.json`));
 
 if (!fs.existsSync(binPath)) {
   console.error('[caelis] binary not found at', binPath);
@@ -47,7 +49,13 @@ if (!fs.existsSync(binPath)) {
 
 const child = spawn(binPath, process.argv.slice(2), {
   stdio: 'inherit',
-  env: process.env,
+  env: {
+    ...process.env,
+    CAELIS_INSTALL_METHOD: 'npm',
+    CAELIS_NPM_PACKAGE_DIR: packageRoot,
+    CAELIS_NPM_PLATFORM_PACKAGE: packageName,
+    CAELIS_NPM_PLATFORM_PACKAGE_DIR: platformPackageRoot,
+  },
 });
 
 child.on('error', (err) => {

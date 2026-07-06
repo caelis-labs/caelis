@@ -413,6 +413,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if handled, cmd := m.handleTerminalResponseGuardKey(msg); handled {
 		return m, cmd
 	}
+	if key.Matches(msg, m.keys.Update) {
+		return m.handleUpdateKey()
+	}
 	// External prompt input takes priority.
 	if m.activePrompt != nil {
 		return m, m.handlePromptKey(msg)
@@ -710,19 +713,6 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m.submitLine(line)
-
-	case key.Matches(msg, m.keys.Clear):
-		m.textarea.SetValue("")
-		m.textarea.CursorStart()
-		m.adjustTextareaHeight()
-		m.input = m.input[:0]
-		m.cursor = 0
-		m.clearInputAttachments()
-		if m.cfg.ClearAttachments != nil {
-			m.cfg.ClearAttachments()
-		}
-		m.clearInputOverlays()
-		return m, nil
 
 	case key.Matches(msg, m.keys.ImagePaste):
 		if m.turnRunning() {
@@ -1175,6 +1165,7 @@ type submitLineOptions struct {
 }
 
 func (m *Model) submitLineWithDisplayAndAttachmentsOptions(execLine string, displayLine string, attachments []Attachment, opts submitLineOptions) (tea.Model, tea.Cmd) {
+	m.revokeUpdateOffer()
 	alreadyRunning := m.turnRunning()
 	mode := m.submissionModeForLine(execLine)
 	if alreadyRunning && mode != SubmissionModeOverlay && m.isConfiguredSlashControlLine(execLine) {

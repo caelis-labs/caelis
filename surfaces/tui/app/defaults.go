@@ -67,7 +67,7 @@ func shortcutHelpTextForPlatform(goos string, wsl bool) string {
 		{Keys: []string{"up", "down"}, Description: "Input history or menu selection"},
 		{Keys: []string{"pgup", "pgdn"}, Description: "Scroll transcript"},
 		{Keys: []string{"shift+tab", "ctrl+o"}, Description: "Toggle session mode"},
-		{Keys: []string{"ctrl+u"}, Description: "Clear input"},
+		{Keys: []string{"ctrl+u"}, Description: "Update when notified"},
 		{Keys: imagePasteKeysForPlatform(goos, wsl), Description: "Paste clipboard image"},
 		{Keys: textPasteKeysForPlatform(goos, wsl), Description: "Paste clipboard text"},
 		{Keys: []string{"esc"}, Description: "Interrupt running turn or close overlay"},

@@ -30,11 +30,7 @@ func glamourRenderNarrative(raw string, width int, theme tuikit.Theme, roleStyle
 	if width <= 0 {
 		width = 80
 	}
-	renderer := getGlamourRenderer(width, theme, roleStyle)
-	if renderer == nil {
-		return ""
-	}
-	rendered, err := renderer.Render(raw)
+	rendered, err := renderGlamourMarkdown(raw, width, theme, roleStyle)
 	if err != nil {
 		return ""
 	}
@@ -163,7 +159,10 @@ func clearGlamourCache() {
 func getGlamourRenderer(width int, theme tuikit.Theme, roleStyle tuikit.LineStyle) *glamour.TermRenderer {
 	glamourCache.Lock()
 	defer glamourCache.Unlock()
+	return getGlamourRendererLocked(width, theme, roleStyle)
+}
 
+func getGlamourRendererLocked(width int, theme tuikit.Theme, roleStyle tuikit.LineStyle) *glamour.TermRenderer {
 	themeKey := themeRenderCacheKey(theme)
 	key := glamourRendererKey{width: width, themeKey: themeKey, role: roleStyle}
 	if renderer := glamourCache.entries[key]; renderer != nil {
@@ -183,6 +182,16 @@ func getGlamourRenderer(width int, theme tuikit.Theme, roleStyle tuikit.LineStyl
 
 	storeGlamourRenderer(key, renderer)
 	return renderer
+}
+
+func renderGlamourMarkdown(raw string, width int, theme tuikit.Theme, roleStyle tuikit.LineStyle) (string, error) {
+	glamourCache.Lock()
+	defer glamourCache.Unlock()
+	renderer := getGlamourRendererLocked(width, theme, roleStyle)
+	if renderer == nil {
+		return "", nil
+	}
+	return renderer.Render(raw)
 }
 
 func touchGlamourRendererCacheKey(key glamourRendererKey) {

@@ -456,6 +456,32 @@ func TestImagePasteWhileRunningShowsFeedback(t *testing.T) {
 	}
 }
 
+func TestCtrlUInActivePromptNoOpWithoutUpdateOffered(t *testing.T) {
+	model := NewModel(Config{
+		OnUpdateRequested: func() {
+			t.Fatal("OnUpdateRequested must not run without update offer")
+		},
+	})
+	model.activePrompt = newPromptState(PromptRequestMsg{
+		Prompt:   "Name",
+		Response: make(chan PromptResponse, 1),
+	})
+	model.activePrompt.input = []rune("draft")
+	model.activePrompt.cursor = len(model.activePrompt.input)
+
+	updated, cmd := model.handleKey(tea.KeyPressMsg(tea.Key{Code: 'u', Mod: tea.ModCtrl}))
+	m := updated.(*Model)
+	if cmd != nil {
+		t.Fatal("prompt Ctrl+U command != nil, want nil")
+	}
+	if m.quit {
+		t.Fatal("model quit = true, want false")
+	}
+	if got := string(m.activePrompt.input); got != "draft" {
+		t.Fatalf("active prompt input = %q, want draft preserved", got)
+	}
+}
+
 func TestTerminalResponseFragmentsDoNotPolluteComposer(t *testing.T) {
 	cases := []string{
 		"0c",

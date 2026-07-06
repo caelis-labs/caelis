@@ -11,6 +11,12 @@ var (
 	Date    = ""
 )
 
+type Info struct {
+	Version string `json:"version"`
+	Commit  string `json:"commit,omitempty"`
+	Date    string `json:"date,omitempty"`
+}
+
 func String() string {
 	if value := normalizedVersion(Version); value != "" {
 		return value
@@ -21,6 +27,14 @@ func String() string {
 		}
 	}
 	return "dev"
+}
+
+func BuildInfo() Info {
+	return Info{
+		Version: String(),
+		Commit:  strings.TrimSpace(Commit),
+		Date:    strings.TrimSpace(Date),
+	}
 }
 
 func normalizedVersion(value string) string {

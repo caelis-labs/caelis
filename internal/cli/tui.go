@@ -12,11 +12,14 @@ import (
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter/local"
 	controlpromptrouter "github.com/caelis-labs/caelis/internal/controlpromptrouter"
+	"github.com/caelis-labs/caelis/internal/updater"
 	"github.com/caelis-labs/caelis/internal/version"
 	"github.com/caelis-labs/caelis/surfaces/tui/app"
 )
 
-func runTUI(ctx context.Context, stack *gatewayapp.Stack, sessionID string, modelText string, stdin io.Reader, stdout io.Writer) error {
+const tuiBackgroundUpdateCheckTimeout = 2 * time.Minute
+
+func runTUI(ctx context.Context, stack *gatewayapp.Stack, sessionID string, appCfg gatewayapp.Config, modelText string, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
 	driver, err := local.NewLocalAdapter(ctx, stack, strings.TrimSpace(sessionID), "cli-tui", strings.TrimSpace(modelText))
 	if err != nil {
 		return err
@@ -24,7 +27,8 @@ func runTUI(ctx context.Context, stack *gatewayapp.Stack, sessionID string, mode
 	programCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	sender := &tuiapp.ProgramSender{}
-	cfg := tuiapp.ConfigFromControlService(driver, sender, tuiapp.Config{
+	updateRequested := false
+	tuiCfg := tuiapp.ConfigFromControlService(driver, sender, tuiapp.Config{
 		Context:             programCtx,
 		AppName:             "CAELIS",
 		Version:             version.String(),
@@ -37,14 +41,24 @@ func runTUI(ctx context.Context, stack *gatewayapp.Stack, sessionID string, mode
 		RenderFPS:           envInt("CAELIS_TUI_RENDER_FPS", 0),
 		OnStart: func() {
 			startTUISandboxRefresh(programCtx, stack, sender)
+			startTUIUpdateCheck(programCtx, appCfg.StoreDir, sender)
+		},
+		OnUpdateRequested: func() {
+			updateRequested = true
 		},
 	})
-	model := tuiapp.NewModel(cfg)
-	program := tea.NewProgram(model, tuiProgramOptions(stdin, stdout, programCtx, cfg.RenderFPS)...)
+	model := tuiapp.NewModel(tuiCfg)
+	program := tea.NewProgram(model, tuiProgramOptions(stdin, stdout, programCtx, tuiCfg.RenderFPS)...)
 	sender.Send = program.Send
 	defer sender.Close()
 	_, err = program.Run()
-	return err
+	if err != nil {
+		return err
+	}
+	if updateRequested {
+		return runUpdate(ctx, appCfg.StoreDir, false, stdout, stderr)
+	}
+	return nil
 }
 
 func startTUISandboxRefresh(ctx context.Context, stack *gatewayapp.Stack, sender *tuiapp.ProgramSender) {
@@ -67,6 +81,26 @@ func formatTUISandboxRefreshError(err error) string {
 	}
 	lines = append(lines, "run /doctor")
 	return strings.Join(lines, "\n")
+}
+
+func startTUIUpdateCheck(ctx context.Context, storeDir string, sender *tuiapp.ProgramSender) {
+	if sender == nil {
+		return
+	}
+	go func() {
+		checkCtx, cancel := context.WithTimeout(ctx, tuiBackgroundUpdateCheckTimeout)
+		defer cancel()
+		cfg := updateConfig(storeDir)
+		result, err := checkUpdateOperation(checkCtx, cfg, updater.CheckOptions{Auto: true})
+		if err != nil {
+			return
+		}
+		manager := updater.New(cfg)
+		sender.SendMsg(tuiapp.UpdateCheckResultMsg{
+			LatestVersion: result.LatestVersion,
+			Eligible:      manager.HintEligible(result),
+		})
+	}()
 }
 
 func tuiProgramOptions(stdin io.Reader, stdout io.Writer, ctx context.Context, fps int) []tea.ProgramOption {

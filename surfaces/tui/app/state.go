@@ -148,6 +148,7 @@ type Config struct {
 	ProgramSender          *ProgramSender
 	PromptRouterFactory    controlprompt.RouterFactory
 	OnStart                func()
+	OnUpdateRequested      func()
 	ExecuteLine            func(Submission) TaskResultMsg
 	executeLineCmd         func(Submission) tea.Msg
 	CanSubmitRunningPrompt func() bool
@@ -426,6 +427,8 @@ type Model struct {
 	hint                   string
 	hintEntries            []hintEntry
 	nextHintID             uint64
+	updateOffered          bool
+	updateHintID           uint64
 
 	pendingInputAt            time.Time
 	inputLatencyWindow        []time.Duration

@@ -59,6 +59,12 @@ type SetHintMsg struct {
 	ClearOnMessage bool
 }
 
+// UpdateCheckResultMsg carries a completed background update check from the CLI host.
+type UpdateCheckResultMsg struct {
+	LatestVersion string
+	Eligible      bool
+}
+
 type RunningActivityMsg struct {
 	Kind   runningActivityKind
 	Detail string
