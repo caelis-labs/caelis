@@ -1,6 +1,6 @@
 package display
 
 const (
-	CompactNoticeLabel        = "Context Compact"
+	CompactNoticeLabel        = "Context compacted"
 	CompactFailureNoticeLabel = "Context Compact failed"
 )

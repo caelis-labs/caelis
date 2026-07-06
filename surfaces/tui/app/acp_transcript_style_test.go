@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/surfaces/transcript"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 	"github.com/charmbracelet/colorprofile"
 	"github.com/charmbracelet/x/ansi"
@@ -110,6 +111,58 @@ func TestExplorationSummaryWrappedDetailStylesContinuationNumbers(t *testing.T) 
 	numberText := normalizeInlineStyleText(textWithSGRForeground(styled, numberFG))
 	if !strings.Contains(numberText, "901") || !strings.Contains(numberText, "1100") {
 		t.Fatalf("continuation numbers not styled with number foreground\nnumbers=%q\nstyled=%q", numberText, styled)
+	}
+}
+
+func TestACPModelRetryNoticeStylesTextAndNumbersSeparately(t *testing.T) {
+	model := NewModel(Config{ColorProfile: colorprofile.TrueColor})
+	ctx := BlockRenderContext{Width: 96, TermWidth: 96, Theme: model.theme}
+	rows := renderACPNoticeRows("block-1", SubagentEvent{
+		Kind:       SENotice,
+		Text:       "Retrying model request (12/50, retry in 10s)",
+		NoticeKind: transcript.NoticeKindModelRetry,
+	}, 96, ctx)
+	if len(rows) != 1 {
+		t.Fatalf("rows = %#v, want one retry notice row", rows)
+	}
+	if rows[0].Plain != "! Retrying model request (12/50, retry in 10s)" {
+		t.Fatalf("plain retry notice = %q", rows[0].Plain)
+	}
+	if got := ansi.Strip(rows[0].Styled); got != rows[0].Plain {
+		t.Fatalf("styled strips to %q, want %q", got, rows[0].Plain)
+	}
+	numberFG := sgrForegroundCode(t, model.theme.TextStyle().GetForeground())
+	numberText := normalizeInlineStyleText(textWithSGRForeground(rows[0].Styled, numberFG))
+	if !strings.Contains(numberText, "12") || !strings.Contains(numberText, "50") || !strings.Contains(numberText, "10") ||
+		strings.Count(numberText, "12") != 1 || strings.Count(numberText, "50") != 1 || strings.Count(numberText, "10") != 1 {
+		t.Fatalf("retry notice numbers = %q, want high-contrast number spans", numberText)
+	}
+	metaFG := sgrForegroundCode(t, model.theme.TranscriptMetaStyle().GetForeground())
+	metaText := normalizeInlineStyleText(textWithSGRForeground(rows[0].Styled, metaFG))
+	if !strings.Contains(metaText, "Retrying model request") || strings.Contains(metaText, "12") || strings.Contains(metaText, "50") || strings.Contains(metaText, "10") {
+		t.Fatalf("retry notice meta text = %q, want low-contrast text without numbers", metaText)
+	}
+}
+
+func TestACPCompactNoticeUsesCompactedLabelAndMetaStyle(t *testing.T) {
+	model := NewModel(Config{ColorProfile: colorprofile.TrueColor})
+	ctx := BlockRenderContext{Width: 96, TermWidth: 96, Theme: model.theme}
+	text := "• " + transcript.CompactNoticeLabel
+	rows := renderACPNoticeRows("block-1", SubagentEvent{
+		Kind:       SENotice,
+		Text:       text,
+		NoticeKind: transcript.NoticeKindCompact,
+	}, 96, ctx)
+	if len(rows) != 1 {
+		t.Fatalf("rows = %#v, want one compact notice row", rows)
+	}
+	if rows[0].Plain != "• Context compacted" {
+		t.Fatalf("plain compact notice = %q", rows[0].Plain)
+	}
+	metaFG := sgrForegroundCode(t, model.theme.TranscriptMetaStyle().GetForeground())
+	metaText := normalizeInlineStyleText(textWithSGRForeground(rows[0].Styled, metaFG))
+	if !strings.Contains(metaText, "Context compacted") {
+		t.Fatalf("compact notice meta text = %q, styled=%q", metaText, rows[0].Styled)
 	}
 }
 

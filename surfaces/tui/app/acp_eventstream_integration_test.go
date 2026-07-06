@@ -861,6 +861,10 @@ func TestHandleACPEventEnvelopeMergesAttemptResetNoticeInMainTurn(t *testing.T) 
 	if strings.Contains(block.Events[0].Text, "Internal Server Error") {
 		t.Fatalf("retry notice leaked provider error: %q", block.Events[0].Text)
 	}
+	rows := block.Render(BlockRenderContext{Width: 96, TermWidth: 96, Theme: model.theme, ThemeKey: themeRenderCacheKey(model.theme)})
+	if plain := joinRenderedPlain(rows); !strings.Contains(plain, "! Retrying model request (2/5, retry in 5s)") {
+		t.Fatalf("rendered retry notice = %q", plain)
+	}
 	if block.Events[1].Kind != SEAssistant || block.Events[1].Text != "final" {
 		t.Fatalf("second event = %#v, want final assistant", block.Events[1])
 	}
