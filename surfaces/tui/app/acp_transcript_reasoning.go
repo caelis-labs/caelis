@@ -69,9 +69,9 @@ func reasoningShouldFold(events []SubagentEvent, idx int, status string) bool {
 func reasoningFoldBoundaryEvent(ev SubagentEvent) bool {
 	switch ev.Kind {
 	case SEReasoning:
-		return strings.TrimSpace(ev.Text) != ""
+		return renderableTextHasContent(ev.Text)
 	case SEAssistant:
-		return strings.TrimSpace(ev.Text) != ""
+		return renderableTextHasContent(ev.Text)
 	case SEToolCall:
 		return strings.TrimSpace(ev.Name) != "" || strings.TrimSpace(ev.Args) != "" || strings.TrimSpace(ev.Output) != ""
 	case SEPlan:
@@ -115,7 +115,7 @@ func shouldDeferLiveTailStageCompaction(events []SubagentEvent, end int, status 
 func hasLaterAssistantNarrative(events []SubagentEvent, start int) bool {
 	for i := maxInt(0, start); i < len(events); i++ {
 		ev := events[i]
-		if (ev.Kind == SEReasoning || ev.Kind == SEAssistant) && strings.TrimSpace(ev.Text) != "" {
+		if (ev.Kind == SEReasoning || ev.Kind == SEAssistant) && renderableTextHasContent(ev.Text) {
 			return true
 		}
 	}

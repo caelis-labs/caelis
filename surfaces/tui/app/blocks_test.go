@@ -357,6 +357,126 @@ func TestMainACPFinalCumulativeSuffixKeepsPreToolTextInPlace(t *testing.T) {
 	}
 }
 
+func TestMainACPAppendStreamChunkPreservesPendingPrefixWithoutGhostEvent(t *testing.T) {
+	block := NewMainACPTurnBlock("session-1")
+
+	block.AppendStreamChunk(SEAssistant, "    ")
+	if len(block.Events) != 0 {
+		t.Fatalf("events = %#v, want no event until pending prefix has renderable content", block.Events)
+	}
+	block.AppendStreamChunk(SEAssistant, "fmt.Println()")
+	block.AppendStreamChunk(SEAssistant, " ")
+	block.AppendStreamChunk(SEAssistant, "tail")
+
+	if len(block.Events) != 1 {
+		t.Fatalf("events = %#v, want one assistant event", block.Events)
+	}
+	if block.Events[0].Kind != SEAssistant || block.Events[0].Text != "    fmt.Println() tail" {
+		t.Fatalf("assistant event = %#v, want preserved boundary whitespace without initial ghost", block.Events[0])
+	}
+}
+
+func TestParticipantAppendStreamChunkPreservesPendingPrefixWithoutGhostEvent(t *testing.T) {
+	block := NewParticipantTurnBlock("session-1", "@agent")
+
+	block.AppendStreamChunk(SEAssistant, "    ")
+	if len(block.Events) != 0 {
+		t.Fatalf("events = %#v, want no event until pending prefix has renderable content", block.Events)
+	}
+	block.AppendStreamChunk(SEAssistant, "answer")
+
+	if len(block.Events) != 1 {
+		t.Fatalf("events = %#v, want one assistant event", block.Events)
+	}
+	if block.Events[0].Kind != SEAssistant || block.Events[0].Text != "    answer" {
+		t.Fatalf("assistant event = %#v, want preserved pending prefix", block.Events[0])
+	}
+}
+
+func TestMainACPReasoningAppendStreamChunkPreservesPendingPrefixWithoutGhostEvent(t *testing.T) {
+	block := NewMainACPTurnBlock("session-1")
+
+	block.AppendStreamChunk(SEReasoning, "  ")
+	if len(block.Events) != 0 {
+		t.Fatalf("events = %#v, want no event until pending reasoning prefix has renderable content", block.Events)
+	}
+	block.AppendStreamChunk(SEReasoning, "thinking")
+
+	if len(block.Events) != 1 {
+		t.Fatalf("events = %#v, want one reasoning event", block.Events)
+	}
+	if block.Events[0].Kind != SEReasoning || block.Events[0].Text != "  thinking" {
+		t.Fatalf("reasoning event = %#v, want preserved pending prefix", block.Events[0])
+	}
+}
+
+func TestMainACPAppendStreamChunkClearsPendingPrefixAcrossToolBarrier(t *testing.T) {
+	block := NewMainACPTurnBlock("session-1")
+
+	block.AppendStreamChunk(SEAssistant, "\n")
+	block.UpdateToolWithMeta("command-1", "RUN_COMMAND", "pwd", "ok", true, false, ToolUpdateMeta{})
+	block.AppendStreamChunk(SEAssistant, "after")
+
+	if len(block.Events) != 2 {
+		t.Fatalf("events = %#v, want tool plus assistant event", block.Events)
+	}
+	if block.Events[1].Kind != SEAssistant || block.Events[1].Text != "after" {
+		t.Fatalf("assistant event = %#v, want pending prefix cleared across tool barrier", block.Events[1])
+	}
+}
+
+func TestMainACPClearActiveBuffersClearsPendingPrefix(t *testing.T) {
+	block := NewMainACPTurnBlock("session-1")
+
+	block.AppendStreamChunk(SEAssistant, "    ")
+	block.ClearActiveBuffers()
+	block.AppendStreamChunk(SEAssistant, "answer")
+
+	if len(block.Events) != 1 {
+		t.Fatalf("events = %#v, want one assistant event", block.Events)
+	}
+	if block.Events[0].Text != "answer" {
+		t.Fatalf("assistant text = %q, want pending prefix cleared", block.Events[0].Text)
+	}
+}
+
+func TestMainACPFinalStreamChunkMergesPendingPrefixWithoutDuplication(t *testing.T) {
+	block := NewMainACPTurnBlock("session-1")
+	block.AppendStreamChunk(SEAssistant, "    ")
+	block.ReplaceFinalStreamChunk(SEAssistant, "    fmt.Println()")
+
+	if len(block.Events) != 1 {
+		t.Fatalf("events = %#v, want one assistant event", block.Events)
+	}
+	if block.Events[0].Text != "    fmt.Println()" {
+		t.Fatalf("assistant text = %q, want final text without duplicated pending prefix", block.Events[0].Text)
+	}
+
+	block = NewMainACPTurnBlock("session-1")
+	block.AppendStreamChunk(SEAssistant, "    ")
+	block.ReplaceFinalStreamChunk(SEAssistant, "fmt.Println()")
+
+	if len(block.Events) != 1 {
+		t.Fatalf("events = %#v, want one assistant event", block.Events)
+	}
+	if block.Events[0].Text != "    fmt.Println()" {
+		t.Fatalf("assistant text = %q, want pending prefix prepended to suffix-only final text", block.Events[0].Text)
+	}
+}
+
+func TestVisibleNarrativeEventsFiltersReplayedWhitespaceOnlyNarrative(t *testing.T) {
+	events := []SubagentEvent{
+		{Kind: SEAssistant, Text: "\n"},
+		{Kind: SEToolCall, Name: "RUN_COMMAND", Args: "pwd"},
+	}
+
+	visible := visibleNarrativeEvents(events, "running")
+
+	if len(visible) != 1 || visible[0].Kind != SEToolCall {
+		t.Fatalf("visible events = %#v, want only tool event", visible)
+	}
+}
+
 func TestMainACPClearActiveBuffersDropsSpeculativeNarrativeText(t *testing.T) {
 	block := NewMainACPTurnBlock("session-1")
 	block.AppendStreamChunk(SEReasoning, "failed thought")

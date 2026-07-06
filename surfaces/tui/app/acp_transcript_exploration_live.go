@@ -35,7 +35,7 @@ func renderACPLiveExplorationStageRows(blockID string, events []SubagentEvent, i
 				offset += consumed - eventIdx
 			}
 		case SEAssistant:
-			if strings.TrimSpace(ev.Text) != "" {
+			if renderableTextHasContent(ev.Text) {
 				rows = append(rows, renderParticipantTurnNarrativeEventRows(blockID, ev, tuikit.LineStyleAssistant, width, ctx, participantNarrativeEventActive(events, eventIdx, status))...)
 			}
 		case SEToolCall:

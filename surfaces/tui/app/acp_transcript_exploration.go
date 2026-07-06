@@ -123,7 +123,7 @@ func collectExplorationRenderStep(events []SubagentEvent, idx int) (explorationR
 		completedExploration: true,
 	}
 	for j := start; j < i; j++ {
-		if strings.TrimSpace(events[j].Text) != "" {
+		if renderableTextHasContent(events[j].Text) {
 			step.hasNarrative = true
 			break
 		}

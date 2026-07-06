@@ -233,6 +233,7 @@ type MainACPTurnBlock struct {
 	toolPanelRenderCache  map[string]toolOutputRenderCache
 	toolEventIndex        map[string]int
 	compactHeightBudget   compactHeightBudgetState
+	narrativeStream       narrativeStreamState
 }
 
 func NewMainACPTurnBlock(turnKey string) *MainACPTurnBlock {
@@ -248,69 +249,6 @@ func NewMainACPTurnBlock(turnKey string) *MainACPTurnBlock {
 func (b *MainACPTurnBlock) BlockID() string { return b.id }
 func (b *MainACPTurnBlock) Kind() BlockKind { return BlockMainACPTurn }
 
-func (b *MainACPTurnBlock) AppendStreamChunk(kind SubagentEventKind, chunk string, occurredAt ...time.Time) {
-	if b == nil {
-		return
-	}
-	at := narrativeEventTime(occurredAt...)
-	if idx := latestNarrativeAppendTargetIndex(b.Events, kind); idx >= 0 {
-		appendNarrativeEventChunk(&b.Events[idx], kind, chunk, at, appendDeltaStreamChunk)
-		return
-	}
-	b.Events = append(b.Events, newNarrativeEventChunk(kind, chunk, at))
-}
-
-func (b *MainACPTurnBlock) ClearActiveBuffers() {
-	if b == nil {
-		return
-	}
-	out := b.Events[:0]
-	for _, ev := range b.Events {
-		if ev.ActiveBuffer != nil && activeNarrativeEventKind(ev.Kind) {
-			continue
-		}
-		ev.ActiveBuffer = nil
-		out = append(out, ev)
-	}
-	clear(b.Events[len(out):])
-	b.Events = out
-}
-
-func activeNarrativeEventKind(kind SubagentEventKind) bool {
-	return kind == SEAssistant || kind == SEReasoning
-}
-
-func (b *MainACPTurnBlock) ReplaceFinalStreamChunk(kind SubagentEventKind, chunk string, occurredAt ...time.Time) {
-	if b == nil {
-		return
-	}
-	if strings.TrimSpace(chunk) == "" {
-		return
-	}
-	at := narrativeEventTime(occurredAt...)
-	chunk = collapseRepeatedNarrativeText(chunk)
-	if cumulativeFinalNarrativeAlreadyRendered(b.Events, kind, chunk) {
-		return
-	}
-	if idx := latestNarrativeFinalTargetIndex(b.Events, kind); idx >= 0 {
-		chunk = cumulativeFinalNarrativeTimelineText(b.Events, kind, chunk, idx)
-		if strings.TrimSpace(chunk) == "" {
-			return
-		}
-		replaceNarrativeEventFinal(&b.Events[idx], chunk, at)
-		b.Events = pruneNarrativeEventsCoveredByFinal(b.Events, idx, kind)
-		return
-	}
-	chunk = cumulativeFinalNarrativeTimelineText(b.Events, kind, chunk, len(b.Events))
-	if strings.TrimSpace(chunk) == "" {
-		return
-	}
-	ev := SubagentEvent{Kind: kind, Text: chunk}
-	markNarrativeTiming(&ev, at)
-	b.Events = append(b.Events, ev)
-	b.Events = pruneNarrativeEventsCoveredByFinal(b.Events, len(b.Events)-1, kind)
-}
-
 func (b *MainACPTurnBlock) UpdateTool(callID, name, args, output string, final bool, err bool) {
 	b.UpdateToolWithMeta(callID, name, args, output, final, err, ToolUpdateMeta{})
 }
@@ -319,6 +257,7 @@ func (b *MainACPTurnBlock) UpdateToolWithMeta(callID, name, args, output string,
 	if b == nil {
 		return
 	}
+	b.onNarrativeBarrier()
 	events, _, collapse := applyToolEventUpdate(b.Events, toolEventUpdate{
 		CallID: callID,
 		Name:   name,
@@ -367,6 +306,7 @@ func (b *MainACPTurnBlock) UpdatePlan(entries []planEntryState) {
 	if b == nil {
 		return
 	}
+	b.onNarrativeBarrier()
 	if n := len(b.Events); n > 0 && b.Events[n-1].Kind == SEPlan {
 		b.Events[n-1].PlanEntries = entries
 		return
@@ -385,6 +325,7 @@ func (b *MainACPTurnBlock) SetStatus(state string, approvalTool string, approval
 	collapseTools := false
 	switch b.Status {
 	case "completed", "failed", "interrupted", "cancelled", "canceled", "terminated":
+		b.onNarrativeBarrier()
 		if b.EndedAt.IsZero() {
 			collapseTools = true
 			if !occurredAt.IsZero() {
@@ -402,6 +343,7 @@ func (b *MainACPTurnBlock) SetStatus(state string, approvalTool string, approval
 	if !strings.EqualFold(b.Status, "waiting_approval") {
 		return
 	}
+	b.onNarrativeBarrier()
 	if n := len(b.Events); n > 0 && b.Events[n-1].Kind == SEApproval {
 		b.Events[n-1].ApprovalTool = strings.TrimSpace(approvalTool)
 		b.Events[n-1].ApprovalCommand = strings.TrimSpace(approvalCommand)
@@ -418,6 +360,7 @@ func (b *MainACPTurnBlock) AddApprovalReviewEvent(callID, tool, command, status,
 	if b == nil {
 		return
 	}
+	b.onNarrativeBarrier()
 	b.Events, _ = addApprovalReviewSubagentEvent(b.Events, callID, tool, command, status, risk, authorization, text)
 }
 
@@ -542,6 +485,7 @@ type ParticipantTurnBlock struct {
 	toolPanelRenderCache  map[string]toolOutputRenderCache
 	toolEventIndex        map[string]int
 	compactHeightBudget   compactHeightBudgetState
+	narrativeStream       narrativeStreamState
 }
 
 func NewParticipantTurnBlock(sessionID, actor string) *ParticipantTurnBlock {
@@ -558,49 +502,6 @@ func NewParticipantTurnBlock(sessionID, actor string) *ParticipantTurnBlock {
 func (b *ParticipantTurnBlock) BlockID() string { return b.id }
 func (b *ParticipantTurnBlock) Kind() BlockKind { return BlockParticipantTurn }
 
-func (b *ParticipantTurnBlock) AppendStreamChunk(kind SubagentEventKind, chunk string, occurredAt ...time.Time) {
-	if b == nil {
-		return
-	}
-	at := narrativeEventTime(occurredAt...)
-	if idx := latestNarrativeAppendTargetIndex(b.Events, kind); idx >= 0 {
-		appendNarrativeEventChunk(&b.Events[idx], kind, chunk, at, appendDeltaStreamChunk)
-		return
-	}
-	b.Events = append(b.Events, newNarrativeEventChunk(kind, chunk, at))
-}
-
-func (b *ParticipantTurnBlock) ReplaceFinalStreamChunk(kind SubagentEventKind, chunk string, occurredAt ...time.Time) {
-	if b == nil {
-		return
-	}
-	if strings.TrimSpace(chunk) == "" {
-		return
-	}
-	at := narrativeEventTime(occurredAt...)
-	chunk = collapseRepeatedNarrativeText(chunk)
-	if cumulativeFinalNarrativeAlreadyRendered(b.Events, kind, chunk) {
-		return
-	}
-	if idx := latestNarrativeFinalTargetIndex(b.Events, kind); idx >= 0 {
-		chunk = cumulativeFinalNarrativeTimelineText(b.Events, kind, chunk, idx)
-		if strings.TrimSpace(chunk) == "" {
-			return
-		}
-		replaceNarrativeEventFinal(&b.Events[idx], chunk, at)
-		b.Events = pruneNarrativeEventsCoveredByFinal(b.Events, idx, kind)
-		return
-	}
-	chunk = cumulativeFinalNarrativeTimelineText(b.Events, kind, chunk, len(b.Events))
-	if strings.TrimSpace(chunk) == "" {
-		return
-	}
-	ev := SubagentEvent{Kind: kind, Text: chunk}
-	markNarrativeTiming(&ev, at)
-	b.Events = append(b.Events, ev)
-	b.Events = pruneNarrativeEventsCoveredByFinal(b.Events, len(b.Events)-1, kind)
-}
-
 func (b *ParticipantTurnBlock) UpdateTool(callID, name, args, output string, final bool, err bool) {
 	b.UpdateToolWithMeta(callID, name, args, output, final, err, ToolUpdateMeta{})
 }
@@ -609,6 +510,7 @@ func (b *ParticipantTurnBlock) UpdateToolWithMeta(callID, name, args, output str
 	if b == nil {
 		return
 	}
+	b.onNarrativeBarrier()
 	events, _, collapse := applyToolEventUpdate(b.Events, toolEventUpdate{
 		CallID: callID,
 		Name:   name,
@@ -628,6 +530,7 @@ func (b *ParticipantTurnBlock) UpdatePlan(entries []planEntryState) {
 	if b == nil {
 		return
 	}
+	b.onNarrativeBarrier()
 	if n := len(b.Events); n > 0 && b.Events[n-1].Kind == SEPlan {
 		b.Events[n-1].PlanEntries = entries
 		return
@@ -646,6 +549,7 @@ func (b *ParticipantTurnBlock) SetStatus(state string, approvalTool string, appr
 	collapseTools := false
 	switch b.Status {
 	case "completed", "failed", "interrupted", "cancelled", "canceled", "terminated":
+		b.onNarrativeBarrier()
 		if b.EndedAt.IsZero() {
 			collapseTools = true
 			if !occurredAt.IsZero() {
@@ -663,6 +567,7 @@ func (b *ParticipantTurnBlock) SetStatus(state string, approvalTool string, appr
 	if !strings.EqualFold(b.Status, "waiting_approval") {
 		return
 	}
+	b.onNarrativeBarrier()
 	if n := len(b.Events); n > 0 && b.Events[n-1].Kind == SEApproval {
 		b.Events[n-1].ApprovalTool = strings.TrimSpace(approvalTool)
 		b.Events[n-1].ApprovalCommand = strings.TrimSpace(approvalCommand)
@@ -679,6 +584,7 @@ func (b *ParticipantTurnBlock) AddApprovalReviewEvent(callID, tool, command, sta
 	if b == nil {
 		return
 	}
+	b.onNarrativeBarrier()
 	b.Events, _ = addApprovalReviewSubagentEvent(b.Events, callID, tool, command, status, risk, authorization, text)
 }
 
@@ -786,6 +692,12 @@ func visibleNarrativeEvents(events []SubagentEvent, status string) []SubagentEve
 	hidePlan := strings.EqualFold(strings.TrimSpace(status), "waiting_approval") && hasApprovalEvent(events)
 	out := make([]SubagentEvent, 0, len(events))
 	for i, ev := range events {
+		// Defense for replayed or legacy snapshots that may already contain a
+		// whitespace-only narrative event. New live streams are guarded by
+		// narrativeStreamState before events are appended.
+		if activeNarrativeEventKind(ev.Kind) && !renderableTextHasContent(ev.Text) {
+			continue
+		}
 		if ev.Kind == SEReasoning && !shouldRenderReasoningEvent(events, i, status) {
 			continue
 		}
@@ -938,7 +850,7 @@ func shouldRenderReasoningEvent(events []SubagentEvent, idx int, _ string) bool 
 		return false
 	}
 	ev := events[idx]
-	return ev.Kind == SEReasoning && strings.TrimSpace(ev.Text) != ""
+	return ev.Kind == SEReasoning && renderableTextHasContent(ev.Text)
 }
 
 func splitParticipantActor(actor string) (name string, provider string) {

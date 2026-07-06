@@ -97,6 +97,108 @@ func TestRegressionACPEventstreamToolCallFrame120x32(t *testing.T) {
 	})
 }
 
+func TestRegressionACPEventstreamWhitespaceOnlyAssistantChunkDoesNotRenderBeforeTool(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{
+		AppName:     "CAELIS",
+		Version:     "dev",
+		Workspace:   "/tmp/workspace",
+		ModelAlias:  "glm-4.5",
+		Commands:    DefaultCommands(),
+		Wizards:     DefaultWizards(),
+		NoColor:     true,
+		NoAnimation: true,
+	})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 120, Height: 32})
+	model = updated.(*Model)
+
+	for _, env := range []eventstream.Envelope{
+		{
+			Kind:      eventstream.KindSessionUpdate,
+			SessionID: "sess-regression",
+			TurnID:    "turn-whitespace-tool",
+			Update: schema.ContentChunk{
+				SessionUpdate: schema.UpdateAgentMessage,
+				Content:       schema.TextContent{Type: "text", Text: "\n"},
+			},
+		},
+		{
+			Kind:      eventstream.KindSessionUpdate,
+			SessionID: "sess-regression",
+			TurnID:    "turn-whitespace-tool",
+			Update: schema.ToolCall{
+				SessionUpdate: schema.UpdateToolCall,
+				ToolCallID:    "call-1",
+				Title:         "cmpctl list ebs --json 2>&1",
+				Kind:          schema.ToolKindExecute,
+				Status:        schema.ToolStatusInProgress,
+				RawInput:      map[string]any{"command": "cmpctl list ebs --json 2>&1"},
+				Meta:          acpToolNameMeta("RUN_COMMAND"),
+			},
+		},
+		{
+			Kind:      eventstream.KindSessionUpdate,
+			SessionID: "sess-regression",
+			TurnID:    "turn-whitespace-tool",
+			Final:     true,
+			Update: schema.ToolCallUpdate{
+				SessionUpdate: schema.UpdateToolCallInfo,
+				ToolCallID:    "call-1",
+				Title:         stringPtr("cmpctl list ebs --json 2>&1"),
+				Kind:          stringPtr(schema.ToolKindExecute),
+				Status:        stringPtr(schema.ToolStatusFailed),
+				RawInput:      map[string]any{"command": "cmpctl list ebs --json 2>&1"},
+				RawOutput:     map[string]any{"exit_code": 1},
+				Meta:          metautil.WithTerminalOutput(acpToolNameMeta("RUN_COMMAND"), "call-1", "{\"status\":\"error\"}\n"),
+			},
+		},
+		{
+			Kind:      eventstream.KindSessionUpdate,
+			SessionID: "sess-regression",
+			TurnID:    "turn-whitespace-tool",
+			Final:     true,
+			Update: schema.ContentChunk{
+				SessionUpdate: schema.UpdateAgentMessage,
+				Content:       schema.TextContent{Type: "text", Text: "没有查到云硬盘。"},
+			},
+		},
+	} {
+		updated, _ = model.Update(env)
+		model = updated.(*Model)
+	}
+
+	block := requireMainACPTurnBlockForTest(t, model)
+	for _, event := range block.Events {
+		if activeNarrativeEventKind(event.Kind) && !renderableTextHasContent(event.Text) {
+			t.Fatalf("main ACP events include whitespace-only narrative event: %#v", block.Events)
+		}
+	}
+	rows := block.Render(model.blockRenderContext(96))
+	plain := renderedPlainRows(rows)
+	if !renderedRowsContainPlain(rows, "没有查到云硬盘。") {
+		t.Fatalf("rendered rows missing final assistant text: %#v", plain)
+	}
+	toolIndex := -1
+	for i, row := range plain {
+		if strings.Contains(row, "Ran cmpctl list ebs --json 2>&1") {
+			toolIndex = i
+			break
+		}
+	}
+	if toolIndex < 0 {
+		t.Fatalf("rendered rows missing tool header: %#v", plain)
+	}
+	for i := 0; i < toolIndex; i++ {
+		if strings.TrimSpace(plain[i]) == "·" {
+			t.Fatalf("whitespace-only assistant chunk rendered as standalone prefix before tool header at row %d: %#v", i, plain)
+		}
+		if strings.TrimSpace(plain[i]) == "" {
+			t.Fatalf("whitespace-only assistant chunk inserted fixed blank spacing before tool header at row %d: %#v", i, plain)
+		}
+	}
+}
+
 func acpToolNameMeta(name string) map[string]any {
 	return metautil.WithRuntimeSection(nil, metautil.RuntimeTool, map[string]any{
 		metautil.RuntimeToolName: name,

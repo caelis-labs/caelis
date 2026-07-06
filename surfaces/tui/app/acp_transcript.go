@@ -107,7 +107,7 @@ func renderACPTranscriptRows(blockID string, events []SubagentEvent, status stri
 				i = consumed
 				continue
 			}
-			if ev.Text != "" {
+			if renderableTextHasContent(ev.Text) {
 				rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupNarrative, false)
 				rows = append(rows, renderParticipantTurnNarrativeEventRows(blockID, ev, tuikit.LineStyleAssistant, width, ctx, participantNarrativeEventActive(visible, i, status))...)
 				hasContent = true
