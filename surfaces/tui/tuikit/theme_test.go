@@ -65,7 +65,7 @@ func TestResolveThemeForBackground_SelectsLightTheme(t *testing.T) {
 	if got := stringifyColor(theme.TextPrimary); got != "#4c4f69" {
 		t.Fatalf("expected light theme body text to use explicit high-contrast foreground, got %q", got)
 	}
-	if got := stringifyColor(theme.Focus); got != "#7287fd" {
+	if got := stringifyColor(theme.Focus); got != "#1e66f5" {
 		t.Fatalf("expected light-theme focus accent, got %q", got)
 	}
 	if got := stringifyColor(theme.PanelBorder); got != "#ccd0da" {
@@ -162,6 +162,49 @@ func TestAdaptiveDefaultThemeUsesExplicitBodyAndSemanticAccents(t *testing.T) {
 	}
 	if got := stringifyColor(theme.TranscriptRail); got != "#313244" {
 		t.Fatalf("expected subtle transcript rail, got %q", got)
+	}
+	if got := stringifyColor(theme.Success); got != "#a6e3a1" {
+		t.Fatalf("expected dark Success green, got %q", got)
+	}
+	if got := stringifyColor(theme.DiffAddFg); got != "#a6e3a1" {
+		t.Fatalf("expected dark DiffAddFg green, got %q", got)
+	}
+	if got := stringifyColor(theme.DiffRemoveFg); got != "#f38ba8" {
+		t.Fatalf("expected dark DiffRemoveFg red/pink, got %q", got)
+	}
+}
+
+func TestNamedThemesAvoidLeakage(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+
+	// Nord
+	t.Setenv("CAELIS_THEME", "nord")
+	nord := ResolveThemeFromOptions(false, colorprofile.TrueColor)
+	if got := stringifyColor(nord.DiffAddFg); got != "#a3be8c" {
+		t.Fatalf("expected nord DiffAddFg, got %q", got)
+	}
+	if got := stringifyColor(nord.DiffRemoveFg); got != "#d08770" {
+		t.Fatalf("expected nord DiffRemoveFg, got %q", got)
+	}
+
+	// Solarized
+	t.Setenv("CAELIS_THEME", "solarized")
+	solarized := ResolveThemeFromOptions(false, colorprofile.TrueColor)
+	if got := stringifyColor(solarized.DiffAddFg); got != "#859900" {
+		t.Fatalf("expected solarized DiffAddFg, got %q", got)
+	}
+	if got := stringifyColor(solarized.DiffRemoveFg); got != "#dc322f" {
+		t.Fatalf("expected solarized DiffRemoveFg, got %q", got)
+	}
+
+	// Dracula
+	t.Setenv("CAELIS_THEME", "dracula")
+	dracula := ResolveThemeFromOptions(false, colorprofile.TrueColor)
+	if got := stringifyColor(dracula.DiffAddFg); got != "#50fa7b" {
+		t.Fatalf("expected dracula DiffAddFg, got %q", got)
+	}
+	if got := stringifyColor(dracula.DiffRemoveFg); got != "#ff5555" {
+		t.Fatalf("expected dracula DiffRemoveFg, got %q", got)
 	}
 }
 

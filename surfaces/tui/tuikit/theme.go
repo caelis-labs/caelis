@@ -675,7 +675,7 @@ func defaultThemeVariant(trueColor bool) Theme {
 		SecondaryText:    themeColor(trueColor, "#c6d0df", "250"),
 		MutedText:        themeColor(trueColor, "#7a8599", "245"),
 		Info:             themeColor(trueColor, "#7dd3fc", "117"),
-		Success:          themeColor(trueColor, "#5ee787", "78"),
+		Success:          themeColor(trueColor, "#a6e3a1", "114"),
 		Warning:          themeColor(trueColor, "#f4bf4f", "221"),
 		Error:            themeColor(trueColor, "#ff6b6b", "203"),
 		Accent:           themeColor(trueColor, "#7aa2f7", "111"),
@@ -699,8 +699,8 @@ func defaultThemeVariant(trueColor bool) Theme {
 		UserPrefixFg:       themeColor(trueColor, "#ffffff", "255"),
 		UserMentionFg:      themeColor(trueColor, "#8bd5ff", "117"),
 		ToolFg:             themeColor(trueColor, "#8bd5ff", "117"),
-		DiffAddFg:          themeColor(trueColor, "#5ee787", "78"),
-		DiffRemoveFg:       themeColor(trueColor, "#ff7b72", "210"),
+		DiffAddFg:          themeColor(trueColor, "#a6e3a1", "114"),
+		DiffRemoveFg:       themeColor(trueColor, "#f38ba8", "211"),
 		DiffHeaderFg:       themeColor(trueColor, "#a8b3c5", "248"),
 		DiffHunkFg:         themeColor(trueColor, "#c6d0df", "250"),
 		DiffAddBg:          themeColor(trueColor, "#173423", "22"),
@@ -756,10 +756,10 @@ func defaultLightThemeVariant(trueColor bool) Theme {
 		MutedText:        themeColor(trueColor, "#748094", "243"),
 		Info:             themeColor(trueColor, "#2563eb", "25"),
 		Success:          themeColor(trueColor, "#188a42", "28"),
-		Warning:          themeColor(trueColor, "#b86b00", "130"),
-		Error:            themeColor(trueColor, "#c2410c", "166"),
-		Accent:           themeColor(trueColor, "#2563eb", "25"),
-		Focus:            themeColor(trueColor, "#0284c7", "32"),
+		Warning:          themeColor(trueColor, "#bc7200", "172"),
+		Error:            themeColor(trueColor, "#d20f39", "160"),
+		Accent:           themeColor(trueColor, "#7287fd", "93"),
+		Focus:            themeColor(trueColor, "#1e66f5", "63"),
 		ModalBg:          themeColor(trueColor, "#ffffff", "231"),
 		StatusBg:         themeColor(trueColor, "#f3f6fb", "255"),
 		StatusText:       themeColor(trueColor, "#1f2937", "236"),
@@ -770,17 +770,17 @@ func defaultLightThemeVariant(trueColor bool) Theme {
 		SelectionFg:      themeColor(trueColor, "#0f172a", "235"),
 		SelectionBg:      themeColor(trueColor, "#dbeafe", "153"),
 		InputSelectionFg: themeColor(trueColor, "#ffffff", "255"),
-		InputSelectionBg: themeColor(trueColor, "#075985", "24"),
+		InputSelectionBg: themeColor(trueColor, "#1e66f5", "63"),
 
 		AssistantFg:        themeColor(trueColor, "#188a42", "28"),
 		ReasoningFg:        themeColor(trueColor, "#6b7280", "242"),
 		UserFg:             themeColor(trueColor, "#111827", "235"),
 		UserBg:             themeColor(trueColor, "#f1f7ff", "195"),
-		UserPrefixFg:       themeColor(trueColor, "#0f172a", "235"),
-		UserMentionFg:      themeColor(trueColor, "#0f766e", "30"),
+		UserPrefixFg:       themeColor(trueColor, "#ea76cb", "160"),
+		UserMentionFg:      themeColor(trueColor, "#ea76cb", "160"),
 		ToolFg:             themeColor(trueColor, "#0f766e", "30"),
 		DiffAddFg:          themeColor(trueColor, "#188a42", "28"),
-		DiffRemoveFg:       themeColor(trueColor, "#c2410c", "166"),
+		DiffRemoveFg:       themeColor(trueColor, "#d20f39", "160"),
 		DiffHeaderFg:       themeColor(trueColor, "#526071", "240"),
 		DiffHunkFg:         themeColor(trueColor, "#1f2937", "236"),
 		DiffAddBg:          themeColor(trueColor, "#e8f7ed", "194"),
@@ -793,20 +793,20 @@ func defaultLightThemeVariant(trueColor bool) Theme {
 		SectionFg:          themeColor(trueColor, "#111827", "235"),
 		KeyLabelFg:         themeColor(trueColor, "#364152", "239"),
 		NoteFg:             themeColor(trueColor, "#6b7280", "242"),
-		PromptFg:           themeColor(trueColor, "#0284c7", "32"),
+		PromptFg:           themeColor(trueColor, "#1e66f5", "63"),
 		CursorFg:           themeColor(trueColor, "#111827", "235"),
-		ScrollHintFg:       themeColor(trueColor, "#b86b00", "130"),
+		ScrollHintFg:       themeColor(trueColor, "#bc7200", "172"),
 
 		InputBarBg:          themeColor(trueColor, "#ffffff", "231"),
 		InputBarFg:          themeColor(trueColor, "#1f2937", "236"),
 		ToolOutputBg:        themeColor(trueColor, "#f8fafc", "255"),
 		HelpHintFg:          themeColor(trueColor, "#748094", "243"),
-		SpinnerFg:           themeColor(trueColor, "#0284c7", "32"),
+		SpinnerFg:           themeColor(trueColor, "#1e66f5", "63"),
 		SeparatorFg:         themeColor(trueColor, "#d7dee8", "252"),
 		RoleBorderFg:        themeColor(trueColor, "#c8d2df", "252"),
 		NewMsgBg:            themeColor(trueColor, "#e7f0ff", "195"),
 		ComposerBorder:      themeColor(trueColor, "#c8d2df", "252"),
-		ComposerBorderFocus: themeColor(trueColor, "#0284c7", "32"),
+		ComposerBorderFocus: themeColor(trueColor, "#1e66f5", "63"),
 		ScrollbarTrack:      themeColor(trueColor, "#e2e8f0", "254"),
 		ScrollbarThumb:      themeColor(trueColor, "#8a98ab", "245"),
 		LinkFg:              themeColor(trueColor, "#2563eb", "25"),
@@ -845,6 +845,8 @@ func nordTheme(trueColor bool) Theme {
 	theme.AssistantFg = themeColor(trueColor, "#a3be8c", "108")
 	theme.ReasoningFg = theme.MutedText
 	theme.ToolFg = themeColor(trueColor, "#88c0d0", "110")
+	theme.DiffAddFg = themeColor(trueColor, "#a3be8c", "108")
+	theme.DiffRemoveFg = themeColor(trueColor, "#d08770", "131")
 	theme.DiffAddBg = themeColor(trueColor, "#314236", "23")
 	theme.DiffAddStrongBg = themeColor(trueColor, "#45604e", "59")
 	theme.DiffRemoveBg = themeColor(trueColor, "#4a3037", "52")
@@ -887,6 +889,8 @@ func solarizedTheme(trueColor bool) Theme {
 	theme.AssistantFg = themeColor(trueColor, "#859900", "100")
 	theme.ReasoningFg = theme.MutedText
 	theme.ToolFg = themeColor(trueColor, "#2aa198", "36")
+	theme.DiffAddFg = themeColor(trueColor, "#859900", "100")
+	theme.DiffRemoveFg = themeColor(trueColor, "#dc322f", "160")
 	theme.DiffAddBg = themeColor(trueColor, "#173d1c", "22")
 	theme.DiffAddStrongBg = themeColor(trueColor, "#2f5f2f", "29")
 	theme.DiffRemoveBg = themeColor(trueColor, "#4a1f1c", "52")
@@ -930,6 +934,8 @@ func draculaTheme(trueColor bool) Theme {
 	theme.AssistantFg = themeColor(trueColor, "#50fa7b", "84")
 	theme.ReasoningFg = theme.MutedText
 	theme.ToolFg = themeColor(trueColor, "#8be9fd", "123")
+	theme.DiffAddFg = themeColor(trueColor, "#50fa7b", "84")
+	theme.DiffRemoveFg = themeColor(trueColor, "#ff5555", "203")
 	theme.DiffAddBg = themeColor(trueColor, "#21392a", "22")
 	theme.DiffAddStrongBg = themeColor(trueColor, "#2f5f43", "29")
 	theme.DiffRemoveBg = themeColor(trueColor, "#4a232d", "52")

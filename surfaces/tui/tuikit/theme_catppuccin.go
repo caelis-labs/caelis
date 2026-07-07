@@ -18,8 +18,8 @@ func adaptiveDarkThemeVariant(profile colorprofile.Profile, background color.Col
 	surface2 := adaptiveBackgroundColor(profile, background, true, 0.12, 0, "#181825", "", "234", "")
 	selection := adaptiveTintColor(profile, background, true, [3]uint8{88, 91, 112}, [3]uint8{}, 0.35, 0, "#585b70", "", "240", "")
 	userBg := adaptiveBackgroundColor(profile, background, true, 0.08, 0, "#181825", "", "234", "")
-	addBg := adaptiveTintColor(profile, background, true, [3]uint8{166, 218, 149}, [3]uint8{}, 0.12, 0, "#223329", "", "22", "")
-	addStrongBg := adaptiveTintColor(profile, background, true, [3]uint8{166, 218, 149}, [3]uint8{}, 0.22, 0, "#2a4435", "", "29", "")
+	addBg := adaptiveTintColor(profile, background, true, [3]uint8{166, 227, 161}, [3]uint8{}, 0.12, 0, "#223329", "", "22", "")
+	addStrongBg := adaptiveTintColor(profile, background, true, [3]uint8{166, 227, 161}, [3]uint8{}, 0.22, 0, "#2a4435", "", "29", "")
 	delBg := adaptiveTintColor(profile, background, true, [3]uint8{242, 205, 205}, [3]uint8{}, 0.12, 0, "#392025", "", "52", "")
 	delStrongBg := adaptiveTintColor(profile, background, true, [3]uint8{242, 205, 205}, [3]uint8{}, 0.22, 0, "#4a2831", "", "88", "")
 
@@ -34,7 +34,7 @@ func adaptiveDarkThemeVariant(profile colorprofile.Profile, background color.Col
 		SecondaryText:    profileColor(profile, "#a6adc8", "248", "7"),
 		MutedText:        profileColor(profile, "#6c7086", "242", "8"),
 		Info:             profileColor(profile, "#89dceb", "117", "6"),
-		Success:          profileColor(profile, "#a6da95", "114", "2"),
+		Success:          profileColor(profile, "#a6e3a1", "114", "2"),
 		Warning:          profileColor(profile, "#f9e2af", "221", "3"),
 		Error:            profileColor(profile, "#f38ba8", "204", "1"),
 		Accent:           profileColor(profile, "#cba6f7", "183", "5"),
@@ -58,8 +58,8 @@ func adaptiveDarkThemeVariant(profile colorprofile.Profile, background color.Col
 		UserPrefixFg:       profileColor(profile, "#f2cdcd", "224", "5"),
 		UserMentionFg:      profileColor(profile, "#f2cdcd", "211", "5"),
 		ToolFg:             profileColor(profile, "#89dceb", "117", "6"),
-		DiffAddFg:          profileColor(profile, "#a6da95", "114", "2"),
-		DiffRemoveFg:       profileColor(profile, "#f2cdcd", "211", "1"),
+		DiffAddFg:          profileColor(profile, "#a6e3a1", "114", "2"),
+		DiffRemoveFg:       profileColor(profile, "#f38ba8", "211", "1"),
 		DiffHeaderFg:       profileColor(profile, "#a6adc8", "248", "7"),
 		DiffHunkFg:         profileColor(profile, "#f2cdcd", "211", "5"),
 		DiffAddBg:          addBg,
@@ -108,8 +108,8 @@ func adaptiveLightThemeVariant(profile colorprofile.Profile, background color.Co
 	userBg := adaptiveBackgroundColor(profile, background, false, 0, 0.035, "", "#e6e9ef", "", "254")
 	addBg := adaptiveTintColor(profile, background, false, [3]uint8{}, [3]uint8{64, 160, 43}, 0, 0.13, "", "#e6f4ea", "", "194")
 	addStrongBg := adaptiveTintColor(profile, background, false, [3]uint8{}, [3]uint8{64, 160, 43}, 0, 0.22, "", "#c8eccb", "", "157")
-	delBg := adaptiveTintColor(profile, background, false, [3]uint8{}, [3]uint8{230, 69, 83}, 0, 0.10, "", "#fdeef0", "", "224")
-	delStrongBg := adaptiveTintColor(profile, background, false, [3]uint8{}, [3]uint8{230, 69, 83}, 0, 0.18, "", "#f8d5da", "", "217")
+	delBg := adaptiveTintColor(profile, background, false, [3]uint8{}, [3]uint8{210, 15, 57}, 0, 0.10, "", "#fdeef0", "", "224")
+	delStrongBg := adaptiveTintColor(profile, background, false, [3]uint8{}, [3]uint8{210, 15, 57}, 0, 0.18, "", "#f8d5da", "", "217")
 
 	return Theme{
 		Name:             "light",
@@ -123,10 +123,10 @@ func adaptiveLightThemeVariant(profile colorprofile.Profile, background color.Co
 		MutedText:        profileColor(profile, "#6c6f85", "242", "8"),
 		Info:             profileColor(profile, "#04a5e5", "32", "6"),
 		Success:          profileColor(profile, "#40a02b", "28", "2"),
-		Warning:          profileColor(profile, "#9a6a10", "172", "3"),
-		Error:            profileColor(profile, "#e64553", "160", "1"),
-		Accent:           profileColor(profile, "#8839ef", "93", "5"),
-		Focus:            profileColor(profile, "#7287fd", "63", "5"),
+		Warning:          profileColor(profile, "#bc7200", "172", "3"),
+		Error:            profileColor(profile, "#d20f39", "160", "1"),
+		Accent:           profileColor(profile, "#7287fd", "93", "5"),
+		Focus:            profileColor(profile, "#1e66f5", "63", "5"),
 		ModalBg:          surface1,
 		StatusBg:         surface1,
 		StatusText:       profileColor(profile, "#5c5f77", "240", "0"),
@@ -136,20 +136,20 @@ func adaptiveLightThemeVariant(profile colorprofile.Profile, background color.Co
 		CommandSubText:   profileColor(profile, "#9ca0b0", "244", "8"),
 		SelectionFg:      profileColor(profile, "#eff1f5", "254", "7"),
 		SelectionBg:      selection,
-		InputSelectionFg: profileColor(profile, "#11111b", "233", "0"),
-		InputSelectionBg: profileColor(profile, "#7287fd", "63", "5"),
+		InputSelectionFg: profileColor(profile, "#ffffff", "255", "7"),
+		InputSelectionBg: profileColor(profile, "#1e66f5", "63", "5"),
 
 		AssistantFg:        profileColor(profile, "#4c4f69", "236", "0"),
 		ReasoningFg:        profileColor(profile, "#6c6f85", "242", "8"),
 		UserFg:             profileColor(profile, "#4c4f69", "236", "0"),
 		UserBg:             userBg,
-		UserPrefixFg:       profileColor(profile, "#e64553", "160", "5"),
-		UserMentionFg:      profileColor(profile, "#e64553", "160", "5"),
+		UserPrefixFg:       profileColor(profile, "#ea76cb", "160", "5"),
+		UserMentionFg:      profileColor(profile, "#ea76cb", "160", "5"),
 		ToolFg:             profileColor(profile, "#04a5e5", "32", "6"),
 		DiffAddFg:          profileColor(profile, "#327d1e", "28", "2"),
-		DiffRemoveFg:       profileColor(profile, "#e64553", "160", "1"),
+		DiffRemoveFg:       profileColor(profile, "#d20f39", "160", "1"),
 		DiffHeaderFg:       profileColor(profile, "#5c5f77", "240", "0"),
-		DiffHunkFg:         profileColor(profile, "#e64553", "160", "5"),
+		DiffHunkFg:         profileColor(profile, "#d20f39", "160", "5"),
 		DiffAddBg:          addBg,
 		DiffAddStrongBg:    addStrongBg,
 		DiffRemoveBg:       delBg,
@@ -160,20 +160,20 @@ func adaptiveLightThemeVariant(profile colorprofile.Profile, background color.Co
 		SectionFg:          profileColor(profile, "#4c4f69", "236", "0"),
 		KeyLabelFg:         profileColor(profile, "#5c5f77", "240", "0"),
 		NoteFg:             profileColor(profile, "#04a5e5", "32", "8"),
-		PromptFg:           profileColor(profile, "#7287fd", "63", "5"),
+		PromptFg:           profileColor(profile, "#1e66f5", "63", "5"),
 		CursorFg:           profileColor(profile, "#4c4f69", "236", "0"),
-		ScrollHintFg:       profileColor(profile, "#9a6a10", "172", "3"),
+		ScrollHintFg:       profileColor(profile, "#bc7200", "172", "3"),
 
 		InputBarBg:          nil,
 		InputBarFg:          profileColor(profile, "#4c4f69", "236", "0"),
 		ToolOutputBg:        nil,
 		HelpHintFg:          profileColor(profile, "#9ca0b0", "244", "8"),
-		SpinnerFg:           profileColor(profile, "#7287fd", "63", "5"),
+		SpinnerFg:           profileColor(profile, "#1e66f5", "63", "5"),
 		SeparatorFg:         profileColor(profile, "#bcc0cc", "248", "8"),
 		RoleBorderFg:        profileColor(profile, "#ccd0da", "250", "8"),
 		NewMsgBg:            selection,
 		ComposerBorder:      profileColor(profile, "#ccd0da", "250", "8"),
-		ComposerBorderFocus: profileColor(profile, "#7287fd", "63", "5"),
+		ComposerBorderFocus: profileColor(profile, "#1e66f5", "63", "5"),
 		ScrollbarTrack:      profileColor(profile, "#e6e9ef", "254", "8"),
 		ScrollbarThumb:      profileColor(profile, "#acb0be", "248", "7"),
 		LinkFg:              profileColor(profile, "#04a5e5", "32", "6"),
