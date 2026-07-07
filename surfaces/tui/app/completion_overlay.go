@@ -28,7 +28,11 @@ func (m *Model) renderCompletionUnselectedLine(innerWidth int, parts ...string) 
 }
 
 func (m *Model) completionRowInnerWidth() int {
-	return maxInt(1, m.completionOverlayInnerWidth()-2)
+	chrome := 2
+	if m.overlayUsesBorder() {
+		chrome = 6
+	}
+	return maxInt(1, m.completionOverlayInnerWidth()-chrome)
 }
 
 type completionLineLayout int

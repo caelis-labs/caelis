@@ -72,6 +72,15 @@ func (t Theme) SelectionStyle() lipgloss.Style {
 		Background(t.SelectionBg)
 }
 
+func (t Theme) InputSelectionStyle() lipgloss.Style {
+	if t.InputSelectionFg == nil || t.InputSelectionBg == nil {
+		return t.SelectionStyle()
+	}
+	return lipgloss.NewStyle().
+		Foreground(t.InputSelectionFg).
+		Background(t.InputSelectionBg)
+}
+
 // ---------------------------------------------------------------------------
 // Line-style rendering helpers
 // ---------------------------------------------------------------------------

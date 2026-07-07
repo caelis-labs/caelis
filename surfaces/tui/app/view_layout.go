@@ -27,23 +27,23 @@ func (m *Model) computeLayout() (int, int) {
 func (m *Model) bottomSectionHeight() int {
 	lines := 0
 
-	// Spacer + optional plan + optional pending queue + hint row + hint/header
-	// gap + workspace/model row + composer section label.
+	// Spacer + optional plan + optional pending queue + hint row + gap.
 	lines += m.preComposerFixedHeight()
 	lines += m.promptModalReservedHeight()
 
-	// Composer top padding between workspace/model row and input.
+	// Composer top padding before input.
 	lines += tuikit.ComposerPadTop
 
-	// Input bar (with minimum height).
+	// Input bar (with minimum height) plus optional UserBg container padding.
 	inputH := maxInt(tuikit.ComposerMinHeight, m.textarea.Height())
 	lines += inputH
+	lines += m.composerChrome().verticalRows()
 
 	// Composer bottom padding.
 	lines += tuikit.ComposerPadBottom
 
-	// Lower separator + status footer.
-	lines += 2
+	// Status footer.
+	lines += 1
 
 	// Status bar bottom padding.
 	lines += tuikit.StatusBarPadBottom
@@ -569,6 +569,7 @@ func (m *Model) inputAreaBounds() (startY int, height int, ok bool) {
 	y += m.preComposerFixedHeight()
 	// composer top padding
 	y += tuikit.ComposerPadTop
+	y += m.composerChrome().topRows()
 	h := maxInt(tuikit.ComposerMinHeight, m.textarea.Height())
 	return y, h, true
 }
@@ -593,7 +594,10 @@ func (m *Model) mousePointToInputPoint(x int, y int, clamp bool, lines []string)
 	if ry >= len(lines) {
 		ry = len(lines) - 1
 	}
-	col := max(x-m.mainColumnX()-inputHorizontalInset, 0)
+	col := x - m.mainColumnX() - m.composerInputColumnOffset()
+	if col < 0 {
+		col = 0
+	}
 	width := displayColumns(lines[ry])
 	if col > width {
 		col = width
@@ -616,7 +620,7 @@ func (m *Model) renderSelectionLines() []string {
 	}
 	// Rendered-text-first selection: non-selected lines keep styled output,
 	// selected lines show plain text with reverse highlight.
-	return renderSelectionOnStyledLines(m.viewportStyledLines, m.viewportPlainLines, start, end, m.theme.SelectionStyle())
+	return renderSelectionOnStyledLines(m.viewportStyledLines, m.viewportPlainLines, start, end, m.theme.InputSelectionStyle())
 }
 
 type fixedTextRegion struct {
@@ -629,34 +633,31 @@ func (m *Model) fixedTextRegions() []fixedTextRegion {
 	layout := m.fixedRowLayout()
 	return []fixedTextRegion{
 		{area: fixedSelectionHint, y: layout.hintY, text: m.hintRowText()},
-		{area: fixedSelectionHeader, y: layout.headerY, text: m.headerRowText()},
 		{area: fixedSelectionFooter, y: layout.footerY, text: m.footerRowText()},
 	}
 }
 
 type fixedRowLayout struct {
 	hintY   int
-	headerY int
 	footerY int
 }
 
 func (m *Model) fixedRowLayout() fixedRowLayout {
 	y := m.viewport.Height()
 	layout := fixedRowLayout{
-		hintY:   y + 1 + m.primaryDrawerOffsetHeight() + m.pendingQueueSectionHeight(),
-		headerY: y + 3 + m.primaryDrawerOffsetHeight() + m.pendingQueueSectionHeight(),
+		hintY: y + 1 + m.primaryDrawerOffsetHeight() + m.pendingQueueSectionHeight(),
 	}
 	y += m.preComposerFixedHeight()
 	y += tuikit.ComposerPadTop
+	y += m.composerChrome().verticalRows()
 	y += maxInt(tuikit.ComposerMinHeight, m.textarea.Height())
 	y += tuikit.ComposerPadBottom // composer bottom padding
-	y++                           // lower separator
 	layout.footerY = y
 	return layout
 }
 
 func (m *Model) preComposerFixedHeight() int {
-	return 5 + m.primaryDrawerOffsetHeight() + m.pendingQueueSectionHeight()
+	return 3 + m.primaryDrawerOffsetHeight() + m.pendingQueueSectionHeight()
 }
 
 func (m *Model) primaryDrawerOffsetHeight() int {

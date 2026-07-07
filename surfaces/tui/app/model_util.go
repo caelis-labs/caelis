@@ -12,6 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/caelis-labs/caelis/protocol/acp/control/promptrefs"
+	"github.com/rivo/uniseg"
 )
 
 // ---------------------------------------------------------------------------
@@ -997,4 +998,26 @@ func maxInt(a int, b int) int {
 		return a
 	}
 	return b
+}
+
+func alignDisplayColumnToCharBoundary(s string, c int) int {
+	if c <= 0 {
+		return 0
+	}
+	col := 0
+	state := -1
+	remaining := s
+	for len(remaining) > 0 {
+		_, rest, w, newState := uniseg.FirstGraphemeClusterInString(remaining, state)
+		if c >= col && c < col+w {
+			return col
+		}
+		col += w
+		if col >= c {
+			return col
+		}
+		remaining = rest
+		state = newState
+	}
+	return col
 }

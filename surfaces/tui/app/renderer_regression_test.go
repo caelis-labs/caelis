@@ -119,9 +119,16 @@ func renderComposerFramesForTest(t *testing.T, width int, frames ...string) []st
 	renderer := uv.NewTerminalRenderer(&buf, []string{"TERM=xterm-256color", "TTY_FORCE=1"})
 	renderer.SetRelativeCursor(true)
 
-	screen := uv.NewScreenBuffer(width, 1)
+	height := 1
+	for _, frame := range frames {
+		if lines := strings.Count(frame, "\n") + 1; lines > height {
+			height = lines
+		}
+	}
+	screen := uv.NewScreenBuffer(width, height)
 	outputs := make([]string, 0, len(frames))
 	for idx, frame := range frames {
+		screen.Clear()
 		uv.NewStyledString(frame).Draw(screen, screen.Bounds())
 		renderer.Render(screen.RenderBuffer)
 		if err := renderer.Flush(); err != nil {

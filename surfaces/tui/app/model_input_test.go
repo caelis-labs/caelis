@@ -8,6 +8,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 	"github.com/charmbracelet/x/ansi"
@@ -188,6 +189,349 @@ func TestViewportSelectionMouseWheelExtendsSelectionAfterScroll(t *testing.T) {
 	if m.viewportScrollbarVisibleUntil.IsZero() {
 		t.Fatal("selection wheel scroll should touch the viewport scrollbar")
 	}
+}
+
+func TestViewportSelectionUsesInputSelectionStyle(t *testing.T) {
+	model := NewModel(Config{})
+	model.theme.SelectionFg = lipgloss.Color("#abcdef")
+	model.theme.SelectionBg = lipgloss.Color("#123456")
+	model.theme.InputSelectionFg = lipgloss.Color("#111111")
+	model.theme.InputSelectionBg = lipgloss.Color("#fedcba")
+	model.viewport.SetWidth(40)
+	model.viewport.SetHeight(3)
+	model.viewportStyledLines = []string{"hello world"}
+	model.viewportPlainLines = []string{"hello world"}
+	model.selectionStart = textSelectionPoint{line: 0, col: 0}
+	model.selectionEnd = textSelectionPoint{line: 0, col: 5}
+
+	rendered := strings.Join(model.renderSelectionLines(), "\n")
+	want := model.theme.InputSelectionStyle().Render("hello")
+	if !strings.Contains(rendered, want) {
+		t.Fatalf("viewport selection render missing input selection style %q: %q", want, rendered)
+	}
+	genericSelection := model.theme.SelectionStyle().Render("hello")
+	if strings.Contains(rendered, genericSelection) {
+		t.Fatalf("viewport selection render used generic selection style %q: %q", genericSelection, rendered)
+	}
+}
+
+func TestInputSelectionUsesInputSelectionStyleWithUserBg(t *testing.T) {
+	model := NewModel(Config{})
+	model.width = 80
+	model.theme.UserBg = lipgloss.Color("#141414")
+	model.theme.AppBg = lipgloss.Color("#000000")
+	model.theme.Focus = lipgloss.Color("#00ff00")
+	model.theme.SelectionFg = lipgloss.Color("#abcdef")
+	model.theme.SelectionBg = lipgloss.Color("#123456")
+	model.theme.InputSelectionFg = lipgloss.Color("#111111")
+	model.theme.InputSelectionBg = lipgloss.Color("#fedcba")
+	model.textarea.SetValue("hello")
+	model.syncInputFromTextarea()
+
+	promptWidth := displayColumns(model.inputPromptPrefix())
+	model.inputSelectionStart = textSelectionPoint{line: 0, col: promptWidth}
+	model.inputSelectionEnd = textSelectionPoint{line: 0, col: promptWidth + 2}
+
+	rendered := model.renderInputBar()
+	want := model.theme.InputSelectionStyle().Render("he")
+	if !strings.Contains(rendered, want) {
+		t.Fatalf("input selection render missing input selection style %q: %q", want, rendered)
+	}
+	genericSelection := model.theme.SelectionStyle().Render("he")
+	if strings.Contains(rendered, genericSelection) {
+		t.Fatalf("input selection render used generic selection style %q: %q", genericSelection, rendered)
+	}
+	regressed := lipgloss.NewStyle().
+		Foreground(model.theme.AppBg).
+		Background(model.theme.Focus).
+		Render("he")
+	if strings.Contains(rendered, regressed) {
+		t.Fatalf("input selection render used AppBg/Focus override %q: %q", regressed, rendered)
+	}
+}
+
+func TestInputSelectionReleaseCopiesAndClearsSelection(t *testing.T) {
+	copied := ""
+	model := NewModel(Config{
+		WriteClipboardText: func(text string) error {
+			copied = text
+			return nil
+		},
+	})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m := updated.(*Model)
+	m.textarea.SetValue("hello")
+	m.syncInputFromTextarea()
+
+	startY, _, ok := m.inputAreaBounds()
+	if !ok {
+		t.Fatal("input area bounds unavailable")
+	}
+	startX := inputSelectionMouseX(m, 0)
+	endX := inputSelectionMouseX(m, len([]rune("hello")))
+
+	handled, cmd := m.handleInputAreaMouse(tea.Mouse{Button: tea.MouseLeft, X: startX, Y: startY}, mousePhasePress)
+	if !handled || cmd != nil {
+		t.Fatalf("press handled=%v cmd=%v, want handled without command", handled, cmd != nil)
+	}
+	handled, cmd = m.handleInputAreaMouse(tea.Mouse{Button: tea.MouseLeft, X: endX, Y: startY}, mousePhaseRelease)
+	if !handled || cmd == nil {
+		t.Fatalf("release handled=%v cmd=%v, want copy command", handled, cmd != nil)
+	}
+	if got, ok := cmd().(clipboardCopyResultMsg); !ok {
+		t.Fatalf("copy command returned %T, want clipboardCopyResultMsg", got)
+	} else if got.err != nil {
+		t.Fatalf("copy command returned error: %v", got.err)
+	}
+	if copied != "hello" {
+		t.Fatalf("copied text = %q, want hello", copied)
+	}
+	if m.inputSelecting || m.inputSelectionStart.line != -1 || m.inputSelectionEnd.line != -1 {
+		t.Fatalf("input selection after release = selecting %v start %#v end %#v, want cleared", m.inputSelecting, m.inputSelectionStart, m.inputSelectionEnd)
+	}
+}
+
+func TestInputSelectionAutoScrollExtendsCopyToBottom(t *testing.T) {
+	copied := ""
+	model := NewModel(Config{
+		WriteClipboardText: func(text string) error {
+			copied = text
+			return nil
+		},
+	})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m := updated.(*Model)
+	m.textarea.SetValue(strings.Join([]string{
+		"line0",
+		"line1",
+		"line2",
+		"line3",
+		"line4",
+		"line5",
+	}, "\n"))
+	m.moveTextareaCursorToIndex(0)
+	m.syncInputFromTextarea()
+	if got := m.composeInputLayout().layout.totalRows; got <= maxInputBarRows {
+		t.Fatalf("composer rows = %d, want more than visible max %d", got, maxInputBarRows)
+	}
+
+	startY, height, ok := m.inputAreaBounds()
+	if !ok {
+		t.Fatal("input area bounds unavailable")
+	}
+	startMouse := tea.Mouse{Button: tea.MouseLeft, X: inputSelectionMouseX(m, 0), Y: startY}
+	edgeMouse := tea.Mouse{Button: tea.MouseLeft, X: inputSelectionMouseX(m, len([]rune("line3"))), Y: startY + height - 1}
+	outsideMouse := tea.Mouse{Button: tea.MouseLeft, X: inputSelectionMouseX(m, len([]rune("line4"))), Y: startY + height}
+
+	handled, _ := m.handleInputAreaMouse(startMouse, mousePhasePress)
+	if !handled {
+		t.Fatal("input selection press was not handled")
+	}
+	handled, cmd := m.handleInputAreaMouse(edgeMouse, mousePhaseMotion)
+	if !handled || cmd != nil {
+		t.Fatalf("inside-edge motion handled=%v cmd=%v, want handled without input auto-scroll", handled, cmd != nil)
+	}
+	if got := m.inputSelectionEnd.line; got != 3 {
+		t.Fatalf("input selection end line inside edge = %d, want 3", got)
+	}
+
+	handled, cmd = m.handleInputAreaMouse(outsideMouse, mousePhaseMotion)
+	if !handled || cmd == nil {
+		t.Fatalf("outside motion handled=%v cmd=%v, want scheduled input auto-scroll", handled, cmd != nil)
+	}
+	token := m.selectionAutoScroll.scheduledToken
+	if token == 0 {
+		t.Fatalf("selection auto-scroll state = %#v, want scheduled token", m.selectionAutoScroll)
+	}
+
+	updated, _ = m.Update(frameTickMsg{kind: frameTickSelectionScroll, token: token, at: time.Now()})
+	m = updated.(*Model)
+	if got := m.inputSelectionEnd.line; got != 4 {
+		t.Fatalf("input selection end line = %d, want 4 after bottom-edge auto-scroll", got)
+	}
+
+	handled, cmd = m.handleInputAreaMouse(outsideMouse, mousePhaseRelease)
+	if !handled || cmd == nil {
+		t.Fatalf("release handled=%v cmd=%v, want copy command", handled, cmd != nil)
+	}
+	if got, ok := cmd().(clipboardCopyResultMsg); !ok {
+		t.Fatalf("copy command returned %T, want clipboardCopyResultMsg", got)
+	} else if got.err != nil {
+		t.Fatalf("copy command returned error: %v", got.err)
+	}
+	want := strings.Join([]string{"line0", "line1", "line2", "line3", "line4"}, "\n")
+	if copied != want {
+		t.Fatalf("copied text = %q, want %q", copied, want)
+	}
+}
+
+func TestInputSelectionCopyMatchesHighlightSpans(t *testing.T) {
+	prompt := "> "
+	promptWidth := displayColumns(prompt)
+	lines := []string{
+		prompt + "line0",
+		strings.Repeat(" ", promptWidth) + "line1",
+		strings.Repeat(" ", promptWidth) + "line2",
+	}
+	start := textSelectionPoint{line: 0, col: promptWidth}
+	end := textSelectionPoint{line: 2, col: promptWidth + displayColumns("line2")}
+
+	got := selectionTextFromInputLines(lines, start, end, promptWidth)
+	want := "line0\nline1\nline2"
+	if got != want {
+		t.Fatalf("selection text = %q, want %q", got, want)
+	}
+}
+
+func TestInputSelectionCopyPreservesBlankLines(t *testing.T) {
+	prompt := "> "
+	promptWidth := displayColumns(prompt)
+	lines := []string{
+		prompt + "line0",
+		strings.Repeat(" ", promptWidth),
+		strings.Repeat(" ", promptWidth) + "line2",
+	}
+	start := textSelectionPoint{line: 0, col: promptWidth}
+	end := textSelectionPoint{line: 2, col: promptWidth + displayColumns("line2")}
+
+	got := selectionTextFromInputLines(lines, start, end, promptWidth)
+	want := "line0\n\nline2"
+	if got != want {
+		t.Fatalf("selection text = %q, want %q", got, want)
+	}
+}
+
+func TestFixedFooterHitboxAccountsForComposerChromeRows(t *testing.T) {
+	model := NewModel(Config{Workspace: "/tmp/workspace"})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m := updated.(*Model)
+	m.theme.UserBg = lipgloss.Color("#141414")
+	m.theme.NoColor = false
+	m.syncTextareaChrome()
+	m.ensureViewportLayout()
+
+	frame := ansi.Strip(m.View().Content)
+	var footerY = -1
+	for y, line := range strings.Split(strings.TrimRight(frame, "\n"), "\n") {
+		if strings.Contains(line, "/tmp/workspace") {
+			footerY = y
+			break
+		}
+	}
+	if footerY < 0 {
+		t.Fatalf("rendered frame missing footer workspace:\n%s", frame)
+	}
+
+	region, ok := m.fixedRegionAt(footerY)
+	if !ok {
+		t.Fatalf("fixedRegionAt(%d) missed rendered footer", footerY)
+	}
+	if region.area != fixedSelectionFooter {
+		t.Fatalf("fixedRegionAt(%d) area = %v, want footer", footerY, region.area)
+	}
+}
+
+func TestInputClickPreservesComposerRowOffset(t *testing.T) {
+	model := NewModel(Config{})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m := updated.(*Model)
+	m.textarea.SetValue(strings.Join([]string{
+		"line0",
+		"line1",
+		"line2",
+		"line3",
+		"line4",
+		"line5",
+	}, "\n"))
+	m.moveTextareaCursorToIndex(len([]rune("line0\nline1\nline2\nline3\nline4\n")))
+	m.syncInputFromTextarea()
+	m.composerRowOffset = 2
+
+	startY, _, ok := m.inputAreaBounds()
+	if !ok {
+		t.Fatal("input area bounds unavailable")
+	}
+	beforeOffset := m.composerRowOffset
+	clickX := inputSelectionMouseX(m, len([]rune("line2")))
+	handled, cmd := m.handleInputAreaMouse(tea.Mouse{Button: tea.MouseLeft, X: clickX, Y: startY}, mousePhasePress)
+	if !handled || cmd != nil {
+		t.Fatalf("press handled=%v cmd=%v, want handled without command", handled, cmd != nil)
+	}
+	if got := m.composerRowOffset; got != beforeOffset {
+		t.Fatalf("composer row offset after click = %d, want unchanged %d", got, beforeOffset)
+	}
+	layout := m.buildComposeInputLayout()
+	if got := layout.rowOffset; got != beforeOffset {
+		t.Fatalf("layout row offset after click = %d, want unchanged %d", got, beforeOffset)
+	}
+}
+
+func TestMouseWheelInsideInputScrollsComposerNotViewport(t *testing.T) {
+	model := NewModel(Config{})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m := updated.(*Model)
+	m.viewport.SetYOffset(7)
+	m.textarea.SetValue(strings.Join([]string{
+		"line0",
+		"line1",
+		"line2",
+		"line3",
+		"line4",
+		"line5",
+	}, "\n"))
+	m.moveTextareaCursorToIndex(0)
+	m.syncInputFromTextarea()
+
+	startY, _, ok := m.inputAreaBounds()
+	if !ok {
+		t.Fatal("input area bounds unavailable")
+	}
+	beforeViewportOffset := m.viewport.YOffset()
+	beforeCursor := m.textareaCursorIndex()
+
+	updated, _ = m.handleMouse(tea.MouseWheelMsg(tea.Mouse{
+		Button: tea.MouseWheelDown,
+		X:      inputSelectionMouseX(m, 0),
+		Y:      startY,
+	}))
+	m = updated.(*Model)
+
+	if got := m.viewport.YOffset(); got != beforeViewportOffset {
+		t.Fatalf("viewport offset = %d, want unchanged %d", got, beforeViewportOffset)
+	}
+	if got := m.textareaCursorIndex(); got <= beforeCursor {
+		t.Fatalf("textarea cursor index = %d, want advanced beyond %d", got, beforeCursor)
+	}
+}
+
+func TestMouseWheelInsideShortInputDoesNotScrollViewport(t *testing.T) {
+	model := NewModel(Config{})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m := updated.(*Model)
+	m.viewport.SetYOffset(5)
+	m.textarea.SetValue("short")
+	m.syncInputFromTextarea()
+
+	startY, _, ok := m.inputAreaBounds()
+	if !ok {
+		t.Fatal("input area bounds unavailable")
+	}
+	beforeViewportOffset := m.viewport.YOffset()
+
+	updated, _ = m.handleMouse(tea.MouseWheelMsg(tea.Mouse{
+		Button: tea.MouseWheelDown,
+		X:      inputSelectionMouseX(m, 0),
+		Y:      startY,
+	}))
+	m = updated.(*Model)
+
+	if got := m.viewport.YOffset(); got != beforeViewportOffset {
+		t.Fatalf("viewport offset = %d, want unchanged %d", got, beforeViewportOffset)
+	}
+}
+
+func inputSelectionMouseX(m *Model, contentCol int) int {
+	return m.mainColumnX() + m.composerInputColumnOffset() + displayColumns(m.inputPromptPrefix()) + contentCol
 }
 
 func TestViewportSelectionAutoScrollUsesVisibleMouseYWhenFrameTopTrimmed(t *testing.T) {

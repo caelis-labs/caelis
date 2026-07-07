@@ -19,28 +19,30 @@ type Theme struct {
 	NoColor bool
 	Profile colorprofile.Profile
 
-	AppBg          color.Color
-	PanelBorder    color.Color
-	PanelTitle     color.Color
-	TextPrimary    color.Color
-	TextSecondary  color.Color
-	SecondaryText  color.Color
-	MutedText      color.Color
-	Info           color.Color
-	Success        color.Color
-	Warning        color.Color
-	Error          color.Color
-	Accent         color.Color
-	Focus          color.Color
-	ModalBg        color.Color
-	StatusBg       color.Color
-	StatusText     color.Color
-	CommandBg      color.Color
-	CommandActive  color.Color
-	CommandText    color.Color
-	CommandSubText color.Color
-	SelectionFg    color.Color
-	SelectionBg    color.Color
+	AppBg            color.Color
+	PanelBorder      color.Color
+	PanelTitle       color.Color
+	TextPrimary      color.Color
+	TextSecondary    color.Color
+	SecondaryText    color.Color
+	MutedText        color.Color
+	Info             color.Color
+	Success          color.Color
+	Warning          color.Color
+	Error            color.Color
+	Accent           color.Color
+	Focus            color.Color
+	ModalBg          color.Color
+	StatusBg         color.Color
+	StatusText       color.Color
+	CommandBg        color.Color
+	CommandActive    color.Color
+	CommandText      color.Color
+	CommandSubText   color.Color
+	SelectionFg      color.Color
+	SelectionBg      color.Color
+	InputSelectionFg color.Color
+	InputSelectionBg color.Color
 
 	// Line-level semantic colors (conversation / tool / diff).
 	AssistantFg        color.Color
@@ -124,6 +126,7 @@ func ValidateTheme(theme Theme) []ThemeIssue {
 		{field: "DiffAddFg", fg: theme.DiffAddFg, bg: firstColor(theme.DiffAddBg, bg), threshold: 3.0},
 		{field: "DiffRemoveFg", fg: theme.DiffRemoveFg, bg: firstColor(theme.DiffRemoveBg, bg), threshold: 3.0},
 		{field: "SelectionFg", fg: theme.SelectionFg, bg: theme.SelectionBg, threshold: 4.5},
+		{field: "InputSelectionFg", fg: theme.InputSelectionFg, bg: theme.InputSelectionBg, threshold: 4.5},
 	}
 	var issues []ThemeIssue
 	for _, check := range checks {
@@ -398,6 +401,8 @@ func stripThemeColors(theme Theme) Theme {
 	theme.CommandSubText = nil
 	theme.SelectionFg = nil
 	theme.SelectionBg = nil
+	theme.InputSelectionFg = nil
+	theme.InputSelectionBg = nil
 	theme.AssistantFg = nil
 	theme.ReasoningFg = nil
 	theme.UserFg = nil
@@ -641,6 +646,7 @@ func stripThemeBackgroundsForANSI(theme Theme, profile colorprofile.Profile) The
 	theme.CommandBg = nil
 	theme.CommandActive = nil
 	theme.SelectionBg = nil
+	theme.InputSelectionBg = nil
 	theme.UserBg = nil
 	theme.DiffAddBg = nil
 	theme.DiffAddStrongBg = nil
@@ -659,30 +665,32 @@ func stripThemeBackgroundsForANSI(theme Theme, profile colorprofile.Profile) The
 
 func defaultThemeVariant(trueColor bool) Theme {
 	return Theme{
-		Name:           "dark",
-		IsDark:         true,
-		AppBg:          themeColor(trueColor, "#0f1117", "233"),
-		PanelBorder:    themeColor(trueColor, "#333b49", "240"),
-		PanelTitle:     themeColor(trueColor, "#f4f7fb", "255"),
-		TextPrimary:    themeColor(trueColor, "#e8edf4", "255"),
-		TextSecondary:  themeColor(trueColor, "#a8b3c5", "248"),
-		SecondaryText:  themeColor(trueColor, "#c6d0df", "250"),
-		MutedText:      themeColor(trueColor, "#7a8599", "245"),
-		Info:           themeColor(trueColor, "#7dd3fc", "117"),
-		Success:        themeColor(trueColor, "#5ee787", "78"),
-		Warning:        themeColor(trueColor, "#f4bf4f", "221"),
-		Error:          themeColor(trueColor, "#ff6b6b", "203"),
-		Accent:         themeColor(trueColor, "#7aa2f7", "111"),
-		Focus:          themeColor(trueColor, "#8bd5ff", "117"),
-		ModalBg:        themeColor(trueColor, "#151922", "234"),
-		StatusBg:       themeColor(trueColor, "#11141b", "233"),
-		StatusText:     themeColor(trueColor, "#d7deea", "252"),
-		CommandBg:      themeColor(trueColor, "#11141b", "233"),
-		CommandActive:  themeColor(trueColor, "#20283a", "236"),
-		CommandText:    themeColor(trueColor, "#f4f7fb", "255"),
-		CommandSubText: themeColor(trueColor, "#9aa6ba", "247"),
-		SelectionFg:    themeColor(trueColor, "#f8fafc", "255"),
-		SelectionBg:    themeColor(trueColor, "#334155", "240"),
+		Name:             "dark",
+		IsDark:           true,
+		AppBg:            themeColor(trueColor, "#0f1117", "233"),
+		PanelBorder:      themeColor(trueColor, "#333b49", "240"),
+		PanelTitle:       themeColor(trueColor, "#f4f7fb", "255"),
+		TextPrimary:      themeColor(trueColor, "#e8edf4", "255"),
+		TextSecondary:    themeColor(trueColor, "#a8b3c5", "248"),
+		SecondaryText:    themeColor(trueColor, "#c6d0df", "250"),
+		MutedText:        themeColor(trueColor, "#7a8599", "245"),
+		Info:             themeColor(trueColor, "#7dd3fc", "117"),
+		Success:          themeColor(trueColor, "#5ee787", "78"),
+		Warning:          themeColor(trueColor, "#f4bf4f", "221"),
+		Error:            themeColor(trueColor, "#ff6b6b", "203"),
+		Accent:           themeColor(trueColor, "#7aa2f7", "111"),
+		Focus:            themeColor(trueColor, "#8bd5ff", "117"),
+		ModalBg:          themeColor(trueColor, "#151922", "234"),
+		StatusBg:         themeColor(trueColor, "#11141b", "233"),
+		StatusText:       themeColor(trueColor, "#d7deea", "252"),
+		CommandBg:        themeColor(trueColor, "#11141b", "233"),
+		CommandActive:    themeColor(trueColor, "#20283a", "236"),
+		CommandText:      themeColor(trueColor, "#f4f7fb", "255"),
+		CommandSubText:   themeColor(trueColor, "#9aa6ba", "247"),
+		SelectionFg:      themeColor(trueColor, "#f8fafc", "255"),
+		SelectionBg:      themeColor(trueColor, "#334155", "240"),
+		InputSelectionFg: themeColor(trueColor, "#0f1117", "233"),
+		InputSelectionBg: themeColor(trueColor, "#8bd5ff", "117"),
 
 		AssistantFg:        themeColor(trueColor, "#9ece6a", "114"),
 		ReasoningFg:        themeColor(trueColor, "#7f8ba3", "245"),
@@ -737,30 +745,32 @@ func defaultThemeVariant(trueColor bool) Theme {
 
 func defaultLightThemeVariant(trueColor bool) Theme {
 	return Theme{
-		Name:           "light",
-		IsDark:         false,
-		AppBg:          themeColor(trueColor, "#fbfcfe", "255"),
-		PanelBorder:    themeColor(trueColor, "#c8d2df", "252"),
-		PanelTitle:     themeColor(trueColor, "#111827", "235"),
-		TextPrimary:    themeColor(trueColor, "#1f2937", "236"),
-		TextSecondary:  themeColor(trueColor, "#526071", "240"),
-		SecondaryText:  themeColor(trueColor, "#364152", "239"),
-		MutedText:      themeColor(trueColor, "#748094", "243"),
-		Info:           themeColor(trueColor, "#2563eb", "25"),
-		Success:        themeColor(trueColor, "#188a42", "28"),
-		Warning:        themeColor(trueColor, "#b86b00", "130"),
-		Error:          themeColor(trueColor, "#c2410c", "166"),
-		Accent:         themeColor(trueColor, "#2563eb", "25"),
-		Focus:          themeColor(trueColor, "#0284c7", "32"),
-		ModalBg:        themeColor(trueColor, "#ffffff", "231"),
-		StatusBg:       themeColor(trueColor, "#f3f6fb", "255"),
-		StatusText:     themeColor(trueColor, "#1f2937", "236"),
-		CommandBg:      themeColor(trueColor, "#ffffff", "231"),
-		CommandActive:  themeColor(trueColor, "#e7f0ff", "195"),
-		CommandText:    themeColor(trueColor, "#111827", "235"),
-		CommandSubText: themeColor(trueColor, "#526071", "240"),
-		SelectionFg:    themeColor(trueColor, "#0f172a", "235"),
-		SelectionBg:    themeColor(trueColor, "#dbeafe", "153"),
+		Name:             "light",
+		IsDark:           false,
+		AppBg:            themeColor(trueColor, "#fbfcfe", "255"),
+		PanelBorder:      themeColor(trueColor, "#c8d2df", "252"),
+		PanelTitle:       themeColor(trueColor, "#111827", "235"),
+		TextPrimary:      themeColor(trueColor, "#1f2937", "236"),
+		TextSecondary:    themeColor(trueColor, "#526071", "240"),
+		SecondaryText:    themeColor(trueColor, "#364152", "239"),
+		MutedText:        themeColor(trueColor, "#748094", "243"),
+		Info:             themeColor(trueColor, "#2563eb", "25"),
+		Success:          themeColor(trueColor, "#188a42", "28"),
+		Warning:          themeColor(trueColor, "#b86b00", "130"),
+		Error:            themeColor(trueColor, "#c2410c", "166"),
+		Accent:           themeColor(trueColor, "#2563eb", "25"),
+		Focus:            themeColor(trueColor, "#0284c7", "32"),
+		ModalBg:          themeColor(trueColor, "#ffffff", "231"),
+		StatusBg:         themeColor(trueColor, "#f3f6fb", "255"),
+		StatusText:       themeColor(trueColor, "#1f2937", "236"),
+		CommandBg:        themeColor(trueColor, "#ffffff", "231"),
+		CommandActive:    themeColor(trueColor, "#e7f0ff", "195"),
+		CommandText:      themeColor(trueColor, "#111827", "235"),
+		CommandSubText:   themeColor(trueColor, "#526071", "240"),
+		SelectionFg:      themeColor(trueColor, "#0f172a", "235"),
+		SelectionBg:      themeColor(trueColor, "#dbeafe", "153"),
+		InputSelectionFg: themeColor(trueColor, "#ffffff", "255"),
+		InputSelectionBg: themeColor(trueColor, "#075985", "24"),
 
 		AssistantFg:        themeColor(trueColor, "#188a42", "28"),
 		ReasoningFg:        themeColor(trueColor, "#6b7280", "242"),

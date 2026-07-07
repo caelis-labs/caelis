@@ -129,6 +129,11 @@ func (m *Model) removeAttachmentAtCursor() bool {
 }
 
 func composeInputDisplay(value string, cursor int, attachments []inputAttachment) (string, int) {
+	display, displayCursor, _ := composeInputDisplayWithMap(value, cursor, attachments)
+	return display, displayCursor
+}
+
+func composeInputDisplayWithMap(value string, cursor int, attachments []inputAttachment) (string, int, []int) {
 	valueRunes := []rune(value)
 	if cursor < 0 {
 		cursor = 0
@@ -139,16 +144,30 @@ func composeInputDisplay(value string, cursor int, attachments []inputAttachment
 
 	items := cloneInputAttachments(attachments)
 	var out strings.Builder
+	displayToValue := []int{0}
 	displayCursor := 0
 	displayCount := 0
 	textPos := 0
 	cursorAssigned := false
 
+	writeTextRunes := func(segment []rune, startOffset int) {
+		for idx, r := range segment {
+			out.WriteRune(r)
+			displayToValue = append(displayToValue, startOffset+idx+1)
+		}
+	}
+	writeAttachmentToken := func(token string, offset int) {
+		for _, r := range token {
+			out.WriteRune(r)
+			displayToValue = append(displayToValue, offset)
+		}
+	}
+
 	for i, item := range items {
 		offset := min(max(item.Offset, 0), len(valueRunes))
 		if offset > textPos {
 			segment := valueRunes[textPos:offset]
-			out.WriteString(string(segment))
+			writeTextRunes(segment, textPos)
 			displayCount += len(segment)
 			if !cursorAssigned && cursor <= offset {
 				displayCursor = displayCount - (offset - cursor)
@@ -157,7 +176,7 @@ func composeInputDisplay(value string, cursor int, attachments []inputAttachment
 			textPos = offset
 		}
 		token := imageAttachmentToken(i + 1)
-		out.WriteString(token)
+		writeAttachmentToken(token, offset)
 		displayCount += len([]rune(token))
 		if cursor == offset {
 			displayCursor = displayCount
@@ -167,7 +186,7 @@ func composeInputDisplay(value string, cursor int, attachments []inputAttachment
 
 	if textPos < len(valueRunes) {
 		segment := valueRunes[textPos:]
-		out.WriteString(string(segment))
+		writeTextRunes(segment, textPos)
 		displayCount += len(segment)
 		if !cursorAssigned {
 			displayCursor = displayCount - (len(valueRunes) - cursor)
@@ -176,7 +195,7 @@ func composeInputDisplay(value string, cursor int, attachments []inputAttachment
 		displayCursor = displayCount
 	}
 
-	return out.String(), displayCursor
+	return out.String(), displayCursor, displayToValue
 }
 
 func imageAttachmentToken(index int) string {

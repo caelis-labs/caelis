@@ -46,6 +46,7 @@ func TestRunExpandsPluginCompatibilityVariables(t *testing.T) {
 		Args:      []string{"${CAELIS_WORKSPACE_DIR}"},
 		Env:       map[string]string{"CUSTOM_PATH": customPathTemplate},
 		PluginDir: pluginDir,
+		Timeout:   "1m",
 		WorkDir:   "${CAELIS_PLUGIN_ROOT}",
 	}, session.SessionRef{SessionID: "s1"}, workspaceDir)
 

@@ -24,6 +24,16 @@ func (m *Model) View() tea.View {
 	// so we intentionally do NOT mutate viewport state here.
 	_, bottomHeight := m.computeLayout()
 
+	// Cache composer layout for the frame, but not while dragging a selection:
+	// cursor-driven window scroll must see a fresh layout so highlight stays aligned.
+	if m.activePrompt == nil && !m.inputSelecting {
+		snapshot := m.buildComposeInputLayout()
+		m.composerViewSnapshot = &snapshot
+	} else {
+		m.composerViewSnapshot = nil
+	}
+	defer func() { m.composerViewSnapshot = nil }()
+
 	var sections []string
 
 	// 1. Viewport (scrollable history + streaming + spinner) with left gutter.
@@ -52,15 +62,6 @@ func (m *Model) View() tea.View {
 	sections = append(sections, m.placeInMainColumn(m.renderHintRow()))
 	sections = append(sections, "")
 
-	// 3. Workspace + model status.
-	sections = append(sections, m.placeInMainColumn(m.renderStatusHeader()))
-
-	// 4. Separator above the composer input.
-	if width := m.fixedRowWidth() - (inputHorizontalInset * 2); width > 0 {
-		sep := m.theme.SeparatorStyle().Render(strings.Repeat("─", width))
-		sections = append(sections, m.placeInMainColumn(insetRenderedBlock(sep, inputHorizontalInset)))
-	}
-
 	// 5. Composer top padding before input.
 	for range tuikit.ComposerPadTop {
 		sections = append(sections, "")
@@ -69,16 +70,12 @@ func (m *Model) View() tea.View {
 	// 6. Input bar.
 	sections = append(sections, m.placeInMainColumn(m.renderInputBar()))
 
-	// 7. Composer bottom padding before footer separator.
+	// 7. Composer bottom padding before footer.
 	for range tuikit.ComposerPadBottom {
 		sections = append(sections, "")
 	}
 
-	// 8. Lower separator + secondary status bar.
-	if width := m.fixedRowWidth() - (inputHorizontalInset * 2); width > 0 {
-		sep := m.theme.SeparatorStyle().Render(strings.Repeat("─", width))
-		sections = append(sections, m.placeInMainColumn(insetRenderedBlock(sep, inputHorizontalInset)))
-	}
+	// 8. Secondary status bar.
 	sections = append(sections, m.placeInMainColumn(m.renderStatusFooter()))
 
 	// 9. Status bar bottom padding.
@@ -124,6 +121,7 @@ func (m *Model) View() tea.View {
 	if cursor := m.regularInputCursor(); cursor != nil {
 		cursor.X += m.mainColumnX()
 		cursor.Y += m.viewport.Height() + m.preComposerFixedHeight() + tuikit.ComposerPadTop
+		cursor.Y += m.composerChrome().topRows()
 		cursor.Y -= topTrim
 		if cursor.Y < 0 {
 			cursor.Y = 0

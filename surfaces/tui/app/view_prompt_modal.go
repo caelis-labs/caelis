@@ -251,28 +251,35 @@ func (m *Model) renderCompletionOverlay(_ string, lines []string) string {
 		return ""
 	}
 	innerWidth := m.completionOverlayInnerWidth()
-
 	hasBorder := m.overlayUsesBorder()
+	contentLimit := innerWidth
+	if hasBorder {
+		contentLimit = innerWidth - 4
+		if contentLimit < 1 {
+			contentLimit = 1
+		}
+	}
+
 	filtered := make([]string, 0, len(lines)+2)
 	if hasBorder {
-		blank := strings.Repeat(" ", innerWidth)
+		blank := strings.Repeat(" ", contentLimit)
 		filtered = append(filtered, blank)
 	}
 	for _, line := range lines {
-		if cols := displayColumns(line); cols > innerWidth {
-			if innerWidth <= 3 {
-				line = ansi.Truncate(line, innerWidth, "")
+		if cols := displayColumns(line); cols > contentLimit {
+			if contentLimit <= 3 {
+				line = ansi.Truncate(line, contentLimit, "")
 			} else {
-				line = ansi.Truncate(line, innerWidth, "...")
+				line = ansi.Truncate(line, contentLimit, "...")
 			}
 		}
-		if pad := innerWidth - displayColumns(line); pad > 0 {
+		if pad := contentLimit - displayColumns(line); pad > 0 {
 			line += strings.Repeat(" ", pad)
 		}
 		filtered = append(filtered, line)
 	}
 	if hasBorder {
-		blank := strings.Repeat(" ", innerWidth)
+		blank := strings.Repeat(" ", contentLimit)
 		filtered = append(filtered, blank)
 	}
 	filtered = clampPromptModalLines(filtered, m.promptModalLineBudget(), m.theme)
@@ -320,7 +327,12 @@ func (m *Model) renderInputOverlay() string {
 }
 
 func (m *Model) renderPromptInputBar() string {
-	prompt := m.theme.PromptStyle().Render("> ")
+	bg := m.theme.UserBg
+	promptStyle := m.theme.PromptStyle()
+	if bg != nil && !m.theme.NoColor {
+		promptStyle = promptStyle.Background(bg)
+	}
+	prompt := promptStyle.Render("> ")
 	value, cursor := m.promptInputValue()
 	return renderMultilineInput(prompt, insertPromptCursor(value, cursor, m.promptCursorGlyph()))
 }

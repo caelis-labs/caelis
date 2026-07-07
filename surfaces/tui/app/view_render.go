@@ -355,34 +355,47 @@ func visiblePlanEntries(entries []planEntryState, limit int) ([]planEntryState, 
 func (m *Model) renderInputBar() string {
 	var rendered string
 	if m.activePrompt != nil {
-		rendered = insetRenderedBlock(m.renderPromptInputBar(), inputHorizontalInset)
-		return m.protectComposerWideCellRepaint(rendered)
-	}
-	if start, end, ok := normalizedSelectionRange(m.inputSelectionStart, m.inputSelectionEnd, len(m.inputPlainLines())); ok &&
-		(start.line != end.line || start.col != end.col) {
-		lines := m.inputPlainLines()
-		rendered = insetRenderedBlock(strings.Join(renderSelectionOnLines(lines, start, end, m.theme.SelectionStyle()), "\n"), inputHorizontalInset)
-		return m.protectComposerWideCellRepaint(rendered)
-	}
-
-	prompt := m.theme.PromptStyle().Render("> ")
-	if m.isWizardActive() && m.wizard != nil {
-		query, _, ok := wizardVisibleInputAtCursor(m.wizard.def.Command, m.input, m.cursor)
-		if ok {
-			inputVal := query
-			if m.wizard.hideInput() {
-				inputVal = strings.Repeat("*", utf8.RuneCountInString(strings.TrimSpace(query)))
+		rendered = m.renderPromptInputBar()
+	} else {
+		snapshot := m.composeInputLayout()
+		allLines := snapshot.allPlainLines()
+		start, end, ok := normalizedSelectionRange(m.inputSelectionStart, m.inputSelectionEnd, len(allLines))
+		switch {
+		case ok && (start.line != end.line || start.col != end.col):
+			start, end = snapshot.snapInputSelectionEndpoints(start, end)
+			prompt := snapshot.prompt
+			promptWidth := snapshot.promptWidth
+			if promptWidth <= 0 {
+				prompt = "> "
+				promptWidth = displayColumns(prompt)
 			}
-			rendered = insetRenderedBlock(renderMultilineInput(prompt, inputVal), inputHorizontalInset)
-			return m.protectComposerWideCellRepaint(rendered)
+			rendered = renderPromptAwareInputSelection(
+				snapshot.visiblePlainLines(),
+				start,
+				end,
+				snapshot.rowOffset,
+				promptWidth,
+				prompt,
+				m.promptAwareSelectionStyles(),
+			)
+		case m.isWizardActive() && m.wizard != nil:
+			query, _, ok := wizardVisibleInputAtCursor(m.wizard.def.Command, m.input, m.cursor)
+			if ok {
+				inputVal := query
+				if m.wizard.hideInput() {
+					inputVal = strings.Repeat("*", utf8.RuneCountInString(strings.TrimSpace(query)))
+				}
+				prompt := m.theme.PromptStyle().Render("> ")
+				rendered = renderMultilineInput(prompt, inputVal)
+			} else {
+				rendered = m.composeInputRenderFrom(snapshot).styledText()
+			}
+		default:
+			rendered = m.composeInputRenderFrom(snapshot).styledText()
 		}
 	}
-	rendered = m.renderRegularInputBar()
-	return m.protectComposerWideCellRepaint(rendered)
-}
 
-func (m *Model) protectComposerWideCellRepaint(text string) string {
-	return protectWideCellRepaintBlock(text, m.fixedRowWidth())
+	return m.finalizeInputBarRender(rendered)
 }
 
 func (m *Model) syncTextareaChrome() {
@@ -520,11 +533,6 @@ func renderMultilineInput(prompt string, input string) string {
 	return strings.Join(lines, "\n")
 }
 
-func (m *Model) renderStatusHeader() string {
-	style := m.theme.StatusStyle().Width(m.fixedRowWidth())
-	return m.renderFixedRow(fixedSelectionHeader, m.headerRowText(), m.renderHeaderRowStyledText(), style)
-}
-
 func (m *Model) renderHintRow() string {
 	style := m.theme.HintRowStyle().Width(m.fixedRowWidth())
 	return m.renderFixedRow(fixedSelectionHint, m.hintRowText(), m.renderHintRowStyledText(), style)
@@ -544,19 +552,6 @@ func (m *Model) renderHintRowStyledText() string {
 		return ""
 	}
 	return composeStyledFooter(w, text, "")
-}
-
-func (m *Model) headerRowText() string {
-	left, right := fitHeaderRowParts(m.fixedRowContentWidth(), m.headerWorkspaceText(), m.headerModelText())
-	return composeStyledFooter(m.fixedRowContentWidth(), left, right)
-}
-
-func (m *Model) renderHeaderRowStyledText() string {
-	tok := m.theme.Tokens()
-	leftPlain, rightPlain := fitHeaderRowParts(m.fixedRowContentWidth(), m.headerWorkspaceText(), m.headerModelText())
-	left := tok.TextPrimary.Render(leftPlain)
-	right := tok.TextPrimary.Render(rightPlain)
-	return composeStyledFooter(m.fixedRowContentWidth(), left, right)
 }
 
 func (m *Model) headerWorkspaceText() string {
@@ -704,7 +699,7 @@ func (m *Model) renderViewportLinesView(applySelection bool) string {
 			if finish.line >= end {
 				localFinish.col = displayColumns(plain[len(plain)-1])
 			}
-			styled = renderSelectionOnStyledLines(styled, plain, localStart, localFinish, m.theme.SelectionStyle())
+			styled = renderSelectionOnStyledLines(styled, plain, localStart, localFinish, m.theme.InputSelectionStyle())
 		}
 	}
 	vp := m.viewport
@@ -746,16 +741,18 @@ func (m *Model) footerRowText() string {
 }
 
 func (m *Model) footerLeftText() string {
-	mode := strings.TrimSpace(m.statusView.FooterModeText(m.modeLabel()))
-	helpText := m.footerHelpText()
-	switch {
-	case mode == "":
-		return helpText
-	case helpText == "":
-		return mode
-	default:
-		return mode + "  " + helpText
+	workspace := m.headerWorkspaceText()
+	model := m.headerModelText()
+	if model == "" && workspace == "" {
+		return ""
 	}
+	if model == "" {
+		return workspace
+	}
+	if workspace == "" {
+		return model
+	}
+	return model + " · " + workspace
 }
 
 func (m *Model) renderFooterRowStyledText() string {
@@ -765,23 +762,12 @@ func (m *Model) renderFooterRowStyledText() string {
 	return composeStyledFooter(m.fixedRowContentWidth(), left, right)
 }
 
-func (m *Model) footerHelpText() string {
-	return formatFooterBindingKeys(m.currentFooterHelp().ShortHelp())
-}
-
 func (m *Model) footerContextText() string {
 	text := formatStatusContextDisplay(strings.TrimSpace(m.statusView.FooterContextText(m.statusContext)))
 	if text == "0" {
 		return ""
 	}
 	return text
-}
-
-func (m *Model) modeLabel() string {
-	if m == nil {
-		return ""
-	}
-	return strings.TrimSpace(m.statusModeLabel)
 }
 
 func composeStyledFooter(width int, left string, right string) string {
@@ -960,33 +946,22 @@ func styleFooterLeft(m *Model, plain string) string {
 	if plain == "" || m == nil {
 		return ""
 	}
-	mode := strings.TrimSpace(m.modeLabel())
-	help := strings.TrimSpace(m.footerHelpText())
-	switch {
-	case mode == "":
-		return m.theme.HelpHintTextStyle().Render(plain)
-	case help == "":
-		modeStyle := m.theme.TextStyle().Bold(true)
-		if mode == "full_access" {
-			modeStyle = m.theme.WarnStyle().Bold(true)
-		}
-		return modeStyle.Render(plain)
-	default:
-		parts := strings.SplitN(plain, "  ", 2)
-		modeText := parts[0]
-		helpText := ""
-		if len(parts) > 1 {
-			helpText = parts[1]
-		}
-		modeStyle := m.theme.TextStyle().Bold(true)
-		if modeText == "full_access" {
-			modeStyle = m.theme.WarnStyle().Bold(true)
-		}
-		if helpText == "" {
-			return modeStyle.Render(modeText)
-		}
-		return modeStyle.Render(modeText) + "  " + m.theme.HelpHintTextStyle().Render(helpText)
+	sep := " · "
+	idx := strings.Index(plain, sep)
+	if idx != -1 {
+		accentStyle := lipgloss.NewStyle().Foreground(m.theme.Accent)
+		focusStyle := lipgloss.NewStyle().Foreground(m.theme.Focus)
+		modelPart := plain[:idx]
+		workspacePart := plain[idx+len(sep):]
+
+		styledModel := accentStyle.Render(modelPart)
+		styledSep := m.theme.MutedTextStyle().Render(sep)
+		styledWorkspace := focusStyle.Render(workspacePart)
+
+		return styledModel + styledSep + styledWorkspace
 	}
+
+	return lipgloss.NewStyle().Foreground(m.theme.Accent).Render(plain)
 }
 
 func formatFooterBindingKeys(bindings []key.Binding) string {

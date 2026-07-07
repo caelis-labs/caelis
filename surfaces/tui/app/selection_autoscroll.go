@@ -80,11 +80,19 @@ func (m *Model) advanceSelectionAutoScroll(token uint64) tea.Cmd {
 	}
 	m.selectionAutoScroll.tickScheduled = false
 	m.selectionAutoScroll.scheduledToken = 0
-	if !m.selecting || !m.selectionAutoScroll.active {
+	if (!m.selecting && !m.inputSelecting) || !m.selectionAutoScroll.active {
 		m.cancelSelectionAutoScroll()
 		return nil
 	}
-	changed, scrollCmd := m.scrollViewportSelectionBy(m.selectionAutoScrollDelta(m.selectionAutoScroll.mouse), m.selectionAutoScroll.mouse)
+	var (
+		changed   bool
+		scrollCmd tea.Cmd
+	)
+	if m.inputSelecting {
+		changed, scrollCmd = m.scrollInputSelectionBy(m.inputSelectionAutoScrollDelta(m.selectionAutoScroll.mouse), m.selectionAutoScroll.mouse)
+	} else {
+		changed, scrollCmd = m.scrollViewportSelectionBy(m.selectionAutoScrollDelta(m.selectionAutoScroll.mouse), m.selectionAutoScroll.mouse)
+	}
 	if !changed {
 		m.cancelSelectionAutoScroll()
 		return nil
@@ -109,6 +117,38 @@ func (m *Model) selectionAutoScrollDelta(mouse tea.Mouse) int {
 	case y >= height:
 		return selectionScrollFast
 	case y == height-1:
+		return selectionScrollSlow
+	default:
+		return 0
+	}
+}
+
+func (m *Model) updateInputSelectionAutoScroll(mouse tea.Mouse) tea.Cmd {
+	if m == nil || !m.inputSelecting {
+		return nil
+	}
+	delta := m.inputSelectionAutoScrollDelta(mouse)
+	if delta == 0 {
+		m.selectionAutoScroll.active = false
+		return nil
+	}
+	m.selectionAutoScroll.active = true
+	return m.ensureSelectionAutoScrollTick()
+}
+
+func (m *Model) inputSelectionAutoScrollDelta(mouse tea.Mouse) int {
+	if m == nil {
+		return 0
+	}
+	startY, height, ok := m.inputAreaBounds()
+	if !ok || height <= 0 {
+		return 0
+	}
+	y := m.screenYToFrameY(mouse.Y)
+	switch {
+	case y < startY:
+		return -selectionScrollSlow
+	case y >= startY+height:
 		return selectionScrollSlow
 	default:
 		return 0
@@ -164,4 +204,31 @@ func (m *Model) scrollViewportSelectionBy(delta int, mouse tea.Mouse) (bool, tea
 	m.setViewportFollowState(viewportSelecting)
 	m.bumpViewportSelectionVersion()
 	return true, m.touchViewportScrollbar()
+}
+
+func (m *Model) scrollInputSelectionBy(delta int, mouse tea.Mouse) (bool, tea.Cmd) {
+	if m == nil || delta == 0 {
+		return false, nil
+	}
+	snapshot := m.composeInputLayout()
+	if snapshot.layout.totalRows <= maxInputBarRows {
+		return false, nil
+	}
+	newOffset := clampComposerRowOffset(m.composerRowOffset+delta, snapshot.layout.totalRows, maxInputBarRows)
+	if newOffset == m.composerRowOffset {
+		return false, nil
+	}
+	m.composerRowOffset = newOffset
+	refreshed := m.buildComposeInputLayout()
+	point, ok := m.inputGlobalPointFromMouse(mouse, true)
+	if !ok {
+		return true, m.ensureSelectionAutoScrollTick()
+	}
+	if point == m.inputSelectionEnd {
+		return true, m.ensureSelectionAutoScrollTick()
+	}
+	m.inputSelectionEnd = point
+	m.moveTextareaCursorToIndex(refreshed.textareaIndexFromPoint(point))
+	m.syncInputFromTextarea()
+	return true, m.ensureSelectionAutoScrollTick()
 }

@@ -7,7 +7,7 @@ LDFLAGS ?= -X github.com/caelis-labs/caelis/internal/version.Version=$(BUILD_VER
 GOFILES_CMD = if command -v rg >/dev/null 2>&1; then rg --files -0 -g '*.go'; else find . -type f -name '*.go' -print0; fi
 GO_TEST_TIMEOUT ?= 5m
 AGENT_SDK_DIR ?= agent-sdk
-RUN_AGENT_SDK = cd $(AGENT_SDK_DIR) &&
+RUN_AGENT_SDK = cd $(AGENT_SDK_DIR) && GOWORK=off
 CACHE_ROOT ?= $(CURDIR)/.tmp/cache
 GOMODCACHE ?= $(CACHE_ROOT)/gomod
 GOCACHE ?= $(CACHE_ROOT)/gocache

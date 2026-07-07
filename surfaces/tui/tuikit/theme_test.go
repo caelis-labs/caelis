@@ -263,6 +263,23 @@ func TestSelectionStyleUsesExplicitPaletteWhenAvailable(t *testing.T) {
 	}
 }
 
+func TestInputSelectionStyleUsesDedicatedPalette(t *testing.T) {
+	theme := ResolveThemeWithState(true, false, colorprofile.TrueColor)
+	style := theme.InputSelectionStyle()
+	if got := stringifyColor(style.GetForeground()); got != "#11111b" {
+		t.Fatalf("input selection foreground = %q", got)
+	}
+	if got := stringifyColor(style.GetBackground()); got != "#b4befe" {
+		t.Fatalf("input selection background = %q", got)
+	}
+
+	ansi := ResolveThemeWithState(true, false, colorprofile.ANSI)
+	ansiStyle := ansi.InputSelectionStyle()
+	if !ansiStyle.GetReverse() && (!colorIsPresent(ansiStyle.GetForeground()) || !colorIsPresent(ansiStyle.GetBackground())) {
+		t.Fatal("expected ANSI input selection style to use reverse video or explicit ANSI colors")
+	}
+}
+
 func TestNamedThemesUseMutedReasoningText(t *testing.T) {
 	for _, name := range []string{"nord", "solarized", "dracula"} {
 		t.Run(name, func(t *testing.T) {

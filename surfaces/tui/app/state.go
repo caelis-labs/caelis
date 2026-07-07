@@ -390,6 +390,7 @@ type Model struct {
 
 	// --- Composer (independent sub-model for input management) ---
 	Composer
+	composerViewSnapshot *composerInputLayout
 
 	// --- Overlay state (unified overlay management) ---
 	OverlayState

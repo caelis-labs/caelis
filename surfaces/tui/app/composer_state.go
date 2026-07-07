@@ -24,4 +24,5 @@ type Composer struct {
 	historyDraftAttachments []inputAttachment
 	pendingQueue            pendingPromptQueue
 	wizard                  *wizardRuntime
+	composerRowOffset       int
 }

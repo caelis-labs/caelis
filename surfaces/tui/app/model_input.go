@@ -25,6 +25,9 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		if m.selecting {
 			return m, m.handleViewportSelectionWheel(typed.Mouse())
 		}
+		if handled, cmd := m.handleInputAreaWheel(typed.Mouse()); handled {
+			return m, cmd
+		}
 		if handled, changed := m.tryScrollPanelAtMouse(typed.Mouse()); handled {
 			if changed {
 				offset := m.viewport.YOffset()
@@ -101,6 +104,73 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	default:
 		return m, nil
 	}
+}
+
+func (m *Model) handleInputAreaWheel(mouse tea.Mouse) (bool, tea.Cmd) {
+	if m == nil || m.activePrompt != nil {
+		return false, nil
+	}
+	if !m.mouseInInputArea(mouse) {
+		return false, nil
+	}
+	delta := 0
+	switch mouse.Button {
+	case tea.MouseWheelUp:
+		delta = -1
+	case tea.MouseWheelDown:
+		delta = 1
+	default:
+		return false, nil
+	}
+	m.scrollComposerInputBy(delta)
+	return true, nil
+}
+
+func (m *Model) mouseInInputArea(mouse tea.Mouse) bool {
+	startY, height, ok := m.inputAreaBounds()
+	if !ok || height <= 0 {
+		return false
+	}
+	y := m.screenYToFrameY(mouse.Y)
+	if y < startY || y >= startY+height {
+		return false
+	}
+	left := m.mainColumnX() + inputHorizontalInset
+	right := m.mainColumnX() + m.fixedRowWidth() - inputHorizontalInset
+	return mouse.X >= left && mouse.X < right
+}
+
+func (m *Model) scrollComposerInputBy(delta int) bool {
+	if m == nil || delta == 0 {
+		return false
+	}
+	snapshot := m.composeInputLayout()
+	if snapshot.layout.totalRows <= maxInputBarRows {
+		return false
+	}
+	targetLine := snapshot.layout.cursorRow + delta
+	if targetLine < 0 {
+		targetLine = 0
+	}
+	if targetLine >= snapshot.layout.totalRows {
+		targetLine = snapshot.layout.totalRows - 1
+	}
+	if targetLine == snapshot.layout.cursorRow {
+		return false
+	}
+	targetPoint := textSelectionPoint{
+		line: targetLine,
+		col:  snapshot.promptWidth + snapshot.layout.cursorCol,
+	}
+	targetIndex := snapshot.textareaIndexFromPoint(targetPoint)
+	if targetIndex == m.textareaCursorIndex() {
+		return false
+	}
+	m.moveTextareaCursorToIndex(targetIndex)
+	m.syncInputFromTextarea()
+	refreshed := m.buildComposeInputLayout()
+	m.ensureComposerRowOffsetForCursor(refreshed.layout.cursorRow, refreshed.layout.totalRows)
+	return true
 }
 
 func (m *Model) tryScrollPanelAtMouse(mouse tea.Mouse) (handled bool, changed bool) {
@@ -260,47 +330,66 @@ func (m *Model) handleInputAreaMouse(mouse tea.Mouse, phase mousePhase) (bool, t
 	if mouse.Button != tea.MouseLeft && phase == mousePhasePress {
 		return false, nil
 	}
-	lines := m.inputPlainLines()
-	if len(lines) == 0 {
-		return false, nil
-	}
-	point, ok := m.mousePointToInputPoint(mouse.X, mouse.Y, phase != mousePhasePress, lines)
 	switch phase {
 	case mousePhasePress:
+		point, ok := m.inputGlobalPointFromMouse(mouse, false)
 		if !ok || mouse.Button != tea.MouseLeft {
 			return false, nil
 		}
+		snapshot := m.composeInputLayout()
+		m.cancelSelectionAutoScroll()
 		m.clearSelection()
 		m.clearFixedSelection()
 		m.inputSelecting = true
 		m.inputSelectionStart = point
 		m.inputSelectionEnd = point
+
+		m.moveTextareaCursorToIndex(snapshot.textareaIndexFromPoint(point))
+		m.syncInputFromTextarea()
 		return true, nil
 	case mousePhaseMotion:
-		if !m.inputSelecting || !ok {
+		if !m.inputSelecting {
 			return false, nil
 		}
+		m.selectionAutoScroll.mouse = mouse
+		cmd := m.updateInputSelectionAutoScroll(mouse)
+		point, ok := m.inputGlobalPointFromMouse(mouse, true)
+		if !ok {
+			return true, cmd
+		}
+		snapshot := m.composeInputLayout()
+		m.moveTextareaCursorToIndex(snapshot.textareaIndexFromPoint(point))
+		m.syncInputFromTextarea()
+		refreshed := m.buildComposeInputLayout()
+		m.ensureComposerRowOffsetForCursor(refreshed.layout.cursorRow, refreshed.layout.totalRows)
+		if point, ok = m.inputGlobalPointFromMouse(mouse, true); !ok {
+			return true, cmd
+		}
 		if m.inputSelectionEnd == point {
-			return true, nil
+			return true, cmd
 		}
 		m.inputSelectionEnd = point
-		return true, nil
+		return true, cmd
 	case mousePhaseRelease:
 		if !m.inputSelecting {
 			return false, nil
 		}
-		if ok {
+		m.cancelSelectionAutoScroll()
+		releaseSnapshot := m.buildComposeInputLayout()
+		if point, mapOK := m.inputGlobalPointFromMouse(mouse, true); mapOK {
 			m.inputSelectionEnd = point
 		}
 		m.inputSelecting = false
-		start, end, ok := normalizedSelectionRange(m.inputSelectionStart, m.inputSelectionEnd, len(lines))
+		allLines := releaseSnapshot.allPlainLines()
+		start, end, ok := normalizedSelectionRange(m.inputSelectionStart, m.inputSelectionEnd, len(allLines))
 		if !ok {
 			m.clearInputSelection()
 			return true, nil
 		}
-		text := selectionTextFromLines(lines, start, end)
+		start, end = releaseSnapshot.snapInputSelectionEndpoints(start, end)
+		text := selectionTextFromInputLines(allLines, start, end, releaseSnapshot.promptWidth)
+		m.clearInputSelection()
 		if text == "" {
-			m.clearInputSelection()
 			return true, nil
 		}
 		return true, m.copySelectionToClipboard(text)
