@@ -49,12 +49,34 @@ func TestDetectLineStyle(t *testing.T) {
 func TestColorizeLogLine(t *testing.T) {
 	theme := DefaultTheme()
 	// Just verify the function doesn't panic and returns non-empty for each style.
-	for style := LineStyleDefault; style <= LineStyleDiffHunk; style++ {
+	for style := LineStyleDefault; style <= LineStyleTableDivider; style++ {
 		line := "test line"
 		result := ColorizeLogLine(line, style, theme)
 		if result == "" {
 			t.Errorf("ColorizeLogLine returned empty for style %d", style)
 		}
+	}
+}
+
+func TestColorizeKeyValueLine_Highlighting(t *testing.T) {
+	theme := DefaultTheme()
+
+	// 测试命令前缀高亮
+	cmdResult := ColorizeLogLine("  /help  Show help", LineStyleKeyValue, theme)
+	if !strings.Contains(cmdResult, "/help") {
+		t.Errorf("expected command key highlighted, got %q", cmdResult)
+	}
+
+	// 测试状态值 ok 高亮
+	okResult := ColorizeLogLine("  status  ok", LineStyleKeyValue, theme)
+	if okResult == "" {
+		t.Error("expected non-empty key value result for ok")
+	}
+
+	// 测试占位符高亮
+	placeholderResult := ColorizeLogLine("  usage  /model <action>", LineStyleKeyValue, theme)
+	if !strings.Contains(placeholderResult, "<action>") {
+		t.Errorf("expected placeholder highlighted, got %q", placeholderResult)
 	}
 }
 

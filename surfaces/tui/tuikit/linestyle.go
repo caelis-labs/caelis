@@ -1,6 +1,7 @@
 package tuikit
 
 import (
+	"regexp"
 	"strings"
 	"unicode"
 
@@ -11,20 +12,22 @@ import (
 type LineStyle int
 
 const (
-	LineStyleDefault    LineStyle = iota
-	LineStyleAssistant            // "· " prefix
-	LineStyleReasoning            // "› " prefix
-	LineStyleUser                 // "▌ " prefix
-	LineStyleTool                 // "▸" / "✓" / "? " prefix
-	LineStyleWarn                 // "warn:" prefix
-	LineStyleError                // "error:" prefix
-	LineStyleNote                 // "note:" prefix
-	LineStyleKeyValue             // indented key-value pairs
-	LineStyleSection              // top-level header-like text
-	LineStyleDiffAdd              // "  +line" (unified diff add)
-	LineStyleDiffRemove           // "  -line" (unified diff remove)
-	LineStyleDiffHeader           // "  --- old" / "  +++ new"
-	LineStyleDiffHunk             // "  @@ -n,m +n,m @@" (hunk header)
+	LineStyleDefault      LineStyle = iota
+	LineStyleAssistant              // "· " prefix
+	LineStyleReasoning              // "› " prefix
+	LineStyleUser                   // "▌ " prefix
+	LineStyleTool                   // "▸" / "✓" / "? " prefix
+	LineStyleWarn                   // "warn:" prefix
+	LineStyleError                  // "error:" prefix
+	LineStyleNote                   // "note:" prefix
+	LineStyleKeyValue               // indented key-value pairs
+	LineStyleSection                // top-level header-like text
+	LineStyleDiffAdd                // "  +line" (unified diff add)
+	LineStyleDiffRemove             // "  -line" (unified diff remove)
+	LineStyleDiffHeader             // "  --- old" / "  +++ new"
+	LineStyleDiffHunk               // "  @@ -n,m +n,m @@" (hunk header)
+	LineStyleTableHeader            // table header row
+	LineStyleTableDivider           // table header divider row (using e.g. ───)
 )
 
 // DetectLineStyle determines the semantic style of a log line in isolation.
@@ -152,7 +155,8 @@ func ColorizeLogLine(line string, style LineStyle, theme Theme) string {
 	case LineStyleKeyValue:
 		return colorizeKeyValueLine(line, theme)
 	case LineStyleSection:
-		return theme.SectionStyle().Render(LinkifyText(line, theme.LinkStyle()))
+		prefix := fgStyle(theme.Accent).Render("◆ ")
+		return prefix + theme.SectionStyle().Render(LinkifyText(line, theme.LinkStyle()))
 	case LineStyleDiffAdd:
 		return theme.DiffAddStyle().Render(LinkifyText(line, theme.LinkStyle()))
 	case LineStyleDiffRemove:
@@ -161,6 +165,10 @@ func ColorizeLogLine(line string, style LineStyle, theme Theme) string {
 		return theme.DiffHeaderStyle().Render(LinkifyText(line, theme.LinkStyle()))
 	case LineStyleDiffHunk:
 		return theme.DiffHunkStyle().Render(LinkifyText(line, theme.LinkStyle()))
+	case LineStyleTableHeader:
+		return fgStyle(theme.Accent).Bold(true).Render(LinkifyText(line, theme.LinkStyle()))
+	case LineStyleTableDivider:
+		return theme.SeparatorStyle().Render(line)
 	default:
 		return LinkifyText(line, theme.LinkStyle())
 	}
@@ -364,6 +372,56 @@ func isMetricToken(value string) bool {
 	return hasDigit
 }
 
+var (
+	reSuccess     = regexp.MustCompile(`\b(ok|success|seatbelt sandbox)\b`)
+	reError       = regexp.MustCompile(`\b(failed|error)\b`)
+	reWarning     = regexp.MustCompile(`\b(warn|warning|manual)\b`)
+	reAuto        = regexp.MustCompile(`\b(auto(-[a-zA-Z0-9_-]+)?)\b`)
+	reLevel       = regexp.MustCompile(`\[(high|max|pro)\]`)
+	rePlaceholder = regexp.MustCompile(`(<[a-zA-Z0-9_-]+>|\[[a-zA-Z0-9_-]+\])`)
+	reTokenUsage  = regexp.MustCompile(`\b(\d+(\.\d+)?[kKmMgG]?\s*/\s*\d+(\.\d+)?[kKmMgG]?)\b`)
+)
+
+func highlightStatusValue(val string, theme Theme) string {
+	val = reLevel.ReplaceAllStringFunc(val, func(m string) string {
+		return fgStyle(theme.Accent).Bold(true).Render(m)
+	})
+	val = reTokenUsage.ReplaceAllStringFunc(val, func(m string) string {
+		return fgStyle(theme.Info).Render(m)
+	})
+	val = rePlaceholder.ReplaceAllStringFunc(val, func(m string) string {
+		if strings.Contains(m, "\x1b") {
+			return m
+		}
+		return quietStyle(theme, theme.MutedText).Render(m)
+	})
+	val = reSuccess.ReplaceAllStringFunc(val, func(m string) string {
+		if strings.Contains(m, "\x1b") {
+			return m
+		}
+		return fgStyle(theme.Success).Render(m)
+	})
+	val = reError.ReplaceAllStringFunc(val, func(m string) string {
+		if strings.Contains(m, "\x1b") {
+			return m
+		}
+		return fgStyle(theme.Error).Render(m)
+	})
+	val = reWarning.ReplaceAllStringFunc(val, func(m string) string {
+		if strings.Contains(m, "\x1b") {
+			return m
+		}
+		return fgStyle(theme.Warning).Render(m)
+	})
+	val = reAuto.ReplaceAllStringFunc(val, func(m string) string {
+		if strings.Contains(m, "\x1b") {
+			return m
+		}
+		return fgStyle(theme.Success).Render(m)
+	})
+	return val
+}
+
 func colorizeKeyValueLine(line string, theme Theme) string {
 	rest := strings.TrimLeft(line, " \t")
 	leading := len(line) - len(rest)
@@ -373,9 +431,17 @@ func colorizeKeyValueLine(line string, theme Theme) string {
 	}
 	key := rest[:keyEnd]
 	val := rest[keyEnd:]
-	return strings.Repeat(" ", leading) +
-		theme.KeyLabelStyle().Render(key) +
-		val
+
+	var keyStyled string
+	if strings.HasPrefix(key, "/") {
+		keyStyled = fgStyle(theme.Accent).Bold(true).Render(key)
+	} else {
+		keyStyled = theme.KeyLabelStyle().Render(key)
+	}
+
+	valStyled := highlightStatusValue(val, theme)
+
+	return strings.Repeat(" ", leading) + keyStyled + valStyled
 }
 
 func countLeadingSpaces(s string) int {

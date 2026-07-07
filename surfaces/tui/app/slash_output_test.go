@@ -73,6 +73,7 @@ func TestSlashStatusOutputRendersStructuredSnapshot(t *testing.T) {
 		"",
 		"Usage",
 		"  Scope                       Total  Input  Cached  Output  Reasoning",
+		"  ──────────────────────────  ─────  ─────  ──────  ──────  ─────────",
 		"  total                       140    100    25      40      5",
 		"  deepseek/deepseek-v4-flash  140    100    -       40      -",
 	}, "\n")
@@ -156,6 +157,7 @@ func TestSlashSubagentOutputRendersProfileData(t *testing.T) {
 	want := strings.Join([]string{
 		"Subagents",
 		"  Profile   Binding                            Status    Description",
+		"  ────────  ─────────────────────────────────  ────────  ──────────────",
 		"  explorer  disabled                           disabled",
 		"  reviewer  deepseek/deepseek-v4-flash [high]  ready     review changes",
 		"",

@@ -214,7 +214,7 @@ func renderSlashSubagentProfileLines(status control.AgentProfileStatusSnapshot) 
 				row.Description,
 			})
 		}
-		lines = append(lines, renderSlashPaddedRows(table)...)
+		lines = append(lines, renderSlashPaddedRowsWithOptions(table, true)...)
 	}
 	var warnings []string
 	for _, row := range view.Rows {
@@ -248,10 +248,14 @@ func renderSlashTokenUsage(usage control.TokenUsageView) []slashOutputLine {
 		}
 		table = append(table, values)
 	}
-	return renderSlashPaddedRows(table)
+	return renderSlashPaddedRowsWithOptions(table, true)
 }
 
 func renderSlashPaddedRows(table [][]string) []slashOutputLine {
+	return renderSlashPaddedRowsWithOptions(table, false)
+}
+
+func renderSlashPaddedRowsWithOptions(table [][]string, hasHeader bool) []slashOutputLine {
 	if len(table) == 0 {
 		return nil
 	}
@@ -266,16 +270,35 @@ func renderSlashPaddedRows(table [][]string) []slashOutputLine {
 			}
 		}
 	}
-	lines := make([]slashOutputLine, 0, len(table))
-	for _, row := range table {
+	capacity := len(table)
+	if hasHeader && len(table) > 0 {
+		capacity++
+	}
+	lines := make([]slashOutputLine, 0, capacity)
+	for idx, row := range table {
 		parts := make([]string, len(row))
 		for i, col := range row {
 			parts[i] = padRightRunes(col, widths[i])
 		}
+		isHeaderRow := hasHeader && idx == 0
+		style := tuikit.LineStyleKeyValue
+		if isHeaderRow {
+			style = tuikit.LineStyleTableHeader
+		}
 		lines = append(lines, slashOutputLine{
 			Text:  "  " + strings.TrimRight(strings.Join(parts, "  "), " "),
-			Style: tuikit.LineStyleKeyValue,
+			Style: style,
 		})
+		if isHeaderRow {
+			dividerParts := make([]string, len(row))
+			for i := range row {
+				dividerParts[i] = strings.Repeat("─", widths[i])
+			}
+			lines = append(lines, slashOutputLine{
+				Text:  "  " + strings.Join(dividerParts, "  "),
+				Style: tuikit.LineStyleTableDivider,
+			})
+		}
 	}
 	return lines
 }

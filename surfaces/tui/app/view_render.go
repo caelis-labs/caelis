@@ -764,25 +764,26 @@ func composeStyledFooter(width int, left string, right string) string {
 	if width <= 0 {
 		return ""
 	}
+	width = max(width-4, 0)
 	leftWidth := lipgloss.Width(left)
 	rightWidth := lipgloss.Width(right)
 	if left == "" && right == "" {
-		return strings.Repeat(" ", width)
+		return "  " + strings.Repeat(" ", width) + "  "
 	}
 	if left == "" {
 		if rightWidth >= width {
-			return right
+			return "  " + right + "  "
 		}
-		return strings.Repeat(" ", width-rightWidth) + right
+		return "  " + strings.Repeat(" ", width-rightWidth) + right + "  "
 	}
 	if right == "" {
 		if leftWidth >= width {
-			return left
+			return "  " + left + "  "
 		}
-		return left + strings.Repeat(" ", width-leftWidth)
+		return "  " + left + strings.Repeat(" ", width-leftWidth) + "  "
 	}
 	gap := max(width-leftWidth-rightWidth, 1)
-	return left + strings.Repeat(" ", gap) + right
+	return "  " + left + strings.Repeat(" ", gap) + right + "  "
 }
 
 func fitHeaderRowParts(width int, workspace string, model string) (string, string) {
@@ -937,19 +938,19 @@ func styleFooterLeft(m *Model, plain string) string {
 	sep := " · "
 	idx := strings.Index(plain, sep)
 	if idx != -1 {
-		accentStyle := lipgloss.NewStyle().Foreground(m.theme.Accent)
-		focusStyle := lipgloss.NewStyle().Foreground(m.theme.Focus)
+		modelStyle := lipgloss.NewStyle().Foreground(m.theme.TextSecondary)
+		workspaceStyle := lipgloss.NewStyle().Foreground(m.theme.MutedText)
 		modelPart := plain[:idx]
 		workspacePart := plain[idx+len(sep):]
 
-		styledModel := accentStyle.Render(modelPart)
+		styledModel := modelStyle.Render(modelPart)
 		styledSep := m.theme.MutedTextStyle().Render(sep)
-		styledWorkspace := focusStyle.Render(workspacePart)
+		styledWorkspace := workspaceStyle.Render(workspacePart)
 
 		return styledModel + styledSep + styledWorkspace
 	}
 
-	return lipgloss.NewStyle().Foreground(m.theme.Accent).Render(plain)
+	return lipgloss.NewStyle().Foreground(m.theme.TextSecondary).Render(plain)
 }
 
 func formatFooterBindingKeys(bindings []key.Binding) string {
