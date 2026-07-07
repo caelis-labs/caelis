@@ -56,6 +56,9 @@ func (m *Model) buildHintText() string {
 		return h
 	}
 	if m.activePrompt != nil {
+		if len(m.activePrompt.choices) > 0 {
+			return ""
+		}
 		return m.promptHintText()
 	}
 	if m.turnRunning() && m.activePrompt == nil {
@@ -64,26 +67,11 @@ func (m *Model) buildHintText() string {
 	if text := m.pendingQueueHintText(); text != "" {
 		return text
 	}
-	// Show /resume guidance.
-	if len(m.resumeCandidates) > 0 {
-		return m.overlayHintText("/resume")
+	if m.completionOverlayActive() {
+		return ""
 	}
-	// Show generic slash-arg guidance.
-	if m.slashArgActive && m.slashArgCommand != "" {
-		// Wizard-driven hint.
-		if m.isWizardActive() {
-			return m.wizardHintText()
-		}
-		// Non-wizard fallback.
-		label := "/" + m.slashArgCommand
-		if len(m.slashArgCandidates) == 0 {
-			return ""
-		}
-		return m.overlayHintText(label)
-	}
-	// Show slash command guidance.
-	if len(m.slashCandidates) > 0 {
-		return m.overlayHintText("/")
+	if m.slashArgActive && m.slashArgCommand != "" && m.isWizardActive() {
+		return m.wizardHintText()
 	}
 	return ""
 }

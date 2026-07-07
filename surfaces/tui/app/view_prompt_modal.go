@@ -41,21 +41,11 @@ func (m *Model) renderPromptModal() string {
 	start = min(start, len(visible))
 	end := minInt(len(visible), start+maxVisiblePromptChoices)
 	window := visible[start:end]
-	lines := make([]string, 0, len(window)+2)
-	if start > 0 {
-		lines = append(lines, m.theme.HelpHintTextStyle().Render(
-			fmt.Sprintf("… and %d earlier", start),
-		))
-	}
+	lines := make([]string, 0, len(window))
 	for i := range window {
 		choice := window[i]
 		actualIndex := start + i
 		lines = append(lines, m.renderPromptChoiceLine(choice, actualIndex == p.choiceIndex))
-	}
-	if len(visible) > end {
-		lines = append(lines, m.theme.HelpHintTextStyle().Render(
-			fmt.Sprintf("… and %d more", len(visible)-end),
-		))
 	}
 	if len(bodyLines) > 0 {
 		bodyLines = append(bodyLines, "")
@@ -175,11 +165,15 @@ func (m *Model) renderPromptModalBoxWithWidth(lines []string, width int) string 
 	if len(filtered) == 0 {
 		filtered = []string{""}
 	}
-	return tuikit.RenderResponsiveOverlayFrame(m.theme, tuikit.ResponsiveOverlayFrameModel{
+	frame := tuikit.RenderResponsiveOverlayFrame(m.theme, tuikit.ResponsiveOverlayFrameModel{
 		Body:      filtered,
 		Width:     width,
 		UseBorder: hasBorder,
 	})
+	if m.activePrompt != nil && len(m.activePrompt.choices) > 0 {
+		return m.attachPromptChoiceFooter(frame)
+	}
+	return frame
 }
 
 func (m *Model) promptDetailLineBudget() int {
@@ -286,11 +280,12 @@ func (m *Model) renderCompletionOverlay(_ string, lines []string) string {
 	if len(filtered) == 0 {
 		filtered = []string{""}
 	}
-	return tuikit.RenderResponsiveOverlayFrame(m.theme, tuikit.ResponsiveOverlayFrameModel{
+	frame := tuikit.RenderResponsiveOverlayFrame(m.theme, tuikit.ResponsiveOverlayFrameModel{
 		Body:      filtered,
 		Width:     innerWidth,
 		UseBorder: hasBorder,
 	})
+	return m.attachCompletionOverlayFooter(frame)
 }
 
 func (m *Model) completionOverlayInnerWidth() int {

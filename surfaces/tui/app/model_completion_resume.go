@@ -20,12 +20,7 @@ func (m *Model) renderResumeList() string {
 		start = maxStart
 	}
 	end := minInt(len(m.resumeCandidates), start+maxItems)
-	var lines []string
-	if start > 0 {
-		lines = append(lines, m.theme.HelpHintTextStyle().Render(
-			fmt.Sprintf("… and %d earlier", start),
-		))
-	}
+	lines := make([]string, 0, end-start)
 	count := end - start
 	titles := make([]string, count)
 	ages := make([]string, count)
@@ -51,11 +46,6 @@ func (m *Model) renderResumeList() string {
 	}
 	for i := start; i < end; i++ {
 		lines = append(lines, m.renderResumeCandidateLine(titles[i-start], ages[i-start], titleColumnWidth, ageColumnWidth, i == m.resumeIndex))
-	}
-	if end < len(m.resumeCandidates) {
-		lines = append(lines, m.theme.HelpHintTextStyle().Render(
-			fmt.Sprintf("… and %d more", len(m.resumeCandidates)-end),
-		))
 	}
 	return m.renderCompletionOverlay("Recent", lines)
 }

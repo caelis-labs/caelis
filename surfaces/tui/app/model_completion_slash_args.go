@@ -1,7 +1,6 @@
 package tuiapp
 
 import (
-	"fmt"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -603,12 +602,7 @@ func (m *Model) renderSlashArgList() string {
 		start = maxStart
 	}
 	end := minInt(len(candidates), start+maxItems)
-	var lines []string
-	if start > 0 {
-		lines = append(lines, m.theme.HelpHintTextStyle().Render(
-			fmt.Sprintf("… and %d earlier", start),
-		))
-	}
+	lines := make([]string, 0, end-start)
 	for i := start; i < end; i++ {
 		display := strings.TrimSpace(candidates[i].Display)
 		if display == "" {
@@ -616,11 +610,6 @@ func (m *Model) renderSlashArgList() string {
 		}
 		detail := strings.TrimSpace(candidates[i].Detail)
 		lines = append(lines, m.renderCompletionValueLine(display, detail, i == index))
-	}
-	if end < len(candidates) {
-		lines = append(lines, m.theme.HelpHintTextStyle().Render(
-			fmt.Sprintf("… and %d more", len(candidates)-end),
-		))
 	}
 	title := "Options"
 	if m.isWizardActive() && m.wizard != nil {

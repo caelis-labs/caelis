@@ -1081,8 +1081,12 @@ func TestSkillCompletionFetchesBeyondVisibleWindowAndScrolls(t *testing.T) {
 	if strings.Contains(rendered, "skill-00") {
 		t.Fatalf("renderSkillList() = %q, should have scrolled past skill-00", rendered)
 	}
-	if !strings.Contains(rendered, "earlier") {
-		t.Fatalf("renderSkillList() = %q, want earlier-page indicator", rendered)
+	if strings.Contains(rendered, "earlier") || strings.Contains(rendered, "more") {
+		t.Fatalf("renderSkillList() = %q, should not contain scroll text rows", rendered)
+	}
+	rendered = ansi.Strip(model.renderSkillList())
+	if !strings.Contains(rendered, "select") {
+		t.Fatalf("renderSkillList() = %q, want unified overlay footer", rendered)
 	}
 }
 
@@ -1207,10 +1211,13 @@ func TestSlashCompletionRendersDescriptionsWithoutHeaderOrBorder(t *testing.T) {
 		}
 	}
 	lines := strings.Split(strings.TrimRight(rendered, "\n"), "\n")
-	if len(lines) != 2 {
-		t.Fatalf("renderSlashCommandList() lines = %#v, want two candidate rows (no border means no mask rows)", lines)
+	if len(lines) != 3 {
+		t.Fatalf("renderSlashCommandList() lines = %#v, want two candidate rows plus footer", lines)
 	}
-	for _, line := range lines {
+	if !strings.Contains(lines[len(lines)-1], "select") {
+		t.Fatalf("renderSlashCommandList() footer = %q, want unified overlay footer", lines[len(lines)-1])
+	}
+	for _, line := range lines[:len(lines)-1] {
 		if width := displayColumns(line); width != model.completionOverlayRenderedRowWidth() {
 			t.Fatalf("renderSlashCommandList() row width = %d, want %d: %q", width, model.completionOverlayRenderedRowWidth(), line)
 		}
@@ -1478,8 +1485,11 @@ func TestFileCompletionFetchesBeyondVisibleWindowAndScrolls(t *testing.T) {
 	if strings.Contains(rendered, "file-00") {
 		t.Fatalf("renderMentionList() = %q, should have scrolled past file-00", rendered)
 	}
-	if !strings.Contains(rendered, "earlier") {
-		t.Fatalf("renderMentionList() = %q, want earlier-page indicator", rendered)
+	if strings.Contains(rendered, "earlier") || strings.Contains(rendered, "more") {
+		t.Fatalf("renderMentionList() = %q, should not contain scroll text rows", rendered)
+	}
+	if !strings.Contains(ansi.Strip(model.renderMentionList()), "select") {
+		t.Fatalf("renderMentionList() should include unified overlay footer")
 	}
 }
 
@@ -1563,8 +1573,11 @@ func TestMentionCompletionFetchesBeyondVisibleWindowAndScrolls(t *testing.T) {
 	if strings.Contains(rendered, "@agent-00") {
 		t.Fatalf("renderMentionList() = %q, should have scrolled past @agent-00", rendered)
 	}
-	if !strings.Contains(rendered, "earlier") {
-		t.Fatalf("renderMentionList() = %q, want earlier-page indicator", rendered)
+	if strings.Contains(rendered, "earlier") || strings.Contains(rendered, "more") {
+		t.Fatalf("renderMentionList() = %q, should not contain scroll text rows", rendered)
+	}
+	if !strings.Contains(ansi.Strip(model.renderMentionList()), "select") {
+		t.Fatalf("renderMentionList() should include unified overlay footer")
 	}
 }
 

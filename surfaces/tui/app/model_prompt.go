@@ -278,13 +278,13 @@ func (m *Model) handlePromptChoiceKey(msg tea.KeyMsg) tea.Cmd {
 			m.clampPromptChoiceIndex()
 		}
 		return nil
-	case "up", "k", "shift+tab", "backtab":
+	case "up":
 		if len(visible) > 0 {
 			m.activePrompt.choiceIndex = wrapSelectionIndex(m.activePrompt.choiceIndex, len(visible), -1)
 			m.syncPromptChoiceWindow()
 		}
 		return nil
-	case "down", "j", "tab":
+	case "down":
 		if len(visible) > 0 {
 			m.activePrompt.choiceIndex = wrapSelectionIndex(m.activePrompt.choiceIndex, len(visible), 1)
 			m.syncPromptChoiceWindow()

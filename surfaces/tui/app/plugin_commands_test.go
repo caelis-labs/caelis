@@ -9,6 +9,8 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/caelis-labs/caelis/protocol/acp/control"
 )
 
@@ -228,8 +230,20 @@ func TestPluginManagePromptScrollsPastFirstPage(t *testing.T) {
 	if !strings.Contains(out, "plugin-10") {
 		t.Fatalf("rendered prompt = %q, want scrolled selection plugin-10", out)
 	}
-	if !strings.Contains(out, "earlier") {
-		t.Fatalf("rendered prompt = %q, want earlier page hint", out)
+	if strings.Contains(out, "earlier") || strings.Contains(out, "more") {
+		t.Fatalf("rendered prompt = %q, should not contain scroll text rows", out)
+	}
+	plain := ansi.Strip(out)
+	for _, want := range []string{"type filter", "↑/↓ select", "space toggle", "enter confirm", "esc cancel"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("rendered prompt = %q, want prompt choice footer item %q", out, want)
+		}
+	}
+	if strings.Contains(plain, "tab fill") {
+		t.Fatalf("rendered prompt = %q, should not contain completion footer", out)
+	}
+	if hint := strings.TrimSpace(model.hintRowText()); hint != "" {
+		t.Fatalf("hintRowText() = %q, want empty while prompt choices are active", hint)
 	}
 	if strings.Contains(out, "plugin-00") {
 		t.Fatalf("rendered prompt = %q, should not stay on first page", out)

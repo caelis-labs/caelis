@@ -1,7 +1,6 @@
 package tuiapp
 
 import (
-	"fmt"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -421,20 +420,10 @@ func (m *Model) renderSkillList() string {
 	contentWidth := maxInt(24, m.completionOverlayInnerWidth())
 	maxItems := minInt(completionOverlayVisibleItems, len(m.skillCandidates))
 	start, end := completionWindowRange(m.skillIndex, len(m.skillCandidates), maxItems)
-	var lines []string
-	if start > 0 {
-		lines = append(lines, m.theme.HelpHintTextStyle().Render(
-			fmt.Sprintf("… and %d earlier", start),
-		))
-	}
+	lines := make([]string, 0, end-start)
 	for i := start; i < end; i++ {
 		selected := i == m.skillIndex
 		lines = append(lines, m.renderSkillCandidateLine(m.skillCandidates[i], selected, contentWidth))
-	}
-	if end < len(m.skillCandidates) {
-		lines = append(lines, m.theme.HelpHintTextStyle().Render(
-			fmt.Sprintf("… and %d more", len(m.skillCandidates)-end),
-		))
 	}
 	return m.renderCompletionOverlay("", lines)
 }
@@ -736,20 +725,10 @@ func (m *Model) renderSlashCommandList() string {
 		start = maxStart
 	}
 	end := minInt(len(m.slashCandidates), start+maxItems)
-	var lines []string
-	if start > 0 {
-		lines = append(lines, m.theme.HelpHintTextStyle().Render(
-			fmt.Sprintf("… and %d earlier", start),
-		))
-	}
+	lines := make([]string, 0, end-start)
 	for i := start; i < end; i++ {
 		display := m.slashCandidates[i]
 		lines = append(lines, m.renderCompletionTextLine(display, slashCommandCompletionDetail(display), i == m.slashIndex))
-	}
-	if end < len(m.slashCandidates) {
-		lines = append(lines, m.theme.HelpHintTextStyle().Render(
-			fmt.Sprintf("… and %d more", len(m.slashCandidates)-end),
-		))
 	}
 	return m.renderCompletionOverlay("Commands", lines)
 }
