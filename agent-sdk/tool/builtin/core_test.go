@@ -136,7 +136,7 @@ func TestCoreToolSchemasExposeGuidanceBoundsAndAnnotations(t *testing.T) {
 
 	requireStringMinLength(t, defs[shell.RunCommandToolName], "command", 1)
 	requireIntegerBounds(t, defs[shell.RunCommandToolName], "yield_time_ms", 0, nil)
-	requireDescriptionContains(t, defs[shell.RunCommandToolName], "repository inspection", "Do not prefix with cd", "workdir", "yield_time_ms", "Host execution")
+	requireDescriptionContains(t, defs[shell.RunCommandToolName], "repository inspection", "Do not prefix with cd", "workdir", "yield_time_ms", "Prefer default sandbox")
 	requireAnnotations(t, defs[shell.RunCommandToolName], false, true, false, true)
 
 	requireStringMinLength(t, defs[task.ToolName], "task_id", 1)
@@ -146,7 +146,7 @@ func TestCoreToolSchemasExposeGuidanceBoundsAndAnnotations(t *testing.T) {
 	requireAnnotations(t, defs[task.ToolName], false, true, false, true)
 
 	requirePlanSchema(t, defs[plan.ToolName])
-	requireDescriptionContains(t, defs[plan.ToolName], "multi-step, risky, or ambiguous", "skip it for trivial")
+	requireDescriptionContains(t, defs[plan.ToolName], "multi-step execution checklist", "insert or append", "do not overwrite or delete history")
 	requireAnnotations(t, defs[plan.ToolName], false, false, true, false)
 
 	requireStringMinLength(t, defs[skilltool.ToolName], "name", 1)

@@ -38,17 +38,17 @@ func New() tool.Tool { return Tool{} }
 func (Tool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        ToolName,
-		Description: "Replace the visible execution plan with the complete current plan. Use it for multi-step, risky, or ambiguous tasks, and skip it for trivial one-step work. Keep entries short, outcome-oriented, and statused with at most one in_progress entry.",
+		Description: "Maintain a short multi-step execution checklist so you and the user can track remaining goals. Skip one-step work and pure investigation/write-ups. When updating: keep prior step texts, advance status, and insert or append steps as needed; do not overwrite or delete history. At most one in_progress entry.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"explanation": map[string]any{
 					"type":        "string",
-					"description": "Why the plan changed.",
+					"description": "Optional. Why the plan changed (status/insert/append), not progress narration.",
 				},
 				"entries": map[string]any{
 					"type":        "array",
-					"description": "Complete current plan.",
+					"description": "Full current plan. Preserve prior steps; update status and insert/append only.",
 					"items": map[string]any{
 						"type": "object",
 						"properties": map[string]any{

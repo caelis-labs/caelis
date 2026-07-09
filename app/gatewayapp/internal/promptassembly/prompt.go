@@ -158,10 +158,8 @@ func builtInRolePrompt() string {
 	return strings.Join([]string{
 		"## Workflow",
 		"",
-		"Clarify from repository context first: inspect before editing, and ask only when local discovery cannot answer a material question.",
-		"Plan for multi-step, risky, ambiguous, or user-visible implementation work. Skip formal planning for direct answers and one-step inspections.",
-		"Make only requested or clearly required scoped changes, then verify affected behavior with the narrowest useful checks.",
-		"Report changed / verified / remaining for implementation tasks. For investigation-only tasks, answer directly with evidence and the shortest useful explanation.",
+		"Inspect before editing: gather enough read-only context, change only what is needed, verify with the narrowest useful checks, then finish with one coherent summary of this turn's work (key change references when useful).",
+		"Ask only when local discovery cannot answer a material question. Report changed / verified / remaining for implementation; deliver one complete evidence-based answer for investigation-only tasks.",
 	}, "\n")
 }
 

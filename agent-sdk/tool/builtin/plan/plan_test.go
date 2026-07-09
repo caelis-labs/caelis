@@ -68,3 +68,24 @@ func TestPlanToolRejectsNonObjectEntries(t *testing.T) {
 		t.Fatalf("Call() error = %v, want %q", err, want)
 	}
 }
+
+func TestPlanDefinitionGuidesStableUpdates(t *testing.T) {
+	t.Parallel()
+
+	def := New().Definition()
+	for _, want := range []string{
+		"multi-step execution checklist",
+		"insert or append",
+		"do not overwrite or delete history",
+		"At most one in_progress",
+	} {
+		if !strings.Contains(def.Description, want) {
+			t.Fatalf("Description missing %q: %q", want, def.Description)
+		}
+	}
+	properties, _ := def.InputSchema["properties"].(map[string]any)
+	entries, _ := properties["entries"].(map[string]any)
+	if got, _ := entries["description"].(string); !strings.Contains(got, "insert/append") {
+		t.Fatalf("entries description = %q, want insert/append guidance", got)
+	}
+}
