@@ -885,14 +885,15 @@ func (m *Model) setInputText(text string) {
 
 func (m *Model) recordHistoryEntry(value string, attachments []inputAttachment) {
 	entry := strings.TrimSpace(value)
-	if entry == "" {
+	clonedAttachments := cloneInputAttachments(attachments)
+	if entry == "" && len(clonedAttachments) == 0 {
 		return
 	}
 	// Slash commands are control inputs and should not pollute user message history.
-	if m.isConfiguredSlashControlLine(entry) {
+	// Expand collapsed pastes so "/help"-only pastes still filter correctly.
+	if m.isConfiguredSlashControlLine(strings.TrimSpace(expandComposerText(entry, clonedAttachments))) {
 		return
 	}
-	clonedAttachments := cloneInputAttachments(attachments)
 	if len(m.history) == 0 || m.history[len(m.history)-1] != entry || !inputAttachmentsEqual(m.historyAttachments[len(m.historyAttachments)-1], clonedAttachments) {
 		m.history = append(m.history, entry)
 		m.historyAttachments = append(m.historyAttachments, clonedAttachments)

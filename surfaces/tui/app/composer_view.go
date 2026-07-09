@@ -292,7 +292,9 @@ func (layout composerInputLayout) textareaIndexFromPoint(point textSelectionPoin
 }
 
 func (m *Model) composerContentWidth() int {
-	if width := m.readableContentWidth() - (inputHorizontalInset * 2) - (m.composerChrome().horizontalInset() * 2); width > 0 {
+	// Prompt text starts at composerInputColumnOffset on both sides of the
+	// main column (symmetric outer margin + optional UserBg chrome pad).
+	if width := m.fixedRowWidth() - (m.composerInputColumnOffset() * 2); width > 0 {
 		return maxInt(20, width)
 	}
 	if width := m.textarea.Width(); width > 0 {
@@ -316,8 +318,9 @@ func clampComposerRowOffset(offset int, totalRows int, maxRows int) int {
 }
 
 // ensureComposerRowOffsetForCursor scrolls the composer window only enough to
-// keep the cursor row visible. Used during drag-selection and wheel navigation,
-// not on a simple click-to-place-cursor.
+// keep the cursor row visible. Used during drag-selection, wheel navigation,
+// paste, and arrow-key navigation — not on a simple click-to-place-cursor
+// (which intentionally preserves the current window).
 func (m *Model) ensureComposerRowOffsetForCursor(cursorRow int, totalRows int) {
 	if m == nil {
 		return
@@ -334,6 +337,25 @@ func (m *Model) ensureComposerRowOffsetForCursor(cursorRow int, totalRows int) {
 		offset = cursorRow - maxInputBarRows + 1
 	}
 	m.composerRowOffset = clampComposerRowOffset(offset, totalRows, maxInputBarRows)
+}
+
+// followComposerCursor rebuilds the composer layout and scrolls the 4-row
+// window so the textarea cursor stays on-screen.
+func (m *Model) followComposerCursor() {
+	if m == nil {
+		return
+	}
+	// Drop any frame snapshot so layout reflects the latest cursor/value.
+	m.composerViewSnapshot = nil
+	layout := m.buildComposeInputLayout()
+	m.ensureComposerRowOffsetForCursor(layout.layout.cursorRow, layout.layout.totalRows)
+}
+
+// syncInputFromTextareaAndFollow syncs rune buffer/height then keeps the
+// composer window pinned to the cursor (paste, typing, arrows, wheel).
+func (m *Model) syncInputFromTextareaAndFollow() {
+	m.syncInputFromTextarea()
+	m.followComposerCursor()
 }
 
 func layoutComposerDisplay(value string, cursor int, width int) composerLayout {
@@ -475,32 +497,97 @@ func (m *Model) textareaCursorIndex() int {
 	return index + col
 }
 
+// moveTextareaCursorToIndex moves the bubbles textarea cursor to a rune index
+// without simulating KeyLeft/KeyRight per character (O(chars) → O(soft lines)).
+// Endpoints use MoveToBegin/MoveToEnd; intermediate positions walk hard lines
+// via CursorUp/Down then SetCursorColumn.
 func (m *Model) moveTextareaCursorToIndex(target int) {
-	valueRunes := []rune(m.textarea.Value())
+	if m == nil {
+		return
+	}
+	value := m.textarea.Value()
+	valueRunes := []rune(value)
 	if target < 0 {
 		target = 0
 	}
 	if target > len(valueRunes) {
 		target = len(valueRunes)
 	}
-	current := m.textareaCursorIndex()
-	if current == target {
+	if m.textareaCursorIndex() == target {
+		return
+	}
+	if target == 0 {
+		m.textarea.MoveToBegin()
+		return
+	}
+	if target == len(valueRunes) {
+		m.textarea.MoveToEnd()
 		return
 	}
 
-	if target > current {
-		diff := target - current
-		for i := 0; i < diff; i++ {
-			var cmd tea.Cmd
-			m.textarea, cmd = m.textarea.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyRight}))
-			_ = cmd
+	targetRow, targetCol := runeIndexToLineCol(value, target)
+	// Bound walk so soft-wrap lines cannot infinite-loop on a stuck cursor.
+	maxSteps := len(valueRunes) + 8
+	if targetRow < m.textarea.Line() {
+		for step := 0; m.textarea.Line() > targetRow && step < maxSteps; step++ {
+			prevRow, prevCol := m.textarea.Line(), m.textarea.Column()
+			m.textarea.CursorUp()
+			if m.textarea.Line() == prevRow && m.textarea.Column() == prevCol {
+				break
+			}
 		}
-	} else {
-		diff := current - target
-		for i := 0; i < diff; i++ {
-			var cmd tea.Cmd
-			m.textarea, cmd = m.textarea.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyLeft}))
-			_ = cmd
+	} else if targetRow > m.textarea.Line() {
+		for step := 0; m.textarea.Line() < targetRow && step < maxSteps; step++ {
+			prevRow, prevCol := m.textarea.Line(), m.textarea.Column()
+			m.textarea.CursorDown()
+			if m.textarea.Line() == prevRow && m.textarea.Column() == prevCol {
+				break
+			}
 		}
 	}
+	// If soft-wrap left us on a nearby hard line, snap by endpoint then re-walk.
+	if m.textarea.Line() != targetRow {
+		if targetRow <= m.textarea.LineCount()/2 {
+			m.textarea.MoveToBegin()
+			for step := 0; m.textarea.Line() < targetRow && step < maxSteps; step++ {
+				prevRow, prevCol := m.textarea.Line(), m.textarea.Column()
+				m.textarea.CursorDown()
+				if m.textarea.Line() == prevRow && m.textarea.Column() == prevCol {
+					break
+				}
+			}
+		} else {
+			m.textarea.MoveToEnd()
+			for step := 0; m.textarea.Line() > targetRow && step < maxSteps; step++ {
+				prevRow, prevCol := m.textarea.Line(), m.textarea.Column()
+				m.textarea.CursorUp()
+				if m.textarea.Line() == prevRow && m.textarea.Column() == prevCol {
+					break
+				}
+			}
+		}
+	}
+	m.textarea.SetCursorColumn(targetCol)
+}
+
+// runeIndexToLineCol maps a rune index in a newline-separated string to the
+// hard line and column expected by bubbles textarea SetCursorColumn.
+func runeIndexToLineCol(value string, index int) (row, col int) {
+	if index < 0 {
+		index = 0
+	}
+	at := 0
+	for _, r := range value {
+		if at == index {
+			return row, col
+		}
+		if r == '\n' {
+			row++
+			col = 0
+		} else {
+			col++
+		}
+		at++
+	}
+	return row, col
 }

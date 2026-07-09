@@ -461,6 +461,7 @@ func (m *Model) syncTextareaFromInput() {
 	m.syncAttachmentSummary()
 	m.moveTextareaCursorToIndex(m.cursor)
 	m.adjustTextareaHeight()
+	m.followComposerCursor()
 }
 
 func (m *Model) viewportScrollbarWidth() int {

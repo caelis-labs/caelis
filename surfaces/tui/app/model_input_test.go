@@ -1024,8 +1024,8 @@ func TestWindowsCtrlVFallsBackToImageWhenTextClipboardEmpty(t *testing.T) {
 
 	updated, _ := model.handleKey(tea.KeyPressMsg(tea.Key{Code: 'v', Mod: tea.ModCtrl}))
 	m := updated.(*Model)
-	if got := m.textarea.Value(); got != "" {
-		t.Fatalf("textarea value = %q, want empty image-only paste", got)
+	if runes := []rune(m.textarea.Value()); len(runes) != 1 || !isAttachmentSentinel(runes[0]) {
+		t.Fatalf("textarea value = %q, want image sentinel", m.textarea.Value())
 	}
 	if len(m.inputAttachments) != 1 || m.inputAttachments[0].Name != "shot.png" {
 		t.Fatalf("input attachments = %#v, want pasted image", m.inputAttachments)

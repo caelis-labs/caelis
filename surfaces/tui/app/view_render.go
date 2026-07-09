@@ -758,32 +758,35 @@ func (m *Model) footerContextText() string {
 	return text
 }
 
+// composeStyledFooter lays out a left/right footer row inside width columns.
+// Horizontal inset is applied by the caller (StatusInset via lipgloss Padding
+// on status/hint rows) so content stays on the same baseline as the composer
+// and transcript (InputInset / GutterNarrative).
 func composeStyledFooter(width int, left string, right string) string {
 	left = strings.TrimSpace(left)
 	right = strings.TrimSpace(right)
 	if width <= 0 {
 		return ""
 	}
-	width = max(width-4, 0)
 	leftWidth := lipgloss.Width(left)
 	rightWidth := lipgloss.Width(right)
 	if left == "" && right == "" {
-		return "  " + strings.Repeat(" ", width) + "  "
+		return strings.Repeat(" ", width)
 	}
 	if left == "" {
 		if rightWidth >= width {
-			return "  " + right + "  "
+			return right
 		}
-		return "  " + strings.Repeat(" ", width-rightWidth) + right + "  "
+		return strings.Repeat(" ", width-rightWidth) + right
 	}
 	if right == "" {
 		if leftWidth >= width {
-			return "  " + left + "  "
+			return left
 		}
-		return "  " + left + strings.Repeat(" ", width-leftWidth) + "  "
+		return left + strings.Repeat(" ", width-leftWidth)
 	}
 	gap := max(width-leftWidth-rightWidth, 1)
-	return "  " + left + strings.Repeat(" ", gap) + right + "  "
+	return left + strings.Repeat(" ", gap) + right
 }
 
 func fitHeaderRowParts(width int, workspace string, model string) (string, string) {

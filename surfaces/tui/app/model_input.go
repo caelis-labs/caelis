@@ -135,8 +135,9 @@ func (m *Model) mouseInInputArea(mouse tea.Mouse) bool {
 	if y < startY || y >= startY+height {
 		return false
 	}
-	left := m.mainColumnX() + inputHorizontalInset
-	right := m.mainColumnX() + m.fixedRowWidth() - inputHorizontalInset
+	outer := m.composerOuterInset()
+	left := m.mainColumnX() + outer
+	right := m.mainColumnX() + m.fixedRowWidth() - outer
 	return mouse.X >= left && mouse.X < right
 }
 
@@ -167,9 +168,7 @@ func (m *Model) scrollComposerInputBy(delta int) bool {
 		return false
 	}
 	m.moveTextareaCursorToIndex(targetIndex)
-	m.syncInputFromTextarea()
-	refreshed := m.buildComposeInputLayout()
-	m.ensureComposerRowOffsetForCursor(refreshed.layout.cursorRow, refreshed.layout.totalRows)
+	m.syncInputFromTextareaAndFollow()
 	return true
 }
 
@@ -702,7 +701,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.shouldUseTextareaVerticalNavigation(-1) {
 			var cmd tea.Cmd
 			m.textarea, cmd = m.textarea.Update(msg)
-			m.syncInputFromTextarea()
+			m.syncInputFromTextareaAndFollow()
 			return m, cmd
 		}
 		if !m.turnRunning() && len(m.history) > 0 {
@@ -724,7 +723,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.shouldUseTextareaVerticalNavigation(1) {
 			var cmd tea.Cmd
 			m.textarea, cmd = m.textarea.Update(msg)
-			m.syncInputFromTextarea()
+			m.syncInputFromTextareaAndFollow()
 			return m, cmd
 		}
 		if !m.turnRunning() && m.historyIndex != -1 {
@@ -736,7 +735,6 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.restoreHistoryEntry(m.historyDraft, m.historyDraftAttachments)
 				m.historyDraft = ""
 				m.historyDraftAttachments = nil
-				m.adjustTextareaHeight()
 			}
 		}
 		return m, nil
@@ -774,34 +772,37 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case key.Matches(msg, m.keys.Send):
-		line, attachments := submissionInput(m.textarea.Value(), m.inputAttachments)
-		if line == "" && len(attachments) == 0 {
+		execLine, displayLine, fileAttachments := m.prepareComposerSubmission()
+		if execLine == "" && len(fileAttachments) == 0 {
 			return m, nil
 		}
-		mode := m.submissionModeForLine(line)
+		mode := m.submissionModeForLine(execLine)
 		if m.turnRunning() {
-			if m.isConfiguredSlashControlLine(line) && mode != SubmissionModeOverlay {
+			if m.isConfiguredSlashControlLine(execLine) && mode != SubmissionModeOverlay {
 				return m, m.showHint("slash commands are unavailable while running", hintOptions{
 					priority:       HintPriorityHigh,
 					clearOnMessage: true,
 					clearAfter:     copyHintDuration,
 				})
 			}
-			return m.submitLineWithDisplayAndAttachments(line, m.displayLineWithInputAttachments(line, attachments), inputAttachmentsToSubmission(attachments))
+			return m.submitLineWithDisplayAndAttachmentsOptions(execLine, displayLine, fileAttachments, submitLineOptions{
+				recordHistory: true,
+			})
 		}
-		m.setInputAttachments(attachments)
-		if (line == "/connect" || strings.HasPrefix(line, "/connect ")) && m.isCommandAvailable("connect") {
+		if (execLine == "/connect" || strings.HasPrefix(execLine, "/connect ")) && m.isCommandAvailable("connect") {
 			if def := m.findWizard("connect"); def != nil {
-				query := strings.TrimSpace(strings.TrimPrefix(line, "/connect"))
+				query := strings.TrimSpace(strings.TrimPrefix(execLine, "/connect"))
 				m.startWizardWithQuery(def, query)
 				return m, nil
 			}
 			return m.submitLine("/connect")
 		}
-		if m.tryOpenSlashArgPicker(line) {
+		if m.tryOpenSlashArgPicker(execLine) {
 			return m, nil
 		}
-		return m.submitLine(line)
+		return m.submitLineWithDisplayAndAttachmentsOptions(execLine, displayLine, fileAttachments, submitLineOptions{
+			recordHistory: true,
+		})
 
 	case key.Matches(msg, m.keys.ImagePaste):
 		if m.turnRunning() {
@@ -847,22 +848,25 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	default:
-		// Backspace should remove an attachment token when the visual cursor is
-		// sitting right after that token, before it edits surrounding text.
-		if !m.turnRunning() && m.attachmentCount > 0 &&
-			(msg.String() == "backspace" || msg.String() == "ctrl+h") &&
-			m.removeAttachmentAtCursor() {
-			m.dismissVisibleHint()
-			return m, nil
-		}
-		// Forward to textarea for general text input.
+		// Forward to textarea for general text input (and arrow-key navigation).
+		// Image/paste tokens are single sentinel runes in the value, so native
+		// Left/Right/Backspace treat them as one character.
 		before := m.textarea.Value()
+		beforeCursor := m.textareaCursorIndex()
 		var cmd tea.Cmd
 		m.textarea, cmd = m.textarea.Update(msg)
 		after := m.textarea.Value()
-		m.inputAttachments = adjustAttachmentOffsetsForTextEdit(m.inputAttachments, before, m.textarea.Value())
-		m.syncAttachmentSummary()
-		m.syncInputFromTextarea()
+		if before != after {
+			m.reconcileAttachmentsAfterEdit(before, after)
+			m.syncBackendAttachments()
+		}
+		// Follow cursor for both edits and pure caret moves (arrows) so the
+		// 4-row window stays pinned to the caret without click-to-place side effects.
+		if before != after || m.textareaCursorIndex() != beforeCursor {
+			m.syncInputFromTextareaAndFollow()
+		} else {
+			m.syncInputFromTextarea()
+		}
 
 		// Trigger @mention / $skill / slash overlays whenever the textarea value
 		// actually changed. Relying on key metadata alone is not robust across
@@ -1158,13 +1162,12 @@ func (m *Model) handlePaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
 	if m.btwOverlay != nil {
 		return m, nil
 	}
-	before := m.textarea.Value()
-	var cmd tea.Cmd
-	m.textarea, cmd = m.textarea.Update(msg)
-	m.inputAttachments = adjustAttachmentOffsetsForTextEdit(m.inputAttachments, before, m.textarea.Value())
-	m.syncAttachmentSummary()
-	m.syncInputFromTextarea()
-	return m, tea.Batch(cmd, m.requestCompletionRefresh())
+	text := normalizeClipboardText(msg.String())
+	if text == "" {
+		return m, nil
+	}
+	m.insertComposerTextOrCollapse(text)
+	return m, m.requestCompletionRefresh()
 }
 
 func (m *Model) insertComposerText(text string) {
@@ -1173,9 +1176,8 @@ func (m *Model) insertComposerText(text string) {
 	}
 	before := m.textarea.Value()
 	m.textarea.InsertString(text)
-	m.inputAttachments = adjustAttachmentOffsetsForTextEdit(m.inputAttachments, before, m.textarea.Value())
-	m.syncAttachmentSummary()
-	m.syncInputFromTextarea()
+	m.reconcileAttachmentsAfterEdit(before, m.textarea.Value())
+	m.syncInputFromTextareaAndFollow()
 }
 
 func (m *Model) pasteClipboardImage() (bool, error) {
@@ -1211,7 +1213,17 @@ func (m *Model) shouldFallbackTextPasteToImage(msg tea.KeyMsg) bool {
 }
 
 func (m *Model) submitLine(line string) (tea.Model, tea.Cmd) {
-	return m.submitLineWithDisplayAndAttachments(line, m.displayLineWithAttachments(line), inputAttachmentsToSubmission(m.inputAttachments))
+	// Slash/completion paths usually replace free-form text. When the line is
+	// still the live composer value, expand collapsed pastes for transcript.
+	if strings.TrimSpace(line) == strings.TrimSpace(m.textarea.Value()) {
+		execLine, displayLine, fileAttachments := m.prepareComposerSubmission()
+		return m.submitLineWithDisplayAndAttachmentsOptions(execLine, displayLine, fileAttachments, submitLineOptions{
+			recordHistory: true,
+		})
+	}
+	return m.submitLineWithDisplayAndAttachmentsOptions(strings.TrimSpace(line), m.displayLineWithAttachments(line), inputAttachmentsToSubmission(m.inputAttachments), submitLineOptions{
+		recordHistory: true,
+	})
 }
 
 func (m *Model) requestRunningInterrupt() (tea.Model, tea.Cmd) {
@@ -1295,7 +1307,7 @@ func (m *Model) submitLineWithDisplayAndAttachmentsOptions(execLine string, disp
 	}
 	m.setViewportFollowState(viewportFollowTail)
 
-	// Push to history.
+	// History stores expanded paste text + image attachments only.
 	if opts.recordHistory && mode != SubmissionModeOverlay {
 		m.recordHistoryEntry(strings.TrimSpace(execLine), attachmentsToInputAttachments(attachments))
 		m.historyIndex = -1

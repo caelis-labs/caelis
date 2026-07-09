@@ -57,8 +57,11 @@ const (
 	// Keep logs on the same baseline as narrative and diff/tool previews.
 	GutterLog = 2
 
-	// InputInset is the left indent for the composer input bar.
-	InputInset = 3
+	// InputInset is the left column where composer prompt text ("> ") begins.
+	// Sit one column right of the transcript marker baseline (GutterNarrative)
+	// so the input block reads as a slightly inset compose area without
+	// feeling left-shifted relative to conversation content.
+	InputInset = GutterNarrative + 1
 
 	// WelcomeLogoMinWidth is the terminal width at which the welcome block renders
 	// the block ASCII logo instead of the compact title line.
@@ -73,7 +76,7 @@ const (
 	OverlayBorderChromeWidth = 4
 
 	// StatusInset is the horizontal padding inside status/footer rows
-	// (applied via lipgloss Padding).
+	// (applied via lipgloss Padding). Match the composer prompt column.
 	StatusInset = InputInset
 
 	// ── Vertical rules per content type ────────────────────────────────

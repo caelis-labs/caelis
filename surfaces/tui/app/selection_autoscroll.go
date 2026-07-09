@@ -219,6 +219,8 @@ func (m *Model) scrollInputSelectionBy(delta int, mouse tea.Mouse) (bool, tea.Cm
 		return false, nil
 	}
 	m.composerRowOffset = newOffset
+	// Invalidate frame snapshot so mouse mapping uses the scrolled window.
+	m.composerViewSnapshot = nil
 	refreshed := m.buildComposeInputLayout()
 	point, ok := m.inputGlobalPointFromMouse(mouse, true)
 	if !ok {

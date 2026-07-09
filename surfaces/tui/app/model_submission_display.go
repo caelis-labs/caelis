@@ -73,24 +73,32 @@ func userDisplayLinesMatchForDedup(existing string, incoming string) bool {
 	if existingNormalized == incomingNormalized {
 		return true
 	}
-	existingWithoutImages := normalizeUserDisplayLine(stripImageDisplayTokens(existing))
-	incomingWithoutImages := normalizeUserDisplayLine(stripImageDisplayTokens(incoming))
-	return existingWithoutImages != "" && existingWithoutImages == incomingWithoutImages
+	existingWithoutTokens := normalizeUserDisplayLine(stripComposerDisplayTokens(existing))
+	incomingWithoutTokens := normalizeUserDisplayLine(stripComposerDisplayTokens(incoming))
+	return existingWithoutTokens != "" && existingWithoutTokens == incomingWithoutTokens
 }
 
-func stripImageDisplayTokens(text string) string {
+func stripComposerDisplayTokens(text string) string {
 	if text == "" {
 		return ""
 	}
 	var out strings.Builder
 	cursor := 0
 	for cursor < len(text) {
-		idx := strings.Index(text[cursor:], "[image")
-		if idx < 0 {
+		nextImage := strings.Index(text[cursor:], "[image")
+		nextPaste := strings.Index(strings.ToLower(text[cursor:]), "[pasted")
+		var idx int
+		switch {
+		case nextImage < 0 && nextPaste < 0:
 			out.WriteString(text[cursor:])
-			break
+			return out.String()
+		case nextImage < 0:
+			idx = cursor + nextPaste
+		case nextPaste < 0:
+			idx = cursor + nextImage
+		default:
+			idx = cursor + min(nextImage, nextPaste)
 		}
-		idx += cursor
 		out.WriteString(text[cursor:idx])
 		end := strings.Index(text[idx:], "]")
 		if end < 0 {
@@ -99,7 +107,7 @@ func stripImageDisplayTokens(text string) string {
 		}
 		tokenEnd := idx + end + 1
 		token := text[idx:tokenEnd]
-		if isImageDisplayToken(token) {
+		if isComposerDisplayToken(token) {
 			out.WriteByte(' ')
 			cursor = tokenEnd
 			continue
@@ -110,10 +118,26 @@ func stripImageDisplayTokens(text string) string {
 	return out.String()
 }
 
+// stripImageDisplayTokens is retained for older call sites / tests.
+func stripImageDisplayTokens(text string) string {
+	return stripComposerDisplayTokens(text)
+}
+
+func isComposerDisplayToken(token string) bool {
+	token = strings.ToLower(strings.TrimSpace(token))
+	return isImageDisplayToken(token) || isPasteDisplayToken(token)
+}
+
 func isImageDisplayToken(token string) bool {
 	token = strings.ToLower(strings.TrimSpace(token))
 	return strings.HasPrefix(token, "[image #") && strings.HasSuffix(token, "]") ||
 		strings.HasPrefix(token, "[image:") && strings.HasSuffix(token, "]")
+}
+
+func isPasteDisplayToken(token string) bool {
+	token = strings.ToLower(strings.TrimSpace(token))
+	return strings.HasPrefix(token, "[pasted:") && strings.HasSuffix(token, "]") ||
+		strings.HasPrefix(token, "[pasted ") && strings.HasSuffix(token, "]")
 }
 
 func (m *Model) displayLineWithAttachments(line string) string {
@@ -121,12 +145,8 @@ func (m *Model) displayLineWithAttachments(line string) string {
 }
 
 func (m *Model) displayLineWithInputAttachments(line string, attachments []inputAttachment) string {
-	return composeDisplayWithToken(line, attachments, func(index int, name string) string {
-		name = strings.TrimSpace(name)
-		if name == "" {
-			return ""
-		}
-		return imageAttachmentToken(index)
+	return composeDisplayWithToken(line, attachments, func(item inputAttachment, imageIndex int) string {
+		return strings.TrimSpace(attachmentDisplayToken(item, imageIndex))
 	})
 }
 

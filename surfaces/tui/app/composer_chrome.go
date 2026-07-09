@@ -7,7 +7,11 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-const containerHorizontalPadding = 2
+// containerHorizontalPadding is the inner left/right padding inside the UserBg
+// composer chrome. A positive value is intentional: the gray bar is slightly
+// wider than the ">" prompt. Combined with composerOuterInset it keeps the
+// prompt column on InputInset (GutterNarrative+1) instead of stacking past it.
+const containerHorizontalPadding = 1
 
 // composerChrome captures UserBg container padding applied around the composer.
 type composerChrome struct {
@@ -49,12 +53,29 @@ func (c composerChrome) topRows() int {
 	return 0
 }
 
-func (m *Model) composerContainerWidth() int {
-	return m.fixedRowWidth() - (inputHorizontalInset * 2)
+// composerOuterInset is the left/right margin outside the UserBg container (or
+// around the plain input when chrome is inactive). outer + chrome pad always
+// equals InputInset so the prompt sits one column right of the transcript
+// gutter while the gray bar stays slightly wider than the ">".
+func (m *Model) composerOuterInset() int {
+	if m == nil {
+		return inputHorizontalInset
+	}
+	pad := m.composerChrome().horizontalInset()
+	if pad >= inputHorizontalInset {
+		return 0
+	}
+	return inputHorizontalInset - pad
 }
 
+func (m *Model) composerContainerWidth() int {
+	return m.fixedRowWidth() - (m.composerOuterInset() * 2)
+}
+
+// composerInputColumnOffset is the screen column where composer prompt text
+// begins (relative to the main column). Lands on InputInset (GutterNarrative+1).
 func (m *Model) composerInputColumnOffset() int {
-	return inputHorizontalInset + m.composerChrome().horizontalInset()
+	return m.composerOuterInset() + m.composerChrome().horizontalInset()
 }
 
 func (m *Model) wrapInputBarInContainer(text string) string {
@@ -107,6 +128,6 @@ func (m *Model) wrapInputBarInContainer(text string) string {
 
 func (m *Model) finalizeInputBarRender(rendered string) string {
 	wrapped := m.wrapInputBarInContainer(rendered)
-	insetted := insetRenderedBlock(wrapped, inputHorizontalInset)
+	insetted := insetRenderedBlock(wrapped, m.composerOuterInset())
 	return protectWideCellRepaintBlock(insetted, m.fixedRowWidth())
 }

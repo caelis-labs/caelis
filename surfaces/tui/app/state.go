@@ -283,9 +283,15 @@ const (
 	fixedSelectionFooter fixedSelectionArea = "footer"
 )
 
+// inputAttachment is metadata for a sentinel rune in the textarea value.
+// Each token has a stable ID encoded into a Private-Use sentinel so deletes
+// mid-list cannot rebind the wrong payload. Images use Name; pastes use Content.
 type inputAttachment struct {
-	Name   string
-	Offset int
+	ID      uint32
+	Kind    attachmentKind
+	Name    string
+	Offset  int    // rune index of the sentinel in the textarea value
+	Content string // full paste body when Kind == attachmentKindPaste
 }
 
 type planEntryState struct {
