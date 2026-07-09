@@ -114,6 +114,9 @@ func decideCommand(input policy.ToolContext, def sandbox.Constraints, modeName s
 		}
 	}
 	if commandHostApprovalRequired(req, input.Sandbox) {
+		if reason := req.explicitEscalationDenyReason(); reason != "" {
+			return deny(reason), nil
+		}
 		return askEscalationApproval(input, req.withEscalation())
 	}
 	return allow(def), nil
@@ -364,7 +367,7 @@ func ensurePathsOutsideDefaultHiddenRoots(paths []string, approvedRoots []string
 			continue
 		}
 		if withinAnyRoot(target, defaultHiddenUserRoots()) {
-			return fmt.Errorf("%s target %q is under a sensitive user configuration path; rerun the specific operation with sandbox_permissions=require_escalated if it is required", action, one)
+			return fmt.Errorf("%s target %q is under a sensitive user configuration path; rerun the specific operation with sandbox_permissions=require_escalated and a non-empty justification if it is required", action, one)
 		}
 	}
 	return nil

@@ -25,6 +25,19 @@ func (r commandSandboxRequest) withEscalation() commandSandboxRequest {
 	return r
 }
 
+// explicitEscalationDenyReason returns a deny reason when the agent requested
+// require_escalated without a usable justification. Host-default backends that
+// force approval without require_escalated are not covered here.
+func (r commandSandboxRequest) explicitEscalationDenyReason() string {
+	if r.SandboxPermissions != commandSandboxPermissionRequireEscalated {
+		return ""
+	}
+	if r.Justification != "" {
+		return ""
+	}
+	return "require_escalated requires justification: state the command intent, why sandbox/default permissions are insufficient, and how it serves the user task"
+}
+
 func parseCommandSandboxRequest(input policy.ToolContext) (commandSandboxRequest, error) {
 	args, err := policy.CallArgs(input.Call)
 	if err != nil {

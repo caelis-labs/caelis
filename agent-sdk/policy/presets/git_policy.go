@@ -74,7 +74,7 @@ func classifyGitCommand(git gitCommand) gitCommandClassification {
 		return gitCommandClassification{
 			Policy: gitPolicyDenyInSandbox,
 			Reason: fmt.Sprintf(
-				"Denied: %s may write Git metadata under .git. Retry the same command with sandbox_permissions=require_escalated if it is required.",
+				"Denied: %s may write Git metadata under .git. Retry the same command with sandbox_permissions=require_escalated and a non-empty justification if it is required.",
 				gitDisplayCommand(git),
 			),
 		}

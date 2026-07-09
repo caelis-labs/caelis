@@ -185,9 +185,9 @@ func builtInPermissionBoundariesPrompt() string {
 	return strings.Join([]string{
 		"## Execution And Approval",
 		"",
-		"- Start from the restricted sandbox and current permissions.",
-		"- For a task-necessary command that cannot complete there, request Host execution for that command with `sandbox_permissions=require_escalated` and a clear reason.",
-		"- Do not bypass or repair sandbox restrictions after permission or lock failures; retry only the necessary original operation with escalation, narrow the operation, or stop for user input.",
+		"- Prefer the restricted sandbox; request Host only when a command truly needs it for the task.",
+		"- Every `sandbox_permissions=require_escalated` requires a specific `justification` (intent, why sandbox is insufficient, task link). Do not escalate by habit from earlier allows.",
+		"- Do not bypass or repair sandbox restrictions after permission or lock failures; escalate the original necessary command with justification, narrow the operation, or stop for user input.",
 	}, "\n")
 }
 

@@ -297,6 +297,11 @@ func TestGuardianPolicyPromptUsesGeneralRecoveryBoundary(t *testing.T) {
 	for _, want := range []string{
 		"Broad cleanup, reset, recursive delete, or state-discarding actions are high or critical",
 		"Permission or lock recovery does not authorize broader cleanup, reset, delete, ACL, or mode changes",
+		"# Host Escalation",
+		"require_escalated is a privilege request",
+		"DENY missing, empty, generic, boilerplate, or unrelated justifications",
+		"If host necessity is doubtful, prefer DENY",
+		"Prior host allows do not pre-authorize later commands",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("guardian policy prompt missing %q:\n%s", want, prompt)

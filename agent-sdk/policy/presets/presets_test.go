@@ -518,7 +518,7 @@ func TestDefaultModeDeniesGitMetadataCommandsInSandbox(t *testing.T) {
 			if decision.Action != policy.ActionDeny {
 				t.Fatalf("Action = %q, want deny (reason=%q)", decision.Action, decision.Reason)
 			}
-			for _, want := range []string{"Denied:", tt.denied, "may write Git metadata under .git", "sandbox_permissions=require_escalated"} {
+			for _, want := range []string{"Denied:", tt.denied, "may write Git metadata under .git", "sandbox_permissions=require_escalated", "justification"} {
 				if !strings.Contains(decision.Reason, want) {
 					t.Fatalf("Reason = %q, want substring %q", decision.Reason, want)
 				}
@@ -676,24 +676,46 @@ func TestDefaultModeDoesNotClassifyCommandTextAsDangerous(t *testing.T) {
 	}
 }
 
-func TestDefaultModeExplicitEscalationCanOmitJustification(t *testing.T) {
+func TestDefaultModeExplicitEscalationRequiresJustification(t *testing.T) {
 	t.Parallel()
 
-	decision, err := AutoReviewMode().DecideTool(context.Background(), commandCtxWithArgs(map[string]any{
-		"command":             "go test ./...",
-		"sandbox_permissions": "require_escalated",
-	}))
-	if err != nil {
-		t.Fatalf("DecideTool() error = %v", err)
-	}
-	if decision.Action != policy.ActionAskApproval {
-		t.Fatalf("Action = %q, want ask_approval", decision.Action)
-	}
-	if decision.Constraints.Route != sandbox.RouteHost {
-		t.Fatalf("Constraints.Route = %q, want host", decision.Constraints.Route)
-	}
-	if _, ok := decision.Metadata["justification"]; ok {
-		t.Fatalf("Metadata[justification] = %#v, want omitted", decision.Metadata["justification"])
+	for _, tt := range []struct {
+		name string
+		args map[string]any
+	}{
+		{
+			name: "missing",
+			args: map[string]any{
+				"command":             "go test ./...",
+				"sandbox_permissions": "require_escalated",
+			},
+		},
+		{
+			name: "blank",
+			args: map[string]any{
+				"command":             "go test ./...",
+				"sandbox_permissions": "require_escalated",
+				"justification":       "   ",
+			},
+		},
+	} {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			decision, err := AutoReviewMode().DecideTool(context.Background(), commandCtxWithArgs(tt.args))
+			if err != nil {
+				t.Fatalf("DecideTool() error = %v", err)
+			}
+			if decision.Action != policy.ActionDeny {
+				t.Fatalf("Action = %q, want deny (reason=%q)", decision.Action, decision.Reason)
+			}
+			for _, want := range []string{"require_escalated requires justification", "why sandbox"} {
+				if !strings.Contains(decision.Reason, want) {
+					t.Fatalf("Reason = %q, want substring %q", decision.Reason, want)
+				}
+			}
+		})
 	}
 }
 

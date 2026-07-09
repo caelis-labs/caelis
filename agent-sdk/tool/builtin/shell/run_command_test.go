@@ -26,7 +26,7 @@ func TestRunCommandDefinitionExposesMinimalArguments(t *testing.T) {
 	if definition.Name != RunCommandToolName {
 		t.Fatalf("Name = %q, want %q", definition.Name, RunCommandToolName)
 	}
-	for _, required := range []string{"specified workdir", "tests, builds", "Host execution"} {
+	for _, required := range []string{"specified workdir", "tests, builds", "Prefer default sandbox"} {
 		if !strings.Contains(definition.Description, required) {
 			t.Fatalf("Description missing %q: %q", required, definition.Description)
 		}
@@ -39,8 +39,8 @@ func TestRunCommandDefinitionExposesMinimalArguments(t *testing.T) {
 		"command":             "Command to execute.",
 		"workdir":             "Working directory for the command; defaults to the session cwd.",
 		"yield_time_ms":       "Wait before yielding async control.",
-		"sandbox_permissions": "Sandbox mode for this command only. use_default runs with default sandbox permissions; require_escalated requests Host execution for this task-necessary command or exact retry after sandbox/permission/lock denial.",
-		"justification":       "Short approval question for require_escalated; state what will run and why sandbox/current permissions are insufficient.",
+		"sandbox_permissions": "Per-command sandbox mode. use_default is preferred; require_escalated requests Host when this command needs it (or exact retry after sandbox denial). Prior escalations do not authorize later commands.",
+		"justification":       "Required with require_escalated: command intent, why sandbox is insufficient, task link. Empty/blank is rejected; vague or unrelated reasons are likely denied on review.",
 	}
 	if len(properties) != len(wantDescriptions) {
 		t.Fatalf("properties = %#v, want only %v", properties, sortedRunCommandPropertyKeys(wantDescriptions))
@@ -554,7 +554,7 @@ func TestRunCommandCallAddsGitIndexLockSandboxHint(t *testing.T) {
 	if got, _ := payload["hint_code"].(string); got != commanddiag.CodeGitIndexLockSandboxDenied {
 		t.Fatalf("hint_code = %q, want %q", got, commanddiag.CodeGitIndexLockSandboxDenied)
 	}
-	if got, _ := payload["hint"].(string); got != "Git index write is blocked by sandbox permissions; retry the original Git command with sandbox_permissions=require_escalated." {
+	if got, _ := payload["hint"].(string); got != "Git index write is blocked by sandbox permissions; retry the original Git command with sandbox_permissions=require_escalated and a non-empty justification." {
 		t.Fatalf("hint = %q, want short Git index sandbox guidance", got)
 	}
 }

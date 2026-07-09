@@ -55,7 +55,7 @@ func NewRunCommand(cfg RunCommandConfig) (*RunCommandTool, error) {
 func (t *RunCommandTool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        RunCommandToolName,
-		Description: "Run a shell command from the session workspace or a specified workdir. Use this for repository inspection, tests, builds, formatting checks, git status/diff inspection, and commands that cannot be expressed by file tools. Do not prefix with cd; set workdir instead. Use yield_time_ms for long-running commands. Commands use default sandbox permissions unless this call requests task-necessary Host execution.",
+		Description: "Run a shell command from the session workspace or a specified workdir. Use this for repository inspection, tests, builds, formatting checks, git status/diff inspection, and commands that cannot be expressed by file tools. Do not prefix with cd; set workdir instead. Use yield_time_ms for long-running commands. Prefer default sandbox permissions; request Host only when this command truly needs it.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -75,12 +75,12 @@ func (t *RunCommandTool) Definition() tool.Definition {
 				},
 				"sandbox_permissions": map[string]any{
 					"type":        "string",
-					"description": "Sandbox mode for this command only. use_default runs with default sandbox permissions; require_escalated requests Host execution for this task-necessary command or exact retry after sandbox/permission/lock denial.",
+					"description": "Per-command sandbox mode. use_default is preferred; require_escalated requests Host when this command needs it (or exact retry after sandbox denial). Prior escalations do not authorize later commands.",
 					"enum":        []string{"use_default", "require_escalated"},
 				},
 				"justification": map[string]any{
 					"type":        "string",
-					"description": "Short approval question for require_escalated; state what will run and why sandbox/current permissions are insufficient.",
+					"description": "Required with require_escalated: command intent, why sandbox is insufficient, task link. Empty/blank is rejected; vague or unrelated reasons are likely denied on review.",
 				},
 			},
 			"required":             []string{"command"},

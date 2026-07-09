@@ -18,13 +18,15 @@ const (
 )
 
 const (
-	hintWindowsMSYSSSHSignalPipe = "Git for Windows MSYS ssh appears incompatible with the Windows restricted-token sandbox. Retry with GIT_SSH_COMMAND=C:/Windows/System32/OpenSSH/ssh.exe if that binary exists; otherwise retry the same necessary network command with sandbox_permissions=require_escalated."
-	hintWindowsSChannel          = "Windows SChannel TLS can fail under the restricted-token sandbox. Prefer Python/Node/OpenSSL-backed HTTPS or native alternatives; otherwise retry the same necessary network command with sandbox_permissions=require_escalated."
-	hintGitIndexLockSandbox      = "Git index write is blocked by sandbox permissions; retry the original Git command with sandbox_permissions=require_escalated."
-	hintWindowsGitCredential     = "Git credential helpers can fail under the Windows restricted-token sandbox. Retry the same necessary Git command with sandbox_permissions=require_escalated."
-	hintGoPrivateDependency      = "Go private dependency resolution can hit Windows sandbox TLS or credential-helper limits. Retry the same Go dependency/test command with sandbox_permissions=require_escalated."
-	hintSandboxCacheDenied       = "A sandboxed tool could not write its cache path. Retry the same necessary command with sandbox_permissions=require_escalated, or clean/reset the sandbox cache if the redirected cache is corrupt."
-	hintWindowsSandboxACLDenied  = "Windows sandbox ACL preparation failed for a required foreground path. Retry the same necessary command with sandbox_permissions=require_escalated, then run `/doctor` or `caelis sandbox fix` when convenient."
+	hintEscalationRetry = "sandbox_permissions=require_escalated and a non-empty justification"
+
+	hintWindowsMSYSSSHSignalPipe = "Git for Windows MSYS ssh appears incompatible with the Windows restricted-token sandbox. Retry with GIT_SSH_COMMAND=C:/Windows/System32/OpenSSH/ssh.exe if that binary exists; otherwise retry the same necessary network command with " + hintEscalationRetry + "."
+	hintWindowsSChannel          = "Windows SChannel TLS can fail under the restricted-token sandbox. Prefer Python/Node/OpenSSL-backed HTTPS or native alternatives; otherwise retry the same necessary network command with " + hintEscalationRetry + "."
+	hintGitIndexLockSandbox      = "Git index write is blocked by sandbox permissions; retry the original Git command with " + hintEscalationRetry + "."
+	hintWindowsGitCredential     = "Git credential helpers can fail under the Windows restricted-token sandbox. Retry the same necessary Git command with " + hintEscalationRetry + "."
+	hintGoPrivateDependency      = "Go private dependency resolution can hit Windows sandbox TLS or credential-helper limits. Retry the same Go dependency/test command with " + hintEscalationRetry + "."
+	hintSandboxCacheDenied       = "A sandboxed tool could not write its cache path. Retry the same necessary command with " + hintEscalationRetry + ", or clean/reset the sandbox cache if the redirected cache is corrupt."
+	hintWindowsSandboxACLDenied  = "Windows sandbox ACL preparation failed for a required foreground path. Retry the same necessary command with " + hintEscalationRetry + ", then run `/doctor` or `caelis sandbox fix` when convenient."
 )
 
 type Input struct {
