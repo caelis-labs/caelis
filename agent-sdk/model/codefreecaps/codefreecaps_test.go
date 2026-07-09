@@ -13,10 +13,10 @@ func TestLookupKnownModels(t *testing.T) {
 		{model: "DeepSeek-V4-Flash-ctyun-oc", context: 112000, maxOutput: 16000, image: false, known: true},
 		{model: "deepseek-v4-flash-ctyun-oc", context: 112000, maxOutput: 16000, image: false, known: true},
 		{model: "GLM-4.7", context: 80000, maxOutput: 8000, image: false, known: true},
-		{model: "GLM-5-ctyun-oc", context: 112000, maxOutput: 16000, image: false, known: true},
 		{model: "GLM-5.1", context: 112000, maxOutput: 16000, image: false, known: true},
 		{model: "GLM-5.1-ctyun-oc", context: 112000, maxOutput: 16000, image: false, known: true},
 		{model: "Qwen3.5-122B-A10B", context: 112000, maxOutput: 16000, image: true, known: true},
+		{model: "GLM-5-ctyun-oc", context: 128000, maxOutput: 8000, image: false, known: false},
 		{model: "custom-codefree-model", context: 128000, maxOutput: 8000, image: false, known: false},
 	}
 	for _, tt := range tests {

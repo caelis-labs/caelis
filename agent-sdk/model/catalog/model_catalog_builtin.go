@@ -693,19 +693,6 @@ var builtinCatalog = []catalogEntry{
 	},
 	{
 		provider: "xiaomi",
-		pattern:  "mimo-v2-pro",
-		caps: ModelCapabilities{
-			ContextWindowTokens:    1048576,
-			MaxOutputTokens:        131072,
-			DefaultMaxOutputTokens: 32768,
-			SupportsToolCalls:      true,
-			SupportsReasoning:      true,
-			SupportsJSONOutput:     true,
-			SupportsImages:         false,
-		},
-	},
-	{
-		provider: "xiaomi",
 		pattern:  "mimo-v2.5",
 		caps: ModelCapabilities{
 			ContextWindowTokens:    1048576,
@@ -715,32 +702,6 @@ var builtinCatalog = []catalogEntry{
 			SupportsReasoning:      true,
 			SupportsJSONOutput:     true,
 			SupportsImages:         true,
-		},
-	},
-	{
-		provider: "xiaomi",
-		pattern:  "mimo-v2-omni",
-		caps: ModelCapabilities{
-			ContextWindowTokens:    262144,
-			MaxOutputTokens:        131072,
-			DefaultMaxOutputTokens: 32768,
-			SupportsToolCalls:      true,
-			SupportsReasoning:      true,
-			SupportsJSONOutput:     true,
-			SupportsImages:         true,
-		},
-	},
-	{
-		provider: "xiaomi",
-		pattern:  "mimo-v2-flash",
-		caps: ModelCapabilities{
-			ContextWindowTokens:    262144,
-			MaxOutputTokens:        65536,
-			DefaultMaxOutputTokens: 16384,
-			SupportsToolCalls:      true,
-			SupportsReasoning:      true,
-			SupportsJSONOutput:     true,
-			SupportsImages:         false,
 		},
 	},
 	// ── Volcengine Coding Plan ────────────────────────────────────────────

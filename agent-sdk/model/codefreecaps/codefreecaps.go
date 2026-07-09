@@ -54,14 +54,6 @@ var Models = []Model{
 		SupportsJSONOutput:     true,
 	},
 	{
-		ID:                     "GLM-5-ctyun-oc",
-		ContextWindowTokens:    112000,
-		MaxOutputTokens:        16000,
-		DefaultMaxOutputTokens: 16000,
-		SupportsToolCalls:      true,
-		SupportsJSONOutput:     true,
-	},
-	{
 		ID:                     "GLM-5.1",
 		ContextWindowTokens:    112000,
 		MaxOutputTokens:        16000,

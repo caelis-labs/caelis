@@ -256,8 +256,10 @@ func TestOllamaStaticDefaultsComeFromCatalog(t *testing.T) {
 
 func TestCodeFreeStaticModelsDoNotExposeReasoning(t *testing.T) {
 	models := ListCatalogModels("codefree")
-	if containsString(models, "DeepSeek-V3.1-Terminus") {
-		t.Fatalf("ListCatalogModels(codefree) = %#v, did not want retired DeepSeek-V3.1-Terminus", models)
+	for _, retired := range []string{"DeepSeek-V3.1-Terminus", "GLM-5-ctyun-oc"} {
+		if containsString(models, retired) {
+			t.Fatalf("ListCatalogModels(codefree) = %#v, did not want retired %q", models, retired)
+		}
 	}
 	tests := []struct {
 		model       string
@@ -267,7 +269,6 @@ func TestCodeFreeStaticModelsDoNotExposeReasoning(t *testing.T) {
 	}{
 		{model: "DeepSeek-V4-Flash-ctyun-oc", context: 112000, maxOutput: 16000, imageInputs: false},
 		{model: "GLM-4.7", context: 80000, maxOutput: 8000, imageInputs: false},
-		{model: "GLM-5-ctyun-oc", context: 112000, maxOutput: 16000, imageInputs: false},
 		{model: "GLM-5.1", context: 112000, maxOutput: 16000, imageInputs: false},
 		{model: "GLM-5.1-ctyun-oc", context: 112000, maxOutput: 16000, imageInputs: false},
 		{model: "Qwen3.5-122B-A10B", context: 112000, maxOutput: 16000, imageInputs: true},
@@ -323,13 +324,13 @@ func TestDeepSeekStaticModelsExposeThinkingEfforts(t *testing.T) {
 
 func TestMimoStaticModelsMatchBuiltInCatalog(t *testing.T) {
 	models := ListCatalogModels("xiaomi")
-	wantModels := []string{"mimo-v2.5-pro", "mimo-v2-pro", "mimo-v2.5", "mimo-v2-omni", "mimo-v2-flash"}
+	wantModels := []string{"mimo-v2.5-pro", "mimo-v2.5"}
 	for _, model := range wantModels {
 		if !containsString(models, model) {
 			t.Fatalf("ListCatalogModels(xiaomi) = %#v, missing %q", models, model)
 		}
 	}
-	for _, model := range []string{"mimo-v2-reasoner", "MiMo-VL-7B-RL"} {
+	for _, model := range []string{"mimo-v2-pro", "mimo-v2-omni", "mimo-v2-flash", "mimo-v2-reasoner", "MiMo-VL-7B-RL"} {
 		if containsString(models, model) {
 			t.Fatalf("ListCatalogModels(xiaomi) = %#v, did not want stale model %q", models, model)
 		}
@@ -342,10 +343,7 @@ func TestMimoStaticModelsMatchBuiltInCatalog(t *testing.T) {
 		imageInputs bool
 	}{
 		{model: "mimo-v2.5-pro", context: 1048576, maxOutput: 131072},
-		{model: "mimo-v2-pro", context: 1048576, maxOutput: 131072},
 		{model: "mimo-v2.5", context: 1048576, maxOutput: 131072, imageInputs: true},
-		{model: "mimo-v2-omni", context: 262144, maxOutput: 131072, imageInputs: true},
-		{model: "mimo-v2-flash", context: 262144, maxOutput: 65536},
 	}
 	for _, tc := range tests {
 		caps, ok := LookupModelCapabilities("xiaomi", tc.model)
