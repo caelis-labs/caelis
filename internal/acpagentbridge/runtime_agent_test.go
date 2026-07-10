@@ -915,10 +915,13 @@ func (s testPromptStreamSubscriber) SubscribeStream(_ context.Context, env event
 }
 
 type recordingPromptCallbacks struct {
+	mu            sync.Mutex
 	notifications []acp.SessionNotification
 }
 
 func (c *recordingPromptCallbacks) SessionUpdate(_ context.Context, notification acp.SessionNotification) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.notifications = append(c.notifications, notification)
 	return nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"iter"
+	"reflect"
 	"slices"
 	"testing"
 	"time"
@@ -20,7 +21,103 @@ import (
 	runtimeacp "github.com/caelis-labs/caelis/internal/acpagentbridge"
 	"github.com/caelis-labs/caelis/protocol/acp"
 	"github.com/caelis-labs/caelis/protocol/acp/fixture"
+	"github.com/caelis-labs/caelis/protocol/acp/projector"
+	acpsemantic "github.com/caelis-labs/caelis/protocol/acp/semantic"
 )
+
+func TestBuiltInProjectionAndExternalWireShareSDKSemantics(t *testing.T) {
+	t.Parallel()
+
+	assistant := model.NewTextMessage(model.RoleAssistant, "hello")
+	events := []*session.Event{
+		{
+			Type:    session.EventTypeAssistant,
+			Text:    "hello",
+			Message: &assistant,
+			Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
+				SessionUpdate: acp.UpdateAgentMessage,
+				MessageID:     "message-1",
+				Meta:          map[string]any{"provider": "built-in"},
+			}},
+		},
+		{
+			Type: session.EventTypeToolCall,
+			Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
+				SessionUpdate: acp.UpdateToolCall,
+				ToolCallID:    "call-1",
+				Title:         "Read file",
+				Kind:          acp.ToolKindRead,
+				Status:        acp.ToolStatusPending,
+				RawInput:      map[string]any{"path": "README.md"},
+			}},
+		},
+		{
+			Type: session.EventTypeToolResult,
+			Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
+				SessionUpdate: acp.UpdateToolCallInfo,
+				ToolCallID:    "call-1",
+				Status:        acp.ToolStatusCompleted,
+				RawOutput:     map[string]any{"content": "done"},
+			}},
+		},
+		{
+			Type: session.EventTypePlan,
+			Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
+				SessionUpdate: acp.UpdatePlan,
+				Entries: []session.ProtocolPlanEntry{{
+					Content: "Run tests", Status: "in_progress", Priority: "high",
+				}},
+			}},
+		},
+	}
+
+	for _, event := range events {
+		updates, err := (projector.EventProjector{}).ProjectEvent(event)
+		if err != nil {
+			t.Fatalf("ProjectEvent(%s) error = %v", event.Type, err)
+		}
+		if len(updates) != 1 {
+			t.Fatalf("ProjectEvent(%s) updates = %d, want 1", event.Type, len(updates))
+		}
+		builtIn, err := acpsemantic.DecodeUpdate(updates[0])
+		if err != nil {
+			t.Fatalf("DecodeUpdate(built-in %s) error = %v", event.Type, err)
+		}
+		externalWire := externalWireRoundTrip(t, updates[0])
+		external, err := acpsemantic.DecodeUpdate(externalWire)
+		if err != nil {
+			t.Fatalf("DecodeUpdate(external %s) error = %v", event.Type, err)
+		}
+		if !reflect.DeepEqual(external, builtIn) {
+			t.Fatalf("external %s semantics = %#v, built-in = %#v", event.Type, external, builtIn)
+		}
+	}
+}
+
+func externalWireRoundTrip(t *testing.T, update acp.Update) acp.Update {
+	t.Helper()
+	raw, err := json.Marshal(update)
+	if err != nil {
+		t.Fatalf("json.Marshal(%T) error = %v", update, err)
+	}
+	var target acp.Update
+	switch update.(type) {
+	case acp.ContentChunk:
+		target = &acp.ContentChunk{}
+	case acp.ToolCall:
+		target = &acp.ToolCall{}
+	case acp.ToolCallUpdate:
+		target = &acp.ToolCallUpdate{}
+	case acp.PlanUpdate:
+		target = &acp.PlanUpdate{}
+	default:
+		t.Fatalf("unsupported conformance update %T", update)
+	}
+	if err := json.Unmarshal(raw, target); err != nil {
+		t.Fatalf("json.Unmarshal(%T) error = %v", update, err)
+	}
+	return target
+}
 
 func TestRuntimeAgentConformanceReplayOrdering(t *testing.T) {
 	agent, sessions := newTestRuntimeAgent(t, staticModel{text: "ok"})

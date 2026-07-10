@@ -31,6 +31,21 @@ Native ACP means semantic equivalence, not mandatory JSON-RPC serialization for
 in-process Agents. Canonical message and tool payloads remain the model-context
 truth; an ACP update or surface envelope is not a replacement for them.
 
+## Semantic and Wire Ownership
+
+`agent-sdk/session.ProtocolUpdate`, `ProtocolApproval`, and their nested DTOs
+are the single normalized semantic owner shared by built-in and external
+Agents. They contain no JSON-RPC transport requirement and the SDK does not
+import the product ACP implementation.
+
+`protocol/acp/schema` owns only public ACP wire shapes, including JSON field
+names and patch-style pointer fields. `protocol/acp/semantic` is the adapter
+between those wire DTOs and the SDK owner. External ingress decodes through
+that adapter before producing session events; projection encodes through it
+before adding product display policy or documented `_meta` extensions. This
+keeps compatibility, terminal rendering, and transport details outside the
+SDK without maintaining a second semantic schema.
+
 ## Orchestration Ownership
 
 Built-in and external Agents differ in transport, process lifecycle, trust, and

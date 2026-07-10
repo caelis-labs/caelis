@@ -7,10 +7,10 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpconvert"
 	"github.com/caelis-labs/caelis/protocol/acp/client"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	acpschema "github.com/caelis-labs/caelis/protocol/acp/schema"
+	acpsemantic "github.com/caelis-labs/caelis/protocol/acp/semantic"
 )
 
 type VisibilityPolicy func(updateType string, eventType session.EventType) session.Visibility
@@ -87,28 +87,23 @@ func normalizeContentChunk(chunk client.ContentChunk, opts Options) *session.Eve
 	event := baseEvent(updateType, eventType, text, actor, opts)
 	msg := messageForContentChunk(chunk, text)
 	event.Message = &msg
+	update, err := acpsemantic.DecodeRawContentUpdate(updateType, chunk.Content, chunk.MessageID, chunk.Meta)
+	if err != nil {
+		return nil
+	}
 	event.Protocol = normalizedProtocol(&session.EventProtocol{
-		Update: &session.ProtocolUpdate{
-			SessionUpdate: updateType,
-			Content:       append(json.RawMessage(nil), chunk.Content...),
-			MessageID:     strings.TrimSpace(chunk.MessageID),
-			Meta:          metautil.CloneMap(chunk.Meta),
-		},
+		Update: update,
 	})
 	return event
 }
 
 func normalizeToolCall(call client.ToolCall, opts Options) *session.Event {
 	updateType := strings.TrimSpace(call.SessionUpdate)
-	protocolTool := &session.ProtocolToolCall{
-		ID:       strings.TrimSpace(call.ToolCallID),
-		Name:     acpconvert.ToolDisplayName(call.Kind, call.Title),
-		Kind:     strings.TrimSpace(call.Kind),
-		Title:    strings.TrimSpace(call.Title),
-		Status:   firstNonEmpty(strings.TrimSpace(call.Status), acpschema.ToolStatusPending),
-		RawInput: acpconvert.ToolRawInput(call.RawInput),
-		Content:  acpconvert.ToolContent(call.Content),
+	protocolUpdate, err := acpsemantic.DecodeUpdate(call)
+	if err != nil || protocolUpdate == nil {
+		return nil
 	}
+	protocolUpdate.Status = firstNonEmpty(protocolUpdate.Status, acpschema.ToolStatusPending)
 	event := baseEvent(
 		updateType,
 		session.EventTypeToolCall,
@@ -116,9 +111,7 @@ func normalizeToolCall(call client.ToolCall, opts Options) *session.Event {
 		session.CloneActorRef(opts.Actor),
 		opts,
 	)
-	update := acpconvert.ToolProtocolUpdate(updateType, protocolTool, call.Meta)
-	update.Locations = protocolLocations(call.Locations)
-	event.Protocol = normalizedProtocol(&session.EventProtocol{Update: update})
+	event.Protocol = normalizedProtocol(&session.EventProtocol{Update: protocolUpdate})
 	if event.Visibility == session.VisibilityCanonical {
 		return nil
 	}
@@ -129,15 +122,9 @@ func normalizeToolCallUpdate(update client.ToolCallUpdate, opts Options) *sessio
 	updateType := strings.TrimSpace(update.SessionUpdate)
 	status := derefString(update.Status)
 	eventType := toolEventTypeFromStatus(status)
-	protocolTool := &session.ProtocolToolCall{
-		ID:        strings.TrimSpace(update.ToolCallID),
-		Name:      acpconvert.ToolDisplayName(derefString(update.Kind), derefString(update.Title)),
-		Kind:      derefString(update.Kind),
-		Title:     derefString(update.Title),
-		Status:    status,
-		RawInput:  acpconvert.ToolRawInput(update.RawInput),
-		RawOutput: acpconvert.ToolRawOutput(update.RawOutput),
-		Content:   acpconvert.ToolContent(update.Content),
+	protocolUpdate, err := acpsemantic.DecodeUpdate(update)
+	if err != nil || protocolUpdate == nil {
+		return nil
 	}
 	event := baseEvent(
 		updateType,
@@ -146,8 +133,6 @@ func normalizeToolCallUpdate(update client.ToolCallUpdate, opts Options) *sessio
 		session.CloneActorRef(opts.Actor),
 		opts,
 	)
-	protocolUpdate := acpconvert.ToolProtocolUpdate(updateType, protocolTool, update.Meta)
-	protocolUpdate.Locations = protocolLocations(update.Locations)
 	event.Protocol = normalizedProtocol(&session.EventProtocol{Update: protocolUpdate})
 	if event.Visibility == session.VisibilityCanonical {
 		return nil
@@ -157,6 +142,10 @@ func normalizeToolCallUpdate(update client.ToolCallUpdate, opts Options) *sessio
 
 func normalizePlanUpdate(update client.PlanUpdate, opts Options) *session.Event {
 	updateType := strings.TrimSpace(update.SessionUpdate)
+	protocolUpdate, err := acpsemantic.DecodeUpdate(update)
+	if err != nil || protocolUpdate == nil {
+		return nil
+	}
 	event := baseEvent(
 		updateType,
 		session.EventTypePlan,
@@ -164,12 +153,8 @@ func normalizePlanUpdate(update client.PlanUpdate, opts Options) *session.Event 
 		session.CloneActorRef(opts.Actor),
 		opts,
 	)
-	entries := planEntries(update.Entries)
 	event.Protocol = normalizedProtocol(&session.EventProtocol{
-		Update: &session.ProtocolUpdate{
-			SessionUpdate: updateType,
-			Entries:       entries,
-		},
+		Update: protocolUpdate,
 	})
 	if event.Visibility == session.VisibilityCanonical {
 		return nil
@@ -216,37 +201,6 @@ func messageForContentChunk(chunk client.ContentChunk, text string) model.Messag
 		return model.NewReasoningMessage(role, text, model.ReasoningVisibilityVisible)
 	}
 	return model.NewTextMessage(role, text)
-}
-
-func protocolLocations(in []client.ToolCallLocation) []session.ProtocolToolCallLocation {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make([]session.ProtocolToolCallLocation, 0, len(in))
-	for _, item := range in {
-		var line *int
-		if item.Line != nil {
-			value := *item.Line
-			line = &value
-		}
-		out = append(out, session.ProtocolToolCallLocation{
-			Path: strings.TrimSpace(item.Path),
-			Line: line,
-		})
-	}
-	return out
-}
-
-func planEntries(in []client.PlanEntry) []session.ProtocolPlanEntry {
-	out := make([]session.ProtocolPlanEntry, 0, len(in))
-	for _, item := range in {
-		out = append(out, session.ProtocolPlanEntry{
-			Content:  strings.TrimSpace(item.Content),
-			Status:   strings.TrimSpace(item.Status),
-			Priority: strings.TrimSpace(item.Priority),
-		})
-	}
-	return out
 }
 
 func normalizedProtocol(protocol *session.EventProtocol) *session.EventProtocol {

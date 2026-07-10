@@ -10,6 +10,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
+	acpsemantic "github.com/caelis-labs/caelis/protocol/acp/semantic"
 )
 
 type Update = schema.Update
@@ -410,20 +411,16 @@ func toolCallFromEventToolPayload(tool *session.EventTool) ToolCall {
 func toolCallFromProtocolUpdate(event *session.Event, update *session.ProtocolUpdate) ToolCall {
 	name := protocolToolNameForUpdate(event, update)
 	rawInput := cloneAnyMap(update.RawInput)
-	displayTerminalID, _ := display.DisplayTerminalID(update.ToolCallID, name)
-	content := session.ProtocolToolCallContentOf(update)
-	call := ToolCall{
-		SessionUpdate: UpdateToolCall,
-		ToolCallID:    strings.TrimSpace(update.ToolCallID),
-		Title:         firstNonEmpty(strings.TrimSpace(update.Title), display.SummarizeToolCallTitle(name, rawInput), strings.TrimSpace(name)),
-		Kind:          firstNonEmpty(strings.TrimSpace(update.Kind), display.ToolKindForName(name)),
-		Status:        firstNonEmpty(acpToolStatus(update.Status), ToolStatusPending),
-		RawInput:      cloneAnyMapPayload(rawInput),
-		RawOutput:     cloneAnyMapPayload(update.RawOutput),
-		Content:       projectToolContent(content, displayTerminalID),
-		Locations:     projectToolLocations(update.Locations),
-		Meta:          cloneAnyMap(update.Meta),
+	wire, err := acpsemantic.EncodeUpdate(update)
+	call, ok := wire.(schema.ToolCall)
+	if err != nil || !ok {
+		return ToolCall{SessionUpdate: UpdateToolCall}
 	}
+	call.Title = firstNonEmpty(strings.TrimSpace(call.Title), display.SummarizeToolCallTitle(name, rawInput), strings.TrimSpace(name))
+	call.Kind = firstNonEmpty(strings.TrimSpace(call.Kind), display.ToolKindForName(name))
+	call.Status = firstNonEmpty(acpToolStatus(call.Status), ToolStatusPending)
+	displayTerminalID, _ := display.DisplayTerminalID(call.ToolCallID, name)
+	call.Content = projectToolContent(session.ProtocolToolCallContentOf(update), displayTerminalID)
 	return withDisplayTerminal(call, name, rawInput)
 }
 
@@ -503,30 +500,29 @@ func toolCallUpdateFromProtocolUpdate(event *session.Event, update *session.Prot
 		return ToolCallUpdate{}, fmt.Errorf("protocol/acp/projector: tool update missing tool call id")
 	}
 	name := protocolToolNameForUpdate(event, update)
-	content := session.ProtocolToolCallContentOf(update)
-	displayTerminalID, _ := display.DisplayTerminalID(id, name)
-	out := ToolCallUpdate{
-		SessionUpdate: UpdateToolCallInfo,
-		ToolCallID:    id,
-		RawInput:      cloneAnyMapPayload(update.RawInput),
-		RawOutput:     cloneAnyMapPayload(update.RawOutput),
-		Content:       projectToolContent(content, displayTerminalID),
-		Locations:     projectToolLocations(update.Locations),
-		Meta:          cloneAnyMap(update.Meta),
+	wire, err := acpsemantic.EncodeUpdate(update)
+	if err != nil {
+		return ToolCallUpdate{}, err
 	}
-	if title := strings.TrimSpace(update.Title); title != "" {
+	out, ok := wire.(schema.ToolCallUpdate)
+	if !ok {
+		return ToolCallUpdate{}, fmt.Errorf("protocol/acp/projector: semantic codec returned %T for tool update", wire)
+	}
+	displayTerminalID, _ := display.DisplayTerminalID(id, name)
+	out.Content = projectToolContent(session.ProtocolToolCallContentOf(update), displayTerminalID)
+	if title := strings.TrimSpace(stringFromPtr(out.Title)); title != "" {
 		out.Title = stringPtr(title)
 	} else if title := display.SummarizeToolCallTitle(name, update.RawInput); title != "" {
 		out.Title = stringPtr(title)
 	}
-	kind := strings.TrimSpace(update.Kind)
+	kind := strings.TrimSpace(stringFromPtr(out.Kind))
 	if kind == "" && strings.TrimSpace(name) != "" {
 		kind = display.ToolKindForName(name)
 	}
 	if kind != "" {
 		out.Kind = stringPtr(kind)
 	}
-	if status := acpToolStatus(update.Status); status != "" {
+	if status := acpToolStatus(stringFromPtr(out.Status)); status != "" {
 		out.Status = stringPtr(status)
 	}
 	return withDisplayTerminalUpdate(out, id, name), nil
@@ -712,18 +708,23 @@ func planUpdateForEvent(event *session.Event) (PlanUpdate, bool) {
 }
 
 func planUpdateFromEntries(protocolEntries []session.ProtocolPlanEntry) PlanUpdate {
-	entries := make([]PlanEntry, 0, len(protocolEntries))
+	entries := make([]session.ProtocolPlanEntry, 0, len(protocolEntries))
 	for _, item := range protocolEntries {
-		entries = append(entries, PlanEntry{
+		entries = append(entries, session.ProtocolPlanEntry{
 			Content:  strings.TrimSpace(item.Content),
 			Status:   strings.TrimSpace(item.Status),
 			Priority: firstNonEmpty(strings.TrimSpace(item.Priority), "medium"),
 		})
 	}
-	return PlanUpdate{
+	wire, err := acpsemantic.EncodeUpdate(&session.ProtocolUpdate{
 		SessionUpdate: UpdatePlan,
 		Entries:       entries,
+	})
+	if err != nil {
+		return PlanUpdate{SessionUpdate: UpdatePlan}
 	}
+	update, _ := wire.(schema.PlanUpdate)
+	return update
 }
 
 func planUpdateFromPayload(payload session.EventPlanPayload) PlanUpdate {
