@@ -266,6 +266,11 @@ func TestSubagentControlAuthorizationUsesNeutralPrincipalNotProductSource(t *tes
 	}); err == nil || !strings.Contains(err.Error(), "unsupported control principal") {
 		t.Fatalf("unknown principal error = %v, want fail-closed rejection", err)
 	}
+	if _, err := runtime.tasks.Wait(ctx, activeSession.SessionRef, task.ControlRequest{
+		TaskID: delegated.Ref.TaskID, Source: "controller-looking-source",
+	}); err == nil || !strings.Contains(err.Error(), "unsupported control principal") {
+		t.Fatalf("empty principal error = %v, want fail-closed rejection", err)
+	}
 }
 
 func TestSubagentRejectsUnknownNeutralRoleBeforeSpawn(t *testing.T) {
@@ -502,8 +507,8 @@ func TestTaskWriteContinuesCompletedSpawnChild(t *testing.T) {
 	}
 
 	continued, err := runtime.tasks.Write(ctx, activeSession.SessionRef, task.ControlRequest{
-		TaskID: started.Ref.TaskID,
-		Input:  "next prompt",
+		TaskID: started.Ref.TaskID, Principal: session.ActorKindTool,
+		Input: "next prompt",
 	})
 	if err != nil {
 		t.Fatalf("Write(completed spawn) error = %v", err)
@@ -593,7 +598,7 @@ func TestTaskWriteContinuesSpawnChildAfterWaitCompletes(t *testing.T) {
 		t.Fatalf("StartSubagent() error = %v", err)
 	}
 	completed, err := runtime.tasks.Wait(ctx, activeSession.SessionRef, task.ControlRequest{
-		TaskID: started.Ref.TaskID,
+		TaskID: started.Ref.TaskID, Principal: session.ActorKindTool,
 	})
 	if err != nil {
 		t.Fatalf("Wait(spawn) error = %v", err)
@@ -603,8 +608,8 @@ func TestTaskWriteContinuesSpawnChildAfterWaitCompletes(t *testing.T) {
 	}
 
 	continued, err := runtime.tasks.Write(ctx, activeSession.SessionRef, task.ControlRequest{
-		TaskID: started.Ref.TaskID,
-		Input:  "next prompt",
+		TaskID: started.Ref.TaskID, Principal: session.ActorKindTool,
+		Input: "next prompt",
 	})
 	if err != nil {
 		t.Fatalf("Write(completed spawn after wait) error = %v", err)
@@ -636,14 +641,14 @@ func TestTaskWriteCanContinueCompletedSpawnChildRepeatedly(t *testing.T) {
 		t.Fatalf("StartSubagent() error = %v", err)
 	}
 	if _, err := runtime.tasks.Write(ctx, activeSession.SessionRef, task.ControlRequest{
-		TaskID: started.Ref.TaskID,
-		Input:  "second prompt",
+		TaskID: started.Ref.TaskID, Principal: session.ActorKindTool,
+		Input: "second prompt",
 	}); err != nil {
 		t.Fatalf("first Write(completed spawn) error = %v", err)
 	}
 	if _, err := runtime.tasks.Write(ctx, activeSession.SessionRef, task.ControlRequest{
-		TaskID: started.Ref.TaskID,
-		Input:  "third prompt",
+		TaskID: started.Ref.TaskID, Principal: session.ActorKindTool,
+		Input: "third prompt",
 	}); err != nil {
 		t.Fatalf("second Write(completed spawn) error = %v", err)
 	}
@@ -685,8 +690,8 @@ func TestTaskWriteClearsPreviousSubagentStreamFrames(t *testing.T) {
 	}
 
 	if _, err := runtime.tasks.Write(ctx, activeSession.SessionRef, task.ControlRequest{
-		TaskID: started.Ref.TaskID,
-		Input:  "next prompt",
+		TaskID: started.Ref.TaskID, Principal: session.ActorKindTool,
+		Input: "next prompt",
 	}); err != nil {
 		t.Fatalf("Write(completed spawn) error = %v", err)
 	}
@@ -726,8 +731,8 @@ func TestTaskWriteRejectsRunningSpawnChildWithWaitHint(t *testing.T) {
 	}
 
 	_, err = runtime.tasks.Write(ctx, activeSession.SessionRef, task.ControlRequest{
-		TaskID: started.Ref.TaskID,
-		Input:  "too soon",
+		TaskID: started.Ref.TaskID, Principal: session.ActorKindTool,
+		Input: "too soon",
 	})
 	if err == nil {
 		t.Fatal("Write(running spawn) error = nil, want wait hint")
@@ -1102,7 +1107,7 @@ func TestSubagentStreamReadInterruptsStaleRunningChild(t *testing.T) {
 		t.Fatalf("stream snapshot final text = %q, want child session detail", got)
 	}
 
-	waited, err := runtime.tasks.Wait(ctx, activeSession.SessionRef, task.ControlRequest{TaskID: started.Ref.TaskID})
+	waited, err := runtime.tasks.Wait(ctx, activeSession.SessionRef, task.ControlRequest{TaskID: started.Ref.TaskID, Principal: session.ActorKindController})
 	if err != nil {
 		t.Fatalf("Wait(interrupted subagent) error = %v", err)
 	}

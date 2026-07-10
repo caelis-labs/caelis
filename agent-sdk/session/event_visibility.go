@@ -69,10 +69,6 @@ func IsMainInvocationVisibleEvent(event *Event) bool {
 	if event.Scope.Participant.Role == ParticipantRoleDelegated {
 		return false
 	}
-	source := strings.ToLower(strings.TrimSpace(event.Scope.Source))
-	if source == "agent_spawn" || strings.Contains(source, "spawn") {
-		return false
-	}
 	return IsSharedDialogueEvent(event)
 }
 

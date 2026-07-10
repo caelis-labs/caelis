@@ -131,6 +131,14 @@ func TestMainInvocationVisibleSharesSideDialogueAndExcludesDelegatedWork(t *test
 	if IsMainInvocationVisibleEvent(delegatedAssistant) {
 		t.Fatal("delegated subagent event must not be visible to the main invocation")
 	}
+	sideAssistant.Scope.Source = "agent_spawn"
+	if !IsMainInvocationVisibleEvent(sideAssistant) {
+		t.Fatal("audit Source must not hide neutral sidecar dialogue")
+	}
+	delegatedAssistant.Scope.Source = "unrelated-origin"
+	if IsMainInvocationVisibleEvent(delegatedAssistant) {
+		t.Fatal("audit Source must not expose delegated dialogue")
+	}
 
 	scopedContextMessage := model.NewTextMessage(model.RoleUser, "plugin context")
 	scopedContext := &Event{

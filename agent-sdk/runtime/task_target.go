@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -16,6 +17,9 @@ type taskControlTarget interface {
 
 func (tm *taskRuntime) control(ctx context.Context, ref session.SessionRef, req taskapi.ControlRequest, fn func(taskControlTarget, taskapi.ControlRequest) (taskapi.Snapshot, error)) (taskapi.Snapshot, error) {
 	req = normalizeTaskControlRequest(req)
+	if err := validateTaskControlPrincipal(req.Principal); err != nil {
+		return taskapi.Snapshot{}, err
+	}
 	target, err := tm.lookupControlTarget(ctx, ref, req.TaskID)
 	if err != nil {
 		return taskapi.Snapshot{}, err
@@ -24,17 +28,22 @@ func (tm *taskRuntime) control(ctx context.Context, ref session.SessionRef, req 
 }
 
 func normalizeTaskControlRequest(req taskapi.ControlRequest) taskapi.ControlRequest {
-	principal := req.Principal
-	if principal == "" {
-		principal = session.ActorKindController
-	}
 	return taskapi.ControlRequest{
 		TaskID:         strings.TrimSpace(req.TaskID),
 		Yield:          req.Yield,
 		Input:          req.Input,
-		Principal:      principal,
+		Principal:      req.Principal,
 		Source:         strings.TrimSpace(req.Source),
 		ContextPrelude: req.ContextPrelude,
+	}
+}
+
+func validateTaskControlPrincipal(principal session.ActorKind) error {
+	switch principal {
+	case session.ActorKindUser, session.ActorKindController, session.ActorKindParticipant, session.ActorKindTool, session.ActorKindSystem:
+		return nil
+	default:
+		return fmt.Errorf("agent-sdk/runtime: unsupported control principal %q", principal)
 	}
 }
 
