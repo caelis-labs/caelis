@@ -11,10 +11,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/agentprofiles"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/agentregistry"
+	controller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/ports/agentprofile"
 	pluginapi "github.com/caelis-labs/caelis/ports/plugin"
@@ -769,20 +769,32 @@ func reservedSlashCommandName(name string) bool {
 }
 
 func (s *Stack) ACPControllerStatus(ctx context.Context, ref session.SessionRef) (controller.ControllerStatus, bool, error) {
-	if s == nil || s.engine == nil {
+	if s == nil {
 		return controller.ControllerStatus{}, false, nil
 	}
-	return s.engine.ACPControllerStatus(ctx, session.NormalizeSessionRef(ref))
+	s.mu.RLock()
+	controlPlane := s.acpControlPlane
+	s.mu.RUnlock()
+	if controlPlane == nil {
+		return controller.ControllerStatus{}, false, nil
+	}
+	return controlPlane.ControllerStatus(ctx, session.NormalizeSessionRef(ref))
 }
 
 func (s *Stack) SetACPControllerModel(ctx context.Context, ref session.SessionRef, model string, reasoningEffort string) (controller.ControllerStatus, error) {
-	if s == nil || s.engine == nil {
+	if s == nil {
 		return controller.ControllerStatus{}, fmt.Errorf("gatewayapp: runtime engine unavailable")
 	}
 	if err := s.rejectReconfigureWhileActive("switch ACP model"); err != nil {
 		return controller.ControllerStatus{}, err
 	}
-	return s.engine.SetACPControllerModel(ctx, controller.SetControllerModelRequest{
+	s.mu.RLock()
+	controlPlane := s.acpControlPlane
+	s.mu.RUnlock()
+	if controlPlane == nil {
+		return controller.ControllerStatus{}, fmt.Errorf("gatewayapp: ACP control plane unavailable")
+	}
+	return controlPlane.SetControllerModel(ctx, controller.SetControllerModelRequest{
 		SessionRef:      session.NormalizeSessionRef(ref),
 		Model:           strings.TrimSpace(model),
 		ReasoningEffort: strings.TrimSpace(reasoningEffort),
@@ -790,10 +802,16 @@ func (s *Stack) SetACPControllerModel(ctx context.Context, ref session.SessionRe
 }
 
 func (s *Stack) SetACPControllerMode(ctx context.Context, ref session.SessionRef, mode string) (controller.ControllerStatus, error) {
-	if s == nil || s.engine == nil {
+	if s == nil {
 		return controller.ControllerStatus{}, fmt.Errorf("gatewayapp: runtime engine unavailable")
 	}
-	return s.engine.SetACPControllerMode(ctx, controller.SetControllerModeRequest{
+	s.mu.RLock()
+	controlPlane := s.acpControlPlane
+	s.mu.RUnlock()
+	if controlPlane == nil {
+		return controller.ControllerStatus{}, fmt.Errorf("gatewayapp: ACP control plane unavailable")
+	}
+	return controlPlane.SetControllerMode(ctx, controller.SetControllerModeRequest{
 		SessionRef: session.NormalizeSessionRef(ref),
 		Mode:       strings.TrimSpace(mode),
 	})

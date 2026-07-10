@@ -254,12 +254,12 @@ func TestControllerRunApplyStartupStatePreservesPreSessionUpdates(t *testing.T) 
 	})
 
 	run.applyStartupStateLocked(nil, "remote-1", controllerClientState{
-		configOptions: []controller.ControllerConfigOption{
+		configOptions: []ControllerConfigOption{
 			{ID: "model", Name: "Model", CurrentValue: "startup-model"},
 			{ID: "reasoning", Name: "Reasoning", CurrentValue: "medium"},
 		},
 		mode: "default",
-		modeOptions: []controller.ControllerMode{
+		modeOptions: []ControllerMode{
 			{ID: "default", Name: "Default"},
 			{ID: "review", Name: "Review"},
 		},
@@ -313,12 +313,12 @@ func TestControllerRunStatusUsesConfigOptionsForModelAndEffort(t *testing.T) {
 
 	run := &controllerRun{}
 	run.applyStartupStateLocked(nil, "remote-1", controllerClientState{
-		configOptions: []controller.ControllerConfigOption{
+		configOptions: []ControllerConfigOption{
 			{
 				ID:           "model",
 				Name:         "Model",
 				CurrentValue: "gpt-5.5",
-				Options: []controller.ControllerConfigChoice{
+				Options: []ControllerConfigChoice{
 					{Value: "gpt-5.5", Name: "GPT-5.5"},
 					{Value: "gpt-5.4", Name: "gpt-5.4"},
 				},
@@ -327,7 +327,7 @@ func TestControllerRunStatusUsesConfigOptionsForModelAndEffort(t *testing.T) {
 				ID:           "reasoning_effort",
 				Name:         "Reasoning Effort",
 				CurrentValue: "xhigh",
-				Options: []controller.ControllerConfigChoice{
+				Options: []ControllerConfigChoice{
 					{Value: "low", Name: "Low"},
 					{Value: "medium", Name: "Medium"},
 					{Value: "high", Name: "High"},
@@ -354,13 +354,13 @@ func TestControllerRunStatusUsesConfigCategoriesForModeAndThoughtLevel(t *testin
 
 	run := &controllerRun{}
 	run.applyStartupStateLocked(nil, "remote-1", controllerClientState{
-		configOptions: []controller.ControllerConfigOption{
+		configOptions: []ControllerConfigOption{
 			{
 				ID:           "session-mode",
 				Name:         "Session Mode",
 				Category:     "mode",
 				CurrentValue: "code",
-				Options: []controller.ControllerConfigChoice{
+				Options: []ControllerConfigChoice{
 					{Value: "ask", Name: "Ask"},
 					{Value: "code", Name: "Code"},
 				},
@@ -370,14 +370,14 @@ func TestControllerRunStatusUsesConfigCategoriesForModeAndThoughtLevel(t *testin
 				Name:         "Thinking",
 				Category:     "thought_level",
 				CurrentValue: "high",
-				Options: []controller.ControllerConfigChoice{
+				Options: []ControllerConfigChoice{
 					{Value: "low", Name: "Low"},
 					{Value: "high", Name: "High"},
 				},
 			},
 		},
 		mode: "ask",
-		modeOptions: []controller.ControllerMode{
+		modeOptions: []ControllerMode{
 			{ID: "ask", Name: "Ask"},
 		},
 	}, 0)
@@ -399,13 +399,13 @@ func TestControllerRunStatusDoesNotTreatModelCategoryEffortAsModel(t *testing.T)
 
 	run := &controllerRun{}
 	run.applyStartupStateLocked(nil, "remote-1", controllerClientState{
-		configOptions: []controller.ControllerConfigOption{
+		configOptions: []ControllerConfigOption{
 			{
 				ID:           "effort",
 				Name:         "Effort",
 				Category:     "model",
 				CurrentValue: "high",
-				Options: []controller.ControllerConfigChoice{
+				Options: []ControllerConfigChoice{
 					{Value: "low", Name: "Low"},
 					{Value: "high", Name: "High"},
 				},
@@ -415,7 +415,7 @@ func TestControllerRunStatusDoesNotTreatModelCategoryEffortAsModel(t *testing.T)
 				Name:         "Model",
 				Category:     "model",
 				CurrentValue: "gpt-next",
-				Options: []controller.ControllerConfigChoice{
+				Options: []ControllerConfigChoice{
 					{Value: "gpt-old", Name: "GPT Old"},
 					{Value: "gpt-next", Name: "GPT Next"},
 				},
@@ -445,12 +445,12 @@ func TestControllerRunApplyStartupStateFillsPartialPreSessionConfigOptions(t *te
 	})
 
 	run.applyStartupStateLocked(nil, "remote-1", controllerClientState{
-		configOptions: []controller.ControllerConfigOption{
+		configOptions: []ControllerConfigOption{
 			{
 				ID:           "model",
 				Name:         "Model",
 				CurrentValue: "gpt-5.5",
-				Options: []controller.ControllerConfigChoice{
+				Options: []ControllerConfigChoice{
 					{Value: "gpt-5.5", Name: "GPT-5.5"},
 					{Value: "gpt-5.4", Name: "gpt-5.4"},
 				},
@@ -459,7 +459,7 @@ func TestControllerRunApplyStartupStateFillsPartialPreSessionConfigOptions(t *te
 				ID:           "reasoning_effort",
 				Name:         "Reasoning Effort",
 				CurrentValue: "xhigh",
-				Options: []controller.ControllerConfigChoice{
+				Options: []ControllerConfigChoice{
 					{Value: "low", Name: "Low"},
 					{Value: "medium", Name: "Medium"},
 					{Value: "high", Name: "High"},
@@ -486,17 +486,17 @@ func TestControllerRunStatusFillsCurrentModelEffortFromACPModelState(t *testing.
 
 	run := &controllerRun{}
 	run.applyStartupStateLocked(nil, "remote-1", controllerClientState{
-		configOptions: []controller.ControllerConfigOption{
+		configOptions: []ControllerConfigOption{
 			{
 				ID: "model",
-				Options: []controller.ControllerConfigChoice{
+				Options: []ControllerConfigChoice{
 					{Value: "gpt-5.5", Name: "GPT-5.5"},
 					{Value: "gpt-5.4", Name: "gpt-5.4"},
 				},
 			},
 			{
 				ID: "reasoning_effort",
-				Options: []controller.ControllerConfigChoice{
+				Options: []ControllerConfigChoice{
 					{Value: "low", Name: "Low"},
 					{Value: "high", Name: "High"},
 					{Value: "xhigh", Name: "Xhigh"},
@@ -519,11 +519,11 @@ func TestControllerRunStatusDerivesEffortOptionsFromACPModelState(t *testing.T) 
 
 	run := &controllerRun{}
 	run.applyStartupStateLocked(nil, "remote-1", controllerClientState{
-		configOptions: []controller.ControllerConfigOption{{
+		configOptions: []ControllerConfigOption{{
 			ID:           "model",
 			Name:         "Model",
 			CurrentValue: "gpt-5.4",
-			Options: []controller.ControllerConfigChoice{
+			Options: []ControllerConfigChoice{
 				{Value: "gpt-5.5", Name: "GPT-5.5"},
 				{Value: "gpt-5.4", Name: "gpt-5.4"},
 			},
@@ -553,11 +553,11 @@ func TestControllerRunStatusPreservesConfigChoicesAfterPartialUpdate(t *testing.
 
 	run := &controllerRun{}
 	run.applyStartupStateLocked(nil, "remote-1", controllerClientState{
-		configOptions: []controller.ControllerConfigOption{{
+		configOptions: []ControllerConfigOption{{
 			ID:           "model",
 			Name:         "Model",
 			CurrentValue: "gpt-5.5",
-			Options: []controller.ControllerConfigChoice{
+			Options: []ControllerConfigChoice{
 				{Value: "gpt-5.5", Name: "GPT-5.5"},
 				{Value: "gpt-5.4", Name: "gpt-5.4"},
 			},
@@ -623,13 +623,13 @@ func TestManagerLifecycleUsesSingleClientStarterSeam(t *testing.T) {
 		}})
 		return nil, remoteID, controllerClientState{
 			agentLabel: "Helper ACP",
-			configOptions: []controller.ControllerConfigOption{{
+			configOptions: []ControllerConfigOption{{
 				ID:           "model",
 				Name:         "Model",
 				CurrentValue: "gpt-test",
 			}},
 			mode: "default",
-			modeOptions: []controller.ControllerMode{{
+			modeOptions: []ControllerMode{{
 				ID:   "default",
 				Name: "Default",
 			}},
@@ -826,7 +826,7 @@ func TestManagerSetControllerModelReconnectsAfterBrokenPipe(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Activate() error = %v", err)
 	}
-	status, err := manager.SetControllerModel(ctx, controller.SetControllerModelRequest{
+	status, err := manager.SetControllerModel(ctx, SetControllerModelRequest{
 		SessionRef: parentSession.SessionRef,
 		Model:      "gpt-next",
 	})
@@ -1016,7 +1016,7 @@ func TestManagerRunTurnReconnectReappliesSelectedModelAndEffort(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Activate() error = %v", err)
 	}
-	status, err := manager.SetControllerModel(ctx, controller.SetControllerModelRequest{
+	status, err := manager.SetControllerModel(ctx, SetControllerModelRequest{
 		SessionRef:      parentSession.SessionRef,
 		Model:           "gpt-next",
 		ReasoningEffort: "high",
@@ -1096,7 +1096,7 @@ func TestManagerRunTurnReconnectReappliesModeWhenResumeReportsEmptyCurrentMode(t
 	}); err != nil {
 		t.Fatalf("Activate() error = %v", err)
 	}
-	status, err := manager.SetControllerMode(ctx, controller.SetControllerModeRequest{
+	status, err := manager.SetControllerMode(ctx, SetControllerModeRequest{
 		SessionRef: parentSession.SessionRef,
 		Mode:       "code",
 	})
@@ -2132,7 +2132,7 @@ func TestTurnHandleSourceEventsDoNotDropBurst(t *testing.T) {
 	}
 }
 
-func controllerChoiceValues(in []controller.ControllerConfigChoice) []string {
+func controllerChoiceValues(in []ControllerConfigChoice) []string {
 	if len(in) == 0 {
 		return nil
 	}
@@ -2143,7 +2143,7 @@ func controllerChoiceValues(in []controller.ControllerConfigChoice) []string {
 	return out
 }
 
-func controllerModeIDs(in []controller.ControllerMode) []string {
+func controllerModeIDs(in []ControllerMode) []string {
 	if len(in) == 0 {
 		return nil
 	}

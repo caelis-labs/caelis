@@ -63,11 +63,11 @@ type controllerRun struct {
 	contextPreludePending bool
 
 	mu                sync.Mutex
-	commands          []controller.ControllerCommand
-	configOptions     []controller.ControllerConfigOption
+	commands          []ControllerCommand
+	configOptions     []ControllerConfigOption
 	models            *client.SessionModelState
 	mode              string
-	modeOptions       []controller.ControllerMode
+	modeOptions       []ControllerMode
 	remoteTitle       string
 	turnID            string
 	turnSession       session.Session
@@ -81,11 +81,11 @@ type controllerRun struct {
 }
 
 type controllerClientState struct {
-	commands           []controller.ControllerCommand
-	configOptions      []controller.ControllerConfigOption
+	commands           []ControllerCommand
+	configOptions      []ControllerConfigOption
 	models             *client.SessionModelState
 	mode               string
-	modeOptions        []controller.ControllerMode
+	modeOptions        []ControllerMode
 	agentLabel         string
 	supportsClose      bool
 	promptCapabilities schema.PromptCapabilities
@@ -307,60 +307,60 @@ func (r *participantRun) supportsPromptImages() bool {
 	return r.promptCapabilities.Image
 }
 
-func (m *Manager) ControllerStatus(_ context.Context, ref session.SessionRef) (controller.ControllerStatus, bool, error) {
+func (m *Manager) ControllerStatus(_ context.Context, ref session.SessionRef) (ControllerStatus, bool, error) {
 	ref = session.NormalizeSessionRef(ref)
 	if strings.TrimSpace(ref.SessionID) == "" {
-		return controller.ControllerStatus{}, false, nil
+		return ControllerStatus{}, false, nil
 	}
 	m.mu.RLock()
 	run := m.controllers[ref.SessionID]
 	m.mu.RUnlock()
 	if run == nil {
-		return controller.ControllerStatus{}, false, nil
+		return ControllerStatus{}, false, nil
 	}
 	run.mu.Lock()
 	defer run.mu.Unlock()
 	return run.controllerStatusLocked(ref), true, nil
 }
 
-func (m *Manager) SetControllerModel(ctx context.Context, req controller.SetControllerModelRequest) (controller.ControllerStatus, error) {
+func (m *Manager) SetControllerModel(ctx context.Context, req SetControllerModelRequest) (ControllerStatus, error) {
 	req.SessionRef = session.NormalizeSessionRef(req.SessionRef)
 	if strings.TrimSpace(req.SessionRef.SessionID) == "" {
-		return controller.ControllerStatus{}, fmt.Errorf("internal/acpagentbridge/controller: session id is required")
+		return ControllerStatus{}, fmt.Errorf("internal/acpagentbridge/controller: session id is required")
 	}
 	m.mu.RLock()
 	run := m.controllers[req.SessionRef.SessionID]
 	m.mu.RUnlock()
 	if run == nil {
-		return controller.ControllerStatus{}, fmt.Errorf("internal/acpagentbridge/controller: no active ACP controller for session %q", req.SessionRef.SessionID)
+		return ControllerStatus{}, fmt.Errorf("internal/acpagentbridge/controller: no active ACP controller for session %q", req.SessionRef.SessionID)
 	}
 	status, err := run.setControllerModel(ctx, req, m.clock)
 	if err == nil || !isACPClientConnectionError(err) {
 		return status, err
 	}
 	if reconnectErr := m.reconnectControllerRun(ctx, run); reconnectErr != nil {
-		return controller.ControllerStatus{}, fmt.Errorf("%w; reconnect failed: %w", err, reconnectErr)
+		return ControllerStatus{}, fmt.Errorf("%w; reconnect failed: %w", err, reconnectErr)
 	}
 	return run.setControllerModel(ctx, req, m.clock)
 }
 
-func (m *Manager) SetControllerMode(ctx context.Context, req controller.SetControllerModeRequest) (controller.ControllerStatus, error) {
+func (m *Manager) SetControllerMode(ctx context.Context, req SetControllerModeRequest) (ControllerStatus, error) {
 	req.SessionRef = session.NormalizeSessionRef(req.SessionRef)
 	if strings.TrimSpace(req.SessionRef.SessionID) == "" {
-		return controller.ControllerStatus{}, fmt.Errorf("internal/acpagentbridge/controller: session id is required")
+		return ControllerStatus{}, fmt.Errorf("internal/acpagentbridge/controller: session id is required")
 	}
 	m.mu.RLock()
 	run := m.controllers[req.SessionRef.SessionID]
 	m.mu.RUnlock()
 	if run == nil {
-		return controller.ControllerStatus{}, fmt.Errorf("internal/acpagentbridge/controller: no active ACP controller for session %q", req.SessionRef.SessionID)
+		return ControllerStatus{}, fmt.Errorf("internal/acpagentbridge/controller: no active ACP controller for session %q", req.SessionRef.SessionID)
 	}
 	status, err := run.setControllerMode(ctx, req, m.clock)
 	if err == nil || !isACPClientConnectionError(err) {
 		return status, err
 	}
 	if reconnectErr := m.reconnectControllerRun(ctx, run); reconnectErr != nil {
-		return controller.ControllerStatus{}, fmt.Errorf("%w; reconnect failed: %w", err, reconnectErr)
+		return ControllerStatus{}, fmt.Errorf("%w; reconnect failed: %w", err, reconnectErr)
 	}
 	return run.setControllerMode(ctx, req, m.clock)
 }
@@ -480,7 +480,7 @@ func (c controllerReconnectConfig) needsRemoteReapply(remote controllerReconnect
 	return false
 }
 
-func controllerReconnectConfigFromState(options []controller.ControllerConfigOption, models *client.SessionModelState, mode string, modeOptions []controller.ControllerMode) controllerReconnectConfig {
+func controllerReconnectConfigFromState(options []ControllerConfigOption, models *client.SessionModelState, mode string, modeOptions []ControllerMode) controllerReconnectConfig {
 	model := currentModelFromConfigOptions(options)
 	var effort string
 	if effortOption, ok := pickEffortConfigOption(options); ok && effortOption != nil {
@@ -511,7 +511,7 @@ func (r *controllerRun) reapplyControllerRemoteConfig(ctx context.Context, desir
 		return nil
 	}
 	if desired.model != "" || desired.reasoningEffort != "" {
-		if _, err := r.setControllerModel(ctx, controller.SetControllerModelRequest{
+		if _, err := r.setControllerModel(ctx, SetControllerModelRequest{
 			SessionRef:      session.SessionRef{SessionID: strings.TrimSpace(r.parentSessionID)},
 			Model:           desired.model,
 			ReasoningEffort: desired.reasoningEffort,
@@ -520,7 +520,7 @@ func (r *controllerRun) reapplyControllerRemoteConfig(ctx context.Context, desir
 		}
 	}
 	if desired.mode != "" {
-		if _, err := r.setControllerMode(ctx, controller.SetControllerModeRequest{
+		if _, err := r.setControllerMode(ctx, SetControllerModeRequest{
 			SessionRef: session.SessionRef{SessionID: strings.TrimSpace(r.parentSessionID)},
 			Mode:       desired.mode,
 		}, clock); err != nil {
@@ -1034,13 +1034,13 @@ func (r *controllerRun) applySessionUpdateLocked(clock func() time.Time, update 
 	}
 }
 
-func (r *controllerRun) controllerStatusLocked(ref session.SessionRef) controller.ControllerStatus {
+func (r *controllerRun) controllerStatusLocked(ref session.SessionRef) ControllerStatus {
 	if r == nil {
-		return controller.ControllerStatus{}
+		return ControllerStatus{}
 	}
 	modelOption, _ := pickModelConfigOption(r.configOptions)
 	effortOption, _ := pickEffortConfigOption(r.configOptions)
-	status := controller.ControllerStatus{
+	status := ControllerStatus{
 		SessionRef:      session.NormalizeSessionRef(ref),
 		Agent:           strings.TrimSpace(r.agent),
 		RemoteSessionID: strings.TrimSpace(r.remoteSessionID),
@@ -1074,14 +1074,14 @@ func (r *controllerRun) controllerStatusLocked(ref session.SessionRef) controlle
 	return status
 }
 
-func (r *controllerRun) setControllerModel(ctx context.Context, req controller.SetControllerModelRequest, clock func() time.Time) (controller.ControllerStatus, error) {
+func (r *controllerRun) setControllerModel(ctx context.Context, req SetControllerModelRequest, clock func() time.Time) (ControllerStatus, error) {
 	if r == nil {
-		return controller.ControllerStatus{}, fmt.Errorf("internal/acpagentbridge/controller: controller run is unavailable")
+		return ControllerStatus{}, fmt.Errorf("internal/acpagentbridge/controller: controller run is unavailable")
 	}
 	testModel := strings.TrimSpace(req.Model)
 	effort := strings.TrimSpace(req.ReasoningEffort)
 	if testModel == "" && effort == "" {
-		return controller.ControllerStatus{}, fmt.Errorf("internal/acpagentbridge/controller: model or reasoning effort is required")
+		return ControllerStatus{}, fmt.Errorf("internal/acpagentbridge/controller: model or reasoning effort is required")
 	}
 	r.mu.Lock()
 	acpClient := r.client
@@ -1090,21 +1090,21 @@ func (r *controllerRun) setControllerModel(ctx context.Context, req controller.S
 	models := cloneACPSessionModelState(r.models)
 	r.mu.Unlock()
 	if acpClient == nil || remoteSessionID == "" {
-		return controller.ControllerStatus{}, fmt.Errorf("internal/acpagentbridge/controller: active controller client is unavailable")
+		return ControllerStatus{}, fmt.Errorf("internal/acpagentbridge/controller: active controller client is unavailable")
 	}
 
 	if testModel != "" {
 		modelOption, hasModelOption := pickModelConfigOption(configOptions)
 		if !hasModelOption || modelOption == nil {
-			return controller.ControllerStatus{}, fmt.Errorf("internal/acpagentbridge/controller: controller does not declare a model config option")
+			return ControllerStatus{}, fmt.Errorf("internal/acpagentbridge/controller: controller does not declare a model config option")
 		}
 		choice, ok := matchControllerConfigChoice(modelOption.Options, testModel)
 		if !ok {
-			return controller.ControllerStatus{}, fmt.Errorf("internal/acpagentbridge/controller: model %q is not declared by the controller", testModel)
+			return ControllerStatus{}, fmt.Errorf("internal/acpagentbridge/controller: model %q is not declared by the controller", testModel)
 		}
 		resp, err := acpClient.SetConfigOption(ctx, remoteSessionID, modelOption.ID, choice.Value)
 		if err != nil {
-			return controller.ControllerStatus{}, err
+			return ControllerStatus{}, err
 		}
 		configOptions = mergeControllerConfigOptions(configOptions, controllerConfigOptionsFromACP(resp.ConfigOptions))
 	}
@@ -1113,21 +1113,21 @@ func (r *controllerRun) setControllerModel(ctx context.Context, req controller.S
 		if hasEffortOption && effortOption != nil {
 			choice, ok := matchControllerConfigChoice(effortOption.Options, effort)
 			if !ok {
-				return controller.ControllerStatus{}, fmt.Errorf("internal/acpagentbridge/controller: reasoning effort %q is not declared by the controller", effort)
+				return ControllerStatus{}, fmt.Errorf("internal/acpagentbridge/controller: reasoning effort %q is not declared by the controller", effort)
 			}
 			resp, err := acpClient.SetConfigOption(ctx, remoteSessionID, effortOption.ID, choice.Value)
 			if err != nil {
-				return controller.ControllerStatus{}, err
+				return ControllerStatus{}, err
 			}
 			configOptions = mergeControllerConfigOptions(configOptions, controllerConfigOptionsFromACP(resp.ConfigOptions))
 		} else {
 			modelForEffort := firstNonEmpty(testModel, currentModelFromConfigOptions(configOptions))
 			modelID, ok := matchACPModelIDForEffort(models, modelForEffort, effort)
 			if !ok {
-				return controller.ControllerStatus{}, fmt.Errorf("internal/acpagentbridge/controller: reasoning effort %q is not declared by the controller", effort)
+				return ControllerStatus{}, fmt.Errorf("internal/acpagentbridge/controller: reasoning effort %q is not declared by the controller", effort)
 			}
 			if err := acpClient.SetModel(ctx, remoteSessionID, modelID); err != nil {
-				return controller.ControllerStatus{}, err
+				return ControllerStatus{}, err
 			}
 			modelBase, _, ok := splitACPCurrentModelEffort(&client.SessionModelState{CurrentModelID: modelID})
 			if !ok {
@@ -1150,13 +1150,13 @@ func (r *controllerRun) setControllerModel(ctx context.Context, req controller.S
 	return r.controllerStatusLocked(req.SessionRef), nil
 }
 
-func (r *controllerRun) setControllerMode(ctx context.Context, req controller.SetControllerModeRequest, clock func() time.Time) (controller.ControllerStatus, error) {
+func (r *controllerRun) setControllerMode(ctx context.Context, req SetControllerModeRequest, clock func() time.Time) (ControllerStatus, error) {
 	if r == nil {
-		return controller.ControllerStatus{}, fmt.Errorf("internal/acpagentbridge/controller: controller run is unavailable")
+		return ControllerStatus{}, fmt.Errorf("internal/acpagentbridge/controller: controller run is unavailable")
 	}
 	requested := strings.TrimSpace(req.Mode)
 	if requested == "" {
-		return controller.ControllerStatus{}, fmt.Errorf("internal/acpagentbridge/controller: mode is required")
+		return ControllerStatus{}, fmt.Errorf("internal/acpagentbridge/controller: mode is required")
 	}
 	r.mu.Lock()
 	client := r.client
@@ -1165,16 +1165,16 @@ func (r *controllerRun) setControllerMode(ctx context.Context, req controller.Se
 	modeOptions := cloneControllerModes(r.modeOptions)
 	r.mu.Unlock()
 	if client == nil || remoteSessionID == "" {
-		return controller.ControllerStatus{}, fmt.Errorf("internal/acpagentbridge/controller: active controller client is unavailable")
+		return ControllerStatus{}, fmt.Errorf("internal/acpagentbridge/controller: active controller client is unavailable")
 	}
 	if modeOption, hasModeOption := pickModeConfigOption(configOptions); hasModeOption && modeOption != nil && len(modeOption.Options) > 0 {
 		choice, ok := matchControllerConfigChoice(modeOption.Options, requested)
 		if !ok {
-			return controller.ControllerStatus{}, fmt.Errorf("internal/acpagentbridge/controller: mode %q is not declared by the controller", requested)
+			return ControllerStatus{}, fmt.Errorf("internal/acpagentbridge/controller: mode %q is not declared by the controller", requested)
 		}
 		resp, err := client.SetConfigOption(ctx, remoteSessionID, modeOption.ID, choice.Value)
 		if err != nil {
-			return controller.ControllerStatus{}, err
+			return ControllerStatus{}, err
 		}
 		configOptions = mergeControllerConfigOptions(configOptions, controllerConfigOptionsFromACP(resp.ConfigOptions))
 		modeOptions = mergeControllerModes(controllerModesFromConfigOptions(configOptions), modeOptions)
@@ -1191,14 +1191,14 @@ func (r *controllerRun) setControllerMode(ctx context.Context, req controller.Se
 		return r.controllerStatusLocked(req.SessionRef), nil
 	}
 	if len(modeOptions) == 0 {
-		return controller.ControllerStatus{}, fmt.Errorf("internal/acpagentbridge/controller: controller does not declare session modes")
+		return ControllerStatus{}, fmt.Errorf("internal/acpagentbridge/controller: controller does not declare session modes")
 	}
 	choice, ok := matchControllerMode(modeOptions, requested)
 	if !ok {
-		return controller.ControllerStatus{}, fmt.Errorf("internal/acpagentbridge/controller: mode %q is not declared by the controller", requested)
+		return ControllerStatus{}, fmt.Errorf("internal/acpagentbridge/controller: mode %q is not declared by the controller", requested)
 	}
 	if err := client.SetMode(ctx, remoteSessionID, strings.TrimSpace(choice.ID)); err != nil {
-		return controller.ControllerStatus{}, err
+		return ControllerStatus{}, err
 	}
 
 	r.mu.Lock()

@@ -5,7 +5,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpingress"
 	"github.com/caelis-labs/caelis/protocol/acp/client"
@@ -43,11 +42,11 @@ func contentChunkText(chunk client.ContentChunk) string {
 	return acpingress.ContentChunkText(chunk)
 }
 
-func controllerCommandsFromACP(in []map[string]any) []controller.ControllerCommand {
+func controllerCommandsFromACP(in []map[string]any) []ControllerCommand {
 	if len(in) == 0 {
 		return nil
 	}
-	out := make([]controller.ControllerCommand, 0, len(in))
+	out := make([]ControllerCommand, 0, len(in))
 	seen := map[string]struct{}{}
 	for _, item := range in {
 		name := normalizeACPCommandName(firstNonEmpty(
@@ -63,7 +62,7 @@ func controllerCommandsFromACP(in []map[string]any) []controller.ControllerComma
 		if _, exists := seen[key]; exists {
 			continue
 		}
-		out = append(out, controller.ControllerCommand{
+		out = append(out, ControllerCommand{
 			Name:        name,
 			Description: firstNonEmpty(stringMapValue(item, "description"), stringMapValue(item, "detail")),
 		})
@@ -97,27 +96,27 @@ func stringMapValue(item map[string]any, key string) string {
 	}
 }
 
-func controllerConfigOptionsFromACP(in []client.SessionConfigOption) []controller.ControllerConfigOption {
+func controllerConfigOptionsFromACP(in []client.SessionConfigOption) []ControllerConfigOption {
 	if len(in) == 0 {
 		return nil
 	}
-	out := make([]controller.ControllerConfigOption, 0, len(in))
+	out := make([]ControllerConfigOption, 0, len(in))
 	for _, item := range in {
-		option := controller.ControllerConfigOption{
+		option := ControllerConfigOption{
 			ID:           strings.TrimSpace(item.ID),
 			Name:         strings.TrimSpace(item.Name),
 			Type:         strings.TrimSpace(item.Type),
 			Category:     strings.TrimSpace(item.Category),
 			Description:  strings.TrimSpace(item.Description),
 			CurrentValue: stringFromACPValue(item.CurrentValue),
-			Options:      make([]controller.ControllerConfigChoice, 0, len(item.Options)),
+			Options:      make([]ControllerConfigChoice, 0, len(item.Options)),
 		}
 		for _, choice := range item.Options {
 			value := strings.TrimSpace(choice.Value)
 			if value == "" {
 				continue
 			}
-			option.Options = append(option.Options, controller.ControllerConfigChoice{
+			option.Options = append(option.Options, ControllerConfigChoice{
 				Value:       value,
 				Name:        strings.TrimSpace(choice.Name),
 				Description: strings.TrimSpace(choice.Description),
@@ -181,15 +180,15 @@ func isReasoningEffortValue(value string) bool {
 	}
 }
 
-func controllerEffortChoicesFromModels(models *client.SessionModelState, model string) []controller.ControllerConfigChoice {
+func controllerEffortChoicesFromModels(models *client.SessionModelState, model string) []ControllerConfigChoice {
 	return controllerEffortChoicesFromMap(controllerEffortChoicesByModelFromModels(models), model)
 }
 
-func controllerEffortChoicesByModelFromModels(models *client.SessionModelState) map[string][]controller.ControllerConfigChoice {
+func controllerEffortChoicesByModelFromModels(models *client.SessionModelState) map[string][]ControllerConfigChoice {
 	if models == nil || len(models.AvailableModels) == 0 {
 		return nil
 	}
-	out := map[string][]controller.ControllerConfigChoice{}
+	out := map[string][]ControllerConfigChoice{}
 	seen := map[string]map[string]struct{}{}
 	for _, item := range models.AvailableModels {
 		base, effort, hasEffort := splitACPModelIDEffort(item.ModelID)
@@ -209,7 +208,7 @@ func controllerEffortChoicesByModelFromModels(models *client.SessionModelState) 
 			continue
 		}
 		seen[modelKey][key] = struct{}{}
-		out[modelKey] = append(out[modelKey], controller.ControllerConfigChoice{
+		out[modelKey] = append(out[modelKey], ControllerConfigChoice{
 			Value:       key,
 			Name:        reasoningEffortDisplayName(key),
 			Description: strings.TrimSpace(item.Description),
@@ -218,7 +217,7 @@ func controllerEffortChoicesByModelFromModels(models *client.SessionModelState) 
 	return out
 }
 
-func controllerEffortChoicesFromMap(options map[string][]controller.ControllerConfigChoice, model string) []controller.ControllerConfigChoice {
+func controllerEffortChoicesFromMap(options map[string][]ControllerConfigChoice, model string) []ControllerConfigChoice {
 	if len(options) == 0 {
 		return nil
 	}
@@ -286,17 +285,17 @@ func reasoningEffortDisplayName(effort string) string {
 	}
 }
 
-func controllerModesFromACP(modes *client.SessionModeState) []controller.ControllerMode {
+func controllerModesFromACP(modes *client.SessionModeState) []ControllerMode {
 	if modes == nil || len(modes.AvailableModes) == 0 {
 		return nil
 	}
-	out := make([]controller.ControllerMode, 0, len(modes.AvailableModes))
+	out := make([]ControllerMode, 0, len(modes.AvailableModes))
 	for _, mode := range modes.AvailableModes {
 		id := strings.TrimSpace(mode.ID)
 		if id == "" {
 			continue
 		}
-		out = append(out, controller.ControllerMode{
+		out = append(out, ControllerMode{
 			ID:          id,
 			Name:        strings.TrimSpace(mode.Name),
 			Description: strings.TrimSpace(mode.Description),
@@ -305,18 +304,18 @@ func controllerModesFromACP(modes *client.SessionModeState) []controller.Control
 	return out
 }
 
-func controllerModesFromConfigOptions(options []controller.ControllerConfigOption) []controller.ControllerMode {
+func controllerModesFromConfigOptions(options []ControllerConfigOption) []ControllerMode {
 	option, ok := pickModeConfigOption(options)
 	if !ok || option == nil || len(option.Options) == 0 {
 		return nil
 	}
-	out := make([]controller.ControllerMode, 0, len(option.Options))
+	out := make([]ControllerMode, 0, len(option.Options))
 	for _, choice := range option.Options {
 		id := strings.TrimSpace(choice.Value)
 		if id == "" {
 			continue
 		}
-		out = append(out, controller.ControllerMode{
+		out = append(out, ControllerMode{
 			ID:          id,
 			Name:        strings.TrimSpace(choice.Name),
 			Description: strings.TrimSpace(choice.Description),
@@ -325,16 +324,16 @@ func controllerModesFromConfigOptions(options []controller.ControllerConfigOptio
 	return out
 }
 
-func pickModelConfigOption(options []controller.ControllerConfigOption) (*controller.ControllerConfigOption, bool) {
+func pickModelConfigOption(options []ControllerConfigOption) (*ControllerConfigOption, bool) {
 	return pickControllerConfigOption(options, matchModelConfigOption)
 }
 
-func pickModeConfigOption(options []controller.ControllerConfigOption) (*controller.ControllerConfigOption, bool) {
+func pickModeConfigOption(options []ControllerConfigOption) (*ControllerConfigOption, bool) {
 	return pickControllerConfigOption(options, matchModeConfigOption)
 }
 
-func pickEffortConfigOption(options []controller.ControllerConfigOption) (*controller.ControllerConfigOption, bool) {
-	return pickControllerConfigOption(options, func(option controller.ControllerConfigOption) (bool, int) {
+func pickEffortConfigOption(options []ControllerConfigOption) (*ControllerConfigOption, bool) {
+	return pickControllerConfigOption(options, func(option ControllerConfigOption) (bool, int) {
 		id := strings.ToLower(strings.TrimSpace(option.ID))
 		category := strings.ToLower(strings.TrimSpace(option.Category))
 		haystack := controllerConfigOptionHaystack(option)
@@ -356,7 +355,7 @@ func pickEffortConfigOption(options []controller.ControllerConfigOption) (*contr
 	})
 }
 
-func matchModeConfigOption(option controller.ControllerConfigOption) (bool, int) {
+func matchModeConfigOption(option ControllerConfigOption) (bool, int) {
 	id := strings.ToLower(strings.TrimSpace(option.ID))
 	category := strings.ToLower(strings.TrimSpace(option.Category))
 	haystack := controllerConfigOptionHaystack(option)
@@ -373,7 +372,7 @@ func matchModeConfigOption(option controller.ControllerConfigOption) (bool, int)
 	return false, 0
 }
 
-func matchModelConfigOption(option controller.ControllerConfigOption) (bool, int) {
+func matchModelConfigOption(option ControllerConfigOption) (bool, int) {
 	id := strings.ToLower(strings.TrimSpace(option.ID))
 	category := strings.ToLower(strings.TrimSpace(option.Category))
 	haystack := controllerConfigOptionHaystack(option)
@@ -395,21 +394,21 @@ func matchModelConfigOption(option controller.ControllerConfigOption) (bool, int
 	return false, 0
 }
 
-func currentModelFromConfigOptions(options []controller.ControllerConfigOption) string {
+func currentModelFromConfigOptions(options []ControllerConfigOption) string {
 	if option, ok := pickModelConfigOption(options); ok && option != nil {
 		return strings.TrimSpace(option.CurrentValue)
 	}
 	return ""
 }
 
-func currentModeFromConfigOptions(options []controller.ControllerConfigOption) string {
+func currentModeFromConfigOptions(options []ControllerConfigOption) string {
 	if option, ok := pickModeConfigOption(options); ok && option != nil {
 		return strings.TrimSpace(option.CurrentValue)
 	}
 	return ""
 }
 
-func setControllerConfigCurrentValue(options []controller.ControllerConfigOption, model string) []controller.ControllerConfigOption {
+func setControllerConfigCurrentValue(options []ControllerConfigOption, model string) []ControllerConfigOption {
 	model = strings.TrimSpace(model)
 	if model == "" {
 		return cloneControllerConfigOptions(options)
@@ -431,7 +430,7 @@ func setControllerConfigCurrentValue(options []controller.ControllerConfigOption
 		out[bestIndex].CurrentValue = model
 		return out
 	}
-	return append(out, controller.ControllerConfigOption{
+	return append(out, ControllerConfigOption{
 		ID:           "model",
 		Name:         "Model",
 		Type:         "select",
@@ -441,10 +440,10 @@ func setControllerConfigCurrentValue(options []controller.ControllerConfigOption
 }
 
 func pickControllerConfigOption(
-	options []controller.ControllerConfigOption,
-	match func(controller.ControllerConfigOption) (bool, int),
-) (*controller.ControllerConfigOption, bool) {
-	var picked *controller.ControllerConfigOption
+	options []ControllerConfigOption,
+	match func(ControllerConfigOption) (bool, int),
+) (*ControllerConfigOption, bool) {
+	var picked *ControllerConfigOption
 	bestScore := 1000
 	for i := range options {
 		ok, score := match(options[i])
@@ -459,7 +458,7 @@ func pickControllerConfigOption(
 	return picked, picked != nil
 }
 
-func controllerConfigOptionHaystack(option controller.ControllerConfigOption) string {
+func controllerConfigOptionHaystack(option ControllerConfigOption) string {
 	return strings.ToLower(strings.Join([]string{
 		strings.TrimSpace(option.ID),
 		strings.TrimSpace(option.Name),
@@ -468,10 +467,10 @@ func controllerConfigOptionHaystack(option controller.ControllerConfigOption) st
 	}, " "))
 }
 
-func matchControllerConfigChoice(options []controller.ControllerConfigChoice, requested string) (controller.ControllerConfigChoice, bool) {
+func matchControllerConfigChoice(options []ControllerConfigChoice, requested string) (ControllerConfigChoice, bool) {
 	requested = strings.TrimSpace(requested)
 	if requested == "" {
-		return controller.ControllerConfigChoice{}, false
+		return ControllerConfigChoice{}, false
 	}
 	for _, option := range options {
 		if strings.EqualFold(strings.TrimSpace(option.Value), requested) || strings.EqualFold(strings.TrimSpace(option.Name), requested) {
@@ -481,10 +480,10 @@ func matchControllerConfigChoice(options []controller.ControllerConfigChoice, re
 			return option, true
 		}
 	}
-	return controller.ControllerConfigChoice{}, false
+	return ControllerConfigChoice{}, false
 }
 
-func mergeControllerConfigChoices(primary []controller.ControllerConfigChoice, fallback []controller.ControllerConfigChoice) []controller.ControllerConfigChoice {
+func mergeControllerConfigChoices(primary []ControllerConfigChoice, fallback []ControllerConfigChoice) []ControllerConfigChoice {
 	if len(primary) == 0 {
 		return cloneControllerConfigChoices(fallback)
 	}
@@ -510,10 +509,10 @@ func mergeControllerConfigChoices(primary []controller.ControllerConfigChoice, f
 	return out
 }
 
-func matchControllerMode(options []controller.ControllerMode, requested string) (controller.ControllerMode, bool) {
+func matchControllerMode(options []ControllerMode, requested string) (ControllerMode, bool) {
 	requested = strings.TrimSpace(requested)
 	if requested == "" {
-		return controller.ControllerMode{}, false
+		return ControllerMode{}, false
 	}
 	for _, option := range options {
 		id := strings.TrimSpace(option.ID)
@@ -524,10 +523,10 @@ func matchControllerMode(options []controller.ControllerMode, requested string) 
 			return option, true
 		}
 	}
-	return controller.ControllerMode{}, false
+	return ControllerMode{}, false
 }
 
-func mergeControllerConfigOptions(existing []controller.ControllerConfigOption, updates []controller.ControllerConfigOption) []controller.ControllerConfigOption {
+func mergeControllerConfigOptions(existing []ControllerConfigOption, updates []ControllerConfigOption) []ControllerConfigOption {
 	if len(updates) == 0 {
 		return cloneControllerConfigOptions(existing)
 	}
@@ -555,7 +554,7 @@ func mergeControllerConfigOptions(existing []controller.ControllerConfigOption, 
 	return out
 }
 
-func mergeControllerConfigOption(existing controller.ControllerConfigOption, update controller.ControllerConfigOption) controller.ControllerConfigOption {
+func mergeControllerConfigOption(existing ControllerConfigOption, update ControllerConfigOption) ControllerConfigOption {
 	out := cloneControllerConfigOption(existing)
 	if value := strings.TrimSpace(update.ID); value != "" {
 		out.ID = value
@@ -577,7 +576,7 @@ func mergeControllerConfigOption(existing controller.ControllerConfigOption, upd
 	return out
 }
 
-func fillControllerConfigOptions(existing []controller.ControllerConfigOption, fallback []controller.ControllerConfigOption) []controller.ControllerConfigOption {
+func fillControllerConfigOptions(existing []ControllerConfigOption, fallback []ControllerConfigOption) []ControllerConfigOption {
 	if len(existing) == 0 {
 		return cloneControllerConfigOptions(fallback)
 	}
@@ -605,7 +604,7 @@ func fillControllerConfigOptions(existing []controller.ControllerConfigOption, f
 	return out
 }
 
-func fillControllerConfigOption(existing controller.ControllerConfigOption, fallback controller.ControllerConfigOption) controller.ControllerConfigOption {
+func fillControllerConfigOption(existing ControllerConfigOption, fallback ControllerConfigOption) ControllerConfigOption {
 	out := cloneControllerConfigOption(existing)
 	if strings.TrimSpace(out.ID) == "" {
 		out.ID = strings.TrimSpace(fallback.ID)
@@ -629,14 +628,14 @@ func fillControllerConfigOption(existing controller.ControllerConfigOption, fall
 	return out
 }
 
-func cloneControllerCommands(in []controller.ControllerCommand) []controller.ControllerCommand {
+func cloneControllerCommands(in []ControllerCommand) []ControllerCommand {
 	if len(in) == 0 {
 		return nil
 	}
-	return append([]controller.ControllerCommand(nil), in...)
+	return append([]ControllerCommand(nil), in...)
 }
 
-func mergeControllerCommands(existing []controller.ControllerCommand, fallback []controller.ControllerCommand) []controller.ControllerCommand {
+func mergeControllerCommands(existing []ControllerCommand, fallback []ControllerCommand) []ControllerCommand {
 	if len(existing) == 0 {
 		return cloneControllerCommands(fallback)
 	}
@@ -663,38 +662,38 @@ func mergeControllerCommands(existing []controller.ControllerCommand, fallback [
 	return out
 }
 
-func cloneControllerConfigOptions(in []controller.ControllerConfigOption) []controller.ControllerConfigOption {
+func cloneControllerConfigOptions(in []ControllerConfigOption) []ControllerConfigOption {
 	if len(in) == 0 {
 		return nil
 	}
-	out := make([]controller.ControllerConfigOption, 0, len(in))
+	out := make([]ControllerConfigOption, 0, len(in))
 	for _, item := range in {
 		out = append(out, cloneControllerConfigOption(item))
 	}
 	return out
 }
 
-func cloneControllerConfigOption(in controller.ControllerConfigOption) controller.ControllerConfigOption {
+func cloneControllerConfigOption(in ControllerConfigOption) ControllerConfigOption {
 	out := in
 	out.Options = cloneControllerConfigChoices(in.Options)
 	return out
 }
 
-func cloneControllerConfigChoices(in []controller.ControllerConfigChoice) []controller.ControllerConfigChoice {
+func cloneControllerConfigChoices(in []ControllerConfigChoice) []ControllerConfigChoice {
 	if len(in) == 0 {
 		return nil
 	}
-	return append([]controller.ControllerConfigChoice(nil), in...)
+	return append([]ControllerConfigChoice(nil), in...)
 }
 
-func cloneControllerModes(in []controller.ControllerMode) []controller.ControllerMode {
+func cloneControllerModes(in []ControllerMode) []ControllerMode {
 	if len(in) == 0 {
 		return nil
 	}
-	return append([]controller.ControllerMode(nil), in...)
+	return append([]ControllerMode(nil), in...)
 }
 
-func mergeControllerModes(existing []controller.ControllerMode, fallback []controller.ControllerMode) []controller.ControllerMode {
+func mergeControllerModes(existing []ControllerMode, fallback []ControllerMode) []ControllerMode {
 	if len(existing) == 0 {
 		return cloneControllerModes(fallback)
 	}

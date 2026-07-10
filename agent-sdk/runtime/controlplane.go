@@ -18,44 +18,6 @@ func (r *Runtime) Controllers() controller.Backend {
 	return r.controllers
 }
 
-func (r *Runtime) ACPControllerStatus(ctx context.Context, ref session.SessionRef) (controller.ControllerStatus, bool, error) {
-	if r == nil || r.controllers == nil {
-		return controller.ControllerStatus{}, false, nil
-	}
-	provider, ok := r.controllers.(controller.ControllerStatusProvider)
-	if !ok || provider == nil {
-		return controller.ControllerStatus{}, false, nil
-	}
-	return provider.ControllerStatus(ctx, session.NormalizeSessionRef(ref))
-}
-
-func (r *Runtime) SetACPControllerModel(ctx context.Context, req controller.SetControllerModelRequest) (controller.ControllerStatus, error) {
-	if r == nil || r.controllers == nil {
-		return controller.ControllerStatus{}, fmt.Errorf("agent-sdk/runtime: ACP controller backend is not configured")
-	}
-	configurator, ok := r.controllers.(controller.ControllerConfigurator)
-	if !ok || configurator == nil {
-		return controller.ControllerStatus{}, fmt.Errorf("agent-sdk/runtime: ACP controller backend does not expose model configuration")
-	}
-	req.SessionRef = session.NormalizeSessionRef(req.SessionRef)
-	req.Model = strings.TrimSpace(req.Model)
-	req.ReasoningEffort = strings.TrimSpace(req.ReasoningEffort)
-	return configurator.SetControllerModel(ctx, req)
-}
-
-func (r *Runtime) SetACPControllerMode(ctx context.Context, req controller.SetControllerModeRequest) (controller.ControllerStatus, error) {
-	if r == nil || r.controllers == nil {
-		return controller.ControllerStatus{}, fmt.Errorf("agent-sdk/runtime: ACP controller backend is not configured")
-	}
-	configurator, ok := r.controllers.(controller.ControllerConfigurator)
-	if !ok || configurator == nil {
-		return controller.ControllerStatus{}, fmt.Errorf("agent-sdk/runtime: ACP controller backend does not expose mode configuration")
-	}
-	req.SessionRef = session.NormalizeSessionRef(req.SessionRef)
-	req.Mode = strings.TrimSpace(req.Mode)
-	return configurator.SetControllerMode(ctx, req)
-}
-
 func (r *Runtime) ensureSessionController(ctx context.Context, activeSession session.Session) (session.Session, error) {
 	if r == nil || r.sessions == nil {
 		return session.Session{}, fmt.Errorf("agent-sdk/runtime: session service is unavailable")
