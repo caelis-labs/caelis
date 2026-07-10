@@ -13,6 +13,24 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
+func TestParticipantLifecycleEventUsesNormalizedACPParticipantSemantics(t *testing.T) {
+	t.Parallel()
+
+	event := participantLifecycleEvent(
+		session.Session{Controller: session.ControllerBinding{Kind: session.ControllerKindKernel, ControllerID: "kernel-1", EpochID: "epoch-1"}},
+		session.ParticipantBinding{ID: "participant-1", Kind: session.ParticipantKindACP, Role: session.ParticipantRoleSidecar, SessionID: "remote-1"},
+		"attached",
+		time.Unix(1, 0),
+	)
+	participant := session.ProtocolParticipantOf(event)
+	if participant == nil || participant.Action != "attached" {
+		t.Fatalf("participant protocol = %#v, want normalized attached lifecycle", participant)
+	}
+	if event.Protocol.Method != session.ProtocolMethodParticipantUpdate {
+		t.Fatalf("participant method = %q, want %q", event.Protocol.Method, session.ProtocolMethodParticipantUpdate)
+	}
+}
+
 func TestRuntimeDetachParticipantRollbackPreservesActiveSessionOnRemoveFailure(t *testing.T) {
 	t.Parallel()
 

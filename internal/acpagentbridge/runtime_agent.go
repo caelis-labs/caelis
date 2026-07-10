@@ -19,6 +19,7 @@ import (
 	controlprompt "github.com/caelis-labs/caelis/ports/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp"
 	"github.com/caelis-labs/caelis/protocol/acp/projector"
+	"github.com/caelis-labs/caelis/protocol/acp/semantic"
 )
 
 // BuildAgentSpecFunc assembles the runtime-facing agent spec for one ACP
@@ -474,8 +475,9 @@ func (a *RuntimeAgent) emitRunEvents(runCtx context.Context, _ context.Context, 
 }
 
 func (a *RuntimeAgent) Cancel(_ context.Context, req acp.CancelNotification) error {
+	ref := semantic.DecodeCancelNotification(req)
 	a.mu.Lock()
-	cancel := a.cancels[strings.TrimSpace(req.SessionID)]
+	cancel := a.cancels[ref.SessionID]
 	a.mu.Unlock()
 	if cancel != nil {
 		cancel()

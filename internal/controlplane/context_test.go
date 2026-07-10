@@ -149,7 +149,11 @@ func TestCoordinatorOwnsActivationAndAtomicHandoffCommit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSession() error = %v", err)
 	}
-	if len(loaded.Events) != 1 || session.ProtocolHandoffOf(loaded.Events[0]) == nil || loaded.Events[0].Actor.Name != "control" {
+	if len(loaded.Events) != 1 {
+		t.Fatalf("handoff events = %#v, want one event", loaded.Events)
+	}
+	handoff := session.ProtocolHandoffOf(loaded.Events[0])
+	if handoff == nil || handoff.Phase != "activation" || loaded.Events[0].Actor.Name != "control" {
 		t.Fatalf("handoff events = %#v", loaded.Events)
 	}
 	if !traceSink.saw(agent.LifecycleHandoff, agent.TraceStarted) || !traceSink.saw(agent.LifecycleHandoff, agent.TraceCompleted) {

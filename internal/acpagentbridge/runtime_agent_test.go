@@ -672,6 +672,15 @@ func TestRuntimeAgentPromptManualModeUsesClientPermission(t *testing.T) {
 	if cb.permissions != 1 {
 		t.Fatalf("client permission requests = %d, want 1 under manual mode", cb.permissions)
 	}
+	if cb.last.SessionID != sessionResp.SessionID || cb.last.ToolCall.ToolCallID != "call-1" {
+		t.Fatalf("client permission request = %#v, want normalized session and call identity", cb.last)
+	}
+	if got := metautil.String(cb.last.ToolCall.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeTool, metautil.RuntimeToolName); got != "RUN_COMMAND" {
+		t.Fatalf("client permission tool name = %q, want RUN_COMMAND", got)
+	}
+	if got := schema.NormalizeRawMap(cb.last.ToolCall.RawInput)["command"]; got != "git restore hello.py" {
+		t.Fatalf("client permission raw command = %#v, want git restore hello.py", got)
+	}
 	if reviewer.calls != 0 {
 		t.Fatalf("reviewer calls = %d, want 0 under manual mode", reviewer.calls)
 	}
@@ -1074,10 +1083,12 @@ func (r promptRouterRun) Close() error { return nil }
 type permissionCountingCallbacks struct {
 	recordingPromptCallbacks
 	permissions int
+	last        acp.RequestPermissionRequest
 }
 
-func (c *permissionCountingCallbacks) RequestPermission(context.Context, acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error) {
+func (c *permissionCountingCallbacks) RequestPermission(_ context.Context, req acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error) {
 	c.permissions++
+	c.last = req
 	return acp.RequestPermissionResponse{
 		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: acp.PermAllowOnce},
 	}, nil

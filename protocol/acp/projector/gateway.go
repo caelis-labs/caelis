@@ -8,6 +8,7 @@ import (
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
+	"github.com/caelis-labs/caelis/protocol/acp/semantic"
 )
 
 // ACPEventHandle is the protocol-facing subset needed to consume one live ACP
@@ -296,14 +297,20 @@ func projectSessionEventstreamOnlyEvents(base eventstream.Envelope, event *sessi
 		next.Notice = strings.TrimSpace(notice.Text)
 		return []eventstream.Envelope{next}
 	case session.EventTypeParticipant:
-		participant := session.ProtocolParticipantOf(event)
-		if participant == nil {
+		if event.Protocol == nil {
+			return nil
+		}
+		participant, err := semantic.DecodeParticipant(*event.Protocol)
+		if err != nil {
 			return nil
 		}
 		return participantEventstreamEnvelope(base, participant.Action, firstNonEmpty(strings.TrimSpace(base.Actor), strings.TrimSpace(event.Actor.Name), strings.TrimSpace(event.Actor.ID)))
 	case session.EventTypeHandoff:
-		handoff := session.ProtocolHandoffOf(event)
-		if handoff == nil {
+		if event.Protocol == nil {
+			return nil
+		}
+		handoff, err := semantic.DecodeHandoff(*event.Protocol)
+		if err != nil {
 			return nil
 		}
 		return lifecycleEventstreamEnvelope(base, handoff.Phase, "", firstNonEmpty(strings.TrimSpace(base.Actor), strings.TrimSpace(event.Actor.Name), strings.TrimSpace(event.Actor.ID)))
@@ -373,71 +380,66 @@ func permissionRequestFromProtocol(sessionID string, meta map[string]any, approv
 	if approval == nil {
 		return nil
 	}
-	toolCall := permissionToolCallUpdateFromProtocol(approval.ToolCall)
-	if strings.TrimSpace(toolCall.ToolCallID) == "" &&
-		toolCall.Title == nil &&
-		toolCall.Kind == nil &&
-		len(approval.Options) == 0 &&
-		rawInputLen(toolCall.RawInput) == 0 {
+	req, err := semantic.EncodePermissionRequest(session.SessionRef{SessionID: sessionID}, approval, meta)
+	if err != nil {
 		return nil
 	}
-	options := make([]schema.PermissionOption, 0, len(approval.Options))
-	for _, item := range approval.Options {
-		options = append(options, schema.PermissionOption{
-			OptionID: strings.TrimSpace(item.ID),
-			Name:     strings.TrimSpace(item.Name),
-			Kind:     strings.TrimSpace(item.Kind),
-		})
+	// Permission wire semantics come from semantic.EncodePermissionRequest.
+	// Projection may add display-only defaults without changing canonical
+	// identity, input, output, options, or approval meaning.
+	displayToolCall := permissionToolCallUpdateFromProtocol(approval.ToolCall)
+	if req.ToolCall.Title == nil {
+		req.ToolCall.Title = displayToolCall.Title
 	}
-	req := &schema.RequestPermissionRequest{
-		SessionID: strings.TrimSpace(sessionID),
-		ToolCall:  toolCall,
-		Options:   options,
-		Meta:      cloneAnyMap(meta),
+	if req.ToolCall.Kind == nil {
+		req.ToolCall.Kind = displayToolCall.Kind
 	}
-	if toolMeta := acpMetaWithToolName(meta, approval.ToolCall.Name); len(toolMeta) > 0 {
-		req.ToolCall.Meta = mergeACPEventMeta(req.ToolCall.Meta, toolMeta)
+	if req.ToolCall.Status == nil {
+		req.ToolCall.Status = displayToolCall.Status
 	}
-	return req
+	if len(req.ToolCall.Content) == 0 {
+		req.ToolCall.Content = displayToolCall.Content
+	}
+	req.ToolCall.Meta = mergeACPEventMeta(req.ToolCall.Meta, displayToolCall.Meta)
+	if strings.TrimSpace(req.ToolCall.ToolCallID) == "" &&
+		req.ToolCall.Title == nil &&
+		req.ToolCall.Kind == nil &&
+		len(approval.Options) == 0 &&
+		len(schema.NormalizeRawMap(req.ToolCall.RawInput)) == 0 {
+		return nil
+	}
+	return &req
 }
 
 func ApprovalPayloadFromPermission(req *schema.RequestPermissionRequest) *approval.Payload {
 	if req == nil {
 		return nil
 	}
-	rawInput := rawInputMap(req.ToolCall.RawInput)
+	_, normalized, _, err := semantic.DecodePermissionRequest(*req)
+	if err != nil || normalized == nil {
+		return nil
+	}
+	rawInput := cloneAnyMap(normalized.ToolCall.RawInput)
 	payload := &approval.Payload{
-		ToolCallID:         strings.TrimSpace(req.ToolCall.ToolCallID),
-		ToolName:           permissionToolName(req),
+		ToolCallID:         strings.TrimSpace(normalized.ToolCall.ID),
+		ToolName:           strings.TrimSpace(normalized.ToolCall.Name),
 		RawInput:           rawInput,
 		Reason:             firstNonEmpty(rawString(rawInput, "approval_reason"), rawString(rawInput, "reason")),
 		Justification:      rawString(rawInput, "justification"),
 		SandboxPermissions: rawString(rawInput, "sandbox_permissions"),
 		Status:             approval.StatusPending,
 	}
-	if len(req.Options) > 0 {
-		payload.Options = make([]approval.Option, 0, len(req.Options))
-		for _, option := range req.Options {
+	if len(normalized.Options) > 0 {
+		payload.Options = make([]approval.Option, 0, len(normalized.Options))
+		for _, option := range normalized.Options {
 			payload.Options = append(payload.Options, approval.Option{
-				ID:   strings.TrimSpace(option.OptionID),
+				ID:   strings.TrimSpace(option.ID),
 				Name: strings.TrimSpace(option.Name),
 				Kind: strings.TrimSpace(option.Kind),
 			})
 		}
 	}
 	return payload
-}
-
-func permissionToolName(req *schema.RequestPermissionRequest) string {
-	if req == nil {
-		return ""
-	}
-	meta := metautil.Merge(req.ToolCall.Meta, req.Meta)
-	return firstNonEmpty(
-		metautil.String(meta, metautil.Root, metautil.Runtime, metautil.RuntimeTool, metautil.RuntimeToolName),
-		stringFromPtr(req.ToolCall.Title),
-		stringFromPtr(req.ToolCall.Kind),
-	)
 }
 
 func protocolApprovalFromPayload(payload *approval.Payload) *session.ProtocolApproval {
@@ -495,15 +497,6 @@ func rawString(values map[string]any, key string) string {
 	}
 	text, _ := values[key].(string)
 	return strings.TrimSpace(text)
-}
-
-func rawInputMap(value any) map[string]any {
-	switch typed := value.(type) {
-	case map[string]any:
-		return cloneAnyMap(typed)
-	default:
-		return nil
-	}
 }
 
 func stringFromPtr(value *string) string {

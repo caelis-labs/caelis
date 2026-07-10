@@ -145,16 +145,6 @@ func permissionToolCallUpdateFromProtocol(call session.ProtocolToolCall) ToolCal
 	return withDisplayTerminalUpdate(update, call.ID, call.Name)
 }
 
-func rawInputLen(raw any) int {
-	if raw == nil {
-		return 0
-	}
-	if mapped, ok := raw.(map[string]any); ok {
-		return len(mapped)
-	}
-	return 1
-}
-
 func explicitUpdates(event *session.Event) []Update {
 	if event == nil || event.Protocol == nil {
 		return nil

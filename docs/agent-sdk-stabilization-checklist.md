@@ -35,7 +35,7 @@ Status values:
 
 | ID | Status | Exit condition |
 | --- | --- | --- |
-| P1-1 ACP semantic completeness | partial | Permission, cancel, participant, and handoff have one normalized codec path and built-in/external conformance, matching the completed update codec |
+| P1-1 ACP semantic completeness | closed | Permission, cancel, participant, and handoff have one normalized codec path and built-in/external conformance, matching the completed update codec |
 | P1-2 Control ownership completion | partial | Surface/source strings are translated by Control into neutral SDK owner/principal/role values; system Agents reuse the common Runtime safety pipeline |
 | P1-3 Durable continuation and placement | partial | Contract is either safe checkpoint/lease-based continuation or explicitly live-process attachment; production host exercises session lease lifecycle |
 | P1-4 Execution capability wiring | partial | Control derives and validates actual model, tool, and sandbox requirements; unsupported output/features do not silently degrade |
@@ -56,6 +56,17 @@ Use small, independently committable slices:
 6. ACP/Control/system-Agent contract completion.
 7. Control watchdog, capability wiring, schema/API compatibility, and release
    enforcement.
+
+### P1 closing evidence
+
+- **P1-1:** `protocol/acp/semantic` owns permission request/response and cancel
+  wire conversion plus participant/handoff lifecycle conversion. Both the
+  event projector and ACP Runtime bridge use that permission codec. Exact
+  wire/normalized round trips cover nested tool identity, raw input/content,
+  allow/reject outcomes, cancellation identity, participant lifecycle, and
+  handoff lifecycle. Runtime participant production, external ACP manual
+  permission and cancellation, and Control-owned atomic handoff commit have
+  conformance regressions against those normalized semantics.
 
 Do not combine unrelated P0s into one broad rewrite. Update this board in the
 same commit as the closing evidence. Do not edit the frozen v0.25.0 acceptance
