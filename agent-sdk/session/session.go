@@ -25,6 +25,10 @@ var (
 	// ErrInvalidEvent reports that one event payload is incomplete.
 	ErrInvalidEvent = errorcode.New(errorcode.InvalidArgument, "agent-sdk/session: invalid event")
 
+	// ErrInvalidTransaction reports a compound mutation without a stable retry
+	// identity.
+	ErrInvalidTransaction = errorcode.New(errorcode.InvalidArgument, "agent-sdk/session: invalid transaction")
+
 	// ErrInvalidValue reports a session value that cannot be represented by the
 	// shared JSON-compatible durable value contract.
 	ErrInvalidValue = errorcode.New(errorcode.InvalidArgument, "agent-sdk/session: invalid JSON-compatible value")
@@ -382,11 +386,16 @@ type AppendEventsRequest struct {
 }
 
 // AppendEventsAndUpdateStateRequest appends multiple events and derives the
-// next session state in one store transaction. UpdateState receives the
-// normalized events that will be returned to the caller.
+// next session state in one store transaction. TransactionID identifies the
+// complete event/state mutation across retries. UpdateState receives the
+// normalized events that will be returned to the caller; an event-derived
+// callback is not repeated when every input event deduplicates. A pure-state
+// mutation uses no Events and must provide its own stable TransactionID for
+// idempotent retry.
 type AppendEventsAndUpdateStateRequest struct {
 	SessionRef       SessionRef
 	ExpectedRevision *uint64
+	TransactionID    string
 	Events           []*Event
 	UpdateState      func(storedEvents []*Event, state map[string]any) (map[string]any, error)
 }

@@ -110,6 +110,9 @@ func TestRuntimeCompactionInjectsCheckpointAndTrimsOldHistory(t *testing.T) {
 	var compactText string
 	for _, event := range loaded.Events {
 		if event != nil && event.Type == session.EventTypeCompact {
+			if strings.TrimSpace(event.IdempotencyKey) == "" {
+				t.Fatalf("compact event has no stable retry identity: %+v", event)
+			}
 			sawCompact = true
 			compactText = strings.TrimSpace(session.EventText(event))
 			break

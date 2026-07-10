@@ -2181,6 +2181,12 @@ func TestRuntimeRunPersistsPlanLoopAndState(t *testing.T) {
 	}
 	var planEvent *session.Event
 	for _, event := range loaded.Events {
+		switch session.EventTypeOf(event) {
+		case session.EventTypeUser, session.EventTypeToolCall, session.EventTypeToolResult, session.EventTypePlan:
+			if strings.TrimSpace(event.IdempotencyKey) == "" {
+				t.Fatalf("runtime fact %s has no stable retry identity: %+v", session.EventTypeOf(event), event)
+			}
+		}
 		if event != nil && event.Type == session.EventTypePlan {
 			planEvent = event
 			break

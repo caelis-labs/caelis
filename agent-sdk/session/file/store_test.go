@@ -1356,6 +1356,7 @@ func TestStoreWALRecoversCommittedEventAndStateAfterCrashPoints(t *testing.T) {
 			_, err = store.AppendEventsAndUpdateState(ctx, session.AppendEventsAndUpdateStateRequest{
 				SessionRef:       created.SessionRef,
 				ExpectedRevision: &zero,
+				TransactionID:    "transaction-wal",
 				Events: []*session.Event{{
 					ID: "event-wal", Type: session.EventTypeUser, Message: &message,
 				}},
@@ -1399,6 +1400,51 @@ func TestStoreWALRecoversCommittedEventAndStateAfterCrashPoints(t *testing.T) {
 				t.Fatalf("Events(after retry) = %#v, %v, want one", events, err)
 			}
 		})
+	}
+}
+
+func TestStoreCompoundCommittedErrorRetryDoesNotReapplyState(t *testing.T) {
+	root := t.TempDir()
+	store := NewStore(Config{RootDir: root, SessionIDGenerator: func() string { return "sess-compound-committed" }})
+	service := NewService(store)
+	created, err := service.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	store.transactionFault = func(phase string) error {
+		if phase == "after_commit" {
+			store.transactionFault = nil
+			return errors.New("simulated committed compound failure")
+		}
+		return nil
+	}
+	message := model.NewTextMessage(model.RoleUser, "committed compound retry")
+	event := &session.Event{ID: "event-compound-committed", IdempotencyKey: "fact:compound-committed", Type: session.EventTypeUser, Message: &message}
+	stateCalls := 0
+	request := func() session.AppendEventsAndUpdateStateRequest {
+		return session.AppendEventsAndUpdateStateRequest{
+			SessionRef: created.SessionRef, TransactionID: "transaction-compound-committed", Events: []*session.Event{event},
+			UpdateState: func(_ []*session.Event, state map[string]any) (map[string]any, error) {
+				stateCalls++
+				state["count"] = float64(stateCalls)
+				return state, nil
+			},
+		}
+	}
+	if _, err := service.AppendEventsAndUpdateState(context.Background(), request()); !session.IsCommitted(err) {
+		t.Fatalf("first AppendEventsAndUpdateState() error = %v, want committed error", err)
+	}
+
+	reopened := NewService(NewStore(Config{RootDir: root}))
+	if _, err := reopened.AppendEventsAndUpdateState(context.Background(), request()); err != nil {
+		t.Fatalf("retry AppendEventsAndUpdateState() error = %v", err)
+	}
+	loaded, err := reopened.LoadSession(context.Background(), session.LoadSessionRequest{SessionRef: created.SessionRef})
+	if err != nil {
+		t.Fatalf("LoadSession() error = %v", err)
+	}
+	if stateCalls != 1 || loaded.State["count"] != float64(1) || len(loaded.Events) != 1 || loaded.Session.Revision != 1 {
+		t.Fatalf("retry outcome = calls %d revision %d state %#v events %#v, want one complete transaction", stateCalls, loaded.Session.Revision, loaded.State, loaded.Events)
 	}
 }
 
@@ -1473,7 +1519,8 @@ func TestStoreAppendEventsAndUpdateStateDoesNotAppendLogWhenStateUpdateFails(t *
 	prompt := model.NewTextMessage(model.RoleUser, "review this change")
 	assistant := model.NewTextMessage(model.RoleAssistant, "allow")
 	_, err = store.AppendEventsAndUpdateState(ctx, session.AppendEventsAndUpdateStateRequest{
-		SessionRef: createdSession.SessionRef,
+		SessionRef:    createdSession.SessionRef,
+		TransactionID: "transaction-state-failure",
 		Events: []*session.Event{
 			{Type: session.EventTypeUser, Message: &prompt, Text: prompt.TextContent()},
 			{Type: session.EventTypeAssistant, Message: &assistant, Text: assistant.TextContent()},

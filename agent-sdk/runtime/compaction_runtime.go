@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
@@ -133,10 +134,16 @@ func (r *Runtime) persistCompactionArtifacts(
 	if result.CompactEvent == nil {
 		return nil, errors.New("agent-sdk/runtime: compact event is required")
 	}
+	compactEvent := normalizeEvent(activeSession, "", result.CompactEvent)
+	if strings.TrimSpace(compactEvent.IdempotencyKey) == "" {
+		if data, ok := compact.CompactEventDataFromEvent(compactEvent); ok && data.SummarizedThroughSeq > 0 {
+			compactEvent.IdempotencyKey = fmt.Sprintf("compact:%d:%s:%s", data.SummarizedThroughSeq, data.Generator, data.Trigger)
+		}
+	}
 	persisted, err := r.sessions.AppendEvent(ctx, session.AppendEventRequest{
 		SessionRef:       ref,
 		ExpectedRevision: &sourceRevision,
-		Event:            normalizeEvent(activeSession, "", result.CompactEvent),
+		Event:            compactEvent,
 	})
 	if err != nil {
 		return nil, err

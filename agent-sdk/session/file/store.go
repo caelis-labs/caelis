@@ -233,7 +233,7 @@ func (s *Store) appendEventRequest(req session.AppendEventRequest) (*session.Eve
 		if err != nil {
 			return err
 		}
-		nextDoc, tx, err := s.prepareAppendTransactionForDocument(doc, []*session.Event{event}, existingEvents, nil, nil, req.ExpectedRevision)
+		nextDoc, tx, err := s.prepareAppendTransactionForDocument(doc, []*session.Event{event}, existingEvents, nil, nil, req.ExpectedRevision, "")
 		if err != nil {
 			return err
 		}
@@ -260,25 +260,34 @@ func (s *Store) prepareAppendTransactionForDocument(
 	mutate session.AppendSessionMutation,
 	updateState session.AppendStateUpdate,
 	expectedRevision *uint64,
+	transactionID string,
 ) (persistedDocument, session.PreparedAppendTransaction, error) {
 	tx, err := session.PrepareAppendTransaction(session.PrepareAppendTransactionRequest{
-		Session:          doc.Session,
-		State:            doc.State,
-		Events:           events,
-		ExistingEvents:   existingEvents,
-		ExistingIDs:      existingEventIDSet(existingEvents),
-		ExpectedRevision: expectedRevision,
-		LastSeq:          session.LastEventSeq(existingEvents),
-		Now:              s.now(),
-		AllocateEventID:  s.ensureUniqueEventID,
-		MutateSession:    mutate,
-		UpdateState:      updateState,
+		Session:            doc.Session,
+		State:              doc.State,
+		Events:             events,
+		ExistingEvents:     existingEvents,
+		ExistingIDs:        existingEventIDSet(existingEvents),
+		ExpectedRevision:   expectedRevision,
+		TransactionID:      transactionID,
+		TransactionApplied: doc.AppliedTransactions[strings.TrimSpace(transactionID)],
+		LastSeq:            session.LastEventSeq(existingEvents),
+		Now:                s.now(),
+		AllocateEventID:    s.ensureUniqueEventID,
+		MutateSession:      mutate,
+		UpdateState:        updateState,
 	})
 	if err != nil {
 		return persistedDocument{}, session.PreparedAppendTransaction{}, err
 	}
 	doc.Session = tx.Session
 	doc.State = cloneState(tx.State)
+	if tx.RecordTransaction {
+		if doc.AppliedTransactions == nil {
+			doc.AppliedTransactions = map[string]bool{}
+		}
+		doc.AppliedTransactions[tx.TransactionID] = true
+	}
 	return doc, tx, nil
 }
 
@@ -337,7 +346,7 @@ func (s *Store) AppendEvents(
 		if err != nil {
 			return err
 		}
-		nextDoc, tx, err := s.prepareAppendTransactionForDocument(doc, req.Events, existingEvents, nil, nil, req.ExpectedRevision)
+		nextDoc, tx, err := s.prepareAppendTransactionForDocument(doc, req.Events, existingEvents, nil, nil, req.ExpectedRevision, "")
 		if err != nil {
 			return err
 		}
@@ -375,7 +384,7 @@ func (s *Store) AppendEventsAndUpdateState(
 		if err != nil {
 			return err
 		}
-		nextDoc, tx, err := s.prepareAppendTransactionForDocument(doc, req.Events, existingEvents, nil, req.UpdateState, req.ExpectedRevision)
+		nextDoc, tx, err := s.prepareAppendTransactionForDocument(doc, req.Events, existingEvents, nil, req.UpdateState, req.ExpectedRevision, req.TransactionID)
 		if err != nil {
 			return err
 		}
@@ -472,6 +481,7 @@ func (s *Store) BindControllerWithEvent(
 			},
 			nil,
 			req.ExpectedRevision,
+			"",
 		)
 		if err != nil {
 			return err
@@ -545,6 +555,7 @@ func (s *Store) PutParticipantWithEvent(
 			},
 			nil,
 			req.ExpectedRevision,
+			"",
 		)
 		if err != nil {
 			return err
@@ -618,6 +629,7 @@ func (s *Store) RemoveParticipantWithEvent(
 			},
 			nil,
 			req.ExpectedRevision,
+			"",
 		)
 		if err != nil {
 			return err

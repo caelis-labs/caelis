@@ -1886,6 +1886,7 @@ package github.com/caelis-labs/caelis/agent-sdk/session
   type AppendEventsAndUpdateStateRequest struct {
       SessionRef       SessionRef
       ExpectedRevision *uint64
+      TransactionID    string
       Events           []*Event
       UpdateState      func(storedEvents []*Event, state map[string]any) (map[string]any, error)
   }
@@ -2171,17 +2172,19 @@ package github.com/caelis-labs/caelis/agent-sdk/session
       Detail  string
   }
   type PrepareAppendTransactionRequest struct {
-      Session          Session
-      State            map[string]any
-      Events           []*Event
-      ExistingEvents   []*Event
-      ExistingIDs      map[string]struct{}
-      ExpectedRevision *uint64
-      LastSeq          uint64
-      Now              time.Time
-      AllocateEventID  EventIDAllocator
-      MutateSession    AppendSessionMutation
-      UpdateState      AppendStateUpdate
+      Session            Session
+      State              map[string]any
+      Events             []*Event
+      ExistingEvents     []*Event
+      ExistingIDs        map[string]struct{}
+      ExpectedRevision   *uint64
+      TransactionID      string
+      TransactionApplied bool
+      LastSeq            uint64
+      Now                time.Time
+      AllocateEventID    EventIDAllocator
+      MutateSession      AppendSessionMutation
+      UpdateState        AppendStateUpdate
   }
   type PrepareEventsForAppendRequest struct {
       SessionID       string
@@ -2199,10 +2202,12 @@ package github.com/caelis-labs/caelis/agent-sdk/session
       Title     string
   }
   type PreparedAppendTransaction struct {
-      Session  Session
-      State    map[string]any
-      Prepared PreparedAppendEvents
-      Changed  bool
+      Session           Session
+      State             map[string]any
+      Prepared          PreparedAppendEvents
+      Changed           bool
+      TransactionID     string
+      RecordTransaction bool
   }
   type ProtocolApproval struct {
       ToolCall ProtocolToolCall         `json:"tool_call,omitempty"`
@@ -2434,6 +2439,8 @@ package github.com/caelis-labs/caelis/agent-sdk/session
       ErrInvalidSession = errorcode.New(errorcode.InvalidArgument, "agent-sdk/session: invalid session")
 
       ErrInvalidEvent = errorcode.New(errorcode.InvalidArgument, "agent-sdk/session: invalid event")
+
+      ErrInvalidTransaction = errorcode.New(errorcode.InvalidArgument, "agent-sdk/session: invalid transaction")
 
       ErrInvalidValue = errorcode.New(errorcode.InvalidArgument, "agent-sdk/session: invalid JSON-compatible value")
 

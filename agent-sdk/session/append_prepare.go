@@ -1,6 +1,7 @@
 package session
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"time"
@@ -42,26 +43,30 @@ type AppendStateUpdate func([]*Event, map[string]any) (map[string]any, error)
 // transaction. Stores provide existing IDs and commit the returned session,
 // state, and persisted events with their own IO primitive.
 type PrepareAppendTransactionRequest struct {
-	Session          Session
-	State            map[string]any
-	Events           []*Event
-	ExistingEvents   []*Event
-	ExistingIDs      map[string]struct{}
-	ExpectedRevision *uint64
-	LastSeq          uint64
-	Now              time.Time
-	AllocateEventID  EventIDAllocator
-	MutateSession    AppendSessionMutation
-	UpdateState      AppendStateUpdate
+	Session            Session
+	State              map[string]any
+	Events             []*Event
+	ExistingEvents     []*Event
+	ExistingIDs        map[string]struct{}
+	ExpectedRevision   *uint64
+	TransactionID      string
+	TransactionApplied bool
+	LastSeq            uint64
+	Now                time.Time
+	AllocateEventID    EventIDAllocator
+	MutateSession      AppendSessionMutation
+	UpdateState        AppendStateUpdate
 }
 
 // PreparedAppendTransaction is the normalized mutation plan for one store
 // append transaction.
 type PreparedAppendTransaction struct {
-	Session  Session
-	State    map[string]any
-	Prepared PreparedAppendEvents
-	Changed  bool
+	Session           Session
+	State             map[string]any
+	Prepared          PreparedAppendEvents
+	Changed           bool
+	TransactionID     string
+	RecordTransaction bool
 }
 
 // PrepareEventsForAppend canonicalizes and validates one append batch before
@@ -156,6 +161,10 @@ func PrepareAppendTransaction(req PrepareAppendTransactionRequest) (PreparedAppe
 	if err := ValidateState(req.State); err != nil {
 		return PreparedAppendTransaction{}, err
 	}
+	transactionID := strings.TrimSpace(req.TransactionID)
+	if req.UpdateState != nil && transactionID == "" {
+		return PreparedAppendTransaction{}, fmt.Errorf("transaction_id is required for compound state mutation: %w", ErrInvalidTransaction)
+	}
 	prepared, err := PrepareEventsForAppend(PrepareEventsForAppendRequest{
 		SessionID:       req.Session.SessionID,
 		Events:          req.Events,
@@ -167,6 +176,14 @@ func PrepareAppendTransaction(req PrepareAppendTransactionRequest) (PreparedAppe
 	})
 	if err != nil {
 		return PreparedAppendTransaction{}, err
+	}
+	if req.TransactionApplied {
+		if len(prepared.Persisted) > 0 {
+			return PreparedAppendTransaction{}, &EventConflictError{SessionID: req.Session.SessionID, IdempotencyKey: "transaction:" + transactionID}
+		}
+		return PreparedAppendTransaction{
+			Session: req.Session, State: CloneState(req.State), Prepared: prepared, TransactionID: transactionID,
+		}, nil
 	}
 
 	nextSession := CloneSession(req.Session)
@@ -185,7 +202,7 @@ func PrepareAppendTransaction(req PrepareAppendTransactionRequest) (PreparedAppe
 	if ApplyPreparedAppendToSession(&nextSession, prepared) {
 		changed = true
 	}
-	if req.UpdateState != nil {
+	if req.UpdateState != nil && (len(req.Events) == 0 || len(prepared.Persisted) > 0) {
 		next, err := req.UpdateState(CloneEvents(prepared.Events), CloneState(nextState))
 		if err != nil {
 			return PreparedAppendTransaction{}, err
@@ -200,14 +217,20 @@ func PrepareAppendTransaction(req PrepareAppendTransactionRequest) (PreparedAppe
 		nextSession.UpdatedAt = req.Now
 		changed = true
 	}
+	recordTransaction := transactionID != ""
+	if recordTransaction {
+		changed = true
+	}
 	if changed {
 		nextSession.Revision = req.Session.Revision + 1
 	}
 	return PreparedAppendTransaction{
-		Session:  nextSession,
-		State:    nextState,
-		Prepared: prepared,
-		Changed:  changed,
+		Session:           nextSession,
+		State:             nextState,
+		Prepared:          prepared,
+		Changed:           changed,
+		TransactionID:     transactionID,
+		RecordTransaction: recordTransaction,
 	}, nil
 }
 

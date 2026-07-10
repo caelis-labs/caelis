@@ -103,6 +103,74 @@ func TestStoreUpdateState(t *testing.T) {
 	}
 }
 
+func TestCompoundTransactionIdentityDoesNotReapplyStateOnRetry(t *testing.T) {
+	t.Parallel()
+
+	store := NewStore(Config{SessionIDGenerator: func() string { return "sess-compound-retry" }})
+	service := NewService(store)
+	created, err := service.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	message := model.NewTextMessage(model.RoleUser, "compound retry")
+	event := &session.Event{ID: "event-compound-retry", IdempotencyKey: "fact:compound-retry", Type: session.EventTypeUser, Message: &message}
+	stateCalls := 0
+	req := session.AppendEventsAndUpdateStateRequest{
+		SessionRef:    created.SessionRef,
+		TransactionID: "transaction-compound-retry",
+		Events:        []*session.Event{event},
+		UpdateState: func(_ []*session.Event, state map[string]any) (map[string]any, error) {
+			stateCalls++
+			state["count"] = float64(stateCalls)
+			return state, nil
+		},
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		if _, err := service.AppendEventsAndUpdateState(context.Background(), req); err != nil {
+			t.Fatalf("AppendEventsAndUpdateState(attempt %d) error = %v", attempt+1, err)
+		}
+	}
+	loaded, err := service.LoadSession(context.Background(), session.LoadSessionRequest{SessionRef: created.SessionRef})
+	if err != nil {
+		t.Fatalf("LoadSession() error = %v", err)
+	}
+	if stateCalls != 1 || loaded.State["count"] != float64(1) || len(loaded.Events) != 1 || loaded.Session.Revision != 1 {
+		t.Fatalf("retry outcome = calls %d revision %d state %#v events %#v, want one complete transaction", stateCalls, loaded.Session.Revision, loaded.State, loaded.Events)
+	}
+	changedMessage := model.NewTextMessage(model.RoleUser, "changed transaction payload")
+	changed := req
+	changed.Events = []*session.Event{{ID: "event-compound-changed", IdempotencyKey: "fact:compound-changed", Type: session.EventTypeUser, Message: &changedMessage}}
+	if _, err := service.AppendEventsAndUpdateState(context.Background(), changed); err == nil {
+		t.Fatal("changed payload with reused TransactionID succeeded, want conflict")
+	} else {
+		var conflict *session.EventConflictError
+		if !errors.As(err, &conflict) {
+			t.Fatalf("changed transaction error = %v, want *EventConflictError", err)
+		}
+	}
+	pureStateCalls := 0
+	pureState := session.AppendEventsAndUpdateStateRequest{
+		SessionRef: created.SessionRef, TransactionID: "transaction-pure-state",
+		UpdateState: func(_ []*session.Event, state map[string]any) (map[string]any, error) {
+			pureStateCalls++
+			state["pure"] = "applied"
+			return state, nil
+		},
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		if _, err := service.AppendEventsAndUpdateState(context.Background(), pureState); err != nil {
+			t.Fatalf("pure-state AppendEventsAndUpdateState(attempt %d) error = %v", attempt+1, err)
+		}
+	}
+	loaded, err = service.LoadSession(context.Background(), session.LoadSessionRequest{SessionRef: created.SessionRef})
+	if err != nil {
+		t.Fatalf("LoadSession(after pure state) error = %v", err)
+	}
+	if pureStateCalls != 1 || loaded.State["pure"] != "applied" || loaded.Session.Revision != 2 {
+		t.Fatalf("pure-state retry = calls %d revision %d state %#v, want one separately identified commit", pureStateCalls, loaded.Session.Revision, loaded.State)
+	}
+}
+
 func TestStoreIsolatesNestedMetadataEventsAndState(t *testing.T) {
 	t.Parallel()
 

@@ -172,7 +172,7 @@ func (s *Store) appendEventRequest(req session.AppendEventRequest) (*session.Eve
 		return nil, session.ErrSessionNotFound
 	}
 
-	tx, err := s.prepareAppendTransactionForRecord(record, []*session.Event{event}, nil, nil, req.ExpectedRevision)
+	tx, err := s.prepareAppendTransactionForRecord(record, []*session.Event{event}, nil, nil, req.ExpectedRevision, "")
 	if err != nil {
 		return nil, err
 	}
@@ -187,22 +187,25 @@ func (s *Store) prepareAppendTransactionForRecord(
 	mutate session.AppendSessionMutation,
 	updateState session.AppendStateUpdate,
 	expectedRevision *uint64,
+	transactionID string,
 ) (session.PreparedAppendTransaction, error) {
 	if record == nil {
 		return session.PreparedAppendTransaction{}, session.ErrSessionNotFound
 	}
 	return session.PrepareAppendTransaction(session.PrepareAppendTransactionRequest{
-		Session:          record.session,
-		State:            record.state,
-		Events:           events,
-		ExistingEvents:   record.events,
-		ExistingIDs:      existingEventIDSet(record.events),
-		ExpectedRevision: expectedRevision,
-		LastSeq:          session.LastEventSeq(record.events),
-		Now:              s.now(),
-		AllocateEventID:  s.ensureUniqueEventID,
-		MutateSession:    mutate,
-		UpdateState:      updateState,
+		Session:            record.session,
+		State:              record.state,
+		Events:             events,
+		ExistingEvents:     record.events,
+		ExistingIDs:        existingEventIDSet(record.events),
+		ExpectedRevision:   expectedRevision,
+		TransactionID:      transactionID,
+		TransactionApplied: record.appliedTransactions[strings.TrimSpace(transactionID)],
+		LastSeq:            session.LastEventSeq(record.events),
+		Now:                s.now(),
+		AllocateEventID:    s.ensureUniqueEventID,
+		MutateSession:      mutate,
+		UpdateState:        updateState,
 	})
 }
 
@@ -214,6 +217,12 @@ func (s *Store) applyAppendTransactionToRecord(record *record, tx session.Prepar
 	record.state = cloneState(tx.State)
 	if len(tx.Prepared.Persisted) > 0 {
 		record.events = append(record.events, session.CloneEvents(tx.Prepared.Persisted)...)
+	}
+	if tx.RecordTransaction {
+		if record.appliedTransactions == nil {
+			record.appliedTransactions = map[string]bool{}
+		}
+		record.appliedTransactions[tx.TransactionID] = true
 	}
 }
 
@@ -232,7 +241,7 @@ func (s *Store) AppendEvents(
 	if !ok {
 		return nil, session.ErrSessionNotFound
 	}
-	tx, err := s.prepareAppendTransactionForRecord(record, req.Events, nil, nil, req.ExpectedRevision)
+	tx, err := s.prepareAppendTransactionForRecord(record, req.Events, nil, nil, req.ExpectedRevision, "")
 	if err != nil {
 		return nil, err
 	}
@@ -255,7 +264,7 @@ func (s *Store) AppendEventsAndUpdateState(
 	if !ok {
 		return nil, session.ErrSessionNotFound
 	}
-	tx, err := s.prepareAppendTransactionForRecord(record, req.Events, nil, req.UpdateState, req.ExpectedRevision)
+	tx, err := s.prepareAppendTransactionForRecord(record, req.Events, nil, req.UpdateState, req.ExpectedRevision, req.TransactionID)
 	if err != nil {
 		return nil, err
 	}
@@ -313,6 +322,7 @@ func (s *Store) BindControllerWithEvent(
 		},
 		nil,
 		req.ExpectedRevision,
+		"",
 	)
 	if err != nil {
 		return session.Session{}, nil, err
@@ -360,6 +370,7 @@ func (s *Store) PutParticipantWithEvent(
 		},
 		nil,
 		req.ExpectedRevision,
+		"",
 	)
 	if err != nil {
 		return session.Session{}, nil, err
@@ -407,6 +418,7 @@ func (s *Store) RemoveParticipantWithEvent(
 		},
 		nil,
 		req.ExpectedRevision,
+		"",
 	)
 	if err != nil {
 		return session.Session{}, nil, err
@@ -617,9 +629,10 @@ func (s *Service) UpdateState(
 }
 
 type record struct {
-	session session.Session
-	events  []*session.Event
-	state   map[string]any
+	session             session.Session
+	events              []*session.Event
+	state               map[string]any
+	appliedTransactions map[string]bool
 }
 
 func (r *record) cloneSession() session.Session {

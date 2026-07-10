@@ -156,8 +156,9 @@ func TestPrepareAppendTransactionAppliesSessionMutationStateAndMetadata(t *testi
 	now := time.Unix(20, 0)
 	message := model.NewTextMessage(model.RoleUser, "hello from transaction")
 	tx, err := PrepareAppendTransaction(PrepareAppendTransactionRequest{
-		Session: Session{SessionRef: SessionRef{SessionID: "sess-1"}},
-		State:   map[string]any{"cursor": float64(1)},
+		Session:       Session{SessionRef: SessionRef{SessionID: "sess-1"}},
+		State:         map[string]any{"cursor": float64(1)},
+		TransactionID: "transaction-1",
 		Events: []*Event{{
 			Type:    EventTypeUser,
 			Message: &message,
@@ -204,6 +205,22 @@ func TestPrepareAppendTransactionAppliesSessionMutationStateAndMetadata(t *testi
 	}
 	if len(tx.Prepared.Persisted) != 1 || tx.Prepared.Persisted[0].ID != "event-1" {
 		t.Fatalf("Persisted = %#v, want allocated event", tx.Prepared.Persisted)
+	}
+}
+
+func TestPrepareAppendTransactionRequiresIdentityForStateMutation(t *testing.T) {
+	t.Parallel()
+
+	_, err := PrepareAppendTransaction(PrepareAppendTransactionRequest{
+		Session: Session{SessionRef: SessionRef{SessionID: "sess-missing-transaction"}},
+		State:   map[string]any{},
+		UpdateState: func(_ []*Event, state map[string]any) (map[string]any, error) {
+			state["unsafe"] = true
+			return state, nil
+		},
+	})
+	if !errors.Is(err, ErrInvalidTransaction) {
+		t.Fatalf("PrepareAppendTransaction() error = %v, want ErrInvalidTransaction", err)
 	}
 }
 

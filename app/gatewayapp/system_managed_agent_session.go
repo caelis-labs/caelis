@@ -264,11 +264,23 @@ func (s *systemManagedAgentSession) commit(
 	}
 	promptToStore := session.CloneEvent(promptEvent)
 	annotateSystemManagedAgentPromptState(promptToStore, s.agentID, s.purpose, s.reuseKey, cursor)
+	transactionID := fmt.Sprintf(
+		"system-agent:%s:%d:%d:%s",
+		strings.TrimSpace(s.agentID), version, cursor.EventCount, strings.TrimSpace(cursor.LastEventID),
+	)
+	if promptToStore != nil && strings.TrimSpace(promptToStore.IdempotencyKey) == "" {
+		promptToStore.IdempotencyKey = transactionID + ":prompt"
+	}
+	assistantToStore := session.CloneEvent(assistantEvent)
+	if assistantToStore != nil && strings.TrimSpace(assistantToStore.IdempotencyKey) == "" {
+		assistantToStore.IdempotencyKey = transactionID + ":assistant"
+	}
 	storedEvents, err := batch.AppendEventsAndUpdateState(ctx, session.AppendEventsAndUpdateStateRequest{
-		SessionRef: s.session.SessionRef,
+		SessionRef:    s.session.SessionRef,
+		TransactionID: transactionID,
 		Events: []*session.Event{
 			promptToStore,
-			session.CloneEvent(assistantEvent),
+			assistantToStore,
 		},
 		UpdateState: func(storedEvents []*session.Event, state map[string]any) (map[string]any, error) {
 			if len(storedEvents) != 2 {

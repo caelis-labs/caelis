@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -18,10 +19,11 @@ func buildUserEvent(activeSession session.Session, turnID string, input string, 
 	}
 	message, displayText, meta := userdisplay.Resolve(input, displayInput, parts, nil)
 	return &session.Event{
-		Type:       session.EventTypeUser,
-		Visibility: session.VisibilityCanonical,
-		Actor:      session.ActorRef{Kind: session.ActorKindUser, Name: "user"},
-		Scope:      ptrScope(defaultScope(activeSession, turnID)),
+		IdempotencyKey: "turn-input:" + strings.TrimSpace(turnID),
+		Type:           session.EventTypeUser,
+		Visibility:     session.VisibilityCanonical,
+		Actor:          session.ActorRef{Kind: session.ActorKindUser, Name: "user"},
+		Scope:          ptrScope(defaultScope(activeSession, turnID)),
 		Protocol: &session.EventProtocol{
 			Update: &session.ProtocolUpdate{
 				SessionUpdate: string(session.ProtocolUpdateTypeUserMessage),
@@ -90,6 +92,14 @@ func normalizeEvent(activeSession session.Session, turnID string, event *session
 	}
 	if event.Actor.Kind == "" {
 		event.Actor = defaultActorForEvent(event)
+	}
+	if strings.TrimSpace(event.IdempotencyKey) == "" && event.Tool != nil {
+		switch session.EventTypeOf(event) {
+		case session.EventTypeToolCall, session.EventTypeToolResult:
+			if toolID := strings.TrimSpace(event.Tool.ID); toolID != "" {
+				event.IdempotencyKey = fmt.Sprintf("%s:%s", session.EventTypeOf(event), toolID)
+			}
+		}
 	}
 	return event
 }
@@ -160,13 +170,19 @@ func (r *Runtime) handlePlanEvent(
 	}
 	normalized := normalizeEvent(session.Session{}, turnID, planEvent)
 	normalized.Scope.Controller = event.Scope.Controller
+	planIdentity := stableToolFactIdentity(event)
+	if planIdentity == "" {
+		return nil, true, errors.New("agent-sdk/runtime: plan result requires a stable tool identity")
+	}
+	normalized.IdempotencyKey = "plan-state:" + planIdentity
 	batch, ok := r.sessions.(session.EventBatchStateService)
 	if !ok {
 		return nil, true, fmt.Errorf("agent-sdk/runtime: session service must support atomic plan event/state commit")
 	}
 	persisted, err := batch.AppendEventsAndUpdateState(ctx, session.AppendEventsAndUpdateStateRequest{
-		SessionRef: ref,
-		Events:     []*session.Event{normalized},
+		SessionRef:    ref,
+		TransactionID: normalized.IdempotencyKey,
+		Events:        []*session.Event{normalized},
 		UpdateState: func(_ []*session.Event, state map[string]any) (map[string]any, error) {
 			if state == nil {
 				state = map[string]any{}
@@ -186,6 +202,13 @@ func (r *Runtime) handlePlanEvent(
 		return nil, true, fmt.Errorf("agent-sdk/runtime: atomic plan commit returned %d events", len(persisted))
 	}
 	return persisted[0], true, nil
+}
+
+func stableToolFactIdentity(event *session.Event) string {
+	if event == nil || event.Tool == nil {
+		return ""
+	}
+	return strings.TrimSpace(event.Tool.ID)
 }
 
 func planEntriesFromEvent(event *session.Event) ([]plan.Entry, string, bool) {
