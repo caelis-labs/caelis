@@ -24,13 +24,21 @@ Use this as a direction, not a hard package map:
 Presentation surfaces -> Control layer -> Agent Runtime / SDK
 ```
 
-- Surfaces consume ACP-style events plus documented `_meta` extensions.
+- ACP is Caelis's native interoperability language for built-in and external
+  Agents as well as the surface protocol. Reusable normalized ACP semantics may
+  live in `agent-sdk`; the root `protocol/acp` packages own product wire,
+  compatibility, and projection.
 - The control layer assembles runnable agents, owns lifecycle/policy/review
-  orchestration, and bridges runtime/control events to the surface protocol.
-- Agent Runtime modules should be reusable below the application and should not
-  depend on presentation or one controller implementation.
-- Internal runtime/control events do not have to be ACP schemas. ACP is the
-  surface-facing contract.
+  orchestration, endpoint selection, Agent Manage Loop decisions, and handoff
+  authorization. Agents may suggest but must not commit handoff.
+- Agent Runtime packages should be reusable below the application and should
+  not depend on presentation, product assembly, or one transport
+  implementation.
+- Internal runtime/control events do not all have to be raw ACP wire schemas,
+  but collaboration crossing built-in/external Agent boundaries should use the
+  shared ACP semantics.
+- Caelis does not target a deterministic workflow graph or node executor;
+  dynamic orchestration belongs to the Control-layer Agent Manage Loop.
 
 ## Review Focus
 
@@ -46,6 +54,8 @@ Look for concrete risks, not theoretical purity:
 - system-managed agents implemented as ad hoc subagent/UI special cases;
 - extension blockers for Guardian, Reviewer, Agent Manage Loop, or external ACP
   agent collaboration;
+- duplicated or drifting ACP semantic contract owners across SDK and product
+  wire packages;
 - Go issues around context, concurrency, errors, resources, interfaces, tests,
   and package ownership.
 

@@ -2,6 +2,10 @@
 
 This is the standard release checklist. Update this document when the process changes.
 
+All Go packages, including `agent-sdk/*`, are versioned and released with the
+root `github.com/caelis-labs/caelis` module and root `vX.Y.Z` tag. There is no
+separate Agent SDK module or release process.
+
 1. Confirm the worktree only contains intended changes.
 2. Confirm `main` is current with `origin/main`.
 3. Confirm `README.md` points to the official site and install scripts:

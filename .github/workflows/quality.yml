@@ -40,6 +40,9 @@ jobs:
       - name: Architecture lint
         run: make arch-lint
 
+      - name: Agent SDK package boundary
+        run: make sdk-boundary-check
+
       - name: Test
         run: make test
 

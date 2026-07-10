@@ -114,6 +114,24 @@ func TestBoundaryRuleRejectsPublicContractsImportingInternal(t *testing.T) {
 			want:       "",
 		},
 		{
+			name:       "agent-sdk packages may import agent-sdk internal helpers",
+			rel:        "agent-sdk/runtime/runtime.go",
+			importPath: modulePath + "/agent-sdk/internal/runstate",
+			want:       "",
+		},
+		{
+			name:       "agent-sdk packages must not import retained product ports",
+			rel:        "agent-sdk/runtime/runtime.go",
+			importPath: modulePath + "/ports/plugin",
+			want:       "agent-sdk/runtime must not depend on product-host or old ports packages",
+		},
+		{
+			name:       "agent-sdk packages must not import platform packages",
+			rel:        "agent-sdk/runtime/runtime.go",
+			importPath: modulePath + "/platform/runtime",
+			want:       "agent-sdk must not depend on non-SDK Caelis packages",
+		},
+		{
 			name:       "impl agent local compat may import agent-sdk runtime",
 			rel:        "impl/agent/local/local.go",
 			importPath: modulePath + "/agent-sdk/runtime",

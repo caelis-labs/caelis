@@ -132,9 +132,6 @@ func readModulePath(path string) (string, error) {
 }
 
 func semanticBoundaryRule(rel string, file *ast.File, fset *token.FileSet, modulePath string) (string, string, int) {
-	if rule, subject, line := agentSDKInternalLayerRule(rel); rule != "" {
-		return rule, subject, line
-	}
 	if rule, subject, line := surfaceGatewayConsumptionRule(rel, file, fset, modulePath); rule != "" {
 		return rule, subject, line
 	}
@@ -146,13 +143,6 @@ func semanticBoundaryRule(rel string, file *ast.File, fset *token.FileSet, modul
 	}
 	if rule, subject, line := gatewayAggregateAccessorRule(rel, file, fset); rule != "" {
 		return rule, subject, line
-	}
-	return "", "", 0
-}
-
-func agentSDKInternalLayerRule(rel string) (string, string, int) {
-	if strings.HasPrefix(rel, "agent-sdk/internal/") {
-		return "agent-sdk must not use an internal package layer", rel, 1
 	}
 	return "", "", 0
 }
@@ -546,9 +536,6 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 		if strings.HasPrefix(target, "internal/") {
 			return "agent-sdk must not depend on repository internal packages"
 		}
-		if target == "agent-sdk/internal" || strings.HasPrefix(target, "agent-sdk/internal/") {
-			return "agent-sdk must not depend on agent-sdk/internal"
-		}
 		if strings.HasPrefix(rel, "agent-sdk/model/codefreecaps/") {
 			if strings.HasPrefix(target, "impl/") {
 				return "agent-sdk/model/codefreecaps must not depend on impl packages"
@@ -815,6 +802,9 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 		if isAgentSDKRootFile(rel) &&
 			(target == "ports/approval" || strings.HasPrefix(target, "ports/approval/")) {
 			return "agent-sdk root must not depend on ports/approval"
+		}
+		if target != "agent-sdk" && !strings.HasPrefix(target, "agent-sdk/") {
+			return "agent-sdk must not depend on non-SDK Caelis packages"
 		}
 	case strings.HasPrefix(rel, "internal/sandboxrouter/"):
 		if strings.HasSuffix(rel, "_test.go") {

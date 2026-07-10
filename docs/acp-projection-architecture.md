@@ -1,17 +1,51 @@
 # ACP Projection Architecture
 
-Caelis presentation surfaces share one protocol: standard ACP-shaped payloads
-plus documented optional `_meta` extensions. TUI, ACP stdio/server, headless,
-and future GUI surfaces consume this protocol and should not own runtime,
-control, tool, sandbox, stream, or persistence semantics.
+ACP has two related roles in Caelis:
+
+1. It is the native interoperability and control language shared by built-in
+   and external Agents.
+2. It is the common protocol projected to presentation surfaces.
+
+This document focuses on the second role. The reusable SDK boundary and
+ACP-native orchestration decisions are documented in
+[docs/agent-sdk-boundary.md](agent-sdk-boundary.md).
+
+Caelis presentation surfaces consume standard ACP-shaped payloads plus
+documented optional `_meta` extensions. TUI, ACP stdio/server, headless, and
+future GUI surfaces should not own runtime, control, tool, sandbox, stream, or
+persistence semantics.
 
 ```text
-Agent Runtime / SDK -> Control layer -> eventstream.Envelope -> surfaces
+Built-in Agent Runtime -------------------------------+
+                                                       +-> normalized SDK ACP semantics
+External ACP Agent -> transport/lifecycle adapter ----+   -> Control / Agent Manage Loop
+                                                            -> eventstream.Envelope
+                                                            -> surfaces
 ```
 
 The control layer may bridge local runtime events, system-managed agent events,
 or external ACP-agent updates. Surfaces should not need to know which source
 produced an event once it has been normalized into `eventstream.Envelope`.
+
+Native ACP means semantic equivalence, not mandatory JSON-RPC serialization for
+in-process Agents. Canonical message and tool payloads remain the model-context
+truth; an ACP update or surface envelope is not a replacement for them.
+
+## Orchestration Ownership
+
+Built-in and external Agents differ in transport, process lifecycle, trust, and
+policy. They do not use different top-level controller or participant semantics.
+
+The Control layer owns endpoint selection, attachment, detachment, and handoff.
+An Agent may emit completion, capability, or recommendation signals, but it
+must not switch the active controller through a tool call or model output.
+Only explicit user control or the Agent Manage Loop and other dynamic Control
+policy may authorize and commit a handoff.
+
+Caelis does not provide a deterministic workflow graph, node/edge DSL, or
+static workflow executor. Dynamic orchestration observes events and state,
+selects the next action at runtime, and persists decisions that affect durable
+execution or controller ownership.
 
 ## Terminal Projection
 

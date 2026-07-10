@@ -10,10 +10,12 @@
 - Add abstractions only when they remove real complexity or match an established pattern.
 - Target architecture: presentation surfaces -> control layer -> Agent Runtime / SDK. Current package names are transitional.
 - Surfaces consume ACP-shaped `eventstream.Envelope` payloads plus documented `_meta` extensions; they must not own model, tool, sandbox, policy, persistence, or runtime semantics.
-- The control layer owns orchestration: lifecycle, Agent assembly, permissions, Guardian/Reviewer/system agents, future Agent Manage Loop coordination, and external ACP-agent bridges.
-- Agent Runtime / SDK modules should be reusable below the application and must not depend on presentation or one controller.
+- ACP is the native interoperability language for built-in and external Agents as well as the surface protocol. Reusable normalized ACP semantics may live in `agent-sdk`; root `protocol/acp/*` owns product wire transport, compatibility, and projection.
+- The control layer owns orchestration: lifecycle, Agent assembly, permissions, Guardian/Reviewer/system agents, future Agent Manage Loop coordination, endpoint selection, and handoff authorization. Agents must not autonomously commit handoff.
+- Agent Runtime / SDK packages should be reusable below the application and must not depend on presentation, product assembly, or one transport implementation.
+- Do not build a deterministic workflow graph/node engine. Dynamic orchestration belongs to the control-layer Agent Manage Loop.
 - Prefer reusable public contracts in `agent-sdk/*`; keep product-host contracts in `ports/*` and private glue in `internal/*`; avoid mixing app-control contracts with reusable runtime contracts.
-- SDK packages must not depend on `app/*`, `surfaces/*`, `protocol/acp/*`, product-host `ports/*`, or repository `internal/*` packages outside the SDK module.
+- `agent-sdk/*` is a package tree in the root Go module, not a nested module. SDK packages must not depend on `app/*`, `surfaces/*`, `protocol/acp/*`, product-host `ports/*`, or repository `internal/*` packages outside the `agent-sdk` package tree.
 - Avoid growing central orchestration files. For coherent features in large/high-touch files, prefer a nearby module with docs and tests.
 - Document new exported types, interfaces, and non-obvious contracts.
 - Persist semantic model state, not UI transcript cache. `_meta` is display/debug unless documented as replay metadata.
@@ -27,7 +29,7 @@
 
 ## Validation
 - Run `gofmt` on touched Go files, focused `go test` packages for changed behavior, and `git diff --check`.
-- Before committing, run `make commit-check`; it includes formatting, `golangci-lint`, `arch-lint`, vet, tests, SDK boundary gates, and build.
+- Before committing, run `make commit-check`; it includes formatting, `golangci-lint`, `arch-lint`, the SDK package-boundary gate, vet, tests, and build.
 - Run `make arch-lint` after import, package ownership, gateway/eventstream, or session protocol changes.
 - Persistence or replay changes need round-trip tests comparing rebuilt model context with runtime-produced context.
 - Projection/UI reload tests do not replace model-context round-trip tests.

@@ -110,6 +110,12 @@ The default data root is:
 Interactive sessions are stored under `~/.caelis/sessions` unless `-store-dir`
 is provided.
 
+## Architecture
+
+See [docs/architecture.md](docs/architecture.md) for the layer map and
+[docs/agent-sdk-boundary.md](docs/agent-sdk-boundary.md) for the reusable Agent
+SDK package boundary, ACP-native orchestration model, and evolution plan.
+
 ## Development
 
 Caelis requires the Go version declared in `go.mod`.
