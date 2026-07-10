@@ -1,0 +1,114 @@
+{
+  "baseline_tag": "v0.25.0",
+  "current_snapshot": "agent-sdk/api.txt",
+  "removals": [
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk",
+      "sha256": "6a9ae99de99317e87dc43b29ce9f561c0cdf9d58ba1c1094c2c95f65799576f2",
+      "symbol": "RunNotResumableError.Error",
+      "reason": "The old name falsely implied durable continuation; v0.25 stabilization replaced it with process-local RunNotAttachableError."
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk",
+      "sha256": "a153955d762802258536dc5940101b84439b1542a792e282e8ffe99e1370f74c",
+      "symbol": "RunNotResumableError.ErrorCode",
+      "reason": "The old error contract was removed with ambiguous Resume and replaced by RunNotAttachableError."
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk",
+      "sha256": "4b3711c9c960e94389d23f1b31950787f8bffa554e2d0aca03010b85849a9dbe",
+      "symbol": "ResumableRuntime",
+      "reason": "Approval resolution and process-local live attachment are separate capabilities; durable replay across unknown side effects is not supported."
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk",
+      "sha256": "5922f03c2dd9285824395bb1a61624c36488616656c38bffa17a3115b15d4d75",
+      "symbol": "ResumeRequest",
+      "reason": "Renamed to AttachLiveRunRequest to make the process-local non-durable contract explicit."
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk",
+      "sha256": "b95d74b4c7396e327702692d966e7aa3f16cde94d3536ce3e4bef1acb747cf01",
+      "symbol": "RunNotResumableError",
+      "reason": "Replaced by RunNotAttachableError after narrowing Resume to honest live-process attachment."
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk/model",
+      "sha256": "87d605dc5373236fd7e7764b9c048dab225f97e7c4acbe3fe1fd0466888b5286",
+      "symbol": "OutputMode constants",
+      "reason": "OutputModeToolOnly had no provider implementation and silently degraded; it was removed before v1 while supported modes gained fail-closed validation."
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk/runtime",
+      "sha256": "9fa64bb645eae9bee25c8bc55578ad955e9328045e4177e049d2458bf42f7f5d",
+      "symbol": "Runtime.Resume",
+      "reason": "Replaced by AttachLiveRun so callers cannot mistake in-process observation for durable continuation."
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk/runtime",
+      "sha256": "53bdd4cda7a398b4c396d3ccadbc166c94b42c5993f23ad2ed5a536a86bf45d5",
+      "symbol": "StartSubagentOptions",
+      "reason": "Added stable SpawnID required for restart-safe spawn saga idempotency."
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk/session",
+      "sha256": "b468137ffc9c7b00d7713d88d0540f4618b6c60372857831474fb10e73e688da",
+      "symbol": "SchemaKind constants",
+      "reason": "Added independent journal and pause-token schema kinds so nested raw records cannot bypass migration."
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk/session",
+      "sha256": "31d6a05a9bf258b14b254d1e722db07822804c6ce0b39e0d0073da54d7003c25",
+      "symbol": "AppendEventsAndUpdateStateRequest",
+      "reason": "Added TransactionID to deduplicate the complete event-derived state delta on compound retries."
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk/session",
+      "sha256": "b71edaad83e50c2560a71d972a3b44274340221a68fba82165abaa0e1f5754ba",
+      "symbol": "PrepareAppendTransactionRequest",
+      "reason": "Added transaction identity and prior-application state for compound idempotency."
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk/session",
+      "sha256": "8040523464df64a6f2de54efd2b9a3f8ef32cd042ddcbb16e43ebc0a03d47326",
+      "symbol": "PreparedAppendTransaction",
+      "reason": "Added transaction recording output needed to atomically persist compound retry identity."
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk/session",
+      "sha256": "8eea3db979e1d1a715fda3a7317f4749d32ead8437dfb04409b782bad2a6322c",
+      "symbol": "session error variables",
+      "reason": "Added typed invalid-transaction and lease-conflict errors; existing error values remain unchanged."
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk/task",
+      "sha256": "96e9ad38b58899130b3c0103e33b223fc41bb97f8fad8cac12a6d0ae6f03f335",
+      "symbol": "task State constants",
+      "reason": "Added prepared and unknown-outcome saga states required for crash-safe subagent spawning."
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk/task",
+      "sha256": "88b4919b8eac1f9eb2cadf5c2369810a5f783c039e5f6ac915c59b2abab06f3a",
+      "symbol": "ControlRequest",
+      "reason": "Added neutral Principal so SDK authorization no longer interprets product source strings."
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk/task",
+      "sha256": "b34b6d2c89ba83ce21131f9866a896f8ac86885347a4e688c51060812da2a4d2",
+      "symbol": "SubagentStartRequest",
+      "reason": "Added stable SpawnID and neutral participant Role while removing unused ParentTool product provenance."
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk/tool",
+      "sha256": "07baed83d19d2da213d02620d1bca12c6c23ee38fd2573f37f675ed57422db9b",
+      "symbol": "tool.Capabilities",
+      "reason": "Removed Resumable because no runtime produced or consumed it; unknown tool outcomes use Recoverer and durable execution identity instead."
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk/tool",
+      "sha256": "d3ec544432556c81c7ee7fd0812d55da6e5f1bc068ce8febb4a9bc0a568ac0e8",
+      "symbol": "tool.Definition",
+      "reason": "Added concrete ExecutionRequirements so Control can validate the actual sandbox selected for each assembled tool set."
+    }
+  ]
+}

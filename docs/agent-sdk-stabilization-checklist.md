@@ -40,7 +40,7 @@ Status values:
 | P1-3 Durable continuation and placement | closed | Contract is either safe checkpoint/lease-based continuation or explicitly live-process attachment; production host exercises session lease lifecycle |
 | P1-4 Execution capability wiring | closed | Control derives and validates actual model, tool, and sandbox requirements; unsupported output/features do not silently degrade |
 | P1-5 Runtime liveness and observability | closed | Control-owned dynamic watchdog exists; TraceSink cannot block execution indefinitely; stuck guardrails are bounded |
-| P1-6 Schema and compatibility | partial | Raw durable JSON migrates before typed decode and unknown-field corpus proves preservation; supported API is compared tag-to-tag with explicit waivers |
+| P1-6 Schema and compatibility | closed | Raw durable JSON migrates before typed decode and unknown-field corpus proves preservation; supported API is compared tag-to-tag with explicit waivers |
 | P1-7 Public consumer contract | partial | A behavioral quickstart uses only supported imports, or required reference packages are explicitly supported; actual tagged module passes a no-replace consumer smoke |
 | P1-8 Release enforcement | partial | Publish waits for quality on the same SHA and CI records focused race, regression, link, and proxy-consumer evidence |
 
@@ -123,6 +123,15 @@ Use small, independently committable slices:
   corpus proves top-level and every nested journal sentinel survives migration;
   file round-trip coverage proves the migrated journal remains outside exact
   canonical model history.
+- **P1-6 tag-to-tag API sub-slice:** `scripts/sdk_api_compat` parses declaration
+  snapshots and compares the current supported API with the `v0.25.0` release
+  tag. Additions pass; every removed or changed old declaration requires an
+  exact package plus SHA-256 waiver and a concrete reason. Missing, duplicate,
+  ambiguous, and stale waivers fail. The 18 reviewed pre-v1 changes cover the
+  honest live-attach rename, spawn/transaction identities, neutral task
+  principals/roles, capability cleanup, independent nested schemas, and
+  execution requirements. Quality checkout now fetches tags and
+  `sdk-boundary-check` runs this gate on the same candidate snapshot.
 
 Do not combine unrelated P0s into one broad rewrite. Update this board in the
 same commit as the closing evidence. Do not edit the frozen v0.25.0 acceptance

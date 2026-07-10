@@ -232,10 +232,14 @@ changes to bundled imports outside the allowlist do not carry a source-
 compatibility promise; durable schema compatibility and the contracts above
 still apply to data written by supported reference stores.
 
-The declaration snapshot detects an unreviewed worktree change, but it does not
-compare the current API with the previous release tag or prove behavioral
-compatibility. Breaking supported API changes require explicit review; a
-tag-to-tag compatibility gate remains follow-up work.
+The declaration snapshot detects an unreviewed worktree change. The
+`sdk-api-compat` gate also compares it with the baseline release tag declared in
+`agent-sdk/api-compat-waivers.json`. Additions are accepted; a removed or
+changed old declaration must match an exact package/SHA-256 waiver with a
+specific pre-v1 reason. Stale waivers fail, so they cannot silently authorize a
+different future change. This is source-declaration evidence; behavioral
+compatibility is covered separately by the supported-consumer quickstart and
+proxy smoke tests.
 
 ## Sandbox platforms
 
