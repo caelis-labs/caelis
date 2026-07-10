@@ -18,6 +18,7 @@ import (
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acputil"
 	"github.com/caelis-labs/caelis/protocol/acp/client"
 	acpschema "github.com/caelis-labs/caelis/protocol/acp/schema"
+	"github.com/caelis-labs/caelis/protocol/acp/semantic"
 )
 
 type PermissionHandler func(context.Context, client.RequestPermissionRequest) (client.RequestPermissionResponse, error)
@@ -347,7 +348,11 @@ func (r *Runner) permissionCallback(spawn subagent.SpawnContext, cfg AgentConfig
 	}
 	return func(ctx context.Context, req client.RequestPermissionRequest) (client.RequestPermissionResponse, error) {
 		if spawn.ApprovalRequester != nil {
-			resp, err := spawn.ApprovalRequester.RequestSubagentApproval(ctx, translateApprovalRequest(spawn, cfg, agentID, req))
+			approval, err := translateApprovalRequest(spawn, cfg, agentID, req)
+			if err != nil {
+				return client.RequestPermissionResponse{}, err
+			}
+			resp, err := spawn.ApprovalRequester.RequestSubagentApproval(ctx, approval)
 			if err != nil {
 				return client.RequestPermissionResponse{}, err
 			}
@@ -364,11 +369,15 @@ func translateApprovalRequest(
 	cfg AgentConfig,
 	agentID string,
 	req client.RequestPermissionRequest,
-) subagent.ApprovalRequest {
-	options := make([]subagent.ApprovalOption, 0, len(req.Options))
-	for _, item := range req.Options {
+) (subagent.ApprovalRequest, error) {
+	_, approval, _, err := semantic.DecodePermissionRequest(req)
+	if err != nil {
+		return subagent.ApprovalRequest{}, err
+	}
+	options := make([]subagent.ApprovalOption, 0, len(approval.Options))
+	for _, item := range approval.Options {
 		options = append(options, subagent.ApprovalOption{
-			ID:   strings.TrimSpace(item.OptionID),
+			ID:   strings.TrimSpace(item.ID),
 			Name: strings.TrimSpace(item.Name),
 			Kind: strings.TrimSpace(item.Kind),
 		})
@@ -381,15 +390,17 @@ func translateApprovalRequest(
 		Agent:        firstNonEmpty(strings.TrimSpace(cfg.Name), strings.TrimSpace(agentID)),
 		Mode:         strings.TrimSpace(spawn.Mode),
 		ToolCall: subagent.ApprovalToolCall{
-			ID:       strings.TrimSpace(req.ToolCall.ToolCallID),
-			Name:     acputil.ToolCallName(req.ToolCall),
-			Kind:     trimStringPtr(req.ToolCall.Kind),
-			Title:    trimStringPtr(req.ToolCall.Title),
-			Status:   trimStringPtr(req.ToolCall.Status),
-			RawInput: acpschema.NormalizeRawMap(req.ToolCall.RawInput),
+			ID:        strings.TrimSpace(approval.ToolCall.ID),
+			Name:      strings.TrimSpace(approval.ToolCall.Name),
+			Kind:      strings.TrimSpace(approval.ToolCall.Kind),
+			Title:     strings.TrimSpace(approval.ToolCall.Title),
+			Status:    strings.TrimSpace(approval.ToolCall.Status),
+			RawInput:  session.CloneState(approval.ToolCall.RawInput),
+			RawOutput: session.CloneState(approval.ToolCall.RawOutput),
+			Content:   session.CloneProtocolToolCallContent(approval.ToolCall.Content),
 		},
 		Options: options,
-	}
+	}, nil
 }
 
 func firstNonEmpty(values ...string) string {

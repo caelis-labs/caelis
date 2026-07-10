@@ -127,10 +127,11 @@ func TestToolRecoveryStatusRemainsCanonicalWithEmptyResult(t *testing.T) {
 		result     tool.RecoveryResult
 		recoverErr error
 		want       session.ToolExecutionStatus
+		wantWire   string
 	}{
-		{name: "succeeded", result: tool.RecoveryResult{Status: tool.RecoverySucceeded}, want: session.ToolExecutionSucceeded},
-		{name: "failed", result: tool.RecoveryResult{Status: tool.RecoveryFailed, Reason: "remote execution failed"}, want: session.ToolExecutionFailed},
-		{name: "unknown_error", result: tool.RecoveryResult{Status: tool.RecoveryUnknown}, recoverErr: errors.New("recovery unavailable"), want: session.ToolExecutionUnknownOutcome},
+		{name: "succeeded", result: tool.RecoveryResult{Status: tool.RecoverySucceeded}, want: session.ToolExecutionSucceeded, wantWire: "completed"},
+		{name: "failed", result: tool.RecoveryResult{Status: tool.RecoveryFailed, Reason: "remote execution failed"}, want: session.ToolExecutionFailed, wantWire: "failed"},
+		{name: "unknown_error", result: tool.RecoveryResult{Status: tool.RecoveryUnknown}, recoverErr: errors.New("recovery unavailable"), want: session.ToolExecutionUnknownOutcome, wantWire: "failed"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -182,7 +183,7 @@ func TestToolRecoveryStatusRemainsCanonicalWithEmptyResult(t *testing.T) {
 			if recovered.Journal == nil || recovered.Journal.ToolExecution == nil || recovered.Journal.ToolExecution.Status != tt.want {
 				t.Fatalf("journal status = %#v, want %q", recovered.Journal, tt.want)
 			}
-			if recovered.Tool == nil || recovered.Tool.ID != "call-recovery" || recovered.Tool.Status != string(tt.want) || recovered.Tool.Output["status"] != string(tt.want) {
+			if recovered.Tool == nil || recovered.Tool.ID != "call-recovery" || recovered.Tool.Status != tt.wantWire || recovered.Tool.Output["status"] != string(tt.want) {
 				t.Fatalf("canonical tool result = %#v, want paired %q", recovered.Tool, tt.want)
 			}
 			for _, result := range recovered.Message.ToolResults() {

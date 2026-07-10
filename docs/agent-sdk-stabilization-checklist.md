@@ -38,7 +38,7 @@ Status values:
 
 | ID | Status | Exit condition |
 | --- | --- | --- |
-| P1-1 ACP semantic completeness | partial | External and controller/subagent permission bridges must use one lossless semantic codec; recovery tool status must map to valid ACP wire enums |
+| P1-1 ACP semantic completeness | closed | External and controller/subagent permission bridges use the lossless semantic codec through the final runtime approval; recovery keeps durable status in the journal/model payload while projecting only valid ACP tool enums |
 | P1-2 Control ownership completion | partial | Source must be audit-only, including projection suppression; system Agents continue to reuse the common Runtime pipeline |
 | P1-3 Durable continuation and placement | partial | StartSubagent and manual Compact must enter through the same leased/watchdog placement envelope as ordinary production runs |
 | P1-4 Execution capability wiring | closed | Control derives and validates actual model, tool, and sandbox requirements; unsupported output/features do not silently degrade |
@@ -132,6 +132,11 @@ useful, but it no longer constitutes closing evidence for the reopened rows.
   handoff lifecycle. Runtime participant production, external ACP manual
   permission and cancellation, and Control-owned atomic handoff commit have
   conformance regressions against those normalized semantics.
+  External child permission ingress now decodes through the same codec and both
+  bridge hops preserve `RawOutput` and canonical `Content`. Recovery regressions
+  separately assert durable `succeeded`/`unknown_outcome` truth and ACP-safe
+  `completed`/`failed` projection, so wire validation cannot rewrite model or
+  journal facts.
 - **P1-2 source-policy slice:** SDK subagent role and task-control authorization
   now consume neutral `session.ParticipantRole` and `session.ActorKind` values.
   Product `Source` strings are audit provenance only and cannot change role,

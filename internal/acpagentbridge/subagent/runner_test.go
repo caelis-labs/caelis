@@ -13,6 +13,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
+	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	"github.com/caelis-labs/caelis/protocol/acp/client"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/protocol/acp/transport/stdio"
@@ -72,6 +73,36 @@ func TestRunnerHandleUpdatePublishesChildStream(t *testing.T) {
 	vendor, _ := got.Event.Protocol.Update.Meta["vendor"].(map[string]any)
 	if vendor["trace"] != "abc" {
 		t.Fatalf("Protocol.Update.Meta = %#v, want vendor trace", got.Event.Protocol.Update.Meta)
+	}
+}
+
+func TestTranslateApprovalRequestPreservesCanonicalToolPayload(t *testing.T) {
+	t.Parallel()
+
+	content := []client.ToolCallContent{{Type: "content", Content: client.TextContent{Type: "text", Text: "permission detail"}}}
+	req := client.RequestPermissionRequest{
+		SessionID: "child-1",
+		ToolCall: client.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo,
+			ToolCallID:    "call-1",
+			Title:         stringPtr("write file"),
+			Status:        stringPtr("pending"),
+			RawInput:      map[string]any{"path": "a.txt"},
+			RawOutput:     map[string]any{"preview": "new text"},
+			Content:       content,
+		},
+		Options: []client.PermissionOption{{OptionID: "allow-once", Name: "Allow once", Kind: "allow_once"}},
+	}
+
+	got, err := translateApprovalRequest(tasksubagent.SpawnContext{TaskID: "task-1"}, AgentConfig{Name: "child"}, "child-1", req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ToolCall.RawOutput["preview"] != "new text" {
+		t.Fatalf("raw output = %#v, want preserved preview", got.ToolCall.RawOutput)
+	}
+	if len(got.ToolCall.Content) != 1 || schema.ExtractTextValue(got.ToolCall.Content[0].Content) != "permission detail" {
+		t.Fatalf("content = %#v, want preserved canonical content", got.ToolCall.Content)
 	}
 }
 

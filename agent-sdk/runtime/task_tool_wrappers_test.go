@@ -6,12 +6,49 @@ import (
 	"strings"
 	"testing"
 
+	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 )
+
+func TestSubagentApprovalRequesterPreservesCanonicalToolPayload(t *testing.T) {
+	t.Parallel()
+
+	var captured agent.ApprovalRequest
+	requester := subagentApprovalRequester{
+		requester: approvalRequesterFunc(func(_ context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+			captured = req
+			return agent.ApprovalResponse{Outcome: "selected", OptionID: "allow-once", Approved: true}, nil
+		}),
+		sessionRef: session.SessionRef{SessionID: "parent-1"},
+	}
+	_, err := requester.RequestSubagentApproval(context.Background(), tasksubagent.ApprovalRequest{
+		TaskID: "task-1",
+		ToolCall: tasksubagent.ApprovalToolCall{
+			ID:        "call-1",
+			Name:      "WRITE",
+			RawInput:  map[string]any{"path": "a.txt"},
+			RawOutput: map[string]any{"preview": "new text"},
+			Content: []session.ProtocolToolCallContent{{
+				Type:    "content",
+				Content: session.ProtocolTextContent("permission detail"),
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if captured.Approval == nil || captured.Approval.ToolCall.RawOutput["preview"] != "new text" {
+		t.Fatalf("approval = %#v, want preserved raw output", captured.Approval)
+	}
+	if len(captured.Approval.ToolCall.Content) != 1 {
+		t.Fatalf("content = %#v, want preserved canonical content", captured.Approval.ToolCall.Content)
+	}
+}
 
 func TestRuntimeRunCommandToolAcceptsLegacyAdditionalPermissionsMode(t *testing.T) {
 	t.Parallel()

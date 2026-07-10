@@ -390,5 +390,10 @@ func rawObject(raw json.RawMessage) map[string]any {
 }
 
 func recoveredToolStatus(status session.ToolExecutionStatus) string {
-	return string(status)
+	switch status {
+	case session.ToolExecutionSucceeded:
+		return "completed"
+	default:
+		return "failed"
+	}
 }
