@@ -5,10 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
+
+const approvalResolutionRecoveryTimeout = 5 * time.Second
 
 type activeRun struct {
 	ref     session.SessionRef
@@ -148,11 +151,13 @@ func (r *Runtime) ResolveApproval(ctx context.Context, req agent.ResolveApproval
 	if err := session.ValidatePauseTokenTransition(token, next); err != nil {
 		return err
 	}
-	if err := r.appendPauseToken(ctx, ref, next); err != nil {
+	if err := r.appendPauseTokenWithGuard(ctx, ref, next, session.ControlMutationGuard()); err != nil {
 		if !session.IsCommitted(err) {
 			return err
 		}
-		durable, loadErr := r.pauseToken(ctx, ref, next.TokenID)
+		recoveryCtx, cancel := boundedApprovalRecoveryContext(ctx)
+		defer cancel()
+		durable, loadErr := r.pauseToken(recoveryCtx, ref, next.TokenID)
 		if loadErr != nil {
 			return errors.Join(err, loadErr)
 		}
@@ -201,8 +206,19 @@ func (r *Runtime) cancelPauseToken(ctx context.Context, ref session.SessionRef, 
 }
 
 func (r *Runtime) appendPauseToken(ctx context.Context, ref session.SessionRef, token session.PauseToken) error {
-	_, err := r.sessions.AppendEvent(ctx, session.AppendEventRequest{SessionRef: ref, MutationGuard: session.RuntimeMutationGuard(ctx), Event: pauseTokenEvent(token)})
+	return r.appendPauseTokenWithGuard(ctx, ref, token, session.RuntimeMutationGuard(ctx))
+}
+
+func (r *Runtime) appendPauseTokenWithGuard(ctx context.Context, ref session.SessionRef, token session.PauseToken, guard session.MutationGuard) error {
+	_, err := r.sessions.AppendEvent(ctx, session.AppendEventRequest{SessionRef: ref, MutationGuard: guard, Event: pauseTokenEvent(token)})
 	return err
+}
+
+func boundedApprovalRecoveryContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithTimeout(context.WithoutCancel(ctx), approvalResolutionRecoveryTimeout)
 }
 
 func pauseTokenEvent(token session.PauseToken) *session.Event {

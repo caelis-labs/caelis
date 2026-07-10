@@ -11,12 +11,39 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
+	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
 type postCommitApprovalService struct {
 	session.Service
 	failResolved atomic.Bool
+}
+
+type cancelAfterCommitApprovalService struct {
+	session.Service
+	armed  atomic.Bool
+	cancel context.CancelFunc
+}
+
+func (s *cancelAfterCommitApprovalService) AppendEvent(ctx context.Context, req session.AppendEventRequest) (*session.Event, error) {
+	persisted, err := s.Service.AppendEvent(ctx, req)
+	if err != nil || !s.armed.CompareAndSwap(true, false) {
+		return persisted, err
+	}
+	if token := pauseTokenFromEvent(req.Event); token == nil || token.Status != session.PauseTokenResolved {
+		s.armed.Store(true)
+		return persisted, nil
+	}
+	s.cancel()
+	return persisted, &session.CommittedError{Err: context.Canceled}
+}
+
+func (s *cancelAfterCommitApprovalService) Events(ctx context.Context, req session.EventsRequest) ([]*session.Event, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return s.Service.Events(ctx, req)
 }
 
 func (s *postCommitApprovalService) AppendEvent(ctx context.Context, req session.AppendEventRequest) (*session.Event, error) {
@@ -170,5 +197,87 @@ func TestResolveApprovalRedeliversMatchingDurableDecision(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("idempotent ResolveApproval() did not redeliver the durable decision")
+	}
+}
+
+func TestResolveApprovalRecoversCommittedDecisionAfterResolverCancellation(t *testing.T) {
+	t.Parallel()
+
+	for _, kind := range []string{"memory", "file"} {
+		kind := kind
+		t.Run(kind, func(t *testing.T) {
+			t.Parallel()
+			var base session.Service
+			switch kind {
+			case "memory":
+				base = inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+			case "file":
+				base = sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()}))
+			}
+			resolverCtx, cancel := context.WithCancel(context.Background())
+			sessions := &cancelAfterCommitApprovalService{Service: base, cancel: cancel}
+			active, err := sessions.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "resolver-cancel", PreferredSessionID: "approval-" + kind})
+			if err != nil {
+				t.Fatal(err)
+			}
+			runtime, err := New(Config{Sessions: sessions, AgentFactory: chat.Factory{}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			runID, turnID := "run-"+kind, "turn-"+kind
+			if err := runtime.startRunTurnJournal(context.Background(), active.SessionRef, runID, turnID); err != nil {
+				t.Fatal(err)
+			}
+			result := make(chan error, 1)
+			go func() {
+				_, requestErr := runtime.requestDurableApproval(context.Background(), agent.ApprovalRequest{
+					SessionRef: active.SessionRef, Session: active, RunID: runID, TurnID: turnID,
+					Tool: tool.Definition{Name: "WRITE"}, Call: tool.Call{ID: "call-" + kind, Name: "WRITE"},
+				}, nil)
+				result <- requestErr
+			}()
+
+			var tokenID string
+			deadline := time.Now().Add(2 * time.Second)
+			for time.Now().Before(deadline) && tokenID == "" {
+				state, stateErr := runtime.RunState(context.Background(), active.SessionRef)
+				if stateErr != nil {
+					t.Fatal(stateErr)
+				}
+				tokenID = state.PauseTokenID
+				if tokenID == "" {
+					time.Sleep(time.Millisecond)
+				}
+			}
+			if tokenID == "" {
+				t.Fatal("approval waiter did not persist a pause token")
+			}
+
+			decision := agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_once", Approved: true}
+			sessions.armed.Store(true)
+			if err := runtime.ResolveApproval(resolverCtx, agent.ResolveApprovalRequest{SessionRef: active.SessionRef, TokenID: tokenID, Decision: decision}); err != nil {
+				t.Fatalf("ResolveApproval() error = %v", err)
+			}
+			if resolverCtx.Err() != context.Canceled {
+				t.Fatalf("resolver context error = %v, want canceled after commit", resolverCtx.Err())
+			}
+			select {
+			case err := <-result:
+				if err != nil {
+					t.Fatalf("live approval waiter error = %v", err)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("live approval waiter remained asleep after committed resolution")
+			}
+			if err := runtime.ResolveApproval(context.Background(), agent.ResolveApprovalRequest{SessionRef: active.SessionRef, TokenID: tokenID, Decision: decision}); err != nil {
+				t.Fatalf("matching idempotent retry error = %v", err)
+			}
+			conflict := decision
+			conflict.OptionID = "reject_once"
+			conflict.Approved = false
+			if err := runtime.ResolveApproval(context.Background(), agent.ResolveApprovalRequest{SessionRef: active.SessionRef, TokenID: tokenID, Decision: conflict}); err == nil {
+				t.Fatal("conflicting retry succeeded, want fail closed")
+			}
+		})
 	}
 }
