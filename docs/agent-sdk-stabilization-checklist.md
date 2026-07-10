@@ -79,6 +79,16 @@ gates. Reproduced blockers are:
 The historical implementation evidence below describes mechanisms that remain
 useful, but it no longer constitutes closing evidence for the reopened rows.
 
+### Reopened P0 repair evidence
+
+- **P0-3 file lease committed-outcome sub-slice:** acquire and heartbeat now
+  translate a document rename followed by index/sync failure into
+  `session.CommittedError` while returning the exact durable lease revision;
+  release uses the same committed classification. File fault tests reload the
+  committed lease, release heartbeat revision 2 without a stale-revision
+  conflict, and prove a committed release removed the lease. P0-3 remains open
+  until production cancellation retains its active fencing context.
+
 ### Historical P1 implementation evidence
 
 - **P1-1:** `protocol/acp/semantic` owns permission request/response and cancel

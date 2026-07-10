@@ -56,6 +56,10 @@ func (s *Store) AcquireSessionLease(_ context.Context, req session.AcquireSessio
 		}
 		doc.Lease = &lease
 		if err := s.writeDocument(doc); err != nil {
+			if documentWriteCommitted(err) {
+				out = lease
+				return &session.CommittedError{Err: err}
+			}
 			return err
 		}
 		out = lease
@@ -86,6 +90,10 @@ func (s *Store) HeartbeatSessionLease(_ context.Context, req session.HeartbeatSe
 		active.ExpiresAt = now.Add(req.TTL)
 		doc.Lease = &active
 		if err := s.writeDocument(doc); err != nil {
+			if documentWriteCommitted(err) {
+				out = active
+				return &session.CommittedError{Err: err}
+			}
 			return err
 		}
 		out = active
@@ -110,7 +118,13 @@ func (s *Store) ReleaseSessionLease(_ context.Context, req session.ReleaseSessio
 			return err
 		}
 		doc.Lease = nil
-		return s.writeDocument(doc)
+		if err := s.writeDocument(doc); err != nil {
+			if documentWriteCommitted(err) {
+				return &session.CommittedError{Err: err}
+			}
+			return err
+		}
+		return nil
 	})
 }
 
