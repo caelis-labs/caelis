@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -63,8 +64,10 @@ type TraceRecord struct {
 	Error    string         `json:"error,omitempty"`
 }
 
-// TraceSink receives read-only lifecycle records. Implementations should be
-// non-blocking. Panics are isolated from execution by ExecuteLifecycle.
+// TraceSink receives read-only lifecycle records asynchronously. Calls may be
+// concurrent across lifecycle operations, so implementations must synchronize
+// mutable state. Slow, stuck, or panicking sinks cannot block execution;
+// observer-only records may be dropped after the bounded dispatcher saturates.
 type TraceSink interface {
 	RecordTrace(TraceRecord)
 }
@@ -93,7 +96,11 @@ func ExecuteLifecycle(ctx context.Context, event LifecycleEvent, options Lifecyc
 		clock = time.Now
 	}
 	startedAt := clock()
-	recordTrace(options.TraceSink, TraceRecord{Event: event, Status: TraceStarted, At: startedAt})
+	dispatcher := newTraceDispatcher(options.TraceSink)
+	if dispatcher != nil {
+		defer dispatcher.close()
+		dispatcher.record(TraceRecord{Event: event, Status: TraceStarted, At: startedAt})
+	}
 
 	chain := next
 	for i := len(options.Interceptors) - 1; i >= 0; i-- {
@@ -118,7 +125,9 @@ func ExecuteLifecycle(ctx context.Context, event LifecycleEvent, options Lifecyc
 		record.Status = TraceFailed
 		record.Error = strings.TrimSpace(err.Error())
 	}
-	recordTrace(options.TraceSink, record)
+	if dispatcher != nil {
+		dispatcher.record(record)
+	}
 	return err
 }
 
@@ -140,10 +149,50 @@ func normalizeLifecycleEvent(event LifecycleEvent) LifecycleEvent {
 	return event
 }
 
-func recordTrace(sink TraceSink, record TraceRecord) {
+const maxOutstandingTraceDispatchers = 32
+
+var traceDispatcherSlots = make(chan struct{}, maxOutstandingTraceDispatchers)
+
+type traceDispatcher struct {
+	once    sync.Once
+	records chan TraceRecord
+}
+
+func newTraceDispatcher(sink TraceSink) *traceDispatcher {
 	if sink == nil {
+		return nil
+	}
+	select {
+	case traceDispatcherSlots <- struct{}{}:
+	default:
+		return nil
+	}
+	dispatcher := &traceDispatcher{records: make(chan TraceRecord, 2)}
+	go func() {
+		defer func() { <-traceDispatcherSlots }()
+		for record := range dispatcher.records {
+			func() {
+				defer func() { _ = recover() }()
+				sink.RecordTrace(record)
+			}()
+		}
+	}()
+	return dispatcher
+}
+
+func (d *traceDispatcher) record(record TraceRecord) {
+	if d == nil {
 		return
 	}
-	defer func() { _ = recover() }()
-	sink.RecordTrace(record)
+	select {
+	case d.records <- record:
+	default:
+	}
+}
+
+func (d *traceDispatcher) close() {
+	if d == nil {
+		return
+	}
+	d.once.Do(func() { close(d.records) })
 }

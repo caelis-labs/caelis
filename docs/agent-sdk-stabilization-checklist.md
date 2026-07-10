@@ -93,6 +93,12 @@ Use small, independently committable slices:
   malformed tools, and undeclared model/sandbox capabilities fail closed. The
   unimplemented `tool.Resumable` and `OutputModeToolOnly` declarations were
   removed before v1 rather than advertising behavior with no consumer.
+- **P1-5 non-blocking trace sub-slice:** lifecycle trace delivery is now
+  observer-only asynchronous work. Each lifecycle preserves start/terminal
+  ordering, slow or panicking sinks cannot hold the execution path, and a
+  process-wide outstanding cap bounds permanently stuck sink calls; saturated
+  telemetry is dropped rather than backpressuring model, tool, approval, or
+  handoff execution.
 
 Do not combine unrelated P0s into one broad rewrite. Update this board in the
 same commit as the closing evidence. Do not edit the frozen v0.25.0 acceptance

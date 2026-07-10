@@ -187,6 +187,11 @@ Runtime repeats model/output validation as a defensive public boundary. Output
 contracts are strict: an unknown mode or schema mode without a schema is an
 error, never an implicit text fallback.
 
+`TraceSink` is observer-only and asynchronous. Delivery preserves the
+start/terminal order within one lifecycle operation, but sinks must tolerate
+concurrent operations. A hard outstanding-dispatch cap bounds non-cooperative
+sinks; once saturated, trace records are dropped instead of blocking execution.
+
 Hosts may implement OpenTelemetry as an interceptor or sink adapter. The SDK
 does not depend on a telemetry implementation.
 

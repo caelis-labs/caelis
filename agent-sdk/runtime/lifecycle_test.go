@@ -5,6 +5,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -104,12 +105,18 @@ func (s *concurrentTraceSink) snapshot() []agent.TraceRecord {
 }
 
 func (s *concurrentTraceSink) saw(operation agent.LifecycleOperation, status agent.TraceStatus) bool {
-	for _, record := range s.snapshot() {
-		if record.Event.Operation == operation && record.Status == status {
-			return true
+	deadline := time.Now().Add(time.Second)
+	for {
+		for _, record := range s.snapshot() {
+			if record.Event.Operation == operation && record.Status == status {
+				return true
+			}
 		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(time.Millisecond)
 	}
-	return false
 }
 
 type recordingLifecycleInterceptor struct {

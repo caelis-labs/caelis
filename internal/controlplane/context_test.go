@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -157,23 +158,40 @@ func TestCoordinatorOwnsActivationAndAtomicHandoffCommit(t *testing.T) {
 		t.Fatalf("handoff events = %#v", loaded.Events)
 	}
 	if !traceSink.saw(agent.LifecycleHandoff, agent.TraceStarted) || !traceSink.saw(agent.LifecycleHandoff, agent.TraceCompleted) {
-		t.Fatalf("trace records = %#v, want handoff lifecycle", traceSink.records)
+		t.Fatalf("trace records = %#v, want handoff lifecycle", traceSink.snapshot())
 	}
 }
 
-type controlTraceSink struct{ records []agent.TraceRecord }
+type controlTraceSink struct {
+	mu      sync.Mutex
+	records []agent.TraceRecord
+}
 
 func (s *controlTraceSink) RecordTrace(record agent.TraceRecord) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.records = append(s.records, record)
 }
 
+func (s *controlTraceSink) snapshot() []agent.TraceRecord {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]agent.TraceRecord(nil), s.records...)
+}
+
 func (s *controlTraceSink) saw(operation agent.LifecycleOperation, status agent.TraceStatus) bool {
-	for _, record := range s.records {
-		if record.Event.Operation == operation && record.Status == status {
-			return true
+	deadline := time.Now().Add(time.Second)
+	for {
+		for _, record := range s.snapshot() {
+			if record.Event.Operation == operation && record.Status == status {
+				return true
+			}
 		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(time.Millisecond)
 	}
-	return false
 }
 
 func TestCoordinatorDeactivatesNewEndpointWhenAtomicCommitFails(t *testing.T) {
