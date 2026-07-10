@@ -13,7 +13,7 @@ GOTMPDIR ?= $(CACHE_ROOT)/gotmp
 GOLANGCI_LINT_CACHE ?= $(CACHE_ROOT)/golangci-lint
 XDG_CACHE_HOME ?= $(CACHE_ROOT)/xdg
 export GOMODCACHE GOCACHE GOTMPDIR GOLANGCI_LINT_CACHE XDG_CACHE_HOME
-.PHONY: arch-lint build build-cli cache-dirs command-regression command-execution-regression commit-check eval-smoke fmt fmt-check install lint quality regression sdk-api-compat sdk-boundary-check sdk-proxy-smoke test tui-golden tui-interaction vet release-dry-run
+.PHONY: arch-lint build build-cli cache-dirs command-regression command-execution-regression commit-check docs-links eval-smoke fmt fmt-check install lint quality regression sdk-api-compat sdk-boundary-check sdk-proxy-smoke sdk-race test tui-golden tui-interaction vet release-dry-run
 
 cache-dirs:
 	mkdir -p "$(GOMODCACHE)" "$(GOCACHE)" "$(GOTMPDIR)" "$(GOLANGCI_LINT_CACHE)" "$(XDG_CACHE_HOME)"
@@ -51,6 +51,12 @@ sdk-boundary-check: cache-dirs sdk-api-compat
 
 sdk-proxy-smoke: cache-dirs
 	./scripts/sdk_proxy_smoke.sh
+
+sdk-race: cache-dirs
+	go test -race -timeout $(GO_TEST_TIMEOUT) ./agent-sdk/policy/... ./agent-sdk/session/... ./agent-sdk/runtime/...
+
+docs-links: cache-dirs
+	go run ./scripts/markdown_links
 
 quality: fmt-check lint arch-lint sdk-boundary-check vet test
 

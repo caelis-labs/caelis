@@ -23,7 +23,9 @@ separate Agent SDK module or release process.
    before the tag.
 6. Commit and push the release-ready SHA to `main`.
 7. Wait for the quality workflow for that exact SHA to succeed before creating
-   the tag.
+   the tag. This operator check catches branch-only failures early; the release
+   workflow independently invokes the same reusable quality workflow for the
+   tag SHA before publish.
 
 The focused race suite for SDK persistence/runtime work is:
 
@@ -43,10 +45,12 @@ go test -race ./agent-sdk/policy/... ./agent-sdk/session/... ./agent-sdk/runtime
 2. The release workflow must publish from the dereferenced tag commit, build
    all six supported targets, upload checksums, then publish the six platform
    npm packages before the main npm package.
-3. Publishing must be conditional on quality success for the same SHA. Until
-   the workflow enforces that dependency itself, waiting before tag creation is
-   a mandatory operator gate. The missing automated dependency was recorded by
-   the [v0.25.0 acceptance review](agent-sdk-v0.25.0-acceptance.md).
+3. The release workflow calls `quality.yml` as a reusable workflow at the
+   caller's tag SHA. The publish job declares `needs: quality`, so no GoReleaser
+   or npm publish step can start unless every quality gate succeeds for that
+   exact candidate. The tag name is passed to the no-replace consumer smoke.
+   This closes the automated dependency missing from the frozen
+   [v0.25.0 acceptance review](agent-sdk-v0.25.0-acceptance.md).
 
 ## Post-publish Acceptance
 
@@ -85,6 +89,14 @@ Release gating should record, rather than merely assume, these results:
 - documentation-link validation;
 - six-target release snapshot or equivalent build coverage;
 - no-replace consumer smoke against the actual tag/Go proxy.
+
+The reusable quality workflow records the focused Agent SDK race suite,
+regression suite, maintained-document link validation, and clean external Go
+consumer as named steps in addition to the ordinary quality gates. Pull request
+and `main` runs use the reviewed baseline tag for the consumer smoke; a tag
+release supplies its own candidate tag. The link gate covers `README.md`,
+`agent-sdk/README.md`, and maintained Markdown under `docs/` while ignoring
+example links embedded in vendored skill text.
 
 A local checklist statement is useful diagnostic context, but it is not a
 substitute for publish-gated CI evidence.

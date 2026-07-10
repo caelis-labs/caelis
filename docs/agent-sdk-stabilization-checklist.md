@@ -42,7 +42,7 @@ Status values:
 | P1-5 Runtime liveness and observability | closed | Control-owned dynamic watchdog exists; TraceSink cannot block execution indefinitely; stuck guardrails are bounded |
 | P1-6 Schema and compatibility | closed | Raw durable JSON migrates before typed decode and unknown-field corpus proves preservation; supported API is compared tag-to-tag with explicit waivers |
 | P1-7 Public consumer contract | closed | A behavioral quickstart uses only supported imports, or required reference packages are explicitly supported; actual tagged module passes a no-replace consumer smoke |
-| P1-8 Release enforcement | partial | Publish waits for quality on the same SHA and CI records focused race, regression, link, and proxy-consumer evidence |
+| P1-8 Release enforcement | closed | Publish waits for quality on the same SHA and CI records focused race, regression, link, and proxy-consumer evidence |
 
 ## Execution Order
 
@@ -139,6 +139,12 @@ Use small, independently committable slices:
   the behavioral quickstart, and verifies the resolved Caelis module has the
   exact `v0.25.0` version and no `replace`. The smoke passed against
   `https://proxy.golang.org,direct`; no new release was created.
+- **P1-8 release-enforcement slice:** `quality.yml` is now reusable and records
+  focused Agent SDK race, regression, maintained-document link, and tagged
+  no-replace consumer gates. `release.yml` invokes that workflow at the caller
+  SHA, supplies the candidate tag to the consumer smoke, and makes every
+  publish step wait on its success. Workflow contract regressions and the link
+  checker have focused tests; no tag or release was created.
 
 Do not combine unrelated P0s into one broad rewrite. Update this board in the
 same commit as the closing evidence. Do not edit the frozen v0.25.0 acceptance

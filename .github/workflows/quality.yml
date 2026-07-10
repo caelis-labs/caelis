@@ -7,6 +7,12 @@ on:
   pull_request:
   push:
     branches: [main]
+  workflow_call:
+    inputs:
+      sdk_proxy_version:
+        description: Tagged root-module version used by the no-replace consumer smoke
+        required: false
+        type: string
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -15,7 +21,7 @@ concurrency:
 jobs:
   go-quality:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v5
         with:
@@ -45,8 +51,22 @@ jobs:
       - name: Agent SDK package boundary
         run: make sdk-boundary-check
 
+      - name: Documentation links
+        run: make docs-links
+
       - name: Test
         run: make test
+
+      - name: Focused Agent SDK race
+        run: make sdk-race
+
+      - name: Regression
+        run: make regression
+
+      - name: Tagged Agent SDK external consumer
+        run: make sdk-proxy-smoke
+        env:
+          SDK_PROXY_VERSION: ${{ inputs.sdk_proxy_version }}
 
       - name: Build
         run: make build
