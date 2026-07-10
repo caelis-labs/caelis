@@ -223,7 +223,7 @@ func (r *Runtime) Run(
 	})
 	handle := newRunner(runID, cancel)
 	handle.setCancelHook(func() error {
-		return r.transitionRunTurnJournal(context.Background(), ref, runID, turnID, session.ExecutionCancelRequested, "run cancellation requested")
+		return r.transitionRunTurnJournal(context.WithoutCancel(runCtx), ref, runID, turnID, session.ExecutionCancelRequested, "run cancellation requested")
 	})
 	r.registerActiveRun(ref, activeSession, handle)
 	go func() {

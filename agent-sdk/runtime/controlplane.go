@@ -72,7 +72,7 @@ func (r *Runtime) runACPControllerTurn(
 	})
 	handle := newRunner(runID, cancel)
 	handle.setCancelHook(func() error {
-		return r.transitionRunTurnJournal(context.Background(), ref, runID, turnID, session.ExecutionCancelRequested, "run cancellation requested")
+		return r.transitionRunTurnJournal(context.WithoutCancel(ctx), ref, runID, turnID, session.ExecutionCancelRequested, "run cancellation requested")
 	})
 	r.registerActiveRun(ref, activeSession, handle)
 	go func() {
@@ -190,7 +190,7 @@ func (r *Runtime) executeACPControllerTurn(
 	}
 	if turnResult.Handle != nil {
 		handle.setCancelHook(func() error {
-			journalErr := r.transitionRunTurnJournal(context.Background(), ref, runID, turnID, session.ExecutionCancelRequested, "run cancellation requested")
+			journalErr := r.transitionRunTurnJournal(context.WithoutCancel(ctx), ref, runID, turnID, session.ExecutionCancelRequested, "run cancellation requested")
 			return errors.Join(journalErr, turnResult.Handle.Cancel().Err)
 		})
 		defer turnResult.Handle.Close()

@@ -28,7 +28,7 @@ Status values:
 | --- | --- | --- |
 | P0-1 Policy fail-closed | closed | Only explicit allow can execute; all malformed, missing, registry, and unknown decisions fail closed |
 | P0-2 Recursive value isolation | closed | Durable/public values cannot share mutable nested descendants; failed mutations roll back |
-| P0-3 Session/compaction concurrency | open | File lease post-commit outcomes must recover the durable lease, and every production cancellation mutation must retain the active lease fence |
+| P0-3 Session/compaction concurrency | closed | Checkpoint replay/CAS and shared-store fencing remain covered; file lease committed outcomes return durable revisions, and built-in/ACP cancellation preserves the active lease fence |
 | P0-4 Compound commit idempotency | partial | Provider-local tool-call IDs need run/turn/step scope, and PLAN transaction digests must cover every persisted state mutation including explanation |
 | P0-5 Tool unknown-outcome model continuity | closed | Unknown side effects produce a canonical result paired with the original call, are visible after replay, and are reconciled without blind execution |
 | P0-6 Approval committed-error liveness | closed | A durable matching resolution always wakes a live waiter, including `session.CommittedError` and idempotent retry paths |
@@ -42,7 +42,7 @@ Status values:
 | P1-2 Control ownership completion | partial | Source must be audit-only, including projection suppression; system Agents continue to reuse the common Runtime pipeline |
 | P1-3 Durable continuation and placement | partial | StartSubagent and manual Compact must enter through the same leased/watchdog placement envelope as ordinary production runs |
 | P1-4 Execution capability wiring | closed | Control derives and validates actual model, tool, and sandbox requirements; unsupported output/features do not silently degrade |
-| P1-5 Runtime liveness and observability | partial | Existing watchdog/TraceSink/guardrail bounds remain, but production cancellation must durably persist under lease fencing |
+| P1-5 Runtime liveness and observability | closed | Watchdog/TraceSink/guardrail bounds remain covered, and production built-in/ACP cancellation durably persists under lease fencing before non-cooperative work returns |
 | P1-6 Schema and compatibility | closed | Raw durable JSON migrates before typed decode and unknown-field corpus proves preservation; supported API is compared tag-to-tag with explicit waivers |
 | P1-7 Public consumer contract | partial | Proxy evidence must use a clean isolated module cache and a proxy-only route so cached or direct fallback resolution cannot pass |
 | P1-8 Release enforcement | partial | Same-SHA/non-empty workflow mechanics remain closed, but the consumer sub-gate needs strict proxy evidence and a real candidate tag remains deferred |
@@ -86,8 +86,16 @@ useful, but it no longer constitutes closing evidence for the reopened rows.
   `session.CommittedError` while returning the exact durable lease revision;
   release uses the same committed classification. File fault tests reload the
   committed lease, release heartbeat revision 2 without a stale-revision
-  conflict, and prove a committed release removed the lease. P0-3 remains open
-  until production cancellation retains its active fencing context.
+  conflict, and prove a committed release removed the lease. The Control
+  placement wrapper accepts a committed Acquire only when the returned or
+  durably reread lease matches the requested session/owner and has a usable
+  revision/fence; committed heartbeats no longer cancel a healthy run.
+- **P0-3/P1-5 cancellation-fencing sub-slice:** every built-in and ACP cancel
+  hook derives an uncancelled context from the original leased run context,
+  preserving its mutation guard. A real production `LeasedRuntime` test holds
+  a non-cooperative Agent after cancellation and observes durable
+  `cancel_requested` before it returns; the live external ACP controller path
+  proves the same ordering and fence preservation.
 
 ### Historical P1 implementation evidence
 

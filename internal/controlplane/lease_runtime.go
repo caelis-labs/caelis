@@ -81,7 +81,27 @@ func (r *LeasedRuntime) runWithLease(ctx context.Context, ref session.SessionRef
 		ctx = context.Background()
 	}
 	ref = session.NormalizeSessionRef(ref)
-	lease, err := r.leases.AcquireSessionLease(ctx, session.AcquireSessionLeaseRequest{SessionRef: ref, OwnerID: r.ownerID, TTL: r.ttl})
+	acquire := session.AcquireSessionLeaseRequest{SessionRef: ref, OwnerID: r.ownerID, TTL: r.ttl}
+	lease, err := r.leases.AcquireSessionLease(ctx, acquire)
+	if session.IsCommitted(err) {
+		committedErr := err
+		if !matchesAcquiredSessionLease(acquire, lease) {
+			if reader, ok := r.leases.(session.SessionLeaseReader); ok {
+				confirmCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), min(r.ttl, 5*time.Second))
+				durable, readErr := reader.SessionLease(confirmCtx, ref)
+				cancel()
+				if readErr != nil {
+					err = errors.Join(committedErr, readErr)
+				} else {
+					lease = durable
+					err = committedErr
+				}
+			}
+		}
+		if matchesAcquiredSessionLease(acquire, lease) {
+			err = nil
+		}
+	}
 	if err != nil {
 		return agent.RunResult{}, err
 	}
@@ -97,6 +117,13 @@ func (r *LeasedRuntime) runWithLease(ctx context.Context, ref session.SessionRef
 	result.Handle = newLeasedRunner(result.Handle, r.leases, lease, r.ttl, r.heartbeatInterval, func() { r.forgetRun(runID) })
 	r.rememberRun(runID, result.Handle)
 	return result, nil
+}
+
+func matchesAcquiredSessionLease(req session.AcquireSessionLeaseRequest, lease session.SessionLease) bool {
+	return session.NormalizeSessionRef(lease.SessionRef) == session.NormalizeSessionRef(req.SessionRef) &&
+		strings.TrimSpace(lease.LeaseID) != "" &&
+		strings.TrimSpace(lease.OwnerID) == strings.TrimSpace(req.OwnerID) &&
+		lease.Revision > 0 && lease.FencingToken > 0
 }
 
 func (r *LeasedRuntime) RunState(ctx context.Context, ref session.SessionRef) (agent.RunState, error) {

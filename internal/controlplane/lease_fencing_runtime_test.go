@@ -126,6 +126,90 @@ func TestLeaseTakeoverFencesNonCooperativeToolResultAndReplaysUnknownOutcome(t *
 	}
 }
 
+func TestLeasedRuntimeCancelPersistsFencedRequestBeforeNonCooperativeRunEnds(t *testing.T) {
+	t.Parallel()
+
+	service := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	active, err := service.StartSession(context.Background(), session.StartSessionRequest{
+		AppName: "caelis", UserID: "cancel-user", PreferredSessionID: "fenced-cancel",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	core, err := localruntime.New(localruntime.Config{Sessions: service, AgentFactory: chat.Factory{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	leased, err := NewLeasedRuntime(LeasedRuntimeConfig{
+		Runtime: core, Leases: service, OwnerID: "host-a",
+		TTL: time.Minute, HeartbeatInterval: 30 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := leased.Run(context.Background(), agent.RunRequest{
+		SessionRef: active.SessionRef,
+		Input:      "wait",
+		Agent: nonCooperativeCancelAgent{
+			started: started,
+			release: release,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("non-cooperative Agent did not start")
+	}
+
+	cancelled := run.Handle.Cancel()
+	if cancelled.Err != nil {
+		t.Fatalf("Cancel() error = %v, want fenced durable request", cancelled.Err)
+	}
+	events, err := service.Events(context.Background(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasRunJournalStatus(events, run.Handle.RunID(), session.ExecutionCancelRequested) {
+		t.Fatalf("events = %#v, want durable cancel_requested before Agent returns", events)
+	}
+
+	close(release)
+	for range run.Handle.Events() {
+	}
+}
+
+type nonCooperativeCancelAgent struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (nonCooperativeCancelAgent) Name() string { return "non-cooperative-cancel" }
+
+func (a nonCooperativeCancelAgent) Run(agent.Context) iter.Seq2[*session.Event, error] {
+	return func(func(*session.Event, error) bool) {
+		close(a.started)
+		<-a.release
+	}
+}
+
+func hasRunJournalStatus(events []*session.Event, runID string, status session.ExecutionStatus) bool {
+	for _, event := range events {
+		if event == nil || event.Journal == nil || event.Journal.Execution == nil {
+			continue
+		}
+		record := event.Journal.Execution
+		if record.Kind == session.JournalKindRun && record.RunID == runID && record.Status == status {
+			return true
+		}
+	}
+	return false
+}
+
 type fencingClock struct {
 	mu  sync.Mutex
 	now time.Time
