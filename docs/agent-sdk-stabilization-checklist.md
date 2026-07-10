@@ -28,7 +28,7 @@ Status values:
 | P0-3 Session/compaction concurrency | partial | Checkpoint persistence uses the source revision; replay keeps every fact with `Seq > summarized_through_seq`; two shared-store Runtimes are coordinated by lease/CAS |
 | P0-4 Compound commit idempotency | partial | A committed-but-reported-error retry cannot apply an event-derived state delta twice; runtime facts needed for retry have stable identities |
 | P0-5 Tool unknown-outcome model continuity | partial | Unknown side effects produce a canonical result paired with the original call, are visible after replay, and are reconciled without blind execution |
-| P0-6 Approval committed-error liveness | open | A durable matching resolution always wakes a live waiter, including `session.CommittedError` and idempotent retry paths |
+| P0-6 Approval committed-error liveness | closed | A durable matching resolution always wakes a live waiter, including `session.CommittedError` and idempotent retry paths |
 | P0-7 Subagent spawn saga | open | Spawn intent and identity are durable; task/binding lifecycle is consistent; post-spawn failures compensate or persist unknown outcome; restart never blindly respawns |
 
 ## P1 stability blockers

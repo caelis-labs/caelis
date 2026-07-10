@@ -127,6 +127,7 @@ func (r *Runtime) ResolveApproval(ctx context.Context, req agent.ResolveApproval
 	}
 	if token.Status == session.PauseTokenResolved {
 		if pauseDecisionEqual(token, req.Decision) {
+			r.deliverApprovalDecision(token)
 			return nil
 		}
 		return fmt.Errorf("agent-sdk/runtime: pause token %q already has a different resolution", token.TokenID)
@@ -147,18 +148,43 @@ func (r *Runtime) ResolveApproval(ctx context.Context, req agent.ResolveApproval
 		return err
 	}
 	if err := r.appendPauseToken(ctx, ref, next); err != nil {
-		return err
+		if !session.IsCommitted(err) {
+			return err
+		}
+		durable, loadErr := r.pauseToken(ctx, ref, next.TokenID)
+		if loadErr != nil {
+			return errors.Join(err, loadErr)
+		}
+		if durable.Status != session.PauseTokenResolved || !pauseDecisionEqual(durable, req.Decision) {
+			return err
+		}
+		r.deliverApprovalDecision(durable)
+		return nil
+	}
+	r.deliverApprovalDecision(next)
+	return nil
+}
+
+func (r *Runtime) deliverApprovalDecision(token session.PauseToken) {
+	if r == nil || token.Status != session.PauseTokenResolved {
+		return
+	}
+	decision := agent.ApprovalResponse{
+		Outcome:    token.Outcome,
+		OptionID:   token.OptionID,
+		Approved:   token.Approved,
+		Reason:     token.Reason,
+		ReviewText: token.ReviewText,
 	}
 	r.mu.RLock()
-	waiter := r.approvalWaiters[next.TokenID]
+	waiter := r.approvalWaiters[token.TokenID]
 	r.mu.RUnlock()
 	if waiter != nil {
 		select {
-		case waiter <- req.Decision:
+		case waiter <- decision:
 		default:
 		}
 	}
-	return nil
 }
 
 func (r *Runtime) cancelPauseToken(ctx context.Context, ref session.SessionRef, token session.PauseToken, reason string) error {
