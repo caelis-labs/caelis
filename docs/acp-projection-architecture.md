@@ -50,26 +50,16 @@ SDK without maintaining a second semantic schema.
 
 Built-in and external Agents differ in transport, process lifecycle, trust, and
 policy. They do not use different top-level controller or participant semantics.
+Control selects endpoints and authorizes handoff; projection only represents
+the resulting normalized facts. The full ownership, dynamic orchestration, and
+no-workflow rules are defined once in
+[Agent SDK Boundary](agent-sdk-boundary.md).
 
-The Control layer owns endpoint selection, attachment, detachment, and handoff.
-An Agent may emit completion, capability, or recommendation signals, but it
-must not switch the active controller through a tool call or model output.
-Only explicit user control or the Agent Manage Loop and other dynamic Control
-policy may authorize and commit a handoff.
-
-Caelis context-routing policy is also Control-owned. `internal/controlplane`
-selects the canonical shared-ledger delta for controller, participant, and
-subagent endpoints, while Agent Runtime consumes the resulting neutral
-`controller.ContextRoute`. The same Control coordinator activates or
-deactivates the endpoint and atomically commits the controller binding plus
-handoff event. Missing-process reattach and durable binding refresh also flow
-through an injected `controller.RecoveryCoordinator`; Runtime neither manages
-endpoint processes nor exposes a handoff operation.
-
-Caelis does not provide a deterministic workflow graph, node/edge DSL, or
-static workflow executor. Dynamic orchestration observes events and state,
-selects the next action at runtime, and persists decisions that affect durable
-execution or controller ownership.
+At `v0.25.0`, message/tool/plan updates use the centralized semantic codec.
+Permission, cancellation, participant, and handoff paths still need equivalent
+built-in/external conformance before this projection boundary is considered
+complete; see the
+[acceptance review](agent-sdk-v0.25.0-acceptance.md).
 
 ## Terminal Projection
 

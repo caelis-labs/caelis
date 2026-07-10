@@ -37,7 +37,7 @@ projection rather than those reusable semantics.
 | `agent-sdk/policy` | Policy presets and permission helpers |
 | `agent-sdk/runtime` | Local agent runtime, turn mechanics, reusable ACP-compatible endpoint/controller contracts, and low-level control-plane mechanisms |
 | `agent-sdk/sandbox` | Sandbox runtime contracts and local implementations |
-| `agent-sdk/session` | Session contracts and file, memory, and sqlite stores |
+| `agent-sdk/session` | Session contracts and bundled file/memory stores; the file store uses a SQLite secondary index |
 | `agent-sdk/skill` | Skill discovery and builtin skill tooling |
 | `agent-sdk/task` | Task and subagent contracts |
 | `agent-sdk/tool` | Tool registry contracts and builtin tools |
@@ -62,12 +62,14 @@ module version.
 
 ## Architecture and Stability
 
-The accepted boundary, ACP-native orchestration model, durability risks, and
-migration plan are documented in
-[Agent SDK Boundary and Evolution Plan](../docs/agent-sdk-boundary.md).
+The accepted package boundary, ACP-native orchestration model, and durability
+invariants are documented in
+[Agent SDK Boundary](../docs/agent-sdk-boundary.md). The frozen v0.25.0 release
+and stable-dependency verdict is in
+[Agent SDK v0.25.0 Acceptance Review](../docs/agent-sdk-v0.25.0-acceptance.md).
 
-The public quickstart and the normative concurrency, cancellation, event
-ordering, persistence, error, Go-version, and platform contracts are in
+The bundled quickstart, consumer contracts, and current concurrency,
+cancellation, persistence, and recovery limitations are in
 [Agent SDK Usage and Compatibility](../docs/agent-sdk-usage.md).
 
 Module or repository extraction is not a current goal. Package independence is

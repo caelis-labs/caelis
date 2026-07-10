@@ -42,6 +42,18 @@ carry model and tool truth below that protocol view. More detail lives in
 [docs/agent-sdk-boundary.md](agent-sdk-boundary.md) and
 [docs/acp-projection-architecture.md](acp-projection-architecture.md).
 
+Document responsibilities are intentionally separate:
+
+- this file owns the layer and repository map;
+- [Agent SDK Boundary](agent-sdk-boundary.md) owns normative SDK/Control/ACP
+  decisions;
+- [Agent SDK v0.25.0 Acceptance Review](agent-sdk-v0.25.0-acceptance.md) is the
+  frozen implementation/readiness verdict;
+- [Agent SDK Stabilization Checklist](agent-sdk-stabilization-checklist.md) is
+  the live follow-up board;
+- [Agent SDK Usage and Compatibility](agent-sdk-usage.md) owns consumer-facing
+  contracts and current limitations.
+
 ## Current Map
 
 - `cmd/caelis`, `internal/cli`: process entry and mode selection.
@@ -56,8 +68,11 @@ carry model and tool truth below that protocol view. More detail lives in
   plus prompt request/result parsing contracts.
 - `internal/controlpromptrouter`: shared app-control slash orchestration over
   `protocol/acp/control.Service`.
-- `app/gatewayapp`, `internal/kernel`, `protocol/acp/control`: current control
-  layer hotspots.
+- `internal/controlassembly`: product Agent assembly and profile resolution.
+- `internal/controlplane`: shared-ledger routing, endpoint lifecycle/recovery,
+  and handoff coordination.
+- `app/gatewayapp`, `internal/kernel`, `protocol/acp/control`: remaining control
+  layer hotspots and host integration.
 - `ports/gateway`, `ports/plugin`, `ports/controlcommand`,
   `ports/controlprompt`, and `ports/agentprofile`: product-host contracts that
   stay outside the SDK.
@@ -125,11 +140,13 @@ Repeatable SDK boundary gates:
 - `make commit-check`: run formatting, lint, architecture and package-boundary
   checks, vet, tests, and builds.
 
-The next architecture step is to harden the SDK package tree as a stable
-dependency layer, formalize one ACP semantic contract owner, and move product
-decisions out of reusable mechanisms. Module or repository extraction is not on
-the current roadmap. The accepted boundary and migration slices are documented
-in [docs/agent-sdk-boundary.md](agent-sdk-boundary.md).
+The update semantic owner, product assembly peel-off, and Control-owned handoff
+coordination are implemented. The next architecture step is to close the
+durability/replay P0s, complete permission and lifecycle ACP conformance, remove
+the remaining product source policy from SDK task code, and make system Agents
+reuse the common Runtime safety pipeline. Module or repository extraction is
+not on the roadmap. Current status is recorded in
+[the v0.25.0 acceptance review](agent-sdk-v0.25.0-acceptance.md).
 
 ## Durable State
 

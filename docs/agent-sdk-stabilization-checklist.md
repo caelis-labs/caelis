@@ -1,68 +1,83 @@
 # Agent SDK Stabilization Checklist
 
-Status: complete from baseline `ba814f51` as of 2026-07-10.
+Status: **reopened after v0.25.0 acceptance**.
 
-This is the durable execution checklist for the P0/P1 blockers in
-[Agent SDK Boundary and Evolution Plan](agent-sdk-boundary.md). Update it in
-the same commit as each completed slice. A blocker is `closed` only when its
-required invariants, focused tests, and applicable gates are all recorded.
+This is the live execution board for work after `v0.25.0`. The full evidence,
+failure interleavings, and frozen verdict are in
+[Agent SDK v0.25.0 Acceptance Review](agent-sdk-v0.25.0-acceptance.md).
+
+An item is closed only when its specific failure sequence has a regression,
+fault, race, or model-context round-trip test. Existing broad green gates are
+necessary but are not sufficient closing evidence.
 
 Status values:
 
-- `open`: known work remains and no closing slice is under verification;
-- `in progress`: implementation or required verification is incomplete;
-- `closed`: all listed invariants have committed evidence;
-- `blocked`: a reproducible external or architectural blocker is recorded.
+- `open`: the acceptance invariant is not implemented;
+- `in progress`: one bounded implementation slice is under verification;
+- `partial`: useful mechanisms exist but the acceptance invariant still fails;
+- `closed`: the exact invariant and failure interleaving have committed tests;
+- `deferred`: an explicit architecture decision narrows the contract and records
+  the remaining risk and owner.
 
-## P0 release blockers
+## P0 stable-dependency blockers
 
-| ID | Status | Required closing evidence | Current evidence / next action |
-| --- | --- | --- | --- |
-| P0-1 Policy fail-open | closed | Missing decider, unknown profile, registry failure, empty/unknown action, and invalid constraints cannot execute; external policy conformance coverage; race/focused tests | Typed `policy.DecisionError` / `policy.ProfileError`, explicit-action normalization, and fail-closed runtime resolution. External-package conformance tests: `agent-sdk/policy/policy_test.go`; runtime resolution tests: `agent-sdk/runtime/runtime_test.go`. Slice 1 race and repository gates passed. |
-| P0-2 Mutable value isolation | closed | One JSON-compatible validator/recursive clone owner; nested isolation for event tool input/output, metadata, state, context, task/result; failed-update rollback; race coverage | `agent-sdk/internal/jsonvalue` owns validation/clone semantics; session/context/policy/approval/task/tool/runtime payload paths use recursive isolation. Nested mutation, invalid value, and rollback tests cover session, memory/file stores, context, policy, task, and tool. Slice 4 also fixed memory-store snapshot reads that released `RLock` before cloning; the live-cancellation race test exercises concurrent append/read. |
-| P0-3 Session concurrency and compaction replay | closed | Monotonic event `Seq`, session `Revision`, expected-revision CAS, same-session conflict signal, compaction `summarized-through Seq`, highest-valid-coverage replay, lease/heartbeat adapter contract | Shared append preparation assigns monotonic `Event.Seq`, increments `Session.Revision`, and enforces typed revision conflicts. Runtime returns `RunConflictError` for a concurrent same-session run. Compaction records covered Seq and ignores later lower-coverage checkpoints. `SessionLeaseService` reserves cloud lease/heartbeat CAS without placement policy. Memory/file and compaction/runtime tests plus race and boundary gates passed. |
-| P0-4 Atomic persistence and idempotency | closed | Atomic event batch + state delta contract; file adapter has explicit degraded capability or safe transaction; stable event/idempotency-key dedupe/conflict; participant/PLAN/handoff compound mutations cannot split | File store now commits a fsynced WAL record before applying JSONL + session/state document changes and recovers it before every later operation. Post-commit failures return typed `file.CommittedError`; Event ID and `IdempotencyKey` retries dedupe or conflict. Runtime PLAN uses event+state batch commit, and controller handoff plus participant lifecycle use atomic binding/event store contracts. Fault tests cover precommit rollback, post-marker recovery, post-event-log recovery, no duplicate retry, and exact model-message rebuild. Race, boundary, and regression gates passed. |
-| P0-5 Tool side-effect unknown outcome | closed | Durable Run/Turn/Step/ToolExecution journal and required state machine; stable execution key; effect class and optional recovery; crash recovery produces `UnknownOutcome`; cancellation request differs from termination | Versioned durable journal records use stable session/run/turn/step/tool-call identities and validated revisions. Tool terminal state is committed atomically with the canonical tool-result event; file-store reopen coverage forces the post-side-effect/pre-result failure window and verifies `UnknownOutcome` with no replay. Tool definitions declare `read_only`, `idempotent`, or conservative `non_idempotent` effects and may implement `tool.Recoverer`. A blocking-tool race test proves `CancelRequested` is durable before `Cancelled`. |
+| ID | Status | Exit condition |
+| --- | --- | --- |
+| P0-1 Policy fail-closed | closed | Only explicit allow can execute; all malformed, missing, registry, and unknown decisions fail closed |
+| P0-2 Recursive value isolation | closed | Durable/public values cannot share mutable nested descendants; failed mutations roll back |
+| P0-3 Session/compaction concurrency | partial | Checkpoint persistence uses the source revision; replay keeps every fact with `Seq > summarized_through_seq`; two shared-store Runtimes are coordinated by lease/CAS |
+| P0-4 Compound commit idempotency | partial | A committed-but-reported-error retry cannot apply an event-derived state delta twice; runtime facts needed for retry have stable identities |
+| P0-5 Tool unknown-outcome model continuity | partial | Unknown side effects produce a canonical result paired with the original call, are visible after replay, and are reconciled without blind execution |
+| P0-6 Approval committed-error liveness | open | A durable matching resolution always wakes a live waiter, including `session.CommittedError` and idempotent retry paths |
+| P0-7 Subagent spawn saga | open | Spawn intent and identity are durable; task/binding lifecycle is consistent; post-spawn failures compensate or persist unknown outcome; restart never blindly respawns |
 
 ## P1 stability blockers
 
-| ID | Status | Required closing evidence | Current evidence / next action |
-| --- | --- | --- | --- |
-| P1-1 ACP contract and Control ownership | closed | One SDK semantic DTO owner; product wire only encodes/projects; product assembly/profile/process/UI/selection/handoff commit moved to Control; built-in/external conformance suite | Product assembly is root-private `internal/controlassembly`; remote command/config/model/mode status is product ACP-manager/gateway state. `agent-sdk/session` is the documented normalized ACP semantic owner and `protocol/acp/semantic` is the one ingress/projection wire codec, with built-in/external JSON conformance across message/tool/plan updates. Runtime requires injected neutral `controller.ContextRouter` and `RecoveryCoordinator`, contains no Caelis routing policy, endpoint activation/deactivation, or handoff operation, and only executes endpoint/participant mechanics. Root-private `internal/controlplane` owns shared-ledger routing, process reattach, endpoint activation/deactivation and rollback, durable binding refresh, plus atomic handoff binding/event persistence; kernel Control injection is explicit. |
-| P1-2 Durable Run, approval, and recovery | closed | Durable Run/Turn/Step/PauseToken; `Resume(runID)` and `ResolveApproval`; endpoint reattach/recover or typed interrupted/unknown outcome; task revision/lease/heartbeat/CAS | Run/Turn/Step are durable journal records and `RunState` rebuilds from file storage. Approval pauses persist a versioned token before waiting; `ResolveApproval` durably records the decision before waking the run, and `Resume` reattaches a live run. A restart without a live continuation returns typed `RunNotResumableError`, then recovery records `interrupted` and cancels the orphaned token. Existing ACP controller reactivation and subagent interrupted recovery remain explicit. Task entries now have revision CAS plus neutral lease acquire/heartbeat/release CAS in the file reference store; Control retains placement policy. |
-| P1-3 Public API governance | closed | Supported-package allowlist; internal helpers; narrow store/executor interfaces; consolidated approval/request/cancel contracts; external examples/contract tests/API diff gate; allowlist-based SDK boundary check | `agent-sdk/supported-packages.txt` distinguishes 16 supported imports from bundled/experimental packages; `agent-sdk/api.txt` and `scripts/sdk_api_snapshot` reject unreviewed declaration drift, and `sdk-boundary-check` compiles the allowlist from an external module while validating full SDK closure. `agent-sdk/internal/jsonvalue` hides recursive value machinery. Session lifecycle/read/append/binding/state and sandbox run/async/filesystem/reporting capabilities are independently consumable. Root endpoint approval and cancel values replace controller/subagent copies. External-package context example, session adapter assertions, policy conformance tests, and the external-module import test cover the supported contracts. |
-| P1-4 Runtime safety, capabilities, observability | closed | Model/tool/executor capability negotiation; typed lifecycle interceptors and read-only TraceSink; deterministic guardrail order/timeout/fail policy; bounded single-consumer event queue and defined close behavior | Runner is bounded, single-consumer, and cancel/discard-on-close. Per-run step/model/tool/token/cost budgets were removed as product-hostile false positives; loop protection is deferred to a future control policy. Model, tool, and sandbox executor capabilities are explicit and assembly validation is fail-closed before durable mutation. Immutable lifecycle events/interceptors and observer-only panic-isolated trace records cover run/turn/model/tool/approval/compact plus Control-owned handoff; OTel stays a host adapter. Ordered mutating input guardrails deep-copy between calls, enforce caller-side timeouts even for non-cooperative code, isolate panics, and apply explicit infrastructure fail-open/fail-closed policy while typed rejection always closes. |
-| P1-5 Schema and compatibility | closed | Versioned durable Event/Run/ToolExecution schemas and migrations; cross-version replay corpus with exact model-context equality; typed error codes; quickstart and platform/Go/concurrency/cancellation/persistence docs | Durable migrations and exact cross-version replay corpus are complete. Shared `errorcode` contracts cover supported session/run/model/policy/capability/task/tool/schema errors, and Core control paths use typed identities. `docs/agent-sdk-usage.md` defines the tested quickstart, concurrency, cancellation/close, ordering/replay, persistence/idempotency, error, Go-version, supported-build-target, and sandbox-platform contracts. |
+| ID | Status | Exit condition |
+| --- | --- | --- |
+| P1-1 ACP semantic completeness | partial | Permission, cancel, participant, and handoff have one normalized codec path and built-in/external conformance, matching the completed update codec |
+| P1-2 Control ownership completion | partial | Surface/source strings are translated by Control into neutral SDK owner/principal/role values; system Agents reuse the common Runtime safety pipeline |
+| P1-3 Durable continuation and placement | partial | Contract is either safe checkpoint/lease-based continuation or explicitly live-process attachment; production host exercises session lease lifecycle |
+| P1-4 Execution capability wiring | partial | Control derives and validates actual model, tool, and sandbox requirements; unsupported output/features do not silently degrade |
+| P1-5 Runtime liveness and observability | partial | Control-owned dynamic watchdog exists; TraceSink cannot block execution indefinitely; stuck guardrails are bounded |
+| P1-6 Schema and compatibility | partial | Raw durable JSON migrates before typed decode and unknown-field corpus proves preservation; supported API is compared tag-to-tag with explicit waivers |
+| P1-7 Public consumer contract | partial | A behavioral quickstart uses only supported imports, or required reference packages are explicitly supported; actual tagged module passes a no-replace consumer smoke |
+| P1-8 Release enforcement | partial | Publish waits for quality on the same SHA and CI records focused race, regression, link, and proxy-consumer evidence |
 
-## Slice log
+## Execution Order
 
-| Slice | Scope | Focused verification | Broad gates | Commit |
-| --- | --- | --- | --- | --- |
-| 1 | P0-1 fail-closed policy + P0-2 recursive value isolation | `go test ./agent-sdk/...`; targeted failure tests added first | Focused race suite, `make arch-lint`, `make sdk-boundary-check`, `make commit-check`, and `git diff --check` passed | `fix: harden policy and JSON value isolation` |
-| 2 | P0-3 Seq/Revision/CAS + compaction coverage replay | `go test ./agent-sdk/...`; memory/file CAS and idempotency, concurrent run, and out-of-order checkpoint tests | Focused race suite, `make arch-lint`, `make sdk-boundary-check`, `make commit-check`, and `git diff --check` passed | `fix: add session CAS and sequence contracts` |
-| 3 | P0-4 WAL atomic persistence + idempotent compound commits | WAL crash/fault recovery, stable Event ID/IdempotencyKey, atomic PLAN/participant/handoff, and model-context round-trip tests | Focused race suite, `make arch-lint`, `make sdk-boundary-check`, `make regression`, `make commit-check`, and `git diff --check` passed | `fix: make session compound commits crash atomic` |
-| 4 | P0-5 durable execution journal + unknown-outcome recovery | Run/Turn/Step/ToolExecution transition contracts, terminal tool-result atomicity, file reopen crash window, no replay, live cancellation, and canonical-history isolation | Full SDK tests, focused policy/session/runtime race suite, `make arch-lint`, `make sdk-boundary-check`, `make regression`, `make commit-check`, and `git diff --check` passed | `fix: recover unknown tool side effects safely` |
-| 5 | P1-2 durable approval/resume + task lease CAS | Live `Resume`/durable `ResolveApproval`, file-reopen RunState, orphaned pause interruption, task stale-writer and stale-heartbeat conflicts, persisted lease release, existing controller/subagent recovery | Full SDK tests, focused policy/session/runtime race suite, `make arch-lint`, `make sdk-boundary-check`, `make regression`, `make commit-check`, and `git diff --check` passed | `feat: persist approval pauses and task leases` |
-| 6 | P1-1a product assembly ownership peel | Move assembly/profile/config/Agent registry data to Control; remove Runtime product overrides, assembly validation, and registry refresh API | Runtime/kernel/app focused tests, `make arch-lint`, `make sdk-boundary-check`, `make regression`, `make commit-check`, and `git diff --check` passed | `refactor: move product assembly out of agent sdk` |
-| 7 | P1-1b controller UI/status ownership peel | Remove remote slash/config/model/mode status and mutation contracts from SDK; gateway talks directly to product ACP manager | Runtime/controller/app focused tests, `make arch-lint`, `make sdk-boundary-check`, `make regression`, `make commit-check`, and `git diff --check` passed | `refactor: move controller status policy to control` |
-| 8 | P1-1c normalized ACP semantic ownership | Make `agent-sdk/session` the explicit semantic DTO owner; centralize ACP wire encode/decode; remove duplicate ingress conversions; prove built-in/external wire equivalence | SDK/ACP/bridge focused and race tests, `make arch-lint`, `make sdk-boundary-check`, `make regression`, `make commit-check`, and `git diff --check` passed | `refactor: centralize acp semantic codecs` |
-| 9 | P1-1d Control-owned context and handoff | Inject neutral endpoint context routes; move Caelis shared-ledger policy and activate/deactivate/bind/persist coordination to root Control; explicitly inject kernel Control; remove Runtime handoff/backend exposure | Runtime/Control/kernel/app focused and race tests, full repository tests, `make arch-lint`, `make sdk-boundary-check`, `make regression`, `make commit-check`, and `git diff --check` passed; atomic handoff and rollback tests cover the product coordinator | `refactor: move handoff coordination to control` |
-| 10 | P1-3a supported API allowlist and diff gate | Define supported imports; compile them from an external module; snapshot exported declarations; fail unreviewed compatibility changes | Snapshot unit tests, `make arch-lint`, `make sdk-boundary-check`, `make commit-check`, and `git diff --check` passed | `build: govern supported agent sdk api` |
-| 11 | P1-3b narrow and consolidated contracts | Split session and sandbox aggregates into consumer capabilities; consolidate endpoint approval/cancel values; add external examples and adapter contract assertions | Full SDK and affected host tests, focused race suite, API snapshot/external consumer, `make arch-lint`, `make sdk-boundary-check`, `make commit-check`, and `git diff --check` passed | `refactor: narrow agent sdk public contracts` |
-| 12 | P1-4a bounded single-consumer run events | Bound queued events with backpressure; reject competing stream views; make natural finish drainable and explicit Close cancel/discard/unblock | Queue/Runner repeated and race tests, SDK/kernel/app focused tests, API snapshot/external consumer, `make arch-lint`, `make sdk-boundary-check`, `make commit-check`, and `git diff --check` passed | `fix: bound runtime event streams` |
-| 13 | P1-4b run budgets (removed) | Originally metered model/tool/turn/token/cost/wall budgets. Removed: fixed step budgets mis-fire on healthy agent turns; loop protection is a later Control concern. | API/docs cleanup and removal of limit wrappers; remaining P1-4 evidence is capabilities, lifecycle, guardrails, and bounded events | `feat: enforce runtime run limits` then removal on review |
-| 14 | P1-4c explicit capability negotiation | Declare model, tool, and executor capabilities; validate requested streaming/structured/parallel/reasoning/hosted/resume features before run mutation; replace name-based parallel-tool behavior | Capability failure and no-mutation tests, provider declarations, tool concurrency regression, executor validation; full SDK/race and repository gates | `feat: validate runtime capabilities` |
-| 15 | P1-4d lifecycle observability and guardrails | Add immutable lifecycle interceptors and observer-only TraceSink across Runtime plus Control handoff; ordered mutating guardrails with deep isolation, enforced timeout, panic isolation, and explicit failure policy | Lifecycle ordering/trace/panic tests; run/turn/model/tool, approval, compact, handoff integration; guardrail order/isolation/timeout/failure/rejection tests; full SDK/race, regression, and repository gates | `feat: add lifecycle tracing and guardrails` |
-| 16 | P1-5a durable schema migrations and replay corpus | Version Event, Run/Turn/Step, ToolExecution; adjacent migration registry; migrate before file validation/replay; exact v0/v1/runtime model context | Registry/future/gap/duplicate tests, legacy file coverage, append schema tests, checked-in cross-version whole-message replay corpus; full SDK/race and repository gates | `feat: migrate durable sdk schemas` |
-| 17 | P1-5b typed SDK error codes | Add shared machine codes across supported errors; type controller reattach/context overflow/backpressure; remove message parsing from Runtime/model/tool control flow | Cross-package black-box code tests, typed-vs-message tool payload test, provider status/retry tests, controller recovery and compaction regressions; full SDK/race and repository gates | `refactor: use typed sdk error codes` |
-| 18 | P1-5c public usage and compatibility contracts | Publish an executable quickstart and normative concurrency, cancellation/close, event order/replay, persistence/idempotency, error, Go-version, build-target, and sandbox-platform behavior | External-package quickstart example, link checks, cross-platform SDK builds, full SDK/race, regression, architecture, boundary, commit, and diff gates | `docs: publish agent sdk compatibility contracts` |
+Use small, independently committable slices:
 
-## Non-negotiable guardrails
+1. P0-6 approval waiter liveness.
+2. P0-3 compaction revision/CAS and covered-sequence replay.
+3. P0-4 compound transaction idempotency and stable runtime identities.
+4. P0-5 canonical unknown-outcome recovery and `tool.Recoverer` wiring.
+5. P0-7 subagent spawn intent, compensation, and recovery.
+6. ACP/Control/system-Agent contract completion.
+7. Control watchdog, capability wiring, schema/API compatibility, and release
+   enforcement.
 
-- Keep `agent-sdk` in the root module; never add a nested module or adapter
-  module to simulate isolation.
+Do not combine unrelated P0s into one broad rewrite. Update this board in the
+same commit as the closing evidence. Do not edit the frozen v0.25.0 acceptance
+record to make an item look closed.
+
+## Historical Implementation Record
+
+The first stabilization implementation spans `ba814f51..5579efa5`. It added the
+mechanisms summarized in the acceptance review, and all repository gates passed
+at the release commit. The earlier 18-slice self-reported log was removed from
+this live board because commit subjects and broad green gates did not prove the
+failure interleavings found during independent acceptance. Git remains the
+authoritative slice history.
+
+## Non-negotiable Guardrails
+
+- Keep `agent-sdk` in the root module; do not add a nested module or adapter
+  module to simulate independence.
 - Keep ACP semantic ownership flowing SDK -> product wire/projection.
 - Only Control or explicit user action may authorize controller handoff.
-- Do not add a deterministic workflow graph/executor.
+- Do not add a deterministic workflow graph/executor or an LLM-facing handoff
+  tool.
 - Persist canonical model/tool/task facts; do not promote UI transcript,
   protocol mirrors, or undocumented `_meta` into model truth.
+- Persistence and replay changes require whole-model-context round-trip tests.

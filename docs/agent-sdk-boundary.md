@@ -1,11 +1,13 @@
-# Agent SDK Boundary and Evolution Plan
+# Agent SDK Boundary
 
-Status: accepted direction as of 2026-07-10.
+Status: accepted architecture direction, implemented in part as of `v0.25.0`.
 
-This document records the target boundary for `agent-sdk`, the architecture
-review findings that block treating it as a stable dependency layer, and the
-accepted ACP-native orchestration model. It is a direction and readiness plan,
-not a claim that the current implementation already satisfies every contract.
+This document is the normative ownership and dependency contract for
+`agent-sdk`. It deliberately does not track implementation tasks or claim
+readiness. Current evidence and residual risks live in
+[Agent SDK v0.25.0 Acceptance Review](agent-sdk-v0.25.0-acceptance.md), and the
+live work queue lives in
+[Agent SDK Stabilization Checklist](agent-sdk-stabilization-checklist.md).
 
 ## Accepted Decisions
 
@@ -15,347 +17,257 @@ not a claim that the current implementation already satisfies every contract.
    dependency graph, version, release, or test lifecycle.
 2. Independence means enforced dependency direction, explicit public
    contracts, package-level testability, durable compatibility, and reuse by
-   multiple Caelis hosts. It does not require a separate Go module or Git
-   repository.
+   multiple Caelis hosts. It does not require a separate module or repository.
 3. ACP is Caelis's native interoperability and control language for built-in
-   and external agents, not only a presentation protocol.
-4. The SDK may own reusable ACP-compatible agent, controller, participant,
-   event, permission, cancellation, and transfer contracts. The concrete ACP
-   wire transport, Caelis product assembly, and surface projection remain
-   outside the SDK.
-5. Handoff is a control-plane ownership transition. An agent may report
+   and external Agents, not only a presentation protocol.
+4. The SDK owns reusable ACP-compatible semantics. The product ACP wire,
+   compatibility policy, transport, and surface projection remain outside the
+   SDK.
+5. Handoff is a Control-owned controller-epoch transition. An Agent may report
    completion, missing capability, or a suggested next actor, but it cannot
-   authorize or commit a handoff.
-6. Handoff decisions belong to explicit user control or to the Agent Manage
-   Loop and other dynamic orchestration policy in the Control layer.
+   authorize or commit handoff.
+6. Handoff decisions belong to explicit user control or dynamic orchestration
+   policy in the Control-layer Agent Manage Loop.
 7. Caelis will not build a deterministic workflow engine. A graph/DAG DSL,
    workflow nodes and edges, and SDK-owned sequential/parallel workflow state
    machines are explicit non-goals.
-8. Caelis does not adopt Agent-as-tool, Handoff, Workflow node, and Remote agent
+8. Caelis does not adopt Agent-as-tool, Handoff, Workflow node, and Remote Agent
    bridge as four required top-level Core abstractions. Existing task and
    delegation primitives remain available; remote is an ACP transport choice,
-   not a separate agent category.
+   not a separate Agent category.
 
-## Current Baseline
-
-The package layer is enforced without a nested module:
-
-- the root `go.mod` is the single dependency graph and release version owner;
-- root build, lint, vet, and test commands cover `agent-sdk/...` exactly once;
-- `make sdk-boundary-check` rejects nested module metadata, checks production
-  and test dependency closure, compiles the supported-package allowlist from an
-  external consumer of the root module, and rejects unreviewed supported API
-  declaration changes against `agent-sdk/api.txt`;
-- architecture lint prevents dependencies on product-host and presentation
-  packages.
-
-At the 2026-07-10 review snapshot, however, the SDK contained roughly 58,000
-lines of production Go, 57 externally importable packages, about 69 exported
-interfaces, 297 exported structs, and 471 exported functions. All existing
-tests and boundary gates passed, but they mostly prove that the current package
-graph compiles. They do not yet prove safe persistence, replay correctness,
-public API quality, or long-term compatibility.
-
-The boundary should therefore be hardened in place. Module or repository
-topology is not a substitute for contract quality.
-
-## Target Ownership
+## Ownership
 
 | Layer | Owns | Must not own |
 | --- | --- | --- |
-| Agent SDK stable kernel | Agent/run values, model and tool contracts, canonical session events, durable run semantics, policy and approval primitives, task/delegation primitives, normalized ACP-compatible coordination contracts, replay and turn mechanics | Caelis product profiles, UI state, agent selection policy, Manage Loop decisions, raw product wire transports |
-| Agent SDK bundled capabilities | Provider implementations, reusable stores, sandbox backends, builtin tools, MCP, skill and display helpers that remain useful to more than one host | Imports from `app/*`, `surfaces/*`, product-host `ports/*`, root `internal/*`, or the product `protocol/acp/*` implementation |
-| Caelis Control | Agent registry and assembly, endpoint factories, credentials and process lifecycle, active-controller selection, policy and approval routing, Guardian/Reviewer/system agents, Agent Manage Loop, dynamic orchestration, handoff decisions and commits | Presentation rendering; autonomous model-driven ownership transfer |
-| ACP product implementation | ACP JSON-RPC/wire schema, stdio or network transport, compatibility handling, adapters from external endpoints, projection into `eventstream.Envelope` | Agent selection policy or model-visible canonical state |
-| Surfaces | Rendering ACP-shaped envelopes, collecting user input, documented `_meta` display extensions | Runtime, policy, persistence, tool, sandbox, or handoff decisions |
+| Agent SDK stable kernel | Agent/run values, model and tool contracts, canonical session events, policy and approval primitives, durable run/replay mechanics, task/delegation primitives, normalized ACP-compatible controller and participant contracts | Caelis profiles, UI state, agent-selection policy, Manage Loop decisions, product wire transport |
+| Agent SDK bundled capabilities | Reusable providers, stores, sandbox backends, builtin tools, MCP, skills, and helpers useful to more than one host | Product imports or product-specific assembly and presentation policy |
+| Caelis Control | Agent registry and assembly, endpoint factories, credentials/process lifecycle, permission and review routing, Guardian/Reviewer/system Agents, dynamic orchestration, active-controller selection, handoff authorization and commit | Presentation rendering; autonomous model-driven ownership transfer |
+| ACP product implementation | JSON-RPC/wire schema, transport, compatibility, ingress normalization, envelope projection, documented `_meta` | Agent-selection policy or a second copy of canonical model truth |
+| Surfaces | Rendering ACP-shaped envelopes and collecting user input | Runtime, policy, persistence, tool, sandbox, or handoff decisions |
 
-Package placement remains transitional. Ownership is determined by semantics,
-not by the current directory name.
+Package placement is still transitional. Ownership is determined by semantics,
+not solely by the current directory name.
 
-The current implementation enforces the handoff boundary directly:
+## Dependency Rule
 
-- `agent-sdk/runtime` executes neutral controller and participant turns but has
-  no `HandoffController` method and contains no Caelis context-selection text;
-- hosts inject `controller.ContextRouter`, so missing routing policy fails
-  assembly instead of silently sending an arbitrary transcript;
-- root-private `internal/controlplane` owns Caelis shared-ledger selection,
-  endpoint activation/deactivation, process reattach and rollback, durable
-  binding refresh, and atomic handoff binding/event persistence;
-- `internal/kernel` receives Control explicitly and never infers orchestration
-  authority by type-asserting the execution Runtime.
+SDK packages must not depend on:
 
-## ACP-Native Collaboration Model
+- `app/*`;
+- `surfaces/*`;
+- the product `protocol/acp/*` implementation;
+- product-host `ports/*` packages;
+- repository `internal/*` packages outside the `agent-sdk` package tree.
 
-Built-in and external agents should expose the same effective language:
+The product wire and host depend inward on reusable SDK contracts, never the
+reverse. This rule is enforced by `make arch-lint` and
+`make sdk-boundary-check`, including SDK test imports. The root module remains
+the single build and release graph.
+
+Only import paths in `agent-sdk/supported-packages.txt` receive the declared
+pre-v1 source-compatibility review. Other non-`internal` SDK paths are bundled
+implementations or experimental helpers until explicitly promoted. The API
+snapshot is a review gate, not by itself proof of SemVer compatibility or
+behavioral correctness.
+
+## ACP-native Collaboration
+
+Built-in and external Agents expose the same effective language:
 
 - session identity and lifecycle;
 - declared capabilities and configuration;
-- prompt and content input;
+- prompt/content input;
 - message, thought, tool, plan, permission, and lifecycle updates;
 - cancellation and completion;
 - controller and participant identity.
 
 The transport may be an in-process call, stdio ACP, or a future network
-connection. Native ACP means semantic equivalence; it does not require an
-in-process built-in agent to serialize every call through JSON-RPC.
+connection. Native ACP means semantic equivalence; an in-process Agent does not
+need to serialize every call through JSON-RPC.
 
 ```text
 Built-in Agent Runtime -------------------------------+
                                                        |
-External ACP Agent -> ACP transport/lifecycle adapter -+-> normalized SDK ACP contracts
-                                                            -> Control / Agent Manage Loop
-                                                            -> eventstream.Envelope
+External ACP Agent -> transport/lifecycle adapter -----+-> normalized SDK semantics
+                                                            -> Caelis Control
+                                                            -> product ACP projection
                                                             -> surfaces
 ```
 
-The normalized contract needs one stable semantic owner. Keeping copied,
-independently evolving ACP-shaped DTOs in both `agent-sdk/session` and
-`protocol/acp/schema` would create two schemas. The target is:
+The normalized semantic contract has one stable owner:
 
-- reusable semantic contracts flow from the SDK toward product adapters;
-- `protocol/acp` depends on and encodes those contracts where the public ACP
-  wire shape permits;
-- Caelis-specific wire compatibility and `_meta` extensions stay in
-  `protocol/acp`;
-- the SDK never imports the product `protocol/acp` package.
+- reusable DTOs and invariants flow from `agent-sdk/session` and other SDK
+  contracts toward product adapters;
+- `protocol/acp/schema` owns public wire shapes;
+- `protocol/acp/semantic` is the wire-to-SDK codec and normalization boundary;
+- Caelis-specific compatibility and `_meta` extensions stay in `protocol/acp`;
+- external input is normalized before it enters durable state.
 
-ACP-native collaboration does not mean:
-
-- raw ACP payloads are the only persisted or model-visible truth;
-- external agents are trusted by default;
-- every UI or transport type belongs in the SDK;
-- built-in agents must run as child processes;
-- agents may autonomously transfer control.
+ACP-native collaboration does not mean that raw ACP payloads are the only
+persisted/model-visible truth, that external Agents are trusted by default, or
+that every transport and presentation type belongs in the SDK.
 
 ## Controller, Participant, Delegation, and Handoff
 
-Caelis uses two reusable collaboration roles:
+A **controller** owns the next main-session turn for one controller epoch. A
+**participant** is a bounded collaborator or sidecar and does not automatically
+replace the controller.
 
-- A **controller** owns the next main-session turn for one controller epoch.
-- A **participant** is attached to the session as a bounded collaborator or
-  sidecar without automatically replacing the controller.
-
-Task, SPAWN, and delegation primitives may use these roles, but Caelis does not
-need a generalized `Agent.asTool` abstraction. A bounded delegated result enters
-the parent model context through a canonical task or tool result, not through
+Task, SPAWN, and delegation primitives may use those roles. Caelis does not
+need a generalized `Agent.asTool` abstraction. A delegated result enters parent
+model context through a canonical task/tool/message fact, never through
 transient child stream output.
 
-Handoff is a transition between controller epochs. The SDK may define neutral
-request, result, transfer-record, and endpoint contracts, but the Control layer
-owns the operation:
+The SDK may define neutral endpoint, controller, participant, cancellation,
+transfer, and recovery contracts. Control owns the handoff operation:
 
-1. observe session, run, capability, and policy state;
+1. observe session, capability, policy, and run state;
 2. decide whether ownership should change;
-3. obtain any required approval;
-4. quiesce or cancel the current controller as required;
+3. obtain any required user or policy approval;
+4. quiesce/cancel the current controller as required;
 5. activate the selected endpoint and synchronize canonical context;
-6. atomically persist the new binding, epoch, and transfer event;
+6. atomically persist the binding, epoch, and handoff fact;
 7. resume dispatch through the selected controller.
 
-There must be no LLM-facing handoff tool. A model output may be an advisory
-signal to the Control layer, but it has no authority to mutate the active
-controller binding.
+There is no LLM-facing handoff tool. A model recommendation is advisory input to
+Control, not authority to mutate the controller binding.
 
-## Dynamic Orchestration, Not Deterministic Workflow
+The current Caelis implementation places product assembly in
+`internal/controlassembly` and shared-ledger routing, endpoint lifecycle,
+recovery, and handoff coordination in `internal/controlplane`. Runtime consumes
+injected neutral routes and mechanisms. Remaining product source-string policy
+inside SDK task/subagent code is boundary debt tracked by the acceptance review.
 
-The future Agent Manage Loop is an event-driven control loop:
+## Dynamic Orchestration
+
+The future Agent Manage Loop is an event-driven Control loop:
 
 ```text
 observe -> evaluate -> select/dispatch/handoff -> verify -> continue or stop
 ```
 
-The path is selected at runtime from session state, events, policy, capability,
-review results, and user intent. Decisions that affect ownership or durable
-execution must be auditable and persisted.
+The path is selected at runtime from durable events, capability state, policy,
+review results, progress, and user intent. Decisions that affect ownership or
+durable execution are auditable and persisted.
 
-Caelis intentionally does not provide:
+Caelis intentionally does not provide a workflow graph/node/edge DSL, a static
+graph executor, SDK-owned Sequential/Parallel/Loop Agent classes, or a separate
+RemoteAgent domain abstraction. Explicit product procedures remain ordinary
+Control logic using SDK primitives.
 
-- a workflow graph or node/edge DSL;
-- a static graph executor;
-- SDK-owned Sequential, Parallel, or Loop workflow agent classes;
-- a separate RemoteAgent domain abstraction parallel to built-in agents.
+## Runtime Safety Contract
 
-Application code may still implement explicit procedures where needed. They
-are ordinary Control logic using SDK primitives, not a new deterministic
-workflow subsystem.
+Fixed generic step/model/tool budgets are not part of the SDK `Run` contract.
+They can abort valid open-ended Agent work. This does not mean execution may be
+unbounded without policy: Control must be able to observe lifecycle, usage,
+elapsed time, repeated action signatures, and progress, then checkpoint,
+request confirmation, or cancel through a dynamic watchdog. That Control policy
+is still incomplete at `v0.25.0` and is a readiness blocker.
 
-## Runtime Safety
+Runtime safety also requires:
 
-Per-run step/model/tool/token/cost budgets are intentionally not part of the
-Agent SDK surface. Agent product turns are open-ended collaborative work, and
-fixed step budgets commonly abort healthy multi-step tool use. Loop protection
-belongs to a future control policy, not a generic per-Run counter.
+- fail-closed capability negotiation against the actual model, tool, and
+  executor instances selected by Control;
+- a bounded, single-consumer event stream with defined close/cancel behavior;
+- typed lifecycle interception and observer telemetry that cannot hang or alter
+  execution accidentally;
+- ordered input guardrails with isolated mutable input, explicit failure policy,
+  bounded non-cooperative work, and typed rejection;
+- cancellation-request state distinct from proven terminal cancellation;
+- no unsafe continuation across an unknown side-effect boundary.
 
-Model adapters implement `model.CapabilityProvider`; unknown is conservative,
-not a synonym for supported. Runtime validates inferred requirements from
-streaming, structured output, local tools, and parallel-safe tools together
-with the assembly's explicit reasoning-continuation and hosted-tool
-requirements before it writes run history. Tool definitions independently
-declare parallel safety and resumability. Sandbox executors keep their existing
-`Descriptor.Capabilities`, with deterministic `ValidateCapabilities` checks for
-command, async/resume, TTY, filesystem, network, path, and environment support.
-Provider catalogs may help Control choose an endpoint, but they do not replace
-the execution object's declaration at the SDK boundary.
+Hosts may implement OpenTelemetry as an interceptor or sink adapter. The SDK
+does not depend on a telemetry implementation.
 
-Lifecycle instrumentation uses immutable `LifecycleEvent` values for
-run/turn/model/tool/approval/compact/handoff boundaries. Interceptors execute
-in configured nesting order. `TraceSink` is observer-only: it receives copied
-start and terminal records, cannot return an error, and its panics cannot alter
-execution. Hosts may implement OpenTelemetry as an interceptor or sink adapter;
-the SDK does not depend on an OTel implementation. Control wraps the handoff
-transaction with the same SDK lifecycle contract instead of moving handoff
-authority back into Runtime.
+## Durable Facts and Replay
 
-Input guardrails run before run-journal or user-event persistence. Each receives
-a deep-copied full input, and its returned full input feeds the next guardrail
-in configuration order. Every guard has a real caller-side timeout, including
-for a non-cooperative implementation. Infrastructure errors and panics obey an
-explicit fail-open/fail-closed policy (default closed); an intentional typed
-rejection is always closed. A timed-out guard may finish in its isolated
-goroutine, but its late output is discarded and cannot mutate the run input.
+`session.Event` is the durable source of truth, with payload ownership by
+semantics:
 
-## Durable Facts and Projection
+- `Event.Message` carries canonical model messages;
+- `Event.Tool` carries canonical tool calls and results;
+- `PlanPayload` carries plan state;
+- normalized protocol payloads carry coordination facts and replayable product
+  projection;
+- protocol mirrors and undocumented `_meta` are not a second model context.
 
-`session.Event` remains the durable source of truth, but different payloads
-have different responsibilities:
+Visibility rules are:
 
-- `Event.Message`, `Event.Tool`, and other canonical semantic payloads rebuild
-  model context.
-- ACP-compatible controller, participant, permission, and transfer payloads
-  record coordination facts and support replayable projection.
-- Protocol mirrors are not a second copy of model context.
-- `_meta` remains display/debug data unless a field is explicitly documented
-  as replay metadata.
+- `canonical`: durable and model-visible when it carries model semantics;
+- `mirror`: durable client-facing projection, not model truth;
+- `journal`: durable execution/recovery truth, promoted into model context only
+  through a defined canonical semantic fact;
+- `ui_only`, `overlay`, and `notice`: transient presentation state.
 
-Durable compatibility is explicit. Event, Run/Turn/Step, and ToolExecution
-records carry independent schema versions. `session.MigrationRegistry` accepts
-only adjacent deterministic steps, rejects gaps, duplicates, and future
-versions, and preserves unknown JSON fields while migrating stored records.
-New in-memory events are stamped without a JSON round trip; legacy file-log
-records migrate before validation and replay. The checked-in v0/v1 replay
-corpus must rebuild a whole `[]model.Message` exactly equal to context produced
-by a live Runtime tool turn.
+External side effects cannot be made generally exactly-once. The reusable
+contract is a stable execution identity, declared effect class, idempotency
+where available, durable state transitions, and explicit unknown-outcome
+recovery. Unknown outcome must remain visible to the next decision-maker; a
+journal record that disappears from model context is insufficient.
 
-Machine control flow uses `agent-sdk/errorcode`, not human messages. Session,
-run-limit/conflict, model/provider, policy, capability, task, tool, and schema
-errors expose stable codes through `errorcode.Coder`; wrapped errors retain the
-code. Runtime reattach recognizes `controller.ErrNotActive`, compaction reacts
-only to `model.ContextOverflowError`, provider backpressure is classified in
-the provider adapter, and tool payloads use typed codes plus standard Go
-filesystem/context identities. Message inspection is confined to adapters that
-must normalize external HTTP, OS, or command diagnostics before wrapping them.
+Persistence implementations must satisfy the capability they advertise:
 
-External ACP input must be normalized before storage. Transient participant or
-subagent stream chunks must not enter durable parent model context unless they
-are carried by a canonical message, task, or tool result.
+- event and state mutations that define one fact are atomically committed;
+- expected revision is a real CAS contract;
+- identical retry deduplicates the complete transaction, including derived
+  state, while a changed payload conflicts;
+- compaction records its covered event sequence and replay retains every later
+  fact regardless of physical file position;
+- raw durable JSON migrates before typed decoding when unknown-field
+  preservation is part of the compatibility contract;
+- restart recovery produces a safe terminal, interrupted, resumable, or unknown
+  state rather than silently replaying an effect.
 
-## Release-Blocking Risk Register
+Persistence/replay changes require whole-object round-trip tests comparing the
+rebuilt `[]model.Message` with runtime-produced context. Projection/UI reload
+tests do not substitute for this evidence.
 
-The following correctness and security work remains P0 for a stable dependency
-layer:
+## Stable-dependency Readiness
 
-| Risk | Required invariant |
-| --- | --- |
-| Policy decisions currently have fail-open paths | Only explicit allow executes a tool. Unknown profiles, missing decision functions, empty actions, and invalid decisions fail closed. |
-| State, metadata, and tool payload clone paths are shallow | Stored values and read-only snapshots cannot share mutable nested references with callers. Failed updates leave stored state unchanged. |
-| Concurrent runs and compaction have no session revision/CAS contract | Events have monotonic sequence, sessions have revision, writes use expected revision, and compaction records its covered sequence. |
-| File persistence cannot always satisfy its advertised atomic event/state contract | A store either atomically commits event batches and state deltas with idempotency, or explicitly declares that it is not a production transactional adapter. |
-| Tool side effects have an unknown-outcome crash window | Durable tool execution records distinguish prepared, approved, started, succeeded, failed, cancellation requested, cancelled, and unknown outcome. |
+The SDK may be described as a stable dependency layer only when:
 
-External side effects cannot be made generally exactly-once by the Agent Core.
-The contract is at-least-once execution with stable execution keys,
-idempotency where available, declared effect class, and explicit unknown
-outcome recovery.
-
-## SDK Contract Quality
-
-The SDK remains one package tree in the root module, but it needs an intentional
-public surface:
-
-- Maintain an explicit allowlist of supported public packages.
-- Permit `agent-sdk/internal` for implementation helpers when it materially
-  reduces the compatibility surface. Go's `internal` import rule keeps those
-  helpers unavailable to product packages.
-- Split broad interfaces by consumer capability instead of requiring every
-  store or executor to implement unrelated control functions.
-- Keep concrete providers, stores, sandbox backends, tools, and MCP support in
-  the same package tree when useful, but make their dependency direction point
-  inward. Do not create modules merely to simulate cleanliness.
-- Add external black-box tests, runnable examples, API-diff checks, schema
-  migration fixtures, race tests, and crash/fault-injection tests.
-- Run the root lint, vet, and test once, plus architecture lint, SDK dependency
-  closure, and a root-module external consumer check in CI.
-- Document compatibility, minimum Go version, supported platforms, error
-  contracts, event ordering, cancellation, and persistence semantics.
-
-The supported-package allowlist and declaration snapshot now enforce the first
-compatibility boundary. Session lifecycle/read/append/binding/state and sandbox
-execution/filesystem/reporting contracts are independently consumable. Root
-approval and cancellation values are shared by controller and subagent
-bridges, and external-package examples plus adapter compile assertions exercise
-the supported surface without product imports.
-
-The product `runtime/assembly` state keys, profile/mode selection, UI-oriented
-controller status, process discovery, and handoff target selection are examples
-of Control concerns to peel off. Reusable endpoint, controller, participant,
-turn, cancellation, and transfer values are not peel-off targets merely because
-they are ACP-compatible.
-
-## Migration Slices
-
-1. **Safety and persistence**: fix fail-open authorization, recursive value
-   isolation, session revision/CAS, atomic append, and durable tool execution.
-2. **Formalize the ACP contract owner**: remove duplicated semantic DTO
-   ownership while preserving product wire/projection adapters and the SDK
-   import boundary.
-3. **Correct orchestration ownership**: move agent selection, activation
-   sequencing, context-routing policy, handoff commit coordination, product
-   assembly, and UI/status policy into Control. Keep reusable mechanisms and
-   neutral records in the SDK.
-4. **Govern the public API**: introduce a supported-package allowlist, internal
-   helpers, narrow capability interfaces, examples, compatibility checks, and
-   SDK boundary checks in root CI.
-5. **Build the dynamic Manage Loop**: consume durable events and capability
-   state to coordinate built-in and external ACP endpoints without introducing
-   a deterministic workflow engine.
-6. **Validate multiple hosts**: run the same SDK contract suite with a local
-   host and a cloud-oriented host. Local and cloud differ in store, lease,
-   sandbox, transport, and executor adapters, not in Core semantics.
-
-Module extraction, physical repository extraction, and adapter-module
-proliferation are not migration slices. Revisit them only through a new explicit
-architecture decision if operational constraints later require it.
-
-## Readiness Gates
-
-The SDK is ready to be treated as a stable dependency layer when:
-
-- the P0 risk register is closed with race, fault, and replay tests;
-- built-in and external agents use the same normalized coordination contracts;
+- every P0 item in the live stabilization checklist is closed by its exact fault
+  and replay tests;
+- built-in and external Agents conform to the same normalized ACP semantics;
 - only Control can select or transfer the active controller;
-- model context can be rebuilt exactly from canonical durable facts;
-- ACP protocol mirrors and `_meta` cannot silently become model truth;
-- SDK public packages and compatibility policy are explicit;
-- SDK code has no dependency on Caelis product-host, wire implementation, or
-  presentation packages;
-- package-boundary and external behavioral consumers pass without importing
-  product packages or relying on product internals;
-- no deterministic workflow engine or autonomous handoff path has entered the
-  Core.
+- model context is exactly rebuildable from canonical durable facts, including
+  unknown outcomes;
+- public imports and compatibility policy are explicit and tested by a real
+  external consumer;
+- local and cloud-oriented hosts exercise the same Core contract with different
+  store, lease, sandbox, transport, and executor adapters;
+- no deterministic workflow engine or autonomous handoff path has entered Core.
+
+`v0.25.0` does not yet satisfy this gate. See the acceptance review for the
+current closed/partial/open matrix.
 
 ## Comparative Inputs
 
-External SDKs are design inputs, not Caelis's taxonomy:
+External SDKs inform constraints; they do not define Caelis's taxonomy:
 
-- OpenAI's distinction between manager-owned agent calls and ownership-changing
-  handoffs reinforces the need to make ownership explicit, but Caelis does not
-  need to expose both as first-class Core abstractions. See
+- OpenAI's distinction between manager-owned calls and ownership-changing
+  handoffs reinforces explicit ownership, but Caelis does not need both as
+  first-class Core abstractions. See
   [Orchestration and handoffs](https://developers.openai.com/api/docs/guides/agents/orchestration).
-- Anthropic's Agent SDK demonstrates that a reusable agent dependency can ship
-  an agent loop and bundled tools without requiring each adapter to become a
-  separate repository. See
+- Anthropic's Agent SDK demonstrates that a reusable dependency may ship an
+  Agent loop and bundled tools without making each adapter a separate
+  repository. See
   [Agent SDK overview](https://code.claude.com/docs/en/agent-sdk/overview).
-- Google ADK's separation of Session, State, Memory, and Event processing is a
-  useful persistence reference. Its workflow-node model is not a Caelis target.
-  See [Sessions](https://adk.dev/sessions/) and
+- Google ADK's Session, State, Memory, and Event separation is a useful
+  persistence reference. Its workflow-node model is not a Caelis target. See
+  [Sessions](https://adk.dev/sessions/) and
   [Event loop](https://adk.dev/runtime/event-loop/).
+
+## Document Ownership
+
+- [Caelis Architecture](architecture.md): layer map and repository package map.
+- This document: normative SDK/Control/ACP ownership and readiness invariants.
+- [Agent SDK v0.25.0 Acceptance Review](agent-sdk-v0.25.0-acceptance.md): frozen
+  release evidence and defect findings.
+- [Agent SDK Stabilization Checklist](agent-sdk-stabilization-checklist.md): live
+  implementation board.
+- [Agent SDK Usage and Compatibility](agent-sdk-usage.md): consumer-facing
+  behavior and known limitations.
+- [ACP Projection Architecture](acp-projection-architecture.md): semantic-to-wire
+  and surface projection.
+- [Release](release.md): release mechanics and post-publish verification.

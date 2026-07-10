@@ -5,6 +5,13 @@ The Caelis Agent SDK is a package tree in the root
 as a separate Go module. This guide defines the host-facing behavior that SDK
 consumers may rely on.
 
+Readiness note: `v0.25.0` establishes the package and source-compatibility
+boundary, but it did not pass stable-dependency acceptance. Until the P0 items
+in [the v0.25.0 acceptance review](agent-sdk-v0.25.0-acceptance.md) are closed,
+use one Runtime owner per session and treat cross-process continuation,
+committed-error retry, and side-effect recovery as restricted contracts rather
+than general guarantees.
+
 ## Requirements and support scope
 
 - Minimum Go version: **Go 1.25.1**, matching the root `go.mod`. A Caelis
@@ -34,6 +41,11 @@ chat agent. A production host normally replaces the static model and chooses a
 durable session adapter. The checked-in
 [`ExampleRuntime_Run`](../agent-sdk/runtime/quickstart_external_test.go) is
 compiled and executed by `go test ./agent-sdk/runtime`.
+
+`runtime/chat` and `session/memory` are bundled reference implementations, not
+members of the 16-import compatibility allowlist. This example proves the
+runtime shape and the bundled local path; it is not yet a supported-import-only
+consumer conformance test.
 
 ```go
 package main
@@ -97,16 +109,20 @@ func main() {
 }
 ```
 
-Declare every capability the host requires in `AgentSpec` and on the model,
-tools, and sandbox executor. Runtime rejects an undeclared requirement before
-making the run durable.
+Declare every capability the host requires in `AgentSpec` and on the actual
+model, tools, and sandbox executor. At v0.25.0 Runtime infers and validates
+model streaming, structured-output, and local-tool requirements. Control does
+not yet wire the complete tool/sandbox execution requirement set, so hosts must
+validate those adapters explicitly; do not rely on `AgentSpec` alone.
 
 ## Concurrency contract
 
-- Core permits one active run per normalized `session.SessionRef`. A competing
-  run returns `*agent.RunConflictError` with code `errorcode.Conflict`. Host
-  Control decides whether to queue the request, reject it, or fork a session;
-  Runtime does not make that product-policy decision.
+- One Runtime instance permits one active run per normalized
+  `session.SessionRef`. A competing run on that instance returns
+  `*agent.RunConflictError` with code `errorcode.Conflict`. This in-memory guard
+  is not a cross-process lease. Hosts sharing a store must establish one owner
+  with `SessionLeaseService` or an equivalent CAS policy; v0.25.0 Runtime does
+  not acquire that lease automatically.
 - A `Runner` has one bounded, single-consumer event stream. Select `Events` or
   the optional source-event view once. A second consumer receives
   `runtime.ErrEventStreamConsumed`; fan-out belongs in the host after one
@@ -116,6 +132,10 @@ making the run durable.
 - Session mutations use revision compare-and-swap. Concurrent writers pass
   `ExpectedRevision`; a stale writer receives `session.ErrRevisionConflict`
   with code `errorcode.Conflict` and must reload before retrying.
+- Store adapters implement that CAS contract, but v0.25.0 Runtime does not yet
+  carry the source revision through every ordinary or compaction append. Do not
+  run multiple Runtime instances against one session until the compaction/CAS
+  acceptance item is closed.
 - Task records and optional session leases also use revision/owner tokens.
   Control owns placement, lease renewal policy, and retry policy.
 
@@ -138,6 +158,10 @@ making the run durable.
   process. After restart, a durable but non-live run returns
   `*agent.RunNotResumableError`; recovery records an interrupted state instead
   of pretending execution resumed.
+- The ordering above is the target contract, but v0.25.0 has a known liveness
+  gap when a resolved PauseToken commits and the store returns
+  `session.CommittedError`: an idempotent retry may not wake the live waiter.
+  See P0-6 in the acceptance review.
 
 ## Event ordering and replay contract
 
@@ -153,6 +177,9 @@ making the run durable.
   `Run`, `Turn`, `Step`, `PauseToken`, and `ToolExecution` records use validated
   transition and revision rules. A terminal tool result and its journal
   transition are one compound commit in capable stores.
+- On v0.25.0 crash recovery, `unknown_outcome` is durable journal truth but is
+  not yet synthesized into the canonical paired tool result. A host must not
+  infer from the rebuilt model history alone that retry is safe; see P0-5.
 - Compaction checkpoints identify the greatest summarized event `Seq`. Replay
   chooses the valid checkpoint with the highest coverage and then applies
   later canonical events; file order alone does not choose a checkpoint.
@@ -175,10 +202,17 @@ making the run durable.
   `ParticipantLifecycleService`, `ControllerHandoffService`, or the execution
   journal compound-commit interfaces. An adapter must not expose one of these
   interfaces unless it can prevent readers from observing a split commit.
+- The v0.25.0 subagent spawn path does not yet make its external spawn, task
+  record, participant binding, and canonical parent facts one recoverable saga.
+  Treat a post-spawn persistence error as unknown outcome; see P0-7.
 - The bundled file store writes a fsynced transaction marker before applying
   event and state documents and completes recovery before later operations.
   A post-commit reporting failure is a committed/unknown-reporting outcome;
   retry with the same idempotency identity rather than inventing a new event.
+- Event deduplication does not make an arbitrary v0.25.0
+  `AppendEventsAndUpdateState` callback idempotent. If every event deduplicates,
+  the callback is still invoked. Until P0-4 closes, callers must not retry an
+  incremental state callback after a committed/unknown-reporting result.
 - Persist semantic model state, not transcript caches. Recursive JSON values
   must be copied on input and output so callers cannot mutate stored state
   without a store operation.
@@ -198,6 +232,11 @@ changes to bundled imports outside the allowlist do not carry a source-
 compatibility promise; durable schema compatibility and the contracts above
 still apply to data written by supported reference stores.
 
+The declaration snapshot detects an unreviewed worktree change, but it does not
+compare the current API with the previous release tag or prove behavioral
+compatibility. Breaking supported API changes require explicit review; a
+tag-to-tag compatibility gate remains follow-up work.
+
 ## Sandbox platforms
 
 The supported `sandbox` contracts are platform-neutral. Concrete backends are:
@@ -213,4 +252,3 @@ When backend selection is automatic, `sandbox.New` may expose an explicit host
 fallback in its status if no native candidate is available. Hosts must inspect
 that status and decide whether their policy allows host execution. Requesting a
 specific unavailable backend fails instead of silently selecting another one.
-
