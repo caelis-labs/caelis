@@ -88,6 +88,115 @@ func TestStoreAppendAndPersistCanonicalEvents(t *testing.T) {
 	}
 }
 
+func TestEventLogMigratesRawNestedJournalBeforeTypedDecode(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := NewStore(Config{RootDir: root, SessionIDGenerator: func() string { return "nested-migration" }})
+	active, err := store.GetOrCreate(context.Background(), session.StartSessionRequest{
+		AppName: "caelis", UserID: "user", Workspace: session.WorkspaceRef{Key: "ws", CWD: root},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := session.ExecutionRecord{
+		Kind: session.JournalKindRun, SessionID: active.SessionID, RunID: "run-1",
+		Revision: 1, Status: session.ExecutionPrepared,
+	}
+	record.Identity = session.ExecutionRecordIdentity(record)
+	raw, err := json.Marshal(&session.Event{
+		ID: "nested-event", SessionID: active.SessionID, Schema: session.EventSchemaVersion,
+		Type: session.EventTypeLifecycle, Visibility: session.VisibilityJournal,
+		Journal: &session.ExecutionJournalEntry{Kind: session.JournalKindRun, Execution: &record},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var object map[string]any
+	if err := json.Unmarshal(raw, &object); err != nil {
+		t.Fatal(err)
+	}
+	journal := object["journal"].(map[string]any)
+	journal["future_journal"] = map[string]any{"sentinel": "journal"}
+	journal["execution"].(map[string]any)["future_execution"] = map[string]any{"sentinel": "execution"}
+	raw, err = json.Marshal(object)
+	if err != nil {
+		t.Fatal(err)
+	}
+	documentPath, err := store.resolveWritePath(active)
+	if err != nil {
+		t.Fatal(err)
+	}
+	userMessage := model.NewTextMessage(model.RoleUser, "model truth survives journal migration")
+	userRaw, err := json.Marshal(&session.Event{
+		ID: "user-event", SessionID: active.SessionID, Schema: session.EventSchemaVersion,
+		Type: session.EventTypeUser, Message: &userMessage,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	logData := append(append(append([]byte(nil), userRaw...), '\n'), raw...)
+	logData = append(logData, '\n')
+	if err := os.WriteFile(eventLogPath(documentPath), logData, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	events, err := store.Events(context.Background(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
+	if err != nil {
+		t.Fatalf("Events() error = %v", err)
+	}
+	if len(events) != 2 || events[1].Journal == nil || events[1].Journal.Schema != session.ExecutionJournalSchemaVersion || events[1].Journal.Execution == nil || events[1].Journal.Execution.Schema != session.RunSchemaVersion {
+		t.Fatalf("events = %#v, want migrated nested journal", events)
+	}
+	modelEvents, err := store.Events(context.Background(), session.EventsRequest{SessionRef: active.SessionRef})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(modelEvents) != 1 || modelEvents[0].Message == nil || !reflect.DeepEqual(*modelEvents[0].Message, userMessage) {
+		t.Fatalf("model events = %#v, want exact user message round trip", modelEvents)
+	}
+}
+
+func TestCommittedTransactionMigratesRawEventsBeforeTypedDecode(t *testing.T) {
+	t.Parallel()
+
+	record := session.ExecutionRecord{
+		Kind: session.JournalKindRun, SessionID: "session", RunID: "run",
+		Revision: 1, Status: session.ExecutionPrepared,
+	}
+	record.Identity = session.ExecutionRecordIdentity(record)
+	event := map[string]any{
+		"schema":     session.EventSchemaVersion,
+		"id":         "event",
+		"session_id": "session",
+		"type":       session.EventTypeLifecycle,
+		"visibility": session.VisibilityJournal,
+		"journal": map[string]any{
+			"schema": 0, "kind": session.JournalKindRun,
+			"future_journal": map[string]any{"sentinel": "journal"},
+			"execution": map[string]any{
+				"schema": 0, "kind": record.Kind, "session_id": record.SessionID,
+				"run_id": record.RunID, "identity": record.Identity, "revision": record.Revision,
+				"status": record.Status, "future_execution": map[string]any{"sentinel": "execution"},
+			},
+		},
+	}
+	raw, err := json.Marshal(map[string]any{
+		"kind": transactionKind, "version": transactionVersion,
+		"document": map[string]any{"kind": documentKind, "version": documentVersion, "session": map[string]any{"session_id": "session"}},
+		"events":   []any{event},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	transaction, err := decodePersistedTransaction(raw)
+	if err != nil {
+		t.Fatalf("decodePersistedTransaction() error = %v", err)
+	}
+	if len(transaction.Events) != 1 || transaction.Events[0].Journal == nil || transaction.Events[0].Journal.Schema != session.ExecutionJournalSchemaVersion || transaction.Events[0].Journal.Execution == nil || transaction.Events[0].Journal.Execution.Schema != session.RunSchemaVersion {
+		t.Fatalf("transaction events = %#v, want migrated nested journal", transaction.Events)
+	}
+}
+
 func TestStoreAppendRejectsProtocolOnlyCoreToolResult(t *testing.T) {
 	t.Parallel()
 

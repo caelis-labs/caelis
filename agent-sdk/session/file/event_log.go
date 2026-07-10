@@ -136,18 +136,20 @@ func (s *Store) readEventLog(documentPath string) ([]*session.Event, error) {
 			if err := rejectUnsupportedLegacyEventLogLine([]byte(trimmed), path, lineNo); err != nil {
 				return nil, err
 			}
+			migratedRaw, err := session.MigrateEventJSON(json.RawMessage(trimmed))
+			if err != nil {
+				if errors.Is(readErr, io.EOF) {
+					break
+				}
+				return nil, fmt.Errorf("agent-sdk/session/file: migrate event log %s line %d: %w", path, lineNo, err)
+			}
 			var event session.Event
-			if err := json.Unmarshal([]byte(trimmed), &event); err != nil {
+			if err := json.Unmarshal(migratedRaw, &event); err != nil {
 				if errors.Is(readErr, io.EOF) {
 					break
 				}
 				return nil, fmt.Errorf("agent-sdk/session/file: decode event log %s: %w", path, err)
 			}
-			migrated, err := session.MigrateEvent(event)
-			if err != nil {
-				return nil, fmt.Errorf("agent-sdk/session/file: migrate event log %s line %d: %w", path, lineNo, err)
-			}
-			event = migrated
 			if err := session.ValidateDurableCoreEvent(&event); err != nil {
 				return nil, fmt.Errorf("agent-sdk/session/file: invalid event log %s line %d: %w", path, lineNo, err)
 			}

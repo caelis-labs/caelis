@@ -108,14 +108,21 @@ Use small, independently committable slices:
 - **P1-5 dynamic-watchdog sub-slice:** the production Control host wraps each
   local run with a dynamic reviewer that observes elapsed/no-progress time,
   typed Runtime lifecycle status, canonical provider usage, and repeated
-  normalized tool signatures from either Runner event view. Soft thresholds request a Control
-  review rather than enforcing an SDK step count. Reviews can continue, append
+  normalized tool signatures from either Runner event view. Soft thresholds
+  request a Control review rather than enforcing an SDK step count. Reviews can continue, append
   an idempotent durable journal checkpoint, or checkpoint and cancel; cancel is
   ignored unless the reviewer explicitly records confirmation. The default
   production policy checkpoints soft-threshold evidence and does not
   auto-cancel. Confirmed cancellation, declined confirmation, timer-only
   stalls, canonical `SourceEvents`, and checkpoint-before-cancel ordering have
   dedicated regressions.
+- **P1-6 raw-migration sub-slice:** file event-log replay and committed WAL
+  recovery now migrate `json.RawMessage` before decoding `session.Event`.
+  Event, journal, run/turn/step, tool-execution, and pause-token schemas advance
+  independently, including the current-event/legacy-nested-journal case. A raw
+  corpus proves top-level and every nested journal sentinel survives migration;
+  file round-trip coverage proves the migrated journal remains outside exact
+  canonical model history.
 
 Do not combine unrelated P0s into one broad rewrite. Update this board in the
 same commit as the closing evidence. Do not edit the frozen v0.25.0 acceptance

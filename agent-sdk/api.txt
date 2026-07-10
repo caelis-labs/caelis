@@ -1732,8 +1732,10 @@ package github.com/caelis-labs/caelis/agent-sdk/session
   )
   const (
       SchemaKindEvent         SchemaKind = "event"
+      SchemaKindJournal       SchemaKind = "journal"
       SchemaKindRun           SchemaKind = "run"
       SchemaKindToolExecution SchemaKind = "tool_execution"
+      SchemaKindPauseToken    SchemaKind = "pause_token"
   )
   const (
       ToolExecutionPrepared        ToolExecutionStatus = "prepared"
@@ -1837,6 +1839,7 @@ package github.com/caelis-labs/caelis/agent-sdk/session
   func MarkOverlay(event *Event) *Event
   func MarkUIOnly(event *Event) *Event
   func MigrateEvent(in Event) (Event, error)
+  func MigrateEventJSON(raw json.RawMessage) (json.RawMessage, error)
   func MigrateExecutionRecord(in ExecutionRecord) (ExecutionRecord, error)
   func MigrateToolExecution(in ToolExecution) (ToolExecution, error)
   func ModelMessageOf(event *Event) (model.Message, bool)

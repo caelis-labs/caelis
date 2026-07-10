@@ -254,6 +254,14 @@ Persistence/replay changes require whole-object round-trip tests comparing the
 rebuilt `[]model.Message` with runtime-produced context. Projection/UI reload
 tests do not substitute for this evidence.
 
+The reference file store applies `MigrateEventJSON` to event-log lines and WAL
+event payloads before unmarshalling `session.Event`. Event and nested journal
+schemas migrate independently, so a current event cannot bypass an older run,
+tool-execution, or pause-token record. Raw migration preserves unknown fields at
+every object level; typed replay then deliberately projects only the current
+semantic contract. Journal-only migration facts remain excluded from rebuilt
+model history.
+
 ## Stable-dependency Readiness
 
 The SDK may be described as a stable dependency layer only when:

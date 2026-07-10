@@ -97,8 +97,8 @@ func (s *Store) recoverTransactions() error {
 		if err != nil {
 			return err
 		}
-		var record persistedTransaction
-		if err := json.Unmarshal(data, &record); err != nil {
+		record, err := decodePersistedTransaction(data)
+		if err != nil {
 			return fmt.Errorf("agent-sdk/session/file: decode committed transaction %s: %w", path, err)
 		}
 		if err := s.applyTransaction(path, record); err != nil {
@@ -106,6 +106,38 @@ func (s *Store) recoverTransactions() error {
 		}
 	}
 	return nil
+}
+
+func decodePersistedTransaction(data []byte) (persistedTransaction, error) {
+	var raw struct {
+		Kind     string            `json:"kind"`
+		Version  int               `json:"version"`
+		Document json.RawMessage   `json:"document"`
+		Events   []json.RawMessage `json:"events"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return persistedTransaction{}, err
+	}
+	record := persistedTransaction{Kind: raw.Kind, Version: raw.Version}
+	if err := json.Unmarshal(raw.Document, &record.Document); err != nil {
+		return persistedTransaction{}, err
+	}
+	record.Events = make([]*session.Event, 0, len(raw.Events))
+	for index, eventRaw := range raw.Events {
+		migrated, err := session.MigrateEventJSON(eventRaw)
+		if err != nil {
+			return persistedTransaction{}, fmt.Errorf("migrate event %d: %w", index, err)
+		}
+		var event session.Event
+		if err := json.Unmarshal(migrated, &event); err != nil {
+			return persistedTransaction{}, fmt.Errorf("decode event %d: %w", index, err)
+		}
+		if err := session.ValidateDurableCoreEvent(&event); err != nil {
+			return persistedTransaction{}, fmt.Errorf("validate event %d: %w", index, err)
+		}
+		record.Events = append(record.Events, &event)
+	}
+	return record, nil
 }
 
 func (s *Store) applyTransaction(path string, record persistedTransaction) error {

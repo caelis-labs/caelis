@@ -20,8 +20,10 @@ type SchemaKind string
 
 const (
 	SchemaKindEvent         SchemaKind = "event"
+	SchemaKindJournal       SchemaKind = "journal"
 	SchemaKindRun           SchemaKind = "run"
 	SchemaKindToolExecution SchemaKind = "tool_execution"
+	SchemaKindPauseToken    SchemaKind = "pause_token"
 )
 
 // SchemaMigration transforms one JSON object from FromVersion to the next
@@ -116,24 +118,20 @@ func (r *MigrationRegistry) Migrate(kind SchemaKind, source, target int, raw jso
 func DefaultMigrationRegistry() *MigrationRegistry {
 	registry := NewMigrationRegistry()
 	_ = registry.Register(SchemaKindEvent, 0, EventSchemaVersion, migrateEventV0ToV1)
+	_ = registry.Register(SchemaKindJournal, 0, ExecutionJournalSchemaVersion, migrateJournalV0ToV1)
 	_ = registry.Register(SchemaKindRun, 0, RunSchemaVersion, migrateSchemaFieldV0ToV1)
 	_ = registry.Register(SchemaKindToolExecution, 0, ToolExecutionSchemaVersion, migrateSchemaFieldV0ToV1)
+	_ = registry.Register(SchemaKindPauseToken, 0, ExecutionJournalSchemaVersion, migrateSchemaFieldV0ToV1)
 	return registry
 }
 
 // MigrateEvent upgrades one event and nested execution journal records.
 func MigrateEvent(in Event) (Event, error) {
-	if in.Schema == EventSchemaVersion {
-		return *CloneEvent(&in), nil
-	}
 	raw, err := json.Marshal(in)
 	if err != nil {
 		return Event{}, err
 	}
-	if in.Schema > EventSchemaVersion {
-		return Event{}, &SchemaVersionError{Kind: SchemaKindEvent, From: in.Schema, To: EventSchemaVersion, Current: EventSchemaVersion, Detail: "future schema is unsupported"}
-	}
-	raw, err = DefaultMigrationRegistry().Migrate(SchemaKindEvent, in.Schema, EventSchemaVersion, raw)
+	raw, err = MigrateEventJSON(raw)
 	if err != nil {
 		return Event{}, err
 	}
@@ -145,6 +143,99 @@ func MigrateEvent(in Event) (Event, error) {
 	// durable JSON schema. Preserve it while migrating the durable fields.
 	out.Text = in.Text
 	return out, nil
+}
+
+// MigrateEventJSON upgrades raw durable event JSON before typed decoding so
+// every migration step can preserve fields introduced by newer writers.
+func MigrateEventJSON(raw json.RawMessage) (json.RawMessage, error) {
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &object); err != nil {
+		return nil, err
+	}
+	source, err := rawSchemaVersion(SchemaKindEvent, object, EventSchemaVersion)
+	if err != nil {
+		return nil, err
+	}
+	registry := DefaultMigrationRegistry()
+	migrated, err := registry.Migrate(SchemaKindEvent, source, EventSchemaVersion, raw)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(migrated, &object); err != nil {
+		return nil, err
+	}
+	journalRaw := object["journal"]
+	if len(journalRaw) == 0 || string(journalRaw) == "null" {
+		return migrated, nil
+	}
+	journal, err := migrateJournalJSON(registry, journalRaw)
+	if err != nil {
+		return nil, err
+	}
+	object["journal"] = journal
+	return json.Marshal(object)
+}
+
+func migrateJournalJSON(registry *MigrationRegistry, raw json.RawMessage) (json.RawMessage, error) {
+	var journal map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &journal); err != nil {
+		return nil, err
+	}
+	source, err := rawSchemaVersion(SchemaKindJournal, journal, ExecutionJournalSchemaVersion)
+	if err != nil {
+		return nil, err
+	}
+	migrated, err := registry.Migrate(SchemaKindJournal, source, ExecutionJournalSchemaVersion, raw)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(migrated, &journal); err != nil {
+		return nil, err
+	}
+	nested := []struct {
+		key    string
+		kind   SchemaKind
+		target int
+	}{
+		{key: "execution", kind: SchemaKindRun, target: RunSchemaVersion},
+		{key: "tool_execution", kind: SchemaKindToolExecution, target: ToolExecutionSchemaVersion},
+		{key: "pause_token", kind: SchemaKindPauseToken, target: ExecutionJournalSchemaVersion},
+	}
+	for _, candidate := range nested {
+		nestedRaw := journal[candidate.key]
+		if len(nestedRaw) == 0 || string(nestedRaw) == "null" {
+			continue
+		}
+		var object map[string]json.RawMessage
+		if err := json.Unmarshal(nestedRaw, &object); err != nil {
+			return nil, err
+		}
+		source, err := rawSchemaVersion(candidate.kind, object, candidate.target)
+		if err != nil {
+			return nil, err
+		}
+		nestedRaw, err = registry.Migrate(candidate.kind, source, candidate.target, nestedRaw)
+		if err != nil {
+			return nil, err
+		}
+		journal[candidate.key] = nestedRaw
+	}
+	return json.Marshal(journal)
+}
+
+func rawSchemaVersion(kind SchemaKind, object map[string]json.RawMessage, current int) (int, error) {
+	raw := object["schema"]
+	if len(raw) == 0 || string(raw) == "null" {
+		return 0, nil
+	}
+	var version int
+	if err := json.Unmarshal(raw, &version); err != nil || version < 0 {
+		return 0, &SchemaVersionError{Kind: kind, To: current, Current: current, Detail: "schema must be a non-negative integer"}
+	}
+	if version > current {
+		return 0, &SchemaVersionError{Kind: kind, From: version, To: current, Current: current, Detail: "future schema is unsupported"}
+	}
+	return version, nil
 }
 
 func stampCurrentEventSchemas(event *Event) {
