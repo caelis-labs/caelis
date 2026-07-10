@@ -46,6 +46,25 @@ func TestAgentSpecCapabilityValidationRejectsUndeclaredRequestedFeatures(t *test
 	}
 }
 
+func TestAgentSpecCapabilityValidationDoesNotRequireParallelModelForParallelSafeTool(t *testing.T) {
+	t.Parallel()
+
+	modelWithSerialToolCalls := limitTestSerialToolModel{}
+	tools := []tool.Tool{tool.NamedTool{Def: tool.Definition{
+		Name:         "probe",
+		Capabilities: tool.Capabilities{ParallelSafe: true},
+	}}}
+	if err := validateAgentSpecCapabilities(modelWithSerialToolCalls, tools, nil, false, model.Capabilities{}); err != nil {
+		t.Fatalf("validateAgentSpecCapabilities() error = %v, want serial tool-call model accepted", err)
+	}
+
+	err := validateAgentSpecCapabilities(modelWithSerialToolCalls, tools, nil, false, model.Capabilities{ParallelToolCalls: true})
+	var capabilityErr *model.CapabilityError
+	if !errors.As(err, &capabilityErr) || capabilityErr.Capability != model.CapabilityParallelToolCalls {
+		t.Fatalf("explicit parallel requirement error = %v, want ParallelToolCalls CapabilityError", err)
+	}
+}
+
 func TestRuntimeRejectsMissingCapabilitiesBeforeDurableRunMutation(t *testing.T) {
 	t.Parallel()
 
@@ -79,4 +98,12 @@ func (limitTestModelWithoutCapabilities) Name() string { return "undeclared" }
 
 func (limitTestModelWithoutCapabilities) Generate(context.Context, *model.Request) iter.Seq2[*model.StreamEvent, error] {
 	return func(func(*model.StreamEvent, error) bool) {}
+}
+
+type limitTestSerialToolModel struct {
+	limitTestModelWithoutCapabilities
+}
+
+func (limitTestSerialToolModel) Capabilities() model.Capabilities {
+	return model.Capabilities{ToolCalls: true}
 }

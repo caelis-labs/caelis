@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
+
+const toolCancellationDrainGrace = 100 * time.Millisecond
 
 type toolObserver struct {
 	results chan<- tool.Result
@@ -76,11 +79,19 @@ func (a *Agent) executeToolCallWithProgress(
 		case done := <-doneCh:
 			return drainProgress(done)
 		case <-ctx.Done():
-			// Prefer a completed terminal result over abandoning an already-finished call.
-			// Cancel the in-flight tool and wait for it so journal terminal state is not dropped.
+			// Give context-aware tools a short window to return their terminal
+			// execution journal, but never let an unresponsive tool block run
+			// cancellation indefinitely. Recovery reconciles the durable
+			// cancel_requested record when no terminal result arrives.
 			cancel()
-			done := <-doneCh
-			return drainProgress(done)
+			timer := time.NewTimer(toolCancellationDrainGrace)
+			defer timer.Stop()
+			select {
+			case done := <-doneCh:
+				return drainProgress(done)
+			case <-timer.C:
+				return model.Message{}, nil, ctx.Err()
+			}
 		}
 	}
 }

@@ -386,6 +386,44 @@ func TestChatAgentRunsMinimalToolLoop(t *testing.T) {
 	}
 }
 
+func TestExecuteToolCallCancellationDoesNotWaitForUnresponsiveTool(t *testing.T) {
+	t.Parallel()
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	blockingTool := tool.NamedTool{
+		Def: tool.Definition{Name: "BLOCK"},
+		Invoke: func(context.Context, tool.Call) (tool.Result, error) {
+			close(started)
+			<-release
+			return tool.Result{}, nil
+		},
+	}
+	chatAgent, err := NewWithTools("chat", &recordingModel{}, []tool.Tool{blockingTool}, "")
+	if err != nil {
+		t.Fatalf("NewWithTools() error = %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	finished := make(chan error, 1)
+	go func() {
+		_, _, callErr := chatAgent.executeToolCallWithProgress(ctx, model.ToolCall{ID: "call-1", Name: "BLOCK", Args: `{}`}, nil)
+		finished <- callErr
+	}()
+	<-started
+	cancel()
+
+	select {
+	case callErr := <-finished:
+		if !errors.Is(callErr, context.Canceled) {
+			t.Fatalf("executeToolCallWithProgress() error = %v, want context.Canceled", callErr)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("executeToolCallWithProgress() remained blocked after cancellation")
+	}
+}
+
 func TestChatAgentRetriesInvalidModelToolCallWithoutPersistingIt(t *testing.T) {
 	t.Parallel()
 

@@ -29,12 +29,6 @@ func validateAgentSpecCapabilities(specModel model.LLM, tools []tool.Tool, reque
 	if len(tools) > 0 {
 		required.ToolCalls = true
 	}
-	for _, item := range tools {
-		if item != nil && item.Definition().Capabilities.ParallelSafe {
-			required.ParallelToolCalls = true
-			break
-		}
-	}
 	actual, _ := model.CapabilitiesOf(specModel)
 	name := ""
 	if specModel != nil {

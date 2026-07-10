@@ -643,6 +643,8 @@ func TestDefaultModeRequiresApprovalForDestructiveGitCommands(t *testing.T) {
 		"bash -lc 'git clean -fd'",
 		"sudo -E git reset --hard",
 		"sudo -Eu root git reset --hard",
+		"echo ready\ngit reset --hard",
+		"echo ready\r\ngit clean -fd",
 	}
 	for _, command := range tests {
 		command := command
@@ -873,6 +875,14 @@ func TestFullAccessBlocksDangerousCommands(t *testing.T) {
 	}
 	if decision.Action != policy.ActionDeny {
 		t.Fatalf("Action = %q, want deny for trailing flags on home target", decision.Action)
+	}
+
+	decision, err = AutoReviewMode().DecideTool(context.Background(), commandCtx("echo ready\nrm -rf /", false))
+	if err != nil {
+		t.Fatalf("DecideTool() error = %v", err)
+	}
+	if decision.Action != policy.ActionDeny {
+		t.Fatalf("Action = %q, want deny for recursive delete after newline", decision.Action)
 	}
 }
 

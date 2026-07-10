@@ -50,6 +50,9 @@ func rmTargets(command string, requireForce bool) []string {
 
 func shellishFields(command string) []string {
 	command = strings.NewReplacer(
+		"\r\n", " ; ",
+		"\n", " ; ",
+		"\r", " ; ",
 		"&&", " && ",
 		"||", " || ",
 		";", " ; ",
