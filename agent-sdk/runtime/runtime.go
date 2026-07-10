@@ -18,7 +18,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
-	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 )
 
 // Config defines one baseline local runtime instance.
@@ -37,7 +36,7 @@ type Config struct {
 	ControllerRecovery       controller.RecoveryCoordinator
 	ControllerEventForwarder agent.ControllerEventForwarder
 	TaskStore                task.Store
-	Subagents                subagent.Runner
+	Subagents                agent.SubagentRunner
 }
 
 // Runtime is the baseline local runtime implementation.
@@ -55,7 +54,7 @@ type Runtime struct {
 	controllerContextRouter  controller.ContextRouter
 	controllerRecovery       controller.RecoveryCoordinator
 	controllerEventForwarder agent.ControllerEventForwarder
-	subagents                subagent.Runner
+	subagents                agent.SubagentRunner
 	idCounter                atomic.Uint64
 	executionMu              sync.Mutex
 	mu                       sync.RWMutex

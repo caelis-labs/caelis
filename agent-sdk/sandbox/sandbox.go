@@ -332,18 +332,38 @@ type AsyncRunner interface {
 	OpenSession(string) (Session, error)
 }
 
-// Runtime is the stable execution boundary consumed by future tool and ACP
-// implementations.
-type Runtime interface {
+// DescriptorProvider reports executor identity and static capabilities.
+type DescriptorProvider interface {
 	Describe() Descriptor
+}
+
+// FileSystemProvider grants filesystem access under explicit constraints.
+type FileSystemProvider interface {
 	FileSystem() FileSystem
 	FileSystemFor(Constraints) FileSystem
-	Run(context.Context, CommandRequest) (CommandResult, error)
-	Start(context.Context, CommandRequest) (Session, error)
-	OpenSession(string) (Session, error)
+}
+
+// SessionRefOpener reattaches one fully qualified asynchronous execution
+// session.
+type SessionRefOpener interface {
 	OpenSessionRef(SessionRef) (Session, error)
+}
+
+// BackendReporter lists and reports the selected sandbox backend.
+type BackendReporter interface {
 	SupportedBackends() []Backend
 	Status() Status
+}
+
+// Runtime is the full reference execution boundary. Consumers should accept
+// Runner, AsyncRunner, FileSystemProvider, or another narrow capability unless
+// they genuinely need the aggregate lifecycle surface.
+type Runtime interface {
+	DescriptorProvider
+	FileSystemProvider
+	AsyncRunner
+	SessionRefOpener
+	BackendReporter
 	Close() error
 }
 

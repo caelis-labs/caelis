@@ -6,27 +6,17 @@ import (
 	"strings"
 	"time"
 
+	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
 // ApprovalOption is one controller-side approval choice surfaced by a remote
 // ACP controller.
-type ApprovalOption struct {
-	ID   string `json:"id,omitempty"`
-	Name string `json:"name,omitempty"`
-	Kind string `json:"kind,omitempty"`
-}
+type ApprovalOption = agent.ApprovalOption
 
 // ApprovalToolCall describes the remote tool invocation asking for approval.
-type ApprovalToolCall struct {
-	ID       string         `json:"id,omitempty"`
-	Name     string         `json:"name,omitempty"`
-	Kind     string         `json:"kind,omitempty"`
-	Title    string         `json:"title,omitempty"`
-	Status   string         `json:"status,omitempty"`
-	RawInput map[string]any `json:"raw_input,omitempty"`
-}
+type ApprovalToolCall = agent.EndpointApprovalToolCall
 
 // ApprovalRequest is the runtime-owned approval bridge payload used by remote
 // ACP controllers. It is system-controlled and never exposed to the model.
@@ -40,11 +30,7 @@ type ApprovalRequest struct {
 }
 
 // ApprovalResponse is one bridged controller approval outcome.
-type ApprovalResponse struct {
-	Outcome  string `json:"outcome,omitempty"`
-	OptionID string `json:"option_id,omitempty"`
-	Approved bool   `json:"approved,omitempty"`
-}
+type ApprovalResponse = agent.ApprovalResponse
 
 // ApprovalRequester bridges a remote controller approval request into the
 // parent runtime's approval surface.
@@ -161,21 +147,14 @@ type ParticipantPromptRequest struct {
 	ApprovalRequester ApprovalRequester   `json:"-"`
 }
 
-type CancelStatus string
+type CancelStatus = agent.CancelStatus
 
 const (
-	CancelStatusCancelled        CancelStatus = "cancelled"
-	CancelStatusAlreadyCancelled CancelStatus = "already_cancelled"
+	CancelStatusCancelled        = agent.CancelStatusCancelled
+	CancelStatusAlreadyCancelled = agent.CancelStatusAlreadyCancelled
 )
 
-type CancelResult struct {
-	Status CancelStatus `json:"status,omitempty"`
-	Err    error        `json:"-"`
-}
-
-func (r CancelResult) Cancelled() bool {
-	return r.Status == CancelStatusCancelled
-}
+type CancelResult = agent.CancelResult
 
 type TurnHandle interface {
 	Events() iter.Seq2[*session.Event, error]

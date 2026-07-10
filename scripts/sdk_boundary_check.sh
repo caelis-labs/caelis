@@ -62,7 +62,7 @@ check_sdk_closure() {
       continue
     fi
     case "${dependency}" in
-      "${SDK_PREFIX}"|"${SDK_PREFIX}"/*|"${SDK_PREFIX}.test")
+      "${SDK_PREFIX}"|"${SDK_PREFIX}"/*|"${SDK_PREFIX}.test"|"${SDK_PREFIX}_test"|"${SDK_PREFIX}"/*_test)
         ;;
       *)
         violations+=("${dependency}")

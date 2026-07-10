@@ -80,6 +80,13 @@ helpers and carry no pre-v1 source-compatibility promise. The generated
 `make sdk-boundary-check` fails on an unreviewed API change and compiles the
 allowlist from a separate consumer module.
 
+Supported consumers should depend on the smallest capability they need. The
+session package exposes separate lifecycle, reader, appender, binding, and
+state contracts; sandbox exposes runner, async-runner, filesystem, descriptor,
+and backend-reporting capabilities. Endpoint and subagent bridges reuse the
+root approval option/response/tool-call and cancellation contracts rather than
+defining transport-specific copies.
+
 ## Development
 
 From the Caelis repository root:

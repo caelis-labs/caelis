@@ -15,11 +15,11 @@ import (
 // ContextRouter applies Caelis shared-ledger routing policy to controller and
 // participant endpoints.
 type ContextRouter struct {
-	sessions session.Service
+	sessions session.Reader
 }
 
 // NewContextRouter returns the product context router for one session store.
-func NewContextRouter(sessions session.Service) (*ContextRouter, error) {
+func NewContextRouter(sessions session.Reader) (*ContextRouter, error) {
 	if sessions == nil {
 		return nil, fmt.Errorf("controlplane: sessions service is required")
 	}

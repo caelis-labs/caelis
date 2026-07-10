@@ -3,18 +3,18 @@
 
 package github.com/caelis-labs/caelis/agent-sdk
   const (
-  	CancelStatusCancelled        CancelStatus = "cancelled"
-  	CancelStatusAlreadyCancelled CancelStatus = "already_cancelled"
+      CancelStatusCancelled        CancelStatus = "cancelled"
+      CancelStatusAlreadyCancelled CancelStatus = "already_cancelled"
   )
   const (
-  	RunLifecycleStatusRunning         RunLifecycleStatus = "running"
-  	RunLifecycleStatusWaitingApproval RunLifecycleStatus = "waiting_approval"
-  	RunLifecycleStatusInterrupted     RunLifecycleStatus = "interrupted"
-  	RunLifecycleStatusFailed          RunLifecycleStatus = "failed"
-  	RunLifecycleStatusCompleted       RunLifecycleStatus = "completed"
+      RunLifecycleStatusRunning         RunLifecycleStatus = "running"
+      RunLifecycleStatusWaitingApproval RunLifecycleStatus = "waiting_approval"
+      RunLifecycleStatusInterrupted     RunLifecycleStatus = "interrupted"
+      RunLifecycleStatusFailed          RunLifecycleStatus = "failed"
+      RunLifecycleStatusCompleted       RunLifecycleStatus = "completed"
   )
   const (
-  	SubmissionKindConversation SubmissionKind = "conversation"
+      SubmissionKindConversation SubmissionKind = "conversation"
   )
   func (e *RunConflictError) Error() string
   func (e *RunNotResumableError) Error() string
@@ -29,238 +29,276 @@ package github.com/caelis-labs/caelis/agent-sdk
   func NewEvents(events []*session.Event) Events
   func NewReadonlyState(values map[string]any) ReadonlyState
   type Agent interface {
-  	Name() string
-  	Run(Context) iter.Seq2[*session.Event, error]
+      Name() string
+      Run(Context) iter.Seq2[*session.Event, error]
   }
   type AgentFactory interface {
-  	NewAgent(context.Context, AgentSpec) (Agent, error)
+      NewAgent(context.Context, AgentSpec) (Agent, error)
   }
   type AgentSpec struct {
-  	Name           string         `json:"name,omitempty"`
-  	Model          model.LLM      `json:"-"`
-  	Tools          []tool.Tool    `json:"-"`
-  	SubagentRunner SubagentRunner `json:"-"`
-  	Request        ModelRequestOptions
-  	Metadata       map[string]any `json:"metadata,omitempty"`
+      Name           string         `json:"name,omitempty"`
+      Model          model.LLM      `json:"-"`
+      Tools          []tool.Tool    `json:"-"`
+      SubagentRunner SubagentRunner `json:"-"`
+      Request        ModelRequestOptions
+      Metadata       map[string]any `json:"metadata,omitempty"`
   }
   type ApprovalOption struct {
-  	ID   string `json:"id,omitempty"`
-  	Name string `json:"name,omitempty"`
-  	Kind string `json:"kind,omitempty"`
+      ID   string `json:"id,omitempty"`
+      Name string `json:"name,omitempty"`
+      Kind string `json:"kind,omitempty"`
   }
   type ApprovalRequest struct {
-  	SessionRef session.SessionRef        `json:"session_ref"`
-  	Session    session.Session           `json:"session"`
-  	RunID      string                    `json:"run_id,omitempty"`
-  	TurnID     string                    `json:"turn_id,omitempty"`
-  	Tool       tool.Definition           `json:"tool"`
-  	Call       tool.Call                 `json:"call"`
-  	Approval   *session.ProtocolApproval `json:"approval,omitempty"`
-  	Metadata   map[string]any            `json:"metadata,omitempty"`
+      SessionRef session.SessionRef        `json:"session_ref"`
+      Session    session.Session           `json:"session"`
+      RunID      string                    `json:"run_id,omitempty"`
+      TurnID     string                    `json:"turn_id,omitempty"`
+      Tool       tool.Definition           `json:"tool"`
+      Call       tool.Call                 `json:"call"`
+      Approval   *session.ProtocolApproval `json:"approval,omitempty"`
+      Metadata   map[string]any            `json:"metadata,omitempty"`
   }
   type ApprovalRequester interface {
-  	RequestApproval(context.Context, ApprovalRequest) (ApprovalResponse, error)
+      RequestApproval(context.Context, ApprovalRequest) (ApprovalResponse, error)
   }
   type ApprovalResponse struct {
-  	Outcome    string `json:"outcome,omitempty"`
-  	OptionID   string `json:"option_id,omitempty"`
-  	Approved   bool   `json:"approved,omitempty"`
-  	Reason     string `json:"reason,omitempty"`
-  	ReviewText string `json:"review_text,omitempty"`
+      Outcome    string `json:"outcome,omitempty"`
+      OptionID   string `json:"option_id,omitempty"`
+      Approved   bool   `json:"approved,omitempty"`
+      Reason     string `json:"reason,omitempty"`
+      ReviewText string `json:"review_text,omitempty"`
   }
   type AttachParticipantRequest struct {
-  	SessionRef session.SessionRef      `json:"session_ref"`
-  	Agent      string                  `json:"agent,omitempty"`
-  	Role       session.ParticipantRole `json:"role,omitempty"`
-  	Source     string                  `json:"source,omitempty"`
-  	Label      string                  `json:"label,omitempty"`
+      SessionRef session.SessionRef      `json:"session_ref"`
+      Agent      string                  `json:"agent,omitempty"`
+      Role       session.ParticipantRole `json:"role,omitempty"`
+      Source     string                  `json:"source,omitempty"`
+      Label      string                  `json:"label,omitempty"`
   }
   type CancelResult struct {
-  	Status CancelStatus `json:"status,omitempty"`
-  	Err    error        `json:"-"`
+      Status CancelStatus `json:"status,omitempty"`
+      Err    error        `json:"-"`
   }
   type CancelStatus string
   type Context interface {
-  	context.Context
-  	Session() session.Session
-  	Events() Events
-  	ReadonlyState() ReadonlyState
-  	DrainSubmissions() []Submission
-  	Overlay() bool
+      context.Context
+      Session() session.Session
+      Events() Events
+      ReadonlyState() ReadonlyState
+      DrainSubmissions() []Submission
+      Overlay() bool
   }
   type ContextSpec struct {
-  	Context          context.Context
-  	Session          session.Session
-  	Events           []*session.Event
-  	State            map[string]any
-  	DrainSubmissions func() []Submission
-  	Overlay          bool
+      Context          context.Context
+      Session          session.Session
+      Events           []*session.Event
+      State            map[string]any
+      DrainSubmissions func() []Submission
+      Overlay          bool
   }
   type ContextUsage struct {
-  	CurrentTokens int `json:"current_tokens,omitempty"`
-  	MaxTokens     int `json:"max_tokens,omitempty"`
+      CurrentTokens int `json:"current_tokens,omitempty"`
+      MaxTokens     int `json:"max_tokens,omitempty"`
   }
   type ControllerEventForwardRequest struct {
-  	ActiveSession session.Session
-  	SessionRef    session.SessionRef
-  	TurnID        string
-  	Source        EventSource
-  	Publisher     SourceEventPublisher
-  	Normalize     EventNormalizer
-  	IsUserEcho    func(*session.Event) bool
+      ActiveSession session.Session
+      SessionRef    session.SessionRef
+      TurnID        string
+      Source        EventSource
+      Publisher     SourceEventPublisher
+      Normalize     EventNormalizer
+      IsUserEcho    func(*session.Event) bool
   }
   type ControllerEventForwarder interface {
-  	ForwardControllerEvents(ctx context.Context, req ControllerEventForwardRequest) error
+      ForwardControllerEvents(ctx context.Context, req ControllerEventForwardRequest) error
   }
   type DetachParticipantRequest struct {
-  	SessionRef    session.SessionRef `json:"session_ref"`
-  	ParticipantID string             `json:"participant_id,omitempty"`
-  	Source        string             `json:"source,omitempty"`
+      SessionRef    session.SessionRef `json:"session_ref"`
+      ParticipantID string             `json:"participant_id,omitempty"`
+      Source        string             `json:"source,omitempty"`
+  }
+  type EndpointApprovalToolCall struct {
+      ID       string         `json:"id,omitempty"`
+      Name     string         `json:"name,omitempty"`
+      Kind     string         `json:"kind,omitempty"`
+      Title    string         `json:"title,omitempty"`
+      Status   string         `json:"status,omitempty"`
+      RawInput map[string]any `json:"raw_input,omitempty"`
   }
   type EventNormalizer func(activeSession session.Session, turnID string, event *session.Event) *session.Event
   type EventSource interface {
-  	Events() iter.Seq2[*session.Event, error]
+      Events() iter.Seq2[*session.Event, error]
   }
   type Events interface {
-  	All() iter.Seq[*session.Event]
-  	Len() int
-  	At(int) *session.Event
+      All() iter.Seq[*session.Event]
+      Len() int
+      At(int) *session.Event
   }
   type HandoffControllerRequest struct {
-  	SessionRef session.SessionRef     `json:"session_ref"`
-  	Kind       session.ControllerKind `json:"kind,omitempty"`
-  	Agent      string                 `json:"agent,omitempty"`
-  	Source     string                 `json:"source,omitempty"`
-  	Reason     string                 `json:"reason,omitempty"`
+      SessionRef session.SessionRef     `json:"session_ref"`
+      Kind       session.ControllerKind `json:"kind,omitempty"`
+      Agent      string                 `json:"agent,omitempty"`
+      Source     string                 `json:"source,omitempty"`
+      Reason     string                 `json:"reason,omitempty"`
   }
   type ModelRequestOptions struct {
-  	Stream *bool             `json:"stream,omitempty"`
-  	Output *model.OutputSpec `json:"output,omitempty"`
+      Stream *bool             `json:"stream,omitempty"`
+      Output *model.OutputSpec `json:"output,omitempty"`
   }
   type ParticipantControlPlane interface {
-  	AttachParticipant(context.Context, AttachParticipantRequest) (session.Session, error)
-  	PromptParticipant(context.Context, PromptParticipantRequest) (RunResult, error)
-  	DetachParticipant(context.Context, DetachParticipantRequest) (session.Session, error)
+      AttachParticipant(context.Context, AttachParticipantRequest) (session.Session, error)
+      PromptParticipant(context.Context, PromptParticipantRequest) (RunResult, error)
+      DetachParticipant(context.Context, DetachParticipantRequest) (session.Session, error)
   }
   type PromptParticipantRequest struct {
-  	SessionRef        session.SessionRef  `json:"session_ref"`
-  	ParticipantID     string              `json:"participant_id,omitempty"`
-  	Input             string              `json:"input,omitempty"`
-  	DisplayInput      string              `json:"display_input,omitempty"`
-  	DisplayTitle      string              `json:"display_title,omitempty"`
-  	ContentParts      []model.ContentPart `json:"content_parts,omitempty"`
-  	Source            string              `json:"source,omitempty"`
-  	Stream            bool                `json:"stream,omitempty"`
-  	ApprovalRequester ApprovalRequester   `json:"-"`
+      SessionRef        session.SessionRef  `json:"session_ref"`
+      ParticipantID     string              `json:"participant_id,omitempty"`
+      Input             string              `json:"input,omitempty"`
+      DisplayInput      string              `json:"display_input,omitempty"`
+      DisplayTitle      string              `json:"display_title,omitempty"`
+      ContentParts      []model.ContentPart `json:"content_parts,omitempty"`
+      Source            string              `json:"source,omitempty"`
+      Stream            bool                `json:"stream,omitempty"`
+      ApprovalRequester ApprovalRequester   `json:"-"`
   }
   type ReadonlyState interface {
-  	Lookup(string) (any, bool)
-  	Snapshot() map[string]any
+      Lookup(string) (any, bool)
+      Snapshot() map[string]any
   }
   type ResolveApprovalRequest struct {
-  	SessionRef session.SessionRef `json:"session_ref"`
-  	TokenID    string             `json:"token_id"`
-  	Decision   ApprovalResponse   `json:"decision"`
+      SessionRef session.SessionRef `json:"session_ref"`
+      TokenID    string             `json:"token_id"`
+      Decision   ApprovalResponse   `json:"decision"`
   }
   type ResumableRuntime interface {
-  	Resume(context.Context, ResumeRequest) (RunResult, error)
-  	ResolveApproval(context.Context, ResolveApprovalRequest) error
+      Resume(context.Context, ResumeRequest) (RunResult, error)
+      ResolveApproval(context.Context, ResolveApprovalRequest) error
   }
   type ResumeRequest struct {
-  	SessionRef session.SessionRef `json:"session_ref"`
-  	RunID      string             `json:"run_id"`
+      SessionRef session.SessionRef `json:"session_ref"`
+      RunID      string             `json:"run_id"`
   }
   type RunConflictError struct {
-  	SessionRef  session.SessionRef
-  	ActiveRunID string
+      SessionRef  session.SessionRef
+      ActiveRunID string
   }
   type RunLifecycleStatus string
   type RunNotResumableError struct {
-  	SessionRef session.SessionRef
-  	RunID      string
-  	Detail     string
+      SessionRef session.SessionRef
+      RunID      string
+      Detail     string
   }
   type RunRequest struct {
-  	SessionRef        session.SessionRef  `json:"session_ref"`
-  	Input             string              `json:"input,omitempty"`
-  	DisplayInput      string              `json:"display_input,omitempty"`
-  	ContentParts      []model.ContentPart `json:"content_parts,omitempty"`
-  	Request           ModelRequestOptions `json:"request,omitempty"`
-  	ApprovalRequester ApprovalRequester   `json:"-"`
-  	Agent             Agent               `json:"-"`
-  	AgentSpec         AgentSpec           `json:"-"`
+      SessionRef        session.SessionRef  `json:"session_ref"`
+      Input             string              `json:"input,omitempty"`
+      DisplayInput      string              `json:"display_input,omitempty"`
+      ContentParts      []model.ContentPart `json:"content_parts,omitempty"`
+      Request           ModelRequestOptions `json:"request,omitempty"`
+      ApprovalRequester ApprovalRequester   `json:"-"`
+      Agent             Agent               `json:"-"`
+      AgentSpec         AgentSpec           `json:"-"`
   }
   type RunResult struct {
-  	Session session.Session `json:"session"`
-  	Handle  Runner          `json:"-"`
+      Session session.Session `json:"session"`
+      Handle  Runner          `json:"-"`
   }
   type RunState struct {
-  	Status          RunLifecycleStatus `json:"status,omitempty"`
-  	ActiveRunID     string             `json:"active_run_id,omitempty"`
-  	WaitingApproval bool               `json:"waiting_approval,omitempty"`
-  	PauseTokenID    string             `json:"pause_token_id,omitempty"`
-  	LastError       string             `json:"last_error,omitempty"`
-  	UpdatedAt       time.Time          `json:"updated_at,omitempty"`
+      Status          RunLifecycleStatus `json:"status,omitempty"`
+      ActiveRunID     string             `json:"active_run_id,omitempty"`
+      WaitingApproval bool               `json:"waiting_approval,omitempty"`
+      PauseTokenID    string             `json:"pause_token_id,omitempty"`
+      LastError       string             `json:"last_error,omitempty"`
+      UpdatedAt       time.Time          `json:"updated_at,omitempty"`
   }
   type Runner interface {
-  	RunID() string
-  	Events() iter.Seq2[*session.Event, error]
-  	Submit(Submission) error
-  	Cancel() CancelResult
-  	Close() error
+      RunID() string
+      Events() iter.Seq2[*session.Event, error]
+      Submit(Submission) error
+      Cancel() CancelResult
+      Close() error
   }
   type Runtime interface {
-  	Run(context.Context, RunRequest) (RunResult, error)
-  	RunState(context.Context, session.SessionRef) (RunState, error)
+      Run(context.Context, RunRequest) (RunResult, error)
+      RunState(context.Context, session.SessionRef) (RunState, error)
   }
   type SessionControlPlane interface {
-  	ParticipantControlPlane
-  	HandoffController(context.Context, HandoffControllerRequest) (session.Session, error)
+      ParticipantControlPlane
+      HandoffController(context.Context, HandoffControllerRequest) (session.Session, error)
   }
   type SourceEvent struct {
-  	Canonical *session.Event
-  	Native    any
+      Canonical *session.Event
+      Native    any
   }
   type SourceEventPublisher interface {
-  	PublishEvent(event *session.Event)
-  	PublishSourceEvent(event SourceEvent)
+      PublishEvent(event *session.Event)
+      PublishSourceEvent(event SourceEvent)
   }
   type SourceHandle interface {
-  	SourceEvents() iter.Seq2[SourceEvent, error]
+      SourceEvents() iter.Seq2[SourceEvent, error]
   }
   type StreamProvider interface {
-  	Streams() stream.Service
+      Streams() stream.Service
   }
   type SubagentAnchor = delegation.Anchor
+  type SubagentApprovalRequest struct {
+      SessionRef   session.SessionRef       `json:"session_ref,omitempty"`
+      Session      session.Session          `json:"session,omitempty"`
+      TaskID       string                   `json:"task_id,omitempty"`
+      ParentCallID string                   `json:"parent_call_id,omitempty"`
+      Agent        string                   `json:"agent,omitempty"`
+      Mode         string                   `json:"mode,omitempty"`
+      ToolCall     EndpointApprovalToolCall `json:"tool_call,omitempty"`
+      Options      []ApprovalOption         `json:"options,omitempty"`
+  }
+  type SubagentApprovalRequester interface {
+      RequestSubagentApproval(context.Context, SubagentApprovalRequest) (ApprovalResponse, error)
+  }
+  type SubagentApprovalToolCall = EndpointApprovalToolCall
   type SubagentRunRequest = delegation.Request
   type SubagentRunResult = delegation.Result
-  type SubagentRunner = subagent.Runner
+  type SubagentRunner interface {
+      Spawn(context.Context, SubagentSpawnContext, delegation.Request) (delegation.Anchor, delegation.Result, error)
+      Continue(context.Context, delegation.Anchor, delegation.ContinueRequest) (delegation.Result, error)
+      Wait(context.Context, delegation.Anchor, int) (delegation.Result, error)
+      Cancel(context.Context, delegation.Anchor) error
+  }
+  type SubagentSpawnContext struct {
+      SessionRef        session.SessionRef        `json:"session_ref,omitempty"`
+      Session           session.Session           `json:"session,omitempty"`
+      CWD               string                    `json:"cwd,omitempty"`
+      TaskID            string                    `json:"task_id,omitempty"`
+      ParentCallID      string                    `json:"parent_call_id,omitempty"`
+      Mode              string                    `json:"mode,omitempty"`
+      ApprovalMode      string                    `json:"approval_mode,omitempty"`
+      ApprovalRequester SubagentApprovalRequester `json:"-"`
+      Streams           stream.Sink               `json:"-"`
+  }
   type Submission struct {
-  	Kind         SubmissionKind      `json:"kind,omitempty"`
-  	Text         string              `json:"text,omitempty"`
-  	DisplayInput string              `json:"display_input,omitempty"`
-  	ContentParts []model.ContentPart `json:"content_parts,omitempty"`
-  	Metadata     map[string]any      `json:"metadata,omitempty"`
+      Kind         SubmissionKind      `json:"kind,omitempty"`
+      Text         string              `json:"text,omitempty"`
+      DisplayInput string              `json:"display_input,omitempty"`
+      ContentParts []model.ContentPart `json:"content_parts,omitempty"`
+      Metadata     map[string]any      `json:"metadata,omitempty"`
   }
   type SubmissionKind string
 
 package github.com/caelis-labs/caelis/agent-sdk/approval
   const (
-  	ModeAutoReview Mode = "auto-review"
-  	ModeManual     Mode = "manual"
+      ModeAutoReview Mode = "auto-review"
+      ModeManual     Mode = "manual"
   )
   const (
-  	ReviewStatusInProgress ReviewStatus = "in_progress"
-  	ReviewStatusApproved   ReviewStatus = "approved"
-  	ReviewStatusDenied     ReviewStatus = "denied"
-  	ReviewStatusTimedOut   ReviewStatus = "timed_out"
-  	ReviewStatusFailed     ReviewStatus = "failed"
+      ReviewStatusInProgress ReviewStatus = "in_progress"
+      ReviewStatusApproved   ReviewStatus = "approved"
+      ReviewStatusDenied     ReviewStatus = "denied"
+      ReviewStatusTimedOut   ReviewStatus = "timed_out"
+      ReviewStatusFailed     ReviewStatus = "failed"
   )
   const (
-  	StatusPending  Status = "pending"
-  	StatusApproved Status = "approved"
-  	StatusRejected Status = "rejected"
-  	StatusSelected Status = "selected"
+      StatusPending  Status = "pending"
+      StatusApproved Status = "approved"
+      StatusRejected Status = "rejected"
+      StatusSelected Status = "selected"
   )
   const StateCurrentApprovalMode = "gateway.current_approval_mode"
   func (a ApproverAdapter) ReviewApproval(ctx context.Context, req Request) (Decision, error)
@@ -283,168 +321,168 @@ package github.com/caelis-labs/caelis/agent-sdk/approval
   func RuntimeResponseFromFinalReview(result ReviewResult) agentsdk.ApprovalResponse
   func RuntimeResponseFromReview(payload *Payload, result ReviewResult) agentsdk.ApprovalResponse
   type Approver interface {
-  	Decide(context.Context, Request) (Decision, error)
+      Decide(context.Context, Request) (Decision, error)
   }
   type ApproverAdapter struct {
-  	Approver Approver
+      Approver Approver
   }
   type Decision = ReviewResult
   type Mode string
   type ModelResolver interface {
-  	ResolveApprovalModel(context.Context, session.SessionRef) (model.LLM, error)
+      ResolveApprovalModel(context.Context, session.SessionRef) (model.LLM, error)
   }
   type Option struct {
-  	ID   string `json:"id,omitempty"`
-  	Name string `json:"name,omitempty"`
-  	Kind string `json:"kind,omitempty"`
+      ID   string `json:"id,omitempty"`
+      Name string `json:"name,omitempty"`
+      Kind string `json:"kind,omitempty"`
   }
   type Payload struct {
-  	ToolCallID         string         `json:"tool_call_id,omitempty"`
-  	ToolName           string         `json:"tool_name,omitempty"`
-  	RawInput           map[string]any `json:"raw_input,omitempty"`
-  	Reason             string         `json:"reason,omitempty"`
-  	Justification      string         `json:"justification,omitempty"`
-  	SandboxPermissions string         `json:"sandbox_permissions,omitempty"`
-  	Status             Status         `json:"status,omitempty"`
-  	Options            []Option       `json:"options,omitempty"`
-  	ReviewID           string         `json:"review_id,omitempty"`
-  	ReviewStatus       ReviewStatus   `json:"review_status,omitempty"`
-  	ReviewText         string         `json:"review_text,omitempty"`
-  	Risk               string         `json:"risk,omitempty"`
-  	Authorization      string         `json:"authorization,omitempty"`
-  	DecisionSource     string         `json:"decision_source,omitempty"`
-  	ReviewTrace        *ReviewTrace   `json:"review_trace,omitempty"`
+      ToolCallID         string         `json:"tool_call_id,omitempty"`
+      ToolName           string         `json:"tool_name,omitempty"`
+      RawInput           map[string]any `json:"raw_input,omitempty"`
+      Reason             string         `json:"reason,omitempty"`
+      Justification      string         `json:"justification,omitempty"`
+      SandboxPermissions string         `json:"sandbox_permissions,omitempty"`
+      Status             Status         `json:"status,omitempty"`
+      Options            []Option       `json:"options,omitempty"`
+      ReviewID           string         `json:"review_id,omitempty"`
+      ReviewStatus       ReviewStatus   `json:"review_status,omitempty"`
+      ReviewText         string         `json:"review_text,omitempty"`
+      Risk               string         `json:"risk,omitempty"`
+      Authorization      string         `json:"authorization,omitempty"`
+      DecisionSource     string         `json:"decision_source,omitempty"`
+      ReviewTrace        *ReviewTrace   `json:"review_trace,omitempty"`
   }
   type Request = ReviewRequest
   type ReviewRequest struct {
-  	SessionRef     session.SessionRef
-  	RunID          string
-  	TurnID         string
-  	Mode           Mode
-  	ReviewID       string
-  	Model          model.LLM
-  	Approval       *Payload
-  	RuntimeRequest agentsdk.ApprovalRequest
+      SessionRef     session.SessionRef
+      RunID          string
+      TurnID         string
+      Mode           Mode
+      ReviewID       string
+      Model          model.LLM
+      Approval       *Payload
+      RuntimeRequest agentsdk.ApprovalRequest
   }
   type ReviewResult struct {
-  	Approved       bool
-  	Outcome        string
-  	OptionID       string
-  	Risk           string
-  	Authorization  string
-  	Rationale      string
-  	DisplayText    string
-  	DecisionSource string
-  	Trace          *ReviewTrace
+      Approved       bool
+      Outcome        string
+      OptionID       string
+      Risk           string
+      Authorization  string
+      Rationale      string
+      DisplayText    string
+      DecisionSource string
+      Trace          *ReviewTrace
   }
   type ReviewStatus string
   type ReviewTrace struct {
-  	SessionID        string `json:"session_id,omitempty"`
-  	PromptEventID    string `json:"prompt_event_id,omitempty"`
-  	AssistantEventID string `json:"assistant_event_id,omitempty"`
+      SessionID        string `json:"session_id,omitempty"`
+      PromptEventID    string `json:"prompt_event_id,omitempty"`
+      AssistantEventID string `json:"assistant_event_id,omitempty"`
   }
   type Reviewer interface {
-  	ReviewApproval(context.Context, ReviewRequest) (ReviewResult, error)
+      ReviewApproval(context.Context, ReviewRequest) (ReviewResult, error)
   }
   type ReviewerAdapter struct {
-  	Reviewer Reviewer
+      Reviewer Reviewer
   }
   type Status string
 
 package github.com/caelis-labs/caelis/agent-sdk/model
   const (
-  	APIOpenAI              APIType = "openai"
-  	APIOpenAICompatible    APIType = "openai_compatible"
-  	APIOpenRouter          APIType = "openrouter"
-  	APICodeFree            APIType = "codefree"
-  	APIGemini              APIType = "gemini"
-  	APIAnthropic           APIType = "anthropic"
-  	APIAnthropicCompatible APIType = "anthropic_compatible"
-  	APIDeepSeek            APIType = "deepseek"
-  	APIMiniMax             APIType = "minimax"
-  	APIMimo                APIType = "mimo"
-  	APIVolcengine          APIType = "volcengine"
-  	APIVolcengineCoding    APIType = "volcengine_coding_plan"
-  	APIOllama              APIType = "ollama"
+      APIOpenAI              APIType = "openai"
+      APIOpenAICompatible    APIType = "openai_compatible"
+      APIOpenRouter          APIType = "openrouter"
+      APICodeFree            APIType = "codefree"
+      APIGemini              APIType = "gemini"
+      APIAnthropic           APIType = "anthropic"
+      APIAnthropicCompatible APIType = "anthropic_compatible"
+      APIDeepSeek            APIType = "deepseek"
+      APIMiniMax             APIType = "minimax"
+      APIMimo                APIType = "mimo"
+      APIVolcengine          APIType = "volcengine"
+      APIVolcengineCoding    APIType = "volcengine_coding_plan"
+      APIOllama              APIType = "ollama"
   )
   const (
-  	AuthAPIKey      AuthType = "api_key"
-  	AuthBearerToken AuthType = "bearer_token"
-  	AuthOAuthToken  AuthType = "oauth_token"
-  	AuthNone        AuthType = "none"
+      AuthAPIKey      AuthType = "api_key"
+      AuthBearerToken AuthType = "bearer_token"
+      AuthOAuthToken  AuthType = "oauth_token"
+      AuthNone        AuthType = "none"
   )
   const (
-  	ContentPartText  ContentPartType = "text"
-  	ContentPartImage ContentPartType = "image"
+      ContentPartText  ContentPartType = "text"
+      ContentPartImage ContentPartType = "image"
   )
   const (
-  	FinishReasonUnknown       FinishReason = ""
-  	FinishReasonStop          FinishReason = "stop"
-  	FinishReasonLength        FinishReason = "length"
-  	FinishReasonToolCalls     FinishReason = "tool_calls"
-  	FinishReasonContentFilter FinishReason = "content_filter"
+      FinishReasonUnknown       FinishReason = ""
+      FinishReasonStop          FinishReason = "stop"
+      FinishReasonLength        FinishReason = "length"
+      FinishReasonToolCalls     FinishReason = "tool_calls"
+      FinishReasonContentFilter FinishReason = "content_filter"
   )
   const (
-  	MediaModalityImage    MediaModality = "image"
-  	MediaModalityAudio    MediaModality = "audio"
-  	MediaModalityVideo    MediaModality = "video"
-  	MediaModalityDocument MediaModality = "document"
-  	MediaModalityFile     MediaModality = "file"
+      MediaModalityImage    MediaModality = "image"
+      MediaModalityAudio    MediaModality = "audio"
+      MediaModalityVideo    MediaModality = "video"
+      MediaModalityDocument MediaModality = "document"
+      MediaModalityFile     MediaModality = "file"
   )
   const (
-  	MediaSourceInline       MediaSourceKind = "inline"
-  	MediaSourceURL          MediaSourceKind = "url"
-  	MediaSourceProviderFile MediaSourceKind = "provider_file"
-  	MediaSourceLocalRef     MediaSourceKind = "local_ref"
+      MediaSourceInline       MediaSourceKind = "inline"
+      MediaSourceURL          MediaSourceKind = "url"
+      MediaSourceProviderFile MediaSourceKind = "provider_file"
+      MediaSourceLocalRef     MediaSourceKind = "local_ref"
   )
   const (
-  	OutputModeText     OutputMode = "text"
-  	OutputModeJSON     OutputMode = "json"
-  	OutputModeSchema   OutputMode = "schema"
-  	OutputModeToolOnly OutputMode = "tool_only"
+      OutputModeText     OutputMode = "text"
+      OutputModeJSON     OutputMode = "json"
+      OutputModeSchema   OutputMode = "schema"
+      OutputModeToolOnly OutputMode = "tool_only"
   )
   const (
-  	PartKindText       PartKind = "text"
-  	PartKindReasoning  PartKind = "reasoning"
-  	PartKindToolUse    PartKind = "tool_use"
-  	PartKindToolResult PartKind = "tool_result"
-  	PartKindMedia      PartKind = "media"
-  	PartKindJSON       PartKind = "json"
-  	PartKindFileRef    PartKind = "file_ref"
+      PartKindText       PartKind = "text"
+      PartKindReasoning  PartKind = "reasoning"
+      PartKindToolUse    PartKind = "tool_use"
+      PartKindToolResult PartKind = "tool_result"
+      PartKindMedia      PartKind = "media"
+      PartKindJSON       PartKind = "json"
+      PartKindFileRef    PartKind = "file_ref"
   )
   const (
-  	ReasoningVisibilityVisible   ReasoningVisibility = "visible"
-  	ReasoningVisibilityHidden    ReasoningVisibility = "hidden"
-  	ReasoningVisibilityRedacted  ReasoningVisibility = "redacted"
-  	ReasoningVisibilityTokenOnly ReasoningVisibility = "token_only"
+      ReasoningVisibilityVisible   ReasoningVisibility = "visible"
+      ReasoningVisibilityHidden    ReasoningVisibility = "hidden"
+      ReasoningVisibilityRedacted  ReasoningVisibility = "redacted"
+      ReasoningVisibilityTokenOnly ReasoningVisibility = "token_only"
   )
   const (
-  	ResponseStatusInProgress ResponseStatus = "in_progress"
-  	ResponseStatusCompleted  ResponseStatus = "completed"
-  	ResponseStatusCancelled  ResponseStatus = "cancelled"
-  	ResponseStatusFailed     ResponseStatus = "failed"
+      ResponseStatusInProgress ResponseStatus = "in_progress"
+      ResponseStatusCompleted  ResponseStatus = "completed"
+      ResponseStatusCancelled  ResponseStatus = "cancelled"
+      ResponseStatusFailed     ResponseStatus = "failed"
   )
   const (
-  	RoleSystem    Role = "system"
-  	RoleUser      Role = "user"
-  	RoleAssistant Role = "assistant"
-  	RoleTool      Role = "tool"
+      RoleSystem    Role = "system"
+      RoleUser      Role = "user"
+      RoleAssistant Role = "assistant"
+      RoleTool      Role = "tool"
   )
   const (
-  	StreamEventPartStart    StreamEventType = "part_start"
-  	StreamEventPartDelta    StreamEventType = "part_delta"
-  	StreamEventPartDone     StreamEventType = "part_done"
-  	StreamEventMessageDone  StreamEventType = "message_done"
-  	StreamEventStepDone     StreamEventType = "step_done"
-  	StreamEventTurnDone     StreamEventType = "turn_done"
-  	StreamEventRawProvider  StreamEventType = "raw_provider_event"
-  	StreamEventAttemptReset StreamEventType = "attempt_reset"
+      StreamEventPartStart    StreamEventType = "part_start"
+      StreamEventPartDelta    StreamEventType = "part_delta"
+      StreamEventPartDone     StreamEventType = "part_done"
+      StreamEventMessageDone  StreamEventType = "message_done"
+      StreamEventStepDone     StreamEventType = "step_done"
+      StreamEventTurnDone     StreamEventType = "turn_done"
+      StreamEventRawProvider  StreamEventType = "raw_provider_event"
+      StreamEventAttemptReset StreamEventType = "attempt_reset"
   )
   const (
-  	ToolSpecKindFunction         ToolSpecKind = "function"
-  	ToolSpecKindProviderDefined  ToolSpecKind = "provider_defined"
-  	ToolSpecKindProviderExecuted ToolSpecKind = "provider_executed"
-  	ToolSpecKindMCP              ToolSpecKind = "mcp"
+      ToolSpecKindFunction         ToolSpecKind = "function"
+      ToolSpecKindProviderDefined  ToolSpecKind = "provider_defined"
+      ToolSpecKindProviderExecuted ToolSpecKind = "provider_executed"
+      ToolSpecKindMCP              ToolSpecKind = "mcp"
   )
   func (e *ContextOverflowError) Error() string
   func (e *ContextOverflowError) Unwrap() error
@@ -508,265 +546,265 @@ package github.com/caelis-labs/caelis/agent-sdk/model
   func WithRetry(llm LLM, cfg RetryConfig) LLM
   type APIType string
   type AttemptReset struct {
-  	Attempt          int   `json:"attempt"`
-  	Retrying         bool  `json:"retrying"`
-  	MaxRetries       int   `json:"max_retries,omitempty"`
-  	RetryDelayMillis int64 `json:"retry_delay_ms,omitempty"`
+      Attempt          int   `json:"attempt"`
+      Retrying         bool  `json:"retrying"`
+      MaxRetries       int   `json:"max_retries,omitempty"`
+      RetryDelayMillis int64 `json:"retry_delay_ms,omitempty"`
   }
   type AuthType string
   type BackpressureError interface {
-  	Backpressure() bool
+      Backpressure() bool
   }
   type ContentPart struct {
-  	Type     ContentPartType `json:"type"`
-  	Text     string          `json:"text,omitempty"`
-  	MimeType string          `json:"mime_type,omitempty"`
-  	Data     string          `json:"data,omitempty"`
-  	FileName string          `json:"file_name,omitempty"`
+      Type     ContentPartType `json:"type"`
+      Text     string          `json:"text,omitempty"`
+      MimeType string          `json:"mime_type,omitempty"`
+      Data     string          `json:"data,omitempty"`
+      FileName string          `json:"file_name,omitempty"`
   }
   type ContentPartType string
   type ContextOverflowError struct {
-  	Cause error
+      Cause error
   }
   type FileRefPart struct {
-  	Name     string `json:"name,omitempty"`
-  	MimeType string `json:"mime_type,omitempty"`
-  	URI      string `json:"uri,omitempty"`
-  	FileID   string `json:"file_id,omitempty"`
-  	LocalRef string `json:"local_ref,omitempty"`
+      Name     string `json:"name,omitempty"`
+      MimeType string `json:"mime_type,omitempty"`
+      URI      string `json:"uri,omitempty"`
+      FileID   string `json:"file_id,omitempty"`
+      LocalRef string `json:"local_ref,omitempty"`
   }
   type FinishReason string
   type FunctionToolSpec struct {
-  	Name        string         `json:"name,omitempty"`
-  	Description string         `json:"description,omitempty"`
-  	Parameters  map[string]any `json:"parameters,omitempty"`
-  	Strict      bool           `json:"strict,omitempty"`
+      Name        string         `json:"name,omitempty"`
+      Description string         `json:"description,omitempty"`
+      Parameters  map[string]any `json:"parameters,omitempty"`
+      Strict      bool           `json:"strict,omitempty"`
   }
   type JSONPart struct {
-  	Value json.RawMessage `json:"value,omitempty"`
+      Value json.RawMessage `json:"value,omitempty"`
   }
   type LLM interface {
-  	Name() string
-  	Generate(context.Context, *Request) iter.Seq2[*StreamEvent, error]
+      Name() string
+      Generate(context.Context, *Request) iter.Seq2[*StreamEvent, error]
   }
   type MCPToolSpec struct {
-  	Name   string `json:"name,omitempty"`
-  	Server string `json:"server,omitempty"`
-  	Tool   string `json:"tool,omitempty"`
+      Name   string `json:"name,omitempty"`
+      Server string `json:"server,omitempty"`
+      Tool   string `json:"tool,omitempty"`
   }
   type MediaModality string
   type MediaPart struct {
-  	Modality MediaModality `json:"modality,omitempty"`
-  	Source   MediaSource   `json:"source"`
-  	MimeType string        `json:"mime_type,omitempty"`
-  	Name     string        `json:"name,omitempty"`
+      Modality MediaModality `json:"modality,omitempty"`
+      Source   MediaSource   `json:"source"`
+      MimeType string        `json:"mime_type,omitempty"`
+      Name     string        `json:"name,omitempty"`
   }
   type MediaSource struct {
-  	Kind     MediaSourceKind `json:"kind,omitempty"`
-  	Data     string          `json:"data,omitempty"`
-  	URI      string          `json:"uri,omitempty"`
-  	FileID   string          `json:"file_id,omitempty"`
-  	LocalRef string          `json:"local_ref,omitempty"`
+      Kind     MediaSourceKind `json:"kind,omitempty"`
+      Data     string          `json:"data,omitempty"`
+      URI      string          `json:"uri,omitempty"`
+      FileID   string          `json:"file_id,omitempty"`
+      LocalRef string          `json:"local_ref,omitempty"`
   }
   type MediaSourceKind string
   type Message struct {
-  	Role   Role           `json:"role"`
-  	Parts  []Part         `json:"parts,omitempty"`
-  	Origin *MessageOrigin `json:"origin,omitempty"`
+      Role   Role           `json:"role"`
+      Parts  []Part         `json:"parts,omitempty"`
+      Origin *MessageOrigin `json:"origin,omitempty"`
   }
   type MessageOrigin struct {
-  	Provider        string `json:"provider,omitempty"`
-  	Model           string `json:"model,omitempty"`
-  	RawFinishReason string `json:"raw_finish_reason,omitempty"`
-  	CreatedAt       string `json:"created_at,omitempty"`
+      Provider        string `json:"provider,omitempty"`
+      Model           string `json:"model,omitempty"`
+      RawFinishReason string `json:"raw_finish_reason,omitempty"`
+      CreatedAt       string `json:"created_at,omitempty"`
   }
   type OutputMode string
   type OutputSpec struct {
-  	Mode            OutputMode     `json:"mode,omitempty"`
-  	JSONSchema      map[string]any `json:"json_schema,omitempty"`
-  	MaxOutputTokens int            `json:"max_output_tokens,omitempty"`
+      Mode            OutputMode     `json:"mode,omitempty"`
+      JSONSchema      map[string]any `json:"json_schema,omitempty"`
+      MaxOutputTokens int            `json:"max_output_tokens,omitempty"`
   }
   type Part struct {
-  	Kind       PartKind        `json:"kind"`
-  	Text       *TextPart       `json:"text,omitempty"`
-  	Reasoning  *ReasoningPart  `json:"reasoning,omitempty"`
-  	ToolUse    *ToolUsePart    `json:"tool_use,omitempty"`
-  	ToolResult *ToolResultPart `json:"tool_result,omitempty"`
-  	Media      *MediaPart      `json:"media,omitempty"`
-  	JSON       *JSONPart       `json:"json,omitempty"`
-  	FileRef    *FileRefPart    `json:"file_ref,omitempty"`
+      Kind       PartKind        `json:"kind"`
+      Text       *TextPart       `json:"text,omitempty"`
+      Reasoning  *ReasoningPart  `json:"reasoning,omitempty"`
+      ToolUse    *ToolUsePart    `json:"tool_use,omitempty"`
+      ToolResult *ToolResultPart `json:"tool_result,omitempty"`
+      Media      *MediaPart      `json:"media,omitempty"`
+      JSON       *JSONPart       `json:"json,omitempty"`
+      FileRef    *FileRefPart    `json:"file_ref,omitempty"`
   }
   type PartDelta struct {
-  	Index           int                        `json:"index,omitempty"`
-  	Kind            PartKind                   `json:"kind,omitempty"`
-  	TextDelta       string                     `json:"text_delta,omitempty"`
-  	InputDelta      string                     `json:"input_delta,omitempty"`
-  	Replay          *ReplayMeta                `json:"replay,omitempty"`
-  	ProviderDetails map[string]json.RawMessage `json:"provider_details,omitempty"`
+      Index           int                        `json:"index,omitempty"`
+      Kind            PartKind                   `json:"kind,omitempty"`
+      TextDelta       string                     `json:"text_delta,omitempty"`
+      InputDelta      string                     `json:"input_delta,omitempty"`
+      Replay          *ReplayMeta                `json:"replay,omitempty"`
+      ProviderDetails map[string]json.RawMessage `json:"provider_details,omitempty"`
   }
   type PartKind string
   type ProviderDefinedToolSpec struct {
-  	Name            string                     `json:"name,omitempty"`
-  	Provider        string                     `json:"provider,omitempty"`
-  	ProviderDetails map[string]json.RawMessage `json:"provider_details,omitempty"`
+      Name            string                     `json:"name,omitempty"`
+      Provider        string                     `json:"provider,omitempty"`
+      ProviderDetails map[string]json.RawMessage `json:"provider_details,omitempty"`
   }
   type ProviderExecutedToolSpec struct {
-  	Name            string                     `json:"name,omitempty"`
-  	Provider        string                     `json:"provider,omitempty"`
-  	ProviderDetails map[string]json.RawMessage `json:"provider_details,omitempty"`
+      Name            string                     `json:"name,omitempty"`
+      Provider        string                     `json:"provider,omitempty"`
+      ProviderDetails map[string]json.RawMessage `json:"provider_details,omitempty"`
   }
   type ProviderExecutedToolUsage interface {
-  	UsesProviderExecutedTools(*Request) bool
+      UsesProviderExecutedTools(*Request) bool
   }
   type ProviderRequestMetadata struct {
-  	SessionAffinity string
+      SessionAffinity string
   }
   type ReasoningConfig struct {
-  	BudgetTokens int    `json:"budget_tokens,omitempty"`
-  	Effort       string `json:"effort,omitempty"`
+      BudgetTokens int    `json:"budget_tokens,omitempty"`
+      Effort       string `json:"effort,omitempty"`
   }
   type ReasoningPart struct {
-  	VisibleText     *string                    `json:"visible_text,omitempty"`
-  	Visibility      ReasoningVisibility        `json:"visibility,omitempty"`
-  	Replay          *ReplayMeta                `json:"replay,omitempty"`
-  	ProviderDetails map[string]json.RawMessage `json:"provider_details,omitempty"`
+      VisibleText     *string                    `json:"visible_text,omitempty"`
+      Visibility      ReasoningVisibility        `json:"visibility,omitempty"`
+      Replay          *ReplayMeta                `json:"replay,omitempty"`
+      ProviderDetails map[string]json.RawMessage `json:"provider_details,omitempty"`
   }
   type ReasoningVisibility string
   type ReplayMeta struct {
-  	Provider string `json:"provider,omitempty"`
-  	Kind     string `json:"kind,omitempty"`
-  	Token    string `json:"token,omitempty"`
+      Provider string `json:"provider,omitempty"`
+      Kind     string `json:"kind,omitempty"`
+      Token    string `json:"token,omitempty"`
   }
   type Request struct {
-  	Instructions []Part          `json:"instructions,omitempty"`
-  	Messages     []Message       `json:"messages,omitempty"`
-  	Tools        []ToolSpec      `json:"tools,omitempty"`
-  	Output       *OutputSpec     `json:"output,omitempty"`
-  	Reasoning    ReasoningConfig `json:"reasoning,omitempty"`
-  	Stream       bool            `json:"stream,omitempty"`
+      Instructions []Part          `json:"instructions,omitempty"`
+      Messages     []Message       `json:"messages,omitempty"`
+      Tools        []ToolSpec      `json:"tools,omitempty"`
+      Output       *OutputSpec     `json:"output,omitempty"`
+      Reasoning    ReasoningConfig `json:"reasoning,omitempty"`
+      Stream       bool            `json:"stream,omitempty"`
   }
   type Response struct {
-  	Message             Message        `json:"message"`
-  	StepComplete        bool           `json:"step_complete,omitempty"`
-  	TurnComplete        bool           `json:"turn_complete,omitempty"`
-  	Status              ResponseStatus `json:"status,omitempty"`
-  	FinishReason        FinishReason   `json:"finish_reason,omitempty"`
-  	RawFinishReason     string         `json:"raw_finish_reason,omitempty"`
-  	Usage               Usage          `json:"usage,omitempty"`
-  	Model               string         `json:"model,omitempty"`
-  	Provider            string         `json:"provider,omitempty"`
-  	ContextWindowTokens int            `json:"context_window_tokens,omitempty"`
+      Message             Message        `json:"message"`
+      StepComplete        bool           `json:"step_complete,omitempty"`
+      TurnComplete        bool           `json:"turn_complete,omitempty"`
+      Status              ResponseStatus `json:"status,omitempty"`
+      FinishReason        FinishReason   `json:"finish_reason,omitempty"`
+      RawFinishReason     string         `json:"raw_finish_reason,omitempty"`
+      Usage               Usage          `json:"usage,omitempty"`
+      Model               string         `json:"model,omitempty"`
+      Provider            string         `json:"provider,omitempty"`
+      ContextWindowTokens int            `json:"context_window_tokens,omitempty"`
   }
   type ResponseStatus string
   type RetryConfig struct {
-  	MaxRetries          int
-  	BaseDelay           time.Duration
-  	MaxDelay            time.Duration
-  	RateLimitMaxRetries int
-  	RateLimitBaseDelay  time.Duration
-  	RateLimitMaxDelay   time.Duration
+      MaxRetries          int
+      BaseDelay           time.Duration
+      MaxDelay            time.Duration
+      RateLimitMaxRetries int
+      RateLimitBaseDelay  time.Duration
+      RateLimitMaxDelay   time.Duration
   }
   type RetryExhaustedError struct {
-  	MaxRetries   int
-  	Backpressure bool
-  	Cause        error
+      MaxRetries   int
+      Backpressure bool
+      Cause        error
   }
   type RetryableError interface {
-  	Retryable() bool
+      Retryable() bool
   }
   type Role string
   type StreamEvent struct {
-  	Type      StreamEventType `json:"type"`
-  	PartDelta *PartDelta      `json:"part_delta,omitempty"`
-  	Message   *Message        `json:"message,omitempty"`
-  	*Response
-  	RawProviderEvent json.RawMessage `json:"raw_provider_event,omitempty"`
-  	AttemptReset     *AttemptReset   `json:"attempt_reset,omitempty"`
+      Type      StreamEventType `json:"type"`
+      PartDelta *PartDelta      `json:"part_delta,omitempty"`
+      Message   *Message        `json:"message,omitempty"`
+      *Response
+      RawProviderEvent json.RawMessage `json:"raw_provider_event,omitempty"`
+      AttemptReset     *AttemptReset   `json:"attempt_reset,omitempty"`
   }
   type StreamEventType string
   type TextPart struct {
-  	Text string `json:"text"`
+      Text string `json:"text"`
   }
   type ToolCall struct {
-  	ID               string `json:"id,omitempty"`
-  	Name             string `json:"name,omitempty"`
-  	Args             string `json:"args,omitempty"`
-  	ThoughtSignature string `json:"thought_signature,omitempty"`
+      ID               string `json:"id,omitempty"`
+      Name             string `json:"name,omitempty"`
+      Args             string `json:"args,omitempty"`
+      ThoughtSignature string `json:"thought_signature,omitempty"`
   }
   type ToolDefinition = FunctionToolSpec
   type ToolResponse struct {
-  	ID     string         `json:"id,omitempty"`
-  	Name   string         `json:"name,omitempty"`
-  	Result map[string]any `json:"result,omitempty"`
+      ID     string         `json:"id,omitempty"`
+      Name   string         `json:"name,omitempty"`
+      Result map[string]any `json:"result,omitempty"`
   }
   type ToolResultPart struct {
-  	ToolUseID string `json:"tool_use_id,omitempty"`
-  	Name      string `json:"name,omitempty"`
-  	Content   []Part `json:"content,omitempty"`
-  	IsError   bool   `json:"is_error,omitempty"`
+      ToolUseID string `json:"tool_use_id,omitempty"`
+      Name      string `json:"name,omitempty"`
+      Content   []Part `json:"content,omitempty"`
+      IsError   bool   `json:"is_error,omitempty"`
   }
   type ToolSpec struct {
-  	Kind             ToolSpecKind              `json:"kind"`
-  	Function         *FunctionToolSpec         `json:"function,omitempty"`
-  	ProviderDefined  *ProviderDefinedToolSpec  `json:"provider_defined,omitempty"`
-  	ProviderExecuted *ProviderExecutedToolSpec `json:"provider_executed,omitempty"`
-  	MCP              *MCPToolSpec              `json:"mcp,omitempty"`
+      Kind             ToolSpecKind              `json:"kind"`
+      Function         *FunctionToolSpec         `json:"function,omitempty"`
+      ProviderDefined  *ProviderDefinedToolSpec  `json:"provider_defined,omitempty"`
+      ProviderExecuted *ProviderExecutedToolSpec `json:"provider_executed,omitempty"`
+      MCP              *MCPToolSpec              `json:"mcp,omitempty"`
   }
   type ToolSpecKind string
   type ToolUsePart struct {
-  	ID              string                     `json:"id,omitempty"`
-  	Name            string                     `json:"name,omitempty"`
-  	Input           json.RawMessage            `json:"input,omitempty"`
-  	Replay          *ReplayMeta                `json:"replay,omitempty"`
-  	ProviderDetails map[string]json.RawMessage `json:"provider_details,omitempty"`
+      ID              string                     `json:"id,omitempty"`
+      Name            string                     `json:"name,omitempty"`
+      Input           json.RawMessage            `json:"input,omitempty"`
+      Replay          *ReplayMeta                `json:"replay,omitempty"`
+      ProviderDetails map[string]json.RawMessage `json:"provider_details,omitempty"`
   }
   type Usage struct {
-  	PromptTokens      int `json:"prompt_tokens,omitempty"`
-  	CachedInputTokens int `json:"cached_input_tokens,omitempty"`
-  	CompletionTokens  int `json:"completion_tokens,omitempty"`
-  	ReasoningTokens   int `json:"reasoning_tokens,omitempty"`
-  	TotalTokens       int `json:"total_tokens,omitempty"`
+      PromptTokens      int `json:"prompt_tokens,omitempty"`
+      CachedInputTokens int `json:"cached_input_tokens,omitempty"`
+      CompletionTokens  int `json:"completion_tokens,omitempty"`
+      ReasoningTokens   int `json:"reasoning_tokens,omitempty"`
+      TotalTokens       int `json:"total_tokens,omitempty"`
   }
   type UserDisplayableError = display.UserDisplayableError
   type WebSearchAvailability interface {
-  	WebSearchUnavailableReason() string
+      WebSearchUnavailableReason() string
   }
   type WebSearchRequest struct {
-  	Query      string `json:"query,omitempty"`
-  	MaxResults int    `json:"max_results,omitempty"`
+      Query      string `json:"query,omitempty"`
+      MaxResults int    `json:"max_results,omitempty"`
   }
   type WebSearchResponse struct {
-  	Query    string            `json:"query,omitempty"`
-  	Provider string            `json:"provider,omitempty"`
-  	Model    string            `json:"model,omitempty"`
-  	Answer   string            `json:"answer,omitempty"`
-  	Results  []WebSearchResult `json:"results,omitempty"`
-  	Usage    Usage             `json:"usage,omitempty"`
+      Query    string            `json:"query,omitempty"`
+      Provider string            `json:"provider,omitempty"`
+      Model    string            `json:"model,omitempty"`
+      Answer   string            `json:"answer,omitempty"`
+      Results  []WebSearchResult `json:"results,omitempty"`
+      Usage    Usage             `json:"usage,omitempty"`
   }
   type WebSearchResult struct {
-  	Title       string `json:"title,omitempty"`
-  	URL         string `json:"url,omitempty"`
-  	Snippet     string `json:"snippet,omitempty"`
-  	Source      string `json:"source,omitempty"`
-  	PublishedAt string `json:"published_at,omitempty"`
+      Title       string `json:"title,omitempty"`
+      URL         string `json:"url,omitempty"`
+      Snippet     string `json:"snippet,omitempty"`
+      Source      string `json:"source,omitempty"`
+      PublishedAt string `json:"published_at,omitempty"`
   }
   type WebSearcher interface {
-  	SearchWeb(context.Context, WebSearchRequest) (WebSearchResponse, error)
+      SearchWeb(context.Context, WebSearchRequest) (WebSearchResponse, error)
   }
 
 package github.com/caelis-labs/caelis/agent-sdk/policy
   const (
-  	ActionAllow       Action = "allow"
-  	ActionDeny        Action = "deny"
-  	ActionAskApproval Action = "ask_approval"
+      ActionAllow       Action = "allow"
+      ActionDeny        Action = "deny"
+      ActionAskApproval Action = "ask_approval"
   )
   const (
-  	ProfileWorkspaceWrite = "workspace-write"
+      ProfileWorkspaceWrite = "workspace-write"
   
-  	MetadataPolicyProfile    = "policy_profile"
-  	MetadataLegacyPolicyMode = "policy_mode"
-  	MetadataExtraReadRoots   = "policy_extra_read_roots"
-  	MetadataExtraWriteRoots  = "policy_extra_write_roots"
+      MetadataPolicyProfile    = "policy_profile"
+      MetadataLegacyPolicyMode = "policy_mode"
+      MetadataExtraReadRoots   = "policy_extra_read_roots"
+      MetadataExtraWriteRoots  = "policy_extra_write_roots"
   )
   func (e *DecisionError) Error() string
   func (e *DecisionError) Unwrap() error
@@ -787,163 +825,163 @@ package github.com/caelis-labs/caelis/agent-sdk/policy
   func NormalizeProfileName(profile string) string
   type Action string
   type Decision struct {
-  	Action      Action                    `json:"action,omitempty"`
-  	Reason      string                    `json:"reason,omitempty"`
-  	Constraints sandbox.Constraints       `json:"constraints,omitempty"`
-  	Metadata    map[string]any            `json:"metadata,omitempty"`
-  	Approval    *session.ProtocolApproval `json:"approval,omitempty"`
+      Action      Action                    `json:"action,omitempty"`
+      Reason      string                    `json:"reason,omitempty"`
+      Constraints sandbox.Constraints       `json:"constraints,omitempty"`
+      Metadata    map[string]any            `json:"metadata,omitempty"`
+      Approval    *session.ProtocolApproval `json:"approval,omitempty"`
   }
   type DecisionError struct {
-  	Mode   string
-  	Detail string
-  	Err    error
+      Mode   string
+      Detail string
+      Err    error
   }
   type MemoryRegistry struct {
-  	// contains filtered or unexported fields
+      // contains filtered or unexported fields
   }
   type Mode interface {
-  	Name() string
-  	DecideTool(context.Context, ToolContext) (Decision, error)
+      Name() string
+      DecideTool(context.Context, ToolContext) (Decision, error)
   }
   type ModeOptions struct {
-  	WorkspaceRoot   string   `json:"workspace_root,omitempty"`
-  	TempRoot        string   `json:"temp_root,omitempty"`
-  	ExtraReadRoots  []string `json:"extra_read_roots,omitempty"`
-  	ExtraWriteRoots []string `json:"extra_write_roots,omitempty"`
-  	NetworkEnabled  *bool    `json:"network_enabled,omitempty"`
+      WorkspaceRoot   string   `json:"workspace_root,omitempty"`
+      TempRoot        string   `json:"temp_root,omitempty"`
+      ExtraReadRoots  []string `json:"extra_read_roots,omitempty"`
+      ExtraWriteRoots []string `json:"extra_write_roots,omitempty"`
+      NetworkEnabled  *bool    `json:"network_enabled,omitempty"`
   }
   type NamedMode struct {
-  	ID     string
-  	Decide func(context.Context, ToolContext) (Decision, error)
+      ID     string
+      Decide func(context.Context, ToolContext) (Decision, error)
   }
   type ProfileError struct {
-  	Profile string
-  	Detail  string
-  	Err     error
+      Profile string
+      Detail  string
+      Err     error
   }
   type Registry interface {
-  	Lookup(context.Context, string) (Mode, bool, error)
+      Lookup(context.Context, string) (Mode, bool, error)
   }
   type ToolContext struct {
-  	Session session.Session    `json:"session"`
-  	State   map[string]any     `json:"state,omitempty"`
-  	Tool    tool.Definition    `json:"tool"`
-  	Call    tool.Call          `json:"call"`
-  	Sandbox sandbox.Descriptor `json:"sandbox"`
-  	Mode    string             `json:"mode,omitempty"`
-  	Options ModeOptions        `json:"options,omitempty"`
+      Session session.Session    `json:"session"`
+      State   map[string]any     `json:"state,omitempty"`
+      Tool    tool.Definition    `json:"tool"`
+      Call    tool.Call          `json:"call"`
+      Sandbox sandbox.Descriptor `json:"sandbox"`
+      Mode    string             `json:"mode,omitempty"`
+      Options ModeOptions        `json:"options,omitempty"`
   }
   type ToolInputDecodeError struct {
-  	Tool string
-  	Err  error
+      Tool string
+      Err  error
   }
 
 package github.com/caelis-labs/caelis/agent-sdk/runtime
   func (r *Runtime) AttachParticipant(ctx context.Context, req agent.AttachParticipantRequest) (session.Session, error)
   func (r *Runtime) Compact(ctx context.Context, req CompactRequest) (CompactResult, error)
   func (r *Runtime) ContinueSubagentByHandle(
-  	ctx context.Context,
-  	ref session.SessionRef,
-  	handle string,
-  	prompt string,
-  	yield time.Duration,
+      ctx context.Context,
+      ref session.SessionRef,
+      handle string,
+      prompt string,
+      yield time.Duration,
   ) (taskapi.Snapshot, error)
   func (r *Runtime) DetachParticipant(ctx context.Context, req agent.DetachParticipantRequest) (session.Session, error)
   func (r *Runtime) PromptParticipant(ctx context.Context, req agent.PromptParticipantRequest) (agent.RunResult, error)
   func (r *Runtime) ResolveApproval(ctx context.Context, req agent.ResolveApprovalRequest) error
   func (r *Runtime) Resume(ctx context.Context, req agent.ResumeRequest) (agent.RunResult, error)
   func (r *Runtime) Run(
-  	ctx context.Context,
-  	req agent.RunRequest,
+      ctx context.Context,
+      req agent.RunRequest,
   ) (agent.RunResult, error)
   func (r *Runtime) RunState(
-  	ctx context.Context,
-  	ref session.SessionRef,
+      ctx context.Context,
+      ref session.SessionRef,
   ) (agent.RunState, error)
   func (r *Runtime) StartSubagent(
-  	ctx context.Context,
-  	ref session.SessionRef,
-  	agent string,
-  	prompt string,
-  	source string,
+      ctx context.Context,
+      ref session.SessionRef,
+      agent string,
+      prompt string,
+      source string,
   ) (taskapi.Snapshot, error)
   func (r *Runtime) StartSubagentWithOptions(
-  	ctx context.Context,
-  	ref session.SessionRef,
-  	agent string,
-  	prompt string,
-  	source string,
-  	opts StartSubagentOptions,
+      ctx context.Context,
+      ref session.SessionRef,
+      agent string,
+      prompt string,
+      source string,
+      opts StartSubagentOptions,
   ) (taskapi.Snapshot, error)
   func (r *Runtime) Streams() stream.Service
   func (r *Runtime) WaitSubagentTask(
-  	ctx context.Context,
-  	ref session.SessionRef,
-  	taskID string,
-  	yield time.Duration,
+      ctx context.Context,
+      ref session.SessionRef,
+      taskID string,
+      yield time.Duration,
   ) (taskapi.Snapshot, error)
   func ComputeUsageSnapshot(events []*session.Event, pendingEvents []*session.Event, contextWindow int, cfg CompactionConfig) compact.UsageSnapshot
   func New(cfg Config) (*Runtime, error)
   type CompactRequest struct {
-  	SessionRef session.SessionRef
-  	Model      model.LLM
-  	Trigger    string
+      SessionRef session.SessionRef
+      Model      model.LLM
+      Trigger    string
   }
   type CompactResult struct {
-  	Session   session.Session
-  	Compacted bool
-  	Event     *session.Event
-  	Usage     compact.UsageSnapshot
+      Session   session.Session
+      Compacted bool
+      Event     *session.Event
+      Usage     compact.UsageSnapshot
   }
   type CompactionConfig struct {
-  	Enabled                     bool
-  	WatermarkRatio              float64
-  	ForceWatermarkRatio         float64
-  	DefaultContextWindowTokens  int
-  	ReserveOutputTokens         int
-  	SafetyMarginTokens          int
-  	SegmentTokenBudget          int
-  	MaxSegmentDepth             int
-  	MaxRetryAttempts            int
-  	RetryBaseDelay              time.Duration
-  	RetryMaxDelay               time.Duration
-  	EstimatedPromptPrefixTokens int
+      Enabled                     bool
+      WatermarkRatio              float64
+      ForceWatermarkRatio         float64
+      DefaultContextWindowTokens  int
+      ReserveOutputTokens         int
+      SafetyMarginTokens          int
+      SegmentTokenBudget          int
+      MaxSegmentDepth             int
+      MaxRetryAttempts            int
+      RetryBaseDelay              time.Duration
+      RetryMaxDelay               time.Duration
+      EstimatedPromptPrefixTokens int
   }
   type Config struct {
-  	Sessions                 session.Service
-  	AgentFactory             agent.AgentFactory
-  	RunIDGenerator           func() string
-  	Clock                    func() time.Time
-  	Compaction               CompactionConfig
-  	Compactor                compact.Engine
-  	PolicyRegistry           policy.Registry
-  	DefaultPolicyMode        string
-  	DefaultApprovalMode      string
-  	Controllers              controller.Backend
-  	ControllerContextRouter  controller.ContextRouter
-  	ControllerRecovery       controller.RecoveryCoordinator
-  	ControllerEventForwarder agent.ControllerEventForwarder
-  	TaskStore                task.Store
-  	Subagents                subagent.Runner
+      Sessions                 session.Service
+      AgentFactory             agent.AgentFactory
+      RunIDGenerator           func() string
+      Clock                    func() time.Time
+      Compaction               CompactionConfig
+      Compactor                compact.Engine
+      PolicyRegistry           policy.Registry
+      DefaultPolicyMode        string
+      DefaultApprovalMode      string
+      Controllers              controller.Backend
+      ControllerContextRouter  controller.ContextRouter
+      ControllerRecovery       controller.RecoveryCoordinator
+      ControllerEventForwarder agent.ControllerEventForwarder
+      TaskStore                task.Store
+      Subagents                agent.SubagentRunner
   }
   type Runtime struct {
-  	// contains filtered or unexported fields
+      // contains filtered or unexported fields
   }
   type StartSubagentOptions struct {
-  	ApprovalRequester agent.ApprovalRequester
-  	ApprovalMode      string
+      ApprovalRequester agent.ApprovalRequester
+      ApprovalMode      string
   }
 
 package github.com/caelis-labs/caelis/agent-sdk/runtime/compact
   const (
-  	MetaKeyCompact         = "compact"
-  	CompactContractVersion = 1
-  	CompactNoticeLabel     = display.CompactNoticeLabel
-  	CompactFailureLabel    = display.CompactFailureNoticeLabel
+      MetaKeyCompact         = "compact"
+      CompactContractVersion = 1
+      CompactNoticeLabel     = display.CompactNoticeLabel
+      CompactFailureLabel    = display.CompactFailureNoticeLabel
   )
   const (
-  	UsageSourceProvider  UsageSource = "provider"
-  	UsageSourceEstimated UsageSource = "estimated"
+      UsageSourceProvider  UsageSource = "provider"
+      UsageSourceEstimated UsageSource = "estimated"
   )
   func CompactEventDataFromEvent(event *session.Event) (CompactEventData, bool)
   func CompactEventDataValue(in CompactEventData) map[string]any
@@ -952,237 +990,218 @@ package github.com/caelis-labs/caelis/agent-sdk/runtime/compact
   func LatestCompactEvent(events []*session.Event) (*session.Event, CompactEventData, bool)
   func PromptEventsFromLatestCompact(events []*session.Event) []*session.Event
   type CompactEventData struct {
-  	Revision             int      `json:"revision,omitempty"`
-  	ContractVersion      int      `json:"contract_version,omitempty"`
-  	SummarizedThroughID  string   `json:"summarized_through_id,omitempty"`
-  	SummarizedThroughSeq uint64   `json:"summarized_through_seq,omitempty"`
-  	Generator            string   `json:"generator,omitempty"`
-  	Trigger              string   `json:"trigger,omitempty"`
-  	SourceEventCount     int      `json:"source_event_count,omitempty"`
-  	TotalTokens          int      `json:"total_tokens,omitempty"`
-  	ContextWindowTokens  int      `json:"context_window_tokens,omitempty"`
-  	DiscoveredTools      []string `json:"discovered_tools,omitempty"`
+      Revision             int      `json:"revision,omitempty"`
+      ContractVersion      int      `json:"contract_version,omitempty"`
+      SummarizedThroughID  string   `json:"summarized_through_id,omitempty"`
+      SummarizedThroughSeq uint64   `json:"summarized_through_seq,omitempty"`
+      Generator            string   `json:"generator,omitempty"`
+      Trigger              string   `json:"trigger,omitempty"`
+      SourceEventCount     int      `json:"source_event_count,omitempty"`
+      TotalTokens          int      `json:"total_tokens,omitempty"`
+      ContextWindowTokens  int      `json:"context_window_tokens,omitempty"`
+      DiscoveredTools      []string `json:"discovered_tools,omitempty"`
   }
   type ContextWindowProvider interface {
-  	ContextWindowTokens() int
+      ContextWindowTokens() int
   }
   type Engine interface {
-  	Prepare(context.Context, Request) (Result, error)
-  	CompactOnOverflow(context.Context, Request, error) (Result, error)
+      Prepare(context.Context, Request) (Result, error)
+      CompactOnOverflow(context.Context, Request, error) (Result, error)
   }
   type ForceEngine interface {
-  	Force(context.Context, Request, string) (Result, error)
+      Force(context.Context, Request, string) (Result, error)
   }
   type Request struct {
-  	Session       session.Session
-  	SessionRef    session.SessionRef
-  	Events        []*session.Event
-  	PendingEvents []*session.Event
-  	Model         model.LLM
+      Session       session.Session
+      SessionRef    session.SessionRef
+      Events        []*session.Event
+      PendingEvents []*session.Event
+      Model         model.LLM
   }
   type Result struct {
-  	Compacted    bool
-  	CompactText  string
-  	CompactEvent *session.Event
-  	PromptEvents []*session.Event
-  	Usage        UsageSnapshot
+      Compacted    bool
+      CompactText  string
+      CompactEvent *session.Event
+      PromptEvents []*session.Event
+      Usage        UsageSnapshot
   }
   type TriggerDecision struct {
-  	ShouldCompact bool
-  	Reason        string
+      ShouldCompact bool
+      Reason        string
   }
   type UsageSnapshot struct {
-  	TotalTokens           int         `json:"total_tokens,omitempty"`
-  	ContextWindowTokens   int         `json:"context_window_tokens,omitempty"`
-  	EffectiveInputBudget  int         `json:"effective_input_budget,omitempty"`
-  	EstimatedDeltaTokens  int         `json:"estimated_delta_tokens,omitempty"`
-  	EstimatedPrefixTokens int         `json:"estimated_prefix_tokens,omitempty"`
-  	Source                UsageSource `json:"source,omitempty"`
-  	AsOfEventID           string      `json:"as_of_event_id,omitempty"`
+      TotalTokens           int         `json:"total_tokens,omitempty"`
+      ContextWindowTokens   int         `json:"context_window_tokens,omitempty"`
+      EffectiveInputBudget  int         `json:"effective_input_budget,omitempty"`
+      EstimatedDeltaTokens  int         `json:"estimated_delta_tokens,omitempty"`
+      EstimatedPrefixTokens int         `json:"estimated_prefix_tokens,omitempty"`
+      Source                UsageSource `json:"source,omitempty"`
+      AsOfEventID           string      `json:"as_of_event_id,omitempty"`
   }
   type UsageSource string
 
 package github.com/caelis-labs/caelis/agent-sdk/runtime/controller
   const (
-  	CancelStatusCancelled        CancelStatus = "cancelled"
-  	CancelStatusAlreadyCancelled CancelStatus = "already_cancelled"
+      CancelStatusCancelled        = agent.CancelStatusCancelled
+      CancelStatusAlreadyCancelled = agent.CancelStatusAlreadyCancelled
   )
-  func (r CancelResult) Cancelled() bool
   func NormalizeAttachRequest(in AttachRequest) AttachRequest
   func NormalizeDetachRequest(in DetachRequest) DetachRequest
   func NormalizeHandoffRequest(in HandoffRequest) HandoffRequest
   func NormalizeParticipantPromptRequest(in ParticipantPromptRequest) ParticipantPromptRequest
   func NormalizeTurnRequest(in TurnRequest) TurnRequest
-  type ApprovalOption struct {
-  	ID   string `json:"id,omitempty"`
-  	Name string `json:"name,omitempty"`
-  	Kind string `json:"kind,omitempty"`
-  }
+  type ApprovalOption = agent.ApprovalOption
   type ApprovalRequest struct {
-  	SessionRef session.SessionRef `json:"session_ref,omitempty"`
-  	Session    session.Session    `json:"session,omitempty"`
-  	Agent      string             `json:"agent,omitempty"`
-  	Mode       string             `json:"mode,omitempty"`
-  	ToolCall   ApprovalToolCall   `json:"tool_call,omitempty"`
-  	Options    []ApprovalOption   `json:"options,omitempty"`
+      SessionRef session.SessionRef `json:"session_ref,omitempty"`
+      Session    session.Session    `json:"session,omitempty"`
+      Agent      string             `json:"agent,omitempty"`
+      Mode       string             `json:"mode,omitempty"`
+      ToolCall   ApprovalToolCall   `json:"tool_call,omitempty"`
+      Options    []ApprovalOption   `json:"options,omitempty"`
   }
   type ApprovalRequester interface {
-  	RequestControllerApproval(context.Context, ApprovalRequest) (ApprovalResponse, error)
+      RequestControllerApproval(context.Context, ApprovalRequest) (ApprovalResponse, error)
   }
-  type ApprovalResponse struct {
-  	Outcome  string `json:"outcome,omitempty"`
-  	OptionID string `json:"option_id,omitempty"`
-  	Approved bool   `json:"approved,omitempty"`
-  }
-  type ApprovalToolCall struct {
-  	ID       string         `json:"id,omitempty"`
-  	Name     string         `json:"name,omitempty"`
-  	Kind     string         `json:"kind,omitempty"`
-  	Title    string         `json:"title,omitempty"`
-  	Status   string         `json:"status,omitempty"`
-  	RawInput map[string]any `json:"raw_input,omitempty"`
-  }
+  type ApprovalResponse = agent.ApprovalResponse
+  type ApprovalToolCall = agent.EndpointApprovalToolCall
   type AttachRequest struct {
-  	SessionRef session.SessionRef         `json:"session_ref,omitempty"`
-  	Session    session.Session            `json:"session,omitempty"`
-  	Binding    session.ParticipantBinding `json:"binding,omitempty"`
-  	Agent      string                     `json:"agent,omitempty"`
-  	Role       session.ParticipantRole    `json:"role,omitempty"`
-  	Source     string                     `json:"source,omitempty"`
-  	Label      string                     `json:"label,omitempty"`
+      SessionRef session.SessionRef         `json:"session_ref,omitempty"`
+      Session    session.Session            `json:"session,omitempty"`
+      Binding    session.ParticipantBinding `json:"binding,omitempty"`
+      Agent      string                     `json:"agent,omitempty"`
+      Role       session.ParticipantRole    `json:"role,omitempty"`
+      Source     string                     `json:"source,omitempty"`
+      Label      string                     `json:"label,omitempty"`
   }
   type Backend interface {
-  	Activate(context.Context, HandoffRequest) (session.ControllerBinding, error)
-  	Deactivate(context.Context, session.SessionRef) error
-  	RunTurn(context.Context, TurnRequest) (TurnResult, error)
-  	Attach(context.Context, AttachRequest) (session.ParticipantBinding, error)
-  	PromptParticipant(context.Context, ParticipantPromptRequest) (TurnResult, error)
-  	Detach(context.Context, DetachRequest) error
+      Activate(context.Context, HandoffRequest) (session.ControllerBinding, error)
+      Deactivate(context.Context, session.SessionRef) error
+      RunTurn(context.Context, TurnRequest) (TurnResult, error)
+      Attach(context.Context, AttachRequest) (session.ParticipantBinding, error)
+      PromptParticipant(context.Context, ParticipantPromptRequest) (TurnResult, error)
+      Detach(context.Context, DetachRequest) error
   }
-  type CancelResult struct {
-  	Status CancelStatus `json:"status,omitempty"`
-  	Err    error        `json:"-"`
-  }
-  type CancelStatus string
+  type CancelResult = agent.CancelResult
+  type CancelStatus = agent.CancelStatus
   type ContextRoute struct {
-  	Prelude string `json:"prelude,omitempty"`
-  	SyncSeq int    `json:"sync_seq,omitempty"`
+      Prelude string `json:"prelude,omitempty"`
+      SyncSeq int    `json:"sync_seq,omitempty"`
   }
   type ContextRouter interface {
-  	ControllerContext(context.Context, ControllerContextRequest) (ContextRoute, error)
-  	ParticipantContext(context.Context, ParticipantContextRequest) (ContextRoute, error)
-  	Checkpoint(context.Context, session.SessionRef, string) (int, error)
+      ControllerContext(context.Context, ControllerContextRequest) (ContextRoute, error)
+      ParticipantContext(context.Context, ParticipantContextRequest) (ContextRoute, error)
+      Checkpoint(context.Context, session.SessionRef, string) (int, error)
   }
   type ControllerContextRequest struct {
-  	SessionRef    session.SessionRef        `json:"session_ref,omitempty"`
-  	Session       session.Session           `json:"session,omitempty"`
-  	Controller    session.ControllerBinding `json:"controller,omitempty"`
-  	SinceSeq      int                       `json:"since_seq,omitempty"`
-  	ExcludeTurnID string                    `json:"exclude_turn_id,omitempty"`
+      SessionRef    session.SessionRef        `json:"session_ref,omitempty"`
+      Session       session.Session           `json:"session,omitempty"`
+      Controller    session.ControllerBinding `json:"controller,omitempty"`
+      SinceSeq      int                       `json:"since_seq,omitempty"`
+      ExcludeTurnID string                    `json:"exclude_turn_id,omitempty"`
   }
   type DetachRequest struct {
-  	SessionRef    session.SessionRef `json:"session_ref,omitempty"`
-  	Session       session.Session    `json:"session,omitempty"`
-  	ParticipantID string             `json:"participant_id,omitempty"`
-  	Source        string             `json:"source,omitempty"`
+      SessionRef    session.SessionRef `json:"session_ref,omitempty"`
+      Session       session.Session    `json:"session,omitempty"`
+      ParticipantID string             `json:"participant_id,omitempty"`
+      Source        string             `json:"source,omitempty"`
   }
   type HandoffRequest struct {
-  	SessionRef     session.SessionRef `json:"session_ref,omitempty"`
-  	Session        session.Session    `json:"session,omitempty"`
-  	Agent          string             `json:"agent,omitempty"`
-  	Source         string             `json:"source,omitempty"`
-  	Reason         string             `json:"reason,omitempty"`
-  	ContextPrelude string             `json:"context_prelude,omitempty"`
-  	ContextSyncSeq int                `json:"context_sync_seq,omitempty"`
+      SessionRef     session.SessionRef `json:"session_ref,omitempty"`
+      Session        session.Session    `json:"session,omitempty"`
+      Agent          string             `json:"agent,omitempty"`
+      Source         string             `json:"source,omitempty"`
+      Reason         string             `json:"reason,omitempty"`
+      ContextPrelude string             `json:"context_prelude,omitempty"`
+      ContextSyncSeq int                `json:"context_sync_seq,omitempty"`
   }
   type ParticipantContextRequest struct {
-  	SessionRef session.SessionRef         `json:"session_ref,omitempty"`
-  	Session    session.Session            `json:"session,omitempty"`
-  	Binding    session.ParticipantBinding `json:"binding,omitempty"`
+      SessionRef session.SessionRef         `json:"session_ref,omitempty"`
+      Session    session.Session            `json:"session,omitempty"`
+      Binding    session.ParticipantBinding `json:"binding,omitempty"`
   }
   type ParticipantPromptRequest struct {
-  	SessionRef        session.SessionRef  `json:"session_ref,omitempty"`
-  	Session           session.Session     `json:"session,omitempty"`
-  	TurnID            string              `json:"turn_id,omitempty"`
-  	ParticipantID     string              `json:"participant_id,omitempty"`
-  	Input             string              `json:"input,omitempty"`
-  	DisplayInput      string              `json:"display_input,omitempty"`
-  	DisplayTitle      string              `json:"display_title,omitempty"`
-  	ContentParts      []model.ContentPart `json:"content_parts,omitempty"`
-  	ContextPrelude    string              `json:"context_prelude,omitempty"`
-  	Stream            bool                `json:"stream,omitempty"`
-  	Mode              string              `json:"mode,omitempty"`
-  	ApprovalRequester ApprovalRequester   `json:"-"`
+      SessionRef        session.SessionRef  `json:"session_ref,omitempty"`
+      Session           session.Session     `json:"session,omitempty"`
+      TurnID            string              `json:"turn_id,omitempty"`
+      ParticipantID     string              `json:"participant_id,omitempty"`
+      Input             string              `json:"input,omitempty"`
+      DisplayInput      string              `json:"display_input,omitempty"`
+      DisplayTitle      string              `json:"display_title,omitempty"`
+      ContentParts      []model.ContentPart `json:"content_parts,omitempty"`
+      ContextPrelude    string              `json:"context_prelude,omitempty"`
+      Stream            bool                `json:"stream,omitempty"`
+      Mode              string              `json:"mode,omitempty"`
+      ApprovalRequester ApprovalRequester   `json:"-"`
   }
   type RecoveryCoordinator interface {
-  	ReattachController(context.Context, RecoveryRequest) (session.Session, error)
+      ReattachController(context.Context, RecoveryRequest) (session.Session, error)
   }
   type RecoveryRequest struct {
-  	SessionRef    session.SessionRef `json:"session_ref,omitempty"`
-  	Session       session.Session    `json:"session,omitempty"`
-  	ExcludeTurnID string             `json:"exclude_turn_id,omitempty"`
+      SessionRef    session.SessionRef `json:"session_ref,omitempty"`
+      Session       session.Session    `json:"session,omitempty"`
+      ExcludeTurnID string             `json:"exclude_turn_id,omitempty"`
   }
   type TurnHandle interface {
-  	Events() iter.Seq2[*session.Event, error]
-  	Cancel() CancelResult
-  	Close() error
+      Events() iter.Seq2[*session.Event, error]
+      Cancel() CancelResult
+      Close() error
   }
   type TurnRequest struct {
-  	SessionRef        session.SessionRef  `json:"session_ref,omitempty"`
-  	Session           session.Session     `json:"session,omitempty"`
-  	TurnID            string              `json:"turn_id,omitempty"`
-  	Input             string              `json:"input,omitempty"`
-  	ContentParts      []model.ContentPart `json:"content_parts,omitempty"`
-  	ContextPrelude    string              `json:"context_prelude,omitempty"`
-  	ContextSyncSeq    int                 `json:"context_sync_seq,omitempty"`
-  	Stream            bool                `json:"stream,omitempty"`
-  	Mode              string              `json:"mode,omitempty"`
-  	ApprovalRequester ApprovalRequester   `json:"-"`
+      SessionRef        session.SessionRef  `json:"session_ref,omitempty"`
+      Session           session.Session     `json:"session,omitempty"`
+      TurnID            string              `json:"turn_id,omitempty"`
+      Input             string              `json:"input,omitempty"`
+      ContentParts      []model.ContentPart `json:"content_parts,omitempty"`
+      ContextPrelude    string              `json:"context_prelude,omitempty"`
+      ContextSyncSeq    int                 `json:"context_sync_seq,omitempty"`
+      Stream            bool                `json:"stream,omitempty"`
+      Mode              string              `json:"mode,omitempty"`
+      ApprovalRequester ApprovalRequester   `json:"-"`
   }
   type TurnResult struct {
-  	Handle    TurnHandle `json:"-"`
-  	UpdatedAt time.Time  `json:"updated_at,omitempty"`
+      Handle    TurnHandle `json:"-"`
+      UpdatedAt time.Time  `json:"updated_at,omitempty"`
   }
 
 package github.com/caelis-labs/caelis/agent-sdk/sandbox
   const (
-  	BackendHost     Backend = "host"
-  	BackendSeatbelt Backend = "seatbelt"
-  	BackendBwrap    Backend = "bwrap"
-  	BackendLandlock Backend = "landlock"
-  	BackendWindows  Backend = "windows"
+      BackendHost     Backend = "host"
+      BackendSeatbelt Backend = "seatbelt"
+      BackendBwrap    Backend = "bwrap"
+      BackendLandlock Backend = "landlock"
+      BackendWindows  Backend = "windows"
   
-  	BackendWindowsElevated Backend = "windows-elevated"
-  	BackendCustom          Backend = "custom"
+      BackendWindowsElevated Backend = "windows-elevated"
+      BackendCustom          Backend = "custom"
   )
   const (
-  	IsolationHost      Isolation = "host"
-  	IsolationProcess   Isolation = "process"
-  	IsolationContainer Isolation = "container"
+      IsolationHost      Isolation = "host"
+      IsolationProcess   Isolation = "process"
+      IsolationContainer Isolation = "container"
   )
   const (
-  	NetworkInherit  Network = "inherit"
-  	NetworkEnabled  Network = "enabled"
-  	NetworkDisabled Network = "disabled"
+      NetworkInherit  Network = "inherit"
+      NetworkEnabled  Network = "enabled"
+      NetworkDisabled Network = "disabled"
   )
   const (
-  	PathAccessReadOnly  PathAccess = "read_only"
-  	PathAccessReadWrite PathAccess = "read_write"
-  	PathAccessHidden    PathAccess = "hidden"
+      PathAccessReadOnly  PathAccess = "read_only"
+      PathAccessReadWrite PathAccess = "read_write"
+      PathAccessHidden    PathAccess = "hidden"
   )
   const (
-  	PermissionDefault        Permission = "default"
-  	PermissionWorkspaceWrite Permission = "workspace_write"
-  	PermissionFullAccess     Permission = "danger_full_access"
+      PermissionDefault        Permission = "default"
+      PermissionWorkspaceWrite Permission = "workspace_write"
+      PermissionFullAccess     Permission = "danger_full_access"
   )
   const (
-  	RouteAuto    Route = ""
-  	RouteHost    Route = "host"
-  	RouteSandbox Route = "sandbox"
+      RouteAuto    Route = ""
+      RouteHost    Route = "host"
+      RouteSandbox Route = "sandbox"
   )
   const (
-  	SetupScopeGlobal    SetupScope = "global"
-  	SetupScopeWorkspace SetupScope = "workspace"
+      SetupScopeGlobal    SetupScope = "global"
+      SetupScopeWorkspace SetupScope = "workspace"
   )
   const HostExecutionRequiresApprovalMessage = "Host execution requires approval. Retry the same necessary command with sandbox_permissions=require_escalated and a non-empty justification."
   const SandboxPermissionDeniedMessage = "Sandbox permission denied. Use a writable workspace path, narrow the operation, or retry the same necessary command with sandbox_permissions=require_escalated and a non-empty justification."
@@ -1226,305 +1245,315 @@ package github.com/caelis-labs/caelis/agent-sdk/sandbox
   func SandboxPermissionDetail(result CommandResult, err error) (string, bool)
   func SelectionStatus(runtime Runtime) Status
   type AsyncRunner interface {
-  	Runner
-  	Start(context.Context, CommandRequest) (Session, error)
-  	OpenSession(string) (Session, error)
+      Runner
+      Start(context.Context, CommandRequest) (Session, error)
+      OpenSession(string) (Session, error)
   }
   type Backend string
   type BackendFactory interface {
-  	Backend() Backend
-  	Build(Config) (Runtime, error)
+      Backend() Backend
+      Build(Config) (Runtime, error)
+  }
+  type BackendReporter interface {
+      SupportedBackends() []Backend
+      Status() Status
   }
   type CapabilitySet struct {
-  	FileSystem     bool `json:"file_system,omitempty"`
-  	CommandExec    bool `json:"command_exec,omitempty"`
-  	AsyncSessions  bool `json:"async_sessions,omitempty"`
-  	TTY            bool `json:"tty,omitempty"`
-  	NetworkControl bool `json:"network_control,omitempty"`
-  	PathPolicy     bool `json:"path_policy,omitempty"`
-  	EnvPolicy      bool `json:"env_policy,omitempty"`
+      FileSystem     bool `json:"file_system,omitempty"`
+      CommandExec    bool `json:"command_exec,omitempty"`
+      AsyncSessions  bool `json:"async_sessions,omitempty"`
+      TTY            bool `json:"tty,omitempty"`
+      NetworkControl bool `json:"network_control,omitempty"`
+      PathPolicy     bool `json:"path_policy,omitempty"`
+      EnvPolicy      bool `json:"env_policy,omitempty"`
   }
   type CommandRequest struct {
-  	Command     string            `json:"command,omitempty"`
-  	Dir         string            `json:"dir,omitempty"`
-  	Timeout     time.Duration     `json:"timeout,omitempty"`
-  	IdleTimeout time.Duration     `json:"idle_timeout,omitempty"`
-  	TTY         bool              `json:"tty,omitempty"`
-  	Env         map[string]string `json:"env,omitempty"`
-  	Stdin       []byte            `json:"stdin,omitempty"`
+      Command     string            `json:"command,omitempty"`
+      Dir         string            `json:"dir,omitempty"`
+      Timeout     time.Duration     `json:"timeout,omitempty"`
+      IdleTimeout time.Duration     `json:"idle_timeout,omitempty"`
+      TTY         bool              `json:"tty,omitempty"`
+      Env         map[string]string `json:"env,omitempty"`
+      Stdin       []byte            `json:"stdin,omitempty"`
   
-  	Permission Permission `json:"permission,omitempty"`
-  	RouteHint  Route      `json:"route_hint,omitempty"`
-  	Backend    Backend    `json:"backend,omitempty"`
+      Permission Permission `json:"permission,omitempty"`
+      RouteHint  Route      `json:"route_hint,omitempty"`
+      Backend    Backend    `json:"backend,omitempty"`
   
-  	Constraints Constraints       `json:"constraints,omitempty"`
-  	OnOutput    func(OutputChunk) `json:"-"`
+      Constraints Constraints       `json:"constraints,omitempty"`
+      OnOutput    func(OutputChunk) `json:"-"`
   }
   type CommandResult struct {
-  	Stdout   string  `json:"stdout,omitempty"`
-  	Stderr   string  `json:"stderr,omitempty"`
-  	Error    string  `json:"error,omitempty"`
-  	ExitCode int     `json:"exit_code,omitempty"`
-  	Route    Route   `json:"route,omitempty"`
-  	Backend  Backend `json:"backend,omitempty"`
+      Stdout   string  `json:"stdout,omitempty"`
+      Stderr   string  `json:"stderr,omitempty"`
+      Error    string  `json:"error,omitempty"`
+      ExitCode int     `json:"exit_code,omitempty"`
+      Route    Route   `json:"route,omitempty"`
+      Backend  Backend `json:"backend,omitempty"`
   }
   type Config struct {
-  	CWD                 string    `json:"cwd,omitempty"`
-  	RequestedBackend    Backend   `json:"requested_backend,omitempty"`
-  	BackendCandidates   []Backend `json:"backend_candidates,omitempty"`
-  	FallbackInstallHint string    `json:"fallback_install_hint,omitempty"`
-  	HelperPath          string    `json:"helper_path,omitempty"`
-  	StateDir            string    `json:"state_dir,omitempty"`
-  	ReadableRoots       []string  `json:"readable_roots,omitempty"`
-  	WritableRoots       []string  `json:"writable_roots,omitempty"`
-  	ReadOnlySubpaths    []string  `json:"read_only_subpaths,omitempty"`
+      CWD                 string    `json:"cwd,omitempty"`
+      RequestedBackend    Backend   `json:"requested_backend,omitempty"`
+      BackendCandidates   []Backend `json:"backend_candidates,omitempty"`
+      FallbackInstallHint string    `json:"fallback_install_hint,omitempty"`
+      HelperPath          string    `json:"helper_path,omitempty"`
+      StateDir            string    `json:"state_dir,omitempty"`
+      ReadableRoots       []string  `json:"readable_roots,omitempty"`
+      WritableRoots       []string  `json:"writable_roots,omitempty"`
+      ReadOnlySubpaths    []string  `json:"read_only_subpaths,omitempty"`
   }
   type Constraints struct {
-  	Route      Route      `json:"route,omitempty"`
-  	Backend    Backend    `json:"backend,omitempty"`
-  	Permission Permission `json:"permission,omitempty"`
-  	Isolation  Isolation  `json:"isolation,omitempty"`
-  	Network    Network    `json:"network,omitempty"`
-  	PathRules  []PathRule `json:"path_rules,omitempty"`
+      Route      Route      `json:"route,omitempty"`
+      Backend    Backend    `json:"backend,omitempty"`
+      Permission Permission `json:"permission,omitempty"`
+      Isolation  Isolation  `json:"isolation,omitempty"`
+      Network    Network    `json:"network,omitempty"`
+      PathRules  []PathRule `json:"path_rules,omitempty"`
   }
   type Descriptor struct {
-  	Backend            Backend       `json:"backend,omitempty"`
-  	Isolation          Isolation     `json:"isolation,omitempty"`
-  	Capabilities       CapabilitySet `json:"capabilities,omitempty"`
-  	DefaultConstraints Constraints   `json:"default_constraints,omitempty"`
+      Backend            Backend       `json:"backend,omitempty"`
+      Isolation          Isolation     `json:"isolation,omitempty"`
+      Capabilities       CapabilitySet `json:"capabilities,omitempty"`
+      DefaultConstraints Constraints   `json:"default_constraints,omitempty"`
+  }
+  type DescriptorProvider interface {
+      Describe() Descriptor
   }
   type FileSystem interface {
-  	Getwd() (string, error)
-  	UserHomeDir() (string, error)
-  	Open(path string) (*os.File, error)
-  	ReadDir(path string) ([]os.DirEntry, error)
-  	Stat(path string) (os.FileInfo, error)
-  	ReadFile(path string) ([]byte, error)
-  	WriteFile(path string, data []byte, perm os.FileMode) error
-  	Glob(pattern string) ([]string, error)
-  	WalkDir(root string, fn fs.WalkDirFunc) error
+      Getwd() (string, error)
+      UserHomeDir() (string, error)
+      Open(path string) (*os.File, error)
+      ReadDir(path string) ([]os.DirEntry, error)
+      Stat(path string) (os.FileInfo, error)
+      ReadFile(path string) ([]byte, error)
+      WriteFile(path string, data []byte, perm os.FileMode) error
+      Glob(pattern string) ([]string, error)
+      WalkDir(root string, fn fs.WalkDirFunc) error
+  }
+  type FileSystemProvider interface {
+      FileSystem() FileSystem
+      FileSystemFor(Constraints) FileSystem
   }
   type FuncRunner func(context.Context, CommandRequest) (CommandResult, error)
   type Isolation string
   type LifecycleAction func(context.Context, Runtime) error
   type LifecycleFactory interface {
-  	Backend() Backend
-  	BuildLifecycle(Config) (Runtime, error)
+      Backend() Backend
+      BuildLifecycle(Config) (Runtime, error)
   }
   type LifecycleTarget struct {
-  	Runtime Runtime
-  	Config  Config
-  	Current bool
-  	NoOp    bool
+      Runtime Runtime
+      Config  Config
+      Current bool
+      NoOp    bool
   }
   type Network string
   type OutputChunk struct {
-  	Stream string `json:"stream,omitempty"`
-  	Text   string `json:"text,omitempty"`
+      Stream string `json:"stream,omitempty"`
+      Text   string `json:"text,omitempty"`
   }
   type PathAccess string
   type PathRule struct {
-  	Path   string     `json:"path,omitempty"`
-  	Access PathAccess `json:"access,omitempty"`
+      Path   string     `json:"path,omitempty"`
+      Access PathAccess `json:"access,omitempty"`
   }
   type Permission string
   type PreflightOptions struct {
-  	AllowNonElevatedRepair bool `json:"allow_non_elevated_repair,omitempty"`
+      AllowNonElevatedRepair bool `json:"allow_non_elevated_repair,omitempty"`
   }
   type PreflightRuntime interface {
-  	Preflight(context.Context, PreflightOptions) error
+      Preflight(context.Context, PreflightOptions) error
   }
   type PreparableRuntime interface {
-  	Prepare(context.Context) error
+      Prepare(context.Context) error
   }
   type PrepareProgress struct {
-  	Phase   string `json:"phase,omitempty"`
-  	Message string `json:"message,omitempty"`
-  	Step    int    `json:"step,omitempty"`
-  	Total   int    `json:"total,omitempty"`
-  	Done    bool   `json:"done,omitempty"`
-  	Debug   bool   `json:"debug,omitempty"`
+      Phase   string `json:"phase,omitempty"`
+      Message string `json:"message,omitempty"`
+      Step    int    `json:"step,omitempty"`
+      Total   int    `json:"total,omitempty"`
+      Done    bool   `json:"done,omitempty"`
+      Debug   bool   `json:"debug,omitempty"`
   }
   type PrepareProgressFunc func(PrepareProgress)
   type RefreshableRuntime interface {
-  	Refresh(context.Context) error
+      Refresh(context.Context) error
   }
   type RepairableRuntime interface {
-  	Repair(context.Context) error
+      Repair(context.Context) error
   }
   type ResettableRuntime interface {
-  	Reset(context.Context) error
+      Reset(context.Context) error
   }
   type Route string
   type Runner interface {
-  	Run(context.Context, CommandRequest) (CommandResult, error)
+      Run(context.Context, CommandRequest) (CommandResult, error)
   }
   type Runtime interface {
-  	Describe() Descriptor
-  	FileSystem() FileSystem
-  	FileSystemFor(Constraints) FileSystem
-  	Run(context.Context, CommandRequest) (CommandResult, error)
-  	Start(context.Context, CommandRequest) (Session, error)
-  	OpenSession(string) (Session, error)
-  	OpenSessionRef(SessionRef) (Session, error)
-  	SupportedBackends() []Backend
-  	Status() Status
-  	Close() error
+      DescriptorProvider
+      FileSystemProvider
+      AsyncRunner
+      SessionRefOpener
+      BackendReporter
+      Close() error
   }
   type SelectionStatusRuntime interface {
-  	SelectionStatus() Status
+      SelectionStatus() Status
   }
   type Session interface {
-  	Ref() SessionRef
-  	Terminal() TerminalRef
-  	WriteInput(ctx context.Context, input []byte) error
-  	ReadOutput(ctx context.Context, stdoutMarker, stderrMarker int64) (stdout, stderr []byte, newStdoutMarker, newStderrMarker int64, err error)
-  	Status(ctx context.Context) (SessionStatus, error)
-  	Wait(ctx context.Context, timeout time.Duration) (SessionStatus, error)
-  	Result(ctx context.Context) (CommandResult, error)
-  	Terminate(ctx context.Context) error
+      Ref() SessionRef
+      Terminal() TerminalRef
+      WriteInput(ctx context.Context, input []byte) error
+      ReadOutput(ctx context.Context, stdoutMarker, stderrMarker int64) (stdout, stderr []byte, newStdoutMarker, newStderrMarker int64, err error)
+      Status(ctx context.Context) (SessionStatus, error)
+      Wait(ctx context.Context, timeout time.Duration) (SessionStatus, error)
+      Result(ctx context.Context) (CommandResult, error)
+      Terminate(ctx context.Context) error
   }
   type SessionRef struct {
-  	Backend   Backend `json:"backend,omitempty"`
-  	SessionID string  `json:"session_id,omitempty"`
+      Backend   Backend `json:"backend,omitempty"`
+      SessionID string  `json:"session_id,omitempty"`
+  }
+  type SessionRefOpener interface {
+      OpenSessionRef(SessionRef) (Session, error)
   }
   type SessionStatus struct {
-  	SessionRef
-  	Terminal      TerminalRef `json:"terminal,omitempty"`
-  	Running       bool        `json:"running,omitempty"`
-  	SupportsInput bool        `json:"supports_input,omitempty"`
-  	ExitCode      int         `json:"exit_code,omitempty"`
-  	StartedAt     time.Time   `json:"started_at,omitempty"`
-  	UpdatedAt     time.Time   `json:"updated_at,omitempty"`
+      SessionRef
+      Terminal      TerminalRef `json:"terminal,omitempty"`
+      Running       bool        `json:"running,omitempty"`
+      SupportsInput bool        `json:"supports_input,omitempty"`
+      ExitCode      int         `json:"exit_code,omitempty"`
+      StartedAt     time.Time   `json:"started_at,omitempty"`
+      UpdatedAt     time.Time   `json:"updated_at,omitempty"`
   }
   type SetupCheck struct {
-  	Name      string            `json:"name,omitempty"`
-  	Scope     SetupScope        `json:"scope,omitempty"`
-  	Current   bool              `json:"current,omitempty"`
-  	Required  bool              `json:"required,omitempty"`
-  	Reason    string            `json:"reason,omitempty"`
-  	Error     string            `json:"error,omitempty"`
-  	Version   int               `json:"version,omitempty"`
-  	Root      string            `json:"root,omitempty"`
-  	UpdatedAt time.Time         `json:"updated_at,omitempty"`
-  	Details   map[string]string `json:"details,omitempty"`
-  	Counts    map[string]int    `json:"counts,omitempty"`
+      Name      string            `json:"name,omitempty"`
+      Scope     SetupScope        `json:"scope,omitempty"`
+      Current   bool              `json:"current,omitempty"`
+      Required  bool              `json:"required,omitempty"`
+      Reason    string            `json:"reason,omitempty"`
+      Error     string            `json:"error,omitempty"`
+      Version   int               `json:"version,omitempty"`
+      Root      string            `json:"root,omitempty"`
+      UpdatedAt time.Time         `json:"updated_at,omitempty"`
+      Details   map[string]string `json:"details,omitempty"`
+      Counts    map[string]int    `json:"counts,omitempty"`
   }
   type SetupScope string
   type SetupStatus struct {
-  	Required bool              `json:"required,omitempty"`
-  	Error    string            `json:"error,omitempty"`
-  	Details  map[string]string `json:"details,omitempty"`
-  	Counts   map[string]int    `json:"counts,omitempty"`
-  	Checks   []SetupCheck      `json:"checks,omitempty"`
+      Required bool              `json:"required,omitempty"`
+      Error    string            `json:"error,omitempty"`
+      Details  map[string]string `json:"details,omitempty"`
+      Counts   map[string]int    `json:"counts,omitempty"`
+      Checks   []SetupCheck      `json:"checks,omitempty"`
   }
   type Status struct {
-  	RequestedBackend    Backend     `json:"requested_backend,omitempty"`
-  	ResolvedBackend     Backend     `json:"resolved_backend,omitempty"`
-  	FallbackToHost      bool        `json:"fallback_to_host,omitempty"`
-  	FallbackReason      string      `json:"fallback_reason,omitempty"`
-  	FallbackInstallHint string      `json:"fallback_install_hint,omitempty"`
-  	Setup               SetupStatus `json:"setup,omitempty"`
+      RequestedBackend    Backend     `json:"requested_backend,omitempty"`
+      ResolvedBackend     Backend     `json:"resolved_backend,omitempty"`
+      FallbackToHost      bool        `json:"fallback_to_host,omitempty"`
+      FallbackReason      string      `json:"fallback_reason,omitempty"`
+      FallbackInstallHint string      `json:"fallback_install_hint,omitempty"`
+      Setup               SetupStatus `json:"setup,omitempty"`
   }
   type TerminalRef struct {
-  	Backend    Backend `json:"backend,omitempty"`
-  	SessionID  string  `json:"session_id,omitempty"`
-  	TerminalID string  `json:"terminal_id,omitempty"`
+      Backend    Backend `json:"backend,omitempty"`
+      SessionID  string  `json:"session_id,omitempty"`
+      TerminalID string  `json:"terminal_id,omitempty"`
   }
 
 package github.com/caelis-labs/caelis/agent-sdk/session
   const (
-  	ActorKindUser        ActorKind = "user"
-  	ActorKindController  ActorKind = "controller"
-  	ActorKindParticipant ActorKind = "participant"
-  	ActorKindTool        ActorKind = "tool"
-  	ActorKindSystem      ActorKind = "system"
+      ActorKindUser        ActorKind = "user"
+      ActorKindController  ActorKind = "controller"
+      ActorKindParticipant ActorKind = "participant"
+      ActorKindTool        ActorKind = "tool"
+      ActorKindSystem      ActorKind = "system"
   )
   const (
-  	ControllerKindKernel ControllerKind = "kernel"
-  	ControllerKindACP    ControllerKind = "acp"
+      ControllerKindKernel ControllerKind = "kernel"
+      ControllerKindACP    ControllerKind = "acp"
   )
   const (
-  	EventTypeUser        EventType = "user"
-  	EventTypeAssistant   EventType = "assistant"
-  	EventTypePlan        EventType = "plan"
-  	EventTypeToolCall    EventType = "tool_call"
-  	EventTypeToolResult  EventType = "tool_result"
-  	EventTypeParticipant EventType = "participant"
-  	EventTypeHandoff     EventType = "handoff"
-  	EventTypeCompact     EventType = "compact"
-  	EventTypeNotice      EventType = "notice"
-  	EventTypeLifecycle   EventType = "lifecycle"
-  	EventTypeSystem      EventType = "system"
-  	EventTypeContext     EventType = "context"
-  	EventTypeCustom      EventType = "custom"
+      EventTypeUser        EventType = "user"
+      EventTypeAssistant   EventType = "assistant"
+      EventTypePlan        EventType = "plan"
+      EventTypeToolCall    EventType = "tool_call"
+      EventTypeToolResult  EventType = "tool_result"
+      EventTypeParticipant EventType = "participant"
+      EventTypeHandoff     EventType = "handoff"
+      EventTypeCompact     EventType = "compact"
+      EventTypeNotice      EventType = "notice"
+      EventTypeLifecycle   EventType = "lifecycle"
+      EventTypeSystem      EventType = "system"
+      EventTypeContext     EventType = "context"
+      EventTypeCustom      EventType = "custom"
   )
   const (
-  	ExecutionPrepared        ExecutionStatus = "prepared"
-  	ExecutionStarted         ExecutionStatus = "started"
-  	ExecutionWaitingApproval ExecutionStatus = "waiting_approval"
-  	ExecutionSucceeded       ExecutionStatus = "succeeded"
-  	ExecutionFailed          ExecutionStatus = "failed"
-  	ExecutionCancelRequested ExecutionStatus = "cancel_requested"
-  	ExecutionCancelled       ExecutionStatus = "cancelled"
-  	ExecutionInterrupted     ExecutionStatus = "interrupted"
-  	ExecutionUnknownOutcome  ExecutionStatus = "unknown_outcome"
+      ExecutionPrepared        ExecutionStatus = "prepared"
+      ExecutionStarted         ExecutionStatus = "started"
+      ExecutionWaitingApproval ExecutionStatus = "waiting_approval"
+      ExecutionSucceeded       ExecutionStatus = "succeeded"
+      ExecutionFailed          ExecutionStatus = "failed"
+      ExecutionCancelRequested ExecutionStatus = "cancel_requested"
+      ExecutionCancelled       ExecutionStatus = "cancelled"
+      ExecutionInterrupted     ExecutionStatus = "interrupted"
+      ExecutionUnknownOutcome  ExecutionStatus = "unknown_outcome"
   )
   const (
-  	JournalKindRun           JournalKind = "run"
-  	JournalKindTurn          JournalKind = "turn"
-  	JournalKindStep          JournalKind = "step"
-  	JournalKindToolExecution JournalKind = "tool_execution"
-  	JournalKindPauseToken    JournalKind = "pause_token"
+      JournalKindRun           JournalKind = "run"
+      JournalKindTurn          JournalKind = "turn"
+      JournalKindStep          JournalKind = "step"
+      JournalKindToolExecution JournalKind = "tool_execution"
+      JournalKindPauseToken    JournalKind = "pause_token"
   )
   const (
-  	ParticipantKindACP      ParticipantKind = "acp"
-  	ParticipantKindSubagent ParticipantKind = "subagent"
+      ParticipantKindACP      ParticipantKind = "acp"
+      ParticipantKindSubagent ParticipantKind = "subagent"
   )
   const (
-  	ParticipantRoleSidecar   ParticipantRole = "sidecar"
-  	ParticipantRoleDelegated ParticipantRole = "delegated"
-  	ParticipantRoleObserver  ParticipantRole = "observer"
+      ParticipantRoleSidecar   ParticipantRole = "sidecar"
+      ParticipantRoleDelegated ParticipantRole = "delegated"
+      ParticipantRoleObserver  ParticipantRole = "observer"
   )
   const (
-  	PauseTokenPending   PauseTokenStatus = "pending"
-  	PauseTokenResolved  PauseTokenStatus = "resolved"
-  	PauseTokenCancelled PauseTokenStatus = "cancelled"
+      PauseTokenPending   PauseTokenStatus = "pending"
+      PauseTokenResolved  PauseTokenStatus = "resolved"
+      PauseTokenCancelled PauseTokenStatus = "cancelled"
   )
   const (
-  	ProtocolMethodSessionUpdate     = "session/update"
-  	ProtocolMethodRequestPermission = "session/request_permission"
-  	ProtocolMethodParticipantUpdate = "caelis/participant"
-  	ProtocolMethodControllerHandoff = "caelis/handoff"
-  	ProtocolMethodRuntimeLifecycle  = "caelis/lifecycle"
-  	ProtocolMethodContextCheckpoint = "caelis/context_checkpoint"
+      ProtocolMethodSessionUpdate     = "session/update"
+      ProtocolMethodRequestPermission = "session/request_permission"
+      ProtocolMethodParticipantUpdate = "caelis/participant"
+      ProtocolMethodControllerHandoff = "caelis/handoff"
+      ProtocolMethodRuntimeLifecycle  = "caelis/lifecycle"
+      ProtocolMethodContextCheckpoint = "caelis/context_checkpoint"
   )
   const (
-  	ProtocolUpdateTypeUserMessage  ProtocolUpdateType = "user_message_chunk"
-  	ProtocolUpdateTypeAgentMessage ProtocolUpdateType = "agent_message_chunk"
-  	ProtocolUpdateTypeAgentThought ProtocolUpdateType = "agent_thought_chunk"
-  	ProtocolUpdateTypeToolCall     ProtocolUpdateType = "tool_call"
-  	ProtocolUpdateTypeToolUpdate   ProtocolUpdateType = "tool_call_update"
-  	ProtocolUpdateTypePlan         ProtocolUpdateType = "plan"
-  	ProtocolUpdateTypePermission   ProtocolUpdateType = "request_permission"
+      ProtocolUpdateTypeUserMessage  ProtocolUpdateType = "user_message_chunk"
+      ProtocolUpdateTypeAgentMessage ProtocolUpdateType = "agent_message_chunk"
+      ProtocolUpdateTypeAgentThought ProtocolUpdateType = "agent_thought_chunk"
+      ProtocolUpdateTypeToolCall     ProtocolUpdateType = "tool_call"
+      ProtocolUpdateTypeToolUpdate   ProtocolUpdateType = "tool_call_update"
+      ProtocolUpdateTypePlan         ProtocolUpdateType = "plan"
+      ProtocolUpdateTypePermission   ProtocolUpdateType = "request_permission"
   )
   const (
-  	ToolExecutionPrepared        ToolExecutionStatus = "prepared"
-  	ToolExecutionApproved        ToolExecutionStatus = "approved"
-  	ToolExecutionStarted         ToolExecutionStatus = "started"
-  	ToolExecutionSucceeded       ToolExecutionStatus = "succeeded"
-  	ToolExecutionFailed          ToolExecutionStatus = "failed"
-  	ToolExecutionCancelRequested ToolExecutionStatus = "cancel_requested"
-  	ToolExecutionCancelled       ToolExecutionStatus = "cancelled"
-  	ToolExecutionUnknownOutcome  ToolExecutionStatus = "unknown_outcome"
+      ToolExecutionPrepared        ToolExecutionStatus = "prepared"
+      ToolExecutionApproved        ToolExecutionStatus = "approved"
+      ToolExecutionStarted         ToolExecutionStatus = "started"
+      ToolExecutionSucceeded       ToolExecutionStatus = "succeeded"
+      ToolExecutionFailed          ToolExecutionStatus = "failed"
+      ToolExecutionCancelRequested ToolExecutionStatus = "cancel_requested"
+      ToolExecutionCancelled       ToolExecutionStatus = "cancelled"
+      ToolExecutionUnknownOutcome  ToolExecutionStatus = "unknown_outcome"
   )
   const (
-  	VisibilityCanonical Visibility = "canonical"
-  	VisibilityUIOnly    Visibility = "ui_only"
-  	VisibilityOverlay   Visibility = "overlay"
-  	VisibilityMirror    Visibility = "mirror"
+      VisibilityCanonical Visibility = "canonical"
+      VisibilityUIOnly    Visibility = "ui_only"
+      VisibilityOverlay   Visibility = "overlay"
+      VisibilityMirror    Visibility = "mirror"
   
-  	VisibilityJournal Visibility = "journal"
+      VisibilityJournal Visibility = "journal"
   )
   const ExecutionJournalSchemaVersion = 1
   const ToolExecutionSchemaVersion = 1
@@ -1626,557 +1655,581 @@ package github.com/caelis-labs/caelis/agent-sdk/session
   func ValidateState(state map[string]any) error
   func ValidateToolExecutionTransition(previous ToolExecution, next ToolExecution) error
   type ACPRef struct {
-  	SessionID string `json:"session_id,omitempty"`
-  	EventType string `json:"event_type,omitempty"`
+      SessionID string `json:"session_id,omitempty"`
+      EventType string `json:"event_type,omitempty"`
   }
   type AcquireSessionLeaseRequest struct {
-  	SessionRef SessionRef    `json:"session_ref"`
-  	OwnerID    string        `json:"owner_id,omitempty"`
-  	TTL        time.Duration `json:"ttl,omitempty"`
+      SessionRef SessionRef    `json:"session_ref"`
+      OwnerID    string        `json:"owner_id,omitempty"`
+      TTL        time.Duration `json:"ttl,omitempty"`
   }
   type ActorKind string
   type ActorRef struct {
-  	Kind ActorKind `json:"kind,omitempty"`
-  	ID   string    `json:"id,omitempty"`
-  	Role string    `json:"role,omitempty"`
-  	Name string    `json:"name,omitempty"`
+      Kind ActorKind `json:"kind,omitempty"`
+      ID   string    `json:"id,omitempty"`
+      Role string    `json:"role,omitempty"`
+      Name string    `json:"name,omitempty"`
   }
   type AppendEventRequest struct {
-  	SessionRef       SessionRef `json:"session_ref"`
-  	ExpectedRevision *uint64    `json:"expected_revision,omitempty"`
-  	Event            *Event     `json:"event"`
+      SessionRef       SessionRef `json:"session_ref"`
+      ExpectedRevision *uint64    `json:"expected_revision,omitempty"`
+      Event            *Event     `json:"event"`
   }
   type AppendEventsAndUpdateStateRequest struct {
-  	SessionRef       SessionRef
-  	ExpectedRevision *uint64
-  	Events           []*Event
-  	UpdateState      func(storedEvents []*Event, state map[string]any) (map[string]any, error)
+      SessionRef       SessionRef
+      ExpectedRevision *uint64
+      Events           []*Event
+      UpdateState      func(storedEvents []*Event, state map[string]any) (map[string]any, error)
   }
   type AppendEventsRequest struct {
-  	SessionRef       SessionRef `json:"session_ref"`
-  	ExpectedRevision *uint64    `json:"expected_revision,omitempty"`
-  	Events           []*Event   `json:"events"`
+      SessionRef       SessionRef `json:"session_ref"`
+      ExpectedRevision *uint64    `json:"expected_revision,omitempty"`
+      Events           []*Event   `json:"events"`
   }
   type AppendSessionMutation func(*Session, PreparedAppendEvents) (bool, error)
   type AppendStateUpdate func([]*Event, map[string]any) (map[string]any, error)
   type BindControllerRequest struct {
-  	SessionRef SessionRef        `json:"session_ref"`
-  	Binding    ControllerBinding `json:"binding"`
+      SessionRef SessionRef        `json:"session_ref"`
+      Binding    ControllerBinding `json:"binding"`
   }
   type BindControllerWithEventRequest struct {
-  	SessionRef       SessionRef        `json:"session_ref"`
-  	ExpectedRevision *uint64           `json:"expected_revision,omitempty"`
-  	Binding          ControllerBinding `json:"binding"`
-  	Event            *Event            `json:"event"`
+      SessionRef       SessionRef        `json:"session_ref"`
+      ExpectedRevision *uint64           `json:"expected_revision,omitempty"`
+      Binding          ControllerBinding `json:"binding"`
+      Event            *Event            `json:"event"`
   }
   type ControllerBinding struct {
-  	Kind            ControllerKind `json:"kind,omitempty"`
-  	ControllerID    string         `json:"controller_id,omitempty"`
-  	AgentName       string         `json:"agent_name,omitempty"`
-  	Label           string         `json:"label,omitempty"`
-  	EpochID         string         `json:"epoch_id,omitempty"`
-  	RemoteSessionID string         `json:"remote_session_id,omitempty"`
-  	ContextSyncSeq  int            `json:"context_sync_seq,omitempty"`
-  	AttachedAt      time.Time      `json:"attached_at,omitempty"`
-  	Source          string         `json:"source,omitempty"`
+      Kind            ControllerKind `json:"kind,omitempty"`
+      ControllerID    string         `json:"controller_id,omitempty"`
+      AgentName       string         `json:"agent_name,omitempty"`
+      Label           string         `json:"label,omitempty"`
+      EpochID         string         `json:"epoch_id,omitempty"`
+      RemoteSessionID string         `json:"remote_session_id,omitempty"`
+      ContextSyncSeq  int            `json:"context_sync_seq,omitempty"`
+      AttachedAt      time.Time      `json:"attached_at,omitempty"`
+      Source          string         `json:"source,omitempty"`
+  }
+  type ControllerBindingStore interface {
+      BindController(context.Context, BindControllerRequest) (Session, error)
   }
   type ControllerHandoffService interface {
-  	BindControllerWithEvent(context.Context, BindControllerWithEventRequest) (Session, *Event, error)
+      BindControllerWithEvent(context.Context, BindControllerWithEventRequest) (Session, *Event, error)
   }
   type ControllerKind string
   type ControllerRef struct {
-  	Kind    ControllerKind `json:"kind,omitempty"`
-  	ID      string         `json:"id,omitempty"`
-  	EpochID string         `json:"epoch_id,omitempty"`
+      Kind    ControllerKind `json:"kind,omitempty"`
+      ID      string         `json:"id,omitempty"`
+      EpochID string         `json:"epoch_id,omitempty"`
   }
   type Event struct {
-  	ID             string                 `json:"id,omitempty"`
-  	IdempotencyKey string                 `json:"idempotency_key,omitempty"`
-  	SessionID      string                 `json:"session_id,omitempty"`
-  	Seq            uint64                 `json:"seq,omitempty"`
-  	Schema         int                    `json:"schema,omitempty"`
-  	Type           EventType              `json:"type,omitempty"`
-  	Visibility     Visibility             `json:"visibility,omitempty"`
-  	Time           time.Time              `json:"time,omitempty"`
-  	Actor          ActorRef               `json:"actor,omitempty"`
-  	Scope          *EventScope            `json:"scope,omitempty"`
-  	Invocation     *EventInvocation       `json:"invocation,omitempty"`
-  	Message        *model.Message         `json:"message,omitempty"`
-  	Tool           *EventTool             `json:"tool,omitempty"`
-  	PlanPayload    *EventPlanPayload      `json:"plan,omitempty"`
-  	Notice         *EventNotice           `json:"notice,omitempty"`
-  	Lifecycle      *EventLifecycle        `json:"lifecycle,omitempty"`
-  	Journal        *ExecutionJournalEntry `json:"journal,omitempty"`
-  	Protocol       *EventProtocol         `json:"protocol,omitempty"`
-  	Text           string                 `json:"-"`
-  	Meta           map[string]any         `json:"_meta,omitempty"`
+      ID             string                 `json:"id,omitempty"`
+      IdempotencyKey string                 `json:"idempotency_key,omitempty"`
+      SessionID      string                 `json:"session_id,omitempty"`
+      Seq            uint64                 `json:"seq,omitempty"`
+      Schema         int                    `json:"schema,omitempty"`
+      Type           EventType              `json:"type,omitempty"`
+      Visibility     Visibility             `json:"visibility,omitempty"`
+      Time           time.Time              `json:"time,omitempty"`
+      Actor          ActorRef               `json:"actor,omitempty"`
+      Scope          *EventScope            `json:"scope,omitempty"`
+      Invocation     *EventInvocation       `json:"invocation,omitempty"`
+      Message        *model.Message         `json:"message,omitempty"`
+      Tool           *EventTool             `json:"tool,omitempty"`
+      PlanPayload    *EventPlanPayload      `json:"plan,omitempty"`
+      Notice         *EventNotice           `json:"notice,omitempty"`
+      Lifecycle      *EventLifecycle        `json:"lifecycle,omitempty"`
+      Journal        *ExecutionJournalEntry `json:"journal,omitempty"`
+      Protocol       *EventProtocol         `json:"protocol,omitempty"`
+      Text           string                 `json:"-"`
+      Meta           map[string]any         `json:"_meta,omitempty"`
+  }
+  type EventAppender interface {
+      AppendEvent(context.Context, AppendEventRequest) (*Event, error)
   }
   type EventBatchService interface {
-  	AppendEvents(context.Context, AppendEventsRequest) ([]*Event, error)
+      AppendEvents(context.Context, AppendEventsRequest) ([]*Event, error)
   }
   type EventBatchStateService interface {
-  	AppendEventsAndUpdateState(context.Context, AppendEventsAndUpdateStateRequest) ([]*Event, error)
+      AppendEventsAndUpdateState(context.Context, AppendEventsAndUpdateStateRequest) ([]*Event, error)
   }
   type EventConflictError struct {
-  	SessionID      string
-  	EventID        string
-  	IdempotencyKey string
+      SessionID      string
+      EventID        string
+      IdempotencyKey string
   }
   type EventIDAllocator func(event *Event, existingIDs map[string]struct{})
   type EventInvocation struct {
-  	Provider            string `json:"provider,omitempty"`
-  	Model               string `json:"model,omitempty"`
-  	ContextWindowTokens int    `json:"context_window_tokens,omitempty"`
+      Provider            string `json:"provider,omitempty"`
+      Model               string `json:"model,omitempty"`
+      ContextWindowTokens int    `json:"context_window_tokens,omitempty"`
   }
   type EventLifecycle struct {
-  	Status string         `json:"status,omitempty"`
-  	Reason string         `json:"reason,omitempty"`
-  	Meta   map[string]any `json:"meta,omitempty"`
+      Status string         `json:"status,omitempty"`
+      Reason string         `json:"reason,omitempty"`
+      Meta   map[string]any `json:"meta,omitempty"`
   }
   type EventNotice struct {
-  	Level string         `json:"level,omitempty"`
-  	Text  string         `json:"text,omitempty"`
-  	Kind  string         `json:"kind,omitempty"`
-  	Meta  map[string]any `json:"meta,omitempty"`
+      Level string         `json:"level,omitempty"`
+      Text  string         `json:"text,omitempty"`
+      Kind  string         `json:"kind,omitempty"`
+      Meta  map[string]any `json:"meta,omitempty"`
   }
   type EventPlanEntry struct {
-  	Content  string `json:"content,omitempty"`
-  	Status   string `json:"status,omitempty"`
-  	Priority string `json:"priority,omitempty"`
+      Content  string `json:"content,omitempty"`
+      Status   string `json:"status,omitempty"`
+      Priority string `json:"priority,omitempty"`
   }
   type EventPlanPayload struct {
-  	Entries []EventPlanEntry `json:"entries,omitempty"`
+      Entries []EventPlanEntry `json:"entries,omitempty"`
   }
   type EventProtocol struct {
-  	Method     string            `json:"method,omitempty"`
-  	Update     *ProtocolUpdate   `json:"update,omitempty"`
-  	Permission *ProtocolApproval `json:"permission,omitempty"`
+      Method     string            `json:"method,omitempty"`
+      Update     *ProtocolUpdate   `json:"update,omitempty"`
+      Permission *ProtocolApproval `json:"permission,omitempty"`
   }
   type EventScope struct {
-  	TurnID      string         `json:"turn_id,omitempty"`
-  	Source      string         `json:"source,omitempty"`
-  	Controller  ControllerRef  `json:"controller,omitempty"`
-  	Participant ParticipantRef `json:"participant,omitempty"`
-  	ACP         ACPRef         `json:"acp,omitempty"`
+      TurnID      string         `json:"turn_id,omitempty"`
+      Source      string         `json:"source,omitempty"`
+      Controller  ControllerRef  `json:"controller,omitempty"`
+      Participant ParticipantRef `json:"participant,omitempty"`
+      ACP         ACPRef         `json:"acp,omitempty"`
   }
   type EventTool struct {
-  	ID        string              `json:"id,omitempty"`
-  	Name      string              `json:"name,omitempty"`
-  	Kind      string              `json:"kind,omitempty"`
-  	Title     string              `json:"title,omitempty"`
-  	Status    string              `json:"status,omitempty"`
-  	Input     map[string]any      `json:"input,omitempty"`
-  	Output    map[string]any      `json:"output,omitempty"`
-  	Content   []EventToolContent  `json:"content,omitempty"`
-  	Locations []EventToolLocation `json:"locations,omitempty"`
+      ID        string              `json:"id,omitempty"`
+      Name      string              `json:"name,omitempty"`
+      Kind      string              `json:"kind,omitempty"`
+      Title     string              `json:"title,omitempty"`
+      Status    string              `json:"status,omitempty"`
+      Input     map[string]any      `json:"input,omitempty"`
+      Output    map[string]any      `json:"output,omitempty"`
+      Content   []EventToolContent  `json:"content,omitempty"`
+      Locations []EventToolLocation `json:"locations,omitempty"`
   }
   type EventToolContent struct {
-  	Type       string  `json:"type,omitempty"`
-  	Text       string  `json:"text,omitempty"`
-  	TerminalID string  `json:"terminal_id,omitempty"`
-  	Path       string  `json:"path,omitempty"`
-  	OldText    *string `json:"old_text,omitempty"`
-  	NewText    string  `json:"new_text,omitempty"`
+      Type       string  `json:"type,omitempty"`
+      Text       string  `json:"text,omitempty"`
+      TerminalID string  `json:"terminal_id,omitempty"`
+      Path       string  `json:"path,omitempty"`
+      OldText    *string `json:"old_text,omitempty"`
+      NewText    string  `json:"new_text,omitempty"`
   }
   type EventToolLocation struct {
-  	Path string `json:"path,omitempty"`
-  	Line *int   `json:"line,omitempty"`
+      Path string `json:"path,omitempty"`
+      Line *int   `json:"line,omitempty"`
   }
   type EventType string
   type EventValidationError struct {
-  	Detail string
+      Detail string
   }
   type EventsRequest struct {
-  	SessionRef       SessionRef `json:"session_ref"`
-  	Limit            int        `json:"limit,omitempty"`
-  	IncludeTransient bool       `json:"include_transient,omitempty"`
+      SessionRef       SessionRef `json:"session_ref"`
+      Limit            int        `json:"limit,omitempty"`
+      IncludeTransient bool       `json:"include_transient,omitempty"`
   }
   type ExecutionJournalEntry struct {
-  	Schema        int              `json:"schema"`
-  	Kind          JournalKind      `json:"kind"`
-  	Execution     *ExecutionRecord `json:"execution,omitempty"`
-  	ToolExecution *ToolExecution   `json:"tool_execution,omitempty"`
-  	PauseToken    *PauseToken      `json:"pause_token,omitempty"`
+      Schema        int              `json:"schema"`
+      Kind          JournalKind      `json:"kind"`
+      Execution     *ExecutionRecord `json:"execution,omitempty"`
+      ToolExecution *ToolExecution   `json:"tool_execution,omitempty"`
+      PauseToken    *PauseToken      `json:"pause_token,omitempty"`
   }
   type ExecutionKey struct {
-  	SessionID  string `json:"session_id"`
-  	RunID      string `json:"run_id"`
-  	TurnID     string `json:"turn_id"`
-  	StepID     string `json:"step_id"`
-  	ToolCallID string `json:"tool_call_id"`
+      SessionID  string `json:"session_id"`
+      RunID      string `json:"run_id"`
+      TurnID     string `json:"turn_id"`
+      StepID     string `json:"step_id"`
+      ToolCallID string `json:"tool_call_id"`
   }
   type ExecutionRecord struct {
-  	Schema        int             `json:"schema"`
-  	Kind          JournalKind     `json:"kind"`
-  	SessionID     string          `json:"session_id"`
-  	RunID         string          `json:"run_id"`
-  	TurnID        string          `json:"turn_id,omitempty"`
-  	StepID        string          `json:"step_id,omitempty"`
-  	Identity      string          `json:"identity"`
-  	Revision      uint64          `json:"revision"`
-  	Status        ExecutionStatus `json:"status"`
-  	RecoveredFrom ExecutionStatus `json:"recovered_from,omitempty"`
-  	Error         string          `json:"error,omitempty"`
-  	Reason        string          `json:"reason,omitempty"`
-  	CreatedAt     time.Time       `json:"created_at"`
-  	UpdatedAt     time.Time       `json:"updated_at"`
+      Schema        int             `json:"schema"`
+      Kind          JournalKind     `json:"kind"`
+      SessionID     string          `json:"session_id"`
+      RunID         string          `json:"run_id"`
+      TurnID        string          `json:"turn_id,omitempty"`
+      StepID        string          `json:"step_id,omitempty"`
+      Identity      string          `json:"identity"`
+      Revision      uint64          `json:"revision"`
+      Status        ExecutionStatus `json:"status"`
+      RecoveredFrom ExecutionStatus `json:"recovered_from,omitempty"`
+      Error         string          `json:"error,omitempty"`
+      Reason        string          `json:"reason,omitempty"`
+      CreatedAt     time.Time       `json:"created_at"`
+      UpdatedAt     time.Time       `json:"updated_at"`
   }
   type ExecutionStatus string
   type ExecutionTransitionError struct {
-  	Identity string
-  	Kind     JournalKind
-  	From     ExecutionStatus
-  	To       ExecutionStatus
-  	Detail   string
+      Identity string
+      Kind     JournalKind
+      From     ExecutionStatus
+      To       ExecutionStatus
+      Detail   string
   }
   type HeartbeatSessionLeaseRequest struct {
-  	SessionRef            SessionRef    `json:"session_ref"`
-  	LeaseID               string        `json:"lease_id,omitempty"`
-  	OwnerID               string        `json:"owner_id,omitempty"`
-  	ExpectedLeaseRevision uint64        `json:"expected_lease_revision,omitempty"`
-  	TTL                   time.Duration `json:"ttl,omitempty"`
+      SessionRef            SessionRef    `json:"session_ref"`
+      LeaseID               string        `json:"lease_id,omitempty"`
+      OwnerID               string        `json:"owner_id,omitempty"`
+      ExpectedLeaseRevision uint64        `json:"expected_lease_revision,omitempty"`
+      TTL                   time.Duration `json:"ttl,omitempty"`
   }
   type JSONValueError struct {
-  	Scope string
-  	Err   error
+      Scope string
+      Err   error
   }
   type JournalKind string
+  type Lifecycle interface {
+      StartSession(context.Context, StartSessionRequest) (Session, error)
+      LoadSession(context.Context, LoadSessionRequest) (LoadedSession, error)
+      ListSessions(context.Context, ListSessionsRequest) (SessionList, error)
+  }
   type ListSessionsRequest struct {
-  	AppName      string `json:"app_name,omitempty"`
-  	UserID       string `json:"user_id,omitempty"`
-  	WorkspaceKey string `json:"workspace_key,omitempty"`
-  	Cursor       string `json:"cursor,omitempty"`
-  	Limit        int    `json:"limit,omitempty"`
+      AppName      string `json:"app_name,omitempty"`
+      UserID       string `json:"user_id,omitempty"`
+      WorkspaceKey string `json:"workspace_key,omitempty"`
+      Cursor       string `json:"cursor,omitempty"`
+      Limit        int    `json:"limit,omitempty"`
   }
   type LoadSessionRequest struct {
-  	SessionRef       SessionRef `json:"session_ref"`
-  	Limit            int        `json:"limit,omitempty"`
-  	IncludeTransient bool       `json:"include_transient,omitempty"`
+      SessionRef       SessionRef `json:"session_ref"`
+      Limit            int        `json:"limit,omitempty"`
+      IncludeTransient bool       `json:"include_transient,omitempty"`
   }
   type LoadedSession struct {
-  	Session Session        `json:"session"`
-  	Events  []*Event       `json:"events,omitempty"`
-  	State   map[string]any `json:"state,omitempty"`
+      Session Session        `json:"session"`
+      Events  []*Event       `json:"events,omitempty"`
+      State   map[string]any `json:"state,omitempty"`
   }
   type ParticipantBinding struct {
-  	ID             string          `json:"id,omitempty"`
-  	Kind           ParticipantKind `json:"kind,omitempty"`
-  	Role           ParticipantRole `json:"role,omitempty"`
-  	AgentName      string          `json:"agent_name,omitempty"`
-  	Label          string          `json:"label,omitempty"`
-  	SessionID      string          `json:"session_id,omitempty"`
-  	Source         string          `json:"source,omitempty"`
-  	ParentTurnID   string          `json:"parent_turn_id,omitempty"`
-  	DelegationID   string          `json:"delegation_id,omitempty"`
-  	ContextSyncSeq int             `json:"context_sync_seq,omitempty"`
-  	AttachedAt     time.Time       `json:"attached_at,omitempty"`
-  	ControllerRef  string          `json:"controller_ref,omitempty"`
+      ID             string          `json:"id,omitempty"`
+      Kind           ParticipantKind `json:"kind,omitempty"`
+      Role           ParticipantRole `json:"role,omitempty"`
+      AgentName      string          `json:"agent_name,omitempty"`
+      Label          string          `json:"label,omitempty"`
+      SessionID      string          `json:"session_id,omitempty"`
+      Source         string          `json:"source,omitempty"`
+      ParentTurnID   string          `json:"parent_turn_id,omitempty"`
+      DelegationID   string          `json:"delegation_id,omitempty"`
+      ContextSyncSeq int             `json:"context_sync_seq,omitempty"`
+      AttachedAt     time.Time       `json:"attached_at,omitempty"`
+      ControllerRef  string          `json:"controller_ref,omitempty"`
+  }
+  type ParticipantBindingStore interface {
+      PutParticipant(context.Context, PutParticipantRequest) (Session, error)
+      RemoveParticipant(context.Context, RemoveParticipantRequest) (Session, error)
   }
   type ParticipantKind string
   type ParticipantLifecycleService interface {
-  	PutParticipantWithEvent(context.Context, PutParticipantWithEventRequest) (Session, *Event, error)
-  	RemoveParticipantWithEvent(context.Context, RemoveParticipantWithEventRequest) (Session, *Event, error)
+      PutParticipantWithEvent(context.Context, PutParticipantWithEventRequest) (Session, *Event, error)
+      RemoveParticipantWithEvent(context.Context, RemoveParticipantWithEventRequest) (Session, *Event, error)
   }
   type ParticipantRef struct {
-  	ID           string          `json:"id,omitempty"`
-  	Kind         ParticipantKind `json:"kind,omitempty"`
-  	Role         ParticipantRole `json:"role,omitempty"`
-  	DelegationID string          `json:"delegation_id,omitempty"`
+      ID           string          `json:"id,omitempty"`
+      Kind         ParticipantKind `json:"kind,omitempty"`
+      Role         ParticipantRole `json:"role,omitempty"`
+      DelegationID string          `json:"delegation_id,omitempty"`
   }
   type ParticipantRole string
   type PauseToken struct {
-  	Schema     int               `json:"schema"`
-  	TokenID    string            `json:"token_id"`
-  	SessionID  string            `json:"session_id"`
-  	RunID      string            `json:"run_id"`
-  	TurnID     string            `json:"turn_id"`
-  	ToolCallID string            `json:"tool_call_id"`
-  	ToolName   string            `json:"tool_name"`
-  	Revision   uint64            `json:"revision"`
-  	Status     PauseTokenStatus  `json:"status"`
-  	Input      json.RawMessage   `json:"input,omitempty"`
-  	Approval   *ProtocolApproval `json:"approval,omitempty"`
-  	Metadata   map[string]any    `json:"metadata,omitempty"`
-  	Outcome    string            `json:"outcome,omitempty"`
-  	OptionID   string            `json:"option_id,omitempty"`
-  	Approved   bool              `json:"approved,omitempty"`
-  	Reason     string            `json:"reason,omitempty"`
-  	ReviewText string            `json:"review_text,omitempty"`
-  	CreatedAt  time.Time         `json:"created_at"`
-  	UpdatedAt  time.Time         `json:"updated_at"`
+      Schema     int               `json:"schema"`
+      TokenID    string            `json:"token_id"`
+      SessionID  string            `json:"session_id"`
+      RunID      string            `json:"run_id"`
+      TurnID     string            `json:"turn_id"`
+      ToolCallID string            `json:"tool_call_id"`
+      ToolName   string            `json:"tool_name"`
+      Revision   uint64            `json:"revision"`
+      Status     PauseTokenStatus  `json:"status"`
+      Input      json.RawMessage   `json:"input,omitempty"`
+      Approval   *ProtocolApproval `json:"approval,omitempty"`
+      Metadata   map[string]any    `json:"metadata,omitempty"`
+      Outcome    string            `json:"outcome,omitempty"`
+      OptionID   string            `json:"option_id,omitempty"`
+      Approved   bool              `json:"approved,omitempty"`
+      Reason     string            `json:"reason,omitempty"`
+      ReviewText string            `json:"review_text,omitempty"`
+      CreatedAt  time.Time         `json:"created_at"`
+      UpdatedAt  time.Time         `json:"updated_at"`
   }
   type PauseTokenStatus string
   type PauseTokenTransitionError struct {
-  	TokenID string
-  	From    PauseTokenStatus
-  	To      PauseTokenStatus
-  	Detail  string
+      TokenID string
+      From    PauseTokenStatus
+      To      PauseTokenStatus
+      Detail  string
   }
   type PrepareAppendTransactionRequest struct {
-  	Session          Session
-  	State            map[string]any
-  	Events           []*Event
-  	ExistingEvents   []*Event
-  	ExistingIDs      map[string]struct{}
-  	ExpectedRevision *uint64
-  	LastSeq          uint64
-  	Now              time.Time
-  	AllocateEventID  EventIDAllocator
-  	MutateSession    AppendSessionMutation
-  	UpdateState      AppendStateUpdate
+      Session          Session
+      State            map[string]any
+      Events           []*Event
+      ExistingEvents   []*Event
+      ExistingIDs      map[string]struct{}
+      ExpectedRevision *uint64
+      LastSeq          uint64
+      Now              time.Time
+      AllocateEventID  EventIDAllocator
+      MutateSession    AppendSessionMutation
+      UpdateState      AppendStateUpdate
   }
   type PrepareEventsForAppendRequest struct {
-  	SessionID       string
-  	Events          []*Event
-  	ExistingEvents  []*Event
-  	ExistingIDs     map[string]struct{}
-  	LastSeq         uint64
-  	Now             time.Time
-  	AllocateEventID EventIDAllocator
+      SessionID       string
+      Events          []*Event
+      ExistingEvents  []*Event
+      ExistingIDs     map[string]struct{}
+      LastSeq         uint64
+      Now             time.Time
+      AllocateEventID EventIDAllocator
   }
   type PreparedAppendEvents struct {
-  	Events    []*Event
-  	Persisted []*Event
-  	UpdatedAt time.Time
-  	Title     string
+      Events    []*Event
+      Persisted []*Event
+      UpdatedAt time.Time
+      Title     string
   }
   type PreparedAppendTransaction struct {
-  	Session  Session
-  	State    map[string]any
-  	Prepared PreparedAppendEvents
-  	Changed  bool
+      Session  Session
+      State    map[string]any
+      Prepared PreparedAppendEvents
+      Changed  bool
   }
   type ProtocolApproval struct {
-  	ToolCall ProtocolToolCall         `json:"tool_call,omitempty"`
-  	Options  []ProtocolApprovalOption `json:"options,omitempty"`
+      ToolCall ProtocolToolCall         `json:"tool_call,omitempty"`
+      Options  []ProtocolApprovalOption `json:"options,omitempty"`
   }
   type ProtocolApprovalOption struct {
-  	ID   string `json:"id,omitempty"`
-  	Name string `json:"name,omitempty"`
-  	Kind string `json:"kind,omitempty"`
+      ID   string `json:"id,omitempty"`
+      Name string `json:"name,omitempty"`
+      Kind string `json:"kind,omitempty"`
   }
   type ProtocolHandoff struct {
-  	Phase string `json:"phase,omitempty"`
+      Phase string `json:"phase,omitempty"`
   }
   type ProtocolParticipant struct {
-  	Action string `json:"action,omitempty"`
+      Action string `json:"action,omitempty"`
   }
   type ProtocolPlan struct {
-  	Entries []ProtocolPlanEntry `json:"entries,omitempty"`
+      Entries []ProtocolPlanEntry `json:"entries,omitempty"`
   }
   type ProtocolPlanEntry struct {
-  	Content  string `json:"content,omitempty"`
-  	Status   string `json:"status,omitempty"`
-  	Priority string `json:"priority,omitempty"`
+      Content  string `json:"content,omitempty"`
+      Status   string `json:"status,omitempty"`
+      Priority string `json:"priority,omitempty"`
   }
   type ProtocolToolCall struct {
-  	ID        string                    `json:"id,omitempty"`
-  	Name      string                    `json:"name,omitempty"`
-  	Kind      string                    `json:"kind,omitempty"`
-  	Title     string                    `json:"title,omitempty"`
-  	Status    string                    `json:"status,omitempty"`
-  	RawInput  map[string]any            `json:"raw_input,omitempty"`
-  	RawOutput map[string]any            `json:"raw_output,omitempty"`
-  	Content   []ProtocolToolCallContent `json:"content,omitempty"`
+      ID        string                    `json:"id,omitempty"`
+      Name      string                    `json:"name,omitempty"`
+      Kind      string                    `json:"kind,omitempty"`
+      Title     string                    `json:"title,omitempty"`
+      Status    string                    `json:"status,omitempty"`
+      RawInput  map[string]any            `json:"raw_input,omitempty"`
+      RawOutput map[string]any            `json:"raw_output,omitempty"`
+      Content   []ProtocolToolCallContent `json:"content,omitempty"`
   }
   type ProtocolToolCallContent struct {
-  	Type       string  `json:"type,omitempty"`
-  	Content    any     `json:"content,omitempty"`
-  	TerminalID string  `json:"terminalId,omitempty"`
-  	Path       string  `json:"path,omitempty"`
-  	OldText    *string `json:"oldText,omitempty"`
-  	NewText    string  `json:"newText,omitempty"`
+      Type       string  `json:"type,omitempty"`
+      Content    any     `json:"content,omitempty"`
+      TerminalID string  `json:"terminalId,omitempty"`
+      Path       string  `json:"path,omitempty"`
+      OldText    *string `json:"oldText,omitempty"`
+      NewText    string  `json:"newText,omitempty"`
   }
   type ProtocolToolCallLocation struct {
-  	Path string `json:"path,omitempty"`
-  	Line *int   `json:"line,omitempty"`
+      Path string `json:"path,omitempty"`
+      Line *int   `json:"line,omitempty"`
   }
   type ProtocolUpdate struct {
-  	SessionUpdate string                     `json:"sessionUpdate,omitempty"`
-  	Content       any                        `json:"content,omitempty"`
-  	MessageID     string                     `json:"messageId,omitempty"`
-  	ToolCallID    string                     `json:"toolCallId,omitempty"`
-  	Title         string                     `json:"title,omitempty"`
-  	Kind          string                     `json:"kind,omitempty"`
-  	Status        string                     `json:"status,omitempty"`
-  	RawInput      map[string]any             `json:"rawInput,omitempty"`
-  	RawOutput     map[string]any             `json:"rawOutput,omitempty"`
-  	Locations     []ProtocolToolCallLocation `json:"locations,omitempty"`
-  	Entries       []ProtocolPlanEntry        `json:"entries,omitempty"`
-  	Meta          map[string]any             `json:"_meta,omitempty"`
+      SessionUpdate string                     `json:"sessionUpdate,omitempty"`
+      Content       any                        `json:"content,omitempty"`
+      MessageID     string                     `json:"messageId,omitempty"`
+      ToolCallID    string                     `json:"toolCallId,omitempty"`
+      Title         string                     `json:"title,omitempty"`
+      Kind          string                     `json:"kind,omitempty"`
+      Status        string                     `json:"status,omitempty"`
+      RawInput      map[string]any             `json:"rawInput,omitempty"`
+      RawOutput     map[string]any             `json:"rawOutput,omitempty"`
+      Locations     []ProtocolToolCallLocation `json:"locations,omitempty"`
+      Entries       []ProtocolPlanEntry        `json:"entries,omitempty"`
+      Meta          map[string]any             `json:"_meta,omitempty"`
   }
   type ProtocolUpdateType string
   type PutParticipantRequest struct {
-  	SessionRef SessionRef         `json:"session_ref"`
-  	Binding    ParticipantBinding `json:"binding"`
+      SessionRef SessionRef         `json:"session_ref"`
+      Binding    ParticipantBinding `json:"binding"`
   }
   type PutParticipantWithEventRequest struct {
-  	SessionRef       SessionRef         `json:"session_ref"`
-  	ExpectedRevision *uint64            `json:"expected_revision,omitempty"`
-  	Binding          ParticipantBinding `json:"binding"`
-  	Event            *Event             `json:"event"`
+      SessionRef       SessionRef         `json:"session_ref"`
+      ExpectedRevision *uint64            `json:"expected_revision,omitempty"`
+      Binding          ParticipantBinding `json:"binding"`
+      Event            *Event             `json:"event"`
+  }
+  type Reader interface {
+      Session(context.Context, SessionRef) (Session, error)
+      Events(context.Context, EventsRequest) ([]*Event, error)
   }
   type ReleaseSessionLeaseRequest struct {
-  	SessionRef            SessionRef `json:"session_ref"`
-  	LeaseID               string     `json:"lease_id,omitempty"`
-  	OwnerID               string     `json:"owner_id,omitempty"`
-  	ExpectedLeaseRevision uint64     `json:"expected_lease_revision,omitempty"`
+      SessionRef            SessionRef `json:"session_ref"`
+      LeaseID               string     `json:"lease_id,omitempty"`
+      OwnerID               string     `json:"owner_id,omitempty"`
+      ExpectedLeaseRevision uint64     `json:"expected_lease_revision,omitempty"`
   }
   type RemoveParticipantRequest struct {
-  	SessionRef    SessionRef `json:"session_ref"`
-  	ParticipantID string     `json:"participant_id,omitempty"`
+      SessionRef    SessionRef `json:"session_ref"`
+      ParticipantID string     `json:"participant_id,omitempty"`
   }
   type RemoveParticipantWithEventRequest struct {
-  	SessionRef       SessionRef `json:"session_ref"`
-  	ExpectedRevision *uint64    `json:"expected_revision,omitempty"`
-  	ParticipantID    string     `json:"participant_id,omitempty"`
-  	Event            *Event     `json:"event"`
+      SessionRef       SessionRef `json:"session_ref"`
+      ExpectedRevision *uint64    `json:"expected_revision,omitempty"`
+      ParticipantID    string     `json:"participant_id,omitempty"`
+      Event            *Event     `json:"event"`
   }
   type RevisionConflictError struct {
-  	SessionID string
-  	Expected  uint64
-  	Actual    uint64
+      SessionID string
+      Expected  uint64
+      Actual    uint64
   }
   type Service interface {
-  	StartSession(context.Context, StartSessionRequest) (Session, error)
-  	LoadSession(context.Context, LoadSessionRequest) (LoadedSession, error)
-  	Session(context.Context, SessionRef) (Session, error)
-  	AppendEvent(context.Context, AppendEventRequest) (*Event, error)
-  	Events(context.Context, EventsRequest) ([]*Event, error)
-  	ListSessions(context.Context, ListSessionsRequest) (SessionList, error)
-  	BindController(context.Context, BindControllerRequest) (Session, error)
-  	PutParticipant(context.Context, PutParticipantRequest) (Session, error)
-  	RemoveParticipant(context.Context, RemoveParticipantRequest) (Session, error)
-  	SnapshotState(context.Context, SessionRef) (map[string]any, error)
-  	ReplaceState(context.Context, SessionRef, map[string]any) error
-  	UpdateState(context.Context, SessionRef, func(map[string]any) (map[string]any, error)) error
+      Lifecycle
+      Reader
+      EventAppender
+      ControllerBindingStore
+      ParticipantBindingStore
+      StateStore
   }
   type Session struct {
-  	SessionRef
-  	Revision     uint64               `json:"revision,omitempty"`
-  	CWD          string               `json:"cwd,omitempty"`
-  	Title        string               `json:"title,omitempty"`
-  	Metadata     map[string]any       `json:"metadata,omitempty"`
-  	Controller   ControllerBinding    `json:"controller,omitempty"`
-  	Participants []ParticipantBinding `json:"participants,omitempty"`
-  	CreatedAt    time.Time            `json:"created_at,omitempty"`
-  	UpdatedAt    time.Time            `json:"updated_at,omitempty"`
+      SessionRef
+      Revision     uint64               `json:"revision,omitempty"`
+      CWD          string               `json:"cwd,omitempty"`
+      Title        string               `json:"title,omitempty"`
+      Metadata     map[string]any       `json:"metadata,omitempty"`
+      Controller   ControllerBinding    `json:"controller,omitempty"`
+      Participants []ParticipantBinding `json:"participants,omitempty"`
+      CreatedAt    time.Time            `json:"created_at,omitempty"`
+      UpdatedAt    time.Time            `json:"updated_at,omitempty"`
   }
   type SessionLease struct {
-  	SessionRef  SessionRef `json:"session_ref"`
-  	LeaseID     string     `json:"lease_id,omitempty"`
-  	OwnerID     string     `json:"owner_id,omitempty"`
-  	Revision    uint64     `json:"revision,omitempty"`
-  	AcquiredAt  time.Time  `json:"acquired_at,omitempty"`
-  	HeartbeatAt time.Time  `json:"heartbeat_at,omitempty"`
-  	ExpiresAt   time.Time  `json:"expires_at,omitempty"`
+      SessionRef  SessionRef `json:"session_ref"`
+      LeaseID     string     `json:"lease_id,omitempty"`
+      OwnerID     string     `json:"owner_id,omitempty"`
+      Revision    uint64     `json:"revision,omitempty"`
+      AcquiredAt  time.Time  `json:"acquired_at,omitempty"`
+      HeartbeatAt time.Time  `json:"heartbeat_at,omitempty"`
+      ExpiresAt   time.Time  `json:"expires_at,omitempty"`
   }
   type SessionLeaseService interface {
-  	AcquireSessionLease(context.Context, AcquireSessionLeaseRequest) (SessionLease, error)
-  	HeartbeatSessionLease(context.Context, HeartbeatSessionLeaseRequest) (SessionLease, error)
-  	ReleaseSessionLease(context.Context, ReleaseSessionLeaseRequest) error
+      AcquireSessionLease(context.Context, AcquireSessionLeaseRequest) (SessionLease, error)
+      HeartbeatSessionLease(context.Context, HeartbeatSessionLeaseRequest) (SessionLease, error)
+      ReleaseSessionLease(context.Context, ReleaseSessionLeaseRequest) error
   }
   type SessionList struct {
-  	Sessions   []SessionSummary `json:"sessions,omitempty"`
-  	NextCursor string           `json:"next_cursor,omitempty"`
+      Sessions   []SessionSummary `json:"sessions,omitempty"`
+      NextCursor string           `json:"next_cursor,omitempty"`
   }
   type SessionRef struct {
-  	AppName      string `json:"app_name,omitempty"`
-  	UserID       string `json:"user_id,omitempty"`
-  	SessionID    string `json:"session_id,omitempty"`
-  	WorkspaceKey string `json:"workspace_key,omitempty"`
+      AppName      string `json:"app_name,omitempty"`
+      UserID       string `json:"user_id,omitempty"`
+      SessionID    string `json:"session_id,omitempty"`
+      WorkspaceKey string `json:"workspace_key,omitempty"`
   }
   type SessionSummary struct {
-  	SessionRef
-  	CWD       string         `json:"cwd,omitempty"`
-  	Title     string         `json:"title,omitempty"`
-  	Metadata  map[string]any `json:"metadata,omitempty"`
-  	UpdatedAt time.Time      `json:"updated_at,omitempty"`
+      SessionRef
+      CWD       string         `json:"cwd,omitempty"`
+      Title     string         `json:"title,omitempty"`
+      Metadata  map[string]any `json:"metadata,omitempty"`
+      UpdatedAt time.Time      `json:"updated_at,omitempty"`
   }
   type StartSessionRequest struct {
-  	AppName            string         `json:"app_name,omitempty"`
-  	UserID             string         `json:"user_id,omitempty"`
-  	Workspace          WorkspaceRef   `json:"workspace,omitempty"`
-  	PreferredSessionID string         `json:"preferred_session_id,omitempty"`
-  	Title              string         `json:"title,omitempty"`
-  	Metadata           map[string]any `json:"metadata,omitempty"`
+      AppName            string         `json:"app_name,omitempty"`
+      UserID             string         `json:"user_id,omitempty"`
+      Workspace          WorkspaceRef   `json:"workspace,omitempty"`
+      PreferredSessionID string         `json:"preferred_session_id,omitempty"`
+      Title              string         `json:"title,omitempty"`
+      Metadata           map[string]any `json:"metadata,omitempty"`
+  }
+  type StateReader interface {
+      SnapshotState(context.Context, SessionRef) (map[string]any, error)
+  }
+  type StateStore interface {
+      StateReader
+      StateWriter
+  }
+  type StateWriter interface {
+      ReplaceState(context.Context, SessionRef, map[string]any) error
+      UpdateState(context.Context, SessionRef, func(map[string]any) (map[string]any, error)) error
   }
   type Store interface {
-  	GetOrCreate(context.Context, StartSessionRequest) (Session, error)
-  	Get(context.Context, SessionRef) (Session, error)
-  	List(context.Context, ListSessionsRequest) (SessionList, error)
-  	AppendEvent(context.Context, SessionRef, *Event) (*Event, error)
-  	Events(context.Context, EventsRequest) ([]*Event, error)
-  	BindController(context.Context, SessionRef, ControllerBinding) (Session, error)
-  	PutParticipant(context.Context, SessionRef, ParticipantBinding) (Session, error)
-  	RemoveParticipant(context.Context, SessionRef, string) (Session, error)
-  	SnapshotState(context.Context, SessionRef) (map[string]any, error)
-  	ReplaceState(context.Context, SessionRef, map[string]any) error
-  	UpdateState(context.Context, SessionRef, func(map[string]any) (map[string]any, error)) error
+      GetOrCreate(context.Context, StartSessionRequest) (Session, error)
+      Get(context.Context, SessionRef) (Session, error)
+      List(context.Context, ListSessionsRequest) (SessionList, error)
+      AppendEvent(context.Context, SessionRef, *Event) (*Event, error)
+      Events(context.Context, EventsRequest) ([]*Event, error)
+      BindController(context.Context, SessionRef, ControllerBinding) (Session, error)
+      PutParticipant(context.Context, SessionRef, ParticipantBinding) (Session, error)
+      RemoveParticipant(context.Context, SessionRef, string) (Session, error)
+      SnapshotState(context.Context, SessionRef) (map[string]any, error)
+      ReplaceState(context.Context, SessionRef, map[string]any) error
+      UpdateState(context.Context, SessionRef, func(map[string]any) (map[string]any, error)) error
   }
   type ToolExecution struct {
-  	Schema        int                 `json:"schema"`
-  	Key           ExecutionKey        `json:"key"`
-  	Identity      string              `json:"identity"`
-  	Revision      uint64              `json:"revision"`
-  	ToolName      string              `json:"tool_name"`
-  	EffectClass   string              `json:"effect_class"`
-  	Status        ToolExecutionStatus `json:"status"`
-  	RecoveredFrom ToolExecutionStatus `json:"recovered_from,omitempty"`
-  	Input         json.RawMessage     `json:"input,omitempty"`
-  	Result        json.RawMessage     `json:"result,omitempty"`
-  	Error         string              `json:"error,omitempty"`
-  	Reason        string              `json:"reason,omitempty"`
-  	CreatedAt     time.Time           `json:"created_at"`
-  	UpdatedAt     time.Time           `json:"updated_at"`
+      Schema        int                 `json:"schema"`
+      Key           ExecutionKey        `json:"key"`
+      Identity      string              `json:"identity"`
+      Revision      uint64              `json:"revision"`
+      ToolName      string              `json:"tool_name"`
+      EffectClass   string              `json:"effect_class"`
+      Status        ToolExecutionStatus `json:"status"`
+      RecoveredFrom ToolExecutionStatus `json:"recovered_from,omitempty"`
+      Input         json.RawMessage     `json:"input,omitempty"`
+      Result        json.RawMessage     `json:"result,omitempty"`
+      Error         string              `json:"error,omitempty"`
+      Reason        string              `json:"reason,omitempty"`
+      CreatedAt     time.Time           `json:"created_at"`
+      UpdatedAt     time.Time           `json:"updated_at"`
   }
   type ToolExecutionStatus string
   type ToolExecutionTransitionError struct {
-  	Identity string
-  	From     ToolExecutionStatus
-  	To       ToolExecutionStatus
-  	Detail   string
+      Identity string
+      From     ToolExecutionStatus
+      To       ToolExecutionStatus
+      Detail   string
   }
   type UsageSnapshot struct {
-  	PromptTokens        int `json:"prompt_tokens,omitempty"`
-  	CachedInputTokens   int `json:"cached_input_tokens,omitempty"`
-  	CompletionTokens    int `json:"completion_tokens,omitempty"`
-  	ReasoningTokens     int `json:"reasoning_tokens,omitempty"`
-  	TotalTokens         int `json:"total_tokens,omitempty"`
-  	ContextWindowTokens int `json:"context_window_tokens,omitempty"`
+      PromptTokens        int `json:"prompt_tokens,omitempty"`
+      CachedInputTokens   int `json:"cached_input_tokens,omitempty"`
+      CompletionTokens    int `json:"completion_tokens,omitempty"`
+      ReasoningTokens     int `json:"reasoning_tokens,omitempty"`
+      TotalTokens         int `json:"total_tokens,omitempty"`
+      ContextWindowTokens int `json:"context_window_tokens,omitempty"`
   }
   type Visibility string
   type WorkspaceRef struct {
-  	Key string `json:"key,omitempty"`
-  	CWD string `json:"cwd,omitempty"`
+      Key string `json:"key,omitempty"`
+      CWD string `json:"cwd,omitempty"`
   }
   var (
-  	ErrSessionNotFound = errors.New("agent-sdk/session: session not found")
+      ErrSessionNotFound = errors.New("agent-sdk/session: session not found")
   
-  	ErrAmbiguousSession = errors.New("agent-sdk/session: ambiguous session")
+      ErrAmbiguousSession = errors.New("agent-sdk/session: ambiguous session")
   
-  	ErrInvalidSession = errors.New("agent-sdk/session: invalid session")
+      ErrInvalidSession = errors.New("agent-sdk/session: invalid session")
   
-  	ErrInvalidEvent = errors.New("agent-sdk/session: invalid event")
+      ErrInvalidEvent = errors.New("agent-sdk/session: invalid event")
   
-  	ErrInvalidValue = errors.New("agent-sdk/session: invalid JSON-compatible value")
+      ErrInvalidValue = errors.New("agent-sdk/session: invalid JSON-compatible value")
   
-  	ErrRevisionConflict = errors.New("agent-sdk/session: revision conflict")
+      ErrRevisionConflict = errors.New("agent-sdk/session: revision conflict")
   
-  	ErrEventConflict = errors.New("agent-sdk/session: event conflict")
+      ErrEventConflict = errors.New("agent-sdk/session: event conflict")
   
-  	ErrUnsupportedLegacyFormat = errors.New("agent-sdk/session: unsupported legacy format")
+      ErrUnsupportedLegacyFormat = errors.New("agent-sdk/session: unsupported legacy format")
   )
 
 package github.com/caelis-labs/caelis/agent-sdk/skill
   const (
-  	ResolveNotFound  ResolveStatus = "not_found"
-  	ResolveMatched   ResolveStatus = "matched"
-  	ResolveAmbiguous ResolveStatus = "ambiguous"
+      ResolveNotFound  ResolveStatus = "not_found"
+      ResolveMatched   ResolveStatus = "matched"
+      ResolveAmbiguous ResolveStatus = "ambiguous"
   )
   const (
-  	SourceRegular = "regular"
-  	SourcePlugin  = "plugin"
+      SourceRegular = "regular"
+      SourcePlugin  = "plugin"
   )
   func (c Catalog) MatchingMetas(name string) []Meta
   func (c Catalog) Metas() []Meta
@@ -2193,68 +2246,68 @@ package github.com/caelis-labs/caelis/agent-sdk/skill
   func NewCatalog(metas []Meta) Catalog
   func RefFromMeta(meta Meta) Ref
   type Bundle struct {
-  	Meta    Meta
-  	Root    string
-  	Content string
+      Meta    Meta
+      Root    string
+      Content string
   }
   type Catalog struct {
-  	// contains filtered or unexported fields
+      // contains filtered or unexported fields
   }
   type DiscoverRequest struct {
-  	Dirs          []string
-  	WorkspaceDir  string
-  	PluginBundles []PluginBundle
+      Dirs          []string
+      WorkspaceDir  string
+      PluginBundles []PluginBundle
   }
   type Discovery interface {
-  	Discover(context.Context, DiscoverRequest) ([]Meta, error)
+      Discover(context.Context, DiscoverRequest) ([]Meta, error)
   }
   type Loader interface {
-  	Load(context.Context, Ref) (Bundle, error)
+      Load(context.Context, Ref) (Bundle, error)
   }
   type Meta struct {
-  	Name        string
-  	Description string
-  	Path        string
-  	Source      string
-  	PluginID    string
-  	Namespace   string
-  	LocalName   string
+      Name        string
+      Description string
+      Path        string
+      Source      string
+      PluginID    string
+      Namespace   string
+      LocalName   string
   }
   type PluginBundle struct {
-  	Plugin    string
-  	Namespace string
-  	Root      string
-  	Disabled  []string
-  	Enabled   bool
+      Plugin    string
+      Namespace string
+      Root      string
+      Disabled  []string
+      Enabled   bool
   }
   type Ref struct {
-  	Name      string
-  	Path      string
-  	Namespace string
-  	PluginID  string
-  	LocalName string
+      Name      string
+      Path      string
+      Namespace string
+      PluginID  string
+      LocalName string
   }
   type ResolveStatus string
 
 package github.com/caelis-labs/caelis/agent-sdk/task
   const (
-  	KindCommand  Kind = "command"
-  	KindSubagent Kind = "subagent"
+      KindCommand  Kind = "command"
+      KindSubagent Kind = "subagent"
   )
   const (
-  	ResultPersistenceCanonical ResultPersistenceMode = iota
+      ResultPersistenceCanonical ResultPersistenceMode = iota
   
-  	ResultPersistenceDeferred
+      ResultPersistenceDeferred
   )
   const (
-  	StateRunning         State = "running"
-  	StateWaitingInput    State = "waiting_input"
-  	StateCompleted       State = "completed"
-  	StateFailed          State = "failed"
-  	StateCancelled       State = "cancelled"
-  	StateInterrupted     State = "interrupted"
-  	StateTerminated      State = "terminated"
-  	StateWaitingApproval State = "waiting_approval"
+      StateRunning         State = "running"
+      StateWaitingInput    State = "waiting_input"
+      StateCompleted       State = "completed"
+      StateFailed          State = "failed"
+      StateCancelled       State = "cancelled"
+      StateInterrupted     State = "interrupted"
+      StateTerminated      State = "terminated"
+      StateWaitingApproval State = "waiting_approval"
   )
   func (e *LeaseConflictError) Error() string
   func (e *RevisionConflictError) Error() string
@@ -2267,158 +2320,158 @@ package github.com/caelis-labs/caelis/agent-sdk/task
   func SanitizeResultForPersistence(result map[string]any, mode ResultPersistenceMode) map[string]any
   func TransientResultKeys() []string
   type AcquireLeaseRequest struct {
-  	TaskID               string        `json:"task_id"`
-  	OwnerID              string        `json:"owner_id"`
-  	LeaseID              string        `json:"lease_id"`
-  	ExpectedTaskRevision uint64        `json:"expected_task_revision"`
-  	Now                  time.Time     `json:"now"`
-  	TTL                  time.Duration `json:"ttl"`
+      TaskID               string        `json:"task_id"`
+      OwnerID              string        `json:"owner_id"`
+      LeaseID              string        `json:"lease_id"`
+      ExpectedTaskRevision uint64        `json:"expected_task_revision"`
+      Now                  time.Time     `json:"now"`
+      TTL                  time.Duration `json:"ttl"`
   }
   type CASStore interface {
-  	Put(context.Context, PutRequest) (*Entry, error)
+      Put(context.Context, PutRequest) (*Entry, error)
   }
   type CommandStartRequest struct {
-  	Command     string        `json:"command,omitempty"`
-  	Workdir     string        `json:"workdir,omitempty"`
-  	Yield       time.Duration `json:"yield,omitempty"`
-  	Timeout     time.Duration `json:"timeout,omitempty"`
-  	ParentCall  string        `json:"parent_call,omitempty"`
-  	ParentTool  string        `json:"parent_tool,omitempty"`
-  	Constraints any           `json:"-"`
-  	Observer    Observer      `json:"-"`
+      Command     string        `json:"command,omitempty"`
+      Workdir     string        `json:"workdir,omitempty"`
+      Yield       time.Duration `json:"yield,omitempty"`
+      Timeout     time.Duration `json:"timeout,omitempty"`
+      ParentCall  string        `json:"parent_call,omitempty"`
+      ParentTool  string        `json:"parent_tool,omitempty"`
+      Constraints any           `json:"-"`
+      Observer    Observer      `json:"-"`
   }
   type ControlRequest struct {
-  	TaskID         string        `json:"task_id,omitempty"`
-  	Yield          time.Duration `json:"yield,omitempty"`
-  	Input          string        `json:"input,omitempty"`
-  	Source         string        `json:"source,omitempty"`
-  	ContextPrelude string        `json:"context_prelude,omitempty"`
+      TaskID         string        `json:"task_id,omitempty"`
+      Yield          time.Duration `json:"yield,omitempty"`
+      Input          string        `json:"input,omitempty"`
+      Source         string        `json:"source,omitempty"`
+      ContextPrelude string        `json:"context_prelude,omitempty"`
   }
   type Entry struct {
-  	TaskID         string              `json:"task_id,omitempty"`
-  	Revision       uint64              `json:"revision,omitempty"`
-  	Kind           Kind                `json:"kind,omitempty"`
-  	Session        session.SessionRef  `json:"session,omitempty"`
-  	Title          string              `json:"title,omitempty"`
-  	State          State               `json:"state,omitempty"`
-  	Running        bool                `json:"running,omitempty"`
-  	SupportsInput  bool                `json:"supports_input,omitempty"`
-  	SupportsCancel bool                `json:"supports_cancel,omitempty"`
-  	CreatedAt      time.Time           `json:"created_at,omitempty"`
-  	UpdatedAt      time.Time           `json:"updated_at,omitempty"`
-  	Lease          Lease               `json:"lease,omitempty"`
-  	StdoutCursor   int64               `json:"stdout_cursor,omitempty"`
-  	StderrCursor   int64               `json:"stderr_cursor,omitempty"`
-  	EventCursor    int64               `json:"event_cursor,omitempty"`
-  	Spec           map[string]any      `json:"spec,omitempty"`
-  	Result         map[string]any      `json:"result,omitempty"`
-  	Metadata       map[string]any      `json:"metadata,omitempty"`
-  	Terminal       sandbox.TerminalRef `json:"terminal,omitempty"`
+      TaskID         string              `json:"task_id,omitempty"`
+      Revision       uint64              `json:"revision,omitempty"`
+      Kind           Kind                `json:"kind,omitempty"`
+      Session        session.SessionRef  `json:"session,omitempty"`
+      Title          string              `json:"title,omitempty"`
+      State          State               `json:"state,omitempty"`
+      Running        bool                `json:"running,omitempty"`
+      SupportsInput  bool                `json:"supports_input,omitempty"`
+      SupportsCancel bool                `json:"supports_cancel,omitempty"`
+      CreatedAt      time.Time           `json:"created_at,omitempty"`
+      UpdatedAt      time.Time           `json:"updated_at,omitempty"`
+      Lease          Lease               `json:"lease,omitempty"`
+      StdoutCursor   int64               `json:"stdout_cursor,omitempty"`
+      StderrCursor   int64               `json:"stderr_cursor,omitempty"`
+      EventCursor    int64               `json:"event_cursor,omitempty"`
+      Spec           map[string]any      `json:"spec,omitempty"`
+      Result         map[string]any      `json:"result,omitempty"`
+      Metadata       map[string]any      `json:"metadata,omitempty"`
+      Terminal       sandbox.TerminalRef `json:"terminal,omitempty"`
   }
   type HeartbeatLeaseRequest struct {
-  	TaskID                string        `json:"task_id"`
-  	OwnerID               string        `json:"owner_id"`
-  	LeaseID               string        `json:"lease_id"`
-  	ExpectedTaskRevision  uint64        `json:"expected_task_revision"`
-  	ExpectedLeaseRevision uint64        `json:"expected_lease_revision"`
-  	Now                   time.Time     `json:"now"`
-  	TTL                   time.Duration `json:"ttl"`
+      TaskID                string        `json:"task_id"`
+      OwnerID               string        `json:"owner_id"`
+      LeaseID               string        `json:"lease_id"`
+      ExpectedTaskRevision  uint64        `json:"expected_task_revision"`
+      ExpectedLeaseRevision uint64        `json:"expected_lease_revision"`
+      Now                   time.Time     `json:"now"`
+      TTL                   time.Duration `json:"ttl"`
   }
   type Kind string
   type Lease struct {
-  	ID          string    `json:"id,omitempty"`
-  	OwnerID     string    `json:"owner_id,omitempty"`
-  	Revision    uint64    `json:"revision,omitempty"`
-  	AcquiredAt  time.Time `json:"acquired_at,omitempty"`
-  	HeartbeatAt time.Time `json:"heartbeat_at,omitempty"`
-  	ExpiresAt   time.Time `json:"expires_at,omitempty"`
+      ID          string    `json:"id,omitempty"`
+      OwnerID     string    `json:"owner_id,omitempty"`
+      Revision    uint64    `json:"revision,omitempty"`
+      AcquiredAt  time.Time `json:"acquired_at,omitempty"`
+      HeartbeatAt time.Time `json:"heartbeat_at,omitempty"`
+      ExpiresAt   time.Time `json:"expires_at,omitempty"`
   }
   type LeaseConflictError struct {
-  	TaskID string
-  	Detail string
+      TaskID string
+      Detail string
   }
   type LeaseStore interface {
-  	AcquireLease(context.Context, AcquireLeaseRequest) (*Entry, error)
-  	HeartbeatLease(context.Context, HeartbeatLeaseRequest) (*Entry, error)
-  	ReleaseLease(context.Context, ReleaseLeaseRequest) (*Entry, error)
+      AcquireLease(context.Context, AcquireLeaseRequest) (*Entry, error)
+      HeartbeatLease(context.Context, HeartbeatLeaseRequest) (*Entry, error)
+      ReleaseLease(context.Context, ReleaseLeaseRequest) (*Entry, error)
   }
   type Manager interface {
-  	StartCommand(context.Context, CommandStartRequest) (Snapshot, error)
-  	Wait(context.Context, ControlRequest) (Snapshot, error)
-  	Write(context.Context, ControlRequest) (Snapshot, error)
-  	Cancel(context.Context, ControlRequest) (Snapshot, error)
+      StartCommand(context.Context, CommandStartRequest) (Snapshot, error)
+      Wait(context.Context, ControlRequest) (Snapshot, error)
+      Write(context.Context, ControlRequest) (Snapshot, error)
+      Cancel(context.Context, ControlRequest) (Snapshot, error)
   }
   type Observer interface {
-  	ObserveTaskSnapshot(Snapshot)
+      ObserveTaskSnapshot(Snapshot)
   }
   type PutRequest struct {
-  	Entry            *Entry `json:"entry"`
-  	ExpectedRevision uint64 `json:"expected_revision"`
+      Entry            *Entry `json:"entry"`
+      ExpectedRevision uint64 `json:"expected_revision"`
   }
   type Ref struct {
-  	TaskID     string `json:"task_id,omitempty"`
-  	SessionID  string `json:"session_id,omitempty"`
-  	TerminalID string `json:"terminal_id,omitempty"`
+      TaskID     string `json:"task_id,omitempty"`
+      SessionID  string `json:"session_id,omitempty"`
+      TerminalID string `json:"terminal_id,omitempty"`
   }
   type ReleaseLeaseRequest struct {
-  	TaskID                string `json:"task_id"`
-  	OwnerID               string `json:"owner_id"`
-  	LeaseID               string `json:"lease_id"`
-  	ExpectedTaskRevision  uint64 `json:"expected_task_revision"`
-  	ExpectedLeaseRevision uint64 `json:"expected_lease_revision"`
+      TaskID                string `json:"task_id"`
+      OwnerID               string `json:"owner_id"`
+      LeaseID               string `json:"lease_id"`
+      ExpectedTaskRevision  uint64 `json:"expected_task_revision"`
+      ExpectedLeaseRevision uint64 `json:"expected_lease_revision"`
   }
   type ResultPersistenceMode int
   type RevisionConflictError struct {
-  	TaskID   string
-  	Expected uint64
-  	Actual   uint64
+      TaskID   string
+      Expected uint64
+      Actual   uint64
   }
   type Snapshot struct {
-  	Ref            Ref                 `json:"ref,omitempty"`
-  	Revision       uint64              `json:"revision,omitempty"`
-  	Kind           Kind                `json:"kind,omitempty"`
-  	Title          string              `json:"title,omitempty"`
-  	State          State               `json:"state,omitempty"`
-  	Running        bool                `json:"running,omitempty"`
-  	SupportsInput  bool                `json:"supports_input,omitempty"`
-  	SupportsCancel bool                `json:"supports_cancel,omitempty"`
-  	CreatedAt      time.Time           `json:"created_at,omitempty"`
-  	UpdatedAt      time.Time           `json:"updated_at,omitempty"`
-  	Lease          Lease               `json:"lease,omitempty"`
-  	StdoutCursor   int64               `json:"stdout_cursor,omitempty"`
-  	StderrCursor   int64               `json:"stderr_cursor,omitempty"`
-  	EventCursor    int64               `json:"event_cursor,omitempty"`
-  	Result         map[string]any      `json:"result,omitempty"`
-  	Metadata       map[string]any      `json:"metadata,omitempty"`
-  	Terminal       sandbox.TerminalRef `json:"terminal,omitempty"`
+      Ref            Ref                 `json:"ref,omitempty"`
+      Revision       uint64              `json:"revision,omitempty"`
+      Kind           Kind                `json:"kind,omitempty"`
+      Title          string              `json:"title,omitempty"`
+      State          State               `json:"state,omitempty"`
+      Running        bool                `json:"running,omitempty"`
+      SupportsInput  bool                `json:"supports_input,omitempty"`
+      SupportsCancel bool                `json:"supports_cancel,omitempty"`
+      CreatedAt      time.Time           `json:"created_at,omitempty"`
+      UpdatedAt      time.Time           `json:"updated_at,omitempty"`
+      Lease          Lease               `json:"lease,omitempty"`
+      StdoutCursor   int64               `json:"stdout_cursor,omitempty"`
+      StderrCursor   int64               `json:"stderr_cursor,omitempty"`
+      EventCursor    int64               `json:"event_cursor,omitempty"`
+      Result         map[string]any      `json:"result,omitempty"`
+      Metadata       map[string]any      `json:"metadata,omitempty"`
+      Terminal       sandbox.TerminalRef `json:"terminal,omitempty"`
   }
   type State string
   type Store interface {
-  	Upsert(context.Context, *Entry) error
-  	Get(context.Context, string) (*Entry, error)
-  	ListSession(context.Context, session.SessionRef) ([]*Entry, error)
-  	GetSessionTaskByHandle(context.Context, session.SessionRef, Kind, string) (*Entry, error)
+      Upsert(context.Context, *Entry) error
+      Get(context.Context, string) (*Entry, error)
+      ListSession(context.Context, session.SessionRef) ([]*Entry, error)
+      GetSessionTaskByHandle(context.Context, session.SessionRef, Kind, string) (*Entry, error)
   }
   type SubagentStartRequest struct {
-  	Agent          string                     `json:"agent,omitempty"`
-  	Prompt         string                     `json:"prompt,omitempty"`
-  	ContextPrelude string                     `json:"context_prelude,omitempty"`
-  	ParentCall     string                     `json:"parent_call,omitempty"`
-  	ParentTool     string                     `json:"parent_tool,omitempty"`
-  	Source         string                     `json:"source,omitempty"`
-  	Mode           string                     `json:"mode,omitempty"`
-  	ApprovalMode   string                     `json:"approval_mode,omitempty"`
-  	Approval       subagent.ApprovalRequester `json:"-"`
+      Agent          string                          `json:"agent,omitempty"`
+      Prompt         string                          `json:"prompt,omitempty"`
+      ContextPrelude string                          `json:"context_prelude,omitempty"`
+      ParentCall     string                          `json:"parent_call,omitempty"`
+      ParentTool     string                          `json:"parent_tool,omitempty"`
+      Source         string                          `json:"source,omitempty"`
+      Mode           string                          `json:"mode,omitempty"`
+      ApprovalMode   string                          `json:"approval_mode,omitempty"`
+      Approval       agent.SubagentApprovalRequester `json:"-"`
   }
 
 package github.com/caelis-labs/caelis/agent-sdk/task/delegation
   const (
-  	StateRunning         State = "running"
-  	StateCompleted       State = "completed"
-  	StateFailed          State = "failed"
-  	StateCancelled       State = "cancelled"
-  	StateInterrupted     State = "interrupted"
-  	StateWaitingApproval State = "waiting_approval"
+      StateRunning         State = "running"
+      StateCompleted       State = "completed"
+      StateFailed          State = "failed"
+      StateCancelled       State = "cancelled"
+      StateInterrupted     State = "interrupted"
+      StateWaitingApproval State = "waiting_approval"
   )
   func CloneAnchor(in Anchor) Anchor
   func CloneContinueRequest(in ContinueRequest) ContinueRequest
@@ -2426,32 +2479,32 @@ package github.com/caelis-labs/caelis/agent-sdk/task/delegation
   func CloneResult(in Result) Result
   func NormalizeAgent(in Agent) Agent
   type Agent struct {
-  	Name        string `json:"name,omitempty"`
-  	Description string `json:"description,omitempty"`
+      Name        string `json:"name,omitempty"`
+      Description string `json:"description,omitempty"`
   }
   type Anchor struct {
-  	TaskID    string `json:"task_id,omitempty"`
-  	SessionID string `json:"session_id,omitempty"`
-  	Agent     string `json:"agent,omitempty"`
-  	AgentID   string `json:"agent_id,omitempty"`
+      TaskID    string `json:"task_id,omitempty"`
+      SessionID string `json:"session_id,omitempty"`
+      Agent     string `json:"agent,omitempty"`
+      AgentID   string `json:"agent_id,omitempty"`
   }
   type ContinueRequest struct {
-  	Agent       string `json:"agent,omitempty"`
-  	Prompt      string `json:"prompt,omitempty"`
-  	YieldTimeMS int    `json:"yield_time_ms,omitempty"`
+      Agent       string `json:"agent,omitempty"`
+      Prompt      string `json:"prompt,omitempty"`
+      YieldTimeMS int    `json:"yield_time_ms,omitempty"`
   }
   type Request struct {
-  	Agent  string `json:"agent,omitempty"`
-  	Prompt string `json:"prompt,omitempty"`
+      Agent  string `json:"agent,omitempty"`
+      Prompt string `json:"prompt,omitempty"`
   }
   type Result struct {
-  	TaskID        string    `json:"task_id,omitempty"`
-  	State         State     `json:"state,omitempty"`
-  	Running       bool      `json:"running,omitempty"`
-  	Yielded       bool      `json:"yielded,omitempty"`
-  	OutputPreview string    `json:"output_preview,omitempty"`
-  	Result        string    `json:"result,omitempty"`
-  	UpdatedAt     time.Time `json:"updated_at,omitempty"`
+      TaskID        string    `json:"task_id,omitempty"`
+      State         State     `json:"state,omitempty"`
+      Running       bool      `json:"running,omitempty"`
+      Yielded       bool      `json:"yielded,omitempty"`
+      OutputPreview string    `json:"output_preview,omitempty"`
+      Result        string    `json:"result,omitempty"`
+      UpdatedAt     time.Time `json:"updated_at,omitempty"`
   }
   type State string
 
@@ -2461,154 +2514,118 @@ package github.com/caelis-labs/caelis/agent-sdk/task/stream
   func CloneSnapshot(in Snapshot) Snapshot
   func NormalizeRef(in Ref) Ref
   type Controller interface {
-  	Service
-  	Wait(context.Context, Ref) (Snapshot, error)
-  	Kill(context.Context, Ref) error
-  	Release(context.Context, Ref) error
+      Service
+      Wait(context.Context, Ref) (Snapshot, error)
+      Kill(context.Context, Ref) error
+      Release(context.Context, Ref) error
   }
   type Cursor struct {
-  	Output int64 `json:"output,omitempty"`
-  	Events int64 `json:"events,omitempty"`
+      Output int64 `json:"output,omitempty"`
+      Events int64 `json:"events,omitempty"`
   }
   type Frame struct {
-  	Ref       Ref            `json:"ref,omitempty"`
-  	Text      string         `json:"text,omitempty"`
-  	State     string         `json:"state,omitempty"`
-  	Cursor    Cursor         `json:"cursor,omitempty"`
-  	Running   bool           `json:"running,omitempty"`
-  	Closed    bool           `json:"closed,omitempty"`
-  	Event     *session.Event `json:"event,omitempty"`
-  	UpdatedAt time.Time      `json:"updated_at,omitempty"`
+      Ref       Ref            `json:"ref,omitempty"`
+      Text      string         `json:"text,omitempty"`
+      State     string         `json:"state,omitempty"`
+      Cursor    Cursor         `json:"cursor,omitempty"`
+      Running   bool           `json:"running,omitempty"`
+      Closed    bool           `json:"closed,omitempty"`
+      Event     *session.Event `json:"event,omitempty"`
+      UpdatedAt time.Time      `json:"updated_at,omitempty"`
   }
   type ReadRequest struct {
-  	Ref    Ref    `json:"ref,omitempty"`
-  	Cursor Cursor `json:"cursor,omitempty"`
+      Ref    Ref    `json:"ref,omitempty"`
+      Cursor Cursor `json:"cursor,omitempty"`
   }
   type Ref struct {
-  	SessionID  string `json:"session_id,omitempty"`
-  	TaskID     string `json:"task_id,omitempty"`
-  	TerminalID string `json:"terminal_id,omitempty"`
+      SessionID  string `json:"session_id,omitempty"`
+      TaskID     string `json:"task_id,omitempty"`
+      TerminalID string `json:"terminal_id,omitempty"`
   }
   type Service interface {
-  	Read(context.Context, ReadRequest) (Snapshot, error)
-  	Subscribe(context.Context, SubscribeRequest) iter.Seq2[*Frame, error]
+      Read(context.Context, ReadRequest) (Snapshot, error)
+      Subscribe(context.Context, SubscribeRequest) iter.Seq2[*Frame, error]
   }
   type Sink interface {
-  	PublishStream(Frame)
+      PublishStream(Frame)
   }
   type Snapshot struct {
-  	Ref           Ref       `json:"ref,omitempty"`
-  	Cursor        Cursor    `json:"cursor,omitempty"`
-  	Frames        []Frame   `json:"frames,omitempty"`
-  	FinalText     string    `json:"final_text,omitempty"`
-  	State         string    `json:"state,omitempty"`
-  	Running       bool      `json:"running,omitempty"`
-  	SupportsInput bool      `json:"supports_input,omitempty"`
-  	ExitCode      *int      `json:"exit_code,omitempty"`
-  	StartedAt     time.Time `json:"started_at,omitempty"`
-  	UpdatedAt     time.Time `json:"updated_at,omitempty"`
+      Ref           Ref       `json:"ref,omitempty"`
+      Cursor        Cursor    `json:"cursor,omitempty"`
+      Frames        []Frame   `json:"frames,omitempty"`
+      FinalText     string    `json:"final_text,omitempty"`
+      State         string    `json:"state,omitempty"`
+      Running       bool      `json:"running,omitempty"`
+      SupportsInput bool      `json:"supports_input,omitempty"`
+      ExitCode      *int      `json:"exit_code,omitempty"`
+      StartedAt     time.Time `json:"started_at,omitempty"`
+      UpdatedAt     time.Time `json:"updated_at,omitempty"`
   }
   type SubscribeRequest struct {
-  	Ref          Ref           `json:"ref,omitempty"`
-  	Cursor       Cursor        `json:"cursor,omitempty"`
-  	PollInterval time.Duration `json:"poll_interval,omitempty"`
+      Ref          Ref           `json:"ref,omitempty"`
+      Cursor       Cursor        `json:"cursor,omitempty"`
+      PollInterval time.Duration `json:"poll_interval,omitempty"`
   }
 
 package github.com/caelis-labs/caelis/agent-sdk/task/subagent
-  type ApprovalOption struct {
-  	ID   string `json:"id,omitempty"`
-  	Name string `json:"name,omitempty"`
-  	Kind string `json:"kind,omitempty"`
-  }
-  type ApprovalRequest struct {
-  	SessionRef   session.SessionRef `json:"session_ref,omitempty"`
-  	Session      session.Session    `json:"session,omitempty"`
-  	TaskID       string             `json:"task_id,omitempty"`
-  	ParentCallID string             `json:"parent_call_id,omitempty"`
-  	Agent        string             `json:"agent,omitempty"`
-  	Mode         string             `json:"mode,omitempty"`
-  	ToolCall     ApprovalToolCall   `json:"tool_call,omitempty"`
-  	Options      []ApprovalOption   `json:"options,omitempty"`
-  }
-  type ApprovalRequester interface {
-  	RequestSubagentApproval(context.Context, ApprovalRequest) (ApprovalResponse, error)
-  }
-  type ApprovalResponse struct {
-  	Outcome  string `json:"outcome,omitempty"`
-  	OptionID string `json:"option_id,omitempty"`
-  	Approved bool   `json:"approved,omitempty"`
-  }
-  type ApprovalToolCall struct {
-  	ID       string         `json:"id,omitempty"`
-  	Name     string         `json:"name,omitempty"`
-  	Kind     string         `json:"kind,omitempty"`
-  	Title    string         `json:"title,omitempty"`
-  	Status   string         `json:"status,omitempty"`
-  	RawInput map[string]any `json:"raw_input,omitempty"`
-  }
+  type ApprovalOption = agent.ApprovalOption
+  type ApprovalRequest = agent.SubagentApprovalRequest
+  type ApprovalRequester = agent.SubagentApprovalRequester
+  type ApprovalResponse = agent.ApprovalResponse
+  type ApprovalToolCall = agent.SubagentApprovalToolCall
   type Registry interface {
-  	Get(context.Context, string) (delegation.Agent, error)
-  	List(context.Context) ([]delegation.Agent, error)
+      Get(context.Context, string) (delegation.Agent, error)
+      List(context.Context) ([]delegation.Agent, error)
   }
   type Runner interface {
-  	Spawn(context.Context, SpawnContext, delegation.Request) (delegation.Anchor, delegation.Result, error)
-  	Continue(context.Context, delegation.Anchor, delegation.ContinueRequest) (delegation.Result, error)
-  	Wait(context.Context, delegation.Anchor, int) (delegation.Result, error)
-  	Cancel(context.Context, delegation.Anchor) error
+      Spawn(context.Context, SpawnContext, delegation.Request) (delegation.Anchor, delegation.Result, error)
+      Continue(context.Context, delegation.Anchor, delegation.ContinueRequest) (delegation.Result, error)
+      Wait(context.Context, delegation.Anchor, int) (delegation.Result, error)
+      Cancel(context.Context, delegation.Anchor) error
   }
-  type SpawnContext struct {
-  	SessionRef        session.SessionRef `json:"session_ref,omitempty"`
-  	Session           session.Session    `json:"session,omitempty"`
-  	CWD               string             `json:"cwd,omitempty"`
-  	TaskID            string             `json:"task_id,omitempty"`
-  	ParentCallID      string             `json:"parent_call_id,omitempty"`
-  	Mode              string             `json:"mode,omitempty"`
-  	ApprovalMode      string             `json:"approval_mode,omitempty"`
-  	ApprovalRequester ApprovalRequester  `json:"-"`
-  	Streams           stream.Sink        `json:"-"`
-  }
+  type SpawnContext = agent.SubagentSpawnContext
 
 package github.com/caelis-labs/caelis/agent-sdk/tool
   const (
-  	CommandSandboxPermissionUseDefault       = "use_default"
-  	CommandSandboxPermissionRequireEscalated = "require_escalated"
-  	CommandSandboxPermissionLegacyAdditional = "with_additional_permissions"
+      CommandSandboxPermissionUseDefault       = "use_default"
+      CommandSandboxPermissionRequireEscalated = "require_escalated"
+      CommandSandboxPermissionLegacyAdditional = "with_additional_permissions"
   )
   const (
-  	EffectReadOnly      EffectClass = "read_only"
-  	EffectIdempotent    EffectClass = "idempotent"
-  	EffectNonIdempotent EffectClass = "non_idempotent"
+      EffectReadOnly      EffectClass = "read_only"
+      EffectIdempotent    EffectClass = "idempotent"
+      EffectNonIdempotent EffectClass = "non_idempotent"
   )
   const (
-  	ErrorCodeNotFound             ErrorCode = "not_found"
-  	ErrorCodePermissionDenied     ErrorCode = "permission_denied"
-  	ErrorCodeSandboxDenied        ErrorCode = "sandbox_denied"
-  	ErrorCodeSandboxUnavailable   ErrorCode = "sandbox_unavailable"
-  	ErrorCodeOldTextNotFound      ErrorCode = "old_text_not_found"
-  	ErrorCodeTooManyMatches       ErrorCode = "too_many_matches"
-  	ErrorCodeUnexpectedMatchCount ErrorCode = "unexpected_match_count"
-  	ErrorCodeStaleRevision        ErrorCode = "stale_revision"
-  	ErrorCodeTimeout              ErrorCode = "timeout"
-  	ErrorCodeOutputTruncated      ErrorCode = "output_truncated"
-  	ErrorCodeInvalidInput         ErrorCode = "invalid_input"
+      ErrorCodeNotFound             ErrorCode = "not_found"
+      ErrorCodePermissionDenied     ErrorCode = "permission_denied"
+      ErrorCodeSandboxDenied        ErrorCode = "sandbox_denied"
+      ErrorCodeSandboxUnavailable   ErrorCode = "sandbox_unavailable"
+      ErrorCodeOldTextNotFound      ErrorCode = "old_text_not_found"
+      ErrorCodeTooManyMatches       ErrorCode = "too_many_matches"
+      ErrorCodeUnexpectedMatchCount ErrorCode = "unexpected_match_count"
+      ErrorCodeStaleRevision        ErrorCode = "stale_revision"
+      ErrorCodeTimeout              ErrorCode = "timeout"
+      ErrorCodeOutputTruncated      ErrorCode = "output_truncated"
+      ErrorCodeInvalidInput         ErrorCode = "invalid_input"
   )
   const (
-  	MetadataToolKind            = "caelis.tool.kind"
-  	MetadataPluginID            = "caelis.plugin.id"
-  	MetadataMCPServer           = "caelis.mcp.server"
-  	MetadataMCPTool             = "caelis.mcp.tool"
-  	MetadataDiscoveredToolNames = "caelis.tool.discovered_names"
-  	MetadataExecutionJournal    = "caelis.execution_journal"
+      MetadataToolKind            = "caelis.tool.kind"
+      MetadataPluginID            = "caelis.plugin.id"
+      MetadataMCPServer           = "caelis.mcp.server"
+      MetadataMCPTool             = "caelis.mcp.tool"
+      MetadataDiscoveredToolNames = "caelis.tool.discovered_names"
+      MetadataExecutionJournal    = "caelis.execution_journal"
   
-  	MetadataToolKindMCP        = "mcp"
-  	MetadataToolKindToolSearch = "tool_search"
+      MetadataToolKindMCP        = "mcp"
+      MetadataToolKindToolSearch = "tool_search"
   
-  	ToolSearchToolName = "tool_search"
+      ToolSearchToolName = "tool_search"
   )
   const (
-  	RecoveryUnknown   RecoveryStatus = "unknown"
-  	RecoverySucceeded RecoveryStatus = "succeeded"
-  	RecoveryFailed    RecoveryStatus = "failed"
+      RecoveryUnknown   RecoveryStatus = "unknown"
+      RecoverySucceeded RecoveryStatus = "succeeded"
+      RecoveryFailed    RecoveryStatus = "failed"
   )
   func (e *ToolError) Error() string
   func (e *ToolError) Unwrap() error
@@ -2654,96 +2671,96 @@ package github.com/caelis-labs/caelis/agent-sdk/tool
   func TruncationMetadata(info TruncationInfo) map[string]any
   func WrapError(code ErrorCode, err error, message string) *ToolError
   type Call struct {
-  	ID           string          `json:"id,omitempty"`
-  	Name         string          `json:"name,omitempty"`
-  	Input        json.RawMessage `json:"input,omitempty"`
-  	Metadata     map[string]any  `json:"metadata,omitempty"`
-  	RuntimeModel model.LLM       `json:"-"`
-  	Observer     Observer        `json:"-"`
+      ID           string          `json:"id,omitempty"`
+      Name         string          `json:"name,omitempty"`
+      Input        json.RawMessage `json:"input,omitempty"`
+      Metadata     map[string]any  `json:"metadata,omitempty"`
+      RuntimeModel model.LLM       `json:"-"`
+      Observer     Observer        `json:"-"`
   }
   type Definition struct {
-  	Name        string         `json:"name,omitempty"`
-  	Description string         `json:"description,omitempty"`
-  	InputSchema map[string]any `json:"input_schema,omitempty"`
-  	Metadata    map[string]any `json:"metadata,omitempty"`
-  	EffectClass EffectClass    `json:"effect_class,omitempty"`
+      Name        string         `json:"name,omitempty"`
+      Description string         `json:"description,omitempty"`
+      InputSchema map[string]any `json:"input_schema,omitempty"`
+      Metadata    map[string]any `json:"metadata,omitempty"`
+      EffectClass EffectClass    `json:"effect_class,omitempty"`
   }
   type EffectClass string
   type ErrorCode string
   type NamedTool struct {
-  	Def    Definition
-  	Invoke func(context.Context, Call) (Result, error)
+      Def    Definition
+      Invoke func(context.Context, Call) (Result, error)
   }
   type Observer interface {
-  	ObserveToolResult(Result)
+      ObserveToolResult(Result)
   }
   type Recoverer interface {
-  	Recover(context.Context, RecoveryRequest) (RecoveryResult, error)
+      Recover(context.Context, RecoveryRequest) (RecoveryResult, error)
   }
   type RecoveryRequest struct {
-  	ExecutionIdentity string `json:"execution_identity"`
-  	Call              Call   `json:"call"`
+      ExecutionIdentity string `json:"execution_identity"`
+      Call              Call   `json:"call"`
   }
   type RecoveryResult struct {
-  	Status RecoveryStatus `json:"status"`
-  	Result Result         `json:"result,omitempty"`
-  	Reason string         `json:"reason,omitempty"`
+      Status RecoveryStatus `json:"status"`
+      Result Result         `json:"result,omitempty"`
+      Reason string         `json:"reason,omitempty"`
   }
   type RecoveryStatus string
   type Registry interface {
-  	List(context.Context) ([]Tool, error)
-  	Lookup(context.Context, string) (Tool, bool, error)
+      List(context.Context) ([]Tool, error)
+      Lookup(context.Context, string) (Tool, bool, error)
   }
   type Result struct {
-  	ID       string         `json:"id,omitempty"`
-  	Name     string         `json:"name,omitempty"`
-  	Content  []model.Part   `json:"content,omitempty"`
-  	Meta     map[string]any `json:"meta,omitempty"`
-  	IsError  bool           `json:"is_error,omitempty"`
-  	Metadata map[string]any `json:"metadata,omitempty"`
+      ID       string         `json:"id,omitempty"`
+      Name     string         `json:"name,omitempty"`
+      Content  []model.Part   `json:"content,omitempty"`
+      Meta     map[string]any `json:"meta,omitempty"`
+      IsError  bool           `json:"is_error,omitempty"`
+      Metadata map[string]any `json:"metadata,omitempty"`
   }
   type Tool interface {
-  	Definition() Definition
-  	Call(context.Context, Call) (Result, error)
+      Definition() Definition
+      Call(context.Context, Call) (Result, error)
   }
   type ToolError struct {
-  	Code      ErrorCode
-  	Message   string
-  	Hint      string
-  	Retryable bool
-  	Err       error
+      Code      ErrorCode
+      Message   string
+      Hint      string
+      Retryable bool
+      Err       error
   }
   type ToolSearchDiscoveredTool struct {
-  	Type         string                      `json:"type"`
-  	Name         string                      `json:"name,omitempty"`
-  	Description  string                      `json:"description,omitempty"`
-  	Parameters   map[string]any              `json:"parameters,omitempty"`
-  	DeferLoading bool                        `json:"defer_loading,omitempty"`
-  	Source       map[string]any              `json:"source,omitempty"`
-  	Function     *ToolSearchFunctionContract `json:"function,omitempty"`
+      Type         string                      `json:"type"`
+      Name         string                      `json:"name,omitempty"`
+      Description  string                      `json:"description,omitempty"`
+      Parameters   map[string]any              `json:"parameters,omitempty"`
+      DeferLoading bool                        `json:"defer_loading,omitempty"`
+      Source       map[string]any              `json:"source,omitempty"`
+      Function     *ToolSearchFunctionContract `json:"function,omitempty"`
   }
   type ToolSearchFunctionContract struct {
-  	Name string `json:"name,omitempty"`
+      Name string `json:"name,omitempty"`
   }
   type ToolSearchResult struct {
-  	Tools []ToolSearchDiscoveredTool `json:"tools,omitempty"`
-  	Count int                        `json:"count,omitempty"`
+      Tools []ToolSearchDiscoveredTool `json:"tools,omitempty"`
+      Count int                        `json:"count,omitempty"`
   }
   type ToolVisibility struct {
-  	// contains filtered or unexported fields
+      // contains filtered or unexported fields
   }
   type TruncationInfo struct {
-  	Truncated       bool
-  	Policy          string
-  	MaxTokens       int
-  	MaxBytes        int
-  	EstimatedTokens int
-  	EstimatedBytes  int
-  	RemovedTokens   int
-  	RemovedBytes    int
-  	OmittedItems    int
+      Truncated       bool
+      Policy          string
+      MaxTokens       int
+      MaxBytes        int
+      EstimatedTokens int
+      EstimatedBytes  int
+      RemovedTokens   int
+      RemovedBytes    int
+      OmittedItems    int
   }
   type TruncationPolicy struct {
-  	MaxTokens int
-  	MaxBytes  int
+      MaxTokens int
+      MaxBytes  int
   }

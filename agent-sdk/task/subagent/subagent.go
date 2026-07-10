@@ -3,9 +3,8 @@ package subagent
 import (
 	"context"
 
-	"github.com/caelis-labs/caelis/agent-sdk/session"
+	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 )
 
 // Registry exposes the spawnable ACP agents available to the runtime.
@@ -17,65 +16,29 @@ type Registry interface {
 }
 
 // ApprovalOption is one remote permission option exposed by a child ACP agent.
-type ApprovalOption struct {
-	ID   string `json:"id,omitempty"`
-	Name string `json:"name,omitempty"`
-	Kind string `json:"kind,omitempty"`
-}
+type ApprovalOption = agent.ApprovalOption
 
 // ApprovalToolCall is the child tool call asking for approval.
-type ApprovalToolCall struct {
-	ID       string         `json:"id,omitempty"`
-	Name     string         `json:"name,omitempty"`
-	Kind     string         `json:"kind,omitempty"`
-	Title    string         `json:"title,omitempty"`
-	Status   string         `json:"status,omitempty"`
-	RawInput map[string]any `json:"raw_input,omitempty"`
-}
+type ApprovalToolCall = agent.SubagentApprovalToolCall
 
 // ApprovalRequest is one runtime-owned approval bridge payload for a spawned
 // child ACP agent. It is system-controlled and never exposed on the LLM-facing
 // SPAWN or TASK results.
-type ApprovalRequest struct {
-	SessionRef   session.SessionRef `json:"session_ref,omitempty"`
-	Session      session.Session    `json:"session,omitempty"`
-	TaskID       string             `json:"task_id,omitempty"`
-	ParentCallID string             `json:"parent_call_id,omitempty"`
-	Agent        string             `json:"agent,omitempty"`
-	Mode         string             `json:"mode,omitempty"`
-	ToolCall     ApprovalToolCall   `json:"tool_call,omitempty"`
-	Options      []ApprovalOption   `json:"options,omitempty"`
-}
+type ApprovalRequest = agent.SubagentApprovalRequest
 
 // ApprovalResponse is one bridged child approval outcome.
-type ApprovalResponse struct {
-	Outcome  string `json:"outcome,omitempty"`
-	OptionID string `json:"option_id,omitempty"`
-	Approved bool   `json:"approved,omitempty"`
-}
+type ApprovalResponse = agent.ApprovalResponse
 
 // ApprovalRequester bridges child ACP permission requests into the parent
 // runtime's approval surface.
-type ApprovalRequester interface {
-	RequestSubagentApproval(context.Context, ApprovalRequest) (ApprovalResponse, error)
-}
+type ApprovalRequester = agent.SubagentApprovalRequester
 
 // SpawnContext is the system-controlled parent session context inherited by one
 // child ACP agent. None of these fields are exposed on the LLM-facing SPAWN
 // tool surface. ApprovalMode is the parent session mode for runners that derive
 // child launch configuration from the spawn request; preassembled ACP runners
 // may already carry the effective child approval mode in their launch args.
-type SpawnContext struct {
-	SessionRef        session.SessionRef `json:"session_ref,omitempty"`
-	Session           session.Session    `json:"session,omitempty"`
-	CWD               string             `json:"cwd,omitempty"`
-	TaskID            string             `json:"task_id,omitempty"`
-	ParentCallID      string             `json:"parent_call_id,omitempty"`
-	Mode              string             `json:"mode,omitempty"`
-	ApprovalMode      string             `json:"approval_mode,omitempty"`
-	ApprovalRequester ApprovalRequester  `json:"-"`
-	Streams           stream.Sink        `json:"-"`
-}
+type SpawnContext = agent.SubagentSpawnContext
 
 // Runner drives one spawned ACP child instance. The child itself is expected to
 // run in its own session and persist its own transcript independently.

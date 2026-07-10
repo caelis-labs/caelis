@@ -478,21 +478,62 @@ type Store interface {
 	UpdateState(context.Context, SessionRef, func(map[string]any) (map[string]any, error)) error
 }
 
-// Service is the stable session-lifecycle boundary consumed by future runtime
-// and adapters.
-type Service interface {
+// Lifecycle starts, loads, and lists sessions without granting mutation of an
+// already active session.
+type Lifecycle interface {
 	StartSession(context.Context, StartSessionRequest) (Session, error)
 	LoadSession(context.Context, LoadSessionRequest) (LoadedSession, error)
-	Session(context.Context, SessionRef) (Session, error)
-	AppendEvent(context.Context, AppendEventRequest) (*Event, error)
-	Events(context.Context, EventsRequest) ([]*Event, error)
 	ListSessions(context.Context, ListSessionsRequest) (SessionList, error)
+}
+
+// Reader exposes immutable session and event snapshots.
+type Reader interface {
+	Session(context.Context, SessionRef) (Session, error)
+	Events(context.Context, EventsRequest) ([]*Event, error)
+}
+
+// EventAppender appends canonical events with optional revision CAS.
+type EventAppender interface {
+	AppendEvent(context.Context, AppendEventRequest) (*Event, error)
+}
+
+// ControllerBindingStore mutates the durable active-controller binding.
+type ControllerBindingStore interface {
 	BindController(context.Context, BindControllerRequest) (Session, error)
+}
+
+// ParticipantBindingStore mutates durable participant bindings.
+type ParticipantBindingStore interface {
 	PutParticipant(context.Context, PutParticipantRequest) (Session, error)
 	RemoveParticipant(context.Context, RemoveParticipantRequest) (Session, error)
+}
+
+// StateReader exposes recursively isolated durable state snapshots.
+type StateReader interface {
 	SnapshotState(context.Context, SessionRef) (map[string]any, error)
+}
+
+// StateWriter replaces or transactionally updates durable session state.
+type StateWriter interface {
 	ReplaceState(context.Context, SessionRef, map[string]any) error
 	UpdateState(context.Context, SessionRef, func(map[string]any) (map[string]any, error)) error
+}
+
+// StateStore combines durable state reads and writes.
+type StateStore interface {
+	StateReader
+	StateWriter
+}
+
+// Service is the full reference session service. Consumers should accept the
+// narrow interfaces above unless they genuinely need the aggregate.
+type Service interface {
+	Lifecycle
+	Reader
+	EventAppender
+	ControllerBindingStore
+	ParticipantBindingStore
+	StateStore
 }
 
 // ParticipantLifecycleService is implemented by stores that can atomically

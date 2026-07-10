@@ -6,10 +6,10 @@ import (
 	"strings"
 	"time"
 
+	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/jsonvalue"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 )
 
 // Kind identifies one durable task family.
@@ -94,15 +94,15 @@ type CommandStartRequest struct {
 
 // SubagentStartRequest defines one yielded SPAWN launch request.
 type SubagentStartRequest struct {
-	Agent          string                     `json:"agent,omitempty"`
-	Prompt         string                     `json:"prompt,omitempty"`
-	ContextPrelude string                     `json:"context_prelude,omitempty"`
-	ParentCall     string                     `json:"parent_call,omitempty"`
-	ParentTool     string                     `json:"parent_tool,omitempty"`
-	Source         string                     `json:"source,omitempty"`
-	Mode           string                     `json:"mode,omitempty"`
-	ApprovalMode   string                     `json:"approval_mode,omitempty"`
-	Approval       subagent.ApprovalRequester `json:"-"`
+	Agent          string                          `json:"agent,omitempty"`
+	Prompt         string                          `json:"prompt,omitempty"`
+	ContextPrelude string                          `json:"context_prelude,omitempty"`
+	ParentCall     string                          `json:"parent_call,omitempty"`
+	ParentTool     string                          `json:"parent_tool,omitempty"`
+	Source         string                          `json:"source,omitempty"`
+	Mode           string                          `json:"mode,omitempty"`
+	ApprovalMode   string                          `json:"approval_mode,omitempty"`
+	Approval       agent.SubagentApprovalRequester `json:"-"`
 }
 
 // ControlRequest defines one task control request.

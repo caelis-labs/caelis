@@ -9,7 +9,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
+	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
@@ -100,7 +100,60 @@ type Runner interface {
 // SubagentRunner starts delegated child runs from the current invocation.
 // Concrete child-agent configuration is app-owned; runtime only sees the
 // registry name and the resulting child instance ref.
-type SubagentRunner = subagent.Runner
+type SubagentRunner interface {
+	Spawn(context.Context, SubagentSpawnContext, delegation.Request) (delegation.Anchor, delegation.Result, error)
+	Continue(context.Context, delegation.Anchor, delegation.ContinueRequest) (delegation.Result, error)
+	Wait(context.Context, delegation.Anchor, int) (delegation.Result, error)
+	Cancel(context.Context, delegation.Anchor) error
+}
+
+// EndpointApprovalToolCall is one external endpoint tool call asking for
+// approval. Controller and subagent bridges share this value contract.
+type EndpointApprovalToolCall struct {
+	ID       string         `json:"id,omitempty"`
+	Name     string         `json:"name,omitempty"`
+	Kind     string         `json:"kind,omitempty"`
+	Title    string         `json:"title,omitempty"`
+	Status   string         `json:"status,omitempty"`
+	RawInput map[string]any `json:"raw_input,omitempty"`
+}
+
+// SubagentApprovalToolCall preserves the scope-specific name while sharing the
+// endpoint approval tool-call contract.
+type SubagentApprovalToolCall = EndpointApprovalToolCall
+
+// SubagentApprovalRequest is one child permission request bridged into the
+// parent runtime approval surface.
+type SubagentApprovalRequest struct {
+	SessionRef   session.SessionRef       `json:"session_ref,omitempty"`
+	Session      session.Session          `json:"session,omitempty"`
+	TaskID       string                   `json:"task_id,omitempty"`
+	ParentCallID string                   `json:"parent_call_id,omitempty"`
+	Agent        string                   `json:"agent,omitempty"`
+	Mode         string                   `json:"mode,omitempty"`
+	ToolCall     EndpointApprovalToolCall `json:"tool_call,omitempty"`
+	Options      []ApprovalOption         `json:"options,omitempty"`
+}
+
+// SubagentApprovalRequester bridges child permission requests into the parent
+// runtime's approval surface.
+type SubagentApprovalRequester interface {
+	RequestSubagentApproval(context.Context, SubagentApprovalRequest) (ApprovalResponse, error)
+}
+
+// SubagentSpawnContext is the system-controlled parent context inherited by a
+// child endpoint. None of these fields are model-controlled tool arguments.
+type SubagentSpawnContext struct {
+	SessionRef        session.SessionRef        `json:"session_ref,omitempty"`
+	Session           session.Session           `json:"session,omitempty"`
+	CWD               string                    `json:"cwd,omitempty"`
+	TaskID            string                    `json:"task_id,omitempty"`
+	ParentCallID      string                    `json:"parent_call_id,omitempty"`
+	Mode              string                    `json:"mode,omitempty"`
+	ApprovalMode      string                    `json:"approval_mode,omitempty"`
+	ApprovalRequester SubagentApprovalRequester `json:"-"`
+	Streams           stream.Sink               `json:"-"`
+}
 
 // Context exposes immutable invocation state derived from persisted events and
 // runtime overlays.

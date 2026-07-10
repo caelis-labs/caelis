@@ -235,6 +235,13 @@ public surface:
 - Document compatibility, minimum Go version, supported platforms, error
   contracts, event ordering, cancellation, and persistence semantics.
 
+The supported-package allowlist and declaration snapshot now enforce the first
+compatibility boundary. Session lifecycle/read/append/binding/state and sandbox
+execution/filesystem/reporting contracts are independently consumable. Root
+approval and cancellation values are shared by controller and subagent
+bridges, and external-package examples plus adapter compile assertions exercise
+the supported surface without product imports.
+
 The product `runtime/assembly` state keys, profile/mode selection, UI-oriented
 controller status, process discovery, and handoff target selection are examples
 of Control concerns to peel off. Reusable endpoint, controller, participant,
