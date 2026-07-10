@@ -80,19 +80,50 @@ check_sdk_closure() {
 check_sdk_closure "agent-sdk production code" ./agent-sdk/...
 check_sdk_closure "agent-sdk tests" -test ./agent-sdk/...
 
-public_packages=()
+allowlist="agent-sdk/supported-packages.txt"
+if [[ ! -f "${allowlist}" ]]; then
+  echo "sdk-boundary-check: supported package allowlist is missing: ${allowlist}" >&2
+  exit 1
+fi
+
+supported_packages=()
+declare -A supported_seen=()
 while IFS= read -r package; do
+  package="${package%%#*}"
+  package="$(printf '%s' "${package}" | xargs)"
+  if [[ -z "${package}" ]]; then
+    continue
+  fi
   case "${package}" in
-    */internal|*/internal/*)
+    "${SDK_PREFIX}"|"${SDK_PREFIX}"/*)
       ;;
     *)
-      public_packages+=("${package}")
+      echo "sdk-boundary-check: unsupported allowlist entry ${package}" >&2
+      exit 1
       ;;
   esac
-done < <(go list -f '{{.ImportPath}}' ./agent-sdk/...)
+  if [[ -n "${supported_seen[${package}]:-}" ]]; then
+    echo "sdk-boundary-check: duplicate allowlist entry ${package}" >&2
+    exit 1
+  fi
+  resolved="$(go list -f '{{.ImportPath}}' "${package}" 2>/dev/null || true)"
+  if [[ "${resolved}" != "${package}" ]]; then
+    echo "sdk-boundary-check: allowlisted package does not exist: ${package}" >&2
+    exit 1
+  fi
+  supported_seen["${package}"]=1
+  supported_packages+=("${package}")
+done <"${allowlist}"
 
-if ((${#public_packages[@]} == 0)); then
-  echo "sdk-boundary-check: no public agent-sdk packages found" >&2
+if ((${#supported_packages[@]} == 0)); then
+  echo "sdk-boundary-check: no supported agent-sdk packages found" >&2
+  exit 1
+fi
+
+sorted_supported="$(printf '%s\n' "${supported_packages[@]}" | LC_ALL=C sort)"
+listed_supported="$(printf '%s\n' "${supported_packages[@]}")"
+if [[ "${sorted_supported}" != "${listed_supported}" ]]; then
+  echo "sdk-boundary-check: supported package allowlist must be sorted" >&2
   exit 1
 fi
 
@@ -113,7 +144,7 @@ cp "${ROOT}/go.sum" "${consumer_dir}/go.sum"
 
   {
     printf 'package consumer\n\nimport (\n'
-    for package in "${public_packages[@]}"; do
+    for package in "${supported_packages[@]}"; do
       printf '\t_ "%s"\n' "${package}"
     done
     printf ')\n'
@@ -124,4 +155,6 @@ cp "${ROOT}/go.sum" "${consumer_dir}/go.sum"
   check_sdk_closure "external consumer" -test ./...
 )
 
-echo "sdk-boundary-check: passed (${package_count} packages, ${#public_packages[@]} public imports)"
+go run ./scripts/sdk_api_snapshot -check
+
+echo "sdk-boundary-check: passed (${package_count} packages, ${#supported_packages[@]} supported imports)"

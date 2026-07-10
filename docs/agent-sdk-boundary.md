@@ -43,8 +43,9 @@ The package layer is enforced without a nested module:
 - the root `go.mod` is the single dependency graph and release version owner;
 - root build, lint, vet, and test commands cover `agent-sdk/...` exactly once;
 - `make sdk-boundary-check` rejects nested module metadata, checks production
-  and test dependency closure, and compiles public SDK imports from an external
-  consumer of the root module;
+  and test dependency closure, compiles the supported-package allowlist from an
+  external consumer of the root module, and rejects unreviewed supported API
+  declaration changes against `agent-sdk/api.txt`;
 - architecture lint prevents dependencies on product-host and presentation
   packages.
 

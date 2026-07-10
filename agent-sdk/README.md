@@ -72,6 +72,14 @@ and external consumer tests against the root module. Handoff is authorized by
 the host Control layer, never by an LLM-facing tool, and Caelis does not provide
 a deterministic workflow engine.
 
+Only the exact import paths in
+[`supported-packages.txt`](supported-packages.txt) are supported SDK API. Other
+non-`internal` packages are bundled Caelis implementations or experimental
+helpers and carry no pre-v1 source-compatibility promise. The generated
+[`api.txt`](api.txt) records exported declarations for supported packages;
+`make sdk-boundary-check` fails on an unreviewed API change and compiles the
+allowlist from a separate consumer module.
+
 ## Development
 
 From the Caelis repository root:
@@ -80,6 +88,12 @@ From the Caelis repository root:
 go test ./agent-sdk/...
 make sdk-boundary-check
 make arch-lint
+```
+
+After intentionally reviewing a supported API change, refresh its manifest:
+
+```bash
+go run ./scripts/sdk_api_snapshot -write
 ```
 
 `make commit-check` runs the package-boundary checks together with root-module
