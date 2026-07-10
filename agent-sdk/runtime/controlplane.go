@@ -11,13 +11,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
-func (r *Runtime) Controllers() controller.Backend {
-	if r == nil {
-		return nil
-	}
-	return r.controllers
-}
-
 func (r *Runtime) ensureSessionController(ctx context.Context, activeSession session.Session) (session.Session, error) {
 	if r == nil || r.sessions == nil {
 		return session.Session{}, fmt.Errorf("agent-sdk/runtime: session service is unavailable")
@@ -140,40 +133,33 @@ func (r *Runtime) executeACPControllerTurn(
 		Mode:              r.policyMode(req.AgentSpec),
 		ApprovalRequester: controllerApprovalRequester{requester: req.ApprovalRequester, sessionRef: ref, session: activeSession, runID: runID, turnID: turnID},
 	}
-	if contextPrelude, contextSeq := r.buildControllerTurnContext(ctx, activeSession, ref, turnID); contextSeq > activeSession.Controller.ContextSyncSeq {
+	contextPrelude, contextSeq, err := r.buildControllerTurnContext(ctx, activeSession, ref, turnID)
+	if err != nil {
+		r.setRunState(ref.SessionID, agent.RunState{Status: agent.RunLifecycleStatusFailed, ActiveRunID: runID, LastError: err.Error(), UpdatedAt: r.now()})
+		handle.publishError(err)
+		return
+	}
+	if contextSeq > activeSession.Controller.ContextSyncSeq {
 		turnReq.ContextPrelude = contextPrelude
 		turnReq.ContextSyncSeq = contextSeq
 	}
 	turnResult, err := r.controllers.RunTurn(ctx, turnReq)
 	if err != nil && isMissingACPControllerRun(err) {
-		agent := firstNonEmpty(strings.TrimSpace(activeSession.Controller.AgentName), strings.TrimSpace(activeSession.Controller.ControllerID), strings.TrimSpace(activeSession.Controller.Label))
-		contextPrelude, contextSeq := r.buildControllerHandoffContext(ctx, activeSession, ref, activeSession.Controller, activeSession.Controller.ContextSyncSeq, turnID)
-		binding, activateErr := r.controllers.Activate(ctx, controller.HandoffRequest{
-			SessionRef:     ref,
-			Session:        activeSession,
-			Agent:          agent,
-			Source:         "controller_rehydrate",
-			Reason:         "controller process rehydrate",
-			ContextPrelude: contextPrelude,
-			ContextSyncSeq: contextSeq,
-		})
-		if activateErr == nil {
-			var bindErr error
-			activeSession, bindErr = r.sessions.BindController(ctx, session.BindControllerRequest{SessionRef: ref, Binding: binding})
-			if bindErr == nil {
-				turnReq.Session = activeSession
-				if binding.ContextSyncSeq < contextSeq {
-					turnReq.ContextPrelude, turnReq.ContextSyncSeq = r.buildControllerHandoffContext(ctx, activeSession, ref, binding, binding.ContextSyncSeq, turnID)
-				} else {
-					turnReq.ContextPrelude = ""
-					turnReq.ContextSyncSeq = 0
-				}
-				turnResult, err = r.controllers.RunTurn(ctx, turnReq)
-			} else {
-				err = bindErr
-			}
+		if r.controllerRecovery == nil {
+			err = fmt.Errorf("agent-sdk/runtime: controller recovery coordinator is unavailable")
 		} else {
-			err = activateErr
+			activeSession, err = r.controllerRecovery.ReattachController(ctx, controller.RecoveryRequest{
+				SessionRef:    ref,
+				Session:       activeSession,
+				ExcludeTurnID: turnID,
+			})
+			if err == nil {
+				turnReq.Session = activeSession
+				turnReq.ContextPrelude, turnReq.ContextSyncSeq, err = r.buildControllerTurnContext(ctx, activeSession, ref, turnID)
+				if err == nil {
+					turnResult, err = r.controllers.RunTurn(ctx, turnReq)
+				}
+			}
 		}
 	}
 	if err != nil {

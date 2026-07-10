@@ -74,6 +74,7 @@ func TestStartParticipantTransientDetachesWhenRuntimeReturnsNoHandle(t *testing.
 	gw, err := New(Config{
 		Sessions: staticSessionService{session: activeSession},
 		Runtime:  rt,
+		Control:  rt,
 		Resolver: staticResolver{},
 	})
 	if err != nil {
@@ -138,6 +139,7 @@ func TestStartParticipantTransientPublishesDetachFailure(t *testing.T) {
 	gw, err := New(Config{
 		Sessions: staticSessionService{session: activeSession},
 		Runtime:  rt,
+		Control:  rt,
 		Resolver: staticResolver{},
 	})
 	if err != nil {
@@ -210,6 +212,7 @@ func TestStartParticipantTransientRollsBackWhenParticipantIDResolutionFails(t *t
 	gw, err := New(Config{
 		Sessions: staticSessionService{session: activeSession},
 		Runtime:  rt,
+		Control:  rt,
 		Resolver: staticResolver{},
 	})
 	if err != nil {
@@ -265,6 +268,7 @@ func TestStartParticipantTransientDetachesWhenRuntimePromptErrors(t *testing.T) 
 	gw, err := New(Config{
 		Sessions: staticSessionService{session: activeSession},
 		Runtime:  rt,
+		Control:  rt,
 		Resolver: staticResolver{},
 	})
 	if err != nil {

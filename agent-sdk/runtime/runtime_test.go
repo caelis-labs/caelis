@@ -35,6 +35,31 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/commanddiag"
 )
 
+func TestRuntimeRequiresControlContextRouterForExternalEndpoints(t *testing.T) {
+	t.Parallel()
+
+	sessions, _ := newTestSessionService(t, "context-router-required")
+	_, err := New(Config{
+		Sessions:                 sessions,
+		AgentFactory:             chat.Factory{},
+		Controllers:              stubACPController{},
+		ControllerEventForwarder: testControllerForwarder{sessions: sessions},
+	})
+	if err == nil || !strings.Contains(err.Error(), "controller context router is required") {
+		t.Fatalf("New() error = %v, want missing Control context router", err)
+	}
+	_, err = New(Config{
+		Sessions:                 sessions,
+		AgentFactory:             chat.Factory{},
+		Controllers:              stubACPController{},
+		ControllerContextRouter:  testContextRouter{sessions: sessions},
+		ControllerEventForwarder: testControllerForwarder{sessions: sessions},
+	})
+	if err == nil || !strings.Contains(err.Error(), "controller recovery coordinator is required") {
+		t.Fatalf("New() error = %v, want missing Control recovery coordinator", err)
+	}
+}
+
 func TestRuntimeRunPersistsMinimalChatTurn(t *testing.T) {
 	t.Parallel()
 
@@ -1569,137 +1594,6 @@ func TestRuntimeACPControllerInterruptedTurnDoesNotPersistLocalReplaySnapshot(t 
 	if got, want := len(loaded.Events), 1; got != want {
 		t.Fatalf("len(loaded.Events) = %d, want only the user prompt", got)
 	}
-}
-
-func TestBuildControllerHandoffContextUsesSharedDialogueOnly(t *testing.T) {
-	t.Parallel()
-
-	sessions, activeSession := newTestSessionService(t, "sess-handoff-shared-ledger")
-	runtime, err := New(Config{
-		Sessions:     sessions,
-		AgentFactory: chat.Factory{SystemPrompt: "Be terse."},
-	})
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	activeSession, err = sessions.PutParticipant(context.Background(), session.PutParticipantRequest{
-		SessionRef: activeSession.SessionRef,
-		Binding: session.ParticipantBinding{
-			ID:           "participant-1",
-			Kind:         session.ParticipantKindSubagent,
-			Role:         session.ParticipantRoleDelegated,
-			Label:        "@ella",
-			AgentName:    "codex",
-			DelegationID: "task-1",
-		},
-	})
-	if err != nil {
-		t.Fatalf("PutParticipant() error = %v", err)
-	}
-	toolMessage := model.Message{
-		Role: model.RoleTool,
-		Parts: []model.Part{model.NewToolResultJSONPart("call-1", "RUN_COMMAND", map[string]any{
-			"result": "tool output",
-		}, false)},
-	}
-	childEvent := assistantEvent("child answer")
-	childEvent.Actor = session.ActorRef{Kind: session.ActorKindParticipant, Name: "ella"}
-	childEvent.Scope = &session.EventScope{Participant: session.ParticipantRef{ID: "participant-1", Kind: session.ParticipantKindSubagent}}
-	events := []*session.Event{
-		userTextEvent("user prompt"),
-		{
-			Type:       session.EventTypeToolResult,
-			Visibility: session.VisibilityCanonical,
-			Text:       "tool output",
-			Message:    &toolMessage,
-			Tool: &session.EventTool{
-				ID:     "call-1",
-				Name:   "RUN_COMMAND",
-				Output: map[string]any{"result": "tool output"},
-			},
-		},
-		childEvent,
-		session.MarkUIOnly(&session.Event{Type: session.EventTypeAssistant, Text: "live chunk"}),
-	}
-	for _, event := range events {
-		if _, err := sessions.AppendEvent(context.Background(), session.AppendEventRequest{SessionRef: activeSession.SessionRef, Event: event}); err != nil {
-			t.Fatalf("AppendEvent() error = %v", err)
-		}
-	}
-
-	text, seq := runtime.buildControllerHandoffContext(context.Background(), activeSession, activeSession.SessionRef, session.ControllerBinding{
-		Kind:           session.ControllerKindACP,
-		Label:          "old",
-		ContextSyncSeq: 4,
-	}, 0, "")
-	if seq != 3 {
-		t.Fatalf("context seq = %d, want latest shared event checkpoint 3", seq)
-	}
-	for _, want := range []string{"shared_ledger_checkpoint: 3", "shared_dialogue_delta:", "[1] user:\nuser prompt", "[3] assistant(ella):\nchild answer", "- @ella agent=codex"} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("handoff context missing %q:\n%s", want, text)
-		}
-	}
-	for _, forbidden := range []string{"canonical_tail", "tool output", "live chunk", "task-1"} {
-		if strings.Contains(text, forbidden) {
-			t.Fatalf("handoff context should not contain %q:\n%s", forbidden, text)
-		}
-	}
-}
-
-func TestSharedDialogueDeltaUsesCheckpointAndCompactBoundary(t *testing.T) {
-	t.Parallel()
-
-	compactMessage := model.NewTextMessage(model.RoleUser, "CONTEXT CHECKPOINT\nObjective: compacted baseline")
-	events := []*session.Event{
-		userTextEvent("old user"),
-		assistantEvent("old assistant"),
-		{
-			Type:       session.EventTypeCompact,
-			Visibility: session.VisibilityCanonical,
-			Message:    &compactMessage,
-			Text:       compactMessage.TextContent(),
-		},
-		userTextEvent("fresh user"),
-		assistantEvent("fresh assistant"),
-	}
-
-	first := sharedDialogueDeltaFromEvents(events, 0)
-	if first.Checkpoint != 5 {
-		t.Fatalf("checkpoint = %d, want 5", first.Checkpoint)
-	}
-	rendered := renderSharedDialogueDeltaForTest(first)
-	for _, want := range []string{
-		"[3] compact:\nCONTEXT CHECKPOINT\nObjective: compacted baseline",
-		"[4] user:\nfresh user",
-		"[5] assistant:\nfresh assistant",
-	} {
-		if !strings.Contains(rendered, want) {
-			t.Fatalf("delta missing %q:\n%s", want, rendered)
-		}
-	}
-	for _, forbidden := range []string{"old user", "old assistant"} {
-		if strings.Contains(rendered, forbidden) {
-			t.Fatalf("delta should not replay pre-compact %q:\n%s", forbidden, rendered)
-		}
-	}
-
-	empty := sharedDialogueDeltaFromEvents(events, first.Checkpoint)
-	if len(empty.Entries) != 0 || empty.Checkpoint != first.Checkpoint {
-		t.Fatalf("empty delta = %+v, want no repeated entries at checkpoint %d", empty, first.Checkpoint)
-	}
-
-	next := sharedDialogueDeltaFromEvents(append(events, userTextEvent("next user")), first.Checkpoint)
-	rendered = renderSharedDialogueDeltaForTest(next)
-	if strings.Contains(rendered, "fresh user") || strings.Contains(rendered, "fresh assistant") || !strings.Contains(rendered, "[6] user:\nnext user") {
-		t.Fatalf("incremental delta should include only new event:\n%s", rendered)
-	}
-}
-
-func renderSharedDialogueDeltaForTest(delta sharedDialogueDelta) string {
-	var b strings.Builder
-	appendSharedDialogueDelta(&b, delta)
-	return b.String()
 }
 
 func TestRuntimeRunReplaysPersistedHistoryFromFileStore(t *testing.T) {

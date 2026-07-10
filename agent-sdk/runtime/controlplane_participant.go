@@ -142,7 +142,10 @@ func (r *Runtime) PromptParticipant(ctx context.Context, req agent.PromptPartici
 	if err != nil {
 		return agent.RunResult{}, err
 	}
-	contextPrelude := r.buildParticipantPromptContext(ctx, activeSession, ref, binding)
+	contextPrelude, _, err := r.buildParticipantPromptContext(ctx, activeSession, ref, binding)
+	if err != nil {
+		return agent.RunResult{}, err
+	}
 	turnID := r.nextID("participant-turn", nil)
 	runID := r.nextID("participant-run", nil)
 	runCtx, cancel := context.WithCancel(ctx)

@@ -18,6 +18,7 @@ import (
 	acpassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
 	"github.com/caelis-labs/caelis/internal/acpbridge"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
+	"github.com/caelis-labs/caelis/internal/controlplane"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/internal/sandboxrouter"
 	"github.com/caelis-labs/caelis/ports/plugin"
@@ -223,12 +224,18 @@ func (s *Stack) buildGatewayRuntime(plan gatewayBuildPlan) (*gatewayRuntimeBundl
 	estimatedPrefixTokens := estimateModelPromptPrefixTokens(effectiveBaseMetadata, tools)
 	compactionCfg := defaultCompactionConfig(runtimeCfg.ContextWindow)
 	compactionCfg.EstimatedPromptPrefixTokens = estimatedPrefixTokens
+	contextRouter, err := controlplane.NewContextRouter(s.Sessions)
+	if err != nil {
+		bundle.Close()
+		return nil, err
+	}
 	localCfg := runtime.Config{
 		Sessions:                 s.Sessions,
 		AgentFactory:             chat.Factory{},
 		DefaultPolicyMode:        effectivePolicyProfile,
 		DefaultApprovalMode:      string(kernelimpl.NormalizeApprovalMode(runtimeCfg.ApprovalMode)),
 		Compaction:               compactionCfg,
+		ControllerContextRouter:  contextRouter,
 		ControllerEventForwarder: acpbridge.NewControllerForwarder(s.Sessions),
 		TaskStore:                s.taskStore,
 	}
@@ -238,6 +245,16 @@ func (s *Stack) buildGatewayRuntime(plan gatewayBuildPlan) (*gatewayRuntimeBundl
 		bundle.Close()
 		return nil, err
 	}
+	controlCoordinator, err := controlplane.NewCoordinator(controlplane.CoordinatorConfig{
+		Sessions:    s.Sessions,
+		Controllers: localCfg.Controllers,
+		Context:     contextRouter,
+	})
+	if err != nil {
+		bundle.Close()
+		return nil, err
+	}
+	localCfg.ControllerRecovery = controlCoordinator
 	rt, err := runtime.New(localCfg)
 	if err != nil {
 		bundle.Close()
@@ -245,6 +262,11 @@ func (s *Stack) buildGatewayRuntime(plan gatewayBuildPlan) (*gatewayRuntimeBundl
 	}
 	bundle.Engine = rt
 	bundle.ACPControlPlane = acpControlPlane
+	sessionControl, err := controlplane.NewSessionControl(controlCoordinator, rt)
+	if err != nil {
+		bundle.Close()
+		return nil, err
+	}
 	resolver, err := kernelimpl.NewAssemblyResolver(kernelimpl.AssemblyResolverConfig{
 		Sessions:          s.Sessions,
 		Assembly:          runtimeCfg.Assembly,
@@ -288,6 +310,7 @@ func (s *Stack) buildGatewayRuntime(plan gatewayBuildPlan) (*gatewayRuntimeBundl
 		Sessions:             s.Sessions,
 		Tasks:                s.taskStore,
 		Runtime:              rt,
+		Control:              sessionControl,
 		Resolver:             resolver,
 		DefaultApprovalMode:  kernelimpl.NormalizeApprovalMode(runtimeCfg.ApprovalMode),
 		ApprovalApprover:     approval.ReviewerAdapter{Reviewer: approvalReviewer},

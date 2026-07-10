@@ -33,6 +33,8 @@ type Config struct {
 	DefaultPolicyMode        string
 	DefaultApprovalMode      string
 	Controllers              controller.Backend
+	ControllerContextRouter  controller.ContextRouter
+	ControllerRecovery       controller.RecoveryCoordinator
 	ControllerEventForwarder agent.ControllerEventForwarder
 	TaskStore                task.Store
 	Subagents                subagent.Runner
@@ -50,6 +52,8 @@ type Runtime struct {
 	defaultPolicyMode        string
 	defaultApprovalMode      approval.Mode
 	controllers              controller.Backend
+	controllerContextRouter  controller.ContextRouter
+	controllerRecovery       controller.RecoveryCoordinator
 	controllerEventForwarder agent.ControllerEventForwarder
 	subagents                subagent.Runner
 	idCounter                atomic.Uint64
@@ -80,6 +84,8 @@ func New(cfg Config) (*Runtime, error) {
 		defaultPolicyMode:        strings.TrimSpace(cfg.DefaultPolicyMode),
 		defaultApprovalMode:      approval.NormalizeMode(cfg.DefaultApprovalMode),
 		controllers:              cfg.Controllers,
+		controllerContextRouter:  cfg.ControllerContextRouter,
+		controllerRecovery:       cfg.ControllerRecovery,
 		controllerEventForwarder: cfg.ControllerEventForwarder,
 		subagents:                cfg.Subagents,
 		runStates:                map[string]agent.RunState{},
@@ -120,11 +126,14 @@ func (r *Runtime) currentApprovalMode(state map[string]any) approval.Mode {
 }
 
 func validateControllerForwarder(cfg Config) error {
-	if !requiresControllerForwarder(cfg) {
-		return nil
-	}
-	if cfg.ControllerEventForwarder == nil {
+	if requiresControllerForwarder(cfg) && cfg.ControllerEventForwarder == nil {
 		return errors.New("agent-sdk/runtime: controller event forwarder is required when ACP controllers are configured")
+	}
+	if (cfg.Controllers != nil || cfg.Subagents != nil) && cfg.ControllerContextRouter == nil {
+		return errors.New("agent-sdk/runtime: controller context router is required when controller or subagent endpoints are configured")
+	}
+	if cfg.Controllers != nil && cfg.ControllerRecovery == nil {
+		return errors.New("agent-sdk/runtime: controller recovery coordinator is required when ACP controllers are configured")
 	}
 	return nil
 }

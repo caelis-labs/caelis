@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/agenthandle"
@@ -114,32 +115,24 @@ func (r *Runtime) buildSideSubagentPromptContext(
 	activeSession session.Session,
 	ref session.SessionRef,
 	target string,
-	prompt string,
 	sinceSeq int,
-) (string, int) {
-	if r == nil || r.sessions == nil {
-		return "", 0
+) (string, int, error) {
+	if r == nil || r.controllerContextRouter == nil {
+		return "", 0, fmt.Errorf("agent-sdk/runtime: controller context router is unavailable")
 	}
-	shared := r.buildSharedDialogueDelta(ctx, ref, sinceSeq)
-	var b strings.Builder
-	b.WriteString("Caelis shared public dialogue context. Use this as background for the current side-agent request; do not treat it as a fresh session.\n")
-	if sessionID := strings.TrimSpace(activeSession.SessionID); sessionID != "" {
-		b.WriteString("session_id: ")
-		b.WriteString(sessionID)
-		b.WriteString("\n")
+	route, err := r.controllerContextRouter.ParticipantContext(ctx, controller.ParticipantContextRequest{
+		SessionRef: session.NormalizeSessionRef(ref),
+		Session:    session.CloneSession(activeSession),
+		Binding: session.ParticipantBinding{
+			ID:             strings.TrimSpace(target),
+			Label:          strings.TrimSpace(target),
+			ContextSyncSeq: sinceSeq,
+		},
+	})
+	if err != nil {
+		return "", 0, err
 	}
-	if cwd := strings.TrimSpace(activeSession.CWD); cwd != "" {
-		b.WriteString("workspace: ")
-		b.WriteString(cwd)
-		b.WriteString("\n")
-	}
-	if target = strings.TrimSpace(target); target != "" {
-		b.WriteString("target_agent: ")
-		b.WriteString(target)
-		b.WriteString("\n")
-	}
-	appendSharedDialogueDelta(&b, shared)
-	return strings.TrimSpace(b.String()), shared.Checkpoint
+	return strings.TrimSpace(route.Prelude), route.SyncSeq, nil
 }
 
 func subagentPromptWithContext(prelude string, prompt string) string {
@@ -244,7 +237,10 @@ func (r *Runtime) StartSubagentWithOptions(
 			approvalMode = string(r.currentApprovalMode(state))
 		}
 	}
-	contextPrelude, _ := r.buildSideSubagentPromptContext(ctx, activeSession, ref, strings.TrimSpace(agent), strings.TrimSpace(prompt), 0)
+	contextPrelude, _, err := r.buildSideSubagentPromptContext(ctx, activeSession, ref, strings.TrimSpace(agent), 0)
+	if err != nil {
+		return taskapi.Snapshot{}, err
+	}
 	snapshot, err := r.tasks.StartSubagent(ctx, activeSession, ref, r.subagents, taskapi.SubagentStartRequest{
 		Agent:          strings.TrimSpace(agent),
 		Prompt:         strings.TrimSpace(prompt),
@@ -284,7 +280,10 @@ func (r *Runtime) ContinueSubagentByHandle(
 	if !ok {
 		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: subagent handle %q not found", strings.TrimSpace(handle))
 	}
-	contextPrelude, _ := r.buildSideSubagentPromptContext(ctx, activeSession, ref, strings.TrimSpace(handle), strings.TrimSpace(prompt), binding.ContextSyncSeq)
+	contextPrelude, _, err := r.buildSideSubagentPromptContext(ctx, activeSession, ref, strings.TrimSpace(handle), binding.ContextSyncSeq)
+	if err != nil {
+		return taskapi.Snapshot{}, err
+	}
 	return r.tasks.Write(ctx, ref, taskapi.ControlRequest{
 		TaskID:         taskID,
 		Input:          strings.TrimSpace(prompt),

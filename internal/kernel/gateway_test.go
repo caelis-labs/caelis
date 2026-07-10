@@ -5,6 +5,7 @@ import (
 	"errors"
 	"iter"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -449,6 +450,7 @@ func TestPromptParticipantCancelCancelsRuntimeRunner(t *testing.T) {
 	gw, err := New(Config{
 		Sessions: svc,
 		Runtime:  rt,
+		Control:  rt,
 		Resolver: staticResolver{resolved: ResolvedTurn{}},
 	})
 	if err != nil {
@@ -498,6 +500,7 @@ func TestPromptParticipantProjectsSubmissionReferencesBeforeRuntime(t *testing.T
 	gw, err := New(Config{
 		Sessions: staticSessionService{session: activeSession},
 		Runtime:  rt,
+		Control:  rt,
 		Resolver: staticResolver{resolved: ResolvedTurn{}},
 		SubmissionReferences: SubmissionReferenceProjectorFunc(func(_ context.Context, req SubmissionReferenceProjectionRequest) (SubmissionReferenceProjection, error) {
 			if req.Session.CWD != "/workspace" {
@@ -537,7 +540,7 @@ func TestPromptParticipantProjectsSubmissionReferencesBeforeRuntime(t *testing.T
 	}
 }
 
-func TestHandoffControllerDelegatesToRuntimeControlPlaneAndUpdatesBinding(t *testing.T) {
+func TestHandoffControllerDelegatesToInjectedControlAndUpdatesBinding(t *testing.T) {
 	t.Parallel()
 
 	activeSession := session.Session{
@@ -586,6 +589,7 @@ func TestHandoffControllerDelegatesToRuntimeControlPlaneAndUpdatesBinding(t *tes
 	gw, err := New(Config{
 		Sessions: svc,
 		Runtime:  rt,
+		Control:  rt,
 		Resolver: staticResolver{},
 	})
 	if err != nil {
@@ -663,7 +667,7 @@ func TestHandoffControllerRejectsMissingControlPlane(t *testing.T) {
 	}
 }
 
-func TestAttachParticipantDelegatesToRuntimeControlPlaneAndUpdatesBinding(t *testing.T) {
+func TestAttachParticipantDelegatesToInjectedControlAndUpdatesBinding(t *testing.T) {
 	t.Parallel()
 
 	activeSession := session.Session{
@@ -684,6 +688,7 @@ func TestAttachParticipantDelegatesToRuntimeControlPlaneAndUpdatesBinding(t *tes
 	gw, err := New(Config{
 		Sessions: staticSessionService{session: activeSession},
 		Runtime:  rt,
+		Control:  rt,
 		Resolver: staticResolver{},
 	})
 	if err != nil {
@@ -718,7 +723,7 @@ func TestAttachParticipantDelegatesToRuntimeControlPlaneAndUpdatesBinding(t *tes
 	}
 }
 
-func TestDetachParticipantDelegatesToRuntimeControlPlaneAndUpdatesBinding(t *testing.T) {
+func TestDetachParticipantDelegatesToInjectedControlAndUpdatesBinding(t *testing.T) {
 	t.Parallel()
 
 	activeSession := session.Session{
@@ -733,6 +738,7 @@ func TestDetachParticipantDelegatesToRuntimeControlPlaneAndUpdatesBinding(t *tes
 	gw, err := New(Config{
 		Sessions: staticSessionService{session: activeSession},
 		Runtime:  rt,
+		Control:  rt,
 		Resolver: staticResolver{},
 	})
 	if err != nil {
@@ -1208,7 +1214,7 @@ func TestGatewaySubmitActiveTurnForwardsConversationToRunner(t *testing.T) {
 		t.Fatalf("SubmitActiveTurn() error = %v", err)
 	}
 	deadline := time.After(2 * time.Second)
-	for len(runner.submissions) == 0 {
+	for len(runner.snapshot()) == 0 {
 		select {
 		case <-deadline:
 			t.Fatal("timed out waiting for active submission to reach runner")
@@ -1216,13 +1222,14 @@ func TestGatewaySubmitActiveTurnForwardsConversationToRunner(t *testing.T) {
 			time.Sleep(10 * time.Millisecond)
 		}
 	}
-	if got, want := len(runner.submissions), 1; got != want {
+	submissions := runner.snapshot()
+	if got, want := len(submissions), 1; got != want {
 		t.Fatalf("len(submissions) = %d, want %d", got, want)
 	}
-	if got := runner.submissions[0].Text; got != "steer next step" {
+	if got := submissions[0].Text; got != "steer next step" {
 		t.Fatalf("submission text = %q, want steer text", got)
 	}
-	if got := runner.submissions[0].Metadata["source"]; got != "test" {
+	if got := submissions[0].Metadata["source"]; got != "test" {
 		t.Fatalf("submission metadata[source] = %#v, want test", got)
 	}
 
@@ -1999,6 +2006,7 @@ func TestPromptParticipantUpdatesBindingReplayState(t *testing.T) {
 	gw, err := New(Config{
 		Sessions: staticSessionService{session: activeSession},
 		Runtime:  rt,
+		Control:  rt,
 		Resolver: staticResolver{},
 	})
 	if err != nil {
@@ -2778,6 +2786,7 @@ func (blockingRunner) Close() error { return nil }
 
 type submitRecordingBlockingRunner struct {
 	release     chan struct{}
+	mu          sync.Mutex
 	submissions []agent.Submission
 }
 
@@ -2790,8 +2799,20 @@ func (r *submitRecordingBlockingRunner) Events() iter.Seq2[*session.Event, error
 }
 
 func (r *submitRecordingBlockingRunner) Submit(sub agent.Submission) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.submissions = append(r.submissions, agent.CloneSubmission(sub))
 	return nil
+}
+
+func (r *submitRecordingBlockingRunner) snapshot() []agent.Submission {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]agent.Submission, 0, len(r.submissions))
+	for _, submission := range r.submissions {
+		out = append(out, agent.CloneSubmission(submission))
+	}
+	return out
 }
 
 func (r *submitRecordingBlockingRunner) Cancel() agent.CancelResult {

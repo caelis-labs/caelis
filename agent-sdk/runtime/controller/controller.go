@@ -82,6 +82,54 @@ type HandoffRequest struct {
 	ContextSyncSeq int                `json:"context_sync_seq,omitempty"`
 }
 
+// ContextRoute is one Control-selected context synchronization payload for an
+// endpoint turn or activation.
+type ContextRoute struct {
+	Prelude string `json:"prelude,omitempty"`
+	SyncSeq int    `json:"sync_seq,omitempty"`
+}
+
+// ControllerContextRequest asks Control to select the canonical context that
+// one controller endpoint should receive. Runtime executes the returned route
+// but does not decide context-routing policy.
+type ControllerContextRequest struct {
+	SessionRef    session.SessionRef        `json:"session_ref,omitempty"`
+	Session       session.Session           `json:"session,omitempty"`
+	Controller    session.ControllerBinding `json:"controller,omitempty"`
+	SinceSeq      int                       `json:"since_seq,omitempty"`
+	ExcludeTurnID string                    `json:"exclude_turn_id,omitempty"`
+}
+
+// ParticipantContextRequest asks Control to select canonical background
+// context for one attached participant prompt.
+type ParticipantContextRequest struct {
+	SessionRef session.SessionRef         `json:"session_ref,omitempty"`
+	Session    session.Session            `json:"session,omitempty"`
+	Binding    session.ParticipantBinding `json:"binding,omitempty"`
+}
+
+// ContextRouter owns endpoint context-routing policy. Implementations belong
+// to the host Control layer; Runtime only consumes their neutral routes.
+type ContextRouter interface {
+	ControllerContext(context.Context, ControllerContextRequest) (ContextRoute, error)
+	ParticipantContext(context.Context, ParticipantContextRequest) (ContextRoute, error)
+	Checkpoint(context.Context, session.SessionRef, string) (int, error)
+}
+
+// RecoveryRequest identifies one persisted controller binding whose endpoint
+// process must be reattached before Runtime retries a turn.
+type RecoveryRequest struct {
+	SessionRef    session.SessionRef `json:"session_ref,omitempty"`
+	Session       session.Session    `json:"session,omitempty"`
+	ExcludeTurnID string             `json:"exclude_turn_id,omitempty"`
+}
+
+// RecoveryCoordinator owns endpoint process reattachment and any resulting
+// durable binding refresh. Implementations belong to host Control.
+type RecoveryCoordinator interface {
+	ReattachController(context.Context, RecoveryRequest) (session.Session, error)
+}
+
 // TurnRequest runs one turn through the active ACP controller.
 type TurnRequest struct {
 	SessionRef        session.SessionRef  `json:"session_ref,omitempty"`

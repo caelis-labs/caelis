@@ -1259,11 +1259,11 @@ func newSubagentTaskTestRuntime(t *testing.T, runner subagent.Runner) (*Runtime,
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
 	}
-	runtime, err := New(Config{
+	runtime, err := New(testConfigWithACPForwarder(Config{
 		Sessions:     sessions,
 		AgentFactory: chat.Factory{},
 		Subagents:    runner,
-	})
+	}))
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}

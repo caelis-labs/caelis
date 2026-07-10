@@ -27,6 +27,7 @@ import (
 	bridgeassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
 	"github.com/caelis-labs/caelis/internal/acpbridge"
 	assemblyapi "github.com/caelis-labs/caelis/internal/controlassembly"
+	"github.com/caelis-labs/caelis/internal/controlplane"
 	"github.com/caelis-labs/caelis/protocol/acp"
 )
 
@@ -50,10 +51,15 @@ func main() {
 		AppName:  "caelis",
 		UserID:   "acp",
 	})
+	contextRouter, err := controlplane.NewContextRouter(sessions)
+	if err != nil {
+		log.Fatal(err)
+	}
 	localCfg := runtime.Config{
 		Sessions:                 sessions,
 		TaskStore:                sessionfile.NewTaskStore(sessionStore),
 		ControllerEventForwarder: acpbridge.NewControllerForwarder(sessions),
+		ControllerContextRouter:  contextRouter,
 		AgentFactory: chat.Factory{
 			SystemPrompt: strings.TrimSpace(os.Getenv("SDK_ACP_SYSTEM_PROMPT")),
 		},
@@ -68,6 +74,13 @@ func main() {
 		localCfg.Controllers = controlPlane.Controllers
 		localCfg.Subagents = controlPlane.Subagents
 	}
+	controlCoordinator, err := controlplane.NewCoordinator(controlplane.CoordinatorConfig{
+		Sessions: sessions, Controllers: localCfg.Controllers, Context: contextRouter,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	localCfg.ControllerRecovery = controlCoordinator
 	rt, err := runtime.New(localCfg)
 	if err != nil {
 		log.Fatal(err)

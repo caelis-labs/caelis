@@ -412,7 +412,103 @@ func testConfigWithACPForwarder(cfg Config) Config {
 	if cfg.ControllerEventForwarder == nil && requiresControllerForwarder(cfg) {
 		cfg.ControllerEventForwarder = testControllerForwarder{sessions: cfg.Sessions}
 	}
+	if cfg.ControllerContextRouter == nil && (cfg.Controllers != nil || cfg.Subagents != nil) {
+		cfg.ControllerContextRouter = testContextRouter{sessions: cfg.Sessions}
+	}
+	if cfg.ControllerRecovery == nil && cfg.Controllers != nil {
+		cfg.ControllerRecovery = testRecoveryCoordinator{}
+	}
 	return cfg
+}
+
+type testRecoveryCoordinator struct{}
+
+func (testRecoveryCoordinator) ReattachController(_ context.Context, req controller.RecoveryRequest) (session.Session, error) {
+	return session.CloneSession(req.Session), nil
+}
+
+type testContextRouter struct {
+	sessions session.Service
+}
+
+func (r testContextRouter) ControllerContext(ctx context.Context, req controller.ControllerContextRequest) (controller.ContextRoute, error) {
+	entries, checkpoint, err := r.entries(ctx, req.SessionRef, req.SinceSeq, req.ExcludeTurnID)
+	if err != nil {
+		return controller.ContextRoute{}, err
+	}
+	var b strings.Builder
+	b.WriteString("test controller context\nshared_dialogue_delta:")
+	appendTestContextEntries(&b, entries)
+	return controller.ContextRoute{Prelude: b.String(), SyncSeq: checkpoint}, nil
+}
+
+func (r testContextRouter) ParticipantContext(ctx context.Context, req controller.ParticipantContextRequest) (controller.ContextRoute, error) {
+	entries, checkpoint, err := r.entries(ctx, req.SessionRef, req.Binding.ContextSyncSeq, "")
+	if err != nil {
+		return controller.ContextRoute{}, err
+	}
+	var b strings.Builder
+	b.WriteString("test participant context\nshared_dialogue_delta:")
+	appendTestContextEntries(&b, entries)
+	return controller.ContextRoute{Prelude: b.String(), SyncSeq: checkpoint}, nil
+}
+
+func (r testContextRouter) Checkpoint(ctx context.Context, ref session.SessionRef, excludeTurnID string) (int, error) {
+	_, checkpoint, err := r.entries(ctx, ref, 0, excludeTurnID)
+	return checkpoint, err
+}
+
+type testContextEntry struct {
+	seq  int
+	role string
+	text string
+}
+
+func (r testContextRouter) entries(ctx context.Context, ref session.SessionRef, sinceSeq int, excludeTurnID string) ([]testContextEntry, int, error) {
+	events, err := r.sessions.Events(ctx, session.EventsRequest{SessionRef: session.NormalizeSessionRef(ref)})
+	if err != nil {
+		return nil, 0, err
+	}
+	var entries []testContextEntry
+	checkpoint := 0
+	for i, event := range events {
+		if event == nil || !session.IsCanonicalHistoryEvent(event) {
+			continue
+		}
+		if excludeTurnID != "" && event.Scope != nil && strings.TrimSpace(event.Scope.TurnID) == strings.TrimSpace(excludeTurnID) {
+			continue
+		}
+		typeOf := session.EventTypeOf(event)
+		if typeOf != session.EventTypeUser && typeOf != session.EventTypeAssistant && typeOf != session.EventTypeCompact {
+			continue
+		}
+		seq := i + 1
+		if event.Seq > 0 {
+			seq = int(event.Seq)
+		}
+		if seq > checkpoint {
+			checkpoint = seq
+		}
+		if seq <= sinceSeq {
+			continue
+		}
+		role := strings.TrimSpace(string(typeOf))
+		if actor := strings.TrimSpace(event.Actor.Name); actor != "" && !strings.EqualFold(actor, role) {
+			role += "(" + actor + ")"
+		}
+		entries = append(entries, testContextEntry{seq: seq, role: role, text: strings.TrimSpace(session.EventText(event))})
+	}
+	return entries, checkpoint, nil
+}
+
+func appendTestContextEntries(b *strings.Builder, entries []testContextEntry) {
+	if len(entries) == 0 {
+		b.WriteString("\n(none)")
+		return
+	}
+	for _, entry := range entries {
+		fmt.Fprintf(b, "\n[%d] %s:\n%s", entry.seq, entry.role, entry.text)
+	}
 }
 
 type testControllerForwarder struct {

@@ -71,6 +71,18 @@ topology is not a substitute for contract quality.
 Package placement remains transitional. Ownership is determined by semantics,
 not by the current directory name.
 
+The current implementation enforces the handoff boundary directly:
+
+- `agent-sdk/runtime` executes neutral controller and participant turns but has
+  no `HandoffController` method and contains no Caelis context-selection text;
+- hosts inject `controller.ContextRouter`, so missing routing policy fails
+  assembly instead of silently sending an arbitrary transcript;
+- root-private `internal/controlplane` owns Caelis shared-ledger selection,
+  endpoint activation/deactivation, process reattach and rollback, durable
+  binding refresh, and atomic handoff binding/event persistence;
+- `internal/kernel` receives Control explicitly and never infers orchestration
+  authority by type-asserting the execution Runtime.
+
 ## ACP-Native Collaboration Model
 
 Built-in and external agents should expose the same effective language:

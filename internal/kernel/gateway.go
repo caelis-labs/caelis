@@ -20,8 +20,11 @@ type Config struct {
 	// Tasks is optional for basic replay. When present, resume can restore
 	// completed asynchronous RUN_COMMAND/SPAWN output into the original tool
 	// panel when the durable session stream only contains the running update.
-	Tasks               task.Store
-	Runtime             agent.Runtime
+	Tasks   task.Store
+	Runtime agent.Runtime
+	// Control is injected by the product host; Gateway does not infer
+	// orchestration authority from the execution Runtime.
+	Control             agent.SessionControlPlane
 	Resolver            TurnResolver
 	RequestPolicy       RequestPolicy
 	DefaultApprovalMode ApprovalMode
@@ -99,7 +102,7 @@ func New(cfg Config) (*Gateway, error) {
 		sessions:             cfg.Sessions,
 		tasks:                cfg.Tasks,
 		runtime:              cfg.Runtime,
-		control:              resolveControlPlane(cfg.Runtime),
+		control:              cfg.Control,
 		resolver:             cfg.Resolver,
 		request:              cfg.RequestPolicy,
 		defaultApprovalMode:  NormalizeApprovalMode(string(cfg.DefaultApprovalMode)),
@@ -111,13 +114,6 @@ func New(cfg Config) (*Gateway, error) {
 		active:               map[string]*turnHandle{},
 		bindings:             map[string]sessionBinding{},
 	}, nil
-}
-
-func resolveControlPlane(runtime agent.Runtime) agent.SessionControlPlane {
-	if control, ok := runtime.(agent.SessionControlPlane); ok {
-		return control
-	}
-	return nil
 }
 
 func (g *Gateway) Streams() stream.Service {

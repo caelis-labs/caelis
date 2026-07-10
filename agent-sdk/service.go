@@ -160,12 +160,18 @@ type HandoffControllerRequest struct {
 	Reason     string                 `json:"reason,omitempty"`
 }
 
-// SessionControlPlane exposes optional session orchestration capabilities such
-// as participant attachment and controller handoff.
-type SessionControlPlane interface {
+// ParticipantControlPlane exposes neutral participant execution capabilities.
+// Host Control owns selection and lifecycle policy around these operations.
+type ParticipantControlPlane interface {
 	AttachParticipant(context.Context, AttachParticipantRequest) (session.Session, error)
 	PromptParticipant(context.Context, PromptParticipantRequest) (RunResult, error)
 	DetachParticipant(context.Context, DetachParticipantRequest) (session.Session, error)
+}
+
+// SessionControlPlane is the host-facing composition of neutral participant
+// execution and the Control-owned controller handoff operation.
+type SessionControlPlane interface {
+	ParticipantControlPlane
 	HandoffController(context.Context, HandoffControllerRequest) (session.Session, error)
 }
 

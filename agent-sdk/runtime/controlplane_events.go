@@ -68,49 +68,6 @@ func isMissingACPControllerRun(err error) bool {
 	return err != nil && strings.Contains(strings.ToLower(err.Error()), "no active acp controller")
 }
 
-func handoffEvent(from session.ControllerBinding, to session.ControllerBinding, reason string, now time.Time) *session.Event {
-	text := "handoff to " + firstNonEmpty(to.Label, to.ControllerID)
-	meta := map[string]any{
-		"from": map[string]any{
-			"kind":              from.Kind,
-			"id":                strings.TrimSpace(from.ControllerID),
-			"agent":             strings.TrimSpace(from.AgentName),
-			"remote_session_id": strings.TrimSpace(from.RemoteSessionID),
-			"context_sync_seq":  from.ContextSyncSeq,
-		},
-		"to": map[string]any{
-			"kind":              to.Kind,
-			"id":                strings.TrimSpace(to.ControllerID),
-			"agent":             strings.TrimSpace(to.AgentName),
-			"remote_session_id": strings.TrimSpace(to.RemoteSessionID),
-			"context_sync_seq":  to.ContextSyncSeq,
-		},
-	}
-	if strings.TrimSpace(reason) != "" {
-		meta["reason"] = strings.TrimSpace(reason)
-	}
-	return &session.Event{
-		Type:       session.EventTypeHandoff,
-		Visibility: session.VisibilityCanonical,
-		Time:       now,
-		Actor:      session.ActorRef{Kind: session.ActorKindSystem, Name: "runtime"},
-		Text:       text,
-		Protocol: &session.EventProtocol{
-			Method: session.ProtocolMethodControllerHandoff,
-			Update: &session.ProtocolUpdate{SessionUpdate: "activation"},
-		},
-		Scope: &session.EventScope{
-			Source: "handoff",
-			Controller: session.ControllerRef{
-				Kind:    to.Kind,
-				ID:      strings.TrimSpace(to.ControllerID),
-				EpochID: strings.TrimSpace(to.EpochID),
-			},
-		},
-		Meta: meta,
-	}
-}
-
 type controllerApprovalRequester struct {
 	requester            agent.ApprovalRequester
 	sessionRef           session.SessionRef
