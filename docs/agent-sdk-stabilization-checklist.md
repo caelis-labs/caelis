@@ -1,7 +1,7 @@
 # Agent SDK Stabilization Checklist
 
-Status: **local stabilization candidate closed at `9acbf75d`; candidate-tag
-operations pending**.
+Status: **stable-dependency candidate readiness rejected at `43d89bc5`;
+blocking P0 and P1 work reopened**.
 
 This is the live execution board for work after `v0.25.0`. The full evidence,
 failure interleavings, and frozen verdict are in
@@ -28,24 +28,24 @@ Status values:
 | --- | --- | --- |
 | P0-1 Policy fail-closed | closed | Only explicit allow can execute; all malformed, missing, registry, and unknown decisions fail closed |
 | P0-2 Recursive value isolation | closed | Durable/public values cannot share mutable nested descendants; failed mutations roll back |
-| P0-3 Session/compaction concurrency | closed | Checkpoint persistence uses the source revision; replay keeps every fact with `Seq > summarized_through_seq`; two shared-store Runtimes are coordinated by lease/CAS |
-| P0-4 Compound commit idempotency | closed | A committed-but-reported-error retry cannot apply an event-derived state delta twice; runtime facts needed for retry have stable identities |
+| P0-3 Session/compaction concurrency | open | File lease post-commit outcomes must recover the durable lease, and every production cancellation mutation must retain the active lease fence |
+| P0-4 Compound commit idempotency | partial | Provider-local tool-call IDs need run/turn/step scope, and PLAN transaction digests must cover every persisted state mutation including explanation |
 | P0-5 Tool unknown-outcome model continuity | closed | Unknown side effects produce a canonical result paired with the original call, are visible after replay, and are reconciled without blind execution |
 | P0-6 Approval committed-error liveness | closed | A durable matching resolution always wakes a live waiter, including `session.CommittedError` and idempotent retry paths |
-| P0-7 Subagent spawn saga | closed | Spawn intent and identity are durable; task/binding lifecycle is consistent; post-spawn failures compensate or persist unknown outcome; restart never blindly respawns |
+| P0-7 Subagent spawn saga | open | Compensation must recover across cancel/terminal/detach failures, spawning recovery must become unknown outcome, identity must bind all spawn semantics, and invalid anchors must fail before participant commit |
 
 ## P1 stability blockers
 
 | ID | Status | Exit condition |
 | --- | --- | --- |
-| P1-1 ACP semantic completeness | closed | Permission, cancel, participant, and handoff have one normalized codec path and built-in/external conformance, matching the completed update codec |
-| P1-2 Control ownership completion | closed | Surface/source strings are translated by Control into neutral SDK owner/principal/role values; system Agents reuse the common Runtime safety pipeline |
-| P1-3 Durable continuation and placement | closed | Contract is either safe checkpoint/lease-based continuation or explicitly live-process attachment; production host exercises session lease lifecycle |
+| P1-1 ACP semantic completeness | partial | External and controller/subagent permission bridges must use one lossless semantic codec; recovery tool status must map to valid ACP wire enums |
+| P1-2 Control ownership completion | partial | Source must be audit-only, including projection suppression; system Agents continue to reuse the common Runtime pipeline |
+| P1-3 Durable continuation and placement | partial | StartSubagent and manual Compact must enter through the same leased/watchdog placement envelope as ordinary production runs |
 | P1-4 Execution capability wiring | closed | Control derives and validates actual model, tool, and sandbox requirements; unsupported output/features do not silently degrade |
-| P1-5 Runtime liveness and observability | closed | Control-owned dynamic watchdog exists; TraceSink cannot block execution indefinitely; stuck guardrails are bounded |
+| P1-5 Runtime liveness and observability | partial | Existing watchdog/TraceSink/guardrail bounds remain, but production cancellation must durably persist under lease fencing |
 | P1-6 Schema and compatibility | closed | Raw durable JSON migrates before typed decode and unknown-field corpus proves preservation; supported API is compared tag-to-tag with explicit waivers |
-| P1-7 Public consumer contract | closed locally; candidate-tag evidence deferred | Current-source quickstart and baseline-tag artifact pass separate gates; the next candidate tag must pass its own no-replace proxy smoke |
-| P1-8 Release enforcement | closed locally; candidate-tag evidence deferred | Same-SHA workflow dependency and non-empty named gates are contract-tested; the next tag must supply operational workflow evidence |
+| P1-7 Public consumer contract | partial | Proxy evidence must use a clean isolated module cache and a proxy-only route so cached or direct fallback resolution cannot pass |
+| P1-8 Release enforcement | partial | Same-SHA/non-empty workflow mechanics remain closed, but the consumer sub-gate needs strict proxy evidence and a real candidate tag remains deferred |
 
 ## Execution Order
 
@@ -60,7 +60,26 @@ Use small, independently committable slices:
 7. Control watchdog, capability wiring, schema/API compatibility, and release
    enforcement.
 
-### P1 closing evidence
+### Independent re-acceptance at `43d89bc5`
+
+An independent fault review rejected the local candidate despite green broad
+gates. Reproduced blockers are:
+
+- file lease acquire/heartbeat commits can be reported as ordinary errors,
+  leaving live leases or cancelling healthy runs;
+- production cancellation writes discard the active lease fence;
+- provider-local tool-call IDs collide across fresh Runtime instances;
+- subagent compensation is not restart-safe across cancel, terminal, and
+  detach boundaries, and spawn identity/anchor validation is incomplete;
+- PLAN compound digests omit the persisted explanation mutation;
+- permission mapping remains duplicated/lossy, recovery emits invalid ACP tool
+  statuses, Source still affects projection, placement has raw-engine bypasses,
+  and the proxy smoke can pass from a shared cache with network disabled.
+
+The historical implementation evidence below describes mechanisms that remain
+useful, but it no longer constitutes closing evidence for the reopened rows.
+
+### Historical P1 implementation evidence
 
 - **P1-1:** `protocol/acp/semantic` owns permission request/response and cancel
   wire conversion plus participant/handoff lifecycle conversion. Both the
