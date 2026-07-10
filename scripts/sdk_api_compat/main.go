@@ -36,6 +36,7 @@ type waiverConfig struct {
 
 func main() {
 	report := flag.Bool("report", false, "print declarations removed since the baseline tag")
+	printBaseline := flag.Bool("print-baseline", false, "print the resolved rolling baseline tag")
 	waiverPath := flag.String("waivers", defaultWaiverPath, "compatibility waiver configuration")
 	flag.Parse()
 
@@ -43,9 +44,17 @@ func main() {
 	if err != nil {
 		fatalf("read waivers: %v", err)
 	}
-	baselineRaw, err := gitShow(config.BaselineTag, "agent-sdk/api.txt")
+	baselineTag, err := resolveBaselineTag(config.BaselineTag)
 	if err != nil {
-		fatalf("read baseline %s: %v", config.BaselineTag, err)
+		fatalf("resolve rolling baseline: %v", err)
+	}
+	if *printBaseline {
+		fmt.Println(baselineTag)
+		return
+	}
+	baselineRaw, err := gitShow(baselineTag, "agent-sdk/api.txt")
+	if err != nil {
+		fatalf("read baseline %s: %v", baselineTag, err)
 	}
 	currentRaw, err := os.ReadFile(config.CurrentSnapshot)
 	if err != nil {
@@ -69,9 +78,9 @@ func main() {
 		return
 	}
 	if err := validateCompatibility(removed, config.Removals); err != nil {
-		fatalf("API compatibility against %s failed:\n%v", config.BaselineTag, err)
+		fatalf("API compatibility against %s failed:\n%v", baselineTag, err)
 	}
-	fmt.Printf("sdk-api-compat: passed against %s (%d reviewed removals)\n", config.BaselineTag, len(removed))
+	fmt.Printf("sdk-api-compat: passed against %s (%d reviewed removals)\n", baselineTag, len(removed))
 }
 
 func readWaiverConfig(path string) (waiverConfig, error) {
@@ -88,12 +97,41 @@ func readWaiverConfig(path string) (waiverConfig, error) {
 	config.BaselineTag = strings.TrimSpace(config.BaselineTag)
 	config.CurrentSnapshot = strings.TrimSpace(config.CurrentSnapshot)
 	if config.BaselineTag == "" {
-		return waiverConfig{}, fmt.Errorf("baseline_tag is required")
+		config.BaselineTag = "auto"
 	}
 	if config.CurrentSnapshot == "" {
 		config.CurrentSnapshot = "agent-sdk/api.txt"
 	}
 	return config, nil
+}
+
+func resolveBaselineTag(configured string) (string, error) {
+	if override := strings.TrimSpace(os.Getenv("SDK_API_BASELINE_TAG")); override != "" {
+		return override, nil
+	}
+	configured = strings.TrimSpace(configured)
+	if configured != "" && configured != "auto" {
+		return configured, nil
+	}
+	exactRaw, _ := exec.Command("git", "describe", "--tags", "--exact-match", "--match", "v[0-9]*").Output()
+	exact := strings.TrimSpace(string(exactRaw))
+	tagsRaw, err := exec.Command("git", "tag", "--merged", "HEAD", "--sort=-v:refname", "--list", "v[0-9]*").Output()
+	if err != nil {
+		return "", err
+	}
+	return selectBaselineTag(strings.Fields(string(tagsRaw)), exact)
+}
+
+func selectBaselineTag(tags []string, exact string) (string, error) {
+	exact = strings.TrimSpace(exact)
+	for _, tag := range tags {
+		tag = strings.TrimSpace(tag)
+		if tag == "" || tag == exact {
+			continue
+		}
+		return tag, nil
+	}
+	return "", fmt.Errorf("no previous semantic release tag is reachable from HEAD")
 }
 
 func gitShow(tag, path string) ([]byte, error) {

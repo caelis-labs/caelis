@@ -6,6 +6,11 @@ BUILD_VERSION ?= $(if $(and $(strip $(GIT_TAG)),$(filter-out dirty,$(GIT_DIRTY))
 LDFLAGS ?= -X github.com/caelis-labs/caelis/internal/version.Version=$(BUILD_VERSION) -X github.com/caelis-labs/caelis/internal/version.Commit=$(COMMIT) -X github.com/caelis-labs/caelis/internal/version.Date=$(DATE)
 GOFILES_CMD = if command -v rg >/dev/null 2>&1; then rg --files -0 -g '*.go'; else find . -type f -name '*.go' -print0; fi
 GO_TEST_TIMEOUT ?= 5m
+EVAL_REGRESSION_SELECTOR ?= ^TestRegression
+TUI_GOLDEN_SELECTOR ?= ^TestRegressionACPEventstreamToolCallFrame120x32$$
+TUI_INTERACTION_SELECTOR ?= ^TestRegressionACPEventstreamWhitespaceOnlyAssistantChunkDoesNotRenderBeforeTool$$
+COMMAND_REGRESSION_SELECTOR ?= ^TestRegression(Command(Status|Workspace|List|Agent|Parse|Connect|NewDriver)|Slash)
+COMMAND_EXECUTION_REGRESSION_SELECTOR ?= ^TestRegressionCommandExec
 CACHE_ROOT ?= $(CURDIR)/.tmp/cache
 GOMODCACHE ?= $(CACHE_ROOT)/gomod
 GOCACHE ?= $(CACHE_ROOT)/gocache
@@ -65,19 +70,19 @@ commit-check: quality build
 regression: eval-smoke tui-golden tui-interaction command-regression command-execution-regression
 
 eval-smoke: cache-dirs
-	go test -timeout $(GO_TEST_TIMEOUT) ./eval -run 'TestRegression'
+	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./eval '$(EVAL_REGRESSION_SELECTOR)' eval-smoke
 
 tui-golden: cache-dirs
-	go test -timeout $(GO_TEST_TIMEOUT) ./surfaces/tui/app -run 'TestRegression.*Golden'
+	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./surfaces/tui/app '$(TUI_GOLDEN_SELECTOR)' tui-golden
 
 tui-interaction: cache-dirs
-	go test -timeout $(GO_TEST_TIMEOUT) ./surfaces/tui/app -run 'TestRegression(Resize|NoWelcome|TerminalOutput|FollowTail|Slash|Approval)'
+	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./surfaces/tui/app '$(TUI_INTERACTION_SELECTOR)' tui-interaction
 
 command-regression: cache-dirs
-	go test -timeout $(GO_TEST_TIMEOUT) ./app/gatewayapp/controladapter -run 'TestRegression(Command(Status|Workspace|List|Agent|Parse|Connect|NewDriver)|Slash)'
+	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./app/gatewayapp/controladapter '$(COMMAND_REGRESSION_SELECTOR)' command-regression
 
 command-execution-regression: cache-dirs
-	go test -timeout $(GO_TEST_TIMEOUT) ./app/gatewayapp/controladapter -run 'TestRegressionCommandExec'
+	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./app/gatewayapp/controladapter '$(COMMAND_EXECUTION_REGRESSION_SELECTOR)' command-execution-regression
 
 test: cache-dirs
 	go test -timeout $(GO_TEST_TIMEOUT) ./...

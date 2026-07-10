@@ -82,3 +82,35 @@ func TestParseSnapshotRejectsDeclarationWithoutPackage(t *testing.T) {
 		t.Fatal("parseSnapshot() error = nil")
 	}
 }
+
+func TestSelectBaselineTagUsesLatestPreviousRelease(t *testing.T) {
+	t.Parallel()
+
+	tags := []string{"v0.27.0", "v0.26.0", "v0.25.0"}
+	if got, err := selectBaselineTag(tags, ""); err != nil || got != "v0.27.0" {
+		t.Fatalf("branch baseline = %q, %v, want latest v0.27.0", got, err)
+	}
+	if got, err := selectBaselineTag(tags, "v0.27.0"); err != nil || got != "v0.26.0" {
+		t.Fatalf("tag candidate baseline = %q, %v, want previous v0.26.0", got, err)
+	}
+}
+
+func TestPreviousReleaseAdditionRemovedByCandidateFails(t *testing.T) {
+	t.Parallel()
+
+	previous, err := parseSnapshot([]byte("package example/sdk\n  func AddedLastRelease()\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate, err := parseSnapshot([]byte("package example/sdk\n  func DifferentAddition()\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	removed := removedDeclarations(previous, candidate)
+	if len(removed) != 1 || !strings.Contains(removed[0].Declaration, "AddedLastRelease") {
+		t.Fatalf("removed = %#v, want previous-release addition", removed)
+	}
+	if err := validateCompatibility(removed, nil); err == nil {
+		t.Fatal("candidate removal passed without an exact waiver")
+	}
+}

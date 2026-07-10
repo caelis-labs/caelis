@@ -1,5 +1,5 @@
 {
-  "baseline_tag": "v0.25.0",
+  "baseline_tag": "auto",
   "current_snapshot": "agent-sdk/api.txt",
   "removals": [
     {
