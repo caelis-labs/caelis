@@ -6,15 +6,26 @@ cd "${ROOT}"
 
 MODULE="github.com/caelis-labs/caelis"
 VERSION="${SDK_PROXY_VERSION:-$(go run ./scripts/sdk_api_compat -print-baseline)}"
-PROXY="${SDK_PROXY_URL:-https://proxy.golang.org,direct}"
+PROXY="${SDK_PROXY_URL:-https://proxy.golang.org}"
 if [[ -z "${VERSION}" || "${VERSION}" != v* ]]; then
   echo "sdk-proxy-smoke: SDK_PROXY_VERSION must be a semantic release tag" >&2
   exit 1
 fi
+if [[ -z "${PROXY}" || "${PROXY}" == "off" || "${PROXY}" == "direct" || "${PROXY}" == *","* ]]; then
+  echo "sdk-proxy-smoke: SDK_PROXY_URL must name exactly one module proxy with no direct/off fallback" >&2
+  exit 1
+fi
 
-consumer_dir="$(mktemp -d "${TMPDIR:-/tmp}/caelis-sdk-proxy-consumer.XXXXXX")"
+smoke_root="$(mktemp -d "${TMPDIR:-/tmp}/caelis-sdk-proxy-consumer.XXXXXX")"
+smoke_root="$(cd "${smoke_root}" && pwd -P)"
+consumer_dir="${smoke_root}/consumer"
+consumer_modcache="${smoke_root}/cache/gomod"
+consumer_gocache="${smoke_root}/cache/gobuild"
+consumer_gotmp="${smoke_root}/cache/gotmp"
+mkdir -p "${consumer_dir}"
 cleanup() {
-  rm -rf "${consumer_dir}"
+	chmod -R u+w "${smoke_root}" 2>/dev/null || true
+  rm -rf "${smoke_root}"
 }
 trap cleanup EXIT
 
@@ -39,10 +50,26 @@ fi
   cd "${consumer_dir}"
   export GOWORK=off
   export GOPROXY="${PROXY}"
+  export GOMODCACHE="${consumer_modcache}"
+  export GOCACHE="${consumer_gocache}"
+  export GOTMPDIR="${consumer_gotmp}"
   export GOFLAGS="${GOFLAGS:-} -buildvcs=false"
+  mkdir -p "${GOMODCACHE}" "${GOCACHE}" "${GOTMPDIR}"
   go mod init example.com/caelis-sdk-proxy-consumer >/dev/null
   go mod edit -go="${tagged_go_version}"
   go mod edit -require="${MODULE}@${VERSION}"
+
+  download="$(go mod download -json "${MODULE}@${VERSION}")"
+  downloaded_dir="$(printf '%s' "${download}" | go run "${ROOT}/scripts/sdk_proxy_download_dir.go")"
+  downloaded_dir="$(cd "${downloaded_dir}" && pwd -P)"
+  isolated_modcache="$(cd "${GOMODCACHE}" && pwd -P)"
+  case "${downloaded_dir}" in
+    "${isolated_modcache}"/*) ;;
+    *)
+      echo "sdk-proxy-smoke: module was not downloaded into the isolated module cache" >&2
+      exit 1
+      ;;
+  esac
 
   {
     printf 'package consumer\n\nimport (\n'
@@ -66,7 +93,8 @@ fi
     echo "sdk-proxy-smoke: resolved ${resolved}, want ${VERSION} with no replacement" >&2
     exit 1
   fi
-  go test ./...
+  go mod tidy
+  go test -mod=readonly ./...
 )
 
 echo "sdk-proxy-smoke: passed ${MODULE}@${VERSION} via ${PROXY} without replace"

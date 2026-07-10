@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -52,10 +53,30 @@ func TestSDKConsumerGatesUseCurrentAndTaggedFixturesSeparately(t *testing.T) {
 		"go list -m",
 		"replace directive",
 		"with no replacement",
+		"GOMODCACHE=\"${consumer_modcache}\"",
+		"no direct/off fallback",
 	} {
 		if !strings.Contains(tagged, want) {
 			t.Errorf("tagged consumer gate missing %q", want)
 		}
+	}
+}
+
+func TestSDKProxySmokeRejectsDisabledProxyEvenWithWarmSharedCache(t *testing.T) {
+	t.Parallel()
+
+	command := exec.Command("bash", "./sdk_proxy_smoke.sh")
+	command.Env = append(os.Environ(),
+		"SDK_PROXY_VERSION=v0.25.0",
+		"SDK_PROXY_URL=off",
+		"GOMODCACHE="+t.TempDir(),
+	)
+	output, err := command.CombinedOutput()
+	if err == nil {
+		t.Fatalf("sdk proxy smoke succeeded with disabled proxy: %s", output)
+	}
+	if !strings.Contains(string(output), "no direct/off fallback") {
+		t.Fatalf("unexpected failure: %s", output)
 	}
 }
 

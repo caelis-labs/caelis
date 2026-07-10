@@ -44,8 +44,8 @@ Status values:
 | P1-4 Execution capability wiring | closed | Control derives and validates actual model, tool, and sandbox requirements; unsupported output/features do not silently degrade |
 | P1-5 Runtime liveness and observability | closed | Watchdog/TraceSink/guardrail bounds remain covered, and production built-in/ACP cancellation durably persists under lease fencing before non-cooperative work returns |
 | P1-6 Schema and compatibility | closed | Raw durable JSON migrates before typed decode and unknown-field corpus proves preservation; supported API is compared tag-to-tag with explicit waivers |
-| P1-7 Public consumer contract | partial | Proxy evidence must use a clean isolated module cache and a proxy-only route so cached or direct fallback resolution cannot pass |
-| P1-8 Release enforcement | partial | Same-SHA/non-empty workflow mechanics remain closed, but the consumer sub-gate needs strict proxy evidence and a real candidate tag remains deferred |
+| P1-7 Public consumer contract | closed | Exact-version/no-replace quickstart downloads into a fresh isolated module cache through one proxy with no direct/off fallback |
+| P1-8 Release enforcement | closed | Same-SHA/non-empty workflow and strict proxy consumer sub-gates are enforced; creating evidence for a new candidate tag remains an authorized release action and is deferred |
 
 ## Execution Order
 
@@ -222,7 +222,10 @@ useful, but it no longer constitutes closing evidence for the reopened rows.
   exact `v0.25.0` version and no `replace`. The current-source gate separately
   compiled the worktree quickstart, so a new supported API is not tested
   against an old tag fixture. The baseline smoke passed against
-  `https://proxy.golang.org,direct`; no new candidate tag was created.
+  `https://proxy.golang.org` with a fresh private module/build/tmp cache. The
+  script rejects `off`, `direct`, and comma fallbacks before fixture loading,
+  verifies the downloaded module directory is inside that cache, and runs the
+  final test with `-mod=readonly`; no new candidate tag was created.
 - **P1-8 release-enforcement slice:** `quality.yml` is now reusable and records
   focused Agent SDK race, regression, maintained-document link, and tagged
   no-replace consumer gates. `release.yml` invokes that workflow at the caller
