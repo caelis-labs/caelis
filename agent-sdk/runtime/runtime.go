@@ -58,6 +58,7 @@ type Runtime struct {
 	agentConfigUpdater       assembly.AgentConfigUpdater
 	subagents                subagent.Runner
 	idCounter                atomic.Uint64
+	executionMu              sync.Mutex
 	mu                       sync.RWMutex
 	runStates                map[string]agent.RunState
 	tasks                    *taskRuntime
@@ -213,6 +214,14 @@ func (r *Runtime) Run(
 	if err := r.beginRun(ref, runID); err != nil {
 		return agent.RunResult{}, err
 	}
+	if err := r.recoverIncompleteExecutionJournal(ctx, ref); err != nil {
+		r.setRunState(ref.SessionID, agent.RunState{Status: agent.RunLifecycleStatusFailed, ActiveRunID: runID, LastError: err.Error(), UpdatedAt: r.now()})
+		return agent.RunResult{}, err
+	}
+	if err := r.startRunTurnJournal(ctx, ref, runID, turnID); err != nil {
+		r.setRunState(ref.SessionID, agent.RunState{Status: agent.RunLifecycleStatusFailed, ActiveRunID: runID, LastError: err.Error(), UpdatedAt: r.now()})
+		return agent.RunResult{}, err
+	}
 	r.setRunState(ref.SessionID, agent.RunState{
 		Status:      agent.RunLifecycleStatusRunning,
 		ActiveRunID: runID,
@@ -220,6 +229,9 @@ func (r *Runtime) Run(
 	})
 	runCtx, cancel := context.WithCancel(ctx)
 	handle := newRunner(runID, cancel)
+	handle.setCancelHook(func() error {
+		return r.transitionRunTurnJournal(context.Background(), ref, runID, turnID, session.ExecutionCancelRequested, "run cancellation requested")
+	})
 	go r.executeKernelTurn(runCtx, activeSession, ref, runID, turnID, req, handle)
 	return agent.RunResult{
 		Session: activeSession,
@@ -259,12 +271,24 @@ func (r *Runtime) executeKernelTurn(
 	batch := make([]*session.Event, 0, 4)
 	userEvent := buildUserEvent(activeSession, turnID, req.Input, req.DisplayInput, req.ContentParts)
 	if err := r.runWithOverflowRecovery(ctx, activeSession, ref, runID, turnID, req, userEvent, &batch, handle); err != nil {
+		journalStatus := session.ExecutionFailed
+		if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
+			journalStatus = session.ExecutionCancelled
+		}
+		if journalErr := r.transitionRunTurnJournal(context.WithoutCancel(ctx), ref, runID, turnID, journalStatus, err.Error()); journalErr != nil {
+			err = errors.Join(err, journalErr)
+		}
 		r.setRunState(ref.SessionID, agent.RunState{
 			Status:      interruptedOrFailedStatus(ctx, err),
 			ActiveRunID: runID,
 			LastError:   err.Error(),
 			UpdatedAt:   r.now(),
 		})
+		handle.publishError(err)
+		return
+	}
+	if err := r.transitionRunTurnJournal(context.WithoutCancel(ctx), ref, runID, turnID, session.ExecutionSucceeded, ""); err != nil {
+		r.setRunState(ref.SessionID, agent.RunState{Status: agent.RunLifecycleStatusFailed, ActiveRunID: runID, LastError: err.Error(), UpdatedAt: r.now()})
 		handle.publishError(err)
 		return
 	}

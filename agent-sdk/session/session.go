@@ -157,6 +157,9 @@ const (
 	VisibilityUIOnly    Visibility = "ui_only"
 	VisibilityOverlay   Visibility = "overlay"
 	VisibilityMirror    Visibility = "mirror"
+	// VisibilityJournal marks durable execution-control facts that are excluded
+	// from canonical model history and transcript replay.
+	VisibilityJournal Visibility = "journal"
 )
 
 // ControllerKind identifies the main controller family of one session epoch.

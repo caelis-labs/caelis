@@ -17,6 +17,40 @@ type Definition struct {
 	Description string         `json:"description,omitempty"`
 	InputSchema map[string]any `json:"input_schema,omitempty"`
 	Metadata    map[string]any `json:"metadata,omitempty"`
+	EffectClass EffectClass    `json:"effect_class,omitempty"`
+}
+
+type EffectClass string
+
+const (
+	EffectReadOnly      EffectClass = "read_only"
+	EffectIdempotent    EffectClass = "idempotent"
+	EffectNonIdempotent EffectClass = "non_idempotent"
+)
+
+type RecoveryStatus string
+
+const (
+	RecoveryUnknown   RecoveryStatus = "unknown"
+	RecoverySucceeded RecoveryStatus = "succeeded"
+	RecoveryFailed    RecoveryStatus = "failed"
+)
+
+type RecoveryRequest struct {
+	ExecutionIdentity string `json:"execution_identity"`
+	Call              Call   `json:"call"`
+}
+
+type RecoveryResult struct {
+	Status RecoveryStatus `json:"status"`
+	Result Result         `json:"result,omitempty"`
+	Reason string         `json:"reason,omitempty"`
+}
+
+// Recoverer optionally reconciles an execution whose side-effect outcome is
+// unknown. Runtime never replays the original Call automatically.
+type Recoverer interface {
+	Recover(context.Context, RecoveryRequest) (RecoveryResult, error)
 }
 
 const (
@@ -25,6 +59,7 @@ const (
 	MetadataMCPServer           = "caelis.mcp.server"
 	MetadataMCPTool             = "caelis.mcp.tool"
 	MetadataDiscoveredToolNames = "caelis.tool.discovered_names"
+	MetadataExecutionJournal    = "caelis.execution_journal"
 
 	MetadataToolKindMCP        = "mcp"
 	MetadataToolKindToolSearch = "tool_search"
@@ -163,6 +198,23 @@ func IsToolSearchDefinition(def Definition) bool {
 func definitionKind(def Definition) string {
 	kind, _ := def.Metadata[MetadataToolKind].(string)
 	return strings.ToLower(strings.TrimSpace(kind))
+}
+
+// EffectClassOf resolves an explicit effect declaration and conservatively
+// falls back to standard annotation hints. Unknown tools are non-idempotent.
+func EffectClassOf(def Definition) EffectClass {
+	switch def.EffectClass {
+	case EffectReadOnly, EffectIdempotent, EffectNonIdempotent:
+		return def.EffectClass
+	}
+	annotations, _ := def.Metadata["annotations"].(map[string]any)
+	if value, _ := annotations["readOnlyHint"].(bool); value {
+		return EffectReadOnly
+	}
+	if value, _ := annotations["idempotentHint"].(bool); value {
+		return EffectIdempotent
+	}
+	return EffectNonIdempotent
 }
 
 func inferStrictFunctionSchema(schema map[string]any) bool {

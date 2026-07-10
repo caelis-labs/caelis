@@ -20,7 +20,7 @@ func IsCanonicalHistoryEvent(event *Event) bool {
 	if event == nil {
 		return false
 	}
-	if IsTransient(event) || IsMirror(event) {
+	if IsTransient(event) || IsMirror(event) || IsJournal(event) {
 		return false
 	}
 	return true
@@ -30,7 +30,7 @@ func IsCanonicalHistoryEvent(event *Event) bool {
 // current invocation context. Overlay events are transient display overlays, so
 // they are not model-visible even when they mirror otherwise canonical shapes.
 func IsInvocationVisibleEvent(event *Event) bool {
-	if event == nil || IsUIOnly(event) || IsOverlay(event) || IsNotice(event) || IsMirror(event) {
+	if event == nil || IsUIOnly(event) || IsOverlay(event) || IsNotice(event) || IsMirror(event) || IsJournal(event) {
 		return false
 	}
 	return true

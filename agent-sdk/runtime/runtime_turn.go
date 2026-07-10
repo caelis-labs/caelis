@@ -47,6 +47,7 @@ func (r *Runtime) resolveAgent(
 		runID:             strings.TrimSpace(runID),
 		turnID:            strings.TrimSpace(turnID),
 	})
+	spec.Tools = r.wrapToolsForExecutionJournal(ref, runID, turnID, spec.Tools)
 	spec.Tools = r.wrapToolsForPolicy(activeSession, ref, state, spec, approvalContext{
 		ctx:        ctx,
 		requester:  req.ApprovalRequester,

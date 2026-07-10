@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -82,7 +83,7 @@ func (r *Runtime) kernelControllerBinding(source string) session.ControllerBindi
 
 func (r *Runtime) runACPControllerTurn(
 	ctx context.Context,
-	session session.Session,
+	activeSession session.Session,
 	ref session.SessionRef,
 	req agent.RunRequest,
 ) (agent.RunResult, error) {
@@ -94,6 +95,14 @@ func (r *Runtime) runACPControllerTurn(
 	if err := r.beginRun(ref, runID); err != nil {
 		return agent.RunResult{}, err
 	}
+	if err := r.recoverIncompleteExecutionJournal(ctx, ref); err != nil {
+		r.setRunState(ref.SessionID, agent.RunState{Status: agent.RunLifecycleStatusFailed, ActiveRunID: runID, LastError: err.Error(), UpdatedAt: r.now()})
+		return agent.RunResult{}, err
+	}
+	if err := r.startRunTurnJournal(ctx, ref, runID, turnID); err != nil {
+		r.setRunState(ref.SessionID, agent.RunState{Status: agent.RunLifecycleStatusFailed, ActiveRunID: runID, LastError: err.Error(), UpdatedAt: r.now()})
+		return agent.RunResult{}, err
+	}
 	r.setRunState(ref.SessionID, agent.RunState{
 		Status:      agent.RunLifecycleStatusRunning,
 		ActiveRunID: runID,
@@ -101,9 +110,12 @@ func (r *Runtime) runACPControllerTurn(
 	})
 	runCtx, cancel := context.WithCancel(ctx)
 	handle := newRunner(runID, cancel)
-	go r.executeACPControllerTurn(runCtx, session, ref, req, runID, turnID, handle)
+	handle.setCancelHook(func() error {
+		return r.transitionRunTurnJournal(context.Background(), ref, runID, turnID, session.ExecutionCancelRequested, "run cancellation requested")
+	})
+	go r.executeACPControllerTurn(runCtx, activeSession, ref, req, runID, turnID, handle)
 	return agent.RunResult{
-		Session: session,
+		Session: activeSession,
 		Handle:  handle,
 	}, nil
 }
@@ -118,6 +130,22 @@ func (r *Runtime) executeACPControllerTurn(
 	handle *runner,
 ) {
 	defer handle.finish()
+	completed := false
+	defer func() {
+		status := session.ExecutionFailed
+		reason := "controller turn failed"
+		if completed {
+			status = session.ExecutionSucceeded
+			reason = ""
+		} else if ctx.Err() != nil {
+			status = session.ExecutionCancelled
+			reason = ctx.Err().Error()
+		}
+		if err := r.transitionRunTurnJournal(context.WithoutCancel(ctx), ref, runID, turnID, status, reason); err != nil {
+			r.setRunState(ref.SessionID, agent.RunState{Status: agent.RunLifecycleStatusFailed, ActiveRunID: runID, LastError: err.Error(), UpdatedAt: r.now()})
+			handle.publishError(err)
+		}
+	}()
 
 	userEvent := buildUserEvent(activeSession, turnID, req.Input, req.DisplayInput, req.ContentParts)
 	if userEvent != nil {
@@ -196,7 +224,8 @@ func (r *Runtime) executeACPControllerTurn(
 	}
 	if turnResult.Handle != nil {
 		handle.setCancelHook(func() error {
-			return turnResult.Handle.Cancel().Err
+			journalErr := r.transitionRunTurnJournal(context.Background(), ref, runID, turnID, session.ExecutionCancelRequested, "run cancellation requested")
+			return errors.Join(journalErr, turnResult.Handle.Cancel().Err)
 		})
 		defer turnResult.Handle.Close()
 		if err := r.forwardControllerEvents(ctx, agent.ControllerEventForwardRequest{
@@ -227,6 +256,7 @@ func (r *Runtime) executeACPControllerTurn(
 			return
 		}
 	}
+	completed = true
 	r.setRunState(ref.SessionID, agent.RunState{
 		Status:      agent.RunLifecycleStatusCompleted,
 		ActiveRunID: runID,

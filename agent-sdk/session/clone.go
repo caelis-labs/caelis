@@ -69,6 +69,10 @@ func CloneEvent(in *Event) *Event {
 		lifecycle.Meta = cloneProtocolAnyMap(lifecycle.Meta)
 		out.Lifecycle = &lifecycle
 	}
+	if in.Journal != nil {
+		journal := CloneExecutionJournalEntry(*in.Journal)
+		out.Journal = &journal
+	}
 	if in.Protocol != nil {
 		protocol := CloneEventProtocol(*in.Protocol)
 		out.Protocol = &protocol

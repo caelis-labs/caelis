@@ -104,7 +104,9 @@ func (s *Store) Get(
 	_ context.Context,
 	ref session.SessionRef,
 ) (session.Session, error) {
-	record, ok := s.lookup(ref)
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	record, ok := s.lookupLocked(ref)
 	if !ok {
 		return session.Session{}, session.ErrSessionNotFound
 	}
@@ -265,7 +267,9 @@ func (s *Store) Events(
 	_ context.Context,
 	req session.EventsRequest,
 ) ([]*session.Event, error) {
-	record, ok := s.lookup(req.SessionRef)
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	record, ok := s.lookupLocked(req.SessionRef)
 	if !ok {
 		return nil, session.ErrSessionNotFound
 	}
@@ -626,12 +630,6 @@ type record struct {
 
 func (r *record) cloneSession() session.Session {
 	return session.CloneSession(r.session)
-}
-
-func (s *Store) lookup(ref session.SessionRef) (*record, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.lookupLocked(ref)
 }
 
 func (s *Store) lookupLocked(ref session.SessionRef) (*record, bool) {

@@ -13,7 +13,10 @@ import (
 func toolResultEvent(call model.ToolCall, result tool.Result, message *model.Message, extraMeta ...map[string]any) *session.Event {
 	rawInput := mustObject(call.Args)
 	rawOutput := toolResultRawOutput(result)
-	metaParts := []map[string]any{result.Metadata}
+	journal := toolExecutionJournalFromResult(result)
+	resultMetadata := session.CloneState(result.Metadata)
+	delete(resultMetadata, tool.MetadataExecutionJournal)
+	metaParts := []map[string]any{resultMetadata}
 	metaParts = append(metaParts, extraMeta...)
 	metaParts = append(metaParts, toolMeta(call.Name))
 	status := toolCallStatus(result, rawOutput)
@@ -23,11 +26,34 @@ func toolResultEvent(call model.ToolCall, result tool.Result, message *model.Mes
 		Tool: toolEventPayload(call, status, rawInput, rawOutput, toolResultContent(call, rawInput, rawOutput, meta, status, result.IsError)),
 		Meta: meta,
 	}
+	if journal != nil {
+		event.Journal = journal
+	}
 	if message != nil {
 		event.Message = message
 		event.Text = message.TextContent()
 	}
 	return event
+}
+
+func toolExecutionJournalFromResult(result tool.Result) *session.ExecutionJournalEntry {
+	raw, ok := result.Metadata[tool.MetadataExecutionJournal]
+	if !ok || raw == nil {
+		return nil
+	}
+	data, err := json.Marshal(raw)
+	if err != nil {
+		return nil
+	}
+	var journal session.ExecutionJournalEntry
+	if err := json.Unmarshal(data, &journal); err != nil {
+		return nil
+	}
+	journal = session.CloneExecutionJournalEntry(journal)
+	if journal.Schema != session.ExecutionJournalSchemaVersion || journal.Kind != session.JournalKindToolExecution || journal.ToolExecution == nil {
+		return nil
+	}
+	return &journal
 }
 
 func toolResultRawOutput(result tool.Result) map[string]any {

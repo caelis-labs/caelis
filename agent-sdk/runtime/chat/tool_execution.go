@@ -98,11 +98,15 @@ func (a *Agent) executeToolCall(ctx context.Context, call model.ToolCall, observ
 		Observer:     observer,
 	})
 	if err != nil {
+		executionJournal := result.Metadata[tool.MetadataExecutionJournal]
 		result = tool.Result{
 			ID:      strings.TrimSpace(call.ID),
 			Name:    strings.TrimSpace(call.Name),
 			IsError: true,
 			Content: []model.Part{model.NewJSONPart(mustJSON(tool.ErrorPayload(err)))},
+		}
+		if executionJournal != nil {
+			result.Metadata = map[string]any{tool.MetadataExecutionJournal: executionJournal}
 		}
 	}
 	canonical, truncationMeta := canonicalToolResult(result)

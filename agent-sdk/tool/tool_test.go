@@ -266,6 +266,19 @@ func TestNamedToolClonesCallAndResult(t *testing.T) {
 	}
 }
 
+func TestEffectClassOfDefaultsFailSafe(t *testing.T) {
+	t.Parallel()
+	if got := EffectClassOf(Definition{}); got != EffectNonIdempotent {
+		t.Fatalf("EffectClassOf(empty) = %q, want non_idempotent", got)
+	}
+	if got := EffectClassOf(Definition{Metadata: map[string]any{"annotations": map[string]any{"readOnlyHint": true}}}); got != EffectReadOnly {
+		t.Fatalf("EffectClassOf(readonly) = %q, want read_only", got)
+	}
+	if got := EffectClassOf(Definition{EffectClass: EffectIdempotent}); got != EffectIdempotent {
+		t.Fatalf("EffectClassOf(explicit) = %q, want idempotent", got)
+	}
+}
+
 func toolSpecNames(specs []model.ToolSpec) []string {
 	out := make([]string, 0, len(specs))
 	for _, spec := range specs {

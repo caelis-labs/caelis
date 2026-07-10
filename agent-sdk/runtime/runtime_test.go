@@ -184,12 +184,16 @@ func TestRuntimeRunPersistsDisplayInputSeparateFromModelInput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
 	}
+	var runNumber int
 	runtime, err := New(Config{
 		Sessions: sessions,
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Be terse.",
 		},
-		RunIDGenerator: func() string { return "run-display-input" },
+		RunIDGenerator: func() string {
+			runNumber++
+			return fmt.Sprintf("run-display-input-%d", runNumber)
+		},
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -2303,7 +2307,14 @@ func TestRuntimeRunPersistsToolLoopEvents(t *testing.T) {
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Use tools when necessary.",
 		},
-		RunIDGenerator: func() string { return "run-tools" },
+		PolicyRegistry: staticPolicyRegistry{mode: policy.NamedMode{
+			ID: "allow",
+			Decide: func(context.Context, policy.ToolContext) (policy.Decision, error) {
+				return policy.Decision{Action: policy.ActionAllow}, nil
+			},
+		}},
+		DefaultPolicyMode: "allow",
+		RunIDGenerator:    func() string { return "run-tools" },
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -2386,6 +2397,38 @@ func TestRuntimeRunPersistsToolLoopEvents(t *testing.T) {
 	assistantMessage, ok := session.ModelMessageOf(loaded.Events[3])
 	if !ok || assistantMessage.TextContent() != "pong" {
 		t.Fatalf("ModelMessageOf(loaded.Events[3]) = %+v, %v; want durable assistant message projection", assistantMessage, ok)
+	}
+	allEvents, err := sessions.Events(context.Background(), session.EventsRequest{SessionRef: activeSession.SessionRef, IncludeTransient: true})
+	if err != nil {
+		t.Fatalf("Events(include journal) error = %v", err)
+	}
+	var toolStatuses []session.ToolExecutionStatus
+	var stepStatuses []session.ExecutionStatus
+	runTurnStatuses := map[session.JournalKind][]session.ExecutionStatus{}
+	for _, event := range allEvents {
+		if event.Journal == nil {
+			continue
+		}
+		if event.Journal.ToolExecution != nil {
+			toolStatuses = append(toolStatuses, event.Journal.ToolExecution.Status)
+		}
+		if event.Journal.Execution != nil && event.Journal.Execution.Kind == session.JournalKindStep {
+			stepStatuses = append(stepStatuses, event.Journal.Execution.Status)
+		}
+		if event.Journal.Execution != nil && (event.Journal.Execution.Kind == session.JournalKindRun || event.Journal.Execution.Kind == session.JournalKindTurn) {
+			runTurnStatuses[event.Journal.Execution.Kind] = append(runTurnStatuses[event.Journal.Execution.Kind], event.Journal.Execution.Status)
+		}
+	}
+	if want := []session.ToolExecutionStatus{session.ToolExecutionPrepared, session.ToolExecutionApproved, session.ToolExecutionStarted, session.ToolExecutionSucceeded}; !reflect.DeepEqual(toolStatuses, want) {
+		t.Fatalf("tool execution journal = %v, want %v", toolStatuses, want)
+	}
+	if want := []session.ExecutionStatus{session.ExecutionPrepared, session.ExecutionStarted, session.ExecutionSucceeded}; !reflect.DeepEqual(stepStatuses, want) {
+		t.Fatalf("step journal = %v, want %v", stepStatuses, want)
+	}
+	for _, kind := range []session.JournalKind{session.JournalKindRun, session.JournalKindTurn} {
+		if want := []session.ExecutionStatus{session.ExecutionPrepared, session.ExecutionStarted, session.ExecutionSucceeded}; !reflect.DeepEqual(runTurnStatuses[kind], want) {
+			t.Fatalf("%s journal = %v, want %v", kind, runTurnStatuses[kind], want)
+		}
 	}
 }
 
