@@ -475,7 +475,7 @@ func (h *turnHandle) publishEnvelopes(events []eventstream.Envelope, bridgeSourc
 		}
 		env = h.enrichEnvelopeLocked(env, bridgeSource)
 		h.events = append(h.events, eventstream.CloneEnvelope(env))
-		if h.closed || h.finished {
+		if h.closed || h.eventsClosed {
 			continue
 		}
 		h.liveQueue = append(h.liveQueue, env)
