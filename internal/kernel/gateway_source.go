@@ -1,8 +1,6 @@
 package kernel
 
 import (
-	"strings"
-
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/internal/acpbridge"
 )
@@ -38,10 +36,7 @@ func shouldProjectSourceCanonicalToACP(sourceEvent acpbridge.SourceEvent, native
 }
 
 func isACPFinalAssistantMaterialization(event *session.Event) bool {
-	if event == nil || event.Scope == nil {
-		return false
-	}
-	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(event.Scope.Source)), "acp") {
+	if event == nil {
 		return false
 	}
 	if session.EventTypeOf(event) != session.EventTypeAssistant {

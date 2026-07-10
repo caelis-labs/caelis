@@ -39,7 +39,7 @@ Status values:
 | ID | Status | Exit condition |
 | --- | --- | --- |
 | P1-1 ACP semantic completeness | closed | External and controller/subagent permission bridges use the lossless semantic codec through the final runtime approval; recovery keeps durable status in the journal/model payload while projecting only valid ACP tool enums |
-| P1-2 Control ownership completion | partial | Source must be audit-only, including projection suppression; system Agents continue to reuse the common Runtime pipeline |
+| P1-2 Control ownership completion | closed | Source is audit-only, including projection/narrative classification; system Agents continue to reuse the common Runtime pipeline |
 | P1-3 Durable continuation and placement | partial | StartSubagent and manual Compact must enter through the same leased/watchdog placement envelope as ordinary production runs |
 | P1-4 Execution capability wiring | closed | Control derives and validates actual model, tool, and sandbox requirements; unsupported output/features do not silently degrade |
 | P1-5 Runtime liveness and observability | closed | Watchdog/TraceSink/guardrail bounds remain covered, and production built-in/ACP cancellation durably persists under lease fencing before non-cooperative work returns |
@@ -146,6 +146,9 @@ useful, but it no longer constitutes closing evidence for the reopened rows.
   guardrails, typed Run/Turn/Model lifecycle, capability validation, and
   terminal Run/Turn journals. Only validated prompt/assistant pairs enter the
   reusable durable Guardian session, preserving malformed-retry isolation.
+  Native ACP stream selection and canonical event/protocol semantics now drive
+  passthrough suppression, narrative accumulation, and live-event finality;
+  exact regressions vary only `EventScope.Source` and prove identical behavior.
 - **P1-3 live-attach/placement contract slice:** the ambiguous `Resume` API was removed.
   `AttachLiveRun` now names and documents the actual process-local contract;
   after restart it returns `RunNotAttachableError` and never treats durable

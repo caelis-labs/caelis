@@ -56,6 +56,23 @@ func TestProjectSessionEventEnvelopeProjectsToolUpdate(t *testing.T) {
 	}
 }
 
+func TestSessionEventFinalIgnoresAuditSource(t *testing.T) {
+	t.Parallel()
+
+	for _, source := range []string{"acp", "slash", "renamed-product-source"} {
+		event := &session.Event{
+			Visibility: session.VisibilityUIOnly,
+			Scope:      &session.EventScope{Source: source},
+			Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
+				SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage),
+			}},
+		}
+		if SessionEventFinal(event) {
+			t.Fatalf("source %q changed live narrative finality", source)
+		}
+	}
+}
+
 func TestProjectSessionEventEnvelopeProjectsNoticeEventstreamOnly(t *testing.T) {
 	event := session.MarkNotice(&session.Event{
 		ID:        "notice-1",

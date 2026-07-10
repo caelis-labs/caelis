@@ -39,6 +39,20 @@ func TestNarrativeAccumulatorMessageChunksEmitDeltasOnly(t *testing.T) {
 	}
 }
 
+func TestNarrativeAccumulatorIgnoresAuditSource(t *testing.T) {
+	t.Parallel()
+
+	for _, source := range []string{"acp", "slash", "renamed-product-source"} {
+		acc := &narrativeAccumulator{}
+		event := acpNarrativeEvent(session.ProtocolUpdateTypeAgentMessage, "hello")
+		event.Scope.Source = source
+		_, live, ok := acc.normalize(event)
+		if !ok || live == nil || session.EventText(live) != "hello" {
+			t.Fatalf("source %q changed narrative classification: ok=%v live=%#v", source, ok, live)
+		}
+	}
+}
+
 func TestNarrativeAccumulatorThoughtChunksEmitDeltasAndResetFinal(t *testing.T) {
 	t.Parallel()
 

@@ -57,9 +57,6 @@ func (a *narrativeAccumulator) observeBarrier(event *session.Event) {
 	if a == nil || event == nil || event.Scope == nil || event.Protocol == nil {
 		return
 	}
-	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(event.Scope.Source)), "acp") {
-		return
-	}
 	switch eventUpdateType(event) {
 	case string(session.ProtocolUpdateTypeToolCall), string(session.ProtocolUpdateTypeToolUpdate), string(session.ProtocolUpdateTypePlan):
 		a.final.Reset()
@@ -80,9 +77,6 @@ func (a *narrativeAccumulator) finalAssistantEvent() *session.Event {
 
 func isControllerNarrativeChunk(event *session.Event) bool {
 	if event == nil || event.Protocol == nil || event.Scope == nil {
-		return false
-	}
-	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(event.Scope.Source)), "acp") {
 		return false
 	}
 	switch eventUpdateType(event) {

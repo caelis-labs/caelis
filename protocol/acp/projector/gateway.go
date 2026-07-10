@@ -115,10 +115,6 @@ func isLiveStreamingNarrativeEvent(event *session.Event) bool {
 	if event.Scope == nil {
 		return false
 	}
-	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(event.Scope.Source)), "acp") &&
-		event.Scope.Controller.Kind != session.ControllerKindACP {
-		return false
-	}
 	updateType := strings.TrimSpace(session.ProtocolSessionUpdateType(event))
 	switch updateType {
 	case string(session.ProtocolUpdateTypeAgentMessage), string(session.ProtocolUpdateTypeAgentThought):
