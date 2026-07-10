@@ -28,14 +28,6 @@ package github.com/caelis-labs/caelis/agent-sdk
       RunLifecycleStatusCompleted       RunLifecycleStatus = "completed"
   )
   const (
-      RunLimitModelCalls RunLimitKind = "model_calls"
-      RunLimitToolCalls  RunLimitKind = "tool_calls"
-      RunLimitTurns      RunLimitKind = "turns"
-      RunLimitWallTime   RunLimitKind = "wall_time"
-      RunLimitTokens     RunLimitKind = "tokens"
-      RunLimitCost       RunLimitKind = "cost"
-  )
-  const (
       SubmissionKindConversation SubmissionKind = "conversation"
   )
   const (
@@ -47,8 +39,6 @@ package github.com/caelis-labs/caelis/agent-sdk
   func (e *GuardrailRejectionError) ErrorCode() errorcode.Code
   func (e *RunConflictError) Error() string
   func (e *RunConflictError) ErrorCode() errorcode.Code
-  func (e *RunLimitError) Error() string
-  func (e *RunLimitError) ErrorCode() errorcode.Code
   func (e *RunNotResumableError) Error() string
   func (e *RunNotResumableError) ErrorCode() errorcode.Code
   func (o ModelRequestOptions) OutputSpec() *model.OutputSpec
@@ -256,20 +246,6 @@ package github.com/caelis-labs/caelis/agent-sdk
       ActiveRunID string
   }
   type RunLifecycleStatus string
-  type RunLimitError struct {
-      Kind  RunLimitKind
-      Limit int64
-      Used  int64
-  }
-  type RunLimitKind string
-  type RunLimits struct {
-      MaxModelCalls int           `json:"max_model_calls,omitempty"`
-      MaxToolCalls  int           `json:"max_tool_calls,omitempty"`
-      MaxTurns      int           `json:"max_turns,omitempty"`
-      MaxWallTime   time.Duration `json:"max_wall_time,omitempty"`
-      MaxTokens     int           `json:"max_tokens,omitempty"`
-      MaxCostMicros int64         `json:"max_cost_micros,omitempty"`
-  }
   type RunNotResumableError struct {
       SessionRef session.SessionRef
       RunID      string
@@ -284,7 +260,6 @@ package github.com/caelis-labs/caelis/agent-sdk
       ApprovalRequester ApprovalRequester   `json:"-"`
       Agent             Agent               `json:"-"`
       AgentSpec         AgentSpec           `json:"-"`
-      Limits            RunLimits           `json:"limits,omitempty"`
   }
   type RunResult struct {
       Session session.Session `json:"session"`
@@ -1770,6 +1745,9 @@ package github.com/caelis-labs/caelis/agent-sdk/session
   )
   const ExecutionJournalSchemaVersion = 1
   const ToolExecutionSchemaVersion = 1
+  func (e *CommittedError) Error() string
+  func (e *CommittedError) ErrorCode() errorcode.Code
+  func (e *CommittedError) Unwrap() error
   func (e *EventConflictError) Error() string
   func (e *EventConflictError) ErrorCode() errorcode.Code
   func (e *EventConflictError) Is(target error) bool
@@ -1828,6 +1806,7 @@ package github.com/caelis-labs/caelis/agent-sdk/session
   func FilterEvents(events []*Event, limit int, includeTransient bool) []*Event
   func FilterReplayTranscriptEvents(events []*Event, includeTransient bool) []*Event
   func IsCanonicalHistoryEvent(event *Event) bool
+  func IsCommitted(err error) bool
   func IsInvocationVisibleEvent(event *Event) bool
   func IsJournal(event *Event) bool
   func IsMainInvocationVisibleEvent(event *Event) bool
@@ -1926,6 +1905,9 @@ package github.com/caelis-labs/caelis/agent-sdk/session
       ExpectedRevision *uint64           `json:"expected_revision,omitempty"`
       Binding          ControllerBinding `json:"binding"`
       Event            *Event            `json:"event"`
+  }
+  type CommittedError struct {
+      Err error
   }
   type ControllerBinding struct {
       Kind            ControllerKind `json:"kind,omitempty"`

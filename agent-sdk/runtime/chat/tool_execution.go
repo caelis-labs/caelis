@@ -3,11 +3,9 @@ package chat
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -49,6 +47,22 @@ func (a *Agent) executeToolCallWithProgress(
 		doneCh <- toolExecutionResult{message: message, event: event, err: err}
 	}()
 
+	drainProgress := func(done toolExecutionResult) (model.Message, *session.Event, error) {
+		// Always prefer the terminal tool result so execution journals are not
+		// dropped when a late progress yield is refused by the consumer.
+		for {
+			select {
+			case progress := <-progressCh:
+				if yieldProgress == nil {
+					continue
+				}
+				canonical, truncationMeta := canonicalToolResult(progress)
+				_ = yieldProgress(session.MarkUIOnly(toolResultEvent(call, canonical, nil, truncationMeta)))
+			default:
+				return done.message, done.event, done.err
+			}
+		}
+	}
 	for {
 		select {
 		case progress := <-progressCh:
@@ -60,19 +74,13 @@ func (a *Agent) executeToolCallWithProgress(
 				return model.Message{}, nil, context.Canceled
 			}
 		case done := <-doneCh:
-			for {
-				select {
-				case progress := <-progressCh:
-					canonical, truncationMeta := canonicalToolResult(progress)
-					if yieldProgress != nil && !yieldProgress(session.MarkUIOnly(toolResultEvent(call, canonical, nil, truncationMeta))) {
-						return model.Message{}, nil, context.Canceled
-					}
-				default:
-					return done.message, done.event, done.err
-				}
-			}
+			return drainProgress(done)
 		case <-ctx.Done():
-			return model.Message{}, nil, ctx.Err()
+			// Prefer a completed terminal result over abandoning an already-finished call.
+			// Cancel the in-flight tool and wait for it so journal terminal state is not dropped.
+			cancel()
+			done := <-doneCh
+			return drainProgress(done)
 		}
 	}
 }
@@ -100,10 +108,6 @@ func (a *Agent) executeToolCall(ctx context.Context, call model.ToolCall, observ
 		Observer:     observer,
 	})
 	if err != nil {
-		var limitErr *agent.RunLimitError
-		if errors.As(err, &limitErr) {
-			return model.Message{}, nil, err
-		}
 		executionJournal := result.Metadata[tool.MetadataExecutionJournal]
 		result = tool.Result{
 			ID:      strings.TrimSpace(call.ID),

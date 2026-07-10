@@ -251,6 +251,9 @@ func (a *Agent) executeStepToolCalls(
 	results := make([]stepToolCallResult, len(calls))
 	remaining := len(calls)
 	var firstErr error
+	// Nil the parent-done channel after the first cancel so select cannot
+	// busy-spin on a permanently ready ctx.Done while draining completions.
+	parentDone := ctx.Done()
 	for remaining > 0 {
 		select {
 		case progress, ok := <-progressCh:
@@ -273,9 +276,10 @@ func (a *Agent) executeStepToolCalls(
 				firstErr = result.err
 				cancel()
 			}
-		case <-ctx.Done():
+		case <-parentDone:
+			// Drain in-flight completions so terminal tool journals are not dropped.
 			cancel()
-			return nil, nil, true, ctx.Err()
+			parentDone = nil
 		}
 	}
 	if progressCh != nil {

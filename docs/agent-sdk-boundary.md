@@ -179,21 +179,12 @@ Application code may still implement explicit procedures where needed. They
 are ordinary Control logic using SDK primitives, not a new deterministic
 workflow subsystem.
 
-## Runtime Safety Budgets
+## Runtime Safety
 
-`RunLimits` is scoped to one `Run`. Runtime enforces wall time for every local
-run and enforces model-call, completed-model-turn, tool-call, token, and cost
-budgets for agents assembled from `AgentSpec`, where it owns the injected model
-and tool boundaries. Token and cost limits use provider-reported usage;
-`CostMicros` is one millionth of the host's configured billing currency unit.
-Runtime rejects those metered limits for prebuilt agents and ACP controllers
-until they declare an equivalent capability instead of silently accepting an
-unenforceable budget.
-
-Limit exhaustion is a typed `RunLimitError`. It aborts before an excess call is
-admitted, or before an over-budget final model response becomes canonical.
-Transient stream output may already have been observed. Run-limit failures are
-control failures, not model-visible tool results.
+Per-run step/model/tool/token/cost budgets are intentionally not part of the
+Agent SDK surface. Agent product turns are open-ended collaborative work, and
+fixed step budgets commonly abort healthy multi-step tool use. Loop protection
+belongs to a future control policy, not a generic per-Run counter.
 
 Model adapters implement `model.CapabilityProvider`; unknown is conservative,
 not a synonym for supported. Runtime validates inferred requirements from

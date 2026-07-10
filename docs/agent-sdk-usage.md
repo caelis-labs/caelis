@@ -99,8 +99,7 @@ func main() {
 
 Declare every capability the host requires in `AgentSpec` and on the model,
 tools, and sandbox executor. Runtime rejects an undeclared requirement before
-making the run durable. Set `RunRequest.Limits` to bound model calls, tool
-calls, completed turns, wall time, and provider-reported token or cost usage.
+making the run durable.
 
 ## Concurrency contract
 

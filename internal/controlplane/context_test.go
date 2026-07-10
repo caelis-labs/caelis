@@ -208,6 +208,42 @@ func TestCoordinatorDeactivatesNewEndpointWhenAtomicCommitFails(t *testing.T) {
 	}
 }
 
+func TestCoordinatorKeepsActivationWhenCommitReportsAlreadyCommitted(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	base, activeSession := newControlTestSession(t, "handoff-committed")
+	committedBinding := session.ControllerBinding{
+		Kind: session.ControllerKindACP, ControllerID: "remote-1", AgentName: "codex", EpochID: "remote-epoch",
+	}
+	sessions := committedHandoffService{
+		Service: base,
+		binding: committedBinding,
+		err:     &session.CommittedError{Err: errors.New("index write failed after commit")},
+	}
+	router, err := NewContextRouter(sessions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend := &recordingControllerBackend{activation: committedBinding}
+	coordinator, err := NewCoordinator(CoordinatorConfig{Sessions: sessions, Controllers: backend, Context: router})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, err := coordinator.HandoffController(ctx, agent.HandoffControllerRequest{
+		SessionRef: activeSession.SessionRef, Kind: session.ControllerKindACP, Agent: "codex",
+	})
+	if err != nil {
+		t.Fatalf("HandoffController() error = %v, want nil for durable commit with reporting failure", err)
+	}
+	if !reflect.DeepEqual(updated.Controller, committedBinding) {
+		t.Fatalf("controller = %#v, want durable binding %#v", updated.Controller, committedBinding)
+	}
+	if backend.deactivations != 0 {
+		t.Fatalf("deactivations = %d, want 0 when commit already durable", backend.deactivations)
+	}
+}
+
 func TestCoordinatorOwnsControllerProcessReattachAndBindingRefresh(t *testing.T) {
 	t.Parallel()
 
@@ -257,6 +293,23 @@ type failingHandoffService struct {
 
 func (s failingHandoffService) BindControllerWithEvent(context.Context, session.BindControllerWithEventRequest) (session.Session, *session.Event, error) {
 	return session.Session{}, nil, s.err
+}
+
+type committedHandoffService struct {
+	session.Service
+	binding session.ControllerBinding
+	err     error
+}
+
+func (s committedHandoffService) BindControllerWithEvent(_ context.Context, req session.BindControllerWithEventRequest) (session.Session, *session.Event, error) {
+	updated, err := s.BindController(context.Background(), session.BindControllerRequest{
+		SessionRef: req.SessionRef,
+		Binding:    s.binding,
+	})
+	if err != nil {
+		return session.Session{}, nil, err
+	}
+	return updated, nil, s.err
 }
 
 type recordingControllerBackend struct {

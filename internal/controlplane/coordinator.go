@@ -195,25 +195,43 @@ func (c *Coordinator) handoffController(ctx context.Context, req agent.HandoffCo
 	if !ok {
 		return session.Session{}, fmt.Errorf("controlplane: session service must support atomic controller handoff")
 	}
+	preCommitSession := session.CloneSession(activeSession)
 	expected := activeSession.Revision
-	activeSession, _, err = handoffs.BindControllerWithEvent(ctx, session.BindControllerWithEventRequest{
+	updated, _, err := handoffs.BindControllerWithEvent(ctx, session.BindControllerWithEventRequest{
 		SessionRef:       ref,
 		ExpectedRevision: &expected,
 		Binding:          to,
 		Event:            handoffEvent(from, to, strings.TrimSpace(req.Reason), c.clock()),
 	})
-	if err != nil && c.controllers != nil {
-		cleanupErr := error(nil)
-		if kind == session.ControllerKindACP {
-			cleanupErr = c.controllers.Deactivate(context.WithoutCancel(ctx), ref)
-		}
-		if from.Kind == session.ControllerKindACP {
-			rollbackErr := c.reactivatePreviousController(context.WithoutCancel(ctx), ref, activeSession, from)
-			cleanupErr = errors.Join(cleanupErr, rollbackErr)
-		}
-		return session.Session{}, errors.Join(err, cleanupErr)
+	if err == nil {
+		return updated, nil
 	}
-	return activeSession, err
+	// Post-commit reporting failures mean the durable binding already changed.
+	// Do not roll back live process activation against that durable state.
+	if session.IsCommitted(err) {
+		reloaded, loadErr := c.sessions.Session(context.WithoutCancel(ctx), ref)
+		if loadErr != nil {
+			return session.Session{}, errors.Join(err, loadErr)
+		}
+		// Recovery-on-read should expose the committed binding. If it does not,
+		// surface the committed error so callers do not treat a stale binding as success.
+		if !sameControllerBinding(reloaded.Controller, to) {
+			return reloaded, err
+		}
+		return reloaded, nil
+	}
+	if c.controllers == nil {
+		return session.Session{}, err
+	}
+	cleanupErr := error(nil)
+	if kind == session.ControllerKindACP {
+		cleanupErr = c.controllers.Deactivate(context.WithoutCancel(ctx), ref)
+	}
+	if from.Kind == session.ControllerKindACP {
+		rollbackErr := c.reactivatePreviousController(context.WithoutCancel(ctx), ref, preCommitSession, from)
+		cleanupErr = errors.Join(cleanupErr, rollbackErr)
+	}
+	return session.Session{}, errors.Join(err, cleanupErr)
 }
 
 func (c *Coordinator) reactivatePreviousController(ctx context.Context, ref session.SessionRef, activeSession session.Session, from session.ControllerBinding) error {
@@ -282,6 +300,16 @@ func sameControllerAgent(binding session.ControllerBinding, agentName string) bo
 		}
 	}
 	return false
+}
+
+// sameControllerBinding compares durable controller identity, ignoring
+// presentation fields that stores may normalize (source, attached_at).
+func sameControllerBinding(left session.ControllerBinding, right session.ControllerBinding) bool {
+	return left.Kind == right.Kind &&
+		strings.TrimSpace(left.ControllerID) == strings.TrimSpace(right.ControllerID) &&
+		strings.TrimSpace(left.AgentName) == strings.TrimSpace(right.AgentName) &&
+		strings.TrimSpace(left.EpochID) == strings.TrimSpace(right.EpochID) &&
+		strings.TrimSpace(left.RemoteSessionID) == strings.TrimSpace(right.RemoteSessionID)
 }
 
 func handoffEvent(from session.ControllerBinding, to session.ControllerBinding, reason string, now time.Time) *session.Event {

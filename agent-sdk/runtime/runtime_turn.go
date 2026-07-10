@@ -49,7 +49,6 @@ func (r *Runtime) resolveAgent(
 		return nil, err
 	}
 	modeName, _ := r.policyForName(ctx, r.policyMode(spec))
-	spec.Model = wrapModelForRunLimits(spec.Model, runBudgetFromContext(ctx))
 	spec.Model = r.wrapModelForAutoCompaction(ref, spec.Model)
 	spec.Model = r.wrapModelForLifecycle(spec.Model)
 	spec.Tools = r.wrapToolsForRuntime(activeSession, ref, spec, runtimeToolContext{
@@ -69,7 +68,6 @@ func (r *Runtime) resolveAgent(
 		runID:      strings.TrimSpace(runID),
 		turnID:     strings.TrimSpace(turnID),
 	})
-	spec.Tools = wrapToolsForRunLimits(spec.Tools, runBudgetFromContext(ctx))
 	spec.Tools = r.wrapToolsForLifecycle(spec.Tools)
 	return r.agentFactory.NewAgent(ctx, spec)
 }

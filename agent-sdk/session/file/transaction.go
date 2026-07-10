@@ -19,26 +19,9 @@ const (
 	transactionSuffix  = ".txn.json"
 )
 
-// CommittedError reports that the WAL commit point was durable even though
-// applying or indexing the transaction returned an error. Retrying with the
-// same stable event IDs is safe and idempotent.
-type CommittedError struct {
-	Err error
-}
-
-func (e *CommittedError) Error() string {
-	if e == nil || e.Err == nil {
-		return "agent-sdk/session/file: transaction committed"
-	}
-	return "agent-sdk/session/file: transaction committed: " + e.Err.Error()
-}
-
-func (e *CommittedError) Unwrap() error {
-	if e == nil {
-		return nil
-	}
-	return e.Err
-}
+// CommittedError is the file-store alias for the durable post-commit signal.
+// Prefer session.CommittedError / session.IsCommitted in new call sites.
+type CommittedError = session.CommittedError
 
 type persistedTransaction struct {
 	Kind     string            `json:"kind"`

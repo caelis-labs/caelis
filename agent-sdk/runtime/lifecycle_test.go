@@ -18,11 +18,11 @@ func TestRuntimeEmitsTypedRunTurnModelAndToolLifecycle(t *testing.T) {
 	t.Parallel()
 
 	var calls atomic.Int64
-	llm := limitTestModel{generate: func(context.Context, *model.Request) *model.Response {
+	llm := scriptedTestModel{generate: func(context.Context, *model.Request) *model.Response {
 		if calls.Add(1) == 1 {
-			return limitToolResponse("probe-1", "probe")
+			return toolCallResponse("probe-1", "probe")
 		}
-		return limitTextResponse("done", model.Usage{})
+		return textResponse("done", model.Usage{})
 	}}
 	probe := tool.NamedTool{Def: tool.Definition{Name: "probe"}, Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
 		return tool.Result{ID: call.ID, Name: call.Name}, nil

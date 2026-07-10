@@ -300,18 +300,18 @@ func (s *Store) writeDocumentWithEvents(doc persistedDocument, events []*session
 	record := persistedTransaction{Kind: transactionKind, Version: transactionVersion, Document: doc, Events: events}
 	if err := s.writeTransaction(txnPath, record); err != nil {
 		if documentWriteCommitted(err) {
-			return &CommittedError{Err: err}
+			return &session.CommittedError{Err: err}
 		}
 		return err
 	}
 	if err := s.injectTransactionFault("after_commit"); err != nil {
-		return &CommittedError{Err: err}
+		return &session.CommittedError{Err: err}
 	}
 	if err := s.applyTransaction(txnPath, record); err != nil {
 		if documentWriteCommitted(err) {
-			return &CommittedError{Err: err}
+			return &session.CommittedError{Err: err}
 		}
-		return &CommittedError{Err: err}
+		return &session.CommittedError{Err: err}
 	}
 	return nil
 }

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -30,6 +31,7 @@ func (t journaledTool) Call(ctx context.Context, call tool.Call) (tool.Result, e
 		now = time.Now
 	}
 	createdAt := now()
+	var mu sync.Mutex
 	record := session.NormalizeToolExecution(session.ToolExecution{
 		Schema:      session.ToolExecutionSchemaVersion,
 		Key:         session.ExecutionKey{SessionID: t.sessionRef.SessionID, RunID: t.runID, TurnID: t.turnID, StepID: strings.TrimSpace(call.ID), ToolCallID: strings.TrimSpace(call.ID)},
@@ -69,10 +71,19 @@ func (t journaledTool) Call(ctx context.Context, call tool.Call) (tool.Result, e
 	}
 
 	requestCancellation := func() error {
+		mu.Lock()
+		defer mu.Unlock()
+		if record.Status != session.ToolExecutionStarted {
+			return nil
+		}
 		previous := record
 		record.Revision++
 		record.Status = session.ToolExecutionCancelRequested
-		record.Reason = ctx.Err().Error()
+		if ctx.Err() != nil {
+			record.Reason = ctx.Err().Error()
+		} else {
+			record.Reason = "cancellation requested"
+		}
 		record.UpdatedAt = now()
 		previousStep := step
 		step.Revision++
@@ -95,12 +106,12 @@ func (t journaledTool) Call(ctx context.Context, call tool.Call) (tool.Result, e
 	result, callErr := t.base.Call(ctx, call)
 	close(callFinished)
 	<-cancelWatcherFinished
-	if ctx.Err() != nil && record.Status == session.ToolExecutionStarted {
-		cancelJournalErr = requestCancellation()
-	}
 	if cancelJournalErr != nil {
 		return result, errors.Join(callErr, cancelJournalErr)
 	}
+
+	mu.Lock()
+	defer mu.Unlock()
 	record.Revision++
 	record.UpdatedAt = now()
 	resultRaw, marshalErr := json.Marshal(result)
@@ -149,10 +160,6 @@ func (t journaledTool) Call(ctx context.Context, call tool.Call) (tool.Result, e
 	}
 	result.Metadata[tool.MetadataExecutionJournal] = journalValue
 	return result, callErr
-}
-
-func (t journaledTool) append(ctx context.Context, previous session.ToolExecution, next session.ToolExecution) error {
-	return t.appendEntry(ctx, previous, next, session.ExecutionRecord{}, session.ExecutionRecord{})
 }
 
 func (t journaledTool) appendEntry(

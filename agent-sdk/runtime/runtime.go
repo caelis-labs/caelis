@@ -179,14 +179,6 @@ func (r *Runtime) Run(
 	if err != nil {
 		return agent.RunResult{}, err
 	}
-	if limitsRequireRuntimeInstrumentation(req.Limits) {
-		switch {
-		case activeSession.Controller.Kind == session.ControllerKindACP:
-			return agent.RunResult{}, fmt.Errorf("agent-sdk/runtime: model, tool, turn, token, and cost limits require an SDK-instrumented agent; ACP controller capabilities are not declared")
-		case req.Agent != nil:
-			return agent.RunResult{}, fmt.Errorf("agent-sdk/runtime: model, tool, turn, token, and cost limits require AgentSpec assembly; prebuilt Agent capabilities are not declared")
-		}
-	}
 	if activeSession.Controller.Kind != session.ControllerKindACP && req.Agent == nil {
 		if err := validateRunRequestAgentSpec(req); err != nil {
 			return agent.RunResult{}, err
@@ -196,10 +188,10 @@ func (r *Runtime) Run(
 	if err != nil {
 		return agent.RunResult{}, err
 	}
-	runCtx, cancel, err := prepareRunContext(ctx, req.Limits, r.now())
-	if err != nil {
-		return agent.RunResult{}, err
+	if ctx == nil {
+		ctx = context.Background()
 	}
+	runCtx, cancel := context.WithCancel(ctx)
 	if activeSession.Controller.Kind == session.ControllerKindACP {
 		return r.runACPControllerTurn(runCtx, cancel, activeSession, ref, req)
 	}
@@ -279,7 +271,6 @@ func (r *Runtime) executeKernelTurn(
 		})
 	})
 	if err := lifecycleErr; err != nil {
-		err = translateRunLimitError(ctx, err)
 		journalStatus := session.ExecutionFailed
 		if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
 			journalStatus = session.ExecutionCancelled

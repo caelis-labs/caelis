@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -57,6 +58,36 @@ func (e *RevisionConflictError) Error() string {
 func (e *RevisionConflictError) Is(target error) bool { return target == ErrRevisionConflict }
 
 func (e *RevisionConflictError) ErrorCode() errorcode.Code { return errorcode.Conflict }
+
+// CommittedError reports that a durable store committed a mutation even though
+// post-commit apply or reporting returned an error. Callers must treat the
+// mutation as durable: re-read state and retry with the same idempotency
+// identity rather than inventing a new write or rolling back process state.
+type CommittedError struct {
+	Err error
+}
+
+func (e *CommittedError) Error() string {
+	if e == nil || e.Err == nil {
+		return "agent-sdk/session: mutation committed"
+	}
+	return "agent-sdk/session: mutation committed: " + e.Err.Error()
+}
+
+func (e *CommittedError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+func (e *CommittedError) ErrorCode() errorcode.Code { return errorcode.UnknownOutcome }
+
+// IsCommitted reports whether err is a post-commit reporting failure.
+func IsCommitted(err error) bool {
+	var committed *CommittedError
+	return errors.As(err, &committed)
+}
 
 // EventConflictError reports a stable event ID reused for different content.
 type EventConflictError struct {

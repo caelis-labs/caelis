@@ -119,7 +119,6 @@ func (r *Runtime) executeACPControllerTurn(
 			Event:      userEvent,
 		})
 		if err != nil {
-			err = translateRunLimitError(ctx, err)
 			r.setRunState(ref.SessionID, agent.RunState{
 				Status:      interruptedOrFailedStatus(ctx, err),
 				ActiveRunID: runID,
@@ -144,7 +143,6 @@ func (r *Runtime) executeACPControllerTurn(
 	}
 	contextPrelude, contextSeq, err := r.buildControllerTurnContext(ctx, activeSession, ref, turnID)
 	if err != nil {
-		err = translateRunLimitError(ctx, err)
 		r.setRunState(ref.SessionID, agent.RunState{Status: agent.RunLifecycleStatusFailed, ActiveRunID: runID, LastError: err.Error(), UpdatedAt: r.now()})
 		handle.publishError(err)
 		return
@@ -179,7 +177,6 @@ func (r *Runtime) executeACPControllerTurn(
 		})
 	})
 	if err != nil {
-		err = translateRunLimitError(ctx, err)
 		r.setRunState(ref.SessionID, agent.RunState{
 			Status:      interruptedOrFailedStatus(ctx, err),
 			ActiveRunID: runID,
@@ -203,7 +200,6 @@ func (r *Runtime) executeACPControllerTurn(
 			Publisher:     handle,
 			IsUserEcho:    isACPControllerUserEcho,
 		}); err != nil {
-			err = translateRunLimitError(ctx, err)
 			r.setRunState(ref.SessionID, agent.RunState{
 				Status:      interruptedOrFailedStatus(ctx, err),
 				ActiveRunID: runID,
@@ -214,7 +210,6 @@ func (r *Runtime) executeACPControllerTurn(
 			return
 		}
 		if err := r.updateControllerContextCheckpoint(ctx, ref); err != nil {
-			err = translateRunLimitError(ctx, err)
 			r.setRunState(ref.SessionID, agent.RunState{
 				Status:      interruptedOrFailedStatus(ctx, err),
 				ActiveRunID: runID,

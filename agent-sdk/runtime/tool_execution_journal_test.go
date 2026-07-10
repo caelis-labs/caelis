@@ -91,14 +91,14 @@ func TestRuntimeRecoveryMarksStartedExecutionUnknownWithoutCallingTool(t *testin
 		Key:      session.ExecutionKey{SessionID: active.SessionID, RunID: "run-old", TurnID: "turn-old", StepID: "call-1", ToolCallID: "call-1"},
 		Revision: 1, ToolName: "WRITE", EffectClass: string(tool.EffectNonIdempotent), Status: session.ToolExecutionPrepared,
 	})
-	if err := writer.append(context.Background(), session.ToolExecution{}, record); err != nil {
+	if err := writer.appendEntry(context.Background(), session.ToolExecution{}, record, session.ExecutionRecord{}, session.ExecutionRecord{}); err != nil {
 		t.Fatalf("append prepared: %v", err)
 	}
 	for _, status := range []session.ToolExecutionStatus{session.ToolExecutionApproved, session.ToolExecutionStarted} {
 		previous := record
 		record.Revision++
 		record.Status = status
-		if err := writer.append(context.Background(), previous, record); err != nil {
+		if err := writer.appendEntry(context.Background(), previous, record, session.ExecutionRecord{}, session.ExecutionRecord{}); err != nil {
 			t.Fatalf("append %s: %v", status, err)
 		}
 	}

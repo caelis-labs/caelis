@@ -26,7 +26,7 @@ func TestCodeOfAcrossSupportedSDKContracts(t *testing.T) {
 		{name: "session not found", err: session.ErrSessionNotFound, code: errorcode.NotFound},
 		{name: "session revision", err: &session.RevisionConflictError{}, code: errorcode.Conflict},
 		{name: "run conflict", err: &agent.RunConflictError{}, code: errorcode.Conflict},
-		{name: "run limit", err: &agent.RunLimitError{}, code: errorcode.ResourceExhausted},
+		{name: "session committed", err: &session.CommittedError{}, code: errorcode.UnknownOutcome},
 		{name: "model overflow", err: &model.ContextOverflowError{}, code: errorcode.ResourceExhausted},
 		{name: "model capability", err: &model.CapabilityError{}, code: errorcode.Unsupported},
 		{name: "sandbox capability", err: &sandbox.CapabilityError{}, code: errorcode.Unsupported},
