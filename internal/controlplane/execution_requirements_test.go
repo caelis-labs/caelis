@@ -19,8 +19,9 @@ func TestExecutionValidatorDerivesAndValidatesActualRequirements(t *testing.T) {
 		Sandbox: executionDescriptor{Descriptor: sandbox.Descriptor{
 			Backend: sandbox.BackendHost,
 			Capabilities: sandbox.CapabilitySet{
-				FileSystem:  true,
-				CommandExec: true,
+				FileSystem:    true,
+				CommandExec:   true,
+				AsyncSessions: true,
 			},
 		}},
 	})
@@ -48,7 +49,7 @@ func TestExecutionValidatorDerivesAndValidatesActualRequirements(t *testing.T) {
 				tool.NamedTool{Def: tool.Definition{
 					Name: "RUN_COMMAND",
 					ExecutionRequirements: &tool.ExecutionRequirements{
-						Sandbox: sandbox.CapabilitySet{CommandExec: true},
+						Sandbox: sandbox.CapabilitySet{CommandExec: true, AsyncSessions: true},
 					},
 				}},
 			},
@@ -61,8 +62,8 @@ func TestExecutionValidatorDerivesAndValidatesActualRequirements(t *testing.T) {
 	if !requirements.Model.ToolCalls || !requirements.Model.StructuredOutput || !requirements.Model.Streaming {
 		t.Fatalf("model requirements = %+v, want tool/structured/streaming", requirements.Model)
 	}
-	if !requirements.Sandbox.FileSystem || !requirements.Sandbox.CommandExec {
-		t.Fatalf("sandbox requirements = %+v, want filesystem and command exec", requirements.Sandbox)
+	if !requirements.Sandbox.FileSystem || !requirements.Sandbox.CommandExec || !requirements.Sandbox.AsyncSessions {
+		t.Fatalf("sandbox requirements = %+v, want filesystem, command exec, and async sessions", requirements.Sandbox)
 	}
 }
 
@@ -70,10 +71,11 @@ func TestExecutionValidatorFailsClosedBeforeUnsupportedExecution(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name    string
-		model   model.Capabilities
-		sandbox sandbox.CapabilitySet
-		want    any
+		name       string
+		model      model.Capabilities
+		sandbox    sandbox.CapabilitySet
+		want       any
+		capability sandbox.Capability
 	}{
 		{
 			name:    "model tool calls",
@@ -81,9 +83,17 @@ func TestExecutionValidatorFailsClosedBeforeUnsupportedExecution(t *testing.T) {
 			want:    new(model.CapabilityError),
 		},
 		{
-			name:  "sandbox command execution",
-			model: model.Capabilities{ToolCalls: true},
-			want:  new(sandbox.CapabilityError),
+			name:       "sandbox command execution",
+			model:      model.Capabilities{ToolCalls: true},
+			want:       new(sandbox.CapabilityError),
+			capability: sandbox.CapabilityCommandExec,
+		},
+		{
+			name:       "sandbox async sessions",
+			model:      model.Capabilities{ToolCalls: true},
+			sandbox:    sandbox.CapabilitySet{CommandExec: true},
+			want:       new(sandbox.CapabilityError),
+			capability: sandbox.CapabilityAsyncSessions,
 		},
 	}
 	for _, tt := range tests {
@@ -103,7 +113,7 @@ func TestExecutionValidatorFailsClosedBeforeUnsupportedExecution(t *testing.T) {
 				Tools: []tool.Tool{tool.NamedTool{Def: tool.Definition{
 					Name: "RUN_COMMAND",
 					ExecutionRequirements: &tool.ExecutionRequirements{
-						Sandbox: sandbox.CapabilitySet{CommandExec: true},
+						Sandbox: sandbox.CapabilitySet{CommandExec: true, AsyncSessions: true},
 					},
 				}}},
 			}})
@@ -117,6 +127,9 @@ func TestExecutionValidatorFailsClosedBeforeUnsupportedExecution(t *testing.T) {
 				var got *sandbox.CapabilityError
 				if !errors.As(err, &got) {
 					t.Fatalf("error = %v, want %T", err, want)
+				}
+				if got.Capability != tt.capability {
+					t.Fatalf("capability = %q, want %q", got.Capability, tt.capability)
 				}
 			}
 		})

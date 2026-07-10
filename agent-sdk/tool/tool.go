@@ -331,6 +331,10 @@ func CloneDefinition(in Definition) Definition {
 	out.Description = strings.TrimSpace(in.Description)
 	out.InputSchema = jsonvalue.CloneMap(in.InputSchema)
 	out.Metadata = jsonvalue.CloneMap(in.Metadata)
+	if in.ExecutionRequirements != nil {
+		requirements := *in.ExecutionRequirements
+		out.ExecutionRequirements = &requirements
+	}
 	return out
 }
 

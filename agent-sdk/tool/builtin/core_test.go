@@ -83,8 +83,8 @@ func TestCoreToolsDeclareActualSandboxRequirements(t *testing.T) {
 				t.Fatalf("%s requirements = %+v, want filesystem", definition.Name, requirements)
 			}
 		case definition.Name == shell.RunCommandToolName:
-			if requirements == nil || !requirements.Sandbox.CommandExec {
-				t.Fatalf("%s requirements = %+v, want command exec", definition.Name, requirements)
+			if requirements == nil || !requirements.Sandbox.CommandExec || !requirements.Sandbox.AsyncSessions {
+				t.Fatalf("%s requirements = %+v, want command exec and async sessions", definition.Name, requirements)
 			}
 		default:
 			if requirements != nil {

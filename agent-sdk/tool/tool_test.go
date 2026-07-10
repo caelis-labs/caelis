@@ -6,7 +6,22 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 )
+
+func TestCloneDefinitionIsolatesExecutionRequirements(t *testing.T) {
+	t.Parallel()
+
+	original := Definition{ExecutionRequirements: &ExecutionRequirements{
+		Sandbox: sandbox.CapabilitySet{CommandExec: true, AsyncSessions: true},
+	}}
+	clone := CloneDefinition(original)
+	clone.ExecutionRequirements.Sandbox.CommandExec = false
+	clone.ExecutionRequirements.Sandbox.AsyncSessions = false
+	if !original.ExecutionRequirements.Sandbox.CommandExec || !original.ExecutionRequirements.Sandbox.AsyncSessions {
+		t.Fatalf("mutating clone changed original requirements: %+v", original.ExecutionRequirements)
+	}
+}
 
 func TestDefinitionsAndModelSpecsCloneStableToolContracts(t *testing.T) {
 	t.Parallel()
