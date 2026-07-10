@@ -93,15 +93,30 @@ func normalizeEvent(activeSession session.Session, turnID string, event *session
 	if event.Actor.Kind == "" {
 		event.Actor = defaultActorForEvent(event)
 	}
-	if strings.TrimSpace(event.IdempotencyKey) == "" && event.Tool != nil {
-		switch session.EventTypeOf(event) {
-		case session.EventTypeToolCall, session.EventTypeToolResult:
-			if toolID := strings.TrimSpace(event.Tool.ID); toolID != "" {
-				event.IdempotencyKey = fmt.Sprintf("%s:%s", session.EventTypeOf(event), toolID)
-			}
-		}
-	}
 	return event
+}
+
+func scopeRuntimeToolFactIdentity(event *session.Event, runID, turnID string, ordinal uint64) bool {
+	if event == nil || event.Tool == nil || strings.TrimSpace(event.IdempotencyKey) != "" {
+		return false
+	}
+	eventType := session.EventTypeOf(event)
+	if eventType != session.EventTypeToolCall && eventType != session.EventTypeToolResult {
+		return false
+	}
+	toolID := strings.TrimSpace(event.Tool.ID)
+	if toolID == "" {
+		return false
+	}
+	event.IdempotencyKey = fmt.Sprintf(
+		"%s:%s:%s:%d:%s",
+		eventType,
+		strings.TrimSpace(runID),
+		strings.TrimSpace(turnID),
+		ordinal,
+		toolID,
+	)
+	return true
 }
 
 func defaultScope(activeSession session.Session, turnID string) session.EventScope {
@@ -207,7 +222,13 @@ func (r *Runtime) handlePlanEvent(
 }
 
 func stableToolFactIdentity(event *session.Event) string {
-	if event == nil || event.Tool == nil {
+	if event == nil {
+		return ""
+	}
+	if identity := strings.TrimSpace(event.IdempotencyKey); identity != "" {
+		return identity
+	}
+	if event.Tool == nil {
 		return ""
 	}
 	return strings.TrimSpace(event.Tool.ID)

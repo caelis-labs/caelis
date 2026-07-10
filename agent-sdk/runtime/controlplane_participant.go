@@ -215,6 +215,7 @@ func (r *Runtime) executeACPParticipantTurn(
 	if turnResult.Handle == nil {
 		return
 	}
+	var toolFactOrdinal uint64
 	handle.setCancelHook(func() error {
 		return turnResult.Handle.Cancel().Err
 	})
@@ -225,7 +226,14 @@ func (r *Runtime) executeACPParticipantTurn(
 		TurnID:        turnID,
 		Source:        turnResult.Handle,
 		Publisher:     handle,
-		IsUserEcho:    isACPParticipantUserEcho,
+		Normalize: func(active session.Session, turn string, event *session.Event) *session.Event {
+			normalized := normalizeEvent(active, turn, event)
+			if scopeRuntimeToolFactIdentity(normalized, runID, turnID, toolFactOrdinal+1) {
+				toolFactOrdinal++
+			}
+			return normalized
+		},
+		IsUserEcho: isACPParticipantUserEcho,
 	}); err != nil {
 		handle.publishError(err)
 		return

@@ -189,6 +189,7 @@ func (r *Runtime) executeACPControllerTurn(
 		return
 	}
 	if turnResult.Handle != nil {
+		var toolFactOrdinal uint64
 		handle.setCancelHook(func() error {
 			journalErr := r.transitionRunTurnJournal(context.WithoutCancel(ctx), ref, runID, turnID, session.ExecutionCancelRequested, "run cancellation requested")
 			return errors.Join(journalErr, turnResult.Handle.Cancel().Err)
@@ -200,7 +201,14 @@ func (r *Runtime) executeACPControllerTurn(
 			TurnID:        turnID,
 			Source:        turnResult.Handle,
 			Publisher:     handle,
-			IsUserEcho:    isACPControllerUserEcho,
+			Normalize: func(active session.Session, turn string, event *session.Event) *session.Event {
+				normalized := normalizeEvent(active, turn, event)
+				if scopeRuntimeToolFactIdentity(normalized, runID, turnID, toolFactOrdinal+1) {
+					toolFactOrdinal++
+				}
+				return normalized
+			},
+			IsUserEcho: isACPControllerUserEcho,
 		}); err != nil {
 			r.setRunState(ref.SessionID, agent.RunState{
 				Status:      interruptedOrFailedStatus(ctx, err),

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -21,6 +22,7 @@ type journaledTool struct {
 	runID      string
 	turnID     string
 	now        func() time.Time
+	sequence   *atomic.Uint64
 }
 
 func (t journaledTool) Definition() tool.Definition { return tool.CloneDefinition(t.base.Definition()) }
@@ -32,10 +34,14 @@ func (t journaledTool) Call(ctx context.Context, call tool.Call) (tool.Result, e
 		now = time.Now
 	}
 	createdAt := now()
+	stepID := strings.TrimSpace(call.ID)
+	if t.sequence != nil {
+		stepID = fmt.Sprintf("tool-step-%d:%s", t.sequence.Add(1), stepID)
+	}
 	var mu sync.Mutex
 	record := session.NormalizeToolExecution(session.ToolExecution{
 		Schema:      session.ToolExecutionSchemaVersion,
-		Key:         session.ExecutionKey{SessionID: t.sessionRef.SessionID, RunID: t.runID, TurnID: t.turnID, StepID: strings.TrimSpace(call.ID), ToolCallID: strings.TrimSpace(call.ID)},
+		Key:         session.ExecutionKey{SessionID: t.sessionRef.SessionID, RunID: t.runID, TurnID: t.turnID, StepID: stepID, ToolCallID: strings.TrimSpace(call.ID)},
 		Revision:    1,
 		ToolName:    def.Name,
 		EffectClass: string(tool.EffectClassOf(def)),
@@ -46,7 +52,7 @@ func (t journaledTool) Call(ctx context.Context, call tool.Call) (tool.Result, e
 	})
 	step := session.NormalizeExecutionRecord(session.ExecutionRecord{
 		Schema: session.ExecutionJournalSchemaVersion, Kind: session.JournalKindStep,
-		SessionID: t.sessionRef.SessionID, RunID: t.runID, TurnID: t.turnID, StepID: strings.TrimSpace(call.ID),
+		SessionID: t.sessionRef.SessionID, RunID: t.runID, TurnID: t.turnID, StepID: stepID,
 		Revision: 1, Status: session.ExecutionPrepared, CreatedAt: createdAt, UpdatedAt: createdAt,
 	})
 	if err := t.appendEntry(ctx, session.ToolExecution{}, record, session.ExecutionRecord{}, step); err != nil {
@@ -215,11 +221,12 @@ func (t journaledTool) appendEntry(
 
 func (r *Runtime) wrapToolsForExecutionJournal(ref session.SessionRef, runID string, turnID string, tools []tool.Tool) []tool.Tool {
 	out := make([]tool.Tool, 0, len(tools))
+	sequence := &atomic.Uint64{}
 	for _, item := range tools {
 		if item == nil {
 			continue
 		}
-		out = append(out, journaledTool{base: item, sessions: r.sessions, sessionRef: session.NormalizeSessionRef(ref), runID: strings.TrimSpace(runID), turnID: strings.TrimSpace(turnID), now: r.now})
+		out = append(out, journaledTool{base: item, sessions: r.sessions, sessionRef: session.NormalizeSessionRef(ref), runID: strings.TrimSpace(runID), turnID: strings.TrimSpace(turnID), now: r.now, sequence: sequence})
 	}
 	return out
 }

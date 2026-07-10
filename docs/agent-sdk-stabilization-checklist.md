@@ -96,6 +96,14 @@ useful, but it no longer constitutes closing evidence for the reopened rows.
   a non-cooperative Agent after cancellation and observes durable
   `cancel_requested` before it returns; the live external ACP controller path
   proves the same ordering and fence preservation.
+- **P0-4 scoped tool-identity sub-slice:** canonical event idempotency uses
+  run/turn/ordinal scope while preserving the provider ToolCall ID inside the
+  paired model call/result. Tool-execution journals use a per-run step ordinal
+  in addition to the raw call ID. Two fresh file-backed Runtimes can therefore
+  persist separate `ollama-call-0` turns, one turn can use that same provider ID
+  in consecutive tool steps, and a third Runtime rebuilds both paired facts in
+  model context. P0-4 remains partial until the PLAN transaction digest covers
+  its complete persisted state mutation.
 
 ### Historical P1 implementation evidence
 

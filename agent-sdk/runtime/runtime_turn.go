@@ -96,8 +96,9 @@ func (r *Runtime) runWithOverflowRecovery(
 	batch *[]*session.Event,
 	sink *runner,
 ) error {
+	var toolFactOrdinal uint64
 	for {
-		attemptBatch, _, inputPersisted, err := r.runAttempt(ctx, activeSession, ref, runID, turnID, req, pendingInput, sink)
+		attemptBatch, _, inputPersisted, err := r.runAttempt(ctx, activeSession, ref, runID, turnID, req, pendingInput, sink, &toolFactOrdinal)
 		if inputPersisted {
 			pendingInput = nil
 		}
@@ -133,6 +134,7 @@ func (r *Runtime) runAttempt(
 	req agent.RunRequest,
 	pendingInput *session.Event,
 	sink *runner,
+	toolFactOrdinal *uint64,
 ) ([]*session.Event, bool, bool, error) {
 	invocation, err := r.prepareInvocationContext(ctx, activeSession, ref, req, pendingInput)
 	if err != nil {
@@ -191,6 +193,9 @@ func (r *Runtime) runAttempt(
 		}
 		emitted = true
 		normalized := normalizeEvent(activeSession, turnID, event)
+		if toolFactOrdinal != nil && scopeRuntimeToolFactIdentity(normalized, runID, turnID, *toolFactOrdinal+1) {
+			(*toolFactOrdinal)++
+		}
 		if session.IsCanonicalHistoryEvent(normalized) {
 			normalized, err = r.appendRuntimeEventOrLifecycle(ctx, activeSession, ref, turnID, normalized)
 			if err != nil {
