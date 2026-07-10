@@ -32,7 +32,16 @@ var (
 	_ agent.LiveRunAttacher         = (*WatchdogRuntime)(nil)
 	_ agent.ApprovalResolver        = (*WatchdogRuntime)(nil)
 	_ agent.ParticipantControlPlane = (*WatchdogRuntime)(nil)
+	_ PlacementExecutor             = (*WatchdogRuntime)(nil)
 )
+
+func (r *WatchdogRuntime) ExecutePlaced(ctx context.Context, ref session.SessionRef, execute func(context.Context) error) error {
+	placement, ok := r.runtime.(PlacementExecutor)
+	if !ok {
+		return fmt.Errorf("controlplane: decorated runtime does not support placed operations")
+	}
+	return placement.ExecutePlaced(ctx, ref, execute)
+}
 
 // WatchdogReason identifies a soft Control review trigger.
 type WatchdogReason string

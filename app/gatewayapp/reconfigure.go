@@ -92,6 +92,7 @@ type gatewayRuntimeBundle struct {
 	Gateway                     *kernelimpl.Gateway
 	Exec                        sandbox.Runtime
 	Engine                      *runtime.Runtime
+	Placement                   controlplane.PlacementExecutor
 	ACPControlPlane             *acpassembly.ControlPlane
 	MCP                         *mcp.Manager
 	RuntimeConfig               stackRuntimeConfig
@@ -294,6 +295,7 @@ func (s *Stack) buildGatewayRuntime(plan gatewayBuildPlan) (*gatewayRuntimeBundl
 		return nil, err
 	}
 	bundle.ACPControlPlane = acpControlPlane
+	bundle.Placement = watchdogRuntime
 	sessionControl, err := controlplane.NewSessionControl(controlCoordinator, watchdogRuntime)
 	if err != nil {
 		bundle.Close()
@@ -387,6 +389,7 @@ func (s *Stack) swapGatewayRuntime(bundle *gatewayRuntimeBundle) {
 	s.gateway = bundle.Gateway
 	s.exec = bundle.Exec
 	s.engine = bundle.Engine
+	s.placement = bundle.Placement
 	s.acpControlPlane = bundle.ACPControlPlane
 	s.mcpMgr = bundle.MCP
 	s.mu.Unlock()

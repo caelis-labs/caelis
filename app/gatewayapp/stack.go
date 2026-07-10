@@ -21,6 +21,7 @@ import (
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/modelregistry"
 	acpassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
+	"github.com/caelis-labs/caelis/internal/controlplane"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/ports/gateway"
 )
@@ -66,6 +67,7 @@ type Stack struct {
 	sandbox         SandboxConfig
 	exec            sandbox.Runtime
 	engine          *runtime.Runtime
+	placement       controlplane.PlacementExecutor
 	acpControlPlane *acpassembly.ControlPlane
 	taskStore       task.Store
 	gateway         *kernelimpl.Gateway

@@ -69,6 +69,44 @@ func TestLeasedRuntimeHeartbeatsUntilRunnerCompletesThenReleases(t *testing.T) {
 	}
 }
 
+func TestExecutePlacedCarriesFenceAndReleasesLease(t *testing.T) {
+	t.Parallel()
+
+	service := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	active, err := service.StartSession(context.Background(), session.StartSessionRequest{
+		AppName: "caelis", UserID: "user-1", PreferredSessionID: "placed-operation",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrapped, err := NewLeasedRuntime(LeasedRuntimeConfig{
+		Runtime: leaseTestRuntime{}, Leases: service, OwnerID: "host-a", TTL: time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := wrapped.ExecutePlaced(context.Background(), active.SessionRef, func(ctx context.Context) error {
+		guard := session.RuntimeMutationGuard(ctx)
+		if guard.Authority != session.MutationAuthorityRuntime || guard.LeaseID == "" || guard.FencingToken == 0 {
+			t.Fatalf("mutation guard = %#v, want live placement fence", guard)
+		}
+		_, acquireErr := service.AcquireSessionLease(context.Background(), session.AcquireSessionLeaseRequest{
+			SessionRef: active.SessionRef, OwnerID: "host-b", TTL: time.Second,
+		})
+		if !errors.Is(acquireErr, session.ErrLeaseConflict) {
+			t.Fatalf("competing acquire error = %v, want lease conflict", acquireErr)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("ExecutePlaced() error = %v", err)
+	}
+	if _, err := service.AcquireSessionLease(context.Background(), session.AcquireSessionLeaseRequest{
+		SessionRef: active.SessionRef, OwnerID: "host-b", TTL: time.Second,
+	}); err != nil {
+		t.Fatalf("acquire after placed operation = %v, want released lease", err)
+	}
+}
+
 func TestLeasedRuntimeCancelsRunWhenHeartbeatFails(t *testing.T) {
 	t.Parallel()
 

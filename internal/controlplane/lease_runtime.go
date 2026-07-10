@@ -21,7 +21,18 @@ var (
 	_ agent.LiveRunAttacher         = (*LeasedRuntime)(nil)
 	_ agent.ApprovalResolver        = (*LeasedRuntime)(nil)
 	_ agent.ParticipantControlPlane = (*LeasedRuntime)(nil)
+	_ PlacementExecutor             = (*LeasedRuntime)(nil)
 )
+
+func (r *LeasedRuntime) ExecutePlaced(ctx context.Context, ref session.SessionRef, execute func(context.Context) error) error {
+	if execute == nil {
+		return fmt.Errorf("controlplane: placed operation is required")
+	}
+	_, err := r.runWithLease(ctx, ref, func(runCtx context.Context) (agent.RunResult, error) {
+		return agent.RunResult{}, execute(runCtx)
+	})
+	return err
+}
 
 // LeasedRuntimeConfig configures the Control-owned placement guard around one
 // execution Runtime. The lease covers the asynchronous Runner lifetime.

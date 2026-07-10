@@ -40,7 +40,7 @@ Status values:
 | --- | --- | --- |
 | P1-1 ACP semantic completeness | closed | External and controller/subagent permission bridges use the lossless semantic codec through the final runtime approval; recovery keeps durable status in the journal/model payload while projecting only valid ACP tool enums |
 | P1-2 Control ownership completion | closed | Source is audit-only, including projection/narrative classification; system Agents continue to reuse the common Runtime pipeline |
-| P1-3 Durable continuation and placement | partial | StartSubagent and manual Compact must enter through the same leased/watchdog placement envelope as ordinary production runs |
+| P1-3 Durable continuation and placement | closed | StartSubagent and manual Compact enter through the same leased/watchdog placement envelope as ordinary production runs |
 | P1-4 Execution capability wiring | closed | Control derives and validates actual model, tool, and sandbox requirements; unsupported output/features do not silently degrade |
 | P1-5 Runtime liveness and observability | closed | Watchdog/TraceSink/guardrail bounds remain covered, and production built-in/ACP cancellation durably persists under lease fencing before non-cooperative work returns |
 | P1-6 Schema and compatibility | closed | Raw durable JSON migrates before typed decode and unknown-field corpus proves preservation; supported API is compared tag-to-tag with explicit waivers |
@@ -161,6 +161,10 @@ useful, but it no longer constitutes closing evidence for the reopened rows.
   writes are checked atomically by memory/file stores. Stream, live-attach,
   approval, and participant capabilities survive lease/watchdog decoration,
   and participant prompts use the same fenced watchdog envelope as main runs.
+  Synchronous Control operations use `PlacementExecutor` on that same
+  watchdog-over-leased runtime. `StartSubagent` and manual `Compact` receive a
+  live runtime mutation fence, reject competing placement, and release the
+  lease after the operation instead of calling the raw engine directly.
 - **P1-4 execution-requirements slice:** built-in tools declare their concrete
   sandbox dependencies, and the production Control host derives their union
   from the final augmented tool set. After surface request defaults are merged,

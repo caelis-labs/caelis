@@ -61,14 +61,24 @@ func (s *Stack) StartSubagentWithOptions(
 	}
 	s.mu.RLock()
 	engine := s.engine
+	placement := s.placement
 	s.mu.RUnlock()
 	if engine == nil {
 		return task.Snapshot{}, fmt.Errorf("gatewayapp: runtime is unavailable")
 	}
-	return engine.StartSubagentWithOptions(ctx, ref, agent, prompt, source, sdkruntime.StartSubagentOptions{
-		ApprovalRequester: opts.ApprovalRequester,
-		ApprovalMode:      opts.ApprovalMode,
+	if placement == nil {
+		return task.Snapshot{}, fmt.Errorf("gatewayapp: placement runtime is unavailable")
+	}
+	var snapshot task.Snapshot
+	err := placement.ExecutePlaced(ctx, ref, func(runCtx context.Context) error {
+		var err error
+		snapshot, err = engine.StartSubagentWithOptions(runCtx, ref, agent, prompt, source, sdkruntime.StartSubagentOptions{
+			ApprovalRequester: opts.ApprovalRequester,
+			ApprovalMode:      opts.ApprovalMode,
+		})
+		return err
 	})
+	return snapshot, err
 }
 
 func (s *Stack) ContinueSubagentByHandle(
@@ -116,10 +126,14 @@ func (s *Stack) CompactSession(ctx context.Context, ref session.SessionRef) erro
 	}
 	s.mu.RLock()
 	engine := s.engine
+	placement := s.placement
 	gw := s.gateway
 	s.mu.RUnlock()
 	if engine == nil {
 		return fmt.Errorf("gatewayapp: runtime is unavailable")
+	}
+	if placement == nil {
+		return fmt.Errorf("gatewayapp: placement runtime is unavailable")
 	}
 	if gw == nil || gw.Resolver() == nil {
 		return fmt.Errorf("gatewayapp: resolver is unavailable")
@@ -128,12 +142,14 @@ func (s *Stack) CompactSession(ctx context.Context, ref session.SessionRef) erro
 	if err != nil {
 		return err
 	}
-	_, err = engine.Compact(ctx, sdkruntime.CompactRequest{
-		SessionRef: ref,
-		Model:      resolved.RunRequest.AgentSpec.Model,
-		Trigger:    "manual",
+	return placement.ExecutePlaced(ctx, ref, func(runCtx context.Context) error {
+		_, compactErr := engine.Compact(runCtx, sdkruntime.CompactRequest{
+			SessionRef: ref,
+			Model:      resolved.RunRequest.AgentSpec.Model,
+			Trigger:    "manual",
+		})
+		return compactErr
 	})
-	return err
 }
 
 func defaultCompactionConfig(contextWindow int) sdkruntime.CompactionConfig {
