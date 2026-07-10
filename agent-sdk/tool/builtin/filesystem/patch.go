@@ -58,7 +58,8 @@ func (t *PatchTool) Definition() tool.Definition {
 			"required":             []string{"path", "edits"},
 			"additionalProperties": false,
 		},
-		Metadata: toolutil.AnnotationMetadata(false, true, true, false),
+		Metadata:              toolutil.AnnotationMetadata(false, true, true, false),
+		ExecutionRequirements: fileSystemExecutionRequirements(),
 	}
 }
 

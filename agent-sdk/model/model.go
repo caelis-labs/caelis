@@ -137,16 +137,14 @@ const (
 )
 
 // OutputMode identifies one provider-neutral desired output contract.
-// Providers translate this into their closest native request parameters, such
-// as response_format, response_schema, or format. Providers that do not support
-// a mode may ignore it and return ordinary text.
+// Providers translate supported modes into native request parameters. Runtime
+// validation rejects unsupported modes instead of silently degrading to text.
 type OutputMode string
 
 const (
-	OutputModeText     OutputMode = "text"
-	OutputModeJSON     OutputMode = "json"
-	OutputModeSchema   OutputMode = "schema"
-	OutputModeToolOnly OutputMode = "tool_only"
+	OutputModeText   OutputMode = "text"
+	OutputModeJSON   OutputMode = "json"
+	OutputModeSchema OutputMode = "schema"
 )
 
 // ResponseStatus identifies one model response lifecycle state.

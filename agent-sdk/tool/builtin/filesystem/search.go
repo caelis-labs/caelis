@@ -55,7 +55,8 @@ func (t *SearchTool) Definition() tool.Definition {
 			"required":             []string{"path", "pattern"},
 			"additionalProperties": false,
 		},
-		Metadata: toolutil.AnnotationMetadata(true, false, true, false),
+		Metadata:              toolutil.AnnotationMetadata(true, false, true, false),
+		ExecutionRequirements: fileSystemExecutionRequirements(),
 	}
 }
 

@@ -220,6 +220,13 @@ func (s *Stack) buildGatewayRuntime(plan gatewayBuildPlan) (*gatewayRuntimeBundl
 		tools = append(tools, searchTool)
 	}
 	tools = append(tools, mcpTools...)
+	executionValidator, err := controlplane.NewExecutionValidator(controlplane.ExecutionValidatorConfig{
+		Sandbox: sandboxRuntime,
+	})
+	if err != nil {
+		bundle.Close()
+		return nil, err
+	}
 
 	estimatedPrefixTokens := estimateModelPromptPrefixTokens(effectiveBaseMetadata, tools)
 	compactionCfg := defaultCompactionConfig(runtimeCfg.ContextWindow)
@@ -326,6 +333,7 @@ func (s *Stack) buildGatewayRuntime(plan gatewayBuildPlan) (*gatewayRuntimeBundl
 		Runtime:              leasedRuntime,
 		Control:              sessionControl,
 		Resolver:             resolver,
+		ExecutionValidator:   executionValidator,
 		DefaultApprovalMode:  kernelimpl.NormalizeApprovalMode(runtimeCfg.ApprovalMode),
 		ApprovalApprover:     approval.ReviewerAdapter{Reviewer: approvalReviewer},
 		ApprovalReviewer:     approvalReviewer,

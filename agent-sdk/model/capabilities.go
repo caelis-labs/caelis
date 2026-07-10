@@ -96,3 +96,45 @@ func MergeCapabilities(left, right Capabilities) Capabilities {
 		HostedTools:           left.HostedTools || right.HostedTools,
 	}
 }
+
+// OutputSpecError reports an invalid or unsupported output contract before a
+// provider request is attempted.
+type OutputSpecError struct {
+	Mode   OutputMode
+	Detail string
+}
+
+func (e *OutputSpecError) Error() string {
+	if e == nil {
+		return "<nil>"
+	}
+	detail := strings.TrimSpace(e.Detail)
+	if detail == "" {
+		detail = "unsupported output contract"
+	}
+	return fmt.Sprintf("model: output mode %q: %s", e.Mode, detail)
+}
+
+func (e *OutputSpecError) ErrorCode() errorcode.Code { return errorcode.Unsupported }
+
+// ValidateOutputSpec rejects output contracts that no provider-neutral
+// adapter can faithfully enforce.
+func ValidateOutputSpec(spec *OutputSpec) error {
+	if spec == nil {
+		return nil
+	}
+	if spec.MaxOutputTokens < 0 {
+		return &OutputSpecError{Mode: spec.Mode, Detail: "max_output_tokens must be non-negative"}
+	}
+	switch spec.Mode {
+	case "", OutputModeText, OutputModeJSON:
+		return nil
+	case OutputModeSchema:
+		if len(spec.JSONSchema) == 0 {
+			return &OutputSpecError{Mode: spec.Mode, Detail: "json_schema is required"}
+		}
+		return nil
+	default:
+		return &OutputSpecError{Mode: spec.Mode, Detail: "unsupported output mode"}
+	}
+}

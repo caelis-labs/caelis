@@ -48,7 +48,8 @@ func (t *GlobTool) Definition() tool.Definition {
 			"required":             []string{"pattern"},
 			"additionalProperties": false,
 		},
-		Metadata: toolutil.AnnotationMetadata(true, false, true, false),
+		Metadata:              toolutil.AnnotationMetadata(true, false, true, false),
+		ExecutionRequirements: fileSystemExecutionRequirements(),
 	}
 }
 

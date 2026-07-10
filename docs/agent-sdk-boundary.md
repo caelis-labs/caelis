@@ -177,6 +177,16 @@ Runtime safety also requires:
 - cancellation-request state distinct from proven terminal cancellation;
 - no unsafe continuation across an unknown side-effect boundary.
 
+For local built-in Agents, tool definitions declare concrete sandbox execution
+requirements. Control derives the union from the final augmented tool set plus
+the merged per-turn output and streaming request, then validates the selected
+model and sandbox descriptors before calling Runtime. ACP-controlled external
+Agents are validated by their ACP endpoint contract instead; local execution
+requirements are not incorrectly projected onto that remote invocation.
+Runtime repeats model/output validation as a defensive public boundary. Output
+contracts are strict: an unknown mode or schema mode without a schema is an
+error, never an implicit text fallback.
+
 Hosts may implement OpenTelemetry as an interceptor or sink adapter. The SDK
 does not depend on a telemetry implementation.
 

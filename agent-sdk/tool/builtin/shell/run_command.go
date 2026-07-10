@@ -88,6 +88,9 @@ func (t *RunCommandTool) Definition() tool.Definition {
 		},
 		Metadata:     toolutil.AnnotationMetadata(false, true, false, true),
 		Capabilities: tool.Capabilities{ParallelSafe: true},
+		ExecutionRequirements: &tool.ExecutionRequirements{
+			Sandbox: sandbox.CapabilitySet{CommandExec: true},
+		},
 	}
 }
 

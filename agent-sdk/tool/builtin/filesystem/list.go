@@ -47,7 +47,8 @@ func (t *ListTool) Definition() tool.Definition {
 			},
 			"additionalProperties": false,
 		},
-		Metadata: toolutil.AnnotationMetadata(true, false, true, false),
+		Metadata:              toolutil.AnnotationMetadata(true, false, true, false),
+		ExecutionRequirements: fileSystemExecutionRequirements(),
 	}
 }
 

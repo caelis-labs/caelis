@@ -899,6 +899,79 @@ func TestBeginTurnPassesIntentToResolver(t *testing.T) {
 	}
 }
 
+func TestBeginTurnValidatesFinalExecutionRequirementsBeforeRuntime(t *testing.T) {
+	t.Parallel()
+
+	activeSession := session.Session{SessionRef: session.SessionRef{
+		AppName: "caelis", UserID: "u", SessionID: "requirements", WorkspaceKey: "ws",
+	}}
+	runtime := &recordingRuntime{session: activeSession, ran: make(chan struct{})}
+	validationErr := errors.New("unsupported execution requirements")
+	validator := &recordingExecutionValidator{err: validationErr}
+	gw, err := New(Config{
+		Sessions:           staticSessionService{session: activeSession},
+		Runtime:            runtime,
+		Resolver:           staticResolver{resolved: ResolvedTurn{RunRequest: agent.RunRequest{AgentSpec: agent.AgentSpec{Name: "main"}}}},
+		ExecutionValidator: validator,
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	_, err = gw.BeginTurn(context.Background(), BeginTurnRequest{
+		SessionRef: activeSession.SessionRef,
+		Input:      "hello",
+		Surface:    "tui",
+	})
+	if !errors.Is(err, validationErr) {
+		t.Fatalf("BeginTurn() error = %v, want %v", err, validationErr)
+	}
+	if validator.calls != 1 {
+		t.Fatalf("validator calls = %d, want 1", validator.calls)
+	}
+	if !validator.request.Request.StreamEnabled(false) {
+		t.Fatalf("validated request = %+v, want merged surface stream requirement", validator.request.Request)
+	}
+	select {
+	case <-runtime.ran:
+		t.Fatal("runtime ran after execution requirements failed")
+	default:
+	}
+}
+
+func TestBeginTurnDoesNotApplyLocalRequirementsToACPController(t *testing.T) {
+	t.Parallel()
+
+	activeSession := session.Session{
+		SessionRef: session.SessionRef{AppName: "caelis", UserID: "u", SessionID: "external", WorkspaceKey: "ws"},
+		Controller: session.ControllerBinding{Kind: session.ControllerKindACP, ControllerID: "external-agent"},
+	}
+	runtime := &recordingRuntime{session: activeSession, ran: make(chan struct{})}
+	validator := &recordingExecutionValidator{err: errors.New("local requirements must not run")}
+	gw, err := New(Config{
+		Sessions:           staticSessionService{session: activeSession},
+		Runtime:            runtime,
+		Resolver:           staticResolver{},
+		ExecutionValidator: validator,
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	result, err := gw.BeginTurn(context.Background(), BeginTurnRequest{SessionRef: activeSession.SessionRef, Input: "hello"})
+	if err != nil {
+		t.Fatalf("BeginTurn() error = %v", err)
+	}
+	defer result.Handle.Close()
+	select {
+	case <-runtime.ran:
+	case <-time.After(2 * time.Second):
+		t.Fatal("external controller runtime did not run")
+	}
+	if validator.calls != 0 {
+		t.Fatalf("local validator calls = %d, want 0 for ACP controller", validator.calls)
+	}
+}
+
 func TestBeginTurnProjectsSubmissionReferencesBeforeResolver(t *testing.T) {
 	t.Parallel()
 
@@ -2363,6 +2436,18 @@ type recordingRuntime struct {
 	result  agent.RunResult
 	lastReq agent.RunRequest
 	ran     chan struct{}
+}
+
+type recordingExecutionValidator struct {
+	request agent.RunRequest
+	calls   int
+	err     error
+}
+
+func (v *recordingExecutionValidator) ValidateExecutionRequest(req agent.RunRequest) error {
+	v.calls++
+	v.request = req
+	return v.err
 }
 
 func (r *recordingRuntime) Run(_ context.Context, req agent.RunRequest) (agent.RunResult, error) {

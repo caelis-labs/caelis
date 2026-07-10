@@ -24,9 +24,12 @@ type Config struct {
 	Runtime agent.Runtime
 	// Control is injected by the product host; Gateway does not infer
 	// orchestration authority from the execution Runtime.
-	Control             agent.SessionControlPlane
-	Resolver            TurnResolver
-	RequestPolicy       RequestPolicy
+	Control       agent.SessionControlPlane
+	Resolver      TurnResolver
+	RequestPolicy RequestPolicy
+	// ExecutionValidator is injected by Control to validate the final assembled
+	// request after surface defaults are applied and before Runtime starts.
+	ExecutionValidator  ExecutionRequirementsValidator
 	DefaultApprovalMode ApprovalMode
 	ApprovalApprover    approval.Approver
 	ApprovalReviewer    ApprovalReviewer
@@ -44,6 +47,7 @@ type Gateway struct {
 	control              agent.SessionControlPlane
 	resolver             TurnResolver
 	request              RequestPolicy
+	executionValidator   ExecutionRequirementsValidator
 	defaultApprovalMode  ApprovalMode
 	approvalApprover     approval.Approver
 	approvalReviewer     ApprovalReviewer
@@ -55,6 +59,12 @@ type Gateway struct {
 	active   map[string]*turnHandle
 	bindings map[string]sessionBinding
 	nextID   atomic.Uint64
+}
+
+// ExecutionRequirementsValidator checks a fully assembled local invocation
+// after surface request defaults have been applied.
+type ExecutionRequirementsValidator interface {
+	ValidateExecutionRequest(agent.RunRequest) error
 }
 
 type sessionBinding struct {
@@ -105,6 +115,7 @@ func New(cfg Config) (*Gateway, error) {
 		control:              cfg.Control,
 		resolver:             cfg.Resolver,
 		request:              cfg.RequestPolicy,
+		executionValidator:   cfg.ExecutionValidator,
 		defaultApprovalMode:  NormalizeApprovalMode(string(cfg.DefaultApprovalMode)),
 		approvalApprover:     cfg.ApprovalApprover,
 		approvalReviewer:     cfg.ApprovalReviewer,

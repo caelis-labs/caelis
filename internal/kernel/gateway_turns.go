@@ -17,18 +17,18 @@ import (
 )
 
 func (g *Gateway) BeginTurn(ctx context.Context, req BeginTurnRequest) (BeginTurnResult, error) {
-	session, err := g.sessions.Session(ctx, req.SessionRef)
+	activeSession, err := g.sessions.Session(ctx, req.SessionRef)
 	if err != nil {
 		return BeginTurnResult{}, wrapSessionError(err)
 	}
-	req.SessionRef = session.SessionRef
+	req.SessionRef = activeSession.SessionRef
 	runCtx, cancel := context.WithCancel(ctx)
 	cancelFn := sync.OnceValue(func() bool {
 		cancel()
 		return true
 	})
 	g.mu.Lock()
-	if _, ok := g.active[session.SessionID]; ok {
+	if _, ok := g.active[activeSession.SessionID]; ok {
 		g.mu.Unlock()
 		return BeginTurnResult{}, &Error{
 			Kind:        KindConflict,
@@ -42,53 +42,63 @@ func (g *Gateway) BeginTurn(ctx context.Context, req BeginTurnRequest) (BeginTur
 		runID:                   g.allocateID("run"),
 		turnID:                  g.allocateID("turn"),
 		activeKind:              ActiveTurnKindKernel,
-		sessionRef:              session.SessionRef,
+		sessionRef:              activeSession.SessionRef,
 		createdAt:               g.clock(),
 		allowPendingSubmissions: true,
 		prepareSubmission: func(submitCtx context.Context, submitReq SubmitRequest) (SubmitRequest, error) {
-			return g.prepareSubmitRequest(submitCtx, session, submitReq)
+			return g.prepareSubmitRequest(submitCtx, activeSession, submitReq)
 		},
 		cancel: func() bool {
 			return cancelFn()
 		},
 	})
-	g.active[session.SessionID] = handle
+	g.active[activeSession.SessionID] = handle
 	g.mu.Unlock()
 
 	// Dispatch SessionStart hooks before resolving the first model invocation.
 	// Hook outputs are persisted as plugin context hints, not provider system messages.
-	if err := g.dispatchSessionStartHooks(ctx, session, handle); err != nil {
+	if err := g.dispatchSessionStartHooks(ctx, activeSession, handle); err != nil {
 		cancelFn()
 		handle.finish()
-		g.releaseActive(session.SessionID, handle)
+		g.releaseActive(activeSession.SessionID, handle)
 		return BeginTurnResult{}, fmt.Errorf("gateway: failed to dispatch SessionStart hooks: %w", err)
 	}
 
-	req, err = g.prepareBeginTurnRequest(ctx, session, req)
+	req, err = g.prepareBeginTurnRequest(ctx, activeSession, req)
 	if err != nil {
 		cancelFn()
 		handle.finish()
-		g.releaseActive(session.SessionID, handle)
+		g.releaseActive(activeSession.SessionID, handle)
 		return BeginTurnResult{}, err
 	}
-	resolved, err := g.resolveBeginTurn(ctx, session, req)
+	resolved, err := g.resolveBeginTurn(ctx, activeSession, req)
 	if err != nil {
 		cancelFn()
 		handle.finish()
-		g.releaseActive(session.SessionID, handle)
+		g.releaseActive(activeSession.SessionID, handle)
 		return BeginTurnResult{}, err
 	}
 	resolved.RunRequest.Request = resolved.RunRequest.Request.WithDefaults(g.requestOptions(req))
+	// ACP-controlled sessions execute through the external controller backend;
+	// local model/tool/sandbox requirements do not describe that invocation.
+	if g.executionValidator != nil && activeSession.Controller.Kind != session.ControllerKindACP {
+		if err := g.executionValidator.ValidateExecutionRequest(resolved.RunRequest); err != nil {
+			cancelFn()
+			handle.finish()
+			g.releaseActive(activeSession.SessionID, handle)
+			return BeginTurnResult{}, err
+		}
+	}
 	g.mu.Lock()
-	if g.active[session.SessionID] == handle {
-		g.noteActiveHandleLocked(session.SessionID, handle)
+	if g.active[activeSession.SessionID] == handle {
+		g.noteActiveHandleLocked(activeSession.SessionID, handle)
 	}
 	g.mu.Unlock()
 
-	go g.runTurn(runCtx, session, req, resolved, handle)
+	go g.runTurn(runCtx, activeSession, req, resolved, handle)
 
 	return BeginTurnResult{
-		Session: session,
+		Session: activeSession,
 		Handle:  handle,
 	}, nil
 }

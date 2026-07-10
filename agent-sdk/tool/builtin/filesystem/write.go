@@ -43,7 +43,8 @@ func (t *WriteTool) Definition() tool.Definition {
 			"required":             []string{"path", "content"},
 			"additionalProperties": false,
 		},
-		Metadata: toolutil.AnnotationMetadata(false, true, true, false),
+		Metadata:              toolutil.AnnotationMetadata(false, true, true, false),
+		ExecutionRequirements: fileSystemExecutionRequirements(),
 	}
 }
 

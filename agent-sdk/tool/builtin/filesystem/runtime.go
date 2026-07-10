@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
 type constraintAwareFileSystemRuntime interface {
@@ -20,6 +21,12 @@ func runtimeOrDefault(runtime sandbox.Runtime) (sandbox.Runtime, error) {
 		return nil, fmt.Errorf("tool: sandbox runtime is required")
 	}
 	return runtime, nil
+}
+
+func fileSystemExecutionRequirements() *tool.ExecutionRequirements {
+	return &tool.ExecutionRequirements{
+		Sandbox: sandbox.CapabilitySet{FileSystem: true},
+	}
 }
 
 func fileSystemFromRuntime(runtime sandbox.Runtime, meta map[string]any) sandbox.FileSystem {

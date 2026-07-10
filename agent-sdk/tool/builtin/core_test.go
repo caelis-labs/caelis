@@ -63,6 +63,37 @@ func TestBuildCoreToolsCreatesDefaultCodingGroup(t *testing.T) {
 	}
 }
 
+func TestCoreToolsDeclareActualSandboxRequirements(t *testing.T) {
+	t.Parallel()
+
+	rt, err := host.New(host.Config{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatalf("host.New() error = %v", err)
+	}
+	tools, err := BuildCoreTools(CoreToolsConfig{Runtime: rt})
+	if err != nil {
+		t.Fatalf("BuildCoreTools() error = %v", err)
+	}
+	for index, configuredTool := range tools {
+		definition := configuredTool.Definition()
+		requirements := definition.ExecutionRequirements
+		switch {
+		case index < 6:
+			if requirements == nil || !requirements.Sandbox.FileSystem {
+				t.Fatalf("%s requirements = %+v, want filesystem", definition.Name, requirements)
+			}
+		case definition.Name == shell.RunCommandToolName:
+			if requirements == nil || !requirements.Sandbox.CommandExec {
+				t.Fatalf("%s requirements = %+v, want command exec", definition.Name, requirements)
+			}
+		default:
+			if requirements != nil {
+				t.Fatalf("%s requirements = %+v, want no sandbox dependency", definition.Name, requirements)
+			}
+		}
+	}
+}
+
 func TestCoreToolSchemasDisallowUnknownRootProperties(t *testing.T) {
 	t.Parallel()
 

@@ -25,7 +25,7 @@ func TestAgentSpecCapabilityValidationRejectsUndeclaredRequestedFeatures(t *test
 		want     model.Capability
 	}{
 		{name: "tool calls", tools: []tool.Tool{tool.NamedTool{Def: tool.Definition{Name: "probe"}}}, want: model.CapabilityToolCalls},
-		{name: "structured output", output: &model.OutputSpec{Mode: model.OutputModeSchema}, want: model.CapabilityStructuredOutput},
+		{name: "structured output", output: &model.OutputSpec{Mode: model.OutputModeSchema, JSONSchema: map[string]any{"type": "object"}}, want: model.CapabilityStructuredOutput},
 		{name: "stream", stream: true, want: model.CapabilityStreaming},
 		{name: "parallel tool", tools: []tool.Tool{tool.NamedTool{Def: tool.Definition{Name: "probe", Capabilities: tool.Capabilities{ParallelSafe: true}}}}, want: model.CapabilityToolCalls},
 		{name: "reasoning continuation", declared: model.Capabilities{ReasoningContinuation: true}, want: model.CapabilityReasoningContinuation},
@@ -89,6 +89,35 @@ func TestRuntimeRejectsMissingCapabilitiesBeforeDurableRunMutation(t *testing.T)
 	}
 	if len(events) != 0 {
 		t.Fatalf("events = %#v, want no mutation after failed assembly", events)
+	}
+}
+
+func TestRuntimeRejectsUnsupportedOutputBeforeDurableRunMutation(t *testing.T) {
+	t.Parallel()
+
+	sessions, active := newTestSessionService(t, "output-preflight")
+	runtime, err := New(Config{Sessions: sessions, AgentFactory: chat.Factory{}})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	_, err = runtime.Run(context.Background(), agent.RunRequest{
+		SessionRef: active.SessionRef,
+		Input:      "must not degrade to text",
+		Request: agent.ModelRequestOptions{Output: &model.OutputSpec{
+			Mode: model.OutputMode("yaml"),
+		}},
+		AgentSpec: agent.AgentSpec{Name: "unsupported-output", Model: limitTestSerialToolModel{}},
+	})
+	var outputErr *model.OutputSpecError
+	if !errors.As(err, &outputErr) {
+		t.Fatalf("Run() error = %v, want OutputSpecError", err)
+	}
+	events, err := sessions.Events(context.Background(), session.EventsRequest{SessionRef: active.SessionRef})
+	if err != nil {
+		t.Fatalf("Events() error = %v", err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("events = %#v, want no mutation after unsupported output", events)
 	}
 }
 

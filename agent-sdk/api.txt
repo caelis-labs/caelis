@@ -558,10 +558,9 @@ package github.com/caelis-labs/caelis/agent-sdk/model
       MediaSourceLocalRef     MediaSourceKind = "local_ref"
   )
   const (
-      OutputModeText     OutputMode = "text"
-      OutputModeJSON     OutputMode = "json"
-      OutputModeSchema   OutputMode = "schema"
-      OutputModeToolOnly OutputMode = "tool_only"
+      OutputModeText   OutputMode = "text"
+      OutputModeJSON   OutputMode = "json"
+      OutputModeSchema OutputMode = "schema"
   )
   const (
       PartKindText       PartKind = "text"
@@ -611,6 +610,8 @@ package github.com/caelis-labs/caelis/agent-sdk/model
   func (e *ContextOverflowError) Error() string
   func (e *ContextOverflowError) ErrorCode() errorcode.Code
   func (e *ContextOverflowError) Unwrap() error
+  func (e *OutputSpecError) Error() string
+  func (e *OutputSpecError) ErrorCode() errorcode.Code
   func (e *RetryExhaustedError) DisplayMessage() string
   func (e *RetryExhaustedError) Error() string
   func (e *RetryExhaustedError) ErrorCode() errorcode.Code
@@ -672,6 +673,7 @@ package github.com/caelis-labs/caelis/agent-sdk/model
   func ToolSpecsFromDefinitions(defs []ToolDefinition) []ToolSpec
   func UserVisibleError(err error) string
   func ValidateCapabilities(modelName string, actual, required Capabilities) error
+  func ValidateOutputSpec(spec *OutputSpec) error
   func WithProviderRequestMetadata(ctx context.Context, metadata ProviderRequestMetadata) context.Context
   func WithRetry(llm LLM, cfg RetryConfig) LLM
   type APIType string
@@ -769,6 +771,10 @@ package github.com/caelis-labs/caelis/agent-sdk/model
       Mode            OutputMode     `json:"mode,omitempty"`
       JSONSchema      map[string]any `json:"json_schema,omitempty"`
       MaxOutputTokens int            `json:"max_output_tokens,omitempty"`
+  }
+  type OutputSpecError struct {
+      Mode   OutputMode
+      Detail string
   }
   type Part struct {
       Kind       PartKind        `json:"kind"`
@@ -2931,8 +2937,6 @@ package github.com/caelis-labs/caelis/agent-sdk/tool
   }
   type Capabilities struct {
       ParallelSafe bool `json:"parallel_safe,omitempty"`
-
-      Resumable bool `json:"resumable,omitempty"`
   }
   type Definition struct {
       Name         string         `json:"name,omitempty"`
@@ -2941,9 +2945,14 @@ package github.com/caelis-labs/caelis/agent-sdk/tool
       Metadata     map[string]any `json:"metadata,omitempty"`
       EffectClass  EffectClass    `json:"effect_class,omitempty"`
       Capabilities Capabilities   `json:"capabilities,omitempty"`
+
+      ExecutionRequirements *ExecutionRequirements `json:"execution_requirements,omitempty"`
   }
   type EffectClass string
   type ErrorCode = errorcode.Code
+  type ExecutionRequirements struct {
+      Sandbox sandbox.CapabilitySet `json:"sandbox,omitempty"`
+  }
   type NamedTool struct {
       Def    Definition
       Invoke func(context.Context, Call) (Result, error)

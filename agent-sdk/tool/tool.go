@@ -8,6 +8,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/internal/jsonvalue"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 )
 
 // Definition is the stable tool declaration exposed to runtimes and model
@@ -19,6 +20,16 @@ type Definition struct {
 	Metadata     map[string]any `json:"metadata,omitempty"`
 	EffectClass  EffectClass    `json:"effect_class,omitempty"`
 	Capabilities Capabilities   `json:"capabilities,omitempty"`
+	// ExecutionRequirements declares infrastructure capabilities consumed by
+	// this concrete tool implementation. Control validates their union against
+	// the actual configured execution services before starting a run.
+	ExecutionRequirements *ExecutionRequirements `json:"execution_requirements,omitempty"`
+}
+
+// ExecutionRequirements describes infrastructure a tool needs in addition to
+// model-side tool calling support.
+type ExecutionRequirements struct {
+	Sandbox sandbox.CapabilitySet `json:"sandbox,omitempty"`
 }
 
 // Capabilities declares execution facts that callers may safely rely on.
@@ -26,8 +37,6 @@ type Capabilities struct {
 	// ParallelSafe permits concurrent calls to the same tool instance. The tool
 	// remains responsible for its own synchronization and side-effect safety.
 	ParallelSafe bool `json:"parallel_safe,omitempty"`
-	// Resumable reports that a durable in-progress execution can be reattached.
-	Resumable bool `json:"resumable,omitempty"`
 }
 
 type EffectClass string

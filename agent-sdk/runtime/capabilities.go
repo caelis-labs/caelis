@@ -19,6 +19,9 @@ func validateRunRequestAgentSpec(req agent.RunRequest) error {
 }
 
 func validateAgentSpecCapabilities(specModel model.LLM, tools []tool.Tool, requestOutput *model.OutputSpec, stream bool, declared model.Capabilities) error {
+	if err := model.ValidateOutputSpec(requestOutput); err != nil {
+		return err
+	}
 	required := declared
 	if stream {
 		required.Streaming = true

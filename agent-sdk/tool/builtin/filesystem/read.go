@@ -60,7 +60,8 @@ func (t *ReadTool) Definition() tool.Definition {
 			"required":             []string{"path"},
 			"additionalProperties": false,
 		},
-		Metadata: toolutil.AnnotationMetadata(true, false, true, false),
+		Metadata:              toolutil.AnnotationMetadata(true, false, true, false),
+		ExecutionRequirements: fileSystemExecutionRequirements(),
 	}
 }
 
