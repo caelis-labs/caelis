@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -356,6 +357,43 @@ func (tm *taskRuntime) persistTaskEntry(ctx context.Context, entry *taskapi.Entr
 		return nil
 	}
 	return tm.store.Upsert(ctx, entry)
+}
+
+func (tm *taskRuntime) persistSpawnEntry(ctx context.Context, entry *taskapi.Entry) error {
+	if tm == nil || tm.store == nil || entry == nil {
+		return errors.New("agent-sdk/runtime: durable CAS task store is required before subagent spawn")
+	}
+	store, ok := tm.store.(taskapi.CASStore)
+	if !ok {
+		return errors.New("agent-sdk/runtime: subagent spawn requires task.CASStore")
+	}
+	expected := entry.Revision
+	persisted, err := store.Put(ctx, taskapi.PutRequest{Entry: entry, ExpectedRevision: expected})
+	if err != nil {
+		if !session.IsCommitted(err) {
+			return err
+		}
+		reloaded, loadErr := tm.store.Get(context.WithoutCancel(ctx), entry.TaskID)
+		if loadErr != nil || !sameSpawnEntryPhase(reloaded, entry) {
+			return errors.Join(err, loadErr)
+		}
+		persisted = reloaded
+	}
+	if persisted == nil {
+		return errors.New("agent-sdk/runtime: CAS task store returned no persisted spawn entry")
+	}
+	*entry = *taskapi.CloneEntry(persisted)
+	tm.updateTaskPersistence(entry)
+	return nil
+}
+
+func sameSpawnEntryPhase(stored *taskapi.Entry, requested *taskapi.Entry) bool {
+	if stored == nil || requested == nil {
+		return false
+	}
+	return strings.TrimSpace(stored.TaskID) == strings.TrimSpace(requested.TaskID) &&
+		taskSpecString(stored.Spec, "spawn_identity") == taskSpecString(requested.Spec, "spawn_identity") &&
+		taskStringValue(stored.Metadata["spawn_status"]) == taskStringValue(requested.Metadata["spawn_status"])
 }
 
 func (tm *taskRuntime) updateTaskPersistence(entry *taskapi.Entry) {

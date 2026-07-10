@@ -15,115 +15,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/task/agenthandle"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
-	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 )
-
-func (tm *taskRuntime) StartSubagent(
-	ctx context.Context,
-	activeSession session.Session,
-	ref session.SessionRef,
-	runner subagent.Runner,
-	req taskapi.SubagentStartRequest,
-) (taskapi.Snapshot, error) {
-	if runner == nil {
-		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: subagent runner is required")
-	}
-	taskID, err := subagentSpawnTaskID(ref, req.SpawnID)
-	if err != nil {
-		return taskapi.Snapshot{}, err
-	}
-	mode := strings.TrimSpace(req.Mode)
-	if mode == "" {
-		mode = strings.TrimSpace(tm.runtime.defaultPolicyMode)
-	}
-	spawnID := firstNonEmpty(strings.TrimSpace(req.SpawnID), taskID)
-	role, err := normalizeSubagentParticipantRole(req.Role)
-	if err != nil {
-		return taskapi.Snapshot{}, err
-	}
-	handle := tm.reserveSubagentHandle(activeSession, ref, req.Agent)
-	intent, existing, done, err := tm.beginSubagentSpawn(ctx, ref, taskID, spawnID, req.Agent, req.Prompt, handle, runner)
-	if done || err != nil {
-		return existing, err
-	}
-	childPrompt := subagentPromptWithContext(req.ContextPrelude, req.Prompt)
-	anchor, result, err := runner.Spawn(ctx, subagent.SpawnContext{
-		SessionRef:        session.NormalizeSessionRef(ref),
-		Session:           session.CloneSession(activeSession),
-		CWD:               strings.TrimSpace(activeSession.CWD),
-		TaskID:            taskID,
-		ParentCallID:      strings.TrimSpace(req.ParentCall),
-		Mode:              mode,
-		ApprovalMode:      strings.TrimSpace(req.ApprovalMode),
-		ApprovalRequester: req.Approval,
-		Streams:           tm,
-	}, delegation.Request{
-		Agent:  strings.TrimSpace(req.Agent),
-		Prompt: childPrompt,
-	})
-	if err != nil {
-		intent.State = taskapi.StateUnknownOutcome
-		setSpawnEntryStatus(intent, spawnStatusUnknownOutcome, err.Error())
-		_ = tm.persistTaskEntry(context.WithoutCancel(ctx), intent)
-		return taskapi.Snapshot{}, err
-	}
-	anchor.TaskID = taskID
-	now := tm.runtime.now()
-	task := &subagentTask{
-		ref: taskapi.Ref{
-			TaskID:     taskID,
-			SessionID:  strings.TrimSpace(anchor.SessionID),
-			TerminalID: subagentTerminalID(taskID),
-		},
-		sessionRef: session.NormalizeSessionRef(ref),
-		anchor:     delegation.CloneAnchor(anchor),
-		runner:     runner,
-		agent:      strings.TrimSpace(anchor.Agent),
-		handle:     handle,
-		title:      spawn.ToolName + " " + strings.TrimSpace(anchor.Agent),
-		prompt:     strings.TrimSpace(req.Prompt),
-		createdAt:  now,
-		revision:   intent.Revision,
-		state:      taskStateFromDelegation(result.State),
-		running:    result.State == delegation.StateRunning,
-		turnSeq:    1,
-		metadata: map[string]any{
-			"source":           firstNonEmpty(strings.TrimSpace(req.Source), "agent_spawn"),
-			"participant_role": string(role),
-			"spawn_status":     spawnStatusSpawned,
-			"spawn_identity":   spawnID,
-		},
-	}
-	task.applyResult(result)
-	task.seedStreamFromResult(result)
-	spawnedEntry := task.entrySnapshot(tm.runtime.now())
-	if err := tm.persistTaskEntry(ctx, spawnedEntry); err != nil {
-		return taskapi.Snapshot{}, tm.compensateSubagentSpawn(ctx, task, err, false)
-	}
-	task.revision = spawnedEntry.Revision
-	tm.mu.Lock()
-	tm.subagents[taskID] = task
-	pending := append([]stream.Frame(nil), tm.pending[taskID]...)
-	delete(tm.pending, taskID)
-	sessionID := strings.TrimSpace(ref.SessionID)
-	tm.order[sessionID] = append(tm.order[sessionID], taskID)
-	tm.mu.Unlock()
-	task.applyStreamFrames(pending)
-	if err := tm.attachSubagentParticipant(ctx, activeSession, task, strings.TrimSpace(req.ParentCall)); err != nil {
-		return taskapi.Snapshot{}, tm.compensateSubagentSpawn(ctx, task, err, false)
-	}
-	if err := tm.appendSideSubagentUserEvent(ctx, task, strings.TrimSpace(req.Prompt)); err != nil {
-		return taskapi.Snapshot{}, tm.compensateSubagentSpawn(ctx, task, err, true)
-	}
-	if err := tm.appendSideSubagentFinalEvent(ctx, task); err != nil {
-		return taskapi.Snapshot{}, tm.compensateSubagentSpawn(ctx, task, err, true)
-	}
-	if err := tm.markSubagentSpawnStatus(ctx, task, spawnStatusCommitted, ""); err != nil {
-		return taskapi.Snapshot{}, tm.compensateSubagentSpawn(ctx, task, err, true)
-	}
-	return task.snapshot(), nil
-}
 
 func subagentSpawnTaskID(ref session.SessionRef, spawnID string) (string, error) {
 	spawnID = strings.TrimSpace(spawnID)
@@ -670,6 +562,12 @@ func (tm *taskRuntime) rehydrateSubagentTask(entry *taskapi.Entry) *subagentTask
 		return nil
 	}
 	agent := taskSpecString(entry.Spec, "agent")
+	result := session.CloneState(entry.Result)
+	if len(result) == 0 {
+		if stored, ok := entry.Spec["spawn_result"].(map[string]any); ok {
+			result = session.CloneState(stored)
+		}
+	}
 	task := &subagentTask{
 		ref: taskapi.Ref{
 			TaskID:     strings.TrimSpace(entry.TaskID),
@@ -694,7 +592,7 @@ func (tm *taskRuntime) rehydrateSubagentTask(entry *taskapi.Entry) *subagentTask
 		state:     entry.State,
 		running:   entry.Running,
 		turnSeq:   taskTurnSeqFromSpec(entry.Spec),
-		result:    session.CloneState(entry.Result),
+		result:    result,
 		metadata:  session.CloneState(entry.Metadata),
 	}
 	if task.turnSeq <= 0 {
@@ -784,41 +682,37 @@ func (tm *taskRuntime) updateSubagentParticipant(ctx context.Context, task *suba
 		return nil
 	}
 	role := subagentParticipantRole(task)
-	_, err := tm.runtime.sessions.AppendEvent(ctx, session.AppendEventRequest{
-		SessionRef:    task.sessionRef,
-		MutationGuard: session.RuntimeMutationGuard(ctx),
-		Event: &session.Event{
-			IdempotencyKey: fmt.Sprintf("subagent-participant:%s:%d:%s", task.ref.TaskID, task.turnSeq, strings.TrimSpace(action)),
-			Type:           session.EventTypeParticipant,
-			Visibility:     session.VisibilityUIOnly,
-			Time:           tm.runtime.now(),
-			Actor: session.ActorRef{
-				Kind: session.ActorKindSystem,
-				ID:   "spawn",
-				Name: "spawn",
+	err := tm.appendSubagentSagaEvent(ctx, task.sessionRef, &session.Event{
+		IdempotencyKey: fmt.Sprintf("subagent-participant:%s:%d:%s", task.ref.TaskID, task.turnSeq, strings.TrimSpace(action)),
+		Type:           session.EventTypeParticipant,
+		Visibility:     session.VisibilityUIOnly,
+		Time:           tm.runtime.now(),
+		Actor: session.ActorRef{
+			Kind: session.ActorKindSystem,
+			ID:   "spawn",
+			Name: "spawn",
+		},
+		Protocol: &session.EventProtocol{
+			Method: session.ProtocolMethodParticipantUpdate,
+			Update: &session.ProtocolUpdate{SessionUpdate: strings.TrimSpace(action)},
+		},
+		Scope: &session.EventScope{
+			Participant: session.ParticipantRef{
+				ID:           strings.TrimSpace(task.anchor.AgentID),
+				Kind:         session.ParticipantKindSubagent,
+				Role:         role,
+				DelegationID: strings.TrimSpace(task.ref.TaskID),
 			},
-			Protocol: &session.EventProtocol{
-				Method: session.ProtocolMethodParticipantUpdate,
-				Update: &session.ProtocolUpdate{SessionUpdate: strings.TrimSpace(action)},
-			},
-			Scope: &session.EventScope{
-				Participant: session.ParticipantRef{
-					ID:           strings.TrimSpace(task.anchor.AgentID),
-					Kind:         session.ParticipantKindSubagent,
-					Role:         role,
-					DelegationID: strings.TrimSpace(task.ref.TaskID),
-				},
-			},
-			Meta: map[string]any{
-				"task_id":        task.ref.TaskID,
-				"agent":          task.agent,
-				"agent_id":       task.anchor.AgentID,
-				"handle":         task.handle,
-				"mention":        "@" + strings.TrimPrefix(task.handle, "@"),
-				"session_id":     task.anchor.SessionID,
-				"state":          string(task.state),
-				"output_preview": taskRawStringValue(task.result["output_preview"]),
-			},
+		},
+		Meta: map[string]any{
+			"task_id":        task.ref.TaskID,
+			"agent":          task.agent,
+			"agent_id":       task.anchor.AgentID,
+			"handle":         task.handle,
+			"mention":        "@" + strings.TrimPrefix(task.handle, "@"),
+			"session_id":     task.anchor.SessionID,
+			"state":          string(task.state),
+			"output_preview": taskRawStringValue(task.result["output_preview"]),
 		},
 	})
 	return err
@@ -834,32 +728,28 @@ func (tm *taskRuntime) appendSideSubagentUserEvent(ctx context.Context, task *su
 	}
 	role := subagentParticipantRole(task)
 	message := model.NewTextMessage(model.RoleUser, prompt)
-	_, err := tm.runtime.sessions.AppendEvent(ctx, session.AppendEventRequest{
-		SessionRef:    task.sessionRef,
-		MutationGuard: session.RuntimeMutationGuard(ctx),
-		Event: &session.Event{
-			IdempotencyKey: fmt.Sprintf("subagent-dialogue:%s:%d:user", task.ref.TaskID, task.turnSeq),
-			Type:           session.EventTypeUser,
-			Visibility:     session.VisibilityCanonical,
-			Time:           tm.runtime.now(),
-			Actor:          session.ActorRef{Kind: session.ActorKindUser, Name: "user"},
-			Scope: &session.EventScope{
-				TurnID: subagentTurnID(task.ref.TaskID, task.turnSeq),
-				Source: firstNonEmpty(taskStringValue(task.metadata["source"]), "subagent_sidecar"),
-				Participant: session.ParticipantRef{
-					ID:           strings.TrimSpace(task.anchor.AgentID),
-					Kind:         session.ParticipantKindSubagent,
-					Role:         role,
-					DelegationID: strings.TrimSpace(task.ref.TaskID),
-				},
+	err := tm.appendSubagentSagaEvent(ctx, task.sessionRef, &session.Event{
+		IdempotencyKey: fmt.Sprintf("subagent-dialogue:%s:%d:user", task.ref.TaskID, task.turnSeq),
+		Type:           session.EventTypeUser,
+		Visibility:     session.VisibilityCanonical,
+		Time:           tm.runtime.now(),
+		Actor:          session.ActorRef{Kind: session.ActorKindUser, Name: "user"},
+		Scope: &session.EventScope{
+			TurnID: subagentTurnID(task.ref.TaskID, task.turnSeq),
+			Source: firstNonEmpty(taskStringValue(task.metadata["source"]), "subagent_sidecar"),
+			Participant: session.ParticipantRef{
+				ID:           strings.TrimSpace(task.anchor.AgentID),
+				Kind:         session.ParticipantKindSubagent,
+				Role:         role,
+				DelegationID: strings.TrimSpace(task.ref.TaskID),
 			},
-			Message: &message,
-			Text:    prompt,
-			Meta: map[string]any{
-				"handle":  strings.TrimSpace(task.handle),
-				"mention": "@" + strings.TrimPrefix(strings.TrimSpace(task.handle), "@"),
-				"agent":   strings.TrimSpace(task.agent),
-			},
+		},
+		Message: &message,
+		Text:    prompt,
+		Meta: map[string]any{
+			"handle":  strings.TrimSpace(task.handle),
+			"mention": "@" + strings.TrimPrefix(strings.TrimSpace(task.handle), "@"),
+			"agent":   strings.TrimSpace(task.agent),
 		},
 	})
 	return err
@@ -915,7 +805,7 @@ func (tm *taskRuntime) appendSideSubagentFinalEvent(ctx context.Context, task *s
 	}
 	task.mu.Unlock()
 
-	if _, err := tm.runtime.sessions.AppendEvent(ctx, session.AppendEventRequest{SessionRef: task.sessionRef, MutationGuard: session.RuntimeMutationGuard(ctx), Event: event}); err != nil {
+	if err := tm.appendSubagentSagaEvent(ctx, task.sessionRef, event); err != nil {
 		return err
 	}
 	if err := tm.runtime.updateParticipantContextCheckpoint(ctx, task.sessionRef, strings.TrimSpace(task.anchor.AgentID)); err != nil {
@@ -1159,6 +1049,7 @@ func (t *subagentTask) entrySnapshot(now time.Time) *taskapi.Entry {
 			"turn_seq":         t.turnSeq,
 			"turn_id":          subagentTurnID(t.ref.TaskID, t.turnSeq),
 			"participant_role": string(subagentParticipantRole(t)),
+			"spawn_result":     taskapi.SanitizeResultForPersistence(t.result, taskapi.ResultPersistenceCanonical),
 		},
 		Result:   subagentTaskEntryResult(t.result, t.running),
 		Metadata: session.CloneState(t.metadata),

@@ -147,7 +147,9 @@ type Entry struct {
 	Terminal       sandbox.TerminalRef `json:"terminal,omitempty"`
 }
 
-// Store persists task records for one owning session. Upsert callers that have
+// Store persists task records for one owning session. Durable subagent spawn
+// additionally requires CASStore and fails before the external Spawn effect
+// when that capability is absent. Upsert callers that have
 // not yet observed the canonical tool-result payload should sanitize entries
 // with ResultPersistenceDeferred before persisting them; store implementations
 // may still enforce ResultPersistenceCanonical to strip transient display data

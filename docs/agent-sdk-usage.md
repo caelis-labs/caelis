@@ -185,9 +185,13 @@ derives and validates the final assembled model/tool/sandbox requirements.
   `ParticipantLifecycleService`, `ControllerHandoffService`, or the execution
   journal compound-commit interfaces. An adapter must not expose one of these
   interfaces unless it can prevent readers from observing a split commit.
-- The v0.25.0 subagent spawn path does not yet make its external spawn, task
-  record, participant binding, and canonical parent facts one recoverable saga.
-  Treat a post-spawn persistence error as unknown outcome; see P0-7.
+- The current subagent spawn path requires `task.CASStore` before invoking the
+  external effect. Its durable phases are `prepared`, `spawning`, `spawned`,
+  `participant_attached`, `canonical_committing`, `canonical_committed`, and
+  `committed`. Restart never respawns across `spawning`; pre-canonical failures
+  compensate by cancellation and durable detach, while canonical-committing
+  and later phases only roll forward through idempotent facts. A cancellation
+  failure remains `unknown_outcome`.
 - The bundled file store writes a fsynced transaction marker before applying
   event and state documents and completes recovery before later operations.
   A post-commit reporting failure is a committed/unknown-reporting outcome;
