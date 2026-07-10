@@ -97,27 +97,31 @@ type CommandStartRequest struct {
 
 // SubagentStartRequest defines one yielded SPAWN launch request. SpawnID is the
 // stable operation identity used for durable intent, retry, and restart
-// recovery; callers that may retry must preserve it.
+// recovery; callers that may retry must preserve it. Role is the normalized
+// participant relationship selected by Control. Source is audit provenance and
+// is never interpreted as authorization or role policy.
 type SubagentStartRequest struct {
 	SpawnID        string                          `json:"spawn_id,omitempty"`
 	Agent          string                          `json:"agent,omitempty"`
 	Prompt         string                          `json:"prompt,omitempty"`
 	ContextPrelude string                          `json:"context_prelude,omitempty"`
 	ParentCall     string                          `json:"parent_call,omitempty"`
-	ParentTool     string                          `json:"parent_tool,omitempty"`
+	Role           session.ParticipantRole         `json:"role,omitempty"`
 	Source         string                          `json:"source,omitempty"`
 	Mode           string                          `json:"mode,omitempty"`
 	ApprovalMode   string                          `json:"approval_mode,omitempty"`
 	Approval       agent.SubagentApprovalRequester `json:"-"`
 }
 
-// ControlRequest defines one task control request.
+// ControlRequest defines one task control request. Principal is the normalized
+// actor exercising control. Source is audit provenance only.
 type ControlRequest struct {
-	TaskID         string        `json:"task_id,omitempty"`
-	Yield          time.Duration `json:"yield,omitempty"`
-	Input          string        `json:"input,omitempty"`
-	Source         string        `json:"source,omitempty"`
-	ContextPrelude string        `json:"context_prelude,omitempty"`
+	TaskID         string            `json:"task_id,omitempty"`
+	Yield          time.Duration     `json:"yield,omitempty"`
+	Input          string            `json:"input,omitempty"`
+	Principal      session.ActorKind `json:"principal,omitempty"`
+	Source         string            `json:"source,omitempty"`
+	ContextPrelude string            `json:"context_prelude,omitempty"`
 }
 
 // Entry is one durable task persistence record.

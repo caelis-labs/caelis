@@ -2577,11 +2577,12 @@ package github.com/caelis-labs/caelis/agent-sdk/task
       Observer    Observer      `json:"-"`
   }
   type ControlRequest struct {
-      TaskID         string        `json:"task_id,omitempty"`
-      Yield          time.Duration `json:"yield,omitempty"`
-      Input          string        `json:"input,omitempty"`
-      Source         string        `json:"source,omitempty"`
-      ContextPrelude string        `json:"context_prelude,omitempty"`
+      TaskID         string            `json:"task_id,omitempty"`
+      Yield          time.Duration     `json:"yield,omitempty"`
+      Input          string            `json:"input,omitempty"`
+      Principal      session.ActorKind `json:"principal,omitempty"`
+      Source         string            `json:"source,omitempty"`
+      ContextPrelude string            `json:"context_prelude,omitempty"`
   }
   type Entry struct {
       TaskID         string              `json:"task_id,omitempty"`
@@ -2694,7 +2695,7 @@ package github.com/caelis-labs/caelis/agent-sdk/task
       Prompt         string                          `json:"prompt,omitempty"`
       ContextPrelude string                          `json:"context_prelude,omitempty"`
       ParentCall     string                          `json:"parent_call,omitempty"`
-      ParentTool     string                          `json:"parent_tool,omitempty"`
+      Role           session.ParticipantRole         `json:"role,omitempty"`
       Source         string                          `json:"source,omitempty"`
       Mode           string                          `json:"mode,omitempty"`
       ApprovalMode   string                          `json:"approval_mode,omitempty"`

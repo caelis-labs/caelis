@@ -142,10 +142,11 @@ Repeatable SDK boundary gates:
 
 The update semantic owner, product assembly peel-off, and Control-owned handoff
 coordination are implemented. The next architecture step is to close the
-durability/replay P0s, complete permission and lifecycle ACP conformance, remove
-the remaining product source policy from SDK task code, and make system Agents
-reuse the common Runtime safety pipeline. Module or repository extraction is
-not on the roadmap. Current status is recorded in
+remaining P1 stability gates, including making system Agents reuse the common
+Runtime safety pipeline, completing execution capability wiring and liveness,
+and enforcing compatibility and release evidence. Product source policy no
+longer lives in SDK task code. Module or repository extraction is not on the
+roadmap. Current status is recorded in
 [the v0.25.0 acceptance review](agent-sdk-v0.25.0-acceptance.md).
 
 ## Durable State

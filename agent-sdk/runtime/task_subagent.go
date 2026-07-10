@@ -38,6 +38,10 @@ func (tm *taskRuntime) StartSubagent(
 		mode = strings.TrimSpace(tm.runtime.defaultPolicyMode)
 	}
 	spawnID := firstNonEmpty(strings.TrimSpace(req.SpawnID), taskID)
+	role, err := normalizeSubagentParticipantRole(req.Role)
+	if err != nil {
+		return taskapi.Snapshot{}, err
+	}
 	handle := tm.reserveSubagentHandle(activeSession, ref, req.Agent)
 	intent, existing, done, err := tm.beginSubagentSpawn(ctx, ref, taskID, spawnID, req.Agent, req.Prompt, handle, runner)
 	if done || err != nil {
@@ -85,10 +89,10 @@ func (tm *taskRuntime) StartSubagent(
 		running:    result.State == delegation.StateRunning,
 		turnSeq:    1,
 		metadata: map[string]any{
-			"source":         firstNonEmpty(strings.TrimSpace(req.Source), "agent_spawn"),
-			"interaction":    subagentInteraction(req.ParentTool, req.Source),
-			"spawn_status":   spawnStatusSpawned,
-			"spawn_identity": spawnID,
+			"source":           firstNonEmpty(strings.TrimSpace(req.Source), "agent_spawn"),
+			"participant_role": string(role),
+			"spawn_status":     spawnStatusSpawned,
+			"spawn_identity":   spawnID,
 		},
 	}
 	task.applyResult(result)
@@ -175,46 +179,45 @@ func subagentPromptWithContext(prelude string, prompt string) string {
 	return prelude + "\n\nCurrent request:\n" + prompt
 }
 
-func subagentInteraction(parentTool string, source string) string {
-	if strings.EqualFold(strings.TrimSpace(parentTool), "slash") || isSlashSubagentSource(source) {
-		return "side"
-	}
-	return "delegated"
-}
-
-func isSlashSubagentSource(source string) bool {
-	source = strings.ToLower(strings.TrimSpace(source))
-	return source == "slash" || source == "slash_agent" || strings.HasPrefix(source, "slash_")
-}
-
 func isSideSubagentTask(task *subagentTask) bool {
-	if task == nil {
-		return false
-	}
-	if strings.EqualFold(taskStringValue(task.metadata["interaction"]), "side") {
-		return true
-	}
-	return isSlashSubagentSource(taskStringValue(task.metadata["source"]))
+	return subagentParticipantRole(task) == session.ParticipantRoleSidecar
 }
 
 func subagentParticipantRole(task *subagentTask) session.ParticipantRole {
-	if isSideSubagentTask(task) {
-		return session.ParticipantRoleSidecar
+	if task != nil {
+		role := session.ParticipantRole(strings.TrimSpace(taskStringValue(task.metadata["participant_role"])))
+		if role == session.ParticipantRoleSidecar {
+			return role
+		}
 	}
 	return session.ParticipantRoleDelegated
 }
 
-func (tm *taskRuntime) authorizeSubagentControl(task *subagentTask, source string, action string) error {
-	source = strings.ToLower(strings.TrimSpace(source))
-	switch source {
-	case "agent_tool":
+func normalizeSubagentParticipantRole(role session.ParticipantRole) (session.ParticipantRole, error) {
+	switch role {
+	case "", session.ParticipantRoleDelegated:
+		return session.ParticipantRoleDelegated, nil
+	case session.ParticipantRoleSidecar:
+		return session.ParticipantRoleSidecar, nil
+	default:
+		return "", fmt.Errorf("agent-sdk/runtime: unsupported subagent participant role %q", role)
+	}
+}
+
+func (tm *taskRuntime) authorizeSubagentControl(task *subagentTask, principal session.ActorKind, action string) error {
+	switch principal {
+	case session.ActorKindTool:
 		if isSideSubagentTask(task) {
-			return fmt.Errorf("agent-sdk/runtime: TASK %s cannot control user-created side subagent %q", strings.TrimSpace(action), task.handle)
+			return fmt.Errorf("agent-sdk/runtime: tool principal cannot %s sidecar subagent %q", strings.TrimSpace(action), task.handle)
 		}
-	case "user_side_agent":
+	case session.ActorKindUser:
 		if !isSideSubagentTask(task) {
-			return fmt.Errorf("agent-sdk/runtime: @handle can only target side subagents created with /<agent>")
+			return fmt.Errorf("agent-sdk/runtime: user principal cannot %s delegated subagent %q", strings.TrimSpace(action), task.handle)
 		}
+	case session.ActorKindController, session.ActorKindSystem:
+		return nil
+	default:
+		return fmt.Errorf("agent-sdk/runtime: unsupported control principal %q", principal)
 	}
 	return nil
 }
@@ -274,8 +277,8 @@ func (r *Runtime) StartSubagentWithOptions(
 		Agent:          strings.TrimSpace(agent),
 		Prompt:         strings.TrimSpace(prompt),
 		ContextPrelude: contextPrelude,
-		ParentTool:     "slash",
-		Source:         firstNonEmpty(strings.TrimSpace(source), "slash_agent"),
+		Role:           session.ParticipantRoleSidecar,
+		Source:         firstNonEmpty(strings.TrimSpace(source), "user"),
 		Mode:           strings.TrimSpace(r.defaultPolicyMode),
 		ApprovalMode:   approvalMode,
 		Approval:       newSubagentApprovalRequester(opts.ApprovalRequester, activeSession, ref),
@@ -284,9 +287,10 @@ func (r *Runtime) StartSubagentWithOptions(
 		return snapshot, err
 	}
 	return r.tasks.Wait(ctx, ref, taskapi.ControlRequest{
-		TaskID: snapshot.Ref.TaskID,
-		Yield:  2 * time.Second,
-		Source: "ui_side_agent",
+		TaskID:    snapshot.Ref.TaskID,
+		Yield:     2 * time.Second,
+		Principal: session.ActorKindController,
+		Source:    "runtime",
 	})
 }
 
@@ -317,7 +321,8 @@ func (r *Runtime) ContinueSubagentByHandle(
 		TaskID:         taskID,
 		Input:          strings.TrimSpace(prompt),
 		Yield:          yield,
-		Source:         "user_side_agent",
+		Principal:      session.ActorKindUser,
+		Source:         "user",
 		ContextPrelude: contextPrelude,
 	})
 }
@@ -336,9 +341,10 @@ func (r *Runtime) WaitSubagentTask(
 		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: subagent task id is required")
 	}
 	return r.tasks.Wait(ctx, session.NormalizeSessionRef(ref), taskapi.ControlRequest{
-		TaskID: taskID,
-		Yield:  yield,
-		Source: "ui_side_agent",
+		TaskID:    taskID,
+		Yield:     yield,
+		Principal: session.ActorKindUser,
+		Source:    "user",
 	})
 }
 
@@ -421,7 +427,7 @@ func (tm *taskRuntime) continueSubagent(ctx context.Context, task *subagentTask,
 	if task.runner == nil {
 		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: SPAWN task %q cannot continue because its child session runner is unavailable", task.ref.TaskID)
 	}
-	if err := tm.authorizeSubagentControl(task, req.Source, "write"); err != nil {
+	if err := tm.authorizeSubagentControl(task, req.Principal, "write"); err != nil {
 		return taskapi.Snapshot{}, err
 	}
 	task.mu.Lock()
@@ -837,7 +843,7 @@ func (tm *taskRuntime) appendSideSubagentUserEvent(ctx context.Context, task *su
 			Actor:          session.ActorRef{Kind: session.ActorKindUser, Name: "user"},
 			Scope: &session.EventScope{
 				TurnID: subagentTurnID(task.ref.TaskID, task.turnSeq),
-				Source: firstNonEmpty(taskStringValue(task.metadata["source"]), "slash_agent"),
+				Source: firstNonEmpty(taskStringValue(task.metadata["source"]), "subagent_sidecar"),
 				Participant: session.ParticipantRef{
 					ID:           strings.TrimSpace(task.anchor.AgentID),
 					Kind:         session.ParticipantKindSubagent,
@@ -889,7 +895,7 @@ func (tm *taskRuntime) appendSideSubagentFinalEvent(ctx context.Context, task *s
 		},
 		Scope: &session.EventScope{
 			TurnID: subagentTurnID(task.ref.TaskID, task.turnSeq),
-			Source: firstNonEmpty(taskStringValue(task.metadata["source"]), "slash_agent"),
+			Source: firstNonEmpty(taskStringValue(task.metadata["source"]), "subagent_sidecar"),
 			Participant: session.ParticipantRef{
 				ID:           strings.TrimSpace(task.anchor.AgentID),
 				Kind:         session.ParticipantKindSubagent,
@@ -1141,15 +1147,16 @@ func (t *subagentTask) entrySnapshot(now time.Time) *taskapi.Entry {
 		UpdatedAt:      now,
 		Lease:          taskapi.CloneLease(t.lease),
 		Spec: map[string]any{
-			"agent":          t.agent,
-			"prompt":         t.prompt,
-			"spawn_identity": taskStringValue(t.metadata["spawn_identity"]),
-			"session_id":     t.anchor.SessionID,
-			"agent_id":       t.anchor.AgentID,
-			"handle":         t.handle,
-			"terminal_id":    t.ref.TerminalID,
-			"turn_seq":       t.turnSeq,
-			"turn_id":        subagentTurnID(t.ref.TaskID, t.turnSeq),
+			"agent":            t.agent,
+			"prompt":           t.prompt,
+			"spawn_identity":   taskStringValue(t.metadata["spawn_identity"]),
+			"session_id":       t.anchor.SessionID,
+			"agent_id":         t.anchor.AgentID,
+			"handle":           t.handle,
+			"terminal_id":      t.ref.TerminalID,
+			"turn_seq":         t.turnSeq,
+			"turn_id":          subagentTurnID(t.ref.TaskID, t.turnSeq),
+			"participant_role": string(subagentParticipantRole(t)),
 		},
 		Result:   subagentTaskEntryResult(t.result, t.running),
 		Metadata: session.CloneState(t.metadata),

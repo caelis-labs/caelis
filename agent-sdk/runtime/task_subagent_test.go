@@ -202,6 +202,88 @@ func TestSubagentTaskIDForHandleAllowsSidecarCustomSource(t *testing.T) {
 	}
 }
 
+func TestSubagentRoleComesFromNeutralRequestNotProductSource(t *testing.T) {
+	ctx := context.Background()
+	runner := &recordingSubagentRunner{spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "done"}}
+	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
+
+	side, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
+		Agent: "helper", Prompt: "side", Source: "custom-origin", Role: session.ParticipantRoleSidecar,
+	})
+	if err != nil {
+		t.Fatalf("StartSubagent(sidecar) error = %v", err)
+	}
+	delegated, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
+		Agent: "helper", Prompt: "delegated", Source: "slash_agent",
+	})
+	if err != nil {
+		t.Fatalf("StartSubagent(delegated) error = %v", err)
+	}
+	if got := session.ParticipantRole(taskStringValue(side.Metadata["participant_role"])); got != session.ParticipantRoleSidecar {
+		t.Fatalf("explicit sidecar role = %q, want sidecar", got)
+	}
+	if got := session.ParticipantRole(taskStringValue(delegated.Metadata["participant_role"])); got != session.ParticipantRoleDelegated {
+		t.Fatalf("slash_agent source role = %q, want default delegated", got)
+	}
+}
+
+func TestSubagentControlAuthorizationUsesNeutralPrincipalNotProductSource(t *testing.T) {
+	ctx := context.Background()
+	runner := &recordingSubagentRunner{spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "done"}}
+	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
+
+	side, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
+		Agent: "helper", Prompt: "side", Role: session.ParticipantRoleSidecar,
+	})
+	if err != nil {
+		t.Fatalf("StartSubagent(sidecar) error = %v", err)
+	}
+	if _, err := runtime.tasks.Wait(ctx, activeSession.SessionRef, task.ControlRequest{
+		TaskID: side.Ref.TaskID, Source: "agent_tool", Principal: session.ActorKindUser,
+	}); err != nil {
+		t.Fatalf("user principal with product-looking source error = %v", err)
+	}
+	if _, err := runtime.tasks.Wait(ctx, activeSession.SessionRef, task.ControlRequest{
+		TaskID: side.Ref.TaskID, Source: "custom-origin", Principal: session.ActorKindTool,
+	}); err == nil || !strings.Contains(err.Error(), "tool principal") {
+		t.Fatalf("tool principal sidecar error = %v, want isolation error", err)
+	}
+
+	delegated, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
+		Agent: "helper", Prompt: "delegated", Role: session.ParticipantRoleDelegated,
+	})
+	if err != nil {
+		t.Fatalf("StartSubagent(delegated) error = %v", err)
+	}
+	_, err = runtime.tasks.Write(ctx, activeSession.SessionRef, task.ControlRequest{
+		TaskID: delegated.Ref.TaskID, Input: "follow up", Source: "custom-origin", Principal: session.ActorKindUser,
+	})
+	if err == nil || !strings.Contains(err.Error(), "user principal") {
+		t.Fatalf("user principal delegated error = %v, want isolation error", err)
+	}
+	if _, err := runtime.tasks.Wait(ctx, activeSession.SessionRef, task.ControlRequest{
+		TaskID: delegated.Ref.TaskID, Principal: session.ActorKind("unknown"), Source: "agent_tool",
+	}); err == nil || !strings.Contains(err.Error(), "unsupported control principal") {
+		t.Fatalf("unknown principal error = %v, want fail-closed rejection", err)
+	}
+}
+
+func TestSubagentRejectsUnknownNeutralRoleBeforeSpawn(t *testing.T) {
+	t.Parallel()
+
+	runner := &recordingSubagentRunner{spawnResult: delegation.Result{State: delegation.StateCompleted}}
+	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
+	_, err := runtime.tasks.StartSubagent(context.Background(), activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
+		Agent: "helper", Prompt: "review", Role: session.ParticipantRole("owner"), Source: "slash_agent",
+	})
+	if err == nil || !strings.Contains(err.Error(), "unsupported subagent participant role") {
+		t.Fatalf("StartSubagent(unknown role) error = %v, want fail-closed rejection", err)
+	}
+	if runner.spawnRequest.Agent != "" {
+		t.Fatalf("Spawn() request = %#v, want no external spawn before role validation", runner.spawnRequest)
+	}
+}
+
 func TestAllocateSubagentHandleUsesAgentDerivedFallback(t *testing.T) {
 	t.Parallel()
 
@@ -270,10 +352,9 @@ func TestTaskRuntimeSyncCanonicalToolResultPersistsSubagentResult(t *testing.T) 
 	runtime.tasks.store = newFileTaskStoreForTest(t)
 
 	snapshot, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
-		Agent:      "helper",
-		Prompt:     "review",
-		Source:     "agent_spawn",
-		ParentTool: "SPAWN",
+		Agent:  "helper",
+		Prompt: "review",
+		Source: "agent_spawn",
 	})
 	if err != nil {
 		t.Fatalf("StartSubagent() error = %v", err)
@@ -457,9 +538,10 @@ func TestSideAndDelegatedSubagentsHaveSeparateControlSurfaces(t *testing.T) {
 		t.Fatalf("StartSubagent(side) error = %v", err)
 	}
 	if _, err := runtime.tasks.Wait(ctx, activeSession.SessionRef, task.ControlRequest{
-		TaskID: taskStringValue(side.Result["handle"]),
-		Source: "agent_tool",
-	}); err == nil || !strings.Contains(err.Error(), "cannot control user-created side subagent") {
+		TaskID:    taskStringValue(side.Result["handle"]),
+		Principal: session.ActorKindTool,
+		Source:    "agent_tool",
+	}); err == nil || !strings.Contains(err.Error(), "tool principal") {
 		t.Fatalf("TASK wait on side err = %v, want isolation error", err)
 	}
 	if _, err := runtime.ContinueSubagentByHandle(ctx, activeSession.SessionRef, taskStringValue(side.Result["handle"]), "follow up", 0); err != nil {

@@ -67,6 +67,12 @@ Use small, independently committable slices:
   handoff lifecycle. Runtime participant production, external ACP manual
   permission and cancellation, and Control-owned atomic handoff commit have
   conformance regressions against those normalized semantics.
+- **P1-2 source-policy slice:** SDK subagent role and task-control authorization
+  now consume neutral `session.ParticipantRole` and `session.ActorKind` values.
+  Product `Source` strings are audit provenance only and cannot change role,
+  model-context visibility, or control authorization. Unknown roles are
+  rejected before spawn and unknown principals fail closed. P1-2 remains
+  partial until Guardian/Reviewer reuse the common Runtime invocation pipeline.
 
 Do not combine unrelated P0s into one broad rewrite. Update this board in the
 same commit as the closing evidence. Do not edit the frozen v0.25.0 acceptance

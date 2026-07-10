@@ -39,8 +39,8 @@ func (o taskToolObserver) ObserveTaskSnapshot(snapshot taskapi.Snapshot) {
 }
 
 func (tm *taskRuntime) Wait(ctx context.Context, ref session.SessionRef, req taskapi.ControlRequest) (taskapi.Snapshot, error) {
-	return tm.control(ctx, ref, req, func(target taskControlTarget) (taskapi.Snapshot, error) {
-		return target.Wait(ctx, req)
+	return tm.control(ctx, ref, req, func(target taskControlTarget, normalized taskapi.ControlRequest) (taskapi.Snapshot, error) {
+		return target.Wait(ctx, normalized)
 	})
 }
 
@@ -93,14 +93,14 @@ func (tm *taskRuntime) WaitUntilDone(ctx context.Context, ref session.SessionRef
 }
 
 func (tm *taskRuntime) Write(ctx context.Context, ref session.SessionRef, req taskapi.ControlRequest) (taskapi.Snapshot, error) {
-	return tm.control(ctx, ref, req, func(target taskControlTarget) (taskapi.Snapshot, error) {
-		return target.Write(ctx, req)
+	return tm.control(ctx, ref, req, func(target taskControlTarget, normalized taskapi.ControlRequest) (taskapi.Snapshot, error) {
+		return target.Write(ctx, normalized)
 	})
 }
 
 func (tm *taskRuntime) Cancel(ctx context.Context, ref session.SessionRef, req taskapi.ControlRequest) (taskapi.Snapshot, error) {
-	return tm.control(ctx, ref, req, func(target taskControlTarget) (taskapi.Snapshot, error) {
-		return target.Cancel(ctx, req)
+	return tm.control(ctx, ref, req, func(target taskControlTarget, normalized taskapi.ControlRequest) (taskapi.Snapshot, error) {
+		return target.Cancel(ctx, normalized)
 	})
 }
 
@@ -257,7 +257,7 @@ func taskToolMeta(snapshot taskapi.Snapshot) map[string]any {
 	if terminalID := firstNonEmpty(strings.TrimSpace(snapshot.Terminal.TerminalID), strings.TrimSpace(snapshot.Ref.TerminalID), taskStringValue(snapshot.Metadata["terminal_id"])); terminalID != "" {
 		taskMeta["terminal_id"] = terminalID
 	}
-	for _, key := range []string{"source", "interaction", "agent", "agent_id", "handle", "mention", "prompt", "turn_id", "turn_seq"} {
+	for _, key := range []string{"source", "participant_role", "agent", "agent_id", "handle", "mention", "prompt", "turn_id", "turn_seq"} {
 		if value, ok := snapshot.Metadata[key]; ok {
 			taskMeta[key] = value
 		}

@@ -135,8 +135,9 @@ Control, not authority to mutate the controller binding.
 The current Caelis implementation places product assembly in
 `internal/controlassembly` and shared-ledger routing, endpoint lifecycle,
 recovery, and handoff coordination in `internal/controlplane`. Runtime consumes
-injected neutral routes and mechanisms. Remaining product source-string policy
-inside SDK task/subagent code is boundary debt tracked by the acceptance review.
+injected neutral routes and mechanisms. Control now supplies normalized
+participant roles and control principals to SDK task/subagent code; product
+source strings remain audit provenance and are not interpreted by the SDK.
 
 ## Dynamic Orchestration
 

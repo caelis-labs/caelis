@@ -416,9 +416,6 @@ func participantAgentType(event session.Event) string {
 	if agent := strings.TrimSpace(stringFromFlatMap(event.Meta, "agent")); agent != "" {
 		return agent
 	}
-	if source := strings.ToLower(strings.TrimSpace(event.Scope.Source)); strings.HasPrefix(source, "slash_") {
-		return strings.TrimPrefix(source, "slash_")
-	}
 	if event.Scope.Participant.Kind != "" {
 		return string(event.Scope.Participant.Kind)
 	}

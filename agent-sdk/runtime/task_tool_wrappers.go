@@ -232,7 +232,8 @@ func (t runtimeSpawnTool) Call(ctx context.Context, call tool.Call) (tool.Result
 		Agent:        strings.TrimSpace(agent),
 		Prompt:       strings.TrimSpace(prompt),
 		ParentCall:   strings.TrimSpace(call.ID),
-		ParentTool:   strings.TrimSpace(call.Name),
+		Role:         session.ParticipantRoleDelegated,
+		Source:       "agent_tool",
 		Mode:         strings.TrimSpace(t.mode),
 		ApprovalMode: strings.TrimSpace(t.approvalMode),
 		Approval:     newSubagentApprovalRequester(t.approval, t.session, t.sessionRef),
@@ -421,10 +422,11 @@ func (t runtimeTaskTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 	}
 	budget := time.Duration(yieldMS) * time.Millisecond
 	req := taskapi.ControlRequest{
-		TaskID: taskIDs[0],
-		Yield:  budget,
-		Input:  input,
-		Source: "agent_tool",
+		TaskID:    taskIDs[0],
+		Yield:     budget,
+		Input:     input,
+		Principal: session.ActorKindTool,
+		Source:    "agent_tool",
 	}
 	var snapshot taskapi.Snapshot
 	var timedOut bool
@@ -497,10 +499,11 @@ func (t runtimeTaskTool) callBatchTaskControl(ctx context.Context, call tool.Cal
 			}
 		}
 		req := taskapi.ControlRequest{
-			TaskID: id,
-			Yield:  yield,
-			Input:  input,
-			Source: "agent_tool",
+			TaskID:    id,
+			Yield:     yield,
+			Input:     input,
+			Principal: session.ActorKindTool,
+			Source:    "agent_tool",
 		}
 		var snapshot taskapi.Snapshot
 		var timedOut bool

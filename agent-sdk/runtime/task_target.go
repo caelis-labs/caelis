@@ -14,20 +14,25 @@ type taskControlTarget interface {
 	Cancel(context.Context, taskapi.ControlRequest) (taskapi.Snapshot, error)
 }
 
-func (tm *taskRuntime) control(ctx context.Context, ref session.SessionRef, req taskapi.ControlRequest, fn func(taskControlTarget) (taskapi.Snapshot, error)) (taskapi.Snapshot, error) {
+func (tm *taskRuntime) control(ctx context.Context, ref session.SessionRef, req taskapi.ControlRequest, fn func(taskControlTarget, taskapi.ControlRequest) (taskapi.Snapshot, error)) (taskapi.Snapshot, error) {
 	req = normalizeTaskControlRequest(req)
 	target, err := tm.lookupControlTarget(ctx, ref, req.TaskID)
 	if err != nil {
 		return taskapi.Snapshot{}, err
 	}
-	return fn(target)
+	return fn(target, req)
 }
 
 func normalizeTaskControlRequest(req taskapi.ControlRequest) taskapi.ControlRequest {
+	principal := req.Principal
+	if principal == "" {
+		principal = session.ActorKindController
+	}
 	return taskapi.ControlRequest{
 		TaskID:         strings.TrimSpace(req.TaskID),
 		Yield:          req.Yield,
 		Input:          req.Input,
+		Principal:      principal,
 		Source:         strings.TrimSpace(req.Source),
 		ContextPrelude: req.ContextPrelude,
 	}
@@ -74,7 +79,7 @@ type subagentControlTarget struct {
 }
 
 func (t subagentControlTarget) Wait(ctx context.Context, req taskapi.ControlRequest) (taskapi.Snapshot, error) {
-	if err := t.runtime.authorizeSubagentControl(t.task, req.Source, "wait"); err != nil {
+	if err := t.runtime.authorizeSubagentControl(t.task, req.Principal, "wait"); err != nil {
 		return taskapi.Snapshot{}, err
 	}
 	return t.runtime.waitSubagent(ctx, t.task, req.Yield)
@@ -85,7 +90,7 @@ func (t subagentControlTarget) Write(ctx context.Context, req taskapi.ControlReq
 }
 
 func (t subagentControlTarget) Cancel(ctx context.Context, req taskapi.ControlRequest) (taskapi.Snapshot, error) {
-	if err := t.runtime.authorizeSubagentControl(t.task, req.Source, "cancel"); err != nil {
+	if err := t.runtime.authorizeSubagentControl(t.task, req.Principal, "cancel"); err != nil {
 		return taskapi.Snapshot{}, err
 	}
 	return t.runtime.cancelSubagent(ctx, t.task)

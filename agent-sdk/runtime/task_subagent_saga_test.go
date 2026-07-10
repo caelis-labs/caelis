@@ -170,7 +170,7 @@ func TestSubagentSpawnSagaCompensatesEveryPostSpawnBoundary(t *testing.T) {
 				t.Fatal(err)
 			}
 			_, err = runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, taskapi.SubagentStartRequest{
-				SpawnID: "spawn-fault", Agent: "helper", Prompt: "review", Source: "slash_agent", ParentTool: "slash",
+				SpawnID: "spawn-fault", Agent: "helper", Prompt: "review", Source: "slash_agent", Role: session.ParticipantRoleSidecar,
 			})
 			if err == nil {
 				t.Fatal("StartSubagent() error = nil, want injected saga failure")
@@ -210,7 +210,7 @@ func TestSubagentSpawnSagaRetryAndRestartNeverBlindlyRespawn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := taskapi.SubagentStartRequest{SpawnID: "stable-spawn", Agent: "helper", Prompt: "review", Source: "slash_agent", ParentTool: "slash"}
+	req := taskapi.SubagentStartRequest{SpawnID: "stable-spawn", Agent: "helper", Prompt: "review", Source: "slash_agent", Role: session.ParticipantRoleSidecar}
 	first, err := runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, req)
 	if err != nil {
 		t.Fatalf("first StartSubagent() error = %v", err)

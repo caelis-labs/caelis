@@ -1425,6 +1425,20 @@ func TestMessagesFromContextUsesEventLocalParticipantLabel(t *testing.T) {
 	}
 }
 
+func TestParticipantAgentTypeDoesNotInterpretProductSource(t *testing.T) {
+	t.Parallel()
+
+	event := session.Event{Scope: &session.EventScope{
+		Source: "slash_codex",
+		Participant: session.ParticipantRef{
+			ID: "side-1", Kind: session.ParticipantKindSubagent, Role: session.ParticipantRoleSidecar,
+		},
+	}}
+	if got := participantAgentType(event); got != string(session.ParticipantKindSubagent) {
+		t.Fatalf("participantAgentType() = %q, want neutral participant kind", got)
+	}
+}
+
 func TestMessagesFromContextSkipsDelegatedACPToolRawOutput(t *testing.T) {
 	t.Parallel()
 
