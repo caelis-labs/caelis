@@ -77,7 +77,7 @@ func TestAdapterStartReviewSubagentUsesHiddenReviewerProfile(t *testing.T) {
 	if got := gw.promptReqs[0].DisplayInput; got != "inspect the [image #1] image" {
 		t.Fatalf("review DisplayInput = %q, want image marker", got)
 	}
-	for _, want := range []string{"Review the current workspace changes", "staged, unstaged, and untracked", "Additional review instructions", "inspect the image"} {
+	for _, want := range []string{"Strictly review the current workspace changes", "staged, unstaged, and untracked", "$review skill", "Additional review instructions", "inspect the image"} {
 		if !strings.Contains(gw.promptReqs[0].Input, want) {
 			t.Fatalf("review prompt = %q, want %q", gw.promptReqs[0].Input, want)
 		}
@@ -116,14 +116,17 @@ func TestAdapterStartReviewSubagentExternalACPReviewerPrompts(t *testing.T) {
 		wantPrompt string
 	}{
 		{
-			name:       "user prompt",
-			input:      "  focus on auth  ",
-			wantPrompt: "Review request:\nReview the current workspace changes, including staged, unstaged, and untracked files.\n\nUser review instructions:\nfocus on auth",
+			name:  "user prompt",
+			input: "  focus on auth  ",
+			wantPrompt: "Review request:\n" +
+				"Strictly review the current workspace changes (staged, unstaged, and untracked). Use the $review skill. Findings-first: correctness, regressions, bloat, design smells, boundary drift, and test gaps.\n\n" +
+				"User review instructions:\nfocus on auth",
 		},
 		{
-			name:       "empty review request",
-			input:      "   ",
-			wantPrompt: "Review request:\nReview the current workspace changes, including staged, unstaged, and untracked files.",
+			name:  "empty review request",
+			input: "   ",
+			wantPrompt: "Review request:\n" +
+				"Strictly review the current workspace changes (staged, unstaged, and untracked). Use the $review skill. Findings-first: correctness, regressions, bloat, design smells, boundary drift, and test gaps.",
 		},
 	}
 

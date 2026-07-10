@@ -1250,7 +1250,7 @@ func TestAgentProfileBindModelUpdatesACPAgentArgs(t *testing.T) {
 			t.Fatalf("reviewer args = %#v, missing %q", reviewer.Args, want)
 		}
 	}
-	if !slices.Contains(reviewer.Args, "-system-prompt") || !profileSystemPromptArgContains(reviewer.Args, "code review subagent") {
+	if !slices.Contains(reviewer.Args, "-system-prompt") || !profileSystemPromptArgContains(reviewer.Args, "strict code-review subagent") {
 		t.Fatalf("reviewer args = %#v, want reviewer system prompt", reviewer.Args)
 	}
 	if reviewer.Env["SDK_ACP_ENABLE_SPAWN"] != "0" || reviewer.Env["SDK_ACP_CHILD_NO_SPAWN"] != "1" {

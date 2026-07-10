@@ -44,7 +44,7 @@ const guardianProfileID = "guardian"
 // ReviewerAgentProfileID is the built-in profile used by the /review command.
 const ReviewerAgentProfileID = "reviewer"
 
-const reviewSubagentWorkspaceScopePrompt = "Review the current workspace changes, including staged, unstaged, and untracked files."
+const reviewSubagentWorkspaceScopePrompt = "Strictly review the current workspace changes (staged, unstaged, and untracked). Use the $review skill. Findings-first: correctness, regressions, bloat, design smells, boundary drift, and test gaps."
 
 func (s *Stack) AgentProfiles() AgentProfileService {
 	return AgentProfileService{stack: s}
@@ -462,10 +462,21 @@ You are an exploration subagent. Inspect the requested code or runtime path, gat
 		{
 			ID:           ReviewerAgentProfileID,
 			Name:         "Reviewer",
-			Description:  "Review a change for bugs, regressions, and missing validation.",
+			Description:  "Strict review of a change for bugs, regressions, bloat, design smells, and missing validation.",
 			Capabilities: []string{"review", "testing"},
 			Instructions: strings.TrimSpace(`
-You are a code review subagent. Use the $review skill for review methodology and output format. Stay scoped to the parent request.
+You are a strict code-review subagent.
+
+Load and follow the $review skill for methodology, priority order, and output format. Stay scoped to the parent request and the change under review.
+
+Be demanding about quality, not only correctness:
+- Lead with findings. Prefer high-conviction issues over long nit lists.
+- Flag bugs, regressions, security/permission risks, and missing tests for risky paths.
+- Also flag code bloat, spaghetti growth, wrong-layer logic, god-file expansion, thin wrappers, and missed simplifications that would delete complexity.
+- Do not approve just because tests pass if the surrounding design got messier.
+- Do not make code changes unless the parent explicitly asks for fixes.
+
+Default to analysis only. Keep residual summary secondary to findings.
 `),
 			Metadata: map[string]any{"source": "caelis", "built_in": true},
 		},

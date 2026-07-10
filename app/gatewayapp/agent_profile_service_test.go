@@ -8,7 +8,7 @@ import (
 
 func TestReviewSubagentPromptScopesWorkspaceReview(t *testing.T) {
 	prompt, offset := ReviewSubagentPrompt("  focus on auth  ")
-	prefix := "Review the current workspace changes, including staged, unstaged, and untracked files.\n\nAdditional review instructions:\n"
+	prefix := reviewSubagentWorkspaceScopePrompt + "\n\nAdditional review instructions:\n"
 	if prompt != prefix+"focus on auth" {
 		t.Fatalf("ReviewSubagentPrompt() prompt = %q, want canonical workspace scope plus instructions", prompt)
 	}
@@ -19,7 +19,7 @@ func TestReviewSubagentPromptScopesWorkspaceReview(t *testing.T) {
 
 func TestReviewSubagentPromptWithoutInstructions(t *testing.T) {
 	prompt, offset := ReviewSubagentPrompt("   ")
-	if prompt != "Review the current workspace changes, including staged, unstaged, and untracked files." {
+	if prompt != reviewSubagentWorkspaceScopePrompt {
 		t.Fatalf("ReviewSubagentPrompt() prompt = %q, want canonical workspace scope", prompt)
 	}
 	if offset != len([]rune(prompt)) {
@@ -29,7 +29,7 @@ func TestReviewSubagentPromptWithoutInstructions(t *testing.T) {
 
 func TestReviewSubagentPromptForExternalACPScopesUserPrompt(t *testing.T) {
 	prompt, offset := ReviewSubagentPromptForProfileTarget("  focus on auth  ", agentprofile.BindingTargetACP)
-	prefix := "Review request:\nReview the current workspace changes, including staged, unstaged, and untracked files.\n\nUser review instructions:\n"
+	prefix := "Review request:\n" + reviewSubagentWorkspaceScopePrompt + "\n\nUser review instructions:\n"
 	if prompt != prefix+"focus on auth" {
 		t.Fatalf("ReviewSubagentPromptForProfileTarget() prompt = %q, want external review scope plus instructions", prompt)
 	}
