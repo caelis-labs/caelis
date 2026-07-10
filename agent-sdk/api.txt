@@ -45,12 +45,13 @@ package github.com/caelis-labs/caelis/agent-sdk
       NewAgent(context.Context, AgentSpec) (Agent, error)
   }
   type AgentSpec struct {
-      Name           string         `json:"name,omitempty"`
-      Model          model.LLM      `json:"-"`
-      Tools          []tool.Tool    `json:"-"`
-      SubagentRunner SubagentRunner `json:"-"`
-      Request        ModelRequestOptions
-      Metadata       map[string]any `json:"metadata,omitempty"`
+      Name                      string         `json:"name,omitempty"`
+      Model                     model.LLM      `json:"-"`
+      Tools                     []tool.Tool    `json:"-"`
+      SubagentRunner            SubagentRunner `json:"-"`
+      Request                   ModelRequestOptions
+      RequiredModelCapabilities model.Capabilities `json:"required_model_capabilities,omitempty"`
+      Metadata                  map[string]any     `json:"metadata,omitempty"`
   }
   type ApprovalOption struct {
       ID   string `json:"id,omitempty"`
@@ -436,6 +437,14 @@ package github.com/caelis-labs/caelis/agent-sdk/model
       AuthNone        AuthType = "none"
   )
   const (
+      CapabilityToolCalls             Capability = "tool_calls"
+      CapabilityStructuredOutput      Capability = "structured_output"
+      CapabilityStreaming             Capability = "streaming"
+      CapabilityParallelToolCalls     Capability = "parallel_tool_calls"
+      CapabilityReasoningContinuation Capability = "reasoning_continuation"
+      CapabilityHostedTools           Capability = "hosted_tools"
+  )
+  const (
       ContentPartText  ContentPartType = "text"
       ContentPartImage ContentPartType = "image"
   )
@@ -508,6 +517,7 @@ package github.com/caelis-labs/caelis/agent-sdk/model
       ToolSpecKindProviderExecuted ToolSpecKind = "provider_executed"
       ToolSpecKindMCP              ToolSpecKind = "mcp"
   )
+  func (e *CapabilityError) Error() string
   func (e *ContextOverflowError) Error() string
   func (e *ContextOverflowError) Unwrap() error
   func (e *RetryExhaustedError) DisplayMessage() string
@@ -523,6 +533,7 @@ package github.com/caelis-labs/caelis/agent-sdk/model
   func (m Message) ToolResults() []ToolResultPart
   func (m Message) ToolUses() []ToolUsePart
   func (p Part) JSONValue() json.RawMessage
+  func CapabilitiesOf(llm LLM) (Capabilities, bool)
   func CloneMessage(msg Message) Message
   func CloneMessages(messages []Message) []Message
   func CloneOutputSpec(in *OutputSpec) *OutputSpec
@@ -535,6 +546,7 @@ package github.com/caelis-labs/caelis/agent-sdk/model
   func IsBackpressureLLMError(err error) bool
   func IsContextOverflow(err error) bool
   func IsRetryableLLMError(err error) bool
+  func MergeCapabilities(left, right Capabilities) Capabilities
   func MessageFromAssistantParts(text string, reasoning string, calls []ToolCall) Message
   func MessageFromContentParts(role Role, parts []ContentPart) Message
   func MessageFromTextAndContentParts(role Role, text string, parts []ContentPart) Message
@@ -566,6 +578,7 @@ package github.com/caelis-labs/caelis/agent-sdk/model
   func StreamEventFromResponse(resp *Response) *StreamEvent
   func ToolSpecsFromDefinitions(defs []ToolDefinition) []ToolSpec
   func UserVisibleError(err error) string
+  func ValidateCapabilities(modelName string, actual, required Capabilities) error
   func WithProviderRequestMetadata(ctx context.Context, metadata ProviderRequestMetadata) context.Context
   func WithRetry(llm LLM, cfg RetryConfig) LLM
   type APIType string
@@ -578,6 +591,22 @@ package github.com/caelis-labs/caelis/agent-sdk/model
   type AuthType string
   type BackpressureError interface {
       Backpressure() bool
+  }
+  type Capabilities struct {
+      ToolCalls             bool `json:"tool_calls,omitempty"`
+      StructuredOutput      bool `json:"structured_output,omitempty"`
+      Streaming             bool `json:"streaming,omitempty"`
+      ParallelToolCalls     bool `json:"parallel_tool_calls,omitempty"`
+      ReasoningContinuation bool `json:"reasoning_continuation,omitempty"`
+      HostedTools           bool `json:"hosted_tools,omitempty"`
+  }
+  type Capability string
+  type CapabilityError struct {
+      Model      string
+      Capability Capability
+  }
+  type CapabilityProvider interface {
+      Capabilities() Capabilities
   }
   type ContentPart struct {
       Type     ContentPartType `json:"type"`
@@ -1202,6 +1231,15 @@ package github.com/caelis-labs/caelis/agent-sdk/sandbox
       BackendCustom          Backend = "custom"
   )
   const (
+      CapabilityFileSystem     Capability = "file_system"
+      CapabilityCommandExec    Capability = "command_exec"
+      CapabilityAsyncSessions  Capability = "async_sessions"
+      CapabilityTTY            Capability = "tty"
+      CapabilityNetworkControl Capability = "network_control"
+      CapabilityPathPolicy     Capability = "path_policy"
+      CapabilityEnvPolicy      Capability = "env_policy"
+  )
+  const (
       IsolationHost      Isolation = "host"
       IsolationProcess   Isolation = "process"
       IsolationContainer Isolation = "container"
@@ -1232,6 +1270,7 @@ package github.com/caelis-labs/caelis/agent-sdk/sandbox
   )
   const HostExecutionRequiresApprovalMessage = "Host execution requires approval. Retry the same necessary command with sandbox_permissions=require_escalated and a non-empty justification."
   const SandboxPermissionDeniedMessage = "Sandbox permission denied. Use a writable workspace path, narrow the operation, or retry the same necessary command with sandbox_permissions=require_escalated and a non-empty justification."
+  func (e *CapabilityError) Error() string
   func (f FuncRunner) Run(ctx context.Context, req CommandRequest) (CommandResult, error)
   func (s SetupStatus) Check(name string) (SetupCheck, bool)
   func (t LifecycleTarget) Close() error
@@ -1271,6 +1310,7 @@ package github.com/caelis-labs/caelis/agent-sdk/sandbox
   func ResetRuntime(ctx context.Context, runtime Runtime) error
   func SandboxPermissionDetail(result CommandResult, err error) (string, bool)
   func SelectionStatus(runtime Runtime) Status
+  func ValidateCapabilities(descriptor Descriptor, required CapabilitySet) error
   type AsyncRunner interface {
       Runner
       Start(context.Context, CommandRequest) (Session, error)
@@ -1284,6 +1324,11 @@ package github.com/caelis-labs/caelis/agent-sdk/sandbox
   type BackendReporter interface {
       SupportedBackends() []Backend
       Status() Status
+  }
+  type Capability string
+  type CapabilityError struct {
+      Backend    Backend
+      Capability Capability
   }
   type CapabilitySet struct {
       FileSystem     bool `json:"file_system,omitempty"`
@@ -2705,12 +2750,18 @@ package github.com/caelis-labs/caelis/agent-sdk/tool
       RuntimeModel model.LLM       `json:"-"`
       Observer     Observer        `json:"-"`
   }
+  type Capabilities struct {
+      ParallelSafe bool `json:"parallel_safe,omitempty"`
+
+      Resumable bool `json:"resumable,omitempty"`
+  }
   type Definition struct {
-      Name        string         `json:"name,omitempty"`
-      Description string         `json:"description,omitempty"`
-      InputSchema map[string]any `json:"input_schema,omitempty"`
-      Metadata    map[string]any `json:"metadata,omitempty"`
-      EffectClass EffectClass    `json:"effect_class,omitempty"`
+      Name         string         `json:"name,omitempty"`
+      Description  string         `json:"description,omitempty"`
+      InputSchema  map[string]any `json:"input_schema,omitempty"`
+      Metadata     map[string]any `json:"metadata,omitempty"`
+      EffectClass  EffectClass    `json:"effect_class,omitempty"`
+      Capabilities Capabilities   `json:"capabilities,omitempty"`
   }
   type EffectClass string
   type ErrorCode string

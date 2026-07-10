@@ -195,6 +195,17 @@ admitted, or before an over-budget final model response becomes canonical.
 Transient stream output may already have been observed. Run-limit failures are
 control failures, not model-visible tool results.
 
+Model adapters implement `model.CapabilityProvider`; unknown is conservative,
+not a synonym for supported. Runtime validates inferred requirements from
+streaming, structured output, local tools, and parallel-safe tools together
+with the assembly's explicit reasoning-continuation and hosted-tool
+requirements before it writes run history. Tool definitions independently
+declare parallel safety and resumability. Sandbox executors keep their existing
+`Descriptor.Capabilities`, with deterministic `ValidateCapabilities` checks for
+command, async/resume, TTY, filesystem, network, path, and environment support.
+Provider catalogs may help Control choose an endpoint, but they do not replace
+the execution object's declaration at the SDK boundary.
+
 ## Durable Facts and Projection
 
 `session.Event` remains the durable source of truth, but different payloads

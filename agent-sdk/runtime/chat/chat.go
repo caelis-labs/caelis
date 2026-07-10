@@ -214,7 +214,7 @@ func (a *Agent) executeStepToolCalls(
 		}
 		return []model.Message{toolMessage}, []*session.Event{toolEvent}, true, nil
 	}
-	if !canExecuteStepToolCallsConcurrently(calls) {
+	if !a.canExecuteStepToolCallsConcurrently(calls) {
 		return a.executeStepToolCallsSerial(ctx, calls, yieldProgress)
 	}
 
@@ -317,12 +317,13 @@ func (a *Agent) executeStepToolCallsSerial(
 	return messages, events, true, nil
 }
 
-func canExecuteStepToolCallsConcurrently(calls []model.ToolCall) bool {
+func (a *Agent) canExecuteStepToolCallsConcurrently(calls []model.ToolCall) bool {
 	if len(calls) < 2 {
 		return false
 	}
 	for _, call := range calls {
-		if !strings.EqualFold(strings.TrimSpace(call.Name), "RUN_COMMAND") {
+		item, ok := a.lookupTool(call.Name)
+		if !ok || !item.Definition().Capabilities.ParallelSafe {
 			return false
 		}
 	}

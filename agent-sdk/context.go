@@ -179,12 +179,13 @@ type Agent interface {
 // AgentSpec describes the concrete execution capabilities assembled into one
 // agent instance before invocation begins.
 type AgentSpec struct {
-	Name           string         `json:"name,omitempty"`
-	Model          model.LLM      `json:"-"`
-	Tools          []tool.Tool    `json:"-"`
-	SubagentRunner SubagentRunner `json:"-"`
-	Request        ModelRequestOptions
-	Metadata       map[string]any `json:"metadata,omitempty"`
+	Name                      string         `json:"name,omitempty"`
+	Model                     model.LLM      `json:"-"`
+	Tools                     []tool.Tool    `json:"-"`
+	SubagentRunner            SubagentRunner `json:"-"`
+	Request                   ModelRequestOptions
+	RequiredModelCapabilities model.Capabilities `json:"required_model_capabilities,omitempty"`
+	Metadata                  map[string]any     `json:"metadata,omitempty"`
 }
 
 // ModelRequestOptions controls per-turn model request behavior independent of

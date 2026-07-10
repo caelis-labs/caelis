@@ -23,6 +23,9 @@ func TestRunCommandDefinitionExposesMinimalArguments(t *testing.T) {
 		t.Fatalf("NewRunCommand() error = %v", err)
 	}
 	definition := runCommandTool.Definition()
+	if !definition.Capabilities.ParallelSafe {
+		t.Fatal("Definition().Capabilities.ParallelSafe = false, want explicit concurrent-call declaration")
+	}
 	if definition.Name != RunCommandToolName {
 		t.Fatalf("Name = %q, want %q", definition.Name, RunCommandToolName)
 	}

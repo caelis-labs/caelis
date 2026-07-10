@@ -168,6 +168,11 @@ func (l *limitedLLM) ContextWindowTokens() int {
 	return 0
 }
 
+func (l *limitedLLM) Capabilities() model.Capabilities {
+	capabilities, _ := model.CapabilitiesOf(l.inner)
+	return capabilities
+}
+
 func (l *limitedLLM) ProviderName() string {
 	if l == nil || l.inner == nil {
 		return ""

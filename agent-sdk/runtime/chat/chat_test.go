@@ -527,9 +527,10 @@ func TestChatAgentExecutesSameStepToolCallsConcurrently(t *testing.T) {
 	var overlapped atomic.Bool
 	runCommandTool := tool.NamedTool{
 		Def: tool.Definition{
-			Name:        "RUN_COMMAND",
-			Description: "echo input",
-			InputSchema: map[string]any{"type": "object"},
+			Name:         "RUN_COMMAND",
+			Description:  "echo input",
+			InputSchema:  map[string]any{"type": "object"},
+			Capabilities: tool.Capabilities{ParallelSafe: true},
 		},
 		Invoke: func(ctx context.Context, call tool.Call) (tool.Result, error) {
 			if atomic.AddInt32(&active, 1) > 1 {
@@ -605,7 +606,7 @@ func TestChatAgentExecutesMixedSameStepToolCallsSerially(t *testing.T) {
 		}, nil
 	}
 	chatAgent, err := NewWithTools("chat", testModel, []tool.Tool{
-		tool.NamedTool{Def: tool.Definition{Name: "RUN_COMMAND", InputSchema: map[string]any{"type": "object"}}, Invoke: invoke},
+		tool.NamedTool{Def: tool.Definition{Name: "RUN_COMMAND", InputSchema: map[string]any{"type": "object"}, Capabilities: tool.Capabilities{ParallelSafe: true}}, Invoke: invoke},
 		tool.NamedTool{Def: tool.Definition{Name: "ECHO", InputSchema: map[string]any{"type": "object"}}, Invoke: invoke},
 	}, "Use tools when needed.")
 	if err != nil {
@@ -627,7 +628,7 @@ func TestChatAgentExecutesMixedSameStepToolCallsSerially(t *testing.T) {
 		}
 	}
 	if overlapped.Load() {
-		t.Fatal("mixed same-step tool calls overlapped; want serial execution for non-RUN_COMMAND tools")
+		t.Fatal("mixed same-step tool calls overlapped; want serial execution when one tool is not parallel-safe")
 	}
 }
 

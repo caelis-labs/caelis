@@ -172,6 +172,11 @@ func (r *Runtime) Run(
 			return agent.RunResult{}, fmt.Errorf("agent-sdk/runtime: model, tool, turn, token, and cost limits require AgentSpec assembly; prebuilt Agent capabilities are not declared")
 		}
 	}
+	if activeSession.Controller.Kind != session.ControllerKindACP && req.Agent == nil {
+		if err := validateRunRequestAgentSpec(req); err != nil {
+			return agent.RunResult{}, err
+		}
+	}
 	runCtx, cancel, err := prepareRunContext(ctx, req.Limits, r.now())
 	if err != nil {
 		return agent.RunResult{}, err

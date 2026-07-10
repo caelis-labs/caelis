@@ -39,6 +39,15 @@ func (r *Runtime) resolveAgent(
 	}
 	spec := cloneAgentSpec(req.AgentSpec)
 	spec.Request = req.Request.WithDefaults(spec.Request)
+	if err := validateAgentSpecCapabilities(
+		spec.Model,
+		spec.Tools,
+		spec.Request.OutputSpec(),
+		spec.Request.StreamEnabled(false),
+		spec.RequiredModelCapabilities,
+	); err != nil {
+		return nil, err
+	}
 	modeName, _ := r.policyForName(ctx, r.policyMode(spec))
 	spec.Model = wrapModelForRunLimits(spec.Model, runBudgetFromContext(ctx))
 	spec.Model = r.wrapModelForAutoCompaction(ref, spec.Model)

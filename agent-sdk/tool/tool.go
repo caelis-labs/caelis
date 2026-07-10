@@ -13,11 +13,21 @@ import (
 // Definition is the stable tool declaration exposed to runtimes and model
 // providers.
 type Definition struct {
-	Name        string         `json:"name,omitempty"`
-	Description string         `json:"description,omitempty"`
-	InputSchema map[string]any `json:"input_schema,omitempty"`
-	Metadata    map[string]any `json:"metadata,omitempty"`
-	EffectClass EffectClass    `json:"effect_class,omitempty"`
+	Name         string         `json:"name,omitempty"`
+	Description  string         `json:"description,omitempty"`
+	InputSchema  map[string]any `json:"input_schema,omitempty"`
+	Metadata     map[string]any `json:"metadata,omitempty"`
+	EffectClass  EffectClass    `json:"effect_class,omitempty"`
+	Capabilities Capabilities   `json:"capabilities,omitempty"`
+}
+
+// Capabilities declares execution facts that callers may safely rely on.
+type Capabilities struct {
+	// ParallelSafe permits concurrent calls to the same tool instance. The tool
+	// remains responsible for its own synchronization and side-effect safety.
+	ParallelSafe bool `json:"parallel_safe,omitempty"`
+	// Resumable reports that a durable in-progress execution can be reattached.
+	Resumable bool `json:"resumable,omitempty"`
 }
 
 type EffectClass string

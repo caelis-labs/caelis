@@ -71,6 +71,11 @@ func (l *autoCompactGatedLLM) ContextWindowTokens() int {
 	return 0
 }
 
+func (l *autoCompactGatedLLM) Capabilities() model.Capabilities {
+	capabilities, _ := model.CapabilitiesOf(l.inner)
+	return capabilities
+}
+
 func (l *autoCompactGatedLLM) ProviderName() string {
 	if l == nil || l.inner == nil {
 		return ""

@@ -86,7 +86,8 @@ func (t *RunCommandTool) Definition() tool.Definition {
 			"required":             []string{"command"},
 			"additionalProperties": false,
 		},
-		Metadata: toolutil.AnnotationMetadata(false, true, false, true),
+		Metadata:     toolutil.AnnotationMetadata(false, true, false, true),
+		Capabilities: tool.Capabilities{ParallelSafe: true},
 	}
 }
 

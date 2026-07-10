@@ -88,7 +88,7 @@ func TestRunLimitsReserveParallelToolCallsAtomically(t *testing.T) {
 			TurnComplete: true,
 		}
 	}}
-	runCommand := tool.NamedTool{Def: tool.Definition{Name: "RUN_COMMAND"}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
+	runCommand := tool.NamedTool{Def: tool.Definition{Name: "RUN_COMMAND", Capabilities: tool.Capabilities{ParallelSafe: true}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
 		toolCalls.Add(1)
 		return tool.Result{Name: "RUN_COMMAND"}, nil
 	}}
@@ -198,6 +198,10 @@ type limitTestModel struct {
 }
 
 func (limitTestModel) Name() string { return "limit-test" }
+
+func (limitTestModel) Capabilities() model.Capabilities {
+	return model.Capabilities{ToolCalls: true, ParallelToolCalls: true}
+}
 
 func (m limitTestModel) Generate(ctx context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
 	return func(yield func(*model.StreamEvent, error) bool) {

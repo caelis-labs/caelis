@@ -131,6 +131,11 @@ func (l *retryingLLM) Name() string {
 	return l.inner.Name()
 }
 
+func (l *retryingLLM) Capabilities() Capabilities {
+	capabilities, _ := CapabilitiesOf(l.inner)
+	return capabilities
+}
+
 func (l *retryingLLM) Generate(ctx context.Context, req *Request) iter.Seq2[*StreamEvent, error] {
 	return func(yield func(*StreamEvent, error) bool) {
 		if l == nil || l.inner == nil {

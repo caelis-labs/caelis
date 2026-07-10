@@ -152,6 +152,17 @@ type staticModel struct {
 
 func (m staticModel) Name() string { return "stub" }
 
+func (m staticModel) Capabilities() model.Capabilities {
+	return model.Capabilities{
+		ToolCalls:             true,
+		StructuredOutput:      true,
+		Streaming:             true,
+		ParallelToolCalls:     true,
+		ReasoningContinuation: true,
+		HostedTools:           true,
+	}
+}
+
 func (m staticModel) Generate(context.Context, *model.Request) iter.Seq2[*model.StreamEvent, error] {
 	return func(yield func(*model.StreamEvent, error) bool) {
 		yield(&model.StreamEvent{
