@@ -21,20 +21,17 @@ func (r *Runtime) prepareInvocationContext(
 	if err := r.recoverRuntimeState(ctx, ref); err != nil {
 		return invocationContext{}, err
 	}
-	events, err := r.sessions.Events(ctx, session.EventsRequest{SessionRef: ref})
+	loaded, err := r.sessions.LoadSession(ctx, session.LoadSessionRequest{SessionRef: ref})
 	if err != nil {
 		return invocationContext{}, err
 	}
-	events = mainInvocationEvents(events)
-	state, err := r.sessions.SnapshotState(ctx, ref)
-	if err != nil {
-		return invocationContext{}, err
-	}
+	events := mainInvocationEvents(loaded.Events)
+	state := loaded.State
 	if state == nil {
 		state = map[string]any{}
 	}
 	result, err := r.compactor.Prepare(ctx, compact.Request{
-		Session:       activeSession,
+		Session:       loaded.Session,
 		SessionRef:    ref,
 		Events:        events,
 		PendingEvents: pendingEventsForCompaction(pendingInput),
@@ -44,7 +41,7 @@ func (r *Runtime) prepareInvocationContext(
 		return invocationContext{}, wrapCompactionFailure("prepare", err)
 	}
 	if result.Compacted && result.CompactEvent != nil {
-		persisted, appendErr := r.persistCompactionArtifacts(ctx, activeSession, ref, result)
+		persisted, appendErr := r.persistCompactionArtifacts(ctx, loaded.Session, ref, loaded.Session.Revision, result)
 		if appendErr != nil {
 			return invocationContext{}, wrapCompactionFailure("persist", appendErr)
 		}
@@ -85,17 +82,15 @@ func (r *Runtime) Compact(ctx context.Context, req CompactRequest) (CompactResul
 		return CompactResult{}, errors.New("agent-sdk/runtime: runtime is unavailable")
 	}
 	ref := session.NormalizeSessionRef(req.SessionRef)
-	activeSession, err := r.sessions.Session(ctx, ref)
-	if err != nil {
-		return CompactResult{}, err
-	}
 	if err := r.recoverRuntimeState(ctx, ref); err != nil {
 		return CompactResult{}, err
 	}
-	events, err := r.sessions.Events(ctx, session.EventsRequest{SessionRef: ref})
+	loaded, err := r.sessions.LoadSession(ctx, session.LoadSessionRequest{SessionRef: ref})
 	if err != nil {
 		return CompactResult{}, err
 	}
+	activeSession := loaded.Session
+	events := loaded.Events
 	forceCompactor, ok := r.compactor.(compact.ForceEngine)
 	if !ok {
 		return CompactResult{}, errors.New("agent-sdk/runtime: compactor does not support forced compaction")
@@ -115,7 +110,7 @@ func (r *Runtime) Compact(ctx context.Context, req CompactRequest) (CompactResul
 		Usage:     result.Usage,
 	}
 	if result.Compacted && result.CompactEvent != nil {
-		persisted, appendErr := r.persistCompactionArtifacts(ctx, activeSession, ref, result)
+		persisted, appendErr := r.persistCompactionArtifacts(ctx, activeSession, ref, loaded.Session.Revision, result)
 		if appendErr != nil {
 			return CompactResult{}, appendErr
 		}
@@ -132,14 +127,16 @@ func (r *Runtime) persistCompactionArtifacts(
 	ctx context.Context,
 	activeSession session.Session,
 	ref session.SessionRef,
+	sourceRevision uint64,
 	result compact.Result,
 ) (*session.Event, error) {
 	if result.CompactEvent == nil {
 		return nil, errors.New("agent-sdk/runtime: compact event is required")
 	}
 	persisted, err := r.sessions.AppendEvent(ctx, session.AppendEventRequest{
-		SessionRef: ref,
-		Event:      normalizeEvent(activeSession, "", result.CompactEvent),
+		SessionRef:       ref,
+		ExpectedRevision: &sourceRevision,
+		Event:            normalizeEvent(activeSession, "", result.CompactEvent),
 	})
 	if err != nil {
 		return nil, err
@@ -156,7 +153,7 @@ func (r *Runtime) compactAfterOverflow(
 	cause error,
 	sink *runner,
 ) (compactionProgress, bool, error) {
-	return r.compactAndNotify(ctx, activeSession, ref, turnID, nil, sink, func(events []*session.Event) (compact.Result, error) {
+	return r.compactAndNotify(ctx, activeSession, ref, turnID, nil, nil, sink, func(events []*session.Event) (compact.Result, error) {
 		return r.compactor.CompactOnOverflow(ctx, compact.Request{
 			Session:    activeSession,
 			SessionRef: ref,
@@ -183,10 +180,11 @@ func (r *Runtime) compactAfterModelRequestWatermark(
 		trigger = "model_request_context_watermark"
 	}
 	var events []*session.Event
+	sourceRevision := decision.SourceRevision
 	if decision.Events != nil {
 		events = decision.Events
 	}
-	return r.compactAndNotify(ctx, activeSession, ref, turnID, events, sink, func(events []*session.Event) (compact.Result, error) {
+	return r.compactAndNotify(ctx, activeSession, ref, turnID, events, &sourceRevision, sink, func(events []*session.Event) (compact.Result, error) {
 		return forceCompactor.Force(ctx, compact.Request{
 			Session:    activeSession,
 			SessionRef: ref,
@@ -202,6 +200,7 @@ func (r *Runtime) compactAndNotify(
 	ref session.SessionRef,
 	turnID string,
 	events []*session.Event,
+	sourceRevision *uint64,
 	sink *runner,
 	compactFn func([]*session.Event) (compact.Result, error),
 ) (compactionProgress, bool, error) {
@@ -209,11 +208,15 @@ func (r *Runtime) compactAndNotify(
 		return compactionProgress{}, false, errors.New("agent-sdk/runtime: compact function is required")
 	}
 	var err error
-	if events == nil {
-		events, err = r.sessions.Events(ctx, session.EventsRequest{SessionRef: ref})
+	if events == nil || sourceRevision == nil {
+		loaded, loadErr := r.sessions.LoadSession(ctx, session.LoadSessionRequest{SessionRef: ref})
+		err = loadErr
 		if err != nil {
 			return compactionProgress{}, false, err
 		}
+		events = loaded.Events
+		revision := loaded.Session.Revision
+		sourceRevision = &revision
 	}
 	var result compact.Result
 	err = r.executeLifecycle(ctx, r.lifecycleEvent(ctx, agent.LifecycleCompact, "", ""), func(context.Context) error {
@@ -231,7 +234,7 @@ func (r *Runtime) compactAndNotify(
 	if progress := compactionProgressFromEvent(result.CompactEvent); progress.hasCompactData && !progress.hasSourceProgress() {
 		return compactionProgress{}, true, nil
 	}
-	persisted, err := r.persistCompactionArtifacts(ctx, activeSession, ref, result)
+	persisted, err := r.persistCompactionArtifacts(ctx, activeSession, ref, *sourceRevision, result)
 	if err != nil {
 		r.publishCompactFailureNotice(activeSession, turnID, sink, err)
 		return compactionProgress{}, false, err

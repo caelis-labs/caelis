@@ -13,12 +13,13 @@ import (
 )
 
 type autoCompactDecision struct {
-	Reason        string
-	Kind          compactionRecoveryKind
-	Usage         compact.UsageSnapshot
-	RequestTokens int
-	Model         model.LLM
-	Events        []*session.Event
+	Reason         string
+	Kind           compactionRecoveryKind
+	Usage          compact.UsageSnapshot
+	RequestTokens  int
+	Model          model.LLM
+	Events         []*session.Event
+	SourceRevision uint64
 }
 
 type autoCompactRequiredError struct {
@@ -174,12 +175,13 @@ func (r *Runtime) autoCompactDecisionBeforeModelRequest(
 		return autoCompactDecision{}, nil
 	}
 	return autoCompactDecision{
-		Reason:        modelRequestWatermarkReason(trigger.Reason),
-		Kind:          compactionRecoveryKindWatermark,
-		Usage:         view.usage,
-		RequestTokens: view.requestTokens,
-		Model:         llm,
-		Events:        view.events,
+		Reason:         modelRequestWatermarkReason(trigger.Reason),
+		Kind:           compactionRecoveryKindWatermark,
+		Usage:          view.usage,
+		RequestTokens:  view.requestTokens,
+		Model:          llm,
+		Events:         view.events,
+		SourceRevision: view.sourceRevision,
 	}, nil
 }
 
@@ -202,19 +204,21 @@ func (r *Runtime) autoCompactDecisionAfterModelRequestFailure(
 		return autoCompactDecision{}, false, nil
 	}
 	return autoCompactDecision{
-		Reason:        "model_request_retry_exhausted_high_water",
-		Kind:          compactionRecoveryKindRetryExhausted,
-		Usage:         view.usage,
-		RequestTokens: view.requestTokens,
-		Model:         llm,
-		Events:        view.events,
+		Reason:         "model_request_retry_exhausted_high_water",
+		Kind:           compactionRecoveryKindRetryExhausted,
+		Usage:          view.usage,
+		RequestTokens:  view.requestTokens,
+		Model:          llm,
+		Events:         view.events,
+		SourceRevision: view.sourceRevision,
 	}, true, nil
 }
 
 type autoCompactModelRequestView struct {
-	usage         compact.UsageSnapshot
-	requestTokens int
-	events        []*session.Event
+	usage          compact.UsageSnapshot
+	requestTokens  int
+	events         []*session.Event
+	sourceRevision uint64
 }
 
 func (r *Runtime) autoCompactModelRequestView(
@@ -229,10 +233,11 @@ func (r *Runtime) autoCompactModelRequestView(
 	if err := ctx.Err(); err != nil {
 		return autoCompactModelRequestView{}, false, err
 	}
-	events, err := r.sessions.Events(ctx, session.EventsRequest{SessionRef: ref})
+	loaded, err := r.sessions.LoadSession(ctx, session.LoadSessionRequest{SessionRef: ref})
 	if err != nil {
 		return autoCompactModelRequestView{}, false, err
 	}
+	events := loaded.Events
 	events = mainInvocationEvents(events)
 	delta := compactableEvents(events)
 	if len(delta) == 0 || !autoCompactGateHasModelProgress(delta) {
@@ -243,9 +248,10 @@ func (r *Runtime) autoCompactModelRequestView(
 		return autoCompactModelRequestView{}, false, nil
 	}
 	return autoCompactModelRequestView{
-		usage:         usage,
-		requestTokens: requestTokens,
-		events:        events,
+		usage:          usage,
+		requestTokens:  requestTokens,
+		events:         events,
+		sourceRevision: loaded.Session.Revision,
 	}, true, nil
 }
 

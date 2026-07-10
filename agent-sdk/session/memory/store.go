@@ -493,25 +493,19 @@ func (s *Service) StartSession(
 }
 
 func (s *Service) LoadSession(
-	ctx context.Context,
+	_ context.Context,
 	req session.LoadSessionRequest,
 ) (session.LoadedSession, error) {
-	loadedSession, err := s.store.Get(ctx, req.SessionRef)
-	if err != nil {
-		return session.LoadedSession{}, err
-	}
-	events, err := s.store.Events(ctx, session.EventsRequest(req))
-	if err != nil {
-		return session.LoadedSession{}, err
-	}
-	state, err := s.store.SnapshotState(ctx, req.SessionRef)
-	if err != nil {
-		return session.LoadedSession{}, err
+	s.store.mu.RLock()
+	defer s.store.mu.RUnlock()
+	record, ok := s.store.lookupLocked(req.SessionRef)
+	if !ok {
+		return session.LoadedSession{}, session.ErrSessionNotFound
 	}
 	return session.LoadedSession{
-		Session: loadedSession,
-		Events:  events,
-		State:   state,
+		Session: record.cloneSession(),
+		Events:  session.FilterEvents(record.events, req.Limit, req.IncludeTransient),
+		State:   cloneState(record.state),
 	}, nil
 }
 

@@ -178,3 +178,38 @@ func TestPromptEventsSelectsValidCheckpointWithHighestCoveredSeq(t *testing.T) {
 		t.Fatalf("PromptEventsFromLatestCompact() = %#v, want highest-coverage checkpoint plus later events", got)
 	}
 }
+
+func TestPromptEventsKeepCoveredSequenceSuccessorStoredBeforeCheckpoint(t *testing.T) {
+	t.Parallel()
+
+	concurrent := &session.Event{
+		Seq:        11,
+		Type:       session.EventTypeUser,
+		Visibility: session.VisibilityCanonical,
+		Text:       "concurrent unsummarized fact",
+	}
+	checkpoint := &session.Event{
+		Seq:        12,
+		Type:       session.EventTypeCompact,
+		Visibility: session.VisibilityCanonical,
+		Text:       "summary through sequence 10",
+		Meta: map[string]any{MetaKeyCompact: CompactEventDataValue(CompactEventData{
+			ContractVersion:      CompactContractVersion,
+			SummarizedThroughSeq: 10,
+		})},
+	}
+
+	got := PromptEventsFromLatestCompact([]*session.Event{
+		{Seq: 10, Type: session.EventTypeAssistant, Visibility: session.VisibilityCanonical, Text: "summarized fact"},
+		concurrent,
+		checkpoint,
+	})
+	if len(got) != 2 || got[0].Text != checkpoint.Text || got[1].Text != concurrent.Text {
+		t.Fatalf("PromptEventsFromLatestCompact() = %#v, want checkpoint plus Seq 11 fact", got)
+	}
+
+	after := EventsAfterLatestCompact([]*session.Event{concurrent, checkpoint})
+	if len(after) != 1 || after[0].Seq != concurrent.Seq || after[0].Text != concurrent.Text {
+		t.Fatalf("EventsAfterLatestCompact() = %#v, want Seq 11 fact", after)
+	}
+}

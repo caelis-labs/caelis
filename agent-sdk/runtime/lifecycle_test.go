@@ -75,7 +75,7 @@ func TestRuntimeEmitsCompactLifecycle(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 	ctx := withLifecycleScope(context.Background(), lifecycleScope{sessionRef: active.SessionRef, runID: "run-1", turnID: "turn-1"})
-	_, _, err = runtime.compactAndNotify(ctx, active, active.SessionRef, "turn-1", []*session.Event{}, nil, func([]*session.Event) (compact.Result, error) {
+	_, _, err = runtime.compactAndNotify(ctx, active, active.SessionRef, "turn-1", []*session.Event{}, nil, nil, func([]*session.Event) (compact.Result, error) {
 		return compact.Result{}, nil
 	})
 	if err != nil {

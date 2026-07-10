@@ -172,17 +172,12 @@ func PromptEventsFromLatestCompact(events []*session.Event) []*session.Event {
 	if index < 0 {
 		return session.CloneEvents(visible)
 	}
-	if _, ok := CompactEventDataFromEvent(visible[index]); ok {
+	if data, ok := CompactEventDataFromEvent(visible[index]); ok {
 		out := make([]*session.Event, 0, len(visible[index:]))
 		if replacement := replacementTextEvent(session.EventText(visible[index])); replacement != nil {
 			out = append(out, replacement)
 		}
-		for _, event := range visible[index+1:] {
-			if IsCompactEvent(event) {
-				continue
-			}
-			out = append(out, session.CloneEvent(event))
-		}
+		out = append(out, eventsAfterCheckpointCoverage(visible, index, data)...)
 		return out
 	}
 	return session.CloneEvents(visible[index:])
@@ -200,9 +195,32 @@ func EventsAfterLatestCompact(events []*session.Event) []*session.Event {
 	if index < 0 {
 		return session.CloneEvents(visible)
 	}
-	out := make([]*session.Event, 0, len(visible)-index-1)
-	for _, event := range visible[index+1:] {
-		if IsCompactEvent(event) {
+	if data, ok := CompactEventDataFromEvent(visible[index]); ok {
+		return eventsAfterCheckpointCoverage(visible, index, data)
+	}
+	return nonCompactEvents(visible[index+1:])
+}
+
+func eventsAfterCheckpointCoverage(events []*session.Event, checkpointIndex int, data CompactEventData) []*session.Event {
+	if data.ContractVersion != CompactContractVersion || data.SummarizedThroughSeq == 0 {
+		return nonCompactEvents(events[checkpointIndex+1:])
+	}
+	out := make([]*session.Event, 0, len(events)-checkpointIndex-1)
+	for index, event := range events {
+		if event == nil || IsCompactEvent(event) {
+			continue
+		}
+		if event.Seq > data.SummarizedThroughSeq || (event.Seq == 0 && index > checkpointIndex) {
+			out = append(out, session.CloneEvent(event))
+		}
+	}
+	return out
+}
+
+func nonCompactEvents(events []*session.Event) []*session.Event {
+	out := make([]*session.Event, 0, len(events))
+	for _, event := range events {
+		if event == nil || IsCompactEvent(event) {
 			continue
 		}
 		out = append(out, session.CloneEvent(event))
