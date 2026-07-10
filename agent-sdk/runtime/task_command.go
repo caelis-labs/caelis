@@ -213,10 +213,8 @@ func (tm *taskRuntime) completeCommandTaskWithStatus(ctx context.Context, task *
 		Route:    result.Route,
 		Backend:  result.Backend,
 	}); ok {
-		task.result["hint_code"] = diag.Code
-		task.result["hint"] = diag.Hint
-		if strings.TrimSpace(diag.Severity) != "" {
-			task.result["hint_severity"] = diag.Severity
+		if hint := strings.TrimSpace(diag.Hint); hint != "" {
+			task.result["system_hint"] = hint
 		}
 	}
 	snapshot := task.snapshotLocked(status)

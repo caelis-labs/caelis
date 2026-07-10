@@ -275,19 +275,19 @@ func promptSandboxContextMode(cfg SandboxConfig) string {
 	requested := strings.ToLower(strings.TrimSpace(cfg.RequestedType))
 	switch requested {
 	case "host":
-		return "host"
+		return "host (no sandbox isolation)"
 	case "", "auto":
-		return "restricted sandbox (auto)"
+		return "restricted; workspace-write; network=enabled (auto backend)"
 	default:
-		return requested + " sandbox"
+		return requested + "; workspace-write; network=enabled"
 	}
 }
 
 func promptDefaultPermissionSummary(cfg SandboxConfig) string {
 	if strings.EqualFold(strings.TrimSpace(cfg.RequestedType), "host") {
-		return "host permissions"
+		return "host permissions; each sensitive action may still require approval"
 	}
-	return "workspace-write sandbox; Host execution requires explicit escalation"
+	return "sandbox default; Host only via one-shot approval"
 }
 
 func (s *Stack) Close() error {

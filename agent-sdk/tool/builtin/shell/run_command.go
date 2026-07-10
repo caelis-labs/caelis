@@ -55,7 +55,7 @@ func NewRunCommand(cfg RunCommandConfig) (*RunCommandTool, error) {
 func (t *RunCommandTool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        RunCommandToolName,
-		Description: "Run a shell command from the session workspace or a specified workdir. Use this for repository inspection, tests, builds, formatting checks, git status/diff inspection, and commands that cannot be expressed by file tools. Do not prefix with cd; set workdir instead. Use yield_time_ms for long-running commands. Prefer default sandbox permissions; request Host only when this command truly needs it.",
+		Description: "Run a shell command from the session workspace or a specified workdir. Use this for repository inspection, tests, builds, formatting checks, git status/diff inspection, and commands that cannot be expressed by file tools. Do not prefix with cd; set workdir instead. Use yield_time_ms for long-running commands. Prefer use_default. Escalate only for this command when sandbox cannot complete it; each Host grant is one-shot.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -75,12 +75,12 @@ func (t *RunCommandTool) Definition() tool.Definition {
 				},
 				"sandbox_permissions": map[string]any{
 					"type":        "string",
-					"description": "Per-command sandbox mode. use_default is preferred; require_escalated requests Host when this command needs it (or exact retry after sandbox denial). Prior escalations do not authorize later commands.",
+					"description": "Default use_default (sandbox). require_escalated = one-shot Host after this command failed in sandbox, or when Host is required for this exact action. Prior Host allows never authorize later commands. Read-only VCS/status/diff/log must not escalate.",
 					"enum":        []string{"use_default", "require_escalated"},
 				},
 				"justification": map[string]any{
 					"type":        "string",
-					"description": "Required with require_escalated: command intent, why sandbox is insufficient, task link. Empty/blank is rejected; vague or unrelated reasons are likely denied on review.",
+					"description": "Required with require_escalated. One short sentence: (1) command intent, (2) sandbox limit hit or why Host is required, (3) link to user task. Reject empty/vague/\"faster\"/\"need host\" text.",
 				},
 			},
 			"required":             []string{"command"},
@@ -278,19 +278,8 @@ func runCommandPayloadForCommand(command string, result sandbox.CommandResult, e
 		Route:    result.Route,
 		Backend:  result.Backend,
 	}); ok {
-		payload["hint_code"] = diag.Code
-		payload["hint"] = diag.Hint
-		if strings.TrimSpace(diag.Severity) != "" {
-			payload["hint_severity"] = diag.Severity
-		}
-		if diag.RetryableWithHost {
-			payload["retryable_with_host"] = true
-		}
-		if strings.TrimSpace(diag.SuggestedSandboxPermissions) != "" {
-			payload["suggested_sandbox_permissions"] = strings.TrimSpace(diag.SuggestedSandboxPermissions)
-		}
-		if len(diag.SuggestedPrefixRule) > 0 {
-			payload["suggested_prefix_rule"] = append([]string(nil), diag.SuggestedPrefixRule...)
+		if hint := strings.TrimSpace(diag.Hint); hint != "" {
+			payload["system_hint"] = hint
 		}
 	}
 	return payload

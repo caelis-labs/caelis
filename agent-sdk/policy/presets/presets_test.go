@@ -74,8 +74,14 @@ func TestDefaultModeRestrictsWriteRoots(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DecideTool() error = %v", err)
 	}
-	if decision.Action != policy.ActionDeny {
-		t.Fatalf("Action = %q, want deny", decision.Action)
+	if decision.Action != policy.ActionAskApproval {
+		t.Fatalf("Action = %q, want ask_approval for outside write", decision.Action)
+	}
+	if !hasPathRule(decision.Constraints.PathRules, testOutsidePath(), sandbox.PathAccessReadWrite) {
+		t.Fatalf("PathRules = %#v, want scoped write grant for outside path", decision.Constraints.PathRules)
+	}
+	if got := decision.Metadata["risk_class"]; got != "path_escape" {
+		t.Fatalf("Metadata[risk_class] = %#v, want path_escape", got)
 	}
 }
 
@@ -176,8 +182,11 @@ func TestDefaultModeAllowsUserConfigReadsButRequiresWriteGrant(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WRITE DecideTool() error = %v", err)
 	}
-	if decision.Action != policy.ActionDeny {
-		t.Fatalf("WRITE action = %q, want deny without explicit grant", decision.Action)
+	if decision.Action != policy.ActionAskApproval {
+		t.Fatalf("WRITE action = %q, want ask_approval without explicit grant", decision.Action)
+	}
+	if !hasPathRule(decision.Constraints.PathRules, configPath, sandbox.PathAccessReadWrite) {
+		t.Fatalf("PathRules = %#v, want scoped write grant for config path", decision.Constraints.PathRules)
 	}
 }
 
@@ -455,7 +464,7 @@ func TestDefaultModeAllowsReadOnlyGitCommands(t *testing.T) {
 	}
 }
 
-func TestDefaultModeDeniesGitMetadataCommandsInSandbox(t *testing.T) {
+func TestDefaultModeRequiresApprovalForGitMetadataCommandsInSandbox(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -515,10 +524,16 @@ func TestDefaultModeDeniesGitMetadataCommandsInSandbox(t *testing.T) {
 			if err != nil {
 				t.Fatalf("DecideTool() error = %v", err)
 			}
-			if decision.Action != policy.ActionDeny {
-				t.Fatalf("Action = %q, want deny (reason=%q)", decision.Action, decision.Reason)
+			if decision.Action != policy.ActionAskApproval {
+				t.Fatalf("Action = %q, want ask_approval (reason=%q)", decision.Action, decision.Reason)
 			}
-			for _, want := range []string{"Denied:", tt.denied, "may write Git metadata under .git", "sandbox_permissions=require_escalated", "justification"} {
+			if decision.Constraints.Route != sandbox.RouteHost {
+				t.Fatalf("Constraints.Route = %q, want host", decision.Constraints.Route)
+			}
+			if got := decision.Metadata["risk_class"]; got != riskClassVCSSandbox {
+				t.Fatalf("Metadata[risk_class] = %#v, want %q", got, riskClassVCSSandbox)
+			}
+			for _, want := range []string{tt.denied, "requires approval", "Git metadata"} {
 				if !strings.Contains(decision.Reason, want) {
 					t.Fatalf("Reason = %q, want substring %q", decision.Reason, want)
 				}
@@ -611,7 +626,7 @@ func TestDefaultModeRequiresApprovalForCompositeHostFallbackDescriptor(t *testin
 	}
 }
 
-func TestDefaultModeDeniesDangerousGitCommands(t *testing.T) {
+func TestDefaultModeRequiresApprovalForDestructiveGitCommands(t *testing.T) {
 	t.Parallel()
 
 	tests := []string{
@@ -623,6 +638,7 @@ func TestDefaultModeDeniesDangerousGitCommands(t *testing.T) {
 		"git restore .",
 		"git push --force origin main",
 		"git push -f origin main",
+		"git push --force-with-lease origin feature/my-branch",
 		"sh -c 'git reset --hard'",
 		"bash -lc 'git clean -fd'",
 		"sudo -E git reset --hard",
@@ -637,8 +653,11 @@ func TestDefaultModeDeniesDangerousGitCommands(t *testing.T) {
 			if err != nil {
 				t.Fatalf("DecideTool() error = %v", err)
 			}
-			if decision.Action != policy.ActionDeny {
-				t.Fatalf("Action = %q, want deny", decision.Action)
+			if decision.Action != policy.ActionAskApproval {
+				t.Fatalf("Action = %q, want ask_approval", decision.Action)
+			}
+			if decision.Constraints.Route != sandbox.RouteHost {
+				t.Fatalf("Constraints.Route = %q, want host", decision.Constraints.Route)
 			}
 		})
 	}
@@ -647,8 +666,8 @@ func TestDefaultModeDeniesDangerousGitCommands(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DecideTool() error = %v", err)
 	}
-	if decision.Action != policy.ActionDeny {
-		t.Fatalf("Escalated git clean action = %q, want deny", decision.Action)
+	if decision.Action != policy.ActionAskApproval {
+		t.Fatalf("Escalated git clean action = %q, want ask_approval", decision.Action)
 	}
 }
 
@@ -857,47 +876,66 @@ func TestFullAccessBlocksDangerousCommands(t *testing.T) {
 	}
 }
 
-func TestRecursiveDeleteCommandsAreDenied(t *testing.T) {
+func TestRecursiveDeleteInsideWritableRootsIsAllowed(t *testing.T) {
 	t.Parallel()
 
-	for _, mode := range []struct {
-		name string
-		mode policy.Mode
-	}{
-		{name: "auto-review", mode: AutoReviewMode()},
-		{name: "manual", mode: ManualMode()},
+	for _, command := range []string{
+		"rm -rf /tmp/caelis-gocache",
+		"rm /tmp/caelis-gocache -rf",
+		"rm -r /tmp/caelis-gocache",
+		"sh -c 'rm -rf /tmp/caelis-gocache'",
+		"bash -lc 'rm -r /tmp/caelis-gocache'",
+		"sudo -u root rm -rf /tmp/caelis-gocache",
+		"sudo -Eu root rm -rf /tmp/caelis-gocache",
+		"Remove-Item -Recurse -Force .\\tmp",
+		"powershell -Command Remove-Item -Recurse -Force .\\tmp",
+		"del /s /q tmp",
+		"del /s/q tmp",
+		"rmdir /s /q tmp",
+		"rmdir /S/Q tmp",
+		"rd /s/q tmp",
+		"cmd /c rmdir /s/q tmp",
+		"rm -rf ./build",
 	} {
-		mode := mode
-		t.Run(mode.name, func(t *testing.T) {
+		command := command
+		t.Run(command, func(t *testing.T) {
 			t.Parallel()
-
-			for _, command := range []string{
-				"rm -rf /tmp/caelis-gocache",
-				"rm /tmp/caelis-gocache -rf",
-				"rm -r /tmp/caelis-gocache",
-				"sh -c 'rm -rf /tmp/caelis-gocache'",
-				"bash -lc 'rm -r /tmp/caelis-gocache'",
-				"sudo -u root rm -rf /tmp/caelis-gocache",
-				"sudo -Eu root rm -rf /tmp/caelis-gocache",
-				"Remove-Item -Recurse -Force .\\tmp",
-				"powershell -Command Remove-Item -Recurse -Force .\\tmp",
-				"del /s /q tmp",
-				"del /s/q tmp",
-				"rmdir /s /q tmp",
-				"rmdir /S/Q tmp",
-				"rd /s/q tmp",
-				"cmd /c rmdir /s/q tmp",
-			} {
-				command := command
-				decision, err := mode.mode.DecideTool(context.Background(), commandCtx(command, false))
-				if err != nil {
-					t.Fatalf("DecideTool(%q) error = %v", command, err)
-				}
-				if decision.Action != policy.ActionDeny {
-					t.Fatalf("%q action = %q, want deny", command, decision.Action)
-				}
+			decision, err := AutoReviewMode().DecideTool(context.Background(), commandCtx(command, false))
+			if err != nil {
+				t.Fatalf("DecideTool(%q) error = %v", command, err)
+			}
+			if decision.Action != policy.ActionAllow {
+				t.Fatalf("%q action = %q, want allow (reason=%q)", command, decision.Action, decision.Reason)
 			}
 		})
+	}
+}
+
+func TestRecursiveDeleteOutsideRootsRequiresApproval(t *testing.T) {
+	t.Parallel()
+
+	outside := testOutsidePath()
+	command := "rm -rf " + outside
+	decision, err := AutoReviewMode().DecideTool(context.Background(), commandCtx(command, false))
+	if err != nil {
+		t.Fatalf("DecideTool() error = %v", err)
+	}
+	if decision.Action != policy.ActionAskApproval {
+		t.Fatalf("Action = %q, want ask_approval for outside recursive delete", decision.Action)
+	}
+}
+
+func TestSensitiveWritePathsRemainDenied(t *testing.T) {
+	home := t.TempDir()
+	setHomeForPresetsTest(t, home)
+	secretPath := filepath.Join(home, ".ssh", "id_rsa")
+
+	decision, err := AutoReviewMode().DecideTool(context.Background(), writeCtx(secretPath))
+	if err != nil {
+		t.Fatalf("DecideTool() error = %v", err)
+	}
+	if decision.Action != policy.ActionDeny {
+		t.Fatalf("Action = %q, want deny for sensitive write", decision.Action)
 	}
 }
 

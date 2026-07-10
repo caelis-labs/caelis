@@ -64,11 +64,10 @@ func TestBuildSystemPromptIncludesPromptAssets(t *testing.T) {
 		"narrowest useful checks",
 		"changed / verified / remaining",
 		"one complete evidence-based answer",
-		"## Execution And Approval",
-		"Prefer the restricted sandbox",
-		"sandbox_permissions=require_escalated",
-		"requires a specific `justification`",
-		"Do not bypass or repair sandbox restrictions",
+		"## Sandbox And Host Approval",
+		"You work inside a restricted workspace-write sandbox by default",
+		"each grant is one-shot",
+		"Read-only inspection",
 		"Tool-specific behavior belongs to each tool's own description and schema.",
 		"Do not invent facts when evidence can be inspected.",
 		"Stop searching once the available evidence is sufficient",
@@ -79,8 +78,8 @@ func TestBuildSystemPromptIncludesPromptAssets(t *testing.T) {
 		"<environment_context>",
 		"<cwd>" + resolvedWorkspace + "</cwd>",
 		"<os>",
-		"<sandbox>restricted sandbox</sandbox>",
-		"<default_permission>workspace-write sandbox; Host execution requires explicit escalation</default_permission>",
+		"<sandbox>restricted; workspace-write</sandbox>",
+		"<default_permission>sandbox default; Host only via one-shot approval</default_permission>",
 		"Skills provide specialized instructions and workflows for specific tasks.",
 		"use the `skill` tool to load it before taking task actions, then follow its routing instructions.",
 		"### Available skills",
@@ -135,8 +134,18 @@ func TestBuildSystemPromptCoreContractIsConciseAndToolAgnostic(t *testing.T) {
 	if end := strings.Index(prompt, "</system_instructions>"); end >= 0 {
 		systemBlock = prompt[:end+len("</system_instructions>")]
 	}
-	if got, max := len(systemBlock), 2300; got > max {
+	if got, max := len(systemBlock), 3200; got > max {
 		t.Fatalf("system instruction length = %d, want <= %d:\n%s", got, max, systemBlock)
+	}
+	for _, want := range []string{
+		"## Sandbox And Host Approval",
+		"workspace-write sandbox",
+		"one-shot",
+		"Read-only inspection",
+	} {
+		if !strings.Contains(systemBlock, want) {
+			t.Fatalf("system instructions missing %q:\n%s", want, systemBlock)
+		}
 	}
 	for _, forbidden := range []string{
 		"terminal-first",
@@ -200,15 +209,16 @@ func TestBuildSystemPromptPermissionBoundariesAreRuntimeAgnostic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildSystemPrompt() error = %v", err)
 	}
-	expected := strings.Join([]string{
-		"## Execution And Approval",
-		"",
-		"- Prefer the restricted sandbox; request Host only when a command truly needs it for the task.",
-		"- Every `sandbox_permissions=require_escalated` requires a specific `justification` (intent, why sandbox is insufficient, task link). Do not escalate by habit from earlier allows.",
-		"- Do not bypass or repair sandbox restrictions after permission or lock failures; escalate the original necessary command with justification, narrow the operation, or stop for user input.",
-	}, "\n")
-	if !strings.Contains(prompt, expected) {
-		t.Fatalf("prompt missing exact permission block:\n%s", prompt)
+	for _, want := range []string{
+		"## Sandbox And Host Approval",
+		"You work inside a restricted workspace-write sandbox by default",
+		"each grant is one-shot",
+		"Read-only inspection",
+		"retry once with Host only when required",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing permission guidance %q:\n%s", want, prompt)
+		}
 	}
 	if strings.Contains(prompt, "git clean") || strings.Contains(prompt, "git reset") || strings.Contains(prompt, "git checkout") {
 		t.Fatalf("prompt includes scenario-specific Git cleanup commands:\n%s", prompt)

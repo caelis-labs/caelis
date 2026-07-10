@@ -181,11 +181,16 @@ func builtInCapabilityGuidancePrompt(agents []delegation.Agent) string {
 
 func builtInPermissionBoundariesPrompt() string {
 	return strings.Join([]string{
-		"## Execution And Approval",
+		"## Sandbox And Host Approval",
 		"",
-		"- Prefer the restricted sandbox; request Host only when a command truly needs it for the task.",
-		"- Every `sandbox_permissions=require_escalated` requires a specific `justification` (intent, why sandbox is insufficient, task link). Do not escalate by habit from earlier allows.",
-		"- Do not bypass or repair sandbox restrictions after permission or lock failures; escalate the original necessary command with justification, narrow the operation, or stop for user input.",
+		"You work inside a restricted workspace-write sandbox by default (workspace and approved roots are writable; Host is not the default).",
+		"Stay in the sandbox unless a command truly cannot complete there.",
+		"Host escalation asks the user to approve an exception; each grant is one-shot and does not authorize later similar commands.",
+		"Escalate only after a concrete sandbox failure on the same necessary command, or when the harness already requires Host for that action.",
+		"Keep escalations rare: repeated Host requests reduce user trust and slow the task.",
+		"Read-only inspection (including most read-only VCS inspection) should stay sandboxed; do not escalate \"just in case.\"",
+		"When escalating, state intent, the sandbox limit you hit, and the task link in one short justification—no generic \"need host\" phrasing.",
+		"Do not bypass sandbox limits with shell tricks; narrow the operation, retry once with Host only when required, or stop for the user.",
 	}, "\n")
 }
 
@@ -203,8 +208,8 @@ func builtInEnvironmentContextPrompt(workspaceDir string, cfg Config) string {
 		return ""
 	}
 	osName := firstNonEmpty(strings.TrimSpace(cfg.RuntimeOS), runtime.GOOS)
-	sandboxMode := firstNonEmpty(strings.TrimSpace(cfg.SandboxMode), "restricted sandbox")
-	defaultPermission := firstNonEmpty(strings.TrimSpace(cfg.DefaultPermission), "workspace-write sandbox; Host execution requires explicit escalation")
+	sandboxMode := firstNonEmpty(strings.TrimSpace(cfg.SandboxMode), "restricted; workspace-write")
+	defaultPermission := firstNonEmpty(strings.TrimSpace(cfg.DefaultPermission), "sandbox default; Host only via one-shot approval")
 	return fmt.Sprintf(`<environment_context>
   <cwd>%s</cwd>
   <os>%s</os>

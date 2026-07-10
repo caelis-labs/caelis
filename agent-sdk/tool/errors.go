@@ -133,7 +133,7 @@ func ErrorPayload(err error) map[string]any {
 			payload["error_code"] = string(toolErr.Code)
 		}
 		if hint := strings.TrimSpace(toolErr.Hint); hint != "" {
-			payload["hint"] = hint
+			payload["system_hint"] = hint
 		}
 		if toolErr.Retryable {
 			payload["retryable"] = true

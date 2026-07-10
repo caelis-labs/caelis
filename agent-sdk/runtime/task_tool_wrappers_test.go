@@ -11,7 +11,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/commanddiag"
 )
 
 func TestRuntimeRunCommandToolAcceptsLegacyAdditionalPermissionsMode(t *testing.T) {
@@ -91,14 +90,11 @@ func TestRuntimeRunCommandToolAddsHostApprovalHintWhenStartRejected(t *testing.T
 		t.Fatal("result.IsError = false, want structured command start failure")
 	}
 	payload := testToolResultPayload(t, result)
-	if got, _ := payload["hint_code"].(string); got != commanddiag.CodeHostExecutionApproval {
-		t.Fatalf("hint_code = %q, want %q", got, commanddiag.CodeHostExecutionApproval)
+	if got, _ := payload["system_hint"].(string); got != sandbox.HostExecutionRequiresApprovalMessage {
+		t.Fatalf("system_hint = %q, want %q", got, sandbox.HostExecutionRequiresApprovalMessage)
 	}
-	if got, _ := payload["suggested_sandbox_permissions"].(string); got != "require_escalated" {
-		t.Fatalf("suggested_sandbox_permissions = %q, want require_escalated", got)
-	}
-	if got, _ := payload["retryable_with_host"].(bool); !got {
-		t.Fatalf("retryable_with_host = %#v, want true", payload["retryable_with_host"])
+	if _, ok := payload["hint_code"]; ok {
+		t.Fatalf("hint_code = %#v, want omitted from model-facing payload", payload["hint_code"])
 	}
 }
 

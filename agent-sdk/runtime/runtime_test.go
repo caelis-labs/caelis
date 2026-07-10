@@ -32,7 +32,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/commanddiag"
 )
 
 func TestRuntimeRequiresControlContextRouterForExternalEndpoints(t *testing.T) {
@@ -2211,7 +2210,7 @@ func TestRuntimeRunPersistsPlanLoopAndState(t *testing.T) {
 	}
 }
 
-func TestRuntimePolicyDefaultDeniesWriteOutsideAllowedRoots(t *testing.T) {
+func TestRuntimePolicyWriteOutsideAllowedRootsRequiresApproval(t *testing.T) {
 	t.Parallel()
 
 	sessions, activeSession := newTestSessionService(t, "sess-policy-default")
@@ -2230,10 +2229,28 @@ func TestRuntimePolicyDefaultDeniesWriteOutsideAllowedRoots(t *testing.T) {
 	if err != nil {
 		t.Fatalf("filesystem.NewWrite() error = %v", err)
 	}
+	outsidePath := policyOutsidePathForRuntimeTest()
 	testModel := &denyWriteRuntimeModel{}
+	var sawApproval bool
+	requester := approvalRequesterFunc(func(_ context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+		sawApproval = true
+		if req.Approval == nil || req.Approval.ToolCall.Name != filesystem.WriteToolName {
+			t.Fatalf("approval request = %+v, want WRITE tool call", req.Approval)
+		}
+		if got := strings.TrimSpace(fmt.Sprint(req.Metadata["risk_class"])); got != "path_escape" {
+			t.Fatalf("approval metadata risk_class = %q, want path_escape", got)
+		}
+		return agent.ApprovalResponse{
+			Outcome:  "selected",
+			OptionID: "reject_once",
+			Approved: false,
+			Reason:   "outside write rejected in test",
+		}, nil
+	})
 	result, err := runtime.Run(context.Background(), agent.RunRequest{
-		SessionRef: activeSession.SessionRef,
-		Input:      "write outside workspace",
+		SessionRef:        activeSession.SessionRef,
+		Input:             "write outside workspace",
+		ApprovalRequester: requester,
 		AgentSpec: agent.AgentSpec{
 			Name:  "chat",
 			Model: testModel,
@@ -2245,6 +2262,12 @@ func TestRuntimePolicyDefaultDeniesWriteOutsideAllowedRoots(t *testing.T) {
 	}
 	if _, err := drainRunnerEvents(t, result.Handle); err != nil {
 		t.Fatalf("runner error = %v", err)
+	}
+	if !sawApproval {
+		t.Fatal("expected WRITE outside roots to request approval")
+	}
+	if _, err := os.Stat(outsidePath); err == nil {
+		t.Fatalf("outside path %q exists, want approval rejection to skip write", outsidePath)
 	}
 
 	loaded, err := sessions.LoadSession(context.Background(), session.LoadSessionRequest{
@@ -2260,8 +2283,68 @@ func TestRuntimePolicyDefaultDeniesWriteOutsideAllowedRoots(t *testing.T) {
 	if toolResult.Type != session.EventTypeToolResult {
 		t.Fatalf("tool result type = %q, want tool_result", toolResult.Type)
 	}
-	if got := eventToolRawOutput(toolResult)["policy_action"]; got != "deny" {
-		t.Fatalf("policy_action = %v, want %q", got, "deny")
+	if got := eventToolRawOutput(toolResult)["system_hint"]; got == nil || strings.TrimSpace(fmt.Sprint(got)) == "" {
+		t.Fatalf("system_hint = %v, want non-empty policy guidance", got)
+	}
+	if _, ok := eventToolRawOutput(toolResult)["policy_action"]; ok {
+		t.Fatalf("policy_action present in model-facing payload, want omitted")
+	}
+}
+
+func TestRuntimePolicyWriteOutsideAllowedRootsExecutesAfterApproval(t *testing.T) {
+	t.Parallel()
+
+	sessions, activeSession := newTestSessionService(t, "sess-policy-write-approve")
+	runtime, err := New(Config{
+		Sessions: sessions,
+		AgentFactory: chat.Factory{
+			SystemPrompt: "Use tools when necessary.",
+		},
+		DefaultPolicyMode: presets.ModeAutoReview,
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	writeTool, err := filesystem.NewWrite(hostRuntimeForTest(t, activeSession.CWD))
+	if err != nil {
+		t.Fatalf("filesystem.NewWrite() error = %v", err)
+	}
+	outsideDir := t.TempDir()
+	outsidePath := filepath.Join(outsideDir, "approved-outside.txt")
+	testModel := &writePathRuntimeModel{path: outsidePath, content: "approved-outside\n"}
+	requester := approvalRequesterFunc(func(_ context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+		if req.Approval == nil || req.Approval.ToolCall.Name != filesystem.WriteToolName {
+			t.Fatalf("approval request = %+v, want WRITE tool call", req.Approval)
+		}
+		return agent.ApprovalResponse{
+			Outcome:  "selected",
+			OptionID: "allow_once",
+			Approved: true,
+		}, nil
+	})
+	result, err := runtime.Run(context.Background(), agent.RunRequest{
+		SessionRef:        activeSession.SessionRef,
+		Input:             "write outside workspace after approval",
+		ApprovalRequester: requester,
+		AgentSpec: agent.AgentSpec{
+			Name:  "chat",
+			Model: testModel,
+			Tools: []tool.Tool{writeTool},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if _, err := drainRunnerEvents(t, result.Handle); err != nil {
+		t.Fatalf("runner error = %v", err)
+	}
+	data, err := os.ReadFile(outsidePath)
+	if err != nil {
+		t.Fatalf("os.ReadFile(%q) error = %v", outsidePath, err)
+	}
+	if got := strings.TrimSpace(string(data)); got != "approved-outside" {
+		t.Fatalf("written content = %q, want approved-outside", got)
 	}
 }
 
@@ -2310,8 +2393,14 @@ func TestRuntimePolicyModePreservesCustomRegistryMode(t *testing.T) {
 		t.Fatalf("policy mode seen by custom mode = %q, want locked-down", sawMode)
 	}
 	payload := testToolResultPayload(t, result)
-	if got := payload["policy_mode"]; got != "locked-down" {
-		t.Fatalf("result policy_mode = %v, want locked-down", got)
+	if got := payload["error"]; got != "custom denied" {
+		t.Fatalf("result error = %v, want custom denied", got)
+	}
+	if got, _ := payload["system_hint"].(string); !strings.Contains(got, "Do not retry") {
+		t.Fatalf("result system_hint = %v, want non-retry guidance", got)
+	}
+	if _, ok := payload["policy_mode"]; ok {
+		t.Fatalf("policy_mode present in model-facing payload, want omitted")
 	}
 }
 
@@ -2491,8 +2580,11 @@ func TestRuntimePolicyFullAccessBlocksDangerousCommand(t *testing.T) {
 		t.Fatalf("LoadSession() error = %v", err)
 	}
 	toolResult := loaded.Events[2]
-	if got := eventToolRawOutput(toolResult)["policy_action"]; got != "deny" {
-		t.Fatalf("policy_action = %v, want %q", got, "deny")
+	if got := eventToolRawOutput(toolResult)["system_hint"]; got == nil || strings.TrimSpace(fmt.Sprint(got)) == "" {
+		t.Fatalf("system_hint = %v, want non-empty policy guidance", got)
+	}
+	if _, ok := eventToolRawOutput(toolResult)["policy_action"]; ok {
+		t.Fatalf("policy_action present in model-facing payload, want omitted")
 	}
 }
 
@@ -3900,11 +3992,11 @@ fatal: Could not read from remote repository.`
 	if text, _ := payload["result"].(string); !strings.Contains(text, "couldn't create signal pipe") {
 		t.Fatalf("result = %q, want original ssh diagnostic", text)
 	}
-	if got, _ := payload["hint_code"].(string); got != commanddiag.CodeWindowsMSYSSSHSignalPipe {
-		t.Fatalf("hint_code = %q, want %q", got, commanddiag.CodeWindowsMSYSSSHSignalPipe)
+	if got, _ := payload["system_hint"].(string); !strings.Contains(got, "GIT_SSH_COMMAND=C:/Windows/System32/OpenSSH/ssh.exe") {
+		t.Fatalf("system_hint = %q, want native OpenSSH guidance", got)
 	}
-	if got, _ := payload["hint"].(string); !strings.Contains(got, "GIT_SSH_COMMAND=C:/Windows/System32/OpenSSH/ssh.exe") {
-		t.Fatalf("hint = %q, want native OpenSSH guidance", got)
+	if _, ok := payload["hint_code"]; ok {
+		t.Fatalf("hint_code = %#v, want omitted from model-facing payload", payload["hint_code"])
 	}
 }
 

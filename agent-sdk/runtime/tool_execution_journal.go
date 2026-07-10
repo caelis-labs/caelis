@@ -101,6 +101,11 @@ func (t journaledTool) Call(ctx context.Context, call tool.Call) (tool.Result, e
 		case <-ctx.Done():
 			cancelJournalErr = requestCancellation()
 		case <-callFinished:
+			// If the context was already cancelled when the tool returned (or both
+			// channels were ready), still record cancel_requested for durable state.
+			if ctx.Err() != nil {
+				cancelJournalErr = requestCancellation()
+			}
 		}
 	}()
 	result, callErr := t.base.Call(ctx, call)

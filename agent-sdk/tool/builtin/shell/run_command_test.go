@@ -11,7 +11,6 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/commanddiag"
 )
 
 func TestRunCommandDefinitionExposesMinimalArguments(t *testing.T) {
@@ -29,7 +28,7 @@ func TestRunCommandDefinitionExposesMinimalArguments(t *testing.T) {
 	if definition.Name != RunCommandToolName {
 		t.Fatalf("Name = %q, want %q", definition.Name, RunCommandToolName)
 	}
-	for _, required := range []string{"specified workdir", "tests, builds", "Prefer default sandbox"} {
+	for _, required := range []string{"specified workdir", "tests, builds", "Prefer use_default", "one-shot"} {
 		if !strings.Contains(definition.Description, required) {
 			t.Fatalf("Description missing %q: %q", required, definition.Description)
 		}
@@ -42,8 +41,8 @@ func TestRunCommandDefinitionExposesMinimalArguments(t *testing.T) {
 		"command":             "Command to execute.",
 		"workdir":             "Working directory for the command; defaults to the session cwd.",
 		"yield_time_ms":       "Wait before yielding async control.",
-		"sandbox_permissions": "Per-command sandbox mode. use_default is preferred; require_escalated requests Host when this command needs it (or exact retry after sandbox denial). Prior escalations do not authorize later commands.",
-		"justification":       "Required with require_escalated: command intent, why sandbox is insufficient, task link. Empty/blank is rejected; vague or unrelated reasons are likely denied on review.",
+		"sandbox_permissions": "Default use_default (sandbox). require_escalated = one-shot Host after this command failed in sandbox, or when Host is required for this exact action. Prior Host allows never authorize later commands. Read-only VCS/status/diff/log must not escalate.",
+		"justification":       "Required with require_escalated. One short sentence: (1) command intent, (2) sandbox limit hit or why Host is required, (3) link to user task. Reject empty/vague/\"faster\"/\"need host\" text.",
 	}
 	if len(properties) != len(wantDescriptions) {
 		t.Fatalf("properties = %#v, want only %v", properties, sortedRunCommandPropertyKeys(wantDescriptions))
@@ -447,11 +446,11 @@ fatal: Could not read from remote repository.`
 	if text, _ := payload["result"].(string); !strings.Contains(text, "couldn't create signal pipe") {
 		t.Fatalf("result = %q, want original ssh diagnostic", text)
 	}
-	if got, _ := payload["hint_code"].(string); got != commanddiag.CodeWindowsMSYSSSHSignalPipe {
-		t.Fatalf("hint_code = %q, want %q", got, commanddiag.CodeWindowsMSYSSSHSignalPipe)
+	if got, _ := payload["system_hint"].(string); !strings.Contains(got, "GIT_SSH_COMMAND=C:/Windows/System32/OpenSSH/ssh.exe") {
+		t.Fatalf("system_hint = %q, want native OpenSSH guidance", got)
 	}
-	if got, _ := payload["hint"].(string); !strings.Contains(got, "GIT_SSH_COMMAND=C:/Windows/System32/OpenSSH/ssh.exe") {
-		t.Fatalf("hint = %q, want native OpenSSH guidance", got)
+	if _, ok := payload["hint_code"]; ok {
+		t.Fatalf("hint_code = %#v, want omitted from model-facing payload", payload["hint_code"])
 	}
 	if got, _ := payload["exit_code"].(float64); got != 128 {
 		t.Fatalf("exit_code = %#v, want 128", payload["exit_code"])
@@ -483,11 +482,8 @@ func TestRunCommandCallDoesNotHintNativeOpenSSHPublicKeyFailure(t *testing.T) {
 	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
 		t.Fatalf("json.Unmarshal(result) error = %v", err)
 	}
-	if _, ok := payload["hint_code"]; ok {
-		t.Fatalf("hint_code = %#v, want absent for ordinary SSH auth failure", payload["hint_code"])
-	}
-	if _, ok := payload["hint"]; ok {
-		t.Fatalf("hint = %#v, want absent for ordinary SSH auth failure", payload["hint"])
+	if _, ok := payload["system_hint"]; ok {
+		t.Fatalf("system_hint = %#v, want absent for ordinary SSH auth failure", payload["system_hint"])
 	}
 }
 
@@ -515,17 +511,11 @@ func TestRunCommandCallAddsHostExecutionApprovalHint(t *testing.T) {
 	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
 		t.Fatalf("json.Unmarshal(result) error = %v", err)
 	}
-	if got, _ := payload["hint_code"].(string); got != commanddiag.CodeHostExecutionApproval {
-		t.Fatalf("hint_code = %q, want %q", got, commanddiag.CodeHostExecutionApproval)
+	if got, _ := payload["system_hint"].(string); got != sandbox.HostExecutionRequiresApprovalMessage {
+		t.Fatalf("system_hint = %q, want host approval guidance", got)
 	}
-	if got, _ := payload["hint"].(string); got != sandbox.HostExecutionRequiresApprovalMessage {
-		t.Fatalf("hint = %q, want host approval guidance", got)
-	}
-	if got, _ := payload["retryable_with_host"].(bool); !got {
-		t.Fatalf("retryable_with_host = %#v, want true", payload["retryable_with_host"])
-	}
-	if got, _ := payload["suggested_sandbox_permissions"].(string); got != "require_escalated" {
-		t.Fatalf("suggested_sandbox_permissions = %q, want require_escalated", got)
+	if _, ok := payload["hint_code"]; ok {
+		t.Fatalf("hint_code = %#v, want omitted from model-facing payload", payload["hint_code"])
 	}
 }
 
@@ -554,11 +544,8 @@ func TestRunCommandCallAddsGitIndexLockSandboxHint(t *testing.T) {
 	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
 		t.Fatalf("json.Unmarshal(result) error = %v", err)
 	}
-	if got, _ := payload["hint_code"].(string); got != commanddiag.CodeGitIndexLockSandboxDenied {
-		t.Fatalf("hint_code = %q, want %q", got, commanddiag.CodeGitIndexLockSandboxDenied)
-	}
-	if got, _ := payload["hint"].(string); got != "Git index write is blocked by sandbox permissions; retry the original Git command with sandbox_permissions=require_escalated and a non-empty justification." {
-		t.Fatalf("hint = %q, want short Git index sandbox guidance", got)
+	if got, _ := payload["system_hint"].(string); !strings.Contains(got, "Git index write is blocked") || !strings.Contains(got, "THIS SAME command once") {
+		t.Fatalf("system_hint = %q, want once-only Git index sandbox guidance", got)
 	}
 }
 
@@ -587,20 +574,11 @@ func TestRunCommandCallAddsWindowsSChannelNoCredentialsHint(t *testing.T) {
 	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
 		t.Fatalf("json.Unmarshal(result) error = %v", err)
 	}
-	if got, _ := payload["hint_code"].(string); got != commanddiag.CodeWindowsSChannelCredentials {
-		t.Fatalf("hint_code = %q, want %q", got, commanddiag.CodeWindowsSChannelCredentials)
+	if got, _ := payload["system_hint"].(string); !strings.Contains(got, "SChannel TLS can fail") {
+		t.Fatalf("system_hint = %q, want SChannel guidance", got)
 	}
-	if got, _ := payload["hint"].(string); !strings.Contains(got, "SChannel TLS can fail") {
-		t.Fatalf("hint = %q, want SChannel guidance", got)
-	}
-	if got, _ := payload["retryable_with_host"].(bool); !got {
-		t.Fatalf("retryable_with_host = %#v, want true", payload["retryable_with_host"])
-	}
-	if got, _ := payload["suggested_sandbox_permissions"].(string); got != "require_escalated" {
-		t.Fatalf("suggested_sandbox_permissions = %q, want require_escalated", got)
-	}
-	if _, ok := payload["suggested_prefix_rule"]; ok {
-		t.Fatalf("suggested_prefix_rule = %#v, want omitted for broad curl retry", payload["suggested_prefix_rule"])
+	if _, ok := payload["hint_code"]; ok {
+		t.Fatalf("hint_code = %#v, want omitted from model-facing payload", payload["hint_code"])
 	}
 	if text, _ := payload["result"].(string); !strings.Contains(text, "SEC_E_NO_CREDENTIALS") {
 		t.Fatalf("result = %q, want original SChannel diagnostic", text)

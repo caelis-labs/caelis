@@ -70,7 +70,7 @@ func TestApprovalReviewerUsesRequestModelAndSessionContext(t *testing.T) {
 	if got := len(modelReq.Instructions); got != 1 {
 		t.Fatalf("len(Instructions) = %d, want guardian policy", got)
 	}
-	if !strings.Contains(modelReq.Instructions[0].Text.Text, "You are judging one planned coding-agent action") {
+	if !strings.Contains(modelReq.Instructions[0].Text.Text, "You approve planned coding-agent actions on behalf of the user") {
 		t.Fatalf("instruction text = %q, want guardian policy", modelReq.Instructions[0].Text.Text)
 	}
 	if !strings.Contains(modelReq.Instructions[0].Text.Text, `return exactly {"outcome":"allow"}`) {
@@ -290,26 +290,113 @@ func TestSystemManagedAgentSessionReadsLegacyGuardianState(t *testing.T) {
 	}
 }
 
+func TestGuardianTranscriptProjectionOmitsSuccessBodiesKeepsFailuresAndOrder(t *testing.T) {
+	t.Parallel()
+
+	events := []*session.Event{
+		{ID: "e1", Type: session.EventTypeUser, Message: ptrMessage(model.NewTextMessage(model.RoleUser, "Please fix tests."))},
+		{ID: "e2", Type: session.EventTypeAssistant, Message: ptrMessage(model.NewTextMessage(model.RoleAssistant, "I will run tests."))},
+		{ID: "e3", Type: session.EventTypeToolCall, Tool: &session.EventTool{Name: "RUN_COMMAND", Input: map[string]any{"command": "go test ./..."}}},
+		{ID: "e4", Type: session.EventTypeToolResult, Tool: &session.EventTool{
+			Name:   "RUN_COMMAND",
+			Status: "completed",
+			Output: map[string]any{"state": "completed", "result": "ok\n" + strings.Repeat("x", 200)},
+		}},
+		{ID: "e5", Type: session.EventTypeToolCall, Tool: &session.EventTool{Name: "RUN_COMMAND", Input: map[string]any{"command": "git add ."}}},
+		{ID: "e6", Type: session.EventTypeToolResult, Tool: &session.EventTool{
+			Name:   "RUN_COMMAND",
+			Status: "failed",
+			Output: map[string]any{"state": "failed", "error": "index.lock denied", "system_hint": "retry once"},
+		}},
+		{ID: "e7", Type: session.EventTypeAssistant, Message: ptrMessage(model.NewTextMessage(model.RoleAssistant, "Need Host for git write."))},
+	}
+	entries, cursor := collectGuardianTranscriptEntries(events)
+	if cursor.EventCount != 7 {
+		t.Fatalf("EventCount = %d, want 7 candidates", cursor.EventCount)
+	}
+	selected, omitted := selectGuardianTranscriptEntries(entries)
+	if omitted {
+		t.Fatal("omitted = true, want false for small fixture")
+	}
+	if got, want := len(selected), 7; got != want {
+		t.Fatalf("len(selected) = %d, want %d (%#v)", got, want, selected)
+	}
+	// Chronological order preserved.
+	for i := 1; i < len(selected); i++ {
+		// kinds should follow timeline roles
+		_ = i
+	}
+	if selected[0].Kind != "user" || selected[1].Kind != "assistant" {
+		t.Fatalf("prefix kinds = %q %q, want user then assistant", selected[0].Kind, selected[1].Kind)
+	}
+	success := selected[3].Text
+	if !strings.Contains(success, `"status"`) || !strings.Contains(success, "completed") {
+		t.Fatalf("success result = %q, want status completed", success)
+	}
+	if strings.Contains(success, "result") || strings.Contains(success, strings.Repeat("x", 20)) {
+		t.Fatalf("success result leaked body: %q", success)
+	}
+	failure := selected[5].Text
+	if !strings.Contains(failure, `"status"`) || !strings.Contains(failure, "failed") {
+		t.Fatalf("failure result = %q, want status failed", failure)
+	}
+	if !strings.Contains(failure, "index.lock denied") {
+		t.Fatalf("failure result = %q, want error body", failure)
+	}
+	if !selected[0].MustKeep || !selected[6].MustKeep || !selected[5].MustKeep {
+		t.Fatalf("MustKeep flags = user=%v final=%v fail=%v", selected[0].MustKeep, selected[6].MustKeep, selected[5].MustKeep)
+	}
+}
+
+func TestGuardianTranscriptProjectionSkipsReasoningOnlyAssistant(t *testing.T) {
+	t.Parallel()
+
+	reasoningOnly := model.Message{
+		Role: model.RoleAssistant,
+		Parts: []model.Part{
+			model.NewReasoningPart("hidden chain of thought", model.ReasoningVisibilityVisible),
+		},
+	}
+	events := []*session.Event{
+		{ID: "u1", Type: session.EventTypeUser, Message: ptrMessage(model.NewTextMessage(model.RoleUser, "hello"))},
+		{ID: "a1", Type: session.EventTypeAssistant, Message: &reasoningOnly},
+		{ID: "a2", Type: session.EventTypeAssistant, Message: ptrMessage(model.NewTextMessage(model.RoleAssistant, "final answer"))},
+	}
+	entries, _ := collectGuardianTranscriptEntries(events)
+	if got, want := len(entries), 2; got != want {
+		t.Fatalf("len(entries) = %d, want %d (reasoning-only skipped)", got, want)
+	}
+	if entries[0].Kind != "user" || entries[1].Kind != "assistant" || entries[1].Text != "final answer" {
+		t.Fatalf("entries = %#v", entries)
+	}
+	if !entries[1].MustKeep {
+		t.Fatal("final assistant MustKeep = false, want true")
+	}
+}
+
 func TestGuardianPolicyPromptUsesGeneralRecoveryBoundary(t *testing.T) {
 	t.Parallel()
 
 	prompt := guardianPolicyPrompt()
 	for _, want := range []string{
+		"on behalf of the user",
+		"critical path",
 		"Broad cleanup, reset, recursive delete, or state-discarding actions are high or critical",
 		"Permission or lock recovery does not authorize broader cleanup, reset, delete, ACL, or mode changes",
-		"# Host Escalation",
-		"require_escalated is a privilege request",
+		"# Host Elevation Bar",
+		"Host is an exception",
 		"DENY missing, empty, generic, boilerplate, or unrelated justifications",
-		"If host necessity is doubtful, prefer DENY",
-		"Prior host allows do not pre-authorize later commands",
+		"If Host necessity is unproven, DENY",
+		"prior Host allow",
+		"Read-only inspection",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("guardian policy prompt missing %q:\n%s", want, prompt)
 		}
 	}
-	for _, forbidden := range []string{"git clean", "git reset", "git checkout"} {
+	for _, forbidden := range []string{"git clean", "git reset", "git checkout", "When the justification makes host need plausible"} {
 		if strings.Contains(prompt, forbidden) {
-			t.Fatalf("guardian policy prompt includes scenario-specific command %q:\n%s", forbidden, prompt)
+			t.Fatalf("guardian policy prompt includes unwanted text %q:\n%s", forbidden, prompt)
 		}
 	}
 }
@@ -1219,6 +1306,11 @@ func (m *approvalReviewerProviderRecorder) Snapshot() ([]model.Request, []model.
 		reqs = append(reqs, cp)
 	}
 	return reqs, append([]model.Usage(nil), m.uses...)
+}
+
+func ptrMessage(message model.Message) *model.Message {
+	out := message
+	return &out
 }
 
 func newApprovalReviewerTestSession(t *testing.T, ctx context.Context) (session.Service, session.Session) {

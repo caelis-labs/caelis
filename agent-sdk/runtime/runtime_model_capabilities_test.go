@@ -32,6 +32,9 @@ func (*overflowRecoveryModel) Capabilities() model.Capabilities {
 func (*denyWriteRuntimeModel) Capabilities() model.Capabilities {
 	return runtimeTestModelCapabilities()
 }
+func (*writePathRuntimeModel) Capabilities() model.Capabilities {
+	return runtimeTestModelCapabilities()
+}
 func (*denyCommandRuntimeModel) Capabilities() model.Capabilities {
 	return runtimeTestModelCapabilities()
 }

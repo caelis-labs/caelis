@@ -176,24 +176,12 @@ func commandStartDiagnosticToolResult(call tool.Call, def tool.Definition, comma
 		return tool.Result{}, false
 	}
 	payload := map[string]any{
-		"state":      "failed",
-		"error":      strings.TrimSpace(err.Error()),
-		"hint_code":  diag.Code,
-		"hint":       diag.Hint,
-		"tool_name":  strings.TrimSpace(def.Name),
-		"error_code": string(tool.ErrorCodePermissionDenied),
+		"state":     "failed",
+		"error":     strings.TrimSpace(err.Error()),
+		"tool_name": strings.TrimSpace(def.Name),
 	}
-	if strings.TrimSpace(diag.Severity) != "" {
-		payload["hint_severity"] = diag.Severity
-	}
-	if diag.RetryableWithHost {
-		payload["retryable_with_host"] = true
-	}
-	if strings.TrimSpace(diag.SuggestedSandboxPermissions) != "" {
-		payload["suggested_sandbox_permissions"] = strings.TrimSpace(diag.SuggestedSandboxPermissions)
-	}
-	if len(diag.SuggestedPrefixRule) > 0 {
-		payload["suggested_prefix_rule"] = append([]string(nil), diag.SuggestedPrefixRule...)
+	if hint := strings.TrimSpace(diag.Hint); hint != "" {
+		payload["system_hint"] = hint
 	}
 	raw, _ := json.Marshal(payload)
 	return tool.Result{

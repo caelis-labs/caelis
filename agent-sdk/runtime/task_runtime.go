@@ -294,14 +294,8 @@ func commandTaskToolPayload(snapshot taskapi.Snapshot) map[string]any {
 	if exitCode, ok := snapshot.Result["exit_code"]; ok {
 		payload["exit_code"] = exitCode
 	}
-	if hintCode, _ := snapshot.Result["hint_code"].(string); strings.TrimSpace(hintCode) != "" {
-		payload["hint_code"] = strings.TrimSpace(hintCode)
-	}
-	if hint, _ := snapshot.Result["hint"].(string); strings.TrimSpace(hint) != "" {
-		payload["hint"] = strings.TrimSpace(hint)
-	}
-	if severity, _ := snapshot.Result["hint_severity"].(string); strings.TrimSpace(severity) != "" {
-		payload["hint_severity"] = strings.TrimSpace(severity)
+	if hint, _ := snapshot.Result["system_hint"].(string); strings.TrimSpace(hint) != "" {
+		payload["system_hint"] = strings.TrimSpace(hint)
 	}
 	return payload
 }

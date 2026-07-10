@@ -1103,6 +1103,53 @@ func (m *denyWriteRuntimeModel) Generate(context.Context, *model.Request) iter.S
 	}
 }
 
+type writePathRuntimeModel struct {
+	calls   int
+	path    string
+	content string
+}
+
+func (m *writePathRuntimeModel) Name() string { return "write-path" }
+
+func (m *writePathRuntimeModel) Generate(context.Context, *model.Request) iter.Seq2[*model.StreamEvent, error] {
+	m.calls++
+	callIndex := m.calls
+	path := strings.TrimSpace(m.path)
+	content := m.content
+	if content == "" {
+		content = "x"
+	}
+	return func(yield func(*model.StreamEvent, error) bool) {
+		if callIndex == 1 {
+			yield(&model.StreamEvent{
+				Type: model.StreamEventTurnDone,
+				Response: &model.Response{
+					Message: model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
+						ID:   "write-path-1",
+						Name: filesystem.WriteToolName,
+						Args: string(mustJSONRaw(map[string]any{"path": path, "content": content})),
+					}}, ""),
+					TurnComplete: true,
+					StepComplete: true,
+					Status:       model.ResponseStatusCompleted,
+					FinishReason: model.FinishReasonToolCalls,
+				},
+			}, nil)
+			return
+		}
+		yield(&model.StreamEvent{
+			Type: model.StreamEventTurnDone,
+			Response: &model.Response{
+				Message:      model.NewTextMessage(model.RoleAssistant, "done"),
+				TurnComplete: true,
+				StepComplete: true,
+				Status:       model.ResponseStatusCompleted,
+				FinishReason: model.FinishReasonStop,
+			},
+		}, nil)
+	}
+}
+
 type denyCommandRuntimeModel struct{ calls int }
 
 func (m *denyCommandRuntimeModel) Name() string { return "deny-command" }

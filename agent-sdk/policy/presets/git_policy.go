@@ -9,7 +9,7 @@ type gitCommandPolicy int
 
 const (
 	gitPolicyAllow gitCommandPolicy = iota
-	gitPolicyDenyAlways
+	gitPolicyAskApproval
 	gitPolicyDenyInSandbox
 )
 
@@ -24,15 +24,15 @@ type gitCommand struct {
 	Display    string
 }
 
-func hardDenyGitCommandReason(command string) string {
-	return gitCommandDenyReason(command, gitPolicyDenyAlways)
+func gitCommandApprovalReason(command string) string {
+	return gitCommandPolicyReason(command, gitPolicyAskApproval)
 }
 
 func vcsSandboxDenyReason(command string) string {
-	return gitCommandDenyReason(command, gitPolicyDenyInSandbox)
+	return gitCommandPolicyReason(command, gitPolicyDenyInSandbox)
 }
 
-func gitCommandDenyReason(command string, policy gitCommandPolicy) string {
+func gitCommandPolicyReason(command string, policy gitCommandPolicy) string {
 	for _, git := range gitCommands(command) {
 		classification := classifyGitCommand(git)
 		if classification.Policy == policy {
@@ -40,7 +40,7 @@ func gitCommandDenyReason(command string, policy gitCommandPolicy) string {
 		}
 	}
 	for _, payload := range shellCommandPayloads(command) {
-		if reason := gitCommandDenyReason(payload, policy); reason != "" {
+		if reason := gitCommandPolicyReason(payload, policy); reason != "" {
 			return reason
 		}
 	}
@@ -51,23 +51,38 @@ func classifyGitCommand(git gitCommand) gitCommandClassification {
 	switch git.Subcommand {
 	case "clean":
 		if !gitCleanDryRun(git.Args) {
-			return gitCommandClassification{Policy: gitPolicyDenyAlways, Reason: "git clean without dry-run is blocked"}
+			return gitCommandClassification{
+				Policy: gitPolicyAskApproval,
+				Reason: "git clean without dry-run requires approval",
+			}
 		}
 	case "reset":
 		if gitHasFlag(git.Args, gitLongFlag("--hard")) {
-			return gitCommandClassification{Policy: gitPolicyDenyAlways, Reason: "git reset --hard is blocked"}
+			return gitCommandClassification{
+				Policy: gitPolicyAskApproval,
+				Reason: "git reset --hard requires approval",
+			}
 		}
 	case "checkout":
 		if gitCheckoutDiscardsWorktree(git.Args) {
-			return gitCommandClassification{Policy: gitPolicyDenyAlways, Reason: "git checkout path restore is blocked"}
+			return gitCommandClassification{
+				Policy: gitPolicyAskApproval,
+				Reason: "git checkout path restore requires approval",
+			}
 		}
 	case "restore":
 		if gitRestoreDiscardsWorktree(git.Args) {
-			return gitCommandClassification{Policy: gitPolicyDenyAlways, Reason: "git worktree restore is blocked"}
+			return gitCommandClassification{
+				Policy: gitPolicyAskApproval,
+				Reason: "git worktree restore requires approval",
+			}
 		}
 	case "push":
 		if gitPushForce(git.Args) {
-			return gitCommandClassification{Policy: gitPolicyDenyAlways, Reason: "forced git push is blocked"}
+			return gitCommandClassification{
+				Policy: gitPolicyAskApproval,
+				Reason: "forced git push requires approval",
+			}
 		}
 	}
 	if gitMayWriteMetadata(git) {

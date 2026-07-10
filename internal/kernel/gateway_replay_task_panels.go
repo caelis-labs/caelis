@@ -421,7 +421,7 @@ func replayCommandTaskRawOutput(out map[string]any, entry *taskapi.Entry, finalT
 	} else if status == schema.ToolStatusFailed && finalText != "" {
 		out[EventMetaRuntimeTaskError] = finalText
 	}
-	for _, key := range []string{"exit_code", "hint_code", "hint", "hint_severity", "error_code"} {
+	for _, key := range []string{"exit_code", "system_hint", "error_code"} {
 		if value, ok := entry.Result[key]; ok {
 			out[key] = value
 		}

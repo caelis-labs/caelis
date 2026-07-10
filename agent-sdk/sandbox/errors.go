@@ -6,8 +6,8 @@ import (
 	"strings"
 )
 
-const SandboxPermissionDeniedMessage = "Sandbox permission denied. Use a writable workspace path, narrow the operation, or retry the same necessary command with sandbox_permissions=require_escalated and a non-empty justification."
-const HostExecutionRequiresApprovalMessage = "Host execution requires approval. Retry the same necessary command with sandbox_permissions=require_escalated and a non-empty justification."
+const SandboxPermissionDeniedMessage = "Sandbox permission denied. Narrow the path or operation first. If still required, retry THIS SAME command once with sandbox_permissions=require_escalated and a justification that cites this failure. Do not escalate later similar commands by habit."
+const HostExecutionRequiresApprovalMessage = "Host execution requires approval. If still required, retry THIS SAME command once with sandbox_permissions=require_escalated and a non-empty justification. Do not escalate later similar commands by habit."
 
 // CommandExitError marks a normal non-zero process exit. It distinguishes a
 // command result from an infrastructure failure without relying on error text.

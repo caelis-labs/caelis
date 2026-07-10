@@ -138,7 +138,7 @@ func (t policyWrappedTool) Call(ctx context.Context, call tool.Call) (tool.Resul
 	case policy.ActionAskApproval:
 		return t.requestApproval(ctx, call, decision)
 	case policy.ActionDeny:
-		return policyDecisionResult(call, t.tool.Definition(), t.mode, decision), nil
+		return policyDecisionResult(call, t.tool.Definition(), decision), nil
 	default:
 		return tool.Result{}, &policy.DecisionError{Mode: t.mode, Detail: "unhandled normalized decision"}
 	}
@@ -150,7 +150,7 @@ func (t policyWrappedTool) requestApproval(
 	decision policy.Decision,
 ) (tool.Result, error) {
 	if decision.Approval == nil || (t.approval.requester == nil && t.approval.runtime == nil) {
-		return policyDecisionResult(call, t.tool.Definition(), t.mode, decision), nil
+		return policyDecisionResult(call, t.tool.Definition(), decision), nil
 	}
 	request := agent.ApprovalRequest{
 		SessionRef: t.sessionRef,
@@ -186,7 +186,7 @@ func (t policyWrappedTool) requestApproval(
 		call.Metadata = mergeCallMetadata(call.Metadata, decision)
 		return t.tool.Call(ctx, call)
 	}
-	return policyDecisionResultWithOutcome(call, t.tool.Definition(), t.mode, decision, resp), nil
+	return policyDecisionResultWithOutcome(call, t.tool.Definition(), decision, resp), nil
 }
 
 func (t policyWrappedTool) describeSandbox() sandbox.Descriptor {
@@ -212,51 +212,21 @@ func mergeCallMetadata(meta map[string]any, decision policy.Decision) map[string
 	return out
 }
 
-func policyDecisionResult(call tool.Call, def tool.Definition, mode string, decision policy.Decision) tool.Result {
-	return policyDecisionResultWithOutcome(call, def, mode, decision, agent.ApprovalResponse{})
+func policyDecisionResult(call tool.Call, def tool.Definition, decision policy.Decision) tool.Result {
+	return policyDecisionResultWithOutcome(call, def, decision, agent.ApprovalResponse{})
 }
 
 func policyDecisionResultWithOutcome(
 	call tool.Call,
 	def tool.Definition,
-	mode string,
 	decision policy.Decision,
 	outcome agent.ApprovalResponse,
 ) tool.Result {
-	approval := decision.Action == policy.ActionAskApproval
-	errorText := strings.TrimSpace(firstNonEmpty(outcome.Reason, outcome.ReviewText, decision.Reason, "tool denied by policy"))
+	errorText, systemHint := policyModelFeedback(decision, outcome)
 	payload := map[string]any{
-		"error":         errorText,
-		"error_code":    string(tool.ErrorCodePermissionDenied),
-		"policy_mode":   strings.TrimSpace(mode),
-		"policy_action": string(decision.Action),
-		"tool_name":     strings.TrimSpace(def.Name),
-	}
-	if approval && decision.Approval != nil {
-		payload["approval_required"] = true
-		payload["approval"] = map[string]any{
-			"tool_call": map[string]any{
-				"id":     decision.Approval.ToolCall.ID,
-				"name":   decision.Approval.ToolCall.Name,
-				"kind":   decision.Approval.ToolCall.Kind,
-				"title":  decision.Approval.ToolCall.Title,
-				"status": decision.Approval.ToolCall.Status,
-			},
-		}
-	}
-	if approval {
-		if strings.TrimSpace(outcome.Outcome) != "" {
-			payload["approval_outcome"] = strings.TrimSpace(outcome.Outcome)
-		}
-		if strings.TrimSpace(outcome.OptionID) != "" {
-			payload["approval_option_id"] = strings.TrimSpace(outcome.OptionID)
-		}
-		if strings.TrimSpace(outcome.Reason) != "" {
-			payload["approval_reason"] = strings.TrimSpace(outcome.Reason)
-		}
-		if strings.TrimSpace(outcome.ReviewText) != "" {
-			payload["approval_review_text"] = strings.TrimSpace(outcome.ReviewText)
-		}
+		"error":       errorText,
+		"system_hint": systemHint,
+		"tool_name":   strings.TrimSpace(def.Name),
 	}
 	raw, _ := json.Marshal(payload)
 	return tool.Result{
@@ -265,6 +235,28 @@ func policyDecisionResultWithOutcome(
 		IsError: true,
 		Content: []model.Part{model.NewJSONPart(raw)},
 	}
+}
+
+// policyModelFeedback separates factual error text from one actionable model hint.
+func policyModelFeedback(decision policy.Decision, outcome agent.ApprovalResponse) (errorText string, systemHint string) {
+	reason := strings.TrimSpace(decision.Reason)
+	outcomeReason := strings.TrimSpace(firstNonEmpty(outcome.Reason, outcome.ReviewText))
+
+	switch {
+	case decision.Action == policy.ActionAskApproval && !outcome.Approved && outcomeReason != "":
+		errorText = outcomeReason
+		systemHint = "Approval was denied; do not bypass with shell or privilege escalation. Adjust the request or ask the user."
+	case decision.Action == policy.ActionAskApproval:
+		errorText = firstNonEmpty(reason, "approval required")
+		systemHint = "This operation will run only after approval; keep using the same tool rather than shell workarounds."
+	case reason != "":
+		errorText = reason
+		systemHint = "Do not retry the same blocked operation; choose a safer alternative or ask the user."
+	default:
+		errorText = "tool denied by policy"
+		systemHint = "Do not retry the same blocked operation; choose a safer alternative or ask the user."
+	}
+	return errorText, systemHint
 }
 
 func cloneApproval(in *session.ProtocolApproval) *session.ProtocolApproval {

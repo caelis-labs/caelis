@@ -25,8 +25,8 @@ fatal: Could not read from remote repository.`
 	if !got.RetryableWithHost || got.SuggestedSandboxPermissions != "require_escalated" {
 		t.Fatalf("Diagnostic = %+v, want host retry metadata", got)
 	}
-	if !strings.Contains(got.Hint, "sandbox_permissions=require_escalated") || !strings.Contains(got.Hint, "justification") {
-		t.Fatalf("Hint = %q, want escalation with justification", got.Hint)
+	if !strings.Contains(got.Hint, "sandbox_permissions=require_escalated") || !strings.Contains(got.Hint, "THIS SAME command once") {
+		t.Fatalf("Hint = %q, want once-only escalation guidance", got.Hint)
 	}
 }
 
@@ -82,8 +82,8 @@ func TestBestDetectsCurlSChannelNoCredentials(t *testing.T) {
 	if got.Code != CodeWindowsSChannelCredentials {
 		t.Fatalf("Code = %q, want %q", got.Code, CodeWindowsSChannelCredentials)
 	}
-	if !strings.Contains(got.Hint, "sandbox_permissions=require_escalated") || !strings.Contains(got.Hint, "justification") {
-		t.Fatalf("Hint = %q, want escalation with justification", got.Hint)
+	if !strings.Contains(got.Hint, "sandbox_permissions=require_escalated") || !strings.Contains(got.Hint, "THIS SAME command once") {
+		t.Fatalf("Hint = %q, want once-only escalation guidance", got.Hint)
 	}
 	if !got.RetryableWithHost || got.SuggestedPrefixRule != nil {
 		t.Fatalf("Diagnostic = %+v, want host retry metadata without broad prefix rule", got)

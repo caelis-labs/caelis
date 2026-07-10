@@ -1366,8 +1366,8 @@ package github.com/caelis-labs/caelis/agent-sdk/sandbox
       SetupScopeGlobal    SetupScope = "global"
       SetupScopeWorkspace SetupScope = "workspace"
   )
-  const HostExecutionRequiresApprovalMessage = "Host execution requires approval. Retry the same necessary command with sandbox_permissions=require_escalated and a non-empty justification."
-  const SandboxPermissionDeniedMessage = "Sandbox permission denied. Use a writable workspace path, narrow the operation, or retry the same necessary command with sandbox_permissions=require_escalated and a non-empty justification."
+  const HostExecutionRequiresApprovalMessage = "Host execution requires approval. If still required, retry THIS SAME command once with sandbox_permissions=require_escalated and a non-empty justification. Do not escalate later similar commands by habit."
+  const SandboxPermissionDeniedMessage = "Sandbox permission denied. Narrow the path or operation first. If still required, retry THIS SAME command once with sandbox_permissions=require_escalated and a justification that cites this failure. Do not escalate later similar commands by habit."
   func (e *CapabilityError) Error() string
   func (e *CapabilityError) ErrorCode() errorcode.Code
   func (e *CommandExitError) Error() string
