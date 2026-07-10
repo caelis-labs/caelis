@@ -236,6 +236,7 @@ func (s *Stack) buildGatewayRuntime(plan gatewayBuildPlan) (*gatewayRuntimeBundl
 		bundle.Close()
 		return nil, err
 	}
+	watchdogLifecycle := controlplane.NewWatchdogLifecycleObserver()
 	localCfg := runtime.Config{
 		Sessions:                 s.Sessions,
 		AgentFactory:             chat.Factory{},
@@ -245,6 +246,7 @@ func (s *Stack) buildGatewayRuntime(plan gatewayBuildPlan) (*gatewayRuntimeBundl
 		ControllerContextRouter:  contextRouter,
 		ControllerEventForwarder: acpbridge.NewControllerForwarder(s.Sessions),
 		TaskStore:                s.taskStore,
+		TraceSink:                watchdogLifecycle,
 	}
 	var acpControlPlane *acpassembly.ControlPlane
 	localCfg, acpControlPlane, err = injectACPControlPlane(localCfg, runtimeCfg.Assembly)
@@ -277,6 +279,15 @@ func (s *Stack) buildGatewayRuntime(plan gatewayBuildPlan) (*gatewayRuntimeBundl
 		Runtime: rt,
 		Leases:  leaseService,
 		OwnerID: strings.TrimSpace(s.leaseOwnerID),
+	})
+	if err != nil {
+		bundle.Close()
+		return nil, err
+	}
+	watchdogRuntime, err := controlplane.NewWatchdogRuntime(controlplane.WatchdogRuntimeConfig{
+		Runtime:   leasedRuntime,
+		Sessions:  s.Sessions,
+		Lifecycle: watchdogLifecycle,
 	})
 	if err != nil {
 		bundle.Close()
@@ -330,7 +341,7 @@ func (s *Stack) buildGatewayRuntime(plan gatewayBuildPlan) (*gatewayRuntimeBundl
 	gw, err := kernelimpl.New(kernelimpl.Config{
 		Sessions:             s.Sessions,
 		Tasks:                s.taskStore,
-		Runtime:              leasedRuntime,
+		Runtime:              watchdogRuntime,
 		Control:              sessionControl,
 		Resolver:             resolver,
 		ExecutionValidator:   executionValidator,

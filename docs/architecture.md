@@ -144,12 +144,13 @@ The update semantic owner, product assembly peel-off, Control-owned handoff,
 neutral task principals/roles, and common Runtime pipeline for system Agents
 are implemented. Durable continuation is explicitly process-local live attach,
 while the production Control host owns cross-Runtime session leases. The next
-architecture step is to close the remaining P1 stability gates for runtime
-liveness, compatibility, consumer evidence, and release enforcement. Execution
-capability wiring is now Control-owned and validates the actual model, final
-tool set, and sandbox descriptor. Product source policy no longer lives in SDK
-task code. Module or repository extraction is not on the roadmap. Current
-status is recorded in
+architecture step is to close the remaining P1 stability gates for schema/API
+compatibility, consumer evidence, and release enforcement. Execution capability
+wiring and the dynamic liveness watchdog are now Control-owned. The watchdog
+uses lifecycle, usage, progress, elapsed-time, and repeated-action signals; it
+does not restore a fixed SDK step budget. Product source policy no longer lives
+in SDK task code. Module or repository extraction is not on the roadmap.
+Current status is recorded in
 [the v0.25.0 acceptance review](agent-sdk-v0.25.0-acceptance.md).
 
 ## Durable State

@@ -39,7 +39,7 @@ Status values:
 | P1-2 Control ownership completion | closed | Surface/source strings are translated by Control into neutral SDK owner/principal/role values; system Agents reuse the common Runtime safety pipeline |
 | P1-3 Durable continuation and placement | closed | Contract is either safe checkpoint/lease-based continuation or explicitly live-process attachment; production host exercises session lease lifecycle |
 | P1-4 Execution capability wiring | closed | Control derives and validates actual model, tool, and sandbox requirements; unsupported output/features do not silently degrade |
-| P1-5 Runtime liveness and observability | partial | Control-owned dynamic watchdog exists; TraceSink cannot block execution indefinitely; stuck guardrails are bounded |
+| P1-5 Runtime liveness and observability | closed | Control-owned dynamic watchdog exists; TraceSink cannot block execution indefinitely; stuck guardrails are bounded |
 | P1-6 Schema and compatibility | partial | Raw durable JSON migrates before typed decode and unknown-field corpus proves preservation; supported API is compared tag-to-tag with explicit waivers |
 | P1-7 Public consumer contract | partial | A behavioral quickstart uses only supported imports, or required reference packages are explicitly supported; actual tagged module passes a no-replace consumer smoke |
 | P1-8 Release enforcement | partial | Publish waits for quality on the same SHA and CI records focused race, regression, link, and proxy-consumer evidence |
@@ -105,6 +105,17 @@ Use small, independently committable slices:
   has a hard outstanding-call cap. Once saturated, later invocations fail with
   `resource_exhausted` (or follow an explicitly configured fail-open policy)
   without spawning another leaked goroutine.
+- **P1-5 dynamic-watchdog sub-slice:** the production Control host wraps each
+  local run with a dynamic reviewer that observes elapsed/no-progress time,
+  typed Runtime lifecycle status, canonical provider usage, and repeated
+  normalized tool signatures from either Runner event view. Soft thresholds request a Control
+  review rather than enforcing an SDK step count. Reviews can continue, append
+  an idempotent durable journal checkpoint, or checkpoint and cancel; cancel is
+  ignored unless the reviewer explicitly records confirmation. The default
+  production policy checkpoints soft-threshold evidence and does not
+  auto-cancel. Confirmed cancellation, declined confirmation, timer-only
+  stalls, canonical `SourceEvents`, and checkpoint-before-cancel ordering have
+  dedicated regressions.
 
 Do not combine unrelated P0s into one broad rewrite. Update this board in the
 same commit as the closing evidence. Do not edit the frozen v0.25.0 acceptance

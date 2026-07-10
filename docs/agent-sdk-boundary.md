@@ -198,6 +198,16 @@ really exits. The per-Runtime cap therefore acts as a stuck-call circuit
 breaker: saturation is a typed resource-exhaustion failure and never creates
 another guardrail goroutine.
 
+The production Control host also owns a dynamic run watchdog above Runtime and
+the session lease wrapper. It observes elapsed time, time since progress, typed
+Runtime lifecycle traces, canonical provider usage, and repeated normalized tool-call
+signatures. Crossing a soft threshold asks a reviewer for a decision; it is not
+an SDK model/tool/step budget. The reviewer may continue, persist an idempotent
+diagnostic journal checkpoint, or checkpoint then cancel. Cancellation requires
+an explicit confirmation bit, allowing a surface adapter to place a real user
+confirmation in front of the decision. These watchdog checkpoints are durable
+Control audit facts, not replacement model messages or UI transcript truth.
+
 Hosts may implement OpenTelemetry as an interceptor or sink adapter. The SDK
 does not depend on a telemetry implementation.
 
