@@ -571,8 +571,8 @@ func TestStoreAppendRegeneratesDuplicateEventIDAcrossProcesses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AppendEvent(first) error = %v", err)
 	}
-	if first.ID != "event-1" {
-		t.Fatalf("first event id = %q, want event-1", first.ID)
+	if !strings.HasPrefix(first.ID, "event-") {
+		t.Fatalf("first event id = %q, want durable event- prefix", first.ID)
 	}
 
 	secondStore := NewStore(Config{
@@ -1855,7 +1855,7 @@ func TestStoreGeneratesFreshCompactSessionIDsAcrossRestart(t *testing.T) {
 	if !strings.HasPrefix(second.SessionID, "s-") {
 		t.Fatalf("second session id = %q, want s- prefix", second.SessionID)
 	}
-	if len(first.SessionID) > 16 || len(second.SessionID) > 16 {
+	if len(first.SessionID) > 32 || len(second.SessionID) > 32 {
 		t.Fatalf("expected compact session ids, got %q (%d) and %q (%d)", first.SessionID, len(first.SessionID), second.SessionID, len(second.SessionID))
 	}
 	if first.SessionID == second.SessionID {

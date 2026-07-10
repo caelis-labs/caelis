@@ -2,13 +2,12 @@ package inmemory
 
 import (
 	"context"
-	"fmt"
 	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/internal/identity"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
@@ -25,7 +24,6 @@ type Store struct {
 	sessionIDGenerator func() string
 	eventIDGenerator   func() string
 	clock              func() time.Time
-	idCounter          atomic.Uint64
 	sessions           map[string]*record
 }
 
@@ -664,8 +662,7 @@ func (s *Store) nextID(prefix string, custom func() string) string {
 			return id
 		}
 	}
-	n := s.idCounter.Add(1)
-	return fmt.Sprintf("%s-%d", prefix, n)
+	return identity.New(prefix)
 }
 
 func (s *Store) ensureUniqueEventID(event *session.Event, existing map[string]struct{}) {
@@ -690,7 +687,7 @@ func (s *Store) ensureUniqueEventID(event *session.Event, existing map[string]st
 		}
 	}
 	for {
-		id = fmt.Sprintf("event-%d", s.idCounter.Add(1))
+		id = identity.New("event")
 		if _, used := existing[id]; !used {
 			event.ID = id
 			return

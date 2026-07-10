@@ -19,6 +19,16 @@ import (
 var _ controller.RecoveryCoordinator = (*Coordinator)(nil)
 var _ agent.SessionControlPlane = (*SessionControl)(nil)
 
+func TestDefaultControllerEpochIdentitySurvivesCoordinatorRestart(t *testing.T) {
+	t.Parallel()
+
+	first := (&Coordinator{clock: time.Now}).kernelControllerBinding("test")
+	second := (&Coordinator{clock: time.Now}).kernelControllerBinding("test")
+	if first.EpochID == "" || second.EpochID == "" || first.EpochID == second.EpochID {
+		t.Fatalf("controller epochs = %q and %q, want distinct durable identities", first.EpochID, second.EpochID)
+	}
+}
+
 func TestContextRouterUsesOnlySharedCanonicalDialogue(t *testing.T) {
 	t.Parallel()
 

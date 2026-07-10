@@ -2,7 +2,6 @@ package file
 
 import (
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -44,7 +43,6 @@ type Store struct {
 	sessionIDGenerator func() string
 	eventIDGenerator   func() string
 	clock              func() time.Time
-	idCounter          atomic.Uint64
 	pathCache          map[string]string
 	writeDocumentFault func() error
 	transactionFault   func(string) error

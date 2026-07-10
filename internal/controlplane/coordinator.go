@@ -2,10 +2,10 @@ package controlplane
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
@@ -34,7 +34,6 @@ type Coordinator struct {
 	context     controller.ContextRouter
 	clock       func() time.Time
 	idGenerator func() string
-	nextID      atomic.Uint64
 	lifecycle   agent.LifecycleOptions
 }
 
@@ -276,7 +275,7 @@ func (c *Coordinator) kernelControllerBinding(source string) session.ControllerB
 		epochID = strings.TrimSpace(c.idGenerator())
 	}
 	if epochID == "" {
-		epochID = fmt.Sprintf("control-kernel-%d", c.nextID.Add(1))
+		epochID = "control-kernel-" + strings.ToLower(rand.Text())
 	}
 	return session.ControllerBinding{
 		Kind:         session.ControllerKindKernel,

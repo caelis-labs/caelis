@@ -3,14 +3,13 @@ package runtime
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/identity"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
@@ -58,7 +57,6 @@ type Runtime struct {
 	controllerRecovery       controller.RecoveryCoordinator
 	controllerEventForwarder agent.ControllerEventForwarder
 	subagents                agent.SubagentRunner
-	idCounter                atomic.Uint64
 	executionMu              sync.Mutex
 	mu                       sync.RWMutex
 	runStates                map[string]agent.RunState
@@ -310,8 +308,7 @@ func (r *Runtime) nextID(prefix string, custom func() string) string {
 			return id
 		}
 	}
-	n := r.idCounter.Add(1)
-	return fmt.Sprintf("%s-%d", prefix, n)
+	return identity.New(prefix)
 }
 
 func (r *Runtime) now() time.Time {

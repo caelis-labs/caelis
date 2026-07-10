@@ -1,12 +1,10 @@
 package file
 
 import (
-	"crypto/rand"
-	"encoding/base32"
-	"fmt"
 	"strings"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/internal/identity"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
@@ -17,10 +15,9 @@ func (s *Store) nextID(prefix string, custom func() string) string {
 		}
 	}
 	if strings.TrimSpace(prefix) == "session" {
-		return nextSessionID()
+		return identity.New("s")
 	}
-	n := s.idCounter.Add(1)
-	return fmt.Sprintf("%s-%d", prefix, n)
+	return identity.New(prefix)
 }
 
 func (s *Store) ensureUniqueEventID(event *session.Event, existing map[string]struct{}) {
@@ -45,7 +42,7 @@ func (s *Store) ensureUniqueEventID(event *session.Event, existing map[string]st
 		}
 	}
 	for {
-		id = fmt.Sprintf("event-%d", s.idCounter.Add(1))
+		id = identity.New("event")
 		if _, used := existing[id]; !used {
 			event.ID = id
 			return
@@ -123,18 +120,6 @@ func workspaceDirName(workspaceKey string) string {
 
 func pathCacheKey(sessionID string, workspaceKey string) string {
 	return sanitizeSessionID(sessionID)
-}
-
-func nextSessionID() string {
-	var raw [7]byte
-	if _, err := rand.Read(raw[:]); err != nil {
-		return fmt.Sprintf("s-%d", time.Now().UTC().UnixNano())
-	}
-	token := strings.ToLower(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(raw[:]))
-	if len(token) > 12 {
-		token = token[:12]
-	}
-	return "s-" + token
 }
 
 func firstNonEmpty(values ...string) string {
