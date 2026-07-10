@@ -25,6 +25,7 @@ const (
 type State string
 
 const (
+	StatePrepared        State = "prepared"
 	StateRunning         State = "running"
 	StateWaitingInput    State = "waiting_input"
 	StateCompleted       State = "completed"
@@ -33,6 +34,7 @@ const (
 	StateInterrupted     State = "interrupted"
 	StateTerminated      State = "terminated"
 	StateWaitingApproval State = "waiting_approval"
+	StateUnknownOutcome  State = "unknown_outcome"
 )
 
 // Ref identifies one task in one owning session.
@@ -93,8 +95,11 @@ type CommandStartRequest struct {
 	Observer    Observer      `json:"-"`
 }
 
-// SubagentStartRequest defines one yielded SPAWN launch request.
+// SubagentStartRequest defines one yielded SPAWN launch request. SpawnID is the
+// stable operation identity used for durable intent, retry, and restart
+// recovery; callers that may retry must preserve it.
 type SubagentStartRequest struct {
+	SpawnID        string                          `json:"spawn_id,omitempty"`
 	Agent          string                          `json:"agent,omitempty"`
 	Prompt         string                          `json:"prompt,omitempty"`
 	ContextPrelude string                          `json:"context_prelude,omitempty"`

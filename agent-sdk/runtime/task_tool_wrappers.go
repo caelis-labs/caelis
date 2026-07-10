@@ -228,6 +228,7 @@ func (t runtimeSpawnTool) Call(ctx context.Context, call tool.Call) (tool.Result
 		return tool.Result{}, err
 	}
 	snapshot, err := t.tasks.StartSubagent(ctx, t.session, t.sessionRef, t.runner, taskapi.SubagentStartRequest{
+		SpawnID:      strings.TrimSpace(call.ID),
 		Agent:        strings.TrimSpace(agent),
 		Prompt:       strings.TrimSpace(prompt),
 		ParentCall:   strings.TrimSpace(call.ID),

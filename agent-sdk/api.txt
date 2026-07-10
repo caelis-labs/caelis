@@ -1122,6 +1122,8 @@ package github.com/caelis-labs/caelis/agent-sdk/runtime
   type StartSubagentOptions struct {
       ApprovalRequester agent.ApprovalRequester
       ApprovalMode      string
+
+      SpawnID string
   }
   var ErrEventStreamConsumed = errors.New("agent-sdk/runtime: runner event stream already has a consumer")
 
@@ -2530,6 +2532,7 @@ package github.com/caelis-labs/caelis/agent-sdk/task
       ResultPersistenceDeferred
   )
   const (
+      StatePrepared        State = "prepared"
       StateRunning         State = "running"
       StateWaitingInput    State = "waiting_input"
       StateCompleted       State = "completed"
@@ -2538,6 +2541,7 @@ package github.com/caelis-labs/caelis/agent-sdk/task
       StateInterrupted     State = "interrupted"
       StateTerminated      State = "terminated"
       StateWaitingApproval State = "waiting_approval"
+      StateUnknownOutcome  State = "unknown_outcome"
   )
   func (e *LeaseConflictError) Error() string
   func (e *LeaseConflictError) ErrorCode() errorcode.Code
@@ -2685,6 +2689,7 @@ package github.com/caelis-labs/caelis/agent-sdk/task
       GetSessionTaskByHandle(context.Context, session.SessionRef, Kind, string) (*Entry, error)
   }
   type SubagentStartRequest struct {
+      SpawnID        string                          `json:"spawn_id,omitempty"`
       Agent          string                          `json:"agent,omitempty"`
       Prompt         string                          `json:"prompt,omitempty"`
       ContextPrelude string                          `json:"context_prelude,omitempty"`

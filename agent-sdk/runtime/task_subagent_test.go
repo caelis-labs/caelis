@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -1100,7 +1101,7 @@ func TestRuntimeSpawnToolAllowsSelfDefaultAndRejectsRawACPWhenEnumExists(t *test
 		tasks:      runtime.tasks,
 		runner:     runner,
 	}
-	for _, input := range []map[string]any{
+	for index, input := range []map[string]any{
 		{"prompt": "review this"},
 		{"agent": "self", "prompt": "review this"},
 	} {
@@ -1108,7 +1109,7 @@ func TestRuntimeSpawnToolAllowsSelfDefaultAndRejectsRawACPWhenEnumExists(t *test
 		if err != nil {
 			t.Fatalf("json.Marshal() error = %v", err)
 		}
-		if _, err := targetTool.Call(ctx, tool.Call{ID: "spawn-1", Name: spawn.ToolName, Input: raw}); err != nil {
+		if _, err := targetTool.Call(ctx, tool.Call{ID: fmt.Sprintf("spawn-%d", index+1), Name: spawn.ToolName, Input: raw}); err != nil {
 			t.Fatalf("SPAWN Call(%v) error = %v", input, err)
 		}
 		if runner.spawnRequest.Agent != "self" {
@@ -1128,7 +1129,7 @@ func TestRuntimeSpawnToolAllowsSelfDefaultAndRejectsRawACPWhenEnumExists(t *test
 	if err != nil {
 		t.Fatalf("json.Marshal() error = %v", err)
 	}
-	if _, err := targetTool.Call(ctx, tool.Call{ID: "spawn-2", Name: spawn.ToolName, Input: raw}); err != nil {
+	if _, err := targetTool.Call(ctx, tool.Call{ID: "spawn-reviewer", Name: spawn.ToolName, Input: raw}); err != nil {
 		t.Fatalf("SPAWN Call(reviewer) error = %v", err)
 	}
 	if runner.spawnRequest.Agent != "reviewer" {
@@ -1263,6 +1264,7 @@ func newSubagentTaskTestRuntime(t *testing.T, runner subagent.Runner) (*Runtime,
 		Sessions:     sessions,
 		AgentFactory: chat.Factory{},
 		Subagents:    runner,
+		TaskStore:    newFileTaskStoreForTest(t),
 	}))
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
