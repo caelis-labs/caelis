@@ -164,10 +164,19 @@ func (t policyWrappedTool) requestApproval(
 	}
 	var resp agent.ApprovalResponse
 	var err error
+	approvalCall := func(callCtx context.Context) error {
+		if t.approval.runtime != nil {
+			resp, err = t.approval.runtime.requestDurableApproval(callCtx, request, t.approval.requester)
+		} else {
+			resp, err = t.approval.requester.RequestApproval(callCtx, request)
+		}
+		return err
+	}
 	if t.approval.runtime != nil {
-		resp, err = t.approval.runtime.requestDurableApproval(ctx, request, t.approval.requester)
+		event := t.approval.runtime.lifecycleEvent(ctx, agent.LifecycleApproval, request.Tool.Name, request.Call.ID)
+		err = t.approval.runtime.executeLifecycle(ctx, event, approvalCall)
 	} else {
-		resp, err = t.approval.requester.RequestApproval(ctx, request)
+		err = approvalCall(ctx)
 	}
 	if err != nil {
 		return tool.Result{}, err

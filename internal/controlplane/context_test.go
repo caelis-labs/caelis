@@ -124,9 +124,11 @@ func TestCoordinatorOwnsActivationAndAtomicHandoffCommit(t *testing.T) {
 		Kind: session.ControllerKindACP, ControllerID: "remote-1", AgentName: "codex", Label: "Codex",
 		EpochID: "epoch-remote", RemoteSessionID: "acp-session-1", ContextSyncSeq: 0,
 	}}
+	traceSink := &controlTraceSink{}
 	coordinator, err := NewCoordinator(CoordinatorConfig{
 		Sessions: sessions, Controllers: backend, Context: router,
 		Clock: func() time.Time { return time.Unix(20, 0) }, IDGenerator: func() string { return "epoch-kernel" },
+		TraceSink: traceSink,
 	})
 	if err != nil {
 		t.Fatalf("NewCoordinator() error = %v", err)
@@ -150,6 +152,24 @@ func TestCoordinatorOwnsActivationAndAtomicHandoffCommit(t *testing.T) {
 	if len(loaded.Events) != 1 || session.ProtocolHandoffOf(loaded.Events[0]) == nil || loaded.Events[0].Actor.Name != "control" {
 		t.Fatalf("handoff events = %#v", loaded.Events)
 	}
+	if !traceSink.saw(agent.LifecycleHandoff, agent.TraceStarted) || !traceSink.saw(agent.LifecycleHandoff, agent.TraceCompleted) {
+		t.Fatalf("trace records = %#v, want handoff lifecycle", traceSink.records)
+	}
+}
+
+type controlTraceSink struct{ records []agent.TraceRecord }
+
+func (s *controlTraceSink) RecordTrace(record agent.TraceRecord) {
+	s.records = append(s.records, record)
+}
+
+func (s *controlTraceSink) saw(operation agent.LifecycleOperation, status agent.TraceStatus) bool {
+	for _, record := range s.records {
+		if record.Event.Operation == operation && record.Status == status {
+			return true
+		}
+	}
+	return false
 }
 
 func TestCoordinatorDeactivatesNewEndpointWhenAtomicCommitFails(t *testing.T) {

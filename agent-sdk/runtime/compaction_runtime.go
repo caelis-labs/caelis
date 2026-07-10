@@ -215,7 +215,12 @@ func (r *Runtime) compactAndNotify(
 			return compactionProgress{}, false, err
 		}
 	}
-	result, err := compactFn(events)
+	var result compact.Result
+	err = r.executeLifecycle(ctx, r.lifecycleEvent(ctx, agent.LifecycleCompact, "", ""), func(context.Context) error {
+		var compactErr error
+		result, compactErr = compactFn(events)
+		return compactErr
+	})
 	if err != nil {
 		r.publishCompactFailureNotice(activeSession, turnID, sink, err)
 		return compactionProgress{}, false, err

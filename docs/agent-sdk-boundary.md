@@ -206,6 +206,23 @@ command, async/resume, TTY, filesystem, network, path, and environment support.
 Provider catalogs may help Control choose an endpoint, but they do not replace
 the execution object's declaration at the SDK boundary.
 
+Lifecycle instrumentation uses immutable `LifecycleEvent` values for
+run/turn/model/tool/approval/compact/handoff boundaries. Interceptors execute
+in configured nesting order. `TraceSink` is observer-only: it receives copied
+start and terminal records, cannot return an error, and its panics cannot alter
+execution. Hosts may implement OpenTelemetry as an interceptor or sink adapter;
+the SDK does not depend on an OTel implementation. Control wraps the handoff
+transaction with the same SDK lifecycle contract instead of moving handoff
+authority back into Runtime.
+
+Input guardrails run before run-journal or user-event persistence. Each receives
+a deep-copied full input, and its returned full input feeds the next guardrail
+in configuration order. Every guard has a real caller-side timeout, including
+for a non-cooperative implementation. Infrastructure errors and panics obey an
+explicit fail-open/fail-closed policy (default closed); an intentional typed
+rejection is always closed. A timed-out guard may finish in its isolated
+goroutine, but its late output is discarded and cannot mutate the run input.
+
 ## Durable Facts and Projection
 
 `session.Event` remains the durable source of truth, but different payloads

@@ -7,6 +7,20 @@ package github.com/caelis-labs/caelis/agent-sdk
       CancelStatusAlreadyCancelled CancelStatus = "already_cancelled"
   )
   const (
+      GuardrailFailClosed GuardrailFailurePolicy = "fail_closed"
+      GuardrailFailOpen   GuardrailFailurePolicy = "fail_open"
+  )
+  const (
+      LifecycleRun       LifecycleOperation = "run"
+      LifecycleTurn      LifecycleOperation = "turn"
+      LifecycleModel     LifecycleOperation = "model"
+      LifecycleTool      LifecycleOperation = "tool"
+      LifecycleApproval  LifecycleOperation = "approval"
+      LifecycleCompact   LifecycleOperation = "compact"
+      LifecycleHandoff   LifecycleOperation = "handoff"
+      LifecycleGuardrail LifecycleOperation = "guardrail"
+  )
+  const (
       RunLifecycleStatusRunning         RunLifecycleStatus = "running"
       RunLifecycleStatusWaitingApproval RunLifecycleStatus = "waiting_approval"
       RunLifecycleStatusInterrupted     RunLifecycleStatus = "interrupted"
@@ -24,6 +38,12 @@ package github.com/caelis-labs/caelis/agent-sdk
   const (
       SubmissionKindConversation SubmissionKind = "conversation"
   )
+  const (
+      TraceStarted   TraceStatus = "started"
+      TraceCompleted TraceStatus = "completed"
+      TraceFailed    TraceStatus = "failed"
+  )
+  func (e *GuardrailRejectionError) Error() string
   func (e *RunConflictError) Error() string
   func (e *RunLimitError) Error() string
   func (e *RunNotResumableError) Error() string
@@ -34,6 +54,7 @@ package github.com/caelis-labs/caelis/agent-sdk
   func CloneSourceEvent(in SourceEvent) SourceEvent
   func CloneSubmission(sub Submission) Submission
   func CloneSubmissions(items []Submission) []Submission
+  func ExecuteLifecycle(ctx context.Context, event LifecycleEvent, options LifecycleOptions, next LifecycleNext) error
   func NewContext(spec ContextSpec) Context
   func NewEvents(events []*session.Event) Events
   func NewReadonlyState(values map[string]any) ReadonlyState
@@ -144,12 +165,50 @@ package github.com/caelis-labs/caelis/agent-sdk
       Len() int
       At(int) *session.Event
   }
+  type Guardrail interface {
+      Name() string
+      ApplyGuardrail(context.Context, GuardrailInput) (GuardrailInput, error)
+  }
+  type GuardrailFailurePolicy string
+  type GuardrailInput struct {
+      SessionRef   session.SessionRef  `json:"session_ref"`
+      Input        string              `json:"input,omitempty"`
+      DisplayInput string              `json:"display_input,omitempty"`
+      ContentParts []model.ContentPart `json:"content_parts,omitempty"`
+  }
+  type GuardrailRejectionError struct {
+      Guardrail string
+      Reason    string
+  }
+  type GuardrailSpec struct {
+      Guardrail Guardrail
+      Timeout   time.Duration
+      OnFailure GuardrailFailurePolicy
+  }
   type HandoffControllerRequest struct {
       SessionRef session.SessionRef     `json:"session_ref"`
       Kind       session.ControllerKind `json:"kind,omitempty"`
       Agent      string                 `json:"agent,omitempty"`
       Source     string                 `json:"source,omitempty"`
       Reason     string                 `json:"reason,omitempty"`
+  }
+  type LifecycleEvent struct {
+      Operation  LifecycleOperation `json:"operation"`
+      SessionRef session.SessionRef `json:"session_ref,omitempty"`
+      RunID      string             `json:"run_id,omitempty"`
+      TurnID     string             `json:"turn_id,omitempty"`
+      StepID     string             `json:"step_id,omitempty"`
+      Name       string             `json:"name,omitempty"`
+  }
+  type LifecycleInterceptor interface {
+      InterceptLifecycle(context.Context, LifecycleEvent, LifecycleNext) error
+  }
+  type LifecycleNext func(context.Context) error
+  type LifecycleOperation string
+  type LifecycleOptions struct {
+      Interceptors []LifecycleInterceptor
+      TraceSink    TraceSink
+      Clock        func() time.Time
   }
   type ModelRequestOptions struct {
       Stream *bool             `json:"stream,omitempty"`
@@ -306,6 +365,17 @@ package github.com/caelis-labs/caelis/agent-sdk
       Metadata     map[string]any      `json:"metadata,omitempty"`
   }
   type SubmissionKind string
+  type TraceRecord struct {
+      Event    LifecycleEvent `json:"event"`
+      Status   TraceStatus    `json:"status"`
+      At       time.Time      `json:"at"`
+      Duration time.Duration  `json:"duration,omitempty"`
+      Error    string         `json:"error,omitempty"`
+  }
+  type TraceSink interface {
+      RecordTrace(TraceRecord)
+  }
+  type TraceStatus string
 
 package github.com/caelis-labs/caelis/agent-sdk/approval
   const (
@@ -1018,6 +1088,9 @@ package github.com/caelis-labs/caelis/agent-sdk/runtime
       ControllerEventForwarder agent.ControllerEventForwarder
       TaskStore                task.Store
       Subagents                agent.SubagentRunner
+      LifecycleInterceptors    []agent.LifecycleInterceptor
+      TraceSink                agent.TraceSink
+      Guardrails               []agent.GuardrailSpec
   }
   type Runtime struct {
       // contains filtered or unexported fields

@@ -49,6 +49,7 @@ func (r *Runtime) runACPControllerTurn(
 	}
 	runID := r.nextID("run", r.runIDGenerator)
 	turnID := r.nextID("turn", nil)
+	ctx = withLifecycleScope(ctx, lifecycleScope{sessionRef: ref, runID: runID, turnID: turnID})
 	if err := r.beginRun(ref, runID); err != nil {
 		cancel()
 		return agent.RunResult{}, err
@@ -152,25 +153,31 @@ func (r *Runtime) executeACPControllerTurn(
 		turnReq.ContextPrelude = contextPrelude
 		turnReq.ContextSyncSeq = contextSeq
 	}
-	turnResult, err := r.controllers.RunTurn(ctx, turnReq)
-	if err != nil && isMissingACPControllerRun(err) {
-		if r.controllerRecovery == nil {
-			err = fmt.Errorf("agent-sdk/runtime: controller recovery coordinator is unavailable")
-		} else {
-			activeSession, err = r.controllerRecovery.ReattachController(ctx, controller.RecoveryRequest{
-				SessionRef:    ref,
-				Session:       activeSession,
-				ExcludeTurnID: turnID,
-			})
-			if err == nil {
-				turnReq.Session = activeSession
-				turnReq.ContextPrelude, turnReq.ContextSyncSeq, err = r.buildControllerTurnContext(ctx, activeSession, ref, turnID)
-				if err == nil {
-					turnResult, err = r.controllers.RunTurn(ctx, turnReq)
+	var turnResult controller.TurnResult
+	err = r.executeLifecycle(ctx, r.lifecycleEvent(ctx, agent.LifecycleRun, "acp", ""), func(runCtx context.Context) error {
+		return r.executeLifecycle(runCtx, r.lifecycleEvent(runCtx, agent.LifecycleTurn, "acp", ""), func(turnCtx context.Context) error {
+			var turnErr error
+			turnResult, turnErr = r.controllers.RunTurn(turnCtx, turnReq)
+			if turnErr != nil && isMissingACPControllerRun(turnErr) {
+				if r.controllerRecovery == nil {
+					return fmt.Errorf("agent-sdk/runtime: controller recovery coordinator is unavailable")
+				}
+				activeSession, turnErr = r.controllerRecovery.ReattachController(turnCtx, controller.RecoveryRequest{
+					SessionRef:    ref,
+					Session:       activeSession,
+					ExcludeTurnID: turnID,
+				})
+				if turnErr == nil {
+					turnReq.Session = activeSession
+					turnReq.ContextPrelude, turnReq.ContextSyncSeq, turnErr = r.buildControllerTurnContext(turnCtx, activeSession, ref, turnID)
+					if turnErr == nil {
+						turnResult, turnErr = r.controllers.RunTurn(turnCtx, turnReq)
+					}
 				}
 			}
-		}
-	}
+			return turnErr
+		})
+	})
 	if err != nil {
 		err = translateRunLimitError(ctx, err)
 		r.setRunState(ref.SessionID, agent.RunState{

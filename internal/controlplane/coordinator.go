@@ -16,11 +16,13 @@ import (
 // CoordinatorConfig wires product-owned controller handoff coordination to
 // neutral SDK endpoint and participant mechanisms.
 type CoordinatorConfig struct {
-	Sessions    session.Service
-	Controllers controller.Backend
-	Context     controller.ContextRouter
-	Clock       func() time.Time
-	IDGenerator func() string
+	Sessions              session.Service
+	Controllers           controller.Backend
+	Context               controller.ContextRouter
+	Clock                 func() time.Time
+	IDGenerator           func() string
+	LifecycleInterceptors []agent.LifecycleInterceptor
+	TraceSink             agent.TraceSink
 }
 
 // Coordinator owns controller activation/deactivation and the atomic durable
@@ -33,6 +35,7 @@ type Coordinator struct {
 	clock       func() time.Time
 	idGenerator func() string
 	nextID      atomic.Uint64
+	lifecycle   agent.LifecycleOptions
 }
 
 // NewCoordinator constructs one Control-owned session coordinator.
@@ -52,6 +55,11 @@ func NewCoordinator(cfg CoordinatorConfig) (*Coordinator, error) {
 		context:     cfg.Context,
 		clock:       cfg.Clock,
 		idGenerator: cfg.IDGenerator,
+		lifecycle: agent.LifecycleOptions{
+			Interceptors: append([]agent.LifecycleInterceptor(nil), cfg.LifecycleInterceptors...),
+			TraceSink:    cfg.TraceSink,
+			Clock:        cfg.Clock,
+		},
 	}, nil
 }
 
@@ -111,6 +119,21 @@ func (c *Coordinator) ReattachController(ctx context.Context, req controller.Rec
 // HandoffController authorizes no transition by itself; it executes a handoff
 // already selected by the calling user or Control policy.
 func (c *Coordinator) HandoffController(ctx context.Context, req agent.HandoffControllerRequest) (session.Session, error) {
+	var result session.Session
+	event := agent.LifecycleEvent{
+		Operation:  agent.LifecycleHandoff,
+		SessionRef: session.NormalizeSessionRef(req.SessionRef),
+		Name:       strings.TrimSpace(req.Agent),
+	}
+	err := agent.ExecuteLifecycle(ctx, event, c.lifecycle, func(callCtx context.Context) error {
+		var handoffErr error
+		result, handoffErr = c.handoffController(callCtx, req)
+		return handoffErr
+	})
+	return result, err
+}
+
+func (c *Coordinator) handoffController(ctx context.Context, req agent.HandoffControllerRequest) (session.Session, error) {
 	if c == nil || c.sessions == nil {
 		return session.Session{}, fmt.Errorf("controlplane: coordinator is unavailable")
 	}

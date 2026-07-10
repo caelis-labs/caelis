@@ -37,6 +37,9 @@ type Config struct {
 	ControllerEventForwarder agent.ControllerEventForwarder
 	TaskStore                task.Store
 	Subagents                agent.SubagentRunner
+	LifecycleInterceptors    []agent.LifecycleInterceptor
+	TraceSink                agent.TraceSink
+	Guardrails               []agent.GuardrailSpec
 }
 
 // Runtime is the baseline local runtime implementation.
@@ -63,6 +66,8 @@ type Runtime struct {
 	approvalWaiters          map[string]chan agent.ApprovalResponse
 	tasks                    *taskRuntime
 	terminals                *streamService
+	lifecycle                agent.LifecycleOptions
+	guardrails               []agent.GuardrailSpec
 }
 
 // New returns one baseline local runtime.
@@ -90,9 +95,19 @@ func New(cfg Config) (*Runtime, error) {
 		runStates:                map[string]agent.RunState{},
 		activeRunners:            map[string]activeRun{},
 		approvalWaiters:          map[string]chan agent.ApprovalResponse{},
+		lifecycle: agent.LifecycleOptions{
+			Interceptors: append([]agent.LifecycleInterceptor(nil), cfg.LifecycleInterceptors...),
+			TraceSink:    cfg.TraceSink,
+			Clock:        cfg.Clock,
+		},
+		guardrails: append([]agent.GuardrailSpec(nil), cfg.Guardrails...),
 	}
 	if r.clock == nil {
 		r.clock = time.Now
+	}
+	r.lifecycle.Clock = r.clock
+	if err := validateGuardrailSpecs(r.guardrails); err != nil {
+		return nil, err
 	}
 	if r.policies == nil {
 		reg, err := presets.NewRegistry()
@@ -177,6 +192,10 @@ func (r *Runtime) Run(
 			return agent.RunResult{}, err
 		}
 	}
+	req, err = r.applyGuardrails(ctx, activeSession, req)
+	if err != nil {
+		return agent.RunResult{}, err
+	}
 	runCtx, cancel, err := prepareRunContext(ctx, req.Limits, r.now())
 	if err != nil {
 		return agent.RunResult{}, err
@@ -187,6 +206,7 @@ func (r *Runtime) Run(
 
 	runID := r.nextID("run", r.runIDGenerator)
 	turnID := r.nextID("turn", nil)
+	runCtx = withLifecycleScope(runCtx, lifecycleScope{sessionRef: ref, runID: runID, turnID: turnID})
 	if err := r.beginRun(ref, runID); err != nil {
 		cancel()
 		return agent.RunResult{}, err
@@ -253,7 +273,12 @@ func (r *Runtime) executeKernelTurn(
 
 	batch := make([]*session.Event, 0, 4)
 	userEvent := buildUserEvent(activeSession, turnID, req.Input, req.DisplayInput, req.ContentParts)
-	if err := r.runWithOverflowRecovery(ctx, activeSession, ref, runID, turnID, req, userEvent, &batch, handle); err != nil {
+	lifecycleErr := r.executeLifecycle(ctx, r.lifecycleEvent(ctx, agent.LifecycleRun, "", ""), func(runCtx context.Context) error {
+		return r.executeLifecycle(runCtx, r.lifecycleEvent(runCtx, agent.LifecycleTurn, "", ""), func(turnCtx context.Context) error {
+			return r.runWithOverflowRecovery(turnCtx, activeSession, ref, runID, turnID, req, userEvent, &batch, handle)
+		})
+	})
+	if err := lifecycleErr; err != nil {
 		err = translateRunLimitError(ctx, err)
 		journalStatus := session.ExecutionFailed
 		if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {

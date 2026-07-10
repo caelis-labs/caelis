@@ -2585,9 +2585,11 @@ func TestRuntimeDurableApprovalResolveAndResume(t *testing.T) {
 			}}, nil
 		},
 	}}
+	traceSink := &concurrentTraceSink{}
 	runtime, err := New(Config{
 		Sessions: sessions, AgentFactory: chat.Factory{}, PolicyRegistry: ask, DefaultPolicyMode: "ask",
 		RunIDGenerator: func() string { return "run-durable-approval" },
+		TraceSink:      traceSink,
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -2632,6 +2634,9 @@ func TestRuntimeDurableApprovalResolveAndResume(t *testing.T) {
 	}
 	if _, err := drainRunnerEvents(t, resumed.Handle); err != nil {
 		t.Fatalf("resumed runner error = %v", err)
+	}
+	if !traceSink.saw(agent.LifecycleApproval, agent.TraceStarted) || !traceSink.saw(agent.LifecycleApproval, agent.TraceCompleted) {
+		t.Fatalf("trace records = %#v, want approval lifecycle", traceSink.snapshot())
 	}
 	if calls != 1 {
 		t.Fatalf("tool calls = %d, want 1", calls)
