@@ -774,7 +774,7 @@ func (tm *taskRuntime) attachSubagentParticipant(ctx context.Context, activeSess
 		},
 	}
 	_, _, err = lifecycle.PutParticipantWithEvent(ctx, session.PutParticipantWithEventRequest{
-		SessionRef: task.sessionRef, ExpectedRevision: &current.Revision, Binding: binding, Event: event,
+		SessionRef: task.sessionRef, ExpectedRevision: &current.Revision, MutationGuard: session.RuntimeMutationGuard(ctx), Binding: binding, Event: event,
 	})
 	return err
 }
@@ -785,7 +785,8 @@ func (tm *taskRuntime) updateSubagentParticipant(ctx context.Context, task *suba
 	}
 	role := subagentParticipantRole(task)
 	_, err := tm.runtime.sessions.AppendEvent(ctx, session.AppendEventRequest{
-		SessionRef: task.sessionRef,
+		SessionRef:    task.sessionRef,
+		MutationGuard: session.RuntimeMutationGuard(ctx),
 		Event: &session.Event{
 			IdempotencyKey: fmt.Sprintf("subagent-participant:%s:%d:%s", task.ref.TaskID, task.turnSeq, strings.TrimSpace(action)),
 			Type:           session.EventTypeParticipant,
@@ -834,7 +835,8 @@ func (tm *taskRuntime) appendSideSubagentUserEvent(ctx context.Context, task *su
 	role := subagentParticipantRole(task)
 	message := model.NewTextMessage(model.RoleUser, prompt)
 	_, err := tm.runtime.sessions.AppendEvent(ctx, session.AppendEventRequest{
-		SessionRef: task.sessionRef,
+		SessionRef:    task.sessionRef,
+		MutationGuard: session.RuntimeMutationGuard(ctx),
 		Event: &session.Event{
 			IdempotencyKey: fmt.Sprintf("subagent-dialogue:%s:%d:user", task.ref.TaskID, task.turnSeq),
 			Type:           session.EventTypeUser,
@@ -913,7 +915,7 @@ func (tm *taskRuntime) appendSideSubagentFinalEvent(ctx context.Context, task *s
 	}
 	task.mu.Unlock()
 
-	if _, err := tm.runtime.sessions.AppendEvent(ctx, session.AppendEventRequest{SessionRef: task.sessionRef, Event: event}); err != nil {
+	if _, err := tm.runtime.sessions.AppendEvent(ctx, session.AppendEventRequest{SessionRef: task.sessionRef, MutationGuard: session.RuntimeMutationGuard(ctx), Event: event}); err != nil {
 		return err
 	}
 	if err := tm.runtime.updateParticipantContextCheckpoint(ctx, task.sessionRef, strings.TrimSpace(task.anchor.AgentID)); err != nil {

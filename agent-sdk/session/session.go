@@ -320,13 +320,14 @@ type Session struct {
 // SessionLease is a neutral cloud-store coordination record. It carries no
 // worker-placement or scheduling policy; those decisions remain in Control.
 type SessionLease struct {
-	SessionRef  SessionRef `json:"session_ref"`
-	LeaseID     string     `json:"lease_id,omitempty"`
-	OwnerID     string     `json:"owner_id,omitempty"`
-	Revision    uint64     `json:"revision,omitempty"`
-	AcquiredAt  time.Time  `json:"acquired_at,omitempty"`
-	HeartbeatAt time.Time  `json:"heartbeat_at,omitempty"`
-	ExpiresAt   time.Time  `json:"expires_at,omitempty"`
+	SessionRef   SessionRef `json:"session_ref"`
+	LeaseID      string     `json:"lease_id,omitempty"`
+	OwnerID      string     `json:"owner_id,omitempty"`
+	Revision     uint64     `json:"revision,omitempty"`
+	FencingToken uint64     `json:"fencing_token,omitempty"`
+	AcquiredAt   time.Time  `json:"acquired_at,omitempty"`
+	HeartbeatAt  time.Time  `json:"heartbeat_at,omitempty"`
+	ExpiresAt    time.Time  `json:"expires_at,omitempty"`
 }
 
 // AcquireSessionLeaseRequest requests a store-level execution lease.
@@ -394,17 +395,19 @@ type LoadSessionRequest struct {
 
 // AppendEventRequest appends one event to one session.
 type AppendEventRequest struct {
-	SessionRef       SessionRef `json:"session_ref"`
-	ExpectedRevision *uint64    `json:"expected_revision,omitempty"`
-	Event            *Event     `json:"event"`
+	SessionRef       SessionRef    `json:"session_ref"`
+	ExpectedRevision *uint64       `json:"expected_revision,omitempty"`
+	MutationGuard    MutationGuard `json:"mutation_guard,omitempty"`
+	Event            *Event        `json:"event"`
 }
 
 // AppendEventsRequest appends multiple events to one session as one batch.
 // Implementations must validate the full batch before making any event durable.
 type AppendEventsRequest struct {
-	SessionRef       SessionRef `json:"session_ref"`
-	ExpectedRevision *uint64    `json:"expected_revision,omitempty"`
-	Events           []*Event   `json:"events"`
+	SessionRef       SessionRef    `json:"session_ref"`
+	ExpectedRevision *uint64       `json:"expected_revision,omitempty"`
+	MutationGuard    MutationGuard `json:"mutation_guard,omitempty"`
+	Events           []*Event      `json:"events"`
 }
 
 // AppendEventsAndUpdateStateRequest appends multiple events and derives the
@@ -417,6 +420,7 @@ type AppendEventsRequest struct {
 type AppendEventsAndUpdateStateRequest struct {
 	SessionRef       SessionRef
 	ExpectedRevision *uint64
+	MutationGuard    MutationGuard
 	TransactionID    string
 	Events           []*Event
 	UpdateState      func(storedEvents []*Event, state map[string]any) (map[string]any, error)
@@ -431,8 +435,9 @@ type EventsRequest struct {
 
 // BindControllerRequest replaces the active controller binding for one session.
 type BindControllerRequest struct {
-	SessionRef SessionRef        `json:"session_ref"`
-	Binding    ControllerBinding `json:"binding"`
+	SessionRef    SessionRef        `json:"session_ref"`
+	MutationGuard MutationGuard     `json:"mutation_guard,omitempty"`
+	Binding       ControllerBinding `json:"binding"`
 }
 
 // BindControllerWithEventRequest atomically commits one controller ownership
@@ -440,20 +445,23 @@ type BindControllerRequest struct {
 type BindControllerWithEventRequest struct {
 	SessionRef       SessionRef        `json:"session_ref"`
 	ExpectedRevision *uint64           `json:"expected_revision,omitempty"`
+	MutationGuard    MutationGuard     `json:"mutation_guard,omitempty"`
 	Binding          ControllerBinding `json:"binding"`
 	Event            *Event            `json:"event"`
 }
 
 // PutParticipantRequest creates or updates one participant binding.
 type PutParticipantRequest struct {
-	SessionRef SessionRef         `json:"session_ref"`
-	Binding    ParticipantBinding `json:"binding"`
+	SessionRef    SessionRef         `json:"session_ref"`
+	MutationGuard MutationGuard      `json:"mutation_guard,omitempty"`
+	Binding       ParticipantBinding `json:"binding"`
 }
 
 // RemoveParticipantRequest detaches one participant binding.
 type RemoveParticipantRequest struct {
-	SessionRef    SessionRef `json:"session_ref"`
-	ParticipantID string     `json:"participant_id,omitempty"`
+	SessionRef    SessionRef    `json:"session_ref"`
+	MutationGuard MutationGuard `json:"mutation_guard,omitempty"`
+	ParticipantID string        `json:"participant_id,omitempty"`
 }
 
 // PutParticipantWithEventRequest creates or updates one participant binding and
@@ -461,6 +469,7 @@ type RemoveParticipantRequest struct {
 type PutParticipantWithEventRequest struct {
 	SessionRef       SessionRef         `json:"session_ref"`
 	ExpectedRevision *uint64            `json:"expected_revision,omitempty"`
+	MutationGuard    MutationGuard      `json:"mutation_guard,omitempty"`
 	Binding          ParticipantBinding `json:"binding"`
 	Event            *Event             `json:"event"`
 }
@@ -468,10 +477,11 @@ type PutParticipantWithEventRequest struct {
 // RemoveParticipantWithEventRequest removes one participant binding and appends
 // the matching lifecycle event in one store transaction.
 type RemoveParticipantWithEventRequest struct {
-	SessionRef       SessionRef `json:"session_ref"`
-	ExpectedRevision *uint64    `json:"expected_revision,omitempty"`
-	ParticipantID    string     `json:"participant_id,omitempty"`
-	Event            *Event     `json:"event"`
+	SessionRef       SessionRef    `json:"session_ref"`
+	ExpectedRevision *uint64       `json:"expected_revision,omitempty"`
+	MutationGuard    MutationGuard `json:"mutation_guard,omitempty"`
+	ParticipantID    string        `json:"participant_id,omitempty"`
+	Event            *Event        `json:"event"`
 }
 
 // ListSessionsRequest lists sessions in one workspace or user namespace.
@@ -635,4 +645,10 @@ type SessionLeaseService interface {
 	AcquireSessionLease(context.Context, AcquireSessionLeaseRequest) (SessionLease, error)
 	HeartbeatSessionLease(context.Context, HeartbeatSessionLeaseRequest) (SessionLease, error)
 	ReleaseSessionLease(context.Context, ReleaseSessionLeaseRequest) error
+}
+
+// SessionLeaseReader reloads the current durable lease after an unknown
+// reporting outcome. It does not acquire or renew ownership.
+type SessionLeaseReader interface {
+	SessionLease(context.Context, SessionRef) (SessionLease, error)
 }

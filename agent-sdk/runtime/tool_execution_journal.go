@@ -198,7 +198,8 @@ func (t journaledTool) appendEntry(
 		journal.Execution = &nextExecution
 	}
 	_, err := t.sessions.AppendEvent(ctx, session.AppendEventRequest{
-		SessionRef: t.sessionRef,
+		SessionRef:    t.sessionRef,
+		MutationGuard: session.RuntimeMutationGuard(ctx),
 		Event: &session.Event{
 			IdempotencyKey: "tool-execution:" + nextTool.Identity + ":" + fmt.Sprint(nextTool.Revision),
 			Type:           session.EventTypeLifecycle,
@@ -364,7 +365,7 @@ func (r *Runtime) appendRecoveredToolResult(
 			Execution: &step, ToolExecution: &record,
 		},
 	}
-	_, err := r.sessions.AppendEvent(ctx, session.AppendEventRequest{SessionRef: ref, Event: event})
+	_, err := r.sessions.AppendEvent(ctx, session.AppendEventRequest{SessionRef: ref, MutationGuard: session.RuntimeMutationGuard(ctx), Event: event})
 	return err
 }
 

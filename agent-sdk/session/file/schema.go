@@ -65,4 +65,5 @@ type persistedDocument struct {
 	State               map[string]any        `json:"state"`
 	AppliedTransactions map[string]bool       `json:"applied_transactions,omitempty"`
 	Lease               *session.SessionLease `json:"lease,omitempty"`
+	LeaseEpoch          uint64                `json:"lease_epoch,omitempty"`
 }

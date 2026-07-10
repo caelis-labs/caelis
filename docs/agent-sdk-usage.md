@@ -107,6 +107,16 @@ derives and validates the final assembled model/tool/sandbox requirements.
 - Session mutations use revision compare-and-swap. Concurrent writers pass
   `ExpectedRevision`; a stale writer receives `session.ErrRevisionConflict`
   with code `errorcode.Conflict` and must reload before retrying.
+- Every lease acquisition has a distinct `LeaseID` even when `OwnerID` is the
+  same. Stores persist a monotonic `FencingToken` per session; heartbeats change
+  only the lease revision, while release, expiry, and takeover never permit an
+  older token to become current again.
+- Runtime-owned event, batch, compound, controller, and participant mutations
+  carry `MutationAuthorityRuntime` plus the active lease fence. Memory and file
+  stores validate that fence in the same atomic write section and return
+  `session.ErrLeaseConflict` for an expired or replaced owner. Non-Run Control
+  writes must opt in explicitly with `session.ControlMutationGuard`; an
+  unscoped write cannot silently bypass a live lease.
 - Store adapters implement that CAS contract. Checkpoint compaction also carries
   the source session revision and abandons stale work on conflict.
 - Task records and optional session leases also use revision/owner tokens.

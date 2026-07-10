@@ -109,6 +109,60 @@
       "sha256": "d3ec544432556c81c7ee7fd0812d55da6e5f1bc068ce8febb4a9bc0a568ac0e8",
       "symbol": "tool.Definition",
       "reason": "Added concrete ExecutionRequirements so Control can validate the actual sandbox selected for each assembled tool set."
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk/session",
+      "sha256": "c8a01025732b6925eba13127695cb7815f422f21e8f2f87f0948d08486ceb204",
+      "symbol": "AppendEventRequest",
+      "reason": "Added an explicit mutation guard so Runtime writes are atomically fenced after lease takeover."
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk/session",
+      "sha256": "85d1b952b57aecd169ad99a3b7beb3fe6c2a71a9d358705fc7bcd40249d410b5",
+      "symbol": "AppendEventsRequest",
+      "reason": "Added an explicit mutation guard so batched Runtime writes are atomically fenced after lease takeover."
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk/session",
+      "sha256": "7a16575492ecaf8f1c460afee3fd02b5528ecea6db63fb272d0aa32b44c44721",
+      "symbol": "BindControllerRequest",
+      "reason": "Added explicit Runtime or Control mutation authority for controller binding writes."
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk/session",
+      "sha256": "c3847614b241c1d7acb478686c277fc3768a10bd60d6ff3785647f4c424ab1c4",
+      "symbol": "BindControllerWithEventRequest",
+      "reason": "Added explicit Runtime or Control mutation authority for atomic controller handoff writes."
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk/session",
+      "sha256": "62c3339ee4f39b3c1dcf1d191783d80d25cb1cae5479fb4efdb44800ce1d23db",
+      "symbol": "PutParticipantRequest",
+      "reason": "Added explicit lease fencing for participant binding writes."
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk/session",
+      "sha256": "e635161ae45b450199070d3bc1631096b1747667d3dabbb57507d52d148ce909",
+      "symbol": "PutParticipantWithEventRequest",
+      "reason": "Added explicit lease fencing for atomic participant attach writes."
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk/session",
+      "sha256": "0d5ca8eb17bda969fb2e0e035a24d04e5f903714883c3d426cb8ebd715c22c79",
+      "symbol": "RemoveParticipantRequest",
+      "reason": "Added explicit lease fencing for participant detach writes."
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk/session",
+      "sha256": "cc054911cf908f06682624175ffbf6d42edf2d1bb2c12d27759c1abe5d28d435",
+      "symbol": "RemoveParticipantWithEventRequest",
+      "reason": "Added explicit lease fencing for atomic participant detach writes."
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk/session",
+      "sha256": "c4a88287b67c7c2ae7433786512b00e063db62a5b95646810e0edb4ce7abe459",
+      "symbol": "SessionLease",
+      "reason": "Added a persistent monotonic fencing token that remains stable across heartbeats and changes on every acquisition."
     }
   ]
 }

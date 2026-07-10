@@ -66,6 +66,7 @@ func (r *LeasedRuntime) Run(ctx context.Context, req agent.RunRequest) (agent.Ru
 	if err != nil {
 		return agent.RunResult{}, err
 	}
+	ctx = session.ContextWithRuntimeLease(ctx, lease)
 	result, err := r.runtime.Run(ctx, req)
 	if err != nil {
 		return agent.RunResult{}, errors.Join(err, r.release(lease))
@@ -198,9 +199,13 @@ func (r *leasedRunner) heartbeatOnce() error {
 	})
 	cancel()
 	if session.IsCommitted(err) {
-		ctx, cancel = context.WithTimeout(context.Background(), r.interval)
-		next, err = r.leases.AcquireSessionLease(ctx, session.AcquireSessionLeaseRequest{SessionRef: lease.SessionRef, OwnerID: lease.OwnerID, TTL: r.ttl})
-		cancel()
+		if next.LeaseID == lease.LeaseID && next.Revision > lease.Revision {
+			err = nil
+		} else if reader, ok := r.leases.(session.SessionLeaseReader); ok {
+			ctx, cancel = context.WithTimeout(context.Background(), r.interval)
+			next, err = reader.SessionLease(ctx, lease.SessionRef)
+			cancel()
+		}
 	}
 	if err != nil {
 		return fmt.Errorf("controlplane: session lease heartbeat failed: %w", err)

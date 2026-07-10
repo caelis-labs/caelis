@@ -11,6 +11,17 @@ import (
 )
 
 var _ session.SessionLeaseService = (*Service)(nil)
+var _ session.SessionLeaseReader = (*Service)(nil)
+
+func (s *Store) SessionLease(_ context.Context, ref session.SessionRef) (session.SessionLease, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	record, ok := s.lookupLocked(ref)
+	if !ok {
+		return session.SessionLease{}, session.ErrSessionNotFound
+	}
+	return record.lease, nil
+}
 
 func (s *Store) AcquireSessionLease(_ context.Context, req session.AcquireSessionLeaseRequest) (session.SessionLease, error) {
 	s.mu.Lock()
@@ -25,18 +36,16 @@ func (s *Store) AcquireSessionLease(_ context.Context, req session.AcquireSessio
 		return session.SessionLease{}, leaseConflict(req.SessionRef, "owner_id and positive TTL are required")
 	}
 	if record.lease.LeaseID != "" && record.lease.ExpiresAt.After(now) {
-		if record.lease.OwnerID == owner {
-			return record.lease, nil
-		}
 		return session.SessionLease{}, leaseConflict(req.SessionRef, "another live owner holds the lease")
 	}
 	leaseID, err := newSessionLeaseID()
 	if err != nil {
 		return session.SessionLease{}, err
 	}
+	record.leaseEpoch++
 	record.lease = session.SessionLease{
 		SessionRef: session.NormalizeSessionRef(record.session.SessionRef), LeaseID: leaseID, OwnerID: owner,
-		Revision: 1, AcquiredAt: now, HeartbeatAt: now, ExpiresAt: now.Add(req.TTL),
+		Revision: 1, FencingToken: record.leaseEpoch, AcquiredAt: now, HeartbeatAt: now, ExpiresAt: now.Add(req.TTL),
 	}
 	return record.lease, nil
 }
@@ -84,6 +93,10 @@ func (s *Service) ReleaseSessionLease(ctx context.Context, req session.ReleaseSe
 	return s.store.ReleaseSessionLease(ctx, req)
 }
 
+func (s *Service) SessionLease(ctx context.Context, ref session.SessionRef) (session.SessionLease, error) {
+	return s.store.SessionLease(ctx, ref)
+}
+
 func validateLiveSessionLease(active session.SessionLease, leaseID, ownerID string, revision uint64, now time.Time, ttl time.Duration) error {
 	if ttl <= 0 {
 		return leaseConflict(active.SessionRef, "positive TTL is required")
@@ -103,6 +116,25 @@ func validateSessionLeaseIdentity(active session.SessionLease, leaseID, ownerID 
 	}
 	if active.LeaseID != strings.TrimSpace(leaseID) || active.OwnerID != strings.TrimSpace(ownerID) || active.Revision != revision {
 		return leaseConflict(active.SessionRef, "lease identity, owner, or revision mismatch")
+	}
+	return nil
+}
+
+func validateMutationGuard(active session.SessionLease, guard session.MutationGuard, now time.Time) error {
+	if guard.Authority == session.MutationAuthorityControl {
+		return nil
+	}
+	if guard.Authority != session.MutationAuthorityRuntime {
+		if active.LeaseID == "" {
+			return nil
+		}
+		return leaseConflict(active.SessionRef, "active lease requires explicit mutation authority")
+	}
+	if active.LeaseID == "" || !active.ExpiresAt.After(now) {
+		return leaseConflict(active.SessionRef, "runtime lease is absent or expired")
+	}
+	if active.LeaseID != strings.TrimSpace(guard.LeaseID) || active.OwnerID != strings.TrimSpace(guard.OwnerID) || active.FencingToken != guard.FencingToken {
+		return leaseConflict(active.SessionRef, "runtime fencing token is stale")
 	}
 	return nil
 }

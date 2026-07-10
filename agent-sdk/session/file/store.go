@@ -228,6 +228,9 @@ func (s *Store) appendEventRequest(req session.AppendEventRequest) (*session.Eve
 		if err != nil {
 			return err
 		}
+		if err := validateFileMutationGuard(activeDocumentLease(doc), req.MutationGuard, s.now()); err != nil {
+			return err
+		}
 
 		existingEvents, err := s.eventsForDocument(doc)
 		if err != nil {
@@ -342,6 +345,9 @@ func (s *Store) AppendEvents(
 		if err != nil {
 			return err
 		}
+		if err := validateFileMutationGuard(activeDocumentLease(doc), req.MutationGuard, s.now()); err != nil {
+			return err
+		}
 		existingEvents, err := s.eventsForDocument(doc)
 		if err != nil {
 			return err
@@ -378,6 +384,9 @@ func (s *Store) AppendEventsAndUpdateState(
 	if err := s.withRootWriteLock(func() error {
 		doc, err := s.readDocumentForRef(req.SessionRef)
 		if err != nil {
+			return err
+		}
+		if err := validateFileMutationGuard(activeDocumentLease(doc), req.MutationGuard, s.now()); err != nil {
 			return err
 		}
 		existingEvents, err := s.eventsForDocument(doc)
@@ -431,16 +440,23 @@ func (s *Store) BindController(
 	ref session.SessionRef,
 	binding session.ControllerBinding,
 ) (session.Session, error) {
+	return s.bindControllerRequest(session.BindControllerRequest{SessionRef: ref, Binding: binding})
+}
+
+func (s *Store) bindControllerRequest(req session.BindControllerRequest) (session.Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	var out session.Session
 	if err := s.withRootWriteLock(func() error {
-		doc, err := s.readDocumentForRef(ref)
+		doc, err := s.readDocumentForRef(req.SessionRef)
 		if err != nil {
 			return err
 		}
-		doc.Session.Controller = session.CloneControllerBinding(binding)
+		if err := validateFileMutationGuard(activeDocumentLease(doc), req.MutationGuard, s.now()); err != nil {
+			return err
+		}
+		doc.Session.Controller = session.CloneControllerBinding(req.Binding)
 		doc.Session.Revision++
 		doc.Session.UpdatedAt = s.now()
 		if err := s.writeDocument(doc); err != nil {
@@ -465,6 +481,9 @@ func (s *Store) BindControllerWithEvent(
 	if err := s.withRootWriteLock(func() error {
 		doc, err := s.readDocumentForRef(req.SessionRef)
 		if err != nil {
+			return err
+		}
+		if err := validateFileMutationGuard(activeDocumentLease(doc), req.MutationGuard, s.now()); err != nil {
 			return err
 		}
 		existing, err := s.eventsForDocument(doc)
@@ -504,16 +523,23 @@ func (s *Store) PutParticipant(
 	ref session.SessionRef,
 	binding session.ParticipantBinding,
 ) (session.Session, error) {
+	return s.putParticipantRequest(session.PutParticipantRequest{SessionRef: ref, Binding: binding})
+}
+
+func (s *Store) putParticipantRequest(req session.PutParticipantRequest) (session.Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	var out session.Session
 	if err := s.withRootWriteLock(func() error {
-		doc, err := s.readDocumentForRef(ref)
+		doc, err := s.readDocumentForRef(req.SessionRef)
 		if err != nil {
 			return err
 		}
-		if session.PutParticipantBinding(&doc.Session, binding) {
+		if err := validateFileMutationGuard(activeDocumentLease(doc), req.MutationGuard, s.now()); err != nil {
+			return err
+		}
+		if session.PutParticipantBinding(&doc.Session, req.Binding) {
 			doc.Session.Revision++
 			doc.Session.UpdatedAt = s.now()
 			if err := s.writeDocument(doc); err != nil {
@@ -540,6 +566,9 @@ func (s *Store) PutParticipantWithEvent(
 	if err := s.withRootWriteLock(func() error {
 		doc, err := s.readDocumentForRef(req.SessionRef)
 		if err != nil {
+			return err
+		}
+		if err := validateFileMutationGuard(activeDocumentLease(doc), req.MutationGuard, s.now()); err != nil {
 			return err
 		}
 		existingEvents, err := s.eventsForDocument(doc)
@@ -578,16 +607,23 @@ func (s *Store) RemoveParticipant(
 	ref session.SessionRef,
 	participantID string,
 ) (session.Session, error) {
+	return s.removeParticipantRequest(session.RemoveParticipantRequest{SessionRef: ref, ParticipantID: participantID})
+}
+
+func (s *Store) removeParticipantRequest(req session.RemoveParticipantRequest) (session.Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	var out session.Session
 	if err := s.withRootWriteLock(func() error {
-		doc, err := s.readDocumentForRef(ref)
+		doc, err := s.readDocumentForRef(req.SessionRef)
 		if err != nil {
 			return err
 		}
-		if session.RemoveParticipantBinding(&doc.Session, participantID) {
+		if err := validateFileMutationGuard(activeDocumentLease(doc), req.MutationGuard, s.now()); err != nil {
+			return err
+		}
+		if session.RemoveParticipantBinding(&doc.Session, req.ParticipantID) {
 			doc.Session.Revision++
 			doc.Session.UpdatedAt = s.now()
 			if err := s.writeDocument(doc); err != nil {
@@ -614,6 +650,9 @@ func (s *Store) RemoveParticipantWithEvent(
 	if err := s.withRootWriteLock(func() error {
 		doc, err := s.readDocumentForRef(req.SessionRef)
 		if err != nil {
+			return err
+		}
+		if err := validateFileMutationGuard(activeDocumentLease(doc), req.MutationGuard, s.now()); err != nil {
 			return err
 		}
 		existingEvents, err := s.eventsForDocument(doc)

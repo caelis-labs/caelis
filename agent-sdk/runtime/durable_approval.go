@@ -201,7 +201,7 @@ func (r *Runtime) cancelPauseToken(ctx context.Context, ref session.SessionRef, 
 }
 
 func (r *Runtime) appendPauseToken(ctx context.Context, ref session.SessionRef, token session.PauseToken) error {
-	_, err := r.sessions.AppendEvent(ctx, session.AppendEventRequest{SessionRef: ref, Event: pauseTokenEvent(token)})
+	_, err := r.sessions.AppendEvent(ctx, session.AppendEventRequest{SessionRef: ref, MutationGuard: session.RuntimeMutationGuard(ctx), Event: pauseTokenEvent(token)})
 	return err
 }
 

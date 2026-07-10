@@ -196,7 +196,7 @@ func (tm *taskRuntime) detachSubagentParticipant(ctx context.Context, task *suba
 	}
 	event := participantLifecycleEvent(active, binding, "detached", tm.runtime.now())
 	_, _, err = lifecycle.RemoveParticipantWithEvent(ctx, session.RemoveParticipantWithEventRequest{
-		SessionRef: task.sessionRef, ExpectedRevision: &active.Revision, ParticipantID: binding.ID, Event: event,
+		SessionRef: task.sessionRef, ExpectedRevision: &active.Revision, MutationGuard: session.RuntimeMutationGuard(ctx), ParticipantID: binding.ID, Event: event,
 	})
 	return err
 }

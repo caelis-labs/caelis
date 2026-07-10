@@ -66,7 +66,7 @@ func (s *Service) BindController(
 	ctx context.Context,
 	req session.BindControllerRequest,
 ) (session.Session, error) {
-	return s.store.BindController(ctx, req.SessionRef, req.Binding)
+	return s.store.bindControllerRequest(req)
 }
 
 func (s *Service) BindControllerWithEvent(
@@ -80,7 +80,7 @@ func (s *Service) PutParticipant(
 	ctx context.Context,
 	req session.PutParticipantRequest,
 ) (session.Session, error) {
-	return s.store.PutParticipant(ctx, req.SessionRef, req.Binding)
+	return s.store.putParticipantRequest(req)
 }
 
 func (s *Service) PutParticipantWithEvent(
@@ -94,7 +94,7 @@ func (s *Service) RemoveParticipant(
 	ctx context.Context,
 	req session.RemoveParticipantRequest,
 ) (session.Session, error) {
-	return s.store.RemoveParticipant(ctx, req.SessionRef, req.ParticipantID)
+	return s.store.removeParticipantRequest(req)
 }
 
 func (s *Service) RemoveParticipantWithEvent(

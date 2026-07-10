@@ -44,9 +44,10 @@ func (r *Runtime) AttachParticipant(ctx context.Context, req agent.AttachPartici
 	}
 	lifecycleEvent := participantLifecycleEvent(activeSession, binding, "attached", r.now())
 	activeSession, _, err = lifecycle.PutParticipantWithEvent(ctx, session.PutParticipantWithEventRequest{
-		SessionRef: ref,
-		Binding:    binding,
-		Event:      lifecycleEvent,
+		SessionRef:    ref,
+		MutationGuard: session.RuntimeMutationGuard(ctx),
+		Binding:       binding,
+		Event:         lifecycleEvent,
 	})
 	if err != nil {
 		_ = r.controllers.Detach(context.WithoutCancel(ctx), controller.DetachRequest{
@@ -90,6 +91,7 @@ func (r *Runtime) DetachParticipant(ctx context.Context, req agent.DetachPartici
 		lifecycleEvent := participantLifecycleEvent(activeSession, binding, "detached", r.now())
 		updatedSession, _, err := lifecycle.RemoveParticipantWithEvent(ctx, session.RemoveParticipantWithEventRequest{
 			SessionRef:    ref,
+			MutationGuard: session.RuntimeMutationGuard(ctx),
 			ParticipantID: strings.TrimSpace(req.ParticipantID),
 			Event:         lifecycleEvent,
 		})
@@ -113,6 +115,7 @@ func (r *Runtime) DetachParticipant(ctx context.Context, req agent.DetachPartici
 	}
 	_, err = r.sessions.RemoveParticipant(ctx, session.RemoveParticipantRequest{
 		SessionRef:    ref,
+		MutationGuard: session.RuntimeMutationGuard(ctx),
 		ParticipantID: strings.TrimSpace(req.ParticipantID),
 	})
 	if err != nil {
@@ -172,8 +175,9 @@ func (r *Runtime) executeACPParticipantTurn(
 	participantID := strings.TrimSpace(req.ParticipantID)
 	if userEvent := participantPromptUserEvent(activeSession, binding, turnID, strings.TrimSpace(req.Source), req.Input, req.DisplayInput, req.DisplayTitle, req.ContentParts, r.now()); userEvent != nil {
 		persisted, err := r.sessions.AppendEvent(ctx, session.AppendEventRequest{
-			SessionRef: ref,
-			Event:      userEvent,
+			SessionRef:    ref,
+			MutationGuard: session.RuntimeMutationGuard(ctx),
+			Event:         userEvent,
 		})
 		if err != nil {
 			handle.publishError(err)
@@ -265,8 +269,9 @@ func (r *Runtime) ensureACPParticipantRun(
 		return activeSession, attached, nil
 	}
 	updated, err := r.sessions.PutParticipant(ctx, session.PutParticipantRequest{
-		SessionRef: ref,
-		Binding:    attached,
+		SessionRef:    ref,
+		MutationGuard: session.RuntimeMutationGuard(ctx),
+		Binding:       attached,
 	})
 	if err != nil {
 		return session.Session{}, session.ParticipantBinding{}, err

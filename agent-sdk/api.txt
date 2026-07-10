@@ -1700,6 +1700,11 @@ package github.com/caelis-labs/caelis/agent-sdk/session
       JournalKindPauseToken    JournalKind = "pause_token"
   )
   const (
+      MutationAuthorityRuntime MutationAuthority = "runtime"
+
+      MutationAuthorityControl MutationAuthority = "control"
+  )
+  const (
       ParticipantKindACP      ParticipantKind = "acp"
       ParticipantKindSubagent ParticipantKind = "subagent"
   )
@@ -1810,6 +1815,8 @@ package github.com/caelis-labs/caelis/agent-sdk/session
   func CloneSessionSummaries(items []SessionSummary) []SessionSummary
   func CloneState(state map[string]any) map[string]any
   func CloneToolExecution(in ToolExecution) ToolExecution
+  func ContextWithRuntimeLease(ctx context.Context, lease SessionLease) context.Context
+  func ControlMutationGuard() MutationGuard
   func DefaultMigrationRegistry() *MigrationRegistry
   func EventDisplayText(event *Event) string
   func EventText(event *Event) string
@@ -1867,6 +1874,7 @@ package github.com/caelis-labs/caelis/agent-sdk/session
   func PutParticipantBinding(activeSession *Session, binding ParticipantBinding) bool
   func RecoverIncompleteToolExecutions(events []*Event) []ToolExecution
   func RemoveParticipantBinding(activeSession *Session, participantID string) bool
+  func RuntimeMutationGuard(ctx context.Context) MutationGuard
   func UsageProviderFromSessionEvent(event *Event) string
   func UsageSnapshotFromMap(payload map[string]any) *UsageSnapshot
   func UsageSnapshotFromMapForProvider(payload map[string]any, provider string) *UsageSnapshot
@@ -1895,31 +1903,36 @@ package github.com/caelis-labs/caelis/agent-sdk/session
       Name string    `json:"name,omitempty"`
   }
   type AppendEventRequest struct {
-      SessionRef       SessionRef `json:"session_ref"`
-      ExpectedRevision *uint64    `json:"expected_revision,omitempty"`
-      Event            *Event     `json:"event"`
+      SessionRef       SessionRef    `json:"session_ref"`
+      ExpectedRevision *uint64       `json:"expected_revision,omitempty"`
+      MutationGuard    MutationGuard `json:"mutation_guard,omitempty"`
+      Event            *Event        `json:"event"`
   }
   type AppendEventsAndUpdateStateRequest struct {
       SessionRef       SessionRef
       ExpectedRevision *uint64
+      MutationGuard    MutationGuard
       TransactionID    string
       Events           []*Event
       UpdateState      func(storedEvents []*Event, state map[string]any) (map[string]any, error)
   }
   type AppendEventsRequest struct {
-      SessionRef       SessionRef `json:"session_ref"`
-      ExpectedRevision *uint64    `json:"expected_revision,omitempty"`
-      Events           []*Event   `json:"events"`
+      SessionRef       SessionRef    `json:"session_ref"`
+      ExpectedRevision *uint64       `json:"expected_revision,omitempty"`
+      MutationGuard    MutationGuard `json:"mutation_guard,omitempty"`
+      Events           []*Event      `json:"events"`
   }
   type AppendSessionMutation func(*Session, PreparedAppendEvents) (bool, error)
   type AppendStateUpdate func([]*Event, map[string]any) (map[string]any, error)
   type BindControllerRequest struct {
-      SessionRef SessionRef        `json:"session_ref"`
-      Binding    ControllerBinding `json:"binding"`
+      SessionRef    SessionRef        `json:"session_ref"`
+      MutationGuard MutationGuard     `json:"mutation_guard,omitempty"`
+      Binding       ControllerBinding `json:"binding"`
   }
   type BindControllerWithEventRequest struct {
       SessionRef       SessionRef        `json:"session_ref"`
       ExpectedRevision *uint64           `json:"expected_revision,omitempty"`
+      MutationGuard    MutationGuard     `json:"mutation_guard,omitempty"`
       Binding          ControllerBinding `json:"binding"`
       Event            *Event            `json:"event"`
   }
@@ -2133,6 +2146,13 @@ package github.com/caelis-labs/caelis/agent-sdk/session
   type MigrationRegistry struct {
       // contains filtered or unexported fields
   }
+  type MutationAuthority string
+  type MutationGuard struct {
+      Authority    MutationAuthority `json:"authority,omitempty"`
+      LeaseID      string            `json:"lease_id,omitempty"`
+      OwnerID      string            `json:"owner_id,omitempty"`
+      FencingToken uint64            `json:"fencing_token,omitempty"`
+  }
   type ParticipantBinding struct {
       ID             string          `json:"id,omitempty"`
       Kind           ParticipantKind `json:"kind,omitempty"`
@@ -2290,12 +2310,14 @@ package github.com/caelis-labs/caelis/agent-sdk/session
   }
   type ProtocolUpdateType string
   type PutParticipantRequest struct {
-      SessionRef SessionRef         `json:"session_ref"`
-      Binding    ParticipantBinding `json:"binding"`
+      SessionRef    SessionRef         `json:"session_ref"`
+      MutationGuard MutationGuard      `json:"mutation_guard,omitempty"`
+      Binding       ParticipantBinding `json:"binding"`
   }
   type PutParticipantWithEventRequest struct {
       SessionRef       SessionRef         `json:"session_ref"`
       ExpectedRevision *uint64            `json:"expected_revision,omitempty"`
+      MutationGuard    MutationGuard      `json:"mutation_guard,omitempty"`
       Binding          ParticipantBinding `json:"binding"`
       Event            *Event             `json:"event"`
   }
@@ -2310,14 +2332,16 @@ package github.com/caelis-labs/caelis/agent-sdk/session
       ExpectedLeaseRevision uint64     `json:"expected_lease_revision,omitempty"`
   }
   type RemoveParticipantRequest struct {
-      SessionRef    SessionRef `json:"session_ref"`
-      ParticipantID string     `json:"participant_id,omitempty"`
+      SessionRef    SessionRef    `json:"session_ref"`
+      MutationGuard MutationGuard `json:"mutation_guard,omitempty"`
+      ParticipantID string        `json:"participant_id,omitempty"`
   }
   type RemoveParticipantWithEventRequest struct {
-      SessionRef       SessionRef `json:"session_ref"`
-      ExpectedRevision *uint64    `json:"expected_revision,omitempty"`
-      ParticipantID    string     `json:"participant_id,omitempty"`
-      Event            *Event     `json:"event"`
+      SessionRef       SessionRef    `json:"session_ref"`
+      ExpectedRevision *uint64       `json:"expected_revision,omitempty"`
+      MutationGuard    MutationGuard `json:"mutation_guard,omitempty"`
+      ParticipantID    string        `json:"participant_id,omitempty"`
+      Event            *Event        `json:"event"`
   }
   type RevisionConflictError struct {
       SessionID string
@@ -2353,13 +2377,17 @@ package github.com/caelis-labs/caelis/agent-sdk/session
       UpdatedAt    time.Time            `json:"updated_at,omitempty"`
   }
   type SessionLease struct {
-      SessionRef  SessionRef `json:"session_ref"`
-      LeaseID     string     `json:"lease_id,omitempty"`
-      OwnerID     string     `json:"owner_id,omitempty"`
-      Revision    uint64     `json:"revision,omitempty"`
-      AcquiredAt  time.Time  `json:"acquired_at,omitempty"`
-      HeartbeatAt time.Time  `json:"heartbeat_at,omitempty"`
-      ExpiresAt   time.Time  `json:"expires_at,omitempty"`
+      SessionRef   SessionRef `json:"session_ref"`
+      LeaseID      string     `json:"lease_id,omitempty"`
+      OwnerID      string     `json:"owner_id,omitempty"`
+      Revision     uint64     `json:"revision,omitempty"`
+      FencingToken uint64     `json:"fencing_token,omitempty"`
+      AcquiredAt   time.Time  `json:"acquired_at,omitempty"`
+      HeartbeatAt  time.Time  `json:"heartbeat_at,omitempty"`
+      ExpiresAt    time.Time  `json:"expires_at,omitempty"`
+  }
+  type SessionLeaseReader interface {
+      SessionLease(context.Context, SessionRef) (SessionLease, error)
   }
   type SessionLeaseService interface {
       AcquireSessionLease(context.Context, AcquireSessionLeaseRequest) (SessionLease, error)

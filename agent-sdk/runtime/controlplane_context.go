@@ -83,8 +83,9 @@ func (r *Runtime) updateControllerContextCheckpoint(ctx context.Context, ref ses
 		return err
 	}
 	_, err = r.sessions.BindController(ctx, session.BindControllerRequest{
-		SessionRef: ref,
-		Binding:    binding,
+		SessionRef:    ref,
+		MutationGuard: session.RuntimeMutationGuard(ctx),
+		Binding:       binding,
 	})
 	return err
 }
@@ -113,8 +114,9 @@ func (r *Runtime) updateParticipantContextCheckpoint(ctx context.Context, ref se
 		return err
 	}
 	_, err = r.sessions.PutParticipant(ctx, session.PutParticipantRequest{
-		SessionRef: ref,
-		Binding:    binding,
+		SessionRef:    ref,
+		MutationGuard: session.RuntimeMutationGuard(ctx),
+		Binding:       binding,
 	})
 	return err
 }

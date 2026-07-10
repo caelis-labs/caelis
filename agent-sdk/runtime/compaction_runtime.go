@@ -143,6 +143,7 @@ func (r *Runtime) persistCompactionArtifacts(
 	persisted, err := r.sessions.AppendEvent(ctx, session.AppendEventRequest{
 		SessionRef:       ref,
 		ExpectedRevision: &sourceRevision,
+		MutationGuard:    session.RuntimeMutationGuard(ctx),
 		Event:            compactEvent,
 	})
 	if err != nil {

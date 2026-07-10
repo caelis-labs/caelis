@@ -36,6 +36,9 @@ func TestLeasedRuntimeHeartbeatsUntilRunnerCompletesThenReleases(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
+	if _, err := wrapped.Run(context.Background(), agent.RunRequest{SessionRef: active.SessionRef}); !errors.Is(err, session.ErrLeaseConflict) {
+		t.Fatalf("same-owner second Run() error = %v, want lease conflict without releasing the first run", err)
+	}
 	if _, err := service.AcquireSessionLease(context.Background(), session.AcquireSessionLeaseRequest{
 		SessionRef: active.SessionRef, OwnerID: "host-b", TTL: time.Second,
 	}); !errors.Is(err, session.ErrLeaseConflict) {
@@ -44,9 +47,7 @@ func TestLeasedRuntimeHeartbeatsUntilRunnerCompletesThenReleases(t *testing.T) {
 	deadline := time.Now().Add(time.Second)
 	var heartbeat session.SessionLease
 	for time.Now().Before(deadline) {
-		heartbeat, err = service.AcquireSessionLease(context.Background(), session.AcquireSessionLeaseRequest{
-			SessionRef: active.SessionRef, OwnerID: "host-a", TTL: time.Second,
-		})
+		heartbeat, err = service.SessionLease(context.Background(), active.SessionRef)
 		if err == nil && heartbeat.Revision > 1 {
 			break
 		}

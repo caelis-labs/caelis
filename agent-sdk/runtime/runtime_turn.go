@@ -225,8 +225,9 @@ func (r *Runtime) appendRuntimeEventOrLifecycle(
 	event *session.Event,
 ) (*session.Event, error) {
 	persisted, err := r.sessions.AppendEvent(ctx, session.AppendEventRequest{
-		SessionRef: ref,
-		Event:      event,
+		SessionRef:    ref,
+		MutationGuard: session.RuntimeMutationGuard(ctx),
+		Event:         event,
 	})
 	if err == nil {
 		return persisted, nil
@@ -239,8 +240,9 @@ func (r *Runtime) appendRuntimeEventOrLifecycle(
 	}
 	lifecycle := recoverableRuntimeEvent(activeSession, turnID, event, err)
 	persisted, lifecycleErr := r.sessions.AppendEvent(ctx, session.AppendEventRequest{
-		SessionRef: ref,
-		Event:      lifecycle,
+		SessionRef:    ref,
+		MutationGuard: session.RuntimeMutationGuard(ctx),
+		Event:         lifecycle,
 	})
 	if lifecycleErr == nil {
 		return persisted, nil

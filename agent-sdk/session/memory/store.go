@@ -169,6 +169,9 @@ func (s *Store) appendEventRequest(req session.AppendEventRequest) (*session.Eve
 	if !ok {
 		return nil, session.ErrSessionNotFound
 	}
+	if err := validateMutationGuard(record.lease, req.MutationGuard, s.now()); err != nil {
+		return nil, err
+	}
 
 	tx, err := s.prepareAppendTransactionForRecord(record, []*session.Event{event}, nil, nil, req.ExpectedRevision, "")
 	if err != nil {
@@ -239,6 +242,9 @@ func (s *Store) AppendEvents(
 	if !ok {
 		return nil, session.ErrSessionNotFound
 	}
+	if err := validateMutationGuard(record.lease, req.MutationGuard, s.now()); err != nil {
+		return nil, err
+	}
 	tx, err := s.prepareAppendTransactionForRecord(record, req.Events, nil, nil, req.ExpectedRevision, "")
 	if err != nil {
 		return nil, err
@@ -261,6 +267,9 @@ func (s *Store) AppendEventsAndUpdateState(
 	record, ok := s.lookupLocked(req.SessionRef)
 	if !ok {
 		return nil, session.ErrSessionNotFound
+	}
+	if err := validateMutationGuard(record.lease, req.MutationGuard, s.now()); err != nil {
+		return nil, err
 	}
 	tx, err := s.prepareAppendTransactionForRecord(record, req.Events, nil, req.UpdateState, req.ExpectedRevision, req.TransactionID)
 	if err != nil {
@@ -288,14 +297,21 @@ func (s *Store) BindController(
 	ref session.SessionRef,
 	binding session.ControllerBinding,
 ) (session.Session, error) {
+	return s.bindControllerRequest(session.BindControllerRequest{SessionRef: ref, Binding: binding})
+}
+
+func (s *Store) bindControllerRequest(req session.BindControllerRequest) (session.Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	record, ok := s.lookupLocked(ref)
+	record, ok := s.lookupLocked(req.SessionRef)
 	if !ok {
 		return session.Session{}, session.ErrSessionNotFound
 	}
-	record.session.Controller = session.CloneControllerBinding(binding)
+	if err := validateMutationGuard(record.lease, req.MutationGuard, s.now()); err != nil {
+		return session.Session{}, err
+	}
+	record.session.Controller = session.CloneControllerBinding(req.Binding)
 	record.session.Revision++
 	record.session.UpdatedAt = s.now()
 	return record.cloneSession(), nil
@@ -310,6 +326,9 @@ func (s *Store) BindControllerWithEvent(
 	record, ok := s.lookupLocked(req.SessionRef)
 	if !ok {
 		return session.Session{}, nil, session.ErrSessionNotFound
+	}
+	if err := validateMutationGuard(record.lease, req.MutationGuard, s.now()); err != nil {
+		return session.Session{}, nil, err
 	}
 	tx, err := s.prepareAppendTransactionForRecord(
 		record,
@@ -335,14 +354,21 @@ func (s *Store) PutParticipant(
 	ref session.SessionRef,
 	binding session.ParticipantBinding,
 ) (session.Session, error) {
+	return s.putParticipantRequest(session.PutParticipantRequest{SessionRef: ref, Binding: binding})
+}
+
+func (s *Store) putParticipantRequest(req session.PutParticipantRequest) (session.Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	record, ok := s.lookupLocked(ref)
+	record, ok := s.lookupLocked(req.SessionRef)
 	if !ok {
 		return session.Session{}, session.ErrSessionNotFound
 	}
-	if session.PutParticipantBinding(&record.session, binding) {
+	if err := validateMutationGuard(record.lease, req.MutationGuard, s.now()); err != nil {
+		return session.Session{}, err
+	}
+	if session.PutParticipantBinding(&record.session, req.Binding) {
 		record.session.Revision++
 		record.session.UpdatedAt = s.now()
 	}
@@ -359,6 +385,9 @@ func (s *Store) PutParticipantWithEvent(
 	record, ok := s.lookupLocked(req.SessionRef)
 	if !ok {
 		return session.Session{}, nil, session.ErrSessionNotFound
+	}
+	if err := validateMutationGuard(record.lease, req.MutationGuard, s.now()); err != nil {
+		return session.Session{}, nil, err
 	}
 	tx, err := s.prepareAppendTransactionForRecord(
 		record,
@@ -383,14 +412,21 @@ func (s *Store) RemoveParticipant(
 	ref session.SessionRef,
 	participantID string,
 ) (session.Session, error) {
+	return s.removeParticipantRequest(session.RemoveParticipantRequest{SessionRef: ref, ParticipantID: participantID})
+}
+
+func (s *Store) removeParticipantRequest(req session.RemoveParticipantRequest) (session.Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	record, ok := s.lookupLocked(ref)
+	record, ok := s.lookupLocked(req.SessionRef)
 	if !ok {
 		return session.Session{}, session.ErrSessionNotFound
 	}
-	if session.RemoveParticipantBinding(&record.session, participantID) {
+	if err := validateMutationGuard(record.lease, req.MutationGuard, s.now()); err != nil {
+		return session.Session{}, err
+	}
+	if session.RemoveParticipantBinding(&record.session, req.ParticipantID) {
 		record.session.Revision++
 		record.session.UpdatedAt = s.now()
 	}
@@ -407,6 +443,9 @@ func (s *Store) RemoveParticipantWithEvent(
 	record, ok := s.lookupLocked(req.SessionRef)
 	if !ok {
 		return session.Session{}, nil, session.ErrSessionNotFound
+	}
+	if err := validateMutationGuard(record.lease, req.MutationGuard, s.now()); err != nil {
+		return session.Session{}, nil, err
 	}
 	tx, err := s.prepareAppendTransactionForRecord(
 		record,
@@ -565,7 +604,7 @@ func (s *Service) BindController(
 	ctx context.Context,
 	req session.BindControllerRequest,
 ) (session.Session, error) {
-	return s.store.BindController(ctx, req.SessionRef, req.Binding)
+	return s.store.bindControllerRequest(req)
 }
 
 func (s *Service) BindControllerWithEvent(
@@ -579,7 +618,7 @@ func (s *Service) PutParticipant(
 	ctx context.Context,
 	req session.PutParticipantRequest,
 ) (session.Session, error) {
-	return s.store.PutParticipant(ctx, req.SessionRef, req.Binding)
+	return s.store.putParticipantRequest(req)
 }
 
 func (s *Service) PutParticipantWithEvent(
@@ -593,7 +632,7 @@ func (s *Service) RemoveParticipant(
 	ctx context.Context,
 	req session.RemoveParticipantRequest,
 ) (session.Session, error) {
-	return s.store.RemoveParticipant(ctx, req.SessionRef, req.ParticipantID)
+	return s.store.removeParticipantRequest(req)
 }
 
 func (s *Service) RemoveParticipantWithEvent(
@@ -632,6 +671,7 @@ type record struct {
 	state               map[string]any
 	appliedTransactions map[string]bool
 	lease               session.SessionLease
+	leaseEpoch          uint64
 }
 
 func (r *record) cloneSession() session.Session {

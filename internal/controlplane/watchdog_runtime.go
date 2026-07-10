@@ -516,7 +516,7 @@ func (r *watchdogRunner) appendCheckpoint(observation WatchdogObservation, decis
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), r.owner.reviewTimeout)
 	defer cancel()
-	_, err := r.owner.sessions.AppendEvent(ctx, session.AppendEventRequest{SessionRef: r.sessionRef, Event: event})
+	_, err := r.owner.sessions.AppendEvent(ctx, session.AppendEventRequest{SessionRef: r.sessionRef, MutationGuard: session.ControlMutationGuard(), Event: event})
 	if session.IsCommitted(err) {
 		return nil
 	}

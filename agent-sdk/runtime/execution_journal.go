@@ -198,14 +198,14 @@ func (r *Runtime) appendExecutionEvents(ctx context.Context, ref session.Session
 		return nil
 	}
 	if batch, ok := r.sessions.(session.EventBatchService); ok {
-		_, err := batch.AppendEvents(ctx, session.AppendEventsRequest{SessionRef: ref, Events: events})
+		_, err := batch.AppendEvents(ctx, session.AppendEventsRequest{SessionRef: ref, MutationGuard: session.RuntimeMutationGuard(ctx), Events: events})
 		return err
 	}
 	// Legacy/narrow service wrappers may expose only single-event append. Each
 	// record remains independently recoverable; production memory/file services
 	// implement EventBatchService and commit these transitions atomically.
 	for _, event := range events {
-		if _, err := r.sessions.AppendEvent(ctx, session.AppendEventRequest{SessionRef: ref, Event: event}); err != nil {
+		if _, err := r.sessions.AppendEvent(ctx, session.AppendEventRequest{SessionRef: ref, MutationGuard: session.RuntimeMutationGuard(ctx), Event: event}); err != nil {
 			return err
 		}
 	}

@@ -11,6 +11,22 @@ import (
 )
 
 var _ session.SessionLeaseService = (*Service)(nil)
+var _ session.SessionLeaseReader = (*Service)(nil)
+
+func (s *Store) SessionLease(_ context.Context, ref session.SessionRef) (session.SessionLease, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out session.SessionLease
+	err := s.withRootReadLock(func() error {
+		doc, err := s.readDocumentForRef(ref)
+		if err != nil {
+			return err
+		}
+		out = activeDocumentLease(doc)
+		return nil
+	})
+	return out, err
+}
 
 func (s *Store) AcquireSessionLease(_ context.Context, req session.AcquireSessionLeaseRequest) (session.SessionLease, error) {
 	s.mu.Lock()
@@ -27,19 +43,16 @@ func (s *Store) AcquireSessionLease(_ context.Context, req session.AcquireSessio
 			return fileLeaseConflict(req.SessionRef, "owner_id and positive TTL are required")
 		}
 		if doc.Lease != nil && doc.Lease.LeaseID != "" && doc.Lease.ExpiresAt.After(now) {
-			if doc.Lease.OwnerID == owner {
-				out = *doc.Lease
-				return nil
-			}
 			return fileLeaseConflict(req.SessionRef, "another live owner holds the lease")
 		}
 		leaseID, err := newFileSessionLeaseID()
 		if err != nil {
 			return err
 		}
+		doc.LeaseEpoch++
 		lease := session.SessionLease{
 			SessionRef: session.NormalizeSessionRef(doc.Session.SessionRef), LeaseID: leaseID, OwnerID: owner,
-			Revision: 1, AcquiredAt: now, HeartbeatAt: now, ExpiresAt: now.Add(req.TTL),
+			Revision: 1, FencingToken: doc.LeaseEpoch, AcquiredAt: now, HeartbeatAt: now, ExpiresAt: now.Add(req.TTL),
 		}
 		doc.Lease = &lease
 		if err := s.writeDocument(doc); err != nil {
@@ -113,6 +126,10 @@ func (s *Service) ReleaseSessionLease(ctx context.Context, req session.ReleaseSe
 	return s.store.ReleaseSessionLease(ctx, req)
 }
 
+func (s *Service) SessionLease(ctx context.Context, ref session.SessionRef) (session.SessionLease, error) {
+	return s.store.SessionLease(ctx, ref)
+}
+
 func validateFileLiveSessionLease(active session.SessionLease, leaseID, ownerID string, revision uint64, now time.Time, ttl time.Duration) error {
 	if ttl <= 0 {
 		return fileLeaseConflict(active.SessionRef, "positive TTL is required")
@@ -134,6 +151,32 @@ func validateFileSessionLeaseIdentity(active session.SessionLease, leaseID, owne
 		return fileLeaseConflict(active.SessionRef, "lease identity, owner, or revision mismatch")
 	}
 	return nil
+}
+
+func validateFileMutationGuard(active session.SessionLease, guard session.MutationGuard, now time.Time) error {
+	if guard.Authority == session.MutationAuthorityControl {
+		return nil
+	}
+	if guard.Authority != session.MutationAuthorityRuntime {
+		if active.LeaseID == "" {
+			return nil
+		}
+		return fileLeaseConflict(active.SessionRef, "active lease requires explicit mutation authority")
+	}
+	if active.LeaseID == "" || !active.ExpiresAt.After(now) {
+		return fileLeaseConflict(active.SessionRef, "runtime lease is absent or expired")
+	}
+	if active.LeaseID != strings.TrimSpace(guard.LeaseID) || active.OwnerID != strings.TrimSpace(guard.OwnerID) || active.FencingToken != guard.FencingToken {
+		return fileLeaseConflict(active.SessionRef, "runtime fencing token is stale")
+	}
+	return nil
+}
+
+func activeDocumentLease(doc persistedDocument) session.SessionLease {
+	if doc.Lease == nil {
+		return session.SessionLease{SessionRef: session.NormalizeSessionRef(doc.Session.SessionRef)}
+	}
+	return *doc.Lease
 }
 
 func fileLeaseConflict(ref session.SessionRef, detail string) error {

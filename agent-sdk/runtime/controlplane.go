@@ -19,8 +19,9 @@ func (r *Runtime) ensureSessionController(ctx context.Context, activeSession ses
 		return session.CloneSession(activeSession), nil
 	}
 	return r.sessions.BindController(ctx, session.BindControllerRequest{
-		SessionRef: activeSession.SessionRef,
-		Binding:    r.kernelControllerBinding("runtime"),
+		SessionRef:    activeSession.SessionRef,
+		MutationGuard: session.RuntimeMutationGuard(ctx),
+		Binding:       r.kernelControllerBinding("runtime"),
 	})
 }
 
@@ -115,8 +116,9 @@ func (r *Runtime) executeACPControllerTurn(
 	userEvent := buildUserEvent(activeSession, turnID, req.Input, req.DisplayInput, req.ContentParts)
 	if userEvent != nil {
 		persisted, err := r.sessions.AppendEvent(ctx, session.AppendEventRequest{
-			SessionRef: ref,
-			Event:      userEvent,
+			SessionRef:    ref,
+			MutationGuard: session.RuntimeMutationGuard(ctx),
+			Event:         userEvent,
 		})
 		if err != nil {
 			r.setRunState(ref.SessionID, agent.RunState{

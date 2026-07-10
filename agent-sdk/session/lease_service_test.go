@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
@@ -51,6 +52,14 @@ func TestSessionLeaseServiceConformance(t *testing.T) {
 			if first.LeaseID == "" || first.Revision != 1 || first.OwnerID != "host-a" {
 				t.Fatalf("first lease = %#v", first)
 			}
+			if first.FencingToken == 0 {
+				t.Fatalf("first fencing token = %d, want positive", first.FencingToken)
+			}
+			if _, err := leases.AcquireSessionLease(ctx, session.AcquireSessionLeaseRequest{
+				SessionRef: active.SessionRef, OwnerID: "host-a", TTL: time.Minute,
+			}); !errors.Is(err, session.ErrLeaseConflict) {
+				t.Fatalf("same-owner second acquisition error = %v, want ErrLeaseConflict", err)
+			}
 
 			reopened := reopen().(session.SessionLeaseService)
 			if _, err := reopened.AcquireSessionLease(ctx, session.AcquireSessionLeaseRequest{
@@ -68,7 +77,7 @@ func TestSessionLeaseServiceConformance(t *testing.T) {
 				SessionRef: active.SessionRef, LeaseID: first.LeaseID, OwnerID: first.OwnerID,
 				ExpectedLeaseRevision: first.Revision, TTL: time.Minute,
 			})
-			if err != nil || heartbeat.Revision != 2 {
+			if err != nil || heartbeat.Revision != 2 || heartbeat.FencingToken != first.FencingToken {
 				t.Fatalf("HeartbeatSessionLease() = %#v, %v", heartbeat, err)
 			}
 			if err := leases.ReleaseSessionLease(ctx, session.ReleaseSessionLeaseRequest{
@@ -80,17 +89,58 @@ func TestSessionLeaseServiceConformance(t *testing.T) {
 			second, err := reopened.AcquireSessionLease(ctx, session.AcquireSessionLeaseRequest{
 				SessionRef: active.SessionRef, OwnerID: "host-b", TTL: time.Minute,
 			})
-			if err != nil || second.OwnerID != "host-b" {
+			if err != nil || second.OwnerID != "host-b" || second.FencingToken <= first.FencingToken {
 				t.Fatalf("second acquire = %#v, %v", second, err)
 			}
 			clock.Advance(2 * time.Minute)
 			takenOver, err := leases.AcquireSessionLease(ctx, session.AcquireSessionLeaseRequest{
 				SessionRef: active.SessionRef, OwnerID: "host-c", TTL: time.Minute,
 			})
-			if err != nil || takenOver.OwnerID != "host-c" || takenOver.LeaseID == second.LeaseID {
+			if err != nil || takenOver.OwnerID != "host-c" || takenOver.LeaseID == second.LeaseID || takenOver.FencingToken <= second.FencingToken {
 				t.Fatalf("expired takeover = %#v, %v", takenOver, err)
 			}
+
+			staleGuard := session.MutationGuard{Authority: session.MutationAuthorityRuntime, LeaseID: second.LeaseID, OwnerID: second.OwnerID, FencingToken: second.FencingToken}
+			assertLeaseFencedMutations(t, service, active.SessionRef, staleGuard)
 		})
+	}
+}
+
+func assertLeaseFencedMutations(t *testing.T, service session.Service, ref session.SessionRef, stale session.MutationGuard) {
+	t.Helper()
+	user := model.NewTextMessage(model.RoleUser, "stale append")
+	if _, err := service.AppendEvent(context.Background(), session.AppendEventRequest{
+		SessionRef: ref, MutationGuard: stale, Event: &session.Event{Type: session.EventTypeUser, Message: &user},
+	}); !errors.Is(err, session.ErrLeaseConflict) {
+		t.Fatalf("stale AppendEvent error = %v, want ErrLeaseConflict", err)
+	}
+	batch := service.(session.EventBatchService)
+	if _, err := batch.AppendEvents(context.Background(), session.AppendEventsRequest{
+		SessionRef: ref, MutationGuard: stale, Events: []*session.Event{{Type: session.EventTypeUser, Message: &user}},
+	}); !errors.Is(err, session.ErrLeaseConflict) {
+		t.Fatalf("stale AppendEvents error = %v, want ErrLeaseConflict", err)
+	}
+	compound := service.(session.EventBatchStateService)
+	if _, err := compound.AppendEventsAndUpdateState(context.Background(), session.AppendEventsAndUpdateStateRequest{
+		SessionRef: ref, MutationGuard: stale, TransactionID: "stale-compound",
+		Events: []*session.Event{{Type: session.EventTypeUser, Message: &user}},
+		UpdateState: func(_ []*session.Event, state map[string]any) (map[string]any, error) {
+			state["stale"] = true
+			return state, nil
+		},
+	}); !errors.Is(err, session.ErrLeaseConflict) {
+		t.Fatalf("stale compound mutation error = %v, want ErrLeaseConflict", err)
+	}
+	if _, err := service.AppendEvent(context.Background(), session.AppendEventRequest{
+		SessionRef: ref, Event: &session.Event{Type: session.EventTypeUser, Message: &user},
+	}); !errors.Is(err, session.ErrLeaseConflict) {
+		t.Fatalf("unscoped AppendEvent error = %v, want ErrLeaseConflict", err)
+	}
+	controlMessage := model.NewTextMessage(model.RoleUser, "control append")
+	if _, err := service.AppendEvent(context.Background(), session.AppendEventRequest{
+		SessionRef: ref, MutationGuard: session.ControlMutationGuard(), Event: &session.Event{Type: session.EventTypeUser, Message: &controlMessage},
+	}); err != nil {
+		t.Fatalf("control AppendEvent error = %v", err)
 	}
 }
 

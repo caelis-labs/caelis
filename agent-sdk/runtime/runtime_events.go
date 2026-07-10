@@ -181,6 +181,7 @@ func (r *Runtime) handlePlanEvent(
 	}
 	persisted, err := batch.AppendEventsAndUpdateState(ctx, session.AppendEventsAndUpdateStateRequest{
 		SessionRef:    ref,
+		MutationGuard: session.RuntimeMutationGuard(ctx),
 		TransactionID: normalized.IdempotencyKey,
 		Events:        []*session.Event{normalized},
 		UpdateState: func(_ []*session.Event, state map[string]any) (map[string]any, error) {
