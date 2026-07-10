@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/assembly"
+	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 )
 
 func TestDoctorReportFlagsMissingAPIKeyAfterRedactedPersistence(t *testing.T) {

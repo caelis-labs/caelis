@@ -4,13 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/assembly"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/session/memory"
@@ -1030,52 +1028,6 @@ func TestSubagentStreamReadInterruptsStaleRunningChild(t *testing.T) {
 	}
 }
 
-func TestUpdateACPAgentsPreservesRunnerAndControllerInstances(t *testing.T) {
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
-	updater := &recordingAgentConfigUpdater{}
-	controllers := &stubACPController{}
-	subagents := &recordingSubagentRunner{}
-	runtime, err := New(testConfigWithACPForwarder(Config{
-		Sessions:     sessions,
-		AgentFactory: chat.Factory{},
-		Assembly: assembly.ResolvedAssembly{Agents: []assembly.AgentConfig{{
-			Name:    "helper",
-			Command: "helper-acp",
-		}}},
-		Controllers:        controllers,
-		Subagents:          subagents,
-		AgentConfigUpdater: updater,
-	}))
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	oldSubagents := runtime.subagents
-	oldControllers := runtime.controllers
-
-	nextAgents := []assembly.AgentConfig{
-		{Name: "helper", Command: "helper-acp"},
-		{Name: "copilot", Command: "copilot", Args: []string{"--acp"}},
-	}
-	if err := runtime.UpdateACPAgents(nextAgents); err != nil {
-		t.Fatalf("UpdateACPAgents() error = %v", err)
-	}
-	if !updater.called {
-		t.Fatal("UpdateACPAgents did not delegate to agent config updater")
-	}
-	if got := updater.lastAgents; !reflect.DeepEqual(got, nextAgents) {
-		t.Fatalf("updater agents = %#v, want %#v", got, nextAgents)
-	}
-	if runtime.subagents != oldSubagents {
-		t.Fatal("UpdateACPAgents replaced subagent runner; existing child runs would be lost")
-	}
-	if runtime.controllers != oldControllers {
-		t.Fatal("UpdateACPAgents replaced controller manager")
-	}
-	if !localAgentConfigSetHas(runtime.assembly.Agents, "copilot") {
-		t.Fatalf("runtime assembly agents = %#v, want copilot", runtime.assembly.Agents)
-	}
-}
-
 func TestRuntimeSpawnToolRejectsYieldTimeMS(t *testing.T) {
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
@@ -1316,29 +1268,6 @@ func newSubagentTaskTestRuntime(t *testing.T, runner subagent.Runner) (*Runtime,
 		t.Fatalf("New() error = %v", err)
 	}
 	return runtime, activeSession
-}
-
-func localAgentConfigSetHas(agents []assembly.AgentConfig, name string) bool {
-	for _, agent := range agents {
-		if strings.EqualFold(strings.TrimSpace(agent.Name), strings.TrimSpace(name)) {
-			return true
-		}
-	}
-	return false
-}
-
-type recordingAgentConfigUpdater struct {
-	called     bool
-	lastAgents []assembly.AgentConfig
-}
-
-func (u *recordingAgentConfigUpdater) UpdateAgents(agents []assembly.AgentConfig) error {
-	if u == nil {
-		return errors.New("recording agent config updater is unavailable")
-	}
-	u.called = true
-	u.lastAgents = append([]assembly.AgentConfig(nil), agents...)
-	return nil
 }
 
 type recordingSubagentRunner struct {

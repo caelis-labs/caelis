@@ -3,11 +3,11 @@ package assembly
 import (
 	"fmt"
 
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/assembly"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	acpcontroller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
 	acpsubagent "github.com/caelis-labs/caelis/internal/acpagentbridge/subagent"
+	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 )
 
 // ControlPlane bundles the default external ACP controller/subagent control

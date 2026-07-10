@@ -5,9 +5,9 @@ import (
 	"fmt"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
-	assemblyapi "github.com/caelis-labs/caelis/agent-sdk/runtime/assembly"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	bridgeassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
+	assemblyapi "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/version"
 	"github.com/caelis-labs/caelis/ports/gateway"
 	"github.com/caelis-labs/caelis/protocol/acp"

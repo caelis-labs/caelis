@@ -10,8 +10,8 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	policyapi "github.com/caelis-labs/caelis/agent-sdk/policy"
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/assembly"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 )
 
 func TestAssemblyResolverAppliesAssemblyStateAndModelDefaults(t *testing.T) {

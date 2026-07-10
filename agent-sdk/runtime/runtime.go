@@ -13,7 +13,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/assembly"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -33,10 +32,8 @@ type Config struct {
 	PolicyRegistry           policy.Registry
 	DefaultPolicyMode        string
 	DefaultApprovalMode      string
-	Assembly                 assembly.ResolvedAssembly
 	Controllers              controller.Backend
 	ControllerEventForwarder agent.ControllerEventForwarder
-	AgentConfigUpdater       assembly.AgentConfigUpdater
 	TaskStore                task.Store
 	Subagents                subagent.Runner
 }
@@ -52,10 +49,8 @@ type Runtime struct {
 	policies                 policy.Registry
 	defaultPolicyMode        string
 	defaultApprovalMode      approval.Mode
-	assembly                 assembly.ResolvedAssembly
 	controllers              controller.Backend
 	controllerEventForwarder agent.ControllerEventForwarder
-	agentConfigUpdater       assembly.AgentConfigUpdater
 	subagents                subagent.Runner
 	idCounter                atomic.Uint64
 	executionMu              sync.Mutex
@@ -84,10 +79,8 @@ func New(cfg Config) (*Runtime, error) {
 		policies:                 cfg.PolicyRegistry,
 		defaultPolicyMode:        strings.TrimSpace(cfg.DefaultPolicyMode),
 		defaultApprovalMode:      approval.NormalizeMode(cfg.DefaultApprovalMode),
-		assembly:                 assembly.CloneResolvedAssembly(cfg.Assembly),
 		controllers:              cfg.Controllers,
 		controllerEventForwarder: cfg.ControllerEventForwarder,
-		agentConfigUpdater:       cfg.AgentConfigUpdater,
 		subagents:                cfg.Subagents,
 		runStates:                map[string]agent.RunState{},
 		activeRunners:            map[string]activeRun{},
@@ -107,13 +100,9 @@ func New(cfg Config) (*Runtime, error) {
 		r.defaultPolicyMode = presets.ModeDefault
 	}
 	r.defaultPolicyMode = normalizePolicyMode(r.defaultPolicyMode)
-	if err := validateControlPlaneConfig(cfg); err != nil {
-		return nil, err
-	}
 	if err := validateControllerForwarder(cfg); err != nil {
 		return nil, err
 	}
-	r.applyAssembly(cfg)
 	r.compactor = cfg.Compactor
 	if r.compactor == nil {
 		r.compactor = newCodexStyleCompactor(r.compaction)
@@ -130,45 +119,6 @@ func (r *Runtime) currentApprovalMode(state map[string]any) approval.Mode {
 	return approval.CurrentModeOrDefault(state, r.defaultApprovalMode)
 }
 
-func (r *Runtime) applyAssembly(cfg Config) {
-	r.controllers = cfg.Controllers
-	r.subagents = cfg.Subagents
-}
-
-func (r *Runtime) UpdateACPAgents(agents []assembly.AgentConfig) error {
-	if r == nil {
-		return fmt.Errorf("agent-sdk/runtime: runtime is unavailable")
-	}
-	if r.agentConfigUpdater == nil {
-		return fmt.Errorf("agent-sdk/runtime: agent config updater is not configured")
-	}
-	if err := r.agentConfigUpdater.UpdateAgents(agents); err != nil {
-		return err
-	}
-	r.mu.Lock()
-	r.assembly.Agents = assembly.CloneResolvedAssembly(assembly.ResolvedAssembly{
-		Agents: append([]assembly.AgentConfig(nil), agents...),
-	}).Agents
-	r.mu.Unlock()
-	return nil
-}
-
-func validateControlPlaneConfig(cfg Config) error {
-	if len(cfg.Assembly.Agents) == 0 {
-		return nil
-	}
-	if cfg.Controllers == nil {
-		return errors.New("agent-sdk/runtime: Controllers is required when Assembly.Agents is configured")
-	}
-	if cfg.Subagents == nil {
-		return errors.New("agent-sdk/runtime: Subagents is required when Assembly.Agents is configured")
-	}
-	if cfg.AgentConfigUpdater == nil {
-		return errors.New("agent-sdk/runtime: agent config updater is required when Assembly.Agents is configured")
-	}
-	return nil
-}
-
 func validateControllerForwarder(cfg Config) error {
 	if !requiresControllerForwarder(cfg) {
 		return nil
@@ -180,10 +130,7 @@ func validateControllerForwarder(cfg Config) error {
 }
 
 func requiresControllerForwarder(cfg Config) bool {
-	if cfg.Controllers != nil {
-		return true
-	}
-	return len(cfg.Assembly.Agents) > 0
+	return cfg.Controllers != nil
 }
 
 // Terminals returns the unified terminal read/subscribe surface for this

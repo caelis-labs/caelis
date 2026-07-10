@@ -7,6 +7,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
 // RunState returns the last known run state for one session.
@@ -36,7 +37,7 @@ func (r *Runtime) resolveAgent(
 	if req.Agent != nil {
 		return req.Agent, nil
 	}
-	spec := r.applyAssemblySpec(state, req.AgentSpec)
+	spec := cloneAgentSpec(req.AgentSpec)
 	spec.Request = req.Request.WithDefaults(spec.Request)
 	modeName, _ := r.policyForName(ctx, r.policyMode(spec))
 	spec.Model = r.wrapModelForAutoCompaction(ref, spec.Model)
@@ -58,6 +59,13 @@ func (r *Runtime) resolveAgent(
 		turnID:     strings.TrimSpace(turnID),
 	})
 	return r.agentFactory.NewAgent(ctx, spec)
+}
+
+func cloneAgentSpec(in agent.AgentSpec) agent.AgentSpec {
+	out := in
+	out.Tools = append([]tool.Tool(nil), in.Tools...)
+	out.Metadata = session.CloneState(in.Metadata)
+	return out
 }
 
 func (r *Runtime) setRunState(sessionID string, state agent.RunState) {

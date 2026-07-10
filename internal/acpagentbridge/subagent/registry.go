@@ -7,8 +7,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/assembly"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
+	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 )
 
 // AgentConfig aliases the app-owned ACP agent declaration shape used by

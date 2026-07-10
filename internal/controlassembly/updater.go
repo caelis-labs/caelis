@@ -1,4 +1,4 @@
-package assembly
+package controlassembly
 
 // AgentConfigUpdater replaces the runtime-visible ACP agent list without
 // reconstructing controller or subagent runner instances. Product-host

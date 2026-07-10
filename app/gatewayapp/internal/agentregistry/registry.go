@@ -5,10 +5,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/assembly"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/modelregistry"
 	"github.com/caelis-labs/caelis/internal/acpagentenv"
+	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	commands "github.com/caelis-labs/caelis/ports/controlcommand"
 )
 

@@ -7,7 +7,6 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime"
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/assembly"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -18,6 +17,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	acpassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
 	"github.com/caelis-labs/caelis/internal/acpbridge"
+	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/internal/sandboxrouter"
 	"github.com/caelis-labs/caelis/ports/plugin"
@@ -229,7 +229,6 @@ func (s *Stack) buildGatewayRuntime(plan gatewayBuildPlan) (*gatewayRuntimeBundl
 		DefaultPolicyMode:        effectivePolicyProfile,
 		DefaultApprovalMode:      string(kernelimpl.NormalizeApprovalMode(runtimeCfg.ApprovalMode)),
 		Compaction:               compactionCfg,
-		Assembly:                 runtimeCfg.Assembly,
 		ControllerEventForwarder: acpbridge.NewControllerForwarder(s.Sessions),
 		TaskStore:                s.taskStore,
 	}

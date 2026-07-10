@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/assembly"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
+	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 )
 
 func newCommandExecDriver(t *testing.T, modelCfg gatewayapp.ModelConfig) (*Adapter, *gatewayapp.Stack) {

@@ -216,22 +216,16 @@ func TestBoundaryRuleRejectsPublicContractsImportingInternal(t *testing.T) {
 			want:       "production code must not depend on ports/compact; use agent-sdk/runtime/compact",
 		},
 		{
-			name:       "agent-sdk runtime may import agent-sdk runtime assembly",
-			rel:        "agent-sdk/runtime/runtime.go",
-			importPath: modulePath + "/agent-sdk/runtime/assembly",
-			want:       "",
-		},
-		{
 			name:       "agent-sdk runtime tests must not import ports assembly",
 			rel:        "agent-sdk/runtime/runtime_test.go",
 			importPath: modulePath + "/ports/assembly",
-			want:       "production code must not depend on ports/assembly; use agent-sdk/runtime/assembly",
+			want:       "production code must not depend on ports/assembly; use internal/controlassembly",
 		},
 		{
 			name:       "production code must not import ports assembly",
 			rel:        "app/gatewayapp/stack.go",
 			importPath: modulePath + "/ports/assembly",
-			want:       "production code must not depend on ports/assembly; use agent-sdk/runtime/assembly",
+			want:       "production code must not depend on ports/assembly; use internal/controlassembly",
 		},
 		{
 			name:       "production code must not import ports agent",

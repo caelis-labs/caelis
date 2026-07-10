@@ -3,7 +3,7 @@ package assembly
 import (
 	"testing"
 
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/assembly"
+	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 )
 
 func TestNewControlPlaneUpdateAgentsPreservesInstances(t *testing.T) {

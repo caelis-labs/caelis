@@ -16,7 +16,6 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime"
-	assemblyapi "github.com/caelis-labs/caelis/agent-sdk/runtime/assembly"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/host"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -27,6 +26,7 @@ import (
 	runtimeacp "github.com/caelis-labs/caelis/internal/acpagentbridge"
 	bridgeassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
 	"github.com/caelis-labs/caelis/internal/acpbridge"
+	assemblyapi "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/protocol/acp"
 )
 
@@ -53,7 +53,6 @@ func main() {
 	localCfg := runtime.Config{
 		Sessions:                 sessions,
 		TaskStore:                sessionfile.NewTaskStore(sessionStore),
-		Assembly:                 assembly,
 		ControllerEventForwarder: acpbridge.NewControllerForwarder(sessions),
 		AgentFactory: chat.Factory{
 			SystemPrompt: strings.TrimSpace(os.Getenv("SDK_ACP_SYSTEM_PROMPT")),
@@ -68,7 +67,6 @@ func main() {
 		}
 		localCfg.Controllers = controlPlane.Controllers
 		localCfg.Subagents = controlPlane.Subagents
-		localCfg.AgentConfigUpdater = controlPlane.Updater
 	}
 	rt, err := runtime.New(localCfg)
 	if err != nil {

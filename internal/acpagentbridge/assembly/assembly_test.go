@@ -4,10 +4,10 @@ import (
 	"context"
 	"testing"
 
-	assemblyapi "github.com/caelis-labs/caelis/agent-sdk/runtime/assembly"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	bridgeassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
+	assemblyapi "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/protocol/acp"
 )
 

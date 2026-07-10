@@ -2,8 +2,8 @@ package gatewayapp
 
 import (
 	"github.com/caelis-labs/caelis/agent-sdk/runtime"
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/assembly"
 	acpassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
+	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 )
 
 func injectACPControlPlane(cfg runtime.Config, resolved assembly.ResolvedAssembly) (runtime.Config, *acpassembly.ControlPlane, error) {
@@ -18,6 +18,5 @@ func injectACPControlPlane(cfg runtime.Config, resolved assembly.ResolvedAssembl
 	}
 	cfg.Controllers = controlPlane.Controllers
 	cfg.Subagents = controlPlane.Subagents
-	cfg.AgentConfigUpdater = controlPlane.Updater
 	return cfg, controlPlane, nil
 }

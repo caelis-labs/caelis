@@ -7,7 +7,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/assembly"
+	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 )
 
 const (

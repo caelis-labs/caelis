@@ -706,11 +706,6 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 				return rule
 			}
 		}
-		if strings.HasPrefix(rel, "agent-sdk/runtime/assembly/") {
-			if rule := agentSDKRuntimeAssemblyForbiddenDependency(target); rule != "" {
-				return rule
-			}
-		}
 		if strings.HasPrefix(rel, "agent-sdk/runtime/controller/") {
 			if rule := agentSDKRuntimeControllerForbiddenDependency(target); rule != "" {
 				return rule
@@ -1307,31 +1302,6 @@ func agentSDKRuntimeControllerForbiddenDependency(target string) string {
 	return ""
 }
 
-func agentSDKRuntimeAssemblyForbiddenDependency(target string) string {
-	for _, prefix := range []string{"ports/", "impl/", "app/", "surfaces/", "protocol/acp/", "internal/"} {
-		if strings.HasPrefix(target, prefix) {
-			switch prefix {
-			case "ports/":
-				return "agent-sdk/runtime/assembly must not depend on ports packages"
-			case "impl/":
-				return "agent-sdk/runtime/assembly must not depend on impl packages"
-			case "app/":
-				return "agent-sdk/runtime/assembly must not depend on app packages"
-			case "surfaces/":
-				return "agent-sdk/runtime/assembly must not depend on surfaces packages"
-			case "protocol/acp/":
-				return "agent-sdk/runtime/assembly must not depend on protocol/acp packages"
-			case "internal/":
-				return "agent-sdk/runtime/assembly must not depend on repository internal packages"
-			}
-		}
-	}
-	if target == "agent-sdk/model" || strings.HasPrefix(target, "agent-sdk/model/") {
-		return ""
-	}
-	return ""
-}
-
 func agentSDKRuntimeCompactForbiddenDependency(target string) string {
 	for _, prefix := range []string{"ports/", "impl/", "app/", "surfaces/", "protocol/acp/", "internal/"} {
 		if strings.HasPrefix(target, prefix) {
@@ -1406,8 +1376,7 @@ func agentSDKDisplayForbiddenDependency(target string) string {
 }
 
 func isAgentSDKRuntimeImplementation(rel string) bool {
-	if strings.HasPrefix(rel, "agent-sdk/runtime/assembly/") ||
-		strings.HasPrefix(rel, "agent-sdk/runtime/compact/") ||
+	if strings.HasPrefix(rel, "agent-sdk/runtime/compact/") ||
 		strings.HasPrefix(rel, "agent-sdk/runtime/controller/") {
 		return false
 	}
@@ -1463,7 +1432,7 @@ func sdkOwnedPortsImportMessage(target string) string {
 		{"ports/subagent/agenthandle", "agent-sdk/task/agenthandle"},
 		{"ports/displaypolicy", "agent-sdk/display"},
 		{"ports/userdisplay", "agent-sdk/session/userdisplay"},
-		{"ports/assembly", "agent-sdk/runtime/assembly"},
+		{"ports/assembly", "internal/controlassembly"},
 		{"ports/controller", "agent-sdk/runtime/controller"},
 		{"ports/delegation", "agent-sdk/task/delegation"},
 		{"ports/subagent", "agent-sdk/task/subagent"},
