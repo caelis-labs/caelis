@@ -8,6 +8,8 @@ import (
 	"io"
 	"strings"
 	"time"
+
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 )
 
 var errStopSSE = errors.New("providers: stop sse")
@@ -36,6 +38,8 @@ func (e streamFirstEventTimeoutError) Unwrap() error {
 func (e streamFirstEventTimeoutError) Retryable() bool {
 	return true
 }
+
+func (e streamFirstEventTimeoutError) ErrorCode() errorcode.Code { return errorcode.Timeout }
 
 func normalizeStreamFirstEventTimeout(timeout time.Duration) time.Duration {
 	if timeout < 0 {
@@ -69,6 +73,8 @@ func (e streamIdleTimeoutError) Unwrap() error {
 func (e streamIdleTimeoutError) Retryable() bool {
 	return true
 }
+
+func (e streamIdleTimeoutError) ErrorCode() errorcode.Code { return errorcode.Timeout }
 
 func newStreamIdleTimeoutError(timeout time.Duration) error {
 	return streamIdleTimeoutError{timeout: timeout}

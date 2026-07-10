@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/jsonvalue"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -28,6 +29,8 @@ func (e *EventValidationError) Error() string {
 func (e *EventValidationError) Unwrap() error {
 	return ErrInvalidEvent
 }
+
+func (e *EventValidationError) ErrorCode() errorcode.Code { return errorcode.InvalidArgument }
 
 // EventValidationDetail returns the precise validation detail carried by err.
 func EventValidationDetail(err error) string {

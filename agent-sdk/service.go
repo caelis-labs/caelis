@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
@@ -25,6 +26,8 @@ func (e *RunConflictError) Error() string {
 	}
 	return fmt.Sprintf("agent-sdk: session %q already has active run %q", strings.TrimSpace(e.SessionRef.SessionID), strings.TrimSpace(e.ActiveRunID))
 }
+
+func (e *RunConflictError) ErrorCode() errorcode.Code { return errorcode.Conflict }
 
 // ApprovalOption is one user-selectable approval choice.
 type ApprovalOption struct {
@@ -114,6 +117,8 @@ func (e *RunLimitError) Error() string {
 	return fmt.Sprintf("agent-sdk: run %s limit exceeded: used %d, limit %d", e.Kind, e.Used, e.Limit)
 }
 
+func (e *RunLimitError) ErrorCode() errorcode.Code { return errorcode.ResourceExhausted }
+
 // RunResult is one runtime execution result.
 type RunResult struct {
 	Session session.Session `json:"session"`
@@ -147,6 +152,8 @@ func (e *RunNotResumableError) Error() string {
 	}
 	return fmt.Sprintf("agent-sdk: run %q in session %q is not resumable: %s", strings.TrimSpace(e.RunID), strings.TrimSpace(e.SessionRef.SessionID), strings.TrimSpace(e.Detail))
 }
+
+func (e *RunNotResumableError) ErrorCode() errorcode.Code { return errorcode.FailedPrecondition }
 
 // Runtime is the minimal runtime execution boundary for the new SDK.
 type Runtime interface {

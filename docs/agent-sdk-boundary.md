@@ -245,6 +245,15 @@ records migrate before validation and replay. The checked-in v0/v1 replay
 corpus must rebuild a whole `[]model.Message` exactly equal to context produced
 by a live Runtime tool turn.
 
+Machine control flow uses `agent-sdk/errorcode`, not human messages. Session,
+run-limit/conflict, model/provider, policy, capability, task, tool, and schema
+errors expose stable codes through `errorcode.Coder`; wrapped errors retain the
+code. Runtime reattach recognizes `controller.ErrNotActive`, compaction reacts
+only to `model.ContextOverflowError`, provider backpressure is classified in
+the provider adapter, and tool payloads use typed codes plus standard Go
+filesystem/context identities. Message inspection is confined to adapters that
+must normalize external HTTP, OS, or command diagnostics before wrapping them.
+
 External ACP input must be normalized before storage. Transient participant or
 subagent stream chunks must not enter durable parent model context unless they
 are carried by a canonical message, task, or tool result.

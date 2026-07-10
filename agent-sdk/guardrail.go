@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
@@ -54,3 +55,5 @@ func (e *GuardrailRejectionError) Error() string {
 	}
 	return fmt.Sprintf("agent-sdk: guardrail %q rejected input: %s", e.Guardrail, e.Reason)
 }
+
+func (e *GuardrailRejectionError) ErrorCode() errorcode.Code { return errorcode.PermissionDenied }

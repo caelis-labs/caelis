@@ -3291,9 +3291,9 @@ func TestStartCommandDoesNotExposePlainExitSummaryAsError(t *testing.T) {
 	completed := false
 	fakeSession := &yieldProbeSandboxSession{
 		statusRunning: &completed,
-		waitErr:       errors.New("process exited with code 1"),
+		waitErr:       sandbox.MarkCommandExit(errors.New("process exited with code 1")),
 		result:        sandbox.CommandResult{ExitCode: 1},
-		resultErr:     errors.New("process exited with code 1"),
+		resultErr:     sandbox.MarkCommandExit(errors.New("process exited with code 1")),
 	}
 	fake := &yieldProbeSandboxRuntime{session: fakeSession}
 	taskStore := newFileTaskStoreForTest(t)
@@ -3884,7 +3884,7 @@ fatal: Could not read from remote repository.`
 		Route:    sandbox.RouteSandbox,
 		Backend:  sandbox.BackendWindows,
 	}
-	fakeSession.resultErr = fmt.Errorf("exit status 128")
+	fakeSession.resultErr = sandbox.MarkCommandExit(fmt.Errorf("exit status 128"))
 
 	taskTool := runtimeTaskTool{
 		base:       tasktool.New(),

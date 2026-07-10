@@ -341,7 +341,7 @@ func terminalFinalText(output string, stdout string, stderr string, resultErr er
 	}
 	if resultErr != nil {
 		if text := strings.TrimSpace(resultErr.Error()); text != "" {
-			if !plainTerminalExitError(resultErr) {
+			if !sandbox.IsCommandExit(resultErr) {
 				return text
 			}
 		}

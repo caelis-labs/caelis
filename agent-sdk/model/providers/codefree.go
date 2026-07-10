@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
@@ -461,6 +462,13 @@ func (e *codeFreeProviderError) Retryable() bool {
 
 func (e *codeFreeProviderError) Backpressure() bool {
 	return e != nil && e.Transient
+}
+
+func (e *codeFreeProviderError) ErrorCode() errorcode.Code {
+	if e != nil && e.Transient {
+		return errorcode.Overloaded
+	}
+	return errorcode.InvalidArgument
 }
 
 func codeFreeResponseError(raw []byte, contentType string) error {

@@ -1,9 +1,12 @@
 package tool
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 )
 
 func TestRejectUnknownArgs(t *testing.T) {
@@ -55,6 +58,23 @@ func TestRejectUnknownArgs(t *testing.T) {
 				t.Fatalf("RejectUnknownArgs() error = %v, want %q", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestErrorPayloadUsesTypedCodeNotMessageGuessing(t *testing.T) {
+	t.Parallel()
+
+	typed := ErrorPayload(errorcode.New(errorcode.NotFound, "opaque"))
+	if got := typed["error_code"]; got != string(ErrorCodeNotFound) {
+		t.Fatalf("typed error_code = %#v, want not_found", got)
+	}
+	untyped := ErrorPayload(errors.New("file not found"))
+	if got := untyped["error_code"]; got != string(ErrorCodeInvalidInput) {
+		t.Fatalf("message-only error_code = %#v, want invalid_input", got)
+	}
+	cancelled := ErrorPayload(context.Canceled)
+	if got := cancelled["error_code"]; got != string(ErrorCodeCancelled) {
+		t.Fatalf("cancelled error_code = %#v, want cancelled", got)
 	}
 }
 

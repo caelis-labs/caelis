@@ -6,6 +6,8 @@ import (
 	"errors"
 	"iter"
 	"strings"
+
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 )
 
 // APIType identifies the model-provider protocol dialect for one configured
@@ -862,6 +864,8 @@ func (e *ContextOverflowError) Error() string {
 }
 
 func (e *ContextOverflowError) Unwrap() error { return e.Cause }
+
+func (e *ContextOverflowError) ErrorCode() errorcode.Code { return errorcode.ResourceExhausted }
 
 func IsContextOverflow(err error) bool {
 	var coe *ContextOverflowError

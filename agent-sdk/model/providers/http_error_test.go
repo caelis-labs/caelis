@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
@@ -45,5 +46,8 @@ func TestStatusErrorDoesNotTreatBackpressureTokenMessageAsOverflow(t *testing.T)
 	}
 	if !model.IsRetryableLLMError(err) {
 		t.Fatalf("statusError() = %v, want retryable error", err)
+	}
+	if got := model.ErrorCodeOf(err); got != errorcode.RateLimited {
+		t.Fatalf("ErrorCodeOf() = %q, want rate_limited", got)
 	}
 }

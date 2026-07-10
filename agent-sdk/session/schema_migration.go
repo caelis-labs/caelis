@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 )
 
 const (
@@ -42,6 +44,8 @@ func (e *SchemaVersionError) Error() string {
 	}
 	return fmt.Sprintf("agent-sdk/session: %s schema migration %d -> %d (current %d): %s", e.Kind, e.From, e.To, e.Current, e.Detail)
 }
+
+func (e *SchemaVersionError) ErrorCode() errorcode.Code { return errorcode.Unsupported }
 
 type migrationStep struct {
 	to      int

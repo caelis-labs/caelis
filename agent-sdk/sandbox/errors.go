@@ -1,11 +1,53 @@
 package sandbox
 
 import (
+	"errors"
+	"os/exec"
 	"strings"
 )
 
 const SandboxPermissionDeniedMessage = "Sandbox permission denied. Use a writable workspace path, narrow the operation, or retry the same necessary command with sandbox_permissions=require_escalated and a non-empty justification."
 const HostExecutionRequiresApprovalMessage = "Host execution requires approval. Retry the same necessary command with sandbox_permissions=require_escalated and a non-empty justification."
+
+// CommandExitError marks a normal non-zero process exit. It distinguishes a
+// command result from an infrastructure failure without relying on error text.
+type CommandExitError struct {
+	Err error
+}
+
+func (e *CommandExitError) Error() string {
+	if e == nil || e.Err == nil {
+		return "command exited"
+	}
+	return e.Err.Error()
+}
+
+func (e *CommandExitError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+// MarkCommandExit marks err as a normal command exit for sandbox adapters that
+// cannot return os/exec.ExitError directly.
+func MarkCommandExit(err error) error {
+	if err == nil || IsCommandExit(err) {
+		return err
+	}
+	return &CommandExitError{Err: err}
+}
+
+// IsCommandExit reports whether err represents a completed process with a
+// non-zero exit status rather than a sandbox or transport failure.
+func IsCommandExit(err error) bool {
+	var marked *CommandExitError
+	if errors.As(err, &marked) {
+		return true
+	}
+	var exitErr *exec.ExitError
+	return errors.As(err, &exitErr)
+}
 
 func NormalizeSandboxPermissionFailure(result CommandResult, err error) (CommandResult, error) {
 	// Command execution failures must preserve their original stdout/stderr/error

@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 
@@ -65,7 +66,7 @@ func participantLifecycleEvent(activeSession session.Session, binding session.Pa
 }
 
 func isMissingACPControllerRun(err error) bool {
-	return err != nil && strings.Contains(strings.ToLower(err.Error()), "no active acp controller")
+	return errors.Is(err, controller.ErrNotActive)
 }
 
 type controllerApprovalRequester struct {

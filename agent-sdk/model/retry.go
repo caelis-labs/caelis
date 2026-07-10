@@ -4,11 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"iter"
-	"net"
 	"strings"
 	"time"
+
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 )
 
 const (
@@ -374,6 +374,13 @@ func (e *RetryExhaustedError) Unwrap() error {
 	return e.Cause
 }
 
+func (e *RetryExhaustedError) ErrorCode() errorcode.Code {
+	if e != nil && e.Backpressure {
+		return errorcode.Overloaded
+	}
+	return errorcode.Unavailable
+}
+
 // DisplayMessage returns the provider-detail-free retry failure summary.
 func (e *RetryExhaustedError) DisplayMessage() string {
 	if e == nil {
@@ -483,79 +490,6 @@ func IsBackpressureLLMError(err error) bool {
 	if errors.As(err, &backpressure) {
 		return backpressure.Backpressure()
 	}
-	status, hasStatus := httpStatusCodeFromError(err)
-	if hasStatus && (status == 429 || status == 529) {
-		return true
-	}
-	text := strings.ToLower(strings.TrimSpace(err.Error()))
-	if text == "" {
-		return false
-	}
-	return strings.Contains(text, "rate limit") ||
-		strings.Contains(text, "ratelimit") ||
-		strings.Contains(text, "too many requests") ||
-		strings.Contains(text, "overloaded_error") ||
-		strings.Contains(text, "server overloaded") ||
-		strings.Contains(text, "codefree server overloaded") ||
-		strings.Contains(text, "retcode=51")
-}
-
-func httpStatusCodeFromError(err error) (int, bool) {
-	if err == nil {
-		return 0, false
-	}
-	text := strings.TrimSpace(err.Error())
-	idx := strings.Index(strings.ToLower(text), "http status ")
-	if idx < 0 {
-		return 0, false
-	}
-	rest := text[idx+len("http status "):]
-	end := 0
-	for end < len(rest) && rest[end] >= '0' && rest[end] <= '9' {
-		end++
-	}
-	if end == 0 {
-		return 0, false
-	}
-	var status int
-	if _, scanErr := fmt.Sscanf(rest[:end], "%d", &status); scanErr != nil || status <= 0 {
-		return 0, false
-	}
-	return status, true
-}
-
-func isLikelyNetworkError(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) {
-		return true
-	}
-	var netErr net.Error
-	if errors.As(err, &netErr) {
-		return true
-	}
-	text := strings.ToLower(strings.TrimSpace(err.Error()))
-	if text == "" {
-		return false
-	}
-	for _, phrase := range []string{
-		"connection reset",
-		"connection refused",
-		"connection aborted",
-		"broken pipe",
-		"unexpected eof",
-		"eof",
-		"no such host",
-		"i/o timeout",
-		"tls handshake timeout",
-		"timeout awaiting response headers",
-		"stream first event timeout",
-		"temporary failure",
-	} {
-		if strings.Contains(text, phrase) {
-			return true
-		}
-	}
-	return false
+	code := errorcode.CodeOf(err)
+	return code == errorcode.RateLimited || code == errorcode.Overloaded
 }

@@ -170,18 +170,8 @@ func commandExitCodeAvailable(state taskapi.State, exitCode int, resultErr error
 	default:
 		return false
 	}
-	if resultErr != nil && exitCode == 0 && !plainTerminalExitError(resultErr) {
+	if resultErr != nil && exitCode == 0 {
 		return false
 	}
 	return true
-}
-
-func plainTerminalExitError(err error) bool {
-	if err == nil {
-		return false
-	}
-	text := strings.TrimSpace(err.Error())
-	return strings.HasPrefix(text, "exit status ") ||
-		strings.HasPrefix(text, "signal: ") ||
-		strings.HasPrefix(text, "process exited with code ")
 }

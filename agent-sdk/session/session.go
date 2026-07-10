@@ -2,42 +2,42 @@ package session
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/jsonvalue"
 )
 
 var (
 	// ErrSessionNotFound reports that one session ref cannot be resolved.
-	ErrSessionNotFound = errors.New("agent-sdk/session: session not found")
+	ErrSessionNotFound = errorcode.New(errorcode.NotFound, "agent-sdk/session: session not found")
 
 	// ErrAmbiguousSession reports that one session ref matches multiple
 	// durable session documents and needs a narrower workspace key.
-	ErrAmbiguousSession = errors.New("agent-sdk/session: ambiguous session")
+	ErrAmbiguousSession = errorcode.New(errorcode.FailedPrecondition, "agent-sdk/session: ambiguous session")
 
 	// ErrInvalidSession reports that one session request is incomplete.
-	ErrInvalidSession = errors.New("agent-sdk/session: invalid session")
+	ErrInvalidSession = errorcode.New(errorcode.InvalidArgument, "agent-sdk/session: invalid session")
 
 	// ErrInvalidEvent reports that one event payload is incomplete.
-	ErrInvalidEvent = errors.New("agent-sdk/session: invalid event")
+	ErrInvalidEvent = errorcode.New(errorcode.InvalidArgument, "agent-sdk/session: invalid event")
 
 	// ErrInvalidValue reports a session value that cannot be represented by the
 	// shared JSON-compatible durable value contract.
-	ErrInvalidValue = errors.New("agent-sdk/session: invalid JSON-compatible value")
+	ErrInvalidValue = errorcode.New(errorcode.InvalidArgument, "agent-sdk/session: invalid JSON-compatible value")
 
 	// ErrRevisionConflict reports a failed expected-revision compare-and-swap.
-	ErrRevisionConflict = errors.New("agent-sdk/session: revision conflict")
+	ErrRevisionConflict = errorcode.New(errorcode.Conflict, "agent-sdk/session: revision conflict")
 
 	// ErrEventConflict reports reuse of a durable event ID with a different
 	// canonical payload.
-	ErrEventConflict = errors.New("agent-sdk/session: event conflict")
+	ErrEventConflict = errorcode.New(errorcode.Conflict, "agent-sdk/session: event conflict")
 
 	// ErrUnsupportedLegacyFormat reports an older on-disk session format that is
 	// no longer a supported replay source.
-	ErrUnsupportedLegacyFormat = errors.New("agent-sdk/session: unsupported legacy format")
+	ErrUnsupportedLegacyFormat = errorcode.New(errorcode.Unsupported, "agent-sdk/session: unsupported legacy format")
 )
 
 // RevisionConflictError carries the expected and actual session revisions.
@@ -55,6 +55,8 @@ func (e *RevisionConflictError) Error() string {
 }
 
 func (e *RevisionConflictError) Is(target error) bool { return target == ErrRevisionConflict }
+
+func (e *RevisionConflictError) ErrorCode() errorcode.Code { return errorcode.Conflict }
 
 // EventConflictError reports a stable event ID reused for different content.
 type EventConflictError struct {
@@ -75,6 +77,8 @@ func (e *EventConflictError) Error() string {
 }
 
 func (e *EventConflictError) Is(target error) bool { return target == ErrEventConflict }
+
+func (e *EventConflictError) ErrorCode() errorcode.Code { return errorcode.Conflict }
 
 // CheckExpectedRevision applies the shared session compare-and-swap contract.
 func CheckExpectedRevision(active Session, expected *uint64) error {
@@ -111,6 +115,8 @@ func (e *JSONValueError) Unwrap() error {
 func (e *JSONValueError) Is(target error) bool {
 	return target == ErrInvalidValue
 }
+
+func (e *JSONValueError) ErrorCode() errorcode.Code { return errorcode.InvalidArgument }
 
 // ValidateState validates one state object before a store makes it visible.
 func ValidateState(state map[string]any) error {

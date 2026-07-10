@@ -3,6 +3,8 @@ package model
 import (
 	"fmt"
 	"strings"
+
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 )
 
 // Capability identifies one provider-neutral model feature that must be
@@ -47,6 +49,8 @@ func (e *CapabilityError) Error() string {
 	}
 	return fmt.Sprintf("model: %q does not declare required capability %q", strings.TrimSpace(e.Model), e.Capability)
 }
+
+func (e *CapabilityError) ErrorCode() errorcode.Code { return errorcode.Unsupported }
 
 // CapabilitiesOf returns an LLM's explicit declaration. The boolean is false
 // when the implementation has no declaration at all.

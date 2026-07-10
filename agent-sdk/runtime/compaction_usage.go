@@ -713,27 +713,5 @@ func intFromAny(value any) (int, bool) {
 }
 
 func isCompactionOverflowError(err error) bool {
-	if err == nil {
-		return false
-	}
-	if model.IsContextOverflow(err) {
-		return true
-	}
-	text := strings.ToLower(err.Error())
-	for _, keyword := range []string{
-		"context length",
-		"context window",
-		"prompt is too long",
-		"too many tokens",
-		"maximum context",
-		"input is too long",
-		"token limit",
-		"max context",
-		"context overflow",
-	} {
-		if strings.Contains(text, keyword) {
-			return true
-		}
-	}
-	return false
+	return model.IsContextOverflow(err)
 }

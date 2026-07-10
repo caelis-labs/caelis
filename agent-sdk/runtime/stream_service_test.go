@@ -382,7 +382,7 @@ func TestTerminalFinalTextPreservesNonBlankWhitespaceAndDropsBlankOnlyOutput(t *
 	if got := terminalFinalText("", "  stdout\n", "", nil); got != "  stdout\n" {
 		t.Fatalf("terminalFinalText(stdout) = %q, want exact stdout", got)
 	}
-	if got := terminalFinalText("", "stdout", "stderr\n", errors.New("exit status 1")); got != "stdout\nstderr\n" {
+	if got := terminalFinalText("", "stdout", "stderr\n", sandbox.MarkCommandExit(errors.New("exit status 1"))); got != "stdout\nstderr\n" {
 		t.Fatalf("terminalFinalText(stdout+stderr) = %q, want separated streams without trimming", got)
 	}
 }
@@ -401,10 +401,10 @@ func TestTerminalOutputTextPreservesBlankOnlyTerminalBytes(t *testing.T) {
 func TestTerminalFinalTextSuppressesSyntheticWindowsExitSummary(t *testing.T) {
 	t.Parallel()
 
-	if got := terminalFinalText("", "", "", errors.New("process exited with code 1")); got != "(no output)" {
+	if got := terminalFinalText("", "", "", sandbox.MarkCommandExit(errors.New("process exited with code 1"))); got != "(no output)" {
 		t.Fatalf("terminalFinalText(process exited) = %q, want no-output placeholder", got)
 	}
-	if got := terminalFinalText("", "", "Write-Error: raw failure\n", errors.New("process exited with code 1")); got != "Write-Error: raw failure\n" {
+	if got := terminalFinalText("", "", "Write-Error: raw failure\n", sandbox.MarkCommandExit(errors.New("process exited with code 1"))); got != "Write-Error: raw failure\n" {
 		t.Fatalf("terminalFinalText(stderr) = %q, want raw stderr", got)
 	}
 }

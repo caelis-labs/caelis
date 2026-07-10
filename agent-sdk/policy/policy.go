@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/jsonvalue"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -84,6 +85,8 @@ func (e *DecisionError) Unwrap() error {
 	return e.Err
 }
 
+func (e *DecisionError) ErrorCode() errorcode.Code { return errorcode.FailedPrecondition }
+
 // ProfileError reports that a requested policy profile could not be resolved.
 // It is intentionally distinct from a deny decision so hosts can diagnose
 // configuration and registry availability without guessing from strings.
@@ -117,6 +120,8 @@ func (e *ProfileError) Unwrap() error {
 	return e.Err
 }
 
+func (e *ProfileError) ErrorCode() errorcode.Code { return errorcode.FailedPrecondition }
+
 type ToolInputDecodeError struct {
 	Tool string
 	Err  error
@@ -138,6 +143,8 @@ func (e *ToolInputDecodeError) Unwrap() error {
 	}
 	return e.Err
 }
+
+func (e *ToolInputDecodeError) ErrorCode() errorcode.Code { return errorcode.InvalidArgument }
 
 // Mode decides whether one tool call may run under one named permission model.
 type Mode interface {

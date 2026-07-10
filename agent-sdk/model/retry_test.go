@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 )
 
 type retryTestContextKey struct{}
@@ -93,7 +95,7 @@ func TestWithRetryRetriesSameLLMRequestBeforeEmission(t *testing.T) {
 			{final},
 		},
 		errs: []error{
-			errors.New("model: http status 529 body={\"error\":\"overloaded_error\"}"),
+			testOverloadedError(),
 			nil,
 		},
 		mutateRequest: true,
@@ -150,7 +152,7 @@ func TestWithRetryRetriesSearchWebTransientFailure(t *testing.T) {
 	inner := &retrySearchLLM{
 		retryTestLLM: &retryTestLLM{},
 		searchErrs: []error{
-			errors.New("model: http status 529 body={\"error\":\"overloaded_error\"}"),
+			testOverloadedError(),
 			nil,
 		},
 	}
@@ -214,7 +216,7 @@ func TestWithRetryNoRetryAfterImplicitProviderExecutedToolSemanticEmission(t *te
 				{StreamEventFromResponse(&Response{Message: NewTextMessage(RoleAssistant, "should-not-run"), TurnComplete: true})},
 			},
 			errs: []error{
-				errors.New("model: http status 529 body={\"error\":\"overloaded_error\"}"),
+				testOverloadedError(),
 				nil,
 			},
 		},
@@ -256,7 +258,7 @@ func TestWithRetryDoesNotRetryAfterProviderExecutedToolSemanticEmission(t *testi
 				{StreamEventFromResponse(&Response{Message: NewTextMessage(RoleAssistant, "should-not-run"), TurnComplete: true})},
 			},
 			errs: []error{
-				errors.New("model: http status 529 body={\"error\":\"overloaded_error\"}"),
+				testOverloadedError(),
 				nil,
 			},
 		},
@@ -314,7 +316,7 @@ func TestWithRetryRetriesAfterEmptyEventEmission(t *testing.T) {
 			{final},
 		},
 		errs: []error{
-			errors.New("model: http status 529 body={\"error\":\"overloaded_error\"}"),
+			testOverloadedError(),
 			nil,
 		},
 	}
@@ -466,17 +468,17 @@ func TestIsBackpressureLLMErrorTreatsProviderOverloadAsBackpressure(t *testing.T
 	}{
 		{
 			name: "too many requests",
-			err:  errors.New("model: http status 429 body={\"error\":\"too many requests\"}"),
+			err:  errorcode.New(errorcode.RateLimited, "model: http status 429 body={\"error\":\"too many requests\"}"),
 			want: true,
 		},
 		{
 			name: "provider overload status",
-			err:  errors.New("model: http status 529 body={\"error\":\"overloaded_error\"}"),
+			err:  testOverloadedError(),
 			want: true,
 		},
 		{
 			name: "codefree control packet",
-			err:  errors.New("model: codefree server overloaded (retCode=51 body={\"retCode\":51})"),
+			err:  errorcode.New(errorcode.Overloaded, "model: codefree server overloaded (retCode=51 body={\"retCode\":51})"),
 			want: true,
 		},
 		{
@@ -507,7 +509,7 @@ func TestRetryPolicyForErrorUsesBackpressureBudgetForProviderOverload(t *testing
 		RateLimitBaseDelay:  5 * time.Second,
 		RateLimitMaxDelay:   45 * time.Second,
 	}
-	policy := retryPolicyForError(cfg, errors.New("model: http status 529 body={\"error\":\"overloaded_error\"}"))
+	policy := retryPolicyForError(cfg, testOverloadedError())
 	if !policy.backpressure {
 		t.Fatal("policy.backpressure = false, want true")
 	}
@@ -520,6 +522,10 @@ func TestRetryPolicyForErrorUsesBackpressureBudgetForProviderOverload(t *testing
 	if got, want := policy.maxDelay, cfg.RateLimitMaxDelay; got != want {
 		t.Fatalf("policy.maxDelay = %s, want %s", got, want)
 	}
+}
+
+func testOverloadedError() error {
+	return errorcode.New(errorcode.Overloaded, "model: http status 529 body={\"error\":\"overloaded_error\"}")
 }
 
 func TestRetryExhaustedErrorKeepsCauseOutOfDisplayMessage(t *testing.T) {

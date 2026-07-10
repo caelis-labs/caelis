@@ -197,7 +197,7 @@ func (tm *taskRuntime) completeCommandTaskWithStatus(ctx context.Context, task *
 	if detail, ok := sandbox.SandboxPermissionDetail(result, resultErr); ok {
 		task.result["error"] = detail
 		task.result["error_code"] = string(tool.ErrorCodeSandboxDenied)
-	} else if resultErr != nil && strings.TrimSpace(finalText) == noOutputPlaceholder && !plainTerminalExitError(resultErr) {
+	} else if resultErr != nil && strings.TrimSpace(finalText) == noOutputPlaceholder && !sandbox.IsCommandExit(resultErr) {
 		task.result["error"] = strings.TrimSpace(resultErr.Error())
 		if code, _ := tool.ErrorPayload(resultErr)["error_code"].(string); code != "" {
 			task.result["error_code"] = code
@@ -242,7 +242,7 @@ func (tm *taskRuntime) failCommandTaskIfStopped(ctx context.Context, task *comma
 	if statusErr == nil && status.Running {
 		return taskapi.Snapshot{}, cause
 	}
-	if statusErr == nil && plainTerminalExitError(cause) {
+	if statusErr == nil && sandbox.IsCommandExit(cause) {
 		snapshot, err := tm.completeCommandTaskWithStatus(context.WithoutCancel(ctx), task, status)
 		if err == nil {
 			return snapshot, nil

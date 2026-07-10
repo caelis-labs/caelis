@@ -7,9 +7,14 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
+
+// ErrNotActive reports that a persisted controller binding has no live
+// endpoint and Control must reattach it before retrying the turn.
+var ErrNotActive = errorcode.New(errorcode.FailedPrecondition, "agent-sdk/runtime/controller: controller is not active")
 
 // ApprovalOption is one controller-side approval choice surfaced by a remote
 // ACP controller.

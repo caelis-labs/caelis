@@ -232,7 +232,7 @@ func (m *Manager) RunTurn(ctx context.Context, req controller.TurnRequest) (cont
 	run := m.controllers[sessionID]
 	m.mu.RUnlock()
 	if run == nil {
-		return controller.TurnResult{}, fmt.Errorf("internal/acpagentbridge/controller: no active ACP controller for session %q", sessionID)
+		return controller.TurnResult{}, fmt.Errorf("%w for session %q", controller.ErrNotActive, sessionID)
 	}
 	if contentPartsContainImage(req.ContentParts) && !run.supportsPromptImages() {
 		return controller.TurnResult{}, fmt.Errorf("internal/acpagentbridge/controller: agent %q does not support image prompts", run.agent)

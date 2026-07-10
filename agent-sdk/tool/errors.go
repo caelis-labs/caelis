@@ -1,12 +1,16 @@
 package tool
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"strings"
+
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 )
 
-type ErrorCode string
+type ErrorCode = errorcode.Code
 
 const (
 	ErrorCodeNotFound             ErrorCode = "not_found"
@@ -18,6 +22,7 @@ const (
 	ErrorCodeUnexpectedMatchCount ErrorCode = "unexpected_match_count"
 	ErrorCodeStaleRevision        ErrorCode = "stale_revision"
 	ErrorCodeTimeout              ErrorCode = "timeout"
+	ErrorCodeCancelled            ErrorCode = "cancelled"
 	ErrorCodeOutputTruncated      ErrorCode = "output_truncated"
 	ErrorCodeInvalidInput         ErrorCode = "invalid_input"
 )
@@ -57,6 +62,13 @@ func (e *ToolError) Unwrap() error {
 		return nil
 	}
 	return e.Err
+}
+
+func (e *ToolError) ErrorCode() errorcode.Code {
+	if e == nil {
+		return errorcode.Unknown
+	}
+	return e.Code
 }
 
 func NewError(code ErrorCode, message string) *ToolError {
@@ -133,19 +145,24 @@ func ErrorPayload(err error) map[string]any {
 }
 
 func classifyErrorCode(err error) ErrorCode {
-	text := strings.ToLower(strings.TrimSpace(fmt.Sprint(err)))
-	switch {
-	case text == "":
-		return ErrorCodeInvalidInput
-	case strings.Contains(text, "sandbox permission denied"):
-		return ErrorCodeSandboxDenied
-	case strings.Contains(text, "sandbox unavailable"), strings.Contains(text, "backend unavailable"), strings.Contains(text, "not registered"):
-		return ErrorCodeSandboxUnavailable
-	case strings.Contains(text, "not found"), strings.Contains(text, "no such file"), strings.Contains(text, "does not exist"):
+	switch code := errorcode.CodeOf(err); code {
+	case errorcode.NotFound:
 		return ErrorCodeNotFound
-	case strings.Contains(text, "permission denied"), strings.Contains(text, "operation not permitted"), strings.Contains(text, "read-only file system"):
+	case errorcode.PermissionDenied:
 		return ErrorCodePermissionDenied
-	case strings.Contains(text, "timed out"), strings.Contains(text, "timeout"):
+	case errorcode.Timeout:
+		return ErrorCodeTimeout
+	case errorcode.Cancelled:
+		return ErrorCodeCancelled
+	case errorcode.Unavailable:
+		return ErrorCodeSandboxUnavailable
+	}
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return ErrorCodeNotFound
+	case errors.Is(err, fs.ErrPermission):
+		return ErrorCodePermissionDenied
+	case errors.Is(err, context.DeadlineExceeded):
 		return ErrorCodeTimeout
 	default:
 		return ErrorCodeInvalidInput

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/jsonvalue"
 )
 
@@ -168,6 +169,8 @@ func (e *ExecutionTransitionError) Error() string {
 	return fmt.Sprintf("agent-sdk/session: %s execution %q transition %q -> %q: %s", e.Kind, e.Identity, e.From, e.To, strings.TrimSpace(e.Detail))
 }
 
+func (e *ExecutionTransitionError) ErrorCode() errorcode.Code { return errorcode.FailedPrecondition }
+
 type ToolExecutionTransitionError struct {
 	Identity string
 	From     ToolExecutionStatus
@@ -190,11 +193,17 @@ func (e *PauseTokenTransitionError) Error() string {
 	return fmt.Sprintf("agent-sdk/session: pause token %q transition %q -> %q: %s", e.TokenID, e.From, e.To, strings.TrimSpace(e.Detail))
 }
 
+func (e *PauseTokenTransitionError) ErrorCode() errorcode.Code { return errorcode.FailedPrecondition }
+
 func (e *ToolExecutionTransitionError) Error() string {
 	if e == nil {
 		return "<nil>"
 	}
 	return fmt.Sprintf("agent-sdk/session: tool execution %q transition %q -> %q: %s", e.Identity, e.From, e.To, strings.TrimSpace(e.Detail))
+}
+
+func (e *ToolExecutionTransitionError) ErrorCode() errorcode.Code {
+	return errorcode.FailedPrecondition
 }
 
 func NormalizeToolExecution(in ToolExecution) ToolExecution {

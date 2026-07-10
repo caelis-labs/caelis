@@ -44,9 +44,13 @@ package github.com/caelis-labs/caelis/agent-sdk
       TraceFailed    TraceStatus = "failed"
   )
   func (e *GuardrailRejectionError) Error() string
+  func (e *GuardrailRejectionError) ErrorCode() errorcode.Code
   func (e *RunConflictError) Error() string
+  func (e *RunConflictError) ErrorCode() errorcode.Code
   func (e *RunLimitError) Error() string
+  func (e *RunLimitError) ErrorCode() errorcode.Code
   func (e *RunNotResumableError) Error() string
+  func (e *RunNotResumableError) ErrorCode() errorcode.Code
   func (o ModelRequestOptions) OutputSpec() *model.OutputSpec
   func (o ModelRequestOptions) StreamEnabled(defaultValue bool) bool
   func (o ModelRequestOptions) WithDefaults(defaults ModelRequestOptions) ModelRequestOptions
@@ -484,6 +488,44 @@ package github.com/caelis-labs/caelis/agent-sdk/approval
   }
   type Status string
 
+package github.com/caelis-labs/caelis/agent-sdk/errorcode
+  const (
+      Unknown            Code = "unknown"
+      InvalidArgument    Code = "invalid_argument"
+      NotFound           Code = "not_found"
+      AlreadyExists      Code = "already_exists"
+      Conflict           Code = "conflict"
+      PermissionDenied   Code = "permission_denied"
+      Unauthenticated    Code = "unauthenticated"
+      FailedPrecondition Code = "failed_precondition"
+      ResourceExhausted  Code = "resource_exhausted"
+      RateLimited        Code = "rate_limited"
+      Overloaded         Code = "overloaded"
+      Timeout            Code = "timeout"
+      Cancelled          Code = "cancelled"
+      Unavailable        Code = "unavailable"
+      Unsupported        Code = "unsupported"
+      UnknownOutcome     Code = "unknown_outcome"
+      Internal           Code = "internal"
+  )
+  func (e *Error) Error() string
+  func (e *Error) ErrorCode() Code
+  func (e *Error) Unwrap() error
+  func CodeOf(err error) Code
+  func Is(err error, code Code) bool
+  func New(code Code, message string) *Error
+  func Require(err error, expected Code) error
+  func Wrap(code Code, message string, err error) *Error
+  type Code string
+  type Coder interface {
+      ErrorCode() Code
+  }
+  type Error struct {
+      Code    Code
+      Message string
+      Err     error
+  }
+
 package github.com/caelis-labs/caelis/agent-sdk/model
   const (
       APIOpenAI              APIType = "openai"
@@ -588,10 +630,13 @@ package github.com/caelis-labs/caelis/agent-sdk/model
       ToolSpecKindMCP              ToolSpecKind = "mcp"
   )
   func (e *CapabilityError) Error() string
+  func (e *CapabilityError) ErrorCode() errorcode.Code
   func (e *ContextOverflowError) Error() string
+  func (e *ContextOverflowError) ErrorCode() errorcode.Code
   func (e *ContextOverflowError) Unwrap() error
   func (e *RetryExhaustedError) DisplayMessage() string
   func (e *RetryExhaustedError) Error() string
+  func (e *RetryExhaustedError) ErrorCode() errorcode.Code
   func (e *RetryExhaustedError) Unwrap() error
   func (m Message) HasImages() bool
   func (m Message) HasMedia(modality MediaModality) bool
@@ -612,6 +657,7 @@ package github.com/caelis-labs/caelis/agent-sdk/model
   func CloneToolSpecs(in []ToolSpec) []ToolSpec
   func ContentPartFromPart(part Part) (ContentPart, bool)
   func ContentPartsFromParts(parts []Part) []ContentPart
+  func ErrorCodeOf(err error) errorcode.Code
   func FunctionToolDefinitions(specs []ToolSpec) []ToolDefinition
   func IsBackpressureLLMError(err error) bool
   func IsContextOverflow(err error) bool
@@ -932,10 +978,13 @@ package github.com/caelis-labs/caelis/agent-sdk/policy
       MetadataExtraWriteRoots  = "policy_extra_write_roots"
   )
   func (e *DecisionError) Error() string
+  func (e *DecisionError) ErrorCode() errorcode.Code
   func (e *DecisionError) Unwrap() error
   func (e *ProfileError) Error() string
+  func (e *ProfileError) ErrorCode() errorcode.Code
   func (e *ProfileError) Unwrap() error
   func (e *ToolInputDecodeError) Error() string
+  func (e *ToolInputDecodeError) ErrorCode() errorcode.Code
   func (e *ToolInputDecodeError) Unwrap() error
   func (m NamedMode) DecideTool(ctx context.Context, input ToolContext) (Decision, error)
   func (m NamedMode) Name() string
@@ -1291,6 +1340,7 @@ package github.com/caelis-labs/caelis/agent-sdk/runtime/controller
       Handle    TurnHandle `json:"-"`
       UpdatedAt time.Time  `json:"updated_at,omitempty"`
   }
+  var ErrNotActive = errorcode.New(errorcode.FailedPrecondition, "agent-sdk/runtime/controller: controller is not active")
 
 package github.com/caelis-labs/caelis/agent-sdk/sandbox
   const (
@@ -1344,6 +1394,9 @@ package github.com/caelis-labs/caelis/agent-sdk/sandbox
   const HostExecutionRequiresApprovalMessage = "Host execution requires approval. Retry the same necessary command with sandbox_permissions=require_escalated and a non-empty justification."
   const SandboxPermissionDeniedMessage = "Sandbox permission denied. Use a writable workspace path, narrow the operation, or retry the same necessary command with sandbox_permissions=require_escalated and a non-empty justification."
   func (e *CapabilityError) Error() string
+  func (e *CapabilityError) ErrorCode() errorcode.Code
+  func (e *CommandExitError) Error() string
+  func (e *CommandExitError) Unwrap() error
   func (f FuncRunner) Run(ctx context.Context, req CommandRequest) (CommandResult, error)
   func (s SetupStatus) Check(name string) (SetupCheck, bool)
   func (t LifecycleTarget) Close() error
@@ -1362,10 +1415,12 @@ package github.com/caelis-labs/caelis/agent-sdk/sandbox
   func ContextWithPrepareProgress(ctx context.Context, fn PrepareProgressFunc) context.Context
   func DescriptorImpliesHostExecution(in Descriptor) bool
   func EffectiveConstraints(req CommandRequest) Constraints
+  func IsCommandExit(err error) bool
   func IsSandboxACLRefreshDeniedText(text string) bool
   func IsSandboxCachePathEvidenceText(text string) bool
   func IsSandboxPermissionDeniedText(text string) bool
   func LifecycleTargetFor(cfg Config, current Runtime) (LifecycleTarget, error)
+  func MarkCommandExit(err error) error
   func New(cfg Config) (Runtime, error)
   func NormalizeConfig(cfg Config) Config
   func NormalizeConstraints(in Constraints) Constraints
@@ -1411,6 +1466,9 @@ package github.com/caelis-labs/caelis/agent-sdk/sandbox
       NetworkControl bool `json:"network_control,omitempty"`
       PathPolicy     bool `json:"path_policy,omitempty"`
       EnvPolicy      bool `json:"env_policy,omitempty"`
+  }
+  type CommandExitError struct {
+      Err error
   }
   type CommandRequest struct {
       Command     string            `json:"command,omitempty"`
@@ -1713,18 +1771,26 @@ package github.com/caelis-labs/caelis/agent-sdk/session
   const ExecutionJournalSchemaVersion = 1
   const ToolExecutionSchemaVersion = 1
   func (e *EventConflictError) Error() string
+  func (e *EventConflictError) ErrorCode() errorcode.Code
   func (e *EventConflictError) Is(target error) bool
   func (e *EventValidationError) Error() string
+  func (e *EventValidationError) ErrorCode() errorcode.Code
   func (e *EventValidationError) Unwrap() error
   func (e *ExecutionTransitionError) Error() string
+  func (e *ExecutionTransitionError) ErrorCode() errorcode.Code
   func (e *JSONValueError) Error() string
+  func (e *JSONValueError) ErrorCode() errorcode.Code
   func (e *JSONValueError) Is(target error) bool
   func (e *JSONValueError) Unwrap() error
   func (e *PauseTokenTransitionError) Error() string
+  func (e *PauseTokenTransitionError) ErrorCode() errorcode.Code
   func (e *RevisionConflictError) Error() string
+  func (e *RevisionConflictError) ErrorCode() errorcode.Code
   func (e *RevisionConflictError) Is(target error) bool
   func (e *SchemaVersionError) Error() string
+  func (e *SchemaVersionError) ErrorCode() errorcode.Code
   func (e *ToolExecutionTransitionError) Error() string
+  func (e *ToolExecutionTransitionError) ErrorCode() errorcode.Code
   func (p *EventProtocol) UnmarshalJSON(data []byte) error
   func (p EventProtocol) MarshalJSON() ([]byte, error)
   func (r *MigrationRegistry) Migrate(kind SchemaKind, source, target int, raw json.RawMessage) (json.RawMessage, error)
@@ -2379,21 +2445,21 @@ package github.com/caelis-labs/caelis/agent-sdk/session
       CWD string `json:"cwd,omitempty"`
   }
   var (
-      ErrSessionNotFound = errors.New("agent-sdk/session: session not found")
+      ErrSessionNotFound = errorcode.New(errorcode.NotFound, "agent-sdk/session: session not found")
 
-      ErrAmbiguousSession = errors.New("agent-sdk/session: ambiguous session")
+      ErrAmbiguousSession = errorcode.New(errorcode.FailedPrecondition, "agent-sdk/session: ambiguous session")
 
-      ErrInvalidSession = errors.New("agent-sdk/session: invalid session")
+      ErrInvalidSession = errorcode.New(errorcode.InvalidArgument, "agent-sdk/session: invalid session")
 
-      ErrInvalidEvent = errors.New("agent-sdk/session: invalid event")
+      ErrInvalidEvent = errorcode.New(errorcode.InvalidArgument, "agent-sdk/session: invalid event")
 
-      ErrInvalidValue = errors.New("agent-sdk/session: invalid JSON-compatible value")
+      ErrInvalidValue = errorcode.New(errorcode.InvalidArgument, "agent-sdk/session: invalid JSON-compatible value")
 
-      ErrRevisionConflict = errors.New("agent-sdk/session: revision conflict")
+      ErrRevisionConflict = errorcode.New(errorcode.Conflict, "agent-sdk/session: revision conflict")
 
-      ErrEventConflict = errors.New("agent-sdk/session: event conflict")
+      ErrEventConflict = errorcode.New(errorcode.Conflict, "agent-sdk/session: event conflict")
 
-      ErrUnsupportedLegacyFormat = errors.New("agent-sdk/session: unsupported legacy format")
+      ErrUnsupportedLegacyFormat = errorcode.New(errorcode.Unsupported, "agent-sdk/session: unsupported legacy format")
   )
 
 package github.com/caelis-labs/caelis/agent-sdk/skill
@@ -2485,7 +2551,9 @@ package github.com/caelis-labs/caelis/agent-sdk/task
       StateWaitingApproval State = "waiting_approval"
   )
   func (e *LeaseConflictError) Error() string
+  func (e *LeaseConflictError) ErrorCode() errorcode.Code
   func (e *RevisionConflictError) Error() string
+  func (e *RevisionConflictError) ErrorCode() errorcode.Code
   func CloneEntry(in *Entry) *Entry
   func CloneLease(in Lease) Lease
   func CloneRef(in Ref) Ref
@@ -2781,6 +2849,7 @@ package github.com/caelis-labs/caelis/agent-sdk/tool
       ErrorCodeUnexpectedMatchCount ErrorCode = "unexpected_match_count"
       ErrorCodeStaleRevision        ErrorCode = "stale_revision"
       ErrorCodeTimeout              ErrorCode = "timeout"
+      ErrorCodeCancelled            ErrorCode = "cancelled"
       ErrorCodeOutputTruncated      ErrorCode = "output_truncated"
       ErrorCodeInvalidInput         ErrorCode = "invalid_input"
   )
@@ -2803,6 +2872,7 @@ package github.com/caelis-labs/caelis/agent-sdk/tool
       RecoveryFailed    RecoveryStatus = "failed"
   )
   func (e *ToolError) Error() string
+  func (e *ToolError) ErrorCode() errorcode.Code
   func (e *ToolError) Unwrap() error
   func (p TruncationPolicy) ByteBudget() int
   func (p TruncationPolicy) TokenBudget() int
@@ -2867,7 +2937,7 @@ package github.com/caelis-labs/caelis/agent-sdk/tool
       Capabilities Capabilities   `json:"capabilities,omitempty"`
   }
   type EffectClass string
-  type ErrorCode string
+  type ErrorCode = errorcode.Code
   type NamedTool struct {
       Def    Definition
       Invoke func(context.Context, Call) (Result, error)

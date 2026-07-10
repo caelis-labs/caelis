@@ -188,7 +188,7 @@ func (s *session) Wait(ctx context.Context, timeout time.Duration) (sandbox.Sess
 		if errors.Is(err, context.DeadlineExceeded) {
 			return s.Status(ctx)
 		}
-		if plainCommandExitError(err) {
+		if sandbox.IsCommandExit(err) || plainCommandExitError(err) {
 			return s.Status(ctx)
 		}
 		return sandbox.SessionStatus{}, err
@@ -203,6 +203,9 @@ func (s *session) Result(ctx context.Context) (sandbox.CommandResult, error) {
 	}
 	if result.Backend == "" {
 		result.Backend = s.backend
+	}
+	if plainCommandExitError(err) {
+		err = sandbox.MarkCommandExit(err)
 	}
 	return sandbox.NormalizeSandboxPermissionFailure(result, err)
 }

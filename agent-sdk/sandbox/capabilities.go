@@ -1,6 +1,10 @@
 package sandbox
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+)
 
 // Capability identifies one executor feature.
 type Capability string
@@ -28,6 +32,8 @@ func (e *CapabilityError) Error() string {
 	}
 	return fmt.Sprintf("sandbox: backend %q does not declare required capability %q", e.Backend, e.Capability)
 }
+
+func (e *CapabilityError) ErrorCode() errorcode.Code { return errorcode.Unsupported }
 
 // ValidateCapabilities checks executor requirements in deterministic order.
 func ValidateCapabilities(descriptor Descriptor, required CapabilitySet) error {

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/jsonvalue"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -175,6 +176,8 @@ func (e *RevisionConflictError) Error() string {
 	return fmt.Sprintf("agent-sdk/task: task %q revision conflict: expected %d, actual %d", strings.TrimSpace(e.TaskID), e.Expected, e.Actual)
 }
 
+func (e *RevisionConflictError) ErrorCode() errorcode.Code { return errorcode.Conflict }
+
 // AcquireLeaseRequest conditionally assigns one task worker lease.
 type AcquireLeaseRequest struct {
 	TaskID               string        `json:"task_id"`
@@ -224,6 +227,8 @@ func (e *LeaseConflictError) Error() string {
 	}
 	return fmt.Sprintf("agent-sdk/task: task %q lease conflict: %s", strings.TrimSpace(e.TaskID), strings.TrimSpace(e.Detail))
 }
+
+func (e *LeaseConflictError) ErrorCode() errorcode.Code { return errorcode.Conflict }
 
 // ResultPersistenceMode controls which task result fields are allowed in a
 // durable task index entry.
