@@ -100,8 +100,13 @@ From the Caelis repository root:
 ```bash
 go test ./agent-sdk/...
 make sdk-boundary-check
+make sdk-proxy-smoke
 make arch-lint
 ```
+
+`sdk-proxy-smoke` builds a clean external consumer against the reviewed tagged
+baseline, imports every supported package, runs the behavioral quickstart, and
+rejects local `replace` directives.
 
 After intentionally reviewing a supported API change, refresh its manifest:
 

@@ -5,12 +5,11 @@ The Caelis Agent SDK is a package tree in the root
 as a separate Go module. This guide defines the host-facing behavior that SDK
 consumers may rely on.
 
-Readiness note: `v0.25.0` establishes the package and source-compatibility
-boundary, but it did not pass stable-dependency acceptance. Until the P0 items
-in [the v0.25.0 acceptance review](agent-sdk-v0.25.0-acceptance.md) are closed,
-use one Runtime owner per session and treat cross-process continuation,
-committed-error retry, and side-effect recovery as restricted contracts rather
-than general guarantees.
+`v0.25.0` established the package boundary but did not itself pass the later
+stable-dependency acceptance. The live status and exact closing evidence are in
+the [stabilization checklist](agent-sdk-stabilization-checklist.md); the frozen
+[v0.25.0 acceptance review](agent-sdk-v0.25.0-acceptance.md) remains the record
+of the faults found in that tag.
 
 ## Requirements and support scope
 
@@ -36,16 +35,13 @@ go get github.com/caelis-labs/caelis@<version>
 
 ## Quickstart
 
-The following offline example uses the bundled in-memory session service and
-chat agent. A production host normally replaces the static model and chooses a
-durable session adapter. The checked-in
-[`ExampleRuntime_Run`](../agent-sdk/runtime/quickstart_external_test.go) is
-compiled and executed by `go test ./agent-sdk/runtime`.
-
-`runtime/chat` and `session/memory` are bundled reference implementations, not
-members of the 16-import compatibility allowlist. This example proves the
-runtime shape and the bundled local path; it is not yet a supported-import-only
-consumer conformance test.
+The following offline example uses only supported imports. It supplies a
+host-local Agent and immutable invocation context, so it does not make a source
+compatibility promise for bundled model providers, stores, or Agent factories.
+The checked-in
+[`Example`](../agent-sdk/runtime/quickstart_external_test.go) is compiled and
+executed by `go test ./agent-sdk/runtime`; CI also parses its imports against the
+16-package allowlist.
 
 ```go
 package main
@@ -57,63 +53,40 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/agent-sdk/runtime"
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
 )
 
-type staticModel struct{}
+type greetingAgent struct{}
 
-func (staticModel) Name() string { return "static" }
-func (staticModel) Capabilities() model.Capabilities { return model.Capabilities{} }
-func (staticModel) Generate(context.Context, *model.Request) iter.Seq2[*model.StreamEvent, error] {
-	return func(yield func(*model.StreamEvent, error) bool) {
-		yield(model.StreamEventFromResponse(&model.Response{
-			Message:      model.NewTextMessage(model.RoleAssistant, "Hello from Caelis."),
-			Status:       model.ResponseStatusCompleted,
-			FinishReason: model.FinishReasonStop,
-			TurnComplete: true,
-		}), nil)
+func (greetingAgent) Name() string { return "greeting" }
+func (greetingAgent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
+	return func(yield func(*session.Event, error) bool) {
+		message := model.NewTextMessage(model.RoleAssistant,
+			fmt.Sprintf("received:%d", ctx.Events().Len()))
+		yield(&session.Event{Type: session.EventTypeAssistant, Message: &message}, nil)
 	}
 }
 
 func main() {
-	ctx := context.Background()
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
-	active, err := sessions.StartSession(ctx, session.StartSessionRequest{
-		AppName: "quickstart", UserID: "local-user",
+	user := model.NewTextMessage(model.RoleUser, "Say hello.")
+	ctx := agent.NewContext(agent.ContextSpec{
+		Context: context.Background(),
+		Session: session.Session{SessionRef: session.SessionRef{
+			AppName: "quickstart", UserID: "local-user", SessionID: "hello",
+		}},
+		Events: []*session.Event{{Type: session.EventTypeUser, Message: &user}},
 	})
-	if err != nil { panic(err) }
-
-	rt, err := runtime.New(runtime.Config{
-		Sessions: sessions,
-		AgentFactory: chat.Factory{SystemPrompt: "Be concise."},
-	})
-	if err != nil { panic(err) }
-
-	result, err := rt.Run(ctx, agent.RunRequest{
-		SessionRef: active.SessionRef,
-		Input: "Say hello.",
-		AgentSpec: agent.AgentSpec{Name: "assistant", Model: staticModel{}},
-	})
-	if err != nil { panic(err) }
-	defer result.Handle.Close()
-
-	for event, eventErr := range result.Handle.Events() {
-		if eventErr != nil { panic(eventErr) }
-		if session.EventTypeOf(event) == session.EventTypeAssistant {
-			fmt.Println(session.EventText(event))
-		}
+	for event, err := range (greetingAgent{}).Run(ctx) {
+		if err != nil { panic(err) }
+		fmt.Println(session.EventText(event))
 	}
 }
 ```
 
-Declare every capability the host requires in `AgentSpec` and on the actual
-model, tools, and sandbox executor. At v0.25.0 Runtime infers and validates
-model streaming, structured-output, and local-tool requirements. Control does
-not yet wire the complete tool/sandbox execution requirement set, so hosts must
-validate those adapters explicitly; do not rely on `AgentSpec` alone.
+Production Runtime hosts still declare every capability they require in
+`AgentSpec` and on the actual model, tools, and sandbox executor. Runtime
+validates model/output requirements defensively; the Caelis Control host also
+derives and validates the final assembled model/tool/sandbox requirements.
 
 ## Concurrency contract
 
