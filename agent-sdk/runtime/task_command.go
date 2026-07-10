@@ -355,6 +355,7 @@ func (tm *taskRuntime) lookupCommand(ctx context.Context, ref session.SessionRef
 func (t *commandTask) snapshotLocked(status sandbox.SessionStatus) taskapi.Snapshot {
 	return taskapi.CloneSnapshot(taskapi.Snapshot{
 		Ref:            t.ref,
+		Revision:       t.revision,
 		Kind:           taskapi.KindCommand,
 		Title:          t.title,
 		State:          t.state,
@@ -363,6 +364,7 @@ func (t *commandTask) snapshotLocked(status sandbox.SessionStatus) taskapi.Snaps
 		SupportsCancel: true,
 		CreatedAt:      t.createdAt,
 		UpdatedAt:      status.UpdatedAt,
+		Lease:          taskapi.CloneLease(t.lease),
 		StdoutCursor:   t.stdoutCursor,
 		StderrCursor:   t.stderrCursor,
 		Result:         session.CloneState(t.result),
@@ -387,6 +389,8 @@ func (tm *taskRuntime) rehydrateCommandTask(entry *taskapi.Entry) (*commandTask,
 		workdir:        taskSpecString(entry.Spec, "workdir"),
 		title:          strings.TrimSpace(entry.Title),
 		createdAt:      entry.CreatedAt,
+		revision:       entry.Revision,
+		lease:          taskapi.CloneLease(entry.Lease),
 		state:          entry.State,
 		running:        entry.Running,
 		stdoutCursor:   entry.StdoutCursor,
@@ -478,6 +482,7 @@ func (t *commandTask) entrySnapshot(now time.Time) *taskapi.Entry {
 	}
 	return &taskapi.Entry{
 		TaskID:         t.ref.TaskID,
+		Revision:       t.revision,
 		Kind:           taskapi.KindCommand,
 		Session:        t.sessionRef,
 		Title:          t.title,
@@ -487,7 +492,7 @@ func (t *commandTask) entrySnapshot(now time.Time) *taskapi.Entry {
 		SupportsCancel: true,
 		CreatedAt:      t.createdAt,
 		UpdatedAt:      now,
-		HeartbeatAt:    now,
+		Lease:          taskapi.CloneLease(t.lease),
 		StdoutCursor:   t.stdoutCursor,
 		StderrCursor:   t.stderrCursor,
 		Spec: map[string]any{

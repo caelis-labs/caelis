@@ -16,6 +16,8 @@ import (
 )
 
 var _ taskapi.Store = (*TaskStore)(nil)
+var _ taskapi.CASStore = (*TaskStore)(nil)
+var _ taskapi.LeaseStore = (*TaskStore)(nil)
 
 // NewTaskStore constructs one task store facade backed by the same file store
 // index used for session metadata.
@@ -27,23 +29,127 @@ func NewTaskStore(store *Store) *TaskStore {
 }
 
 func (s *TaskStore) Upsert(_ context.Context, entry *taskapi.Entry) error {
+	_, err := s.put(entry, nil)
+	return err
+}
+
+// Put conditionally persists one task state using task revision CAS.
+func (s *TaskStore) Put(_ context.Context, req taskapi.PutRequest) (*taskapi.Entry, error) {
+	expected := req.ExpectedRevision
+	return s.put(req.Entry, &expected)
+}
+
+func (s *TaskStore) put(entry *taskapi.Entry, expected *uint64) (*taskapi.Entry, error) {
 	if s == nil || s.store == nil {
-		return fmt.Errorf("agent-sdk/session/file: task store is not initialized")
+		return nil, fmt.Errorf("agent-sdk/session/file: task store is not initialized")
 	}
 	entry = taskapi.SanitizeEntryForPersistence(entry, taskapi.ResultPersistenceCanonical)
 	if entry == nil {
-		return nil
+		return nil, nil
 	}
 	if strings.TrimSpace(entry.TaskID) == "" || strings.TrimSpace(entry.Session.SessionID) == "" {
-		return fmt.Errorf("agent-sdk/session/file: task_id and session_id are required")
+		return nil, fmt.Errorf("agent-sdk/session/file: task_id and session_id are required")
 	}
 
 	s.store.mu.Lock()
 	defer s.store.mu.Unlock()
 
-	return s.store.withRootWriteLock(func() error {
-		return s.store.upsertTaskIndex(entry)
+	var out *taskapi.Entry
+	err := s.store.withRootWriteLock(func() error {
+		var err error
+		out, err = s.store.upsertTaskIndex(entry, expected)
+		return err
 	})
+	return out, err
+}
+
+// AcquireLease conditionally assigns one live worker lease.
+func (s *TaskStore) AcquireLease(ctx context.Context, req taskapi.AcquireLeaseRequest) (*taskapi.Entry, error) {
+	entry, err := s.Get(ctx, req.TaskID)
+	if err != nil {
+		return nil, err
+	}
+	if entry.Revision != req.ExpectedTaskRevision {
+		return nil, &taskapi.RevisionConflictError{TaskID: entry.TaskID, Expected: req.ExpectedTaskRevision, Actual: entry.Revision}
+	}
+	now, expiresAt, err := taskLeaseTimes(req.Now, req.TTL)
+	if err != nil {
+		return nil, err
+	}
+	ownerID := strings.TrimSpace(req.OwnerID)
+	leaseID := strings.TrimSpace(req.LeaseID)
+	if ownerID == "" || leaseID == "" {
+		return nil, &taskapi.LeaseConflictError{TaskID: entry.TaskID, Detail: "owner_id and lease_id are required"}
+	}
+	if entry.Lease.ID != "" && entry.Lease.ExpiresAt.After(now) && (entry.Lease.ID != leaseID || entry.Lease.OwnerID != ownerID) {
+		return nil, &taskapi.LeaseConflictError{TaskID: entry.TaskID, Detail: "another live lease owns the task"}
+	}
+	leaseRevision := entry.Lease.Revision + 1
+	entry.Lease = taskapi.Lease{ID: leaseID, OwnerID: ownerID, Revision: leaseRevision, AcquiredAt: now, HeartbeatAt: now, ExpiresAt: expiresAt}
+	return s.Put(ctx, taskapi.PutRequest{Entry: entry, ExpectedRevision: req.ExpectedTaskRevision})
+}
+
+// HeartbeatLease conditionally renews one live worker lease.
+func (s *TaskStore) HeartbeatLease(ctx context.Context, req taskapi.HeartbeatLeaseRequest) (*taskapi.Entry, error) {
+	entry, err := s.Get(ctx, req.TaskID)
+	if err != nil {
+		return nil, err
+	}
+	if entry.Revision != req.ExpectedTaskRevision {
+		return nil, &taskapi.RevisionConflictError{TaskID: entry.TaskID, Expected: req.ExpectedTaskRevision, Actual: entry.Revision}
+	}
+	if err := validateTaskLeaseOwner(entry, req.LeaseID, req.OwnerID, req.ExpectedLeaseRevision); err != nil {
+		return nil, err
+	}
+	now, expiresAt, err := taskLeaseTimes(req.Now, req.TTL)
+	if err != nil {
+		return nil, err
+	}
+	if !entry.Lease.ExpiresAt.IsZero() && !entry.Lease.ExpiresAt.After(now) {
+		return nil, &taskapi.LeaseConflictError{TaskID: entry.TaskID, Detail: "lease has expired"}
+	}
+	entry.Lease.Revision++
+	entry.Lease.HeartbeatAt = now
+	entry.Lease.ExpiresAt = expiresAt
+	return s.Put(ctx, taskapi.PutRequest{Entry: entry, ExpectedRevision: req.ExpectedTaskRevision})
+}
+
+// ReleaseLease conditionally clears one worker lease.
+func (s *TaskStore) ReleaseLease(ctx context.Context, req taskapi.ReleaseLeaseRequest) (*taskapi.Entry, error) {
+	entry, err := s.Get(ctx, req.TaskID)
+	if err != nil {
+		return nil, err
+	}
+	if entry.Revision != req.ExpectedTaskRevision {
+		return nil, &taskapi.RevisionConflictError{TaskID: entry.TaskID, Expected: req.ExpectedTaskRevision, Actual: entry.Revision}
+	}
+	if err := validateTaskLeaseOwner(entry, req.LeaseID, req.OwnerID, req.ExpectedLeaseRevision); err != nil {
+		return nil, err
+	}
+	entry.Lease = taskapi.Lease{}
+	return s.Put(ctx, taskapi.PutRequest{Entry: entry, ExpectedRevision: req.ExpectedTaskRevision})
+}
+
+func taskLeaseTimes(now time.Time, ttl time.Duration) (time.Time, time.Time, error) {
+	if ttl <= 0 {
+		return time.Time{}, time.Time{}, &taskapi.LeaseConflictError{Detail: "positive TTL is required"}
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	} else {
+		now = now.UTC()
+	}
+	return now, now.Add(ttl), nil
+}
+
+func validateTaskLeaseOwner(entry *taskapi.Entry, leaseID, ownerID string, expectedRevision uint64) error {
+	if entry == nil || entry.Lease.ID == "" {
+		return &taskapi.LeaseConflictError{Detail: "task has no active lease"}
+	}
+	if entry.Lease.ID != strings.TrimSpace(leaseID) || entry.Lease.OwnerID != strings.TrimSpace(ownerID) || entry.Lease.Revision != expectedRevision {
+		return &taskapi.LeaseConflictError{TaskID: entry.TaskID, Detail: "lease identity, owner, or revision mismatch"}
+	}
+	return nil
 }
 
 func (s *TaskStore) Get(_ context.Context, taskID string) (*taskapi.Entry, error) {
@@ -132,26 +238,41 @@ func (s *TaskStore) GetSessionTaskByHandle(_ context.Context, ref session.Sessio
 	return out, nil
 }
 
-func (s *Store) upsertTaskIndex(entry *taskapi.Entry) error {
-	row, err := taskIndexRowFromEntry(entry)
-	if err != nil {
-		return err
-	}
+func (s *Store) upsertTaskIndex(entry *taskapi.Entry, expected *uint64) (*taskapi.Entry, error) {
 	db, err := s.openSessionIndex()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer db.Close()
+	tx, err := db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var current uint64
+	if err := tx.QueryRow(`SELECT revision FROM tasks WHERE task_id = ?`, strings.TrimSpace(entry.TaskID)).Scan(&current); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("agent-sdk/session/file: read task revision: %w", err)
+	}
+	if expected != nil && *expected != current {
+		return nil, &taskapi.RevisionConflictError{TaskID: entry.TaskID, Expected: *expected, Actual: current}
+	}
+	next := taskapi.CloneEntry(entry)
+	next.Revision = current + 1
+	row, err := taskIndexRowFromEntry(next)
+	if err != nil {
+		return nil, err
+	}
 
-	_, err = db.Exec(
+	_, err = tx.Exec(
 		`INSERT INTO tasks (
-			task_id, kind, app_name, user_id, session_id, workspace_key, title, state,
+			task_id, revision, kind, app_name, user_id, session_id, workspace_key, title, state,
 			running, supports_input, supports_cancel,
-			created_at_ns, updated_at_ns, heartbeat_at_ns,
+			created_at_ns, updated_at_ns, heartbeat_at_ns, lease_id, lease_owner_id, lease_revision, lease_acquired_at_ns, lease_expires_at_ns,
 			stdout_cursor, stderr_cursor, event_cursor,
 			handle, spec_json, result_json, metadata_json, terminal_json
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(task_id) DO UPDATE SET
+			revision = excluded.revision,
 			kind = excluded.kind,
 			app_name = excluded.app_name,
 			user_id = excluded.user_id,
@@ -165,6 +286,11 @@ func (s *Store) upsertTaskIndex(entry *taskapi.Entry) error {
 			created_at_ns = excluded.created_at_ns,
 			updated_at_ns = excluded.updated_at_ns,
 			heartbeat_at_ns = excluded.heartbeat_at_ns,
+			lease_id = excluded.lease_id,
+			lease_owner_id = excluded.lease_owner_id,
+			lease_revision = excluded.lease_revision,
+			lease_acquired_at_ns = excluded.lease_acquired_at_ns,
+			lease_expires_at_ns = excluded.lease_expires_at_ns,
 			stdout_cursor = excluded.stdout_cursor,
 			stderr_cursor = excluded.stderr_cursor,
 			event_cursor = excluded.event_cursor,
@@ -174,6 +300,7 @@ func (s *Store) upsertTaskIndex(entry *taskapi.Entry) error {
 			metadata_json = excluded.metadata_json,
 			terminal_json = excluded.terminal_json`,
 		row.taskID,
+		row.revision,
 		row.kind,
 		row.appName,
 		row.userID,
@@ -187,6 +314,11 @@ func (s *Store) upsertTaskIndex(entry *taskapi.Entry) error {
 		timeToUnixNano(row.createdAt),
 		timeToUnixNano(row.updatedAt),
 		timeToUnixNano(row.heartbeatAt),
+		row.leaseID,
+		row.leaseOwnerID,
+		row.leaseRevision,
+		timeToUnixNano(row.leaseAcquiredAt),
+		timeToUnixNano(row.leaseExpiresAt),
 		row.stdoutCursor,
 		row.stderrCursor,
 		row.eventCursor,
@@ -197,9 +329,15 @@ func (s *Store) upsertTaskIndex(entry *taskapi.Entry) error {
 		row.terminalJSON,
 	)
 	if err != nil {
-		return fmt.Errorf("agent-sdk/session/file: upsert task index: %w", err)
+		return nil, fmt.Errorf("agent-sdk/session/file: upsert task index: %w", err)
 	}
-	return syncDir(filepath.Dir(s.sessionIndexPath()))
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("agent-sdk/session/file: commit task index: %w", err)
+	}
+	if err := syncDir(filepath.Dir(s.sessionIndexPath())); err != nil {
+		return nil, err
+	}
+	return taskapi.CloneEntry(next), nil
 }
 
 func (s *Store) getTaskIndex(taskID string) (*taskapi.Entry, error) {
@@ -288,37 +426,43 @@ func (s *Store) getSessionTaskIndexByHandle(ref session.SessionRef, kind taskapi
 
 func taskIndexSelectSQL() string {
 	return `SELECT
-		task_id, kind, app_name, user_id, session_id, workspace_key, title, state,
+		task_id, revision, kind, app_name, user_id, session_id, workspace_key, title, state,
 		running, supports_input, supports_cancel,
-		created_at_ns, updated_at_ns, heartbeat_at_ns,
+		created_at_ns, updated_at_ns, heartbeat_at_ns, lease_id, lease_owner_id, lease_revision, lease_acquired_at_ns, lease_expires_at_ns,
 		stdout_cursor, stderr_cursor, event_cursor,
 		spec_json, result_json, metadata_json, terminal_json
 	FROM tasks`
 }
 
 type taskIndexRow struct {
-	taskID         string
-	kind           string
-	appName        string
-	userID         string
-	sessionID      string
-	workspaceKey   string
-	title          string
-	state          string
-	running        bool
-	supportsInput  bool
-	supportsCancel bool
-	createdAt      time.Time
-	updatedAt      time.Time
-	heartbeatAt    time.Time
-	stdoutCursor   int64
-	stderrCursor   int64
-	eventCursor    int64
-	handle         string
-	specJSON       string
-	resultJSON     string
-	metadataJSON   string
-	terminalJSON   string
+	taskID          string
+	revision        uint64
+	kind            string
+	appName         string
+	userID          string
+	sessionID       string
+	workspaceKey    string
+	title           string
+	state           string
+	running         bool
+	supportsInput   bool
+	supportsCancel  bool
+	createdAt       time.Time
+	updatedAt       time.Time
+	heartbeatAt     time.Time
+	leaseID         string
+	leaseOwnerID    string
+	leaseRevision   uint64
+	leaseAcquiredAt time.Time
+	leaseExpiresAt  time.Time
+	stdoutCursor    int64
+	stderrCursor    int64
+	eventCursor     int64
+	handle          string
+	specJSON        string
+	resultJSON      string
+	metadataJSON    string
+	terminalJSON    string
 }
 
 func taskIndexRowFromEntry(entry *taskapi.Entry) (taskIndexRow, error) {
@@ -342,57 +486,70 @@ func taskIndexRowFromEntry(entry *taskapi.Entry) (taskIndexRow, error) {
 		return taskIndexRow{}, fmt.Errorf("agent-sdk/session/file: encode task terminal: %w", err)
 	}
 	return taskIndexRow{
-		taskID:         strings.TrimSpace(entry.TaskID),
-		kind:           strings.TrimSpace(string(entry.Kind)),
-		appName:        strings.TrimSpace(entry.Session.AppName),
-		userID:         strings.TrimSpace(entry.Session.UserID),
-		sessionID:      strings.TrimSpace(entry.Session.SessionID),
-		workspaceKey:   strings.TrimSpace(entry.Session.WorkspaceKey),
-		title:          strings.TrimSpace(entry.Title),
-		state:          strings.TrimSpace(string(entry.State)),
-		running:        entry.Running,
-		supportsInput:  entry.SupportsInput,
-		supportsCancel: entry.SupportsCancel,
-		createdAt:      entry.CreatedAt,
-		updatedAt:      entry.UpdatedAt,
-		heartbeatAt:    entry.HeartbeatAt,
-		stdoutCursor:   entry.StdoutCursor,
-		stderrCursor:   entry.StderrCursor,
-		eventCursor:    entry.EventCursor,
-		handle:         taskapi.NormalizeHandle(firstNonEmpty(taskIndexString(entry.Result, "handle"), taskIndexString(entry.Metadata, "handle"), taskIndexString(entry.Spec, "handle"))),
-		specJSON:       specJSON,
-		resultJSON:     resultJSON,
-		metadataJSON:   metadataJSON,
-		terminalJSON:   terminalJSON,
+		taskID:          strings.TrimSpace(entry.TaskID),
+		revision:        entry.Revision,
+		kind:            strings.TrimSpace(string(entry.Kind)),
+		appName:         strings.TrimSpace(entry.Session.AppName),
+		userID:          strings.TrimSpace(entry.Session.UserID),
+		sessionID:       strings.TrimSpace(entry.Session.SessionID),
+		workspaceKey:    strings.TrimSpace(entry.Session.WorkspaceKey),
+		title:           strings.TrimSpace(entry.Title),
+		state:           strings.TrimSpace(string(entry.State)),
+		running:         entry.Running,
+		supportsInput:   entry.SupportsInput,
+		supportsCancel:  entry.SupportsCancel,
+		createdAt:       entry.CreatedAt,
+		updatedAt:       entry.UpdatedAt,
+		heartbeatAt:     entry.Lease.HeartbeatAt,
+		leaseID:         strings.TrimSpace(entry.Lease.ID),
+		leaseOwnerID:    strings.TrimSpace(entry.Lease.OwnerID),
+		leaseRevision:   entry.Lease.Revision,
+		leaseAcquiredAt: entry.Lease.AcquiredAt,
+		leaseExpiresAt:  entry.Lease.ExpiresAt,
+		stdoutCursor:    entry.StdoutCursor,
+		stderrCursor:    entry.StderrCursor,
+		eventCursor:     entry.EventCursor,
+		handle:          taskapi.NormalizeHandle(firstNonEmpty(taskIndexString(entry.Result, "handle"), taskIndexString(entry.Metadata, "handle"), taskIndexString(entry.Spec, "handle"))),
+		specJSON:        specJSON,
+		resultJSON:      resultJSON,
+		metadataJSON:    metadataJSON,
+		terminalJSON:    terminalJSON,
 	}, nil
 }
 
 func scanTaskIndexEntry(scanner sessionIndexScanner) (*taskapi.Entry, error) {
 	var (
-		taskID         string
-		kind           string
-		appName        string
-		userID         string
-		sessionID      string
-		workspaceKey   string
-		title          string
-		state          string
-		running        int64
-		supportsInput  int64
-		supportsCancel int64
-		createdAtNS    int64
-		updatedAtNS    int64
-		heartbeatAtNS  int64
-		stdoutCursor   int64
-		stderrCursor   int64
-		eventCursor    int64
-		specRaw        string
-		resultRaw      string
-		metadataRaw    string
-		terminalRaw    string
+		taskID            string
+		revision          uint64
+		kind              string
+		appName           string
+		userID            string
+		sessionID         string
+		workspaceKey      string
+		title             string
+		state             string
+		running           int64
+		supportsInput     int64
+		supportsCancel    int64
+		createdAtNS       int64
+		updatedAtNS       int64
+		heartbeatAtNS     int64
+		leaseID           string
+		leaseOwnerID      string
+		leaseRevision     uint64
+		leaseAcquiredAtNS int64
+		leaseExpiresAtNS  int64
+		stdoutCursor      int64
+		stderrCursor      int64
+		eventCursor       int64
+		specRaw           string
+		resultRaw         string
+		metadataRaw       string
+		terminalRaw       string
 	)
 	if err := scanner.Scan(
 		&taskID,
+		&revision,
 		&kind,
 		&appName,
 		&userID,
@@ -406,6 +563,11 @@ func scanTaskIndexEntry(scanner sessionIndexScanner) (*taskapi.Entry, error) {
 		&createdAtNS,
 		&updatedAtNS,
 		&heartbeatAtNS,
+		&leaseID,
+		&leaseOwnerID,
+		&leaseRevision,
+		&leaseAcquiredAtNS,
+		&leaseExpiresAtNS,
 		&stdoutCursor,
 		&stderrCursor,
 		&eventCursor,
@@ -433,8 +595,9 @@ func scanTaskIndexEntry(scanner sessionIndexScanner) (*taskapi.Entry, error) {
 		return nil, err
 	}
 	return taskapi.CloneEntry(&taskapi.Entry{
-		TaskID: strings.TrimSpace(taskID),
-		Kind:   taskapi.Kind(strings.TrimSpace(kind)),
+		TaskID:   strings.TrimSpace(taskID),
+		Revision: revision,
+		Kind:     taskapi.Kind(strings.TrimSpace(kind)),
 		Session: session.NormalizeSessionRef(session.SessionRef{
 			AppName:      appName,
 			UserID:       userID,
@@ -448,14 +611,17 @@ func scanTaskIndexEntry(scanner sessionIndexScanner) (*taskapi.Entry, error) {
 		SupportsCancel: sqliteBool(supportsCancel),
 		CreatedAt:      unixNanoToTime(createdAtNS),
 		UpdatedAt:      unixNanoToTime(updatedAtNS),
-		HeartbeatAt:    unixNanoToTime(heartbeatAtNS),
-		StdoutCursor:   stdoutCursor,
-		StderrCursor:   stderrCursor,
-		EventCursor:    eventCursor,
-		Spec:           spec,
-		Result:         result,
-		Metadata:       metadata,
-		Terminal:       terminal,
+		Lease: taskapi.Lease{
+			ID: strings.TrimSpace(leaseID), OwnerID: strings.TrimSpace(leaseOwnerID), Revision: leaseRevision,
+			AcquiredAt: unixNanoToTime(leaseAcquiredAtNS), HeartbeatAt: unixNanoToTime(heartbeatAtNS), ExpiresAt: unixNanoToTime(leaseExpiresAtNS),
+		},
+		StdoutCursor: stdoutCursor,
+		StderrCursor: stderrCursor,
+		EventCursor:  eventCursor,
+		Spec:         spec,
+		Result:       result,
+		Metadata:     metadata,
+		Terminal:     terminal,
 	}), nil
 }
 

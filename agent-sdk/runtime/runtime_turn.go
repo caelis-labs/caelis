@@ -11,15 +11,15 @@ import (
 
 // RunState returns the last known run state for one session.
 func (r *Runtime) RunState(
-	_ context.Context,
+	ctx context.Context,
 	ref session.SessionRef,
 ) (agent.RunState, error) {
 	ref = session.NormalizeSessionRef(ref)
 	r.mu.RLock()
-	defer r.mu.RUnlock()
 	state, ok := r.runStates[ref.SessionID]
+	r.mu.RUnlock()
 	if !ok {
-		return agent.RunState{}, session.ErrSessionNotFound
+		return r.persistedRunState(ctx, ref, "")
 	}
 	return state, nil
 }

@@ -340,7 +340,50 @@ func (tm *taskRuntime) persistTaskEntry(ctx context.Context, entry *taskapi.Entr
 	if tm == nil || tm.store == nil || entry == nil {
 		return nil
 	}
+	if store, ok := tm.store.(taskapi.CASStore); ok {
+		expected := entry.Revision
+		if expected == 0 {
+			if current, err := tm.store.Get(ctx, entry.TaskID); err == nil && current != nil {
+				expected = current.Revision
+				entry.Revision = current.Revision
+				if entry.Lease.ID == "" {
+					entry.Lease = taskapi.CloneLease(current.Lease)
+				}
+			}
+		}
+		persisted, err := store.Put(ctx, taskapi.PutRequest{Entry: entry, ExpectedRevision: expected})
+		if err != nil {
+			return err
+		}
+		if persisted != nil {
+			*entry = *taskapi.CloneEntry(persisted)
+			tm.updateTaskPersistence(entry)
+		}
+		return nil
+	}
 	return tm.store.Upsert(ctx, entry)
+}
+
+func (tm *taskRuntime) updateTaskPersistence(entry *taskapi.Entry) {
+	if tm == nil || entry == nil {
+		return
+	}
+	tm.mu.RLock()
+	command := tm.tasks[entry.TaskID]
+	subagent := tm.subagents[entry.TaskID]
+	tm.mu.RUnlock()
+	if command != nil {
+		command.mu.Lock()
+		command.revision = entry.Revision
+		command.lease = taskapi.CloneLease(entry.Lease)
+		command.mu.Unlock()
+	}
+	if subagent != nil {
+		subagent.mu.Lock()
+		subagent.revision = entry.Revision
+		subagent.lease = taskapi.CloneLease(entry.Lease)
+		subagent.mu.Unlock()
+	}
 }
 
 func (tm *taskRuntime) listSessionEntries(ctx context.Context, ref session.SessionRef) []*taskapi.Entry {

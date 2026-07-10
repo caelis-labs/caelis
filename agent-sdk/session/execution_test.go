@@ -61,6 +61,30 @@ func TestRunTurnStepExecutionTransitionContract(t *testing.T) {
 	}
 }
 
+func TestPauseTokenTransitionContract(t *testing.T) {
+	t.Parallel()
+	pending := PauseToken{
+		Schema: ExecutionJournalSchemaVersion, TokenID: "pause-1", SessionID: "s1", RunID: "r1", TurnID: "t1",
+		Revision: 1, Status: PauseTokenPending,
+	}
+	resolved := pending
+	resolved.Revision++
+	resolved.Status = PauseTokenResolved
+	if err := ValidatePauseTokenTransition(PauseToken{}, pending); err != nil {
+		t.Fatalf("initial pause transition error = %v", err)
+	}
+	if err := ValidatePauseTokenTransition(pending, resolved); err != nil {
+		t.Fatalf("resolved pause transition error = %v", err)
+	}
+	invalid := resolved
+	invalid.Revision++
+	invalid.Status = PauseTokenPending
+	var transitionErr *PauseTokenTransitionError
+	if err := ValidatePauseTokenTransition(resolved, invalid); !errors.As(err, &transitionErr) {
+		t.Fatalf("invalid pause transition error = %v, want *PauseTokenTransitionError", err)
+	}
+}
+
 func TestRecoverIncompleteToolExecutionsMarksUnknownWithoutReplay(t *testing.T) {
 	t.Parallel()
 	key := ExecutionKey{SessionID: "s1", RunID: "r1", TurnID: "t1", StepID: "step-1", ToolCallID: "call-1"}

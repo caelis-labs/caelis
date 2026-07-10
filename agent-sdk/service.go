@@ -78,10 +78,44 @@ type RunResult struct {
 	Handle  Runner          `json:"-"`
 }
 
+// ResumeRequest identifies one live durable run to reattach.
+type ResumeRequest struct {
+	SessionRef session.SessionRef `json:"session_ref"`
+	RunID      string             `json:"run_id"`
+}
+
+// ResolveApprovalRequest resolves one durable approval pause token.
+type ResolveApprovalRequest struct {
+	SessionRef session.SessionRef `json:"session_ref"`
+	TokenID    string             `json:"token_id"`
+	Decision   ApprovalResponse   `json:"decision"`
+}
+
+// RunNotResumableError reports a run that has no live execution to reattach.
+// Its durable RunState remains available for recovery diagnostics.
+type RunNotResumableError struct {
+	SessionRef session.SessionRef
+	RunID      string
+	Detail     string
+}
+
+func (e *RunNotResumableError) Error() string {
+	if e == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("agent-sdk: run %q in session %q is not resumable: %s", strings.TrimSpace(e.RunID), strings.TrimSpace(e.SessionRef.SessionID), strings.TrimSpace(e.Detail))
+}
+
 // Runtime is the minimal runtime execution boundary for the new SDK.
 type Runtime interface {
 	Run(context.Context, RunRequest) (RunResult, error)
 	RunState(context.Context, session.SessionRef) (RunState, error)
+}
+
+// ResumableRuntime is the optional durable approval/run recovery capability.
+type ResumableRuntime interface {
+	Resume(context.Context, ResumeRequest) (RunResult, error)
+	ResolveApproval(context.Context, ResolveApprovalRequest) error
 }
 
 // AttachParticipantRequest attaches one external participant without replacing

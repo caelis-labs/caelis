@@ -113,6 +113,7 @@ func (r *Runtime) runACPControllerTurn(
 	handle.setCancelHook(func() error {
 		return r.transitionRunTurnJournal(context.Background(), ref, runID, turnID, session.ExecutionCancelRequested, "run cancellation requested")
 	})
+	r.registerActiveRun(ref, activeSession, handle)
 	go r.executeACPControllerTurn(runCtx, activeSession, ref, req, runID, turnID, handle)
 	return agent.RunResult{
 		Session: activeSession,
@@ -130,6 +131,7 @@ func (r *Runtime) executeACPControllerTurn(
 	handle *runner,
 ) {
 	defer handle.finish()
+	defer r.unregisterActiveRun(runID)
 	completed := false
 	defer func() {
 		status := session.ExecutionFailed

@@ -118,7 +118,7 @@ func (tm *taskRuntime) syncCanonicalTaskEntry(ctx context.Context, ref session.S
 		updatedAt = event.Time
 	}
 	applyCanonicalTaskEntry(entry, output, status, updatedAt)
-	if err := tm.store.Upsert(ctx, entry); err != nil {
+	if err := tm.persistTaskEntry(ctx, entry); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -192,7 +192,7 @@ func (tm *taskRuntime) backfillCanonicalTaskEntry(ctx context.Context, ref sessi
 		return entry
 	}
 	applyCanonicalTaskEntry(entry, latest.Output, latest.Status, latest.UpdatedAt)
-	_ = tm.store.Upsert(ctx, entry)
+	_ = tm.persistTaskEntry(ctx, entry)
 	return entry
 }
 

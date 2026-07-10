@@ -24,7 +24,41 @@ const (
 	JournalKindTurn          JournalKind = "turn"
 	JournalKindStep          JournalKind = "step"
 	JournalKindToolExecution JournalKind = "tool_execution"
+	JournalKindPauseToken    JournalKind = "pause_token"
 )
+
+// PauseTokenStatus identifies one durable approval pause state.
+type PauseTokenStatus string
+
+const (
+	PauseTokenPending   PauseTokenStatus = "pending"
+	PauseTokenResolved  PauseTokenStatus = "resolved"
+	PauseTokenCancelled PauseTokenStatus = "cancelled"
+)
+
+// PauseToken is the durable handoff between a waiting run and an approval
+// resolver. It contains only semantic request/decision data.
+type PauseToken struct {
+	Schema     int               `json:"schema"`
+	TokenID    string            `json:"token_id"`
+	SessionID  string            `json:"session_id"`
+	RunID      string            `json:"run_id"`
+	TurnID     string            `json:"turn_id"`
+	ToolCallID string            `json:"tool_call_id"`
+	ToolName   string            `json:"tool_name"`
+	Revision   uint64            `json:"revision"`
+	Status     PauseTokenStatus  `json:"status"`
+	Input      json.RawMessage   `json:"input,omitempty"`
+	Approval   *ProtocolApproval `json:"approval,omitempty"`
+	Metadata   map[string]any    `json:"metadata,omitempty"`
+	Outcome    string            `json:"outcome,omitempty"`
+	OptionID   string            `json:"option_id,omitempty"`
+	Approved   bool              `json:"approved,omitempty"`
+	Reason     string            `json:"reason,omitempty"`
+	ReviewText string            `json:"review_text,omitempty"`
+	CreatedAt  time.Time         `json:"created_at"`
+	UpdatedAt  time.Time         `json:"updated_at"`
+}
 
 // ExecutionStatus identifies one durable Run, Turn, or Step state.
 type ExecutionStatus string
@@ -114,6 +148,7 @@ type ExecutionJournalEntry struct {
 	Kind          JournalKind      `json:"kind"`
 	Execution     *ExecutionRecord `json:"execution,omitempty"`
 	ToolExecution *ToolExecution   `json:"tool_execution,omitempty"`
+	PauseToken    *PauseToken      `json:"pause_token,omitempty"`
 }
 
 // ExecutionTransitionError reports an invalid durable Run, Turn, or Step
@@ -138,6 +173,21 @@ type ToolExecutionTransitionError struct {
 	From     ToolExecutionStatus
 	To       ToolExecutionStatus
 	Detail   string
+}
+
+// PauseTokenTransitionError reports an invalid durable approval resolution.
+type PauseTokenTransitionError struct {
+	TokenID string
+	From    PauseTokenStatus
+	To      PauseTokenStatus
+	Detail  string
+}
+
+func (e *PauseTokenTransitionError) Error() string {
+	if e == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("agent-sdk/session: pause token %q transition %q -> %q: %s", e.TokenID, e.From, e.To, strings.TrimSpace(e.Detail))
 }
 
 func (e *ToolExecutionTransitionError) Error() string {
@@ -178,7 +228,59 @@ func CloneExecutionJournalEntry(in ExecutionJournalEntry) ExecutionJournalEntry 
 		record := CloneToolExecution(*in.ToolExecution)
 		out.ToolExecution = &record
 	}
+	if in.PauseToken != nil {
+		token := ClonePauseToken(*in.PauseToken)
+		out.PauseToken = &token
+	}
 	return out
+}
+
+// ClonePauseToken returns one recursively isolated normalized token.
+func ClonePauseToken(in PauseToken) PauseToken {
+	out := in
+	out.TokenID = strings.TrimSpace(in.TokenID)
+	out.SessionID = strings.TrimSpace(in.SessionID)
+	out.RunID = strings.TrimSpace(in.RunID)
+	out.TurnID = strings.TrimSpace(in.TurnID)
+	out.ToolCallID = strings.TrimSpace(in.ToolCallID)
+	out.ToolName = strings.TrimSpace(in.ToolName)
+	out.Status = PauseTokenStatus(strings.TrimSpace(string(in.Status)))
+	out.Input = append(json.RawMessage(nil), in.Input...)
+	if in.Approval != nil {
+		approval := CloneProtocolApproval(*in.Approval)
+		out.Approval = &approval
+	}
+	out.Metadata = CloneState(in.Metadata)
+	out.Outcome = strings.TrimSpace(in.Outcome)
+	out.OptionID = strings.TrimSpace(in.OptionID)
+	out.Reason = strings.TrimSpace(in.Reason)
+	out.ReviewText = strings.TrimSpace(in.ReviewText)
+	return out
+}
+
+// ValidatePauseTokenTransition validates one durable approval pause update.
+func ValidatePauseTokenTransition(previous PauseToken, next PauseToken) error {
+	previous = ClonePauseToken(previous)
+	next = ClonePauseToken(next)
+	invalid := func(detail string) error {
+		return &PauseTokenTransitionError{TokenID: next.TokenID, From: previous.Status, To: next.Status, Detail: detail}
+	}
+	if next.Schema != ExecutionJournalSchemaVersion || next.TokenID == "" || next.SessionID == "" || next.RunID == "" || next.TurnID == "" {
+		return invalid("invalid schema or identity")
+	}
+	if previous.Status == "" {
+		if next.Status == PauseTokenPending && next.Revision == 1 {
+			return nil
+		}
+		return invalid("first record must be pending revision 1")
+	}
+	if previous.TokenID != next.TokenID || previous.SessionID != next.SessionID || previous.RunID != next.RunID || next.Revision != previous.Revision+1 {
+		return invalid("identity or revision mismatch")
+	}
+	if previous.Status != PauseTokenPending || (next.Status != PauseTokenResolved && next.Status != PauseTokenCancelled) {
+		return invalid("transition is not allowed")
+	}
+	return nil
 }
 
 // ExecutionRecordIdentity returns the stable identity for one Run, Turn, or
@@ -272,7 +374,7 @@ func ValidateExecutionJournalEntry(in ExecutionJournalEntry) error {
 	if entry.Schema != ExecutionJournalSchemaVersion {
 		return fmt.Errorf("agent-sdk/session: unsupported execution journal schema %d", entry.Schema)
 	}
-	if entry.Execution == nil && entry.ToolExecution == nil {
+	if entry.Execution == nil && entry.ToolExecution == nil && entry.PauseToken == nil {
 		return fmt.Errorf("agent-sdk/session: execution journal entry is empty")
 	}
 	if entry.Execution != nil {
@@ -300,6 +402,24 @@ func ValidateExecutionJournalEntry(in ExecutionJournalEntry) error {
 			if step.Kind != JournalKindStep || step.SessionID != record.Key.SessionID || step.RunID != record.Key.RunID || step.TurnID != record.Key.TurnID || step.StepID != record.Key.StepID {
 				return fmt.Errorf("agent-sdk/session: tool execution does not match step record")
 			}
+		}
+	}
+	if entry.PauseToken != nil {
+		token := ClonePauseToken(*entry.PauseToken)
+		if entry.Kind != JournalKindPauseToken || token.Schema != ExecutionJournalSchemaVersion || token.TokenID == "" || token.SessionID == "" || token.RunID == "" || token.TurnID == "" || token.Revision == 0 {
+			return fmt.Errorf("agent-sdk/session: invalid pause token schema or identity")
+		}
+		switch token.Status {
+		case PauseTokenPending:
+			if token.Revision != 1 {
+				return fmt.Errorf("agent-sdk/session: pending pause token must be revision 1")
+			}
+		case PauseTokenResolved, PauseTokenCancelled:
+			if token.Revision != 2 {
+				return fmt.Errorf("agent-sdk/session: terminal pause token must be revision 2")
+			}
+		default:
+			return fmt.Errorf("agent-sdk/session: invalid pause token status %q", token.Status)
 		}
 	}
 	return jsonvalue.Validate(entry)

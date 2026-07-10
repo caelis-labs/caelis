@@ -2,6 +2,7 @@ package file
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,82 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 )
+
+func TestTaskStoreRevisionAndLeaseCAS(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := NewTaskStore(NewStore(Config{RootDir: root}))
+	created, err := store.Put(context.Background(), task.PutRequest{
+		Entry:            &task.Entry{TaskID: "task-cas", Kind: task.KindCommand, Session: taskSessionRef("sess-cas"), State: task.StateRunning, Running: true},
+		ExpectedRevision: 0,
+	})
+	if err != nil {
+		t.Fatalf("Put(create) error = %v", err)
+	}
+	if created.Revision != 1 {
+		t.Fatalf("created revision = %d, want 1", created.Revision)
+	}
+	stale := task.CloneEntry(created)
+	created.Title = "current"
+	updated, err := store.Put(context.Background(), task.PutRequest{Entry: created, ExpectedRevision: created.Revision})
+	if err != nil {
+		t.Fatalf("Put(update) error = %v", err)
+	}
+	if updated.Revision != 2 {
+		t.Fatalf("updated revision = %d, want 2", updated.Revision)
+	}
+	stale.Title = "stale"
+	_, err = store.Put(context.Background(), task.PutRequest{Entry: stale, ExpectedRevision: stale.Revision})
+	var revisionErr *task.RevisionConflictError
+	if !errors.As(err, &revisionErr) || revisionErr.Actual != 2 {
+		t.Fatalf("stale Put error = %v, want revision conflict at 2", err)
+	}
+
+	now := time.Unix(100, 0).UTC()
+	leased, err := store.AcquireLease(context.Background(), task.AcquireLeaseRequest{
+		TaskID: "task-cas", OwnerID: "worker-1", LeaseID: "lease-1", ExpectedTaskRevision: 2, Now: now, TTL: time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("AcquireLease() error = %v", err)
+	}
+	if leased.Revision != 3 || leased.Lease.Revision != 1 || leased.Lease.HeartbeatAt != now {
+		t.Fatalf("acquired lease = %#v, want task revision 3 and lease revision 1", leased)
+	}
+	heartbeatAt := now.Add(10 * time.Second)
+	heartbeat, err := store.HeartbeatLease(context.Background(), task.HeartbeatLeaseRequest{
+		TaskID: "task-cas", OwnerID: "worker-1", LeaseID: "lease-1", ExpectedTaskRevision: 3, ExpectedLeaseRevision: 1, Now: heartbeatAt, TTL: time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("HeartbeatLease() error = %v", err)
+	}
+	if heartbeat.Revision != 4 || heartbeat.Lease.Revision != 2 || heartbeat.Lease.HeartbeatAt != heartbeatAt {
+		t.Fatalf("heartbeat lease = %#v, want task revision 4 and lease revision 2", heartbeat)
+	}
+	_, err = store.HeartbeatLease(context.Background(), task.HeartbeatLeaseRequest{
+		TaskID: "task-cas", OwnerID: "worker-1", LeaseID: "lease-1", ExpectedTaskRevision: 4, ExpectedLeaseRevision: 1, Now: heartbeatAt, TTL: time.Minute,
+	})
+	var leaseErr *task.LeaseConflictError
+	if !errors.As(err, &leaseErr) {
+		t.Fatalf("stale HeartbeatLease error = %v, want lease conflict", err)
+	}
+	released, err := store.ReleaseLease(context.Background(), task.ReleaseLeaseRequest{
+		TaskID: "task-cas", OwnerID: "worker-1", LeaseID: "lease-1", ExpectedTaskRevision: 4, ExpectedLeaseRevision: 2,
+	})
+	if err != nil {
+		t.Fatalf("ReleaseLease() error = %v", err)
+	}
+	if released.Revision != 5 || released.Lease.ID != "" {
+		t.Fatalf("released task = %#v, want revision 5 without lease", released)
+	}
+	reopened, err := NewTaskStore(NewStore(Config{RootDir: root})).Get(context.Background(), "task-cas")
+	if err != nil {
+		t.Fatalf("reopened Get() error = %v", err)
+	}
+	if reopened.Revision != 5 || reopened.Lease.ID != "" {
+		t.Fatalf("reopened task = %#v, want persisted revision 5 without lease", reopened)
+	}
+}
 
 func TestTaskStoreUpsertCompletedTaskKeepsCanonicalResultInIndex(t *testing.T) {
 	t.Parallel()

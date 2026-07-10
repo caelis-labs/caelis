@@ -77,6 +77,7 @@ type RunState struct {
 	Status          RunLifecycleStatus `json:"status,omitempty"`
 	ActiveRunID     string             `json:"active_run_id,omitempty"`
 	WaitingApproval bool               `json:"waiting_approval,omitempty"`
+	PauseTokenID    string             `json:"pause_token_id,omitempty"`
 	LastError       string             `json:"last_error,omitempty"`
 	UpdatedAt       time.Time          `json:"updated_at,omitempty"`
 }

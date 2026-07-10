@@ -50,6 +50,8 @@ type commandTask struct {
 	workdir    string
 	title      string
 	createdAt  time.Time
+	revision   uint64
+	lease      taskapi.Lease
 
 	mu             sync.Mutex
 	state          taskapi.State
@@ -75,6 +77,8 @@ type subagentTask struct {
 	title      string
 	prompt     string
 	createdAt  time.Time
+	revision   uint64
+	lease      taskapi.Lease
 
 	mu       sync.Mutex
 	state    taskapi.State

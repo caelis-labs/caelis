@@ -655,6 +655,8 @@ func (tm *taskRuntime) rehydrateSubagentTask(entry *taskapi.Entry) *subagentTask
 		title:     strings.TrimSpace(entry.Title),
 		prompt:    taskSpecString(entry.Spec, "prompt"),
 		createdAt: entry.CreatedAt,
+		revision:  entry.Revision,
+		lease:     taskapi.CloneLease(entry.Lease),
 		state:     entry.State,
 		running:   entry.Running,
 		turnSeq:   taskTurnSeqFromSpec(entry.Spec),
@@ -1069,6 +1071,7 @@ func (t *subagentTask) snapshot() taskapi.Snapshot {
 	metadata["turn_seq"] = t.turnSeq
 	return taskapi.CloneSnapshot(taskapi.Snapshot{
 		Ref:            t.ref,
+		Revision:       t.revision,
 		Kind:           taskapi.KindSubagent,
 		Title:          t.title,
 		State:          t.state,
@@ -1077,6 +1080,7 @@ func (t *subagentTask) snapshot() taskapi.Snapshot {
 		SupportsCancel: true,
 		CreatedAt:      t.createdAt,
 		UpdatedAt:      time.Now(),
+		Lease:          taskapi.CloneLease(t.lease),
 		StdoutCursor:   t.stdoutCursor,
 		StderrCursor:   t.stderrCursor,
 		EventCursor:    int64(len(t.streamFrames)),
@@ -1091,6 +1095,7 @@ func (t *subagentTask) entrySnapshot(now time.Time) *taskapi.Entry {
 	}
 	return &taskapi.Entry{
 		TaskID:         t.ref.TaskID,
+		Revision:       t.revision,
 		Kind:           taskapi.KindSubagent,
 		Session:        t.sessionRef,
 		Title:          t.title,
@@ -1100,7 +1105,7 @@ func (t *subagentTask) entrySnapshot(now time.Time) *taskapi.Entry {
 		SupportsCancel: true,
 		CreatedAt:      t.createdAt,
 		UpdatedAt:      now,
-		HeartbeatAt:    now,
+		Lease:          taskapi.CloneLease(t.lease),
 		Spec: map[string]any{
 			"agent":       t.agent,
 			"prompt":      t.prompt,

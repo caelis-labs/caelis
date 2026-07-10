@@ -149,23 +149,10 @@ func (t policyWrappedTool) requestApproval(
 	call tool.Call,
 	decision policy.Decision,
 ) (tool.Result, error) {
-	if decision.Approval == nil || t.approval.requester == nil {
+	if decision.Approval == nil || (t.approval.requester == nil && t.approval.runtime == nil) {
 		return policyDecisionResult(call, t.tool.Definition(), t.mode, decision), nil
 	}
-	if t.approval.runtime != nil {
-		t.approval.runtime.setRunState(t.sessionRef.SessionID, agent.RunState{
-			Status:          agent.RunLifecycleStatusWaitingApproval,
-			ActiveRunID:     strings.TrimSpace(t.approval.runID),
-			WaitingApproval: true,
-			UpdatedAt:       t.approval.runtime.now(),
-		})
-		defer t.approval.runtime.setRunState(t.sessionRef.SessionID, agent.RunState{
-			Status:      agent.RunLifecycleStatusRunning,
-			ActiveRunID: strings.TrimSpace(t.approval.runID),
-			UpdatedAt:   t.approval.runtime.now(),
-		})
-	}
-	resp, err := t.approval.requester.RequestApproval(ctx, agent.ApprovalRequest{
+	request := agent.ApprovalRequest{
 		SessionRef: t.sessionRef,
 		Session:    session.CloneSession(t.session),
 		RunID:      strings.TrimSpace(t.approval.runID),
@@ -174,7 +161,14 @@ func (t policyWrappedTool) requestApproval(
 		Call:       tool.CloneCall(call),
 		Approval:   cloneApproval(decision.Approval),
 		Metadata:   mapsClone(decision.Metadata),
-	})
+	}
+	var resp agent.ApprovalResponse
+	var err error
+	if t.approval.runtime != nil {
+		resp, err = t.approval.runtime.requestDurableApproval(ctx, request, t.approval.requester)
+	} else {
+		resp, err = t.approval.requester.RequestApproval(ctx, request)
+	}
 	if err != nil {
 		return tool.Result{}, err
 	}

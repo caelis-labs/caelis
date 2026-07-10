@@ -137,6 +137,7 @@ func (r *Runtime) recoverIncompleteExecutionJournal(ctx context.Context, ref ses
 		return err
 	}
 	latest := map[string]session.ExecutionRecord{}
+	latestPause := map[string]session.PauseToken{}
 	for _, event := range events {
 		if event == nil || event.Journal == nil || event.Journal.Execution == nil {
 			continue
@@ -144,6 +145,15 @@ func (r *Runtime) recoverIncompleteExecutionJournal(ctx context.Context, ref ses
 		record := session.NormalizeExecutionRecord(*event.Journal.Execution)
 		if prior, ok := latest[record.Identity]; !ok || record.Revision > prior.Revision {
 			latest[record.Identity] = record
+		}
+	}
+	for _, event := range events {
+		if event == nil || event.Journal == nil || event.Journal.PauseToken == nil {
+			continue
+		}
+		token := session.ClonePauseToken(*event.Journal.PauseToken)
+		if prior, ok := latestPause[token.TokenID]; !ok || token.Revision > prior.Revision {
+			latestPause[token.TokenID] = token
 		}
 	}
 	updates := make([]*session.Event, 0)
@@ -165,6 +175,16 @@ func (r *Runtime) recoverIncompleteExecutionJournal(ctx context.Context, ref ses
 			return err
 		}
 		updates = append(updates, executionJournalEvent(next))
+	}
+	for _, token := range latestPause {
+		if token.Status != session.PauseTokenPending {
+			continue
+		}
+		token.Revision++
+		token.Status = session.PauseTokenCancelled
+		token.Reason = "runtime recovered without a live approval waiter"
+		token.UpdatedAt = r.now()
+		updates = append(updates, pauseTokenEvent(token))
 	}
 	if len(updates) == 0 {
 		return nil

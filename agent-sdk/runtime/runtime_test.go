@@ -2938,6 +2938,163 @@ func TestRuntimePolicyDefaultCommandEscalationWaitsApprovalThenExecutes(t *testi
 	}
 }
 
+func TestRuntimeDurableApprovalResolveAndResume(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	sessions := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{RootDir: root, SessionIDGenerator: func() string { return "sess-durable-approval" }}))
+	activeSession, err := sessions.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	ask := staticPolicyRegistry{mode: policy.NamedMode{
+		ID: "ask",
+		Decide: func(_ context.Context, input policy.ToolContext) (policy.Decision, error) {
+			return policy.Decision{Action: policy.ActionAskApproval, Approval: &session.ProtocolApproval{
+				ToolCall: session.ProtocolToolCall{ID: input.Call.ID, Name: input.Tool.Name, Status: "pending"},
+				Options:  []session.ProtocolApprovalOption{{ID: "allow_once", Name: "Allow once", Kind: "allow_once"}},
+			}}, nil
+		},
+	}}
+	runtime, err := New(Config{
+		Sessions: sessions, AgentFactory: chat.Factory{}, PolicyRegistry: ask, DefaultPolicyMode: "ask",
+		RunIDGenerator: func() string { return "run-durable-approval" },
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	var calls int
+	targetTool := tool.NamedTool{
+		Def: tool.Definition{Name: "ECHO", EffectClass: tool.EffectNonIdempotent, InputSchema: map[string]any{"type": "object"}},
+		Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
+			calls++
+			return tool.Result{ID: call.ID, Name: call.Name, Content: []model.Part{model.NewJSONPart([]byte(`{"value":"pong"}`))}}, nil
+		},
+	}
+	run, err := runtime.Run(context.Background(), agent.RunRequest{
+		SessionRef: activeSession.SessionRef, Input: "approve echo",
+		AgentSpec: agent.AgentSpec{Name: "chat", Model: &toolLoopRuntimeModel{}, Tools: []tool.Tool{targetTool}},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	defer run.Handle.Cancel()
+	var waiting agent.RunState
+	deadline := time.After(2 * time.Second)
+	for {
+		waiting, err = runtime.RunState(context.Background(), activeSession.SessionRef)
+		if err == nil && waiting.WaitingApproval && waiting.PauseTokenID != "" {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("RunState() = %+v, %v; want durable waiting approval", waiting, err)
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+	resumed, err := runtime.Resume(context.Background(), agent.ResumeRequest{SessionRef: activeSession.SessionRef, RunID: run.Handle.RunID()})
+	if err != nil || resumed.Handle != run.Handle {
+		t.Fatalf("Resume() = %+v, %v; want same live runner", resumed, err)
+	}
+	decision := agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_once", Approved: true, Reason: "approved by user"}
+	if err := runtime.ResolveApproval(context.Background(), agent.ResolveApprovalRequest{SessionRef: activeSession.SessionRef, TokenID: waiting.PauseTokenID, Decision: decision}); err != nil {
+		t.Fatalf("ResolveApproval() error = %v", err)
+	}
+	if _, err := drainRunnerEvents(t, resumed.Handle); err != nil {
+		t.Fatalf("resumed runner error = %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("tool calls = %d, want 1", calls)
+	}
+	if err := runtime.ResolveApproval(context.Background(), agent.ResolveApprovalRequest{SessionRef: activeSession.SessionRef, TokenID: waiting.PauseTokenID, Decision: decision}); err != nil {
+		t.Fatalf("idempotent ResolveApproval() error = %v", err)
+	}
+	events, err := sessions.Events(context.Background(), session.EventsRequest{SessionRef: activeSession.SessionRef, IncludeTransient: true})
+	if err != nil {
+		t.Fatalf("Events() error = %v", err)
+	}
+	var pauseStatuses []session.PauseTokenStatus
+	for _, event := range events {
+		if event.Journal != nil && event.Journal.PauseToken != nil {
+			pauseStatuses = append(pauseStatuses, event.Journal.PauseToken.Status)
+		}
+	}
+	if want := []session.PauseTokenStatus{session.PauseTokenPending, session.PauseTokenResolved}; !reflect.DeepEqual(pauseStatuses, want) {
+		t.Fatalf("pause token journal = %v, want %v", pauseStatuses, want)
+	}
+
+	reopened, err := New(Config{Sessions: sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{RootDir: root})), AgentFactory: chat.Factory{}})
+	if err != nil {
+		t.Fatalf("New(reopened) error = %v", err)
+	}
+	state, err := reopened.RunState(context.Background(), activeSession.SessionRef)
+	if err != nil || state.Status != agent.RunLifecycleStatusCompleted || state.ActiveRunID != "run-durable-approval" {
+		t.Fatalf("reopened RunState() = %+v, %v; want durable completed run", state, err)
+	}
+	_, err = reopened.Resume(context.Background(), agent.ResumeRequest{SessionRef: activeSession.SessionRef, RunID: "run-durable-approval"})
+	var notResumable *agent.RunNotResumableError
+	if !errors.As(err, &notResumable) {
+		t.Fatalf("reopened Resume() error = %v, want *RunNotResumableError", err)
+	}
+}
+
+func TestRuntimeRecoveryInterruptsOrphanedApprovalPause(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	sessions := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{RootDir: root, SessionIDGenerator: func() string { return "sess-orphaned-approval" }}))
+	activeSession, err := sessions.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	runtime, err := New(Config{Sessions: sessions, AgentFactory: chat.Factory{}})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := runtime.startRunTurnJournal(context.Background(), activeSession.SessionRef, "run-orphaned", "turn-orphaned"); err != nil {
+		t.Fatalf("startRunTurnJournal() error = %v", err)
+	}
+	if err := runtime.transitionRunTurnJournal(context.Background(), activeSession.SessionRef, "run-orphaned", "turn-orphaned", session.ExecutionWaitingApproval, "approval required"); err != nil {
+		t.Fatalf("transitionRunTurnJournal(waiting) error = %v", err)
+	}
+	now := time.Unix(500, 0).UTC()
+	token := session.PauseToken{
+		Schema: session.ExecutionJournalSchemaVersion, TokenID: "pause-orphaned", SessionID: activeSession.SessionID,
+		RunID: "run-orphaned", TurnID: "turn-orphaned", ToolCallID: "call-orphaned", ToolName: "WRITE",
+		Revision: 1, Status: session.PauseTokenPending, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := runtime.appendPauseToken(context.Background(), activeSession.SessionRef, token); err != nil {
+		t.Fatalf("appendPauseToken() error = %v", err)
+	}
+
+	reopenedSessions := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{RootDir: root}))
+	reopened, err := New(Config{Sessions: reopenedSessions, AgentFactory: chat.Factory{}})
+	if err != nil {
+		t.Fatalf("New(reopened) error = %v", err)
+	}
+	state, err := reopened.RunState(context.Background(), activeSession.SessionRef)
+	if err != nil || !state.WaitingApproval || state.PauseTokenID != "pause-orphaned" {
+		t.Fatalf("reopened RunState() = %+v, %v; want pending durable approval", state, err)
+	}
+	_, err = reopened.Resume(context.Background(), agent.ResumeRequest{SessionRef: activeSession.SessionRef, RunID: "run-orphaned"})
+	var notResumable *agent.RunNotResumableError
+	if !errors.As(err, &notResumable) {
+		t.Fatalf("Resume(orphaned) error = %v, want *RunNotResumableError", err)
+	}
+	if err := reopened.recoverIncompleteExecutionJournal(context.Background(), activeSession.SessionRef); err != nil {
+		t.Fatalf("recoverIncompleteExecutionJournal() error = %v", err)
+	}
+	state, err = reopened.persistedRunState(context.Background(), activeSession.SessionRef, "run-orphaned")
+	if err != nil || state.Status != agent.RunLifecycleStatusInterrupted {
+		t.Fatalf("recovered RunState() = %+v, %v; want interrupted", state, err)
+	}
+	recoveredToken, err := reopened.pauseToken(context.Background(), activeSession.SessionRef, "pause-orphaned")
+	if err != nil || recoveredToken.Status != session.PauseTokenCancelled {
+		t.Fatalf("recovered pause token = %+v, %v; want cancelled", recoveredToken, err)
+	}
+}
+
 func TestControllerApprovalRequesterPreservesToolRawInput(t *testing.T) {
 	t.Parallel()
 

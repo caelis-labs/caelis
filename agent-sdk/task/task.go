@@ -2,6 +2,7 @@ package task
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -43,6 +44,7 @@ type Ref struct {
 // Snapshot is one provider-neutral task status payload.
 type Snapshot struct {
 	Ref            Ref                 `json:"ref,omitempty"`
+	Revision       uint64              `json:"revision,omitempty"`
 	Kind           Kind                `json:"kind,omitempty"`
 	Title          string              `json:"title,omitempty"`
 	State          State               `json:"state,omitempty"`
@@ -51,12 +53,24 @@ type Snapshot struct {
 	SupportsCancel bool                `json:"supports_cancel,omitempty"`
 	CreatedAt      time.Time           `json:"created_at,omitempty"`
 	UpdatedAt      time.Time           `json:"updated_at,omitempty"`
+	Lease          Lease               `json:"lease,omitempty"`
 	StdoutCursor   int64               `json:"stdout_cursor,omitempty"`
 	StderrCursor   int64               `json:"stderr_cursor,omitempty"`
 	EventCursor    int64               `json:"event_cursor,omitempty"`
 	Result         map[string]any      `json:"result,omitempty"`
 	Metadata       map[string]any      `json:"metadata,omitempty"`
 	Terminal       sandbox.TerminalRef `json:"terminal,omitempty"`
+}
+
+// Lease is a neutral task-worker ownership record. Core stores enforce its CAS
+// semantics; Control owns worker placement and renewal policy.
+type Lease struct {
+	ID          string    `json:"id,omitempty"`
+	OwnerID     string    `json:"owner_id,omitempty"`
+	Revision    uint64    `json:"revision,omitempty"`
+	AcquiredAt  time.Time `json:"acquired_at,omitempty"`
+	HeartbeatAt time.Time `json:"heartbeat_at,omitempty"`
+	ExpiresAt   time.Time `json:"expires_at,omitempty"`
 }
 
 // Observer receives transient task lifecycle snapshots while a tool call is
@@ -103,6 +117,7 @@ type ControlRequest struct {
 // Entry is one durable task persistence record.
 type Entry struct {
 	TaskID         string              `json:"task_id,omitempty"`
+	Revision       uint64              `json:"revision,omitempty"`
 	Kind           Kind                `json:"kind,omitempty"`
 	Session        session.SessionRef  `json:"session,omitempty"`
 	Title          string              `json:"title,omitempty"`
@@ -112,7 +127,7 @@ type Entry struct {
 	SupportsCancel bool                `json:"supports_cancel,omitempty"`
 	CreatedAt      time.Time           `json:"created_at,omitempty"`
 	UpdatedAt      time.Time           `json:"updated_at,omitempty"`
-	HeartbeatAt    time.Time           `json:"heartbeat_at,omitempty"`
+	Lease          Lease               `json:"lease,omitempty"`
 	StdoutCursor   int64               `json:"stdout_cursor,omitempty"`
 	StderrCursor   int64               `json:"stderr_cursor,omitempty"`
 	EventCursor    int64               `json:"event_cursor,omitempty"`
@@ -132,6 +147,82 @@ type Store interface {
 	Get(context.Context, string) (*Entry, error)
 	ListSession(context.Context, session.SessionRef) ([]*Entry, error)
 	GetSessionTaskByHandle(context.Context, session.SessionRef, Kind, string) (*Entry, error)
+}
+
+// PutRequest conditionally creates or replaces one task entry. Revision zero
+// is the expected revision for a create.
+type PutRequest struct {
+	Entry            *Entry `json:"entry"`
+	ExpectedRevision uint64 `json:"expected_revision"`
+}
+
+// CASStore is the optional lost-update-safe task persistence capability.
+type CASStore interface {
+	Put(context.Context, PutRequest) (*Entry, error)
+}
+
+// RevisionConflictError reports a stale task writer.
+type RevisionConflictError struct {
+	TaskID   string
+	Expected uint64
+	Actual   uint64
+}
+
+func (e *RevisionConflictError) Error() string {
+	if e == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("agent-sdk/task: task %q revision conflict: expected %d, actual %d", strings.TrimSpace(e.TaskID), e.Expected, e.Actual)
+}
+
+// AcquireLeaseRequest conditionally assigns one task worker lease.
+type AcquireLeaseRequest struct {
+	TaskID               string        `json:"task_id"`
+	OwnerID              string        `json:"owner_id"`
+	LeaseID              string        `json:"lease_id"`
+	ExpectedTaskRevision uint64        `json:"expected_task_revision"`
+	Now                  time.Time     `json:"now"`
+	TTL                  time.Duration `json:"ttl"`
+}
+
+// HeartbeatLeaseRequest conditionally renews one task worker lease.
+type HeartbeatLeaseRequest struct {
+	TaskID                string        `json:"task_id"`
+	OwnerID               string        `json:"owner_id"`
+	LeaseID               string        `json:"lease_id"`
+	ExpectedTaskRevision  uint64        `json:"expected_task_revision"`
+	ExpectedLeaseRevision uint64        `json:"expected_lease_revision"`
+	Now                   time.Time     `json:"now"`
+	TTL                   time.Duration `json:"ttl"`
+}
+
+// ReleaseLeaseRequest conditionally releases one task worker lease.
+type ReleaseLeaseRequest struct {
+	TaskID                string `json:"task_id"`
+	OwnerID               string `json:"owner_id"`
+	LeaseID               string `json:"lease_id"`
+	ExpectedTaskRevision  uint64 `json:"expected_task_revision"`
+	ExpectedLeaseRevision uint64 `json:"expected_lease_revision"`
+}
+
+// LeaseStore is the optional task lease/heartbeat CAS capability.
+type LeaseStore interface {
+	AcquireLease(context.Context, AcquireLeaseRequest) (*Entry, error)
+	HeartbeatLease(context.Context, HeartbeatLeaseRequest) (*Entry, error)
+	ReleaseLease(context.Context, ReleaseLeaseRequest) (*Entry, error)
+}
+
+// LeaseConflictError reports a stale or non-owning lease mutation.
+type LeaseConflictError struct {
+	TaskID string
+	Detail string
+}
+
+func (e *LeaseConflictError) Error() string {
+	if e == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("agent-sdk/task: task %q lease conflict: %s", strings.TrimSpace(e.TaskID), strings.TrimSpace(e.Detail))
 }
 
 // ResultPersistenceMode controls which task result fields are allowed in a
@@ -218,8 +309,16 @@ func CloneSnapshot(in Snapshot) Snapshot {
 	out.Title = strings.TrimSpace(in.Title)
 	out.Result = jsonvalue.CloneMap(in.Result)
 	out.Metadata = jsonvalue.CloneMap(in.Metadata)
+	out.Lease = CloneLease(in.Lease)
 	out.Terminal = sandbox.CloneTerminalRef(in.Terminal)
 	return out
+}
+
+// CloneLease returns one normalized lease copy.
+func CloneLease(in Lease) Lease {
+	in.ID = strings.TrimSpace(in.ID)
+	in.OwnerID = strings.TrimSpace(in.OwnerID)
+	return in
 }
 
 // CloneEntry returns one normalized task entry copy.
@@ -233,6 +332,7 @@ func CloneEntry(in *Entry) *Entry {
 	out.Session = session.NormalizeSessionRef(in.Session)
 	out.Title = strings.TrimSpace(in.Title)
 	out.State = State(strings.TrimSpace(string(in.State)))
+	out.Lease = CloneLease(in.Lease)
 	out.Spec = jsonvalue.CloneMap(in.Spec)
 	out.Result = jsonvalue.CloneMap(in.Result)
 	out.Metadata = jsonvalue.CloneMap(in.Metadata)

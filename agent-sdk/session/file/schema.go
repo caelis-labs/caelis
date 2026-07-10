@@ -11,7 +11,7 @@ import (
 const (
 	documentKind    = "caelis.sdk.session"
 	documentVersion = 1
-	indexVersion    = 2
+	indexVersion    = 3
 	indexFilename   = ".sessions.index.sqlite"
 	lockFilename    = ".sessions.lock"
 )

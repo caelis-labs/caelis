@@ -61,6 +61,8 @@ type Runtime struct {
 	executionMu              sync.Mutex
 	mu                       sync.RWMutex
 	runStates                map[string]agent.RunState
+	activeRunners            map[string]activeRun
+	approvalWaiters          map[string]chan agent.ApprovalResponse
 	tasks                    *taskRuntime
 	terminals                *streamService
 }
@@ -88,6 +90,8 @@ func New(cfg Config) (*Runtime, error) {
 		agentConfigUpdater:       cfg.AgentConfigUpdater,
 		subagents:                cfg.Subagents,
 		runStates:                map[string]agent.RunState{},
+		activeRunners:            map[string]activeRun{},
+		approvalWaiters:          map[string]chan agent.ApprovalResponse{},
 	}
 	if r.clock == nil {
 		r.clock = time.Now
@@ -232,6 +236,7 @@ func (r *Runtime) Run(
 	handle.setCancelHook(func() error {
 		return r.transitionRunTurnJournal(context.Background(), ref, runID, turnID, session.ExecutionCancelRequested, "run cancellation requested")
 	})
+	r.registerActiveRun(ref, activeSession, handle)
 	go r.executeKernelTurn(runCtx, activeSession, ref, runID, turnID, req, handle)
 	return agent.RunResult{
 		Session: activeSession,
@@ -267,6 +272,7 @@ func (r *Runtime) executeKernelTurn(
 	handle *runner,
 ) {
 	defer handle.finish()
+	defer r.unregisterActiveRun(runID)
 
 	batch := make([]*session.Event, 0, 4)
 	userEvent := buildUserEvent(activeSession, turnID, req.Input, req.DisplayInput, req.ContentParts)
