@@ -76,6 +76,11 @@ Use small, independently committable slices:
   guardrails, typed Run/Turn/Model lifecycle, capability validation, and
   terminal Run/Turn journals. Only validated prompt/assistant pairs enter the
   reusable durable Guardian session, preserving malformed-retry isolation.
+- **P1-3 live-attach contract slice:** the ambiguous `Resume` API was removed.
+  `AttachLiveRun` now names and documents the actual process-local contract;
+  after restart it returns `RunNotAttachableError` and never treats durable
+  journal state as a replay point. P1-3 remains partial until a production host
+  acquires, heartbeats, and releases the store-level session lease.
 
 Do not combine unrelated P0s into one broad rewrite. Update this board in the
 same commit as the closing evidence. Do not edit the frozen v0.25.0 acceptance

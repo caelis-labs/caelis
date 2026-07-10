@@ -2665,7 +2665,7 @@ func TestRuntimePolicyDefaultCommandEscalationWaitsApprovalThenExecutes(t *testi
 	}
 }
 
-func TestRuntimeDurableApprovalResolveAndResume(t *testing.T) {
+func TestRuntimeDurableApprovalResolveAndAttachLiveRun(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -2722,9 +2722,9 @@ func TestRuntimeDurableApprovalResolveAndResume(t *testing.T) {
 			time.Sleep(time.Millisecond)
 		}
 	}
-	resumed, err := runtime.Resume(context.Background(), agent.ResumeRequest{SessionRef: activeSession.SessionRef, RunID: run.Handle.RunID()})
+	resumed, err := runtime.AttachLiveRun(context.Background(), agent.AttachLiveRunRequest{SessionRef: activeSession.SessionRef, RunID: run.Handle.RunID()})
 	if err != nil || resumed.Handle != run.Handle {
-		t.Fatalf("Resume() = %+v, %v; want same live runner", resumed, err)
+		t.Fatalf("AttachLiveRun() = %+v, %v; want same live runner", resumed, err)
 	}
 	decision := agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_once", Approved: true, Reason: "approved by user"}
 	if err := runtime.ResolveApproval(context.Background(), agent.ResolveApprovalRequest{SessionRef: activeSession.SessionRef, TokenID: waiting.PauseTokenID, Decision: decision}); err != nil {
@@ -2764,10 +2764,10 @@ func TestRuntimeDurableApprovalResolveAndResume(t *testing.T) {
 	if err != nil || state.Status != agent.RunLifecycleStatusCompleted || state.ActiveRunID != "run-durable-approval" {
 		t.Fatalf("reopened RunState() = %+v, %v; want durable completed run", state, err)
 	}
-	_, err = reopened.Resume(context.Background(), agent.ResumeRequest{SessionRef: activeSession.SessionRef, RunID: "run-durable-approval"})
-	var notResumable *agent.RunNotResumableError
+	_, err = reopened.AttachLiveRun(context.Background(), agent.AttachLiveRunRequest{SessionRef: activeSession.SessionRef, RunID: "run-durable-approval"})
+	var notResumable *agent.RunNotAttachableError
 	if !errors.As(err, &notResumable) {
-		t.Fatalf("reopened Resume() error = %v, want *RunNotResumableError", err)
+		t.Fatalf("reopened AttachLiveRun() error = %v, want *RunNotAttachableError", err)
 	}
 }
 
@@ -2809,10 +2809,10 @@ func TestRuntimeRecoveryInterruptsOrphanedApprovalPause(t *testing.T) {
 	if err != nil || !state.WaitingApproval || state.PauseTokenID != "pause-orphaned" {
 		t.Fatalf("reopened RunState() = %+v, %v; want pending durable approval", state, err)
 	}
-	_, err = reopened.Resume(context.Background(), agent.ResumeRequest{SessionRef: activeSession.SessionRef, RunID: "run-orphaned"})
-	var notResumable *agent.RunNotResumableError
+	_, err = reopened.AttachLiveRun(context.Background(), agent.AttachLiveRunRequest{SessionRef: activeSession.SessionRef, RunID: "run-orphaned"})
+	var notResumable *agent.RunNotAttachableError
 	if !errors.As(err, &notResumable) {
-		t.Fatalf("Resume(orphaned) error = %v, want *RunNotResumableError", err)
+		t.Fatalf("AttachLiveRun(orphaned) error = %v, want *RunNotAttachableError", err)
 	}
 	if err := reopened.recoverIncompleteExecutionJournal(context.Background(), activeSession.SessionRef); err != nil {
 		t.Fatalf("recoverIncompleteExecutionJournal() error = %v", err)

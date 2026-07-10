@@ -39,8 +39,8 @@ package github.com/caelis-labs/caelis/agent-sdk
   func (e *GuardrailRejectionError) ErrorCode() errorcode.Code
   func (e *RunConflictError) Error() string
   func (e *RunConflictError) ErrorCode() errorcode.Code
-  func (e *RunNotResumableError) Error() string
-  func (e *RunNotResumableError) ErrorCode() errorcode.Code
+  func (e *RunNotAttachableError) Error() string
+  func (e *RunNotAttachableError) ErrorCode() errorcode.Code
   func (o ModelRequestOptions) OutputSpec() *model.OutputSpec
   func (o ModelRequestOptions) StreamEnabled(defaultValue bool) bool
   func (o ModelRequestOptions) WithDefaults(defaults ModelRequestOptions) ModelRequestOptions
@@ -86,12 +86,19 @@ package github.com/caelis-labs/caelis/agent-sdk
   type ApprovalRequester interface {
       RequestApproval(context.Context, ApprovalRequest) (ApprovalResponse, error)
   }
+  type ApprovalResolver interface {
+      ResolveApproval(context.Context, ResolveApprovalRequest) error
+  }
   type ApprovalResponse struct {
       Outcome    string `json:"outcome,omitempty"`
       OptionID   string `json:"option_id,omitempty"`
       Approved   bool   `json:"approved,omitempty"`
       Reason     string `json:"reason,omitempty"`
       ReviewText string `json:"review_text,omitempty"`
+  }
+  type AttachLiveRunRequest struct {
+      SessionRef session.SessionRef `json:"session_ref"`
+      RunID      string             `json:"run_id"`
   }
   type AttachParticipantRequest struct {
       SessionRef session.SessionRef      `json:"session_ref"`
@@ -204,6 +211,9 @@ package github.com/caelis-labs/caelis/agent-sdk
       TraceSink    TraceSink
       Clock        func() time.Time
   }
+  type LiveRunAttacher interface {
+      AttachLiveRun(context.Context, AttachLiveRunRequest) (RunResult, error)
+  }
   type ModelRequestOptions struct {
       Stream *bool             `json:"stream,omitempty"`
       Output *model.OutputSpec `json:"output,omitempty"`
@@ -233,20 +243,12 @@ package github.com/caelis-labs/caelis/agent-sdk
       TokenID    string             `json:"token_id"`
       Decision   ApprovalResponse   `json:"decision"`
   }
-  type ResumableRuntime interface {
-      Resume(context.Context, ResumeRequest) (RunResult, error)
-      ResolveApproval(context.Context, ResolveApprovalRequest) error
-  }
-  type ResumeRequest struct {
-      SessionRef session.SessionRef `json:"session_ref"`
-      RunID      string             `json:"run_id"`
-  }
   type RunConflictError struct {
       SessionRef  session.SessionRef
       ActiveRunID string
   }
   type RunLifecycleStatus string
-  type RunNotResumableError struct {
+  type RunNotAttachableError struct {
       SessionRef session.SessionRef
       RunID      string
       Detail     string
@@ -1026,6 +1028,7 @@ package github.com/caelis-labs/caelis/agent-sdk/policy
   }
 
 package github.com/caelis-labs/caelis/agent-sdk/runtime
+  func (r *Runtime) AttachLiveRun(ctx context.Context, req agent.AttachLiveRunRequest) (agent.RunResult, error)
   func (r *Runtime) AttachParticipant(ctx context.Context, req agent.AttachParticipantRequest) (session.Session, error)
   func (r *Runtime) Compact(ctx context.Context, req CompactRequest) (CompactResult, error)
   func (r *Runtime) ContinueSubagentByHandle(
@@ -1038,7 +1041,6 @@ package github.com/caelis-labs/caelis/agent-sdk/runtime
   func (r *Runtime) DetachParticipant(ctx context.Context, req agent.DetachParticipantRequest) (session.Session, error)
   func (r *Runtime) PromptParticipant(ctx context.Context, req agent.PromptParticipantRequest) (agent.RunResult, error)
   func (r *Runtime) ResolveApproval(ctx context.Context, req agent.ResolveApprovalRequest) error
-  func (r *Runtime) Resume(ctx context.Context, req agent.ResumeRequest) (agent.RunResult, error)
   func (r *Runtime) Run(
       ctx context.Context,
       req agent.RunRequest,

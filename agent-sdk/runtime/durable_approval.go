@@ -34,13 +34,14 @@ func (r *Runtime) unregisterActiveRun(runID string) {
 	r.mu.Unlock()
 }
 
-// Resume reattaches to one live run. A persisted interrupted run is reported
-// explicitly rather than being replayed from an unsafe execution point.
-func (r *Runtime) Resume(ctx context.Context, req agent.ResumeRequest) (agent.RunResult, error) {
+// AttachLiveRun reattaches to one run still live in this Runtime process. A
+// persisted non-live run is reported explicitly rather than being replayed
+// from an unsafe execution point.
+func (r *Runtime) AttachLiveRun(ctx context.Context, req agent.AttachLiveRunRequest) (agent.RunResult, error) {
 	ref := session.NormalizeSessionRef(req.SessionRef)
 	runID := strings.TrimSpace(req.RunID)
 	if r == nil || runID == "" {
-		return agent.RunResult{}, &agent.RunNotResumableError{SessionRef: ref, RunID: runID, Detail: "run_id is required"}
+		return agent.RunResult{}, &agent.RunNotAttachableError{SessionRef: ref, RunID: runID, Detail: "run_id is required"}
 	}
 	r.mu.RLock()
 	active, ok := r.activeRunners[runID]
@@ -56,7 +57,7 @@ func (r *Runtime) Resume(ctx context.Context, req agent.ResumeRequest) (agent.Ru
 	if state.Status != "" {
 		detail = fmt.Sprintf("durable status is %s", state.Status)
 	}
-	return agent.RunResult{}, &agent.RunNotResumableError{SessionRef: ref, RunID: runID, Detail: detail}
+	return agent.RunResult{}, &agent.RunNotAttachableError{SessionRef: ref, RunID: runID, Detail: detail}
 }
 
 func (r *Runtime) requestDurableApproval(

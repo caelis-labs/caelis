@@ -154,10 +154,10 @@ validate those adapters explicitly; do not rely on `AgentSpec` alone.
   preserves queued events so the selected consumer can drain them. Callers
   that stop iteration early must call `Close`.
 - Approval resolution is persisted before a waiting run is awakened.
-  `Resume(runID)` reattaches only a continuation still live in the current
-  process. After restart, a durable but non-live run returns
-  `*agent.RunNotResumableError`; recovery records an interrupted state instead
-  of pretending execution resumed.
+  `AttachLiveRun(runID)` attaches only to execution still registered in the
+  current Runtime process. It is not durable continuation. After restart, a
+  durable but non-live run returns `*agent.RunNotAttachableError`; recovery
+  records an interrupted state instead of pretending execution resumed.
 - The ordering above is the target contract, but v0.25.0 has a known liveness
   gap when a resolved PauseToken commits and the store returns
   `session.CommittedError`: an idempotent retry may not wake the live waiter.

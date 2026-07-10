@@ -81,8 +81,9 @@ type RunResult struct {
 	Handle  Runner          `json:"-"`
 }
 
-// ResumeRequest identifies one live durable run to reattach.
-type ResumeRequest struct {
+// AttachLiveRunRequest identifies one execution that must still be live in the
+// current Runtime process. It is not a durable continuation request.
+type AttachLiveRunRequest struct {
 	SessionRef session.SessionRef `json:"session_ref"`
 	RunID      string             `json:"run_id"`
 }
@@ -94,22 +95,23 @@ type ResolveApprovalRequest struct {
 	Decision   ApprovalResponse   `json:"decision"`
 }
 
-// RunNotResumableError reports a run that has no live execution to reattach.
-// Its durable RunState remains available for recovery diagnostics.
-type RunNotResumableError struct {
+// RunNotAttachableError reports a run that has no live execution in this
+// Runtime process. Its durable RunState remains available for recovery
+// diagnostics, but callers must not interpret that state as a replay point.
+type RunNotAttachableError struct {
 	SessionRef session.SessionRef
 	RunID      string
 	Detail     string
 }
 
-func (e *RunNotResumableError) Error() string {
+func (e *RunNotAttachableError) Error() string {
 	if e == nil {
 		return "<nil>"
 	}
-	return fmt.Sprintf("agent-sdk: run %q in session %q is not resumable: %s", strings.TrimSpace(e.RunID), strings.TrimSpace(e.SessionRef.SessionID), strings.TrimSpace(e.Detail))
+	return fmt.Sprintf("agent-sdk: run %q in session %q is not live-attachable: %s", strings.TrimSpace(e.RunID), strings.TrimSpace(e.SessionRef.SessionID), strings.TrimSpace(e.Detail))
 }
 
-func (e *RunNotResumableError) ErrorCode() errorcode.Code { return errorcode.FailedPrecondition }
+func (e *RunNotAttachableError) ErrorCode() errorcode.Code { return errorcode.FailedPrecondition }
 
 // Runtime is the minimal runtime execution boundary for the new SDK.
 type Runtime interface {
@@ -117,9 +119,16 @@ type Runtime interface {
 	RunState(context.Context, session.SessionRef) (RunState, error)
 }
 
-// ResumableRuntime is the optional durable approval/run recovery capability.
-type ResumableRuntime interface {
-	Resume(context.Context, ResumeRequest) (RunResult, error)
+// LiveRunAttacher exposes process-local observation of an execution that is
+// still registered in the same Runtime instance. It never reconstructs or
+// continues a durable run after restart.
+type LiveRunAttacher interface {
+	AttachLiveRun(context.Context, AttachLiveRunRequest) (RunResult, error)
+}
+
+// ApprovalResolver resolves one durable approval pause. Resolution can wake a
+// matching live waiter, but does not make a non-live run resumable.
+type ApprovalResolver interface {
 	ResolveApproval(context.Context, ResolveApprovalRequest) error
 }
 
