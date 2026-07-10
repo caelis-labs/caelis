@@ -119,6 +119,158 @@ func TestRuntimeRecoveryMarksStartedExecutionUnknownWithoutCallingTool(t *testin
 	}
 }
 
+func TestToolRecoveryStatusRemainsCanonicalWithEmptyResult(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		result     tool.RecoveryResult
+		recoverErr error
+		want       session.ToolExecutionStatus
+	}{
+		{name: "succeeded", result: tool.RecoveryResult{Status: tool.RecoverySucceeded}, want: session.ToolExecutionSucceeded},
+		{name: "failed", result: tool.RecoveryResult{Status: tool.RecoveryFailed, Reason: "remote execution failed"}, want: session.ToolExecutionFailed},
+		{name: "unknown_error", result: tool.RecoveryResult{Status: tool.RecoveryUnknown}, recoverErr: errors.New("recovery unavailable"), want: session.ToolExecutionUnknownOutcome},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			service := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{RootDir: root, SessionIDGenerator: func() string { return "recovery-" + tt.name }}))
+			active, err := service.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "recovery-user"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			user := model.NewTextMessage(model.RoleUser, "perform once")
+			callMessage := model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{ID: "call-recovery", Name: "SIDE_EFFECT", Args: `{}`}}, "")
+			for _, event := range []*session.Event{
+				{IdempotencyKey: "recovery-user", Type: session.EventTypeUser, Visibility: session.VisibilityCanonical, Message: &user},
+				{IdempotencyKey: "recovery-call", Type: session.EventTypeToolCall, Visibility: session.VisibilityCanonical, Message: &callMessage, Tool: &session.EventTool{ID: "call-recovery", Name: "SIDE_EFFECT", Status: "started", Input: map[string]any{}}},
+			} {
+				if _, err := service.AppendEvent(context.Background(), session.AppendEventRequest{SessionRef: active.SessionRef, Event: event}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			writer := journaledTool{sessions: service, sessionRef: active.SessionRef, now: func() time.Time { return time.Unix(200, 0) }}
+			record := session.NormalizeToolExecution(session.ToolExecution{
+				Schema:   session.ToolExecutionSchemaVersion,
+				Key:      session.ExecutionKey{SessionID: active.SessionID, RunID: "run-old", TurnID: "turn-old", StepID: "call-recovery", ToolCallID: "call-recovery"},
+				Revision: 1, ToolName: "SIDE_EFFECT", EffectClass: string(tool.EffectNonIdempotent), Status: session.ToolExecutionPrepared,
+			})
+			if err := writer.appendEntry(context.Background(), session.ToolExecution{}, record, session.ExecutionRecord{}, session.ExecutionRecord{}); err != nil {
+				t.Fatal(err)
+			}
+			for _, status := range []session.ToolExecutionStatus{session.ToolExecutionApproved, session.ToolExecutionStarted} {
+				previous := record
+				record.Revision++
+				record.Status = status
+				if err := writer.appendEntry(context.Background(), previous, record, session.ExecutionRecord{}, session.ExecutionRecord{}); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			runtime := &Runtime{sessions: service, clock: func() time.Time { return time.Unix(300, 0) }}
+			recoverer := recoveryStatusTool{result: tt.result, err: tt.recoverErr}
+			if err := runtime.recoverIncompleteToolExecutions(context.Background(), active.SessionRef, recoverer); err != nil {
+				t.Fatal(err)
+			}
+			events, err := service.Events(context.Background(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			recovered := events[len(events)-1]
+			if recovered.Journal == nil || recovered.Journal.ToolExecution == nil || recovered.Journal.ToolExecution.Status != tt.want {
+				t.Fatalf("journal status = %#v, want %q", recovered.Journal, tt.want)
+			}
+			if recovered.Tool == nil || recovered.Tool.ID != "call-recovery" || recovered.Tool.Status != string(tt.want) || recovered.Tool.Output["status"] != string(tt.want) {
+				t.Fatalf("canonical tool result = %#v, want paired %q", recovered.Tool, tt.want)
+			}
+			for _, result := range recovered.Message.ToolResults() {
+				if result.ToolUseID != "call-recovery" {
+					t.Fatalf("model tool result id = %q, want original call", result.ToolUseID)
+				}
+				for _, part := range result.Content {
+					if part.JSON == nil {
+						continue
+					}
+					var payload map[string]any
+					if err := json.Unmarshal(part.JSON.Value, &payload); err != nil || payload["status"] != string(tt.want) {
+						t.Fatalf("model payload = %v, %v, want status %q", payload, err, tt.want)
+					}
+					_, hasInstruction := payload["instruction"]
+					if hasInstruction != (tt.want == session.ToolExecutionUnknownOutcome) {
+						t.Fatalf("instruction presence = %v for %q", hasInstruction, tt.want)
+					}
+				}
+			}
+
+			rebuilt := canonicalMessages(events)
+			reopened := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{RootDir: root}))
+			probe := &recoveryCaptureModel{}
+			restarted, err := New(Config{Sessions: reopened, AgentFactory: chat.Factory{}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			run, err := restarted.Run(context.Background(), agent.RunRequest{SessionRef: active.SessionRef, Input: "continue", AgentSpec: agent.AgentSpec{Name: "chat", Model: probe}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := drainRunnerEvents(t, run.Handle); err != nil {
+				t.Fatal(err)
+			}
+			wantContext := append(model.CloneMessages(rebuilt), model.NewTextMessage(model.RoleUser, "continue"))
+			if !reflect.DeepEqual(probe.messages, wantContext) {
+				t.Fatalf("live model context = %#v, want rebuilt %#v", probe.messages, wantContext)
+			}
+		})
+	}
+}
+
+type recoveryStatusTool struct {
+	result tool.RecoveryResult
+	err    error
+}
+
+func (recoveryStatusTool) Definition() tool.Definition {
+	return tool.Definition{Name: "SIDE_EFFECT", EffectClass: tool.EffectNonIdempotent}
+}
+
+func (recoveryStatusTool) Call(context.Context, tool.Call) (tool.Result, error) {
+	return tool.Result{}, errors.New("must not execute during recovery")
+}
+
+func (t recoveryStatusTool) Recover(context.Context, tool.RecoveryRequest) (tool.RecoveryResult, error) {
+	return t.result, t.err
+}
+
+type recoveryCaptureModel struct{ messages []model.Message }
+
+func (*recoveryCaptureModel) Name() string { return "recovery-capture" }
+
+func (*recoveryCaptureModel) Capabilities() model.Capabilities {
+	return model.Capabilities{ToolCalls: true}
+}
+
+func (m *recoveryCaptureModel) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
+	m.messages = model.CloneMessages(req.Messages)
+	return func(yield func(*model.StreamEvent, error) bool) {
+		yield(model.StreamEventFromResponse(&model.Response{Message: model.NewTextMessage(model.RoleAssistant, "done"), TurnComplete: true, StepComplete: true, Status: model.ResponseStatusCompleted}), nil)
+	}
+}
+
+func canonicalMessages(events []*session.Event) []model.Message {
+	var messages []model.Message
+	for _, event := range events {
+		if !session.IsMainInvocationVisibleEvent(event) {
+			continue
+		}
+		if message, ok := session.ModelMessageOf(event); ok {
+			messages = append(messages, message)
+		}
+	}
+	return messages
+}
+
 func TestJournaledToolPersistsCancelRequestBeforeExecutionTerminates(t *testing.T) {
 	t.Parallel()
 

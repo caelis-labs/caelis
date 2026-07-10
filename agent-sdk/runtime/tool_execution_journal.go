@@ -304,10 +304,17 @@ func reconcileToolExecution(ctx context.Context, record session.ToolExecution, t
 
 func recoveredToolResultPayload(record session.ToolExecution, recovery tool.RecoveryResult, reason string) map[string]any {
 	if recovery.Status == tool.RecoverySucceeded || recovery.Status == tool.RecoveryFailed {
-		if payload := recoveryResultPayload(recovery.Result); len(payload) > 0 {
-			payload["recovery_status"] = string(recovery.Status)
-			return payload
+		payload := recoveryResultPayload(recovery.Result)
+		if payload == nil {
+			payload = map[string]any{}
 		}
+		payload["status"] = string(recovery.Status)
+		payload["effect_class"] = record.EffectClass
+		payload["execution_identity"] = record.Identity
+		if reason = strings.TrimSpace(reason); reason != "" {
+			payload["reason"] = reason
+		}
+		return payload
 	}
 	return map[string]any{
 		"status":             "unknown_outcome",
@@ -376,8 +383,5 @@ func rawObject(raw json.RawMessage) map[string]any {
 }
 
 func recoveredToolStatus(status session.ToolExecutionStatus) string {
-	if status == session.ToolExecutionSucceeded {
-		return "completed"
-	}
-	return "failed"
+	return string(status)
 }
