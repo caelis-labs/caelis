@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -47,6 +48,59 @@ func TestRunnerSourceEventsDoesNotBlockOnUndrainedLegacyEvents(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for SourceEvents to close")
+	}
+}
+
+func TestRunnerRejectsCompetingEventConsumers(t *testing.T) {
+	t.Parallel()
+
+	runner := newRunner("run-1", func() {})
+	runner.publishEvent(&session.Event{ID: "event-1", Type: session.EventTypeAssistant})
+	runner.finish()
+	var sourceCount int
+	for event, err := range runner.SourceEvents() {
+		if err != nil {
+			t.Fatalf("SourceEvents() error = %v", err)
+		}
+		if event.Canonical != nil {
+			sourceCount++
+		}
+	}
+	if sourceCount != 1 {
+		t.Fatalf("SourceEvents() count = %d, want 1", sourceCount)
+	}
+	var competingErr error
+	for _, err := range runner.Events() {
+		competingErr = err
+	}
+	if !errors.Is(competingErr, ErrEventStreamConsumed) {
+		t.Fatalf("Events() error = %v, want ErrEventStreamConsumed", competingErr)
+	}
+}
+
+func TestRunnerCloseCancelsAndDiscardsUndrainedEvents(t *testing.T) {
+	t.Parallel()
+
+	cancelled := make(chan struct{}, 1)
+	runner := newRunner("run-1", func() { cancelled <- struct{}{} })
+	runner.publishEvent(&session.Event{ID: "event-1", Type: session.EventTypeAssistant})
+	if err := runner.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	select {
+	case <-cancelled:
+	case <-time.After(time.Second):
+		t.Fatal("Close() did not cancel the active execution")
+	}
+	var count int
+	for range runner.Events() {
+		count++
+	}
+	if count != 0 {
+		t.Fatalf("Events() count after Close = %d, want discarded queue", count)
+	}
+	if err := runner.Close(); err != nil {
+		t.Fatalf("second Close() error = %v", err)
 	}
 }
 

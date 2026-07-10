@@ -971,6 +971,7 @@ package github.com/caelis-labs/caelis/agent-sdk/runtime
       ApprovalRequester agent.ApprovalRequester
       ApprovalMode      string
   }
+  var ErrEventStreamConsumed = errors.New("agent-sdk/runtime: runner event stream already has a consumer")
 
 package github.com/caelis-labs/caelis/agent-sdk/runtime/compact
   const (

@@ -88,7 +88,11 @@ type ContextUsage struct {
 	MaxTokens     int `json:"max_tokens,omitempty"`
 }
 
-// Runner is one active runtime run handle.
+// Runner is one active runtime run handle. Events and optional SourceEvents are
+// alternate views of one bounded single-consumer stream; consuming both returns
+// runtime.ErrEventStreamConsumed. Close cancels an unfinished run and discards
+// undrained events, while natural completion preserves queued events for the
+// selected consumer.
 type Runner interface {
 	RunID() string
 	Events() iter.Seq2[*session.Event, error]

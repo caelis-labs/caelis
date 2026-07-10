@@ -11,6 +11,10 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
+// ErrEventStreamConsumed reports an attempt to consume both alternate views of
+// one single-consumer Runner event stream.
+var ErrEventStreamConsumed = errors.New("agent-sdk/runtime: runner event stream already has a consumer")
+
 type runner struct {
 	runID       string
 	cancelFn    context.CancelFunc
@@ -19,6 +23,8 @@ type runner struct {
 	mu          sync.Mutex
 	cancelled   bool
 	closed      bool
+	finished    bool
+	consumer    string
 	submissions []agent.Submission
 	cancelHook  func() error
 }
@@ -41,6 +47,10 @@ func (r *runner) RunID() string { return r.runID }
 func (r *runner) Events() iter.Seq2[*session.Event, error] {
 	return func(yield func(*session.Event, error) bool) {
 		if r == nil {
+			return
+		}
+		if err := r.claimEventStream("events"); err != nil {
+			yield(nil, err)
 			return
 		}
 		for {
@@ -69,6 +79,10 @@ func (r *runner) SourceEvents() iter.Seq2[agent.SourceEvent, error] {
 		if r == nil {
 			return
 		}
+		if err := r.claimEventStream("source_events"); err != nil {
+			yield(agent.SourceEvent{}, err)
+			return
+		}
 		for {
 			item, ok := r.events.Pop()
 			if !ok {
@@ -79,6 +93,16 @@ func (r *runner) SourceEvents() iter.Seq2[agent.SourceEvent, error] {
 			}
 		}
 	}
+}
+
+func (r *runner) claimEventStream(requested string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.consumer == "" {
+		r.consumer = requested
+		return nil
+	}
+	return fmt.Errorf("%w: selected %s, requested %s", ErrEventStreamConsumed, r.consumer, requested)
 }
 
 func (r *runner) Submit(sub agent.Submission) error {
@@ -116,7 +140,7 @@ func (r *runner) markClosed() {
 
 func (r *runner) Cancel() agent.CancelResult {
 	r.mu.Lock()
-	if r.cancelled {
+	if r.cancelled || r.finished {
 		r.mu.Unlock()
 		return agent.CancelResult{Status: agent.CancelStatusAlreadyCancelled}
 	}
@@ -148,8 +172,24 @@ func (r *runner) setCancelHook(fn func() error) {
 }
 
 func (r *runner) Close() error {
+	if r == nil {
+		return nil
+	}
+	r.mu.Lock()
+	finished := r.finished
+	r.mu.Unlock()
+	var cancelErr error
+	if !finished {
+		cancelErr = r.Cancel().Err
+	}
 	r.markClosed()
-	return nil
+	r.closeOnce.Do(func() {
+		r.events.Abort()
+	})
+	// Abort also clears a normally finished queue when Close is called after the
+	// producer won closeOnce but the caller no longer intends to drain events.
+	r.events.Abort()
+	return cancelErr
 }
 
 func (r *runner) PublishEvent(event *session.Event) {
@@ -192,8 +232,11 @@ func (r *runner) finish() {
 	if r == nil {
 		return
 	}
+	r.mu.Lock()
+	r.finished = true
+	r.closed = true
+	r.mu.Unlock()
 	r.closeOnce.Do(func() {
-		r.markClosed()
 		r.events.Close()
 	})
 }

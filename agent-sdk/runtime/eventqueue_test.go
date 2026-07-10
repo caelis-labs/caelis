@@ -67,3 +67,53 @@ func TestEventQueueClearDropsBufferedItems(t *testing.T) {
 		t.Fatal("Pop() ok = true after Clear and Close, want false")
 	}
 }
+
+func TestEventQueueAppliesBoundedBackpressure(t *testing.T) {
+	t.Parallel()
+
+	q := newEventQueueWithCapacity[int](2)
+	if !q.Push(1) || !q.Push(2) {
+		t.Fatal("initial Push() failed")
+	}
+	pushed := make(chan bool, 1)
+	go func() { pushed <- q.Push(3) }()
+	select {
+	case <-pushed:
+		t.Fatal("third Push() returned before capacity became available")
+	case <-time.After(20 * time.Millisecond):
+	}
+	if value, ok := q.Pop(); !ok || value != 1 {
+		t.Fatalf("Pop() = %d, %v; want 1, true", value, ok)
+	}
+	select {
+	case ok := <-pushed:
+		if !ok {
+			t.Fatal("third Push() failed after capacity became available")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("third Push() remained blocked")
+	}
+	q.Close()
+}
+
+func TestEventQueueAbortDropsItemsAndUnblocksProducer(t *testing.T) {
+	t.Parallel()
+
+	q := newEventQueueWithCapacity[int](1)
+	q.Push(1)
+	pushed := make(chan bool, 1)
+	go func() { pushed <- q.Push(2) }()
+	time.Sleep(20 * time.Millisecond)
+	q.Abort()
+	select {
+	case ok := <-pushed:
+		if ok {
+			t.Fatal("blocked Push() succeeded after Abort")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Abort() did not unblock producer")
+	}
+	if _, ok := q.Pop(); ok {
+		t.Fatal("Pop() returned an item after Abort")
+	}
+}

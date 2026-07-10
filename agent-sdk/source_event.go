@@ -16,8 +16,9 @@ type SourceEvent struct {
 	Native    any
 }
 
-// SourceHandle is an optional extension for handles that expose both canonical
-// session events and opaque native passthrough events.
+// SourceHandle is an optional alternate view for handles that expose canonical
+// session events plus opaque native passthrough. It and Runner.Events must not
+// be consumed concurrently; one handle has one event consumer.
 type SourceHandle interface {
 	SourceEvents() iter.Seq2[SourceEvent, error]
 }
