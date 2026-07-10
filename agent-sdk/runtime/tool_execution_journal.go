@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
@@ -222,7 +223,7 @@ func (r *Runtime) wrapToolsForExecutionJournal(ref session.SessionRef, runID str
 	return out
 }
 
-func (r *Runtime) recoverIncompleteToolExecutions(ctx context.Context, ref session.SessionRef) error {
+func (r *Runtime) recoverIncompleteToolExecutions(ctx context.Context, ref session.SessionRef, recoveryTools ...tool.Tool) error {
 	events, err := r.sessions.Events(ctx, session.EventsRequest{SessionRef: ref, IncludeTransient: true})
 	if err != nil {
 		return err
@@ -244,14 +245,138 @@ func (r *Runtime) recoverIncompleteToolExecutions(ctx context.Context, ref sessi
 		}
 		nextStep := previousStep
 		nextStep.Revision++
-		nextStep.Status = session.ExecutionUnknownOutcome
+		result, recoveryReason := reconcileToolExecution(ctx, record, recoveryTools)
+		payload := recoveredToolResultPayload(record, result, recoveryReason)
+		switch result.Status {
+		case tool.RecoverySucceeded:
+			record.Status = session.ToolExecutionSucceeded
+			nextStep.Status = session.ExecutionSucceeded
+		case tool.RecoveryFailed:
+			record.Status = session.ToolExecutionFailed
+			record.Error = firstNonEmpty(result.Reason, recoveryReason)
+			nextStep.Status = session.ExecutionFailed
+			nextStep.Error = record.Error
+		default:
+			record.Status = session.ToolExecutionUnknownOutcome
+			nextStep.Status = session.ExecutionUnknownOutcome
+		}
 		nextStep.RecoveredFrom = previousStep.Status
+		record.Reason = firstNonEmpty(result.Reason, recoveryReason, record.Reason)
 		nextStep.Reason = record.Reason
 		nextStep.UpdatedAt = record.UpdatedAt
-		writer := journaledTool{sessions: r.sessions, sessionRef: ref, now: r.now}
-		if err := writer.appendEntry(ctx, previous, record, previousStep, nextStep); err != nil {
+		if result.Status == tool.RecoverySucceeded || result.Status == tool.RecoveryFailed {
+			record.Result, _ = json.Marshal(result.Result)
+		}
+		if err := session.ValidateToolExecutionTransition(previous, record); err != nil {
+			return err
+		}
+		if err := session.ValidateExecutionTransition(previousStep, nextStep); err != nil {
+			return err
+		}
+		if err := r.appendRecoveredToolResult(ctx, ref, record, nextStep, payload); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func reconcileToolExecution(ctx context.Context, record session.ToolExecution, tools []tool.Tool) (tool.RecoveryResult, string) {
+	for _, candidate := range tools {
+		if candidate == nil || !strings.EqualFold(candidate.Definition().Name, record.ToolName) {
+			continue
+		}
+		recoverer, ok := candidate.(tool.Recoverer)
+		if !ok {
+			break
+		}
+		result, err := recoverer.Recover(ctx, tool.RecoveryRequest{
+			ExecutionIdentity: record.Identity,
+			Call:              tool.Call{ID: record.Key.ToolCallID, Name: record.ToolName, Input: append(json.RawMessage(nil), record.Input...)},
+		})
+		if err != nil {
+			return tool.RecoveryResult{Status: tool.RecoveryUnknown}, "recovery failed: " + err.Error()
+		}
+		return result, strings.TrimSpace(result.Reason)
+	}
+	return tool.RecoveryResult{Status: tool.RecoveryUnknown}, "no configured recoverer could prove the side-effect outcome"
+}
+
+func recoveredToolResultPayload(record session.ToolExecution, recovery tool.RecoveryResult, reason string) map[string]any {
+	if recovery.Status == tool.RecoverySucceeded || recovery.Status == tool.RecoveryFailed {
+		if payload := recoveryResultPayload(recovery.Result); len(payload) > 0 {
+			payload["recovery_status"] = string(recovery.Status)
+			return payload
+		}
+	}
+	return map[string]any{
+		"status":             "unknown_outcome",
+		"effect_class":       record.EffectClass,
+		"execution_identity": record.Identity,
+		"reason":             strings.TrimSpace(reason),
+		"instruction":        "Do not retry this tool call blindly; reconcile its side effects before any new execution.",
+	}
+}
+
+func recoveryResultPayload(result tool.Result) map[string]any {
+	for _, part := range result.Content {
+		if part.JSON != nil {
+			var decoded map[string]any
+			if json.Unmarshal(part.JSON.Value, &decoded) == nil {
+				return session.CloneState(decoded)
+			}
+		}
+		if part.Text != nil && strings.TrimSpace(part.Text.Text) != "" {
+			return map[string]any{"result": part.Text.Text}
+		}
+	}
+	return nil
+}
+
+func (r *Runtime) appendRecoveredToolResult(
+	ctx context.Context,
+	ref session.SessionRef,
+	record session.ToolExecution,
+	step session.ExecutionRecord,
+	payload map[string]any,
+) error {
+	message := model.Message{
+		Role: model.RoleTool,
+		Parts: []model.Part{model.NewToolResultJSONPart(
+			record.Key.ToolCallID,
+			record.ToolName,
+			payload,
+			record.Status != session.ToolExecutionSucceeded,
+		)},
+	}
+	event := &session.Event{
+		IdempotencyKey: "tool-recovery-result:" + record.Identity,
+		Type:           session.EventTypeToolResult,
+		Visibility:     session.VisibilityCanonical,
+		Time:           record.UpdatedAt,
+		Actor:          session.ActorRef{Kind: session.ActorKindTool, ID: record.Key.ToolCallID, Name: record.ToolName},
+		Message:        &message,
+		Tool: &session.EventTool{
+			ID: record.Key.ToolCallID, Name: record.ToolName, Status: recoveredToolStatus(record.Status),
+			Input: rawObject(record.Input), Output: session.CloneState(payload),
+		},
+		Journal: &session.ExecutionJournalEntry{
+			Schema: session.ExecutionJournalSchemaVersion, Kind: session.JournalKindToolExecution,
+			Execution: &step, ToolExecution: &record,
+		},
+	}
+	_, err := r.sessions.AppendEvent(ctx, session.AppendEventRequest{SessionRef: ref, Event: event})
+	return err
+}
+
+func rawObject(raw json.RawMessage) map[string]any {
+	out := map[string]any{}
+	_ = json.Unmarshal(raw, &out)
+	return out
+}
+
+func recoveredToolStatus(status session.ToolExecutionStatus) string {
+	if status == session.ToolExecutionSucceeded {
+		return "completed"
+	}
+	return "failed"
 }

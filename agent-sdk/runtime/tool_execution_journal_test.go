@@ -3,7 +3,10 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"iter"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -192,13 +195,8 @@ func TestRuntimeCrashWindowRecoversUnknownOutcomeWithoutToolReplay(t *testing.T)
 		},
 	}}
 	var calls int
-	writeTool := tool.NamedTool{
-		Def: tool.Definition{Name: "ECHO", EffectClass: tool.EffectNonIdempotent, InputSchema: map[string]any{"type": "object"}},
-		Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
-			calls++
-			return tool.Result{ID: call.ID, Name: call.Name, Content: []model.Part{model.NewJSONPart([]byte(`{"value":"written"}`))}}, nil
-		},
-	}
+	var recoveryCalls int
+	writeTool := &failingRecoveryTool{calls: &calls, recoveryCalls: &recoveryCalls}
 	first, err := New(Config{
 		Sessions: failing, AgentFactory: chat.Factory{}, PolicyRegistry: allow, DefaultPolicyMode: "allow",
 		RunIDGenerator: func() string { return "run-crashed" },
@@ -228,9 +226,10 @@ func TestRuntimeCrashWindowRecoversUnknownOutcomeWithoutToolReplay(t *testing.T)
 	if err != nil {
 		t.Fatalf("New(second) error = %v", err)
 	}
+	probe := &unknownOutcomeAwareModel{messages: make(chan []model.Message, 1)}
 	run, err = second.Run(context.Background(), agent.RunRequest{
 		SessionRef: active.SessionRef, Input: "recover",
-		AgentSpec: agent.AgentSpec{Name: "chat", Model: staticModel{text: "recovered"}},
+		AgentSpec: agent.AgentSpec{Name: "chat", Model: probe, Tools: []tool.Tool{writeTool}},
 	})
 	if err != nil {
 		t.Fatalf("Run(second) error = %v", err)
@@ -241,6 +240,9 @@ func TestRuntimeCrashWindowRecoversUnknownOutcomeWithoutToolReplay(t *testing.T)
 	if calls != 1 {
 		t.Fatalf("tool calls after recovery = %d, want no replay", calls)
 	}
+	if recoveryCalls != 1 {
+		t.Fatalf("Recover() calls = %d, want 1", recoveryCalls)
+	}
 
 	events, err := reopened.Events(context.Background(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
 	if err != nil {
@@ -248,7 +250,17 @@ func TestRuntimeCrashWindowRecoversUnknownOutcomeWithoutToolReplay(t *testing.T)
 	}
 	var toolStatuses []session.ToolExecutionStatus
 	var stepStatuses []session.ExecutionStatus
+	var rebuiltContext []model.Message
+	var recoveredResult *session.Event
 	for _, event := range events {
+		if session.IsMainInvocationVisibleEvent(event) && (session.EventTypeOf(event) != session.EventTypeAssistant || session.EventText(event) != "probe complete") {
+			if message, ok := session.ModelMessageOf(event); ok {
+				rebuiltContext = append(rebuiltContext, message)
+			}
+		}
+		if session.EventTypeOf(event) == session.EventTypeToolResult && event.Tool != nil && event.Tool.ID == "call-1" {
+			recoveredResult = event
+		}
 		if event.Journal == nil {
 			continue
 		}
@@ -265,6 +277,80 @@ func TestRuntimeCrashWindowRecoversUnknownOutcomeWithoutToolReplay(t *testing.T)
 	if want := []session.ExecutionStatus{session.ExecutionPrepared, session.ExecutionStarted, session.ExecutionUnknownOutcome}; !reflect.DeepEqual(stepStatuses, want) {
 		t.Fatalf("step journal = %v, want %v", stepStatuses, want)
 	}
+	if recoveredResult == nil || recoveredResult.Tool.Output["status"] != "unknown_outcome" || recoveredResult.Tool.Output["effect_class"] != string(tool.EffectNonIdempotent) {
+		t.Fatalf("canonical recovered tool result = %+v, want unknown_outcome for original call", recoveredResult)
+	}
+	if instruction, _ := recoveredResult.Tool.Output["instruction"].(string); !strings.Contains(instruction, "Do not retry") {
+		t.Fatalf("recovery instruction = %q, want explicit no-blind-retry guidance", instruction)
+	}
+	if got := <-probe.messages; !reflect.DeepEqual(got, rebuiltContext) {
+		t.Fatalf("recovered live model context = %#v, want rebuilt durable context %#v", got, rebuiltContext)
+	}
+}
+
+type failingRecoveryTool struct {
+	calls         *int
+	recoveryCalls *int
+}
+
+type unknownOutcomeAwareModel struct {
+	messages chan []model.Message
+}
+
+func (*unknownOutcomeAwareModel) Name() string { return "unknown-outcome-aware" }
+
+func (*unknownOutcomeAwareModel) Capabilities() model.Capabilities {
+	return model.Capabilities{ToolCalls: true}
+}
+
+func (m *unknownOutcomeAwareModel) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
+	messages := make([]model.Message, len(req.Messages))
+	for index := range req.Messages {
+		messages[index] = model.CloneMessage(req.Messages[index])
+	}
+	select {
+	case m.messages <- messages:
+	default:
+	}
+	sawUnknown := false
+	for _, message := range req.Messages {
+		for _, result := range message.ToolResults() {
+			for _, part := range result.Content {
+				if part.JSON == nil {
+					continue
+				}
+				var payload map[string]any
+				if json.Unmarshal(part.JSON.Value, &payload) == nil && payload["status"] == "unknown_outcome" {
+					sawUnknown = true
+				}
+			}
+		}
+	}
+	return func(yield func(*model.StreamEvent, error) bool) {
+		response := &model.Response{TurnComplete: true, StepComplete: true, Status: model.ResponseStatusCompleted}
+		if sawUnknown {
+			response.Message = model.NewTextMessage(model.RoleAssistant, "probe complete")
+			response.FinishReason = model.FinishReasonStop
+		} else {
+			response.Message = model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{ID: "call-blind-retry", Name: "ECHO", Args: `{"value":"written"}`}}, "")
+			response.FinishReason = model.FinishReasonToolCalls
+		}
+		yield(&model.StreamEvent{Type: model.StreamEventTurnDone, Response: response}, nil)
+	}
+}
+
+func (*failingRecoveryTool) Definition() tool.Definition {
+	return tool.Definition{Name: "ECHO", EffectClass: tool.EffectNonIdempotent, InputSchema: map[string]any{"type": "object"}}
+}
+
+func (t *failingRecoveryTool) Call(_ context.Context, call tool.Call) (tool.Result, error) {
+	*t.calls++
+	return tool.Result{ID: call.ID, Name: call.Name, Content: []model.Part{model.NewJSONPart([]byte(`{"value":"written"}`))}}, nil
+}
+
+func (t *failingRecoveryTool) Recover(context.Context, tool.RecoveryRequest) (tool.RecoveryResult, error) {
+	*t.recoveryCalls++
+	return tool.RecoveryResult{}, errors.New("reconciliation backend unavailable")
 }
 
 func newJournalTestSession(t *testing.T, id string) (*inmemory.Service, session.Session) {

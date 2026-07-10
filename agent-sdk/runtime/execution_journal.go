@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
 func (r *Runtime) startRunTurnJournal(ctx context.Context, ref session.SessionRef, runID, turnID string) error {
@@ -126,8 +127,8 @@ func executionTerminal(status session.ExecutionStatus) bool {
 	}
 }
 
-func (r *Runtime) recoverIncompleteExecutionJournal(ctx context.Context, ref session.SessionRef) error {
-	if err := r.recoverIncompleteToolExecutions(ctx, ref); err != nil {
+func (r *Runtime) recoverIncompleteExecutionJournal(ctx context.Context, ref session.SessionRef, recoveryTools ...tool.Tool) error {
+	if err := r.recoverIncompleteToolExecutions(ctx, ref, recoveryTools...); err != nil {
 		return err
 	}
 	r.executionMu.Lock()

@@ -203,7 +203,7 @@ func (r *Runtime) Run(
 		cancel()
 		return agent.RunResult{}, err
 	}
-	if err := r.recoverIncompleteExecutionJournal(runCtx, ref); err != nil {
+	if err := r.recoverIncompleteExecutionJournal(runCtx, ref, req.AgentSpec.Tools...); err != nil {
 		cancel()
 		r.setRunState(ref.SessionID, agent.RunState{Status: agent.RunLifecycleStatusFailed, ActiveRunID: runID, LastError: err.Error(), UpdatedAt: r.now()})
 		return agent.RunResult{}, err
