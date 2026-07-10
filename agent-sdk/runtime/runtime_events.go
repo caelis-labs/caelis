@@ -194,21 +194,26 @@ func (r *Runtime) handlePlanEvent(
 	if !ok {
 		return nil, true, fmt.Errorf("agent-sdk/runtime: session service must support atomic plan event/state commit")
 	}
+	planState := map[string]any{
+		"version":     1,
+		"entries":     entriesToState(entries),
+		"explanation": explanation,
+	}
+	planMutation, err := json.Marshal(planState)
+	if err != nil {
+		return nil, true, fmt.Errorf("agent-sdk/runtime: encode plan state mutation: %w", err)
+	}
 	persisted, err := batch.AppendEventsAndUpdateState(ctx, session.AppendEventsAndUpdateStateRequest{
 		SessionRef:     ref,
 		MutationGuard:  session.RuntimeMutationGuard(ctx),
 		TransactionID:  normalized.IdempotencyKey,
-		MutationDigest: "plan-state-v1",
+		MutationDigest: "plan-state-v2:" + string(planMutation),
 		Events:         []*session.Event{normalized},
 		UpdateState: func(_ []*session.Event, state map[string]any) (map[string]any, error) {
 			if state == nil {
 				state = map[string]any{}
 			}
-			state["plan"] = map[string]any{
-				"version":     1,
-				"entries":     entriesToState(entries),
-				"explanation": explanation,
-			}
+			state["plan"] = session.CloneState(planState)
 			return state, nil
 		},
 	})

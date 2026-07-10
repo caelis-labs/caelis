@@ -29,7 +29,7 @@ Status values:
 | P0-1 Policy fail-closed | closed | Only explicit allow can execute; all malformed, missing, registry, and unknown decisions fail closed |
 | P0-2 Recursive value isolation | closed | Durable/public values cannot share mutable nested descendants; failed mutations roll back |
 | P0-3 Session/compaction concurrency | closed | Checkpoint replay/CAS and shared-store fencing remain covered; file lease committed outcomes return durable revisions, and built-in/ACP cancellation preserves the active lease fence |
-| P0-4 Compound commit idempotency | partial | Provider-local tool-call IDs need run/turn/step scope, and PLAN transaction digests must cover every persisted state mutation including explanation |
+| P0-4 Compound commit idempotency | closed | Provider-local tool IDs are scoped by run/turn/step while canonical pairing keeps the raw ID; PLAN transaction digests cover entries and persisted explanation |
 | P0-5 Tool unknown-outcome model continuity | closed | Unknown side effects produce a canonical result paired with the original call, are visible after replay, and are reconciled without blind execution |
 | P0-6 Approval committed-error liveness | closed | A durable matching resolution always wakes a live waiter, including `session.CommittedError` and idempotent retry paths |
 | P0-7 Subagent spawn saga | closed | Compensation resumes across cancel/phase/detach failures; spawning restart becomes durable unknown outcome; identity binds full spawn semantics; invalid anchors fail before participant commit; ACP cancel failures propagate |
@@ -115,6 +115,12 @@ useful, but it no longer constitutes closing evidence for the reopened rows.
   participant identity before attachment and compensates the external child.
   The production ACP runner now returns remote Cancel notification failures and
   records an interrupted/unknown local state instead of claiming cancellation.
+- **P0-4 PLAN mutation-digest sub-slice:** PLAN compound transactions encode
+  the complete versioned plan state—entries and explanation—into the explicit
+  mutation digest rather than relying on non-persisted `Event.Text`. Memory and
+  file regressions prove an identical retry deduplicates, while the same
+  transaction/entries with a different explanation returns
+  `EventConflictError` and leaves the original state intact.
 
 ### Historical P1 implementation evidence
 
