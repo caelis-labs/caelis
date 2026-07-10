@@ -196,10 +196,12 @@ derives and validates the final assembled model/tool/sandbox requirements.
   event and state documents and completes recovery before later operations.
   A post-commit reporting failure is a committed/unknown-reporting outcome;
   retry with the same idempotency identity rather than inventing a new event.
-- Event deduplication does not make an arbitrary v0.25.0
-  `AppendEventsAndUpdateState` callback idempotent. If every event deduplicates,
-  the callback is still invoked. Until P0-4 closes, callers must not retry an
-  incremental state callback after a committed/unknown-reporting result.
+- Compound event/state mutations bind `TransactionID` to a caller-declared
+  `MutationDigest` plus the canonical event payload digest. An identical retry
+  is recognized before stale `ExpectedRevision` CAS is evaluated and does not
+  invoke the callback again. Reusing the transaction identity with changed
+  event or mutation semantics conflicts. Legacy bool-only transaction records
+  remain readable but cannot prove a digest and therefore fail closed on retry.
 - Persist semantic model state, not transcript caches. Recursive JSON values
   must be copied on input and output so callers cannot mutate stored state
   without a store operation.

@@ -180,10 +180,11 @@ func (r *Runtime) handlePlanEvent(
 		return nil, true, fmt.Errorf("agent-sdk/runtime: session service must support atomic plan event/state commit")
 	}
 	persisted, err := batch.AppendEventsAndUpdateState(ctx, session.AppendEventsAndUpdateStateRequest{
-		SessionRef:    ref,
-		MutationGuard: session.RuntimeMutationGuard(ctx),
-		TransactionID: normalized.IdempotencyKey,
-		Events:        []*session.Event{normalized},
+		SessionRef:     ref,
+		MutationGuard:  session.RuntimeMutationGuard(ctx),
+		TransactionID:  normalized.IdempotencyKey,
+		MutationDigest: "plan-state-v1",
+		Events:         []*session.Event{normalized},
 		UpdateState: func(_ []*session.Event, state map[string]any) (map[string]any, error) {
 			if state == nil {
 				state = map[string]any{}

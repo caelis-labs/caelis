@@ -156,9 +156,10 @@ func TestPrepareAppendTransactionAppliesSessionMutationStateAndMetadata(t *testi
 	now := time.Unix(20, 0)
 	message := model.NewTextMessage(model.RoleUser, "hello from transaction")
 	tx, err := PrepareAppendTransaction(PrepareAppendTransactionRequest{
-		Session:       Session{SessionRef: SessionRef{SessionID: "sess-1"}},
-		State:         map[string]any{"cursor": float64(1)},
-		TransactionID: "transaction-1",
+		Session:        Session{SessionRef: SessionRef{SessionID: "sess-1"}},
+		State:          map[string]any{"cursor": float64(1)},
+		TransactionID:  "transaction-1",
+		MutationDigest: "cursor-and-participant-v1",
 		Events: []*Event{{
 			Type:    EventTypeUser,
 			Message: &message,
@@ -221,6 +222,17 @@ func TestPrepareAppendTransactionRequiresIdentityForStateMutation(t *testing.T) 
 	})
 	if !errors.Is(err, ErrInvalidTransaction) {
 		t.Fatalf("PrepareAppendTransaction() error = %v, want ErrInvalidTransaction", err)
+	}
+	_, err = PrepareAppendTransaction(PrepareAppendTransactionRequest{
+		Session:       Session{SessionRef: SessionRef{SessionID: "sess-missing-digest"}},
+		State:         map[string]any{},
+		TransactionID: "transaction-without-digest",
+		UpdateState: func(_ []*Event, state map[string]any) (map[string]any, error) {
+			return state, nil
+		},
+	})
+	if !errors.Is(err, ErrInvalidTransaction) {
+		t.Fatalf("PrepareAppendTransaction(missing digest) error = %v, want ErrInvalidTransaction", err)
 	}
 }
 

@@ -1,6 +1,9 @@
 package session
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"strings"
@@ -43,19 +46,21 @@ type AppendStateUpdate func([]*Event, map[string]any) (map[string]any, error)
 // transaction. Stores provide existing IDs and commit the returned session,
 // state, and persisted events with their own IO primitive.
 type PrepareAppendTransactionRequest struct {
-	Session            Session
-	State              map[string]any
-	Events             []*Event
-	ExistingEvents     []*Event
-	ExistingIDs        map[string]struct{}
-	ExpectedRevision   *uint64
-	TransactionID      string
-	TransactionApplied bool
-	LastSeq            uint64
-	Now                time.Time
-	AllocateEventID    EventIDAllocator
-	MutateSession      AppendSessionMutation
-	UpdateState        AppendStateUpdate
+	Session                  Session
+	State                    map[string]any
+	Events                   []*Event
+	ExistingEvents           []*Event
+	ExistingIDs              map[string]struct{}
+	ExpectedRevision         *uint64
+	TransactionID            string
+	MutationDigest           string
+	TransactionApplied       bool
+	AppliedTransactionDigest string
+	LastSeq                  uint64
+	Now                      time.Time
+	AllocateEventID          EventIDAllocator
+	MutateSession            AppendSessionMutation
+	UpdateState              AppendStateUpdate
 }
 
 // PreparedAppendTransaction is the normalized mutation plan for one store
@@ -66,6 +71,7 @@ type PreparedAppendTransaction struct {
 	Prepared          PreparedAppendEvents
 	Changed           bool
 	TransactionID     string
+	TransactionDigest string
 	RecordTransaction bool
 }
 
@@ -155,15 +161,30 @@ func PrepareEventsForAppend(req PrepareEventsForAppendRequest) (PreparedAppendEv
 // PrepareAppendTransaction canonicalizes events and applies shared session and
 // state mutations before any backend commit occurs.
 func PrepareAppendTransaction(req PrepareAppendTransactionRequest) (PreparedAppendTransaction, error) {
-	if err := CheckExpectedRevision(req.Session, req.ExpectedRevision); err != nil {
-		return PreparedAppendTransaction{}, err
-	}
 	if err := ValidateState(req.State); err != nil {
 		return PreparedAppendTransaction{}, err
 	}
 	transactionID := strings.TrimSpace(req.TransactionID)
 	if req.UpdateState != nil && transactionID == "" {
 		return PreparedAppendTransaction{}, fmt.Errorf("transaction_id is required for compound state mutation: %w", ErrInvalidTransaction)
+	}
+	mutationDigest := strings.TrimSpace(req.MutationDigest)
+	if transactionID != "" && mutationDigest == "" {
+		return PreparedAppendTransaction{}, fmt.Errorf("mutation_digest is required for compound state mutation: %w", ErrInvalidTransaction)
+	}
+	transactionDigest, err := appendTransactionDigest(mutationDigest, req.Events)
+	if err != nil {
+		return PreparedAppendTransaction{}, err
+	}
+	if req.TransactionApplied {
+		if strings.TrimSpace(req.AppliedTransactionDigest) == "" || req.AppliedTransactionDigest != transactionDigest {
+			return PreparedAppendTransaction{}, &EventConflictError{SessionID: req.Session.SessionID, IdempotencyKey: "transaction:" + transactionID}
+		}
+	}
+	if !req.TransactionApplied {
+		if err := CheckExpectedRevision(req.Session, req.ExpectedRevision); err != nil {
+			return PreparedAppendTransaction{}, err
+		}
 	}
 	prepared, err := PrepareEventsForAppend(PrepareEventsForAppendRequest{
 		SessionID:       req.Session.SessionID,
@@ -183,6 +204,7 @@ func PrepareAppendTransaction(req PrepareAppendTransactionRequest) (PreparedAppe
 		}
 		return PreparedAppendTransaction{
 			Session: req.Session, State: CloneState(req.State), Prepared: prepared, TransactionID: transactionID,
+			TransactionDigest: transactionDigest,
 		}, nil
 	}
 
@@ -230,8 +252,34 @@ func PrepareAppendTransaction(req PrepareAppendTransactionRequest) (PreparedAppe
 		Prepared:          prepared,
 		Changed:           changed,
 		TransactionID:     transactionID,
+		TransactionDigest: transactionDigest,
 		RecordTransaction: recordTransaction,
 	}, nil
+}
+
+func appendTransactionDigest(mutationDigest string, events []*Event) (string, error) {
+	prepared := make([]*Event, 0, len(events))
+	for _, event := range events {
+		normalized := CanonicalizeEvent(event)
+		if normalized == nil {
+			return "", ErrInvalidEvent
+		}
+		normalized.SessionID = ""
+		normalized.ID = ""
+		normalized.Seq = 0
+		normalized.Time = time.Time{}
+		normalized.Text = ""
+		prepared = append(prepared, normalized)
+	}
+	raw, err := json.Marshal(struct {
+		Mutation string   `json:"mutation"`
+		Events   []*Event `json:"events,omitempty"`
+	}{Mutation: strings.TrimSpace(mutationDigest), Events: prepared})
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:]), nil
 }
 
 // LastEventSeq returns the highest durable sequence in one event set.

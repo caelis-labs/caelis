@@ -1913,6 +1913,7 @@ package github.com/caelis-labs/caelis/agent-sdk/session
       ExpectedRevision *uint64
       MutationGuard    MutationGuard
       TransactionID    string
+      MutationDigest   string
       Events           []*Event
       UpdateState      func(storedEvents []*Event, state map[string]any) (map[string]any, error)
   }
@@ -2212,19 +2213,21 @@ package github.com/caelis-labs/caelis/agent-sdk/session
       Detail  string
   }
   type PrepareAppendTransactionRequest struct {
-      Session            Session
-      State              map[string]any
-      Events             []*Event
-      ExistingEvents     []*Event
-      ExistingIDs        map[string]struct{}
-      ExpectedRevision   *uint64
-      TransactionID      string
-      TransactionApplied bool
-      LastSeq            uint64
-      Now                time.Time
-      AllocateEventID    EventIDAllocator
-      MutateSession      AppendSessionMutation
-      UpdateState        AppendStateUpdate
+      Session                  Session
+      State                    map[string]any
+      Events                   []*Event
+      ExistingEvents           []*Event
+      ExistingIDs              map[string]struct{}
+      ExpectedRevision         *uint64
+      TransactionID            string
+      MutationDigest           string
+      TransactionApplied       bool
+      AppliedTransactionDigest string
+      LastSeq                  uint64
+      Now                      time.Time
+      AllocateEventID          EventIDAllocator
+      MutateSession            AppendSessionMutation
+      UpdateState              AppendStateUpdate
   }
   type PrepareEventsForAppendRequest struct {
       SessionID       string
@@ -2247,6 +2250,7 @@ package github.com/caelis-labs/caelis/agent-sdk/session
       Prepared          PreparedAppendEvents
       Changed           bool
       TransactionID     string
+      TransactionDigest string
       RecordTransaction bool
   }
   type ProtocolApproval struct {

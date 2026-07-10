@@ -276,8 +276,9 @@ func (s *systemManagedAgentSession) commit(
 		assistantToStore.IdempotencyKey = transactionID + ":assistant"
 	}
 	storedEvents, err := batch.AppendEventsAndUpdateState(ctx, session.AppendEventsAndUpdateStateRequest{
-		SessionRef:    s.session.SessionRef,
-		TransactionID: transactionID,
+		SessionRef:     s.session.SessionRef,
+		TransactionID:  transactionID,
+		MutationDigest: "system-managed-agent-session-v1",
 		Events: []*session.Event{
 			promptToStore,
 			assistantToStore,

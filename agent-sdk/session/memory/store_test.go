@@ -116,9 +116,10 @@ func TestCompoundTransactionIdentityDoesNotReapplyStateOnRetry(t *testing.T) {
 	event := &session.Event{ID: "event-compound-retry", IdempotencyKey: "fact:compound-retry", Type: session.EventTypeUser, Message: &message}
 	stateCalls := 0
 	req := session.AppendEventsAndUpdateStateRequest{
-		SessionRef:    created.SessionRef,
-		TransactionID: "transaction-compound-retry",
-		Events:        []*session.Event{event},
+		SessionRef:     created.SessionRef,
+		TransactionID:  "transaction-compound-retry",
+		MutationDigest: "compound-count-v1",
+		Events:         []*session.Event{event},
 		UpdateState: func(_ []*session.Event, state map[string]any) (map[string]any, error) {
 			stateCalls++
 			state["count"] = float64(stateCalls)
@@ -151,6 +152,7 @@ func TestCompoundTransactionIdentityDoesNotReapplyStateOnRetry(t *testing.T) {
 	pureStateCalls := 0
 	pureState := session.AppendEventsAndUpdateStateRequest{
 		SessionRef: created.SessionRef, TransactionID: "transaction-pure-state",
+		MutationDigest: "pure-state-v1",
 		UpdateState: func(_ []*session.Event, state map[string]any) (map[string]any, error) {
 			pureStateCalls++
 			state["pure"] = "applied"
@@ -168,6 +170,16 @@ func TestCompoundTransactionIdentityDoesNotReapplyStateOnRetry(t *testing.T) {
 	}
 	if pureStateCalls != 1 || loaded.State["pure"] != "applied" || loaded.Session.Revision != 2 {
 		t.Fatalf("pure-state retry = calls %d revision %d state %#v, want one separately identified commit", pureStateCalls, loaded.Session.Revision, loaded.State)
+	}
+	changedPure := pureState
+	changedPure.MutationDigest = "pure-state-v2"
+	if _, err := service.AppendEventsAndUpdateState(context.Background(), changedPure); err == nil {
+		t.Fatal("pure-state TransactionID reused with a different mutation digest succeeded")
+	} else {
+		var conflict *session.EventConflictError
+		if !errors.As(err, &conflict) {
+			t.Fatalf("changed pure-state digest error = %v, want *EventConflictError", err)
+		}
 	}
 }
 

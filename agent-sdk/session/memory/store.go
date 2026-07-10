@@ -173,7 +173,7 @@ func (s *Store) appendEventRequest(req session.AppendEventRequest) (*session.Eve
 		return nil, err
 	}
 
-	tx, err := s.prepareAppendTransactionForRecord(record, []*session.Event{event}, nil, nil, req.ExpectedRevision, "")
+	tx, err := s.prepareAppendTransactionForRecord(record, []*session.Event{event}, nil, nil, req.ExpectedRevision, "", "")
 	if err != nil {
 		return nil, err
 	}
@@ -189,24 +189,27 @@ func (s *Store) prepareAppendTransactionForRecord(
 	updateState session.AppendStateUpdate,
 	expectedRevision *uint64,
 	transactionID string,
+	mutationDigest string,
 ) (session.PreparedAppendTransaction, error) {
 	if record == nil {
 		return session.PreparedAppendTransaction{}, session.ErrSessionNotFound
 	}
 	return session.PrepareAppendTransaction(session.PrepareAppendTransactionRequest{
-		Session:            record.session,
-		State:              record.state,
-		Events:             events,
-		ExistingEvents:     record.events,
-		ExistingIDs:        existingEventIDSet(record.events),
-		ExpectedRevision:   expectedRevision,
-		TransactionID:      transactionID,
-		TransactionApplied: record.appliedTransactions[strings.TrimSpace(transactionID)],
-		LastSeq:            session.LastEventSeq(record.events),
-		Now:                s.now(),
-		AllocateEventID:    s.ensureUniqueEventID,
-		MutateSession:      mutate,
-		UpdateState:        updateState,
+		Session:                  record.session,
+		State:                    record.state,
+		Events:                   events,
+		ExistingEvents:           record.events,
+		ExistingIDs:              existingEventIDSet(record.events),
+		ExpectedRevision:         expectedRevision,
+		TransactionID:            transactionID,
+		MutationDigest:           mutationDigest,
+		TransactionApplied:       record.appliedTransactions[strings.TrimSpace(transactionID)],
+		AppliedTransactionDigest: record.appliedTransactionDigests[strings.TrimSpace(transactionID)],
+		LastSeq:                  session.LastEventSeq(record.events),
+		Now:                      s.now(),
+		AllocateEventID:          s.ensureUniqueEventID,
+		MutateSession:            mutate,
+		UpdateState:              updateState,
 	})
 }
 
@@ -224,6 +227,10 @@ func (s *Store) applyAppendTransactionToRecord(record *record, tx session.Prepar
 			record.appliedTransactions = map[string]bool{}
 		}
 		record.appliedTransactions[tx.TransactionID] = true
+		if record.appliedTransactionDigests == nil {
+			record.appliedTransactionDigests = map[string]string{}
+		}
+		record.appliedTransactionDigests[tx.TransactionID] = tx.TransactionDigest
 	}
 }
 
@@ -245,7 +252,7 @@ func (s *Store) AppendEvents(
 	if err := validateMutationGuard(record.lease, req.MutationGuard, s.now()); err != nil {
 		return nil, err
 	}
-	tx, err := s.prepareAppendTransactionForRecord(record, req.Events, nil, nil, req.ExpectedRevision, "")
+	tx, err := s.prepareAppendTransactionForRecord(record, req.Events, nil, nil, req.ExpectedRevision, "", "")
 	if err != nil {
 		return nil, err
 	}
@@ -271,7 +278,7 @@ func (s *Store) AppendEventsAndUpdateState(
 	if err := validateMutationGuard(record.lease, req.MutationGuard, s.now()); err != nil {
 		return nil, err
 	}
-	tx, err := s.prepareAppendTransactionForRecord(record, req.Events, nil, req.UpdateState, req.ExpectedRevision, req.TransactionID)
+	tx, err := s.prepareAppendTransactionForRecord(record, req.Events, nil, req.UpdateState, req.ExpectedRevision, req.TransactionID, req.MutationDigest)
 	if err != nil {
 		return nil, err
 	}
@@ -340,6 +347,7 @@ func (s *Store) BindControllerWithEvent(
 		nil,
 		req.ExpectedRevision,
 		"",
+		"",
 	)
 	if err != nil {
 		return session.Session{}, nil, err
@@ -398,6 +406,7 @@ func (s *Store) PutParticipantWithEvent(
 		nil,
 		req.ExpectedRevision,
 		"",
+		"",
 	)
 	if err != nil {
 		return session.Session{}, nil, err
@@ -455,6 +464,7 @@ func (s *Store) RemoveParticipantWithEvent(
 		},
 		nil,
 		req.ExpectedRevision,
+		"",
 		"",
 	)
 	if err != nil {
@@ -666,12 +676,13 @@ func (s *Service) UpdateState(
 }
 
 type record struct {
-	session             session.Session
-	events              []*session.Event
-	state               map[string]any
-	appliedTransactions map[string]bool
-	lease               session.SessionLease
-	leaseEpoch          uint64
+	session                   session.Session
+	events                    []*session.Event
+	state                     map[string]any
+	appliedTransactions       map[string]bool
+	appliedTransactionDigests map[string]string
+	lease                     session.SessionLease
+	leaseEpoch                uint64
 }
 
 func (r *record) cloneSession() session.Session {

@@ -415,13 +415,14 @@ type AppendEventsRequest struct {
 // complete event/state mutation across retries. UpdateState receives the
 // normalized events that will be returned to the caller; an event-derived
 // callback is not repeated when every input event deduplicates. A pure-state
-// mutation uses no Events and must provide its own stable TransactionID for
-// idempotent retry.
+// mutation uses no Events. MutationDigest identifies the callback semantics;
+// it is combined with canonical event payloads and bound to TransactionID.
 type AppendEventsAndUpdateStateRequest struct {
 	SessionRef       SessionRef
 	ExpectedRevision *uint64
 	MutationGuard    MutationGuard
 	TransactionID    string
+	MutationDigest   string
 	Events           []*Event
 	UpdateState      func(storedEvents []*Event, state map[string]any) (map[string]any, error)
 }

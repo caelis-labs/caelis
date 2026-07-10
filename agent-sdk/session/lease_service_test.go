@@ -123,7 +123,8 @@ func assertLeaseFencedMutations(t *testing.T, service session.Service, ref sessi
 	compound := service.(session.EventBatchStateService)
 	if _, err := compound.AppendEventsAndUpdateState(context.Background(), session.AppendEventsAndUpdateStateRequest{
 		SessionRef: ref, MutationGuard: stale, TransactionID: "stale-compound",
-		Events: []*session.Event{{Type: session.EventTypeUser, Message: &user}},
+		MutationDigest: "stale-compound-v1",
+		Events:         []*session.Event{{Type: session.EventTypeUser, Message: &user}},
 		UpdateState: func(_ []*session.Event, state map[string]any) (map[string]any, error) {
 			state["stale"] = true
 			return state, nil

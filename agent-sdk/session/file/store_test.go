@@ -1466,6 +1466,7 @@ func TestStoreWALRecoversCommittedEventAndStateAfterCrashPoints(t *testing.T) {
 				SessionRef:       created.SessionRef,
 				ExpectedRevision: &zero,
 				TransactionID:    "transaction-wal",
+				MutationDigest:   "wal-cursor-v1",
 				Events: []*session.Event{{
 					ID: "event-wal", Type: session.EventTypeUser, Message: &message,
 				}},
@@ -1531,8 +1532,9 @@ func TestStoreCompoundCommittedErrorRetryDoesNotReapplyState(t *testing.T) {
 	event := &session.Event{ID: "event-compound-committed", IdempotencyKey: "fact:compound-committed", Type: session.EventTypeUser, Message: &message}
 	stateCalls := 0
 	request := func() session.AppendEventsAndUpdateStateRequest {
+		expected := uint64(0)
 		return session.AppendEventsAndUpdateStateRequest{
-			SessionRef: created.SessionRef, TransactionID: "transaction-compound-committed", Events: []*session.Event{event},
+			SessionRef: created.SessionRef, ExpectedRevision: &expected, TransactionID: "transaction-compound-committed", MutationDigest: "compound-count-v1", Events: []*session.Event{event},
 			UpdateState: func(_ []*session.Event, state map[string]any) (map[string]any, error) {
 				stateCalls++
 				state["count"] = float64(stateCalls)
@@ -1554,6 +1556,16 @@ func TestStoreCompoundCommittedErrorRetryDoesNotReapplyState(t *testing.T) {
 	}
 	if stateCalls != 1 || loaded.State["count"] != float64(1) || len(loaded.Events) != 1 || loaded.Session.Revision != 1 {
 		t.Fatalf("retry outcome = calls %d revision %d state %#v events %#v, want one complete transaction", stateCalls, loaded.Session.Revision, loaded.State, loaded.Events)
+	}
+	changed := request()
+	changed.MutationDigest = "compound-count-v2"
+	if _, err := reopened.AppendEventsAndUpdateState(context.Background(), changed); err == nil {
+		t.Fatal("reused transaction with changed mutation digest succeeded")
+	} else {
+		var conflict *session.EventConflictError
+		if !errors.As(err, &conflict) {
+			t.Fatalf("changed digest error = %v, want *EventConflictError", err)
+		}
 	}
 }
 
@@ -1628,8 +1640,9 @@ func TestStoreAppendEventsAndUpdateStateDoesNotAppendLogWhenStateUpdateFails(t *
 	prompt := model.NewTextMessage(model.RoleUser, "review this change")
 	assistant := model.NewTextMessage(model.RoleAssistant, "allow")
 	_, err = store.AppendEventsAndUpdateState(ctx, session.AppendEventsAndUpdateStateRequest{
-		SessionRef:    createdSession.SessionRef,
-		TransactionID: "transaction-state-failure",
+		SessionRef:     createdSession.SessionRef,
+		TransactionID:  "transaction-state-failure",
+		MutationDigest: "state-failure-v1",
 		Events: []*session.Event{
 			{Type: session.EventTypeUser, Message: &prompt, Text: prompt.TextContent()},
 			{Type: session.EventTypeAssistant, Message: &assistant, Text: assistant.TextContent()},
