@@ -9,12 +9,16 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
-const defaultGuardrailTimeout = 5 * time.Second
+const (
+	defaultGuardrailTimeout  = 5 * time.Second
+	maxOutstandingGuardrails = 32
+)
 
 type lifecycleScopeContextKey struct{}
 
@@ -74,6 +78,9 @@ func validateGuardrailSpecs(specs []agent.GuardrailSpec) error {
 }
 
 func (r *Runtime) applyGuardrails(ctx context.Context, activeSession session.Session, req agent.RunRequest) (agent.RunRequest, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if r == nil || len(r.guardrails) == 0 {
 		return req, nil
 	}
@@ -84,6 +91,7 @@ func (r *Runtime) applyGuardrails(ctx context.Context, activeSession session.Ses
 		ContentParts: cloneContentParts(req.ContentParts),
 	}
 	for _, spec := range r.guardrails {
+		guardrailName := strings.TrimSpace(spec.Guardrail.Name())
 		timeout := spec.Timeout
 		if timeout == 0 {
 			timeout = defaultGuardrailTimeout
@@ -93,9 +101,14 @@ func (r *Runtime) applyGuardrails(ctx context.Context, activeSession session.Ses
 		event := agent.LifecycleEvent{
 			Operation:  agent.LifecycleGuardrail,
 			SessionRef: current.SessionRef,
-			Name:       spec.Guardrail.Name(),
+			Name:       guardrailName,
 		}
 		err := r.executeLifecycle(guardCtx, event, func(callCtx context.Context) error {
+			select {
+			case r.guardrailSlots <- struct{}{}:
+			default:
+				return errorcode.New(errorcode.ResourceExhausted, fmt.Sprintf("agent-sdk/runtime: guardrail outstanding limit reached (%d)", maxOutstandingGuardrails))
+			}
 			type applyResult struct {
 				input agent.GuardrailInput
 				err   error
@@ -105,8 +118,9 @@ func (r *Runtime) applyGuardrails(ctx context.Context, activeSession session.Ses
 			go func() {
 				result := applyResult{}
 				defer func() {
+					defer func() { <-r.guardrailSlots }()
 					if recovered := recover(); recovered != nil {
-						result.err = fmt.Errorf("agent-sdk/runtime: guardrail %q panic: %v", spec.Guardrail.Name(), recovered)
+						result.err = fmt.Errorf("agent-sdk/runtime: guardrail %q panic: %v", guardrailName, recovered)
 					}
 					done <- result
 				}()

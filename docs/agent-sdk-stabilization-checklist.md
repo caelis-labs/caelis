@@ -99,6 +99,12 @@ Use small, independently committable slices:
   process-wide outstanding cap bounds permanently stuck sink calls; saturated
   telemetry is dropped rather than backpressuring model, tool, approval, or
   handoff execution.
+- **P1-5 guardrail-liveness sub-slice:** Runtime normalizes a nil caller context
+  before session or guardrail work. Non-cooperative guardrails retain their
+  outstanding slot after timeout until they actually return, and each Runtime
+  has a hard outstanding-call cap. Once saturated, later invocations fail with
+  `resource_exhausted` (or follow an explicitly configured fail-open policy)
+  without spawning another leaked goroutine.
 
 Do not combine unrelated P0s into one broad rewrite. Update this board in the
 same commit as the closing evidence. Do not edit the frozen v0.25.0 acceptance

@@ -192,6 +192,12 @@ start/terminal order within one lifecycle operation, but sinks must tolerate
 concurrent operations. A hard outstanding-dispatch cap bounds non-cooperative
 sinks; once saturated, trace records are dropped instead of blocking execution.
 
+Runtime normalizes the caller context before guardrails run. A timed-out
+guardrail that ignores cancellation retains an outstanding slot until its call
+really exits. The per-Runtime cap therefore acts as a stuck-call circuit
+breaker: saturation is a typed resource-exhaustion failure and never creates
+another guardrail goroutine.
+
 Hosts may implement OpenTelemetry as an interceptor or sink adapter. The SDK
 does not depend on a telemetry implementation.
 

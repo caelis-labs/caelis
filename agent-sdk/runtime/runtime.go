@@ -68,6 +68,7 @@ type Runtime struct {
 	terminals                *streamService
 	lifecycle                agent.LifecycleOptions
 	guardrails               []agent.GuardrailSpec
+	guardrailSlots           chan struct{}
 }
 
 // New returns one baseline local runtime.
@@ -100,7 +101,8 @@ func New(cfg Config) (*Runtime, error) {
 			TraceSink:    cfg.TraceSink,
 			Clock:        cfg.Clock,
 		},
-		guardrails: append([]agent.GuardrailSpec(nil), cfg.Guardrails...),
+		guardrails:     append([]agent.GuardrailSpec(nil), cfg.Guardrails...),
+		guardrailSlots: make(chan struct{}, maxOutstandingGuardrails),
 	}
 	if r.clock == nil {
 		r.clock = time.Now
@@ -170,6 +172,9 @@ func (r *Runtime) Run(
 	ctx context.Context,
 	req agent.RunRequest,
 ) (agent.RunResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	ref := session.NormalizeSessionRef(req.SessionRef)
 	activeSession, err := r.sessions.Session(ctx, ref)
 	if err != nil {

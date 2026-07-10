@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -107,6 +109,53 @@ func TestGuardrailRejectionNeverFailsOpen(t *testing.T) {
 	var rejection *agent.GuardrailRejectionError
 	if !errors.As(err, &rejection) {
 		t.Fatalf("error = %v, want GuardrailRejectionError", err)
+	}
+}
+
+func TestGuardrailsNormalizeNilContextBeforeInvocation(t *testing.T) {
+	t.Parallel()
+
+	guardrail := guardrailFunc{name: "context", apply: func(ctx context.Context, input agent.GuardrailInput) (agent.GuardrailInput, error) {
+		if ctx == nil {
+			t.Fatal("guardrail context = nil")
+		}
+		return input, nil
+	}}
+	runtime, active := newGuardrailRuntime(t, agent.GuardrailSpec{Guardrail: guardrail})
+	//nolint:staticcheck // This regression intentionally exercises the public nil-context normalization contract.
+	if _, err := runtime.applyGuardrails(nil, active, agent.RunRequest{SessionRef: active.SessionRef, Input: "input"}); err != nil {
+		t.Fatalf("applyGuardrails(nil) error = %v", err)
+	}
+}
+
+func TestGuardrailOutstandingCallsAreBoundedWhenImplementationsIgnoreCancellation(t *testing.T) {
+	t.Parallel()
+
+	release := make(chan struct{})
+	defer close(release)
+	var entered atomic.Int64
+	blocking := guardrailFunc{name: "stuck", apply: func(_ context.Context, input agent.GuardrailInput) (agent.GuardrailInput, error) {
+		entered.Add(1)
+		<-release
+		return input, nil
+	}}
+	runtime, active := newGuardrailRuntime(t, agent.GuardrailSpec{
+		Guardrail: blocking,
+		Timeout:   time.Millisecond,
+		OnFailure: agent.GuardrailFailClosed,
+	})
+	var exhausted bool
+	for range 64 {
+		_, err := runtime.applyGuardrails(context.Background(), active, agent.RunRequest{SessionRef: active.SessionRef, Input: "input"})
+		if errorcode.Is(err, errorcode.ResourceExhausted) {
+			exhausted = true
+		}
+	}
+	if !exhausted {
+		t.Fatal("applyGuardrails() never reported bounded outstanding capacity")
+	}
+	if got := entered.Load(); got == 0 || got > 32 {
+		t.Fatalf("stuck guardrail calls = %d, want bounded range 1..32", got)
 	}
 }
 
