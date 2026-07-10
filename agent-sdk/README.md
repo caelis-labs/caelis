@@ -66,6 +66,10 @@ The accepted boundary, ACP-native orchestration model, durability risks, and
 migration plan are documented in
 [Agent SDK Boundary and Evolution Plan](../docs/agent-sdk-boundary.md).
 
+The public quickstart and the normative concurrency, cancellation, event
+ordering, persistence, error, Go-version, and platform contracts are in
+[Agent SDK Usage and Compatibility](../docs/agent-sdk-usage.md).
+
 Module or repository extraction is not a current goal. Package independence is
 enforced by dependency closure, architecture lint, explicit public contracts,
 and external consumer tests against the root module. Handoff is authorized by

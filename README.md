@@ -114,7 +114,9 @@ is provided.
 
 See [docs/architecture.md](docs/architecture.md) for the layer map and
 [docs/agent-sdk-boundary.md](docs/agent-sdk-boundary.md) for the reusable Agent
-SDK package boundary, ACP-native orchestration model, and evolution plan.
+SDK package boundary, ACP-native orchestration model, and evolution plan. See
+[docs/agent-sdk-usage.md](docs/agent-sdk-usage.md) for the SDK quickstart and
+compatibility contracts.
 
 ## Development
 
