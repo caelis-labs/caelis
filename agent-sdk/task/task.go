@@ -2,10 +2,10 @@ package task
 
 import (
 	"context"
-	"maps"
 	"strings"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/internal/jsonvalue"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
@@ -169,7 +169,7 @@ func SanitizeResultForPersistence(result map[string]any, mode ResultPersistenceM
 	if result == nil {
 		return nil
 	}
-	out := maps.Clone(result)
+	out := jsonvalue.CloneMap(result)
 	for _, key := range transientResultKeys {
 		delete(out, key)
 	}
@@ -216,8 +216,8 @@ func CloneSnapshot(in Snapshot) Snapshot {
 	out := in
 	out.Ref = CloneRef(in.Ref)
 	out.Title = strings.TrimSpace(in.Title)
-	out.Result = maps.Clone(in.Result)
-	out.Metadata = maps.Clone(in.Metadata)
+	out.Result = jsonvalue.CloneMap(in.Result)
+	out.Metadata = jsonvalue.CloneMap(in.Metadata)
 	out.Terminal = sandbox.CloneTerminalRef(in.Terminal)
 	return out
 }
@@ -233,9 +233,9 @@ func CloneEntry(in *Entry) *Entry {
 	out.Session = session.NormalizeSessionRef(in.Session)
 	out.Title = strings.TrimSpace(in.Title)
 	out.State = State(strings.TrimSpace(string(in.State)))
-	out.Spec = maps.Clone(in.Spec)
-	out.Result = maps.Clone(in.Result)
-	out.Metadata = maps.Clone(in.Metadata)
+	out.Spec = jsonvalue.CloneMap(in.Spec)
+	out.Result = jsonvalue.CloneMap(in.Result)
+	out.Metadata = jsonvalue.CloneMap(in.Metadata)
 	out.Terminal = sandbox.CloneTerminalRef(in.Terminal)
 	return &out
 }

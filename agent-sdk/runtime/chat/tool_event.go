@@ -2,7 +2,6 @@ package chat
 
 import (
 	"encoding/json"
-	"maps"
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
@@ -41,7 +40,7 @@ func toolResultRawOutput(result tool.Result) map[string]any {
 			return map[string]any{"result": string(part.JSON.Value)}
 		}
 		if payload, ok := decoded.(map[string]any); ok {
-			return maps.Clone(payload)
+			return session.CloneState(payload)
 		}
 		return map[string]any{"result": decoded}
 	}
@@ -239,8 +238,8 @@ func toolEventPayload(call model.ToolCall, status string, rawInput map[string]an
 		Kind:    display.ToolKindForName(call.Name),
 		Title:   toolCallTitle(call),
 		Status:  strings.TrimSpace(status),
-		Input:   maps.Clone(rawInput),
-		Output:  maps.Clone(rawOutput),
+		Input:   session.CloneState(rawInput),
+		Output:  session.CloneState(rawOutput),
 		Content: cloneEventToolContent(content),
 	}
 	return payload

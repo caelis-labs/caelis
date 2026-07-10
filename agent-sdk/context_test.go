@@ -23,7 +23,12 @@ func TestNewContextProvidesStableReadonlyViews(t *testing.T) {
 			Text:    "hello",
 		},
 	}
-	state := map[string]any{"mode": "chat"}
+	state := map[string]any{
+		"mode": "chat",
+		"nested": map[string]any{
+			"items": []any{map[string]any{"value": "original"}},
+		},
+	}
 
 	ctx := NewContext(ContextSpec{
 		Context: context.Background(),
@@ -59,11 +64,20 @@ func TestNewContextProvidesStableReadonlyViews(t *testing.T) {
 
 	events[0].Text = "mutated"
 	state["mode"] = "other"
+	state["nested"].(map[string]any)["items"].([]any)[0].(map[string]any)["value"] = "source-mutated"
 	if got := ctx.Events().At(0).Text; got != "hello" {
 		t.Fatalf("context should be isolated from source mutations, got %q", got)
 	}
 	if got, _ := ctx.ReadonlyState().Lookup("mode"); got != "chat" {
 		t.Fatalf("readonly state should be isolated from source mutations, got %v", got)
+	}
+	lookup, _ := ctx.ReadonlyState().Lookup("nested")
+	lookup.(map[string]any)["items"].([]any)[0].(map[string]any)["value"] = "lookup-mutated"
+	snapshot := ctx.ReadonlyState().Snapshot()
+	snapshot["nested"].(map[string]any)["items"].([]any)[0].(map[string]any)["value"] = "snapshot-mutated"
+	stable, _ := ctx.ReadonlyState().Lookup("nested")
+	if got := stable.(map[string]any)["items"].([]any)[0].(map[string]any)["value"]; got != "original" {
+		t.Fatalf("readonly nested state leaked mutation: %v", got)
 	}
 }
 

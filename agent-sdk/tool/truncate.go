@@ -3,12 +3,12 @@ package tool
 import (
 	"encoding/json"
 	"fmt"
-	"maps"
 	"sort"
 	"strconv"
 	"strings"
 	"unicode/utf8"
 
+	"github.com/caelis-labs/caelis/agent-sdk/internal/jsonvalue"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
@@ -56,7 +56,7 @@ func TruncateResultWithInfo(result Result, policy TruncationPolicy) (Result, Tru
 	}
 	out, _ := CloneResult(result, nil)
 	out.Content = model.CloneParts(result.Content)
-	out.Meta = maps.Clone(result.Meta)
+	out.Meta = jsonvalue.CloneMap(result.Meta)
 	if len(out.Content) == 0 {
 		payload := map[string]any{}
 		if result.IsError {

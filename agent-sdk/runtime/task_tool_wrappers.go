@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"maps"
 	"strings"
 	"time"
 
@@ -343,7 +342,7 @@ func (r subagentApprovalRequester) RequestSubagentApproval(
 	if toolName == "" || strings.EqualFold(toolName, "UNKNOWN") {
 		toolName = firstNonEmpty(req.ToolCall.Title, req.ToolCall.Kind, "UNKNOWN")
 	}
-	rawInput := maps.Clone(req.ToolCall.RawInput)
+	rawInput := session.CloneState(req.ToolCall.RawInput)
 	var callInput json.RawMessage
 	if len(rawInput) > 0 {
 		if data, err := json.Marshal(rawInput); err == nil {
@@ -572,7 +571,7 @@ func splitTaskControlIDs(taskID string) []string {
 }
 
 func taskToolResultEventMeta(existing map[string]any, action string, input string, yieldMS int, yieldDefaulted bool, waitUntilDone bool, timedOut bool, actualWaitMS int, snapshot taskapi.Snapshot) map[string]any {
-	out := maps.Clone(existing)
+	out := session.CloneState(existing)
 	if out == nil {
 		out = map[string]any{}
 	}
@@ -602,7 +601,7 @@ func taskToolResultEventMeta(existing map[string]any, action string, input strin
 }
 
 func taskBatchToolResultEventMeta(existing map[string]any, action string, input string, yieldMS int, yieldDefaulted bool, waitUntilDone bool, actualWaitMS int, items []taskBatchControlItem) map[string]any {
-	out := maps.Clone(existing)
+	out := session.CloneState(existing)
 	if out == nil {
 		out = map[string]any{}
 	}

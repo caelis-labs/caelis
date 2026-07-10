@@ -113,6 +113,9 @@ func PrepareEventsForAppend(req PrepareEventsForAppendRequest) (PreparedAppendEv
 // PrepareAppendTransaction canonicalizes events and applies shared session and
 // state mutations before any backend commit occurs.
 func PrepareAppendTransaction(req PrepareAppendTransactionRequest) (PreparedAppendTransaction, error) {
+	if err := ValidateState(req.State); err != nil {
+		return PreparedAppendTransaction{}, err
+	}
 	prepared, err := PrepareEventsForAppend(PrepareEventsForAppendRequest{
 		SessionID:       req.Session.SessionID,
 		Events:          req.Events,
@@ -143,6 +146,9 @@ func PrepareAppendTransaction(req PrepareAppendTransactionRequest) (PreparedAppe
 	if req.UpdateState != nil {
 		next, err := req.UpdateState(CloneEvents(prepared.Events), CloneState(nextState))
 		if err != nil {
+			return PreparedAppendTransaction{}, err
+		}
+		if err := ValidateState(next); err != nil {
 			return PreparedAppendTransaction{}, err
 		}
 		nextState = CloneState(next)

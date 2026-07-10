@@ -3,9 +3,9 @@ package agentsdk
 import (
 	"context"
 	"iter"
-	"maps"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/internal/jsonvalue"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
@@ -245,7 +245,7 @@ func NewEvents(events []*session.Event) Events {
 
 // NewReadonlyState wraps one state snapshot as one readonly view.
 func NewReadonlyState(values map[string]any) ReadonlyState {
-	return readonlyStateSnapshot{values: maps.Clone(values)}
+	return readonlyStateSnapshot{values: jsonvalue.CloneMap(values)}
 }
 
 type eventSlice struct {
@@ -279,11 +279,11 @@ type readonlyStateSnapshot struct {
 
 func (s readonlyStateSnapshot) Lookup(key string) (any, bool) {
 	value, ok := s.values[key]
-	return value, ok
+	return jsonvalue.Clone(value), ok
 }
 
 func (s readonlyStateSnapshot) Snapshot() map[string]any {
-	return maps.Clone(s.values)
+	return jsonvalue.CloneMap(s.values)
 }
 
 type contextSnapshot struct {
@@ -325,7 +325,7 @@ func CloneSubmission(sub Submission) Submission {
 		Text:         sub.Text,
 		DisplayInput: sub.DisplayInput,
 		ContentParts: append([]model.ContentPart(nil), sub.ContentParts...),
-		Metadata:     maps.Clone(sub.Metadata),
+		Metadata:     jsonvalue.CloneMap(sub.Metadata),
 	}
 }
 

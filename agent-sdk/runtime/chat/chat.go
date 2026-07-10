@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"iter"
-	"maps"
 	"strings"
 	"sync"
 
@@ -394,5 +393,5 @@ func Metadata(systemPrompt string) map[string]any {
 
 // CloneMetadata returns one shallow metadata copy.
 func CloneMetadata(values map[string]any) map[string]any {
-	return maps.Clone(values)
+	return session.CloneState(values)
 }

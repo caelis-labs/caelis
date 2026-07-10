@@ -4,6 +4,7 @@ import (
 	"maps"
 	"strings"
 
+	"github.com/caelis-labs/caelis/agent-sdk/internal/jsonvalue"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
@@ -178,7 +179,7 @@ func CurrentConfigValues(state map[string]any) map[string]string {
 
 // SetCurrentModeID returns one detached state snapshot with the selected mode updated.
 func SetCurrentModeID(state map[string]any, modeID string) map[string]any {
-	out := maps.Clone(state)
+	out := jsonvalue.CloneMap(state)
 	if out == nil {
 		out = map[string]any{}
 	}
@@ -193,7 +194,7 @@ func SetCurrentModeID(state map[string]any, modeID string) map[string]any {
 
 // SetCurrentConfigValue returns one detached state snapshot with one selected config value updated.
 func SetCurrentConfigValue(state map[string]any, configID string, value string) map[string]any {
-	out := maps.Clone(state)
+	out := jsonvalue.CloneMap(state)
 	if out == nil {
 		out = map[string]any{}
 	}

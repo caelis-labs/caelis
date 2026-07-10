@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"context"
-	"maps"
 	"strings"
 	"time"
 
@@ -14,7 +13,7 @@ func (tm *taskRuntime) syncCanonicalToolResult(ctx context.Context, ref session.
 	if tm == nil || tm.store == nil || event == nil || session.EventTypeOf(event) != session.EventTypeToolResult || event.Tool == nil {
 		return nil
 	}
-	output := maps.Clone(event.Tool.Output)
+	output := session.CloneState(event.Tool.Output)
 	if len(output) == 0 {
 		return nil
 	}
@@ -48,13 +47,13 @@ func canonicalTaskBatchOutputs(value any) ([]map[string]any, bool) {
 			if !ok {
 				continue
 			}
-			out = append(out, maps.Clone(itemMap))
+			out = append(out, session.CloneState(itemMap))
 		}
 		return out, true
 	case []map[string]any:
 		out := make([]map[string]any, 0, len(items))
 		for _, item := range items {
-			out = append(out, maps.Clone(item))
+			out = append(out, session.CloneState(item))
 		}
 		return out, true
 	default:
@@ -148,7 +147,7 @@ func applyCanonicalTaskEntry(entry *taskapi.Entry, output map[string]any, status
 	if entry == nil {
 		return
 	}
-	entry.Result = maps.Clone(output)
+	entry.Result = session.CloneState(output)
 	if entry.Kind == taskapi.KindCommand {
 		syncCanonicalCommandTaskMetadata(entry, output)
 	}
@@ -219,7 +218,7 @@ func canonicalTaskHistoryOutputs(event *session.Event) []canonicalTaskHistoryOut
 		}
 		return out
 	}
-	output := maps.Clone(event.Tool.Output)
+	output := session.CloneState(event.Tool.Output)
 	if len(output) == 0 || strings.TrimSpace(taskStringValue(output["task_id"])) == "" {
 		return nil
 	}

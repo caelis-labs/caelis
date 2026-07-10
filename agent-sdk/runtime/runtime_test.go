@@ -2590,7 +2590,7 @@ func TestRuntimePolicyModePreservesCustomRegistryMode(t *testing.T) {
 	}
 }
 
-func TestRuntimePolicyUnknownModeFallsBackToDefaultPolicy(t *testing.T) {
+func TestRuntimePolicyUnknownModeFailsClosed(t *testing.T) {
 	t.Parallel()
 
 	activeSession := session.Session{
@@ -2623,21 +2623,81 @@ func TestRuntimePolicyUnknownModeFallsBackToDefaultPolicy(t *testing.T) {
 	if got := len(wrapped); got != 1 {
 		t.Fatalf("len(wrapped) = %d, want 1", got)
 	}
-	result, err := wrapped[0].Call(context.Background(), tool.Call{
+	_, err = wrapped[0].Call(context.Background(), tool.Call{
 		ID:    "call-1",
 		Name:  "WRITE",
 		Input: []byte(`{"path":` + jsonStringForTest(policyOutsidePathForRuntimeTest()) + `}`),
 	})
-	if err != nil {
-		t.Fatalf("wrapped tool Call() error = %v", err)
+	var profileErr *policy.ProfileError
+	if !errors.As(err, &profileErr) {
+		t.Fatalf("wrapped tool Call() error = %v, want *policy.ProfileError", err)
 	}
-	if !result.IsError {
-		t.Fatalf("result.IsError = false, want policy denial")
+}
+
+func TestRuntimePolicyRegistryErrorAndEmptyDecisionFailClosed(t *testing.T) {
+	t.Parallel()
+
+	activeSession := session.Session{SessionRef: session.SessionRef{SessionID: "s1"}}
+	targetTool := tool.NamedTool{
+		Def: tool.Definition{Name: "ECHO"},
+		Invoke: func(context.Context, tool.Call) (tool.Result, error) {
+			t.Fatal("fail-closed policy must not invoke the tool")
+			return tool.Result{}, nil
+		},
 	}
-	payload := testToolResultPayload(t, result)
-	if got := payload["policy_mode"]; got != presets.ModeDefault {
-		t.Fatalf("result policy_mode = %v, want %s", got, presets.ModeDefault)
+	tests := []struct {
+		name     string
+		registry policy.Registry
+		wantType any
+	}{
+		{
+			name:     "registry error",
+			registry: errorPolicyRegistry{err: errors.New("registry unavailable")},
+			wantType: &policy.ProfileError{},
+		},
+		{
+			name: "empty decision",
+			registry: staticPolicyRegistry{mode: policy.NamedMode{
+				ID:     "empty",
+				Decide: func(context.Context, policy.ToolContext) (policy.Decision, error) { return policy.Decision{}, nil },
+			}},
+			wantType: &policy.DecisionError{},
+		},
 	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			runtime := &Runtime{policies: tt.registry, defaultPolicyMode: "empty"}
+			wrapped := runtime.wrapToolsForPolicy(activeSession, activeSession.SessionRef, nil, agent.AgentSpec{
+				Tools: []tool.Tool{targetTool},
+			}, approvalContext{ctx: context.Background(), session: activeSession, sessionRef: activeSession.SessionRef})
+			_, err := wrapped[0].Call(context.Background(), tool.Call{ID: "call-1", Name: "ECHO"})
+			switch tt.wantType.(type) {
+			case *policy.ProfileError:
+				var target *policy.ProfileError
+				if !errors.As(err, &target) {
+					t.Fatalf("Call() error = %v, want *policy.ProfileError", err)
+				}
+			case *policy.DecisionError:
+				var target *policy.DecisionError
+				if !errors.As(err, &target) {
+					t.Fatalf("Call() error = %v, want *policy.DecisionError", err)
+				}
+			}
+		})
+	}
+}
+
+type errorPolicyRegistry struct{ err error }
+
+func (r errorPolicyRegistry) Lookup(context.Context, string) (policy.Mode, bool, error) {
+	return nil, false, r.err
+}
+
+type staticPolicyRegistry struct{ mode policy.Mode }
+
+func (r staticPolicyRegistry) Lookup(context.Context, string) (policy.Mode, bool, error) {
+	return r.mode, r.mode != nil, nil
 }
 
 func TestNormalizePolicyModeHandlesDefaultAliasesAndPreservesCustomNames(t *testing.T) {

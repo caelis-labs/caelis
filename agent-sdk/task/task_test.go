@@ -22,12 +22,15 @@ func TestCloneEntryNormalizesMutableFields(t *testing.T) {
 		State: " running ",
 		Spec: map[string]any{
 			"command": "ls -la",
+			"options": map[string]any{"env": []any{"A=1"}},
 		},
 		Result: map[string]any{
 			"exit_code": 0,
+			"details":   map[string]any{"files": []any{"a"}},
 		},
 		Metadata: map[string]any{
 			"tool_name": "RUN_COMMAND",
+			"trace":     map[string]any{"ids": []any{"one"}},
 		},
 		Terminal: sandbox.TerminalRef{
 			Backend:    " host ",
@@ -40,6 +43,9 @@ func TestCloneEntryNormalizesMutableFields(t *testing.T) {
 	cloned.Spec["command"] = "pwd"
 	cloned.Result["exit_code"] = 1
 	cloned.Metadata["tool_name"] = "TASK"
+	cloned.Spec["options"].(map[string]any)["env"].([]any)[0] = "A=2"
+	cloned.Result["details"].(map[string]any)["files"].([]any)[0] = "b"
+	cloned.Metadata["trace"].(map[string]any)["ids"].([]any)[0] = "two"
 
 	if got := cloned.TaskID; got != "task-1" {
 		t.Fatalf("TaskID = %q, want %q", got, "task-1")
@@ -61,6 +67,15 @@ func TestCloneEntryNormalizesMutableFields(t *testing.T) {
 	}
 	if got := entry.Metadata["tool_name"]; got != "RUN_COMMAND" {
 		t.Fatalf("original metadata mutated: %v", got)
+	}
+	if got := entry.Spec["options"].(map[string]any)["env"].([]any)[0]; got != "A=1" {
+		t.Fatalf("original nested spec mutated: %v", got)
+	}
+	if got := entry.Result["details"].(map[string]any)["files"].([]any)[0]; got != "a" {
+		t.Fatalf("original nested result mutated: %v", got)
+	}
+	if got := entry.Metadata["trace"].(map[string]any)["ids"].([]any)[0]; got != "one" {
+		t.Fatalf("original nested metadata mutated: %v", got)
 	}
 }
 

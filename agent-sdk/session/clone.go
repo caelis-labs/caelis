@@ -1,10 +1,10 @@
 package session
 
 import (
-	"maps"
 	"slices"
 	"strings"
 
+	"github.com/caelis-labs/caelis/agent-sdk/internal/jsonvalue"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
@@ -24,7 +24,7 @@ func CloneSession(in Session) Session {
 	out.SessionRef = NormalizeSessionRef(in.SessionRef)
 	out.CWD = strings.TrimSpace(in.CWD)
 	out.Title = strings.TrimSpace(in.Title)
-	out.Metadata = maps.Clone(in.Metadata)
+	out.Metadata = jsonvalue.CloneMap(in.Metadata)
 	out.Controller = CloneControllerBinding(in.Controller)
 	out.Participants = CloneParticipantBindings(in.Participants)
 	return out
@@ -111,9 +111,9 @@ func FilterEvents(events []*Event, limit int, includeTransient bool) []*Event {
 	return filtered
 }
 
-// CloneState returns one shallow copy of one session state map.
+// CloneState returns one recursively isolated copy of one session state map.
 func CloneState(state map[string]any) map[string]any {
-	return maps.Clone(state)
+	return jsonvalue.CloneMap(state)
 }
 
 // CloneControllerBinding returns one normalized controller binding copy.
@@ -211,8 +211,8 @@ func CloneEventTool(in EventTool) EventTool {
 		Kind:   strings.TrimSpace(in.Kind),
 		Title:  strings.TrimSpace(in.Title),
 		Status: strings.TrimSpace(in.Status),
-		Input:  maps.Clone(in.Input),
-		Output: maps.Clone(in.Output),
+		Input:  jsonvalue.CloneMap(in.Input),
+		Output: jsonvalue.CloneMap(in.Output),
 	}
 	if len(in.Content) > 0 {
 		out.Content = make([]EventToolContent, 0, len(in.Content))

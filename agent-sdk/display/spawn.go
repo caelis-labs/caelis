@@ -2,8 +2,9 @@ package display
 
 import (
 	"encoding/json"
-	"maps"
 	"strings"
+
+	"github.com/caelis-labs/caelis/agent-sdk/internal/jsonvalue"
 )
 
 func SpawnFullDisplayArgs(raw map[string]any) string {
@@ -70,9 +71,9 @@ func SpawnDisplayInputForResult(input map[string]any, output map[string]any) map
 
 func NormalizeSpawnDisplayRawMap(raw map[string]any) map[string]any {
 	if len(raw) == 0 {
-		return maps.Clone(raw)
+		return jsonvalue.CloneMap(raw)
 	}
-	out := maps.Clone(raw)
+	out := jsonvalue.CloneMap(raw)
 	for _, key := range []string{"text", "result", "output", "summary", "content", "stdout", "output_preview", "tool_output", "toolOutput", "raw_output", "rawOutput", "message"} {
 		text := MapString(out, key)
 		decoded, remainder, ok := SplitLeadingJSONObject(text)

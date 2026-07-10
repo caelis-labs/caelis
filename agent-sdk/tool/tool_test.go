@@ -222,20 +222,27 @@ func TestNamedToolClonesCallAndResult(t *testing.T) {
 				t.Fatalf("call.Input = %s, want %s", got, `{"value":"ok"}`)
 			}
 			call.Metadata["mutated"] = true
+			call.Metadata["nested"].(map[string]any)["value"] = "invoke-mutated"
 			return Result{
 				Name: "echo",
 				Content: []model.Part{
 					model.NewTextPart("ok"),
 				},
-				Meta: map[string]any{"source": "invoke"},
+				Meta: map[string]any{
+					"source": "invoke",
+					"nested": map[string]any{"value": "result"},
+				},
 			}, nil
 		},
 	}
 
 	call := Call{
-		Name:     "echo",
-		Input:    json.RawMessage(`{"value":"ok"}`),
-		Metadata: map[string]any{"trace": "1"},
+		Name:  "echo",
+		Input: json.RawMessage(`{"value":"ok"}`),
+		Metadata: map[string]any{
+			"trace":  "1",
+			"nested": map[string]any{"value": "caller"},
+		},
 	}
 	result, err := tool.Call(context.Background(), call)
 	if err != nil {
@@ -249,6 +256,13 @@ func TestNamedToolClonesCallAndResult(t *testing.T) {
 	}
 	if _, ok := call.Metadata["mutated"]; ok {
 		t.Fatal("input call metadata should be cloned")
+	}
+	if got := call.Metadata["nested"].(map[string]any)["value"]; got != "caller" {
+		t.Fatalf("input call nested metadata leaked mutation: %v", got)
+	}
+	result.Meta["nested"].(map[string]any)["value"] = "caller-mutated"
+	if got := result.Meta["nested"].(map[string]any)["value"]; got != "caller-mutated" {
+		t.Fatalf("result nested metadata mutation = %v", got)
 	}
 }
 

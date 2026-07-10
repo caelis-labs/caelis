@@ -3,7 +3,11 @@ package session
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
+
+	"github.com/caelis-labs/caelis/agent-sdk/internal/jsonvalue"
 )
 
 var (
@@ -20,10 +24,59 @@ var (
 	// ErrInvalidEvent reports that one event payload is incomplete.
 	ErrInvalidEvent = errors.New("agent-sdk/session: invalid event")
 
+	// ErrInvalidValue reports a session value that cannot be represented by the
+	// shared JSON-compatible durable value contract.
+	ErrInvalidValue = errors.New("agent-sdk/session: invalid JSON-compatible value")
+
 	// ErrUnsupportedLegacyFormat reports an older on-disk session format that is
 	// no longer a supported replay source.
 	ErrUnsupportedLegacyFormat = errors.New("agent-sdk/session: unsupported legacy format")
 )
+
+// JSONValueError reports which durable session value failed validation.
+type JSONValueError struct {
+	Scope string
+	Err   error
+}
+
+func (e *JSONValueError) Error() string {
+	if e == nil {
+		return "<nil>"
+	}
+	scope := strings.TrimSpace(e.Scope)
+	if scope == "" {
+		scope = "value"
+	}
+	return fmt.Sprintf("%s: %s: %v", ErrInvalidValue, scope, e.Err)
+}
+
+func (e *JSONValueError) Unwrap() error {
+	if e == nil || e.Err == nil {
+		return ErrInvalidValue
+	}
+	return e.Err
+}
+
+func (e *JSONValueError) Is(target error) bool {
+	return target == ErrInvalidValue
+}
+
+// ValidateState validates one state object before a store makes it visible.
+func ValidateState(state map[string]any) error {
+	return validateJSONMap("state", state)
+}
+
+// ValidateMetadata validates one metadata object before durable storage.
+func ValidateMetadata(metadata map[string]any) error {
+	return validateJSONMap("metadata", metadata)
+}
+
+func validateJSONMap(scope string, value map[string]any) error {
+	if err := jsonvalue.ValidateMap(value); err != nil {
+		return &JSONValueError{Scope: scope, Err: err}
+	}
+	return nil
+}
 
 // EventType identifies one canonical session event kind.
 type EventType string

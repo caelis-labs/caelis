@@ -2,8 +2,9 @@ package chat
 
 import (
 	"encoding/json"
-	"maps"
 	"strings"
+
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
 func firstNonEmpty(values ...string) string {
@@ -86,7 +87,7 @@ func mergeEventMeta(parts ...map[string]any) map[string]any {
 }
 
 func mergeAnyMap(base map[string]any, overlay map[string]any) map[string]any {
-	out := maps.Clone(base)
+	out := session.CloneState(base)
 	for key, value := range overlay {
 		if existing, ok := out[key].(map[string]any); ok {
 			if incoming, ok := value.(map[string]any); ok {

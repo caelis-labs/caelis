@@ -3,17 +3,17 @@ package chat
 import (
 	"encoding/json"
 	"fmt"
-	"maps"
 	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
 func toolResultDisplayOutput(name string, output map[string]any, meta map[string]any) map[string]any {
-	out := maps.Clone(output)
+	out := session.CloneState(output)
 	if out == nil {
 		out = map[string]any{}
 	}

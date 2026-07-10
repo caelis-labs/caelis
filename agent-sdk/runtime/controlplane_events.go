@@ -3,7 +3,6 @@ package runtime
 import (
 	"context"
 	"encoding/json"
-	"maps"
 	"strings"
 	"time"
 
@@ -136,7 +135,7 @@ func (r controllerApprovalRequester) RequestControllerApproval(ctx context.Conte
 		})
 	}
 	toolName := firstNonEmpty(req.ToolCall.Name, req.ToolCall.Title, "ACP_TOOL")
-	rawInput := maps.Clone(req.ToolCall.RawInput)
+	rawInput := session.CloneState(req.ToolCall.RawInput)
 	var callInput json.RawMessage
 	if len(rawInput) > 0 {
 		if data, marshalErr := json.Marshal(rawInput); marshalErr == nil {

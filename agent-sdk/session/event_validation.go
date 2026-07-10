@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/caelis-labs/caelis/agent-sdk/internal/jsonvalue"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
@@ -41,7 +42,13 @@ func EventValidationDetail(err error) string {
 // rebuild model-visible context. Runtime-only control information is allowed to
 // remain custom/lifecycle/protocol-shaped when it does not enter prompt history.
 func ValidateDurableCoreEvent(event *Event) error {
-	if event == nil || !IsCanonicalHistoryEvent(event) {
+	if event == nil || IsTransient(event) {
+		return nil
+	}
+	if err := jsonvalue.Validate(event); err != nil {
+		return coreEventValidationError(fmt.Sprintf("event contains invalid JSON-compatible value: %v", err))
+	}
+	if !IsCanonicalHistoryEvent(event) {
 		return nil
 	}
 	switch EventTypeOf(event) {

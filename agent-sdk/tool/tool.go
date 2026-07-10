@@ -3,10 +3,10 @@ package tool
 import (
 	"context"
 	"encoding/json"
-	"maps"
 	"slices"
 	"strings"
 
+	"github.com/caelis-labs/caelis/agent-sdk/internal/jsonvalue"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
@@ -136,7 +136,7 @@ func modelSpecsFromDefinitions(definitions []Definition) []model.ToolSpec {
 		spec := model.NewFunctionToolSpec(
 			strings.TrimSpace(def.Name),
 			strings.TrimSpace(def.Description),
-			maps.Clone(def.InputSchema),
+			jsonvalue.CloneMap(def.InputSchema),
 		)
 		if spec.Function != nil {
 			spec.Function.Strict = inferStrictFunctionSchema(def.InputSchema)
@@ -258,8 +258,8 @@ func CloneDefinition(in Definition) Definition {
 	out := in
 	out.Name = strings.TrimSpace(in.Name)
 	out.Description = strings.TrimSpace(in.Description)
-	out.InputSchema = maps.Clone(in.InputSchema)
-	out.Metadata = maps.Clone(in.Metadata)
+	out.InputSchema = jsonvalue.CloneMap(in.InputSchema)
+	out.Metadata = jsonvalue.CloneMap(in.Metadata)
 	return out
 }
 
@@ -268,7 +268,7 @@ func CloneCall(in Call) Call {
 	out := in
 	out.Name = strings.TrimSpace(in.Name)
 	out.Input = append(json.RawMessage(nil), in.Input...)
-	out.Metadata = maps.Clone(in.Metadata)
+	out.Metadata = jsonvalue.CloneMap(in.Metadata)
 	return out
 }
 
@@ -277,7 +277,7 @@ func CloneResult(in Result, err error) (Result, error) {
 	out := in
 	out.Name = strings.TrimSpace(in.Name)
 	out.Content = slices.Clone(in.Content)
-	out.Meta = maps.Clone(in.Meta)
-	out.Metadata = maps.Clone(in.Metadata)
+	out.Meta = jsonvalue.CloneMap(in.Meta)
+	out.Metadata = jsonvalue.CloneMap(in.Metadata)
 	return out, err
 }

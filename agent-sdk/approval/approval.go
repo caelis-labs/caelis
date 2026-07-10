@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
 	"strings"
 
 	agentsdk "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/jsonvalue"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
@@ -133,7 +133,7 @@ func PayloadFromRuntimeRequest(req agentsdk.ApprovalRequest) *Payload {
 		if toolName := strings.TrimSpace(req.Approval.ToolCall.Name); toolName != "" {
 			payload.ToolName = toolName
 		}
-		payload.RawInput = maps.Clone(req.Approval.ToolCall.RawInput)
+		payload.RawInput = jsonvalue.CloneMap(req.Approval.ToolCall.RawInput)
 		if len(req.Approval.Options) > 0 {
 			payload.Options = NormalizeProtocolOptions(req.Approval.Options)
 		}
@@ -286,7 +286,7 @@ func ClonePayload(in *Payload) *Payload {
 		return nil
 	}
 	out := *in
-	out.RawInput = maps.Clone(in.RawInput)
+	out.RawInput = jsonvalue.CloneMap(in.RawInput)
 	if len(in.Options) > 0 {
 		out.Options = append([]Option(nil), in.Options...)
 	}
@@ -434,7 +434,7 @@ func rawMap(raw map[string]any, key string) map[string]any {
 func anyMap(value any) map[string]any {
 	switch typed := value.(type) {
 	case map[string]any:
-		return maps.Clone(typed)
+		return jsonvalue.CloneMap(typed)
 	case map[string]string:
 		out := make(map[string]any, len(typed))
 		for key, value := range typed {
@@ -458,7 +458,7 @@ func firstNonEmpty(values ...string) string {
 func firstNonEmptyMap(values ...map[string]any) map[string]any {
 	for _, value := range values {
 		if len(value) > 0 {
-			return maps.Clone(value)
+			return jsonvalue.CloneMap(value)
 		}
 	}
 	return nil

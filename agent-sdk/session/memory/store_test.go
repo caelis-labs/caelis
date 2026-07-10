@@ -2,6 +2,8 @@ package inmemory
 
 import (
 	"context"
+	"errors"
+	"math"
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -98,6 +100,128 @@ func TestStoreUpdateState(t *testing.T) {
 	}
 	if got := state["mode"]; got != "chat" {
 		t.Fatalf("state[mode] = %v, want %q", got, "chat")
+	}
+}
+
+func TestStoreIsolatesNestedMetadataEventsAndState(t *testing.T) {
+	t.Parallel()
+
+	store := NewStore(Config{SessionIDGenerator: func() string { return "sess-isolation" }})
+	ctx := context.Background()
+	metadata := map[string]any{"nested": map[string]any{"value": "created"}}
+	created, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+		AppName:  "caelis",
+		UserID:   "user-1",
+		Metadata: metadata,
+	})
+	if err != nil {
+		t.Fatalf("GetOrCreate() error = %v", err)
+	}
+	metadata["nested"].(map[string]any)["value"] = "caller-mutated"
+	loaded, err := store.Get(ctx, created.SessionRef)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got := loaded.Metadata["nested"].(map[string]any)["value"]; got != "created" {
+		t.Fatalf("stored metadata = %v, want created", got)
+	}
+
+	event := &session.Event{
+		Type: session.EventTypeToolCall,
+		Tool: &session.EventTool{
+			ID:    "call-1",
+			Name:  "READ",
+			Input: map[string]any{"nested": map[string]any{"path": "a"}},
+		},
+		Meta: map[string]any{"nested": map[string]any{"trace": "one"}},
+	}
+	if _, err := store.AppendEvent(ctx, created.SessionRef, event); err != nil {
+		t.Fatalf("AppendEvent() error = %v", err)
+	}
+	event.Tool.Input["nested"].(map[string]any)["path"] = "b"
+	event.Meta["nested"].(map[string]any)["trace"] = "two"
+	events, err := store.Events(ctx, session.EventsRequest{SessionRef: created.SessionRef})
+	if err != nil {
+		t.Fatalf("Events() error = %v", err)
+	}
+	if got := events[0].Tool.Input["nested"].(map[string]any)["path"]; got != "a" {
+		t.Fatalf("stored tool input = %v, want a", got)
+	}
+	if got := events[0].Meta["nested"].(map[string]any)["trace"]; got != "one" {
+		t.Fatalf("stored event meta = %v, want one", got)
+	}
+
+	state := map[string]any{"nested": map[string]any{"items": []any{"original"}}}
+	if err := store.ReplaceState(ctx, created.SessionRef, state); err != nil {
+		t.Fatalf("ReplaceState() error = %v", err)
+	}
+	state["nested"].(map[string]any)["items"].([]any)[0] = "caller-mutated"
+	snapshot, err := store.SnapshotState(ctx, created.SessionRef)
+	if err != nil {
+		t.Fatalf("SnapshotState() error = %v", err)
+	}
+	snapshot["nested"].(map[string]any)["items"].([]any)[0] = "snapshot-mutated"
+	stable, err := store.SnapshotState(ctx, created.SessionRef)
+	if err != nil {
+		t.Fatalf("SnapshotState(stable) error = %v", err)
+	}
+	if got := stable["nested"].(map[string]any)["items"].([]any)[0]; got != "original" {
+		t.Fatalf("stored nested state = %v, want original", got)
+	}
+}
+
+func TestStoreUpdateStateErrorRollsBackNestedMutation(t *testing.T) {
+	t.Parallel()
+
+	store := NewStore(Config{SessionIDGenerator: func() string { return "sess-rollback" }})
+	ctx := context.Background()
+	created, err := store.GetOrCreate(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
+	if err != nil {
+		t.Fatalf("GetOrCreate() error = %v", err)
+	}
+	if err := store.ReplaceState(ctx, created.SessionRef, map[string]any{
+		"nested": map[string]any{"value": "before"},
+	}); err != nil {
+		t.Fatalf("ReplaceState() error = %v", err)
+	}
+	wantErr := errors.New("reject update")
+	err = store.UpdateState(ctx, created.SessionRef, func(state map[string]any) (map[string]any, error) {
+		state["nested"].(map[string]any)["value"] = "after"
+		return state, wantErr
+	})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("UpdateState() error = %v, want %v", err, wantErr)
+	}
+	state, err := store.SnapshotState(ctx, created.SessionRef)
+	if err != nil {
+		t.Fatalf("SnapshotState() error = %v", err)
+	}
+	if got := state["nested"].(map[string]any)["value"]; got != "before" {
+		t.Fatalf("state after failed update = %v, want before", got)
+	}
+}
+
+func TestStoreRejectsInvalidJSONStateWithoutMutation(t *testing.T) {
+	t.Parallel()
+
+	store := NewStore(Config{SessionIDGenerator: func() string { return "sess-invalid-state" }})
+	ctx := context.Background()
+	created, err := store.GetOrCreate(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
+	if err != nil {
+		t.Fatalf("GetOrCreate() error = %v", err)
+	}
+	if err := store.ReplaceState(ctx, created.SessionRef, map[string]any{"value": "before"}); err != nil {
+		t.Fatalf("ReplaceState() error = %v", err)
+	}
+	if err := store.ReplaceState(ctx, created.SessionRef, map[string]any{"value": math.NaN()}); err == nil {
+		t.Fatal("ReplaceState(invalid) error = nil, want rejection")
+	}
+	state, err := store.SnapshotState(ctx, created.SessionRef)
+	if err != nil {
+		t.Fatalf("SnapshotState() error = %v", err)
+	}
+	if got := state["value"]; got != "before" {
+		t.Fatalf("state after invalid replacement = %v, want before", got)
 	}
 }
 

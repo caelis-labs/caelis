@@ -2,9 +2,9 @@ package tool
 
 import (
 	"encoding/json"
-	"maps"
 	"strings"
 
+	"github.com/caelis-labs/caelis/agent-sdk/internal/jsonvalue"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
@@ -151,7 +151,7 @@ func NewToolSearchDiscoveredTool(def Definition) ToolSearchDiscoveredTool {
 		Type:         "function",
 		Name:         strings.TrimSpace(def.Name),
 		Description:  strings.TrimSpace(def.Description),
-		Parameters:   maps.Clone(def.InputSchema),
+		Parameters:   jsonvalue.CloneMap(def.InputSchema),
 		DeferLoading: true,
 		Source:       toolSearchSource(def),
 	}

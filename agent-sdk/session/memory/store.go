@@ -3,7 +3,6 @@ package inmemory
 import (
 	"context"
 	"fmt"
-	"maps"
 	"sort"
 	"strings"
 	"sync"
@@ -61,6 +60,9 @@ func (s *Store) GetOrCreate(
 	_ context.Context,
 	req session.StartSessionRequest,
 ) (session.Session, error) {
+	if err := session.ValidateMetadata(req.Metadata); err != nil {
+		return session.Session{}, err
+	}
 	ref := session.NormalizeSessionRef(session.SessionRef{
 		AppName:      req.AppName,
 		UserID:       req.UserID,
@@ -86,7 +88,7 @@ func (s *Store) GetOrCreate(
 		SessionRef:   ref,
 		CWD:          strings.TrimSpace(req.Workspace.CWD),
 		Title:        strings.TrimSpace(req.Title),
-		Metadata:     maps.Clone(req.Metadata),
+		Metadata:     session.CloneState(req.Metadata),
 		Participants: nil,
 		CreatedAt:    now,
 		UpdatedAt:    now,
@@ -391,6 +393,9 @@ func (s *Store) ReplaceState(
 	ref session.SessionRef,
 	state map[string]any,
 ) error {
+	if err := session.ValidateState(state); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -421,6 +426,9 @@ func (s *Store) UpdateState(
 	}
 	next, err := update(cloneState(record.state))
 	if err != nil {
+		return err
+	}
+	if err := session.ValidateState(next); err != nil {
 		return err
 	}
 	record.state = cloneState(next)

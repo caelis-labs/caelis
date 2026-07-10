@@ -3,7 +3,6 @@ package runtime
 import (
 	"context"
 	"fmt"
-	"maps"
 	"strings"
 	"time"
 
@@ -659,8 +658,8 @@ func (tm *taskRuntime) rehydrateSubagentTask(entry *taskapi.Entry) *subagentTask
 		state:     entry.State,
 		running:   entry.Running,
 		turnSeq:   taskTurnSeqFromSpec(entry.Spec),
-		result:    maps.Clone(entry.Result),
-		metadata:  maps.Clone(entry.Metadata),
+		result:    session.CloneState(entry.Result),
+		metadata:  session.CloneState(entry.Metadata),
 	}
 	if task.turnSeq <= 0 {
 		task.turnSeq = taskTurnSeqFromSpec(entry.Metadata)
@@ -1055,8 +1054,8 @@ func (t *subagentTask) snapshot() taskapi.Snapshot {
 	if t == nil {
 		return taskapi.Snapshot{}
 	}
-	result := maps.Clone(t.result)
-	metadata := maps.Clone(t.metadata)
+	result := session.CloneState(t.result)
+	metadata := session.CloneState(t.metadata)
 	if result == nil {
 		result = map[string]any{}
 	}
@@ -1113,7 +1112,7 @@ func (t *subagentTask) entrySnapshot(now time.Time) *taskapi.Entry {
 			"turn_id":     subagentTurnID(t.ref.TaskID, t.turnSeq),
 		},
 		Result:   subagentTaskEntryResult(t.result, t.running),
-		Metadata: maps.Clone(t.metadata),
+		Metadata: session.CloneState(t.metadata),
 	}
 }
 

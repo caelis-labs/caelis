@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 	"strings"
 	"sync"
 	"time"
@@ -366,8 +365,8 @@ func (t *commandTask) snapshotLocked(status sandbox.SessionStatus) taskapi.Snaps
 		UpdatedAt:      status.UpdatedAt,
 		StdoutCursor:   t.stdoutCursor,
 		StderrCursor:   t.stderrCursor,
-		Result:         maps.Clone(t.result),
-		Metadata:       maps.Clone(t.metadata),
+		Result:         session.CloneState(t.result),
+		Metadata:       session.CloneState(t.metadata),
 		Terminal:       status.Terminal,
 	})
 }
@@ -394,8 +393,8 @@ func (tm *taskRuntime) rehydrateCommandTask(entry *taskapi.Entry) (*commandTask,
 		stderrCursor:   entry.StderrCursor,
 		output:         seededOutput,
 		outputCallback: seededFromResult,
-		result:         maps.Clone(entry.Result),
-		metadata:       maps.Clone(entry.Metadata),
+		result:         session.CloneState(entry.Result),
+		metadata:       session.CloneState(entry.Metadata),
 	}
 	if cursor, ok := taskInt64Value(entry.Metadata["model_output_cursor"]); ok && cursor >= 0 {
 		task.modelCursor = cursor
@@ -415,7 +414,7 @@ func (tm *taskRuntime) rehydrateCommandTask(entry *taskapi.Entry) (*commandTask,
 		task.session = completedTaskSession{entry: taskapi.CloneEntry(entry)}
 		task.running = false
 		task.state = taskapi.StateInterrupted
-		task.result = maps.Clone(entry.Result)
+		task.result = session.CloneState(entry.Result)
 		if task.result == nil {
 			task.result = map[string]any{}
 		}
@@ -511,7 +510,7 @@ func commandTaskEntryResult(result map[string]any, running bool) map[string]any 
 }
 
 func commandTaskEntryMetadata(metadata map[string]any, running bool) map[string]any {
-	out := maps.Clone(metadata)
+	out := session.CloneState(metadata)
 	if running {
 		return out
 	}

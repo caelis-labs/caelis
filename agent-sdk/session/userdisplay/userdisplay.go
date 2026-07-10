@@ -3,9 +3,9 @@
 package userdisplay
 
 import (
-	"maps"
 	"strings"
 
+	"github.com/caelis-labs/caelis/agent-sdk/internal/jsonvalue"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
@@ -21,7 +21,7 @@ func Resolve(input string, displayInput string, parts []model.ContentPart, meta 
 		displayText = message.TextContent()
 	}
 
-	outMeta := maps.Clone(meta)
+	outMeta := jsonvalue.CloneMap(meta)
 	delete(outMeta, MetaDisplayInput)
 	delete(outMeta, legacyMetaDisplayText)
 	if strings.TrimSpace(displayText) != "" && strings.TrimSpace(displayText) != modelText {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"maps"
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -208,11 +207,11 @@ func planEntriesFromEvent(event *session.Event) ([]plan.Entry, string, bool) {
 
 	payload := map[string]any{}
 	if toolPayload := session.EventToolProjection(event); toolPayload != nil && len(toolPayload.Output) > 0 {
-		payload = maps.Clone(toolPayload.Output)
+		payload = session.CloneState(toolPayload.Output)
 	}
 	if len(payload) == 0 {
 		if update := session.ProtocolUpdateOf(event); update != nil && len(update.RawOutput) > 0 {
-			payload = maps.Clone(update.RawOutput)
+			payload = session.CloneState(update.RawOutput)
 		}
 	}
 	if len(payload) == 0 {

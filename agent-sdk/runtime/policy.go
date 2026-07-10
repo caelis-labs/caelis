@@ -8,7 +8,6 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
-	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -37,6 +36,17 @@ type policyWrappedTool struct {
 	options    policy.ModeOptions
 	tool       tool.Tool
 	approval   approvalContext
+}
+
+type rejectedPolicyMode struct {
+	name string
+	err  error
+}
+
+func (m rejectedPolicyMode) Name() string { return strings.TrimSpace(m.name) }
+
+func (m rejectedPolicyMode) DecideTool(context.Context, policy.ToolContext) (policy.Decision, error) {
+	return policy.Decision{}, m.err
 }
 
 func (r *Runtime) wrapToolsForPolicy(
@@ -72,12 +82,27 @@ func (r *Runtime) wrapToolsForPolicy(
 
 func (r *Runtime) policyForName(ctx context.Context, modeName string) (string, policy.Mode) {
 	normalized := normalizePolicyMode(modeName)
-	if r != nil && r.policies != nil {
-		if mode, ok, err := r.policies.Lookup(ctx, normalized); err == nil && ok && mode != nil {
-			return normalized, mode
-		}
+	if r == nil || r.policies == nil {
+		return normalized, rejectedPolicyMode{name: normalized, err: &policy.ProfileError{
+			Profile: normalized,
+			Detail:  "policy registry is unavailable",
+		}}
 	}
-	return presets.ModeDefault, presets.WorkspaceWriteMode()
+	mode, ok, err := r.policies.Lookup(ctx, normalized)
+	if err != nil {
+		return normalized, rejectedPolicyMode{name: normalized, err: &policy.ProfileError{
+			Profile: normalized,
+			Detail:  "registry lookup failed",
+			Err:     err,
+		}}
+	}
+	if !ok || mode == nil {
+		return normalized, rejectedPolicyMode{name: normalized, err: &policy.ProfileError{
+			Profile: normalized,
+			Detail:  "unknown policy profile",
+		}}
+	}
+	return normalized, mode
 }
 
 func (t policyWrappedTool) Definition() tool.Definition {
@@ -85,6 +110,9 @@ func (t policyWrappedTool) Definition() tool.Definition {
 }
 
 func (t policyWrappedTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
+	if t.policy == nil {
+		return tool.Result{}, &policy.ProfileError{Profile: t.mode, Detail: "policy mode is unavailable"}
+	}
 	input := policy.ToolContext{
 		Session: t.session,
 		State:   session.CloneState(t.state),
@@ -98,15 +126,21 @@ func (t policyWrappedTool) Call(ctx context.Context, call tool.Call) (tool.Resul
 	if err != nil {
 		return tool.Result{}, err
 	}
+	decision, err = policy.NormalizeDecision(t.mode, decision)
+	if err != nil {
+		return tool.Result{}, err
+	}
 	switch decision.Action {
-	case policy.ActionAllow, "":
+	case policy.ActionAllow:
 		call = tool.CloneCall(call)
 		call.Metadata = mergeCallMetadata(call.Metadata, decision)
 		return t.tool.Call(ctx, call)
 	case policy.ActionAskApproval:
 		return t.requestApproval(ctx, call, decision)
-	default:
+	case policy.ActionDeny:
 		return policyDecisionResult(call, t.tool.Definition(), t.mode, decision), nil
+	default:
+		return tool.Result{}, &policy.DecisionError{Mode: t.mode, Detail: "unhandled normalized decision"}
 	}
 }
 
@@ -234,19 +268,12 @@ func cloneApproval(in *session.ProtocolApproval) *session.ProtocolApproval {
 	if in == nil {
 		return nil
 	}
-	out := *in
+	out := session.CloneProtocolApproval(*in)
 	return &out
 }
 
 func mapsClone(in map[string]any) map[string]any {
-	if len(in) == 0 {
-		return nil
-	}
-	out := map[string]any{}
-	for k, v := range in {
-		out[k] = v
-	}
-	return out
+	return session.CloneState(in)
 }
 
 func firstNonEmpty(values ...string) string {

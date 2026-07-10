@@ -2,7 +2,6 @@ package chat
 
 import (
 	"fmt"
-	"maps"
 	"strings"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
@@ -337,7 +336,7 @@ func toolResultContextPayload(toolPayload *session.EventTool) map[string]any {
 		return map[string]any{}
 	}
 	if len(toolPayload.Output) > 0 {
-		return maps.Clone(toolPayload.Output)
+		return session.CloneState(toolPayload.Output)
 	}
 	if text := eventToolContentText(toolPayload.Content); text != "" {
 		return map[string]any{"result": text}

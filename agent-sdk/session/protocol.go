@@ -2,9 +2,10 @@ package session
 
 import (
 	"encoding/json"
-	"maps"
 	"slices"
 	"strings"
+
+	"github.com/caelis-labs/caelis/agent-sdk/internal/jsonvalue"
 )
 
 // ProtocolUpdateType identifies one ACP-compatible protocol update family.
@@ -453,8 +454,8 @@ func cloneProtocolUpdate(in ProtocolUpdate) ProtocolUpdate {
 		Title:         strings.TrimSpace(in.Title),
 		Kind:          strings.TrimSpace(in.Kind),
 		Status:        strings.TrimSpace(in.Status),
-		RawInput:      maps.Clone(in.RawInput),
-		RawOutput:     maps.Clone(in.RawOutput),
+		RawInput:      jsonvalue.CloneMap(in.RawInput),
+		RawOutput:     jsonvalue.CloneMap(in.RawOutput),
 		Meta:          cloneProtocolAnyMap(in.Meta),
 	}
 	if len(in.Locations) > 0 {
@@ -539,19 +540,12 @@ func cloneProtocolAny(in any) any {
 		}
 		return out
 	default:
-		return typed
+		return jsonvalue.Clone(typed)
 	}
 }
 
 func cloneProtocolAnyMap(in map[string]any) map[string]any {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make(map[string]any, len(in))
-	for key, value := range in {
-		out[key] = cloneProtocolAny(value)
-	}
-	return out
+	return jsonvalue.CloneMap(in)
 }
 
 func firstNonEmpty(values ...string) string {
@@ -570,8 +564,13 @@ func cloneProtocolToolCall(in ProtocolToolCall) ProtocolToolCall {
 	call.Kind = strings.TrimSpace(call.Kind)
 	call.Title = strings.TrimSpace(call.Title)
 	call.Status = strings.TrimSpace(call.Status)
-	call.RawInput = maps.Clone(call.RawInput)
-	call.RawOutput = maps.Clone(call.RawOutput)
+	call.RawInput = jsonvalue.CloneMap(call.RawInput)
+	call.RawOutput = jsonvalue.CloneMap(call.RawOutput)
 	call.Content = cloneProtocolToolCallContents(call.Content)
 	return call
+}
+
+// CloneProtocolApproval returns one recursively isolated approval payload.
+func CloneProtocolApproval(in ProtocolApproval) ProtocolApproval {
+	return cloneProtocolApproval(in)
 }

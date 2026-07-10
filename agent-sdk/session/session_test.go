@@ -2,6 +2,7 @@ package session
 
 import (
 	"encoding/json"
+	"math"
 	"reflect"
 	"strconv"
 	"strings"
@@ -260,6 +261,69 @@ func TestFilterEvents(t *testing.T) {
 	}
 	if got := withTransient[0].ID; got != "2" {
 		t.Fatalf("first limited event id = %q, want %q", got, "2")
+	}
+}
+
+func TestCloneContractsIsolateNestedJSONValues(t *testing.T) {
+	t.Parallel()
+
+	sess := Session{Metadata: map[string]any{
+		"nested": map[string]any{"items": []any{"original"}},
+	}}
+	clonedSession := CloneSession(sess)
+	clonedSession.Metadata["nested"].(map[string]any)["items"].([]any)[0] = "mutated"
+	if got := sess.Metadata["nested"].(map[string]any)["items"].([]any)[0]; got != "original" {
+		t.Fatalf("CloneSession() leaked nested metadata mutation: %v", got)
+	}
+
+	event := &Event{
+		Tool: &EventTool{
+			Input:  map[string]any{"nested": map[string]any{"value": "input"}},
+			Output: map[string]any{"nested": []any{map[string]any{"value": "output"}}},
+		},
+		Protocol: &EventProtocol{Update: &ProtocolUpdate{
+			RawInput:  map[string]any{"nested": map[string]any{"value": "raw-input"}},
+			RawOutput: map[string]any{"nested": map[string]any{"value": "raw-output"}},
+		}},
+		Meta: map[string]any{"nested": map[string]any{"value": "meta"}},
+	}
+	clonedEvent := CloneEvent(event)
+	clonedEvent.Tool.Input["nested"].(map[string]any)["value"] = "mutated"
+	clonedEvent.Tool.Output["nested"].([]any)[0].(map[string]any)["value"] = "mutated"
+	clonedEvent.Protocol.Update.RawInput["nested"].(map[string]any)["value"] = "mutated"
+	clonedEvent.Protocol.Update.RawOutput["nested"].(map[string]any)["value"] = "mutated"
+	clonedEvent.Meta["nested"].(map[string]any)["value"] = "mutated"
+
+	want := map[string]any{
+		"input":      event.Tool.Input["nested"].(map[string]any)["value"],
+		"output":     event.Tool.Output["nested"].([]any)[0].(map[string]any)["value"],
+		"raw_input":  event.Protocol.Update.RawInput["nested"].(map[string]any)["value"],
+		"raw_output": event.Protocol.Update.RawOutput["nested"].(map[string]any)["value"],
+		"meta":       event.Meta["nested"].(map[string]any)["value"],
+	}
+	if got := want; !reflect.DeepEqual(got, map[string]any{
+		"input": "input", "output": "output", "raw_input": "raw-input", "raw_output": "raw-output", "meta": "meta",
+	}) {
+		t.Fatalf("original event after clone mutation = %#v", got)
+	}
+}
+
+func TestPrepareEventsRejectsInvalidJSONCompatibleValue(t *testing.T) {
+	t.Parallel()
+
+	_, err := PrepareEventsForAppend(PrepareEventsForAppendRequest{
+		SessionID: "sess-1",
+		Events: []*Event{{
+			Type: EventTypeToolCall,
+			Tool: &EventTool{
+				ID:    "call-1",
+				Name:  "READ",
+				Input: map[string]any{"limit": math.Inf(1)},
+			},
+		}},
+	})
+	if err == nil {
+		t.Fatal("PrepareEventsForAppend() error = nil, want invalid JSON value rejection")
 	}
 }
 

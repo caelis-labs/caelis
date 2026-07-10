@@ -4,9 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"maps"
 	"strings"
 
+	"github.com/caelis-labs/caelis/agent-sdk/internal/jsonvalue"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -50,6 +50,71 @@ type Decision struct {
 	Constraints sandbox.Constraints       `json:"constraints,omitempty"`
 	Metadata    map[string]any            `json:"metadata,omitempty"`
 	Approval    *session.ProtocolApproval `json:"approval,omitempty"`
+}
+
+// DecisionError reports a missing, empty, or invalid policy decision. Runtime
+// callers must treat it as fail-closed and must not execute the tool.
+type DecisionError struct {
+	Mode   string
+	Detail string
+	Err    error
+}
+
+func (e *DecisionError) Error() string {
+	if e == nil {
+		return "<nil>"
+	}
+	detail := strings.TrimSpace(e.Detail)
+	if detail == "" && e.Err != nil {
+		detail = e.Err.Error()
+	}
+	if detail == "" {
+		detail = "invalid decision"
+	}
+	if mode := strings.TrimSpace(e.Mode); mode != "" {
+		return fmt.Sprintf("agent-sdk/policy: mode %q: %s", mode, detail)
+	}
+	return "agent-sdk/policy: " + detail
+}
+
+func (e *DecisionError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+// ProfileError reports that a requested policy profile could not be resolved.
+// It is intentionally distinct from a deny decision so hosts can diagnose
+// configuration and registry availability without guessing from strings.
+type ProfileError struct {
+	Profile string
+	Detail  string
+	Err     error
+}
+
+func (e *ProfileError) Error() string {
+	if e == nil {
+		return "<nil>"
+	}
+	detail := strings.TrimSpace(e.Detail)
+	if detail == "" && e.Err != nil {
+		detail = e.Err.Error()
+	}
+	if detail == "" {
+		detail = "profile is unavailable"
+	}
+	if profile := strings.TrimSpace(e.Profile); profile != "" {
+		return fmt.Sprintf("agent-sdk/policy: profile %q: %s", profile, detail)
+	}
+	return "agent-sdk/policy: " + detail
+}
+
+func (e *ProfileError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
 }
 
 type ToolInputDecodeError struct {
@@ -99,16 +164,20 @@ func (m NamedMode) Name() string {
 
 func (m NamedMode) DecideTool(ctx context.Context, input ToolContext) (Decision, error) {
 	if m.Decide == nil {
-		return Decision{Action: ActionAllow}, nil
+		return Decision{}, &DecisionError{Mode: m.Name(), Detail: "decision function is required"}
 	}
-	return CloneDecision(m.Decide(ctx, CloneToolContext(input)))
+	decision, err := m.Decide(ctx, CloneToolContext(input))
+	if err != nil {
+		return CloneDecision(decision, err)
+	}
+	return NormalizeDecision(m.Name(), decision)
 }
 
 // CloneToolContext returns one isolated copy of one policy tool context.
 func CloneToolContext(in ToolContext) ToolContext {
 	out := in
 	out.Session = session.CloneSession(in.Session)
-	out.State = maps.Clone(in.State)
+	out.State = jsonvalue.CloneMap(in.State)
 	out.Tool = tool.CloneDefinition(in.Tool)
 	out.Call = tool.CloneCall(in.Call)
 	out.Sandbox = sandbox.CloneDescriptor(in.Sandbox)
@@ -136,12 +205,68 @@ func CloneDecision(in Decision, err error) (Decision, error) {
 	out.Action = Action(strings.TrimSpace(string(in.Action)))
 	out.Reason = strings.TrimSpace(in.Reason)
 	out.Constraints = sandbox.NormalizeConstraints(in.Constraints)
-	out.Metadata = maps.Clone(in.Metadata)
+	out.Metadata = jsonvalue.CloneMap(in.Metadata)
 	if in.Approval != nil {
-		approval := *in.Approval
+		approval := session.CloneProtocolApproval(*in.Approval)
 		out.Approval = &approval
 	}
 	return out, err
+}
+
+// NormalizeDecision validates and recursively clones one third-party policy
+// decision. Only the three declared actions are accepted; in particular an
+// empty action is never an implicit allow.
+func NormalizeDecision(mode string, in Decision) (Decision, error) {
+	out, _ := CloneDecision(in, nil)
+	switch out.Action {
+	case ActionAllow, ActionDeny, ActionAskApproval:
+	default:
+		detail := "decision action is required"
+		if out.Action != "" {
+			detail = fmt.Sprintf("unsupported decision action %q", out.Action)
+		}
+		return Decision{}, &DecisionError{Mode: mode, Detail: detail}
+	}
+	if err := validateConstraints(out.Constraints); err != nil {
+		return Decision{}, &DecisionError{Mode: mode, Detail: "invalid constraints", Err: err}
+	}
+	if err := jsonvalue.ValidateMap(out.Metadata); err != nil {
+		return Decision{}, &DecisionError{Mode: mode, Detail: "invalid metadata", Err: err}
+	}
+	return out, nil
+}
+
+func validateConstraints(in sandbox.Constraints) error {
+	if !oneOf(string(in.Route), "", string(sandbox.RouteHost), string(sandbox.RouteSandbox)) {
+		return fmt.Errorf("route %q is unsupported", in.Route)
+	}
+	if !oneOf(string(in.Permission), "", string(sandbox.PermissionDefault), string(sandbox.PermissionWorkspaceWrite), string(sandbox.PermissionFullAccess)) {
+		return fmt.Errorf("permission %q is unsupported", in.Permission)
+	}
+	if !oneOf(string(in.Isolation), "", string(sandbox.IsolationHost), string(sandbox.IsolationProcess), string(sandbox.IsolationContainer)) {
+		return fmt.Errorf("isolation %q is unsupported", in.Isolation)
+	}
+	if !oneOf(string(in.Network), "", string(sandbox.NetworkInherit), string(sandbox.NetworkEnabled), string(sandbox.NetworkDisabled)) {
+		return fmt.Errorf("network %q is unsupported", in.Network)
+	}
+	for i, rule := range in.PathRules {
+		if strings.TrimSpace(rule.Path) == "" {
+			return fmt.Errorf("path_rules[%d].path is required", i)
+		}
+		if !oneOf(string(rule.Access), string(sandbox.PathAccessReadOnly), string(sandbox.PathAccessReadWrite), string(sandbox.PathAccessHidden)) {
+			return fmt.Errorf("path_rules[%d].access %q is unsupported", i, rule.Access)
+		}
+	}
+	return nil
+}
+
+func oneOf(value string, allowed ...string) bool {
+	for _, candidate := range allowed {
+		if value == candidate {
+			return true
+		}
+	}
+	return false
 }
 
 // CallArgs decodes one tool-call input object for policy inspection. Malformed

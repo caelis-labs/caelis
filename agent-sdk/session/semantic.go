@@ -1,9 +1,9 @@
 package session
 
 import (
-	"maps"
 	"strings"
 
+	"github.com/caelis-labs/caelis/agent-sdk/internal/jsonvalue"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
@@ -45,8 +45,8 @@ func EventToolProjection(event *Event) *EventTool {
 	out.Kind = strings.TrimSpace(out.Kind)
 	out.Title = strings.TrimSpace(out.Title)
 	out.Status = strings.TrimSpace(out.Status)
-	out.Input = maps.Clone(event.Tool.Input)
-	out.Output = maps.Clone(event.Tool.Output)
+	out.Input = jsonvalue.CloneMap(event.Tool.Input)
+	out.Output = jsonvalue.CloneMap(event.Tool.Output)
 	out.Content = cloneEventToolContent(event.Tool.Content)
 	out.Locations = cloneEventToolLocations(event.Tool.Locations)
 	return &out

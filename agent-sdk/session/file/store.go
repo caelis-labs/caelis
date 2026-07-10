@@ -92,6 +92,9 @@ func (s *Store) GetOrCreate(
 	_ context.Context,
 	req session.StartSessionRequest,
 ) (session.Session, error) {
+	if err := session.ValidateMetadata(req.Metadata); err != nil {
+		return session.Session{}, err
+	}
 	ref := session.NormalizeSessionRef(session.SessionRef{
 		AppName:      req.AppName,
 		UserID:       req.UserID,
@@ -590,6 +593,9 @@ func (s *Store) ReplaceState(
 	ref session.SessionRef,
 	state map[string]any,
 ) error {
+	if err := session.ValidateState(state); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -623,6 +629,9 @@ func (s *Store) UpdateState(
 		}
 		next, err := update(cloneState(doc.State))
 		if err != nil {
+			return err
+		}
+		if err := session.ValidateState(next); err != nil {
 			return err
 		}
 		doc.State = cloneState(next)
