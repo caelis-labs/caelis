@@ -212,19 +212,25 @@ func (r *Runner) Cancel(ctx context.Context, anchor delegation.Anchor) error {
 	client := run.client
 	sessionID := run.anchor.SessionID
 	run.mu.RUnlock()
+	var remoteErr error
 	if client != nil {
-		_ = client.Cancel(ctx, sessionID)
+		remoteErr = client.Cancel(ctx, sessionID)
 	}
 	if run.cancel != nil {
 		run.cancel()
 	}
 	run.mu.Lock()
 	run.running = false
-	run.state = delegation.StateCancelled
-	run.outputPreview = "cancelled"
+	if remoteErr != nil {
+		run.state = delegation.StateInterrupted
+		run.outputPreview = "cancellation outcome unknown"
+	} else {
+		run.state = delegation.StateCancelled
+		run.outputPreview = "cancelled"
+	}
 	run.updatedAt = r.clock()
 	run.mu.Unlock()
-	return nil
+	return remoteErr
 }
 
 func (r *Runner) drivePrompt(ctx context.Context, run *childRun, prompt string) {

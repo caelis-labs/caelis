@@ -1391,7 +1391,8 @@ func (r *recordingSubagentRunner) Spawn(_ context.Context, spawn subagent.SpawnC
 			Running: running,
 		})
 	}
-	return delegation.Anchor{SessionID: "child-1", Agent: "helper", AgentID: "helper-1"}, delegation.CloneResult(r.spawnResult), nil
+	agentName := strings.TrimSpace(req.Agent)
+	return delegation.Anchor{SessionID: "child-1", Agent: agentName, AgentID: agentName + "-1"}, delegation.CloneResult(r.spawnResult), nil
 }
 
 func (r *recordingSubagentRunner) Continue(_ context.Context, anchor delegation.Anchor, req delegation.ContinueRequest) (delegation.Result, error) {

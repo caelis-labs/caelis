@@ -32,7 +32,7 @@ Status values:
 | P0-4 Compound commit idempotency | partial | Provider-local tool-call IDs need run/turn/step scope, and PLAN transaction digests must cover every persisted state mutation including explanation |
 | P0-5 Tool unknown-outcome model continuity | closed | Unknown side effects produce a canonical result paired with the original call, are visible after replay, and are reconciled without blind execution |
 | P0-6 Approval committed-error liveness | closed | A durable matching resolution always wakes a live waiter, including `session.CommittedError` and idempotent retry paths |
-| P0-7 Subagent spawn saga | open | Compensation must recover across cancel/terminal/detach failures, spawning recovery must become unknown outcome, identity must bind all spawn semantics, and invalid anchors must fail before participant commit |
+| P0-7 Subagent spawn saga | closed | Compensation resumes across cancel/phase/detach failures; spawning restart becomes durable unknown outcome; identity binds full spawn semantics; invalid anchors fail before participant commit; ACP cancel failures propagate |
 
 ## P1 stability blockers
 
@@ -104,6 +104,17 @@ useful, but it no longer constitutes closing evidence for the reopened rows.
   in consecutive tool steps, and a third Runtime rebuilds both paired facts in
   model context. P0-4 remains partial until the PLAN transaction digest covers
   its complete persisted state mutation.
+- **P0-7 recoverable-compensation sub-slice:** compensation first persists
+  intent, then proves child cancellation, persists that proof, atomically
+  detaches any participant, and only then writes terminal `compensated`.
+  Restart tests cover cancel success followed by phase-write failure and
+  terminal/detach boundaries without respawn or roll-forward. A restart from
+  `spawning` CAS-transitions to durable `unknown_outcome`; the spawn request
+  digest binds Agent, prompt, context prelude, effective mode, approval mode,
+  parent call, and participant role. Anchor/result validation rejects missing
+  participant identity before attachment and compensates the external child.
+  The production ACP runner now returns remote Cancel notification failures and
+  records an interrupted/unknown local state instead of claiming cancellation.
 
 ### Historical P1 implementation evidence
 

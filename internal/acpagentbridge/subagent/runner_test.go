@@ -3,6 +3,7 @@ package subagent
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/protocol/acp/client"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
+	"github.com/caelis-labs/caelis/protocol/acp/transport/stdio"
 )
 
 func TestRunnerHandleUpdatePublishesChildStream(t *testing.T) {
@@ -70,6 +72,42 @@ func TestRunnerHandleUpdatePublishesChildStream(t *testing.T) {
 	vendor, _ := got.Event.Protocol.Update.Meta["vendor"].(map[string]any)
 	if vendor["trace"] != "abc" {
 		t.Fatalf("Protocol.Update.Meta = %#v, want vendor trace", got.Event.Protocol.Update.Meta)
+	}
+}
+
+func TestRunnerCancelReturnsRemoteNotificationFailure(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stdoutReader, stdoutWriter := io.Pipe()
+	stdinReader, stdinWriter := io.Pipe()
+	remote := client.NewProcessClient(ctx, &stdio.Process{Stdin: stdinWriter, Stdout: stdoutReader}, client.Config{})
+	_ = stdinReader.Close()
+	defer stdoutWriter.Close()
+	defer remote.Close(context.Background())
+	localCancelled := false
+	run := &childRun{
+		anchor:  delegation.Anchor{TaskID: "task-cancel", SessionID: "child-cancel", Agent: "helper", AgentID: "helper-1"},
+		client:  remote,
+		state:   delegation.StateRunning,
+		running: true,
+		cancel:  func() { localCancelled = true },
+	}
+	runner := &Runner{clock: time.Now, runs: map[string]*childRun{"child-cancel": run}}
+
+	err := runner.Cancel(context.Background(), run.anchor)
+	if err == nil {
+		t.Fatal("Cancel() error = nil, want remote notification failure")
+	}
+	if !localCancelled {
+		t.Fatal("local child context was not cancelled after remote failure")
+	}
+	run.mu.RLock()
+	state := run.state
+	run.mu.RUnlock()
+	if state == delegation.StateCancelled {
+		t.Fatalf("child state = %q, must not claim cancellation after remote failure", state)
 	}
 }
 
