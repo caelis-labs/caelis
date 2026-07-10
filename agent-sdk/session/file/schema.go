@@ -61,9 +61,10 @@ type TaskStore struct {
 }
 
 type persistedDocument struct {
-	Kind                string          `json:"kind"`
-	Version             int             `json:"version"`
-	Session             session.Session `json:"session"`
-	State               map[string]any  `json:"state"`
-	AppliedTransactions map[string]bool `json:"applied_transactions,omitempty"`
+	Kind                string                `json:"kind"`
+	Version             int                   `json:"version"`
+	Session             session.Session       `json:"session"`
+	State               map[string]any        `json:"state"`
+	AppliedTransactions map[string]bool       `json:"applied_transactions,omitempty"`
+	Lease               *session.SessionLease `json:"lease,omitempty"`
 }

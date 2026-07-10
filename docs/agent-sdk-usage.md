@@ -120,9 +120,11 @@ validate those adapters explicitly; do not rely on `AgentSpec` alone.
 - One Runtime instance permits one active run per normalized
   `session.SessionRef`. A competing run on that instance returns
   `*agent.RunConflictError` with code `errorcode.Conflict`. This in-memory guard
-  is not a cross-process lease. Hosts sharing a store must establish one owner
-  with `SessionLeaseService` or an equivalent CAS policy; v0.25.0 Runtime does
-  not acquire that lease automatically.
+  is not a cross-process lease. Control must establish one owner with
+  `SessionLeaseService` or an equivalent CAS policy. The production Gateway
+  wraps its execution Runtime with the Control-owned leased Runtime, which
+  acquires before dispatch, heartbeats for the asynchronous Runner lifetime,
+  cancels on heartbeat failure, and releases on completion/close.
 - A `Runner` has one bounded, single-consumer event stream. Select `Events` or
   the optional source-event view once. A second consumer receives
   `runtime.ErrEventStreamConsumed`; fan-out belongs in the host after one
@@ -132,10 +134,8 @@ validate those adapters explicitly; do not rely on `AgentSpec` alone.
 - Session mutations use revision compare-and-swap. Concurrent writers pass
   `ExpectedRevision`; a stale writer receives `session.ErrRevisionConflict`
   with code `errorcode.Conflict` and must reload before retrying.
-- Store adapters implement that CAS contract, but v0.25.0 Runtime does not yet
-  carry the source revision through every ordinary or compaction append. Do not
-  run multiple Runtime instances against one session until the compaction/CAS
-  acceptance item is closed.
+- Store adapters implement that CAS contract. Checkpoint compaction also carries
+  the source session revision and abandons stale work on conflict.
 - Task records and optional session leases also use revision/owner tokens.
   Control owns placement, lease renewal policy, and retry policy.
 

@@ -2,6 +2,8 @@ package gatewayapp
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -57,6 +59,7 @@ type Stack struct {
 	lookup          *modelLookup
 	store           *appConfigStore
 	storeDir        string
+	leaseOwnerID    string
 	mu              sync.RWMutex
 	reconfigureMu   sync.Mutex
 	runtime         stackRuntimeConfig
@@ -208,6 +211,10 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		}
 	}
 	sandboxCfg := mergeSandboxConfig(doc.Sandbox, cfg.Sandbox)
+	leaseOwnerID, err := newStackLeaseOwnerID()
+	if err != nil {
+		return nil, err
+	}
 	stack := &Stack{
 		Sessions: sessions,
 		AppName:  appName,
@@ -216,10 +223,11 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 			Key: workspaceKey,
 			CWD: workspaceCWD,
 		},
-		lookup:    lookup,
-		store:     configStore,
-		storeDir:  storeDir,
-		taskStore: taskStore,
+		lookup:       lookup,
+		store:        configStore,
+		storeDir:     storeDir,
+		leaseOwnerID: leaseOwnerID,
+		taskStore:    taskStore,
 		runtime: stackRuntimeConfig{
 			ApprovalMode:                effectiveApprovalMode,
 			PolicyProfile:               effectivePolicyProfile,
@@ -238,6 +246,14 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		return nil, err
 	}
 	return stack, nil
+}
+
+func newStackLeaseOwnerID() (string, error) {
+	var value [16]byte
+	if _, err := rand.Read(value[:]); err != nil {
+		return "", fmt.Errorf("gatewayapp: generate runtime lease owner id: %w", err)
+	}
+	return "gateway-" + hex.EncodeToString(value[:]), nil
 }
 
 type stackBaseMetadata struct {

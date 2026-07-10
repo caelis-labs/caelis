@@ -142,11 +142,12 @@ Repeatable SDK boundary gates:
 
 The update semantic owner, product assembly peel-off, Control-owned handoff,
 neutral task principals/roles, and common Runtime pipeline for system Agents
-are implemented. The next architecture step is to close the remaining P1
-stability gates, including execution capability wiring and liveness, durable
-continuation placement, and compatibility and release evidence. Product source
-policy no longer lives in SDK task code. Module or repository extraction is not
-on the roadmap. Current status is recorded in
+are implemented. Durable continuation is explicitly process-local live attach,
+while the production Control host owns cross-Runtime session leases. The next
+architecture step is to close the remaining P1 stability gates, including
+execution capability wiring and liveness, and compatibility and release
+evidence. Product source policy no longer lives in SDK task code. Module or
+repository extraction is not on the roadmap. Current status is recorded in
 [the v0.25.0 acceptance review](agent-sdk-v0.25.0-acceptance.md).
 
 ## Durable State

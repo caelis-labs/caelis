@@ -633,6 +633,7 @@ type record struct {
 	events              []*session.Event
 	state               map[string]any
 	appliedTransactions map[string]bool
+	lease               session.SessionLease
 }
 
 func (r *record) cloneSession() session.Session {

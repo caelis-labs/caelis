@@ -40,6 +40,10 @@ var (
 	// canonical payload.
 	ErrEventConflict = errorcode.New(errorcode.Conflict, "agent-sdk/session: event conflict")
 
+	// ErrLeaseConflict reports that a live lease is owned elsewhere or that
+	// lease identity/revision CAS failed.
+	ErrLeaseConflict = errorcode.New(errorcode.Conflict, "agent-sdk/session: lease conflict")
+
 	// ErrUnsupportedLegacyFormat reports an older on-disk session format that is
 	// no longer a supported replay source.
 	ErrUnsupportedLegacyFormat = errorcode.New(errorcode.Unsupported, "agent-sdk/session: unsupported legacy format")
@@ -62,6 +66,24 @@ func (e *RevisionConflictError) Error() string {
 func (e *RevisionConflictError) Is(target error) bool { return target == ErrRevisionConflict }
 
 func (e *RevisionConflictError) ErrorCode() errorcode.Code { return errorcode.Conflict }
+
+// LeaseConflictError carries the session and stable reason for one failed
+// store-level execution lease operation.
+type LeaseConflictError struct {
+	SessionID string
+	Detail    string
+}
+
+func (e *LeaseConflictError) Error() string {
+	if e == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("%s: session %q: %s", ErrLeaseConflict, strings.TrimSpace(e.SessionID), strings.TrimSpace(e.Detail))
+}
+
+func (e *LeaseConflictError) Is(target error) bool { return target == ErrLeaseConflict }
+
+func (e *LeaseConflictError) ErrorCode() errorcode.Code { return errorcode.Conflict }
 
 // CommittedError reports that a durable store committed a mutation even though
 // post-commit apply or reporting returned an error. Callers must treat the
@@ -607,8 +629,8 @@ type EventBatchStateService interface {
 	AppendEventsAndUpdateState(context.Context, AppendEventsAndUpdateStateRequest) ([]*Event, error)
 }
 
-// SessionLeaseService is the optional lease/heartbeat capability implemented
-// by cloud-oriented stores. Core defines record and CAS semantics only.
+// SessionLeaseService coordinates exclusive session execution across Runtime
+// instances. Control owns placement and heartbeat policy; stores own lease CAS.
 type SessionLeaseService interface {
 	AcquireSessionLease(context.Context, AcquireSessionLeaseRequest) (SessionLease, error)
 	HeartbeatSessionLease(context.Context, HeartbeatSessionLeaseRequest) (SessionLease, error)

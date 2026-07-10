@@ -261,6 +261,20 @@ func (s *Stack) buildGatewayRuntime(plan gatewayBuildPlan) (*gatewayRuntimeBundl
 		return nil, err
 	}
 	bundle.Engine = rt
+	leaseService, ok := s.Sessions.(session.SessionLeaseService)
+	if !ok {
+		bundle.Close()
+		return nil, fmt.Errorf("gatewayapp: production session service does not support execution leases")
+	}
+	leasedRuntime, err := controlplane.NewLeasedRuntime(controlplane.LeasedRuntimeConfig{
+		Runtime: rt,
+		Leases:  leaseService,
+		OwnerID: strings.TrimSpace(s.leaseOwnerID),
+	})
+	if err != nil {
+		bundle.Close()
+		return nil, err
+	}
 	bundle.ACPControlPlane = acpControlPlane
 	sessionControl, err := controlplane.NewSessionControl(controlCoordinator, rt)
 	if err != nil {
@@ -309,7 +323,7 @@ func (s *Stack) buildGatewayRuntime(plan gatewayBuildPlan) (*gatewayRuntimeBundl
 	gw, err := kernelimpl.New(kernelimpl.Config{
 		Sessions:             s.Sessions,
 		Tasks:                s.taskStore,
-		Runtime:              rt,
+		Runtime:              leasedRuntime,
 		Control:              sessionControl,
 		Resolver:             resolver,
 		DefaultApprovalMode:  kernelimpl.NormalizeApprovalMode(runtimeCfg.ApprovalMode),

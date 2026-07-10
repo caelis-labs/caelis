@@ -37,7 +37,7 @@ Status values:
 | --- | --- | --- |
 | P1-1 ACP semantic completeness | closed | Permission, cancel, participant, and handoff have one normalized codec path and built-in/external conformance, matching the completed update codec |
 | P1-2 Control ownership completion | closed | Surface/source strings are translated by Control into neutral SDK owner/principal/role values; system Agents reuse the common Runtime safety pipeline |
-| P1-3 Durable continuation and placement | partial | Contract is either safe checkpoint/lease-based continuation or explicitly live-process attachment; production host exercises session lease lifecycle |
+| P1-3 Durable continuation and placement | closed | Contract is either safe checkpoint/lease-based continuation or explicitly live-process attachment; production host exercises session lease lifecycle |
 | P1-4 Execution capability wiring | partial | Control derives and validates actual model, tool, and sandbox requirements; unsupported output/features do not silently degrade |
 | P1-5 Runtime liveness and observability | partial | Control-owned dynamic watchdog exists; TraceSink cannot block execution indefinitely; stuck guardrails are bounded |
 | P1-6 Schema and compatibility | partial | Raw durable JSON migrates before typed decode and unknown-field corpus proves preservation; supported API is compared tag-to-tag with explicit waivers |
@@ -79,8 +79,11 @@ Use small, independently committable slices:
 - **P1-3 live-attach contract slice:** the ambiguous `Resume` API was removed.
   `AttachLiveRun` now names and documents the actual process-local contract;
   after restart it returns `RunNotAttachableError` and never treats durable
-  journal state as a replay point. P1-3 remains partial until a production host
-  acquires, heartbeats, and releases the store-level session lease.
+  journal state as a replay point. Memory and file stores now implement the
+  same lease CAS contract, including cross-instance conflict, heartbeat
+  revision, release, and expiry takeover. The production Gateway uses a
+  Control-owned wrapper that holds the lease for the full asynchronous Runner
+  lifetime and cancels execution if heartbeat ownership is lost.
 
 Do not combine unrelated P0s into one broad rewrite. Update this board in the
 same commit as the closing evidence. Do not edit the frozen v0.25.0 acceptance

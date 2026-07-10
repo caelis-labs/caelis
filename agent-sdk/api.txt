@@ -1764,6 +1764,9 @@ package github.com/caelis-labs/caelis/agent-sdk/session
   func (e *JSONValueError) ErrorCode() errorcode.Code
   func (e *JSONValueError) Is(target error) bool
   func (e *JSONValueError) Unwrap() error
+  func (e *LeaseConflictError) Error() string
+  func (e *LeaseConflictError) ErrorCode() errorcode.Code
+  func (e *LeaseConflictError) Is(target error) bool
   func (e *PauseTokenTransitionError) Error() string
   func (e *PauseTokenTransitionError) ErrorCode() errorcode.Code
   func (e *RevisionConflictError) Error() string
@@ -2092,6 +2095,10 @@ package github.com/caelis-labs/caelis/agent-sdk/session
       Err   error
   }
   type JournalKind string
+  type LeaseConflictError struct {
+      SessionID string
+      Detail    string
+  }
   type Lifecycle interface {
       StartSession(context.Context, StartSessionRequest) (Session, error)
       LoadSession(context.Context, LoadSessionRequest) (LoadedSession, error)
@@ -2451,6 +2458,8 @@ package github.com/caelis-labs/caelis/agent-sdk/session
       ErrRevisionConflict = errorcode.New(errorcode.Conflict, "agent-sdk/session: revision conflict")
 
       ErrEventConflict = errorcode.New(errorcode.Conflict, "agent-sdk/session: event conflict")
+
+      ErrLeaseConflict = errorcode.New(errorcode.Conflict, "agent-sdk/session: lease conflict")
 
       ErrUnsupportedLegacyFormat = errorcode.New(errorcode.Unsupported, "agent-sdk/session: unsupported legacy format")
   )
