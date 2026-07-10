@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
@@ -1133,6 +1134,41 @@ func TestStorePutParticipantWithEventRejectsInvalidEventAtomically(t *testing.T)
 	}
 }
 
+func TestStoreBindControllerWithEventDoesNotSplitOnPrecommitFailure(t *testing.T) {
+	t.Parallel()
+
+	store := NewStore(Config{RootDir: t.TempDir(), SessionIDGenerator: func() string { return "sess-handoff-atomic" }})
+	ctx := context.Background()
+	created, err := store.GetOrCreate(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
+	if err != nil {
+		t.Fatalf("GetOrCreate() error = %v", err)
+	}
+	store.writeDocumentFault = func() error { return errors.New("precommit failure") }
+	message := model.NewTextMessage(model.RoleSystem, "handoff")
+	zero := uint64(0)
+	_, _, err = store.BindControllerWithEvent(ctx, session.BindControllerWithEventRequest{
+		SessionRef:       created.SessionRef,
+		ExpectedRevision: &zero,
+		Binding: session.ControllerBinding{
+			Kind: session.ControllerKindACP, ControllerID: "reviewer", EpochID: "epoch-1",
+		},
+		Event: &session.Event{
+			ID: "handoff-1", Type: session.EventTypeHandoff, Message: &message,
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "precommit failure") {
+		t.Fatalf("BindControllerWithEvent() error = %v, want precommit failure", err)
+	}
+	store.writeDocumentFault = nil
+	loaded, err := NewService(store).LoadSession(ctx, session.LoadSessionRequest{SessionRef: created.SessionRef})
+	if err != nil {
+		t.Fatalf("LoadSession() error = %v", err)
+	}
+	if loaded.Session.Controller.ControllerID != "" || loaded.Session.Revision != 0 || len(loaded.Events) != 0 {
+		t.Fatalf("split handoff state after failure: session=%#v events=%#v", loaded.Session, loaded.Events)
+	}
+}
+
 func TestStorePutParticipantWithEventDoesNotAppendLogWhenDocumentWriteFails(t *testing.T) {
 	t.Parallel()
 
@@ -1296,6 +1332,73 @@ func TestStoreAppendEventKeepsLogWhenDocumentWriteFailsAfterCommit(t *testing.T)
 	}
 	if loaded.Title == "" {
 		t.Fatal("Session title after late document write failure is empty, want committed document update")
+	}
+}
+
+func TestStoreWALRecoversCommittedEventAndStateAfterCrashPoints(t *testing.T) {
+	for _, phase := range []string{"after_commit", "after_event_log"} {
+		t.Run(phase, func(t *testing.T) {
+			root := t.TempDir()
+			store := NewStore(Config{RootDir: root, SessionIDGenerator: func() string { return "sess-wal" }})
+			ctx := context.Background()
+			created, err := store.GetOrCreate(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
+			if err != nil {
+				t.Fatalf("GetOrCreate() error = %v", err)
+			}
+			store.transactionFault = func(current string) error {
+				if current == phase {
+					return errors.New("simulated crash at " + phase)
+				}
+				return nil
+			}
+			message := model.NewTextMessage(model.RoleUser, "durable through WAL")
+			zero := uint64(0)
+			_, err = store.AppendEventsAndUpdateState(ctx, session.AppendEventsAndUpdateStateRequest{
+				SessionRef:       created.SessionRef,
+				ExpectedRevision: &zero,
+				Events: []*session.Event{{
+					ID: "event-wal", Type: session.EventTypeUser, Message: &message,
+				}},
+				UpdateState: func(_ []*session.Event, state map[string]any) (map[string]any, error) {
+					state["cursor"] = "committed"
+					return state, nil
+				},
+			})
+			var committed *CommittedError
+			if !errors.As(err, &committed) {
+				t.Fatalf("AppendEventsAndUpdateState() error = %v, want *CommittedError", err)
+			}
+
+			reopened := NewService(NewStore(Config{RootDir: root}))
+			loaded, err := reopened.LoadSession(ctx, session.LoadSessionRequest{SessionRef: created.SessionRef})
+			if err != nil {
+				t.Fatalf("LoadSession(recovery) error = %v", err)
+			}
+			if loaded.Session.Revision != 1 || len(loaded.Events) != 1 || loaded.Events[0].ID != "event-wal" || loaded.Events[0].Seq != 1 {
+				t.Fatalf("recovered session/events = revision %d events %#v", loaded.Session.Revision, loaded.Events)
+			}
+			if got := loaded.State["cursor"]; got != "committed" {
+				t.Fatalf("recovered state cursor = %v, want committed", got)
+			}
+			replayed, ok := session.ModelMessageOf(loaded.Events[0])
+			if !ok || !reflect.DeepEqual(replayed, message) {
+				t.Fatalf("replayed model context = %#v, want runtime message %#v", replayed, message)
+			}
+
+			one := uint64(1)
+			retried, err := reopened.AppendEvent(ctx, session.AppendEventRequest{
+				SessionRef:       created.SessionRef,
+				ExpectedRevision: &one,
+				Event:            &session.Event{ID: "event-wal", Type: session.EventTypeUser, Message: &message},
+			})
+			if err != nil || retried.Seq != 1 {
+				t.Fatalf("idempotent retry = event %#v error %v, want existing seq 1", retried, err)
+			}
+			events, err := reopened.Events(ctx, session.EventsRequest{SessionRef: created.SessionRef})
+			if err != nil || len(events) != 1 {
+				t.Fatalf("Events(after retry) = %#v, %v, want one", events, err)
+			}
+		})
 	}
 }
 

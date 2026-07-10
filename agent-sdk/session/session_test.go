@@ -402,6 +402,19 @@ func TestPrepareEventsDedupesStableEventIDOrReturnsConflict(t *testing.T) {
 	}
 }
 
+func TestPrepareEventsDedupesIdempotencyKeyAcrossAllocatedIDs(t *testing.T) {
+	t.Parallel()
+	message := model.NewTextMessage(model.RoleUser, "same operation")
+	existing := &Event{ID: "event-1", IdempotencyKey: "request-1", SessionID: "sess-1", Seq: 1, Type: EventTypeUser, Visibility: VisibilityCanonical, Message: &message}
+	prepared, err := PrepareEventsForAppend(PrepareEventsForAppendRequest{
+		SessionID: "sess-1", LastSeq: 1, ExistingEvents: []*Event{existing},
+		Events: []*Event{{ID: "event-retry", IdempotencyKey: "request-1", Type: EventTypeUser, Message: &message}},
+	})
+	if err != nil || len(prepared.Persisted) != 0 || prepared.Events[0].ID != "event-1" {
+		t.Fatalf("idempotency retry = %#v, %v, want existing event-1", prepared, err)
+	}
+}
+
 func TestFilterReplayTranscriptEventsKeepsLatestTurnTraceOnly(t *testing.T) {
 	t.Parallel()
 

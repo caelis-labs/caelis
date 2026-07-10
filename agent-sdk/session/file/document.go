@@ -111,6 +111,10 @@ func committedDocumentWrite(err error) error {
 }
 
 func (s *Store) writeDocument(doc persistedDocument) error {
+	return s.writeDocumentInternal(doc, true, true)
+}
+
+func (s *Store) writeDocumentInternal(doc persistedDocument, injectFault bool, updateIndex bool) error {
 	doc.Kind = documentKind
 	doc.Version = documentVersion
 	doc.Session = session.CloneSession(doc.Session)
@@ -126,7 +130,7 @@ func (s *Store) writeDocument(doc persistedDocument) error {
 	if err != nil {
 		return err
 	}
-	if s.writeDocumentFault != nil {
+	if injectFault && s.writeDocumentFault != nil {
 		if err := s.writeDocumentFault(); err != nil {
 			return err
 		}
@@ -165,8 +169,10 @@ func (s *Store) writeDocument(doc persistedDocument) error {
 		return committedDocumentWrite(err)
 	}
 	s.pathCache[pathCacheKey(doc.Session.SessionID, doc.Session.WorkspaceKey)] = path
-	if err := s.upsertSessionIndex(doc.Session, path); err != nil {
-		return committedDocumentWrite(err)
+	if updateIndex {
+		if err := s.upsertSessionIndex(doc.Session, path); err != nil {
+			return committedDocumentWrite(err)
+		}
 	}
 	return nil
 }

@@ -69,6 +69,13 @@ func (s *Service) BindController(
 	return s.store.BindController(ctx, req.SessionRef, req.Binding)
 }
 
+func (s *Service) BindControllerWithEvent(
+	ctx context.Context,
+	req session.BindControllerWithEventRequest,
+) (session.Session, *session.Event, error) {
+	return s.store.BindControllerWithEvent(ctx, req)
+}
+
 func (s *Service) PutParticipant(
 	ctx context.Context,
 	req session.PutParticipantRequest,

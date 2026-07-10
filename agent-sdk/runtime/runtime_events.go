@@ -147,19 +147,6 @@ func (r *Runtime) handlePlanEvent(
 	if !ok {
 		return nil, false, nil
 	}
-	if err := r.sessions.UpdateState(ctx, ref, func(state map[string]any) (map[string]any, error) {
-		if state == nil {
-			state = map[string]any{}
-		}
-		state["plan"] = map[string]any{
-			"version":     1,
-			"entries":     entriesToState(entries),
-			"explanation": explanation,
-		}
-		return state, nil
-	}); err != nil {
-		return nil, true, err
-	}
 	planEvent := &session.Event{
 		Type:       session.EventTypePlan,
 		Visibility: session.VisibilityCanonical,
@@ -173,14 +160,32 @@ func (r *Runtime) handlePlanEvent(
 	}
 	normalized := normalizeEvent(session.Session{}, turnID, planEvent)
 	normalized.Scope.Controller = event.Scope.Controller
-	persisted, err := r.sessions.AppendEvent(ctx, session.AppendEventRequest{
+	batch, ok := r.sessions.(session.EventBatchStateService)
+	if !ok {
+		return nil, true, fmt.Errorf("agent-sdk/runtime: session service must support atomic plan event/state commit")
+	}
+	persisted, err := batch.AppendEventsAndUpdateState(ctx, session.AppendEventsAndUpdateStateRequest{
 		SessionRef: ref,
-		Event:      normalized,
+		Events:     []*session.Event{normalized},
+		UpdateState: func(_ []*session.Event, state map[string]any) (map[string]any, error) {
+			if state == nil {
+				state = map[string]any{}
+			}
+			state["plan"] = map[string]any{
+				"version":     1,
+				"entries":     entriesToState(entries),
+				"explanation": explanation,
+			}
+			return state, nil
+		},
 	})
 	if err != nil {
 		return nil, true, err
 	}
-	return persisted, true, nil
+	if len(persisted) != 1 {
+		return nil, true, fmt.Errorf("agent-sdk/runtime: atomic plan commit returned %d events", len(persisted))
+	}
+	return persisted[0], true, nil
 }
 
 func planEntriesFromEvent(event *session.Event) ([]plan.Entry, string, bool) {

@@ -58,20 +58,18 @@ func (r *Runtime) HandoffController(ctx context.Context, req agent.HandoffContro
 		to = r.kernelControllerBinding(firstNonEmpty(strings.TrimSpace(req.Source), "handoff"))
 	}
 
-	activeSession, err = r.sessions.BindController(ctx, session.BindControllerRequest{
-		SessionRef: ref,
-		Binding:    to,
+	handoffs, ok := r.sessions.(session.ControllerHandoffService)
+	if !ok {
+		return session.Session{}, fmt.Errorf("agent-sdk/runtime: session service must support atomic controller handoff")
+	}
+	expected := activeSession.Revision
+	activeSession, _, err = handoffs.BindControllerWithEvent(ctx, session.BindControllerWithEventRequest{
+		SessionRef:       ref,
+		ExpectedRevision: &expected,
+		Binding:          to,
+		Event:            handoffEvent(from, to, strings.TrimSpace(req.Reason), r.now()),
 	})
-	if err != nil {
-		return session.Session{}, err
-	}
-	if _, err := r.sessions.AppendEvent(ctx, session.AppendEventRequest{
-		SessionRef: ref,
-		Event:      handoffEvent(from, to, strings.TrimSpace(req.Reason), r.now()),
-	}); err != nil {
-		return session.Session{}, err
-	}
-	return r.sessions.Session(ctx, ref)
+	return activeSession, err
 }
 
 func (r *Runtime) buildControllerTurnContext(

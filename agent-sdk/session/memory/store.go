@@ -290,6 +290,34 @@ func (s *Store) BindController(
 	return record.cloneSession(), nil
 }
 
+func (s *Store) BindControllerWithEvent(
+	_ context.Context,
+	req session.BindControllerWithEventRequest,
+) (session.Session, *session.Event, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	record, ok := s.lookupLocked(req.SessionRef)
+	if !ok {
+		return session.Session{}, nil, session.ErrSessionNotFound
+	}
+	tx, err := s.prepareAppendTransactionForRecord(
+		record,
+		[]*session.Event{req.Event},
+		func(active *session.Session, _ session.PreparedAppendEvents) (bool, error) {
+			active.Controller = session.CloneControllerBinding(req.Binding)
+			return true, nil
+		},
+		nil,
+		req.ExpectedRevision,
+	)
+	if err != nil {
+		return session.Session{}, nil, err
+	}
+	normalized := tx.Prepared.Events[0]
+	s.applyAppendTransactionToRecord(record, tx)
+	return record.cloneSession(), session.CloneEvent(normalized), nil
+}
+
 func (s *Store) PutParticipant(
 	_ context.Context,
 	ref session.SessionRef,
@@ -530,6 +558,13 @@ func (s *Service) BindController(
 	req session.BindControllerRequest,
 ) (session.Session, error) {
 	return s.store.BindController(ctx, req.SessionRef, req.Binding)
+}
+
+func (s *Service) BindControllerWithEvent(
+	ctx context.Context,
+	req session.BindControllerWithEventRequest,
+) (session.Session, *session.Event, error) {
+	return s.store.BindControllerWithEvent(ctx, req)
 }
 
 func (s *Service) PutParticipant(

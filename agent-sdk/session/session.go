@@ -58,15 +58,20 @@ func (e *RevisionConflictError) Is(target error) bool { return target == ErrRevi
 
 // EventConflictError reports a stable event ID reused for different content.
 type EventConflictError struct {
-	SessionID string
-	EventID   string
+	SessionID      string
+	EventID        string
+	IdempotencyKey string
 }
 
 func (e *EventConflictError) Error() string {
 	if e == nil {
 		return "<nil>"
 	}
-	return fmt.Sprintf("%s: session %q event %q has different content", ErrEventConflict, strings.TrimSpace(e.SessionID), strings.TrimSpace(e.EventID))
+	identity := strings.TrimSpace(e.EventID)
+	if identity == "" {
+		identity = strings.TrimSpace(e.IdempotencyKey)
+	}
+	return fmt.Sprintf("%s: session %q identity %q has different content", ErrEventConflict, strings.TrimSpace(e.SessionID), identity)
 }
 
 func (e *EventConflictError) Is(target error) bool { return target == ErrEventConflict }
@@ -359,6 +364,15 @@ type BindControllerRequest struct {
 	Binding    ControllerBinding `json:"binding"`
 }
 
+// BindControllerWithEventRequest atomically commits one controller ownership
+// transition and its matching durable transfer event.
+type BindControllerWithEventRequest struct {
+	SessionRef       SessionRef        `json:"session_ref"`
+	ExpectedRevision *uint64           `json:"expected_revision,omitempty"`
+	Binding          ControllerBinding `json:"binding"`
+	Event            *Event            `json:"event"`
+}
+
 // PutParticipantRequest creates or updates one participant binding.
 type PutParticipantRequest struct {
 	SessionRef SessionRef         `json:"session_ref"`
@@ -483,6 +497,12 @@ type Service interface {
 type ParticipantLifecycleService interface {
 	PutParticipantWithEvent(context.Context, PutParticipantWithEventRequest) (Session, *Event, error)
 	RemoveParticipantWithEvent(context.Context, RemoveParticipantWithEventRequest) (Session, *Event, error)
+}
+
+// ControllerHandoffService is implemented by stores that atomically commit a
+// controller binding and its matching durable handoff event.
+type ControllerHandoffService interface {
+	BindControllerWithEvent(context.Context, BindControllerWithEventRequest) (Session, *Event, error)
 }
 
 // EventBatchService is implemented by stores that can validate and append a

@@ -47,6 +47,7 @@ type Store struct {
 	idCounter          atomic.Uint64
 	pathCache          map[string]string
 	writeDocumentFault func() error
+	transactionFault   func(string) error
 }
 
 // Service is the file-backed implementation of session.Service.

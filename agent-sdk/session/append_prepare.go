@@ -72,6 +72,7 @@ func PrepareEventsForAppend(req PrepareEventsForAppendRequest) (PreparedAppendEv
 	}
 	existingIDs := cloneEventIDSet(req.ExistingIDs)
 	existingEvents := eventIndexByID(req.ExistingEvents)
+	existingKeys := eventIndexByIdempotencyKey(req.ExistingEvents)
 	for id := range existingEvents {
 		existingIDs[id] = struct{}{}
 	}
@@ -99,14 +100,18 @@ func PrepareEventsForAppend(req PrepareEventsForAppendRequest) (PreparedAppendEv
 			return PreparedAppendEvents{}, err
 		}
 		if !IsTransient(normalized) {
-			if id := strings.TrimSpace(normalized.ID); id != "" {
-				if prior := existingEvents[id]; prior != nil {
-					if !sameIdempotentEvent(prior, normalized) {
-						return PreparedAppendEvents{}, &EventConflictError{SessionID: req.SessionID, EventID: id}
-					}
-					prepared = append(prepared, CloneEvent(prior))
-					continue
+			id := strings.TrimSpace(normalized.ID)
+			key := strings.TrimSpace(normalized.IdempotencyKey)
+			prior := existingEvents[id]
+			if prior == nil && key != "" {
+				prior = existingKeys[key]
+			}
+			if prior != nil {
+				if !sameIdempotentEvent(prior, normalized) {
+					return PreparedAppendEvents{}, &EventConflictError{SessionID: req.SessionID, EventID: id, IdempotencyKey: key}
 				}
+				prepared = append(prepared, CloneEvent(prior))
+				continue
 			}
 			if req.AllocateEventID != nil {
 				req.AllocateEventID(normalized, existingIDs)
@@ -116,6 +121,9 @@ func PrepareEventsForAppend(req PrepareEventsForAppendRequest) (PreparedAppendEv
 			if id := strings.TrimSpace(normalized.ID); id != "" {
 				existingIDs[id] = struct{}{}
 				existingEvents[id] = CloneEvent(normalized)
+			}
+			if key := strings.TrimSpace(normalized.IdempotencyKey); key != "" {
+				existingKeys[key] = CloneEvent(normalized)
 			}
 			persisted = append(persisted, normalized)
 			updatedAt = normalized.Time
@@ -228,6 +236,19 @@ func eventIndexByID(events []*Event) map[string]*Event {
 	return out
 }
 
+func eventIndexByIdempotencyKey(events []*Event) map[string]*Event {
+	out := make(map[string]*Event, len(events))
+	for _, event := range events {
+		if event == nil {
+			continue
+		}
+		if key := strings.TrimSpace(event.IdempotencyKey); key != "" {
+			out[key] = CloneEvent(event)
+		}
+	}
+	return out
+}
+
 func sameIdempotentEvent(existing *Event, retry *Event) bool {
 	left := CanonicalizeEvent(existing)
 	right := CanonicalizeEvent(retry)
@@ -235,6 +256,7 @@ func sameIdempotentEvent(existing *Event, retry *Event) bool {
 		return left == nil && right == nil
 	}
 	left.SessionID, right.SessionID = "", ""
+	left.ID, right.ID = "", ""
 	left.Seq, right.Seq = 0, 0
 	left.Time, right.Time = time.Time{}, time.Time{}
 	left.Text, right.Text = "", ""

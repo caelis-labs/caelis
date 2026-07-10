@@ -43,7 +43,9 @@ func (s *Store) withRootWriteLock(fn func() error) error {
 }
 
 func (s *Store) withRootReadLock(fn func() error) error {
-	return s.withRootLock(storeRootLockShared, fn)
+	// Reads may need to finish a committed WAL transaction before exposing
+	// document/event state, so they take the exclusive root lock as well.
+	return s.withRootLock(storeRootLockExclusive, fn)
 }
 
 func (s *Store) withRootLock(mode storeRootLockMode, fn func() error) error {
@@ -74,6 +76,11 @@ func (s *Store) withRootLock(mode storeRootLockMode, fn func() error) error {
 	defer func() {
 		_ = unlockSessionStoreRoot(file)
 	}()
+	if mode == storeRootLockExclusive {
+		if err := s.recoverTransactions(); err != nil {
+			return err
+		}
+	}
 	return fn()
 }
 
@@ -280,22 +287,31 @@ func (s *Store) writeDocumentWithEvents(doc persistedDocument, events []*session
 	if len(events) == 0 {
 		return s.writeDocument(doc)
 	}
+	if s.writeDocumentFault != nil {
+		if err := s.writeDocumentFault(); err != nil {
+			return err
+		}
+	}
 	path, err := s.resolveWritePath(doc.Session)
 	if err != nil {
 		return err
 	}
-	rollbackLog, err := s.appendEventLogTransaction(path, events)
-	if err != nil {
+	txnPath := transactionPath(path)
+	record := persistedTransaction{Kind: transactionKind, Version: transactionVersion, Document: doc, Events: events}
+	if err := s.writeTransaction(txnPath, record); err != nil {
+		if documentWriteCommitted(err) {
+			return &CommittedError{Err: err}
+		}
 		return err
 	}
-	if err := s.writeDocument(doc); err != nil {
+	if err := s.injectTransactionFault("after_commit"); err != nil {
+		return &CommittedError{Err: err}
+	}
+	if err := s.applyTransaction(txnPath, record); err != nil {
 		if documentWriteCommitted(err) {
-			return err
+			return &CommittedError{Err: err}
 		}
-		if rollbackErr := rollbackLog(); rollbackErr != nil {
-			return errors.Join(err, rollbackErr)
-		}
-		return err
+		return &CommittedError{Err: err}
 	}
 	return nil
 }
@@ -427,6 +443,50 @@ func (s *Store) BindController(
 		return session.Session{}, err
 	}
 	return out, nil
+}
+
+func (s *Store) BindControllerWithEvent(
+	_ context.Context,
+	req session.BindControllerWithEventRequest,
+) (session.Session, *session.Event, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out session.Session
+	var outEvent *session.Event
+	if err := s.withRootWriteLock(func() error {
+		doc, err := s.readDocumentForRef(req.SessionRef)
+		if err != nil {
+			return err
+		}
+		existing, err := s.eventsForDocument(doc)
+		if err != nil {
+			return err
+		}
+		nextDoc, tx, err := s.prepareAppendTransactionForDocument(
+			doc,
+			[]*session.Event{req.Event},
+			existing,
+			func(active *session.Session, _ session.PreparedAppendEvents) (bool, error) {
+				active.Controller = session.CloneControllerBinding(req.Binding)
+				return true, nil
+			},
+			nil,
+			req.ExpectedRevision,
+		)
+		if err != nil {
+			return err
+		}
+		normalized := tx.Prepared.Events[0]
+		if err := s.writeDocumentWithEvents(nextDoc, tx.Prepared.Persisted); err != nil {
+			return err
+		}
+		out = session.CloneSession(nextDoc.Session)
+		outEvent = session.CloneEvent(normalized)
+		return nil
+	}); err != nil {
+		return session.Session{}, nil, err
+	}
+	return out, outEvent, nil
 }
 
 func (s *Store) PutParticipant(
