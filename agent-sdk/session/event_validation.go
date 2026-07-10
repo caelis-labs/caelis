@@ -45,6 +45,11 @@ func ValidateDurableCoreEvent(event *Event) error {
 	if event == nil || IsTransient(event) {
 		return nil
 	}
+	migrated, err := MigrateEvent(*event)
+	if err != nil {
+		return coreEventValidationError(err.Error())
+	}
+	event = &migrated
 	if err := jsonvalue.Validate(event); err != nil {
 		return coreEventValidationError(fmt.Sprintf("event contains invalid JSON-compatible value: %v", err))
 	}

@@ -236,6 +236,15 @@ have different responsibilities:
 - `_meta` remains display/debug data unless a field is explicitly documented
   as replay metadata.
 
+Durable compatibility is explicit. Event, Run/Turn/Step, and ToolExecution
+records carry independent schema versions. `session.MigrationRegistry` accepts
+only adjacent deterministic steps, rejects gaps, duplicates, and future
+versions, and preserves unknown JSON fields while migrating stored records.
+New in-memory events are stamped without a JSON round trip; legacy file-log
+records migrate before validation and replay. The checked-in v0/v1 replay
+corpus must rebuild a whole `[]model.Message` exactly equal to context produced
+by a live Runtime tool turn.
+
 External ACP input must be normalized before storage. Transient participant or
 subagent stream chunks must not enter durable parent model context unless they
 are carried by a canonical message, task, or tool result.

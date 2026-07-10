@@ -86,6 +86,12 @@ func PrepareEventsForAppend(req PrepareEventsForAppendRequest) (PreparedAppendEv
 		if normalized == nil {
 			return PreparedAppendEvents{}, ErrInvalidEvent
 		}
+		stampCurrentEventSchemas(normalized)
+		migrated, err := MigrateEvent(*normalized)
+		if err != nil {
+			return PreparedAppendEvents{}, err
+		}
+		normalized = &migrated
 		normalized.SessionID = req.SessionID
 		if normalized.Time.IsZero() {
 			normalized.Time = req.Now
@@ -230,7 +236,7 @@ func eventIndexByID(events []*Event) map[string]*Event {
 			continue
 		}
 		if id := strings.TrimSpace(event.ID); id != "" {
-			out[id] = CloneEvent(event)
+			out[id] = migratedEventForIndex(event)
 		}
 	}
 	return out
@@ -243,10 +249,21 @@ func eventIndexByIdempotencyKey(events []*Event) map[string]*Event {
 			continue
 		}
 		if key := strings.TrimSpace(event.IdempotencyKey); key != "" {
-			out[key] = CloneEvent(event)
+			out[key] = migratedEventForIndex(event)
 		}
 	}
 	return out
+}
+
+func migratedEventForIndex(event *Event) *Event {
+	if event == nil {
+		return nil
+	}
+	migrated, err := MigrateEvent(*event)
+	if err != nil {
+		return CloneEvent(event)
+	}
+	return &migrated
 }
 
 func sameIdempotentEvent(existing *Event, retry *Event) bool {

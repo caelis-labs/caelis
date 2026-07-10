@@ -143,7 +143,11 @@ func (s *Store) readEventLog(documentPath string) ([]*session.Event, error) {
 				}
 				return nil, fmt.Errorf("agent-sdk/session/file: decode event log %s: %w", path, err)
 			}
-			event = normalizeLegacyEventLogEvent(event)
+			migrated, err := session.MigrateEvent(event)
+			if err != nil {
+				return nil, fmt.Errorf("agent-sdk/session/file: migrate event log %s line %d: %w", path, lineNo, err)
+			}
+			event = migrated
 			if err := session.ValidateDurableCoreEvent(&event); err != nil {
 				return nil, fmt.Errorf("agent-sdk/session/file: invalid event log %s line %d: %w", path, lineNo, err)
 			}
@@ -242,25 +246,6 @@ func (s *Store) readEventLogIDs(documentPath string) (map[string]bool, error) {
 		}
 	}
 	return ids, nil
-}
-
-func normalizeLegacyEventLogEvent(event session.Event) session.Event {
-	if session.EventTypeOf(&event) != session.EventTypeCustom || event.Message == nil {
-		return event
-	}
-	if !legacyPluginContextEvent(&event) {
-		return event
-	}
-	event.Type = session.EventTypeContext
-	return event
-}
-
-func legacyPluginContextEvent(event *session.Event) bool {
-	if event == nil {
-		return false
-	}
-	source := strings.TrimSpace(fmt.Sprint(event.Meta["source"]))
-	return strings.EqualFold(source, "plugin_hook")
 }
 
 func eventLogPath(documentPath string) string {

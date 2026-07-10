@@ -1619,6 +1619,11 @@ package github.com/caelis-labs/caelis/agent-sdk/session
       ControllerKindACP    ControllerKind = "acp"
   )
   const (
+      EventSchemaVersion = 1
+
+      RunSchemaVersion = ExecutionJournalSchemaVersion
+  )
+  const (
       EventTypeUser        EventType = "user"
       EventTypeAssistant   EventType = "assistant"
       EventTypePlan        EventType = "plan"
@@ -1683,6 +1688,11 @@ package github.com/caelis-labs/caelis/agent-sdk/session
       ProtocolUpdateTypePermission   ProtocolUpdateType = "request_permission"
   )
   const (
+      SchemaKindEvent         SchemaKind = "event"
+      SchemaKindRun           SchemaKind = "run"
+      SchemaKindToolExecution SchemaKind = "tool_execution"
+  )
+  const (
       ToolExecutionPrepared        ToolExecutionStatus = "prepared"
       ToolExecutionApproved        ToolExecutionStatus = "approved"
       ToolExecutionStarted         ToolExecutionStatus = "started"
@@ -1713,9 +1723,12 @@ package github.com/caelis-labs/caelis/agent-sdk/session
   func (e *PauseTokenTransitionError) Error() string
   func (e *RevisionConflictError) Error() string
   func (e *RevisionConflictError) Is(target error) bool
+  func (e *SchemaVersionError) Error() string
   func (e *ToolExecutionTransitionError) Error() string
   func (p *EventProtocol) UnmarshalJSON(data []byte) error
   func (p EventProtocol) MarshalJSON() ([]byte, error)
+  func (r *MigrationRegistry) Migrate(kind SchemaKind, source, target int, raw json.RawMessage) (json.RawMessage, error)
+  func (r *MigrationRegistry) Register(kind SchemaKind, from, to int, migration SchemaMigration) error
   func ApplyPreparedAppendToSession(activeSession *Session, prepared PreparedAppendEvents) bool
   func CanonicalToolName(event *Event, update *ProtocolUpdate) string
   func CanonicalizeEvent(event *Event) *Event
@@ -1738,6 +1751,7 @@ package github.com/caelis-labs/caelis/agent-sdk/session
   func CloneSessionSummaries(items []SessionSummary) []SessionSummary
   func CloneState(state map[string]any) map[string]any
   func CloneToolExecution(in ToolExecution) ToolExecution
+  func DefaultMigrationRegistry() *MigrationRegistry
   func EventDisplayText(event *Event) string
   func EventText(event *Event) string
   func EventToolProjection(event *Event) *EventTool
@@ -1764,7 +1778,11 @@ package github.com/caelis-labs/caelis/agent-sdk/session
   func MarkNotice(event *Event, level string, text string) *Event
   func MarkOverlay(event *Event) *Event
   func MarkUIOnly(event *Event) *Event
+  func MigrateEvent(in Event) (Event, error)
+  func MigrateExecutionRecord(in ExecutionRecord) (ExecutionRecord, error)
+  func MigrateToolExecution(in ToolExecution) (ToolExecution, error)
   func ModelMessageOf(event *Event) (model.Message, bool)
+  func NewMigrationRegistry() *MigrationRegistry
   func NormalizeExecutionKey(in ExecutionKey) ExecutionKey
   func NormalizeExecutionRecord(in ExecutionRecord) ExecutionRecord
   func NormalizeSessionRef(ref SessionRef) SessionRef
@@ -2043,6 +2061,9 @@ package github.com/caelis-labs/caelis/agent-sdk/session
       Events  []*Event       `json:"events,omitempty"`
       State   map[string]any `json:"state,omitempty"`
   }
+  type MigrationRegistry struct {
+      // contains filtered or unexported fields
+  }
   type ParticipantBinding struct {
       ID             string          `json:"id,omitempty"`
       Kind           ParticipantKind `json:"kind,omitempty"`
@@ -2229,6 +2250,15 @@ package github.com/caelis-labs/caelis/agent-sdk/session
       SessionID string
       Expected  uint64
       Actual    uint64
+  }
+  type SchemaKind string
+  type SchemaMigration func(json.RawMessage) (json.RawMessage, error)
+  type SchemaVersionError struct {
+      Kind    SchemaKind
+      From    int
+      To      int
+      Current int
+      Detail  string
   }
   type Service interface {
       Lifecycle

@@ -1,0 +1,28 @@
+[
+  {
+    "schema": 1,
+    "type": "user",
+    "visibility": "canonical",
+    "message": {"role": "user", "parts": [{"kind": "text", "text": {"text": "inspect"}}]}
+  },
+  {
+    "schema": 1,
+    "type": "tool_call",
+    "visibility": "canonical",
+    "message": {"role": "assistant", "parts": [{"kind": "tool_use", "tool_use": {"id": "call-1", "name": "probe", "input":{"path":"README.md"}}}]},
+    "tool": {"id": "call-1", "name": "probe", "status": "pending", "input": {"path": "README.md"}}
+  },
+  {
+    "schema": 1,
+    "type": "tool_result",
+    "visibility": "canonical",
+    "message": {"role": "tool", "parts": [{"kind": "tool_result", "tool_result": {"tool_use_id": "call-1", "name": "probe", "content": [{"kind": "json", "json": {"value":{"value":"ok"}}}]}}]},
+    "tool": {"id": "call-1", "name": "probe", "status": "completed", "output": {"value": "ok"}}
+  },
+  {
+    "schema": 1,
+    "type": "assistant",
+    "visibility": "canonical",
+    "message": {"role": "assistant", "parts": [{"kind": "text", "text": {"text": "done"}}]}
+  }
+]
