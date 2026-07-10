@@ -5,12 +5,124 @@ import (
 	"iter"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 
+	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	"github.com/caelis-labs/caelis/ports/agentprofile"
 )
+
+func TestSystemManagedAgentUsesCoreRuntimeLifecycleAndJournalPipeline(t *testing.T) {
+	t.Parallel()
+
+	staging := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	interceptor := &systemManagedLifecycleRecorder{}
+	guardrail := &systemManagedGuardrailRecorder{}
+	runner := newSystemManagedAgentRuntimeWithConfig(systemManagedAgentRuntimeConfig{
+		AgentFactory:          chat.Factory{},
+		StagingSessions:       func() session.Service { return staging },
+		LifecycleInterceptors: []agent.LifecycleInterceptor{interceptor},
+		Guardrails:            []agent.GuardrailSpec{{Guardrail: guardrail, OnFailure: agent.GuardrailFailClosed}},
+	})
+	parent := session.Session{SessionRef: session.SessionRef{
+		AppName: "caelis", UserID: "user-1", SessionID: "parent-session", WorkspaceKey: "workspace-1",
+	}}
+	prompt := model.NewTextMessage(model.RoleUser, "review this")
+	result, err := runner.Run(context.Background(), systemManagedAgentRunRequest{
+		AgentID: guardianProfileID, Model: systemManagedAgentResponseModel{}, ParentSession: parent,
+		Events: []*session.Event{{Type: session.EventTypeUser, Message: &prompt, Text: "review this"}},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.AssistantEvent == nil || strings.TrimSpace(result.Text) == "" {
+		t.Fatalf("Run() result = %#v, want assistant assessment", result)
+	}
+	for _, operation := range []agent.LifecycleOperation{agent.LifecycleRun, agent.LifecycleTurn, agent.LifecycleModel} {
+		if !interceptor.saw(operation) {
+			t.Fatalf("lifecycle events = %#v, want %q", interceptor.snapshot(), operation)
+		}
+	}
+	if guardrail.calls() != 1 {
+		t.Fatalf("guardrail calls = %d, want one Core Runtime input pass", guardrail.calls())
+	}
+	plan, err := systemManagedAgentRunPlanFor(systemManagedAgentRunRequest{
+		AgentID: guardianProfileID, Model: systemManagedAgentResponseModel{}, ParentSession: parent,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err := staging.Events(context.Background(), session.EventsRequest{SessionRef: plan.Session.SessionRef, IncludeTransient: true})
+	if err != nil {
+		t.Fatalf("Events(staging) error = %v", err)
+	}
+	wantTerminal := map[session.JournalKind]bool{session.JournalKindRun: false, session.JournalKindTurn: false}
+	for _, event := range events {
+		if event == nil || event.Journal == nil || event.Journal.Execution == nil {
+			continue
+		}
+		record := event.Journal.Execution
+		if record.Status == session.ExecutionSucceeded {
+			wantTerminal[record.Kind] = true
+		}
+	}
+	for kind, seen := range wantTerminal {
+		if !seen {
+			t.Fatalf("staging events = %#v, want terminal %s journal", events, kind)
+		}
+	}
+}
+
+type systemManagedLifecycleRecorder struct {
+	mu     sync.Mutex
+	events []agent.LifecycleEvent
+}
+
+type systemManagedGuardrailRecorder struct {
+	mu    sync.Mutex
+	count int
+}
+
+func (*systemManagedGuardrailRecorder) Name() string { return "system-managed-test" }
+
+func (r *systemManagedGuardrailRecorder) ApplyGuardrail(_ context.Context, input agent.GuardrailInput) (agent.GuardrailInput, error) {
+	r.mu.Lock()
+	r.count++
+	r.mu.Unlock()
+	return input, nil
+}
+
+func (r *systemManagedGuardrailRecorder) calls() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.count
+}
+
+func (r *systemManagedLifecycleRecorder) InterceptLifecycle(ctx context.Context, event agent.LifecycleEvent, next agent.LifecycleNext) error {
+	r.mu.Lock()
+	r.events = append(r.events, event)
+	r.mu.Unlock()
+	return next(ctx)
+}
+
+func (r *systemManagedLifecycleRecorder) snapshot() []agent.LifecycleEvent {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]agent.LifecycleEvent(nil), r.events...)
+}
+
+func (r *systemManagedLifecycleRecorder) saw(operation agent.LifecycleOperation) bool {
+	for _, event := range r.snapshot() {
+		if event.Operation == operation {
+			return true
+		}
+	}
+	return false
+}
 
 func TestSystemManagedAgentRegistryEntries(t *testing.T) {
 	specs := systemManagedAgentSpecs()
@@ -133,11 +245,32 @@ type systemManagedAgentTestModel struct {
 	name string
 }
 
+type systemManagedAgentResponseModel struct{}
+
+func (systemManagedAgentResponseModel) Name() string { return "system-managed-response" }
+
+func (systemManagedAgentResponseModel) Capabilities() model.Capabilities {
+	return model.Capabilities{StructuredOutput: true}
+}
+
+func (systemManagedAgentResponseModel) Generate(context.Context, *model.Request) iter.Seq2[*model.StreamEvent, error] {
+	return func(yield func(*model.StreamEvent, error) bool) {
+		yield(&model.StreamEvent{Type: model.StreamEventTurnDone, Response: &model.Response{
+			Status: model.ResponseStatusCompleted, TurnComplete: true, StepComplete: true,
+			Message: model.NewTextMessage(model.RoleAssistant, `{"outcome":"allow"}`),
+		}}, nil)
+	}
+}
+
 func (m systemManagedAgentTestModel) Name() string {
 	if strings.TrimSpace(m.name) != "" {
 		return strings.TrimSpace(m.name)
 	}
 	return "system-managed-test-model"
+}
+
+func (m systemManagedAgentTestModel) Capabilities() model.Capabilities {
+	return model.Capabilities{StructuredOutput: true}
 }
 
 func (m systemManagedAgentTestModel) Generate(context.Context, *model.Request) iter.Seq2[*model.StreamEvent, error] {

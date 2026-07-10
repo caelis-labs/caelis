@@ -1104,6 +1104,10 @@ func (m *approvalReviewerFakeModel) Name() string {
 	return "approval-reviewer-fake"
 }
 
+func (m *approvalReviewerFakeModel) Capabilities() model.Capabilities {
+	return model.Capabilities{StructuredOutput: true}
+}
+
 type approvalReviewerUpdateFailSessionService struct {
 	session.Service
 	failures int
@@ -1254,6 +1258,13 @@ type approvalReviewerProviderRecorder struct {
 }
 
 func (m *approvalReviewerProviderRecorder) Name() string { return m.base.Name() }
+
+func (m *approvalReviewerProviderRecorder) Capabilities() model.Capabilities {
+	if provider, ok := m.base.(model.CapabilityProvider); ok {
+		return provider.Capabilities()
+	}
+	return model.Capabilities{}
+}
 
 func (m *approvalReviewerProviderRecorder) Generate(ctx context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
 	m.recordRequest(req)

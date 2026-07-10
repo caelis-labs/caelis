@@ -10,8 +10,10 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	sdkruntime "github.com/caelis-labs/caelis/agent-sdk/runtime"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/ports/agentprofile"
 )
@@ -100,7 +102,15 @@ type systemManagedAgentRunner interface {
 }
 
 type systemManagedAgentRuntime struct {
-	factory agent.AgentFactory
+	config systemManagedAgentRuntimeConfig
+}
+
+type systemManagedAgentRuntimeConfig struct {
+	AgentFactory          agent.AgentFactory
+	StagingSessions       func() session.Service
+	LifecycleInterceptors []agent.LifecycleInterceptor
+	TraceSink             agent.TraceSink
+	Guardrails            []agent.GuardrailSpec
 }
 
 type systemManagedAgentRegistry struct {
@@ -114,10 +124,21 @@ var (
 )
 
 func newSystemManagedAgentRuntime(factory agent.AgentFactory) *systemManagedAgentRuntime {
-	if factory == nil {
-		factory = chat.Factory{}
+	return newSystemManagedAgentRuntimeWithConfig(systemManagedAgentRuntimeConfig{AgentFactory: factory})
+}
+
+func newSystemManagedAgentRuntimeWithConfig(config systemManagedAgentRuntimeConfig) *systemManagedAgentRuntime {
+	if config.AgentFactory == nil {
+		config.AgentFactory = chat.Factory{}
 	}
-	return &systemManagedAgentRuntime{factory: factory}
+	if config.StagingSessions == nil {
+		config.StagingSessions = func() session.Service {
+			return inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+		}
+	}
+	config.LifecycleInterceptors = append([]agent.LifecycleInterceptor(nil), config.LifecycleInterceptors...)
+	config.Guardrails = append([]agent.GuardrailSpec(nil), config.Guardrails...)
+	return &systemManagedAgentRuntime{config: config}
 }
 
 func (r *systemManagedAgentRuntime) Run(ctx context.Context, req systemManagedAgentRunRequest) (systemManagedAgentRunResult, error) {
@@ -125,12 +146,12 @@ func (r *systemManagedAgentRuntime) Run(ctx context.Context, req systemManagedAg
 	if err != nil {
 		return systemManagedAgentRunResult{}, err
 	}
-	factory := agent.AgentFactory(nil)
+	config := systemManagedAgentRuntimeConfig{}
 	if r != nil {
-		factory = r.factory
+		config = r.config
 	}
-	if factory == nil {
-		factory = chat.Factory{}
+	if config.AgentFactory == nil || config.StagingSessions == nil {
+		config = newSystemManagedAgentRuntimeWithConfig(config).config
 	}
 	metadata := chat.Metadata(plan.Spec.Instructions)
 	if metadata == nil {
@@ -142,26 +163,60 @@ func (r *systemManagedAgentRuntime) Run(ctx context.Context, req systemManagedAg
 	if strings.TrimSpace(plan.Spec.ReasoningEffort) != "" {
 		metadata["reasoning_effort"] = strings.TrimSpace(plan.Spec.ReasoningEffort)
 	}
-	runtimeAgent, err := factory.NewAgent(ctx, agent.AgentSpec{
-		Name:  plan.AgentID,
-		Model: plan.Model,
-		Tools: plan.Tools,
-		Request: agent.ModelRequestOptions{
-			Stream: boolPtr(false),
-			Output: plan.Output,
-		},
-		Metadata: metadata,
+	// System-agent attempts execute through Core Runtime in an isolated staging
+	// session. The domain owner validates the result before atomically committing
+	// canonical prompt/assistant facts to its reusable durable session, so a
+	// malformed attempt receives the common safety and journal pipeline without
+	// poisoning the next model prefix.
+	staging := config.StagingSessions()
+	if staging == nil {
+		return systemManagedAgentRunResult{}, fmt.Errorf("gatewayapp: system-managed agent staging session service is unavailable")
+	}
+	activeSession, err := startSystemManagedAgentStagingSession(ctx, staging, plan.Session)
+	if err != nil {
+		return systemManagedAgentRunResult{}, err
+	}
+	if len(plan.Events) > 0 {
+		batch, ok := staging.(session.EventBatchService)
+		if !ok {
+			return systemManagedAgentRunResult{}, fmt.Errorf("gatewayapp: system-managed agent staging service requires event batches")
+		}
+		if _, err := batch.AppendEvents(ctx, session.AppendEventsRequest{SessionRef: activeSession.SessionRef, Events: session.CloneEvents(plan.Events)}); err != nil {
+			return systemManagedAgentRunResult{}, err
+		}
+	}
+	core, err := sdkruntime.New(sdkruntime.Config{
+		Sessions:              staging,
+		AgentFactory:          config.AgentFactory,
+		LifecycleInterceptors: config.LifecycleInterceptors,
+		TraceSink:             config.TraceSink,
+		Guardrails:            config.Guardrails,
 	})
 	if err != nil {
 		return systemManagedAgentRunResult{}, err
 	}
-	runCtx := agent.NewContext(agent.ContextSpec{
-		Context: ctx,
-		Session: plan.Session,
-		Events:  plan.Events,
+	run, err := core.Run(ctx, agent.RunRequest{
+		SessionRef: activeSession.SessionRef,
+		AgentSpec: agent.AgentSpec{
+			Name:  plan.AgentID,
+			Model: plan.Model,
+			Tools: plan.Tools,
+			Request: agent.ModelRequestOptions{
+				Stream: boolPtr(false),
+				Output: plan.Output,
+			},
+			Metadata: metadata,
+		},
 	})
+	if err != nil {
+		return systemManagedAgentRunResult{}, err
+	}
+	if run.Handle == nil {
+		return systemManagedAgentRunResult{}, fmt.Errorf("gatewayapp: system-managed agent runtime returned no handle")
+	}
+	defer run.Handle.Close()
 	result := systemManagedAgentRunResult{}
-	for event, runErr := range runtimeAgent.Run(runCtx) {
+	for event, runErr := range run.Handle.Events() {
 		if runErr != nil {
 			return result, runErr
 		}
@@ -178,6 +233,27 @@ func (r *systemManagedAgentRuntime) Run(ctx context.Context, req systemManagedAg
 		result.Text = session.EventText(result.AssistantEvent)
 	}
 	return result, nil
+}
+
+func startSystemManagedAgentStagingSession(ctx context.Context, service session.Service, planned session.Session) (session.Session, error) {
+	ref := session.NormalizeSessionRef(planned.SessionRef)
+	if ref.AppName == "" {
+		ref.AppName = "caelis-system"
+	}
+	if ref.UserID == "" {
+		ref.UserID = "system"
+	}
+	return service.StartSession(ctx, session.StartSessionRequest{
+		AppName: ref.AppName,
+		UserID:  ref.UserID,
+		Workspace: session.WorkspaceRef{
+			Key: ref.WorkspaceKey,
+			CWD: strings.TrimSpace(planned.CWD),
+		},
+		PreferredSessionID: ref.SessionID,
+		Title:              planned.Title,
+		Metadata:           session.CloneState(planned.Metadata),
+	})
 }
 
 func systemManagedAgentRunPlanFor(req systemManagedAgentRunRequest) (systemManagedAgentRunPlan, error) {

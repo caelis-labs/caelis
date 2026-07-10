@@ -36,7 +36,7 @@ Status values:
 | ID | Status | Exit condition |
 | --- | --- | --- |
 | P1-1 ACP semantic completeness | closed | Permission, cancel, participant, and handoff have one normalized codec path and built-in/external conformance, matching the completed update codec |
-| P1-2 Control ownership completion | partial | Surface/source strings are translated by Control into neutral SDK owner/principal/role values; system Agents reuse the common Runtime safety pipeline |
+| P1-2 Control ownership completion | closed | Surface/source strings are translated by Control into neutral SDK owner/principal/role values; system Agents reuse the common Runtime safety pipeline |
 | P1-3 Durable continuation and placement | partial | Contract is either safe checkpoint/lease-based continuation or explicitly live-process attachment; production host exercises session lease lifecycle |
 | P1-4 Execution capability wiring | partial | Control derives and validates actual model, tool, and sandbox requirements; unsupported output/features do not silently degrade |
 | P1-5 Runtime liveness and observability | partial | Control-owned dynamic watchdog exists; TraceSink cannot block execution indefinitely; stuck guardrails are bounded |
@@ -71,8 +71,11 @@ Use small, independently committable slices:
   now consume neutral `session.ParticipantRole` and `session.ActorKind` values.
   Product `Source` strings are audit provenance only and cannot change role,
   model-context visibility, or control authorization. Unknown roles are
-  rejected before spawn and unknown principals fail closed. P1-2 remains
-  partial until Guardian/Reviewer reuse the common Runtime invocation pipeline.
+  rejected before spawn and unknown principals fail closed. Guardian model
+  attempts now execute through Core Runtime in isolated staging sessions, with
+  guardrails, typed Run/Turn/Model lifecycle, capability validation, and
+  terminal Run/Turn journals. Only validated prompt/assistant pairs enter the
+  reusable durable Guardian session, preserving malformed-retry isolation.
 
 Do not combine unrelated P0s into one broad rewrite. Update this board in the
 same commit as the closing evidence. Do not edit the frozen v0.25.0 acceptance
