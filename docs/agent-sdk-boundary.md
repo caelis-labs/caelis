@@ -1,12 +1,14 @@
 # Agent SDK Boundary
 
-Status: accepted architecture direction, implemented in part as of `v0.25.0`.
+Status: accepted normative architecture; locally implemented and verified at
+candidate `9acbf75d`, pending tagged/published operational evidence.
 
 This document is the normative ownership and dependency contract for
 `agent-sdk`. It deliberately does not track implementation tasks or claim
 readiness. Current evidence and residual risks live in
-[Agent SDK v0.25.0 Acceptance Review](agent-sdk-v0.25.0-acceptance.md), and the
-live work queue lives in
+[Agent SDK 9acbf75d Acceptance](agent-sdk-9acbf75d-acceptance.md). The frozen
+[v0.25.0 review](agent-sdk-v0.25.0-acceptance.md) records the defects found in
+that release, and the live work queue lives in
 [Agent SDK Stabilization Checklist](agent-sdk-stabilization-checklist.md).
 
 ## Accepted Decisions
@@ -163,7 +165,8 @@ They can abort valid open-ended Agent work. This does not mean execution may be
 unbounded without policy: Control must be able to observe lifecycle, usage,
 elapsed time, repeated action signatures, and progress, then checkpoint,
 request confirmation, or cancel through a dynamic watchdog. That Control policy
-is still incomplete at `v0.25.0` and is a readiness blocker.
+was incomplete at `v0.25.0`; the current production Control host implements it
+above the fenced Runtime decorator.
 
 Runtime safety also requires:
 
@@ -278,8 +281,9 @@ The SDK may be described as a stable dependency layer only when:
   store, lease, sandbox, transport, and executor adapters;
 - no deterministic workflow engine or autonomous handoff path has entered Core.
 
-`v0.25.0` does not yet satisfy this gate. See the acceptance review for the
-current closed/partial/open matrix.
+The local `9acbf75d` candidate satisfies this implementation gate. It is not a
+published-release claim: candidate-tag proxy resolution and same-SHA release
+workflow evidence remain post-tag operational checks.
 
 ## Comparative Inputs
 
@@ -304,6 +308,8 @@ External SDKs inform constraints; they do not define Caelis's taxonomy:
 - This document: normative SDK/Control/ACP ownership and readiness invariants.
 - [Agent SDK v0.25.0 Acceptance Review](agent-sdk-v0.25.0-acceptance.md): frozen
   release evidence and defect findings.
+- [Agent SDK 9acbf75d Acceptance](agent-sdk-9acbf75d-acceptance.md): current
+  local-candidate evidence and residual operational status.
 - [Agent SDK Stabilization Checklist](agent-sdk-stabilization-checklist.md): live
   implementation board.
 - [Agent SDK Usage and Compatibility](agent-sdk-usage.md): consumer-facing

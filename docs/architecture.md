@@ -48,7 +48,9 @@ Document responsibilities are intentionally separate:
 - [Agent SDK Boundary](agent-sdk-boundary.md) owns normative SDK/Control/ACP
   decisions;
 - [Agent SDK v0.25.0 Acceptance Review](agent-sdk-v0.25.0-acceptance.md) is the
-  frozen implementation/readiness verdict;
+  frozen release verdict;
+- [Agent SDK 9acbf75d Acceptance](agent-sdk-9acbf75d-acceptance.md) is the
+  current local-candidate verdict;
 - [Agent SDK Stabilization Checklist](agent-sdk-stabilization-checklist.md) is
   the live follow-up board;
 - [Agent SDK Usage and Compatibility](agent-sdk-usage.md) owns consumer-facing
@@ -140,18 +142,20 @@ Repeatable SDK boundary gates:
 - `make commit-check`: run formatting, lint, architecture and package-boundary
   checks, vet, tests, and builds.
 
-The update semantic owner, product assembly peel-off, Control-owned handoff,
-neutral task principals/roles, and common Runtime pipeline for system Agents
-are implemented. Durable continuation is explicitly process-local live attach,
-while the production Control host owns cross-Runtime session leases. The next
-architecture step is to close the remaining P1 stability gates for schema/API
-compatibility, consumer evidence, and release enforcement. Execution capability
-wiring and the dynamic liveness watchdog are now Control-owned. The watchdog
+The update and coordination semantic owners, product assembly peel-off,
+Control-owned handoff, neutral task principals/roles, and common Runtime
+pipeline for system Agents are implemented. Durable continuation is explicitly
+process-local live attach, while the production Control host owns fenced
+cross-Runtime session leases. Rolling API compatibility, split current/tagged
+consumer gates, and non-empty regression enforcement are implemented for the
+local candidate. Execution capability wiring and the dynamic liveness watchdog
+are Control-owned. The watchdog
 uses lifecycle, usage, progress, elapsed-time, and repeated-action signals; it
 does not restore a fixed SDK step budget. Product source policy no longer lives
 in SDK task code. Module or repository extraction is not on the roadmap.
 Current status is recorded in
-[the v0.25.0 acceptance review](agent-sdk-v0.25.0-acceptance.md).
+[the 9acbf75d candidate acceptance](agent-sdk-9acbf75d-acceptance.md); a new
+candidate tag has not been created or published.
 
 ## Durable State
 

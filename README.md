@@ -114,9 +114,11 @@ is provided.
 
 See [docs/architecture.md](docs/architecture.md) for the layer map and
 [docs/agent-sdk-boundary.md](docs/agent-sdk-boundary.md) for the reusable Agent
-SDK package boundary and ACP-native orchestration model. The current
-closed/partial/open readiness verdict is in
-[docs/agent-sdk-v0.25.0-acceptance.md](docs/agent-sdk-v0.25.0-acceptance.md).
+SDK package boundary and ACP-native orchestration model. The local stabilization
+candidate verdict is in
+[docs/agent-sdk-9acbf75d-acceptance.md](docs/agent-sdk-9acbf75d-acceptance.md);
+the [v0.25.0 review](docs/agent-sdk-v0.25.0-acceptance.md) is frozen release
+history.
 See [docs/agent-sdk-usage.md](docs/agent-sdk-usage.md) for the SDK quickstart and
 consumer contracts.
 

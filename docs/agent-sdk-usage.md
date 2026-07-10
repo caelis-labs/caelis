@@ -7,7 +7,8 @@ consumers may rely on.
 
 `v0.25.0` established the package boundary but did not itself pass the later
 stable-dependency acceptance. The live status and exact closing evidence are in
-the [stabilization checklist](agent-sdk-stabilization-checklist.md); the frozen
+the [9acbf75d candidate acceptance](agent-sdk-9acbf75d-acceptance.md) and
+[stabilization checklist](agent-sdk-stabilization-checklist.md); the frozen
 [v0.25.0 acceptance review](agent-sdk-v0.25.0-acceptance.md) remains the record
 of the faults found in that tag.
 
@@ -141,10 +142,10 @@ derives and validates the final assembled model/tool/sandbox requirements.
   current Runtime process. It is not durable continuation. After restart, a
   durable but non-live run returns `*agent.RunNotAttachableError`; recovery
   records an interrupted state instead of pretending execution resumed.
-- The ordering above is the target contract, but v0.25.0 has a known liveness
-  gap when a resolved PauseToken commits and the store returns
-  `session.CommittedError`: an idempotent retry may not wake the live waiter.
-  See P0-6 in the acceptance review.
+- Historical note: `v0.25.0` could miss waking a live approval waiter after a
+  committed-but-reported resolution. The local candidate confirms the durable
+  decision with a bounded context detached from the resolver cancellation and
+  redelivers matching idempotent retries; conflicting decisions fail closed.
 
 ## Event ordering and replay contract
 
@@ -160,9 +161,10 @@ derives and validates the final assembled model/tool/sandbox requirements.
   `Run`, `Turn`, `Step`, `PauseToken`, and `ToolExecution` records use validated
   transition and revision rules. A terminal tool result and its journal
   transition are one compound commit in capable stores.
-- On v0.25.0 crash recovery, `unknown_outcome` is durable journal truth but is
-  not yet synthesized into the canonical paired tool result. A host must not
-  infer from the rebuilt model history alone that retry is safe; see P0-5.
+- Historical note: `v0.25.0` could leave recovered tool journal state out of
+  canonical model truth. The local candidate derives the minimal canonical
+  payload directly from `RecoveryStatus`; only genuinely unknown outcomes carry
+  the no-blind-retry instruction, and live/rebuilt model contexts match.
 - Compaction checkpoints identify the greatest summarized event `Seq`. Replay
   chooses the valid checkpoint with the highest coverage and then applies
   later canonical events; file order alone does not choose a checkpoint.
@@ -222,13 +224,18 @@ compatibility promise; durable schema compatibility and the contracts above
 still apply to data written by supported reference stores.
 
 The declaration snapshot detects an unreviewed worktree change. The
-`sdk-api-compat` gate also compares it with the baseline release tag declared in
-`agent-sdk/api-compat-waivers.json`. Additions are accepted; a removed or
+`sdk-api-compat` gate automatically compares it with the most recent reachable
+prior release tag; when running at a candidate tag, that tag itself is skipped.
+`agent-sdk/api-compat-waivers.json` may use `auto`, while an explicit operator
+override is available for controlled diagnostics. Additions are accepted; a removed or
 changed old declaration must match an exact package/SHA-256 waiver with a
 specific pre-v1 reason. Stale waivers fail, so they cannot silently authorize a
 different future change. This is source-declaration evidence; behavioral
 compatibility is covered separately by the supported-consumer quickstart and
-proxy smoke tests.
+proxy smoke tests. The current-source gate compiles the worktree fixture with a
+local module replacement. The tagged-artifact gate extracts the target tag's
+own fixture and package list, resolves the exact proxy version, and forbids
+`replace`.
 
 ## Sandbox platforms
 

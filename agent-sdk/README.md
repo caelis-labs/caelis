@@ -64,9 +64,11 @@ module version.
 
 The accepted package boundary, ACP-native orchestration model, and durability
 invariants are documented in
-[Agent SDK Boundary](../docs/agent-sdk-boundary.md). The frozen v0.25.0 release
-and stable-dependency verdict is in
-[Agent SDK v0.25.0 Acceptance Review](../docs/agent-sdk-v0.25.0-acceptance.md).
+[Agent SDK Boundary](../docs/agent-sdk-boundary.md). The current local candidate
+verdict is in
+[Agent SDK 9acbf75d Acceptance](../docs/agent-sdk-9acbf75d-acceptance.md). The
+[v0.25.0 review](../docs/agent-sdk-v0.25.0-acceptance.md) is frozen history, not
+the current implementation status.
 
 The bundled quickstart, consumer contracts, and current concurrency,
 cancellation, persistence, and recovery limitations are in
@@ -104,9 +106,10 @@ make sdk-proxy-smoke
 make arch-lint
 ```
 
-`sdk-proxy-smoke` builds a clean external consumer against the reviewed tagged
-baseline, imports every supported package, runs the behavioral quickstart, and
-rejects local `replace` directives.
+`sdk-boundary-check` builds the current worktree quickstart in a separate module.
+`sdk-proxy-smoke` separately extracts the target tag's own fixture and supported
+package list, resolves that exact version through a Go proxy, and rejects local
+`replace` directives.
 
 After intentionally reviewing a supported API change, refresh its manifest:
 

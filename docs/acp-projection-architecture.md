@@ -55,11 +55,13 @@ the resulting normalized facts. The full ownership, dynamic orchestration, and
 no-workflow rules are defined once in
 [Agent SDK Boundary](agent-sdk-boundary.md).
 
-At `v0.25.0`, message/tool/plan updates use the centralized semantic codec.
-Permission, cancellation, participant, and handoff paths still need equivalent
-built-in/external conformance before this projection boundary is considered
-complete; see the
-[acceptance review](agent-sdk-v0.25.0-acceptance.md).
+At the local `9acbf75d` candidate, message/tool/plan updates plus permission,
+cancellation, participant, and handoff use the centralized semantic path.
+External controller permission ingress and prompt responses route through
+`protocol/acp/semantic`; built-in participant and Control-authorized handoff
+facts use SDK-owned constructors. Architecture lint rejects new direct
+participant/handoff protocol construction outside the SDK semantic owner. See
+the [candidate acceptance](agent-sdk-9acbf75d-acceptance.md).
 
 ## Terminal Projection
 

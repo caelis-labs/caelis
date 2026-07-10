@@ -18,6 +18,8 @@ separate Agent SDK module or release process.
    publish.
 4. Run `make commit-check`, the focused Agent SDK race suite,
    `make regression`, `make release-dry-run`, and `git diff --check`.
+   Every regression group must print at least one matched test; `[no tests to
+   run]` or an empty selector is a failure.
 5. Review a curated behavioral release summary. Do not use raw commit subjects
    as the only release note: an intermediate feature may have been removed
    before the tag.
@@ -26,6 +28,11 @@ separate Agent SDK module or release process.
    the tag. This operator check catches branch-only failures early; the release
    workflow independently invokes the same reusable quality workflow for the
    tag SHA before publish.
+8. Run `go run ./scripts/sdk_api_compat -print-baseline` and confirm it is the
+   immediately preceding reachable release. On a candidate tag, the resolver
+   skips the candidate itself. Remove waivers that become stale when the
+   baseline rolls forward; each remaining waiver must bind an exact package and
+   declaration digest with a concrete reason.
 
 The focused race suite for SDK persistence/runtime work is:
 
@@ -93,8 +100,10 @@ Release gating should record, rather than merely assume, these results:
 The reusable quality workflow records the focused Agent SDK race suite,
 regression suite, maintained-document link validation, and clean external Go
 consumer as named steps in addition to the ordinary quality gates. Pull request
-and `main` runs use the reviewed baseline tag for the consumer smoke; a tag
-release supplies its own candidate tag. The link gate covers `README.md`,
+and `main` runs compile the current-source quickstart and use the rolling prior
+release for the tagged-artifact smoke; a tag release supplies its own candidate
+tag. The tagged gate extracts that tag's fixture/allowlist and forbids replace,
+so current API additions are not compiled against an old fixture. The link gate covers `README.md`,
 `agent-sdk/README.md`, and maintained Markdown under `docs/` while ignoring
 example links embedded in vendored skill text.
 

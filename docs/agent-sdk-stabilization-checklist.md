@@ -1,10 +1,13 @@
 # Agent SDK Stabilization Checklist
 
-Status: **reopened after v0.25.0 acceptance**.
+Status: **local stabilization candidate closed at `9acbf75d`; candidate-tag
+operations pending**.
 
 This is the live execution board for work after `v0.25.0`. The full evidence,
 failure interleavings, and frozen verdict are in
 [Agent SDK v0.25.0 Acceptance Review](agent-sdk-v0.25.0-acceptance.md).
+The current evidence index is
+[Agent SDK 9acbf75d Acceptance](agent-sdk-9acbf75d-acceptance.md).
 
 An item is closed only when its specific failure sequence has a regression,
 fault, race, or model-context round-trip test. Existing broad green gates are
@@ -41,8 +44,8 @@ Status values:
 | P1-4 Execution capability wiring | closed | Control derives and validates actual model, tool, and sandbox requirements; unsupported output/features do not silently degrade |
 | P1-5 Runtime liveness and observability | closed | Control-owned dynamic watchdog exists; TraceSink cannot block execution indefinitely; stuck guardrails are bounded |
 | P1-6 Schema and compatibility | closed | Raw durable JSON migrates before typed decode and unknown-field corpus proves preservation; supported API is compared tag-to-tag with explicit waivers |
-| P1-7 Public consumer contract | closed | A behavioral quickstart uses only supported imports, or required reference packages are explicitly supported; actual tagged module passes a no-replace consumer smoke |
-| P1-8 Release enforcement | closed | Publish waits for quality on the same SHA and CI records focused race, regression, link, and proxy-consumer evidence |
+| P1-7 Public consumer contract | closed locally; candidate-tag evidence deferred | Current-source quickstart and baseline-tag artifact pass separate gates; the next candidate tag must pass its own no-replace proxy smoke |
+| P1-8 Release enforcement | closed locally; candidate-tag evidence deferred | Same-SHA workflow dependency and non-empty named gates are contract-tested; the next tag must supply operational workflow evidence |
 
 ## Execution Order
 
@@ -76,14 +79,18 @@ Use small, independently committable slices:
   guardrails, typed Run/Turn/Model lifecycle, capability validation, and
   terminal Run/Turn journals. Only validated prompt/assistant pairs enter the
   reusable durable Guardian session, preserving malformed-retry isolation.
-- **P1-3 live-attach contract slice:** the ambiguous `Resume` API was removed.
+- **P1-3 live-attach/placement contract slice:** the ambiguous `Resume` API was removed.
   `AttachLiveRun` now names and documents the actual process-local contract;
   after restart it returns `RunNotAttachableError` and never treats durable
   journal state as a replay point. Memory and file stores now implement the
   same lease CAS contract, including cross-instance conflict, heartbeat
   revision, release, and expiry takeover. The production Gateway uses a
   Control-owned wrapper that holds the lease for the full asynchronous Runner
-  lifetime and cancels execution if heartbeat ownership is lost.
+  lifetime and cancels execution if heartbeat ownership is lost. Every
+  acquisition has a distinct identity and monotonic fencing token; Runtime
+  writes are checked atomically by memory/file stores. Stream, live-attach,
+  approval, and participant capabilities survive lease/watchdog decoration,
+  and participant prompts use the same fenced watchdog envelope as main runs.
 - **P1-4 execution-requirements slice:** built-in tools declare their concrete
   sandbox dependencies, and the production Control host derives their union
   from the final augmented tool set. After surface request defaults are merged,
@@ -124,8 +131,9 @@ Use small, independently committable slices:
   file round-trip coverage proves the migrated journal remains outside exact
   canonical model history.
 - **P1-6 tag-to-tag API sub-slice:** `scripts/sdk_api_compat` parses declaration
-  snapshots and compares the current supported API with the `v0.25.0` release
-  tag. Additions pass; every removed or changed old declaration requires an
+  snapshots and automatically compares the current supported API with the most
+  recent reachable prior release tag (skipping the current candidate tag).
+  Additions pass; every removed or changed old declaration requires an
   exact package plus SHA-256 waiver and a concrete reason. Missing, duplicate,
   ambiguous, and stale waivers fail. The 18 reviewed pre-v1 changes cover the
   honest live-attach rename, spawn/transaction identities, neutral task
@@ -137,14 +145,18 @@ Use small, independently committable slices:
   regression parses its imports against the allowlist. `sdk_proxy_smoke.sh`
   creates a clean external module, imports all 16 supported packages, executes
   the behavioral quickstart, and verifies the resolved Caelis module has the
-  exact `v0.25.0` version and no `replace`. The smoke passed against
-  `https://proxy.golang.org,direct`; no new release was created.
+  exact `v0.25.0` version and no `replace`. The current-source gate separately
+  compiled the worktree quickstart, so a new supported API is not tested
+  against an old tag fixture. The baseline smoke passed against
+  `https://proxy.golang.org,direct`; no new candidate tag was created.
 - **P1-8 release-enforcement slice:** `quality.yml` is now reusable and records
   focused Agent SDK race, regression, maintained-document link, and tagged
   no-replace consumer gates. `release.yml` invokes that workflow at the caller
   SHA, supplies the candidate tag to the consumer smoke, and makes every
-  publish step wait on its success. Workflow contract regressions and the link
-  checker have focused tests; no tag or release was created.
+  publish step wait on its success. Every regression selector must list at least
+  one real test before execution; an empty or unmatched selector fails. Workflow
+  contract regressions and the link checker have focused tests; no tag or
+  release was created.
 
 Do not combine unrelated P0s into one broad rewrite. Update this board in the
 same commit as the closing evidence. Do not edit the frozen v0.25.0 acceptance
