@@ -31,6 +31,20 @@ func TestStackExposesNarrowKernelServices(t *testing.T) {
 	requireKernelService(stack.Kernel())
 }
 
+func TestProductionStackPreservesRuntimeStreamsThroughDecorators(t *testing.T) {
+	t.Parallel()
+
+	stack, err := newGatewayAppTestStack(t, Config{StoreDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+	defer stack.Close()
+	provider := stack.KernelStreams()
+	if provider == nil || provider.Streams() == nil {
+		t.Fatalf("KernelStreams().Streams() = %#v, want production task streams", provider)
+	}
+}
+
 func requireKernelTurnService(gateway.TurnService)                 {}
 func requireKernelSessionService(gateway.SessionService)           {}
 func requireKernelControlPlaneService(gateway.ControlPlaneService) {}

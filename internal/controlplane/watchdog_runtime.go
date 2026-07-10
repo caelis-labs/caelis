@@ -14,6 +14,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 )
 
 const (
@@ -24,6 +25,13 @@ const (
 	defaultWatchdogTickInterval   = time.Second
 	defaultWatchdogReviewInterval = 5 * time.Minute
 	defaultWatchdogReviewTimeout  = 30 * time.Second
+)
+
+var (
+	_ agent.StreamProvider          = (*WatchdogRuntime)(nil)
+	_ agent.LiveRunAttacher         = (*WatchdogRuntime)(nil)
+	_ agent.ApprovalResolver        = (*WatchdogRuntime)(nil)
+	_ agent.ParticipantControlPlane = (*WatchdogRuntime)(nil)
 )
 
 // WatchdogReason identifies a soft Control review trigger.
@@ -126,6 +134,8 @@ type WatchdogRuntime struct {
 	reviewer       WatchdogReviewer
 	clock          func() time.Time
 	lifecycle      *WatchdogLifecycleObserver
+	runsMu         sync.Mutex
+	runs           map[string]agent.Runner
 }
 
 // NewWatchdogRuntime wraps an execution Runtime with soft-threshold review,
@@ -162,11 +172,14 @@ func NewWatchdogRuntime(config WatchdogRuntimeConfig) (*WatchdogRuntime, error) 
 	if config.Clock == nil {
 		config.Clock = time.Now
 	}
+	if config.Lifecycle == nil {
+		config.Lifecycle = NewWatchdogLifecycleObserver()
+	}
 	return &WatchdogRuntime{
 		runtime: config.Runtime, sessions: config.Sessions, thresholds: config.Thresholds,
 		tickInterval: config.TickInterval, reviewInterval: config.ReviewInterval,
 		reviewTimeout: config.ReviewTimeout, reviewer: config.Reviewer, clock: config.Clock,
-		lifecycle: config.Lifecycle,
+		lifecycle: config.Lifecycle, runs: map[string]agent.Runner{},
 	}, nil
 }
 
@@ -182,8 +195,94 @@ func (r *WatchdogRuntime) Run(ctx context.Context, req agent.RunRequest) (agent.
 	if result.Session.SessionID != "" {
 		ref = session.NormalizeSessionRef(result.Session.SessionRef)
 	}
-	result.Handle = newWatchdogRunner(result.Handle, ref, r)
+	runID := result.Handle.RunID()
+	result.Handle = newWatchdogRunner(result.Handle, ref, r, func() { r.forgetRun(runID) })
+	r.rememberRun(runID, result.Handle)
 	return result, nil
+}
+
+func (r *WatchdogRuntime) Streams() stream.Service {
+	provider, _ := r.runtime.(agent.StreamProvider)
+	if provider == nil {
+		return nil
+	}
+	return provider.Streams()
+}
+
+func (r *WatchdogRuntime) AttachLiveRun(ctx context.Context, req agent.AttachLiveRunRequest) (agent.RunResult, error) {
+	attacher, ok := r.runtime.(agent.LiveRunAttacher)
+	if !ok {
+		return agent.RunResult{}, &agent.RunNotAttachableError{SessionRef: req.SessionRef, RunID: req.RunID, Detail: "decorated runtime does not support live attachment"}
+	}
+	result, err := attacher.AttachLiveRun(ctx, req)
+	if err != nil {
+		return result, err
+	}
+	r.runsMu.Lock()
+	result.Handle = r.runs[strings.TrimSpace(req.RunID)]
+	r.runsMu.Unlock()
+	if result.Handle == nil {
+		return agent.RunResult{}, &agent.RunNotAttachableError{SessionRef: req.SessionRef, RunID: req.RunID, Detail: "decorated live runner is unavailable"}
+	}
+	return result, nil
+}
+
+func (r *WatchdogRuntime) ResolveApproval(ctx context.Context, req agent.ResolveApprovalRequest) error {
+	resolver, ok := r.runtime.(agent.ApprovalResolver)
+	if !ok {
+		return fmt.Errorf("controlplane: decorated runtime does not support approval resolution")
+	}
+	return resolver.ResolveApproval(ctx, req)
+}
+
+func (r *WatchdogRuntime) AttachParticipant(ctx context.Context, req agent.AttachParticipantRequest) (session.Session, error) {
+	participants, ok := r.runtime.(agent.ParticipantControlPlane)
+	if !ok {
+		return session.Session{}, fmt.Errorf("controlplane: decorated runtime does not support participants")
+	}
+	return participants.AttachParticipant(ctx, req)
+}
+
+func (r *WatchdogRuntime) PromptParticipant(ctx context.Context, req agent.PromptParticipantRequest) (agent.RunResult, error) {
+	participants, ok := r.runtime.(agent.ParticipantControlPlane)
+	if !ok {
+		return agent.RunResult{}, fmt.Errorf("controlplane: decorated runtime does not support participants")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	result, err := participants.PromptParticipant(ctx, req)
+	if err != nil || result.Handle == nil {
+		return result, err
+	}
+	ref := session.NormalizeSessionRef(req.SessionRef)
+	if result.Session.SessionID != "" {
+		ref = session.NormalizeSessionRef(result.Session.SessionRef)
+	}
+	runID := result.Handle.RunID()
+	result.Handle = newWatchdogRunner(result.Handle, ref, r, func() { r.forgetRun(runID) })
+	r.rememberRun(runID, result.Handle)
+	return result, nil
+}
+
+func (r *WatchdogRuntime) DetachParticipant(ctx context.Context, req agent.DetachParticipantRequest) (session.Session, error) {
+	participants, ok := r.runtime.(agent.ParticipantControlPlane)
+	if !ok {
+		return session.Session{}, fmt.Errorf("controlplane: decorated runtime does not support participants")
+	}
+	return participants.DetachParticipant(ctx, req)
+}
+
+func (r *WatchdogRuntime) rememberRun(runID string, runner agent.Runner) {
+	r.runsMu.Lock()
+	r.runs[strings.TrimSpace(runID)] = runner
+	r.runsMu.Unlock()
+}
+
+func (r *WatchdogRuntime) forgetRun(runID string) {
+	r.runsMu.Lock()
+	delete(r.runs, strings.TrimSpace(runID))
+	r.runsMu.Unlock()
 }
 
 // WatchdogLifecycleObserver routes typed Runtime lifecycle traces into the
@@ -269,13 +368,14 @@ type watchdogRunner struct {
 	usage                 session.UsageSnapshot
 	lifecycleStatus       string
 	terminalErr           error
+	onFinish              func()
 }
 
-func newWatchdogRunner(inner agent.Runner, ref session.SessionRef, owner *WatchdogRuntime) agent.Runner {
+func newWatchdogRunner(inner agent.Runner, ref session.SessionRef, owner *WatchdogRuntime, onFinish func()) agent.Runner {
 	startedAt := owner.clock()
 	runner := &watchdogRunner{
 		inner: inner, sessionRef: ref, owner: owner, startedAt: startedAt,
-		lastProgressAt: startedAt, stop: make(chan struct{}),
+		lastProgressAt: startedAt, stop: make(chan struct{}), onFinish: onFinish,
 	}
 	owner.lifecycle.register(runner)
 	go runner.monitor()
@@ -527,6 +627,9 @@ func (r *watchdogRunner) finish() {
 	r.stopOnce.Do(func() {
 		close(r.stop)
 		r.owner.lifecycle.unregister(r)
+		if r.onFinish != nil {
+			r.onFinish()
+		}
 	})
 }
 

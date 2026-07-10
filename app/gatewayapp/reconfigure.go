@@ -294,7 +294,7 @@ func (s *Stack) buildGatewayRuntime(plan gatewayBuildPlan) (*gatewayRuntimeBundl
 		return nil, err
 	}
 	bundle.ACPControlPlane = acpControlPlane
-	sessionControl, err := controlplane.NewSessionControl(controlCoordinator, rt)
+	sessionControl, err := controlplane.NewSessionControl(controlCoordinator, watchdogRuntime)
 	if err != nil {
 		bundle.Close()
 		return nil, err
