@@ -124,8 +124,13 @@ func buildSnapshot(importPaths []string) ([]byte, error) {
 		out.WriteString("\n")
 		for _, declaration := range declarations {
 			for _, line := range strings.Split(declaration, "\n") {
+				line = strings.TrimRight(strings.ReplaceAll(line, "\t", "    "), " ")
+				if line == "" {
+					out.WriteByte('\n')
+					continue
+				}
 				out.WriteString("  ")
-				out.WriteString(strings.ReplaceAll(line, "\t", "    "))
+				out.WriteString(line)
 				out.WriteByte('\n')
 			}
 		}

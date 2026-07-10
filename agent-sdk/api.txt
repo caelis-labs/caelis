@@ -14,9 +14,18 @@ package github.com/caelis-labs/caelis/agent-sdk
       RunLifecycleStatusCompleted       RunLifecycleStatus = "completed"
   )
   const (
+      RunLimitModelCalls RunLimitKind = "model_calls"
+      RunLimitToolCalls  RunLimitKind = "tool_calls"
+      RunLimitTurns      RunLimitKind = "turns"
+      RunLimitWallTime   RunLimitKind = "wall_time"
+      RunLimitTokens     RunLimitKind = "tokens"
+      RunLimitCost       RunLimitKind = "cost"
+  )
+  const (
       SubmissionKindConversation SubmissionKind = "conversation"
   )
   func (e *RunConflictError) Error() string
+  func (e *RunLimitError) Error() string
   func (e *RunNotResumableError) Error() string
   func (o ModelRequestOptions) OutputSpec() *model.OutputSpec
   func (o ModelRequestOptions) StreamEnabled(defaultValue bool) bool
@@ -183,6 +192,20 @@ package github.com/caelis-labs/caelis/agent-sdk
       ActiveRunID string
   }
   type RunLifecycleStatus string
+  type RunLimitError struct {
+      Kind  RunLimitKind
+      Limit int64
+      Used  int64
+  }
+  type RunLimitKind string
+  type RunLimits struct {
+      MaxModelCalls int           `json:"max_model_calls,omitempty"`
+      MaxToolCalls  int           `json:"max_tool_calls,omitempty"`
+      MaxTurns      int           `json:"max_turns,omitempty"`
+      MaxWallTime   time.Duration `json:"max_wall_time,omitempty"`
+      MaxTokens     int           `json:"max_tokens,omitempty"`
+      MaxCostMicros int64         `json:"max_cost_micros,omitempty"`
+  }
   type RunNotResumableError struct {
       SessionRef session.SessionRef
       RunID      string
@@ -197,6 +220,7 @@ package github.com/caelis-labs/caelis/agent-sdk
       ApprovalRequester ApprovalRequester   `json:"-"`
       Agent             Agent               `json:"-"`
       AgentSpec         AgentSpec           `json:"-"`
+      Limits            RunLimits           `json:"limits,omitempty"`
   }
   type RunResult struct {
       Session session.Session `json:"session"`
@@ -764,6 +788,8 @@ package github.com/caelis-labs/caelis/agent-sdk/model
       CompletionTokens  int `json:"completion_tokens,omitempty"`
       ReasoningTokens   int `json:"reasoning_tokens,omitempty"`
       TotalTokens       int `json:"total_tokens,omitempty"`
+
+      CostMicros int64 `json:"cost_micros,omitempty"`
   }
   type UserDisplayableError = display.UserDisplayableError
   type WebSearchAvailability interface {
@@ -800,7 +826,7 @@ package github.com/caelis-labs/caelis/agent-sdk/policy
   )
   const (
       ProfileWorkspaceWrite = "workspace-write"
-  
+
       MetadataPolicyProfile    = "policy_profile"
       MetadataLegacyPolicyMode = "policy_mode"
       MetadataExtraReadRoots   = "policy_extra_read_roots"
@@ -1171,7 +1197,7 @@ package github.com/caelis-labs/caelis/agent-sdk/sandbox
       BackendBwrap    Backend = "bwrap"
       BackendLandlock Backend = "landlock"
       BackendWindows  Backend = "windows"
-  
+
       BackendWindowsElevated Backend = "windows-elevated"
       BackendCustom          Backend = "custom"
   )
@@ -1276,11 +1302,11 @@ package github.com/caelis-labs/caelis/agent-sdk/sandbox
       TTY         bool              `json:"tty,omitempty"`
       Env         map[string]string `json:"env,omitempty"`
       Stdin       []byte            `json:"stdin,omitempty"`
-  
+
       Permission Permission `json:"permission,omitempty"`
       RouteHint  Route      `json:"route_hint,omitempty"`
       Backend    Backend    `json:"backend,omitempty"`
-  
+
       Constraints Constraints       `json:"constraints,omitempty"`
       OnOutput    func(OutputChunk) `json:"-"`
   }
@@ -1553,7 +1579,7 @@ package github.com/caelis-labs/caelis/agent-sdk/session
       VisibilityUIOnly    Visibility = "ui_only"
       VisibilityOverlay   Visibility = "overlay"
       VisibilityMirror    Visibility = "mirror"
-  
+
       VisibilityJournal Visibility = "journal"
   )
   const ExecutionJournalSchemaVersion = 1
@@ -2206,19 +2232,19 @@ package github.com/caelis-labs/caelis/agent-sdk/session
   }
   var (
       ErrSessionNotFound = errors.New("agent-sdk/session: session not found")
-  
+
       ErrAmbiguousSession = errors.New("agent-sdk/session: ambiguous session")
-  
+
       ErrInvalidSession = errors.New("agent-sdk/session: invalid session")
-  
+
       ErrInvalidEvent = errors.New("agent-sdk/session: invalid event")
-  
+
       ErrInvalidValue = errors.New("agent-sdk/session: invalid JSON-compatible value")
-  
+
       ErrRevisionConflict = errors.New("agent-sdk/session: revision conflict")
-  
+
       ErrEventConflict = errors.New("agent-sdk/session: event conflict")
-  
+
       ErrUnsupportedLegacyFormat = errors.New("agent-sdk/session: unsupported legacy format")
   )
 
@@ -2297,7 +2323,7 @@ package github.com/caelis-labs/caelis/agent-sdk/task
   )
   const (
       ResultPersistenceCanonical ResultPersistenceMode = iota
-  
+
       ResultPersistenceDeferred
   )
   const (
@@ -2617,10 +2643,10 @@ package github.com/caelis-labs/caelis/agent-sdk/tool
       MetadataMCPTool             = "caelis.mcp.tool"
       MetadataDiscoveredToolNames = "caelis.tool.discovered_names"
       MetadataExecutionJournal    = "caelis.execution_journal"
-  
+
       MetadataToolKindMCP        = "mcp"
       MetadataToolKindToolSearch = "tool_search"
-  
+
       ToolSearchToolName = "tool_search"
   )
   const (

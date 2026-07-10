@@ -3,9 +3,11 @@ package chat
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
+	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -98,6 +100,10 @@ func (a *Agent) executeToolCall(ctx context.Context, call model.ToolCall, observ
 		Observer:     observer,
 	})
 	if err != nil {
+		var limitErr *agent.RunLimitError
+		if errors.As(err, &limitErr) {
+			return model.Message{}, nil, err
+		}
 		executionJournal := result.Metadata[tool.MetadataExecutionJournal]
 		result = tool.Result{
 			ID:      strings.TrimSpace(call.ID),

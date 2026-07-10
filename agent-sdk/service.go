@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -70,6 +71,47 @@ type RunRequest struct {
 	ApprovalRequester ApprovalRequester   `json:"-"`
 	Agent             Agent               `json:"-"`
 	AgentSpec         AgentSpec           `json:"-"`
+	Limits            RunLimits           `json:"limits,omitempty"`
+}
+
+// RunLimits bounds one runtime Run. Zero values are unlimited. Model calls
+// count SDK LLM invocations, turns count completed model responses, and tool
+// calls count executions admitted by Runtime. Token and cost budgets use
+// provider-reported usage; CostMicros is one millionth of the configured
+// billing currency unit.
+type RunLimits struct {
+	MaxModelCalls int           `json:"max_model_calls,omitempty"`
+	MaxToolCalls  int           `json:"max_tool_calls,omitempty"`
+	MaxTurns      int           `json:"max_turns,omitempty"`
+	MaxWallTime   time.Duration `json:"max_wall_time,omitempty"`
+	MaxTokens     int           `json:"max_tokens,omitempty"`
+	MaxCostMicros int64         `json:"max_cost_micros,omitempty"`
+}
+
+// RunLimitKind identifies one exhausted run budget.
+type RunLimitKind string
+
+const (
+	RunLimitModelCalls RunLimitKind = "model_calls"
+	RunLimitToolCalls  RunLimitKind = "tool_calls"
+	RunLimitTurns      RunLimitKind = "turns"
+	RunLimitWallTime   RunLimitKind = "wall_time"
+	RunLimitTokens     RunLimitKind = "tokens"
+	RunLimitCost       RunLimitKind = "cost"
+)
+
+// RunLimitError reports that Runtime stopped work at a configured budget.
+type RunLimitError struct {
+	Kind  RunLimitKind
+	Limit int64
+	Used  int64
+}
+
+func (e *RunLimitError) Error() string {
+	if e == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("agent-sdk: run %s limit exceeded: used %d, limit %d", e.Kind, e.Used, e.Limit)
 }
 
 // RunResult is one runtime execution result.

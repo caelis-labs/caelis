@@ -40,6 +40,7 @@ func (r *Runtime) resolveAgent(
 	spec := cloneAgentSpec(req.AgentSpec)
 	spec.Request = req.Request.WithDefaults(spec.Request)
 	modeName, _ := r.policyForName(ctx, r.policyMode(spec))
+	spec.Model = wrapModelForRunLimits(spec.Model, runBudgetFromContext(ctx))
 	spec.Model = r.wrapModelForAutoCompaction(ref, spec.Model)
 	spec.Tools = r.wrapToolsForRuntime(activeSession, ref, spec, runtimeToolContext{
 		mode:              modeName,
@@ -58,6 +59,7 @@ func (r *Runtime) resolveAgent(
 		runID:      strings.TrimSpace(runID),
 		turnID:     strings.TrimSpace(turnID),
 	})
+	spec.Tools = wrapToolsForRunLimits(spec.Tools, runBudgetFromContext(ctx))
 	return r.agentFactory.NewAgent(ctx, spec)
 }
 

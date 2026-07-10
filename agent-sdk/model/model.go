@@ -773,6 +773,9 @@ type Usage struct {
 	CompletionTokens  int `json:"completion_tokens,omitempty"`
 	ReasoningTokens   int `json:"reasoning_tokens,omitempty"`
 	TotalTokens       int `json:"total_tokens,omitempty"`
+	// CostMicros is provider-reported monetary usage in one millionth of the
+	// configured billing currency unit. Zero means unavailable or no charge.
+	CostMicros int64 `json:"cost_micros,omitempty"`
 }
 
 // FinishReason describes why a model turn ended.

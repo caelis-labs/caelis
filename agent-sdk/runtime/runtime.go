@@ -164,20 +164,35 @@ func (r *Runtime) Run(
 	if err != nil {
 		return agent.RunResult{}, err
 	}
+	if limitsRequireRuntimeInstrumentation(req.Limits) {
+		switch {
+		case activeSession.Controller.Kind == session.ControllerKindACP:
+			return agent.RunResult{}, fmt.Errorf("agent-sdk/runtime: model, tool, turn, token, and cost limits require an SDK-instrumented agent; ACP controller capabilities are not declared")
+		case req.Agent != nil:
+			return agent.RunResult{}, fmt.Errorf("agent-sdk/runtime: model, tool, turn, token, and cost limits require AgentSpec assembly; prebuilt Agent capabilities are not declared")
+		}
+	}
+	runCtx, cancel, err := prepareRunContext(ctx, req.Limits, r.now())
+	if err != nil {
+		return agent.RunResult{}, err
+	}
 	if activeSession.Controller.Kind == session.ControllerKindACP {
-		return r.runACPControllerTurn(ctx, activeSession, ref, req)
+		return r.runACPControllerTurn(runCtx, cancel, activeSession, ref, req)
 	}
 
 	runID := r.nextID("run", r.runIDGenerator)
 	turnID := r.nextID("turn", nil)
 	if err := r.beginRun(ref, runID); err != nil {
+		cancel()
 		return agent.RunResult{}, err
 	}
-	if err := r.recoverIncompleteExecutionJournal(ctx, ref); err != nil {
+	if err := r.recoverIncompleteExecutionJournal(runCtx, ref); err != nil {
+		cancel()
 		r.setRunState(ref.SessionID, agent.RunState{Status: agent.RunLifecycleStatusFailed, ActiveRunID: runID, LastError: err.Error(), UpdatedAt: r.now()})
 		return agent.RunResult{}, err
 	}
-	if err := r.startRunTurnJournal(ctx, ref, runID, turnID); err != nil {
+	if err := r.startRunTurnJournal(runCtx, ref, runID, turnID); err != nil {
+		cancel()
 		r.setRunState(ref.SessionID, agent.RunState{Status: agent.RunLifecycleStatusFailed, ActiveRunID: runID, LastError: err.Error(), UpdatedAt: r.now()})
 		return agent.RunResult{}, err
 	}
@@ -186,13 +201,15 @@ func (r *Runtime) Run(
 		ActiveRunID: runID,
 		UpdatedAt:   r.now(),
 	})
-	runCtx, cancel := context.WithCancel(ctx)
 	handle := newRunner(runID, cancel)
 	handle.setCancelHook(func() error {
 		return r.transitionRunTurnJournal(context.Background(), ref, runID, turnID, session.ExecutionCancelRequested, "run cancellation requested")
 	})
 	r.registerActiveRun(ref, activeSession, handle)
-	go r.executeKernelTurn(runCtx, activeSession, ref, runID, turnID, req, handle)
+	go func() {
+		defer cancel()
+		r.executeKernelTurn(runCtx, activeSession, ref, runID, turnID, req, handle)
+	}()
 	return agent.RunResult{
 		Session: activeSession,
 		Handle:  handle,
@@ -232,6 +249,7 @@ func (r *Runtime) executeKernelTurn(
 	batch := make([]*session.Event, 0, 4)
 	userEvent := buildUserEvent(activeSession, turnID, req.Input, req.DisplayInput, req.ContentParts)
 	if err := r.runWithOverflowRecovery(ctx, activeSession, ref, runID, turnID, req, userEvent, &batch, handle); err != nil {
+		err = translateRunLimitError(ctx, err)
 		journalStatus := session.ExecutionFailed
 		if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
 			journalStatus = session.ExecutionCancelled

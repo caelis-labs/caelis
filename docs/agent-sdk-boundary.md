@@ -179,6 +179,22 @@ Application code may still implement explicit procedures where needed. They
 are ordinary Control logic using SDK primitives, not a new deterministic
 workflow subsystem.
 
+## Runtime Safety Budgets
+
+`RunLimits` is scoped to one `Run`. Runtime enforces wall time for every local
+run and enforces model-call, completed-model-turn, tool-call, token, and cost
+budgets for agents assembled from `AgentSpec`, where it owns the injected model
+and tool boundaries. Token and cost limits use provider-reported usage;
+`CostMicros` is one millionth of the host's configured billing currency unit.
+Runtime rejects those metered limits for prebuilt agents and ACP controllers
+until they declare an equivalent capability instead of silently accepting an
+unenforceable budget.
+
+Limit exhaustion is a typed `RunLimitError`. It aborts before an excess call is
+admitted, or before an over-budget final model response becomes canonical.
+Transient stream output may already have been observed. Run-limit failures are
+control failures, not model-visible tool results.
+
 ## Durable Facts and Projection
 
 `session.Event` remains the durable source of truth, but different payloads

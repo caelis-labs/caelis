@@ -169,6 +169,7 @@ func responseMeta(resp *model.Response) map[string]any {
 		"completion_tokens":   resp.Usage.CompletionTokens,
 		"reasoning_tokens":    resp.Usage.ReasoningTokens,
 		"total_tokens":        resp.Usage.TotalTokens,
+		"cost_micros":         resp.Usage.CostMicros,
 	}
 	if provider := responseUsageAccountingProvider(resp); provider != "" {
 		usage["provider"] = provider
