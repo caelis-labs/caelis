@@ -12,6 +12,7 @@ import (
 	"github.com/caelis-labs/caelis/protocol/acp"
 	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
+	"github.com/caelis-labs/caelis/protocol/acp/semantic"
 )
 
 func (a *RuntimeAgent) runPromptRouter(runCtx context.Context, bridgeCtx context.Context, activeSession session.Session, input string, contentParts []model.ContentPart, cb acp.PromptCallbacks) (bool, error) {
@@ -311,24 +312,15 @@ func emitFilteredSessionUpdate(ctx context.Context, cb acp.PromptCallbacks, noti
 }
 
 func approvalDecisionFromACPResponse(options []acp.PermissionOption, resp acp.RequestPermissionResponse) control.ApprovalDecision {
-	outcome := strings.TrimSpace(resp.Outcome.Outcome)
-	optionID := strings.TrimSpace(resp.Outcome.OptionID)
-	approved := false
-	if strings.EqualFold(outcome, "selected") {
-		for _, option := range options {
-			if strings.TrimSpace(option.OptionID) != optionID {
-				continue
-			}
-			if strings.HasPrefix(strings.ToLower(strings.TrimSpace(option.Kind)), "allow") {
-				approved = true
-			}
-			break
-		}
+	approval := &session.ProtocolApproval{Options: make([]session.ProtocolApprovalOption, 0, len(options))}
+	for _, option := range options {
+		approval.Options = append(approval.Options, session.ProtocolApprovalOption{
+			ID: strings.TrimSpace(option.OptionID), Name: strings.TrimSpace(option.Name), Kind: strings.TrimSpace(option.Kind),
+		})
 	}
+	decision := semantic.DecodePermissionResponse(resp, approval)
 	return control.ApprovalDecision{
-		Outcome:  outcome,
-		OptionID: optionID,
-		Approved: approved,
+		Outcome: decision.Outcome, OptionID: decision.OptionID, Approved: decision.Approved,
 	}
 }
 

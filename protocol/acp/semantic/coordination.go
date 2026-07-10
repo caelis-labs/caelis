@@ -86,7 +86,7 @@ func EncodeCancelNotification(ref session.SessionRef) schema.CancelNotification 
 // EncodeParticipant creates the SDK-owned normalized participant lifecycle
 // protocol payload used by built-in and external adapters.
 func EncodeParticipant(participant session.ProtocolParticipant) session.EventProtocol {
-	return session.CloneEventProtocol(session.EventProtocol{Method: session.ProtocolMethodParticipantUpdate, Update: &session.ProtocolUpdate{SessionUpdate: strings.TrimSpace(participant.Action)}})
+	return session.NewParticipantProtocol(participant)
 }
 
 // DecodeParticipant validates and decodes normalized participant lifecycle.
@@ -101,7 +101,7 @@ func DecodeParticipant(protocol session.EventProtocol) (session.ProtocolParticip
 // EncodeHandoff creates the normalized handoff fact. It does not authorize or
 // commit controller transfer; that authority remains in Control.
 func EncodeHandoff(handoff session.ProtocolHandoff) session.EventProtocol {
-	return session.CloneEventProtocol(session.EventProtocol{Method: session.ProtocolMethodControllerHandoff, Update: &session.ProtocolUpdate{SessionUpdate: strings.TrimSpace(handoff.Phase)}})
+	return session.NewHandoffProtocol(handoff)
 }
 
 // DecodeHandoff validates and decodes one already-authorized Control fact.

@@ -857,10 +857,7 @@ func TestEventProtocolRoundTripPreservesUpdateMessageID(t *testing.T) {
 func TestEventProtocolRoundTripPreservesParticipantPayload(t *testing.T) {
 	t.Parallel()
 
-	source := EventProtocol{
-		Method: ProtocolMethodParticipantUpdate,
-		Update: &ProtocolUpdate{SessionUpdate: " attached "},
-	}
+	source := NewParticipantProtocol(ProtocolParticipant{Action: " attached "})
 	raw, err := json.Marshal(source)
 	if err != nil {
 		t.Fatalf("json.Marshal(EventProtocol) error = %v", err)
@@ -890,10 +887,7 @@ func TestEventProtocolRoundTripPreservesParticipantPayload(t *testing.T) {
 func TestEventProtocolRoundTripPreservesHandoffPayload(t *testing.T) {
 	t.Parallel()
 
-	source := EventProtocol{
-		Method: ProtocolMethodControllerHandoff,
-		Update: &ProtocolUpdate{SessionUpdate: " activation "},
-	}
+	source := NewHandoffProtocol(ProtocolHandoff{Phase: " activation "})
 	raw, err := json.Marshal(source)
 	if err != nil {
 		t.Fatalf("json.Marshal(EventProtocol) error = %v", err)

@@ -150,12 +150,14 @@ package github.com/caelis-labs/caelis/agent-sdk
       Source        string             `json:"source,omitempty"`
   }
   type EndpointApprovalToolCall struct {
-      ID       string         `json:"id,omitempty"`
-      Name     string         `json:"name,omitempty"`
-      Kind     string         `json:"kind,omitempty"`
-      Title    string         `json:"title,omitempty"`
-      Status   string         `json:"status,omitempty"`
-      RawInput map[string]any `json:"raw_input,omitempty"`
+      ID        string                            `json:"id,omitempty"`
+      Name      string                            `json:"name,omitempty"`
+      Kind      string                            `json:"kind,omitempty"`
+      Title     string                            `json:"title,omitempty"`
+      Status    string                            `json:"status,omitempty"`
+      RawInput  map[string]any                    `json:"raw_input,omitempty"`
+      RawOutput map[string]any                    `json:"raw_output,omitempty"`
+      Content   []session.ProtocolToolCallContent `json:"content,omitempty"`
   }
   type EventNormalizer func(activeSession session.Session, turnID string, event *session.Event) *session.Event
   type EventSource interface {
@@ -1850,7 +1852,9 @@ package github.com/caelis-labs/caelis/agent-sdk/session
   func MigrateExecutionRecord(in ExecutionRecord) (ExecutionRecord, error)
   func MigrateToolExecution(in ToolExecution) (ToolExecution, error)
   func ModelMessageOf(event *Event) (model.Message, bool)
+  func NewHandoffProtocol(handoff ProtocolHandoff) EventProtocol
   func NewMigrationRegistry() *MigrationRegistry
+  func NewParticipantProtocol(participant ProtocolParticipant) EventProtocol
   func NormalizeExecutionKey(in ExecutionKey) ExecutionKey
   func NormalizeExecutionRecord(in ExecutionRecord) ExecutionRecord
   func NormalizeSessionRef(ref SessionRef) SessionRef

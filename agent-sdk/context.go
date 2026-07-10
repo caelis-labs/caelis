@@ -114,12 +114,14 @@ type SubagentRunner interface {
 // EndpointApprovalToolCall is one external endpoint tool call asking for
 // approval. Controller and subagent bridges share this value contract.
 type EndpointApprovalToolCall struct {
-	ID       string         `json:"id,omitempty"`
-	Name     string         `json:"name,omitempty"`
-	Kind     string         `json:"kind,omitempty"`
-	Title    string         `json:"title,omitempty"`
-	Status   string         `json:"status,omitempty"`
-	RawInput map[string]any `json:"raw_input,omitempty"`
+	ID        string                            `json:"id,omitempty"`
+	Name      string                            `json:"name,omitempty"`
+	Kind      string                            `json:"kind,omitempty"`
+	Title     string                            `json:"title,omitempty"`
+	Status    string                            `json:"status,omitempty"`
+	RawInput  map[string]any                    `json:"raw_input,omitempty"`
+	RawOutput map[string]any                    `json:"raw_output,omitempty"`
+	Content   []session.ProtocolToolCallContent `json:"content,omitempty"`
 }
 
 // SubagentApprovalToolCall preserves the scope-specific name while sharing the

@@ -19,6 +19,7 @@ import (
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/subagent"
 	"github.com/caelis-labs/caelis/protocol/acp/client"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
+	"github.com/caelis-labs/caelis/protocol/acp/semantic"
 )
 
 type Config struct {
@@ -821,7 +822,11 @@ func (m *Manager) permissionHandler(
 	return func(ctx context.Context, req client.RequestPermissionRequest) (client.RequestPermissionResponse, error) {
 		trimmedAgent := strings.TrimSpace(agent)
 		if requester != nil {
-			resp, err := requester.RequestControllerApproval(ctx, translateApprovalRequest(session, trimmedAgent, mode, req))
+			approvalReq, err := translateApprovalRequest(session, trimmedAgent, mode, req)
+			if err != nil {
+				return client.RequestPermissionResponse{}, err
+			}
+			resp, err := requester.RequestControllerApproval(ctx, approvalReq)
 			if err != nil {
 				return client.RequestPermissionResponse{}, err
 			}
@@ -844,7 +849,11 @@ func (r *controllerRun) permissionHandler(ctx context.Context, req client.Reques
 	agent := strings.TrimSpace(r.agent)
 	r.mu.Unlock()
 	if requester != nil {
-		resp, err := requester.RequestControllerApproval(ctx, translateApprovalRequest(activeSession, agent, mode, req))
+		approvalReq, err := translateApprovalRequest(activeSession, agent, mode, req)
+		if err != nil {
+			return client.RequestPermissionResponse{}, err
+		}
+		resp, err := requester.RequestControllerApproval(ctx, approvalReq)
 		if err != nil {
 			return client.RequestPermissionResponse{}, err
 		}
@@ -860,14 +869,22 @@ func translateApprovalRequest(
 	agent string,
 	mode string,
 	req client.RequestPermissionRequest,
-) controller.ApprovalRequest {
-	options := make([]controller.ApprovalOption, 0, len(req.Options))
-	for _, item := range req.Options {
+) (controller.ApprovalRequest, error) {
+	_, approval, _, err := semantic.DecodePermissionRequest(req)
+	if err != nil {
+		return controller.ApprovalRequest{}, err
+	}
+	options := make([]controller.ApprovalOption, 0, len(approval.Options))
+	for _, item := range approval.Options {
 		options = append(options, controller.ApprovalOption{
-			ID:   strings.TrimSpace(item.OptionID),
+			ID:   strings.TrimSpace(item.ID),
 			Name: strings.TrimSpace(item.Name),
 			Kind: strings.TrimSpace(item.Kind),
 		})
+	}
+	toolName := strings.TrimSpace(approval.ToolCall.Name)
+	if toolName == strings.TrimSpace(approval.ToolCall.Title) || toolName == strings.TrimSpace(approval.ToolCall.Kind) {
+		toolName = acputil.ToolCallName(req.ToolCall)
 	}
 	return controller.ApprovalRequest{
 		SessionRef: session.NormalizeSessionRef(turnSession.SessionRef),
@@ -875,15 +892,17 @@ func translateApprovalRequest(
 		Agent:      strings.TrimSpace(agent),
 		Mode:       strings.TrimSpace(mode),
 		ToolCall: controller.ApprovalToolCall{
-			ID:       strings.TrimSpace(req.ToolCall.ToolCallID),
-			Name:     acputil.ToolCallName(req.ToolCall),
-			Kind:     derefString(req.ToolCall.Kind),
-			Title:    derefString(req.ToolCall.Title),
-			Status:   derefString(req.ToolCall.Status),
-			RawInput: schema.NormalizeRawMap(req.ToolCall.RawInput),
+			ID:        strings.TrimSpace(approval.ToolCall.ID),
+			Name:      toolName,
+			Kind:      strings.TrimSpace(approval.ToolCall.Kind),
+			Title:     strings.TrimSpace(approval.ToolCall.Title),
+			Status:    strings.TrimSpace(approval.ToolCall.Status),
+			RawInput:  session.CloneState(approval.ToolCall.RawInput),
+			RawOutput: session.CloneState(approval.ToolCall.RawOutput),
+			Content:   session.CloneProtocolToolCallContent(approval.ToolCall.Content),
 		},
 		Options: options,
-	}
+	}, nil
 }
 
 func controllerBinding(agent string, source string, epochID string, now time.Time) session.ControllerBinding {
@@ -1284,7 +1303,11 @@ func (r *participantRun) permissionHandler(ctx context.Context, req client.Reque
 	agent := strings.TrimSpace(r.agent)
 	r.mu.Unlock()
 	if requester != nil {
-		resp, err := requester.RequestControllerApproval(ctx, translateApprovalRequest(activeSession, agent, mode, req))
+		approvalReq, err := translateApprovalRequest(activeSession, agent, mode, req)
+		if err != nil {
+			return client.RequestPermissionResponse{}, err
+		}
+		resp, err := requester.RequestControllerApproval(ctx, approvalReq)
 		if err != nil {
 			return client.RequestPermissionResponse{}, err
 		}

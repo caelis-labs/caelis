@@ -989,6 +989,21 @@ func writeAlias() *session.EventProtocol {
 	}
 }
 
+func TestSemanticBoundaryRuleRejectsDirectCoordinationProtocolConstruction(t *testing.T) {
+	t.Parallel()
+
+	const modulePath = "github.com/caelis-labs/caelis"
+	const source = `package runtime
+import "github.com/caelis-labs/caelis/agent-sdk/session"
+func participant() session.EventProtocol {
+	return session.EventProtocol{Method: session.ProtocolMethodParticipantUpdate}
+}`
+	rule, subject, _ := semanticRuleForSource(t, "agent-sdk/runtime/events.go", source, modulePath)
+	if !strings.Contains(rule, "protocol helpers") || subject != "EventProtocol.Method" {
+		t.Fatalf("semantic rule = (%q, %q), want direct coordination construction rejection", rule, subject)
+	}
+}
+
 func TestSemanticBoundaryRuleRejectsTopLevelTerminalMetaKeys(t *testing.T) {
 	t.Parallel()
 

@@ -35,10 +35,7 @@ func participantLifecycleEvent(activeSession session.Session, binding session.Pa
 		Time:       now,
 		Actor:      session.ActorRef{Kind: session.ActorKindSystem, Name: "runtime"},
 		Text:       text,
-		Protocol: &session.EventProtocol{
-			Method: session.ProtocolMethodParticipantUpdate,
-			Update: &session.ProtocolUpdate{SessionUpdate: strings.TrimSpace(action)},
-		},
+		Protocol:   ptrEventProtocol(session.NewParticipantProtocol(session.ProtocolParticipant{Action: action})),
 		Scope: &session.EventScope{
 			Source: "control_plane",
 			Controller: session.ControllerRef{
@@ -63,6 +60,11 @@ func participantLifecycleEvent(activeSession session.Session, binding session.Pa
 			"controller_ref": binding.ControllerRef,
 		},
 	}
+}
+
+func ptrEventProtocol(protocol session.EventProtocol) *session.EventProtocol {
+	out := session.CloneEventProtocol(protocol)
+	return &out
 }
 
 func isMissingACPControllerRun(err error) bool {

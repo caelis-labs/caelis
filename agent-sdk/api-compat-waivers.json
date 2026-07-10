@@ -4,6 +4,12 @@
   "removals": [
     {
       "package": "github.com/caelis-labs/caelis/agent-sdk",
+      "sha256": "b6bcedfd6bae9abdb61942c1c19d3cbd0464c52a182dc22cc41ec09018997bdc",
+      "symbol": "EndpointApprovalToolCall",
+      "reason": "Preserve normalized ACP raw output and content alongside raw input so built-in and external approval adapters share one lossless semantic contract."
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk",
       "sha256": "6a9ae99de99317e87dc43b29ce9f561c0cdf9d58ba1c1094c2c95f65799576f2",
       "symbol": "RunNotResumableError.Error",
       "reason": "The old name falsely implied durable continuation; v0.25 stabilization replaced it with process-local RunNotAttachableError."

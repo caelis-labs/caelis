@@ -333,10 +333,7 @@ func handoffEvent(from session.ControllerBinding, to session.ControllerBinding, 
 		Time:       now,
 		Actor:      session.ActorRef{Kind: session.ActorKindSystem, Name: "control"},
 		Text:       "handoff to " + firstNonEmpty(to.Label, to.ControllerID),
-		Protocol: &session.EventProtocol{
-			Method: session.ProtocolMethodControllerHandoff,
-			Update: &session.ProtocolUpdate{SessionUpdate: "activation"},
-		},
+		Protocol:   ptrControlProtocol(session.NewHandoffProtocol(session.ProtocolHandoff{Phase: "activation"})),
 		Scope: &session.EventScope{
 			Source: "handoff",
 			Controller: session.ControllerRef{
@@ -345,4 +342,9 @@ func handoffEvent(from session.ControllerBinding, to session.ControllerBinding, 
 		},
 		Meta: meta,
 	}
+}
+
+func ptrControlProtocol(protocol session.EventProtocol) *session.EventProtocol {
+	out := session.CloneEventProtocol(protocol)
+	return &out
 }

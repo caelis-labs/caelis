@@ -232,7 +232,15 @@ func eventProtocolAliasRule(rel string, file *ast.File, fset *token.FileSet, mod
 					continue
 				}
 				key, ok := kv.Key.(*ast.Ident)
-				if !ok || key.Name != "Handoff" {
+				if !ok {
+					continue
+				}
+				if key.Name == "Method" && isSessionCoordinationMethod(kv.Value, sessionNames) {
+					subject = "EventProtocol.Method"
+					line = fset.Position(key.Pos()).Line
+					return false
+				}
+				if key.Name != "Handoff" {
 					continue
 				}
 				subject = "EventProtocol." + key.Name
@@ -264,6 +272,18 @@ func eventProtocolAliasRule(rel string, file *ast.File, fset *token.FileSet, mod
 		return "", "", 0
 	}
 	return "production code must use agent-sdk/session protocol helpers instead of EventProtocol json:\"-\" aliases", subject, line
+}
+
+func isSessionCoordinationMethod(expr ast.Expr, sessionNames map[string]bool) bool {
+	selector, ok := expr.(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	ident, ok := selector.X.(*ast.Ident)
+	if !ok || !sessionNames[ident.Name] {
+		return false
+	}
+	return selector.Sel.Name == "ProtocolMethodParticipantUpdate" || selector.Sel.Name == "ProtocolMethodControllerHandoff"
 }
 
 func topLevelTerminalMetaRule(rel string, file *ast.File, fset *token.FileSet) (string, string, int) {

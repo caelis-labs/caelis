@@ -166,7 +166,7 @@ func TestNormalizeACPUpdateEventPreservesToolUpdateMeta(t *testing.T) {
 func TestTranslateApprovalRequestPreservesToolRawInput(t *testing.T) {
 	t.Parallel()
 
-	req := translateApprovalRequest(session.Session{
+	req, err := translateApprovalRequest(session.Session{
 		SessionRef: session.SessionRef{SessionID: "sess-1"},
 	}, "codex", "default", client.RequestPermissionRequest{
 		SessionID: "remote-1",
@@ -179,8 +179,16 @@ func TestTranslateApprovalRequestPreservesToolRawInput(t *testing.T) {
 				"command": "pwd",
 				"workdir": "/tmp/project",
 			},
+			RawOutput: map[string]any{"preview": "ok"},
+			Content: []client.ToolCallContent{{
+				Type: "content", Content: client.TextContent{Type: "text", Text: "approval detail"},
+			}},
 		},
+		Options: []client.PermissionOption{{OptionID: "allow_once", Name: "Allow", Kind: "allow_once"}},
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if req.ToolCall.RawInput["command"] != "pwd" {
 		t.Fatalf("ToolCall.RawInput[command] = %#v", req.ToolCall.RawInput["command"])
 	}
@@ -189,6 +197,12 @@ func TestTranslateApprovalRequestPreservesToolRawInput(t *testing.T) {
 	}
 	if req.ToolCall.RawInput["workdir"] != "/tmp/project" {
 		t.Fatalf("ToolCall.RawInput[workdir] = %#v", req.ToolCall.RawInput["workdir"])
+	}
+	if req.ToolCall.RawOutput["preview"] != "ok" || len(req.ToolCall.Content) != 1 {
+		t.Fatalf("ToolCall raw output/content = %#v/%#v, want preserved", req.ToolCall.RawOutput, req.ToolCall.Content)
+	}
+	if len(req.Options) != 1 || req.Options[0].ID != "allow_once" || req.Options[0].Kind != "allow_once" {
+		t.Fatalf("Options = %#v, want exact allow option", req.Options)
 	}
 }
 

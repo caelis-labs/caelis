@@ -137,6 +137,25 @@ type ProtocolHandoff struct {
 	Phase string `json:"phase,omitempty"`
 }
 
+// NewParticipantProtocol constructs the normalized participant lifecycle
+// protocol payload shared by built-in and external ACP adapters.
+func NewParticipantProtocol(participant ProtocolParticipant) EventProtocol {
+	return CloneEventProtocol(EventProtocol{
+		Method: ProtocolMethodParticipantUpdate,
+		Update: &ProtocolUpdate{SessionUpdate: strings.TrimSpace(participant.Action)},
+	})
+}
+
+// NewHandoffProtocol constructs an already-authorized controller handoff fact.
+// Constructing the payload does not grant handoff authority; Control remains
+// responsible for committing controller transfer.
+func NewHandoffProtocol(handoff ProtocolHandoff) EventProtocol {
+	return CloneEventProtocol(EventProtocol{
+		Method: ProtocolMethodControllerHandoff,
+		Update: &ProtocolUpdate{SessionUpdate: strings.TrimSpace(handoff.Phase)},
+	})
+}
+
 // EventProtocol is the ACP-compatible protocol payload carried by one event.
 // It groups protocol-shaped extensions under one nested object so Event itself
 // stays small and stable.
