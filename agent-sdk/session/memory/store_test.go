@@ -225,6 +225,58 @@ func TestStoreRejectsInvalidJSONStateWithoutMutation(t *testing.T) {
 	}
 }
 
+func TestServiceAppendEventCASAndIdempotentRetry(t *testing.T) {
+	t.Parallel()
+
+	service := NewService(NewStore(Config{SessionIDGenerator: func() string { return "sess-cas" }}))
+	ctx := context.Background()
+	created, err := service.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	message := model.NewTextMessage(model.RoleUser, "stable retry")
+	event := &session.Event{ID: "event-stable", Type: session.EventTypeUser, Message: &message}
+	zero := uint64(0)
+	first, err := service.AppendEvent(ctx, session.AppendEventRequest{
+		SessionRef:       created.SessionRef,
+		ExpectedRevision: &zero,
+		Event:            event,
+	})
+	if err != nil {
+		t.Fatalf("AppendEvent(first) error = %v", err)
+	}
+	if first.Seq != 1 {
+		t.Fatalf("first.Seq = %d, want 1", first.Seq)
+	}
+	_, err = service.AppendEvent(ctx, session.AppendEventRequest{
+		SessionRef:       created.SessionRef,
+		ExpectedRevision: &zero,
+		Event:            &session.Event{ID: "event-other", Type: session.EventTypeUser, Message: &message},
+	})
+	if !errors.Is(err, session.ErrRevisionConflict) {
+		t.Fatalf("AppendEvent(stale) error = %v, want ErrRevisionConflict", err)
+	}
+	one := uint64(1)
+	retried, err := service.AppendEvent(ctx, session.AppendEventRequest{
+		SessionRef:       created.SessionRef,
+		ExpectedRevision: &one,
+		Event:            event,
+	})
+	if err != nil {
+		t.Fatalf("AppendEvent(retry) error = %v", err)
+	}
+	if retried.Seq != first.Seq {
+		t.Fatalf("retry seq = %d, want existing %d", retried.Seq, first.Seq)
+	}
+	loaded, err := service.LoadSession(ctx, session.LoadSessionRequest{SessionRef: created.SessionRef})
+	if err != nil {
+		t.Fatalf("LoadSession() error = %v", err)
+	}
+	if loaded.Session.Revision != 1 || len(loaded.Events) != 1 {
+		t.Fatalf("loaded after retry = revision %d events %d, want 1/1", loaded.Session.Revision, len(loaded.Events))
+	}
+}
+
 func TestStoreStateOperationsRepairNilState(t *testing.T) {
 	t.Parallel()
 

@@ -210,6 +210,9 @@ func (r *Runtime) Run(
 
 	runID := r.nextID("run", r.runIDGenerator)
 	turnID := r.nextID("turn", nil)
+	if err := r.beginRun(ref, runID); err != nil {
+		return agent.RunResult{}, err
+	}
 	r.setRunState(ref.SessionID, agent.RunState{
 		Status:      agent.RunLifecycleStatusRunning,
 		ActiveRunID: runID,
@@ -222,6 +225,24 @@ func (r *Runtime) Run(
 		Session: activeSession,
 		Handle:  handle,
 	}, nil
+}
+
+func (r *Runtime) beginRun(ref session.SessionRef, runID string) error {
+	ref = session.NormalizeSessionRef(ref)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if current, ok := r.runStates[ref.SessionID]; ok {
+		switch current.Status {
+		case agent.RunLifecycleStatusRunning, agent.RunLifecycleStatusWaitingApproval:
+			return &agent.RunConflictError{SessionRef: ref, ActiveRunID: current.ActiveRunID}
+		}
+	}
+	r.runStates[ref.SessionID] = agent.RunState{
+		Status:      agent.RunLifecycleStatusRunning,
+		ActiveRunID: strings.TrimSpace(runID),
+		UpdatedAt:   r.now(),
+	}
+	return nil
 }
 
 func (r *Runtime) executeKernelTurn(

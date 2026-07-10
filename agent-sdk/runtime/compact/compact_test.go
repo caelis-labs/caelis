@@ -8,15 +8,16 @@ import (
 
 func TestCompactEventDataContractMetadataRoundTrip(t *testing.T) {
 	data := CompactEventData{
-		Revision:            3,
-		ContractVersion:     CompactContractVersion,
-		SummarizedThroughID: "event-9",
-		Generator:           "model_markdown",
-		Trigger:             "manual",
-		SourceEventCount:    8,
-		TotalTokens:         100,
-		ContextWindowTokens: 1000,
-		DiscoveredTools:     []string{"mcp__calendar__demo__create_event", "mcp__calendar__demo__create_event", ""},
+		Revision:             3,
+		ContractVersion:      CompactContractVersion,
+		SummarizedThroughID:  "event-9",
+		SummarizedThroughSeq: 9,
+		Generator:            "model_markdown",
+		Trigger:              "manual",
+		SourceEventCount:     8,
+		TotalTokens:          100,
+		ContextWindowTokens:  1000,
+		DiscoveredTools:      []string{"mcp__calendar__demo__create_event", "mcp__calendar__demo__create_event", ""},
 	}
 	value := CompactEventDataValue(data)
 	event := &session.Event{
@@ -148,5 +149,32 @@ func TestPromptEventsFromLatestCompactIgnoresLegacyRetainedInputs(t *testing.T) 
 	}
 	if got[0].Text != compactText {
 		t.Fatalf("prompt text = %q, want compact text", got[0].Text)
+	}
+}
+
+func TestPromptEventsSelectsValidCheckpointWithHighestCoveredSeq(t *testing.T) {
+	t.Parallel()
+
+	checkpoint := func(seq uint64, covered uint64, text string) *session.Event {
+		return &session.Event{
+			Seq:        seq,
+			Type:       session.EventTypeCompact,
+			Visibility: session.VisibilityCanonical,
+			Text:       text,
+			Meta: map[string]any{MetaKeyCompact: CompactEventDataValue(CompactEventData{
+				ContractVersion:      CompactContractVersion,
+				SummarizedThroughSeq: covered,
+			})},
+		}
+	}
+	events := []*session.Event{
+		{Seq: 1, Type: session.EventTypeUser, Visibility: session.VisibilityCanonical, Text: "old"},
+		checkpoint(8, 7, "highest coverage"),
+		{Seq: 9, Type: session.EventTypeUser, Visibility: session.VisibilityCanonical, Text: "after high"},
+		checkpoint(10, 3, "late but stale"),
+	}
+	got := PromptEventsFromLatestCompact(events)
+	if len(got) != 2 || got[0].Text != "highest coverage" || got[1].Text != "after high" {
+		t.Fatalf("PromptEventsFromLatestCompact() = %#v, want highest-coverage checkpoint plus later events", got)
 	}
 }

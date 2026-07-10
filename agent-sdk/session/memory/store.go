@@ -153,6 +153,11 @@ func (s *Store) AppendEvent(
 	ref session.SessionRef,
 	event *session.Event,
 ) (*session.Event, error) {
+	return s.appendEventRequest(session.AppendEventRequest{SessionRef: ref, Event: event})
+}
+
+func (s *Store) appendEventRequest(req session.AppendEventRequest) (*session.Event, error) {
+	event := req.Event
 	if event == nil {
 		return nil, session.ErrInvalidEvent
 	}
@@ -160,12 +165,12 @@ func (s *Store) AppendEvent(
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	record, ok := s.lookupLocked(ref)
+	record, ok := s.lookupLocked(req.SessionRef)
 	if !ok {
 		return nil, session.ErrSessionNotFound
 	}
 
-	tx, err := s.prepareAppendTransactionForRecord(record, []*session.Event{event}, nil, nil)
+	tx, err := s.prepareAppendTransactionForRecord(record, []*session.Event{event}, nil, nil, req.ExpectedRevision)
 	if err != nil {
 		return nil, err
 	}
@@ -179,19 +184,23 @@ func (s *Store) prepareAppendTransactionForRecord(
 	events []*session.Event,
 	mutate session.AppendSessionMutation,
 	updateState session.AppendStateUpdate,
+	expectedRevision *uint64,
 ) (session.PreparedAppendTransaction, error) {
 	if record == nil {
 		return session.PreparedAppendTransaction{}, session.ErrSessionNotFound
 	}
 	return session.PrepareAppendTransaction(session.PrepareAppendTransactionRequest{
-		Session:         record.session,
-		State:           record.state,
-		Events:          events,
-		ExistingIDs:     existingEventIDSet(record.events),
-		Now:             s.now(),
-		AllocateEventID: s.ensureUniqueEventID,
-		MutateSession:   mutate,
-		UpdateState:     updateState,
+		Session:          record.session,
+		State:            record.state,
+		Events:           events,
+		ExistingEvents:   record.events,
+		ExistingIDs:      existingEventIDSet(record.events),
+		ExpectedRevision: expectedRevision,
+		LastSeq:          session.LastEventSeq(record.events),
+		Now:              s.now(),
+		AllocateEventID:  s.ensureUniqueEventID,
+		MutateSession:    mutate,
+		UpdateState:      updateState,
 	})
 }
 
@@ -221,7 +230,7 @@ func (s *Store) AppendEvents(
 	if !ok {
 		return nil, session.ErrSessionNotFound
 	}
-	tx, err := s.prepareAppendTransactionForRecord(record, req.Events, nil, nil)
+	tx, err := s.prepareAppendTransactionForRecord(record, req.Events, nil, nil, req.ExpectedRevision)
 	if err != nil {
 		return nil, err
 	}
@@ -244,7 +253,7 @@ func (s *Store) AppendEventsAndUpdateState(
 	if !ok {
 		return nil, session.ErrSessionNotFound
 	}
-	tx, err := s.prepareAppendTransactionForRecord(record, req.Events, nil, req.UpdateState)
+	tx, err := s.prepareAppendTransactionForRecord(record, req.Events, nil, req.UpdateState, req.ExpectedRevision)
 	if err != nil {
 		return nil, err
 	}
@@ -276,6 +285,7 @@ func (s *Store) BindController(
 		return session.Session{}, session.ErrSessionNotFound
 	}
 	record.session.Controller = session.CloneControllerBinding(binding)
+	record.session.Revision++
 	record.session.UpdatedAt = s.now()
 	return record.cloneSession(), nil
 }
@@ -293,6 +303,7 @@ func (s *Store) PutParticipant(
 		return session.Session{}, session.ErrSessionNotFound
 	}
 	if session.PutParticipantBinding(&record.session, binding) {
+		record.session.Revision++
 		record.session.UpdatedAt = s.now()
 	}
 	return record.cloneSession(), nil
@@ -316,6 +327,7 @@ func (s *Store) PutParticipantWithEvent(
 			return session.PutParticipantBinding(activeSession, req.Binding), nil
 		},
 		nil,
+		req.ExpectedRevision,
 	)
 	if err != nil {
 		return session.Session{}, nil, err
@@ -338,6 +350,7 @@ func (s *Store) RemoveParticipant(
 		return session.Session{}, session.ErrSessionNotFound
 	}
 	if session.RemoveParticipantBinding(&record.session, participantID) {
+		record.session.Revision++
 		record.session.UpdatedAt = s.now()
 	}
 	return record.cloneSession(), nil
@@ -361,6 +374,7 @@ func (s *Store) RemoveParticipantWithEvent(
 			return session.RemoveParticipantBinding(activeSession, req.ParticipantID), nil
 		},
 		nil,
+		req.ExpectedRevision,
 	)
 	if err != nil {
 		return session.Session{}, nil, err
@@ -383,6 +397,7 @@ func (s *Store) SnapshotState(
 	}
 	if record.state == nil {
 		record.state = map[string]any{}
+		record.session.Revision++
 		record.session.UpdatedAt = s.now()
 	}
 	return cloneState(record.state), nil
@@ -404,6 +419,7 @@ func (s *Store) ReplaceState(
 		return session.ErrSessionNotFound
 	}
 	record.state = cloneState(state)
+	record.session.Revision++
 	record.session.UpdatedAt = s.now()
 	return nil
 }
@@ -432,6 +448,7 @@ func (s *Store) UpdateState(
 		return err
 	}
 	record.state = cloneState(next)
+	record.session.Revision++
 	record.session.UpdatedAt = s.now()
 	return nil
 }
@@ -477,7 +494,7 @@ func (s *Service) AppendEvent(
 	ctx context.Context,
 	req session.AppendEventRequest,
 ) (*session.Event, error) {
-	return s.store.AppendEvent(ctx, req.SessionRef, req.Event)
+	return s.store.appendEventRequest(req)
 }
 
 func (s *Service) AppendEvents(

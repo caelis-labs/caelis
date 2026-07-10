@@ -2,12 +2,28 @@ package agentsdk
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
+
+// RunConflictError reports that Core detected another active run for the same
+// session. Control decides whether to queue, reject, or fork the new request.
+type RunConflictError struct {
+	SessionRef  session.SessionRef
+	ActiveRunID string
+}
+
+func (e *RunConflictError) Error() string {
+	if e == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("agent-sdk: session %q already has active run %q", strings.TrimSpace(e.SessionRef.SessionID), strings.TrimSpace(e.ActiveRunID))
+}
 
 // ApprovalOption is one user-selectable approval choice.
 type ApprovalOption struct {

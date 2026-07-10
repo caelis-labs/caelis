@@ -494,6 +494,64 @@ func TestStoreAppendRegeneratesDuplicateEventIDAcrossProcesses(t *testing.T) {
 	}
 }
 
+func TestServiceAppendEventCASAndStableIDConflict(t *testing.T) {
+	t.Parallel()
+
+	service := NewService(NewStore(Config{RootDir: t.TempDir(), SessionIDGenerator: func() string { return "sess-cas" }}))
+	ctx := context.Background()
+	created, err := service.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	message := model.NewTextMessage(model.RoleUser, "stable")
+	zero := uint64(0)
+	first, err := service.AppendEvent(ctx, session.AppendEventRequest{
+		SessionRef:       created.SessionRef,
+		ExpectedRevision: &zero,
+		Event:            &session.Event{ID: "event-stable", Type: session.EventTypeUser, Message: &message},
+	})
+	if err != nil {
+		t.Fatalf("AppendEvent(first) error = %v", err)
+	}
+	if first.Seq != 1 {
+		t.Fatalf("first.Seq = %d, want 1", first.Seq)
+	}
+	one := uint64(1)
+	reopened := NewService(NewStore(Config{RootDir: service.store.rootDir}))
+	retried, err := reopened.AppendEvent(ctx, session.AppendEventRequest{
+		SessionRef:       created.SessionRef,
+		ExpectedRevision: &one,
+		Event: &session.Event{
+			ID:      "event-stable",
+			Type:    session.EventTypeUser,
+			Message: &message,
+			Text:    message.TextContent(),
+		},
+	})
+	if err != nil {
+		t.Fatalf("AppendEvent(retry after reopen) error = %v", err)
+	}
+	if retried.Seq != first.Seq {
+		t.Fatalf("retry seq = %d, want %d", retried.Seq, first.Seq)
+	}
+	different := model.NewTextMessage(model.RoleUser, "different")
+	_, err = reopened.AppendEvent(ctx, session.AppendEventRequest{
+		SessionRef:       created.SessionRef,
+		ExpectedRevision: &one,
+		Event:            &session.Event{ID: "event-stable", Type: session.EventTypeUser, Message: &different},
+	})
+	if !errors.Is(err, session.ErrEventConflict) {
+		t.Fatalf("AppendEvent(conflict) error = %v, want ErrEventConflict", err)
+	}
+	loaded, err := reopened.LoadSession(ctx, session.LoadSessionRequest{SessionRef: created.SessionRef})
+	if err != nil {
+		t.Fatalf("LoadSession() error = %v", err)
+	}
+	if loaded.Session.Revision != 1 || len(loaded.Events) != 1 {
+		t.Fatalf("loaded after conflict = revision %d events %d, want 1/1", loaded.Session.Revision, len(loaded.Events))
+	}
+}
+
 func TestStoreListUsesSessionMetadataIndex(t *testing.T) {
 	t.Parallel()
 

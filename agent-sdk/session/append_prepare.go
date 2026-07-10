@@ -1,6 +1,7 @@
 package session
 
 import (
+	"reflect"
 	"strings"
 	"time"
 )
@@ -14,7 +15,9 @@ type EventIDAllocator func(event *Event, existingIDs map[string]struct{})
 type PrepareEventsForAppendRequest struct {
 	SessionID       string
 	Events          []*Event
+	ExistingEvents  []*Event
 	ExistingIDs     map[string]struct{}
+	LastSeq         uint64
 	Now             time.Time
 	AllocateEventID EventIDAllocator
 }
@@ -39,14 +42,17 @@ type AppendStateUpdate func([]*Event, map[string]any) (map[string]any, error)
 // transaction. Stores provide existing IDs and commit the returned session,
 // state, and persisted events with their own IO primitive.
 type PrepareAppendTransactionRequest struct {
-	Session         Session
-	State           map[string]any
-	Events          []*Event
-	ExistingIDs     map[string]struct{}
-	Now             time.Time
-	AllocateEventID EventIDAllocator
-	MutateSession   AppendSessionMutation
-	UpdateState     AppendStateUpdate
+	Session          Session
+	State            map[string]any
+	Events           []*Event
+	ExistingEvents   []*Event
+	ExistingIDs      map[string]struct{}
+	ExpectedRevision *uint64
+	LastSeq          uint64
+	Now              time.Time
+	AllocateEventID  EventIDAllocator
+	MutateSession    AppendSessionMutation
+	UpdateState      AppendStateUpdate
 }
 
 // PreparedAppendTransaction is the normalized mutation plan for one store
@@ -65,6 +71,11 @@ func PrepareEventsForAppend(req PrepareEventsForAppendRequest) (PreparedAppendEv
 		return PreparedAppendEvents{}, nil
 	}
 	existingIDs := cloneEventIDSet(req.ExistingIDs)
+	existingEvents := eventIndexByID(req.ExistingEvents)
+	for id := range existingEvents {
+		existingIDs[id] = struct{}{}
+	}
+	nextSeq := req.LastSeq
 	prepared := make([]*Event, 0, len(req.Events))
 	persisted := make([]*Event, 0, len(req.Events))
 	var updatedAt time.Time
@@ -88,11 +99,23 @@ func PrepareEventsForAppend(req PrepareEventsForAppendRequest) (PreparedAppendEv
 			return PreparedAppendEvents{}, err
 		}
 		if !IsTransient(normalized) {
+			if id := strings.TrimSpace(normalized.ID); id != "" {
+				if prior := existingEvents[id]; prior != nil {
+					if !sameIdempotentEvent(prior, normalized) {
+						return PreparedAppendEvents{}, &EventConflictError{SessionID: req.SessionID, EventID: id}
+					}
+					prepared = append(prepared, CloneEvent(prior))
+					continue
+				}
+			}
 			if req.AllocateEventID != nil {
 				req.AllocateEventID(normalized, existingIDs)
 			}
+			nextSeq++
+			normalized.Seq = nextSeq
 			if id := strings.TrimSpace(normalized.ID); id != "" {
 				existingIDs[id] = struct{}{}
+				existingEvents[id] = CloneEvent(normalized)
 			}
 			persisted = append(persisted, normalized)
 			updatedAt = normalized.Time
@@ -113,13 +136,18 @@ func PrepareEventsForAppend(req PrepareEventsForAppendRequest) (PreparedAppendEv
 // PrepareAppendTransaction canonicalizes events and applies shared session and
 // state mutations before any backend commit occurs.
 func PrepareAppendTransaction(req PrepareAppendTransactionRequest) (PreparedAppendTransaction, error) {
+	if err := CheckExpectedRevision(req.Session, req.ExpectedRevision); err != nil {
+		return PreparedAppendTransaction{}, err
+	}
 	if err := ValidateState(req.State); err != nil {
 		return PreparedAppendTransaction{}, err
 	}
 	prepared, err := PrepareEventsForAppend(PrepareEventsForAppendRequest{
 		SessionID:       req.Session.SessionID,
 		Events:          req.Events,
+		ExistingEvents:  req.ExistingEvents,
 		ExistingIDs:     req.ExistingIDs,
+		LastSeq:         req.LastSeq,
 		Now:             req.Now,
 		AllocateEventID: req.AllocateEventID,
 	})
@@ -158,12 +186,59 @@ func PrepareAppendTransaction(req PrepareAppendTransactionRequest) (PreparedAppe
 		nextSession.UpdatedAt = req.Now
 		changed = true
 	}
+	if changed {
+		nextSession.Revision = req.Session.Revision + 1
+	}
 	return PreparedAppendTransaction{
 		Session:  nextSession,
 		State:    nextState,
 		Prepared: prepared,
 		Changed:  changed,
 	}, nil
+}
+
+// LastEventSeq returns the highest durable sequence in one event set.
+func LastEventSeq(events []*Event) uint64 {
+	var out uint64
+	for index, event := range events {
+		if event == nil {
+			continue
+		}
+		seq := event.Seq
+		if seq == 0 {
+			seq = uint64(index + 1)
+		}
+		if seq > out {
+			out = seq
+		}
+	}
+	return out
+}
+
+func eventIndexByID(events []*Event) map[string]*Event {
+	out := make(map[string]*Event, len(events))
+	for _, event := range events {
+		if event == nil {
+			continue
+		}
+		if id := strings.TrimSpace(event.ID); id != "" {
+			out[id] = CloneEvent(event)
+		}
+	}
+	return out
+}
+
+func sameIdempotentEvent(existing *Event, retry *Event) bool {
+	left := CanonicalizeEvent(existing)
+	right := CanonicalizeEvent(retry)
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	left.SessionID, right.SessionID = "", ""
+	left.Seq, right.Seq = 0, 0
+	left.Time, right.Time = time.Time{}, time.Time{}
+	left.Text, right.Text = "", ""
+	return reflect.DeepEqual(left, right)
 }
 
 // ApplyPreparedAppendToSession applies title and UpdatedAt changes implied by

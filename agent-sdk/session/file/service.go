@@ -31,7 +31,7 @@ func (s *Service) AppendEvent(
 	ctx context.Context,
 	req session.AppendEventRequest,
 ) (*session.Event, error) {
-	return s.store.AppendEvent(ctx, req.SessionRef, req.Event)
+	return s.store.appendEventRequest(req)
 }
 
 func (s *Service) AppendEvents(

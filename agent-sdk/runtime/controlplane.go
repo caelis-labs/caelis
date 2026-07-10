@@ -91,6 +91,9 @@ func (r *Runtime) runACPControllerTurn(
 	}
 	runID := r.nextID("run", r.runIDGenerator)
 	turnID := r.nextID("turn", nil)
+	if err := r.beginRun(ref, runID); err != nil {
+		return agent.RunResult{}, err
+	}
 	r.setRunState(ref.SessionID, agent.RunState{
 		Status:      agent.RunLifecycleStatusRunning,
 		ActiveRunID: runID,

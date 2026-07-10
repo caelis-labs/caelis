@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"iter"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -111,6 +112,58 @@ func TestRuntimeRunPersistsMinimalChatTurn(t *testing.T) {
 	}
 	if state.Status != agent.RunLifecycleStatusCompleted {
 		t.Fatalf("state.Status = %q, want %q", state.Status, agent.RunLifecycleStatusCompleted)
+	}
+}
+
+func TestRuntimeRejectsConcurrentRunForSameSession(t *testing.T) {
+	t.Parallel()
+
+	sessions, activeSession := newTestSessionService(t, "sess-concurrent-run")
+	runtime, err := New(Config{Sessions: sessions, AgentFactory: chat.Factory{}})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	blocking := &blockingTestAgent{started: make(chan struct{})}
+	first, err := runtime.Run(context.Background(), agent.RunRequest{
+		SessionRef: activeSession.SessionRef,
+		Input:      "first",
+		Agent:      blocking,
+	})
+	if err != nil {
+		t.Fatalf("Run(first) error = %v", err)
+	}
+	select {
+	case <-blocking.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first run did not start")
+	}
+	_, err = runtime.Run(context.Background(), agent.RunRequest{
+		SessionRef: activeSession.SessionRef,
+		Input:      "second",
+		Agent:      blocking,
+	})
+	var conflict *agent.RunConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("Run(second) error = %v, want *agentsdk.RunConflictError", err)
+	}
+	if conflict.ActiveRunID != first.Handle.RunID() {
+		t.Fatalf("conflict.ActiveRunID = %q, want %q", conflict.ActiveRunID, first.Handle.RunID())
+	}
+	first.Handle.Cancel()
+	for range first.Handle.Events() {
+	}
+}
+
+type blockingTestAgent struct {
+	started chan struct{}
+}
+
+func (a *blockingTestAgent) Name() string { return "blocking" }
+
+func (a *blockingTestAgent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
+	return func(func(*session.Event, error) bool) {
+		close(a.started)
+		<-ctx.Done()
 	}
 }
 

@@ -28,10 +28,56 @@ var (
 	// shared JSON-compatible durable value contract.
 	ErrInvalidValue = errors.New("agent-sdk/session: invalid JSON-compatible value")
 
+	// ErrRevisionConflict reports a failed expected-revision compare-and-swap.
+	ErrRevisionConflict = errors.New("agent-sdk/session: revision conflict")
+
+	// ErrEventConflict reports reuse of a durable event ID with a different
+	// canonical payload.
+	ErrEventConflict = errors.New("agent-sdk/session: event conflict")
+
 	// ErrUnsupportedLegacyFormat reports an older on-disk session format that is
 	// no longer a supported replay source.
 	ErrUnsupportedLegacyFormat = errors.New("agent-sdk/session: unsupported legacy format")
 )
+
+// RevisionConflictError carries the expected and actual session revisions.
+type RevisionConflictError struct {
+	SessionID string
+	Expected  uint64
+	Actual    uint64
+}
+
+func (e *RevisionConflictError) Error() string {
+	if e == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("%s: session %q expected %d, actual %d", ErrRevisionConflict, strings.TrimSpace(e.SessionID), e.Expected, e.Actual)
+}
+
+func (e *RevisionConflictError) Is(target error) bool { return target == ErrRevisionConflict }
+
+// EventConflictError reports a stable event ID reused for different content.
+type EventConflictError struct {
+	SessionID string
+	EventID   string
+}
+
+func (e *EventConflictError) Error() string {
+	if e == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("%s: session %q event %q has different content", ErrEventConflict, strings.TrimSpace(e.SessionID), strings.TrimSpace(e.EventID))
+}
+
+func (e *EventConflictError) Is(target error) bool { return target == ErrEventConflict }
+
+// CheckExpectedRevision applies the shared session compare-and-swap contract.
+func CheckExpectedRevision(active Session, expected *uint64) error {
+	if expected == nil || *expected == active.Revision {
+		return nil
+	}
+	return &RevisionConflictError{SessionID: active.SessionID, Expected: *expected, Actual: active.Revision}
+}
 
 // JSONValueError reports which durable session value failed validation.
 type JSONValueError struct {
@@ -190,6 +236,7 @@ type ParticipantBinding struct {
 // Session describes one session row.
 type Session struct {
 	SessionRef
+	Revision     uint64               `json:"revision,omitempty"`
 	CWD          string               `json:"cwd,omitempty"`
 	Title        string               `json:"title,omitempty"`
 	Metadata     map[string]any       `json:"metadata,omitempty"`
@@ -197,6 +244,42 @@ type Session struct {
 	Participants []ParticipantBinding `json:"participants,omitempty"`
 	CreatedAt    time.Time            `json:"created_at,omitempty"`
 	UpdatedAt    time.Time            `json:"updated_at,omitempty"`
+}
+
+// SessionLease is a neutral cloud-store coordination record. It carries no
+// worker-placement or scheduling policy; those decisions remain in Control.
+type SessionLease struct {
+	SessionRef  SessionRef `json:"session_ref"`
+	LeaseID     string     `json:"lease_id,omitempty"`
+	OwnerID     string     `json:"owner_id,omitempty"`
+	Revision    uint64     `json:"revision,omitempty"`
+	AcquiredAt  time.Time  `json:"acquired_at,omitempty"`
+	HeartbeatAt time.Time  `json:"heartbeat_at,omitempty"`
+	ExpiresAt   time.Time  `json:"expires_at,omitempty"`
+}
+
+// AcquireSessionLeaseRequest requests a store-level execution lease.
+type AcquireSessionLeaseRequest struct {
+	SessionRef SessionRef    `json:"session_ref"`
+	OwnerID    string        `json:"owner_id,omitempty"`
+	TTL        time.Duration `json:"ttl,omitempty"`
+}
+
+// HeartbeatSessionLeaseRequest renews one existing lease with lease CAS.
+type HeartbeatSessionLeaseRequest struct {
+	SessionRef            SessionRef    `json:"session_ref"`
+	LeaseID               string        `json:"lease_id,omitempty"`
+	OwnerID               string        `json:"owner_id,omitempty"`
+	ExpectedLeaseRevision uint64        `json:"expected_lease_revision,omitempty"`
+	TTL                   time.Duration `json:"ttl,omitempty"`
+}
+
+// ReleaseSessionLeaseRequest releases one existing lease with lease CAS.
+type ReleaseSessionLeaseRequest struct {
+	SessionRef            SessionRef `json:"session_ref"`
+	LeaseID               string     `json:"lease_id,omitempty"`
+	OwnerID               string     `json:"owner_id,omitempty"`
+	ExpectedLeaseRevision uint64     `json:"expected_lease_revision,omitempty"`
 }
 
 // LoadedSession is one loaded session plus canonical events and state.
@@ -240,24 +323,27 @@ type LoadSessionRequest struct {
 
 // AppendEventRequest appends one event to one session.
 type AppendEventRequest struct {
-	SessionRef SessionRef `json:"session_ref"`
-	Event      *Event     `json:"event"`
+	SessionRef       SessionRef `json:"session_ref"`
+	ExpectedRevision *uint64    `json:"expected_revision,omitempty"`
+	Event            *Event     `json:"event"`
 }
 
 // AppendEventsRequest appends multiple events to one session as one batch.
 // Implementations must validate the full batch before making any event durable.
 type AppendEventsRequest struct {
-	SessionRef SessionRef `json:"session_ref"`
-	Events     []*Event   `json:"events"`
+	SessionRef       SessionRef `json:"session_ref"`
+	ExpectedRevision *uint64    `json:"expected_revision,omitempty"`
+	Events           []*Event   `json:"events"`
 }
 
 // AppendEventsAndUpdateStateRequest appends multiple events and derives the
 // next session state in one store transaction. UpdateState receives the
 // normalized events that will be returned to the caller.
 type AppendEventsAndUpdateStateRequest struct {
-	SessionRef  SessionRef
-	Events      []*Event
-	UpdateState func(storedEvents []*Event, state map[string]any) (map[string]any, error)
+	SessionRef       SessionRef
+	ExpectedRevision *uint64
+	Events           []*Event
+	UpdateState      func(storedEvents []*Event, state map[string]any) (map[string]any, error)
 }
 
 // EventsRequest lists events for one session.
@@ -288,17 +374,19 @@ type RemoveParticipantRequest struct {
 // PutParticipantWithEventRequest creates or updates one participant binding and
 // appends the matching lifecycle event in one store transaction.
 type PutParticipantWithEventRequest struct {
-	SessionRef SessionRef         `json:"session_ref"`
-	Binding    ParticipantBinding `json:"binding"`
-	Event      *Event             `json:"event"`
+	SessionRef       SessionRef         `json:"session_ref"`
+	ExpectedRevision *uint64            `json:"expected_revision,omitempty"`
+	Binding          ParticipantBinding `json:"binding"`
+	Event            *Event             `json:"event"`
 }
 
 // RemoveParticipantWithEventRequest removes one participant binding and appends
 // the matching lifecycle event in one store transaction.
 type RemoveParticipantWithEventRequest struct {
-	SessionRef    SessionRef `json:"session_ref"`
-	ParticipantID string     `json:"participant_id,omitempty"`
-	Event         *Event     `json:"event"`
+	SessionRef       SessionRef `json:"session_ref"`
+	ExpectedRevision *uint64    `json:"expected_revision,omitempty"`
+	ParticipantID    string     `json:"participant_id,omitempty"`
+	Event            *Event     `json:"event"`
 }
 
 // ListSessionsRequest lists sessions in one workspace or user namespace.
@@ -407,4 +495,12 @@ type EventBatchService interface {
 // batch and update session state without exposing only one side of the commit.
 type EventBatchStateService interface {
 	AppendEventsAndUpdateState(context.Context, AppendEventsAndUpdateStateRequest) ([]*Event, error)
+}
+
+// SessionLeaseService is the optional lease/heartbeat capability implemented
+// by cloud-oriented stores. Core defines record and CAS semantics only.
+type SessionLeaseService interface {
+	AcquireSessionLease(context.Context, AcquireSessionLeaseRequest) (SessionLease, error)
+	HeartbeatSessionLease(context.Context, HeartbeatSessionLeaseRequest) (SessionLease, error)
+	ReleaseSessionLease(context.Context, ReleaseSessionLeaseRequest) error
 }

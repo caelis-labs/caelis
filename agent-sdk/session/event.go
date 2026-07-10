@@ -62,6 +62,7 @@ type EventToolContent struct {
 type Event struct {
 	ID          string            `json:"id,omitempty"`
 	SessionID   string            `json:"session_id,omitempty"`
+	Seq         uint64            `json:"seq,omitempty"`
 	Schema      int               `json:"schema,omitempty"`
 	Type        EventType         `json:"type,omitempty"`
 	Visibility  Visibility        `json:"visibility,omitempty"`

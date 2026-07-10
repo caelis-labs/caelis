@@ -66,15 +66,16 @@ type ForceEngine interface {
 }
 
 type CompactEventData struct {
-	Revision            int      `json:"revision,omitempty"`
-	ContractVersion     int      `json:"contract_version,omitempty"`
-	SummarizedThroughID string   `json:"summarized_through_id,omitempty"`
-	Generator           string   `json:"generator,omitempty"`
-	Trigger             string   `json:"trigger,omitempty"`
-	SourceEventCount    int      `json:"source_event_count,omitempty"`
-	TotalTokens         int      `json:"total_tokens,omitempty"`
-	ContextWindowTokens int      `json:"context_window_tokens,omitempty"`
-	DiscoveredTools     []string `json:"discovered_tools,omitempty"`
+	Revision             int      `json:"revision,omitempty"`
+	ContractVersion      int      `json:"contract_version,omitempty"`
+	SummarizedThroughID  string   `json:"summarized_through_id,omitempty"`
+	SummarizedThroughSeq uint64   `json:"summarized_through_seq,omitempty"`
+	Generator            string   `json:"generator,omitempty"`
+	Trigger              string   `json:"trigger,omitempty"`
+	SourceEventCount     int      `json:"source_event_count,omitempty"`
+	TotalTokens          int      `json:"total_tokens,omitempty"`
+	ContextWindowTokens  int      `json:"context_window_tokens,omitempty"`
+	DiscoveredTools      []string `json:"discovered_tools,omitempty"`
 }
 
 type ContextWindowProvider interface {
@@ -177,6 +178,9 @@ func PromptEventsFromLatestCompact(events []*session.Event) []*session.Event {
 			out = append(out, replacement)
 		}
 		for _, event := range visible[index+1:] {
+			if IsCompactEvent(event) {
+				continue
+			}
 			out = append(out, session.CloneEvent(event))
 		}
 		return out
@@ -196,7 +200,14 @@ func EventsAfterLatestCompact(events []*session.Event) []*session.Event {
 	if index < 0 {
 		return session.CloneEvents(visible)
 	}
-	return session.CloneEvents(visible[index+1:])
+	out := make([]*session.Event, 0, len(visible)-index-1)
+	for _, event := range visible[index+1:] {
+		if IsCompactEvent(event) {
+			continue
+		}
+		out = append(out, session.CloneEvent(event))
+	}
+	return out
 }
 
 func LatestCompactEvent(events []*session.Event) (*session.Event, CompactEventData, bool) {
@@ -224,12 +235,31 @@ func filterPromptVisibleEvents(events []*session.Event) []*session.Event {
 }
 
 func lastCompactIndex(events []*session.Event) int {
-	for i := len(events) - 1; i >= 0; i-- {
-		if IsCompactEvent(events[i]) {
-			return i
+	bestIndex := -1
+	var bestCoverage uint64
+	legacyIndex := -1
+	for i, event := range events {
+		if !IsCompactEvent(event) {
+			continue
+		}
+		data, ok := CompactEventDataFromEvent(event)
+		if !ok || data.ContractVersion != CompactContractVersion || data.SummarizedThroughSeq == 0 {
+			legacyIndex = i
+			continue
+		}
+		if event.Seq > 0 && data.SummarizedThroughSeq >= event.Seq {
+			continue
+		}
+		if bestIndex < 0 || data.SummarizedThroughSeq > bestCoverage ||
+			(data.SummarizedThroughSeq == bestCoverage && event.Seq >= events[bestIndex].Seq) {
+			bestIndex = i
+			bestCoverage = data.SummarizedThroughSeq
 		}
 	}
-	return -1
+	if bestIndex >= 0 {
+		return bestIndex
+	}
+	return legacyIndex
 }
 
 func replacementTextEvent(text string) *session.Event {

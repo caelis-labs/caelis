@@ -148,13 +148,14 @@ func (c *codexStyleCompactor) compact(ctx context.Context, req compact.Request, 
 		return compact.Result{}, err
 	}
 	data := compact.CompactEventData{
-		Revision:            baseData.Revision + 1,
-		ContractVersion:     compact.CompactContractVersion,
-		SummarizedThroughID: lastEventID(delta),
-		Generator:           "model_markdown",
-		Trigger:             strings.TrimSpace(trigger),
-		SourceEventCount:    len(summaryEvents),
-		DiscoveredTools:     discoveredToolNamesFromEvents(req.Events),
+		Revision:             baseData.Revision + 1,
+		ContractVersion:      compact.CompactContractVersion,
+		SummarizedThroughID:  lastEventID(delta),
+		SummarizedThroughSeq: lastEventSeq(delta),
+		Generator:            "model_markdown",
+		Trigger:              strings.TrimSpace(trigger),
+		SourceEventCount:     len(summaryEvents),
+		DiscoveredTools:      discoveredToolNamesFromEvents(req.Events),
 	}
 	compactEvent := buildCompactEvent(req.Session, compactText, data)
 	promptEvents := compact.PromptEventsFromLatestCompact([]*session.Event{compactEvent})
@@ -172,6 +173,10 @@ func (c *codexStyleCompactor) compact(ctx context.Context, req compact.Request, 
 		PromptEvents: promptEvents,
 		Usage:        usage,
 	}, nil
+}
+
+func lastEventSeq(events []*session.Event) uint64 {
+	return session.LastEventSeq(events)
 }
 
 func (c *codexStyleCompactor) snapshotUsage(req compact.Request, promptEvents []*session.Event) compact.UsageSnapshot {

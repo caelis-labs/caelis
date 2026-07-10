@@ -2,6 +2,7 @@ package session
 
 import (
 	"encoding/json"
+	"errors"
 	"math"
 	"reflect"
 	"strconv"
@@ -324,6 +325,80 @@ func TestPrepareEventsRejectsInvalidJSONCompatibleValue(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("PrepareEventsForAppend() error = nil, want invalid JSON value rejection")
+	}
+}
+
+func TestPrepareAppendTransactionAssignsSeqRevisionAndEnforcesCAS(t *testing.T) {
+	t.Parallel()
+
+	expected := uint64(4)
+	first := model.NewTextMessage(model.RoleUser, "first")
+	second := model.NewTextMessage(model.RoleAssistant, "second")
+	tx, err := PrepareAppendTransaction(PrepareAppendTransactionRequest{
+		Session:          Session{SessionRef: SessionRef{SessionID: "sess-1"}, Revision: 4},
+		ExpectedRevision: &expected,
+		LastSeq:          8,
+		Events: []*Event{
+			{ID: "event-9", Type: EventTypeUser, Message: &first},
+			{ID: "event-10", Type: EventTypeAssistant, Message: &second},
+		},
+	})
+	if err != nil {
+		t.Fatalf("PrepareAppendTransaction() error = %v", err)
+	}
+	if tx.Session.Revision != 5 {
+		t.Fatalf("Session.Revision = %d, want 5", tx.Session.Revision)
+	}
+	if got := []uint64{tx.Prepared.Events[0].Seq, tx.Prepared.Events[1].Seq}; !reflect.DeepEqual(got, []uint64{9, 10}) {
+		t.Fatalf("event seqs = %v, want [9 10]", got)
+	}
+
+	stale := uint64(3)
+	_, err = PrepareAppendTransaction(PrepareAppendTransactionRequest{
+		Session:          Session{SessionRef: SessionRef{SessionID: "sess-1"}, Revision: 4},
+		ExpectedRevision: &stale,
+	})
+	var conflict *RevisionConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("stale transaction error = %v, want *RevisionConflictError", err)
+	}
+}
+
+func TestPrepareEventsDedupesStableEventIDOrReturnsConflict(t *testing.T) {
+	t.Parallel()
+
+	message := model.NewTextMessage(model.RoleUser, "retry me")
+	existing := &Event{
+		ID:         "event-stable",
+		SessionID:  "sess-1",
+		Seq:        1,
+		Type:       EventTypeUser,
+		Visibility: VisibilityCanonical,
+		Message:    &message,
+	}
+	prepared, err := PrepareEventsForAppend(PrepareEventsForAppendRequest{
+		SessionID:      "sess-1",
+		Events:         []*Event{{ID: "event-stable", Type: EventTypeUser, Message: &message}},
+		ExistingEvents: []*Event{existing},
+		LastSeq:        1,
+	})
+	if err != nil {
+		t.Fatalf("PrepareEventsForAppend(retry) error = %v", err)
+	}
+	if len(prepared.Events) != 1 || len(prepared.Persisted) != 0 || prepared.Events[0].Seq != 1 {
+		t.Fatalf("retry prepared = %#v, want existing event and no new persistence", prepared)
+	}
+
+	different := model.NewTextMessage(model.RoleUser, "different payload")
+	_, err = PrepareEventsForAppend(PrepareEventsForAppendRequest{
+		SessionID:      "sess-1",
+		Events:         []*Event{{ID: "event-stable", Type: EventTypeUser, Message: &different}},
+		ExistingEvents: []*Event{existing},
+		LastSeq:        1,
+	})
+	var conflict *EventConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("conflicting event error = %v, want *EventConflictError", err)
 	}
 }
 

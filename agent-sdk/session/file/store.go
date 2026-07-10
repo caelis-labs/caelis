@@ -203,6 +203,11 @@ func (s *Store) AppendEvent(
 	ref session.SessionRef,
 	event *session.Event,
 ) (*session.Event, error) {
+	return s.appendEventRequest(session.AppendEventRequest{SessionRef: ref, Event: event})
+}
+
+func (s *Store) appendEventRequest(req session.AppendEventRequest) (*session.Event, error) {
+	event := req.Event
 	if event == nil {
 		return nil, session.ErrInvalidEvent
 	}
@@ -212,7 +217,7 @@ func (s *Store) AppendEvent(
 
 	var out *session.Event
 	if err := s.withRootWriteLock(func() error {
-		doc, err := s.readDocumentForRef(ref)
+		doc, err := s.readDocumentForRef(req.SessionRef)
 		if err != nil {
 			return err
 		}
@@ -221,7 +226,7 @@ func (s *Store) AppendEvent(
 		if err != nil {
 			return err
 		}
-		nextDoc, tx, err := s.prepareAppendTransactionForDocument(doc, []*session.Event{event}, existingEvents, nil, nil)
+		nextDoc, tx, err := s.prepareAppendTransactionForDocument(doc, []*session.Event{event}, existingEvents, nil, nil, req.ExpectedRevision)
 		if err != nil {
 			return err
 		}
@@ -247,16 +252,20 @@ func (s *Store) prepareAppendTransactionForDocument(
 	existingEvents []*session.Event,
 	mutate session.AppendSessionMutation,
 	updateState session.AppendStateUpdate,
+	expectedRevision *uint64,
 ) (persistedDocument, session.PreparedAppendTransaction, error) {
 	tx, err := session.PrepareAppendTransaction(session.PrepareAppendTransactionRequest{
-		Session:         doc.Session,
-		State:           doc.State,
-		Events:          events,
-		ExistingIDs:     existingEventIDSet(existingEvents),
-		Now:             s.now(),
-		AllocateEventID: s.ensureUniqueEventID,
-		MutateSession:   mutate,
-		UpdateState:     updateState,
+		Session:          doc.Session,
+		State:            doc.State,
+		Events:           events,
+		ExistingEvents:   existingEvents,
+		ExistingIDs:      existingEventIDSet(existingEvents),
+		ExpectedRevision: expectedRevision,
+		LastSeq:          session.LastEventSeq(existingEvents),
+		Now:              s.now(),
+		AllocateEventID:  s.ensureUniqueEventID,
+		MutateSession:    mutate,
+		UpdateState:      updateState,
 	})
 	if err != nil {
 		return persistedDocument{}, session.PreparedAppendTransaction{}, err
@@ -312,7 +321,7 @@ func (s *Store) AppendEvents(
 		if err != nil {
 			return err
 		}
-		nextDoc, tx, err := s.prepareAppendTransactionForDocument(doc, req.Events, existingEvents, nil, nil)
+		nextDoc, tx, err := s.prepareAppendTransactionForDocument(doc, req.Events, existingEvents, nil, nil, req.ExpectedRevision)
 		if err != nil {
 			return err
 		}
@@ -350,7 +359,7 @@ func (s *Store) AppendEventsAndUpdateState(
 		if err != nil {
 			return err
 		}
-		nextDoc, tx, err := s.prepareAppendTransactionForDocument(doc, req.Events, existingEvents, nil, req.UpdateState)
+		nextDoc, tx, err := s.prepareAppendTransactionForDocument(doc, req.Events, existingEvents, nil, req.UpdateState, req.ExpectedRevision)
 		if err != nil {
 			return err
 		}
@@ -407,6 +416,7 @@ func (s *Store) BindController(
 			return err
 		}
 		doc.Session.Controller = session.CloneControllerBinding(binding)
+		doc.Session.Revision++
 		doc.Session.UpdatedAt = s.now()
 		if err := s.writeDocument(doc); err != nil {
 			return err
@@ -434,6 +444,7 @@ func (s *Store) PutParticipant(
 			return err
 		}
 		if session.PutParticipantBinding(&doc.Session, binding) {
+			doc.Session.Revision++
 			doc.Session.UpdatedAt = s.now()
 			if err := s.writeDocument(doc); err != nil {
 				return err
@@ -473,6 +484,7 @@ func (s *Store) PutParticipantWithEvent(
 				return session.PutParticipantBinding(activeSession, req.Binding), nil
 			},
 			nil,
+			req.ExpectedRevision,
 		)
 		if err != nil {
 			return err
@@ -505,6 +517,7 @@ func (s *Store) RemoveParticipant(
 			return err
 		}
 		if session.RemoveParticipantBinding(&doc.Session, participantID) {
+			doc.Session.Revision++
 			doc.Session.UpdatedAt = s.now()
 			if err := s.writeDocument(doc); err != nil {
 				return err
@@ -544,6 +557,7 @@ func (s *Store) RemoveParticipantWithEvent(
 				return session.RemoveParticipantBinding(activeSession, req.ParticipantID), nil
 			},
 			nil,
+			req.ExpectedRevision,
 		)
 		if err != nil {
 			return err
@@ -576,6 +590,7 @@ func (s *Store) SnapshotState(
 		}
 		if doc.State == nil {
 			doc.State = map[string]any{}
+			doc.Session.Revision++
 			if err := s.writeDocument(doc); err != nil {
 				return err
 			}
@@ -605,6 +620,7 @@ func (s *Store) ReplaceState(
 			return err
 		}
 		doc.State = cloneState(state)
+		doc.Session.Revision++
 		doc.Session.UpdatedAt = s.now()
 		return s.writeDocument(doc)
 	})
@@ -635,6 +651,7 @@ func (s *Store) UpdateState(
 			return err
 		}
 		doc.State = cloneState(next)
+		doc.Session.Revision++
 		doc.Session.UpdatedAt = s.now()
 		return s.writeDocument(doc)
 	})
