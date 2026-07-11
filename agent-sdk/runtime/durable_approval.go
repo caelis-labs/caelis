@@ -151,7 +151,7 @@ func (r *Runtime) ResolveApproval(ctx context.Context, req agent.ResolveApproval
 	if err := session.ValidatePauseTokenTransition(token, next); err != nil {
 		return err
 	}
-	if err := r.appendPauseTokenWithGuard(ctx, ref, next, session.ControlMutationGuard()); err != nil {
+	if err := r.appendPauseTokenWithGuard(ctx, ref, next, session.ControlMutationGuard(session.ControlMutationPurposeApproval)); err != nil {
 		if !session.IsCommitted(err) {
 			return err
 		}

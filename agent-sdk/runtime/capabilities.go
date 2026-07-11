@@ -22,16 +22,7 @@ func validateAgentSpecCapabilities(specModel model.LLM, tools []tool.Tool, reque
 	if err := model.ValidateOutputSpec(requestOutput); err != nil {
 		return err
 	}
-	required := declared
-	if stream {
-		required.Streaming = true
-	}
-	if requestOutput != nil && requestOutput.Mode != "" && requestOutput.Mode != model.OutputModeText {
-		required.StructuredOutput = true
-	}
-	if len(tools) > 0 {
-		required.ToolCalls = true
-	}
+	required := model.DeriveRequiredCapabilities(declared, stream, requestOutput, len(tools))
 	actual, _ := model.CapabilitiesOf(specModel)
 	name := ""
 	if specModel != nil {

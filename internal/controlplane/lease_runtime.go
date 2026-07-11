@@ -11,7 +11,6 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 )
 
 const defaultSessionLeaseTTL = 30 * time.Second
@@ -37,13 +36,11 @@ type LeasedRuntimeConfig struct {
 // LeasedRuntime acquires a store-level session lease before dispatch and keeps
 // it alive until the returned Runner completes or closes.
 type LeasedRuntime struct {
-	runtime           agent.Runtime
+	runtimeFacade
 	leases            session.SessionLeaseService
 	ownerID           string
 	ttl               time.Duration
 	heartbeatInterval time.Duration
-	runsMu            sync.Mutex
-	runs              map[string]agent.Runner
 }
 
 func NewLeasedRuntime(config LeasedRuntimeConfig) (*LeasedRuntime, error) {
@@ -68,7 +65,13 @@ func NewLeasedRuntime(config LeasedRuntimeConfig) (*LeasedRuntime, error) {
 	if interval <= 0 || interval >= ttl {
 		return nil, fmt.Errorf("controlplane: lease heartbeat interval must be positive and less than TTL")
 	}
-	return &LeasedRuntime{runtime: config.Runtime, leases: config.Leases, ownerID: ownerID, ttl: ttl, heartbeatInterval: interval, runs: map[string]agent.Runner{}}, nil
+	return &LeasedRuntime{
+		runtimeFacade:     newRuntimeFacade(config.Runtime),
+		leases:            config.Leases,
+		ownerID:           ownerID,
+		ttl:               ttl,
+		heartbeatInterval: interval,
+	}, nil
 }
 
 // ExecutePlaced holds and heartbeats the session lease for the full synchronous
@@ -95,7 +98,7 @@ func (r *LeasedRuntime) ExecutePlaced(ctx context.Context, ref session.SessionRe
 
 func (r *LeasedRuntime) Run(ctx context.Context, req agent.RunRequest) (agent.RunResult, error) {
 	return r.runWithLease(ctx, req.SessionRef, func(runCtx context.Context) (agent.RunResult, error) {
-		return r.runtime.Run(runCtx, req)
+		return r.inner.Run(runCtx, req)
 	})
 }
 
@@ -116,10 +119,9 @@ func (r *LeasedRuntime) runWithLease(ctx context.Context, ref session.SessionRef
 	if result.Handle == nil {
 		return result, r.release(lease)
 	}
-	runID := result.Handle.RunID()
-	result.Handle = newLeasedRunner(result.Handle, r.leases, lease, r.ttl, r.heartbeatInterval, func() { r.forgetRun(runID) })
-	r.rememberRun(runID, result.Handle)
-	return result, nil
+	return r.wrapLiveHandle(result, func(inner agent.Runner, runID string) agent.Runner {
+		return newLeasedRunner(inner, r.leases, lease, r.ttl, r.heartbeatInterval, func() { r.forgetRun(runID) })
+	}), nil
 }
 
 func (r *LeasedRuntime) acquireSessionLease(ctx context.Context, ref session.SessionRef) (session.SessionLease, error) {
@@ -157,80 +159,14 @@ func matchesAcquiredSessionLease(req session.AcquireSessionLeaseRequest, lease s
 		lease.Revision > 0 && lease.FencingToken > 0
 }
 
-func (r *LeasedRuntime) RunState(ctx context.Context, ref session.SessionRef) (agent.RunState, error) {
-	return r.runtime.RunState(ctx, ref)
-}
-
-func (r *LeasedRuntime) Streams() stream.Service {
-	provider, _ := r.runtime.(agent.StreamProvider)
-	if provider == nil {
-		return nil
-	}
-	return provider.Streams()
-}
-
-func (r *LeasedRuntime) AttachLiveRun(ctx context.Context, req agent.AttachLiveRunRequest) (agent.RunResult, error) {
-	attacher, ok := r.runtime.(agent.LiveRunAttacher)
-	if !ok {
-		return agent.RunResult{}, &agent.RunNotAttachableError{SessionRef: req.SessionRef, RunID: req.RunID, Detail: "decorated runtime does not support live attachment"}
-	}
-	result, err := attacher.AttachLiveRun(ctx, req)
-	if err != nil {
-		return result, err
-	}
-	r.runsMu.Lock()
-	result.Handle = r.runs[strings.TrimSpace(req.RunID)]
-	r.runsMu.Unlock()
-	if result.Handle == nil {
-		return agent.RunResult{}, &agent.RunNotAttachableError{SessionRef: req.SessionRef, RunID: req.RunID, Detail: "decorated live runner is unavailable"}
-	}
-	return result, nil
-}
-
-func (r *LeasedRuntime) ResolveApproval(ctx context.Context, req agent.ResolveApprovalRequest) error {
-	resolver, ok := r.runtime.(agent.ApprovalResolver)
-	if !ok {
-		return fmt.Errorf("controlplane: decorated runtime does not support approval resolution")
-	}
-	return resolver.ResolveApproval(ctx, req)
-}
-
-func (r *LeasedRuntime) AttachParticipant(ctx context.Context, req agent.AttachParticipantRequest) (session.Session, error) {
-	participants, ok := r.runtime.(agent.ParticipantControlPlane)
-	if !ok {
-		return session.Session{}, fmt.Errorf("controlplane: decorated runtime does not support participants")
-	}
-	return participants.AttachParticipant(ctx, req)
-}
-
 func (r *LeasedRuntime) PromptParticipant(ctx context.Context, req agent.PromptParticipantRequest) (agent.RunResult, error) {
-	participants, ok := r.runtime.(agent.ParticipantControlPlane)
-	if !ok {
-		return agent.RunResult{}, fmt.Errorf("controlplane: decorated runtime does not support participants")
+	participants, err := r.participants()
+	if err != nil {
+		return agent.RunResult{}, err
 	}
 	return r.runWithLease(ctx, req.SessionRef, func(runCtx context.Context) (agent.RunResult, error) {
 		return participants.PromptParticipant(runCtx, req)
 	})
-}
-
-func (r *LeasedRuntime) DetachParticipant(ctx context.Context, req agent.DetachParticipantRequest) (session.Session, error) {
-	participants, ok := r.runtime.(agent.ParticipantControlPlane)
-	if !ok {
-		return session.Session{}, fmt.Errorf("controlplane: decorated runtime does not support participants")
-	}
-	return participants.DetachParticipant(ctx, req)
-}
-
-func (r *LeasedRuntime) rememberRun(runID string, runner agent.Runner) {
-	r.runsMu.Lock()
-	r.runs[strings.TrimSpace(runID)] = runner
-	r.runsMu.Unlock()
-}
-
-func (r *LeasedRuntime) forgetRun(runID string) {
-	r.runsMu.Lock()
-	delete(r.runs, strings.TrimSpace(runID))
-	r.runsMu.Unlock()
 }
 
 func (r *LeasedRuntime) release(lease session.SessionLease) error {

@@ -139,7 +139,7 @@ func assertLeaseFencedMutations(t *testing.T, service session.Service, ref sessi
 	}
 	controlMessage := model.NewTextMessage(model.RoleUser, "control append")
 	if _, err := service.AppendEvent(context.Background(), session.AppendEventRequest{
-		SessionRef: ref, MutationGuard: session.ControlMutationGuard(), Event: &session.Event{Type: session.EventTypeUser, Message: &controlMessage},
+		SessionRef: ref, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Event: &session.Event{Type: session.EventTypeUser, Message: &controlMessage},
 	}); err != nil {
 		t.Fatalf("control AppendEvent error = %v", err)
 	}

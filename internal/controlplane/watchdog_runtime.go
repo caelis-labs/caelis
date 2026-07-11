@@ -14,7 +14,6 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 )
 
 const (
@@ -40,7 +39,7 @@ var (
 // is intentionally not reimplemented here for synchronous Control ops; lease
 // fencing/heartbeat/cancel-on-loss is the placement safety envelope.
 func (r *WatchdogRuntime) ExecutePlaced(ctx context.Context, ref session.SessionRef, execute func(context.Context) error) error {
-	placement, ok := r.runtime.(PlacementExecutor)
+	placement, ok := r.inner.(PlacementExecutor)
 	if !ok {
 		return fmt.Errorf("controlplane: decorated runtime does not support placed operations")
 	}
@@ -138,7 +137,7 @@ type WatchdogRuntimeConfig struct {
 
 // WatchdogRuntime observes one live Runner without owning Agent semantics.
 type WatchdogRuntime struct {
-	runtime        agent.Runtime
+	runtimeFacade
 	sessions       session.Service
 	thresholds     WatchdogThresholds
 	tickInterval   time.Duration
@@ -147,8 +146,6 @@ type WatchdogRuntime struct {
 	reviewer       WatchdogReviewer
 	clock          func() time.Time
 	lifecycle      *WatchdogLifecycleObserver
-	runsMu         sync.Mutex
-	runs           map[string]agent.Runner
 }
 
 // NewWatchdogRuntime wraps an execution Runtime with soft-threshold review,
@@ -189,10 +186,15 @@ func NewWatchdogRuntime(config WatchdogRuntimeConfig) (*WatchdogRuntime, error) 
 		config.Lifecycle = NewWatchdogLifecycleObserver()
 	}
 	return &WatchdogRuntime{
-		runtime: config.Runtime, sessions: config.Sessions, thresholds: config.Thresholds,
-		tickInterval: config.TickInterval, reviewInterval: config.ReviewInterval,
-		reviewTimeout: config.ReviewTimeout, reviewer: config.Reviewer, clock: config.Clock,
-		lifecycle: config.Lifecycle, runs: map[string]agent.Runner{},
+		runtimeFacade:  newRuntimeFacade(config.Runtime),
+		sessions:       config.Sessions,
+		thresholds:     config.Thresholds,
+		tickInterval:   config.TickInterval,
+		reviewInterval: config.ReviewInterval,
+		reviewTimeout:  config.ReviewTimeout,
+		reviewer:       config.Reviewer,
+		clock:          config.Clock,
+		lifecycle:      config.Lifecycle,
 	}, nil
 }
 
@@ -200,7 +202,7 @@ func (r *WatchdogRuntime) Run(ctx context.Context, req agent.RunRequest) (agent.
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	result, err := r.runtime.Run(ctx, req)
+	result, err := r.inner.Run(ctx, req)
 	if err != nil || result.Handle == nil {
 		return result, err
 	}
@@ -208,58 +210,15 @@ func (r *WatchdogRuntime) Run(ctx context.Context, req agent.RunRequest) (agent.
 	if result.Session.SessionID != "" {
 		ref = session.NormalizeSessionRef(result.Session.SessionRef)
 	}
-	runID := result.Handle.RunID()
-	result.Handle = newWatchdogRunner(result.Handle, ref, r, func() { r.forgetRun(runID) })
-	r.rememberRun(runID, result.Handle)
-	return result, nil
-}
-
-func (r *WatchdogRuntime) Streams() stream.Service {
-	provider, _ := r.runtime.(agent.StreamProvider)
-	if provider == nil {
-		return nil
-	}
-	return provider.Streams()
-}
-
-func (r *WatchdogRuntime) AttachLiveRun(ctx context.Context, req agent.AttachLiveRunRequest) (agent.RunResult, error) {
-	attacher, ok := r.runtime.(agent.LiveRunAttacher)
-	if !ok {
-		return agent.RunResult{}, &agent.RunNotAttachableError{SessionRef: req.SessionRef, RunID: req.RunID, Detail: "decorated runtime does not support live attachment"}
-	}
-	result, err := attacher.AttachLiveRun(ctx, req)
-	if err != nil {
-		return result, err
-	}
-	r.runsMu.Lock()
-	result.Handle = r.runs[strings.TrimSpace(req.RunID)]
-	r.runsMu.Unlock()
-	if result.Handle == nil {
-		return agent.RunResult{}, &agent.RunNotAttachableError{SessionRef: req.SessionRef, RunID: req.RunID, Detail: "decorated live runner is unavailable"}
-	}
-	return result, nil
-}
-
-func (r *WatchdogRuntime) ResolveApproval(ctx context.Context, req agent.ResolveApprovalRequest) error {
-	resolver, ok := r.runtime.(agent.ApprovalResolver)
-	if !ok {
-		return fmt.Errorf("controlplane: decorated runtime does not support approval resolution")
-	}
-	return resolver.ResolveApproval(ctx, req)
-}
-
-func (r *WatchdogRuntime) AttachParticipant(ctx context.Context, req agent.AttachParticipantRequest) (session.Session, error) {
-	participants, ok := r.runtime.(agent.ParticipantControlPlane)
-	if !ok {
-		return session.Session{}, fmt.Errorf("controlplane: decorated runtime does not support participants")
-	}
-	return participants.AttachParticipant(ctx, req)
+	return r.wrapLiveHandle(result, func(inner agent.Runner, runID string) agent.Runner {
+		return newWatchdogRunner(inner, ref, r, func() { r.forgetRun(runID) })
+	}), nil
 }
 
 func (r *WatchdogRuntime) PromptParticipant(ctx context.Context, req agent.PromptParticipantRequest) (agent.RunResult, error) {
-	participants, ok := r.runtime.(agent.ParticipantControlPlane)
-	if !ok {
-		return agent.RunResult{}, fmt.Errorf("controlplane: decorated runtime does not support participants")
+	participants, err := r.participants()
+	if err != nil {
+		return agent.RunResult{}, err
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -272,30 +231,9 @@ func (r *WatchdogRuntime) PromptParticipant(ctx context.Context, req agent.Promp
 	if result.Session.SessionID != "" {
 		ref = session.NormalizeSessionRef(result.Session.SessionRef)
 	}
-	runID := result.Handle.RunID()
-	result.Handle = newWatchdogRunner(result.Handle, ref, r, func() { r.forgetRun(runID) })
-	r.rememberRun(runID, result.Handle)
-	return result, nil
-}
-
-func (r *WatchdogRuntime) DetachParticipant(ctx context.Context, req agent.DetachParticipantRequest) (session.Session, error) {
-	participants, ok := r.runtime.(agent.ParticipantControlPlane)
-	if !ok {
-		return session.Session{}, fmt.Errorf("controlplane: decorated runtime does not support participants")
-	}
-	return participants.DetachParticipant(ctx, req)
-}
-
-func (r *WatchdogRuntime) rememberRun(runID string, runner agent.Runner) {
-	r.runsMu.Lock()
-	r.runs[strings.TrimSpace(runID)] = runner
-	r.runsMu.Unlock()
-}
-
-func (r *WatchdogRuntime) forgetRun(runID string) {
-	r.runsMu.Lock()
-	delete(r.runs, strings.TrimSpace(runID))
-	r.runsMu.Unlock()
+	return r.wrapLiveHandle(result, func(inner agent.Runner, runID string) agent.Runner {
+		return newWatchdogRunner(inner, ref, r, func() { r.forgetRun(runID) })
+	}), nil
 }
 
 // WatchdogLifecycleObserver routes typed Runtime lifecycle traces into the
@@ -356,10 +294,6 @@ func (o *WatchdogLifecycleObserver) unregister(runner *watchdogRunner) {
 		delete(o.runs, key)
 	}
 	o.mu.Unlock()
-}
-
-func (r *WatchdogRuntime) RunState(ctx context.Context, ref session.SessionRef) (agent.RunState, error) {
-	return r.runtime.RunState(ctx, ref)
 }
 
 type watchdogRunner struct {
@@ -629,7 +563,7 @@ func (r *watchdogRunner) appendCheckpoint(observation WatchdogObservation, decis
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), r.owner.reviewTimeout)
 	defer cancel()
-	_, err := r.owner.sessions.AppendEvent(ctx, session.AppendEventRequest{SessionRef: r.sessionRef, MutationGuard: session.ControlMutationGuard(), Event: event})
+	_, err := r.owner.sessions.AppendEvent(ctx, session.AppendEventRequest{SessionRef: r.sessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeWatchdog), Event: event})
 	if session.IsCommitted(err) {
 		return nil
 	}

@@ -172,12 +172,17 @@ func (s *sagaSessionService) AppendEvent(ctx context.Context, req session.Append
 func TestSubagentSpawnSagaCompensatesEveryPostSpawnBoundary(t *testing.T) {
 	t.Parallel()
 
+	// Durable put sequence for a successful sidecar spawn:
+	// 1 intent, 2 external claim, 3 post_spawn, 4 final_event_persisted (completed), 5 committed.
+	// Failures after remote spawn but before post_spawn commit compensate.
+	// Canonical dialogue failures leave post_spawn and roll-forward without respawn.
 	tests := []struct {
 		name            string
 		failPut         int
 		failParticipant bool
 		failCanonical   bool
 		failCanonicalAt int
+		failStatus      string
 		cancelErr       bool
 		wantSpawn       int
 		wantCancel      int
@@ -188,11 +193,9 @@ func TestSubagentSpawnSagaCompensatesEveryPostSpawnBoundary(t *testing.T) {
 		{name: "before spawn intent", failPut: 1, wantSpawn: 0, wantCancel: 0},
 		{name: "after spawn before task commit", failPut: 3, wantSpawn: 1, wantCancel: 1, wantStatus: spawnStatusCompensated},
 		{name: "after task before participant", failParticipant: true, wantSpawn: 1, wantCancel: 1, wantStatus: spawnStatusCompensated},
-		{name: "after participant before canonical phase", failPut: 5, wantSpawn: 1, wantCancel: 1, wantStatus: spawnStatusCompensated},
-		{name: "canonical user append failure", failCanonical: true, wantSpawn: 1, wantCancel: 0, wantStatus: spawnStatusCanonicalCommitting, wantParticipant: true, rollForward: true},
-		{name: "after canonical user before final", failCanonicalAt: 2, wantSpawn: 1, wantCancel: 0, wantStatus: spawnStatusCanonicalCommitting, wantParticipant: true, rollForward: true},
-		{name: "after canonical dialogue before phase commit", failPut: 7, wantSpawn: 1, wantCancel: 0, wantStatus: spawnStatusCanonicalCommitting, wantParticipant: true, rollForward: true},
-		{name: "after canonical phase before committed", failPut: 8, wantSpawn: 1, wantCancel: 0, wantStatus: spawnStatusCanonicalCommitted, wantParticipant: true, rollForward: true},
+		{name: "canonical user append failure", failCanonical: true, wantSpawn: 1, wantCancel: 0, wantStatus: spawnStatusSpawned, wantParticipant: true, rollForward: true},
+		{name: "after canonical user before final", failCanonicalAt: 2, wantSpawn: 1, wantCancel: 0, wantStatus: spawnStatusSpawned, wantParticipant: true, rollForward: true},
+		{name: "after dialogue before committed mark", failStatus: spawnStatusCommitted, wantSpawn: 1, wantCancel: 0, wantStatus: spawnStatusSpawned, wantParticipant: true, rollForward: true},
 		{name: "cancellation cannot prove termination", failParticipant: true, cancelErr: true, wantSpawn: 1, wantCancel: 1, wantStatus: spawnStatusUnknownOutcome},
 	}
 	for _, test := range tests {
@@ -205,6 +208,7 @@ func TestSubagentSpawnSagaCompensatesEveryPostSpawnBoundary(t *testing.T) {
 			sessions := &sagaSessionService{Service: base, failParticipant: test.failParticipant, failCanonical: test.failCanonical, failCanonicalAt: test.failCanonicalAt}
 			store := newSagaTaskStore()
 			store.failOnPut = test.failPut
+			store.failStatus = test.failStatus
 			runner := &sagaRunner{}
 			if test.cancelErr {
 				runner.cancelErr = errors.New("forced cancellation failure")
@@ -373,15 +377,67 @@ func TestSubagentSpawnCompensationResumesDetachBeforeTerminalState(t *testing.T)
 	}
 	sessions := &sagaSessionService{Service: base, failDetach: true}
 	store := newSagaTaskStore()
-	store.failStatus = spawnStatusCanonicalCommitting
 	runner := &sagaRunner{}
 	req := taskapi.SubagentStartRequest{SpawnID: "detach-recovery", Agent: "helper", Prompt: "review", Role: session.ParticipantRoleSidecar}
+	taskID, err := subagentSpawnTaskID(active.SessionRef, req.SpawnID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Digest must match StartSubagent's mode defaulting (empty Mode uses runtime defaultPolicyMode).
+	probe, err := New(testConfigWithACPForwarder(Config{Sessions: base, AgentFactory: chat.Factory{}, Subagents: runner, TaskStore: store}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mode := strings.TrimSpace(probe.defaultPolicyMode)
+	digest, err := subagentSpawnRequestDigest(req, mode, session.ParticipantRoleSidecar)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Seed mid-compensation after a durable post-spawn attach, before detach.
+	// Pure intermediate marker failures no longer exist; resume from compensating.
+	lifecycle := sessions.Service.(session.ParticipantLifecycleService)
+	if _, _, err := lifecycle.PutParticipantWithEvent(context.Background(), session.PutParticipantWithEventRequest{
+		SessionRef: active.SessionRef,
+		Binding: session.ParticipantBinding{
+			ID: "child-agent-saga", Kind: session.ParticipantKindSubagent, Role: session.ParticipantRoleSidecar,
+			AgentName: "helper", Label: "@helper", SessionID: "child-saga", DelegationID: taskID, AttachedAt: time.Now(),
+		},
+		Event: &session.Event{
+			Type: session.EventTypeParticipant, Visibility: session.VisibilityMirror, Time: time.Now(),
+			Protocol: ptrEventProtocol(session.NewParticipantProtocol(session.ProtocolParticipant{Action: "attached"})),
+			Scope:    &session.EventScope{Participant: session.ParticipantRef{ID: "child-agent-saga", Kind: session.ParticipantKindSubagent, Role: session.ParticipantRoleSidecar, DelegationID: taskID}},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if _, err := store.Put(context.Background(), taskapi.PutRequest{Entry: &taskapi.Entry{
+		TaskID: taskID, Kind: taskapi.KindSubagent, Session: active.SessionRef, Title: "SPAWN helper",
+		State: taskapi.StateRunning, CreatedAt: now, UpdatedAt: now, SupportsCancel: true, Running: true,
+		Spec: map[string]any{
+			"spawn_identity": req.SpawnID, "spawn_request_digest": digest, "agent": "helper", "prompt": "review",
+			"participant_role": string(session.ParticipantRoleSidecar), "handle": "helper",
+			"session_id": "child-saga", "agent_id": "child-agent-saga", "terminal_id": subagentTerminalID(taskID),
+			"spawn_phase": string(spawnPhaseCompensating),
+		},
+		Metadata: map[string]any{
+			"spawn_status": string(spawnPhaseCompensating), "spawn_identity": req.SpawnID,
+			"spawn_request_digest": digest, "spawn_reason": "forced compensation", "participant_role": string(session.ParticipantRoleSidecar),
+		},
+		Result: map[string]any{"state": string(taskapi.StateRunning), "error": "forced compensation"},
+	}, ExpectedRevision: 0}); err != nil {
+		t.Fatal(err)
+	}
+
 	runtime, err := New(testConfigWithACPForwarder(Config{Sessions: sessions, AgentFactory: chat.Factory{}, Subagents: runner, TaskStore: store}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, req); err == nil {
-		t.Fatal("StartSubagent() error = nil, want canonical phase and detach failures")
+		t.Fatal("StartSubagent() error = nil, want detach failure during compensation resume")
+	}
+	if runner.cancelCalls != 1 {
+		t.Fatalf("cancel calls after first resume = %d, want 1", runner.cancelCalls)
 	}
 	loaded, err := sessions.Session(context.Background(), active.SessionRef)
 	if err != nil {
@@ -389,6 +445,10 @@ func TestSubagentSpawnCompensationResumesDetachBeforeTerminalState(t *testing.T)
 	}
 	if len(loaded.Participants) != 1 {
 		t.Fatalf("participants after failed detach = %#v, want recoverable attachment", loaded.Participants)
+	}
+	entry, err := store.Get(context.Background(), taskID)
+	if err != nil || taskStringValue(entry.Metadata["spawn_status"]) != spawnStatusChildCancelled {
+		t.Fatalf("after failed detach entry = %#v, %v, want child_cancelled", entry, err)
 	}
 
 	sessions.failDetach = false
@@ -406,13 +466,12 @@ func TestSubagentSpawnCompensationResumesDetachBeforeTerminalState(t *testing.T)
 	if len(loaded.Participants) != 0 {
 		t.Fatalf("participants after compensation retry = %#v, want detached", loaded.Participants)
 	}
-	taskID, _ := subagentSpawnTaskID(active.SessionRef, req.SpawnID)
-	entry, err := store.Get(context.Background(), taskID)
+	entry, err = store.Get(context.Background(), taskID)
 	if err != nil || taskStringValue(entry.Metadata["spawn_status"]) != spawnStatusCompensated {
 		t.Fatalf("compensation entry = %#v, %v, want terminal compensated", entry, err)
 	}
-	if runner.spawnCalls != 1 || runner.cancelCalls != 1 {
-		t.Fatalf("spawn/cancel calls = %d/%d, want 1/1", runner.spawnCalls, runner.cancelCalls)
+	if runner.spawnCalls != 0 {
+		t.Fatalf("spawn calls = %d, want 0 (compensation resume never respawns)", runner.spawnCalls)
 	}
 }
 
@@ -635,7 +694,9 @@ func TestSubagentSpawnCommittedErrorsReloadAndRollForward(t *testing.T) {
 	}
 	sessions := &sagaSessionService{Service: base, commitParticipant: true, commitCanonical: true}
 	store := newSagaTaskStore()
-	store.commitOnPut = 4
+	// Put sequence: 1 intent, 2 claim, 3 post_spawn, 4 final_event_persisted, 5 committed.
+	// CommittedError recovery is implemented on spawn-phase CAS puts; exercise put 3.
+	store.commitOnPut = 3
 	runner := &sagaRunner{}
 	runtime, err := New(testConfigWithACPForwarder(Config{Sessions: sessions, AgentFactory: chat.Factory{}, Subagents: runner, TaskStore: store}))
 	if err != nil {

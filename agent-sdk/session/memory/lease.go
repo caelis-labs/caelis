@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"strings"
 	"time"
 
@@ -122,6 +123,13 @@ func validateSessionLeaseIdentity(active session.SessionLease, leaseID, ownerID 
 
 func validateMutationGuard(active session.SessionLease, guard session.MutationGuard, now time.Time) error {
 	if guard.Authority == session.MutationAuthorityControl {
+		if err := session.ValidateControlMutationGuard(guard); err != nil {
+			var conflict *session.LeaseConflictError
+			if errors.As(err, &conflict) {
+				conflict.SessionID = session.NormalizeSessionRef(active.SessionRef).SessionID
+			}
+			return err
+		}
 		return nil
 	}
 	if guard.Authority != session.MutationAuthorityRuntime {

@@ -393,7 +393,9 @@ func sameSpawnEntryPhase(stored *taskapi.Entry, requested *taskapi.Entry) bool {
 	}
 	return strings.TrimSpace(stored.TaskID) == strings.TrimSpace(requested.TaskID) &&
 		taskSpecString(stored.Spec, "spawn_identity") == taskSpecString(requested.Spec, "spawn_identity") &&
-		taskStringValue(stored.Metadata["spawn_status"]) == taskStringValue(requested.Metadata["spawn_status"])
+		taskStringValue(stored.Metadata["spawn_status"]) == taskStringValue(requested.Metadata["spawn_status"]) &&
+		taskStringValue(stored.Metadata["continue_phase"]) == taskStringValue(requested.Metadata["continue_phase"]) &&
+		taskStringValue(stored.Metadata["continue_digest"]) == taskStringValue(requested.Metadata["continue_digest"])
 }
 
 func (tm *taskRuntime) updateTaskPersistence(entry *taskapi.Entry) {

@@ -107,7 +107,7 @@ func (c *Coordinator) ReattachController(ctx context.Context, req controller.Rec
 	if err != nil {
 		return session.Session{}, err
 	}
-	updated, err := c.sessions.BindController(ctx, session.BindControllerRequest{SessionRef: ref, MutationGuard: session.ControlMutationGuard(), Binding: attached})
+	updated, err := c.sessions.BindController(ctx, session.BindControllerRequest{SessionRef: ref, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeCoordinator), Binding: attached})
 	if err != nil {
 		cleanupErr := c.controllers.Deactivate(context.WithoutCancel(ctx), ref)
 		return session.Session{}, errors.Join(err, cleanupErr)
@@ -199,7 +199,7 @@ func (c *Coordinator) handoffController(ctx context.Context, req agent.HandoffCo
 	updated, _, err := handoffs.BindControllerWithEvent(ctx, session.BindControllerWithEventRequest{
 		SessionRef:       ref,
 		ExpectedRevision: &expected,
-		MutationGuard:    session.ControlMutationGuard(),
+		MutationGuard:    session.ControlMutationGuard(session.ControlMutationPurposeHandoff),
 		Binding:          to,
 		Event:            handoffEvent(from, to, strings.TrimSpace(req.Reason), c.clock()),
 	})
@@ -266,7 +266,7 @@ func (c *Coordinator) ensureSessionController(ctx context.Context, activeSession
 	}
 	return c.sessions.BindController(ctx, session.BindControllerRequest{
 		SessionRef:    activeSession.SessionRef,
-		MutationGuard: session.ControlMutationGuard(),
+		MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeCoordinator),
 		Binding:       c.kernelControllerBinding("control"),
 	})
 }

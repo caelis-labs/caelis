@@ -40,7 +40,7 @@ Status values:
 | --- | --- | --- |
 | P1-1 ACP semantic completeness | closed | External and controller/subagent permission bridges preserve RawInput/RawOutput/Content through the final runtime approval; recovery keeps durable status while projecting only valid ACP tool enums |
 | P1-2 Control ownership completion | closed | Source is audit-only, including projection/narrative classification; system Agents continue to reuse the common Runtime pipeline |
-| P1-3 Durable continuation and placement | closed | StartSubagent, Compact, Continue, and Wait use one leased placement envelope with heartbeat and cancel-on-loss; Continue records parent user intent before the remote child effect. Soft watchdog review remains Runner-scoped (not reimplemented for sync placed ops). Residual: remote-success/parent-final dual-write is not a full saga |
+| P1-3 Durable continuation and placement | closed | StartSubagent, Compact, Continue, and Wait use one leased placement envelope with heartbeat and cancel-on-loss. Continue is a durable saga (`continue_prepared` → `continue_pending` → `continue_post_effect` → cleared) so remote success / parent-final dual-write rolls forward without blind re-issue; external-claim restart is fail-closed as `continue_unknown_outcome`. Soft watchdog review remains Runner-scoped (not reimplemented for sync placed ops) |
 | P1-4 Execution capability wiring | closed | Control derives and validates actual model, tool, and sandbox requirements; unsupported output/features do not silently degrade |
 | P1-5 Runtime liveness and observability | closed | Watchdog/TraceSink/guardrail bounds remain covered; production cancellation is fenced; transient detach honors a deadline so finish cannot block the event stream forever |
 | P1-6 Schema and compatibility | closed | Raw durable JSON migrates before typed decode and unknown-field corpus proves preservation; supported API is compared tag-to-tag with explicit waivers |
@@ -103,7 +103,7 @@ passed. Reopened/partial findings were:
   Gateway Start/Continue/Wait/Compact share `withPlaced`. Soft watchdog review
   is not duplicated for placed ops (Runner event stream only). Continue appends
   parent user intent before remote child execution; final assistant dual-write
-  remains a documented residual, not full spawn-style saga atomicity.
+  is now a continue saga (`continue_post_effect` roll-forward, no blind re-issue).
 - **P1-7 proxy pipe fallback:** `sdk_proxy_smoke.sh` rejects `|` fallbacks; the
   workflow regression proves `https://127.0.0.1:1|direct` fails closed.
 - **P1-5 transient detach timeout:** finish-hook detach uses a bounded context;

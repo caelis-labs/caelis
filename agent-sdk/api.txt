@@ -637,6 +637,7 @@ package github.com/caelis-labs/caelis/agent-sdk/model
   func CloneToolSpecs(in []ToolSpec) []ToolSpec
   func ContentPartFromPart(part Part) (ContentPart, bool)
   func ContentPartsFromParts(parts []Part) []ContentPart
+  func DeriveRequiredCapabilities(declared Capabilities, stream bool, output *OutputSpec, toolCount int) Capabilities
   func ErrorCodeOf(err error) errorcode.Code
   func FunctionToolDefinitions(specs []ToolSpec) []ToolDefinition
   func IsBackpressureLLMError(err error) bool
@@ -1660,6 +1661,14 @@ package github.com/caelis-labs/caelis/agent-sdk/session
       ActorKindSystem      ActorKind = "system"
   )
   const (
+      ControlMutationPurposeApproval     ControlMutationPurpose = "approval"
+      ControlMutationPurposeHandoff      ControlMutationPurpose = "handoff"
+      ControlMutationPurposeWatchdog     ControlMutationPurpose = "watchdog"
+      ControlMutationPurposeCoordinator  ControlMutationPurpose = "coordinator"
+      ControlMutationPurposeTest         ControlMutationPurpose = "test"
+      ControlMutationPurposeSystemCommit ControlMutationPurpose = "system_commit"
+  )
+  const (
       ControllerKindKernel ControllerKind = "kernel"
       ControllerKindACP    ControllerKind = "acp"
   )
@@ -1818,7 +1827,7 @@ package github.com/caelis-labs/caelis/agent-sdk/session
   func CloneState(state map[string]any) map[string]any
   func CloneToolExecution(in ToolExecution) ToolExecution
   func ContextWithRuntimeLease(ctx context.Context, lease SessionLease) context.Context
-  func ControlMutationGuard() MutationGuard
+  func ControlMutationGuard(purpose ControlMutationPurpose) MutationGuard
   func DefaultMigrationRegistry() *MigrationRegistry
   func EventDisplayText(event *Event) string
   func EventText(event *Event) string
@@ -1883,6 +1892,7 @@ package github.com/caelis-labs/caelis/agent-sdk/session
   func UsageSnapshotFromMap(payload map[string]any) *UsageSnapshot
   func UsageSnapshotFromMapForProvider(payload map[string]any, provider string) *UsageSnapshot
   func UsageSnapshotFromSessionEvent(event *Event) *UsageSnapshot
+  func ValidateControlMutationGuard(guard MutationGuard) error
   func ValidateDurableCoreEvent(event *Event) error
   func ValidateExecutionJournalEntry(in ExecutionJournalEntry) error
   func ValidateExecutionTransition(previous ExecutionRecord, next ExecutionRecord) error
@@ -1944,6 +1954,7 @@ package github.com/caelis-labs/caelis/agent-sdk/session
   type CommittedError struct {
       Err error
   }
+  type ControlMutationPurpose string
   type ControllerBinding struct {
       Kind            ControllerKind `json:"kind,omitempty"`
       ControllerID    string         `json:"controller_id,omitempty"`
@@ -2153,10 +2164,11 @@ package github.com/caelis-labs/caelis/agent-sdk/session
   }
   type MutationAuthority string
   type MutationGuard struct {
-      Authority    MutationAuthority `json:"authority,omitempty"`
-      LeaseID      string            `json:"lease_id,omitempty"`
-      OwnerID      string            `json:"owner_id,omitempty"`
-      FencingToken uint64            `json:"fencing_token,omitempty"`
+      Authority    MutationAuthority      `json:"authority,omitempty"`
+      Purpose      ControlMutationPurpose `json:"purpose,omitempty"`
+      LeaseID      string                 `json:"lease_id,omitempty"`
+      OwnerID      string                 `json:"owner_id,omitempty"`
+      FencingToken uint64                 `json:"fencing_token,omitempty"`
   }
   type ParticipantBinding struct {
       ID             string          `json:"id,omitempty"`

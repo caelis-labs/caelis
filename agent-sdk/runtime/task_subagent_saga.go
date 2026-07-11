@@ -20,6 +20,57 @@ import (
 
 const subagentSagaRecoveryTimeout = 5 * time.Second
 
+// spawnPhase is the durable recovery phase for subagent spawn.
+// Phases are intentionally few:
+//
+//	intent            — durable request recorded; external effect not claimed
+//	external_pending  — claimed for remote spawn; never blind-respawn on restart
+//	post_spawn        — remote spawn recorded; local attach/events still needed
+//	committed         — fully durable
+//	compensating / child_cancelled / compensated / unknown_outcome — failure path
+//
+// Legacy intermediate markers (participant_attached, canonical_committing,
+// canonical_committed) still resume as post_spawn so in-flight entries advance.
+type spawnPhase string
+
+const (
+	spawnPhaseIntent          spawnPhase = "prepared"
+	spawnPhaseExternalPending spawnPhase = "spawning"
+	spawnPhasePostSpawn       spawnPhase = "spawned"
+	spawnPhaseCommitted       spawnPhase = "committed"
+	spawnPhaseCompensating    spawnPhase = "compensating"
+	spawnPhaseChildCancelled  spawnPhase = "child_cancelled"
+	spawnPhaseCompensated     spawnPhase = "compensated"
+	spawnPhaseUnknownOutcome  spawnPhase = "unknown_outcome"
+
+	// Legacy markers accepted only on read for restart compatibility.
+	spawnPhaseLegacyParticipantAttached = "participant_attached"
+	spawnPhaseLegacyCanonicalCommitting = "canonical_committing"
+	spawnPhaseLegacyCanonicalCommitted  = "canonical_committed"
+)
+
+// Compatibility aliases used by tests and older call sites.
+const (
+	spawnStatusPrepared            = string(spawnPhaseIntent)
+	spawnStatusSpawning            = string(spawnPhaseExternalPending)
+	spawnStatusSpawned             = string(spawnPhasePostSpawn)
+	spawnStatusCommitted           = string(spawnPhaseCommitted)
+	spawnStatusCompensating        = string(spawnPhaseCompensating)
+	spawnStatusChildCancelled      = string(spawnPhaseChildCancelled)
+	spawnStatusCompensated         = string(spawnPhaseCompensated)
+	spawnStatusUnknownOutcome      = string(spawnPhaseUnknownOutcome)
+	spawnStatusParticipantAttached = spawnPhaseLegacyParticipantAttached
+	spawnStatusCanonicalCommitting = spawnPhaseLegacyCanonicalCommitting
+	spawnStatusCanonicalCommitted  = spawnPhaseLegacyCanonicalCommitted
+)
+
+type spawnBeginOutcome struct {
+	Entry       *taskapi.Entry
+	Snapshot    taskapi.Snapshot
+	Terminal    bool // already finished or permanently blocked
+	ShouldSpawn bool // caller must perform external Spawn
+}
+
 func (tm *taskRuntime) StartSubagent(
 	ctx context.Context,
 	activeSession session.Session,
@@ -48,12 +99,12 @@ func (tm *taskRuntime) StartSubagent(
 		return taskapi.Snapshot{}, err
 	}
 	handle := tm.reserveSubagentHandle(activeSession, ref, req.Agent)
-	intent, existing, done, shouldSpawn, err := tm.beginSubagentSpawn(ctx, ref, taskID, spawnID, requestDigest, req, mode, role, handle, runner)
-	if done || err != nil {
-		return existing, err
+	outcome, err := tm.beginSubagentSpawn(ctx, ref, taskID, spawnID, requestDigest, req, mode, role, handle, runner)
+	if err != nil || outcome.Terminal {
+		return outcome.Snapshot, err
 	}
 	var task *subagentTask
-	if shouldSpawn {
+	if outcome.ShouldSpawn {
 		childPrompt := subagentPromptWithContext(req.ContextPrelude, req.Prompt)
 		anchor, result, err := runner.Spawn(ctx, subagent.SpawnContext{
 			SessionRef: session.NormalizeSessionRef(ref), Session: session.CloneSession(activeSession), CWD: strings.TrimSpace(activeSession.CWD),
@@ -61,9 +112,9 @@ func (tm *taskRuntime) StartSubagent(
 			ApprovalRequester: req.Approval, Streams: tm,
 		}, delegation.Request{Agent: strings.TrimSpace(req.Agent), Prompt: childPrompt})
 		if err != nil {
-			intent.State = taskapi.StateUnknownOutcome
-			setSpawnEntryStatus(intent, spawnStatusUnknownOutcome, err.Error())
-			_ = tm.persistSpawnEntry(context.WithoutCancel(ctx), intent)
+			outcome.Entry.State = taskapi.StateUnknownOutcome
+			setSpawnEntryPhase(outcome.Entry, spawnPhaseUnknownOutcome, err.Error())
+			_ = tm.persistSpawnEntry(context.WithoutCancel(ctx), outcome.Entry)
 			return taskapi.Snapshot{}, err
 		}
 		anchor = delegation.CloneAnchor(anchor)
@@ -74,13 +125,13 @@ func (tm *taskRuntime) StartSubagent(
 		if result.TaskID == "" {
 			result.TaskID = taskID
 		}
-		// Validate before any durable "spawned" commit so a crash cannot
+		// Validate before any durable post_spawn commit so a crash cannot
 		// roll-forward an invalid anchor (empty AgentID, mismatched agent, etc.).
 		if validationErr := validateSubagentSpawnResult(taskID, strings.TrimSpace(req.Agent), anchor, result); validationErr != nil {
-			task = newSubagentTaskFromSpawn(ref, taskID, spawnID, requestDigest, req, role, handle, runner, anchor, result, intent.Revision, tm.runtime.now(), spawnStatusSpawning)
+			task = newSubagentTaskFromSpawn(ref, taskID, spawnID, requestDigest, req, role, handle, runner, anchor, result, outcome.Entry.Revision, tm.runtime.now(), spawnPhaseExternalPending)
 			return taskapi.Snapshot{}, tm.compensateSubagentSpawn(ctx, task, validationErr)
 		}
-		task = newSubagentTaskFromSpawn(ref, taskID, spawnID, requestDigest, req, role, handle, runner, anchor, result, intent.Revision, tm.runtime.now(), spawnStatusSpawned)
+		task = newSubagentTaskFromSpawn(ref, taskID, spawnID, requestDigest, req, role, handle, runner, anchor, result, outcome.Entry.Revision, tm.runtime.now(), spawnPhasePostSpawn)
 		task.seedStreamFromResult(result)
 		spawnedEntry := task.entrySnapshot(tm.runtime.now())
 		if err := tm.persistSpawnEntry(ctx, spawnedEntry); err != nil {
@@ -88,7 +139,7 @@ func (tm *taskRuntime) StartSubagent(
 		}
 		task.revision = spawnedEntry.Revision
 	} else {
-		task = tm.rehydrateSubagentTask(intent)
+		task = tm.rehydrateSubagentTask(outcome.Entry)
 		task.runner = runner
 	}
 	tm.mu.Lock()
@@ -101,20 +152,6 @@ func (tm *taskRuntime) StartSubagent(
 	return tm.advanceSubagentSpawn(ctx, activeSession, task, strings.TrimSpace(req.ParentCall), strings.TrimSpace(req.Prompt))
 }
 
-const (
-	spawnStatusPrepared            = "prepared"
-	spawnStatusSpawning            = "spawning"
-	spawnStatusSpawned             = "spawned"
-	spawnStatusParticipantAttached = "participant_attached"
-	spawnStatusCanonicalCommitting = "canonical_committing"
-	spawnStatusCanonicalCommitted  = "canonical_committed"
-	spawnStatusCommitted           = "committed"
-	spawnStatusCompensating        = "compensating"
-	spawnStatusChildCancelled      = "child_cancelled"
-	spawnStatusCompensated         = "compensated"
-	spawnStatusUnknownOutcome      = "unknown_outcome"
-)
-
 func (tm *taskRuntime) beginSubagentSpawn(
 	ctx context.Context,
 	ref session.SessionRef,
@@ -126,58 +163,19 @@ func (tm *taskRuntime) beginSubagentSpawn(
 	role session.ParticipantRole,
 	handle string,
 	runner subagent.Runner,
-) (*taskapi.Entry, taskapi.Snapshot, bool, bool, error) {
+) (spawnBeginOutcome, error) {
 	if tm == nil || tm.store == nil {
-		return nil, taskapi.Snapshot{}, false, false, errors.New("agent-sdk/runtime: durable task store is required before subagent spawn")
+		return spawnBeginOutcome{}, errors.New("agent-sdk/runtime: durable task store is required before subagent spawn")
 	}
 	if _, ok := tm.store.(taskapi.CASStore); !ok {
-		return nil, taskapi.Snapshot{}, false, false, errors.New("agent-sdk/runtime: subagent spawn requires task.CASStore")
+		return spawnBeginOutcome{}, errors.New("agent-sdk/runtime: subagent spawn requires task.CASStore")
 	}
 	if existing, err := tm.store.Get(ctx, taskID); err == nil && existing != nil {
 		if taskSpecString(existing.Spec, "spawn_identity") != strings.TrimSpace(spawnID) ||
 			taskSpecString(existing.Spec, "spawn_request_digest") != strings.TrimSpace(requestDigest) {
-			return nil, taskapi.Snapshot{}, false, false, fmt.Errorf("agent-sdk/runtime: spawn identity %q conflicts with durable intent", spawnID)
+			return spawnBeginOutcome{}, fmt.Errorf("agent-sdk/runtime: spawn identity %q conflicts with durable intent", spawnID)
 		}
-		status := taskStringValue(existing.Metadata["spawn_status"])
-		switch status {
-		case spawnStatusCommitted:
-			task := tm.rehydrateSubagentTask(existing)
-			tm.rememberRehydratedSubagent(task)
-			return existing, task.snapshot(), true, false, nil
-		case spawnStatusPrepared:
-			claimed := taskapi.CloneEntry(existing)
-			setSpawnEntryStatus(claimed, spawnStatusSpawning, "")
-			if err := tm.persistSpawnEntry(ctx, claimed); err != nil {
-				var conflict *taskapi.RevisionConflictError
-				if errors.As(err, &conflict) {
-					return existing, snapshotFromTaskEntry(existing), true, false, fmt.Errorf("agent-sdk/runtime: subagent spawn %q was claimed concurrently: %w", spawnID, err)
-				}
-				return nil, taskapi.Snapshot{}, false, false, err
-			}
-			return claimed, taskapi.Snapshot{}, false, true, nil
-		case spawnStatusSpawned, spawnStatusParticipantAttached, spawnStatusCanonicalCommitting, spawnStatusCanonicalCommitted,
-			spawnStatusCompensating, spawnStatusChildCancelled:
-			task := tm.rehydrateSubagentTask(existing)
-			task.runner = runner
-			tm.rememberRehydratedSubagent(task)
-			return existing, task.snapshot(), false, false, nil
-		case spawnStatusSpawning:
-			recovered := taskapi.CloneEntry(existing)
-			recovered.State = taskapi.StateUnknownOutcome
-			recovered.Running = false
-			setSpawnEntryStatus(recovered, spawnStatusUnknownOutcome, "runtime restarted while external spawn outcome was unrecorded")
-			persistErr := tm.persistSpawnEntry(context.WithoutCancel(ctx), recovered)
-			return recovered, snapshotFromTaskEntry(recovered), true, false, errors.Join(
-				fmt.Errorf("agent-sdk/runtime: subagent spawn %q crossed the external effect boundary; refusing blind respawn and recording unknown outcome", spawnID),
-				persistErr,
-			)
-		case spawnStatusUnknownOutcome:
-			return existing, snapshotFromTaskEntry(existing), true, false, fmt.Errorf("agent-sdk/runtime: subagent spawn %q has unknown outcome; refusing blind respawn", spawnID)
-		case spawnStatusCompensated:
-			return existing, snapshotFromTaskEntry(existing), true, false, fmt.Errorf("agent-sdk/runtime: subagent spawn %q was compensated", spawnID)
-		default:
-			return existing, snapshotFromTaskEntry(existing), true, false, fmt.Errorf("agent-sdk/runtime: subagent spawn %q has invalid durable status %q", spawnID, status)
-		}
+		return tm.resumeExistingSpawn(ctx, existing, spawnID, runner)
 	}
 
 	now := tm.runtime.now()
@@ -192,20 +190,69 @@ func (tm *taskRuntime) beginSubagentSpawn(
 			"approval_mode": strings.TrimSpace(req.ApprovalMode), "parent_call": strings.TrimSpace(req.ParentCall),
 			"participant_role": string(role),
 			"handle":           strings.TrimSpace(handle), "terminal_id": subagentTerminalID(taskID), "turn_seq": int64(1),
+			"spawn_phase": string(spawnPhaseIntent),
 		},
 		Metadata: map[string]any{
-			"spawn_status": spawnStatusPrepared, "spawn_identity": strings.TrimSpace(spawnID),
+			"spawn_status": string(spawnPhaseIntent), "spawn_identity": strings.TrimSpace(spawnID),
 			"spawn_request_digest": strings.TrimSpace(requestDigest),
 		},
 	}
 	if err := tm.persistSpawnEntry(ctx, entry); err != nil {
-		return nil, taskapi.Snapshot{}, false, false, err
+		return spawnBeginOutcome{}, err
 	}
-	setSpawnEntryStatus(entry, spawnStatusSpawning, "")
-	if err := tm.persistSpawnEntry(ctx, entry); err != nil {
-		return nil, taskapi.Snapshot{}, false, false, err
+	// Claim the external-effect boundary in one additional CAS write. A crash
+	// between intent and claim leaves prepared, which is safe to re-claim.
+	return tm.claimSpawnExternalEffect(ctx, entry, spawnID)
+}
+
+func (tm *taskRuntime) resumeExistingSpawn(ctx context.Context, existing *taskapi.Entry, spawnID string, runner subagent.Runner) (spawnBeginOutcome, error) {
+	phase := spawnPhaseOf(existing)
+	switch phase {
+	case spawnPhaseCommitted:
+		task := tm.rehydrateSubagentTask(existing)
+		tm.rememberRehydratedSubagent(task)
+		return spawnBeginOutcome{Entry: existing, Snapshot: task.snapshot(), Terminal: true}, nil
+	case spawnPhaseIntent:
+		return tm.claimSpawnExternalEffect(ctx, existing, spawnID)
+	case spawnPhasePostSpawn, spawnPhaseCompensating, spawnPhaseChildCancelled:
+		task := tm.rehydrateSubagentTask(existing)
+		task.runner = runner
+		tm.rememberRehydratedSubagent(task)
+		return spawnBeginOutcome{Entry: existing, Snapshot: task.snapshot()}, nil
+	case spawnPhaseExternalPending:
+		recovered := taskapi.CloneEntry(existing)
+		recovered.State = taskapi.StateUnknownOutcome
+		recovered.Running = false
+		setSpawnEntryPhase(recovered, spawnPhaseUnknownOutcome, "runtime restarted while external spawn outcome was unrecorded")
+		persistErr := tm.persistSpawnEntry(context.WithoutCancel(ctx), recovered)
+		return spawnBeginOutcome{Entry: recovered, Snapshot: snapshotFromTaskEntry(recovered), Terminal: true}, errors.Join(
+			fmt.Errorf("agent-sdk/runtime: subagent spawn %q crossed the external effect boundary; refusing blind respawn and recording unknown outcome", spawnID),
+			persistErr,
+		)
+	case spawnPhaseUnknownOutcome:
+		return spawnBeginOutcome{Entry: existing, Snapshot: snapshotFromTaskEntry(existing), Terminal: true},
+			fmt.Errorf("agent-sdk/runtime: subagent spawn %q has unknown outcome; refusing blind respawn", spawnID)
+	case spawnPhaseCompensated:
+		return spawnBeginOutcome{Entry: existing, Snapshot: snapshotFromTaskEntry(existing), Terminal: true},
+			fmt.Errorf("agent-sdk/runtime: subagent spawn %q was compensated", spawnID)
+	default:
+		return spawnBeginOutcome{Entry: existing, Snapshot: snapshotFromTaskEntry(existing), Terminal: true},
+			fmt.Errorf("agent-sdk/runtime: subagent spawn %q has invalid durable status %q", spawnID, phase)
 	}
-	return entry, taskapi.Snapshot{}, false, true, nil
+}
+
+func (tm *taskRuntime) claimSpawnExternalEffect(ctx context.Context, entry *taskapi.Entry, spawnID string) (spawnBeginOutcome, error) {
+	claimed := taskapi.CloneEntry(entry)
+	setSpawnEntryPhase(claimed, spawnPhaseExternalPending, "")
+	if err := tm.persistSpawnEntry(ctx, claimed); err != nil {
+		var conflict *taskapi.RevisionConflictError
+		if errors.As(err, &conflict) {
+			return spawnBeginOutcome{Entry: entry, Snapshot: snapshotFromTaskEntry(entry), Terminal: true},
+				fmt.Errorf("agent-sdk/runtime: subagent spawn %q was claimed concurrently: %w", spawnID, err)
+		}
+		return spawnBeginOutcome{}, err
+	}
+	return spawnBeginOutcome{Entry: claimed, ShouldSpawn: true}, nil
 }
 
 func subagentSpawnRequestDigest(req taskapi.SubagentStartRequest, mode string, role session.ParticipantRole) (string, error) {
@@ -243,7 +290,7 @@ func newSubagentTaskFromSpawn(
 	result delegation.Result,
 	revision uint64,
 	now time.Time,
-	spawnStatus string,
+	phase spawnPhase,
 ) *subagentTask {
 	agentName := strings.TrimSpace(firstNonEmpty(anchor.Agent, req.Agent))
 	task := &subagentTask{
@@ -254,7 +301,7 @@ func newSubagentTaskFromSpawn(
 		state: taskStateFromDelegation(result.State), running: result.State == delegation.StateRunning, turnSeq: 1,
 		metadata: map[string]any{
 			"source": firstNonEmpty(strings.TrimSpace(req.Source), "agent_spawn"), "participant_role": string(role),
-			"spawn_status": spawnStatus, "spawn_identity": spawnID, "spawn_request_digest": requestDigest,
+			"spawn_status": string(phase), "spawn_identity": spawnID, "spawn_request_digest": requestDigest,
 		},
 	}
 	task.applyResult(result)
@@ -297,17 +344,57 @@ func (tm *taskRuntime) rememberRehydratedSubagent(task *subagentTask) {
 	tm.mu.Unlock()
 }
 
-func setSpawnEntryStatus(entry *taskapi.Entry, status string, reason string) {
+func spawnPhaseOf(entry *taskapi.Entry) spawnPhase {
+	if entry == nil {
+		return ""
+	}
+	raw := taskStringValue(entry.Metadata["spawn_status"])
+	if raw == "" {
+		raw = taskSpecString(entry.Spec, "spawn_phase")
+	}
+	return normalizeSpawnPhase(raw)
+}
+
+func spawnPhaseOfTask(task *subagentTask) spawnPhase {
+	if task == nil {
+		return ""
+	}
+	return normalizeSpawnPhase(taskStringValue(task.metadata["spawn_status"]))
+}
+
+func normalizeSpawnPhase(raw string) spawnPhase {
+	switch phase := spawnPhase(strings.TrimSpace(raw)); phase {
+	case spawnPhaseIntent, spawnPhaseExternalPending, spawnPhasePostSpawn, spawnPhaseCommitted,
+		spawnPhaseCompensating, spawnPhaseChildCancelled, spawnPhaseCompensated, spawnPhaseUnknownOutcome:
+		return phase
+	case spawnPhaseLegacyParticipantAttached, spawnPhaseLegacyCanonicalCommitting, spawnPhaseLegacyCanonicalCommitted:
+		// Legacy pure-marker phases collapse to post_spawn for resume.
+		return spawnPhasePostSpawn
+	default:
+		return phase
+	}
+}
+
+func setSpawnEntryPhase(entry *taskapi.Entry, phase spawnPhase, reason string) {
 	if entry == nil {
 		return
 	}
 	if entry.Metadata == nil {
 		entry.Metadata = map[string]any{}
 	}
-	entry.Metadata["spawn_status"] = strings.TrimSpace(status)
+	if entry.Spec == nil {
+		entry.Spec = map[string]any{}
+	}
+	entry.Metadata["spawn_status"] = string(phase)
+	entry.Spec["spawn_phase"] = string(phase)
 	if strings.TrimSpace(reason) != "" {
 		entry.Metadata["spawn_reason"] = strings.TrimSpace(reason)
 	}
+}
+
+// setSpawnEntryStatus is retained for older call sites/tests.
+func setSpawnEntryStatus(entry *taskapi.Entry, status string, reason string) {
+	setSpawnEntryPhase(entry, normalizeSpawnPhase(status), reason)
 }
 
 func snapshotFromTaskEntry(entry *taskapi.Entry) taskapi.Snapshot {
@@ -322,7 +409,7 @@ func snapshotFromTaskEntry(entry *taskapi.Entry) taskapi.Snapshot {
 	}
 }
 
-func (tm *taskRuntime) markSubagentSpawnStatus(ctx context.Context, task *subagentTask, status string, reason string) error {
+func (tm *taskRuntime) markSubagentSpawnPhase(ctx context.Context, task *subagentTask, phase spawnPhase, reason string) error {
 	if task == nil {
 		return nil
 	}
@@ -330,11 +417,15 @@ func (tm *taskRuntime) markSubagentSpawnStatus(ctx context.Context, task *subage
 	if task.metadata == nil {
 		task.metadata = map[string]any{}
 	}
-	task.metadata["spawn_status"] = status
+	task.metadata["spawn_status"] = string(phase)
 	if reason != "" {
 		task.metadata["spawn_reason"] = strings.TrimSpace(reason)
 	}
 	entry := task.entrySnapshot(tm.runtime.now())
+	if entry.Spec == nil {
+		entry.Spec = map[string]any{}
+	}
+	entry.Spec["spawn_phase"] = string(phase)
 	task.mu.Unlock()
 	err := tm.persistSpawnEntry(ctx, entry)
 	if err == nil {
@@ -343,6 +434,10 @@ func (tm *taskRuntime) markSubagentSpawnStatus(ctx context.Context, task *subage
 		task.mu.Unlock()
 	}
 	return err
+}
+
+func (tm *taskRuntime) markSubagentSpawnStatus(ctx context.Context, task *subagentTask, status string, reason string) error {
+	return tm.markSubagentSpawnPhase(ctx, task, normalizeSpawnPhase(status), reason)
 }
 
 func (tm *taskRuntime) advanceSubagentSpawn(
@@ -355,46 +450,30 @@ func (tm *taskRuntime) advanceSubagentSpawn(
 	if task == nil {
 		return taskapi.Snapshot{}, errors.New("agent-sdk/runtime: subagent spawn task is required")
 	}
-	status := taskStringValue(task.metadata["spawn_status"])
-	if status == spawnStatusCompensating || status == spawnStatusChildCancelled {
+	phase := spawnPhaseOfTask(task)
+	if phase == spawnPhaseCompensating || phase == spawnPhaseChildCancelled {
 		cause := errors.New(firstNonEmpty(taskStringValue(task.metadata["spawn_reason"]), "subagent spawn compensation resumed"))
 		return taskapi.Snapshot{}, tm.resumeSubagentSpawnCompensation(ctx, task, cause)
 	}
-	if status == spawnStatusSpawned {
-		if err := tm.ensureSubagentParticipantAttached(ctx, activeSession, task, parentCall); err != nil {
-			return taskapi.Snapshot{}, tm.compensateSubagentSpawn(ctx, task, err)
-		}
-		if err := tm.markSubagentSpawnStatus(ctx, task, spawnStatusParticipantAttached, ""); err != nil {
-			return taskapi.Snapshot{}, tm.compensateSubagentSpawn(ctx, task, err)
-		}
-		status = spawnStatusParticipantAttached
+	if phase == spawnPhaseCommitted {
+		return task.snapshot(), nil
 	}
-	if status == spawnStatusParticipantAttached {
-		if err := tm.markSubagentSpawnStatus(ctx, task, spawnStatusCanonicalCommitting, ""); err != nil {
-			return taskapi.Snapshot{}, tm.compensateSubagentSpawn(ctx, task, err)
-		}
-		status = spawnStatusCanonicalCommitting
+	if phase != spawnPhasePostSpawn {
+		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: cannot advance subagent spawn from phase %q", phase)
 	}
-	if status == spawnStatusCanonicalCommitting {
-		if err := tm.appendSideSubagentUserEvent(ctx, task, strings.TrimSpace(prompt)); err != nil {
-			return taskapi.Snapshot{}, err
-		}
-		if err := tm.appendSideSubagentFinalEvent(ctx, task); err != nil {
-			return taskapi.Snapshot{}, err
-		}
-		if err := tm.markSubagentSpawnStatus(context.WithoutCancel(ctx), task, spawnStatusCanonicalCommitted, ""); err != nil {
-			return taskapi.Snapshot{}, err
-		}
-		status = spawnStatusCanonicalCommitted
+	// Single post_spawn roll-forward: attach (idempotent) + canonical dialogue
+	// (idempotent keys) + one committed mark. No pure marker phases.
+	if err := tm.ensureSubagentParticipantAttached(ctx, activeSession, task, parentCall); err != nil {
+		return taskapi.Snapshot{}, tm.compensateSubagentSpawn(ctx, task, err)
 	}
-	if status == spawnStatusCanonicalCommitted {
-		if err := tm.markSubagentSpawnStatus(context.WithoutCancel(ctx), task, spawnStatusCommitted, ""); err != nil {
-			return taskapi.Snapshot{}, err
-		}
-		status = spawnStatusCommitted
+	if err := tm.appendSideSubagentUserEvent(ctx, task, strings.TrimSpace(prompt)); err != nil {
+		return taskapi.Snapshot{}, err
 	}
-	if status != spawnStatusCommitted {
-		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: cannot advance subagent spawn from phase %q", status)
+	if err := tm.appendSideSubagentFinalEvent(ctx, task); err != nil {
+		return taskapi.Snapshot{}, err
+	}
+	if err := tm.markSubagentSpawnPhase(context.WithoutCancel(ctx), task, spawnPhaseCommitted, ""); err != nil {
+		return taskapi.Snapshot{}, err
 	}
 	return task.snapshot(), nil
 }
@@ -432,15 +511,15 @@ func (tm *taskRuntime) compensateSubagentSpawn(ctx context.Context, task *subage
 	}
 	task.result["error"] = strings.TrimSpace(cause.Error())
 	task.mu.Unlock()
-	if err := tm.markSubagentSpawnStatus(context.WithoutCancel(ctx), task, spawnStatusCompensating, cause.Error()); err != nil {
+	if err := tm.markSubagentSpawnPhase(context.WithoutCancel(ctx), task, spawnPhaseCompensating, cause.Error()); err != nil {
 		return errors.Join(cause, err)
 	}
 	return tm.resumeSubagentSpawnCompensation(ctx, task, cause)
 }
 
 func (tm *taskRuntime) resumeSubagentSpawnCompensation(ctx context.Context, task *subagentTask, cause error) error {
-	status := taskStringValue(task.metadata["spawn_status"])
-	if status == spawnStatusCompensating {
+	phase := spawnPhaseOfTask(task)
+	if phase == spawnPhaseCompensating {
 		cancelErr := task.runner.Cancel(context.WithoutCancel(ctx), delegation.CloneAnchor(task.anchor))
 		if cancelErr != nil {
 			task.mu.Lock()
@@ -451,7 +530,7 @@ func (tm *taskRuntime) resumeSubagentSpawnCompensation(ctx context.Context, task
 			}
 			task.result["state"] = string(taskapi.StateUnknownOutcome)
 			task.mu.Unlock()
-			persistErr := tm.markSubagentSpawnStatus(context.WithoutCancel(ctx), task, spawnStatusUnknownOutcome, errors.Join(cause, cancelErr).Error())
+			persistErr := tm.markSubagentSpawnPhase(context.WithoutCancel(ctx), task, spawnPhaseUnknownOutcome, errors.Join(cause, cancelErr).Error())
 			return errors.Join(cause, cancelErr, persistErr)
 		}
 		task.mu.Lock()
@@ -462,21 +541,21 @@ func (tm *taskRuntime) resumeSubagentSpawnCompensation(ctx context.Context, task
 		}
 		task.result["state"] = string(taskapi.StateCancelled)
 		task.mu.Unlock()
-		if err := tm.markSubagentSpawnStatus(context.WithoutCancel(ctx), task, spawnStatusChildCancelled, cause.Error()); err != nil {
+		if err := tm.markSubagentSpawnPhase(context.WithoutCancel(ctx), task, spawnPhaseChildCancelled, cause.Error()); err != nil {
 			return errors.Join(cause, err)
 		}
-		status = spawnStatusChildCancelled
+		phase = spawnPhaseChildCancelled
 	}
-	if status == spawnStatusChildCancelled {
+	if phase == spawnPhaseChildCancelled {
 		if err := tm.detachSubagentParticipant(context.WithoutCancel(ctx), task); err != nil {
 			return errors.Join(cause, err)
 		}
-		if err := tm.markSubagentSpawnStatus(context.WithoutCancel(ctx), task, spawnStatusCompensated, cause.Error()); err != nil {
+		if err := tm.markSubagentSpawnPhase(context.WithoutCancel(ctx), task, spawnPhaseCompensated, cause.Error()); err != nil {
 			return errors.Join(cause, err)
 		}
 		return fmt.Errorf("agent-sdk/runtime: subagent spawn %q was compensated: %w", taskStringValue(task.metadata["spawn_identity"]), cause)
 	}
-	return errors.Join(cause, fmt.Errorf("agent-sdk/runtime: cannot resume compensation from phase %q", status))
+	return errors.Join(cause, fmt.Errorf("agent-sdk/runtime: cannot resume compensation from phase %q", phase))
 }
 
 func (tm *taskRuntime) detachSubagentParticipant(ctx context.Context, task *subagentTask) error {

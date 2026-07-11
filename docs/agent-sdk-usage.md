@@ -189,12 +189,22 @@ derives and validates the final assembled model/tool/sandbox requirements.
   journal compound-commit interfaces. An adapter must not expose one of these
   interfaces unless it can prevent readers from observing a split commit.
 - The current subagent spawn path requires `task.CASStore` before invoking the
-  external effect. Its durable phases are `prepared`, `spawning`, `spawned`,
-  `participant_attached`, `canonical_committing`, `canonical_committed`, and
-  `committed`. Restart never respawns across `spawning`; pre-canonical failures
-  compensate by cancellation and durable detach, while canonical-committing
-  and later phases only roll forward through idempotent facts. A cancellation
-  failure remains `unknown_outcome`.
+  external effect. Its durable phases are intentionally few: `prepared`
+  (intent), `spawning` (external-effect claim), `spawned` (post-spawn local
+  roll-forward), and `committed`, plus compensation terminals
+  (`compensating` / `child_cancelled` / `compensated` / `unknown_outcome`).
+  Restart never respawns across `spawning`. Failures before a durable
+  post-spawn record compensate by cancellation and durable detach. From
+  `spawned`, attach and canonical dialogue use idempotent facts and only mark
+  `committed` once; there are no pure intermediate marker phases. A
+  cancellation failure remains `unknown_outcome`.
+- Subagent Continue uses the same effect-boundary style on one task entry:
+  `continue_prepared` → `continue_pending` → `continue_post_effect` → cleared.
+  Parent user intent is durable before the remote claim; after
+  `continue_post_effect` recovery only finishes the parent final dual-write
+  (idempotent assistant key) and never re-issues the remote Continue. A
+  process restart or remote failure after `continue_pending` is
+  `continue_unknown_outcome` and refuses blind re-issue.
 - The bundled file store writes a fsynced transaction marker before applying
   event and state documents and completes recovery before later operations.
   A post-commit reporting failure is a committed/unknown-reporting outcome;

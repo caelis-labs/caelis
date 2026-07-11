@@ -52,14 +52,9 @@ func (v *ExecutionValidator) ExecutionRequirements(req agent.RunRequest) (Execut
 	if err := model.ValidateOutputSpec(output); err != nil {
 		return ExecutionRequirements{}, err
 	}
-	requirements := ExecutionRequirements{Model: req.AgentSpec.RequiredModelCapabilities}
-	if req.Request.WithDefaults(req.AgentSpec.Request).StreamEnabled(false) {
-		requirements.Model.Streaming = true
-	}
-	if output != nil && output.Mode != "" && output.Mode != model.OutputModeText {
-		requirements.Model.StructuredOutput = true
-	}
+	stream := req.Request.WithDefaults(req.AgentSpec.Request).StreamEnabled(false)
 	seen := make(map[string]struct{}, len(req.AgentSpec.Tools))
+	var sandboxReqs sandbox.CapabilitySet
 	for index, configuredTool := range req.AgentSpec.Tools {
 		if configuredTool == nil {
 			return ExecutionRequirements{}, fmt.Errorf("controlplane: configured tool %d is nil", index)
@@ -75,11 +70,14 @@ func (v *ExecutionValidator) ExecutionRequirements(req agent.RunRequest) (Execut
 		}
 		seen[key] = struct{}{}
 		if definition.ExecutionRequirements != nil {
-			requirements.Sandbox = mergeSandboxCapabilities(requirements.Sandbox, definition.ExecutionRequirements.Sandbox)
+			sandboxReqs = mergeSandboxCapabilities(sandboxReqs, definition.ExecutionRequirements.Sandbox)
 		}
 	}
-	if len(req.AgentSpec.Tools) > 0 {
-		requirements.Model.ToolCalls = true
+	// Share model requirement derivation with Runtime so Control preflight and
+	// Runtime capability gates cannot drift.
+	requirements := ExecutionRequirements{
+		Model:   model.DeriveRequiredCapabilities(req.AgentSpec.RequiredModelCapabilities, stream, output, len(req.AgentSpec.Tools)),
+		Sandbox: sandboxReqs,
 	}
 	actualModel, _ := model.CapabilitiesOf(req.AgentSpec.Model)
 	modelName := ""

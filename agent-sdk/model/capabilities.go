@@ -97,6 +97,23 @@ func MergeCapabilities(left, right Capabilities) Capabilities {
 	}
 }
 
+// DeriveRequiredCapabilities expands declared model requirements with the
+// features implied by one assembled invocation (stream, output mode, tools).
+// Control preflight and Runtime gates must share this derivation.
+func DeriveRequiredCapabilities(declared Capabilities, stream bool, output *OutputSpec, toolCount int) Capabilities {
+	required := declared
+	if stream {
+		required.Streaming = true
+	}
+	if output != nil && output.Mode != "" && output.Mode != OutputModeText {
+		required.StructuredOutput = true
+	}
+	if toolCount > 0 {
+		required.ToolCalls = true
+	}
+	return required
+}
+
 // OutputSpecError reports an invalid or unsupported output contract before a
 // provider request is attempted.
 type OutputSpecError struct {
