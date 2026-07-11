@@ -108,10 +108,9 @@ func newParticipantEnvelopeRuntime(t *testing.T, inner agent.Runtime, sessions s
 	}
 	watchdog, err := NewWatchdogRuntime(WatchdogRuntimeConfig{
 		Runtime: leased, Sessions: sessions,
-		Thresholds:   WatchdogThresholds{Elapsed: time.Hour, NoProgress: time.Hour, RepeatedToolCalls: 2},
-		TickInterval: time.Hour, ReviewInterval: time.Nanosecond,
+		Thresholds: WatchdogThresholds{ToolLoopStreak: 2, TextLoopStreak: 50},
 		Reviewer: WatchdogReviewFunc(func(context.Context, WatchdogObservation) (WatchdogDecision, error) {
-			return WatchdogDecision{Action: WatchdogActionCancel, Confirmed: true, Reason: "participant loop confirmed"}, nil
+			return WatchdogDecision{Action: WatchdogActionInterrupt, Reason: "participant loop"}, nil
 		}),
 	})
 	if err != nil {

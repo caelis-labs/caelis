@@ -3,7 +3,6 @@ package controlplane
 import (
 	"context"
 	"iter"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -13,40 +12,33 @@ import (
 	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
 )
 
-func TestWatchdogObservesSignalsCheckpointsAndCancelsOnlyAfterConfirmation(t *testing.T) {
+func TestWatchdogTripsToolLoopAndInterrupts(t *testing.T) {
 	t.Parallel()
 
 	service := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
 	active, err := service.StartSession(context.Background(), session.StartSessionRequest{
-		AppName: "caelis", UserID: "user", PreferredSessionID: "watchdog-signals",
+		AppName: "caelis", UserID: "user", PreferredSessionID: "watchdog-tool-loop",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner := newWatchdogTestRunner("watchdog-run", []*session.Event{
-		watchdogToolCall("call-1", "READ", map[string]any{"path": "same.txt"}),
-		watchdogToolCall("call-2", "READ", map[string]any{"path": "same.txt"}),
-		{
-			Type: session.EventTypeCustom,
-			Meta: map[string]any{"usage": map[string]any{
-				"prompt_tokens": 40, "completion_tokens": 2, "total_tokens": 42,
-			}},
-		},
-		watchdogToolCall("call-3", "READ", map[string]any{"path": "same.txt"}),
-	})
+	events := make([]*session.Event, 0, 6)
+	for i := 0; i < 3; i++ {
+		events = append(events, &session.Event{Type: session.EventTypeAssistant, Text: "retry read"})
+		events = append(events, watchdogToolCall("call", "READ", map[string]any{"path": "same.txt"}))
+	}
+	runner := newWatchdogTestRunner("watchdog-run", events)
 	reviewed := make(chan WatchdogObservation, 1)
-	lifecycle := NewWatchdogLifecycleObserver()
 	watchdog, err := NewWatchdogRuntime(WatchdogRuntimeConfig{
 		Runtime:  watchdogTestRuntime{runner: runner},
 		Sessions: service,
 		Thresholds: WatchdogThresholds{
-			RepeatedToolCalls: 3,
+			ToolLoopStreak: 3,
+			TextLoopStreak: 50,
 		},
-		ReviewInterval: time.Hour,
-		Lifecycle:      lifecycle,
 		Reviewer: WatchdogReviewFunc(func(_ context.Context, observation WatchdogObservation) (WatchdogDecision, error) {
 			reviewed <- observation
-			return WatchdogDecision{Action: WatchdogActionCancel, Confirmed: true, Reason: "user confirmed loop cancellation"}, nil
+			return WatchdogDecision{Action: WatchdogActionInterrupt, Reason: "tool loop"}, nil
 		}),
 	})
 	if err != nil {
@@ -56,10 +48,6 @@ func TestWatchdogObservesSignalsCheckpointsAndCancelsOnlyAfterConfirmation(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	lifecycle.RecordTrace(agent.TraceRecord{
-		Event:  agent.LifecycleEvent{Operation: agent.LifecycleModel, SessionRef: active.SessionRef, RunID: run.Handle.RunID()},
-		Status: agent.TraceStarted,
-	})
 	for _, eventErr := range run.Handle.Events() {
 		if eventErr != nil {
 			t.Fatalf("Events() error = %v", eventErr)
@@ -71,17 +59,11 @@ func TestWatchdogObservesSignalsCheckpointsAndCancelsOnlyAfterConfirmation(t *te
 	case <-time.After(time.Second):
 		t.Fatal("watchdog reviewer was not invoked")
 	}
-	if observation.RepeatedToolCalls != 3 || observation.RepeatedToolSignature == "" {
-		t.Fatalf("repeated tool observation = %+v", observation)
-	}
-	if observation.Usage.TotalTokens != 42 || observation.LifecycleStatus != "model:started" {
-		t.Fatalf("usage/lifecycle observation = %+v", observation)
-	}
-	if !observation.HasReason(WatchdogReasonRepeatedTool) {
-		t.Fatalf("reasons = %v, want repeated tool", observation.Reasons)
+	if !observation.HasReason(WatchdogReasonToolLoop) || observation.LoopStreak != 3 {
+		t.Fatalf("observation = %+v, want tool_loop streak 3", observation)
 	}
 	if got := runner.cancelCalls(); got != 1 {
-		t.Fatalf("cancel calls = %d, want 1 confirmed cancel", got)
+		t.Fatalf("cancel calls = %d, want 1", got)
 	}
 	loaded, err := service.LoadSession(context.Background(), session.LoadSessionRequest{SessionRef: active.SessionRef, IncludeTransient: true})
 	if err != nil {
@@ -89,37 +71,67 @@ func TestWatchdogObservesSignalsCheckpointsAndCancelsOnlyAfterConfirmation(t *te
 	}
 	checkpoint := watchdogCheckpoint(loaded.Events)
 	if checkpoint == nil || checkpoint.Lifecycle == nil || checkpoint.Lifecycle.Status != watchdogCheckpointStatus {
-		t.Fatalf("events = %#v, want durable watchdog checkpoint", loaded.Events)
-	}
-	if !strings.Contains(checkpoint.Lifecycle.Reason, "user confirmed") {
-		t.Fatalf("checkpoint reason = %q", checkpoint.Lifecycle.Reason)
+		t.Fatalf("events = %#v, want durable loop watchdog checkpoint", loaded.Events)
 	}
 }
 
-func TestWatchdogElapsedSoftThresholdRequestsReviewButUnconfirmedCancelContinues(t *testing.T) {
+func TestWatchdogDefaultReviewerInterruptsHighConfidenceLoop(t *testing.T) {
 	t.Parallel()
 
 	service := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
 	active, err := service.StartSession(context.Background(), session.StartSessionRequest{
-		AppName: "caelis", UserID: "user", PreferredSessionID: "watchdog-elapsed",
+		AppName: "caelis", UserID: "user", PreferredSessionID: "watchdog-auto",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner := newWatchdogTestRunner("elapsed-run", nil)
-	reviewed := make(chan WatchdogObservation, 1)
+	events := make([]*session.Event, 0, 3)
+	for i := 0; i < 3; i++ {
+		events = append(events, watchdogToolCall("c", "READ", map[string]any{"path": "x"}))
+	}
+	runner := newWatchdogTestRunner("auto-run", events)
 	watchdog, err := NewWatchdogRuntime(WatchdogRuntimeConfig{
-		Runtime:  watchdogTestRuntime{runner: runner},
-		Sessions: service,
-		Thresholds: WatchdogThresholds{
-			Elapsed:    15 * time.Millisecond,
-			NoProgress: 15 * time.Millisecond,
-		},
-		TickInterval:   2 * time.Millisecond,
-		ReviewInterval: time.Hour,
-		Reviewer: WatchdogReviewFunc(func(_ context.Context, observation WatchdogObservation) (WatchdogDecision, error) {
-			reviewed <- observation
-			return WatchdogDecision{Action: WatchdogActionCancel, Confirmed: false, Reason: "confirmation declined"}, nil
+		Runtime:    watchdogTestRuntime{runner: runner},
+		Sessions:   service,
+		Thresholds: WatchdogThresholds{ToolLoopStreak: 3, TextLoopStreak: 50},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := watchdog.Run(context.Background(), agent.RunRequest{SessionRef: active.SessionRef})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, eventErr := range run.Handle.Events() {
+		if eventErr != nil {
+			t.Fatal(eventErr)
+		}
+	}
+	if got := runner.cancelCalls(); got != 1 {
+		t.Fatalf("cancel calls = %d, want interrupt 1", got)
+	}
+}
+
+func TestWatchdogCancelRequiresConfirmation(t *testing.T) {
+	t.Parallel()
+
+	service := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	active, err := service.StartSession(context.Background(), session.StartSessionRequest{
+		AppName: "caelis", UserID: "user", PreferredSessionID: "watchdog-confirm",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := []*session.Event{
+		watchdogToolCall("c", "READ", map[string]any{"path": "x"}),
+	}
+	runner := newWatchdogTestRunner("confirm-run", events)
+	watchdog, err := NewWatchdogRuntime(WatchdogRuntimeConfig{
+		Runtime:    watchdogTestRuntime{runner: runner},
+		Sessions:   service,
+		Thresholds: WatchdogThresholds{ToolLoopStreak: 1, TextLoopStreak: 50},
+		Reviewer: WatchdogReviewFunc(func(context.Context, WatchdogObservation) (WatchdogDecision, error) {
+			return WatchdogDecision{Action: WatchdogActionCancel, Confirmed: false, Reason: "declined"}, nil
 		}),
 	})
 	if err != nil {
@@ -139,15 +151,8 @@ func TestWatchdogElapsedSoftThresholdRequestsReviewButUnconfirmedCancelContinues
 		}
 		done <- nil
 	}()
-	var observation WatchdogObservation
-	select {
-	case observation = <-reviewed:
-	case <-time.After(time.Second):
-		t.Fatal("elapsed watchdog reviewer was not invoked")
-	}
-	if !observation.HasReason(WatchdogReasonElapsed) || !observation.HasReason(WatchdogReasonNoProgress) {
-		t.Fatalf("reasons = %v, want elapsed and no-progress", observation.Reasons)
-	}
+	// Unconfirmed cancel must not kill the runner; finish the test stream explicitly.
+	time.Sleep(50 * time.Millisecond)
 	if got := runner.cancelCalls(); got != 0 {
 		t.Fatalf("cancel calls = %d, want unconfirmed cancel ignored", got)
 	}
@@ -158,11 +163,11 @@ func TestWatchdogElapsedSoftThresholdRequestsReviewButUnconfirmedCancelContinues
 			t.Fatal(err)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("watchdog runner did not finish")
+		t.Fatal("event stream did not finish")
 	}
 }
 
-func TestWatchdogPreservesSourceEventsAndObservesCanonicalPayload(t *testing.T) {
+func TestWatchdogPreservesSourceEvents(t *testing.T) {
 	t.Parallel()
 
 	service := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
@@ -175,12 +180,11 @@ func TestWatchdogPreservesSourceEventsAndObservesCanonicalPayload(t *testing.T) 
 	inner := newWatchdogTestRunner("source-run", []*session.Event{watchdogToolCall("call-1", "READ", map[string]any{"path": "same.txt"})})
 	source := &watchdogSourceTestRunner{watchdogTestRunner: inner}
 	watchdog, err := NewWatchdogRuntime(WatchdogRuntimeConfig{
-		Runtime:        watchdogSourceTestRuntime{runner: source},
-		Sessions:       service,
-		Thresholds:     WatchdogThresholds{RepeatedToolCalls: 1},
-		ReviewInterval: time.Hour,
+		Runtime:    watchdogSourceTestRuntime{runner: source},
+		Sessions:   service,
+		Thresholds: WatchdogThresholds{ToolLoopStreak: 1, TextLoopStreak: 50},
 		Reviewer: WatchdogReviewFunc(func(context.Context, WatchdogObservation) (WatchdogDecision, error) {
-			return WatchdogDecision{Action: WatchdogActionCancel, Confirmed: true, Reason: "confirmed"}, nil
+			return WatchdogDecision{Action: WatchdogActionInterrupt, Reason: "confirmed"}, nil
 		}),
 	})
 	if err != nil {
@@ -192,7 +196,7 @@ func TestWatchdogPreservesSourceEventsAndObservesCanonicalPayload(t *testing.T) 
 	}
 	handle, ok := run.Handle.(agent.SourceHandle)
 	if !ok {
-		t.Fatalf("handle = %T, want SourceHandle preservation", run.Handle)
+		t.Fatalf("handle = %T, want SourceHandle", run.Handle)
 	}
 	var canonical, native int
 	for event, eventErr := range handle.SourceEvents() {
@@ -208,6 +212,26 @@ func TestWatchdogPreservesSourceEventsAndObservesCanonicalPayload(t *testing.T) 
 	}
 	if canonical != 1 || native != 1 || inner.cancelCalls() != 1 {
 		t.Fatalf("canonical/native/cancel = %d/%d/%d, want 1/1/1", canonical, native, inner.cancelCalls())
+	}
+}
+
+func TestWatchdogProductionDefaults(t *testing.T) {
+	t.Parallel()
+	service := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	if _, err := service.StartSession(context.Background(), session.StartSessionRequest{
+		AppName: "caelis", UserID: "user", PreferredSessionID: "watchdog-defaults",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	watchdog, err := NewWatchdogRuntime(WatchdogRuntimeConfig{
+		Runtime:  watchdogTestRuntime{runner: newWatchdogTestRunner("defaults", nil)},
+		Sessions: service,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if watchdog.thresholds.TextLoopStreak != defaultTextLoopStreak || watchdog.thresholds.ToolLoopStreak != defaultToolLoopStreak {
+		t.Fatalf("defaults = %+v", watchdog.thresholds)
 	}
 }
 
