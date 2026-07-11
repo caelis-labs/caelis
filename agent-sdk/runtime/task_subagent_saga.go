@@ -68,35 +68,25 @@ func (tm *taskRuntime) StartSubagent(
 		}
 		anchor = delegation.CloneAnchor(anchor)
 		result = delegation.CloneResult(result)
-		validationErr := validateSubagentSpawnResult(taskID, strings.TrimSpace(req.Agent), anchor, result)
 		if anchor.TaskID == "" {
 			anchor.TaskID = taskID
 		}
 		if result.TaskID == "" {
 			result.TaskID = taskID
 		}
-		now := tm.runtime.now()
-		task = &subagentTask{
-			ref:        taskapi.Ref{TaskID: taskID, SessionID: strings.TrimSpace(anchor.SessionID), TerminalID: subagentTerminalID(taskID)},
-			sessionRef: session.NormalizeSessionRef(ref), anchor: delegation.CloneAnchor(anchor), runner: runner,
-			agent: strings.TrimSpace(anchor.Agent), handle: handle, title: spawn.ToolName + " " + strings.TrimSpace(anchor.Agent),
-			prompt: strings.TrimSpace(req.Prompt), createdAt: now, revision: intent.Revision,
-			state: taskStateFromDelegation(result.State), running: result.State == delegation.StateRunning, turnSeq: 1,
-			metadata: map[string]any{
-				"source": firstNonEmpty(strings.TrimSpace(req.Source), "agent_spawn"), "participant_role": string(role),
-				"spawn_status": spawnStatusSpawned, "spawn_identity": spawnID, "spawn_request_digest": requestDigest,
-			},
+		// Validate before any durable "spawned" commit so a crash cannot
+		// roll-forward an invalid anchor (empty AgentID, mismatched agent, etc.).
+		if validationErr := validateSubagentSpawnResult(taskID, strings.TrimSpace(req.Agent), anchor, result); validationErr != nil {
+			task = newSubagentTaskFromSpawn(ref, taskID, spawnID, requestDigest, req, role, handle, runner, anchor, result, intent.Revision, tm.runtime.now(), spawnStatusSpawning)
+			return taskapi.Snapshot{}, tm.compensateSubagentSpawn(ctx, task, validationErr)
 		}
-		task.applyResult(result)
+		task = newSubagentTaskFromSpawn(ref, taskID, spawnID, requestDigest, req, role, handle, runner, anchor, result, intent.Revision, tm.runtime.now(), spawnStatusSpawned)
 		task.seedStreamFromResult(result)
 		spawnedEntry := task.entrySnapshot(tm.runtime.now())
 		if err := tm.persistSpawnEntry(ctx, spawnedEntry); err != nil {
 			return taskapi.Snapshot{}, tm.compensateSubagentSpawn(ctx, task, err)
 		}
 		task.revision = spawnedEntry.Revision
-		if validationErr != nil {
-			return taskapi.Snapshot{}, tm.compensateSubagentSpawn(ctx, task, validationErr)
-		}
 	} else {
 		task = tm.rehydrateSubagentTask(intent)
 		task.runner = runner
@@ -238,6 +228,37 @@ func subagentSpawnRequestDigest(req taskapi.SubagentStartRequest, mode string, r
 	}
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:]), nil
+}
+
+func newSubagentTaskFromSpawn(
+	ref session.SessionRef,
+	taskID string,
+	spawnID string,
+	requestDigest string,
+	req taskapi.SubagentStartRequest,
+	role session.ParticipantRole,
+	handle string,
+	runner subagent.Runner,
+	anchor delegation.Anchor,
+	result delegation.Result,
+	revision uint64,
+	now time.Time,
+	spawnStatus string,
+) *subagentTask {
+	agentName := strings.TrimSpace(firstNonEmpty(anchor.Agent, req.Agent))
+	task := &subagentTask{
+		ref:        taskapi.Ref{TaskID: taskID, SessionID: strings.TrimSpace(anchor.SessionID), TerminalID: subagentTerminalID(taskID)},
+		sessionRef: session.NormalizeSessionRef(ref), anchor: delegation.CloneAnchor(anchor), runner: runner,
+		agent: agentName, handle: handle, title: spawn.ToolName + " " + agentName,
+		prompt: strings.TrimSpace(req.Prompt), createdAt: now, revision: revision,
+		state: taskStateFromDelegation(result.State), running: result.State == delegation.StateRunning, turnSeq: 1,
+		metadata: map[string]any{
+			"source": firstNonEmpty(strings.TrimSpace(req.Source), "agent_spawn"), "participant_role": string(role),
+			"spawn_status": spawnStatus, "spawn_identity": spawnID, "spawn_request_digest": requestDigest,
+		},
+	}
+	task.applyResult(result)
+	return task
 }
 
 func validateSubagentSpawnResult(taskID, requestedAgent string, anchor delegation.Anchor, result delegation.Result) error {

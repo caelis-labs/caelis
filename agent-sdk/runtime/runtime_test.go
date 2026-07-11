@@ -2858,6 +2858,13 @@ func TestControllerApprovalRequesterPreservesToolRawInput(t *testing.T) {
 				"command": "pwd",
 				"workdir": "/tmp/project",
 			},
+			RawOutput: map[string]any{
+				"preview": "would run pwd",
+			},
+			Content: []session.ProtocolToolCallContent{{
+				Type:    "content",
+				Content: session.ProtocolTextContent("permission detail"),
+			}},
 		},
 	})
 	if err != nil {
@@ -2871,6 +2878,12 @@ func TestControllerApprovalRequesterPreservesToolRawInput(t *testing.T) {
 	}
 	if captured.Approval.ToolCall.RawInput["workdir"] != "/tmp/project" {
 		t.Fatalf("Approval.ToolCall.RawInput[workdir] = %#v", captured.Approval.ToolCall.RawInput["workdir"])
+	}
+	if captured.Approval.ToolCall.RawOutput["preview"] != "would run pwd" {
+		t.Fatalf("Approval.ToolCall.RawOutput[preview] = %#v", captured.Approval.ToolCall.RawOutput["preview"])
+	}
+	if len(captured.Approval.ToolCall.Content) != 1 {
+		t.Fatalf("Approval.ToolCall.Content = %#v, want one content part", captured.Approval.ToolCall.Content)
 	}
 	if captured.Call.Input == nil || !strings.Contains(string(captured.Call.Input), `"command":"pwd"`) {
 		t.Fatalf("Call.Input = %s, want command JSON", string(captured.Call.Input))

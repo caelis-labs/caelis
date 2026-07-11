@@ -1,7 +1,8 @@
 # Agent SDK Boundary
 
-Status: accepted normative architecture; locally implemented and verified at
-candidate `9acbf75d`, pending tagged/published operational evidence.
+Status: accepted normative architecture; locally implemented and repaired after
+independent rejection of `30ee5f02`, pending tagged/published operational
+evidence.
 
 This document is the normative ownership and dependency contract for
 `agent-sdk`. It deliberately does not track implementation tasks or claim
@@ -281,9 +282,11 @@ The SDK may be described as a stable dependency layer only when:
   store, lease, sandbox, transport, and executor adapters;
 - no deterministic workflow engine or autonomous handoff path has entered Core.
 
-The local `9acbf75d` candidate satisfies this implementation gate. It is not a
-published-release claim: candidate-tag proxy resolution and same-SHA release
-workflow evidence remain post-tag operational checks.
+The local worktree after the `30ee5f02` rejection repairs satisfies this
+implementation gate when the final gate index in the candidate acceptance note
+is green on a clean HEAD. It is not a published-release claim: candidate-tag
+proxy resolution and same-SHA release workflow evidence remain post-tag
+operational checks.
 
 ## Comparative Inputs
 

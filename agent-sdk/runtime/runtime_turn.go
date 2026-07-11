@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync/atomic"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -33,6 +34,7 @@ func (r *Runtime) resolveAgent(
 	runID string,
 	turnID string,
 	req agent.RunRequest,
+	toolStepSequence *atomic.Uint64,
 ) (agent.Agent, error) {
 	if req.Agent != nil {
 		return req.Agent, nil
@@ -58,7 +60,7 @@ func (r *Runtime) resolveAgent(
 		runID:             strings.TrimSpace(runID),
 		turnID:            strings.TrimSpace(turnID),
 	})
-	spec.Tools = r.wrapToolsForExecutionJournal(ref, runID, turnID, spec.Tools)
+	spec.Tools = r.wrapToolsForExecutionJournal(ref, runID, turnID, toolStepSequence, spec.Tools)
 	spec.Tools = r.wrapToolsForPolicy(activeSession, ref, state, spec, approvalContext{
 		ctx:        ctx,
 		requester:  req.ApprovalRequester,
@@ -97,8 +99,11 @@ func (r *Runtime) runWithOverflowRecovery(
 	sink *runner,
 ) error {
 	var toolFactOrdinal uint64
+	// Share the durable tool-step counter across overflow retries so a reused
+	// provider-local call ID cannot collide with a prior successful execution.
+	toolStepSequence := &atomic.Uint64{}
 	for {
-		attemptBatch, _, inputPersisted, err := r.runAttempt(ctx, activeSession, ref, runID, turnID, req, pendingInput, sink, &toolFactOrdinal)
+		attemptBatch, _, inputPersisted, err := r.runAttempt(ctx, activeSession, ref, runID, turnID, req, pendingInput, sink, &toolFactOrdinal, toolStepSequence)
 		if inputPersisted {
 			pendingInput = nil
 		}
@@ -135,6 +140,7 @@ func (r *Runtime) runAttempt(
 	pendingInput *session.Event,
 	sink *runner,
 	toolFactOrdinal *uint64,
+	toolStepSequence *atomic.Uint64,
 ) ([]*session.Event, bool, bool, error) {
 	invocation, err := r.prepareInvocationContext(ctx, activeSession, ref, req, pendingInput)
 	if err != nil {
@@ -167,7 +173,7 @@ func (r *Runtime) runAttempt(
 		}
 	}
 
-	activeAgent, err := r.resolveAgent(ctx, activeSession, ref, invocation.State, runID, turnID, req)
+	activeAgent, err := r.resolveAgent(ctx, activeSession, ref, invocation.State, runID, turnID, req, toolStepSequence)
 	if err != nil {
 		return batch, false, inputPersisted, err
 	}

@@ -56,21 +56,8 @@ func (s *Stack) StartSubagentWithOptions(
 	source string,
 	opts StartSubagentOptions,
 ) (task.Snapshot, error) {
-	if s == nil {
-		return task.Snapshot{}, fmt.Errorf("gatewayapp: stack is unavailable")
-	}
-	s.mu.RLock()
-	engine := s.engine
-	placement := s.placement
-	s.mu.RUnlock()
-	if engine == nil {
-		return task.Snapshot{}, fmt.Errorf("gatewayapp: runtime is unavailable")
-	}
-	if placement == nil {
-		return task.Snapshot{}, fmt.Errorf("gatewayapp: placement runtime is unavailable")
-	}
 	var snapshot task.Snapshot
-	err := placement.ExecutePlaced(ctx, ref, func(runCtx context.Context) error {
+	err := s.withPlaced(ctx, ref, func(runCtx context.Context, engine *sdkruntime.Runtime) error {
 		var err error
 		snapshot, err = engine.StartSubagentWithOptions(runCtx, ref, agent, prompt, source, sdkruntime.StartSubagentOptions{
 			ApprovalRequester: opts.ApprovalRequester,
@@ -88,16 +75,13 @@ func (s *Stack) ContinueSubagentByHandle(
 	prompt string,
 	yield time.Duration,
 ) (task.Snapshot, error) {
-	if s == nil {
-		return task.Snapshot{}, fmt.Errorf("gatewayapp: stack is unavailable")
-	}
-	s.mu.RLock()
-	engine := s.engine
-	s.mu.RUnlock()
-	if engine == nil {
-		return task.Snapshot{}, fmt.Errorf("gatewayapp: runtime is unavailable")
-	}
-	return engine.ContinueSubagentByHandle(ctx, ref, handle, prompt, yield)
+	var snapshot task.Snapshot
+	err := s.withPlaced(ctx, ref, func(runCtx context.Context, engine *sdkruntime.Runtime) error {
+		var err error
+		snapshot, err = engine.ContinueSubagentByHandle(runCtx, ref, handle, prompt, yield)
+		return err
+	})
+	return snapshot, err
 }
 
 func (s *Stack) WaitSubagentTask(
@@ -106,16 +90,13 @@ func (s *Stack) WaitSubagentTask(
 	taskID string,
 	yield time.Duration,
 ) (task.Snapshot, error) {
-	if s == nil {
-		return task.Snapshot{}, fmt.Errorf("gatewayapp: stack is unavailable")
-	}
-	s.mu.RLock()
-	engine := s.engine
-	s.mu.RUnlock()
-	if engine == nil {
-		return task.Snapshot{}, fmt.Errorf("gatewayapp: runtime is unavailable")
-	}
-	return engine.WaitSubagentTask(ctx, ref, taskID, yield)
+	var snapshot task.Snapshot
+	err := s.withPlaced(ctx, ref, func(runCtx context.Context, engine *sdkruntime.Runtime) error {
+		var err error
+		snapshot, err = engine.WaitSubagentTask(runCtx, ref, taskID, yield)
+		return err
+	})
+	return snapshot, err
 }
 
 // CompactSession forces a model-backed checkpoint compaction for the given
@@ -125,16 +106,8 @@ func (s *Stack) CompactSession(ctx context.Context, ref session.SessionRef) erro
 		return fmt.Errorf("gatewayapp: stack is unavailable")
 	}
 	s.mu.RLock()
-	engine := s.engine
-	placement := s.placement
 	gw := s.gateway
 	s.mu.RUnlock()
-	if engine == nil {
-		return fmt.Errorf("gatewayapp: runtime is unavailable")
-	}
-	if placement == nil {
-		return fmt.Errorf("gatewayapp: placement runtime is unavailable")
-	}
 	if gw == nil || gw.Resolver() == nil {
 		return fmt.Errorf("gatewayapp: resolver is unavailable")
 	}
@@ -142,13 +115,37 @@ func (s *Stack) CompactSession(ctx context.Context, ref session.SessionRef) erro
 	if err != nil {
 		return err
 	}
-	return placement.ExecutePlaced(ctx, ref, func(runCtx context.Context) error {
+	return s.withPlaced(ctx, ref, func(runCtx context.Context, engine *sdkruntime.Runtime) error {
 		_, compactErr := engine.Compact(runCtx, sdkruntime.CompactRequest{
 			SessionRef: ref,
 			Model:      resolved.RunRequest.AgentSpec.Model,
 			Trigger:    "manual",
 		})
 		return compactErr
+	})
+}
+
+// withPlaced runs a synchronous Control operation inside the production
+// placement envelope (leased heartbeat, cancel-on-loss).
+func (s *Stack) withPlaced(ctx context.Context, ref session.SessionRef, fn func(context.Context, *sdkruntime.Runtime) error) error {
+	if s == nil {
+		return fmt.Errorf("gatewayapp: stack is unavailable")
+	}
+	if fn == nil {
+		return fmt.Errorf("gatewayapp: placed operation is required")
+	}
+	s.mu.RLock()
+	engine := s.engine
+	placement := s.placement
+	s.mu.RUnlock()
+	if engine == nil {
+		return fmt.Errorf("gatewayapp: runtime is unavailable")
+	}
+	if placement == nil {
+		return fmt.Errorf("gatewayapp: placement runtime is unavailable")
+	}
+	return placement.ExecutePlaced(ctx, ref, func(runCtx context.Context) error {
+		return fn(runCtx, engine)
 	})
 }
 

@@ -219,9 +219,11 @@ func (t journaledTool) appendEntry(
 	return err
 }
 
-func (r *Runtime) wrapToolsForExecutionJournal(ref session.SessionRef, runID string, turnID string, tools []tool.Tool) []tool.Tool {
+func (r *Runtime) wrapToolsForExecutionJournal(ref session.SessionRef, runID string, turnID string, sequence *atomic.Uint64, tools []tool.Tool) []tool.Tool {
 	out := make([]tool.Tool, 0, len(tools))
-	sequence := &atomic.Uint64{}
+	if sequence == nil {
+		sequence = &atomic.Uint64{}
+	}
 	for _, item := range tools {
 		if item == nil {
 			continue

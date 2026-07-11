@@ -94,6 +94,57 @@ type subagentTask struct {
 	streamFrames []stream.Frame
 }
 
+type subagentContinuationCheckpoint struct {
+	stdout       string
+	stderr       string
+	stdoutCursor int64
+	stderrCursor int64
+	streamFrames []stream.Frame
+	turnSeq      int64
+}
+
+// beginContinuationTurn snapshots local stream state, advances turnSeq, and
+// clears in-memory stream buffers for the next child turn.
+func (task *subagentTask) beginContinuationTurn() subagentContinuationCheckpoint {
+	task.mu.Lock()
+	defer task.mu.Unlock()
+	checkpoint := subagentContinuationCheckpoint{
+		stdout: task.stdout, stderr: task.stderr,
+		stdoutCursor: task.stdoutCursor, stderrCursor: task.stderrCursor,
+		streamFrames: append([]stream.Frame(nil), task.streamFrames...),
+		turnSeq:      task.turnSeq,
+	}
+	task.turnSeq++
+	if task.turnSeq <= 0 {
+		task.turnSeq = 1
+	}
+	task.stdout = ""
+	task.stderr = ""
+	task.stdoutCursor = 0
+	task.stderrCursor = 0
+	task.streamFrames = nil
+	if task.metadata != nil {
+		delete(task.metadata, "final_event_persisted")
+	}
+	return checkpoint
+}
+
+// restoreContinuationTurn reverts beginContinuationTurn when parent intent or
+// remote continue fails. force restores even if stream output already arrived.
+func (task *subagentTask) restoreContinuationTurn(checkpoint subagentContinuationCheckpoint, force bool) {
+	task.mu.Lock()
+	defer task.mu.Unlock()
+	if !force && (task.stdout != "" || task.stderr != "") {
+		return
+	}
+	task.stdout = checkpoint.stdout
+	task.stderr = checkpoint.stderr
+	task.stdoutCursor = checkpoint.stdoutCursor
+	task.stderrCursor = checkpoint.stderrCursor
+	task.streamFrames = checkpoint.streamFrames
+	task.turnSeq = checkpoint.turnSeq
+}
+
 func newTaskRuntime(runtime *Runtime, store taskapi.Store) *taskRuntime {
 	return &taskRuntime{
 		runtime:   runtime,

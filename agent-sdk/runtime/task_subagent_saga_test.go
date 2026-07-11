@@ -530,6 +530,15 @@ func TestSubagentSpawnRejectsEmptyParticipantAnchorAndCompensates(t *testing.T) 
 	if len(loaded.Participants) != 0 || runner.cancelCalls != 1 {
 		t.Fatalf("participants=%#v cancel calls=%d, want compensated invalid child", loaded.Participants, runner.cancelCalls)
 	}
+	taskID, _ := subagentSpawnTaskID(active.SessionRef, "invalid-anchor")
+	entry, err := store.Get(context.Background(), taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	status := taskStringValue(entry.Metadata["spawn_status"])
+	if status == spawnStatusSpawned || status == spawnStatusParticipantAttached || status == spawnStatusCommitted {
+		t.Fatalf("durable spawn_status = %q after invalid anchor, want compensated path without roll-forward-ready spawned", status)
+	}
 }
 
 type invalidAnchorSagaRunner struct {

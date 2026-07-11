@@ -50,7 +50,7 @@ Document responsibilities are intentionally separate:
 - [Agent SDK v0.25.0 Acceptance Review](agent-sdk-v0.25.0-acceptance.md) is the
   frozen release verdict;
 - [Agent SDK 9acbf75d Acceptance](agent-sdk-9acbf75d-acceptance.md) is the
-  current local-candidate verdict;
+  current local-candidate evidence index (post-`30ee5f02` repair);
 - [Agent SDK Stabilization Checklist](agent-sdk-stabilization-checklist.md) is
   the live follow-up board;
 - [Agent SDK Usage and Compatibility](agent-sdk-usage.md) owns consumer-facing
@@ -154,8 +154,9 @@ uses lifecycle, usage, progress, elapsed-time, and repeated-action signals; it
 does not restore a fixed SDK step budget. Product source policy no longer lives
 in SDK task code. Module or repository extraction is not on the roadmap.
 Current status is recorded in
-[the 9acbf75d candidate acceptance](agent-sdk-9acbf75d-acceptance.md); a new
-candidate tag has not been created or published.
+[the candidate acceptance](agent-sdk-9acbf75d-acceptance.md) after the
+`30ee5f02` independent rejection repairs; a new candidate tag has not been
+created or published.
 
 ## Durable State
 

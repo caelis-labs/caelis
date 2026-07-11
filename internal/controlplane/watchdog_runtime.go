@@ -35,6 +35,10 @@ var (
 	_ PlacementExecutor             = (*WatchdogRuntime)(nil)
 )
 
+// ExecutePlaced delegates to the inner PlacementExecutor (typically
+// LeasedRuntime). Soft watchdog review requires a live Runner event stream and
+// is intentionally not reimplemented here for synchronous Control ops; lease
+// fencing/heartbeat/cancel-on-loss is the placement safety envelope.
 func (r *WatchdogRuntime) ExecutePlaced(ctx context.Context, ref session.SessionRef, execute func(context.Context) error) error {
 	placement, ok := r.runtime.(PlacementExecutor)
 	if !ok {

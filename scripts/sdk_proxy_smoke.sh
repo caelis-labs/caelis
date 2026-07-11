@@ -11,8 +11,8 @@ if [[ -z "${VERSION}" || "${VERSION}" != v* ]]; then
   echo "sdk-proxy-smoke: SDK_PROXY_VERSION must be a semantic release tag" >&2
   exit 1
 fi
-if [[ -z "${PROXY}" || "${PROXY}" == "off" || "${PROXY}" == "direct" || "${PROXY}" == *","* ]]; then
-  echo "sdk-proxy-smoke: SDK_PROXY_URL must name exactly one module proxy with no direct/off fallback" >&2
+if [[ -z "${PROXY}" || "${PROXY}" == "off" || "${PROXY}" == "direct" || "${PROXY}" == *","* || "${PROXY}" == *"|"* ]]; then
+  echo "sdk-proxy-smoke: SDK_PROXY_URL must name exactly one module proxy with no direct/off/pipe fallback" >&2
   exit 1
 fi
 

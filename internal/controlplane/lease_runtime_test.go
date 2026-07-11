@@ -107,6 +107,90 @@ func TestExecutePlacedCarriesFenceAndReleasesLease(t *testing.T) {
 	}
 }
 
+func TestExecutePlacedHeartbeatsDuringLongCallback(t *testing.T) {
+	t.Parallel()
+
+	service := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	active, err := service.StartSession(context.Background(), session.StartSessionRequest{
+		AppName: "caelis", UserID: "user-1", PreferredSessionID: "placed-heartbeat",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrapped, err := NewLeasedRuntime(LeasedRuntimeConfig{
+		Runtime: leaseTestRuntime{}, Leases: service,
+		OwnerID: "host-a", TTL: 300 * time.Millisecond, HeartbeatInterval: 20 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := wrapped.ExecutePlaced(context.Background(), active.SessionRef, func(ctx context.Context) error {
+		deadline := time.Now().Add(time.Second)
+		for time.Now().Before(deadline) {
+			lease, leaseErr := service.SessionLease(context.Background(), active.SessionRef)
+			if leaseErr == nil && lease.Revision > 1 {
+				// Survive longer than the original TTL only because heartbeats run.
+				time.Sleep(350 * time.Millisecond)
+				if _, acquireErr := service.AcquireSessionLease(context.Background(), session.AcquireSessionLeaseRequest{
+					SessionRef: active.SessionRef, OwnerID: "host-b", TTL: time.Second,
+				}); !errors.Is(acquireErr, session.ErrLeaseConflict) {
+					t.Fatalf("competing acquire during placed op = %v, want conflict while heartbeating", acquireErr)
+				}
+				return nil
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Fatal("placed lease never heartbeated above revision 1")
+		return nil
+	}); err != nil {
+		t.Fatalf("ExecutePlaced() error = %v", err)
+	}
+	if _, err := service.AcquireSessionLease(context.Background(), session.AcquireSessionLeaseRequest{
+		SessionRef: active.SessionRef, OwnerID: "host-b", TTL: time.Second,
+	}); err != nil {
+		t.Fatalf("acquire after heartbeating placed op = %v, want released", err)
+	}
+}
+
+func TestExecutePlacedCancelsCallbackWhenHeartbeatFails(t *testing.T) {
+	t.Parallel()
+
+	service := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	active, err := service.StartSession(context.Background(), session.StartSessionRequest{
+		AppName: "caelis", UserID: "user-1", PreferredSessionID: "placed-heartbeat-cancel",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	leasing := &heartbeatFailLeaseService{SessionLeaseService: service, err: errors.New("heartbeat unavailable")}
+	wrapped, err := NewLeasedRuntime(LeasedRuntimeConfig{
+		Runtime: leaseTestRuntime{}, Leases: leasing,
+		OwnerID: "host-a", TTL: 100 * time.Millisecond, HeartbeatInterval: 10 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sawCancel := false
+	err = wrapped.ExecutePlaced(context.Background(), active.SessionRef, func(ctx context.Context) error {
+		select {
+		case <-ctx.Done():
+			sawCancel = true
+			return ctx.Err()
+		case <-time.After(2 * time.Second):
+			return errors.New("placed callback was not cancelled after heartbeat failure")
+		}
+	})
+	if err == nil {
+		t.Fatal("ExecutePlaced() error = nil, want heartbeat failure")
+	}
+	if !sawCancel {
+		t.Fatal("placed callback context was not cancelled on lease loss")
+	}
+	if !strings.Contains(err.Error(), "heartbeat unavailable") && !errors.Is(err, context.Canceled) {
+		t.Fatalf("ExecutePlaced() error = %v, want heartbeat or cancel signal", err)
+	}
+}
+
 func TestLeasedRuntimeCancelsRunWhenHeartbeatFails(t *testing.T) {
 	t.Parallel()
 

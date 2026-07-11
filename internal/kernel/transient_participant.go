@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -129,7 +130,16 @@ func (g *Gateway) attachTransientDetach(
 		return BeginTurnResult{}, err
 	}
 	handle.onFinish(func() {
-		if err := detach(handle.didFail()); err != nil {
+		// Detach must not block finish forever: a stuck backend would otherwise
+		// keep the event stream open indefinitely (P1-5 liveness residual).
+		detachCtx, cancel := context.WithTimeout(context.Background(), transientParticipantDetachTimeout)
+		defer cancel()
+		if err := g.detachTransientParticipant(detachCtx, attached.SessionRef, req.BindingKey, participantID, func() string {
+			if handle.didFail() {
+				return "side_agent_prompt_failed"
+			}
+			return detachSource
+		}()); err != nil {
 			handle.publishError(fmt.Errorf("gateway: transient participant detach failed: %w", err))
 		}
 	})
@@ -154,12 +164,24 @@ func defaultParticipantRole(role session.ParticipantRole) session.ParticipantRol
 	return role
 }
 
+const transientParticipantDetachTimeout = 5 * time.Second
+
 func (g *Gateway) detachTransientParticipant(ctx context.Context, ref session.SessionRef, bindingKey string, participantID string, source string) error {
 	participantID = strings.TrimSpace(participantID)
 	if participantID == "" {
 		return nil
 	}
-	detachCtx := context.WithoutCancel(ctx)
+	// Honor caller deadlines (finish-hook timeout). Only synthesize a bound when
+	// the caller did not provide one; never strip an existing deadline via
+	// context.WithoutCancel, which would allow unbounded detach blocking.
+	detachCtx := ctx
+	cancel := func() {}
+	if ctx == nil {
+		detachCtx, cancel = context.WithTimeout(context.Background(), transientParticipantDetachTimeout)
+	} else if _, ok := ctx.Deadline(); !ok {
+		detachCtx, cancel = context.WithTimeout(context.WithoutCancel(ctx), transientParticipantDetachTimeout)
+	}
+	defer cancel()
 	_, err := g.DetachParticipant(detachCtx, DetachParticipantRequest{
 		SessionRef:    ref,
 		BindingKey:    bindingKey,

@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"iter"
+	"sync/atomic"
 	"testing"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
@@ -201,6 +202,56 @@ func (m *repeatedProviderToolIDModel) Generate(context.Context, *model.Request) 
 			response.FinishReason = model.FinishReasonStop
 		}
 		yield(&model.StreamEvent{Type: model.StreamEventTurnDone, Response: response}, nil)
+	}
+}
+
+func TestSharedToolStepSequenceSurvivesOverflowStyleRebind(t *testing.T) {
+	t.Parallel()
+
+	// Overflow recovery re-resolves the Agent (and rewraps tools) while the same
+	// run/turn continues. A fresh journal counter would reissue tool-step-1 for
+	// a reused provider-local call ID; the shared sequence must keep advancing.
+	service, active := newTestSessionService(t, "shared-tool-step-sequence")
+	core, err := New(Config{Sessions: service, AgentFactory: chat.Factory{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sequence := &atomic.Uint64{}
+	base := tool.NamedTool{
+		Def: tool.Definition{Name: "ECHO", InputSchema: map[string]any{"type": "object"}},
+		Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
+			return tool.Result{ID: call.ID, Name: call.Name, Content: []model.Part{model.NewJSONPart([]byte(`{"value":"ok"}`))}}, nil
+		},
+	}
+	firstWrap := core.wrapToolsForExecutionJournal(active.SessionRef, "run-1", "turn-1", sequence, []tool.Tool{base})
+	secondWrap := core.wrapToolsForExecutionJournal(active.SessionRef, "run-1", "turn-1", sequence, []tool.Tool{base})
+	if len(firstWrap) != 1 || len(secondWrap) != 1 {
+		t.Fatalf("wrapped tools = %d/%d, want 1 each", len(firstWrap), len(secondWrap))
+	}
+	if _, err := firstWrap[0].Call(context.Background(), tool.Call{ID: "ollama-call-0", Name: "ECHO", Input: []byte(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := secondWrap[0].Call(context.Background(), tool.Call{ID: "ollama-call-0", Name: "ECHO", Input: []byte(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	events, err := service.Events(context.Background(), session.EventsRequest{
+		SessionRef: active.SessionRef, IncludeTransient: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stepIDs := map[string]bool{}
+	for _, event := range events {
+		if event == nil || event.Journal == nil || event.Journal.ToolExecution == nil {
+			continue
+		}
+		if event.Journal.ToolExecution.Key.ToolCallID != "ollama-call-0" {
+			continue
+		}
+		stepIDs[event.Journal.ToolExecution.Key.StepID] = true
+	}
+	if !stepIDs["tool-step-1:ollama-call-0"] || !stepIDs["tool-step-2:ollama-call-0"] {
+		t.Fatalf("tool execution step identities = %v, want tool-step-1 and tool-step-2 for ollama-call-0", stepIDs)
 	}
 }
 

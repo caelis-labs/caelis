@@ -7,8 +7,9 @@ consumers may rely on.
 
 `v0.25.0` established the package boundary but did not itself pass the later
 stable-dependency acceptance. The live status and exact closing evidence are in
-the [9acbf75d candidate acceptance](agent-sdk-9acbf75d-acceptance.md) and
-[stabilization checklist](agent-sdk-stabilization-checklist.md); the frozen
+the [candidate acceptance](agent-sdk-9acbf75d-acceptance.md) and
+[stabilization checklist](agent-sdk-stabilization-checklist.md) after the
+`30ee5f02` independent rejection repairs; the frozen
 [v0.25.0 acceptance review](agent-sdk-v0.25.0-acceptance.md) remains the record
 of the faults found in that tag.
 

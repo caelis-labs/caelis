@@ -125,7 +125,7 @@ func TestRunnerCancelReturnsRemoteNotificationFailure(t *testing.T) {
 		running: true,
 		cancel:  func() { localCancelled = true },
 	}
-	runner := &Runner{clock: time.Now, runs: map[string]*childRun{"child-cancel": run}}
+	runner := &Runner{clock: time.Now, runs: map[string]*childRun{"task-cancel": run}}
 
 	err := runner.Cancel(context.Background(), run.anchor)
 	if err == nil {
@@ -719,6 +719,53 @@ func TestRunnerHandleUpdateDoesNotHoldRunLockWhilePublishing(t *testing.T) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("handleUpdate did not return after releasing PublishStream")
+	}
+}
+
+func TestChildRunKeyIsolatesSharedRemoteSessionIDs(t *testing.T) {
+	t.Parallel()
+
+	runner := &Runner{clock: time.Now, runs: map[string]*childRun{}}
+	a := &childRun{anchor: delegation.Anchor{TaskID: "task-a", SessionID: "session-1", Agent: "helper", AgentID: "task-a"}}
+	b := &childRun{anchor: delegation.Anchor{TaskID: "task-b", SessionID: "session-1", Agent: "helper", AgentID: "task-b"}}
+	keyA, err := childRunKey(a.anchor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyB, err := childRunKey(b.anchor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if keyA == keyB {
+		t.Fatalf("child run keys collided for shared remote session ids: %q", keyA)
+	}
+	runner.runs[keyA] = a
+	runner.runs[keyB] = b
+
+	gotA, err := runner.lookup(a.anchor)
+	if err != nil || gotA != a {
+		t.Fatalf("lookup(A) = %#v, %v", gotA, err)
+	}
+	gotB, err := runner.lookup(b.anchor)
+	if err != nil || gotB != b {
+		t.Fatalf("lookup(B) = %#v, %v", gotB, err)
+	}
+	if _, err := runner.lookup(delegation.Anchor{TaskID: "task-a", SessionID: "session-other"}); err == nil {
+		t.Fatal("lookup with mismatched session_id succeeded, want isolation error")
+	}
+}
+
+func TestStableAgentIDUsesDurableTaskID(t *testing.T) {
+	t.Parallel()
+
+	runner := &Runner{}
+	if got := runner.stableAgentID("helper", "spawn-task-42"); got != "spawn-task-42" {
+		t.Fatalf("stableAgentID = %q, want durable task id", got)
+	}
+	first := runner.stableAgentID("helper", "")
+	second := runner.stableAgentID("helper", "")
+	if first == "" || first == second {
+		t.Fatalf("fallback agent ids = %q/%q, want distinct counter values", first, second)
 	}
 }
 

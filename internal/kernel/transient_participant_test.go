@@ -50,6 +50,36 @@ func TestTransientParticipantFinishHookCanPublishError(t *testing.T) {
 	}
 }
 
+func TestDetachTransientParticipantHonorsDeadline(t *testing.T) {
+	t.Parallel()
+
+	blocked := make(chan struct{})
+	rt := &controlPlaneRuntime{detachBlock: blocked}
+	gw, err := New(Config{
+		Sessions: staticSessionService{session: session.Session{
+			SessionRef: session.SessionRef{AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws"},
+		}},
+		Runtime:  rt,
+		Control:  rt,
+		Resolver: staticResolver{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	err = gw.detachTransientParticipant(ctx, session.SessionRef{
+		AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+	}, "surface", "participant-1", "side_agent_complete")
+	if err == nil {
+		t.Fatal("detachTransientParticipant() error = nil, want deadline exceeded")
+	}
+	if time.Since(started) > time.Second {
+		t.Fatalf("detach blocked for %s, want deadline-bounded return", time.Since(started))
+	}
+}
+
 func TestStartParticipantTransientDetachesWhenRuntimeReturnsNoHandle(t *testing.T) {
 	t.Parallel()
 

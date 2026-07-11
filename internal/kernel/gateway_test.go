@@ -2592,6 +2592,9 @@ type controlPlaneRuntime struct {
 	detachReq   agent.DetachParticipantRequest
 	detachResp  session.Session
 	detachErr   error
+	// detachBlock, when non-nil, blocks DetachParticipant until the request
+	// context is cancelled or the channel is closed.
+	detachBlock <-chan struct{}
 }
 
 func (r *controlPlaneRuntime) Run(context.Context, agent.RunRequest) (agent.RunResult, error) {
@@ -2623,8 +2626,15 @@ func (r *controlPlaneRuntime) PromptParticipant(_ context.Context, req agent.Pro
 	return agent.RunResult{Session: r.attachResp}, nil
 }
 
-func (r *controlPlaneRuntime) DetachParticipant(_ context.Context, req agent.DetachParticipantRequest) (session.Session, error) {
+func (r *controlPlaneRuntime) DetachParticipant(ctx context.Context, req agent.DetachParticipantRequest) (session.Session, error) {
 	r.detachReq = req
+	if r.detachBlock != nil {
+		select {
+		case <-ctx.Done():
+			return session.Session{}, ctx.Err()
+		case <-r.detachBlock:
+		}
+	}
 	if r.detachErr != nil {
 		return session.Session{}, r.detachErr
 	}

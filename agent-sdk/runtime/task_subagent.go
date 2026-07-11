@@ -14,7 +14,6 @@ import (
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/agenthandle"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 )
 
 func subagentSpawnTaskID(ref session.SessionRef, spawnID string) (string, error) {
@@ -322,26 +321,15 @@ func (tm *taskRuntime) continueSubagent(ctx context.Context, task *subagentTask,
 	if err := tm.authorizeSubagentControl(task, req.Principal, "write"); err != nil {
 		return taskapi.Snapshot{}, err
 	}
-	task.mu.Lock()
-	previousStdout := task.stdout
-	previousStderr := task.stderr
-	previousStdoutCursor := task.stdoutCursor
-	previousStderrCursor := task.stderrCursor
-	previousStreamFrames := append([]stream.Frame(nil), task.streamFrames...)
-	previousTurnSeq := task.turnSeq
-	task.turnSeq++
-	if task.turnSeq <= 0 {
-		task.turnSeq = 1
+	checkpoint := task.beginContinuationTurn()
+	// Persist the parent continuation intent before the remote child effect so a
+	// lease/write failure cannot leave a completed remote turn unrecorded while
+	// a retry re-executes the same prompt. Final assistant dual-write remains a
+	// residual if the remote succeeds and the parent final event fails later.
+	if err := tm.appendSideSubagentUserEvent(ctx, task, prompt); err != nil {
+		task.restoreContinuationTurn(checkpoint, true)
+		return taskapi.Snapshot{}, err
 	}
-	task.stdout = ""
-	task.stderr = ""
-	task.stdoutCursor = 0
-	task.stderrCursor = 0
-	task.streamFrames = nil
-	if task.metadata != nil {
-		delete(task.metadata, "final_event_persisted")
-	}
-	task.mu.Unlock()
 	childPrompt := subagentPromptWithContext(req.ContextPrelude, prompt)
 	result, err := task.runner.Continue(ctx, delegation.CloneAnchor(task.anchor), delegation.ContinueRequest{
 		Agent:       task.agent,
@@ -349,19 +337,7 @@ func (tm *taskRuntime) continueSubagent(ctx context.Context, task *subagentTask,
 		YieldTimeMS: int(req.Yield / time.Millisecond),
 	})
 	if err != nil {
-		task.mu.Lock()
-		if task.stdout == "" && task.stderr == "" {
-			task.stdout = previousStdout
-			task.stderr = previousStderr
-			task.stdoutCursor = previousStdoutCursor
-			task.stderrCursor = previousStderrCursor
-			task.streamFrames = previousStreamFrames
-			task.turnSeq = previousTurnSeq
-		}
-		task.mu.Unlock()
-		return taskapi.Snapshot{}, err
-	}
-	if err := tm.appendSideSubagentUserEvent(ctx, task, prompt); err != nil {
+		task.restoreContinuationTurn(checkpoint, false)
 		return taskapi.Snapshot{}, err
 	}
 	task.mu.Lock()

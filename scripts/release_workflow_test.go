@@ -54,7 +54,7 @@ func TestSDKConsumerGatesUseCurrentAndTaggedFixturesSeparately(t *testing.T) {
 		"replace directive",
 		"with no replacement",
 		"GOMODCACHE=\"${consumer_modcache}\"",
-		"no direct/off fallback",
+		"no direct/off/pipe fallback",
 	} {
 		if !strings.Contains(tagged, want) {
 			t.Errorf("tagged consumer gate missing %q", want)
@@ -75,7 +75,25 @@ func TestSDKProxySmokeRejectsDisabledProxyEvenWithWarmSharedCache(t *testing.T) 
 	if err == nil {
 		t.Fatalf("sdk proxy smoke succeeded with disabled proxy: %s", output)
 	}
-	if !strings.Contains(string(output), "no direct/off fallback") {
+	if !strings.Contains(string(output), "no direct/off/pipe fallback") {
+		t.Fatalf("unexpected failure: %s", output)
+	}
+}
+
+func TestSDKProxySmokeRejectsPipeDirectFallback(t *testing.T) {
+	t.Parallel()
+
+	command := exec.Command("bash", "./sdk_proxy_smoke.sh")
+	command.Env = append(os.Environ(),
+		"SDK_PROXY_VERSION=v0.25.0",
+		"SDK_PROXY_URL=https://127.0.0.1:1|direct",
+		"GOMODCACHE="+t.TempDir(),
+	)
+	output, err := command.CombinedOutput()
+	if err == nil {
+		t.Fatalf("sdk proxy smoke succeeded with pipe direct fallback: %s", output)
+	}
+	if !strings.Contains(string(output), "no direct/off/pipe fallback") {
 		t.Fatalf("unexpected failure: %s", output)
 	}
 }

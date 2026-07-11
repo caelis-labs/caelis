@@ -24,16 +24,6 @@ var (
 	_ PlacementExecutor             = (*LeasedRuntime)(nil)
 )
 
-func (r *LeasedRuntime) ExecutePlaced(ctx context.Context, ref session.SessionRef, execute func(context.Context) error) error {
-	if execute == nil {
-		return fmt.Errorf("controlplane: placed operation is required")
-	}
-	_, err := r.runWithLease(ctx, ref, func(runCtx context.Context) (agent.RunResult, error) {
-		return agent.RunResult{}, execute(runCtx)
-	})
-	return err
-}
-
 // LeasedRuntimeConfig configures the Control-owned placement guard around one
 // execution Runtime. The lease covers the asynchronous Runner lifetime.
 type LeasedRuntimeConfig struct {
@@ -81,6 +71,28 @@ func NewLeasedRuntime(config LeasedRuntimeConfig) (*LeasedRuntime, error) {
 	return &LeasedRuntime{runtime: config.Runtime, leases: config.Leases, ownerID: ownerID, ttl: ttl, heartbeatInterval: interval, runs: map[string]agent.Runner{}}, nil
 }
 
+// ExecutePlaced holds and heartbeats the session lease for the full synchronous
+// callback. Lease loss cancels the callback context so work cannot continue
+// under a stolen fence.
+func (r *LeasedRuntime) ExecutePlaced(ctx context.Context, ref session.SessionRef, execute func(context.Context) error) error {
+	if execute == nil {
+		return fmt.Errorf("controlplane: placed operation is required")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ref = session.NormalizeSessionRef(ref)
+	lease, err := r.acquireSessionLease(ctx, ref)
+	if err != nil {
+		return err
+	}
+	runCtx, cancel := context.WithCancel(session.ContextWithRuntimeLease(ctx, lease))
+	defer cancel()
+	guard := startSessionLeaseGuard(r.leases, lease, r.ttl, r.heartbeatInterval, cancel)
+	execErr := execute(runCtx)
+	return errors.Join(execErr, guard.err(), guard.finish())
+}
+
 func (r *LeasedRuntime) Run(ctx context.Context, req agent.RunRequest) (agent.RunResult, error) {
 	return r.runWithLease(ctx, req.SessionRef, func(runCtx context.Context) (agent.RunResult, error) {
 		return r.runtime.Run(runCtx, req)
@@ -92,6 +104,25 @@ func (r *LeasedRuntime) runWithLease(ctx context.Context, ref session.SessionRef
 		ctx = context.Background()
 	}
 	ref = session.NormalizeSessionRef(ref)
+	lease, err := r.acquireSessionLease(ctx, ref)
+	if err != nil {
+		return agent.RunResult{}, err
+	}
+	ctx = session.ContextWithRuntimeLease(ctx, lease)
+	result, err := execute(ctx)
+	if err != nil {
+		return agent.RunResult{}, errors.Join(err, r.release(lease))
+	}
+	if result.Handle == nil {
+		return result, r.release(lease)
+	}
+	runID := result.Handle.RunID()
+	result.Handle = newLeasedRunner(result.Handle, r.leases, lease, r.ttl, r.heartbeatInterval, func() { r.forgetRun(runID) })
+	r.rememberRun(runID, result.Handle)
+	return result, nil
+}
+
+func (r *LeasedRuntime) acquireSessionLease(ctx context.Context, ref session.SessionRef) (session.SessionLease, error) {
 	acquire := session.AcquireSessionLeaseRequest{SessionRef: ref, OwnerID: r.ownerID, TTL: r.ttl}
 	lease, err := r.leases.AcquireSessionLease(ctx, acquire)
 	if session.IsCommitted(err) {
@@ -114,20 +145,9 @@ func (r *LeasedRuntime) runWithLease(ctx context.Context, ref session.SessionRef
 		}
 	}
 	if err != nil {
-		return agent.RunResult{}, err
+		return session.SessionLease{}, err
 	}
-	ctx = session.ContextWithRuntimeLease(ctx, lease)
-	result, err := execute(ctx)
-	if err != nil {
-		return agent.RunResult{}, errors.Join(err, r.release(lease))
-	}
-	if result.Handle == nil {
-		return result, r.release(lease)
-	}
-	runID := result.Handle.RunID()
-	result.Handle = newLeasedRunner(result.Handle, r.leases, lease, r.ttl, r.heartbeatInterval, func() { r.forgetRun(runID) })
-	r.rememberRun(runID, result.Handle)
-	return result, nil
+	return lease, nil
 }
 
 func matchesAcquiredSessionLease(req session.AcquireSessionLeaseRequest, lease session.SessionLease) bool {
@@ -214,9 +234,115 @@ func (r *LeasedRuntime) forgetRun(runID string) {
 }
 
 func (r *LeasedRuntime) release(lease session.SessionLease) error {
-	ctx, cancel := context.WithTimeout(context.Background(), min(r.ttl, 5*time.Second))
+	return releaseSessionLease(r.leases, lease, r.ttl)
+}
+
+// sessionLeaseGuard is the single heartbeat/release machine used by both
+// synchronous placed operations and asynchronous leased runners.
+type sessionLeaseGuard struct {
+	leases   session.SessionLeaseService
+	ttl      time.Duration
+	interval time.Duration
+	onLoss   func()
+
+	mu           sync.Mutex
+	lease        session.SessionLease
+	heartbeatErr error
+	stop         chan struct{}
+	finishOnce   sync.Once
+	finishErr    error
+	wg           sync.WaitGroup
+}
+
+func startSessionLeaseGuard(
+	leases session.SessionLeaseService,
+	lease session.SessionLease,
+	ttl, interval time.Duration,
+	onLoss func(),
+) *sessionLeaseGuard {
+	guard := &sessionLeaseGuard{
+		leases: leases, lease: lease, ttl: ttl, interval: interval, onLoss: onLoss, stop: make(chan struct{}),
+	}
+	guard.wg.Add(1)
+	go guard.heartbeat()
+	return guard
+}
+
+func (g *sessionLeaseGuard) heartbeat() {
+	defer g.wg.Done()
+	ticker := time.NewTicker(g.interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-g.stop:
+			return
+		case <-ticker.C:
+			if err := g.heartbeatOnce(); err != nil {
+				g.mu.Lock()
+				g.heartbeatErr = err
+				g.mu.Unlock()
+				if g.onLoss != nil {
+					g.onLoss()
+				}
+				return
+			}
+		}
+	}
+}
+
+func (g *sessionLeaseGuard) heartbeatOnce() error {
+	g.mu.Lock()
+	lease := g.lease
+	g.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), g.interval)
+	next, err := g.leases.HeartbeatSessionLease(ctx, session.HeartbeatSessionLeaseRequest{
+		SessionRef: lease.SessionRef, LeaseID: lease.LeaseID, OwnerID: lease.OwnerID,
+		ExpectedLeaseRevision: lease.Revision, TTL: g.ttl,
+	})
+	cancel()
+	if session.IsCommitted(err) {
+		if next.LeaseID == lease.LeaseID && next.Revision > lease.Revision {
+			err = nil
+		} else if reader, ok := g.leases.(session.SessionLeaseReader); ok {
+			ctx, cancel = context.WithTimeout(context.Background(), g.interval)
+			next, err = reader.SessionLease(ctx, lease.SessionRef)
+			cancel()
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("controlplane: session lease heartbeat failed: %w", err)
+	}
+	if next.LeaseID != lease.LeaseID {
+		return fmt.Errorf("controlplane: session lease identity changed during heartbeat")
+	}
+	g.mu.Lock()
+	g.lease = next
+	g.mu.Unlock()
+	return nil
+}
+
+func (g *sessionLeaseGuard) err() error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.heartbeatErr
+}
+
+func (g *sessionLeaseGuard) finish() error {
+	g.finishOnce.Do(func() {
+		close(g.stop)
+		g.wg.Wait()
+		g.mu.Lock()
+		lease := g.lease
+		g.mu.Unlock()
+		g.finishErr = releaseSessionLease(g.leases, lease, g.ttl)
+	})
+	return g.finishErr
+}
+
+func releaseSessionLease(leases session.SessionLeaseService, lease session.SessionLease, ttl time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), min(ttl, 5*time.Second))
 	defer cancel()
-	err := r.leases.ReleaseSessionLease(ctx, session.ReleaseSessionLeaseRequest{
+	err := leases.ReleaseSessionLease(ctx, session.ReleaseSessionLeaseRequest{
 		SessionRef: lease.SessionRef, LeaseID: lease.LeaseID, OwnerID: lease.OwnerID, ExpectedLeaseRevision: lease.Revision,
 	})
 	if session.IsCommitted(err) {
@@ -226,25 +352,18 @@ func (r *LeasedRuntime) release(lease session.SessionLease) error {
 }
 
 type leasedRunner struct {
-	inner    agent.Runner
-	leases   session.SessionLeaseService
-	ttl      time.Duration
-	interval time.Duration
-
-	mu           sync.Mutex
-	lease        session.SessionLease
-	heartbeatErr error
-	stop         chan struct{}
-	finishOnce   sync.Once
-	finishErr    error
-	onFinish     func()
-	wg           sync.WaitGroup
+	inner      agent.Runner
+	guard      *sessionLeaseGuard
+	onFinish   func()
+	finishOnce sync.Once
+	finishErr  error
 }
 
 func newLeasedRunner(inner agent.Runner, leases session.SessionLeaseService, lease session.SessionLease, ttl, interval time.Duration, onFinish func()) agent.Runner {
-	runner := &leasedRunner{inner: inner, leases: leases, lease: lease, ttl: ttl, interval: interval, stop: make(chan struct{}), onFinish: onFinish}
-	runner.wg.Add(1)
-	go runner.heartbeat()
+	runner := &leasedRunner{inner: inner, onFinish: onFinish}
+	runner.guard = startSessionLeaseGuard(leases, lease, ttl, interval, func() {
+		runner.inner.Cancel()
+	})
 	if source, ok := inner.(agent.SourceHandle); ok {
 		return &leasedSourceRunner{leasedRunner: runner, source: source}
 	}
@@ -265,7 +384,7 @@ func (r *leasedRunner) Events() iter.Seq2[*session.Event, error] {
 		if !completed {
 			_ = r.inner.Close()
 		}
-		if err := errors.Join(r.currentHeartbeatError(), r.finish()); err != nil {
+		if err := errors.Join(r.guard.err(), r.finish()); err != nil {
 			yield(nil, err)
 		}
 	}
@@ -288,7 +407,7 @@ func (r *leasedSourceRunner) SourceEvents() iter.Seq2[agent.SourceEvent, error] 
 		if !completed {
 			_ = r.inner.Close()
 		}
-		if err := errors.Join(r.currentHeartbeatError(), r.finish()); err != nil {
+		if err := errors.Join(r.guard.err(), r.finish()); err != nil {
 			yield(agent.SourceEvent{}, err)
 		}
 	}
@@ -300,81 +419,12 @@ func (r *leasedRunner) Cancel() agent.CancelResult { return r.inner.Cancel() }
 
 func (r *leasedRunner) Close() error { return errors.Join(r.inner.Close(), r.finish()) }
 
-func (r *leasedRunner) heartbeat() {
-	defer r.wg.Done()
-	ticker := time.NewTicker(r.interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-r.stop:
-			return
-		case <-ticker.C:
-			if err := r.heartbeatOnce(); err != nil {
-				r.mu.Lock()
-				r.heartbeatErr = err
-				r.mu.Unlock()
-				r.inner.Cancel()
-				return
-			}
-		}
-	}
-}
-
-func (r *leasedRunner) heartbeatOnce() error {
-	r.mu.Lock()
-	lease := r.lease
-	r.mu.Unlock()
-	ctx, cancel := context.WithTimeout(context.Background(), r.interval)
-	next, err := r.leases.HeartbeatSessionLease(ctx, session.HeartbeatSessionLeaseRequest{
-		SessionRef: lease.SessionRef, LeaseID: lease.LeaseID, OwnerID: lease.OwnerID,
-		ExpectedLeaseRevision: lease.Revision, TTL: r.ttl,
-	})
-	cancel()
-	if session.IsCommitted(err) {
-		if next.LeaseID == lease.LeaseID && next.Revision > lease.Revision {
-			err = nil
-		} else if reader, ok := r.leases.(session.SessionLeaseReader); ok {
-			ctx, cancel = context.WithTimeout(context.Background(), r.interval)
-			next, err = reader.SessionLease(ctx, lease.SessionRef)
-			cancel()
-		}
-	}
-	if err != nil {
-		return fmt.Errorf("controlplane: session lease heartbeat failed: %w", err)
-	}
-	if next.LeaseID != lease.LeaseID {
-		return fmt.Errorf("controlplane: session lease identity changed during heartbeat")
-	}
-	r.mu.Lock()
-	r.lease = next
-	r.mu.Unlock()
-	return nil
-}
-
-func (r *leasedRunner) currentHeartbeatError() error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.heartbeatErr
-}
-
 func (r *leasedRunner) finish() error {
 	r.finishOnce.Do(func() {
 		if r.onFinish != nil {
 			defer r.onFinish()
 		}
-		close(r.stop)
-		r.wg.Wait()
-		r.mu.Lock()
-		lease := r.lease
-		r.mu.Unlock()
-		ctx, cancel := context.WithTimeout(context.Background(), min(r.ttl, 5*time.Second))
-		defer cancel()
-		r.finishErr = r.leases.ReleaseSessionLease(ctx, session.ReleaseSessionLeaseRequest{
-			SessionRef: lease.SessionRef, LeaseID: lease.LeaseID, OwnerID: lease.OwnerID, ExpectedLeaseRevision: lease.Revision,
-		})
-		if session.IsCommitted(r.finishErr) {
-			r.finishErr = nil
-		}
+		r.finishErr = r.guard.finish()
 	})
 	return r.finishErr
 }

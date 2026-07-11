@@ -110,7 +110,7 @@ func (r *Runner) Spawn(ctx context.Context, spawn subagent.SpawnContext, req del
 	childCtx, childCancel := context.WithCancel(context.WithoutCancel(ctx))
 	run.ctx = childCtx
 	run.cancel = childCancel
-	agentID := r.nextAgentID(cfg.Name)
+	agentID := r.stableAgentID(cfg.Name, spawn.TaskID)
 	launchEnv := maps.Clone(cfg.Env)
 	if strings.EqualFold(strings.TrimSpace(cfg.Name), "self") {
 		if launchEnv == nil {
@@ -158,8 +158,20 @@ func (r *Runner) Spawn(ctx context.Context, spawn subagent.SpawnContext, req del
 	}
 	run.anchor = anchor
 	run.client = client
+	runKey, err := childRunKey(anchor)
+	if err != nil {
+		childCancel()
+		_ = client.Close(ctx)
+		return delegation.Anchor{}, delegation.Result{}, err
+	}
 	r.mu.Lock()
-	r.runs[anchor.SessionID] = run
+	if existing := r.runs[runKey]; existing != nil {
+		r.mu.Unlock()
+		childCancel()
+		_ = client.Close(ctx)
+		return delegation.Anchor{}, delegation.Result{}, fmt.Errorf("internal/acpagentbridge/subagent: child run %q already registered", runKey)
+	}
+	r.runs[runKey] = run
 	r.mu.Unlock()
 	go r.drivePrompt(childCtx, run, strings.TrimSpace(req.Prompt))
 	return anchor, r.waitRun(ctx, run, 0), nil
@@ -304,17 +316,45 @@ func (r *Runner) waitRun(ctx context.Context, run *childRun, yieldTimeMS int) de
 }
 
 func (r *Runner) lookup(anchor delegation.Anchor) (*childRun, error) {
-	sessionID := strings.TrimSpace(anchor.SessionID)
-	if sessionID == "" {
-		return nil, fmt.Errorf("internal/acpagentbridge/subagent: session_id is required")
+	key, err := childRunKey(anchor)
+	if err != nil {
+		return nil, err
 	}
 	r.mu.RLock()
-	run := r.runs[sessionID]
+	run := r.runs[key]
 	r.mu.RUnlock()
 	if run == nil {
-		return nil, fmt.Errorf("internal/acpagentbridge/subagent: child session %q not found", sessionID)
+		return nil, fmt.Errorf("internal/acpagentbridge/subagent: child run %q not found", key)
+	}
+	// Defensive isolation: reject anchors whose remote session drifted from the
+	// registered child (two endpoints must not share a process-local binding).
+	if sessionID := strings.TrimSpace(anchor.SessionID); sessionID != "" &&
+		strings.TrimSpace(run.anchor.SessionID) != "" &&
+		sessionID != strings.TrimSpace(run.anchor.SessionID) {
+		return nil, fmt.Errorf("internal/acpagentbridge/subagent: child run %q session mismatch", key)
 	}
 	return run, nil
+}
+
+// childRunKey isolates process-local child runs by durable TaskID so two remote
+// endpoints that both return a common session id (for example "session-1") cannot
+// overwrite each other.
+func childRunKey(anchor delegation.Anchor) (string, error) {
+	taskID := strings.TrimSpace(anchor.TaskID)
+	if taskID == "" {
+		return "", fmt.Errorf("internal/acpagentbridge/subagent: task_id is required")
+	}
+	return taskID, nil
+}
+
+// stableAgentID binds participant identity to the durable spawn TaskID so process
+// restarts cannot reissue a short counter ID that collides with a prior binding.
+func (r *Runner) stableAgentID(name string, taskID string) string {
+	taskID = strings.TrimSpace(taskID)
+	if taskID != "" {
+		return taskID
+	}
+	return r.nextAgentID(name)
 }
 
 func (r *Runner) nextAgentID(name string) string {
