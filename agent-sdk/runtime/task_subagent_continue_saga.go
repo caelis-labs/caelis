@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -35,6 +36,18 @@ func (tm *taskRuntime) continueSubagent(ctx context.Context, task *subagentTask,
 	if task == nil {
 		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: task is required")
 	}
+	releaseOperation, claimed := tm.tryClaimSubagentOperation(task.sessionRef, task.ref.TaskID)
+	if !claimed {
+		return task.snapshot(), fmt.Errorf("agent-sdk/runtime: subagent continue %q already has an operation in progress", task.ref.TaskID)
+	}
+	defer releaseOperation()
+	return tm.continueSubagentClaimed(ctx, task, req)
+}
+
+func (tm *taskRuntime) continueSubagentClaimed(ctx context.Context, task *subagentTask, req taskapi.ControlRequest) (taskapi.Snapshot, error) {
+	if task == nil {
+		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: task is required")
+	}
 	prompt := strings.TrimSpace(req.Input)
 	if prompt == "" {
 		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: TASK write for SPAWN task %q requires a follow-up prompt", task.ref.TaskID)
@@ -46,13 +59,18 @@ func (tm *taskRuntime) continueSubagent(ctx context.Context, task *subagentTask,
 		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: SPAWN task %q cannot continue because its child session runner is unavailable", task.ref.TaskID)
 	}
 
-	phase := continuePhaseOfTask(task)
+	phase, _, _, storedDigest, storedTurnSeq := continueStateOfTask(task)
 	switch phase {
-	case continuePhasePending, continuePhaseUnknownOutcome:
+	case continuePhasePending:
+		reason := "runtime restarted or lost ownership after the remote continuation claim"
+		if err := tm.markSubagentContinueUnknown(context.WithoutCancel(ctx), task, reason); err != nil {
+			return task.snapshot(), err
+		}
+		return task.snapshot(), fmt.Errorf("agent-sdk/runtime: subagent continue %q has %s; refusing blind re-issue of the remote turn", task.ref.TaskID, continuePhaseUnknownOutcome)
+	case continuePhaseUnknownOutcome:
 		return task.snapshot(), fmt.Errorf("agent-sdk/runtime: subagent continue %q has %s; refusing blind re-issue of the remote turn", task.ref.TaskID, phase)
 	case continuePhasePrepared, continuePhasePostEffect:
-		storedDigest := taskStringValue(task.metadata["continue_digest"])
-		digest, err := continueRequestDigest(prompt, req.ContextPrelude, continueTurnSeqOfTask(task))
+		digest, err := continueRequestDigest(prompt, req.ContextPrelude, storedTurnSeq)
 		if err != nil {
 			return taskapi.Snapshot{}, err
 		}
@@ -88,10 +106,7 @@ func (tm *taskRuntime) continueSubagent(ctx context.Context, task *subagentTask,
 }
 
 func (tm *taskRuntime) executeClaimedSubagentContinue(ctx context.Context, task *subagentTask, yieldMS int) (taskapi.Snapshot, error) {
-	prompt := taskStringValue(task.metadata["continue_prompt"])
-	prelude := taskStringValue(task.metadata["continue_prelude"])
-	digest := taskStringValue(task.metadata["continue_digest"])
-	turnSeq := continueTurnSeqOfTask(task)
+	_, prompt, prelude, digest, turnSeq := continueStateOfTask(task)
 
 	if err := tm.appendSideSubagentUserEvent(ctx, task, prompt); err != nil {
 		// Intent is durable; leave prepared so retry re-appends via idempotent keys.
@@ -106,15 +121,10 @@ func (tm *taskRuntime) executeClaimedSubagentContinue(ctx context.Context, task 
 		YieldTimeMS: yieldMS,
 	})
 	if err != nil {
-		_ = tm.markSubagentContinuePhase(context.WithoutCancel(ctx), task, continuePhaseUnknownOutcome, prompt, prelude, digest, turnSeq, err.Error())
-		return task.snapshot(), err
+		persistErr := tm.markSubagentContinueUnknown(context.WithoutCancel(ctx), task, err.Error())
+		return task.snapshot(), errors.Join(err, persistErr)
 	}
-	task.mu.Lock()
-	task.prompt = prompt
-	task.applyResult(result)
-	task.seedStreamFromResult(result)
-	task.mu.Unlock()
-	if err := tm.markSubagentContinuePhase(ctx, task, continuePhasePostEffect, prompt, prelude, digest, turnSeq, ""); err != nil {
+	if err := tm.markSubagentContinuePostEffect(ctx, task, prompt, prelude, digest, turnSeq, result); err != nil {
 		return task.snapshot(), err
 	}
 	return tm.advanceSubagentContinue(ctx, task)
@@ -170,13 +180,33 @@ func continueRequestDigest(prompt string, prelude string, turnSeq int64) (string
 }
 
 func continuePhaseOfTask(task *subagentTask) continuePhase {
+	phase, _, _, _, _ := continueStateOfTask(task)
+	return phase
+}
+
+func continueStateOfTask(task *subagentTask) (continuePhase, string, string, string, int64) {
 	if task == nil {
-		return continuePhaseNone
+		return continuePhaseNone, "", "", "", 0
 	}
-	return normalizeContinuePhase(taskStringValue(task.metadata["continue_phase"]))
+	task.mu.Lock()
+	defer task.mu.Unlock()
+	return normalizeContinuePhase(taskStringValue(task.metadata["continue_phase"])),
+		taskStringValue(task.metadata["continue_prompt"]),
+		taskStringValue(task.metadata["continue_prelude"]),
+		taskStringValue(task.metadata["continue_digest"]),
+		continueTurnSeqOfTaskLocked(task)
 }
 
 func continueTurnSeqOfTask(task *subagentTask) int64 {
+	if task == nil {
+		return 0
+	}
+	task.mu.Lock()
+	defer task.mu.Unlock()
+	return continueTurnSeqOfTaskLocked(task)
+}
+
+func continueTurnSeqOfTaskLocked(task *subagentTask) int64 {
 	if task == nil {
 		return 0
 	}
@@ -208,51 +238,145 @@ func (tm *taskRuntime) markSubagentContinuePhase(
 	turnSeq int64,
 	reason string,
 ) error {
+	return tm.persistSubagentContinuePhase(ctx, task, phase, prompt, prelude, digest, turnSeq, reason, nil)
+}
+
+func (tm *taskRuntime) markSubagentContinuePostEffect(
+	ctx context.Context,
+	task *subagentTask,
+	prompt string,
+	prelude string,
+	digest string,
+	turnSeq int64,
+	result delegation.Result,
+) error {
+	return tm.persistSubagentContinuePhase(ctx, task, continuePhasePostEffect, prompt, prelude, digest, turnSeq, "", &result)
+}
+
+func (tm *taskRuntime) persistSubagentContinuePhase(
+	ctx context.Context,
+	task *subagentTask,
+	phase continuePhase,
+	prompt string,
+	prelude string,
+	digest string,
+	turnSeq int64,
+	reason string,
+	result *delegation.Result,
+) error {
 	if task == nil {
 		return nil
 	}
 	task.mu.Lock()
-	if task.metadata == nil {
-		task.metadata = map[string]any{}
-	}
-	if phase == continuePhaseNone {
-		delete(task.metadata, "continue_phase")
-		delete(task.metadata, "continue_prompt")
-		delete(task.metadata, "continue_prelude")
-		delete(task.metadata, "continue_digest")
-		delete(task.metadata, "continue_turn_seq")
-		delete(task.metadata, "continue_reason")
-	} else {
-		task.metadata["continue_phase"] = string(phase)
-		task.metadata["continue_prompt"] = strings.TrimSpace(prompt)
-		task.metadata["continue_prelude"] = strings.TrimSpace(prelude)
-		task.metadata["continue_digest"] = strings.TrimSpace(digest)
-		task.metadata["continue_turn_seq"] = turnSeq
-		if strings.TrimSpace(reason) != "" {
-			task.metadata["continue_reason"] = strings.TrimSpace(reason)
-		}
-	}
 	entry := task.entrySnapshot(tm.runtime.now())
+	task.mu.Unlock()
+	if result != nil {
+		desired := tm.rehydrateSubagentTask(entry)
+		desired.prompt = strings.TrimSpace(prompt)
+		desired.applyResult(*result)
+		desired.seedStreamFromResult(*result)
+		entry = desired.entrySnapshot(tm.runtime.now())
+	}
+	applyContinuePhaseToEntry(entry, phase, prompt, prelude, digest, turnSeq, reason)
+	if phase == continuePhaseUnknownOutcome {
+		reason = firstNonEmpty(strings.TrimSpace(reason), "remote continuation outcome is unknown")
+		entry.Running = false
+		entry.State = taskapi.StateUnknownOutcome
+		entry.SupportsInput = false
+		if entry.Result == nil {
+			entry.Result = map[string]any{}
+		}
+		entry.Result["state"] = string(taskapi.StateUnknownOutcome)
+		entry.Result["error"] = reason
+		if entry.Spec == nil {
+			entry.Spec = map[string]any{}
+		}
+		entry.Spec["spawn_result"] = taskapi.SanitizeResultForPersistence(entry.Result, taskapi.ResultPersistenceCanonical)
+	}
+	if err := tm.persistSpawnEntry(ctx, entry); err != nil {
+		return err
+	}
+	task.mu.Lock()
+	if result != nil {
+		task.prompt = strings.TrimSpace(prompt)
+		task.applyResult(*result)
+		task.seedStreamFromResult(*result)
+	}
+	applyContinuePhaseToMetadata(&task.metadata, phase, prompt, prelude, digest, turnSeq, reason)
+	if phase == continuePhaseUnknownOutcome {
+		task.running = false
+		task.state = taskapi.StateUnknownOutcome
+		if task.result == nil {
+			task.result = map[string]any{}
+		}
+		task.result["state"] = string(taskapi.StateUnknownOutcome)
+		task.result["error"] = reason
+	}
+	task.revision = entry.Revision
+	task.lease = taskapi.CloneLease(entry.Lease)
+	task.mu.Unlock()
+	return nil
+}
+
+func applyContinuePhaseToEntry(entry *taskapi.Entry, phase continuePhase, prompt, prelude, digest string, turnSeq int64, reason string) {
+	if entry == nil {
+		return
+	}
+	applyContinuePhaseToMetadata(&entry.Metadata, phase, prompt, prelude, digest, turnSeq, reason)
 	if entry.Spec == nil {
 		entry.Spec = map[string]any{}
 	}
 	if phase == continuePhaseNone {
-		delete(entry.Spec, "continue_phase")
+		for _, key := range []string{"continue_phase", "continue_digest", "continue_turn_seq"} {
+			delete(entry.Spec, key)
+		}
 	} else {
 		entry.Spec["continue_phase"] = string(phase)
 		entry.Spec["continue_digest"] = strings.TrimSpace(digest)
 		entry.Spec["continue_turn_seq"] = turnSeq
 	}
-	task.mu.Unlock()
-	err := tm.persistSpawnEntry(ctx, entry)
-	if err == nil {
-		task.mu.Lock()
-		task.revision = entry.Revision
-		task.mu.Unlock()
+}
+
+func applyContinuePhaseToMetadata(metadata *map[string]any, phase continuePhase, prompt, prelude, digest string, turnSeq int64, reason string) {
+	if metadata == nil {
+		return
 	}
-	return err
+	if *metadata == nil {
+		*metadata = map[string]any{}
+	}
+	values := *metadata
+	if phase == continuePhaseNone {
+		for _, key := range []string{"continue_phase", "continue_prompt", "continue_prelude", "continue_digest", "continue_turn_seq", "continue_reason"} {
+			delete(values, key)
+		}
+		return
+	}
+	values["continue_phase"] = string(phase)
+	values["continue_prompt"] = strings.TrimSpace(prompt)
+	values["continue_prelude"] = strings.TrimSpace(prelude)
+	values["continue_digest"] = strings.TrimSpace(digest)
+	values["continue_turn_seq"] = turnSeq
+	if strings.TrimSpace(reason) == "" {
+		delete(values, "continue_reason")
+	} else {
+		values["continue_reason"] = strings.TrimSpace(reason)
+	}
 }
 
 func (tm *taskRuntime) clearSubagentContinuePhase(ctx context.Context, task *subagentTask) error {
 	return tm.markSubagentContinuePhase(ctx, task, continuePhaseNone, "", "", "", 0, "")
+}
+
+func (tm *taskRuntime) markSubagentContinueUnknown(ctx context.Context, task *subagentTask, reason string) error {
+	if task == nil {
+		return nil
+	}
+	reason = firstNonEmpty(strings.TrimSpace(reason), "remote continuation outcome is unknown")
+	task.mu.Lock()
+	prompt := taskStringValue(task.metadata["continue_prompt"])
+	prelude := taskStringValue(task.metadata["continue_prelude"])
+	digest := taskStringValue(task.metadata["continue_digest"])
+	turnSeq := continueTurnSeqOfTaskLocked(task)
+	task.mu.Unlock()
+	return tm.markSubagentContinuePhase(ctx, task, continuePhaseUnknownOutcome, prompt, prelude, digest, turnSeq, reason)
 }

@@ -1,6 +1,7 @@
 package controlplane
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
@@ -12,7 +13,7 @@ func TestLoopDetectorIgnoresDifferentToolArgs(t *testing.T) {
 	d := newGenerationLoopDetector(20, 3, 8)
 	for i := 0; i < 6; i++ {
 		path := "file-" + string(rune('a'+i)) + ".txt"
-		if _, ok := d.observe(watchdogToolCall("c", "READ", map[string]any{"path": path})); ok {
+		if _, ok := d.observe(watchdogToolCall("c-"+strconv.Itoa(i), "READ", map[string]any{"path": path})); ok {
 			t.Fatalf("different READ paths must not trip at step %d", i)
 		}
 	}
@@ -23,7 +24,7 @@ func TestLoopDetectorIgnoresSameToolWhenContentDiffers(t *testing.T) {
 	d := newGenerationLoopDetector(20, 3, 8)
 	for i := 0; i < 6; i++ {
 		d.observe(&session.Event{Type: session.EventTypeAssistant, Text: "thinking step " + strings.Repeat("x", i+1)})
-		if _, ok := d.observe(watchdogToolCall("c", "READ", map[string]any{"path": "same.txt"})); ok {
+		if _, ok := d.observe(watchdogToolCall("c-"+strconv.Itoa(i), "READ", map[string]any{"path": "same.txt"})); ok {
 			t.Fatalf("same tool with different segment content must not trip at step %d", i)
 		}
 	}
@@ -36,7 +37,7 @@ func TestLoopDetectorTripsOnIdenticalContentAndTool(t *testing.T) {
 	var ok bool
 	for i := 0; i < 3; i++ {
 		d.observe(&session.Event{Type: session.EventTypeAssistant, Text: "I will read the file again"})
-		hit, ok = d.observe(watchdogToolCall("c", "READ", map[string]any{"path": "same.txt"}))
+		hit, ok = d.observe(watchdogToolCall("c-"+strconv.Itoa(i), "READ", map[string]any{"path": "same.txt"}))
 	}
 	if !ok || hit.Reason != WatchdogReasonToolLoop || hit.Streak != 3 {
 		t.Fatalf("hit = %+v ok=%v, want tool_loop streak 3", hit, ok)
@@ -49,7 +50,7 @@ func TestLoopDetectorTripsOnPureIdenticalToolWithEmptyContent(t *testing.T) {
 	var hit loopHit
 	var ok bool
 	for i := 0; i < 3; i++ {
-		hit, ok = d.observe(watchdogToolCall("c", "READ", map[string]any{"path": "same.txt"}))
+		hit, ok = d.observe(watchdogToolCall("c-"+strconv.Itoa(i), "READ", map[string]any{"path": "same.txt"}))
 	}
 	if !ok || hit.Reason != WatchdogReasonToolLoop {
 		t.Fatalf("hit = %+v ok=%v, want pure tool loop", hit, ok)
@@ -136,9 +137,116 @@ func TestLoopDetectorIncludesThoughtInContentFingerprint(t *testing.T) {
 	var ok bool
 	for i := 0; i < 3; i++ {
 		d.observe(thought)
-		hit, ok = d.observe(watchdogToolCall("c", "READ", map[string]any{"path": "x"}))
+		hit, ok = d.observe(watchdogToolCall("c-"+strconv.Itoa(i), "READ", map[string]any{"path": "x"}))
 	}
 	if !ok || hit.Reason != WatchdogReasonToolLoop {
 		t.Fatalf("hit = %+v ok=%v, want tool loop with thought content", hit, ok)
+	}
+}
+
+func TestLoopDetectorUsesProtocolOnlyToolCall(t *testing.T) {
+	t.Parallel()
+	d := newGenerationLoopDetector(50, 2, 4)
+	protocolCall := func(id string) *session.Event {
+		return &session.Event{Protocol: &session.EventProtocol{
+			Method: session.ProtocolMethodSessionUpdate,
+			Update: &session.ProtocolUpdate{
+				SessionUpdate: string(session.ProtocolUpdateTypeToolCall), ToolCallID: id,
+				Title: "READ file", RawInput: map[string]any{"path": "same.txt"},
+			},
+		}}
+	}
+	if _, ok := d.observe(protocolCall("one")); ok {
+		t.Fatal("first protocol-only tool call triggered loop")
+	}
+	hit, ok := d.observe(protocolCall("two"))
+	if !ok || hit.Reason != WatchdogReasonToolLoop {
+		t.Fatalf("hit = %+v ok=%v, want protocol-only tool loop", hit, ok)
+	}
+}
+
+func TestLoopDetectorTextTailDoesNotCrossToolBoundary(t *testing.T) {
+	t.Parallel()
+	d := newGenerationLoopDetector(2, 50, 4)
+	cycle := "repeated reasoning segment"
+	if _, ok := d.observe(&session.Event{Type: session.EventTypeAssistant, Text: cycle}); ok {
+		t.Fatal("first text segment triggered loop")
+	}
+	d.observe(watchdogToolCall("call", "READ", map[string]any{"path": "a"}))
+	if _, ok := d.observe(&session.Event{Type: session.EventTypeAssistant, Text: cycle}); ok {
+		t.Fatal("text loop crossed a tool boundary")
+	}
+}
+
+func TestLoopDetectorCountsOneACPToolCallIDOnce(t *testing.T) {
+	t.Parallel()
+	d := newGenerationLoopDetector(50, 2, 4)
+	call := func(id string, args map[string]any) *session.Event {
+		return &session.Event{Protocol: &session.EventProtocol{
+			Method: session.ProtocolMethodSessionUpdate,
+			Update: &session.ProtocolUpdate{
+				SessionUpdate: string(session.ProtocolUpdateTypeToolCall), ToolCallID: id,
+				Title: "READ file", RawInput: args,
+			},
+		}}
+	}
+	if _, ok := d.observe(call("same-call", map[string]any{"path": "x"})); ok {
+		t.Fatal("first ACP tool update triggered loop")
+	}
+	if _, ok := d.observe(call("same-call", map[string]any{"path": "x"})); ok {
+		t.Fatal("second update for the same ACP ToolCallID counted as a new step")
+	}
+	if hit, ok := d.observe(call("next-call", map[string]any{"path": "x"})); !ok || hit.Streak != 2 {
+		t.Fatalf("next distinct call hit = %+v ok=%v, want second tool step", hit, ok)
+	}
+}
+
+func TestLoopDetectorCountsACPToolCallAfterArgsBecomeComparable(t *testing.T) {
+	t.Parallel()
+	d := newGenerationLoopDetector(50, 2, 4)
+	call := func(id string, args map[string]any) *session.Event {
+		return &session.Event{Protocol: &session.EventProtocol{
+			Method: session.ProtocolMethodSessionUpdate,
+			Update: &session.ProtocolUpdate{
+				SessionUpdate: string(session.ProtocolUpdateTypeToolCall), ToolCallID: id,
+				Title: "READ file", RawInput: args,
+			},
+		}}
+	}
+	if _, ok := d.observe(call("same-call", nil)); ok {
+		t.Fatal("argument-free pending update triggered loop")
+	}
+	if _, ok := d.observe(call("same-call", map[string]any{"path": "x"})); ok {
+		t.Fatal("first comparable update triggered loop")
+	}
+	if hit, ok := d.observe(call("next-call", map[string]any{"path": "x"})); !ok || hit.Streak != 2 {
+		t.Fatalf("next distinct call hit = %+v ok=%v, want second comparable step", hit, ok)
+	}
+}
+
+func TestLoopDetectorDoesNotRecountNonAdjacentACPToolCallID(t *testing.T) {
+	t.Parallel()
+	d := newGenerationLoopDetector(50, 3, 4)
+	for _, id := range []string{"call-a", "call-b", "call-a"} {
+		if _, ok := d.observe(watchdogToolCall(id, "READ", map[string]any{"path": "x"})); ok {
+			t.Fatalf("tool call %q triggered before three distinct calls", id)
+		}
+	}
+	if hit, ok := d.observe(watchdogToolCall("call-c", "READ", map[string]any{"path": "x"})); !ok || hit.Streak != 3 {
+		t.Fatalf("third distinct call hit = %+v ok=%v", hit, ok)
+	}
+}
+
+func TestLoopDetectorUncomparableToolIsEvidenceBarrier(t *testing.T) {
+	t.Parallel()
+	d := newGenerationLoopDetector(50, 2, 4)
+	if _, ok := d.observe(watchdogToolCall("one", "READ", map[string]any{"path": "x"})); ok {
+		t.Fatal("first comparable tool triggered loop")
+	}
+	if _, ok := d.observe(watchdogToolCall("barrier", "READ", nil)); ok {
+		t.Fatal("empty tool args triggered loop")
+	}
+	if _, ok := d.observe(watchdogToolCall("two", "READ", map[string]any{"path": "x"})); ok {
+		t.Fatal("tool loop evidence crossed an uncomparable tool boundary")
 	}
 }

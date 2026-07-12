@@ -91,6 +91,77 @@ func TestTaskStoreRevisionAndLeaseCAS(t *testing.T) {
 	}
 }
 
+func TestTaskStoreRejectsStaleSessionFenceAfterTakeover(t *testing.T) {
+	t.Parallel()
+	now := time.Unix(1000, 0).UTC()
+	backing := NewStore(Config{RootDir: t.TempDir(), Clock: func() time.Time { return now }})
+	active, err := backing.GetOrCreate(context.Background(), session.StartSessionRequest{
+		AppName: "caelis", UserID: "task-fence", PreferredSessionID: "task-fence",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaseA, err := backing.AcquireSessionLease(context.Background(), session.AcquireSessionLeaseRequest{
+		SessionRef: active.SessionRef, OwnerID: "host-a", TTL: time.Minute,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctxA := session.ContextWithRuntimeLease(context.Background(), leaseA)
+	tasks := NewTaskStore(backing)
+	created, err := tasks.Put(ctxA, task.PutRequest{Entry: &task.Entry{
+		TaskID: "fenced-task", Kind: task.KindSubagent, Session: active.SessionRef, State: task.StateRunning, Running: true,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	now = now.Add(2 * time.Minute)
+	leaseB, err := backing.AcquireSessionLease(context.Background(), session.AcquireSessionLeaseRequest{
+		SessionRef: active.SessionRef, OwnerID: "host-b", TTL: time.Minute,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := task.CloneEntry(created)
+	stale.Title = "stale host write"
+	if _, err := tasks.Put(ctxA, task.PutRequest{Entry: stale, ExpectedRevision: created.Revision}); !errors.Is(err, session.ErrLeaseConflict) {
+		t.Fatalf("stale task Put error = %v, want session lease conflict", err)
+	}
+	current := task.CloneEntry(created)
+	current.Title = "new owner write"
+	ctxB := session.ContextWithRuntimeLease(context.Background(), leaseB)
+	if _, err := tasks.Put(ctxB, task.PutRequest{Entry: current, ExpectedRevision: created.Revision}); err != nil {
+		t.Fatalf("new owner task Put error = %v", err)
+	}
+}
+
+func TestTaskStoreReturnsCommittedEntryAfterPostCommitFailure(t *testing.T) {
+	t.Parallel()
+	backing := NewStore(Config{RootDir: t.TempDir()})
+	tasks := NewTaskStore(backing)
+	backing.transactionFault = func(phase string) error {
+		if phase == "task_index_post_commit" {
+			return errors.New("forced task index directory sync failure")
+		}
+		return nil
+	}
+	persisted, err := tasks.Put(context.Background(), task.PutRequest{Entry: &task.Entry{
+		TaskID: "task-committed", Kind: task.KindSubagent, Session: taskSessionRef("task-committed-session"), State: task.StateRunning,
+	}})
+	if !session.IsCommitted(err) {
+		t.Fatalf("Put error = %v, want committed outcome", err)
+	}
+	if persisted == nil || persisted.Revision != 1 {
+		t.Fatalf("persisted entry = %#v, want exact revision 1", persisted)
+	}
+	backing.transactionFault = nil
+	durable, loadErr := tasks.Get(context.Background(), "task-committed")
+	if loadErr != nil || durable.Revision != persisted.Revision {
+		t.Fatalf("durable entry = %#v, %v; want committed revision", durable, loadErr)
+	}
+}
+
 func TestTaskStoreUpsertCompletedTaskKeepsCanonicalResultInIndex(t *testing.T) {
 	t.Parallel()
 

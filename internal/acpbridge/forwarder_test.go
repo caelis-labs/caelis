@@ -2,9 +2,11 @@ package acpbridge
 
 import (
 	"context"
+	"errors"
 	"iter"
 	"reflect"
 	"testing"
+	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -14,6 +16,46 @@ import (
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
+
+func TestForwardControllerEventsPreservesActiveTurnFence(t *testing.T) {
+	t.Parallel()
+
+	sessions, activeSession := newTestSessionService(t, "sess-acp-forward-fenced")
+	lease, err := sessions.(session.SessionLeaseService).AcquireSessionLease(context.Background(), session.AcquireSessionLeaseRequest{
+		SessionRef: activeSession.SessionRef,
+		OwnerID:    "turn-owner",
+		TTL:        time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("AcquireSessionLease() error = %v", err)
+	}
+	forwarder := NewControllerForwarder(sessions)
+	request := agent.ControllerEventForwardRequest{
+		ActiveSession: activeSession,
+		SessionRef:    activeSession.SessionRef,
+		TurnID:        "participant-turn-1",
+		Source: scriptedSourceHandle{events: []SourceEvent{{
+			Canonical: acpNarrativeEvent(session.ProtocolUpdateTypeAgentMessage, "done"),
+		}}},
+		Publisher: newTestPublisher(),
+	}
+	if err := forwarder.ForwardControllerEvents(context.Background(), request); !errors.Is(err, session.ErrLeaseConflict) {
+		t.Fatalf("unfenced ForwardControllerEvents() error = %v, want ErrLeaseConflict", err)
+	}
+
+	request.MutationGuard = session.RuntimeMutationGuard(session.ContextWithRuntimeLease(context.Background(), lease))
+	request.Publisher = newTestPublisher()
+	if err := forwarder.ForwardControllerEvents(context.Background(), request); err != nil {
+		t.Fatalf("fenced ForwardControllerEvents() error = %v", err)
+	}
+	stored, err := sessions.Events(context.Background(), session.EventsRequest{SessionRef: activeSession.SessionRef})
+	if err != nil {
+		t.Fatalf("Events() error = %v", err)
+	}
+	if len(stored) != 1 || session.EventTypeOf(stored[0]) != session.EventTypeAssistant || session.EventText(stored[0]) != "done" {
+		t.Fatalf("stored events = %#v, want one fenced final assistant", stored)
+	}
+}
 
 func TestForwardControllerEventsPublishesPersistedCanonicalWhenACPPresent(t *testing.T) {
 	t.Parallel()

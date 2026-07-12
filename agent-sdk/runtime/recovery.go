@@ -15,7 +15,7 @@ func (r *Runtime) recoverRuntimeState(ctx context.Context, ref session.SessionRe
 	}
 	entries := r.tasks.listSessionEntries(ctx, ref)
 	for _, entry := range entries {
-		if entry == nil || !entry.Running {
+		if entry == nil || (!entry.Running && !entryHasPendingContinue(entry)) {
 			continue
 		}
 		switch entry.Kind {
@@ -62,7 +62,37 @@ func (r *Runtime) recoverCommandEntry(ctx context.Context, entry *task.Entry) er
 }
 
 func (r *Runtime) recoverSubagentEntry(ctx context.Context, entry *task.Entry) error {
-	if r == nil || r.tasks == nil || entry == nil || !entry.Running {
+	if r == nil || r.tasks == nil || entry == nil {
+		return nil
+	}
+	if entryHasPendingContinue(entry) {
+		release, claimed := r.tasks.tryClaimSubagentOperation(entry.Session, entry.TaskID)
+		if !claimed {
+			return nil
+		}
+		defer release()
+		next := task.CloneEntry(entry)
+		next.Running = false
+		next.State = task.StateUnknownOutcome
+		next.SupportsInput = false
+		if next.Result == nil {
+			next.Result = map[string]any{}
+		}
+		if next.Metadata == nil {
+			next.Metadata = map[string]any{}
+		}
+		reason := "runtime restarted after the remote continuation claim; outcome is unknown"
+		next.Result["state"] = string(task.StateUnknownOutcome)
+		next.Result["error"] = reason
+		next.Metadata["continue_phase"] = string(continuePhaseUnknownOutcome)
+		next.Metadata["continue_reason"] = reason
+		if next.Spec == nil {
+			next.Spec = map[string]any{}
+		}
+		next.Spec["continue_phase"] = string(continuePhaseUnknownOutcome)
+		return r.tasks.persistTaskEntry(ctx, next)
+	}
+	if !entry.Running {
 		return nil
 	}
 	if r.tasks.hasActiveSubagentTask(entry) {
@@ -70,6 +100,27 @@ func (r *Runtime) recoverSubagentEntry(ctx context.Context, entry *task.Entry) e
 	}
 	next := interruptedSubagentEntry(entry, subagentInterruptedSummary(entry))
 	return r.tasks.persistTaskEntry(ctx, next)
+}
+
+func (tm *taskRuntime) recoverPendingSubagentControlClaimed(ctx context.Context, subagent *subagentTask) error {
+	if tm == nil || subagent == nil || continuePhaseOfTask(subagent) != continuePhasePending {
+		return nil
+	}
+	return tm.markSubagentContinueUnknown(
+		context.WithoutCancel(ctx),
+		subagent,
+		"runtime restarted after the remote continuation claim; outcome is unknown",
+	)
+}
+
+func entryHasPendingContinue(entry *task.Entry) bool {
+	if entry == nil {
+		return false
+	}
+	return normalizeContinuePhase(firstNonEmpty(
+		taskStringValue(entry.Metadata["continue_phase"]),
+		taskSpecString(entry.Spec, "continue_phase"),
+	)) == continuePhasePending
 }
 
 func subagentInterruptedSummary(entry *task.Entry) string {

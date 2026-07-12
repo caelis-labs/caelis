@@ -1,6 +1,7 @@
 package file
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -1566,6 +1567,44 @@ func TestStoreCompoundCommittedErrorRetryDoesNotReapplyState(t *testing.T) {
 		if !errors.As(err, &conflict) {
 			t.Fatalf("changed digest error = %v, want *EventConflictError", err)
 		}
+	}
+}
+
+func TestParticipantLifecycleCommittedErrorReturnsExactResult(t *testing.T) {
+	t.Parallel()
+	store := NewStore(Config{RootDir: t.TempDir()})
+	ctx := context.Background()
+	active, err := store.GetOrCreate(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "participant-committed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding := session.ParticipantBinding{ID: "participant-a", Kind: session.ParticipantKindACP, DelegationID: "delegation-a"}
+	protocol := session.NewParticipantProtocol(session.ProtocolParticipant{Action: "attached"})
+	event := &session.Event{IdempotencyKey: "participant-attach-a", Type: session.EventTypeParticipant, Protocol: &protocol}
+	store.transactionFault = func(phase string) error {
+		if phase == "after_commit" {
+			return errors.New("forced after-commit failure")
+		}
+		return nil
+	}
+	committedSession, committedEvent, err := store.PutParticipantWithEvent(ctx, session.PutParticipantWithEventRequest{
+		SessionRef: active.SessionRef, ExpectedRevision: &active.Revision, Binding: binding, Event: event,
+	})
+	if !session.IsCommitted(err) {
+		t.Fatalf("PutParticipantWithEvent() error = %v, want CommittedError", err)
+	}
+	if committedSession.Revision != active.Revision+1 || len(committedSession.Participants) != 1 || committedEvent == nil || committedEvent.ID == "" {
+		t.Fatalf("committed result = %#v, %#v; want exact session and event", committedSession, committedEvent)
+	}
+	store.transactionFault = nil
+	loaded, err := store.Get(ctx, active.SessionRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loadedJSON, _ := json.Marshal(loaded)
+	committedJSON, _ := json.Marshal(committedSession)
+	if !bytes.Equal(loadedJSON, committedJSON) {
+		t.Fatalf("loaded session differs from committed result:\nloaded=%#v\ncommitted=%#v", loaded, committedSession)
 	}
 }
 

@@ -547,16 +547,35 @@ func (s *Store) putParticipantRequest(req session.PutParticipantRequest) (sessio
 		if err := validateFileMutationGuard(activeDocumentLease(doc), req.MutationGuard, s.now()); err != nil {
 			return err
 		}
+		if err := session.CheckExpectedRevision(doc.Session, req.ExpectedRevision); err != nil {
+			return err
+		}
+		if strings.TrimSpace(req.Binding.ID) != "" {
+			expected := strings.TrimSpace(req.Binding.DelegationID)
+			if req.ExpectedDelegationID != nil {
+				expected = strings.TrimSpace(*req.ExpectedDelegationID)
+			}
+			if err := session.CheckParticipantDelegation(&doc.Session, req.Binding.ID, expected); err != nil {
+				return err
+			}
+		}
 		if session.PutParticipantBinding(&doc.Session, req.Binding) {
 			doc.Session.Revision++
 			doc.Session.UpdatedAt = s.now()
+			out = session.CloneSession(doc.Session)
 			if err := s.writeDocument(doc); err != nil {
+				if documentWriteCommitted(err) {
+					return &session.CommittedError{Err: err}
+				}
 				return err
 			}
 		}
 		out = session.CloneSession(doc.Session)
 		return nil
 	}); err != nil {
+		if session.IsCommitted(err) {
+			return out, err
+		}
 		return session.Session{}, err
 	}
 	return out, nil
@@ -588,6 +607,15 @@ func (s *Store) PutParticipantWithEvent(
 			[]*session.Event{req.Event},
 			existingEvents,
 			func(activeSession *session.Session, _ session.PreparedAppendEvents) (bool, error) {
+				if strings.TrimSpace(req.Binding.ID) != "" {
+					expected := strings.TrimSpace(req.Binding.DelegationID)
+					if req.ExpectedDelegationID != nil {
+						expected = strings.TrimSpace(*req.ExpectedDelegationID)
+					}
+					if err := session.CheckParticipantDelegation(activeSession, req.Binding.ID, expected); err != nil {
+						return false, err
+					}
+				}
 				return session.PutParticipantBinding(activeSession, req.Binding), nil
 			},
 			nil,
@@ -599,13 +627,16 @@ func (s *Store) PutParticipantWithEvent(
 			return err
 		}
 		normalizedEvent := tx.Prepared.Events[0]
+		out = session.CloneSession(nextDoc.Session)
+		outEvent = session.CloneEvent(normalizedEvent)
 		if err := s.writeDocumentWithEvents(nextDoc, tx.Prepared.Persisted); err != nil {
 			return err
 		}
-		out = session.CloneSession(nextDoc.Session)
-		outEvent = session.CloneEvent(normalizedEvent)
 		return nil
 	}); err != nil {
+		if session.IsCommitted(err) {
+			return out, outEvent, err
+		}
 		return session.Session{}, nil, err
 	}
 	return out, outEvent, nil
@@ -632,16 +663,31 @@ func (s *Store) removeParticipantRequest(req session.RemoveParticipantRequest) (
 		if err := validateFileMutationGuard(activeDocumentLease(doc), req.MutationGuard, s.now()); err != nil {
 			return err
 		}
+		if err := session.CheckExpectedRevision(doc.Session, req.ExpectedRevision); err != nil {
+			return err
+		}
+		if req.ExpectedDelegationID != nil {
+			if err := session.CheckParticipantDelegation(&doc.Session, req.ParticipantID, *req.ExpectedDelegationID); err != nil {
+				return err
+			}
+		}
 		if session.RemoveParticipantBinding(&doc.Session, req.ParticipantID) {
 			doc.Session.Revision++
 			doc.Session.UpdatedAt = s.now()
+			out = session.CloneSession(doc.Session)
 			if err := s.writeDocument(doc); err != nil {
+				if documentWriteCommitted(err) {
+					return &session.CommittedError{Err: err}
+				}
 				return err
 			}
 		}
 		out = session.CloneSession(doc.Session)
 		return nil
 	}); err != nil {
+		if session.IsCommitted(err) {
+			return out, err
+		}
 		return session.Session{}, err
 	}
 	return out, nil
@@ -673,6 +719,11 @@ func (s *Store) RemoveParticipantWithEvent(
 			[]*session.Event{req.Event},
 			existingEvents,
 			func(activeSession *session.Session, _ session.PreparedAppendEvents) (bool, error) {
+				if req.ExpectedDelegationID != nil {
+					if err := session.CheckParticipantDelegation(activeSession, req.ParticipantID, *req.ExpectedDelegationID); err != nil {
+						return false, err
+					}
+				}
 				return session.RemoveParticipantBinding(activeSession, req.ParticipantID), nil
 			},
 			nil,
@@ -684,13 +735,16 @@ func (s *Store) RemoveParticipantWithEvent(
 			return err
 		}
 		normalizedEvent := tx.Prepared.Events[0]
+		out = session.CloneSession(nextDoc.Session)
+		outEvent = session.CloneEvent(normalizedEvent)
 		if err := s.writeDocumentWithEvents(nextDoc, tx.Prepared.Persisted); err != nil {
 			return err
 		}
-		out = session.CloneSession(nextDoc.Session)
-		outEvent = session.CloneEvent(normalizedEvent)
 		return nil
 	}); err != nil {
+		if session.IsCommitted(err) {
+			return out, outEvent, err
+		}
 		return session.Session{}, nil, err
 	}
 	return out, outEvent, nil

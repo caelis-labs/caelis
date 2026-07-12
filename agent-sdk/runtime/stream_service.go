@@ -24,15 +24,33 @@ func newStreamService(tasks *taskRuntime) *streamService {
 func (s *streamService) Read(ctx context.Context, req stream.ReadRequest) (stream.Snapshot, error) {
 	ref := stream.NormalizeRef(req.Ref)
 	cursor := stream.CloneCursor(req.Cursor)
+	read, err := s.resolveReader(ctx, ref)
+	if err != nil {
+		return stream.Snapshot{}, err
+	}
+	return read(ctx, cursor)
+}
+
+type resolvedStreamReader func(context.Context, stream.Cursor) (stream.Snapshot, error)
+
+// resolveReader pins one stream operation to the task instance it resolved.
+// A completed task may leave the live registry before its canonical result is
+// promoted from the deferred durable entry; re-resolving during that interval
+// would close an active subscription against an empty reconstructed snapshot.
+func (s *streamService) resolveReader(ctx context.Context, ref stream.Ref) (resolvedStreamReader, error) {
 	task, err := s.resolveTask(ctx, ref)
 	if err == nil {
-		return s.readCommand(ctx, task, cursor)
+		return func(readCtx context.Context, cursor stream.Cursor) (stream.Snapshot, error) {
+			return s.readCommand(readCtx, task, cursor)
+		}, nil
 	}
 	subagent, subagentErr := s.resolveSubagent(ctx, ref)
 	if subagentErr != nil {
-		return stream.Snapshot{}, err
+		return nil, err
 	}
-	return s.readSubagent(ctx, subagent, cursor)
+	return func(readCtx context.Context, cursor stream.Cursor) (stream.Snapshot, error) {
+		return s.readSubagent(readCtx, subagent, cursor)
+	}, nil
 }
 
 func (s *streamService) readCommand(ctx context.Context, task *commandTask, cursor stream.Cursor) (stream.Snapshot, error) {
@@ -69,7 +87,8 @@ func (s *streamService) readCommand(ctx context.Context, task *commandTask, curs
 	finalText := ""
 	if !status.Running {
 		finalText = terminalFinalText(task.output, result.Stdout, result.Stderr, resultErr)
-		outputCursor = int64(len([]byte(terminalOutputText(task.output, result.Stdout, result.Stderr))))
+		task.reconcileFinalOutputLocked(terminalOutputText(task.output, result.Stdout, result.Stderr))
+		outputCursor = task.outputCursorLocked()
 	}
 	snap := stream.Snapshot{
 		Ref: stream.Ref{
@@ -200,13 +219,18 @@ func (s *streamService) Subscribe(ctx context.Context, req stream.SubscribeReque
 	return func(yield func(*stream.Frame, error) bool) {
 		ref := stream.NormalizeRef(req.Ref)
 		cursor := stream.CloneCursor(req.Cursor)
+		read, err := s.resolveReader(ctx, ref)
+		if err != nil {
+			yield(nil, err)
+			return
+		}
 		poll := req.PollInterval
 		if poll <= 0 {
 			poll = 100 * time.Millisecond
 		}
 		closedSent := false
 		for {
-			snap, err := s.Read(ctx, stream.ReadRequest{Ref: ref, Cursor: cursor})
+			snap, err := read(ctx, cursor)
 			if err != nil {
 				yield(nil, err)
 				return
@@ -286,9 +310,13 @@ func subagentStreamOutput(stdout string, stderr string) string {
 
 func (s *streamService) Wait(ctx context.Context, ref stream.Ref) (stream.Snapshot, error) {
 	ref = stream.NormalizeRef(ref)
+	read, err := s.resolveReader(ctx, ref)
+	if err != nil {
+		return stream.Snapshot{}, err
+	}
 	poll := 100 * time.Millisecond
 	for {
-		snap, err := s.Read(ctx, stream.ReadRequest{Ref: ref})
+		snap, err := read(ctx, stream.Cursor{})
 		if err != nil {
 			return stream.Snapshot{}, err
 		}

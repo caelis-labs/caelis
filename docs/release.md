@@ -1,6 +1,6 @@
 # Release
 
-This is the standard release and post-publish acceptance checklist. Update it
+This is the standard release and post-publish verification procedure. Update it
 when the process changes.
 
 All Go packages, including `agent-sdk/*`, are versioned and released with the
@@ -56,8 +56,6 @@ go test -race ./agent-sdk/policy/... ./agent-sdk/session/... ./agent-sdk/runtime
    caller's tag SHA. The publish job declares `needs: quality`, so no GoReleaser
    or npm publish step can start unless every quality gate succeeds for that
    exact candidate. The tag name is passed to the no-replace consumer smoke.
-   This closes the automated dependency missing from the frozen
-   [v0.25.0 acceptance review](agent-sdk-v0.25.0-acceptance.md).
 
 ## Post-publish Acceptance
 
@@ -74,8 +72,8 @@ Verify all of the following before declaring the release complete:
 4. Download at least one archive, verify its checksum, and run `caelis version`
    to confirm both version and commit.
 5. Verify the Go proxy can consume `github.com/caelis-labs/caelis@vX.Y.Z` from a
-   clean external module without a local `replace` directive. Compile the 16
-   supported SDK imports in that consumer.
+   clean external module without a local `replace` directive. Compile every
+   import in `agent-sdk/supported-packages.txt` in that consumer.
 6. Verify npm reports `X.Y.Z` for:
    - `@caelis/caelis`;
    - `@caelis/caelis-darwin-arm64` and `-darwin-x64`;
@@ -84,7 +82,8 @@ Verify all of the following before declaring the release complete:
 7. Verify the main npm package pins every optional platform dependency to the
    same version and its installed CLI reports the expected version/commit.
 8. Record the release SHA, workflow URLs, asset check, npm/Go-proxy evidence,
-   and any SDK readiness decision in a versioned acceptance note.
+   and any SDK compatibility decision in the GitHub Release or linked workflow
+   run. Do not create a repository-local release evidence document.
 
 ## Required CI Evidence
 
@@ -107,5 +106,5 @@ so current API additions are not compiled against an old fixture. The link gate 
 `agent-sdk/README.md`, and maintained Markdown under `docs/` while ignoring
 example links embedded in vendored skill text.
 
-A local checklist statement is useful diagnostic context, but it is not a
-substitute for publish-gated CI evidence.
+Local notes are useful diagnostic context, but they are not a substitute for
+publish-gated CI evidence.

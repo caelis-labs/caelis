@@ -172,6 +172,53 @@ func TestCoordinatorOwnsActivationAndAtomicHandoffCommit(t *testing.T) {
 	}
 }
 
+func TestCoordinatorHandoffDoesNotBypassActiveTurnLease(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	sessions, activeSession := newControlTestSession(t, "handoff-active-turn")
+	lease, err := sessions.(session.SessionLeaseService).AcquireSessionLease(ctx, session.AcquireSessionLeaseRequest{
+		SessionRef: activeSession.SessionRef,
+		OwnerID:    "active-turn",
+		TTL:        time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("AcquireSessionLease() error = %v", err)
+	}
+	t.Cleanup(func() {
+		_ = sessions.(session.SessionLeaseService).ReleaseSessionLease(context.Background(), session.ReleaseSessionLeaseRequest{
+			SessionRef: activeSession.SessionRef, LeaseID: lease.LeaseID, OwnerID: lease.OwnerID, ExpectedLeaseRevision: lease.Revision,
+		})
+	})
+	router, err := NewContextRouter(sessions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend := &recordingControllerBackend{activation: session.ControllerBinding{
+		Kind: session.ControllerKindACP, ControllerID: "remote-1", AgentName: "claude", EpochID: "remote-epoch",
+	}}
+	coordinator, err := NewCoordinator(CoordinatorConfig{Sessions: sessions, Controllers: backend, Context: router})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = coordinator.HandoffController(ctx, agent.HandoffControllerRequest{
+		SessionRef: activeSession.SessionRef, Kind: session.ControllerKindACP, Agent: "claude",
+	})
+	if !errors.Is(err, session.ErrLeaseConflict) {
+		t.Fatalf("HandoffController() error = %v, want active Turn ErrLeaseConflict", err)
+	}
+	if backend.activate.Agent != "" || backend.deactivations != 0 {
+		t.Fatalf("backend activity = %#v/deactivations=%d, want no endpoint effect before lease ownership", backend.activate, backend.deactivations)
+	}
+	loaded, err := sessions.Session(ctx, activeSession.SessionRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(loaded.Controller, activeSession.Controller) {
+		t.Fatalf("controller = %#v, want unchanged %#v", loaded.Controller, activeSession.Controller)
+	}
+}
+
 type controlTraceSink struct {
 	mu      sync.Mutex
 	records []agent.TraceRecord
@@ -304,6 +351,13 @@ func TestCoordinatorOwnsControllerProcessReattachAndBindingRefresh(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
+	lease, err := sessions.(session.SessionLeaseService).AcquireSessionLease(ctx, session.AcquireSessionLeaseRequest{
+		SessionRef: activeSession.SessionRef, OwnerID: "runtime-owner", TTL: time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("AcquireSessionLease() error = %v", err)
+	}
+	ctx = session.ContextWithRuntimeLease(ctx, lease)
 	updated, err := coordinator.ReattachController(ctx, controller.RecoveryRequest{
 		SessionRef: activeSession.SessionRef, Session: activeSession, ExcludeTurnID: "turn-current",
 	})

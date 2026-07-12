@@ -25,13 +25,14 @@ type taskRuntime struct {
 	runtime *Runtime
 	store   taskapi.Store
 
-	mu        sync.RWMutex
-	tasks     map[string]*commandTask
-	subagents map[string]*subagentTask
-	pending   map[string][]stream.Frame
-	order     map[string][]string
-	backends  map[sandbox.Backend]sandbox.Runtime
-	handles   map[string]map[string]struct{}
+	mu         sync.RWMutex
+	tasks      map[string]*commandTask
+	subagents  map[string]*subagentTask
+	pending    map[string][]stream.Frame
+	order      map[string][]string
+	backends   map[sandbox.Backend]sandbox.Runtime
+	handles    map[string]map[string]struct{}
+	operations map[string]struct{}
 }
 
 type sandboxRuntimeBackends interface {
@@ -43,15 +44,17 @@ type sandboxSessionRefOpener interface {
 }
 
 type commandTask struct {
-	ref        taskapi.Ref
-	sessionRef session.SessionRef
-	session    sandbox.Session
-	command    string
-	workdir    string
-	title      string
-	createdAt  time.Time
-	revision   uint64
-	lease      taskapi.Lease
+	ref           taskapi.Ref
+	sessionRef    session.SessionRef
+	session       sandbox.Session
+	command       string
+	workdir       string
+	parentCall    string
+	requestDigest string
+	title         string
+	createdAt     time.Time
+	revision      uint64
+	lease         taskapi.Lease
 
 	mu             sync.Mutex
 	state          taskapi.State
@@ -147,15 +150,52 @@ func (task *subagentTask) restoreContinuationTurn(checkpoint subagentContinuatio
 
 func newTaskRuntime(runtime *Runtime, store taskapi.Store) *taskRuntime {
 	return &taskRuntime{
-		runtime:   runtime,
-		store:     store,
-		tasks:     map[string]*commandTask{},
-		subagents: map[string]*subagentTask{},
-		pending:   map[string][]stream.Frame{},
-		order:     map[string][]string{},
-		backends:  map[sandbox.Backend]sandbox.Runtime{},
-		handles:   map[string]map[string]struct{}{},
+		runtime:    runtime,
+		store:      store,
+		tasks:      map[string]*commandTask{},
+		subagents:  map[string]*subagentTask{},
+		pending:    map[string][]stream.Frame{},
+		order:      map[string][]string{},
+		backends:   map[sandbox.Backend]sandbox.Runtime{},
+		handles:    map[string]map[string]struct{}{},
+		operations: map[string]struct{}{},
 	}
+}
+
+func (tm *taskRuntime) tryClaimSubagentOperation(ref session.SessionRef, taskID string) (func(), bool) {
+	if tm == nil {
+		return nil, false
+	}
+	operationKey := taskOperationKey(ref, taskID)
+	tm.mu.Lock()
+	if tm.operations == nil {
+		tm.operations = map[string]struct{}{}
+	}
+	if _, active := tm.operations[operationKey]; active {
+		tm.mu.Unlock()
+		return nil, false
+	}
+	tm.operations[operationKey] = struct{}{}
+	tm.mu.Unlock()
+	return func() {
+		tm.mu.Lock()
+		delete(tm.operations, operationKey)
+		tm.mu.Unlock()
+	}, true
+}
+
+func (tm *taskRuntime) hasSubagentOperation(ref session.SessionRef, taskID string) bool {
+	if tm == nil {
+		return false
+	}
+	tm.mu.RLock()
+	_, active := tm.operations[taskOperationKey(ref, taskID)]
+	tm.mu.RUnlock()
+	return active
+}
+
+func taskOperationKey(ref session.SessionRef, taskID string) string {
+	return strings.TrimSpace(session.NormalizeSessionRef(ref).SessionID) + "\x00" + strings.TrimSpace(taskID)
 }
 
 type runtimeToolContext struct {

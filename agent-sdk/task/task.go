@@ -162,13 +162,17 @@ type Store interface {
 }
 
 // PutRequest conditionally creates or replaces one task entry. Revision zero
-// is the expected revision for a create.
+// is the expected revision for a create. Reference stores derive the owning
+// session fence from the Put context, so callers must preserve the Runtime
+// execution context through durable task mutations.
 type PutRequest struct {
 	Entry            *Entry `json:"entry"`
 	ExpectedRevision uint64 `json:"expected_revision"`
 }
 
 // CASStore is the optional lost-update-safe task persistence capability.
+// Implementations that colocate tasks with sessions must enforce the owning
+// session mutation fence carried by the Put context before committing CAS.
 type CASStore interface {
 	Put(context.Context, PutRequest) (*Entry, error)
 }

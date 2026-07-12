@@ -56,10 +56,12 @@ type AttachRequest struct {
 
 // DetachRequest removes one ACP-backed participant attachment.
 type DetachRequest struct {
-	SessionRef    session.SessionRef `json:"session_ref,omitempty"`
-	Session       session.Session    `json:"session,omitempty"`
-	ParticipantID string             `json:"participant_id,omitempty"`
-	Source        string             `json:"source,omitempty"`
+	SessionRef           session.SessionRef `json:"session_ref,omitempty"`
+	Session              session.Session    `json:"session,omitempty"`
+	ParticipantID        string             `json:"participant_id,omitempty"`
+	DelegationID         string             `json:"delegation_id,omitempty"`
+	AttachmentGeneration string             `json:"attachment_generation,omitempty"`
+	Source               string             `json:"source,omitempty"`
 }
 
 // HandoffRequest activates one ACP controller for a session.
@@ -200,6 +202,8 @@ func NormalizeDetachRequest(in DetachRequest) DetachRequest {
 	out.SessionRef = session.NormalizeSessionRef(in.SessionRef)
 	out.Session = session.CloneSession(in.Session)
 	out.ParticipantID = strings.TrimSpace(in.ParticipantID)
+	out.DelegationID = strings.TrimSpace(in.DelegationID)
+	out.AttachmentGeneration = strings.TrimSpace(in.AttachmentGeneration)
 	out.Source = strings.TrimSpace(in.Source)
 	return out
 }

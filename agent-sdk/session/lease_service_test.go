@@ -101,12 +101,18 @@ func TestSessionLeaseServiceConformance(t *testing.T) {
 			}
 
 			staleGuard := session.MutationGuard{Authority: session.MutationAuthorityRuntime, LeaseID: second.LeaseID, OwnerID: second.OwnerID, FencingToken: second.FencingToken}
-			assertLeaseFencedMutations(t, service, active.SessionRef, staleGuard)
+			assertLeaseFencedMutations(t, service, active.SessionRef, staleGuard, takenOver)
 		})
 	}
 }
 
-func assertLeaseFencedMutations(t *testing.T, service session.Service, ref session.SessionRef, stale session.MutationGuard) {
+func assertLeaseFencedMutations(
+	t *testing.T,
+	service session.Service,
+	ref session.SessionRef,
+	stale session.MutationGuard,
+	current session.SessionLease,
+) {
 	t.Helper()
 	user := model.NewTextMessage(model.RoleUser, "stale append")
 	if _, err := service.AppendEvent(context.Background(), session.AppendEventRequest{
@@ -142,6 +148,57 @@ func assertLeaseFencedMutations(t *testing.T, service session.Service, ref sessi
 		SessionRef: ref, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Event: &session.Event{Type: session.EventTypeUser, Message: &controlMessage},
 	}); err != nil {
 		t.Fatalf("control AppendEvent error = %v", err)
+	}
+	if _, err := service.AppendEvent(context.Background(), session.AppendEventRequest{
+		SessionRef: ref, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeApproval), Event: &session.Event{Type: session.EventTypeUser, Message: &controlMessage},
+	}); err != nil {
+		t.Fatalf("overlapping approval AppendEvent error = %v", err)
+	}
+	if _, err := service.AppendEvent(context.Background(), session.AppendEventRequest{
+		SessionRef: ref, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeParticipant), Event: &session.Event{Type: session.EventTypeUser, Message: &controlMessage},
+	}); err != nil {
+		t.Fatalf("overlapping participant AppendEvent error = %v", err)
+	}
+	if _, err := service.AppendEvent(context.Background(), session.AppendEventRequest{
+		SessionRef: ref, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeHandoff), Event: &session.Event{Type: session.EventTypeUser, Message: &controlMessage},
+	}); !errors.Is(err, session.ErrLeaseConflict) {
+		t.Fatalf("unfenced handoff AppendEvent error = %v, want ErrLeaseConflict", err)
+	}
+	staleControl := session.MutationGuard{
+		Authority: session.MutationAuthorityControl, Purpose: session.ControlMutationPurposeHandoff,
+		LeaseID: stale.LeaseID, OwnerID: stale.OwnerID, FencingToken: stale.FencingToken,
+	}
+	if _, err := service.AppendEvent(context.Background(), session.AppendEventRequest{
+		SessionRef: ref, MutationGuard: staleControl, Event: &session.Event{Type: session.EventTypeUser, Message: &controlMessage},
+	}); !errors.Is(err, session.ErrLeaseConflict) {
+		t.Fatalf("stale fenced handoff AppendEvent error = %v, want ErrLeaseConflict", err)
+	}
+	placedCtx := session.ContextWithRuntimeLease(context.Background(), current)
+	if _, err := service.AppendEvent(context.Background(), session.AppendEventRequest{
+		SessionRef:    ref,
+		MutationGuard: session.ControlMutationGuardWithRuntimeLease(placedCtx, session.ControlMutationPurposeHandoff),
+		Event:         &session.Event{Type: session.EventTypeUser, Message: &controlMessage},
+	}); err != nil {
+		t.Fatalf("matching fenced handoff AppendEvent error = %v", err)
+	}
+	if err := service.(session.SessionLeaseService).ReleaseSessionLease(context.Background(), session.ReleaseSessionLeaseRequest{
+		SessionRef: ref, LeaseID: current.LeaseID, OwnerID: current.OwnerID, ExpectedLeaseRevision: current.Revision,
+	}); err != nil {
+		t.Fatalf("ReleaseSessionLease(current) error = %v", err)
+	}
+	if _, err := service.AppendEvent(context.Background(), session.AppendEventRequest{
+		SessionRef:    ref,
+		MutationGuard: session.ControlMutationGuardWithRuntimeLease(placedCtx, session.ControlMutationPurposeHandoff),
+		Event:         &session.Event{Type: session.EventTypeUser, Message: &controlMessage},
+	}); !errors.Is(err, session.ErrLeaseConflict) {
+		t.Fatalf("late fenced handoff AppendEvent error = %v, want ErrLeaseConflict", err)
+	}
+	if _, err := service.AppendEvent(context.Background(), session.AppendEventRequest{
+		SessionRef:    ref,
+		MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeHandoff),
+		Event:         &session.Event{Type: session.EventTypeUser, Message: &controlMessage},
+	}); err != nil {
+		t.Fatalf("quiescent unfenced handoff AppendEvent error = %v", err)
 	}
 }
 

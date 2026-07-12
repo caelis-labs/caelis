@@ -290,18 +290,21 @@ type ControllerBinding struct {
 
 // ParticipantBinding is the durable participant attachment for one session.
 type ParticipantBinding struct {
-	ID             string          `json:"id,omitempty"`
-	Kind           ParticipantKind `json:"kind,omitempty"`
-	Role           ParticipantRole `json:"role,omitempty"`
-	AgentName      string          `json:"agent_name,omitempty"`
-	Label          string          `json:"label,omitempty"`
-	SessionID      string          `json:"session_id,omitempty"`
-	Source         string          `json:"source,omitempty"`
-	ParentTurnID   string          `json:"parent_turn_id,omitempty"`
-	DelegationID   string          `json:"delegation_id,omitempty"`
-	ContextSyncSeq int             `json:"context_sync_seq,omitempty"`
-	AttachedAt     time.Time       `json:"attached_at,omitempty"`
-	ControllerRef  string          `json:"controller_ref,omitempty"`
+	ID           string          `json:"id,omitempty"`
+	Kind         ParticipantKind `json:"kind,omitempty"`
+	Role         ParticipantRole `json:"role,omitempty"`
+	AgentName    string          `json:"agent_name,omitempty"`
+	Label        string          `json:"label,omitempty"`
+	SessionID    string          `json:"session_id,omitempty"`
+	Source       string          `json:"source,omitempty"`
+	ParentTurnID string          `json:"parent_turn_id,omitempty"`
+	DelegationID string          `json:"delegation_id,omitempty"`
+	// AttachmentGeneration identifies the exact live endpoint instance behind
+	// this durable binding. Conditional detach must match it.
+	AttachmentGeneration string    `json:"attachment_generation,omitempty"`
+	ContextSyncSeq       int       `json:"context_sync_seq,omitempty"`
+	AttachedAt           time.Time `json:"attached_at,omitempty"`
+	ControllerRef        string    `json:"controller_ref,omitempty"`
 }
 
 // Session describes one session row.
@@ -317,8 +320,11 @@ type Session struct {
 	UpdatedAt    time.Time            `json:"updated_at,omitempty"`
 }
 
-// SessionLease is a neutral cloud-store coordination record. It carries no
-// worker-placement or scheduling policy; those decisions remain in Control.
+// SessionLease is a neutral cloud-store coordination record for one canonical
+// Turn or exclusive controller-ownership transition. It is not a lock against
+// all Session collaboration: explicitly classified Control mutations may
+// coexist, while Runtime and exclusive Control mutations carry its fence.
+// Worker-placement and scheduling policy remain in Control.
 type SessionLease struct {
 	SessionRef   SessionRef `json:"session_ref"`
 	LeaseID      string     `json:"lease_id,omitempty"`
@@ -330,7 +336,8 @@ type SessionLease struct {
 	ExpiresAt    time.Time  `json:"expires_at,omitempty"`
 }
 
-// AcquireSessionLeaseRequest requests a store-level execution lease.
+// AcquireSessionLeaseRequest requests a store-level canonical execution or
+// controller-transition lease.
 type AcquireSessionLeaseRequest struct {
 	SessionRef SessionRef    `json:"session_ref"`
 	OwnerID    string        `json:"owner_id,omitempty"`
@@ -453,26 +460,37 @@ type BindControllerWithEventRequest struct {
 
 // PutParticipantRequest creates or updates one participant binding.
 type PutParticipantRequest struct {
-	SessionRef    SessionRef         `json:"session_ref"`
-	MutationGuard MutationGuard      `json:"mutation_guard,omitempty"`
-	Binding       ParticipantBinding `json:"binding"`
+	SessionRef       SessionRef    `json:"session_ref"`
+	ExpectedRevision *uint64       `json:"expected_revision,omitempty"`
+	MutationGuard    MutationGuard `json:"mutation_guard,omitempty"`
+	// ExpectedDelegationID optionally makes participant identity replacement a
+	// delegation CAS. Nil defaults to Binding.DelegationID, including empty.
+	ExpectedDelegationID *string            `json:"expected_delegation_id,omitempty"`
+	Binding              ParticipantBinding `json:"binding"`
 }
 
 // RemoveParticipantRequest detaches one participant binding.
 type RemoveParticipantRequest struct {
-	SessionRef    SessionRef    `json:"session_ref"`
-	MutationGuard MutationGuard `json:"mutation_guard,omitempty"`
-	ParticipantID string        `json:"participant_id,omitempty"`
+	SessionRef       SessionRef    `json:"session_ref"`
+	ExpectedRevision *uint64       `json:"expected_revision,omitempty"`
+	MutationGuard    MutationGuard `json:"mutation_guard,omitempty"`
+	ParticipantID    string        `json:"participant_id,omitempty"`
+	// ExpectedDelegationID, when non-nil, prevents one delegation from
+	// detaching another delegation that reused the same participant ID.
+	ExpectedDelegationID *string `json:"expected_delegation_id,omitempty"`
 }
 
 // PutParticipantWithEventRequest creates or updates one participant binding and
 // appends the matching lifecycle event in one store transaction.
 type PutParticipantWithEventRequest struct {
-	SessionRef       SessionRef         `json:"session_ref"`
-	ExpectedRevision *uint64            `json:"expected_revision,omitempty"`
-	MutationGuard    MutationGuard      `json:"mutation_guard,omitempty"`
-	Binding          ParticipantBinding `json:"binding"`
-	Event            *Event             `json:"event"`
+	SessionRef       SessionRef    `json:"session_ref"`
+	ExpectedRevision *uint64       `json:"expected_revision,omitempty"`
+	MutationGuard    MutationGuard `json:"mutation_guard,omitempty"`
+	// ExpectedDelegationID optionally makes participant identity replacement a
+	// delegation CAS. Nil defaults to Binding.DelegationID, including empty.
+	ExpectedDelegationID *string            `json:"expected_delegation_id,omitempty"`
+	Binding              ParticipantBinding `json:"binding"`
+	Event                *Event             `json:"event"`
 }
 
 // RemoveParticipantWithEventRequest removes one participant binding and appends
@@ -482,7 +500,10 @@ type RemoveParticipantWithEventRequest struct {
 	ExpectedRevision *uint64       `json:"expected_revision,omitempty"`
 	MutationGuard    MutationGuard `json:"mutation_guard,omitempty"`
 	ParticipantID    string        `json:"participant_id,omitempty"`
-	Event            *Event        `json:"event"`
+	// ExpectedDelegationID, when non-nil, prevents one delegation from
+	// detaching another delegation that reused the same participant ID.
+	ExpectedDelegationID *string `json:"expected_delegation_id,omitempty"`
+	Event                *Event  `json:"event"`
 }
 
 // ListSessionsRequest lists sessions in one workspace or user namespace.
@@ -582,6 +603,10 @@ type ControllerBindingStore interface {
 }
 
 // ParticipantBindingStore mutates durable participant bindings.
+// Implementations must return RevisionConflictError for a failed revision CAS
+// and ParticipantBindingConflictError for a failed delegation CAS. If a
+// mutation commits but reporting it fails, implementations must return the
+// exact committed Session together with an error matching CommittedError.
 type ParticipantBindingStore interface {
 	PutParticipant(context.Context, PutParticipantRequest) (Session, error)
 	RemoveParticipant(context.Context, RemoveParticipantRequest) (Session, error)
@@ -617,6 +642,10 @@ type Service interface {
 
 // ParticipantLifecycleService is implemented by stores that can atomically
 // change participant bindings and append their replayable lifecycle events.
+// Implementations must enforce ExpectedRevision, MutationGuard, and the
+// delegation identity CAS carried by participant lifecycle requests. CAS
+// failures and post-commit reporting failures use the same normative error and
+// exact-result contract documented by ParticipantBindingStore.
 type ParticipantLifecycleService interface {
 	PutParticipantWithEvent(context.Context, PutParticipantWithEventRequest) (Session, *Event, error)
 	RemoveParticipantWithEvent(context.Context, RemoveParticipantWithEventRequest) (Session, *Event, error)
@@ -640,8 +669,9 @@ type EventBatchStateService interface {
 	AppendEventsAndUpdateState(context.Context, AppendEventsAndUpdateStateRequest) ([]*Event, error)
 }
 
-// SessionLeaseService coordinates exclusive session execution across Runtime
-// instances. Control owns placement and heartbeat policy; stores own lease CAS.
+// SessionLeaseService coordinates one canonical Turn or controller transition
+// across Runtime instances. Control owns placement and heartbeat policy;
+// stores own lease CAS and mutation-fence validation.
 type SessionLeaseService interface {
 	AcquireSessionLease(context.Context, AcquireSessionLeaseRequest) (SessionLease, error)
 	HeartbeatSessionLease(context.Context, HeartbeatSessionLeaseRequest) (SessionLease, error)

@@ -28,18 +28,18 @@ func NewTaskStore(store *Store) *TaskStore {
 	return &TaskStore{store: store}
 }
 
-func (s *TaskStore) Upsert(_ context.Context, entry *taskapi.Entry) error {
-	_, err := s.put(entry, nil)
+func (s *TaskStore) Upsert(ctx context.Context, entry *taskapi.Entry) error {
+	_, err := s.put(entry, nil, session.RuntimeMutationGuard(ctx))
 	return err
 }
 
 // Put conditionally persists one task state using task revision CAS.
-func (s *TaskStore) Put(_ context.Context, req taskapi.PutRequest) (*taskapi.Entry, error) {
+func (s *TaskStore) Put(ctx context.Context, req taskapi.PutRequest) (*taskapi.Entry, error) {
 	expected := req.ExpectedRevision
-	return s.put(req.Entry, &expected)
+	return s.put(req.Entry, &expected, session.RuntimeMutationGuard(ctx))
 }
 
-func (s *TaskStore) put(entry *taskapi.Entry, expected *uint64) (*taskapi.Entry, error) {
+func (s *TaskStore) put(entry *taskapi.Entry, expected *uint64, guard session.MutationGuard) (*taskapi.Entry, error) {
 	if s == nil || s.store == nil {
 		return nil, fmt.Errorf("agent-sdk/session/file: task store is not initialized")
 	}
@@ -56,7 +56,14 @@ func (s *TaskStore) put(entry *taskapi.Entry, expected *uint64) (*taskapi.Entry,
 
 	var out *taskapi.Entry
 	err := s.store.withRootWriteLock(func() error {
-		var err error
+		doc, err := s.store.readDocumentForRef(entry.Session)
+		if err == nil {
+			if err := validateFileMutationGuard(activeDocumentLease(doc), guard, s.store.now()); err != nil {
+				return err
+			}
+		} else if !errors.Is(err, session.ErrSessionNotFound) || guard.Authority != "" {
+			return err
+		}
 		out, err = s.store.upsertTaskIndex(entry, expected)
 		return err
 	})
@@ -334,8 +341,11 @@ func (s *Store) upsertTaskIndex(entry *taskapi.Entry, expected *uint64) (*taskap
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("agent-sdk/session/file: commit task index: %w", err)
 	}
+	if err := s.injectTransactionFault("task_index_post_commit"); err != nil {
+		return taskapi.CloneEntry(next), &session.CommittedError{Err: err}
+	}
 	if err := syncDir(filepath.Dir(s.sessionIndexPath())); err != nil {
-		return nil, err
+		return taskapi.CloneEntry(next), &session.CommittedError{Err: err}
 	}
 	return taskapi.CloneEntry(next), nil
 }

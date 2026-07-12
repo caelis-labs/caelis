@@ -135,6 +135,8 @@ package github.com/caelis-labs/caelis/agent-sdk
   type ControllerEventForwardRequest struct {
       ActiveSession session.Session
       SessionRef    session.SessionRef
+
+      MutationGuard session.MutationGuard
       TurnID        string
       Source        EventSource
       Publisher     SourceEventPublisher
@@ -1266,10 +1268,12 @@ package github.com/caelis-labs/caelis/agent-sdk/runtime/controller
       ExcludeTurnID string                    `json:"exclude_turn_id,omitempty"`
   }
   type DetachRequest struct {
-      SessionRef    session.SessionRef `json:"session_ref,omitempty"`
-      Session       session.Session    `json:"session,omitempty"`
-      ParticipantID string             `json:"participant_id,omitempty"`
-      Source        string             `json:"source,omitempty"`
+      SessionRef           session.SessionRef `json:"session_ref,omitempty"`
+      Session              session.Session    `json:"session,omitempty"`
+      ParticipantID        string             `json:"participant_id,omitempty"`
+      DelegationID         string             `json:"delegation_id,omitempty"`
+      AttachmentGeneration string             `json:"attachment_generation,omitempty"`
+      Source               string             `json:"source,omitempty"`
   }
   type HandoffRequest struct {
       SessionRef     session.SessionRef `json:"session_ref,omitempty"`
@@ -1665,6 +1669,7 @@ package github.com/caelis-labs/caelis/agent-sdk/session
       ControlMutationPurposeHandoff      ControlMutationPurpose = "handoff"
       ControlMutationPurposeWatchdog     ControlMutationPurpose = "watchdog"
       ControlMutationPurposeCoordinator  ControlMutationPurpose = "coordinator"
+      ControlMutationPurposeParticipant  ControlMutationPurpose = "participant"
       ControlMutationPurposeTest         ControlMutationPurpose = "test"
       ControlMutationPurposeSystemCommit ControlMutationPurpose = "system_commit"
   )
@@ -1791,6 +1796,8 @@ package github.com/caelis-labs/caelis/agent-sdk/session
   func (e *LeaseConflictError) Error() string
   func (e *LeaseConflictError) ErrorCode() errorcode.Code
   func (e *LeaseConflictError) Is(target error) bool
+  func (e *ParticipantBindingConflictError) Error() string
+  func (e *ParticipantBindingConflictError) ErrorCode() errorcode.Code
   func (e *PauseTokenTransitionError) Error() string
   func (e *PauseTokenTransitionError) ErrorCode() errorcode.Code
   func (e *RevisionConflictError) Error() string
@@ -1808,6 +1815,7 @@ package github.com/caelis-labs/caelis/agent-sdk/session
   func CanonicalToolName(event *Event, update *ProtocolUpdate) string
   func CanonicalizeEvent(event *Event) *Event
   func CheckExpectedRevision(active Session, expected *uint64) error
+  func CheckParticipantDelegation(activeSession *Session, participantID, expectedDelegation string) error
   func CloneActorRef(in ActorRef) ActorRef
   func CloneControllerBinding(in ControllerBinding) ControllerBinding
   func CloneEvent(in *Event) *Event
@@ -1827,7 +1835,10 @@ package github.com/caelis-labs/caelis/agent-sdk/session
   func CloneState(state map[string]any) map[string]any
   func CloneToolExecution(in ToolExecution) ToolExecution
   func ContextWithRuntimeLease(ctx context.Context, lease SessionLease) context.Context
+  func ContextWithoutRuntimeLease(ctx context.Context) context.Context
   func ControlMutationGuard(purpose ControlMutationPurpose) MutationGuard
+  func ControlMutationGuardWithRuntimeLease(ctx context.Context, purpose ControlMutationPurpose) MutationGuard
+  func ControlMutationMayOverlapRuntimeLease(purpose ControlMutationPurpose) bool
   func DefaultMigrationRegistry() *MigrationRegistry
   func EventDisplayText(event *Event) string
   func EventText(event *Event) string
@@ -2171,18 +2182,25 @@ package github.com/caelis-labs/caelis/agent-sdk/session
       FencingToken uint64                 `json:"fencing_token,omitempty"`
   }
   type ParticipantBinding struct {
-      ID             string          `json:"id,omitempty"`
-      Kind           ParticipantKind `json:"kind,omitempty"`
-      Role           ParticipantRole `json:"role,omitempty"`
-      AgentName      string          `json:"agent_name,omitempty"`
-      Label          string          `json:"label,omitempty"`
-      SessionID      string          `json:"session_id,omitempty"`
-      Source         string          `json:"source,omitempty"`
-      ParentTurnID   string          `json:"parent_turn_id,omitempty"`
-      DelegationID   string          `json:"delegation_id,omitempty"`
-      ContextSyncSeq int             `json:"context_sync_seq,omitempty"`
-      AttachedAt     time.Time       `json:"attached_at,omitempty"`
-      ControllerRef  string          `json:"controller_ref,omitempty"`
+      ID           string          `json:"id,omitempty"`
+      Kind         ParticipantKind `json:"kind,omitempty"`
+      Role         ParticipantRole `json:"role,omitempty"`
+      AgentName    string          `json:"agent_name,omitempty"`
+      Label        string          `json:"label,omitempty"`
+      SessionID    string          `json:"session_id,omitempty"`
+      Source       string          `json:"source,omitempty"`
+      ParentTurnID string          `json:"parent_turn_id,omitempty"`
+      DelegationID string          `json:"delegation_id,omitempty"`
+
+      AttachmentGeneration string    `json:"attachment_generation,omitempty"`
+      ContextSyncSeq       int       `json:"context_sync_seq,omitempty"`
+      AttachedAt           time.Time `json:"attached_at,omitempty"`
+      ControllerRef        string    `json:"controller_ref,omitempty"`
+  }
+  type ParticipantBindingConflictError struct {
+      ParticipantID      string
+      ExpectedDelegation string
+      ActualDelegation   string
   }
   type ParticipantBindingStore interface {
       PutParticipant(context.Context, PutParticipantRequest) (Session, error)
@@ -2330,16 +2348,21 @@ package github.com/caelis-labs/caelis/agent-sdk/session
   }
   type ProtocolUpdateType string
   type PutParticipantRequest struct {
-      SessionRef    SessionRef         `json:"session_ref"`
-      MutationGuard MutationGuard      `json:"mutation_guard,omitempty"`
-      Binding       ParticipantBinding `json:"binding"`
+      SessionRef       SessionRef    `json:"session_ref"`
+      ExpectedRevision *uint64       `json:"expected_revision,omitempty"`
+      MutationGuard    MutationGuard `json:"mutation_guard,omitempty"`
+
+      ExpectedDelegationID *string            `json:"expected_delegation_id,omitempty"`
+      Binding              ParticipantBinding `json:"binding"`
   }
   type PutParticipantWithEventRequest struct {
-      SessionRef       SessionRef         `json:"session_ref"`
-      ExpectedRevision *uint64            `json:"expected_revision,omitempty"`
-      MutationGuard    MutationGuard      `json:"mutation_guard,omitempty"`
-      Binding          ParticipantBinding `json:"binding"`
-      Event            *Event             `json:"event"`
+      SessionRef       SessionRef    `json:"session_ref"`
+      ExpectedRevision *uint64       `json:"expected_revision,omitempty"`
+      MutationGuard    MutationGuard `json:"mutation_guard,omitempty"`
+
+      ExpectedDelegationID *string            `json:"expected_delegation_id,omitempty"`
+      Binding              ParticipantBinding `json:"binding"`
+      Event                *Event             `json:"event"`
   }
   type Reader interface {
       Session(context.Context, SessionRef) (Session, error)
@@ -2352,16 +2375,21 @@ package github.com/caelis-labs/caelis/agent-sdk/session
       ExpectedLeaseRevision uint64     `json:"expected_lease_revision,omitempty"`
   }
   type RemoveParticipantRequest struct {
-      SessionRef    SessionRef    `json:"session_ref"`
-      MutationGuard MutationGuard `json:"mutation_guard,omitempty"`
-      ParticipantID string        `json:"participant_id,omitempty"`
+      SessionRef       SessionRef    `json:"session_ref"`
+      ExpectedRevision *uint64       `json:"expected_revision,omitempty"`
+      MutationGuard    MutationGuard `json:"mutation_guard,omitempty"`
+      ParticipantID    string        `json:"participant_id,omitempty"`
+
+      ExpectedDelegationID *string `json:"expected_delegation_id,omitempty"`
   }
   type RemoveParticipantWithEventRequest struct {
       SessionRef       SessionRef    `json:"session_ref"`
       ExpectedRevision *uint64       `json:"expected_revision,omitempty"`
       MutationGuard    MutationGuard `json:"mutation_guard,omitempty"`
       ParticipantID    string        `json:"participant_id,omitempty"`
-      Event            *Event        `json:"event"`
+
+      ExpectedDelegationID *string `json:"expected_delegation_id,omitempty"`
+      Event                *Event  `json:"event"`
   }
   type RevisionConflictError struct {
       SessionID string
@@ -2520,6 +2548,25 @@ package github.com/caelis-labs/caelis/agent-sdk/session
 
       ErrUnsupportedLegacyFormat = errorcode.New(errorcode.Unsupported, "agent-sdk/session: unsupported legacy format")
   )
+
+package github.com/caelis-labs/caelis/agent-sdk/session/sessiontest
+  const (
+      ParticipantPlainPut        ParticipantMutation = "plain_put"
+      ParticipantPlainRemove     ParticipantMutation = "plain_remove"
+      ParticipantLifecyclePut    ParticipantMutation = "lifecycle_put"
+      ParticipantLifecycleRemove ParticipantMutation = "lifecycle_remove"
+  )
+  func ParticipantLifecycleConformance(t *testing.T, factory func(*testing.T) ParticipantStore)
+  type ParticipantCommittedFailureInjector interface {
+      ArmParticipantCommittedFailure(ParticipantMutation)
+  }
+  type ParticipantMutation string
+  type ParticipantStore interface {
+      session.Service
+      session.ParticipantLifecycleService
+      session.SessionLeaseService
+      ParticipantCommittedFailureInjector
+  }
 
 package github.com/caelis-labs/caelis/agent-sdk/skill
   const (

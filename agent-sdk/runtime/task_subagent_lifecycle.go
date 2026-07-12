@@ -72,7 +72,8 @@ func (tm *taskRuntime) attachSubagentParticipant(ctx context.Context, activeSess
 		},
 	}
 	_, _, err = lifecycle.PutParticipantWithEvent(ctx, session.PutParticipantWithEventRequest{
-		SessionRef: task.sessionRef, ExpectedRevision: &current.Revision, MutationGuard: session.RuntimeMutationGuard(ctx), Binding: binding, Event: event,
+		SessionRef: task.sessionRef, ExpectedRevision: &current.Revision, MutationGuard: session.RuntimeMutationGuard(ctx),
+		ExpectedDelegationID: stringPointer(task.ref.TaskID), Binding: binding, Event: event,
 	})
 	return err
 }

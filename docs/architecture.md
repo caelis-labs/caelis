@@ -47,14 +47,11 @@ Document responsibilities are intentionally separate:
 - this file owns the layer and repository map;
 - [Agent SDK Boundary](agent-sdk-boundary.md) owns normative SDK/Control/ACP
   decisions;
-- [Agent SDK v0.25.0 Acceptance Review](agent-sdk-v0.25.0-acceptance.md) is the
-  frozen release verdict;
-- [Agent SDK 9acbf75d Acceptance](agent-sdk-9acbf75d-acceptance.md) is the
-  current local-candidate evidence index (post-`30ee5f02` repair);
-- [Agent SDK Stabilization Checklist](agent-sdk-stabilization-checklist.md) is
-  the live follow-up board;
 - [Agent SDK Usage and Compatibility](agent-sdk-usage.md) owns consumer-facing
-  contracts and current limitations.
+  contracts and current limitations;
+- [ACP Projection Architecture](acp-projection-architecture.md) owns semantic,
+  wire, and surface projection boundaries;
+- [Release](release.md) owns release and post-publish verification mechanics.
 
 ## Current Map
 
@@ -142,21 +139,29 @@ Repeatable SDK boundary gates:
 - `make commit-check`: run formatting, lint, architecture and package-boundary
   checks, vet, tests, and builds.
 
-The update and coordination semantic owners, product assembly peel-off,
-Control-owned handoff, neutral task principals/roles, and common Runtime
-pipeline for system Agents are implemented. Durable continuation is explicitly
-process-local live attach, while the production Control host owns fenced
-cross-Runtime session leases. Rolling API compatibility, split current/tagged
-consumer gates, and non-empty regression enforcement are implemented for the
-local candidate. Execution capability wiring and the dynamic liveness watchdog
-are Control-owned. The watchdog
-uses lifecycle, usage, progress, elapsed-time, and repeated-action signals; it
-does not restore a fixed SDK step budget. Product source policy no longer lives
-in SDK task code. Module or repository extraction is not on the roadmap.
-Current status is recorded in
-[the candidate acceptance](agent-sdk-9acbf75d-acceptance.md) after the
-`30ee5f02` independent rejection repairs; a new candidate tag has not been
-created or published.
+The implementation centralizes update and coordination semantics, keeps
+product assembly and handoff policy in Control, uses neutral task principals
+and roles, and routes system Agents through the common Runtime pipeline.
+Durable continuation is explicitly process-local live attach, while the
+production Control host owns fenced cross-Runtime Session execution leases.
+The lease serializes one canonical Turn rather than one Agent identity: local
+and ACP controllers plus Side ACP or Reviewer participant prompts use the same
+fenced envelope. Participant lifecycle is explicit Control metadata with
+revision/delegation/generation CAS; handoff acquires the exclusive lease before
+endpoint activation and binding commit. ACP event forwarding preserves the
+owning Turn fence instead of becoming an unscoped writer.
+
+Execution capability wiring and the liveness watchdog are Control-owned. The
+watchdog is a generation-tail loop probe for repeated pure-text cycles and
+repeated content-plus-tool-argument steps, including normalized protocol-only
+ACP tool calls. It resets pure-text evidence at tool boundaries and may
+Interrupt only after high-confidence evidence is reviewed. Review is
+asynchronous and bounded to eight active pipelines; saturation drops evidence
+rather than queueing or cancelling a Turn. Reviewer/checkpoint failures do not
+delay or fail normal completion, and normal finish invalidates late decisions.
+This does not restore a fixed SDK step or wall-clock budget. Product source
+policy no longer lives in SDK task code. Module or repository extraction is not
+a goal.
 
 ## Durable State
 

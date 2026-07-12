@@ -55,13 +55,12 @@ the resulting normalized facts. The full ownership, dynamic orchestration, and
 no-workflow rules are defined once in
 [Agent SDK Boundary](agent-sdk-boundary.md).
 
-At the local `9acbf75d` candidate, message/tool/plan updates plus permission,
-cancellation, participant, and handoff use the centralized semantic path.
+Message/tool/plan updates plus permission, cancellation, participant, and
+handoff use the centralized semantic path.
 External controller permission ingress and prompt responses route through
 `protocol/acp/semantic`; built-in participant and Control-authorized handoff
 facts use SDK-owned constructors. Architecture lint rejects new direct
-participant/handoff protocol construction outside the SDK semantic owner. See
-the [candidate acceptance](agent-sdk-9acbf75d-acceptance.md).
+participant/handoff protocol construction outside the SDK semantic owner.
 
 ## Terminal Projection
 
@@ -89,6 +88,14 @@ but it is not part of session identity.
 
 ACP and gateway surfaces must pass the session id they received and must not
 keep in-memory `sessionId -> workspace/cwd` caches to repair later requests.
+
+ACP projection does not create a second persistence authority. Main-controller
+and participant prompt streams receive the owning Turn's SDK `MutationGuard`,
+and every canonical event materialized by `internal/acpbridge` preserves it on
+the Session append. Participant attach/detach is separately classified as
+Control-owned lifecycle metadata; controller handoff remains an exclusive,
+fenced Control transition. Transport source labels and `_meta` never grant
+lease authority.
 
 Before v1.0, unsupported old session/index layouts may fail explicitly. Caelis
 prefers the clean identity model over compatibility fallbacks.

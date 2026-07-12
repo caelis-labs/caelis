@@ -2,6 +2,8 @@ package controller
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -38,7 +40,12 @@ type Manager struct {
 
 	mu           sync.RWMutex
 	controllers  map[string]*controllerRun
-	participants map[string]*participantRun
+	participants map[participantRunKey]*participantRun
+}
+
+type participantRunKey struct {
+	sessionID     string
+	participantID string
 }
 
 type clientStarter func(
@@ -125,7 +132,7 @@ func NewManager(cfg Config) (*Manager, error) {
 		clientInfo:   cfg.ClientInfo,
 		clock:        clock,
 		controllers:  map[string]*controllerRun{},
-		participants: map[string]*participantRun{},
+		participants: map[participantRunKey]*participantRun{},
 	}
 	manager.startClient = manager.startACPClient
 	return manager, nil
@@ -564,14 +571,25 @@ func isACPClientConnectionError(err error) bool {
 
 func (m *Manager) Attach(ctx context.Context, req controller.AttachRequest) (session.ParticipantBinding, error) {
 	req = controller.NormalizeAttachRequest(req)
+	if _, err := participantRequestSessionID(req.SessionRef, req.Session); err != nil {
+		return session.ParticipantBinding{}, err
+	}
 	if strings.TrimSpace(req.Session.SessionID) == "" {
 		return session.ParticipantBinding{}, fmt.Errorf("internal/acpagentbridge/controller: session id is required")
 	}
 	if id := strings.TrimSpace(req.Binding.ID); id != "" {
+		key := participantKey(req.Session.SessionID, id)
 		m.mu.RLock()
-		run := m.participants[id]
+		run := m.participants[key]
 		m.mu.RUnlock()
 		if run != nil {
+			live := run.bindingSnapshot()
+			if expected := strings.TrimSpace(req.Binding.DelegationID); expected != "" && expected != strings.TrimSpace(live.DelegationID) {
+				return session.ParticipantBinding{}, fmt.Errorf("internal/acpagentbridge/controller: participant %q delegation changed", id)
+			}
+			if expected := strings.TrimSpace(req.Binding.AttachmentGeneration); expected != "" && expected != strings.TrimSpace(live.AttachmentGeneration) {
+				return session.ParticipantBinding{}, fmt.Errorf("internal/acpagentbridge/controller: participant %q attachment generation changed", id)
+			}
 			return run.refreshBinding(req.Binding), nil
 		}
 	}
@@ -583,7 +601,7 @@ func (m *Manager) Attach(ctx context.Context, req controller.AttachRequest) (ses
 	if err != nil {
 		return session.ParticipantBinding{}, err
 	}
-	return session.CloneParticipantBinding(run.binding), nil
+	return run.bindingSnapshot(), nil
 }
 
 func (m *Manager) PromptParticipant(ctx context.Context, req controller.ParticipantPromptRequest) (controller.TurnResult, error) {
@@ -591,8 +609,15 @@ func (m *Manager) PromptParticipant(ctx context.Context, req controller.Particip
 	if req.ParticipantID == "" {
 		return controller.TurnResult{}, fmt.Errorf("internal/acpagentbridge/controller: participant id is required")
 	}
+	sessionID, err := participantRequestSessionID(req.SessionRef, req.Session)
+	if err != nil {
+		return controller.TurnResult{}, err
+	}
+	if sessionID == "" {
+		return controller.TurnResult{}, fmt.Errorf("internal/acpagentbridge/controller: session id is required")
+	}
 	m.mu.RLock()
-	run := m.participants[req.ParticipantID]
+	run := m.participants[participantKey(sessionID, req.ParticipantID)]
 	m.mu.RUnlock()
 	if run == nil {
 		return controller.TurnResult{}, fmt.Errorf("internal/acpagentbridge/controller: participant %q not found", req.ParticipantID)
@@ -607,7 +632,10 @@ func (m *Manager) PromptParticipant(ctx context.Context, req controller.Particip
 	}
 	turnCtx, cancel := context.WithCancel(ctx)
 	handle := newTurnHandle(cancel)
-	run.beginPrompt(req, handle)
+	if err := run.beginPrompt(req, handle); err != nil {
+		cancel()
+		return controller.TurnResult{}, err
+	}
 	go func() {
 		defer handle.finish()
 		if _, err := run.client.PromptParts(turnCtx, run.remoteSessionID, prompt, nil); err != nil {
@@ -630,9 +658,26 @@ func (m *Manager) Detach(ctx context.Context, req controller.DetachRequest) erro
 	if req.ParticipantID == "" {
 		return nil
 	}
+	sessionID, err := participantRequestSessionID(req.SessionRef, req.Session)
+	if err != nil {
+		return err
+	}
+	if sessionID == "" {
+		return fmt.Errorf("internal/acpagentbridge/controller: session id is required")
+	}
+	key := participantKey(sessionID, req.ParticipantID)
 	m.mu.Lock()
-	run := m.participants[req.ParticipantID]
-	delete(m.participants, req.ParticipantID)
+	run := m.participants[key]
+	if run != nil {
+		binding := run.bindingSnapshot()
+		delegationMatches := req.DelegationID == strings.TrimSpace(binding.DelegationID)
+		generationMatches := req.AttachmentGeneration == strings.TrimSpace(binding.AttachmentGeneration)
+		if delegationMatches && generationMatches {
+			delete(m.participants, key)
+		} else {
+			run = nil
+		}
+	}
 	m.mu.Unlock()
 	if run != nil && run.client != nil {
 		_ = run.client.Close(context.WithoutCancel(ctx))
@@ -691,6 +736,13 @@ func (m *Manager) startParticipant(
 	if resumeRemoteSessionID != "" && !strings.EqualFold(strings.TrimSpace(remoteSessionID), resumeRemoteSessionID) {
 		contextSyncSeq = 0
 	}
+	attachmentGeneration, err := newParticipantAttachmentGeneration()
+	if err != nil {
+		if client != nil {
+			_ = client.Close(context.WithoutCancel(ctx))
+		}
+		return nil, err
+	}
 	run = &participantRun{
 		id:                 id,
 		parentSessionID:    strings.TrimSpace(parentSession.SessionID),
@@ -699,22 +751,36 @@ func (m *Manager) startParticipant(
 		remoteSessionID:    remoteSessionID,
 		promptCapabilities: state.promptCapabilities,
 		binding: session.ParticipantBinding{
-			ID:             id,
-			Kind:           session.ParticipantKindACP,
-			Role:           role,
-			AgentName:      agentName,
-			Label:          label,
-			SessionID:      remoteSessionID,
-			Source:         firstNonEmpty(req.Source, existing.Source, "user_attach"),
-			ParentTurnID:   strings.TrimSpace(existing.ParentTurnID),
-			DelegationID:   strings.TrimSpace(existing.DelegationID),
-			ContextSyncSeq: contextSyncSeq,
-			AttachedAt:     attachedAt,
-			ControllerRef:  firstNonEmpty(strings.TrimSpace(existing.ControllerRef), strings.TrimSpace(parentSession.Controller.EpochID)),
+			ID:                   id,
+			Kind:                 session.ParticipantKindACP,
+			Role:                 role,
+			AgentName:            agentName,
+			Label:                label,
+			SessionID:            remoteSessionID,
+			Source:               firstNonEmpty(req.Source, existing.Source, "user_attach"),
+			ParentTurnID:         strings.TrimSpace(existing.ParentTurnID),
+			DelegationID:         strings.TrimSpace(existing.DelegationID),
+			AttachmentGeneration: attachmentGeneration,
+			ContextSyncSeq:       contextSyncSeq,
+			AttachedAt:           attachedAt,
+			ControllerRef:        firstNonEmpty(strings.TrimSpace(existing.ControllerRef), strings.TrimSpace(parentSession.Controller.EpochID)),
 		},
 	}
+	key := participantKey(parentSession.SessionID, id)
 	m.mu.Lock()
-	m.participants[id] = run
+	if current := m.participants[key]; current != nil {
+		currentBinding := current.bindingSnapshot()
+		m.mu.Unlock()
+		if run.client != nil {
+			_ = run.client.Close(context.WithoutCancel(ctx))
+		}
+		if strings.TrimSpace(currentBinding.DelegationID) == strings.TrimSpace(run.binding.DelegationID) &&
+			strings.TrimSpace(currentBinding.AttachmentGeneration) == strings.TrimSpace(run.binding.AttachmentGeneration) {
+			return current, nil
+		}
+		return nil, fmt.Errorf("internal/acpagentbridge/controller: participant %q was attached concurrently", id)
+	}
+	m.participants[key] = run
 	m.mu.Unlock()
 	return run, nil
 }
@@ -1231,12 +1297,15 @@ func (r *controllerRun) setControllerMode(ctx context.Context, req SetController
 	return r.controllerStatusLocked(req.SessionRef), nil
 }
 
-func (r *participantRun) beginPrompt(req controller.ParticipantPromptRequest, handle *turnHandle) {
+func (r *participantRun) beginPrompt(req controller.ParticipantPromptRequest, handle *turnHandle) error {
 	if r == nil {
-		return
+		return fmt.Errorf("internal/acpagentbridge/controller: participant run is unavailable")
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.handle != nil || strings.TrimSpace(r.turnID) != "" {
+		return fmt.Errorf("internal/acpagentbridge/controller: participant %q already has a prompt in progress", r.id)
+	}
 	r.turnID = firstNonEmpty(strings.TrimSpace(req.TurnID), strings.TrimSpace(req.ParticipantID), r.id)
 	r.turnSession = session.CloneSession(req.Session)
 	r.turnStream = req.Stream
@@ -1244,6 +1313,7 @@ func (r *participantRun) beginPrompt(req controller.ParticipantPromptRequest, ha
 	r.approvalRequester = req.ApprovalRequester
 	r.handle = handle
 	r.events = nil
+	return nil
 }
 
 func (r *participantRun) finishPrompt() ([]*session.Event, bool) {
@@ -1290,6 +1360,42 @@ func (r *participantRun) refreshBinding(binding session.ParticipantBinding) sess
 		r.binding.ControllerRef = controllerRef
 	}
 	return session.CloneParticipantBinding(r.binding)
+}
+
+func (r *participantRun) bindingSnapshot() session.ParticipantBinding {
+	if r == nil {
+		return session.ParticipantBinding{}
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return session.CloneParticipantBinding(r.binding)
+}
+
+func participantRequestSessionID(ref session.SessionRef, active session.Session) (string, error) {
+	refID := strings.TrimSpace(ref.SessionID)
+	activeID := strings.TrimSpace(active.SessionID)
+	if refID != "" && activeID != "" && refID != activeID {
+		return "", fmt.Errorf("internal/acpagentbridge/controller: contradictory session ids %q and %q", refID, activeID)
+	}
+	if refID != "" {
+		return refID, nil
+	}
+	return activeID, nil
+}
+
+func participantKey(sessionID, participantID string) participantRunKey {
+	return participantRunKey{
+		sessionID:     strings.TrimSpace(sessionID),
+		participantID: strings.TrimSpace(participantID),
+	}
+}
+
+func newParticipantAttachmentGeneration() (string, error) {
+	var raw [16]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", fmt.Errorf("internal/acpagentbridge/controller: generate participant attachment generation: %w", err)
+	}
+	return hex.EncodeToString(raw[:]), nil
 }
 
 func (r *participantRun) permissionHandler(ctx context.Context, req client.RequestPermissionRequest) (client.RequestPermissionResponse, error) {

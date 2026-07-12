@@ -75,23 +75,14 @@ func TestParticipantPromptUsesLeaseFenceAndWatchdogEnvelope(t *testing.T) {
 	inner.mu.Lock()
 	guard := inner.promptGuard
 	promptCalls := inner.promptCalls
+	participantRunner := inner.participantRunner
 	inner.mu.Unlock()
 	if promptCalls != 1 || guard.Authority != session.MutationAuthorityRuntime || guard.FencingToken == 0 {
 		t.Fatalf("participant prompt calls=%d guard=%#v, want one fenced execution", promptCalls, guard)
 	}
-
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		events, eventsErr := service.Events(context.Background(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
-		if eventsErr != nil {
-			t.Fatal(eventsErr)
-		}
-		if checkpoint := watchdogCheckpoint(events); checkpoint != nil {
-			return
-		}
-		time.Sleep(time.Millisecond)
+	if participantRunner == nil || participantRunner.cancelCalls.Load() != 1 {
+		t.Fatalf("participant watchdog runner = %#v, want one high-confidence Interrupt", participantRunner)
 	}
-	t.Fatal("participant prompt produced no durable watchdog checkpoint")
 }
 
 func newParticipantEnvelopeRuntime(t *testing.T, inner agent.Runtime, sessions session.Service, owner string) *WatchdogRuntime {
@@ -109,9 +100,6 @@ func newParticipantEnvelopeRuntime(t *testing.T, inner agent.Runtime, sessions s
 	watchdog, err := NewWatchdogRuntime(WatchdogRuntimeConfig{
 		Runtime: leased, Sessions: sessions,
 		Thresholds: WatchdogThresholds{ToolLoopStreak: 2, TextLoopStreak: 50},
-		Reviewer: WatchdogReviewFunc(func(context.Context, WatchdogObservation) (WatchdogDecision, error) {
-			return WatchdogDecision{Action: WatchdogActionInterrupt, Reason: "participant loop"}, nil
-		}),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -120,13 +108,14 @@ func newParticipantEnvelopeRuntime(t *testing.T, inner agent.Runtime, sessions s
 }
 
 type participantEnvelopeRuntime struct {
-	sessions    session.Service
-	mainRunner  *leaseTestRunner
-	mu          sync.Mutex
-	promptCalls int
-	promptGuard session.MutationGuard
-	streams     stream.Service
-	approvals   int
+	sessions          session.Service
+	mainRunner        *leaseTestRunner
+	mu                sync.Mutex
+	promptCalls       int
+	promptGuard       session.MutationGuard
+	participantRunner *controlledWatchdogRunner
+	streams           stream.Service
+	approvals         int
 }
 
 func (r *participantEnvelopeRuntime) Run(context.Context, agent.RunRequest) (agent.RunResult, error) {
@@ -163,15 +152,16 @@ func (r *participantEnvelopeRuntime) PromptParticipant(ctx context.Context, req 
 	}); err != nil {
 		return agent.RunResult{}, err
 	}
+	runner := newControlledWatchdogRunner("participant-run", []*session.Event{
+		sameWatchdogToolCall("participant-call-1"),
+		sameWatchdogToolCall("participant-call-2"),
+		sameWatchdogToolCall("participant-call-3"),
+	}, true)
 	r.mu.Lock()
 	r.promptCalls++
 	r.promptGuard = guard
+	r.participantRunner = runner
 	r.mu.Unlock()
-	runner := newWatchdogTestRunner("participant-run", []*session.Event{
-		watchdogToolCall("participant-call-1", "READ", map[string]any{"path": "same.txt"}),
-		watchdogToolCall("participant-call-2", "READ", map[string]any{"path": "same.txt"}),
-		watchdogToolCall("participant-call-3", "READ", map[string]any{"path": "same.txt"}),
-	})
 	return agent.RunResult{Session: session.Session{SessionRef: req.SessionRef}, Handle: runner}, nil
 }
 

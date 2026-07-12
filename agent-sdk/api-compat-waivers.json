@@ -4,6 +4,12 @@
   "removals": [
     {
       "package": "github.com/caelis-labs/caelis/agent-sdk",
+      "sha256": "9f7b8d07ca9741454f0e57bddd24b6d50468a6803670e1c77d52c35eef1a7492",
+      "symbol": "ControllerEventForwardRequest",
+      "reason": "Added explicit MutationGuard propagation so external ACP controller and participant event forwarders cannot lose the active Turn fence before durable persistence."
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk",
       "sha256": "b6bcedfd6bae9abdb61942c1c19d3cbd0464c52a182dc22cc41ec09018997bdc",
       "symbol": "EndpointApprovalToolCall",
       "reason": "Preserve normalized ACP raw output and content alongside raw input so built-in and external approval adapters share one lossless semantic contract."
@@ -169,6 +175,18 @@
       "sha256": "c4a88287b67c7c2ae7433786512b00e063db62a5b95646810e0edb4ce7abe459",
       "symbol": "SessionLease",
       "reason": "Added a persistent monotonic fencing token that remains stable across heartbeats and changes on every acquisition."
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk/runtime/controller",
+      "sha256": "324acf3971691ecaf4736b45d11a2c6970d2e628c99c519228f96245a2458ec5",
+      "symbol": "DetachRequest",
+      "reason": "Added delegation and attachment-generation preconditions so stale compensation cannot remove a newer live participant endpoint."
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk/session",
+      "sha256": "3c7e1c62a2a065d2e0a3ea5130e8d6f597360c2873dc5963229c5f9ffb359f68",
+      "symbol": "ParticipantBinding",
+      "reason": "Added durable live attachment generation required to reconcile participant ledger identity with the exact endpoint instance."
     }
   ]
 }

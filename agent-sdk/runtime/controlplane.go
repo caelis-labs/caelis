@@ -12,6 +12,14 @@ import (
 )
 
 func (r *Runtime) ensureSessionController(ctx context.Context, activeSession session.Session) (session.Session, error) {
+	return r.ensureSessionControllerWithGuard(ctx, activeSession, session.RuntimeMutationGuard(ctx))
+}
+
+func (r *Runtime) ensureSessionControllerWithGuard(
+	ctx context.Context,
+	activeSession session.Session,
+	mutationGuard session.MutationGuard,
+) (session.Session, error) {
 	if r == nil || r.sessions == nil {
 		return session.Session{}, fmt.Errorf("agent-sdk/runtime: session service is unavailable")
 	}
@@ -20,7 +28,7 @@ func (r *Runtime) ensureSessionController(ctx context.Context, activeSession ses
 	}
 	return r.sessions.BindController(ctx, session.BindControllerRequest{
 		SessionRef:    activeSession.SessionRef,
-		MutationGuard: session.RuntimeMutationGuard(ctx),
+		MutationGuard: mutationGuard,
 		Binding:       r.kernelControllerBinding("runtime"),
 	})
 }
@@ -198,6 +206,7 @@ func (r *Runtime) executeACPControllerTurn(
 		if err := r.forwardControllerEvents(ctx, agent.ControllerEventForwardRequest{
 			ActiveSession: activeSession,
 			SessionRef:    ref,
+			MutationGuard: session.RuntimeMutationGuard(ctx),
 			TurnID:        turnID,
 			Source:        turnResult.Handle,
 			Publisher:     handle,

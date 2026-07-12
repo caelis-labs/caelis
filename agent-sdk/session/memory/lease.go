@@ -130,6 +130,19 @@ func validateMutationGuard(active session.SessionLease, guard session.MutationGu
 			}
 			return err
 		}
+		hasFence := strings.TrimSpace(guard.LeaseID) != ""
+		if hasFence {
+			if active.LeaseID == "" || !active.ExpiresAt.After(now) {
+				return leaseConflict(active.SessionRef, "control mutation fence is absent or expired")
+			}
+			if active.LeaseID != strings.TrimSpace(guard.LeaseID) || active.OwnerID != strings.TrimSpace(guard.OwnerID) || active.FencingToken != guard.FencingToken {
+				return leaseConflict(active.SessionRef, "control mutation fencing token is stale")
+			}
+			return nil
+		}
+		if active.LeaseID != "" && active.ExpiresAt.After(now) && !session.ControlMutationMayOverlapRuntimeLease(guard.Purpose) {
+			return leaseConflict(active.SessionRef, "active execution lease requires a matching control fence")
+		}
 		return nil
 	}
 	if guard.Authority != session.MutationAuthorityRuntime {

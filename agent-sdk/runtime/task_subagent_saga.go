@@ -483,8 +483,13 @@ func (tm *taskRuntime) ensureSubagentParticipantAttached(ctx context.Context, ac
 	if err != nil {
 		return err
 	}
-	if binding, ok := participantBinding(current, task.anchor.AgentID); ok && strings.TrimSpace(binding.DelegationID) == strings.TrimSpace(task.ref.TaskID) {
-		return nil
+	if binding, ok := participantBinding(current, task.anchor.AgentID); ok {
+		if strings.TrimSpace(binding.DelegationID) == strings.TrimSpace(task.ref.TaskID) {
+			return nil
+		}
+		return &session.ParticipantBindingConflictError{
+			ParticipantID: task.anchor.AgentID, ExpectedDelegation: task.ref.TaskID, ActualDelegation: binding.DelegationID,
+		}
 	}
 	err = tm.attachSubagentParticipant(ctx, activeSession, task, strings.TrimSpace(parentCall))
 	if err == nil || !session.IsCommitted(err) {
@@ -571,11 +576,36 @@ func (tm *taskRuntime) detachSubagentParticipant(ctx context.Context, task *suba
 	if !ok {
 		return nil
 	}
+	if strings.TrimSpace(binding.DelegationID) != strings.TrimSpace(task.ref.TaskID) {
+		// This task has no attachment to remove. A different delegation now owns
+		// the colliding participant ID, so compensation must leave it untouched
+		// and may safely advance to terminal compensated.
+		return nil
+	}
 	event := participantLifecycleEvent(active, binding, "detached", tm.runtime.now())
 	_, _, err = lifecycle.RemoveParticipantWithEvent(ctx, session.RemoveParticipantWithEventRequest{
-		SessionRef: task.sessionRef, ExpectedRevision: &active.Revision, MutationGuard: session.RuntimeMutationGuard(ctx), ParticipantID: binding.ID, Event: event,
+		SessionRef: task.sessionRef, ExpectedRevision: &active.Revision, MutationGuard: session.RuntimeMutationGuard(ctx),
+		ParticipantID: binding.ID, ExpectedDelegationID: stringPointer(task.ref.TaskID), Event: event,
 	})
+	if err != nil {
+		var conflict *session.ParticipantBindingConflictError
+		if errors.As(err, &conflict) {
+			reloaded, loadErr := tm.runtime.sessions.Session(context.WithoutCancel(ctx), task.sessionRef)
+			if loadErr == nil {
+				current, exists := participantBinding(reloaded, task.anchor.AgentID)
+				if !exists || strings.TrimSpace(current.DelegationID) != strings.TrimSpace(task.ref.TaskID) {
+					return nil
+				}
+			}
+			return errors.Join(err, loadErr)
+		}
+	}
 	return err
+}
+
+func stringPointer(value string) *string {
+	value = strings.TrimSpace(value)
+	return &value
 }
 
 func (tm *taskRuntime) appendSubagentSagaEvent(ctx context.Context, ref session.SessionRef, event *session.Event) error {

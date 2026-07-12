@@ -32,6 +32,15 @@ type sagaTaskStore struct {
 	failedState bool
 }
 
+type getFailingSagaTaskStore struct {
+	*sagaTaskStore
+	err error
+}
+
+func (s *getFailingSagaTaskStore) Get(context.Context, string) (*taskapi.Entry, error) {
+	return nil, s.err
+}
+
 func newSagaTaskStore() *sagaTaskStore { return &sagaTaskStore{entries: map[string]*taskapi.Entry{}} }
 
 func (s *sagaTaskStore) Upsert(ctx context.Context, entry *taskapi.Entry) error {
@@ -267,6 +276,58 @@ func TestSubagentSpawnSagaCompensatesEveryPostSpawnBoundary(t *testing.T) {
 			}
 			assertSubagentSagaModelRoundTrip(t, sessions, active.SessionRef)
 		})
+	}
+}
+
+func TestSubagentSpawnRejectsAgentIDCollisionWithoutReplacingOriginalParticipant(t *testing.T) {
+	t.Parallel()
+	base := memory.NewService(memory.NewStore(memory.Config{}))
+	active, err := base.StartSession(context.Background(), session.StartSessionRequest{
+		AppName: "caelis", UserID: "participant-collision",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := newSagaTaskStore()
+	runner := &sagaRunner{}
+	runtime, err := New(testConfigWithACPForwarder(Config{Sessions: base, AgentFactory: chat.Factory{}, Subagents: runner, TaskStore: store}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, taskapi.SubagentStartRequest{
+		SpawnID: "collision-one", Agent: "helper", Prompt: "first", Role: session.ParticipantRoleSidecar,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, taskapi.SubagentStartRequest{
+		SpawnID: "collision-two", Agent: "helper", Prompt: "second", Role: session.ParticipantRoleSidecar,
+	})
+	var conflict *session.ParticipantBindingConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("second spawn error = %v, want participant delegation conflict", err)
+	}
+	loaded, err := base.Session(context.Background(), active.SessionRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, ok := participantBinding(loaded, "child-agent-saga")
+	if !ok || binding.DelegationID != first.Ref.TaskID {
+		t.Fatalf("participant after collision = %#v, want original delegation %q", binding, first.Ref.TaskID)
+	}
+	collidingTaskID, err := subagentSpawnTaskID(active.SessionRef, "collision-two")
+	if err != nil {
+		t.Fatal(err)
+	}
+	colliding, err := store.Get(context.Background(), collidingTaskID)
+	if err != nil || taskStringValue(colliding.Metadata["spawn_status"]) != string(spawnPhaseCompensated) {
+		t.Fatalf("colliding task = %#v, %v; want terminal compensated", colliding, err)
+	}
+	_, retryErr := runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, taskapi.SubagentStartRequest{
+		SpawnID: "collision-two", Agent: "helper", Prompt: "second", Role: session.ParticipantRoleSidecar,
+	})
+	if retryErr == nil || !strings.Contains(retryErr.Error(), "was compensated") {
+		t.Fatalf("collision retry error = %v, want stable compensated terminal", retryErr)
 	}
 }
 
@@ -635,6 +696,38 @@ func TestSubagentSpawnRequiresCASBeforeExternalEffect(t *testing.T) {
 	_, err = runtime.tasks.StartSubagent(context.Background(), active, active.SessionRef, runner, taskapi.SubagentStartRequest{SpawnID: "upsert-only", Agent: "helper", Prompt: "review"})
 	if err == nil || !strings.Contains(err.Error(), "CASStore") || runner.spawnCalls != 0 {
 		t.Fatalf("StartSubagent() = %v, spawn calls %d; want fail closed before spawn", err, runner.spawnCalls)
+	}
+}
+
+func TestSubagentCancelFailsClosedWhenDurableReloadFails(t *testing.T) {
+	t.Parallel()
+
+	base := memory.NewService(memory.NewStore(memory.Config{}))
+	active, err := base.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "reload-outage"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := &sagaRunner{}
+	storeErr := errors.New("forced task store reload outage")
+	store := &getFailingSagaTaskStore{sagaTaskStore: newSagaTaskStore(), err: storeErr}
+	runtime, err := New(testConfigWithACPForwarder(Config{Sessions: base, AgentFactory: chat.Factory{}, Subagents: runner, TaskStore: store}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskID := "cached-subagent"
+	runtime.tasks.subagents[taskID] = &subagentTask{
+		ref: taskapi.Ref{TaskID: taskID}, sessionRef: active.SessionRef,
+		anchor: delegation.Anchor{TaskID: taskID, SessionID: "child"}, runner: runner,
+		state: taskapi.StateRunning, running: true,
+	}
+	_, err = runtime.tasks.Cancel(context.Background(), active.SessionRef, taskapi.ControlRequest{
+		TaskID: taskID, Principal: session.ActorKindUser,
+	})
+	if !errors.Is(err, storeErr) {
+		t.Fatalf("Cancel() error = %v, want durable reload outage", err)
+	}
+	if runner.cancelCalls != 0 {
+		t.Fatalf("external Cancel calls = %d, want 0 before durable reload", runner.cancelCalls)
 	}
 }
 

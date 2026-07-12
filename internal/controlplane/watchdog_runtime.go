@@ -2,7 +2,6 @@ package controlplane
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"iter"
 	"strings"
@@ -14,8 +13,9 @@ import (
 )
 
 const (
-	watchdogCheckpointStatus     = "loop_watchdog_checkpoint"
-	defaultWatchdogReviewTimeout = 30 * time.Second
+	watchdogCheckpointStatus        = "loop_watchdog_checkpoint"
+	defaultWatchdogReviewTimeout    = 30 * time.Second
+	maxOutstandingWatchdogPipelines = 8
 )
 
 var (
@@ -36,7 +36,7 @@ func (r *WatchdogRuntime) ExecutePlaced(ctx context.Context, ref session.Session
 	return placement.ExecutePlaced(ctx, ref, execute)
 }
 
-// WatchdogReason identifies a loop-detector trigger.
+// WatchdogReason identifies a high-confidence loop-detector trigger.
 type WatchdogReason string
 
 const (
@@ -46,17 +46,14 @@ const (
 	WatchdogReasonToolLoop WatchdogReason = "tool_loop"
 )
 
-// WatchdogAction identifies the Control decision after detecting a loop.
+// WatchdogAction identifies the only Control decisions supported by the loop
+// watchdog. It deliberately has no generic Cancel action: only a validated
+// high-confidence output loop may interrupt a live Turn.
 type WatchdogAction string
 
 const (
-	WatchdogActionContinue   WatchdogAction = "continue"
-	WatchdogActionCheckpoint WatchdogAction = "checkpoint"
-	// WatchdogActionInterrupt checkpoints then cancels the live turn without a
-	// separate user-confirmation bit. Used for high-confidence loops.
+	WatchdogActionContinue  WatchdogAction = "continue"
 	WatchdogActionInterrupt WatchdogAction = "interrupt"
-	// WatchdogActionCancel checkpoints, then cancels only when Confirmed.
-	WatchdogActionCancel WatchdogAction = "cancel"
 )
 
 // WatchdogThresholds configures the generation-tail loop detector.
@@ -91,14 +88,15 @@ func (o WatchdogObservation) HasReason(reason WatchdogReason) bool {
 	return false
 }
 
-// WatchdogDecision is the reviewed Control action.
+// WatchdogDecision is the reviewed Control action. Interrupt is accepted only
+// for an observation produced by the high-confidence loop detector.
 type WatchdogDecision struct {
-	Action    WatchdogAction
-	Confirmed bool // only meaningful for WatchdogActionCancel
-	Reason    string
+	Action WatchdogAction
+	Reason string
 }
 
-// WatchdogReviewer maps observations to Control-owned actions.
+// WatchdogReviewer maps high-confidence observations to Control-owned actions.
+// It runs asynchronously and cannot delay or fail the Agent Turn.
 type WatchdogReviewer interface {
 	ReviewWatchdog(context.Context, WatchdogObservation) (WatchdogDecision, error)
 }
@@ -110,18 +108,21 @@ func (f WatchdogReviewFunc) ReviewWatchdog(ctx context.Context, observation Watc
 	return f(ctx, observation)
 }
 
-// WatchdogRuntimeConfig configures the Control-owned generation-tail loop watchdog.
+// WatchdogRuntimeConfig configures the Control-owned generation-tail loop
+// watchdog. ReviewTimeout bounds cooperative review/audit work only; watchdog
+// failures never become Turn errors.
 type WatchdogRuntimeConfig struct {
 	Runtime       agent.Runtime
 	Sessions      session.Service
-	Lifecycle     *WatchdogLifecycleObserver
 	Thresholds    WatchdogThresholds
 	ReviewTimeout time.Duration
 	Reviewer      WatchdogReviewer
 	Clock         func() time.Time
 }
 
-// WatchdogRuntime observes one live Runner for generation-tail loops.
+// WatchdogRuntime observes live Runner output. It may interrupt only after a
+// high-confidence loop decision. Detection saturation and all internal
+// review/audit failures are best-effort and never affect the Turn.
 type WatchdogRuntime struct {
 	runtimeFacade
 	sessions      session.Service
@@ -129,11 +130,11 @@ type WatchdogRuntime struct {
 	reviewTimeout time.Duration
 	reviewer      WatchdogReviewer
 	clock         func() time.Time
-	lifecycle     *WatchdogLifecycleObserver
+	pipelineSlots chan struct{}
 }
 
-// NewWatchdogRuntime wraps an execution Runtime with loop detection, durable
-// diagnostic checkpoint, and high-confidence turn interrupt.
+// NewWatchdogRuntime wraps an execution Runtime with bounded loop detection
+// and high-confidence turn interruption.
 func NewWatchdogRuntime(config WatchdogRuntimeConfig) (*WatchdogRuntime, error) {
 	if config.Runtime == nil {
 		return nil, fmt.Errorf("controlplane: watchdog runtime requires an execution runtime")
@@ -162,9 +163,6 @@ func NewWatchdogRuntime(config WatchdogRuntimeConfig) (*WatchdogRuntime, error) 
 	if config.Clock == nil {
 		config.Clock = time.Now
 	}
-	if config.Lifecycle == nil {
-		config.Lifecycle = NewWatchdogLifecycleObserver()
-	}
 	return &WatchdogRuntime{
 		runtimeFacade: newRuntimeFacade(config.Runtime),
 		sessions:      config.Sessions,
@@ -172,7 +170,7 @@ func NewWatchdogRuntime(config WatchdogRuntimeConfig) (*WatchdogRuntime, error) 
 		reviewTimeout: config.ReviewTimeout,
 		reviewer:      config.Reviewer,
 		clock:         config.Clock,
-		lifecycle:     config.Lifecycle,
+		pipelineSlots: make(chan struct{}, maxOutstandingWatchdogPipelines),
 	}, nil
 }
 
@@ -188,8 +186,8 @@ func (r *WatchdogRuntime) Run(ctx context.Context, req agent.RunRequest) (agent.
 	if result.Session.SessionID != "" {
 		ref = session.NormalizeSessionRef(result.Session.SessionRef)
 	}
-	return r.wrapLiveHandle(result, func(inner agent.Runner, runID string) agent.Runner {
-		return newWatchdogRunner(inner, ref, r, func() { r.forgetRun(runID) })
+	return r.wrapLiveHandle(result, ref, func(inner agent.Runner, onFinish func()) agent.Runner {
+		return newWatchdogRunner(inner, ref, r, onFinish)
 	}), nil
 }
 
@@ -209,60 +207,18 @@ func (r *WatchdogRuntime) PromptParticipant(ctx context.Context, req agent.Promp
 	if result.Session.SessionID != "" {
 		ref = session.NormalizeSessionRef(result.Session.SessionRef)
 	}
-	return r.wrapLiveHandle(result, func(inner agent.Runner, runID string) agent.Runner {
-		return newWatchdogRunner(inner, ref, r, func() { r.forgetRun(runID) })
+	return r.wrapLiveHandle(result, ref, func(inner agent.Runner, onFinish func()) agent.Runner {
+		return newWatchdogRunner(inner, ref, r, onFinish)
 	}), nil
 }
 
-// WatchdogLifecycleObserver routes typed Runtime lifecycle traces without
-// blocking execution. Kept for stack TraceSink wiring; loop detection is
-// driven by canonical Runner events, not traces.
-type WatchdogLifecycleObserver struct {
-	mu   sync.RWMutex
-	runs map[watchdogRunKey]*watchdogRunner
-}
+// WatchdogLifecycleObserver remains a non-blocking TraceSink for stack wiring.
+// Loop detection is driven only by canonical Runner events.
+type WatchdogLifecycleObserver struct{}
 
-type watchdogRunKey struct {
-	sessionID string
-	runID     string
-}
+func NewWatchdogLifecycleObserver() *WatchdogLifecycleObserver { return &WatchdogLifecycleObserver{} }
 
-// NewWatchdogLifecycleObserver creates a lifecycle sink shared by Runtime and
-// its Control-owned WatchdogRuntime wrapper.
-func NewWatchdogLifecycleObserver() *WatchdogLifecycleObserver {
-	return &WatchdogLifecycleObserver{runs: map[watchdogRunKey]*watchdogRunner{}}
-}
-
-// RecordTrace implements agent.TraceSink.
-func (o *WatchdogLifecycleObserver) RecordTrace(record agent.TraceRecord) {
-	// Intentionally no-op for loop detection. Traces stay off the hot path.
-	_ = record
-}
-
-func (o *WatchdogLifecycleObserver) register(runner *watchdogRunner) {
-	if o == nil || runner == nil {
-		return
-	}
-	key := runner.watchdogRunKey()
-	if key.sessionID == "" || key.runID == "" {
-		return
-	}
-	o.mu.Lock()
-	o.runs[key] = runner
-	o.mu.Unlock()
-}
-
-func (o *WatchdogLifecycleObserver) unregister(runner *watchdogRunner) {
-	if o == nil || runner == nil {
-		return
-	}
-	key := runner.watchdogRunKey()
-	o.mu.Lock()
-	if o.runs[key] == runner {
-		delete(o.runs, key)
-	}
-	o.mu.Unlock()
-}
+func (*WatchdogLifecycleObserver) RecordTrace(agent.TraceRecord) {}
 
 type watchdogRunner struct {
 	inner      agent.Runner
@@ -273,11 +229,18 @@ type watchdogRunner struct {
 	stopOnce   sync.Once
 	loop       *generationLoopDetector
 
-	mu             sync.Mutex
-	reviewInFlight bool
-	reviewSequence uint64
-	terminalErr    error
-	onFinish       func()
+	mu               sync.Mutex
+	reviewInFlight   bool
+	reviewSequence   uint64
+	pendingHit       *loopHit
+	pipelineCancel   context.CancelFunc
+	pipelineSequence uint64
+	terminal         bool
+	actionClaimed    bool
+	actionSequence   uint64
+	cancelOnce       sync.Once
+	cancelResult     agent.CancelResult
+	onFinish         func()
 }
 
 func newWatchdogRunner(inner agent.Runner, ref session.SessionRef, owner *WatchdogRuntime, onFinish func()) agent.Runner {
@@ -285,7 +248,6 @@ func newWatchdogRunner(inner agent.Runner, ref session.SessionRef, owner *Watchd
 		inner: inner, sessionRef: ref, owner: owner, stop: make(chan struct{}), onFinish: onFinish,
 		loop: newGenerationLoopDetector(owner.thresholds.TextLoopStreak, owner.thresholds.ToolLoopStreak, owner.thresholds.MinContentRunes),
 	}
-	owner.lifecycle.register(runner)
 	if source, ok := inner.(agent.SourceHandle); ok {
 		runner.source = source
 		return &watchdogSourceRunner{watchdogRunner: runner}
@@ -295,29 +257,19 @@ func newWatchdogRunner(inner agent.Runner, ref session.SessionRef, owner *Watchd
 
 func (r *watchdogRunner) RunID() string { return r.inner.RunID() }
 
-func (r *watchdogRunner) watchdogRunKey() watchdogRunKey {
-	return watchdogRunKey{sessionID: strings.TrimSpace(r.sessionRef.SessionID), runID: strings.TrimSpace(r.RunID())}
-}
-
 func (r *watchdogRunner) Events() iter.Seq2[*session.Event, error] {
 	return func(yield func(*session.Event, error) bool) {
-		completed := true
 		for event, err := range r.inner.Events() {
 			if event != nil {
 				r.observe(event)
 			}
 			if !yield(event, err) {
-				completed = false
-				break
+				r.finish()
+				_ = r.inner.Close()
+				return
 			}
 		}
-		if !completed {
-			_ = r.inner.Close()
-		}
 		r.finish()
-		if err := r.currentTerminalError(); err != nil {
-			yield(nil, err)
-		}
 	}
 }
 
@@ -325,23 +277,17 @@ type watchdogSourceRunner struct{ *watchdogRunner }
 
 func (r *watchdogSourceRunner) SourceEvents() iter.Seq2[agent.SourceEvent, error] {
 	return func(yield func(agent.SourceEvent, error) bool) {
-		completed := true
 		for event, err := range r.source.SourceEvents() {
 			if event.Canonical != nil {
 				r.observe(event.Canonical)
 			}
 			if !yield(event, err) {
-				completed = false
-				break
+				r.finish()
+				_ = r.inner.Close()
+				return
 			}
 		}
-		if !completed {
-			_ = r.inner.Close()
-		}
 		r.finish()
-		if err := r.currentTerminalError(); err != nil {
-			yield(agent.SourceEvent{}, err)
-		}
 	}
 }
 
@@ -349,7 +295,7 @@ func (r *watchdogRunner) Submit(submission agent.Submission) error { return r.in
 
 func (r *watchdogRunner) Cancel() agent.CancelResult {
 	r.finish()
-	return r.inner.Cancel()
+	return r.cancelInner()
 }
 
 func (r *watchdogRunner) Close() error {
@@ -362,96 +308,187 @@ func (r *watchdogRunner) observe(event *session.Event) {
 		return
 	}
 	r.mu.Lock()
-	hit, ok := r.loop.observe(event)
-	if !ok || r.reviewInFlight {
+	if r.terminal {
 		r.mu.Unlock()
 		return
 	}
+	hit, ok := r.loop.observe(event)
+	if !ok {
+		r.mu.Unlock()
+		return
+	}
+	if r.reviewInFlight {
+		copyHit := hit
+		r.pendingHit = &copyHit
+		r.mu.Unlock()
+		return
+	}
+	if !r.owner.tryAcquireWatchdogPipeline() {
+		// Capacity is diagnostic only. Drop this evidence window and let the
+		// Agent Turn continue untouched.
+		r.loop.resetAll()
+		r.mu.Unlock()
+		return
+	}
+	r.startReviewLocked(hit)
+	r.mu.Unlock()
+}
+
+func (r *watchdogRunner) startReviewLocked(hit loopHit) {
 	r.reviewInFlight = true
 	r.reviewSequence++
+	pipelineCtx, pipelineCancel := context.WithCancel(context.Background())
+	r.pipelineCancel = pipelineCancel
+	r.pipelineSequence = r.reviewSequence
 	observation := WatchdogObservation{
 		SessionRef: r.sessionRef, RunID: r.inner.RunID(), ReviewSequence: r.reviewSequence,
 		ObservedAt: r.owner.clock(), LoopStreak: hit.Streak, LoopHasTool: hit.HasTool,
 		ContentDigest: hit.Content, ToolDigest: hit.Tools, LoopDetail: hit.Detail,
 		Reasons: []WatchdogReason{hit.Reason},
 	}
-	r.mu.Unlock()
-	go r.review(observation)
+	go r.review(pipelineCtx, observation)
 }
 
-func (r *watchdogRunner) review(observation WatchdogObservation) {
-	ctx, cancel := context.WithTimeout(context.Background(), r.owner.reviewTimeout)
-	decision, err := r.owner.reviewer.ReviewWatchdog(ctx, observation)
-	cancel()
-	if err == nil {
-		err = r.applyDecision(observation, decision)
-	}
-	r.mu.Lock()
-	r.reviewInFlight = false
+func (r *watchdogRunner) review(parent context.Context, observation WatchdogObservation) {
+	var (
+		decision WatchdogDecision
+		claimed  bool
+	)
+	defer func() {
+		_ = recover()
+		r.owner.releaseWatchdogPipeline()
+		r.completeReview(observation.ReviewSequence, claimed)
+	}()
+	ctx, cancel := context.WithTimeout(parent, r.owner.reviewTimeout)
+	defer cancel()
+	var err error
+	decision, err = r.owner.reviewer.ReviewWatchdog(ctx, observation)
 	if err != nil {
-		r.terminalErr = errors.Join(r.terminalErr, fmt.Errorf("controlplane: watchdog review failed: %w", err))
+		return
 	}
-	r.mu.Unlock()
+	claimed, _ = r.applyDecision(ctx, observation, decision)
 }
 
-func (r *watchdogRunner) applyDecision(observation WatchdogObservation, decision WatchdogDecision) error {
+func (r *watchdogRunner) completeReview(sequence uint64, claimed bool) {
+	r.mu.Lock()
+	if r.pipelineSequence != sequence {
+		r.mu.Unlock()
+		return
+	}
+	r.pipelineCancel = nil
+	r.pipelineSequence = 0
+	r.reviewInFlight = false
 	select {
 	case <-r.stop:
-		return nil
+		r.pendingHit = nil
+		r.mu.Unlock()
+		return
 	default:
 	}
+	if claimed || (r.actionClaimed && r.actionSequence == sequence) {
+		r.terminal = true
+		r.pendingHit = nil
+		r.mu.Unlock()
+		return
+	}
+	r.loop.resetAll()
+	pending := r.pendingHit
+	r.pendingHit = nil
+	if pending == nil || !r.owner.tryAcquireWatchdogPipeline() {
+		r.mu.Unlock()
+		return
+	}
+	r.startReviewLocked(*pending)
+	r.mu.Unlock()
+}
+
+func (r *watchdogRunner) applyDecision(ctx context.Context, observation WatchdogObservation, decision WatchdogDecision) (bool, error) {
 	action := decision.Action
 	if action == "" {
 		action = WatchdogActionContinue
 	}
 	switch action {
 	case WatchdogActionContinue:
-		return nil
-	case WatchdogActionCheckpoint:
-		return r.appendCheckpoint(observation, decision, action)
+		return false, nil
 	case WatchdogActionInterrupt:
-		if err := r.appendCheckpoint(observation, decision, action); err != nil {
-			return err
+		if !observation.HasReason(WatchdogReasonTextLoop) && !observation.HasReason(WatchdogReasonToolLoop) {
+			return false, fmt.Errorf("controlplane: watchdog interrupt requires high-confidence loop evidence")
 		}
-		if result := r.inner.Cancel(); result.Err != nil {
-			return result.Err
+		if err := r.claimWatchdogInterrupt(ctx, observation.ReviewSequence); err != nil {
+			return false, err
 		}
-		return nil
-	case WatchdogActionCancel:
-		if err := r.appendCheckpoint(observation, decision, action); err != nil {
-			return err
-		}
-		if !decision.Confirmed {
-			return nil
-		}
-		if result := r.inner.Cancel(); result.Err != nil {
-			return result.Err
-		}
-		return nil
+		// Interrupt first; durable audit is best-effort and must never gate the
+		// core safety action or become a Turn error.
+		_ = r.cancelInner()
+		_ = r.appendCheckpoint(ctx, observation, decision)
+		return true, nil
 	default:
-		return fmt.Errorf("unsupported watchdog action %q", action)
+		return false, fmt.Errorf("controlplane: unsupported watchdog action %q", action)
 	}
 }
 
-func (r *watchdogRunner) appendCheckpoint(observation WatchdogObservation, decision WatchdogDecision, action WatchdogAction) error {
+func (r *watchdogRunner) claimWatchdogInterrupt(ctx context.Context, sequence uint64) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	select {
+	case <-r.stop:
+		return context.Canceled
+	default:
+	}
+	if r.reviewSequence != sequence || r.pipelineSequence != sequence || !r.reviewInFlight || r.terminal {
+		return fmt.Errorf("controlplane: watchdog review no longer owns the interrupt")
+	}
+	if r.actionClaimed {
+		return fmt.Errorf("controlplane: watchdog interrupt was already claimed")
+	}
+	r.actionClaimed = true
+	r.actionSequence = sequence
+	r.terminal = true
+	return nil
+}
+
+func (r *watchdogRunner) cancelInner() agent.CancelResult {
+	if r == nil || r.inner == nil {
+		return agent.CancelResult{Err: fmt.Errorf("controlplane: watchdog runner is unavailable")}
+	}
+	r.cancelOnce.Do(func() {
+		func() {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					r.cancelResult.Err = fmt.Errorf("controlplane: watchdog interrupt panic: %v", recovered)
+				}
+			}()
+			r.cancelResult = r.inner.Cancel()
+		}()
+	})
+	return r.cancelResult
+}
+
+func (r *watchdogRunner) appendCheckpoint(ctx context.Context, observation WatchdogObservation, decision WatchdogDecision) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	reason := strings.TrimSpace(decision.Reason)
 	if reason == "" {
-		reason = fmt.Sprintf("watchdog %s after %s", action, strings.Join(watchdogReasonStrings(observation.Reasons), ","))
+		reason = fmt.Sprintf("high-confidence generation loop: %s", strings.Join(watchdogReasonStrings(observation.Reasons), ","))
 	}
 	event := &session.Event{
 		IdempotencyKey: fmt.Sprintf("watchdog:%s:%d", strings.TrimSpace(observation.RunID), observation.ReviewSequence),
 		Type:           session.EventTypeLifecycle, Visibility: session.VisibilityJournal, Time: observation.ObservedAt,
 		Actor: session.ActorRef{Kind: session.ActorKindSystem, Name: "control-watchdog"},
 		Lifecycle: &session.EventLifecycle{Status: watchdogCheckpointStatus, Reason: reason, Meta: map[string]any{
-			"action":      string(action),
-			"loop_streak": observation.LoopStreak, "loop_has_tool": observation.LoopHasTool,
-			"content_digest": observation.ContentDigest, "tool_digest": observation.ToolDigest,
-			"loop_detail": observation.LoopDetail,
-			"reasons":     watchdogReasonStrings(observation.Reasons),
+			"action": string(WatchdogActionInterrupt), "loop_streak": observation.LoopStreak,
+			"loop_has_tool": observation.LoopHasTool, "content_digest": observation.ContentDigest,
+			"tool_digest": observation.ToolDigest, "loop_detail": observation.LoopDetail,
+			"reasons": watchdogReasonStrings(observation.Reasons),
 		}},
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), r.owner.reviewTimeout)
-	defer cancel()
 	_, err := r.owner.sessions.AppendEvent(ctx, session.AppendEventRequest{
 		SessionRef: r.sessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeWatchdog), Event: event,
 	})
@@ -463,21 +500,47 @@ func (r *watchdogRunner) appendCheckpoint(observation WatchdogObservation, decis
 
 func (r *watchdogRunner) finish() {
 	r.stopOnce.Do(func() {
+		r.mu.Lock()
 		close(r.stop)
-		r.owner.lifecycle.unregister(r)
+		cancel := r.pipelineCancel
+		r.pipelineCancel = nil
+		r.pipelineSequence = 0
+		r.pendingHit = nil
+		r.reviewInFlight = false
+		r.terminal = true
+		r.mu.Unlock()
+		if cancel != nil {
+			cancel()
+		}
 		if r.onFinish != nil {
 			r.onFinish()
 		}
 	})
 }
 
-func (r *watchdogRunner) currentTerminalError() error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.terminalErr
+func (r *WatchdogRuntime) tryAcquireWatchdogPipeline() bool {
+	if r == nil || r.pipelineSlots == nil {
+		return true
+	}
+	select {
+	case r.pipelineSlots <- struct{}{}:
+		return true
+	default:
+		return false
+	}
 }
 
-// loopWatchdogReviewer interrupts high-confidence generation loops.
+func (r *WatchdogRuntime) releaseWatchdogPipeline() {
+	if r == nil || r.pipelineSlots == nil {
+		return
+	}
+	select {
+	case <-r.pipelineSlots:
+	default:
+	}
+}
+
+// loopWatchdogReviewer interrupts only high-confidence generation loops.
 type loopWatchdogReviewer struct{}
 
 func (loopWatchdogReviewer) ReviewWatchdog(_ context.Context, observation WatchdogObservation) (WatchdogDecision, error) {

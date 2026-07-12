@@ -154,6 +154,20 @@ func (t runtimeCommandTool) Call(ctx context.Context, call tool.Call) (tool.Resu
 	}
 	snapshot, err := t.tasks.StartCommand(ctx, t.session, t.sessionRef, runtime, req)
 	if err != nil {
+		if strings.TrimSpace(snapshot.Ref.TaskID) != "" {
+			payload := taskToolPayload(snapshot)
+			if diag, ok := commanddiag.Best(commanddiag.Input{
+				ToolName: shell.RunCommandToolName, Command: command,
+				Error: strings.TrimSpace(err.Error()), ExitCode: 1,
+			}); ok {
+				if hint := strings.TrimSpace(diag.Hint); hint != "" {
+					payload["system_hint"] = hint
+				}
+			}
+			result := taskSnapshotToolResultWithPayload(call, t.base.Definition(), snapshot, payload)
+			result.IsError = true
+			return result, nil
+		}
 		if result, ok := commandStartDiagnosticToolResult(call, t.base.Definition(), command, err); ok {
 			return result, nil
 		}

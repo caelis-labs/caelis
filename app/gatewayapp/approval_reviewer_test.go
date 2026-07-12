@@ -102,6 +102,38 @@ func TestApprovalReviewerUsesRequestModelAndSessionContext(t *testing.T) {
 	}
 }
 
+func TestApprovalReviewerWorksInsideParentRuntimeLease(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, activeSession := newApprovalReviewerTestSession(t, ctx)
+	appendApprovalReviewerTextEvent(t, ctx, service, activeSession, session.EventTypeUser, model.RoleUser, "Please inspect the workspace.")
+	leases, ok := service.(session.SessionLeaseService)
+	if !ok {
+		t.Fatal("approval reviewer test service does not support leases")
+	}
+	lease, err := leases.AcquireSessionLease(ctx, session.AcquireSessionLeaseRequest{
+		SessionRef: activeSession.SessionRef, OwnerID: "parent-runtime", TTL: time.Minute,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaseCtx := session.ContextWithRuntimeLease(ctx, lease)
+	testModel := &approvalReviewerFakeModel{
+		responses: []string{`{"outcome":"allow","risk_level":"low","user_authorization":"medium","rationale":"read-only inspection"}`},
+	}
+	reviewer := newModelApprovalReviewer(service)
+	result, err := reviewer.ReviewApproval(leaseCtx, approvalReviewerTestRequest(
+		activeSession, testModel, "inspect workspace", map[string]any{"cmd": "rg TODO"},
+	))
+	if err != nil {
+		t.Fatalf("ReviewApproval() inherited the parent Session lease into Guardian staging: %v", err)
+	}
+	if !result.Approved {
+		t.Fatalf("Approved = false, want true: %#v", result)
+	}
+}
+
 func TestApprovalReviewerUsesSystemManagedGuardianRunner(t *testing.T) {
 	ctx := context.Background()
 	service, activeSession := newApprovalReviewerTestSession(t, ctx)

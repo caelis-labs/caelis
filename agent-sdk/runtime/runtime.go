@@ -58,6 +58,8 @@ type Runtime struct {
 	controllerEventForwarder agent.ControllerEventForwarder
 	subagents                agent.SubagentRunner
 	executionMu              sync.Mutex
+	participantMu            sync.Mutex
+	participantPromptClaims  map[participantPromptKey]struct{}
 	mu                       sync.RWMutex
 	runStates                map[string]agent.RunState
 	activeRunners            map[string]activeRun
@@ -94,6 +96,7 @@ func New(cfg Config) (*Runtime, error) {
 		runStates:                map[string]agent.RunState{},
 		activeRunners:            map[string]activeRun{},
 		approvalWaiters:          map[string]chan agent.ApprovalResponse{},
+		participantPromptClaims:  map[participantPromptKey]struct{}{},
 		lifecycle: agent.LifecycleOptions{
 			Interceptors: append([]agent.LifecycleInterceptor(nil), cfg.LifecycleInterceptors...),
 			TraceSink:    cfg.TraceSink,

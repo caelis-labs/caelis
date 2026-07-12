@@ -1,16 +1,11 @@
 # Agent SDK Boundary
 
-Status: accepted normative architecture; locally implemented and repaired after
-independent rejection of `30ee5f02`, pending tagged/published operational
-evidence.
+Status: accepted normative architecture.
 
 This document is the normative ownership and dependency contract for
 `agent-sdk`. It deliberately does not track implementation tasks or claim
-readiness. Current evidence and residual risks live in
-[Agent SDK 9acbf75d Acceptance](agent-sdk-9acbf75d-acceptance.md). The frozen
-[v0.25.0 review](agent-sdk-v0.25.0-acceptance.md) records the defects found in
-that release, and the live work queue lives in
-[Agent SDK Stabilization Checklist](agent-sdk-stabilization-checklist.md).
+readiness. Implementation history belongs in Git, tests, release tags, and CI
+evidence rather than a parallel documentation board.
 
 ## Accepted Decisions
 
@@ -142,9 +137,44 @@ injected neutral routes and mechanisms. Control now supplies normalized
 participant roles and control principals to SDK task/subagent code; product
 source strings remain audit provenance and are not interpreted by the SDK.
 
+## Shared Session execution and collaboration
+
+A workspace may host multiple Sessions and those Sessions may execute in
+parallel. Within one Session, Caelis separates the durable collaboration ledger
+from the current canonical Turn:
+
+- one local controller, ACP controller, or Side ACP/Reviewer prompt owns the
+  execution lease for its complete asynchronous Turn;
+- `/claude`, `/codex`, `@agent`, and ACP-backed `/review` are valid participant
+  Turn owners. Their normalized ACP event forwarder carries the same
+  `MutationGuard` as the user event, so transport projection cannot lose the
+  fence before persistence;
+- participant attach/detach is Control-owned collaboration metadata, not a
+  second model Turn. It may overlap an active Turn only under the explicit
+  `participant` purpose and still requires revision, delegation, attachment
+  generation, atomic lifecycle-event, and exact committed-result checks;
+- approval resolution, watchdog audit checkpoints, and validated system-result
+  commits are the other explicitly classified Control writes that may coexist
+  with a live Turn. Unknown Control purposes fail closed while a lease is live;
+- controller handoff and coordinator binding changes are exclusive. Control
+  first acquires and heartbeats the Session execution lease, carries that fence
+  on the atomic binding/event commit, and releases it before the new controller
+  receives a Turn. A live old Turn therefore prevents endpoint activation and
+  ownership transfer;
+- a nested system Agent operating on a different staging Session masks the
+  parent fence and obtains independent placement. A parent Session fence is
+  never valid authority for the child Session.
+
+This contract intentionally does not permit two independent canonical Turns to
+append dialogue or execute ownership-changing effects concurrently in one
+Session. Multi-Agent workspace collaboration remains available through
+parallel Sessions, parent-fenced delegated tasks, and participant lifecycle;
+the orchestration layer decides when the next same-Session Turn runs. Raw child
+stream output never becomes parent model truth without a canonical result.
+
 ## Dynamic Orchestration
 
-The future Agent Manage Loop is an event-driven Control loop:
+The Agent Manage Loop is an event-driven Control loop:
 
 ```text
 observe -> evaluate -> select/dispatch/handoff -> verify -> continue or stop
@@ -164,10 +194,11 @@ Control logic using SDK primitives.
 Fixed generic step/model/tool budgets are not part of the SDK `Run` contract.
 They can abort valid open-ended Agent work. This does not mean execution may be
 unbounded without policy: Control must be able to observe lifecycle, usage,
-elapsed time, repeated action signatures, and progress, then checkpoint,
-request confirmation, or cancel through a dynamic watchdog. That Control policy
-was incomplete at `v0.25.0`; the current production Control host implements it
-above the fenced Runtime decorator.
+elapsed time, repeated action signatures, and progress. The watchdog has one
+narrow active safety action: interrupt a live Turn only after high-confidence
+model-output loop evidence. Other cancellation and confirmation policy belongs
+to explicit Control orchestration, not watchdog capacity handling. The
+production Control host implements this above the fenced Runtime decorator.
 
 Runtime safety also requires:
 
@@ -209,10 +240,15 @@ exact reasoning/assistant tail cycles, or identical tool name+args steps only
 when the content segment since the previous tool call is also identical
 (different thought with the same tool is progress). Stream deltas are
 concatenated without inserted separators; empty tool args fail open.
-High-confidence hits write a durable loop checkpoint and interrupt the live
-Turn (`WatchdogActionInterrupt`). Surfaces that want a confirmation gate can
-still use `WatchdogActionCancel` with `Confirmed`. Checkpoints are Control
-audit facts, not model context.
+High-confidence hits claim one interrupt and cancel the live Turn
+(`WatchdogActionInterrupt`); the durable loop checkpoint is best-effort audit,
+not a precondition and not model context. Review runs asynchronously in at most
+eight Runtime-wide slots. Saturation drops that evidence window: there is no
+queue and no capacity-triggered Cancel. Reviewer timeout/failure/panic and
+checkpoint failure never delay normal stream completion, enter the Turn event
+stream, or cancel the Turn. Normal completion, explicit Close, or public Cancel
+invalidates every late watchdog decision. Public Cancel and a concurrently
+validated loop Interrupt still share one underlying cancellation effect.
 
 Hosts may implement OpenTelemetry as an interceptor or sink adapter. The SDK
 does not depend on a telemetry implementation.
@@ -268,12 +304,12 @@ every object level; typed replay then deliberately projects only the current
 semantic contract. Journal-only migration facts remain excluded from rebuilt
 model history.
 
-## Stable-dependency Readiness
+## Stable-dependency Invariants
 
-The SDK may be described as a stable dependency layer only when:
+The SDK is treated as a stable dependency layer only while:
 
-- every P0 item in the live stabilization checklist is closed by its exact fault
-  and replay tests;
+- correctness, fault, race, and replay tests cover its persistence and
+  side-effect boundaries;
 - built-in and external Agents conform to the same normalized ACP semantics;
 - only Control can select or transfer the active controller;
 - model context is exactly rebuildable from canonical durable facts, including
@@ -283,12 +319,6 @@ The SDK may be described as a stable dependency layer only when:
 - local and cloud-oriented hosts exercise the same Core contract with different
   store, lease, sandbox, transport, and executor adapters;
 - no deterministic workflow engine or autonomous handoff path has entered Core.
-
-The local worktree after the `30ee5f02` rejection repairs satisfies this
-implementation gate when the final gate index in the candidate acceptance note
-is green on a clean HEAD. It is not a published-release claim: candidate-tag
-proxy resolution and same-SHA release workflow evidence remain post-tag
-operational checks.
 
 ## Comparative Inputs
 
@@ -311,12 +341,6 @@ External SDKs inform constraints; they do not define Caelis's taxonomy:
 
 - [Caelis Architecture](architecture.md): layer map and repository package map.
 - This document: normative SDK/Control/ACP ownership and readiness invariants.
-- [Agent SDK v0.25.0 Acceptance Review](agent-sdk-v0.25.0-acceptance.md): frozen
-  release evidence and defect findings.
-- [Agent SDK 9acbf75d Acceptance](agent-sdk-9acbf75d-acceptance.md): current
-  local-candidate evidence and residual operational status.
-- [Agent SDK Stabilization Checklist](agent-sdk-stabilization-checklist.md): live
-  implementation board.
 - [Agent SDK Usage and Compatibility](agent-sdk-usage.md): consumer-facing
   behavior and known limitations.
 - [ACP Projection Architecture](acp-projection-architecture.md): semantic-to-wire

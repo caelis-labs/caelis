@@ -55,6 +55,9 @@ func TestSDKConsumerGatesUseCurrentAndTaggedFixturesSeparately(t *testing.T) {
 		"with no replacement",
 		"GOMODCACHE=\"${consumer_modcache}\"",
 		"no direct/off/pipe fallback",
+		"GOPRIVATE=",
+		"GONOPROXY=none",
+		"GOVCS='*:off'",
 	} {
 		if !strings.Contains(tagged, want) {
 			t.Errorf("tagged consumer gate missing %q", want)
@@ -95,6 +98,25 @@ func TestSDKProxySmokeRejectsPipeDirectFallback(t *testing.T) {
 	}
 	if !strings.Contains(string(output), "no direct/off/pipe fallback") {
 		t.Fatalf("unexpected failure: %s", output)
+	}
+}
+
+func TestSDKProxySmokeCannotUseAmbientPrivateModuleBypass(t *testing.T) {
+	t.Parallel()
+	command := exec.Command("bash", "./sdk_proxy_smoke.sh")
+	command.Env = append(os.Environ(),
+		"SDK_PROXY_VERSION=v0.25.0",
+		"SDK_PROXY_URL=https://127.0.0.1:1",
+		"GOPRIVATE=github.com/caelis-labs/*",
+		"GONOPROXY=github.com/caelis-labs/*",
+		"GOFLAGS=-x",
+	)
+	output, err := command.CombinedOutput()
+	if err == nil {
+		t.Fatalf("sdk proxy smoke bypassed the dead evidence proxy: %s", output)
+	}
+	if strings.Contains(string(output), "git ls-remote") {
+		t.Fatalf("sdk proxy smoke reached VCS through ambient private settings: %s", output)
 	}
 }
 

@@ -5,14 +5,6 @@ The Caelis Agent SDK is a package tree in the root
 as a separate Go module. This guide defines the host-facing behavior that SDK
 consumers may rely on.
 
-`v0.25.0` established the package boundary but did not itself pass the later
-stable-dependency acceptance. The live status and exact closing evidence are in
-the [candidate acceptance](agent-sdk-9acbf75d-acceptance.md) and
-[stabilization checklist](agent-sdk-stabilization-checklist.md) after the
-`30ee5f02` independent rejection repairs; the frozen
-[v0.25.0 acceptance review](agent-sdk-v0.25.0-acceptance.md) remains the record
-of the faults found in that tag.
-
 ## Requirements and support scope
 
 - Minimum Go version: **Go 1.25.1**, matching the root `go.mod`. A Caelis
@@ -43,7 +35,7 @@ compatibility promise for bundled model providers, stores, or Agent factories.
 The checked-in
 [`Example`](../agent-sdk/runtime/quickstart_external_test.go) is compiled and
 executed by `go test ./agent-sdk/runtime`; CI also parses its imports against the
-16-package allowlist.
+17-package allowlist.
 
 ```go
 package main
@@ -104,6 +96,10 @@ derives and validates the final assembled model/tool/sandbox requirements.
   the optional source-event view once. A second consumer receives
   `runtime.ErrEventStreamConsumed`; fan-out belongs in the host after one
   consumer reads the stream.
+- A task stream subscription or stream `Wait` resolves its task once and keeps
+  that task generation until close. It cannot switch to a reconstructed task
+  during the terminal-result persistence window. Point-in-time stream `Read`
+  resolves current durable state on each call.
 - Event publication applies backpressure when the bounded queue is full. A
   slow consumer therefore bounds memory at the cost of slowing the run.
 - Session mutations use revision compare-and-swap. Concurrent writers pass
@@ -113,12 +109,32 @@ derives and validates the final assembled model/tool/sandbox requirements.
   same. Stores persist a monotonic `FencingToken` per session; heartbeats change
   only the lease revision, while release, expiry, and takeover never permit an
   older token to become current again.
-- Runtime-owned event, batch, compound, controller, and participant mutations
-  carry `MutationAuthorityRuntime` plus the active lease fence. Memory and file
-  stores validate that fence in the same atomic write section and return
-  `session.ErrLeaseConflict` for an expired or replaced owner. Non-Run Control
-  writes must opt in explicitly with `session.ControlMutationGuard`; an
-  unscoped write cannot silently bypass a live lease.
+- The lease serializes one canonical Turn, not one Agent identity. Local main
+  turns, ACP-controlled main turns, and Side ACP/Reviewer participant prompts
+  all acquire it and keep it through the asynchronous Runner lifetime. ACP
+  event forwarders receive and preserve the same `MutationGuard` as Runtime;
+  dropping it is a lease conflict rather than an unfenced fallback.
+- Runtime-owned event, batch, compound, controller, task, and participant-prompt
+  mutations carry `MutationAuthorityRuntime` plus the active fence. Memory and
+  file stores validate it in the same atomic write section and return
+  `session.ErrLeaseConflict` for an expired or replaced owner.
+- Non-Run Control writes opt in with a named `session.ControlMutationGuard`.
+  Approval resolution, participant attach/detach, watchdog audit, validated
+  system commits, and tests may overlap a live Turn. Participant lifecycle
+  remains protected by revision/delegation/generation CAS and atomic event
+  persistence. Unknown purposes, handoff, and coordinator binding do not bypass
+  a live lease.
+- Exclusive Control mutations use
+  `session.ControlMutationGuardWithRuntimeLease`. Controller handoff first
+  acquires the Session execution lease, starts no endpoint when an old Turn is
+  active, and commits the binding plus handoff event only under the matching
+  fence. Losing the lease invalidates the commit.
+- An unscoped event/binding mutation cannot silently bypass a live lease.
+- A Runtime lease context is scoped to exactly one Session. A nested Runtime
+  that operates on a distinct staging Session first uses
+  `session.ContextWithoutRuntimeLease`, then establishes its own placement
+  lease if that store is shared. The helper preserves cancellation, deadlines,
+  and unrelated context values; it cannot bypass an active store lease.
 - Store adapters implement that CAS contract. Checkpoint compaction also carries
   the source session revision and abandons stale work on conflict.
 - Task records and optional session leases also use revision/owner tokens.
@@ -138,15 +154,19 @@ derives and validates the final assembled model/tool/sandbox requirements.
   unblocks producers and consumers. Natural completion closes production but
   preserves queued events so the selected consumer can drain them. Callers
   that stop iteration early must call `Close`.
+- The Control watchdog may Interrupt a live Turn only for high-confidence
+  generation-loop evidence. Its reviewer is asynchronous and Runtime-wide
+  bounded; capacity saturation drops evidence. Reviewer timeout/failure/panic,
+  checkpoint failure, and decisions arriving after normal completion never
+  become Turn errors or capacity-triggered cancellation.
 - Approval resolution is persisted before a waiting run is awakened.
   `AttachLiveRun(runID)` attaches only to execution still registered in the
   current Runtime process. It is not durable continuation. After restart, a
   durable but non-live run returns `*agent.RunNotAttachableError`; recovery
   records an interrupted state instead of pretending execution resumed.
-- Historical note: `v0.25.0` could miss waking a live approval waiter after a
-  committed-but-reported resolution. The local candidate confirms the durable
-  decision with a bounded context detached from the resolver cancellation and
-  redelivers matching idempotent retries; conflicting decisions fail closed.
+- A committed-but-reported approval resolution is confirmed with a bounded
+  context detached from resolver cancellation. Matching idempotent retries
+  redeliver the durable decision; conflicting decisions fail closed.
 
 ## Event ordering and replay contract
 
@@ -162,10 +182,9 @@ derives and validates the final assembled model/tool/sandbox requirements.
   `Run`, `Turn`, `Step`, `PauseToken`, and `ToolExecution` records use validated
   transition and revision rules. A terminal tool result and its journal
   transition are one compound commit in capable stores.
-- Historical note: `v0.25.0` could leave recovered tool journal state out of
-  canonical model truth. The local candidate derives the minimal canonical
-  payload directly from `RecoveryStatus`; only genuinely unknown outcomes carry
-  the no-blind-retry instruction, and live/rebuilt model contexts match.
+- Recovered tool state derives a minimal canonical payload directly from
+  `RecoveryStatus`; only genuinely unknown outcomes carry the no-blind-retry
+  instruction, and live/rebuilt model contexts match.
 - Compaction checkpoints identify the greatest summarized event `Seq`. Replay
   chooses the valid checkpoint with the highest coverage and then applies
   later canonical events; file order alone does not choose a checkpoint.
@@ -188,6 +207,37 @@ derives and validates the final assembled model/tool/sandbox requirements.
   `ParticipantLifecycleService`, `ControllerHandoffService`, or the execution
   journal compound-commit interfaces. An adapter must not expose one of these
   interfaces unless it can prevent readers from observing a split commit.
+- `task.CASStore.Put` must honor both task revision CAS and the owning session
+  mutation fence carried by its context. A committed reporting error may return
+  the exact persisted entry; consumers validate and adopt that revision instead
+  of treating an already committed write as absent.
+- Participant lifecycle stores treat participant ID plus delegation ID as one
+  durable identity. Live ACP endpoints additionally carry an attachment
+  generation and are indexed by parent SessionID plus participant ID. Every new
+  endpoint client rotates generation across reconnect/restart; compensation and
+  detach must conditionally match delegation and generation so a stale
+  operation cannot remove a newer endpoint. Attach
+  compares delegation even when it is empty, and atomic attach or detach honors
+  `ExpectedDelegationID`. Participant prompts are single-flight per live
+  attachment; Runtime rejects a second prompt before appending its durable user
+  event, so it cannot share turn, event, or approval state with the first.
+- Participant stores can run the supported `session/sessiontest` conformance
+  matrix. It covers plain and lifecycle put/remove, revision/delegation CAS,
+  lease MutationGuard fencing on every mutation shape, atomic event conflicts, and exact committed
+  results through a store-supplied post-commit fault adapter. The suite is
+  strict: lease fencing and fault injection are required capabilities, and
+  returned Session/event objects must exactly match durable state and lifecycle
+  semantics.
+- With a configured durable task store, asynchronous command start requires
+  `task.CASStore`. `(SessionID, ParentCall)` is the stable effect identity;
+  intent, effect, cleanup, and cancellation claims are persisted before their
+  external sandbox actions. `command_intent` and `command_cancel_claimed` mean
+  that their respective external effect is authorized but has not yet reached a
+  durable post-attempt phase, so recovery may roll them forward. A retry never
+  repeats Start after `command_effect_claimed`, or Terminate after cancellation
+  is recorded as unknown/applied. Unconfirmed Wait/Status or terminal output
+  retrieval preserves the stable TaskID, durable unknown outcome, and live
+  handle.
 - The current subagent spawn path requires `task.CASStore` before invoking the
   external effect. Its durable phases are intentionally few: `prepared`
   (intent), `spawning` (external-effect claim), `spawned` (post-spawn local
@@ -205,6 +255,11 @@ derives and validates the final assembled model/tool/sandbox requirements.
   (idempotent assistant key) and never re-issues the remote Continue. A
   process restart or remote failure after `continue_pending` is
   `continue_unknown_outcome` and refuses blind re-issue.
+- Subagent Cancel persists `subagent_cancel_claimed` before invoking the remote
+  effect. Once claimed, retries and restarts reconcile through Wait instead of
+  blindly invoking Cancel again; ordinary non-committed task-store failures
+  evict the process-local task so equal-revision cache cannot outrank durable
+  state.
 - The bundled file store writes a fsynced transaction marker before applying
   event and state documents and completes recovery before later operations.
   A post-commit reporting failure is a committed/unknown-reporting outcome;

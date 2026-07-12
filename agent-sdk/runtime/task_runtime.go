@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -280,6 +281,9 @@ func commandTaskToolPayload(snapshot taskapi.Snapshot) map[string]any {
 	}
 	if snapshot.Running {
 		payload["state"] = string(snapshot.State)
+		if errText, _ := snapshot.Result["error"].(string); strings.TrimSpace(errText) != "" {
+			payload["error"] = strings.TrimSpace(errText)
+		}
 		if latestOutput, _ := snapshot.Result["latest_output"].(string); taskOutputHasNonBlankLine(latestOutput) {
 			payload["latest_output"] = latestOutput
 		}
@@ -348,7 +352,20 @@ func (tm *taskRuntime) persistTaskEntry(ctx context.Context, entry *taskapi.Entr
 		}
 		persisted, err := store.Put(ctx, taskapi.PutRequest{Entry: entry, ExpectedRevision: expected})
 		if err != nil {
-			return err
+			if !session.IsCommitted(err) {
+				if entry.Kind == taskapi.KindSubagent {
+					tm.invalidateSubagentTask(entry.Session, entry.TaskID, expected)
+				}
+				return err
+			}
+			committedErr := err
+			if !sameCommittedTaskEntry(persisted, entry, expected) {
+				reloaded, loadErr := tm.store.Get(context.WithoutCancel(ctx), entry.TaskID)
+				if loadErr != nil || !sameCommittedTaskEntry(reloaded, entry, expected) {
+					return errors.Join(committedErr, loadErr)
+				}
+				persisted = reloaded
+			}
 		}
 		if persisted != nil {
 			*entry = *taskapi.CloneEntry(persisted)
@@ -357,6 +374,18 @@ func (tm *taskRuntime) persistTaskEntry(ctx context.Context, entry *taskapi.Entr
 		return nil
 	}
 	return tm.store.Upsert(ctx, entry)
+}
+
+func sameCommittedTaskEntry(persisted, requested *taskapi.Entry, expected uint64) bool {
+	if persisted == nil || requested == nil || persisted.Revision != expected+1 {
+		return false
+	}
+	want := taskapi.SanitizeEntryForPersistence(requested, taskapi.ResultPersistenceCanonical)
+	if want == nil {
+		return false
+	}
+	want.Revision = persisted.Revision
+	return reflect.DeepEqual(taskapi.CloneEntry(persisted), want)
 }
 
 func (tm *taskRuntime) persistSpawnEntry(ctx context.Context, entry *taskapi.Entry) error {
@@ -371,13 +400,17 @@ func (tm *taskRuntime) persistSpawnEntry(ctx context.Context, entry *taskapi.Ent
 	persisted, err := store.Put(ctx, taskapi.PutRequest{Entry: entry, ExpectedRevision: expected})
 	if err != nil {
 		if !session.IsCommitted(err) {
+			tm.invalidateSubagentTask(entry.Session, entry.TaskID, expected)
 			return err
 		}
-		reloaded, loadErr := tm.store.Get(context.WithoutCancel(ctx), entry.TaskID)
-		if loadErr != nil || !sameSpawnEntryPhase(reloaded, entry) {
-			return errors.Join(err, loadErr)
+		committedErr := err
+		if !sameCommittedTaskEntry(persisted, entry, expected) {
+			reloaded, loadErr := tm.store.Get(context.WithoutCancel(ctx), entry.TaskID)
+			if loadErr != nil || !sameCommittedTaskEntry(reloaded, entry, expected) {
+				return errors.Join(committedErr, loadErr)
+			}
+			persisted = reloaded
 		}
-		persisted = reloaded
 	}
 	if persisted == nil {
 		return errors.New("agent-sdk/runtime: CAS task store returned no persisted spawn entry")
@@ -385,17 +418,6 @@ func (tm *taskRuntime) persistSpawnEntry(ctx context.Context, entry *taskapi.Ent
 	*entry = *taskapi.CloneEntry(persisted)
 	tm.updateTaskPersistence(entry)
 	return nil
-}
-
-func sameSpawnEntryPhase(stored *taskapi.Entry, requested *taskapi.Entry) bool {
-	if stored == nil || requested == nil {
-		return false
-	}
-	return strings.TrimSpace(stored.TaskID) == strings.TrimSpace(requested.TaskID) &&
-		taskSpecString(stored.Spec, "spawn_identity") == taskSpecString(requested.Spec, "spawn_identity") &&
-		taskStringValue(stored.Metadata["spawn_status"]) == taskStringValue(requested.Metadata["spawn_status"]) &&
-		taskStringValue(stored.Metadata["continue_phase"]) == taskStringValue(requested.Metadata["continue_phase"]) &&
-		taskStringValue(stored.Metadata["continue_digest"]) == taskStringValue(requested.Metadata["continue_digest"])
 }
 
 func (tm *taskRuntime) updateTaskPersistence(entry *taskapi.Entry) {

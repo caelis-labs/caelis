@@ -21,6 +21,9 @@ type SourceEventPublisher interface {
 type ControllerEventForwardRequest struct {
 	ActiveSession session.Session
 	SessionRef    session.SessionRef
+	// MutationGuard is the execution authority for every durable event emitted
+	// by this forwarding job. Forwarders must preserve it on every store write.
+	MutationGuard session.MutationGuard
 	TurnID        string
 	Source        EventSource
 	Publisher     SourceEventPublisher

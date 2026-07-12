@@ -141,18 +141,19 @@ func CloneControllerBinding(in ControllerBinding) ControllerBinding {
 // CloneParticipantBinding returns one normalized participant binding copy.
 func CloneParticipantBinding(in ParticipantBinding) ParticipantBinding {
 	return ParticipantBinding{
-		ID:             strings.TrimSpace(in.ID),
-		Kind:           in.Kind,
-		Role:           in.Role,
-		AgentName:      strings.TrimSpace(in.AgentName),
-		Label:          strings.TrimSpace(in.Label),
-		SessionID:      strings.TrimSpace(in.SessionID),
-		Source:         strings.TrimSpace(in.Source),
-		ParentTurnID:   strings.TrimSpace(in.ParentTurnID),
-		DelegationID:   strings.TrimSpace(in.DelegationID),
-		ContextSyncSeq: in.ContextSyncSeq,
-		AttachedAt:     in.AttachedAt,
-		ControllerRef:  strings.TrimSpace(in.ControllerRef),
+		ID:                   strings.TrimSpace(in.ID),
+		Kind:                 in.Kind,
+		Role:                 in.Role,
+		AgentName:            strings.TrimSpace(in.AgentName),
+		Label:                strings.TrimSpace(in.Label),
+		SessionID:            strings.TrimSpace(in.SessionID),
+		Source:               strings.TrimSpace(in.Source),
+		ParentTurnID:         strings.TrimSpace(in.ParentTurnID),
+		DelegationID:         strings.TrimSpace(in.DelegationID),
+		AttachmentGeneration: strings.TrimSpace(in.AttachmentGeneration),
+		ContextSyncSeq:       in.ContextSyncSeq,
+		AttachedAt:           in.AttachedAt,
+		ControllerRef:        strings.TrimSpace(in.ControllerRef),
 	}
 }
 

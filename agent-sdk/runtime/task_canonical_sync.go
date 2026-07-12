@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -109,6 +110,9 @@ func (tm *taskRuntime) syncCanonicalTaskEntry(ctx context.Context, ref session.S
 	if !ok {
 		return false, nil
 	}
+	if entry.State == taskapi.StateUnknownOutcome {
+		return true, nil
+	}
 	status := ""
 	if event != nil && event.Tool != nil {
 		status = event.Tool.Status
@@ -166,14 +170,20 @@ type canonicalTaskHistoryOutput struct {
 	UpdatedAt time.Time
 }
 
-func (tm *taskRuntime) backfillCanonicalTaskEntry(ctx context.Context, ref session.SessionRef, entry *taskapi.Entry) *taskapi.Entry {
+func (tm *taskRuntime) backfillCanonicalTaskEntry(ctx context.Context, ref session.SessionRef, entry *taskapi.Entry) (*taskapi.Entry, error) {
 	entry = taskapi.CloneEntry(entry)
 	if entry == nil || tm == nil || tm.runtime == nil || tm.runtime.sessions == nil || tm.store == nil {
-		return entry
+		return entry, nil
+	}
+	// Unknown outcome is a durable safety state produced after a later effect
+	// claim or failed reconciliation. Historical model-visible tool output has
+	// no operation revision and therefore cannot safely prove that state stale.
+	if entry.State == taskapi.StateUnknownOutcome {
+		return entry, nil
 	}
 	events, err := tm.runtime.sessions.Events(ctx, session.EventsRequest{SessionRef: ref})
 	if err != nil {
-		return entry
+		return entry, nil
 	}
 	var (
 		found  bool
@@ -189,11 +199,24 @@ func (tm *taskRuntime) backfillCanonicalTaskEntry(ctx context.Context, ref sessi
 		}
 	}
 	if !found {
-		return entry
+		return entry, nil
+	}
+	if !entry.UpdatedAt.IsZero() && (latest.UpdatedAt.IsZero() || !latest.UpdatedAt.After(entry.UpdatedAt)) {
+		return entry, nil
 	}
 	applyCanonicalTaskEntry(entry, latest.Output, latest.Status, latest.UpdatedAt)
-	_ = tm.persistTaskEntry(ctx, entry)
-	return entry
+	if err := tm.persistTaskEntry(ctx, entry); err != nil {
+		var conflict *taskapi.RevisionConflictError
+		if !errors.As(err, &conflict) {
+			return nil, err
+		}
+		reloaded, loadErr := tm.store.Get(context.WithoutCancel(ctx), entry.TaskID)
+		if loadErr != nil || !storedTaskEntryMatches(reloaded, ref, entry.Kind) {
+			return nil, errors.Join(err, loadErr)
+		}
+		return taskapi.CloneEntry(reloaded), nil
+	}
+	return entry, nil
 }
 
 func canonicalTaskHistoryOutputs(event *session.Event) []canonicalTaskHistoryOutput {

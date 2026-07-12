@@ -191,6 +191,71 @@ func TestExecutePlacedCancelsCallbackWhenHeartbeatFails(t *testing.T) {
 	}
 }
 
+func TestExecutePlacedRetainsHeartbeatFailureThatArrivesDuringFinish(t *testing.T) {
+	t.Parallel()
+	service := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	active, err := service.StartSession(context.Background(), session.StartSessionRequest{
+		AppName: "caelis", UserID: "user", PreferredSessionID: "late-heartbeat-error",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	leasing := &lateHeartbeatLeaseService{
+		SessionLeaseService: service, started: make(chan struct{}), release: make(chan struct{}),
+	}
+	wrapper, err := NewLeasedRuntime(LeasedRuntimeConfig{
+		Runtime: leaseTestRuntime{}, Leases: leasing, OwnerID: "host-a",
+		TTL: 100 * time.Millisecond, HeartbeatInterval: time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = wrapper.ExecutePlaced(context.Background(), active.SessionRef, func(context.Context) error {
+		<-leasing.started
+		go func() {
+			time.Sleep(10 * time.Millisecond)
+			close(leasing.release)
+		}()
+		return nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "late heartbeat failure") {
+		t.Fatalf("ExecutePlaced error = %v, want late heartbeat failure", err)
+	}
+}
+
+func TestLeasedRunnerCloseRetainsHeartbeatFailure(t *testing.T) {
+	t.Parallel()
+	service := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	active, err := service.StartSession(context.Background(), session.StartSessionRequest{
+		AppName: "caelis", UserID: "user", PreferredSessionID: "close-heartbeat-error",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	leasing := &lateHeartbeatLeaseService{
+		SessionLeaseService: service, started: make(chan struct{}), release: make(chan struct{}),
+	}
+	wrapper, err := NewLeasedRuntime(LeasedRuntimeConfig{
+		Runtime: leaseTestRuntime{runner: newLeaseTestRunner("close-heartbeat-run")}, Leases: leasing,
+		OwnerID: "host-a", TTL: 100 * time.Millisecond, HeartbeatInterval: time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := wrapper.Run(context.Background(), agent.RunRequest{SessionRef: active.SessionRef})
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-leasing.started
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		close(leasing.release)
+	}()
+	if err := run.Handle.Close(); err == nil || !strings.Contains(err.Error(), "late heartbeat failure") {
+		t.Fatalf("Close error = %v, want late heartbeat failure", err)
+	}
+}
+
 func TestLeasedRuntimeCancelsRunWhenHeartbeatFails(t *testing.T) {
 	t.Parallel()
 
@@ -228,6 +293,38 @@ func TestLeasedRuntimeCancelsRunWhenHeartbeatFails(t *testing.T) {
 	runner.mu.Unlock()
 	if cancelCalls != 1 {
 		t.Fatalf("runner cancel calls = %d, want 1", cancelCalls)
+	}
+}
+
+func TestLeasedRuntimeEarlyConsumerStopDoesNotYieldCleanupError(t *testing.T) {
+	t.Parallel()
+
+	service := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	active, err := service.StartSession(context.Background(), session.StartSessionRequest{
+		AppName: "caelis", UserID: "user", PreferredSessionID: "early-stop",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := &singleEventRunner{id: "early-stop-run"}
+	leasing := &releaseErrorLeaseService{SessionLeaseService: service}
+	wrapper, err := NewLeasedRuntime(LeasedRuntimeConfig{
+		Runtime: singleEventRuntime{runner: runner}, Leases: leasing, OwnerID: "host-a", TTL: time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := wrapper.Run(context.Background(), agent.RunRequest{SessionRef: active.SessionRef})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := 0
+	for range run.Handle.Events() {
+		seen++
+		break
+	}
+	if seen != 1 {
+		t.Fatalf("events seen = %d, want 1", seen)
 	}
 }
 
@@ -339,6 +436,50 @@ type heartbeatFailLeaseService struct {
 	session.SessionLeaseService
 	err error
 }
+
+type releaseErrorLeaseService struct{ session.SessionLeaseService }
+
+func (s *releaseErrorLeaseService) ReleaseSessionLease(ctx context.Context, req session.ReleaseSessionLeaseRequest) error {
+	_ = s.SessionLeaseService.ReleaseSessionLease(ctx, req)
+	return errors.New("release failed after early consumer stop")
+}
+
+type lateHeartbeatLeaseService struct {
+	session.SessionLeaseService
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (s *lateHeartbeatLeaseService) HeartbeatSessionLease(context.Context, session.HeartbeatSessionLeaseRequest) (session.SessionLease, error) {
+	s.once.Do(func() { close(s.started) })
+	<-s.release
+	return session.SessionLease{}, errors.New("late heartbeat failure")
+}
+
+type singleEventRuntime struct{ runner agent.Runner }
+
+func (r singleEventRuntime) Run(context.Context, agent.RunRequest) (agent.RunResult, error) {
+	return agent.RunResult{Handle: r.runner}, nil
+}
+
+func (singleEventRuntime) RunState(context.Context, session.SessionRef) (agent.RunState, error) {
+	return agent.RunState{}, nil
+}
+
+type singleEventRunner struct{ id string }
+
+func (r *singleEventRunner) RunID() string { return r.id }
+func (*singleEventRunner) Events() iter.Seq2[*session.Event, error] {
+	return func(yield func(*session.Event, error) bool) {
+		yield(&session.Event{Type: session.EventTypeNotice, Text: "one"}, nil)
+	}
+}
+func (*singleEventRunner) Submit(agent.Submission) error { return nil }
+func (*singleEventRunner) Cancel() agent.CancelResult {
+	return agent.CancelResult{Status: agent.CancelStatusCancelled}
+}
+func (*singleEventRunner) Close() error { return nil }
 
 func (s *heartbeatFailLeaseService) HeartbeatSessionLease(context.Context, session.HeartbeatSessionLeaseRequest) (session.SessionLease, error) {
 	return session.SessionLease{}, s.err

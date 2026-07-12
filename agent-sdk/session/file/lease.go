@@ -177,6 +177,19 @@ func validateFileMutationGuard(active session.SessionLease, guard session.Mutati
 			}
 			return err
 		}
+		hasFence := strings.TrimSpace(guard.LeaseID) != ""
+		if hasFence {
+			if active.LeaseID == "" || !active.ExpiresAt.After(now) {
+				return fileLeaseConflict(active.SessionRef, "control mutation fence is absent or expired")
+			}
+			if active.LeaseID != strings.TrimSpace(guard.LeaseID) || active.OwnerID != strings.TrimSpace(guard.OwnerID) || active.FencingToken != guard.FencingToken {
+				return fileLeaseConflict(active.SessionRef, "control mutation fencing token is stale")
+			}
+			return nil
+		}
+		if active.LeaseID != "" && active.ExpiresAt.After(now) && !session.ControlMutationMayOverlapRuntimeLease(guard.Purpose) {
+			return fileLeaseConflict(active.SessionRef, "active execution lease requires a matching control fence")
+		}
 		return nil
 	}
 	if guard.Authority != session.MutationAuthorityRuntime {

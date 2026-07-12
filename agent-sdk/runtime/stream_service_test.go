@@ -68,29 +68,178 @@ func TestStreamReadCommandUsesReadOutputFallbackWithoutCallbackSource(t *testing
 	}
 }
 
-func TestStreamReadCommandCompletedUsesFinalTextWithoutFrame(t *testing.T) {
+func TestStreamReadCommandCompletedEmitsUndeliveredCallbackTail(t *testing.T) {
 	t.Parallel()
 
+	const shown = "live\n"
+	const tail = "final\n"
 	task := &commandTask{
 		ref:            taskapi.Ref{TaskID: "task-1", SessionID: "term-session", TerminalID: "term-1"},
 		sessionRef:     session.SessionRef{SessionID: "session-1"},
-		session:        &liveOutputRaceSession{stdout: "final\n", completed: true},
+		session:        &liveOutputRaceSession{stdout: shown + tail, completed: true},
 		state:          taskapi.StateRunning,
 		running:        true,
 		createdAt:      time.Now(),
-		output:         "live\n",
+		output:         shown,
 		outputCallback: true,
 	}
 
-	snap, err := (&streamService{}).readCommand(context.Background(), task, stream.Cursor{Output: int64(len("live\n"))})
+	snap, err := (&streamService{}).readCommand(context.Background(), task, stream.Cursor{Output: int64(len(shown))})
 	if err != nil {
 		t.Fatalf("readCommand() error = %v", err)
 	}
-	if len(snap.Frames) != 0 {
-		t.Fatalf("frames = %#v, want no duplicate final terminal frame", snap.Frames)
+	if got := streamFrameText(snap.Frames); got != tail {
+		t.Fatalf("stream frame text = %q, want undelivered callback tail %q", got, tail)
 	}
-	if snap.FinalText != "final\n" {
+	if snap.Cursor.Output != int64(len(shown+tail)) {
+		t.Fatalf("cursor.Output = %d, want complete delivered length %d", snap.Cursor.Output, len(shown+tail))
+	}
+	if snap.FinalText != shown+tail {
 		t.Fatalf("FinalText = %q, want complete command result", snap.FinalText)
+	}
+}
+
+func TestStreamSubscribeEmitsUndeliveredCommandTailBeforeClose(t *testing.T) {
+	t.Parallel()
+
+	const shown = "步骤 5/5: 处理中...\n"
+	const tail = "✅ 任务完成！\n"
+	task := &commandTask{
+		ref:            taskapi.Ref{TaskID: "task-1", SessionID: "term-session", TerminalID: "term-1"},
+		sessionRef:     session.SessionRef{SessionID: "session-1"},
+		session:        &liveOutputRaceSession{stdout: shown + tail, completed: true},
+		state:          taskapi.StateRunning,
+		running:        true,
+		createdAt:      time.Now(),
+		output:         shown,
+		outputCallback: true,
+	}
+	service := newStreamService(&taskRuntime{
+		tasks: map[string]*commandTask{task.ref.TaskID: task},
+	})
+
+	var frames []stream.Frame
+	for frame, err := range service.Subscribe(context.Background(), stream.SubscribeRequest{
+		Ref: stream.Ref{
+			SessionID: task.sessionRef.SessionID,
+			TaskID:    task.ref.TaskID,
+		},
+		Cursor: stream.Cursor{Output: int64(len(shown))},
+	}) {
+		if err != nil {
+			t.Fatalf("Subscribe() error = %v", err)
+		}
+		if frame != nil {
+			frames = append(frames, stream.CloneFrame(*frame))
+		}
+	}
+	if len(frames) != 2 {
+		t.Fatalf("frames = %#v, want output tail then close", frames)
+	}
+	if frames[0].Closed || frames[0].Text != tail {
+		t.Fatalf("first frame = %#v, want open tail %q", frames[0], tail)
+	}
+	if !frames[1].Closed || frames[1].Text != "" {
+		t.Fatalf("second frame = %#v, want contentless close", frames[1])
+	}
+	if frames[0].Cursor.Output != int64(len(shown+tail)) || frames[1].Cursor.Output != frames[0].Cursor.Output {
+		t.Fatalf("frame cursors = %#v, want delivered cursor %d preserved through close", frames, len(shown+tail))
+	}
+}
+
+func TestResolvedStreamReaderKeepsLiveTaskAcrossDeferredDurableReplacement(t *testing.T) {
+	t.Parallel()
+
+	const shown = "步骤 5/5: 处理中...\n"
+	const tail = "✅ 任务完成！\n"
+	sess := &liveOutputRaceSession{stdout: shown + tail}
+	live := &commandTask{
+		ref:            taskapi.Ref{TaskID: "task-1", SessionID: "term-session", TerminalID: "term-1"},
+		sessionRef:     session.SessionRef{SessionID: "session-1"},
+		session:        sess,
+		state:          taskapi.StateRunning,
+		running:        true,
+		createdAt:      time.Now(),
+		output:         shown,
+		outputCallback: true,
+	}
+	tasks := &taskRuntime{tasks: map[string]*commandTask{live.ref.TaskID: live}}
+	service := newStreamService(tasks)
+	read, err := service.resolveReader(context.Background(), stream.Ref{
+		SessionID: live.sessionRef.SessionID,
+		TaskID:    live.ref.TaskID,
+	})
+	if err != nil {
+		t.Fatalf("resolveReader() error = %v", err)
+	}
+
+	// TASK wait removes the live task after persisting a terminal entry whose
+	// final result remains deferred until the canonical tool result is synced.
+	// A subscription must not switch to that empty reconstruction mid-stream.
+	deferredEntry := &taskapi.Entry{
+		TaskID:   live.ref.TaskID,
+		Session:  live.sessionRef,
+		State:    taskapi.StateCompleted,
+		Terminal: live.session.Terminal(),
+	}
+	deferred, err := tasks.rehydrateCommandTask(deferredEntry)
+	if err != nil {
+		t.Fatalf("rehydrateCommandTask() error = %v", err)
+	}
+	tasks.tasks[live.ref.TaskID] = deferred
+	sess.completed = true
+
+	snap, err := read(context.Background(), stream.Cursor{Output: int64(len([]byte(shown)))})
+	if err != nil {
+		t.Fatalf("resolved reader error = %v", err)
+	}
+	if got := streamFrameText(snap.Frames); got != tail {
+		t.Fatalf("stream frame text = %q, want live task completion tail %q", got, tail)
+	}
+	if snap.Cursor.Output != int64(len([]byte(shown+tail))) {
+		t.Fatalf("cursor.Output = %d, want %d", snap.Cursor.Output, len([]byte(shown+tail)))
+	}
+}
+
+func TestCompleteCommandTaskReconcilesCallbackTailForConcurrentSubscribers(t *testing.T) {
+	t.Parallel()
+
+	const shown = "步骤 5/5: 处理中...\n"
+	const tail = "✅ 任务完成！\n"
+	sess := &liveOutputRaceSession{stdout: shown + tail, completed: true}
+	task := &commandTask{
+		ref:            taskapi.Ref{TaskID: "task-1", SessionID: "term-session", TerminalID: "term-1"},
+		sessionRef:     session.SessionRef{SessionID: "session-1"},
+		session:        sess,
+		state:          taskapi.StateRunning,
+		running:        true,
+		createdAt:      time.Now(),
+		stdoutCursor:   int64(len([]byte(shown))),
+		output:         shown,
+		outputCallback: true,
+		result:         map[string]any{"state": string(taskapi.StateRunning)},
+		metadata:       map[string]any{"state": string(taskapi.StateRunning), "running": true},
+	}
+	tasks := newTaskRuntime(&Runtime{clock: time.Now}, nil)
+	tasks.installCommandTask(task)
+	status, err := sess.Status(context.Background())
+	if err != nil {
+		t.Fatalf("Status() error = %v", err)
+	}
+
+	snapshot, err := tasks.completeCommandTaskWithStatus(context.Background(), task, status)
+	if err != nil {
+		t.Fatalf("completeCommandTaskWithStatus() error = %v", err)
+	}
+	if snapshot.Running || snapshot.State != taskapi.StateCompleted {
+		t.Fatalf("snapshot = %#v, want completed", snapshot)
+	}
+	task.mu.Lock()
+	output := task.output
+	cursor := task.outputCursorLocked()
+	task.mu.Unlock()
+	if output != shown+tail || cursor != int64(len([]byte(shown+tail))) {
+		t.Fatalf("live task output/cursor = %q/%d, want complete callback result %q/%d", output, cursor, shown+tail, len([]byte(shown+tail)))
 	}
 }
 

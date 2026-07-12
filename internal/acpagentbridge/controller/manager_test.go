@@ -706,11 +706,14 @@ func TestManagerLifecycleUsesSingleClientStarterSeam(t *testing.T) {
 	if participant.ID == "" || participant.SessionID != "remote-session" {
 		t.Fatalf("participant binding = %#v, want remote session binding", participant)
 	}
-	if err := manager.Detach(context.Background(), controller.DetachRequest{ParticipantID: participant.ID}); err != nil {
+	if err := manager.Detach(context.Background(), controller.DetachRequest{
+		Session: parentSession, ParticipantID: participant.ID, DelegationID: participant.DelegationID,
+		AttachmentGeneration: participant.AttachmentGeneration,
+	}); err != nil {
 		t.Fatalf("Detach() error = %v", err)
 	}
 	manager.mu.RLock()
-	_, stillAttached := manager.participants[participant.ID]
+	_, stillAttached := manager.participants[participantKey(parentSession.SessionID, participant.ID)]
 	manager.mu.RUnlock()
 	if stillAttached {
 		t.Fatal("participant still attached after Detach")
@@ -1265,6 +1268,172 @@ func TestManagerAttachRehydratesPersistedParticipant(t *testing.T) {
 	}
 	if binding.ContextSyncSeq != 9 {
 		t.Fatalf("ContextSyncSeq = %d, want refreshed checkpoint 9", binding.ContextSyncSeq)
+	}
+}
+
+func TestManagerDetachMatchesDelegationAndAttachmentGeneration(t *testing.T) {
+	t.Parallel()
+	manager := &Manager{participants: map[participantRunKey]*participantRun{}}
+	key := participantKey("session-a", "shared")
+	manager.participants[key] = &participantRun{parentSessionID: "session-a", binding: session.ParticipantBinding{
+		ID: "shared", DelegationID: "delegation-new", AttachmentGeneration: "generation-new",
+	}}
+	if err := manager.Detach(context.Background(), controller.DetachRequest{
+		SessionRef: session.SessionRef{SessionID: "session-a"}, ParticipantID: "shared", DelegationID: "delegation-old", AttachmentGeneration: "generation-old",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if manager.participants[key] == nil {
+		t.Fatal("stale detach removed the winning live endpoint")
+	}
+	if err := manager.Detach(context.Background(), controller.DetachRequest{
+		SessionRef: session.SessionRef{SessionID: "session-a"}, ParticipantID: "shared",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if manager.participants[key] == nil {
+		t.Fatal("empty conditional identity acted as a wildcard and removed the live endpoint")
+	}
+	if err := manager.Detach(context.Background(), controller.DetachRequest{
+		SessionRef: session.SessionRef{SessionID: "session-a"}, ParticipantID: "shared", DelegationID: "delegation-new", AttachmentGeneration: "generation-new",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if manager.participants[key] != nil {
+		t.Fatal("matching detach left the endpoint attached")
+	}
+}
+
+func TestParticipantRunRejectsOverlappingPrompts(t *testing.T) {
+	t.Parallel()
+	run := &participantRun{id: "participant-busy"}
+	first := newTurnHandle(nil)
+	if err := run.beginPrompt(controller.ParticipantPromptRequest{TurnID: "turn-1", ParticipantID: run.id}, first); err != nil {
+		t.Fatal(err)
+	}
+	if err := run.beginPrompt(controller.ParticipantPromptRequest{TurnID: "turn-2", ParticipantID: run.id}, newTurnHandle(nil)); err == nil {
+		t.Fatal("overlapping participant prompt was allowed to overwrite active turn state")
+	}
+	run.finishPrompt()
+	if err := run.beginPrompt(controller.ParticipantPromptRequest{TurnID: "turn-3", ParticipantID: run.id}, newTurnHandle(nil)); err != nil {
+		t.Fatalf("prompt after completion remained busy: %v", err)
+	}
+}
+
+func TestManagerRejectsContradictoryParticipantSessionIdentity(t *testing.T) {
+	t.Parallel()
+	manager := &Manager{participants: map[participantRunKey]*participantRun{}}
+	ref := session.SessionRef{SessionID: "session-ref"}
+	active := session.Session{SessionRef: session.SessionRef{SessionID: "session-body"}}
+	if _, err := manager.Attach(context.Background(), controller.AttachRequest{SessionRef: ref, Session: active}); err == nil {
+		t.Fatal("Attach accepted contradictory session ids")
+	}
+	if _, err := manager.PromptParticipant(context.Background(), controller.ParticipantPromptRequest{
+		SessionRef: ref, Session: active, ParticipantID: "p", Input: "hello",
+	}); err == nil {
+		t.Fatal("PromptParticipant accepted contradictory session ids")
+	}
+	if err := manager.Detach(context.Background(), controller.DetachRequest{
+		SessionRef: ref, Session: active, ParticipantID: "p",
+	}); err == nil {
+		t.Fatal("Detach accepted contradictory session ids")
+	}
+}
+
+func TestManagerScopesParticipantIdentityByParentSession(t *testing.T) {
+	t.Parallel()
+	registry, err := subagent.NewRegistry([]subagent.AgentConfig{{Name: "helper", Command: "helper-acp"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := NewManager(Config{Registry: registry})
+	if err != nil {
+		t.Fatal(err)
+	}
+	starts := 0
+	manager.startClient = func(
+		context.Context, string, subagent.AgentConfig, string,
+		func(client.UpdateEnvelope),
+		func(context.Context, client.RequestPermissionRequest) (client.RequestPermissionResponse, error),
+	) (*client.Client, string, controllerClientState, error) {
+		starts++
+		return nil, fmt.Sprintf("remote-%d", starts), controllerClientState{}, nil
+	}
+	binding := session.ParticipantBinding{ID: "shared", DelegationID: "delegation-shared", AttachmentGeneration: "durable-generation"}
+	sessionA := session.Session{SessionRef: session.SessionRef{SessionID: "session-a"}}
+	sessionB := session.Session{SessionRef: session.SessionRef{SessionID: "session-b"}}
+	attachedA, err := manager.Attach(context.Background(), controller.AttachRequest{Session: sessionA, Agent: "helper", Binding: binding})
+	if err != nil {
+		t.Fatal(err)
+	}
+	attachedB, err := manager.Attach(context.Background(), controller.AttachRequest{Session: sessionB, Agent: "helper", Binding: binding})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if starts != 2 || attachedA.SessionID == attachedB.SessionID || attachedA.AttachmentGeneration == attachedB.AttachmentGeneration {
+		t.Fatalf("starts/bindings = %d/%#v/%#v, want isolated live endpoints", starts, attachedA, attachedB)
+	}
+	if err := manager.Detach(context.Background(), controller.DetachRequest{
+		Session: sessionB, ParticipantID: binding.ID, DelegationID: binding.DelegationID,
+		AttachmentGeneration: attachedB.AttachmentGeneration,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	manager.mu.RLock()
+	runA := manager.participants[participantKey(sessionA.SessionID, binding.ID)]
+	runB := manager.participants[participantKey(sessionB.SessionID, binding.ID)]
+	manager.mu.RUnlock()
+	if runA == nil || runB != nil {
+		t.Fatalf("session-scoped participants after detach = a:%v b:%v", runA != nil, runB != nil)
+	}
+}
+
+func TestManagerNewClientAlwaysRotatesAttachmentGeneration(t *testing.T) {
+	t.Parallel()
+	registry, err := subagent.NewRegistry([]subagent.AgentConfig{{Name: "helper", Command: "helper-acp"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	newManager := func(remote string) *Manager {
+		manager, managerErr := NewManager(Config{Registry: registry})
+		if managerErr != nil {
+			t.Fatal(managerErr)
+		}
+		manager.startClient = func(
+			context.Context, string, subagent.AgentConfig, string,
+			func(client.UpdateEnvelope),
+			func(context.Context, client.RequestPermissionRequest) (client.RequestPermissionResponse, error),
+		) (*client.Client, string, controllerClientState, error) {
+			return nil, remote, controllerClientState{}, nil
+		}
+		return manager
+	}
+	parent := session.Session{SessionRef: session.SessionRef{SessionID: "generation-session"}}
+	persisted := session.ParticipantBinding{ID: "shared", DelegationID: "delegation", AttachmentGeneration: "old-generation"}
+	firstManager := newManager("remote-first")
+	first, err := firstManager.Attach(context.Background(), controller.AttachRequest{Session: parent, Agent: "helper", Binding: persisted})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondManager := newManager("remote-second")
+	second, err := secondManager.Attach(context.Background(), controller.AttachRequest{Session: parent, Agent: "helper", Binding: first})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.AttachmentGeneration == persisted.AttachmentGeneration || second.AttachmentGeneration == first.AttachmentGeneration {
+		t.Fatalf("attachment generations were reused: persisted=%q first=%q second=%q", persisted.AttachmentGeneration, first.AttachmentGeneration, second.AttachmentGeneration)
+	}
+	if err := secondManager.Detach(context.Background(), controller.DetachRequest{
+		Session: parent, ParticipantID: persisted.ID, DelegationID: persisted.DelegationID,
+		AttachmentGeneration: first.AttachmentGeneration,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	secondManager.mu.RLock()
+	stillAttached := secondManager.participants[participantKey(parent.SessionID, persisted.ID)] != nil
+	secondManager.mu.RUnlock()
+	if !stillAttached {
+		t.Fatal("stale generation detached the restarted participant endpoint")
 	}
 }
 

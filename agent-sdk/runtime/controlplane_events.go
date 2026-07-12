@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -30,12 +32,13 @@ func participantBindingLabel(binding session.ParticipantBinding) string {
 func participantLifecycleEvent(activeSession session.Session, binding session.ParticipantBinding, action string, now time.Time) *session.Event {
 	text := strings.TrimSpace(action + " participant " + firstNonEmpty(binding.Label, binding.ID))
 	return &session.Event{
-		Type:       session.EventTypeParticipant,
-		Visibility: session.VisibilityCanonical,
-		Time:       now,
-		Actor:      session.ActorRef{Kind: session.ActorKindSystem, Name: "runtime"},
-		Text:       text,
-		Protocol:   ptrEventProtocol(session.NewParticipantProtocol(session.ProtocolParticipant{Action: action})),
+		IdempotencyKey: participantLifecycleIdempotencyKey(activeSession, binding, action),
+		Type:           session.EventTypeParticipant,
+		Visibility:     session.VisibilityCanonical,
+		Time:           now,
+		Actor:          session.ActorRef{Kind: session.ActorKindSystem, Name: "runtime"},
+		Text:           text,
+		Protocol:       ptrEventProtocol(session.NewParticipantProtocol(session.ProtocolParticipant{Action: action})),
 		Scope: &session.EventScope{
 			Source: "control_plane",
 			Controller: session.ControllerRef{
@@ -54,12 +57,26 @@ func participantLifecycleEvent(activeSession session.Session, binding session.Pa
 			},
 		},
 		Meta: map[string]any{
-			"participant_id": binding.ID,
-			"label":          binding.Label,
-			"session_id":     binding.SessionID,
-			"controller_ref": binding.ControllerRef,
+			"participant_id":        binding.ID,
+			"label":                 binding.Label,
+			"session_id":            binding.SessionID,
+			"controller_ref":        binding.ControllerRef,
+			"delegation_id":         binding.DelegationID,
+			"attachment_generation": binding.AttachmentGeneration,
 		},
 	}
+}
+
+func participantLifecycleIdempotencyKey(activeSession session.Session, binding session.ParticipantBinding, action string) string {
+	raw := strings.Join([]string{
+		strings.TrimSpace(activeSession.SessionID),
+		strings.TrimSpace(action),
+		strings.TrimSpace(binding.ID),
+		strings.TrimSpace(binding.DelegationID),
+		strings.TrimSpace(binding.AttachmentGeneration),
+	}, "\x00")
+	sum := sha256.Sum256([]byte(raw))
+	return "participant-lifecycle-" + hex.EncodeToString(sum[:12])
 }
 
 func ptrEventProtocol(protocol session.EventProtocol) *session.EventProtocol {

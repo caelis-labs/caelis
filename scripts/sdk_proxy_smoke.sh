@@ -50,6 +50,12 @@ fi
   cd "${consumer_dir}"
   export GOWORK=off
   export GOPROXY="${PROXY}"
+	# Ambient private-module policy must not bypass the evidence proxy for the
+	# target module. Explicit empty/none values override user and CI GOENV.
+	export GOPRIVATE=
+	export GONOPROXY=none
+	export GONOSUMDB=none
+	export GOVCS='*:off'
   export GOMODCACHE="${consumer_modcache}"
   export GOCACHE="${consumer_gocache}"
   export GOTMPDIR="${consumer_gotmp}"

@@ -15,13 +15,31 @@ import (
 // Lease fencing and watchdog observation differ; capability passthrough and live
 // runner bookkeeping do not.
 type runtimeFacade struct {
-	inner  agent.Runtime
-	runsMu sync.Mutex
-	runs   map[string]agent.Runner
+	inner         agent.Runtime
+	runsMu        sync.Mutex
+	runs          map[liveRunKey]liveRunEntry
+	runGeneration uint64
 }
 
 func newRuntimeFacade(inner agent.Runtime) runtimeFacade {
-	return runtimeFacade{inner: inner, runs: map[string]agent.Runner{}}
+	return runtimeFacade{inner: inner, runs: map[liveRunKey]liveRunEntry{}}
+}
+
+type liveRunKey struct {
+	sessionID string
+	runID     string
+}
+
+type liveRunEntry struct {
+	runner     agent.Runner
+	generation uint64
+}
+
+func normalizedLiveRunKey(ref session.SessionRef, runID string) liveRunKey {
+	return liveRunKey{
+		sessionID: strings.TrimSpace(session.NormalizeSessionRef(ref).SessionID),
+		runID:     strings.TrimSpace(runID),
+	}
 }
 
 func (f *runtimeFacade) RunState(ctx context.Context, ref session.SessionRef) (agent.RunState, error) {
@@ -45,8 +63,9 @@ func (f *runtimeFacade) AttachLiveRun(ctx context.Context, req agent.AttachLiveR
 	if err != nil {
 		return result, err
 	}
+	key := normalizedLiveRunKey(req.SessionRef, req.RunID)
 	f.runsMu.Lock()
-	result.Handle = f.runs[strings.TrimSpace(req.RunID)]
+	result.Handle = f.runs[key].runner
 	f.runsMu.Unlock()
 	if result.Handle == nil {
 		return agent.RunResult{}, &agent.RunNotAttachableError{SessionRef: req.SessionRef, RunID: req.RunID, Detail: "decorated live runner is unavailable"}
@@ -86,26 +105,35 @@ func (f *runtimeFacade) participants() (agent.ParticipantControlPlane, error) {
 	return participants, nil
 }
 
-func (f *runtimeFacade) rememberRun(runID string, runner agent.Runner) {
-	f.runsMu.Lock()
-	f.runs[strings.TrimSpace(runID)] = runner
-	f.runsMu.Unlock()
-}
-
-func (f *runtimeFacade) forgetRun(runID string) {
-	f.runsMu.Lock()
-	delete(f.runs, strings.TrimSpace(runID))
-	f.runsMu.Unlock()
-}
-
 // wrapLiveHandle records the outer decorated runner so AttachLiveRun returns the
 // same handle identity the original Run produced.
-func (f *runtimeFacade) wrapLiveHandle(result agent.RunResult, wrap func(agent.Runner, string) agent.Runner) agent.RunResult {
+func (f *runtimeFacade) wrapLiveHandle(
+	result agent.RunResult,
+	ref session.SessionRef,
+	wrap func(agent.Runner, func()) agent.Runner,
+) agent.RunResult {
 	if result.Handle == nil {
 		return result
 	}
-	runID := result.Handle.RunID()
-	result.Handle = wrap(result.Handle, runID)
-	f.rememberRun(runID, result.Handle)
+	key := normalizedLiveRunKey(ref, result.Handle.RunID())
+	f.runsMu.Lock()
+	f.runGeneration++
+	generation := f.runGeneration
+	// Reserve the generation before calling arbitrary wrapper code. An older
+	// wrap that finishes later can no longer overwrite a newer reservation.
+	f.runs[key] = liveRunEntry{generation: generation}
+	f.runsMu.Unlock()
+	result.Handle = wrap(result.Handle, func() {
+		f.runsMu.Lock()
+		if current, ok := f.runs[key]; ok && current.generation == generation {
+			delete(f.runs, key)
+		}
+		f.runsMu.Unlock()
+	})
+	f.runsMu.Lock()
+	if current, ok := f.runs[key]; ok && current.generation == generation {
+		f.runs[key] = liveRunEntry{runner: result.Handle, generation: generation}
+	}
+	f.runsMu.Unlock()
 	return result
 }

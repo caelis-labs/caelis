@@ -33,8 +33,10 @@ type LeasedRuntimeConfig struct {
 	HeartbeatInterval time.Duration
 }
 
-// LeasedRuntime acquires a store-level session lease before dispatch and keeps
-// it alive until the returned Runner completes or closes.
+// LeasedRuntime acquires a store-level execution lease before a main or
+// participant Turn and keeps it alive until the returned Runner completes or
+// closes. Side ACP is therefore a valid owner of the same canonical execution
+// envelope, not an unfenced writer.
 type LeasedRuntime struct {
 	runtimeFacade
 	leases            session.SessionLeaseService
@@ -78,22 +80,7 @@ func NewLeasedRuntime(config LeasedRuntimeConfig) (*LeasedRuntime, error) {
 // callback. Lease loss cancels the callback context so work cannot continue
 // under a stolen fence.
 func (r *LeasedRuntime) ExecutePlaced(ctx context.Context, ref session.SessionRef, execute func(context.Context) error) error {
-	if execute == nil {
-		return fmt.Errorf("controlplane: placed operation is required")
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	ref = session.NormalizeSessionRef(ref)
-	lease, err := r.acquireSessionLease(ctx, ref)
-	if err != nil {
-		return err
-	}
-	runCtx, cancel := context.WithCancel(session.ContextWithRuntimeLease(ctx, lease))
-	defer cancel()
-	guard := startSessionLeaseGuard(r.leases, lease, r.ttl, r.heartbeatInterval, cancel)
-	execErr := execute(runCtx)
-	return errors.Join(execErr, guard.err(), guard.finish())
+	return executeWithSessionLease(ctx, r.leases, r.ownerID, r.ttl, r.heartbeatInterval, ref, execute)
 }
 
 func (r *LeasedRuntime) Run(ctx context.Context, req agent.RunRequest) (agent.RunResult, error) {
@@ -119,19 +106,56 @@ func (r *LeasedRuntime) runWithLease(ctx context.Context, ref session.SessionRef
 	if result.Handle == nil {
 		return result, r.release(lease)
 	}
-	return r.wrapLiveHandle(result, func(inner agent.Runner, runID string) agent.Runner {
-		return newLeasedRunner(inner, r.leases, lease, r.ttl, r.heartbeatInterval, func() { r.forgetRun(runID) })
+	return r.wrapLiveHandle(result, ref, func(inner agent.Runner, onFinish func()) agent.Runner {
+		return newLeasedRunner(inner, r.leases, lease, r.ttl, r.heartbeatInterval, onFinish)
 	}), nil
 }
 
 func (r *LeasedRuntime) acquireSessionLease(ctx context.Context, ref session.SessionRef) (session.SessionLease, error) {
-	acquire := session.AcquireSessionLeaseRequest{SessionRef: ref, OwnerID: r.ownerID, TTL: r.ttl}
-	lease, err := r.leases.AcquireSessionLease(ctx, acquire)
+	return acquireSessionLease(ctx, r.leases, r.ownerID, r.ttl, ref)
+}
+
+func executeWithSessionLease(
+	ctx context.Context,
+	leases session.SessionLeaseService,
+	ownerID string,
+	ttl time.Duration,
+	heartbeatInterval time.Duration,
+	ref session.SessionRef,
+	execute func(context.Context) error,
+) error {
+	if execute == nil {
+		return fmt.Errorf("controlplane: placed operation is required")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ref = session.NormalizeSessionRef(ref)
+	lease, err := acquireSessionLease(ctx, leases, ownerID, ttl, ref)
+	if err != nil {
+		return err
+	}
+	runCtx, cancel := context.WithCancel(session.ContextWithRuntimeLease(ctx, lease))
+	defer cancel()
+	guard := startSessionLeaseGuard(leases, lease, ttl, heartbeatInterval, cancel)
+	execErr := execute(runCtx)
+	return errors.Join(execErr, guard.finishAndErr())
+}
+
+func acquireSessionLease(
+	ctx context.Context,
+	leases session.SessionLeaseService,
+	ownerID string,
+	ttl time.Duration,
+	ref session.SessionRef,
+) (session.SessionLease, error) {
+	acquire := session.AcquireSessionLeaseRequest{SessionRef: ref, OwnerID: strings.TrimSpace(ownerID), TTL: ttl}
+	lease, err := leases.AcquireSessionLease(ctx, acquire)
 	if session.IsCommitted(err) {
 		committedErr := err
 		if !matchesAcquiredSessionLease(acquire, lease) {
-			if reader, ok := r.leases.(session.SessionLeaseReader); ok {
-				confirmCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), min(r.ttl, 5*time.Second))
+			if reader, ok := leases.(session.SessionLeaseReader); ok {
+				confirmCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), min(ttl, 5*time.Second))
 				durable, readErr := reader.SessionLease(confirmCtx, ref)
 				cancel()
 				if readErr != nil {
@@ -275,6 +299,11 @@ func (g *sessionLeaseGuard) finish() error {
 	return g.finishErr
 }
 
+func (g *sessionLeaseGuard) finishAndErr() error {
+	finishErr := g.finish()
+	return errors.Join(g.err(), finishErr)
+}
+
 func releaseSessionLease(leases session.SessionLeaseService, lease session.SessionLease, ttl time.Duration) error {
 	ctx, cancel := context.WithTimeout(context.Background(), min(ttl, 5*time.Second))
 	defer cancel()
@@ -319,8 +348,10 @@ func (r *leasedRunner) Events() iter.Seq2[*session.Event, error] {
 		}
 		if !completed {
 			_ = r.inner.Close()
+			_ = r.finish()
+			return
 		}
-		if err := errors.Join(r.guard.err(), r.finish()); err != nil {
+		if err := errors.Join(r.guard.finishAndErr(), r.finish()); err != nil {
 			yield(nil, err)
 		}
 	}
@@ -342,8 +373,10 @@ func (r *leasedSourceRunner) SourceEvents() iter.Seq2[agent.SourceEvent, error] 
 		}
 		if !completed {
 			_ = r.inner.Close()
+			_ = r.finish()
+			return
 		}
-		if err := errors.Join(r.guard.err(), r.finish()); err != nil {
+		if err := errors.Join(r.guard.finishAndErr(), r.finish()); err != nil {
 			yield(agent.SourceEvent{}, err)
 		}
 	}
@@ -353,7 +386,11 @@ func (r *leasedRunner) Submit(submission agent.Submission) error { return r.inne
 
 func (r *leasedRunner) Cancel() agent.CancelResult { return r.inner.Cancel() }
 
-func (r *leasedRunner) Close() error { return errors.Join(r.inner.Close(), r.finish()) }
+func (r *leasedRunner) Close() error {
+	innerErr := r.inner.Close()
+	finishErr := r.finish()
+	return errors.Join(innerErr, finishErr, r.guard.err())
+}
 
 func (r *leasedRunner) finish() error {
 	r.finishOnce.Do(func() {

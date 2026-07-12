@@ -77,6 +77,35 @@ func TestSystemManagedAgentUsesCoreRuntimeLifecycleAndJournalPipeline(t *testing
 	}
 }
 
+func TestSystemManagedAgentDoesNotInheritParentRuntimeLease(t *testing.T) {
+	t.Parallel()
+
+	staging := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	runner := newSystemManagedAgentRuntimeWithConfig(systemManagedAgentRuntimeConfig{
+		AgentFactory:    chat.Factory{},
+		StagingSessions: func() session.Service { return staging },
+	})
+	parent := session.Session{SessionRef: session.SessionRef{
+		AppName: "caelis", UserID: "user-1", SessionID: "parent-session", WorkspaceKey: "workspace-1",
+	}}
+	parentLease := session.SessionLease{
+		SessionRef: parent.SessionRef,
+		LeaseID:    "parent-lease", OwnerID: "parent-owner", FencingToken: 7,
+	}
+	ctx := session.ContextWithRuntimeLease(context.Background(), parentLease)
+	prompt := model.NewTextMessage(model.RoleUser, "review this")
+	result, err := runner.Run(ctx, systemManagedAgentRunRequest{
+		AgentID: guardianProfileID, Model: systemManagedAgentResponseModel{}, ParentSession: parent,
+		Events: []*session.Event{{Type: session.EventTypeUser, Message: &prompt, Text: "review this"}},
+	})
+	if err != nil {
+		t.Fatalf("Run() inherited parent lease into staging Session: %v", err)
+	}
+	if result.AssistantEvent == nil {
+		t.Fatal("Run() returned no Guardian assessment")
+	}
+}
+
 type systemManagedLifecycleRecorder struct {
 	mu     sync.Mutex
 	events []agent.LifecycleEvent

@@ -9,6 +9,7 @@ import (
 	goruntime "runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -580,8 +581,9 @@ func (f testControllerForwarder) ForwardControllerEvents(ctx context.Context, re
 		}
 		if f.sessions != nil && testShouldPersistExternalControllerEvent(normalized) {
 			persisted, err := f.sessions.AppendEvent(ctx, session.AppendEventRequest{
-				SessionRef: req.SessionRef,
-				Event:      normalized,
+				SessionRef:    req.SessionRef,
+				MutationGuard: req.MutationGuard,
+				Event:         normalized,
 			})
 			if err != nil {
 				return err
@@ -595,8 +597,9 @@ func (f testControllerForwarder) ForwardControllerEvents(ctx context.Context, re
 	if finalAssistant != nil {
 		if f.sessions != nil {
 			persisted, err := f.sessions.AppendEvent(ctx, session.AppendEventRequest{
-				SessionRef: req.SessionRef,
-				Event:      finalAssistant,
+				SessionRef:    req.SessionRef,
+				MutationGuard: req.MutationGuard,
+				Event:         finalAssistant,
 			})
 			if err != nil {
 				return err
@@ -1804,8 +1807,11 @@ type yieldProbeSandboxSession struct {
 	waitCalls     []time.Duration
 	waitDelay     time.Duration
 	waitErr       error
+	statusErr     error
 	statusRunning *bool
 	terminated    bool
+	terminateErr  error
+	readErr       error
 	stdout        string
 	stderr        string
 	result        sandbox.CommandResult
@@ -1832,12 +1838,18 @@ func (s *yieldProbeSandboxSession) Terminal() sandbox.TerminalRef {
 func (s *yieldProbeSandboxSession) WriteInput(context.Context, []byte) error { return nil }
 
 func (s *yieldProbeSandboxSession) ReadOutput(_ context.Context, stdoutCursor int64, stderrCursor int64) ([]byte, []byte, int64, int64, error) {
+	if s.readErr != nil {
+		return nil, nil, stdoutCursor, stderrCursor, s.readErr
+	}
 	stdout, nextStdout := probeOutputFromCursor(s.stdout, stdoutCursor)
 	stderr, nextStderr := probeOutputFromCursor(s.stderr, stderrCursor)
 	return stdout, stderr, nextStdout, nextStderr, nil
 }
 
 func (s *yieldProbeSandboxSession) Status(context.Context) (sandbox.SessionStatus, error) {
+	if s.statusErr != nil {
+		return sandbox.SessionStatus{}, s.statusErr
+	}
 	running := true
 	if s.statusRunning != nil {
 		running = *s.statusRunning
@@ -1874,7 +1886,7 @@ func (s *yieldProbeSandboxSession) Result(context.Context) (sandbox.CommandResul
 
 func (s *yieldProbeSandboxSession) Terminate(context.Context) error {
 	s.terminated = true
-	return nil
+	return s.terminateErr
 }
 
 func probeOutputFromCursor(text string, cursor int64) ([]byte, int64) {
@@ -2022,7 +2034,7 @@ func callRuntimeRunCommandTool(t *testing.T, runCommandTool runtimeCommandTool, 
 		t.Fatalf("json.Marshal() error = %v", err)
 	}
 	result, err := runCommandTool.Call(context.Background(), tool.Call{
-		ID:    "command-yield-test",
+		ID:    fmt.Sprintf("command-yield-test-%d", runtimeTestCommandCallSequence.Add(1)),
 		Name:  shell.RunCommandToolName,
 		Input: raw,
 	})
@@ -2031,6 +2043,8 @@ func callRuntimeRunCommandTool(t *testing.T, runCommandTool runtimeCommandTool, 
 	}
 	return result
 }
+
+var runtimeTestCommandCallSequence atomic.Uint64
 
 func startProbeCommandTask(t *testing.T, activeSession session.Session, runtime *Runtime, fake *yieldProbeSandboxRuntime) string {
 	t.Helper()

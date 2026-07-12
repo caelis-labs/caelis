@@ -114,9 +114,11 @@ func (r *Runtime) updateParticipantContextCheckpoint(ctx context.Context, ref se
 		return err
 	}
 	_, err = r.sessions.PutParticipant(ctx, session.PutParticipantRequest{
-		SessionRef:    ref,
-		MutationGuard: session.RuntimeMutationGuard(ctx),
-		Binding:       binding,
+		SessionRef:           ref,
+		ExpectedRevision:     &activeSession.Revision,
+		MutationGuard:        session.RuntimeMutationGuard(ctx),
+		ExpectedDelegationID: stringPointer(binding.DelegationID),
+		Binding:              binding,
 	})
 	return err
 }

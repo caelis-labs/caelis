@@ -4,6 +4,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"unicode"
 )
 
@@ -36,13 +37,12 @@ const (
 
 // nextAttachmentID allocates stable token identities (not reset per model so
 // tests that share a process still get unique IDs).
-var nextAttachmentID uint32 = 1
+var nextAttachmentID atomic.Uint32
 
 func allocAttachmentID() uint32 {
-	id := nextAttachmentID
-	nextAttachmentID++
-	if nextAttachmentID == 0 {
-		nextAttachmentID = 1
+	id := nextAttachmentID.Add(1)
+	if id == 0 {
+		id = nextAttachmentID.Add(1)
 	}
 	return id
 }

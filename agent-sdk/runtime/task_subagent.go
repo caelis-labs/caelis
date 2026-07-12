@@ -259,15 +259,21 @@ func (tm *taskRuntime) waitSubagent(ctx context.Context, task *subagentTask, yie
 	if task == nil {
 		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: task is required")
 	}
+	task.mu.Lock()
+	cancelPhase := subagentCancelPhase(taskStringValue(task.metadata["cancel_phase"]))
+	task.mu.Unlock()
+	if cancelPhase != subagentCancelPhaseNone && cancelPhase != subagentCancelPhaseCompleted {
+		return tm.advanceSubagentCancel(ctx, task, cancelPhase, int(yield/time.Millisecond))
+	}
 	if task.runner == nil {
 		task.mu.Lock()
-		snapshot := task.snapshot()
+		snapshot := task.snapshotLocked()
 		task.mu.Unlock()
 		return snapshot, nil
 	}
 	if !task.isRunning() {
 		task.mu.Lock()
-		snapshot := task.snapshot()
+		snapshot := task.snapshotLocked()
 		task.mu.Unlock()
 		return snapshot, nil
 	}
@@ -280,7 +286,7 @@ func (tm *taskRuntime) waitSubagent(ctx context.Context, task *subagentTask, yie
 	}
 	task.mu.Lock()
 	task.applyResult(result)
-	snapshot := task.snapshot()
+	snapshot := task.snapshotLocked()
 	entry := task.entrySnapshot(tm.runtime.now())
 	task.mu.Unlock()
 	if err := tm.persistTaskEntry(ctx, entry); err != nil {
@@ -299,43 +305,7 @@ func (tm *taskRuntime) waitSubagent(ctx context.Context, task *subagentTask, yie
 }
 
 func (tm *taskRuntime) cancelSubagent(ctx context.Context, task *subagentTask) (taskapi.Snapshot, error) {
-	if task == nil {
-		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: task is required")
-	}
-	if task.runner == nil {
-		task.mu.Lock()
-		task.state = taskapi.StateCancelled
-		task.running = false
-		snapshot := task.snapshot()
-		entry := task.entrySnapshot(tm.runtime.now())
-		task.mu.Unlock()
-		if err := tm.persistTaskEntry(ctx, entry); err != nil {
-			return taskapi.Snapshot{}, err
-		}
-		return snapshot, nil
-	}
-	if err := task.runner.Cancel(ctx, delegation.CloneAnchor(task.anchor)); err != nil {
-		return taskapi.Snapshot{}, err
-	}
-	result, err := task.runner.Wait(ctx, delegation.CloneAnchor(task.anchor), 10)
-	if err != nil {
-		return taskapi.Snapshot{}, err
-	}
-	task.mu.Lock()
-	task.applyResult(result)
-	task.state = taskapi.StateCancelled
-	task.running = false
-	snapshot := task.snapshot()
-	entry := task.entrySnapshot(tm.runtime.now())
-	task.mu.Unlock()
-	if err := tm.persistTaskEntry(ctx, entry); err != nil {
-		return taskapi.Snapshot{}, err
-	}
-	tm.mu.Lock()
-	delete(tm.subagents, task.ref.TaskID)
-	tm.mu.Unlock()
-	_ = tm.updateSubagentParticipant(ctx, task, "detached")
-	return snapshot, nil
+	return tm.cancelSubagentSaga(ctx, task)
 }
 
 func (tm *taskRuntime) lookupSubagent(ctx context.Context, ref session.SessionRef, taskID string) (*subagentTask, error) {
@@ -352,7 +322,7 @@ func (tm *taskRuntime) lookupSubagent(ctx context.Context, ref session.SessionRe
 			if strings.TrimSpace(candidate.sessionRef.SessionID) != strings.TrimSpace(ref.SessionID) {
 				continue
 			}
-			if normalizeSubagentHandle(candidate.handle) == handle || normalizeSubagentHandle(taskStringValue(candidate.metadata["handle"])) == handle {
+			if normalizeSubagentHandle(candidate.handle) == handle {
 				matches = append(matches, candidate)
 			}
 		}
@@ -384,13 +354,100 @@ func (tm *taskRuntime) lookupSubagent(ctx context.Context, ref session.SessionRe
 	if strings.TrimSpace(entry.Session.SessionID) != strings.TrimSpace(ref.SessionID) || entry.Kind != taskapi.KindSubagent {
 		return nil, fmt.Errorf("agent-sdk/runtime: task %q not found", taskID)
 	}
-	entry = tm.backfillCanonicalTaskEntry(ctx, ref, entry)
+	entry, err = tm.backfillCanonicalTaskEntry(ctx, ref, entry)
+	if err != nil {
+		return nil, err
+	}
 	rehydrated := tm.rehydrateSubagentTask(entry)
 	tm.mu.Lock()
+	if current := tm.subagents[rehydrated.ref.TaskID]; current != nil {
+		tm.mu.Unlock()
+		if strings.TrimSpace(current.sessionRef.SessionID) != strings.TrimSpace(ref.SessionID) {
+			return nil, fmt.Errorf("agent-sdk/runtime: task %q not found", taskID)
+		}
+		return current, nil
+	}
 	tm.subagents[rehydrated.ref.TaskID] = rehydrated
 	tm.rememberSubagentHandleLocked(rehydrated.sessionRef.SessionID, rehydrated.handle)
 	tm.mu.Unlock()
 	return rehydrated, nil
+}
+
+// lookupSubagentCanonical reloads and publishes one canonical task while its
+// session-scoped operation claim is held by the caller. Durable state wins over
+// an older registry pointer; a live pointer at the same or newer revision keeps
+// its process-local runner.
+func (tm *taskRuntime) lookupSubagentCanonical(ctx context.Context, ref session.SessionRef, taskID string) (*subagentTask, error) {
+	ref = session.NormalizeSessionRef(ref)
+	taskID = strings.TrimSpace(taskID)
+	tm.mu.RLock()
+	current := tm.subagents[taskID]
+	tm.mu.RUnlock()
+	if tm.store == nil {
+		if current != nil && strings.TrimSpace(current.sessionRef.SessionID) == strings.TrimSpace(ref.SessionID) {
+			return current, nil
+		}
+		return nil, fmt.Errorf("agent-sdk/runtime: task %q not found", taskID)
+	}
+	entry, err := tm.store.Get(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("agent-sdk/runtime: reload subagent task %q: %w", taskID, err)
+	}
+	if entry == nil {
+		return nil, fmt.Errorf("agent-sdk/runtime: task %q not found", taskID)
+	}
+	if entry.Kind != taskapi.KindSubagent || strings.TrimSpace(entry.Session.SessionID) != strings.TrimSpace(ref.SessionID) {
+		return nil, fmt.Errorf("agent-sdk/runtime: task %q not found", taskID)
+	}
+	entry, err = tm.backfillCanonicalTaskEntry(ctx, ref, entry)
+	if err != nil {
+		return nil, err
+	}
+	if current != nil && strings.TrimSpace(current.sessionRef.SessionID) == strings.TrimSpace(ref.SessionID) {
+		current.mu.Lock()
+		currentRevision := current.revision
+		current.mu.Unlock()
+		if currentRevision >= entry.Revision {
+			return current, nil
+		}
+	}
+	fresh := tm.rehydrateSubagentTask(entry)
+	tm.mu.Lock()
+	installed := tm.subagents[taskID]
+	if installed != nil {
+		installed.mu.Lock()
+		installedRevision := installed.revision
+		installed.mu.Unlock()
+		if installedRevision >= entry.Revision {
+			tm.mu.Unlock()
+			return installed, nil
+		}
+	}
+	tm.subagents[taskID] = fresh
+	tm.rememberSubagentHandleLocked(fresh.sessionRef.SessionID, fresh.handle)
+	tm.mu.Unlock()
+	return fresh, nil
+}
+
+func (tm *taskRuntime) invalidateSubagentTask(ref session.SessionRef, taskID string, throughRevision uint64) {
+	if tm == nil {
+		return
+	}
+	taskID = strings.TrimSpace(taskID)
+	ref = session.NormalizeSessionRef(ref)
+	tm.mu.Lock()
+	current := tm.subagents[taskID]
+	if current == nil || strings.TrimSpace(current.sessionRef.SessionID) != strings.TrimSpace(ref.SessionID) {
+		tm.mu.Unlock()
+		return
+	}
+	current.mu.Lock()
+	stale := current.revision <= throughRevision
+	current.mu.Unlock()
+	if stale {
+		delete(tm.subagents, taskID)
+	}
+	tm.mu.Unlock()
 }
 
 func (tm *taskRuntime) lookupStoredSubagentByHandle(ctx context.Context, ref session.SessionRef, handle string) (*taskapi.Entry, error) {
@@ -459,7 +516,7 @@ func (tm *taskRuntime) interruptSubagentTask(ctx context.Context, task *subagent
 	}
 	task.mu.Lock()
 	task.applyInterruptedLocked(reason)
-	snapshot := task.snapshot()
+	snapshot := task.snapshotLocked()
 	entry := task.entrySnapshot(tm.runtime.now())
 	task.mu.Unlock()
 	if err := tm.persistTaskEntry(ctx, entry); err != nil {
@@ -617,6 +674,15 @@ func (t *subagentTask) snapshot() taskapi.Snapshot {
 	if t == nil {
 		return taskapi.Snapshot{}
 	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.snapshotLocked()
+}
+
+func (t *subagentTask) snapshotLocked() taskapi.Snapshot {
+	if t == nil {
+		return taskapi.Snapshot{}
+	}
 	result := session.CloneState(t.result)
 	metadata := session.CloneState(t.metadata)
 	if result == nil {
@@ -676,6 +742,7 @@ func (t *subagentTask) entrySnapshot(now time.Time) *taskapi.Entry {
 			"continue_phase":       taskStringValue(t.metadata["continue_phase"]),
 			"continue_digest":      taskStringValue(t.metadata["continue_digest"]),
 			"continue_turn_seq":    t.metadata["continue_turn_seq"],
+			"cancel_phase":         taskStringValue(t.metadata["cancel_phase"]),
 			"session_id":           t.anchor.SessionID,
 			"agent_id":             t.anchor.AgentID,
 			"handle":               t.handle,

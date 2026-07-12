@@ -172,7 +172,12 @@ func (r *systemManagedAgentRuntime) Run(ctx context.Context, req systemManagedAg
 	if staging == nil {
 		return systemManagedAgentRunResult{}, fmt.Errorf("gatewayapp: system-managed agent staging session service is unavailable")
 	}
-	activeSession, err := startSystemManagedAgentStagingSession(ctx, staging, plan.Session)
+	// A system-managed attempt is a distinct Runtime placement scope. The
+	// caller may be executing inside the parent Session's leased Turn; carrying
+	// that fence into the isolated staging Session makes every Runtime mutation
+	// fail closed against the wrong lease.
+	stagingCtx := session.ContextWithoutRuntimeLease(ctx)
+	activeSession, err := startSystemManagedAgentStagingSession(stagingCtx, staging, plan.Session)
 	if err != nil {
 		return systemManagedAgentRunResult{}, err
 	}
@@ -181,7 +186,7 @@ func (r *systemManagedAgentRuntime) Run(ctx context.Context, req systemManagedAg
 		if !ok {
 			return systemManagedAgentRunResult{}, fmt.Errorf("gatewayapp: system-managed agent staging service requires event batches")
 		}
-		if _, err := batch.AppendEvents(ctx, session.AppendEventsRequest{SessionRef: activeSession.SessionRef, Events: session.CloneEvents(plan.Events)}); err != nil {
+		if _, err := batch.AppendEvents(stagingCtx, session.AppendEventsRequest{SessionRef: activeSession.SessionRef, Events: session.CloneEvents(plan.Events)}); err != nil {
 			return systemManagedAgentRunResult{}, err
 		}
 	}
@@ -195,7 +200,7 @@ func (r *systemManagedAgentRuntime) Run(ctx context.Context, req systemManagedAg
 	if err != nil {
 		return systemManagedAgentRunResult{}, err
 	}
-	run, err := core.Run(ctx, agent.RunRequest{
+	run, err := core.Run(stagingCtx, agent.RunRequest{
 		SessionRef: activeSession.SessionRef,
 		AgentSpec: agent.AgentSpec{
 			Name:  plan.AgentID,

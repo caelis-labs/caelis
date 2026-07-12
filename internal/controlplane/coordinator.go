@@ -29,12 +29,16 @@ type CoordinatorConfig struct {
 // binding/event commit. Participant execution is delegated to the SDK's
 // neutral participant mechanism.
 type Coordinator struct {
-	sessions    session.Service
-	controllers controller.Backend
-	context     controller.ContextRouter
-	clock       func() time.Time
-	idGenerator func() string
-	lifecycle   agent.LifecycleOptions
+	sessions               session.Service
+	controllers            controller.Backend
+	context                controller.ContextRouter
+	clock                  func() time.Time
+	idGenerator            func() string
+	lifecycle              agent.LifecycleOptions
+	leases                 session.SessionLeaseService
+	leaseOwnerID           string
+	leaseTTL               time.Duration
+	leaseHeartbeatInterval time.Duration
 }
 
 // NewCoordinator constructs one Control-owned session coordinator.
@@ -48,12 +52,18 @@ func NewCoordinator(cfg CoordinatorConfig) (*Coordinator, error) {
 	if cfg.Clock == nil {
 		cfg.Clock = time.Now
 	}
+	leases, _ := cfg.Sessions.(session.SessionLeaseService)
+	leaseTTL := defaultSessionLeaseTTL
 	return &Coordinator{
-		sessions:    cfg.Sessions,
-		controllers: cfg.Controllers,
-		context:     cfg.Context,
-		clock:       cfg.Clock,
-		idGenerator: cfg.IDGenerator,
+		sessions:               cfg.Sessions,
+		controllers:            cfg.Controllers,
+		context:                cfg.Context,
+		clock:                  cfg.Clock,
+		idGenerator:            cfg.IDGenerator,
+		leases:                 leases,
+		leaseOwnerID:           "control-handoff-" + strings.ToLower(rand.Text()),
+		leaseTTL:               leaseTTL,
+		leaseHeartbeatInterval: leaseTTL / 3,
 		lifecycle: agent.LifecycleOptions{
 			Interceptors: append([]agent.LifecycleInterceptor(nil), cfg.LifecycleInterceptors...),
 			TraceSink:    cfg.TraceSink,
@@ -107,7 +117,14 @@ func (c *Coordinator) ReattachController(ctx context.Context, req controller.Rec
 	if err != nil {
 		return session.Session{}, err
 	}
-	updated, err := c.sessions.BindController(ctx, session.BindControllerRequest{SessionRef: ref, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeCoordinator), Binding: attached})
+	updated, err := c.sessions.BindController(ctx, session.BindControllerRequest{
+		SessionRef: ref,
+		MutationGuard: session.ControlMutationGuardWithRuntimeLease(
+			ctx,
+			session.ControlMutationPurposeCoordinator,
+		),
+		Binding: attached,
+	})
 	if err != nil {
 		cleanupErr := c.controllers.Deactivate(context.WithoutCancel(ctx), ref)
 		return session.Session{}, errors.Join(err, cleanupErr)
@@ -125,9 +142,23 @@ func (c *Coordinator) HandoffController(ctx context.Context, req agent.HandoffCo
 		Name:       strings.TrimSpace(req.Agent),
 	}
 	err := agent.ExecuteLifecycle(ctx, event, c.lifecycle, func(callCtx context.Context) error {
-		var handoffErr error
-		result, handoffErr = c.handoffController(callCtx, req)
-		return handoffErr
+		execute := func(executionCtx context.Context) error {
+			var handoffErr error
+			result, handoffErr = c.handoffController(executionCtx, req)
+			return handoffErr
+		}
+		if c.leases == nil {
+			return execute(callCtx)
+		}
+		return executeWithSessionLease(
+			callCtx,
+			c.leases,
+			c.leaseOwnerID,
+			c.leaseTTL,
+			c.leaseHeartbeatInterval,
+			event.SessionRef,
+			execute,
+		)
 	})
 	return result, err
 }
@@ -199,7 +230,7 @@ func (c *Coordinator) handoffController(ctx context.Context, req agent.HandoffCo
 	updated, _, err := handoffs.BindControllerWithEvent(ctx, session.BindControllerWithEventRequest{
 		SessionRef:       ref,
 		ExpectedRevision: &expected,
-		MutationGuard:    session.ControlMutationGuard(session.ControlMutationPurposeHandoff),
+		MutationGuard:    session.ControlMutationGuardWithRuntimeLease(ctx, session.ControlMutationPurposeHandoff),
 		Binding:          to,
 		Event:            handoffEvent(from, to, strings.TrimSpace(req.Reason), c.clock()),
 	})
@@ -266,7 +297,7 @@ func (c *Coordinator) ensureSessionController(ctx context.Context, activeSession
 	}
 	return c.sessions.BindController(ctx, session.BindControllerRequest{
 		SessionRef:    activeSession.SessionRef,
-		MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeCoordinator),
+		MutationGuard: session.ControlMutationGuardWithRuntimeLease(ctx, session.ControlMutationPurposeCoordinator),
 		Binding:       c.kernelControllerBinding("control"),
 	})
 }

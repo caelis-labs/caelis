@@ -38,8 +38,9 @@ func (f *ControllerForwarder) ForwardControllerEvents(ctx context.Context, req a
 	}
 	if finalEvent := accumulator.finalAssistantEvent(); finalEvent != nil {
 		persisted, err := f.sessions.AppendEvent(ctx, session.AppendEventRequest{
-			SessionRef: req.SessionRef,
-			Event:      finalEvent,
+			SessionRef:    req.SessionRef,
+			MutationGuard: req.MutationGuard,
+			Event:         finalEvent,
 		})
 		if err != nil {
 			return err
@@ -76,8 +77,9 @@ func (f *ControllerForwarder) forwardSourceEvent(ctx context.Context, req agents
 
 		if shouldPersistExternalACPEvent(normalized) {
 			persisted, err := f.sessions.AppendEvent(ctx, session.AppendEventRequest{
-				SessionRef: req.SessionRef,
-				Event:      normalized,
+				SessionRef:    req.SessionRef,
+				MutationGuard: req.MutationGuard,
+				Event:         normalized,
 			})
 			if err != nil {
 				return err

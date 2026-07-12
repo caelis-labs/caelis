@@ -87,7 +87,6 @@ func TestRuntimeRunPersistsMinimalChatTurn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
-
 	result, err := runtime.Run(context.Background(), agent.RunRequest{
 		SessionRef: activeSession.SessionRef,
 		Input:      "hello",
@@ -1041,6 +1040,15 @@ func TestRuntimePromptParticipantPersistsPublicDialogue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PutParticipant() error = %v", err)
 	}
+	lease, err := sessions.(session.SessionLeaseService).AcquireSessionLease(context.Background(), session.AcquireSessionLeaseRequest{
+		SessionRef: activeSession.SessionRef,
+		OwnerID:    "participant-turn-owner",
+		TTL:        time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("AcquireSessionLease() error = %v", err)
+	}
+	turnCtx := session.ContextWithRuntimeLease(context.Background(), lease)
 	turnReqCh := make(chan controller.ParticipantPromptRequest, 1)
 	testController := stubACPController{
 		promptParticipant: func(ctx context.Context, req controller.ParticipantPromptRequest) (controller.TurnResult, error) {
@@ -1116,7 +1124,7 @@ func TestRuntimePromptParticipantPersistsPublicDialogue(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	updated, err := runtime.PromptParticipant(context.Background(), agent.PromptParticipantRequest{
+	updated, err := runtime.PromptParticipant(turnCtx, agent.PromptParticipantRequest{
 		SessionRef:    activeSession.SessionRef,
 		ParticipantID: "emma",
 		Input:         "刚才都做了什么？总结一下",
@@ -1407,8 +1415,17 @@ func TestRuntimeACPControllerPublishesChunksAsLiveDeltas(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
+	lease, err := sessions.AcquireSessionLease(context.Background(), session.AcquireSessionLeaseRequest{
+		SessionRef: activeSession.SessionRef,
+		OwnerID:    "acp-controller-turn-owner",
+		TTL:        time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("AcquireSessionLease() error = %v", err)
+	}
+	runCtx := session.ContextWithRuntimeLease(context.Background(), lease)
 
-	result, err := runtime.Run(context.Background(), agent.RunRequest{
+	result, err := runtime.Run(runCtx, agent.RunRequest{
 		SessionRef: activeSession.SessionRef,
 		Input:      "hello",
 		Request: agent.ModelRequestOptions{
@@ -3252,6 +3269,139 @@ func TestRuntimeTerminalSubscribePreservesEchoNewlines(t *testing.T) {
 	}
 }
 
+func TestRuntimeTerminalSubscribePreservesCompletionTailDuringTaskWait(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workdir := t.TempDir()
+	sessionStore := sessionfile.NewStore(sessionfile.Config{
+		RootDir:            root,
+		SessionIDGenerator: func() string { return "sess-terminal-task-wait-tail" },
+	})
+	sessions := sessionfile.NewService(sessionStore)
+	activeSession, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
+		AppName: "caelis",
+		UserID:  "user-1",
+		Workspace: session.WorkspaceRef{
+			Key: "ws-1",
+			CWD: workdir,
+		},
+	})
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	runtime, err := New(Config{
+		Sessions:  sessions,
+		TaskStore: sessionfile.NewTaskStore(sessionStore),
+		AgentFactory: chat.Factory{
+			SystemPrompt: "Use tools when necessary.",
+		},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	backend := hostRuntimeForTest(t, workdir)
+	runtime.tasks.registerSandboxRuntime(backend)
+
+	const prefix = "步骤 5/5: 处理中...\n"
+	const tail = "✅ 任务完成！\n"
+	delay := 250 * time.Millisecond
+	command := "printf " + shellQuoteForTest(prefix) + "; sleep 0.250; printf " + shellQuoteForTest(tail)
+	yield := 5 * time.Millisecond
+	waitBudget := 3 * time.Second
+	if goruntime.GOOS == "windows" {
+		delay = 2 * time.Second
+		command = fmt.Sprintf("[Console]::Out.Write(%s); Start-Sleep -Milliseconds %d; [Console]::Out.Write(%s)",
+			powershellQuoteForTest(prefix), delay.Milliseconds(), powershellQuoteForTest(tail))
+		yield = 100 * time.Millisecond
+		waitBudget = 8 * time.Second
+	}
+	snapshot, err := runtime.tasks.StartCommand(context.Background(), activeSession, activeSession.SessionRef, backend, taskapi.CommandStartRequest{
+		Command:    command,
+		Workdir:    workdir,
+		Yield:      yield,
+		ParentCall: "call-terminal-task-wait-tail",
+	})
+	if err != nil {
+		t.Fatalf("StartCommand() error = %v", err)
+	}
+	if !snapshot.Running {
+		t.Fatalf("StartCommand() snapshot = %#v, want running task", snapshot)
+	}
+	initial := taskRawStringValue(snapshot.Result["latest_output"])
+	cursor, _ := taskInt64Value(snapshot.Metadata["output_cursor"])
+
+	type subscriptionResult struct {
+		frames []stream.Frame
+		err    error
+	}
+	streamCtx, cancel := context.WithTimeout(context.Background(), waitBudget)
+	defer cancel()
+	subscriptionDone := make(chan subscriptionResult, 1)
+	go func() {
+		var result subscriptionResult
+		for frame, streamErr := range runtime.Streams().Subscribe(streamCtx, stream.SubscribeRequest{
+			Ref: stream.Ref{
+				SessionID: activeSession.SessionID,
+				TaskID:    snapshot.Ref.TaskID,
+			},
+			Cursor:       stream.Cursor{Output: cursor},
+			PollInterval: 5 * time.Millisecond,
+		}) {
+			if streamErr != nil {
+				result.err = streamErr
+				break
+			}
+			if frame != nil {
+				result.frames = append(result.frames, stream.CloneFrame(*frame))
+			}
+		}
+		subscriptionDone <- result
+	}()
+
+	time.Sleep(minDuration(delay/4, 50*time.Millisecond))
+	waited, err := runtime.tasks.Wait(context.Background(), activeSession.SessionRef, taskapi.ControlRequest{
+		TaskID:    snapshot.Ref.TaskID,
+		Yield:     waitBudget,
+		Principal: session.ActorKindController,
+	})
+	if err != nil {
+		t.Fatalf("TASK wait error = %v", err)
+	}
+	if waited.Running || waited.State != taskapi.StateCompleted {
+		t.Fatalf("TASK wait snapshot = %#v, want completed", waited)
+	}
+
+	var subscribed subscriptionResult
+	select {
+	case subscribed = <-subscriptionDone:
+	case <-streamCtx.Done():
+		t.Fatalf("terminal subscription did not close: %v", streamCtx.Err())
+	}
+	if subscribed.err != nil {
+		t.Fatalf("terminal subscription error = %v", subscribed.err)
+	}
+	var streamed strings.Builder
+	closeIndex := -1
+	tailIndex := -1
+	for i, frame := range subscribed.frames {
+		streamed.WriteString(frame.Text)
+		if strings.Contains(frame.Text, tail) && tailIndex < 0 {
+			tailIndex = i
+		}
+		if frame.Closed && closeIndex < 0 {
+			closeIndex = i
+		}
+	}
+	want := taskRawStringValue(waited.Result["result"])
+	if got := initial + streamed.String(); got != want || want != prefix+tail {
+		t.Fatalf("initial + streamed output = %q, TASK result = %q, want %q", got, want, prefix+tail)
+	}
+	if tailIndex < 0 || closeIndex < 0 || tailIndex >= closeIndex {
+		t.Fatalf("frames = %#v, want completion tail before terminal close", subscribed.frames)
+	}
+}
+
 func TestRuntimeRunCommandToolUsesDefaultYieldWhenOmitted(t *testing.T) {
 	t.Parallel()
 
@@ -3351,7 +3501,7 @@ func TestRuntimeRunCommandToolPassesConfiguredTimeoutThrough(t *testing.T) {
 	assertRunningTaskSnapshot(t, result)
 }
 
-func TestStartCommandMarksTaskFailedWhenInitialWaitErrors(t *testing.T) {
+func TestStartCommandReconcilesTerminalStatusWhenInitialWaitErrors(t *testing.T) {
 	t.Parallel()
 
 	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
@@ -3371,27 +3521,24 @@ func TestStartCommandMarksTaskFailedWhenInitialWaitErrors(t *testing.T) {
 	if snapshot.Running {
 		t.Fatalf("snapshot.Running = true, want false")
 	}
-	if snapshot.State != taskapi.StateFailed {
-		t.Fatalf("snapshot.State = %q, want failed", snapshot.State)
+	if snapshot.State != taskapi.StateCompleted {
+		t.Fatalf("snapshot.State = %q, want completed status confirmed independently", snapshot.State)
 	}
-	if got, _ := snapshot.Result["error"].(string); got != waitErr.Error() {
-		t.Fatalf("snapshot.Result[error] = %q, want %q", got, waitErr.Error())
-	}
-	if !fake.session.terminated {
-		t.Fatal("session.terminated = false, want true")
+	if fake.session.terminated {
+		t.Fatal("session.terminated = true, want no speculative termination after terminal status")
 	}
 	runtime.tasks.mu.RLock()
 	_, active := runtime.tasks.tasks[snapshot.Ref.TaskID]
 	runtime.tasks.mu.RUnlock()
 	if active {
-		t.Fatalf("task %q still active after wait failure", snapshot.Ref.TaskID)
+		t.Fatalf("task %q still active after terminal reconciliation", snapshot.Ref.TaskID)
 	}
 	entry, err := taskStore.Get(context.Background(), snapshot.Ref.TaskID)
 	if err != nil {
 		t.Fatalf("task store Get() error = %v", err)
 	}
-	if entry == nil || entry.Running || entry.State != taskapi.StateFailed {
-		t.Fatalf("persisted entry = %#v, want failed non-running task", entry)
+	if entry == nil || entry.Running || entry.State != taskapi.StateCompleted {
+		t.Fatalf("persisted entry = %#v, want completed non-running task", entry)
 	}
 }
 

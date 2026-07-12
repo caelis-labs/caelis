@@ -64,11 +64,7 @@ module version.
 
 The accepted package boundary, ACP-native orchestration model, and durability
 invariants are documented in
-[Agent SDK Boundary](../docs/agent-sdk-boundary.md). The current local candidate
-verdict is in
-[Agent SDK 9acbf75d Acceptance](../docs/agent-sdk-9acbf75d-acceptance.md). The
-[v0.25.0 review](../docs/agent-sdk-v0.25.0-acceptance.md) is frozen history, not
-the current implementation status.
+[Agent SDK Boundary](../docs/agent-sdk-boundary.md).
 
 The bundled quickstart, consumer contracts, and current concurrency,
 cancellation, persistence, and recovery limitations are in

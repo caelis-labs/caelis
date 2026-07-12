@@ -286,9 +286,8 @@ func (s *Stack) buildGatewayRuntime(plan gatewayBuildPlan) (*gatewayRuntimeBundl
 		return nil, err
 	}
 	watchdogRuntime, err := controlplane.NewWatchdogRuntime(controlplane.WatchdogRuntimeConfig{
-		Runtime:   leasedRuntime,
-		Sessions:  s.Sessions,
-		Lifecycle: watchdogLifecycle,
+		Runtime:  leasedRuntime,
+		Sessions: s.Sessions,
 	})
 	if err != nil {
 		bundle.Close()
