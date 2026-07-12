@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
+	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 )
 
 func renderACPToolLifecycleRows(blockID string, events []SubagentEvent, idx int, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) ([]RenderedRow, int) {
@@ -290,16 +291,16 @@ func acpStandardCollapsedClickToken(callID string, ev SubagentEvent, text string
 
 func standardToolLifecycleHeader(ev SubagentEvent, err bool) string {
 	semanticName := toolSemanticName(ev.Name, ev.ToolKind)
-	switch strings.ToUpper(strings.TrimSpace(semanticName)) {
-	case "RUN_COMMAND", "SPAWN":
+	switch names.CanonicalOrSelf(semanticName) {
+	case names.RunCommand, names.Spawn:
 		ev.Name = semanticName
 		return terminalLifecycleHeader(ev)
-	case "TASK":
+	case names.Task:
 		if taskEventAction(ev) == "write" {
 			return taskWriteLifecycleHeader(ev, err)
 		}
 		return taskControlLifecycleHeader(ev)
-	case "WRITE", "PATCH":
+	case names.Write, names.Patch:
 		ev.Name = semanticName
 		return mutationLifecycleHeader(ev, err)
 	default:
@@ -417,8 +418,8 @@ func isMutationPanelTool(name string) bool {
 }
 
 func isMutationPanelToolKind(name string, kind string) bool {
-	switch strings.ToUpper(strings.TrimSpace(name)) {
-	case "WRITE", "PATCH":
+	switch names.CanonicalOrSelf(name) {
+	case names.Write, names.Patch:
 		return true
 	}
 	switch strings.ToLower(strings.TrimSpace(kind)) {
@@ -438,8 +439,8 @@ func toolSemanticName(name string, kind string) string {
 }
 
 func isAttentionLoopTool(name string) bool {
-	name = strings.ToUpper(strings.TrimSpace(name))
-	if name == "" || name == "TASK" {
+	name = names.CanonicalOrSelf(name)
+	if name == "" || name == names.Task {
 		return false
 	}
 	return !shouldDefaultCollapseToolPanel(name)
@@ -447,19 +448,19 @@ func isAttentionLoopTool(name string) bool {
 
 func renderACPTerminalLifecycleRows(blockID string, ev SubagentEvent, callID string, text string, width int, ctx BlockRenderContext, err bool, expanded bool, final bool, fullOutput bool, opts acpTranscriptRenderOptions) []RenderedRow {
 	headerEvent := ev
-	if fullOutput && strings.EqualFold(strings.TrimSpace(ev.Name), "SPAWN") {
+	if fullOutput && names.CanonicalOrSelf(ev.Name) == names.Spawn {
 		if fullArgs := strings.TrimSpace(ev.FullArgs); fullArgs != "" {
 			headerEvent.Args = fullArgs
 		}
 	}
 	displayText := text
-	if strings.EqualFold(strings.TrimSpace(toolSemanticName(ev.Name, ev.ToolKind)), "SPAWN") {
+	if names.CanonicalOrSelf(toolSemanticName(ev.Name, ev.ToolKind)) == names.Spawn {
 		displayText = summarizeSubagentTerminalPanelText(displayText, final)
 	}
 	header := terminalLifecycleHeader(headerEvent)
 	token := acpToolPanelClickTokenIf(callID, toolPanelCanExpandHiddenDetails(ev, displayText, final, err))
 	rows := []RenderedRow{renderACPTranscriptHeaderRow(blockID, header, width, ctx, token)}
-	if !renderableTextHasContent(text) && !final && strings.EqualFold(strings.TrimSpace(ev.Name), "SPAWN") {
+	if !renderableTextHasContent(text) && !final && names.CanonicalOrSelf(ev.Name) == names.Spawn {
 		text = "(wait subagent output)"
 	}
 	if !expanded || !shouldRenderACPToolPanel(text, err) {
@@ -469,7 +470,7 @@ func renderACPTerminalLifecycleRows(blockID string, ev SubagentEvent, callID str
 		rows = append(rows, renderACPFullTerminalPanelRows(blockID, callID, text, width, ctx, err, token)...)
 		return rows
 	}
-	if strings.EqualFold(strings.TrimSpace(toolSemanticName(ev.Name, ev.ToolKind)), "SPAWN") {
+	if names.CanonicalOrSelf(toolSemanticName(ev.Name, ev.ToolKind)) == names.Spawn {
 		text = displayText
 		if !renderableTextHasContent(text) && !final {
 			text = "(wait subagent output)"
@@ -482,15 +483,15 @@ func renderACPTerminalLifecycleRows(blockID string, ev SubagentEvent, callID str
 
 func terminalLifecycleHeader(ev SubagentEvent) string {
 	rawName := firstTrimmed(ev.Name, "TOOL")
-	name := strings.ToUpper(strings.TrimSpace(rawName))
+	name := names.CanonicalOrSelf(rawName)
 	args := strings.TrimSpace(ev.Args)
 	switch name {
-	case "RUN_COMMAND":
+	case names.RunCommand:
 		if args != "" {
 			return "• Ran " + args
 		}
 		return "• Ran"
-	case "SPAWN":
+	case names.Spawn:
 		args = display.SanitizeSpawnHeaderArgs(args)
 		if args != "" {
 			return "• Spawned " + args
@@ -587,18 +588,18 @@ func mutationPanelTextIsHeaderOnly(ev SubagentEvent, text string) bool {
 }
 
 func mutationLifecycleHeader(ev SubagentEvent, err bool) string {
-	name := strings.ToUpper(strings.TrimSpace(toolSemanticName(ev.Name, ev.ToolKind)))
+	name := names.CanonicalOrSelf(toolSemanticName(ev.Name, ev.ToolKind))
 	args := strings.TrimSpace(ev.Args)
-	if args == "" && name != "WRITE" && name != "PATCH" {
+	if args == "" && name != names.Write && name != names.Patch {
 		args = strings.ToLower(name)
 	}
 	switch name {
-	case "WRITE":
+	case names.Write:
 		if err {
 			return "• Write failed " + args
 		}
 		return "• Wrote " + args
-	case "PATCH":
+	case names.Patch:
 		if err {
 			return "• Patch failed " + args
 		}

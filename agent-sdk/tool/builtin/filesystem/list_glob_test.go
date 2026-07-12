@@ -12,68 +12,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
-func TestListToolOmitsMetadataByDefault(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("a"), 0o644); err != nil {
-		t.Fatalf("WriteFile() error = %v", err)
-	}
-	listTool, err := NewList(fakeRuntime{defaultFS: hostFileSystem{cwd: dir}})
-	if err != nil {
-		t.Fatalf("NewList() error = %v", err)
-	}
-	input, err := json.Marshal(map[string]any{"path": "."})
-	if err != nil {
-		t.Fatalf("Marshal() error = %v", err)
-	}
-
-	result, err := listTool.Call(context.Background(), tool.Call{Input: input})
-	if err != nil {
-		t.Fatalf("Call() error = %v", err)
-	}
-	entries := filesystemToolMetaEntries(t, result)
-	if len(entries) != 1 {
-		t.Fatalf("metadata entries = %d, want 1", len(entries))
-	}
-	if _, ok := entries[0]["size"]; ok {
-		t.Fatalf("default metadata unexpectedly included size: %#v", entries[0])
-	}
-	if _, ok := entries[0]["mod_time"]; ok {
-		t.Fatalf("default metadata unexpectedly included mod_time: %#v", entries[0])
-	}
-}
-
-func TestListToolIncludesMetadataWhenRequested(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("hello"), 0o644); err != nil {
-		t.Fatalf("WriteFile() error = %v", err)
-	}
-	listTool, err := NewList(fakeRuntime{defaultFS: hostFileSystem{cwd: dir}})
-	if err != nil {
-		t.Fatalf("NewList() error = %v", err)
-	}
-	input, err := json.Marshal(map[string]any{"path": ".", "metadata": true})
-	if err != nil {
-		t.Fatalf("Marshal() error = %v", err)
-	}
-
-	result, err := listTool.Call(context.Background(), tool.Call{Input: input})
-	if err != nil {
-		t.Fatalf("Call() error = %v", err)
-	}
-	payload := filesystemToolPayload(t, result)
-	rawEntries, _ := payload["entries"].([]any)
-	if len(rawEntries) != 1 {
-		t.Fatalf("payload entries = %d, want 1", len(rawEntries))
-	}
-	entry, _ := rawEntries[0].(map[string]any)
-	if got := numericMetaValue(entry["size"]); got != 5 {
-		t.Fatalf("payload size = %v, want 5", entry["size"])
-	}
-	if _, ok := entry["mod_time"]; !ok {
-		t.Fatalf("payload metadata missing mod_time: %#v", entry)
-	}
-}
-
 func TestGlobToolStopsAfterLimitPlusOneMatches(t *testing.T) {
 	dir := t.TempDir()
 	for _, name := range []string{"a.txt", "b.txt", "c.txt", "d.txt", "e.txt"} {
@@ -497,23 +435,6 @@ func filesystemToolMeta(t *testing.T, result tool.Result) map[string]any {
 		t.Fatalf("missing tool metadata: %#v", result.Metadata)
 	}
 	return meta
-}
-
-func filesystemToolMetaEntries(t *testing.T, result tool.Result) []map[string]any {
-	t.Helper()
-	rawEntries, _ := filesystemToolMeta(t, result)["entries"].([]map[string]any)
-	if rawEntries != nil {
-		return rawEntries
-	}
-	entriesAny, _ := filesystemToolMeta(t, result)["entries"].([]any)
-	out := make([]map[string]any, 0, len(entriesAny))
-	for _, item := range entriesAny {
-		entry, _ := item.(map[string]any)
-		if entry != nil {
-			out = append(out, entry)
-		}
-	}
-	return out
 }
 
 func stringSlicePayloadValue(t *testing.T, value any) []string {

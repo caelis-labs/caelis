@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
+	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 	"github.com/caelis-labs/caelis/protocol/acp/client"
 )
 
@@ -36,18 +37,20 @@ func ToolCallName(update client.ToolCallUpdate) string {
 			return strings.TrimSpace(name)
 		}
 	}
+	kind := ""
 	if update.Kind != nil {
-		if name := display.SemanticToolName("", *update.Kind); strings.TrimSpace(name) != "" {
-			return strings.TrimSpace(name)
+		kind = strings.TrimSpace(*update.Kind)
+		if !strings.EqualFold(kind, display.ToolKindExecute) {
+			return kind
 		}
 	}
 	if input, ok := update.RawInput.(map[string]any); ok {
 		if command, _ := input["command"].(string); strings.TrimSpace(command) != "" {
-			return "RUN_COMMAND"
+			return names.RunCommand
 		}
 		if command, _ := input["cmd"].(string); strings.TrimSpace(command) != "" {
-			return "RUN_COMMAND"
+			return names.RunCommand
 		}
 	}
-	return ""
+	return kind
 }

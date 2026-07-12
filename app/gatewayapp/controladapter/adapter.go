@@ -12,6 +12,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
+	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 	controller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
 	"github.com/caelis-labs/caelis/ports/gateway"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
@@ -291,9 +292,11 @@ func streamToolNameFromTitle(title string) string {
 	if len(fields) == 0 {
 		return ""
 	}
-	switch strings.ToUpper(strings.Trim(fields[0], ":")) {
-	case "RUN_COMMAND", "SPAWN":
-		return strings.ToUpper(strings.Trim(fields[0], ":"))
+	if canonical, ok := names.Resolve(strings.Trim(fields[0], ":")); ok {
+		switch canonical {
+		case names.RunCommand, names.Spawn:
+			return canonical
+		}
 	}
 	return ""
 }

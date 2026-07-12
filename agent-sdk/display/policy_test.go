@@ -28,14 +28,14 @@ func TestSummarizeToolCallTitleIncludesSpawnPrompt(t *testing.T) {
 		"agent":  "self",
 		"prompt": "创建 hello_spawn.txt",
 	}
-	if got := SummarizeToolCallTitle("SPAWN", raw); got != "SPAWN self: 创建 hello_spawn.txt" {
+	if got := SummarizeToolCallTitle("SPAWN", raw); got != "Spawn self: 创建 hello_spawn.txt" {
 		t.Fatalf("SummarizeToolCallTitle(SPAWN) = %q", got)
 	}
 }
 
 func TestSkillToolKeepsDistinctSemanticName(t *testing.T) {
-	if got := SemanticToolName("skill", ToolKindForName("skill")); got != "SKILL" {
-		t.Fatalf("SemanticToolName(skill) = %q, want SKILL", got)
+	if got := SemanticToolName("skill", ToolKindForName("skill")); got != "Skill" {
+		t.Fatalf("SemanticToolName(skill) = %q, want Skill", got)
 	}
 	if got := ToolKindForName("skill"); got != ToolKindRead {
 		t.Fatalf("ToolKindForName(skill) = %q, want %q", got, ToolKindRead)
@@ -43,8 +43,17 @@ func TestSkillToolKeepsDistinctSemanticName(t *testing.T) {
 	if got := ExplorationVerbForTool("skill"); got != "Skill" {
 		t.Fatalf("ExplorationVerbForTool(skill) = %q, want Skill", got)
 	}
-	if got := SummarizeToolCallTitle("skill", map[string]any{"name": "brainstorm"}); got != "SKILL brainstorm" {
-		t.Fatalf("SummarizeToolCallTitle(skill) = %q, want SKILL brainstorm", got)
+	if got := SummarizeToolCallTitle("skill", map[string]any{"name": "brainstorm"}); got != "Skill brainstorm" {
+		t.Fatalf("SummarizeToolCallTitle(skill) = %q, want Skill brainstorm", got)
+	}
+}
+
+func TestSemanticToolNameDoesNotInventBuiltinFromKind(t *testing.T) {
+	if got := SemanticToolName("", ToolKindSearch); got != "" {
+		t.Fatalf("SemanticToolName(empty, search) = %q, want empty", got)
+	}
+	if got := SemanticToolName("external_search", ToolKindSearch); got != "external_search" {
+		t.Fatalf("SemanticToolName(external_search, search) = %q", got)
 	}
 }
 
@@ -66,7 +75,7 @@ func TestDisplayTerminalInitialOutputForSpawn(t *testing.T) {
 		"agent":  "codex",
 		"prompt": "explain the patch",
 	})
-	if got != "SPAWN agent=codex\nexplain the patch\n" {
+	if got != "Spawn agent=codex\nexplain the patch\n" {
 		t.Fatalf("DisplayTerminalInitialOutput() = %q", got)
 	}
 }
@@ -87,6 +96,15 @@ func TestIsTerminalPanelTool(t *testing.T) {
 		if got := IsTerminalPanelTool(tt.name, tt.kind); got != tt.want {
 			t.Fatalf("IsTerminalPanelTool(%q, %q) = %v, want %v", tt.name, tt.kind, got, tt.want)
 		}
+	}
+}
+
+func TestDisplayTerminalIDAcceptsGenericExecuteKindWithoutInventingName(t *testing.T) {
+	if got, ok := DisplayTerminalID("call-1", ToolKindExecute); !ok || got != "call-1" {
+		t.Fatalf("DisplayTerminalID(execute) = %q, %v", got, ok)
+	}
+	if got := SemanticToolName(ToolKindExecute, ToolKindExecute); got != ToolKindExecute {
+		t.Fatalf("SemanticToolName(execute) = %q, want generic kind preserved", got)
 	}
 }
 

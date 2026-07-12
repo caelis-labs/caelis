@@ -8,9 +8,10 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolutil"
+	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 )
 
-const ToolName = "SPAWN"
+const ToolName = names.Spawn
 
 var allowedArgs = []string{"agent", "prompt"}
 
@@ -51,7 +52,7 @@ func (t Tool) Definition() tool.Definition {
 	}
 	return tool.Definition{
 		Name:        ToolName,
-		Description: "Start a bounded delegated child session for work that can proceed independently. Use it for parallel investigation, isolated review, or a clearly scoped subtask, not for final integration or user-facing judgment. The prompt must be self-contained with goal, scope, constraints, expected output, and whether edits are allowed. To observe or wait for an existing child task, use TASK wait with the returned task_id; do not call SPAWN again.",
+		Description: "Start a bounded delegated child session for work that can proceed independently. Use it for parallel investigation, isolated review, or a clearly scoped subtask, not for final integration or user-facing judgment. The prompt must be self-contained with goal, scope, constraints, expected output, and whether edits are allowed. To observe or wait for an existing child task, use Task wait with the returned task_id; do not call Spawn again.",
 		InputSchema: map[string]any{
 			"type":                 "object",
 			"properties":           props,
@@ -70,7 +71,7 @@ func (Tool) Call(_ context.Context, call tool.Call) (tool.Result, error) {
 	if err := ValidateArgs(args); err != nil {
 		return tool.Result{}, err
 	}
-	return tool.Result{}, fmt.Errorf("tool: SPAWN must be executed by the runtime wrapper")
+	return tool.Result{}, fmt.Errorf("tool: Spawn must be executed by the runtime wrapper")
 }
 
 func agentNames(agents []delegation.Agent) []string {

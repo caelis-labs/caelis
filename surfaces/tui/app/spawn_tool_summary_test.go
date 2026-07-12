@@ -61,3 +61,20 @@ func TestSubagentTerminalSignalLinesToolLifecycleCleanup(t *testing.T) {
 		})
 	}
 }
+
+func TestSubagentTerminalToolSignalKeysCanonicalizeMultiwordAliases(t *testing.T) {
+	tests := [][2]string{
+		{"RunCommand pwd", "RUN_COMMAND pwd completed"},
+		{"WebSearch weather", "web_search weather completed"},
+	}
+	for _, pair := range tests {
+		first, firstOK := parseSubagentTerminalToolSignalLine(pair[0])
+		second, secondOK := parseSubagentTerminalToolSignalLine(pair[1])
+		if !firstOK || !secondOK {
+			t.Fatalf("parse signals %q / %q = %v / %v", pair[0], pair[1], firstOK, secondOK)
+		}
+		if first.Key != second.Key {
+			t.Fatalf("canonical keys for %q / %q = %q / %q", pair[0], pair[1], first.Key, second.Key)
+		}
+	}
+}

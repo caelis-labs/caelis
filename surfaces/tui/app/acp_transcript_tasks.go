@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 )
 
 // A single wait after reasoning keeps the live reasoning visible; repeated waits
@@ -168,7 +169,7 @@ func taskWaitSummaryEvent(events []SubagentEvent) SubagentEvent {
 	if detail != "" {
 		args += " " + detail
 	}
-	return SubagentEvent{Kind: SEToolCall, Name: "TASK", Args: args}
+	return SubagentEvent{Kind: SEToolCall, Name: names.Task, Args: args}
 }
 
 func taskStageDetailRows(events []SubagentEvent, width int) []string {

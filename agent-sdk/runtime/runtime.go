@@ -160,7 +160,7 @@ func requiresControllerForwarder(cfg Config) bool {
 }
 
 // Terminals returns the unified terminal read/subscribe surface for this
-// runtime. Task control remains on the TASK tool plane.
+// runtime. Task control remains on the Task tool plane.
 func (r *Runtime) Streams() stream.Service {
 	if r == nil {
 		return nil

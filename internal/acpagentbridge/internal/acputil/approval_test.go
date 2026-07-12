@@ -15,12 +15,12 @@ func TestToolCallNameInfersSemanticExecuteName(t *testing.T) {
 		RawInput: map[string]any{"command": "pwd"},
 	})
 
-	if got != "RUN_COMMAND" {
-		t.Fatalf("ToolCallName() = %q, want RUN_COMMAND", got)
+	if got != "RunCommand" {
+		t.Fatalf("ToolCallName() = %q, want RunCommand", got)
 	}
 }
 
-func TestToolCallNamePrefersKindOverCommandShapedInput(t *testing.T) {
+func TestToolCallNamePreservesGenericKindOverCommandShapedInput(t *testing.T) {
 	t.Parallel()
 
 	got := ToolCallName(client.ToolCallUpdate{
@@ -29,8 +29,8 @@ func TestToolCallNamePrefersKindOverCommandShapedInput(t *testing.T) {
 		RawInput: map[string]any{"cmd": "show running-config"},
 	})
 
-	if got != "READ" {
-		t.Fatalf("ToolCallName() = %q, want READ", got)
+	if got != "read" {
+		t.Fatalf("ToolCallName() = %q, want generic read kind", got)
 	}
 }
 

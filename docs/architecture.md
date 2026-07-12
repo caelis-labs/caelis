@@ -187,7 +187,7 @@ Visibility categories:
 - `ui_only`, `overlay`, `notice`: not durable parent model context.
 
 Subagent stream chunks are `ui_only`; the parent receives subagent output
-through durable `SPAWN`/`TASK` tool results.
+through durable `Spawn`/`Task` tool results.
 
 ## Migration Rules
 

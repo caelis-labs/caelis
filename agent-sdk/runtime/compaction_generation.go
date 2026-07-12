@@ -145,11 +145,11 @@ CONTEXT CHECKPOINT
 - Keep recent user wording verbatim when it changes what should happen next.
 
 ## Current Plan And Progress
-- Preserve PLAN events as ordinary history, including item statuses when available.
+- Preserve Plan events as ordinary history, including item statuses when available.
 - Distinguish completed work from work that still needs action.
 
 ## Key Files And Facts
-- Include file paths plus useful symbols or line ranges when they were learned from READ/SEARCH/GLOB/PATCH output.
+- Include file paths plus useful symbols or line ranges when they were learned from Read/Grep/Glob/Patch output.
 
 ## Validation And Tool Results
 - Keep relevant build/test/vet results, sandbox failures, and unread or incomplete tool outcomes.

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -17,6 +18,7 @@ import (
 	skilltool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/skill"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/web"
+	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/registry"
 )
 
@@ -31,13 +33,13 @@ func TestBuildCoreToolsCreatesDefaultCodingGroup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildCoreTools() error = %v", err)
 	}
-	if got, want := len(tools), 12; got != want {
+	if got, want := len(tools), 11; got != want {
 		t.Fatalf("len(tools) = %d, want %d", got, want)
 	}
 	if got := tools[0].Definition().Name; got != filesystem.ReadToolName {
 		t.Fatalf("first tool = %q, want %q", got, filesystem.ReadToolName)
 	}
-	if got := tools[6].Definition().Name; got != shell.RunCommandToolName {
+	if got := tools[5].Definition().Name; got != shell.RunCommandToolName {
 		t.Fatalf("run command tool = %q, want %q", got, shell.RunCommandToolName)
 	}
 	legacyCommandToolName := "BA" + "SH"
@@ -46,20 +48,52 @@ func TestBuildCoreToolsCreatesDefaultCodingGroup(t *testing.T) {
 			t.Fatalf("core tools exposed legacy %s tool", legacyCommandToolName)
 		}
 	}
-	if got := tools[7].Definition().Name; got != task.ToolName {
+	if got := tools[6].Definition().Name; got != task.ToolName {
 		t.Fatalf("task tool = %q, want %q", got, task.ToolName)
 	}
-	if got := tools[8].Definition().Name; got != plan.ToolName {
+	if got := tools[7].Definition().Name; got != plan.ToolName {
 		t.Fatalf("plan tool = %q, want %q", got, plan.ToolName)
 	}
-	if got := tools[9].Definition().Name; got != skilltool.ToolName {
+	if got := tools[8].Definition().Name; got != skilltool.ToolName {
 		t.Fatalf("skill tool = %q, want %q", got, skilltool.ToolName)
 	}
-	if got := tools[10].Definition().Name; got != web.SearchToolName {
+	if got := tools[9].Definition().Name; got != web.SearchToolName {
 		t.Fatalf("web search tool = %q, want %q", got, web.SearchToolName)
 	}
-	if got := tools[11].Definition().Name; got != web.FetchToolName {
+	if got := tools[10].Definition().Name; got != web.FetchToolName {
 		t.Fatalf("last tool = %q, want %q", got, web.FetchToolName)
+	}
+}
+
+func TestCoreToolsExposeOnlyCanonicalPascalCaseNames(t *testing.T) {
+	t.Parallel()
+	if names.ToolSearch != tool.ToolSearchToolName {
+		t.Fatalf("ToolSearch names drifted: builtin=%q public=%q", names.ToolSearch, tool.ToolSearchToolName)
+	}
+
+	rt, err := host.New(host.Config{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatalf("host.New() error = %v", err)
+	}
+	tools, err := BuildCoreTools(CoreToolsConfig{Runtime: rt})
+	if err != nil {
+		t.Fatalf("BuildCoreTools() error = %v", err)
+	}
+	got := make([]string, 0, len(tools))
+	for _, configured := range tools {
+		got = append(got, configured.Definition().Name)
+	}
+	want := []string{
+		names.Read, names.Write, names.Patch, names.Glob, names.Grep,
+		names.RunCommand, names.Task, names.Plan, names.Skill, names.WebSearch, names.WebFetch,
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("core tool names = %#v, want %#v", got, want)
+	}
+	for _, removed := range []string{"List", "LIST"} {
+		if slices.Contains(got, removed) {
+			t.Fatalf("core tool names unexpectedly contain removed %q", removed)
+		}
 	}
 }
 
@@ -78,7 +112,7 @@ func TestCoreToolsDeclareActualSandboxRequirements(t *testing.T) {
 		definition := configuredTool.Definition()
 		requirements := definition.ExecutionRequirements
 		switch {
-		case index < 6:
+		case index < 5:
 			if requirements == nil || !requirements.Sandbox.FileSystem {
 				t.Fatalf("%s requirements = %+v, want filesystem", definition.Name, requirements)
 			}
@@ -136,14 +170,10 @@ func TestCoreToolSchemasExposeGuidanceBoundsAndAnnotations(t *testing.T) {
 	requireDescriptionContains(t, defs[filesystem.ReadToolName], "numbered lines", "small offsets", "has_more", "revision", "if_revision")
 	requireAnnotations(t, defs[filesystem.ReadToolName], true, false, true, false)
 
-	requireIntegerBounds(t, defs[filesystem.ListToolName], "limit", 1, ptrAny(1000))
-	requireDescriptionContains(t, defs[filesystem.ListToolName], "not recursive", "metadata")
-	requireAnnotations(t, defs[filesystem.ListToolName], true, false, true, false)
-
 	requireStringMinLength(t, defs[filesystem.GlobToolName], "pattern", 1)
 	requireStringOrStringArray(t, defs[filesystem.GlobToolName], "exclude", 1)
 	requireIntegerBounds(t, defs[filesystem.GlobToolName], "limit", 1, ptrAny(1000))
-	requireDescriptionContains(t, defs[filesystem.GlobToolName], "Find filesystem paths", "glob pattern")
+	requireDescriptionContains(t, defs[filesystem.GlobToolName], "Find filesystem paths", "glob pattern", "direct children", "recursive discovery")
 	requireAnnotations(t, defs[filesystem.GlobToolName], true, false, true, false)
 
 	requireStringMinLength(t, defs[filesystem.SearchToolName], "path", 1)
@@ -157,7 +187,7 @@ func TestCoreToolSchemasExposeGuidanceBoundsAndAnnotations(t *testing.T) {
 
 	requireStringMinLength(t, defs[filesystem.WriteToolName], "path", 1)
 	requireNoMinLength(t, defs[filesystem.WriteToolName], "content")
-	requireDescriptionContains(t, defs[filesystem.WriteToolName], "Prefer PATCH", "if_revision")
+	requireDescriptionContains(t, defs[filesystem.WriteToolName], "Prefer Patch", "if_revision")
 	requireAnnotations(t, defs[filesystem.WriteToolName], false, true, true, false)
 
 	requireStringMinLength(t, defs[filesystem.PatchToolName], "path", 1)
@@ -186,7 +216,7 @@ func TestCoreToolSchemasExposeGuidanceBoundsAndAnnotations(t *testing.T) {
 
 	requireStringMinLength(t, defs[web.SearchToolName], "query", 1)
 	requireIntegerBounds(t, defs[web.SearchToolName], "max_results", 1, ptrAny(10))
-	requireDescriptionContains(t, defs[web.SearchToolName], "Search the web", "concise keyword queries", "site:", "provider-native web search", "unavailable", "fall back to web_fetch")
+	requireDescriptionContains(t, defs[web.SearchToolName], "Search the web", "concise keyword queries", "site:", "provider-native web search", "unavailable", "fall back to WebFetch")
 	requireAnnotations(t, defs[web.SearchToolName], true, false, false, true)
 
 	requireStringMinLength(t, defs[web.FetchToolName], "url", 1)
@@ -233,6 +263,20 @@ func TestEnsureCoreToolsRejectsReservedBuiltinNames(t *testing.T) {
 	}
 }
 
+func TestEnsureCoreToolsRejectsHistoricalBuiltinNamesButNotRemovedList(t *testing.T) {
+	t.Parallel()
+
+	for _, name := range []string{"READ", "SEARCH", "RUN_COMMAND", "web_search", "tool_search"} {
+		_, err := EnsureCoreTools([]tool.Tool{tool.NamedTool{Def: tool.Definition{Name: name}}}, nil)
+		if err == nil {
+			t.Fatalf("EnsureCoreTools(%q) error = nil, want reserved name failure", name)
+		}
+	}
+	if _, err := EnsureCoreTools([]tool.Tool{tool.NamedTool{Def: tool.Definition{Name: "List"}}}, nil); err != nil {
+		t.Fatalf("EnsureCoreTools(List) error = %v, removed List must not alias another built-in", err)
+	}
+}
+
 func TestCoreToolsRejectUnknownArgs(t *testing.T) {
 	t.Parallel()
 
@@ -258,7 +302,6 @@ func TestCoreToolsRejectUnknownArgs(t *testing.T) {
 		args map[string]any
 	}{
 		{filesystem.ReadToolName, map[string]any{"path": "notes.txt", "unexpected": true}},
-		{filesystem.ListToolName, map[string]any{"path": ".", "unexpected": true}},
 		{filesystem.GlobToolName, map[string]any{"pattern": "*.txt", "unexpected": true}},
 		{filesystem.SearchToolName, map[string]any{"path": ".", "pattern": "hello", "unexpected": true}},
 		{filesystem.WriteToolName, map[string]any{"path": "new.txt", "content": "new\n", "unexpected": true}},
@@ -428,14 +471,6 @@ func TestCoreCodingToolsE2E(t *testing.T) {
 		t.Fatalf("glob count = %v, want 1", got)
 	}
 
-	listTool := mustLookupTool(t, reg, filesystem.ListToolName)
-	listResult := runToolJSON(t, listTool, map[string]any{
-		"path": dir,
-	})
-	if got := listResult["count"]; got != float64(1) {
-		t.Fatalf("list count = %v, want 1", got)
-	}
-
 	if err := os.MkdirAll(filepath.Join(dir, "_sync_mirrors", "large.git"), 0o755); err != nil {
 		t.Fatalf("MkdirAll(_sync_mirrors) error = %v", err)
 	}
@@ -465,13 +500,6 @@ func TestCoreCodingToolsE2E(t *testing.T) {
 	if got := globResult["count"]; got != float64(1) {
 		t.Fatalf("glob count with default gitignore = %v, want 1", got)
 	}
-	listResult = runToolJSON(t, listTool, map[string]any{
-		"path": dir,
-	})
-	if got := listResult["count"]; got != float64(2) {
-		t.Fatalf("list count with default gitignore = %v, want 2", got)
-	}
-
 	runCommandTool := mustLookupTool(t, reg, shell.RunCommandToolName)
 	runCommandResult := runToolJSON(t, runCommandTool, map[string]any{
 		"command":       "cat notes.txt",

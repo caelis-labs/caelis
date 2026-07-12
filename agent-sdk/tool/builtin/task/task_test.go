@@ -12,8 +12,8 @@ import (
 func TestTaskDescriptionGuidesContinuingSubagentConversation(t *testing.T) {
 	desc := New().Definition().Description
 	for _, want := range []string{
-		"For RUN_COMMAND, write sends terminal stdin.",
-		"For SPAWN, write sends a follow-up prompt only after the child task has completed",
+		"For RunCommand, write sends terminal stdin.",
+		"For Spawn, write sends a follow-up prompt only after the child task has completed",
 		"Always wait before relying on a task result.",
 	} {
 		if !strings.Contains(desc, want) {
@@ -45,7 +45,7 @@ func TestTaskSchemaUsesYieldTimeForWaitBudget(t *testing.T) {
 	}
 	input, _ := props["input"].(map[string]any)
 	inputDesc, _ := input["description"].(string)
-	for _, want := range []string{"terminal stdin", "completed SPAWN", "follow-up prompt"} {
+	for _, want := range []string{"terminal stdin", "completed Spawn", "follow-up prompt"} {
 		if !strings.Contains(inputDesc, want) {
 			t.Fatalf("input description = %q, want %q", inputDesc, want)
 		}

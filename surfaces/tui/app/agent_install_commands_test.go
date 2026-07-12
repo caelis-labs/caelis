@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -31,7 +32,7 @@ func TestSlashAgentInstallUsesTUIPrivateToolProjection(t *testing.T) {
 		t.Fatalf("added agent=%q opts=%#v, want install claude", svc.addedAgent, svc.addedOptions)
 	}
 	if !hasAgentInstallToolCall(messages, schema.ToolStatusInProgress) {
-		t.Fatalf("messages = %#v, want RUN_COMMAND in-progress tool call", messages)
+		t.Fatalf("messages = %#v, want RunCommand in-progress tool call", messages)
 	}
 	if !hasAgentInstallToolUpdate(messages, schema.ToolStatusCompleted) {
 		t.Fatalf("messages = %#v, want completed tool update", messages)
@@ -84,7 +85,7 @@ func hasAgentInstallToolCall(messages []tea.Msg, status string) bool {
 			continue
 		}
 		call, ok := env.Update.(schema.ToolCall)
-		if ok && call.Kind == "RUN_COMMAND" && call.Status == status {
+		if ok && call.Kind == names.RunCommand && call.Status == status {
 			return true
 		}
 	}
@@ -98,7 +99,7 @@ func hasAgentInstallToolUpdate(messages []tea.Msg, status string) bool {
 			continue
 		}
 		update, ok := env.Update.(schema.ToolCallUpdate)
-		if ok && update.Kind != nil && *update.Kind == "RUN_COMMAND" && update.Status != nil && *update.Status == status {
+		if ok && update.Kind != nil && *update.Kind == names.RunCommand && update.Status != nil && *update.Status == status {
 			return true
 		}
 	}

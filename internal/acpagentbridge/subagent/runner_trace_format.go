@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 	"github.com/caelis-labs/caelis/protocol/acp/client"
 	acpschema "github.com/caelis-labs/caelis/protocol/acp/schema"
 )
@@ -106,22 +107,18 @@ func splitChildToolTitle(title string) (string, string) {
 }
 
 func childToolNameFromKind(kind string) string {
-	switch strings.ToLower(strings.TrimSpace(kind)) {
-	case "read":
-		return "READ"
-	case "search", "fetch":
-		return "SEARCH"
-	case "edit", "delete", "move":
-		return "PATCH"
-	default:
-		return childCanonicalToolName(kind)
-	}
+	return childCanonicalToolName(kind)
 }
 
 func childCanonicalToolName(name string) string {
-	switch strings.ToUpper(strings.TrimSpace(name)) {
-	case "READ", "LIST", "GLOB", "SEARCH", "RG", "FIND", "WRITE", "PATCH", "WEB_SEARCH", "WEB_FETCH":
-		return strings.ToUpper(strings.TrimSpace(name))
+	if canonical, ok := names.Resolve(name); ok {
+		return canonical
+	}
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "rg":
+		return "RG"
+	case "find":
+		return "FIND"
 	default:
 		return ""
 	}
@@ -210,16 +207,17 @@ func childToolInputSummaryForName(name string, raw any) string {
 	if len(values) == 0 {
 		return ""
 	}
-	switch strings.ToUpper(strings.TrimSpace(name)) {
-	case "READ":
+	name = names.CanonicalOrSelf(name)
+	switch name {
+	case names.Read:
 		if path := childRawPath(values); path != "" {
 			return childDisplayPathBase(path)
 		}
-	case "LIST":
+	case names.List:
 		if path := firstNonEmpty(childRawPath(values), rawValueString(values, "cwd"), rawValueString(values, "directory")); path != "" {
 			return childDisplayPathBase(path)
 		}
-	case "GLOB":
+	case names.Glob:
 		pattern := rawValueString(values, "pattern")
 		scope := firstNonEmpty(childRawPath(values), rawValueString(values, "cwd"), rawValueString(values, "directory"))
 		switch {
@@ -230,7 +228,7 @@ func childToolInputSummaryForName(name string, raw any) string {
 		case scope != "":
 			return childDisplayPathBase(scope)
 		}
-	case "SEARCH", "RG", "FIND":
+	case names.Grep, "RG", "FIND":
 		query := firstNonEmpty(rawValueString(values, "query"), rawValueString(values, "pattern"), rawValueString(values, "text"))
 		scope := firstNonEmpty(childRawPath(values), rawValueString(values, "cwd"), rawValueString(values, "directory"))
 		switch {
@@ -241,15 +239,15 @@ func childToolInputSummaryForName(name string, raw any) string {
 		case scope != "":
 			return childDisplayPathBase(scope)
 		}
-	case "WRITE", "PATCH":
+	case names.Write, names.Patch:
 		if path := childRawPath(values); path != "" {
 			return childDisplayPathBase(path)
 		}
-	case "WEB_SEARCH":
+	case names.WebSearch:
 		if query := rawValueString(values, "query"); query != "" {
 			return truncateTraceText(quoteTraceValue(query), 100)
 		}
-	case "WEB_FETCH":
+	case names.WebFetch:
 		if url := rawValueString(values, "url"); url != "" {
 			return truncateTraceText(url, 100)
 		}
@@ -262,12 +260,13 @@ func compactChildToolDetail(name string, detail string) string {
 	if detail == "" {
 		return ""
 	}
-	switch strings.ToUpper(strings.TrimSpace(name)) {
-	case "READ", "LIST", "WRITE", "PATCH":
+	name = names.CanonicalOrSelf(name)
+	switch name {
+	case names.Read, names.List, names.Write, names.Patch:
 		if path, rest, ok := childLeadingPath(detail); ok {
 			return strings.TrimSpace(childDisplayPathBase(path) + rest)
 		}
-	case "GLOB", "SEARCH", "RG", "FIND":
+	case names.Glob, names.Grep, "RG", "FIND":
 		if before, after, ok := strings.Cut(detail, " in "); ok {
 			if path, rest, pathOK := childLeadingPath(after); pathOK {
 				return strings.TrimSpace(before + " in " + childDisplayPathBase(path) + rest)

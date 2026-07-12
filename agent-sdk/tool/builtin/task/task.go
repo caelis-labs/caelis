@@ -6,9 +6,10 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolutil"
+	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 )
 
-const ToolName = "TASK"
+const ToolName = names.Task
 
 var allowedArgs = []string{"action", "task_id", "input", "yield_time_ms"}
 
@@ -26,7 +27,7 @@ func New() Tool {
 func (Tool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        ToolName,
-		Description: "Control an async task returned by RUN_COMMAND or SPAWN. For RUN_COMMAND, write sends terminal stdin. For SPAWN, write sends a follow-up prompt only after the child task has completed. Always wait before relying on a task result.",
+		Description: "Control an async task returned by RunCommand or Spawn. For RunCommand, write sends terminal stdin. For Spawn, write sends a follow-up prompt only after the child task has completed. Always wait before relying on a task result.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -42,7 +43,7 @@ func (Tool) Definition() tool.Definition {
 				},
 				"input": map[string]any{
 					"type":        "string",
-					"description": "Text for write. RUN_COMMAND receives terminal stdin; completed SPAWN receives a follow-up prompt.",
+					"description": "Text for write. RunCommand receives terminal stdin; completed Spawn receives a follow-up prompt.",
 				},
 				"yield_time_ms": map[string]any{
 					"type":        "integer",
@@ -65,7 +66,7 @@ func (Tool) Call(_ context.Context, call tool.Call) (tool.Result, error) {
 	if err := ValidateArgs(args); err != nil {
 		return tool.Result{}, err
 	}
-	return tool.Result{}, fmt.Errorf("tool: TASK must be executed by the runtime wrapper")
+	return tool.Result{}, fmt.Errorf("tool: Task must be executed by the runtime wrapper")
 }
 
 var _ tool.Tool = Tool{}

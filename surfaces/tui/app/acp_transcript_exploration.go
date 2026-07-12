@@ -6,6 +6,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/caelis-labs/caelis/agent-sdk/display"
+	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 )
 
 type explorationProjectionState struct {
@@ -548,7 +549,7 @@ func renderExplorationToolRow(blockID string, ev SubagentEvent, width int, ctx B
 func renderExplorationToolRowWithMode(blockID string, ev SubagentEvent, width int, ctx BlockRenderContext, token string, first bool, mode explorationToolDetailMode) RenderedRow {
 	verb := display.ExplorationVerbForTool(toolSemanticName(ev.Name, ev.ToolKind))
 	if verb == "" {
-		verb = strings.ToUpper(strings.TrimSpace(ev.Name))
+		verb = names.CanonicalOrSelf(ev.Name)
 	}
 	detail := explorationToolDetailForDisplay(ev, ctx.Workspace, mode)
 	prefix := explorationChildPrefix(first)
@@ -674,7 +675,7 @@ func explorationToolDetailForDisplay(ev SubagentEvent, workspace string, mode ex
 		if display.ExplorationVerbForTool(toolSemanticName(ev.Name, ev.ToolKind)) != "" {
 			return ""
 		}
-		item = strings.ToUpper(strings.TrimSpace(ev.Name))
+		item = names.CanonicalOrSelf(ev.Name)
 	}
 	item = normalizeExplorationFailedDetail(item)
 	item = compactExplorationToolDetailWithWorkspace(ev, item, workspace)
@@ -694,7 +695,7 @@ func compactExplorationToolDetailWithWorkspace(ev SubagentEvent, detail string, 
 		return ""
 	}
 	semanticName := toolSemanticName(ev.Name, ev.ToolKind)
-	if strings.EqualFold(semanticName, "WEB_SEARCH") {
+	if names.CanonicalOrSelf(semanticName) == names.WebSearch {
 		return detail
 	}
 	switch display.ExplorationVerbForTool(semanticName) {
@@ -955,11 +956,21 @@ func toolSignalDisplayVerb(name string) string {
 	if verb := display.ExplorationVerbForTool(name); verb != "" {
 		return verb
 	}
-	switch strings.ToUpper(strings.TrimSpace(name)) {
-	case "WRITE":
+	info, ok := names.Lookup(name)
+	if !ok {
+		return ""
+	}
+	switch info.Name {
+	case names.Write:
 		return "Write"
-	case "PATCH":
+	case names.Patch:
 		return "Patch"
+	case names.RunCommand:
+		return "Ran"
+	case names.Spawn:
+		return "Spawned"
+	case names.Task:
+		return "Task"
 	default:
 		return ""
 	}

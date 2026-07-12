@@ -181,7 +181,7 @@ func (tm *taskRuntime) beginSubagentSpawn(
 	now := tm.runtime.now()
 	entry := &taskapi.Entry{
 		TaskID: taskID, Kind: taskapi.KindSubagent, Session: session.NormalizeSessionRef(ref),
-		Title: "SPAWN " + strings.TrimSpace(req.Agent), State: taskapi.StatePrepared, CreatedAt: now, UpdatedAt: now,
+		Title: "Spawn " + strings.TrimSpace(req.Agent), State: taskapi.StatePrepared, CreatedAt: now, UpdatedAt: now,
 		SupportsCancel: true,
 		Spec: map[string]any{
 			"spawn_identity": strings.TrimSpace(spawnID), "spawn_request_digest": strings.TrimSpace(requestDigest),

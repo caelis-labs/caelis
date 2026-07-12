@@ -9,17 +9,23 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
+	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 	"github.com/caelis-labs/caelis/surfaces/transcript"
 )
 
 func toolDisplayArgs(name string, raw map[string]any, fallback ...string) string {
-	name = strings.ToUpper(strings.TrimSpace(name))
+	name = names.CanonicalOrSelf(name)
+	if strings.EqualFold(name, display.ToolKindExecute) {
+		if command := terminalCommandDisplay(raw); command != "" {
+			return display.NormalizeDisplayArg(command)
+		}
+	}
 	switch name {
-	case "READ":
+	case names.Read:
 		if path := toolPath(raw); path != "" {
 			return path
 		}
-	case "LIST":
+	case names.List:
 		if path := toolPath(raw); path != "" {
 			return path
 		}
@@ -31,11 +37,11 @@ func toolDisplayArgs(name string, raw map[string]any, fallback ...string) string
 		if metadataOnlyToolArgs(raw) {
 			return ""
 		}
-	case "GLOB":
+	case names.Glob:
 		if pattern := globPattern(raw); pattern != "" {
 			return pattern
 		}
-	case "SEARCH", "RG", "FIND":
+	case names.Grep, "RG", "FIND":
 		query := toolQuery(raw)
 		path := toolPath(raw)
 		switch {
@@ -46,27 +52,27 @@ func toolDisplayArgs(name string, raw map[string]any, fallback ...string) string
 		case path != "":
 			return compactPathDisplay(path)
 		}
-	case "WEB_SEARCH":
+	case names.WebSearch:
 		if display := display.WebSearchDisplayArg(raw); display != "" {
 			return display
 		}
-	case "WEB_FETCH":
+	case names.WebFetch:
 		if display := display.WebFetchDisplayArg(raw); display != "" {
 			return display
 		}
-	case "SKILL":
+	case names.Skill:
 		if name := strings.TrimSpace(asString(raw["name"])); name != "" {
 			return name
 		}
 		if name := skillContentDisplayNameFromRaw(raw); name != "" {
 			return name
 		}
-	case "WRITE", "PATCH":
+	case names.Write, names.Patch:
 		if path := toolPath(raw); path != "" {
 			return filepath.Base(path)
 		}
-	case "RUN_COMMAND", "SPAWN", "TASK":
-		if name == "TASK" {
+	case names.RunCommand, names.Spawn, names.Task:
+		if name == names.Task {
 			if action := taskControlDisplay(raw); action != "" {
 				return action
 			}
@@ -74,7 +80,7 @@ func toolDisplayArgs(name string, raw map[string]any, fallback ...string) string
 				return action
 			}
 		}
-		if name == "SPAWN" {
+		if name == names.Spawn {
 			if display := spawnDisplayArgs(raw); display != "" {
 				return display
 			}
@@ -216,8 +222,8 @@ func isASCIILetter(ch byte) bool {
 }
 
 func toolDisplayFullArgs(name string, raw map[string]any) string {
-	switch strings.ToUpper(strings.TrimSpace(name)) {
-	case "SPAWN":
+	switch names.CanonicalOrSelf(name) {
+	case names.Spawn:
 		return spawnFullDisplayArgs(raw)
 	default:
 		return ""
@@ -241,12 +247,12 @@ func toolDisplaySemanticOverride(semanticName string, kind string, title string,
 }
 
 func overrideSearchListFiles(semanticName string, kind string, title string, raw map[string]any) string {
-	if !strings.EqualFold(strings.TrimSpace(kind), "search") && !strings.EqualFold(strings.TrimSpace(semanticName), "SEARCH") {
+	if !strings.EqualFold(strings.TrimSpace(kind), "search") && names.CanonicalOrSelf(semanticName) != names.Grep {
 		return ""
 	}
 	switch parsedCommandType(raw) {
 	case "list_files":
-		return "LIST"
+		return names.List
 	default:
 		return ""
 	}
@@ -257,22 +263,22 @@ func toolTitleDisplayArgs(name string, kind string, title string) string {
 	if title == "" {
 		return ""
 	}
-	name = strings.ToUpper(strings.TrimSpace(name))
+	name = names.CanonicalOrSelf(name)
 	if titleEqualsToolName(title, name) {
 		return ""
 	}
 	switch name {
-	case "SKILL":
+	case names.Skill:
 		return display.SkillContentNameFromTitle(title)
-	case "RUN_COMMAND":
+	case names.RunCommand:
 		return executeTitleDisplayArgs(title)
-	case "GLOB":
+	case names.Glob:
 		return globTitleDisplayArgs(title)
-	case "READ", "LIST":
+	case names.Read, names.List:
 		return prefixedTitleDetail(title, "Read", "List")
-	case "SEARCH", "RG", "FIND":
+	case names.Grep, "RG", "FIND":
 		return searchTitleDisplayArgs(title)
-	case "WRITE", "PATCH":
+	case names.Write, names.Patch:
 		return compactMutationTitleDetail(prefixedTitleDetail(title, "Write", "Edit", "Patch", "Delete", "Move"))
 	}
 	switch strings.ToLower(strings.TrimSpace(kind)) {
@@ -412,6 +418,11 @@ func executeTitleDisplayArgs(title string) string {
 	title = strings.TrimSpace(title)
 	if genericExecuteTitle(title) {
 		return ""
+	}
+	if fields := strings.Fields(title); len(fields) > 1 {
+		if info, ok := names.Lookup(fields[0]); ok && info.Kind == names.KindExecute {
+			return strings.TrimSpace(strings.TrimPrefix(title, fields[0]))
+		}
 	}
 	if detail := prefixedTitleDetail(title, "Terminal", "Shell", "Command", "Execute", "Run", "Running"); detail != "" {
 		return detail
@@ -853,8 +864,7 @@ func formatDurationMS(ms int) string {
 }
 
 func toolDisplayPanelOutput(name string, output string) string {
-	switch strings.ToUpper(strings.TrimSpace(name)) {
-	case "WRITE", "PATCH":
+	if info, ok := names.Lookup(name); ok && info.ResultStyle == names.ResultMutation {
 		lines := strings.Split(strings.TrimSpace(output), "\n")
 		if len(lines) >= 2 && strings.EqualFold(strings.TrimSpace(lines[1]), "diff / hunk") {
 			return strings.Join(lines[1:], "\n")
@@ -875,19 +885,26 @@ func toolDisplaySummaryOutput(name string, output map[string]any, meta map[strin
 		}
 		return out
 	}
+	info, known := names.Lookup(name)
+	if !known {
+		if len(out) == 0 {
+			return nil
+		}
+		return out
+	}
 	var keys []string
-	switch strings.ToUpper(strings.TrimSpace(name)) {
-	case "READ":
+	switch info.ResultStyle {
+	case names.ResultRead:
 		keys = []string{"path", "file_path", "start_line", "end_line", "next_offset", "has_more"}
-	case "LIST":
+	case names.ResultList:
 		keys = []string{"path", "count", "total_count"}
-	case "GLOB":
+	case names.ResultGlob:
 		keys = []string{"pattern", "count", "total_count"}
-	case "SEARCH", "RG", "FIND":
+	case names.ResultSearch:
 		keys = []string{"pattern", "query", "count", "file_count"}
-	case "WEB_SEARCH":
+	case names.ResultWebSearch:
 		keys = []string{"query", "provider", "model", "status", "answer", "results", "message"}
-	case "WEB_FETCH":
+	case names.ResultWebFetch:
 		keys = []string{"url", "final_url", "title", "status", "status_code", "content_type", "format", "artifact_path", "message"}
 	default:
 		if len(out) == 0 {
@@ -910,18 +927,22 @@ func toolDisplaySummaryOutput(name string, output map[string]any, meta map[strin
 }
 
 func toolDisplayStructuredSummary(name string, input map[string]any, output map[string]any, meta map[string]any) string {
-	switch strings.ToUpper(strings.TrimSpace(name)) {
-	case "READ":
+	info, ok := names.Lookup(name)
+	if !ok {
+		return ""
+	}
+	switch info.ResultStyle {
+	case names.ResultRead:
 		return readDisplaySummary(input, output)
-	case "LIST":
+	case names.ResultList:
 		return listDisplaySummary(input, output)
-	case "GLOB":
+	case names.ResultGlob:
 		return globDisplaySummary(input, output)
-	case "SEARCH", "RG", "FIND":
+	case names.ResultSearch:
 		return searchDisplaySummary(input, output)
-	case "WEB_SEARCH":
+	case names.ResultWebSearch:
 		return display.WebSearchSummary(input, output)
-	case "WEB_FETCH":
+	case names.ResultWebFetch:
 		return display.WebFetchSummary(input, output)
 	default:
 		return ""
@@ -970,13 +991,16 @@ func displayStringAllDigits(value string) bool {
 }
 
 func toolDisplayResultHeader(name string, output string) string {
-	name = strings.ToUpper(strings.TrimSpace(name))
-	switch name {
-	case "READ", "LIST", "GLOB", "WRITE", "PATCH":
+	info, ok := names.Lookup(name)
+	if !ok {
+		return ""
+	}
+	switch info.ResultStyle {
+	case names.ResultRead, names.ResultList, names.ResultGlob, names.ResultMutation:
 	default:
 		return ""
 	}
-	mutationDiff := (name == "WRITE" || name == "PATCH") && toolOutputLooksLikeMutationDiff(output)
+	mutationDiff := info.ResultStyle == names.ResultMutation && toolOutputLooksLikeMutationDiff(output)
 	for _, line := range strings.Split(output, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
@@ -989,15 +1013,15 @@ func toolDisplayResultHeader(name string, output string) string {
 			continue
 		}
 		if trimmed != "" {
-			return compactToolResultHeaderPath(name, trimmed)
+			return compactToolResultHeaderPath(info.Name, trimmed)
 		}
 	}
 	return ""
 }
 
 func compactToolResultHeaderPath(name string, header string) string {
-	switch strings.ToUpper(strings.TrimSpace(name)) {
-	case "READ", "LIST":
+	switch names.CanonicalOrSelf(name) {
+	case names.Read, names.List:
 		pathPart, rest, ok, tagged := splitLeadingPathHeaderParts(header)
 		if !ok {
 			return header
@@ -1010,7 +1034,7 @@ func compactToolResultHeaderPath(name string, header string) string {
 			return header
 		}
 		return compact + rest
-	case "GLOB":
+	case names.Glob:
 	default:
 		return header
 	}

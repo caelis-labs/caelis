@@ -8,9 +8,10 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/argparse"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolutil"
+	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 )
 
-const FetchToolName = "web_fetch"
+const FetchToolName = names.WebFetch
 
 const (
 	defaultFetchTimeout     = 30 * time.Second
@@ -57,14 +58,14 @@ func NewFetch(cfg FetchConfig) (*FetchTool, error) {
 func (t *FetchTool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        FetchToolName,
-		Description: "Fetch and read one specific http or https URL. Use this after the user provides a URL or after web_search returns a result that needs source inspection. This tool does not search, follow arbitrary browsing tasks, or discover related pages. It returns cleaned markdown by default, can return text or raw html when requested, and includes an artifact_path for recalling the original fetched content if global tool-result truncation hides details.",
+		Description: "Fetch and read one specific http or https URL. Use this after the user provides a URL or after WebSearch returns a result that needs source inspection. This tool does not search, follow arbitrary browsing tasks, or discover related pages. It returns cleaned markdown by default, can return text or raw html when requested, and includes an artifact_path for recalling the original fetched content if global tool-result truncation hides details.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"url": map[string]any{
 					"type":        "string",
 					"minLength":   1,
-					"description": "Exact fully-qualified http or https URL to retrieve. Do not pass a search query here; use web_search first if you need discovery.",
+					"description": "Exact fully-qualified http or https URL to retrieve. Do not pass a search query here; use WebSearch first if you need discovery.",
 				},
 				"format": map[string]any{
 					"type":        "string",

@@ -198,7 +198,6 @@ func TestDefaultModeReadToolsDoNotRequireExplicitReadableRootsForOrdinaryReads(t
 
 	cases := []policy.ToolContext{
 		readCtx(configPath),
-		listCtx(filepath.Dir(configPath)),
 		searchCtx(filepath.Dir(configPath), "theme"),
 		globCtx(filepath.Join(filepath.Dir(configPath), "*")),
 	}
@@ -813,8 +812,6 @@ func TestDefaultModeAllowsRelativeFilesystemPathsWithinWorkspace(t *testing.T) {
 
 	cases := []policy.ToolContext{
 		readCtx("README.md"),
-		listCtx("."),
-		listCtx("sdk"),
 		searchCtx(".", "prompt"),
 		globCtx("*.md"),
 		globCtx("README*"),
@@ -835,7 +832,6 @@ func TestDefaultModeAllowsRelativeReadPathsOutsideWorkspace(t *testing.T) {
 
 	cases := []policy.ToolContext{
 		readCtx("../secret.txt"),
-		listCtx("../outside"),
 		searchCtx("../outside", "prompt"),
 		globCtx("../*.md"),
 	}
@@ -1010,19 +1006,6 @@ func readCtx(path string) policy.ToolContext {
 	return policy.ToolContext{
 		Tool: tool.Definition{Name: "READ"},
 		Call: tool.Call{Name: "READ", Input: raw},
-		Options: policy.ModeOptions{
-			WorkspaceRoot: testWorkspaceProjectRoot(),
-			TempRoot:      testTempRoot(),
-		},
-		Sandbox: sandbox.Descriptor{Backend: sandbox.BackendHost},
-	}
-}
-
-func listCtx(path string) policy.ToolContext {
-	raw, _ := json.Marshal(map[string]any{"path": path})
-	return policy.ToolContext{
-		Tool: tool.Definition{Name: "LIST"},
-		Call: tool.Call{Name: "LIST", Input: raw},
 		Options: policy.ModeOptions{
 			WorkspaceRoot: testWorkspaceProjectRoot(),
 			TempRoot:      testTempRoot(),

@@ -1,6 +1,10 @@
 package display
 
-import "strings"
+import (
+	"strings"
+
+	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
+)
 
 const (
 	ToolKindRead    = "read"
@@ -12,44 +16,36 @@ const (
 
 func SemanticToolName(name string, kind string) string {
 	name = strings.TrimSpace(name)
-	switch strings.ToUpper(name) {
-	case "RUN_COMMAND", "SPAWN", "TASK", "SKILL", "READ", "LIST", "GLOB", "SEARCH", "WEB_SEARCH", "WEB_FETCH", "RG", "FIND", "WRITE", "PATCH":
-		return strings.ToUpper(name)
+	if info, ok := names.Lookup(name); ok {
+		return info.Name
 	}
-	switch strings.ToLower(strings.TrimSpace(kind)) {
-	case "execute":
-		return "RUN_COMMAND"
-	case "read":
-		return "READ"
-	case "search", "fetch":
-		return "SEARCH"
-	case "edit", "delete", "move":
-		return "PATCH"
-	default:
-		return name
-	}
+	return name
 }
 
 func SummarizeToolCallTitle(name string, args map[string]any) string {
-	name = strings.TrimSpace(strings.ToUpper(name))
-	switch name {
-	case "READ", "WRITE", "PATCH", "SEARCH", "LIST", "GLOB":
+	info, known := names.Lookup(name)
+	name = SemanticToolName(name, "")
+	if !known {
+		return name
+	}
+	switch info.TitleStyle {
+	case names.TitlePath:
 		if path := MapString(args, "path"); strings.TrimSpace(path) != "" {
 			return strings.TrimSpace(name + " " + path)
 		}
-	case "SKILL":
+	case names.TitleSkill:
 		if skillName := MapString(args, "name"); strings.TrimSpace(skillName) != "" {
 			return strings.TrimSpace(name + " " + skillName)
 		}
-	case "WEB_SEARCH":
+	case names.TitleQuery:
 		if query := MapString(args, "query"); strings.TrimSpace(query) != "" {
 			return strings.TrimSpace(name + " " + query)
 		}
-	case "WEB_FETCH":
+	case names.TitleURL:
 		if url := MapString(args, "url"); strings.TrimSpace(url) != "" {
 			return strings.TrimSpace(name + " " + url)
 		}
-	case "RUN_COMMAND", "TASK":
+	case names.TitleCommandAction:
 		if command := MapString(args, "command"); strings.TrimSpace(command) != "" {
 			return strings.TrimSpace(name + " " + command)
 		}
@@ -59,7 +55,7 @@ func SummarizeToolCallTitle(name string, args map[string]any) string {
 			}
 			return strings.TrimSpace(name + " " + action)
 		}
-	case "SPAWN":
+	case names.TitleSpawn:
 		if display := SpawnFullDisplayArgs(args); strings.TrimSpace(display) != "" {
 			return strings.TrimSpace(name + " " + display)
 		}
@@ -68,14 +64,18 @@ func SummarizeToolCallTitle(name string, args map[string]any) string {
 }
 
 func ToolKindForName(name string) string {
-	switch strings.ToUpper(strings.TrimSpace(name)) {
-	case "READ", "SKILL":
+	info, ok := names.Lookup(name)
+	if !ok {
+		return ToolKindOther
+	}
+	switch info.Kind {
+	case names.KindRead:
 		return ToolKindRead
-	case "WRITE", "PATCH":
+	case names.KindEdit:
 		return ToolKindEdit
-	case "SEARCH", "GLOB", "LIST", "WEB_SEARCH", "WEB_FETCH":
+	case names.KindSearch:
 		return ToolKindSearch
-	case "RUN_COMMAND", "SPAWN", "TASK":
+	case names.KindExecute:
 		return ToolKindExecute
 	default:
 		return ToolKindOther

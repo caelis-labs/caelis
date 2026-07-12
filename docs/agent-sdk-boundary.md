@@ -111,7 +111,7 @@ A **controller** owns the next main-session turn for one controller epoch. A
 **participant** is a bounded collaborator or sidecar and does not automatically
 replace the controller.
 
-Task, SPAWN, and delegation primitives may use those roles. Caelis does not
+Task, Spawn, and delegation primitives may use those roles. Caelis does not
 need a generalized `Agent.asTool` abstraction. A delegated result enters parent
 model context through a canonical task/tool/message fact, never through
 transient child stream output.

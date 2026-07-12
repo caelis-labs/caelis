@@ -7,6 +7,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
+	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -58,7 +59,7 @@ func (r StreamRequest) Key() string {
 // ACP-native envelopes for live clients.
 func ProjectStreamFrame(req StreamRequest, frame stream.Frame) []eventstream.Envelope {
 	out := make([]eventstream.Envelope, 0, 2)
-	if strings.EqualFold(strings.TrimSpace(req.ToolName), "SPAWN") {
+	if canonical, ok := names.Resolve(req.ToolName); ok && canonical == names.Spawn {
 		return subagentStreamFrameEvents(req, frame)
 	}
 	embedded := streamFrameEmbeddedEvents(req, frame)

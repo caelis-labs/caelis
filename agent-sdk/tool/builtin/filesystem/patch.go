@@ -6,9 +6,10 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolutil"
+	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 )
 
-const PatchToolName = "PATCH"
+const PatchToolName = names.Patch
 
 type PatchTool struct {
 	runtime sandbox.Runtime
@@ -25,7 +26,7 @@ func NewPatch(runtime sandbox.Runtime) (*PatchTool, error) {
 func (t *PatchTool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        PatchToolName,
-		Description: "Apply one or more exact text replacements to a single file atomically. Use this for surgical edits after READ provides the exact old text. Include if_revision when available to guard against stale edits.",
+		Description: "Apply one or more exact text replacements to a single file atomically. Use this for surgical edits after Read provides the exact old text. Include if_revision when available to guard against stale edits.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -52,7 +53,7 @@ func (t *PatchTool) Definition() tool.Definition {
 				},
 				"if_revision": map[string]any{
 					"type":        "string",
-					"description": "Revision guard from READ.",
+					"description": "Revision guard from Read.",
 				},
 			},
 			"required":             []string{"path", "edits"},

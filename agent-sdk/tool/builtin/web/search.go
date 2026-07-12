@@ -8,9 +8,10 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/argparse"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolutil"
+	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 )
 
-const SearchToolName = "web_search"
+const SearchToolName = names.WebSearch
 
 type SearchTool struct{}
 
@@ -21,7 +22,7 @@ func NewSearch() *SearchTool {
 func (t *SearchTool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        SearchToolName,
-		Description: "Search the web for current, external, or unknown information when you do not already have a URL. Use concise keyword queries with the key entity, location, date/time, version, error text, or product name instead of long prose. Put common search operators directly in query, such as site:, filetype:, quoted phrases, OR, or minus terms. Use web_fetch after search when you need to read a specific result URL. If provider-native web search is unavailable, fall back to web_fetch with a known URL or ask for a search backend.",
+		Description: "Search the web for current, external, or unknown information when you do not already have a URL. Use concise keyword queries with the key entity, location, date/time, version, error text, or product name instead of long prose. Put common search operators directly in query, such as site:, filetype:, quoted phrases, OR, or minus terms. Use WebFetch after search when you need to read a specific result URL. If provider-native web search is unavailable, fall back to WebFetch with a known URL or ask for a search backend.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -73,7 +74,7 @@ func (t *SearchTool) Call(ctx context.Context, call tool.Call) (tool.Result, err
 	}
 	searcher, ok := llm.(model.WebSearcher)
 	if !ok {
-		return webSearchUnavailableResult(req, provider, "Web search is unavailable for this provider. Use web_fetch with a known URL, or configure a search backend.")
+		return webSearchUnavailableResult(req, provider, "Web search is unavailable for this provider. Use WebFetch with a known URL, or configure a search backend.")
 	}
 	resp, err := searcher.SearchWeb(ctx, req)
 	if err != nil {
@@ -134,9 +135,9 @@ func webSearchErrorMessage(err error) string {
 	}
 	msg := strings.TrimSpace(err.Error())
 	if msg == "" {
-		return "Use web_fetch with a known URL, or retry later."
+		return "Use WebFetch with a known URL, or retry later."
 	}
-	return msg + ". Use web_fetch with a known URL, or retry later."
+	return msg + ". Use WebFetch with a known URL, or retry later."
 }
 
 func webSearchResultsPayload(results []model.WebSearchResult) []map[string]any {

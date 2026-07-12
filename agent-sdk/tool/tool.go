@@ -9,6 +9,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/internal/jsonvalue"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 )
 
 // Definition is the stable tool declaration exposed to runtimes and model
@@ -83,7 +84,7 @@ const (
 	MetadataToolKindMCP        = "mcp"
 	MetadataToolKindToolSearch = "tool_search"
 
-	ToolSearchToolName = "tool_search"
+	ToolSearchToolName = identity.ToolSearch
 )
 
 // Call is one provider-neutral tool invocation.

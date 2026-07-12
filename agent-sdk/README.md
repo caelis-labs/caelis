@@ -41,6 +41,14 @@ projection rather than those reusable semantics.
 | `agent-sdk/skill` | Skill discovery and builtin skill tooling |
 | `agent-sdk/task` | Task and subagent contracts |
 | `agent-sdk/tool` | Tool registry contracts and builtin tools |
+| `agent-sdk/tool/identity` | Canonical built-in identities, historical aliases, and shared semantic traits |
+
+Built-in tools use PascalCase model-visible names: `Read`, `Write`, `Patch`,
+`Glob`, `Grep`, `RunCommand`, `Task`, `Plan`, `Skill`, `WebSearch`, and
+`WebFetch`. `Spawn` and `ToolSearch` are injected only when their capabilities
+are available. Historical names are accepted only at the built-in execution
+and replay boundary. Removed `List` remains a historical display identity but
+cannot be registered for execution; external MCP tool names are unchanged.
 
 ## Dependency Boundary
 

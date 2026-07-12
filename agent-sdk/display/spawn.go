@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/internal/jsonvalue"
+	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 )
 
 func SpawnFullDisplayArgs(raw map[string]any) string {
@@ -137,10 +138,10 @@ func SpawnDisplayTextCandidate(text string) string {
 
 func SanitizeSpawnHeaderArgs(args string) string {
 	args = strings.TrimSpace(args)
-	if strings.EqualFold(args, "SPAWN") {
+	if canonical, ok := names.Resolve(args); ok && canonical == names.Spawn {
 		return ""
 	}
-	for _, prefix := range []string{"SPAWN ", "spawn "} {
+	for _, prefix := range []string{names.Spawn + " ", "SPAWN ", "spawn "} {
 		if strings.HasPrefix(args, prefix) {
 			return strings.TrimSpace(strings.TrimPrefix(args, prefix))
 		}

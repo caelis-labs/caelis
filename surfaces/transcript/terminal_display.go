@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
+	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
@@ -58,14 +59,14 @@ func TerminalToolOutputText(input ToolOutputFallbackInput) string {
 	if text := TerminalRuntimeOutputText(input.Meta); text != "" {
 		return text
 	}
-	if !display.IsTerminalPanelTool(input.ToolName, input.ToolKind) && !strings.EqualFold(strings.TrimSpace(input.ToolName), "TASK") {
+	canonical, _ := names.Resolve(input.ToolName)
+	if !display.IsTerminalPanelTool(input.ToolName, input.ToolKind) && canonical != names.Task {
 		return ""
 	}
 	if !HasTerminalPanelMeta(input.Meta) {
 		return ""
 	}
-	name := strings.ToUpper(strings.TrimSpace(input.ToolName))
-	if name == "SPAWN" {
+	if canonical == names.Spawn {
 		if input.Error || strings.EqualFold(strings.TrimSpace(input.Status), ToolStatusFailed) {
 			return firstRawNonEmpty(rawDisplayString(input.RawOutput["stderr"]), rawDisplayString(input.RawOutput["error"]))
 		}

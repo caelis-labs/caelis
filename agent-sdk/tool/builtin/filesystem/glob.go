@@ -12,9 +12,10 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/argparse"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolutil"
+	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 )
 
-const GlobToolName = "GLOB"
+const GlobToolName = names.Glob
 
 const (
 	defaultGlobLimit = 200
@@ -36,7 +37,7 @@ func NewGlob(runtime sandbox.Runtime) (*GlobTool, error) {
 func (t *GlobTool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        GlobToolName,
-		Description: "Find filesystem paths matching a glob pattern under a search directory.",
+		Description: "Find filesystem paths matching a glob pattern under a search directory. Use * to enumerate direct children and **/* for recursive discovery.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -94,7 +95,7 @@ func (t *GlobTool) Call(ctx context.Context, call tool.Call) (tool.Result, error
 	resolvedPattern := pattern
 	if filepath.IsAbs(pattern) {
 		if searchRoot != "" {
-			err := tool.NewError(tool.ErrorCodeInvalidInput, "GLOB pattern must be relative when path is provided")
+			err := tool.NewError(tool.ErrorCodeInvalidInput, "Glob pattern must be relative when path is provided")
 			err.Hint = "Use path for the search directory and pattern for a relative glob such as \"*.py\" or \"**/*.py\"."
 			return tool.Result{}, err
 		}
@@ -182,12 +183,12 @@ func globSearchRoot(fsys sandbox.FileSystem, pathArg string) (string, error) {
 	info, err := fsys.Stat(root)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return "", tool.NewError(tool.ErrorCodeNotFound, "GLOB path does not exist: "+root)
+			return "", tool.NewError(tool.ErrorCodeNotFound, "Glob path does not exist: "+root)
 		}
 		return "", err
 	}
 	if !info.IsDir() {
-		return "", tool.NewError(tool.ErrorCodeInvalidInput, "GLOB path must be a directory: "+root)
+		return "", tool.NewError(tool.ErrorCodeInvalidInput, "Glob path must be a directory: "+root)
 	}
 	return root, nil
 }
@@ -195,7 +196,7 @@ func globSearchRoot(fsys sandbox.FileSystem, pathArg string) (string, error) {
 func validateGlobPatternUnderSearchRoot(searchRoot string, resolvedPattern string) error {
 	rel, err := filepath.Rel(searchRoot, resolvedPattern)
 	if err != nil || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		toolErr := tool.NewError(tool.ErrorCodeInvalidInput, "GLOB pattern must stay under path: "+searchRoot)
+		toolErr := tool.NewError(tool.ErrorCodeInvalidInput, "Glob pattern must stay under path: "+searchRoot)
 		toolErr.Hint = "Use path for the search directory and a pattern inside it, such as \"*.py\" or \"**/*.py\"."
 		return toolErr
 	}

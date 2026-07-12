@@ -1,9 +1,8 @@
 package acpagentbridge
 
 import (
-	"strings"
-
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
@@ -35,8 +34,9 @@ func suppressACPBridgeSubagentMeta(meta map[string]any) bool {
 		metautil.RuntimeStream,
 		metautil.RuntimeStreamParentTool,
 	)
-	switch strings.ToUpper(strings.TrimSpace(parentTool)) {
-	case "SPAWN", "TASK":
+	canonical, _ := names.Resolve(parentTool)
+	switch canonical {
+	case names.Spawn, names.Task:
 		return true
 	default:
 		return metautil.Bool(

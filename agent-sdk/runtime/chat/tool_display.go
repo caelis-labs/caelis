@@ -10,6 +10,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 )
 
 func toolResultDisplayOutput(name string, output map[string]any, meta map[string]any) map[string]any {
@@ -17,8 +18,7 @@ func toolResultDisplayOutput(name string, output map[string]any, meta map[string
 	if out == nil {
 		out = map[string]any{}
 	}
-	switch strings.ToUpper(strings.TrimSpace(name)) {
-	case "WRITE", "PATCH":
+	if info, ok := names.Lookup(name); ok && info.ResultStyle == names.ResultMutation {
 		for _, key := range []string{
 			"created",
 			"previous_empty",
@@ -43,33 +43,36 @@ func toolResultDisplayOutput(name string, output map[string]any, meta map[string
 }
 
 func toolResultDisplayText(name string, input map[string]any, output map[string]any, meta map[string]any, status string, isErr bool) string {
-	name = strings.ToUpper(strings.TrimSpace(name))
-	switch name {
-	case "READ":
+	info, known := names.Lookup(name)
+	if !known {
+		return genericResultText(output, isErr)
+	}
+	switch info.ResultStyle {
+	case names.ResultRead:
 		if summary := readResultSummary(input, output); summary != "" {
 			return summary
 		}
 		return toolString(output["content"])
-	case "LIST":
+	case names.ResultList:
 		return listResultSummary(input, output)
-	case "GLOB":
+	case names.ResultGlob:
 		return globResultSummary(input, output, meta)
-	case "SEARCH", "RG", "FIND":
+	case names.ResultSearch:
 		return searchResultSummary(input, output, meta)
-	case "WEB_SEARCH":
+	case names.ResultWebSearch:
 		return display.WebSearchSummary(input, output)
-	case "WEB_FETCH":
+	case names.ResultWebFetch:
 		return display.WebFetchSummary(input, output)
-	case "WRITE", "PATCH":
+	case names.ResultMutation:
 		if isErr || strings.EqualFold(status, "failed") {
 			return firstNonEmpty(toolString(output["error"]), toolString(output["summary"]))
 		}
 		return mutationResultSummary(input, output)
-	case "RUN_COMMAND":
+	case names.ResultCommand:
 		return terminalResultText(output, status, isErr)
-	case "SPAWN":
+	case names.ResultSpawn:
 		return spawnResultText(output, status, isErr)
-	case "TASK":
+	case names.ResultTask:
 		if toolStatusFinal(status, isErr) {
 			if summary := display.CleanSubagentFinalOutput(toolString(output["final_message"])); summary != "" {
 				return summary

@@ -10,9 +10,10 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolutil"
+	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 )
 
-const WriteToolName = "WRITE"
+const WriteToolName = names.Write
 
 type WriteTool struct {
 	runtime sandbox.Runtime
@@ -29,7 +30,7 @@ func NewWrite(runtime sandbox.Runtime) (*WriteTool, error) {
 func (t *WriteTool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        WriteToolName,
-		Description: "Create a new file or intentionally replace the full contents of one file. Prefer PATCH for localized edits to existing files because WRITE overwrites the entire target. Include if_revision when replacing a file previously read.",
+		Description: "Create a new file or intentionally replace the full contents of one file. Prefer Patch for localized edits to existing files because Write overwrites the entire target. Include if_revision when replacing a file previously read.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -37,7 +38,7 @@ func (t *WriteTool) Definition() tool.Definition {
 				"content": map[string]any{"type": "string", "description": "Full new contents."},
 				"if_revision": map[string]any{
 					"type":        "string",
-					"description": "Revision guard from READ.",
+					"description": "Revision guard from Read.",
 				},
 			},
 			"required":             []string{"path", "content"},

@@ -1,2 +1,2 @@
-// Package spawn defines the runtime-owned SPAWN tool declaration.
+// Package spawn defines the runtime-owned Spawn tool declaration.
 package spawn

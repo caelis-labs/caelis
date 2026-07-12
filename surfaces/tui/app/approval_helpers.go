@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
+	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 )
 
 const (
@@ -125,28 +126,28 @@ func approvalReviewToolName(toolName string) string {
 
 func approvalToolDisplayLabel(toolName string) string {
 	semanticName := display.SemanticToolName(toolName, toolName)
-	switch strings.ToUpper(strings.TrimSpace(semanticName)) {
+	switch names.CanonicalOrSelf(semanticName) {
 	case "":
 		return ""
 	case "UNKNOWN":
 		return ""
-	case "RUN_COMMAND":
+	case names.RunCommand:
 		return "Ran"
-	case "SPAWN":
+	case names.Spawn:
 		return "Spawned"
-	case "TASK":
+	case names.Task:
 		return "Task"
-	case "READ":
+	case names.Read:
 		return "Read"
-	case "LIST":
+	case names.List:
 		return "List"
-	case "GLOB":
+	case names.Glob:
 		return "Glob"
-	case "SEARCH", "RG", "FIND":
+	case names.Grep, "RG", "FIND":
 		return "Search"
-	case "WRITE":
+	case names.Write:
 		return "Wrote"
-	case "PATCH":
+	case names.Patch:
 		return "Patched"
 	default:
 		return strings.TrimSpace(toolName)
@@ -157,14 +158,18 @@ func approvalActionLabel(req *approvalPayload) string {
 	if req == nil {
 		return ""
 	}
-	tool := strings.ToLower(strings.TrimSpace(req.ToolName))
+	if info, ok := names.Lookup(req.ToolName); ok {
+		switch info.Kind {
+		case names.KindEdit:
+			return "write"
+		case names.KindExecute:
+			return "execute"
+		case names.KindRead, names.KindSearch:
+			return "read"
+		}
+	}
+	tool := strings.TrimSpace(req.ToolName)
 	switch {
-	case strings.Contains(tool, "write"), strings.Contains(tool, "patch"):
-		return "write"
-	case strings.Contains(tool, "run_command"), strings.Contains(tool, "spawn"):
-		return "execute"
-	case strings.Contains(tool, "read"), strings.Contains(tool, "search"):
-		return "read"
 	case strings.TrimSpace(req.SandboxPermissions) != "":
 		return "permission change"
 	case tool != "":

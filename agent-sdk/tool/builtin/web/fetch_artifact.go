@@ -28,7 +28,7 @@ func (t *FetchTool) writeContentArtifact(resp fetchResponseMeta, content string,
 		dir = filepath.Join(os.TempDir(), defaultArtifactRootName)
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fetchContentArtifact{}, fmt.Errorf("web_fetch: create artifact directory: %w", err)
+		return fetchContentArtifact{}, fmt.Errorf("WebFetch: create artifact directory: %w", err)
 	}
 	_ = t.cleanupContentArtifacts(dir, "")
 	sum := sha256.Sum256([]byte(resp.finalURL + "\n" + format + "\n" + content))
@@ -44,7 +44,7 @@ func (t *FetchTool) writeContentArtifact(resp fetchResponseMeta, content string,
 	)
 	path := filepath.Join(dir, name)
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		return fetchContentArtifact{}, fmt.Errorf("web_fetch: write artifact: %w", err)
+		return fetchContentArtifact{}, fmt.Errorf("WebFetch: write artifact: %w", err)
 	}
 	_ = t.cleanupContentArtifacts(dir, path)
 	return fetchContentArtifact{Path: path}, nil

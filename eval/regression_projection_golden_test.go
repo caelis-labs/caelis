@@ -228,7 +228,7 @@ func TestRegressionProjectionGoldenFullEnvelopes(t *testing.T) {
     "update": {
       "sessionUpdate": "tool_call",
       "toolCallId": "call-1",
-      "title": "RUN_COMMAND go test ./protocol/acp/projector",
+      "title": "RunCommand go test ./protocol/acp/projector",
       "kind": "execute",
       "status": "pending",
       "rawInput": {
@@ -259,7 +259,7 @@ func TestRegressionProjectionGoldenFullEnvelopes(t *testing.T) {
     "update": {
       "sessionUpdate": "tool_call_update",
       "toolCallId": "call-1",
-      "title": "RUN_COMMAND go test ./protocol/acp/projector",
+      "title": "RunCommand go test ./protocol/acp/projector",
       "kind": "execute",
       "status": "completed",
       "rawInput": {
@@ -329,7 +329,7 @@ func TestRegressionProjectionGoldenFullEnvelopes(t *testing.T) {
       "toolCall": {
         "sessionUpdate": "tool_call_update",
         "toolCallId": "call-2",
-        "title": "RUN_COMMAND make arch-lint",
+        "title": "RunCommand make arch-lint",
         "kind": "execute",
         "status": "pending",
         "rawInput": {
@@ -345,7 +345,7 @@ func TestRegressionProjectionGoldenFullEnvelopes(t *testing.T) {
           "caelis": {
             "runtime": {
               "tool": {
-                "name": "RUN_COMMAND"
+                "name": "RunCommand"
               }
             },
             "version": 1
@@ -484,7 +484,7 @@ func projectionGoldenFixtureEvents() []*session.Event {
 			Time:       at.Add(2 * time.Second),
 			Tool: &session.EventTool{
 				ID:     "call-1",
-				Name:   "RUN_COMMAND",
+				Name:   "RunCommand",
 				Status: "pending",
 				Input:  map[string]any{"command": "go test ./protocol/acp/projector"},
 			},
@@ -498,7 +498,7 @@ func projectionGoldenFixtureEvents() []*session.Event {
 			Time:       at.Add(3 * time.Second),
 			Tool: &session.EventTool{
 				ID:     "call-1",
-				Name:   "RUN_COMMAND",
+				Name:   "RunCommand",
 				Status: "completed",
 				Input:  map[string]any{"command": "go test ./protocol/acp/projector"},
 				Output: map[string]any{"exit_code": 0},
@@ -538,7 +538,7 @@ func projectionGoldenFixtureEvents() []*session.Event {
 				Permission: &session.ProtocolApproval{
 					ToolCall: session.ProtocolToolCall{
 						ID:       "call-2",
-						Name:     "RUN_COMMAND",
+						Name:     "RunCommand",
 						Status:   "pending",
 						RawInput: map[string]any{"command": "make arch-lint"},
 					},

@@ -46,7 +46,7 @@ func TestProjectApprovalPayloadEnvelopeUsesPermissionProjectorPolicy(t *testing.
 	if stringPtrValue(permission.ToolCall.Kind) != schema.ToolKindExecute {
 		t.Fatalf("permission tool kind = %q, want displaypolicy execute kind", stringPtrValue(permission.ToolCall.Kind))
 	}
-	if stringPtrValue(permission.ToolCall.Title) != "RUN_COMMAND go test ./..." {
+	if stringPtrValue(permission.ToolCall.Title) != "RunCommand go test ./..." {
 		t.Fatalf("permission tool title = %q, want summarized title", stringPtrValue(permission.ToolCall.Title))
 	}
 	rawInput, ok := permission.ToolCall.RawInput.(map[string]any)

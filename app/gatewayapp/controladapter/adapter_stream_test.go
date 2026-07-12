@@ -65,12 +65,12 @@ func TestStreamRequestFromACPEventDerivesStreamToolFromStandardTitle(t *testing.
 		{
 			name:     "run command",
 			title:    "RUN_COMMAND sleep 10",
-			wantTool: "RUN_COMMAND",
+			wantTool: "RunCommand",
 		},
 		{
 			name:     "spawn",
 			title:    "SPAWN reviewer: inspect",
-			wantTool: "SPAWN",
+			wantTool: "Spawn",
 		},
 	}
 	for _, tt := range cases {

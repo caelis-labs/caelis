@@ -907,8 +907,8 @@ func TestEventProjectorProjectsSpawnAsExecuteWithTerminalMeta(t *testing.T) {
 	if update.Kind == nil || *update.Kind != ToolKindExecute {
 		t.Fatalf("kind = %v, want %q", update.Kind, ToolKindExecute)
 	}
-	if update.Title == nil || *update.Title != "SPAWN codex: child work" {
-		t.Fatalf("title = %v, want SPAWN codex: child work", update.Title)
+	if update.Title == nil || *update.Title != "Spawn codex: child work" {
+		t.Fatalf("title = %v, want Spawn codex: child work", update.Title)
 	}
 	assertTerminalAnchor(t, update.Content, "call-1")
 	assertTerminalInfo(t, update.Meta, "call-1")

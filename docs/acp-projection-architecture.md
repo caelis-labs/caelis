@@ -64,7 +64,7 @@ participant/handoff protocol construction outside the SDK semantic owner.
 
 ## Terminal Projection
 
-RUN_COMMAND, Bash-compatible command tools, and SPAWN share the same terminal
+`RunCommand`, Bash-compatible command tools, and `Spawn` share the same terminal
 projection contract:
 
 - `_meta.terminal_info`: local terminal identity for a tool call.

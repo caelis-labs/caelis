@@ -8,6 +8,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 )
 
 func toolResultEvent(call model.ToolCall, result tool.Result, message *model.Message, extraMeta ...map[string]any) *session.Event {
@@ -82,13 +83,14 @@ func toolResultRawOutput(result tool.Result) map[string]any {
 }
 
 func toolResultContent(call model.ToolCall, input map[string]any, output map[string]any, meta map[string]any, status string, isErr bool) []session.EventToolContent {
-	name := strings.ToUpper(strings.TrimSpace(call.Name))
-	displayOutput := toolResultDisplayOutput(name, output, meta)
-	if name == "TASK" && suppressTaskControlContent(display.ToolTaskAction(input, displayOutput, meta)) {
+	info, _ := names.Lookup(call.Name)
+	toolName := names.CanonicalOrSelf(call.Name)
+	displayOutput := toolResultDisplayOutput(toolName, output, meta)
+	if info.ResultStyle == names.ResultTask && suppressTaskControlContent(display.ToolTaskAction(input, displayOutput, meta)) {
 		return nil
 	}
-	text := toolResultDisplayText(name, input, displayOutput, meta, status, isErr)
-	if strings.TrimSpace(text) == "" && successfulEmptyTerminalResult(name, status, isErr) {
+	text := toolResultDisplayText(toolName, input, displayOutput, meta, status, isErr)
+	if strings.TrimSpace(text) == "" && successfulEmptyTerminalResult(toolName, status, isErr) {
 		return nil
 	}
 	if strings.TrimSpace(text) == "" {
@@ -101,8 +103,7 @@ func toolResultContent(call model.ToolCall, input map[string]any, output map[str
 		Type: "content",
 		Text: text,
 	}
-	switch name {
-	case "RUN_COMMAND", "SPAWN", "TASK":
+	if info.TerminalKnown {
 		item.Type = "terminal"
 		item.TerminalID = toolResultTerminalID(call, displayOutput, meta)
 	}
@@ -125,12 +126,8 @@ func successfulEmptyTerminalResult(name string, status string, isErr bool) bool 
 	if !strings.EqualFold(strings.TrimSpace(status), "completed") {
 		return false
 	}
-	switch strings.ToUpper(strings.TrimSpace(name)) {
-	case "RUN_COMMAND", "SPAWN":
-		return true
-	default:
-		return false
-	}
+	info, ok := names.Lookup(name)
+	return ok && info.TerminalKnown && info.TerminalPanel
 }
 
 func toolCallTitle(call model.ToolCall) string {

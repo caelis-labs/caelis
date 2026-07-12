@@ -479,8 +479,8 @@ func TestTaskToolResultEventMetaMarksSubagentWriteTarget(t *testing.T) {
 	}
 	runtimeMeta, _ := caelis["runtime"].(map[string]any)
 	targetTool, _ := runtimeMeta["tool"].(map[string]any)
-	if targetTool["name"] != "TASK" || targetTool["action"] != "write" || targetTool["target_kind"] != "subagent" || targetTool["target_id"] != "maya" || targetTool["input"] != "请追加两行" {
-		t.Fatalf("runtime.tool = %#v, want TASK write subagent target", targetTool)
+	if targetTool["name"] != "Task" || targetTool["action"] != "write" || targetTool["target_kind"] != "subagent" || targetTool["target_id"] != "maya" || targetTool["input"] != "请追加两行" {
+		t.Fatalf("runtime.tool = %#v, want Task write subagent target", targetTool)
 	}
 }
 
@@ -737,8 +737,8 @@ func TestTaskWriteRejectsRunningSpawnChildWithWaitHint(t *testing.T) {
 	if err == nil {
 		t.Fatal("Write(running spawn) error = nil, want wait hint")
 	}
-	if !strings.Contains(err.Error(), "TASK wait") {
-		t.Fatalf("Write(running spawn) error = %v, want TASK wait hint", err)
+	if !strings.Contains(err.Error(), "Task wait") {
+		t.Fatalf("Write(running spawn) error = %v, want Task wait hint", err)
 	}
 	if runner.continuePrompt != "" {
 		t.Fatalf("Continue was called for running task with prompt %q", runner.continuePrompt)

@@ -10,6 +10,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 )
 
 const toolCancellationDrainGrace = 100 * time.Millisecond
@@ -137,12 +138,12 @@ func (a *Agent) executeToolCall(ctx context.Context, call model.ToolCall, observ
 }
 
 func (a *Agent) lookupTool(name string) (tool.Tool, bool) {
-	name = strings.TrimSpace(strings.ToUpper(name))
+	requested := names.ExecutableOrSelf(name)
 	for _, item := range a.tools {
 		if item == nil {
 			continue
 		}
-		if strings.TrimSpace(strings.ToUpper(item.Definition().Name)) == name {
+		if strings.EqualFold(names.ExecutableOrSelf(item.Definition().Name), requested) {
 			return item, true
 		}
 	}

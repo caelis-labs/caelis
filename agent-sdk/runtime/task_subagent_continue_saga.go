@@ -50,13 +50,13 @@ func (tm *taskRuntime) continueSubagentClaimed(ctx context.Context, task *subage
 	}
 	prompt := strings.TrimSpace(req.Input)
 	if prompt == "" {
-		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: TASK write for SPAWN task %q requires a follow-up prompt", task.ref.TaskID)
+		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: Task write for Spawn task %q requires a follow-up prompt", task.ref.TaskID)
 	}
 	if err := tm.authorizeSubagentControl(task, req.Principal, "write"); err != nil {
 		return taskapi.Snapshot{}, err
 	}
 	if task.runner == nil {
-		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: SPAWN task %q cannot continue because its child session runner is unavailable", task.ref.TaskID)
+		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: Spawn task %q cannot continue because its child session runner is unavailable", task.ref.TaskID)
 	}
 
 	phase, _, _, storedDigest, storedTurnSeq := continueStateOfTask(task)
@@ -88,7 +88,7 @@ func (tm *taskRuntime) continueSubagentClaimed(ctx context.Context, task *subage
 	running := task.running
 	task.mu.Unlock()
 	if running || state != taskapi.StateCompleted {
-		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: SPAWN task %q is %s; use TASK wait until completed before TASK write", task.ref.TaskID, state)
+		return taskapi.Snapshot{}, fmt.Errorf("agent-sdk/runtime: Spawn task %q is %s; use Task wait until completed before Task write", task.ref.TaskID, state)
 	}
 
 	checkpoint := task.beginContinuationTurn()

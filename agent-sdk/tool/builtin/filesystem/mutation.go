@@ -132,7 +132,7 @@ func planPatchMutation(fsys sandbox.FileSystem, args map[string]any) (fileMutati
 	}
 
 	if !fileExists {
-		err := tool.NewError(tool.ErrorCodeNotFound, "tool: PATCH target does not exist; use WRITE to create files")
+		err := tool.NewError(tool.ErrorCodeNotFound, "tool: Patch target does not exist; use Write to create files")
 		err.Retryable = true
 		return fileMutationPlan{}, err
 	}
@@ -189,7 +189,7 @@ func parsePatchEdits(args map[string]any) ([]patchEdit, error) {
 			return nil, tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("tool: arg \"edits[%d]\" must be an object", idx))
 		}
 		if err := tool.RejectUnknownArgs(item, "old", "new", "replace_all", "expected_replacements"); err != nil {
-			return nil, fmt.Errorf("tool: PATCH edits[%d]: %w", idx, err)
+			return nil, fmt.Errorf("tool: Patch edits[%d]: %w", idx, err)
 		}
 		oldValue, err := requiredPatchEditString(item, idx, "old")
 		if err != nil {
@@ -250,8 +250,8 @@ func collectPatchReplacements(content string, edits []patchEdit) ([]patchReplace
 		matches := patchMatchRanges(content, edit.old)
 		count := len(matches)
 		if count == 0 {
-			err := tool.NewError(tool.ErrorCodeOldTextNotFound, fmt.Sprintf("tool: PATCH edit %d did not contain an exact match for old", idx))
-			err.Hint = "READ the file again and retry PATCH with the current text."
+			err := tool.NewError(tool.ErrorCodeOldTextNotFound, fmt.Sprintf("tool: Patch edit %d did not contain an exact match for old", idx))
+			err.Hint = "Read the file again and retry Patch with the current text."
 			err.Retryable = true
 			return nil, err
 		}
@@ -259,7 +259,7 @@ func collectPatchReplacements(content string, edits []patchEdit) ([]patchReplace
 			return nil, replacementCountError(idx, edit.expected, count)
 		}
 		if !edit.replaceAll && count != 1 {
-			err := tool.NewError(tool.ErrorCodeTooManyMatches, fmt.Sprintf("tool: PATCH edit %d requires exact single match, found %d", idx, count))
+			err := tool.NewError(tool.ErrorCodeTooManyMatches, fmt.Sprintf("tool: Patch edit %d requires exact single match, found %d", idx, count))
 			err.Hint = "Use a more specific old text or set replace_all with expected_replacements."
 			err.Retryable = true
 			return nil, err
@@ -426,7 +426,7 @@ func validatePatchReplacementRanges(replacements []patchReplacement) error {
 		prev := replacements[idx-1]
 		next := replacements[idx]
 		if next.start < prev.end {
-			err := tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("tool: PATCH has overlapping edits %d and %d", prev.editIndex, next.editIndex))
+			err := tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("tool: Patch has overlapping edits %d and %d", prev.editIndex, next.editIndex))
 			err.Hint = "Use non-overlapping old text in each edit."
 			err.Retryable = true
 			return err
@@ -450,8 +450,8 @@ func applyPatchReplacements(content string, replacements []patchReplacement) str
 }
 
 func replacementCountError(editIndex int, expected int, actual int) error {
-	err := tool.NewError(tool.ErrorCodeUnexpectedMatchCount, fmt.Sprintf("tool: PATCH edit %d expected %d replacement(s), found %d", editIndex, expected, actual))
-	err.Hint = "READ the file again and retry PATCH with the current expected_replacements value."
+	err := tool.NewError(tool.ErrorCodeUnexpectedMatchCount, fmt.Sprintf("tool: Patch edit %d expected %d replacement(s), found %d", editIndex, expected, actual))
+	err.Hint = "Read the file again and retry Patch with the current expected_replacements value."
 	err.Retryable = true
 	return err
 }

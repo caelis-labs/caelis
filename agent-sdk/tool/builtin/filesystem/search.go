@@ -13,9 +13,10 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/argparse"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolutil"
+	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 )
 
-const SearchToolName = "SEARCH"
+const SearchToolName = names.Grep
 
 var errSearchLimitReached = errors.New("search: limit reached")
 
@@ -102,7 +103,7 @@ func (t *SearchTool) Call(ctx context.Context, call tool.Call) (tool.Result, err
 		return tool.Result{}, err
 	}
 	if len(terms) == 0 {
-		return tool.Result{}, tool.NewError(tool.ErrorCodeInvalidInput, "SEARCH pattern must include at least one non-empty keyword")
+		return tool.Result{}, tool.NewError(tool.ErrorCodeInvalidInput, "Grep pattern must include at least one non-empty keyword")
 	}
 	exclude, err := parseStringSliceArg(args, "exclude")
 	if err != nil {
@@ -248,7 +249,7 @@ func parseSearchTerms(pattern string, caseSensitive bool, regexMode bool) ([]sea
 		}
 		compiled, err := regexp.Compile(regexPattern)
 		if err != nil {
-			return nil, tool.WrapError(tool.ErrorCodeInvalidInput, err, "SEARCH pattern is not a valid regular expression")
+			return nil, tool.WrapError(tool.ErrorCodeInvalidInput, err, "Grep pattern is not a valid regular expression")
 		}
 		return []searchTerm{{Raw: pattern, Regex: compiled}}, nil
 	}

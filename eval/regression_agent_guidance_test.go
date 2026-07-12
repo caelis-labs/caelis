@@ -64,7 +64,7 @@ func TestRegressionAgentGuidanceReachesModelBoundary(t *testing.T) {
 		toolName string
 		wants    []string
 	}{
-		{name: "small edits prefer patch", toolName: filesystem.WriteToolName, wants: []string{"Prefer PATCH"}},
+		{name: "small edits prefer patch", toolName: filesystem.WriteToolName, wants: []string{"Prefer Patch"}},
 		{name: "patch uses exact surgical edits", toolName: filesystem.PatchToolName, wants: []string{"surgical edits", "if_revision"}},
 		{name: "read exposes revision replay guard", toolName: filesystem.ReadToolName, wants: []string{"has_more", "revision", "if_revision"}},
 		{name: "long shell work uses task wait", toolName: shell.RunCommandToolName, wants: []string{"yield_time_ms", "workdir"}},

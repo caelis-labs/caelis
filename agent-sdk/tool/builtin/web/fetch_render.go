@@ -22,7 +22,7 @@ func (t *FetchTool) renderResponse(resp fetchResponseMeta, body []byte, format s
 	}
 	if !isTextualMime(resp.mimeType) {
 		payload["status"] = "unsupported"
-		payload["message"] = "web_fetch only returns text, markdown, or HTML content in this version."
+		payload["message"] = "WebFetch only returns text, markdown, or HTML content in this version."
 		return payload
 	}
 	content := string(body)

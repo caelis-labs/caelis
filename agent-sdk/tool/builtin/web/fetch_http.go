@@ -79,11 +79,11 @@ func fetchHTTPTransport(base http.RoundTripper) http.RoundTripper {
 		}
 		ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
 		if err != nil {
-			return nil, fmt.Errorf("web_fetch: resolve host %q: %w", host, err)
+			return nil, fmt.Errorf("WebFetch: resolve host %q: %w", host, err)
 		}
 		for _, addr := range ips {
 			if isBlockedFetchIP(addr.IP) {
-				return nil, fmt.Errorf("web_fetch: refusing to fetch private or local network address %s", addr.IP.String())
+				return nil, fmt.Errorf("WebFetch: refusing to fetch private or local network address %s", addr.IP.String())
 			}
 		}
 		var lastErr error
@@ -97,7 +97,7 @@ func fetchHTTPTransport(base http.RoundTripper) http.RoundTripper {
 		if lastErr != nil {
 			return nil, lastErr
 		}
-		return nil, fmt.Errorf("web_fetch: host %q resolved to no addresses", host)
+		return nil, fmt.Errorf("WebFetch: host %q resolved to no addresses", host)
 	}
 	return tr
 }
@@ -129,10 +129,10 @@ func (t *FetchTool) fetch(ctx context.Context, u *url.URL, format string) (fetch
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
-		return fetchResponseMeta{}, nil, fmt.Errorf("web_fetch: HTTP status %d", resp.StatusCode)
+		return fetchResponseMeta{}, nil, fmt.Errorf("WebFetch: HTTP status %d", resp.StatusCode)
 	}
 	if resp.ContentLength > t.cfg.MaxResponseBytes {
-		return fetchResponseMeta{}, nil, fmt.Errorf("web_fetch: response too large (%d bytes, limit %d)", resp.ContentLength, t.cfg.MaxResponseBytes)
+		return fetchResponseMeta{}, nil, fmt.Errorf("WebFetch: response too large (%d bytes, limit %d)", resp.ContentLength, t.cfg.MaxResponseBytes)
 	}
 	limited := io.LimitReader(resp.Body, t.cfg.MaxResponseBytes+1)
 	raw, err := io.ReadAll(limited)
@@ -140,7 +140,7 @@ func (t *FetchTool) fetch(ctx context.Context, u *url.URL, format string) (fetch
 		return fetchResponseMeta{}, nil, err
 	}
 	if int64(len(raw)) > t.cfg.MaxResponseBytes {
-		return fetchResponseMeta{}, nil, fmt.Errorf("web_fetch: response too large (limit %d bytes)", t.cfg.MaxResponseBytes)
+		return fetchResponseMeta{}, nil, fmt.Errorf("WebFetch: response too large (limit %d bytes)", t.cfg.MaxResponseBytes)
 	}
 	contentType := resp.Header.Get("Content-Type")
 	mediaType, _, _ := mime.ParseMediaType(contentType)
@@ -175,10 +175,10 @@ func validateFetchURL(raw string) (*url.URL, error) {
 		return nil, err
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
-		return nil, fmt.Errorf("web_fetch: URL must start with http:// or https://")
+		return nil, fmt.Errorf("WebFetch: URL must start with http:// or https://")
 	}
 	if strings.TrimSpace(u.Hostname()) == "" {
-		return nil, fmt.Errorf("web_fetch: URL host is required")
+		return nil, fmt.Errorf("WebFetch: URL host is required")
 	}
 	return u, nil
 }
@@ -186,15 +186,15 @@ func validateFetchURL(raw string) (*url.URL, error) {
 func rejectPrivateFetchTarget(ctx context.Context, u *url.URL) error {
 	host := strings.TrimSpace(u.Hostname())
 	if host == "" {
-		return fmt.Errorf("web_fetch: URL host is required")
+		return fmt.Errorf("WebFetch: URL host is required")
 	}
 	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
 	if err != nil {
-		return fmt.Errorf("web_fetch: resolve host %q: %w", host, err)
+		return fmt.Errorf("WebFetch: resolve host %q: %w", host, err)
 	}
 	for _, addr := range ips {
 		if isBlockedFetchIP(addr.IP) {
-			return fmt.Errorf("web_fetch: refusing to fetch private or local network address %s", addr.IP.String())
+			return fmt.Errorf("WebFetch: refusing to fetch private or local network address %s", addr.IP.String())
 		}
 	}
 	return nil
@@ -219,7 +219,7 @@ func normalizeFetchFormat(format string) (string, error) {
 	case "text", "html":
 		return strings.ToLower(strings.TrimSpace(format)), nil
 	default:
-		return "", fmt.Errorf("web_fetch: format must be one of markdown, text, or html")
+		return "", fmt.Errorf("WebFetch: format must be one of markdown, text, or html")
 	}
 }
 

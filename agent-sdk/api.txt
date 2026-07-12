@@ -2974,7 +2974,7 @@ package github.com/caelis-labs/caelis/agent-sdk/tool
       MetadataToolKindMCP        = "mcp"
       MetadataToolKindToolSearch = "tool_search"
 
-      ToolSearchToolName = "tool_search"
+      ToolSearchToolName = identity.ToolSearch
   )
   const (
       RecoveryUnknown   RecoveryStatus = "unknown"
@@ -3128,3 +3128,69 @@ package github.com/caelis-labs/caelis/agent-sdk/tool
       MaxTokens int
       MaxBytes  int
   }
+
+package github.com/caelis-labs/caelis/agent-sdk/tool/identity
+  const (
+      KindOther   Kind = "other"
+      KindRead    Kind = "read"
+      KindEdit    Kind = "edit"
+      KindSearch  Kind = "search"
+      KindExecute Kind = "execute"
+  )
+  const (
+      Read       = "Read"
+      Write      = "Write"
+      Patch      = "Patch"
+      List       = "List"
+      Glob       = "Glob"
+      Grep       = "Grep"
+      RunCommand = "RunCommand"
+      Task       = "Task"
+      Plan       = "Plan"
+      Skill      = "Skill"
+      WebSearch  = "WebSearch"
+      WebFetch   = "WebFetch"
+      Spawn      = "Spawn"
+      ToolSearch = "ToolSearch"
+  )
+  const (
+      ResultGeneric   ResultStyle = ""
+      ResultRead      ResultStyle = "read"
+      ResultList      ResultStyle = "list"
+      ResultGlob      ResultStyle = "glob"
+      ResultSearch    ResultStyle = "search"
+      ResultWebSearch ResultStyle = "web_search"
+      ResultWebFetch  ResultStyle = "web_fetch"
+      ResultMutation  ResultStyle = "mutation"
+      ResultCommand   ResultStyle = "command"
+      ResultSpawn     ResultStyle = "spawn"
+      ResultTask      ResultStyle = "task"
+  )
+  const (
+      TitleNone          TitleStyle = ""
+      TitlePath          TitleStyle = "path"
+      TitleSkill         TitleStyle = "skill"
+      TitleQuery         TitleStyle = "query"
+      TitleURL           TitleStyle = "url"
+      TitleCommandAction TitleStyle = "command_action"
+      TitleSpawn         TitleStyle = "spawn"
+  )
+  func CanonicalOrSelf(name string) string
+  func ExecutableOrSelf(name string) string
+  func Lookup(name string) (Info, bool)
+  func LookupExecutable(name string) (Info, bool)
+  func Resolve(name string) (string, bool)
+  func ResolveExecutable(name string) (string, bool)
+  type Info struct {
+      Name            string
+      Kind            Kind
+      ExplorationVerb string
+      TitleStyle      TitleStyle
+      ResultStyle     ResultStyle
+      TerminalKnown   bool
+      TerminalPanel   bool
+      HistoricalOnly  bool
+  }
+  type Kind string
+  type ResultStyle string
+  type TitleStyle string

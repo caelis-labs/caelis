@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
+	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 	"github.com/caelis-labs/caelis/surfaces/transcript"
 )
 
@@ -109,8 +110,8 @@ func toolDisplayMetaOutput(toolName string, meta map[string]any) map[string]any 
 	out := map[string]any{}
 	toolMeta := transcript.RuntimeToolMeta(meta)
 	taskMeta := transcript.RuntimeTaskMeta(meta)
-	switch strings.ToUpper(strings.TrimSpace(toolName)) {
-	case "RUN_COMMAND", "SPAWN", "TASK":
+	switch names.CanonicalOrSelf(toolName) {
+	case names.RunCommand, names.Spawn, names.Task:
 		if taskID := firstNonEmpty(asString(toolMeta["target_id"]), asString(taskMeta["task_id"])); taskID != "" {
 			out["task_id"] = taskID
 		}
@@ -119,7 +120,7 @@ func toolDisplayMetaOutput(toolName string, meta map[string]any) map[string]any 
 				out[key] = value
 			}
 		}
-		if strings.EqualFold(toolName, "RUN_COMMAND") {
+		if names.CanonicalOrSelf(toolName) == names.RunCommand {
 			break
 		}
 		for _, key := range []string{"agent", "agent_id", "handle", "mention", "prompt", "target_kind", "action", "input"} {

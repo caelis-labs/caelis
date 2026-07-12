@@ -8,6 +8,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
+	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 )
 
 func (tm *taskRuntime) syncCanonicalToolResult(ctx context.Context, ref session.SessionRef, event *session.Event) error {
@@ -18,8 +19,8 @@ func (tm *taskRuntime) syncCanonicalToolResult(ctx context.Context, ref session.
 	if len(output) == 0 {
 		return nil
 	}
-	toolName := strings.ToUpper(strings.TrimSpace(event.Tool.Name))
-	if toolName != "RUN_COMMAND" && toolName != "TASK" && toolName != "SPAWN" {
+	toolName := names.ExecutableOrSelf(event.Tool.Name)
+	if toolName != names.RunCommand && toolName != names.Task && toolName != names.Spawn {
 		return nil
 	}
 	if tasks, ok := canonicalTaskBatchOutputs(output["tasks"]); ok {
@@ -88,13 +89,13 @@ func (tm *taskRuntime) syncCanonicalToolOutput(ctx context.Context, ref session.
 	))
 	targetKind = firstNonEmpty(strings.ToLower(strings.TrimSpace(targetKind)), metaKind)
 	switch {
-	case toolName == "RUN_COMMAND" || targetKind == string(taskapi.KindCommand):
+	case toolName == names.RunCommand || targetKind == string(taskapi.KindCommand):
 		_, err := tm.syncCanonicalTaskEntry(ctx, ref, taskID, taskapi.KindCommand, output, event)
 		return err
-	case toolName == "SPAWN" || targetKind == string(taskapi.KindSubagent):
+	case toolName == names.Spawn || targetKind == string(taskapi.KindSubagent):
 		_, err := tm.syncCanonicalTaskEntry(ctx, ref, taskID, taskapi.KindSubagent, output, event)
 		return err
-	case toolName == "TASK":
+	case toolName == names.Task:
 		if synced, err := tm.syncCanonicalTaskEntry(ctx, ref, taskID, taskapi.KindCommand, output, event); err != nil || synced {
 			return err
 		}
@@ -223,8 +224,8 @@ func canonicalTaskHistoryOutputs(event *session.Event) []canonicalTaskHistoryOut
 	if event == nil || session.EventTypeOf(event) != session.EventTypeToolResult || event.Tool == nil {
 		return nil
 	}
-	toolName := strings.ToUpper(strings.TrimSpace(event.Tool.Name))
-	if toolName != "RUN_COMMAND" && toolName != "TASK" && toolName != "SPAWN" {
+	toolName := names.ExecutableOrSelf(event.Tool.Name)
+	if toolName != names.RunCommand && toolName != names.Task && toolName != names.Spawn {
 		return nil
 	}
 	if tasks, ok := canonicalTaskBatchOutputs(event.Tool.Output["tasks"]); ok {

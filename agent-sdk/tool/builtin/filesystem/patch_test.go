@@ -296,7 +296,7 @@ func TestPatchToolMatchErrorsDoNotIncludeTargetPath(t *testing.T) {
 	})
 	requireToolErrorCode(t, err, tool.ErrorCodeTooManyMatches)
 	text := err.Error()
-	if !strings.Contains(text, "PATCH edit 0 requires exact single match, found 3") {
+	if !strings.Contains(text, "Patch edit 0 requires exact single match, found 3") {
 		t.Fatalf("PATCH error = %q, want concise mismatch detail", text)
 	}
 	if strings.Contains(text, path) || strings.Contains(text, "duplicates.txt") {

@@ -2,7 +2,6 @@ package builtin
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
@@ -13,18 +12,12 @@ import (
 	skilltool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/skill"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/web"
+	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 )
 
 func isReservedCoreToolName(name string) bool {
-	switch strings.TrimSpace(strings.ToUpper(name)) {
-	case filesystem.ReadToolName, filesystem.WriteToolName, filesystem.PatchToolName,
-		filesystem.ListToolName, filesystem.GlobToolName, filesystem.SearchToolName, shell.RunCommandToolName, task.ToolName, plan.ToolName,
-		strings.ToUpper(skilltool.ToolName),
-		strings.ToUpper(web.SearchToolName), strings.ToUpper(web.FetchToolName):
-		return true
-	default:
-		return false
-	}
+	_, ok := names.LookupExecutable(name)
+	return ok
 }
 
 // CoreToolsConfig configures default core coding tools.
@@ -46,10 +39,6 @@ func BuildCoreTools(cfg CoreToolsConfig) ([]tool.Tool, error) {
 		return nil, err
 	}
 	patchTool, err := filesystem.NewPatch(cfg.Runtime)
-	if err != nil {
-		return nil, err
-	}
-	listTool, err := filesystem.NewList(cfg.Runtime)
 	if err != nil {
 		return nil, err
 	}
@@ -77,7 +66,7 @@ func BuildCoreTools(cfg CoreToolsConfig) ([]tool.Tool, error) {
 		return nil, err
 	}
 	return []tool.Tool{
-		readTool, writeTool, patchTool, listTool, globTool, searchTool, runCommandTool, taskTool, planTool,
+		readTool, writeTool, patchTool, globTool, searchTool, runCommandTool, taskTool, planTool,
 		skillTool, webSearchTool, webFetchTool,
 	}, nil
 }

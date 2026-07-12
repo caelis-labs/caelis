@@ -9,6 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 	controlcommands "github.com/caelis-labs/caelis/ports/controlcommand"
 	controlprompt "github.com/caelis-labs/caelis/ports/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/control"
@@ -103,8 +104,8 @@ func sendAgentInstallToolCall(send func(tea.Msg), target string, command string)
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall,
 			ToolCallID:    callID,
-			Title:         "RUN_COMMAND",
-			Kind:          "RUN_COMMAND",
+			Title:         names.RunCommand,
+			Kind:          names.RunCommand,
 			Status:        schema.ToolStatusInProgress,
 			RawInput:      map[string]any{"command": strings.TrimSpace(command)},
 			Meta:          agentInstallToolMeta(),
@@ -134,8 +135,8 @@ func sendAgentInstallToolResult(send func(tea.Msg), callID string, command strin
 	} else {
 		meta = metautil.WithTerminalInfo(meta, callID)
 	}
-	title := "RUN_COMMAND"
-	kind := "RUN_COMMAND"
+	title := names.RunCommand
+	kind := names.RunCommand
 	updateStatus := agentInstallACPStatus(status)
 	send(eventstream.Envelope{
 		Kind:       eventstream.KindSessionUpdate,
@@ -172,7 +173,7 @@ func agentInstallToolMeta() map[string]any {
 		"caelis": map[string]any{
 			"version": 1,
 			"runtime": map[string]any{
-				"tool": map[string]any{"name": "RUN_COMMAND"},
+				"tool": map[string]any{"name": names.RunCommand},
 			},
 		},
 	}

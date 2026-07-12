@@ -87,7 +87,16 @@ if [[ ! -f "${allowlist}" ]]; then
 fi
 
 supported_packages=()
-declare -A supported_seen=()
+has_seen_package() {
+  local needle="$1"
+  local p
+  for p in "${supported_packages[@]+${supported_packages[@]}}"; do
+    if [[ "${p}" == "${needle}" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
 while IFS= read -r package; do
   package="${package%%#*}"
   package="$(printf '%s' "${package}" | xargs)"
@@ -102,7 +111,7 @@ while IFS= read -r package; do
       exit 1
       ;;
   esac
-  if [[ -n "${supported_seen[${package}]:-}" ]]; then
+  if has_seen_package "${package}"; then
     echo "sdk-boundary-check: duplicate allowlist entry ${package}" >&2
     exit 1
   fi
@@ -111,7 +120,6 @@ while IFS= read -r package; do
     echo "sdk-boundary-check: allowlisted package does not exist: ${package}" >&2
     exit 1
   fi
-  supported_seen["${package}"]=1
   supported_packages+=("${package}")
 done <"${allowlist}"
 

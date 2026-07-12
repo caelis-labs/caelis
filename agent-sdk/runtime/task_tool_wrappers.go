@@ -18,6 +18,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/commanddiag"
+	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 )
 
 func (r *Runtime) wrapToolsForRuntime(activeSession session.Session, ref session.SessionRef, spec agent.AgentSpec, toolCtx runtimeToolContext) []tool.Tool {
@@ -32,7 +33,7 @@ func (r *Runtime) wrapToolsForRuntime(activeSession session.Session, ref session
 		if one == nil {
 			continue
 		}
-		name := strings.ToUpper(strings.TrimSpace(one.Definition().Name))
+		name := names.ExecutableOrSelf(one.Definition().Name)
 		switch name {
 		case shell.RunCommandToolName:
 			hasCommand = true
@@ -264,7 +265,7 @@ func resolveRuntimeSpawnToolAgent(def tool.Definition, activeSession session.Ses
 	enum := spawnAgentEnum(def)
 	if len(enum) == 0 {
 		if requested != "" && !strings.EqualFold(requested, "self") {
-			return "", fmt.Errorf("tool: SPAWN agent %q is not available", requested)
+			return "", fmt.Errorf("tool: Spawn agent %q is not available", requested)
 		}
 		return resolveSpawnAgent(activeSession, requested)
 	}
@@ -274,14 +275,14 @@ func resolveRuntimeSpawnToolAgent(def tool.Definition, activeSession session.Ses
 				return strings.TrimSpace(allowed), nil
 			}
 		}
-		return "", fmt.Errorf("tool: SPAWN agent default is not available")
+		return "", fmt.Errorf("tool: Spawn agent default is not available")
 	}
 	for _, allowed := range enum {
 		if strings.EqualFold(requested, allowed) {
 			return strings.TrimSpace(allowed), nil
 		}
 	}
-	return "", fmt.Errorf("tool: SPAWN agent %q is not available", requested)
+	return "", fmt.Errorf("tool: Spawn agent %q is not available", requested)
 }
 
 func spawnAgentEnum(def tool.Definition) []string {
@@ -384,7 +385,7 @@ func (r subagentApprovalRequester) RequestSubagentApproval(
 			"task_id":        strings.TrimSpace(req.TaskID),
 			"agent":          strings.TrimSpace(req.Agent),
 			"parent_call_id": strings.TrimSpace(req.ParentCallID),
-			"parent_tool":    "SPAWN",
+			"parent_tool":    names.Spawn,
 		},
 	})
 	if err != nil {
@@ -584,7 +585,7 @@ func taskToolResultEventMeta(existing map[string]any, action string, input strin
 		out = map[string]any{}
 	}
 	toolMeta := taskRuntimeMetaSection(out, "tool")
-	toolMeta["name"] = "TASK"
+	toolMeta["name"] = names.Task
 	toolMeta["action"] = strings.ToLower(strings.TrimSpace(action))
 	toolMeta["target_kind"] = strings.TrimSpace(string(snapshot.Kind))
 	toolMeta["target_id"] = taskVisibleID(snapshot)
@@ -614,7 +615,7 @@ func taskBatchToolResultEventMeta(existing map[string]any, action string, input 
 		out = map[string]any{}
 	}
 	toolMeta := taskRuntimeMetaSection(out, "tool")
-	toolMeta["name"] = "TASK"
+	toolMeta["name"] = names.Task
 	toolMeta["action"] = strings.ToLower(strings.TrimSpace(action))
 	toolMeta["target_ids"] = taskBatchVisibleIDs(items)
 	toolMeta["target_count"] = len(items)

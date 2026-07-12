@@ -77,7 +77,7 @@ func TestToolCallTitleIncludesSpawnPrompt(t *testing.T) {
 		Name: "SPAWN",
 		Args: `{"agent":"self","prompt":"总结当前目录"}`,
 	}
-	if got := toolCallTitle(call); got != "SPAWN self: 总结当前目录" {
+	if got := toolCallTitle(call); got != "Spawn self: 总结当前目录" {
 		t.Fatalf("toolCallTitle(SPAWN) = %q", got)
 	}
 }
@@ -554,6 +554,46 @@ func TestCanonicalizeAssistantToolCallsPreservesNumericArgumentLexemes(t *testin
 	}
 	if got := canonical.ToolCalls()[0].Args; got != rawArgs {
 		t.Fatalf("canonical message args = %q, want %q", got, rawArgs)
+	}
+}
+
+func TestCanonicalizeAssistantToolCallsResolvesHistoricalBuiltinName(t *testing.T) {
+	t.Parallel()
+
+	message := model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
+		ID:   "call-grep",
+		Name: "SEARCH",
+		Args: `{"path":".","pattern":"needle"}`,
+	}}, "")
+	grepTool := tool.NamedTool{Def: tool.Definition{Name: "Grep"}}
+	canonical, calls, err := canonicalizeAssistantToolCalls(message, grepTool)
+	if err != nil {
+		t.Fatalf("canonicalizeAssistantToolCalls() error = %v", err)
+	}
+	if len(calls) != 1 || calls[0].Name != "Grep" {
+		t.Fatalf("calls = %#v, want canonical Grep call", calls)
+	}
+	if got := canonical.ToolCalls()[0].Name; got != "Grep" {
+		t.Fatalf("canonical message tool name = %q, want Grep", got)
+	}
+}
+
+func TestMessagesFromContextNormalizesHistoricalBuiltinCallAndResultNames(t *testing.T) {
+	t.Parallel()
+
+	events := []*session.Event{
+		persistedToolCallEvent("call-grep", "SEARCH", map[string]any{"path": ".", "pattern": "needle"}),
+		persistedToolResultEvent("call-grep", "SEARCH", map[string]any{"path": ".", "pattern": "needle"}, map[string]any{"count": 0}),
+	}
+	messages := messagesFromContext(agent.NewContext(agent.ContextSpec{Context: context.Background(), Events: events}))
+	if len(messages) != 2 {
+		t.Fatalf("messages = %#v, want call and result", messages)
+	}
+	if got := messages[0].ToolCalls()[0].Name; got != "Grep" {
+		t.Fatalf("replayed call name = %q, want Grep", got)
+	}
+	if got := messages[1].ToolResults()[0].Name; got != "Grep" {
+		t.Fatalf("replayed result name = %q, want Grep", got)
 	}
 }
 

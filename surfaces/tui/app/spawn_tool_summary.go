@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
+	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -104,9 +105,10 @@ func parseSubagentTerminalToolSignalLine(line string) (subagentTerminalToolSigna
 	if status == "failed" {
 		display += " failed"
 	}
-	key := strings.ToUpper(strings.TrimSpace(rawName)) + "\x00" + normalizeSubagentTerminalPreviewLineKey(detail)
+	identityName := names.CanonicalOrSelf(rawName)
+	key := identityName + "\x00" + normalizeSubagentTerminalPreviewLineKey(detail)
 	if key == "\x00" {
-		key = strings.ToUpper(strings.TrimSpace(rawName))
+		key = identityName
 	}
 	return subagentTerminalToolSignalLine{
 		Key:     key,
@@ -120,8 +122,15 @@ func compactSubagentTerminalToolSignalDetail(name string, detail string) string 
 	if detail == "" {
 		return ""
 	}
-	switch strings.ToUpper(strings.TrimSpace(name)) {
-	case "READ", "WRITE", "PATCH", "LIST", "GLOB", "SEARCH", "RG", "FIND":
+	info, known := names.Lookup(name)
+	pathLike := known && info.TitleStyle == names.TitlePath
+	if !pathLike {
+		switch strings.ToLower(strings.TrimSpace(name)) {
+		case "rg", "find":
+			pathLike = true
+		}
+	}
+	if pathLike {
 		if pathPart, rest, ok, _ := splitLeadingPathHeaderParts(detail); ok && isLikelyDisplayPath(pathPart) {
 			if compact := compactPathDisplay(pathPart); compact != "" {
 				return compact + rest

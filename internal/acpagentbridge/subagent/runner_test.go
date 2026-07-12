@@ -234,7 +234,7 @@ func TestRunnerHandleUpdatePublishesStructuredToolAndPlanEvents(t *testing.T) {
 	}
 }
 
-func TestRunnerKeepsCodexWebSearchToolIdentity(t *testing.T) {
+func TestRunnerDoesNotInventBuiltinIdentityForGenericFetch(t *testing.T) {
 	t.Parallel()
 
 	sink := &recordingStreams{}
@@ -263,7 +263,7 @@ func TestRunnerKeepsCodexWebSearchToolIdentity(t *testing.T) {
 		t.Fatalf("stream frames = %#v, want one structured search update", sink.frames)
 	}
 	frame := sink.frames[0]
-	if frame.Text != "SEARCH \"weather: Shanghai, China\"\n" {
+	if frame.Text != "Searching for: weather: Shanghai, China\n" {
 		t.Fatalf("stream frame text = %q, want compact search trace", frame.Text)
 	}
 	event := frame.Event
@@ -497,7 +497,7 @@ func TestRunnerResultKeepsOnlyLatestAssistantSegmentAfterTools(t *testing.T) {
 	for _, frame := range sink.frames {
 		streamed += frame.Text
 	}
-	for _, want := range []string{"我先读取文件。", "READ hello_spawn.txt", "总结一下执行结果"} {
+	for _, want := range []string{"我先读取文件。", "Read hello_spawn.txt", "总结一下执行结果"} {
 		if !strings.Contains(streamed, want) {
 			t.Fatalf("streamed text = %q, want %q preserved in running trace", streamed, want)
 		}
@@ -555,7 +555,7 @@ func TestRunnerFormatsCompactSubagentTraceWithBoundaries(t *testing.T) {
 	if got := len(sink.frames); got != 4 {
 		t.Fatalf("stream frames = %#v, want assistant, tool call, completed event, tool call", sink.frames)
 	}
-	if got := sink.frames[0].Text + sink.frames[1].Text + sink.frames[2].Text + sink.frames[3].Text; got != "先看一下文件\nLIST demo\nGLOB **/*.md in demo\n" {
+	if got := sink.frames[0].Text + sink.frames[1].Text + sink.frames[2].Text + sink.frames[3].Text; got != "先看一下文件\nList demo\nGlob **/*.md in demo\n" {
 		t.Fatalf("combined trace = %q, want compact line-oriented subagent trace", got)
 	}
 }

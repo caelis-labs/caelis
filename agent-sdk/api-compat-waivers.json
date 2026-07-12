@@ -187,6 +187,12 @@
       "sha256": "3c7e1c62a2a065d2e0a3ea5130e8d6f597360c2873dc5963229c5f9ffb359f68",
       "symbol": "ParticipantBinding",
       "reason": "Added durable live attachment generation required to reconcile participant ledger identity with the exact endpoint instance."
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk/tool",
+      "sha256": "6ecb9a199bcffddff3807b383f55dbdc892f16cf625dc9d13719568ee83348d6",
+      "symbol": "ToolSearchToolName",
+      "reason": "Standardized the pre-v1 model-visible built-in tool identity from tool_search to PascalCase ToolSearch; historical names remain accepted only by the built-in name resolver."
     }
   ]
 }

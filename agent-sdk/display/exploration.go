@@ -1,22 +1,12 @@
 package display
 
+import names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
+
 func ExplorationVerbForTool(name string) string {
-	switch SemanticToolName(name, "") {
-	case "READ":
-		return "Read"
-	case "LIST":
-		return "List"
-	case "GLOB":
-		return "Glob"
-	case "SEARCH", "RG", "FIND", "WEB_SEARCH":
-		return "Search"
-	case "WEB_FETCH":
-		return "Fetch"
-	case "SKILL":
-		return "Skill"
-	default:
-		return ""
+	if info, ok := names.Lookup(name); ok {
+		return info.ExplorationVerb
 	}
+	return ""
 }
 
 func IsExplorationTool(name string) bool {

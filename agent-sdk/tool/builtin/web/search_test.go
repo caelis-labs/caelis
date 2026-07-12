@@ -63,8 +63,8 @@ func TestSearchToolReturnsUnavailableFallbackForUnsupportedProvider(t *testing.T
 	if got := payload["provider"]; got != "plain" {
 		t.Fatalf("provider = %#v, want plain", got)
 	}
-	if message, _ := payload["message"].(string); !strings.Contains(message, "web_fetch") {
-		t.Fatalf("message = %q, want web_fetch fallback guidance", message)
+	if message, _ := payload["message"].(string); !strings.Contains(message, "WebFetch") {
+		t.Fatalf("message = %q, want WebFetch fallback guidance", message)
 	}
 }
 

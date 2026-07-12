@@ -13,6 +13,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 )
 
 type journaledTool struct {
@@ -291,8 +292,12 @@ func (r *Runtime) recoverIncompleteToolExecutions(ctx context.Context, ref sessi
 }
 
 func reconcileToolExecution(ctx context.Context, record session.ToolExecution, tools []tool.Tool) (tool.RecoveryResult, string) {
+	recoveryName := strings.TrimSpace(record.ToolName)
+	if canonical, ok := names.ResolveExecutable(recoveryName); ok {
+		recoveryName = canonical
+	}
 	for _, candidate := range tools {
-		if candidate == nil || !strings.EqualFold(candidate.Definition().Name, record.ToolName) {
+		if candidate == nil || !strings.EqualFold(candidate.Definition().Name, recoveryName) {
 			continue
 		}
 		recoverer, ok := candidate.(tool.Recoverer)
@@ -301,7 +306,7 @@ func reconcileToolExecution(ctx context.Context, record session.ToolExecution, t
 		}
 		result, err := recoverer.Recover(ctx, tool.RecoveryRequest{
 			ExecutionIdentity: record.Identity,
-			Call:              tool.Call{ID: record.Key.ToolCallID, Name: record.ToolName, Input: append(json.RawMessage(nil), record.Input...)},
+			Call:              tool.Call{ID: record.Key.ToolCallID, Name: recoveryName, Input: append(json.RawMessage(nil), record.Input...)},
 		})
 		if err != nil {
 			return tool.RecoveryResult{Status: tool.RecoveryUnknown}, "recovery failed: " + err.Error()

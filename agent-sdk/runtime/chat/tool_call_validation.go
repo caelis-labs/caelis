@@ -9,6 +9,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 )
 
 const maxInvalidToolCallRepairAttempts = 2
@@ -68,8 +69,8 @@ func canonicalizeAssistantToolCalls(message model.Message, tools ...tool.Tool) (
 }
 
 func canonicalToolCallName(name string, tools []tool.Tool) string {
-	name = strings.TrimSpace(name)
-	if name == "" {
+	requested := names.ExecutableOrSelf(name)
+	if requested == "" {
 		return ""
 	}
 	for _, item := range tools {
@@ -80,11 +81,11 @@ func canonicalToolCallName(name string, tools []tool.Tool) string {
 		if defined == "" {
 			continue
 		}
-		if strings.EqualFold(defined, name) {
+		if strings.EqualFold(names.ExecutableOrSelf(defined), requested) {
 			return defined
 		}
 	}
-	return name
+	return requested
 }
 
 func toolCallsHaveValidArgs(calls []model.ToolCall) bool {

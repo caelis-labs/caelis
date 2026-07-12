@@ -6,6 +6,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
@@ -168,13 +169,13 @@ func protocolToolNameFromRawInput(rawInput map[string]any) string {
 		return ""
 	}
 	if command := display.MapString(rawInput, "command"); command != "" {
-		return "RUN_COMMAND"
+		return names.RunCommand
 	}
 	if agent := display.MapString(rawInput, "agent"); agent != "" {
-		return "SPAWN"
+		return names.Spawn
 	}
 	if prompt := display.MapString(rawInput, "prompt"); prompt != "" {
-		return "SPAWN"
+		return names.Spawn
 	}
 	return ""
 }
@@ -184,19 +185,14 @@ func protocolToolNameFromKind(kind string) string {
 	if kind == "" {
 		return ""
 	}
-	switch strings.ToUpper(kind) {
-	case "RUN_COMMAND", "SPAWN", "TASK", "READ", "LIST", "GLOB", "SEARCH", "WEB_SEARCH", "WEB_FETCH", "RG", "FIND", "WRITE", "PATCH":
-		return strings.ToUpper(kind)
+	if canonical, ok := names.Resolve(kind); ok {
+		return canonical
 	}
 	switch strings.ToLower(kind) {
-	case ToolKindExecute:
-		return "RUN_COMMAND"
-	case ToolKindRead:
-		return "READ"
-	case ToolKindSearch, ToolKindFetch:
-		return "SEARCH"
-	case ToolKindEdit, ToolKindDelete, ToolKindMove:
-		return "PATCH"
+	case "rg":
+		return "RG"
+	case "find":
+		return "FIND"
 	}
 	return kind
 }

@@ -1,12 +1,10 @@
 package display
 
-import "strings"
+import (
+	"strings"
 
-var terminalPanelToolNames = map[string]bool{
-	"RUN_COMMAND": true,
-	"SPAWN":       true,
-	"TASK":        false,
-}
+	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
+)
 
 func IsTerminalPanelTool(name string, kind string) bool {
 	if terminal, ok := terminalPanelToolName(name); ok {
@@ -16,7 +14,11 @@ func IsTerminalPanelTool(name string, kind string) bool {
 }
 
 func DisplayTerminalID(toolCallID string, name string) (string, bool) {
-	if terminal, ok := terminalPanelToolName(name); ok && terminal {
+	terminal, known := terminalPanelToolName(name)
+	if !known && strings.EqualFold(strings.TrimSpace(name), ToolKindExecute) {
+		terminal = true
+	}
+	if terminal {
 		if id := strings.TrimSpace(toolCallID); id != "" {
 			return id, true
 		}
@@ -25,22 +27,25 @@ func DisplayTerminalID(toolCallID string, name string) (string, bool) {
 }
 
 func terminalPanelToolName(name string) (bool, bool) {
-	terminal, ok := terminalPanelToolNames[strings.ToUpper(strings.TrimSpace(name))]
-	return terminal, ok
+	info, ok := names.Lookup(name)
+	if !ok || !info.TerminalKnown {
+		return false, false
+	}
+	return info.TerminalPanel, true
 }
 
 func DisplayTerminalInitialOutput(name string, args map[string]any) string {
-	switch strings.ToUpper(strings.TrimSpace(name)) {
-	case "SPAWN":
+	switch SemanticToolName(name, "") {
+	case names.Spawn:
 		agent := strings.TrimSpace(MapString(args, "agent"))
 		prompt := strings.TrimSpace(MapString(args, "prompt"))
 		switch {
 		case agent != "" && prompt != "":
-			return "SPAWN agent=" + agent + "\n" + prompt + "\n"
+			return names.Spawn + " agent=" + agent + "\n" + prompt + "\n"
 		case agent != "":
-			return "SPAWN agent=" + agent + "\n"
+			return names.Spawn + " agent=" + agent + "\n"
 		case prompt != "":
-			return "SPAWN\n" + prompt + "\n"
+			return names.Spawn + "\n" + prompt + "\n"
 		}
 	}
 	return ""

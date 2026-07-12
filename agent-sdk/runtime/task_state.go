@@ -210,7 +210,7 @@ type StartSubagentOptions struct {
 	ApprovalRequester agent.ApprovalRequester
 	ApprovalMode      string
 	// SpawnID preserves one user/Control initiated spawn identity across retry.
-	// LLM-facing SPAWN calls derive this from the stable tool-call ID.
+	// LLM-facing Spawn calls derive this from the stable tool-call ID.
 	SpawnID string
 }
 

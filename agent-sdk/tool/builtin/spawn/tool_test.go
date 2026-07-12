@@ -32,9 +32,9 @@ func TestDefinitionGuidesWaitingWithTaskTool(t *testing.T) {
 
 	desc := New([]delegation.Agent{{Name: "codex"}}).Definition().Description
 	for _, want := range []string{
-		"To observe or wait for an existing child task, use TASK wait",
+		"To observe or wait for an existing child task, use Task wait",
 		"returned task_id",
-		"do not call SPAWN again",
+		"do not call Spawn again",
 	} {
 		if !strings.Contains(desc, want) {
 			t.Fatalf("SPAWN description missing %q:\n%s", want, desc)

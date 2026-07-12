@@ -6,10 +6,12 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 )
 
 const (
@@ -53,22 +55,22 @@ func WorkspaceWriteMode() policy.Mode {
 		Decide: func(_ context.Context, input policy.ToolContext) (policy.Decision, error) {
 			def := baseStrictConstraints(input.Options)
 			switch toolName(input) {
-			case "PLAN", "SPAWN":
+			case names.Plan, names.Spawn:
 				return allow(def), nil
-			case "READ", "SEARCH", "LIST", "GLOB":
+			case names.Read, names.Grep, names.Glob:
 				if err := ensureReadPathsOutsideDefaultHiddenRoots(input); err != nil {
 					return policyErrorOrDeny(err)
 				}
 				return allow(filesystemReadToolConstraints(def)), nil
-			case "SKILL":
+			case names.Skill:
 				return allow(filesystemReadToolConstraints(def)), nil
-			case "WRITE", "PATCH":
+			case names.Write, names.Patch:
 				return decideFilesystemWrite(input, def)
-			case "TASK":
+			case names.Task:
 				return allow(def), nil
-			case "RUN_COMMAND":
+			case names.RunCommand:
 				return decideCommand(input, def)
-			case "WEB_SEARCH", "WEB_FETCH":
+			case names.WebSearch, names.WebFetch:
 				return allow(def), nil
 			default:
 				if isMCPTool(input.Tool) || tool.IsToolSearchDefinition(input.Tool) {
@@ -119,7 +121,7 @@ func policyErrorOrDeny(err error) (policy.Decision, error) {
 }
 
 func askApproval(reason string, constraints sandbox.Constraints, input policy.ToolContext) (policy.Decision, error) {
-	name := strings.TrimSpace(strings.ToUpper(input.Tool.Name))
+	name := toolName(input)
 	call, err := policy.CallArgs(input.Call)
 	if err != nil {
 		return policy.Decision{}, err
@@ -156,18 +158,10 @@ func hostExecutionConstraints() sandbox.Constraints {
 }
 
 func toolKind(name string) string {
-	switch strings.ToUpper(strings.TrimSpace(name)) {
-	case "READ":
-		return "read"
-	case "WRITE", "PATCH":
-		return "edit"
-	case "SEARCH", "GLOB", "LIST":
-		return "search"
-	case "RUN_COMMAND", "TASK", "SPAWN":
-		return "execute"
-	default:
-		return "other"
+	if info, ok := names.LookupExecutable(name); ok {
+		return string(info.Kind)
 	}
+	return string(names.KindOther)
 }
 
 func isMCPTool(def tool.Definition) bool {
@@ -179,29 +173,7 @@ func isMCPTool(def tool.Definition) bool {
 }
 
 func approvalTitle(name string, call map[string]any) string {
-	name = strings.ToUpper(strings.TrimSpace(name))
-	switch name {
-	case "READ", "WRITE", "PATCH", "SEARCH", "LIST", "GLOB":
-		if path, _ := call["path"].(string); strings.TrimSpace(path) != "" {
-			return strings.TrimSpace(name + " " + path)
-		}
-	case "RUN_COMMAND":
-		if command, _ := call["command"].(string); strings.TrimSpace(command) != "" {
-			return strings.TrimSpace(name + " " + command)
-		}
-	case "TASK":
-		if action, _ := call["action"].(string); strings.TrimSpace(action) != "" {
-			if taskID, _ := call["task_id"].(string); strings.TrimSpace(taskID) != "" {
-				return strings.TrimSpace(name + " " + action + " " + taskID)
-			}
-			return strings.TrimSpace(name + " " + action)
-		}
-	case "SPAWN":
-		if agent, _ := call["agent"].(string); strings.TrimSpace(agent) != "" {
-			return strings.TrimSpace(name + " " + agent)
-		}
-	}
-	return name
+	return display.SummarizeToolCallTitle(name, call)
 }
 
 func baseStrictConstraints(opts policy.ModeOptions) sandbox.Constraints {
@@ -244,5 +216,5 @@ func defaultNetworkPolicy(opts policy.ModeOptions) sandbox.Network {
 }
 
 func toolName(input policy.ToolContext) string {
-	return strings.ToUpper(strings.TrimSpace(input.Tool.Name))
+	return names.ExecutableOrSelf(input.Tool.Name)
 }

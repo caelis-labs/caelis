@@ -114,7 +114,7 @@ func (t *Tool) Definition() tool.Definition {
 
 func (t *Tool) Call(_ context.Context, call tool.Call) (tool.Result, error) {
 	if t == nil {
-		return tool.Result{}, tool.NewError(tool.ErrorCodeNotFound, "tool_search is unavailable")
+		return tool.Result{}, tool.NewError(tool.ErrorCodeNotFound, "ToolSearch is unavailable")
 	}
 	args, err := parseRequest(call.Input)
 	if err != nil {
@@ -141,21 +141,21 @@ func (t *Tool) Call(_ context.Context, call tool.Call) (tool.Result, error) {
 func parseRequest(raw json.RawMessage) (request, error) {
 	var args request
 	if len(raw) == 0 {
-		return args, tool.NewError(tool.ErrorCodeInvalidInput, "tool_search query is required")
+		return args, tool.NewError(tool.ErrorCodeInvalidInput, "ToolSearch query is required")
 	}
 	var values map[string]any
 	if err := json.Unmarshal(raw, &values); err != nil {
-		return args, fmt.Errorf("tool_search: decode input: %w", err)
+		return args, fmt.Errorf("ToolSearch: decode input: %w", err)
 	}
 	if err := tool.RejectUnknownArgs(values, "query", "limit"); err != nil {
 		return args, err
 	}
 	if err := json.Unmarshal(raw, &args); err != nil {
-		return args, fmt.Errorf("tool_search: decode input: %w", err)
+		return args, fmt.Errorf("ToolSearch: decode input: %w", err)
 	}
 	args.Query = strings.TrimSpace(args.Query)
 	if args.Query == "" {
-		return args, tool.NewError(tool.ErrorCodeInvalidInput, "tool_search query is required")
+		return args, tool.NewError(tool.ErrorCodeInvalidInput, "ToolSearch query is required")
 	}
 	if args.Limit <= 0 {
 		args.Limit = defaultLimit

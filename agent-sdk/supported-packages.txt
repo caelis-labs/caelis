@@ -17,3 +17,4 @@ github.com/caelis-labs/caelis/agent-sdk/task/delegation
 github.com/caelis-labs/caelis/agent-sdk/task/stream
 github.com/caelis-labs/caelis/agent-sdk/task/subagent
 github.com/caelis-labs/caelis/agent-sdk/tool
+github.com/caelis-labs/caelis/agent-sdk/tool/identity
