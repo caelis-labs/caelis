@@ -58,11 +58,12 @@ func (r StreamRequest) Key() string {
 // ProjectStreamFrame projects one runtime stream frame into transient
 // ACP-native envelopes for live clients.
 func ProjectStreamFrame(req StreamRequest, frame stream.Frame) []eventstream.Envelope {
+	embedded := streamFrameEmbeddedEvents(req, frame)
 	out := make([]eventstream.Envelope, 0, 2)
 	if canonical, ok := names.Resolve(req.ToolName); ok && canonical == names.Spawn {
-		return subagentStreamFrameEvents(req, frame)
+		out = append(out, embedded...)
+		return append(out, subagentStreamFrameEvents(req, frame)...)
 	}
-	embedded := streamFrameEmbeddedEvents(req, frame)
 	out = append(out, embedded...)
 	if frame.Closed {
 		out = append(out, streamFinalFrameEvent(req, frame))
@@ -354,10 +355,10 @@ func markStreamFrameAnchor(meta map[string]any, callID string, toolName string) 
 	streamMeta, _ := runtimeMeta[metautil.RuntimeStream].(map[string]any)
 	if callID != "" {
 		streamMeta[metautil.RuntimeStreamParentCallID] = callID
-		// Embedded stream events are only projected here after their visible
-		// output has been mirrored into the parent tool update. Consumers should
-		// keep them available for scoped panels but suppress them from the main
-		// transcript.
+		// Embedded stream events keep their scoped ACP semantics while the
+		// compatibility parent-tool mirror remains the current TUI transcript
+		// rendering path. Consumers may retain the scoped event for rich panels
+		// and suppress it from the main transcript.
 		streamMeta[metautil.RuntimeStreamMirroredToParentTool] = true
 	}
 	if toolName != "" {

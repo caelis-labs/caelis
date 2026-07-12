@@ -51,6 +51,8 @@ Document responsibilities are intentionally separate:
   contracts and current limitations;
 - [ACP Projection Architecture](acp-projection-architecture.md) owns semantic,
   wire, and surface projection boundaries;
+- [Control and Client Protocol Roadmap](control-client-roadmap.md) owns the
+  ordered next-stage implementation plan and milestone acceptance criteria;
 - [Release](release.md) owns release and post-publish verification mechanics.
 
 ## Current Map

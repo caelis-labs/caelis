@@ -62,23 +62,59 @@ External controller permission ingress and prompt responses route through
 facts use SDK-owned constructors. Architecture lint rejects new direct
 participant/handoff protocol construction outside the SDK semantic owner.
 
-## Terminal Projection
+## Task Stream Projection
 
-`RunCommand`, Bash-compatible command tools, and `Spawn` share the same terminal
-projection contract:
+`RunCommand`, Bash-compatible command tools, and `Spawn` share the task-stream
+service, subscription lifecycle, ordering, and backpressure path. They do not
+share rendering semantics.
 
-- `_meta.terminal_info`: local terminal identity for a tool call.
-- `_meta.terminal_output`: exact output bytes in `data`.
+Local command execution projects opaque terminal bytes through the documented
+Caelis extension:
+
+- `_meta.terminal_info`: local terminal identity for a tool call;
+- `_meta.terminal_output`: exact output bytes in `data`;
 - `_meta.terminal_exit`: local terminal termination state when known.
-- `content[type="terminal"]`: an empty render anchor with the same terminal id.
 
-The empty terminal anchor mounts a panel; it is not an output transport and must
-not contain terminal text. ACP stdio, TUI, headless, and future GUI surfaces
-must render bytes from `_meta.terminal_output` and avoid surface-private
-terminal fallbacks.
+The current empty `content[type="terminal"]` anchor is not an output transport;
+the Caelis metadata carries the bytes. This is a deliberate compatibility
+projection that has been observed to mount and update correctly in the tested
+Zed version. It does not claim standard terminal ownership because the official
+ACP terminal flow uses `terminal/create` to execute the command in the Client
+environment and the Client then owns output, wait, kill, and release.
 
-Standard ACP client-created terminals remain reserved for execution that is
-actually delegated to a client-created ACP terminal id.
+Forcing an existing Caelis Runtime command through that standard flow changes
+execution placement, sandbox, permission, environment, and recovery ownership.
+The compatibility anchor therefore remains supported until the T0 tradeoff
+experiment selects profiles for Zed interoperability, strict ACP, and the
+Caelis client protocol. Strict ACP mode may only emit a standard terminal
+anchor for a real client-created terminal. The detailed experiment and removal
+criteria live in the roadmap.
+
+The current repository does not support that client-hosted execution path end
+to end. Outbound terminal RPC callbacks exist, but `RunCommand` remains bound to
+the SDK sandbox/task lifecycle and the ACP Prompt path does not select the
+remote Client as its execution backend. Caelis ACP Client connections therefore
+advertise `clientCapabilities.terminal=false` unless a complete terminal
+handler is explicitly installed. The reverse local-output adapter used by the
+Zed compatibility projection does not change that capability assessment.
+
+A spawned Agent instead projects its normalized child events as standard ACP
+message, thought, tool, content, diff, plan, permission, and lifecycle
+semantics. Caelis Envelope scope and relationship fields associate those
+payloads with the parent Spawn call and durable task identity. A Surface may
+derive a compact text panel from those events, but the formatted text is not the
+protocol or replay authority. Future GUI clients render the same scoped ACP
+payloads with the same components used for a main Agent.
+
+The parent receives the delegated final result through the canonical Spawn/Task
+result. Live child events remain transient until a linked semantic child replay
+authority is implemented; they must not be promoted into parent model context
+or reconstructed from terminal text. `control.StreamSubscriber` is a
+transitional in-process source adapter and must move behind a Control-owned
+client event broker rather than becoming an app-server or GUI contract.
+
+The ordered migration and acceptance criteria are defined in
+[Control and Client Protocol Roadmap](control-client-roadmap.md).
 
 ## Session Identity
 
