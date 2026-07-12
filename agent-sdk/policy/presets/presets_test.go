@@ -296,6 +296,30 @@ func TestDefaultModeOnlyApprovesCommandEscalation(t *testing.T) {
 	}
 }
 
+func TestDefaultModeCommandApprovalsAlwaysRouteHost(t *testing.T) {
+	t.Parallel()
+
+	outsideDelete := "rm -rf " + testOutsidePath()
+	for _, command := range []string{
+		"go test ./...",
+		"git clean -fd",
+		"git reset --hard",
+		"git push origin main",
+		outsideDelete,
+	} {
+		decision, err := AutoReviewMode().DecideTool(context.Background(), commandCtx(command, true))
+		if err != nil {
+			t.Fatalf("DecideTool(%q) error = %v", command, err)
+		}
+		if decision.Action != policy.ActionAskApproval {
+			t.Fatalf("DecideTool(%q) action = %q, want ask_approval", command, decision.Action)
+		}
+		if decision.Constraints.Route != sandbox.RouteHost || decision.Constraints.Permission != sandbox.PermissionFullAccess {
+			t.Fatalf("DecideTool(%q) constraints = %#v, every command approval must route Host", command, decision.Constraints)
+		}
+	}
+}
+
 func TestDefaultModeAddsDeveloperCacheWriteRoots(t *testing.T) {
 	home := filepath.Join(testTempRoot(), "caelis-cache-test")
 	setHomeForPresetsTest(t, home)
@@ -463,56 +487,35 @@ func TestDefaultModeAllowsReadOnlyGitCommands(t *testing.T) {
 	}
 }
 
-func TestDefaultModeRequiresApprovalForGitMetadataCommandsInSandbox(t *testing.T) {
+func TestDefaultModeKeepsGitMetadataCommandsInSandbox(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		command string
-		denied  string
 	}{
-		{command: "git add .", denied: "git add ."},
-		{command: "git -C repo add .", denied: "git -C repo add ."},
-		{command: "git commit -m update", denied: "git commit -m update"},
-		{command: "git tag v1.2.3", denied: "git tag v1.2.3"},
-		{command: "git tag -d v1.2.3", denied: "git tag -d v1.2.3"},
-		{command: "git branch feature", denied: "git branch feature"},
-		{command: "git branch -d feature", denied: "git branch -d feature"},
-		{command: "git remote add origin https://example.com/repo.git", denied: "git remote add origin https://example.com/repo.git"},
-		{command: "git config user.name test", denied: "git config user.name test"},
-		{command: "git merge feature", denied: "git merge feature"},
-		{command: "git rebase main", denied: "git rebase main"},
-		{command: "git cherry-pick abc123", denied: "git cherry-pick abc123"},
-		{command: "git revert abc123", denied: "git revert abc123"},
-		{command: "git stash", denied: "git stash"},
-		{command: "git stash -p", denied: "git stash -p"},
-		{command: "git stash push", denied: "git stash push"},
-		{command: "git reset HEAD README.md", denied: "git reset HEAD README.md"},
-		{command: "git restore --staged README.md", denied: "git restore --staged README.md"},
-		{command: "git checkout main", denied: "git checkout main"},
-		{command: "git switch main", denied: "git switch main"},
-		{command: "git fetch origin", denied: "git fetch origin"},
-		{command: "git pull --rebase", denied: "git pull --rebase"},
-		{command: "git push origin main", denied: "git push origin main"},
-		{command: "git submodule update --init", denied: "git submodule update --init"},
-		{command: "git worktree add ../wt main", denied: "git worktree add ../wt main"},
-		{command: "git add . && git commit -m update", denied: "git add ."},
-		{command: "git add . && git push origin main", denied: "git add ."},
-		{command: "git add . & touch .git/index.lock", denied: "git add ."},
-		{command: "git add . | cat", denied: "git add ."},
-		{command: "git add . > staged.log", denied: "git add . > staged.log"},
-		{command: "git add $(cat files)", denied: "git add $(cat files)"},
-		{command: "./git add .", denied: "./git add ."},
-		{command: "/usr/bin/git add .", denied: "/usr/bin/git add ."},
-		{command: "PATH=.:$PATH git add .", denied: "git add ."},
-		{command: "env PATH=.:$PATH git add .", denied: "git add ."},
-		{command: "git add . && ./git commit -m update", denied: "git add ."},
-		{command: "sh -c 'git add .'", denied: "git add ."},
-		{command: "bash -lc 'git commit -m update'", denied: "git commit -m update"},
-		{command: "cmd /c git add .", denied: "git add ."},
-		{command: "powershell -Command git add .", denied: "git add ."},
-		{command: "sudo -E git add .", denied: "git add ."},
-		{command: "sudo -u root git add .", denied: "git add ."},
-		{command: "sudo --user root git add .", denied: "git add ."},
+		{command: "git add ."},
+		{command: "git -C repo add ."},
+		{command: "git commit -m update"},
+		{command: "git tag v1.2.3"},
+		{command: "git branch feature"},
+		{command: "git remote add origin https://example.com/repo.git"},
+		{command: "git merge feature"},
+		{command: "git rebase main"},
+		{command: "git cherry-pick abc123"},
+		{command: "git revert abc123"},
+		{command: "git stash"},
+		{command: "git reset HEAD README.md"},
+		{command: "git restore --staged README.md"},
+		{command: "git checkout main"},
+		{command: "git switch main"},
+		{command: "git fetch origin"},
+		{command: "git pull --rebase"},
+		{command: "git submodule update --init"},
+		{command: "git worktree add ../wt main"},
+		{command: "sh -c 'git add .'"},
+		{command: "bash -lc 'git commit -m update'"},
+		{command: "sudo -E git add ."},
+		{command: "env PATH=.:$PATH git add ."},
 	}
 	for _, tt := range tests {
 		tt := tt
@@ -523,19 +526,14 @@ func TestDefaultModeRequiresApprovalForGitMetadataCommandsInSandbox(t *testing.T
 			if err != nil {
 				t.Fatalf("DecideTool() error = %v", err)
 			}
-			if decision.Action != policy.ActionAskApproval {
-				t.Fatalf("Action = %q, want ask_approval (reason=%q)", decision.Action, decision.Reason)
+			if decision.Action != policy.ActionAllow {
+				t.Fatalf("Action = %q, want allow (reason=%q)", decision.Action, decision.Reason)
 			}
-			if decision.Constraints.Route != sandbox.RouteHost {
-				t.Fatalf("Constraints.Route = %q, want host", decision.Constraints.Route)
+			if decision.Constraints.Route == sandbox.RouteHost {
+				t.Fatalf("Constraints.Route = %q, must preserve sandbox execution", decision.Constraints.Route)
 			}
-			if got := decision.Metadata["risk_class"]; got != riskClassVCSSandbox {
-				t.Fatalf("Metadata[risk_class] = %#v, want %q", got, riskClassVCSSandbox)
-			}
-			for _, want := range []string{tt.denied, "requires approval", "Git metadata"} {
-				if !strings.Contains(decision.Reason, want) {
-					t.Fatalf("Reason = %q, want substring %q", decision.Reason, want)
-				}
+			if decision.Approval != nil {
+				t.Fatalf("Approval = %#v, want no automatic approval", decision.Approval)
 			}
 		})
 	}
@@ -588,8 +586,8 @@ func TestDefaultModeRequiresApprovalWhenDefaultCommandWouldRunOnHost(t *testing.
 	if decision.Constraints.Route != sandbox.RouteHost || decision.Constraints.Permission != sandbox.PermissionFullAccess {
 		t.Fatalf("Constraints = %#v, want host full access", decision.Constraints)
 	}
-	if got := decision.Metadata["sandbox_permissions"]; got != "require_escalated" {
-		t.Fatalf("Metadata[sandbox_permissions] = %#v, want require_escalated", got)
+	if got := decision.Metadata["sandbox_permissions"]; got != "use_default" {
+		t.Fatalf("Metadata[sandbox_permissions] = %#v, want original use_default request", got)
 	}
 }
 
@@ -633,8 +631,10 @@ func TestDefaultModeRequiresApprovalForDestructiveGitCommands(t *testing.T) {
 		"git clean -xfd",
 		"git reset --hard",
 		"git checkout -- .",
+		"git checkout HEAD -- .",
 		"git checkout .",
 		"git restore .",
+		"git restore --staged --worktree .",
 		"git push --force origin main",
 		"git push -f origin main",
 		"git push --force-with-lease origin feature/my-branch",
@@ -654,21 +654,59 @@ func TestDefaultModeRequiresApprovalForDestructiveGitCommands(t *testing.T) {
 			if err != nil {
 				t.Fatalf("DecideTool() error = %v", err)
 			}
-			if decision.Action != policy.ActionAskApproval {
-				t.Fatalf("Action = %q, want ask_approval", decision.Action)
+			if decision.Action != policy.ActionDeny {
+				t.Fatalf("Action = %q, want sandbox policy redirect to explicit Host request", decision.Action)
 			}
-			if decision.Constraints.Route != sandbox.RouteHost {
-				t.Fatalf("Constraints.Route = %q, want host", decision.Constraints.Route)
+			for _, want := range []string{"policy requires Host review", "sandbox_permissions=require_escalated"} {
+				if !strings.Contains(decision.Reason, want) {
+					t.Fatalf("Reason = %q, want %q", decision.Reason, want)
+				}
+			}
+			if strings.Count(decision.Reason, "Host review") != 1 {
+				t.Fatalf("Reason repeats Host review wording: %q", decision.Reason)
 			}
 		})
 	}
 
-	decision, err := AutoReviewMode().DecideTool(context.Background(), commandCtx("git clean -fd", true))
-	if err != nil {
-		t.Fatalf("DecideTool() error = %v", err)
+	for _, command := range []string{"git clean -fd", "git reset --hard", "git push --force origin main"} {
+		decision, err := AutoReviewMode().DecideTool(context.Background(), commandCtx(command, true))
+		if err != nil {
+			t.Fatalf("DecideTool(%q escalated) error = %v", command, err)
+		}
+		if decision.Action != policy.ActionAskApproval || decision.Constraints.Route != sandbox.RouteHost {
+			t.Fatalf("Escalated %q decision = %#v, want one Host approval", command, decision)
+		}
+		if strings.TrimSpace(decision.Reason) == "" {
+			t.Fatalf("Escalated %q reason = %q", command, decision.Reason)
+		}
+		if strings.Count(decision.Reason, "Host review") > 1 {
+			t.Fatalf("Escalated %q repeats Host review wording: %q", command, decision.Reason)
+		}
 	}
-	if decision.Action != policy.ActionAskApproval {
-		t.Fatalf("Escalated git clean action = %q, want ask_approval", decision.Action)
+}
+
+func TestDefaultModeRedirectsGitPushToExplicitHostReview(t *testing.T) {
+	t.Parallel()
+
+	for _, command := range []string{"git push origin main", "git push --force origin main"} {
+		decision, err := AutoReviewMode().DecideTool(context.Background(), commandCtx(command, false))
+		if err != nil {
+			t.Fatalf("DecideTool(%q) error = %v", command, err)
+		}
+		if decision.Action != policy.ActionDeny {
+			t.Fatalf("DecideTool(%q) action = %q, want explicit Host redirect", command, decision.Action)
+		}
+		if !strings.Contains(decision.Reason, "sandbox_permissions=require_escalated") {
+			t.Fatalf("DecideTool(%q) reason = %q", command, decision.Reason)
+		}
+
+		decision, err = AutoReviewMode().DecideTool(context.Background(), commandCtx(command, true))
+		if err != nil {
+			t.Fatalf("DecideTool(%q escalated) error = %v", command, err)
+		}
+		if decision.Action != policy.ActionAskApproval || decision.Constraints.Route != sandbox.RouteHost {
+			t.Fatalf("DecideTool(%q escalated) = %#v, want Host approval", command, decision)
+		}
 	}
 }
 
@@ -926,8 +964,15 @@ func TestRecursiveDeleteOutsideRootsRequiresApproval(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DecideTool() error = %v", err)
 	}
-	if decision.Action != policy.ActionAskApproval {
-		t.Fatalf("Action = %q, want ask_approval for outside recursive delete", decision.Action)
+	if decision.Action != policy.ActionDeny || !strings.Contains(decision.Reason, "sandbox_permissions=require_escalated") {
+		t.Fatalf("Decision = %#v, want explicit Host retry for outside recursive delete", decision)
+	}
+	decision, err = AutoReviewMode().DecideTool(context.Background(), commandCtx(command, true))
+	if err != nil {
+		t.Fatalf("DecideTool(escalated) error = %v", err)
+	}
+	if decision.Action != policy.ActionAskApproval || decision.Constraints.Route != sandbox.RouteHost {
+		t.Fatalf("Escalated decision = %#v, want Host approval", decision)
 	}
 }
 

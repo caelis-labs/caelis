@@ -1,108 +1,56 @@
 package presets
 
 import (
-	"fmt"
 	"strings"
 )
-
-type gitCommandPolicy int
-
-const (
-	gitPolicyAllow gitCommandPolicy = iota
-	gitPolicyAskApproval
-	gitPolicyDenyInSandbox
-)
-
-type gitCommandClassification struct {
-	Policy gitCommandPolicy
-	Reason string
-}
 
 type gitCommand struct {
 	Subcommand string
 	Args       []string
-	Display    string
 }
 
 func gitCommandApprovalReason(command string) string {
-	return gitCommandPolicyReason(command, gitPolicyAskApproval)
-}
-
-func vcsSandboxDenyReason(command string) string {
-	return gitCommandPolicyReason(command, gitPolicyDenyInSandbox)
-}
-
-func gitCommandPolicyReason(command string, policy gitCommandPolicy) string {
 	for _, git := range gitCommands(command) {
-		classification := classifyGitCommand(git)
-		if classification.Policy == policy {
-			return classification.Reason
+		if reason := classifyGitCommand(git); reason != "" {
+			return reason
 		}
 	}
 	for _, payload := range shellCommandPayloads(command) {
-		if reason := gitCommandPolicyReason(payload, policy); reason != "" {
+		if reason := gitCommandApprovalReason(payload); reason != "" {
 			return reason
 		}
 	}
 	return ""
 }
 
-func classifyGitCommand(git gitCommand) gitCommandClassification {
+func classifyGitCommand(git gitCommand) string {
+	if gitHasFlag(git.Args, gitLongFlag("--help"), gitExactFlag("-h")) {
+		return ""
+	}
 	switch git.Subcommand {
 	case "clean":
 		if !gitCleanDryRun(git.Args) {
-			return gitCommandClassification{
-				Policy: gitPolicyAskApproval,
-				Reason: "git clean without dry-run requires approval",
-			}
+			return "git clean without dry-run can irreversibly remove untracked files"
 		}
 	case "reset":
 		if gitHasFlag(git.Args, gitLongFlag("--hard")) {
-			return gitCommandClassification{
-				Policy: gitPolicyAskApproval,
-				Reason: "git reset --hard requires approval",
-			}
+			return "git reset --hard discards index and worktree changes"
 		}
 	case "checkout":
 		if gitCheckoutDiscardsWorktree(git.Args) {
-			return gitCommandClassification{
-				Policy: gitPolicyAskApproval,
-				Reason: "git checkout path restore requires approval",
-			}
+			return "git checkout path restore discards worktree changes"
 		}
 	case "restore":
 		if gitRestoreDiscardsWorktree(git.Args) {
-			return gitCommandClassification{
-				Policy: gitPolicyAskApproval,
-				Reason: "git worktree restore requires approval",
-			}
+			return "git restore discards worktree changes"
 		}
 	case "push":
 		if gitPushForce(git.Args) {
-			return gitCommandClassification{
-				Policy: gitPolicyAskApproval,
-				Reason: "forced git push requires approval",
-			}
+			return "forced git push can rewrite remote history"
 		}
+		return "git push may update the remote before a later local Git metadata write fails in the sandbox"
 	}
-	if gitMayWriteMetadata(git) {
-		return gitCommandClassification{
-			Policy: gitPolicyDenyInSandbox,
-			Reason: fmt.Sprintf(
-				"Denied: %s may write Git metadata under .git. Retry the same command with sandbox_permissions=require_escalated and a non-empty justification if it is required.",
-				gitDisplayCommand(git),
-			),
-		}
-	}
-	return gitCommandClassification{}
-}
-
-func gitDisplayCommand(git gitCommand) string {
-	display := strings.TrimSpace(git.Display)
-	if display != "" {
-		return display
-	}
-	return strings.TrimSpace("git " + git.Subcommand + " " + strings.Join(git.Args, " "))
+	return ""
 }
 
 func gitCommands(command string) []gitCommand {
@@ -124,27 +72,9 @@ func gitCommands(command string) []gitCommand {
 			}
 			args = append(args, token)
 		}
-		out = append(out, gitCommand{Subcommand: subcommand, Args: args, Display: commandSegmentDisplay(fields, i)})
+		out = append(out, gitCommand{Subcommand: subcommand, Args: args})
 	}
 	return out
-}
-
-func commandSegmentDisplay(fields []string, start int) string {
-	if start < 0 || start >= len(fields) {
-		return ""
-	}
-	var segment []string
-	for i := start; i < len(fields); i++ {
-		token := trimShellToken(fields[i])
-		if token == "" {
-			continue
-		}
-		if isShellCommandSeparator(token) {
-			break
-		}
-		segment = append(segment, token)
-	}
-	return strings.TrimSpace(strings.Join(segment, " "))
 }
 
 func gitSubcommand(fields []string, start int) (string, int, bool) {
@@ -187,30 +117,6 @@ func isGitGlobalOptionWithSeparateValue(token string) bool {
 func isGitCommand(token string) bool {
 	base := executableBase(token)
 	return base == "git" || base == "git.exe"
-}
-
-func gitMayWriteMetadata(git gitCommand) bool {
-	if gitArgsRequestHelp(git.Args) {
-		return false
-	}
-	switch git.Subcommand {
-	case "add", "commit", "push", "pull", "fetch", "init", "checkout", "switch", "merge", "rebase", "cherry-pick", "revert", "reset", "submodule", "worktree":
-		return true
-	case "restore":
-		return gitHasFlag(git.Args, gitLongFlag("--staged"), gitShortClusterFlag("-s"))
-	case "stash":
-		return gitStashWrites(git.Args)
-	case "tag":
-		return gitTagWrites(git.Args)
-	case "branch":
-		return gitBranchWrites(git.Args)
-	case "remote":
-		return gitRemoteWrites(git.Args)
-	case "config":
-		return gitConfigWrites(git.Args)
-	default:
-		return false
-	}
 }
 
 func gitCleanDryRun(args []string) bool {
@@ -269,135 +175,6 @@ func gitPushForce(args []string) bool {
 	)
 }
 
-func gitStashWrites(args []string) bool {
-	subcommand := firstNonOptionGitArg(args)
-	return subcommand != "list" && subcommand != "show"
-}
-
-func gitArgsRequestHelp(args []string) bool {
-	return gitHasFlag(args, gitLongFlag("--help"), gitExactFlag("-h"))
-}
-
-func gitTagWrites(args []string) bool {
-	if len(args) == 0 {
-		return false
-	}
-	if gitHasFlag(args, gitLongFlag("--delete"), gitShortClusterFlag("-d")) {
-		return true
-	}
-	if gitHasFlag(args,
-		gitLongFlag("--list"),
-		gitExactFlag("-l"),
-		gitLongFlag("--points-at"),
-		gitLongFlag("--contains"),
-		gitLongFlag("--no-contains"),
-		gitLongFlag("--merged"),
-		gitLongFlag("--no-merged"),
-		gitLongFlag("--sort"),
-		gitLongFlag("--format"),
-		gitLongFlag("--column"),
-		gitLongFlag("--no-column"),
-		gitLongFlag("--ignore-case"),
-		gitShortPrefixFlag("-n"),
-		gitLongFlag("--verify"),
-		gitExactFlag("-v"),
-	) {
-		return false
-	}
-	return firstNonOptionGitArg(args) != ""
-}
-
-func gitBranchWrites(args []string) bool {
-	if len(args) == 0 {
-		return false
-	}
-	if gitHasFlag(args,
-		gitLongFlag("--delete"),
-		gitExactFlag("-d"),
-		gitExactFlag("-D"),
-		gitLongFlag("--move"),
-		gitExactFlag("-m"),
-		gitExactFlag("-M"),
-		gitLongFlag("--copy"),
-		gitExactFlag("-c"),
-		gitExactFlag("-C"),
-		gitLongFlag("--set-upstream-to"),
-		gitExactFlag("-u"),
-		gitLongFlag("--unset-upstream"),
-		gitLongFlag("--track"),
-		gitLongFlag("--set-upstream"),
-		gitLongFlag("--edit-description"),
-	) {
-		return true
-	}
-	if gitHasFlag(args,
-		gitLongFlag("--list"),
-		gitLongFlag("--show-current"),
-		gitLongFlag("--all"),
-		gitExactFlag("-a"),
-		gitLongFlag("--remotes"),
-		gitExactFlag("-r"),
-		gitLongFlag("--contains"),
-		gitLongFlag("--no-contains"),
-		gitLongFlag("--merged"),
-		gitLongFlag("--no-merged"),
-		gitLongFlag("--points-at"),
-		gitLongFlag("--format"),
-		gitLongFlag("--sort"),
-		gitLongFlag("--column"),
-		gitLongFlag("--no-column"),
-		gitLongFlag("--verbose"),
-		gitExactFlag("-v"),
-		gitExactFlag("-vv"),
-	) {
-		return false
-	}
-	return firstNonOptionGitArg(args) != ""
-}
-
-func gitRemoteWrites(args []string) bool {
-	switch firstNonOptionGitArg(args) {
-	case "add", "remove", "rm", "rename", "set-url", "set-head", "set-branches", "prune", "update":
-		return true
-	default:
-		return false
-	}
-}
-
-func gitConfigWrites(args []string) bool {
-	if len(args) == 0 {
-		return false
-	}
-	if gitHasFlag(args,
-		gitLongFlag("--unset"),
-		gitLongFlag("--unset-all"),
-		gitLongFlag("--add"),
-		gitLongFlag("--replace-all"),
-		gitLongFlag("--rename-section"),
-		gitLongFlag("--remove-section"),
-		gitLongFlag("--edit"),
-		gitExactFlag("-e"),
-	) {
-		return true
-	}
-	if gitHasFlag(args,
-		gitLongFlag("--get"),
-		gitLongFlag("--get-all"),
-		gitLongFlag("--get-regexp"),
-		gitLongFlag("--get-urlmatch"),
-		gitLongFlag("--list"),
-		gitExactFlag("-l"),
-		gitLongFlag("--null"),
-		gitExactFlag("-z"),
-		gitLongFlag("--name-only"),
-		gitLongFlag("--show-origin"),
-		gitLongFlag("--show-scope"),
-	) {
-		return false
-	}
-	return countNonOptionGitArgs(args) >= 2
-}
-
 type gitFlagMatcher func(string) bool
 
 func gitExactFlag(name string) gitFlagMatcher {
@@ -428,13 +205,6 @@ func gitShortClusterFlag(name string) gitFlagMatcher {
 	}
 }
 
-func gitShortPrefixFlag(name string) gitFlagMatcher {
-	name = strings.ToLower(strings.TrimSpace(name))
-	return func(token string) bool {
-		return strings.HasPrefix(token, name)
-	}
-}
-
 func gitHasFlag(args []string, matchers ...gitFlagMatcher) bool {
 	for _, arg := range args {
 		token := strings.ToLower(trimShellToken(arg))
@@ -448,30 +218,4 @@ func gitHasFlag(args []string, matchers ...gitFlagMatcher) bool {
 		}
 	}
 	return false
-}
-
-func firstNonOptionGitArg(args []string) string {
-	for _, arg := range args {
-		token := trimShellToken(arg)
-		if token == "" || token == "--" {
-			continue
-		}
-		if strings.HasPrefix(token, "-") {
-			continue
-		}
-		return strings.ToLower(token)
-	}
-	return ""
-}
-
-func countNonOptionGitArgs(args []string) int {
-	count := 0
-	for _, arg := range args {
-		token := trimShellToken(arg)
-		if token == "" || token == "--" || strings.HasPrefix(token, "-") {
-			continue
-		}
-		count++
-	}
-	return count
 }

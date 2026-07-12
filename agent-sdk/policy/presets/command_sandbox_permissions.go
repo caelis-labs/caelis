@@ -20,11 +20,6 @@ type commandSandboxRequest struct {
 	Justification      string
 }
 
-func (r commandSandboxRequest) withEscalation() commandSandboxRequest {
-	r.SandboxPermissions = commandSandboxPermissionRequireEscalated
-	return r
-}
-
 // explicitEscalationDenyReason returns a deny reason when the agent requested
 // require_escalated without a usable justification. Host-default backends that
 // force approval without require_escalated are not covered here.

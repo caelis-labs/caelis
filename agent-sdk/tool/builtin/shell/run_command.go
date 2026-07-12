@@ -56,7 +56,7 @@ func NewRunCommand(cfg RunCommandConfig) (*RunCommandTool, error) {
 func (t *RunCommandTool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        RunCommandToolName,
-		Description: "Run a shell command from the session workspace or a specified workdir. Use this for repository inspection, tests, builds, formatting checks, git status/diff inspection, and commands that cannot be expressed by file tools. Do not prefix with cd; set workdir instead. Use yield_time_ms for long-running commands. Prefer use_default. Escalate only for this command when sandbox cannot complete it; each Host grant is one-shot.",
+		Description: "Run a shell command from the session workspace or a specified workdir. Use this for repository inspection, tests, builds, formatting checks, git status/diff inspection, and commands that cannot be expressed by file tools. Do not prefix with cd; set workdir instead. Use yield_time_ms for long-running commands. Prefer use_default. Escalate only when this exact command cannot complete in the sandbox or policy/runtime explicitly requires Host. Each Host grant is one-shot.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -76,12 +76,12 @@ func (t *RunCommandTool) Definition() tool.Definition {
 				},
 				"sandbox_permissions": map[string]any{
 					"type":        "string",
-					"description": "Default use_default (sandbox). require_escalated = one-shot Host after this command failed in sandbox, or when Host is required for this exact action. Prior Host allows never authorize later commands. Read-only VCS/status/diff/log must not escalate.",
+					"description": "Default use_default (sandbox). require_escalated = one-shot Host after this exact command failed in sandbox or policy/runtime explicitly requires Host. Prior Host allows never authorize later commands. Routine work must not escalate when sandboxed execution is sufficient.",
 					"enum":        []string{"use_default", "require_escalated"},
 				},
 				"justification": map[string]any{
 					"type":        "string",
-					"description": "Required with require_escalated. One short sentence: (1) command intent, (2) sandbox limit hit or why Host is required, (3) link to user task. Reject empty/vague/\"faster\"/\"need host\" text.",
+					"description": "Required with require_escalated. One short sentence: (1) command intent, (2) the concrete sandbox failure or policy/runtime Host requirement, (3) link to the user task. Reject empty/vague/\"faster\"/\"need host\" text.",
 				},
 			},
 			"required":             []string{"command"},

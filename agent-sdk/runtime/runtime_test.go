@@ -2306,8 +2306,12 @@ func TestRuntimePolicyWriteOutsideAllowedRootsRequiresApproval(t *testing.T) {
 	if toolResult.Type != session.EventTypeToolResult {
 		t.Fatalf("tool result type = %q, want tool_result", toolResult.Type)
 	}
-	if got := eventToolRawOutput(toolResult)["system_hint"]; got == nil || strings.TrimSpace(fmt.Sprint(got)) == "" {
-		t.Fatalf("system_hint = %v, want non-empty policy guidance", got)
+	payload := eventToolRawOutput(toolResult)
+	if got := strings.TrimSpace(fmt.Sprint(payload["error"])); got != "outside write rejected in test" {
+		t.Fatalf("error = %q, want Guardian rationale only", got)
+	}
+	if got, ok := payload["system_hint"]; ok {
+		t.Fatalf("system_hint = %v, want omitted for Guardian denial", got)
 	}
 	if _, ok := eventToolRawOutput(toolResult)["policy_action"]; ok {
 		t.Fatalf("policy_action present in model-facing payload, want omitted")
@@ -2419,8 +2423,8 @@ func TestRuntimePolicyModePreservesCustomRegistryMode(t *testing.T) {
 	if got := payload["error"]; got != "custom denied" {
 		t.Fatalf("result error = %v, want custom denied", got)
 	}
-	if got, _ := payload["system_hint"].(string); !strings.Contains(got, "Do not retry") {
-		t.Fatalf("result system_hint = %v, want non-retry guidance", got)
+	if got, _ := payload["system_hint"].(string); !strings.Contains(got, "Follow the policy error exactly") {
+		t.Fatalf("result system_hint = %v, want policy-following guidance", got)
 	}
 	if _, ok := payload["policy_mode"]; ok {
 		t.Fatalf("policy_mode present in model-facing payload, want omitted")

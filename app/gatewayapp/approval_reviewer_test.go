@@ -70,7 +70,7 @@ func TestApprovalReviewerUsesRequestModelAndSessionContext(t *testing.T) {
 	if got := len(modelReq.Instructions); got != 1 {
 		t.Fatalf("len(Instructions) = %d, want guardian policy", got)
 	}
-	if !strings.Contains(modelReq.Instructions[0].Text.Text, "You approve planned coding-agent actions on behalf of the user") {
+	if !strings.Contains(modelReq.Instructions[0].Text.Text, "You choose an approval option for a planned coding-agent action on behalf of the user") {
 		t.Fatalf("instruction text = %q, want guardian policy", modelReq.Instructions[0].Text.Text)
 	}
 	if !strings.Contains(modelReq.Instructions[0].Text.Text, `return exactly {"outcome":"allow"}`) {
@@ -412,13 +412,24 @@ func TestGuardianPolicyPromptUsesGeneralRecoveryBoundary(t *testing.T) {
 	prompt := guardianPolicyPrompt()
 	for _, want := range []string{
 		"on behalf of the user",
-		"critical path",
+		"concrete sandbox or policy failure",
+		"runtime evidence that this request already routes to Host",
+		"does not require a redundant failed sandbox attempt",
+		"RUN_COMMAND approval is only for Host execution",
+		"use_default when the runtime already defaults or falls back to Host",
+		"do not fault those requests for lacking explicit escalation or justification",
+		"authorization for those exact staging and commit commands is high, not medium",
 		"Broad cleanup, reset, recursive delete, or state-discarding actions are high or critical",
 		"Permission or lock recovery does not authorize broader cleanup, reset, delete, ACL, or mode changes",
-		"# Host Elevation Bar",
+		"# Decision Process",
+		"The selected option is authoritative",
+		"option_id, outcome, and rationale agree",
+		"always include option_id, risk_level, user_authorization, outcome, and rationale",
+		"Never allow while saying Host is unnecessary",
+		"# Host Discipline",
 		"Host is an exception",
-		"DENY missing, empty, generic, boilerplate, or unrelated justifications",
-		"If Host necessity is unproven, DENY",
+		"For explicit escalation, deny missing, empty, generic, boilerplate, or unrelated justifications",
+		"If Host necessity is unproven, deny",
 		"prior Host allow",
 		"Read-only inspection",
 	} {
@@ -426,10 +437,28 @@ func TestGuardianPolicyPromptUsesGeneralRecoveryBoundary(t *testing.T) {
 			t.Fatalf("guardian policy prompt missing %q:\n%s", want, prompt)
 		}
 	}
-	for _, forbidden := range []string{"git clean", "git reset", "git checkout", "When the justification makes host need plausible"} {
+	for _, forbidden := range []string{"git clean", "git reset", "git checkout", "When the justification makes host need plausible", "# Host Elevation Bar"} {
 		if strings.Contains(prompt, forbidden) {
 			t.Fatalf("guardian policy prompt includes unwanted text %q:\n%s", forbidden, prompt)
 		}
+	}
+}
+
+func TestGuardianPolicyPromptAcceptsHostDefaultUseDefaultRequests(t *testing.T) {
+	t.Parallel()
+
+	prompt := guardianPolicyPrompt()
+	for _, want := range []string{
+		"use_default when the runtime already defaults or falls back to Host",
+		"host-default or fallback use_default requests may legitimately have no justification",
+		"runtime Host-default/fallback route",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("guardian policy prompt missing host-default rule %q:\n%s", want, prompt)
+		}
+	}
+	if strings.Contains(prompt, "only after the agent explicitly uses require_escalated") {
+		t.Fatalf("guardian policy prompt still claims all requests are explicit escalations:\n%s", prompt)
 	}
 }
 

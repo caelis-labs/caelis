@@ -30,7 +30,6 @@ const (
 	riskClassVCSDestructive = "vcs_destructive"
 	riskClassPathEscape     = "path_escape"
 	riskClassHostExec       = "host_exec"
-	riskClassVCSSandbox     = "vcs_sandbox"
 )
 
 func NormalizeModeName(mode string) string {

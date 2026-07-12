@@ -66,6 +66,8 @@ func TestBuildSystemPromptIncludesPromptAssets(t *testing.T) {
 		"one complete evidence-based answer",
 		"## Sandbox And Host Approval",
 		"You work inside a restricted workspace-write sandbox by default",
+		"policy, a tool result, or the runtime explicitly requires Host",
+		"otherwise keep ordinary work sandboxed",
 		"each grant is one-shot",
 		"Read-only inspection",
 		"Tool-specific behavior belongs to each tool's own description and schema.",

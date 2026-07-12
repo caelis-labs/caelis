@@ -224,9 +224,11 @@ func policyDecisionResultWithOutcome(
 ) tool.Result {
 	errorText, systemHint := policyModelFeedback(decision, outcome)
 	payload := map[string]any{
-		"error":       errorText,
-		"system_hint": systemHint,
-		"tool_name":   strings.TrimSpace(def.Name),
+		"error":     errorText,
+		"tool_name": strings.TrimSpace(def.Name),
+	}
+	if systemHint != "" {
+		payload["system_hint"] = systemHint
 	}
 	raw, _ := json.Marshal(payload)
 	return tool.Result{
@@ -245,16 +247,15 @@ func policyModelFeedback(decision policy.Decision, outcome agent.ApprovalRespons
 	switch {
 	case decision.Action == policy.ActionAskApproval && !outcome.Approved && outcomeReason != "":
 		errorText = outcomeReason
-		systemHint = "Approval was denied; do not bypass with shell or privilege escalation. Adjust the request or ask the user."
 	case decision.Action == policy.ActionAskApproval:
 		errorText = firstNonEmpty(reason, "approval required")
 		systemHint = "This operation will run only after approval; keep using the same tool rather than shell workarounds."
 	case reason != "":
 		errorText = reason
-		systemHint = "Do not retry the same blocked operation; choose a safer alternative or ask the user."
+		systemHint = "Follow the policy error exactly; do not bypass it with a different command or shell trick."
 	default:
 		errorText = "tool denied by policy"
-		systemHint = "Do not retry the same blocked operation; choose a safer alternative or ask the user."
+		systemHint = "Follow the policy error exactly; do not bypass it with a different command or shell trick."
 	}
 	return errorText, systemHint
 }

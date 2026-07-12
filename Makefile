@@ -18,7 +18,7 @@ GOTMPDIR ?= $(CACHE_ROOT)/gotmp
 GOLANGCI_LINT_CACHE ?= $(CACHE_ROOT)/golangci-lint
 XDG_CACHE_HOME ?= $(CACHE_ROOT)/xdg
 export GOMODCACHE GOCACHE GOTMPDIR GOLANGCI_LINT_CACHE XDG_CACHE_HOME
-.PHONY: arch-lint build build-cli cache-dirs command-regression command-execution-regression commit-check docs-links eval-smoke fmt fmt-check install lint quality regression sdk-api-compat sdk-boundary-check sdk-proxy-smoke sdk-race test tui-golden tui-interaction vet release-dry-run
+.PHONY: arch-lint build build-cli cache-dirs command-regression command-execution-regression commit-check docs-links eval-smoke fmt fmt-check guardian-eval install lint quality regression sdk-api-compat sdk-boundary-check sdk-proxy-smoke sdk-race test tui-golden tui-interaction vet release-dry-run
 
 cache-dirs:
 	mkdir -p "$(GOMODCACHE)" "$(GOCACHE)" "$(GOTMPDIR)" "$(GOLANGCI_LINT_CACHE)" "$(XDG_CACHE_HOME)"
@@ -71,6 +71,9 @@ regression: eval-smoke tui-golden tui-interaction command-regression command-exe
 
 eval-smoke: cache-dirs
 	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./eval '$(EVAL_REGRESSION_SELECTOR)' eval-smoke
+
+guardian-eval: cache-dirs
+	CAELIS_GUARDIAN_E2E=1 go test -tags=e2e -timeout 30m -run '^TestGuardianLiveE2E$$' -v ./eval
 
 tui-golden: cache-dirs
 	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./surfaces/tui/app '$(TUI_GOLDEN_SELECTOR)' tui-golden

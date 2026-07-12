@@ -185,6 +185,7 @@ func builtInPermissionBoundariesPrompt() string {
 		"",
 		"You work inside a restricted workspace-write sandbox by default (workspace and approved roots are writable; Host is not the default).",
 		"Stay in the sandbox unless a command truly cannot complete there.",
+		"If policy, a tool result, or the runtime explicitly requires Host for this exact command, retry it once with escalation; otherwise keep ordinary work sandboxed.",
 		"Host escalation asks the user to approve an exception; each grant is one-shot and does not authorize later similar commands.",
 		"Escalate only after a concrete sandbox failure on the same necessary command, or when the harness already requires Host for that action.",
 		"Keep escalations rare: repeated Host requests reduce user trust and slow the task.",

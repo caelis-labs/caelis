@@ -1,7 +1,6 @@
 package presets
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -34,7 +33,7 @@ func decideCommand(input policy.ToolContext, def sandbox.Constraints) (policy.De
 	case policy.ActionDeny:
 		return deny(class.Reason), nil
 	case policy.ActionAskApproval:
-		return askCommandApproval(input, req.withEscalation(), class)
+		return askCommandApproval(input, req, class)
 	default:
 		return allow(def), nil
 	}
@@ -44,26 +43,44 @@ func classifyRUNCommand(command string, opts policy.ModeOptions, req commandSand
 	if class := scanCommandTree(command, opts, classifyMachineHardDeny); class.Action == policy.ActionDeny {
 		return class
 	}
-	if commandHostApprovalRequired(req, desc) {
-		if reason := req.explicitEscalationDenyReason(); reason != "" {
-			return commandClass{Action: policy.ActionDeny, Reason: reason, RiskClass: riskClassHostExec}
-		}
-		return commandClass{
-			Action:      policy.ActionAskApproval,
-			Reason:      "host execution requires approval",
-			RiskClass:   riskClassHostExec,
-			Constraints: hostExecutionConstraints(),
-		}
+	reason, riskClass := "", ""
+	if gitReason := gitCommandApprovalReason(command); gitReason != "" {
+		reason, riskClass = gitReason, riskClassVCSDestructive
+	} else if pathReason := outOfRootsRecursiveDeleteReason(command, opts); pathReason != "" {
+		reason, riskClass = pathReason, riskClassPathEscape
 	}
-	if class := scanCommandTree(command, opts, classifyDestructiveApproval); class.Action == policy.ActionAskApproval {
-		class.Constraints = hostExecutionConstraints()
-		return class
-	}
-	if class := scanCommandTree(command, opts, classifyVCSSandboxApproval); class.Action == policy.ActionAskApproval {
-		class.Constraints = hostExecutionConstraints()
+	if class, gated := hostGatedCommand(reason, riskClass, req, desc); gated {
 		return class
 	}
 	return commandClass{}
+}
+
+func hostGatedCommand(reason string, riskClass string, req commandSandboxRequest, desc sandbox.Descriptor) (commandClass, bool) {
+	hostExecution := commandHostApprovalRequired(req, desc)
+	if reason == "" && !hostExecution {
+		return commandClass{}, false
+	}
+	if hostExecution {
+		if denyReason := req.explicitEscalationDenyReason(); denyReason != "" {
+			return commandClass{Action: policy.ActionDeny, Reason: denyReason, RiskClass: riskClassHostExec}, true
+		}
+		if reason == "" {
+			reason = "host execution requested"
+		}
+		if riskClass == "" {
+			riskClass = riskClassHostExec
+		}
+		return commandClass{
+			Action:      policy.ActionAskApproval,
+			Reason:      reason,
+			RiskClass:   riskClass,
+			Constraints: hostExecutionConstraints(),
+		}, true
+	}
+	return commandClass{
+		Action: policy.ActionDeny,
+		Reason: reason + "; retry this exact command with sandbox_permissions=require_escalated and a concrete justification because policy requires Host review",
+	}, true
 }
 
 func scanCommandTree(command string, opts policy.ModeOptions, classify func(string, policy.ModeOptions) commandClass) commandClass {
@@ -103,43 +120,12 @@ func classifyMachineHardDeny(command string, opts policy.ModeOptions) commandCla
 	return commandClass{}
 }
 
-func classifyDestructiveApproval(command string, opts policy.ModeOptions) commandClass {
-	if reason := gitCommandApprovalReason(command); reason != "" {
-		return commandClass{Action: policy.ActionAskApproval, Reason: reason, RiskClass: riskClassVCSDestructive}
-	}
-	if reason := outOfRootsRecursiveDeleteReason(command, opts); reason != "" {
-		return commandClass{Action: policy.ActionAskApproval, Reason: reason, RiskClass: riskClassPathEscape}
-	}
-	return commandClass{}
-}
-
-// classifyVCSSandboxApproval turns Git metadata writes into approval rather
-// than a deny-and-retry tutorial for require_escalated.
-func classifyVCSSandboxApproval(command string, _ policy.ModeOptions) commandClass {
-	for _, git := range gitCommands(command) {
-		classification := classifyGitCommand(git)
-		if classification.Policy != gitPolicyDenyInSandbox {
-			continue
-		}
-		return commandClass{
-			Action:    policy.ActionAskApproval,
-			Reason:    fmt.Sprintf("%s requires approval because it may write Git metadata under .git", gitDisplayCommand(git)),
-			RiskClass: riskClassVCSSandbox,
-		}
-	}
-	return commandClass{}
-}
-
 func askCommandApproval(input policy.ToolContext, req commandSandboxRequest, class commandClass) (policy.Decision, error) {
 	reason := strings.TrimSpace(class.Reason)
 	if reason == "" {
 		reason = "host execution requires approval"
 	}
-	constraints := class.Constraints
-	if constraintsIsZero(constraints) {
-		constraints = hostExecutionConstraints()
-	}
-	decision, err := askApproval(reason, constraints, input)
+	decision, err := askApproval(reason, class.Constraints, input)
 	if err != nil {
 		return policy.Decision{}, err
 	}
@@ -200,7 +186,7 @@ func outOfRootsRecursiveDeleteReason(command string, opts policy.ModeOptions) st
 	}
 	targets := recursiveDeleteTargets(command, opts)
 	if len(targets) == 0 {
-		return "recursive filesystem delete requires approval"
+		return "recursive filesystem delete has unresolved targets"
 	}
 	roots := writableRoots(opts)
 	for _, target := range targets {
@@ -208,7 +194,7 @@ func outOfRootsRecursiveDeleteReason(command string, opts policy.ModeOptions) st
 			continue
 		}
 		if !withinAnyRoot(target, roots) {
-			return "recursive filesystem delete outside allowed roots requires approval"
+			return "recursive filesystem delete targets paths outside allowed roots"
 		}
 	}
 	return ""
@@ -327,13 +313,4 @@ func catastrophicSystemRoots() []string {
 		return []string{`C:\Windows`, `C:\Windows\System32`, `C:\Program Files`, `C:\Program Files (x86)`}
 	}
 	return []string{"/bin", "/sbin", "/usr", "/etc", "/var", "/boot", "/dev", "/proc", "/sys", "/System", "/Library"}
-}
-
-func constraintsIsZero(in sandbox.Constraints) bool {
-	return in.Route == "" &&
-		in.Backend == "" &&
-		in.Permission == "" &&
-		in.Isolation == "" &&
-		in.Network == "" &&
-		len(in.PathRules) == 0
 }

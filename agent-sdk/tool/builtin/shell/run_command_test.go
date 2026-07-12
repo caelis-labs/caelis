@@ -28,7 +28,7 @@ func TestRunCommandDefinitionExposesMinimalArguments(t *testing.T) {
 	if definition.Name != RunCommandToolName {
 		t.Fatalf("Name = %q, want %q", definition.Name, RunCommandToolName)
 	}
-	for _, required := range []string{"specified workdir", "tests, builds", "Prefer use_default", "one-shot"} {
+	for _, required := range []string{"specified workdir", "tests, builds", "Prefer use_default", "policy/runtime explicitly requires Host", "one-shot"} {
 		if !strings.Contains(definition.Description, required) {
 			t.Fatalf("Description missing %q: %q", required, definition.Description)
 		}
@@ -41,8 +41,8 @@ func TestRunCommandDefinitionExposesMinimalArguments(t *testing.T) {
 		"command":             "Command to execute.",
 		"workdir":             "Working directory for the command; defaults to the session cwd.",
 		"yield_time_ms":       "Wait before yielding async control.",
-		"sandbox_permissions": "Default use_default (sandbox). require_escalated = one-shot Host after this command failed in sandbox, or when Host is required for this exact action. Prior Host allows never authorize later commands. Read-only VCS/status/diff/log must not escalate.",
-		"justification":       "Required with require_escalated. One short sentence: (1) command intent, (2) sandbox limit hit or why Host is required, (3) link to user task. Reject empty/vague/\"faster\"/\"need host\" text.",
+		"sandbox_permissions": "Default use_default (sandbox). require_escalated = one-shot Host after this exact command failed in sandbox or policy/runtime explicitly requires Host. Prior Host allows never authorize later commands. Routine work must not escalate when sandboxed execution is sufficient.",
+		"justification":       "Required with require_escalated. One short sentence: (1) command intent, (2) the concrete sandbox failure or policy/runtime Host requirement, (3) link to the user task. Reject empty/vague/\"faster\"/\"need host\" text.",
 	}
 	if len(properties) != len(wantDescriptions) {
 		t.Fatalf("properties = %#v, want only %v", properties, sortedRunCommandPropertyKeys(wantDescriptions))
