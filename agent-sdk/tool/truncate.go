@@ -70,6 +70,15 @@ func TruncateResultWithInfo(result Result, policy TruncationPolicy) (Result, Tru
 	return out, info
 }
 
+// ResultNeedsTruncation reports whether result exceeds the model-visible
+// content budget. It does not allocate or construct the truncated result.
+func ResultNeedsTruncation(result Result, policy TruncationPolicy) bool {
+	if policy.tokenBudget() <= 0 {
+		policy = DefaultTruncationPolicy()
+	}
+	return estimateTokensForParts(result.Content) > policy.tokenBudget()
+}
+
 // TruncateParts applies one shared budget to model content items while
 // preserving non-text references such as images and files.
 func TruncateParts(parts []model.Part, policy TruncationPolicy) ([]model.Part, TruncationInfo) {
@@ -648,17 +657,22 @@ func truncateLineUnit(line string, budgetTokens int) string {
 }
 
 func truncateMapToJSONBudget(input map[string]any, budgetTokens int) (map[string]any, *truncationState) {
+	body, protected := splitProtectedJSONFields(input, budgetTokens)
 	target := budgetTokens
+	if len(protected) > 0 {
+		target = max(budgetTokens-estimateTokensForJSONValue(protected), 1)
+	}
 	var last map[string]any
 	var lastState *truncationState
 	for attempt := 0; attempt < 8; attempt++ {
 		remaining := target
 		state := &truncationState{}
-		truncated := truncateValue(input, &remaining, state)
+		truncated := truncateValue(body, &remaining, state)
 		out, _ := truncated.(map[string]any)
 		if out == nil {
 			out = map[string]any{}
 		}
+		mergeProtectedJSONFields(out, protected)
 		last = out
 		lastState = state
 		if estimateTokensForJSONValue(out) <= budgetTokens {
@@ -675,9 +689,34 @@ func truncateMapToJSONBudget(input map[string]any, budgetTokens int) (map[string
 	}
 	if estimateTokensForJSONValue(last) > budgetTokens {
 		lastState.omitted++
-		return compactJSONMapFallback(input, budgetTokens), lastState
+		fallback := compactJSONMapFallback(body, target)
+		mergeProtectedJSONFields(fallback, protected)
+		if estimateTokensForJSONValue(fallback) <= budgetTokens {
+			return fallback, lastState
+		}
+		return cloneMapValue(protected), lastState
 	}
 	return last, lastState
+}
+
+func splitProtectedJSONFields(input map[string]any, budgetTokens int) (map[string]any, map[string]any) {
+	body := cloneMapValue(input)
+	hint, _ := body["system_hint"].(string)
+	if strings.TrimSpace(hint) == "" {
+		return body, nil
+	}
+	protected := map[string]any{"system_hint": hint}
+	if estimateTokensForJSONValue(protected) >= budgetTokens {
+		return body, nil
+	}
+	delete(body, "system_hint")
+	return body, protected
+}
+
+func mergeProtectedJSONFields(target map[string]any, protected map[string]any) {
+	for key, value := range protected {
+		target[key] = cloneTruncationValue(value)
+	}
 }
 
 func compactJSONMapFallback(input map[string]any, budgetTokens int) map[string]any {

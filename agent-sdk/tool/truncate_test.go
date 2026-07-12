@@ -37,6 +37,39 @@ func TestTruncateMapPreservesKeysAndReportsMetadata(t *testing.T) {
 	}
 }
 
+func TestResultNeedsTruncationDoesNotConstructCanonicalResult(t *testing.T) {
+	t.Parallel()
+
+	policy := TruncationPolicy{MaxTokens: 10}
+	if ResultNeedsTruncation(Result{Content: []model.Part{model.NewTextPart("small")}}, policy) {
+		t.Fatal("ResultNeedsTruncation(small) = true")
+	}
+	if !ResultNeedsTruncation(Result{Content: []model.Part{model.NewTextPart(strings.Repeat("large", 100))}}, policy) {
+		t.Fatal("ResultNeedsTruncation(large) = false")
+	}
+}
+
+func TestTruncateMapProtectsSystemHintWithinBudget(t *testing.T) {
+	t.Parallel()
+
+	hint := "Full tool result saved to /tmp/caelis/tool-results/0123456789ab.json"
+	out, info := TruncateMap(map[string]any{
+		"result":      strings.Repeat("evidence line\n", 1000),
+		"system_hint": hint,
+	}, TruncationPolicy{MaxTokens: 80})
+	if !info.Truncated {
+		t.Fatal("info.Truncated = false, want true")
+	}
+	if got := out["system_hint"]; got != hint {
+		t.Fatalf("system_hint = %#v, want %q", got, hint)
+	}
+	if raw, err := json.Marshal(out); err != nil {
+		t.Fatalf("json.Marshal(out) error = %v", err)
+	} else if got := estimateTextTokens(string(raw)); got > 80 {
+		t.Fatalf("serialized output tokens = %d, want <= 80", got)
+	}
+}
+
 func TestTruncateTextDoesNotDuplicateExistingLineHeader(t *testing.T) {
 	t.Parallel()
 

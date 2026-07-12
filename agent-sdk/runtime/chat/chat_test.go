@@ -1987,7 +1987,7 @@ func TestToolResultEventUsesCanonicalTruncatedOutputForDisplayAndMessage(t *test
 		Name: "RUN_COMMAND",
 		Args: `{"command":"find /tmp -delete"}`,
 	}
-	canonical, truncationMeta := canonicalToolResult(result)
+	canonical, truncationMeta := canonicalToolResult(result, nil)
 	message := toolResultMessageFromCanonical(call, canonical)
 	event := toolResultEvent(model.ToolCall{
 		ID:   "call-1",

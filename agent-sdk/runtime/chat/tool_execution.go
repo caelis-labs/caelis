@@ -60,7 +60,7 @@ func (a *Agent) executeToolCallWithProgress(
 				if yieldProgress == nil {
 					continue
 				}
-				canonical, truncationMeta := canonicalToolResult(progress)
+				canonical, truncationMeta := canonicalToolResult(progress, nil)
 				_ = yieldProgress(session.MarkUIOnly(toolResultEvent(call, canonical, nil, truncationMeta)))
 			default:
 				return done.message, done.event, done.err
@@ -73,7 +73,7 @@ func (a *Agent) executeToolCallWithProgress(
 			if yieldProgress == nil {
 				continue
 			}
-			canonical, truncationMeta := canonicalToolResult(progress)
+			canonical, truncationMeta := canonicalToolResult(progress, nil)
 			if !yieldProgress(session.MarkUIOnly(toolResultEvent(call, canonical, nil, truncationMeta))) {
 				return model.Message{}, nil, context.Canceled
 			}
@@ -107,7 +107,7 @@ func (a *Agent) executeToolCall(ctx context.Context, call model.ToolCall, observ
 			IsError: true,
 			Content: []model.Part{model.NewJSONPart(mustJSON(rawOutput))},
 		}
-		canonical, truncationMeta := canonicalToolResult(result)
+		canonical, truncationMeta := canonicalToolResult(result, a.toolResultArtifacts)
 		message := toolResultMessageFromCanonical(call, canonical)
 		return message, toolResultEvent(call, canonical, &message, truncationMeta), nil
 	}
@@ -131,7 +131,7 @@ func (a *Agent) executeToolCall(ctx context.Context, call model.ToolCall, observ
 			result.Metadata = map[string]any{tool.MetadataExecutionJournal: executionJournal}
 		}
 	}
-	canonical, truncationMeta := canonicalToolResult(result)
+	canonical, truncationMeta := canonicalToolResult(result, a.toolResultArtifacts)
 	message := toolResultMessageFromCanonical(call, canonical)
 	event := toolResultEvent(call, canonical, &message, truncationMeta)
 	return message, event, nil
@@ -151,18 +151,23 @@ func (a *Agent) lookupTool(name string) (tool.Tool, bool) {
 }
 
 func toolResultMessage(call model.ToolCall, result tool.Result) model.Message {
-	message, _ := toolResultMessageWithMeta(call, result)
-	return message
+	canonical, _ := canonicalToolResult(result, nil)
+	return toolResultMessageFromCanonical(call, canonical)
 }
 
-func canonicalToolResult(result tool.Result) (tool.Result, map[string]any) {
-	canonical, info := tool.TruncateResultWithInfo(result, tool.DefaultTruncationPolicy())
+func canonicalToolResult(result tool.Result, artifacts *toolResultArtifactStore) (tool.Result, map[string]any) {
+	policy := tool.DefaultTruncationPolicy()
+	if artifacts != nil && tool.ResultNeedsTruncation(result, policy) {
+		if path, ok := artifacts.write(result); ok {
+			if withHint, ok := toolResultWithArtifactHint(result, path); ok {
+				result = withHint
+			} else {
+				_ = artifacts.remove(path)
+			}
+		}
+	}
+	canonical, info := tool.TruncateResultWithInfo(result, policy)
 	return canonical, toolTruncationEventMeta(info)
-}
-
-func toolResultMessageWithMeta(call model.ToolCall, result tool.Result) (model.Message, map[string]any) {
-	result, truncationMeta := canonicalToolResult(result)
-	return toolResultMessageFromCanonical(call, result), truncationMeta
 }
 
 func toolResultMessageFromCanonical(call model.ToolCall, result tool.Result) model.Message {

@@ -71,10 +71,14 @@ func toolResultRawOutput(result tool.Result) map[string]any {
 		}
 		return map[string]any{"result": decoded}
 	}
+	texts := make([]string, 0, len(result.Content))
 	for _, part := range result.Content {
 		if part.Text != nil {
-			return map[string]any{"result": part.Text.Text}
+			texts = append(texts, part.Text.Text)
 		}
+	}
+	if len(texts) > 0 {
+		return map[string]any{"result": strings.Join(texts, "\n")}
 	}
 	if result.IsError {
 		return map[string]any{"error": "tool call failed"}

@@ -21,12 +21,13 @@ type Factory struct {
 
 // Agent is the minimal model-backed chat agent.
 type Agent struct {
-	name         string
-	model        model.LLM
-	tools        []tool.Tool
-	systemPrompt string
-	reasoning    model.ReasoningConfig
-	request      agent.ModelRequestOptions
+	name                string
+	model               model.LLM
+	tools               []tool.Tool
+	systemPrompt        string
+	reasoning           model.ReasoningConfig
+	request             agent.ModelRequestOptions
+	toolResultArtifacts *toolResultArtifactStore
 }
 
 // New returns one concrete chat agent.
@@ -39,9 +40,10 @@ func New(name string, model model.LLM, systemPrompt string) (*Agent, error) {
 		name = "chat"
 	}
 	return &Agent{
-		name:         name,
-		model:        model,
-		systemPrompt: strings.TrimSpace(systemPrompt),
+		name:                name,
+		model:               model,
+		systemPrompt:        strings.TrimSpace(systemPrompt),
+		toolResultArtifacts: defaultToolResultArtifactStore(),
 	}, nil
 }
 

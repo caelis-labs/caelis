@@ -17,20 +17,12 @@ const (
 	defaultFetchTimeout     = 30 * time.Second
 	maxFetchTimeout         = 120 * time.Second
 	defaultMaxResponseBytes = 5 * 1024 * 1024
-	defaultArtifactRootName = "caelis-web-fetch"
-	defaultArtifactMaxAge   = 24 * time.Hour
-	defaultArtifactMaxFiles = 128
-	defaultArtifactMaxBytes = 64 * 1024 * 1024
 )
 
 type FetchConfig struct {
 	Client              *http.Client
 	AllowPrivateNetwork bool
 	MaxResponseBytes    int64
-	ArtifactDir         string
-	ArtifactMaxAge      time.Duration
-	ArtifactMaxFiles    int
-	ArtifactMaxBytes    int64
 }
 
 type FetchTool struct {
@@ -42,15 +34,6 @@ func NewFetch(cfg FetchConfig) (*FetchTool, error) {
 	if cfg.MaxResponseBytes <= 0 {
 		cfg.MaxResponseBytes = defaultMaxResponseBytes
 	}
-	if cfg.ArtifactMaxAge <= 0 {
-		cfg.ArtifactMaxAge = defaultArtifactMaxAge
-	}
-	if cfg.ArtifactMaxFiles <= 0 {
-		cfg.ArtifactMaxFiles = defaultArtifactMaxFiles
-	}
-	if cfg.ArtifactMaxBytes <= 0 {
-		cfg.ArtifactMaxBytes = defaultArtifactMaxBytes
-	}
 	client := fetchHTTPClient(cfg)
 	return &FetchTool{cfg: cfg, client: client}, nil
 }
@@ -58,7 +41,7 @@ func NewFetch(cfg FetchConfig) (*FetchTool, error) {
 func (t *FetchTool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        FetchToolName,
-		Description: "Fetch and read one specific http or https URL. Use this after the user provides a URL or after WebSearch returns a result that needs source inspection. This tool does not search, follow arbitrary browsing tasks, or discover related pages. It returns cleaned markdown by default, can return text or raw html when requested, and includes an artifact_path for recalling the original fetched content if global tool-result truncation hides details.",
+		Description: "Fetch and read one specific http or https URL. Use this after the user provides a URL or after WebSearch returns a result that needs source inspection. This tool does not search, follow arbitrary browsing tasks, or discover related pages. It returns cleaned markdown by default and can return text or raw html when requested.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

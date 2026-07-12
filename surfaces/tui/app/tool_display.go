@@ -905,7 +905,7 @@ func toolDisplaySummaryOutput(name string, output map[string]any, meta map[strin
 	case names.ResultWebSearch:
 		keys = []string{"query", "provider", "model", "status", "answer", "results", "message"}
 	case names.ResultWebFetch:
-		keys = []string{"url", "final_url", "title", "status", "status_code", "content_type", "format", "artifact_path", "message"}
+		keys = []string{"url", "final_url", "title", "status", "status_code", "content_type", "format", "message"}
 	default:
 		if len(out) == 0 {
 			return nil

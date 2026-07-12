@@ -3016,6 +3016,7 @@ package github.com/caelis-labs/caelis/agent-sdk/tool
   func NormalizeCommandSandboxPermission(value string, allowLegacy bool) (string, error)
   func ParseToolSearchOutput(output map[string]any) ToolSearchResult
   func RejectUnknownArgs(args map[string]any, allowed ...string) error
+  func ResultNeedsTruncation(result Result, policy TruncationPolicy) bool
   func RuntimeModel(call Call) (model.LLM, bool)
   func TruncateJSON(raw json.RawMessage, policy TruncationPolicy) (json.RawMessage, TruncationInfo)
   func TruncateMap(input map[string]any, policy TruncationPolicy) (map[string]any, TruncationInfo)

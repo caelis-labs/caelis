@@ -182,6 +182,12 @@ derives and validates the final assembled model/tool/sandbox requirements.
   `Run`, `Turn`, `Step`, `PauseToken`, and `ToolExecution` records use validated
   transition and revision rules. A terminal tool result and its journal
   transition are one compound commit in capable stores.
+- Local terminal tool results are canonical-truncated before they become model
+  or session history. When the runtime can write the pre-truncation text or
+  JSON to its private system-temporary cache, the same canonical result seen
+  live and on replay carries that absolute path in a model-visible system hint.
+  The file is optional and evictable; durable context never depends on it and
+  never stores the omitted bytes.
 - Recovered tool state derives a minimal canonical payload directly from
   `RecoveryStatus`; only genuinely unknown outcomes carry the no-blind-retry
   instruction, and live/rebuilt model contexts match.

@@ -8,7 +8,6 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -27,8 +26,7 @@ func TestFetchToolReturnsCleanMarkdown(t *testing.T) {
 	}))
 	defer server.Close()
 
-	artifactDir := t.TempDir()
-	fetch, err := NewFetch(FetchConfig{Client: server.Client(), AllowPrivateNetwork: true, ArtifactDir: artifactDir})
+	fetch, err := NewFetch(FetchConfig{Client: server.Client(), AllowPrivateNetwork: true})
 	if err != nil {
 		t.Fatalf("NewFetch() error = %v", err)
 	}
@@ -52,19 +50,8 @@ func TestFetchToolReturnsCleanMarkdown(t *testing.T) {
 	if !strings.Contains(content, server.URL+"/docs") {
 		t.Fatalf("content = %q, want relative link converted to absolute URL", content)
 	}
-	artifactPath, _ := payload["artifact_path"].(string)
-	if artifactPath == "" {
-		t.Fatalf("artifact_path = %#v, want path", payload["artifact_path"])
-	}
-	if !strings.HasPrefix(artifactPath, artifactDir+string(os.PathSeparator)) {
-		t.Fatalf("artifact_path = %q, want under %q", artifactPath, artifactDir)
-	}
-	raw, err := os.ReadFile(artifactPath)
-	if err != nil {
-		t.Fatalf("ReadFile(%q) error = %v", artifactPath, err)
-	}
-	if artifact := string(raw); !strings.Contains(artifact, "Article Title") || !strings.Contains(artifact, server.URL+"/docs") {
-		t.Fatalf("artifact = %q, want complete cleaned markdown", artifact)
+	if _, ok := payload["artifact_path"]; ok {
+		t.Fatalf("artifact_path = %#v, WebFetch must not own result artifacts", payload["artifact_path"])
 	}
 }
 
@@ -196,7 +183,7 @@ func TestFetchToolAppliesTimeoutToDNSPreflight(t *testing.T) {
 	}
 }
 
-func TestFetchToolArtifactPathSurvivesGlobalTruncation(t *testing.T) {
+func TestFetchToolReturnsFullContentForRuntimeTruncation(t *testing.T) {
 	t.Parallel()
 
 	fullContent := strings.Repeat("large fetched line with useful evidence\n", 3000)
@@ -206,11 +193,9 @@ func TestFetchToolArtifactPathSurvivesGlobalTruncation(t *testing.T) {
 	}))
 	defer server.Close()
 
-	artifactDir := t.TempDir()
 	fetch, err := NewFetch(FetchConfig{
 		Client:              server.Client(),
 		AllowPrivateNetwork: true,
-		ArtifactDir:         artifactDir,
 	})
 	if err != nil {
 		t.Fatalf("NewFetch() error = %v", err)
@@ -228,59 +213,11 @@ func TestFetchToolArtifactPathSurvivesGlobalTruncation(t *testing.T) {
 	if _, ok := payload["truncated"]; ok {
 		t.Fatalf("payload has truncated field: %#v", payload["truncated"])
 	}
-	artifactPath, _ := payload["artifact_path"].(string)
-	if artifactPath == "" {
-		t.Fatalf("artifact_path = %#v, want path", payload["artifact_path"])
-	}
-	if !strings.HasPrefix(artifactPath, artifactDir+string(os.PathSeparator)) {
-		t.Fatalf("artifact_path = %q, want under %q", artifactPath, artifactDir)
-	}
-	raw, err := os.ReadFile(artifactPath)
-	if err != nil {
-		t.Fatalf("ReadFile(%q) error = %v", artifactPath, err)
-	}
-	if string(raw) != fullContent {
-		t.Fatalf("artifact content length = %d, want full content length %d", len(raw), len(fullContent))
-	}
-
-	canonical, info := tool.TruncateMap(payload, tool.DefaultTruncationPolicy())
+	_, info := tool.TruncateMap(payload, tool.DefaultTruncationPolicy())
 	if !info.Truncated {
 		t.Fatalf("global truncation info = %#v, want truncation for large web_fetch payload", info)
 	}
-	if got, _ := canonical["artifact_path"].(string); got != artifactPath {
-		t.Fatalf("canonical artifact_path = %q, want %q", got, artifactPath)
-	}
-}
-
-func TestFetchToolCleansOldArtifactsByFileLimit(t *testing.T) {
-	t.Parallel()
-
-	artifactDir := t.TempDir()
-	fetch, err := NewFetch(FetchConfig{
-		ArtifactDir:      artifactDir,
-		ArtifactMaxFiles: 2,
-		ArtifactMaxBytes: 1024 * 1024,
-	})
-	if err != nil {
-		t.Fatalf("NewFetch() error = %v", err)
-	}
-	resp := fetchResponseMeta{finalURL: "https://example.com/page"}
-	var latest string
-	for i := 0; i < 4; i++ {
-		artifact, err := fetch.writeContentArtifact(resp, fmt.Sprintf("content-%d", i), "markdown")
-		if err != nil {
-			t.Fatalf("writeContentArtifact(%d) error = %v", i, err)
-		}
-		latest = artifact.Path
-	}
-	entries, err := os.ReadDir(artifactDir)
-	if err != nil {
-		t.Fatalf("ReadDir(%q) error = %v", artifactDir, err)
-	}
-	if got := len(entries); got > 2 {
-		t.Fatalf("artifact count = %d, want <= 2", got)
-	}
-	if _, err := os.Stat(latest); err != nil {
-		t.Fatalf("latest artifact %q missing after cleanup: %v", latest, err)
+	if _, ok := payload["artifact_path"]; ok {
+		t.Fatalf("artifact_path = %#v, WebFetch must defer artifacts to Runtime", payload["artifact_path"])
 	}
 }

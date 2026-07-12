@@ -35,15 +35,8 @@ func (t *FetchTool) renderResponse(resp fetchResponseMeta, body []byte, format s
 		content = bluemonday.UGCPolicy().Sanitize(content)
 	}
 	putNonEmpty(payload, "title", title)
-	t.attachContent(payload, resp, content, format)
-	return payload
-}
-
-func (t *FetchTool) attachContent(payload map[string]any, resp fetchResponseMeta, content string, format string) {
-	if artifact, err := t.writeContentArtifact(resp, content, format); err == nil {
-		payload["artifact_path"] = artifact.Path
-	}
 	payload["content"] = content
+	return payload
 }
 
 func renderHTMLContent(input string, finalURL string, format string) (string, string) {

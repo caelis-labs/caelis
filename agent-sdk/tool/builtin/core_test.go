@@ -221,7 +221,7 @@ func TestCoreToolSchemasExposeGuidanceBoundsAndAnnotations(t *testing.T) {
 
 	requireStringMinLength(t, defs[web.FetchToolName], "url", 1)
 	requireIntegerBounds(t, defs[web.FetchToolName], "timeout", 1, ptrAny(120))
-	requireDescriptionContains(t, defs[web.FetchToolName], "specific http or https URL", "cleaned markdown", "does not search", "artifact_path")
+	requireDescriptionContains(t, defs[web.FetchToolName], "specific http or https URL", "cleaned markdown", "does not search")
 	requireAnnotations(t, defs[web.FetchToolName], true, false, false, true)
 }
 
