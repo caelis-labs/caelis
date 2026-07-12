@@ -1,0 +1,30 @@
+{
+  "kind": "session/update",
+  "cursor": "stream:child-1",
+  "session_id": "session-1",
+  "handle_id": "handle-1",
+  "run_id": "run-1",
+  "turn_id": "turn-1",
+  "occurred_at": "2026-07-12T10:00:00Z",
+  "scope": "subagent",
+  "scope_id": "task-1",
+  "actor": "reviewer",
+  "parent_tool": {
+    "tool_call_id": "spawn-call-1",
+    "tool_name": "Spawn"
+  },
+  "delivery": {
+    "transient": true,
+    "has_parent_tool_mirror": true
+  },
+  "update": {
+    "sessionUpdate": "tool_call",
+    "toolCallId": "child-read-1",
+    "title": "Read README.md",
+    "kind": "read",
+    "status": "completed",
+    "rawInput": {
+      "path": "README.md"
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "kind": "session/update",
+  "cursor": "stream:spawn-mirror-1",
+  "session_id": "session-1",
+  "handle_id": "handle-1",
+  "run_id": "run-1",
+  "turn_id": "turn-1",
+  "occurred_at": "2026-07-12T10:00:01Z",
+  "scope": "main",
+  "delivery": {
+    "transient": true,
+    "is_parent_tool_mirror": true
+  },
+  "update": {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "spawn-call-1",
+    "status": "completed",
+    "content": [
+      {
+        "type": "terminal",
+        "terminalId": "spawn-call-1"
+      }
+    ],
+    "_meta": {
+      "terminal_output": {
+        "data": "child result\n",
+        "terminal_id": "spawn-call-1"
+      }
+    }
+  }
+}

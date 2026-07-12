@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
@@ -173,6 +174,101 @@ func TestEnvelopeV1ToolCallUpdateGolden(t *testing.T) {
 		},
 	}
 	assertGoldenJSON(t, "testdata/envelope_v1_tool_call_update.golden.json", env)
+}
+
+func TestEnvelopeV1SpawnChildSemanticGolden(t *testing.T) {
+	t.Parallel()
+
+	env := Envelope{
+		Kind:       KindSessionUpdate,
+		Cursor:     "stream:child-1",
+		SessionID:  "session-1",
+		HandleID:   "handle-1",
+		RunID:      "run-1",
+		TurnID:     "turn-1",
+		OccurredAt: time.Date(2026, 7, 12, 10, 0, 0, 0, time.UTC),
+		Scope:      ScopeSubagent,
+		ScopeID:    "task-1",
+		Actor:      "reviewer",
+		ParentTool: &ParentToolRelation{
+			ToolCallID: "spawn-call-1",
+			ToolName:   "Spawn",
+		},
+		Delivery: &Delivery{
+			Transient:           true,
+			HasParentToolMirror: true,
+		},
+		Update: schema.ToolCall{
+			SessionUpdate: schema.UpdateToolCall,
+			ToolCallID:    "child-read-1",
+			Title:         "Read README.md",
+			Kind:          schema.ToolKindRead,
+			Status:        schema.ToolStatusCompleted,
+			RawInput:      map[string]any{"path": "README.md"},
+		},
+	}
+	assertGoldenJSON(t, "testdata/envelope_v1_spawn_child_semantic.golden.json", env)
+	assertEnvelopeRelationOutsideACPUpdate(t, env)
+}
+
+func TestEnvelopeV1SpawnParentToolMirrorGolden(t *testing.T) {
+	t.Parallel()
+
+	status := schema.ToolStatusCompleted
+	env := Envelope{
+		Kind:       KindSessionUpdate,
+		Cursor:     "stream:spawn-mirror-1",
+		SessionID:  "session-1",
+		HandleID:   "handle-1",
+		RunID:      "run-1",
+		TurnID:     "turn-1",
+		OccurredAt: time.Date(2026, 7, 12, 10, 0, 1, 0, time.UTC),
+		Scope:      ScopeMain,
+		Delivery: &Delivery{
+			Transient:          true,
+			IsParentToolMirror: true,
+		},
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo,
+			ToolCallID:    "spawn-call-1",
+			Status:        &status,
+			Content: []schema.ToolCallContent{{
+				Type:       "terminal",
+				TerminalID: "spawn-call-1",
+			}},
+			Meta: metautil.WithTerminalOutput(nil, "spawn-call-1", "child result\n"),
+		},
+	}
+	assertGoldenJSON(t, "testdata/envelope_v1_spawn_parent_tool_mirror.golden.json", env)
+	assertEnvelopeRelationOutsideACPUpdate(t, env)
+}
+
+func TestEnvelopeV1RunCommandTransientGolden(t *testing.T) {
+	t.Parallel()
+
+	status := schema.ToolStatusInProgress
+	env := Envelope{
+		Kind:       KindSessionUpdate,
+		Cursor:     "stream:command-1",
+		SessionID:  "session-1",
+		HandleID:   "handle-1",
+		RunID:      "run-1",
+		TurnID:     "turn-1",
+		OccurredAt: time.Date(2026, 7, 12, 10, 0, 2, 0, time.UTC),
+		Scope:      ScopeMain,
+		Delivery:   &Delivery{Transient: true},
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo,
+			ToolCallID:    "command-call-1",
+			Status:        &status,
+			Content: []schema.ToolCallContent{{
+				Type:       "terminal",
+				TerminalID: "command-call-1",
+			}},
+		},
+	}
+	assertGoldenJSON(t, "testdata/envelope_v1_run_command_transient.golden.json", env)
+	assertEnvelopeRelationOutsideACPUpdate(t, env)
 }
 
 func TestEnvelopeV1PlanGolden(t *testing.T) {
@@ -354,6 +450,30 @@ func TestCloneEnvelopePreservesContentChunkMetadata(t *testing.T) {
 	}
 }
 
+func TestCloneEnvelopeDeepCopiesRelationAndDelivery(t *testing.T) {
+	t.Parallel()
+
+	env := Envelope{
+		ParentTool: &ParentToolRelation{ToolCallID: "spawn-call-1", ToolName: "Spawn"},
+		Delivery: &Delivery{
+			Transient:           true,
+			HasParentToolMirror: true,
+		},
+	}
+	cloned := CloneEnvelope(env)
+	cloned.ParentTool.ToolCallID = "changed-call"
+	cloned.Delivery.Transient = false
+	cloned.Delivery.HasParentToolMirror = false
+	cloned.Delivery.IsParentToolMirror = true
+
+	if env.ParentTool.ToolCallID != "spawn-call-1" || env.ParentTool.ToolName != "Spawn" {
+		t.Fatalf("original parent relation mutated = %#v", env.ParentTool)
+	}
+	if !env.Delivery.Transient || !env.Delivery.HasParentToolMirror || env.Delivery.IsParentToolMirror {
+		t.Fatalf("original delivery mutated = %#v", env.Delivery)
+	}
+}
+
 func assertGoldenJSON(t *testing.T, path string, value any) {
 	t.Helper()
 	data, err := json.MarshalIndent(value, "", "  ")
@@ -367,6 +487,35 @@ func assertGoldenJSON(t *testing.T, path string, value any) {
 	}
 	if string(data) != string(want) {
 		t.Fatalf("golden mismatch for %s\ngot:\n%s\nwant:\n%s", path, data, want)
+	}
+}
+
+func assertEnvelopeRelationOutsideACPUpdate(t *testing.T, env Envelope) {
+	t.Helper()
+	data, err := json.Marshal(env)
+	if err != nil {
+		t.Fatalf("json.Marshal(Envelope) error = %v", err)
+	}
+	var root map[string]json.RawMessage
+	if err := json.Unmarshal(data, &root); err != nil {
+		t.Fatalf("json.Unmarshal(Envelope) error = %v", err)
+	}
+	if _, ok := root["parent_tool"]; env.ParentTool != nil && !ok {
+		t.Fatalf("envelope json = %s, want parent_tool at envelope root", data)
+	}
+	if _, ok := root["delivery"]; env.Delivery != nil && !ok {
+		t.Fatalf("envelope json = %s, want delivery at envelope root", data)
+	}
+	var update map[string]json.RawMessage
+	if raw := root["update"]; len(raw) > 0 {
+		if err := json.Unmarshal(raw, &update); err != nil {
+			t.Fatalf("json.Unmarshal(update) error = %v", err)
+		}
+	}
+	for _, field := range []string{"parent_tool", "delivery"} {
+		if _, ok := update[field]; ok {
+			t.Fatalf("ACP update unexpectedly contains %q: %s", field, root["update"])
+		}
 	}
 }
 

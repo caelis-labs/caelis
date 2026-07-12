@@ -8,7 +8,106 @@ import (
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
-func TestProjectACPEventToEventsProjectsNarrativeScopeAndAnchors(t *testing.T) {
+func TestProjectACPEventToEventsUsesTypedRelationAndDeliveryWithoutMetadata(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectACPEventToEvents(eventstream.Envelope{
+		Kind:    eventstream.KindSessionUpdate,
+		TurnID:  "turn-1",
+		Scope:   eventstream.ScopeSubagent,
+		ScopeID: "task-1",
+		Actor:   "worker",
+		ParentTool: &eventstream.ParentToolRelation{
+			ToolCallID: "spawn-1",
+			ToolName:   "Spawn",
+		},
+		Delivery: &eventstream.Delivery{
+			Transient:           true,
+			HasParentToolMirror: true,
+		},
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateAgentMessage,
+			Content:       schema.TextContent{Type: "text", Text: "subagent output"},
+		},
+		Final: true,
+	}, nil)
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one transcript event", events)
+	}
+	event := events[0]
+	if event.AnchorToolCallID != "spawn-1" || event.AnchorToolName != "Spawn" || !event.MirroredToParentTool {
+		t.Fatalf("typed event delivery = %#v, want child SPAWN anchor with a parent mirror", event)
+	}
+}
+
+func TestProjectACPEventToEventsPrefersTypedRelationAndDeliveryOverConflictingLegacyMetadata(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectACPEventToEvents(eventstream.Envelope{
+		Kind:    eventstream.KindSessionUpdate,
+		Scope:   eventstream.ScopeSubagent,
+		ScopeID: "task-1",
+		ParentTool: &eventstream.ParentToolRelation{
+			ToolCallID: "typed-spawn-1",
+			ToolName:   "Spawn",
+		},
+		Delivery: &eventstream.Delivery{},
+		Meta: map[string]any{
+			"caelis": map[string]any{
+				"transient": true,
+				"runtime": map[string]any{
+					"stream": map[string]any{
+						"parent_call_id":          "legacy-task-1",
+						"parent_tool":             "TASK",
+						"mirrored_to_parent_tool": true,
+					},
+				},
+			},
+		},
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateAgentMessage,
+			Content:       schema.TextContent{Type: "text", Text: "typed wins"},
+		},
+	}, nil)
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one transcript event", events)
+	}
+	event := events[0]
+	if event.AnchorToolCallID != "typed-spawn-1" || event.AnchorToolName != "Spawn" || event.MirroredToParentTool {
+		t.Fatalf("event = %#v, want typed relation and zero delivery", event)
+	}
+}
+
+func TestProjectACPEventToEventsRetainsEventOnlyPlanParentRelation(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectACPEventToEvents(eventstream.Envelope{
+		Kind:    eventstream.KindSessionUpdate,
+		Scope:   eventstream.ScopeSubagent,
+		ScopeID: "task-1",
+		ParentTool: &eventstream.ParentToolRelation{
+			ToolCallID: "spawn-1",
+			ToolName:   "Spawn",
+		},
+		Delivery: &eventstream.Delivery{Transient: true},
+		Update: schema.PlanUpdate{
+			SessionUpdate: schema.UpdatePlan,
+			Entries: []schema.PlanEntry{{
+				Content: "inspect mirror delivery",
+				Status:  "in_progress",
+			}},
+		},
+	}, nil)
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one plan event", events)
+	}
+	event := events[0]
+	if event.Kind != EventPlan || event.AnchorToolCallID != "spawn-1" || event.AnchorToolName != "Spawn" || event.MirroredToParentTool {
+		t.Fatalf("event-only plan = %#v, want non-mirrored Spawn relation", event)
+	}
+}
+
+func TestProjectACPEventToEventsFallsBackToLegacyRelationAndDeliveryMetadata(t *testing.T) {
 	t.Parallel()
 
 	events := ProjectACPEventToEvents(eventstream.Envelope{
@@ -19,6 +118,7 @@ func TestProjectACPEventToEventsProjectsNarrativeScopeAndAnchors(t *testing.T) {
 		Actor:   "worker",
 		Meta: map[string]any{
 			"caelis": map[string]any{
+				"transient": true,
 				"runtime": map[string]any{
 					"stream": map[string]any{
 						"parent_call_id":          "spawn-1",

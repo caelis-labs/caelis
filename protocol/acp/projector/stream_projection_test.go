@@ -113,9 +113,10 @@ func TestProjectStreamFrameBuildsStandardToolUpdateEnvelope(t *testing.T) {
 	if got := toolTerminalOutputText(t, update); got != "ok\n" {
 		t.Fatalf("terminal output = %q, want ok output", got)
 	}
-	if !metautil.Bool(update.Meta, metautil.Root, metautil.Transient) {
-		t.Fatalf("update.Meta = %#v, want transient stream update", update.Meta)
+	if metautil.Bool(update.Meta, metautil.Root, metautil.Transient) {
+		t.Fatalf("update.Meta = %#v, want typed delivery without legacy transient shadow", update.Meta)
 	}
+	assertStreamDelivery(t, env, true, false, false)
 }
 
 func TestProjectStreamFramePreservesSplitNewlineFrame(t *testing.T) {
@@ -220,16 +221,16 @@ func TestProjectStreamFrameMarksEmbeddedEventsMirroredToParentTool(t *testing.T)
 	if embedded.Scope != eventstream.ScopeSubagent || embedded.ScopeID != "jack" || eventstream.UpdateType(embedded.Update) != schema.UpdateAgentMessage {
 		t.Fatalf("embedded event = %#v, want subagent agent message", embedded)
 	}
-	if got := metautil.String(embedded.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeStream, metautil.RuntimeStreamParentCallID); got != "task-call-1" {
-		t.Fatalf("embedded meta parent_call_id = %q, want task-call-1; meta=%#v", got, embedded.Meta)
+	if embedded.ParentTool == nil || embedded.ParentTool.ToolCallID != "task-call-1" || embedded.ParentTool.ToolName != "TASK" {
+		t.Fatalf("embedded parent relation = %#v, want TASK/task-call-1", embedded.ParentTool)
 	}
-	if !metautil.Bool(embedded.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeStream, metautil.RuntimeStreamMirroredToParentTool) {
-		t.Fatalf("embedded meta = %#v, want mirrored_to_parent_tool=true", embedded.Meta)
-	}
+	assertStreamDelivery(t, embedded, true, true, false)
+	assertNoLegacyRelationDeliveryMetadata(t, embedded)
 	update := requireToolUpdate(t, events[1])
 	if update.ToolCallID != "task-call-1" || toolTerminalOutputText(t, update) != "child output\n" {
 		t.Fatalf("parent tool update = %#v, want child output in parent panel", update)
 	}
+	assertStreamDelivery(t, events[1], true, false, true)
 }
 
 func TestProjectStreamFrameAppendsSubagentReasoningToParentTerminal(t *testing.T) {
@@ -363,7 +364,7 @@ func TestProjectStreamFrameProjectsSubagentSemanticEventBeforeParentTerminal(t *
 	if len(events) != 2 {
 		t.Fatalf("ProjectStreamFrame() returned %d events, want child semantic event then parent terminal update: %#v", len(events), events)
 	}
-	assertSpawnSemanticEnvelope(t, events[0], "jack", "spawn-call-1")
+	assertSpawnSemanticEnvelope(t, events[0], "jack", "spawn-call-1", true)
 	message, ok := events[0].Update.(schema.ContentChunk)
 	if !ok {
 		t.Fatalf("child update = %T, want ContentChunk", events[0].Update)
@@ -378,6 +379,7 @@ func TestProjectStreamFrameProjectsSubagentSemanticEventBeforeParentTerminal(t *
 	}
 	assertTerminalAnchor(t, tool.Content, "spawn-call-1")
 	assertStreamTerminalInfo(t, tool.Meta, "spawn-call-1")
+	assertStreamDelivery(t, events[1], true, false, true)
 }
 
 func TestProjectStreamFrameProjectsEventOnlySpawnChildSemantics(t *testing.T) {
@@ -500,7 +502,7 @@ func TestProjectStreamFrameProjectsEventOnlySpawnChildSemantics(t *testing.T) {
 			if len(events) != 1 {
 				t.Fatalf("ProjectStreamFrame() returned %d events, want one child semantic event: %#v", len(events), events)
 			}
-			assertSpawnSemanticEnvelope(t, events[0], "jack", "spawn-call-1")
+			assertSpawnSemanticEnvelope(t, events[0], "jack", "spawn-call-1", false)
 			tc.assert(t, events[0])
 		})
 	}
@@ -556,7 +558,7 @@ func TestProjectStreamFrameProjectsClosedSpawnEventBeforeOneParentFinal(t *testi
 	if len(events) != 2 {
 		t.Fatalf("ProjectStreamFrame() returned %d events, want child semantic event and one parent final: %#v", len(events), events)
 	}
-	assertSpawnSemanticEnvelope(t, events[0], "jack", "spawn-call-1")
+	assertSpawnSemanticEnvelope(t, events[0], "jack", "spawn-call-1", false)
 	if update, ok := events[0].Update.(schema.ContentChunk); !ok || update.MessageID != "child-message-final" {
 		t.Fatalf("closed child semantic update = %#v, want final child message", events[0].Update)
 	}
@@ -724,6 +726,99 @@ func TestProjectStreamFrameSuppressesEmbeddedParentToolEcho(t *testing.T) {
 	}
 }
 
+type streamFrameEnvelopeExpectation struct {
+	parentCallID      string
+	parentTool        string
+	transient         bool
+	hasMirror         bool
+	isMirror          bool
+	terminalOutput    string
+	hasTerminalOutput bool
+}
+
+func assertStreamFrameEnvelopeExpectation(t *testing.T, env eventstream.Envelope, want streamFrameEnvelopeExpectation) {
+	t.Helper()
+	if want.parentCallID == "" {
+		if env.ParentTool != nil {
+			t.Fatalf("parent relation = %#v, want none", env.ParentTool)
+		}
+	} else if env.ParentTool == nil || env.ParentTool.ToolCallID != want.parentCallID || env.ParentTool.ToolName != want.parentTool {
+		t.Fatalf("parent relation = %#v, want %s/%s", env.ParentTool, want.parentTool, want.parentCallID)
+	}
+	assertStreamDelivery(t, env, want.transient, want.hasMirror, want.isMirror)
+	gotTerminalOutput, hasTerminalOutput := streamEnvelopeTerminalOutput(env)
+	if hasTerminalOutput != want.hasTerminalOutput || gotTerminalOutput != want.terminalOutput {
+		t.Fatalf("terminal output = %q/%t, want %q/%t; env=%#v", gotTerminalOutput, hasTerminalOutput, want.terminalOutput, want.hasTerminalOutput, env)
+	}
+}
+
+func streamEnvelopeTerminalOutput(env eventstream.Envelope) (string, bool) {
+	update, ok := eventstream.ToolCallUpdateFromEnvelope(env)
+	if !ok {
+		return "", false
+	}
+	output, ok := metautil.TerminalOutput(update.Meta)
+	if !ok {
+		return "", false
+	}
+	return output.Data, true
+}
+
+func childMessageEventForStreamTest(text string) *session.Event {
+	return &session.Event{
+		ID:         "child-message-stream-1",
+		Type:       session.EventTypeAssistant,
+		Visibility: session.VisibilityUIOnly,
+		Text:       text,
+		Scope:      spawnSubagentScope("jack"),
+		Protocol: &session.EventProtocol{
+			Method: session.ProtocolMethodSessionUpdate,
+			Update: &session.ProtocolUpdate{
+				SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage),
+				MessageID:     "child-message-stream-1",
+				Content:       session.ProtocolTextContent(text),
+			},
+		},
+	}
+}
+
+func childPlanEventForStreamTest() *session.Event {
+	return &session.Event{
+		ID:         "child-plan-stream-1",
+		Type:       session.EventTypePlan,
+		Visibility: session.VisibilityUIOnly,
+		Scope:      spawnSubagentScope("jack"),
+		Protocol: &session.EventProtocol{
+			Method: session.ProtocolMethodSessionUpdate,
+			Update: &session.ProtocolUpdate{
+				SessionUpdate: string(session.ProtocolUpdateTypePlan),
+				Entries: []session.ProtocolPlanEntry{{
+					Content: "inspect parent delivery",
+					Status:  "in_progress",
+				}},
+			},
+		},
+	}
+}
+
+func childToolUpdateEventForStreamTest() *session.Event {
+	return &session.Event{
+		ID:         "child-tool-stream-1",
+		Type:       session.EventTypeToolResult,
+		Visibility: session.VisibilityUIOnly,
+		Scope:      spawnSubagentScope("jack"),
+		Protocol: &session.EventProtocol{
+			Method: session.ProtocolMethodSessionUpdate,
+			Update: &session.ProtocolUpdate{
+				SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate),
+				ToolCallID:    "child-tool-stream-1",
+				Kind:          "PATCH",
+				Status:        schema.ToolStatusCompleted,
+			},
+		},
+	}
+}
+
 func spawnStreamRequestForTest() StreamRequest {
 	return StreamRequest{
 		HandleID:          "handle-1",
@@ -751,22 +846,39 @@ func spawnSubagentScope(taskID string) *session.EventScope {
 	}
 }
 
-func assertSpawnSemanticEnvelope(t *testing.T, env eventstream.Envelope, taskID string, parentCallID string) {
+func assertSpawnSemanticEnvelope(t *testing.T, env eventstream.Envelope, taskID string, parentCallID string, hasParentToolMirror bool) {
 	t.Helper()
 	if env.Kind != eventstream.KindSessionUpdate || env.Scope != eventstream.ScopeSubagent || env.ScopeID != taskID {
 		t.Fatalf("child envelope = %#v, want scoped subagent session/update for task %q", env, taskID)
 	}
-	if got := metautil.String(env.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeStream, metautil.RuntimeStreamParentCallID); got != parentCallID {
-		t.Fatalf("child parent_call_id = %q, want %q; meta=%#v", got, parentCallID, env.Meta)
+	if env.ParentTool == nil || env.ParentTool.ToolCallID != parentCallID || env.ParentTool.ToolName != "SPAWN" {
+		t.Fatalf("child parent relation = %#v, want SPAWN/%q", env.ParentTool, parentCallID)
 	}
-	if got := metautil.String(env.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeStream, metautil.RuntimeStreamParentTool); got != "SPAWN" {
-		t.Fatalf("child parent_tool = %q, want SPAWN; meta=%#v", got, env.Meta)
+	assertStreamDelivery(t, env, true, hasParentToolMirror, false)
+	assertNoLegacyRelationDeliveryMetadata(t, env)
+}
+
+func assertNoLegacyRelationDeliveryMetadata(t *testing.T, env eventstream.Envelope) {
+	t.Helper()
+	if parentCallID := metautil.String(env.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeStream, metautil.RuntimeStreamParentCallID); parentCallID != "" {
+		t.Fatalf("envelope meta parent_call_id = %q, want typed-only relation; meta=%#v", parentCallID, env.Meta)
 	}
-	if !metautil.Bool(env.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeStream, metautil.RuntimeStreamMirroredToParentTool) {
-		t.Fatalf("child meta = %#v, want mirrored_to_parent_tool=true", env.Meta)
+	if parentTool := metautil.String(env.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeStream, metautil.RuntimeStreamParentTool); parentTool != "" {
+		t.Fatalf("envelope meta parent_tool = %q, want typed-only relation; meta=%#v", parentTool, env.Meta)
 	}
-	if !metautil.Bool(env.Meta, metautil.Root, metautil.Transient) {
-		t.Fatalf("child meta = %#v, want transient stream event", env.Meta)
+	if metautil.Bool(env.Meta, metautil.Root, metautil.Runtime, metautil.RuntimeStream, metautil.RuntimeStreamMirroredToParentTool) ||
+		metautil.Bool(env.Meta, metautil.Root, metautil.Transient) {
+		t.Fatalf("envelope meta = %#v, want no legacy delivery shadow", env.Meta)
+	}
+}
+
+func assertStreamDelivery(t *testing.T, env eventstream.Envelope, transient bool, hasParentToolMirror bool, isParentToolMirror bool) {
+	t.Helper()
+	if env.Delivery == nil {
+		t.Fatalf("envelope delivery = nil, want transient=%t has_parent_tool_mirror=%t is_parent_tool_mirror=%t", transient, hasParentToolMirror, isParentToolMirror)
+	}
+	if env.Delivery.Transient != transient || env.Delivery.HasParentToolMirror != hasParentToolMirror || env.Delivery.IsParentToolMirror != isParentToolMirror {
+		t.Fatalf("envelope delivery = %#v, want transient=%t has_parent_tool_mirror=%t is_parent_tool_mirror=%t", env.Delivery, transient, hasParentToolMirror, isParentToolMirror)
 	}
 }
 

@@ -30,6 +30,25 @@ const (
 	ScopeSubagent    Scope = "subagent"
 )
 
+// ParentToolRelation identifies the actual parent tool call that produced a
+// scoped delegated event. It is intentionally limited to tool-call ancestry;
+// it does not model arbitrary workflow or Goal relationships.
+type ParentToolRelation struct {
+	ToolCallID string `json:"tool_call_id,omitempty"`
+	ToolName   string `json:"tool_name,omitempty"`
+}
+
+// Delivery classifies how an Envelope reaches a client. A transient Envelope
+// is live-only and has no durable replay authority. HasParentToolMirror is true
+// only when the same source frame emits a parent-tool compatibility mirror;
+// IsParentToolMirror identifies that parent update. The mirror fields do not
+// change the standard ACP payload carried by the Envelope.
+type Delivery struct {
+	Transient           bool `json:"transient,omitempty"`
+	HasParentToolMirror bool `json:"has_parent_tool_mirror,omitempty"`
+	IsParentToolMirror  bool `json:"is_parent_tool_mirror,omitempty"`
+}
+
 type UsageSnapshot struct {
 	PromptTokens        int `json:"prompt_tokens,omitempty"`
 	CachedInputTokens   int `json:"cached_input_tokens,omitempty"`
@@ -92,11 +111,13 @@ type Envelope struct {
 	TurnID       string    `json:"turn_id,omitempty"`
 	OccurredAt   time.Time `json:"occurred_at,omitempty"`
 
-	Scope         Scope  `json:"scope,omitempty"`
-	ScopeID       string `json:"scope_id,omitempty"`
-	Actor         string `json:"actor,omitempty"`
-	ParticipantID string `json:"participant_id,omitempty"`
-	Final         bool   `json:"final,omitempty"`
+	Scope         Scope               `json:"scope,omitempty"`
+	ScopeID       string              `json:"scope_id,omitempty"`
+	Actor         string              `json:"actor,omitempty"`
+	ParticipantID string              `json:"participant_id,omitempty"`
+	Final         bool                `json:"final,omitempty"`
+	ParentTool    *ParentToolRelation `json:"parent_tool,omitempty"`
+	Delivery      *Delivery           `json:"delivery,omitempty"`
 
 	Update     schema.Update                    `json:"update,omitempty"`
 	Permission *schema.RequestPermissionRequest `json:"permission,omitempty"`
@@ -262,6 +283,14 @@ func firstNonEmpty(values ...string) string {
 func CloneEnvelope(in Envelope) Envelope {
 	out := in
 	out.Meta = cloneAnyMap(in.Meta)
+	if in.ParentTool != nil {
+		parentTool := *in.ParentTool
+		out.ParentTool = &parentTool
+	}
+	if in.Delivery != nil {
+		delivery := *in.Delivery
+		out.Delivery = &delivery
+	}
 	if in.Permission != nil {
 		permission := *in.Permission
 		permission.Options = append([]schema.PermissionOption(nil), in.Permission.Options...)

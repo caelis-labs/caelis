@@ -1,0 +1,24 @@
+{
+  "kind": "session/update",
+  "cursor": "stream:command-1",
+  "session_id": "session-1",
+  "handle_id": "handle-1",
+  "run_id": "run-1",
+  "turn_id": "turn-1",
+  "occurred_at": "2026-07-12T10:00:02Z",
+  "scope": "main",
+  "delivery": {
+    "transient": true
+  },
+  "update": {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "command-call-1",
+    "status": "in_progress",
+    "content": [
+      {
+        "type": "terminal",
+        "terminalId": "command-call-1"
+      }
+    ]
+  }
+}

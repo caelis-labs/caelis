@@ -479,7 +479,14 @@ func TestHandleACPEventEnvelopeSuppressesMirroredSpawnSemanticEventBeforeParentT
 		Scope:     eventstream.ScopeSubagent,
 		ScopeID:   "akio",
 		Actor:     "explorer",
-		Meta:      parentToolStreamMeta("spawn-call-1", "SPAWN", true),
+		ParentTool: &eventstream.ParentToolRelation{
+			ToolCallID: "spawn-call-1",
+			ToolName:   "Spawn",
+		},
+		Delivery: &eventstream.Delivery{
+			Transient:           true,
+			HasParentToolMirror: true,
+		},
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall,
 			ToolCallID:    "child-read-1",
@@ -495,8 +502,34 @@ func TestHandleACPEventEnvelopeSuppressesMirroredSpawnSemanticEventBeforeParentT
 		Scope:     eventstream.ScopeSubagent,
 		ScopeID:   "akio",
 		Actor:     "explorer",
+		ParentTool: &eventstream.ParentToolRelation{
+			ToolCallID: "spawn-call-1",
+			ToolName:   "Spawn",
+		},
+		Delivery: &eventstream.Delivery{Transient: true},
+		Update: schema.PlanUpdate{
+			SessionUpdate: schema.UpdatePlan,
+			Entries: []schema.PlanEntry{{
+				Content: "inspect README.md",
+				Status:  "in_progress",
+			}},
+		},
+	})
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		Scope:     eventstream.ScopeSubagent,
+		ScopeID:   "akio",
+		Actor:     "explorer",
 		Final:     true,
-		Meta:      parentToolStreamMeta("spawn-call-1", "SPAWN", true),
+		ParentTool: &eventstream.ParentToolRelation{
+			ToolCallID: "spawn-call-1",
+			ToolName:   "Spawn",
+		},
+		Delivery: &eventstream.Delivery{
+			Transient:           true,
+			HasParentToolMirror: true,
+		},
 		Update: schema.ContentChunk{
 			SessionUpdate: schema.UpdateAgentMessage,
 			Content:       schema.TextContent{Type: "text", Text: "child stream summary\n"},
@@ -509,6 +542,10 @@ func TestHandleACPEventEnvelopeSuppressesMirroredSpawnSemanticEventBeforeParentT
 			SessionUpdate: schema.UpdateToolCallInfo,
 			ToolCallID:    "spawn-call-1",
 			Meta:          metautil.WithTerminalOutput(acpToolNameMeta("SPAWN"), "spawn-call-1", "child stream summary\n"),
+		},
+		Delivery: &eventstream.Delivery{
+			Transient:          true,
+			IsParentToolMirror: true,
 		},
 	})
 

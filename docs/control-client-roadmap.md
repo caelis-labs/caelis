@@ -50,8 +50,8 @@ yet complete.
 | --- | --- | --- |
 | Turn output | Main turns use `eventstream.Envelope` | Terminal and subagent output are discovered through a second `StreamSubscriber` path |
 | Command output | `RunCommand` publishes task-stream text | The empty terminal anchor plus Caelis metadata is a deliberate Zed-compatible projection, but it is not strict ACP terminal ownership |
-| Spawn output | A task-stream frame can carry both text and a normalized child `session.Event` | The Spawn projector currently flattens the child event into parent-tool terminal text |
-| Child rendering | TUI shows a compact Spawn panel | Child thought, tool, diff, plan, and nested content cannot be reconstructed by a rich client from flattened text |
+| Spawn output | A task-stream frame can carry both text and a normalized child `session.Event`; the projector preserves the child event as a scoped ACP Envelope and retains the parent terminal compatibility mirror | The trace remains transient, the mirror remains temporary, and a Control-owned broker has not yet replaced the direct stream path |
+| Child rendering | TUI receives scoped semantic events and applies typed parent/delivery routing to suppress compatibility duplicates in its compact Spawn panel | One ordered cross-surface feed and durable child replay authority are still absent |
 | Replay | Parent canonical Spawn result is durable | The live child trace is transient and has no durable GUI reload authority |
 | Client commands | In-process Control service supports current TUI workflows | Requests are ambient-session and live-handle oriented rather than network-safe and reconnectable |
 | Dynamic orchestration | Handoff, leases, Reviewer, Guardian, and loop watchdog boundaries exist | Goal state and the cross-Turn Agent Manage Loop are not implemented |
@@ -66,8 +66,11 @@ The important implementation seam already exists:
 - the parent receives the final delegated result through a canonical Spawn/Task
   result, independently of the transient child trace.
 
-The missing step is to preserve the semantic event through projection and move
-compact formatting to the consuming Surface.
+The completed minimum Spawn projection preserves the semantic event through
+projection and lets the consuming Surface apply the current compact-panel
+compatibility policy. The remaining M1 work is to place that live path behind
+one Control-owned feed, remove the temporary text-mirror dependency, and supply
+the required replay and approval semantics.
 
 ## Protocol Layers
 
@@ -111,6 +114,35 @@ Scope and parent relationships belong to the Caelis Envelope, not to custom
 root fields added to standard ACP payloads. Display-only hints may remain under
 `_meta.caelis`, but clients must not need undocumented metadata to recover
 identity, ordering, lifecycle, or durability.
+
+### Event Broker prerequisite: explicit parent and delivery Envelope contract
+
+The completed Spawn semantic-projection slice introduces a minimal typed
+Envelope contract before broker work begins:
+
+- `parent_tool` carries only the actual parent tool-call relationship for a
+  scoped delegated event;
+- `delivery.transient` identifies live-only events independently of mirror
+  semantics;
+- `delivery.has_parent_tool_mirror` marks a semantic child event only when the
+  same source frame also emits a temporary parent-tool compatibility mirror;
+- `delivery.is_parent_tool_mirror` marks only the parent tool update that
+  carries that compatibility terminal text.
+
+`parent_tool` is not evidence of a mirror. In particular, an event-only child
+Plan or tool update remains related and transient while
+`has_parent_tool_mirror=false`; a Spawn/Task status-only parent update likewise
+is not a mirror unless it carries actual compatibility terminal text.
+
+New `protocol/acp/projector` stream projections write the relation and delivery
+contract only to typed Envelope fields. `eventstream.ResolveRelationDelivery`
+owns the one-way typed-first fallback for old replay fixtures and ACP
+compatibility bridges: a present typed pointer wins, and only a missing pointer
+consults legacy metadata. `surfaces/transcript` and the ACP compatibility
+bridge consume that common resolver. It is removed once those supported inputs
+emit typed Envelope fields. A Control Event Broker must treat the typed fields
+as authoritative and must not use `_meta` for correlation, ordering, or
+durability.
 
 ### RunCommand and Spawn share delivery, not rendering semantics
 
@@ -465,7 +497,8 @@ Deliverables:
 
 - introduce the Control-owned event broker and move task-stream fan-in behind
   it;
-- project `Frame.Event` for Spawn as child-scoped standard ACP payloads;
+- project `Frame.Event` for Spawn as child-scoped standard ACP payloads
+  (completed minimum slice);
 - retain RunCommand exact terminal-byte behavior;
 - make parent Spawn updates lifecycle/final-result summaries rather than child
   transcript copies;
@@ -614,10 +647,13 @@ reload tests do not replace model-context or Goal/decision round-trip tests.
 
 Start with the bounded T0 terminal experiment and decision record; do not change
 the working Zed projection before that evidence exists. Continue M0 with ACP
-conformance and Envelope contract tests. The next bounded slice is the M1 Spawn
-fixture: preserve one child `Frame.Event` through projection, render it in the
-existing TUI compact panel, and prove that the parent Spawn result remains the
-only canonical parent-model fact.
+conformance and Envelope contract tests. The M1 Spawn semantic-projection
+minimum is complete: one child `Frame.Event` is preserved through projection,
+the existing TUI compact panel applies its typed Envelope delivery policy, and
+the parent Spawn result remains the only canonical parent-model fact. Its explicit
+parent/delivery Envelope contract is the Event Broker prerequisite, not M1
+completion: broker fan-in, permission routing, one feed, and text-mirror
+removal remain open.
 
 Full GUI feature work should not begin before M1. GUI history and production
 app-server work require M2. Goal and Manage Loop implementation starts only

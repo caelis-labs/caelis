@@ -58,21 +58,34 @@ func (r StreamRequest) Key() string {
 // ProjectStreamFrame projects one runtime stream frame into transient
 // ACP-native envelopes for live clients.
 func ProjectStreamFrame(req StreamRequest, frame stream.Frame) []eventstream.Envelope {
-	embedded := streamFrameEmbeddedEvents(req, frame)
-	out := make([]eventstream.Envelope, 0, 2)
-	if canonical, ok := names.Resolve(req.ToolName); ok && canonical == names.Spawn {
-		out = append(out, embedded...)
-		return append(out, subagentStreamFrameEvents(req, frame)...)
-	}
+	parent := parentStreamFrameEvents(req, frame)
+	embedded := streamFrameEmbeddedEvents(req, frame, parentStreamFrameHasToolMirror(parent))
+	out := make([]eventstream.Envelope, 0, len(embedded)+len(parent))
 	out = append(out, embedded...)
+	out = append(out, parent...)
+	return out
+}
+
+func parentStreamFrameEvents(req StreamRequest, frame stream.Frame) []eventstream.Envelope {
+	if canonical, ok := names.Resolve(req.ToolName); ok && canonical == names.Spawn {
+		return subagentStreamFrameEvents(req, frame)
+	}
 	if frame.Closed {
-		out = append(out, streamFinalFrameEvent(req, frame))
-		return out
+		return []eventstream.Envelope{streamFinalFrameEvent(req, frame)}
 	}
 	if frame.Text != "" && shouldProjectFrameTextToParentTool(frame) {
-		out = append(out, streamFrameEvent(req, frame))
+		return []eventstream.Envelope{streamFrameEvent(req, frame)}
 	}
-	return out
+	return nil
+}
+
+func parentStreamFrameHasToolMirror(parent []eventstream.Envelope) bool {
+	for _, env := range parent {
+		if env.Delivery != nil && env.Delivery.IsParentToolMirror {
+			return true
+		}
+	}
+	return false
 }
 
 func subagentStreamFrameEvents(req StreamRequest, frame stream.Frame) []eventstream.Envelope {
@@ -190,9 +203,23 @@ func streamToolUpdateEnvelope(req StreamRequest, frame stream.Frame, status stri
 		ScopeID:       streamRequestScopeID(req),
 		Actor:         strings.TrimSpace(req.Actor),
 		ParticipantID: strings.TrimSpace(req.ParticipantID),
+		Delivery:      streamFrameDelivery(req, terminalText),
 		Update:        update,
 		Meta:          streamFrameMetaForEnvelope(isErr),
 	}
+}
+
+func streamFrameDelivery(req StreamRequest, terminalText string) *eventstream.Delivery {
+	delivery := &eventstream.Delivery{Transient: true}
+	if terminalText != "" && streamParentToolCompatibilityMirror(req) {
+		delivery.IsParentToolMirror = true
+	}
+	return delivery
+}
+
+func streamParentToolCompatibilityMirror(req StreamRequest) bool {
+	canonical, ok := names.Resolve(req.ToolName)
+	return ok && (canonical == names.Spawn || canonical == names.Task)
 }
 
 func streamRequestScopeID(req StreamRequest) string {
@@ -268,7 +295,7 @@ func shouldProjectFrameTextToParentTool(frame stream.Frame) bool {
 	return true
 }
 
-func streamFrameEmbeddedEvents(req StreamRequest, frame stream.Frame) []eventstream.Envelope {
+func streamFrameEmbeddedEvents(req StreamRequest, frame stream.Frame, hasParentToolMirror bool) []eventstream.Envelope {
 	event := session.CloneEvent(frame.Event)
 	if event == nil {
 		return nil
@@ -285,8 +312,8 @@ func streamFrameEmbeddedEvents(req StreamRequest, frame stream.Frame) []eventstr
 	if streamFrameSessionEventIsParentToolEcho(req, event) {
 		return nil
 	}
-	event.Meta = markStreamFrameTransient(event.Meta)
-	event.Meta = markStreamFrameAnchor(event.Meta, req.CallID, req.ToolName)
+	parentTool := streamParentToolRelation(req)
+	event.Meta = streamFrameEventMeta(event.Meta)
 	out := ProjectSessionEventEnvelope(EnvelopeBaseFromSessionEvent(req.SessionRef, event, SessionEventTransport{
 		HandleID: req.HandleID,
 		RunID:    req.RunID,
@@ -299,7 +326,31 @@ func streamFrameEmbeddedEvents(req StreamRequest, frame stream.Frame) []eventstr
 			}
 		}
 	}
+	for i := range out {
+		if out[i].Scope != eventstream.ScopeSubagent {
+			continue
+		}
+		if parentTool != nil {
+			parentToolCopy := *parentTool
+			out[i].ParentTool = &parentToolCopy
+		}
+		out[i].Delivery = &eventstream.Delivery{
+			Transient:           true,
+			HasParentToolMirror: hasParentToolMirror,
+		}
+	}
 	return out
+}
+
+func streamParentToolRelation(req StreamRequest) *eventstream.ParentToolRelation {
+	toolCallID := strings.TrimSpace(req.CallID)
+	if toolCallID == "" {
+		return nil
+	}
+	return &eventstream.ParentToolRelation{
+		ToolCallID: toolCallID,
+		ToolName:   strings.TrimSpace(req.ToolName),
+	}
 }
 
 func streamFrameSessionEventIsParentToolEcho(req StreamRequest, event *session.Event) bool {
@@ -325,49 +376,16 @@ func streamFrameSessionEventIsParentToolEcho(req StreamRequest, event *session.E
 	return parentTool == "" || toolName == "" || strings.EqualFold(parentTool, toolName)
 }
 
-func markStreamFrameTransient(meta map[string]any) map[string]any {
-	out := metautil.WithCompactRuntimeSection(meta, metautil.RuntimeStream, map[string]any{
+func streamFrameEventMeta(meta map[string]any) map[string]any {
+	return metautil.WithCompactRuntimeSection(meta, metautil.RuntimeStream, map[string]any{
 		metautil.RuntimeStreamMode: "append",
 	})
-	caelis, _ := out[metautil.Root].(map[string]any)
-	caelis[metautil.Transient] = true
-	return out
 }
 
 func streamFrameMeta(mode string) map[string]any {
-	out := metautil.WithCompactRuntimeSection(nil, metautil.RuntimeStream, map[string]any{
+	return metautil.WithCompactRuntimeSection(nil, metautil.RuntimeStream, map[string]any{
 		metautil.RuntimeStreamMode: strings.TrimSpace(mode),
 	})
-	caelis, _ := out[metautil.Root].(map[string]any)
-	caelis[metautil.Transient] = true
-	return out
-}
-
-func markStreamFrameAnchor(meta map[string]any, callID string, toolName string) map[string]any {
-	callID = strings.TrimSpace(callID)
-	toolName = strings.TrimSpace(toolName)
-	if callID == "" && toolName == "" {
-		return meta
-	}
-	out := markStreamFrameTransient(meta)
-	caelis, _ := out[metautil.Root].(map[string]any)
-	runtimeMeta, _ := caelis[metautil.Runtime].(map[string]any)
-	streamMeta, _ := runtimeMeta[metautil.RuntimeStream].(map[string]any)
-	if callID != "" {
-		streamMeta[metautil.RuntimeStreamParentCallID] = callID
-		// Embedded stream events keep their scoped ACP semantics while the
-		// compatibility parent-tool mirror remains the current TUI transcript
-		// rendering path. Consumers may retain the scoped event for rich panels
-		// and suppress it from the main transcript.
-		streamMeta[metautil.RuntimeStreamMirroredToParentTool] = true
-	}
-	if toolName != "" {
-		streamMeta[metautil.RuntimeStreamParentTool] = toolName
-	}
-	runtimeMeta[metautil.RuntimeStream] = streamMeta
-	caelis[metautil.Runtime] = runtimeMeta
-	out[metautil.Root] = caelis
-	return out
 }
 
 const (

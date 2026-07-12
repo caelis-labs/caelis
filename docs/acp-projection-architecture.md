@@ -100,11 +100,20 @@ Zed compatibility projection does not change that capability assessment.
 
 A spawned Agent instead projects its normalized child events as standard ACP
 message, thought, tool, content, diff, plan, permission, and lifecycle
-semantics. Caelis Envelope scope and relationship fields associate those
-payloads with the parent Spawn call and durable task identity. A Surface may
-derive a compact text panel from those events, but the formatted text is not the
-protocol or replay authority. Future GUI clients render the same scoped ACP
-payloads with the same components used for a main Agent.
+semantics. Caelis Envelope `scope`, `scope_id`, and `parent_tool` fields
+associate those payloads with the parent Spawn call and durable task identity.
+`delivery` classifies a live-only transient event separately from the temporary
+parent-tool compatibility mirror. `parent_tool` records the real delegated
+relationship whether or not a mirror exists. A semantic child event sets
+`has_parent_tool_mirror` only when the same source frame also emits an actual
+parent terminal compatibility mirror; the parent `tool_call_update` sets
+`is_parent_tool_mirror` only when it carries that terminal text. A status-only
+parent update is not a mirror merely because its tool is Spawn or Task.
+Those fields are Caelis Envelope extensions, never custom fields in the ACP
+update payload root. A Surface may derive a compact text panel from those
+events, but the formatted text is not the protocol or replay authority. Future
+GUI clients render the same scoped ACP payloads with the same components used
+for a main Agent.
 
 The parent receives the delegated final result through the canonical Spawn/Task
 result. Live child events remain transient until a linked semantic child replay
@@ -112,6 +121,17 @@ authority is implemented; they must not be promoted into parent model context
 or reconstructed from terminal text. `control.StreamSubscriber` is a
 transitional in-process source adapter and must move behind a Control-owned
 client event broker rather than becoming an app-server or GUI contract.
+
+New `protocol/acp/projector` stream projections write parent relation and
+delivery facts only to typed Envelope fields. `eventstream.ResolveRelationDelivery`
+owns the one-way typed-first legacy read fallback: each typed pointer is
+authoritative when present, and only its absence permits the corresponding
+metadata fallback. `surfaces/transcript` and the ACP compatibility bridge both
+use that entry point; it neither writes metadata nor carries display policy.
+The fallback exists only for old replay fixtures and legacy Envelope inputs,
+and can be removed after those supported inputs no longer supply the legacy
+metadata layout. The future Control Event Broker must use typed Envelope fields
+rather than `_meta` for correlation, ordering, or durability decisions.
 
 The ordered migration and acceptance criteria are defined in
 [Control and Client Protocol Roadmap](control-client-roadmap.md).

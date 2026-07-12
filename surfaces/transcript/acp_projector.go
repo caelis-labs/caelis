@@ -44,9 +44,14 @@ func ProjectACPEventToEvents(env eventstream.Envelope, surface SurfaceProjector)
 	scopeID := ACPEventScopeID(env)
 	occurredAt := env.OccurredAt
 	meta := MergeMeta(ACPUpdateMeta(env.Update), env.Meta)
-	anchorToolCallID := MetaString(meta, "caelis", "runtime", "stream", "parent_call_id")
-	anchorToolName := MetaString(meta, "caelis", "runtime", "stream", "parent_tool")
-	mirroredToParentTool := MetaBool(meta, "caelis", "runtime", "stream", "mirrored_to_parent_tool")
+	relationDelivery := eventstream.ResolveRelationDelivery(env)
+	parentToolCallID := ""
+	parentToolName := ""
+	if parentTool := relationDelivery.ParentTool; parentTool != nil {
+		parentToolCallID = parentTool.ToolCallID
+		parentToolName = parentTool.ToolName
+	}
+	hasParentToolMirror := relationDelivery.Delivery != nil && relationDelivery.Delivery.HasParentToolMirror
 	out := make([]Event, 0, 2)
 	switch env.Kind {
 	case eventstream.KindSessionUpdate:
@@ -110,9 +115,9 @@ func ProjectACPEventToEvents(env eventstream.Envelope, surface SurfaceProjector)
 	}
 	for i := range out {
 		out[i].TurnID = strings.TrimSpace(env.TurnID)
-		out[i].AnchorToolCallID = anchorToolCallID
-		out[i].AnchorToolName = anchorToolName
-		out[i].MirroredToParentTool = mirroredToParentTool
+		out[i].AnchorToolCallID = parentToolCallID
+		out[i].AnchorToolName = parentToolName
+		out[i].MirroredToParentTool = hasParentToolMirror
 	}
 	return out
 }
