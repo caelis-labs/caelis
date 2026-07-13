@@ -56,6 +56,18 @@ func TestMergeSubagentStreamChunkAcceptsCumulativeReplay(t *testing.T) {
 	}
 }
 
+func TestMergeSubagentNarrativeChunkScopesCumulativeDetectionToMessageID(t *testing.T) {
+	combined, current := mergeSubagentNarrativeChunk("", "", "", "same", "message-1")
+	combined, current = mergeSubagentNarrativeChunk(combined, "message-1", current, "same extended", "message-1")
+	if combined != "same extended" || current != "same extended" {
+		t.Fatalf("same-message cumulative merge = (%q, %q)", combined, current)
+	}
+	combined, current = mergeSubagentNarrativeChunk(combined, "message-1", current, "same extended", "message-2")
+	if combined != "same extendedsame extended" || current != "same extended" {
+		t.Fatalf("different-message prefix merge = (%q, %q), want both messages preserved", combined, current)
+	}
+}
+
 func TestMergeCommandStreamChunkDropsRepeatedLineOverlap(t *testing.T) {
 	existing := "步骤 1/5 - 21:53:13\n步骤 2/5 - 21:53:14\n步骤 3/5 - 21:53:15\n步骤 4/5 - 21:53:16\n"
 	incoming := "步骤 4/5 - 21:53:16\n步骤 5/5 - 21:53:17\n"

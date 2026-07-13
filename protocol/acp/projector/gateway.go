@@ -144,10 +144,14 @@ func SessionEventFinal(event *session.Event) bool {
 }
 
 func isLiveStreamingNarrativeEvent(event *session.Event) bool {
-	if event == nil || strings.TrimSpace(event.ID) != "" {
+	if event == nil {
 		return false
 	}
-	if event.Scope == nil {
+	durableChildMirror := session.IsMirror(event) && event.ChildOrigin != nil
+	if strings.TrimSpace(event.ID) != "" && !durableChildMirror {
+		return false
+	}
+	if event.Scope == nil && !durableChildMirror {
 		return false
 	}
 	updateType := strings.TrimSpace(session.ProtocolSessionUpdateType(event))

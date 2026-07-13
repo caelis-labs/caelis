@@ -25,6 +25,7 @@ func TestProjectACPEventToEventsUsesTypedRelationAndDeliveryWithoutMetadata(t *t
 		Update: schema.ContentChunk{
 			SessionUpdate: schema.UpdateAgentMessage,
 			Content:       schema.TextContent{Type: "text", Text: "subagent output"},
+			MessageID:     "message-1",
 		},
 		Final: true,
 	}, nil)
@@ -34,6 +35,9 @@ func TestProjectACPEventToEventsUsesTypedRelationAndDeliveryWithoutMetadata(t *t
 	event := events[0]
 	if event.AnchorToolCallID != "spawn-1" || event.AnchorToolName != "Spawn" {
 		t.Fatalf("typed event delivery = %#v, want child SPAWN anchor", event)
+	}
+	if event.MessageID != "message-1" {
+		t.Fatalf("typed event message id = %q, want message-1", event.MessageID)
 	}
 }
 

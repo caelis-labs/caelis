@@ -13,6 +13,7 @@ type ToolUpdateMeta struct {
 	TaskTargetKind  string
 	ToolKind        string
 	FullArgs        string
+	MessageID       string
 	Terminal        bool
 	OutputSynthetic bool
 	OutputTerminal  bool
@@ -36,6 +37,7 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 	args := strings.TrimSpace(update.Args)
 	toolKind := strings.TrimSpace(update.Meta.ToolKind)
 	fullArgs := strings.TrimSpace(update.Meta.FullArgs)
+	messageID := strings.TrimSpace(update.Meta.MessageID)
 	taskID := strings.TrimSpace(update.Meta.TaskID)
 	taskAction := strings.ToLower(strings.TrimSpace(update.Meta.TaskAction))
 	taskInput := strings.TrimSpace(update.Meta.TaskInput)
@@ -65,7 +67,7 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 	if !update.Final {
 		if i := openIdx; i >= 0 {
 			ev := &out[i]
-			mergeOpenToolEvent(ev, name, toolKind, args, fullArgs, output, taskID, taskAction, taskInput, taskTargetKind, semanticName, update.Meta.Terminal)
+			mergeOpenToolEvent(ev, name, toolKind, args, fullArgs, output, messageID, taskID, taskAction, taskInput, taskTargetKind, semanticName, update.Meta.Terminal)
 			return out, true, false
 		}
 		out = append(out, SubagentEvent{
@@ -77,6 +79,8 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 			StartArgs:       args,
 			FullArgs:        fullArgs,
 			Output:          output,
+			OutputMessageID: messageID,
+			OutputMessage:   output,
 			Terminal:        update.Meta.Terminal,
 			OutputSynthetic: update.Meta.OutputSynthetic,
 			OutputTerminal:  update.Meta.OutputTerminal,
@@ -97,6 +101,8 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 		StartArgs:       args,
 		FullArgs:        fullArgs,
 		Output:          output,
+		OutputMessageID: messageID,
+		OutputMessage:   output,
 		Terminal:        update.Meta.Terminal,
 		OutputSynthetic: update.Meta.OutputSynthetic,
 		OutputTerminal:  update.Meta.OutputTerminal,
@@ -207,7 +213,7 @@ func updateToolEventIndex(index map[string]int, events []SubagentEvent, callID s
 	delete(index, callID)
 }
 
-func mergeOpenToolEvent(ev *SubagentEvent, name, toolKind, args, fullArgs, output, taskID, taskAction, taskInput, taskTargetKind string, semanticName string, terminal bool) {
+func mergeOpenToolEvent(ev *SubagentEvent, name, toolKind, args, fullArgs, output, messageID, taskID, taskAction, taskInput, taskTargetKind string, semanticName string, terminal bool) {
 	if ev == nil {
 		return
 	}
@@ -242,7 +248,10 @@ func mergeOpenToolEvent(ev *SubagentEvent, name, toolKind, args, fullArgs, outpu
 		if isTerminalPanelToolEvent(*ev) {
 			ev.Output = mergeCommandStreamChunk(ev.Output, output)
 		} else {
-			ev.Output = mergeSubagentStreamChunk(ev.Output, output)
+			ev.Output, ev.OutputMessage = mergeSubagentNarrativeChunk(ev.Output, ev.OutputMessageID, ev.OutputMessage, output, messageID)
+			if messageID != "" {
+				ev.OutputMessageID = messageID
+			}
 		}
 		ev.OutputSynthetic = false
 		if isTerminalPanelToolEvent(*ev) {
@@ -338,6 +347,8 @@ func mergeFinalToolEvent(ev *SubagentEvent, finalEvent *SubagentEvent) {
 	ev.Terminal = ev.Terminal || finalEvent.Terminal
 	if finalToolOutputShouldReplace(*ev, *finalEvent) {
 		ev.Output = finalEvent.Output
+		ev.OutputMessageID = finalEvent.OutputMessageID
+		ev.OutputMessage = finalEvent.OutputMessage
 		ev.OutputSynthetic = finalEvent.OutputSynthetic
 		ev.OutputTerminal = finalEvent.OutputTerminal
 	}

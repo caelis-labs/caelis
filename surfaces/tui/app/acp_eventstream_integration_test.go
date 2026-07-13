@@ -9,8 +9,10 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
+	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/surfaces/transcript"
 )
@@ -453,6 +455,91 @@ func TestHandleACPEventEnvelopeAnchorsSubagentOutputToSpawnTool(t *testing.T) {
 	}
 	if event.TaskID != "task-1" || !strings.Contains(event.Output, "subagent found the issue") {
 		t.Fatalf("spawn event = %#v, want anchored subagent output", event)
+	}
+}
+
+func TestHandleACPEventEnvelopeStreamsDurableChildNarrativeBeforeCompletion(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(240, 0))
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		Scope:     eventstream.ScopeMain,
+		Update: schema.ToolCall{
+			SessionUpdate: schema.UpdateToolCall,
+			ToolCallID:    "spawn-call-1",
+			Title:         "SPAWN explorer: inspect",
+			Kind:          schema.ToolKindExecute,
+			Status:        schema.ToolStatusInProgress,
+			RawInput:      map[string]any{"agent": "explorer", "prompt": "inspect"},
+			Meta:          acpToolNameMeta("SPAWN"),
+		},
+	})
+
+	chunks := []struct {
+		eventID string
+		text    string
+		want    string
+	}{
+		{eventID: "child-mirror-1", text: "first ", want: "first "},
+		{eventID: "child-mirror-2", text: "second", want: "first second"},
+	}
+	for index, chunk := range chunks {
+		event := &session.Event{
+			ID:         chunk.eventID,
+			Seq:        uint64(index + 1),
+			SessionID:  "session-1",
+			Type:       session.EventTypeAssistant,
+			Visibility: session.VisibilityMirror,
+			ChildOrigin: &session.EventChildOrigin{
+				Scope:         session.EventChildScopeSubagent,
+				ScopeID:       "task-1",
+				TaskID:        "task-1",
+				DelegationID:  "task-1",
+				ParticipantID: "child-1",
+				ACPSessionID:  "child-session-1",
+				SourceEventID: chunk.eventID,
+				ParentTool:    session.EventParentTool{CallID: "spawn-call-1", Name: "SPAWN"},
+			},
+			Protocol: &session.EventProtocol{Method: session.ProtocolMethodSessionUpdate, Update: &session.ProtocolUpdate{
+				SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage),
+				MessageID:     "message-1",
+				Content:       session.ProtocolTextContent(chunk.text),
+			}},
+		}
+		base := acpprojector.EnvelopeBaseFromSessionEvent(
+			session.SessionRef{SessionID: "session-1"},
+			event,
+			acpprojector.SessionEventTransport{HandleID: "handle-1", RunID: "run-1", TurnID: "turn-1"},
+		)
+		envelopes := acpprojector.ProjectSessionEventEnvelope(base, event)
+		if len(envelopes) != 1 {
+			t.Fatalf("child projection %d = %#v, want one envelope", index, envelopes)
+		}
+		model = applyACPEnvelopeForTest(t, model, envelopes[0])
+
+		block := requireMainACPTurnBlockForTest(t, model)
+		if len(block.Events) != 1 {
+			t.Fatalf("after child chunk %d main events = %#v, want one Spawn panel", index, block.Events)
+		}
+		spawn := block.Events[0]
+		if spawn.Done {
+			t.Fatalf("after child chunk %d Spawn completed while child is still running: %#v", index, spawn)
+		}
+		if spawn.Output != chunk.want {
+			t.Fatalf("after child chunk %d Spawn output = %q, want %q", index, spawn.Output, chunk.want)
+		}
+	}
+
+	if !model.turnRunning() {
+		t.Fatal("child narrative ended the parent Turn before child completion")
+	}
+	model.syncViewportContent()
+	plain := strings.Join(model.viewportPlainLines, "\n")
+	if strings.Contains(plain, "(wait subagent output)") || !strings.Contains(plain, "first second") {
+		t.Fatalf("running Spawn panel did not replace its placeholder incrementally:\n%s", plain)
 	}
 }
 

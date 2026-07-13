@@ -64,6 +64,7 @@ type Event struct {
 
 	NarrativeKind NarrativeKind
 	NoticeKind    NoticeKind
+	MessageID     string
 	Text          string
 	Final         bool
 

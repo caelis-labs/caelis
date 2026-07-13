@@ -44,6 +44,8 @@ type SubagentEvent struct {
 	StartArgs       string
 	FullArgs        string
 	Output          string
+	OutputMessageID string
+	OutputMessage   string
 	Terminal        bool
 	OutputSynthetic bool
 	OutputTerminal  bool
@@ -157,6 +159,22 @@ func mergeSubagentStreamChunk(existing string, incoming string) string {
 		return existing
 	}
 	return existing + incoming
+}
+
+func mergeSubagentNarrativeChunk(existing string, existingMessageID string, existingMessage string, incoming string, incomingMessageID string) (string, string) {
+	existingMessageID = strings.TrimSpace(existingMessageID)
+	incomingMessageID = strings.TrimSpace(incomingMessageID)
+	if existingMessageID == "" || incomingMessageID == "" {
+		return mergeSubagentStreamChunk(existing, incoming), incoming
+	}
+	if existingMessageID != incomingMessageID {
+		return existing + incoming, incoming
+	}
+	mergedMessage := mergeSubagentStreamChunk(existingMessage, incoming)
+	if existingMessage != "" && strings.HasSuffix(existing, existingMessage) {
+		return strings.TrimSuffix(existing, existingMessage) + mergedMessage, mergedMessage
+	}
+	return mergeSubagentStreamChunk(existing, incoming), mergedMessage
 }
 
 func mergeCommandStreamChunk(existing string, incoming string) string {

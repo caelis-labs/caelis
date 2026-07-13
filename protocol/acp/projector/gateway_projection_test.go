@@ -295,6 +295,24 @@ func TestEnvelopeBaseFromSessionEventUsesDurableChildOrigin(t *testing.T) {
 	if base.Delivery == nil || base.Delivery.Mode != eventstream.DeliveryMirror {
 		t.Fatalf("base delivery = %#v, want mirror", base.Delivery)
 	}
+	if base.Final {
+		t.Fatal("durable child narrative was marked final before its message boundary closed")
+	}
+}
+
+func TestSessionEventFinalKeepsCanonicalAssistantBoundaryFinal(t *testing.T) {
+	event := &session.Event{
+		ID:         "assistant-1",
+		Visibility: session.VisibilityCanonical,
+		Protocol: &session.EventProtocol{Method: session.ProtocolMethodSessionUpdate, Update: &session.ProtocolUpdate{
+			SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage),
+			MessageID:     "message-1",
+			Content:       session.ProtocolTextContent("complete assistant message"),
+		}},
+	}
+	if !SessionEventFinal(event) {
+		t.Fatal("ordinary durable canonical assistant event lost its final boundary")
+	}
 }
 
 func TestProjectSessionEventNotificationsPreservesCustomNotificationsAndAppendsUsage(t *testing.T) {

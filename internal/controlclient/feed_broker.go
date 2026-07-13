@@ -56,6 +56,7 @@ type FeedBroker struct {
 	generation string
 	now        func() time.Time
 	primeMu    sync.Mutex
+	done       chan struct{}
 
 	mu            sync.Mutex
 	ring          []feedRingItem
@@ -67,6 +68,10 @@ type FeedBroker struct {
 	transientSeq  uint64
 	closed        bool
 }
+
+// Attached ingress owns no caller context, so recoverable durable-read
+// failures are retried with a small bounded cadence until the broker closes.
+const attachPublishRetryInterval = 10 * time.Millisecond
 
 // NewFeedBroker constructs a broker. CursorCodec and Session ID are required.
 func NewFeedBroker(cfg FeedBrokerConfig) (*FeedBroker, error) {
@@ -99,7 +104,7 @@ func NewFeedBroker(cfg FeedBrokerConfig) (*FeedBroker, error) {
 		ref: cfg.SessionRef, reader: cfg.Reader, codec: cfg.CursorCodec,
 		ringEvents: cfg.RingEvents, ringBytes: cfg.RingBytes, ringTTL: cfg.RingTTL,
 		queueSize: cfg.SubscriberQueue, generation: cfg.Generation, now: cfg.Now,
-		seen: map[string]struct{}{}, subscribers: map[*feedSubscription]struct{}{},
+		done: make(chan struct{}), seen: map[string]struct{}{}, subscribers: map[*feedSubscription]struct{}{},
 	}, nil
 }
 
@@ -409,7 +414,20 @@ func (b *FeedBroker) Attach(events <-chan eventstream.Envelope) {
 	}
 	go func() {
 		for envelope := range events {
-			_ = b.Publish(envelope)
+			for {
+				if err := b.Publish(envelope); err == nil {
+					break
+				}
+				timer := time.NewTimer(attachPublishRetryInterval)
+				select {
+				case <-b.done:
+					if !timer.Stop() {
+						<-timer.C
+					}
+					return
+				case <-timer.C:
+				}
+			}
 		}
 	}()
 }
@@ -447,6 +465,7 @@ func (b *FeedBroker) Close() error {
 		return nil
 	}
 	b.closed = true
+	close(b.done)
 	for subscriber := range b.subscribers {
 		b.stopSubscriberLocked(subscriber, nil)
 	}

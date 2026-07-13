@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	controlclientport "github.com/caelis-labs/caelis/ports/controlclient"
 	"github.com/caelis-labs/caelis/ports/gateway"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
@@ -78,6 +79,30 @@ func TestGatewayTurnEventsReturnsSameStream(t *testing.T) {
 	}
 }
 
+func TestGatewayTurnSubscriptionFailureEmitsErrorAndInterruptedTerminal(t *testing.T) {
+	events := make(chan eventstream.Envelope, 1)
+	events <- eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		Scope:     eventstream.ScopeSubagent,
+		ScopeID:   "task-1",
+	}
+	close(events)
+	turn := &gatewayTurn{
+		handle:       &testGatewayTurnHandle{},
+		subscription: &errorFeedSubscription{events: events, err: controlclientport.ErrSlowConsumer},
+	}
+
+	out := collectAdapterTurnEvents(turn.Events())
+	if len(out) != 3 {
+		t.Fatalf("events = %#v, want child envelope, delivery error, interrupted terminal", out)
+	}
+	if out[0].Scope != eventstream.ScopeSubagent || out[1].Kind != eventstream.KindError || !errors.Is(out[1].Err, controlclientport.ErrSlowConsumer) {
+		t.Fatalf("subscription failure sequence = %#v", out)
+	}
+	assertAdapterLifecycleState(t, out[2], eventstream.LifecycleStateInterrupted)
+}
+
 func TestGatewayTurnSubmitApprovalForwardsRequestID(t *testing.T) {
 	handle := &testGatewayTurnHandle{}
 	turn := newGatewayTurn(handle, nil)
@@ -109,6 +134,21 @@ type testGatewayTurnHandle struct {
 	acpEvents <-chan eventstream.Envelope
 	submitted []gateway.SubmitRequest
 }
+
+type errorFeedSubscription struct {
+	events <-chan eventstream.Envelope
+	err    error
+}
+
+func (s *errorFeedSubscription) Events() <-chan eventstream.Envelope { return s.events }
+func (*errorFeedSubscription) BackfillDone() <-chan struct{} {
+	done := make(chan struct{})
+	close(done)
+	return done
+}
+func (*errorFeedSubscription) Close() error       { return nil }
+func (s *errorFeedSubscription) Err() error       { return s.err }
+func (*errorFeedSubscription) LastCursor() string { return "" }
 
 func (h *testGatewayTurnHandle) HandleID() string { return "handle-1" }
 func (h *testGatewayTurnHandle) RunID() string    { return "run-1" }

@@ -2,7 +2,9 @@ package controladapter
 
 import (
 	"context"
+	"errors"
 	"iter"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -14,6 +16,7 @@ import (
 	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	internalcontrolclient "github.com/caelis-labs/caelis/internal/controlclient"
+	controlclientport "github.com/caelis-labs/caelis/ports/controlclient"
 	"github.com/caelis-labs/caelis/ports/gateway"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
@@ -225,6 +228,166 @@ func TestLiveFeedBrokerPersistsChildMirrorBeforePublishing(t *testing.T) {
 	assertBrokerMainTerminal(t, receiveBrokerEnvelope(t, events))
 	requireBrokerChannelClosed(t, events)
 	waitBrokerDone(t, turn.feed)
+}
+
+func TestControlSessionFeedPublishesDurableChildMirrorWithTaskScopeWhileRunning(t *testing.T) {
+	ctx := context.Background()
+	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{SessionIDGenerator: func() string { return "session-1" }}))
+	parent, err := sessions.StartSession(ctx, session.StartSessionRequest{
+		AppName: "caelis", UserID: "user-1", PreferredSessionID: "session-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	codec, err := eventstream.NewCursorCodec(eventstream.CursorCodecConfig{Secret: []byte("0123456789abcdef0123456789abcdef")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	feeds, err := internalcontrolclient.NewFeedRegistry(internalcontrolclient.FeedRegistryConfig{
+		Reader: sessions, CursorCodec: codec, SubscriberQueue: 16,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	feed, err := feeds.Session(parent.SessionRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	live, err := feed.SubscribeFromNow()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer live.Close()
+
+	source := make(chan eventstream.Envelope, 2)
+	streams := newBrokerTestStreamService()
+	ingress := newLiveFeedBroker(
+		newBrokerTestHandle(source),
+		func() stream.Service { return streams },
+		internalcontrolclient.NewChildRecorder(sessions),
+	)
+	feed.Attach(ingress.Events())
+
+	source <- brokerRunningToolEnvelope("SPAWN", "spawn-call-1", "task-1", "spawn-terminal-1")
+	assertBrokerToolCallID(t, receiveBrokerEnvelope(t, live.Events()), "spawn-call-1")
+	waitBrokerSignal(t, streams.started, "production task stream start")
+	streams.frames <- stream.Frame{
+		Ref:     brokerStreamRef("task-1", "spawn-terminal-1"),
+		Cursor:  stream.Cursor{Events: 1},
+		Running: true,
+		Event:   brokerChildMessageEvent("child-message-1", "visible before completion"),
+	}
+	child := receiveBrokerEnvelope(t, live.Events())
+	assertDurableChildFeedEnvelope(t, child)
+
+	page, err := sessions.EventsPage(ctx, session.EventPageRequest{
+		SessionRef: parent.SessionRef, Visibility: session.EventPageClientReplay,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Events) != 1 || page.Events[0].ChildOrigin == nil || page.Events[0].ChildOrigin.ScopeID != "task-1" {
+		t.Fatalf("stored child origin = %#v, want task scope", page.Events)
+	}
+
+	source <- eventstream.TurnCompleted("handle-1", "run-1", "turn-1", time.Unix(12, 0))
+	close(source)
+	assertBrokerMainTerminal(t, receiveBrokerEnvelope(t, live.Events()))
+	waitBrokerDone(t, ingress)
+
+	replay, err := feed.Subscribe(ctx, controlclientport.SubscribeRequest{SessionID: "session-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer replay.Subscription.Close()
+	replayed := receiveBrokerEnvelope(t, replay.Subscription.Events())
+	assertDurableChildFeedEnvelope(t, replayed)
+	if replayed.Update != nil && child.Update != nil && !reflect.DeepEqual(replayed.Update, child.Update) {
+		t.Fatalf("live/replay child update mismatch:\nlive=%#v\nreplay=%#v", child.Update, replayed.Update)
+	}
+}
+
+func assertDurableChildFeedEnvelope(t *testing.T, child eventstream.Envelope) {
+	t.Helper()
+	if child.Scope != eventstream.ScopeSubagent || child.ScopeID != "task-1" {
+		t.Fatalf("child scope = (%q, %q), want (subagent, task-1): %#v", child.Scope, child.ScopeID, child)
+	}
+	if child.ParentTool == nil || child.ParentTool.ToolCallID != "spawn-call-1" || child.ParentTool.ToolName != "SPAWN" {
+		t.Fatalf("child parent relation = %#v, want Spawn call", child.ParentTool)
+	}
+	if child.Delivery == nil || child.Delivery.Mode != eventstream.DeliveryMirror || child.Position == nil || child.Position.Durable == nil || child.Cursor == "" {
+		t.Fatalf("child durable delivery = %#v position=%#v cursor=%q", child.Delivery, child.Position, child.Cursor)
+	}
+	if child.Final {
+		t.Fatalf("running child narrative is final: %#v", child)
+	}
+	update, ok := child.Update.(schema.ContentChunk)
+	if !ok || update.SessionUpdate != schema.UpdateAgentMessage || update.MessageID != "child-message-1" {
+		t.Fatalf("child update = %#v, want message child-message-1", child.Update)
+	}
+}
+
+func TestLiveFeedBrokerRetriesChildSnapshotWithoutAdvancingCursorAfterRecorderFailure(t *testing.T) {
+	ctx := context.Background()
+	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{SessionIDGenerator: func() string { return "session-1" }}))
+	if _, err := sessions.StartSession(ctx, session.StartSessionRequest{
+		AppName: "caelis", UserID: "user-1", PreferredSessionID: "session-1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	appender := &recoverableChildAppender{delegate: sessions}
+	source := make(chan eventstream.Envelope, 2)
+	streams := newBrokerReadStreamService()
+	turn := newGatewayTurn(
+		newBrokerTestHandle(source),
+		func() stream.Service { return streams },
+		internalcontrolclient.NewChildRecorder(appender),
+	)
+	events := turn.Events()
+
+	source <- brokerRunningToolEnvelope("SPAWN", "spawn-call-1", "task-1", "spawn-terminal-1")
+	receiveBrokerEnvelope(t, events)
+	firstRead := waitBrokerRead(t, streams.reads, "first child mirror Read")
+	frame := stream.Frame{
+		Ref:     brokerStreamRef("task-1", "spawn-terminal-1"),
+		Cursor:  stream.Cursor{Events: 1},
+		Running: true,
+		Event:   brokerChildMessageEvent("child-message-1", "retry me"),
+	}
+	respondBrokerRead(t, firstRead, stream.Snapshot{
+		Ref: firstRead.Request.Ref, Cursor: stream.Cursor{Events: 1}, Running: true, Frames: []stream.Frame{frame},
+	})
+
+	retryRead := waitBrokerRead(t, streams.reads, "child mirror retry Read")
+	if retryRead.Request.Cursor.Events != 0 {
+		t.Fatalf("recorder failure advanced source cursor to %+v, want unchanged cursor", retryRead.Request.Cursor)
+	}
+	respondBrokerRead(t, retryRead, stream.Snapshot{
+		Ref: retryRead.Request.Ref, Cursor: stream.Cursor{Events: 1}, Running: true, Frames: []stream.Frame{frame},
+	})
+	child := receiveBrokerEnvelope(t, events)
+	if child.Err != nil || child.Kind == eventstream.KindError {
+		t.Fatalf("retried child projection = %#v, want semantic envelope", child)
+	}
+	if child.Scope != eventstream.ScopeSubagent || child.ScopeID != "task-1" || child.ParentTool == nil || child.ParentTool.ToolCallID != "spawn-call-1" {
+		t.Fatalf("retried child relation = %#v, want task-1 under spawn-call-1", child)
+	}
+	if child.Delivery == nil || child.Delivery.Mode != eventstream.DeliveryMirror || child.EventID == "" {
+		t.Fatalf("retried child delivery = %#v event=%q, want durable mirror", child.Delivery, child.EventID)
+	}
+
+	source <- eventstream.TurnCompleted("handle-1", "run-1", "turn-1", time.Unix(12, 0))
+	close(source)
+	finalRead := waitBrokerRead(t, streams.reads, "recorder retry final Read")
+	respondBrokerRead(t, finalRead, stream.Snapshot{
+		Ref: finalRead.Request.Ref, Cursor: stream.Cursor{Events: 1}, Running: true,
+	})
+	assertBrokerMainTerminal(t, receiveBrokerEnvelope(t, events))
+	requireBrokerChannelClosed(t, events)
+	waitBrokerDone(t, turn.feed)
+	if calls := appender.calls.Load(); calls != 2 {
+		t.Fatalf("child appender calls = %d, want one recoverable failure and one successful retry", calls)
+	}
 }
 
 func TestLiveFeedBrokerForwardsControlPublishedChildPermission(t *testing.T) {
@@ -660,6 +823,18 @@ type brokerTestHandle struct {
 	closeFn     func() error
 	cancelCalls atomic.Int32
 	closeCalls  atomic.Int32
+}
+
+type recoverableChildAppender struct {
+	delegate session.EventAppender
+	calls    atomic.Int32
+}
+
+func (a *recoverableChildAppender) AppendEvent(ctx context.Context, req session.AppendEventRequest) (*session.Event, error) {
+	if a.calls.Add(1) == 1 {
+		return nil, errors.New("recoverable child recorder failure")
+	}
+	return a.delegate.AppendEvent(ctx, req)
 }
 
 func newBrokerTestHandle(events <-chan eventstream.Envelope) *brokerTestHandle {
