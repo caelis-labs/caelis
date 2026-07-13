@@ -11,7 +11,7 @@ import (
 	controlport "github.com/caelis-labs/caelis/ports/controlclient"
 )
 
-func TestCloseSessionPersistsLifecycleGateAndIsIdempotentDuringRuntimeLease(t *testing.T) {
+func TestCloseSessionRequiresQuiescentLeaseAndIsIdempotent(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	service := sessionmemory.NewService(sessionmemory.NewStore(sessionmemory.Config{}))
@@ -28,17 +28,21 @@ func TestCloseSessionPersistsLifecycleGateAndIsIdempotentDuringRuntimeLease(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() {
-		if err := leaseStore.ReleaseSessionLease(ctx, session.ReleaseSessionLeaseRequest{
-			SessionRef: active.SessionRef, LeaseID: lease.LeaseID, OwnerID: lease.OwnerID, ExpectedLeaseRevision: lease.Revision,
-		}); err != nil {
-			t.Errorf("release runtime lease: %v", err)
-		}
-	}()
+	if _, err := CloseSession(ctx, service, active, "premature"); !errors.Is(err, session.ErrLeaseConflict) {
+		t.Fatalf("CloseSession() under runtime lease = %v, want ErrLeaseConflict", err)
+	}
+	if isClosed, err := IsSessionClosed(ctx, service, active.SessionRef); err != nil || isClosed {
+		t.Fatalf("IsSessionClosed() after rejected close = %v, %v", isClosed, err)
+	}
+	if err := leaseStore.ReleaseSessionLease(ctx, session.ReleaseSessionLeaseRequest{
+		SessionRef: active.SessionRef, LeaseID: lease.LeaseID, OwnerID: lease.OwnerID, ExpectedLeaseRevision: lease.Revision,
+	}); err != nil {
+		t.Fatalf("release runtime lease: %v", err)
+	}
 
 	closed, err := CloseSession(ctx, service, active, "done")
 	if err != nil {
-		t.Fatalf("CloseSession() under runtime lease = %v", err)
+		t.Fatalf("CloseSession() after runtime quiescence = %v", err)
 	}
 	if closed.Revision != active.Revision+1 {
 		t.Fatalf("closed revision = %d, want %d", closed.Revision, active.Revision+1)

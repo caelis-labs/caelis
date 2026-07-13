@@ -39,11 +39,27 @@ func TestControlMutationGuardWithRuntimeLeaseCarriesExactFence(t *testing.T) {
 	}
 }
 
-func TestValidateControlMutationGuardRejectsPartialFence(t *testing.T) {
-	guard := session.ControlMutationGuard(session.ControlMutationPurposeHandoff)
-	guard.LeaseID = "lease-a"
-	if err := session.ValidateControlMutationGuard(guard); !errors.Is(err, session.ErrLeaseConflict) {
-		t.Fatalf("ValidateControlMutationGuard() error = %v, want ErrLeaseConflict", err)
+func TestValidateControlMutationGuardFailsClosed(t *testing.T) {
+	tests := []struct {
+		name  string
+		guard session.MutationGuard
+	}{
+		{name: "unknown purpose", guard: session.ControlMutationGuard("future_unknown")},
+		{name: "unfenced handoff", guard: session.ControlMutationGuard(session.ControlMutationPurposeHandoff)},
+		{name: "unfenced coordinator", guard: session.ControlMutationGuard(session.ControlMutationPurposeCoordinator)},
+		{name: "partial fence", guard: session.MutationGuard{
+			Authority: session.MutationAuthorityControl, Purpose: session.ControlMutationPurposeHandoff, LeaseID: "lease-a",
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if err := session.ValidateControlMutationGuard(test.guard); !errors.Is(err, session.ErrLeaseConflict) {
+				t.Fatalf("ValidateControlMutationGuard() error = %v, want ErrLeaseConflict", err)
+			}
+		})
+	}
+	if err := session.ValidateControlMutationGuard(session.ControlMutationGuard(session.ControlMutationPurposeConfiguration)); err != nil {
+		t.Fatalf("ValidateControlMutationGuard(configuration) error = %v", err)
 	}
 }
 
@@ -56,6 +72,8 @@ func TestControlMutationOverlapPolicyFailsUnknownPurposeClosed(t *testing.T) {
 		{purpose: session.ControlMutationPurposeWatchdog, want: true},
 		{purpose: session.ControlMutationPurposeParticipant, want: true},
 		{purpose: session.ControlMutationPurposeSystemCommit, want: true},
+		{purpose: session.ControlMutationPurposeLifecycle, want: false},
+		{purpose: session.ControlMutationPurposeConfiguration, want: false},
 		{purpose: session.ControlMutationPurposeHandoff, want: false},
 		{purpose: session.ControlMutationPurposeCoordinator, want: false},
 		{purpose: session.ControlMutationPurpose("future_unknown"), want: false},

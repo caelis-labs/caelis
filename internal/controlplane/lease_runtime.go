@@ -271,7 +271,7 @@ func (g *sessionLeaseGuard) heartbeatOnce() error {
 	g.mu.Lock()
 	lease := g.lease
 	g.mu.Unlock()
-	ctx, cancel := context.WithTimeout(context.Background(), g.interval)
+	ctx, cancel := context.WithTimeout(context.Background(), g.ttl)
 	next, err := g.leases.HeartbeatSessionLease(ctx, session.HeartbeatSessionLeaseRequest{
 		SessionRef: lease.SessionRef, LeaseID: lease.LeaseID, OwnerID: lease.OwnerID,
 		ExpectedLeaseRevision: lease.Revision, TTL: g.ttl,
@@ -281,7 +281,7 @@ func (g *sessionLeaseGuard) heartbeatOnce() error {
 		if next.LeaseID == lease.LeaseID && next.Revision > lease.Revision {
 			err = nil
 		} else if reader, ok := g.leases.(session.SessionLeaseReader); ok {
-			ctx, cancel = context.WithTimeout(context.Background(), g.interval)
+			ctx, cancel = context.WithTimeout(context.Background(), g.ttl)
 			next, err = reader.SessionLease(ctx, lease.SessionRef)
 			cancel()
 		}

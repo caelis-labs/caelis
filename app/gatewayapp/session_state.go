@@ -48,7 +48,7 @@ func (s *Stack) updateSessionState(
 	return s.Sessions.UpdateState(ctx, session.UpdateStateRequest{
 		SessionRef:       ref,
 		ExpectedRevision: &current.Revision,
-		MutationGuard:    session.ControlMutationGuard(session.ControlMutationPurposeCoordinator),
+		MutationGuard:    session.ControlMutationGuard(session.ControlMutationPurposeConfiguration),
 		Update:           update,
 	})
 }
@@ -61,7 +61,7 @@ func (s *Stack) replaceSessionState(ctx context.Context, ref session.SessionRef,
 	return s.Sessions.ReplaceState(ctx, session.ReplaceStateRequest{
 		SessionRef:       ref,
 		ExpectedRevision: &current.Revision,
-		MutationGuard:    session.ControlMutationGuard(session.ControlMutationPurposeCoordinator),
+		MutationGuard:    session.ControlMutationGuard(session.ControlMutationPurposeConfiguration),
 		State:            state,
 	})
 }

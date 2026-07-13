@@ -19,6 +19,14 @@ import (
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
+func TestClassifyControlBackendErrorTreatsLeaseConflictAsConflict(t *testing.T) {
+	err := classifyControlBackendError(&session.LeaseConflictError{SessionID: "session-1", Detail: "active execution lease"})
+	var outcomeErr *controlport.OutcomeError
+	if !errors.As(err, &outcomeErr) || outcomeErr.Outcome != controlport.OutcomeConflicted {
+		t.Fatalf("classifyControlBackendError() = %v, want conflicted outcome", err)
+	}
+}
+
 func TestAttachControlClientHandleUsesSharedTaskIngress(t *testing.T) {
 	t.Parallel()
 

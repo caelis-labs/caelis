@@ -257,7 +257,9 @@ func TestCoordinatorDeactivatesNewEndpointWhenAtomicCommitFails(t *testing.T) {
 	ctx := context.Background()
 	base, activeSession := newControlTestSession(t, "handoff-failure")
 	commitErr := errors.New("commit failed")
-	sessions := failingHandoffService{Service: base, err: commitErr}
+	sessions := failingHandoffService{
+		Service: base, SessionLeaseService: base.(session.SessionLeaseService), err: commitErr,
+	}
 	router, err := NewContextRouter(sessions)
 	if err != nil {
 		t.Fatal(err)
@@ -296,9 +298,10 @@ func TestCoordinatorKeepsActivationWhenCommitReportsAlreadyCommitted(t *testing.
 		Kind: session.ControllerKindACP, ControllerID: "remote-1", AgentName: "codex", EpochID: "remote-epoch",
 	}
 	sessions := committedHandoffService{
-		Service: base,
-		binding: committedBinding,
-		err:     &session.CommittedError{Err: errors.New("index write failed after commit")},
+		Service:             base,
+		SessionLeaseService: base.(session.SessionLeaseService),
+		binding:             committedBinding,
+		err:                 &session.CommittedError{Err: errors.New("index write failed after commit")},
 	}
 	router, err := NewContextRouter(sessions)
 	if err != nil {
@@ -374,6 +377,7 @@ func TestCoordinatorOwnsControllerProcessReattachAndBindingRefresh(t *testing.T)
 
 type failingHandoffService struct {
 	session.Service
+	session.SessionLeaseService
 	err error
 }
 
@@ -383,14 +387,16 @@ func (s failingHandoffService) BindControllerWithEvent(context.Context, session.
 
 type committedHandoffService struct {
 	session.Service
+	session.SessionLeaseService
 	binding session.ControllerBinding
 	err     error
 }
 
-func (s committedHandoffService) BindControllerWithEvent(_ context.Context, req session.BindControllerWithEventRequest) (session.Session, *session.Event, error) {
-	updated, err := s.BindController(context.Background(), session.BindControllerRequest{
-		SessionRef: req.SessionRef,
-		Binding:    s.binding,
+func (s committedHandoffService) BindControllerWithEvent(ctx context.Context, req session.BindControllerWithEventRequest) (session.Session, *session.Event, error) {
+	updated, err := s.BindController(ctx, session.BindControllerRequest{
+		SessionRef:    req.SessionRef,
+		MutationGuard: req.MutationGuard,
+		Binding:       s.binding,
 	})
 	if err != nil {
 		return session.Session{}, nil, err

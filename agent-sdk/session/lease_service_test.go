@@ -3,6 +3,7 @@ package session_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -106,6 +107,78 @@ func TestSessionLeaseServiceConformance(t *testing.T) {
 	}
 }
 
+func TestSessionLeaseExpiryBoundaryConformance(t *testing.T) {
+	t.Parallel()
+	for _, store := range []string{"memory", "file"} {
+		store := store
+		t.Run(store, func(t *testing.T) {
+			t.Parallel()
+			clock := &leaseTestClock{now: time.Unix(1_000, 0)}
+			var service session.Service
+			switch store {
+			case "memory":
+				service = inmemory.NewService(inmemory.NewStore(inmemory.Config{Clock: clock.Now}))
+			case "file":
+				service = sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir(), Clock: clock.Now}))
+			}
+			active, err := service.StartSession(context.Background(), session.StartSessionRequest{
+				AppName: "caelis", UserID: "user-1", PreferredSessionID: "lease-boundary",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			leases := service.(session.SessionLeaseService)
+			const ttl = time.Minute
+			old, err := leases.AcquireSessionLease(context.Background(), session.AcquireSessionLeaseRequest{
+				SessionRef: active.SessionRef, OwnerID: "old-owner", TTL: ttl,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			clock.Advance(ttl)
+			_, err = leases.HeartbeatSessionLease(context.Background(), session.HeartbeatSessionLeaseRequest{
+				SessionRef: active.SessionRef, LeaseID: old.LeaseID, OwnerID: old.OwnerID,
+				ExpectedLeaseRevision: old.Revision, TTL: ttl,
+			})
+			requireLeaseConflictDetail(t, err, "lease has expired")
+
+			current, err := leases.AcquireSessionLease(context.Background(), session.AcquireSessionLeaseRequest{
+				SessionRef: active.SessionRef, OwnerID: "new-owner", TTL: ttl,
+			})
+			if err != nil {
+				t.Fatalf("takeover at exact expiry = %v", err)
+			}
+			err = leases.ReleaseSessionLease(context.Background(), session.ReleaseSessionLeaseRequest{
+				SessionRef: active.SessionRef, LeaseID: old.LeaseID, OwnerID: old.OwnerID, ExpectedLeaseRevision: old.Revision,
+			})
+			requireLeaseConflictDetail(t, err, "lease identity, owner, or revision mismatch")
+
+			message := model.NewTextMessage(model.RoleUser, "old owner")
+			oldGuard := session.MutationGuard{
+				Authority: session.MutationAuthorityRuntime, LeaseID: old.LeaseID,
+				OwnerID: old.OwnerID, FencingToken: old.FencingToken,
+			}
+			_, err = service.AppendEvent(context.Background(), session.AppendEventRequest{
+				SessionRef: active.SessionRef, MutationGuard: oldGuard,
+				Event: &session.Event{Type: session.EventTypeUser, Message: &message},
+			})
+			requireLeaseConflictDetail(t, err, "runtime fencing token is stale")
+
+			if err := leases.ReleaseSessionLease(context.Background(), session.ReleaseSessionLeaseRequest{
+				SessionRef: active.SessionRef, LeaseID: current.LeaseID, OwnerID: current.OwnerID,
+				ExpectedLeaseRevision: current.Revision,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			_, err = service.AppendEvent(context.Background(), session.AppendEventRequest{
+				SessionRef: active.SessionRef, MutationGuard: oldGuard,
+				Event: &session.Event{Type: session.EventTypeUser, Message: &message},
+			})
+			requireLeaseConflictDetail(t, err, "runtime lease is absent or expired")
+		})
+	}
+}
+
 func assertLeaseFencedMutations(
 	t *testing.T,
 	service session.Service,
@@ -163,6 +236,16 @@ func assertLeaseFencedMutations(
 		SessionRef: ref, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeHandoff), Event: &session.Event{Type: session.EventTypeUser, Message: &controlMessage},
 	}); !errors.Is(err, session.ErrLeaseConflict) {
 		t.Fatalf("unfenced handoff AppendEvent error = %v, want ErrLeaseConflict", err)
+	}
+	for _, purpose := range []session.ControlMutationPurpose{
+		session.ControlMutationPurposeLifecycle,
+		session.ControlMutationPurposeConfiguration,
+	} {
+		if _, err := service.AppendEvent(context.Background(), session.AppendEventRequest{
+			SessionRef: ref, MutationGuard: session.ControlMutationGuard(purpose), Event: &session.Event{Type: session.EventTypeUser, Message: &controlMessage},
+		}); !errors.Is(err, session.ErrLeaseConflict) {
+			t.Fatalf("overlapping %s AppendEvent error = %v, want ErrLeaseConflict", purpose, err)
+		}
 	}
 	staleControl := session.MutationGuard{
 		Authority: session.MutationAuthorityControl, Purpose: session.ControlMutationPurposeHandoff,
@@ -243,8 +326,46 @@ func assertLeaseFencedMutations(
 		SessionRef:    ref,
 		MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeHandoff),
 		Event:         &session.Event{Type: session.EventTypeUser, Message: &controlMessage},
+	}); !errors.Is(err, session.ErrLeaseConflict) {
+		t.Fatalf("quiescent unfenced handoff AppendEvent error = %v, want ErrLeaseConflict", err)
+	}
+	if _, err := service.AppendEvent(context.Background(), session.AppendEventRequest{
+		SessionRef:    ref,
+		MutationGuard: session.ControlMutationGuard("future_unknown"),
+		Event:         &session.Event{Type: session.EventTypeUser, Message: &controlMessage},
+	}); !errors.Is(err, session.ErrLeaseConflict) {
+		t.Fatalf("unknown control purpose AppendEvent error = %v, want ErrLeaseConflict", err)
+	}
+	if _, err := service.AppendEvent(context.Background(), session.AppendEventRequest{
+		SessionRef:    ref,
+		MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeConfiguration),
+		Event:         &session.Event{Type: session.EventTypeUser, Message: &controlMessage},
 	}); err != nil {
-		t.Fatalf("quiescent unfenced handoff AppendEvent error = %v", err)
+		t.Fatalf("quiescent configuration AppendEvent error = %v", err)
+	}
+
+	leases := service.(session.SessionLeaseService)
+	fresh, err := leases.AcquireSessionLease(context.Background(), session.AcquireSessionLeaseRequest{
+		SessionRef: ref, OwnerID: current.OwnerID, TTL: time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("same-owner reacquire error = %v", err)
+	}
+	if fresh.LeaseID == current.LeaseID || fresh.FencingToken <= current.FencingToken {
+		t.Fatalf("same-owner fresh lease = %#v, want distinct LeaseID and increasing fence after %#v", fresh, current)
+	}
+	if err := leases.ReleaseSessionLease(context.Background(), session.ReleaseSessionLeaseRequest{
+		SessionRef: ref, LeaseID: fresh.LeaseID, OwnerID: fresh.OwnerID, ExpectedLeaseRevision: fresh.Revision,
+	}); err != nil {
+		t.Fatalf("release same-owner fresh lease error = %v", err)
+	}
+}
+
+func requireLeaseConflictDetail(t *testing.T, err error, detail string) {
+	t.Helper()
+	var conflict *session.LeaseConflictError
+	if !errors.As(err, &conflict) || !strings.Contains(conflict.Detail, detail) {
+		t.Fatalf("lease conflict = %v, want detail containing %q", err, detail)
 	}
 }
 

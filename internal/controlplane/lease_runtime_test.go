@@ -12,6 +12,7 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
 )
 
@@ -111,6 +112,109 @@ func TestLeasedRuntimeHeartbeatsDuringSynchronousRuntimeStartup(t *testing.T) {
 	for _, eventErr := range run.Handle.Events() {
 		if eventErr != nil {
 			t.Fatal(eventErr)
+		}
+	}
+}
+
+func TestLeasedRuntimeHeartbeatWaitsThroughFileRootContentionWithinTTL(t *testing.T) {
+	root := t.TempDir()
+	primary := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{RootDir: root}))
+	contender := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{RootDir: root}))
+	active, err := primary.StartSession(context.Background(), session.StartSessionRequest{
+		AppName: "caelis", UserID: "user-1", PreferredSessionID: "leased-root-contention",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocked, err := primary.StartSession(context.Background(), session.StartSessionRequest{
+		AppName: "caelis", UserID: "user-1", PreferredSessionID: "root-lock-blocker",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const (
+		ttl      = 600 * time.Millisecond
+		interval = 40 * time.Millisecond
+	)
+	leasing := &observedHeartbeatLeaseService{
+		SessionLeaseService: primary,
+		started:             make(chan time.Duration, 1),
+		completed:           make(chan observedHeartbeatResult, 1),
+	}
+	runner := newLeaseTestRunner("run-root-contention")
+	wrapper, err := NewLeasedRuntime(LeasedRuntimeConfig{
+		Runtime: leaseTestRuntime{runner: runner}, Leases: leasing,
+		OwnerID: "host-a", TTL: ttl, HeartbeatInterval: interval,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := wrapper.Run(context.Background(), agent.RunRequest{SessionRef: active.SessionRef})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	lockHeld := make(chan struct{})
+	releaseLock := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseLock) }) }
+	defer func() {
+		release()
+		runner.finish()
+		_ = run.Handle.Close()
+	}()
+	writeDone := make(chan error, 1)
+	go func() {
+		_, updateErr := contender.UpdateState(context.Background(), session.UpdateStateRequest{
+			SessionRef:    blocked.SessionRef,
+			MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeConfiguration),
+			Update: func(state map[string]any) (map[string]any, error) {
+				close(lockHeld)
+				<-releaseLock
+				state["completed"] = true
+				return state, nil
+			},
+		})
+		writeDone <- updateErr
+	}()
+
+	select {
+	case <-lockHeld:
+	case <-time.After(time.Second):
+		t.Fatal("file root lock was not acquired")
+	}
+	var heartbeatBudget time.Duration
+	select {
+	case heartbeatBudget = <-leasing.started:
+	case <-time.After(time.Second):
+		t.Fatal("heartbeat did not start behind the file root lock")
+	}
+	if heartbeatBudget < ttl/2 {
+		t.Fatalf("heartbeat context budget = %v, want lease-validity budget rather than one %v interval", heartbeatBudget, interval)
+	}
+
+	timer := time.NewTimer(3 * interval)
+	<-timer.C
+	release()
+	if err := <-writeDone; err != nil {
+		t.Fatalf("blocking file state update = %v", err)
+	}
+	result := <-leasing.completed
+	if result.err != nil || result.lease.Revision <= 1 {
+		t.Fatalf("heartbeat after root contention = %#v, %v", result.lease, result.err)
+	}
+	runner.mu.Lock()
+	cancelCalls := runner.cancel
+	runner.mu.Unlock()
+	if cancelCalls != 0 {
+		t.Fatalf("runner cancel calls = %d, want healthy Runtime retained", cancelCalls)
+	}
+
+	runner.finish()
+	for _, eventErr := range run.Handle.Events() {
+		if eventErr != nil {
+			t.Fatalf("Events() after root contention = %v", eventErr)
 		}
 	}
 }
@@ -529,6 +633,35 @@ func (s *committedOutcomeLeaseService) HeartbeatSessionLease(ctx context.Context
 type heartbeatFailLeaseService struct {
 	session.SessionLeaseService
 	err error
+}
+
+type observedHeartbeatResult struct {
+	lease session.SessionLease
+	err   error
+}
+
+type observedHeartbeatLeaseService struct {
+	session.SessionLeaseService
+	started   chan time.Duration
+	completed chan observedHeartbeatResult
+	once      sync.Once
+}
+
+func (s *observedHeartbeatLeaseService) HeartbeatSessionLease(
+	ctx context.Context,
+	req session.HeartbeatSessionLeaseRequest,
+) (session.SessionLease, error) {
+	budget := time.Duration(-1)
+	if deadline, ok := ctx.Deadline(); ok {
+		budget = time.Until(deadline)
+	}
+	s.once.Do(func() { s.started <- budget })
+	lease, err := s.SessionLeaseService.HeartbeatSessionLease(ctx, req)
+	select {
+	case s.completed <- observedHeartbeatResult{lease: lease, err: err}:
+	default:
+	}
+	return lease, err
 }
 
 type releaseErrorLeaseService struct{ session.SessionLeaseService }

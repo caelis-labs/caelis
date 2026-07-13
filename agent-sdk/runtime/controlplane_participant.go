@@ -45,7 +45,7 @@ func (r *Runtime) AttachParticipant(ctx context.Context, req agent.AttachPartici
 	activeSession, err = r.ensureSessionControllerWithGuard(
 		ctx,
 		activeSession,
-		session.ControlMutationGuardWithRuntimeLease(ctx, session.ControlMutationPurposeCoordinator),
+		session.ControlMutationGuard(session.ControlMutationPurposeParticipant),
 	)
 	if err != nil {
 		return session.Session{}, err
@@ -117,7 +117,7 @@ func (r *Runtime) DetachParticipant(ctx context.Context, req agent.DetachPartici
 	activeSession, err = r.ensureSessionControllerWithGuard(
 		ctx,
 		activeSession,
-		session.ControlMutationGuardWithRuntimeLease(ctx, session.ControlMutationPurposeCoordinator),
+		session.ControlMutationGuard(session.ControlMutationPurposeParticipant),
 	)
 	if err != nil {
 		return session.Session{}, err

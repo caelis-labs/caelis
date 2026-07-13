@@ -323,7 +323,7 @@ func updateProviderSessionState(
 	_, err = sessions.UpdateState(ctx, session.UpdateStateRequest{
 		SessionRef:       ref,
 		ExpectedRevision: &current.Revision,
-		MutationGuard:    session.ControlMutationGuard(session.ControlMutationPurposeCoordinator),
+		MutationGuard:    session.ControlMutationGuard(session.ControlMutationPurposeConfiguration),
 		Update:           update,
 	})
 	return err

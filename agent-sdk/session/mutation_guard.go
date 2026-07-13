@@ -17,19 +17,20 @@ const (
 	MutationAuthorityControl MutationAuthority = "control"
 )
 
-// ControlMutationPurpose names the Control operation that is intentionally
-// allowed to mutate outside a Runtime lease fence.
+// ControlMutationPurpose names an inventoryable Control operation. The purpose
+// policy decides whether it may overlap Runtime or requires the matching fence.
 type ControlMutationPurpose string
 
 const (
-	ControlMutationPurposeApproval     ControlMutationPurpose = "approval"
-	ControlMutationPurposeHandoff      ControlMutationPurpose = "handoff"
-	ControlMutationPurposeWatchdog     ControlMutationPurpose = "watchdog"
-	ControlMutationPurposeCoordinator  ControlMutationPurpose = "coordinator"
-	ControlMutationPurposeParticipant  ControlMutationPurpose = "participant"
-	ControlMutationPurposeLifecycle    ControlMutationPurpose = "session_lifecycle"
-	ControlMutationPurposeTest         ControlMutationPurpose = "test"
-	ControlMutationPurposeSystemCommit ControlMutationPurpose = "system_commit"
+	ControlMutationPurposeApproval      ControlMutationPurpose = "approval"
+	ControlMutationPurposeHandoff       ControlMutationPurpose = "handoff"
+	ControlMutationPurposeWatchdog      ControlMutationPurpose = "watchdog"
+	ControlMutationPurposeCoordinator   ControlMutationPurpose = "coordinator"
+	ControlMutationPurposeParticipant   ControlMutationPurpose = "participant"
+	ControlMutationPurposeLifecycle     ControlMutationPurpose = "session_lifecycle"
+	ControlMutationPurposeConfiguration ControlMutationPurpose = "session_configuration"
+	ControlMutationPurposeTest          ControlMutationPurpose = "test"
+	ControlMutationPurposeSystemCommit  ControlMutationPurpose = "system_commit"
 )
 
 // MutationGuard carries the authority and durable fence for one mutation.
@@ -97,14 +98,18 @@ func ControlMutationGuard(purpose ControlMutationPurpose) MutationGuard {
 	return MutationGuard{Authority: MutationAuthorityControl, Purpose: ControlMutationPurpose(strings.TrimSpace(string(purpose)))}
 }
 
-// ValidateControlMutationGuard reports whether a Control authority guard has a
-// non-empty purpose. Stores call this before accepting an unfenced write.
+// ValidateControlMutationGuard reports whether a Control authority guard names
+// a supported purpose and carries the complete fence required by that purpose.
 func ValidateControlMutationGuard(guard MutationGuard) error {
 	if guard.Authority != MutationAuthorityControl {
 		return nil
 	}
-	if strings.TrimSpace(string(guard.Purpose)) == "" {
+	purpose := ControlMutationPurpose(strings.TrimSpace(string(guard.Purpose)))
+	if purpose == "" {
 		return &LeaseConflictError{Detail: "control mutation requires a non-empty purpose"}
+	}
+	if !knownControlMutationPurpose(purpose) {
+		return &LeaseConflictError{Detail: "control mutation purpose is unknown"}
 	}
 	hasLeaseID := strings.TrimSpace(guard.LeaseID) != ""
 	hasOwnerID := strings.TrimSpace(guard.OwnerID) != ""
@@ -112,21 +117,48 @@ func ValidateControlMutationGuard(guard MutationGuard) error {
 	if (hasLeaseID || hasOwnerID || hasFence) && (!hasLeaseID || !hasOwnerID || !hasFence) {
 		return &LeaseConflictError{Detail: "control mutation fence requires lease_id, owner_id, and fencing_token"}
 	}
+	if !hasLeaseID && controlMutationRequiresFence(purpose) {
+		return &LeaseConflictError{Detail: "control mutation purpose requires a matching runtime lease fence"}
+	}
 	return nil
 }
 
 // ControlMutationMayOverlapRuntimeLease reports whether an unfenced Control
 // mutation is explicitly safe while a Turn owns the Session execution lease.
-// Unknown purposes fail closed: they may run while the Session is quiescent or
-// after acquiring and carrying the matching execution fence.
+// Unknown purposes fail closed during guard validation.
 func ControlMutationMayOverlapRuntimeLease(purpose ControlMutationPurpose) bool {
 	switch ControlMutationPurpose(strings.TrimSpace(string(purpose))) {
 	case ControlMutationPurposeApproval,
 		ControlMutationPurposeWatchdog,
 		ControlMutationPurposeParticipant,
-		ControlMutationPurposeLifecycle,
 		ControlMutationPurposeSystemCommit,
 		ControlMutationPurposeTest:
+		return true
+	default:
+		return false
+	}
+}
+
+func knownControlMutationPurpose(purpose ControlMutationPurpose) bool {
+	switch purpose {
+	case ControlMutationPurposeApproval,
+		ControlMutationPurposeHandoff,
+		ControlMutationPurposeWatchdog,
+		ControlMutationPurposeCoordinator,
+		ControlMutationPurposeParticipant,
+		ControlMutationPurposeLifecycle,
+		ControlMutationPurposeConfiguration,
+		ControlMutationPurposeTest,
+		ControlMutationPurposeSystemCommit:
+		return true
+	default:
+		return false
+	}
+}
+
+func controlMutationRequiresFence(purpose ControlMutationPurpose) bool {
+	switch purpose {
+	case ControlMutationPurposeHandoff, ControlMutationPurposeCoordinator:
 		return true
 	default:
 		return false

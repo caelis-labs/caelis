@@ -1676,14 +1676,15 @@ package github.com/caelis-labs/caelis/agent-sdk/session
       ActorKindSystem      ActorKind = "system"
   )
   const (
-      ControlMutationPurposeApproval     ControlMutationPurpose = "approval"
-      ControlMutationPurposeHandoff      ControlMutationPurpose = "handoff"
-      ControlMutationPurposeWatchdog     ControlMutationPurpose = "watchdog"
-      ControlMutationPurposeCoordinator  ControlMutationPurpose = "coordinator"
-      ControlMutationPurposeParticipant  ControlMutationPurpose = "participant"
-      ControlMutationPurposeLifecycle    ControlMutationPurpose = "session_lifecycle"
-      ControlMutationPurposeTest         ControlMutationPurpose = "test"
-      ControlMutationPurposeSystemCommit ControlMutationPurpose = "system_commit"
+      ControlMutationPurposeApproval      ControlMutationPurpose = "approval"
+      ControlMutationPurposeHandoff       ControlMutationPurpose = "handoff"
+      ControlMutationPurposeWatchdog      ControlMutationPurpose = "watchdog"
+      ControlMutationPurposeCoordinator   ControlMutationPurpose = "coordinator"
+      ControlMutationPurposeParticipant   ControlMutationPurpose = "participant"
+      ControlMutationPurposeLifecycle     ControlMutationPurpose = "session_lifecycle"
+      ControlMutationPurposeConfiguration ControlMutationPurpose = "session_configuration"
+      ControlMutationPurposeTest          ControlMutationPurpose = "test"
+      ControlMutationPurposeSystemCommit  ControlMutationPurpose = "system_commit"
   )
   const (
       ControllerKindKernel ControllerKind = "kernel"

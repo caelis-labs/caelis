@@ -122,8 +122,10 @@ derives and validates the final assembled model/tool/sandbox requirements.
   Approval resolution, participant attach/detach, watchdog audit, validated
   system commits, and tests may overlap a live Turn. Participant lifecycle
   remains protected by revision/delegation/generation CAS and atomic event
-  persistence. Unknown purposes, handoff, and coordinator binding do not bypass
-  a live lease.
+  persistence. Session lifecycle and configuration writes require a quiescent
+  Session. Unknown purposes fail closed; handoff and coordinator binding always
+  require the matching execution fence, including while the Session is
+  quiescent.
 - Exclusive Control mutations use
   `session.ControlMutationGuardWithRuntimeLease`. Controller handoff first
   acquires the Session execution lease, starts no endpoint when an old Turn is

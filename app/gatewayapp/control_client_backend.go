@@ -292,7 +292,7 @@ func classifyControlBackendError(err error) error {
 	if errors.As(err, &gatewayErr) && (gatewayErr.Kind == gateway.KindConflict || gatewayErr.Kind == gateway.KindApproval) {
 		return controlport.NewOutcomeError(controlport.OutcomeConflicted, err)
 	}
-	if errors.Is(err, session.ErrRevisionConflict) {
+	if errors.Is(err, session.ErrRevisionConflict) || errors.Is(err, session.ErrLeaseConflict) {
 		return controlport.NewOutcomeError(controlport.OutcomeConflicted, err)
 	}
 	if session.IsCommitted(err) {
