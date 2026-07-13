@@ -89,6 +89,47 @@ func TestStoreAppendAndPersistCanonicalEvents(t *testing.T) {
 	}
 }
 
+func TestStoreEventsPageStreamsCanonicalAndMirrorBySequence(t *testing.T) {
+	t.Parallel()
+
+	store := NewStore(Config{RootDir: t.TempDir(), SessionIDGenerator: func() string { return "paged-session" }})
+	ctx := context.Background()
+	active, err := store.GetOrCreate(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendEvent := func(event *session.Event) {
+		t.Helper()
+		if _, err := store.AppendEvent(ctx, active.SessionRef, event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	user := model.NewTextMessage(model.RoleUser, "one")
+	appendEvent(&session.Event{ID: "canonical-1", Type: session.EventTypeUser, Message: &user})
+	appendEvent(session.MarkMirror(&session.Event{ID: "mirror-2", Type: session.EventTypeAssistant, Protocol: &session.EventProtocol{
+		Method: session.ProtocolMethodSessionUpdate,
+		Update: &session.ProtocolUpdate{SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage), Content: session.ProtocolTextContent("child")},
+	}}))
+	appendEvent(&session.Event{ID: "journal-3", Type: session.EventTypeLifecycle, Visibility: session.VisibilityJournal, Lifecycle: &session.EventLifecycle{Status: "prepared"}})
+	assistant := model.NewTextMessage(model.RoleAssistant, "four")
+	appendEvent(&session.Event{ID: "canonical-4", Type: session.EventTypeAssistant, Message: &assistant})
+
+	first, err := store.EventsPage(ctx, session.EventPageRequest{SessionRef: active.SessionRef, Limit: 2, Visibility: session.EventPageClientReplay})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Events) != 2 || first.Events[0].ID != "canonical-1" || first.Events[1].ID != "mirror-2" || !first.HasMore || first.NextSeq != 3 {
+		t.Fatalf("first page = %#v", first)
+	}
+	second, err := store.EventsPage(ctx, session.EventPageRequest{SessionRef: active.SessionRef, AfterSeq: first.NextSeq, Limit: 2, Visibility: session.EventPageClientReplay})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(second.Events) != 1 || second.Events[0].ID != "canonical-4" || second.HasMore || second.NextSeq != 4 {
+		t.Fatalf("second page = %#v", second)
+	}
+}
+
 func TestEventLogMigratesRawNestedJournalBeforeTypedDecode(t *testing.T) {
 	t.Parallel()
 
@@ -1050,10 +1091,11 @@ func TestStoreConcurrentReadersAndWritersAcrossStoreInstances(t *testing.T) {
 				})
 				errs <- err
 			default:
-				errs <- store.UpdateState(ctx, createdSession.SessionRef, func(state map[string]any) (map[string]any, error) {
+				_, err := store.UpdateState(ctx, session.UpdateStateRequest{SessionRef: createdSession.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Update: func(state map[string]any) (map[string]any, error) {
 					state[fmt.Sprintf("worker_%02d", i)] = true
 					return state, nil
-				})
+				}})
+				errs <- err
 			}
 		}()
 	}
@@ -1141,10 +1183,10 @@ func TestStoreUpdateStateAndParticipantAnchor(t *testing.T) {
 		t.Fatalf("StartSession() error = %v", err)
 	}
 
-	if err := service.UpdateState(ctx, createdSession.SessionRef, func(state map[string]any) (map[string]any, error) {
+	if _, err := service.UpdateState(ctx, session.UpdateStateRequest{SessionRef: createdSession.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Update: func(state map[string]any) (map[string]any, error) {
 		state["mode"] = "default"
 		return state, nil
-	}); err != nil {
+	}}); err != nil {
 		t.Fatalf("UpdateState() error = %v", err)
 	}
 
@@ -1739,10 +1781,10 @@ func TestServiceLoadSessionReadsOneDocumentSnapshot(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("AppendEvent() error = %v", err)
 	}
-	if err := service.UpdateState(ctx, createdSession.SessionRef, func(state map[string]any) (map[string]any, error) {
+	if _, err := service.UpdateState(ctx, session.UpdateStateRequest{SessionRef: createdSession.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Update: func(state map[string]any) (map[string]any, error) {
 		state["mode"] = "manual"
 		return state, nil
-	}); err != nil {
+	}}); err != nil {
 		t.Fatalf("UpdateState() error = %v", err)
 	}
 
@@ -1769,7 +1811,7 @@ func TestServiceLoadSessionReadsOneDocumentSnapshot(t *testing.T) {
 	}
 }
 
-func TestStoreSnapshotStateRepairsMissingDocumentState(t *testing.T) {
+func TestStoreSnapshotStateReturnsEmptyForMissingDocumentStateWithoutRepair(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -1819,19 +1861,25 @@ func TestStoreSnapshotStateRepairsMissingDocumentState(t *testing.T) {
 		t.Fatalf("SnapshotState() error = %v", err)
 	}
 	if state == nil || len(state) != 0 {
-		t.Fatalf("SnapshotState() = %#v, want repaired empty state", state)
+		t.Fatalf("SnapshotState() = %#v, want returned empty state", state)
 	}
 
-	repairedData, err := os.ReadFile(docPath)
+	storedData, err := os.ReadFile(docPath)
 	if err != nil {
-		t.Fatalf("ReadFile(repaired doc) error = %v", err)
+		t.Fatalf("ReadFile(stored doc) error = %v", err)
 	}
-	var repaired persistedDocument
-	if err := json.Unmarshal(repairedData, &repaired); err != nil {
-		t.Fatalf("Unmarshal(repaired doc) error = %v", err)
+	if !bytes.Equal(storedData, append(data, '\n')) {
+		t.Fatalf("SnapshotState() changed the persisted document\ngot:  %s\nwant: %s", storedData, append(data, '\n'))
 	}
-	if repaired.State == nil || len(repaired.State) != 0 {
-		t.Fatalf("repaired State = %#v, want empty map", repaired.State)
+	var stored persistedDocument
+	if err := json.Unmarshal(storedData, &stored); err != nil {
+		t.Fatalf("Unmarshal(stored doc) error = %v", err)
+	}
+	if stored.State != nil {
+		t.Fatalf("stored State = %#v, want missing state to remain nil", stored.State)
+	}
+	if stored.Session.Revision != 0 {
+		t.Fatalf("stored revision = %d, want 0", stored.Session.Revision)
 	}
 }
 

@@ -299,6 +299,20 @@ func (s *Store) Events(
 	return session.FilterEvents(record.events, req.Limit, req.IncludeTransient), nil
 }
 
+// EventsPage returns one bounded forward sequence page.
+func (s *Store) EventsPage(
+	_ context.Context,
+	req session.EventPageRequest,
+) (session.EventPage, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	record, ok := s.lookupLocked(req.SessionRef)
+	if !ok {
+		return session.EventPage{}, session.ErrSessionNotFound
+	}
+	return session.PageEvents(record.events, req), nil
+}
+
 func (s *Store) BindController(
 	_ context.Context,
 	ref session.SessionRef,
@@ -513,69 +527,73 @@ func (s *Store) SnapshotState(
 	_ context.Context,
 	ref session.SessionRef,
 ) (map[string]any, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
 	record, ok := s.lookupLocked(ref)
 	if !ok {
 		return nil, session.ErrSessionNotFound
-	}
-	if record.state == nil {
-		record.state = map[string]any{}
-		record.session.Revision++
-		record.session.UpdatedAt = s.now()
 	}
 	return cloneState(record.state), nil
 }
 
 func (s *Store) ReplaceState(
 	_ context.Context,
-	ref session.SessionRef,
-	state map[string]any,
-) error {
-	if err := session.ValidateState(state); err != nil {
-		return err
+	req session.ReplaceStateRequest,
+) (session.Session, error) {
+	if err := session.ValidateState(req.State); err != nil {
+		return session.Session{}, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	record, ok := s.lookupLocked(ref)
+	record, ok := s.lookupLocked(req.SessionRef)
 	if !ok {
-		return session.ErrSessionNotFound
+		return session.Session{}, session.ErrSessionNotFound
 	}
-	record.state = cloneState(state)
+	if err := validateMutationGuard(record.lease, req.MutationGuard, s.now()); err != nil {
+		return session.Session{}, err
+	}
+	if err := session.CheckExpectedRevision(record.session, req.ExpectedRevision); err != nil {
+		return session.Session{}, err
+	}
+	record.state = cloneState(req.State)
 	record.session.Revision++
 	record.session.UpdatedAt = s.now()
-	return nil
+	return record.cloneSession(), nil
 }
 
 func (s *Store) UpdateState(
 	_ context.Context,
-	ref session.SessionRef,
-	update func(map[string]any) (map[string]any, error),
-) error {
-	if update == nil {
-		return nil
-	}
-
+	req session.UpdateStateRequest,
+) (session.Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	record, ok := s.lookupLocked(ref)
+	record, ok := s.lookupLocked(req.SessionRef)
 	if !ok {
-		return session.ErrSessionNotFound
+		return session.Session{}, session.ErrSessionNotFound
 	}
-	next, err := update(cloneState(record.state))
+	if err := validateMutationGuard(record.lease, req.MutationGuard, s.now()); err != nil {
+		return session.Session{}, err
+	}
+	if err := session.CheckExpectedRevision(record.session, req.ExpectedRevision); err != nil {
+		return session.Session{}, err
+	}
+	if req.Update == nil {
+		return record.cloneSession(), nil
+	}
+	next, err := req.Update(cloneState(record.state))
 	if err != nil {
-		return err
+		return session.Session{}, err
 	}
 	if err := session.ValidateState(next); err != nil {
-		return err
+		return session.Session{}, err
 	}
 	record.state = cloneState(next)
 	record.session.Revision++
 	record.session.UpdatedAt = s.now()
-	return nil
+	return record.cloneSession(), nil
 }
 
 func (s *Service) StartSession(
@@ -637,6 +655,14 @@ func (s *Service) Events(
 	return s.store.Events(ctx, req)
 }
 
+// EventsPage returns one bounded forward sequence page.
+func (s *Service) EventsPage(
+	ctx context.Context,
+	req session.EventPageRequest,
+) (session.EventPage, error) {
+	return s.store.EventsPage(ctx, req)
+}
+
 func (s *Service) ListSessions(
 	ctx context.Context,
 	req session.ListSessionsRequest,
@@ -695,18 +721,16 @@ func (s *Service) SnapshotState(
 
 func (s *Service) ReplaceState(
 	ctx context.Context,
-	ref session.SessionRef,
-	state map[string]any,
-) error {
-	return s.store.ReplaceState(ctx, ref, state)
+	req session.ReplaceStateRequest,
+) (session.Session, error) {
+	return s.store.ReplaceState(ctx, req)
 }
 
 func (s *Service) UpdateState(
 	ctx context.Context,
-	ref session.SessionRef,
-	update func(map[string]any) (map[string]any, error),
-) error {
-	return s.store.UpdateState(ctx, ref, update)
+	req session.UpdateStateRequest,
+) (session.Session, error) {
+	return s.store.UpdateState(ctx, req)
 }
 
 type record struct {

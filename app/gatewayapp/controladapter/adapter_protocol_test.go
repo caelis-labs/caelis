@@ -8,6 +8,7 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
+	controlclientport "github.com/caelis-labs/caelis/ports/controlclient"
 	"github.com/caelis-labs/caelis/ports/gateway"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -21,22 +22,19 @@ func TestAdapterReplayReturnsStableClientProtocol(t *testing.T) {
 	updatedAt := time.Unix(456, 0)
 	ref := session.SessionRef{AppName: "caelis", UserID: "user-1", WorkspaceKey: "ws", SessionID: "session-1"}
 	gw := &protocolGatewayService{
-		replayResult: gateway.ReplayEventsResult{
-			SessionRef:    ref,
-			Events:        []eventstream.Envelope{{Kind: eventstream.KindSessionUpdate, Cursor: "cursor-1", SessionID: "session-1"}},
-			NextCursor:    "cursor-1",
-			Durable:       true,
-			HasLiveHandle: true,
-			ControlPlane: gateway.ControlPlaneState{
-				SessionRef: ref,
-				RunState: agent.RunState{
-					Status:          agent.RunLifecycleStatusWaitingApproval,
-					ActiveRunID:     "run-1",
-					WaitingApproval: true,
-					UpdatedAt:       updatedAt,
-				},
-				HasActiveTurn: true,
+		feed: &protocolSessionFeed{
+			events:   []eventstream.Envelope{{Kind: eventstream.KindSessionUpdate, Cursor: "cursor-1", SessionID: "session-1"}},
+			boundary: "cursor-1",
+		},
+		controlState: gateway.ControlPlaneState{
+			SessionRef: ref,
+			RunState: agent.RunState{
+				Status:          agent.RunLifecycleStatusWaitingApproval,
+				ActiveRunID:     "run-1",
+				WaitingApproval: true,
+				UpdatedAt:       updatedAt,
 			},
+			HasActiveTurn: true,
 		},
 		active: []gateway.ActiveTurnState{{
 			SessionRef: ref,
@@ -49,12 +47,12 @@ func TestAdapterReplayReturnsStableClientProtocol(t *testing.T) {
 	}
 	driver := newProtocolTestAdapter(t, gw, session.Session{SessionRef: ref})
 
-	result, err := driver.Replay(ctx, eventstream.ReplayRequest{Cursor: "cursor-0", Limit: 25})
+	result, err := driver.Replay(ctx, eventstream.ReplayRequest{SessionID: "session-1", Cursor: "cursor-0", Limit: 25})
 	if err != nil {
 		t.Fatalf("Replay() error = %v", err)
 	}
-	if gw.replayReq.Cursor != "cursor-0" || gw.replayReq.Limit != 25 || gw.replayReq.BindingKey != "gui" {
-		t.Fatalf("gateway replay request = %+v, want cursor/limit/binding", gw.replayReq)
+	if gw.feed.request.Cursor != "cursor-0" || gw.feed.request.SessionID != "session-1" {
+		t.Fatalf("feed subscribe request = %+v, want signed cursor and explicit session", gw.feed.request)
 	}
 	if result.SessionID != "session-1" || result.NextCursor != "cursor-1" || !result.Durable || !result.HasLiveHandle {
 		t.Fatalf("replay result = %+v", result)
@@ -83,11 +81,11 @@ func TestAdapterListSessionSnapshotsReturnsProtocolRows(t *testing.T) {
 	}
 	driver := newProtocolTestAdapter(t, gw, session.Session{SessionRef: ref})
 
-	result, err := driver.ListSessionSnapshots(ctx, schema.SessionListRequest{Cursor: "page-1", CWD: "requested-workspace"})
+	result, err := driver.ListSessionSnapshots(ctx, schema.SessionListRequest{Cursor: "page-1", CWD: "/tmp/ws"})
 	if err != nil {
 		t.Fatalf("ListSessionSnapshots() error = %v", err)
 	}
-	if gw.listReq.Cursor != "page-1" || gw.listReq.Limit != clientProtocolSessionListLimit || gw.listReq.WorkspaceKey != "requested-workspace" {
+	if gw.listReq.Cursor != "page-1" || gw.listReq.Limit != clientProtocolSessionListLimit || gw.listReq.WorkspaceKey != "" {
 		t.Fatalf("gateway list request = %+v", gw.listReq)
 	}
 	if result.NextCursor != "next-page" || len(result.Sessions) != 1 {
@@ -102,8 +100,8 @@ func TestAdapterListSessionSnapshotsReturnsProtocolRows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListSessionSnapshots() fallback error = %v", err)
 	}
-	if gw.listReq.Cursor != "page-2" || gw.listReq.WorkspaceKey != "ws" {
-		t.Fatalf("fallback gateway list request = %+v, want stack workspace", gw.listReq)
+	if gw.listReq.Cursor != "page-2" || gw.listReq.WorkspaceKey != "" {
+		t.Fatalf("fallback gateway list request = %+v, want no ambient workspace", gw.listReq)
 	}
 }
 
@@ -133,7 +131,8 @@ func TestAdapterRunStateReturnsIdleWithoutSession(t *testing.T) {
 func newProtocolTestAdapter(t *testing.T, gw *protocolGatewayService, activeSession session.Session) *Adapter {
 	t.Helper()
 	driver, err := NewAdapter(context.Background(), &RuntimeStack{
-		Gateway: gatewayRuntimeDepsForTest(gw),
+		Gateway:      gatewayRuntimeDepsForTest(gw),
+		ControlFeeds: protocolFeedRegistry{feed: gw.feed},
 		Session: SessionRuntimeDeps{
 			AppName:   "caelis",
 			UserID:    "user-1",
@@ -157,7 +156,64 @@ type protocolGatewayService struct {
 	controlReq   gateway.ControlPlaneStateRequest
 	controlState gateway.ControlPlaneState
 	active       []gateway.ActiveTurnState
+	feed         *protocolSessionFeed
 }
+
+type protocolFeedRegistry struct{ feed *protocolSessionFeed }
+
+func (r protocolFeedRegistry) Session(session.SessionRef) (controlclientport.SessionFeed, error) {
+	if r.feed == nil {
+		return &protocolSessionFeed{}, nil
+	}
+	return r.feed, nil
+}
+
+type protocolSessionFeed struct {
+	request  controlclientport.SubscribeRequest
+	events   []eventstream.Envelope
+	boundary string
+}
+
+func (*protocolSessionFeed) Prime(context.Context) error        { return nil }
+func (*protocolSessionFeed) Publish(eventstream.Envelope) error { return nil }
+func (*protocolSessionFeed) Attach(<-chan eventstream.Envelope) {}
+func (f *protocolSessionFeed) Boundary() (*eventstream.FeedPosition, string) {
+	return nil, f.boundary
+}
+func (f *protocolSessionFeed) Subscribe(_ context.Context, req controlclientport.SubscribeRequest) (controlclientport.SubscribeResult, error) {
+	f.request = req
+	return controlclientport.SubscribeResult{
+		Subscription:   newProtocolFeedSubscription(f.events),
+		Mode:           controlclientport.ResumeModeExact,
+		BoundaryCursor: f.boundary,
+	}, nil
+}
+func (f *protocolSessionFeed) SubscribeFromNow() (controlclientport.FeedSubscription, error) {
+	return newProtocolFeedSubscription(f.events), nil
+}
+
+type protocolFeedSubscription struct {
+	events chan eventstream.Envelope
+	done   chan struct{}
+}
+
+func newProtocolFeedSubscription(events []eventstream.Envelope) *protocolFeedSubscription {
+	subscription := &protocolFeedSubscription{events: make(chan eventstream.Envelope), done: make(chan struct{})}
+	go func() {
+		defer close(subscription.events)
+		for _, envelope := range events {
+			subscription.events <- eventstream.CloneEnvelope(envelope)
+		}
+		close(subscription.done)
+	}()
+	return subscription
+}
+
+func (s *protocolFeedSubscription) Events() <-chan eventstream.Envelope { return s.events }
+func (s *protocolFeedSubscription) BackfillDone() <-chan struct{}       { return s.done }
+func (*protocolFeedSubscription) Close() error                          { return nil }
+func (*protocolFeedSubscription) Err() error                            { return nil }
+func (*protocolFeedSubscription) LastCursor() string                    { return "" }
 
 func (g *protocolGatewayService) Streams() stream.Service { return nil }
 func (g *protocolGatewayService) BeginTurn(context.Context, gateway.BeginTurnRequest) (gateway.BeginTurnResult, error) {

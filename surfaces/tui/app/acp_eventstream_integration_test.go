@@ -456,7 +456,7 @@ func TestHandleACPEventEnvelopeAnchorsSubagentOutputToSpawnTool(t *testing.T) {
 	}
 }
 
-func TestHandleACPEventEnvelopeSuppressesMirroredSpawnSemanticEventBeforeParentTerminalMirror(t *testing.T) {
+func TestHandleACPEventEnvelopeRendersSemanticSpawnEventsOnce(t *testing.T) {
 	t.Parallel()
 
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
@@ -483,10 +483,7 @@ func TestHandleACPEventEnvelopeSuppressesMirroredSpawnSemanticEventBeforeParentT
 			ToolCallID: "spawn-call-1",
 			ToolName:   "Spawn",
 		},
-		Delivery: &eventstream.Delivery{
-			Transient:           true,
-			HasParentToolMirror: true,
-		},
+		Delivery: &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall,
 			ToolCallID:    "child-read-1",
@@ -506,7 +503,7 @@ func TestHandleACPEventEnvelopeSuppressesMirroredSpawnSemanticEventBeforeParentT
 			ToolCallID: "spawn-call-1",
 			ToolName:   "Spawn",
 		},
-		Delivery: &eventstream.Delivery{Transient: true},
+		Delivery: &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
 		Update: schema.PlanUpdate{
 			SessionUpdate: schema.UpdatePlan,
 			Entries: []schema.PlanEntry{{
@@ -521,31 +518,30 @@ func TestHandleACPEventEnvelopeSuppressesMirroredSpawnSemanticEventBeforeParentT
 		Scope:     eventstream.ScopeSubagent,
 		ScopeID:   "akio",
 		Actor:     "explorer",
-		Final:     true,
 		ParentTool: &eventstream.ParentToolRelation{
 			ToolCallID: "spawn-call-1",
 			ToolName:   "Spawn",
 		},
-		Delivery: &eventstream.Delivery{
-			Transient:           true,
-			HasParentToolMirror: true,
-		},
+		Delivery: &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
 		Update: schema.ContentChunk{
-			SessionUpdate: schema.UpdateAgentMessage,
-			Content:       schema.TextContent{Type: "text", Text: "child stream summary\n"},
+			SessionUpdate: schema.UpdateAgentThought,
+			Content:       schema.TextContent{Type: "text", Text: "child private thought"},
 		},
 	})
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind:      eventstream.KindSessionUpdate,
 		SessionID: "session-1",
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo,
-			ToolCallID:    "spawn-call-1",
-			Meta:          metautil.WithTerminalOutput(acpToolNameMeta("SPAWN"), "spawn-call-1", "child stream summary\n"),
+		Scope:     eventstream.ScopeSubagent,
+		ScopeID:   "akio",
+		Actor:     "explorer",
+		ParentTool: &eventstream.ParentToolRelation{
+			ToolCallID: "spawn-call-1",
+			ToolName:   "Spawn",
 		},
-		Delivery: &eventstream.Delivery{
-			Transient:          true,
-			IsParentToolMirror: true,
+		Delivery: &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateAgentMessage,
+			Content:       schema.TextContent{Type: "text", Text: "child semantic summary\n"},
 		},
 	})
 
@@ -553,11 +549,14 @@ func TestHandleACPEventEnvelopeSuppressesMirroredSpawnSemanticEventBeforeParentT
 	if len(block.Events) != 1 {
 		t.Fatalf("main events = %#v, want only parent SPAWN event", block.Events)
 	}
-	if event := block.Events[0]; event.CallID != "spawn-call-1" || event.Output != "child stream summary\n" {
-		t.Fatalf("spawn event = %#v, want parent terminal mirror only", event)
+	if event := block.Events[0]; event.CallID != "spawn-call-1" || event.Output != "child semantic summary\n" {
+		t.Fatalf("spawn event = %#v, want semantic child narrative once", event)
+	}
+	if strings.Contains(block.Events[0].Output, "private thought") {
+		t.Fatalf("spawn event = %#v, must not merge child thought into parent output", block.Events[0])
 	}
 	if participant := model.findParticipantTurnBlock("akio"); participant != nil {
-		t.Fatalf("subagent participant block = %#v, want mirrored SPAWN event suppressed", participant)
+		t.Fatalf("subagent participant block = %#v, want anchored output kept in parent panel", participant)
 	}
 	for _, docBlock := range model.doc.Blocks() {
 		if participant, ok := docBlock.(*ParticipantTurnBlock); ok {
@@ -594,7 +593,7 @@ func TestHandleACPEventEnvelopeScopedChildTerminalKeepsOneSpawnPanelAndMainTurnA
 			ToolCallID: "spawn-call-1",
 			ToolName:   "Spawn",
 		},
-		Delivery:  &eventstream.Delivery{Transient: true},
+		Delivery:  &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
 		Lifecycle: &eventstream.Lifecycle{State: eventstream.LifecycleStateCompleted},
 	})
 	if !model.turnRunning() {
@@ -658,7 +657,7 @@ func TestHandleACPEventEnvelopeRoutesAnchoredSubagentOutputToParentPanel(t *test
 		ScopeID:   "akio",
 		Actor:     "explorer",
 		Final:     true,
-		Meta:      parentToolStreamMeta("task-call-1", "TASK", false),
+		Meta:      parentToolStreamMeta("task-call-1", "TASK"),
 		Update: schema.ContentChunk{
 			SessionUpdate: schema.UpdateAgentMessage,
 			Content:       schema.TextContent{Type: "text", Text: "child write response"},
@@ -677,7 +676,7 @@ func TestHandleACPEventEnvelopeRoutesAnchoredSubagentOutputToParentPanel(t *test
 	}
 }
 
-func TestHandleACPEventEnvelopeReplacesSpawnStreamWithFinalRuntimeResult(t *testing.T) {
+func TestHandleACPEventEnvelopeAppliesSpawnFinalRuntimeResultWithoutTerminalOutput(t *testing.T) {
 	t.Parallel()
 
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
@@ -701,15 +700,6 @@ func TestHandleACPEventEnvelopeReplacesSpawnStreamWithFinalRuntimeResult(t *test
 			Meta:          spawnMeta,
 		},
 	})
-	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
-		Kind:      eventstream.KindSessionUpdate,
-		SessionID: "session-1",
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo,
-			ToolCallID:    "spawn-1",
-			Meta:          metautil.WithTerminalOutput(spawnMeta, "spawn-1", "LIST /tmp completed"),
-		},
-	})
 	completed := schema.ToolStatusCompleted
 	finalMeta := metautil.WithRuntimeSection(spawnMeta, metautil.RuntimeTask, map[string]any{
 		metautil.RuntimeTaskID:         "task-1",
@@ -725,7 +715,7 @@ func TestHandleACPEventEnvelopeReplacesSpawnStreamWithFinalRuntimeResult(t *test
 			SessionUpdate: schema.UpdateToolCallInfo,
 			ToolCallID:    "spawn-1",
 			Status:        &completed,
-			Meta:          metautil.WithTerminalOutput(finalMeta, "spawn-1", "Final child result"),
+			Meta:          finalMeta,
 		},
 	})
 
@@ -736,45 +726,6 @@ func TestHandleACPEventEnvelopeReplacesSpawnStreamWithFinalRuntimeResult(t *test
 	event := block.Events[0]
 	if !event.Done || event.Output != "Final child result" {
 		t.Fatalf("spawn event = %#v, want final result to replace streamed output", event)
-	}
-}
-
-func TestHandleACPEventEnvelopePreservesSpawnTerminalPatchNewlines(t *testing.T) {
-	t.Parallel()
-
-	model := NewModel(Config{NoColor: true, NoAnimation: true})
-	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
-		Kind:      eventstream.KindSessionUpdate,
-		SessionID: "session-1",
-		Update: schema.ToolCall{
-			SessionUpdate: schema.UpdateToolCall,
-			ToolCallID:    "spawn-1",
-			Title:         "SPAWN reviewer: inspect",
-			Kind:          schema.ToolKindExecute,
-			Status:        schema.ToolStatusInProgress,
-			RawInput:      map[string]any{"agent": "reviewer", "prompt": "inspect"},
-			Meta:          runningSnapshotTerminalMeta("SPAWN", "task-1", "terminal-1", "", ""),
-		},
-	})
-	for _, text := range []string{"LIST /tmp completed\n", "READ /tmp/file completed\n"} {
-		model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
-			Kind:      eventstream.KindSessionUpdate,
-			SessionID: "session-1",
-			Update: schema.ToolCallUpdate{
-				SessionUpdate: schema.UpdateToolCallInfo,
-				ToolCallID:    "spawn-1",
-				Meta:          metautil.WithTerminalOutput(acpToolNameMeta("SPAWN"), "spawn-1", text),
-			},
-		})
-	}
-
-	block := requireMainACPTurnBlockForTest(t, model)
-	if len(block.Events) != 1 {
-		t.Fatalf("main events = %#v, want one SPAWN event", block.Events)
-	}
-	const want = "LIST /tmp completed\nREAD /tmp/file completed\n"
-	if got := block.Events[0].Output; got != want {
-		t.Fatalf("spawn output = %q, want %q", got, want)
 	}
 }
 

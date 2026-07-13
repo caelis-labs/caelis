@@ -61,6 +61,14 @@ func ValidateDurableCoreEvent(event *Event) error {
 			return coreEventValidationError(err.Error())
 		}
 	}
+	if event.ChildOrigin != nil {
+		if err := ValidateEventChildOrigin(*event.ChildOrigin); err != nil {
+			return coreEventValidationError(err.Error())
+		}
+		if !IsMirror(event) {
+			return coreEventValidationError("child origin requires mirror visibility")
+		}
+	}
 	if !IsCanonicalHistoryEvent(event) {
 		return nil
 	}

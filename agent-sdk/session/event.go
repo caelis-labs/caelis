@@ -60,26 +60,28 @@ type EventToolContent struct {
 // is the ACP projection/control payload and must not be used as the local model
 // replay source.
 type Event struct {
-	ID             string                 `json:"id,omitempty"`
-	IdempotencyKey string                 `json:"idempotency_key,omitempty"`
-	SessionID      string                 `json:"session_id,omitempty"`
-	Seq            uint64                 `json:"seq,omitempty"`
-	Schema         int                    `json:"schema,omitempty"`
-	Type           EventType              `json:"type,omitempty"`
-	Visibility     Visibility             `json:"visibility,omitempty"`
-	Time           time.Time              `json:"time,omitempty"`
-	Actor          ActorRef               `json:"actor,omitempty"`
-	Scope          *EventScope            `json:"scope,omitempty"`
-	Invocation     *EventInvocation       `json:"invocation,omitempty"`
-	Message        *model.Message         `json:"message,omitempty"`
-	Tool           *EventTool             `json:"tool,omitempty"`
-	PlanPayload    *EventPlanPayload      `json:"plan,omitempty"`
-	Notice         *EventNotice           `json:"notice,omitempty"`
-	Lifecycle      *EventLifecycle        `json:"lifecycle,omitempty"`
-	Journal        *ExecutionJournalEntry `json:"journal,omitempty"`
-	Protocol       *EventProtocol         `json:"protocol,omitempty"`
-	Text           string                 `json:"-"`
-	Meta           map[string]any         `json:"_meta,omitempty"`
+	ID                string                 `json:"id,omitempty"`
+	IdempotencyKey    string                 `json:"idempotency_key,omitempty"`
+	SessionID         string                 `json:"session_id,omitempty"`
+	Seq               uint64                 `json:"seq,omitempty"`
+	Schema            int                    `json:"schema,omitempty"`
+	Type              EventType              `json:"type,omitempty"`
+	Visibility        Visibility             `json:"visibility,omitempty"`
+	Time              time.Time              `json:"time,omitempty"`
+	Actor             ActorRef               `json:"actor,omitempty"`
+	Scope             *EventScope            `json:"scope,omitempty"`
+	ChildOrigin       *EventChildOrigin      `json:"child_origin,omitempty"`
+	ApprovalRequestID string                 `json:"approval_request_id,omitempty"`
+	Invocation        *EventInvocation       `json:"invocation,omitempty"`
+	Message           *model.Message         `json:"message,omitempty"`
+	Tool              *EventTool             `json:"tool,omitempty"`
+	PlanPayload       *EventPlanPayload      `json:"plan,omitempty"`
+	Notice            *EventNotice           `json:"notice,omitempty"`
+	Lifecycle         *EventLifecycle        `json:"lifecycle,omitempty"`
+	Journal           *ExecutionJournalEntry `json:"journal,omitempty"`
+	Protocol          *EventProtocol         `json:"protocol,omitempty"`
+	Text              string                 `json:"-"`
+	Meta              map[string]any         `json:"_meta,omitempty"`
 }
 
 // NoticeOf returns the structured notice carried by one event, if any.

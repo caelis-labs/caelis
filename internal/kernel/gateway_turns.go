@@ -27,6 +27,7 @@ func (g *Gateway) BeginTurn(ctx context.Context, req BeginTurnRequest) (BeginTur
 		cancel()
 		return true
 	})
+	approvals := g.sessionApprovals(activeSession.SessionRef)
 	g.mu.Lock()
 	if _, ok := g.active[activeSession.SessionID]; ok {
 		g.mu.Unlock()
@@ -51,7 +52,10 @@ func (g *Gateway) BeginTurn(ctx context.Context, req BeginTurnRequest) (BeginTur
 		cancel: func() bool {
 			return cancelFn()
 		},
+		approvals: approvals,
 	})
+	handle.persistApproval = g.approvalPersister(activeSession.SessionRef, handle.TurnID())
+	handle.settleApproval = g.approvalSettler(activeSession.SessionRef, handle.TurnID())
 	g.active[activeSession.SessionID] = handle
 	g.mu.Unlock()
 
@@ -268,7 +272,7 @@ func (g *Gateway) dispatchSessionStartHooks(ctx context.Context, sessionObj sess
 		}
 		if alreadyRun {
 			// Best-effort backfill session state key to avoid event scans on subsequent turns
-			_ = g.sessions.UpdateState(ctx, sessionObj.SessionRef, func(state map[string]any) (map[string]any, error) {
+			_ = g.updateSessionState(ctx, sessionObj.SessionRef, session.RuntimeMutationGuard(ctx), func(state map[string]any) (map[string]any, error) {
 				if state == nil {
 					state = make(map[string]any)
 				}
@@ -374,7 +378,7 @@ func (g *Gateway) dispatchSessionStartHooks(ctx context.Context, sessionObj sess
 }
 
 func (g *Gateway) markSessionStartHookExecuted(ctx context.Context, ref session.SessionRef, stateKey string) error {
-	return g.sessions.UpdateState(ctx, ref, func(state map[string]any) (map[string]any, error) {
+	return g.updateSessionState(ctx, ref, session.RuntimeMutationGuard(ctx), func(state map[string]any) (map[string]any, error) {
 		if state == nil {
 			state = make(map[string]any)
 		}

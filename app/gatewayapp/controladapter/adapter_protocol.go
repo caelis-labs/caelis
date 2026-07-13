@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	controlclientport "github.com/caelis-labs/caelis/ports/controlclient"
 	"github.com/caelis-labs/caelis/ports/gateway"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -20,11 +21,10 @@ func (d *Adapter) ListSessionSnapshots(ctx context.Context, req schema.SessionLi
 		return schema.SessionListResponse{}, err
 	}
 	result, err := gw.ListSessions(ctx, gateway.ListSessionsRequest{
-		AppName:      d.stack.Session.AppName,
-		UserID:       d.stack.Session.UserID,
-		WorkspaceKey: firstNonEmpty(strings.TrimSpace(req.CWD), d.stack.Session.Workspace.Key),
-		Cursor:       strings.TrimSpace(req.Cursor),
-		Limit:        clientProtocolSessionListLimit,
+		AppName: d.stack.Session.AppName,
+		UserID:  d.stack.Session.UserID,
+		Cursor:  strings.TrimSpace(req.Cursor),
+		Limit:   clientProtocolSessionListLimit,
 	})
 	if err != nil {
 		return schema.SessionListResponse{}, err
@@ -33,7 +33,11 @@ func (d *Adapter) ListSessionSnapshots(ctx context.Context, req schema.SessionLi
 		Sessions:   make([]schema.SessionSummary, 0, len(result.Sessions)),
 		NextCursor: strings.TrimSpace(result.NextCursor),
 	}
+	cwdFilter := strings.TrimSpace(req.CWD)
 	for _, summary := range result.Sessions {
+		if cwdFilter != "" && strings.TrimSpace(summary.CWD) != cwdFilter {
+			continue
+		}
 		out.Sessions = append(out.Sessions, protocolSessionSummary(summary))
 	}
 	return out, nil
@@ -44,34 +48,68 @@ func (d *Adapter) Replay(ctx context.Context, req eventstream.ReplayRequest) (ev
 	if err != nil {
 		return eventstream.ReplayResult{}, err
 	}
-	gw, err := d.gatewaySessions()
-	if err != nil {
-		return eventstream.ReplayResult{}, err
-	}
-	result, err := gw.ReplayEvents(ctx, gateway.ReplayEventsRequest{
-		SessionRef:       ref,
-		BindingKey:       d.bindingKey,
-		Cursor:           strings.TrimSpace(req.Cursor),
-		Limit:            req.Limit,
-		IncludeTransient: req.IncludeTransient,
-	})
+	result, err := d.replayControlFeed(ctx, ref.SessionID, req)
 	if err != nil {
 		return eventstream.ReplayResult{}, err
 	}
 	var active gateway.ActiveTurnState
 	var hasActive bool
 	if turns, err := d.gatewayTurns(); err == nil && turns != nil {
-		active, hasActive = activeTurnStateForSession(turns.ActiveTurns(), result.SessionRef)
+		active, hasActive = activeTurnStateForSession(turns.ActiveTurns(), ref)
 	}
-	runState := protocolRunStateFromGateway(result.ControlPlane, active, hasActive)
-	return eventstream.ReplayResult{
-		SessionID:     strings.TrimSpace(result.SessionRef.SessionID),
-		Events:        eventstream.CloneEnvelopes(result.Events),
-		NextCursor:    strings.TrimSpace(result.NextCursor),
-		Durable:       result.Durable,
-		HasLiveHandle: result.HasLiveHandle,
-		RunState:      runState,
-	}, nil
+	state, err := d.gatewayControlPlane()
+	if err != nil {
+		return eventstream.ReplayResult{}, err
+	}
+	controlState, err := state.ControlPlaneState(ctx, gateway.ControlPlaneStateRequest{SessionRef: ref, BindingKey: d.bindingKey})
+	if err != nil {
+		return eventstream.ReplayResult{}, err
+	}
+	runState := protocolRunStateFromGateway(controlState, active, hasActive)
+	result.RunState = runState
+	result.HasLiveHandle = hasActive || controlState.HasActiveTurn
+	return result, nil
+}
+
+func (d *Adapter) replayControlFeed(ctx context.Context, sessionID string, req eventstream.ReplayRequest) (eventstream.ReplayResult, error) {
+	if d == nil || d.stack == nil || d.stack.ControlFeeds == nil {
+		return eventstream.ReplayResult{}, missingRuntimeDependency("control client feed")
+	}
+	feed, err := d.stack.ControlFeeds.Session(session.SessionRef{SessionID: strings.TrimSpace(sessionID)})
+	if err != nil {
+		return eventstream.ReplayResult{}, err
+	}
+	subscribed, err := feed.Subscribe(ctx, controlclientport.SubscribeRequest{SessionID: strings.TrimSpace(sessionID), Cursor: strings.TrimSpace(req.Cursor)})
+	if err != nil {
+		return eventstream.ReplayResult{}, err
+	}
+	defer subscribed.Subscription.Close()
+	out := eventstream.ReplayResult{
+		SessionID: strings.TrimSpace(sessionID), NextCursor: strings.TrimSpace(subscribed.BoundaryCursor), Durable: true,
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return eventstream.ReplayResult{}, ctx.Err()
+		case <-subscribed.Subscription.BackfillDone():
+			return out, nil
+		case envelope, ok := <-subscribed.Subscription.Events():
+			if !ok {
+				if err := subscribed.Subscription.Err(); err != nil {
+					return eventstream.ReplayResult{}, err
+				}
+				return out, nil
+			}
+			if !req.IncludeTransient && envelope.Delivery != nil && envelope.Delivery.Mode == eventstream.DeliveryTransient {
+				continue
+			}
+			out.Events = append(out.Events, eventstream.CloneEnvelope(envelope))
+			out.NextCursor = strings.TrimSpace(envelope.Cursor)
+			if req.Limit > 0 && len(out.Events) >= req.Limit {
+				return out, nil
+			}
+		}
+	}
 }
 
 func (d *Adapter) RunState(ctx context.Context) (eventstream.RunState, error) {
@@ -100,19 +138,12 @@ func (d *Adapter) RunState(ctx context.Context) (eventstream.RunState, error) {
 
 func (d *Adapter) protocolSessionRef(sessionID string) (session.SessionRef, error) {
 	sessionID = strings.TrimSpace(sessionID)
-	if sessionID != "" {
-		return session.SessionRef{
-			AppName:      d.stack.Session.AppName,
-			UserID:       d.stack.Session.UserID,
-			WorkspaceKey: d.stack.Session.Workspace.Key,
-			SessionID:    sessionID,
-		}, nil
+	if sessionID == "" {
+		return session.SessionRef{}, fmt.Errorf("app/gatewayapp/controladapter: session id is required")
 	}
-	activeSession, ok := d.currentSession()
-	if !ok {
-		return session.SessionRef{}, fmt.Errorf("app/gatewayapp/controladapter: no active session")
-	}
-	return activeSession.SessionRef, nil
+	return session.SessionRef{
+		AppName: d.stack.Session.AppName, UserID: d.stack.Session.UserID, SessionID: sessionID,
+	}, nil
 }
 
 func protocolSessionSummary(summary session.SessionSummary) schema.SessionSummary {

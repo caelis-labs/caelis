@@ -1,110 +1,99 @@
 ---
 name: caelis-deep-review
-description: Caelis workspace-private architecture and code-quality review. Use for long-term technical debt inventory, architecture boundary review, Go quality review, layering responsibility checks, extension-risk analysis, code bloat/smell scans, or changes touching presentation surfaces, control orchestration, Agent Runtime modules, ACP/eventstream projection, session persistence, tools, skills, model providers, Guardian/Reviewer agents, Agent Manage Loop direction, or external ACP agent collaboration.
+description: Caelis architecture and code-quality review for layering, ownership, extension risk, Go design, ACP/eventstream, Control, Runtime/SDK, persistence, Surfaces, and multi-Agent collaboration.
 ---
 
 # Caelis Deep Review
 
-Review Caelis architecture and code quality from the current repository state.
-Default to analysis only. Do not edit code unless the user separately asks for a
-fix.
+Review the current repository with findings first. Default to analysis only;
+edit code only when the user also requests a change. Keep depth proportional to
+the scope: a local change gets a local review, while cross-layer or release work
+earns broader tracing and validation.
 
-Be strict and ambitious about structure. Defects first, then maintainability:
-bloat, smells, wrong-layer ownership, and missed simplifications that would
-delete whole categories of complexity.
+## Read
 
-## Read First
+Always read `AGENTS.md` and `docs/architecture.md`. Then read only the normative
+document relevant to the change:
 
-- `AGENTS.md`
-- `docs/architecture.md`
-- `docs/acp-projection-architecture.md`
-- `scripts/arch_lint.go` when boundary rules matter
+- `docs/agent-sdk-boundary.md` for SDK, Runtime, handoff, or orchestration;
+- `docs/acp-projection-architecture.md` for ACP/eventstream or Surfaces;
+- `docs/control-client-m2-design.md` for client commands, feed, replay, or
+  app-server;
+- `scripts/arch_lint.go` when dependency rules matter;
+- `docs/release.md` only for release readiness.
 
-## Architecture Lens
-
-Use this as a direction, not a hard package map:
+## Design Lens
 
 ```text
 Presentation surfaces -> Control layer -> Agent Runtime / SDK
 ```
 
-- ACP is Caelis's native interoperability language for built-in and external
-  Agents as well as the surface protocol. Reusable normalized ACP semantics may
-  live in `agent-sdk`; the root `protocol/acp` packages own product wire,
-  compatibility, and projection.
-- The control layer assembles runnable agents, owns lifecycle/policy/review
-  orchestration, endpoint selection, Agent Manage Loop decisions, and handoff
-  authorization. Agents may suggest but must not commit handoff.
-- Agent Runtime packages should be reusable below the application and should
-  not depend on presentation, product assembly, or one transport
-  implementation.
-- Internal runtime/control events do not all have to be raw ACP wire schemas,
-  but collaboration crossing built-in/external Agent boundaries should use the
-  shared ACP semantics.
-- Caelis does not target a deterministic workflow graph or node executor;
-  dynamic orchestration belongs to the Control-layer Agent Manage Loop.
+- Surfaces render `eventstream.Envelope` values and collect input. They do not
+  own Runtime, model, tool, sandbox, policy, persistence, or orchestration.
+- Control owns assembly, lifecycle, permissions, Guardian/Reviewer/system
+  Agents, endpoint selection, handoff authorization, and future Agent Manage
+  Loop decisions.
+- `agent-sdk/*` owns reusable Runtime semantics and must not depend on product
+  `app/*`, `surfaces/*`, `protocol/acp/*`, product `ports/*`, or non-SDK
+  repository internals.
+- ACP is the shared semantic language for built-in and external Agents and the
+  payload vocabulary projected to clients. SDK-normalized semantics flow
+  outward to `protocol/acp`; product wire types do not flow inward.
+- `ports/controlclient` is the product-client contract;
+  `internal/controlclient` owns its Control implementation; HTTP/SSE remains a
+  thin Surface adapter. Transitional `protocol/acp/control.Service` must not
+  grow into a second product API.
+- Canonical durable facts, not transcript caches or undocumented `_meta`, are
+  replay truth. Typed Envelope fields own scope, relation, delivery, position,
+  approval identity, and resume semantics.
+- Agents may suggest delegation or handoff, but only Control commits ownership
+  changes. Caelis does not build a deterministic workflow graph/node engine;
+  dynamic orchestration belongs to the Agent Manage Loop.
+- Unsupported capabilities should fail closed and be declared unsupported;
+  incomplete optional functionality is not a reason to add a compatibility
+  bypass.
 
-## Review Focus
+## Review Rules
 
-Prioritize concrete risk over theoretical purity, and structural health over
-cosmetic style:
+1. Preserve user changes and record the worktree boundary before broad work.
+2. Identify the semantic owner and dependency direction before judging package
+   placement.
+3. Review changed code with nearby contracts, package comments, and tests.
+   Search wider only when ownership, duplication, or risk crosses that boundary.
+4. Prefer deletion and reuse of an established path over a new mode, wrapper,
+   mirror, cache, or special case.
+5. Keep new coherent behavior out of central orchestration files when a nearby
+   focused module can own it.
+6. Require comments for exported contracts and non-obvious ordering,
+   concurrency, persistence, compatibility, and failure guarantees.
+7. Compare maintained docs and exported comments with implementation. Keep
+   completed plans and acceptance history in Git, tests, tags, and CI.
+8. For high-risk concurrency, persistence, replay, permission, or effect work,
+   expand to an end-to-end trace and test the smallest production-shaped
+   counterexample. Do not impose that cost on unrelated reviews.
 
-### Correctness and product risk (P0)
+## Findings
 
-- security, permission, sandbox, destructive-operation mistakes
-- replay/persistence or model-context breakage
-- concurrency, lifecycle, cancellation, error-handling, resource leaks
-- durable model facts represented only by protocol mirrors or `_meta`
-
-### Boundary and extension risk (P1)
-
-- surface packages owning model/tool/sandbox/session/policy semantics
-- duplicated projection, terminal, transcript, or replay paths
-- orchestration accumulating in one god package or file
-- `ports/*` contracts mixing reusable runtime contracts with app-control
-  contracts
-- SDK packages depending on product host packages
-- system-managed agents implemented as ad hoc subagent/UI special cases
-- extension blockers for Guardian, Reviewer, Agent Manage Loop, or external ACP
-  agent collaboration
-- duplicated or drifting ACP semantic contract owners across SDK and product
-  wire packages
-
-### Quality, bloat, and design smell (P1/P2 by blast radius)
-
-- file-size explosions (especially past ~1k lines without decomposition)
-- special-case branches bolted onto already busy flows
-- thin wrappers / identity abstractions that add indirection without clarity
-- copy-pasted helpers when a canonical owner already exists
-- feature logic leaking into shared paths
-- complexity rearranged rather than deleted ("refactor" with no fewer concepts)
-- prompt or agent guidance that trains bad operational habits
-
-## Stance
-
-- Be direct and demanding. Do not rubber-stamp working-but-messier code.
-- Prefer a few high-conviction findings over long nit lists.
-- Look for code judo: reframes that remove layers, modes, or branches entirely.
-- If a simpler structure preserves behavior, push for that structure.
-- Do not invent future abstractions with no present complexity win.
-
-## Output
-
-Rank findings by impact:
-
-- `P0`: correctness, security, data loss, replay/persistence, or model-context
-  breakage.
-- `P1`: boundary drift, coupling, bloat, or smell that blocks near-term
-  extension or will keep accumulating cost.
+- `P0`: correctness, security, data loss, replay/model-context corruption,
+  permission/sandbox failure, or user-visible lifecycle breakage.
+- `P1`: wrong-layer ownership, duplicated authority or data path, coupling, or
+  bloat that blocks near-term extension.
 - `P2`: useful cleanup with lower immediate risk.
 
-For each P0/P1 finding, include file:line, failure mode or smell, why it
-matters, and a bounded repair direction. End with the top 1-3 next slices by
-ROI/risk.
+For each P0/P1 include file:line, failure mode, impact, and a bounded repair.
+Prefer a few high-confidence findings over a long nit list. If there are no
+findings, say so and name the evidence and residual limitations checked. End
+with at most three next slices only when follow-up work remains.
 
-## Validation Expectations
+## Validation
 
-- Pre-commit gate: `make commit-check`.
-- Release gate: `make release-dry-run`.
-- Use focused `go test` packages before broad gates when proposing or reviewing
-  a bounded implementation slice.
+Keep validation proportional:
+
+- focused `go test -count=1` for changed behavior;
+- focused `go test -race -count=1` for concurrency/lifecycle/persistence;
+- model-context round trips for persistence or replay;
+- `make client-protocol-check` for product wire changes;
+- `make regression` for broad ACP, projection, TUI, or command changes;
+- `make docs-links` for documentation topology changes;
+- `make commit-check` plus `git diff --check` before a requested commit;
+- the full `docs/release.md` gates only for release readiness.

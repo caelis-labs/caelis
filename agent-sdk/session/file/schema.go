@@ -25,7 +25,7 @@ const (
 )
 
 type storeRootLock struct {
-	mu sync.RWMutex
+	mu contextMutex
 }
 
 // Config defines one single-file durable session store instance.
@@ -38,7 +38,7 @@ type Config struct {
 
 // Store is the file-backed implementation of session.Store.
 type Store struct {
-	mu                 sync.Mutex
+	mu                 contextMutex
 	rootDir            string
 	sessionIDGenerator func() string
 	eventIDGenerator   func() string

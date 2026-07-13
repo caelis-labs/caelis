@@ -160,6 +160,48 @@ func PayloadFromRuntimeRequest(req agentsdk.ApprovalRequest) *Payload {
 	return payload
 }
 
+// ProtocolApprovalFromPayload returns the normalized transport-neutral ACP
+// permission payload represented by one approval payload.
+func ProtocolApprovalFromPayload(payload *Payload) *session.ProtocolApproval {
+	if payload == nil {
+		return nil
+	}
+	options := make([]session.ProtocolApprovalOption, 0, len(payload.Options))
+	for _, option := range payload.Options {
+		options = append(options, session.ProtocolApprovalOption{
+			ID: strings.TrimSpace(option.ID), Name: strings.TrimSpace(option.Name), Kind: strings.TrimSpace(option.Kind),
+		})
+	}
+	rawInput := jsonvalue.CloneMap(payload.RawInput)
+	rawInput = putRawStringIfMissing(rawInput, "approval_reason", payload.Reason)
+	rawInput = putRawStringIfMissing(rawInput, "justification", payload.Justification)
+	rawInput = putRawStringIfMissing(rawInput, "sandbox_permissions", payload.SandboxPermissions)
+	return &session.ProtocolApproval{
+		ToolCall: session.ProtocolToolCall{
+			ID: strings.TrimSpace(payload.ToolCallID), Name: strings.TrimSpace(payload.ToolName),
+			Kind: strings.TrimSpace(payload.ToolKind), Title: strings.TrimSpace(payload.ToolTitle),
+			Status:   firstNonEmpty(strings.TrimSpace(payload.ToolStatus), strings.TrimSpace(string(payload.Status))),
+			RawInput: rawInput, RawOutput: jsonvalue.CloneMap(payload.RawOutput),
+			Content: session.CloneProtocolToolCallContent(payload.Content),
+		},
+		Options: options,
+	}
+}
+
+func putRawStringIfMissing(values map[string]any, key string, value string) map[string]any {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return values
+	}
+	if values == nil {
+		values = map[string]any{}
+	}
+	if _, exists := values[key]; !exists {
+		values[key] = value
+	}
+	return values
+}
+
 // NormalizeProtocolOptions converts protocol approval options into the stable
 // approval option shape and applies canonical option normalization.
 func NormalizeProtocolOptions(options []session.ProtocolApprovalOption) []Option {

@@ -434,6 +434,24 @@ type AppendEventsAndUpdateStateRequest struct {
 	UpdateState      func(storedEvents []*Event, state map[string]any) (map[string]any, error)
 }
 
+// ReplaceStateRequest replaces one durable Session state snapshot under an
+// explicit revision and mutation-authority fence.
+type ReplaceStateRequest struct {
+	SessionRef       SessionRef
+	ExpectedRevision *uint64
+	MutationGuard    MutationGuard
+	State            map[string]any
+}
+
+// UpdateStateRequest derives one durable Session state snapshot under an
+// explicit revision and mutation-authority fence.
+type UpdateStateRequest struct {
+	SessionRef       SessionRef
+	ExpectedRevision *uint64
+	MutationGuard    MutationGuard
+	Update           func(map[string]any) (map[string]any, error)
+}
+
 // EventsRequest lists events for one session.
 type EventsRequest struct {
 	SessionRef       SessionRef `json:"session_ref"`
@@ -574,8 +592,8 @@ type Store interface {
 	PutParticipant(context.Context, SessionRef, ParticipantBinding) (Session, error)
 	RemoveParticipant(context.Context, SessionRef, string) (Session, error)
 	SnapshotState(context.Context, SessionRef) (map[string]any, error)
-	ReplaceState(context.Context, SessionRef, map[string]any) error
-	UpdateState(context.Context, SessionRef, func(map[string]any) (map[string]any, error)) error
+	ReplaceState(context.Context, ReplaceStateRequest) (Session, error)
+	UpdateState(context.Context, UpdateStateRequest) (Session, error)
 }
 
 // Lifecycle starts, loads, and lists sessions without granting mutation of an
@@ -617,10 +635,12 @@ type StateReader interface {
 	SnapshotState(context.Context, SessionRef) (map[string]any, error)
 }
 
-// StateWriter replaces or transactionally updates durable session state.
+// StateWriter replaces or transactionally updates durable Session state.
+// Implementations enforce ExpectedRevision and MutationGuard before commit and
+// return the exact committed Session alongside post-commit reporting errors.
 type StateWriter interface {
-	ReplaceState(context.Context, SessionRef, map[string]any) error
-	UpdateState(context.Context, SessionRef, func(map[string]any) (map[string]any, error)) error
+	ReplaceState(context.Context, ReplaceStateRequest) (Session, error)
+	UpdateState(context.Context, UpdateStateRequest) (Session, error)
 }
 
 // StateStore combines durable state reads and writes.

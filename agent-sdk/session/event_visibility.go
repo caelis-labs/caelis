@@ -26,6 +26,30 @@ func IsCanonicalHistoryEvent(event *Event) bool {
 	return true
 }
 
+// IsClientReplayEvent reports whether one durable event belongs to the client
+// semantic replay lane. Mirrors are included without becoming model context;
+// transient, overlay, notice, and journal state remain excluded.
+func IsClientReplayEvent(event *Event) bool {
+	if event == nil || IsTransient(event) || IsJournal(event) {
+		return false
+	}
+	return IsCanonicalHistoryEvent(event) || IsMirror(event)
+}
+
+// FilterClientReplayEvents returns canonical and mirror events in source
+// order. It is intentionally independent from model-context and bounded TUI
+// transcript replay filters.
+func FilterClientReplayEvents(events []*Event) []*Event {
+	out := make([]*Event, 0, len(events))
+	for _, event := range events {
+		if !IsClientReplayEvent(event) {
+			continue
+		}
+		out = append(out, CanonicalizeEvent(event))
+	}
+	return out
+}
+
 // IsInvocationVisibleEvent reports whether one event may participate in the
 // current invocation context. Overlay events are transient display overlays, so
 // they are not model-visible even when they mirror otherwise canonical shapes.

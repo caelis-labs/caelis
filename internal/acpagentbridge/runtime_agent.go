@@ -441,7 +441,7 @@ func (a *RuntimeAgent) Prompt(ctx context.Context, req acp.PromptRequest, cb acp
 		}
 		return acp.PromptResponse{}, err
 	}
-	if err := a.emitRunEvents(runCtx, ctx, cb, result.Handle, true); err != nil {
+	if err := a.emitRunEvents(runCtx, ctx, cb, ref, result.Handle, true); err != nil {
 		if errors.Is(err, context.Canceled) {
 			return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
 		}
@@ -450,7 +450,7 @@ func (a *RuntimeAgent) Prompt(ctx context.Context, req acp.PromptRequest, cb acp
 	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
 }
 
-func (a *RuntimeAgent) emitRunEvents(runCtx context.Context, _ context.Context, cb acp.PromptCallbacks, handle agent.Runner, suppressUserEcho bool) error {
+func (a *RuntimeAgent) emitRunEvents(runCtx context.Context, _ context.Context, cb acp.PromptCallbacks, ref session.SessionRef, handle agent.Runner, suppressUserEcho bool) error {
 	if handle == nil {
 		return nil
 	}
@@ -467,7 +467,7 @@ func (a *RuntimeAgent) emitRunEvents(runCtx context.Context, _ context.Context, 
 			continue
 		}
 		a.rememberTerminalRefFromEvent(event)
-		if err := a.emitEvent(runCtx, cb, event, outboundFilter); err != nil {
+		if err := a.emitEvent(runCtx, cb, ref, event, outboundFilter); err != nil {
 			return err
 		}
 	}
@@ -546,21 +546,19 @@ func (a *RuntimeAgent) Release(ctx context.Context, req acp.TerminalReleaseReque
 	return adapter.Release(ctx, req)
 }
 
-func (a *RuntimeAgent) emitEvent(ctx context.Context, cb acp.PromptCallbacks, event *session.Event, outboundFilter *acpNarrativeFilter) error {
+func (a *RuntimeAgent) emitEvent(ctx context.Context, cb acp.PromptCallbacks, ref session.SessionRef, event *session.Event, outboundFilter *acpNarrativeFilter) error {
 	if cb == nil || event == nil {
 		return nil
 	}
+	source := acpFilterSourceFromSessionEvent(ref, event)
 	if permission, ok, err := a.projector.ProjectPermissionRequest(event); err != nil {
 		return err
 	} else if ok && permission != nil {
 		if outboundFilter != nil {
-			outboundFilter.resetSegment()
+			outboundFilter.resetSource(source)
 		}
 		_, err := cb.RequestPermission(ctx, *permission)
 		return err
-	}
-	if suppressACPBridgeSubagentEvent(event) {
-		return nil
 	}
 	notifications, err := a.projector.ProjectNotifications(event)
 	if err != nil {
@@ -570,7 +568,7 @@ func (a *RuntimeAgent) emitEvent(ctx context.Context, cb acp.PromptCallbacks, ev
 		filtered := notification
 		if outboundFilter != nil {
 			var ok bool
-			filtered, ok = outboundFilter.FilterNotificationWithFinal(filtered, projector.SessionEventFinal(event))
+			filtered, ok = outboundFilter.filterNotificationWithFinal(filtered, projector.SessionEventFinal(event), source)
 			if !ok {
 				continue
 			}

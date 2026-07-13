@@ -6,6 +6,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
 func (g *Gateway) ActiveCounts() (int, int) {
@@ -33,12 +34,13 @@ func (g *Gateway) ActiveTurns() []ActiveTurnState {
 			ref.SessionID = strings.TrimSpace(sessionID)
 		}
 		out = append(out, ActiveTurnState{
-			SessionRef: ref,
-			Kind:       handle.ActiveKind(),
-			HandleID:   handle.HandleID(),
-			RunID:      handle.RunID(),
-			TurnID:     handle.TurnID(),
-			StartedAt:  handle.CreatedAt(),
+			SessionRef:    ref,
+			Kind:          handle.ActiveKind(),
+			ParticipantID: handle.ParticipantID(),
+			HandleID:      handle.HandleID(),
+			RunID:         handle.RunID(),
+			TurnID:        handle.TurnID(),
+			StartedAt:     handle.CreatedAt(),
 		})
 	}
 	return out
@@ -63,13 +65,46 @@ func (g *Gateway) ActiveTurn(sessionID string) (ActiveTurnState, bool) {
 		ref.SessionID = sessionID
 	}
 	return ActiveTurnState{
-		SessionRef: ref,
-		Kind:       handle.ActiveKind(),
-		HandleID:   handle.HandleID(),
-		RunID:      handle.RunID(),
-		TurnID:     handle.TurnID(),
-		StartedAt:  handle.CreatedAt(),
+		SessionRef:    ref,
+		Kind:          handle.ActiveKind(),
+		ParticipantID: handle.ParticipantID(),
+		HandleID:      handle.HandleID(),
+		RunID:         handle.RunID(),
+		TurnID:        handle.TurnID(),
+		StartedAt:     handle.CreatedAt(),
 	}, true
+}
+
+// ApprovalTarget returns the exact Turn identity that owns one pending
+// Session-scoped approval, including approvals whose detached child outlived
+// the active parent Turn.
+func (g *Gateway) ApprovalTarget(sessionID string, requestID eventstream.ApprovalRequestID) (ActiveTurnState, bool) {
+	if g == nil {
+		return ActiveTurnState{}, false
+	}
+	g.mu.Lock()
+	coordinator := g.approvals[strings.TrimSpace(sessionID)]
+	g.mu.Unlock()
+	if coordinator == nil {
+		return ActiveTurnState{}, false
+	}
+	return coordinator.target(requestID)
+}
+
+// CloseSessionApprovals releases every waiter owned by a semantically closed
+// Session and removes its coordinator registry entry.
+func (g *Gateway) CloseSessionApprovals(ref session.SessionRef, reason string) {
+	if g == nil {
+		return
+	}
+	sessionID := strings.TrimSpace(ref.SessionID)
+	g.mu.Lock()
+	coordinator := g.approvals[sessionID]
+	delete(g.approvals, sessionID)
+	g.mu.Unlock()
+	if coordinator != nil {
+		coordinator.clear(reason)
+	}
 }
 
 func (g *Gateway) SubmitActiveTurn(ctx context.Context, req SubmitActiveTurnRequest) error {
@@ -93,8 +128,12 @@ func (g *Gateway) SubmitActiveTurn(ctx context.Context, req SubmitActiveTurnRequ
 	}
 	g.mu.Lock()
 	handle := g.active[sessionID]
+	coordinator := g.approvals[sessionID]
 	g.mu.Unlock()
 	if handle == nil {
+		if req.Kind == SubmissionKindApproval && req.Approval != nil && coordinator != nil {
+			return coordinator.submit(ctx, *req.Approval)
+		}
 		return &Error{
 			Kind:        KindConflict,
 			Code:        CodeNoActiveRun,

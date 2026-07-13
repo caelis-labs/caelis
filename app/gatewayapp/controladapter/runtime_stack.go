@@ -12,6 +12,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	controller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
+	controlclientport "github.com/caelis-labs/caelis/ports/controlclient"
 	"github.com/caelis-labs/caelis/ports/gateway"
 )
 
@@ -306,6 +307,7 @@ type CodeFreeAuthRequest struct {
 
 type RuntimeStack struct {
 	Gateway      GatewayRuntimeDeps
+	ControlFeeds controlclientport.FeedRegistry
 	Session      SessionRuntimeDeps
 	Status       StatusRuntimeDeps
 	Agent        AgentRuntimeDeps

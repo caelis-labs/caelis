@@ -100,7 +100,7 @@ func (s *Stack) UseModel(ctx context.Context, ref session.SessionRef, alias stri
 	if err := s.refreshConfiguredAgentsFromStore(); err != nil {
 		return txn.rollback(err)
 	}
-	if err := s.Sessions.UpdateState(ctx, ref, func(state map[string]any) (map[string]any, error) {
+	if _, err := s.updateSessionState(ctx, ref, func(state map[string]any) (map[string]any, error) {
 		next := session.CloneState(state)
 		if next == nil {
 			next = map[string]any{}
@@ -161,7 +161,7 @@ func (s *Stack) DeleteModel(ctx context.Context, ref session.SessionRef, alias s
 	if err := s.refreshConfiguredAgentsFromStore(); err != nil {
 		return txn.rollback(err)
 	}
-	if err := s.Sessions.UpdateState(ctx, ref, func(state map[string]any) (map[string]any, error) {
+	if _, err := s.updateSessionState(ctx, ref, func(state map[string]any) (map[string]any, error) {
 		next := session.CloneState(state)
 		if next == nil {
 			next = map[string]any{}
@@ -246,7 +246,7 @@ func (t *modelConfigTransaction) rollbackWithState(ctx context.Context, ref sess
 	if t == nil || t.stack == nil || t.stack.Sessions == nil {
 		return err
 	}
-	if restoreErr := t.stack.Sessions.ReplaceState(ctx, ref, previousState); restoreErr != nil {
+	if _, restoreErr := t.stack.replaceSessionState(ctx, ref, previousState); restoreErr != nil {
 		return errors.Join(err, fmt.Errorf("gatewayapp: rollback session model state failed: %w", restoreErr))
 	}
 	return err

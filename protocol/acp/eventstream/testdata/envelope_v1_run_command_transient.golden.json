@@ -8,7 +8,7 @@
   "occurred_at": "2026-07-12T10:00:02Z",
   "scope": "main",
   "delivery": {
-    "transient": true
+    "mode": "transient"
   },
   "update": {
     "sessionUpdate": "tool_call_update",

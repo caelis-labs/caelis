@@ -152,7 +152,7 @@ func (p *modeProvider) SetSessionMode(ctx context.Context, req acp.SetSessionMod
 		if err != nil {
 			return acp.SetSessionModeResponse{}, err
 		}
-		if err := p.sessions.UpdateState(ctx, ref, func(state map[string]any) (map[string]any, error) {
+		if err := updateProviderSessionState(ctx, p.sessions, ref, func(state map[string]any) (map[string]any, error) {
 			return assembly.SetCurrentModeID(state, modeID), nil
 		}); err != nil {
 			return acp.SetSessionModeResponse{}, err
@@ -285,7 +285,7 @@ func (p *configProvider) SetSessionConfigOption(ctx context.Context, req acp.Set
 		if err != nil {
 			return acp.SetSessionConfigOptionResponse{}, err
 		}
-		if err := p.sessions.UpdateState(ctx, ref, func(state map[string]any) (map[string]any, error) {
+		if err := updateProviderSessionState(ctx, p.sessions, ref, func(state map[string]any) (map[string]any, error) {
 			return assembly.SetCurrentConfigValue(state, configID, value), nil
 		}); err != nil {
 			return acp.SetSessionConfigOptionResponse{}, err
@@ -308,6 +308,25 @@ func (p *configProvider) SetSessionConfigOption(ctx context.Context, req acp.Set
 	return acp.SetSessionConfigOptionResponse{
 		ConfigOptions: p.renderOptions(selected),
 	}, nil
+}
+
+func updateProviderSessionState(
+	ctx context.Context,
+	sessions session.Service,
+	ref session.SessionRef,
+	update func(map[string]any) (map[string]any, error),
+) error {
+	current, err := sessions.Session(ctx, ref)
+	if err != nil {
+		return err
+	}
+	_, err = sessions.UpdateState(ctx, session.UpdateStateRequest{
+		SessionRef:       ref,
+		ExpectedRevision: &current.Revision,
+		MutationGuard:    session.ControlMutationGuard(session.ControlMutationPurposeCoordinator),
+		Update:           update,
+	})
+	return err
 }
 
 func (p *configProvider) lookup(configID string) (assembly.ConfigOption, bool) {

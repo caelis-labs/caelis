@@ -101,6 +101,14 @@ type Runner interface {
 	Close() error
 }
 
+// RunnerCompletionWaiter reports when the execution producer, including its
+// final durable writes, is quiescent. Runtime decorators that own an external
+// lease use this optional contract before releasing that authority after an
+// early consumer stop or Close.
+type RunnerCompletionWaiter interface {
+	WaitCompletion(context.Context) error
+}
+
 // SubagentRunner starts delegated child runs from the current invocation.
 // Concrete child-agent configuration is app-owned; runtime only sees the
 // registry name and the resulting child instance ref.

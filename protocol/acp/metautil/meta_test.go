@@ -23,14 +23,14 @@ func TestStringAndBoolReadNestedMeta(t *testing.T) {
 	t.Parallel()
 
 	meta := WithRuntimeSection(nil, RuntimeStream, map[string]any{
-		RuntimeStreamParentTool:           "  SPAWN  ",
-		RuntimeStreamMirroredToParentTool: true,
+		RuntimeStreamParentTool: "  SPAWN  ",
+		"active":                true,
 	})
 
 	if got := String(meta, Root, Runtime, RuntimeStream, RuntimeStreamParentTool); got != "SPAWN" {
 		t.Fatalf("String() = %q, want trimmed tool name", got)
 	}
-	if !Bool(meta, Root, Runtime, RuntimeStream, RuntimeStreamMirroredToParentTool) {
+	if !Bool(meta, Root, Runtime, RuntimeStream, "active") {
 		t.Fatal("Bool() = false, want true")
 	}
 }

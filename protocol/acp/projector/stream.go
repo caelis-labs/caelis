@@ -59,7 +59,7 @@ func (r StreamRequest) Key() string {
 // ACP-native envelopes for live clients.
 func ProjectStreamFrame(req StreamRequest, frame stream.Frame) []eventstream.Envelope {
 	parent := parentStreamFrameEvents(req, frame)
-	embedded := streamFrameEmbeddedEvents(req, frame, parentStreamFrameHasToolMirror(parent))
+	embedded := streamFrameEmbeddedEvents(req, frame)
 	out := make([]eventstream.Envelope, 0, len(embedded)+len(parent))
 	out = append(out, embedded...)
 	out = append(out, parent...)
@@ -67,8 +67,11 @@ func ProjectStreamFrame(req StreamRequest, frame stream.Frame) []eventstream.Env
 }
 
 func parentStreamFrameEvents(req StreamRequest, frame stream.Frame) []eventstream.Envelope {
-	if canonical, ok := names.Resolve(req.ToolName); ok && canonical == names.Spawn {
-		return subagentStreamFrameEvents(req, frame)
+	if delegatedParentStream(req) {
+		if frame.Closed {
+			return []eventstream.Envelope{delegatedFinalFrameEvent(req, frame)}
+		}
+		return nil
 	}
 	if frame.Closed {
 		return []eventstream.Envelope{streamFinalFrameEvent(req, frame)}
@@ -79,34 +82,13 @@ func parentStreamFrameEvents(req StreamRequest, frame stream.Frame) []eventstrea
 	return nil
 }
 
-func parentStreamFrameHasToolMirror(parent []eventstream.Envelope) bool {
-	for _, env := range parent {
-		if env.Delivery != nil && env.Delivery.IsParentToolMirror {
-			return true
-		}
-	}
-	return false
-}
-
-func subagentStreamFrameEvents(req StreamRequest, frame stream.Frame) []eventstream.Envelope {
-	if frame.Closed {
-		return []eventstream.Envelope{subagentFinalFrameEvent(req, frame)}
-	}
-	if !frame.Running || frame.Text == "" {
-		return nil
-	}
-	if taskID := strings.TrimSpace(req.Ref.TaskID); taskID != "" {
-		frame = stream.CloneFrame(frame)
-		frame.Ref.TaskID = taskID
-		if terminalID := strings.TrimSpace(req.Ref.TerminalID); terminalID != "" {
-			frame.Ref.TerminalID = terminalID
-		}
-	}
-	return []eventstream.Envelope{streamFrameEvent(req, frame)}
+func delegatedParentStream(req StreamRequest) bool {
+	canonical, ok := names.Resolve(req.ToolName)
+	return ok && (canonical == names.Spawn || canonical == names.Task)
 }
 
 func streamFrameEvent(req StreamRequest, frame stream.Frame) eventstream.Envelope {
-	return streamToolUpdateEnvelope(req, frame, toolStatusRunning, true, false, frame.Text, streamFrameMeta("append"))
+	return streamToolUpdateEnvelope(req, frame, toolStatusRunning, true, false, frame.Text, streamFrameMeta("append"), true)
 }
 
 func streamFinalFrameEvent(req StreamRequest, frame stream.Frame) eventstream.Envelope {
@@ -115,21 +97,17 @@ func streamFinalFrameEvent(req StreamRequest, frame stream.Frame) eventstream.En
 	if frame.Cursor.Output == 0 {
 		finalText = streamFinalTerminalText(frame.Text, frame.Cursor, status)
 	}
-	return streamToolUpdateEnvelope(req, frame, status, true, isErr, finalText, streamFrameMeta("final"))
+	return streamToolUpdateEnvelope(req, frame, status, true, isErr, finalText, streamFrameMeta("final"), true)
 }
 
-func subagentFinalFrameEvent(req StreamRequest, frame stream.Frame) eventstream.Envelope {
+func delegatedFinalFrameEvent(req StreamRequest, frame stream.Frame) eventstream.Envelope {
 	status, isErr := subagentFinalToolStatus(frame)
 	finalMessage := display.CleanSubagentFinalOutput(frame.Text)
-	terminalText := ""
-	if frame.Cursor.Output == 0 {
-		terminalText = finalMessage
-	}
 	if terminalID := strings.TrimSpace(req.Ref.TerminalID); terminalID != "" {
 		frame = stream.CloneFrame(frame)
 		frame.Ref.TerminalID = terminalID
 	}
-	env := streamToolUpdateEnvelope(req, frame, status, true, isErr, terminalText, streamFrameMeta("final"))
+	env := streamToolUpdateEnvelope(req, frame, status, true, isErr, "", streamFrameMeta("final"), false)
 	update, _ := env.Update.(ToolCallUpdate)
 	taskID := firstNonEmpty(req.Ref.TaskID, frame.Ref.TaskID)
 	update.Meta = streamFrameToolMeta(update.Meta, req.RawInput, map[string]any{
@@ -162,7 +140,7 @@ func streamTerminalExitID(req StreamRequest, frame stream.Frame) string {
 	return streamDisplayTerminalID(req, frame)
 }
 
-func streamToolUpdateEnvelope(req StreamRequest, frame stream.Frame, status string, includeStatus bool, isErr bool, terminalText string, meta map[string]any) eventstream.Envelope {
+func streamToolUpdateEnvelope(req StreamRequest, frame stream.Frame, status string, includeStatus bool, isErr bool, terminalText string, meta map[string]any, includeDisplayTerminal bool) eventstream.Envelope {
 	terminalID := firstNonEmpty(frame.Ref.TerminalID, req.Ref.TerminalID)
 	metaOutput := map[string]any{
 		"task_id":       firstNonEmpty(frame.Ref.TaskID, req.Ref.TaskID),
@@ -194,12 +172,14 @@ func streamToolUpdateEnvelope(req StreamRequest, frame stream.Frame, status stri
 		statusText := acpToolStatus(status)
 		update.Status = stringPtr(statusText)
 	}
-	update = withDisplayTerminalUpdate(update, req.CallID, req.ToolName)
-	if frame.Closed {
-		// withDisplayTerminalUpdate preserves the Zed-compatible empty terminal
-		// anchor and installs the final terminal metadata. The stream close frame
-		// is the authoritative runtime exit-code carrier, so retain it here.
-		update.Meta = metautil.WithTerminalExit(update.Meta, streamTerminalExitID(req, frame), frame.ExitCode, nil)
+	if includeDisplayTerminal {
+		update = withDisplayTerminalUpdate(update, req.CallID, req.ToolName)
+		if frame.Closed {
+			// withDisplayTerminalUpdate preserves the Zed-compatible empty terminal
+			// anchor and installs the final terminal metadata. The stream close frame
+			// is the authoritative runtime exit-code carrier, so retain it here.
+			update.Meta = metautil.WithTerminalExit(update.Meta, streamTerminalExitID(req, frame), frame.ExitCode, nil)
+		}
 	}
 	scope := req.Scope
 	if scope == "" {
@@ -216,23 +196,14 @@ func streamToolUpdateEnvelope(req StreamRequest, frame stream.Frame, status stri
 		ScopeID:       streamRequestScopeID(req),
 		Actor:         strings.TrimSpace(req.Actor),
 		ParticipantID: strings.TrimSpace(req.ParticipantID),
-		Delivery:      streamFrameDelivery(req, terminalText),
+		Delivery:      streamFrameDelivery(),
 		Update:        update,
 		Meta:          streamFrameMetaForEnvelope(isErr),
 	}
 }
 
-func streamFrameDelivery(req StreamRequest, terminalText string) *eventstream.Delivery {
-	delivery := &eventstream.Delivery{Transient: true}
-	if terminalText != "" && streamParentToolCompatibilityMirror(req) {
-		delivery.IsParentToolMirror = true
-	}
-	return delivery
-}
-
-func streamParentToolCompatibilityMirror(req StreamRequest) bool {
-	canonical, ok := names.Resolve(req.ToolName)
-	return ok && (canonical == names.Spawn || canonical == names.Task)
+func streamFrameDelivery() *eventstream.Delivery {
+	return &eventstream.Delivery{Mode: eventstream.DeliveryTransient}
 }
 
 func streamRequestScopeID(req StreamRequest) string {
@@ -308,7 +279,7 @@ func shouldProjectFrameTextToParentTool(frame stream.Frame) bool {
 	return true
 }
 
-func streamFrameEmbeddedEvents(req StreamRequest, frame stream.Frame, hasParentToolMirror bool) []eventstream.Envelope {
+func streamFrameEmbeddedEvents(req StreamRequest, frame stream.Frame) []eventstream.Envelope {
 	event := session.CloneEvent(frame.Event)
 	if event == nil {
 		return nil
@@ -354,9 +325,8 @@ func streamFrameEmbeddedEvents(req StreamRequest, frame stream.Frame, hasParentT
 			parentToolCopy := *parentTool
 			out[i].ParentTool = &parentToolCopy
 		}
-		out[i].Delivery = &eventstream.Delivery{
-			Transient:           true,
-			HasParentToolMirror: hasParentToolMirror,
+		if event.ChildOrigin == nil {
+			out[i].Delivery = &eventstream.Delivery{Mode: eventstream.DeliveryTransient}
 		}
 	}
 	return out

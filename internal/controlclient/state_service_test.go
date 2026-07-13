@@ -1,0 +1,111 @@
+package controlclient
+
+import (
+	"context"
+	"errors"
+	"testing"
+
+	"github.com/caelis-labs/caelis/agent-sdk/session"
+	controlport "github.com/caelis-labs/caelis/ports/controlclient"
+	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
+)
+
+func TestStateServiceReturnsTypedConsistentBootstrapBySessionID(t *testing.T) {
+	codec, err := eventstream.NewCursorCodec(eventstream.CursorCodecConfig{Secret: []byte("0123456789abcdef0123456789abcdef")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	feeds, err := NewFeedRegistry(FeedRegistryConfig{CursorCodec: codec})
+	if err != nil {
+		t.Fatal(err)
+	}
+	feed, err := feeds.Session(session.SessionRef{SessionID: "session-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := feed.Publish(terminalEnvelope("live")); err != nil {
+		t.Fatal(err)
+	}
+	sessions := &stateSessionReader{session: session.Session{
+		SessionRef: session.SessionRef{SessionID: "session-1", WorkspaceKey: "workspace-a"},
+		Revision:   7, CWD: "/workspace/a", Title: "Session A", Metadata: map[string]any{"display": map[string]any{"color": "blue"}},
+		Controller:   session.ControllerBinding{Kind: session.ControllerKindACP, EpochID: "epoch-1"},
+		Participants: []session.ParticipantBinding{{ID: "participant-1", Kind: session.ParticipantKindACP}},
+	}}
+	runtime := staticRuntimeStateReader{state: controlport.RuntimeState{
+		Run: controlport.RunState{Active: true, Status: "waiting_approval", HandleID: "handle-1", RunID: "run-1", TurnID: "turn-1", WaitingApproval: true},
+		Approval: controlport.ApprovalState{Active: &controlport.ActiveApproval{
+			RequestID: "approval-1", Scope: eventstream.ScopeMain,
+			Permission: &session.ProtocolApproval{ToolCall: session.ProtocolToolCall{ID: "call-1", Name: "WRITE"}},
+		}, QueuedCount: 2},
+	}}
+	service, err := NewStateService(StateServiceConfig{Sessions: sessions, Runtime: runtime, Feeds: feeds})
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := service.State(context.Background(), controlport.StateRequest{SessionID: "session-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sessions.firstRef.SessionID != "session-1" || sessions.firstRef.WorkspaceKey != "" {
+		t.Fatalf("initial state lookup ref = %#v, want global SessionID only", sessions.firstRef)
+	}
+	if state.SessionID != "session-1" || state.Revision != 7 || state.WorkspaceKey != "workspace-a" || state.BoundaryCursor == "" {
+		t.Fatalf("state identity/boundary = %#v", state)
+	}
+	if state.Approval.Active == nil || state.Approval.Active.RequestID != "approval-1" || state.Approval.QueuedCount != 2 {
+		t.Fatalf("approval bootstrap = %#v", state.Approval)
+	}
+	if state.Capabilities.ClientManagedTerminal || !state.Capabilities.CaelisTerminalStream || state.Capabilities.GoalBootstrapSupported || state.Capabilities.ManageLoopBootstrapSupported {
+		t.Fatalf("capabilities = %#v", state.Capabilities)
+	}
+}
+
+func TestStateServiceReturnsRevisionConflictInsteadOfMixedSnapshot(t *testing.T) {
+	codec, err := eventstream.NewCursorCodec(eventstream.CursorCodecConfig{Secret: []byte("0123456789abcdef0123456789abcdef")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	feeds, err := NewFeedRegistry(FeedRegistryConfig{CursorCodec: codec})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions := &changingStateSessionReader{}
+	service, err := NewStateService(StateServiceConfig{
+		Sessions: sessions, Runtime: staticRuntimeStateReader{}, Feeds: feeds, MaxRetries: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = service.State(context.Background(), controlport.StateRequest{SessionID: "session-1"})
+	if !errors.Is(err, controlport.ErrStateRevisionConflict) {
+		t.Fatalf("State error = %v, want revision conflict", err)
+	}
+}
+
+type stateSessionReader struct {
+	session  session.Session
+	firstRef session.SessionRef
+	lastRef  session.SessionRef
+}
+
+func (r *stateSessionReader) Session(_ context.Context, ref session.SessionRef) (session.Session, error) {
+	if r.firstRef.SessionID == "" {
+		r.firstRef = ref
+	}
+	r.lastRef = ref
+	return session.CloneSession(r.session), nil
+}
+
+type changingStateSessionReader struct{ revision uint64 }
+
+func (r *changingStateSessionReader) Session(_ context.Context, ref session.SessionRef) (session.Session, error) {
+	r.revision++
+	return session.Session{SessionRef: session.SessionRef{SessionID: ref.SessionID}, Revision: r.revision}, nil
+}
+
+type staticRuntimeStateReader struct{ state controlport.RuntimeState }
+
+func (r staticRuntimeStateReader) ControlClientRuntimeState(context.Context, session.SessionRef) (controlport.RuntimeState, error) {
+	return r.state, nil
+}

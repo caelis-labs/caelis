@@ -73,9 +73,14 @@ type ListSessionsRequest struct {
 }
 
 type InterruptRequest struct {
-	SessionRef session.SessionRef
-	BindingKey string
-	Reason     string
+	SessionRef    session.SessionRef
+	BindingKey    string
+	Reason        string
+	HandleID      string
+	RunID         string
+	TurnID        string
+	Kind          ActiveTurnKind
+	ParticipantID string
 }
 
 type BindingDescriptor struct {
@@ -95,9 +100,8 @@ type BindSessionRequest struct {
 type ReplayEventsRequest struct {
 	SessionRef session.SessionRef `json:"session_ref"`
 	BindingKey string             `json:"binding_key,omitempty"`
-	// Cursor accepts a durable replay cursor/projection_id or a legacy source
-	// session event id. Live eventstream cursors are stream-local; clients
-	// bridging from live to replay should pass projection_id when present.
+	// Cursor is a legacy in-process kernel replay offset. Public Control clients
+	// use only the signed Envelope.Cursor through ports/controlclient.
 	Cursor string `json:"cursor,omitempty"`
 	// Limit caps source session events, not projected envelopes, so one source
 	// event may still expand to multiple semantic ACP envelopes.
@@ -179,12 +183,13 @@ type BindingStateRequest struct {
 }
 
 type ActiveTurnState struct {
-	SessionRef session.SessionRef `json:"session_ref"`
-	Kind       ActiveTurnKind     `json:"kind,omitempty"`
-	HandleID   string             `json:"handle_id,omitempty"`
-	RunID      string             `json:"run_id,omitempty"`
-	TurnID     string             `json:"turn_id,omitempty"`
-	StartedAt  time.Time          `json:"started_at,omitempty"`
+	SessionRef    session.SessionRef `json:"session_ref"`
+	Kind          ActiveTurnKind     `json:"kind,omitempty"`
+	ParticipantID string             `json:"participant_id,omitempty"`
+	HandleID      string             `json:"handle_id,omitempty"`
+	RunID         string             `json:"run_id,omitempty"`
+	TurnID        string             `json:"turn_id,omitempty"`
+	StartedAt     time.Time          `json:"started_at,omitempty"`
 }
 
 type ActiveTurnKind string

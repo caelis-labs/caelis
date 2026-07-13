@@ -18,7 +18,7 @@ GOTMPDIR ?= $(CACHE_ROOT)/gotmp
 GOLANGCI_LINT_CACHE ?= $(CACHE_ROOT)/golangci-lint
 XDG_CACHE_HOME ?= $(CACHE_ROOT)/xdg
 export GOMODCACHE GOCACHE GOTMPDIR GOLANGCI_LINT_CACHE XDG_CACHE_HOME
-.PHONY: arch-lint build build-cli cache-dirs command-regression command-execution-regression commit-check docs-links eval-smoke fmt fmt-check guardian-eval install lint quality regression sdk-api-compat sdk-boundary-check sdk-proxy-smoke sdk-race test tui-golden tui-interaction vet release-dry-run
+.PHONY: arch-lint build build-cli cache-dirs client-protocol-check client-protocol-generate command-regression command-execution-regression commit-check docs-links eval-smoke fmt fmt-check guardian-eval install lint quality regression sdk-api-compat sdk-boundary-check sdk-proxy-smoke sdk-race test tui-golden tui-interaction vet release-dry-run
 
 cache-dirs:
 	mkdir -p "$(GOMODCACHE)" "$(GOCACHE)" "$(GOTMPDIR)" "$(GOLANGCI_LINT_CACHE)" "$(XDG_CACHE_HOME)"
@@ -63,7 +63,13 @@ sdk-race: cache-dirs
 docs-links: cache-dirs
 	go run ./scripts/markdown_links
 
-quality: fmt-check lint arch-lint sdk-boundary-check vet test
+client-protocol-generate: cache-dirs
+	go run ./scripts/client_protocol_generate
+
+client-protocol-check: cache-dirs
+	go run ./scripts/client_protocol_generate -check
+
+quality: fmt-check lint arch-lint sdk-boundary-check client-protocol-check vet test
 
 commit-check: quality build
 

@@ -20,6 +20,8 @@ type runner struct {
 	cancelFn    context.CancelFunc
 	events      *eventQueue[runnerEvent]
 	closeOnce   sync.Once
+	finishOnce  sync.Once
+	done        chan struct{}
 	mu          sync.Mutex
 	cancelled   bool
 	closed      bool
@@ -39,6 +41,7 @@ func newRunner(runID string, cancel context.CancelFunc) *runner {
 		runID:    runID,
 		cancelFn: cancel,
 		events:   newEventQueue[runnerEvent](),
+		done:     make(chan struct{}),
 	}
 }
 
@@ -192,6 +195,21 @@ func (r *runner) Close() error {
 	return cancelErr
 }
 
+func (r *runner) WaitCompletion(ctx context.Context) error {
+	if r == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	select {
+	case <-r.done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 func (r *runner) PublishEvent(event *session.Event) {
 	r.publishEvent(event)
 }
@@ -238,6 +256,9 @@ func (r *runner) finish() {
 	r.mu.Unlock()
 	r.closeOnce.Do(func() {
 		r.events.Close()
+	})
+	r.finishOnce.Do(func() {
+		close(r.done)
 	})
 }
 

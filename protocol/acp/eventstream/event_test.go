@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
@@ -229,10 +228,7 @@ func TestEnvelopeV1SpawnChildSemanticGolden(t *testing.T) {
 			ToolCallID: "spawn-call-1",
 			ToolName:   "Spawn",
 		},
-		Delivery: &Delivery{
-			Transient:           true,
-			HasParentToolMirror: true,
-		},
+		Delivery: &Delivery{Mode: DeliveryTransient},
 		Update: schema.ToolCall{
 			SessionUpdate: schema.UpdateToolCall,
 			ToolCallID:    "child-read-1",
@@ -243,38 +239,6 @@ func TestEnvelopeV1SpawnChildSemanticGolden(t *testing.T) {
 		},
 	}
 	assertGoldenJSON(t, "testdata/envelope_v1_spawn_child_semantic.golden.json", env)
-	assertEnvelopeRelationOutsideACPUpdate(t, env)
-}
-
-func TestEnvelopeV1SpawnParentToolMirrorGolden(t *testing.T) {
-	t.Parallel()
-
-	status := schema.ToolStatusCompleted
-	env := Envelope{
-		Kind:       KindSessionUpdate,
-		Cursor:     "stream:spawn-mirror-1",
-		SessionID:  "session-1",
-		HandleID:   "handle-1",
-		RunID:      "run-1",
-		TurnID:     "turn-1",
-		OccurredAt: time.Date(2026, 7, 12, 10, 0, 1, 0, time.UTC),
-		Scope:      ScopeMain,
-		Delivery: &Delivery{
-			Transient:          true,
-			IsParentToolMirror: true,
-		},
-		Update: schema.ToolCallUpdate{
-			SessionUpdate: schema.UpdateToolCallInfo,
-			ToolCallID:    "spawn-call-1",
-			Status:        &status,
-			Content: []schema.ToolCallContent{{
-				Type:       "terminal",
-				TerminalID: "spawn-call-1",
-			}},
-			Meta: metautil.WithTerminalOutput(nil, "spawn-call-1", "child result\n"),
-		},
-	}
-	assertGoldenJSON(t, "testdata/envelope_v1_spawn_parent_tool_mirror.golden.json", env)
 	assertEnvelopeRelationOutsideACPUpdate(t, env)
 }
 
@@ -291,7 +255,7 @@ func TestEnvelopeV1RunCommandTransientGolden(t *testing.T) {
 		TurnID:     "turn-1",
 		OccurredAt: time.Date(2026, 7, 12, 10, 0, 2, 0, time.UTC),
 		Scope:      ScopeMain,
-		Delivery:   &Delivery{Transient: true},
+		Delivery:   &Delivery{Mode: DeliveryTransient},
 		Update: schema.ToolCallUpdate{
 			SessionUpdate: schema.UpdateToolCallInfo,
 			ToolCallID:    "command-call-1",
@@ -490,21 +454,16 @@ func TestCloneEnvelopeDeepCopiesRelationAndDelivery(t *testing.T) {
 
 	env := Envelope{
 		ParentTool: &ParentToolRelation{ToolCallID: "spawn-call-1", ToolName: "Spawn"},
-		Delivery: &Delivery{
-			Transient:           true,
-			HasParentToolMirror: true,
-		},
+		Delivery:   &Delivery{Mode: DeliveryTransient},
 	}
 	cloned := CloneEnvelope(env)
 	cloned.ParentTool.ToolCallID = "changed-call"
-	cloned.Delivery.Transient = false
-	cloned.Delivery.HasParentToolMirror = false
-	cloned.Delivery.IsParentToolMirror = true
+	cloned.Delivery.Mode = DeliveryCanonical
 
 	if env.ParentTool.ToolCallID != "spawn-call-1" || env.ParentTool.ToolName != "Spawn" {
 		t.Fatalf("original parent relation mutated = %#v", env.ParentTool)
 	}
-	if !env.Delivery.Transient || !env.Delivery.HasParentToolMirror || env.Delivery.IsParentToolMirror {
+	if env.Delivery.Mode != DeliveryTransient {
 		t.Fatalf("original delivery mutated = %#v", env.Delivery)
 	}
 }

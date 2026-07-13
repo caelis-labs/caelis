@@ -1684,20 +1684,6 @@ func transientTerminalStreamMetaForTest(mode string) map[string]any {
 	}
 }
 
-func mirroredSubagentStreamMetaForTest(parentCallID string, parentTool string) map[string]any {
-	return map[string]any{
-		"caelis": map[string]any{
-			"runtime": map[string]any{
-				"stream": map[string]any{
-					"parent_call_id":          strings.TrimSpace(parentCallID),
-					"parent_tool":             strings.TrimSpace(parentTool),
-					"mirrored_to_parent_tool": true,
-				},
-			},
-		},
-	}
-}
-
 func firstCompletedToolUpdateIndex(notifications []acp.SessionNotification, terminalID string) int {
 	for i, notification := range notifications {
 		update, ok := notification.Update.(acp.ToolCallUpdate)

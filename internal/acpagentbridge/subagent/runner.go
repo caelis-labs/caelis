@@ -68,9 +68,6 @@ type childRun struct {
 	result         string
 	agentText      string
 	finalAssistant acpschema.FinalAssistantAccumulator
-	lastTraceText  string
-	streamStarted  bool
-	streamEndsLine bool
 	updatedAt      time.Time
 	running        bool
 	done           chan struct{}
@@ -107,7 +104,8 @@ func (r *Runner) Spawn(ctx context.Context, spawn subagent.SpawnContext, req del
 		updatedAt: r.clock(),
 		done:      make(chan struct{}),
 	}
-	childCtx, childCancel := context.WithCancel(context.WithoutCancel(ctx))
+	detachedCtx := detachedChildContext(ctx)
+	childCtx, childCancel := context.WithCancel(detachedCtx)
 	run.ctx = childCtx
 	run.cancel = childCancel
 	agentID := r.stableAgentID(cfg.Name, spawn.TaskID)
@@ -209,11 +207,15 @@ func (r *Runner) Continue(ctx context.Context, anchor delegation.Anchor, req del
 	run.done = make(chan struct{})
 	runCtx := run.ctx
 	if runCtx == nil {
-		runCtx = context.WithoutCancel(ctx)
+		runCtx = detachedChildContext(ctx)
 	}
 	run.mu.Unlock()
 	go r.drivePrompt(runCtx, run, prompt)
 	return r.waitRun(ctx, run, req.YieldTimeMS), nil
+}
+
+func detachedChildContext(ctx context.Context) context.Context {
+	return session.ContextWithoutRuntimeLease(context.WithoutCancel(ctx))
 }
 
 func (r *Runner) Cancel(ctx context.Context, anchor delegation.Anchor) error {
@@ -490,8 +492,6 @@ func (r *Runner) handleUpdate(run *childRun, env client.UpdateEnvelope) {
 		return
 	}
 	env.Update = acputil.StripTerminalConsoleFenceUpdate(env.Update)
-	var streamText string
-	streamLineOriented := false
 	var event *session.Event
 	var frame *stream.Frame
 	run.mu.Lock()
@@ -501,14 +501,13 @@ func (r *Runner) handleUpdate(run *childRun, env client.UpdateEnvelope) {
 		if text := chunkText(update); text != "" {
 			switch strings.TrimSpace(update.SessionUpdate) {
 			case client.UpdateAgentMessage:
-				streamText = run.appendAgentMessageChunkLocked(update.MessageID, text)
+				textOverride := run.appendAgentMessageChunkLocked(update.MessageID, text)
 				run.outputPreview = compactPreview(run.agentText)
-				if streamText != "" {
-					event = run.acpUpdateEvent(env, run.updatedAt, streamText)
+				if textOverride != "" {
+					event = run.acpUpdateEvent(env, run.updatedAt, textOverride)
 				}
 			case client.UpdateAgentThought:
 				run.clearFinalAssistantLocked()
-				streamText = childNarrativeTraceText(text)
 				event = run.acpUpdateEvent(env, run.updatedAt)
 			default:
 				break
@@ -517,30 +516,22 @@ func (r *Runner) handleUpdate(run *childRun, env client.UpdateEnvelope) {
 	case client.ToolCall:
 		run.clearFinalAssistantLocked()
 		run.outputPreview = compactPreview(toolActivity(update.Title, update.Kind, update.Status))
-		streamText = run.appendTraceTextLocked(childToolCallTraceText(update))
-		streamLineOriented = streamText != ""
 		event = run.acpUpdateEvent(env, run.updatedAt)
 	case client.ToolCallUpdate:
 		run.clearFinalAssistantLocked()
-		if text := run.appendTraceTextLocked(childToolCallUpdateTraceText(update)); text != "" {
-			streamText = text
-			streamLineOriented = true
-			run.outputPreview = compactPreview(toolActivity(derefString(update.Title), derefString(update.Kind), derefString(update.Status)))
-		}
+		run.outputPreview = compactPreview(toolActivity(derefString(update.Title), derefString(update.Kind), derefString(update.Status)))
 		event = run.acpUpdateEvent(env, run.updatedAt)
 	case client.PlanUpdate:
 		run.clearFinalAssistantLocked()
 		run.outputPreview = "updating plan"
 		event = run.acpUpdateEvent(env, run.updatedAt)
 	}
-	streamText = run.prepareStreamTextLocked(streamText, streamLineOriented)
-	if streamText != "" || event != nil {
+	if event != nil {
 		next := stream.Frame{
 			Ref: stream.Ref{
 				TaskID:    firstNonEmpty(run.taskID, run.anchor.TaskID),
 				SessionID: firstNonEmpty(strings.TrimSpace(env.SessionID), run.anchor.SessionID),
 			},
-			Text:      streamText,
 			State:     string(run.state),
 			Running:   run.running,
 			Event:     event,
@@ -639,33 +630,6 @@ func (run *childRun) clearFinalAssistantLocked() {
 	run.agentText = ""
 	run.result = ""
 	run.finalAssistant.Reset()
-}
-
-func (run *childRun) appendTraceTextLocked(text string) string {
-	if run == nil {
-		return ""
-	}
-	text = normalizeTraceLine(text)
-	if text == "" {
-		return ""
-	}
-	if text == run.lastTraceText {
-		return ""
-	}
-	run.lastTraceText = text
-	return text
-}
-
-func (run *childRun) prepareStreamTextLocked(text string, lineOriented bool) string {
-	if run == nil || text == "" {
-		return text
-	}
-	if lineOriented && run.streamStarted && !run.streamEndsLine && !strings.HasPrefix(text, "\n") {
-		text = "\n" + text
-	}
-	run.streamStarted = true
-	run.streamEndsLine = strings.HasSuffix(text, "\n") || strings.HasSuffix(text, "\r")
-	return text
 }
 
 func chunkText(chunk client.ContentChunk) string {

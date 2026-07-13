@@ -27,12 +27,11 @@ const (
 	RuntimeTaskID         = "task_id"
 	RuntimeTaskTerminalID = "terminal_id"
 
-	RuntimeStream                     = "stream"
-	RuntimeStreamMode                 = "mode"
-	RuntimeStreamParentCallID         = "parent_call_id"
-	RuntimeStreamParentTool           = "parent_tool"
-	RuntimeStreamParentTaskID         = "parent_task_id"
-	RuntimeStreamMirroredToParentTool = "mirrored_to_parent_tool"
+	RuntimeStream             = "stream"
+	RuntimeStreamMode         = "mode"
+	RuntimeStreamParentCallID = "parent_call_id"
+	RuntimeStreamParentTool   = "parent_tool"
+	RuntimeStreamParentTaskID = "parent_task_id"
 )
 
 // String returns a trimmed string from _meta using a stable path.

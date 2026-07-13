@@ -19,6 +19,30 @@
       "sha256": "d93d06f85e184b7d515d358d0d5a4141631e997c3961daf0e7ed957e6a0d84af",
       "symbol": "type Payload",
       "reason": "pre-v1 approval payload retains normalized ACP ToolCall kind, title, status, raw output, and content so child permissions round-trip without loss"
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk/session",
+      "sha256": "9c648f36f9e47206a08223e9201be2ee22583074f5a93f136af4b478155d761e",
+      "symbol": "type Event",
+      "reason": "pre-v1 Event adds typed child origin and approval request identity required for durable M2 replay without reconstructing semantic relations from display metadata"
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk/session",
+      "sha256": "53dcd3ce4d3c07c9cbcb4115b7641bb78e4461dc3917dda88e0f9d3df075f2ae",
+      "symbol": "ControlMutationPurpose constants",
+      "reason": "pre-v1 Control mutation purposes add explicit session lifecycle authority so semantic close can overlap a cancelling Runtime lease without using an anonymous bypass"
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk/session",
+      "sha256": "5e18d30fcc7d6bf60483dae7e5b30e243ba9c42996849ad200e7fbb20a2aec79",
+      "symbol": "type StateWriter",
+      "reason": "pre-v1 StateWriter replaces legacy unfenced signatures with request-scoped revision CAS and explicit mutation authority so durable semantic state cannot bypass an active Session lease"
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk/session",
+      "sha256": "b609ad48f5647bfa53e8274a74a2b7b0ca3f98d861913ecb8a543df9107a2ea2",
+      "symbol": "type Store",
+      "reason": "pre-v1 low-level Store adopts the request-scoped State mutation contract and returns the exact committed Session for revision-aware recovery"
     }
   ]
 }

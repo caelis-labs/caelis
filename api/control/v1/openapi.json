@@ -1,0 +1,499 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Caelis Control Client API",
+    "version": "1.0.0-m2"
+  },
+  "servers": [{"url": "/api/control/v1"}],
+  "paths": {
+    "/sessions": {
+      "get": {
+        "operationId": "listSessions",
+        "parameters": [
+          {"name": "workspace_key", "in": "query", "schema": {"type": "string"}},
+          {"name": "cursor", "in": "query", "schema": {"type": "string"}},
+          {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1}}
+        ],
+        "responses": {
+          "200": {"description": "Authorized Sessions", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SessionList"}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"}
+        }
+      },
+      "post": {
+        "operationId": "createSession",
+        "parameters": [{"$ref": "#/components/parameters/IdempotencyKey"}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CreateSessionRequest"}}}},
+        "responses": {
+          "200": {"$ref": "#/components/responses/CommandCommitted"},
+          "202": {"$ref": "#/components/responses/CommandAccepted"},
+          "400": {"$ref": "#/components/responses/CommandBadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "409": {"$ref": "#/components/responses/CommandConflict"}
+        }
+      }
+    },
+    "/sessions/{session_id}": {
+      "delete": {
+        "operationId": "closeSession",
+        "parameters": [
+          {"$ref": "#/components/parameters/SessionID"},
+          {"$ref": "#/components/parameters/IdempotencyKey"},
+          {"$ref": "#/components/parameters/IfMatch"}
+        ],
+        "responses": {
+          "200": {"$ref": "#/components/responses/CommandCommitted"},
+          "202": {"$ref": "#/components/responses/CommandAccepted"},
+          "400": {"$ref": "#/components/responses/CommandBadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "409": {"$ref": "#/components/responses/CommandConflict"}
+        }
+      }
+    },
+    "/sessions/{session_id}/state": {
+      "get": {
+        "operationId": "getSessionState",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}],
+        "responses": {
+          "200": {"description": "Reconnect bootstrap", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SessionState"}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"}
+        }
+      }
+    },
+    "/sessions/{session_id}/events": {
+      "get": {
+        "operationId": "getSessionEvents",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}, {"$ref": "#/components/parameters/After"}],
+        "responses": {
+          "200": {"description": "Finite feed backfill", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/EventBatch"}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"}
+        }
+      }
+    },
+    "/sessions/{session_id}/stream": {
+      "get": {
+        "operationId": "streamSessionEvents",
+        "parameters": [
+          {"$ref": "#/components/parameters/SessionID"},
+          {"$ref": "#/components/parameters/After"},
+          {"name": "Last-Event-ID", "in": "header", "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {
+            "description": "SSE Envelope stream. The first named event is the ResumeBoundary metadata frame.",
+            "headers": {
+              "Caelis-Resume-Mode": {"schema": {"$ref": "#/components/schemas/ResumeMode"}},
+              "Caelis-Transient-Gap": {"schema": {"type": "boolean"}},
+              "Caelis-Boundary-Cursor": {"schema": {"type": "string"}}
+            },
+            "content": {"text/event-stream": {"schema": {"type": "string"}}}
+          },
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "500": {"$ref": "#/components/responses/InternalServerError"}
+        }
+      }
+    },
+    "/sessions/{session_id}/prompt": {
+      "post": {
+        "operationId": "promptSession",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}, {"$ref": "#/components/parameters/IdempotencyKey"}, {"$ref": "#/components/parameters/IfMatch"}],
+        "requestBody": {"$ref": "#/components/requestBodies/Prompt"},
+        "responses": {
+          "200": {"$ref": "#/components/responses/CommandCommitted"},
+          "202": {"$ref": "#/components/responses/CommandAccepted"},
+          "400": {"$ref": "#/components/responses/CommandBadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "409": {"$ref": "#/components/responses/CommandConflict"}
+        }
+      }
+    },
+    "/sessions/{session_id}/steer": {
+      "post": {
+        "operationId": "steerSession",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}, {"$ref": "#/components/parameters/IdempotencyKey"}, {"$ref": "#/components/parameters/IfMatch"}],
+        "requestBody": {"$ref": "#/components/requestBodies/Steer"},
+        "responses": {
+          "200": {"$ref": "#/components/responses/CommandCommitted"},
+          "202": {"$ref": "#/components/responses/CommandAccepted"},
+          "400": {"$ref": "#/components/responses/CommandBadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "409": {"$ref": "#/components/responses/CommandConflict"}
+        }
+      }
+    },
+    "/sessions/{session_id}/cancel": {
+      "post": {
+        "operationId": "cancelSessionTurn",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}, {"$ref": "#/components/parameters/IdempotencyKey"}, {"$ref": "#/components/parameters/IfMatch"}],
+        "requestBody": {"$ref": "#/components/requestBodies/Cancel"},
+        "responses": {
+          "200": {"$ref": "#/components/responses/CommandCommitted"},
+          "202": {"$ref": "#/components/responses/CommandAccepted"},
+          "400": {"$ref": "#/components/responses/CommandBadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "409": {"$ref": "#/components/responses/CommandConflict"}
+        }
+      }
+    },
+    "/sessions/{session_id}/approvals/{approval_request_id}/resolve": {
+      "post": {
+        "operationId": "resolveApproval",
+        "parameters": [
+          {"$ref": "#/components/parameters/SessionID"},
+          {"name": "approval_request_id", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"$ref": "#/components/parameters/IdempotencyKey"},
+          {"$ref": "#/components/parameters/IfMatch"}
+        ],
+        "requestBody": {"$ref": "#/components/requestBodies/ResolveApproval"},
+        "responses": {
+          "200": {"$ref": "#/components/responses/CommandCommitted"},
+          "202": {"$ref": "#/components/responses/CommandAccepted"},
+          "400": {"$ref": "#/components/responses/CommandBadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "409": {"$ref": "#/components/responses/CommandConflict"}
+        }
+      }
+    },
+    "/sessions/{session_id}/participants": {
+      "post": {
+        "operationId": "attachParticipant",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}, {"$ref": "#/components/parameters/IdempotencyKey"}, {"$ref": "#/components/parameters/IfMatch"}],
+        "requestBody": {"$ref": "#/components/requestBodies/AttachParticipant"},
+        "responses": {
+          "200": {"$ref": "#/components/responses/CommandCommitted"},
+          "202": {"$ref": "#/components/responses/CommandAccepted"},
+          "400": {"$ref": "#/components/responses/CommandBadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "409": {"$ref": "#/components/responses/CommandConflict"}
+        }
+      }
+    },
+    "/sessions/{session_id}/participants/{participant_id}/prompt": {
+      "post": {
+        "operationId": "promptParticipant",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}, {"$ref": "#/components/parameters/ParticipantID"}, {"$ref": "#/components/parameters/IdempotencyKey"}, {"$ref": "#/components/parameters/IfMatch"}],
+        "requestBody": {"$ref": "#/components/requestBodies/PromptParticipant"},
+        "responses": {
+          "200": {"$ref": "#/components/responses/CommandCommitted"},
+          "202": {"$ref": "#/components/responses/CommandAccepted"},
+          "400": {"$ref": "#/components/responses/CommandBadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "409": {"$ref": "#/components/responses/CommandConflict"}
+        }
+      }
+    },
+    "/sessions/{session_id}/participants/{participant_id}/cancel": {
+      "post": {
+        "operationId": "cancelParticipant",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}, {"$ref": "#/components/parameters/ParticipantID"}, {"$ref": "#/components/parameters/IdempotencyKey"}, {"$ref": "#/components/parameters/IfMatch"}],
+        "requestBody": {"$ref": "#/components/requestBodies/CancelParticipant"},
+        "responses": {
+          "200": {"$ref": "#/components/responses/CommandCommitted"},
+          "202": {"$ref": "#/components/responses/CommandAccepted"},
+          "400": {"$ref": "#/components/responses/CommandBadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "409": {"$ref": "#/components/responses/CommandConflict"}
+        }
+      }
+    },
+    "/sessions/{session_id}/participants/{participant_id}": {
+      "delete": {
+        "operationId": "detachParticipant",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}, {"$ref": "#/components/parameters/ParticipantID"}, {"$ref": "#/components/parameters/IdempotencyKey"}, {"$ref": "#/components/parameters/IfMatch"}],
+        "responses": {
+          "200": {"$ref": "#/components/responses/CommandCommitted"},
+          "202": {"$ref": "#/components/responses/CommandAccepted"},
+          "400": {"$ref": "#/components/responses/CommandBadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "409": {"$ref": "#/components/responses/CommandConflict"}
+        }
+      }
+    },
+    "/sessions/{session_id}/handoff": {
+      "post": {
+        "operationId": "handoffController",
+        "parameters": [{"$ref": "#/components/parameters/SessionID"}, {"$ref": "#/components/parameters/IdempotencyKey"}, {"$ref": "#/components/parameters/IfMatch"}],
+        "requestBody": {"$ref": "#/components/requestBodies/Handoff"},
+        "responses": {
+          "200": {"$ref": "#/components/responses/CommandCommitted"},
+          "202": {"$ref": "#/components/responses/CommandAccepted"},
+          "400": {"$ref": "#/components/responses/CommandBadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "409": {"$ref": "#/components/responses/CommandConflict"}
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {"bearerAuth": {"type": "http", "scheme": "bearer"}},
+    "parameters": {
+      "SessionID": {"name": "session_id", "in": "path", "required": true, "schema": {"type": "string", "minLength": 1}},
+      "ParticipantID": {"name": "participant_id", "in": "path", "required": true, "schema": {"type": "string", "minLength": 1}},
+      "IdempotencyKey": {"name": "Idempotency-Key", "in": "header", "required": true, "schema": {"type": "string", "minLength": 1}},
+      "IfMatch": {"name": "If-Match", "in": "header", "schema": {"type": "string"}},
+      "After": {"name": "after", "in": "query", "schema": {"type": "string"}}
+    },
+    "requestBodies": {
+      "Prompt": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PromptRequest"}}}},
+      "Steer": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SteerRequest"}}}},
+      "Cancel": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CancelRequest"}}}},
+      "ResolveApproval": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ResolveApprovalRequest"}}}},
+      "AttachParticipant": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/AttachParticipantRequest"}}}},
+      "PromptParticipant": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PromptParticipantRequest"}}}},
+      "CancelParticipant": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CancelParticipantRequest"}}}},
+      "Handoff": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HandoffRequest"}}}}
+    },
+    "responses": {
+      "CommandCommitted": {"description": "Command committed synchronously", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CommandResult"}}}},
+      "CommandAccepted": {"description": "Command accepted or has an unknown reporting outcome", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CommandResult"}}}},
+      "CommandBadRequest": {"description": "Rejected command or malformed transport request", "content": {"application/json": {"schema": {"oneOf": [{"$ref": "#/components/schemas/CommandResult"}, {"$ref": "#/components/schemas/ErrorResponse"}]}}}},
+      "CommandConflict": {"description": "Command precondition or identity conflict", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CommandResult"}}}},
+      "BadRequest": {"description": "Malformed request", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}},
+      "Unauthorized": {"description": "Authentication required or failed", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}},
+      "Forbidden": {"description": "Authenticated principal is not authorized", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}},
+      "InternalServerError": {"description": "HTTP streaming is unavailable", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}}
+    },
+    "schemas": {
+      "JSONValue": {},
+      "JSONObject": {"type": "object", "additionalProperties": {"$ref": "#/components/schemas/JSONValue"}},
+      "Outcome": {"type": "string", "enum": ["accepted", "committed", "conflicted", "rejected", "unknown"]},
+      "ResumeMode": {"type": "string", "enum": ["exact", "durable_fallback"]},
+      "ControllerKind": {"type": "string", "enum": ["kernel", "acp"]},
+      "ParticipantKind": {"type": "string", "enum": ["acp", "subagent"]},
+      "ParticipantRole": {"type": "string", "enum": ["sidecar", "delegated", "observer"]},
+      "DeliveryMode": {"type": "string", "enum": ["canonical", "mirror", "transient"]},
+      "EnvelopeKind": {"type": "string", "enum": ["session/update", "session/request_permission", "caelis/notice", "caelis/participant", "caelis/lifecycle", "caelis/approval_review", "caelis/error"]},
+      "WriteBase": {
+        "type": "object",
+        "properties": {
+          "operation_id": {"type": "string"},
+          "session_id": {"type": "string"},
+          "expected_revision": {"type": "integer", "format": "uint64", "minimum": 0},
+          "expected_controller_epoch": {"type": "string"}
+        }
+      },
+      "TurnTarget": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["handle_id", "run_id", "turn_id"],
+        "properties": {
+          "handle_id": {"type": "string", "minLength": 1},
+          "run_id": {"type": "string", "minLength": 1},
+          "turn_id": {"type": "string", "minLength": 1}
+        }
+      },
+      "CommandTarget": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "handle_id": {"type": "string"},
+          "run_id": {"type": "string"},
+          "turn_id": {"type": "string"}
+        }
+      },
+      "CreateSessionRequest": {
+        "allOf": [
+          {"$ref": "#/components/schemas/WriteBase"},
+          {"type": "object", "properties": {
+            "preferred_session_id": {"type": "string"},
+            "workspace_key": {"type": "string"},
+            "cwd": {"type": "string"},
+            "title": {"type": "string"},
+            "metadata": {"$ref": "#/components/schemas/JSONObject"}
+          }}
+        ],
+        "unevaluatedProperties": false
+      },
+      "CloseSessionRequest": {"allOf": [{"$ref": "#/components/schemas/WriteBase"}], "unevaluatedProperties": false},
+      "PromptRequest": {
+        "allOf": [{"$ref": "#/components/schemas/WriteBase"}, {"type": "object", "required": ["input"], "properties": {"input": {"type": "string", "minLength": 1}, "display_input": {"type": "string"}}}],
+        "unevaluatedProperties": false
+      },
+      "SteerRequest": {
+        "allOf": [{"$ref": "#/components/schemas/WriteBase"}, {"type": "object", "required": ["target", "input"], "properties": {"target": {"$ref": "#/components/schemas/TurnTarget"}, "input": {"type": "string", "minLength": 1}, "display_input": {"type": "string"}}}],
+        "unevaluatedProperties": false
+      },
+      "CancelRequest": {
+        "allOf": [{"$ref": "#/components/schemas/WriteBase"}, {"type": "object", "required": ["target"], "properties": {"target": {"$ref": "#/components/schemas/TurnTarget"}, "reason": {"type": "string"}}}],
+        "unevaluatedProperties": false
+      },
+      "ResolveApprovalRequest": {
+        "allOf": [{"$ref": "#/components/schemas/WriteBase"}, {"type": "object", "required": ["target", "approval_request_id", "outcome", "approved"], "properties": {
+          "target": {"$ref": "#/components/schemas/TurnTarget"},
+          "approval_request_id": {"type": "string", "minLength": 1},
+          "outcome": {"type": "string", "minLength": 1},
+          "option_id": {"type": "string"},
+          "approved": {"type": "boolean"},
+          "reason": {"type": "string"},
+          "review_text": {"type": "string"}
+        }}],
+        "unevaluatedProperties": false
+      },
+      "AttachParticipantRequest": {
+        "allOf": [{"$ref": "#/components/schemas/WriteBase"}, {"type": "object", "required": ["agent"], "properties": {"agent": {"type": "string", "minLength": 1}, "role": {"$ref": "#/components/schemas/ParticipantRole"}, "label": {"type": "string"}, "source": {"type": "string"}}}],
+        "unevaluatedProperties": false
+      },
+      "PromptParticipantRequest": {
+        "allOf": [{"$ref": "#/components/schemas/WriteBase"}, {"type": "object", "required": ["participant_id", "input"], "properties": {"participant_id": {"type": "string", "minLength": 1}, "input": {"type": "string", "minLength": 1}, "display_input": {"type": "string"}}}],
+        "unevaluatedProperties": false
+      },
+      "CancelParticipantRequest": {
+        "allOf": [{"$ref": "#/components/schemas/WriteBase"}, {"type": "object", "required": ["participant_id", "target"], "properties": {"participant_id": {"type": "string", "minLength": 1}, "target": {"$ref": "#/components/schemas/TurnTarget"}, "reason": {"type": "string"}}}],
+        "unevaluatedProperties": false
+      },
+      "DetachParticipantRequest": {
+        "allOf": [{"$ref": "#/components/schemas/WriteBase"}, {"type": "object", "required": ["participant_id"], "properties": {"participant_id": {"type": "string", "minLength": 1}, "source": {"type": "string"}}}],
+        "unevaluatedProperties": false
+      },
+      "HandoffRequest": {
+        "allOf": [{"$ref": "#/components/schemas/WriteBase"}, {"type": "object", "required": ["kind"], "properties": {"kind": {"$ref": "#/components/schemas/ControllerKind"}, "agent": {"type": "string"}, "source": {"type": "string"}, "reason": {"type": "string"}}}],
+        "unevaluatedProperties": false
+      },
+      "CommandResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["operation_id", "outcome"],
+        "properties": {
+          "operation_id": {"type": "string"},
+          "outcome": {"$ref": "#/components/schemas/Outcome"},
+          "session_id": {"type": "string"},
+          "revision": {"type": "integer", "format": "uint64", "minimum": 0},
+          "target": {"$ref": "#/components/schemas/CommandTarget"},
+          "detail": {"type": "string"}
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["error"],
+        "properties": {"error": {"type": "string"}}
+      },
+      "DurableFeedPosition": {
+        "type": "object", "additionalProperties": false, "required": ["seq", "projection_index"],
+        "properties": {"seq": {"type": "integer", "format": "uint64", "minimum": 0}, "projection_index": {"type": "integer", "format": "uint32", "minimum": 0}}
+      },
+      "TransientFeedPosition": {
+        "type": "object", "additionalProperties": false, "required": ["anchor", "generation", "sequence"],
+        "properties": {"anchor": {"$ref": "#/components/schemas/DurableFeedPosition"}, "generation": {"type": "string", "minLength": 1}, "sequence": {"type": "integer", "format": "uint64", "minimum": 1}}
+      },
+      "FeedPosition": {
+        "oneOf": [
+          {"type": "object", "additionalProperties": false, "required": ["durable"], "properties": {"durable": {"$ref": "#/components/schemas/DurableFeedPosition"}}},
+          {"type": "object", "additionalProperties": false, "required": ["transient"], "properties": {"transient": {"$ref": "#/components/schemas/TransientFeedPosition"}}}
+        ]
+      },
+      "Delivery": {"type": "object", "additionalProperties": false, "required": ["mode"], "properties": {"mode": {"$ref": "#/components/schemas/DeliveryMode"}}},
+      "ParentToolRelation": {"type": "object", "additionalProperties": false, "properties": {"tool_call_id": {"type": "string"}, "tool_name": {"type": "string"}}},
+      "TextContent": {"type": "object", "additionalProperties": false, "required": ["type", "text"], "properties": {"type": {"const": "text"}, "text": {"type": "string"}}},
+      "ImageContent": {"type": "object", "additionalProperties": false, "required": ["type", "data", "mimeType"], "properties": {"type": {"const": "image"}, "data": {"type": "string"}, "mimeType": {"type": "string"}}},
+      "AudioContent": {"type": "object", "additionalProperties": false, "required": ["type", "data", "mimeType"], "properties": {"type": {"const": "audio"}, "data": {"type": "string"}, "mimeType": {"type": "string"}}},
+      "ResourceContent": {"type": "object", "additionalProperties": false, "required": ["type", "uri"], "properties": {"type": {"const": "resource"}, "uri": {"type": "string"}, "name": {"type": "string"}, "mimeType": {"type": "string"}}},
+      "ContentBlock": {"oneOf": [{"$ref": "#/components/schemas/TextContent"}, {"$ref": "#/components/schemas/ImageContent"}, {"$ref": "#/components/schemas/AudioContent"}, {"$ref": "#/components/schemas/ResourceContent"}], "discriminator": {"propertyName": "type"}},
+      "ToolCallLocation": {"type": "object", "additionalProperties": false, "required": ["path"], "properties": {"path": {"type": "string"}, "line": {"type": "integer"}}},
+      "ToolCallContent": {"type": "object", "additionalProperties": false, "required": ["type"], "properties": {"type": {"type": "string"}, "content": {"$ref": "#/components/schemas/JSONValue"}, "terminalId": {"type": "string"}, "path": {"type": "string"}, "oldText": {"type": "string"}, "newText": {"type": "string"}}},
+      "ACPContentChunk": {"type": "object", "additionalProperties": false, "required": ["sessionUpdate", "content"], "properties": {"sessionUpdate": {"enum": ["user_message_chunk", "agent_message_chunk", "agent_thought_chunk", "compact"]}, "content": {"$ref": "#/components/schemas/ContentBlock"}, "messageId": {"type": "string"}, "_meta": {"$ref": "#/components/schemas/JSONObject"}}},
+      "ACPToolCall": {"type": "object", "additionalProperties": false, "required": ["sessionUpdate", "toolCallId", "title"], "properties": {"sessionUpdate": {"const": "tool_call"}, "toolCallId": {"type": "string"}, "title": {"type": "string"}, "kind": {"type": "string"}, "status": {"type": "string"}, "rawInput": {"$ref": "#/components/schemas/JSONValue"}, "rawOutput": {"$ref": "#/components/schemas/JSONValue"}, "content": {"type": "array", "items": {"$ref": "#/components/schemas/ToolCallContent"}}, "locations": {"type": "array", "items": {"$ref": "#/components/schemas/ToolCallLocation"}}, "_meta": {"$ref": "#/components/schemas/JSONObject"}}},
+      "ACPToolCallUpdate": {"type": "object", "additionalProperties": false, "required": ["sessionUpdate", "toolCallId"], "properties": {"sessionUpdate": {"const": "tool_call_update"}, "toolCallId": {"type": "string"}, "title": {"type": "string"}, "kind": {"type": "string"}, "status": {"type": "string"}, "rawInput": {"$ref": "#/components/schemas/JSONValue"}, "rawOutput": {"$ref": "#/components/schemas/JSONValue"}, "content": {"type": "array", "items": {"$ref": "#/components/schemas/ToolCallContent"}}, "locations": {"type": "array", "items": {"$ref": "#/components/schemas/ToolCallLocation"}}, "_meta": {"$ref": "#/components/schemas/JSONObject"}}},
+      "PlanEntry": {"type": "object", "additionalProperties": false, "required": ["content", "status", "priority"], "properties": {"content": {"type": "string"}, "status": {"type": "string"}, "priority": {"type": "string"}}},
+      "ACPPlanUpdate": {"type": "object", "additionalProperties": false, "required": ["sessionUpdate", "entries"], "properties": {"sessionUpdate": {"const": "plan"}, "entries": {"type": "array", "items": {"$ref": "#/components/schemas/PlanEntry"}}}},
+      "UsageCost": {"type": "object", "additionalProperties": false, "properties": {"input": {"type": "number"}, "output": {"type": "number"}, "cache_read": {"type": "number"}, "cache_write": {"type": "number"}, "total": {"type": "number"}, "currency": {"type": "string"}}},
+      "ACPUsageUpdate": {"type": "object", "additionalProperties": false, "required": ["sessionUpdate", "size", "used"], "properties": {"sessionUpdate": {"const": "usage_update"}, "size": {"type": "integer"}, "used": {"type": "integer"}, "cost": {"$ref": "#/components/schemas/UsageCost"}, "_meta": {"$ref": "#/components/schemas/JSONObject"}}},
+      "ACPCompactUpdate": {"type": "object", "additionalProperties": false, "required": ["sessionUpdate"], "properties": {"sessionUpdate": {"const": "compact"}, "_meta": {"$ref": "#/components/schemas/JSONObject"}}},
+      "ACPCurrentModeUpdate": {"type": "object", "additionalProperties": false, "required": ["sessionUpdate", "currentModeId"], "properties": {"sessionUpdate": {"const": "current_mode_update"}, "currentModeId": {"type": "string"}}},
+      "ACPConfigOptionUpdate": {"type": "object", "additionalProperties": false, "required": ["sessionUpdate", "configOptions"], "properties": {"sessionUpdate": {"const": "config_option_update"}, "configOptions": {"type": "array", "items": {"$ref": "#/components/schemas/JSONObject"}}}},
+      "ACPSessionInfoUpdate": {"type": "object", "additionalProperties": false, "required": ["sessionUpdate"], "properties": {"sessionUpdate": {"const": "session_info_update"}, "title": {"type": "string"}, "updatedAt": {"type": "string"}}},
+      "AvailableCommand": {"type": "object", "additionalProperties": false, "required": ["name"], "properties": {"name": {"type": "string"}, "description": {"type": "string"}, "input": {"$ref": "#/components/schemas/JSONObject"}}},
+      "ACPAvailableCommandsUpdate": {"type": "object", "additionalProperties": false, "required": ["sessionUpdate", "availableCommands"], "properties": {"sessionUpdate": {"const": "available_commands_update"}, "availableCommands": {"type": "array", "items": {"$ref": "#/components/schemas/AvailableCommand"}}}},
+      "ACPRawUpdate": {
+        "type": "object",
+        "additionalProperties": {"$ref": "#/components/schemas/JSONValue"},
+        "required": ["sessionUpdate"],
+        "properties": {
+          "sessionUpdate": {
+            "type": "string",
+            "minLength": 1,
+            "not": {"enum": ["user_message_chunk", "agent_message_chunk", "agent_thought_chunk", "tool_call", "tool_call_update", "plan", "usage_update", "compact", "current_mode_update", "config_option_update", "session_info_update", "available_commands_update"]}
+          }
+        }
+      },
+      "ACPUpdate": {
+        "oneOf": [
+          {"$ref": "#/components/schemas/ACPContentChunk"}, {"$ref": "#/components/schemas/ACPToolCall"},
+          {"$ref": "#/components/schemas/ACPToolCallUpdate"}, {"$ref": "#/components/schemas/ACPPlanUpdate"},
+          {"$ref": "#/components/schemas/ACPUsageUpdate"},
+          {"$ref": "#/components/schemas/ACPCurrentModeUpdate"}, {"$ref": "#/components/schemas/ACPConfigOptionUpdate"},
+          {"$ref": "#/components/schemas/ACPSessionInfoUpdate"}, {"$ref": "#/components/schemas/ACPAvailableCommandsUpdate"},
+          {"$ref": "#/components/schemas/ACPRawUpdate"}
+        ],
+        "discriminator": {"propertyName": "sessionUpdate"}
+      },
+      "PermissionOption": {"type": "object", "additionalProperties": false, "required": ["optionId", "name", "kind"], "properties": {"optionId": {"type": "string"}, "name": {"type": "string"}, "kind": {"type": "string"}}},
+      "RequestPermission": {"type": "object", "additionalProperties": false, "required": ["sessionId", "toolCall", "options"], "properties": {"sessionId": {"type": "string"}, "toolCall": {"$ref": "#/components/schemas/ACPToolCallUpdate"}, "options": {"type": "array", "items": {"$ref": "#/components/schemas/PermissionOption"}}, "_meta": {"$ref": "#/components/schemas/JSONObject"}}},
+      "ApprovalReview": {"type": "object", "additionalProperties": false, "properties": {"tool_call_id": {"type": "string"}, "tool_name": {"type": "string"}, "raw_input": {"$ref": "#/components/schemas/JSONObject"}, "status": {"type": "string"}, "text": {"type": "string"}, "risk": {"type": "string"}, "authorization": {"type": "string"}}},
+      "ParticipantEvent": {"type": "object", "additionalProperties": false, "required": ["state"], "properties": {"state": {"type": "string"}}},
+      "LifecycleEvent": {"type": "object", "additionalProperties": false, "required": ["state"], "properties": {"state": {"type": "string"}, "reason": {"type": "string"}, "stopReason": {"type": "string"}}},
+      "EnvelopeBase": {
+        "type": "object",
+        "required": ["kind", "cursor", "position", "delivery"],
+        "properties": {
+          "kind": {"$ref": "#/components/schemas/EnvelopeKind"}, "cursor": {"type": "string", "minLength": 1},
+          "event_id": {"type": "string"}, "projection_id": {"type": "string"}, "position": {"$ref": "#/components/schemas/FeedPosition"},
+          "session_id": {"type": "string"}, "handle_id": {"type": "string"}, "run_id": {"type": "string"}, "turn_id": {"type": "string"},
+          "occurred_at": {"type": "string", "format": "date-time"}, "scope": {"type": "string", "enum": ["main", "participant", "subagent"]},
+          "scope_id": {"type": "string"}, "actor": {"type": "string"}, "participant_id": {"type": "string"}, "final": {"type": "boolean"},
+          "parent_tool": {"$ref": "#/components/schemas/ParentToolRelation"}, "delivery": {"$ref": "#/components/schemas/Delivery"},
+          "_meta": {"$ref": "#/components/schemas/JSONObject"}
+        }
+      },
+      "SessionUpdateEnvelope": {"allOf": [{"$ref": "#/components/schemas/EnvelopeBase"}, {"type": "object", "required": ["update"], "properties": {"kind": {"const": "session/update"}, "update": {"$ref": "#/components/schemas/ACPUpdate"}}}], "unevaluatedProperties": false},
+      "RequestPermissionEnvelope": {"allOf": [{"$ref": "#/components/schemas/EnvelopeBase"}, {"type": "object", "required": ["approval_request_id", "permission"], "properties": {"kind": {"const": "session/request_permission"}, "approval_request_id": {"type": "string", "minLength": 1}, "permission": {"$ref": "#/components/schemas/RequestPermission"}}}], "unevaluatedProperties": false},
+      "NoticeEnvelope": {"allOf": [{"$ref": "#/components/schemas/EnvelopeBase"}, {"type": "object", "required": ["notice"], "properties": {"kind": {"const": "caelis/notice"}, "notice": {"type": "string"}}}], "unevaluatedProperties": false},
+      "ParticipantEnvelope": {"allOf": [{"$ref": "#/components/schemas/EnvelopeBase"}, {"type": "object", "required": ["participant"], "properties": {"kind": {"const": "caelis/participant"}, "participant": {"$ref": "#/components/schemas/ParticipantEvent"}}}], "unevaluatedProperties": false},
+      "LifecycleEnvelope": {"allOf": [{"$ref": "#/components/schemas/EnvelopeBase"}, {"type": "object", "required": ["lifecycle"], "properties": {"kind": {"const": "caelis/lifecycle"}, "lifecycle": {"$ref": "#/components/schemas/LifecycleEvent"}}}], "unevaluatedProperties": false},
+      "ApprovalReviewEnvelope": {"allOf": [{"$ref": "#/components/schemas/EnvelopeBase"}, {"type": "object", "required": ["approval_review"], "properties": {"kind": {"const": "caelis/approval_review"}, "approval_review": {"$ref": "#/components/schemas/ApprovalReview"}}}], "unevaluatedProperties": false},
+      "ErrorEnvelope": {"allOf": [{"$ref": "#/components/schemas/EnvelopeBase"}, {"type": "object", "required": ["error"], "properties": {"kind": {"const": "caelis/error"}, "error": {"type": "string"}}}], "unevaluatedProperties": false},
+      "Envelope": {
+        "oneOf": [
+          {"$ref": "#/components/schemas/SessionUpdateEnvelope"}, {"$ref": "#/components/schemas/RequestPermissionEnvelope"},
+          {"$ref": "#/components/schemas/NoticeEnvelope"}, {"$ref": "#/components/schemas/ParticipantEnvelope"},
+          {"$ref": "#/components/schemas/LifecycleEnvelope"}, {"$ref": "#/components/schemas/ApprovalReviewEnvelope"},
+          {"$ref": "#/components/schemas/ErrorEnvelope"}
+        ],
+        "discriminator": {"propertyName": "kind"}
+      },
+      "ResumeBoundary": {"type": "object", "additionalProperties": false, "required": ["resume_mode"], "properties": {"resume_mode": {"$ref": "#/components/schemas/ResumeMode"}, "transient_gap": {"type": "boolean"}, "boundary_cursor": {"type": "string"}}},
+      "EventBatch": {"type": "object", "additionalProperties": false, "required": ["resume_mode"], "properties": {"events": {"type": "array", "items": {"$ref": "#/components/schemas/Envelope"}}, "resume_mode": {"$ref": "#/components/schemas/ResumeMode"}, "transient_gap": {"type": "boolean"}, "boundary_cursor": {"type": "string"}}},
+      "SessionRef": {"type": "object", "additionalProperties": false, "properties": {"app_name": {"type": "string"}, "user_id": {"type": "string"}, "session_id": {"type": "string"}, "workspace_key": {"type": "string"}}},
+      "ControllerBinding": {"type": "object", "additionalProperties": false, "properties": {"kind": {"$ref": "#/components/schemas/ControllerKind"}, "controller_id": {"type": "string"}, "agent_name": {"type": "string"}, "label": {"type": "string"}, "epoch_id": {"type": "string"}, "remote_session_id": {"type": "string"}, "context_sync_seq": {"type": "integer"}, "attached_at": {"type": "string", "format": "date-time"}, "source": {"type": "string"}}},
+      "ParticipantBinding": {"type": "object", "additionalProperties": false, "properties": {"id": {"type": "string"}, "kind": {"$ref": "#/components/schemas/ParticipantKind"}, "role": {"$ref": "#/components/schemas/ParticipantRole"}, "agent_name": {"type": "string"}, "label": {"type": "string"}, "session_id": {"type": "string"}, "source": {"type": "string"}, "parent_turn_id": {"type": "string"}, "delegation_id": {"type": "string"}, "attachment_generation": {"type": "string"}, "context_sync_seq": {"type": "integer"}, "attached_at": {"type": "string", "format": "date-time"}, "controller_ref": {"type": "string"}}},
+      "RunState": {"type": "object", "additionalProperties": false, "properties": {"status": {"type": "string"}, "waiting_approval": {"type": "boolean"}, "active": {"type": "boolean"}, "kind": {"type": "string"}, "handle_id": {"type": "string"}, "run_id": {"type": "string"}, "turn_id": {"type": "string"}, "started_at": {"type": "string", "format": "date-time"}}},
+      "ActiveApproval": {"type": "object", "additionalProperties": false, "required": ["request_id", "permission"], "properties": {"request_id": {"type": "string"}, "scope": {"type": "string", "enum": ["main", "participant", "subagent"]}, "scope_id": {"type": "string"}, "participant_id": {"type": "string"}, "parent_tool": {"$ref": "#/components/schemas/ParentToolRelation"}, "permission": {"$ref": "#/components/schemas/JSONObject"}}},
+      "ApprovalState": {"type": "object", "additionalProperties": false, "properties": {"active": {"$ref": "#/components/schemas/ActiveApproval"}, "queued_count": {"type": "integer", "minimum": 0}}},
+      "ClientCapabilities": {"type": "object", "additionalProperties": false, "required": ["client_managed_terminal", "caelis_terminal_stream", "goal_bootstrap_supported", "manage_loop_bootstrap_supported"], "properties": {"client_managed_terminal": {"type": "boolean", "const": false}, "caelis_terminal_stream": {"type": "boolean", "const": true}, "goal_bootstrap_supported": {"type": "boolean", "const": false}, "manage_loop_bootstrap_supported": {"type": "boolean", "const": false}}},
+      "SessionState": {
+        "type": "object", "additionalProperties": false,
+        "required": ["protocol_version", "envelope_version", "api_version", "session_id", "revision", "resume_mode", "run", "controller", "approval", "capabilities"],
+        "properties": {
+          "protocol_version": {"type": "integer"}, "envelope_version": {"type": "string"}, "api_version": {"type": "string"},
+          "session_id": {"type": "string"}, "revision": {"type": "integer", "format": "uint64"}, "workspace_key": {"type": "string"},
+          "cwd": {"type": "string"}, "title": {"type": "string"}, "metadata": {"$ref": "#/components/schemas/JSONObject"},
+          "boundary_cursor": {"type": "string"}, "boundary_position": {"$ref": "#/components/schemas/FeedPosition"},
+          "resume_mode": {"$ref": "#/components/schemas/ResumeMode"}, "transient_gap": {"type": "boolean"},
+          "run": {"$ref": "#/components/schemas/RunState"}, "controller": {"$ref": "#/components/schemas/ControllerBinding"},
+          "participants": {"type": "array", "items": {"$ref": "#/components/schemas/ParticipantBinding"}},
+          "approval": {"$ref": "#/components/schemas/ApprovalState"}, "capabilities": {"$ref": "#/components/schemas/ClientCapabilities"}
+        }
+      },
+      "SessionSummary": {"type": "object", "additionalProperties": false, "properties": {"app_name": {"type": "string"}, "user_id": {"type": "string"}, "session_id": {"type": "string"}, "workspace_key": {"type": "string"}, "cwd": {"type": "string"}, "title": {"type": "string"}, "metadata": {"$ref": "#/components/schemas/JSONObject"}, "updated_at": {"type": "string", "format": "date-time"}}},
+      "SessionList": {"type": "object", "additionalProperties": false, "properties": {"sessions": {"type": "array", "items": {"$ref": "#/components/schemas/SessionSummary"}}, "next_cursor": {"type": "string"}}}
+    }
+  },
+  "security": [{"bearerAuth": []}]
+}

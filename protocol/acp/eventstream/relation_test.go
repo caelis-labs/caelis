@@ -12,18 +12,18 @@ func TestResolveRelationDeliveryPrefersTypedPointersOverLegacyMetadata(t *testin
 	env := Envelope{
 		ParentTool: &ParentToolRelation{ToolCallID: "typed-parent", ToolName: "Spawn"},
 		Delivery:   &Delivery{},
-		Meta:       legacyRelationDeliveryMetaForTest("legacy-parent", "TASK", true, true),
+		Meta:       legacyRelationDeliveryMetaForTest("legacy-parent", "TASK", true),
 	}
 	resolved := ResolveRelationDelivery(env)
 	if resolved.ParentTool == nil || resolved.ParentTool.ToolCallID != "typed-parent" || resolved.ParentTool.ToolName != "Spawn" {
 		t.Fatalf("parent relation = %#v, want typed Spawn parent", resolved.ParentTool)
 	}
-	if resolved.Delivery == nil || resolved.Delivery.Transient || resolved.Delivery.HasParentToolMirror || resolved.Delivery.IsParentToolMirror {
+	if resolved.Delivery == nil || resolved.Delivery.Mode != "" {
 		t.Fatalf("delivery = %#v, want typed zero delivery without legacy fallback", resolved.Delivery)
 	}
 	resolved.ParentTool.ToolCallID = "mutated"
-	resolved.Delivery.Transient = true
-	if env.ParentTool.ToolCallID != "typed-parent" || env.Delivery.Transient {
+	resolved.Delivery.Mode = DeliveryTransient
+	if env.ParentTool.ToolCallID != "typed-parent" || env.Delivery.Mode != "" {
 		t.Fatalf("resolved values mutated source envelope: %#v", env)
 	}
 }
@@ -36,22 +36,22 @@ func TestResolveRelationDeliveryFallsBackToLegacyMetadataInUpdate(t *testing.T) 
 		Update: schema.ToolCallUpdate{
 			SessionUpdate: schema.UpdateToolCallInfo,
 			ToolCallID:    "child-tool-1",
-			Meta:          legacyRelationDeliveryMetaForTest("spawn-call-1", "SPAWN", true, true),
+			Meta:          legacyRelationDeliveryMetaForTest("spawn-call-1", "SPAWN", true),
 		},
 	}
 	resolved := ResolveRelationDelivery(env)
 	if resolved.ParentTool == nil || resolved.ParentTool.ToolCallID != "spawn-call-1" || resolved.ParentTool.ToolName != "SPAWN" {
 		t.Fatalf("parent relation = %#v, want legacy Spawn parent", resolved.ParentTool)
 	}
-	if resolved.Delivery == nil || !resolved.Delivery.Transient || !resolved.Delivery.HasParentToolMirror || resolved.Delivery.IsParentToolMirror {
-		t.Fatalf("delivery = %#v, want legacy transient mirror delivery", resolved.Delivery)
+	if resolved.Delivery == nil || resolved.Delivery.Mode != DeliveryTransient {
+		t.Fatalf("delivery = %#v, want legacy transient delivery", resolved.Delivery)
 	}
 }
 
 func TestResolveRelationDeliveryFallsBackPerMissingTypedPointer(t *testing.T) {
 	t.Parallel()
 
-	legacyMeta := legacyRelationDeliveryMetaForTest("legacy-parent", "TASK", true, true)
+	legacyMeta := legacyRelationDeliveryMetaForTest("legacy-parent", "TASK", true)
 	tests := []struct {
 		name             string
 		env              Envelope
@@ -67,7 +67,7 @@ func TestResolveRelationDeliveryFallsBackPerMissingTypedPointer(t *testing.T) {
 			},
 			wantParentCallID: "typed-parent",
 			wantParentTool:   "Spawn",
-			wantDelivery:     Delivery{Transient: true, HasParentToolMirror: true},
+			wantDelivery:     Delivery{Mode: DeliveryTransient},
 		},
 		{
 			name: "typed delivery with legacy relation",
@@ -95,13 +95,10 @@ func TestResolveRelationDeliveryFallsBackPerMissingTypedPointer(t *testing.T) {
 	}
 }
 
-func legacyRelationDeliveryMetaForTest(parentCallID string, parentTool string, transient bool, mirrored bool) map[string]any {
+func legacyRelationDeliveryMetaForTest(parentCallID string, parentTool string, transient bool) map[string]any {
 	stream := map[string]any{
 		"parent_call_id": parentCallID,
 		"parent_tool":    parentTool,
-	}
-	if mirrored {
-		stream["mirrored_to_parent_tool"] = true
 	}
 	caelis := map[string]any{
 		"runtime": map[string]any{"stream": stream},

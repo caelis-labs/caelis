@@ -14,11 +14,13 @@ import (
 var _ session.SessionLeaseService = (*Service)(nil)
 var _ session.SessionLeaseReader = (*Service)(nil)
 
-func (s *Store) SessionLease(_ context.Context, ref session.SessionRef) (session.SessionLease, error) {
-	s.mu.Lock()
+func (s *Store) SessionLease(ctx context.Context, ref session.SessionRef) (session.SessionLease, error) {
+	if err := s.mu.LockContext(ctx); err != nil {
+		return session.SessionLease{}, err
+	}
 	defer s.mu.Unlock()
 	var out session.SessionLease
-	err := s.withRootReadLock(func() error {
+	err := s.withRootLockContext(ctx, storeRootLockExclusive, func() error {
 		doc, err := s.readDocumentForRef(ref)
 		if err != nil {
 			return err
@@ -29,11 +31,13 @@ func (s *Store) SessionLease(_ context.Context, ref session.SessionRef) (session
 	return out, err
 }
 
-func (s *Store) AcquireSessionLease(_ context.Context, req session.AcquireSessionLeaseRequest) (session.SessionLease, error) {
-	s.mu.Lock()
+func (s *Store) AcquireSessionLease(ctx context.Context, req session.AcquireSessionLeaseRequest) (session.SessionLease, error) {
+	if err := s.mu.LockContext(ctx); err != nil {
+		return session.SessionLease{}, err
+	}
 	defer s.mu.Unlock()
 	var out session.SessionLease
-	err := s.withRootWriteLock(func() error {
+	err := s.withRootLockContext(ctx, storeRootLockExclusive, func() error {
 		doc, err := s.readDocumentForRef(req.SessionRef)
 		if err != nil {
 			return err
@@ -69,11 +73,13 @@ func (s *Store) AcquireSessionLease(_ context.Context, req session.AcquireSessio
 	return out, err
 }
 
-func (s *Store) HeartbeatSessionLease(_ context.Context, req session.HeartbeatSessionLeaseRequest) (session.SessionLease, error) {
-	s.mu.Lock()
+func (s *Store) HeartbeatSessionLease(ctx context.Context, req session.HeartbeatSessionLeaseRequest) (session.SessionLease, error) {
+	if err := s.mu.LockContext(ctx); err != nil {
+		return session.SessionLease{}, err
+	}
 	defer s.mu.Unlock()
 	var out session.SessionLease
-	err := s.withRootWriteLock(func() error {
+	err := s.withRootLockContext(ctx, storeRootLockExclusive, func() error {
 		doc, err := s.readDocumentForRef(req.SessionRef)
 		if err != nil {
 			return err
@@ -103,10 +109,12 @@ func (s *Store) HeartbeatSessionLease(_ context.Context, req session.HeartbeatSe
 	return out, err
 }
 
-func (s *Store) ReleaseSessionLease(_ context.Context, req session.ReleaseSessionLeaseRequest) error {
-	s.mu.Lock()
+func (s *Store) ReleaseSessionLease(ctx context.Context, req session.ReleaseSessionLeaseRequest) error {
+	if err := s.mu.LockContext(ctx); err != nil {
+		return err
+	}
 	defer s.mu.Unlock()
-	return s.withRootWriteLock(func() error {
+	return s.withRootLockContext(ctx, storeRootLockExclusive, func() error {
 		doc, err := s.readDocumentForRef(req.SessionRef)
 		if err != nil {
 			return err

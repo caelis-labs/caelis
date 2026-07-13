@@ -10,8 +10,8 @@ import (
 	gatewayapi "github.com/caelis-labs/caelis/ports/gateway"
 )
 
-func replayTranscriptEvents(events []*session.Event, includeTransient bool) []*session.Event {
-	return session.FilterReplayTranscriptEvents(events, includeTransient)
+func replayClientEvents(events []*session.Event) []*session.Event {
+	return session.FilterClientReplayEvents(events)
 }
 
 func replayControlPlaneEvents(events []*session.Event, includeTransient bool) []*session.Event {

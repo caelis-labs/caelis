@@ -22,12 +22,11 @@ const (
 	EventMetaRuntimeTaskID         = metautil.RuntimeTaskID
 	EventMetaRuntimeTaskTerminalID = metautil.RuntimeTaskTerminalID
 
-	EventMetaRuntimeStream                     = metautil.RuntimeStream
-	EventMetaRuntimeStreamMode                 = metautil.RuntimeStreamMode
-	EventMetaRuntimeStreamParentCallID         = metautil.RuntimeStreamParentCallID
-	EventMetaRuntimeStreamParentTool           = metautil.RuntimeStreamParentTool
-	EventMetaRuntimeStreamParentTaskID         = metautil.RuntimeStreamParentTaskID
-	EventMetaRuntimeStreamMirroredToParentTool = metautil.RuntimeStreamMirroredToParentTool
+	EventMetaRuntimeStream             = metautil.RuntimeStream
+	EventMetaRuntimeStreamMode         = metautil.RuntimeStreamMode
+	EventMetaRuntimeStreamParentCallID = metautil.RuntimeStreamParentCallID
+	EventMetaRuntimeStreamParentTool   = metautil.RuntimeStreamParentTool
+	EventMetaRuntimeStreamParentTaskID = metautil.RuntimeStreamParentTaskID
 )
 
 // EventMetaString returns a trimmed string from _meta using a stable path.

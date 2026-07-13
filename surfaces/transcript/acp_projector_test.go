@@ -21,10 +21,7 @@ func TestProjectACPEventToEventsUsesTypedRelationAndDeliveryWithoutMetadata(t *t
 			ToolCallID: "spawn-1",
 			ToolName:   "Spawn",
 		},
-		Delivery: &eventstream.Delivery{
-			Transient:           true,
-			HasParentToolMirror: true,
-		},
+		Delivery: &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
 		Update: schema.ContentChunk{
 			SessionUpdate: schema.UpdateAgentMessage,
 			Content:       schema.TextContent{Type: "text", Text: "subagent output"},
@@ -35,8 +32,8 @@ func TestProjectACPEventToEventsUsesTypedRelationAndDeliveryWithoutMetadata(t *t
 		t.Fatalf("events = %#v, want one transcript event", events)
 	}
 	event := events[0]
-	if event.AnchorToolCallID != "spawn-1" || event.AnchorToolName != "Spawn" || !event.MirroredToParentTool {
-		t.Fatalf("typed event delivery = %#v, want child SPAWN anchor with a parent mirror", event)
+	if event.AnchorToolCallID != "spawn-1" || event.AnchorToolName != "Spawn" {
+		t.Fatalf("typed event delivery = %#v, want child SPAWN anchor", event)
 	}
 }
 
@@ -57,9 +54,8 @@ func TestProjectACPEventToEventsPrefersTypedRelationAndDeliveryOverConflictingLe
 				"transient": true,
 				"runtime": map[string]any{
 					"stream": map[string]any{
-						"parent_call_id":          "legacy-task-1",
-						"parent_tool":             "TASK",
-						"mirrored_to_parent_tool": true,
+						"parent_call_id": "legacy-task-1",
+						"parent_tool":    "TASK",
 					},
 				},
 			},
@@ -73,7 +69,7 @@ func TestProjectACPEventToEventsPrefersTypedRelationAndDeliveryOverConflictingLe
 		t.Fatalf("events = %#v, want one transcript event", events)
 	}
 	event := events[0]
-	if event.AnchorToolCallID != "typed-spawn-1" || event.AnchorToolName != "Spawn" || event.MirroredToParentTool {
+	if event.AnchorToolCallID != "typed-spawn-1" || event.AnchorToolName != "Spawn" {
 		t.Fatalf("event = %#v, want typed relation and zero delivery", event)
 	}
 }
@@ -89,11 +85,11 @@ func TestProjectACPEventToEventsRetainsEventOnlyPlanParentRelation(t *testing.T)
 			ToolCallID: "spawn-1",
 			ToolName:   "Spawn",
 		},
-		Delivery: &eventstream.Delivery{Transient: true},
+		Delivery: &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
 		Update: schema.PlanUpdate{
 			SessionUpdate: schema.UpdatePlan,
 			Entries: []schema.PlanEntry{{
-				Content: "inspect mirror delivery",
+				Content: "inspect semantic delivery",
 				Status:  "in_progress",
 			}},
 		},
@@ -102,8 +98,8 @@ func TestProjectACPEventToEventsRetainsEventOnlyPlanParentRelation(t *testing.T)
 		t.Fatalf("events = %#v, want one plan event", events)
 	}
 	event := events[0]
-	if event.Kind != EventPlan || event.AnchorToolCallID != "spawn-1" || event.AnchorToolName != "Spawn" || event.MirroredToParentTool {
-		t.Fatalf("event-only plan = %#v, want non-mirrored Spawn relation", event)
+	if event.Kind != EventPlan || event.AnchorToolCallID != "spawn-1" || event.AnchorToolName != "Spawn" {
+		t.Fatalf("event-only plan = %#v, want Spawn relation", event)
 	}
 }
 
@@ -121,9 +117,8 @@ func TestProjectACPEventToEventsFallsBackToLegacyRelationAndDeliveryMetadata(t *
 				"transient": true,
 				"runtime": map[string]any{
 					"stream": map[string]any{
-						"parent_call_id":          "spawn-1",
-						"parent_tool":             "SPAWN",
-						"mirrored_to_parent_tool": true,
+						"parent_call_id": "spawn-1",
+						"parent_tool":    "SPAWN",
 					},
 				},
 			},
@@ -144,7 +139,7 @@ func TestProjectACPEventToEventsFallsBackToLegacyRelationAndDeliveryMetadata(t *
 	if event.Scope != ScopeSubagent || event.ScopeID != "task-1" || event.Actor != "worker" || event.TurnID != "turn-1" {
 		t.Fatalf("event scope = %#v, want subagent/task-1/worker/turn-1", event)
 	}
-	if event.AnchorToolCallID != "spawn-1" || event.AnchorToolName != "SPAWN" || !event.MirroredToParentTool {
+	if event.AnchorToolCallID != "spawn-1" || event.AnchorToolName != "SPAWN" {
 		t.Fatalf("event anchor = %#v, want parent SPAWN anchor", event)
 	}
 }

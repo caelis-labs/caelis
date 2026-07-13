@@ -10,6 +10,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
 )
@@ -66,6 +67,99 @@ func TestLeasedRuntimeHeartbeatsUntilRunnerCompletesThenReleases(t *testing.T) {
 		SessionRef: active.SessionRef, OwnerID: "host-b", TTL: time.Second,
 	}); err != nil {
 		t.Fatalf("acquire after completion error = %v, want released lease", err)
+	}
+}
+
+func TestLeasedRuntimeHeartbeatsDuringSynchronousRuntimeStartup(t *testing.T) {
+	t.Parallel()
+
+	service := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	active, err := service.StartSession(context.Background(), session.StartSessionRequest{
+		AppName: "caelis", UserID: "user-1", PreferredSessionID: "leased-startup",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan struct{})
+	releaseStartup := make(chan struct{})
+	runner := newLeaseTestRunner("run-startup")
+	runtime := &leaseStartupRuntime{
+		sessions: service, ref: active.SessionRef, started: started,
+		release: releaseStartup, runner: runner,
+	}
+	wrapped, err := NewLeasedRuntime(LeasedRuntimeConfig{
+		Runtime: runtime, Leases: service, OwnerID: "host-a",
+		TTL: 90 * time.Millisecond, HeartbeatInterval: 10 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := make(chan error, 1)
+	var run agent.RunResult
+	go func() {
+		var runErr error
+		run, runErr = wrapped.Run(context.Background(), agent.RunRequest{SessionRef: active.SessionRef})
+		result <- runErr
+	}()
+	<-started
+	time.Sleep(140 * time.Millisecond)
+	close(releaseStartup)
+	if err := <-result; err != nil {
+		t.Fatalf("Run() after startup longer than original TTL = %v", err)
+	}
+	runner.finish()
+	for _, eventErr := range run.Handle.Events() {
+		if eventErr != nil {
+			t.Fatal(eventErr)
+		}
+	}
+}
+
+func TestLeasedRunnerCloseRetainsLeaseUntilProducerQuiescent(t *testing.T) {
+	t.Parallel()
+
+	service := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	active, err := service.StartSession(context.Background(), session.StartSessionRequest{
+		AppName: "caelis", UserID: "user-1", PreferredSessionID: "leased-close-barrier",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := newLeaseCompletionRunner("run-close-barrier")
+	wrapped, err := NewLeasedRuntime(LeasedRuntimeConfig{
+		Runtime: singleEventRuntime{runner: runner}, Leases: service,
+		OwnerID: "host-a", TTL: 300 * time.Millisecond, HeartbeatInterval: 20 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := wrapped.Run(context.Background(), agent.RunRequest{SessionRef: active.SessionRef})
+	if err != nil {
+		t.Fatal(err)
+	}
+	closeDone := make(chan error, 1)
+	go func() { closeDone <- run.Handle.Close() }()
+	<-runner.closed
+
+	select {
+	case err := <-closeDone:
+		t.Fatalf("Close() returned before producer completion: %v", err)
+	case <-time.After(40 * time.Millisecond):
+	}
+	if _, err := service.AcquireSessionLease(context.Background(), session.AcquireSessionLeaseRequest{
+		SessionRef: active.SessionRef, OwnerID: "host-b", TTL: time.Second,
+	}); !errors.Is(err, session.ErrLeaseConflict) {
+		t.Fatalf("competing acquire before producer completion = %v, want lease conflict", err)
+	}
+
+	close(runner.producerDone)
+	if err := <-closeDone; err != nil {
+		t.Fatalf("Close() after producer completion = %v", err)
+	}
+	if _, err := service.AcquireSessionLease(context.Background(), session.AcquireSessionLeaseRequest{
+		SessionRef: active.SessionRef, OwnerID: "host-b", TTL: time.Second,
+	}); err != nil {
+		t.Fatalf("acquire after producer completion = %v", err)
 	}
 }
 
@@ -529,4 +623,65 @@ func (r *leaseTestRunner) Close() error { return nil }
 
 func (r *leaseTestRunner) finish() {
 	r.completeOnce.Do(func() { close(r.complete) })
+}
+
+type leaseStartupRuntime struct {
+	sessions session.Service
+	ref      session.SessionRef
+	started  chan struct{}
+	release  chan struct{}
+	runner   agent.Runner
+}
+
+func (r *leaseStartupRuntime) Run(ctx context.Context, _ agent.RunRequest) (agent.RunResult, error) {
+	close(r.started)
+	select {
+	case <-r.release:
+	case <-ctx.Done():
+		return agent.RunResult{}, ctx.Err()
+	}
+	message := model.NewTextMessage(model.RoleAssistant, "startup survived")
+	if _, err := r.sessions.AppendEvent(ctx, session.AppendEventRequest{
+		SessionRef: r.ref, MutationGuard: session.RuntimeMutationGuard(ctx),
+		Event: &session.Event{Type: session.EventTypeAssistant, Message: &message},
+	}); err != nil {
+		return agent.RunResult{}, err
+	}
+	return agent.RunResult{Handle: r.runner}, nil
+}
+
+func (*leaseStartupRuntime) RunState(context.Context, session.SessionRef) (agent.RunState, error) {
+	return agent.RunState{}, nil
+}
+
+type leaseCompletionRunner struct {
+	id           string
+	closed       chan struct{}
+	closeOnce    sync.Once
+	producerDone chan struct{}
+}
+
+func newLeaseCompletionRunner(id string) *leaseCompletionRunner {
+	return &leaseCompletionRunner{id: id, closed: make(chan struct{}), producerDone: make(chan struct{})}
+}
+
+func (r *leaseCompletionRunner) RunID() string { return r.id }
+func (*leaseCompletionRunner) Events() iter.Seq2[*session.Event, error] {
+	return func(func(*session.Event, error) bool) {}
+}
+func (*leaseCompletionRunner) Submit(agent.Submission) error { return nil }
+func (*leaseCompletionRunner) Cancel() agent.CancelResult {
+	return agent.CancelResult{Status: agent.CancelStatusCancelled}
+}
+func (r *leaseCompletionRunner) Close() error {
+	r.closeOnce.Do(func() { close(r.closed) })
+	return nil
+}
+func (r *leaseCompletionRunner) WaitCompletion(ctx context.Context) error {
+	select {
+	case <-r.producerDone:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }

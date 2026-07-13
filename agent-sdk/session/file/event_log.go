@@ -162,6 +162,67 @@ func (s *Store) readEventLog(documentPath string) ([]*session.Event, error) {
 	return events, nil
 }
 
+func (s *Store) readEventLogPage(documentPath string, req session.EventPageRequest) (session.EventPage, error) {
+	req = session.NormalizeEventPageRequest(req)
+	path := eventLogPath(documentPath)
+	file, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return session.EventPage{NextSeq: req.AfterSeq}, nil
+		}
+		return session.EventPage{}, err
+	}
+	defer file.Close()
+
+	out := session.EventPage{NextSeq: req.AfterSeq}
+	reader := bufio.NewReader(file)
+	lineNo := 0
+	for {
+		line, readErr := reader.ReadString('\n')
+		lineNo++
+		if readErr != nil && !errors.Is(readErr, io.EOF) {
+			return session.EventPage{}, readErr
+		}
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" {
+			if err := rejectUnsupportedLegacyEventLogLine([]byte(trimmed), path, lineNo); err != nil {
+				return session.EventPage{}, err
+			}
+			migratedRaw, err := session.MigrateEventJSON(json.RawMessage(trimmed))
+			if err != nil {
+				if errors.Is(readErr, io.EOF) {
+					break
+				}
+				return session.EventPage{}, fmt.Errorf("agent-sdk/session/file: migrate event log %s line %d: %w", path, lineNo, err)
+			}
+			var event session.Event
+			if err := json.Unmarshal(migratedRaw, &event); err != nil {
+				if errors.Is(readErr, io.EOF) {
+					break
+				}
+				return session.EventPage{}, fmt.Errorf("agent-sdk/session/file: decode event log %s line %d: %w", path, lineNo, err)
+			}
+			if err := session.ValidateDurableCoreEvent(&event); err != nil {
+				return session.EventPage{}, fmt.Errorf("agent-sdk/session/file: invalid event log %s line %d: %w", path, lineNo, err)
+			}
+			if event.Seq > req.AfterSeq && (req.ThroughSeq == 0 || event.Seq <= req.ThroughSeq) {
+				if session.EventMatchesPageVisibility(&event, req.Visibility) && len(out.Events) >= req.Limit {
+					out.HasMore = true
+					break
+				}
+				out.NextSeq = event.Seq
+				if session.EventMatchesPageVisibility(&event, req.Visibility) {
+					out.Events = append(out.Events, session.CanonicalizeEvent(&event))
+				}
+			}
+		}
+		if errors.Is(readErr, io.EOF) {
+			break
+		}
+	}
+	return out, nil
+}
+
 func rejectUnsupportedLegacyEventLogLine(data []byte, path string, lineNo int) error {
 	var root map[string]json.RawMessage
 	if err := json.Unmarshal(data, &root); err != nil {

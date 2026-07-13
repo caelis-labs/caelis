@@ -296,6 +296,9 @@ func TestResumeSessionResolvesUniquePrefix(t *testing.T) {
 	if svc.loadReq.SessionRef.SessionID != "s-12345678" {
 		t.Fatalf("loadReq = %+v", svc.loadReq)
 	}
+	if svc.listReq.WorkspaceKey != "" {
+		t.Fatalf("listReq.WorkspaceKey = %q, want global SessionID lookup", svc.listReq.WorkspaceKey)
+	}
 }
 
 func TestResumeSessionRejectsAmbiguousPrefix(t *testing.T) {
@@ -1605,9 +1608,7 @@ func TestResolveApprovalRequestQueuesAutoReviewAtActiveHead(t *testing.T) {
 		results <- result{callID: "second", resp: resp, err: err}
 	}()
 	waitForApprovalQueueLength(t, handle, 2)
-	handle.mu.Lock()
-	second := handle.approvalQueue[1]
-	handle.mu.Unlock()
+	second := handle.approvals.queueSnapshot()[1]
 	select {
 	case <-second.activated:
 		t.Fatal("queued auto-review became active before the first request resolved")
@@ -2336,9 +2337,9 @@ func TestReplayEventsReturnsSessionBackedCanonicalReplay(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReplayEvents() error = %v", err)
 	}
-	// Participant-scoped tool trace stays out of transcript replay; control
-	// plane continuity below still advances over e3.
-	if len(replayed.Events) != 1 || replayed.Events[0].Cursor != "acp-projection:ZTI:0" || replayed.Events[0].EventID != "e2" {
+	// Client replay includes all canonical and mirror semantics, including
+	// participant-scoped tool state needed to rebuild a rich client view.
+	if len(replayed.Events) != 2 || replayed.Events[0].Cursor != "acp-projection:ZTI:0" || replayed.Events[0].EventID != "e2" || replayed.Events[1].EventID != "e3" {
 		t.Fatalf("ReplayEvents() = %#v", replayed.Events)
 	}
 	if replayed.Events[0].Kind != eventstream.KindSessionUpdate ||
@@ -2346,7 +2347,7 @@ func TestReplayEventsReturnsSessionBackedCanonicalReplay(t *testing.T) {
 		replayed.Events[0].TurnID != "turn-1" {
 		t.Fatalf("first replay event = %+v", replayed.Events[0])
 	}
-	if !replayed.Durable || replayed.NextCursor != "acp-projection:ZTI:0" {
+	if !replayed.Durable || replayed.NextCursor != "acp-projection:ZTM:0" {
 		t.Fatalf("replay result = %+v", replayed)
 	}
 	if replayed.ControlPlane.Continuity.LastEventCursor != "e3" || replayed.ControlPlane.Continuity.ControllerCursor != "e3" {
@@ -2775,9 +2776,7 @@ func waitForApprovalQueueLength(t *testing.T, handle *turnHandle, want int) {
 	tick := time.NewTicker(time.Millisecond)
 	defer tick.Stop()
 	for {
-		handle.mu.Lock()
-		got := len(handle.approvalQueue)
-		handle.mu.Unlock()
+		got := len(handle.approvals.queueSnapshot())
 		if got == want {
 			return
 		}
@@ -2950,11 +2949,11 @@ func (s staticSessionService) RemoveParticipant(context.Context, session.RemoveP
 func (s staticSessionService) SnapshotState(context.Context, session.SessionRef) (map[string]any, error) {
 	return cloneMap(s.state), nil
 }
-func (s staticSessionService) ReplaceState(context.Context, session.SessionRef, map[string]any) error {
-	return nil
+func (s staticSessionService) ReplaceState(context.Context, session.ReplaceStateRequest) (session.Session, error) {
+	return s.session, nil
 }
-func (s staticSessionService) UpdateState(context.Context, session.SessionRef, func(map[string]any) (map[string]any, error)) error {
-	return nil
+func (s staticSessionService) UpdateState(context.Context, session.UpdateStateRequest) (session.Session, error) {
+	return s.session, nil
 }
 
 type mockSessionService struct{ staticSessionService }
@@ -3041,12 +3040,12 @@ func (s *recordingSessionService) SnapshotState(context.Context, session.Session
 	return map[string]any{}, nil
 }
 
-func (s *recordingSessionService) ReplaceState(context.Context, session.SessionRef, map[string]any) error {
-	return nil
+func (s *recordingSessionService) ReplaceState(context.Context, session.ReplaceStateRequest) (session.Session, error) {
+	return s.sessionResult, nil
 }
 
-func (s *recordingSessionService) UpdateState(context.Context, session.SessionRef, func(map[string]any) (map[string]any, error)) error {
-	return nil
+func (s *recordingSessionService) UpdateState(context.Context, session.UpdateStateRequest) (session.Session, error) {
+	return s.sessionResult, nil
 }
 
 type staticResolver struct {

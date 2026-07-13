@@ -17,8 +17,8 @@ const (
 	RunStateCancelled       = LifecycleStateCancelled
 )
 
-// ReplayRequest is the stable client replay request used by GUI, SSE, and
-// WebSocket adapters. Cursor accepts Envelope.ProjectionID or Envelope.Cursor.
+// ReplayRequest is the stable client replay request used by Control clients.
+// Cursor accepts only the opaque signed Envelope.Cursor resume token.
 type ReplayRequest struct {
 	SessionID        string `json:"session_id,omitempty"`
 	Cursor           string `json:"cursor,omitempty"`
@@ -71,10 +71,9 @@ func NormalizeRunStatus(status string, waitingApproval bool, hasActiveTurn bool)
 	return normalized, false
 }
 
-// ReplayCursor returns the durable resume cursor clients should use when
-// switching from a live stream to Replay. It prefers ProjectionID over Cursor.
+// ReplayCursor returns the sole public resume token carried by an Envelope.
 func ReplayCursor(env Envelope) string {
-	return firstNonEmpty(env.ProjectionID, env.Cursor)
+	return strings.TrimSpace(env.Cursor)
 }
 
 // SSEEventID returns the event id for SSE transports.

@@ -92,6 +92,9 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 		}
 	}
 	if strings.TrimSpace(toolOutput) == "" && !toolOutputHasTerminalData {
+		toolOutput = transcript.DelegatedTaskResultText(fallbackInput)
+	}
+	if strings.TrimSpace(toolOutput) == "" && !toolOutputHasTerminalData {
 		if exitText := transcript.TerminalExitCodeOutputText(fallbackInput); exitText != "" {
 			toolOutput = exitText
 			toolOutputSynthetic = true

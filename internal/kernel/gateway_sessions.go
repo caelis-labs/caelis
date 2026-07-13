@@ -89,10 +89,14 @@ func (g *Gateway) LoadSession(ctx context.Context, req LoadSessionRequest) (sess
 }
 
 func (g *Gateway) ResumeSession(ctx context.Context, req ResumeSessionRequest) (session.LoadedSession, error) {
+	workspaceKey := strings.TrimSpace(req.Workspace.Key)
+	if strings.TrimSpace(req.SessionID) != "" {
+		workspaceKey = ""
+	}
 	list, err := g.ListSessions(ctx, ListSessionsRequest{
 		AppName:      req.AppName,
 		UserID:       req.UserID,
-		WorkspaceKey: req.Workspace.Key,
+		WorkspaceKey: workspaceKey,
 		Limit:        200,
 	})
 	if err != nil {
@@ -166,4 +170,20 @@ func looksLikeLegacySystemManagedSessionSummary(summary session.SessionSummary) 
 		return true
 	}
 	return strings.Contains(strings.TrimSpace(summary.SessionID), "-approval-review")
+}
+
+func (g *Gateway) updateSessionState(
+	ctx context.Context,
+	ref session.SessionRef,
+	guard session.MutationGuard,
+	update func(map[string]any) (map[string]any, error),
+) error {
+	current, err := g.sessions.Session(ctx, ref)
+	if err != nil {
+		return err
+	}
+	_, err = g.sessions.UpdateState(ctx, session.UpdateStateRequest{
+		SessionRef: ref, ExpectedRevision: &current.Revision, MutationGuard: guard, Update: update,
+	})
+	return err
 }

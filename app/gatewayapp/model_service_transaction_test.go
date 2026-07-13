@@ -85,6 +85,6 @@ type failingUpdateSessionService struct {
 	err error
 }
 
-func (s *failingUpdateSessionService) UpdateState(context.Context, session.SessionRef, func(map[string]any) (map[string]any, error)) error {
-	return s.err
+func (s *failingUpdateSessionService) UpdateState(context.Context, session.UpdateStateRequest) (session.Session, error) {
+	return session.Session{}, s.err
 }

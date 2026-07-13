@@ -174,6 +174,52 @@ func assertLeaseFencedMutations(
 		t.Fatalf("stale fenced handoff AppendEvent error = %v, want ErrLeaseConflict", err)
 	}
 	placedCtx := session.ContextWithRuntimeLease(context.Background(), current)
+	currentSession, err := service.Session(context.Background(), ref)
+	if err != nil {
+		t.Fatalf("Session(before state fencing) error = %v", err)
+	}
+	if _, err := service.UpdateState(context.Background(), session.UpdateStateRequest{
+		SessionRef: ref, ExpectedRevision: &currentSession.Revision, MutationGuard: stale,
+		Update: func(state map[string]any) (map[string]any, error) {
+			state["stale"] = true
+			return state, nil
+		},
+	}); !errors.Is(err, session.ErrLeaseConflict) {
+		t.Fatalf("stale UpdateState fence error = %v, want ErrLeaseConflict", err)
+	}
+	if _, err := service.ReplaceState(context.Background(), session.ReplaceStateRequest{
+		SessionRef: ref, ExpectedRevision: &currentSession.Revision, State: map[string]any{"unscoped": true},
+	}); !errors.Is(err, session.ErrLeaseConflict) {
+		t.Fatalf("unscoped ReplaceState error = %v, want ErrLeaseConflict", err)
+	}
+	controlSession, err := service.UpdateState(context.Background(), session.UpdateStateRequest{
+		SessionRef: ref, ExpectedRevision: &currentSession.Revision,
+		MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeApproval),
+		Update: func(state map[string]any) (map[string]any, error) {
+			state["approval"] = true
+			return state, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("overlapping approval UpdateState error = %v", err)
+	}
+	runtimeSession, err := service.ReplaceState(context.Background(), session.ReplaceStateRequest{
+		SessionRef: ref, ExpectedRevision: &controlSession.Revision,
+		MutationGuard: session.RuntimeMutationGuard(placedCtx), State: map[string]any{"runtime": true},
+	})
+	if err != nil {
+		t.Fatalf("matching runtime ReplaceState error = %v", err)
+	}
+	staleRevision := controlSession.Revision
+	if _, err := service.UpdateState(context.Background(), session.UpdateStateRequest{
+		SessionRef: ref, ExpectedRevision: &staleRevision, MutationGuard: session.RuntimeMutationGuard(placedCtx),
+		Update: func(state map[string]any) (map[string]any, error) { return state, nil },
+	}); !errors.Is(err, session.ErrRevisionConflict) {
+		t.Fatalf("stale UpdateState revision error = %v, want ErrRevisionConflict", err)
+	}
+	if runtimeSession.Revision != controlSession.Revision+1 {
+		t.Fatalf("runtime state revision = %d, want %d", runtimeSession.Revision, controlSession.Revision+1)
+	}
 	if _, err := service.AppendEvent(context.Background(), session.AppendEventRequest{
 		SessionRef:    ref,
 		MutationGuard: session.ControlMutationGuardWithRuntimeLease(placedCtx, session.ControlMutationPurposeHandoff),

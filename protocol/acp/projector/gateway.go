@@ -76,11 +76,31 @@ func EnvelopeBaseFromSessionEvent(ref session.SessionRef, event *session.Event, 
 		return base
 	}
 	base.EventID = strings.TrimSpace(event.ID)
+	base.ApprovalRequestID = eventstream.ApprovalRequestID(strings.TrimSpace(event.ApprovalRequestID))
 	base.TurnID = firstNonEmpty(sessionEventTurnID(event), strings.TrimSpace(transport.TurnID))
 	base.OccurredAt = event.Time
 	base.Final = SessionEventFinal(event)
+	base.Delivery = sessionEventDelivery(event)
 	base.Meta = cloneAnyMap(event.Meta)
 	base.Actor = firstNonEmpty(strings.TrimSpace(event.Actor.Name), strings.TrimSpace(event.Actor.ID))
+	if event.ChildOrigin != nil {
+		origin := session.CloneEventChildOrigin(*event.ChildOrigin)
+		base.ScopeID = firstNonEmpty(origin.ScopeID, origin.TaskID, origin.DelegationID, base.ScopeID)
+		base.ParticipantID = origin.ParticipantID
+		switch origin.Scope {
+		case session.EventChildScopeSubagent:
+			base.Scope = eventstream.ScopeSubagent
+		case session.EventChildScopeParticipant:
+			base.Scope = eventstream.ScopeParticipant
+		}
+		if origin.ParentTool.CallID != "" {
+			base.ParentTool = &eventstream.ParentToolRelation{
+				ToolCallID: origin.ParentTool.CallID,
+				ToolName:   origin.ParentTool.Name,
+			}
+		}
+		return base
+	}
 	if event.Scope == nil {
 		return base
 	}
@@ -97,6 +117,21 @@ func EnvelopeBaseFromSessionEvent(ref session.SessionRef, event *session.Event, 
 		base.ScopeID = firstNonEmpty(strings.TrimSpace(event.Scope.TurnID), base.ScopeID)
 	}
 	return base
+}
+
+func sessionEventDelivery(event *session.Event) *eventstream.Delivery {
+	switch {
+	case event == nil:
+		return nil
+	case session.IsMirror(event):
+		return &eventstream.Delivery{Mode: eventstream.DeliveryMirror}
+	case session.IsTransient(event):
+		return &eventstream.Delivery{Mode: eventstream.DeliveryTransient}
+	case session.IsCanonicalHistoryEvent(event):
+		return &eventstream.Delivery{Mode: eventstream.DeliveryCanonical}
+	default:
+		return nil
+	}
 }
 
 // SessionEventFinal reports whether a projected session event should be treated
@@ -144,6 +179,23 @@ func ProjectSessionEventEnvelopeWithProjector(base eventstream.Envelope, event *
 	}
 	if usage := session.UsageSnapshotFromSessionEvent(event); usage != nil && !containsUsageUpdate(out) {
 		out = append(out, gatewayUsageEnvelope(base, usage))
+	}
+	return stampDurableProjectionPositions(event, out)
+}
+
+func stampDurableProjectionPositions(event *session.Event, events []eventstream.Envelope) []eventstream.Envelope {
+	if event == nil || event.Seq == 0 || strings.TrimSpace(event.ID) == "" || len(events) == 0 {
+		return events
+	}
+	out := make([]eventstream.Envelope, len(events))
+	for index, env := range events {
+		env.EventID = strings.TrimSpace(event.ID)
+		env.ProjectionID = eventstream.FormatProjectionID(event.ID, index)
+		env.Position = &eventstream.FeedPosition{Durable: &eventstream.DurableFeedPosition{
+			Seq:             event.Seq,
+			ProjectionIndex: uint32(index),
+		}}
+		out[index] = env
 	}
 	return out
 }
@@ -240,6 +292,7 @@ func gatewayUsageEnvelope(base eventstream.Envelope, usage *session.UsageSnapsho
 		Cursor:        base.Cursor,
 		EventID:       base.EventID,
 		ProjectionID:  base.ProjectionID,
+		Position:      eventstream.CloneFeedPosition(base.Position),
 		SessionID:     base.SessionID,
 		HandleID:      base.HandleID,
 		RunID:         base.RunID,
@@ -249,6 +302,8 @@ func gatewayUsageEnvelope(base eventstream.Envelope, usage *session.UsageSnapsho
 		ScopeID:       base.ScopeID,
 		Actor:         base.Actor,
 		ParticipantID: base.ParticipantID,
+		ParentTool:    cloneParentToolRelation(base.ParentTool),
+		Delivery:      cloneDelivery(base.Delivery),
 		Update: eventstream.UsageUpdateFromSnapshot(eventstream.UsageSnapshot{
 			PromptTokens:        usage.PromptTokens,
 			CachedInputTokens:   usage.CachedInputTokens,
@@ -258,6 +313,22 @@ func gatewayUsageEnvelope(base eventstream.Envelope, usage *session.UsageSnapsho
 			ContextWindowTokens: usage.ContextWindowTokens,
 		}, base.Meta),
 	}
+}
+
+func cloneParentToolRelation(in *eventstream.ParentToolRelation) *eventstream.ParentToolRelation {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	return &out
+}
+
+func cloneDelivery(in *eventstream.Delivery) *eventstream.Delivery {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	return &out
 }
 
 func containsUsageUpdate(events []eventstream.Envelope) bool {
@@ -444,31 +515,7 @@ func ApprovalPayloadFromPermission(req *schema.RequestPermissionRequest) *approv
 }
 
 func protocolApprovalFromPayload(payload *approval.Payload) *session.ProtocolApproval {
-	if payload == nil {
-		return nil
-	}
-	rawInput := approvalRawInput(payload)
-	options := make([]session.ProtocolApprovalOption, 0, len(payload.Options))
-	for _, option := range payload.Options {
-		options = append(options, session.ProtocolApprovalOption{
-			ID:   strings.TrimSpace(option.ID),
-			Name: strings.TrimSpace(option.Name),
-			Kind: strings.TrimSpace(option.Kind),
-		})
-	}
-	return &session.ProtocolApproval{
-		ToolCall: session.ProtocolToolCall{
-			ID:        strings.TrimSpace(payload.ToolCallID),
-			Name:      strings.TrimSpace(payload.ToolName),
-			Kind:      strings.TrimSpace(payload.ToolKind),
-			Title:     strings.TrimSpace(payload.ToolTitle),
-			Status:    firstNonEmpty(strings.TrimSpace(payload.ToolStatus), strings.TrimSpace(string(payload.Status))),
-			RawInput:  rawInput,
-			RawOutput: cloneAnyMap(payload.RawOutput),
-			Content:   session.CloneProtocolToolCallContent(payload.Content),
-		},
-		Options: options,
-	}
+	return approval.ProtocolApprovalFromPayload(payload)
 }
 
 func approvalRawInput(payload *approval.Payload) map[string]any {

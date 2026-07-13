@@ -10,11 +10,10 @@ import (
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 )
 
-func parentToolStreamMeta(callID string, toolName string, mirrored bool) map[string]any {
+func parentToolStreamMeta(callID string, toolName string) map[string]any {
 	return metautil.WithRuntimeSection(nil, metautil.RuntimeStream, map[string]any{
-		metautil.RuntimeStreamParentCallID:         strings.TrimSpace(callID),
-		metautil.RuntimeStreamParentTool:           strings.TrimSpace(toolName),
-		metautil.RuntimeStreamMirroredToParentTool: mirrored,
+		metautil.RuntimeStreamParentCallID: strings.TrimSpace(callID),
+		metautil.RuntimeStreamParentTool:   strings.TrimSpace(toolName),
 	})
 }
 

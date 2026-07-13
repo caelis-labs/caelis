@@ -36,12 +36,11 @@ const (
 	EventMetaRuntimeTaskError      = "error"
 	EventMetaRuntimeTaskFinal      = "final_message"
 
-	EventMetaRuntimeStream                     = "stream"
-	EventMetaRuntimeStreamMode                 = "mode"
-	EventMetaRuntimeStreamParentCallID         = "parent_call_id"
-	EventMetaRuntimeStreamParentTool           = "parent_tool"
-	EventMetaRuntimeStreamParentTaskID         = "parent_task_id"
-	EventMetaRuntimeStreamMirroredToParentTool = "mirrored_to_parent_tool"
+	EventMetaRuntimeStream             = "stream"
+	EventMetaRuntimeStreamMode         = "mode"
+	EventMetaRuntimeStreamParentCallID = "parent_call_id"
+	EventMetaRuntimeStreamParentTool   = "parent_tool"
+	EventMetaRuntimeStreamParentTaskID = "parent_task_id"
 )
 
 // EventMetaString returns a trimmed string from _meta using a stable path.

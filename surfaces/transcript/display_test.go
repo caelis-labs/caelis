@@ -200,6 +200,40 @@ func TestTerminalToolOutputTextPreservesRawWhitespace(t *testing.T) {
 	}
 }
 
+func TestDelegatedTaskResultTextUsesCanonicalTaskResultWithoutTerminalOutput(t *testing.T) {
+	t.Parallel()
+
+	meta := map[string]any{
+		"caelis": map[string]any{
+			"runtime": map[string]any{
+				"task": map[string]any{
+					"state":  "completed",
+					"result": "child final result",
+				},
+			},
+		},
+	}
+	for _, tt := range []struct {
+		name     string
+		toolName string
+		status   string
+		want     string
+	}{
+		{name: "spawn final", toolName: "SPAWN", status: ToolStatusCompleted, want: "child final result"},
+		{name: "task final", toolName: "TASK", status: ToolStatusCompleted, want: "child final result"},
+		{name: "running", toolName: "SPAWN", status: ToolStatusRunning},
+		{name: "command", toolName: "RUN_COMMAND", status: ToolStatusCompleted},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := DelegatedTaskResultText(ToolOutputFallbackInput{ToolName: tt.toolName, Status: tt.status, Meta: meta}); got != tt.want {
+				t.Fatalf("DelegatedTaskResultText() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestTerminalFallbacksForNoOutputAndExitCode(t *testing.T) {
 	t.Parallel()
 

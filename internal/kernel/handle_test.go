@@ -643,16 +643,12 @@ func TestTurnHandleClearsPendingApprovalsOnCancelCloseAndTerminal(t *testing.T) 
 				t.Fatalf("cleanup injected fallback approval decision: %+v", got)
 			default:
 			}
-			handle.mu.Lock()
-			remaining := len(handle.pendingApprovals)
-			handle.mu.Unlock()
+			remaining := len(handle.approvals.queueSnapshot())
 			if remaining != 0 {
 				t.Fatalf("pending approvals after %s = %d, want zero", name, remaining)
 			}
-			handle.mu.Lock()
-			queued := len(handle.approvalQueue)
-			active := handle.activeApproval
-			handle.mu.Unlock()
+			queued := len(handle.approvals.queueSnapshot())
+			active, _ := handle.approvals.snapshot()
 			if queued != 0 || active != nil {
 				t.Fatalf("approval queue after %s = %d/%#v, want empty", name, queued, active)
 			}
@@ -705,6 +701,70 @@ func TestTurnHandleAdvancesQueueWhenActiveApprovalIsAbandoned(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("second waiter did not receive its decision")
 	}
+}
+
+func TestSessionApprovalCoordinatorAcceptsDetachedChildAfterParentTerminal(t *testing.T) {
+	t.Parallel()
+
+	handle := newTestTurnHandle()
+	handle.finish()
+	request := testChildApprovalRequest("task-detached", "detached.txt")
+	request.PauseTokenID = "detached-approval"
+	pending, err := handle.openPendingApproval(request)
+	if err != nil {
+		t.Fatalf("open detached approval after parent terminal: %v", err)
+	}
+	gateway := &Gateway{
+		approvals: map[string]*approvalCoordinator{handle.sessionRef.SessionID: handle.approvals},
+	}
+	if err := gateway.SubmitActiveTurn(context.Background(), SubmitActiveTurnRequest{
+		SessionRef: handle.sessionRef,
+		Kind:       SubmissionKindApproval,
+		Approval: &ApprovalDecision{
+			RequestID: pending.id, Approved: true, Outcome: string(ApprovalStatusApproved),
+		},
+	}); err != nil {
+		t.Fatalf("SubmitActiveTurn(detached approval) error = %v", err)
+	}
+	select {
+	case decision := <-pending.decisions:
+		if decision.RequestID != pending.id || !decision.Approved {
+			t.Fatalf("detached decision = %#v", decision)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("detached child approval waiter did not resume")
+	}
+}
+
+func TestSessionApprovalCoordinatorSharesFIFOAcrossTurnOwners(t *testing.T) {
+	t.Parallel()
+
+	ref := session.SessionRef{SessionID: "session-shared-approval"}
+	coordinator := newApprovalCoordinator(ref)
+	firstOwner := newTurnHandle(turnHandleConfig{handleID: "turn-a", sessionRef: ref, approvals: coordinator})
+	secondOwner := newTurnHandle(turnHandleConfig{handleID: "turn-b", sessionRef: ref, approvals: coordinator})
+	first, err := firstOwner.openPendingApproval(testChildApprovalRequest("task-a", "a.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := secondOwner.openPendingApproval(testChildApprovalRequest("task-b", "b.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	active, queued := coordinator.snapshot()
+	if active != first || queued != 1 {
+		t.Fatalf("shared FIFO = active %#v queued %d, want first/1", active, queued)
+	}
+	if err := secondOwner.submitApproval(context.Background(), ApprovalDecision{
+		RequestID: first.id, Approved: true, Outcome: string(ApprovalStatusApproved),
+	}); err != nil {
+		t.Fatalf("cross-owner resolve first = %v", err)
+	}
+	active, queued = coordinator.snapshot()
+	if active != second || queued != 0 {
+		t.Fatalf("shared FIFO after resolve = active %#v queued %d, want second/0", active, queued)
+	}
+	coordinator.release(second, "abandoned")
 }
 
 func TestTurnHandleConcurrentApprovalSubmissionsOnlyResolveActiveHead(t *testing.T) {
@@ -852,8 +912,8 @@ func assertChildPermissionEnvelope(t *testing.T, env eventstream.Envelope, reque
 	if env.ParentTool == nil || env.ParentTool.ToolCallID != "spawn-call-1" || env.ParentTool.ToolName != "SPAWN" {
 		t.Fatalf("child parent relation = %#v, want SPAWN/spawn-call-1", env.ParentTool)
 	}
-	if env.Delivery == nil || !env.Delivery.Transient || env.Delivery.IsParentToolMirror {
-		t.Fatalf("child delivery = %#v, want transient non-mirror", env.Delivery)
+	if env.Delivery == nil || env.Delivery.Mode != eventstream.DeliveryMirror {
+		t.Fatalf("child delivery = %#v, want durable mirror delivery", env.Delivery)
 	}
 	if env.Permission == nil || env.Permission.ToolCall.ToolCallID != "shared-child-call" || len(env.Permission.Options) != 1 || env.Permission.Options[0].OptionID != "allow_once" {
 		t.Fatalf("child ACP permission = %#v, want preserved tool call and options", env.Permission)

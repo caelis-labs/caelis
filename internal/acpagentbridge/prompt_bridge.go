@@ -233,17 +233,15 @@ func (a *RuntimeAgent) emitControlEnvelope(ctx context.Context, cb acp.PromptCal
 	if cb == nil {
 		return nil
 	}
-	sessionID := strings.TrimSpace(env.SessionID)
-	if sessionID == "" {
-		sessionID = strings.TrimSpace(fallbackSessionID)
-	}
+	source := acpFilterSourceFromEnvelope(env, fallbackSessionID)
+	sessionID := source.SessionID
 	switch env.Kind {
 	case eventstream.KindRequestPermission:
 		if env.Permission == nil {
 			return nil
 		}
 		if outboundFilter != nil {
-			outboundFilter.resetSegment()
+			outboundFilter.resetSource(source)
 		}
 		resp, err := cb.RequestPermission(ctx, *env.Permission)
 		if err != nil || turn == nil {
@@ -254,10 +252,7 @@ func (a *RuntimeAgent) emitControlEnvelope(ctx context.Context, cb acp.PromptCal
 		if env.Update == nil {
 			return nil
 		}
-		if suppressACPBridgeSubagentEnvelope(env) {
-			return nil
-		}
-		return emitFilteredSessionUpdate(ctx, cb, acp.SessionNotification{SessionID: sessionID, Update: env.Update}, env.Final, outboundFilter)
+		return emitFilteredSessionUpdate(ctx, cb, acp.SessionNotification{SessionID: sessionID, Update: env.Update}, env.Final, source, outboundFilter)
 	case eventstream.KindNotice:
 		text := strings.TrimSpace(env.Notice)
 		if text == "" {
@@ -269,7 +264,7 @@ func (a *RuntimeAgent) emitControlEnvelope(ctx context.Context, cb acp.PromptCal
 				SessionUpdate: acp.UpdateAgentMessage,
 				Content:       acp.TextContent{Type: "text", Text: text},
 			},
-		}, true, outboundFilter)
+		}, true, source, outboundFilter)
 	case eventstream.KindError:
 		if env.Err != nil {
 			return env.Err
@@ -279,17 +274,14 @@ func (a *RuntimeAgent) emitControlEnvelope(ctx context.Context, cb acp.PromptCal
 		}
 	}
 	if env.Update != nil {
-		if suppressACPBridgeSubagentEnvelope(env) {
-			return nil
-		}
-		return emitFilteredSessionUpdate(ctx, cb, acp.SessionNotification{SessionID: sessionID, Update: env.Update}, env.Final, outboundFilter)
+		return emitFilteredSessionUpdate(ctx, cb, acp.SessionNotification{SessionID: sessionID, Update: env.Update}, env.Final, source, outboundFilter)
 	}
 	return nil
 }
 
-func emitFilteredSessionUpdate(ctx context.Context, cb acp.PromptCallbacks, notification acp.SessionNotification, final bool, outboundFilter *acpNarrativeFilter) error {
+func emitFilteredSessionUpdate(ctx context.Context, cb acp.PromptCallbacks, notification acp.SessionNotification, final bool, source acpFilterSource, outboundFilter *acpNarrativeFilter) error {
 	if outboundFilter != nil {
-		filtered, ok := outboundFilter.FilterNotificationWithFinal(notification, final)
+		filtered, ok := outboundFilter.filterNotificationWithFinal(notification, final, source)
 		if !ok {
 			return nil
 		}

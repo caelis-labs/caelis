@@ -12,18 +12,21 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
+	"github.com/caelis-labs/caelis/app/controlserver"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/app/gatewayapp/acpagent"
 	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter/local"
 	"github.com/caelis-labs/caelis/internal/acpagentenv"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/version"
+	controlclient "github.com/caelis-labs/caelis/ports/controlclient"
 	"github.com/caelis-labs/caelis/ports/gateway"
 	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 	"github.com/caelis-labs/caelis/surfaces/acpserver"
+	"github.com/caelis-labs/caelis/surfaces/appserver"
 	"github.com/caelis-labs/caelis/surfaces/headless"
 )
 
@@ -43,11 +46,13 @@ type runResult struct {
 type doctorResult = gatewayapp.DoctorReport
 type sandboxStatusResult = gatewayapp.SandboxStatus
 type sandboxCommandFunc func(context.Context, gatewayapp.Config, outputFormat, io.Writer) error
+type controlServerFunc func(context.Context, *gatewayapp.Stack, controlserver.Config) error
 
 var (
-	runSandboxSetupCommand sandboxCommandFunc = runSandboxSetupFromConfig
-	runSandboxFixCommand   sandboxCommandFunc = runSandboxFixFromConfig
-	runSandboxResetCommand sandboxCommandFunc = runSandboxResetFromConfig
+	runSandboxSetupCommand  sandboxCommandFunc = runSandboxSetupFromConfig
+	runSandboxFixCommand    sandboxCommandFunc = runSandboxFixFromConfig
+	runSandboxResetCommand  sandboxCommandFunc = runSandboxResetFromConfig
+	runControlServerCommand controlServerFunc  = controlserver.ListenAndServe
 )
 
 func Run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
@@ -72,6 +77,10 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 	}
 	doctorSubcommand := len(args) > 0 && strings.EqualFold(strings.TrimSpace(args[0]), "doctor")
 	if doctorSubcommand {
+		args = args[1:]
+	}
+	controlServerSubcommand := len(args) > 0 && (strings.EqualFold(strings.TrimSpace(args[0]), "serve") || strings.EqualFold(strings.TrimSpace(args[0]), "server"))
+	if controlServerSubcommand {
 		args = args[1:]
 	}
 	sandboxSubcommand := ""
@@ -122,6 +131,8 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 		maxOutputTokens  = fs.Int("max-output-tokens", envInt("CAELIS_MAX_OUTPUT_TOKENS", 4096), "Max output tokens")
 		forceInteractive = fs.Bool("interactive", false, "Force interactive local main path")
 		doctor           = fs.Bool("doctor", false, "Print runtime/session/sandbox diagnostics and exit")
+		controlListen    = fs.String("listen", envOr("CAELIS_CONTROL_LISTEN", "127.0.0.1:7777"), "Control client HTTP listen address")
+		controlToken     = fs.String("control-token", envOr("CAELIS_CONTROL_TOKEN", ""), "Bearer token required by the Control client HTTP server")
 	)
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -192,6 +203,19 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 			return err
 		}
 		return acpserver.ServeStdio(ctx, agent, stdin, stdout)
+	}
+	if controlServerSubcommand {
+		principal := controlclient.Principal{ID: strings.TrimSpace(*userID)}
+		var authenticator appserver.Authenticator
+		if strings.TrimSpace(*controlToken) != "" {
+			authenticator, err = controlserver.BearerTokenAuthenticator(*controlToken, principal)
+			if err != nil {
+				return err
+			}
+		}
+		return runControlServerCommand(ctx, stack, controlserver.Config{
+			Address: strings.TrimSpace(*controlListen), Authenticator: authenticator, LocalPrincipal: principal,
+		})
 	}
 	if doctorSubcommand || *doctor {
 		outFmt, err := parseOutputFormat(*format)

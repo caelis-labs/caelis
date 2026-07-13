@@ -1656,7 +1656,7 @@ func TestAdapterSessionTokenUsageBreakdownIncludesSubagentsAndAutoReview(t *test
 	}); err != nil {
 		t.Fatalf("AppendEvent(main) error = %v", err)
 	}
-	if err := stack.Sessions.UpdateState(ctx, session.SessionRef{SessionID: activeSession.SessionID}, func(state map[string]any) (map[string]any, error) {
+	if _, err := stack.Sessions.UpdateState(ctx, session.UpdateStateRequest{SessionRef: session.SessionRef{SessionID: activeSession.SessionID}, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Update: func(state map[string]any) (map[string]any, error) {
 		next := session.CloneState(state)
 		if next == nil {
 			next = map[string]any{}
@@ -1684,7 +1684,7 @@ func TestAdapterSessionTokenUsageBreakdownIncludesSubagentsAndAutoReview(t *test
 			}},
 		}
 		return next, nil
-	}); err != nil {
+	}}); err != nil {
 		t.Fatalf("UpdateState(auto-review usage) error = %v", err)
 	}
 	child, err := stack.Sessions.StartSession(ctx, session.StartSessionRequest{
@@ -2910,14 +2910,14 @@ func TestAdapterIgnoresStaleSessionAliasOutsideConfiguredModels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
-	if err := stack.Sessions.UpdateState(ctx, session.SessionRef{SessionID: activeSession.SessionID}, func(state map[string]any) (map[string]any, error) {
+	if _, err := stack.Sessions.UpdateState(ctx, session.UpdateStateRequest{SessionRef: session.SessionRef{SessionID: activeSession.SessionID}, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Update: func(state map[string]any) (map[string]any, error) {
 		next := session.CloneState(state)
 		if next == nil {
 			next = map[string]any{}
 		}
 		next["gateway.current_model_alias"] = "minimax/minimax-m2.7-highspeed"
 		return next, nil
-	}); err != nil {
+	}}); err != nil {
 		t.Fatalf("UpdateState() error = %v", err)
 	}
 	status, err := driver.Status(ctx)
@@ -3949,11 +3949,11 @@ func TestAdapterCompleteResumeIncludesMetadataAndRecentFirst(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartSession(first) error = %v", err)
 	}
-	if err := stack.Sessions.UpdateState(ctx, first.SessionRef, func(state map[string]any) (map[string]any, error) {
+	if _, err := stack.Sessions.UpdateState(ctx, session.UpdateStateRequest{SessionRef: first.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Update: func(state map[string]any) (map[string]any, error) {
 		next := session.CloneState(state)
 		next[gateway.StateCurrentModelAlias] = "openai/gpt-4o-mini"
 		return next, nil
-	}); err != nil {
+	}}); err != nil {
 		t.Fatalf("UpdateState(first) error = %v", err)
 	}
 	second, err := stack.KernelSessions().StartSession(ctx, gateway.StartSessionRequest{
@@ -3966,11 +3966,11 @@ func TestAdapterCompleteResumeIncludesMetadataAndRecentFirst(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartSession(second) error = %v", err)
 	}
-	if err := stack.Sessions.UpdateState(ctx, second.SessionRef, func(state map[string]any) (map[string]any, error) {
+	if _, err := stack.Sessions.UpdateState(ctx, session.UpdateStateRequest{SessionRef: second.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Update: func(state map[string]any) (map[string]any, error) {
 		next := session.CloneState(state)
 		next[gateway.StateCurrentModelAlias] = "deepseek/deepseek-v4-flash"
 		return next, nil
-	}); err != nil {
+	}}); err != nil {
 		t.Fatalf("UpdateState(second) error = %v", err)
 	}
 

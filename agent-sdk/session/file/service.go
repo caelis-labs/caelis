@@ -55,6 +55,14 @@ func (s *Service) Events(
 	return s.store.Events(ctx, req)
 }
 
+// EventsPage returns one bounded forward sequence page.
+func (s *Service) EventsPage(
+	ctx context.Context,
+	req session.EventPageRequest,
+) (session.EventPage, error) {
+	return s.store.EventsPage(ctx, req)
+}
+
 func (s *Service) ListSessions(
 	ctx context.Context,
 	req session.ListSessionsRequest,
@@ -113,16 +121,14 @@ func (s *Service) SnapshotState(
 
 func (s *Service) ReplaceState(
 	ctx context.Context,
-	ref session.SessionRef,
-	state map[string]any,
-) error {
-	return s.store.ReplaceState(ctx, ref, state)
+	req session.ReplaceStateRequest,
+) (session.Session, error) {
+	return s.store.ReplaceState(ctx, req)
 }
 
 func (s *Service) UpdateState(
 	ctx context.Context,
-	ref session.SessionRef,
-	update func(map[string]any) (map[string]any, error),
-) error {
-	return s.store.UpdateState(ctx, ref, update)
+	req session.UpdateStateRequest,
+) (session.Session, error) {
+	return s.store.UpdateState(ctx, req)
 }

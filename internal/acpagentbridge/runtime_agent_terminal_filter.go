@@ -30,17 +30,29 @@ func (c normalizingPromptCallbacks) RequestPermission(ctx context.Context, req a
 
 const acpNarrativeReplayMinRunes = 4
 
+type acpNarrativeKey struct {
+	Source     acpFilterSource
+	UpdateType string
+	MessageID  string
+}
+
+type acpTerminalOutputKey struct {
+	Source     acpFilterSource
+	ToolCallID string
+	TerminalID string
+}
+
 type acpNarrativeFilter struct {
 	mu               sync.Mutex
-	sent             map[string]string
-	terminalSent     map[string]acpTerminalOutputState
+	sent             map[acpNarrativeKey]string
+	terminalSent     map[acpTerminalOutputKey]acpTerminalOutputState
 	suppressUserEcho bool
 }
 
 func newACPNarrativeFilter(suppressUserEcho bool) *acpNarrativeFilter {
 	return &acpNarrativeFilter{
-		sent:             map[string]string{},
-		terminalSent:     map[string]acpTerminalOutputState{},
+		sent:             map[acpNarrativeKey]string{},
+		terminalSent:     map[acpTerminalOutputKey]acpTerminalOutputState{},
 		suppressUserEcho: suppressUserEcho,
 	}
 }
@@ -50,17 +62,21 @@ func (f *acpNarrativeFilter) FilterNotification(notification acp.SessionNotifica
 }
 
 func (f *acpNarrativeFilter) FilterNotificationWithFinal(notification acp.SessionNotification, final bool) (acp.SessionNotification, bool) {
+	return f.filterNotificationWithFinal(notification, final, acpFilterSource{SessionID: strings.TrimSpace(notification.SessionID)})
+}
+
+func (f *acpNarrativeFilter) filterNotificationWithFinal(notification acp.SessionNotification, final bool, source acpFilterSource) (acp.SessionNotification, bool) {
 	if f == nil {
 		return notification, true
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	notification = normalizeACPStdioTerminalExtension(notification)
-	notification = f.filterTerminalOutput(notification, final)
-	updateType, text, ok := acpContentChunkText(notification.Update)
+	notification = f.filterTerminalOutput(notification, source, final)
+	updateType, messageID, text, ok := acpContentChunkText(notification.Update)
 	if !ok {
 		if acpNarrativeBarrier(notification.Update) {
-			clear(f.sent)
+			f.clearNarrativeSource(source)
 		}
 		return notification, true
 	}
@@ -73,7 +89,8 @@ func (f *acpNarrativeFilter) FilterNotificationWithFinal(notification acp.Sessio
 		}
 		return notification, true
 	}
-	previous := f.sent[updateType]
+	key := acpNarrativeKey{Source: source, UpdateType: updateType, MessageID: messageID}
+	previous := f.sent[key]
 	if final && previous != "" {
 		return acp.SessionNotification{}, false
 	}
@@ -81,47 +98,55 @@ func (f *acpNarrativeFilter) FilterNotificationWithFinal(notification acp.Sessio
 		if replacement == "" {
 			return acp.SessionNotification{}, false
 		}
-		f.sent[updateType] = previous + replacement
+		f.sent[key] = previous + replacement
 		return cloneContentChunkNotificationWithText(notification, replacement), true
 	}
-	f.sent[updateType] = previous + text
+	f.sent[key] = previous + text
 	return notification, true
 }
 
-func (f *acpNarrativeFilter) resetSegment() {
+func (f *acpNarrativeFilter) clearNarrativeSource(source acpFilterSource) {
+	for key := range f.sent {
+		if key.Source == source {
+			delete(f.sent, key)
+		}
+	}
+}
+
+func (f *acpNarrativeFilter) resetSource(source acpFilterSource) {
 	if f == nil {
 		return
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	clear(f.sent)
+	f.clearNarrativeSource(source)
 }
 
-func (f *acpNarrativeFilter) filterTerminalOutput(notification acp.SessionNotification, final bool) acp.SessionNotification {
+func (f *acpNarrativeFilter) filterTerminalOutput(notification acp.SessionNotification, source acpFilterSource, final bool) acp.SessionNotification {
 	if f == nil {
 		return notification
 	}
 	switch update := notification.Update.(type) {
 	case acp.ToolCall:
-		update.Meta = f.filterTerminalOutputMeta(notification.SessionID, update.ToolCallID, update.Status, final, update.Meta)
+		update.Meta = f.filterTerminalOutputMeta(source, update.ToolCallID, update.Status, final, update.Meta)
 		notification.Update = update
 	case acp.ToolCallUpdate:
 		status := ""
 		if update.Status != nil {
 			status = *update.Status
 		}
-		update.Meta = f.filterTerminalOutputMeta(notification.SessionID, update.ToolCallID, status, final, update.Meta)
+		update.Meta = f.filterTerminalOutputMeta(source, update.ToolCallID, status, final, update.Meta)
 		notification.Update = update
 	}
 	return notification
 }
 
-func (f *acpNarrativeFilter) filterTerminalOutputMeta(sessionID string, toolCallID string, status string, final bool, meta map[string]any) map[string]any {
+func (f *acpNarrativeFilter) filterTerminalOutputMeta(source acpFilterSource, toolCallID string, status string, final bool, meta map[string]any) map[string]any {
 	output, ok := metautil.TerminalOutput(meta)
 	if !ok {
 		return meta
 	}
-	key := acpTerminalOutputFilterKey(sessionID, toolCallID, output.TerminalID)
+	key := acpTerminalOutputFilterKey(source, toolCallID, output.TerminalID)
 	state := f.terminalSent[key]
 	isFinal := final || acpToolStatusFinalString(status)
 	if state.Text != "" && (isFinal || state.SawFinal) {
@@ -152,12 +177,12 @@ func (s *acpTerminalOutputState) observeFinal(final bool) {
 	}
 }
 
-func acpTerminalOutputFilterKey(sessionID string, toolCallID string, terminalID string) string {
-	return strings.Join([]string{
-		strings.TrimSpace(sessionID),
-		strings.TrimSpace(toolCallID),
-		strings.TrimSpace(terminalID),
-	}, "\x00")
+func acpTerminalOutputFilterKey(source acpFilterSource, toolCallID string, terminalID string) acpTerminalOutputKey {
+	return acpTerminalOutputKey{
+		Source:     source,
+		ToolCallID: strings.TrimSpace(toolCallID),
+		TerminalID: strings.TrimSpace(terminalID),
+	}
 }
 
 func acpTerminalUnsentSuffix(previous string, incoming string) (string, bool) {
@@ -284,18 +309,18 @@ func terminalExitCodeFromRawOutput(raw any) *int {
 	}
 }
 
-func acpContentChunkText(update acp.Update) (string, string, bool) {
+func acpContentChunkText(update acp.Update) (string, string, string, bool) {
 	chunk, ok := update.(acp.ContentChunk)
 	if !ok {
-		return "", "", false
+		return "", "", "", false
 	}
 	updateType := strings.TrimSpace(chunk.SessionUpdate)
 	switch updateType {
 	case acp.UpdateUserMessage, acp.UpdateAgentMessage, acp.UpdateAgentThought:
 	default:
-		return "", "", false
+		return "", "", "", false
 	}
-	return updateType, acpTextContentText(chunk.Content), true
+	return updateType, strings.TrimSpace(chunk.MessageID), acpTextContentText(chunk.Content), true
 }
 
 func acpTextContentText(content any) string {

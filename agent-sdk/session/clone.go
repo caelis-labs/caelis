@@ -50,6 +50,10 @@ func CloneEvent(in *Event) *Event {
 		scope := CloneEventScope(*in.Scope)
 		out.Scope = &scope
 	}
+	if in.ChildOrigin != nil {
+		origin := CloneEventChildOrigin(*in.ChildOrigin)
+		out.ChildOrigin = &origin
+	}
 	if in.PlanPayload != nil {
 		payload := cloneEventPlanPayload(*in.PlanPayload)
 		out.PlanPayload = &payload

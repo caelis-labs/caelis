@@ -27,6 +27,7 @@ const (
 	ControlMutationPurposeWatchdog     ControlMutationPurpose = "watchdog"
 	ControlMutationPurposeCoordinator  ControlMutationPurpose = "coordinator"
 	ControlMutationPurposeParticipant  ControlMutationPurpose = "participant"
+	ControlMutationPurposeLifecycle    ControlMutationPurpose = "session_lifecycle"
 	ControlMutationPurposeTest         ControlMutationPurpose = "test"
 	ControlMutationPurposeSystemCommit ControlMutationPurpose = "system_commit"
 )
@@ -123,6 +124,7 @@ func ControlMutationMayOverlapRuntimeLease(purpose ControlMutationPurpose) bool 
 	case ControlMutationPurposeApproval,
 		ControlMutationPurposeWatchdog,
 		ControlMutationPurposeParticipant,
+		ControlMutationPurposeLifecycle,
 		ControlMutationPurposeSystemCommit,
 		ControlMutationPurposeTest:
 		return true

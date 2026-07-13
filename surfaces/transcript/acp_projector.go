@@ -51,7 +51,6 @@ func ProjectACPEventToEvents(env eventstream.Envelope, surface SurfaceProjector)
 		parentToolCallID = parentTool.ToolCallID
 		parentToolName = parentTool.ToolName
 	}
-	hasParentToolMirror := relationDelivery.Delivery != nil && relationDelivery.Delivery.HasParentToolMirror
 	out := make([]Event, 0, 2)
 	switch env.Kind {
 	case eventstream.KindSessionUpdate:
@@ -117,7 +116,6 @@ func ProjectACPEventToEvents(env eventstream.Envelope, surface SurfaceProjector)
 		out[i].TurnID = strings.TrimSpace(env.TurnID)
 		out[i].AnchorToolCallID = parentToolCallID
 		out[i].AnchorToolName = parentToolName
-		out[i].MirroredToParentTool = hasParentToolMirror
 	}
 	return out
 }

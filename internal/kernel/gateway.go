@@ -3,6 +3,7 @@ package kernel
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -10,18 +11,13 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/ports/plugin"
 )
 
 type Config struct {
 	Sessions session.Service
-	// Tasks is optional for basic replay. When present, resume can restore
-	// completed asynchronous RUN_COMMAND/SPAWN output into the original tool
-	// panel when the durable session stream only contains the running update.
-	Tasks   task.Store
-	Runtime agent.Runtime
+	Runtime  agent.Runtime
 	// Control is injected by the product host; Gateway does not infer
 	// orchestration authority from the execution Runtime.
 	Control       agent.SessionControlPlane
@@ -42,7 +38,6 @@ type Config struct {
 
 type Gateway struct {
 	sessions             session.Service
-	tasks                task.Store
 	runtime              agent.Runtime
 	control              agent.SessionControlPlane
 	resolver             TurnResolver
@@ -55,10 +50,11 @@ type Gateway struct {
 	clock                func() time.Time
 	sessionStartHooks    []plugin.HookSpec
 
-	mu       sync.Mutex
-	active   map[string]*turnHandle
-	bindings map[string]sessionBinding
-	nextID   atomic.Uint64
+	mu        sync.Mutex
+	active    map[string]*turnHandle
+	approvals map[string]*approvalCoordinator
+	bindings  map[string]sessionBinding
+	nextID    atomic.Uint64
 }
 
 // ExecutionRequirementsValidator checks a fully assembled local invocation
@@ -110,7 +106,6 @@ func New(cfg Config) (*Gateway, error) {
 	}
 	return &Gateway{
 		sessions:             cfg.Sessions,
-		tasks:                cfg.Tasks,
 		runtime:              cfg.Runtime,
 		control:              cfg.Control,
 		resolver:             cfg.Resolver,
@@ -123,8 +118,24 @@ func New(cfg Config) (*Gateway, error) {
 		clock:                cfg.Clock,
 		sessionStartHooks:    cfg.SessionStartHooks,
 		active:               map[string]*turnHandle{},
+		approvals:            map[string]*approvalCoordinator{},
 		bindings:             map[string]sessionBinding{},
 	}, nil
+}
+
+func (g *Gateway) sessionApprovals(ref session.SessionRef) *approvalCoordinator {
+	if g == nil {
+		return nil
+	}
+	ref = session.NormalizeSessionRef(ref)
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	coordinator := g.approvals[ref.SessionID]
+	if coordinator == nil {
+		coordinator = newApprovalCoordinator(ref)
+		g.approvals[ref.SessionID] = coordinator
+	}
+	return coordinator
 }
 
 func (g *Gateway) Streams() stream.Service {
@@ -170,6 +181,13 @@ func (g *Gateway) Interrupt(ctx context.Context, req InterruptRequest) error {
 	}
 	g.mu.Lock()
 	handle, ok := g.active[ref.SessionID]
+	if ok && handle != nil && !interruptMatchesHandle(req, handle) {
+		g.mu.Unlock()
+		return &Error{
+			Kind: KindConflict, Code: CodeActiveRunConflict, UserVisible: true,
+			Message: "gateway: active run does not match interrupt target",
+		}
+	}
 	g.mu.Unlock()
 	if !ok || handle == nil {
 		return &Error{
@@ -188,4 +206,26 @@ func (g *Gateway) Interrupt(ctx context.Context, req InterruptRequest) error {
 		}
 	}
 	return nil
+}
+
+func interruptMatchesHandle(req InterruptRequest, handle *turnHandle) bool {
+	if handle == nil {
+		return false
+	}
+	if value := strings.TrimSpace(req.HandleID); value != "" && value != handle.HandleID() {
+		return false
+	}
+	if value := strings.TrimSpace(req.RunID); value != "" && value != handle.RunID() {
+		return false
+	}
+	if value := strings.TrimSpace(req.TurnID); value != "" && value != handle.TurnID() {
+		return false
+	}
+	if req.Kind != "" && req.Kind != handle.ActiveKind() {
+		return false
+	}
+	if value := strings.TrimSpace(req.ParticipantID); value != "" && value != handle.ParticipantID() {
+		return false
+	}
+	return true
 }

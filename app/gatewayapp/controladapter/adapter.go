@@ -414,7 +414,6 @@ func (d *Adapter) ResumeSession(ctx context.Context, sessionID string) (SessionS
 	result, err := gw.ResumeSession(ctx, gateway.ResumeSessionRequest{
 		AppName:    d.stack.Session.AppName,
 		UserID:     d.stack.Session.UserID,
-		Workspace:  d.stack.Session.Workspace,
 		SessionID:  strings.TrimSpace(sessionID),
 		BindingKey: d.bindingKey,
 		Binding: gateway.BindingDescriptor{
@@ -470,14 +469,7 @@ func (d *Adapter) ReplayEvents(ctx context.Context) ([]eventstream.Envelope, err
 	if !ok {
 		return nil, fmt.Errorf("app/gatewayapp/controladapter: no active session")
 	}
-	gw, err := d.gatewaySessions()
-	if err != nil {
-		return nil, err
-	}
-	result, err := gw.ReplayEvents(ctx, gateway.ReplayEventsRequest{
-		SessionRef: activeSession.SessionRef,
-		BindingKey: d.bindingKey,
-	})
+	result, err := d.replayControlFeed(ctx, activeSession.SessionID, eventstream.ReplayRequest{SessionID: activeSession.SessionID})
 	if err != nil {
 		return nil, err
 	}

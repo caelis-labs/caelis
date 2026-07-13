@@ -853,6 +853,10 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 		if strings.HasPrefix(target, "surfaces/") {
 			return "impl must not depend on surfaces"
 		}
+	case strings.HasPrefix(rel, "surfaces/appserver/"):
+		if strings.HasPrefix(target, "app/") || strings.HasPrefix(target, "internal/") {
+			return "surfaces/appserver must not depend on app or internal implementation packages"
+		}
 	case strings.HasPrefix(rel, "surfaces/"):
 		if strings.HasPrefix(target, "app/") {
 			return "surfaces must not depend directly on app"

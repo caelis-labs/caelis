@@ -871,7 +871,7 @@ func TestRuntimeCompactionIgnoresStateOnlyPlanSnapshot(t *testing.T) {
 	appendTestEvent(t, sessions, activeSession.SessionRef, userTextEvent("Next action: compact only from canonical events and verify no state leakage."))
 	appendTestEvent(t, sessions, activeSession.SessionRef, assistantEvent("ack"))
 
-	if err := sessions.UpdateState(context.Background(), activeSession.SessionRef, func(state map[string]any) (map[string]any, error) {
+	if _, err := sessions.UpdateState(context.Background(), session.UpdateStateRequest{SessionRef: activeSession.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Update: func(state map[string]any) (map[string]any, error) {
 		if state == nil {
 			state = map[string]any{}
 		}
@@ -885,7 +885,7 @@ func TestRuntimeCompactionIgnoresStateOnlyPlanSnapshot(t *testing.T) {
 			},
 		}
 		return state, nil
-	}); err != nil {
+	}}); err != nil {
 		t.Fatalf("UpdateState() error = %v", err)
 	}
 

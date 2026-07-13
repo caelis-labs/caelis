@@ -1197,12 +1197,12 @@ func (s *approvalReviewerUpdateFailSessionService) AppendEventsAndUpdateState(ct
 	return batch.AppendEventsAndUpdateState(ctx, wrapped)
 }
 
-func (s *approvalReviewerUpdateFailSessionService) UpdateState(ctx context.Context, ref session.SessionRef, update func(map[string]any) (map[string]any, error)) error {
+func (s *approvalReviewerUpdateFailSessionService) UpdateState(ctx context.Context, req session.UpdateStateRequest) (session.Session, error) {
 	if s.failures > 0 {
 		s.failures--
-		return fmt.Errorf("forced guardian state update failure")
+		return session.Session{}, fmt.Errorf("forced guardian state update failure")
 	}
-	return s.Service.UpdateState(ctx, ref, update)
+	return s.Service.UpdateState(ctx, req)
 }
 
 type approvalReviewerAppendFailSessionService struct {

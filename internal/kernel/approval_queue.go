@@ -4,85 +4,110 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
-// pendingApproval belongs to one live Turn request. The Turn owns its queue and
-// exposes exactly one active head at a time. Its done channel is closed only
-// when the owning Turn abandons the request; it is never used to inject a
-// zero-value fallback decision into a waiter.
+// pendingApproval belongs to one Session-scoped Control approval plane. owner
+// supplies origin and live Turn publication only; it does not own the FIFO.
 type pendingApproval struct {
 	id                eventstream.ApprovalRequestID
 	decisions         chan ApprovalDecision
 	done              chan struct{}
 	activated         chan struct{}
 	request           *agent.ApprovalRequest
+	owner             *turnHandle
+	detached          bool
 	publishOnActivate bool
+	activationErr     error
+	persisted         bool
+	settled           bool
 }
 
-// openPendingApproval registers one approval without publishing an ACP prompt.
-// It exists for internal callers and tests that need a live resolver without a
-// Surface-visible prompt; production approval routing uses enqueueApproval.
-func (h *turnHandle) openPendingApproval(req *agent.ApprovalRequest) (*pendingApproval, error) {
-	return h.enqueueApproval(req, false)
+// approvalCoordinator owns one Session's approval registry, FIFO, and active
+// head across main, participant, Side ACP, and detached child lifetimes.
+type approvalCoordinator struct {
+	sessionRef session.SessionRef
+
+	mu       sync.Mutex
+	pending  map[eventstream.ApprovalRequestID]*pendingApproval
+	settled  map[eventstream.ApprovalRequestID]string
+	queue    []*pendingApproval
+	active   *pendingApproval
+	requests uint64
 }
 
-// enqueueApproval registers an exact waiter before making a request eligible
-// for resolution. When publishOnActivate is true, this Control-owned queue
-// publishes the standard ACP permission only after the request reaches its
-// single active head.
-func (h *turnHandle) enqueueApproval(req *agent.ApprovalRequest, publishOnActivate bool) (*pendingApproval, error) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if h.cancelled || h.closed || h.finished || h.finishing {
-		return nil, &Error{
-			Kind:        KindConflict,
-			Code:        CodeApprovalNotPending,
-			UserVisible: true,
-			Message:     "gateway: turn is not accepting approval requests",
-		}
+func newApprovalCoordinator(ref session.SessionRef) *approvalCoordinator {
+	return &approvalCoordinator{
+		sessionRef: session.NormalizeSessionRef(ref),
+		pending:    map[eventstream.ApprovalRequestID]*pendingApproval{},
+		settled:    map[eventstream.ApprovalRequestID]string{},
 	}
+}
+
+func (c *approvalCoordinator) enqueue(owner *turnHandle, req *agent.ApprovalRequest, publishOnActivate bool) (*pendingApproval, error) {
+	if c == nil {
+		return nil, approvalUnavailableError()
+	}
+	detached := detachedApprovalRequest(req)
+	if owner != nil && owner.isTerminal() && !detached {
+		return nil, approvalUnavailableError()
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	requestID := approvalRequestIDForRuntimeRequest(req)
 	if requestID == "" {
-		h.approvalRequestSeq++
-		prefix := strings.TrimSpace(h.handleID)
+		c.requests++
+		prefix := strings.TrimSpace(c.sessionRef.SessionID)
 		if prefix == "" {
-			prefix = "turn"
+			prefix = "session"
 		}
-		requestID = eventstream.ApprovalRequestID(fmt.Sprintf("%s-approval-%06d", prefix, h.approvalRequestSeq))
+		requestID = eventstream.ApprovalRequestID(fmt.Sprintf("%s-approval-%06d", prefix, c.requests))
 	}
-	if _, exists := h.pendingApprovals[requestID]; exists {
+	if _, exists := c.pending[requestID]; exists {
 		return nil, &Error{
-			Kind:        KindConflict,
-			Code:        CodeApprovalNotPending,
-			UserVisible: true,
-			Message:     "gateway: approval request is already pending",
-			Detail:      string(requestID),
+			Kind: KindConflict, Code: CodeApprovalNotPending, UserVisible: true,
+			Message: "gateway: approval request is already pending",
 		}
 	}
-	if state := strings.TrimSpace(h.settledApprovals[requestID]); state != "" {
+	if state := strings.TrimSpace(c.settled[requestID]); state != "" {
 		return nil, &Error{
-			Kind:        KindConflict,
-			Code:        CodeApprovalNotPending,
-			UserVisible: true,
-			Message:     "gateway: approval request is no longer pending",
-			Detail:      string(requestID) + ": " + state,
+			Kind: KindConflict, Code: CodeApprovalNotPending, UserVisible: true,
+			Message: "gateway: approval request is no longer pending",
+			Detail:  string(requestID) + ": " + state,
 		}
 	}
 	pending := &pendingApproval{
-		id:                requestID,
-		decisions:         make(chan ApprovalDecision, 1),
-		done:              make(chan struct{}),
-		activated:         make(chan struct{}),
-		request:           req,
+		id: requestID, decisions: make(chan ApprovalDecision, 1), done: make(chan struct{}),
+		activated: make(chan struct{}), request: req, owner: owner, detached: detached,
 		publishOnActivate: publishOnActivate,
 	}
-	h.pendingApprovals[requestID] = pending
-	h.approvalQueue = append(h.approvalQueue, pending)
-	h.activateNextApprovalLocked()
+	c.pending[requestID] = pending
+	c.queue = append(c.queue, pending)
+	c.activateNextLocked()
+	if pending.activationErr != nil {
+		return nil, pending.activationErr
+	}
 	return pending, nil
+}
+
+func detachedApprovalRequest(req *agent.ApprovalRequest) bool {
+	if req == nil {
+		return false
+	}
+	origin := canonicalOriginFromApproval(req, req.SessionRef, req.TurnID)
+	return origin != nil && origin.Scope == EventScopeSubagent
+}
+
+func approvalUnavailableError() error {
+	return &Error{
+		Kind: KindConflict, Code: CodeApprovalNotPending, UserVisible: true,
+		Message: "gateway: session approval coordinator is unavailable",
+	}
 }
 
 func approvalRequestIDForRuntimeRequest(req *agent.ApprovalRequest) eventstream.ApprovalRequestID {
@@ -92,155 +117,265 @@ func approvalRequestIDForRuntimeRequest(req *agent.ApprovalRequest) eventstream.
 	return eventstream.ApprovalRequestID(strings.TrimSpace(req.PauseTokenID))
 }
 
-func (h *turnHandle) submitApproval(ctx context.Context, decision ApprovalDecision) error {
+func (c *approvalCoordinator) submit(ctx context.Context, decision ApprovalDecision) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	requestID := eventstream.ApprovalRequestID(strings.TrimSpace(string(decision.RequestID)))
 	if requestID == "" {
 		return &Error{
-			Kind:        KindValidation,
-			Code:        CodeInvalidRequest,
-			UserVisible: true,
-			Message:     "gateway: approval request id is required",
+			Kind: KindValidation, Code: CodeInvalidRequest, UserVisible: true,
+			Message: "gateway: approval request id is required",
 		}
 	}
-	h.mu.Lock()
-	pending := h.pendingApprovals[requestID]
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	pending := c.pending[requestID]
 	if pending == nil {
-		err := h.approvalNotPendingErrorLocked(requestID)
-		h.mu.Unlock()
+		return c.approvalNotPendingErrorLocked(requestID)
+	}
+	return c.resolveLocked(pending, decision)
+}
+
+func (c *approvalCoordinator) resolve(pending *pendingApproval, decision ApprovalDecision) error {
+	if c == nil || pending == nil {
+		return approvalUnavailableError()
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.resolveLocked(pending, decision)
+}
+
+func (c *approvalCoordinator) resolveLocked(pending *pendingApproval, decision ApprovalDecision) error {
+	if c.pending[pending.id] != pending {
+		return c.approvalNotPendingErrorLocked(pending.id)
+	}
+	if c.active != pending {
+		return c.approvalNotActiveErrorLocked(pending.id)
+	}
+	if err := c.settleLocked(pending, "resolved"); err != nil {
 		return err
 	}
-	err := h.resolvePendingApprovalLocked(pending, decision)
-	h.mu.Unlock()
-	return err
-}
-
-// resolvePendingApproval resolves one active request from a Control-owned
-// resolver such as Guardian/auto-review. User submissions take the same path
-// through submitApproval.
-func (h *turnHandle) resolvePendingApproval(pending *pendingApproval, decision ApprovalDecision) error {
-	if h == nil || pending == nil {
-		return &Error{
-			Kind:        KindConflict,
-			Code:        CodeApprovalNotPending,
-			UserVisible: true,
-			Message:     "gateway: approval request is not pending",
-		}
-	}
-	h.mu.Lock()
-	err := h.resolvePendingApprovalLocked(pending, decision)
-	h.mu.Unlock()
-	return err
-}
-
-func (h *turnHandle) resolvePendingApprovalLocked(pending *pendingApproval, decision ApprovalDecision) error {
-	if h.pendingApprovals[pending.id] != pending {
-		return h.approvalNotPendingErrorLocked(pending.id)
-	}
-	if h.activeApproval != pending {
-		return h.approvalNotActiveErrorLocked(pending.id)
-	}
 	decision.RequestID = pending.id
-	// The per-request channel is freshly allocated with one slot. Sending before
-	// advancing the queue cannot block and preserves the resolver-before-next-
-	// prompt order without ever waking a different waiter.
 	pending.decisions <- decision
-	h.removePendingApprovalLocked(pending, "resolved")
-	h.activateNextApprovalLocked()
+	c.removeLocked(pending, "resolved")
+	c.activateNextLocked()
 	return nil
 }
 
-func (h *turnHandle) releasePendingApproval(pending *pendingApproval, state string) {
-	if h == nil || pending == nil {
+func (c *approvalCoordinator) release(pending *pendingApproval, state string) {
+	if c == nil || pending == nil {
 		return
 	}
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if h.pendingApprovals[pending.id] != pending {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.pending[pending.id] != pending {
 		return
 	}
-	h.removePendingApprovalLocked(pending, state)
+	_ = c.settleLocked(pending, state)
+	c.removeLocked(pending, state)
 	close(pending.done)
-	h.activateNextApprovalLocked()
+	c.activateNextLocked()
 }
 
-func (h *turnHandle) clearPendingApprovalsLocked(state string) {
-	for id, pending := range h.pendingApprovals {
-		delete(h.pendingApprovals, id)
-		h.settledApprovals[id] = strings.TrimSpace(state)
+func (c *approvalCoordinator) abandonOwner(owner *turnHandle, state string) {
+	if c == nil || owner == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, pending := range append([]*pendingApproval(nil), c.queue...) {
+		if pending == nil || pending.owner != owner || pending.detached || c.pending[pending.id] != pending {
+			continue
+		}
+		_ = c.settleLocked(pending, state)
+		c.removeLocked(pending, state)
 		close(pending.done)
 	}
-	clear(h.approvalQueue)
-	h.approvalQueue = nil
-	h.activeApproval = nil
+	c.activateNextLocked()
 }
 
-func (h *turnHandle) removePendingApprovalLocked(pending *pendingApproval, state string) {
+func (c *approvalCoordinator) clear(state string) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for id, pending := range c.pending {
+		_ = c.settleLocked(pending, state)
+		delete(c.pending, id)
+		c.settled[id] = strings.TrimSpace(state)
+		close(pending.done)
+	}
+	clear(c.queue)
+	c.queue = nil
+	c.active = nil
+}
+
+func (c *approvalCoordinator) removeLocked(pending *pendingApproval, state string) {
 	if pending == nil {
 		return
 	}
-	delete(h.pendingApprovals, pending.id)
-	h.settledApprovals[pending.id] = strings.TrimSpace(state)
-	for index, queued := range h.approvalQueue {
+	delete(c.pending, pending.id)
+	c.settled[pending.id] = strings.TrimSpace(state)
+	for index, queued := range c.queue {
 		if queued != pending {
 			continue
 		}
-		copy(h.approvalQueue[index:], h.approvalQueue[index+1:])
-		h.approvalQueue[len(h.approvalQueue)-1] = nil
-		h.approvalQueue = h.approvalQueue[:len(h.approvalQueue)-1]
+		copy(c.queue[index:], c.queue[index+1:])
+		c.queue[len(c.queue)-1] = nil
+		c.queue = c.queue[:len(c.queue)-1]
 		break
 	}
-	if h.activeApproval == pending {
-		h.activeApproval = nil
+	if c.active == pending {
+		c.active = nil
 	}
 }
 
-func (h *turnHandle) activateNextApprovalLocked() {
-	if h.activeApproval != nil {
+func (c *approvalCoordinator) activateNextLocked() {
+	if c.active != nil {
 		return
 	}
-	for len(h.approvalQueue) > 0 {
-		pending := h.approvalQueue[0]
-		if pending == nil || h.pendingApprovals[pending.id] != pending {
-			h.approvalQueue = h.approvalQueue[1:]
+	for len(c.queue) > 0 {
+		pending := c.queue[0]
+		if pending == nil || c.pending[pending.id] != pending {
+			c.queue = c.queue[1:]
 			continue
 		}
-		h.activeApproval = pending
-		close(pending.activated)
+		c.active = pending
 		if pending.publishOnActivate {
-			h.publishApprovalPayloadLocked(pending.request, canonicalApprovalPayload(pending.request), pending.id)
+			owner := pending.owner
+			if owner != nil && owner.persistApproval != nil {
+				event, err := owner.persistApproval(pending.request, pending.id)
+				if err != nil {
+					pending.activationErr = err
+					c.removeLocked(pending, "persistence_failed")
+					close(pending.done)
+					continue
+				}
+				owner.publishEnvelopes(projectSessionACPEvent(owner.sessionRef, event, owner.handleID, owner.runID, owner.turnID), "")
+				pending.persisted = true
+			} else if owner != nil {
+				owner.publishApprovalPayload(pending.request, canonicalApprovalPayload(pending.request), pending.id)
+			}
 		}
+		close(pending.activated)
 		return
 	}
 }
 
-func (h *turnHandle) approvalNotPendingErrorLocked(requestID eventstream.ApprovalRequestID) error {
+func (c *approvalCoordinator) settleLocked(pending *pendingApproval, state string) error {
+	if pending == nil || pending.settled || !pending.persisted || pending.owner == nil || pending.owner.settleApproval == nil {
+		return nil
+	}
+	event, err := pending.owner.settleApproval(pending.request, pending.id, state)
+	if err != nil {
+		return err
+	}
+	pending.settled = true
+	pending.owner.publishEnvelopes(projectSessionACPEvent(
+		pending.owner.sessionRef, event, pending.owner.handleID, pending.owner.runID, pending.owner.turnID,
+	), "")
+	return nil
+}
+
+func (c *approvalCoordinator) approvalNotPendingErrorLocked(requestID eventstream.ApprovalRequestID) error {
 	detail := "unknown approval request"
-	if state := strings.TrimSpace(h.settledApprovals[requestID]); state != "" {
+	if state := strings.TrimSpace(c.settled[requestID]); state != "" {
 		detail = "approval request is no longer pending: " + state
 	}
 	return &Error{
-		Kind:        KindConflict,
-		Code:        CodeApprovalNotPending,
-		UserVisible: true,
-		Message:     "gateway: approval request is not pending",
-		Detail:      string(requestID) + ": " + detail,
+		Kind: KindConflict, Code: CodeApprovalNotPending, UserVisible: true,
+		Message: "gateway: approval request is not pending",
+		Detail:  string(requestID) + ": " + detail,
 	}
 }
 
-func (h *turnHandle) approvalNotActiveErrorLocked(requestID eventstream.ApprovalRequestID) error {
+func (c *approvalCoordinator) approvalNotActiveErrorLocked(requestID eventstream.ApprovalRequestID) error {
 	activeID := ""
-	if h.activeApproval != nil {
-		activeID = string(h.activeApproval.id)
+	if c.active != nil {
+		activeID = string(c.active.id)
 	}
 	return &Error{
-		Kind:        KindConflict,
-		Code:        CodeApprovalNotActive,
-		UserVisible: true,
-		Message:     "gateway: approval request is not the active queue head",
-		Detail:      string(requestID) + ": active approval request is " + activeID,
+		Kind: KindConflict, Code: CodeApprovalNotActive, UserVisible: true,
+		Message: "gateway: approval request is not the active queue head",
+		Detail:  string(requestID) + ": active approval request is " + activeID,
+	}
+}
+
+func (c *approvalCoordinator) snapshot() (*pendingApproval, int) {
+	if c == nil {
+		return nil, 0
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	active := c.active
+	queued := 0
+	for _, pending := range c.queue {
+		if pending != nil && c.pending[pending.id] == pending && pending != active {
+			queued++
+		}
+	}
+	return active, queued
+}
+
+func (c *approvalCoordinator) queueSnapshot() []*pendingApproval {
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]*pendingApproval(nil), c.queue...)
+}
+
+func (c *approvalCoordinator) target(requestID eventstream.ApprovalRequestID) (ActiveTurnState, bool) {
+	if c == nil || strings.TrimSpace(string(requestID)) == "" {
+		return ActiveTurnState{}, false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	pending := c.pending[requestID]
+	if pending == nil || pending.owner == nil {
+		return ActiveTurnState{}, false
+	}
+	owner := pending.owner
+	return ActiveTurnState{
+		SessionRef: owner.SessionRef(), Kind: owner.ActiveKind(), ParticipantID: owner.ParticipantID(),
+		HandleID: owner.HandleID(), RunID: owner.RunID(), TurnID: owner.TurnID(), StartedAt: owner.CreatedAt(),
+	}, true
+}
+
+func (h *turnHandle) openPendingApproval(req *agent.ApprovalRequest) (*pendingApproval, error) {
+	return h.enqueueApproval(req, false)
+}
+
+func (h *turnHandle) enqueueApproval(req *agent.ApprovalRequest, publishOnActivate bool) (*pendingApproval, error) {
+	if h == nil || h.approvals == nil {
+		return nil, approvalUnavailableError()
+	}
+	return h.approvals.enqueue(h, req, publishOnActivate)
+}
+
+func (h *turnHandle) submitApproval(ctx context.Context, decision ApprovalDecision) error {
+	if h == nil || h.approvals == nil {
+		return approvalUnavailableError()
+	}
+	return h.approvals.submit(ctx, decision)
+}
+
+func (h *turnHandle) resolvePendingApproval(pending *pendingApproval, decision ApprovalDecision) error {
+	if h == nil || h.approvals == nil {
+		return approvalUnavailableError()
+	}
+	return h.approvals.resolve(pending, decision)
+}
+
+func (h *turnHandle) releasePendingApproval(pending *pendingApproval, state string) {
+	if h != nil && h.approvals != nil {
+		h.approvals.release(pending, state)
 	}
 }
 
@@ -248,6 +383,6 @@ func (h *turnHandle) publishApproval(req *agent.ApprovalRequest) (*pendingApprov
 	return h.enqueueApproval(req, true)
 }
 
-func (h *turnHandle) publishApprovalPayloadLocked(req *agent.ApprovalRequest, payload *ApprovalPayload, requestID eventstream.ApprovalRequestID) {
-	h.publishEnvelopesLocked(h.approvalEventEnvelopes(req, payload, EventKindApprovalRequested, nil, nil, requestID), "")
+func (h *turnHandle) publishApprovalPayload(req *agent.ApprovalRequest, payload *ApprovalPayload, requestID eventstream.ApprovalRequestID) {
+	h.publishEnvelopes(h.approvalEventEnvelopes(req, payload, EventKindApprovalRequested, nil, nil, requestID), "")
 }

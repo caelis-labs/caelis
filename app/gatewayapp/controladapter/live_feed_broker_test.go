@@ -11,7 +11,9 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
+	internalcontrolclient "github.com/caelis-labs/caelis/internal/controlclient"
 	"github.com/caelis-labs/caelis/ports/gateway"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
@@ -36,7 +38,7 @@ func TestLiveFeedBrokerFansInSpawnSemanticsInOrder(t *testing.T) {
 		Event:   brokerChildMessageEvent("child-message-1", "child message"),
 	}
 	message := receiveBrokerEnvelope(t, events)
-	assertBrokerChildRelation(t, message, "spawn-call-1", false)
+	assertBrokerChildRelation(t, message, "spawn-call-1")
 	if update, ok := message.Update.(schema.ContentChunk); !ok || update.SessionUpdate != schema.UpdateAgentMessage {
 		t.Fatalf("child message = %#v, want agent message chunk", message)
 	}
@@ -47,9 +49,20 @@ func TestLiveFeedBrokerFansInSpawnSemanticsInOrder(t *testing.T) {
 		Event:   brokerChildThoughtEvent("child-thought-1", "child thought"),
 	}
 	thought := receiveBrokerEnvelope(t, events)
-	assertBrokerChildRelation(t, thought, "spawn-call-1", false)
+	assertBrokerChildRelation(t, thought, "spawn-call-1")
 	if update, ok := thought.Update.(schema.ContentChunk); !ok || update.SessionUpdate != schema.UpdateAgentThought {
 		t.Fatalf("child thought = %#v, want agent thought chunk", thought)
+	}
+
+	streams.frames <- stream.Frame{
+		Ref:     brokerStreamRef("task-1", "spawn-terminal-1"),
+		Running: true,
+		Event:   brokerChildToolCallEvent(),
+	}
+	childToolCall := receiveBrokerEnvelope(t, events)
+	assertBrokerChildRelation(t, childToolCall, "spawn-call-1")
+	if update, ok := childToolCall.Update.(schema.ToolCall); !ok || update.ToolCallID != "child-tool-1" {
+		t.Fatalf("child tool call = %#v, want distinct child tool call", childToolCall)
 	}
 
 	streams.frames <- stream.Frame{
@@ -58,7 +71,7 @@ func TestLiveFeedBrokerFansInSpawnSemanticsInOrder(t *testing.T) {
 		Event:   brokerChildToolEvent(),
 	}
 	childTool := receiveBrokerEnvelope(t, events)
-	assertBrokerChildRelation(t, childTool, "spawn-call-1", false)
+	assertBrokerChildRelation(t, childTool, "spawn-call-1")
 	toolUpdate, ok := childTool.Update.(schema.ToolCallUpdate)
 	if !ok {
 		t.Fatalf("child tool = %#v, want tool_call_update", childTool)
@@ -66,29 +79,32 @@ func TestLiveFeedBrokerFansInSpawnSemanticsInOrder(t *testing.T) {
 	if toolUpdate.ToolCallID != "child-tool-1" || toolUpdate.ToolCallID == "spawn-call-1" {
 		t.Fatalf("child tool id = %q, want distinct child id related to parent spawn", toolUpdate.ToolCallID)
 	}
-	if len(toolUpdate.Content) != 1 || toolUpdate.Content[0].Type != "diff" {
-		t.Fatalf("child tool content = %#v, want diff", toolUpdate.Content)
+	if len(toolUpdate.Content) != 1 || toolUpdate.Content[0].Type != "diff" || len(toolUpdate.Locations) != 1 {
+		t.Fatalf("child tool = %#v, want diff and location", toolUpdate)
 	}
 
 	streams.frames <- stream.Frame{
 		Ref:     brokerStreamRef("task-1", "spawn-terminal-1"),
-		Text:    "parent compatibility mirror\n",
+		Text:    "materialized child text\n",
 		Cursor:  stream.Cursor{Output: 29, Events: 4},
 		Running: true,
 		Event:   brokerChildPlanEvent(),
 	}
 	plan := receiveBrokerEnvelope(t, events)
-	assertBrokerChildRelation(t, plan, "spawn-call-1", true)
+	assertBrokerChildRelation(t, plan, "spawn-call-1")
 	if _, ok := plan.Update.(schema.PlanUpdate); !ok {
 		t.Fatalf("child plan = %#v, want plan update", plan)
 	}
-	mirror := receiveBrokerEnvelope(t, events)
-	if mirror.Delivery == nil || !mirror.Delivery.IsParentToolMirror {
-		t.Fatalf("parent mirror delivery = %#v, want parent-tool mirror", mirror.Delivery)
+
+	streams.frames <- stream.Frame{
+		Ref:     brokerStreamRef("task-1", "spawn-terminal-1"),
+		Running: true,
+		Event:   brokerChildMessageEvent("child-message-final", "child final result"),
 	}
-	assertBrokerToolCallID(t, mirror, "spawn-call-1")
-	if output, ok := brokerTerminalOutput(mirror); !ok || output != "parent compatibility mirror\n" {
-		t.Fatalf("parent mirror output = %q, %v; want compatibility mirror", output, ok)
+	childFinal := receiveBrokerEnvelope(t, events)
+	assertBrokerChildRelation(t, childFinal, "spawn-call-1")
+	if update, ok := childFinal.Update.(schema.ContentChunk); !ok || update.MessageID != "child-message-final" {
+		t.Fatalf("child final = %#v, want final child message", childFinal)
 	}
 
 	streams.frames <- stream.Frame{
@@ -97,12 +113,24 @@ func TestLiveFeedBrokerFansInSpawnSemanticsInOrder(t *testing.T) {
 		Event:   brokerChildLifecycleEvent(),
 	}
 	childTerminal := receiveBrokerEnvelope(t, events)
-	assertBrokerChildRelation(t, childTerminal, "spawn-call-1", false)
+	assertBrokerChildRelation(t, childTerminal, "spawn-call-1")
 	if !eventstream.IsTerminalLifecycle(childTerminal) || childTerminal.Scope != eventstream.ScopeSubagent {
 		t.Fatalf("scoped lifecycle = %#v, want subagent terminal", childTerminal)
 	}
 	if childTerminal.TurnID != "child-turn-1" {
 		t.Fatalf("scoped lifecycle turn id = %q, want child execution id", childTerminal.TurnID)
+	}
+
+	streams.frames <- stream.Frame{
+		Ref:    brokerStreamRef("task-1", "spawn-terminal-1"),
+		Text:   "child final result",
+		Closed: true,
+		State:  "completed",
+	}
+	parentFinal := receiveBrokerEnvelope(t, events)
+	assertBrokerToolCallID(t, parentFinal, "spawn-call-1")
+	if output, ok := brokerTerminalOutput(parentFinal); ok || output != "" {
+		t.Fatalf("delegated parent final output = %q, %v; want no terminal replay", output, ok)
 	}
 
 	afterChild := brokerMainMessageEnvelope("main continues after child terminal")
@@ -122,7 +150,7 @@ func TestLiveFeedBrokerFansInSpawnSemanticsInOrder(t *testing.T) {
 	waitBrokerDone(t, turn.feed)
 }
 
-func TestLiveFeedBrokerEventOnlyPlanHasNoParentToolMirror(t *testing.T) {
+func TestLiveFeedBrokerEventOnlyPlanHasTransientChildDelivery(t *testing.T) {
 	source := make(chan eventstream.Envelope, 2)
 	handle := newBrokerTestHandle(source)
 	streams := newBrokerTestStreamService()
@@ -138,14 +166,63 @@ func TestLiveFeedBrokerEventOnlyPlanHasNoParentToolMirror(t *testing.T) {
 		Event:   brokerChildPlanEvent(),
 	}
 	plan := receiveBrokerEnvelope(t, events)
-	assertBrokerChildRelation(t, plan, "spawn-call-1", false)
-	if plan.Delivery == nil || plan.Delivery.HasParentToolMirror {
-		t.Fatalf("event-only plan delivery = %#v, want has_parent_tool_mirror=false", plan.Delivery)
+	assertBrokerChildRelation(t, plan, "spawn-call-1")
+	if plan.Delivery == nil || plan.Delivery.Mode != eventstream.DeliveryTransient {
+		t.Fatalf("event-only plan delivery = %#v, want transient child delivery", plan.Delivery)
 	}
 
 	source <- eventstream.TurnCompleted("handle-1", "run-1", "turn-1", time.Unix(12, 0))
 	close(source)
 	receiveBrokerEnvelope(t, events)
+	requireBrokerChannelClosed(t, events)
+	waitBrokerDone(t, turn.feed)
+}
+
+func TestLiveFeedBrokerPersistsChildMirrorBeforePublishing(t *testing.T) {
+	ctx := context.Background()
+	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{SessionIDGenerator: func() string { return "session-1" }}))
+	parent, err := sessions.StartSession(ctx, session.StartSessionRequest{
+		AppName: "caelis", UserID: "user-1", PreferredSessionID: "session-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := make(chan eventstream.Envelope, 2)
+	streams := newBrokerTestStreamService()
+	turn := newGatewayTurn(
+		newBrokerTestHandle(source),
+		func() stream.Service { return streams },
+		internalcontrolclient.NewChildRecorder(sessions),
+	)
+	events := turn.Events()
+
+	source <- brokerRunningToolEnvelope("SPAWN", "spawn-call-1", "task-1", "spawn-terminal-1")
+	receiveBrokerEnvelope(t, events)
+	waitBrokerSignal(t, streams.started, "task stream subscription start")
+	streams.frames <- stream.Frame{
+		Ref:     brokerStreamRef("task-1", "spawn-terminal-1"),
+		Cursor:  stream.Cursor{Events: 1},
+		Running: true,
+		Event:   brokerChildMessageEvent("child-source-1", "durable child message"),
+	}
+	child := receiveBrokerEnvelope(t, events)
+	if child.Delivery == nil || child.Delivery.Mode != eventstream.DeliveryMirror || child.EventID == "" {
+		t.Fatalf("published child = %#v, want stored mirror identity", child)
+	}
+	if child.ParentTool == nil || child.ParentTool.ToolCallID != "spawn-call-1" || child.ScopeID != "task-1" {
+		t.Fatalf("published child relation = %#v", child)
+	}
+	page, err := sessions.EventsPage(ctx, session.EventPageRequest{SessionRef: parent.SessionRef, Visibility: session.EventPageClientReplay})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Events) != 1 || page.Events[0].ID != child.EventID || page.Events[0].ChildOrigin == nil || page.Events[0].ChildOrigin.SourceEventID == "" {
+		t.Fatalf("durable child page = %#v", page)
+	}
+
+	source <- eventstream.TurnCompleted("handle-1", "run-1", "turn-1", time.Unix(12, 0))
+	close(source)
+	assertBrokerMainTerminal(t, receiveBrokerEnvelope(t, events))
 	requireBrokerChannelClosed(t, events)
 	waitBrokerDone(t, turn.feed)
 }
@@ -166,7 +243,7 @@ func TestLiveFeedBrokerForwardsControlPublishedChildPermission(t *testing.T) {
 	if permission.Kind != eventstream.KindRequestPermission || permission.ApprovalRequestID != "approval-child-1" {
 		t.Fatalf("child permission = %#v, want Control-published request_permission", permission)
 	}
-	assertBrokerChildRelation(t, permission, "spawn-call-1", false)
+	assertBrokerChildRelation(t, permission, "spawn-call-1")
 	if permission.Permission == nil || permission.Permission.ToolCall.ToolCallID != "shared-child-call" || len(permission.Permission.Options) != 1 || permission.Permission.Options[0].OptionID != "allow_once" {
 		t.Fatalf("child permission ACP payload = %#v, want original tool call and options", permission.Permission)
 	}
@@ -291,7 +368,7 @@ func TestLiveFeedBrokerFinalReadFlushesMaterializedSourceBeforeMainTerminal(t *t
 	streams.releaseRead()
 
 	child := receiveBrokerEnvelope(t, events)
-	assertBrokerChildRelation(t, child, "spawn-call-1", false)
+	assertBrokerChildRelation(t, child, "spawn-call-1")
 	terminal := receiveBrokerEnvelope(t, events)
 	assertBrokerMainTerminal(t, terminal)
 	requireBrokerChannelClosed(t, events)
@@ -335,7 +412,7 @@ func TestLiveFeedBrokerFinalReadDeliversWholeSnapshotInOrder(t *testing.T) {
 			},
 			{
 				Ref:     brokerStreamRef("task-1", "spawn-terminal-1"),
-				Text:    "parent compatibility mirror\n",
+				Text:    "materialized child text\n",
 				Cursor:  stream.Cursor{Output: 29, Events: 3},
 				Running: true,
 				Event:   brokerChildPlanEvent(),
@@ -344,20 +421,16 @@ func TestLiveFeedBrokerFinalReadDeliversWholeSnapshotInOrder(t *testing.T) {
 	})
 
 	message := receiveBrokerEnvelope(t, events)
-	assertBrokerChildRelation(t, message, "spawn-call-1", false)
+	assertBrokerChildRelation(t, message, "spawn-call-1")
 	tool := receiveBrokerEnvelope(t, events)
-	assertBrokerChildRelation(t, tool, "spawn-call-1", false)
+	assertBrokerChildRelation(t, tool, "spawn-call-1")
 	if update, ok := tool.Update.(schema.ToolCallUpdate); !ok || update.ToolCallID != "child-tool-1" {
 		t.Fatalf("child tool = %#v, want one child tool update", tool)
 	}
 	plan := receiveBrokerEnvelope(t, events)
-	assertBrokerChildRelation(t, plan, "spawn-call-1", true)
+	assertBrokerChildRelation(t, plan, "spawn-call-1")
 	if _, ok := plan.Update.(schema.PlanUpdate); !ok {
-		t.Fatalf("child plan = %#v, want one plan before parent mirror", plan)
-	}
-	mirror := receiveBrokerEnvelope(t, events)
-	if mirror.Delivery == nil || !mirror.Delivery.IsParentToolMirror {
-		t.Fatalf("parent compatibility mirror = %#v, want one mirror after child semantics", mirror)
+		t.Fatalf("child plan = %#v, want one plan from the final snapshot", plan)
 	}
 	terminal := receiveBrokerEnvelope(t, events)
 	assertBrokerMainTerminal(t, terminal)
@@ -384,9 +457,9 @@ func TestLiveFeedBrokerFinalReadAdvancesCursorAfterWholeAcceptedSnapshot(t *test
 	)
 	streams.releaseRead()
 	first := receiveBrokerEnvelope(t, events)
-	assertBrokerChildRelation(t, first, "spawn-call-1", false)
+	assertBrokerChildRelation(t, first, "spawn-call-1")
 	second := receiveBrokerEnvelope(t, events)
-	assertBrokerChildRelation(t, second, "spawn-call-1", false)
+	assertBrokerChildRelation(t, second, "spawn-call-1")
 
 	// Keep both accepted frames in the source's materialized history, add one
 	// more frame, and then terminal. A cursor advanced after only the first
@@ -400,7 +473,7 @@ func TestLiveFeedBrokerFinalReadAdvancesCursorAfterWholeAcceptedSnapshot(t *test
 	}
 	streams.releaseRead()
 	third := receiveBrokerEnvelope(t, events)
-	assertBrokerChildRelation(t, third, "spawn-call-1", false)
+	assertBrokerChildRelation(t, third, "spawn-call-1")
 	if update, ok := third.Update.(schema.ToolCallUpdate); !ok || update.ToolCallID != "child-tool-1" {
 		t.Fatalf("final snapshot update = %#v, want only new child tool", third)
 	}
@@ -951,7 +1024,27 @@ func brokerChildThoughtEvent(id string, text string) *session.Event {
 	}
 }
 
+func brokerChildToolCallEvent() *session.Event {
+	return &session.Event{
+		ID:         "child-tool-call-event-1",
+		Type:       session.EventTypeToolCall,
+		Visibility: session.VisibilityUIOnly,
+		Scope:      brokerChildScope(),
+		Protocol: &session.EventProtocol{
+			Method: session.ProtocolMethodSessionUpdate,
+			Update: &session.ProtocolUpdate{
+				SessionUpdate: string(session.ProtocolUpdateTypeToolCall),
+				ToolCallID:    "child-tool-1",
+				Kind:          "PATCH",
+				Title:         "Apply child patch",
+				Status:        schema.ToolStatusInProgress,
+			},
+		},
+	}
+}
+
 func brokerChildToolEvent() *session.Event {
+	line := 12
 	return &session.Event{
 		ID:         "child-tool-event-1",
 		Type:       session.EventTypeToolResult,
@@ -964,6 +1057,10 @@ func brokerChildToolEvent() *session.Event {
 				ToolCallID:    "child-tool-1",
 				Kind:          "PATCH",
 				Status:        schema.ToolStatusCompleted,
+				Locations: []session.ProtocolToolCallLocation{{
+					Path: "/workspace/demo.txt",
+					Line: &line,
+				}},
 				Content: []session.ProtocolToolCallContent{{
 					Type:    "diff",
 					Path:    "/workspace/demo.txt",
@@ -1022,7 +1119,7 @@ func brokerControlChildPermissionEnvelope() eventstream.Envelope {
 			ToolCallID: "spawn-call-1",
 			ToolName:   "SPAWN",
 		},
-		Delivery: &eventstream.Delivery{Transient: true},
+		Delivery: &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
 		Permission: &schema.RequestPermissionRequest{
 			SessionID: "session-1",
 			ToolCall: schema.ToolCallUpdate{
@@ -1088,16 +1185,14 @@ func waitBrokerDone(t *testing.T, broker *liveFeedBroker) {
 	if broker == nil {
 		t.Fatal("live feed broker is nil")
 	}
-	waitBrokerSignal(t, broker.done, "broker shutdown")
+	waitBrokerSignal(t, broker.Done(), "broker shutdown")
 }
 
 func brokerSourceCount(broker *liveFeedBroker) int {
 	if broker == nil {
 		return 0
 	}
-	broker.mu.Lock()
-	defer broker.mu.Unlock()
-	return len(broker.sources)
+	return broker.SourceCount()
 }
 
 func assertBrokerMainTerminal(t *testing.T, env eventstream.Envelope) {
@@ -1107,13 +1202,13 @@ func assertBrokerMainTerminal(t *testing.T, env eventstream.Envelope) {
 	}
 }
 
-func assertBrokerChildRelation(t *testing.T, env eventstream.Envelope, parentCallID string, hasMirror bool) {
+func assertBrokerChildRelation(t *testing.T, env eventstream.Envelope, parentCallID string) {
 	t.Helper()
 	if env.Scope != eventstream.ScopeSubagent || env.ParentTool == nil || env.ParentTool.ToolCallID != parentCallID {
 		t.Fatalf("child envelope relation = %#v, want scoped relation to %q", env, parentCallID)
 	}
-	if env.Delivery == nil || !env.Delivery.Transient || env.Delivery.HasParentToolMirror != hasMirror {
-		t.Fatalf("child delivery = %#v, want transient has_parent_tool_mirror=%t", env.Delivery, hasMirror)
+	if env.Delivery == nil || env.Delivery.Mode != eventstream.DeliveryTransient {
+		t.Fatalf("child delivery = %#v, want transient delivery", env.Delivery)
 	}
 }
 
@@ -1152,48 +1247,5 @@ func assertBrokerTerminalFrame(t *testing.T, env eventstream.Envelope, callID st
 	}
 	if !ok || output != text {
 		t.Fatalf("terminal output = %q, %v; want exact %q", output, ok, text)
-	}
-}
-
-func TestLiveFeedTurnIdentityMatchesKnownIDs(t *testing.T) {
-	t.Parallel()
-
-	identity := liveFeedTurnIdentity{handleID: "handle-1", runID: "run-1", turnID: "turn-1"}
-	for _, tt := range []struct {
-		name string
-		env  eventstream.Envelope
-		want bool
-	}{
-		{
-			name: "all identifiers match",
-			env:  eventstream.Envelope{HandleID: "handle-1", RunID: "run-1", TurnID: "turn-1"},
-			want: true,
-		},
-		{
-			name: "source omits identifiers",
-			env:  eventstream.Envelope{},
-			want: true,
-		},
-		{
-			name: "foreign handle",
-			env:  eventstream.Envelope{HandleID: "other", RunID: "run-1", TurnID: "turn-1"},
-			want: false,
-		},
-		{
-			name: "foreign run",
-			env:  eventstream.Envelope{HandleID: "handle-1", RunID: "other", TurnID: "turn-1"},
-			want: false,
-		},
-		{
-			name: "foreign turn",
-			env:  eventstream.Envelope{HandleID: "handle-1", RunID: "run-1", TurnID: "other"},
-			want: false,
-		},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := identity.matches(tt.env); got != tt.want {
-				t.Fatalf("identity.matches(%#v) = %t, want %t", tt.env, got, tt.want)
-			}
-		})
 	}
 }

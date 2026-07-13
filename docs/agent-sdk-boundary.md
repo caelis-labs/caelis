@@ -345,4 +345,6 @@ External SDKs inform constraints; they do not define Caelis's taxonomy:
   behavior and known limitations.
 - [ACP Projection Architecture](acp-projection-architecture.md): semantic-to-wire
   and surface projection.
+- [Control Client Protocol v1 — M2 Design](control-client-m2-design.md): accepted
+  product-client commands, Session feed, replay, and HTTP/SSE boundary.
 - [Release](release.md): release mechanics and post-publish verification.

@@ -8,7 +8,7 @@ import (
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
-func TestProjectStreamFrameClassifiesParentMirrorFacts(t *testing.T) {
+func TestProjectStreamFrameSeparatesDelegatedSemanticsFromCommandTerminalOutput(t *testing.T) {
 	t.Parallel()
 
 	taskRequest := spawnStreamRequestForTest()
@@ -30,7 +30,7 @@ func TestProjectStreamFrameClassifiesParentMirrorFacts(t *testing.T) {
 		want  []streamFrameEnvelopeExpectation
 	}{
 		{
-			name: "task child event with text",
+			name: "task child event with materialized text",
 			req:  taskRequest,
 			frame: stream.Frame{
 				Ref:     taskRequest.Ref,
@@ -39,32 +39,7 @@ func TestProjectStreamFrameClassifiesParentMirrorFacts(t *testing.T) {
 				Event:   childMessageEventForStreamTest("child message"),
 			},
 			want: []streamFrameEnvelopeExpectation{
-				{parentCallID: "task-call-1", parentTool: "TASK", transient: true, hasMirror: true},
-				{transient: true, isMirror: true, terminalOutput: "child message\n", hasTerminalOutput: true},
-			},
-		},
-		{
-			name: "spawn child plan event only",
-			req:  spawnStreamRequestForTest(),
-			frame: stream.Frame{
-				Ref:     spawnStreamRequestForTest().Ref,
-				Running: true,
-				Event:   childPlanEventForStreamTest(),
-			},
-			want: []streamFrameEnvelopeExpectation{
-				{parentCallID: "spawn-call-1", parentTool: "SPAWN", transient: true},
-			},
-		},
-		{
-			name: "spawn child tool update event only",
-			req:  spawnStreamRequestForTest(),
-			frame: stream.Frame{
-				Ref:     spawnStreamRequestForTest().Ref,
-				Running: true,
-				Event:   childToolUpdateEventForStreamTest(),
-			},
-			want: []streamFrameEnvelopeExpectation{
-				{parentCallID: "spawn-call-1", parentTool: "SPAWN", transient: true},
+				{parentCallID: "task-call-1", parentTool: "TASK", transient: true},
 			},
 		},
 		{
@@ -75,37 +50,17 @@ func TestProjectStreamFrameClassifiesParentMirrorFacts(t *testing.T) {
 				Text:    "child text only\n",
 				Running: true,
 			},
-			want: []streamFrameEnvelopeExpectation{
-				{transient: true, isMirror: true, terminalOutput: "child text only\n", hasTerminalOutput: true},
-			},
 		},
 		{
-			name: "spawn final with terminal text",
+			name: "spawn final result has no terminal replay",
 			req:  spawnStreamRequestForTest(),
 			frame: stream.Frame{
 				Ref:    spawnStreamRequestForTest().Ref,
 				Text:   "final child result\n",
-				Cursor: stream.Cursor{Output: 0},
 				Closed: true,
 				State:  "completed",
 			},
-			want: []streamFrameEnvelopeExpectation{
-				{transient: true, isMirror: true, terminalOutput: "final child result", hasTerminalOutput: true},
-			},
-		},
-		{
-			name: "spawn final status only",
-			req:  spawnStreamRequestForTest(),
-			frame: stream.Frame{
-				Ref:    spawnStreamRequestForTest().Ref,
-				Text:   "already streamed child result\n",
-				Cursor: stream.Cursor{Output: 1},
-				Closed: true,
-				State:  "completed",
-			},
-			want: []streamFrameEnvelopeExpectation{
-				{transient: true},
-			},
+			want: []streamFrameEnvelopeExpectation{{transient: true}},
 		},
 		{
 			name: "run command running",

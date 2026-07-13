@@ -35,7 +35,11 @@ func (g *Gateway) resolveApprovalRequest(
 	if g == nil || handle == nil || req == nil {
 		return agent.ApprovalResponse{}, nil
 	}
-	mode, modeErr := g.currentApprovalMode(turnCtx, req.SessionRef)
+	lifecycleCtx := turnCtx
+	if detachedApprovalRequest(req) {
+		lifecycleCtx = approvalCtx
+	}
+	mode, modeErr := g.currentApprovalMode(lifecycleCtx, req.SessionRef)
 	if modeErr != nil {
 		return agent.ApprovalResponse{}, modeErr
 	}
@@ -53,13 +57,16 @@ func (g *Gateway) resolveApprovalRequest(
 		select {
 		case <-pending.activated:
 		case <-pending.done:
+			if pending.activationErr != nil {
+				return agent.ApprovalResponse{}, pending.activationErr
+			}
 			return agent.ApprovalResponse{}, context.Canceled
 		case <-approvalCtx.Done():
 			return agent.ApprovalResponse{}, approvalCtx.Err()
-		case <-turnCtx.Done():
-			return agent.ApprovalResponse{}, turnCtx.Err()
+		case <-lifecycleCtx.Done():
+			return agent.ApprovalResponse{}, lifecycleCtx.Err()
 		}
-		response, err := g.resolveActiveAutoApproval(turnCtx, approvalCtx, handle, req, reviewModel, mode)
+		response, err := g.resolveActiveAutoApproval(lifecycleCtx, approvalCtx, handle, req, reviewModel, mode)
 		if err != nil {
 			return agent.ApprovalResponse{}, err
 		}
@@ -74,7 +81,7 @@ func (g *Gateway) resolveApprovalRequest(
 		}
 	}
 
-	return waitForApprovalDecision(turnCtx, approvalCtx, pending)
+	return waitForApprovalDecision(lifecycleCtx, approvalCtx, pending)
 }
 
 func waitForApprovalDecision(turnCtx context.Context, approvalCtx context.Context, pending *pendingApproval) (agent.ApprovalResponse, error) {
@@ -91,6 +98,9 @@ func waitForApprovalDecision(turnCtx context.Context, approvalCtx context.Contex
 			ReviewText: decision.ReviewText,
 		}, nil
 	case <-pending.done:
+		if pending.activationErr != nil {
+			return agent.ApprovalResponse{}, pending.activationErr
+		}
 		return agent.ApprovalResponse{}, context.Canceled
 	case <-approvalCtx.Done():
 		return agent.ApprovalResponse{}, approvalCtx.Err()
@@ -248,7 +258,7 @@ func (g *Gateway) persistApprovalReviewSessionAccounting(ctx context.Context, re
 	}
 	source = firstNonEmpty(strings.TrimSpace(source), string(ApprovalModeAutoReview))
 	usageCopy := *usage
-	return g.sessions.UpdateState(ctx, req.SessionRef, func(state map[string]any) (map[string]any, error) {
+	return g.updateSessionState(ctx, req.SessionRef, session.ControlMutationGuard(session.ControlMutationPurposeApproval), func(state map[string]any) (map[string]any, error) {
 		next := session.CloneState(state)
 		if next == nil {
 			next = map[string]any{}

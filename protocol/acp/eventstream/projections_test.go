@@ -6,12 +6,12 @@ import (
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
-func TestReplayCursorPrefersProjectionID(t *testing.T) {
+func TestReplayCursorUsesOnlySignedEnvelopeCursor(t *testing.T) {
 	t.Parallel()
 
 	env := Envelope{Cursor: "live-1", ProjectionID: "acp-projection:abc:0"}
-	if got := ReplayCursor(env); got != "acp-projection:abc:0" {
-		t.Fatalf("ReplayCursor() = %q, want projection id", got)
+	if got := ReplayCursor(env); got != "live-1" {
+		t.Fatalf("ReplayCursor() = %q, want Envelope.Cursor", got)
 	}
 	if got := SSEEventID(env); got != "live-1" {
 		t.Fatalf("SSEEventID() = %q, want live cursor", got)

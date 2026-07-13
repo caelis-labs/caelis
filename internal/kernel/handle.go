@@ -21,21 +21,26 @@ type turnHandleConfig struct {
 	runID                   string
 	turnID                  string
 	activeKind              ActiveTurnKind
+	participantID           string
 	sessionRef              session.SessionRef
 	createdAt               time.Time
 	cancel                  func() bool
 	allowPendingSubmissions bool
 	prepareSubmission       func(context.Context, SubmitRequest) (SubmitRequest, error)
+	persistApproval         func(*agent.ApprovalRequest, eventstream.ApprovalRequestID) (*session.Event, error)
+	settleApproval          func(*agent.ApprovalRequest, eventstream.ApprovalRequestID, string) (*session.Event, error)
+	approvals               *approvalCoordinator
 }
 
 type turnHandle struct {
-	handleID   string
-	runID      string
-	turnID     string
-	activeKind ActiveTurnKind
-	sessionRef session.SessionRef
-	createdAt  time.Time
-	cancelFn   func() bool
+	handleID      string
+	runID         string
+	turnID        string
+	activeKind    ActiveTurnKind
+	participantID string
+	sessionRef    session.SessionRef
+	createdAt     time.Time
+	cancelFn      func() bool
 
 	mu                      sync.Mutex
 	events                  []eventstream.Envelope
@@ -53,15 +58,13 @@ type turnHandle struct {
 	pendingSubmissions      []SubmitRequest
 	allowPendingSubmissions bool
 	prepareSubmission       func(context.Context, SubmitRequest) (SubmitRequest, error)
-	pendingApprovals        map[eventstream.ApprovalRequestID]*pendingApproval
-	settledApprovals        map[eventstream.ApprovalRequestID]string
-	approvalQueue           []*pendingApproval
-	activeApproval          *pendingApproval
+	persistApproval         func(*agent.ApprovalRequest, eventstream.ApprovalRequestID) (*session.Event, error)
+	settleApproval          func(*agent.ApprovalRequest, eventstream.ApprovalRequestID, string) (*session.Event, error)
+	approvals               *approvalCoordinator
 	finishHooks             []func()
 
-	approvalRequestSeq uint64
-	approvalReviewSeq  uint64
-	acpCursorSeq       uint64
+	approvalReviewSeq uint64
+	acpCursorSeq      uint64
 }
 
 func newTurnHandle(cfg turnHandleConfig) *turnHandle {
@@ -70,14 +73,19 @@ func newTurnHandle(cfg turnHandleConfig) *turnHandle {
 		runID:                   cfg.runID,
 		turnID:                  cfg.turnID,
 		activeKind:              cfg.activeKind,
+		participantID:           strings.TrimSpace(cfg.participantID),
 		sessionRef:              cfg.sessionRef,
 		createdAt:               cfg.createdAt,
 		cancelFn:                cfg.cancel,
 		allowPendingSubmissions: cfg.allowPendingSubmissions,
 		prepareSubmission:       cfg.prepareSubmission,
+		persistApproval:         cfg.persistApproval,
+		settleApproval:          cfg.settleApproval,
+		approvals:               cfg.approvals,
 		eventsCh:                make(chan eventstream.Envelope, 32),
-		pendingApprovals:        map[eventstream.ApprovalRequestID]*pendingApproval{},
-		settledApprovals:        map[eventstream.ApprovalRequestID]string{},
+	}
+	if h.approvals == nil {
+		h.approvals = newApprovalCoordinator(cfg.sessionRef)
 	}
 	h.eventsCond = sync.NewCond(&h.mu)
 	return h
@@ -87,6 +95,7 @@ func (h *turnHandle) HandleID() string               { return h.handleID }
 func (h *turnHandle) RunID() string                  { return h.runID }
 func (h *turnHandle) TurnID() string                 { return h.turnID }
 func (h *turnHandle) ActiveKind() ActiveTurnKind     { return h.activeKind }
+func (h *turnHandle) ParticipantID() string          { return h.participantID }
 func (h *turnHandle) SessionRef() session.SessionRef { return h.sessionRef }
 func (h *turnHandle) CreatedAt() time.Time           { return h.createdAt }
 func (h *turnHandle) ACPEvents() <-chan eventstream.Envelope {
@@ -167,10 +176,10 @@ func (h *turnHandle) Cancel() agent.CancelResult {
 		return agent.CancelResult{Status: agent.CancelStatusAlreadyCancelled}
 	}
 	h.cancelled = true
-	h.clearPendingApprovalsLocked("cancelled")
 	cancelFn := h.cancelFn
 	runner := h.runner
 	h.mu.Unlock()
+	h.approvals.abandonOwner(h, "cancelled")
 
 	if cancelFn != nil {
 		cancelFn()
@@ -186,16 +195,26 @@ func (h *turnHandle) Cancel() agent.CancelResult {
 
 func (h *turnHandle) Close() error {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	if h.closed {
+		h.mu.Unlock()
 		return nil
 	}
 	h.closed = true
-	h.clearPendingApprovalsLocked("closed")
 	if h.finished {
 		h.closeEventsLocked()
 	}
+	h.mu.Unlock()
+	h.approvals.abandonOwner(h, "closed")
 	return nil
+}
+
+func (h *turnHandle) isTerminal() bool {
+	if h == nil {
+		return true
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.cancelled || h.closed || h.finished || h.finishing
 }
 
 func (h *turnHandle) setRunner(runner agent.Runner) {
@@ -335,7 +354,7 @@ func (h *turnHandle) approvalEventEnvelopes(req *agent.ApprovalRequest, payload 
 		base.Actor = strings.TrimSpace(origin.Actor)
 		base.ParticipantID = strings.TrimSpace(origin.ParticipantID)
 		if base.Scope == eventstream.ScopeSubagent {
-			base.Delivery = &eventstream.Delivery{Transient: true}
+			base.Delivery = &eventstream.Delivery{Mode: eventstream.DeliveryMirror}
 			if parent := approvalParentToolRelation(req); parent != nil {
 				base.ParentTool = parent
 			}
@@ -536,9 +555,9 @@ func (h *turnHandle) finish() {
 	h.mu.Lock()
 	h.finishing = false
 	h.finished = true
-	h.clearPendingApprovalsLocked("terminal")
 	h.closeEventsLocked()
 	h.mu.Unlock()
+	h.approvals.abandonOwner(h, "terminal")
 }
 
 func (h *turnHandle) closeEventsLocked() {

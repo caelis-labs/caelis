@@ -86,10 +86,10 @@ func TestStoreUpdateState(t *testing.T) {
 		t.Fatalf("GetOrCreate() error = %v", err)
 	}
 
-	err = store.UpdateState(ctx, createdSession.SessionRef, func(state map[string]any) (map[string]any, error) {
+	_, err = store.UpdateState(ctx, session.UpdateStateRequest{SessionRef: createdSession.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Update: func(state map[string]any) (map[string]any, error) {
 		state["mode"] = "chat"
 		return state, nil
-	})
+	}})
 	if err != nil {
 		t.Fatalf("UpdateState() error = %v", err)
 	}
@@ -232,7 +232,7 @@ func TestStoreIsolatesNestedMetadataEventsAndState(t *testing.T) {
 	}
 
 	state := map[string]any{"nested": map[string]any{"items": []any{"original"}}}
-	if err := store.ReplaceState(ctx, created.SessionRef, state); err != nil {
+	if _, err := store.ReplaceState(ctx, session.ReplaceStateRequest{SessionRef: created.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), State: state}); err != nil {
 		t.Fatalf("ReplaceState() error = %v", err)
 	}
 	state["nested"].(map[string]any)["items"].([]any)[0] = "caller-mutated"
@@ -259,16 +259,16 @@ func TestStoreUpdateStateErrorRollsBackNestedMutation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetOrCreate() error = %v", err)
 	}
-	if err := store.ReplaceState(ctx, created.SessionRef, map[string]any{
+	if _, err := store.ReplaceState(ctx, session.ReplaceStateRequest{SessionRef: created.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), State: map[string]any{
 		"nested": map[string]any{"value": "before"},
-	}); err != nil {
+	}}); err != nil {
 		t.Fatalf("ReplaceState() error = %v", err)
 	}
 	wantErr := errors.New("reject update")
-	err = store.UpdateState(ctx, created.SessionRef, func(state map[string]any) (map[string]any, error) {
+	_, err = store.UpdateState(ctx, session.UpdateStateRequest{SessionRef: created.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Update: func(state map[string]any) (map[string]any, error) {
 		state["nested"].(map[string]any)["value"] = "after"
 		return state, wantErr
-	})
+	}})
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("UpdateState() error = %v, want %v", err, wantErr)
 	}
@@ -290,10 +290,10 @@ func TestStoreRejectsInvalidJSONStateWithoutMutation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetOrCreate() error = %v", err)
 	}
-	if err := store.ReplaceState(ctx, created.SessionRef, map[string]any{"value": "before"}); err != nil {
+	if _, err := store.ReplaceState(ctx, session.ReplaceStateRequest{SessionRef: created.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), State: map[string]any{"value": "before"}}); err != nil {
 		t.Fatalf("ReplaceState() error = %v", err)
 	}
-	if err := store.ReplaceState(ctx, created.SessionRef, map[string]any{"value": math.NaN()}); err == nil {
+	if _, err := store.ReplaceState(ctx, session.ReplaceStateRequest{SessionRef: created.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), State: map[string]any{"value": math.NaN()}}); err == nil {
 		t.Fatal("ReplaceState(invalid) error = nil, want rejection")
 	}
 	state, err := store.SnapshotState(ctx, created.SessionRef)
@@ -357,7 +357,7 @@ func TestServiceAppendEventCASAndIdempotentRetry(t *testing.T) {
 	}
 }
 
-func TestStoreStateOperationsRepairNilState(t *testing.T) {
+func TestStoreStateOperationsHandleNilStateWithoutSnapshotMutation(t *testing.T) {
 	t.Parallel()
 
 	store := NewStore(Config{
@@ -373,7 +373,10 @@ func TestStoreStateOperationsRepairNilState(t *testing.T) {
 	}
 
 	store.mu.Lock()
-	store.sessions[createdSession.SessionID].state = nil
+	record := store.sessions[createdSession.SessionID]
+	record.state = nil
+	revisionBefore := record.session.Revision
+	updatedAtBefore := record.session.UpdatedAt
 	store.mu.Unlock()
 
 	state, err := store.SnapshotState(ctx, createdSession.SessionRef)
@@ -381,19 +384,28 @@ func TestStoreStateOperationsRepairNilState(t *testing.T) {
 		t.Fatalf("SnapshotState() error = %v", err)
 	}
 	if state == nil || len(state) != 0 {
-		t.Fatalf("SnapshotState() = %#v, want repaired empty state", state)
+		t.Fatalf("SnapshotState() = %#v, want returned empty state", state)
 	}
 
-	store.mu.Lock()
-	store.sessions[createdSession.SessionID].state = nil
-	store.mu.Unlock()
-	if err := store.UpdateState(ctx, createdSession.SessionRef, func(state map[string]any) (map[string]any, error) {
+	store.mu.RLock()
+	if record.state != nil {
+		t.Fatalf("stored state = %#v, want nil", record.state)
+	}
+	if record.session.Revision != revisionBefore {
+		t.Fatalf("stored revision = %d, want unchanged %d", record.session.Revision, revisionBefore)
+	}
+	if !record.session.UpdatedAt.Equal(updatedAtBefore) {
+		t.Fatalf("stored updated_at = %v, want unchanged %v", record.session.UpdatedAt, updatedAtBefore)
+	}
+	store.mu.RUnlock()
+
+	if _, err := store.UpdateState(ctx, session.UpdateStateRequest{SessionRef: createdSession.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Update: func(state map[string]any) (map[string]any, error) {
 		if state == nil {
 			t.Fatal("UpdateState() received nil state, want empty map")
 		}
 		state["mode"] = "chat"
 		return state, nil
-	}); err != nil {
+	}}); err != nil {
 		t.Fatalf("UpdateState() error = %v", err)
 	}
 	state, err = store.SnapshotState(ctx, createdSession.SessionRef)
@@ -404,7 +416,7 @@ func TestStoreStateOperationsRepairNilState(t *testing.T) {
 		t.Fatalf("state[mode] = %v, want chat", got)
 	}
 
-	if err := store.ReplaceState(ctx, createdSession.SessionRef, nil); err != nil {
+	if _, err := store.ReplaceState(ctx, session.ReplaceStateRequest{SessionRef: createdSession.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest)}); err != nil {
 		t.Fatalf("ReplaceState(nil) error = %v", err)
 	}
 	state, err = store.SnapshotState(ctx, createdSession.SessionRef)

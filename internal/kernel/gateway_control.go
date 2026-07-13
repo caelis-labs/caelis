@@ -116,6 +116,7 @@ func (g *Gateway) PromptParticipant(ctx context.Context, req PromptParticipantRe
 		cancel()
 		return true
 	})
+	approvals := g.sessionApprovals(session.SessionRef)
 	g.mu.Lock()
 	if _, ok := g.active[session.SessionID]; ok {
 		g.mu.Unlock()
@@ -131,6 +132,7 @@ func (g *Gateway) PromptParticipant(ctx context.Context, req PromptParticipantRe
 		runID:                   g.allocateID("participant-run"),
 		turnID:                  g.allocateID("participant-turn"),
 		activeKind:              ActiveTurnKindParticipant,
+		participantID:           req.ParticipantID,
 		sessionRef:              session.SessionRef,
 		createdAt:               g.clock(),
 		allowPendingSubmissions: true,
@@ -140,7 +142,10 @@ func (g *Gateway) PromptParticipant(ctx context.Context, req PromptParticipantRe
 		cancel: func() bool {
 			return cancelFn()
 		},
+		approvals: approvals,
 	})
+	handle.persistApproval = g.approvalPersister(session.SessionRef, handle.TurnID())
+	handle.settleApproval = g.approvalSettler(session.SessionRef, handle.TurnID())
 	g.active[session.SessionID] = handle
 	g.noteActiveHandleLocked(session.SessionID, handle)
 	g.mu.Unlock()

@@ -22,7 +22,7 @@ func (s *Stack) SetSessionMode(ctx context.Context, ref session.SessionRef, mode
 	if err != nil {
 		return "", err
 	}
-	err = s.Sessions.UpdateState(ctx, ref, func(state map[string]any) (map[string]any, error) {
+	_, err = s.updateSessionState(ctx, ref, func(state map[string]any) (map[string]any, error) {
 		next := session.CloneState(state)
 		if next == nil {
 			next = map[string]any{}
@@ -34,6 +34,36 @@ func (s *Stack) SetSessionMode(ctx context.Context, ref session.SessionRef, mode
 		return "", err
 	}
 	return normalized, nil
+}
+
+func (s *Stack) updateSessionState(
+	ctx context.Context,
+	ref session.SessionRef,
+	update func(map[string]any) (map[string]any, error),
+) (session.Session, error) {
+	current, err := s.Sessions.Session(ctx, ref)
+	if err != nil {
+		return session.Session{}, err
+	}
+	return s.Sessions.UpdateState(ctx, session.UpdateStateRequest{
+		SessionRef:       ref,
+		ExpectedRevision: &current.Revision,
+		MutationGuard:    session.ControlMutationGuard(session.ControlMutationPurposeCoordinator),
+		Update:           update,
+	})
+}
+
+func (s *Stack) replaceSessionState(ctx context.Context, ref session.SessionRef, state map[string]any) (session.Session, error) {
+	current, err := s.Sessions.Session(ctx, ref)
+	if err != nil {
+		return session.Session{}, err
+	}
+	return s.Sessions.ReplaceState(ctx, session.ReplaceStateRequest{
+		SessionRef:       ref,
+		ExpectedRevision: &current.Revision,
+		MutationGuard:    session.ControlMutationGuard(session.ControlMutationPurposeCoordinator),
+		State:            state,
+	})
 }
 
 func (s *Stack) CycleSessionMode(ctx context.Context, ref session.SessionRef) (string, error) {

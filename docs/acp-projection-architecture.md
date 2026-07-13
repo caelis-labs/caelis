@@ -84,11 +84,11 @@ environment and the Client then owns output, wait, kill, and release.
 
 Forcing an existing Caelis Runtime command through that standard flow changes
 execution placement, sandbox, permission, environment, and recovery ownership.
-The compatibility anchor therefore remains supported until the T0 tradeoff
-experiment selects profiles for Zed interoperability, strict ACP, and the
-Caelis client protocol. Strict ACP mode may only emit a standard terminal
-anchor for a real client-created terminal. The detailed experiment and removal
-criteria live in the roadmap.
+The compatibility anchor therefore remains supported in the current release.
+The T0 tradeoff experiment is deferred to a compatibility-focused version and
+will select profiles for Zed interoperability, strict ACP, and the Caelis
+client protocol. Strict ACP mode may only emit a standard terminal anchor for a
+real client-created terminal.
 
 The current repository does not support that client-hosted execution path end
 to end. Outbound terminal RPC callbacks exist, but `RunCommand` remains bound to
@@ -98,41 +98,49 @@ advertise `clientCapabilities.terminal=false` unless a complete terminal
 handler is explicitly installed. The reverse local-output adapter used by the
 Zed compatibility projection does not change that capability assessment.
 
+A later terminal-compatibility review must use one deterministic RunCommand
+fixture covering interleaved output, UTF-8 boundaries, ANSI, non-zero exit,
+cancellation, and completion. It must compare the current Zed anchor, Caelis
+metadata without that anchor, standard tool content updates, and a real
+client-owned terminal lifecycle. The decision must retain wire captures and
+rendering evidence, name the selected profile per client class, and specify
+capability negotiation, fallback, ownership, and a removal or revisit
+condition. Until that evidence exists, the current capability declaration and
+compatibility projection remain unchanged.
+
 A spawned Agent instead projects its normalized child message, thought, tool,
 content, diff, plan, and lifecycle events as standard ACP semantics. Permission
 requests are Control interactions: the bridge normalizes them into an SDK
 `ApprovalRequest`, and Control emits the permission Envelope rather than a task
 stream frame. Caelis Envelope `scope`, `scope_id`, and `parent_tool` fields
 associate those payloads with the parent Spawn call and durable task identity.
-`delivery` classifies a live-only transient event separately from the temporary
-parent-tool compatibility mirror. `parent_tool` records the real delegated
-relationship whether or not a mirror exists. A semantic child event sets
-`has_parent_tool_mirror` only when the same source frame also emits an actual
-parent terminal compatibility mirror; the parent `tool_call_update` sets
-`is_parent_tool_mirror` only when it carries that terminal text. A status-only
-parent update is not a mirror merely because its tool is Spawn or Task.
-Those fields are Caelis Envelope extensions, never custom fields in the ACP
-update payload root. A Surface may derive a compact text panel from those
-events, but the formatted text is not the protocol or replay authority. Future
-GUI clients render the same scoped ACP payloads with the same components used
-for a main Agent.
+The Control child recorder first persists semantic child events as
+`VisibilityMirror`; their published `delivery.mode=mirror` position is durable
+and replayable without entering parent model context. Exact task bytes and
+other events with no stored semantic source use `delivery.mode=transient`.
+`parent_tool` records the delegated relationship in either lane. Spawn and Task
+stream frames never emit a parent tool terminal/text copy of child activity,
+including when a runtime has materialized `Frame.Text` from a semantic child
+event. The parent receives one canonical status/result summary when the
+delegated stream closes. These are Caelis Envelope extensions, never custom
+fields in an ACP update payload root. Every Surface, including a future GUI,
+renders the same replayable scoped ACP payloads with the components used for a
+main Agent.
 
-The parent receives the delegated final result through the canonical Spawn/Task
-result. Live child events remain transient until a linked semantic child replay
-authority is implemented; they must not be promoted into parent model context
-or reconstructed from terminal text.
+`internal/controlclient/turningress.Broker` owns the shared per-Turn fan-in. The
+Gateway Control client backend and the transitional ACP/TUI adapter both use
+that implementation; the adapter's former live-feed broker is now only an
+alias. Turningress derives `StreamRequest` values from main ACP tool updates,
+deduplicates by `StreamRequest.Key`, and uses cursor-owned
+`stream.Service.Read` snapshots to project each source frame through
+`projector.ProjectStreamFrame`. The Control Session Feed Broker attaches to
+that ingress and gives TUI, headless, the ACP bridge, and app-server independent
+subscriptions to the same ordered Envelopes. No Surface discovers a second task
+stream from a rendered update.
 
-The completed M1 Control-owned fan-in slice places task-stream discovery and
-live delivery in the private `app/gatewayapp/controladapter` live-feed broker.
-It derives `StreamRequest` values from the main ACP tool update, deduplicates by
-`StreamRequest.Key`, and uses cursor-owned `stream.Service.Read` snapshots to
-project each source frame through
-`projector.ProjectStreamFrame` before placing it on `gatewayTurn.Events()`.
-The main update is emitted before its task delivery starts; each task source
+The main update is accepted before its task delivery starts; each task source
 retains its own cursor/event order; and a projected child semantic event remains
-before the parent compatibility mirror from the same frame. TUI, headless, and
-the ACP prompt bridge consume that one Turn feed and do not discover a second
-task stream from a rendered update.
+before the one parent final status/result update when its source closes.
 
 The current running-task stream anchor is a private, transitional Control input
 parse of the source tool update's runtime task metadata. It is confined to
@@ -155,27 +163,31 @@ execution and cannot terminate the parent Turn.
 
 ### Child-scoped permission routing
 
-The completed bounded M1 permission slice gives every live
-`session/request_permission` Envelope a typed
+The Control permission plane gives every live `session/request_permission`
+Envelope a typed
 `eventstream.ApprovalRequestID`. This is a Caelis Envelope and Control-command
 correlation field, never an undocumented `_meta` value, an ACP wire field, or
 an eventstream cursor. `control.ApprovalDecision.RequestID` carries the same
 typed value back to the owning Turn.
 
-`internal/kernel.turnHandle` owns the authoritative registry, FIFO queue, and
-single active approval head for a Turn. It reuses an SDK durable pause token
-when a Runtime approval has one; otherwise it allocates a Turn-scoped live ID.
+The Session-scoped Control approval coordinator owns the authoritative
+registry, FIFO queue, and single active approval head across main, participant,
+Side ACP, and child origins. A Turn contributes origin and lifecycle ownership,
+but it does not own queue ordering. The coordinator reuses an SDK durable pause
+token when a Runtime approval has one; otherwise it allocates a stable live ID.
 Registration and enqueueing happen before delivery. Only the active head may
 be published or resolved; its completion or individual abandonment advances the
-next queued request, while Turn Cancel, Close, and terminal cleanup release all
-remaining waiters without injecting a zero-value decision. Unknown, stale,
-duplicate, and queued-but-not-active responses are rejected explicitly.
+next queued request. Parent terminal cleanup releases parent-owned requests but
+preserves a detached child's request; Session close releases the complete
+coordinator. Unknown, stale, duplicate, and queued-but-not-active responses are
+rejected explicitly.
 
 Main Runtime, Side ACP, and Spawn-child requests all enter this coordinator as
 normalized `ApprovalRequest` values. Control uses their canonical origin and
 parent metadata to publish the active standard ACP permission Envelope with the
-child `scope`, task `scope_id`, real Spawn `parent_tool`, transient delivery,
-and unmodified ToolCall/options/raw input/output/content. A user and
+child `scope`, task `scope_id`, real Spawn `parent_tool`, and unmodified
+ToolCall/options/raw input/output/content. The active request and settlement are
+durable mirror events, so reconnect needs no second permission route. A user and
 Guardian/auto-review are different resolvers of the same active queue head;
 auto-review never calls its approver before that request is active.
 
@@ -186,25 +198,29 @@ same Turn feed as main and Side ACP delivery. TUI, headless, and the ACP prompt
 bridge only return that ID plus the user's decision through
 `Turn.SubmitApproval`; they do not select an endpoint or own permission policy.
 
-This is live routing, not M2 replay/resume. A durable pause token is already a
-reusable SDK identity, but reconnecting to a pending live approval after a
-process restart remains M2 work. Parent compatibility mirror removal and ACP
-runner trace cleanup also remain open M1 work; the retained mirror is still
-transient display compatibility rather than durable parent model context.
+Reconnect resolves a pending live waiter by its durable approval identity.
+After a process restart, an orphaned persisted request is swept to a terminal
+settlement because Runtime continuation is not recreated. Child mirror updates
+remain excluded from parent model context and are never reconstructed from
+terminal text.
 
 New `protocol/acp/projector` stream projections write parent relation and
 delivery facts only to typed Envelope fields. `eventstream.ResolveRelationDelivery`
 owns the one-way typed-first legacy read fallback: each typed pointer is
 authoritative when present, and only its absence permits the corresponding
-metadata fallback. `surfaces/transcript` and the ACP compatibility bridge both
-use that entry point; it neither writes metadata nor carries display policy.
+metadata fallback. `surfaces/transcript` is the current production consumer of
+that entry point. The ACP prompt bridge forwards the shared Control feed
+directly and does not resolve Envelope relation or delivery metadata; the
+resolver neither writes metadata nor carries display policy.
 The fallback exists only for old replay fixtures and legacy Envelope inputs,
 and can be removed after those supported inputs no longer supply the legacy
-metadata layout. The future Control Event Broker must use typed Envelope fields
-rather than `_meta` for correlation, ordering, or durability decisions.
+metadata layout. The Control Session Feed Broker uses typed Envelope fields and
+durable positions rather than `_meta` for correlation, ordering, or durability
+decisions.
 
-The ordered migration and acceptance criteria are defined in
-[Control and Client Protocol Roadmap](control-client-roadmap.md).
+The durable child mirror, delivery mode, feed position, signed resume Cursor,
+and app-server boundaries are normative in
+[Control Client Protocol v1 — M2 Design](control-client-m2-design.md).
 
 ## Session Identity
 
@@ -225,3 +241,22 @@ lease authority.
 
 Before v1.0, unsupported old session/index layouts may fail explicitly. Caelis
 prefers the clean identity model over compatibility fallbacks.
+
+Durable State mutations are fenced like event mutations. SDK `StateWriter`
+operations are request-scoped and carry expected Session revision plus
+`MutationGuard`; file and memory implementations validate the active lease
+before invoking an update callback. Legacy ref/state/callback-only writes are
+not a supported compatibility path. This prevents configuration, approval
+accounting, and future Manage Loop state from becoming an alternate unfenced
+semantic writer.
+`SnapshotState` remains a pure read even for compatibility documents with a
+missing state field: it returns an empty map without persisting repair or
+changing Session revision. Persistent repair requires an explicit guarded
+mutation.
+
+At the product HTTP boundary, standard ACP update schemas stay closed while
+unknown vendor updates use an explicit non-overlapping raw extension variant.
+The app-server's production Go JSON shapes are validated against the checked-in
+OpenAPI for every request, response, Envelope kind, and ACP update variant. The
+generated Go raw object and union also preserve unknown fields through complete
+Envelope decode/encode round trips.

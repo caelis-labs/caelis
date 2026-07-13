@@ -98,16 +98,19 @@ func (r *LeasedRuntime) runWithLease(ctx context.Context, ref session.SessionRef
 	if err != nil {
 		return agent.RunResult{}, err
 	}
-	ctx = session.ContextWithRuntimeLease(ctx, lease)
-	result, err := execute(ctx)
+	runCtx, cancel := context.WithCancel(session.ContextWithRuntimeLease(ctx, lease))
+	guard := startSessionLeaseGuard(r.leases, lease, r.ttl, r.heartbeatInterval, cancel)
+	result, err := execute(runCtx)
 	if err != nil {
-		return agent.RunResult{}, errors.Join(err, r.release(lease))
+		cancel()
+		return agent.RunResult{}, errors.Join(err, guard.finishAndErr())
 	}
 	if result.Handle == nil {
-		return result, r.release(lease)
+		cancel()
+		return result, guard.finishAndErr()
 	}
 	return r.wrapLiveHandle(result, ref, func(inner agent.Runner, onFinish func()) agent.Runner {
-		return newLeasedRunner(inner, r.leases, lease, r.ttl, r.heartbeatInterval, onFinish)
+		return newLeasedRunner(inner, guard, cancel, onFinish)
 	}), nil
 }
 
@@ -240,13 +243,27 @@ func (g *sessionLeaseGuard) heartbeat() {
 			if err := g.heartbeatOnce(); err != nil {
 				g.mu.Lock()
 				g.heartbeatErr = err
+				onLoss := g.onLoss
 				g.mu.Unlock()
-				if g.onLoss != nil {
-					g.onLoss()
+				if onLoss != nil {
+					onLoss()
 				}
 				return
 			}
 		}
+	}
+}
+
+func (g *sessionLeaseGuard) setOnLoss(onLoss func()) {
+	if g == nil {
+		return
+	}
+	g.mu.Lock()
+	g.onLoss = onLoss
+	alreadyLost := g.heartbeatErr != nil
+	g.mu.Unlock()
+	if alreadyLost && onLoss != nil {
+		onLoss()
 	}
 }
 
@@ -319,15 +336,17 @@ func releaseSessionLease(leases session.SessionLeaseService, lease session.Sessi
 type leasedRunner struct {
 	inner      agent.Runner
 	guard      *sessionLeaseGuard
+	cancel     context.CancelFunc
 	onFinish   func()
 	finishOnce sync.Once
 	finishErr  error
 }
 
-func newLeasedRunner(inner agent.Runner, leases session.SessionLeaseService, lease session.SessionLease, ttl, interval time.Duration, onFinish func()) agent.Runner {
-	runner := &leasedRunner{inner: inner, onFinish: onFinish}
-	runner.guard = startSessionLeaseGuard(leases, lease, ttl, interval, func() {
-		runner.inner.Cancel()
+func newLeasedRunner(inner agent.Runner, guard *sessionLeaseGuard, cancel context.CancelFunc, onFinish func()) agent.Runner {
+	runner := &leasedRunner{inner: inner, guard: guard, cancel: cancel, onFinish: onFinish}
+	guard.setOnLoss(func() {
+		cancel()
+		inner.Cancel()
 	})
 	if source, ok := inner.(agent.SourceHandle); ok {
 		return &leasedSourceRunner{leasedRunner: runner, source: source}
@@ -348,10 +367,10 @@ func (r *leasedRunner) Events() iter.Seq2[*session.Event, error] {
 		}
 		if !completed {
 			_ = r.inner.Close()
-			_ = r.finish()
+			_ = r.finishAfterProducer()
 			return
 		}
-		if err := errors.Join(r.guard.finishAndErr(), r.finish()); err != nil {
+		if err := r.finishAfterProducer(); err != nil {
 			yield(nil, err)
 		}
 	}
@@ -373,10 +392,10 @@ func (r *leasedSourceRunner) SourceEvents() iter.Seq2[agent.SourceEvent, error] 
 		}
 		if !completed {
 			_ = r.inner.Close()
-			_ = r.finish()
+			_ = r.finishAfterProducer()
 			return
 		}
-		if err := errors.Join(r.guard.finishAndErr(), r.finish()); err != nil {
+		if err := r.finishAfterProducer(); err != nil {
 			yield(agent.SourceEvent{}, err)
 		}
 	}
@@ -388,16 +407,27 @@ func (r *leasedRunner) Cancel() agent.CancelResult { return r.inner.Cancel() }
 
 func (r *leasedRunner) Close() error {
 	innerErr := r.inner.Close()
-	finishErr := r.finish()
+	finishErr := r.finishAfterProducer()
 	return errors.Join(innerErr, finishErr, r.guard.err())
+}
+
+func (r *leasedRunner) finishAfterProducer() error {
+	var waitErr error
+	if waiter, ok := r.inner.(agent.RunnerCompletionWaiter); ok {
+		waitErr = waiter.WaitCompletion(context.Background())
+	}
+	return errors.Join(waitErr, r.finish())
 }
 
 func (r *leasedRunner) finish() error {
 	r.finishOnce.Do(func() {
+		if r.cancel != nil {
+			defer r.cancel()
+		}
 		if r.onFinish != nil {
 			defer r.onFinish()
 		}
-		r.finishErr = r.guard.finish()
+		r.finishErr = r.guard.finishAndErr()
 	})
 	return r.finishErr
 }

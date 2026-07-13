@@ -984,6 +984,43 @@ func TestModelContextRoundTripsThroughSessionStore(t *testing.T) {
 	}
 }
 
+func TestChildVisibilityMirrorDoesNotChangeParentModelContext(t *testing.T) {
+	t.Parallel()
+
+	activeSession := session.Session{SessionRef: session.SessionRef{SessionID: "parent-1"}}
+	user := model.NewTextMessage(model.RoleUser, "delegate this")
+	assistant := model.NewTextMessage(model.RoleAssistant, "canonical final result")
+	canonical := []*session.Event{
+		{ID: "user-1", Type: session.EventTypeUser, Visibility: session.VisibilityCanonical, Message: &user},
+		{ID: "assistant-1", Type: session.EventTypeAssistant, Visibility: session.VisibilityCanonical, Message: &assistant},
+	}
+	contextFor := func(events []*session.Event) agent.Context {
+		return agent.NewContext(agent.ContextSpec{Context: context.Background(), Session: activeSession, Events: events})
+	}
+	before := messagesFromContext(contextFor(canonical))
+	childMirror := &session.Event{
+		ID:         "child-mirror-1",
+		Type:       session.EventTypeAssistant,
+		Visibility: session.VisibilityMirror,
+		ChildOrigin: &session.EventChildOrigin{
+			Scope:         session.EventChildScopeSubagent,
+			ScopeID:       "task-1",
+			TaskID:        "task-1",
+			SourceEventID: "task-1:1",
+			ParentTool:    session.EventParentTool{CallID: "spawn-1", Name: "Spawn"},
+		},
+		Protocol: &session.EventProtocol{Method: session.ProtocolMethodSessionUpdate, Update: &session.ProtocolUpdate{
+			SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage),
+			Content:       session.ProtocolTextContent("private child narrative"),
+		}},
+	}
+	afterEvents := append(session.CloneEvents(canonical), childMirror)
+	after := messagesFromContext(contextFor(afterEvents))
+	if !reflect.DeepEqual(after, before) {
+		t.Fatalf("model context changed after child mirror\nbefore: %#v\nafter:  %#v", before, after)
+	}
+}
+
 func TestProviderReplayMetadataRoundTripsThroughSessionStore(t *testing.T) {
 	t.Parallel()
 

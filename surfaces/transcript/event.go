@@ -98,10 +98,8 @@ type Event struct {
 
 	Usage *eventstream.UsageSnapshot
 
-	// Parent-tool fields flatten the Envelope relationship and the one delivery
-	// policy currently consumed by the Surface. They do not make transcript
-	// state authoritative.
-	AnchorToolCallID     string
-	AnchorToolName       string
-	MirroredToParentTool bool
+	// Parent-tool fields flatten the Envelope relationship. They do not make
+	// transcript state authoritative.
+	AnchorToolCallID string
+	AnchorToolName   string
 }

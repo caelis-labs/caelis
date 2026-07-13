@@ -46,17 +46,11 @@ func ResolveRelationDelivery(env Envelope) RelationDelivery {
 		}
 	}
 	if resolved.Delivery == nil {
-		delivery := Delivery{
-			Transient: metautil.Bool(meta, metautil.Root, metautil.Transient),
-			HasParentToolMirror: metautil.Bool(
-				meta,
-				metautil.Root,
-				metautil.Runtime,
-				metautil.RuntimeStream,
-				metautil.RuntimeStreamMirroredToParentTool,
-			),
+		delivery := Delivery{}
+		if metautil.Bool(meta, metautil.Root, metautil.Transient) {
+			delivery.Mode = DeliveryTransient
 		}
-		if delivery.Transient || delivery.HasParentToolMirror {
+		if delivery.Mode != "" {
 			resolved.Delivery = &delivery
 		}
 	}

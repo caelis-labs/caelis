@@ -44,15 +44,19 @@ type ParentToolRelation struct {
 	ToolName   string `json:"tool_name,omitempty"`
 }
 
-// Delivery classifies how an Envelope reaches a client. A transient Envelope
-// is live-only and has no durable replay authority. HasParentToolMirror is true
-// only when the same source frame emits a parent-tool compatibility mirror;
-// IsParentToolMirror identifies that parent update. The mirror fields do not
-// change the standard ACP payload carried by the Envelope.
+// DeliveryMode classifies one Envelope's replay guarantee.
+type DeliveryMode string
+
+const (
+	DeliveryCanonical DeliveryMode = "canonical"
+	DeliveryMirror    DeliveryMode = "mirror"
+	DeliveryTransient DeliveryMode = "transient"
+)
+
+// Delivery classifies how an Envelope reaches a client. Mode is one exclusive
+// guarantee rather than a set of Boolean flags.
 type Delivery struct {
-	Transient           bool `json:"transient,omitempty"`
-	HasParentToolMirror bool `json:"has_parent_tool_mirror,omitempty"`
-	IsParentToolMirror  bool `json:"is_parent_tool_mirror,omitempty"`
+	Mode DeliveryMode `json:"mode"`
 }
 
 type UsageSnapshot struct {
@@ -107,15 +111,16 @@ func UsageSnapshotFromEnvelope(env Envelope) *UsageSnapshot {
 }
 
 type Envelope struct {
-	Kind         Kind      `json:"kind"`
-	Cursor       string    `json:"cursor,omitempty"`
-	EventID      string    `json:"event_id,omitempty"`
-	ProjectionID string    `json:"projection_id,omitempty"`
-	SessionID    string    `json:"session_id,omitempty"`
-	HandleID     string    `json:"handle_id,omitempty"`
-	RunID        string    `json:"run_id,omitempty"`
-	TurnID       string    `json:"turn_id,omitempty"`
-	OccurredAt   time.Time `json:"occurred_at,omitempty"`
+	Kind         Kind          `json:"kind"`
+	Cursor       string        `json:"cursor,omitempty"`
+	EventID      string        `json:"event_id,omitempty"`
+	ProjectionID string        `json:"projection_id,omitempty"`
+	Position     *FeedPosition `json:"position,omitempty"`
+	SessionID    string        `json:"session_id,omitempty"`
+	HandleID     string        `json:"handle_id,omitempty"`
+	RunID        string        `json:"run_id,omitempty"`
+	TurnID       string        `json:"turn_id,omitempty"`
+	OccurredAt   time.Time     `json:"occurred_at,omitempty"`
 
 	Scope         Scope               `json:"scope,omitempty"`
 	ScopeID       string              `json:"scope_id,omitempty"`
@@ -292,6 +297,7 @@ func firstNonEmpty(values ...string) string {
 
 func CloneEnvelope(in Envelope) Envelope {
 	out := in
+	out.Position = CloneFeedPosition(in.Position)
 	out.Meta = cloneAnyMap(in.Meta)
 	if in.ParentTool != nil {
 		parentTool := *in.ParentTool

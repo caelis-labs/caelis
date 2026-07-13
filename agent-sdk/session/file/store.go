@@ -39,29 +39,33 @@ func NewService(store *Store) *Service {
 }
 
 func (s *Store) withRootWriteLock(fn func() error) error {
-	return s.withRootLock(storeRootLockExclusive, fn)
+	return s.withRootLockContext(context.Background(), storeRootLockExclusive, fn)
 }
 
 func (s *Store) withRootReadLock(fn func() error) error {
 	// Reads may need to finish a committed WAL transaction before exposing
 	// document/event state, so they take the exclusive root lock as well.
-	return s.withRootLock(storeRootLockExclusive, fn)
+	return s.withRootLockContext(context.Background(), storeRootLockExclusive, fn)
 }
 
 func (s *Store) withRootLock(mode storeRootLockMode, fn func() error) error {
+	return s.withRootLockContext(context.Background(), mode, fn)
+}
+
+func (s *Store) withRootLockContext(ctx context.Context, mode storeRootLockMode, fn func() error) error {
 	if s == nil || fn == nil {
 		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 	root := s.normalizedRootDir()
 	lockValue, _ := storeRootLocks.LoadOrStore(root, &storeRootLock{})
 	rootLock := lockValue.(*storeRootLock)
-	if mode == storeRootLockShared {
-		rootLock.mu.RLock()
-		defer rootLock.mu.RUnlock()
-	} else {
-		rootLock.mu.Lock()
-		defer rootLock.mu.Unlock()
+	if err := rootLock.mu.LockContext(ctx); err != nil {
+		return err
 	}
+	defer rootLock.mu.Unlock()
 
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		return err
@@ -69,7 +73,7 @@ func (s *Store) withRootLock(mode storeRootLockMode, fn func() error) error {
 	if err := os.Chmod(root, 0o700); err != nil {
 		return err
 	}
-	file, err := lockSessionStoreRoot(root, mode)
+	file, err := lockSessionStoreRoot(ctx, root, mode)
 	if err != nil {
 		return err
 	}
@@ -442,6 +446,32 @@ func (s *Store) Events(
 	return out, nil
 }
 
+// EventsPage streams one bounded forward sequence page from the event log.
+func (s *Store) EventsPage(
+	_ context.Context,
+	req session.EventPageRequest,
+) (session.EventPage, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var out session.EventPage
+	if err := s.withRootReadLock(func() error {
+		doc, err := s.readDocumentForRef(req.SessionRef)
+		if err != nil {
+			return err
+		}
+		path, err := s.resolveWritePath(doc.Session)
+		if err != nil {
+			return err
+		}
+		out, err = s.readEventLogPage(path, req)
+		return err
+	}); err != nil {
+		return session.EventPage{}, err
+	}
+	return out, nil
+}
+
 func (s *Store) BindController(
 	_ context.Context,
 	ref session.SessionRef,
@@ -758,17 +788,10 @@ func (s *Store) SnapshotState(
 	defer s.mu.Unlock()
 
 	var out map[string]any
-	if err := s.withRootWriteLock(func() error {
+	if err := s.withRootReadLock(func() error {
 		doc, err := s.readDocumentForRef(ref)
 		if err != nil {
 			return err
-		}
-		if doc.State == nil {
-			doc.State = map[string]any{}
-			doc.Session.Revision++
-			if err := s.writeDocument(doc); err != nil {
-				return err
-			}
 		}
 		out = cloneState(doc.State)
 		return nil
@@ -780,45 +803,65 @@ func (s *Store) SnapshotState(
 
 func (s *Store) ReplaceState(
 	_ context.Context,
-	ref session.SessionRef,
-	state map[string]any,
-) error {
-	if err := session.ValidateState(state); err != nil {
-		return err
+	req session.ReplaceStateRequest,
+) (session.Session, error) {
+	if err := session.ValidateState(req.State); err != nil {
+		return session.Session{}, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	return s.withRootWriteLock(func() error {
-		doc, err := s.readDocumentForRef(ref)
+	var out session.Session
+	err := s.withRootWriteLock(func() error {
+		doc, err := s.readDocumentForRef(req.SessionRef)
 		if err != nil {
 			return err
 		}
-		doc.State = cloneState(state)
+		if err := validateFileMutationGuard(activeDocumentLease(doc), req.MutationGuard, s.now()); err != nil {
+			return err
+		}
+		if err := session.CheckExpectedRevision(doc.Session, req.ExpectedRevision); err != nil {
+			return err
+		}
+		doc.State = cloneState(req.State)
 		doc.Session.Revision++
 		doc.Session.UpdatedAt = s.now()
-		return s.writeDocument(doc)
+		out = session.CloneSession(doc.Session)
+		if err := s.writeDocument(doc); err != nil {
+			if documentWriteCommitted(err) {
+				return &session.CommittedError{Err: err}
+			}
+			return err
+		}
+		return nil
 	})
+	return out, err
 }
 
 func (s *Store) UpdateState(
 	_ context.Context,
-	ref session.SessionRef,
-	update func(map[string]any) (map[string]any, error),
-) error {
-	if update == nil {
-		return nil
-	}
-
+	req session.UpdateStateRequest,
+) (session.Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	return s.withRootWriteLock(func() error {
-		doc, err := s.readDocumentForRef(ref)
+	var out session.Session
+	err := s.withRootWriteLock(func() error {
+		doc, err := s.readDocumentForRef(req.SessionRef)
 		if err != nil {
 			return err
 		}
-		next, err := update(cloneState(doc.State))
+		if err := validateFileMutationGuard(activeDocumentLease(doc), req.MutationGuard, s.now()); err != nil {
+			return err
+		}
+		if err := session.CheckExpectedRevision(doc.Session, req.ExpectedRevision); err != nil {
+			return err
+		}
+		if req.Update == nil {
+			out = session.CloneSession(doc.Session)
+			return nil
+		}
+		next, err := req.Update(cloneState(doc.State))
 		if err != nil {
 			return err
 		}
@@ -828,8 +871,16 @@ func (s *Store) UpdateState(
 		doc.State = cloneState(next)
 		doc.Session.Revision++
 		doc.Session.UpdatedAt = s.now()
-		return s.writeDocument(doc)
+		out = session.CloneSession(doc.Session)
+		if err := s.writeDocument(doc); err != nil {
+			if documentWriteCommitted(err) {
+				return &session.CommittedError{Err: err}
+			}
+			return err
+		}
+		return nil
 	})
+	return out, err
 }
 
 func (s *Store) LoadDocument(

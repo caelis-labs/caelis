@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/app/controlserver"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/internal/acpagentenv"
 	"github.com/caelis-labs/caelis/internal/testenv"
@@ -21,6 +22,28 @@ import (
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
+
+func TestRunServeStartsProductControlServer(t *testing.T) {
+	previous := runControlServerCommand
+	t.Cleanup(func() { runControlServerCommand = previous })
+	var captured controlserver.Config
+	runControlServerCommand = func(_ context.Context, stack *gatewayapp.Stack, config controlserver.Config) error {
+		if stack == nil || stack.ControlClient() == nil {
+			t.Fatal("serve did not assemble the product Control client")
+		}
+		captured = config
+		return nil
+	}
+	err := run(context.Background(), []string{
+		"serve", "--store-dir", t.TempDir(), "--listen", "0.0.0.0:7777", "--control-token", "secret",
+	}, nil, io.Discard, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if captured.Address != "0.0.0.0:7777" || captured.Authenticator == nil || captured.LocalPrincipal.ID != "local-user" {
+		t.Fatalf("control server config = %#v", captured)
+	}
+}
 
 func TestResolveInputFromPrompt(t *testing.T) {
 	got, single, err := resolveInput("hello", strings.NewReader(""), true)

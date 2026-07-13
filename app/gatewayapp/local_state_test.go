@@ -82,14 +82,14 @@ func TestStackSessionRuntimeStateTracksModelAndSessionModeOverrides(t *testing.T
 func TestStackSessionRuntimeStateRejectsLegacySessionState(t *testing.T) {
 	ctx := context.Background()
 	stack, activeSession := newLocalStateTestStack(t)
-	if err := stack.Sessions.UpdateState(ctx, activeSession.SessionRef, func(state map[string]any) (map[string]any, error) {
+	if _, err := stack.Sessions.UpdateState(ctx, session.UpdateStateRequest{SessionRef: activeSession.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Update: func(state map[string]any) (map[string]any, error) {
 		next := session.CloneState(state)
 		if next == nil {
 			next = map[string]any{}
 		}
 		next["gateway.current_session_mode"] = "manual"
 		return next, nil
-	}); err != nil {
+	}}); err != nil {
 		t.Fatalf("UpdateState() error = %v", err)
 	}
 
@@ -552,14 +552,14 @@ func TestStackDeleteOnlyModelClearsRuntimeModelState(t *testing.T) {
 func TestSessionRuntimeStateIgnoresStaleModelAliasOutsideConfig(t *testing.T) {
 	ctx := context.Background()
 	stack, activeSession := newLocalStateTestStack(t)
-	if err := stack.Sessions.UpdateState(ctx, activeSession.SessionRef, func(state map[string]any) (map[string]any, error) {
+	if _, err := stack.Sessions.UpdateState(ctx, session.UpdateStateRequest{SessionRef: activeSession.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Update: func(state map[string]any) (map[string]any, error) {
 		next := session.CloneState(state)
 		if next == nil {
 			next = map[string]any{}
 		}
 		next["gateway.current_model_alias"] = "minimax/minimax-m2.7-highspeed"
 		return next, nil
-	}); err != nil {
+	}}); err != nil {
 		t.Fatalf("UpdateState() error = %v", err)
 	}
 	state, err := stack.SessionRuntimeState(ctx, activeSession.SessionRef)

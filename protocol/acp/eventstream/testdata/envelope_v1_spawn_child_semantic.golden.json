@@ -14,8 +14,7 @@
     "tool_name": "Spawn"
   },
   "delivery": {
-    "transient": true,
-    "has_parent_tool_mirror": true
+    "mode": "transient"
   },
   "update": {
     "sessionUpdate": "tool_call",

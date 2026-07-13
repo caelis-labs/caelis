@@ -262,6 +262,41 @@ func TestProjectSessionEventEnvelopeKeepsLiveAndReplayNarrativeAligned(t *testin
 	}
 }
 
+func TestEnvelopeBaseFromSessionEventUsesDurableChildOrigin(t *testing.T) {
+	event := &session.Event{
+		ID:         "child-mirror-1",
+		Seq:        17,
+		SessionID:  "parent-1",
+		Type:       session.EventTypeAssistant,
+		Visibility: session.VisibilityMirror,
+		ChildOrigin: &session.EventChildOrigin{
+			Scope:         session.EventChildScopeSubagent,
+			ScopeID:       "task-1",
+			TaskID:        "task-1",
+			DelegationID:  "task-1",
+			ParticipantID: "child-1",
+			ACPSessionID:  "acp-child-1",
+			SourceEventID: "task-1:8",
+			ParentTool:    session.EventParentTool{CallID: "spawn-1", Name: "Spawn"},
+		},
+		Protocol: &session.EventProtocol{Method: session.ProtocolMethodSessionUpdate, Update: &session.ProtocolUpdate{
+			SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage),
+			MessageID:     "same-message-id",
+			Content:       session.ProtocolTextContent("child output"),
+		}},
+	}
+	base := EnvelopeBaseFromSessionEvent(session.SessionRef{SessionID: "parent-1"}, event, SessionEventTransport{TurnID: "turn-1"})
+	if base.Scope != eventstream.ScopeSubagent || base.ScopeID != "task-1" || base.ParticipantID != "child-1" {
+		t.Fatalf("base scope = %#v", base)
+	}
+	if base.ParentTool == nil || base.ParentTool.ToolCallID != "spawn-1" || base.ParentTool.ToolName != "Spawn" {
+		t.Fatalf("base parent relation = %#v", base.ParentTool)
+	}
+	if base.Delivery == nil || base.Delivery.Mode != eventstream.DeliveryMirror {
+		t.Fatalf("base delivery = %#v, want mirror", base.Delivery)
+	}
+}
+
 func TestProjectSessionEventNotificationsPreservesCustomNotificationsAndAppendsUsage(t *testing.T) {
 	notifications, err := ProjectSessionEventNotifications(eventstream.Envelope{
 		SessionID: "base-session",

@@ -51,8 +51,8 @@ Document responsibilities are intentionally separate:
   contracts and current limitations;
 - [ACP Projection Architecture](acp-projection-architecture.md) owns semantic,
   wire, and surface projection boundaries;
-- [Control and Client Protocol Roadmap](control-client-roadmap.md) owns the
-  ordered next-stage implementation plan and milestone acceptance criteria;
+- [Control Client Protocol v1 — M2 Design](control-client-m2-design.md) owns the
+  accepted product-client command, feed, replay, HTTP/SSE, and release boundary;
 - [Release](release.md) owns release and post-publish verification mechanics.
 
 ## Current Map
@@ -65,6 +65,15 @@ Document responsibilities are intentionally separate:
 - `agent-sdk/*`: reusable SDK package tree. It owns runtime, model, tool, session,
   sandbox, task, policy, skill, and display contracts and reusable
   implementations.
+- `ports/controlclient`: transport-neutral product-client commands, outcomes,
+  bootstrap state, and Session-feed subscription contracts.
+- `internal/controlclient`: Control-owned authorization, operation ledger,
+  command dispatch, Session feed/replay, child recorder, approval recovery, and
+  state assembly. `internal/controlclient/turningress` is the one shared
+  Turn/task ingress and does not own task execution.
+- `surfaces/appserver`: thin HTTP JSON/SSE and authentication mapping over
+  `ports/controlclient`; `app/controlserver` owns production listener assembly
+  and fail-closed network configuration.
 - `ports/controlcommand`, `ports/controlprompt`: transitional command catalog
   plus prompt request/result parsing contracts.
 - `internal/controlpromptrouter`: shared app-control slash orchestration over
@@ -72,8 +81,11 @@ Document responsibilities are intentionally separate:
 - `internal/controlassembly`: product Agent assembly and profile resolution.
 - `internal/controlplane`: shared-ledger routing, endpoint lifecycle/recovery,
   and handoff coordination.
-- `app/gatewayapp`, `internal/kernel`, `protocol/acp/control`: remaining control
-  layer hotspots and host integration.
+- `app/gatewayapp`, `internal/kernel`: remaining Control host integration and
+  runtime coordination hotspots.
+- `protocol/acp/control.Service` and `app/gatewayapp/controladapter`:
+  transitional in-process ACP/TUI command adapters. New product-client
+  operations belong in `ports/controlclient`, not these aggregate interfaces.
 - `ports/gateway`, `ports/plugin`, `ports/controlcommand`,
   `ports/controlprompt`, and `ports/agentprofile`: product-host contracts that
   stay outside the SDK.
@@ -151,7 +163,11 @@ and ACP controllers plus Side ACP or Reviewer participant prompts use the same
 fenced envelope. Participant lifecycle is explicit Control metadata with
 revision/delegation/generation CAS; handoff acquires the exclusive lease before
 endpoint activation and binding commit. ACP event forwarding preserves the
-owning Turn fence instead of becoming an unscoped writer.
+owning Turn fence instead of becoming an unscoped writer. The leased Runtime
+starts renewal with the acquired fence, keeps that lease through asynchronous
+producer completion, cancels execution on heartbeat loss, and releases only
+after the producer boundary closes. A lease conflict on an ordinary supported
+user path is therefore a correctness failure, not a retry hint.
 
 Execution capability wiring and the liveness watchdog are Control-owned. The
 watchdog is a generation-tail loop probe for repeated pure-text cycles and

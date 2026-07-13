@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -700,12 +699,16 @@ func TestRuntimeAgentPromptRouterDeduplicatesFinalNarrativeReplay(t *testing.T) 
 	}
 }
 
-func TestRuntimeAgentPromptRouterTurnFeedSuppressesMirroredSubagentEvents(t *testing.T) {
+func TestRuntimeAgentPromptRouterTurnFeedForwardsChildSemanticUpdatesOnce(t *testing.T) {
 	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
 	runtime := &promptRouterRuntime{sessions: sessions}
 	status := acp.ToolStatusInProgress
+	completed := acp.ToolStatusCompleted
 	spawnKind := "SPAWN"
-	childTitle := "LIST /tmp/project"
+	childTitle := "Apply child patch"
+	line := 12
+	parentTool := &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "SPAWN"}
+	childDelivery := &eventstream.Delivery{Mode: eventstream.DeliveryTransient}
 	main := eventstream.Envelope{
 		Kind:      eventstream.KindSessionUpdate,
 		SessionID: "session-1",
@@ -714,34 +717,95 @@ func TestRuntimeAgentPromptRouterTurnFeedSuppressesMirroredSubagentEvents(t *tes
 			ToolCallID:    "spawn-1",
 			Kind:          &spawnKind,
 			Status:        &status,
-			Content: []acp.ToolCallContent{{
-				Type:       "terminal",
-				TerminalID: "spawn-1",
-			}},
 		},
 	}
 	streamEvents := []eventstream.Envelope{
 		{
-			Kind:      eventstream.KindSessionUpdate,
-			SessionID: "session-1",
-			Scope:     eventstream.ScopeSubagent,
-			ScopeID:   "task-1",
-			Meta:      mirroredSubagentStreamMetaForTest("spawn-1", "SPAWN"),
+			Kind:       eventstream.KindSessionUpdate,
+			SessionID:  "session-1",
+			Scope:      eventstream.ScopeSubagent,
+			ScopeID:    "task-1",
+			ParentTool: parentTool,
+			Delivery:   childDelivery,
 			Update: acp.ContentChunk{
 				SessionUpdate: acp.UpdateAgentMessage,
-				Content:       acp.TextContent{Type: "text", Text: "child answer"},
+				MessageID:     "child-message-1",
+				Content:       acp.TextContent{Type: "text", Text: "child opening"},
 			},
 		},
 		{
-			Kind:      eventstream.KindSessionUpdate,
-			SessionID: "session-1",
-			Scope:     eventstream.ScopeSubagent,
-			ScopeID:   "task-1",
-			Meta:      mirroredSubagentStreamMetaForTest("spawn-1", "SPAWN"),
+			Kind:       eventstream.KindSessionUpdate,
+			SessionID:  "session-1",
+			Scope:      eventstream.ScopeSubagent,
+			ScopeID:    "task-1",
+			ParentTool: parentTool,
+			Delivery:   childDelivery,
+			Update: acp.ContentChunk{
+				SessionUpdate: acp.UpdateAgentThought,
+				Content:       acp.TextContent{Type: "text", Text: "child thought"},
+			},
+		},
+		{
+			Kind:       eventstream.KindSessionUpdate,
+			SessionID:  "session-1",
+			Scope:      eventstream.ScopeSubagent,
+			ScopeID:    "task-1",
+			ParentTool: parentTool,
+			Delivery:   childDelivery,
+			Update: acp.ToolCall{
+				SessionUpdate: acp.UpdateToolCall,
+				ToolCallID:    "child-list-1",
+				Title:         childTitle,
+				Kind:          "PATCH",
+				Status:        acp.ToolStatusInProgress,
+			},
+		},
+		{
+			Kind:       eventstream.KindSessionUpdate,
+			SessionID:  "session-1",
+			Scope:      eventstream.ScopeSubagent,
+			ScopeID:    "task-1",
+			ParentTool: parentTool,
+			Delivery:   childDelivery,
 			Update: acp.ToolCallUpdate{
 				SessionUpdate: acp.UpdateToolCallInfo,
 				ToolCallID:    "child-list-1",
-				Title:         &childTitle,
+				Status:        &completed,
+				Locations:     []acp.ToolCallLocation{{Path: "child.txt", Line: &line}},
+				Content: []acp.ToolCallContent{{
+					Type:    "diff",
+					Path:    "child.txt",
+					NewText: "new child text\n",
+				}},
+			},
+		},
+		{
+			Kind:       eventstream.KindSessionUpdate,
+			SessionID:  "session-1",
+			Scope:      eventstream.ScopeSubagent,
+			ScopeID:    "task-1",
+			ParentTool: parentTool,
+			Delivery:   childDelivery,
+			Update: schema.PlanUpdate{
+				SessionUpdate: schema.UpdatePlan,
+				Entries: []schema.PlanEntry{{
+					Content: "inspect child output",
+					Status:  "in_progress",
+				}},
+			},
+		},
+		{
+			Kind:       eventstream.KindSessionUpdate,
+			SessionID:  "session-1",
+			Scope:      eventstream.ScopeSubagent,
+			ScopeID:    "task-1",
+			ParentTool: parentTool,
+			Delivery:   childDelivery,
+			Final:      true,
+			Update: acp.ContentChunk{
+				SessionUpdate: acp.UpdateAgentMessage,
+				MessageID:     "child-message-final",
+				Content:       acp.TextContent{Type: "text", Text: "child final"},
 			},
 		},
 		{
@@ -750,12 +814,10 @@ func TestRuntimeAgentPromptRouterTurnFeedSuppressesMirroredSubagentEvents(t *tes
 			Update: acp.ToolCallUpdate{
 				SessionUpdate: acp.UpdateToolCallInfo,
 				ToolCallID:    "spawn-1",
-				Content: []acp.ToolCallContent{{
-					Type:       "terminal",
-					TerminalID: "spawn-1",
-					Content:    acp.TextContent{Type: "text", Text: "child answer"},
-				}},
-				Meta: transientTerminalStreamMetaForTest("append"),
+				Status:        &completed,
+				Meta: map[string]any{"caelis": map[string]any{"runtime": map[string]any{"task": map[string]any{
+					"task_id": "task-1", "running": false, "state": "completed", "result": "child final",
+				}}}},
 			},
 		},
 	}
@@ -795,180 +857,76 @@ func TestRuntimeAgentPromptRouterTurnFeedSuppressesMirroredSubagentEvents(t *tes
 	if err != nil {
 		t.Fatalf("Prompt(/review) error = %v", err)
 	}
-	if got := agentMessageChunks(cb.notifications); len(got) != 0 {
-		t.Fatalf("agent message chunks = %#v, want mirrored child messages suppressed", got)
+	if got, want := agentMessageChunks(cb.notifications), []string{"child opening", "child final"}; strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("agent message chunks = %#v, want forwarded child messages %#v", got, want)
 	}
-	if hasToolCallNotification(cb.notifications, "child-list-1") {
-		t.Fatalf("notifications = %#v, want child tool update suppressed", cb.notifications)
+	if got, want := agentThoughtChunks(cb.notifications), []string{"child thought"}; strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("agent thought chunks = %#v, want forwarded child thought %#v", got, want)
 	}
-	if outputs := terminalOutputPayloads(cb.notifications, "spawn-1"); strings.Join(outputs, "") != "child answer" {
-		t.Fatalf("terminal outputs = %#v, want transient parent SPAWN stream terminal meta", outputs)
+	if countToolCallNotifications(cb.notifications, "child-list-1") != 2 {
+		t.Fatalf("notifications = %#v, want one child tool call and one update", cb.notifications)
 	}
-	if !hasTerminalInfo(cb.notifications, "spawn-1", "spawn-1") {
-		t.Fatalf("notifications = %#v, want parent SPAWN terminal info for ACP stdio", cb.notifications)
+	if !hasChildToolUpdateWithDiffAndLocation(cb.notifications, "child-list-1") {
+		t.Fatalf("notifications = %#v, want forwarded child diff and location", cb.notifications)
 	}
-}
-
-func TestRuntimeAgentPromptRouterTurnFeedSuppressesTypedAndLegacySubagentEnvelopes(t *testing.T) {
-	cases := []struct {
-		name  string
-		typed bool
-	}{
-		{name: "typed only", typed: true},
-		{name: "legacy metadata"},
+	if countPlanNotifications(cb.notifications) != 1 {
+		t.Fatalf("notifications = %#v, want one forwarded child plan", cb.notifications)
 	}
-	var wantNotifications []acp.SessionNotification
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
-			runtime := &promptRouterRuntime{sessions: sessions}
-			status := acp.ToolStatusInProgress
-			spawnKind := "SPAWN"
-			childTitle := "LIST /tmp/project"
-			main := eventstream.Envelope{
-				Kind:      eventstream.KindSessionUpdate,
-				SessionID: "session-1",
-				Update: acp.ToolCallUpdate{
-					SessionUpdate: acp.UpdateToolCallInfo,
-					ToolCallID:    "spawn-1",
-					Kind:          &spawnKind,
-					Status:        &status,
-					Content:       []acp.ToolCallContent{{Type: "terminal", TerminalID: "spawn-1"}},
-				},
-			}
-			parentTool, childDelivery, childPlanDelivery, childMeta := bridgeSubagentEnvelopeFieldsForTest(tc.typed)
-			streamEvents := []eventstream.Envelope{
-				{
-					Kind:       eventstream.KindSessionUpdate,
-					SessionID:  "session-1",
-					Scope:      eventstream.ScopeSubagent,
-					ScopeID:    "task-1",
-					ParentTool: parentTool,
-					Delivery:   childDelivery,
-					Meta:       childMeta,
-					Update: acp.ContentChunk{
-						SessionUpdate: acp.UpdateAgentMessage,
-						Content:       acp.TextContent{Type: "text", Text: "child answer"},
-					},
-				},
-				{
-					Kind:       eventstream.KindSessionUpdate,
-					SessionID:  "session-1",
-					Scope:      eventstream.ScopeSubagent,
-					ScopeID:    "task-1",
-					ParentTool: parentTool,
-					Delivery:   childDelivery,
-					Meta:       childMeta,
-					Update: acp.ToolCallUpdate{
-						SessionUpdate: acp.UpdateToolCallInfo,
-						ToolCallID:    "child-list-1",
-						Title:         &childTitle,
-					},
-				},
-				{
-					Kind:       eventstream.KindSessionUpdate,
-					SessionID:  "session-1",
-					Scope:      eventstream.ScopeSubagent,
-					ScopeID:    "task-1",
-					ParentTool: parentTool,
-					Delivery:   childPlanDelivery,
-					Meta:       childMeta,
-					Update: schema.PlanUpdate{
-						SessionUpdate: schema.UpdatePlan,
-						Entries: []schema.PlanEntry{{
-							Content: "inspect child output",
-							Status:  "in_progress",
-						}},
-					},
-				},
-				{
-					Kind:      eventstream.KindSessionUpdate,
-					SessionID: "session-1",
-					Delivery:  bridgeParentMirrorDeliveryForTest(tc.typed),
-					Update: acp.ToolCallUpdate{
-						SessionUpdate: acp.UpdateToolCallInfo,
-						ToolCallID:    "spawn-1",
-						Content: []acp.ToolCallContent{{
-							Type:       "terminal",
-							TerminalID: "spawn-1",
-							Content:    acp.TextContent{Type: "text", Text: "child answer"},
-						}},
-						Meta: transientTerminalStreamMetaForTest("append"),
-					},
-				},
-			}
-			turn := newTestControlTurn(append([]eventstream.Envelope{main}, streamEvents...)...)
-			router := &testPromptRouter{result: controlprompt.Result{Handled: true, Turn: turn}}
-			agent, err := runtimeacp.New(runtimeacp.Config{
-				Runtime:  runtime,
-				Sessions: sessions,
-				BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
-					return agent.AgentSpec{}, errors.New("main agent spec should not be built for handled slash command")
-				},
-				PromptRouterFactory: func(context.Context, session.Session) (controlprompt.Router, error) {
-					return router, nil
-				},
-				AppName: "caelis",
-				UserID:  "user-1",
-			})
-			if err != nil {
-				t.Fatalf("runtimeacp.New() error = %v", err)
-			}
-			activeSession, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
-			if err != nil {
-				t.Fatalf("NewSession() error = %v", err)
-			}
-			cb := &recordingPromptCallbacks{}
-			if _, err := agent.Prompt(context.Background(), acp.PromptRequest{
-				SessionID: activeSession.SessionID,
-				Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"/review"}`)},
-			}, cb); err != nil {
-				t.Fatalf("Prompt(/review) error = %v", err)
-			}
-			if got := agentMessageChunks(cb.notifications); len(got) != 0 {
-				t.Fatalf("agent message chunks = %#v, want child message suppressed", got)
-			}
-			if hasToolCallNotification(cb.notifications, "child-list-1") {
-				t.Fatalf("notifications = %#v, want child tool update suppressed", cb.notifications)
-			}
-			if hasPlanNotification(cb.notifications) {
-				t.Fatalf("notifications = %#v, want child plan suppressed", cb.notifications)
-			}
-			if outputs := terminalOutputPayloads(cb.notifications, "spawn-1"); strings.Join(outputs, "") != "child answer" {
-				t.Fatalf("terminal outputs = %#v, want parent compatibility mirror", outputs)
-			}
-			if !hasTerminalInfo(cb.notifications, "spawn-1", "spawn-1") {
-				t.Fatalf("notifications = %#v, want parent terminal info", cb.notifications)
-			}
-			if wantNotifications == nil {
-				wantNotifications = append([]acp.SessionNotification(nil), cb.notifications...)
-			} else if !reflect.DeepEqual(cb.notifications, wantNotifications) {
-				t.Fatalf("typed and legacy notifications differ\ngot: %#v\nwant: %#v", cb.notifications, wantNotifications)
-			}
-		})
+	if outputs := terminalOutputPayloads(cb.notifications, "spawn-1"); len(outputs) != 0 {
+		t.Fatalf("terminal outputs = %#v, want no parent terminal replay", outputs)
+	}
+	if !hasCompletedToolUpdate(cb.notifications, "spawn-1") {
+		t.Fatalf("notifications = %#v, want parent final summary", cb.notifications)
 	}
 }
 
-func bridgeSubagentEnvelopeFieldsForTest(typed bool) (*eventstream.ParentToolRelation, *eventstream.Delivery, *eventstream.Delivery, map[string]any) {
-	if !typed {
-		return nil, nil, nil, mirroredSubagentStreamMetaForTest("spawn-1", "SPAWN")
-	}
-	return &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"},
-		&eventstream.Delivery{Transient: true, HasParentToolMirror: true},
-		&eventstream.Delivery{Transient: true}, nil
-}
-
-func bridgeParentMirrorDeliveryForTest(typed bool) *eventstream.Delivery {
-	if !typed {
-		return nil
-	}
-	return &eventstream.Delivery{Transient: true, IsParentToolMirror: true}
-}
-
-func hasPlanNotification(notifications []acp.SessionNotification) bool {
+func countPlanNotifications(notifications []acp.SessionNotification) int {
+	count := 0
 	for _, notification := range notifications {
 		if _, ok := notification.Update.(acp.PlanUpdate); ok {
+			count++
+		}
+	}
+	return count
+}
+
+func countToolCallNotifications(notifications []acp.SessionNotification, toolCallID string) int {
+	count := 0
+	for _, notification := range notifications {
+		switch update := notification.Update.(type) {
+		case acp.ToolCall:
+			if strings.TrimSpace(update.ToolCallID) == toolCallID {
+				count++
+			}
+		case acp.ToolCallUpdate:
+			if strings.TrimSpace(update.ToolCallID) == toolCallID {
+				count++
+			}
+		}
+	}
+	return count
+}
+
+func hasChildToolUpdateWithDiffAndLocation(notifications []acp.SessionNotification, toolCallID string) bool {
+	for _, notification := range notifications {
+		update, ok := notification.Update.(acp.ToolCallUpdate)
+		if !ok || strings.TrimSpace(update.ToolCallID) != toolCallID || update.Status == nil || *update.Status != acp.ToolStatusCompleted {
+			continue
+		}
+		if len(update.Locations) != 1 || update.Locations[0].Path != "child.txt" || len(update.Content) != 1 {
+			continue
+		}
+		if content := update.Content[0]; content.Type == "diff" && content.Path == "child.txt" && content.NewText == "new child text\n" {
+			return true
+		}
+	}
+	return false
+}
+
+func hasCompletedToolUpdate(notifications []acp.SessionNotification, toolCallID string) bool {
+	for _, notification := range notifications {
+		update, ok := notification.Update.(acp.ToolCallUpdate)
+		if ok && strings.TrimSpace(update.ToolCallID) == toolCallID && update.Status != nil && *update.Status == acp.ToolStatusCompleted {
 			return true
 		}
 	}

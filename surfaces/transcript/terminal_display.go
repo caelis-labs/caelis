@@ -87,6 +87,18 @@ func TerminalToolOutputText(input ToolOutputFallbackInput) string {
 	return ""
 }
 
+// DelegatedTaskResultText returns the canonical final Spawn/Task result carried
+// in documented runtime task metadata. It is distinct from terminal output and
+// is only used once the delegated tool has reached a final state.
+func DelegatedTaskResultText(input ToolOutputFallbackInput) string {
+	canonical, _ := names.Resolve(input.ToolName)
+	if (canonical != names.Spawn && canonical != names.Task) || !ToolStatusFinal(input.Status, input.Error) {
+		return ""
+	}
+	taskMeta := RuntimeTaskMeta(input.Meta)
+	return display.SubagentTaskFinalText(rawDisplayString(taskMeta["state"]), taskMeta)
+}
+
 func TerminalTaskStillRunning(rawOutput map[string]any, meta map[string]any) bool {
 	if rawBool(rawOutput["running"]) {
 		return true

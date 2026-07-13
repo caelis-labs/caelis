@@ -288,6 +288,9 @@ package github.com/caelis-labs/caelis/agent-sdk
       Cancel() CancelResult
       Close() error
   }
+  type RunnerCompletionWaiter interface {
+      WaitCompletion(context.Context) error
+  }
   type Runtime interface {
       Run(context.Context, RunRequest) (RunResult, error)
       RunState(context.Context, session.SessionRef) (RunState, error)
@@ -396,6 +399,7 @@ package github.com/caelis-labs/caelis/agent-sdk/approval
   func NormalizeProtocolOptions(options []session.ProtocolApprovalOption) []Option
   func OptionIDs(options []Option) []string
   func PayloadFromRuntimeRequest(req agentsdk.ApprovalRequest) *Payload
+  func ProtocolApprovalFromPayload(payload *Payload) *session.ProtocolApproval
   func ResolveReviewResult(payload *Payload, result ReviewResult) ReviewResult
   func ReviewErrorOutcome(err error) (ReviewStatus, string, bool)
   func ReviewID(prefix string, payload *Payload) string
@@ -1677,12 +1681,24 @@ package github.com/caelis-labs/caelis/agent-sdk/session
       ControlMutationPurposeWatchdog     ControlMutationPurpose = "watchdog"
       ControlMutationPurposeCoordinator  ControlMutationPurpose = "coordinator"
       ControlMutationPurposeParticipant  ControlMutationPurpose = "participant"
+      ControlMutationPurposeLifecycle    ControlMutationPurpose = "session_lifecycle"
       ControlMutationPurposeTest         ControlMutationPurpose = "test"
       ControlMutationPurposeSystemCommit ControlMutationPurpose = "system_commit"
   )
   const (
       ControllerKindKernel ControllerKind = "kernel"
       ControllerKindACP    ControllerKind = "acp"
+  )
+  const (
+      EventChildScopeSubagent    EventChildScope = "subagent"
+      EventChildScopeParticipant EventChildScope = "participant"
+  )
+  const (
+      EventPageCanonical EventPageVisibility = "canonical"
+
+      EventPageClientReplay EventPageVisibility = "client_replay"
+
+      EventPageAllDurable EventPageVisibility = "all_durable"
   )
   const (
       EventSchemaVersion = 1
@@ -1826,6 +1842,7 @@ package github.com/caelis-labs/caelis/agent-sdk/session
   func CloneActorRef(in ActorRef) ActorRef
   func CloneControllerBinding(in ControllerBinding) ControllerBinding
   func CloneEvent(in *Event) *Event
+  func CloneEventChildOrigin(in EventChildOrigin) EventChildOrigin
   func CloneEventInvocation(in EventInvocation) EventInvocation
   func CloneEventProtocol(in EventProtocol) EventProtocol
   func CloneEventScope(in EventScope) EventScope
@@ -1848,15 +1865,18 @@ package github.com/caelis-labs/caelis/agent-sdk/session
   func ControlMutationMayOverlapRuntimeLease(purpose ControlMutationPurpose) bool
   func DefaultMigrationRegistry() *MigrationRegistry
   func EventDisplayText(event *Event) string
+  func EventMatchesPageVisibility(event *Event, visibility EventPageVisibility) bool
   func EventText(event *Event) string
   func EventToolProjection(event *Event) *EventTool
   func EventTypeOf(event *Event) EventType
   func EventValidationDetail(err error) string
   func ExecutionIdentity(key ExecutionKey) string
   func ExecutionRecordIdentity(record ExecutionRecord) string
+  func FilterClientReplayEvents(events []*Event) []*Event
   func FilterEvents(events []*Event, limit int, includeTransient bool) []*Event
   func FilterReplayTranscriptEvents(events []*Event, includeTransient bool) []*Event
   func IsCanonicalHistoryEvent(event *Event) bool
+  func IsClientReplayEvent(event *Event) bool
   func IsCommitted(err error) bool
   func IsInvocationVisibleEvent(event *Event) bool
   func IsJournal(event *Event) bool
@@ -1882,12 +1902,14 @@ package github.com/caelis-labs/caelis/agent-sdk/session
   func NewHandoffProtocol(handoff ProtocolHandoff) EventProtocol
   func NewMigrationRegistry() *MigrationRegistry
   func NewParticipantProtocol(participant ProtocolParticipant) EventProtocol
+  func NormalizeEventPageRequest(req EventPageRequest) EventPageRequest
   func NormalizeExecutionKey(in ExecutionKey) ExecutionKey
   func NormalizeExecutionRecord(in ExecutionRecord) ExecutionRecord
   func NormalizeSessionRef(ref SessionRef) SessionRef
   func NormalizeToolExecution(in ToolExecution) ToolExecution
   func NormalizeUsageForDisplay(usage UsageSnapshot, provider string) UsageSnapshot
   func NoticeOf(event *Event) (EventNotice, bool)
+  func PageEvents(events []*Event, req EventPageRequest) EventPage
   func PlanPayloadOf(event *Event) *EventPlanPayload
   func PrepareAppendTransaction(req PrepareAppendTransactionRequest) (PreparedAppendTransaction, error)
   func PrepareEventsForAppend(req PrepareEventsForAppendRequest) (PreparedAppendEvents, error)
@@ -1912,6 +1934,7 @@ package github.com/caelis-labs/caelis/agent-sdk/session
   func UsageSnapshotFromSessionEvent(event *Event) *UsageSnapshot
   func ValidateControlMutationGuard(guard MutationGuard) error
   func ValidateDurableCoreEvent(event *Event) error
+  func ValidateEventChildOrigin(in EventChildOrigin) error
   func ValidateExecutionJournalEntry(in ExecutionJournalEntry) error
   func ValidateExecutionTransition(previous ExecutionRecord, next ExecutionRecord) error
   func ValidateMetadata(metadata map[string]any) error
@@ -1997,26 +2020,28 @@ package github.com/caelis-labs/caelis/agent-sdk/session
       EpochID string         `json:"epoch_id,omitempty"`
   }
   type Event struct {
-      ID             string                 `json:"id,omitempty"`
-      IdempotencyKey string                 `json:"idempotency_key,omitempty"`
-      SessionID      string                 `json:"session_id,omitempty"`
-      Seq            uint64                 `json:"seq,omitempty"`
-      Schema         int                    `json:"schema,omitempty"`
-      Type           EventType              `json:"type,omitempty"`
-      Visibility     Visibility             `json:"visibility,omitempty"`
-      Time           time.Time              `json:"time,omitempty"`
-      Actor          ActorRef               `json:"actor,omitempty"`
-      Scope          *EventScope            `json:"scope,omitempty"`
-      Invocation     *EventInvocation       `json:"invocation,omitempty"`
-      Message        *model.Message         `json:"message,omitempty"`
-      Tool           *EventTool             `json:"tool,omitempty"`
-      PlanPayload    *EventPlanPayload      `json:"plan,omitempty"`
-      Notice         *EventNotice           `json:"notice,omitempty"`
-      Lifecycle      *EventLifecycle        `json:"lifecycle,omitempty"`
-      Journal        *ExecutionJournalEntry `json:"journal,omitempty"`
-      Protocol       *EventProtocol         `json:"protocol,omitempty"`
-      Text           string                 `json:"-"`
-      Meta           map[string]any         `json:"_meta,omitempty"`
+      ID                string                 `json:"id,omitempty"`
+      IdempotencyKey    string                 `json:"idempotency_key,omitempty"`
+      SessionID         string                 `json:"session_id,omitempty"`
+      Seq               uint64                 `json:"seq,omitempty"`
+      Schema            int                    `json:"schema,omitempty"`
+      Type              EventType              `json:"type,omitempty"`
+      Visibility        Visibility             `json:"visibility,omitempty"`
+      Time              time.Time              `json:"time,omitempty"`
+      Actor             ActorRef               `json:"actor,omitempty"`
+      Scope             *EventScope            `json:"scope,omitempty"`
+      ChildOrigin       *EventChildOrigin      `json:"child_origin,omitempty"`
+      ApprovalRequestID string                 `json:"approval_request_id,omitempty"`
+      Invocation        *EventInvocation       `json:"invocation,omitempty"`
+      Message           *model.Message         `json:"message,omitempty"`
+      Tool              *EventTool             `json:"tool,omitempty"`
+      PlanPayload       *EventPlanPayload      `json:"plan,omitempty"`
+      Notice            *EventNotice           `json:"notice,omitempty"`
+      Lifecycle         *EventLifecycle        `json:"lifecycle,omitempty"`
+      Journal           *ExecutionJournalEntry `json:"journal,omitempty"`
+      Protocol          *EventProtocol         `json:"protocol,omitempty"`
+      Text              string                 `json:"-"`
+      Meta              map[string]any         `json:"_meta,omitempty"`
   }
   type EventAppender interface {
       AppendEvent(context.Context, AppendEventRequest) (*Event, error)
@@ -2027,6 +2052,17 @@ package github.com/caelis-labs/caelis/agent-sdk/session
   type EventBatchStateService interface {
       AppendEventsAndUpdateState(context.Context, AppendEventsAndUpdateStateRequest) ([]*Event, error)
   }
+  type EventChildOrigin struct {
+      Scope         EventChildScope `json:"scope,omitempty"`
+      ScopeID       string          `json:"scope_id,omitempty"`
+      TaskID        string          `json:"task_id,omitempty"`
+      DelegationID  string          `json:"delegation_id,omitempty"`
+      ParticipantID string          `json:"participant_id,omitempty"`
+      ACPSessionID  string          `json:"acp_session_id,omitempty"`
+      SourceEventID string          `json:"source_event_id,omitempty"`
+      ParentTool    EventParentTool `json:"parent_tool,omitempty"`
+  }
+  type EventChildScope string
   type EventConflictError struct {
       SessionID      string
       EventID        string
@@ -2048,6 +2084,23 @@ package github.com/caelis-labs/caelis/agent-sdk/session
       Text  string         `json:"text,omitempty"`
       Kind  string         `json:"kind,omitempty"`
       Meta  map[string]any `json:"meta,omitempty"`
+  }
+  type EventPage struct {
+      Events  []*Event `json:"events,omitempty"`
+      NextSeq uint64   `json:"next_seq,omitempty"`
+      HasMore bool     `json:"has_more,omitempty"`
+  }
+  type EventPageRequest struct {
+      SessionRef SessionRef          `json:"session_ref"`
+      AfterSeq   uint64              `json:"after_seq,omitempty"`
+      ThroughSeq uint64              `json:"through_seq,omitempty"`
+      Limit      int                 `json:"limit,omitempty"`
+      Visibility EventPageVisibility `json:"visibility,omitempty"`
+  }
+  type EventPageVisibility string
+  type EventParentTool struct {
+      CallID string `json:"call_id,omitempty"`
+      Name   string `json:"name,omitempty"`
   }
   type EventPlanEntry struct {
       Content  string `json:"content,omitempty"`
@@ -2187,6 +2240,9 @@ package github.com/caelis-labs/caelis/agent-sdk/session
       LeaseID      string                 `json:"lease_id,omitempty"`
       OwnerID      string                 `json:"owner_id,omitempty"`
       FencingToken uint64                 `json:"fencing_token,omitempty"`
+  }
+  type PagedReader interface {
+      EventsPage(context.Context, EventPageRequest) (EventPage, error)
   }
   type ParticipantBinding struct {
       ID           string          `json:"id,omitempty"`
@@ -2398,6 +2454,12 @@ package github.com/caelis-labs/caelis/agent-sdk/session
       ExpectedDelegationID *string `json:"expected_delegation_id,omitempty"`
       Event                *Event  `json:"event"`
   }
+  type ReplaceStateRequest struct {
+      SessionRef       SessionRef
+      ExpectedRevision *uint64
+      MutationGuard    MutationGuard
+      State            map[string]any
+  }
   type RevisionConflictError struct {
       SessionID string
       Expected  uint64
@@ -2482,8 +2544,8 @@ package github.com/caelis-labs/caelis/agent-sdk/session
       StateWriter
   }
   type StateWriter interface {
-      ReplaceState(context.Context, SessionRef, map[string]any) error
-      UpdateState(context.Context, SessionRef, func(map[string]any) (map[string]any, error)) error
+      ReplaceState(context.Context, ReplaceStateRequest) (Session, error)
+      UpdateState(context.Context, UpdateStateRequest) (Session, error)
   }
   type Store interface {
       GetOrCreate(context.Context, StartSessionRequest) (Session, error)
@@ -2495,8 +2557,8 @@ package github.com/caelis-labs/caelis/agent-sdk/session
       PutParticipant(context.Context, SessionRef, ParticipantBinding) (Session, error)
       RemoveParticipant(context.Context, SessionRef, string) (Session, error)
       SnapshotState(context.Context, SessionRef) (map[string]any, error)
-      ReplaceState(context.Context, SessionRef, map[string]any) error
-      UpdateState(context.Context, SessionRef, func(map[string]any) (map[string]any, error)) error
+      ReplaceState(context.Context, ReplaceStateRequest) (Session, error)
+      UpdateState(context.Context, UpdateStateRequest) (Session, error)
   }
   type ToolExecution struct {
       Schema        int                 `json:"schema"`
@@ -2520,6 +2582,12 @@ package github.com/caelis-labs/caelis/agent-sdk/session
       From     ToolExecutionStatus
       To       ToolExecutionStatus
       Detail   string
+  }
+  type UpdateStateRequest struct {
+      SessionRef       SessionRef
+      ExpectedRevision *uint64
+      MutationGuard    MutationGuard
+      Update           func(map[string]any) (map[string]any, error)
   }
   type UsageSnapshot struct {
       PromptTokens        int `json:"prompt_tokens,omitempty"`

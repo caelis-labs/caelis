@@ -21,9 +21,12 @@ import (
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/modelregistry"
 	acpassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
+	internalcontrolclient "github.com/caelis-labs/caelis/internal/controlclient"
 	"github.com/caelis-labs/caelis/internal/controlplane"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
+	controlclientport "github.com/caelis-labs/caelis/ports/controlclient"
 	"github.com/caelis-labs/caelis/ports/gateway"
+	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
 type Config struct {
@@ -70,6 +73,10 @@ type Stack struct {
 	placement       controlplane.PlacementExecutor
 	acpControlPlane *acpassembly.ControlPlane
 	taskStore       task.Store
+	controlFeeds    controlclientport.FeedRegistry
+	controlState    controlclientport.StateReader
+	controlCommands controlclientport.CommandClient
+	controlClient   controlclientport.Service
 	gateway         *kernelimpl.Gateway
 	mcpMgr          *mcp.Manager
 
@@ -118,6 +125,49 @@ func (s *Stack) KernelControlPlane() gateway.ControlPlaneService {
 // gateway control or session operations.
 func (s *Stack) KernelStreams() gateway.StreamProvider {
 	return s.kernelRuntime()
+}
+
+// ControlClientFeeds returns the Control-owned Session feed registry shared by
+// every in-process and network adapter.
+func (s *Stack) ControlClientFeeds() controlclientport.FeedRegistry {
+	if s == nil {
+		return nil
+	}
+	return s.controlFeeds
+}
+
+// ControlClientState returns the typed reconnect bootstrap reader.
+func (s *Stack) ControlClientState() controlclientport.StateReader {
+	if s == nil {
+		return nil
+	}
+	return s.controlState
+}
+
+// ControlClientCommands returns the request-scoped authorized command service.
+func (s *Stack) ControlClientCommands() controlclientport.CommandClient {
+	if s == nil {
+		return nil
+	}
+	return s.controlCommands
+}
+
+// ControlClient returns the complete transport-neutral client service.
+func (s *Stack) ControlClient() controlclientport.Service {
+	if s == nil {
+		return nil
+	}
+	return s.controlClient
+}
+
+// ControlClientRuntimeState delegates bootstrap live-state reads to the
+// currently installed Control gateway.
+func (s *Stack) ControlClientRuntimeState(ctx context.Context, ref session.SessionRef) (controlclientport.RuntimeState, error) {
+	gateway := s.currentGateway()
+	if gateway == nil {
+		return controlclientport.RuntimeState{}, fmt.Errorf("gatewayapp: control runtime is unavailable")
+	}
+	return gateway.ControlClientRuntimeState(ctx, ref)
 }
 
 func (s *Stack) currentGateway() *kernelimpl.Gateway {
@@ -199,6 +249,23 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	})
 	sessions := sessionfile.NewService(sessionStore)
 	taskStore := sessionfile.NewTaskStore(sessionStore)
+	if err := internalcontrolclient.SweepAbandonedApprovals(context.Background(), sessions); err != nil {
+		return nil, err
+	}
+	cursorSecret, err := loadOrCreateControlClientCursorSecret(storeDir)
+	if err != nil {
+		return nil, err
+	}
+	cursorCodec, err := eventstream.NewCursorCodec(eventstream.CursorCodecConfig{Secret: cursorSecret})
+	if err != nil {
+		return nil, err
+	}
+	controlFeeds, err := internalcontrolclient.NewFeedRegistry(internalcontrolclient.FeedRegistryConfig{
+		Reader: sessions, CursorCodec: cursorCodec,
+	})
+	if err != nil {
+		return nil, err
+	}
 	lookup, err := newModelLookup(configStore, cfg.Model, cfg.ContextWindow)
 	if err != nil {
 		return nil, err
@@ -230,6 +297,7 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		storeDir:     storeDir,
 		leaseOwnerID: leaseOwnerID,
 		taskStore:    taskStore,
+		controlFeeds: controlFeeds,
 		runtime: stackRuntimeConfig{
 			ApprovalMode:                effectiveApprovalMode,
 			PolicyProfile:               effectivePolicyProfile,
@@ -244,6 +312,30 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		},
 		sandbox: sandboxCfg,
 	}
+	controlState, err := internalcontrolclient.NewStateService(internalcontrolclient.StateServiceConfig{
+		Sessions: sessions, Runtime: stack, Feeds: controlFeeds,
+	})
+	if err != nil {
+		return nil, err
+	}
+	stack.controlState = controlState
+	controlCommands, err := internalcontrolclient.NewCommandService(internalcontrolclient.CommandServiceConfig{
+		Authorizer: internalcontrolclient.SessionAuthorizer{Sessions: sessions},
+		Operations: internalcontrolclient.NewFileOperationStore(filepath.Join(storeDir, "control-operations")),
+		Backend:    stack,
+	})
+	if err != nil {
+		return nil, err
+	}
+	stack.controlCommands = controlCommands
+	controlClient, err := internalcontrolclient.NewClient(internalcontrolclient.ClientConfig{
+		Commands: controlCommands, State: controlState, Feeds: controlFeeds,
+		Authorizer: internalcontrolclient.SessionAuthorizer{Sessions: sessions}, Sessions: sessions,
+	})
+	if err != nil {
+		return nil, err
+	}
+	stack.controlClient = controlClient
 	if err := stack.rebuildGateway(); err != nil {
 		return nil, err
 	}

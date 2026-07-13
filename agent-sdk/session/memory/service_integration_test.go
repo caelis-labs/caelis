@@ -48,10 +48,10 @@ func TestSessionServiceIntegration(t *testing.T) {
 		t.Fatalf("AppendEvent(assistant) error = %v", err)
 	}
 
-	if err := service.UpdateState(ctx, createdSession.SessionRef, func(state map[string]any) (map[string]any, error) {
+	if _, err := service.UpdateState(ctx, session.UpdateStateRequest{SessionRef: createdSession.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Update: func(state map[string]any) (map[string]any, error) {
 		state["controller"] = "kernel"
 		return state, nil
-	}); err != nil {
+	}}); err != nil {
 		t.Fatalf("UpdateState() error = %v", err)
 	}
 

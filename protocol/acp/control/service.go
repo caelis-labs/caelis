@@ -39,9 +39,9 @@ type SessionService interface {
 	Compact(context.Context) error
 }
 
-// ClientProtocolService is the stable GUI/API protocol surface. It returns
-// eventstream envelopes and standard ACP schema payloads without exposing
-// transitional gateway envelopes or TUI transcript view models.
+// ClientProtocolService is the transitional in-process ACP/TUI replay and
+// status contract. New product clients use ports/controlclient.Service for
+// request-scoped commands, bootstrap, replay, and subscriptions.
 type ClientProtocolService interface {
 	ListSessionSnapshots(context.Context, schema.SessionListRequest) (schema.SessionListResponse, error)
 	Replay(context.Context, eventstream.ReplayRequest) (eventstream.ReplayResult, error)

@@ -341,7 +341,6 @@ func (s *Stack) buildGatewayRuntime(plan gatewayBuildPlan) (*gatewayRuntimeBundl
 	approvalReviewer := s.newModelApprovalReviewer()
 	gw, err := kernelimpl.New(kernelimpl.Config{
 		Sessions:             s.Sessions,
-		Tasks:                s.taskStore,
 		Runtime:              watchdogRuntime,
 		Control:              sessionControl,
 		Resolver:             resolver,
