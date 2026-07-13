@@ -13,7 +13,6 @@ var (
 	_ control.AgentService              = (*Adapter)(nil)
 	_ control.CompletionService         = (*Adapter)(nil)
 	_ control.PluginService             = (*Adapter)(nil)
-	_ control.StreamSubscriber          = (*Adapter)(nil)
 	_ control.LightweightStatusProvider = (*Adapter)(nil)
 	_ control.ClientProtocolService     = (*Adapter)(nil)
 )

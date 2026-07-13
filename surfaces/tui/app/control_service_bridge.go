@@ -512,7 +512,7 @@ func executeLineViaControlServiceWithContextResult(ctx context.Context, service 
 
 	send := sender.sendFunc()
 	if send != nil {
-		return forwardTurnEventStream(ctx, service, turn, sender)
+		return forwardTurnEventStream(ctx, turn, sender)
 	} else {
 		for range turn.Events() {
 		}
@@ -547,7 +547,7 @@ func executeControlPromptResult(ctx context.Context, service control.Service, se
 		refreshAgentSlashCommandsViaSendWithContext(ctx, service, send)
 	}
 	if result.Turn != nil {
-		return runSubagentTurn(ctx, service, sender, result.Turn)
+		return runSubagentTurn(ctx, sender, result.Turn)
 	}
 	if result.ContinueRunning {
 		return executeLineResult{completion: TaskResultMsg{ContinueRunning: true, SuppressTurnDivider: true}}

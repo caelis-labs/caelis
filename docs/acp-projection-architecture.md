@@ -118,9 +118,43 @@ for a main Agent.
 The parent receives the delegated final result through the canonical Spawn/Task
 result. Live child events remain transient until a linked semantic child replay
 authority is implemented; they must not be promoted into parent model context
-or reconstructed from terminal text. `control.StreamSubscriber` is a
-transitional in-process source adapter and must move behind a Control-owned
-client event broker rather than becoming an app-server or GUI contract.
+or reconstructed from terminal text.
+
+The completed M1 Control-owned fan-in slice places task-stream discovery and
+live delivery in the private `app/gatewayapp/controladapter` live-feed broker.
+It derives `StreamRequest` values from the main ACP tool update, deduplicates by
+`StreamRequest.Key`, and uses cursor-owned `stream.Service.Read` snapshots to
+project each source frame through
+`projector.ProjectStreamFrame` before placing it on `gatewayTurn.Events()`.
+The main update is emitted before its task delivery starts; each task source
+retains its own cursor/event order; and a projected child semantic event remains
+before the parent compatibility mirror from the same frame. TUI, headless, and
+the ACP prompt bridge consume that one Turn feed and do not discover a second
+task stream from a rendered update.
+
+The current running-task stream anchor is a private, transitional Control input
+parse of the source tool update's runtime task metadata. It is confined to
+live-delivery discovery; it does not restore metadata-based `ParentTool` or
+`Delivery`, and it does not supply correlation, ordering, or durability facts
+to a Surface. A future typed running-task anchor or small Control DTO should
+replace this parse rather than extending the metadata path.
+
+A Turn feed owns only live client delivery. A matching main lifecycle terminal
+first prevents new sources, requests one immediate final `Read` from each
+already-started source, and advances a source cursor only after its complete
+snapshot has been accepted by the broker. It then drains all accepted batches,
+waits for those source acknowledgements, ends the broker delivery contexts, and
+emits the one final Turn frame. The final read flushes only frames materialized
+at that instant; it neither waits for nor cancels an asynchronous Spawn or
+other task runtime work. Task-runtime lifecycle remains owned by the
+Runtime/Control task plane. Scoped
+subagent/participant lifecycle envelopes close only their own displayed
+execution and cannot terminate the parent Turn.
+
+This slice does not complete child permission routing, parent compatibility
+mirror removal, replay/resume, or linked child replay authority. Those remain
+separate M1/M2 work; the retained parent mirror is still transient display
+compatibility rather than durable parent model context.
 
 New `protocol/acp/projector` stream projections write parent relation and
 delivery facts only to typed Envelope fields. `eventstream.ResolveRelationDelivery`

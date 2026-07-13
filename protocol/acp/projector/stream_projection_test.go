@@ -119,6 +119,40 @@ func TestProjectStreamFrameBuildsStandardToolUpdateEnvelope(t *testing.T) {
 	assertStreamDelivery(t, env, true, false, false)
 }
 
+func TestProjectStreamFramePreservesClosedCommandExitCode(t *testing.T) {
+	t.Parallel()
+
+	exitCode := 7
+	req := StreamRequest{
+		SessionRef:        session.SessionRef{SessionID: "session-1"},
+		CallID:            "call-1",
+		ToolName:          "RUN_COMMAND",
+		RawInput:          map[string]any{"command": "false"},
+		Ref:               stream.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "term-1"},
+		DisplayTerminalID: "call-1",
+		Scope:             eventstream.ScopeMain,
+	}
+	events := ProjectStreamFrame(req, stream.Frame{
+		Ref:      req.Ref,
+		Cursor:   stream.Cursor{Output: 3},
+		Closed:   true,
+		State:    "failed",
+		ExitCode: &exitCode,
+	})
+	if len(events) != 1 {
+		t.Fatalf("ProjectStreamFrame() returned %d events: %#v", len(events), events)
+	}
+	update := requireToolUpdate(t, events[0])
+	if got := stringPtrValue(update.Status); got != schema.ToolStatusFailed {
+		t.Fatalf("final status = %q, want failed", got)
+	}
+	exit, ok := metautil.TerminalExit(update.Meta)
+	if !ok || exit.TerminalID != "call-1" || exit.ExitCode == nil || *exit.ExitCode != exitCode {
+		t.Fatalf("terminal exit = %#v, %v; want exit code %d", exit, ok, exitCode)
+	}
+	assertTerminalAnchor(t, update.Content, "call-1")
+}
+
 func TestProjectStreamFramePreservesSplitNewlineFrame(t *testing.T) {
 	t.Parallel()
 

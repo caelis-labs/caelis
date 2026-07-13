@@ -13,7 +13,7 @@ func (m *Model) handleACPEventEnvelope(env eventstream.Envelope) (tea.Model, tea
 	if env.Err != nil || env.Kind == eventstream.KindError {
 		return m, nil
 	}
-	if eventstream.IsTerminalLifecycle(env) {
+	if isMainTurnTerminalLifecycle(env) {
 		if !m.turnRunning() && !terminalLifecycleHasTranscriptIdentity(env) {
 			return m, nil
 		}

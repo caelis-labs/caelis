@@ -228,39 +228,22 @@ func (s *streamService) Subscribe(ctx context.Context, req stream.SubscribeReque
 		if poll <= 0 {
 			poll = 100 * time.Millisecond
 		}
-		closedSent := false
 		for {
 			snap, err := read(ctx, cursor)
 			if err != nil {
 				yield(nil, err)
 				return
 			}
-			cursor = snap.Cursor
-			for _, frame := range snap.Frames {
+			for _, frame := range stream.FramesForSnapshot(snap) {
 				cloned := stream.CloneFrame(frame)
 				if !yield(&cloned, nil) {
 					return
 				}
 			}
+			// The cursor represents the whole source snapshot. Advance it only
+			// after every frame from that snapshot was accepted by the consumer.
+			cursor = stream.CloneCursor(snap.Cursor)
 			if !snap.Running {
-				if !closedSent {
-					closeText := ""
-					if snap.ExitCode == nil {
-						closeText = snap.FinalText
-					}
-					frame := stream.Frame{
-						Ref:       snap.Ref,
-						Text:      closeText,
-						Cursor:    snap.Cursor,
-						Running:   false,
-						Closed:    true,
-						State:     streamClosedState(snap),
-						UpdatedAt: snap.UpdatedAt,
-					}
-					if !yield(&frame, nil) {
-						return
-					}
-				}
 				return
 			}
 			timer := time.NewTimer(poll)
@@ -273,26 +256,6 @@ func (s *streamService) Subscribe(ctx context.Context, req stream.SubscribeReque
 			}
 		}
 	}
-}
-
-func streamClosedState(snap stream.Snapshot) string {
-	switch strings.ToLower(strings.TrimSpace(snap.State)) {
-	case "completed":
-		return "completed"
-	case "failed":
-		return "failed"
-	case "interrupted":
-		return "interrupted"
-	case "cancelled", "canceled":
-		return "cancelled"
-	}
-	if snap.ExitCode != nil && *snap.ExitCode != 0 {
-		if *snap.ExitCode < 0 {
-			return "cancelled"
-		}
-		return "failed"
-	}
-	return "completed"
 }
 
 func subagentStreamOutput(stdout string, stderr string) string {

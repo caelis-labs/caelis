@@ -566,6 +566,74 @@ func TestHandleACPEventEnvelopeSuppressesMirroredSpawnSemanticEventBeforeParentT
 	}
 }
 
+func TestHandleACPEventEnvelopeScopedChildTerminalKeepsOneSpawnPanelAndMainTurnAlive(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(230, 0))
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		Scope:     eventstream.ScopeMain,
+		Update: schema.ToolCall{
+			SessionUpdate: schema.UpdateToolCall,
+			ToolCallID:    "spawn-call-1",
+			Title:         "SPAWN explorer: inspect",
+			Kind:          schema.ToolKindExecute,
+			Status:        schema.ToolStatusInProgress,
+			RawInput:      map[string]any{"agent": "explorer", "prompt": "inspect"},
+			Meta:          acpToolNameMeta("SPAWN"),
+		},
+	})
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindLifecycle,
+		SessionID: "session-1",
+		Scope:     eventstream.ScopeSubagent,
+		ScopeID:   "task-1",
+		ParentTool: &eventstream.ParentToolRelation{
+			ToolCallID: "spawn-call-1",
+			ToolName:   "Spawn",
+		},
+		Delivery:  &eventstream.Delivery{Transient: true},
+		Lifecycle: &eventstream.Lifecycle{State: eventstream.LifecycleStateCompleted},
+	})
+	if !model.turnRunning() {
+		t.Fatal("scoped child terminal ended the parent live turn")
+	}
+	if participant := model.findParticipantTurnBlock("task-1"); participant != nil {
+		t.Fatalf("scoped child terminal created duplicate participant block: %#v", participant)
+	}
+
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		Scope:     eventstream.ScopeMain,
+		Final:     true,
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateAgentMessage,
+			Content:       schema.TextContent{Type: "text", Text: "main answer"},
+		},
+	})
+	terminal := eventstream.TurnCompleted("handle-1", "run-1", "turn-1", time.Unix(231, 0))
+	terminal.SessionID = "session-1"
+	terminal.ScopeID = "session-1"
+	model = applyACPEnvelopeForTest(t, model, terminal)
+	if model.turnRunning() {
+		t.Fatal("main terminal did not end the parent live turn")
+	}
+
+	block := requireMainACPTurnBlockForTest(t, model)
+	spawnPanels := 0
+	for _, event := range block.Events {
+		if event.Kind == SEToolCall && event.CallID == "spawn-call-1" {
+			spawnPanels++
+		}
+	}
+	if spawnPanels != 1 {
+		t.Fatalf("spawn panels = %d, want one compact parent panel: %#v", spawnPanels, block.Events)
+	}
+}
+
 func TestHandleACPEventEnvelopeRoutesAnchoredSubagentOutputToParentPanel(t *testing.T) {
 	t.Parallel()
 
@@ -776,7 +844,7 @@ func TestForwardTurnEventStreamQueuesLiveACPEnvelopes(t *testing.T) {
 	close(events)
 
 	var sent []tea.Msg
-	result := forwardTurnEventStream(context.Background(), nil, &eventstreamIntegrationTurn{events: events}, &ProgramSender{
+	result := forwardTurnEventStream(context.Background(), &eventstreamIntegrationTurn{events: events}, &ProgramSender{
 		Send: func(msg tea.Msg) {
 			sent = append(sent, msg)
 		},

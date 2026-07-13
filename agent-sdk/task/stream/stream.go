@@ -31,6 +31,7 @@ type Frame struct {
 	Cursor    Cursor         `json:"cursor,omitempty"`
 	Running   bool           `json:"running,omitempty"`
 	Closed    bool           `json:"closed,omitempty"`
+	ExitCode  *int           `json:"exit_code,omitempty"`
 	Event     *session.Event `json:"event,omitempty"`
 	UpdatedAt time.Time      `json:"updated_at,omitempty"`
 }
@@ -109,6 +110,10 @@ func CloneFrame(in Frame) Frame {
 	out := in
 	out.Ref = NormalizeRef(in.Ref)
 	out.Cursor = CloneCursor(in.Cursor)
+	if in.ExitCode != nil {
+		code := *in.ExitCode
+		out.ExitCode = &code
+	}
 	out.Event = session.CloneEvent(in.Event)
 	return out
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"strings"
-	"sync"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -33,7 +32,7 @@ func (a *RuntimeAgent) runPromptRouter(runCtx context.Context, bridgeCtx context
 	if err != nil || !result.Handled {
 		return result.Handled, err
 	}
-	return true, a.emitPromptRouterResult(runCtx, activeSession, router, result, cb, true)
+	return true, a.emitPromptRouterResult(runCtx, activeSession, result, cb, true)
 }
 
 func promptRouterAttachmentsFromContentParts(input string, parts []model.ContentPart) []control.Attachment {
@@ -79,7 +78,7 @@ func promptRouterAttachmentsFromContentParts(input string, parts []model.Content
 	return out
 }
 
-func (a *RuntimeAgent) emitPromptRouterResult(ctx context.Context, activeSession session.Session, router controlprompt.Router, result controlprompt.Result, cb acp.PromptCallbacks, suppressUserEcho bool) error {
+func (a *RuntimeAgent) emitPromptRouterResult(ctx context.Context, activeSession session.Session, result controlprompt.Result, cb acp.PromptCallbacks, suppressUserEcho bool) error {
 	if cb == nil {
 		return nil
 	}
@@ -112,17 +111,10 @@ func (a *RuntimeAgent) emitPromptRouterResult(ctx context.Context, activeSession
 	if result.Turn == nil {
 		return nil
 	}
-	var streamer control.StreamSubscriber
-	if provider, ok := router.(controlprompt.StreamSubscriberProvider); ok {
-		streamer, _ = provider.StreamSubscriber()
-	}
-	bridge := newControlStreamBridge(ctx, a, cb, sessionID, streamer, outboundFilter)
 	for events := result.Turn.Events(); events != nil; {
 		select {
 		case <-ctx.Done():
-			bridge.cancel()
 			_ = result.Turn.Close()
-			_ = bridge.wait()
 			return context.Canceled
 		case env, ok := <-events:
 			if !ok {
@@ -130,21 +122,16 @@ func (a *RuntimeAgent) emitPromptRouterResult(ctx context.Context, activeSession
 				continue
 			}
 			if err := a.emitControlEnvelope(ctx, cb, sessionID, result.Turn, env, outboundFilter); err != nil {
-				bridge.cancel()
 				_ = result.Turn.Close()
-				_ = bridge.wait()
 				return err
 			}
-			bridge.start(env)
 		}
 	}
 	closeErr := result.Turn.Close()
-	waitErr := bridge.wait()
-	bridge.cancel()
 	if closeErr != nil {
 		return closeErr
 	}
-	return waitErr
+	return nil
 }
 
 func promptRouterResultSessionID(activeSession session.Session, result controlprompt.Result) string {
@@ -321,115 +308,5 @@ func approvalDecisionFromACPResponse(options []acp.PermissionOption, resp acp.Re
 	decision := semantic.DecodePermissionResponse(resp, approval)
 	return control.ApprovalDecision{
 		Outcome: decision.Outcome, OptionID: decision.OptionID, Approved: decision.Approved,
-	}
-}
-
-type controlStreamBridge struct {
-	ctx               context.Context
-	cancel            context.CancelFunc
-	agent             *RuntimeAgent
-	cb                acp.PromptCallbacks
-	fallbackSessionID string
-	streamer          control.StreamSubscriber
-	outboundFilter    *acpNarrativeFilter
-	mu                sync.Mutex
-	ownedToolCalls    map[string]struct{}
-	wg                sync.WaitGroup
-	errMu             sync.Mutex
-	err               error
-}
-
-func newControlStreamBridge(ctx context.Context, agent *RuntimeAgent, cb acp.PromptCallbacks, fallbackSessionID string, streamer control.StreamSubscriber, outboundFilter *acpNarrativeFilter) *controlStreamBridge {
-	streamCtx, cancel := context.WithCancel(ctx)
-	return &controlStreamBridge{
-		ctx:               streamCtx,
-		cancel:            cancel,
-		agent:             agent,
-		cb:                cb,
-		fallbackSessionID: fallbackSessionID,
-		streamer:          streamer,
-		outboundFilter:    outboundFilter,
-		ownedToolCalls:    map[string]struct{}{},
-	}
-}
-
-func (b *controlStreamBridge) start(env eventstream.Envelope) {
-	if b == nil || b.cb == nil || b.streamer == nil {
-		return
-	}
-	events, ok := b.streamer.SubscribeStream(b.ctx, env)
-	if !ok || events == nil {
-		return
-	}
-	b.markOwnedToolCall(toolCallIDFromControlEnvelope(env))
-	b.wg.Add(1)
-	go func() {
-		defer b.wg.Done()
-		for {
-			select {
-			case <-b.ctx.Done():
-				return
-			case terminalEnv, ok := <-events:
-				if !ok {
-					return
-				}
-				if err := b.agent.emitControlEnvelope(b.ctx, b.cb, b.fallbackSessionID, nil, terminalEnv, b.outboundFilter); err != nil {
-					b.recordError(err)
-					b.cancel()
-					return
-				}
-			}
-		}
-	}()
-}
-
-func (b *controlStreamBridge) markOwnedToolCall(toolCallID string) {
-	if b == nil || strings.TrimSpace(toolCallID) == "" {
-		return
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.ownedToolCalls[strings.TrimSpace(toolCallID)] = struct{}{}
-}
-
-func (b *controlStreamBridge) ownsToolCall(toolCallID string) bool {
-	if b == nil || strings.TrimSpace(toolCallID) == "" {
-		return false
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	_, ok := b.ownedToolCalls[strings.TrimSpace(toolCallID)]
-	return ok
-}
-
-func toolCallIDFromControlEnvelope(env eventstream.Envelope) string {
-	switch update := env.Update.(type) {
-	case acp.ToolCall:
-		return strings.TrimSpace(update.ToolCallID)
-	case acp.ToolCallUpdate:
-		return strings.TrimSpace(update.ToolCallID)
-	default:
-		return ""
-	}
-}
-
-func (b *controlStreamBridge) wait() error {
-	if b == nil {
-		return nil
-	}
-	b.wg.Wait()
-	b.errMu.Lock()
-	defer b.errMu.Unlock()
-	return b.err
-}
-
-func (b *controlStreamBridge) recordError(err error) {
-	if b == nil || err == nil {
-		return
-	}
-	b.errMu.Lock()
-	defer b.errMu.Unlock()
-	if b.err == nil {
-		b.err = err
 	}
 }

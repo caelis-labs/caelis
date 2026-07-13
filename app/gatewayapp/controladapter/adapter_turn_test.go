@@ -14,7 +14,7 @@ import (
 func TestGatewayTurnEventsSynthesizesCompletedForEmptyStream(t *testing.T) {
 	events := make(chan eventstream.Envelope)
 	close(events)
-	turn := &gatewayTurn{handle: &testGatewayTurnHandle{acpEvents: events}}
+	turn := newGatewayTurn(&testGatewayTurnHandle{acpEvents: events}, nil)
 
 	out := collectAdapterTurnEvents(turn.Events())
 	if len(out) != 1 {
@@ -27,7 +27,7 @@ func TestGatewayTurnEventsSynthesizesFailedAfterError(t *testing.T) {
 	events := make(chan eventstream.Envelope, 1)
 	events <- eventstream.Error(errors.New("provider failed"))
 	close(events)
-	turn := &gatewayTurn{handle: &testGatewayTurnHandle{acpEvents: events}}
+	turn := newGatewayTurn(&testGatewayTurnHandle{acpEvents: events}, nil)
 
 	out := collectAdapterTurnEvents(turn.Events())
 	if len(out) != 2 {
@@ -43,7 +43,7 @@ func TestGatewayTurnEventsSynthesizesCancelledAfterCancelError(t *testing.T) {
 	events := make(chan eventstream.Envelope, 1)
 	events <- eventstream.Error(errors.New("providers: context canceled"))
 	close(events)
-	turn := &gatewayTurn{handle: &testGatewayTurnHandle{acpEvents: events}}
+	turn := newGatewayTurn(&testGatewayTurnHandle{acpEvents: events}, nil)
 
 	out := collectAdapterTurnEvents(turn.Events())
 	if len(out) != 2 {
@@ -57,7 +57,7 @@ func TestGatewayTurnEventsForwardsExplicitTerminalOnce(t *testing.T) {
 	acpEvents <- eventstream.TurnCompleted("handle-1", "run-1", "turn-1", time.Time{})
 	acpEvents <- eventstream.TurnFailed("handle-1", "run-1", "turn-1", "late", time.Time{})
 	close(acpEvents)
-	turn := &gatewayTurn{handle: &testGatewayTurnHandle{acpEvents: acpEvents}}
+	turn := newGatewayTurn(&testGatewayTurnHandle{acpEvents: acpEvents}, nil)
 
 	out := collectAdapterTurnEvents(turn.Events())
 	if len(out) != 1 {
@@ -69,7 +69,7 @@ func TestGatewayTurnEventsForwardsExplicitTerminalOnce(t *testing.T) {
 func TestGatewayTurnEventsReturnsSameStream(t *testing.T) {
 	events := make(chan eventstream.Envelope)
 	close(events)
-	turn := &gatewayTurn{handle: &testGatewayTurnHandle{acpEvents: events}}
+	turn := newGatewayTurn(&testGatewayTurnHandle{acpEvents: events}, nil)
 
 	first := turn.Events()
 	second := turn.Events()

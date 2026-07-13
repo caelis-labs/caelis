@@ -1,5 +1,12 @@
 {
   "baseline_tag": "auto",
   "current_snapshot": "agent-sdk/api.txt",
-  "removals": []
+  "removals": [
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk/task/stream",
+      "sha256": "9b7220e14d879fb3665c19010b7ff4f77797ee94face4b660191b952a1b8d49d",
+      "symbol": "type Frame",
+      "reason": "pre-v1 Frame adds terminal ExitCode so a final stream Snapshot preserves command exit projection through the Control-owned broker"
+    }
+  ]
 }

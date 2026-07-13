@@ -11,13 +11,9 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
-	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 	controller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
 	"github.com/caelis-labs/caelis/ports/gateway"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
-	acpprojector "github.com/caelis-labs/caelis/protocol/acp/projector"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 type Adapter struct {
@@ -34,7 +30,6 @@ type Adapter struct {
 	sandboxType         string
 	activeCommandID     uint64
 	activeCommandCancel context.CancelFunc
-	streamSubscriptions map[string]struct{}
 }
 
 func NewAdapter(ctx context.Context, stack *RuntimeStack, preferredSessionID string, bindingKey string, modelText string) (*Adapter, error) {
@@ -86,15 +81,14 @@ func NewAdapterForSession(ctx context.Context, stack *RuntimeStack, activeSessio
 func newAdapterForStack(stack *RuntimeStack, bindingKey string, modelText string) *Adapter {
 	key := firstNonEmpty(strings.TrimSpace(bindingKey), "cli-tui")
 	return &Adapter{
-		stack:               stack,
-		bindingKey:          key,
-		defaultModelText:    strings.TrimSpace(modelText),
-		modelText:           strings.TrimSpace(modelText),
-		defaultSessionMode:  "auto-review",
-		sessionMode:         "auto-review",
-		defaultSandboxType:  "auto",
-		sandboxType:         "auto",
-		streamSubscriptions: map[string]struct{}{},
+		stack:              stack,
+		bindingKey:         key,
+		defaultModelText:   strings.TrimSpace(modelText),
+		modelText:          strings.TrimSpace(modelText),
+		defaultSessionMode: "auto-review",
+		sessionMode:        "auto-review",
+		defaultSandboxType: "auto",
+		sandboxType:        "auto",
 	}
 }
 
@@ -150,240 +144,6 @@ func gatewayControlPlaneServiceFn(deps GatewayRuntimeDeps) func() GatewayControl
 
 func gatewayStreamProviderFn(deps GatewayRuntimeDeps) func() GatewayStreamProvider {
 	return deps.StreamProviderFn
-}
-
-func (d *Adapter) SubscribeStream(ctx context.Context, env eventstream.Envelope) (<-chan eventstream.Envelope, bool) {
-	gw, err := d.gatewayStreams()
-	if err != nil {
-		return nil, false
-	}
-	req, ok := streamRequestFromACPEvent(env)
-	if !ok {
-		return nil, false
-	}
-	streams := gw.Streams()
-	if streams == nil {
-		return nil, false
-	}
-	key := req.Key()
-	if key == "" {
-		return nil, false
-	}
-	d.mu.Lock()
-	if d.streamSubscriptions == nil {
-		d.streamSubscriptions = map[string]struct{}{}
-	}
-	if _, exists := d.streamSubscriptions[key]; exists {
-		d.mu.Unlock()
-		return nil, false
-	}
-	d.streamSubscriptions[key] = struct{}{}
-	d.mu.Unlock()
-
-	out := make(chan eventstream.Envelope, 32)
-	go func() {
-		defer close(out)
-		defer func() {
-			d.mu.Lock()
-			delete(d.streamSubscriptions, key)
-			d.mu.Unlock()
-		}()
-		for frame, err := range streams.Subscribe(ctx, stream.SubscribeRequest{Ref: req.Ref, Cursor: req.Cursor}) {
-			if err != nil || frame == nil {
-				return
-			}
-			if frame.Text == "" && frame.Event == nil && !frame.Closed {
-				continue
-			}
-			for _, projected := range acpprojector.ProjectStreamFrame(req, stream.CloneFrame(*frame)) {
-				select {
-				case out <- projected:
-				case <-ctx.Done():
-					return
-				}
-			}
-		}
-	}()
-	return out, true
-}
-
-func streamRequestFromACPEvent(env eventstream.Envelope) (acpprojector.StreamRequest, bool) {
-	update, ok := env.Update.(schema.ToolCallUpdate)
-	if !ok {
-		return acpprojector.StreamRequest{}, false
-	}
-	status := strings.TrimSpace(stringFromPtr(update.Status))
-	if status != schema.ToolStatusInProgress {
-		return acpprojector.StreamRequest{}, false
-	}
-	meta := mergeMeta(update.Meta, env.Meta)
-	toolName := streamToolNameFromACPUpdate(meta, update)
-	if toolName == "" {
-		return acpprojector.StreamRequest{}, false
-	}
-	taskID := firstNonEmpty(
-		metaString(meta, gateway.EventMetaRoot, gateway.EventMetaRuntime, "task", "task_id"),
-		metaString(meta, gateway.EventMetaRoot, gateway.EventMetaRuntime, "task", "internal_task_id"),
-	)
-	displayTerminalID := acpTerminalID(update.Content)
-	terminalID := firstNonEmpty(
-		metaString(meta, gateway.EventMetaRoot, gateway.EventMetaRuntime, "task", "terminal_id"),
-		displayTerminalID,
-	)
-	if taskID == "" && terminalID == "" {
-		return acpprojector.StreamRequest{}, false
-	}
-	scope := env.Scope
-	if scope == "" {
-		scope = eventstream.ScopeMain
-	}
-	req := acpprojector.StreamRequest{
-		HandleID: strings.TrimSpace(env.HandleID),
-		RunID:    strings.TrimSpace(env.RunID),
-		TurnID:   strings.TrimSpace(env.TurnID),
-		SessionRef: session.SessionRef{SessionID: firstNonEmpty(
-			strings.TrimSpace(env.SessionID),
-			metaString(meta, gateway.EventMetaRoot, gateway.EventMetaRuntime, "task", "session_id"),
-		)},
-		CallID:   strings.TrimSpace(update.ToolCallID),
-		ToolName: toolName,
-		RawInput: anyMap(update.RawInput),
-		Ref: stream.Ref{
-			SessionID: firstNonEmpty(
-				strings.TrimSpace(env.SessionID),
-				metaString(meta, gateway.EventMetaRoot, gateway.EventMetaRuntime, "task", "session_id"),
-			),
-			TaskID:     taskID,
-			TerminalID: terminalID,
-		},
-		DisplayTerminalID: firstNonEmpty(displayTerminalID, strings.TrimSpace(update.ToolCallID)),
-		Cursor: stream.Cursor{
-			Output: int64FromAny(metaAny(meta, gateway.EventMetaRoot, gateway.EventMetaRuntime, "task", "output_cursor")),
-		},
-		Origin: &acpprojector.StreamOrigin{
-			Scope:         scope,
-			ScopeID:       strings.TrimSpace(env.ScopeID),
-			Actor:         strings.TrimSpace(env.Actor),
-			ParticipantID: strings.TrimSpace(env.ParticipantID),
-		},
-		Actor:         strings.TrimSpace(env.Actor),
-		Scope:         scope,
-		ParticipantID: strings.TrimSpace(env.ParticipantID),
-	}
-	if req.SessionRef.SessionID == "" || req.Ref.SessionID == "" || req.CallID == "" || req.ToolName == "" {
-		return acpprojector.StreamRequest{}, false
-	}
-	return req, true
-}
-
-func streamToolNameFromACPUpdate(meta map[string]any, update schema.ToolCallUpdate) string {
-	if name := strings.TrimSpace(metaString(meta, gateway.EventMetaRoot, gateway.EventMetaRuntime, gateway.EventMetaRuntimeTool, gateway.EventMetaRuntimeToolName)); name != "" {
-		return name
-	}
-	if name := streamToolNameFromTitle(stringFromPtr(update.Title)); name != "" {
-		return name
-	}
-	return strings.TrimSpace(stringFromPtr(update.Kind))
-}
-
-func streamToolNameFromTitle(title string) string {
-	title = strings.TrimSpace(title)
-	fields := strings.Fields(title)
-	if len(fields) == 0 {
-		return ""
-	}
-	if canonical, ok := names.Resolve(strings.Trim(fields[0], ":")); ok {
-		switch canonical {
-		case names.RunCommand, names.Spawn:
-			return canonical
-		}
-	}
-	return ""
-}
-
-func acpTerminalID(content []schema.ToolCallContent) string {
-	for _, item := range content {
-		if !strings.EqualFold(strings.TrimSpace(item.Type), "terminal") {
-			continue
-		}
-		if terminalID := strings.TrimSpace(item.TerminalID); terminalID != "" {
-			return terminalID
-		}
-	}
-	return ""
-}
-
-func mergeMeta(base map[string]any, overlay map[string]any) map[string]any {
-	if len(base) == 0 && len(overlay) == 0 {
-		return nil
-	}
-	out := map[string]any{}
-	for key, value := range base {
-		out[key] = value
-	}
-	for key, value := range overlay {
-		if baseMap, ok := out[key].(map[string]any); ok {
-			if overlayMap, ok := value.(map[string]any); ok {
-				out[key] = mergeMeta(baseMap, overlayMap)
-				continue
-			}
-		}
-		out[key] = value
-	}
-	return out
-}
-
-func metaAny(values map[string]any, path ...string) any {
-	var current any = values
-	for _, key := range path {
-		mapped, ok := current.(map[string]any)
-		if !ok {
-			return nil
-		}
-		current = mapped[key]
-	}
-	return current
-}
-
-func metaString(values map[string]any, path ...string) string {
-	text, _ := metaAny(values, path...).(string)
-	return strings.TrimSpace(text)
-}
-
-func metaBool(values map[string]any, path ...string) bool {
-	value, _ := metaAny(values, path...).(bool)
-	return value
-}
-
-func anyMap(value any) map[string]any {
-	if mapped, ok := value.(map[string]any); ok {
-		out := make(map[string]any, len(mapped))
-		for key, value := range mapped {
-			out[key] = value
-		}
-		return out
-	}
-	return nil
-}
-
-func int64FromAny(value any) int64 {
-	switch typed := value.(type) {
-	case int:
-		return int64(typed)
-	case int64:
-		return typed
-	case float64:
-		return int64(typed)
-	default:
-		return 0
-	}
-}
-
-func stringFromPtr(value *string) string {
-	if value == nil {
-		return ""
-	}
-	return strings.TrimSpace(*value)
 }
 
 func anyString(value any) string {
@@ -527,7 +287,7 @@ func (d *Adapter) Submit(ctx context.Context, submission Submission) (Turn, erro
 	if result.Handle == nil {
 		return nil, nil
 	}
-	return &gatewayTurn{handle: result.Handle}, nil
+	return d.newGatewayTurn(result.Handle), nil
 }
 
 func activeKernelTurnForSession(active []gateway.ActiveTurnState, ref session.SessionRef) bool {

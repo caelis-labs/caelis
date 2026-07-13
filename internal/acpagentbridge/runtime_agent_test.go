@@ -906,23 +906,6 @@ func (t *testControlTurn) Close() error {
 	return nil
 }
 
-type testPromptStreamSubscriber struct {
-	events []eventstream.Envelope
-}
-
-func (s testPromptStreamSubscriber) SubscribeStream(_ context.Context, env eventstream.Envelope) (<-chan eventstream.Envelope, bool) {
-	update, ok := eventstream.ToolCallUpdateFromEnvelope(env)
-	if !ok || update.Status == nil || *update.Status != acp.ToolStatusInProgress {
-		return nil, false
-	}
-	ch := make(chan eventstream.Envelope, len(s.events))
-	for _, env := range s.events {
-		ch <- env
-	}
-	close(ch)
-	return ch, true
-}
-
 type recordingPromptCallbacks struct {
 	mu            sync.Mutex
 	notifications []acp.SessionNotification

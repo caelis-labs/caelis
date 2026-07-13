@@ -142,6 +142,9 @@ func TestStreamSubscribeEmitsUndeliveredCommandTailBeforeClose(t *testing.T) {
 	if !frames[1].Closed || frames[1].Text != "" {
 		t.Fatalf("second frame = %#v, want contentless close", frames[1])
 	}
+	if frames[1].ExitCode == nil || *frames[1].ExitCode != 0 {
+		t.Fatalf("second frame exit code = %#v, want command exit code 0", frames[1].ExitCode)
+	}
 	if frames[0].Cursor.Output != int64(len(shown+tail)) || frames[1].Cursor.Output != frames[0].Cursor.Output {
 		t.Fatalf("frame cursors = %#v, want delivered cursor %d preserved through close", frames, len(shown+tail))
 	}
@@ -684,8 +687,9 @@ func TestCompletedTaskSessionInfersCancelledExitCode(t *testing.T) {
 	if status.ExitCode != -1 {
 		t.Fatalf("Status().ExitCode = %d, want -1 for cancelled task", status.ExitCode)
 	}
-	if got := streamClosedState(stream.Snapshot{ExitCode: &status.ExitCode}); got != "cancelled" {
-		t.Fatalf("streamClosedState() = %q, want cancelled", got)
+	frames := stream.FramesForSnapshot(stream.Snapshot{ExitCode: &status.ExitCode})
+	if got := frames[len(frames)-1].State; got != "cancelled" {
+		t.Fatalf("terminal close state = %q, want cancelled", got)
 	}
 }
 
@@ -711,8 +715,9 @@ func TestStreamReadSubagentPreservesInterruptedStateWithoutExitCode(t *testing.T
 	if snap.ExitCode != nil {
 		t.Fatalf("snapshot ExitCode = %#v, want nil for subagent lifecycle state", snap.ExitCode)
 	}
-	if got := streamClosedState(snap); got != string(taskapi.StateInterrupted) {
-		t.Fatalf("streamClosedState() = %q, want interrupted", got)
+	frames := stream.FramesForSnapshot(snap)
+	if got := frames[len(frames)-1].State; got != string(taskapi.StateInterrupted) {
+		t.Fatalf("terminal close state = %q, want interrupted", got)
 	}
 }
 

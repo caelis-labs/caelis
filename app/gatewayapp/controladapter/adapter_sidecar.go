@@ -90,7 +90,7 @@ func (d *Adapter) startSidecarTurn(ctx context.Context, req startSidecarTurnRequ
 	if result.Handle == nil {
 		return nil, nil
 	}
-	return &gatewayTurn{handle: result.Handle}, nil
+	return d.newGatewayTurn(result.Handle), nil
 }
 
 func (d *Adapter) allocateSideAgentLabel(ctx context.Context, ref session.SessionRef, agent string) string {
@@ -145,5 +145,5 @@ func (d *Adapter) ContinueSubagent(ctx context.Context, handle string, prompt st
 	if result.Handle == nil {
 		return nil, nil
 	}
-	return &gatewayTurn{handle: result.Handle}, nil
+	return d.newGatewayTurn(result.Handle), nil
 }

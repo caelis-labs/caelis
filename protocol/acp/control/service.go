@@ -118,10 +118,6 @@ type Service interface {
 	PluginService
 }
 
-type StreamSubscriber interface {
-	SubscribeStream(context.Context, eventstream.Envelope) (<-chan eventstream.Envelope, bool)
-}
-
 type LightweightStatusProvider interface {
 	LightweightStatus(context.Context) (StatusSnapshot, error)
 }

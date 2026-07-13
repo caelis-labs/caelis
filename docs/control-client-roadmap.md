@@ -48,10 +48,10 @@ yet complete.
 
 | Area | Current state | Extension risk |
 | --- | --- | --- |
-| Turn output | Main turns use `eventstream.Envelope` | Terminal and subagent output are discovered through a second `StreamSubscriber` path |
+| Turn output | Main turns use `eventstream.Envelope`; the private Control adapter broker fans task-stream output into `gatewayTurn.Events()` | The live feed is not yet resumable and has no app-server transport contract |
 | Command output | `RunCommand` publishes task-stream text | The empty terminal anchor plus Caelis metadata is a deliberate Zed-compatible projection, but it is not strict ACP terminal ownership |
-| Spawn output | A task-stream frame can carry both text and a normalized child `session.Event`; the projector preserves the child event as a scoped ACP Envelope and retains the parent terminal compatibility mirror | The trace remains transient, the mirror remains temporary, and a Control-owned broker has not yet replaced the direct stream path |
-| Child rendering | TUI receives scoped semantic events and applies typed parent/delivery routing to suppress compatibility duplicates in its compact Spawn panel | One ordered cross-surface feed and durable child replay authority are still absent |
+| Spawn output | A task-stream frame can carry both text and a normalized child `session.Event`; the projector preserves the child event as a scoped ACP Envelope and retains the parent terminal compatibility mirror | The trace remains transient and the mirror remains temporary |
+| Child rendering | TUI receives scoped semantic events and applies typed parent/delivery routing to suppress compatibility duplicates in its compact Spawn panel | Durable child replay authority is still absent |
 | Replay | Parent canonical Spawn result is durable | The live child trace is transient and has no durable GUI reload authority |
 | Client commands | In-process Control service supports current TUI workflows | Requests are ambient-session and live-handle oriented rather than network-safe and reconnectable |
 | Dynamic orchestration | Handoff, leases, Reviewer, Guardian, and loop watchdog boundaries exist | Goal state and the cross-Turn Agent Manage Loop are not implemented |
@@ -68,9 +68,10 @@ The important implementation seam already exists:
 
 The completed minimum Spawn projection preserves the semantic event through
 projection and lets the consuming Surface apply the current compact-panel
-compatibility policy. The remaining M1 work is to place that live path behind
-one Control-owned feed, remove the temporary text-mirror dependency, and supply
-the required replay and approval semantics.
+compatibility policy. The completed Control-owned fan-in slice places that live
+path behind one feed. The remaining M1 work is to remove the temporary
+text-mirror dependency and supply the required permission/approval semantics;
+replay remains separate M2 work.
 
 ## Protocol Layers
 
@@ -94,10 +95,20 @@ events, task streams, external ACP updates, terminal output, participant state,
 approval requests, Goal state, and Manage Loop decisions are merged by a
 Control-owned broker before they reach a Surface.
 
-`control.StreamSubscriber` is a transitional in-process source adapter. It may
-continue to bridge the existing task-stream service while the broker is built,
-but it is not the app-server or GUI contract. A Surface must not discover a
-second stream from an already-rendered tool update.
+The completed Control-owned fan-in slice keeps the existing task-stream service
+behind a private Control adapter broker. `gatewayTurn.Events()` is the one live
+feed consumed by TUI, headless, and the ACP prompt bridge; Surfaces no longer
+discover a second stream from an already-rendered tool update. This is an
+in-process delivery implementation, not an app-server, GUI, or resume
+contract.
+
+The broker owns live delivery, not task execution. On a matching main terminal
+it stops new sources, asks every started source for one immediate final `Read`
+of already materialized state, advances each cursor only after that complete
+snapshot is accepted, drains accepted batches, and then emits one final main
+lifecycle frame. It ends broker delivery contexts after that barrier; it does
+not wait for or cancel asynchronous Spawn runtime work. A scoped subagent or
+participant terminal remains a scoped event and cannot end the parent Turn.
 
 The versioned Envelope contract must make these fields explicit:
 
@@ -495,8 +506,9 @@ Exit criteria:
 
 Deliverables:
 
-- introduce the Control-owned event broker and move task-stream fan-in behind
-  it;
+- **Completed bounded slice:** introduce the Control-owned event broker, move
+  task-stream fan-in behind it with a final materialized-source read barrier,
+  and remove Surface/ACP prompt-bridge secondary subscriptions;
 - project `Frame.Event` for Spawn as child-scoped standard ACP payloads
   (completed minimum slice);
 - retain RunCommand exact terminal-byte behavior;
@@ -650,10 +662,13 @@ the working Zed projection before that evidence exists. Continue M0 with ACP
 conformance and Envelope contract tests. The M1 Spawn semantic-projection
 minimum is complete: one child `Frame.Event` is preserved through projection,
 the existing TUI compact panel applies its typed Envelope delivery policy, and
-the parent Spawn result remains the only canonical parent-model fact. Its explicit
-parent/delivery Envelope contract is the Event Broker prerequisite, not M1
-completion: broker fan-in, permission routing, one feed, and text-mirror
-removal remain open.
+the parent Spawn result remains the only canonical parent-model fact. The
+Control-owned fan-in / Surface-no-secondary-subscription slice is now complete:
+the typed parent/delivery Envelope contract drives one live `gatewayTurn` feed,
+whose main-terminal barrier final-reads already materialized source state before
+its final Turn lifecycle frame.
+M1 remains open for permission routing and parent text-mirror removal; M2
+remains open for replay/resume and linked child replay authority.
 
 Full GUI feature work should not begin before M1. GUI history and production
 app-server work require M2. Goal and Manage Loop implementation starts only

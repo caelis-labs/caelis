@@ -98,13 +98,13 @@ func controlServiceCanSubmitRunningPrompt(ctx context.Context, service control.S
 	return strings.EqualFold(strings.TrimSpace(status.ActiveTurnKind), "kernel")
 }
 
-func runSubagentTurn(ctx context.Context, service control.Service, sender *ProgramSender, turn control.Turn) executeLineResult {
+func runSubagentTurn(ctx context.Context, sender *ProgramSender, turn control.Turn) executeLineResult {
 	if turn == nil {
 		return executeLineResult{completion: TaskResultMsg{SuppressTurnDivider: true}}
 	}
 	defer turn.Close()
 	if sender != nil && sender.sendFunc() != nil {
-		return forwardTurnEventStream(ctx, service, turn, sender)
+		return forwardTurnEventStream(ctx, turn, sender)
 	}
 	for range turn.Events() {
 	}

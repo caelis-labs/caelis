@@ -2612,15 +2612,14 @@ func TestAdapterSetSessionModeUpdatesLocalApprovalModeUnderACPController(t *test
 		t.Fatalf("BindController() error = %v", err)
 	}
 	driver := &Adapter{
-		stack:               gatewayAppStackForRuntimeTest(stack),
-		session:             activeSession,
-		hasSession:          true,
-		bindingKey:          "surface",
-		defaultSessionMode:  "auto-review",
-		sessionMode:         "auto-review",
-		defaultSandboxType:  "host",
-		sandboxType:         "host",
-		streamSubscriptions: map[string]struct{}{},
+		stack:              gatewayAppStackForRuntimeTest(stack),
+		session:            activeSession,
+		hasSession:         true,
+		bindingKey:         "surface",
+		defaultSessionMode: "auto-review",
+		sessionMode:        "auto-review",
+		defaultSandboxType: "host",
+		sandboxType:        "host",
 	}
 
 	status, err := driver.SetSessionMode(ctx, "manual")
@@ -2699,14 +2698,13 @@ func TestAdapterCycleSessionModeUpdatesRemoteACPControllerMode(t *testing.T) {
 				},
 			},
 		},
-		session:             activeSession,
-		hasSession:          true,
-		bindingKey:          "surface",
-		defaultSessionMode:  "auto-review",
-		sessionMode:         "auto-review",
-		defaultSandboxType:  "host",
-		sandboxType:         "host",
-		streamSubscriptions: map[string]struct{}{},
+		session:            activeSession,
+		hasSession:         true,
+		bindingKey:         "surface",
+		defaultSessionMode: "auto-review",
+		sessionMode:        "auto-review",
+		defaultSandboxType: "host",
+		sandboxType:        "host",
 	}
 
 	status, err := driver.CycleSessionMode(ctx)
@@ -2809,13 +2807,12 @@ func TestAdapterACPStatusPrefersRemoteModeOverLocalSessionMode(t *testing.T) {
 				},
 			},
 		},
-		session:             activeSession,
-		hasSession:          true,
-		defaultSessionMode:  "local-default",
-		sessionMode:         "local-default",
-		defaultSandboxType:  "host",
-		sandboxType:         "host",
-		streamSubscriptions: map[string]struct{}{},
+		session:            activeSession,
+		hasSession:         true,
+		defaultSessionMode: "local-default",
+		sessionMode:        "local-default",
+		defaultSandboxType: "host",
+		sandboxType:        "host",
 	}
 
 	status, err := driver.Status(ctx)
@@ -2868,15 +2865,14 @@ func TestAdapterACPStatusKeepsAgentFallbackWithoutRemoteModel(t *testing.T) {
 	}
 
 	driver := &Adapter{
-		stack:               gatewayAppStackForRuntimeTest(stack),
-		session:             activeSession,
-		hasSession:          true,
-		bindingKey:          "surface",
-		defaultSessionMode:  "default",
-		sessionMode:         "default",
-		defaultSandboxType:  "host",
-		sandboxType:         "host",
-		streamSubscriptions: map[string]struct{}{},
+		stack:              gatewayAppStackForRuntimeTest(stack),
+		session:            activeSession,
+		hasSession:         true,
+		bindingKey:         "surface",
+		defaultSessionMode: "default",
+		sessionMode:        "default",
+		defaultSandboxType: "host",
+		sandboxType:        "host",
 	}
 	status, err := driver.Status(ctx)
 	if err != nil {

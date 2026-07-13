@@ -155,6 +155,13 @@ func streamDisplayTerminalID(req StreamRequest, frame stream.Frame) string {
 	return firstNonEmpty(req.DisplayTerminalID, frame.Ref.TerminalID, req.Ref.TerminalID, req.CallID)
 }
 
+func streamTerminalExitID(req StreamRequest, frame stream.Frame) string {
+	if terminalID, ok := display.DisplayTerminalID(req.CallID, req.ToolName); ok {
+		return terminalID
+	}
+	return streamDisplayTerminalID(req, frame)
+}
+
 func streamToolUpdateEnvelope(req StreamRequest, frame stream.Frame, status string, includeStatus bool, isErr bool, terminalText string, meta map[string]any) eventstream.Envelope {
 	terminalID := firstNonEmpty(frame.Ref.TerminalID, req.Ref.TerminalID)
 	metaOutput := map[string]any{
@@ -188,6 +195,12 @@ func streamToolUpdateEnvelope(req StreamRequest, frame stream.Frame, status stri
 		update.Status = stringPtr(statusText)
 	}
 	update = withDisplayTerminalUpdate(update, req.CallID, req.ToolName)
+	if frame.Closed {
+		// withDisplayTerminalUpdate preserves the Zed-compatible empty terminal
+		// anchor and installs the final terminal metadata. The stream close frame
+		// is the authoritative runtime exit-code carrier, so retain it here.
+		update.Meta = metautil.WithTerminalExit(update.Meta, streamTerminalExitID(req, frame), frame.ExitCode, nil)
+	}
 	scope := req.Scope
 	if scope == "" {
 		scope = eventstream.ScopeMain

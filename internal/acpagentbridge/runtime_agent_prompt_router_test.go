@@ -473,28 +473,26 @@ func TestRuntimeAgentPromptRouterAppliesSideEffectsWithoutTurn(t *testing.T) {
 	}
 }
 
-func TestRuntimeAgentPromptRouterStreamBridgeReturnsEmitErrors(t *testing.T) {
+func TestRuntimeAgentPromptRouterTurnFeedReturnsEmitErrors(t *testing.T) {
 	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
 	runtime := &promptRouterRuntime{sessions: sessions}
 	status := acp.ToolStatusInProgress
-	turn := newTestControlTurn(eventstream.Envelope{
-		Kind: eventstream.KindSessionUpdate,
-		Update: acp.ToolCallUpdate{
-			SessionUpdate: acp.UpdateToolCallInfo,
-			ToolCallID:    "call-1",
-			Status:        &status,
+	turn := newTestControlTurn(
+		eventstream.Envelope{
+			Kind: eventstream.KindSessionUpdate,
+			Update: acp.ToolCallUpdate{
+				SessionUpdate: acp.UpdateToolCallInfo,
+				ToolCallID:    "call-1",
+				Status:        &status,
+			},
 		},
-	})
-	streamer := testPromptStreamSubscriber{events: []eventstream.Envelope{{
-		Kind:   eventstream.KindNotice,
-		Notice: "stream output",
-	}}}
+		eventstream.Envelope{Kind: eventstream.KindNotice, Notice: "stream output"},
+	)
 	router := &testPromptRouter{
 		result: controlprompt.Result{
 			Handled: true,
 			Turn:    turn,
 		},
-		streamer: streamer,
 	}
 	agent, err := runtimeacp.New(runtimeacp.Config{
 		Runtime:  runtime,
@@ -531,7 +529,7 @@ func TestRuntimeAgentPromptRouterStreamBridgeReturnsEmitErrors(t *testing.T) {
 	}
 }
 
-func TestRuntimeAgentPromptRouterStreamBridgeEmitsTerminalMetaForACPStdio(t *testing.T) {
+func TestRuntimeAgentPromptRouterTurnFeedEmitsTerminalMetaForACPStdio(t *testing.T) {
 	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
 	runtime := &promptRouterRuntime{sessions: sessions}
 	running := acp.ToolStatusInProgress
@@ -554,6 +552,19 @@ func TestRuntimeAgentPromptRouterStreamBridgeEmitsTerminalMetaForACPStdio(t *tes
 			Update: acp.ToolCallUpdate{
 				SessionUpdate: acp.UpdateToolCallInfo,
 				ToolCallID:    "call-1",
+				Content: []acp.ToolCallContent{{
+					Type:       "terminal",
+					TerminalID: "call-1",
+					Content:    acp.TextContent{Type: "text", Text: "streamed output\n"},
+				}},
+				Meta: transientTerminalStreamMetaForTest("append"),
+			},
+		},
+		eventstream.Envelope{
+			Kind: eventstream.KindSessionUpdate,
+			Update: acp.ToolCallUpdate{
+				SessionUpdate: acp.UpdateToolCallInfo,
+				ToolCallID:    "call-1",
 				Status:        &completed,
 				Content: []acp.ToolCallContent{{
 					Type:       "terminal",
@@ -562,25 +573,11 @@ func TestRuntimeAgentPromptRouterStreamBridgeEmitsTerminalMetaForACPStdio(t *tes
 			},
 		},
 	)
-	streamer := testPromptStreamSubscriber{events: []eventstream.Envelope{{
-		Kind: eventstream.KindSessionUpdate,
-		Update: acp.ToolCallUpdate{
-			SessionUpdate: acp.UpdateToolCallInfo,
-			ToolCallID:    "call-1",
-			Content: []acp.ToolCallContent{{
-				Type:       "terminal",
-				TerminalID: "call-1",
-				Content:    acp.TextContent{Type: "text", Text: "streamed output\n"},
-			}},
-			Meta: transientTerminalStreamMetaForTest("append"),
-		},
-	}}}
 	router := &testPromptRouter{
 		result: controlprompt.Result{
 			Handled: true,
 			Turn:    turn,
 		},
-		streamer: streamer,
 	}
 	agent, err := runtimeacp.New(runtimeacp.Config{
 		Runtime:  runtime,
@@ -703,13 +700,13 @@ func TestRuntimeAgentPromptRouterDeduplicatesFinalNarrativeReplay(t *testing.T) 
 	}
 }
 
-func TestRuntimeAgentPromptRouterStreamBridgeSuppressesMirroredSubagentEvents(t *testing.T) {
+func TestRuntimeAgentPromptRouterTurnFeedSuppressesMirroredSubagentEvents(t *testing.T) {
 	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
 	runtime := &promptRouterRuntime{sessions: sessions}
 	status := acp.ToolStatusInProgress
 	spawnKind := "SPAWN"
 	childTitle := "LIST /tmp/project"
-	turn := newTestControlTurn(eventstream.Envelope{
+	main := eventstream.Envelope{
 		Kind:      eventstream.KindSessionUpdate,
 		SessionID: "session-1",
 		Update: acp.ToolCallUpdate{
@@ -722,8 +719,8 @@ func TestRuntimeAgentPromptRouterStreamBridgeSuppressesMirroredSubagentEvents(t 
 				TerminalID: "spawn-1",
 			}},
 		},
-	})
-	streamer := testPromptStreamSubscriber{events: []eventstream.Envelope{
+	}
+	streamEvents := []eventstream.Envelope{
 		{
 			Kind:      eventstream.KindSessionUpdate,
 			SessionID: "session-1",
@@ -761,13 +758,13 @@ func TestRuntimeAgentPromptRouterStreamBridgeSuppressesMirroredSubagentEvents(t 
 				Meta: transientTerminalStreamMetaForTest("append"),
 			},
 		},
-	}}
+	}
+	turn := newTestControlTurn(append([]eventstream.Envelope{main}, streamEvents...)...)
 	router := &testPromptRouter{
 		result: controlprompt.Result{
 			Handled: true,
 			Turn:    turn,
 		},
-		streamer: streamer,
 	}
 	agent, err := runtimeacp.New(runtimeacp.Config{
 		Runtime:  runtime,
@@ -812,7 +809,7 @@ func TestRuntimeAgentPromptRouterStreamBridgeSuppressesMirroredSubagentEvents(t 
 	}
 }
 
-func TestRuntimeAgentPromptRouterStreamBridgeSuppressesTypedAndLegacySubagentEnvelopes(t *testing.T) {
+func TestRuntimeAgentPromptRouterTurnFeedSuppressesTypedAndLegacySubagentEnvelopes(t *testing.T) {
 	cases := []struct {
 		name  string
 		typed bool
@@ -829,7 +826,7 @@ func TestRuntimeAgentPromptRouterStreamBridgeSuppressesTypedAndLegacySubagentEnv
 			status := acp.ToolStatusInProgress
 			spawnKind := "SPAWN"
 			childTitle := "LIST /tmp/project"
-			turn := newTestControlTurn(eventstream.Envelope{
+			main := eventstream.Envelope{
 				Kind:      eventstream.KindSessionUpdate,
 				SessionID: "session-1",
 				Update: acp.ToolCallUpdate{
@@ -839,9 +836,9 @@ func TestRuntimeAgentPromptRouterStreamBridgeSuppressesTypedAndLegacySubagentEnv
 					Status:        &status,
 					Content:       []acp.ToolCallContent{{Type: "terminal", TerminalID: "spawn-1"}},
 				},
-			})
+			}
 			parentTool, childDelivery, childPlanDelivery, childMeta := bridgeSubagentEnvelopeFieldsForTest(tc.typed)
-			streamer := testPromptStreamSubscriber{events: []eventstream.Envelope{
+			streamEvents := []eventstream.Envelope{
 				{
 					Kind:       eventstream.KindSessionUpdate,
 					SessionID:  "session-1",
@@ -900,8 +897,9 @@ func TestRuntimeAgentPromptRouterStreamBridgeSuppressesTypedAndLegacySubagentEnv
 						Meta: transientTerminalStreamMetaForTest("append"),
 					},
 				},
-			}}
-			router := &testPromptRouter{result: controlprompt.Result{Handled: true, Turn: turn}, streamer: streamer}
+			}
+			turn := newTestControlTurn(append([]eventstream.Envelope{main}, streamEvents...)...)
+			router := &testPromptRouter{result: controlprompt.Result{Handled: true, Turn: turn}}
 			agent, err := runtimeacp.New(runtimeacp.Config{
 				Runtime:  runtime,
 				Sessions: sessions,
@@ -978,20 +976,12 @@ func hasPlanNotification(notifications []acp.SessionNotification) bool {
 }
 
 type testPromptRouter struct {
-	request  controlprompt.Request
-	result   controlprompt.Result
-	streamer control.StreamSubscriber
-	err      error
+	request controlprompt.Request
+	result  controlprompt.Result
+	err     error
 }
 
 func (r *testPromptRouter) Route(_ context.Context, req controlprompt.Request) (controlprompt.Result, error) {
 	r.request = req
 	return r.result, r.err
-}
-
-func (r *testPromptRouter) StreamSubscriber() (control.StreamSubscriber, bool) {
-	if r.streamer == nil {
-		return nil, false
-	}
-	return r.streamer, true
 }

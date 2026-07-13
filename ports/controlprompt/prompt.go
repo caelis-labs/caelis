@@ -14,12 +14,6 @@ type Router interface {
 	Route(context.Context, Request) (Result, error)
 }
 
-// StreamSubscriberProvider exposes optional stream fan-out for router results
-// that carry live turns.
-type StreamSubscriberProvider interface {
-	StreamSubscriber() (control.StreamSubscriber, bool)
-}
-
 // RouterFactory builds a prompt router from a shared configuration.
 type RouterFactory func(RouterConfig) Router
 

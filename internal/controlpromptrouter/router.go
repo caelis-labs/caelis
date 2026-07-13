@@ -30,11 +30,6 @@ func New(cfg prompt.RouterConfig) prompt.Router {
 	}
 }
 
-func (r Router) StreamSubscriber() (control.StreamSubscriber, bool) {
-	streamer, ok := r.service.(control.StreamSubscriber)
-	return streamer, ok
-}
-
 func (r Router) Route(ctx context.Context, req prompt.Request) (prompt.Result, error) {
 	ctx = contextOrBackground(ctx)
 	if r.service == nil {

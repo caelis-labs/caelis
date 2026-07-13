@@ -40,13 +40,20 @@ func (m *Model) stopLiveTurn() {
 }
 
 func (m *Model) finishLiveTurnFromEnvelope(env eventstream.Envelope) (tea.Cmd, bool) {
-	if m == nil || !eventstream.IsTerminalLifecycle(env) {
+	if m == nil || !isMainTurnTerminalLifecycle(env) {
 		return nil, false
 	}
 	err := errorFromTerminalLifecycle(env)
 	interrupted := liveTurnLifecycleInterrupted(env)
 	cmd := m.finishLiveTurn(liveTurnEndedAt(env), interrupted, err)
 	return cmd, true
+}
+
+func isMainTurnTerminalLifecycle(env eventstream.Envelope) bool {
+	if !eventstream.IsTerminalLifecycle(env) {
+		return false
+	}
+	return env.Scope == "" || env.Scope == eventstream.ScopeMain
 }
 
 func terminalLifecycleForTaskResult(msg TaskResultMsg, occurredAt time.Time) eventstream.Envelope {

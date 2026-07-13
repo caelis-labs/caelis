@@ -2865,6 +2865,7 @@ package github.com/caelis-labs/caelis/agent-sdk/task/stream
   func CloneCursor(in Cursor) Cursor
   func CloneFrame(in Frame) Frame
   func CloneSnapshot(in Snapshot) Snapshot
+  func FramesForSnapshot(snapshot Snapshot) []Frame
   func NormalizeRef(in Ref) Ref
   type Controller interface {
       Service
@@ -2883,6 +2884,7 @@ package github.com/caelis-labs/caelis/agent-sdk/task/stream
       Cursor    Cursor         `json:"cursor,omitempty"`
       Running   bool           `json:"running,omitempty"`
       Closed    bool           `json:"closed,omitempty"`
+      ExitCode  *int           `json:"exit_code,omitempty"`
       Event     *session.Event `json:"event,omitempty"`
       UpdatedAt time.Time      `json:"updated_at,omitempty"`
   }

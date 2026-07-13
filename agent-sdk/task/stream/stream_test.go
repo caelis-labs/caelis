@@ -56,7 +56,9 @@ func TestFrameEventJSONRoundTrip(t *testing.T) {
 func TestCloneFrameClonesEvent(t *testing.T) {
 	t.Parallel()
 
+	exitCode := 7
 	frame := Frame{
+		ExitCode: &exitCode,
 		Event: &session.Event{
 			Protocol: &session.EventProtocol{
 				Update: &session.ProtocolUpdate{
@@ -68,7 +70,58 @@ func TestCloneFrameClonesEvent(t *testing.T) {
 	}
 	cloned := CloneFrame(frame)
 	cloned.Event.Protocol.Update.RawInput["command"] = "changed"
+	*cloned.ExitCode = 9
 	if got := frame.Event.Protocol.Update.RawInput["command"]; got != "echo hi" {
 		t.Fatalf("source command = %#v, want unchanged clone isolation", got)
+	}
+	if *frame.ExitCode != exitCode {
+		t.Fatalf("source exit code = %d, want unchanged %d", *frame.ExitCode, exitCode)
+	}
+}
+
+func TestFramesForSnapshotBuildsTerminalFrame(t *testing.T) {
+	t.Parallel()
+
+	exitCode := 7
+	frames := FramesForSnapshot(Snapshot{
+		Ref:       Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "term-1"},
+		Cursor:    Cursor{Output: 12, Events: 3},
+		FinalText: "ignored for command exit",
+		State:     "failed",
+		Running:   false,
+		ExitCode:  &exitCode,
+	})
+	if len(frames) != 1 {
+		t.Fatalf("frames = %#v, want one generated close frame", frames)
+	}
+	close := frames[0]
+	if !close.Closed || close.Running || close.State != "failed" || close.Text != "" {
+		t.Fatalf("close frame = %#v, want failed contentless close", close)
+	}
+	if close.ExitCode == nil || *close.ExitCode != exitCode {
+		t.Fatalf("close exit code = %#v, want %d", close.ExitCode, exitCode)
+	}
+	*close.ExitCode = 9
+	if *frames[0].ExitCode != 9 || exitCode != 7 {
+		t.Fatalf("close exit clone = %#v, source exit code = %d; want isolated source", frames[0].ExitCode, exitCode)
+	}
+}
+
+func TestFramesForSnapshotNormalizesExistingClose(t *testing.T) {
+	t.Parallel()
+
+	frames := FramesForSnapshot(Snapshot{
+		Ref:       Ref{SessionID: "session-1", TaskID: "task-1"},
+		Cursor:    Cursor{Output: 4},
+		FinalText: "child result",
+		State:     "completed",
+		Running:   false,
+		Frames:    []Frame{{Closed: true}},
+	})
+	if len(frames) != 1 {
+		t.Fatalf("frames = %#v, want one normalized close frame", frames)
+	}
+	if got := frames[0]; !got.Closed || got.Running || got.Text != "child result" || got.State != "completed" || got.Ref.TaskID != "task-1" {
+		t.Fatalf("normalized close = %#v, want snapshot terminal semantics", got)
 	}
 }
