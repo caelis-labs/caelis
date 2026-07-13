@@ -325,13 +325,20 @@ func streamFrameEmbeddedEvents(req StreamRequest, frame stream.Frame, hasParentT
 	if streamFrameSessionEventIsParentToolEcho(req, event) {
 		return nil
 	}
+	// Permission routing is a Control interaction, not a child stream delivery
+	// concern. The bridge normalizes it into ApprovalRequest and Control later
+	// publishes the single active request through the Turn event stream.
+	if session.ProtocolPermissionOf(event) != nil {
+		return nil
+	}
 	parentTool := streamParentToolRelation(req)
 	event.Meta = streamFrameEventMeta(event.Meta)
-	out := ProjectSessionEventEnvelope(EnvelopeBaseFromSessionEvent(req.SessionRef, event, SessionEventTransport{
+	base := EnvelopeBaseFromSessionEvent(req.SessionRef, event, SessionEventTransport{
 		HandleID: req.HandleID,
 		RunID:    req.RunID,
 		TurnID:   req.TurnID,
-	}), event)
+	})
+	out := ProjectSessionEventEnvelope(base, event)
 	if taskID := firstNonEmpty(strings.TrimSpace(frame.Ref.TaskID), strings.TrimSpace(req.Ref.TaskID)); taskID != "" {
 		for i := range out {
 			if out[i].Scope == eventstream.ScopeSubagent {

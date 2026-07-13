@@ -106,6 +106,58 @@ func TestTranslateApprovalRequestPreservesCanonicalToolPayload(t *testing.T) {
 	}
 }
 
+func TestRunnerPermissionCallbackNormalizesChildApprovalWithoutPublishingFrame(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingStreams{}
+	runner := &Runner{}
+	var captured tasksubagent.ApprovalRequest
+	requester := subagentApprovalRequesterFunc(func(ctx context.Context, req tasksubagent.ApprovalRequest) (tasksubagent.ApprovalResponse, error) {
+		captured = req
+		return tasksubagent.ApprovalResponse{Outcome: "selected", OptionID: "allow_once", Approved: true}, nil
+	})
+	handler := runner.permissionCallback(tasksubagent.SpawnContext{
+		SessionRef:        session.SessionRef{SessionID: "root-session"},
+		TaskID:            "task-1",
+		ParentCallID:      "spawn-call-1",
+		ApprovalRequester: requester,
+		Streams:           sink,
+	}, AgentConfig{Name: "helper"}, "helper-1")
+
+	response, err := handler(context.Background(), client.RequestPermissionRequest{
+		SessionID: "child-session",
+		ToolCall: client.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo,
+			ToolCallID:    "child-call-1",
+			Kind:          stringPtr("edit"),
+			Title:         stringPtr("Write child file"),
+			Status:        stringPtr("pending"),
+			RawInput:      map[string]any{"path": "child.txt"},
+			RawOutput:     map[string]any{"preview": "new text"},
+			Content: []client.ToolCallContent{{
+				Type:    "content",
+				Content: client.TextContent{Type: "text", Text: "child permission detail"},
+			}},
+		},
+		Options: []client.PermissionOption{{OptionID: "allow_once", Name: "Allow once", Kind: "allow_once"}},
+	})
+	if err != nil {
+		t.Fatalf("permission callback error = %v", err)
+	}
+	if response.Outcome.Outcome != "selected" || response.Outcome.OptionID != "allow_once" {
+		t.Fatalf("permission callback response = %#v, want selected allow_once", response)
+	}
+	if len(sink.frames) != 0 {
+		t.Fatalf("permission frames = %#v, want no child-owned permission frame", sink.frames)
+	}
+	if captured.TaskID != "task-1" || captured.ParentCallID != "spawn-call-1" || captured.Agent != "helper" {
+		t.Fatalf("normalized child approval = %#v, want inherited child origin", captured)
+	}
+	if captured.ToolCall.ID != "child-call-1" || captured.ToolCall.RawInput["path"] != "child.txt" || captured.ToolCall.RawOutput["preview"] != "new text" || len(captured.ToolCall.Content) != 1 || len(captured.Options) != 1 {
+		t.Fatalf("normalized child approval payload = %#v, want original ACP tool payload", captured)
+	}
+}
+
 func TestRunnerCancelReturnsRemoteNotificationFailure(t *testing.T) {
 	t.Parallel()
 
@@ -835,6 +887,12 @@ func stringPtr(value string) *string {
 
 type recordingStreams struct {
 	frames []stream.Frame
+}
+
+type subagentApprovalRequesterFunc func(context.Context, tasksubagent.ApprovalRequest) (tasksubagent.ApprovalResponse, error)
+
+func (f subagentApprovalRequesterFunc) RequestSubagentApproval(ctx context.Context, req tasksubagent.ApprovalRequest) (tasksubagent.ApprovalResponse, error) {
+	return f(ctx, req)
 }
 
 func (s *recordingStreams) PublishStream(frame stream.Frame) {

@@ -21,6 +21,7 @@ const (
 	CodeCursorNotFound          = gateway.CodeCursorNotFound
 	CodeSubmissionUnsupported   = gateway.CodeSubmissionUnsupported
 	CodeApprovalNotPending      = gateway.CodeApprovalNotPending
+	CodeApprovalNotActive       = gateway.CodeApprovalNotActive
 	CodeSessionNotFound         = gateway.CodeSessionNotFound
 	CodeSessionAmbiguous        = gateway.CodeSessionAmbiguous
 	CodeBindingNotFound         = gateway.CodeBindingNotFound

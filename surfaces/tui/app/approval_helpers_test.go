@@ -85,6 +85,26 @@ func TestApprovalReviewPendingHintTruncatesToSingleLineBudget(t *testing.T) {
 	}
 }
 
+func TestApprovalDecisionFromPromptPreservesRequestID(t *testing.T) {
+	t.Parallel()
+
+	req := &approvalPayload{
+		RequestID: "approval-child-1",
+		Options: []approvalOption{
+			{ID: "allow_once", Name: "Allow once", Kind: "allow_once"},
+			{ID: "reject_once", Name: "Reject", Kind: "reject_once"},
+		},
+	}
+	allowed := approvalDecisionFromPrompt(req, PromptResponse{Line: "allow_once"})
+	if allowed.RequestID != req.RequestID || !allowed.Approved || allowed.OptionID != "allow_once" {
+		t.Fatalf("allowed decision = %#v, want request id and allow_once", allowed)
+	}
+	rejected := approvalDecisionFromPrompt(req, PromptResponse{Line: "reject_once"})
+	if rejected.RequestID != req.RequestID || rejected.Approved || rejected.OptionID != "reject_once" {
+		t.Fatalf("rejected decision = %#v, want request id and reject_once", rejected)
+	}
+}
+
 func hasPromptDetail(details []PromptDetail, want PromptDetail) bool {
 	for _, detail := range details {
 		if detail.Label == want.Label && detail.Value == want.Value && detail.Emphasis == want.Emphasis {

@@ -249,7 +249,7 @@ func (a *RuntimeAgent) emitControlEnvelope(ctx context.Context, cb acp.PromptCal
 		if err != nil || turn == nil {
 			return err
 		}
-		return turn.SubmitApproval(ctx, approvalDecisionFromACPResponse(env.Permission.Options, resp))
+		return turn.SubmitApproval(ctx, approvalDecisionFromACPResponse(env.ApprovalRequestID, env.Permission.Options, resp))
 	case eventstream.KindSessionUpdate:
 		if env.Update == nil {
 			return nil
@@ -298,7 +298,7 @@ func emitFilteredSessionUpdate(ctx context.Context, cb acp.PromptCallbacks, noti
 	return cb.SessionUpdate(ctx, notification)
 }
 
-func approvalDecisionFromACPResponse(options []acp.PermissionOption, resp acp.RequestPermissionResponse) control.ApprovalDecision {
+func approvalDecisionFromACPResponse(requestID eventstream.ApprovalRequestID, options []acp.PermissionOption, resp acp.RequestPermissionResponse) control.ApprovalDecision {
 	approval := &session.ProtocolApproval{Options: make([]session.ProtocolApprovalOption, 0, len(options))}
 	for _, option := range options {
 		approval.Options = append(approval.Options, session.ProtocolApprovalOption{
@@ -307,6 +307,7 @@ func approvalDecisionFromACPResponse(options []acp.PermissionOption, resp acp.Re
 	}
 	decision := semantic.DecodePermissionResponse(resp, approval)
 	return control.ApprovalDecision{
-		Outcome: decision.Outcome, OptionID: decision.OptionID, Approved: decision.Approved,
+		RequestID: requestID,
+		Outcome:   decision.Outcome, OptionID: decision.OptionID, Approved: decision.Approved,
 	}
 }

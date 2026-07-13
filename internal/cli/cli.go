@@ -370,8 +370,12 @@ func streamHandle(ctx context.Context, handle gateway.TurnHandle, stdout io.Writ
 		if env.Kind == eventstream.KindRequestPermission {
 			fmt.Fprintln(stderr, "[approval] denied by default")
 			if err := handle.Submit(ctx, gateway.SubmitRequest{
-				Kind:     gateway.SubmissionKindApproval,
-				Approval: &gateway.ApprovalDecision{Approved: false, Outcome: string(gateway.ApprovalStatusRejected)},
+				Kind: gateway.SubmissionKindApproval,
+				Approval: &gateway.ApprovalDecision{
+					RequestID: env.ApprovalRequestID,
+					Approved:  false,
+					Outcome:   string(gateway.ApprovalStatusRejected),
+				},
 			}); err != nil {
 				return err
 			}

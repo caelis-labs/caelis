@@ -59,6 +59,7 @@ func (t gatewayHeadlessTurn) SubmitApproval(ctx context.Context, decision contro
 	return t.handle.Submit(ctx, gateway.SubmitRequest{
 		Kind: gateway.SubmissionKindApproval,
 		Approval: &gateway.ApprovalDecision{
+			RequestID:  decision.RequestID,
 			Outcome:    strings.TrimSpace(decision.Outcome),
 			OptionID:   strings.TrimSpace(decision.OptionID),
 			Approved:   decision.Approved,

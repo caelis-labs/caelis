@@ -21,6 +21,7 @@ const (
 	CodeCursorNotFound          = "cursor_not_found"
 	CodeSubmissionUnsupported   = "submission_unsupported"
 	CodeApprovalNotPending      = "approval_not_pending"
+	CodeApprovalNotActive       = "approval_not_active"
 	CodeSessionNotFound         = "session_not_found"
 	CodeSessionAmbiguous        = "session_ambiguous"
 	CodeBindingNotFound         = "binding_not_found"

@@ -7,6 +7,18 @@
       "sha256": "9b7220e14d879fb3665c19010b7ff4f77797ee94face4b660191b952a1b8d49d",
       "symbol": "type Frame",
       "reason": "pre-v1 Frame adds terminal ExitCode so a final stream Snapshot preserves command exit projection through the Control-owned broker"
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk",
+      "sha256": "b18f3fc0a10461a773a459032b07fba67a8b618277a9da28f2b959e96c53edf6",
+      "symbol": "type ApprovalRequest",
+      "reason": "pre-v1 approval request adds the SDK durable pause identity for Control-owned approval correlation"
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk/approval",
+      "sha256": "d93d06f85e184b7d515d358d0d5a4141631e997c3961daf0e7ed957e6a0d84af",
+      "symbol": "type Payload",
+      "reason": "pre-v1 approval payload retains normalized ACP ToolCall kind, title, status, raw output, and content so child permissions round-trip without loss"
     }
   ]
 }

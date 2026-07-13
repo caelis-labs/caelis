@@ -74,14 +74,16 @@ package github.com/caelis-labs/caelis/agent-sdk
       Kind string `json:"kind,omitempty"`
   }
   type ApprovalRequest struct {
-      SessionRef session.SessionRef        `json:"session_ref"`
-      Session    session.Session           `json:"session"`
-      RunID      string                    `json:"run_id,omitempty"`
-      TurnID     string                    `json:"turn_id,omitempty"`
-      Tool       tool.Definition           `json:"tool"`
-      Call       tool.Call                 `json:"call"`
-      Approval   *session.ProtocolApproval `json:"approval,omitempty"`
-      Metadata   map[string]any            `json:"metadata,omitempty"`
+      SessionRef session.SessionRef `json:"session_ref"`
+      Session    session.Session    `json:"session"`
+      RunID      string             `json:"run_id,omitempty"`
+      TurnID     string             `json:"turn_id,omitempty"`
+
+      PauseTokenID string                    `json:"pause_token_id,omitempty"`
+      Tool         tool.Definition           `json:"tool"`
+      Call         tool.Call                 `json:"call"`
+      Approval     *session.ProtocolApproval `json:"approval,omitempty"`
+      Metadata     map[string]any            `json:"metadata,omitempty"`
   }
   type ApprovalRequester interface {
       RequestApproval(context.Context, ApprovalRequest) (ApprovalResponse, error)
@@ -417,21 +419,26 @@ package github.com/caelis-labs/caelis/agent-sdk/approval
       Kind string `json:"kind,omitempty"`
   }
   type Payload struct {
-      ToolCallID         string         `json:"tool_call_id,omitempty"`
-      ToolName           string         `json:"tool_name,omitempty"`
-      RawInput           map[string]any `json:"raw_input,omitempty"`
-      Reason             string         `json:"reason,omitempty"`
-      Justification      string         `json:"justification,omitempty"`
-      SandboxPermissions string         `json:"sandbox_permissions,omitempty"`
-      Status             Status         `json:"status,omitempty"`
-      Options            []Option       `json:"options,omitempty"`
-      ReviewID           string         `json:"review_id,omitempty"`
-      ReviewStatus       ReviewStatus   `json:"review_status,omitempty"`
-      ReviewText         string         `json:"review_text,omitempty"`
-      Risk               string         `json:"risk,omitempty"`
-      Authorization      string         `json:"authorization,omitempty"`
-      DecisionSource     string         `json:"decision_source,omitempty"`
-      ReviewTrace        *ReviewTrace   `json:"review_trace,omitempty"`
+      ToolCallID         string                            `json:"tool_call_id,omitempty"`
+      ToolName           string                            `json:"tool_name,omitempty"`
+      ToolKind           string                            `json:"tool_kind,omitempty"`
+      ToolTitle          string                            `json:"tool_title,omitempty"`
+      ToolStatus         string                            `json:"tool_status,omitempty"`
+      RawInput           map[string]any                    `json:"raw_input,omitempty"`
+      RawOutput          map[string]any                    `json:"raw_output,omitempty"`
+      Content            []session.ProtocolToolCallContent `json:"content,omitempty"`
+      Reason             string                            `json:"reason,omitempty"`
+      Justification      string                            `json:"justification,omitempty"`
+      SandboxPermissions string                            `json:"sandbox_permissions,omitempty"`
+      Status             Status                            `json:"status,omitempty"`
+      Options            []Option                          `json:"options,omitempty"`
+      ReviewID           string                            `json:"review_id,omitempty"`
+      ReviewStatus       ReviewStatus                      `json:"review_status,omitempty"`
+      ReviewText         string                            `json:"review_text,omitempty"`
+      Risk               string                            `json:"risk,omitempty"`
+      Authorization      string                            `json:"authorization,omitempty"`
+      DecisionSource     string                            `json:"decision_source,omitempty"`
+      ReviewTrace        *ReviewTrace                      `json:"review_trace,omitempty"`
   }
   type Request = ReviewRequest
   type ReviewRequest struct {

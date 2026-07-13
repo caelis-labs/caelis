@@ -38,14 +38,18 @@ type ApprovalOption struct {
 // ApprovalRequest is one runtime-owned approval request emitted before one
 // sensitive tool execution continues.
 type ApprovalRequest struct {
-	SessionRef session.SessionRef        `json:"session_ref"`
-	Session    session.Session           `json:"session"`
-	RunID      string                    `json:"run_id,omitempty"`
-	TurnID     string                    `json:"turn_id,omitempty"`
-	Tool       tool.Definition           `json:"tool"`
-	Call       tool.Call                 `json:"call"`
-	Approval   *session.ProtocolApproval `json:"approval,omitempty"`
-	Metadata   map[string]any            `json:"metadata,omitempty"`
+	SessionRef session.SessionRef `json:"session_ref"`
+	Session    session.Session    `json:"session"`
+	RunID      string             `json:"run_id,omitempty"`
+	TurnID     string             `json:"turn_id,omitempty"`
+	// PauseTokenID identifies the SDK-owned durable pause, when this approval
+	// was created by Runtime durable approval handling. Product Control may use
+	// it as the request correlation value without adding it to ACP wire payloads.
+	PauseTokenID string                    `json:"pause_token_id,omitempty"`
+	Tool         tool.Definition           `json:"tool"`
+	Call         tool.Call                 `json:"call"`
+	Approval     *session.ProtocolApproval `json:"approval,omitempty"`
+	Metadata     map[string]any            `json:"metadata,omitempty"`
 }
 
 // ApprovalResponse is one resolved approval outcome.

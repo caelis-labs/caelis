@@ -25,7 +25,15 @@ const (
 
 type Options struct {
 	ApprovalPolicy  ApprovalPolicy
-	ResolveApproval func(context.Context, *approval.Payload) (approval.Decision, error)
+	ResolveApproval func(context.Context, ApprovalRequest) (approval.Decision, error)
+}
+
+// ApprovalRequest is the headless resolver input for one permission Envelope.
+// The resolver selects a decision only; the Surface forwards RequestID unchanged
+// to Control so it never chooses a runtime endpoint or approval waiter.
+type ApprovalRequest struct {
+	RequestID eventstream.ApprovalRequestID
+	Payload   *approval.Payload
 }
 
 type Result struct {
@@ -61,11 +69,12 @@ func RunOnce(ctx context.Context, starter Starter, submission control.Submission
 		}
 		if env.Kind == eventstream.KindRequestPermission {
 			payload := projector.ApprovalPayloadFromPermission(env.Permission)
-			decision, err := resolveApproval(ctx, opts, payload)
+			approvalReq := ApprovalRequest{RequestID: env.ApprovalRequestID, Payload: payload}
+			decision, err := resolveApproval(ctx, opts, approvalReq)
 			if err != nil {
 				return out, err
 			}
-			if err := turn.SubmitApproval(ctx, controlApprovalDecision(payload, decision)); err != nil {
+			if err := turn.SubmitApproval(ctx, controlApprovalDecision(approvalReq, decision)); err != nil {
 				return out, err
 			}
 			continue
@@ -101,7 +110,7 @@ func envelopeError(env eventstream.Envelope) error {
 	return nil
 }
 
-func resolveApproval(ctx context.Context, opts Options, req *approval.Payload) (approval.Decision, error) {
+func resolveApproval(ctx context.Context, opts Options, req ApprovalRequest) (approval.Decision, error) {
 	if opts.ResolveApproval != nil {
 		return opts.ResolveApproval(ctx, req)
 	}
@@ -111,9 +120,10 @@ func resolveApproval(ctx context.Context, opts Options, req *approval.Payload) (
 	return approval.Decision{Approved: false, Outcome: string(approval.StatusRejected)}, nil
 }
 
-func controlApprovalDecision(payload *approval.Payload, decision approval.Decision) control.ApprovalDecision {
-	response := approval.RuntimeResponseFromFinalReview(approval.FinalizeReviewResult(payload, decision))
+func controlApprovalDecision(req ApprovalRequest, decision approval.Decision) control.ApprovalDecision {
+	response := approval.RuntimeResponseFromFinalReview(approval.FinalizeReviewResult(req.Payload, decision))
 	return control.ApprovalDecision{
+		RequestID:  req.RequestID,
 		Outcome:    response.Outcome,
 		OptionID:   response.OptionID,
 		Approved:   response.Approved,

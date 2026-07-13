@@ -22,9 +22,14 @@ func TestProjectApprovalPayloadEnvelopeUsesPermissionProjectorPolicy(t *testing.
 			"request_id": "approval-1",
 		},
 	}, &approval.Payload{
-		ToolCallID:         "call-1",
-		ToolName:           "RUN_COMMAND",
-		RawInput:           map[string]any{"command": "go test ./..."},
+		ToolCallID: "call-1",
+		ToolName:   "RUN_COMMAND",
+		RawInput:   map[string]any{"command": "go test ./..."},
+		RawOutput:  map[string]any{"preview": "would run tests"},
+		Content: []session.ProtocolToolCallContent{{
+			Type:    "content",
+			Content: session.ProtocolTextContent("permission detail"),
+		}},
 		Reason:             "needs execution",
 		Justification:      "requested by user",
 		SandboxPermissions: "workspace-write",
@@ -56,9 +61,77 @@ func TestProjectApprovalPayloadEnvelopeUsesPermissionProjectorPolicy(t *testing.
 	if rawInput["approval_reason"] != "needs execution" || rawInput["justification"] != "requested by user" || rawInput["sandbox_permissions"] != "workspace-write" {
 		t.Fatalf("permission raw input = %#v, want approval prompt fields", rawInput)
 	}
+	if rawOutput, ok := permission.ToolCall.RawOutput.(map[string]any); !ok || rawOutput["preview"] != "would run tests" {
+		t.Fatalf("permission raw output = %#v, want preserved preview", permission.ToolCall.RawOutput)
+	}
+	if len(permission.ToolCall.Content) != 1 || permission.ToolCall.Content[0].Type != "content" {
+		t.Fatalf("permission content = %#v, want preserved canonical content", permission.ToolCall.Content)
+	}
 	payload := ApprovalPayloadFromPermission(permission)
-	if payload == nil || payload.ToolName != "RUN_COMMAND" {
+	if payload == nil || payload.ToolName != "RUN_COMMAND" || len(payload.Content) != 1 {
 		t.Fatalf("approval payload = %#v, want canonical RUN_COMMAND tool name", payload)
+	}
+}
+
+func TestProjectStreamFrameDoesNotProjectChildPermissionOutsideControl(t *testing.T) {
+	t.Parallel()
+
+	req := StreamRequest{
+		HandleID:   "handle-1",
+		RunID:      "run-1",
+		TurnID:     "turn-1",
+		SessionRef: session.SessionRef{SessionID: "root-session"},
+		CallID:     "spawn-call-1",
+		ToolName:   "SPAWN",
+		RawInput:   map[string]any{"agent": "helper", "prompt": "inspect"},
+		Ref:        stream.Ref{SessionID: "root-session", TaskID: "task-1", TerminalID: "child-terminal-1"},
+		Scope:      eventstream.ScopeMain,
+	}
+	frame := stream.Frame{
+		Ref:       req.Ref,
+		Running:   true,
+		State:     "waiting_approval",
+		UpdatedAt: time.Unix(200, 0),
+		Event: &session.Event{
+			ID:         "approval-child-1",
+			Type:       session.EventTypeLifecycle,
+			Visibility: session.VisibilityUIOnly,
+			Scope: &session.EventScope{
+				Participant: session.ParticipantRef{
+					ID:           "helper-1",
+					Kind:         session.ParticipantKindSubagent,
+					Role:         session.ParticipantRoleDelegated,
+					DelegationID: "task-1",
+				},
+				ACP: session.ACPRef{SessionID: "child-session"},
+			},
+			Protocol: &session.EventProtocol{
+				Method: session.ProtocolMethodRequestPermission,
+				Permission: &session.ProtocolApproval{
+					ToolCall: session.ProtocolToolCall{
+						ID:        "shared-call",
+						Name:      "WRITE",
+						Kind:      "edit",
+						Title:     "Write file",
+						Status:    "pending",
+						RawInput:  map[string]any{"path": "child.txt"},
+						RawOutput: map[string]any{"preview": "new text"},
+						Content: []session.ProtocolToolCallContent{{
+							Type:    "content",
+							Content: session.ProtocolTextContent("child permission detail"),
+						}},
+					},
+					Options: []session.ProtocolApprovalOption{{
+						ID: "allow_once", Name: "Allow once", Kind: "allow_once",
+					}},
+				},
+			},
+		},
+	}
+
+	events := ProjectStreamFrame(req, frame)
+	if len(events) != 0 {
+		t.Fatalf("ProjectStreamFrame() = %#v, want child permission withheld for Control routing", events)
 	}
 }
 

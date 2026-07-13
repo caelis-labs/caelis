@@ -4,6 +4,8 @@ import (
 	"maps"
 	"strings"
 	"time"
+
+	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
 // SubmissionMode controls how a surface routes a user submission.
@@ -360,6 +362,10 @@ type ConnectConfig struct {
 }
 
 type ApprovalDecision struct {
+	// RequestID must match the approval_request_id on the permission Envelope
+	// being resolved. Control uses it to route a decision to exactly one pending
+	// main, participant, or child approval waiter.
+	RequestID  eventstream.ApprovalRequestID
 	Outcome    string
 	OptionID   string
 	Approved   bool

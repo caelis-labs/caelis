@@ -437,6 +437,7 @@ const (
 )
 
 type ApprovalDecision struct {
+	RequestID  eventstream.ApprovalRequestID
 	Outcome    string
 	OptionID   string
 	Approved   bool

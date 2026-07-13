@@ -2078,7 +2078,8 @@ func TestApprovalPayloadFromACPEventUsesStandardPermission(t *testing.T) {
 	t.Parallel()
 
 	req := approvalPayloadFromACPEvent(eventstream.Envelope{
-		Kind: eventstream.KindRequestPermission,
+		Kind:              eventstream.KindRequestPermission,
+		ApprovalRequestID: "approval-child-1",
 		Permission: &schema.RequestPermissionRequest{
 			SessionID: "session-1",
 			ToolCall: schema.ToolCallUpdate{
@@ -2104,7 +2105,7 @@ func TestApprovalPayloadFromACPEventUsesStandardPermission(t *testing.T) {
 	if req == nil {
 		t.Fatal("approvalPayloadFromACPEvent() = nil")
 	}
-	if req.ToolCallID != "call-1" || req.ToolName != "RUN_COMMAND" || req.Reason != "needs execution" {
+	if req.RequestID != "approval-child-1" || req.ToolCallID != "call-1" || req.ToolName != "RUN_COMMAND" || req.Reason != "needs execution" {
 		t.Fatalf("approval payload = %#v, want ACP permission fields", req)
 	}
 	if len(req.Options) != 1 || req.Options[0].ID != "allow_once" {

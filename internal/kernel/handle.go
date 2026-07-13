@@ -53,11 +53,15 @@ type turnHandle struct {
 	pendingSubmissions      []SubmitRequest
 	allowPendingSubmissions bool
 	prepareSubmission       func(context.Context, SubmitRequest) (SubmitRequest, error)
-	pendingApprovalCh       chan ApprovalDecision
+	pendingApprovals        map[eventstream.ApprovalRequestID]*pendingApproval
+	settledApprovals        map[eventstream.ApprovalRequestID]string
+	approvalQueue           []*pendingApproval
+	activeApproval          *pendingApproval
 	finishHooks             []func()
 
-	approvalReviewSeq uint64
-	acpCursorSeq      uint64
+	approvalRequestSeq uint64
+	approvalReviewSeq  uint64
+	acpCursorSeq       uint64
 }
 
 func newTurnHandle(cfg turnHandleConfig) *turnHandle {
@@ -72,6 +76,8 @@ func newTurnHandle(cfg turnHandleConfig) *turnHandle {
 		allowPendingSubmissions: cfg.allowPendingSubmissions,
 		prepareSubmission:       cfg.prepareSubmission,
 		eventsCh:                make(chan eventstream.Envelope, 32),
+		pendingApprovals:        map[eventstream.ApprovalRequestID]*pendingApproval{},
+		settledApprovals:        map[eventstream.ApprovalRequestID]string{},
 	}
 	h.eventsCond = sync.NewCond(&h.mu)
 	return h
@@ -116,24 +122,7 @@ func (h *turnHandle) Submit(ctx context.Context, req SubmitRequest) error {
 		return err
 	}
 	if req.Kind == SubmissionKindApproval && req.Approval != nil {
-		h.mu.Lock()
-		wait := h.pendingApprovalCh
-		h.pendingApprovalCh = nil
-		h.mu.Unlock()
-		if wait == nil {
-			return &Error{
-				Kind:        KindApproval,
-				Code:        CodeApprovalNotPending,
-				UserVisible: true,
-				Message:     "gateway: no approval is pending",
-			}
-		}
-		select {
-		case wait <- *req.Approval:
-			return nil
-		case <-ctx.Done():
-			return ctx.Err()
-		}
+		return h.submitApproval(ctx, *req.Approval)
 	}
 	if h.prepareSubmission != nil {
 		prepared, err := h.prepareSubmission(ctx, req)
@@ -178,6 +167,7 @@ func (h *turnHandle) Cancel() agent.CancelResult {
 		return agent.CancelResult{Status: agent.CancelStatusAlreadyCancelled}
 	}
 	h.cancelled = true
+	h.clearPendingApprovalsLocked("cancelled")
 	cancelFn := h.cancelFn
 	runner := h.runner
 	h.mu.Unlock()
@@ -201,6 +191,7 @@ func (h *turnHandle) Close() error {
 		return nil
 	}
 	h.closed = true
+	h.clearPendingApprovalsLocked("closed")
 	if h.finished {
 		h.closeEventsLocked()
 	}
@@ -300,14 +291,6 @@ func invalidSubmissionKind(kind SubmissionKind) error {
 	}
 }
 
-func (h *turnHandle) setPendingApproval() <-chan ApprovalDecision {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	ch := make(chan ApprovalDecision, 1)
-	h.pendingApprovalCh = ch
-	return ch
-}
-
 func (h *turnHandle) publishSessionEvent(event *session.Event) {
 	h.publishSessionEventWithACPProjection(event, true)
 }
@@ -321,45 +304,42 @@ func (h *turnHandle) publishSessionEventWithACPProjection(event *session.Event, 
 	}
 }
 
-func (h *turnHandle) publishApproval(req *agent.ApprovalRequest) <-chan ApprovalDecision {
-	wait := h.setPendingApproval()
-	h.publishApprovalPayload(req, canonicalApprovalPayload(req))
-	return wait
-}
-
-func (h *turnHandle) publishApprovalPayload(req *agent.ApprovalRequest, payload *ApprovalPayload) {
-	h.publishApprovalEvent(req, payload, EventKindApprovalRequested, nil, nil)
-}
-
 func (h *turnHandle) publishApprovalReviewPayload(req *agent.ApprovalRequest, payload *ApprovalPayload) {
-	h.publishApprovalEvent(req, payload, EventKindApprovalReview, nil, nil)
+	h.publishApprovalEvent(req, payload, EventKindApprovalReview, nil, nil, "")
 }
 
 func (h *turnHandle) publishApprovalReviewPayloadWithUsage(req *agent.ApprovalRequest, payload *ApprovalPayload, usage *UsageSnapshot, invocation *session.EventInvocation) {
-	h.publishApprovalEvent(req, payload, EventKindApprovalReview, usage, invocation)
+	h.publishApprovalEvent(req, payload, EventKindApprovalReview, usage, invocation, "")
 }
 
-func (h *turnHandle) publishApprovalEvent(req *agent.ApprovalRequest, payload *ApprovalPayload, kind EventKind, usage *UsageSnapshot, invocation *session.EventInvocation) {
-	h.publishEnvelopes(h.approvalEventEnvelopes(req, payload, kind, usage, invocation), "")
+func (h *turnHandle) publishApprovalEvent(req *agent.ApprovalRequest, payload *ApprovalPayload, kind EventKind, usage *UsageSnapshot, invocation *session.EventInvocation, requestID eventstream.ApprovalRequestID) {
+	h.publishEnvelopes(h.approvalEventEnvelopes(req, payload, kind, usage, invocation, requestID), "")
 }
 
-func (h *turnHandle) approvalEventEnvelopes(req *agent.ApprovalRequest, payload *ApprovalPayload, kind EventKind, usage *UsageSnapshot, invocation *session.EventInvocation) []eventstream.Envelope {
+func (h *turnHandle) approvalEventEnvelopes(req *agent.ApprovalRequest, payload *ApprovalPayload, kind EventKind, usage *UsageSnapshot, invocation *session.EventInvocation, requestID eventstream.ApprovalRequestID) []eventstream.Envelope {
 	payload = cloneApprovalPayload(payload)
 	base := eventstream.Envelope{
-		SessionID:  h.sessionRef.SessionID,
-		HandleID:   h.handleID,
-		RunID:      h.runID,
-		TurnID:     h.turnID,
-		OccurredAt: time.Now(),
-		Scope:      eventstream.ScopeMain,
-		ScopeID:    h.sessionRef.SessionID,
-		Meta:       approvalEventMeta(req, invocation),
+		SessionID:         h.sessionRef.SessionID,
+		HandleID:          h.handleID,
+		RunID:             h.runID,
+		TurnID:            h.turnID,
+		OccurredAt:        time.Now(),
+		Scope:             eventstream.ScopeMain,
+		ScopeID:           h.sessionRef.SessionID,
+		Meta:              approvalEventMeta(req, invocation),
+		ApprovalRequestID: requestID,
 	}
 	if origin := canonicalOriginFromApproval(req, h.sessionRef, h.turnID); origin != nil {
 		base.Scope = eventstream.Scope(origin.Scope)
 		base.ScopeID = firstNonEmpty(strings.TrimSpace(origin.ScopeID), base.ScopeID)
 		base.Actor = strings.TrimSpace(origin.Actor)
 		base.ParticipantID = strings.TrimSpace(origin.ParticipantID)
+		if base.Scope == eventstream.ScopeSubagent {
+			base.Delivery = &eventstream.Delivery{Transient: true}
+			if parent := approvalParentToolRelation(req); parent != nil {
+				base.ParentTool = parent
+			}
+		}
 	}
 	var out []eventstream.Envelope
 	switch kind {
@@ -437,6 +417,20 @@ func canonicalApprovalEventMeta(req *agent.ApprovalRequest) map[string]any {
 	})
 }
 
+func approvalParentToolRelation(req *agent.ApprovalRequest) *eventstream.ParentToolRelation {
+	if req == nil {
+		return nil
+	}
+	toolCallID := metadataString(req.Metadata, "parent_call_id")
+	if toolCallID == "" {
+		return nil
+	}
+	return &eventstream.ParentToolRelation{
+		ToolCallID: toolCallID,
+		ToolName:   firstNonEmpty(metadataString(req.Metadata, "parent_tool"), metadataString(req.Metadata, "parent_tool_name")),
+	}
+}
+
 func (h *turnHandle) nextApprovalReviewID() string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -469,6 +463,16 @@ func (h *turnHandle) publishEnvelopes(events []eventstream.Envelope, bridgeSourc
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	h.publishEnvelopesLocked(events, bridgeSource)
+}
+
+// publishEnvelopesLocked records and schedules ACP envelopes while h.mu is
+// held. Approval activation uses it so waiter registration, queue activation,
+// and prompt publication stay under the same Control owner.
+func (h *turnHandle) publishEnvelopesLocked(events []eventstream.Envelope, bridgeSource string) {
+	if len(events) == 0 {
+		return
+	}
 	for _, env := range events {
 		if env.Cursor == "" || (env.ProjectionID != "" && env.Cursor == env.ProjectionID) {
 			env.Cursor = h.allocateEventCursorLocked()
@@ -532,6 +536,7 @@ func (h *turnHandle) finish() {
 	h.mu.Lock()
 	h.finishing = false
 	h.finished = true
+	h.clearPendingApprovalsLocked("terminal")
 	h.closeEventsLocked()
 	h.mu.Unlock()
 }

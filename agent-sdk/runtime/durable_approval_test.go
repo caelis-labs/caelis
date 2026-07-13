@@ -144,6 +144,59 @@ func TestResolveApprovalDeliversFileStoreCommittedResolution(t *testing.T) {
 	}
 }
 
+func TestRequestDurableApprovalExposesPauseTokenIDToRequester(t *testing.T) {
+	t.Parallel()
+
+	sessions, activeSession := newTestSessionService(t, "approval-request-id")
+	runtime, err := New(Config{Sessions: sessions, AgentFactory: chat.Factory{}})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	const runID = "run-approval-request-id"
+	const turnID = "turn-approval-request-id"
+	if err := runtime.startRunTurnJournal(context.Background(), activeSession.SessionRef, runID, turnID); err != nil {
+		t.Fatalf("startRunTurnJournal() error = %v", err)
+	}
+
+	var observed agent.ApprovalRequest
+	decision := agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_once", Approved: true}
+	got, err := runtime.requestDurableApproval(context.Background(), agent.ApprovalRequest{
+		SessionRef: activeSession.SessionRef,
+		Session:    activeSession,
+		RunID:      runID,
+		TurnID:     turnID,
+		Tool:       tool.Definition{Name: "WRITE"},
+		Call:       tool.Call{ID: "call-approval-request-id", Name: "WRITE"},
+	}, approvalRequesterFunc(func(_ context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+		observed = req
+		return decision, nil
+	}))
+	if err != nil {
+		t.Fatalf("requestDurableApproval() error = %v", err)
+	}
+	if got != decision {
+		t.Fatalf("requestDurableApproval() = %+v, want %+v", got, decision)
+	}
+	if observed.PauseTokenID == "" {
+		t.Fatal("requester approval request has empty PauseTokenID")
+	}
+
+	events, err := sessions.Events(context.Background(), session.EventsRequest{
+		SessionRef:       activeSession.SessionRef,
+		IncludeTransient: true,
+	})
+	if err != nil {
+		t.Fatalf("Events() error = %v", err)
+	}
+	for _, event := range events {
+		token := pauseTokenFromEvent(event)
+		if token != nil && token.TokenID == observed.PauseTokenID {
+			return
+		}
+	}
+	t.Fatalf("requester pause token id %q was not persisted", observed.PauseTokenID)
+}
+
 func TestResolveApprovalRedeliversMatchingDurableDecision(t *testing.T) {
 	t.Parallel()
 

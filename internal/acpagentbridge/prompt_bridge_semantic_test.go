@@ -13,19 +13,19 @@ func TestApprovalDecisionUsesSharedSemanticCodec(t *testing.T) {
 		{OptionID: "allow_once", Name: "Allow once", Kind: "allow_once"},
 		{OptionID: "reject_once", Name: "Reject", Kind: "reject_once"},
 	}
-	allowed := approvalDecisionFromACPResponse(options, acp.RequestPermissionResponse{
+	allowed := approvalDecisionFromACPResponse("approval-1", options, acp.RequestPermissionResponse{
 		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: "allow_once"},
 	})
-	if !allowed.Approved || allowed.OptionID != "allow_once" || allowed.Outcome != "selected" {
+	if !allowed.Approved || allowed.OptionID != "allow_once" || allowed.Outcome != "selected" || allowed.RequestID != "approval-1" {
 		t.Fatalf("allow decision = %#v, want selected approval", allowed)
 	}
-	rejected := approvalDecisionFromACPResponse(options, acp.RequestPermissionResponse{
+	rejected := approvalDecisionFromACPResponse("approval-1", options, acp.RequestPermissionResponse{
 		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: "reject_once"},
 	})
 	if rejected.Approved || rejected.OptionID != "reject_once" {
 		t.Fatalf("reject decision = %#v, want selected rejection", rejected)
 	}
-	cancelled := approvalDecisionFromACPResponse(options, acp.RequestPermissionResponse{
+	cancelled := approvalDecisionFromACPResponse("approval-1", options, acp.RequestPermissionResponse{
 		Outcome: acp.PermissionOutcome{Outcome: "cancelled", OptionID: "allow_once"},
 	})
 	if cancelled.Approved {

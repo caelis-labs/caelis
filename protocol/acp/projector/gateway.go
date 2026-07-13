@@ -419,7 +419,12 @@ func ApprovalPayloadFromPermission(req *schema.RequestPermissionRequest) *approv
 	payload := &approval.Payload{
 		ToolCallID:         strings.TrimSpace(normalized.ToolCall.ID),
 		ToolName:           strings.TrimSpace(normalized.ToolCall.Name),
+		ToolKind:           strings.TrimSpace(normalized.ToolCall.Kind),
+		ToolTitle:          strings.TrimSpace(normalized.ToolCall.Title),
+		ToolStatus:         strings.TrimSpace(normalized.ToolCall.Status),
 		RawInput:           rawInput,
+		RawOutput:          cloneAnyMap(normalized.ToolCall.RawOutput),
+		Content:            session.CloneProtocolToolCallContent(normalized.ToolCall.Content),
 		Reason:             firstNonEmpty(rawString(rawInput, "approval_reason"), rawString(rawInput, "reason")),
 		Justification:      rawString(rawInput, "justification"),
 		SandboxPermissions: rawString(rawInput, "sandbox_permissions"),
@@ -453,10 +458,14 @@ func protocolApprovalFromPayload(payload *approval.Payload) *session.ProtocolApp
 	}
 	return &session.ProtocolApproval{
 		ToolCall: session.ProtocolToolCall{
-			ID:       strings.TrimSpace(payload.ToolCallID),
-			Name:     strings.TrimSpace(payload.ToolName),
-			Status:   strings.TrimSpace(string(payload.Status)),
-			RawInput: rawInput,
+			ID:        strings.TrimSpace(payload.ToolCallID),
+			Name:      strings.TrimSpace(payload.ToolName),
+			Kind:      strings.TrimSpace(payload.ToolKind),
+			Title:     strings.TrimSpace(payload.ToolTitle),
+			Status:    firstNonEmpty(strings.TrimSpace(payload.ToolStatus), strings.TrimSpace(string(payload.Status))),
+			RawInput:  rawInput,
+			RawOutput: cloneAnyMap(payload.RawOutput),
+			Content:   session.CloneProtocolToolCallContent(payload.Content),
 		},
 		Options: options,
 	}

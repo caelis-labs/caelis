@@ -263,7 +263,8 @@ func TestStreamHandleWritesAssistantTextAndDeniesApproval(t *testing.T) {
 	title := "RUN_COMMAND"
 	handle := newFakeHandle([]eventstream.Envelope{
 		{
-			Kind: eventstream.KindRequestPermission,
+			Kind:              eventstream.KindRequestPermission,
+			ApprovalRequestID: "approval-1",
 			Permission: &schema.RequestPermissionRequest{
 				SessionID: "s1",
 				ToolCall: schema.ToolCallUpdate{

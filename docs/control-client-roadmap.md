@@ -2,7 +2,7 @@
 
 Status: active planning and acceptance baseline.
 
-Last reviewed: 2026-07-12.
+Last reviewed: 2026-07-13.
 
 This document orders the next Caelis architecture work after the Agent SDK
 boundary cleanup. It is the shared reference for implementation scope,
@@ -68,10 +68,11 @@ The important implementation seam already exists:
 
 The completed minimum Spawn projection preserves the semantic event through
 projection and lets the consuming Surface apply the current compact-panel
-compatibility policy. The completed Control-owned fan-in slice places that live
-path behind one feed. The remaining M1 work is to remove the temporary
-text-mirror dependency and supply the required permission/approval semantics;
-replay remains separate M2 work.
+compatibility policy. The completed Control-owned fan-in and child-scoped
+permission-routing slices place that live path behind one feed and give every
+approval response an exact request identity. The remaining M1 work is parent
+text-mirror removal and ACP runner trace cleanup; replay remains separate M2
+work.
 
 ## Protocol Layers
 
@@ -125,6 +126,32 @@ Scope and parent relationships belong to the Caelis Envelope, not to custom
 root fields added to standard ACP payloads. Display-only hints may remain under
 `_meta.caelis`, but clients must not need undocumented metadata to recover
 identity, ordering, lifecycle, or durability.
+
+### Approval request identity and live routing
+
+The completed bounded M1 slice adds `Envelope.approval_request_id` and the
+matching `control.ApprovalDecision.RequestID`. The value is owned by the active
+Turn's Control registry and FIFO queue: a durable Runtime pause token is reused
+when available, otherwise the Turn allocates a live-only ID. It is not an
+Envelope cursor, a `toolCallId`, or a field added to the official ACP
+`RequestPermissionRequest` wire type.
+
+Control registers and queues every normalized main, Side ACP, and child
+`ApprovalRequest` before delivery. Its unique active head is the only request
+that Control publishes and accepts for resolution; completion or individual
+abandonment advances the next head. User submission and Guardian/auto-review
+are resolver variants of that same head. Unknown, stale, duplicate, and
+queued-but-not-active IDs fail explicitly, while Cancel, Close, and Turn
+terminal clear all live waiters. Surfaces do not choose an endpoint or own
+policy.
+
+An external ACP child does not publish a separate permission `Frame.Event`.
+The runner passes its canonical ToolCall/options and origin data to the shared
+Control coordinator, which emits the scoped transient Envelope with task
+`scope_id` and real Spawn `parent_tool`; the broker forwards that same Turn-feed
+Envelope to every Surface. Reconnecting to a pending approval remains M2, and
+the existing SDK durable pause token can be reused by that future recovery path
+without changing its identity.
 
 ### Event Broker prerequisite: explicit parent and delivery Envelope contract
 
@@ -288,7 +315,8 @@ The following invariants are required:
    The parent tool may receive lifecycle and final-result updates, but not a
    second flattened copy of every child event.
 5. Child permission requests retain child scope and stable request identity so
-   a reconnecting client can respond through the common approval command API.
+   a live client can respond through the common approval command API. Pending
+   approval reconnect/recovery remains M2.
 6. TUI compact text is derived from the standard child events in
    `surfaces/transcript`; GUI clients can render the same events as nested rich
    ACP components.
@@ -509,8 +537,13 @@ Deliverables:
 - **Completed bounded slice:** introduce the Control-owned event broker, move
   task-stream fan-in behind it with a final materialized-source read barrier,
   and remove Surface/ACP prompt-bridge secondary subscriptions;
-- project `Frame.Event` for Spawn as child-scoped standard ACP payloads
-  (completed minimum slice);
+- **Completed bounded slice:** route main and child approval decisions by
+  `Envelope.approval_request_id` through one Control-owned FIFO queue and
+  active head; reuse durable pause tokens where available, otherwise allocate
+  one live Turn ID; publish normalized external child permissions from Control
+  with no child-specific frame/broker route or standard-ACP wire change;
+- project non-permission `Frame.Event` values for Spawn as child-scoped
+  standard ACP payloads (completed minimum slice);
 - retain RunCommand exact terminal-byte behavior;
 - make parent Spawn updates lifecycle/final-result summaries rather than child
   transcript copies;
@@ -526,7 +559,15 @@ Exit criteria:
 - child tool IDs and parent Spawn ID remain distinct and correlated;
 - no child narrative or tool activity is rendered twice;
 - RunCommand byte/order/exit tests remain unchanged;
-- child permission requests remain correctly scoped and resolvable.
+- child permission requests remain correctly scoped, preserve parent relation
+  and standard ACP ToolCall/options/content, and resolve their exact live
+  waiter without affecting a concurrent main or sibling child request;
+- a Control-owned FIFO queue publishes and resolves only its active head, and
+  Guardian/auto-review uses that same head rather than bypassing it;
+- no ACP child permission reaches a Surface through a child-owned
+  `Frame.Event`/projector/broker publication path;
+- M1 still removes the parent text mirror and cleans up ACP runner trace
+  formatting. Pending-approval reconnect/replay is explicitly M2.
 
 ### M2: Replay, reconnect, and thin app-server
 
@@ -667,8 +708,10 @@ Control-owned fan-in / Surface-no-secondary-subscription slice is now complete:
 the typed parent/delivery Envelope contract drives one live `gatewayTurn` feed,
 whose main-terminal barrier final-reads already materialized source state before
 its final Turn lifecycle frame.
-M1 remains open for permission routing and parent text-mirror removal; M2
-remains open for replay/resume and linked child replay authority.
+M1 remains open for parent text-mirror removal and ACP runner trace cleanup;
+the unified child permission-routing bounded slice is complete. M2 remains open
+for replay/resume and linked child replay authority, including pending-approval
+reconnect/recovery.
 
 Full GUI feature work should not begin before M1. GUI history and production
 app-server work require M2. Goal and Manage Loop implementation starts only

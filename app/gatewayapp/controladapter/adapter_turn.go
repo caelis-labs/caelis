@@ -24,6 +24,7 @@ func (t *gatewayTurn) SubmitApproval(ctx context.Context, decision ApprovalDecis
 	return t.handle.Submit(ctx, gateway.SubmitRequest{
 		Kind: gateway.SubmissionKindApproval,
 		Approval: &gateway.ApprovalDecision{
+			RequestID:  decision.RequestID,
 			Outcome:    strings.TrimSpace(decision.Outcome),
 			OptionID:   strings.TrimSpace(decision.OptionID),
 			Approved:   decision.Approved,

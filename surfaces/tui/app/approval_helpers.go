@@ -5,6 +5,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
 	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
+	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
 const (
@@ -19,6 +20,7 @@ const (
 )
 
 type approvalPayload struct {
+	RequestID          eventstream.ApprovalRequestID
 	ToolCallID         string
 	ToolName           string
 	RawInput           map[string]any

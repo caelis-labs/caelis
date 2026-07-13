@@ -100,6 +100,10 @@ func (r *Runtime) requestDurableApproval(
 		Status: agent.RunLifecycleStatusWaitingApproval, ActiveRunID: req.RunID, WaitingApproval: true, PauseTokenID: token.TokenID, UpdatedAt: r.now(),
 	})
 	if requester != nil {
+		// The durable pause token is the reusable Runtime correlation identity.
+		// Keep it on the normalized request rather than hiding it in metadata or
+		// adding a field to the ACP request_permission wire payload.
+		req.PauseTokenID = token.TokenID
 		decision, err := requester.RequestApproval(ctx, req)
 		if err != nil {
 			_ = r.cancelPauseToken(context.WithoutCancel(ctx), req.SessionRef, token, err.Error())

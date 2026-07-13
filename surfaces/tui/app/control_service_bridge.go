@@ -17,6 +17,7 @@ import (
 	controlcommands "github.com/caelis-labs/caelis/ports/controlcommand"
 	controlprompt "github.com/caelis-labs/caelis/ports/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/control"
+	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/surfaces/statusbar"
 )
 
@@ -721,6 +722,10 @@ func awaitApprovalPrompt(ctx context.Context, turn control.Turn, req *approvalPa
 }
 
 func approvalDecisionFromPrompt(req *approvalPayload, response PromptResponse) control.ApprovalDecision {
+	requestID := eventstream.ApprovalRequestID("")
+	if req != nil {
+		requestID = req.RequestID
+	}
 	selected := strings.TrimSpace(response.Line)
 	if response.Err != nil || selected == "" {
 		return rejectionApprovalDecision(req)
@@ -731,15 +736,16 @@ func approvalDecisionFromPrompt(req *approvalPayload, response PromptResponse) c
 				continue
 			}
 			return control.ApprovalDecision{
-				Outcome:  approvalStatusSelected,
-				OptionID: selected,
-				Approved: approvalOptionAllows(opt.Kind, opt.Name, opt.ID),
+				RequestID: req.RequestID,
+				Outcome:   approvalStatusSelected,
+				OptionID:  selected,
+				Approved:  approvalOptionAllows(opt.Kind, opt.Name, opt.ID),
 			}
 		}
 	}
 	switch strings.ToLower(selected) {
 	case "approve", "allow", "yes", "y":
-		return control.ApprovalDecision{Outcome: approvalStatusApproved, Approved: true}
+		return control.ApprovalDecision{RequestID: requestID, Outcome: approvalStatusApproved, Approved: true}
 	default:
 		return rejectionApprovalDecision(req)
 	}
@@ -752,13 +758,18 @@ func rejectionApprovalDecision(req *approvalPayload) control.ApprovalDecision {
 				continue
 			}
 			return control.ApprovalDecision{
-				Outcome:  approvalStatusSelected,
-				OptionID: strings.TrimSpace(opt.ID),
-				Approved: false,
+				RequestID: req.RequestID,
+				Outcome:   approvalStatusSelected,
+				OptionID:  strings.TrimSpace(opt.ID),
+				Approved:  false,
 			}
 		}
 	}
-	return control.ApprovalDecision{Outcome: approvalStatusRejected, Approved: false}
+	requestID := eventstream.ApprovalRequestID("")
+	if req != nil {
+		requestID = req.RequestID
+	}
+	return control.ApprovalDecision{RequestID: requestID, Outcome: approvalStatusRejected, Approved: false}
 }
 
 func approvalOptionAllows(kind string, name string, id string) bool {

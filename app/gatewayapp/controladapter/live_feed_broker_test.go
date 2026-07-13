@@ -150,6 +150,38 @@ func TestLiveFeedBrokerEventOnlyPlanHasNoParentToolMirror(t *testing.T) {
 	waitBrokerDone(t, turn.feed)
 }
 
+func TestLiveFeedBrokerForwardsControlPublishedChildPermission(t *testing.T) {
+	source := make(chan eventstream.Envelope, 2)
+	handle := newBrokerTestHandle(source)
+	streams := newBrokerTestStreamService()
+	turn := newGatewayTurn(handle, func() stream.Service { return streams })
+	events := turn.Events()
+
+	source <- brokerRunningToolEnvelope("SPAWN", "spawn-call-1", "task-1", "spawn-terminal-1")
+	assertBrokerToolCallID(t, receiveBrokerEnvelope(t, events), "spawn-call-1")
+	waitBrokerSignal(t, streams.started, "task stream subscription start")
+
+	source <- brokerControlChildPermissionEnvelope()
+	permission := receiveBrokerEnvelope(t, events)
+	if permission.Kind != eventstream.KindRequestPermission || permission.ApprovalRequestID != "approval-child-1" {
+		t.Fatalf("child permission = %#v, want Control-published request_permission", permission)
+	}
+	assertBrokerChildRelation(t, permission, "spawn-call-1", false)
+	if permission.Permission == nil || permission.Permission.ToolCall.ToolCallID != "shared-child-call" || len(permission.Permission.Options) != 1 || permission.Permission.Options[0].OptionID != "allow_once" {
+		t.Fatalf("child permission ACP payload = %#v, want original tool call and options", permission.Permission)
+	}
+	raw, ok := permission.Permission.ToolCall.RawInput.(map[string]any)
+	if !ok || raw["path"] != "child.txt" || len(permission.Permission.ToolCall.Content) != 1 {
+		t.Fatalf("child permission ACP details = %#v, want raw input and content", permission.Permission.ToolCall)
+	}
+
+	source <- eventstream.TurnCompleted("handle-1", "run-1", "turn-1", time.Unix(12, 0))
+	close(source)
+	assertBrokerMainTerminal(t, receiveBrokerEnvelope(t, events))
+	requireBrokerChannelClosed(t, events)
+	waitBrokerDone(t, turn.feed)
+}
+
 func TestLiveFeedBrokerAcceptsMainTerminalWithMissingTransportIDs(t *testing.T) {
 	source := make(chan eventstream.Envelope, 1)
 	turn := newGatewayTurn(newBrokerTestHandle(source), nil)
@@ -969,6 +1001,47 @@ func brokerChildLifecycleEvent() *session.Event {
 		Visibility: session.VisibilityUIOnly,
 		Scope:      brokerChildScope(),
 		Lifecycle:  &session.EventLifecycle{Status: eventstream.LifecycleStateCompleted},
+	}
+}
+
+func brokerControlChildPermissionEnvelope() eventstream.Envelope {
+	kind := "edit"
+	title := "Write child file"
+	status := "pending"
+	return eventstream.Envelope{
+		Kind:              eventstream.KindRequestPermission,
+		SessionID:         "session-1",
+		HandleID:          "handle-1",
+		RunID:             "run-1",
+		TurnID:            "turn-1",
+		Scope:             eventstream.ScopeSubagent,
+		ScopeID:           "task-1",
+		ParticipantID:     "child-1",
+		ApprovalRequestID: "approval-child-1",
+		ParentTool: &eventstream.ParentToolRelation{
+			ToolCallID: "spawn-call-1",
+			ToolName:   "SPAWN",
+		},
+		Delivery: &eventstream.Delivery{Transient: true},
+		Permission: &schema.RequestPermissionRequest{
+			SessionID: "session-1",
+			ToolCall: schema.ToolCallUpdate{
+				SessionUpdate: schema.UpdateToolCallInfo,
+				ToolCallID:    "shared-child-call",
+				Kind:          &kind,
+				Title:         &title,
+				Status:        &status,
+				RawInput:      map[string]any{"path": "child.txt"},
+				RawOutput:     map[string]any{"preview": "new text"},
+				Content: []schema.ToolCallContent{{
+					Type:    "content",
+					Content: schema.TextContent{Type: "text", Text: "child permission detail"},
+				}},
+			},
+			Options: []schema.PermissionOption{{
+				OptionID: "allow_once", Name: "Allow once", Kind: "allow_once",
+			}},
+		},
 	}
 }
 

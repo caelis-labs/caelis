@@ -39,6 +39,40 @@ func TestEnvelopeMarshalIncludesACPUpdate(t *testing.T) {
 	}
 }
 
+func TestApprovalRequestIDStaysOnEnvelopeOutsideACPWirePayload(t *testing.T) {
+	t.Parallel()
+
+	env := Envelope{
+		Kind:              KindRequestPermission,
+		ApprovalRequestID: "approval-1",
+		Permission: &schema.RequestPermissionRequest{
+			SessionID: "session-1",
+			ToolCall: schema.ToolCallUpdate{
+				SessionUpdate: schema.UpdateToolCallInfo,
+				ToolCallID:    "call-1",
+			},
+		},
+	}
+	clone := CloneEnvelope(env)
+	if clone.ApprovalRequestID != env.ApprovalRequestID {
+		t.Fatalf("CloneEnvelope().ApprovalRequestID = %q, want %q", clone.ApprovalRequestID, env.ApprovalRequestID)
+	}
+	permissionJSON, err := json.Marshal(env.Permission)
+	if err != nil {
+		t.Fatalf("json.Marshal(permission) error = %v", err)
+	}
+	if strings.Contains(string(permissionJSON), "approval_request_id") {
+		t.Fatalf("ACP permission wire payload = %s, must not contain Caelis request identity", permissionJSON)
+	}
+	envelopeJSON, err := json.Marshal(env)
+	if err != nil {
+		t.Fatalf("json.Marshal(envelope) error = %v", err)
+	}
+	if !strings.Contains(string(envelopeJSON), `"approval_request_id":"approval-1"`) {
+		t.Fatalf("Envelope JSON = %s, want top-level approval request identity", envelopeJSON)
+	}
+}
+
 func TestEnvelopeV1SessionUpdateGolden(t *testing.T) {
 	t.Parallel()
 
@@ -78,14 +112,15 @@ func TestEnvelopeV1RequestPermissionGolden(t *testing.T) {
 	kind := schema.ToolKindExecute
 	status := schema.ToolStatusPending
 	env := Envelope{
-		Kind:       KindRequestPermission,
-		Cursor:     "turn-1:0002",
-		SessionID:  "session-1",
-		HandleID:   "handle-1",
-		RunID:      "run-1",
-		TurnID:     "turn-1",
-		OccurredAt: time.Date(2026, 6, 27, 12, 0, 1, 0, time.UTC),
-		Scope:      ScopeMain,
+		Kind:              KindRequestPermission,
+		Cursor:            "turn-1:0002",
+		SessionID:         "session-1",
+		HandleID:          "handle-1",
+		RunID:             "run-1",
+		TurnID:            "turn-1",
+		OccurredAt:        time.Date(2026, 6, 27, 12, 0, 1, 0, time.UTC),
+		Scope:             ScopeMain,
+		ApprovalRequestID: "approval-1",
 		Permission: &schema.RequestPermissionRequest{
 			SessionID: "session-1",
 			ToolCall: schema.ToolCallUpdate{

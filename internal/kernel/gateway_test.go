@@ -1465,13 +1465,179 @@ func TestBeginTurnBridgesApprovalRequestsIntoHandleEvents(t *testing.T) {
 	if err := result.Handle.Submit(context.Background(), SubmitRequest{
 		Kind: SubmissionKindApproval,
 		Approval: &ApprovalDecision{
-			Approved: true,
-			Outcome:  "approved",
+			RequestID: first.ApprovalRequestID,
+			Approved:  true,
+			Outcome:   "approved",
 		},
 	}); err != nil {
 		t.Fatalf("Submit(approval) error = %v", err)
 	}
 	_ = collectHandleEvents(t, result.Handle)
+}
+
+func TestBeginTurnPublishesChildApprovalThroughControlQueue(t *testing.T) {
+	t.Parallel()
+
+	activeSession := session.Session{
+		SessionRef: session.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+		},
+	}
+	runtime := &childApprovalRuntime{
+		session:   activeSession,
+		responses: make(chan agent.ApprovalResponse, 1),
+	}
+	gw, err := New(Config{
+		Sessions: staticSessionService{
+			session: activeSession,
+			state:   map[string]any{StateCurrentApprovalMode: string(ApprovalModeManual)},
+		},
+		Runtime:  runtime,
+		Resolver: staticResolver{resolved: ResolvedTurn{RunRequest: agent.RunRequest{}}},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	result, err := gw.BeginTurn(context.Background(), BeginTurnRequest{
+		SessionRef: activeSession.SessionRef,
+		Input:      "hello",
+	})
+	if err != nil {
+		t.Fatalf("BeginTurn() error = %v", err)
+	}
+	var permission eventstream.Envelope
+	select {
+	case permission = <-result.Handle.ACPEvents():
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for Control-published child approval")
+	}
+	if permission.ApprovalRequestID == "" {
+		t.Fatal("Control-published child approval has no request id")
+	}
+	assertChildPermissionEnvelope(t, permission, permission.ApprovalRequestID, "task-1", "child.txt")
+	handle, ok := result.Handle.(*turnHandle)
+	if !ok {
+		t.Fatalf("turn handle = %T, want *turnHandle", result.Handle)
+	}
+	if events, _, err := handle.eventsAfter(""); err != nil || len(events) != 1 || events[0].ApprovalRequestID != permission.ApprovalRequestID {
+		t.Fatalf("gateway direct approval events = %#v, %v; want one Control-owned permission", events, err)
+	}
+
+	if err := result.Handle.Submit(context.Background(), SubmitRequest{
+		Kind: SubmissionKindApproval,
+		Approval: &ApprovalDecision{
+			RequestID: permission.ApprovalRequestID,
+			Outcome:   string(ApprovalStatusApproved),
+			Approved:  true,
+		},
+	}); err != nil {
+		t.Fatalf("Submit(child approval) error = %v", err)
+	}
+	select {
+	case response := <-runtime.responses:
+		if !response.Approved || response.Outcome != string(ApprovalStatusApproved) {
+			t.Fatalf("child approval response = %+v, want approved response", response)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("child runtime did not resume after exact approval response")
+	}
+	_ = collectHandleEvents(t, result.Handle)
+}
+
+func TestResolveApprovalRequestQueuesAutoReviewAtActiveHead(t *testing.T) {
+	t.Parallel()
+
+	activeSession := session.Session{
+		SessionRef: session.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+		},
+	}
+	release := make(chan struct{})
+	approver := &serialApprovalApprover{
+		started: make(chan string, 2),
+		release: release,
+	}
+	gw, err := New(Config{
+		Sessions: staticSessionService{
+			session: activeSession,
+			state:   map[string]any{StateCurrentApprovalMode: string(ApprovalModeAutoReview)},
+		},
+		Runtime:          mockRuntime{},
+		Resolver:         staticResolver{},
+		ApprovalApprover: approver,
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	handle := newTestTurnHandle()
+	request := func(callID string) *agent.ApprovalRequest {
+		return &agent.ApprovalRequest{
+			SessionRef: activeSession.SessionRef,
+			Session:    activeSession,
+			RunID:      "run-1",
+			TurnID:     "turn-1",
+			Tool:       tool.Definition{Name: "RUN_COMMAND"},
+			Call:       tool.Call{ID: callID, Name: "RUN_COMMAND"},
+		}
+	}
+	type result struct {
+		callID string
+		resp   agent.ApprovalResponse
+		err    error
+	}
+	results := make(chan result, 2)
+	go func() {
+		resp, err := gw.resolveApprovalRequest(context.Background(), context.Background(), handle, request("first"), nil)
+		results <- result{callID: "first", resp: resp, err: err}
+	}()
+	select {
+	case callID := <-approver.started:
+		if callID != "first" {
+			t.Fatalf("first auto-review call = %q, want first", callID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("first auto-review did not start")
+	}
+
+	go func() {
+		resp, err := gw.resolveApprovalRequest(context.Background(), context.Background(), handle, request("second"), nil)
+		results <- result{callID: "second", resp: resp, err: err}
+	}()
+	waitForApprovalQueueLength(t, handle, 2)
+	handle.mu.Lock()
+	second := handle.approvalQueue[1]
+	handle.mu.Unlock()
+	select {
+	case <-second.activated:
+		t.Fatal("queued auto-review became active before the first request resolved")
+	default:
+	}
+	select {
+	case callID := <-approver.started:
+		t.Fatalf("queued auto-review called approver before becoming active: %q", callID)
+	default:
+	}
+
+	close(release)
+	select {
+	case callID := <-approver.started:
+		if callID != "second" {
+			t.Fatalf("second auto-review call = %q, want second", callID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("second auto-review did not start after the first resolved")
+	}
+	for range 2 {
+		select {
+		case got := <-results:
+			if got.err != nil || !got.resp.Approved {
+				t.Fatalf("auto-review result for %s = %+v, %v; want approved", got.callID, got.resp, got.err)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("auto-review request did not resolve")
+		}
+	}
 }
 
 func TestBeginTurnDefaultManualApprovalModePromptsClient(t *testing.T) {
@@ -1513,8 +1679,9 @@ func TestBeginTurnDefaultManualApprovalModePromptsClient(t *testing.T) {
 	if err := result.Handle.Submit(context.Background(), SubmitRequest{
 		Kind: SubmissionKindApproval,
 		Approval: &ApprovalDecision{
-			Approved: true,
-			Outcome:  "approved",
+			RequestID: first.ApprovalRequestID,
+			Approved:  true,
+			Outcome:   "approved",
 		},
 	}); err != nil {
 		t.Fatalf("Submit(approval) error = %v", err)
@@ -2516,6 +2683,110 @@ func (r *approvalRuntime) Run(ctx context.Context, req agent.RunRequest) (agent.
 
 func (r *approvalRuntime) RunState(context.Context, session.SessionRef) (agent.RunState, error) {
 	return agent.RunState{}, nil
+}
+
+type childApprovalRuntime struct {
+	session   session.Session
+	responses chan agent.ApprovalResponse
+}
+
+func (r *childApprovalRuntime) Run(ctx context.Context, req agent.RunRequest) (agent.RunResult, error) {
+	if req.ApprovalRequester == nil {
+		return agent.RunResult{}, errors.New("missing approval requester")
+	}
+	response, err := req.ApprovalRequester.RequestApproval(ctx, agent.ApprovalRequest{
+		SessionRef: r.session.SessionRef,
+		Session:    r.session,
+		RunID:      "run-1",
+		TurnID:     "turn-1",
+		Tool:       tool.Definition{Name: "WRITE"},
+		Call:       tool.Call{ID: "shared-child-call", Name: "WRITE"},
+		Approval: &session.ProtocolApproval{
+			ToolCall: session.ProtocolToolCall{
+				ID:        "shared-child-call",
+				Name:      "WRITE",
+				Kind:      "edit",
+				Title:     "Write file",
+				Status:    "pending",
+				RawInput:  map[string]any{"path": "child.txt"},
+				RawOutput: map[string]any{"preview": "new content"},
+				Content: []session.ProtocolToolCallContent{{
+					Type:    "content",
+					Content: session.ProtocolTextContent("child permission detail"),
+				}},
+			},
+			Options: []session.ProtocolApprovalOption{{ID: "allow_once", Name: "Allow once", Kind: "allow_once"}},
+		},
+		Metadata: map[string]any{
+			"subagent":       true,
+			"scope":          "subagent",
+			"scope_id":       "task-1",
+			"task_id":        "task-1",
+			"parent_call_id": "spawn-call-1",
+			"parent_tool":    "SPAWN",
+		},
+	})
+	if err != nil {
+		return agent.RunResult{}, err
+	}
+	select {
+	case r.responses <- response:
+	case <-ctx.Done():
+		return agent.RunResult{}, ctx.Err()
+	}
+	return agent.RunResult{Session: r.session, Handle: &recordingRunner{}}, nil
+}
+
+func (r *childApprovalRuntime) RunState(context.Context, session.SessionRef) (agent.RunState, error) {
+	return agent.RunState{}, nil
+}
+
+type serialApprovalApprover struct {
+	started chan string
+	release <-chan struct{}
+}
+
+func (a *serialApprovalApprover) Decide(ctx context.Context, req ApprovalReviewRequest) (ApprovalReviewResult, error) {
+	if a != nil && a.started != nil {
+		select {
+		case a.started <- req.RuntimeRequest.Call.ID:
+		case <-ctx.Done():
+			return ApprovalReviewResult{}, ctx.Err()
+		}
+	}
+	if a != nil && a.release != nil {
+		select {
+		case <-a.release:
+		case <-ctx.Done():
+			return ApprovalReviewResult{}, ctx.Err()
+		}
+	}
+	return ApprovalReviewResult{
+		Approved:       true,
+		Outcome:        string(ApprovalStatusApproved),
+		DecisionSource: string(ApprovalModeAutoReview),
+	}, nil
+}
+
+func waitForApprovalQueueLength(t *testing.T, handle *turnHandle, want int) {
+	t.Helper()
+	deadline := time.NewTimer(time.Second)
+	defer deadline.Stop()
+	tick := time.NewTicker(time.Millisecond)
+	defer tick.Stop()
+	for {
+		handle.mu.Lock()
+		got := len(handle.approvalQueue)
+		handle.mu.Unlock()
+		if got == want {
+			return
+		}
+		select {
+		case <-deadline.C:
+			t.Fatalf("approval queue length = %d, want %d", got, want)
+		case <-tick.C:
+		}
+	}
 }
 
 type staticApprovalReviewer struct {

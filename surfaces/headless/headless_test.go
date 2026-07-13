@@ -102,8 +102,9 @@ func TestRunOnceAutoDeniesApprovalByDefault(t *testing.T) {
 	title := "RUN_COMMAND"
 	handle := newFakeACPHandle([]eventstream.Envelope{
 		{
-			Cursor: "a1",
-			Kind:   eventstream.KindRequestPermission,
+			Cursor:            "a1",
+			Kind:              eventstream.KindRequestPermission,
+			ApprovalRequestID: eventstream.ApprovalRequestID("approval-1"),
 			Permission: &schema.RequestPermissionRequest{
 				SessionID: "s1",
 				ToolCall: schema.ToolCallUpdate{
@@ -135,8 +136,9 @@ func TestRunOnceApprovalCallbackReceivesPromptFields(t *testing.T) {
 	title := "RUN_COMMAND"
 	handle := newFakeACPHandle([]eventstream.Envelope{
 		{
-			Cursor: "a1",
-			Kind:   eventstream.KindRequestPermission,
+			Cursor:            "a1",
+			Kind:              eventstream.KindRequestPermission,
+			ApprovalRequestID: eventstream.ApprovalRequestID("approval-2"),
 			Permission: &schema.RequestPermissionRequest{
 				SessionID: "s1",
 				ToolCall: schema.ToolCallUpdate{
@@ -163,13 +165,16 @@ func TestRunOnceApprovalCallbackReceivesPromptFields(t *testing.T) {
 	}
 	called := false
 	_, err := RunOnce(context.Background(), gw, control.Submission{Text: "hello"}, Options{
-		ResolveApproval: func(_ context.Context, req *approval.Payload) (approval.Decision, error) {
+		ResolveApproval: func(_ context.Context, req ApprovalRequest) (approval.Decision, error) {
 			called = true
-			if req == nil {
+			if req.Payload == nil {
 				t.Fatal("approval payload = nil")
 			}
-			if req.Reason != "needs execution" || req.Justification != "requested by user" || req.SandboxPermissions != "host" {
-				t.Fatalf("approval fields = (%q, %q, %q), want restored prompt fields", req.Reason, req.Justification, req.SandboxPermissions)
+			if req.RequestID != "approval-2" {
+				t.Fatalf("approval request id = %q, want approval-2", req.RequestID)
+			}
+			if req.Payload.Reason != "needs execution" || req.Payload.Justification != "requested by user" || req.Payload.SandboxPermissions != "host" {
+				t.Fatalf("approval fields = (%q, %q, %q), want restored prompt fields", req.Payload.Reason, req.Payload.Justification, req.Payload.SandboxPermissions)
 			}
 			return approval.Decision{Approved: true, Outcome: string(approval.StatusApproved)}, nil
 		},
@@ -182,6 +187,9 @@ func TestRunOnceApprovalCallbackReceivesPromptFields(t *testing.T) {
 	}
 	if len(handle.submissions) != 1 || !handle.submissions[0].Approved {
 		t.Fatalf("submissions = %#v, want approved decision", handle.submissions)
+	}
+	if handle.submissions[0].RequestID != "approval-2" {
+		t.Fatalf("approval request id = %q, want approval-2", handle.submissions[0].RequestID)
 	}
 }
 

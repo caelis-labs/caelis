@@ -18,13 +18,21 @@ func TestPayloadFromRuntimeRequestUsesProtocolApprovalFirst(t *testing.T) {
 		Call: tool.Call{ID: "call-from-runtime", Name: "custom_tool"},
 		Approval: &session.ProtocolApproval{
 			ToolCall: session.ProtocolToolCall{
-				ID:   "call-from-protocol",
-				Name: "RUN_COMMAND",
+				ID:     "call-from-protocol",
+				Name:   "RUN_COMMAND",
+				Kind:   "execute",
+				Title:  "Run command",
+				Status: "pending",
 				RawInput: map[string]any{
 					"command":             "git restore hello.py",
 					"approval_reason":     "destructive edit",
 					"sandbox_permissions": "workspace_write",
 				},
+				RawOutput: map[string]any{"preview": "would restore hello.py"},
+				Content: []session.ProtocolToolCallContent{{
+					Type:    "content",
+					Content: session.ProtocolTextContent("permission detail"),
+				}},
 			},
 			Options: []session.ProtocolApprovalOption{
 				{ID: " allow_once ", Name: " Allow once ", Kind: " allow_once "},
@@ -43,6 +51,12 @@ func TestPayloadFromRuntimeRequestUsesProtocolApprovalFirst(t *testing.T) {
 	}
 	if payload.RawInput["command"] != "git restore hello.py" {
 		t.Fatalf("payload raw input = %#v, want command", payload.RawInput)
+	}
+	if payload.ToolKind != "execute" || payload.ToolTitle != "Run command" || payload.ToolStatus != "pending" {
+		t.Fatalf("payload tool display = %#v, want preserved protocol fields", payload)
+	}
+	if payload.RawOutput["preview"] != "would restore hello.py" || len(payload.Content) != 1 {
+		t.Fatalf("payload tool details = %#v/%#v, want raw output and content", payload.RawOutput, payload.Content)
 	}
 	if payload.Reason != "destructive edit" || payload.SandboxPermissions != "workspace_write" {
 		t.Fatalf("payload policy fields = %#v", payload)

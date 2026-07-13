@@ -98,9 +98,11 @@ advertise `clientCapabilities.terminal=false` unless a complete terminal
 handler is explicitly installed. The reverse local-output adapter used by the
 Zed compatibility projection does not change that capability assessment.
 
-A spawned Agent instead projects its normalized child events as standard ACP
-message, thought, tool, content, diff, plan, permission, and lifecycle
-semantics. Caelis Envelope `scope`, `scope_id`, and `parent_tool` fields
+A spawned Agent instead projects its normalized child message, thought, tool,
+content, diff, plan, and lifecycle events as standard ACP semantics. Permission
+requests are Control interactions: the bridge normalizes them into an SDK
+`ApprovalRequest`, and Control emits the permission Envelope rather than a task
+stream frame. Caelis Envelope `scope`, `scope_id`, and `parent_tool` fields
 associate those payloads with the parent Spawn call and durable task identity.
 `delivery` classifies a live-only transient event separately from the temporary
 parent-tool compatibility mirror. `parent_tool` records the real delegated
@@ -151,10 +153,44 @@ Runtime/Control task plane. Scoped
 subagent/participant lifecycle envelopes close only their own displayed
 execution and cannot terminate the parent Turn.
 
-This slice does not complete child permission routing, parent compatibility
-mirror removal, replay/resume, or linked child replay authority. Those remain
-separate M1/M2 work; the retained parent mirror is still transient display
-compatibility rather than durable parent model context.
+### Child-scoped permission routing
+
+The completed bounded M1 permission slice gives every live
+`session/request_permission` Envelope a typed
+`eventstream.ApprovalRequestID`. This is a Caelis Envelope and Control-command
+correlation field, never an undocumented `_meta` value, an ACP wire field, or
+an eventstream cursor. `control.ApprovalDecision.RequestID` carries the same
+typed value back to the owning Turn.
+
+`internal/kernel.turnHandle` owns the authoritative registry, FIFO queue, and
+single active approval head for a Turn. It reuses an SDK durable pause token
+when a Runtime approval has one; otherwise it allocates a Turn-scoped live ID.
+Registration and enqueueing happen before delivery. Only the active head may
+be published or resolved; its completion or individual abandonment advances the
+next queued request, while Turn Cancel, Close, and terminal cleanup release all
+remaining waiters without injecting a zero-value decision. Unknown, stale,
+duplicate, and queued-but-not-active responses are rejected explicitly.
+
+Main Runtime, Side ACP, and Spawn-child requests all enter this coordinator as
+normalized `ApprovalRequest` values. Control uses their canonical origin and
+parent metadata to publish the active standard ACP permission Envelope with the
+child `scope`, task `scope_id`, real Spawn `parent_tool`, transient delivery,
+and unmodified ToolCall/options/raw input/output/content. A user and
+Guardian/auto-review are different resolvers of the same active queue head;
+auto-review never calls its approver before that request is active.
+
+The ACP child runner no longer emits a permission `Frame.Event`, and
+`ProjectStreamFrame` does not project permission frames as an alternate route.
+The live broker therefore receives the Control-published Envelope through the
+same Turn feed as main and Side ACP delivery. TUI, headless, and the ACP prompt
+bridge only return that ID plus the user's decision through
+`Turn.SubmitApproval`; they do not select an endpoint or own permission policy.
+
+This is live routing, not M2 replay/resume. A durable pause token is already a
+reusable SDK identity, but reconnecting to a pending live approval after a
+process restart remains M2 work. Parent compatibility mirror removal and ACP
+runner trace cleanup also remain open M1 work; the retained mirror is still
+transient display compatibility rather than durable parent model context.
 
 New `protocol/acp/projector` stream projections write parent relation and
 delivery facts only to typed Envelope fields. `eventstream.ResolveRelationDelivery`

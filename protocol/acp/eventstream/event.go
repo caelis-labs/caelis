@@ -30,6 +30,12 @@ const (
 	ScopeSubagent    Scope = "subagent"
 )
 
+// ApprovalRequestID identifies one pending Control-routed approval request.
+// It is a Caelis Envelope correlation value, not an ACP wire field and not an
+// event cursor. A durable SDK pause token may supply this value; otherwise the
+// owning live Turn allocates it for the lifetime of that pending request.
+type ApprovalRequestID string
+
 // ParentToolRelation identifies the actual parent tool call that produced a
 // scoped delegated event. It is intentionally limited to tool-call ancestry;
 // it does not model arbitrary workflow or Goal relationships.
@@ -118,6 +124,10 @@ type Envelope struct {
 	Final         bool                `json:"final,omitempty"`
 	ParentTool    *ParentToolRelation `json:"parent_tool,omitempty"`
 	Delivery      *Delivery           `json:"delivery,omitempty"`
+	// ApprovalRequestID is required to resolve a request_permission Envelope
+	// through the Caelis Control command. It deliberately sits beside the ACP
+	// payload so standard RequestPermissionRequest wire shape remains unchanged.
+	ApprovalRequestID ApprovalRequestID `json:"approval_request_id,omitempty"`
 
 	Update     schema.Update                    `json:"update,omitempty"`
 	Permission *schema.RequestPermissionRequest `json:"permission,omitempty"`

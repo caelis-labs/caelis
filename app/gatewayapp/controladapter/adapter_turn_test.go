@@ -78,8 +78,36 @@ func TestGatewayTurnEventsReturnsSameStream(t *testing.T) {
 	}
 }
 
+func TestGatewayTurnSubmitApprovalForwardsRequestID(t *testing.T) {
+	handle := &testGatewayTurnHandle{}
+	turn := newGatewayTurn(handle, nil)
+
+	err := turn.SubmitApproval(context.Background(), ApprovalDecision{
+		RequestID:  "approval-child-1",
+		Outcome:    "selected",
+		OptionID:   "allow_once",
+		Approved:   true,
+		Reason:     " approved ",
+		ReviewText: " reviewed ",
+	})
+	if err != nil {
+		t.Fatalf("SubmitApproval() error = %v", err)
+	}
+	if len(handle.submitted) != 1 {
+		t.Fatalf("gateway submissions = %#v, want one", handle.submitted)
+	}
+	got := handle.submitted[0]
+	if got.Kind != gateway.SubmissionKindApproval || got.Approval == nil {
+		t.Fatalf("gateway submission = %#v, want approval", got)
+	}
+	if got.Approval.RequestID != "approval-child-1" || got.Approval.OptionID != "allow_once" || got.Approval.Reason != "approved" || got.Approval.ReviewText != "reviewed" {
+		t.Fatalf("gateway approval = %#v, want exact request id and normalized decision", got.Approval)
+	}
+}
+
 type testGatewayTurnHandle struct {
 	acpEvents <-chan eventstream.Envelope
+	submitted []gateway.SubmitRequest
 }
 
 func (h *testGatewayTurnHandle) HandleID() string { return "handle-1" }
@@ -89,7 +117,8 @@ func (h *testGatewayTurnHandle) SessionRef() session.SessionRef {
 	return session.SessionRef{SessionID: "session-1"}
 }
 func (h *testGatewayTurnHandle) CreatedAt() time.Time { return time.Time{} }
-func (h *testGatewayTurnHandle) Submit(context.Context, gateway.SubmitRequest) error {
+func (h *testGatewayTurnHandle) Submit(_ context.Context, req gateway.SubmitRequest) error {
+	h.submitted = append(h.submitted, req)
 	return nil
 }
 func (h *testGatewayTurnHandle) Cancel() gateway.CancelResult { return gateway.CancelResult{} }

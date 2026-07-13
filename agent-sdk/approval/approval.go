@@ -60,21 +60,26 @@ type Option struct {
 }
 
 type Payload struct {
-	ToolCallID         string         `json:"tool_call_id,omitempty"`
-	ToolName           string         `json:"tool_name,omitempty"`
-	RawInput           map[string]any `json:"raw_input,omitempty"`
-	Reason             string         `json:"reason,omitempty"`
-	Justification      string         `json:"justification,omitempty"`
-	SandboxPermissions string         `json:"sandbox_permissions,omitempty"`
-	Status             Status         `json:"status,omitempty"`
-	Options            []Option       `json:"options,omitempty"`
-	ReviewID           string         `json:"review_id,omitempty"`
-	ReviewStatus       ReviewStatus   `json:"review_status,omitempty"`
-	ReviewText         string         `json:"review_text,omitempty"`
-	Risk               string         `json:"risk,omitempty"`
-	Authorization      string         `json:"authorization,omitempty"`
-	DecisionSource     string         `json:"decision_source,omitempty"`
-	ReviewTrace        *ReviewTrace   `json:"review_trace,omitempty"`
+	ToolCallID         string                            `json:"tool_call_id,omitempty"`
+	ToolName           string                            `json:"tool_name,omitempty"`
+	ToolKind           string                            `json:"tool_kind,omitempty"`
+	ToolTitle          string                            `json:"tool_title,omitempty"`
+	ToolStatus         string                            `json:"tool_status,omitempty"`
+	RawInput           map[string]any                    `json:"raw_input,omitempty"`
+	RawOutput          map[string]any                    `json:"raw_output,omitempty"`
+	Content            []session.ProtocolToolCallContent `json:"content,omitempty"`
+	Reason             string                            `json:"reason,omitempty"`
+	Justification      string                            `json:"justification,omitempty"`
+	SandboxPermissions string                            `json:"sandbox_permissions,omitempty"`
+	Status             Status                            `json:"status,omitempty"`
+	Options            []Option                          `json:"options,omitempty"`
+	ReviewID           string                            `json:"review_id,omitempty"`
+	ReviewStatus       ReviewStatus                      `json:"review_status,omitempty"`
+	ReviewText         string                            `json:"review_text,omitempty"`
+	Risk               string                            `json:"risk,omitempty"`
+	Authorization      string                            `json:"authorization,omitempty"`
+	DecisionSource     string                            `json:"decision_source,omitempty"`
+	ReviewTrace        *ReviewTrace                      `json:"review_trace,omitempty"`
 }
 
 type ReviewTrace struct {
@@ -133,7 +138,12 @@ func PayloadFromRuntimeRequest(req agentsdk.ApprovalRequest) *Payload {
 		if toolName := strings.TrimSpace(req.Approval.ToolCall.Name); toolName != "" {
 			payload.ToolName = toolName
 		}
+		payload.ToolKind = strings.TrimSpace(req.Approval.ToolCall.Kind)
+		payload.ToolTitle = strings.TrimSpace(req.Approval.ToolCall.Title)
+		payload.ToolStatus = strings.TrimSpace(req.Approval.ToolCall.Status)
 		payload.RawInput = jsonvalue.CloneMap(req.Approval.ToolCall.RawInput)
+		payload.RawOutput = jsonvalue.CloneMap(req.Approval.ToolCall.RawOutput)
+		payload.Content = session.CloneProtocolToolCallContent(req.Approval.ToolCall.Content)
 		if len(req.Approval.Options) > 0 {
 			payload.Options = NormalizeProtocolOptions(req.Approval.Options)
 		}
@@ -287,6 +297,8 @@ func ClonePayload(in *Payload) *Payload {
 	}
 	out := *in
 	out.RawInput = jsonvalue.CloneMap(in.RawInput)
+	out.RawOutput = jsonvalue.CloneMap(in.RawOutput)
+	out.Content = session.CloneProtocolToolCallContent(in.Content)
 	if len(in.Options) > 0 {
 		out.Options = append([]Option(nil), in.Options...)
 	}

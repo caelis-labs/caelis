@@ -39,23 +39,77 @@ func (g *Gateway) resolveApprovalRequest(
 	if modeErr != nil {
 		return agent.ApprovalResponse{}, modeErr
 	}
-	if mode == ApprovalModeManual {
-		wait := handle.publishApproval(req)
+
+	// Every normalized request enters the same Control-owned queue. Manual
+	// requests publish an ACP permission only when they become the active head;
+	// auto-review waits for that same head and resolves it through the registry.
+	pending, err := handle.enqueueApproval(req, mode == ApprovalModeManual)
+	if err != nil {
+		return agent.ApprovalResponse{}, err
+	}
+	defer handle.releasePendingApproval(pending, "abandoned")
+
+	if mode != ApprovalModeManual {
 		select {
-		case decision := <-wait:
-			return agent.ApprovalResponse{
-				Outcome:    decision.Outcome,
-				OptionID:   decision.OptionID,
-				Approved:   decision.Approved,
-				Reason:     decision.Reason,
-				ReviewText: decision.ReviewText,
-			}, nil
+		case <-pending.activated:
+		case <-pending.done:
+			return agent.ApprovalResponse{}, context.Canceled
 		case <-approvalCtx.Done():
 			return agent.ApprovalResponse{}, approvalCtx.Err()
 		case <-turnCtx.Done():
 			return agent.ApprovalResponse{}, turnCtx.Err()
 		}
+		response, err := g.resolveActiveAutoApproval(turnCtx, approvalCtx, handle, req, reviewModel, mode)
+		if err != nil {
+			return agent.ApprovalResponse{}, err
+		}
+		if err := handle.resolvePendingApproval(pending, ApprovalDecision{
+			Outcome:    response.Outcome,
+			OptionID:   response.OptionID,
+			Approved:   response.Approved,
+			Reason:     response.Reason,
+			ReviewText: response.ReviewText,
+		}); err != nil {
+			return agent.ApprovalResponse{}, err
+		}
 	}
+
+	return waitForApprovalDecision(turnCtx, approvalCtx, pending)
+}
+
+func waitForApprovalDecision(turnCtx context.Context, approvalCtx context.Context, pending *pendingApproval) (agent.ApprovalResponse, error) {
+	if pending == nil {
+		return agent.ApprovalResponse{}, context.Canceled
+	}
+	select {
+	case decision := <-pending.decisions:
+		return agent.ApprovalResponse{
+			Outcome:    decision.Outcome,
+			OptionID:   decision.OptionID,
+			Approved:   decision.Approved,
+			Reason:     decision.Reason,
+			ReviewText: decision.ReviewText,
+		}, nil
+	case <-pending.done:
+		return agent.ApprovalResponse{}, context.Canceled
+	case <-approvalCtx.Done():
+		return agent.ApprovalResponse{}, approvalCtx.Err()
+	case <-turnCtx.Done():
+		return agent.ApprovalResponse{}, turnCtx.Err()
+	}
+}
+
+// resolveActiveAutoApproval runs Guardian/Reviewer work only after the
+// request reaches the Control queue head. Its result is returned to the common
+// resolver path instead of bypassing the approval registry.
+func (g *Gateway) resolveActiveAutoApproval(
+	turnCtx context.Context,
+	approvalCtx context.Context,
+	handle *turnHandle,
+	req *agent.ApprovalRequest,
+	reviewModel model.LLM,
+	mode ApprovalMode,
+) (agent.ApprovalResponse, error) {
 
 	payload := canonicalApprovalPayload(req)
 	if payload == nil {

@@ -118,6 +118,7 @@ func approvalPayloadFromACPEvent(env eventstream.Envelope) *approvalPayload {
 		})
 	}
 	return &approvalPayload{
+		RequestID:  env.ApprovalRequestID,
 		ToolCallID: strings.TrimSpace(tool.ToolCallID),
 		ToolName: firstNonEmpty(
 			transcript.MetaString(transcript.MergeMeta(transcript.ACPUpdateMeta(tool), env.Meta), "caelis", "runtime", "tool", "name"),
