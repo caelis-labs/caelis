@@ -130,6 +130,29 @@ func TestStoreEventsPageStreamsCanonicalAndMirrorBySequence(t *testing.T) {
 	}
 }
 
+func TestStoreEventsPageDoesNotDecodePayloadBeforeCursor(t *testing.T) {
+	t.Parallel()
+
+	store := NewStore(Config{RootDir: t.TempDir(), SessionIDGenerator: func() string { return "cursor-session" }})
+	active, err := store.GetOrCreate(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeRawEventLogForTest(t, store, active,
+		`{"id":"invalid-before-cursor","session_id":"cursor-session","seq":1,"schema":1,"type":"user","visibility":"canonical"}`,
+		`{"id":"after-cursor","session_id":"cursor-session","seq":2,"schema":1,"type":"lifecycle","visibility":"canonical","lifecycle":{"status":"completed"}}`,
+	)
+	page, err := store.EventsPage(context.Background(), session.EventPageRequest{
+		SessionRef: active.SessionRef, AfterSeq: 1, Visibility: session.EventPageAllDurable,
+	})
+	if err != nil {
+		t.Fatalf("EventsPage() error = %v, want cursor-bounded decode", err)
+	}
+	if len(page.Events) != 1 || page.Events[0].ID != "after-cursor" || page.NextSeq != 2 {
+		t.Fatalf("EventsPage() = %#v, want only event after cursor", page)
+	}
+}
+
 func TestEventLogMigratesRawNestedJournalBeforeTypedDecode(t *testing.T) {
 	t.Parallel()
 

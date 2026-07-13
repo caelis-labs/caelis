@@ -1,6 +1,7 @@
 package tuiapp
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -204,6 +205,30 @@ func TestPluginMarketplaceListCompletionSubmitsPickerCommand(t *testing.T) {
 	findAndRunTaskResult(cmd(), model)
 	if submitted != "/plugin marketplace list" {
 		t.Fatalf("submitted input = %q, want /plugin marketplace list", submitted)
+	}
+}
+
+func TestTypedResumeEnterOpensPickerBeforeAsyncCandidatesArrive(t *testing.T) {
+	model := NewModel(Config{
+		Commands: DefaultCommands(),
+		ResumeComplete: func(context.Context, string, int) ([]ResumeCandidate, error) {
+			return []ResumeCandidate{{SessionID: "session-1"}}, nil
+		},
+		ExecuteLine: func(Submission) TaskResultMsg {
+			t.Fatal("/resume without a selected Session must not be submitted")
+			return TaskResultMsg{}
+		},
+	})
+	model.setInputText("/resume")
+	model.syncTextareaFromInput()
+
+	next, cmd := model.handleKey(keyPress("enter"))
+	model = next.(*Model)
+	if !model.resumeActive || model.textarea.Value() != "/resume " {
+		t.Fatalf("resume picker state = active:%v input:%q", model.resumeActive, model.textarea.Value())
+	}
+	if cmd == nil {
+		t.Fatal("opening typed /resume did not schedule asynchronous completion")
 	}
 }
 
@@ -785,7 +810,7 @@ func TestModelActionPrefixTypingResetsSelectionToFirstFilteredCandidate(t *testi
 func TestResumePrefixTypingFiltersCandidates(t *testing.T) {
 	model := NewModel(Config{
 		Commands: DefaultCommands(),
-		ResumeComplete: func(query string, limit int) ([]ResumeCandidate, error) {
+		ResumeComplete: func(_ context.Context, query string, limit int) ([]ResumeCandidate, error) {
 			return []ResumeCandidate{
 				{SessionID: "alpha-session", Prompt: "work on gateway", Age: "1m"},
 				{SessionID: "beta-session", Prompt: "resume model work", Age: "2m"},
@@ -796,6 +821,7 @@ func TestResumePrefixTypingFiltersCandidates(t *testing.T) {
 	model.setInputText("/resume be")
 	model.syncTextareaFromInput()
 	model.syncSlashInputOverlays()
+	completeResumeCandidates(t, model)
 
 	if !model.resumeActive {
 		t.Fatal("resume picker not activated")
@@ -808,7 +834,7 @@ func TestResumePrefixTypingFiltersCandidates(t *testing.T) {
 func TestResumePrefixTypingFiltersCandidatesWhenCursorLags(t *testing.T) {
 	model := NewModel(Config{
 		Commands: DefaultCommands(),
-		ResumeComplete: func(query string, limit int) ([]ResumeCandidate, error) {
+		ResumeComplete: func(_ context.Context, query string, limit int) ([]ResumeCandidate, error) {
 			return []ResumeCandidate{
 				{SessionID: "alpha-session", Prompt: "work on gateway", Age: "1m"},
 				{SessionID: "beta-session", Prompt: "resume model work", Age: "2m"},
@@ -820,6 +846,7 @@ func TestResumePrefixTypingFiltersCandidatesWhenCursorLags(t *testing.T) {
 	model.syncTextareaFromInput()
 	model.cursor = len([]rune("/resume "))
 	model.syncSlashInputOverlays()
+	completeResumeCandidates(t, model)
 
 	if !model.resumeActive {
 		t.Fatal("resume picker not activated")
@@ -832,7 +859,7 @@ func TestResumePrefixTypingFiltersCandidatesWhenCursorLags(t *testing.T) {
 func TestResumePrefixTypingResetsSelectionToFirstFilteredCandidate(t *testing.T) {
 	model := NewModel(Config{
 		Commands: DefaultCommands(),
-		ResumeComplete: func(query string, limit int) ([]ResumeCandidate, error) {
+		ResumeComplete: func(_ context.Context, query string, limit int) ([]ResumeCandidate, error) {
 			return []ResumeCandidate{
 				{SessionID: "alpha-session", Prompt: "work on gateway", Age: "1m"},
 				{SessionID: "beta-session", Prompt: "resume model work", Age: "2m"},
@@ -845,12 +872,136 @@ func TestResumePrefixTypingResetsSelectionToFirstFilteredCandidate(t *testing.T)
 	model.setInputText("/resume al")
 	model.syncTextareaFromInput()
 	model.syncSlashInputOverlays()
+	completeResumeCandidates(t, model)
 
 	if len(model.resumeCandidates) != 1 || model.resumeCandidates[0].SessionID != "alpha-session" {
 		t.Fatalf("resumeCandidates after /resume al = %#v, want only alpha-session", model.resumeCandidates)
 	}
 	if model.resumeIndex != 0 {
 		t.Fatalf("resumeIndex after query change = %d, want 0", model.resumeIndex)
+	}
+}
+
+func TestResumeCompletionRefreshIsAsyncCancelableAndGenerationSafe(t *testing.T) {
+	startedOld := make(chan struct{})
+	canceledOld := make(chan struct{})
+	model := NewModel(Config{
+		Context:  context.Background(),
+		Commands: DefaultCommands(),
+		ResumeComplete: func(ctx context.Context, query string, _ int) ([]ResumeCandidate, error) {
+			switch query {
+			case "old":
+				close(startedOld)
+				<-ctx.Done()
+				close(canceledOld)
+				return nil, ctx.Err()
+			case "new":
+				return []ResumeCandidate{{SessionID: "new-session", Prompt: "new result"}}, nil
+			default:
+				return nil, nil
+			}
+		},
+	})
+	model.setInputText("/resume old")
+	model.syncTextareaFromInput()
+	model.syncSlashInputOverlays()
+	model.completionRefreshSeq = 1
+
+	updated, oldCmd := model.handleCompletionRefreshMsg(completionRefreshMsg{seq: 1})
+	if updated != model || oldCmd == nil {
+		t.Fatalf("completion refresh = (%T, %v), want same model and async Cmd", updated, oldCmd)
+	}
+	if duplicate := model.updateResumeCandidates(); duplicate != nil {
+		t.Fatal("same pending resume query scheduled a duplicate request")
+	}
+	oldResult := make(chan tea.Msg, 1)
+	go func() { oldResult <- oldCmd() }()
+	select {
+	case <-startedOld:
+	case <-time.After(time.Second):
+		t.Fatal("old completion backend did not start")
+	}
+
+	updateStarted := time.Now()
+	_, _ = model.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
+	if elapsed := time.Since(updateStarted); elapsed > 50*time.Millisecond {
+		t.Fatalf("WindowSize Update blocked behind completion for %s", elapsed)
+	}
+	model.setInputText("/resume new")
+	model.syncTextareaFromInput()
+	model.syncSlashInputOverlays()
+	model.completionRefreshSeq = 2
+	_, newCmd := model.handleCompletionRefreshMsg(completionRefreshMsg{seq: 2})
+	if newCmd == nil {
+		t.Fatal("new query did not schedule completion")
+	}
+	select {
+	case <-canceledOld:
+	case <-time.After(time.Second):
+		t.Fatal("old completion context was not canceled by the new query")
+	}
+	newMsg := newCmd()
+	if _, _ = model.Update(newMsg); len(model.resumeCandidates) != 1 || model.resumeCandidates[0].SessionID != "new-session" {
+		t.Fatalf("new resume candidates = %#v", model.resumeCandidates)
+	}
+	select {
+	case msg := <-oldResult:
+		_, _ = model.Update(msg)
+	case <-time.After(time.Second):
+		t.Fatal("canceled completion did not return")
+	}
+	if len(model.resumeCandidates) != 1 || model.resumeCandidates[0].SessionID != "new-session" {
+		t.Fatalf("stale result replaced new candidates: %#v", model.resumeCandidates)
+	}
+}
+
+func TestClosingResumePickerRejectsLateCompletionAndAcceptDoesNotRefresh(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	called := make(chan struct{}, 1)
+	model := NewModel(Config{
+		Context:  context.Background(),
+		Commands: DefaultCommands(),
+		ResumeComplete: func(_ context.Context, _ string, _ int) ([]ResumeCandidate, error) {
+			called <- struct{}{}
+			close(started)
+			<-release
+			return []ResumeCandidate{{SessionID: "late-session", Prompt: "late"}}, nil
+		},
+	})
+	model.setInputText("/resume late")
+	model.syncTextareaFromInput()
+	model.syncSlashInputOverlays()
+	if _, cmd := model.handleKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})); cmd != nil {
+		t.Fatal("accept with no candidates scheduled synchronous or backend work")
+	}
+	select {
+	case <-called:
+		t.Fatal("accept invoked ResumeComplete before an asynchronous refresh")
+	default:
+	}
+
+	cmd := model.updateResumeCandidates()
+	if cmd == nil {
+		t.Fatal("resume completion command = nil")
+	}
+	result := make(chan tea.Msg, 1)
+	go func() { result <- cmd() }()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("completion backend did not start")
+	}
+	model.clearResume()
+	close(release)
+	select {
+	case msg := <-result:
+		_, _ = model.Update(msg)
+	case <-time.After(time.Second):
+		t.Fatal("late completion did not return")
+	}
+	if model.resumeActive || len(model.resumeCandidates) != 0 {
+		t.Fatalf("late completion reopened picker: active=%v candidates=%#v", model.resumeActive, model.resumeCandidates)
 	}
 }
 
@@ -1001,7 +1152,7 @@ func TestModelActionPrefixTypingUsesTextareaValueAsSourceOfTruth(t *testing.T) {
 func TestResumePrefixTypingUsesTextareaValueAsSourceOfTruth(t *testing.T) {
 	model := NewModel(Config{
 		Commands: DefaultCommands(),
-		ResumeComplete: func(query string, limit int) ([]ResumeCandidate, error) {
+		ResumeComplete: func(_ context.Context, query string, limit int) ([]ResumeCandidate, error) {
 			return []ResumeCandidate{
 				{SessionID: "alpha-session", Prompt: "work on gateway", Age: "1m"},
 				{SessionID: "beta-session", Prompt: "resume model work", Age: "2m"},
@@ -1014,6 +1165,7 @@ func TestResumePrefixTypingUsesTextareaValueAsSourceOfTruth(t *testing.T) {
 	model.textarea.SetValue("/resume be")
 	model.textarea.CursorEnd()
 	model.syncSlashInputOverlays()
+	completeResumeCandidates(t, model)
 
 	if !model.resumeActive {
 		t.Fatal("resume picker not activated")
@@ -1850,4 +2002,9 @@ func runCompletionCmd(t *testing.T, model *Model, cmd tea.Cmd) {
 			*model = *next
 		}
 	}
+}
+
+func completeResumeCandidates(t *testing.T, model *Model) {
+	t.Helper()
+	runCompletionCmd(t, model, model.updateResumeCandidates())
 }

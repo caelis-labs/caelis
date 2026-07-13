@@ -533,7 +533,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	// /resume overlay.
-	if len(m.resumeCandidates) > 0 {
+	if m.resumeActive {
 		if handled, cmd := m.handleResumeKey(msg); handled {
 			return m, cmd
 		}
@@ -798,7 +798,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.submitLine("/connect")
 		}
 		if m.tryOpenSlashArgPicker(execLine) {
-			return m, nil
+			return m, m.requestCompletionRefresh()
 		}
 		return m.submitLineWithDisplayAndAttachmentsOptions(execLine, displayLine, fileAttachments, submitLineOptions{
 			recordHistory: true,

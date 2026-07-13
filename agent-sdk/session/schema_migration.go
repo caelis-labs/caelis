@@ -114,8 +114,7 @@ func (r *MigrationRegistry) Migrate(kind SchemaKind, source, target int, raw jso
 	return out, nil
 }
 
-// DefaultMigrationRegistry returns the built-in pre-v1 migration set.
-func DefaultMigrationRegistry() *MigrationRegistry {
+func newDefaultMigrationRegistry() *MigrationRegistry {
 	registry := NewMigrationRegistry()
 	_ = registry.Register(SchemaKindEvent, 0, EventSchemaVersion, migrateEventV0ToV1)
 	_ = registry.Register(SchemaKindJournal, 0, ExecutionJournalSchemaVersion, migrateJournalV0ToV1)
@@ -123,6 +122,15 @@ func DefaultMigrationRegistry() *MigrationRegistry {
 	_ = registry.Register(SchemaKindToolExecution, 0, ToolExecutionSchemaVersion, migrateSchemaFieldV0ToV1)
 	_ = registry.Register(SchemaKindPauseToken, 0, ExecutionJournalSchemaVersion, migrateSchemaFieldV0ToV1)
 	return registry
+}
+
+var builtInMigrationRegistry = newDefaultMigrationRegistry()
+
+// DefaultMigrationRegistry returns a mutable copy of the built-in pre-v1
+// migration set. Internal migrations share an immutable registry so replaying
+// histories does not rebuild identical lookup maps for every event.
+func DefaultMigrationRegistry() *MigrationRegistry {
+	return newDefaultMigrationRegistry()
 }
 
 // MigrateEvent upgrades one event and nested execution journal records.
@@ -156,7 +164,7 @@ func MigrateEventJSON(raw json.RawMessage) (json.RawMessage, error) {
 	if err != nil {
 		return nil, err
 	}
-	registry := DefaultMigrationRegistry()
+	registry := builtInMigrationRegistry
 	migrated, err := registry.Migrate(SchemaKindEvent, source, EventSchemaVersion, raw)
 	if err != nil {
 		return nil, err

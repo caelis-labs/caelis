@@ -60,6 +60,7 @@ func (s *Store) readDocumentAt(path string) (persistedDocument, error) {
 	if doc.State != nil {
 		doc.State = cloneState(doc.State)
 	}
+	doc.PendingApprovals = clonePendingApprovals(doc.PendingApprovals)
 	return doc, nil
 }
 
@@ -119,6 +120,7 @@ func (s *Store) writeDocumentInternal(doc persistedDocument, injectFault bool, u
 	doc.Version = documentVersion
 	doc.Session = session.CloneSession(doc.Session)
 	doc.State = cloneState(doc.State)
+	doc.PendingApprovals = clonePendingApprovals(doc.PendingApprovals)
 
 	data, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {

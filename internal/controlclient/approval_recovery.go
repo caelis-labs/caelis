@@ -21,6 +21,26 @@ func SweepAbandonedApprovals(ctx context.Context, store ApprovalRecoveryStore) e
 	if store == nil {
 		return nil
 	}
+	if indexed, ok := store.(session.ApprovalRecoveryReader); ok {
+		pending, err := indexed.PendingApprovals(ctx)
+		if err != nil {
+			return err
+		}
+		for _, approval := range pending {
+			requestID := ""
+			if approval.Request != nil {
+				requestID = strings.TrimSpace(approval.Request.ApprovalRequestID)
+			}
+			if requestID == "" {
+				continue
+			}
+			event := abandonedApprovalSettlement(approval.Request, requestID)
+			if _, err := store.AppendEvent(ctx, abandonedApprovalAppendRequest(approval.SessionRef, event)); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 	cursor := ""
 	for {
 		list, err := store.ListSessions(ctx, session.ListSessionsRequest{Cursor: cursor, Limit: 200})
@@ -68,11 +88,18 @@ func sweepSessionApprovals(ctx context.Context, store ApprovalRecoveryStore, ref
 	}
 	for requestID, request := range pending {
 		event := abandonedApprovalSettlement(request, requestID)
-		if _, err := store.AppendEvent(ctx, session.AppendEventRequest{SessionRef: ref, Event: event}); err != nil {
+		if _, err := store.AppendEvent(ctx, abandonedApprovalAppendRequest(ref, event)); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func abandonedApprovalAppendRequest(ref session.SessionRef, event *session.Event) session.AppendEventRequest {
+	return session.AppendEventRequest{
+		SessionRef: ref, Event: event,
+		MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeApproval),
+	}
 }
 
 func abandonedApprovalSettlement(request *session.Event, requestID string) *session.Event {

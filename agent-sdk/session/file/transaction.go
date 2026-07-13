@@ -37,6 +37,7 @@ func (s *Store) writeTransaction(path string, record persistedTransaction) error
 	record.Version = transactionVersion
 	record.Document.Session = session.CloneSession(record.Document.Session)
 	record.Document.State = cloneState(record.Document.State)
+	record.Document.PendingApprovals = clonePendingApprovals(record.Document.PendingApprovals)
 	record.Events = session.CloneEvents(record.Events)
 	data, err := json.MarshalIndent(record, "", "  ")
 	if err != nil {

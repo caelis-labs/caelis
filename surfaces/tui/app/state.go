@@ -122,6 +122,7 @@ type Diagnostics struct {
 	AvgInputLatency               time.Duration
 	P95InputLatency               time.Duration
 	LastMentionLatency            time.Duration
+	LastResumeLatency             time.Duration
 	RedrawMode                    string
 }
 
@@ -160,7 +161,7 @@ type Config struct {
 	MentionComplete        func(string, int) ([]CompletionCandidate, error)
 	FileComplete           func(string, int) ([]CompletionCandidate, error)
 	SkillComplete          func(string, int) ([]CompletionCandidate, error)
-	ResumeComplete         func(string, int) ([]ResumeCandidate, error)
+	ResumeComplete         func(context.Context, string, int) ([]ResumeCandidate, error)
 	SlashArgComplete       func(command string, query string, limit int) ([]SlashArgCandidate, error)
 	ReadClipboardText      func() (string, error)
 	WriteClipboardText     func(string) error

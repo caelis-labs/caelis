@@ -33,8 +33,8 @@ func (s *Store) listFromSessionIndex(req session.ListSessionsRequest) (session.S
 	defer db.Close()
 
 	query := `SELECT session_id, app_name, user_id, workspace_key, cwd, title, metadata_json, path, created_at_ns, updated_at_ns FROM sessions`
-	args := make([]any, 0, 3)
-	clauses := make([]string, 0, 3)
+	args := make([]any, 0, 6)
+	clauses := make([]string, 0, 4)
 	if appName := strings.TrimSpace(req.AppName); appName != "" {
 		clauses = append(clauses, "app_name = ?")
 		args = append(args, appName)
@@ -47,13 +47,23 @@ func (s *Store) listFromSessionIndex(req session.ListSessionsRequest) (session.S
 		clauses = append(clauses, "workspace_key = ?")
 		args = append(args, workspaceKey)
 	}
+	if encoded := strings.TrimSpace(req.Cursor); encoded != "" {
+		cursor, err := session.DecodeSessionListCursor(encoded)
+		if err != nil {
+			return session.SessionList{}, err
+		}
+		updatedAtNS := timeToUnixNano(cursor.UpdatedAt)
+		clauses = append(clauses, "(updated_at_ns < ? OR (updated_at_ns = ? AND session_id > ?))")
+		args = append(args, updatedAtNS, updatedAtNS, cursor.SessionID)
+	}
 	if len(clauses) > 0 {
 		query += " WHERE " + strings.Join(clauses, " AND ")
 	}
 	query += " ORDER BY updated_at_ns DESC, session_id ASC"
-	if req.Limit > 0 {
+	queryLimit := req.Limit
+	if queryLimit > 0 {
 		query += " LIMIT ?"
-		args = append(args, req.Limit)
+		args = append(args, queryLimit+1)
 	}
 
 	rows, err := db.Query(query, args...)
@@ -76,7 +86,19 @@ func (s *Store) listFromSessionIndex(req session.ListSessionsRequest) (session.S
 	if err := rows.Err(); err != nil {
 		return session.SessionList{}, fmt.Errorf("agent-sdk/session/file: scan session index: %w", err)
 	}
-	return session.SessionList{Sessions: session.CloneSessionSummaries(summaries)}, nil
+	hasMore := queryLimit > 0 && len(summaries) > queryLimit
+	if hasMore {
+		summaries = summaries[:queryLimit]
+	}
+	nextCursor := ""
+	if hasMore && len(summaries) > 0 {
+		last := summaries[len(summaries)-1]
+		nextCursor, err = session.EncodeSessionListCursor(session.SessionListCursor{UpdatedAt: last.UpdatedAt, SessionID: last.SessionID})
+		if err != nil {
+			return session.SessionList{}, err
+		}
+	}
+	return session.SessionList{Sessions: session.CloneSessionSummaries(summaries), NextCursor: nextCursor}, nil
 }
 
 func (s *Store) lookupSessionIndex(sessionID string) (sessionIndexEntry, error) {

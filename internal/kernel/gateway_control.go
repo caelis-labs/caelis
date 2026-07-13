@@ -90,6 +90,9 @@ func (g *Gateway) DetachParticipant(ctx context.Context, req DetachParticipantRe
 }
 
 func (g *Gateway) PromptParticipant(ctx context.Context, req PromptParticipantRequest) (BeginTurnResult, error) {
+	if err := g.waitForTurnStart(ctx); err != nil {
+		return BeginTurnResult{}, err
+	}
 	if g.control == nil {
 		return BeginTurnResult{}, &Error{
 			Kind:        KindUnsupported,

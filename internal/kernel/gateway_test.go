@@ -50,6 +50,35 @@ func TestNewRequiresSessionsRuntimeAndResolver(t *testing.T) {
 	}
 }
 
+type failingTurnStartGate struct{ err error }
+
+func (g failingTurnStartGate) Wait(context.Context) error { return g.err }
+
+func TestTurnEntryPointsHonorControlStartupGate(t *testing.T) {
+	t.Parallel()
+
+	want := errors.New("approval recovery incomplete")
+	svc := &recordingSessionService{}
+	gw, err := New(Config{
+		Sessions: svc, Runtime: mockRuntime{}, Resolver: staticResolver{}, TurnStartGate: failingTurnStartGate{err: want},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gw.BeginTurn(context.Background(), BeginTurnRequest{}); !errors.Is(err, want) {
+		t.Fatalf("BeginTurn() error = %v, want recovery gate error", err)
+	}
+	if _, err := gw.PromptParticipant(context.Background(), PromptParticipantRequest{}); !errors.Is(err, want) {
+		t.Fatalf("PromptParticipant() error = %v, want recovery gate error", err)
+	}
+	if _, err := gw.StartParticipant(context.Background(), StartParticipantRequest{}); !errors.Is(err, want) {
+		t.Fatalf("StartParticipant() error = %v, want recovery gate error", err)
+	}
+	if svc.sessionReq.SessionID != "" || svc.loadCalls != 0 || svc.listCalls != 0 {
+		t.Fatalf("session I/O occurred before recovery gate: session=%+v loads=%d lists=%d", svc.sessionReq, svc.loadCalls, svc.listCalls)
+	}
+}
+
 func TestStartSessionDelegatesToSDKSessions(t *testing.T) {
 	t.Parallel()
 
@@ -298,6 +327,50 @@ func TestResumeSessionResolvesUniquePrefix(t *testing.T) {
 	}
 	if svc.listReq.WorkspaceKey != "" {
 		t.Fatalf("listReq.WorkspaceKey = %q, want global SessionID lookup", svc.listReq.WorkspaceKey)
+	}
+}
+
+func TestResumeSessionLoadsExactGlobalIDWithoutListingAndChecksScope(t *testing.T) {
+	t.Parallel()
+
+	target := session.Session{SessionRef: session.SessionRef{
+		AppName: "caelis", UserID: "user-1", SessionID: "s-exact", WorkspaceKey: "workspace-1",
+	}}
+	svc := &recordingSessionService{
+		sessionResult: target,
+		listSessionsResult: session.SessionList{Sessions: []session.SessionSummary{{
+			SessionRef: target.SessionRef,
+		}}},
+	}
+	gw, err := New(Config{Sessions: svc, Runtime: mockRuntime{}, Resolver: staticResolver{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := gw.ResumeSession(context.Background(), ResumeSessionRequest{
+		AppName: "caelis", UserID: "user-1", Workspace: session.WorkspaceRef{Key: "workspace-1"}, SessionID: "s-exact", MetadataOnly: true,
+	})
+	if err != nil {
+		t.Fatalf("ResumeSession() error = %v", err)
+	}
+	if loaded.Session.SessionID != "s-exact" {
+		t.Fatalf("ResumeSession() = %#v", loaded)
+	}
+	if svc.listCalls != 0 {
+		t.Fatalf("ListSessions() calls = %d, want 0 for an exact global SessionID", svc.listCalls)
+	}
+	if svc.loadCalls != 0 || svc.sessionCalls != 1 {
+		t.Fatalf("history loads = %d metadata reads = %d, want 0 and 1", svc.loadCalls, svc.sessionCalls)
+	}
+
+	for _, mismatch := range []ResumeSessionRequest{
+		{AppName: "other-app", UserID: "user-1", Workspace: session.WorkspaceRef{Key: "workspace-1"}, SessionID: "s-exact", MetadataOnly: true},
+		{AppName: "caelis", UserID: "other-user", Workspace: session.WorkspaceRef{Key: "workspace-1"}, SessionID: "s-exact", MetadataOnly: true},
+		{AppName: "caelis", UserID: "user-1", Workspace: session.WorkspaceRef{Key: "other-workspace"}, SessionID: "s-exact", MetadataOnly: true},
+	} {
+		if _, err := gw.ResumeSession(context.Background(), mismatch); err == nil {
+			t.Fatalf("ResumeSession(%+v) error = nil, want scoped not-found error", mismatch)
+		}
 	}
 }
 
@@ -2975,6 +3048,9 @@ type recordingSessionService struct {
 	listErr            error
 	sessionErr         error
 	eventsErr          error
+	loadCalls          int
+	listCalls          int
+	sessionCalls       int
 }
 
 func (s *recordingSessionService) StartSession(_ context.Context, req session.StartSessionRequest) (session.Session, error) {
@@ -2986,6 +3062,7 @@ func (s *recordingSessionService) StartSession(_ context.Context, req session.St
 }
 
 func (s *recordingSessionService) LoadSession(_ context.Context, req session.LoadSessionRequest) (session.LoadedSession, error) {
+	s.loadCalls++
 	s.loadReq = req
 	if s.loadErr != nil {
 		return session.LoadedSession{}, s.loadErr
@@ -2994,6 +3071,7 @@ func (s *recordingSessionService) LoadSession(_ context.Context, req session.Loa
 }
 
 func (s *recordingSessionService) Session(_ context.Context, ref session.SessionRef) (session.Session, error) {
+	s.sessionCalls++
 	s.sessionReq = ref
 	if s.sessionErr != nil {
 		return session.Session{}, s.sessionErr
@@ -3014,6 +3092,7 @@ func (s *recordingSessionService) Events(_ context.Context, req session.EventsRe
 }
 
 func (s *recordingSessionService) ListSessions(_ context.Context, req session.ListSessionsRequest) (session.SessionList, error) {
+	s.listCalls++
 	s.listReq = req
 	if s.listErr != nil {
 		return session.SessionList{}, s.listErr

@@ -49,6 +49,14 @@ type completionRefreshMsg struct {
 	seq uint64
 }
 
+type resumeCompletionResultMsg struct {
+	seq        uint64
+	query      string
+	candidates []ResumeCandidate
+	err        error
+	latency    time.Duration
+}
+
 func animatePaletteCmd() tea.Cmd {
 	return tea.Tick(paletteAnimationInterval, func(time.Time) tea.Msg {
 		return paletteAnimationMsg{}

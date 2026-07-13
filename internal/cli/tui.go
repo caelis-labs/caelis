@@ -40,6 +40,7 @@ func runTUI(ctx context.Context, stack *gatewayapp.Stack, sessionID string, appC
 		PromptRouterFactory: controlpromptrouter.New,
 		RenderFPS:           envInt("CAELIS_TUI_RENDER_FPS", 0),
 		OnStart: func() {
+			stack.StartApprovalRecovery(programCtx)
 			startTUISandboxRefresh(programCtx, stack, sender)
 			startTUIUpdateCheck(programCtx, appCfg.StoreDir, sender)
 		},

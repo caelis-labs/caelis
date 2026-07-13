@@ -62,6 +62,50 @@ func TestCopySelectionToClipboardRunsAsCommand(t *testing.T) {
 	}
 }
 
+func TestNewSessionBackendWorkRunsOutsideModelUpdate(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	model := NewModel(Config{
+		ExecuteLine: func(submission Submission) TaskResultMsg {
+			if submission.Text != "/new" {
+				t.Errorf("submission text = %q, want /new", submission.Text)
+			}
+			close(started)
+			<-release
+			return TaskResultMsg{SuppressTurnDivider: true}
+		},
+	})
+
+	cmd := model.executeLineCmd(Submission{Text: "/new"})
+	select {
+	case <-started:
+		t.Fatal("/new backend work ran synchronously while creating tea.Cmd")
+	default:
+	}
+	done := make(chan tea.Msg, 1)
+	go func() { done <- cmd() }()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("/new backend command did not start")
+	}
+
+	begin := time.Now()
+	next, _ := model.Update(keyPress("x"))
+	if time.Since(begin) > 50*time.Millisecond {
+		t.Fatal("model update blocked behind /new backend work")
+	}
+	if got := next.(*Model).textarea.Value(); got != "x" {
+		t.Fatalf("composer input while /new is pending = %q, want x", got)
+	}
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("/new backend command did not finish")
+	}
+}
+
 func TestViewportSelectionMotionDedupesSameEndpoint(t *testing.T) {
 	model := NewModel(Config{})
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})

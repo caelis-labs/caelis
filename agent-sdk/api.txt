@@ -1864,7 +1864,9 @@ package github.com/caelis-labs/caelis/agent-sdk/session
   func ControlMutationGuard(purpose ControlMutationPurpose) MutationGuard
   func ControlMutationGuardWithRuntimeLease(ctx context.Context, purpose ControlMutationPurpose) MutationGuard
   func ControlMutationMayOverlapRuntimeLease(purpose ControlMutationPurpose) bool
+  func DecodeSessionListCursor(encoded string) (SessionListCursor, error)
   func DefaultMigrationRegistry() *MigrationRegistry
+  func EncodeSessionListCursor(cursor SessionListCursor) (string, error)
   func EventDisplayText(event *Event) string
   func EventMatchesPageVisibility(event *Event, visibility EventPageVisibility) bool
   func EventText(event *Event) string
@@ -1981,6 +1983,9 @@ package github.com/caelis-labs/caelis/agent-sdk/session
   }
   type AppendSessionMutation func(*Session, PreparedAppendEvents) (bool, error)
   type AppendStateUpdate func([]*Event, map[string]any) (map[string]any, error)
+  type ApprovalRecoveryReader interface {
+      PendingApprovals(context.Context) ([]PendingApproval, error)
+  }
   type BindControllerRequest struct {
       SessionRef    SessionRef        `json:"session_ref"`
       MutationGuard MutationGuard     `json:"mutation_guard,omitempty"`
@@ -2310,6 +2315,10 @@ package github.com/caelis-labs/caelis/agent-sdk/session
       To      PauseTokenStatus
       Detail  string
   }
+  type PendingApproval struct {
+      SessionRef SessionRef
+      Request    *Event
+  }
   type PrepareAppendTransactionRequest struct {
       Session                  Session
       State                    map[string]any
@@ -2515,6 +2524,10 @@ package github.com/caelis-labs/caelis/agent-sdk/session
   type SessionList struct {
       Sessions   []SessionSummary `json:"sessions,omitempty"`
       NextCursor string           `json:"next_cursor,omitempty"`
+  }
+  type SessionListCursor struct {
+      UpdatedAt time.Time
+      SessionID string
   }
   type SessionRef struct {
       AppName      string `json:"app_name,omitempty"`

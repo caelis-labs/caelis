@@ -56,29 +56,30 @@ type GatewayRuntime interface {
 }
 
 type Stack struct {
-	Sessions        session.Service
-	AppName         string
-	UserID          string
-	Workspace       session.WorkspaceRef
-	lookup          *modelLookup
-	store           *appConfigStore
-	storeDir        string
-	leaseOwnerID    string
-	mu              sync.RWMutex
-	reconfigureMu   sync.Mutex
-	runtime         stackRuntimeConfig
-	sandbox         SandboxConfig
-	exec            sandbox.Runtime
-	engine          *runtime.Runtime
-	placement       controlplane.PlacementExecutor
-	acpControlPlane *acpassembly.ControlPlane
-	taskStore       task.Store
-	controlFeeds    controlclientport.FeedRegistry
-	controlState    controlclientport.StateReader
-	controlCommands controlclientport.CommandClient
-	controlClient   controlclientport.Service
-	gateway         *kernelimpl.Gateway
-	mcpMgr          *mcp.Manager
+	Sessions         session.Service
+	AppName          string
+	UserID           string
+	Workspace        session.WorkspaceRef
+	lookup           *modelLookup
+	store            *appConfigStore
+	storeDir         string
+	leaseOwnerID     string
+	mu               sync.RWMutex
+	reconfigureMu    sync.Mutex
+	runtime          stackRuntimeConfig
+	sandbox          SandboxConfig
+	exec             sandbox.Runtime
+	engine           *runtime.Runtime
+	placement        controlplane.PlacementExecutor
+	acpControlPlane  *acpassembly.ControlPlane
+	taskStore        task.Store
+	controlFeeds     controlclientport.FeedRegistry
+	controlState     controlclientport.StateReader
+	controlCommands  controlclientport.CommandClient
+	controlClient    controlclientport.Service
+	approvalRecovery *internalcontrolclient.ApprovalRecoveryGate
+	gateway          *kernelimpl.Gateway
+	mcpMgr           *mcp.Manager
 
 	// Optional test seam; nil uses the platform lifecycle runtime factory.
 	sandboxLifecycleFactory sandboxLifecycleRuntimeFactory
@@ -249,9 +250,7 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	})
 	sessions := sessionfile.NewService(sessionStore)
 	taskStore := sessionfile.NewTaskStore(sessionStore)
-	if err := internalcontrolclient.SweepAbandonedApprovals(context.Background(), sessions); err != nil {
-		return nil, err
-	}
+	approvalRecovery := internalcontrolclient.NewApprovalRecoveryGate(sessions)
 	cursorSecret, err := loadOrCreateControlClientCursorSecret(storeDir)
 	if err != nil {
 		return nil, err
@@ -292,12 +291,13 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 			Key: workspaceKey,
 			CWD: workspaceCWD,
 		},
-		lookup:       lookup,
-		store:        configStore,
-		storeDir:     storeDir,
-		leaseOwnerID: leaseOwnerID,
-		taskStore:    taskStore,
-		controlFeeds: controlFeeds,
+		lookup:           lookup,
+		store:            configStore,
+		storeDir:         storeDir,
+		leaseOwnerID:     leaseOwnerID,
+		taskStore:        taskStore,
+		controlFeeds:     controlFeeds,
+		approvalRecovery: approvalRecovery,
 		runtime: stackRuntimeConfig{
 			ApprovalMode:                effectiveApprovalMode,
 			PolicyProfile:               effectivePolicyProfile,
@@ -340,6 +340,15 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		return nil, err
 	}
 	return stack, nil
+}
+
+// StartApprovalRecovery begins the Control-owned abandoned-approval sweep.
+// Turn entry remains gated until the sweep completes.
+func (s *Stack) StartApprovalRecovery(ctx context.Context) {
+	if s == nil || s.approvalRecovery == nil {
+		return
+	}
+	s.approvalRecovery.Start(ctx)
 }
 
 func newStackLeaseOwnerID() (string, error) {

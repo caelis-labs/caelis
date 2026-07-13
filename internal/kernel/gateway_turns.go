@@ -17,6 +17,9 @@ import (
 )
 
 func (g *Gateway) BeginTurn(ctx context.Context, req BeginTurnRequest) (BeginTurnResult, error) {
+	if err := g.waitForTurnStart(ctx); err != nil {
+		return BeginTurnResult{}, err
+	}
 	activeSession, err := g.sessions.Session(ctx, req.SessionRef)
 	if err != nil {
 		return BeginTurnResult{}, wrapSessionError(err)

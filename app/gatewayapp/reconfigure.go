@@ -342,6 +342,7 @@ func (s *Stack) buildGatewayRuntime(plan gatewayBuildPlan) (*gatewayRuntimeBundl
 	gw, err := kernelimpl.New(kernelimpl.Config{
 		Sessions:             s.Sessions,
 		Runtime:              watchdogRuntime,
+		TurnStartGate:        s.approvalRecovery,
 		Control:              sessionControl,
 		Resolver:             resolver,
 		ExecutionValidator:   executionValidator,

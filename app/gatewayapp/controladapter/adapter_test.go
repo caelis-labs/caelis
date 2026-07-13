@@ -3922,7 +3922,7 @@ func TestAdapterCompleteMentionReturnsACPSidecarsOnly(t *testing.T) {
 	}
 }
 
-func TestAdapterCompleteResumeIncludesMetadataAndRecentFirst(t *testing.T) {
+func TestAdapterCompleteResumeUsesSummaryMetadataAndRecentFirst(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -3988,8 +3988,8 @@ func TestAdapterCompleteResumeIncludesMetadataAndRecentFirst(t *testing.T) {
 	if candidates[0].Title != "Second Task" {
 		t.Fatalf("first resume candidate title = %q, want most recent Second Task", candidates[0].Title)
 	}
-	if candidates[0].Model == "" || candidates[0].Workspace == "" {
-		t.Fatalf("first resume candidate = %#v, want model and workspace metadata", candidates[0])
+	if candidates[0].Model != "" || candidates[0].Workspace == "" {
+		t.Fatalf("first resume candidate = %#v, want summary workspace without history-loaded model", candidates[0])
 	}
 }
 

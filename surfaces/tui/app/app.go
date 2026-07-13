@@ -285,6 +285,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case completionRefreshMsg:
 		return m.handleCompletionRefreshMsg(typed)
 
+	case resumeCompletionResultMsg:
+		return m.handleResumeCompletionResultMsg(typed)
+
 	case terminalResponsePendingFlushMsg:
 		return m.handleTerminalResponsePendingFlush(typed)
 

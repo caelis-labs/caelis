@@ -12,7 +12,6 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
-	"github.com/caelis-labs/caelis/ports/gateway"
 )
 
 const (
@@ -249,8 +248,8 @@ func sortAndTrimCandidates(items []scoredCompletion, limit int) []CompletionCand
 	return out
 }
 
-func enrichResumeCandidate(ctx context.Context, sessions resumeSessionLoader, summary session.SessionSummary) ResumeCandidate {
-	candidate := ResumeCandidate{
+func enrichResumeCandidate(_ context.Context, _ resumeSessionLoader, summary session.SessionSummary) ResumeCandidate {
+	return ResumeCandidate{
 		SessionID: summary.SessionID,
 		Title:     strings.TrimSpace(summary.Title),
 		Prompt:    strings.TrimSpace(summary.Title),
@@ -258,22 +257,6 @@ func enrichResumeCandidate(ctx context.Context, sessions resumeSessionLoader, su
 		Age:       humanAge(summary.UpdatedAt),
 		UpdatedAt: summary.UpdatedAt,
 	}
-	if sessions == nil {
-		return candidate
-	}
-	loaded, err := sessions.LoadSession(ctx, session.LoadSessionRequest{
-		SessionRef:       summary.SessionRef,
-		Limit:            0,
-		IncludeTransient: false,
-	})
-	if err != nil {
-		return candidate
-	}
-	candidate.Title = firstNonEmpty(strings.TrimSpace(loaded.Session.Title), candidate.Title)
-	candidate.Prompt = firstNonEmpty(strings.TrimSpace(loaded.Session.Title), candidate.Prompt)
-	candidate.Workspace = firstNonEmpty(strings.TrimSpace(loaded.Session.CWD), candidate.Workspace)
-	candidate.Model = strings.TrimSpace(gateway.CurrentModelAlias(loaded.State))
-	return candidate
 }
 
 func scoreResumeCandidate(query string, candidate ResumeCandidate) (int, bool) {

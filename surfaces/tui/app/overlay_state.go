@@ -1,6 +1,8 @@
 package tuiapp
 
 import (
+	"context"
+
 	"charm.land/bubbles/v2/list"
 )
 
@@ -43,10 +45,14 @@ type OverlayState struct {
 	slashIndex      int
 	slashPrefix     string
 
-	resumeActive     bool
-	resumeQuery      string
-	resumeCandidates []ResumeCandidate
-	resumeIndex      int
+	resumeActive         bool
+	resumeQuery          string
+	resumeCandidates     []ResumeCandidate
+	resumeIndex          int
+	resumeRequestSeq     uint64
+	resumeRequestQuery   string
+	resumeRequestPending bool
+	resumeRequestCancel  context.CancelFunc
 
 	slashArgActive     bool
 	slashArgCommand    string

@@ -3,6 +3,7 @@ package file
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,11 +16,15 @@ import (
 )
 
 func (s *Store) eventsForDocument(doc persistedDocument) ([]*session.Event, error) {
+	return s.eventsForDocumentContext(context.Background(), doc)
+}
+
+func (s *Store) eventsForDocumentContext(ctx context.Context, doc persistedDocument) ([]*session.Event, error) {
 	path, err := s.resolveWritePath(doc.Session)
 	if err != nil {
 		return nil, err
 	}
-	return s.readEventLog(path)
+	return s.readEventLogContext(ctx, path)
 }
 
 func (s *Store) appendEventLog(documentPath string, events []*session.Event) error {
@@ -113,6 +118,13 @@ func rollbackEventLogAppend(path string, offset int64) error {
 }
 
 func (s *Store) readEventLog(documentPath string) ([]*session.Event, error) {
+	return s.readEventLogContext(context.Background(), documentPath)
+}
+
+func (s *Store) readEventLogContext(ctx context.Context, documentPath string) ([]*session.Event, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	path := eventLogPath(documentPath)
 	file, err := os.Open(path)
 	if err != nil {
@@ -126,6 +138,9 @@ func (s *Store) readEventLog(documentPath string) ([]*session.Event, error) {
 	events := make([]*session.Event, 0)
 	lineNo := 0
 	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		line, readErr := reader.ReadString('\n')
 		lineNo++
 		if readErr != nil && !errors.Is(readErr, io.EOF) {
@@ -162,7 +177,10 @@ func (s *Store) readEventLog(documentPath string) ([]*session.Event, error) {
 	return events, nil
 }
 
-func (s *Store) readEventLogPage(documentPath string, req session.EventPageRequest) (session.EventPage, error) {
+func (s *Store) readEventLogPage(ctx context.Context, documentPath string, req session.EventPageRequest) (session.EventPage, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	req = session.NormalizeEventPageRequest(req)
 	path := eventLogPath(documentPath)
 	file, err := os.Open(path)
@@ -178,6 +196,9 @@ func (s *Store) readEventLogPage(documentPath string, req session.EventPageReque
 	reader := bufio.NewReader(file)
 	lineNo := 0
 	for {
+		if err := ctx.Err(); err != nil {
+			return session.EventPage{}, err
+		}
 		line, readErr := reader.ReadString('\n')
 		lineNo++
 		if readErr != nil && !errors.Is(readErr, io.EOF) {
@@ -185,6 +206,24 @@ func (s *Store) readEventLogPage(documentPath string, req session.EventPageReque
 		}
 		trimmed := strings.TrimSpace(line)
 		if trimmed != "" {
+			var header struct {
+				Seq uint64 `json:"seq"`
+			}
+			if err := json.Unmarshal([]byte(trimmed), &header); err != nil {
+				if errors.Is(readErr, io.EOF) {
+					break
+				}
+				return session.EventPage{}, fmt.Errorf("agent-sdk/session/file: decode event log %s line %d header: %w", path, lineNo, err)
+			}
+			// The cursor proves earlier records were already consumed. Parse only
+			// their sequence header instead of repeatedly migrating, validating,
+			// and cloning every payload on each forward page.
+			if header.Seq > 0 && header.Seq <= req.AfterSeq {
+				if errors.Is(readErr, io.EOF) {
+					break
+				}
+				continue
+			}
 			if err := rejectUnsupportedLegacyEventLogLine([]byte(trimmed), path, lineNo); err != nil {
 				return session.EventPage{}, err
 			}

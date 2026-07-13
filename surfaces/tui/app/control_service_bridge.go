@@ -44,6 +44,11 @@ type programSenderBoundContextKey struct{}
 
 const programSenderCloseTimeout = 250 * time.Millisecond
 
+// resumeReplayTranscriptBatchSize bounds one Bubble Tea update while a large
+// Session history is projected. Each batch is a separate message so keyboard
+// and resize input can be scheduled between replay mutations.
+const resumeReplayTranscriptBatchSize = 64
+
 func (s *ProgramSender) sendFunc() func(tea.Msg) {
 	if s == nil {
 		return nil
@@ -345,8 +350,8 @@ func ConfigFromControlService(service control.Service, sender *ProgramSender, ba
 	}
 
 	if base.ResumeComplete == nil {
-		base.ResumeComplete = func(query string, limit int) ([]ResumeCandidate, error) {
-			candidates, err := service.CompleteResume(ctx, query, limit)
+		base.ResumeComplete = func(requestCtx context.Context, query string, limit int) ([]ResumeCandidate, error) {
+			candidates, err := service.CompleteResume(requestCtx, query, limit)
 			if err != nil {
 				return nil, err
 			}
@@ -528,8 +533,11 @@ func executeControlPromptResult(ctx context.Context, service control.Service, se
 		send(ClearHistoryMsg{})
 	}
 	if len(result.ReplayEvents) > 0 && send != nil {
-		if transcriptEvents := projectResumeReplayEvents(result.ReplayEvents); len(transcriptEvents) > 0 {
-			send(TranscriptEventsMsg{Events: transcriptEvents})
+		transcriptEvents := projectResumeReplayEvents(result.ReplayEvents)
+		for start := 0; start < len(transcriptEvents); start += resumeReplayTranscriptBatchSize {
+			end := min(start+resumeReplayTranscriptBatchSize, len(transcriptEvents))
+			batch := append([]TranscriptEvent(nil), transcriptEvents[start:end]...)
+			send(TranscriptEventsMsg{Events: batch})
 		}
 	}
 	if result.SlashResult != nil && send != nil {

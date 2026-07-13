@@ -2,6 +2,7 @@ package tuiapp
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -197,6 +198,50 @@ func TestExecuteControlPromptResultForwardsSlashResultAndEvents(t *testing.T) {
 	}
 	if env, ok := got[1].(eventstream.Envelope); !ok || env.Kind != eventstream.KindNotice || env.Notice != "extra notice" {
 		t.Fatalf("second message = %#v, want extra notice event", got[1])
+	}
+}
+
+func TestExecuteControlPromptResultBatchesResumeReplayAfterClear(t *testing.T) {
+	t.Parallel()
+
+	replay := make([]eventstream.Envelope, resumeReplayTranscriptBatchSize*2+1)
+	for i := range replay {
+		replay[i] = eventstream.Envelope{
+			Kind:      eventstream.KindLifecycle,
+			SessionID: "session-1",
+			Lifecycle: &eventstream.Lifecycle{State: "completed"},
+		}
+	}
+	var got []tea.Msg
+	sender := &ProgramSender{Send: func(msg tea.Msg) { got = append(got, msg) }}
+	executeControlPromptResult(context.Background(), nil, sender, controlprompt.Result{
+		Handled: true, ClearHistory: true, ReplayEvents: replay,
+	})
+
+	if len(got) != 4 {
+		t.Fatalf("sent messages = %d, want clear plus three replay batches", len(got))
+	}
+	if _, ok := got[0].(ClearHistoryMsg); !ok {
+		t.Fatalf("first message = %#v, want ClearHistoryMsg", got[0])
+	}
+	total := 0
+	var batched []TranscriptEvent
+	for i, raw := range got[1:] {
+		batch, ok := raw.(TranscriptEventsMsg)
+		if !ok {
+			t.Fatalf("message %d = %#v, want TranscriptEventsMsg", i+1, raw)
+		}
+		if len(batch.Events) == 0 || len(batch.Events) > resumeReplayTranscriptBatchSize {
+			t.Fatalf("message %d replay batch size = %d, want 1..%d", i+1, len(batch.Events), resumeReplayTranscriptBatchSize)
+		}
+		total += len(batch.Events)
+		batched = append(batched, batch.Events...)
+	}
+	if total != len(replay) {
+		t.Fatalf("replayed transcript events = %d, want %d", total, len(replay))
+	}
+	if want := projectResumeReplayEvents(replay); !reflect.DeepEqual(batched, want) {
+		t.Fatalf("batched replay differs from one-shot projection\nbatched: %#v\nwant:    %#v", batched, want)
 	}
 }
 

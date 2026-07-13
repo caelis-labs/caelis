@@ -412,10 +412,13 @@ func (d *Adapter) ResumeSession(ctx context.Context, sessionID string) (SessionS
 		return SessionSnapshot{}, err
 	}
 	result, err := gw.ResumeSession(ctx, gateway.ResumeSessionRequest{
-		AppName:    d.stack.Session.AppName,
-		UserID:     d.stack.Session.UserID,
-		SessionID:  strings.TrimSpace(sessionID),
-		BindingKey: d.bindingKey,
+		AppName:   d.stack.Session.AppName,
+		UserID:    d.stack.Session.UserID,
+		SessionID: strings.TrimSpace(sessionID),
+		// Replay is consumed from the Control-owned Session Feed below the
+		// prompt-router boundary. Resume itself only needs the target Session.
+		MetadataOnly: true,
+		BindingKey:   d.bindingKey,
 		Binding: gateway.BindingDescriptor{
 			Surface: d.bindingKey,
 			Owner:   d.stack.Session.AppName,

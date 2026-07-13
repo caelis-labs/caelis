@@ -60,8 +60,11 @@ type ResumeSessionRequest struct {
 	ExcludeSessionID string
 	Limit            int
 	IncludeTransient bool
-	BindingKey       string
-	Binding          BindingDescriptor
+	// MetadataOnly binds and returns the authorized Session without reading
+	// event history. The caller must obtain replay from the Control Session Feed.
+	MetadataOnly bool
+	BindingKey   string
+	Binding      BindingDescriptor
 }
 
 type ListSessionsRequest struct {

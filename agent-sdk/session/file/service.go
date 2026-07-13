@@ -31,7 +31,7 @@ func (s *Service) AppendEvent(
 	ctx context.Context,
 	req session.AppendEventRequest,
 ) (*session.Event, error) {
-	return s.store.appendEventRequest(req)
+	return s.store.appendEventRequest(ctx, req)
 }
 
 func (s *Service) AppendEvents(
@@ -68,6 +68,11 @@ func (s *Service) ListSessions(
 	req session.ListSessionsRequest,
 ) (session.SessionList, error) {
 	return s.store.List(ctx, req)
+}
+
+// PendingApprovals returns the Store-maintained abandoned-approval candidates.
+func (s *Service) PendingApprovals(ctx context.Context) ([]session.PendingApproval, error) {
+	return s.store.PendingApprovals(ctx)
 }
 
 func (s *Service) BindController(

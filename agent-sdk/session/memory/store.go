@@ -138,14 +138,36 @@ func (s *Store) List(
 		})
 	}
 	sort.Slice(rows, func(i, j int) bool {
-		return rows[i].UpdatedAt.After(rows[j].UpdatedAt)
+		if !rows[i].UpdatedAt.Equal(rows[j].UpdatedAt) {
+			return rows[i].UpdatedAt.After(rows[j].UpdatedAt)
+		}
+		return rows[i].SessionID < rows[j].SessionID
 	})
-	if req.Limit > 0 && len(rows) > req.Limit {
+	if encoded := strings.TrimSpace(req.Cursor); encoded != "" {
+		cursor, err := session.DecodeSessionListCursor(encoded)
+		if err != nil {
+			return session.SessionList{}, err
+		}
+		start := sort.Search(len(rows), func(i int) bool {
+			return rows[i].UpdatedAt.Before(cursor.UpdatedAt) ||
+				(rows[i].UpdatedAt.Equal(cursor.UpdatedAt) && rows[i].SessionID > cursor.SessionID)
+		})
+		rows = rows[start:]
+	}
+	hasMore := req.Limit > 0 && len(rows) > req.Limit
+	if hasMore {
 		rows = rows[:req.Limit]
 	}
-	return session.SessionList{
-		Sessions: session.CloneSessionSummaries(rows),
-	}, nil
+	nextCursor := ""
+	if hasMore && len(rows) > 0 {
+		last := rows[len(rows)-1]
+		var err error
+		nextCursor, err = session.EncodeSessionListCursor(session.SessionListCursor{UpdatedAt: last.UpdatedAt, SessionID: last.SessionID})
+		if err != nil {
+			return session.SessionList{}, err
+		}
+	}
+	return session.SessionList{Sessions: session.CloneSessionSummaries(rows), NextCursor: nextCursor}, nil
 }
 
 func (s *Store) AppendEvent(
@@ -668,6 +690,61 @@ func (s *Service) ListSessions(
 	req session.ListSessionsRequest,
 ) (session.SessionList, error) {
 	return s.store.List(ctx, req)
+}
+
+// PendingApprovals returns durable permission requests without a later
+// settlement across the in-memory Store.
+func (s *Service) PendingApprovals(ctx context.Context) ([]session.PendingApproval, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	s.store.mu.RLock()
+	defer s.store.mu.RUnlock()
+	type pendingKey struct {
+		sessionID string
+		requestID string
+		ref       session.SessionRef
+		request   *session.Event
+	}
+	keys := make([]pendingKey, 0)
+	for _, record := range s.store.sessions {
+		pending := map[string]*session.Event{}
+		for _, event := range record.events {
+			requestID := ""
+			if event != nil {
+				requestID = strings.TrimSpace(event.ApprovalRequestID)
+			}
+			if requestID == "" {
+				continue
+			}
+			switch {
+			case session.ProtocolPermissionOf(event) != nil:
+				pending[requestID] = event
+			case event.Lifecycle != nil:
+				delete(pending, requestID)
+			}
+		}
+		for requestID, request := range pending {
+			keys = append(keys, pendingKey{
+				sessionID: record.session.SessionID, requestID: requestID,
+				ref: record.session.SessionRef, request: request,
+			})
+		}
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].sessionID != keys[j].sessionID {
+			return keys[i].sessionID < keys[j].sessionID
+		}
+		return keys[i].requestID < keys[j].requestID
+	})
+	out := make([]session.PendingApproval, 0, len(keys))
+	for _, key := range keys {
+		out = append(out, session.PendingApproval{SessionRef: key.ref, Request: session.CloneEvent(key.request)})
+	}
+	return out, nil
 }
 
 func (s *Service) BindController(

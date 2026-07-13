@@ -25,6 +25,9 @@ type startParticipantRequest struct {
 }
 
 func (g *Gateway) StartParticipant(ctx context.Context, req StartParticipantRequest) (BeginTurnResult, error) {
+	if err := g.waitForTurnStart(ctx); err != nil {
+		return BeginTurnResult{}, err
+	}
 	lifecycle, err := normalizeParticipantLifecycle(req.Lifecycle)
 	if err != nil {
 		return BeginTurnResult{}, err

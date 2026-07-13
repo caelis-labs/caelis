@@ -225,7 +225,7 @@ func (m *Model) tryOpenSlashArgPicker(line string) bool {
 			return false
 		}
 		m.openResumePicker()
-		return len(m.resumeCandidates) > 0
+		return m.resumeActive
 	}
 	if strings.HasPrefix(text, "/") && !strings.Contains(text, " ") {
 		cmd := strings.TrimPrefix(text, "/")

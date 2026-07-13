@@ -18,6 +18,9 @@ import (
 type Config struct {
 	Sessions session.Service
 	Runtime  agent.Runtime
+	// TurnStartGate is a Control-owned readiness barrier checked before any
+	// main or participant Turn can mutate runtime state.
+	TurnStartGate TurnStartGate
 	// Control is injected by the product host; Gateway does not infer
 	// orchestration authority from the execution Runtime.
 	Control       agent.SessionControlPlane
@@ -39,6 +42,7 @@ type Config struct {
 type Gateway struct {
 	sessions             session.Service
 	runtime              agent.Runtime
+	turnStartGate        TurnStartGate
 	control              agent.SessionControlPlane
 	resolver             TurnResolver
 	request              RequestPolicy
@@ -55,6 +59,11 @@ type Gateway struct {
 	approvals map[string]*approvalCoordinator
 	bindings  map[string]sessionBinding
 	nextID    atomic.Uint64
+}
+
+// TurnStartGate blocks Turn creation until Control startup invariants hold.
+type TurnStartGate interface {
+	Wait(context.Context) error
 }
 
 // ExecutionRequirementsValidator checks a fully assembled local invocation
@@ -107,6 +116,7 @@ func New(cfg Config) (*Gateway, error) {
 	return &Gateway{
 		sessions:             cfg.Sessions,
 		runtime:              cfg.Runtime,
+		turnStartGate:        cfg.TurnStartGate,
 		control:              cfg.Control,
 		resolver:             cfg.Resolver,
 		request:              cfg.RequestPolicy,
@@ -121,6 +131,13 @@ func New(cfg Config) (*Gateway, error) {
 		approvals:            map[string]*approvalCoordinator{},
 		bindings:             map[string]sessionBinding{},
 	}, nil
+}
+
+func (g *Gateway) waitForTurnStart(ctx context.Context) error {
+	if g == nil || g.turnStartGate == nil {
+		return nil
+	}
+	return g.turnStartGate.Wait(ctx)
 }
 
 func (g *Gateway) sessionApprovals(ref session.SessionRef) *approvalCoordinator {

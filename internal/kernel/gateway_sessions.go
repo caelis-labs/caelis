@@ -2,6 +2,7 @@ package kernel
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -89,6 +90,26 @@ func (g *Gateway) LoadSession(ctx context.Context, req LoadSessionRequest) (sess
 }
 
 func (g *Gateway) ResumeSession(ctx context.Context, req ResumeSessionRequest) (session.LoadedSession, error) {
+	limit := req.Limit
+	if limit <= 0 {
+		limit = 200
+	}
+	if targetID := strings.TrimSpace(req.SessionID); targetID != "" {
+		loaded, err := g.loadResumeTarget(ctx, session.SessionRef{SessionID: targetID}, req, limit)
+		switch {
+		case err == nil && loaded.Session.SessionID == targetID:
+			if !resumeSessionInScope(loaded.Session, req) {
+				return session.LoadedSession{}, resumeSessionNotFoundError()
+			}
+			g.bind(req.BindingKey, loaded.Session.SessionRef, req.Binding)
+			return loaded, nil
+		case err != nil && !errors.Is(err, session.ErrSessionNotFound):
+			return session.LoadedSession{}, wrapSessionError(err)
+		}
+		// A non-exact token may still be a supported unique SessionID prefix.
+		// Exact IDs take the direct path above; only prefixes fall back to the
+		// bounded namespace list.
+	}
 	workspaceKey := strings.TrimSpace(req.Workspace.Key)
 	if strings.TrimSpace(req.SessionID) != "" {
 		workspaceKey = ""
@@ -106,17 +127,48 @@ func (g *Gateway) ResumeSession(ctx context.Context, req ResumeSessionRequest) (
 	if err != nil {
 		return session.LoadedSession{}, err
 	}
-	limit := req.Limit
-	if limit <= 0 {
-		limit = 200
+	loaded, err := g.loadResumeTarget(ctx, target.SessionRef, req, limit)
+	if err != nil {
+		return session.LoadedSession{}, wrapSessionError(err)
 	}
-	return g.LoadSession(ctx, LoadSessionRequest{
-		SessionRef:       target.SessionRef,
-		Limit:            limit,
-		IncludeTransient: req.IncludeTransient,
-		BindingKey:       req.BindingKey,
-		Binding:          req.Binding,
+	if !resumeSessionInScope(loaded.Session, req) {
+		return session.LoadedSession{}, resumeSessionNotFoundError()
+	}
+	g.bind(req.BindingKey, loaded.Session.SessionRef, req.Binding)
+	return loaded, nil
+}
+
+func (g *Gateway) loadResumeTarget(ctx context.Context, ref session.SessionRef, req ResumeSessionRequest, limit int) (session.LoadedSession, error) {
+	if req.MetadataOnly {
+		active, err := g.sessions.Session(ctx, ref)
+		if err != nil {
+			return session.LoadedSession{}, err
+		}
+		return session.LoadedSession{Session: active}, nil
+	}
+	return g.sessions.LoadSession(ctx, session.LoadSessionRequest{
+		SessionRef: ref, Limit: limit, IncludeTransient: req.IncludeTransient,
 	})
+}
+
+func resumeSessionInScope(active session.Session, req ResumeSessionRequest) bool {
+	if appName := strings.TrimSpace(req.AppName); appName != "" && active.AppName != appName {
+		return false
+	}
+	if userID := strings.TrimSpace(req.UserID); userID != "" && active.UserID != userID {
+		return false
+	}
+	if workspaceKey := strings.TrimSpace(req.Workspace.Key); workspaceKey != "" && active.WorkspaceKey != workspaceKey {
+		return false
+	}
+	return true
+}
+
+func resumeSessionNotFoundError() error {
+	return &Error{
+		Kind: KindNotFound, Code: CodeSessionNotFound, UserVisible: true,
+		Message: "gateway: session not found",
+	}
 }
 
 func (g *Gateway) ListSessions(ctx context.Context, req ListSessionsRequest) (session.SessionList, error) {
