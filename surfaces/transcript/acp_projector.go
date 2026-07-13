@@ -313,6 +313,7 @@ func projectACPContentChunk(env eventstream.Envelope, update schema.ContentChunk
 			Actor:         strings.TrimSpace(env.Actor),
 			OccurredAt:    env.OccurredAt,
 			NarrativeKind: NarrativeAssistant,
+			MessageID:     strings.TrimSpace(update.MessageID),
 			Text:          text,
 			Final:         env.Final,
 		}}
@@ -324,6 +325,7 @@ func projectACPContentChunk(env eventstream.Envelope, update schema.ContentChunk
 			Actor:         strings.TrimSpace(env.Actor),
 			OccurredAt:    env.OccurredAt,
 			NarrativeKind: NarrativeReasoning,
+			MessageID:     strings.TrimSpace(update.MessageID),
 			Text:          text,
 			Final:         env.Final,
 		}}

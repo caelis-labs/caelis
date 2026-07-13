@@ -284,16 +284,27 @@ func (b *Broker) forwardSource(ctx context.Context, source *source) {
 	defer b.workers.Done()
 	cursor := stream.CloneCursor(source.request.Cursor)
 	for {
-		if source.finalReadRequested() {
-			b.readSourceSnapshot(ctx, source, &cursor)
+		finalRead := source.finalReadRequested()
+		running, accepted, ok := b.readSourceSnapshot(ctx, source, &cursor)
+		if !ok {
 			return
 		}
-		running, ok := b.readSourceSnapshot(ctx, source, &cursor)
-		if !ok || !running {
+		if accepted && (finalRead || !running) {
 			return
 		}
 
 		timer := time.NewTimer(sourcePollInterval)
+		if finalRead {
+			select {
+			case <-ctx.Done():
+				if !timer.Stop() {
+					<-timer.C
+				}
+				return
+			case <-timer.C:
+				continue
+			}
+		}
 		select {
 		case <-ctx.Done():
 			if !timer.Stop() {
@@ -310,8 +321,7 @@ func (b *Broker) forwardSource(ctx context.Context, source *source) {
 				default:
 				}
 			}
-			b.readSourceSnapshot(ctx, source, &cursor)
-			return
+			continue
 		case <-timer.C:
 		}
 	}
@@ -320,22 +330,22 @@ func (b *Broker) forwardSource(ctx context.Context, source *source) {
 // readSourceSnapshot accepts one complete runtime snapshot before advancing the
 // source cursor. A source batch is intentionally indivisible: it preserves the
 // source's raw frame order and ProjectStreamFrame's child-before-parent order.
-func (b *Broker) readSourceSnapshot(ctx context.Context, source *source, cursor *stream.Cursor) (bool, bool) {
+func (b *Broker) readSourceSnapshot(ctx context.Context, source *source, cursor *stream.Cursor) (bool, bool, bool) {
 	if b == nil || source == nil || source.service == nil || cursor == nil {
-		return false, false
+		return false, false, false
 	}
 	snapshot, err := source.service.Read(ctx, stream.ReadRequest{
 		Ref:    source.request.Ref,
 		Cursor: stream.CloneCursor(*cursor),
 	})
 	if err != nil || ctx.Err() != nil {
-		return false, false
+		return false, false, false
 	}
 	if !b.acceptSourceSnapshot(ctx, source.request, snapshot, cursor.Events) {
-		return false, false
+		return snapshot.Running, false, true
 	}
 	*cursor = stream.CloneCursor(snapshot.Cursor)
-	return snapshot.Running, true
+	return snapshot.Running, true, true
 }
 
 func (b *Broker) acceptSourceSnapshot(ctx context.Context, request acpprojector.StreamRequest, snapshot stream.Snapshot, afterEvents int64) bool {
@@ -351,8 +361,7 @@ func (b *Broker) acceptSourceSnapshot(ctx context.Context, request acpprojector.
 				Origin:     childOriginForStreamFrame(request, frame, afterEvents+int64(index)+1),
 			})
 			if err != nil {
-				batch = append(batch, eventstream.Error(err))
-				continue
+				return false
 			}
 			frame.Event = stored
 		}
@@ -375,7 +384,6 @@ func childOriginForStreamFrame(request acpprojector.StreamRequest, frame stream.
 	participantID := strings.TrimSpace(request.ParticipantID)
 	acpSessionID := ""
 	if request.Origin != nil {
-		scopeID = firstNonEmpty(strings.TrimSpace(request.Origin.ScopeID), scopeID)
 		participantID = firstNonEmpty(participantID, strings.TrimSpace(request.Origin.ParticipantID))
 		acpSessionID = strings.TrimSpace(request.Origin.ParticipantSessionID)
 	}

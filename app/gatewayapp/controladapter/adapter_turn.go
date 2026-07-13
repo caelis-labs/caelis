@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"sync"
+	"time"
 
 	controlclientport "github.com/caelis-labs/caelis/ports/controlclient"
 	"github.com/caelis-labs/caelis/ports/gateway"
@@ -44,6 +45,28 @@ func (t *gatewayTurn) turnSubscriptionEvents() <-chan eventstream.Envelope {
 				return
 			}
 		}
+		if err := t.subscription.Err(); err != nil {
+			failure := eventstream.Error(err)
+			failure.SessionID = t.handle.SessionRef().SessionID
+			failure.HandleID = t.HandleID()
+			failure.RunID = t.RunID()
+			failure.TurnID = t.TurnID()
+			failure.Scope = eventstream.ScopeMain
+			failure.ScopeID = t.handle.SessionRef().SessionID
+			out <- failure
+			terminal := eventstream.TurnLifecycle(
+				t.HandleID(), t.RunID(), t.TurnID(),
+				eventstream.LifecycleStateInterrupted, err.Error(), "", time.Now(),
+			)
+			terminal.SessionID = t.handle.SessionRef().SessionID
+			terminal.ScopeID = t.handle.SessionRef().SessionID
+			out <- terminal
+			return
+		}
+		terminal := eventstream.TurnCompleted(t.HandleID(), t.RunID(), t.TurnID(), time.Now())
+		terminal.SessionID = t.handle.SessionRef().SessionID
+		terminal.ScopeID = t.handle.SessionRef().SessionID
+		out <- terminal
 	}()
 	return out
 }

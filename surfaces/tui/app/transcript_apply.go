@@ -432,8 +432,9 @@ func (m *Model) applyAnchoredSubagentNarrativeToTool(event TranscriptEvent) (tea
 			continue
 		}
 		block.UpdateToolWithMeta(callID, toolName, "", text, event.Final, false, ToolUpdateMeta{
-			ToolKind: "execute",
-			TaskID:   strings.TrimSpace(event.ScopeID),
+			ToolKind:  "execute",
+			TaskID:    strings.TrimSpace(event.ScopeID),
+			MessageID: strings.TrimSpace(event.MessageID),
 		})
 		m.markViewportBlockDirty(block.BlockID())
 		return m, m.requestStreamViewportSync()

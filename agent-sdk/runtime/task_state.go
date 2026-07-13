@@ -83,6 +83,9 @@ type subagentTask struct {
 	revision   uint64
 	lease      taskapi.Lease
 
+	// streamMu preserves publication order across the pending-to-live handoff.
+	// It must be acquired before publishing the task in taskRuntime.subagents.
+	streamMu sync.Mutex
 	mu       sync.Mutex
 	state    taskapi.State
 	running  bool

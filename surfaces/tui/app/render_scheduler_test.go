@@ -58,6 +58,28 @@ func TestRenderSchedulerCoalescesACPAssistantEnvelopesToOneMutation(t *testing.T
 	}
 }
 
+func TestEventStreamNarrativeBatchKeyPreservesMessageIDBoundary(t *testing.T) {
+	t.Parallel()
+
+	first := schedulerACPAssistantEnvelope("first")
+	firstUpdate := first.Update.(schema.ContentChunk)
+	firstUpdate.MessageID = "message-1"
+	first.Update = firstUpdate
+	second := schedulerACPAssistantEnvelope("second")
+	secondUpdate := second.Update.(schema.ContentChunk)
+	secondUpdate.MessageID = "message-2"
+	second.Update = secondUpdate
+
+	firstKey, firstOK := eventStreamNarrativeBatchKey(first)
+	secondKey, secondOK := eventStreamNarrativeBatchKey(second)
+	if !firstOK || !secondOK {
+		t.Fatalf("narrative batch keys unavailable: first=%t second=%t", firstOK, secondOK)
+	}
+	if firstKey == secondKey {
+		t.Fatalf("different ACP message IDs shared one narrative batch key: %q", firstKey)
+	}
+}
+
 func schedulerACPAssistantEnvelope(text string) eventstream.Envelope {
 	return eventstream.Envelope{
 		Kind:      eventstream.KindSessionUpdate,

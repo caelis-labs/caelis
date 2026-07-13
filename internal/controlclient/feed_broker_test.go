@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -289,6 +290,33 @@ func TestFeedBrokerAttachStartsImmediatelyAndChildTerminalDoesNotCloseSession(t 
 	}
 }
 
+func TestFeedBrokerAttachRetriesRecoverableDurablePublishFailure(t *testing.T) {
+	reader := &recoverablePageReader{events: []*session.Event{durableProtocolEvent(1, "retry durable child")}}
+	broker, _ := newTestFeedBroker(t, reader, FeedBrokerConfig{SubscriberQueue: 8})
+	subscription, err := broker.SubscribeFromNow()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer subscription.Close()
+
+	ingress := make(chan eventstream.Envelope, 1)
+	broker.Attach(ingress)
+	ingress <- projectedEnvelope(1, "retry durable child")
+	close(ingress)
+
+	select {
+	case got := <-subscription.Events():
+		if got.EventID != "event-1" || got.Position == nil || got.Position.Durable == nil || got.Position.Durable.Seq != 1 {
+			t.Fatalf("retried attached envelope = %#v", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("recoverable Attach publish failure permanently dropped the durable envelope")
+	}
+	if calls := reader.calls.Load(); calls < 2 {
+		t.Fatalf("paged reader calls = %d, want failed attempt plus retry", calls)
+	}
+}
+
 func TestFeedBrokerRestartPrimesDurableBoundaryAndBootstrap(t *testing.T) {
 	reader := staticPageReader{events: []*session.Event{
 		durableProtocolEvent(1, "before restart"),
@@ -427,6 +455,18 @@ type blockingPageReader struct {
 	started chan struct{}
 	release chan struct{}
 	events  []*session.Event
+}
+
+type recoverablePageReader struct {
+	calls  atomic.Int32
+	events []*session.Event
+}
+
+func (r *recoverablePageReader) EventsPage(_ context.Context, req session.EventPageRequest) (session.EventPage, error) {
+	if r.calls.Add(1) == 1 {
+		return session.EventPage{}, errors.New("recoverable durable reader failure")
+	}
+	return session.PageEvents(r.events, req), nil
 }
 
 func (r *blockingPageReader) EventsPage(ctx context.Context, req session.EventPageRequest) (session.EventPage, error) {

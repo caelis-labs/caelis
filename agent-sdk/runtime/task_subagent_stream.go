@@ -14,7 +14,10 @@ func (tm *taskRuntime) PublishStream(frame stream.Frame) {
 	}
 	taskID := strings.TrimSpace(frame.Ref.TaskID)
 	sessionID := strings.TrimSpace(frame.Ref.SessionID)
-	tm.mu.RLock()
+	// Resolve-or-enqueue is one atomic decision with task installation. If a
+	// publish raced the install between separate read/write locks, it could be
+	// queued after the install had already drained pending frames.
+	tm.mu.Lock()
 	var task *subagentTask
 	if taskID != "" {
 		task = tm.subagents[taskID]
@@ -38,13 +41,11 @@ func (tm *taskRuntime) PublishStream(frame stream.Frame) {
 			task = matched
 		}
 	}
-	tm.mu.RUnlock()
+	if task == nil && taskID != "" {
+		tm.pending[taskID] = append(tm.pending[taskID], stream.CloneFrame(frame))
+	}
+	tm.mu.Unlock()
 	if task == nil {
-		if taskID != "" {
-			tm.mu.Lock()
-			tm.pending[taskID] = append(tm.pending[taskID], stream.CloneFrame(frame))
-			tm.mu.Unlock()
-		}
 		return
 	}
 	task.applyStreamFrames([]stream.Frame{frame})
@@ -86,6 +87,12 @@ func (t *subagentTask) applyStreamFrames(frames []stream.Frame) {
 	if t == nil || len(frames) == 0 {
 		return
 	}
+	t.streamMu.Lock()
+	defer t.streamMu.Unlock()
+	t.applyStreamFramesLocked(frames)
+}
+
+func (t *subagentTask) applyStreamFramesLocked(frames []stream.Frame) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	for _, frame := range frames {

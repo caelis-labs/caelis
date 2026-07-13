@@ -142,13 +142,18 @@ func (tm *taskRuntime) StartSubagent(
 		task = tm.rehydrateSubagentTask(outcome.Entry)
 		task.runner = runner
 	}
+	// Hold the task's stream-order lock while making it discoverable and
+	// applying earlier pending frames. A concurrent publisher that resolves the
+	// newly installed task must not apply a later frame first.
+	task.streamMu.Lock()
 	tm.mu.Lock()
 	tm.subagents[taskID] = task
 	pending := append([]stream.Frame(nil), tm.pending[taskID]...)
 	delete(tm.pending, taskID)
 	tm.order[strings.TrimSpace(ref.SessionID)] = append(tm.order[strings.TrimSpace(ref.SessionID)], taskID)
 	tm.mu.Unlock()
-	task.applyStreamFrames(pending)
+	task.applyStreamFramesLocked(pending)
+	task.streamMu.Unlock()
 	return tm.advanceSubagentSpawn(ctx, activeSession, task, strings.TrimSpace(req.ParentCall), strings.TrimSpace(req.Prompt))
 }
 

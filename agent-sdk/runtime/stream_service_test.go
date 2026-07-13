@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -636,6 +637,114 @@ func TestPublishStreamDoesNotRouteAmbiguousSharedChildSessionWithoutTaskID(t *te
 	taskB.mu.Unlock()
 	if taskAOut != "" || taskBOut != "" {
 		t.Fatalf("ambiguous shared-session frame routed to task output: task-a=%q task-b=%q", taskAOut, taskBOut)
+	}
+}
+
+func TestPublishStreamKeepsSiblingChildEventsIsolatedWhenInterleaved(t *testing.T) {
+	t.Parallel()
+
+	tm := newTaskRuntime(nil, nil)
+	for _, taskID := range []string{"task-a", "task-b"} {
+		tm.subagents[taskID] = &subagentTask{
+			ref:        taskapi.Ref{TaskID: taskID},
+			sessionRef: session.SessionRef{SessionID: "parent-session"},
+			anchor:     delegation.Anchor{SessionID: "shared-child-session"},
+			createdAt:  time.Now(),
+			state:      taskapi.StateRunning,
+			running:    true,
+		}
+	}
+
+	publish := func(taskID, eventID, messageID, text string) {
+		t.Helper()
+		tm.PublishStream(stream.Frame{
+			Ref:     stream.Ref{TaskID: taskID, SessionID: "shared-child-session"},
+			Running: true,
+			Event: &session.Event{
+				ID:   eventID,
+				Type: session.EventTypeAssistant,
+				Protocol: &session.EventProtocol{Method: session.ProtocolMethodSessionUpdate, Update: &session.ProtocolUpdate{
+					SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage),
+					MessageID:     messageID,
+					Content:       session.ProtocolTextContent(text),
+				}},
+			},
+		})
+	}
+	publish("task-a", "a-1", "a-message", "A1")
+	publish("task-b", "b-1", "b-message", "B1")
+	publish("task-a", "a-2", "a-message", "A2")
+	publish("task-b", "b-2", "b-message", "B2")
+
+	service := newStreamService(tm)
+	for taskID, wantIDs := range map[string][]string{
+		"task-a": {"a-1", "a-2"},
+		"task-b": {"b-1", "b-2"},
+	} {
+		snapshot, err := service.Read(context.Background(), stream.ReadRequest{
+			Ref: stream.Ref{SessionID: "parent-session", TaskID: taskID},
+		})
+		if err != nil {
+			t.Fatalf("Read(%s) error = %v", taskID, err)
+		}
+		gotIDs := make([]string, 0, len(snapshot.Frames))
+		for _, frame := range snapshot.Frames {
+			if frame.Event != nil {
+				gotIDs = append(gotIDs, frame.Event.ID)
+			}
+		}
+		if !reflect.DeepEqual(gotIDs, wantIDs) {
+			t.Fatalf("Read(%s) event ids = %v, want %v", taskID, gotIDs, wantIDs)
+		}
+	}
+}
+
+func TestSubagentStreamPendingHandoffPreservesPublicationOrder(t *testing.T) {
+	t.Parallel()
+
+	task := &subagentTask{
+		ref:        taskapi.Ref{TaskID: "task-1"},
+		sessionRef: session.SessionRef{SessionID: "parent-session"},
+		createdAt:  time.Now(),
+		state:      taskapi.StateRunning,
+		running:    true,
+	}
+	frame := func(id, text string) stream.Frame {
+		return stream.Frame{
+			Ref:     stream.Ref{TaskID: task.ref.TaskID, SessionID: "child-session"},
+			Text:    text,
+			Running: true,
+			Event:   &session.Event{ID: id, Type: session.EventTypeAssistant},
+		}
+	}
+
+	// This is the task-install handoff: the task becomes discoverable while the
+	// installer still owns streamMu and has an older pending frame to apply.
+	task.streamMu.Lock()
+	publishStarted := make(chan struct{})
+	publishDone := make(chan struct{})
+	go func() {
+		close(publishStarted)
+		task.applyStreamFrames([]stream.Frame{frame("live", "B")})
+		close(publishDone)
+	}()
+	<-publishStarted
+	task.applyStreamFramesLocked([]stream.Frame{frame("pending", "A")})
+	task.streamMu.Unlock()
+	<-publishDone
+
+	task.mu.Lock()
+	gotIDs := make([]string, 0, len(task.streamFrames))
+	for _, streamed := range task.streamFrames {
+		gotIDs = append(gotIDs, streamed.Event.ID)
+	}
+	gotOutput := task.stdout
+	task.mu.Unlock()
+	if !reflect.DeepEqual(gotIDs, []string{"pending", "live"}) {
+		t.Fatalf("stream event ids = %v, want pending frame before live frame", gotIDs)
+	}
+	if gotOutput != "AB" {
+		t.Fatalf("stream output = %q, want publication order %q", gotOutput, "AB")
 	}
 }
 
