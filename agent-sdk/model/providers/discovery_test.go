@@ -130,8 +130,15 @@ func TestCodeFreeModelLimitsMatchCodeFreeODirectory(t *testing.T) {
 func TestDiscoverCodeFreeModelsParsesLimits(t *testing.T) {
 	credsPath := writeCodeFreeCredsForTest(t, "272182", "api-key")
 	t.Setenv(codeFreeCredsPathEnv, credsPath)
+	t.Setenv(codeFreeClientVersionEnv, "")
 
 	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Path; got != codeFreeVersionCheckPathPrefix+"1.4.0" {
+			t.Fatalf("path = %q, want %q", got, codeFreeVersionCheckPathPrefix+"1.4.0")
+		}
+		if got := r.Header.Get("clientVersion"); got != "1.4.0" {
+			t.Fatalf("clientVersion = %q, want 1.4.0", got)
+		}
 		if got := r.Header.Get("sessionId"); got != "login-session-272182" {
 			t.Fatalf("sessionId = %q, want stored login session", got)
 		}
@@ -177,6 +184,37 @@ func TestDiscoverCodeFreeModelsParsesLimits(t *testing.T) {
 		if hasImage := containsRemoteCapability(item.Capabilities, "image"); hasImage != tt.image {
 			t.Fatalf("discoverCodeFreeModels(%q) image capability = %v in %#v, want %v", tt.model, hasImage, item.Capabilities, tt.image)
 		}
+	}
+}
+
+func TestDiscoverCodeFreeModelsClientVersionOverrideFollowsHeaderAndEndpoint(t *testing.T) {
+	credsPath := writeCodeFreeCredsForTest(t, "272182", "api-key")
+	t.Setenv(codeFreeCredsPathEnv, credsPath)
+	t.Setenv(codeFreeClientVersionEnv, " 9.8.7 ")
+
+	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Path; got != codeFreeVersionCheckPathPrefix+"9.8.7" {
+			t.Fatalf("path = %q, want %q", got, codeFreeVersionCheckPathPrefix+"9.8.7")
+		}
+		if got := r.Header.Get("clientVersion"); got != "9.8.7" {
+			t.Fatalf("clientVersion = %q, want 9.8.7", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"optResult":0,"data":[]}`)
+	}))
+	defer server.Close()
+
+	models, err := discoverCodeFreeModels(context.Background(), server.Client(), Config{
+		Provider:   "codefree",
+		API:        APICodeFree,
+		BaseURL:    server.URL + codeFreeVersionCheckPathPrefix + "0.0.1",
+		HTTPClient: server.Client(),
+	})
+	if err != nil {
+		t.Fatalf("discoverCodeFreeModels failed: %v", err)
+	}
+	if len(models) != 0 {
+		t.Fatalf("discoverCodeFreeModels() = %+v, want no models", models)
 	}
 }
 

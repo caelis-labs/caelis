@@ -108,6 +108,7 @@ func withCodeFreeControlHTTPClientForTest(t *testing.T, client *http.Client) {
 func TestCodeFreeNonStream_UsesLocalOAuthCredsAndEndpoint(t *testing.T) {
 	credsPath := writeCodeFreeCredsForTest(t, "272182", "76475baf-3659-488a-932d-0971ae103591")
 	t.Setenv(codeFreeCredsPathEnv, credsPath)
+	t.Setenv(codeFreeClientVersionEnv, "")
 
 	var seenHeaders http.Header
 	var seenPayload map[string]any
@@ -179,8 +180,8 @@ func TestCodeFreeNonStream_UsesLocalOAuthCredsAndEndpoint(t *testing.T) {
 	if got := seenHeaders.Get("subService"); got != codeFreeDefaultSubservice {
 		t.Fatalf("subservice = %q, want %q", got, codeFreeDefaultSubservice)
 	}
-	if got := seenHeaders.Get("clientVersion"); got != "1.3.1" {
-		t.Fatalf("clientversion = %q, want 1.3.1", got)
+	if got := seenHeaders.Get("clientVersion"); got != "1.4.0" {
+		t.Fatalf("clientversion = %q, want 1.4.0", got)
 	}
 	if got := seenHeaders.Get("sessionId"); got != "caelis-session-1" {
 		t.Fatalf("sessionid = %q, want caelis-session-1", got)
@@ -196,6 +197,46 @@ func TestCodeFreeNonStream_UsesLocalOAuthCredsAndEndpoint(t *testing.T) {
 	}
 	if _, ok := seenPayload["stream_options"]; ok {
 		t.Fatalf("non-stream payload unexpectedly included stream_options: %#v", seenPayload["stream_options"])
+	}
+}
+
+func TestCodeFreeVersionEndpointUsesEffectiveVersionWithoutDuplicatePath(t *testing.T) {
+	t.Setenv(codeFreeClientVersionEnv, "")
+
+	wantPath := codeFreeVersionCheckPathPrefix + "1.4.0"
+	tests := []struct {
+		name    string
+		baseURL string
+		want    string
+	}{
+		{
+			name:    "custom base URL",
+			baseURL: "https://codefree.example/proxy",
+			want:    "https://codefree.example/proxy" + wantPath,
+		},
+		{
+			name:    "version path root",
+			baseURL: "https://codefree.example" + strings.TrimSuffix(codeFreeVersionCheckPathPrefix, "/"),
+			want:    "https://codefree.example" + wantPath,
+		},
+		{
+			name:    "current version endpoint",
+			baseURL: "https://codefree.example" + wantPath,
+			want:    "https://codefree.example" + wantPath,
+		},
+		{
+			name:    "different version endpoint",
+			baseURL: "https://codefree.example" + codeFreeVersionCheckPathPrefix + "0.0.1",
+			want:    "https://codefree.example" + wantPath,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := codeFreeVersionEndpoint(tt.baseURL); got != tt.want {
+				t.Fatalf("codeFreeVersionEndpoint(%q) = %q, want %q", tt.baseURL, got, tt.want)
+			}
+		})
 	}
 }
 

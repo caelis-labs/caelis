@@ -37,30 +37,30 @@ func newCodeFreeControlHTTPClient() *http.Client {
 }
 
 const (
-	codeFreeDefaultBaseURL        = "https://www.srdcloud.cn"
-	codeFreeChatCompletionsPath   = "/api/acbackend/codechat/v1/completions"
-	codeFreeVersionCheckPath      = "/api/acbackend/modelmgr/v1/clients/codefree-o/versions/1.3.1"
-	codeFreeUserAPIKeyPath        = "/api/acbackend/usermanager/v1/users/apikey"
-	codeFreeOAuthAuthorizePath    = "/login/oauth/authorize"
-	codeFreeOAuthTokenPath        = "/login/oauth/access_token"
-	codeFreeOAuthRedirectPath     = "/login/oauth-srdcloud-redirect"
-	codeFreeDefaultOAuthClientID  = "251384680635inwsxjcm"
-	codeFreeDefaultClientVersion  = "1.3.1"
-	codeFreeCredsPathEnv          = "CODEFREE_OAUTH_CREDS_PATH"
-	codeFreeClientVersionEnv      = "CODEFREE_CLIENT_VERSION"
-	codeFreeClientIDEnv           = "CODEFREE_OAUTH_CLIENT_ID"
-	codeFreeClientSecretEnv       = "CODEFREE_OAUTH_CLIENT_SECRET"
-	codeFreeClientAuthMethodEnv   = "CODEFREE_OAUTH_CLIENT_AUTH_METHOD"
-	codeFreeDevOAuthClientID      = "2510a379050azejezeas"
-	codeFreeTestOAuthClientID     = "2512525649b2unrogn26"
-	codeFreeDefaultClientType     = "codefree-o"
-	codeFreeDefaultSubservice     = "codefree_o_chat"
-	codeFreeStreamAcceptValue     = "application/json, text/event-stream"
-	codeFreeAPIKeyDecryptKey      = "Xtpa6sS&+D.NAo%CP8LA:7pk"
-	codeFreeAPIKeyDecryptIV       = "%1KJIrl3!XUxr04V"
-	codeFreeDefaultCredentialFile = "codefree.json"
-	codeFreeCredentialDir         = "providers/codefree"
-	codeFreeResponseSummaryLimit  = 2048
+	codeFreeDefaultBaseURL         = "https://www.srdcloud.cn"
+	codeFreeChatCompletionsPath    = "/api/acbackend/codechat/v1/completions"
+	codeFreeVersionCheckPathPrefix = "/api/acbackend/modelmgr/v1/clients/codefree-o/versions/"
+	codeFreeUserAPIKeyPath         = "/api/acbackend/usermanager/v1/users/apikey"
+	codeFreeOAuthAuthorizePath     = "/login/oauth/authorize"
+	codeFreeOAuthTokenPath         = "/login/oauth/access_token"
+	codeFreeOAuthRedirectPath      = "/login/oauth-srdcloud-redirect"
+	codeFreeDefaultOAuthClientID   = "251384680635inwsxjcm"
+	codeFreeDefaultClientVersion   = "1.4.0"
+	codeFreeCredsPathEnv           = "CODEFREE_OAUTH_CREDS_PATH"
+	codeFreeClientVersionEnv       = "CODEFREE_CLIENT_VERSION"
+	codeFreeClientIDEnv            = "CODEFREE_OAUTH_CLIENT_ID"
+	codeFreeClientSecretEnv        = "CODEFREE_OAUTH_CLIENT_SECRET"
+	codeFreeClientAuthMethodEnv    = "CODEFREE_OAUTH_CLIENT_AUTH_METHOD"
+	codeFreeDevOAuthClientID       = "2510a379050azejezeas"
+	codeFreeTestOAuthClientID      = "2512525649b2unrogn26"
+	codeFreeDefaultClientType      = "codefree-o"
+	codeFreeDefaultSubservice      = "codefree_o_chat"
+	codeFreeStreamAcceptValue      = "application/json, text/event-stream"
+	codeFreeAPIKeyDecryptKey       = "Xtpa6sS&+D.NAo%CP8LA:7pk"
+	codeFreeAPIKeyDecryptIV        = "%1KJIrl3!XUxr04V"
+	codeFreeDefaultCredentialFile  = "codefree.json"
+	codeFreeCredentialDir          = "providers/codefree"
+	codeFreeResponseSummaryLimit   = 2048
 )
 
 type codeFreeLLM struct {
@@ -641,6 +641,8 @@ func codeFreeSessionAffinityFromContext(ctx context.Context) string {
 	return metadata.SessionAffinity
 }
 
+// codeFreeClientVersion is the effective protocol version for both the
+// clientVersion header and the model-discovery version endpoint.
 func codeFreeClientVersion() string {
 	if value := strings.TrimSpace(os.Getenv(codeFreeClientVersionEnv)); value != "" {
 		return value
@@ -669,8 +671,21 @@ func codeFreeVersionEndpoint(baseURL string) string {
 	if base == "" {
 		base = codeFreeDefaultBaseURL
 	}
-	if strings.HasSuffix(strings.ToLower(base), strings.ToLower(codeFreeVersionCheckPath)) {
-		return base
+	clientVersion := codeFreeClientVersion()
+	versionPath := codeFreeVersionCheckPathPrefix + clientVersion
+	lowerBase := strings.ToLower(base)
+	lowerPrefix := strings.ToLower(codeFreeVersionCheckPathPrefix)
+	if index := strings.LastIndex(lowerBase, lowerPrefix); index >= 0 {
+		existingVersion := base[index+len(codeFreeVersionCheckPathPrefix):]
+		if existingVersion != "" && !strings.ContainsAny(existingVersion, "/?#") {
+			// A complete version endpoint still follows the effective client
+			// version; replace its final segment instead of appending another path.
+			return base[:index] + versionPath
+		}
 	}
-	return base + codeFreeVersionCheckPath
+	versionRoot := strings.TrimSuffix(codeFreeVersionCheckPathPrefix, "/")
+	if strings.HasSuffix(lowerBase, strings.ToLower(versionRoot)) {
+		return base + "/" + clientVersion
+	}
+	return base + versionPath
 }
