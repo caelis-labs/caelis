@@ -558,5 +558,6 @@ func transcriptToolUpdateMeta(event TranscriptEvent) ToolUpdateMeta {
 		Terminal:        event.ToolTerminal,
 		OutputSynthetic: event.ToolOutputSynthetic,
 		OutputTerminal:  event.ToolOutputTerminal,
+		OutputGapBefore: event.ToolOutputGapBefore,
 	}
 }

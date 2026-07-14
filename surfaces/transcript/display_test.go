@@ -234,6 +234,27 @@ func TestDelegatedTaskResultTextUsesCanonicalTaskResultWithoutTerminalOutput(t *
 	}
 }
 
+func TestDelegatedTaskResultTextPrefersDurableRawOutput(t *testing.T) {
+	t.Parallel()
+
+	raw := "## 完成\n\n- 第一项\n- 第二项\n\n| 列 | 值 |\n| --- | --- |\n| 文件 | 好 |\n\n```go\nfmt.Println(\"好\")\n```"
+	got := DelegatedTaskResultText(ToolOutputFallbackInput{
+		ToolName: "TASK",
+		Status:   ToolStatusCompleted,
+		RawOutput: map[string]any{
+			"state":         "completed",
+			"target_kind":   "subagent",
+			"final_message": raw,
+		},
+		Meta: map[string]any{
+			"caelis": map[string]any{"runtime": map[string]any{"task": map[string]any{"result": "legacy metadata"}}},
+		},
+	})
+	if got != raw {
+		t.Fatalf("DelegatedTaskResultText() = %q, want exact durable Final Message %q", got, raw)
+	}
+}
+
 func TestTerminalFallbacksForNoOutputAndExitCode(t *testing.T) {
 	t.Parallel()
 

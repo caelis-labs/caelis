@@ -5,6 +5,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -83,6 +84,7 @@ func EnvelopeBaseFromSessionEvent(ref session.SessionRef, event *session.Event, 
 	base.Delivery = sessionEventDelivery(event)
 	base.Meta = cloneAnyMap(event.Meta)
 	base.Actor = firstNonEmpty(strings.TrimSpace(event.Actor.Name), strings.TrimSpace(event.Actor.ID))
+	base.ParentTool = canonicalTaskParentToolRelation(event)
 	if event.ChildOrigin != nil {
 		origin := session.CloneEventChildOrigin(*event.ChildOrigin)
 		base.ScopeID = firstNonEmpty(origin.ScopeID, origin.TaskID, origin.DelegationID, base.ScopeID)
@@ -117,6 +119,45 @@ func EnvelopeBaseFromSessionEvent(ref session.SessionRef, event *session.Event, 
 		base.ScopeID = firstNonEmpty(strings.TrimSpace(event.Scope.TurnID), base.ScopeID)
 	}
 	return base
+}
+
+// canonicalTaskParentToolRelation recovers the physical panel relation from
+// the model-visible TASK wait result. The relationship is deliberately read
+// only from canonical tool input/output fields: _meta is not an ordering or
+// correlation contract.
+func canonicalTaskParentToolRelation(event *session.Event) *eventstream.ParentToolRelation {
+	if event == nil || event.Tool == nil || event.ChildOrigin != nil ||
+		(event.Scope != nil && strings.TrimSpace(event.Scope.Participant.ID) != "") {
+		return nil
+	}
+	if session.EventTypeOf(event) != session.EventTypeToolResult || !canonicalTaskResultFinal(event.Tool.Status) {
+		return nil
+	}
+	canonical, _ := names.Resolve(event.Tool.Name)
+	if canonical != names.Task || !strings.EqualFold(stringValue(event.Tool.Input["action"]), "wait") {
+		return nil
+	}
+	if !strings.EqualFold(stringValue(event.Tool.Output["target_kind"]), "subagent") {
+		return nil
+	}
+	parentCall := stringValue(event.Tool.Output["parent_call"])
+	parentName, _ := names.Resolve(stringValue(event.Tool.Output["parent_tool"]))
+	if parentCall == "" || parentName != names.Spawn {
+		return nil
+	}
+	return &eventstream.ParentToolRelation{
+		ToolCallID: parentCall,
+		ToolName:   names.Spawn,
+	}
+}
+
+func canonicalTaskResultFinal(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "completed", "failed", "interrupted", "cancelled", "canceled", "terminated":
+		return true
+	default:
+		return false
+	}
 }
 
 func sessionEventDelivery(event *session.Event) *eventstream.Delivery {

@@ -271,10 +271,24 @@ func taskToolMeta(snapshot taskapi.Snapshot) map[string]any {
 }
 
 func taskToolPayload(snapshot taskapi.Snapshot) map[string]any {
+	var payload map[string]any
 	if snapshot.Kind == taskapi.KindSubagent {
-		return subagentTaskToolPayload(snapshot)
+		payload = subagentTaskToolPayload(snapshot)
+	} else {
+		payload = commandTaskToolPayload(snapshot)
 	}
-	return commandTaskToolPayload(snapshot)
+	if payload == nil {
+		payload = map[string]any{}
+	}
+	if targetKind := strings.TrimSpace(string(snapshot.Kind)); targetKind != "" {
+		payload["target_kind"] = targetKind
+	}
+	for _, key := range []string{"parent_call", "parent_tool"} {
+		if value := strings.TrimSpace(taskStringValue(snapshot.Metadata[key])); value != "" {
+			payload[key] = value
+		}
+	}
+	return payload
 }
 
 func commandTaskToolPayload(snapshot taskapi.Snapshot) map[string]any {

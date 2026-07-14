@@ -139,6 +139,14 @@ fields in an ACP update payload root. Every Surface, including a future GUI,
 renders the same replayable scoped ACP payloads with the components used for a
 main Agent.
 
+A completed main-scope Task wait remains a model-visible canonical result even
+when the physical task panel belongs to an earlier Spawn call. Its canonical
+tool output carries `target_kind`, `parent_call`, and `parent_tool`; durable
+projection promotes that ancestry to typed Envelope `parent_tool`. Surfaces use
+the typed relation to complete the original Spawn panel and consume the
+observer result instead of rendering a second physical panel. They never
+recover this relation from `_meta` or a Surface-private replay path.
+
 `internal/controlclient/turningress.Broker` owns the shared per-Turn fan-in. The
 Gateway Control client backend and the transitional ACP/TUI adapter both use
 that implementation; the adapter's former live-feed broker is now only an

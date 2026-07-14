@@ -458,11 +458,10 @@ func toolPanelEventHasHiddenOutputSummary(ev SubagentEvent) bool {
 	if ev.Kind != SEToolCall || !ev.Done || !shouldRenderToolEvent(ev) || isMutationPanelToolEvent(ev) {
 		return false
 	}
-	text := ev.Output
 	if strings.EqualFold(toolSemanticName(ev.Name, ev.ToolKind), "SPAWN") {
-		text = summarizeSubagentTerminalPanelText(text, true)
+		return false
 	}
-	return finalToolOutputSummaryHidesLines(text)
+	return finalToolOutputSummaryHidesLines(ev.Output)
 }
 
 func finalToolOutputSummaryHidesLines(text string) bool {

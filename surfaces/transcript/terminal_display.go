@@ -87,16 +87,46 @@ func TerminalToolOutputText(input ToolOutputFallbackInput) string {
 	return ""
 }
 
-// DelegatedTaskResultText returns the canonical final Spawn/Task result carried
-// in documented runtime task metadata. It is distinct from terminal output and
-// is only used once the delegated tool has reached a final state.
+// DelegatedTaskResultText returns the canonical final Spawn/Task result. The
+// durable tool output is authoritative; runtime task metadata is only a
+// compatibility fallback for older stored events.
 func DelegatedTaskResultText(input ToolOutputFallbackInput) string {
 	canonical, _ := names.Resolve(input.ToolName)
 	if (canonical != names.Spawn && canonical != names.Task) || !ToolStatusFinal(input.Status, input.Error) {
 		return ""
 	}
+	targetKind := strings.ToLower(firstRawNonEmpty(
+		rawDisplayString(input.RawOutput["target_kind"]),
+		display.ToolTaskTargetKind(nil, input.RawOutput, input.Meta),
+	))
+	state := rawDisplayString(input.RawOutput["state"])
+	if canonical == names.Spawn || !commandTaskTargetKind(targetKind) {
+		if text := display.SubagentTaskFinalText(state, input.RawOutput); text != "" {
+			return text
+		}
+	} else if TerminalRawOutputHasText(input.RawOutput) {
+		if text := display.CommandTaskFinalText(state, input.RawOutput); text != "" {
+			return text
+		}
+	}
 	taskMeta := RuntimeTaskMeta(input.Meta)
-	return display.SubagentTaskFinalText(rawDisplayString(taskMeta["state"]), taskMeta)
+	state = firstRawNonEmpty(rawDisplayString(taskMeta["state"]), state)
+	if canonical == names.Spawn || !commandTaskTargetKind(targetKind) {
+		return display.SubagentTaskFinalText(state, taskMeta)
+	}
+	if TerminalRawOutputHasText(taskMeta) {
+		return display.CommandTaskFinalText(state, taskMeta)
+	}
+	return ""
+}
+
+func commandTaskTargetKind(kind string) bool {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "command", "terminal":
+		return true
+	default:
+		return false
+	}
 }
 
 func TerminalTaskStillRunning(rawOutput map[string]any, meta map[string]any) bool {

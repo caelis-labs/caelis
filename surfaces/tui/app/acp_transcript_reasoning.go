@@ -135,7 +135,7 @@ func collectConsecutiveReasoning(events []SubagentEvent, idx int) (string, int) 
 		text = appendDeltaStreamChunk(text, events[i].Text)
 		end = i
 	}
-	return collapseRepeatedNarrativeText(text), end
+	return normalizeNarrativeLineEndings(text), end
 }
 
 func activeBufferForConsecutiveReasoning(events []SubagentEvent, idx int, end int, text string) *activeNarrativeBuffer {

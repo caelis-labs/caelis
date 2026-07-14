@@ -176,7 +176,7 @@ func TestResumeUsesDurableTaskWaitResultWhenCommandTransientOutputIsMissing(t *t
 	})
 	taskMeta = metautil.WithRuntimeSection(taskMeta, metautil.RuntimeTask, map[string]any{
 		metautil.RuntimeTaskID: "task-1", metautil.RuntimeTaskTerminalID: "terminal-1",
-		"running": false, "state": "completed", "result": recovered,
+		"running": false, "state": "completed",
 	})
 	taskMeta = metautil.WithTerminalInfo(taskMeta, "terminal-1")
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{

@@ -37,8 +37,9 @@ const (
 type ApprovalRequestID string
 
 // ParentToolRelation identifies the actual parent tool call that produced a
-// scoped delegated event. It is intentionally limited to tool-call ancestry;
-// it does not model arbitrary workflow or Goal relationships.
+// scoped delegated event or owns a main-scope observer result for the same
+// physical task panel. It is intentionally limited to tool-call ancestry; it
+// does not model arbitrary workflow or Goal relationships.
 type ParentToolRelation struct {
 	ToolCallID string `json:"tool_call_id,omitempty"`
 	ToolName   string `json:"tool_name,omitempty"`

@@ -732,8 +732,8 @@ func TestProjectStreamFrameSubagentFinalWithStreamKeepsResultWithoutTerminalRepl
 		t.Fatalf("parent final meta = %#v, must not replay child output", tool.Meta)
 	}
 	taskMeta := runtimeTaskMeta(tool.Meta)
-	if got := taskMeta["result"]; got != "Final child result" {
-		t.Fatalf("runtime task result = %#v, want cleaned final child result; meta=%#v", got, tool.Meta)
+	if got := taskMeta["result"]; got != "### Final child result" {
+		t.Fatalf("runtime task result = %#v, want Markdown-preserving final child result; meta=%#v", got, tool.Meta)
 	}
 	if got := taskMeta["running"]; got != false {
 		t.Fatalf("runtime task running = %#v, want false; meta=%#v", got, tool.Meta)

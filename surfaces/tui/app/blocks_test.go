@@ -42,17 +42,17 @@ func TestReasoningBlockRenderSuppressesDefaultAssistantLabel(t *testing.T) {
 	}
 }
 
-func TestMergeSubagentStreamChunkPreservesOverlappingDelta(t *testing.T) {
-	got := mergeSubagentStreamChunk("abcabc", "abcXYZ")
+func TestAppendSubagentStreamDeltaPreservesOverlappingDelta(t *testing.T) {
+	got := appendSubagentStreamDelta("abcabc", "abcXYZ")
 	if got != "abcabcabcXYZ" {
 		t.Fatalf("merged chunk = %q, want exact appended delta", got)
 	}
 }
 
-func TestMergeSubagentStreamChunkAcceptsCumulativeReplay(t *testing.T) {
-	got := mergeSubagentStreamChunk("你好", "你好，世界")
-	if got != "你好，世界" {
-		t.Fatalf("merged cumulative chunk = %q, want cumulative replacement", got)
+func TestAppendSubagentStreamDeltaPreservesPrefixLikeDelta(t *testing.T) {
+	got := appendSubagentStreamDelta("你好", "你好，世界")
+	if got != "你好你好，世界" {
+		t.Fatalf("merged prefix-like chunk = %q, want exact appended delta", got)
 	}
 }
 
