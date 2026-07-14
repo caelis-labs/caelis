@@ -402,6 +402,35 @@ func (s *Store) EventsPage(
 	return session.PageEvents(record.events, req), nil
 }
 
+// EventCheckpoint returns one Session/event high-water cut under the Store
+// read lock without cloning the complete event history.
+func (s *Store) EventCheckpoint(
+	_ context.Context,
+	ref session.SessionRef,
+) (session.EventCheckpoint, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	record, ok := s.lookupLocked(ref)
+	if !ok {
+		return session.EventCheckpoint{}, session.ErrSessionNotFound
+	}
+	out := session.EventCheckpoint{Session: record.cloneSession()}
+	for index := len(record.events) - 1; index >= 0; index-- {
+		event := record.events[index]
+		if event == nil || session.IsTransient(event) {
+			continue
+		}
+		if out.ThroughSeq == 0 {
+			out.ThroughSeq = event.Seq
+		}
+		if session.IsClientReplayEvent(event) {
+			out.LastClientReplayEvent = session.CloneEvent(event)
+			break
+		}
+	}
+	return out, nil
+}
+
 func (s *Store) BindController(
 	_ context.Context,
 	ref session.SessionRef,
@@ -759,6 +788,14 @@ func (s *Service) EventsPage(
 	req session.EventPageRequest,
 ) (session.EventPage, error) {
 	return s.store.EventsPage(ctx, req)
+}
+
+// EventCheckpoint returns one atomic Session/event high-water cut.
+func (s *Service) EventCheckpoint(
+	ctx context.Context,
+	ref session.SessionRef,
+) (session.EventCheckpoint, error) {
+	return s.store.EventCheckpoint(ctx, ref)
 }
 
 func (s *Service) ListSessions(

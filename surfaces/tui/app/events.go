@@ -6,6 +6,7 @@ package tuiapp
 import (
 	"time"
 
+	controlclient "github.com/caelis-labs/caelis/ports/controlclient"
 	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/surfaces/transcript"
 )
@@ -146,6 +147,12 @@ type AttachmentCountMsg struct {
 }
 
 type ClearHistoryMsg struct{}
+
+// SessionReconnectMsg atomically replaces transcript/interaction state and
+// installs the Control-owned running snapshot for a resumed Session.
+type SessionReconnectMsg struct {
+	State controlclient.SessionState
+}
 
 type UserMessageMsg struct {
 	Text string

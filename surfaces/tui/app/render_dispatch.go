@@ -259,6 +259,9 @@ func (m *Model) dispatchRenderEvent(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	case ClearHistoryMsg:
 		m.resetConversationView()
 		return m, policyCmd, true
+	case SessionReconnectMsg:
+		cmd := m.applySessionReconnectState(typed.State)
+		return m, tea.Batch(policyCmd, cmd), true
 	case UserMessageMsg:
 		return m.handleUserMessageMsg(typed), policyCmd, true
 	case TaskResultMsg:

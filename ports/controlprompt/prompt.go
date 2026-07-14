@@ -76,6 +76,7 @@ type PrivateSlashHandler func(context.Context, PrivateSlashRequest) (Result, boo
 type Result struct {
 	Handled             bool
 	Turn                control.Turn
+	Reconnect           control.SessionReconnect
 	Events              []eventstream.Envelope
 	SlashResult         *control.SlashCommandResult
 	ClearHistory        bool

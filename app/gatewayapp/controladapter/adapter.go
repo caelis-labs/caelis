@@ -18,6 +18,7 @@ import (
 
 type Adapter struct {
 	mu                  sync.Mutex
+	sessionChangeMu     sync.Mutex
 	stack               *RuntimeStack
 	session             session.Session
 	hasSession          bool
@@ -414,35 +415,6 @@ func (d *Adapter) NewSession(ctx context.Context) (SessionSnapshot, error) {
 	d.mu.Unlock()
 	d.refreshSessionDisplay(ctx, activeSession)
 	return sessionSnapshotFromSession(activeSession), nil
-}
-
-func (d *Adapter) ResumeSession(ctx context.Context, sessionID string) (SessionSnapshot, error) {
-	gw, err := d.gatewaySessions()
-	if err != nil {
-		return SessionSnapshot{}, err
-	}
-	result, err := gw.ResumeSession(ctx, gateway.ResumeSessionRequest{
-		AppName:   d.stack.Session.AppName,
-		UserID:    d.stack.Session.UserID,
-		SessionID: strings.TrimSpace(sessionID),
-		// Replay is consumed from the Control-owned Session Feed below the
-		// prompt-router boundary. Resume itself only needs the target Session.
-		MetadataOnly: true,
-		BindingKey:   d.bindingKey,
-		Binding: gateway.BindingDescriptor{
-			Surface: d.bindingKey,
-			Owner:   d.stack.Session.AppName,
-		},
-	})
-	if err != nil {
-		return SessionSnapshot{}, err
-	}
-	d.mu.Lock()
-	d.session = result.Session
-	d.hasSession = true
-	d.mu.Unlock()
-	d.refreshSessionDisplay(ctx, result.Session)
-	return sessionSnapshotFromSession(result.Session), nil
 }
 
 func sessionSnapshotFromSession(activeSession session.Session) SessionSnapshot {

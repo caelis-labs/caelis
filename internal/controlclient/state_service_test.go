@@ -2,8 +2,9 @@ package controlclient
 
 import (
 	"context"
-	"errors"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	controlport "github.com/caelis-labs/caelis/ports/controlclient"
@@ -61,7 +62,7 @@ func TestStateServiceReturnsTypedConsistentBootstrapBySessionID(t *testing.T) {
 	}
 }
 
-func TestStateServiceReturnsRevisionConflictInsteadOfMixedSnapshot(t *testing.T) {
+func TestStateServiceDoesNotStarveWhileSessionRevisionChanges(t *testing.T) {
 	codec, err := eventstream.NewCursorCodec(eventstream.CursorCodecConfig{Secret: []byte("0123456789abcdef0123456789abcdef")})
 	if err != nil {
 		t.Fatal(err)
@@ -72,15 +73,141 @@ func TestStateServiceReturnsRevisionConflictInsteadOfMixedSnapshot(t *testing.T)
 	}
 	sessions := &changingStateSessionReader{}
 	service, err := NewStateService(StateServiceConfig{
-		Sessions: sessions, Runtime: staticRuntimeStateReader{}, Feeds: feeds, MaxRetries: 2,
+		Sessions: sessions, Runtime: staticRuntimeStateReader{}, Feeds: feeds,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = service.State(context.Background(), controlport.StateRequest{SessionID: "session-1"})
-	if !errors.Is(err, controlport.ErrStateRevisionConflict) {
-		t.Fatalf("State error = %v, want revision conflict", err)
+	state, err := service.State(context.Background(), controlport.StateRequest{SessionID: "session-1"})
+	if err != nil {
+		t.Fatalf("State error = %v, want bounded successful bootstrap", err)
 	}
+	if state.SessionID != "session-1" || state.Revision == 0 {
+		t.Fatalf("State = %#v, want one coherent observed revision", state)
+	}
+}
+
+func TestStateServiceReconnectSucceedsDuringContinuousPublish(t *testing.T) {
+	codec, err := eventstream.NewCursorCodec(eventstream.CursorCodecConfig{Secret: []byte("0123456789abcdef0123456789abcdef")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader := &checkpointPageReader{
+		active: session.Session{SessionRef: session.SessionRef{SessionID: "session-1"}, Revision: 1},
+		events: []*session.Event{durableProtocolEvent(1, "durable history")},
+	}
+	feeds, err := NewFeedRegistry(FeedRegistryConfig{
+		Reader: reader, CursorCodec: codec, RingEvents: 100_000, RingBytes: 64 << 20,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	feed, err := feeds.Session(session.SessionRef{SessionID: "session-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var published atomic.Int64
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				if feed.Publish(terminalEnvelope("continuous output")) == nil {
+					published.Add(1)
+				}
+			}
+		}
+	}()
+	deadline := time.Now().Add(time.Second)
+	for published.Load() < 100 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	defer func() {
+		close(stop)
+		<-done
+	}()
+
+	service, err := NewStateService(StateServiceConfig{
+		Sessions: readerSessionLookup{reader}, Runtime: staticRuntimeStateReader{}, Feeds: feeds,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	state, err := service.State(ctx, controlport.StateRequest{SessionID: "session-1"})
+	if err != nil {
+		t.Fatalf("State during continuous Publish = %v", err)
+	}
+	if state.SessionID != "session-1" || state.BoundaryCursor == "" {
+		t.Fatalf("State during continuous Publish = %#v", state)
+	}
+}
+
+func TestReconnectStateUsesExactFeedCutModeGapAndBoundary(t *testing.T) {
+	codec, err := eventstream.NewCursorCodec(eventstream.CursorCodecConfig{Secret: []byte("0123456789abcdef0123456789abcdef")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader := &checkpointPageReader{active: session.Session{
+		SessionRef: session.SessionRef{SessionID: "session-1"}, Revision: 2,
+	}, events: []*session.Event{durableProtocolEvent(1, "one")}}
+	feeds, err := NewFeedRegistry(FeedRegistryConfig{Reader: reader, CursorCodec: codec, RingEvents: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	feed, err := feeds.Session(session.SessionRef{SessionID: "session-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := feed.Publish(projectedEnvelope(1, "one")); err != nil {
+		t.Fatal(err)
+	}
+	_, firstCursor := feed.Boundary()
+	reader.events = append(reader.events, durableProtocolEvent(2, "two"))
+	if err := feed.Publish(projectedEnvelope(2, "two")); err != nil {
+		t.Fatal(err)
+	}
+	service, err := NewStateService(StateServiceConfig{Sessions: readerSessionLookup{reader}, Runtime: staticRuntimeStateReader{}, Feeds: feeds})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fallback, err := service.Reconnect(context.Background(), controlport.ReconnectRequest{SessionID: "session-1", Cursor: firstCursor})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fallback.Subscription.Close()
+	if fallback.State.ResumeMode != controlport.ResumeModeDurableFallback || !fallback.State.TransientGap {
+		t.Fatalf("fallback state = %#v", fallback.State)
+	}
+	decoded, err := codec.Decode("session-1", fallback.State.BoundaryCursor)
+	if err != nil || decoded.Durable == nil || fallback.State.BoundaryPosition == nil || fallback.State.BoundaryPosition.Durable == nil ||
+		eventstream.CompareDurablePosition(*decoded.Durable, *fallback.State.BoundaryPosition.Durable) != 0 {
+		t.Fatalf("fallback boundary cursor/position = %q / %#v, decode=%#v err=%v", fallback.State.BoundaryCursor, fallback.State.BoundaryPosition, decoded, err)
+	}
+	backfill := receiveEnvelopes(t, fallback.Subscription.Backfill(), 1)
+	if backfill[0].EventID != "event-2" {
+		t.Fatalf("fallback backfill = %#v", backfill)
+	}
+	_, currentCursor := feed.Boundary()
+	exact, err := service.Reconnect(context.Background(), controlport.ReconnectRequest{SessionID: "session-1", Cursor: currentCursor})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer exact.Subscription.Close()
+	if exact.State.ResumeMode != controlport.ResumeModeExact || exact.State.TransientGap {
+		t.Fatalf("exact state = %#v", exact.State)
+	}
+}
+
+type readerSessionLookup struct{ reader *checkpointPageReader }
+
+func (r readerSessionLookup) Session(context.Context, session.SessionRef) (session.Session, error) {
+	return session.CloneSession(r.reader.active), nil
 }
 
 type stateSessionReader struct {

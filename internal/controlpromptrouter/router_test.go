@@ -2,10 +2,12 @@ package controlpromptrouter
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
+	controlclient "github.com/caelis-labs/caelis/ports/controlclient"
 	prompt "github.com/caelis-labs/caelis/ports/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
@@ -53,7 +55,7 @@ func TestRouterStatusModelAndCompactCommands(t *testing.T) {
 	}
 }
 
-func TestRouterResumeDefersStatusUntilAfterReplay(t *testing.T) {
+func TestRouterResumeReturnsLiveReconnectWithoutSuccessNotice(t *testing.T) {
 	t.Parallel()
 
 	svc := &fakeService{
@@ -78,11 +80,45 @@ func TestRouterResumeDefersStatusUntilAfterReplay(t *testing.T) {
 	if result.StatusUpdate != nil || svc.statusCalls != 0 {
 		t.Fatalf("Route(/resume) status = %#v calls=%d, want no synchronous status read", result.StatusUpdate, svc.statusCalls)
 	}
-	if len(result.ReplayEvents) != 1 {
-		t.Fatalf("Route(/resume).ReplayEvents = %#v, want one event", result.ReplayEvents)
+	if len(result.ReplayEvents) != 0 || result.Reconnect == nil {
+		t.Fatalf("Route(/resume) replay/reconnect = %#v / %#v, want live reconnect only", result.ReplayEvents, result.Reconnect)
 	}
-	if got := firstNotice(result); got != "resumed session: resumed-session" {
-		t.Fatalf("Route(/resume) notice = %q, want visible success confirmation", got)
+	if got := firstNotice(result); got != "" {
+		t.Fatalf("Route(/resume) notice = %q, want no normal success notice", got)
+	}
+}
+
+func TestRouterResumePropagatesTypedGapWithoutPersistentNotice(t *testing.T) {
+	svc := &fakeService{resumeSnapshot: control.SessionSnapshot{
+		SessionID: "resumed-session",
+		Reconnect: &routerReconnect{state: controlclient.SessionState{
+			SessionID: "resumed-session", ResumeMode: controlclient.ResumeModeDurableFallback, TransientGap: true,
+		}},
+	}}
+	result, err := New(prompt.RouterConfig{Service: svc}).Route(context.Background(), prompt.Request{
+		Submission: control.Submission{Text: "/resume resumed-session"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Reconnect == nil || !result.Reconnect.State().TransientGap {
+		t.Fatalf("gap reconnect = %#v", result.Reconnect)
+	}
+	if notice := firstNotice(result); notice != "" {
+		t.Fatalf("persistent gap notice = %q, want Surface-local ephemeral warning", notice)
+	}
+}
+
+func TestRouterResumeBootstrapFailureHasNoDestructiveSideEffects(t *testing.T) {
+	svc := &fakeService{resumeErr: errors.New("bootstrap failed")}
+	result, err := New(prompt.RouterConfig{Service: svc}).Route(context.Background(), prompt.Request{
+		Submission: control.Submission{Text: "/resume resumed-session"},
+	})
+	if err == nil {
+		t.Fatal("Route(/resume) error = nil")
+	}
+	if result.ClearHistory || result.ActiveSessionID != "" || result.Reconnect != nil {
+		t.Fatalf("failed resume result = %#v, want no Session/transcript mutation", result)
 	}
 }
 
@@ -374,6 +410,8 @@ type fakeService struct {
 	continuedHandle    string
 	continuedPrompt    string
 	controllerKind     string
+	resumeSnapshot     control.SessionSnapshot
+	resumeErr          error
 	addedAgent         string
 	addedOptions       control.AgentAddOptions
 	profileStatus      control.AgentProfileStatusSnapshot
@@ -393,7 +431,18 @@ func (s *fakeService) NewSession(context.Context) (control.SessionSnapshot, erro
 	return control.SessionSnapshot{SessionID: "new-session"}, nil
 }
 func (s *fakeService) ResumeSession(context.Context, string) (control.SessionSnapshot, error) {
-	return control.SessionSnapshot{SessionID: "resumed-session"}, nil
+	if s.resumeErr != nil {
+		return control.SessionSnapshot{}, s.resumeErr
+	}
+	if s.resumeSnapshot.SessionID != "" {
+		return s.resumeSnapshot, nil
+	}
+	return control.SessionSnapshot{
+		SessionID: "resumed-session",
+		Reconnect: &routerReconnect{state: controlclient.SessionState{
+			SessionID: "resumed-session", ResumeMode: controlclient.ResumeModeExact,
+		}},
+	}, nil
 }
 func (s *fakeService) ListSessions(context.Context, int) ([]control.ResumeCandidate, error) {
 	return nil, nil
@@ -414,6 +463,35 @@ func (s *fakeService) Replay(context.Context, eventstream.ReplayRequest) (events
 func (s *fakeService) RunState(context.Context) (eventstream.RunState, error) {
 	return eventstream.RunState{}, nil
 }
+
+type routerReconnect struct{ state controlclient.SessionState }
+
+func (r *routerReconnect) State() controlclient.SessionState { return r.state }
+func (*routerReconnect) HandleID() string                    { return "" }
+func (*routerReconnect) RunID() string                       { return "" }
+func (*routerReconnect) TurnID() string                      { return "" }
+func (*routerReconnect) Backfill() <-chan eventstream.Envelope {
+	closed := make(chan eventstream.Envelope)
+	close(closed)
+	return closed
+}
+func (*routerReconnect) Events() <-chan eventstream.Envelope {
+	closed := make(chan eventstream.Envelope)
+	close(closed)
+	return closed
+}
+func (*routerReconnect) BackfillDone() <-chan struct{} {
+	closed := make(chan struct{})
+	close(closed)
+	return closed
+}
+func (*routerReconnect) BootstrapEvents() []eventstream.Envelope { return nil }
+func (*routerReconnect) SubmitApproval(context.Context, control.ApprovalDecision) error {
+	return nil
+}
+func (*routerReconnect) Cancel()      {}
+func (*routerReconnect) Close() error { return nil }
+func (*routerReconnect) Err() error   { return nil }
 func (s *fakeService) CycleSessionMode(context.Context) (control.StatusSnapshot, error) {
 	return s.status, nil
 }

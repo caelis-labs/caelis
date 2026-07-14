@@ -26,6 +26,7 @@ type Service interface {
 	CommandClient
 	ListSessions(context.Context, Principal, ListSessionsRequest) (session.SessionList, error)
 	InspectSession(context.Context, Principal, StateRequest) (SessionState, error)
+	Reconnect(context.Context, Principal, ReconnectRequest) (ReconnectResult, error)
 	Events(context.Context, Principal, SubscribeRequest) (EventBatch, error)
 	Subscribe(context.Context, Principal, SubscribeRequest) (SubscribeResult, error)
 }

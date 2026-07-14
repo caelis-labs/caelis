@@ -329,15 +329,19 @@ func (f *protocolSessionFeed) SubscribeFromNow(context.Context) (controlclientpo
 }
 
 type protocolFeedSubscription struct {
-	events chan eventstream.Envelope
-	done   chan struct{}
+	backfill chan eventstream.Envelope
+	events   chan eventstream.Envelope
+	done     chan struct{}
 }
 
 func newProtocolFeedSubscription(events []eventstream.Envelope) *protocolFeedSubscription {
-	subscription := &protocolFeedSubscription{events: make(chan eventstream.Envelope, len(events)), done: make(chan struct{})}
-	for _, envelope := range events {
-		subscription.events <- eventstream.CloneEnvelope(envelope)
+	subscription := &protocolFeedSubscription{
+		backfill: make(chan eventstream.Envelope, len(events)), events: make(chan eventstream.Envelope), done: make(chan struct{}),
 	}
+	for _, envelope := range events {
+		subscription.backfill <- eventstream.CloneEnvelope(envelope)
+	}
+	close(subscription.backfill)
 	close(subscription.events)
 	close(subscription.done)
 	return subscription
@@ -373,10 +377,13 @@ func protocolDurableEvent(seq uint64, text string) *session.Event {
 }
 
 func (s *protocolFeedSubscription) Events() <-chan eventstream.Envelope { return s.events }
-func (s *protocolFeedSubscription) BackfillDone() <-chan struct{}       { return s.done }
-func (*protocolFeedSubscription) Close() error                          { return nil }
-func (*protocolFeedSubscription) Err() error                            { return nil }
-func (*protocolFeedSubscription) LastCursor() string                    { return "" }
+func (s *protocolFeedSubscription) Backfill() <-chan eventstream.Envelope {
+	return s.backfill
+}
+func (s *protocolFeedSubscription) BackfillDone() <-chan struct{} { return s.done }
+func (*protocolFeedSubscription) Close() error                    { return nil }
+func (*protocolFeedSubscription) Err() error                      { return nil }
+func (*protocolFeedSubscription) LastCursor() string              { return "" }
 
 func (g *protocolGatewayService) Streams() stream.Service { return nil }
 func (g *protocolGatewayService) BeginTurn(context.Context, gateway.BeginTurnRequest) (gateway.BeginTurnResult, error) {

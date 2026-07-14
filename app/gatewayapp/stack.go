@@ -145,6 +145,15 @@ func (s *Stack) ControlClientState() controlclientport.StateReader {
 	return s.controlState
 }
 
+// ControlClientReconnect returns the atomic typed bootstrap/splice service.
+func (s *Stack) ControlClientReconnect() controlclientport.ReconnectReader {
+	if s == nil {
+		return nil
+	}
+	reconnect, _ := s.controlState.(controlclientport.ReconnectReader)
+	return reconnect
+}
+
 // ControlClientCommands returns the request-scoped authorized command service.
 func (s *Stack) ControlClientCommands() controlclientport.CommandClient {
 	if s == nil {

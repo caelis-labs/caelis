@@ -584,7 +584,7 @@ func collectLiveOutputChildEnvelopes(t *testing.T, subscription controlclientpor
 	t.Helper()
 	out := make([]eventstream.Envelope, 0, count)
 	for len(out) < count {
-		envelope := receiveLiveOutputEnvelope(t, subscription.Events(), func(env eventstream.Envelope) bool {
+		envelope := receiveLiveOutputEnvelope(t, subscription.Backfill(), func(env eventstream.Envelope) bool {
 			return env.Scope == eventstream.ScopeSubagent && env.ParentTool != nil && env.ParentTool.ToolCallID == "spawn-call-1"
 		}, "replayed child envelope")
 		out = append(out, envelope)

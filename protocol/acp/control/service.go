@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 
+	controlclient "github.com/caelis-labs/caelis/ports/controlclient"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
@@ -19,6 +20,18 @@ type Turn interface {
 	SubmitApproval(context.Context, ApprovalDecision) error
 	Cancel()
 	Close() error
+}
+
+// SessionReconnect is the transitional in-process view of one Control-owned
+// reconnect transaction. Backfill is transcript-only; Events is the already
+// spliced live continuation. Closing it never cancels the Runtime Turn.
+type SessionReconnect interface {
+	Turn
+	State() controlclient.SessionState
+	Backfill() <-chan eventstream.Envelope
+	BackfillDone() <-chan struct{}
+	BootstrapEvents() []eventstream.Envelope
+	Err() error
 }
 
 type StatusService interface {

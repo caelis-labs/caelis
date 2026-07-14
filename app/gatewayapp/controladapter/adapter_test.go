@@ -26,6 +26,7 @@ import (
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/testenv"
+	controlclientport "github.com/caelis-labs/caelis/ports/controlclient"
 	"github.com/caelis-labs/caelis/ports/controlprompt/connectwizard"
 	"github.com/caelis-labs/caelis/ports/gateway"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
@@ -377,6 +378,93 @@ func TestAdapterSubmitRoutesActiveSessionInputToActiveTurn(t *testing.T) {
 	}
 	if _, ok := gw.activeSubmits[0].Metadata["display_text"]; ok {
 		t.Fatalf("active submit metadata contains legacy display_text: %#v", gw.activeSubmits[0].Metadata)
+	}
+}
+
+func TestAdapterResumeCommitsAtomicReconnectAndSteersActiveTurn(t *testing.T) {
+	ctx := context.Background()
+	oldSession := session.Session{SessionRef: session.SessionRef{
+		AppName: "caelis", UserID: "user-1", SessionID: "old-session", WorkspaceKey: "ws",
+	}, CWD: t.TempDir()}
+	target := session.Session{SessionRef: session.SessionRef{
+		AppName: "caelis", UserID: "user-1", SessionID: "target-session", WorkspaceKey: "ws",
+	}, CWD: oldSession.CWD}
+	gw := &activeSubmitGatewayService{
+		resume: target,
+		active: []gateway.ActiveTurnState{{
+			SessionRef: target.SessionRef, Kind: gateway.ActiveTurnKindKernel,
+			HandleID: "handle-1", RunID: "run-1", TurnID: "turn-1",
+		}},
+	}
+	reconnect := &fixedReconnectReader{result: controlclientport.ReconnectResult{
+		State: controlclientport.SessionState{
+			SessionID: target.SessionID, ResumeMode: controlclientport.ResumeModeExact,
+			Run: controlclientport.RunState{Active: true, HandleID: "handle-1", RunID: "run-1", TurnID: "turn-1"},
+			Approval: controlclientport.ApprovalState{Active: &controlclientport.ActiveApproval{
+				RequestID: "approval-1", Permission: &session.ProtocolApproval{},
+			}},
+		},
+		Subscription: newProtocolFeedSubscription(nil),
+	}}
+	driver, err := NewAdapter(ctx, &RuntimeStack{
+		Gateway: gatewayRuntimeDepsForTest(gw), ControlReconnect: reconnect,
+		Session: SessionRuntimeDeps{
+			AppName: "caelis", UserID: "user-1", Workspace: session.WorkspaceRef{Key: "ws", CWD: oldSession.CWD},
+			StartFn: func(context.Context, string, string) (session.Session, error) { return oldSession, nil },
+		},
+		Sandbox: SandboxRuntimeDeps{StatusFn: func() SandboxStatus { return SandboxStatus{RequestedBackend: "host"} }},
+	}, oldSession.SessionID, "surface", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := driver.ResumeSession(ctx, target.SessionID)
+	if err != nil {
+		t.Fatalf("ResumeSession() error = %v", err)
+	}
+	if gw.resumeReq.BindingKey != "" || len(gw.bindReqs) != 1 || gw.bindReqs[0].SessionRef.SessionID != target.SessionID {
+		t.Fatalf("resume/bind requests = %#v / %#v, want read-only resolve then one target bind", gw.resumeReq, gw.bindReqs)
+	}
+	if snapshot.Reconnect == nil || !snapshot.Reconnect.State().Run.Active {
+		t.Fatalf("snapshot reconnect = %#v", snapshot.Reconnect)
+	}
+	defer snapshot.Reconnect.Close()
+	bootstrap := snapshot.Reconnect.BootstrapEvents()
+	if len(bootstrap) != 1 || bootstrap[0].ApprovalRequestID != "approval-1" {
+		t.Fatalf("approval bootstrap = %#v, want original request ID", bootstrap)
+	}
+	if _, err := driver.Submit(ctx, Submission{Text: "steer after resume", Mode: SubmissionModeActiveTurn}); err != nil {
+		t.Fatalf("Submit(active) error = %v", err)
+	}
+	if gw.beginCalls != 0 || len(gw.activeSubmits) != 1 || gw.activeSubmits[0].Kind != gateway.SubmissionKindConversation {
+		t.Fatalf("turn routing begin=%d active=%#v", gw.beginCalls, gw.activeSubmits)
+	}
+	if err := snapshot.Reconnect.SubmitApproval(ctx, ApprovalDecision{RequestID: "approval-1", OptionID: "allow_once", Approved: true}); err != nil {
+		t.Fatalf("SubmitApproval() error = %v", err)
+	}
+	if len(gw.activeSubmits) != 2 || gw.activeSubmits[1].Approval == nil || gw.activeSubmits[1].Approval.RequestID != "approval-1" {
+		t.Fatalf("approval submit = %#v, want original request ID", gw.activeSubmits)
+	}
+}
+
+func TestAdapterResumeBootstrapFailurePreservesCurrentSessionAndBinding(t *testing.T) {
+	ctx := context.Background()
+	oldSession := session.Session{SessionRef: session.SessionRef{SessionID: "old-session"}}
+	target := session.Session{SessionRef: session.SessionRef{SessionID: "target-session"}}
+	gw := &activeSubmitGatewayService{resume: target}
+	driver, err := NewAdapter(ctx, &RuntimeStack{
+		Gateway:          gatewayRuntimeDepsForTest(gw),
+		ControlReconnect: &fixedReconnectReader{err: errors.New("bootstrap failed")},
+		Session:          SessionRuntimeDeps{StartFn: func(context.Context, string, string) (session.Session, error) { return oldSession, nil }},
+	}, oldSession.SessionID, "surface", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := driver.ResumeSession(ctx, target.SessionID); err == nil {
+		t.Fatal("ResumeSession() error = nil, want bootstrap failure")
+	}
+	current, ok := driver.currentSession()
+	if !ok || current.SessionID != oldSession.SessionID || len(gw.bindReqs) != 0 {
+		t.Fatalf("current/binds after failure = %#v %v / %#v", current, ok, gw.bindReqs)
 	}
 }
 
@@ -4431,6 +4519,10 @@ type activeSubmitGatewayService struct {
 	activeErr     error
 	beginReqs     []gateway.BeginTurnRequest
 	beginCalls    int
+	resume        session.Session
+	resumeReq     gateway.ResumeSessionRequest
+	bindReqs      []gateway.BindSessionRequest
+	bindErr       error
 }
 
 func (g *activeSubmitGatewayService) Streams() stream.Service { return nil }
@@ -4450,8 +4542,14 @@ func (g *activeSubmitGatewayService) Interrupt(context.Context, gateway.Interrup
 	return nil
 }
 
-func (g *activeSubmitGatewayService) ResumeSession(context.Context, gateway.ResumeSessionRequest) (session.LoadedSession, error) {
-	return session.LoadedSession{}, nil
+func (g *activeSubmitGatewayService) ResumeSession(_ context.Context, req gateway.ResumeSessionRequest) (session.LoadedSession, error) {
+	g.resumeReq = req
+	return session.LoadedSession{Session: session.CloneSession(g.resume)}, nil
+}
+
+func (g *activeSubmitGatewayService) BindSession(_ context.Context, req gateway.BindSessionRequest) error {
+	g.bindReqs = append(g.bindReqs, req)
+	return g.bindErr
 }
 
 func (g *activeSubmitGatewayService) ListSessions(context.Context, gateway.ListSessionsRequest) (session.SessionList, error) {
@@ -4488,6 +4586,15 @@ func (g *activeSubmitGatewayService) DetachParticipant(context.Context, gateway.
 
 func (g *activeSubmitGatewayService) ActiveTurns() []gateway.ActiveTurnState {
 	return append([]gateway.ActiveTurnState(nil), g.active...)
+}
+
+type fixedReconnectReader struct {
+	result controlclientport.ReconnectResult
+	err    error
+}
+
+func (r *fixedReconnectReader) Reconnect(context.Context, controlclientport.ReconnectRequest) (controlclientport.ReconnectResult, error) {
+	return r.result, r.err
 }
 
 func repoRootForAdapterTest(t *testing.T) string {

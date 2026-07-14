@@ -302,7 +302,7 @@ func TestControlSessionFeedPublishesDurableChildMirrorWithTaskScopeWhileRunning(
 	}
 	defer replay.Subscription.Close()
 	var replayed eventstream.Envelope
-	for _, envelope := range replay.Backfill {
+	for envelope := range replay.Subscription.Backfill() {
 		if envelope.Delivery != nil && envelope.Delivery.Mode == eventstream.DeliveryMirror {
 			replayed = envelope
 			break
