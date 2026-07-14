@@ -107,7 +107,7 @@ func (r *ContextRouter) ParticipantContext(ctx context.Context, req controller.P
 
 // Checkpoint returns the latest canonical public-dialogue sequence routed by
 // this policy, optionally excluding one in-flight turn.
-func (r *ContextRouter) Checkpoint(ctx context.Context, ref session.SessionRef, excludeTurnID string) (int, error) {
+func (r *ContextRouter) Checkpoint(ctx context.Context, ref session.SessionRef, excludeTurnID string) (uint64, error) {
 	if r == nil || r.sessions == nil {
 		return 0, fmt.Errorf("controlplane: context router is unavailable")
 	}
@@ -119,20 +119,17 @@ func (r *ContextRouter) Checkpoint(ctx context.Context, ref session.SessionRef, 
 }
 
 type sharedDialogueDelta struct {
-	Checkpoint int
+	Checkpoint uint64
 	Entries    []sharedDialogueEntry
 }
 
 type sharedDialogueEntry struct {
-	Seq  int
+	Seq  uint64
 	Role string
 	Text string
 }
 
-func sharedDialogueDeltaFromEvents(events []*session.Event, sinceSeq int, excludeTurnID string) sharedDialogueDelta {
-	if sinceSeq < 0 {
-		sinceSeq = 0
-	}
+func sharedDialogueDeltaFromEvents(events []*session.Event, sinceSeq uint64, excludeTurnID string) sharedDialogueDelta {
 	excludeTurnID = strings.TrimSpace(excludeTurnID)
 	latestCompactSeq := latestCompactEventSeq(events)
 	startAfter := sinceSeq
@@ -183,14 +180,14 @@ func appendSharedDialogueDelta(b *strings.Builder, delta sharedDialogueDelta) {
 	}
 }
 
-func eventSequence(event *session.Event, index int) int {
+func eventSequence(event *session.Event, index int) uint64 {
 	if event != nil && event.Seq > 0 {
-		return int(event.Seq)
+		return event.Seq
 	}
-	return index + 1
+	return uint64(index + 1)
 }
 
-func latestCompactEventSeq(events []*session.Event) int {
+func latestCompactEventSeq(events []*session.Event) uint64 {
 	for i := len(events) - 1; i >= 0; i-- {
 		if compact.IsCompactEvent(events[i]) {
 			return eventSequence(events[i], i)
@@ -199,9 +196,9 @@ func latestCompactEventSeq(events []*session.Event) int {
 	return 0
 }
 
-func sharedDialogueCheckpoint(events []*session.Event, excludeTurnID string) int {
+func sharedDialogueCheckpoint(events []*session.Event, excludeTurnID string) uint64 {
 	excludeTurnID = strings.TrimSpace(excludeTurnID)
-	checkpoint := 0
+	var checkpoint uint64
 	latestCompactSeq := latestCompactEventSeq(events)
 	for i, event := range events {
 		seq := eventSequence(event, i)
@@ -218,7 +215,7 @@ func sharedDialogueCheckpoint(events []*session.Event, excludeTurnID string) int
 	return checkpoint
 }
 
-func isSharedDialogueDeltaEvent(event *session.Event, latestCompactSeq int, seq int) bool {
+func isSharedDialogueDeltaEvent(event *session.Event, latestCompactSeq uint64, seq uint64) bool {
 	if event == nil || !session.IsCanonicalHistoryEvent(event) {
 		return false
 	}

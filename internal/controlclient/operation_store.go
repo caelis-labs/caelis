@@ -13,10 +13,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	controlport "github.com/caelis-labs/caelis/ports/controlclient"
 )
 
-var ErrOperationConflict = errors.New("controlclient: operation id is bound to another request")
+var ErrOperationConflict = errorcode.New(errorcode.Conflict, "controlclient: operation id is bound to another request")
 
 type OperationIntent struct {
 	PrincipalID string             `json:"principal_id"`

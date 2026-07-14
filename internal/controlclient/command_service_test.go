@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	controlport "github.com/caelis-labs/caelis/ports/controlclient"
 )
@@ -154,6 +156,39 @@ func TestSessionAuthorizerRejectsCrossPrincipalSession(t *testing.T) {
 	}
 }
 
+func TestSessionAuthorizerDoesNotHideSessionStoreFailureAsPermissionDenied(t *testing.T) {
+	storeErr := errors.New("disk checksum failure")
+	authorizer := SessionAuthorizer{Sessions: faultingSessionReader{err: storeErr}}
+	err := authorizer.Authorize(context.Background(), controlport.Principal{ID: "owner"}, controlport.ActionSessionInspect, "session-1")
+	if errorcode.CodeOf(err) != errorcode.Internal || errors.Is(err, ErrUnauthorized) || !errors.Is(err, storeErr) {
+		t.Fatalf("Authorize() error = %v (code %q), want retained internal store failure", err, errorcode.CodeOf(err))
+	}
+
+	authorizer.Sessions = faultingSessionReader{err: session.ErrSessionNotFound}
+	if err := authorizer.Authorize(context.Background(), controlport.Principal{ID: "owner"}, controlport.ActionSessionInspect, "missing"); !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("missing session error = %v, want permission denied", err)
+	}
+}
+
+func TestCommandServicePersistsOnlyStablePublicFailureDetail(t *testing.T) {
+	backendErr := controlport.NewOutcomeError(controlport.OutcomeUnknown, errors.New("secret storage path /private/ledger"))
+	operations := NewMemoryOperationStore()
+	backend := &recordingCommandBackend{err: backendErr}
+	service := newTestCommandService(t, allowAuthorizer{}, operations, backend)
+	req := controlport.PromptRequest{
+		WriteBase: controlport.WriteBase{OperationID: "unknown-op", SessionID: "session-1"},
+		Input:     "hello",
+	}
+	first, err := service.Prompt(context.Background(), controlport.Principal{ID: "owner"}, req)
+	if err == nil || first.Outcome != controlport.OutcomeUnknown || first.Detail != "effect outcome cannot be proven" {
+		t.Fatalf("Prompt() = %#v, %v", first, err)
+	}
+	replayed, err := service.Prompt(context.Background(), controlport.Principal{ID: "owner"}, req)
+	if err != nil || replayed != first || strings.Contains(replayed.Detail, "/private/ledger") {
+		t.Fatalf("Prompt(replay) = %#v, %v", replayed, err)
+	}
+}
+
 func TestFileOperationStoreSurvivesRestartAndBindsPayload(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "operations")
 	intent := OperationIntent{PrincipalID: "owner", OperationID: "op-1", Action: controlport.ActionPrompt, SessionID: "session-1", Target: "session-1", Digest: "digest-a"}
@@ -291,4 +326,10 @@ func (r fixedOwnerSessionReader) Session(_ context.Context, ref session.SessionR
 
 func (fixedOwnerSessionReader) SnapshotState(context.Context, session.SessionRef) (map[string]any, error) {
 	return nil, nil
+}
+
+type faultingSessionReader struct{ err error }
+
+func (r faultingSessionReader) Session(context.Context, session.SessionRef) (session.Session, error) {
+	return session.Session{}, r.err
 }

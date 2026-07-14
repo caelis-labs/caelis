@@ -209,7 +209,7 @@ type ControllerState struct {
 	Label           string                 `json:"label,omitempty"`
 	EpochID         string                 `json:"epoch_id,omitempty"`
 	RemoteSessionID string                 `json:"remote_session_id,omitempty"`
-	ContextSyncSeq  int                    `json:"context_sync_seq,omitempty"`
+	ContextSyncSeq  uint64                 `json:"context_sync_seq,omitempty"`
 	AttachedAt      time.Time              `json:"attached_at,omitempty"`
 	Source          string                 `json:"source,omitempty"`
 }
@@ -224,7 +224,7 @@ type ParticipantState struct {
 	Source         string                  `json:"source,omitempty"`
 	ParentTurnID   string                  `json:"parent_turn_id,omitempty"`
 	DelegationID   string                  `json:"delegation_id,omitempty"`
-	ContextSyncSeq int                     `json:"context_sync_seq,omitempty"`
+	ContextSyncSeq uint64                  `json:"context_sync_seq,omitempty"`
 	AttachedAt     time.Time               `json:"attached_at,omitempty"`
 	ControllerRef  string                  `json:"controller_ref,omitempty"`
 }

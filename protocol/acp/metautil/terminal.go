@@ -1,6 +1,9 @@
 package metautil
 
-import "strings"
+import (
+	"encoding/json"
+	"strings"
+)
 
 const (
 	TerminalInfoKey   = "terminal_info"
@@ -136,6 +139,9 @@ func intAt(values map[string]any, key string) (int, bool) {
 		return int(typed), true
 	case float64:
 		return int(typed), true
+	case json.Number:
+		value, err := typed.Int64()
+		return int(value), err == nil
 	default:
 		return 0, false
 	}

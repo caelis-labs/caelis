@@ -49,6 +49,48 @@
       "sha256": "b609ad48f5647bfa53e8274a74a2b7b0ca3f98d861913ecb8a543df9107a2ea2",
       "symbol": "type Store",
       "reason": "pre-v1 low-level Store adopts the request-scoped State mutation contract and returns the exact committed Session for revision-aware recovery"
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk/runtime/controller",
+      "sha256": "48965729b21ca3904d707395c3dcf93ccc12bca3ec84ad075a1a8809a9889222",
+      "symbol": "type ContextRoute",
+      "reason": "pre-v1 context checkpoints use uint64 end to end so durable sequence values cannot truncate before the decimal-string HTTP projection"
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk/runtime/controller",
+      "sha256": "ecfdfb0c14b1d79cfb0dc8230a503cb4db448dc7aa43176adc226332af877689",
+      "symbol": "type ContextRouter",
+      "reason": "pre-v1 context checkpoint contracts use uint64 end to end so durable sequence values cannot truncate before the decimal-string HTTP projection"
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk/runtime/controller",
+      "sha256": "70fc418df6c5be669c5223d41ec7b2012d3e7adc02379ae2b5b1edee6d28affb",
+      "symbol": "type ControllerContextRequest",
+      "reason": "pre-v1 controller context requests use uint64 checkpoints so resume values preserve the full durable sequence domain"
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk/runtime/controller",
+      "sha256": "9d29025cc62ca289dd5275764b13f1fd7eb1a6585bd26dc0ed89aa621c29643f",
+      "symbol": "type HandoffRequest",
+      "reason": "pre-v1 handoff context checkpoints use uint64 so Control can preserve the full durable sequence domain"
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk/runtime/controller",
+      "sha256": "7b5ba8e3ec2b8afd5855770e11054bde06ecdf3e43e05e9b6f6485602cb90539",
+      "symbol": "type TurnRequest",
+      "reason": "pre-v1 turn context checkpoints use uint64 so Runtime receives the exact durable sequence selected by Control"
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk/session",
+      "sha256": "703386ecab8fedd7505f3f64103ea9fcd7f028f7833b1cf1eb1ff066cb6d578e",
+      "symbol": "type ControllerBinding",
+      "reason": "pre-v1 durable controller bindings use uint64 checkpoints so Session state can represent the complete sequence domain"
+    },
+    {
+      "package": "github.com/caelis-labs/caelis/agent-sdk/session",
+      "sha256": "b62e3654da3c897abbbd8f5698b07305ddd26f815bab4f791d1c58e521903734",
+      "symbol": "type ParticipantBinding",
+      "reason": "pre-v1 durable participant bindings use uint64 checkpoints so Session state can represent the complete sequence domain"
     }
   ]
 }

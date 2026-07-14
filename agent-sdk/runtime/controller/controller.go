@@ -72,14 +72,14 @@ type HandoffRequest struct {
 	Source         string             `json:"source,omitempty"`
 	Reason         string             `json:"reason,omitempty"`
 	ContextPrelude string             `json:"context_prelude,omitempty"`
-	ContextSyncSeq int                `json:"context_sync_seq,omitempty"`
+	ContextSyncSeq uint64             `json:"context_sync_seq,omitempty"`
 }
 
 // ContextRoute is one Control-selected context synchronization payload for an
 // endpoint turn or activation.
 type ContextRoute struct {
 	Prelude string `json:"prelude,omitempty"`
-	SyncSeq int    `json:"sync_seq,omitempty"`
+	SyncSeq uint64 `json:"sync_seq,omitempty"`
 }
 
 // ControllerContextRequest asks Control to select the canonical context that
@@ -89,7 +89,7 @@ type ControllerContextRequest struct {
 	SessionRef    session.SessionRef        `json:"session_ref,omitempty"`
 	Session       session.Session           `json:"session,omitempty"`
 	Controller    session.ControllerBinding `json:"controller,omitempty"`
-	SinceSeq      int                       `json:"since_seq,omitempty"`
+	SinceSeq      uint64                    `json:"since_seq,omitempty"`
 	ExcludeTurnID string                    `json:"exclude_turn_id,omitempty"`
 }
 
@@ -106,7 +106,7 @@ type ParticipantContextRequest struct {
 type ContextRouter interface {
 	ControllerContext(context.Context, ControllerContextRequest) (ContextRoute, error)
 	ParticipantContext(context.Context, ParticipantContextRequest) (ContextRoute, error)
-	Checkpoint(context.Context, session.SessionRef, string) (int, error)
+	Checkpoint(context.Context, session.SessionRef, string) (uint64, error)
 }
 
 // RecoveryRequest identifies one persisted controller binding whose endpoint
@@ -131,7 +131,7 @@ type TurnRequest struct {
 	Input             string              `json:"input,omitempty"`
 	ContentParts      []model.ContentPart `json:"content_parts,omitempty"`
 	ContextPrelude    string              `json:"context_prelude,omitempty"`
-	ContextSyncSeq    int                 `json:"context_sync_seq,omitempty"`
+	ContextSyncSeq    uint64              `json:"context_sync_seq,omitempty"`
 	Stream            bool                `json:"stream,omitempty"`
 	Mode              string              `json:"mode,omitempty"`
 	ApprovalRequester ApprovalRequester   `json:"-"`

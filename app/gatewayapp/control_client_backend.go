@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	internalcontrolclient "github.com/caelis-labs/caelis/internal/controlclient"
@@ -289,11 +290,19 @@ func classifyControlBackendError(err error) error {
 		return err
 	}
 	var gatewayErr *gateway.Error
-	if errors.As(err, &gatewayErr) && (gatewayErr.Kind == gateway.KindConflict || gatewayErr.Kind == gateway.KindApproval) {
-		return controlport.NewOutcomeError(controlport.OutcomeConflicted, err)
+	if errors.As(err, &gatewayErr) {
+		switch gatewayErr.Kind {
+		case gateway.KindValidation:
+			coded := errorcode.Wrap(errorcode.InvalidArgument, gatewayErr.Error(), err)
+			return controlport.NewOutcomeError(controlport.OutcomeRejected, coded)
+		case gateway.KindConflict, gateway.KindApproval:
+			coded := errorcode.Wrap(errorcode.Conflict, "gatewayapp: command conflict", err)
+			return controlport.NewOutcomeError(controlport.OutcomeConflicted, coded)
+		}
 	}
 	if errors.Is(err, session.ErrRevisionConflict) || errors.Is(err, session.ErrLeaseConflict) {
-		return controlport.NewOutcomeError(controlport.OutcomeConflicted, err)
+		coded := errorcode.Wrap(errorcode.Conflict, "gatewayapp: session conflict", err)
+		return controlport.NewOutcomeError(controlport.OutcomeConflicted, coded)
 	}
 	if session.IsCommitted(err) {
 		return nil

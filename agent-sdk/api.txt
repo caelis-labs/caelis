@@ -1264,18 +1264,18 @@ package github.com/caelis-labs/caelis/agent-sdk/runtime/controller
   type CancelStatus = agent.CancelStatus
   type ContextRoute struct {
       Prelude string `json:"prelude,omitempty"`
-      SyncSeq int    `json:"sync_seq,omitempty"`
+      SyncSeq uint64 `json:"sync_seq,omitempty"`
   }
   type ContextRouter interface {
       ControllerContext(context.Context, ControllerContextRequest) (ContextRoute, error)
       ParticipantContext(context.Context, ParticipantContextRequest) (ContextRoute, error)
-      Checkpoint(context.Context, session.SessionRef, string) (int, error)
+      Checkpoint(context.Context, session.SessionRef, string) (uint64, error)
   }
   type ControllerContextRequest struct {
       SessionRef    session.SessionRef        `json:"session_ref,omitempty"`
       Session       session.Session           `json:"session,omitempty"`
       Controller    session.ControllerBinding `json:"controller,omitempty"`
-      SinceSeq      int                       `json:"since_seq,omitempty"`
+      SinceSeq      uint64                    `json:"since_seq,omitempty"`
       ExcludeTurnID string                    `json:"exclude_turn_id,omitempty"`
   }
   type DetachRequest struct {
@@ -1293,7 +1293,7 @@ package github.com/caelis-labs/caelis/agent-sdk/runtime/controller
       Source         string             `json:"source,omitempty"`
       Reason         string             `json:"reason,omitempty"`
       ContextPrelude string             `json:"context_prelude,omitempty"`
-      ContextSyncSeq int                `json:"context_sync_seq,omitempty"`
+      ContextSyncSeq uint64             `json:"context_sync_seq,omitempty"`
   }
   type ParticipantContextRequest struct {
       SessionRef session.SessionRef         `json:"session_ref,omitempty"`
@@ -1334,7 +1334,7 @@ package github.com/caelis-labs/caelis/agent-sdk/runtime/controller
       Input             string              `json:"input,omitempty"`
       ContentParts      []model.ContentPart `json:"content_parts,omitempty"`
       ContextPrelude    string              `json:"context_prelude,omitempty"`
-      ContextSyncSeq    int                 `json:"context_sync_seq,omitempty"`
+      ContextSyncSeq    uint64              `json:"context_sync_seq,omitempty"`
       Stream            bool                `json:"stream,omitempty"`
       Mode              string              `json:"mode,omitempty"`
       ApprovalRequester ApprovalRequester   `json:"-"`
@@ -1805,6 +1805,7 @@ package github.com/caelis-labs/caelis/agent-sdk/session
   func (e *CommittedError) Error() string
   func (e *CommittedError) ErrorCode() errorcode.Code
   func (e *CommittedError) Unwrap() error
+  func (e *Event) UnmarshalJSON(data []byte) error
   func (e *EventConflictError) Error() string
   func (e *EventConflictError) ErrorCode() errorcode.Code
   func (e *EventConflictError) Is(target error) bool
@@ -2018,7 +2019,7 @@ package github.com/caelis-labs/caelis/agent-sdk/session
       Label           string         `json:"label,omitempty"`
       EpochID         string         `json:"epoch_id,omitempty"`
       RemoteSessionID string         `json:"remote_session_id,omitempty"`
-      ContextSyncSeq  int            `json:"context_sync_seq,omitempty"`
+      ContextSyncSeq  uint64         `json:"context_sync_seq,omitempty"`
       AttachedAt      time.Time      `json:"attached_at,omitempty"`
       Source          string         `json:"source,omitempty"`
   }
@@ -2279,7 +2280,7 @@ package github.com/caelis-labs/caelis/agent-sdk/session
       DelegationID string          `json:"delegation_id,omitempty"`
 
       AttachmentGeneration string    `json:"attachment_generation,omitempty"`
-      ContextSyncSeq       int       `json:"context_sync_seq,omitempty"`
+      ContextSyncSeq       uint64    `json:"context_sync_seq,omitempty"`
       AttachedAt           time.Time `json:"attached_at,omitempty"`
       ControllerRef        string    `json:"controller_ref,omitempty"`
   }

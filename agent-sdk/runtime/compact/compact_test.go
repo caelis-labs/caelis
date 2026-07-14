@@ -1,6 +1,9 @@
 package compact
 
 import (
+	"encoding/json"
+	"math"
+	"strconv"
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -34,6 +37,37 @@ func TestCompactEventDataContractMetadataRoundTrip(t *testing.T) {
 	}
 	if len(got.DiscoveredTools) != 1 || got.DiscoveredTools[0] != "mcp__calendar__demo__create_event" {
 		t.Fatalf("discovered tools = %v, want normalized MCP tool", got.DiscoveredTools)
+	}
+}
+
+func TestCompactEventSequencePersistsAsExactDecimalString(t *testing.T) {
+	for _, sequence := range []uint64{
+		9007199254740991,
+		9007199254740992,
+		9007199254740993,
+		math.MaxUint64,
+	} {
+		sequence := sequence
+		t.Run(strconv.FormatUint(sequence, 10), func(t *testing.T) {
+			before := session.Event{
+				Type: session.EventTypeCompact,
+				Meta: map[string]any{MetaKeyCompact: CompactEventDataValue(CompactEventData{
+					ContractVersion: CompactContractVersion, SummarizedThroughSeq: sequence,
+				})},
+			}
+			raw, err := json.Marshal(before)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var after session.Event
+			if err := json.Unmarshal(raw, &after); err != nil {
+				t.Fatal(err)
+			}
+			got, ok := CompactEventDataFromEvent(&after)
+			if !ok || got.SummarizedThroughSeq != sequence {
+				t.Fatalf("CompactEventDataFromEvent() = %#v, %v; want sequence %d", got, ok, sequence)
+			}
+		})
 	}
 }
 

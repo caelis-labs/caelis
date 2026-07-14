@@ -189,7 +189,7 @@ func (m *Manager) Activate(ctx context.Context, req controller.HandoffRequest) (
 	return session.CloneControllerBinding(run.binding), nil
 }
 
-func (r *controllerRun) applyStartupStateLocked(client *client.Client, remoteSessionID string, state controllerClientState, contextSyncSeq int) {
+func (r *controllerRun) applyStartupStateLocked(client *client.Client, remoteSessionID string, state controllerClientState, contextSyncSeq uint64) {
 	if r == nil {
 		return
 	}

@@ -132,7 +132,10 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 		forceInteractive = fs.Bool("interactive", false, "Force interactive local main path")
 		doctor           = fs.Bool("doctor", false, "Print runtime/session/sandbox diagnostics and exit")
 		controlListen    = fs.String("listen", envOr("CAELIS_CONTROL_LISTEN", "127.0.0.1:7777"), "Control client HTTP listen address")
-		controlToken     = fs.String("control-token", envOr("CAELIS_CONTROL_TOKEN", ""), "Bearer token required by the Control client HTTP server")
+		controlTokenFile = fs.String("control-token-file", envOr("CAELIS_CONTROL_TOKEN_FILE", ""), "Path to the platform-secured Control bearer token file")
+		controlHosts     = fs.String("control-allowed-hosts", envOr("CAELIS_CONTROL_ALLOWED_HOSTS", ""), "Comma-separated Host allowlist for the Control server")
+		controlTLSCert   = fs.String("control-tls-cert", envOr("CAELIS_CONTROL_TLS_CERT", ""), "TLS certificate file for the Control server")
+		controlTLSKey    = fs.String("control-tls-key", envOr("CAELIS_CONTROL_TLS_KEY", ""), "TLS private key file for the Control server")
 	)
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -206,15 +209,24 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 	}
 	if controlServerSubcommand {
 		principal := controlclient.Principal{ID: strings.TrimSpace(*userID)}
+		token := strings.TrimSpace(os.Getenv("CAELIS_CONTROL_TOKEN"))
+		tokenFile := strings.TrimSpace(*controlTokenFile)
 		var authenticator appserver.Authenticator
-		if strings.TrimSpace(*controlToken) != "" {
-			authenticator, err = controlserver.BearerTokenAuthenticator(*controlToken, principal)
+		if token != "" {
+			if tokenFile != "" {
+				return errors.New("configure either CAELIS_CONTROL_TOKEN or a Control token file, not both")
+			}
+			authenticator, err = controlserver.BearerTokenAuthenticator(token, principal)
 			if err != nil {
 				return err
 			}
+		} else if tokenFile == "" {
+			tokenFile = controlserver.DefaultTokenFile(cfg.StoreDir)
 		}
 		return runControlServerCommand(ctx, stack, controlserver.Config{
-			Address: strings.TrimSpace(*controlListen), Authenticator: authenticator, LocalPrincipal: principal,
+			Address: strings.TrimSpace(*controlListen), Authenticator: authenticator, Principal: principal,
+			TokenFile: tokenFile, AllowedHosts: splitCommaSeparated(*controlHosts),
+			TLSCertFile: strings.TrimSpace(*controlTLSCert), TLSKeyFile: strings.TrimSpace(*controlTLSKey),
 		})
 	}
 	if doctorSubcommand || *doctor {
@@ -258,6 +270,16 @@ func defaultStoreDir(cwd string) string {
 		return filepath.Join(home, ".caelis")
 	}
 	return filepath.Join(cwd, ".caelis")
+}
+
+func splitCommaSeparated(value string) []string {
+	var result []string
+	for item := range strings.SplitSeq(value, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			result = append(result, item)
+		}
+	}
+	return result
 }
 
 func preferredInteractiveSessionID(sessionID string) string {

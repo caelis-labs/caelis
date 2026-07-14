@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -15,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	controlclient "github.com/caelis-labs/caelis/ports/controlclient"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
@@ -23,12 +26,11 @@ import (
 
 func TestHTTPCreateUsesTrustedPrincipalAndHeaderContracts(t *testing.T) {
 	service := &fakeService{}
-	server, err := New(Config{Service: service, LocalPrincipal: controlclient.Principal{ID: "trusted-owner"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	body := `{"workspace_key":"workspace-a","title":"hello","expected_revision":8}`
+	server := newTestServer(t, service, 0)
+	body := `{"workspace_key":"workspace-a","title":"hello","expected_revision":"8"}`
 	request := httptest.NewRequest(http.MethodPost, apiPrefix+"/sessions", strings.NewReader(body))
+	authorizeTestRequest(request)
+	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Idempotency-Key", "operation-1")
 	request.Header.Set("If-Match", `"8"`)
 	recorder := httptest.NewRecorder()
@@ -51,19 +53,26 @@ func TestHTTPCreateUsesTrustedPrincipalAndHeaderContracts(t *testing.T) {
 func TestSSEUsesCursorIDAndWholeEnvelopeData(t *testing.T) {
 	want := eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, Cursor: "signed-cursor-1", SessionID: "session-1",
-		Position: &eventstream.FeedPosition{Transient: &eventstream.TransientFeedPosition{Generation: "generation-1", Sequence: 1}},
+		Position: &eventstream.FeedPosition{Transient: &eventstream.TransientFeedPosition{
+			Anchor: eventstream.DurableFeedPosition{Seq: math.MaxUint64}, Generation: "generation-1", Sequence: math.MaxUint64,
+		}},
 		Delivery: &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
 		Update:   schema.ContentChunk{SessionUpdate: schema.UpdateAgentMessage, Content: schema.TextContent{Type: "text", Text: "hello"}},
+		Meta: map[string]any{"compact": map[string]any{
+			"summarized_through_seq": uint64(math.MaxUint64),
+		}},
 	}
 	subscription := newTestSubscription(want)
 	service := &fakeService{subscription: subscription}
-	server, err := New(Config{Service: service, LocalPrincipal: controlclient.Principal{ID: "owner"}, Heartbeat: time.Hour})
+	server := newTestServer(t, service, time.Hour)
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+	request, err := http.NewRequest(http.MethodGet, httpServer.URL+apiPrefix+"/sessions/session-1/stream", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	httpServer := httptest.NewServer(server)
-	defer httpServer.Close()
-	response, err := http.Get(httpServer.URL + apiPrefix + "/sessions/session-1/stream")
+	authorizeTestRequest(request)
+	response, err := http.DefaultClient.Do(request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +99,12 @@ func TestSSEUsesCursorIDAndWholeEnvelopeData(t *testing.T) {
 	if idLine != "id: signed-cursor-1\n" || !strings.HasPrefix(dataLine, "data: ") {
 		t.Fatalf("SSE = %q %q", idLine, dataLine)
 	}
-	wantJSON, err := json.Marshal(want)
+	if !strings.Contains(dataLine, `"seq":"18446744073709551615"`) ||
+		!strings.Contains(dataLine, `"sequence":"18446744073709551615"`) ||
+		!strings.Contains(dataLine, `"summarized_through_seq":"18446744073709551615"`) {
+		t.Fatalf("SSE lost max uint64 precision: %s", dataLine)
+	}
+	wantJSON, err := marshalEnvelope(want)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,16 +126,15 @@ func TestSSEReportsTypedGapWithRetryCursor(t *testing.T) {
 		Cause: errors.New("splice overtaken"), RetryCursor: "retry-cursor",
 		Mode: controlclient.ResumeModeDurableFallback, TransientGap: true,
 	}
-	server, err := New(Config{
-		Service:        &fakeService{subscription: subscription},
-		LocalPrincipal: controlclient.Principal{ID: "owner"}, Heartbeat: time.Hour,
-	})
+	server := newTestServer(t, &fakeService{subscription: subscription}, time.Hour)
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+	request, err := http.NewRequest(http.MethodGet, httpServer.URL+apiPrefix+"/sessions/session-1/stream", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	httpServer := httptest.NewServer(server)
-	defer httpServer.Close()
-	response, err := http.Get(httpServer.URL + apiPrefix + "/sessions/session-1/stream")
+	authorizeTestRequest(request)
+	response, err := http.DefaultClient.Do(request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,11 +152,9 @@ func TestSSEReportsTypedGapWithRetryCursor(t *testing.T) {
 }
 
 func TestSSERejectsMismatchedResumeInputsAndCredentialQuery(t *testing.T) {
-	server, err := New(Config{Service: &fakeService{}, LocalPrincipal: controlclient.Principal{ID: "owner"}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	server := newTestServer(t, &fakeService{}, 0)
 	request := httptest.NewRequest(http.MethodGet, apiPrefix+"/sessions/session-1/stream?after=a", nil)
+	authorizeTestRequest(request)
 	request.Header.Set("Last-Event-ID", "b")
 	recorder := httptest.NewRecorder()
 	server.ServeHTTP(recorder, request)
@@ -151,6 +162,7 @@ func TestSSERejectsMismatchedResumeInputsAndCredentialQuery(t *testing.T) {
 		t.Fatalf("resume mismatch status = %d", recorder.Code)
 	}
 	request = httptest.NewRequest(http.MethodGet, apiPrefix+"/sessions?token=secret", nil)
+	authorizeTestRequest(request)
 	recorder = httptest.NewRecorder()
 	server.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusBadRequest {
@@ -158,16 +170,170 @@ func TestSSERejectsMismatchedResumeInputsAndCredentialQuery(t *testing.T) {
 	}
 }
 
-func TestValidateListenerFailsClosedOffLoopback(t *testing.T) {
-	if err := ValidateListener("127.0.0.1:7777", nil); err != nil {
-		t.Fatal(err)
+func TestNewRequiresNetworkAuthenticatorAndHostAllowlist(t *testing.T) {
+	if _, err := New(Config{Service: &fakeService{}, AllowedHosts: []string{"example.test"}}); err == nil {
+		t.Fatal("New accepted an unauthenticated HTTP handler")
 	}
-	if err := ValidateListener("0.0.0.0:7777", nil); err == nil {
-		t.Fatal("non-loopback unauthenticated listener accepted")
+	if _, err := New(Config{Service: &fakeService{}, Authenticator: testAuthenticator()}); err == nil {
+		t.Fatal("New accepted an empty Host allowlist")
 	}
-	if err := ValidateListener("0.0.0.0:7777", AuthenticatorFunc(func(*http.Request) (controlclient.Principal, error) { return controlclient.Principal{ID: "owner"}, nil })); err != nil {
-		t.Fatal(err)
+}
+
+func TestRequestTrustPolicyRejectsBrowserAndRebindingInputsBeforeService(t *testing.T) {
+	tests := []struct {
+		name   string
+		host   string
+		header http.Header
+	}{
+		{name: "host", host: "evil.example"},
+		{name: "malformed host", host: "example.test@evil.example"},
+		{name: "cross host origin", host: "example.test", header: http.Header{"Origin": {"http://evil.example"}}},
+		{name: "cross scheme origin", host: "example.test", header: http.Header{"Origin": {"https://example.test"}}},
+		{name: "origin port mismatch", host: "example.test:7777", header: http.Header{"Origin": {"http://example.test:8888"}}},
+		{name: "duplicate origin", host: "example.test", header: http.Header{"Origin": {"http://example.test", "http://example.test"}}},
+		{name: "fetch metadata", host: "example.test", header: http.Header{"Sec-Fetch-Site": {"cross-site"}}},
+		{name: "duplicate fetch metadata", host: "example.test", header: http.Header{"Sec-Fetch-Site": {"same-origin", "same-origin"}}},
 	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			service := &fakeService{}
+			server := newTestServer(t, service, 0)
+			request := httptest.NewRequest(http.MethodGet, apiPrefix+"/sessions", nil)
+			request.Host = tt.host
+			request.Header = tt.header.Clone()
+			authorizeTestRequest(request)
+			recorder := httptest.NewRecorder()
+			server.ServeHTTP(recorder, request)
+			if recorder.Code != http.StatusForbidden {
+				t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+			}
+			if service.listCalls != 0 {
+				t.Fatalf("Service called %d times", service.listCalls)
+			}
+		})
+	}
+}
+
+func TestSameOriginHostAndBearerAuthentication(t *testing.T) {
+	service := &fakeService{}
+	server := newTestServer(t, service, 0)
+	request := httptest.NewRequest(http.MethodGet, apiPrefix+"/sessions", nil)
+	request.Host = "example.test"
+	request.Header.Set("Origin", "http://example.test")
+	request.Header.Set("Sec-Fetch-Site", "same-origin")
+	authorizeTestRequest(request)
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK || service.listCalls != 1 {
+		t.Fatalf("status = %d, calls = %d, body = %s", recorder.Code, service.listCalls, recorder.Body.String())
+	}
+	if got := recorder.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("Access-Control-Allow-Origin = %q", got)
+	}
+}
+
+func TestMissingAndWrongBearerReturn401(t *testing.T) {
+	server := newTestServer(t, &fakeService{}, 0)
+	for _, authorization := range []string{"", "Bearer wrong-token"} {
+		request := httptest.NewRequest(http.MethodGet, apiPrefix+"/sessions", nil)
+		request.Host = "example.test"
+		if authorization != "" {
+			request.Header.Set("Authorization", authorization)
+		}
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusUnauthorized {
+			t.Fatalf("authorization %q status = %d", authorization, recorder.Code)
+		}
+		if got := recorder.Header().Get("WWW-Authenticate"); got != `Bearer realm="caelis-control"` {
+			t.Fatalf("WWW-Authenticate = %q", got)
+		}
+	}
+}
+
+func TestAuthenticatedCrossSessionAccessReturns403(t *testing.T) {
+	service := &fakeService{inspectErr: errorcode.New(errorcode.PermissionDenied, "session belongs to another principal")}
+	server := newTestServer(t, service, 0)
+	request := httptest.NewRequest(http.MethodGet, apiPrefix+"/sessions/other-session/state", nil)
+	request.Host = "example.test"
+	authorizeTestRequest(request)
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusForbidden || !strings.Contains(recorder.Body.String(), `"forbidden"`) {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestMalformedWriteInputsReturn400BeforeService(t *testing.T) {
+	tests := []struct {
+		name   string
+		body   string
+		mutate func(*http.Request)
+	}{
+		{name: "missing content type", body: `{}`},
+		{name: "trailing JSON", body: `{}{}`, mutate: setJSONContentType},
+		{name: "numeric revision", body: `{"expected_revision":9007199254740993}`, mutate: setJSONContentType},
+		{name: "noncanonical revision", body: `{"expected_revision":"01"}`, mutate: setJSONContentType},
+		{name: "unsafe extension integer", body: `{"metadata":{"unsafe":9007199254740993}}`, mutate: setJSONContentType},
+		{name: "unquoted If-Match", body: `{}`, mutate: func(request *http.Request) {
+			setJSONContentType(request)
+			request.Header.Set("If-Match", "9")
+		}},
+		{name: "duplicate If-Match", body: `{}`, mutate: func(request *http.Request) {
+			setJSONContentType(request)
+			request.Header.Add("If-Match", `"9"`)
+			request.Header.Add("If-Match", `"9"`)
+		}},
+		{name: "duplicate idempotency key", body: `{}`, mutate: func(request *http.Request) {
+			setJSONContentType(request)
+			request.Header.Add("Idempotency-Key", "operation-2")
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			service := &fakeService{}
+			server := newTestServer(t, service, 0)
+			request := httptest.NewRequest(http.MethodPost, apiPrefix+"/sessions", strings.NewReader(tt.body))
+			request.Host = "example.test"
+			authorizeTestRequest(request)
+			request.Header.Set("Idempotency-Key", "operation-1")
+			if tt.mutate != nil {
+				tt.mutate(request)
+			}
+			recorder := httptest.NewRecorder()
+			server.ServeHTTP(recorder, request)
+			if recorder.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+			}
+			if service.created.OperationID != "" {
+				t.Fatalf("Service received malformed request: %#v", service.created)
+			}
+		})
+	}
+}
+
+func TestHTTPHandlerRoundTripsMaxUint64Revision(t *testing.T) {
+	service := &fakeService{}
+	server := newTestServer(t, service, 0)
+	const decimal = "18446744073709551615"
+	request := httptest.NewRequest(http.MethodPost, apiPrefix+"/sessions", strings.NewReader(`{"expected_revision":"`+decimal+`"}`))
+	request.Host = "example.test"
+	authorizeTestRequest(request)
+	setJSONContentType(request)
+	request.Header.Set("Idempotency-Key", "operation-1")
+	request.Header.Set("If-Match", `"`+decimal+`"`)
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	if service.created.ExpectedRevision == nil || *service.created.ExpectedRevision != math.MaxUint64 {
+		t.Fatalf("expected revision = %#v", service.created.ExpectedRevision)
+	}
+}
+
+func setJSONContentType(request *http.Request) {
+	request.Header.Set("Content-Type", "application/json")
 }
 
 func TestOpenAPI31ContainsEveryGeneratedOperation(t *testing.T) {
@@ -205,15 +371,55 @@ type fakeService struct {
 	principal    controlclient.Principal
 	created      controlclient.CreateSessionRequest
 	subscription controlclient.FeedSubscription
+	listCalls    int
+	inspectErr   error
 }
 
+func (s *fakeService) ListSessions(context.Context, controlclient.Principal, controlclient.ListSessionsRequest) (session.SessionList, error) {
+	s.listCalls++
+	return session.SessionList{}, nil
+}
 func (s *fakeService) CreateSession(_ context.Context, principal controlclient.Principal, req controlclient.CreateSessionRequest) (controlclient.CommandResult, error) {
 	s.principal = principal
 	s.created = req
 	return controlclient.CommandResult{OperationID: req.OperationID, Outcome: controlclient.OutcomeCommitted, SessionID: "session-created", Revision: 1}, nil
 }
+func (s *fakeService) InspectSession(context.Context, controlclient.Principal, controlclient.StateRequest) (controlclient.SessionState, error) {
+	return controlclient.SessionState{}, s.inspectErr
+}
 func (s *fakeService) Subscribe(context.Context, controlclient.Principal, controlclient.SubscribeRequest) (controlclient.SubscribeResult, error) {
 	return controlclient.SubscribeResult{Subscription: s.subscription, Mode: controlclient.ResumeModeExact, BoundaryCursor: "signed-cursor-1"}, nil
+}
+
+func newTestServer(t *testing.T, service controlclient.Service, heartbeat time.Duration) *Server {
+	t.Helper()
+	server, err := New(Config{
+		Service: service, Authenticator: testAuthenticator(),
+		AllowedHosts: []string{"example.test", "127.0.0.1"}, Heartbeat: heartbeat,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return server
+}
+
+func testAuthenticator() Authenticator {
+	return AuthenticatorFunc(func(request *http.Request) (controlclient.Principal, error) {
+		if request.Header.Get("Authorization") != "Bearer test-token" {
+			return controlclient.Principal{}, errors.New("invalid bearer")
+		}
+		return controlclient.Principal{ID: "trusted-owner"}, nil
+	})
+}
+
+func authorizeTestRequest(request *http.Request) {
+	if request.Header == nil {
+		request.Header = make(http.Header)
+	}
+	if request.Host == "example.com" {
+		request.Host = "example.test"
+	}
+	request.Header.Set("Authorization", "Bearer test-token")
 }
 
 type testSubscription struct {

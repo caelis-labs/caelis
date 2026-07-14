@@ -7,12 +7,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
 const sessionLifecycleStateKey = "control.session.lifecycle.v1"
 
-var ErrSessionClosed = errors.New("controlclient: session is closed")
+var ErrSessionClosed = errorcode.New(errorcode.FailedPrecondition, "controlclient: session is closed")
 
 type closeSessionStore interface {
 	session.Reader

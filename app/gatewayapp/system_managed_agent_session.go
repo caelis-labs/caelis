@@ -2,6 +2,7 @@ package gatewayapp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"maps"
 	"strings"
@@ -417,6 +418,12 @@ func systemManagedAgentStateIntValue(value any) int {
 		return int(value)
 	case float64:
 		return int(value)
+	case json.Number:
+		parsed, err := value.Int64()
+		if err == nil {
+			return int(parsed)
+		}
+		return 0
 	default:
 		return 0
 	}

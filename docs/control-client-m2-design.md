@@ -451,17 +451,57 @@ Every write requires `Idempotency-Key`. Revision CAS maps from `If-Match` and
 the generated DTO's expected revision; contradictory values are rejected.
 Controller epoch and live Turn target remain explicit request fields.
 Mutation responses declare the handler's complete `200`, `202`, `400`, `401`,
-and `409` status set. Read endpoints declare their authentication,
-authorization, and malformed-request responses; SSE additionally declares its
-streaming-unavailable response.
+`403`, `409`, and `500` status set. Read endpoints declare their malformed,
+authentication, authorization, conflict, and internal-error responses; SSE
+additionally declares its streaming-unavailable response.
+
+### Lossless integer wire contract
+
+JavaScript-facing integers that may exceed `Number.MAX_SAFE_INTEGER` use the
+OpenAPI `Uint64Decimal` schema: a canonical, unsigned base-10 JSON string with
+no sign or leading zeroes. This applies to `expected_revision`, command and
+Session revisions, durable feed `seq`, transient anchor `seq`, transient
+`sequence`, and controller/participant `context_sync_seq`. The corresponding
+Go domain values remain `uint64`; `surfaces/appserver` maps them at the HTTP
+DTO boundary. `If-Match` carries the same decimal value as one quoted ETag.
+
+Known Caelis metadata counters use the same representation. The complete typed
+set is runtime task `output_cursor`, `event_cursor`, and `turn_seq`; runtime
+stream `truncated_before`; root `from`/`to.context_sync_seq`; Caelis and SDK
+prompt/cache/completion/reasoning/total/context-window usage counters; SDK
+`cost_micros` and `context_window_tokens`; and compact `revision`,
+`contract_version`, `summarized_through_seq`, `source_event_count`,
+`total_tokens`, and `context_window_tokens`. ACP `usage_update.size` and
+`usage_update.used` are also decimal strings in the HTTP/SSE DTO even though
+the reusable Go ACP type remains `int`. This is an intentional product-wire
+projection, not a change to the reusable ACP/runtime domain type.
+
+Durable `Event._meta` decoding retains numeric tokens as `json.Number`, and
+compact checkpoints persist their integer metadata as canonical decimal
+strings. Rebuild and projection therefore reach the HTTP mapper without a
+`float64` precision loss. Other typed Event fields and open Tool/Protocol
+payloads keep their existing decoder behavior.
+
+Arbitrary JSON extensions may not emit a numeric token outside the inclusive
+JavaScript-safe range
+`[-9007199254740991, 9007199254740991]`; extension-defined larger integers
+must be decimal strings. The server rejects an unsafe extension number instead
+of sending JSON that a JavaScript parser would silently round.
+
+Wire conformance covers `9007199254740991`, `9007199254740992`,
+`9007199254740993`, and `18446744073709551615` through HTTP encode, generated
+Go/TypeScript-facing DTO shape, and decode. The generated TypeScript alias is
+`Uint64Decimal = string`; no uint64 wire field is `number` or
+`number | string`.
 
 Standard ACP update variants remain closed and discriminated. Unknown
 non-empty `sessionUpdate` values use the explicit `ACPRawUpdate` extension
 variant, which preserves vendor fields, is represented by the generated
 TypeScript union, and excludes every known standard discriminator so `oneOf`
-remains unambiguous. Generated Go represents the open raw object as a JSON-value
-map and the containing union as `json.RawMessage`; both standalone raw updates
-and complete Envelopes therefore preserve unknown vendor properties.
+remains unambiguous. Generated Go represents `ACPRawUpdate` as
+`json.RawMessage` and also keeps a containing union with an open variant raw;
+both standalone raw updates and complete Envelopes therefore preserve unknown
+vendor properties and numeric tokens without a `float64` intermediate.
 
 SSE rules:
 
@@ -476,12 +516,62 @@ SSE rules:
   `caelis.control.resume` event with `durable_fallback`,
   `transient_gap=true`, and its signed retry Cursor before termination.
 
-The `caelis serve` product entry point defaults to a loopback listener. Starting
-on a non-loopback address without configured authentication fails closed; a
-static Bearer token is available for the product server. `surfaces/appserver`
-only extracts
-credentials into a trusted principal, maps DTOs and errors, and streams
-Envelopes. It contains no Runtime, approval policy, broker, session store,
+### HTTP trust and error contract
+
+Every HTTP handler, including an explicitly assembled in-process test handler,
+requires an authenticator and Host allowlist; there is no network form of an
+implicit `LocalPrincipal` or trusted-mode switch that a TCP server can enable.
+The `caelis serve` product entry point defaults to `127.0.0.1:7777` and, unless
+`CAELIS_CONTROL_TOKEN` is set, creates or loads
+`<store-dir>/control-http.token`. The file contains a random 256-bit bearer
+credential. On Unix it must be an ordinary, current-user-owned non-symlink file
+with exact mode `0600`; on Windows it must be current-user-owned with a
+protected DACL limited to that user, LocalSystem, and Administrators. Creation
+flushes a secured temporary file and publishes it through an atomic no-clobber
+link; Unix then syncs the parent directory. Concurrent creators converge on one
+complete credential without a persistent lock; crashed temporary-file residue
+cannot block restart. Insecure, partial, or malformed target files fail closed.
+`CAELIS_CONTROL_TOKEN_FILE` or `--control-token-file` selects another credential
+file. Bearer secrets have no command-line flag and therefore need not be exposed
+in process argv.
+
+Loopback may use HTTP because the bearer credential is still mandatory. A
+non-loopback TCP listener requires a directly configured TLS certificate and
+key (`--control-tls-cert` and `--control-tls-key`, or the corresponding
+`CAELIS_CONTROL_TLS_*` variables); plaintext bearer transport fails before
+listen. Wildcard listeners also require an explicit
+`--control-allowed-hosts` allowlist. This version deliberately does not trust
+forwarded headers or implement a reverse-proxy bypass.
+
+Before authentication or Service dispatch, the adapter rejects a Host outside
+the allowlist, a cross-origin `Origin`, and `Sec-Fetch-Site: same-site` or
+`cross-site`. Native/CLI requests may omit browser headers; an explicit browser
+Origin must exactly match request scheme and authority. The server emits no
+wildcard CORS allow-origin header and never accepts credentials in query
+parameters.
+
+Transport status is selected only from typed `agent-sdk/errorcode` values and
+cursor sentinels, never from error text:
+
+| Condition | HTTP status | Response rule |
+| --- | ---: | --- |
+| committed command | `200` | typed `CommandResult` |
+| accepted command or effect outcome not provable | `202` | typed `CommandResult`; unknown detail is stable and generic |
+| malformed JSON/header/path or typed invalid argument | `400` | validation failure |
+| missing/invalid authentication | `401` | generic body plus `WWW-Authenticate: Bearer realm="caelis-control"` |
+| authenticated principal lacks Session/action access | `403` | generic forbidden body |
+| revision, idempotency, or failed-precondition conflict | `409` | typed command conflict or generic read conflict |
+| uncategorized/internal failure | `500` | generic body; internal error text is not exposed |
+
+Control persists only stable public command detail for rejected, conflicted,
+or unknown results, so idempotent ledger replay cannot reveal an earlier
+backend/store error string. Raw rejected backend failures remain `500`; only an
+unknown or conflicted recovery outcome preserves the `202`/`409` retry
+contract.
+
+`surfaces/appserver` only enforces request-origin trust, extracts credentials
+into a trusted principal, maps DTOs and typed errors, and streams Envelopes. It
+contains no Runtime, approval policy, broker, Session store,
 participant/handoff policy, or persistence logic.
 
 ## Package Ownership
