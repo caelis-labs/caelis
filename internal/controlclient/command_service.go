@@ -133,7 +133,10 @@ func resultForBackendError(result controlport.CommandResult, err error) controlp
 	if errors.As(err, &outcomeErr) && outcomeErr.Outcome.Valid() {
 		result.Outcome = outcomeErr.Outcome
 	} else {
-		result.Outcome = controlport.OutcomeRejected
+		// An unclassified backend error does not prove that the effect was
+		// rejected before commit. Preserve the conservative outcome so retention
+		// cannot later erase the only guard against repeating an external effect.
+		result.Outcome = controlport.OutcomeUnknown
 	}
 	result.Detail = err.Error()
 	return result

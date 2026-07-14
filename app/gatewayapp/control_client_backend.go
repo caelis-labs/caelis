@@ -298,5 +298,8 @@ func classifyControlBackendError(err error) error {
 	if session.IsCommitted(err) {
 		return nil
 	}
-	return controlport.NewOutcomeError(controlport.OutcomeRejected, err)
+	// Only an explicitly typed rejected error proves that no effect committed.
+	// Ordinary backend failures remain unknown so the operation ledger cannot
+	// expire their idempotency guard and replay a possible external effect.
+	return controlport.NewOutcomeError(controlport.OutcomeUnknown, err)
 }

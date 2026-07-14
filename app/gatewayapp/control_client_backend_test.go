@@ -27,6 +27,14 @@ func TestClassifyControlBackendErrorTreatsLeaseConflictAsConflict(t *testing.T) 
 	}
 }
 
+func TestClassifyControlBackendErrorTreatsUnclassifiedFailureAsUnknown(t *testing.T) {
+	err := classifyControlBackendError(errors.New("effect boundary failed without proof"))
+	var outcomeErr *controlport.OutcomeError
+	if !errors.As(err, &outcomeErr) || outcomeErr.Outcome != controlport.OutcomeUnknown {
+		t.Fatalf("classifyControlBackendError() = %v, want unknown outcome", err)
+	}
+}
+
 func TestAttachControlClientHandleUsesSharedTaskIngress(t *testing.T) {
 	t.Parallel()
 

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/modelregistry"
@@ -13,16 +14,17 @@ import (
 )
 
 type RuntimeConfig struct {
-	AppName       string
-	UserID        string
-	StoreDir      string
-	WorkspaceKey  string
-	WorkspaceCWD  string
-	ApprovalMode  string
-	PolicyProfile string
-	ContextWindow int
-	SystemPrompt  string
-	Model         modelregistry.Config
+	AppName                   string
+	UserID                    string
+	StoreDir                  string
+	WorkspaceKey              string
+	WorkspaceCWD              string
+	ApprovalMode              string
+	PolicyProfile             string
+	ControlOperationRetention time.Duration
+	ContextWindow             int
+	SystemPrompt              string
+	Model                     modelregistry.Config
 }
 
 type DefaultSelfConfig struct {
@@ -164,6 +166,9 @@ func SelfRuntimeInvocation(cfg RuntimeConfig) ([]string, map[string]string) {
 	appendFlag("-auth-type", string(model.AuthType))
 	appendFlag("-header-key", model.HeaderKey)
 	appendFlag("-system-prompt", cfg.SystemPrompt)
+	if cfg.ControlOperationRetention > 0 {
+		args = append(args, "-control-operation-retention", cfg.ControlOperationRetention.String())
+	}
 	if cfg.ContextWindow > 0 {
 		args = append(args, "-context-window", fmt.Sprintf("%d", cfg.ContextWindow))
 	}

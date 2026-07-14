@@ -221,6 +221,20 @@ func TestDefaultStoreDirUsesHomeDirectory(t *testing.T) {
 	}
 }
 
+func TestParseControlOperationRetention(t *testing.T) {
+	if got, err := parseControlOperationRetention(""); err != nil || got != 0 {
+		t.Fatalf("empty retention = %v, %v", got, err)
+	}
+	if got, err := parseControlOperationRetention("720h"); err != nil || got != 30*24*time.Hour {
+		t.Fatalf("parsed retention = %v, %v", got, err)
+	}
+	for _, value := range []string{"invalid", "0", "-1h"} {
+		if _, err := parseControlOperationRetention(value); err == nil {
+			t.Fatalf("retention %q unexpectedly succeeded", value)
+		}
+	}
+}
+
 func TestPreferredSessionIDDefaultsDifferBetweenInteractiveAndHeadless(t *testing.T) {
 	if got := preferredInteractiveSessionID(""); got != "" {
 		t.Fatalf("preferredInteractiveSessionID(\"\") = %q, want empty for fresh TUI session", got)

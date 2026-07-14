@@ -279,6 +279,67 @@ func TestFileOperationStoreBeginExactlyOnceAcrossProcesses(t *testing.T) {
 	}
 }
 
+func TestFileOperationStoreCompleteAndSweepAcrossProcesses(t *testing.T) {
+	if testing.Short() {
+		t.Skip("cross-process lock test")
+	}
+	root := filepath.Join(t.TempDir(), "operations")
+	intent := operationStoreTestIntent("cross-process-complete-sweep", "digest-a")
+	if _, created, err := NewFileOperationStore(root).Begin(context.Background(), intent); err != nil || !created {
+		t.Fatalf("Begin() = created %v, error %v", created, err)
+	}
+	barrier := filepath.Join(t.TempDir(), "start")
+	modes := []string{"complete", "sweep"}
+	commands := make([]*exec.Cmd, len(modes))
+	outputs := make([]bytes.Buffer, len(modes))
+	results := make([]string, len(modes))
+	ready := make([]string, len(modes))
+	for index, mode := range modes {
+		results[index] = filepath.Join(t.TempDir(), "result.json")
+		ready[index] = filepath.Join(t.TempDir(), "ready")
+		command := exec.Command(os.Args[0], "-test.run=^TestFileOperationStoreProcessHelper$")
+		command.Env = append(os.Environ(),
+			"CAELIS_OPERATION_STORE_HELPER="+mode,
+			"CAELIS_OPERATION_STORE_ROOT="+root,
+			"CAELIS_OPERATION_STORE_BARRIER="+barrier,
+			"CAELIS_OPERATION_STORE_READY="+ready[index],
+			"CAELIS_OPERATION_STORE_RESULT="+results[index],
+		)
+		command.Stdout = &outputs[index]
+		command.Stderr = &outputs[index]
+		if err := command.Start(); err != nil {
+			t.Fatalf("start %s helper: %v", mode, err)
+		}
+		commands[index] = command
+	}
+	waitForOperationStoreFiles(t, ready, 5*time.Second)
+	if err := os.WriteFile(barrier, []byte("start"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for index, command := range commands {
+		if err := command.Wait(); err != nil {
+			t.Fatalf("%s helper: %v\n%s", modes[index], err, outputs[index].String())
+		}
+		data, err := os.ReadFile(results[index])
+		if err != nil {
+			t.Fatal(err)
+		}
+		var result operationStoreProcessResult
+		if err := json.Unmarshal(data, &result); err != nil {
+			t.Fatal(err)
+		}
+		if result.Error != "" {
+			t.Fatalf("%s helper error = %s", modes[index], result.Error)
+		}
+	}
+
+	want := operationStoreTestResult(intent, controlport.OutcomeCommitted)
+	reloaded, created, err := NewFileOperationStore(root).Begin(context.Background(), intent)
+	if err != nil || created || reloaded.Result == nil || *reloaded.Result != want {
+		t.Fatalf("reloaded = %#v, created %v, error %v; want %#v", reloaded, created, err, want)
+	}
+}
+
 func TestOperationStoreOSFileLockHonorsContextCancellation(t *testing.T) {
 	root := t.TempDir()
 	first, err := lockOperationStoreRoot(context.Background(), root)
@@ -307,7 +368,8 @@ func TestOperationStoreOSFileLockHonorsContextCancellation(t *testing.T) {
 }
 
 func TestFileOperationStoreProcessHelper(t *testing.T) {
-	if os.Getenv("CAELIS_OPERATION_STORE_HELPER") != "begin" {
+	mode := os.Getenv("CAELIS_OPERATION_STORE_HELPER")
+	if mode == "" {
 		return
 	}
 	ready := os.Getenv("CAELIS_OPERATION_STORE_READY")
@@ -327,10 +389,25 @@ func TestFileOperationStoreProcessHelper(t *testing.T) {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	_, created, err := NewFileOperationStore(os.Getenv("CAELIS_OPERATION_STORE_ROOT")).Begin(
-		context.Background(),
-		operationStoreTestIntent("cross-process", "digest-a"),
+	store := NewFileOperationStore(os.Getenv("CAELIS_OPERATION_STORE_ROOT"))
+	var (
+		created bool
+		err     error
 	)
+	switch mode {
+	case "begin":
+		_, created, err = store.Begin(
+			context.Background(),
+			operationStoreTestIntent("cross-process", "digest-a"),
+		)
+	case "complete":
+		intent := operationStoreTestIntent("cross-process-complete-sweep", "digest-a")
+		_, err = store.Complete(context.Background(), intent, operationStoreTestResult(intent, controlport.OutcomeCommitted))
+	case "sweep":
+		_, err = store.Sweep(context.Background())
+	default:
+		t.Fatalf("unknown operation store helper mode %q", mode)
+	}
 	result := operationStoreProcessResult{Created: created}
 	if err != nil {
 		result.Error = err.Error()

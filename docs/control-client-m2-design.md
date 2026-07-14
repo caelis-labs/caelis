@@ -400,6 +400,91 @@ an effect committed, the recorded and returned outcome is `unknown`. It must
 not retry the effect unconditionally. This guarantee applies to every write,
 including handoff and participant operations.
 
+### Operation idempotency retention
+
+The durable operation ledger provides a minimum terminal-result retention
+window, not an unbounded history. The production default is 30 days and is
+named in code as `DefaultOperationTerminalRetention`; operators may override it
+with `--control-operation-retention`, `CAELIS_CONTROL_OPERATION_RETENTION`, or
+the Control host `Config`. For a fresh root, zero-valued host configuration
+selects the default; for an existing root it adopts the persisted policy.
+Operators must provide an explicit value to replace that policy, and
+non-positive explicit values are rejected. The active window is persisted
+atomically in the `control-operations` root so every process sharing that root
+uses one policy. A deliberate policy change is installed during host assembly;
+already-open stores fail closed until reopened instead of silently mixing
+policies for new work and maintenance. An already-started operation may still
+persist its known result using its record snapshot, so rolling configuration
+cannot strand a committed effect as intent-only `unknown`. The parent passes
+the effective value as an explicit flag to spawned self ACP processes, so an
+inherited environment variable cannot replace the shared-root policy.
+
+Each newly begun record snapshots the active window. When Control persists a
+proven terminal result it also persists an absolute `retain_until` deadline,
+measured from the monotonic terminal `UpdatedAt`. Policy changes therefore do
+not shorten a window already promised to an existing operation. The root policy
+separately persists a high-water retention for legacy records that lack a
+snapshot; it is the maximum policy ever installed for that root and cannot
+decrease. A legacy `committed` or `conflicted` record materializes that
+high-water window on a safe read or sweep. A legacy `rejected` record is never
+age-reclaimed because older Control versions used that outcome for unclassified
+failures whose external effect may be unknown.
+
+Before `retain_until`, the same `(principal, operation_id)` and the same bound
+intent stably replay the old result; changing action, Session, target, or
+canonical digest remains `ErrOperationConflict`. Expiry makes a record eligible
+for maintenance but does not promise immediate deletion: until deletion, it
+continues to replay or conflict. After the canonical record is durably removed,
+the ID may be treated as a new operation with either the same or a different
+payload and may execute its effect again. Clients must therefore generate
+globally unique operation IDs and must not use window expiry as a safe retry or
+reuse signal.
+
+Automatic TTL applies only to proven terminal outcomes:
+
+- new-schema `committed`, `conflicted`, and `rejected` transition from retained
+  to eligible at `retain_until`; `rejected` specifically means Control proved
+  that no effect committed;
+- legacy `rejected` remains indeterminate because its old encoding did not
+  prove that distinction;
+- an unclassified backend error is `unknown`, not `rejected`;
+- intent-only records (`Result == nil`) may be in flight or may represent a
+  crash with an unproved external effect, so ordinary TTL never removes them;
+- persisted `accepted` and `unknown` results also remain protected;
+- malformed records, retention snapshots/deadlines that do not exactly agree,
+  invalid outcomes or timestamps, key/path mismatches, symlinks, and unknown
+  record versions remain in place fail closed.
+
+There is currently no proof-based reconciliation transition for intent-only,
+`accepted`, or `unknown` records. They remain conservative idempotency guards
+and may still accumulate. A future reconciliation API may move them only to a
+proved terminal outcome using the downstream transaction/event/task identity;
+ordinary age is not proof.
+
+Maintenance is Control persistence behavior in `internal/controlclient`, not an
+SDK, Surface, or wire-protocol concern. `MemoryOperationStore` and
+`FileOperationStore` expose the same bounded `Sweep` semantics and lightweight
+result counts. `FileOperationStore` opportunistically starts a traversal from
+`Begin` no more than once per hour per in-process root when no backlog exists;
+there is no background goroutine. If a bounded batch reports more work, the
+next `Begin` may continue the cursor immediately, allowing command traffic to
+catch up instead of capping production cleanup at one batch per hour. One call
+still inspects at most 256 directory entries, removes at most 128 files, and has
+a 100 ms soft processing budget. Its lifecycle-managed directory cursor
+advances across calls so protected or damaged entries cannot permanently starve
+later terminal records. Old writer temp files use a separate 24-hour grace
+period; young temps and unrelated files are ignored.
+
+Sweep classification and removal hold the existing process-local root lock and
+cross-process root file lock for the complete critical section, so `Sweep`
+racing `Complete` sees either an indeterminate intent or a freshly completed
+deadline and cannot lose the result. On Unix, successful unlink is followed by
+parent-directory sync. On Windows, the canonical record is first moved with
+`MOVEFILE_WRITE_THROUGH` to a non-canonical GC temp before best-effort removal;
+a crash can leave only reclaimable temp residue. Cleanup errors are returned by
+explicit `Sweep` but opportunistic maintenance never changes the outcome of
+`Begin` or `Complete`.
+
 ## HTTP JSON and SSE API
 
 The checked-in OpenAPI 3.1 document is the HTTP wire truth. Generation uses a
