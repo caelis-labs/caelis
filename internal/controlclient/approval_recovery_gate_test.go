@@ -3,6 +3,7 @@ package controlclient
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,6 +15,23 @@ type blockingApprovalRecoveryStore struct {
 	started chan struct{}
 	release chan struct{}
 	err     error
+}
+
+type approvalRecoveryClock struct {
+	mu  sync.Mutex
+	now time.Time
+}
+
+func (c *approvalRecoveryClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
+}
+
+func (c *approvalRecoveryClock) Advance(delta time.Duration) {
+	c.mu.Lock()
+	c.now = c.now.Add(delta)
+	c.mu.Unlock()
 }
 
 func (s *blockingApprovalRecoveryStore) ListSessions(context.Context, session.ListSessionsRequest) (session.SessionList, error) {
@@ -87,7 +105,12 @@ func TestApprovalRecoveryGateRetainsSweepFailure(t *testing.T) {
 }
 
 func TestApprovalRecoveryGateDefersForeignLeaseAndSettlesAfterExpiry(t *testing.T) {
-	store := inmemory.NewStore(inmemory.Config{SessionIDGenerator: func() string { return "deferred-recovery-session" }})
+	const leaseTTL = 100 * time.Millisecond
+	clock := &approvalRecoveryClock{now: time.Now()}
+	store := inmemory.NewStore(inmemory.Config{
+		SessionIDGenerator: func() string { return "deferred-recovery-session" },
+		Clock:              clock.Now,
+	})
 	service := inmemory.NewService(store)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -96,7 +119,7 @@ func TestApprovalRecoveryGateDefersForeignLeaseAndSettlesAfterExpiry(t *testing.
 		t.Fatal(err)
 	}
 	lease, err := service.AcquireSessionLease(ctx, session.AcquireSessionLeaseRequest{
-		SessionRef: active.SessionRef, OwnerID: "foreign-runtime", TTL: 80 * time.Millisecond,
+		SessionRef: active.SessionRef, OwnerID: "foreign-runtime", TTL: leaseTTL,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -133,6 +156,7 @@ func TestApprovalRecoveryGateDefersForeignLeaseAndSettlesAfterExpiry(t *testing.
 		t.Fatalf("events while foreign lease is live = %#v, want pending request only", page.Events)
 	}
 
+	clock.Advance(leaseTTL + time.Nanosecond)
 	deadline := time.Now().Add(2 * time.Second)
 	for len(page.Events) != 2 && time.Now().Before(deadline) {
 		time.Sleep(20 * time.Millisecond)

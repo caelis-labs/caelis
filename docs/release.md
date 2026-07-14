@@ -101,9 +101,13 @@ Release gating should record, rather than merely assume, these results:
 The reusable quality workflow records the focused Agent SDK race suite,
 regression suite, maintained-document link validation, and clean external Go
 consumer as named steps in addition to the ordinary quality gates. Pull request
-and `main` runs compile the current-source quickstart and use the rolling prior
-release for the tagged-artifact smoke; a tag release supplies its own candidate
-tag. The tagged gate extracts that tag's fixture/allowlist and forbids replace,
+runs compile the current-source quickstart and use the rolling prior release for
+the tagged-artifact smoke, and a tag release supplies its own candidate tag.
+`main` push runs retain that current-source consumer check, ordinary quality,
+build, and real-Windows persistence gates without repeating the release-depth
+race, regression, and tagged-proxy consumer steps; the tag workflow enables
+those extended gates before publication. The tagged gate extracts that tag's
+fixture/allowlist and forbids replace,
 so current API additions are not compiled against an old fixture. The link gate covers `README.md`,
 `agent-sdk/README.md`, and maintained Markdown under `docs/` while ignoring
 example links embedded in vendored skill text.

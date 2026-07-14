@@ -13,6 +13,11 @@ on:
         description: Tagged root-module version used by the no-replace consumer smoke
         required: false
         type: string
+      extended_validation:
+        description: Run release-depth race, regression, and tagged-proxy gates
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -61,12 +66,15 @@ jobs:
         run: make test
 
       - name: Focused Agent SDK race
+        if: github.event_name == 'pull_request' || inputs.extended_validation
         run: make sdk-race
 
       - name: Regression
+        if: github.event_name == 'pull_request' || inputs.extended_validation
         run: make regression
 
       - name: Tagged Agent SDK external consumer
+        if: github.event_name == 'pull_request' || inputs.extended_validation
         run: make sdk-proxy-smoke
         env:
           SDK_PROXY_VERSION: ${{ inputs.sdk_proxy_version }}

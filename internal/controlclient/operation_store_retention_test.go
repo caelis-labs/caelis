@@ -403,6 +403,30 @@ func TestFileOperationStoreInterruptedSweepFailsSafeAfterRemove(t *testing.T) {
 	}
 }
 
+func TestFileOperationStoreSparseSweepClosesDirectoryCursor(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "operations")
+	clock := &fakeOperationClock{now: time.Date(2026, 7, 14, 6, 30, 0, 0, time.UTC)}
+	store := newFileRetentionTestStore(t, root, OperationRetentionConfig{
+		TerminalRetention: time.Hour,
+		SweepInterval:     24 * time.Hour,
+		SweepBatchSize:    64,
+		SweepTimeLimit:    time.Second,
+	}, clock)
+	intent := operationStoreTestIntent("sparse-directory", "digest")
+	writeRawOperationRecord(t, store, intent, retainedTestRecord(clock.Now(), intent, controlport.OutcomeUnknown))
+
+	result, err := store.Sweep(context.Background())
+	if err != nil || result.More {
+		t.Fatalf("Sweep() = %#v, %v; want completed sparse traversal", result, err)
+	}
+	if store.scanDirectory != nil {
+		t.Fatal("completed sparse traversal retained an open directory cursor")
+	}
+	if err := os.RemoveAll(root); err != nil {
+		t.Fatalf("remove operation store after completed sweep: %v", err)
+	}
+}
+
 func TestFileOperationStoreSweepIsBoundedAndCursorMakesProgress(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "operations")
 	clock := &fakeOperationClock{now: time.Date(2026, 7, 14, 7, 0, 0, 0, time.UTC)}

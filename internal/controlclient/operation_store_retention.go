@@ -309,15 +309,12 @@ func (s *FileOperationStore) sweepDirectoryLocked(
 	result *OperationSweepResult,
 ) error {
 	started := time.Now()
-	if err := s.fillScanPendingLocked(); err != nil {
-		return err
-	}
 	var (
 		removed      bool
 		cleanupPaths []string
 		sweepErr     error
 	)
-	for len(s.scanPending) > 0 && result.Scanned < s.retention.SweepBatchSize &&
+	for result.Scanned < s.retention.SweepBatchSize &&
 		result.RemovedTerminal+result.RemovedTemporary < s.retention.SweepDeleteLimit {
 		if err := contextError(ctx); err != nil {
 			sweepErr = errors.Join(sweepErr, err)
@@ -325,6 +322,15 @@ func (s *FileOperationStore) sweepDirectoryLocked(
 		}
 		if result.Scanned > 0 && time.Since(started) >= s.retention.SweepTimeLimit {
 			break
+		}
+		if len(s.scanPending) == 0 {
+			if err := s.fillScanPendingLocked(); err != nil {
+				sweepErr = errors.Join(sweepErr, err)
+				break
+			}
+			if len(s.scanPending) == 0 {
+				break
+			}
 		}
 		entry := s.scanPending[0]
 		s.scanPending = s.scanPending[1:]
