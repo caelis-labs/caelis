@@ -21,6 +21,10 @@ func TestRouterStatusModelAndCompactCommands(t *testing.T) {
 			Display: "ollama/llama3",
 		},
 		SandboxStatus: control.StatusSandbox{ResolvedBackend: "seatbelt"},
+		Usage: control.StatusUsage{
+			TotalTokens:         5100,
+			ContextWindowTokens: 1000000,
+		},
 	}}
 	router := New(prompt.RouterConfig{Service: svc})
 	status, err := router.Route(context.Background(), prompt.Request{Submission: control.Submission{Text: "/status"}})
@@ -32,6 +36,9 @@ func TestRouterStatusModelAndCompactCommands(t *testing.T) {
 	}
 	if status.SlashResult == nil || status.SlashResult.Kind != control.SlashCommandResultStatus || status.SlashResult.Status.ModelStatus.Display != "ollama/llama3" {
 		t.Fatalf("Route(/status).SlashResult = %#v, want structured status payload", status.SlashResult)
+	}
+	if status.StatusUpdate == nil || status.StatusUpdate.Usage.TotalTokens != 5100 {
+		t.Fatalf("Route(/status).StatusUpdate = %#v, want the displayed snapshot applied to surface status", status.StatusUpdate)
 	}
 	if len(status.Events) != 0 {
 		t.Fatalf("Route(/status).Events = %#v, want no eager fallback events", status.Events)
@@ -52,6 +59,9 @@ func TestRouterStatusModelAndCompactCommands(t *testing.T) {
 	}
 	if !svc.compacted || firstNotice(compactResult) != compact.CompactNoticeLabel {
 		t.Fatalf("compact route compacted=%v notice=%q", svc.compacted, firstNotice(compactResult))
+	}
+	if compactResult.StatusUpdate == nil || compactResult.StatusUpdate.Usage.TotalTokens != 5100 || compactResult.StatusUpdate.Usage.ContextWindowTokens != 1000000 {
+		t.Fatalf("Route(/compact).StatusUpdate = %#v, want post-compact context snapshot", compactResult.StatusUpdate)
 	}
 }
 

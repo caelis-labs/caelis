@@ -201,6 +201,42 @@ func TestExecuteControlPromptResultForwardsSlashResultAndEvents(t *testing.T) {
 	}
 }
 
+func TestExecuteControlPromptResultAppliesPostCompactContextStatus(t *testing.T) {
+	t.Parallel()
+
+	status := control.StatusSnapshot{
+		ModelStatus: control.StatusModel{Display: "xiaomi/mimo-v2.5"},
+		Usage: control.StatusUsage{
+			TotalTokens:         5100,
+			ContextWindowTokens: 1000000,
+		},
+	}
+	var got []tea.Msg
+	sender := &ProgramSender{Send: func(msg tea.Msg) { got = append(got, msg) }}
+	executeControlPromptResult(context.Background(), nil, sender, controlprompt.Result{
+		Handled: true,
+		Events: []eventstream.Envelope{{
+			Kind:   eventstream.KindNotice,
+			Notice: "Context compacted",
+		}},
+		StatusUpdate: &status,
+	})
+
+	if len(got) != 2 {
+		t.Fatalf("sent messages = %#v, want compact notice followed by status update", got)
+	}
+	if env, ok := got[0].(eventstream.Envelope); !ok || env.Notice != "Context compacted" {
+		t.Fatalf("first message = %#v, want compact notice", got[0])
+	}
+	update, ok := got[1].(SetStatusMsg)
+	if !ok {
+		t.Fatalf("second message = %#v, want SetStatusMsg", got[1])
+	}
+	if want := "5.1k / 1.0m · 0%"; update.Context != want || update.Status.Tokens != want {
+		t.Fatalf("post-compact context = %q / %q, want %q", update.Context, update.Status.Tokens, want)
+	}
+}
+
 func TestExecuteControlPromptResultBatchesResumeReplayAfterClear(t *testing.T) {
 	t.Parallel()
 

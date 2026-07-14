@@ -209,7 +209,9 @@ func (r Router) dispatchStatus(ctx context.Context, args string) (prompt.Result,
 	if err != nil {
 		return prompt.Result{}, controlcommands.FriendlyCommandError("status", err)
 	}
-	return r.slashResult(control.NewStatusSlashResult(status)), nil
+	result := r.slashResult(control.NewStatusSlashResult(status))
+	result.StatusUpdate = &status
+	return result, nil
 }
 
 func (r Router) dispatchDoctor(ctx context.Context, args string) (prompt.Result, error) {
@@ -294,7 +296,11 @@ func (r Router) dispatchCompact(ctx context.Context, args string) (prompt.Result
 	if err := r.service.Compact(ctx); err != nil {
 		return prompt.Result{}, controlcommands.FriendlyCommandError("compact", err)
 	}
-	return r.noticeResult(compact.CompactNoticeLabel), nil
+	result := r.noticeResult(compact.CompactNoticeLabel)
+	if status, err := r.service.Status(ctx); err == nil {
+		result.StatusUpdate = &status
+	}
+	return result, nil
 }
 
 func (r Router) dispatchDynamicAgent(ctx context.Context, agent string, promptText string, attachments []control.Attachment) (prompt.Result, error) {
