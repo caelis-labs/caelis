@@ -459,7 +459,10 @@ func toolPanelEventHasHiddenOutputSummary(ev SubagentEvent) bool {
 		return false
 	}
 	if strings.EqualFold(toolSemanticName(ev.Name, ev.ToolKind), "SPAWN") {
-		return false
+		// Completed Spawn calls default to the same bounded terminal preview used
+		// while the child is running. The exact canonical Final Message remains
+		// available through the panel's full-output state.
+		return shouldRenderACPToolPanel(ev.Output, ev.Err)
 	}
 	return finalToolOutputSummaryHidesLines(ev.Output)
 }

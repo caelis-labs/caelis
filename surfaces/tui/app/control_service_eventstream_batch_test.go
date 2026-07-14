@@ -64,6 +64,40 @@ func TestForwardTurnEventStreamCoalescesNarrativeWithoutCorruptingEnvelopeIdenti
 	}
 }
 
+func TestNarrativeBatcherCoalescesTinySubagentChunksIntoOneVisualUpdate(t *testing.T) {
+	t.Parallel()
+
+	first := narrativeBatchEnvelope("event-1", "cursor-1", 1, "message-1", "一")
+	first.Scope = eventstream.ScopeSubagent
+	first.ScopeID = "task-1"
+	second := narrativeBatchEnvelope("event-2", "cursor-2", 2, "message-1", "行")
+	second.Scope = eventstream.ScopeSubagent
+	second.ScopeID = "task-1"
+
+	var sent []tea.Msg
+	send := func(message tea.Msg) { sent = append(sent, message) }
+	var batcher eventStreamNarrativeBatcher
+	if !batcher.enqueue(first, send) {
+		t.Fatal("first subagent chunk was not accepted by the narrative batcher")
+	}
+	started := time.Unix(400, 0)
+	batcher.pendingSince = started
+	batcher.flushReady(started.Add(eventStreamBatchInterval), send)
+	if len(sent) != 0 {
+		t.Fatalf("tiny subagent chunk flushed as a one-character frame: %#v", sent)
+	}
+	if !batcher.enqueue(second, send) {
+		t.Fatal("second subagent chunk was not accepted by the narrative batcher")
+	}
+	batcher.flushReady(started.Add(eventStreamSubagentBatchMaxDelay), send)
+	if len(sent) != 1 {
+		t.Fatalf("sent messages = %#v, want one coalesced subagent update", sent)
+	}
+	if got := narrativeBatchText(t, requireNarrativeBatchEnvelope(t, sent[0])); got != "一行" {
+		t.Fatalf("coalesced subagent narrative = %q, want %q", got, "一行")
+	}
+}
+
 func narrativeBatchEnvelope(eventID string, cursor string, sequence uint64, messageID string, text string) eventstream.Envelope {
 	return eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", HandleID: "handle-1",

@@ -690,7 +690,7 @@ func toolPanelCanExpandHiddenDetails(ev SubagentEvent, outputText string, final 
 		return true
 	}
 	if final && strings.EqualFold(toolSemanticName(ev.Name, ev.ToolKind), "SPAWN") {
-		return false
+		return shouldRenderACPToolPanel(outputText, err)
 	}
 	if final && shouldDefaultCollapseToolEvent(ev) && shouldRenderACPToolPanel(outputText, err) {
 		return true

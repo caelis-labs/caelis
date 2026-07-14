@@ -34,35 +34,46 @@ func TestDurableTaskWaitFinalCompletesOriginalSpawnPanel(t *testing.T) {
 
 	model.syncViewportContent()
 	plain := strings.Join(model.viewportPlainLines, "\n")
-	wantRendered := []string{
+	wantPreview := []string{
 		"• Spawned reviewer: inspect",
-		"  └ 完成",
-		"",
-		"已创建文件。",
-		"",
-		"────────",
-		"",
-		"结果",
-		"",
-		"• 第一项",
-		"• 第二项",
-		"",
-		" 文件                                │ 状态",
-		"─────────────────────────────────────┼────────────────────────────────────",
-		" hello.go                            │ 好",
-		"",
-		"fmt.Println(\"你好\")",
-		"",
-		"创建文件",
-		"",
-		"│ 结果",
+		"  └ # 完成",
+		"    已创建文件。",
+		"    ... +10 lines",
+		"    创建文件",
+		"    > **结果**",
 	}
-	if !reflect.DeepEqual(model.viewportPlainLines, wantRendered) {
-		t.Fatalf("rendered Final Message rows = %#v\nwant golden rows = %#v", model.viewportPlainLines, wantRendered)
+	if !reflect.DeepEqual(model.viewportPlainLines, wantPreview) {
+		t.Fatalf("rendered Spawn preview rows = %#v\nwant bounded preview rows = %#v", model.viewportPlainLines, wantPreview)
+	}
+	if strings.Contains(plain, "hello.go") || strings.Contains(plain, "fmt.Println") {
+		t.Fatalf("bounded Spawn preview leaked full child output into the main transcript:\n%s", plain)
+	}
+	if !block.toggleToolPanelClick("spawn-call-1") {
+		t.Fatal("completed Spawn preview did not expose its canonical full output")
+	}
+	model.markViewportBlockDirty(block.BlockID())
+	model.syncViewportContent()
+	plain = strings.Join(model.viewportPlainLines, "\n")
+	if len(model.viewportPlainLines) <= len(wantPreview) {
+		t.Fatalf("expanded Spawn output stayed compact: %#v", model.viewportPlainLines)
+	}
+	for index, row := range model.viewportPlainLines[1:] {
+		if index == 0 {
+			if !strings.HasPrefix(row, "  └ ") {
+				t.Fatalf("first expanded Spawn row escaped its panel: %q", row)
+			}
+			continue
+		}
+		if strings.TrimSpace(row) == "" {
+			continue
+		}
+		if !strings.HasPrefix(row, "    ") {
+			t.Fatalf("expanded Spawn row %d escaped its panel: %q", index+2, row)
+		}
 	}
 	for _, want := range []string{"完成", "第一项", "第二项", "hello.go", "fmt.Println", "创建文件", "结果"} {
 		if !strings.Contains(plain, want) {
-			t.Fatalf("rendered Final Message missing %q:\n%s", want, plain)
+			t.Fatalf("expanded Final Message missing %q:\n%s", want, plain)
 		}
 	}
 	for _, forbidden := range []string{"(wait subagent output)", "---###", "创建文件>"} {

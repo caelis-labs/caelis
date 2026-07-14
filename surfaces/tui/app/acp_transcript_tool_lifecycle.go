@@ -472,7 +472,7 @@ func renderACPTerminalLifecycleRows(blockID string, ev SubagentEvent, callID str
 	if ev.OutputGapBefore {
 		rows = append(rows, renderACPTerminalGapRow(blockID, width, ctx, token))
 	}
-	if spawn && final {
+	if spawn && final && fullOutput {
 		rows = append(rows, renderACPSpawnFinalMessageRows(blockID, displayText, width, ctx, token)...)
 		return rows
 	}
@@ -502,7 +502,7 @@ func renderACPTerminalGapRow(blockID string, width int, ctx BlockRenderContext, 
 }
 
 func renderACPSpawnFinalMessageRows(blockID string, text string, width int, ctx BlockRenderContext, token string) []RenderedRow {
-	return RenderTextWithContext(ctx, TextRenderRequest{
+	rows := RenderTextWithContext(ctx, TextRenderRequest{
 		Kind:           TextAssistant,
 		Mode:           RenderFinal,
 		MarkdownPolicy: MarkdownFull,
@@ -513,6 +513,23 @@ func renderACPSpawnFinalMessageRows(blockID string, text string, width int, ctx 
 		ClickToken:     token,
 		LineStyle:      tuikit.LineStyleAssistant,
 	}).Rows
+	return alignSpawnFinalMessageRows(rows)
+}
+
+func alignSpawnFinalMessageRows(rows []RenderedRow) []RenderedRow {
+	if len(rows) <= 1 {
+		return rows
+	}
+	const continuation = "    "
+	out := append([]RenderedRow(nil), rows...)
+	for index := 1; index < len(out); index++ {
+		if strings.HasPrefix(out[index].Plain, continuation) {
+			continue
+		}
+		out[index].Plain = continuation + out[index].Plain
+		out[index].Styled = continuation + out[index].Styled
+	}
+	return out
 }
 
 func terminalLifecycleHeader(ev SubagentEvent) string {

@@ -16,15 +16,17 @@ import (
 )
 
 const (
-	eventStreamBatchInterval = 16 * time.Millisecond
+	eventStreamBatchInterval         = 16 * time.Millisecond
+	eventStreamSubagentBatchMaxDelay = 48 * time.Millisecond
 )
 
 // eventStreamNarrativeBatcher bounds ProgramSender traffic before Tea receives
 // the feed. The render scheduler independently coalesces its render-tick
 // queue, including callers that bypass this Control-service forwarding path.
 type eventStreamNarrativeBatcher struct {
-	pending *eventstream.Envelope
-	key     string
+	pending      *eventstream.Envelope
+	key          string
+	pendingSince time.Time
 }
 
 func forwardTurnEventStream(ctx context.Context, turn control.Turn, sender *ProgramSender) executeLineResult {
@@ -56,8 +58,8 @@ func forwardTurnEventStream(ctx context.Context, turn control.Turn, sender *Prog
 			cancelRequested = true
 			batcher.flush(send)
 			turn.Cancel()
-		case <-ticker.C:
-			batcher.flush(send)
+		case now := <-ticker.C:
+			batcher.flushReady(now, send)
 		case env, ok := <-events:
 			if !ok {
 				events = nil
@@ -149,6 +151,7 @@ func (b *eventStreamNarrativeBatcher) enqueue(env eventstream.Envelope, send fun
 		copy := cloneEventStreamNarrativeEnvelope(env)
 		b.pending = &copy
 		b.key = key
+		b.pendingSince = time.Now()
 		return true
 	}
 	if b.key != key {
@@ -156,10 +159,26 @@ func (b *eventStreamNarrativeBatcher) enqueue(env eventstream.Envelope, send fun
 		copy := cloneEventStreamNarrativeEnvelope(env)
 		b.pending = &copy
 		b.key = key
+		b.pendingSince = time.Now()
 		return true
 	}
 	mergeEventStreamNarrativeEnvelope(b.pending, env)
 	return true
+}
+
+func (b *eventStreamNarrativeBatcher) flushReady(now time.Time, send func(tea.Msg)) {
+	if b == nil || b.pending == nil {
+		return
+	}
+	// Main-agent output keeps the 60 Hz delivery cadence. Tiny child deltas get
+	// one short coalescing window so tokenizers that emit one grapheme at a time
+	// do not force a complete Spawn-panel render for every character. Semantic
+	// barriers and terminal events still call flush directly.
+	if b.pending.Scope == eventstream.ScopeSubagent &&
+		!b.pendingSince.IsZero() && now.Sub(b.pendingSince) < eventStreamSubagentBatchMaxDelay {
+		return
+	}
+	b.flush(send)
 }
 
 func (b *eventStreamNarrativeBatcher) flush(send func(tea.Msg)) {
@@ -171,6 +190,7 @@ func (b *eventStreamNarrativeBatcher) flush(send func(tea.Msg)) {
 	}
 	b.pending = nil
 	b.key = ""
+	b.pendingSince = time.Time{}
 }
 
 func eventStreamNarrativeBatchKey(env eventstream.Envelope) (string, bool) {
