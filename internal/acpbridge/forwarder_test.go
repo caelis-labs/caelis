@@ -467,9 +467,9 @@ func acpNarrativeEnvelope(text string, meta map[string]any) *eventstream.Envelop
 
 func newTestSessionService(t *testing.T, sessionID string) (session.Service, session.Session) {
 	t.Helper()
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{
+	sessions := inmemory.NewStore(inmemory.Config{
 		SessionIDGenerator: func() string { return sessionID },
-	}))
+	})
 	activeSession, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",

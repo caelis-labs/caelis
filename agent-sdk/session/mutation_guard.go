@@ -2,7 +2,9 @@ package session
 
 import (
 	"context"
+	"errors"
 	"strings"
+	"time"
 )
 
 // MutationAuthority identifies the explicit authority for a session mutation.
@@ -119,6 +121,51 @@ func ValidateControlMutationGuard(guard MutationGuard) error {
 	}
 	if !hasLeaseID && controlMutationRequiresFence(purpose) {
 		return &LeaseConflictError{Detail: "control mutation purpose requires a matching runtime lease fence"}
+	}
+	return nil
+}
+
+// AuthorizeMutationGuard applies the shared lease-fence decision for one
+// mutation. Persistence implementations call it while holding their own
+// transaction lock; it does not read or mutate backend state.
+func AuthorizeMutationGuard(active SessionLease, guard MutationGuard, now time.Time) error {
+	conflict := func(detail string) error {
+		return &LeaseConflictError{SessionID: NormalizeSessionRef(active.SessionRef).SessionID, Detail: detail}
+	}
+	if guard.Authority == MutationAuthorityControl {
+		if err := ValidateControlMutationGuard(guard); err != nil {
+			var leaseErr *LeaseConflictError
+			if errors.As(err, &leaseErr) {
+				leaseErr.SessionID = NormalizeSessionRef(active.SessionRef).SessionID
+			}
+			return err
+		}
+		hasFence := strings.TrimSpace(guard.LeaseID) != ""
+		if hasFence {
+			if active.LeaseID == "" || !active.ExpiresAt.After(now) {
+				return conflict("control mutation fence is absent or expired")
+			}
+			if active.LeaseID != strings.TrimSpace(guard.LeaseID) || active.OwnerID != strings.TrimSpace(guard.OwnerID) || active.FencingToken != guard.FencingToken {
+				return conflict("control mutation fencing token is stale")
+			}
+			return nil
+		}
+		if active.LeaseID != "" && active.ExpiresAt.After(now) && !ControlMutationMayOverlapRuntimeLease(guard.Purpose) {
+			return conflict("active execution lease requires a matching control fence")
+		}
+		return nil
+	}
+	if guard.Authority != MutationAuthorityRuntime {
+		if active.LeaseID == "" {
+			return nil
+		}
+		return conflict("active lease requires explicit mutation authority")
+	}
+	if active.LeaseID == "" || !active.ExpiresAt.After(now) {
+		return conflict("runtime lease is absent or expired")
+	}
+	if active.LeaseID != strings.TrimSpace(guard.LeaseID) || active.OwnerID != strings.TrimSpace(guard.OwnerID) || active.FencingToken != guard.FencingToken {
+		return conflict("runtime fencing token is stale")
 	}
 	return nil
 }

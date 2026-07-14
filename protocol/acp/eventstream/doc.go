@@ -21,15 +21,14 @@
 //     session/request_permission messages; Caelis extension events remain
 //     extension envelopes on non-stdio streams.
 //
-// Cursor values are opaque resume ids and are unique per envelope. Live cursors
-// are stream-local ordering ids; replay cursors are durable projection cursors.
-// Session-derived envelopes also carry EventID, the durable source session event
-// id, and ProjectionID, the stable per-source projection id. Clients that bridge
-// from a live stream to durable ReplayEvents should resume with ProjectionID
-// when it is present, not the live Cursor. Clients should render standard ACP
+// Cursor values are opaque signed resume ids issued by the Control Session
+// feed and are unique per envelope. Session-derived envelopes also carry
+// EventID, the durable source session event id, and ProjectionID, the stable
+// per-source projection identity. Neither identity is accepted as a resume
+// token. Clients should render standard ACP
 // payloads directly; helpers in this package only identify those payloads and
-// expose replay/run-state metadata without depending on TUI transcript view
-// models. Final marks a completed semantic projection for the scoped
+// without depending on TUI transcript view models. Final marks a completed
+// semantic projection for the scoped
 // actor/message, while lifecycle terminal states close the turn stream.
 // ParentTool and Delivery are Caelis Envelope fields, never custom fields in
 // an ACP update payload. ParentTool carries only a real delegated parent tool

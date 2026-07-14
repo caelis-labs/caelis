@@ -68,10 +68,10 @@ func pauseTokenFromEvent(event *session.Event) *session.PauseToken {
 func TestResolveApprovalDeliversFileStoreCommittedResolution(t *testing.T) {
 	t.Parallel()
 
-	base := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{
+	base := sessionfile.NewStore(sessionfile.Config{
 		RootDir:            t.TempDir(),
 		SessionIDGenerator: func() string { return "sess-approval-committed" },
-	}))
+	})
 	sessions := &postCommitApprovalService{Service: base}
 	activeSession, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis",
@@ -263,9 +263,9 @@ func TestResolveApprovalRecoversCommittedDecisionAfterResolverCancellation(t *te
 			var base session.Service
 			switch kind {
 			case "memory":
-				base = inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+				base = inmemory.NewStore(inmemory.Config{})
 			case "file":
-				base = sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()}))
+				base = sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()})
 			}
 			resolverCtx, cancel := context.WithCancel(context.Background())
 			sessions := &cancelAfterCommitApprovalService{Service: base, cancel: cancel}

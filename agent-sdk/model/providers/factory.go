@@ -124,11 +124,6 @@ func (f *Factory) NewByAlias(alias string) (model.LLM, error) {
 	return model.WithRetry(llm, cfg.Retry), nil
 }
 
-// NewByAlias creates a model provider from a new empty factory.
-func NewByAlias(alias string) (model.LLM, error) {
-	return NewFactory().NewByAlias(alias)
-}
-
 // ListModels returns available aliases from current factory.
 func (f *Factory) ListModels() []string {
 	if f == nil {
@@ -140,11 +135,6 @@ func (f *Factory) ListModels() []string {
 	}
 	sort.Strings(out)
 	return out
-}
-
-// ListModels returns aliases from a new empty factory.
-func ListModels() []string {
-	return NewFactory().ListModels()
 }
 
 // ConfigForAlias returns the registered Config for the given alias.

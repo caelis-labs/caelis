@@ -111,7 +111,7 @@ func TestApprovalRecoveryGateDefersForeignLeaseAndSettlesAfterExpiry(t *testing.
 		SessionIDGenerator: func() string { return "deferred-recovery-session" },
 		Clock:              clock.Now,
 	})
-	service := inmemory.NewService(store)
+	service := store
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	active, err := service.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})

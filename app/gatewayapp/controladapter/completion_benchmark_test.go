@@ -28,20 +28,16 @@ func (g completionBenchmarkGateway) ListSessions(ctx context.Context, req gatewa
 	})
 }
 
-func (g completionBenchmarkGateway) ReplayEvents(context.Context, gateway.ReplayEventsRequest) (gateway.ReplayEventsResult, error) {
-	return gateway.ReplayEventsResult{}, nil
-}
-
 func BenchmarkResumeCompletion200Sessions500Events(b *testing.B) {
 	ctx := context.Background()
 	nextID := 0
-	service := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{
+	service := sessionfile.NewStore(sessionfile.Config{
 		RootDir: b.TempDir(),
 		SessionIDGenerator: func() string {
 			nextID++
 			return fmt.Sprintf("session-%04d", nextID)
 		},
-	}))
+	})
 	events := make([]*session.Event, 500)
 	for i := range events {
 		events[i] = &session.Event{

@@ -581,21 +581,6 @@ type EventScope struct {
 	ACP         ACPRef         `json:"acp,omitempty"`
 }
 
-// Store is the low-level durable session persistence boundary.
-type Store interface {
-	GetOrCreate(context.Context, StartSessionRequest) (Session, error)
-	Get(context.Context, SessionRef) (Session, error)
-	List(context.Context, ListSessionsRequest) (SessionList, error)
-	AppendEvent(context.Context, SessionRef, *Event) (*Event, error)
-	Events(context.Context, EventsRequest) ([]*Event, error)
-	BindController(context.Context, SessionRef, ControllerBinding) (Session, error)
-	PutParticipant(context.Context, SessionRef, ParticipantBinding) (Session, error)
-	RemoveParticipant(context.Context, SessionRef, string) (Session, error)
-	SnapshotState(context.Context, SessionRef) (map[string]any, error)
-	ReplaceState(context.Context, ReplaceStateRequest) (Session, error)
-	UpdateState(context.Context, UpdateStateRequest) (Session, error)
-}
-
 // Lifecycle starts, loads, and lists sessions without granting mutation of an
 // already active session.
 type Lifecycle interface {

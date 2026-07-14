@@ -16,10 +16,10 @@ func TestEventCheckpointFindsReplayTailAndIgnoresIncompleteAppend(t *testing.T) 
 	t.Parallel()
 
 	store, active := newEventPageIndexFixture(t, 2)
-	if _, err := store.AppendEvent(context.Background(), active.SessionRef, &session.Event{
+	if _, err := store.AppendEvent(context.Background(), session.AppendEventRequest{SessionRef: active.SessionRef, Event: &session.Event{
 		ID: "journal-0003", Type: session.EventTypeLifecycle, Visibility: session.VisibilityJournal,
 		Lifecycle: &session.EventLifecycle{Status: "prepared"},
-	}); err != nil {
+	}}); err != nil {
 		t.Fatal(err)
 	}
 	assertCheckpoint := func() {
@@ -310,9 +310,10 @@ func newEventPageIndexFixture(t testing.TB, count int) (*Store, session.Session)
 		RootDir:            t.TempDir(),
 		SessionIDGenerator: func() string { return "event-page-index-session" },
 	})
-	active, err := store.GetOrCreate(context.Background(), session.StartSessionRequest{
+	active, err := store.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis", UserID: "user-1", Workspace: session.WorkspaceRef{Key: "ws-1"},
 	})
+
 	if err != nil {
 		t.Fatal(err)
 	}

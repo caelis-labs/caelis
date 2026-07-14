@@ -15,6 +15,7 @@ import (
 )
 
 type openAICompatLLM struct {
+	api                 APIType
 	name                string
 	provider            string
 	baseURL             string
@@ -26,6 +27,7 @@ type openAICompatLLM struct {
 	maxOutputTok        int
 	contextWindowTokens int
 	options             openAICompatOptions
+	openRouter          OpenRouterConfig
 }
 
 type openAICompatOptions struct {
@@ -66,6 +68,7 @@ const (
 
 func newOpenAICompat(cfg Config, token string) *openAICompatLLM {
 	llm := &openAICompatLLM{
+		api:                 APIOpenAICompatible,
 		name:                cfg.Model,
 		provider:            cfg.Provider,
 		baseURL:             strings.TrimRight(cfg.BaseURL, "/"),
@@ -146,11 +149,18 @@ func (l *openAICompatLLM) Generate(ctx context.Context, req *model.Request) iter
 			tools = append(tools, l.options.ProviderTools(l.name, req.Tools)...)
 		}
 		payload := openAICompatRequest{
-			Model:     l.name,
+			Model:     l.requestModel(),
 			Messages:  l.fromKernelMessages(req.Instructions, req.Messages),
 			Tools:     tools,
 			Stream:    req.Stream,
 			MaxTokens: l.maxOutputTok,
+		}
+		if l.api == APIOpenRouter {
+			payload.Models = normalizeOpenRouterModelIDs(l.openRouter.Models)
+			payload.Route = strings.TrimSpace(l.openRouter.Route)
+			payload.Transforms = cloneStringSlice(l.openRouter.Transforms)
+			payload.Provider = cloneAnyMap(l.openRouter.Provider)
+			payload.Plugins = cloneMapSlice(l.openRouter.Plugins)
 		}
 		applyOpenAICompatOutput(&payload, req.Output, l.options.StructuredOutput)
 		if req.Stream {
@@ -180,8 +190,8 @@ func (l *openAICompatLLM) Generate(ctx context.Context, req *model.Request) iter
 			return
 		}
 		httpReq.Header.Set("Content-Type", "application/json")
-		applyDefaultAttributionHeaders(httpReq, APIOpenAICompatible)
-		applyDefaultAuthHeader(httpReq, Config{API: APIOpenAICompatible, Provider: l.provider}, l.token, false)
+		applyDefaultAttributionHeaders(httpReq, l.api)
+		applyDefaultAuthHeader(httpReq, Config{API: l.api, Provider: l.provider}, l.token, false)
 		applyConfiguredHeaders(httpReq, l.headers)
 
 		resp, err := l.client.Do(httpReq)
@@ -261,11 +271,12 @@ func (l *openAICompatLLM) Generate(ctx context.Context, req *model.Request) iter
 					return errStopSSE
 				}
 			}
-			if delta.ReasoningContent != "" {
-				acc.reasoning.WriteString(delta.ReasoningContent)
+			reasoning := firstNonEmpty(delta.Reasoning, delta.ReasoningContent)
+			if reasoning != "" {
+				acc.reasoning.WriteString(reasoning)
 				if !yield(&model.StreamEvent{
 					Type:      model.StreamEventPartDelta,
-					PartDelta: &model.PartDelta{Kind: model.PartKindReasoning, TextDelta: delta.ReasoningContent},
+					PartDelta: &model.PartDelta{Kind: model.PartKindReasoning, TextDelta: reasoning},
 				}, nil) {
 					stopped = true
 					return errStopSSE
@@ -314,6 +325,13 @@ func (l *openAICompatLLM) Generate(ctx context.Context, req *model.Request) iter
 	}
 }
 
+func (l *openAICompatLLM) requestModel() string {
+	if l != nil && l.api == APIOpenRouter {
+		return normalizeOpenRouterModelID(l.name)
+	}
+	return l.name
+}
+
 func cloneHeaders(in map[string]string) map[string]string {
 	if len(in) == 0 {
 		return nil
@@ -334,7 +352,9 @@ func cloneHeaders(in map[string]string) map[string]string {
 }
 
 type openAICompatRequest struct {
-	Model           string                     `json:"model"`
+	Model           string                     `json:"model,omitempty"`
+	Models          []string                   `json:"models,omitempty"`
+	Route           string                     `json:"route,omitempty"`
 	ModelName       string                     `json:"modelName,omitempty"`
 	Messages        []openAICompatReqMsg       `json:"messages"`
 	Tools           []openAICompatTool         `json:"tools,omitempty"`
@@ -347,6 +367,9 @@ type openAICompatRequest struct {
 	ReasoningEffort string                     `json:"reasoning_effort,omitempty"`
 	Reasoning       *openAIReasoning           `json:"reasoning,omitempty"`
 	Thinking        *openAIThinking            `json:"thinking,omitempty"`
+	Transforms      []string                   `json:"transforms,omitempty"`
+	Provider        map[string]any             `json:"provider,omitempty"`
+	Plugins         []map[string]any           `json:"plugins,omitempty"`
 }
 
 type openAIResponseFormat struct {

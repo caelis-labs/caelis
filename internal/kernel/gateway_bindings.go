@@ -6,50 +6,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
-func (g *Gateway) LookupBinding(req BindingStateRequest) (BindingState, error) {
-	if strings.TrimSpace(req.BindingKey) == "" {
-		return BindingState{}, &Error{
-			Kind:        KindValidation,
-			Code:        CodeInvalidRequest,
-			UserVisible: true,
-			Message:     "gateway: binding key is required",
-		}
-	}
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	binding, ok := g.bindingLocked(strings.TrimSpace(req.BindingKey))
-	if !ok {
-		return BindingState{}, &Error{
-			Kind:        KindNotFound,
-			Code:        CodeBindingNotFound,
-			UserVisible: true,
-			Message:     "gateway: binding not found",
-		}
-	}
-	state := BindingState{
-		BindingKey:      strings.TrimSpace(req.BindingKey),
-		SessionRef:      binding.current,
-		Surface:         binding.surface,
-		ActorKind:       binding.actorKind,
-		ActorID:         binding.actorID,
-		Owner:           binding.owner,
-		BoundAt:         binding.boundAt,
-		UpdatedAt:       binding.updatedAt,
-		ExpiresAt:       binding.expiresAt,
-		LastHandleID:    binding.lastHandleID,
-		LastRunID:       binding.lastRunID,
-		LastTurnID:      binding.lastTurnID,
-		LastEventCursor: binding.lastEventCursor,
-	}
-	if active, ok := g.active[binding.current.SessionID]; ok && active != nil {
-		state.HasActiveTurn = true
-		state.LastHandleID = active.HandleID()
-		state.LastRunID = active.RunID()
-		state.LastTurnID = active.TurnID()
-	}
-	return state, nil
-}
-
 func (g *Gateway) releaseActive(sessionID string, handle *turnHandle) {
 	g.mu.Lock()
 	defer g.mu.Unlock()

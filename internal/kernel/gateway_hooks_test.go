@@ -34,7 +34,7 @@ func TestSessionStartHookRunsOnceAndPersists(t *testing.T) {
 	t.Parallel()
 
 	// 1. Create a memory session service correctly
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	sessions := inmemory.NewStore(inmemory.Config{})
 	ctx := context.Background()
 
 	sess, err := sessions.StartSession(ctx, session.StartSessionRequest{
@@ -200,7 +200,7 @@ func TestSessionStartHookRunsOnceAndPersists(t *testing.T) {
 func TestSessionStartHookFailure(t *testing.T) {
 	t.Parallel()
 
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	sessions := inmemory.NewStore(inmemory.Config{})
 	ctx := context.Background()
 
 	sess, err := sessions.StartSession(ctx, session.StartSessionRequest{
@@ -343,9 +343,9 @@ func TestSessionStartHookResumeWithFileStore(t *testing.T) {
 	t.Parallel()
 
 	storeDir := t.TempDir()
-	sessions := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{
+	sessions := sessionfile.NewStore(sessionfile.Config{
 		RootDir: storeDir,
-	}))
+	})
 	ctx := context.Background()
 
 	sess, err := sessions.StartSession(ctx, session.StartSessionRequest{
@@ -404,9 +404,9 @@ func TestSessionStartHookResumeWithFileStore(t *testing.T) {
 	}
 
 	// Recreate the session service (simulating load/resume) and gateway
-	sessions2 := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{
+	sessions2 := sessionfile.NewStore(sessionfile.Config{
 		RootDir: storeDir,
-	}))
+	})
 
 	gw2, err := New(Config{
 		Sessions:          sessions2,
@@ -456,7 +456,7 @@ func TestSessionStartHookResumeWithFileStore(t *testing.T) {
 func TestHookDigestDifferentiatesArgsAndEnv(t *testing.T) {
 	t.Parallel()
 
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	sessions := inmemory.NewStore(inmemory.Config{})
 	ctx := context.Background()
 
 	sess, err := sessions.StartSession(ctx, session.StartSessionRequest{
@@ -548,7 +548,7 @@ func TestHookDigestDifferentiatesArgsAndEnv(t *testing.T) {
 func TestHookEnvAndCompatEnv(t *testing.T) {
 	t.Parallel()
 
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	sessions := inmemory.NewStore(inmemory.Config{})
 	ctx := context.Background()
 
 	wsDir := t.TempDir()
@@ -627,7 +627,7 @@ func TestHookEnvAndCompatEnv(t *testing.T) {
 func TestHookTimeout(t *testing.T) {
 	t.Parallel()
 
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	sessions := inmemory.NewStore(inmemory.Config{})
 	ctx := context.Background()
 
 	sess, err := sessions.StartSession(ctx, session.StartSessionRequest{
@@ -706,7 +706,7 @@ func TestHookTimeout(t *testing.T) {
 func TestSessionStartHookTruncation(t *testing.T) {
 	t.Parallel()
 
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	sessions := inmemory.NewStore(inmemory.Config{})
 	ctx := context.Background()
 
 	sess, err := sessions.StartSession(ctx, session.StartSessionRequest{
@@ -794,7 +794,7 @@ func TestSessionStartHookRunsOnceAndPersistsEmptyStdout(t *testing.T) {
 	t.Parallel()
 
 	// 1. Create a memory session service
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	sessions := inmemory.NewStore(inmemory.Config{})
 	ctx := context.Background()
 
 	sess, err := sessions.StartSession(ctx, session.StartSessionRequest{

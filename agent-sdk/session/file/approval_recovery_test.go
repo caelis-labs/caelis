@@ -17,7 +17,7 @@ import (
 
 func TestPendingApprovalsUsesPersistedIndexWithoutReadingEventLog(t *testing.T) {
 	root := t.TempDir()
-	service := NewService(NewStore(Config{RootDir: root, SessionIDGenerator: func() string { return "session-indexed" }}))
+	service := NewStore(Config{RootDir: root, SessionIDGenerator: func() string { return "session-indexed" }})
 	ctx := context.Background()
 	active, err := service.StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis", UserID: "user-1", Workspace: session.WorkspaceRef{Key: "ws-1"},
@@ -34,7 +34,7 @@ func TestPendingApprovalsUsesPersistedIndexWithoutReadingEventLog(t *testing.T) 
 	if err := os.Rename(eventLogPath(documentPath), eventLogPath(documentPath)+".hidden"); err != nil {
 		t.Fatal(err)
 	}
-	pending, err := NewService(NewStore(Config{RootDir: root})).PendingApprovals(ctx)
+	pending, err := NewStore(Config{RootDir: root}).PendingApprovals(ctx)
 	if err != nil {
 		t.Fatalf("PendingApprovals() error = %v, want persisted-index read", err)
 	}
@@ -45,7 +45,7 @@ func TestPendingApprovalsUsesPersistedIndexWithoutReadingEventLog(t *testing.T) 
 
 func TestPendingApprovalsSettlementRemovesPersistedIndexEntry(t *testing.T) {
 	root := t.TempDir()
-	service := NewService(NewStore(Config{RootDir: root, SessionIDGenerator: func() string { return "session-settled" }}))
+	service := NewStore(Config{RootDir: root, SessionIDGenerator: func() string { return "session-settled" }})
 	ctx := context.Background()
 	active, err := service.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
 	if err != nil {
@@ -61,7 +61,7 @@ func TestPendingApprovalsSettlementRemovesPersistedIndexEntry(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reopened := NewService(NewStore(Config{RootDir: root}))
+	reopened := NewStore(Config{RootDir: root})
 	pending, err := reopened.PendingApprovals(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -79,7 +79,7 @@ func TestPendingApprovalsSettlementRemovesPersistedIndexEntry(t *testing.T) {
 
 func TestSettlePendingApprovalRejectsStaleSnapshotAfterLiveResolutionAndLeaseRelease(t *testing.T) {
 	root := t.TempDir()
-	service := NewService(NewStore(Config{RootDir: root, SessionIDGenerator: func() string { return "session-settlement-cas" }}))
+	service := NewStore(Config{RootDir: root, SessionIDGenerator: func() string { return "session-settlement-cas" }})
 	ctx := context.Background()
 	active, err := service.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
 	if err != nil {
@@ -160,7 +160,7 @@ func TestSettlePendingApprovalRejectsStaleSnapshotAfterLiveResolutionAndLeaseRel
 func TestPendingApprovalsRebuildsLegacyIndexWithoutSemanticMutation(t *testing.T) {
 	root := t.TempDir()
 	store := NewStore(Config{RootDir: root, SessionIDGenerator: func() string { return "session-legacy-index" }})
-	service := NewService(store)
+	service := store
 	ctx := context.Background()
 	active, err := service.StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis", UserID: "user-1", Workspace: session.WorkspaceRef{Key: "ws-1"},
@@ -188,14 +188,14 @@ func TestPendingApprovalsRebuildsLegacyIndexWithoutSemanticMutation(t *testing.T
 	document.PendingApprovals = nil
 	writePersistedDocument(t, documentPath, document)
 
-	pending, err := NewService(NewStore(Config{RootDir: root})).PendingApprovals(ctx)
+	pending, err := NewStore(Config{RootDir: root}).PendingApprovals(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(pending) != 1 || pending[0].Request.ApprovalRequestID != "approval-legacy" {
 		t.Fatalf("legacy PendingApprovals() = %#v, want rebuilt request", pending)
 	}
-	after, err := NewService(NewStore(Config{RootDir: root})).LoadSession(ctx, session.LoadSessionRequest{SessionRef: active.SessionRef})
+	after, err := NewStore(Config{RootDir: root}).LoadSession(ctx, session.LoadSessionRequest{SessionRef: active.SessionRef})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +205,7 @@ func TestPendingApprovalsRebuildsLegacyIndexWithoutSemanticMutation(t *testing.T
 	if err := os.Rename(eventLogPath(documentPath), eventLogPath(documentPath)+".hidden"); err != nil {
 		t.Fatal(err)
 	}
-	pending, err = NewService(NewStore(Config{RootDir: root})).PendingApprovals(ctx)
+	pending, err = NewStore(Config{RootDir: root}).PendingApprovals(ctx)
 	if err != nil || len(pending) != 1 {
 		t.Fatalf("persisted rebuilt index = %#v, %v, want one without event log", pending, err)
 	}
@@ -214,7 +214,7 @@ func TestPendingApprovalsRebuildsLegacyIndexWithoutSemanticMutation(t *testing.T
 func TestPendingApprovalIndexRecoversWithCommittedWAL(t *testing.T) {
 	root := t.TempDir()
 	store := NewStore(Config{RootDir: root, SessionIDGenerator: func() string { return "session-wal-index" }})
-	service := NewService(store)
+	service := store
 	ctx := context.Background()
 	active, err := service.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
 	if err != nil {
@@ -232,7 +232,7 @@ func TestPendingApprovalIndexRecoversWithCommittedWAL(t *testing.T) {
 		t.Fatalf("AppendEvent() error = %v, want committed error", err)
 	}
 
-	reopened := NewService(NewStore(Config{RootDir: root}))
+	reopened := NewStore(Config{RootDir: root})
 	pending, err := reopened.PendingApprovals(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -251,7 +251,7 @@ func TestPendingApprovalIndexRecoversWithCommittedWAL(t *testing.T) {
 func TestPendingApprovalsReleasesLocksBetweenLegacySessions(t *testing.T) {
 	root := t.TempDir()
 	setupStore := NewStore(Config{RootDir: root})
-	setup := NewService(setupStore)
+	setup := setupStore
 	ctx := context.Background()
 	sessions := make([]session.Session, 0, 3)
 	for i := 0; i < 3; i++ {
@@ -314,7 +314,7 @@ func TestPendingApprovalsReleasesLocksBetweenLegacySessions(t *testing.T) {
 		t.Fatal("legacy recovery did not finish its first Session")
 	}
 
-	interactions := NewService(NewStore(Config{RootDir: root}))
+	interactions := NewStore(Config{RootDir: root})
 	interactionCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	listed, err := interactions.ListSessions(interactionCtx, session.ListSessionsRequest{
@@ -348,7 +348,7 @@ func TestPendingApprovalsUsesStableNamespaceSnapshotWithoutRecoveryScanAmplifica
 	var recoveryScans atomic.Int64
 	setupStore := NewStore(Config{RootDir: root, Clock: func() time.Time { return base }})
 	setupStore.transactionRecoveryScan = func() { recoveryScans.Add(1) }
-	setup := NewService(setupStore)
+	setup := setupStore
 	ctx := context.Background()
 	const sessionCount = 130
 	var target session.Session
@@ -375,7 +375,7 @@ func TestPendingApprovalsUsesStableNamespaceSnapshotWithoutRecoveryScanAmplifica
 	var reorderOnce sync.Once
 	recoveryStore.approvalRecoverySessionDone = func(session.SessionRef) {
 		reorderOnce.Do(func() {
-			mutator := NewService(NewStore(Config{RootDir: root, Clock: func() time.Time { return base.Add(time.Hour) }}))
+			mutator := NewStore(Config{RootDir: root, Clock: func() time.Time { return base.Add(time.Hour) }})
 			if _, err := mutator.ReplaceState(context.Background(), session.ReplaceStateRequest{
 				SessionRef:    target.SessionRef,
 				State:         map[string]any{"reordered": true},

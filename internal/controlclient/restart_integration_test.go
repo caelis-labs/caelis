@@ -14,10 +14,10 @@ import (
 func TestProcessRestartRebuildsDurableClientStateFromSessionTruth(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
-	newService := func() *sessionfile.Service {
-		return sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{
+	newService := func() *sessionfile.Store {
+		return sessionfile.NewStore(sessionfile.Config{
 			RootDir: root, SessionIDGenerator: func() string { return "session-1" },
-		}))
+		})
 	}
 	beforeRestart := newService()
 	active, err := beforeRestart.StartSession(ctx, session.StartSessionRequest{

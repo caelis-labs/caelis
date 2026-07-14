@@ -43,15 +43,6 @@ type LoadSessionRequest struct {
 	Binding          BindingDescriptor
 }
 
-type ForkSessionRequest struct {
-	SourceSessionRef   session.SessionRef
-	PreferredSessionID string
-	Title              string
-	Metadata           map[string]any
-	BindingKey         string
-	Binding            BindingDescriptor
-}
-
 type ResumeSessionRequest struct {
 	AppName          string
 	UserID           string
@@ -98,18 +89,6 @@ type BindSessionRequest struct {
 	SessionRef session.SessionRef `json:"session_ref"`
 	BindingKey string             `json:"binding_key,omitempty"`
 	Binding    BindingDescriptor  `json:"binding,omitempty"`
-}
-
-type ReplayEventsRequest struct {
-	SessionRef session.SessionRef `json:"session_ref"`
-	BindingKey string             `json:"binding_key,omitempty"`
-	// Cursor is a legacy in-process kernel replay offset. Public Control clients
-	// use only the signed Envelope.Cursor through ports/controlclient.
-	Cursor string `json:"cursor,omitempty"`
-	// Limit caps source session events, not projected envelopes, so one source
-	// event may still expand to multiple semantic ACP envelopes.
-	Limit            int  `json:"limit,omitempty"`
-	IncludeTransient bool `json:"include_transient,omitempty"`
 }
 
 type HandoffControllerRequest struct {
@@ -181,10 +160,6 @@ type ControlPlaneStateRequest struct {
 	BindingKey string
 }
 
-type BindingStateRequest struct {
-	BindingKey string `json:"binding_key,omitempty"`
-}
-
 type ActiveTurnState struct {
 	SessionRef    session.SessionRef `json:"session_ref"`
 	Kind          ActiveTurnKind     `json:"kind,omitempty"`
@@ -249,32 +224,6 @@ type ControlPlaneState struct {
 	Continuity    ContinuityState    `json:"continuity,omitempty"`
 	RunState      agent.RunState     `json:"run_state,omitempty"`
 	HasActiveTurn bool               `json:"has_active_turn,omitempty"`
-}
-
-type BindingState struct {
-	BindingKey      string             `json:"binding_key,omitempty"`
-	SessionRef      session.SessionRef `json:"session_ref"`
-	Surface         string             `json:"surface,omitempty"`
-	ActorKind       string             `json:"actor_kind,omitempty"`
-	ActorID         string             `json:"actor_id,omitempty"`
-	Owner           string             `json:"owner,omitempty"`
-	BoundAt         time.Time          `json:"bound_at,omitempty"`
-	UpdatedAt       time.Time          `json:"updated_at,omitempty"`
-	ExpiresAt       time.Time          `json:"expires_at,omitempty"`
-	LastHandleID    string             `json:"last_handle_id,omitempty"`
-	LastRunID       string             `json:"last_run_id,omitempty"`
-	LastTurnID      string             `json:"last_turn_id,omitempty"`
-	LastEventCursor string             `json:"last_event_cursor,omitempty"`
-	HasActiveTurn   bool               `json:"has_active_turn,omitempty"`
-}
-
-type ReplayEventsResult struct {
-	SessionRef    session.SessionRef     `json:"session_ref"`
-	Events        []eventstream.Envelope `json:"events,omitempty"`
-	NextCursor    string                 `json:"next_cursor,omitempty"`
-	Durable       bool                   `json:"durable,omitempty"`
-	HasLiveHandle bool                   `json:"has_live_handle,omitempty"`
-	ControlPlane  ControlPlaneState      `json:"control_plane"`
 }
 
 type ResolvedTurn struct {

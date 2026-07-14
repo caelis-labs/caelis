@@ -11,7 +11,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	controller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
-	"github.com/caelis-labs/caelis/ports/gateway"
 	"github.com/caelis-labs/caelis/protocol/acp"
 )
 
@@ -69,14 +68,6 @@ func (s *Stack) Status() StatusService {
 
 func (s *Stack) ACPSurface(modes acp.ModeProvider, useFallbackModes bool, configs acp.ConfigProvider) ACPSurfaceService {
 	return newGatewayACPSurface(s, modes, useFallbackModes, configs)
-}
-
-// Kernel returns the current aggregate gateway service.
-//
-// Deprecated: use KernelTurns, KernelSessions, KernelControlPlane, or
-// KernelStreams so production callers depend on the narrow service they need.
-func (s *Stack) Kernel() gateway.Service {
-	return s.kernelRuntime()
 }
 
 func (s ModelService) Connect(cfg ModelConfig) (string, error) {

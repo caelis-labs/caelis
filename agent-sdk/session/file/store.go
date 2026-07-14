@@ -32,14 +32,6 @@ func NewStore(cfg Config) *Store {
 	return store
 }
 
-// NewService constructs one session service backed by one file store.
-func NewService(store *Store) *Service {
-	if store == nil {
-		store = NewStore(Config{})
-	}
-	return &Service{store: store}
-}
-
 func (s *Store) withRootWriteLock(fn func() error) error {
 	return s.withRootLockContext(context.Background(), storeRootLockExclusive, fn)
 }
@@ -140,7 +132,7 @@ func (s *Store) normalizedRootDir() string {
 	return filepath.Clean(root)
 }
 
-func (s *Store) GetOrCreate(
+func (s *Store) StartSession(
 	ctx context.Context,
 	req session.StartSessionRequest,
 ) (session.Session, error) {
@@ -218,7 +210,7 @@ func (s *Store) GetOrCreate(
 	return out, nil
 }
 
-func (s *Store) Get(
+func (s *Store) Session(
 	ctx context.Context,
 	ref session.SessionRef,
 ) (session.Session, error) {
@@ -241,7 +233,7 @@ func (s *Store) Get(
 	return out, nil
 }
 
-func (s *Store) List(
+func (s *Store) ListSessions(
 	ctx context.Context,
 	req session.ListSessionsRequest,
 ) (session.SessionList, error) {
@@ -266,10 +258,9 @@ func (s *Store) List(
 
 func (s *Store) AppendEvent(
 	ctx context.Context,
-	ref session.SessionRef,
-	event *session.Event,
+	req session.AppendEventRequest,
 ) (*session.Event, error) {
-	return s.appendEventRequest(ctx, session.AppendEventRequest{SessionRef: ref, Event: event})
+	return s.appendEventRequest(ctx, req)
 }
 
 func (s *Store) appendEventRequest(ctx context.Context, req session.AppendEventRequest) (*session.Event, error) {
@@ -571,10 +562,9 @@ func (s *Store) EventCheckpoint(
 
 func (s *Store) BindController(
 	ctx context.Context,
-	ref session.SessionRef,
-	binding session.ControllerBinding,
+	req session.BindControllerRequest,
 ) (session.Session, error) {
-	return s.bindControllerRequest(ctx, session.BindControllerRequest{SessionRef: ref, Binding: binding})
+	return s.bindControllerRequest(ctx, req)
 }
 
 func (s *Store) bindControllerRequest(ctx context.Context, req session.BindControllerRequest) (session.Session, error) {
@@ -659,10 +649,9 @@ func (s *Store) BindControllerWithEvent(
 
 func (s *Store) PutParticipant(
 	ctx context.Context,
-	ref session.SessionRef,
-	binding session.ParticipantBinding,
+	req session.PutParticipantRequest,
 ) (session.Session, error) {
-	return s.putParticipantRequest(ctx, session.PutParticipantRequest{SessionRef: ref, Binding: binding})
+	return s.putParticipantRequest(ctx, req)
 }
 
 func (s *Store) putParticipantRequest(ctx context.Context, req session.PutParticipantRequest) (session.Session, error) {
@@ -779,10 +768,9 @@ func (s *Store) PutParticipantWithEvent(
 
 func (s *Store) RemoveParticipant(
 	ctx context.Context,
-	ref session.SessionRef,
-	participantID string,
+	req session.RemoveParticipantRequest,
 ) (session.Session, error) {
-	return s.removeParticipantRequest(ctx, session.RemoveParticipantRequest{SessionRef: ref, ParticipantID: participantID})
+	return s.removeParticipantRequest(ctx, req)
 }
 
 func (s *Store) removeParticipantRequest(ctx context.Context, req session.RemoveParticipantRequest) (session.Session, error) {
@@ -998,7 +986,7 @@ func (s *Store) UpdateState(
 	return out, err
 }
 
-func (s *Store) LoadDocument(
+func (s *Store) LoadSession(
 	ctx context.Context,
 	req session.LoadSessionRequest,
 ) (session.LoadedSession, error) {

@@ -33,7 +33,7 @@ func TestStoreAppendAndPersistCanonicalEvents(t *testing.T) {
 	})
 	ctx := context.Background()
 
-	createdSession, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+	createdSession, err := store.StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
 		Workspace: session.WorkspaceRef{
@@ -41,19 +41,20 @@ func TestStoreAppendAndPersistCanonicalEvents(t *testing.T) {
 			CWD: "/tmp/ws",
 		},
 	})
+
 	if err != nil {
-		t.Fatalf("GetOrCreate() error = %v", err)
+		t.Fatalf("StartSession() error = %v", err)
 	}
 
-	if _, err := store.AppendEvent(ctx, createdSession.SessionRef, &session.Event{
+	if _, err := store.AppendEvent(ctx, session.AppendEventRequest{SessionRef: createdSession.SessionRef, Event: &session.Event{
 		Message: ptrMessage(model.NewTextMessage(model.RoleAssistant, "hello")),
 		Text:    "hello",
-	}); err != nil {
+	}}); err != nil {
 		t.Fatalf("AppendEvent() error = %v", err)
 	}
-	if _, err := store.AppendEvent(ctx, createdSession.SessionRef, session.MarkNotice(&session.Event{
+	if _, err := store.AppendEvent(ctx, session.AppendEventRequest{SessionRef: createdSession.SessionRef, Event: session.MarkNotice(&session.Event{
 		Message: ptrMessage(model.NewTextMessage(model.RoleSystem, "warn: retrying")),
-	}, "warn", "retrying")); err != nil {
+	}, "warn", "retrying")}); err != nil {
 		t.Fatalf("AppendEvent(notice) error = %v", err)
 	}
 
@@ -94,13 +95,13 @@ func TestStoreEventsPageStreamsCanonicalAndMirrorBySequence(t *testing.T) {
 
 	store := NewStore(Config{RootDir: t.TempDir(), SessionIDGenerator: func() string { return "paged-session" }})
 	ctx := context.Background()
-	active, err := store.GetOrCreate(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
+	active, err := store.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	appendEvent := func(event *session.Event) {
 		t.Helper()
-		if _, err := store.AppendEvent(ctx, active.SessionRef, event); err != nil {
+		if _, err := store.AppendEvent(ctx, session.AppendEventRequest{SessionRef: active.SessionRef, Event: event}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -134,7 +135,7 @@ func TestStoreEventsPageDoesNotDecodePayloadBeforeCursor(t *testing.T) {
 	t.Parallel()
 
 	store := NewStore(Config{RootDir: t.TempDir(), SessionIDGenerator: func() string { return "cursor-session" }})
-	active, err := store.GetOrCreate(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
+	active, err := store.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,9 +159,10 @@ func TestEventLogMigratesRawNestedJournalBeforeTypedDecode(t *testing.T) {
 
 	root := t.TempDir()
 	store := NewStore(Config{RootDir: root, SessionIDGenerator: func() string { return "nested-migration" }})
-	active, err := store.GetOrCreate(context.Background(), session.StartSessionRequest{
+	active, err := store.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis", UserID: "user", Workspace: session.WorkspaceRef{Key: "ws", CWD: root},
 	})
+
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,15 +272,16 @@ func TestStoreAppendRejectsProtocolOnlyCoreToolResult(t *testing.T) {
 		SessionIDGenerator: func() string { return "sess-1" },
 	})
 	ctx := context.Background()
-	createdSession, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+	createdSession, err := store.StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
 	})
+
 	if err != nil {
-		t.Fatalf("GetOrCreate() error = %v", err)
+		t.Fatalf("StartSession() error = %v", err)
 	}
 
-	_, err = store.AppendEvent(ctx, createdSession.SessionRef, &session.Event{
+	_, err = store.AppendEvent(ctx, session.AppendEventRequest{SessionRef: createdSession.SessionRef, Event: &session.Event{
 		Type: session.EventTypeToolResult,
 		Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
 			SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate),
@@ -286,7 +289,8 @@ func TestStoreAppendRejectsProtocolOnlyCoreToolResult(t *testing.T) {
 			Kind:          "RUN_COMMAND",
 			RawOutput:     map[string]any{"stdout": "ok"},
 		}},
-	})
+	}})
+
 	if err == nil {
 		t.Fatal("AppendEvent() error = nil, want protocol-only tool result rejected")
 	}
@@ -303,12 +307,13 @@ func TestStoreEventsRejectsLegacySemanticEventLog(t *testing.T) {
 		SessionIDGenerator: func() string { return "sess-1" },
 	})
 	ctx := context.Background()
-	createdSession, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+	createdSession, err := store.StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
 	})
+
 	if err != nil {
-		t.Fatalf("GetOrCreate() error = %v", err)
+		t.Fatalf("StartSession() error = %v", err)
 	}
 	writeRawEventLogForTest(t, store, createdSession, `{"id":"evt-legacy","type":"user","visibility":"canonical","user_message":{"role":"user","parts":[{"kind":"text","text":"hello"}]}}`)
 
@@ -329,12 +334,13 @@ func TestStoreEventsRejectsLegacyEmbeddedDocumentEvents(t *testing.T) {
 		SessionIDGenerator: func() string { return "sess-1" },
 	})
 	ctx := context.Background()
-	createdSession, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+	createdSession, err := store.StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
 	})
+
 	if err != nil {
-		t.Fatalf("GetOrCreate() error = %v", err)
+		t.Fatalf("StartSession() error = %v", err)
 	}
 	path, err := store.resolveWritePath(createdSession)
 	if err != nil {
@@ -374,12 +380,13 @@ func TestStoreEventsUpgradesLegacyCustomPluginContextEvent(t *testing.T) {
 		SessionIDGenerator: func() string { return "sess-1" },
 	})
 	ctx := context.Background()
-	createdSession, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+	createdSession, err := store.StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
 	})
+
 	if err != nil {
-		t.Fatalf("GetOrCreate() error = %v", err)
+		t.Fatalf("StartSession() error = %v", err)
 	}
 	text := "[Plugin context: prompt-plugin]\nlegacy hook context"
 	message := model.NewTextMessage(model.RoleUser, text)
@@ -415,7 +422,7 @@ func TestStoreEventsUpgradesLegacyCustomPluginContextEvent(t *testing.T) {
 		t.Fatalf("legacy event message = %#v, want preserved plugin context", events[0].Message)
 	}
 
-	loaded, err := NewService(store).LoadSession(ctx, session.LoadSessionRequest{SessionRef: createdSession.SessionRef})
+	loaded, err := store.LoadSession(ctx, session.LoadSessionRequest{SessionRef: createdSession.SessionRef})
 	if err != nil {
 		t.Fatalf("LoadSession() error = %v", err)
 	}
@@ -432,12 +439,13 @@ func TestStoreEventsRejectsInvalidEventLog(t *testing.T) {
 		SessionIDGenerator: func() string { return "sess-1" },
 	})
 	ctx := context.Background()
-	createdSession, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+	createdSession, err := store.StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
 	})
+
 	if err != nil {
-		t.Fatalf("GetOrCreate() error = %v", err)
+		t.Fatalf("StartSession() error = %v", err)
 	}
 	writeRawEventLogForTest(t, store, createdSession, `{"id":"evt-invalid","type":"user","visibility":"canonical"}`)
 
@@ -458,7 +466,7 @@ func TestStoreAppendSkipsHiddenPluginContextForGeneratedTitle(t *testing.T) {
 		SessionIDGenerator: func() string { return "sess-1" },
 	})
 	ctx := context.Background()
-	createdSession, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+	createdSession, err := store.StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
 		Workspace: session.WorkspaceRef{
@@ -466,12 +474,13 @@ func TestStoreAppendSkipsHiddenPluginContextForGeneratedTitle(t *testing.T) {
 			CWD: "/tmp/ws",
 		},
 	})
+
 	if err != nil {
-		t.Fatalf("GetOrCreate() error = %v", err)
+		t.Fatalf("StartSession() error = %v", err)
 	}
 
 	hookText := "[Plugin context: prompt-plugin]\nHOOK PREFIX"
-	if _, err := store.AppendEvent(ctx, createdSession.SessionRef, &session.Event{
+	if _, err := store.AppendEvent(ctx, session.AppendEventRequest{SessionRef: createdSession.SessionRef, Event: &session.Event{
 		Type:       session.EventTypeContext,
 		Visibility: session.VisibilityCanonical,
 		Message:    ptrMessage(model.NewTextMessage(model.RoleUser, hookText)),
@@ -480,20 +489,21 @@ func TestStoreAppendSkipsHiddenPluginContextForGeneratedTitle(t *testing.T) {
 			"source":                 "plugin_hook",
 			"hidden_from_transcript": true,
 		},
-	}); err != nil {
+	}}); err != nil {
 		t.Fatalf("AppendEvent(hook context) error = %v", err)
 	}
-	if _, err := store.AppendEvent(ctx, createdSession.SessionRef, &session.Event{
+	if _, err := store.AppendEvent(ctx, session.AppendEventRequest{SessionRef: createdSession.SessionRef, Event: &session.Event{
 		Message: ptrMessage(model.NewTextMessage(model.RoleUser, "真实的用户消息")),
-	}); err != nil {
+	}}); err != nil {
 		t.Fatalf("AppendEvent(user) error = %v", err)
 	}
 
-	list, err := store.List(ctx, session.ListSessionsRequest{
+	list, err := store.ListSessions(ctx, session.ListSessionsRequest{
 		AppName:      "caelis",
 		UserID:       "user-1",
 		WorkspaceKey: "ws-1",
 	})
+
 	if err != nil {
 		t.Fatalf("List() error = %v", err)
 	}
@@ -510,7 +520,7 @@ func TestStoreAppendUsesDisplayTextForGeneratedTitle(t *testing.T) {
 		SessionIDGenerator: func() string { return "sess-1" },
 	})
 	ctx := context.Background()
-	createdSession, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+	createdSession, err := store.StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
 		Workspace: session.WorkspaceRef{
@@ -518,22 +528,23 @@ func TestStoreAppendUsesDisplayTextForGeneratedTitle(t *testing.T) {
 			CWD: "/tmp/ws",
 		},
 	})
+
 	if err != nil {
-		t.Fatalf("GetOrCreate() error = %v", err)
+		t.Fatalf("StartSession() error = %v", err)
 	}
 
 	modelText := "The user referenced these resources. Treat them as explicit instructions for this turn:\n- Load skill `cmpctl` before taking task actions, then follow its instructions.\n\nUser request:\narchive preflight"
 	displayText := "$cmpctl archive preflight"
-	if _, err := store.AppendEvent(ctx, createdSession.SessionRef, &session.Event{
+	if _, err := store.AppendEvent(ctx, session.AppendEventRequest{SessionRef: createdSession.SessionRef, Event: &session.Event{
 		Type:       session.EventTypeUser,
 		Visibility: session.VisibilityCanonical,
 		Message:    ptrMessage(model.NewTextMessage(model.RoleUser, modelText)),
 		Text:       displayText,
-	}); err != nil {
+	}}); err != nil {
 		t.Fatalf("AppendEvent(user) error = %v", err)
 	}
 
-	gotSession, err := store.Get(ctx, createdSession.SessionRef)
+	gotSession, err := store.Session(ctx, createdSession.SessionRef)
 	if err != nil {
 		t.Fatalf("Get() error = %v", err)
 	}
@@ -550,12 +561,13 @@ func TestStoreLoadRejectsToolResultNameMismatch(t *testing.T) {
 		SessionIDGenerator: func() string { return "s-hxiurg3hq57a" },
 	})
 	ctx := context.Background()
-	createdSession, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+	createdSession, err := store.StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
 	})
+
 	if err != nil {
-		t.Fatalf("GetOrCreate() error = %v", err)
+		t.Fatalf("StartSession() error = %v", err)
 	}
 
 	message := model.Message{
@@ -599,7 +611,7 @@ func TestStoreLoadRejectsToolResultNameMismatch(t *testing.T) {
 		t.Fatalf("appendEventLog() error = %v", err)
 	}
 
-	_, err = NewService(store).LoadSession(ctx, session.LoadSessionRequest{SessionRef: createdSession.SessionRef})
+	_, err = store.LoadSession(ctx, session.LoadSessionRequest{SessionRef: createdSession.SessionRef})
 	if !errors.Is(err, session.ErrInvalidEvent) {
 		t.Fatalf("LoadSession() error = %v, want ErrInvalidEvent", err)
 	}
@@ -619,7 +631,7 @@ func TestStoreAppendRegeneratesDuplicateEventIDAcrossProcesses(t *testing.T) {
 		Clock:              func() time.Time { return at },
 	})
 	ctx := context.Background()
-	createdSession, err := firstStore.GetOrCreate(ctx, session.StartSessionRequest{
+	createdSession, err := firstStore.StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
 		Workspace: session.WorkspaceRef{
@@ -627,12 +639,14 @@ func TestStoreAppendRegeneratesDuplicateEventIDAcrossProcesses(t *testing.T) {
 			CWD: "/tmp/ws",
 		},
 	})
+
 	if err != nil {
-		t.Fatalf("GetOrCreate() error = %v", err)
+		t.Fatalf("StartSession() error = %v", err)
 	}
-	first, err := firstStore.AppendEvent(ctx, createdSession.SessionRef, &session.Event{
+	first, err := firstStore.AppendEvent(ctx, session.AppendEventRequest{SessionRef: createdSession.SessionRef, Event: &session.Event{
 		Message: ptrMessage(model.NewTextMessage(model.RoleUser, "first")),
-	})
+	}})
+
 	if err != nil {
 		t.Fatalf("AppendEvent(first) error = %v", err)
 	}
@@ -644,9 +658,10 @@ func TestStoreAppendRegeneratesDuplicateEventIDAcrossProcesses(t *testing.T) {
 		RootDir: root,
 		Clock:   func() time.Time { return at.Add(time.Second) },
 	})
-	second, err := secondStore.AppendEvent(ctx, createdSession.SessionRef, &session.Event{
+	second, err := secondStore.AppendEvent(ctx, session.AppendEventRequest{SessionRef: createdSession.SessionRef, Event: &session.Event{
 		Message: ptrMessage(model.NewTextMessage(model.RoleAssistant, "second")),
-	})
+	}})
+
 	if err != nil {
 		t.Fatalf("AppendEvent(second) error = %v", err)
 	}
@@ -672,7 +687,7 @@ func TestStoreAppendRegeneratesDuplicateEventIDAcrossProcesses(t *testing.T) {
 func TestServiceAppendEventCASAndStableIDConflict(t *testing.T) {
 	t.Parallel()
 
-	service := NewService(NewStore(Config{RootDir: t.TempDir(), SessionIDGenerator: func() string { return "sess-cas" }}))
+	service := NewStore(Config{RootDir: t.TempDir(), SessionIDGenerator: func() string { return "sess-cas" }})
 	ctx := context.Background()
 	created, err := service.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
 	if err != nil {
@@ -692,7 +707,7 @@ func TestServiceAppendEventCASAndStableIDConflict(t *testing.T) {
 		t.Fatalf("first.Seq = %d, want 1", first.Seq)
 	}
 	one := uint64(1)
-	reopened := NewService(NewStore(Config{RootDir: service.store.rootDir}))
+	reopened := NewStore(Config{RootDir: service.rootDir})
 	retried, err := reopened.AppendEvent(ctx, session.AppendEventRequest{
 		SessionRef:       created.SessionRef,
 		ExpectedRevision: &one,
@@ -739,7 +754,7 @@ func TestStoreListUsesSessionMetadataIndex(t *testing.T) {
 	})
 	ctx := context.Background()
 
-	createdSession, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+	createdSession, err := store.StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
 		Workspace: session.WorkspaceRef{
@@ -748,20 +763,22 @@ func TestStoreListUsesSessionMetadataIndex(t *testing.T) {
 		},
 		Title: "indexed session",
 	})
+
 	if err != nil {
-		t.Fatalf("GetOrCreate() error = %v", err)
+		t.Fatalf("StartSession() error = %v", err)
 	}
 	docPath := rolloutDocumentPath(root, "ws-1", at, createdSession.SessionID)
 	if err := os.WriteFile(docPath, []byte("{not-json"), 0o600); err != nil {
 		t.Fatalf("WriteFile(corrupt doc) error = %v", err)
 	}
 
-	list, err := store.List(ctx, session.ListSessionsRequest{
+	list, err := store.ListSessions(ctx, session.ListSessionsRequest{
 		AppName:      "caelis",
 		UserID:       "user-1",
 		WorkspaceKey: "ws-1",
 		Limit:        10,
 	})
+
 	if err != nil {
 		t.Fatalf("List() error = %v", err)
 	}
@@ -785,7 +802,7 @@ func TestStoreListSurfacesCorruptSessionIndex(t *testing.T) {
 	})
 	ctx := context.Background()
 
-	createdSession, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+	createdSession, err := store.StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
 		Workspace: session.WorkspaceRef{
@@ -794,8 +811,9 @@ func TestStoreListSurfacesCorruptSessionIndex(t *testing.T) {
 		},
 		Title: "valid document",
 	})
+
 	if err != nil {
-		t.Fatalf("GetOrCreate() error = %v", err)
+		t.Fatalf("StartSession() error = %v", err)
 	}
 	if createdSession.SessionID != "sess-1" {
 		t.Fatalf("SessionID = %q, want sess-1", createdSession.SessionID)
@@ -804,11 +822,12 @@ func TestStoreListSurfacesCorruptSessionIndex(t *testing.T) {
 		t.Fatalf("WriteFile(index) error = %v", err)
 	}
 
-	_, err = store.List(ctx, session.ListSessionsRequest{
+	_, err = store.ListSessions(ctx, session.ListSessionsRequest{
 		AppName:      "caelis",
 		UserID:       "user-1",
 		WorkspaceKey: "ws-1",
 	})
+
 	if err == nil {
 		t.Fatal("List() error = nil, want corrupt SQLite index failure")
 	}
@@ -827,10 +846,11 @@ func TestStoreListSurfacesSessionIndexOpenError(t *testing.T) {
 		t.Fatalf("Mkdir(index path) error = %v", err)
 	}
 
-	_, err := NewStore(Config{RootDir: root}).List(ctx, session.ListSessionsRequest{
+	_, err := NewStore(Config{RootDir: root}).ListSessions(ctx, session.ListSessionsRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
 	})
+
 	if err == nil {
 		t.Fatal("List() error = nil, want index open failure")
 	}
@@ -852,7 +872,7 @@ func TestStoreWriteSurfacesCorruptSessionIndexBeforeUpsert(t *testing.T) {
 	})
 	ctx := context.Background()
 	for _, id := range []string{"sess-1", "sess-2"} {
-		if _, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+		if _, err := store.StartSession(ctx, session.StartSessionRequest{
 			AppName:            "caelis",
 			UserID:             "user-1",
 			PreferredSessionID: id,
@@ -862,19 +882,19 @@ func TestStoreWriteSurfacesCorruptSessionIndexBeforeUpsert(t *testing.T) {
 			},
 			Title: id,
 		}); err != nil {
-			t.Fatalf("GetOrCreate(%q) error = %v", id, err)
+			t.Fatalf("StartSession(%q) error = %v", id, err)
 		}
 	}
 	if err := os.WriteFile(filepath.Join(root, indexFilename), []byte("{not-json"), 0o600); err != nil {
 		t.Fatalf("WriteFile(index) error = %v", err)
 	}
 
-	if _, err := store.BindController(ctx, session.SessionRef{
+	if _, err := store.BindController(ctx, session.BindControllerRequest{SessionRef: session.SessionRef{
 		AppName:      "caelis",
 		UserID:       "user-1",
 		SessionID:    "sess-2",
 		WorkspaceKey: "ws-1",
-	}, session.ControllerBinding{ControllerID: "controller-1"}); err == nil {
+	}, Binding: session.ControllerBinding{ControllerID: "controller-1"}}); err == nil {
 		t.Fatal("BindController() error = nil, want corrupt SQLite index failure")
 	} else if !strings.Contains(strings.ToLower(err.Error()), "session index") {
 		t.Fatalf("BindController() error = %v, want session index failure", err)
@@ -898,7 +918,7 @@ func TestStoreEventsIgnoresPartialFinalEventLogRecord(t *testing.T) {
 	})
 	ctx := context.Background()
 
-	createdSession, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+	createdSession, err := store.StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
 		Workspace: session.WorkspaceRef{
@@ -906,14 +926,15 @@ func TestStoreEventsIgnoresPartialFinalEventLogRecord(t *testing.T) {
 			CWD: "/tmp/ws",
 		},
 	})
+
 	if err != nil {
-		t.Fatalf("GetOrCreate() error = %v", err)
+		t.Fatalf("StartSession() error = %v", err)
 	}
 	for _, text := range []string{"first", "second"} {
-		if _, err := store.AppendEvent(ctx, createdSession.SessionRef, &session.Event{
+		if _, err := store.AppendEvent(ctx, session.AppendEventRequest{SessionRef: createdSession.SessionRef, Event: &session.Event{
 			Message: ptrMessage(model.NewTextMessage(model.RoleAssistant, text)),
 			Text:    text,
-		}); err != nil {
+		}}); err != nil {
 			t.Fatalf("AppendEvent(%q) error = %v", text, err)
 		}
 	}
@@ -956,7 +977,7 @@ func TestStoreAppendTruncatesPartialFinalEventLogRecordBeforeWriting(t *testing.
 	})
 	ctx := context.Background()
 
-	createdSession, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+	createdSession, err := store.StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
 		Workspace: session.WorkspaceRef{
@@ -964,13 +985,14 @@ func TestStoreAppendTruncatesPartialFinalEventLogRecordBeforeWriting(t *testing.
 			CWD: "/tmp/ws",
 		},
 	})
+
 	if err != nil {
-		t.Fatalf("GetOrCreate() error = %v", err)
+		t.Fatalf("StartSession() error = %v", err)
 	}
-	if _, err := store.AppendEvent(ctx, createdSession.SessionRef, &session.Event{
+	if _, err := store.AppendEvent(ctx, session.AppendEventRequest{SessionRef: createdSession.SessionRef, Event: &session.Event{
 		Message: ptrMessage(model.NewTextMessage(model.RoleAssistant, "first")),
 		Text:    "first",
-	}); err != nil {
+	}}); err != nil {
 		t.Fatalf("AppendEvent(first) error = %v", err)
 	}
 	logPath := rolloutEventLogPath(root, "ws-1", at, "sess-1")
@@ -986,10 +1008,10 @@ func TestStoreAppendTruncatesPartialFinalEventLogRecordBeforeWriting(t *testing.
 		t.Fatalf("Close(event log) error = %v", err)
 	}
 
-	if _, err := store.AppendEvent(ctx, createdSession.SessionRef, &session.Event{
+	if _, err := store.AppendEvent(ctx, session.AppendEventRequest{SessionRef: createdSession.SessionRef, Event: &session.Event{
 		Message: ptrMessage(model.NewTextMessage(model.RoleAssistant, "second")),
 		Text:    "second",
-	}); err != nil {
+	}}); err != nil {
 		t.Fatalf("AppendEvent(second) error = %v", err)
 	}
 	events, err := store.Events(ctx, session.EventsRequest{SessionRef: createdSession.SessionRef})
@@ -1026,7 +1048,7 @@ func TestStoreConcurrentWritersPreserveSessionIndexAcrossStoreInstances(t *testi
 					return baseTime.Add(time.Duration(i) * time.Second)
 				},
 			})
-			_, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+			_, err := store.StartSession(ctx, session.StartSessionRequest{
 				AppName:            "caelis",
 				UserID:             "user-1",
 				PreferredSessionID: fmt.Sprintf("sess-%02d", i),
@@ -1036,6 +1058,7 @@ func TestStoreConcurrentWritersPreserveSessionIndexAcrossStoreInstances(t *testi
 				},
 				Title: fmt.Sprintf("session %02d", i),
 			})
+
 			if err != nil {
 				errs <- err
 			}
@@ -1046,15 +1069,16 @@ func TestStoreConcurrentWritersPreserveSessionIndexAcrossStoreInstances(t *testi
 	close(errs)
 	for err := range errs {
 		if err != nil {
-			t.Fatalf("concurrent GetOrCreate() error = %v", err)
+			t.Fatalf("concurrent StartSession() error = %v", err)
 		}
 	}
 
-	list, err := NewStore(Config{RootDir: root}).List(ctx, session.ListSessionsRequest{
+	list, err := NewStore(Config{RootDir: root}).ListSessions(ctx, session.ListSessionsRequest{
 		AppName:      "caelis",
 		UserID:       "user-1",
 		WorkspaceKey: "ws-1",
 	})
+
 	if err != nil {
 		t.Fatalf("List() error = %v", err)
 	}
@@ -1071,7 +1095,7 @@ func TestStoreConcurrentReadersAndWritersAcrossStoreInstances(t *testing.T) {
 		RootDir: root,
 		Clock:   func() time.Time { return baseTime },
 	})
-	createdSession, err := baseStore.GetOrCreate(ctx, session.StartSessionRequest{
+	createdSession, err := baseStore.StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
 		Workspace: session.WorkspaceRef{
@@ -1080,8 +1104,9 @@ func TestStoreConcurrentReadersAndWritersAcrossStoreInstances(t *testing.T) {
 		},
 		Title: "shared session",
 	})
+
 	if err != nil {
-		t.Fatalf("GetOrCreate() error = %v", err)
+		t.Fatalf("StartSession() error = %v", err)
 	}
 
 	const workers = 24
@@ -1102,16 +1127,18 @@ func TestStoreConcurrentReadersAndWritersAcrossStoreInstances(t *testing.T) {
 			})
 			switch i % 3 {
 			case 0:
-				_, err := store.List(ctx, session.ListSessionsRequest{
+				_, err := store.ListSessions(ctx, session.ListSessionsRequest{
 					AppName:      "caelis",
 					UserID:       "user-1",
 					WorkspaceKey: "ws-1",
 				})
+
 				errs <- err
 			case 1:
-				_, err := store.AppendEvent(ctx, createdSession.SessionRef, &session.Event{
+				_, err := store.AppendEvent(ctx, session.AppendEventRequest{SessionRef: createdSession.SessionRef, Event: &session.Event{
 					Message: ptrMessage(model.NewTextMessage(model.RoleAssistant, fmt.Sprintf("event %02d", i))),
-				})
+				}})
+
 				errs <- err
 			default:
 				_, err := store.UpdateState(ctx, session.UpdateStateRequest{SessionRef: createdSession.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Update: func(state map[string]any) (map[string]any, error) {
@@ -1131,11 +1158,12 @@ func TestStoreConcurrentReadersAndWritersAcrossStoreInstances(t *testing.T) {
 		}
 	}
 
-	list, err := NewStore(Config{RootDir: root}).List(ctx, session.ListSessionsRequest{
+	list, err := NewStore(Config{RootDir: root}).ListSessions(ctx, session.ListSessionsRequest{
 		AppName:      "caelis",
 		UserID:       "user-1",
 		WorkspaceKey: "ws-1",
 	})
+
 	if err != nil {
 		t.Fatalf("List() after concurrent operations error = %v", err)
 	}
@@ -1153,22 +1181,23 @@ func TestStoreLargeEventListRoundTrip(t *testing.T) {
 		SessionIDGenerator: func() string { return "sess-large" },
 	})
 	ctx := context.Background()
-	createdSession, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+	createdSession, err := store.StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
 	})
+
 	if err != nil {
-		t.Fatalf("GetOrCreate() error = %v", err)
+		t.Fatalf("StartSession() error = %v", err)
 	}
 	const eventCount = 40
 	for i := 0; i < eventCount; i++ {
 		msg := model.NewTextMessage(model.RoleUser, "large event "+strings.Repeat("x", 128))
-		if _, err := store.AppendEvent(ctx, createdSession.SessionRef, &session.Event{
+		if _, err := store.AppendEvent(ctx, session.AppendEventRequest{SessionRef: createdSession.SessionRef, Event: &session.Event{
 			Type:       session.EventTypeUser,
 			Visibility: session.VisibilityCanonical,
 			Message:    &msg,
 			Text:       msg.TextContent(),
-		}); err != nil {
+		}}); err != nil {
 			t.Fatalf("AppendEvent(%d) error = %v", i, err)
 		}
 	}
@@ -1191,11 +1220,11 @@ func TestStoreUpdateStateAndParticipantAnchor(t *testing.T) {
 
 	root := t.TempDir()
 	at := time.Date(2026, time.April, 19, 11, 22, 33, 0, time.UTC)
-	service := NewService(NewStore(Config{
+	service := NewStore(Config{
 		RootDir:            root,
 		SessionIDGenerator: func() string { return "sess-1" },
 		Clock:              func() time.Time { return at },
-	}))
+	})
 	ctx := context.Background()
 
 	createdSession, err := service.StartSession(ctx, session.StartSessionRequest{
@@ -1263,7 +1292,7 @@ func TestStorePutParticipantWithEventRejectsInvalidEventAtomically(t *testing.T)
 		SessionIDGenerator: func() string { return "sess-participant-atomic" },
 	})
 	ctx := context.Background()
-	createdSession, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+	createdSession, err := store.StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
 		Workspace: session.WorkspaceRef{
@@ -1271,8 +1300,9 @@ func TestStorePutParticipantWithEventRejectsInvalidEventAtomically(t *testing.T)
 			CWD: "/tmp/ws",
 		},
 	})
+
 	if err != nil {
-		t.Fatalf("GetOrCreate() error = %v", err)
+		t.Fatalf("StartSession() error = %v", err)
 	}
 
 	_, _, err = store.PutParticipantWithEvent(ctx, session.PutParticipantWithEventRequest{
@@ -1293,7 +1323,7 @@ func TestStorePutParticipantWithEventRejectsInvalidEventAtomically(t *testing.T)
 	if err == nil {
 		t.Fatal("PutParticipantWithEvent() error = nil, want invalid event rejection")
 	}
-	loaded, err := store.Get(ctx, createdSession.SessionRef)
+	loaded, err := store.Session(ctx, createdSession.SessionRef)
 	if err != nil {
 		t.Fatalf("Get() error = %v", err)
 	}
@@ -1314,9 +1344,9 @@ func TestStoreBindControllerWithEventDoesNotSplitOnPrecommitFailure(t *testing.T
 
 	store := NewStore(Config{RootDir: t.TempDir(), SessionIDGenerator: func() string { return "sess-handoff-atomic" }})
 	ctx := context.Background()
-	created, err := store.GetOrCreate(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
+	created, err := store.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
 	if err != nil {
-		t.Fatalf("GetOrCreate() error = %v", err)
+		t.Fatalf("StartSession() error = %v", err)
 	}
 	store.writeDocumentFault = func() error { return errors.New("precommit failure") }
 	message := model.NewTextMessage(model.RoleSystem, "handoff")
@@ -1335,7 +1365,7 @@ func TestStoreBindControllerWithEventDoesNotSplitOnPrecommitFailure(t *testing.T
 		t.Fatalf("BindControllerWithEvent() error = %v, want precommit failure", err)
 	}
 	store.writeDocumentFault = nil
-	loaded, err := NewService(store).LoadSession(ctx, session.LoadSessionRequest{SessionRef: created.SessionRef})
+	loaded, err := store.LoadSession(ctx, session.LoadSessionRequest{SessionRef: created.SessionRef})
 	if err != nil {
 		t.Fatalf("LoadSession() error = %v", err)
 	}
@@ -1353,7 +1383,7 @@ func TestStorePutParticipantWithEventDoesNotAppendLogWhenDocumentWriteFails(t *t
 		EventIDGenerator:   func() string { return "evt-participant" },
 	})
 	ctx := context.Background()
-	createdSession, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+	createdSession, err := store.StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
 		Workspace: session.WorkspaceRef{
@@ -1361,8 +1391,9 @@ func TestStorePutParticipantWithEventDoesNotAppendLogWhenDocumentWriteFails(t *t
 			CWD: "/tmp/ws",
 		},
 	})
+
 	if err != nil {
-		t.Fatalf("GetOrCreate() error = %v", err)
+		t.Fatalf("StartSession() error = %v", err)
 	}
 
 	store.writeDocumentFault = func() error {
@@ -1391,7 +1422,7 @@ func TestStorePutParticipantWithEventDoesNotAppendLogWhenDocumentWriteFails(t *t
 	}
 	store.writeDocumentFault = nil
 
-	loaded, err := store.Get(ctx, createdSession.SessionRef)
+	loaded, err := store.Session(ctx, createdSession.SessionRef)
 	if err != nil {
 		t.Fatalf("Get() error = %v", err)
 	}
@@ -1416,7 +1447,7 @@ func TestStoreAppendEventDoesNotAppendLogWhenDocumentWriteFails(t *testing.T) {
 		EventIDGenerator:   func() string { return "evt-append" },
 	})
 	ctx := context.Background()
-	createdSession, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+	createdSession, err := store.StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
 		Workspace: session.WorkspaceRef{
@@ -1424,19 +1455,21 @@ func TestStoreAppendEventDoesNotAppendLogWhenDocumentWriteFails(t *testing.T) {
 			CWD: "/tmp/ws",
 		},
 	})
+
 	if err != nil {
-		t.Fatalf("GetOrCreate() error = %v", err)
+		t.Fatalf("StartSession() error = %v", err)
 	}
 
 	store.writeDocumentFault = func() error {
 		return errors.New("forced document write failure")
 	}
 	message := model.NewTextMessage(model.RoleUser, "hello")
-	_, err = store.AppendEvent(ctx, createdSession.SessionRef, &session.Event{
+	_, err = store.AppendEvent(ctx, session.AppendEventRequest{SessionRef: createdSession.SessionRef, Event: &session.Event{
 		Type:    session.EventTypeUser,
 		Message: &message,
 		Text:    message.TextContent(),
-	})
+	}})
+
 	if err == nil || !strings.Contains(err.Error(), "forced document write failure") {
 		t.Fatalf("AppendEvent() error = %v, want forced write failure", err)
 	}
@@ -1461,7 +1494,7 @@ func TestStoreAppendEventKeepsLogWhenDocumentWriteFailsAfterCommit(t *testing.T)
 		EventIDGenerator:   func() string { return "evt-late-document-failure" },
 	})
 	ctx := context.Background()
-	createdSession, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+	createdSession, err := store.StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
 		Workspace: session.WorkspaceRef{
@@ -1469,8 +1502,9 @@ func TestStoreAppendEventKeepsLogWhenDocumentWriteFailsAfterCommit(t *testing.T)
 			CWD: "/tmp/ws",
 		},
 	})
+
 	if err != nil {
-		t.Fatalf("GetOrCreate() error = %v", err)
+		t.Fatalf("StartSession() error = %v", err)
 	}
 
 	indexPath := filepath.Join(root, indexFilename)
@@ -1482,11 +1516,12 @@ func TestStoreAppendEventKeepsLogWhenDocumentWriteFailsAfterCommit(t *testing.T)
 	}
 
 	message := model.NewTextMessage(model.RoleUser, "hello after commit")
-	_, err = store.AppendEvent(ctx, createdSession.SessionRef, &session.Event{
+	_, err = store.AppendEvent(ctx, session.AppendEventRequest{SessionRef: createdSession.SessionRef, Event: &session.Event{
 		Type:    session.EventTypeUser,
 		Message: &message,
 		Text:    message.TextContent(),
-	})
+	}})
+
 	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "session index") {
 		t.Fatalf("AppendEvent() error = %v, want late session index failure", err)
 	}
@@ -1505,7 +1540,7 @@ func TestStoreAppendEventKeepsLogWhenDocumentWriteFailsAfterCommit(t *testing.T)
 	if events[0].ID != "evt-late-document-failure" {
 		t.Fatalf("Event ID after late document write failure = %q, want generated ID", events[0].ID)
 	}
-	loaded, err := store.Get(ctx, createdSession.SessionRef)
+	loaded, err := store.Session(ctx, createdSession.SessionRef)
 	if err != nil {
 		t.Fatalf("Get() error = %v", err)
 	}
@@ -1520,9 +1555,9 @@ func TestStoreWALRecoversCommittedEventAndStateAfterCrashPoints(t *testing.T) {
 			root := t.TempDir()
 			store := NewStore(Config{RootDir: root, SessionIDGenerator: func() string { return "sess-wal" }})
 			ctx := context.Background()
-			created, err := store.GetOrCreate(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
+			created, err := store.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
 			if err != nil {
-				t.Fatalf("GetOrCreate() error = %v", err)
+				t.Fatalf("StartSession() error = %v", err)
 			}
 			store.transactionFault = func(current string) error {
 				if current == phase {
@@ -1550,7 +1585,7 @@ func TestStoreWALRecoversCommittedEventAndStateAfterCrashPoints(t *testing.T) {
 				t.Fatalf("AppendEventsAndUpdateState() error = %v, want *CommittedError", err)
 			}
 
-			reopened := NewService(NewStore(Config{RootDir: root}))
+			reopened := NewStore(Config{RootDir: root})
 			loaded, err := reopened.LoadSession(ctx, session.LoadSessionRequest{SessionRef: created.SessionRef})
 			if err != nil {
 				t.Fatalf("LoadSession(recovery) error = %v", err)
@@ -1586,7 +1621,7 @@ func TestStoreWALRecoversCommittedEventAndStateAfterCrashPoints(t *testing.T) {
 func TestStoreCompoundCommittedErrorRetryDoesNotReapplyState(t *testing.T) {
 	root := t.TempDir()
 	store := NewStore(Config{RootDir: root, SessionIDGenerator: func() string { return "sess-compound-committed" }})
-	service := NewService(store)
+	service := store
 	created, err := service.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
@@ -1616,7 +1651,7 @@ func TestStoreCompoundCommittedErrorRetryDoesNotReapplyState(t *testing.T) {
 		t.Fatalf("first AppendEventsAndUpdateState() error = %v, want committed error", err)
 	}
 
-	reopened := NewService(NewStore(Config{RootDir: root}))
+	reopened := NewStore(Config{RootDir: root})
 	if _, err := reopened.AppendEventsAndUpdateState(context.Background(), request()); err != nil {
 		t.Fatalf("retry AppendEventsAndUpdateState() error = %v", err)
 	}
@@ -1643,7 +1678,7 @@ func TestParticipantLifecycleCommittedErrorReturnsExactResult(t *testing.T) {
 	t.Parallel()
 	store := NewStore(Config{RootDir: t.TempDir()})
 	ctx := context.Background()
-	active, err := store.GetOrCreate(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "participant-committed"})
+	active, err := store.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "participant-committed"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1666,7 +1701,7 @@ func TestParticipantLifecycleCommittedErrorReturnsExactResult(t *testing.T) {
 		t.Fatalf("committed result = %#v, %#v; want exact session and event", committedSession, committedEvent)
 	}
 	store.transactionFault = nil
-	loaded, err := store.Get(ctx, active.SessionRef)
+	loaded, err := store.Session(ctx, active.SessionRef)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1686,7 +1721,7 @@ func TestStoreAppendEventsDoesNotAppendLogWhenDocumentWriteFails(t *testing.T) {
 		EventIDGenerator:   func() string { return "evt-batch" },
 	})
 	ctx := context.Background()
-	createdSession, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+	createdSession, err := store.StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
 		Workspace: session.WorkspaceRef{
@@ -1694,8 +1729,9 @@ func TestStoreAppendEventsDoesNotAppendLogWhenDocumentWriteFails(t *testing.T) {
 			CWD: "/tmp/ws",
 		},
 	})
+
 	if err != nil {
-		t.Fatalf("GetOrCreate() error = %v", err)
+		t.Fatalf("StartSession() error = %v", err)
 	}
 
 	store.writeDocumentFault = func() error {
@@ -1733,7 +1769,7 @@ func TestStoreAppendEventsAndUpdateStateDoesNotAppendLogWhenStateUpdateFails(t *
 		EventIDGenerator:   func() string { return "evt-batch-state" },
 	})
 	ctx := context.Background()
-	createdSession, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+	createdSession, err := store.StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
 		Workspace: session.WorkspaceRef{
@@ -1741,8 +1777,9 @@ func TestStoreAppendEventsAndUpdateStateDoesNotAppendLogWhenStateUpdateFails(t *
 			CWD: "/tmp/ws",
 		},
 	})
+
 	if err != nil {
-		t.Fatalf("GetOrCreate() error = %v", err)
+		t.Fatalf("StartSession() error = %v", err)
 	}
 
 	prompt := model.NewTextMessage(model.RoleUser, "review this change")
@@ -1784,12 +1821,12 @@ func TestServiceLoadSessionReadsOneDocumentSnapshot(t *testing.T) {
 
 	root := t.TempDir()
 	at := time.Date(2026, time.April, 19, 11, 22, 33, 0, time.UTC)
-	service := NewService(NewStore(Config{
+	service := NewStore(Config{
 		RootDir:            root,
 		SessionIDGenerator: func() string { return "sess-1" },
 		EventIDGenerator:   func() string { return "evt-1" },
 		Clock:              func() time.Time { return at },
-	}))
+	})
 	ctx := context.Background()
 
 	createdSession, err := service.StartSession(ctx, session.StartSessionRequest{
@@ -1848,7 +1885,7 @@ func TestStoreSnapshotStateReturnsEmptyForMissingDocumentStateWithoutRepair(t *t
 		SessionIDGenerator: func() string { return "sess-1" },
 		Clock:              func() time.Time { return at },
 	})
-	ref, err := store.GetOrCreate(context.Background(), session.StartSessionRequest{
+	ref, err := store.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
 		Workspace: session.WorkspaceRef{
@@ -1856,8 +1893,9 @@ func TestStoreSnapshotStateReturnsEmptyForMissingDocumentStateWithoutRepair(t *t
 			CWD: "/tmp/ws-1",
 		},
 	})
+
 	if err != nil {
-		t.Fatalf("GetOrCreate() error = %v", err)
+		t.Fatalf("StartSession() error = %v", err)
 	}
 	docPath, err := store.resolveDocumentPath(ref.SessionID, ref.WorkspaceKey)
 	if err != nil {
@@ -1925,7 +1963,7 @@ func TestStoreWriteDocumentUsesSecurePermissions(t *testing.T) {
 		Clock:              func() time.Time { return at },
 	})
 	ctx := context.Background()
-	createdSession, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+	createdSession, err := store.StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
 		Workspace: session.WorkspaceRef{
@@ -1933,8 +1971,9 @@ func TestStoreWriteDocumentUsesSecurePermissions(t *testing.T) {
 			CWD: "/tmp/ws",
 		},
 	})
+
 	if err != nil {
-		t.Fatalf("GetOrCreate() error = %v", err)
+		t.Fatalf("StartSession() error = %v", err)
 	}
 	docPath := rolloutDocumentPath(root, "ws-1", at, createdSession.SessionID)
 	info, err := os.Stat(docPath)
@@ -1967,13 +2006,13 @@ func TestStoreGeneratesFreshCompactSessionIDsAcrossRestart(t *testing.T) {
 		},
 	}
 
-	first, err := NewStore(Config{RootDir: root}).GetOrCreate(ctx, req)
+	first, err := NewStore(Config{RootDir: root}).StartSession(ctx, req)
 	if err != nil {
-		t.Fatalf("first GetOrCreate() error = %v", err)
+		t.Fatalf("first StartSession() error = %v", err)
 	}
-	second, err := NewStore(Config{RootDir: root}).GetOrCreate(ctx, req)
+	second, err := NewStore(Config{RootDir: root}).StartSession(ctx, req)
 	if err != nil {
-		t.Fatalf("second GetOrCreate() error = %v", err)
+		t.Fatalf("second StartSession() error = %v", err)
 	}
 
 	if !strings.HasPrefix(first.SessionID, "s-") {
@@ -1989,11 +2028,12 @@ func TestStoreGeneratesFreshCompactSessionIDsAcrossRestart(t *testing.T) {
 		t.Fatalf("session ids collided across restart: %q", first.SessionID)
 	}
 
-	list, err := NewStore(Config{RootDir: root}).List(ctx, session.ListSessionsRequest{
+	list, err := NewStore(Config{RootDir: root}).ListSessions(ctx, session.ListSessionsRequest{
 		AppName:      "caelis",
 		UserID:       "user-1",
 		WorkspaceKey: "ws-1",
 	})
+
 	if err != nil {
 		t.Fatalf("List() error = %v", err)
 	}
@@ -2019,7 +2059,7 @@ func TestStoreListSessionsRecursesRolloutDirectories(t *testing.T) {
 		Clock: func() time.Time { return now },
 	})
 
-	first, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+	first, err := store.StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
 		Workspace: session.WorkspaceRef{
@@ -2027,18 +2067,19 @@ func TestStoreListSessionsRecursesRolloutDirectories(t *testing.T) {
 			CWD: "/tmp/ws",
 		},
 	})
+
 	if err != nil {
-		t.Fatalf("GetOrCreate(first) error = %v", err)
+		t.Fatalf("StartSession(first) error = %v", err)
 	}
-	if _, err := store.AppendEvent(ctx, first.SessionRef, &session.Event{
+	if _, err := store.AppendEvent(ctx, session.AppendEventRequest{SessionRef: first.SessionRef, Event: &session.Event{
 		Message: ptrMessage(model.NewTextMessage(model.RoleUser, "first")),
 		Text:    "first",
-	}); err != nil {
+	}}); err != nil {
 		t.Fatalf("AppendEvent(first) error = %v", err)
 	}
 
 	now = now.Add(2 * time.Hour)
-	second, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+	second, err := store.StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
 		Workspace: session.WorkspaceRef{
@@ -2046,21 +2087,23 @@ func TestStoreListSessionsRecursesRolloutDirectories(t *testing.T) {
 			CWD: "/tmp/ws",
 		},
 	})
+
 	if err != nil {
-		t.Fatalf("GetOrCreate(second) error = %v", err)
+		t.Fatalf("StartSession(second) error = %v", err)
 	}
-	if _, err := store.AppendEvent(ctx, second.SessionRef, &session.Event{
+	if _, err := store.AppendEvent(ctx, session.AppendEventRequest{SessionRef: second.SessionRef, Event: &session.Event{
 		Message: ptrMessage(model.NewTextMessage(model.RoleUser, "second")),
 		Text:    "second",
-	}); err != nil {
+	}}); err != nil {
 		t.Fatalf("AppendEvent(second) error = %v", err)
 	}
 
-	list, err := NewStore(Config{RootDir: root}).List(ctx, session.ListSessionsRequest{
+	list, err := NewStore(Config{RootDir: root}).ListSessions(ctx, session.ListSessionsRequest{
 		AppName:      "caelis",
 		UserID:       "user-1",
 		WorkspaceKey: "ws-1",
 	})
+
 	if err != nil {
 		t.Fatalf("List() error = %v", err)
 	}
@@ -2075,7 +2118,7 @@ func TestStoreListSessionsRecursesRolloutDirectories(t *testing.T) {
 	}
 }
 
-func TestStoreGetOrCreateRejectsSameSessionIDAcrossWorkspaces(t *testing.T) {
+func TestStoreStartSessionRejectsSameSessionIDAcrossWorkspaces(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -2086,7 +2129,7 @@ func TestStoreGetOrCreateRejectsSameSessionIDAcrossWorkspaces(t *testing.T) {
 	})
 
 	ctx := context.Background()
-	first, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+	first, err := store.StartSession(ctx, session.StartSessionRequest{
 		AppName:            "caelis",
 		UserID:             "user-1",
 		PreferredSessionID: "default",
@@ -2095,10 +2138,11 @@ func TestStoreGetOrCreateRejectsSameSessionIDAcrossWorkspaces(t *testing.T) {
 			CWD: "/tmp/ws-a",
 		},
 	})
+
 	if err != nil {
-		t.Fatalf("GetOrCreate(ws-a) error = %v", err)
+		t.Fatalf("StartSession(ws-a) error = %v", err)
 	}
-	_, err = store.GetOrCreate(ctx, session.StartSessionRequest{
+	_, err = store.StartSession(ctx, session.StartSessionRequest{
 		AppName:            "caelis",
 		UserID:             "user-1",
 		PreferredSessionID: "default",
@@ -2107,8 +2151,9 @@ func TestStoreGetOrCreateRejectsSameSessionIDAcrossWorkspaces(t *testing.T) {
 			CWD: "/tmp/ws-b",
 		},
 	})
+
 	if !errors.Is(err, session.ErrInvalidSession) {
-		t.Fatalf("GetOrCreate(ws-b) error = %v, want ErrInvalidSession", err)
+		t.Fatalf("StartSession(ws-b) error = %v, want ErrInvalidSession", err)
 	}
 
 	if first.WorkspaceKey != "ws-a" {
@@ -2130,7 +2175,7 @@ func TestStoreGetLoadsSessionWithoutWorkspaceKey(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	service := NewService(NewStore(Config{RootDir: root}))
+	service := NewStore(Config{RootDir: root})
 	ctx := context.Background()
 
 	createdSession, err := service.StartSession(ctx, session.StartSessionRequest{
@@ -2167,7 +2212,7 @@ func TestStoreGlobalSessionIDResolvesAcrossStoreReopen(t *testing.T) {
 	root := t.TempDir()
 	store := NewStore(Config{RootDir: root})
 	ctx := context.Background()
-	created, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+	created, err := store.StartSession(ctx, session.StartSessionRequest{
 		AppName:            "caelis",
 		UserID:             "user-1",
 		PreferredSessionID: "shared",
@@ -2176,11 +2221,12 @@ func TestStoreGlobalSessionIDResolvesAcrossStoreReopen(t *testing.T) {
 			CWD: "/tmp/ws-a",
 		},
 	})
+
 	if err != nil {
-		t.Fatalf("GetOrCreate(shared) error = %v", err)
+		t.Fatalf("StartSession(shared) error = %v", err)
 	}
 
-	reloaded := NewService(NewStore(Config{RootDir: root}))
+	reloaded := NewStore(Config{RootDir: root})
 	loaded, err := reloaded.Session(ctx, session.SessionRef{
 		AppName:   "caelis",
 		UserID:    "user-1",
@@ -2220,7 +2266,7 @@ func TestStoreIgnoresLegacyFlatSessionDocuments(t *testing.T) {
 		RootDir:            root,
 		SessionIDGenerator: func() string { return "sess-2" },
 	})
-	if _, err := store.Get(context.Background(), session.SessionRef{
+	if _, err := store.Session(context.Background(), session.SessionRef{
 		AppName:      "caelis",
 		UserID:       "user-1",
 		SessionID:    "session-1",
@@ -2229,10 +2275,11 @@ func TestStoreIgnoresLegacyFlatSessionDocuments(t *testing.T) {
 		t.Fatalf("Get(legacy flat) error = %v, want ErrSessionNotFound", err)
 	}
 
-	list, err := store.List(context.Background(), session.ListSessionsRequest{
+	list, err := store.ListSessions(context.Background(), session.ListSessionsRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
 	})
+
 	if err != nil {
 		t.Fatalf("List() error = %v", err)
 	}

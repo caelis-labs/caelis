@@ -19,7 +19,7 @@ func TestStoreAppendAndListCanonicalEvents(t *testing.T) {
 	})
 	ctx := context.Background()
 
-	createdSession, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+	createdSession, err := store.StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
 		Workspace: session.WorkspaceRef{
@@ -27,21 +27,24 @@ func TestStoreAppendAndListCanonicalEvents(t *testing.T) {
 			CWD: "/tmp/ws",
 		},
 	})
+
 	if err != nil {
-		t.Fatalf("GetOrCreate() error = %v", err)
+		t.Fatalf("StartSession() error = %v", err)
 	}
 
-	_, err = store.AppendEvent(ctx, createdSession.SessionRef, &session.Event{
+	_, err = store.AppendEvent(ctx, session.AppendEventRequest{SessionRef: createdSession.SessionRef, Event: &session.Event{
 		Message: ptrMessage(model.NewTextMessage(model.RoleAssistant, "hello")),
 		Text:    "hello",
-	})
+	}})
+
 	if err != nil {
 		t.Fatalf("AppendEvent() error = %v", err)
 	}
 
-	_, err = store.AppendEvent(ctx, createdSession.SessionRef, session.MarkNotice(&session.Event{
+	_, err = store.AppendEvent(ctx, session.AppendEventRequest{SessionRef: createdSession.SessionRef, Event: session.MarkNotice(&session.Event{
 		Message: ptrMessage(model.NewTextMessage(model.RoleSystem, "warn: retrying")),
-	}, "warn", "retrying"))
+	}, "warn", "retrying")})
+
 	if err != nil {
 		t.Fatalf("AppendEvent(notice) error = %v", err)
 	}
@@ -78,12 +81,13 @@ func TestStoreUpdateState(t *testing.T) {
 		SessionIDGenerator: func() string { return "sess-1" },
 	})
 	ctx := context.Background()
-	createdSession, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+	createdSession, err := store.StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
 	})
+
 	if err != nil {
-		t.Fatalf("GetOrCreate() error = %v", err)
+		t.Fatalf("StartSession() error = %v", err)
 	}
 
 	_, err = store.UpdateState(ctx, session.UpdateStateRequest{SessionRef: createdSession.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Update: func(state map[string]any) (map[string]any, error) {
@@ -107,7 +111,7 @@ func TestCompoundTransactionIdentityDoesNotReapplyStateOnRetry(t *testing.T) {
 	t.Parallel()
 
 	store := NewStore(Config{SessionIDGenerator: func() string { return "sess-compound-retry" }})
-	service := NewService(store)
+	service := store
 	created, err := service.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
@@ -189,16 +193,17 @@ func TestStoreIsolatesNestedMetadataEventsAndState(t *testing.T) {
 	store := NewStore(Config{SessionIDGenerator: func() string { return "sess-isolation" }})
 	ctx := context.Background()
 	metadata := map[string]any{"nested": map[string]any{"value": "created"}}
-	created, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+	created, err := store.StartSession(ctx, session.StartSessionRequest{
 		AppName:  "caelis",
 		UserID:   "user-1",
 		Metadata: metadata,
 	})
+
 	if err != nil {
-		t.Fatalf("GetOrCreate() error = %v", err)
+		t.Fatalf("StartSession() error = %v", err)
 	}
 	metadata["nested"].(map[string]any)["value"] = "caller-mutated"
-	loaded, err := store.Get(ctx, created.SessionRef)
+	loaded, err := store.Session(ctx, created.SessionRef)
 	if err != nil {
 		t.Fatalf("Get() error = %v", err)
 	}
@@ -215,7 +220,7 @@ func TestStoreIsolatesNestedMetadataEventsAndState(t *testing.T) {
 		},
 		Meta: map[string]any{"nested": map[string]any{"trace": "one"}},
 	}
-	if _, err := store.AppendEvent(ctx, created.SessionRef, event); err != nil {
+	if _, err := store.AppendEvent(ctx, session.AppendEventRequest{SessionRef: created.SessionRef, Event: event}); err != nil {
 		t.Fatalf("AppendEvent() error = %v", err)
 	}
 	event.Tool.Input["nested"].(map[string]any)["path"] = "b"
@@ -255,9 +260,9 @@ func TestStoreUpdateStateErrorRollsBackNestedMutation(t *testing.T) {
 
 	store := NewStore(Config{SessionIDGenerator: func() string { return "sess-rollback" }})
 	ctx := context.Background()
-	created, err := store.GetOrCreate(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
+	created, err := store.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
 	if err != nil {
-		t.Fatalf("GetOrCreate() error = %v", err)
+		t.Fatalf("StartSession() error = %v", err)
 	}
 	if _, err := store.ReplaceState(ctx, session.ReplaceStateRequest{SessionRef: created.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), State: map[string]any{
 		"nested": map[string]any{"value": "before"},
@@ -286,9 +291,9 @@ func TestStoreRejectsInvalidJSONStateWithoutMutation(t *testing.T) {
 
 	store := NewStore(Config{SessionIDGenerator: func() string { return "sess-invalid-state" }})
 	ctx := context.Background()
-	created, err := store.GetOrCreate(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
+	created, err := store.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
 	if err != nil {
-		t.Fatalf("GetOrCreate() error = %v", err)
+		t.Fatalf("StartSession() error = %v", err)
 	}
 	if _, err := store.ReplaceState(ctx, session.ReplaceStateRequest{SessionRef: created.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), State: map[string]any{"value": "before"}}); err != nil {
 		t.Fatalf("ReplaceState() error = %v", err)
@@ -308,7 +313,7 @@ func TestStoreRejectsInvalidJSONStateWithoutMutation(t *testing.T) {
 func TestServiceAppendEventCASAndIdempotentRetry(t *testing.T) {
 	t.Parallel()
 
-	service := NewService(NewStore(Config{SessionIDGenerator: func() string { return "sess-cas" }}))
+	service := NewStore(Config{SessionIDGenerator: func() string { return "sess-cas" }})
 	ctx := context.Background()
 	created, err := service.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
 	if err != nil {
@@ -364,12 +369,13 @@ func TestStoreStateOperationsHandleNilStateWithoutSnapshotMutation(t *testing.T)
 		SessionIDGenerator: func() string { return "sess-1" },
 	})
 	ctx := context.Background()
-	createdSession, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+	createdSession, err := store.StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
 	})
+
 	if err != nil {
-		t.Fatalf("GetOrCreate() error = %v", err)
+		t.Fatalf("StartSession() error = %v", err)
 	}
 
 	store.mu.Lock()
@@ -431,9 +437,9 @@ func TestStoreStateOperationsHandleNilStateWithoutSnapshotMutation(t *testing.T)
 func TestStoreControllerAndParticipantBindings(t *testing.T) {
 	t.Parallel()
 
-	service := NewService(NewStore(Config{
+	service := NewStore(Config{
 		SessionIDGenerator: func() string { return "sess-1" },
-	}))
+	})
 	ctx := context.Background()
 	createdSession, err := service.StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis",

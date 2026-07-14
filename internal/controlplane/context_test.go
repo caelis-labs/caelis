@@ -438,7 +438,7 @@ func (*recordingControllerBackend) Detach(context.Context, controller.DetachRequ
 
 func newControlTestSession(t *testing.T, id string) (session.Service, session.Session) {
 	t.Helper()
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{SessionIDGenerator: func() string { return id }}))
+	sessions := inmemory.NewStore(inmemory.Config{SessionIDGenerator: func() string { return id }})
 	activeSession, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis", UserID: "test", Workspace: session.WorkspaceRef{Key: "ws", CWD: "/tmp/ws"},
 	})

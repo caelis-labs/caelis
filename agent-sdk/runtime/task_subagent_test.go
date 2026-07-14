@@ -1392,7 +1392,7 @@ func TestStartSubagentWithOptionsUsesRuntimeDefaultApprovalMode(t *testing.T) {
 
 func newSubagentTaskTestRuntime(t *testing.T, runner subagent.Runner) (*Runtime, session.Session) {
 	t.Helper()
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	sessions := inmemory.NewStore(inmemory.Config{})
 	activeSession, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "task-test",

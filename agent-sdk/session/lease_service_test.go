@@ -27,13 +27,13 @@ func TestSessionLeaseServiceConformance(t *testing.T) {
 			switch store {
 			case "memory":
 				base := inmemory.NewStore(inmemory.Config{Clock: clock.Now})
-				service = inmemory.NewService(base)
-				reopen = func() session.Service { return inmemory.NewService(base) }
+				service = base
+				reopen = func() session.Service { return base }
 			case "file":
 				root := t.TempDir()
-				service = sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{RootDir: root, Clock: clock.Now}))
+				service = sessionfile.NewStore(sessionfile.Config{RootDir: root, Clock: clock.Now})
 				reopen = func() session.Service {
-					return sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{RootDir: root, Clock: clock.Now}))
+					return sessionfile.NewStore(sessionfile.Config{RootDir: root, Clock: clock.Now})
 				}
 			}
 			ctx := context.Background()
@@ -117,9 +117,9 @@ func TestSessionLeaseExpiryBoundaryConformance(t *testing.T) {
 			var service session.Service
 			switch store {
 			case "memory":
-				service = inmemory.NewService(inmemory.NewStore(inmemory.Config{Clock: clock.Now}))
+				service = inmemory.NewStore(inmemory.Config{Clock: clock.Now})
 			case "file":
-				service = sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir(), Clock: clock.Now}))
+				service = sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir(), Clock: clock.Now})
 			}
 			active, err := service.StartSession(context.Background(), session.StartSessionRequest{
 				AppName: "caelis", UserID: "user-1", PreferredSessionID: "lease-boundary",

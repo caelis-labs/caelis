@@ -12,7 +12,7 @@ import (
 )
 
 func TestProvidersFromAssemblyModeAndConfig(t *testing.T) {
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	sessions := inmemory.NewStore(inmemory.Config{})
 	started, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",

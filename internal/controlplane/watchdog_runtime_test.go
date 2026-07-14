@@ -428,7 +428,7 @@ func TestWatchdogProductionDefaults(t *testing.T) {
 
 func newWatchdogTestSession(t *testing.T, sessionID string) (session.Service, session.Session) {
 	t.Helper()
-	service := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	service := inmemory.NewStore(inmemory.Config{})
 	active, err := service.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis", UserID: "user", PreferredSessionID: sessionID,
 	})

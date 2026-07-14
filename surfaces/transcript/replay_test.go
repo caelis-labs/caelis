@@ -167,6 +167,63 @@ func TestProjectReplayEventsSkipsSideACPProcessTrace(t *testing.T) {
 	}
 }
 
+func TestProjectReplayEventsKeepsDurableChildMirrorHistory(t *testing.T) {
+	t.Parallel()
+
+	status := schema.ToolStatusCompleted
+	delivery := &eventstream.Delivery{Mode: eventstream.DeliveryMirror}
+	events := ProjectReplayEvents([]eventstream.Envelope{
+		{
+			Kind: eventstream.KindSessionUpdate, Scope: eventstream.ScopeSubagent, ScopeID: "task-1",
+			Delivery: delivery,
+			Update: schema.ContentChunk{
+				SessionUpdate: schema.UpdateAgentMessage,
+				Content:       schema.TextContent{Type: "text", Text: "streamed child answer"},
+			},
+		},
+		{
+			Kind: eventstream.KindSessionUpdate, Scope: eventstream.ScopeSubagent, ScopeID: "task-1",
+			Delivery: delivery,
+			Update: schema.ToolCallUpdate{
+				SessionUpdate: schema.UpdateToolCallInfo,
+				ToolCallID:    "child-call",
+				Status:        &status,
+			},
+		},
+		{
+			Kind: eventstream.KindSessionUpdate, Scope: eventstream.ScopeSubagent, ScopeID: "task-1",
+			Delivery: delivery,
+			Update: schema.PlanUpdate{
+				SessionUpdate: schema.UpdatePlan,
+				Entries:       []schema.PlanEntry{{Content: "inspect package", Status: "completed"}},
+			},
+		},
+		{
+			Kind: eventstream.KindLifecycle, Scope: eventstream.ScopeSubagent, ScopeID: "task-1",
+			Delivery: delivery,
+			Lifecycle: &eventstream.Lifecycle{
+				State: eventstream.LifecycleStateCompleted,
+			},
+		},
+	}, testSurfaceProjector{toolName: "READ"})
+
+	if len(events) != 4 {
+		t.Fatalf("events = %#v, want child narrative, tool, plan, and lifecycle", events)
+	}
+	if events[0].Kind != EventNarrative || events[0].Scope != ScopeSubagent || events[0].Text != "streamed child answer" || events[0].Final {
+		t.Fatalf("narrative = %#v, want non-final durable child mirror", events[0])
+	}
+	if events[1].Kind != EventTool || events[1].ToolCallID != "child-call" {
+		t.Fatalf("tool = %#v, want durable child tool", events[1])
+	}
+	if events[2].Kind != EventPlan || events[2].Scope != ScopeSubagent || len(events[2].PlanEntries) != 1 {
+		t.Fatalf("plan = %#v, want durable child plan", events[2])
+	}
+	if events[3].Kind != EventLifecycle || events[3].Scope != ScopeSubagent || events[3].State != eventstream.LifecycleStateCompleted {
+		t.Fatalf("lifecycle = %#v, want durable child lifecycle", events[3])
+	}
+}
+
 func TestProjectReplayEventsProjectsParticipantUserPrompt(t *testing.T) {
 	t.Parallel()
 

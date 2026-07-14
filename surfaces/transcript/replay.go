@@ -29,6 +29,9 @@ func ProjectReplayEvent(env eventstream.Envelope, surface SurfaceProjector) []Ev
 // supplied directly as ACP events. Canonical session replay filtering lives in
 // agent-sdk/session.
 func replayableACPEvents(env eventstream.Envelope, surface SurfaceProjector) []Event {
+	if env.Delivery != nil && env.Delivery.Mode == eventstream.DeliveryMirror {
+		return replayableACPMirrorEvent(env, surface)
+	}
 	switch env.Kind {
 	case eventstream.KindSessionUpdate:
 		return replayableACPSessionUpdate(env, surface)
@@ -37,6 +40,19 @@ func replayableACPEvents(env eventstream.Envelope, surface SurfaceProjector) []E
 	default:
 		return nil
 	}
+}
+
+func replayableACPMirrorEvent(env eventstream.Envelope, surface SurfaceProjector) []Event {
+	switch env.Kind {
+	case eventstream.KindLifecycle:
+		return ProjectACPEventToEvents(env, surface)
+	case eventstream.KindSessionUpdate:
+		switch env.Update.(type) {
+		case schema.ContentChunk, schema.ToolCall, schema.ToolCallUpdate, schema.PlanUpdate, schema.UsageUpdate:
+			return ProjectACPEventToEvents(env, surface)
+		}
+	}
+	return nil
 }
 
 func replayableACPSessionUpdate(env eventstream.Envelope, surface SurfaceProjector) []Event {

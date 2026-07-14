@@ -103,14 +103,14 @@ func benchmarkRecoveryService(b *testing.B, backend string, sessionCount int, ev
 	var service recoveryBenchmarkService
 	switch backend {
 	case "file":
-		service = sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{
+		service = sessionfile.NewStore(sessionfile.Config{
 			RootDir:            b.TempDir(),
 			SessionIDGenerator: idGenerator,
-		}))
+		})
 	case "memory":
-		service = sessionmemory.NewService(sessionmemory.NewStore(sessionmemory.Config{
+		service = sessionmemory.NewStore(sessionmemory.Config{
 			SessionIDGenerator: idGenerator,
-		}))
+		})
 	default:
 		b.Fatalf("unknown backend %q", backend)
 	}

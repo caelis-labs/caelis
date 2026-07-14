@@ -19,7 +19,7 @@ func TestFreshRuntimesScopeProviderLocalToolCallIDsAndRebuildBothTurns(t *testin
 	t.Parallel()
 
 	root := t.TempDir()
-	service := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{RootDir: root}))
+	service := sessionfile.NewStore(sessionfile.Config{RootDir: root})
 	active, err := service.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis", UserID: "user", PreferredSessionID: "provider-local-tool-ids",
 	})
@@ -40,7 +40,7 @@ func TestFreshRuntimesScopeProviderLocalToolCallIDsAndRebuildBothTurns(t *testin
 	}
 
 	for turn := 1; turn <= 2; turn++ {
-		freshService := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{RootDir: root}))
+		freshService := sessionfile.NewStore(sessionfile.Config{RootDir: root})
 		fresh, err := New(Config{
 			Sessions: freshService, AgentFactory: chat.Factory{},
 			PolicyRegistry: allow, DefaultPolicyMode: "allow",

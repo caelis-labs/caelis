@@ -16,7 +16,7 @@ import (
 func TestACPControllerCancelPersistsFencedRequestWhileRemoteTurnIsLive(t *testing.T) {
 	t.Parallel()
 
-	service := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	service := inmemory.NewStore(inmemory.Config{})
 	active, err := service.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis", UserID: "acp-cancel-user", PreferredSessionID: "acp-fenced-cancel",
 	})

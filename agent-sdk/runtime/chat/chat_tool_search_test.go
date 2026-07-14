@@ -151,10 +151,10 @@ func TestChatAgentRestoresDeferredMCPVisibilityAfterSessionStoreRoundTrip(t *tes
 	}
 	livePostSearchTools := requestToolNames(liveModel.requests[1])
 
-	sessions := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{
+	sessions := sessionfile.NewStore(sessionfile.Config{
 		RootDir:            t.TempDir(),
 		SessionIDGenerator: func() string { return "sess-tool-search-store" },
-	}))
+	})
 	activeSession, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",

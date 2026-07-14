@@ -40,7 +40,7 @@ func TestExternalACPChildStreamsThroughRuntimeRecorderAndSessionFeedBeforeComple
 		RootDir:            root,
 		SessionIDGenerator: func() string { return "parent-session" },
 	})
-	sessions := sessionfile.NewService(store)
+	sessions := store
 	parent, err := sessions.StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis", UserID: "user-1", PreferredSessionID: "parent-session",
 		Workspace: session.WorkspaceRef{Key: "workspace-1", CWD: root},
@@ -284,7 +284,7 @@ func TestExternalACPChildStreamsThroughRuntimeRecorderAndSessionFeedBeforeComple
 		t.Fatalf("durable child mirror count = %d, want %d", mirrors, len(updates))
 	}
 
-	reopenedSessions := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{RootDir: root}))
+	reopenedSessions := sessionfile.NewStore(sessionfile.Config{RootDir: root})
 	contextModel := &liveOutputContextCaptureModel{requests: make(chan string, 1)}
 	reopenedRuntime, err := sdkruntime.New(sdkruntime.Config{
 		Sessions:     reopenedSessions,

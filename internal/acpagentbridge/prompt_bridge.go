@@ -100,11 +100,6 @@ func (a *RuntimeAgent) emitPromptRouterResult(ctx context.Context, activeSession
 			return err
 		}
 	}
-	for _, env := range result.ReplayEvents {
-		if err := a.emitControlEnvelope(ctx, cb, sessionID, nil, env, outboundFilter); err != nil {
-			return err
-		}
-	}
 	if result.Reconnect != nil {
 		defer result.Reconnect.Close()
 		for backfill := result.Reconnect.Backfill(); backfill != nil; {

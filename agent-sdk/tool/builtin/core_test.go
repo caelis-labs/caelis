@@ -19,7 +19,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/web"
 	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/registry"
 )
 
 func TestBuildCoreToolsCreatesDefaultCodingGroup(t *testing.T) {
@@ -292,11 +291,6 @@ func TestCoreToolsRejectUnknownArgs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildCoreTools() error = %v", err)
 	}
-	reg, err := registry.NewMemory(tools...)
-	if err != nil {
-		t.Fatalf("NewMemory() error = %v", err)
-	}
-
 	tests := []struct {
 		name string
 		args map[string]any
@@ -321,7 +315,7 @@ func TestCoreToolsRejectUnknownArgs(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			targetTool := mustLookupTool(t, reg, tt.name)
+			targetTool := mustLookupTool(t, tools, tt.name)
 			err := runToolErr(t, targetTool, tt.args)
 			if err == nil {
 				t.Fatalf("%s.Call() error = nil, want unknown arg rejection", tt.name)
@@ -377,12 +371,7 @@ func TestCoreCodingToolsE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildCoreTools() error = %v", err)
 	}
-	reg, err := registry.NewMemory(tools...)
-	if err != nil {
-		t.Fatalf("NewMemory() error = %v", err)
-	}
-
-	writeTool := mustLookupTool(t, reg, filesystem.WriteToolName)
+	writeTool := mustLookupTool(t, tools, filesystem.WriteToolName)
 	writeResult := runToolJSON(t, writeTool, map[string]any{
 		"path":    "notes.txt",
 		"content": "hello\nworld\n",
@@ -394,7 +383,7 @@ func TestCoreCodingToolsE2E(t *testing.T) {
 		t.Fatalf("write revision = %#v, want non-empty", writeResult["revision"])
 	}
 
-	readTool := mustLookupTool(t, reg, filesystem.ReadToolName)
+	readTool := mustLookupTool(t, tools, filesystem.ReadToolName)
 	readResult := runToolJSON(t, readTool, map[string]any{
 		"path": "notes.txt",
 	})
@@ -406,7 +395,7 @@ func TestCoreCodingToolsE2E(t *testing.T) {
 		t.Fatal("read revision is empty")
 	}
 
-	patchTool := mustLookupTool(t, reg, filesystem.PatchToolName)
+	patchTool := mustLookupTool(t, tools, filesystem.PatchToolName)
 	patchResult := runToolJSON(t, patchTool, map[string]any{
 		"path": "notes.txt",
 		"edits": []map[string]any{
@@ -425,7 +414,7 @@ func TestCoreCodingToolsE2E(t *testing.T) {
 		t.Fatalf("patch revision = %#v, want non-empty", patchResult["revision"])
 	}
 
-	searchTool := mustLookupTool(t, reg, filesystem.SearchToolName)
+	searchTool := mustLookupTool(t, tools, filesystem.SearchToolName)
 	searchResult := runToolJSON(t, searchTool, map[string]any{
 		"path":    dir,
 		"pattern": "missing|caelis",
@@ -463,7 +452,7 @@ func TestCoreCodingToolsE2E(t *testing.T) {
 		t.Fatalf("search count with .git index = %v, want 1", got)
 	}
 
-	globTool := mustLookupTool(t, reg, filesystem.GlobToolName)
+	globTool := mustLookupTool(t, tools, filesystem.GlobToolName)
 	globResult := runToolJSON(t, globTool, map[string]any{
 		"pattern": filepath.Join(dir, "*.txt"),
 	})
@@ -500,7 +489,7 @@ func TestCoreCodingToolsE2E(t *testing.T) {
 	if got := globResult["count"]; got != float64(1) {
 		t.Fatalf("glob count with default gitignore = %v, want 1", got)
 	}
-	runCommandTool := mustLookupTool(t, reg, shell.RunCommandToolName)
+	runCommandTool := mustLookupTool(t, tools, shell.RunCommandToolName)
 	runCommandResult := runToolJSON(t, runCommandTool, map[string]any{
 		"command":       "cat notes.txt",
 		"workdir":       dir,
@@ -521,7 +510,7 @@ func TestCoreCodingToolsE2E(t *testing.T) {
 		t.Fatalf("notes.txt = %q, want patched content", got)
 	}
 
-	planTool := mustLookupTool(t, reg, plan.ToolName)
+	planTool := mustLookupTool(t, tools, plan.ToolName)
 	planResult := runToolJSON(t, planTool, map[string]any{
 		"entries": []map[string]any{
 			{"content": "Read file", "status": "completed"},
@@ -533,16 +522,15 @@ func TestCoreCodingToolsE2E(t *testing.T) {
 	}
 }
 
-func mustLookupTool(t *testing.T, reg tool.Registry, name string) tool.Tool {
+func mustLookupTool(t *testing.T, tools []tool.Tool, name string) tool.Tool {
 	t.Helper()
-	item, ok, err := reg.Lookup(context.Background(), name)
-	if err != nil {
-		t.Fatalf("Lookup(%q) error = %v", name, err)
+	for _, item := range tools {
+		if item != nil && tool.CanonicalName(item.Definition().Name) == tool.CanonicalName(name) {
+			return item
+		}
 	}
-	if !ok || item == nil {
-		t.Fatalf("Lookup(%q) = nil, want tool", name)
-	}
-	return item
+	t.Fatalf("Lookup(%q) = nil, want tool", name)
+	return nil
 }
 
 func runToolJSON(t *testing.T, targetTool tool.Tool, args map[string]any) map[string]any {

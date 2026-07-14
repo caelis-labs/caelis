@@ -184,7 +184,7 @@ func TestLiveFeedBrokerEventOnlyPlanHasTransientChildDelivery(t *testing.T) {
 
 func TestLiveFeedBrokerPersistsChildMirrorBeforePublishing(t *testing.T) {
 	ctx := context.Background()
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{SessionIDGenerator: func() string { return "session-1" }}))
+	sessions := inmemory.NewStore(inmemory.Config{SessionIDGenerator: func() string { return "session-1" }})
 	parent, err := sessions.StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis", UserID: "user-1", PreferredSessionID: "session-1",
 	})
@@ -233,7 +233,7 @@ func TestLiveFeedBrokerPersistsChildMirrorBeforePublishing(t *testing.T) {
 
 func TestControlSessionFeedPublishesDurableChildMirrorWithTaskScopeWhileRunning(t *testing.T) {
 	ctx := context.Background()
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{SessionIDGenerator: func() string { return "session-1" }}))
+	sessions := inmemory.NewStore(inmemory.Config{SessionIDGenerator: func() string { return "session-1" }})
 	parent, err := sessions.StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis", UserID: "user-1", PreferredSessionID: "session-1",
 	})
@@ -1032,7 +1032,7 @@ func assertDurableChildFeedEnvelope(t *testing.T, child eventstream.Envelope) {
 
 func TestLiveFeedBrokerRetriesChildSnapshotWithoutAdvancingCursorAfterRecorderFailure(t *testing.T) {
 	ctx := context.Background()
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{SessionIDGenerator: func() string { return "session-1" }}))
+	sessions := inmemory.NewStore(inmemory.Config{SessionIDGenerator: func() string { return "session-1" }})
 	if _, err := sessions.StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis", UserID: "user-1", PreferredSessionID: "session-1",
 	}); err != nil {
@@ -1275,9 +1275,9 @@ func TestLiveFeedBrokerDeduplicatesRunningTaskSnapshots(t *testing.T) {
 
 func TestLiveFeedBrokerSharesPhysicalSpawnStreamAcrossTaskWaitObservers(t *testing.T) {
 	ctx := context.Background()
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{
+	sessions := inmemory.NewStore(inmemory.Config{
 		SessionIDGenerator: func() string { return "session-1" },
-	}))
+	})
 	parent, err := sessions.StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis", UserID: "user-1", PreferredSessionID: "session-1",
 	})
@@ -1360,9 +1360,9 @@ func TestLiveFeedBrokerSharesPhysicalSpawnStreamAcrossTaskWaitObservers(t *testi
 
 func TestControlSessionFeedRecoversDetachedChildGapAcrossTurnBrokers(t *testing.T) {
 	ctx := context.Background()
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{
+	sessions := inmemory.NewStore(inmemory.Config{
 		SessionIDGenerator: func() string { return "session-1" },
-	}))
+	})
 	parent, err := sessions.StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis", UserID: "user-1", PreferredSessionID: "session-1",
 	})

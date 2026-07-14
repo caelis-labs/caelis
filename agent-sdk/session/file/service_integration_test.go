@@ -13,10 +13,10 @@ func TestSessionServiceIntegration(t *testing.T) {
 
 	root := t.TempDir()
 	ctx := context.Background()
-	service := NewService(NewStore(Config{
+	service := NewStore(Config{
 		RootDir:            root,
 		SessionIDGenerator: func() string { return "parent-1" },
-	}))
+	})
 
 	parent, err := service.StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis",
@@ -66,7 +66,7 @@ func TestSessionServiceIntegration(t *testing.T) {
 		RootDir:            root,
 		SessionIDGenerator: func() string { return "child-1" },
 	})
-	childService := NewService(childStore)
+	childService := childStore
 	child, err := childService.StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
@@ -90,7 +90,7 @@ func TestSessionServiceIntegration(t *testing.T) {
 		t.Fatalf("AppendEvent(child) error = %v", err)
 	}
 
-	reopened := NewService(NewStore(Config{RootDir: root}))
+	reopened := NewStore(Config{RootDir: root})
 	loadedParent, err := reopened.LoadSession(ctx, session.LoadSessionRequest{
 		SessionRef: parent.SessionRef,
 	})

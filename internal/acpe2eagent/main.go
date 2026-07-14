@@ -41,7 +41,7 @@ func main() {
 		RootDir:            sessionRootDir(),
 		SessionIDGenerator: newSessionID,
 	})
-	sessions := sessionfile.NewService(sessionStore)
+	sessions := sessionStore
 	assembly, err := resolveAssembly()
 	if err != nil {
 		log.Fatal(err)

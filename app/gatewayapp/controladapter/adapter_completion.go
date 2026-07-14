@@ -12,6 +12,8 @@ import (
 	"github.com/caelis-labs/caelis/ports/gateway"
 )
 
+const resumeCompletionPageLimit = 200
+
 func (d *Adapter) CompleteMention(ctx context.Context, query string, limit int) ([]CompletionCandidate, error) {
 	limit = normalizeCompletionLimit(limit)
 	activeSession, ok := d.currentSession()
@@ -122,7 +124,7 @@ func (d *Adapter) CompleteResume(ctx context.Context, query string, limit int) (
 		result, err := gw.ListSessions(ctx, gateway.ListSessionsRequest{
 			AppName: d.stack.Session.AppName, UserID: d.stack.Session.UserID,
 			WorkspaceKey: d.stack.Session.Workspace.Key,
-			Cursor:       cursor, Limit: clientProtocolSessionListLimit,
+			Cursor:       cursor, Limit: resumeCompletionPageLimit,
 		})
 		if err != nil {
 			return nil, err

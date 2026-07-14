@@ -11,9 +11,9 @@ import (
 func TestSessionServiceIntegration(t *testing.T) {
 	t.Parallel()
 
-	service := NewService(NewStore(Config{
+	service := NewStore(Config{
 		SessionIDGenerator: func() string { return "sess-e2e" },
-	}))
+	})
 	ctx := context.Background()
 
 	createdSession, err := service.StartSession(ctx, session.StartSessionRequest{

@@ -16,6 +16,7 @@ import (
 	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter"
 	internalcontrolclient "github.com/caelis-labs/caelis/internal/controlclient"
 	"github.com/caelis-labs/caelis/internal/evalharness"
+	controlclient "github.com/caelis-labs/caelis/ports/controlclient"
 	"github.com/caelis-labs/caelis/ports/gateway"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/metautil"
@@ -26,9 +27,9 @@ import (
 
 func TestControlSessionFeedAdapterStreamsSpawnNarrativeIntoTUIAndReplaysEquivalently(t *testing.T) {
 	ctx := context.Background()
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{
+	sessions := inmemory.NewStore(inmemory.Config{
 		SessionIDGenerator: func() string { return "session-1" },
-	}))
+	})
 	active, err := sessions.StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis", UserID: "user-1", PreferredSessionID: "session-1",
 	})
@@ -144,13 +145,21 @@ func TestControlSessionFeedAdapterStreamsSpawnNarrativeIntoTUIAndReplaysEquivale
 		t.Fatalf("live TUI did not retain exactly one Spawn output:\n%s", liveFrame)
 	}
 
-	replay, err := driver.Replay(ctx, eventstream.ReplayRequest{SessionID: "session-1", IncludeTransient: true})
+	replay, err := feed.Subscribe(ctx, controlclient.SubscribeRequest{SessionID: "session-1"})
 	if err != nil {
+		t.Fatal(err)
+	}
+	defer replay.Subscription.Close()
+	var replayEvents []eventstream.Envelope
+	for envelope := range replay.Subscription.Backfill() {
+		replayEvents = append(replayEvents, envelope)
+	}
+	if err := replay.Subscription.Err(); err != nil {
 		t.Fatal(err)
 	}
 	replayModel := newSpawnFeedTUIModel(t)
 	hasParentAnchor := false
-	for _, envelope := range replay.Events {
+	for _, envelope := range replayEvents {
 		call, ok := envelope.Update.(schema.ToolCall)
 		if ok && call.ToolCallID == "spawn-call-1" {
 			hasParentAnchor = true
@@ -160,7 +169,7 @@ func TestControlSessionFeedAdapterStreamsSpawnNarrativeIntoTUIAndReplaysEquivale
 	if !hasParentAnchor {
 		replayModel = updateSpawnFeedTUIModel(t, replayModel, spawnFeedRunningEnvelope())
 	}
-	for _, envelope := range replay.Events {
+	for _, envelope := range replayEvents {
 		replayModel = updateSpawnFeedTUIModel(t, replayModel, envelope)
 	}
 	replayFrame := evalharness.NormalizeFrame(replayModel.View().Content)

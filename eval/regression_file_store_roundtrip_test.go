@@ -35,13 +35,14 @@ func TestRegressionFileStoreRoundTripMinimalToolLoop(t *testing.T) {
 	ctx := context.Background()
 	store := newFileStoreForTest(t)
 
-	sess, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+	sess, err := store.StartSession(ctx, session.StartSessionRequest{
 		AppName:            "caelis",
 		UserID:             "test-user",
 		PreferredSessionID: "sess-file-tool-loop",
 	})
+
 	if err != nil {
-		t.Fatalf("GetOrCreate() error = %v", err)
+		t.Fatalf("StartSession() error = %v", err)
 	}
 
 	liveScripted := evalharness.NewScriptedModel("live-file-tool-loop",
@@ -77,7 +78,7 @@ func TestRegressionFileStoreRoundTripMinimalToolLoop(t *testing.T) {
 
 	for _, event := range canonicalEvents {
 		event.SessionID = ""
-		if _, err := store.AppendEvent(ctx, session.SessionRef{SessionID: sess.SessionID}, event); err != nil {
+		if _, err := store.AppendEvent(ctx, session.AppendEventRequest{SessionRef: session.SessionRef{SessionID: sess.SessionID}, Event: event}); err != nil {
 			t.Fatalf("AppendEvent() error = %v", err)
 		}
 	}
@@ -143,13 +144,14 @@ func TestRegressionFileStoreRoundTripDeferredMCPToolVisibility(t *testing.T) {
 	ctx := context.Background()
 	store := newFileStoreForTest(t)
 
-	sess, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+	sess, err := store.StartSession(ctx, session.StartSessionRequest{
 		AppName:            "caelis",
 		UserID:             "test-user",
 		PreferredSessionID: "sess-file-deferred-mcp-tool",
 	})
+
 	if err != nil {
-		t.Fatalf("GetOrCreate() error = %v", err)
+		t.Fatalf("StartSession() error = %v", err)
 	}
 
 	const mcpToolName = "mcp__calendar__demo__create_event"
@@ -223,7 +225,7 @@ func TestRegressionFileStoreRoundTripDeferredMCPToolVisibility(t *testing.T) {
 	allEvents := append([]*session.Event{userEvent}, liveRun.Events...)
 	for _, event := range evalharness.CanonicalEvents(allEvents) {
 		event.SessionID = ""
-		if _, err := store.AppendEvent(ctx, session.SessionRef{SessionID: sess.SessionID}, event); err != nil {
+		if _, err := store.AppendEvent(ctx, session.AppendEventRequest{SessionRef: session.SessionRef{SessionID: sess.SessionID}, Event: event}); err != nil {
 			t.Fatalf("AppendEvent() error = %v", err)
 		}
 	}
@@ -262,13 +264,14 @@ func TestRegressionFileStoreRoundTripReasoning(t *testing.T) {
 	ctx := context.Background()
 	store := newFileStoreForTest(t)
 
-	sess, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+	sess, err := store.StartSession(ctx, session.StartSessionRequest{
 		AppName:            "caelis",
 		UserID:             "test-user",
 		PreferredSessionID: "sess-file-reasoning",
 	})
+
 	if err != nil {
-		t.Fatalf("GetOrCreate() error = %v", err)
+		t.Fatalf("StartSession() error = %v", err)
 	}
 
 	liveScripted := evalharness.NewScriptedModel("live-file-reasoning",
@@ -295,7 +298,7 @@ func TestRegressionFileStoreRoundTripReasoning(t *testing.T) {
 
 	for _, event := range canonicalEvents {
 		event.SessionID = ""
-		if _, err := store.AppendEvent(ctx, session.SessionRef{SessionID: sess.SessionID}, event); err != nil {
+		if _, err := store.AppendEvent(ctx, session.AppendEventRequest{SessionRef: session.SessionRef{SessionID: sess.SessionID}, Event: event}); err != nil {
 			t.Fatalf("AppendEvent() error = %v", err)
 		}
 	}
@@ -352,13 +355,14 @@ func TestRegressionFileStoreRoundTripInvalidToolRetry(t *testing.T) {
 	ctx := context.Background()
 	store := newFileStoreForTest(t)
 
-	sess, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+	sess, err := store.StartSession(ctx, session.StartSessionRequest{
 		AppName:            "caelis",
 		UserID:             "test-user",
 		PreferredSessionID: "sess-file-invalid-retry",
 	})
+
 	if err != nil {
-		t.Fatalf("GetOrCreate() error = %v", err)
+		t.Fatalf("StartSession() error = %v", err)
 	}
 
 	liveScripted := evalharness.NewScriptedModel("live-file-invalid-retry",
@@ -402,7 +406,7 @@ func TestRegressionFileStoreRoundTripInvalidToolRetry(t *testing.T) {
 
 	for _, event := range canonicalEvents {
 		event.SessionID = ""
-		if _, err := store.AppendEvent(ctx, session.SessionRef{SessionID: sess.SessionID}, event); err != nil {
+		if _, err := store.AppendEvent(ctx, session.AppendEventRequest{SessionRef: session.SessionRef{SessionID: sess.SessionID}, Event: event}); err != nil {
 			t.Fatalf("AppendEvent() error = %v", err)
 		}
 	}

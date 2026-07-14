@@ -9,7 +9,7 @@ import (
 )
 
 func TestSettlePendingApprovalRejectsStaleSnapshotAfterLiveResolutionAndLeaseRelease(t *testing.T) {
-	service := NewService(NewStore(Config{SessionIDGenerator: func() string { return "session-settlement-cas" }}))
+	service := NewStore(Config{SessionIDGenerator: func() string { return "session-settlement-cas" }})
 	ctx := context.Background()
 	active, err := service.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
 	if err != nil {

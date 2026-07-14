@@ -19,7 +19,7 @@ import (
 func TestSystemManagedAgentUsesCoreRuntimeLifecycleAndJournalPipeline(t *testing.T) {
 	t.Parallel()
 
-	staging := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	staging := inmemory.NewStore(inmemory.Config{})
 	interceptor := &systemManagedLifecycleRecorder{}
 	guardrail := &systemManagedGuardrailRecorder{}
 	runner := newSystemManagedAgentRuntimeWithConfig(systemManagedAgentRuntimeConfig{
@@ -80,7 +80,7 @@ func TestSystemManagedAgentUsesCoreRuntimeLifecycleAndJournalPipeline(t *testing
 func TestSystemManagedAgentDoesNotInheritParentRuntimeLease(t *testing.T) {
 	t.Parallel()
 
-	staging := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	staging := inmemory.NewStore(inmemory.Config{})
 	runner := newSystemManagedAgentRuntimeWithConfig(systemManagedAgentRuntimeConfig{
 		AgentFactory:    chat.Factory{},
 		StagingSessions: func() session.Service { return staging },

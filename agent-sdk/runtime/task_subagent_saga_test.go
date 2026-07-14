@@ -209,7 +209,7 @@ func TestSubagentSpawnSagaCompensatesEveryPostSpawnBoundary(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			base := memory.NewService(memory.NewStore(memory.Config{}))
+			base := memory.NewStore(memory.Config{})
 			active, err := base.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "saga"})
 			if err != nil {
 				t.Fatal(err)
@@ -281,7 +281,7 @@ func TestSubagentSpawnSagaCompensatesEveryPostSpawnBoundary(t *testing.T) {
 
 func TestSubagentSpawnRejectsAgentIDCollisionWithoutReplacingOriginalParticipant(t *testing.T) {
 	t.Parallel()
-	base := memory.NewService(memory.NewStore(memory.Config{}))
+	base := memory.NewStore(memory.Config{})
 	active, err := base.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis", UserID: "participant-collision",
 	})
@@ -334,7 +334,7 @@ func TestSubagentSpawnRejectsAgentIDCollisionWithoutReplacingOriginalParticipant
 func TestSubagentSpawnSagaRetryAndRestartNeverBlindlyRespawn(t *testing.T) {
 	t.Parallel()
 
-	base := memory.NewService(memory.NewStore(memory.Config{}))
+	base := memory.NewStore(memory.Config{})
 	active, err := base.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "saga"})
 	if err != nil {
 		t.Fatal(err)
@@ -431,7 +431,7 @@ func TestSubagentSpawnSagaRetryAndRestartNeverBlindlyRespawn(t *testing.T) {
 func TestSubagentSpawnCompensationResumesDetachBeforeTerminalState(t *testing.T) {
 	t.Parallel()
 
-	base := memory.NewService(memory.NewStore(memory.Config{}))
+	base := memory.NewStore(memory.Config{})
 	active, err := base.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "detach-recovery"})
 	if err != nil {
 		t.Fatal(err)
@@ -539,7 +539,7 @@ func TestSubagentSpawnCompensationResumesDetachBeforeTerminalState(t *testing.T)
 func TestSubagentSpawnCancelSuccessCannotRollForwardAfterTerminalWriteFailure(t *testing.T) {
 	t.Parallel()
 
-	base := memory.NewService(memory.NewStore(memory.Config{}))
+	base := memory.NewStore(memory.Config{})
 	active, err := base.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "cancel-terminal"})
 	if err != nil {
 		t.Fatal(err)
@@ -594,7 +594,7 @@ func TestSubagentSpawnIdentityBindsCompleteSemanticRequest(t *testing.T) {
 	for _, change := range changes {
 		change := change
 		t.Run(change.name, func(t *testing.T) {
-			base := memory.NewService(memory.NewStore(memory.Config{}))
+			base := memory.NewStore(memory.Config{})
 			active, err := base.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: change.name})
 			if err != nil {
 				t.Fatal(err)
@@ -626,7 +626,7 @@ func TestSubagentSpawnIdentityBindsCompleteSemanticRequest(t *testing.T) {
 func TestSubagentSpawnRejectsEmptyParticipantAnchorAndCompensates(t *testing.T) {
 	t.Parallel()
 
-	base := memory.NewService(memory.NewStore(memory.Config{}))
+	base := memory.NewStore(memory.Config{})
 	active, err := base.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "invalid-anchor"})
 	if err != nil {
 		t.Fatal(err)
@@ -682,7 +682,7 @@ func (r *invalidAnchorSagaRunner) Cancel(context.Context, delegation.Anchor) err
 func TestSubagentSpawnRequiresCASBeforeExternalEffect(t *testing.T) {
 	t.Parallel()
 
-	base := memory.NewService(memory.NewStore(memory.Config{}))
+	base := memory.NewStore(memory.Config{})
 	active, err := base.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "upsert-only"})
 	if err != nil {
 		t.Fatal(err)
@@ -702,7 +702,7 @@ func TestSubagentSpawnRequiresCASBeforeExternalEffect(t *testing.T) {
 func TestSubagentCancelFailsClosedWhenDurableReloadFails(t *testing.T) {
 	t.Parallel()
 
-	base := memory.NewService(memory.NewStore(memory.Config{}))
+	base := memory.NewStore(memory.Config{})
 	active, err := base.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "reload-outage"})
 	if err != nil {
 		t.Fatal(err)
@@ -734,7 +734,7 @@ func TestSubagentCancelFailsClosedWhenDurableReloadFails(t *testing.T) {
 func TestConcurrentSubagentSpawnCASCallsExternalSpawnOnce(t *testing.T) {
 	t.Parallel()
 
-	base := memory.NewService(memory.NewStore(memory.Config{}))
+	base := memory.NewStore(memory.Config{})
 	active, err := base.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "concurrent-spawn"})
 	if err != nil {
 		t.Fatal(err)
@@ -780,7 +780,7 @@ func TestConcurrentSubagentSpawnCASCallsExternalSpawnOnce(t *testing.T) {
 func TestSubagentSpawnCommittedErrorsReloadAndRollForward(t *testing.T) {
 	t.Parallel()
 
-	base := memory.NewService(memory.NewStore(memory.Config{}))
+	base := memory.NewStore(memory.Config{})
 	active, err := base.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "committed-errors"})
 	if err != nil {
 		t.Fatal(err)
@@ -820,7 +820,7 @@ func TestSubagentSpawnSagaFileRoundTripWholeObjects(t *testing.T) {
 
 	root := t.TempDir()
 	store := sessionfile.NewStore(sessionfile.Config{RootDir: root})
-	sessions := sessionfile.NewService(store)
+	sessions := store
 	tasks := sessionfile.NewTaskStore(store)
 	active, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis", UserID: "file-roundtrip", PreferredSessionID: "subagent-saga-roundtrip",
@@ -853,7 +853,7 @@ func TestSubagentSpawnSagaFileRoundTripWholeObjects(t *testing.T) {
 	}
 
 	reopenedStore := sessionfile.NewStore(sessionfile.Config{RootDir: root})
-	reopenedSessions := sessionfile.NewService(reopenedStore)
+	reopenedSessions := reopenedStore
 	reopenedTasks := sessionfile.NewTaskStore(reopenedStore)
 	gotTask, err := reopenedTasks.Get(context.Background(), snapshot.Ref.TaskID)
 	if err != nil {

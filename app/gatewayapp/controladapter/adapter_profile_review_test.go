@@ -347,6 +347,10 @@ type reviewProfileGatewayService struct {
 	detachReqs []gateway.DetachParticipantRequest
 }
 
+func (*reviewProfileGatewayService) HandoffController(context.Context, gateway.HandoffControllerRequest) (session.Session, error) {
+	return session.Session{}, nil
+}
+
 func (g *reviewProfileGatewayService) ControlPlaneState(context.Context, gateway.ControlPlaneStateRequest) (gateway.ControlPlaneState, error) {
 	participants := make([]gateway.ParticipantState, 0, len(g.session.Participants))
 	for _, participant := range g.session.Participants {

@@ -61,13 +61,13 @@ func BenchmarkNewSessionControlPath(b *testing.B) {
 func benchmarkStackSessions(b *testing.B, root string, sessionCount int, eventsPerSession int) {
 	b.Helper()
 	nextID := 0
-	service := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{
+	service := sessionfile.NewStore(sessionfile.Config{
 		RootDir: root,
 		SessionIDGenerator: func() string {
 			nextID++
 			return fmt.Sprintf("session-%04d", nextID)
 		},
-	}))
+	})
 	events := make([]*session.Event, eventsPerSession)
 	for i := range events {
 		events[i] = &session.Event{

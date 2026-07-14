@@ -95,9 +95,10 @@ func TestTaskStoreRejectsStaleSessionFenceAfterTakeover(t *testing.T) {
 	t.Parallel()
 	now := time.Unix(1000, 0).UTC()
 	backing := NewStore(Config{RootDir: t.TempDir(), Clock: func() time.Time { return now }})
-	active, err := backing.GetOrCreate(context.Background(), session.StartSessionRequest{
+	active, err := backing.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis", UserID: "task-fence", PreferredSessionID: "task-fence",
 	})
+
 	if err != nil {
 		t.Fatal(err)
 	}

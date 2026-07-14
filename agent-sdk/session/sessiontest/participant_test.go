@@ -15,12 +15,12 @@ import (
 func TestReferenceParticipantStoresConform(t *testing.T) {
 	t.Run("memory", func(t *testing.T) {
 		sessiontest.ParticipantLifecycleConformance(t, func(*testing.T) sessiontest.ParticipantStore {
-			return &committedFaultParticipantStore{participantBackend: sessionmemory.NewService(sessionmemory.NewStore(sessionmemory.Config{}))}
+			return &committedFaultParticipantStore{participantBackend: sessionmemory.NewStore(sessionmemory.Config{})}
 		})
 	})
 	t.Run("file", func(t *testing.T) {
 		sessiontest.ParticipantLifecycleConformance(t, func(t *testing.T) sessiontest.ParticipantStore {
-			return &committedFaultParticipantStore{participantBackend: sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()}))}
+			return &committedFaultParticipantStore{participantBackend: sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()})}
 		})
 	})
 }

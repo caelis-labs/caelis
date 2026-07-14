@@ -30,6 +30,22 @@ type eventStreamNarrativeBatcher struct {
 }
 
 func forwardTurnEventStream(ctx context.Context, turn control.Turn, sender *ProgramSender) executeLineResult {
+	return forwardControlEventStream(ctx, turn, nil, sender)
+}
+
+func forwardSessionReconnectEventStream(ctx context.Context, reconnect control.SessionReconnect, sender *ProgramSender) executeLineResult {
+	if reconnect == nil {
+		return executeLineResult{completion: TaskResultMsg{}}
+	}
+	return forwardControlEventStream(ctx, reconnect, reconnect.Err, sender)
+}
+
+func forwardControlEventStream(
+	ctx context.Context,
+	turn control.Turn,
+	closureError func() error,
+	sender *ProgramSender,
+) executeLineResult {
 	ctx = contextOrBackground(ctx)
 	if sender != nil {
 		ctx = sender.bindContext(ctx)
@@ -86,7 +102,21 @@ func forwardTurnEventStream(ctx context.Context, turn control.Turn, sender *Prog
 	}
 	batcher.flush(send)
 	var terminal eventstream.Envelope
+	closureErr := error(nil)
+	if closureError != nil {
+		closureErr = closureError()
+	}
 	switch {
+	case closureErr != nil:
+		failureReason = display.UserVisibleError(closureErr)
+		terminal = eventstream.TurnLifecycle(
+			turn.HandleID(), turn.RunID(), turn.TurnID(),
+			eventstream.LifecycleStateInterrupted, failureReason, "", time.Now(),
+		)
+		// SessionReconnect is an in-process subscription view. Retain its typed
+		// FeedGapError so the retry Cursor is not lost when the live channel closes.
+		terminal.Err = closureErr
+		terminal.Error = failureReason
 	case cancelled || cancelRequested:
 		terminal = eventstream.TurnCancelled(turn.HandleID(), turn.RunID(), turn.TurnID(), failureReason, time.Now())
 	case failureReason != "":

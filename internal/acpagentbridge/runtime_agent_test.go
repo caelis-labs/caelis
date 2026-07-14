@@ -83,7 +83,7 @@ func TestRuntimeAgentNewSessionIncludesInjectedModesAndConfig(t *testing.T) {
 }
 
 func TestRuntimeAgentNewSessionIncludesAssemblyModesAndConfig(t *testing.T) {
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	sessions := inmemory.NewStore(inmemory.Config{})
 	modes, configs := bridgeassembly.ProvidersFromAssembly(bridgeassembly.ProviderConfig{
 		Assembly: assemblyapi.ResolvedAssembly{
 			Modes: []assemblyapi.ModeConfig{
@@ -248,7 +248,7 @@ func TestRuntimeAgentListResumeAndCloseSession(t *testing.T) {
 
 func TestRuntimeAgentPromptPassesResolvedWorkspaceRefToMainRuntime(t *testing.T) {
 	ctx := context.Background()
-	sessions := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()}))
+	sessions := sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()})
 	if _, err := sessions.StartSession(ctx, session.StartSessionRequest{
 		AppName:            "caelis",
 		UserID:             "user-1",
@@ -296,7 +296,7 @@ func TestRuntimeAgentPromptPassesResolvedWorkspaceRefToMainRuntime(t *testing.T)
 
 func TestRuntimeAgentResumeSessionIgnoresCWDForIdentity(t *testing.T) {
 	ctx := context.Background()
-	sessions := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()}))
+	sessions := sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()})
 	if _, err := sessions.StartSession(ctx, session.StartSessionRequest{
 		AppName:            "caelis",
 		UserID:             "user-1",
@@ -348,7 +348,7 @@ func TestRuntimeAgentResumeSessionIgnoresCWDForIdentity(t *testing.T) {
 
 func TestRuntimeAgentUnscopedPromptUsesGlobalSessionIDAfterResumeWithDifferentCWD(t *testing.T) {
 	ctx := context.Background()
-	sessions := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()}))
+	sessions := sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()})
 	if _, err := sessions.StartSession(ctx, session.StartSessionRequest{
 		AppName:            "caelis",
 		UserID:             "user-1",
@@ -399,7 +399,7 @@ func TestRuntimeAgentUnscopedPromptUsesGlobalSessionIDAfterResumeWithDifferentCW
 }
 
 func TestRuntimeAgentPromptConvertsLocalTerminalTextToTerminalMetaForACPStdio(t *testing.T) {
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	sessions := inmemory.NewStore(inmemory.Config{})
 	agent, err := runtimeacp.New(runtimeacp.Config{
 		Runtime:  terminalBridgeRuntime{includeFinalEvent: true},
 		Sessions: sessions,
@@ -433,7 +433,7 @@ func TestRuntimeAgentPromptConvertsLocalTerminalTextToTerminalMetaForACPStdio(t 
 }
 
 func TestRuntimeAgentPromptDeduplicatesCumulativeNarrativeChunks(t *testing.T) {
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	sessions := inmemory.NewStore(inmemory.Config{})
 	agent, err := runtimeacp.New(runtimeacp.Config{
 		Runtime:  narrativeReplayRuntime{},
 		Sessions: sessions,
@@ -466,7 +466,7 @@ func TestRuntimeAgentPromptDeduplicatesCumulativeNarrativeChunks(t *testing.T) {
 }
 
 func TestRuntimeAgentPromptDeduplicatesFinalReasoningReplay(t *testing.T) {
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	sessions := inmemory.NewStore(inmemory.Config{})
 	agent, err := runtimeacp.New(runtimeacp.Config{
 		Runtime:  narrativeThoughtReplayRuntime{},
 		Sessions: sessions,
@@ -499,7 +499,7 @@ func TestRuntimeAgentPromptDeduplicatesFinalReasoningReplay(t *testing.T) {
 }
 
 func TestRuntimeAgentPromptDeduplicatesNarrativeReplayAcrossToolBoundary(t *testing.T) {
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	sessions := inmemory.NewStore(inmemory.Config{})
 	agent, err := runtimeacp.New(runtimeacp.Config{
 		Runtime:  narrativeToolBoundaryReplayRuntime{},
 		Sessions: sessions,
@@ -543,7 +543,7 @@ func TestRuntimeAgentOptionalMethodsUnsupportedByDefault(t *testing.T) {
 }
 
 func TestRuntimeAgentPromptAutoReviewUsesReviewerInsteadOfClientPermission(t *testing.T) {
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	sessions := inmemory.NewStore(inmemory.Config{})
 	runtime := &approvalReviewRuntime{}
 	reviewer := &recordingApprovalReviewer{}
 	agent, err := runtimeacp.New(runtimeacp.Config{
@@ -592,7 +592,7 @@ func TestRuntimeAgentPromptAutoReviewUsesReviewerInsteadOfClientPermission(t *te
 }
 
 func TestRuntimeAgentPromptAutoReviewNormalizesTextAfterSelectedOption(t *testing.T) {
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	sessions := inmemory.NewStore(inmemory.Config{})
 	runtime := &approvalReviewRuntime{}
 	reviewResult := approval.ReviewResult{
 		Approved:      true,
@@ -640,7 +640,7 @@ func TestRuntimeAgentPromptAutoReviewNormalizesTextAfterSelectedOption(t *testin
 }
 
 func TestRuntimeAgentPromptManualModeUsesClientPermission(t *testing.T) {
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	sessions := inmemory.NewStore(inmemory.Config{})
 	runtime := &approvalReviewRuntime{mode: "manual"}
 	reviewer := &recordingApprovalReviewer{}
 	agent, err := runtimeacp.New(runtimeacp.Config{
@@ -690,7 +690,7 @@ func TestRuntimeAgentPromptManualModeUsesClientPermission(t *testing.T) {
 }
 
 func TestRuntimeAgentPromptUsesDedicatedApprovalModes(t *testing.T) {
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	sessions := inmemory.NewStore(inmemory.Config{})
 	runtime := &approvalReviewRuntime{}
 	reviewer := &recordingApprovalReviewer{}
 	agent, err := runtimeacp.New(runtimeacp.Config{
@@ -733,7 +733,7 @@ func TestRuntimeAgentPromptUsesDedicatedApprovalModes(t *testing.T) {
 
 func newRuntimeAgentWithConfig(t *testing.T, override runtimeacp.Config) (*runtimeacp.RuntimeAgent, session.Service) {
 	t.Helper()
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	sessions := inmemory.NewStore(inmemory.Config{})
 	return newRuntimeAgentWithSessionsAndConfig(t, sessions, override)
 }
 

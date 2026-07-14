@@ -13,6 +13,7 @@ import (
 type openAICompatMsg struct {
 	Role             string                 `json:"role"`
 	Content          any                    `json:"content,omitempty"`
+	Reasoning        string                 `json:"reasoning,omitempty"`
 	ReasoningContent string                 `json:"reasoning_content,omitempty"`
 	ToolCallID       string                 `json:"tool_call_id,omitempty"`
 	ToolCalls        []openAICompatToolCall `json:"tool_calls,omitempty"`
@@ -229,7 +230,7 @@ func toKernelMessage(m openAICompatMsg) (model.Message, error) {
 		})
 	}
 	if role == model.RoleAssistant {
-		return model.MessageFromAssistantParts(text, m.ReasoningContent, calls), nil
+		return model.MessageFromAssistantParts(text, firstNonEmpty(m.Reasoning, m.ReasoningContent), calls), nil
 	}
 	parts := make([]model.Part, 0, 1)
 	if strings.TrimSpace(text) != "" {

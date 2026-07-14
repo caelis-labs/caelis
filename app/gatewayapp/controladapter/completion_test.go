@@ -43,10 +43,6 @@ func (g *pagedResumeCompletionGateway) ListSessions(_ context.Context, req gatew
 	return g.pages[req.Cursor], nil
 }
 
-func (*pagedResumeCompletionGateway) ReplayEvents(context.Context, gateway.ReplayEventsRequest) (gateway.ReplayEventsResult, error) {
-	return gateway.ReplayEventsResult{}, nil
-}
-
 func TestCompleteResumeSearchesBeyondFirstTwoHundredSessions(t *testing.T) {
 	t.Parallel()
 

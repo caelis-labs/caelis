@@ -301,10 +301,10 @@ func TestToolResultArtifactPathRoundTripsWithoutPersistingFullResult(t *testing.
 	}
 
 	root := t.TempDir()
-	sessions := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{
+	sessions := sessionfile.NewStore(sessionfile.Config{
 		RootDir:            root,
 		SessionIDGenerator: func() string { return "sess-artifact-roundtrip" },
-	}))
+	})
 	active, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis", UserID: "user", Workspace: session.WorkspaceRef{Key: "ws", CWD: t.TempDir()},
 	})

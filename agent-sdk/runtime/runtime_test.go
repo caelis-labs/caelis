@@ -62,9 +62,9 @@ func TestRuntimeRequiresControlContextRouterForExternalEndpoints(t *testing.T) {
 func TestRuntimeRunPersistsMinimalChatTurn(t *testing.T) {
 	t.Parallel()
 
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{
+	sessions := inmemory.NewStore(inmemory.Config{
 		SessionIDGenerator: func() string { return "sess-1" },
-	}))
+	})
 	activeSession, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
@@ -192,9 +192,9 @@ func (a *blockingTestAgent) Run(ctx agent.Context) iter.Seq2[*session.Event, err
 func TestRuntimeRunPersistsDisplayInputSeparateFromModelInput(t *testing.T) {
 	t.Parallel()
 
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{
+	sessions := inmemory.NewStore(inmemory.Config{
 		SessionIDGenerator: func() string { return "sess-display-input" },
-	}))
+	})
 	activeSession, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
@@ -420,9 +420,9 @@ func boolPtr(v bool) *bool { return &v }
 func TestRuntimeRunReturnsLiveRunnerBeforeModelCompletion(t *testing.T) {
 	t.Parallel()
 
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{
+	sessions := inmemory.NewStore(inmemory.Config{
 		SessionIDGenerator: func() string { return "sess-live" },
-	}))
+	})
 	activeSession, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
@@ -564,9 +564,9 @@ func TestRuntimeRunReturnsLiveRunnerBeforeModelCompletion(t *testing.T) {
 func TestRuntimeSubmitQueuesGuidanceForNextModelStep(t *testing.T) {
 	t.Parallel()
 
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{
+	sessions := inmemory.NewStore(inmemory.Config{
 		SessionIDGenerator: func() string { return "sess-steer" },
-	}))
+	})
 	activeSession, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
@@ -675,9 +675,9 @@ func TestRuntimeSubmitQueuesGuidanceForNextModelStep(t *testing.T) {
 func TestRuntimeRunDoesNotPersistInterruptedAssistantReplay(t *testing.T) {
 	t.Parallel()
 
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{
+	sessions := inmemory.NewStore(inmemory.Config{
 		SessionIDGenerator: func() string { return "sess-no-interrupted-replay" },
-	}))
+	})
 	activeSession, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
@@ -762,9 +762,9 @@ func TestRuntimeRunDoesNotPersistInterruptedAssistantReplay(t *testing.T) {
 func TestRuntimeACPControllerReturnsLiveRunnerBeforeTurnCompletion(t *testing.T) {
 	t.Parallel()
 
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{
+	sessions := inmemory.NewStore(inmemory.Config{
 		SessionIDGenerator: func() string { return "sess-acp-live" },
-	}))
+	})
 	activeSession, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
@@ -1351,9 +1351,9 @@ func TestRuntimePromptParticipantCancelCancelsControllerTurn(t *testing.T) {
 func TestRuntimeACPControllerPublishesChunksAsLiveDeltas(t *testing.T) {
 	t.Parallel()
 
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{
+	sessions := inmemory.NewStore(inmemory.Config{
 		SessionIDGenerator: func() string { return "sess-acp-deltas" },
-	}))
+	})
 	activeSession, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
@@ -1616,10 +1616,10 @@ func TestRuntimeRunReplaysPersistedHistoryFromFileStore(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	sessions := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{
+	sessions := sessionfile.NewStore(sessionfile.Config{
 		RootDir:            root,
 		SessionIDGenerator: func() string { return "sess-file-replay" },
-	}))
+	})
 	activeSession, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
@@ -1658,7 +1658,7 @@ func TestRuntimeRunReplaysPersistedHistoryFromFileStore(t *testing.T) {
 		t.Fatalf("runtime1 runner error = %v", err)
 	}
 
-	reopenedSessions := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{RootDir: root}))
+	reopenedSessions := sessionfile.NewStore(sessionfile.Config{RootDir: root})
 	runtime2, err := New(Config{
 		Sessions: reopenedSessions,
 		AgentFactory: chat.Factory{
@@ -1722,7 +1722,7 @@ func TestRuntimeRecoveryInterruptsOrphanedCommandTask(t *testing.T) {
 		RootDir:            root,
 		SessionIDGenerator: func() string { return "sess-orphan-command" },
 	})
-	sessions := sessionfile.NewService(sessionStore)
+	sessions := sessionStore
 	tasks := sessionfile.NewTaskStore(sessionStore)
 	activeSession, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis",
@@ -1768,7 +1768,7 @@ func TestRuntimeRecoveryInterruptsOrphanedCommandTask(t *testing.T) {
 	})
 
 	reopenedStore := sessionfile.NewStore(sessionfile.Config{RootDir: root})
-	reopenedSessions := sessionfile.NewService(reopenedStore)
+	reopenedSessions := reopenedStore
 	runtime2, err := New(Config{
 		Sessions:  reopenedSessions,
 		TaskStore: sessionfile.NewTaskStore(reopenedStore),
@@ -2690,7 +2690,7 @@ func TestRuntimeDurableApprovalResolveAndAttachLiveRun(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	sessions := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{RootDir: root, SessionIDGenerator: func() string { return "sess-durable-approval" }}))
+	sessions := sessionfile.NewStore(sessionfile.Config{RootDir: root, SessionIDGenerator: func() string { return "sess-durable-approval" }})
 	activeSession, err := sessions.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
@@ -2786,7 +2786,7 @@ func TestRuntimeDurableApprovalResolveAndAttachLiveRun(t *testing.T) {
 		t.Fatalf("pause token journal = %v, want %v", pauseStatuses, want)
 	}
 
-	reopened, err := New(Config{Sessions: sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{RootDir: root})), AgentFactory: chat.Factory{}})
+	reopened, err := New(Config{Sessions: sessionfile.NewStore(sessionfile.Config{RootDir: root}), AgentFactory: chat.Factory{}})
 	if err != nil {
 		t.Fatalf("New(reopened) error = %v", err)
 	}
@@ -2805,7 +2805,7 @@ func TestRuntimeRecoveryInterruptsOrphanedApprovalPause(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	sessions := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{RootDir: root, SessionIDGenerator: func() string { return "sess-orphaned-approval" }}))
+	sessions := sessionfile.NewStore(sessionfile.Config{RootDir: root, SessionIDGenerator: func() string { return "sess-orphaned-approval" }})
 	activeSession, err := sessions.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
@@ -2830,7 +2830,7 @@ func TestRuntimeRecoveryInterruptsOrphanedApprovalPause(t *testing.T) {
 		t.Fatalf("appendPauseToken() error = %v", err)
 	}
 
-	reopenedSessions := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{RootDir: root}))
+	reopenedSessions := sessionfile.NewStore(sessionfile.Config{RootDir: root})
 	reopened, err := New(Config{Sessions: reopenedSessions, AgentFactory: chat.Factory{}})
 	if err != nil {
 		t.Fatalf("New(reopened) error = %v", err)
@@ -3291,7 +3291,7 @@ func TestRuntimeTerminalSubscribePreservesCompletionTailDuringTaskWait(t *testin
 		RootDir:            root,
 		SessionIDGenerator: func() string { return "sess-terminal-task-wait-tail" },
 	})
-	sessions := sessionfile.NewService(sessionStore)
+	sessions := sessionStore
 	activeSession, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",

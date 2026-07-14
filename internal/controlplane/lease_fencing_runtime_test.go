@@ -25,7 +25,7 @@ func TestLeaseTakeoverFencesNonCooperativeToolResultAndReplaysUnknownOutcome(t *
 	t.Parallel()
 
 	clock := &fencingClock{now: time.Unix(1_000, 0)}
-	service := inmemory.NewService(inmemory.NewStore(inmemory.Config{Clock: clock.Now}))
+	service := inmemory.NewStore(inmemory.Config{Clock: clock.Now})
 	active, err := service.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis", UserID: "fencing-user", PreferredSessionID: "fencing-runtime",
 	})
@@ -129,7 +129,7 @@ func TestLeaseTakeoverFencesNonCooperativeToolResultAndReplaysUnknownOutcome(t *
 func TestLeasedRuntimeCancelPersistsFencedRequestBeforeNonCooperativeRunEnds(t *testing.T) {
 	t.Parallel()
 
-	service := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	service := inmemory.NewStore(inmemory.Config{})
 	active, err := service.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis", UserID: "cancel-user", PreferredSessionID: "fenced-cancel",
 	})

@@ -16,7 +16,7 @@ import (
 func TestChildRecorderUsesParticipantControlAuthorityDuringActiveRuntimeLease(t *testing.T) {
 	t.Parallel()
 
-	sessions := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()}))
+	sessions := sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()})
 	parent, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis", UserID: "user-1", PreferredSessionID: "parent-leased",
 	})
@@ -48,7 +48,7 @@ func TestChildRecorderUsesParticipantControlAuthorityDuringActiveRuntimeLease(t 
 
 func TestChildRecorderDeduplicatesStableSourceAndConflictsOnChangedPayload(t *testing.T) {
 	ctx := context.Background()
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{SessionIDGenerator: func() string { return "parent-1" }}))
+	sessions := inmemory.NewStore(inmemory.Config{SessionIDGenerator: func() string { return "parent-1" }})
 	parent, err := sessions.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
 	if err != nil {
 		t.Fatal(err)
@@ -104,7 +104,7 @@ func TestChildRecorderRecordBatchUsesAtomicSessionAppend(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{SessionIDGenerator: func() string { return "parent-batch" }}))
+	sessions := inmemory.NewStore(inmemory.Config{SessionIDGenerator: func() string { return "parent-batch" }})
 	parent, err := sessions.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
 	if err != nil {
 		t.Fatal(err)
@@ -137,7 +137,7 @@ func TestChildRecorderRecordBatchDeduplicatesAsOneBatch(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{SessionIDGenerator: func() string { return "parent-batch" }}))
+	sessions := inmemory.NewStore(inmemory.Config{SessionIDGenerator: func() string { return "parent-batch" }})
 	parent, err := sessions.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
 	if err != nil {
 		t.Fatal(err)
@@ -188,7 +188,7 @@ func TestChildRecorderUpgradeReplayDeduplicatesLegacyPrefixAndAppendsSuffix(t *t
 	t.Parallel()
 
 	ctx := context.Background()
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{SessionIDGenerator: func() string { return "parent-upgrade" }}))
+	sessions := inmemory.NewStore(inmemory.Config{SessionIDGenerator: func() string { return "parent-upgrade" }})
 	parent, err := sessions.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
 	if err != nil {
 		t.Fatal(err)
@@ -225,7 +225,7 @@ func TestChildRecorderUsesPhysicalFallbackForResetContinuationCollision(t *testi
 	t.Parallel()
 
 	ctx := context.Background()
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{SessionIDGenerator: func() string { return "parent-continuation" }}))
+	sessions := inmemory.NewStore(inmemory.Config{SessionIDGenerator: func() string { return "parent-continuation" }})
 	parent, err := sessions.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
 	if err != nil {
 		t.Fatal(err)
@@ -258,7 +258,7 @@ func TestChildRecorderRecordBatchConflictAppendsNothing(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{SessionIDGenerator: func() string { return "parent-batch" }}))
+	sessions := inmemory.NewStore(inmemory.Config{SessionIDGenerator: func() string { return "parent-batch" }})
 	parent, err := sessions.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
 	if err != nil {
 		t.Fatal(err)
@@ -318,7 +318,7 @@ func TestChildRecorderRecordBatchFallsBackToOrderedSingleAppends(t *testing.T) {
 
 func TestChildRecorderDurablyReplaysEveryScopedSemanticFamily(t *testing.T) {
 	ctx := context.Background()
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{SessionIDGenerator: func() string { return "parent-1" }}))
+	sessions := inmemory.NewStore(inmemory.Config{SessionIDGenerator: func() string { return "parent-1" }})
 	parent, err := sessions.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
 	if err != nil {
 		t.Fatal(err)

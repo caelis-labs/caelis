@@ -38,7 +38,7 @@ type Config struct {
 	Clock              func() time.Time
 }
 
-// Store is the file-backed implementation of session.Store.
+// Store is the file-backed implementation of session.Service.
 type Store struct {
 	mu                      contextMutex
 	rootDir                 string
@@ -63,11 +63,6 @@ type Store struct {
 	// eventLogLineRead is an optional test seam for measuring incremental
 	// cached history reads used by append preparation.
 	eventLogLineRead func(path string, lineNo int, offset int64)
-}
-
-// Service is the file-backed implementation of session.Service.
-type Service struct {
-	store *Store
 }
 
 // TaskStore is the task.Store facade backed by the same file store index.

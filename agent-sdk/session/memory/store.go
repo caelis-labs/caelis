@@ -18,7 +18,7 @@ type Config struct {
 	Clock              func() time.Time
 }
 
-// Store is the in-memory implementation of session.Store.
+// Store is the in-memory implementation of session.Service.
 type Store struct {
 	mu                 sync.RWMutex
 	sessionIDGenerator func() string
@@ -27,12 +27,7 @@ type Store struct {
 	sessions           map[string]*record
 }
 
-// Service is the in-memory implementation of session.Service.
-type Service struct {
-	store *Store
-}
-
-var _ session.ApprovalRecoveryService = (*Service)(nil)
+var _ session.ApprovalRecoveryService = (*Store)(nil)
 
 // NewStore constructs one new in-memory session store.
 func NewStore(cfg Config) *Store {
@@ -48,15 +43,7 @@ func NewStore(cfg Config) *Store {
 	return store
 }
 
-// NewService constructs one session service backed by one in-memory store.
-func NewService(store *Store) *Service {
-	if store == nil {
-		store = NewStore(Config{})
-	}
-	return &Service{store: store}
-}
-
-func (s *Store) GetOrCreate(
+func (s *Store) StartSession(
 	_ context.Context,
 	req session.StartSessionRequest,
 ) (session.Session, error) {
@@ -100,7 +87,7 @@ func (s *Store) GetOrCreate(
 	return session.CloneSession(createdSession), nil
 }
 
-func (s *Store) Get(
+func (s *Store) Session(
 	_ context.Context,
 	ref session.SessionRef,
 ) (session.Session, error) {
@@ -113,7 +100,7 @@ func (s *Store) Get(
 	return record.cloneSession(), nil
 }
 
-func (s *Store) List(
+func (s *Store) ListSessions(
 	_ context.Context,
 	req session.ListSessionsRequest,
 ) (session.SessionList, error) {
@@ -174,10 +161,9 @@ func (s *Store) List(
 
 func (s *Store) AppendEvent(
 	_ context.Context,
-	ref session.SessionRef,
-	event *session.Event,
+	req session.AppendEventRequest,
 ) (*session.Event, error) {
-	return s.appendEventRequest(session.AppendEventRequest{SessionRef: ref, Event: event})
+	return s.appendEventRequest(req)
 }
 
 func (s *Store) appendEventRequest(req session.AppendEventRequest) (*session.Event, error) {
@@ -433,10 +419,9 @@ func (s *Store) EventCheckpoint(
 
 func (s *Store) BindController(
 	_ context.Context,
-	ref session.SessionRef,
-	binding session.ControllerBinding,
+	req session.BindControllerRequest,
 ) (session.Session, error) {
-	return s.bindControllerRequest(session.BindControllerRequest{SessionRef: ref, Binding: binding})
+	return s.bindControllerRequest(req)
 }
 
 func (s *Store) bindControllerRequest(req session.BindControllerRequest) (session.Session, error) {
@@ -491,10 +476,9 @@ func (s *Store) BindControllerWithEvent(
 
 func (s *Store) PutParticipant(
 	_ context.Context,
-	ref session.SessionRef,
-	binding session.ParticipantBinding,
+	req session.PutParticipantRequest,
 ) (session.Session, error) {
-	return s.putParticipantRequest(session.PutParticipantRequest{SessionRef: ref, Binding: binding})
+	return s.putParticipantRequest(req)
 }
 
 func (s *Store) putParticipantRequest(req session.PutParticipantRequest) (session.Session, error) {
@@ -571,10 +555,9 @@ func (s *Store) PutParticipantWithEvent(
 
 func (s *Store) RemoveParticipant(
 	_ context.Context,
-	ref session.SessionRef,
-	participantID string,
+	req session.RemoveParticipantRequest,
 ) (session.Session, error) {
-	return s.removeParticipantRequest(session.RemoveParticipantRequest{SessionRef: ref, ParticipantID: participantID})
+	return s.removeParticipantRequest(req)
 }
 
 func (s *Store) removeParticipantRequest(req session.RemoveParticipantRequest) (session.Session, error) {
@@ -714,20 +697,13 @@ func (s *Store) UpdateState(
 	return record.cloneSession(), nil
 }
 
-func (s *Service) StartSession(
-	ctx context.Context,
-	req session.StartSessionRequest,
-) (session.Session, error) {
-	return s.store.GetOrCreate(ctx, req)
-}
-
-func (s *Service) LoadSession(
+func (s *Store) LoadSession(
 	_ context.Context,
 	req session.LoadSessionRequest,
 ) (session.LoadedSession, error) {
-	s.store.mu.RLock()
-	defer s.store.mu.RUnlock()
-	record, ok := s.store.lookupLocked(req.SessionRef)
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	record, ok := s.lookupLocked(req.SessionRef)
 	if !ok {
 		return session.LoadedSession{}, session.ErrSessionNotFound
 	}
@@ -738,84 +714,24 @@ func (s *Service) LoadSession(
 	}, nil
 }
 
-func (s *Service) Session(
-	ctx context.Context,
-	ref session.SessionRef,
-) (session.Session, error) {
-	return s.store.Get(ctx, ref)
-}
-
-func (s *Service) AppendEvent(
-	ctx context.Context,
-	req session.AppendEventRequest,
-) (*session.Event, error) {
-	return s.store.appendEventRequest(req)
-}
-
 // SettlePendingApproval atomically settles one still-pending recovery
 // candidate.
-func (s *Service) SettlePendingApproval(
-	ctx context.Context,
-	req session.SettlePendingApprovalRequest,
-) (session.SettlePendingApprovalResult, error) {
-	return s.store.SettlePendingApproval(ctx, req)
-}
-
-func (s *Service) AppendEvents(
-	ctx context.Context,
-	req session.AppendEventsRequest,
-) ([]*session.Event, error) {
-	return s.store.AppendEvents(ctx, req)
-}
-
-func (s *Service) AppendEventsAndUpdateState(
-	ctx context.Context,
-	req session.AppendEventsAndUpdateStateRequest,
-) ([]*session.Event, error) {
-	return s.store.AppendEventsAndUpdateState(ctx, req)
-}
-
-func (s *Service) Events(
-	ctx context.Context,
-	req session.EventsRequest,
-) ([]*session.Event, error) {
-	return s.store.Events(ctx, req)
-}
 
 // EventsPage returns one bounded forward sequence page.
-func (s *Service) EventsPage(
-	ctx context.Context,
-	req session.EventPageRequest,
-) (session.EventPage, error) {
-	return s.store.EventsPage(ctx, req)
-}
 
 // EventCheckpoint returns one atomic Session/event high-water cut.
-func (s *Service) EventCheckpoint(
-	ctx context.Context,
-	ref session.SessionRef,
-) (session.EventCheckpoint, error) {
-	return s.store.EventCheckpoint(ctx, ref)
-}
-
-func (s *Service) ListSessions(
-	ctx context.Context,
-	req session.ListSessionsRequest,
-) (session.SessionList, error) {
-	return s.store.List(ctx, req)
-}
 
 // PendingApprovals returns durable permission requests without a later
 // settlement across the in-memory Store.
-func (s *Service) PendingApprovals(ctx context.Context) ([]session.PendingApproval, error) {
+func (s *Store) PendingApprovals(ctx context.Context) ([]session.PendingApproval, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	s.store.mu.RLock()
-	defer s.store.mu.RUnlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	type pendingKey struct {
 		sessionID string
 		requestID string
@@ -824,7 +740,7 @@ func (s *Service) PendingApprovals(ctx context.Context) ([]session.PendingApprov
 		request   *session.Event
 	}
 	keys := make([]pendingKey, 0)
-	for _, record := range s.store.sessions {
+	for _, record := range s.sessions {
 		pending := map[string]*session.Event{}
 		for _, event := range record.events {
 			requestID := ""
@@ -861,69 +777,6 @@ func (s *Service) PendingApprovals(ctx context.Context) ([]session.PendingApprov
 		})
 	}
 	return out, nil
-}
-
-func (s *Service) BindController(
-	ctx context.Context,
-	req session.BindControllerRequest,
-) (session.Session, error) {
-	return s.store.bindControllerRequest(req)
-}
-
-func (s *Service) BindControllerWithEvent(
-	ctx context.Context,
-	req session.BindControllerWithEventRequest,
-) (session.Session, *session.Event, error) {
-	return s.store.BindControllerWithEvent(ctx, req)
-}
-
-func (s *Service) PutParticipant(
-	ctx context.Context,
-	req session.PutParticipantRequest,
-) (session.Session, error) {
-	return s.store.putParticipantRequest(req)
-}
-
-func (s *Service) PutParticipantWithEvent(
-	ctx context.Context,
-	req session.PutParticipantWithEventRequest,
-) (session.Session, *session.Event, error) {
-	return s.store.PutParticipantWithEvent(ctx, req)
-}
-
-func (s *Service) RemoveParticipant(
-	ctx context.Context,
-	req session.RemoveParticipantRequest,
-) (session.Session, error) {
-	return s.store.removeParticipantRequest(req)
-}
-
-func (s *Service) RemoveParticipantWithEvent(
-	ctx context.Context,
-	req session.RemoveParticipantWithEventRequest,
-) (session.Session, *session.Event, error) {
-	return s.store.RemoveParticipantWithEvent(ctx, req)
-}
-
-func (s *Service) SnapshotState(
-	ctx context.Context,
-	ref session.SessionRef,
-) (map[string]any, error) {
-	return s.store.SnapshotState(ctx, ref)
-}
-
-func (s *Service) ReplaceState(
-	ctx context.Context,
-	req session.ReplaceStateRequest,
-) (session.Session, error) {
-	return s.store.ReplaceState(ctx, req)
-}
-
-func (s *Service) UpdateState(
-	ctx context.Context,
-	req session.UpdateStateRequest,
-) (session.Session, error) {
-	return s.store.UpdateState(ctx, req)
 }
 
 type record struct {

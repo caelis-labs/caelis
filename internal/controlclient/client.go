@@ -111,10 +111,6 @@ func (c *Client) Events(ctx context.Context, principal controlport.Principal, re
 	}
 	defer result.Subscription.Close()
 	out := controlport.EventBatch{ResumeMode: result.Mode, TransientGap: result.TransientGap, BoundaryCursor: result.BoundaryCursor}
-	if len(result.Backfill) > 0 {
-		out.Events = eventstream.CloneEnvelopes(result.Backfill)
-		return out, nil
-	}
 	for {
 		select {
 		case <-ctx.Done():

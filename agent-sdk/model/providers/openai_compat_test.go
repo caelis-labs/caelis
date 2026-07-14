@@ -706,6 +706,48 @@ func TestOpenRouterRequest_AppliesConfiguredHeaders(t *testing.T) {
 	}
 }
 
+func TestOpenRouterRequest_ModelsOnlyOmitsEmptyModel(t *testing.T) {
+	var payload map[string]any
+	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode request payload: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"model":"openai/gpt-4o-mini","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`)
+	}))
+	defer server.Close()
+
+	llm := newOpenRouter(Config{
+		Provider:   "openrouter",
+		API:        APIOpenRouter,
+		BaseURL:    server.URL,
+		HTTPClient: server.Client(),
+		OpenRouter: OpenRouterConfig{
+			Models: []string{"openrouter/openai/gpt-4o-mini", "openrouter/anthropic/claude-sonnet-4"},
+		},
+		Timeout: 2 * time.Second,
+	}, "token")
+
+	for _, err := range llm.Generate(context.Background(), &model.Request{
+		Messages: []model.Message{model.NewTextMessage(model.RoleUser, "hi")},
+	}) {
+		if err != nil {
+			t.Fatalf("Generate() error = %v", err)
+		}
+	}
+	if _, ok := payload["model"]; ok {
+		t.Fatalf("models-only OpenRouter request includes empty model: %#v", payload["model"])
+	}
+	models, _ := payload["models"].([]any)
+	if len(models) != 2 || models[0] != "openai/gpt-4o-mini" || models[1] != "anthropic/claude-sonnet-4" {
+		t.Fatalf("models-only OpenRouter request models = %#v", models)
+	}
+}
+
 func TestOpenRouterRequest_DoesNotForceStrictForOptionalStructuredOutput(t *testing.T) {
 	var payload map[string]any
 	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

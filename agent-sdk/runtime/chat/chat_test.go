@@ -900,10 +900,10 @@ func TestCollectFinalResponseAnnotatesContextWindow(t *testing.T) {
 func TestModelContextRoundTripsThroughSessionStore(t *testing.T) {
 	t.Parallel()
 
-	sessions := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{
+	sessions := sessionfile.NewStore(sessionfile.Config{
 		RootDir:            t.TempDir(),
 		SessionIDGenerator: func() string { return "sess-context-roundtrip" },
-	}))
+	})
 	activeSession, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
@@ -1024,10 +1024,10 @@ func TestChildVisibilityMirrorDoesNotChangeParentModelContext(t *testing.T) {
 func TestProviderReplayMetadataRoundTripsThroughSessionStore(t *testing.T) {
 	t.Parallel()
 
-	sessions := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{
+	sessions := sessionfile.NewStore(sessionfile.Config{
 		RootDir:            t.TempDir(),
 		SessionIDGenerator: func() string { return "sess-provider-replay-meta" },
-	}))
+	})
 	activeSession, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
@@ -1109,10 +1109,10 @@ func TestProviderReplayMetadataRoundTripsThroughSessionStore(t *testing.T) {
 func TestServerSideToolReplayPartsRoundTripThroughSessionStore(t *testing.T) {
 	t.Parallel()
 
-	sessions := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{
+	sessions := sessionfile.NewStore(sessionfile.Config{
 		RootDir:            t.TempDir(),
 		SessionIDGenerator: func() string { return "sess-server-tool-roundtrip" },
-	}))
+	})
 	activeSession, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
@@ -1193,10 +1193,10 @@ func serverSideToolReplayTestPart(kind string, raw json.RawMessage) model.Part {
 func TestLiveModelContextPrefixMatchesPersistedReplay(t *testing.T) {
 	t.Parallel()
 
-	sessions := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{
+	sessions := sessionfile.NewStore(sessionfile.Config{
 		RootDir:            t.TempDir(),
 		SessionIDGenerator: func() string { return "sess-context-stability" },
-	}))
+	})
 	activeSession, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",

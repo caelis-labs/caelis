@@ -21,12 +21,13 @@ func TestStoreIndexFailureKeepsWALUntilRestartRepairsIndex(t *testing.T) {
 		Clock:   func() time.Time { return at },
 	})
 	ctx := context.Background()
-	active, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+	active, err := store.StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis", UserID: "user", PreferredSessionID: "session-index-recovery",
 		Workspace: session.WorkspaceRef{Key: "workspace", CWD: "/tmp/workspace"},
 	})
+
 	if err != nil {
-		t.Fatalf("GetOrCreate() error = %v", err)
+		t.Fatalf("StartSession() error = %v", err)
 	}
 
 	indexPath := store.sessionIndexPath()
@@ -66,7 +67,7 @@ func TestStoreIndexFailureKeepsWALUntilRestartRepairsIndex(t *testing.T) {
 
 	restoreSessionIndex(t, indexPath)
 	reopenedStore := NewStore(Config{RootDir: root, Clock: func() time.Time { return at }})
-	reopened := NewService(reopenedStore)
+	reopened := reopenedStore
 	loaded, err := reopened.LoadSession(ctx, session.LoadSessionRequest{SessionRef: active.SessionRef})
 	if err != nil {
 		t.Fatalf("LoadSession(recovery) error = %v", err)
@@ -98,7 +99,7 @@ func TestStoreIndexFailureKeepsWALUntilRestartRepairsIndex(t *testing.T) {
 	if stateCalls != 1 || afterRetry.Session.Revision != 1 || len(afterRetry.Events) != 1 || !reflect.DeepEqual(afterRetry.State, loaded.State) {
 		t.Fatalf("retry rebuilt durable fact: calls=%d revision=%d events=%#v state=%#v", stateCalls, afterRetry.Session.Revision, afterRetry.Events, afterRetry.State)
 	}
-	list, err := reopenedStore.List(ctx, session.ListSessionsRequest{})
+	list, err := reopenedStore.ListSessions(ctx, session.ListSessionsRequest{})
 	if err != nil || len(list.Sessions) != 1 || list.Sessions[0].SessionID != active.SessionID {
 		t.Fatalf("List(after index repair) = %#v, %v, want recovered Session", list, err)
 	}
@@ -121,12 +122,12 @@ func TestStoreCreateKeepsZeroEventWALUntilIndexRecovery(t *testing.T) {
 		Title: "original title", Metadata: map[string]any{"source": "original"},
 		Workspace: session.WorkspaceRef{Key: "workspace", CWD: "/tmp/workspace"},
 	}
-	committed, err := store.GetOrCreate(context.Background(), request)
+	committed, err := store.StartSession(context.Background(), request)
 	if !session.IsCommitted(err) {
-		t.Fatalf("GetOrCreate() error = %v, want committed index failure", err)
+		t.Fatalf("StartSession() error = %v, want committed index failure", err)
 	}
 	if committed.SessionID != request.PreferredSessionID || committed.Title != request.Title || !reflect.DeepEqual(committed.Metadata, request.Metadata) {
-		t.Fatalf("GetOrCreate() committed Session = %#v, want original identity", committed)
+		t.Fatalf("StartSession() committed Session = %#v, want original identity", committed)
 	}
 
 	documentPath := rolloutDocumentPath(root, "workspace", at, committed.SessionID)
@@ -140,25 +141,25 @@ func TestStoreCreateKeepsZeroEventWALUntilIndexRecovery(t *testing.T) {
 	retry := request
 	retry.Title = "must not replace original"
 	retry.Metadata = map[string]any{"source": "retry"}
-	loaded, err := reopened.GetOrCreate(context.Background(), retry)
+	loaded, err := reopened.StartSession(context.Background(), retry)
 	if err != nil {
-		t.Fatalf("GetOrCreate(recovery retry) error = %v", err)
+		t.Fatalf("StartSession(recovery retry) error = %v", err)
 	}
 	if !reflect.DeepEqual(loaded, committed) {
-		t.Fatalf("GetOrCreate(recovery retry) rebuilt Session\ngot:  %#v\nwant: %#v", loaded, committed)
+		t.Fatalf("StartSession(recovery retry) rebuilt Session\ngot:  %#v\nwant: %#v", loaded, committed)
 	}
 	paths, err := reopened.listDocumentPaths()
 	if err != nil || len(paths) != 1 || paths[0] != documentPath {
 		t.Fatalf("document paths = %#v, %v, want one original document", paths, err)
 	}
-	loadedDocument, err := NewService(reopened).LoadSession(context.Background(), session.LoadSessionRequest{SessionRef: committed.SessionRef})
+	loadedDocument, err := reopened.LoadSession(context.Background(), session.LoadSessionRequest{SessionRef: committed.SessionRef})
 	if err != nil {
 		t.Fatalf("LoadSession() error = %v", err)
 	}
 	if len(loadedDocument.Events) != 0 || len(loadedDocument.State) != 0 {
 		t.Fatalf("zero-event recovery introduced durable data: events=%#v state=%#v", loadedDocument.Events, loadedDocument.State)
 	}
-	list, err := reopened.List(context.Background(), session.ListSessionsRequest{})
+	list, err := reopened.ListSessions(context.Background(), session.ListSessionsRequest{})
 	if err != nil || len(list.Sessions) != 1 || list.Sessions[0].Title != request.Title {
 		t.Fatalf("List(after create recovery) = %#v, %v, want original Session once", list, err)
 	}

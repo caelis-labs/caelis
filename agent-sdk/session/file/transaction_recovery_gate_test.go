@@ -17,15 +17,15 @@ func TestTransactionRecoveryScanIsAmortizedAndPendingMarkerForcesRecovery(t *tes
 	var scans atomic.Int64
 	store.transactionRecoveryScan = func() { scans.Add(1) }
 	ctx := context.Background()
-	active, err := store.GetOrCreate(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
+	active, err := store.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for i := 0; i < 8; i++ {
-		if _, err := store.Get(ctx, active.SessionRef); err != nil {
+		if _, err := store.Session(ctx, active.SessionRef); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := store.List(ctx, session.ListSessionsRequest{}); err != nil {
+		if _, err := store.ListSessions(ctx, session.ListSessionsRequest{}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -40,16 +40,16 @@ func TestTransactionRecoveryScanIsAmortizedAndPendingMarkerForcesRecovery(t *tes
 		return nil
 	}
 	message := model.NewTextMessage(model.RoleUser, "recover from root marker")
-	if _, err := store.AppendEvent(ctx, active.SessionRef, &session.Event{
+	if _, err := store.AppendEvent(ctx, session.AppendEventRequest{SessionRef: active.SessionRef, Event: &session.Event{
 		ID: "recovery-gate-event", Type: session.EventTypeUser, Message: &message,
-	}); !session.IsCommitted(err) {
+	}}); !session.IsCommitted(err) {
 		t.Fatalf("AppendEvent() error = %v, want committed error", err)
 	}
 	if _, err := os.Stat(store.transactionRecoveryMarkerPath()); err != nil {
 		t.Fatalf("pending recovery marker: %v", err)
 	}
 	store.transactionFault = nil
-	loaded, err := store.LoadDocument(ctx, session.LoadSessionRequest{SessionRef: active.SessionRef})
+	loaded, err := store.LoadSession(ctx, session.LoadSessionRequest{SessionRef: active.SessionRef})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestTransactionRecoveryScanIsAmortizedAndPendingMarkerForcesRecovery(t *tes
 	if _, err := os.Stat(store.transactionRecoveryMarkerPath()); !os.IsNotExist(err) {
 		t.Fatalf("recovery marker after apply error = %v, want absent", err)
 	}
-	if _, err := store.Get(ctx, active.SessionRef); err != nil {
+	if _, err := store.Session(ctx, active.SessionRef); err != nil {
 		t.Fatal(err)
 	}
 	if got := scans.Load(); got != 2 {

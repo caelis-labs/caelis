@@ -5,7 +5,6 @@ import (
 
 	controlclient "github.com/caelis-labs/caelis/ports/controlclient"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 type Turn interface {
@@ -48,17 +47,7 @@ type SessionService interface {
 	NewSession(context.Context) (SessionSnapshot, error)
 	ResumeSession(context.Context, string) (SessionSnapshot, error)
 	ListSessions(context.Context, int) ([]ResumeCandidate, error)
-	ReplayEvents(context.Context) ([]eventstream.Envelope, error)
 	Compact(context.Context) error
-}
-
-// ClientProtocolService is the transitional in-process ACP/TUI replay and
-// status contract. New product clients use ports/controlclient.Service for
-// request-scoped commands, bootstrap, replay, and subscriptions.
-type ClientProtocolService interface {
-	ListSessionSnapshots(context.Context, schema.SessionListRequest) (schema.SessionListResponse, error)
-	Replay(context.Context, eventstream.ReplayRequest) (eventstream.ReplayResult, error)
-	RunState(context.Context) (eventstream.RunState, error)
 }
 
 type SessionModeService interface {
@@ -121,7 +110,6 @@ type Service interface {
 	StatusService
 	TurnService
 	SessionService
-	ClientProtocolService
 	SessionModeService
 	ModelService
 	SandboxService

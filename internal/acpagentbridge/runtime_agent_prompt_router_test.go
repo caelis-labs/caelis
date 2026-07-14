@@ -21,7 +21,7 @@ import (
 )
 
 func TestRuntimeAgentPromptSlashCommandUsesPromptRouterBeforeMainRuntime(t *testing.T) {
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	sessions := inmemory.NewStore(inmemory.Config{})
 	runtime := &promptRouterRuntime{sessions: sessions}
 	statusSlash := control.NewStatusSlashResult(control.StatusSnapshot{
 		Session:     control.StatusSession{ID: "session-1"},
@@ -78,7 +78,7 @@ func TestRuntimeAgentPromptSlashCommandUsesPromptRouterBeforeMainRuntime(t *test
 }
 
 func TestRuntimeAgentPromptRouterSuppressesLiveUserMessageEcho(t *testing.T) {
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	sessions := inmemory.NewStore(inmemory.Config{})
 	runtime := &promptRouterRuntime{sessions: sessions}
 	router := &testPromptRouter{
 		result: controlprompt.Result{
@@ -142,7 +142,7 @@ func TestRuntimeAgentPromptRouterSuppressesLiveUserMessageEcho(t *testing.T) {
 }
 
 func TestRuntimeAgentPromptRouterHandlesSharedSlashWithImagePart(t *testing.T) {
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	sessions := inmemory.NewStore(inmemory.Config{})
 	runtime := &promptRouterRuntime{sessions: sessions}
 	imageData := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
 	router := &testPromptRouter{
@@ -210,7 +210,7 @@ func TestRuntimeAgentPromptRouterHandlesSharedSlashWithImagePart(t *testing.T) {
 }
 
 func TestRuntimeAgentPromptRouterHandlesDynamicSlashWithImagePart(t *testing.T) {
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	sessions := inmemory.NewStore(inmemory.Config{})
 	runtime := &promptRouterRuntime{sessions: sessions}
 	imageData := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
 	router := &testPromptRouter{
@@ -273,7 +273,7 @@ func TestRuntimeAgentPromptRouterHandlesDynamicSlashWithImagePart(t *testing.T) 
 }
 
 func TestRuntimeAgentPromptRouterHandlesNormalPromptWithImagePart(t *testing.T) {
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	sessions := inmemory.NewStore(inmemory.Config{})
 	runtime := &promptRouterRuntime{sessions: sessions}
 	imageData := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
 	router := &testPromptRouter{
@@ -339,7 +339,7 @@ func TestRuntimeAgentPromptRouterHandlesNormalPromptWithImagePart(t *testing.T) 
 
 func TestRuntimeAgentPromptResolvesSessionByGlobalID(t *testing.T) {
 	ctx := context.Background()
-	sessions := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()}))
+	sessions := sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()})
 	if _, err := sessions.StartSession(ctx, session.StartSessionRequest{
 		AppName:            "caelis",
 		UserID:             "user-1",
@@ -396,7 +396,7 @@ func TestRuntimeAgentPromptResolvesSessionByGlobalID(t *testing.T) {
 }
 
 func TestRuntimeAgentPromptRouterAppliesSideEffectsWithoutTurn(t *testing.T) {
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	sessions := inmemory.NewStore(inmemory.Config{})
 	runtime := &promptRouterRuntime{sessions: sessions}
 	commands := availableCommandProvider{{Name: "status", Description: "Show status"}}
 	router := &testPromptRouter{
@@ -474,7 +474,7 @@ func TestRuntimeAgentPromptRouterAppliesSideEffectsWithoutTurn(t *testing.T) {
 }
 
 func TestRuntimeAgentPromptRouterTurnFeedReturnsEmitErrors(t *testing.T) {
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	sessions := inmemory.NewStore(inmemory.Config{})
 	runtime := &promptRouterRuntime{sessions: sessions}
 	status := acp.ToolStatusInProgress
 	turn := newTestControlTurn(
@@ -530,7 +530,7 @@ func TestRuntimeAgentPromptRouterTurnFeedReturnsEmitErrors(t *testing.T) {
 }
 
 func TestRuntimeAgentPromptRouterTurnFeedEmitsTerminalMetaForACPStdio(t *testing.T) {
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	sessions := inmemory.NewStore(inmemory.Config{})
 	runtime := &promptRouterRuntime{sessions: sessions}
 	running := acp.ToolStatusInProgress
 	completed := acp.ToolStatusCompleted
@@ -634,7 +634,7 @@ func TestRuntimeAgentPromptRouterTurnFeedEmitsTerminalMetaForACPStdio(t *testing
 }
 
 func TestRuntimeAgentPromptRouterDeduplicatesFinalNarrativeReplay(t *testing.T) {
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	sessions := inmemory.NewStore(inmemory.Config{})
 	runtime := &promptRouterRuntime{sessions: sessions}
 	turn := newTestControlTurn(
 		eventstream.Envelope{
@@ -701,7 +701,7 @@ func TestRuntimeAgentPromptRouterDeduplicatesFinalNarrativeReplay(t *testing.T) 
 }
 
 func TestRuntimeAgentPromptRouterProjectsChildSemanticsIntoParentSpawnTerminal(t *testing.T) {
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	sessions := inmemory.NewStore(inmemory.Config{})
 	runtime := &promptRouterRuntime{sessions: sessions}
 	status := acp.ToolStatusInProgress
 	completed := acp.ToolStatusCompleted

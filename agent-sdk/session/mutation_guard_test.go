@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
@@ -81,5 +82,46 @@ func TestControlMutationOverlapPolicyFailsUnknownPurposeClosed(t *testing.T) {
 		if got := session.ControlMutationMayOverlapRuntimeLease(test.purpose); got != test.want {
 			t.Fatalf("ControlMutationMayOverlapRuntimeLease(%q) = %v, want %v", test.purpose, got, test.want)
 		}
+	}
+}
+
+func TestAuthorizeMutationGuardAppliesSharedFencePolicy(t *testing.T) {
+	now := time.Unix(100, 0)
+	active := session.SessionLease{
+		SessionRef: session.SessionRef{SessionID: "session-1"},
+		LeaseID:    "lease-1", OwnerID: "owner-1", FencingToken: 7, ExpiresAt: now.Add(time.Minute),
+	}
+	exactRuntime := session.MutationGuard{
+		Authority: session.MutationAuthorityRuntime,
+		LeaseID:   active.LeaseID, OwnerID: active.OwnerID, FencingToken: active.FencingToken,
+	}
+	exactControl := session.ControlMutationGuard(session.ControlMutationPurposeHandoff)
+	exactControl.LeaseID, exactControl.OwnerID, exactControl.FencingToken = active.LeaseID, active.OwnerID, active.FencingToken
+
+	for _, test := range []struct {
+		name   string
+		active session.SessionLease
+		guard  session.MutationGuard
+		want   bool
+	}{
+		{name: "unguarded without active lease", active: session.SessionLease{SessionRef: active.SessionRef}},
+		{name: "unguarded with active lease", active: active, want: true},
+		{name: "matching runtime", active: active, guard: exactRuntime},
+		{name: "stale runtime", active: active, guard: session.MutationGuard{Authority: session.MutationAuthorityRuntime, LeaseID: "stale"}, want: true},
+		{name: "overlapping approval", active: active, guard: session.ControlMutationGuard(session.ControlMutationPurposeApproval)},
+		{name: "unfenced configuration", active: active, guard: session.ControlMutationGuard(session.ControlMutationPurposeConfiguration), want: true},
+		{name: "matching fenced handoff", active: active, guard: exactControl},
+		{name: "expired runtime", active: active, guard: exactRuntime, want: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			at := now
+			if test.name == "expired runtime" {
+				at = active.ExpiresAt
+			}
+			err := session.AuthorizeMutationGuard(test.active, test.guard, at)
+			if got := errors.Is(err, session.ErrLeaseConflict); got != test.want {
+				t.Fatalf("AuthorizeMutationGuard() error = %v, conflict=%v; want %v", err, got, test.want)
+			}
+		})
 	}
 }

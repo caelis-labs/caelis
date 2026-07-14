@@ -790,24 +790,6 @@ func TestApprovalReviewerDoesNotPersistGuardianPromptWhenAssistantAppendFails(t 
 	}
 }
 
-func TestCompleteSystemManagedAgentEventsKeepsNonGuardianOrphanUserEvent(t *testing.T) {
-	message := model.NewTextMessage(model.RoleUser, "ordinary prompt")
-	event := &session.Event{
-		Type:    session.EventTypeUser,
-		Message: &message,
-		Text:    message.TextContent(),
-		Meta: map[string]any{
-			systemManagedAgentStateCursorEventCount:  12,
-			systemManagedAgentStateCursorLastEventID: "evt-12",
-		},
-	}
-
-	events := completeSystemManagedAgentEvents([]*session.Event{event})
-	if len(events) != 1 || events[0].Text != "ordinary prompt" {
-		t.Fatalf("completeSystemManagedAgentEvents() = %#v, want non-guardian orphan preserved", events)
-	}
-}
-
 func TestSystemManagedAgentCursorSurvivesDurableEventJSONRoundTrip(t *testing.T) {
 	before := session.Event{
 		Type: session.EventTypeUser,
@@ -1409,7 +1391,7 @@ func ptrMessage(message model.Message) *model.Message {
 
 func newApprovalReviewerTestSession(t *testing.T, ctx context.Context) (session.Service, session.Session) {
 	t.Helper()
-	service := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	service := inmemory.NewStore(inmemory.Config{})
 	activeSession, err := service.StartSession(ctx, session.StartSessionRequest{
 		AppName:            "caelis",
 		UserID:             "user-1",

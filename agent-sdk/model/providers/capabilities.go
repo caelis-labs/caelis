@@ -4,7 +4,6 @@ import "github.com/caelis-labs/caelis/agent-sdk/model"
 
 var (
 	_ model.CapabilityProvider = (*openAICompatLLM)(nil)
-	_ model.CapabilityProvider = (*openRouterLLM)(nil)
 	_ model.CapabilityProvider = (*codeFreeLLM)(nil)
 	_ model.CapabilityProvider = (*anthropicSDKLLM)(nil)
 	_ model.CapabilityProvider = (*geminiLLM)(nil)
@@ -12,20 +11,6 @@ var (
 )
 
 func (l *openAICompatLLM) Capabilities() model.Capabilities {
-	if l == nil {
-		return model.Capabilities{}
-	}
-	return model.Capabilities{
-		ToolCalls:             true,
-		StructuredOutput:      l.options.StructuredOutput != "",
-		Streaming:             true,
-		ParallelToolCalls:     true,
-		ReasoningContinuation: l.options.IncludeReasoningContent,
-		HostedTools:           l.options.ProviderTools != nil,
-	}
-}
-
-func (l *openRouterLLM) Capabilities() model.Capabilities {
 	if l == nil {
 		return model.Capabilities{}
 	}

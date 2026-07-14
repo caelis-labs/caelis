@@ -436,10 +436,10 @@ func TestGeminiServerToolReplayPartsRoundTripThroughFileStore(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sessions := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{
+	sessions := sessionfile.NewStore(sessionfile.Config{
 		RootDir:            t.TempDir(),
 		SessionIDGenerator: func() string { return "sess-gemini-server-tools" },
-	}))
+	})
 	activeSession, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",

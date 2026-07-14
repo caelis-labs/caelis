@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"iter"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -71,9 +73,9 @@ func TestClassifyControlBackendErrorTreatsUnclassifiedFailureAsUnknown(t *testin
 func TestAttachControlClientHandleUsesSharedTaskIngress(t *testing.T) {
 	t.Parallel()
 
-	sessions := sessionmemory.NewService(sessionmemory.NewStore(sessionmemory.Config{
+	sessions := sessionmemory.NewStore(sessionmemory.Config{
 		SessionIDGenerator: func() string { return "session-1" },
-	}))
+	})
 	active, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis", UserID: "owner", PreferredSessionID: "session-1",
 	})
@@ -168,10 +170,113 @@ func TestAttachControlClientHandleUsesSharedTaskIngress(t *testing.T) {
 	}
 }
 
+func TestAttachControlClientHandleFailureCancelsAndPublishesAfterProducerBarrier(t *testing.T) {
+	t.Parallel()
+
+	handle := newControlClientAttachmentFailureHandle()
+	published := make(chan eventstream.Envelope, 4)
+	var attachCalls atomic.Int32
+	feed := &controlClientSessionFeed{attachFn: func(events <-chan eventstream.Envelope) <-chan error {
+		call := attachCalls.Add(1)
+		result := make(chan error, 1)
+		if call == 1 {
+			result <- errors.New("injected feed publish failure")
+			close(result)
+			return result
+		}
+		go func() {
+			defer close(result)
+			for envelope := range events {
+				published <- envelope
+			}
+		}()
+		return result
+	}}
+	stack := &Stack{controlFeeds: controlClientFeedRegistry{feed: feed}}
+	stack.attachControlClientHandle(handle)
+
+	select {
+	case <-handle.cancelRequested:
+	case <-time.After(2 * time.Second):
+		t.Fatal("attachment failure did not cancel the owning producer")
+	}
+	select {
+	case envelope := <-published:
+		t.Fatalf("envelope before producer barrier = %#v", envelope)
+	case <-time.After(30 * time.Millisecond):
+	}
+	close(handle.releaseProducer)
+
+	terminal := receiveControlClientIngressEnvelope(t, published)
+	if !eventstream.IsTerminalLifecycle(terminal) || terminal.Lifecycle.State != eventstream.LifecycleStateFailed {
+		t.Fatalf("terminal = %#v, want one failed terminal", terminal)
+	}
+	select {
+	case <-handle.producerDone:
+	default:
+		t.Fatal("failed terminal arrived before producer completion")
+	}
+	if calls := handle.cancelCalls.Load(); calls != 1 {
+		t.Fatalf("Cancel calls = %d, want one", calls)
+	}
+	if calls := attachCalls.Load(); calls != 2 {
+		t.Fatalf("Attach calls = %d, want initial failure plus one fallback", calls)
+	}
+	select {
+	case duplicate := <-published:
+		t.Fatalf("duplicate terminal = %#v", duplicate)
+	case <-time.After(30 * time.Millisecond):
+	}
+}
+
+func TestCommittedCommandKeepsOutcomeWhenFeedPrimeFailsAndLedgerReplays(t *testing.T) {
+	t.Parallel()
+
+	sessions := sessionmemory.NewStore(sessionmemory.Config{})
+	kernel, err := kernelimpl.New(kernelimpl.Config{
+		Sessions: sessions, Runtime: controlClientIngressRuntime{}, Resolver: controlClientIngressResolver{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	feed := &controlClientSessionFeed{primeErr: errors.New("injected prime failure")}
+	stack := &Stack{
+		Sessions: sessions, AppName: "caelis", controlFeeds: controlClientFeedRegistry{feed: feed}, gateway: kernel,
+	}
+	backend := &countingControlClientBackend{backend: stack}
+	commands, err := internalcontrolclient.NewCommandService(internalcontrolclient.CommandServiceConfig{
+		Authorizer: controlClientAllowAuthorizer{},
+		Operations: internalcontrolclient.NewMemoryOperationStore(),
+		Backend:    backend,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := controlport.CreateSessionRequest{
+		WriteBase:          controlport.WriteBase{OperationID: "operation-prime-failure"},
+		PreferredSessionID: "session-prime-failure",
+	}
+	principal := controlport.Principal{ID: "owner"}
+	first, err := commands.CreateSession(context.Background(), principal, request)
+	if err != nil || first.Outcome != controlport.OutcomeCommitted || first.Detail != controlFeedCatchUpWarning {
+		t.Fatalf("first result = %#v, %v, want committed result with feed warning", first, err)
+	}
+	replayed, err := commands.CreateSession(context.Background(), principal, request)
+	if err != nil || replayed != first {
+		t.Fatalf("replayed result = %#v, %v, want %#v", replayed, err, first)
+	}
+	if calls := backend.calls.Load(); calls != 1 {
+		t.Fatalf("backend calls = %d, want one dispatch", calls)
+	}
+	if calls := feed.primeCalls.Load(); calls != 1 {
+		t.Fatalf("Prime calls = %d, want one post-commit catch-up", calls)
+	}
+}
+
 func TestControlClientClosePersistsGatePublishesLiveAndRejectsLaterPrompt(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	sessions := sessionmemory.NewService(sessionmemory.NewStore(sessionmemory.Config{}))
+	sessions := sessionmemory.NewStore(sessionmemory.Config{})
 	active, err := sessions.StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis", UserID: "owner", PreferredSessionID: "session-close",
 	})
@@ -241,7 +346,7 @@ func TestControlClientClosePersistsGatePublishesLiveAndRejectsLaterPrompt(t *tes
 func TestControlClientCancelParticipantRejectsMainTurnWithArbitraryParticipantID(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	sessions := sessionmemory.NewService(sessionmemory.NewStore(sessionmemory.Config{}))
+	sessions := sessionmemory.NewStore(sessionmemory.Config{})
 	active, err := sessions.StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis", UserID: "owner", PreferredSessionID: "session-main",
 	})
@@ -362,6 +467,115 @@ func (*controlClientIngressHandle) Cancel() agent.CancelResult {
 	return agent.CancelResult{Status: agent.CancelStatusCancelled}
 }
 func (*controlClientIngressHandle) Close() error { return nil }
+
+type controlClientAttachmentFailureHandle struct {
+	events          chan eventstream.Envelope
+	cancelRequested chan struct{}
+	releaseProducer chan struct{}
+	producerDone    chan struct{}
+	cancelOnce      sync.Once
+	cancelCalls     atomic.Int32
+}
+
+func newControlClientAttachmentFailureHandle() *controlClientAttachmentFailureHandle {
+	return &controlClientAttachmentFailureHandle{
+		events:          make(chan eventstream.Envelope),
+		cancelRequested: make(chan struct{}),
+		releaseProducer: make(chan struct{}),
+		producerDone:    make(chan struct{}),
+	}
+}
+
+func (*controlClientAttachmentFailureHandle) HandleID() string { return "handle-attachment-failure" }
+func (*controlClientAttachmentFailureHandle) RunID() string    { return "run-attachment-failure" }
+func (*controlClientAttachmentFailureHandle) TurnID() string   { return "turn-attachment-failure" }
+func (*controlClientAttachmentFailureHandle) SessionRef() session.SessionRef {
+	return session.SessionRef{SessionID: "session-attachment-failure"}
+}
+func (*controlClientAttachmentFailureHandle) CreatedAt() time.Time { return time.Time{} }
+func (handle *controlClientAttachmentFailureHandle) ACPEvents() <-chan eventstream.Envelope {
+	return handle.events
+}
+func (*controlClientAttachmentFailureHandle) Submit(context.Context, gateway.SubmitRequest) error {
+	return nil
+}
+func (handle *controlClientAttachmentFailureHandle) Cancel() agent.CancelResult {
+	handle.cancelCalls.Add(1)
+	handle.cancelOnce.Do(func() {
+		close(handle.cancelRequested)
+		go func() {
+			<-handle.releaseProducer
+			close(handle.producerDone)
+			close(handle.events)
+		}()
+	})
+	return agent.CancelResult{Status: agent.CancelStatusCancelled}
+}
+func (*controlClientAttachmentFailureHandle) Close() error { return nil }
+
+type controlClientFeedRegistry struct {
+	feed controlport.SessionFeed
+	err  error
+}
+
+func (registry controlClientFeedRegistry) Session(session.SessionRef) (controlport.SessionFeed, error) {
+	return registry.feed, registry.err
+}
+
+type controlClientSessionFeed struct {
+	primeErr   error
+	primeCalls atomic.Int32
+	attachFn   func(<-chan eventstream.Envelope) <-chan error
+}
+
+func (feed *controlClientSessionFeed) Prime(context.Context) error {
+	feed.primeCalls.Add(1)
+	return feed.primeErr
+}
+func (*controlClientSessionFeed) Publish(eventstream.Envelope) error { return nil }
+func (*controlClientSessionFeed) Subscribe(context.Context, controlport.SubscribeRequest) (controlport.SubscribeResult, error) {
+	return controlport.SubscribeResult{}, errors.New("test feed does not support Subscribe")
+}
+func (*controlClientSessionFeed) SubscribeFromNow(context.Context) (controlport.FeedSubscription, error) {
+	return nil, errors.New("test feed does not support SubscribeFromNow")
+}
+func (feed *controlClientSessionFeed) Attach(events <-chan eventstream.Envelope) <-chan error {
+	if feed.attachFn != nil {
+		return feed.attachFn(events)
+	}
+	result := make(chan error)
+	go func() {
+		for range events {
+		}
+		close(result)
+	}()
+	return result
+}
+func (feed *controlClientSessionFeed) AttachTo(_ controlport.FeedSubscription, events <-chan eventstream.Envelope) <-chan error {
+	return feed.Attach(events)
+}
+func (*controlClientSessionFeed) Boundary() (*eventstream.FeedPosition, string) { return nil, "" }
+
+type controlClientAllowAuthorizer struct{}
+
+func (controlClientAllowAuthorizer) Authorize(context.Context, controlport.Principal, controlport.Action, string) error {
+	return nil
+}
+
+type countingControlClientBackend struct {
+	backend controlport.CommandBackend
+	calls   atomic.Int32
+}
+
+func (backend *countingControlClientBackend) ExecuteControlCommand(
+	ctx context.Context,
+	principal controlport.Principal,
+	action controlport.Action,
+	request any,
+) (controlport.CommandResult, error) {
+	backend.calls.Add(1)
+	return backend.backend.ExecuteControlCommand(ctx, principal, action, request)
+}
 
 func receiveControlClientIngressEnvelope(t *testing.T, events <-chan eventstream.Envelope) eventstream.Envelope {
 	t.Helper()

@@ -127,7 +127,7 @@ func TestRuntimeAgentPromptRouterChildTerminalKeepsMessageIdentityDuringFinalRep
 }
 
 func TestRuntimeAgentPromptDirectPathScopesNarrativesAndPermissionReset(t *testing.T) {
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	sessions := inmemory.NewStore(inmemory.Config{})
 	runtimeAgent, err := runtimeacp.New(runtimeacp.Config{
 		Runtime:  directScopedNarrativeRuntime{},
 		Sessions: sessions,
@@ -217,7 +217,7 @@ func scopedTerminalEnvelope(scopeID string, toolCallID string, terminalID string
 
 func newPromptRouterAgentForScopeTest(t *testing.T, turn *testControlTurn) (*runtimeacp.RuntimeAgent, string) {
 	t.Helper()
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	sessions := inmemory.NewStore(inmemory.Config{})
 	runtime := &promptRouterRuntime{sessions: sessions}
 	router := &testPromptRouter{result: controlprompt.Result{Handled: true, Turn: turn}}
 	runtimeAgent, err := runtimeacp.New(runtimeacp.Config{

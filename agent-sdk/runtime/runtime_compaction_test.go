@@ -564,10 +564,10 @@ func TestRuntimeCompactionReplaysFromEventsAfterReload(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	sessions := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{
+	sessions := sessionfile.NewStore(sessionfile.Config{
 		RootDir:            root,
 		SessionIDGenerator: func() string { return "sess-compact-replay" },
-	}))
+	})
 	activeSession, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
@@ -634,7 +634,7 @@ Next action: verify reload from file-backed events only
 		t.Fatalf("runtime1 runner error = %v", err)
 	}
 
-	reopenedSessions := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{RootDir: root}))
+	reopenedSessions := sessionfile.NewStore(sessionfile.Config{RootDir: root})
 	reopenedState, err := reopenedSessions.SnapshotState(context.Background(), activeSession.SessionRef)
 	if err != nil {
 		t.Fatalf("SnapshotState() error = %v", err)

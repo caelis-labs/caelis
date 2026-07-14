@@ -36,46 +36,6 @@ func (g *Gateway) BindSession(ctx context.Context, req BindSessionRequest) error
 	return nil
 }
 
-func (g *Gateway) ForkSession(ctx context.Context, req ForkSessionRequest) (session.Session, error) {
-	if strings.TrimSpace(req.SourceSessionRef.SessionID) == "" {
-		return session.Session{}, &Error{
-			Kind:        KindValidation,
-			Code:        CodeInvalidRequest,
-			UserVisible: true,
-			Message:     "gateway: source session ref is required",
-		}
-	}
-	source, err := g.sessions.Session(ctx, req.SourceSessionRef)
-	if err != nil {
-		return session.Session{}, wrapSessionError(err)
-	}
-	metadata := cloneMap(source.Metadata)
-	for key, value := range req.Metadata {
-		metadata[key] = value
-	}
-	if metadata == nil {
-		metadata = map[string]any{}
-	}
-	metadata["forked_from_session_id"] = source.SessionID
-	title := strings.TrimSpace(req.Title)
-	if title == "" {
-		title = source.Title
-	}
-	started, err := g.sessions.StartSession(ctx, session.StartSessionRequest{
-		AppName:            source.AppName,
-		UserID:             source.UserID,
-		Workspace:          session.WorkspaceRef{Key: source.WorkspaceKey, CWD: source.CWD},
-		PreferredSessionID: req.PreferredSessionID,
-		Title:              title,
-		Metadata:           metadata,
-	})
-	if err != nil {
-		return session.Session{}, wrapSessionError(err)
-	}
-	g.bind(req.BindingKey, started.SessionRef, req.Binding)
-	return started, nil
-}
-
 func (g *Gateway) LoadSession(ctx context.Context, req LoadSessionRequest) (session.LoadedSession, error) {
 	loaded, err := g.sessions.LoadSession(ctx, session.LoadSessionRequest{
 		SessionRef:       req.SessionRef,

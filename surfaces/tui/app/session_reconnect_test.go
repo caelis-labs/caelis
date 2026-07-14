@@ -2,6 +2,7 @@ package tuiapp
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -86,6 +87,44 @@ func TestExecuteReconnectTreatsHistoryAsTranscriptAndRestoresApproval(t *testing
 	}
 }
 
+func TestForwardSessionReconnectPreservesFeedGapAndDoesNotCompleteTurn(t *testing.T) {
+	t.Parallel()
+
+	live := make(chan eventstream.Envelope)
+	close(live)
+	gap := &controlclient.FeedGapError{
+		Cause:        controlclient.ErrSlowConsumer,
+		RetryCursor:  "retry-cursor",
+		Mode:         controlclient.ResumeModeDurableFallback,
+		TransientGap: true,
+	}
+	reconnect := &tuiReconnect{
+		state: controlclient.SessionState{
+			SessionID: "session-1",
+			Run: controlclient.RunState{
+				Active: true, HandleID: "handle-1", RunID: "run-1", TurnID: "turn-1",
+			},
+		},
+		live: live,
+		err:  gap,
+	}
+	var messages []tea.Msg
+	result := forwardSessionReconnectEventStream(context.Background(), reconnect, &ProgramSender{Send: func(message tea.Msg) {
+		messages = append(messages, message)
+	}})
+	if !result.queued || len(messages) != 1 {
+		t.Fatalf("result = %#v, messages = %#v, want one queued interrupted terminal", result, messages)
+	}
+	terminal, ok := messages[0].(eventstream.Envelope)
+	if !ok || !eventstream.IsTerminalLifecycle(terminal) || terminal.Lifecycle.State != eventstream.LifecycleStateInterrupted {
+		t.Fatalf("terminal = %#v, want interrupted lifecycle", messages[0])
+	}
+	var gotGap *controlclient.FeedGapError
+	if !errors.As(terminal.Err, &gotGap) || gotGap.RetryCursor != gap.RetryCursor || gotGap.Mode != gap.Mode || !gotGap.TransientGap {
+		t.Fatalf("terminal error = %#v, want typed feed gap with retry cursor", terminal.Err)
+	}
+}
+
 type tuiReconnect struct {
 	mu        sync.Mutex
 	state     controlclient.SessionState
@@ -93,6 +132,7 @@ type tuiReconnect struct {
 	live      <-chan eventstream.Envelope
 	bootstrap []eventstream.Envelope
 	decisions []control.ApprovalDecision
+	err       error
 }
 
 func (r *tuiReconnect) State() controlclient.SessionState { return r.state }
@@ -119,4 +159,4 @@ func (r *tuiReconnect) SubmitApproval(_ context.Context, decision control.Approv
 }
 func (*tuiReconnect) Cancel()      {}
 func (*tuiReconnect) Close() error { return nil }
-func (*tuiReconnect) Err() error   { return nil }
+func (r *tuiReconnect) Err() error { return r.err }

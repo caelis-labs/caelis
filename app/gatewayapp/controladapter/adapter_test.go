@@ -58,25 +58,29 @@ func ptrRuntimeMessage(message model.Message) *model.Message {
 	return &message
 }
 
-func gatewayRuntimeDepsForTest(gw GatewayService) GatewayRuntimeDeps {
-	return gatewayRuntimeDepsProviderForTest(func() GatewayService {
+func gatewayRuntimeDepsForTest(gw any) GatewayRuntimeDeps {
+	return gatewayRuntimeDepsProviderForTest(func() any {
 		return gw
 	})
 }
 
-func gatewayRuntimeDepsProviderForTest(provider func() GatewayService) GatewayRuntimeDeps {
+func gatewayRuntimeDepsProviderForTest(provider func() any) GatewayRuntimeDeps {
 	return GatewayRuntimeDeps{
 		TurnServiceFn: func() GatewayTurnService {
-			return provider()
+			service, _ := provider().(GatewayTurnService)
+			return service
 		},
 		SessionServiceFn: func() GatewaySessionService {
-			return provider()
+			service, _ := provider().(GatewaySessionService)
+			return service
 		},
 		ControlPlaneServiceFn: func() GatewayControlPlaneService {
-			return provider()
+			service, _ := provider().(GatewayControlPlaneService)
+			return service
 		},
 		StreamProviderFn: func() GatewayStreamProvider {
-			return provider()
+			service, _ := provider().(GatewayStreamProvider)
+			return service
 		},
 	}
 }
@@ -404,7 +408,7 @@ func TestAdapterResumeCommitsAtomicReconnectAndSteersActiveTurn(t *testing.T) {
 				RequestID: "approval-1", Permission: &session.ProtocolApproval{},
 			}},
 		},
-		Subscription: newProtocolFeedSubscription(nil),
+		Subscription: &errorFeedSubscription{},
 	}}
 	driver, err := NewAdapter(ctx, &RuntimeStack{
 		Gateway: gatewayRuntimeDepsForTest(gw), ControlReconnect: reconnect,
@@ -743,7 +747,7 @@ func TestAdapterLightweightStatusSkipsSandboxDiagnostics(t *testing.T) {
 	doctorCalls := 0
 	usageCalls := 0
 	store := &countingEventsSessionService{
-		Service: inmemory.NewService(inmemory.NewStore(inmemory.Config{})),
+		Service: inmemory.NewStore(inmemory.Config{}),
 	}
 	stack := &RuntimeStack{
 		Session: SessionRuntimeDeps{
@@ -832,7 +836,7 @@ func TestAdapterLightweightStatusDoesNotWaitForBlockedEventReader(t *testing.T) 
 	t.Parallel()
 
 	store := &blockingEventsSessionService{
-		Service: inmemory.NewService(inmemory.NewStore(inmemory.Config{})),
+		Service: inmemory.NewStore(inmemory.Config{}),
 		entered: make(chan struct{}, 1),
 		release: make(chan struct{}),
 	}
@@ -2656,14 +2660,6 @@ func TestAdapterStartupBindsRequestedSessionInsteadOfFreshOne(t *testing.T) {
 	if status.Session.ID == stale.SessionID {
 		t.Fatalf("startup session = %q, want sticky-session instead of stale bound session", status.Session.ID)
 	}
-	binding, err := stack.KernelSessions().LookupBinding(gateway.BindingStateRequest{BindingKey: "surface"})
-	if err != nil {
-		t.Fatalf("LookupBinding(surface) error = %v", err)
-	}
-	current := binding.SessionRef
-	if current.SessionID != status.Session.ID {
-		t.Fatalf("current binding session = %q, want %q", current.SessionID, status.Session.ID)
-	}
 }
 
 func TestAdapterStartupReusesExistingRequestedSession(t *testing.T) {
@@ -4399,6 +4395,10 @@ type sideAgentRollbackGatewayService struct {
 	detachReqs []gateway.DetachParticipantRequest
 }
 
+func (*sideAgentRollbackGatewayService) HandoffController(context.Context, gateway.HandoffControllerRequest) (session.Session, error) {
+	return session.Session{}, nil
+}
+
 func (g *sideAgentRollbackGatewayService) ControlPlaneState(context.Context, gateway.ControlPlaneStateRequest) (gateway.ControlPlaneState, error) {
 	participants := make([]gateway.ParticipantState, 0, len(g.session.Participants))
 	for _, participant := range g.session.Participants {
@@ -4554,34 +4554,6 @@ func (g *activeSubmitGatewayService) BindSession(_ context.Context, req gateway.
 
 func (g *activeSubmitGatewayService) ListSessions(context.Context, gateway.ListSessionsRequest) (session.SessionList, error) {
 	return session.SessionList{}, nil
-}
-
-func (g *activeSubmitGatewayService) ReplayEvents(context.Context, gateway.ReplayEventsRequest) (gateway.ReplayEventsResult, error) {
-	return gateway.ReplayEventsResult{}, nil
-}
-
-func (g *activeSubmitGatewayService) ControlPlaneState(context.Context, gateway.ControlPlaneStateRequest) (gateway.ControlPlaneState, error) {
-	return gateway.ControlPlaneState{}, nil
-}
-
-func (g *activeSubmitGatewayService) HandoffController(context.Context, gateway.HandoffControllerRequest) (session.Session, error) {
-	return session.Session{}, nil
-}
-
-func (g *activeSubmitGatewayService) AttachParticipant(context.Context, gateway.AttachParticipantRequest) (session.Session, error) {
-	return session.Session{}, nil
-}
-
-func (g *activeSubmitGatewayService) PromptParticipant(context.Context, gateway.PromptParticipantRequest) (gateway.BeginTurnResult, error) {
-	return gateway.BeginTurnResult{}, nil
-}
-
-func (g *activeSubmitGatewayService) StartParticipant(context.Context, gateway.StartParticipantRequest) (gateway.BeginTurnResult, error) {
-	return gateway.BeginTurnResult{}, nil
-}
-
-func (g *activeSubmitGatewayService) DetachParticipant(context.Context, gateway.DetachParticipantRequest) (session.Session, error) {
-	return session.Session{}, nil
 }
 
 func (g *activeSubmitGatewayService) ActiveTurns() []gateway.ActiveTurnState {

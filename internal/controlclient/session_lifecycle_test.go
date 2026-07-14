@@ -14,7 +14,7 @@ import (
 func TestCloseSessionRequiresQuiescentLeaseAndIsIdempotent(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	service := sessionmemory.NewService(sessionmemory.NewStore(sessionmemory.Config{}))
+	service := sessionmemory.NewStore(sessionmemory.Config{})
 	active, err := service.StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis", UserID: "owner", PreferredSessionID: "session-close",
 	})

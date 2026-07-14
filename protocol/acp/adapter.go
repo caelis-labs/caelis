@@ -2,11 +2,6 @@ package acp
 
 import "context"
 
-// LoadSessionAdapter exposes the optional session/load surface.
-type LoadSessionAdapter interface {
-	LoadSession(context.Context, LoadSessionRequest, PromptCallbacks) (LoadSessionResponse, error)
-}
-
 // SessionListAdapter exposes the optional session/list surface.
 type SessionListAdapter interface {
 	ListSessions(context.Context, SessionListRequest) (SessionListResponse, error)
@@ -37,16 +32,6 @@ type SessionModelAdapter interface {
 	SetSessionModel(context.Context, SetSessionModelRequest) (SetSessionModelResponse, error)
 }
 
-// SessionCommandAdapter exposes available slash commands for one session.
-type SessionCommandAdapter interface {
-	AvailableCommands(context.Context, string) ([]AvailableCommand, error)
-}
-
-func AsLoadSessionAdapter(agent Agent) (LoadSessionAdapter, bool) {
-	adapter, ok := agent.(LoadSessionAdapter)
-	return adapter, ok
-}
-
 func AsSessionListAdapter(agent Agent) (SessionListAdapter, bool) {
 	adapter, ok := agent.(SessionListAdapter)
 	return adapter, ok
@@ -74,11 +59,6 @@ func AsSessionConfigAdapter(agent Agent) (SessionConfigAdapter, bool) {
 
 func AsSessionModelAdapter(agent Agent) (SessionModelAdapter, bool) {
 	adapter, ok := agent.(SessionModelAdapter)
-	return adapter, ok
-}
-
-func AsSessionCommandAdapter(agent Agent) (SessionCommandAdapter, bool) {
-	adapter, ok := agent.(SessionCommandAdapter)
 	return adapter, ok
 }
 

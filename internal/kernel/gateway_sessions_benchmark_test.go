@@ -10,9 +10,9 @@ import (
 
 func BenchmarkResumeKnownSessionID5000Events(b *testing.B) {
 	ctx := context.Background()
-	service := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{
+	service := sessionfile.NewStore(sessionfile.Config{
 		RootDir: b.TempDir(), SessionIDGenerator: func() string { return "large-session" },
-	}))
+	})
 	active, err := service.StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis", UserID: "performance-user", Workspace: session.WorkspaceRef{Key: "performance-workspace"},
 	})

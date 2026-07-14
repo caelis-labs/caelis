@@ -607,7 +607,7 @@ func newTestRuntimeAgent(t *testing.T, model model.LLM) (*runtimeacp.RuntimeAgen
 
 func newTestRuntimeAgentWithTools(t *testing.T, model model.LLM, tools []tool.Tool) (*runtimeacp.RuntimeAgent, session.Service) {
 	t.Helper()
-	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	sessions := inmemory.NewStore(inmemory.Config{})
 	runtime, err := sdkruntime.New(sdkruntime.Config{
 		Sessions: sessions,
 		AgentFactory: sdkchat.Factory{

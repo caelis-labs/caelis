@@ -87,7 +87,7 @@ func (c *serverConn) handleRequest(ctx context.Context, msg jsonrpc.Message) (an
 		if err := decodeParams(msg.Params, &req); err != nil {
 			return nil, invalidParams(err)
 		}
-		handler, ok := AsLoadSessionAdapter(c.agent)
+		handler, ok := c.agent.(SessionLoader)
 		if !ok {
 			return nil, &jsonrpc.RPCError{Code: -32601, Message: "Method not found"}
 		}
@@ -224,7 +224,7 @@ func (c *serverConn) SessionUpdate(_ context.Context, notification SessionNotifi
 }
 
 func (c *serverConn) withAvailableCommands(ctx context.Context, payload any, sessionID string, delay time.Duration) any {
-	handler, ok := AsSessionCommandAdapter(c.agent)
+	handler, ok := c.agent.(CommandProvider)
 	sessionID = strings.TrimSpace(sessionID)
 	if !ok || sessionID == "" {
 		return payload
@@ -252,7 +252,7 @@ func (c *serverConn) withAvailableCommands(ctx context.Context, payload any, ses
 	}
 }
 
-func (c *serverConn) emitAvailableCommands(ctx context.Context, handler SessionCommandAdapter, sessionID string) {
+func (c *serverConn) emitAvailableCommands(ctx context.Context, handler CommandProvider, sessionID string) {
 	cmds, err := handler.AvailableCommands(ctx, sessionID)
 	if err != nil || len(cmds) == 0 {
 		return

@@ -8,7 +8,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
-var _ session.ApprovalRecoveryService = (*Service)(nil)
+var _ session.ApprovalRecoveryService = (*Store)(nil)
 
 // PendingApprovals returns every durable permission without a later
 // settlement. A stable SessionRef snapshot is captured under one short root

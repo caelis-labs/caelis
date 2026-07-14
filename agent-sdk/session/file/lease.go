@@ -4,15 +4,14 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"errors"
 	"strings"
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
-var _ session.SessionLeaseService = (*Service)(nil)
-var _ session.SessionLeaseReader = (*Service)(nil)
+var _ session.SessionLeaseService = (*Store)(nil)
+var _ session.SessionLeaseReader = (*Store)(nil)
 
 func (s *Store) SessionLease(ctx context.Context, ref session.SessionRef) (session.SessionLease, error) {
 	if err := s.mu.LockContext(ctx); err != nil {
@@ -137,22 +136,6 @@ func (s *Store) ReleaseSessionLease(ctx context.Context, req session.ReleaseSess
 	})
 }
 
-func (s *Service) AcquireSessionLease(ctx context.Context, req session.AcquireSessionLeaseRequest) (session.SessionLease, error) {
-	return s.store.AcquireSessionLease(ctx, req)
-}
-
-func (s *Service) HeartbeatSessionLease(ctx context.Context, req session.HeartbeatSessionLeaseRequest) (session.SessionLease, error) {
-	return s.store.HeartbeatSessionLease(ctx, req)
-}
-
-func (s *Service) ReleaseSessionLease(ctx context.Context, req session.ReleaseSessionLeaseRequest) error {
-	return s.store.ReleaseSessionLease(ctx, req)
-}
-
-func (s *Service) SessionLease(ctx context.Context, ref session.SessionRef) (session.SessionLease, error) {
-	return s.store.SessionLease(ctx, ref)
-}
-
 func validateFileLiveSessionLease(active session.SessionLease, leaseID, ownerID string, revision uint64, now time.Time, ttl time.Duration) error {
 	if ttl <= 0 {
 		return fileLeaseConflict(active.SessionRef, "positive TTL is required")
@@ -177,42 +160,7 @@ func validateFileSessionLeaseIdentity(active session.SessionLease, leaseID, owne
 }
 
 func validateFileMutationGuard(active session.SessionLease, guard session.MutationGuard, now time.Time) error {
-	if guard.Authority == session.MutationAuthorityControl {
-		if err := session.ValidateControlMutationGuard(guard); err != nil {
-			var conflict *session.LeaseConflictError
-			if errors.As(err, &conflict) {
-				conflict.SessionID = session.NormalizeSessionRef(active.SessionRef).SessionID
-			}
-			return err
-		}
-		hasFence := strings.TrimSpace(guard.LeaseID) != ""
-		if hasFence {
-			if active.LeaseID == "" || !active.ExpiresAt.After(now) {
-				return fileLeaseConflict(active.SessionRef, "control mutation fence is absent or expired")
-			}
-			if active.LeaseID != strings.TrimSpace(guard.LeaseID) || active.OwnerID != strings.TrimSpace(guard.OwnerID) || active.FencingToken != guard.FencingToken {
-				return fileLeaseConflict(active.SessionRef, "control mutation fencing token is stale")
-			}
-			return nil
-		}
-		if active.LeaseID != "" && active.ExpiresAt.After(now) && !session.ControlMutationMayOverlapRuntimeLease(guard.Purpose) {
-			return fileLeaseConflict(active.SessionRef, "active execution lease requires a matching control fence")
-		}
-		return nil
-	}
-	if guard.Authority != session.MutationAuthorityRuntime {
-		if active.LeaseID == "" {
-			return nil
-		}
-		return fileLeaseConflict(active.SessionRef, "active lease requires explicit mutation authority")
-	}
-	if active.LeaseID == "" || !active.ExpiresAt.After(now) {
-		return fileLeaseConflict(active.SessionRef, "runtime lease is absent or expired")
-	}
-	if active.LeaseID != strings.TrimSpace(guard.LeaseID) || active.OwnerID != strings.TrimSpace(guard.OwnerID) || active.FencingToken != guard.FencingToken {
-		return fileLeaseConflict(active.SessionRef, "runtime fencing token is stale")
-	}
-	return nil
+	return session.AuthorizeMutationGuard(active, guard, now)
 }
 
 func activeDocumentLease(doc persistedDocument) session.SessionLease {

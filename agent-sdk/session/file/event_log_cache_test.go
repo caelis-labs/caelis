@@ -158,7 +158,7 @@ func TestEventLogCachePreservesIdempotencyAndConflictChecks(t *testing.T) {
 		Visibility: session.VisibilityCanonical,
 		Lifecycle:  &session.EventLifecycle{Status: "completed", Reason: "event-0001"},
 	}
-	prior, err := store.AppendEvent(context.Background(), active.SessionRef, retry)
+	prior, err := store.AppendEvent(context.Background(), session.AppendEventRequest{SessionRef: active.SessionRef, Event: retry})
 	if err != nil {
 		t.Fatalf("idempotent AppendEvent() error = %v", err)
 	}
@@ -167,7 +167,7 @@ func TestEventLogCachePreservesIdempotencyAndConflictChecks(t *testing.T) {
 	}
 	conflict := session.CloneEvent(retry)
 	conflict.Lifecycle.Reason = "different"
-	if _, err := store.AppendEvent(context.Background(), active.SessionRef, conflict); !errors.Is(err, session.ErrEventConflict) {
+	if _, err := store.AppendEvent(context.Background(), session.AppendEventRequest{SessionRef: active.SessionRef, Event: conflict}); !errors.Is(err, session.ErrEventConflict) {
 		t.Fatalf("conflicting AppendEvent() error = %v, want event conflict", err)
 	}
 	if reads != 0 {
@@ -191,7 +191,7 @@ func BenchmarkAppendEventWarmCache835(b *testing.B) {
 	b.ReportMetric(835, "history_events")
 	b.ResetTimer()
 	for range b.N {
-		if _, err := store.AppendEvent(context.Background(), active.SessionRef, retry); err != nil {
+		if _, err := store.AppendEvent(context.Background(), session.AppendEventRequest{SessionRef: active.SessionRef, Event: retry}); err != nil {
 			b.Fatal(err)
 		}
 	}

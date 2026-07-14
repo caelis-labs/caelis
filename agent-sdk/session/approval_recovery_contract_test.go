@@ -20,14 +20,14 @@ type approvalRecoveryContractService interface {
 func TestApprovalRecoverySettlementRevisionCASContract(t *testing.T) {
 	factories := map[string]func(*testing.T) approvalRecoveryContractService{
 		"file": func(t *testing.T) approvalRecoveryContractService {
-			return sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{
+			return sessionfile.NewStore(sessionfile.Config{
 				RootDir: t.TempDir(), SessionIDGenerator: func() string { return "approval-contract-file" },
-			}))
+			})
 		},
 		"memory": func(*testing.T) approvalRecoveryContractService {
-			return inmemory.NewService(inmemory.NewStore(inmemory.Config{
+			return inmemory.NewStore(inmemory.Config{
 				SessionIDGenerator: func() string { return "approval-contract-memory" },
-			}))
+			})
 		},
 	}
 	for name, factory := range factories {

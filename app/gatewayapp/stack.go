@@ -55,11 +55,6 @@ type ModelChoice = modelregistry.Choice
 // proven terminal Control operations.
 const DefaultControlOperationRetention = internalcontrolclient.DefaultOperationTerminalRetention
 
-type GatewayRuntime interface {
-	gateway.Service
-	gateway.StreamProvider
-}
-
 type Stack struct {
 	Sessions                  session.Service
 	AppName                   string
@@ -95,44 +90,40 @@ type Stack struct {
 	refreshConfiguredAgentsHook func() error
 }
 
-// CurrentGateway returns the current aggregate gateway runtime.
-//
-// Deprecated: use KernelTurns, KernelSessions, KernelControlPlane, or
-// KernelStreams so production callers depend on the narrow service they need.
-func (s *Stack) CurrentGateway() GatewayRuntime {
-	return s.kernelRuntime()
-}
-
-func (s *Stack) kernelRuntime() GatewayRuntime {
-	gw := s.currentGateway()
-	if gw == nil {
-		return nil
-	}
-	return gw
-}
-
 // KernelTurns returns the current gateway turn service without exposing the
 // broader session/control-plane aggregate to callers that only submit turns.
 func (s *Stack) KernelTurns() gateway.TurnService {
-	return s.kernelRuntime()
+	if gw := s.currentGateway(); gw != nil {
+		return gw
+	}
+	return nil
 }
 
 // KernelSessions returns the current gateway session service without exposing
 // turn or control-plane operations to session-only callers.
 func (s *Stack) KernelSessions() gateway.SessionService {
-	return s.kernelRuntime()
+	if gw := s.currentGateway(); gw != nil {
+		return gw
+	}
+	return nil
 }
 
 // KernelControlPlane returns the current gateway control-plane service without
 // exposing turn/session operations to controller-only callers.
 func (s *Stack) KernelControlPlane() gateway.ControlPlaneService {
-	return s.kernelRuntime()
+	if gw := s.currentGateway(); gw != nil {
+		return gw
+	}
+	return nil
 }
 
 // KernelStreams returns the current gateway stream provider without exposing
 // gateway control or session operations.
 func (s *Stack) KernelStreams() gateway.StreamProvider {
-	return s.kernelRuntime()
+	if gw := s.currentGateway(); gw != nil {
+		return gw
+	}
+	return nil
 }
 
 // ControlClientFeeds returns the Control-owned Session feed registry shared by
@@ -264,7 +255,7 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	sessionStore := sessionfile.NewStore(sessionfile.Config{
 		RootDir: filepath.Join(storeDir, "sessions"),
 	})
-	sessions := sessionfile.NewService(sessionStore)
+	sessions := sessionStore
 	taskStore := sessionfile.NewTaskStore(sessionStore)
 	approvalRecovery := internalcontrolclient.NewApprovalRecoveryGate(sessions)
 	cursorSecret, err := loadOrCreateControlClientCursorSecret(storeDir)

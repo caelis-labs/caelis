@@ -402,7 +402,7 @@ func TestStackSetSandboxBackendRollsBackOnConfigSaveFailure(t *testing.T) {
 	ctx := context.Background()
 	stack, _ := newLocalStateTestStack(t)
 	before := stack.SandboxStatus()
-	beforeGateway := stack.CurrentGateway()
+	beforeGateway := stack.currentGateway()
 	poisonConfigStorePath(t, stack)
 
 	_, err := stack.SetSandboxBackend(ctx, "auto")
@@ -413,8 +413,8 @@ func TestStackSetSandboxBackendRollsBackOnConfigSaveFailure(t *testing.T) {
 	if after.RequestedBackend != before.RequestedBackend || after.ResolvedBackend != before.ResolvedBackend {
 		t.Fatalf("SandboxStatus() = %+v, want rollback to %+v", after, before)
 	}
-	if afterGateway := stack.CurrentGateway(); afterGateway != beforeGateway {
-		t.Fatalf("CurrentGateway() changed on save failure: before=%p after=%p", beforeGateway, afterGateway)
+	if afterGateway := stack.currentGateway(); afterGateway != beforeGateway {
+		t.Fatalf("currentGateway() changed on save failure: before=%p after=%p", beforeGateway, afterGateway)
 	}
 }
 

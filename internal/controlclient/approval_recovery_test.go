@@ -13,14 +13,14 @@ import (
 )
 
 type resolveAfterRecoverySnapshotStore struct {
-	*sessionfile.Service
+	*sessionfile.Store
 	lease session.SessionLease
 	once  sync.Once
 	err   error
 }
 
 func (s *resolveAfterRecoverySnapshotStore) PendingApprovals(ctx context.Context) ([]session.PendingApproval, error) {
-	pending, err := s.Service.PendingApprovals(ctx)
+	pending, err := s.Store.PendingApprovals(ctx)
 	if err != nil || len(pending) == 0 {
 		return pending, err
 	}
@@ -48,9 +48,9 @@ func (s *resolveAfterRecoverySnapshotStore) PendingApprovals(ctx context.Context
 
 func TestSweepAbandonedApprovalsDoesNotOverwriteResolutionAfterCandidateSnapshot(t *testing.T) {
 	ctx := context.Background()
-	service := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{
+	service := sessionfile.NewStore(sessionfile.Config{
 		RootDir: t.TempDir(), SessionIDGenerator: func() string { return "session-recovery-cas" },
-	}))
+	})
 	active, err := service.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
 	if err != nil {
 		t.Fatal(err)
@@ -80,7 +80,7 @@ func TestSweepAbandonedApprovalsDoesNotOverwriteResolutionAfterCandidateSnapshot
 	}); err != nil {
 		t.Fatal(err)
 	}
-	recovery := &resolveAfterRecoverySnapshotStore{Service: service, lease: lease}
+	recovery := &resolveAfterRecoverySnapshotStore{Store: service, lease: lease}
 	if err := SweepAbandonedApprovals(ctx, recovery); err != nil {
 		t.Fatal(err)
 	}
@@ -107,8 +107,8 @@ func TestSweepAbandonedApprovalsDefersLiveForeignLeaseThenInterruptsOnceAfterExp
 		SessionIDGenerator: func() string { return "session-1" },
 		Clock:              func() time.Time { return now },
 	})
-	runtimeService := inmemory.NewService(store)
-	recoveryService := inmemory.NewService(store)
+	runtimeService := store
+	recoveryService := store
 	active, err := runtimeService.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
 	if err != nil {
 		t.Fatal(err)
@@ -166,10 +166,10 @@ func TestSweepAbandonedApprovalsDefersLiveForeignLeaseThenInterruptsOnceAfterExp
 func TestSweepAbandonedApprovalsContinuesPastTwoHundredSessions(t *testing.T) {
 	ctx := context.Background()
 	nextID := 0
-	service := inmemory.NewService(inmemory.NewStore(inmemory.Config{SessionIDGenerator: func() string {
+	service := inmemory.NewStore(inmemory.Config{SessionIDGenerator: func() string {
 		nextID++
 		return fmt.Sprintf("session-%03d", nextID)
-	}}))
+	}})
 	var target session.Session
 	for i := 0; i < 205; i++ {
 		active, err := service.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})

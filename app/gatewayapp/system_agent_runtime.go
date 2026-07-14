@@ -133,7 +133,7 @@ func newSystemManagedAgentRuntimeWithConfig(config systemManagedAgentRuntimeConf
 	}
 	if config.StagingSessions == nil {
 		config.StagingSessions = func() session.Service {
-			return inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+			return inmemory.NewStore(inmemory.Config{})
 		}
 	}
 	config.LifecycleInterceptors = append([]agent.LifecycleInterceptor(nil), config.LifecycleInterceptors...)

@@ -19,11 +19,8 @@ type SessionService interface {
 	StartSession(context.Context, StartSessionRequest) (session.Session, error)
 	LoadSession(context.Context, LoadSessionRequest) (session.LoadedSession, error)
 	ResumeSession(context.Context, ResumeSessionRequest) (session.LoadedSession, error)
-	ForkSession(context.Context, ForkSessionRequest) (session.Session, error)
 	ListSessions(context.Context, ListSessionsRequest) (session.SessionList, error)
 	BindSession(context.Context, BindSessionRequest) error
-	LookupBinding(BindingStateRequest) (BindingState, error)
-	ReplayEvents(context.Context, ReplayEventsRequest) (ReplayEventsResult, error)
 }
 
 type TurnService interface {

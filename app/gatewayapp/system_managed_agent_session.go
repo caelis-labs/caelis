@@ -154,7 +154,6 @@ func (c *systemManagedAgentSessionCache) load(ctx context.Context, req systemMan
 		if err != nil {
 			return nil, err
 		}
-		events = completeSystemManagedAgentEvents(events)
 		cursor = systemManagedAgentCursorFromState(state)
 		if cursor.EventCount == 0 {
 			cursor = systemManagedAgentCursorFromEvents(events)
@@ -175,39 +174,6 @@ func (c *systemManagedAgentSessionCache) load(ctx context.Context, req systemMan
 		events:   session.CloneEvents(events),
 		cursor:   cursor,
 	}, nil
-}
-
-func completeSystemManagedAgentEvents(events []*session.Event) []*session.Event {
-	if len(events) == 0 {
-		return nil
-	}
-	// One-release recovery shim for pre-batch guardian histories: keep only
-	// explicitly annotated prompt/assistant pairs now that new commits use
-	// AppendEventsAndUpdateState. Remove after the first release that can no
-	// longer load non-atomic guardian prompt writes from prior builds.
-	out := make([]*session.Event, 0, len(events))
-	for i := 0; i < len(events); i++ {
-		event := events[i]
-		if !isSystemManagedAgentPromptEvent(event) {
-			out = append(out, event)
-			continue
-		}
-		if i+1 >= len(events) || session.EventTypeOf(events[i+1]) != session.EventTypeAssistant {
-			continue
-		}
-		out = append(out, event, events[i+1])
-		i++
-	}
-	return out
-}
-
-func isSystemManagedAgentPromptEvent(event *session.Event) bool {
-	if event == nil || session.EventTypeOf(event) != session.EventTypeUser {
-		return false
-	}
-	return systemManagedAgentStateString(event.Meta, systemManagedAgentStateAgentID) == guardianProfileID &&
-		systemManagedAgentStateString(event.Meta, systemManagedAgentStatePurpose) == string(systemManagedAgentPurposeApprovalReview) &&
-		systemManagedAgentStateString(event.Meta, systemManagedAgentStateReuseKey) != ""
 }
 
 func (c *systemManagedAgentSessionCache) start(ctx context.Context, req systemManagedAgentSessionRequest) (session.Session, error) {

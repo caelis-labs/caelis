@@ -16,15 +16,6 @@ import (
 	"github.com/caelis-labs/caelis/ports/gateway"
 )
 
-// GatewayService is a test compatibility aggregate for fakes that implement
-// every gateway-facing narrow interface.
-type GatewayService interface {
-	GatewayTurnService
-	GatewaySessionService
-	GatewayControlPlaneService
-	GatewayStreamProvider
-}
-
 // GatewayTurnService exposes the turn operations used by Adapter.
 type GatewayTurnService interface {
 	BeginTurn(context.Context, gateway.BeginTurnRequest) (gateway.BeginTurnResult, error)
@@ -37,7 +28,6 @@ type GatewayTurnService interface {
 type GatewaySessionService interface {
 	ResumeSession(context.Context, gateway.ResumeSessionRequest) (session.LoadedSession, error)
 	ListSessions(context.Context, gateway.ListSessionsRequest) (session.SessionList, error)
-	ReplayEvents(context.Context, gateway.ReplayEventsRequest) (gateway.ReplayEventsResult, error)
 }
 
 // GatewayControlPlaneService exposes controller and participant operations used by Adapter.

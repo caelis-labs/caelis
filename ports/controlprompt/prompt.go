@@ -57,9 +57,9 @@ type PrivateSlashHandler func(context.Context, PrivateSlashRequest) (Result, boo
 
 // Result is the surface-neutral outcome of routing one prompt submission.
 //
-// Events and ReplayEvents are already ACP/eventstream-shaped and should be
-// forwarded by every surface that can display them. Turn carries live streaming
-// work and remains owned by the caller until it is closed.
+// Events are already ACP/eventstream-shaped and should be forwarded by every
+// surface that can display them. Turn carries live streaming work and remains
+// owned by the caller until it is closed.
 //
 // The boolean fields are semantic side effects, not UI instructions. TUI maps
 // ClearHistory to transcript clearing and StatusUpdate to its status bar; ACP
@@ -80,7 +80,6 @@ type Result struct {
 	Events              []eventstream.Envelope
 	SlashResult         *control.SlashCommandResult
 	ClearHistory        bool
-	ReplayEvents        []eventstream.Envelope
 	RefreshCommands     bool
 	ActiveSessionID     string
 	RefreshStatus       bool

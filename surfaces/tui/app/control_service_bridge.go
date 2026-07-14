@@ -540,14 +540,6 @@ func executeControlPromptResult(ctx context.Context, service control.Service, se
 	} else if result.ClearHistory && send != nil {
 		send(ClearHistoryMsg{})
 	}
-	if len(result.ReplayEvents) > 0 && send != nil {
-		transcriptEvents := projectResumeReplayEvents(result.ReplayEvents)
-		for start := 0; start < len(transcriptEvents); start += resumeReplayTranscriptBatchSize {
-			end := min(start+resumeReplayTranscriptBatchSize, len(transcriptEvents))
-			batch := append([]TranscriptEvent(nil), transcriptEvents[start:end]...)
-			send(TranscriptEventsMsg{Events: batch})
-		}
-	}
 	if result.SlashResult != nil && send != nil {
 		send(SlashCommandResultMsg{Result: *result.SlashResult})
 	}
@@ -578,7 +570,7 @@ func executeControlPromptResult(ctx context.Context, service control.Service, se
 		}
 		state := result.Reconnect.State()
 		if state.Run.Active || state.Approval.Active != nil {
-			return forwardTurnEventStream(ctx, result.Reconnect, sender)
+			return forwardSessionReconnectEventStream(ctx, result.Reconnect, sender)
 		}
 		return executeLineResult{completion: TaskResultMsg{SuppressTurnDivider: result.SuppressTurnDivider}}
 	}

@@ -256,8 +256,7 @@ before `Subscribe` returns merely because the default live queue is small.
 `FeedSubscription.Backfill` streams only the captured prefix and closes before
 `FeedSubscription.Events` exposes the live splice. `BackfillDone` mirrors that
 phase boundary. Finite readers collect the Backfill stream and then close the
-subscription. The production broker leaves the legacy in-process
-`SubscribeResult.Backfill` slice empty.
+subscription; there is no parallel materialized backfill slice.
 
 Subscribe returns one of:
 

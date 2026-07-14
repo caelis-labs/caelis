@@ -9,7 +9,7 @@ import (
 )
 
 func TestPreCancelledAppendAndStateWriterDoNotCommitWithFreeLocks(t *testing.T) {
-	service := NewService(NewStore(Config{RootDir: t.TempDir()}))
+	service := NewStore(Config{RootDir: t.TempDir()})
 	active, err := service.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis", UserID: "user-1", PreferredSessionID: "cancel-fence",
 	})

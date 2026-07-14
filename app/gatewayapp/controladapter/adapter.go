@@ -13,7 +13,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	controller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
 	"github.com/caelis-labs/caelis/ports/gateway"
-	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
 type Adapter struct {
@@ -447,21 +446,6 @@ func (d *Adapter) ListSessions(ctx context.Context, limit int) ([]ResumeCandidat
 		out = append(out, candidate)
 	}
 	return out, nil
-}
-
-func (d *Adapter) ReplayEvents(ctx context.Context) ([]eventstream.Envelope, error) {
-	activeSession, ok := d.currentSession()
-	if !ok {
-		return nil, fmt.Errorf("app/gatewayapp/controladapter: no active session")
-	}
-	result, err := d.replayControlFeed(ctx, activeSession.SessionID, eventstream.ReplayRequest{
-		SessionID:        activeSession.SessionID,
-		IncludeTransient: true,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return result.Events, nil
 }
 
 func (d *Adapter) Compact(ctx context.Context) error {

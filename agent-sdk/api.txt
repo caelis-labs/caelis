@@ -1837,6 +1837,7 @@ package github.com/caelis-labs/caelis/agent-sdk/session
   func (r *MigrationRegistry) Migrate(kind SchemaKind, source, target int, raw json.RawMessage) (json.RawMessage, error)
   func (r *MigrationRegistry) Register(kind SchemaKind, from, to int, migration SchemaMigration) error
   func ApplyPreparedAppendToSession(activeSession *Session, prepared PreparedAppendEvents) bool
+  func AuthorizeMutationGuard(active SessionLease, guard MutationGuard, now time.Time) error
   func CanonicalToolName(event *Event, update *ProtocolUpdate) string
   func CanonicalizeEvent(event *Event) *Event
   func CheckExpectedRevision(active Session, expected *uint64) error
@@ -2591,19 +2592,6 @@ package github.com/caelis-labs/caelis/agent-sdk/session
       StateWriter
   }
   type StateWriter interface {
-      ReplaceState(context.Context, ReplaceStateRequest) (Session, error)
-      UpdateState(context.Context, UpdateStateRequest) (Session, error)
-  }
-  type Store interface {
-      GetOrCreate(context.Context, StartSessionRequest) (Session, error)
-      Get(context.Context, SessionRef) (Session, error)
-      List(context.Context, ListSessionsRequest) (SessionList, error)
-      AppendEvent(context.Context, SessionRef, *Event) (*Event, error)
-      Events(context.Context, EventsRequest) ([]*Event, error)
-      BindController(context.Context, SessionRef, ControllerBinding) (Session, error)
-      PutParticipant(context.Context, SessionRef, ParticipantBinding) (Session, error)
-      RemoveParticipant(context.Context, SessionRef, string) (Session, error)
-      SnapshotState(context.Context, SessionRef) (map[string]any, error)
       ReplaceState(context.Context, ReplaceStateRequest) (Session, error)
       UpdateState(context.Context, UpdateStateRequest) (Session, error)
   }

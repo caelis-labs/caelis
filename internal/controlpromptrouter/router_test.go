@@ -11,7 +11,6 @@ import (
 	prompt "github.com/caelis-labs/caelis/ports/controlprompt"
 	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
-	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
 func TestRouterStatusModelAndCompactCommands(t *testing.T) {
@@ -68,13 +67,7 @@ func TestRouterStatusModelAndCompactCommands(t *testing.T) {
 func TestRouterResumeReturnsLiveReconnectWithoutSuccessNotice(t *testing.T) {
 	t.Parallel()
 
-	svc := &fakeService{
-		replayEvents: []eventstream.Envelope{{
-			Kind:      eventstream.KindLifecycle,
-			SessionID: "resumed-session",
-			Lifecycle: &eventstream.Lifecycle{State: "completed"},
-		}},
-	}
+	svc := &fakeService{}
 	result, err := New(prompt.RouterConfig{Service: svc}).Route(context.Background(), prompt.Request{
 		Submission: control.Submission{Text: "/resume resumed-session"},
 	})
@@ -90,8 +83,8 @@ func TestRouterResumeReturnsLiveReconnectWithoutSuccessNotice(t *testing.T) {
 	if result.StatusUpdate != nil || svc.statusCalls != 0 {
 		t.Fatalf("Route(/resume) status = %#v calls=%d, want no synchronous status read", result.StatusUpdate, svc.statusCalls)
 	}
-	if len(result.ReplayEvents) != 0 || result.Reconnect == nil {
-		t.Fatalf("Route(/resume) replay/reconnect = %#v / %#v, want live reconnect only", result.ReplayEvents, result.Reconnect)
+	if result.Reconnect == nil {
+		t.Fatalf("Route(/resume) reconnect = %#v, want live reconnect", result.Reconnect)
 	}
 	if got := firstNotice(result); got != "" {
 		t.Fatalf("Route(/resume) notice = %q, want no normal success notice", got)
@@ -405,7 +398,6 @@ func firstNotice(result prompt.Result) string {
 type fakeService struct {
 	status             control.StatusSnapshot
 	statusCalls        int
-	replayEvents       []eventstream.Envelope
 	agents             []control.AgentCandidate
 	turn               control.Turn
 	submitted          control.Submission
@@ -457,21 +449,9 @@ func (s *fakeService) ResumeSession(context.Context, string) (control.SessionSna
 func (s *fakeService) ListSessions(context.Context, int) ([]control.ResumeCandidate, error) {
 	return nil, nil
 }
-func (s *fakeService) ReplayEvents(context.Context) ([]eventstream.Envelope, error) {
-	return append([]eventstream.Envelope(nil), s.replayEvents...), nil
-}
 func (s *fakeService) Compact(context.Context) error {
 	s.compacted = true
 	return nil
-}
-func (s *fakeService) ListSessionSnapshots(context.Context, schema.SessionListRequest) (schema.SessionListResponse, error) {
-	return schema.SessionListResponse{}, nil
-}
-func (s *fakeService) Replay(context.Context, eventstream.ReplayRequest) (eventstream.ReplayResult, error) {
-	return eventstream.ReplayResult{}, nil
-}
-func (s *fakeService) RunState(context.Context) (eventstream.RunState, error) {
-	return eventstream.RunState{}, nil
 }
 
 type routerReconnect struct{ state controlclient.SessionState }

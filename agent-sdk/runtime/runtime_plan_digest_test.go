@@ -21,9 +21,9 @@ func TestPlanCompoundDigestIncludesPersistedExplanation(t *testing.T) {
 			t.Parallel()
 			var service session.Service
 			if storeKind == "file" {
-				service = sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()}))
+				service = sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()})
 			} else {
-				service = inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+				service = inmemory.NewStore(inmemory.Config{})
 			}
 			active, err := service.StartSession(context.Background(), session.StartSessionRequest{
 				AppName: "caelis", UserID: "plan-digest", PreferredSessionID: "plan-digest-" + storeKind,

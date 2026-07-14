@@ -19,7 +19,7 @@ import (
 func TestLeasedRuntimeHeartbeatsUntilRunnerCompletesThenReleases(t *testing.T) {
 	t.Parallel()
 
-	service := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	service := inmemory.NewStore(inmemory.Config{})
 	active, err := service.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis", UserID: "user-1", PreferredSessionID: "leased-run",
 	})
@@ -74,7 +74,7 @@ func TestLeasedRuntimeHeartbeatsUntilRunnerCompletesThenReleases(t *testing.T) {
 func TestLeasedRuntimeHeartbeatsDuringSynchronousRuntimeStartup(t *testing.T) {
 	t.Parallel()
 
-	service := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	service := inmemory.NewStore(inmemory.Config{})
 	active, err := service.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis", UserID: "user-1", PreferredSessionID: "leased-startup",
 	})
@@ -118,8 +118,8 @@ func TestLeasedRuntimeHeartbeatsDuringSynchronousRuntimeStartup(t *testing.T) {
 
 func TestLeasedRuntimeHeartbeatWaitsThroughFileRootContentionWithinTTL(t *testing.T) {
 	root := t.TempDir()
-	primary := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{RootDir: root}))
-	contender := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{RootDir: root}))
+	primary := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	contender := sessionfile.NewStore(sessionfile.Config{RootDir: root})
 	active, err := primary.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis", UserID: "user-1", PreferredSessionID: "leased-root-contention",
 	})
@@ -221,8 +221,8 @@ func TestLeasedRuntimeHeartbeatWaitsThroughFileRootContentionWithinTTL(t *testin
 
 func TestLeasedRuntimeHeartbeatDeadlineCancelsBeforeDurableExpiry(t *testing.T) {
 	root := t.TempDir()
-	primary := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{RootDir: root}))
-	contender := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{RootDir: root}))
+	primary := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	contender := sessionfile.NewStore(sessionfile.Config{RootDir: root})
 	active, err := primary.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis", UserID: "user-1", PreferredSessionID: "leased-expiry-fence",
 	})
@@ -382,8 +382,8 @@ func TestLeasedRuntimeHeartbeatDeadlineCancelsBeforeDurableExpiry(t *testing.T) 
 
 func TestLeasedRuntimeCompletionCancelsHeartbeatBlockedOnFileRootLock(t *testing.T) {
 	root := t.TempDir()
-	primary := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{RootDir: root}))
-	contender := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{RootDir: root}))
+	primary := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	contender := sessionfile.NewStore(sessionfile.Config{RootDir: root})
 	active, err := primary.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis", UserID: "user-1", PreferredSessionID: "leased-finish-contention",
 	})
@@ -503,7 +503,7 @@ func TestLeasedRuntimeCompletionCancelsHeartbeatBlockedOnFileRootLock(t *testing
 func TestLeasedRunnerCloseRetainsLeaseUntilProducerQuiescent(t *testing.T) {
 	t.Parallel()
 
-	service := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	service := inmemory.NewStore(inmemory.Config{})
 	active, err := service.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis", UserID: "user-1", PreferredSessionID: "leased-close-barrier",
 	})
@@ -551,7 +551,7 @@ func TestLeasedRunnerCloseRetainsLeaseUntilProducerQuiescent(t *testing.T) {
 func TestExecutePlacedCarriesFenceAndReleasesLease(t *testing.T) {
 	t.Parallel()
 
-	service := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	service := inmemory.NewStore(inmemory.Config{})
 	active, err := service.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis", UserID: "user-1", PreferredSessionID: "placed-operation",
 	})
@@ -589,7 +589,7 @@ func TestExecutePlacedCarriesFenceAndReleasesLease(t *testing.T) {
 func TestExecutePlacedHeartbeatsDuringLongCallback(t *testing.T) {
 	t.Parallel()
 
-	service := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	service := inmemory.NewStore(inmemory.Config{})
 	active, err := service.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis", UserID: "user-1", PreferredSessionID: "placed-heartbeat",
 	})
@@ -634,7 +634,7 @@ func TestExecutePlacedHeartbeatsDuringLongCallback(t *testing.T) {
 func TestExecutePlacedCancelsCallbackWhenHeartbeatFails(t *testing.T) {
 	t.Parallel()
 
-	service := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	service := inmemory.NewStore(inmemory.Config{})
 	active, err := service.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis", UserID: "user-1", PreferredSessionID: "placed-heartbeat-cancel",
 	})
@@ -672,7 +672,7 @@ func TestExecutePlacedCancelsCallbackWhenHeartbeatFails(t *testing.T) {
 
 func TestExecutePlacedRetainsHeartbeatFailureThatArrivesDuringFinish(t *testing.T) {
 	t.Parallel()
-	service := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	service := inmemory.NewStore(inmemory.Config{})
 	active, err := service.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis", UserID: "user", PreferredSessionID: "late-heartbeat-error",
 	})
@@ -704,7 +704,7 @@ func TestExecutePlacedRetainsHeartbeatFailureThatArrivesDuringFinish(t *testing.
 
 func TestLeasedRunnerCloseRetainsHeartbeatFailure(t *testing.T) {
 	t.Parallel()
-	service := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	service := inmemory.NewStore(inmemory.Config{})
 	active, err := service.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis", UserID: "user", PreferredSessionID: "close-heartbeat-error",
 	})
@@ -738,7 +738,7 @@ func TestLeasedRunnerCloseRetainsHeartbeatFailure(t *testing.T) {
 func TestLeasedRuntimeCancelsRunWhenHeartbeatFails(t *testing.T) {
 	t.Parallel()
 
-	service := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	service := inmemory.NewStore(inmemory.Config{})
 	active, err := service.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis", UserID: "user-1", PreferredSessionID: "heartbeat-failure",
 	})
@@ -778,7 +778,7 @@ func TestLeasedRuntimeCancelsRunWhenHeartbeatFails(t *testing.T) {
 func TestLeasedRuntimeEarlyConsumerStopDoesNotYieldCleanupError(t *testing.T) {
 	t.Parallel()
 
-	service := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	service := inmemory.NewStore(inmemory.Config{})
 	active, err := service.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis", UserID: "user", PreferredSessionID: "early-stop",
 	})
@@ -810,7 +810,7 @@ func TestLeasedRuntimeEarlyConsumerStopDoesNotYieldCleanupError(t *testing.T) {
 func TestLeasedRuntimeContinuesAfterCommittedAcquireReturnsDurableLease(t *testing.T) {
 	t.Parallel()
 
-	service := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	service := inmemory.NewStore(inmemory.Config{})
 	active, err := service.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis", UserID: "user-1", PreferredSessionID: "committed-acquire",
 	})
@@ -846,7 +846,7 @@ func TestLeasedRuntimeContinuesAfterCommittedAcquireReturnsDurableLease(t *testi
 func TestLeasedRuntimeKeepsHealthyRunAfterCommittedHeartbeatReturnsNewRevision(t *testing.T) {
 	t.Parallel()
 
-	service := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	service := inmemory.NewStore(inmemory.Config{})
 	active, err := service.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis", UserID: "user-1", PreferredSessionID: "committed-heartbeat",
 	})

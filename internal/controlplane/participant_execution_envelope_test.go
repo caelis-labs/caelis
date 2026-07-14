@@ -3,6 +3,7 @@ package controlplane
 import (
 	"context"
 	"errors"
+	"iter"
 	"sync"
 	"testing"
 	"time"
@@ -12,13 +13,12 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
-	streammemory "github.com/caelis-labs/caelis/agent-sdk/task/stream/memory"
 )
 
 func TestParticipantPromptUsesLeaseFenceAndWatchdogEnvelope(t *testing.T) {
 	t.Parallel()
 
-	service := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	service := inmemory.NewStore(inmemory.Config{})
 	active, err := service.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis", UserID: "participant-envelope", PreferredSessionID: "participant-envelope",
 	})
@@ -26,7 +26,7 @@ func TestParticipantPromptUsesLeaseFenceAndWatchdogEnvelope(t *testing.T) {
 		t.Fatal(err)
 	}
 	mainRunner := newLeaseTestRunner("main-run")
-	inner := &participantEnvelopeRuntime{sessions: service, mainRunner: mainRunner, streams: streammemory.New()}
+	inner := &participantEnvelopeRuntime{sessions: service, mainRunner: mainRunner, streams: &participantStreamService{}}
 	ownerA := newParticipantEnvelopeRuntime(t, inner, service, "host-a")
 	ownerB := newParticipantEnvelopeRuntime(t, inner, service, "host-b")
 
@@ -116,6 +116,16 @@ type participantEnvelopeRuntime struct {
 	participantRunner *controlledWatchdogRunner
 	streams           stream.Service
 	approvals         int
+}
+
+type participantStreamService struct{}
+
+func (*participantStreamService) Read(context.Context, stream.ReadRequest) (stream.Snapshot, error) {
+	return stream.Snapshot{}, nil
+}
+
+func (*participantStreamService) Subscribe(context.Context, stream.SubscribeRequest) iter.Seq2[*stream.Frame, error] {
+	return func(func(*stream.Frame, error) bool) {}
 }
 
 func (r *participantEnvelopeRuntime) Run(context.Context, agent.RunRequest) (agent.RunResult, error) {

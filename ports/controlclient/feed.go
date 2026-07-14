@@ -75,11 +75,6 @@ type SubscribeResult struct {
 	// BoundaryPosition is the decoded in-process form of BoundaryCursor. The
 	// Cursor remains the sole public resume token.
 	BoundaryPosition *eventstream.FeedPosition `json:"-"`
-	// Backfill is the exact captured prefix ending at BoundaryCursor. It is an
-	// in-process compatibility handoff for finite test feeds and is never
-	// encoded on the wire. Production brokers stream through Subscription and
-	// close BackfillDone without materializing the full prefix here.
-	Backfill []eventstream.Envelope `json:"-"`
 }
 
 // SessionFeed is the narrow Control-owned feed used by adapters and Surfaces.

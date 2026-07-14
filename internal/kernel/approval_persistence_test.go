@@ -16,7 +16,7 @@ import (
 func TestApprovalPersistenceUsesApprovalControlAuthorityDuringRuntimeLease(t *testing.T) {
 	t.Parallel()
 
-	sessions := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()}))
+	sessions := sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()})
 	active, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis", UserID: "user-1", PreferredSessionID: "approval-leased",
 	})

@@ -9,9 +9,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	internalcontrolclient "github.com/caelis-labs/caelis/internal/controlclient"
-	"github.com/caelis-labs/caelis/internal/controlclient/turningress"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 	controlport "github.com/caelis-labs/caelis/ports/controlclient"
 	"github.com/caelis-labs/caelis/ports/gateway"
@@ -19,6 +17,8 @@ import (
 )
 
 const controlFeedPublishTimeout = 5 * time.Second
+
+const controlFeedCatchUpWarning = "session mutation committed; live feed catch-up failed, reconnect to refresh session state"
 
 // ExecuteControlCommand is the app assembly adapter for already-authorized
 // transport-neutral commands. The request's operation ID is forwarded in
@@ -32,20 +32,22 @@ func (s *Stack) ExecuteControlCommand(ctx context.Context, principal controlport
 		return controlport.CommandResult{}, errors.New("gatewayapp: gateway is unavailable")
 	}
 	defer func() {
-		if commandErr != nil || strings.TrimSpace(result.SessionID) == "" || s.controlFeeds == nil {
+		if commandErr != nil || strings.TrimSpace(result.SessionID) == "" {
+			return
+		}
+		if s.controlFeeds == nil {
+			result.Detail = controlFeedCatchUpWarning
 			return
 		}
 		feed, err := s.controlFeeds.Session(session.SessionRef{SessionID: result.SessionID})
 		if err != nil {
-			result.Outcome = controlport.OutcomeUnknown
-			commandErr = controlport.NewOutcomeError(controlport.OutcomeUnknown, fmt.Errorf("gatewayapp: open committed session feed: %w", err))
+			result.Detail = controlFeedCatchUpWarning
 			return
 		}
 		publishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), controlFeedPublishTimeout)
 		defer cancel()
 		if err := feed.Prime(publishCtx); err != nil {
-			result.Outcome = controlport.OutcomeUnknown
-			commandErr = controlport.NewOutcomeError(controlport.OutcomeUnknown, fmt.Errorf("gatewayapp: publish committed session mutation: %w", err))
+			result.Detail = controlFeedCatchUpWarning
 		}
 	}()
 	switch req := request.(type) {
@@ -257,24 +259,6 @@ func waitControlTurnStopped(ctx context.Context, gw *kernelimpl.Gateway, target 
 		case <-ticker.C:
 		}
 	}
-}
-
-func (s *Stack) attachControlClientHandle(handle gateway.TurnHandle) {
-	if handle == nil || s.controlFeeds == nil {
-		return
-	}
-	feed, err := s.controlFeeds.Session(handle.SessionRef())
-	if err != nil {
-		return
-	}
-	ingress := turningress.New(handle, func() stream.Service {
-		provider := s.KernelStreams()
-		if provider == nil {
-			return nil
-		}
-		return provider.Streams()
-	}, internalcontrolclient.NewChildRecorder(s.Sessions))
-	feed.Attach(ingress.Events())
 }
 
 func sessionCommandResult(active session.Session) controlport.CommandResult {

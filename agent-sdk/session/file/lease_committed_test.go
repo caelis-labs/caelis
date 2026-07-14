@@ -106,11 +106,12 @@ func newCommittedLeaseTestStore(t *testing.T, sessionID string) (*Store, session
 	t.Helper()
 	root := t.TempDir()
 	store := NewStore(Config{RootDir: root})
-	created, err := store.GetOrCreate(context.Background(), session.StartSessionRequest{
+	created, err := store.StartSession(context.Background(), session.StartSessionRequest{
 		AppName: "caelis", UserID: "user", PreferredSessionID: sessionID,
 	})
+
 	if err != nil {
-		t.Fatalf("GetOrCreate() error = %v", err)
+		t.Fatalf("StartSession() error = %v", err)
 	}
 	return store, created.SessionRef, filepath.Join(root, indexFilename)
 }

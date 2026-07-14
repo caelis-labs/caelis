@@ -12,34 +12,36 @@ import (
 func TestStoreReadPathsHonorContextWhileWaitingForStoreMutex(t *testing.T) {
 	store := NewStore(Config{RootDir: t.TempDir(), SessionIDGenerator: func() string { return "session-1" }})
 	ctx := context.Background()
-	active, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+	active, err := store.StartSession(ctx, session.StartSessionRequest{
 		AppName: "caelis", UserID: "user-1", Workspace: session.WorkspaceRef{Key: "ws-1", CWD: "/tmp/ws-1"},
 	})
+
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.AppendEvent(ctx, active.SessionRef, &session.Event{
+	if _, err := store.AppendEvent(ctx, session.AppendEventRequest{SessionRef: active.SessionRef, Event: &session.Event{
 		Type:       session.EventTypeLifecycle,
 		Visibility: session.VisibilityCanonical,
 		Lifecycle:  &session.EventLifecycle{Status: "completed", Reason: "fixture"},
-	}); err != nil {
+	}}); err != nil {
 		t.Fatal(err)
 	}
 	tasks := NewTaskStore(store)
 
 	operations := map[string]func(context.Context) error{
 		"get_or_create": func(ctx context.Context) error {
-			_, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+			_, err := store.StartSession(ctx, session.StartSessionRequest{
 				AppName: "caelis", UserID: "user-1", PreferredSessionID: "session-2",
 			})
+
 			return err
 		},
 		"get": func(ctx context.Context) error {
-			_, err := store.Get(ctx, active.SessionRef)
+			_, err := store.Session(ctx, active.SessionRef)
 			return err
 		},
 		"list": func(ctx context.Context) error {
-			_, err := store.List(ctx, session.ListSessionsRequest{AppName: "caelis", UserID: "user-1"})
+			_, err := store.ListSessions(ctx, session.ListSessionsRequest{AppName: "caelis", UserID: "user-1"})
 			return err
 		},
 		"events": func(ctx context.Context) error {
@@ -55,15 +57,16 @@ func TestStoreReadPathsHonorContextWhileWaitingForStoreMutex(t *testing.T) {
 			return err
 		},
 		"load_document": func(ctx context.Context) error {
-			_, err := store.LoadDocument(ctx, session.LoadSessionRequest{SessionRef: active.SessionRef})
+			_, err := store.LoadSession(ctx, session.LoadSessionRequest{SessionRef: active.SessionRef})
 			return err
 		},
 		"append_event": func(ctx context.Context) error {
-			_, err := store.AppendEvent(ctx, active.SessionRef, &session.Event{
+			_, err := store.AppendEvent(ctx, session.AppendEventRequest{SessionRef: active.SessionRef, Event: &session.Event{
 				Type:       session.EventTypeLifecycle,
 				Visibility: session.VisibilityCanonical,
 				Lifecycle:  &session.EventLifecycle{Status: "completed", Reason: "should-cancel"},
-			})
+			}})
+
 			return err
 		},
 		"append_events": func(ctx context.Context) error {
@@ -142,7 +145,7 @@ func TestStoreReadPathsHonorContextWhileWaitingForStoreMutex(t *testing.T) {
 func TestStoreListHonorsContextWhileWaitingForRootFileLock(t *testing.T) {
 	root := t.TempDir()
 	store := NewStore(Config{RootDir: root})
-	if _, err := store.List(context.Background(), session.ListSessionsRequest{}); err != nil {
+	if _, err := store.ListSessions(context.Background(), session.ListSessionsRequest{}); err != nil {
 		t.Fatal(err)
 	}
 	held, err := lockSessionStoreRoot(context.Background(), root, storeRootLockExclusive)
@@ -154,7 +157,7 @@ func TestStoreListHonorsContextWhileWaitingForRootFileLock(t *testing.T) {
 	defer cancel()
 	result := make(chan error, 1)
 	go func() {
-		_, err := store.List(callCtx, session.ListSessionsRequest{})
+		_, err := store.ListSessions(callCtx, session.ListSessionsRequest{})
 		result <- err
 	}()
 	<-callCtx.Done()

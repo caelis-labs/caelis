@@ -18,13 +18,14 @@ func TestRegressionStoreRoundTripMinimalToolLoop(t *testing.T) {
 	ctx := context.Background()
 	store := inmemory.NewStore(inmemory.Config{})
 
-	sess, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+	sess, err := store.StartSession(ctx, session.StartSessionRequest{
 		AppName:            "caelis",
 		UserID:             "test-user",
 		PreferredSessionID: "sess-roundtrip-tool-loop",
 	})
+
 	if err != nil {
-		t.Fatalf("GetOrCreate() error = %v", err)
+		t.Fatalf("StartSession() error = %v", err)
 	}
 
 	liveScripted := evalharness.NewScriptedModel("live-tool-loop",
@@ -60,7 +61,7 @@ func TestRegressionStoreRoundTripMinimalToolLoop(t *testing.T) {
 
 	for _, event := range canonicalEvents {
 		event.SessionID = ""
-		if _, err := store.AppendEvent(ctx, session.SessionRef{SessionID: sess.SessionID}, event); err != nil {
+		if _, err := store.AppendEvent(ctx, session.AppendEventRequest{SessionRef: session.SessionRef{SessionID: sess.SessionID}, Event: event}); err != nil {
 			t.Fatalf("AppendEvent() error = %v", err)
 		}
 	}
@@ -126,13 +127,14 @@ func TestRegressionStoreRoundTripReasoning(t *testing.T) {
 	ctx := context.Background()
 	store := inmemory.NewStore(inmemory.Config{})
 
-	sess, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+	sess, err := store.StartSession(ctx, session.StartSessionRequest{
 		AppName:            "caelis",
 		UserID:             "test-user",
 		PreferredSessionID: "sess-roundtrip-reasoning",
 	})
+
 	if err != nil {
-		t.Fatalf("GetOrCreate() error = %v", err)
+		t.Fatalf("StartSession() error = %v", err)
 	}
 
 	liveScripted := evalharness.NewScriptedModel("live-reasoning",
@@ -162,7 +164,7 @@ func TestRegressionStoreRoundTripReasoning(t *testing.T) {
 
 	for _, event := range canonicalEvents {
 		event.SessionID = ""
-		if _, err := store.AppendEvent(ctx, session.SessionRef{SessionID: sess.SessionID}, event); err != nil {
+		if _, err := store.AppendEvent(ctx, session.AppendEventRequest{SessionRef: session.SessionRef{SessionID: sess.SessionID}, Event: event}); err != nil {
 			t.Fatalf("AppendEvent() error = %v", err)
 		}
 	}
@@ -219,13 +221,14 @@ func TestRegressionStoreRoundTripInvalidToolRetry(t *testing.T) {
 	ctx := context.Background()
 	store := inmemory.NewStore(inmemory.Config{})
 
-	sess, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+	sess, err := store.StartSession(ctx, session.StartSessionRequest{
 		AppName:            "caelis",
 		UserID:             "test-user",
 		PreferredSessionID: "sess-roundtrip-invalid-retry",
 	})
+
 	if err != nil {
-		t.Fatalf("GetOrCreate() error = %v", err)
+		t.Fatalf("StartSession() error = %v", err)
 	}
 
 	liveScripted := evalharness.NewScriptedModel("live-invalid-retry",
@@ -269,7 +272,7 @@ func TestRegressionStoreRoundTripInvalidToolRetry(t *testing.T) {
 
 	for _, event := range canonicalEvents {
 		event.SessionID = ""
-		if _, err := store.AppendEvent(ctx, session.SessionRef{SessionID: sess.SessionID}, event); err != nil {
+		if _, err := store.AppendEvent(ctx, session.AppendEventRequest{SessionRef: session.SessionRef{SessionID: sess.SessionID}, Event: event}); err != nil {
 			t.Fatalf("AppendEvent() error = %v", err)
 		}
 	}

@@ -82,7 +82,7 @@ func (s *continueFailFinalSessions) AppendEvent(ctx context.Context, req session
 func TestSubagentContinueSagaRollsForwardFinalWithoutReissuingRemote(t *testing.T) {
 	t.Parallel()
 
-	base := memory.NewService(memory.NewStore(memory.Config{}))
+	base := memory.NewStore(memory.Config{})
 	active, err := base.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "continue-saga"})
 	if err != nil {
 		t.Fatal(err)
@@ -150,7 +150,7 @@ func TestSubagentContinueSagaRollsForwardFinalWithoutReissuingRemote(t *testing.
 func TestSubagentContinueSagaRefusesBlindReissueAfterExternalClaim(t *testing.T) {
 	t.Parallel()
 
-	base := memory.NewService(memory.NewStore(memory.Config{}))
+	base := memory.NewStore(memory.Config{})
 	active, err := base.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "continue-pending"})
 	if err != nil {
 		t.Fatal(err)
@@ -195,7 +195,7 @@ func TestSubagentContinueSagaRefusesBlindReissueAfterExternalClaim(t *testing.T)
 
 func TestSubagentContinueRejectsConcurrentOperationBeforeSecondRemoteEffect(t *testing.T) {
 	t.Parallel()
-	base := memory.NewService(memory.NewStore(memory.Config{}))
+	base := memory.NewStore(memory.Config{})
 	active, err := base.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "continue-concurrent"})
 	if err != nil {
 		t.Fatal(err)
@@ -263,7 +263,7 @@ func TestTaskOperationClaimIsSessionScoped(t *testing.T) {
 
 func TestSubagentControlReloadsNewerDurableRevisionBeforeDispatch(t *testing.T) {
 	t.Parallel()
-	base := memory.NewService(memory.NewStore(memory.Config{}))
+	base := memory.NewStore(memory.Config{})
 	active, err := base.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "canonical-reload"})
 	if err != nil {
 		t.Fatal(err)
@@ -307,7 +307,7 @@ func TestSubagentControlReloadsNewerDurableRevisionBeforeDispatch(t *testing.T) 
 
 func TestSubagentWaitRecoversPendingContinueBeforeReturningSnapshot(t *testing.T) {
 	t.Parallel()
-	base := memory.NewService(memory.NewStore(memory.Config{}))
+	base := memory.NewStore(memory.Config{})
 	active, err := base.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "continue-wait-recovery"})
 	if err != nil {
 		t.Fatal(err)
@@ -355,7 +355,7 @@ func TestSubagentWaitRecoversPendingContinueBeforeReturningSnapshot(t *testing.T
 
 func TestSubagentContinuePendingPersistenceFailureDoesNotAdvanceLocalPhase(t *testing.T) {
 	t.Parallel()
-	base := memory.NewService(memory.NewStore(memory.Config{}))
+	base := memory.NewStore(memory.Config{})
 	active, err := base.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "continue-pending-put-fail"})
 	if err != nil {
 		t.Fatal(err)
@@ -398,7 +398,7 @@ func TestSubagentContinuePendingPersistenceFailureDoesNotAdvanceLocalPhase(t *te
 
 func TestSubagentContinueUnknownPersistenceFailureLeavesLocalAndDurablePending(t *testing.T) {
 	t.Parallel()
-	base := memory.NewService(memory.NewStore(memory.Config{}))
+	base := memory.NewStore(memory.Config{})
 	active, err := base.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "continue-unknown-put-fail"})
 	if err != nil {
 		t.Fatal(err)
@@ -441,7 +441,7 @@ func TestSubagentContinueUnknownPersistenceFailureLeavesLocalAndDurablePending(t
 
 func TestRecoverRuntimeStatePromotesPendingContinueToDurableUnknown(t *testing.T) {
 	t.Parallel()
-	base := memory.NewService(memory.NewStore(memory.Config{}))
+	base := memory.NewStore(memory.Config{})
 	active, err := base.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "continue-recover-pending"})
 	if err != nil {
 		t.Fatal(err)
@@ -476,7 +476,7 @@ func TestRecoverRuntimeStatePromotesPendingContinueToDurableUnknown(t *testing.T
 func TestSubagentContinueSagaRecoversPreparedWithoutRemoteUntilClaim(t *testing.T) {
 	t.Parallel()
 
-	base := memory.NewService(memory.NewStore(memory.Config{}))
+	base := memory.NewStore(memory.Config{})
 	active, err := base.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "continue-prepared"})
 	if err != nil {
 		t.Fatal(err)

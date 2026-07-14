@@ -137,7 +137,7 @@ func TestToolRecoveryStatusRemainsCanonicalWithEmptyResult(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			root := t.TempDir()
-			service := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{RootDir: root, SessionIDGenerator: func() string { return "recovery-" + tt.name }}))
+			service := sessionfile.NewStore(sessionfile.Config{RootDir: root, SessionIDGenerator: func() string { return "recovery-" + tt.name }})
 			active, err := service.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "recovery-user"})
 			if err != nil {
 				t.Fatal(err)
@@ -206,7 +206,7 @@ func TestToolRecoveryStatusRemainsCanonicalWithEmptyResult(t *testing.T) {
 			}
 
 			rebuilt := canonicalMessages(events)
-			reopened := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{RootDir: root}))
+			reopened := sessionfile.NewStore(sessionfile.Config{RootDir: root})
 			probe := &recoveryCaptureModel{}
 			restarted, err := New(Config{Sessions: reopened, AgentFactory: chat.Factory{}})
 			if err != nil {
@@ -335,7 +335,7 @@ func TestRuntimeCrashWindowRecoversUnknownOutcomeWithoutToolReplay(t *testing.T)
 	t.Parallel()
 
 	root := t.TempDir()
-	service := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{RootDir: root, SessionIDGenerator: func() string { return "sess-crash-window" }}))
+	service := sessionfile.NewStore(sessionfile.Config{RootDir: root, SessionIDGenerator: func() string { return "sess-crash-window" }})
 	active, err := service.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
@@ -371,7 +371,7 @@ func TestRuntimeCrashWindowRecoversUnknownOutcomeWithoutToolReplay(t *testing.T)
 		t.Fatalf("tool calls after crash window = %d, want 1", calls)
 	}
 
-	reopened := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{RootDir: root}))
+	reopened := sessionfile.NewStore(sessionfile.Config{RootDir: root})
 	second, err := New(Config{
 		Sessions: reopened, AgentFactory: chat.Factory{},
 		RunIDGenerator: func() string { return "run-recovery" },
@@ -506,9 +506,9 @@ func (t *failingRecoveryTool) Recover(context.Context, tool.RecoveryRequest) (to
 	return tool.RecoveryResult{}, errors.New("reconciliation backend unavailable")
 }
 
-func newJournalTestSession(t *testing.T, id string) (*inmemory.Service, session.Session) {
+func newJournalTestSession(t *testing.T, id string) (*inmemory.Store, session.Session) {
 	t.Helper()
-	service := inmemory.NewService(inmemory.NewStore(inmemory.Config{SessionIDGenerator: func() string { return id }}))
+	service := inmemory.NewStore(inmemory.Config{SessionIDGenerator: func() string { return id }})
 	active, err := service.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)

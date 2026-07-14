@@ -21,19 +21,19 @@ func TestStoreListPaginatesWithStableKeysetCursor(t *testing.T) {
 		Clock: func() time.Time { return now },
 	})
 	for i := 0; i < 5; i++ {
-		if _, err := store.GetOrCreate(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user-1"}); err != nil {
+		if _, err := store.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user-1"}); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	first, err := store.List(ctx, session.ListSessionsRequest{AppName: "caelis", UserID: "user-1", Limit: 3})
+	first, err := store.ListSessions(ctx, session.ListSessionsRequest{AppName: "caelis", UserID: "user-1", Limit: 3})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(first.Sessions) != 3 || first.NextCursor == "" {
 		t.Fatalf("first page = %#v", first)
 	}
-	second, err := store.List(ctx, session.ListSessionsRequest{AppName: "caelis", UserID: "user-1", Cursor: first.NextCursor, Limit: 3})
+	second, err := store.ListSessions(ctx, session.ListSessionsRequest{AppName: "caelis", UserID: "user-1", Cursor: first.NextCursor, Limit: 3})
 	if err != nil {
 		t.Fatal(err)
 	}

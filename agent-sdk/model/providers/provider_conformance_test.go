@@ -67,6 +67,59 @@ func TestProviderConformanceMatrixStreamingSemantics(t *testing.T) {
 			},
 		},
 		{
+			name: "openrouter",
+			build: func(server *providerTestServer) model.LLM {
+				return newOpenRouter(Config{
+					Provider:   "openrouter",
+					API:        APIOpenRouter,
+					Model:      "openrouter/openai/test-model",
+					BaseURL:    server.URL,
+					HTTPClient: server.Client(),
+					Timeout:    2 * time.Second,
+					OpenRouter: OpenRouterConfig{
+						Models:     []string{"openrouter/anthropic/fallback-model"},
+						Route:      "fallback",
+						Transforms: []string{"middle-out"},
+						Provider:   map[string]any{"allow_fallbacks": true},
+						Plugins:    []map[string]any{{"id": "web"}},
+					},
+				}, "token")
+			},
+			requestOK: func(raw string) bool {
+				return strings.Contains(raw, `"model":"openai/test-model"`) &&
+					strings.Contains(raw, `"models":["anthropic/fallback-model"]`) &&
+					strings.Contains(raw, `"route":"fallback"`) &&
+					strings.Contains(raw, `"transforms":["middle-out"]`) &&
+					strings.Contains(raw, `"allow_fallbacks":true`) &&
+					strings.Contains(raw, `"plugins":[{"id":"web"}]`) &&
+					strings.Contains(raw, `"response_format"`) &&
+					strings.Contains(raw, `"lookup"`) &&
+					strings.Contains(raw, `data:image/png;base64,aW1n`)
+			},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/chat/completions" {
+					http.NotFound(w, r)
+					return
+				}
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = fmt.Fprint(w, `data: {"model":"openai/test-model","choices":[{"delta":{"role":"assistant","reasoning":"think "},"finish_reason":null}]}`+"\n\n")
+				_, _ = fmt.Fprint(w, `data: {"model":"openai/test-model","choices":[{"delta":{"content":"answer"},"finish_reason":null}]}`+"\n\n")
+				_, _ = fmt.Fprint(w, `data: {"model":"openai/test-model","choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{\"query\":\"x\"}"}}]},"finish_reason":"tool_calls"}]}`+"\n\n")
+				_, _ = fmt.Fprint(w, `data: {"model":"openai/test-model","choices":[],"usage":{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18,"completion_tokens_details":{"reasoning_tokens":3}}}`+"\n\n")
+				_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+			},
+			wantProvider: "openrouter",
+			wantModel:    "openrouter/openai/test-model",
+			wantText:     "answer",
+			wantReason:   "think ",
+			wantUsage: model.Usage{
+				PromptTokens:     11,
+				CompletionTokens: 7,
+				ReasoningTokens:  3,
+				TotalTokens:      18,
+			},
+		},
+		{
 			name: "gemini",
 			build: func(server *providerTestServer) model.LLM {
 				return newGemini(Config{
