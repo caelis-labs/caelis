@@ -80,47 +80,8 @@ func alignParticipantNarrativeContinuationRows(rows []RenderedRow, continuationP
 	return out
 }
 
-func collapseRepeatedNarrativeText(text string) string {
-	text = strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n")
-	if strings.TrimSpace(text) == "" {
-		return text
-	}
-	parts := strings.Split(text, "\n\n")
-	filteredParts := make([]string, 0, len(parts))
-	lastPart := ""
-	for _, part := range parts {
-		part = collapseAdjacentDuplicateLines(part)
-		trimmed := strings.TrimSpace(part)
-		if trimmed == "" {
-			continue
-		}
-		if trimmed == lastPart && len([]rune(trimmed)) >= 16 {
-			continue
-		}
-		filteredParts = append(filteredParts, part)
-		lastPart = trimmed
-	}
-	if len(filteredParts) == 0 {
-		return ""
-	}
-	return strings.Join(filteredParts, "\n\n")
-}
-
-func collapseAdjacentDuplicateLines(text string) string {
-	lines := strings.Split(text, "\n")
-	out := make([]string, 0, len(lines))
-	last := ""
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed != "" && trimmed == last && len([]rune(trimmed)) >= 16 {
-			continue
-		}
-		out = append(out, line)
-		if trimmed != "" {
-			last = trimmed
-		}
-	}
-	return strings.Join(out, "\n")
+func normalizeNarrativeLineEndings(text string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n")
 }
 
 func latestNarrativeAppendTargetIndex(events []SubagentEvent, kind SubagentEventKind) int {
@@ -159,7 +120,14 @@ func pruneNarrativeEventsCoveredByFinal(events []SubagentEvent, finalIdx int, ki
 	}
 	remove := make(map[int]struct{})
 	cursor := 0
-	for i := 0; i < finalIdx; i++ {
+	segmentStart := 0
+	for i := finalIdx - 1; i >= 0; i-- {
+		if narrativeFinalBarrier(events[i]) {
+			segmentStart = i + 1
+			break
+		}
+	}
+	for i := segmentStart; i < finalIdx; i++ {
 		if events[i].Kind != kind {
 			continue
 		}
@@ -185,36 +153,6 @@ func pruneNarrativeEventsCoveredByFinal(events []SubagentEvent, finalIdx int, ki
 		out = append(out, ev)
 	}
 	return out
-}
-
-func cumulativeFinalNarrativeAlreadyRendered(events []SubagentEvent, kind SubagentEventKind, finalText string) bool {
-	if strings.TrimSpace(finalText) == "" {
-		return false
-	}
-	cursor := 0
-	matched := false
-	for _, ev := range events {
-		if ev.Kind != kind {
-			continue
-		}
-		text := ev.Text
-		if strings.TrimSpace(text) == "" {
-			continue
-		}
-		pos := strings.Index(finalText[cursor:], text)
-		if pos < 0 {
-			return false
-		}
-		if strings.TrimSpace(finalText[cursor:cursor+pos]) != "" {
-			return false
-		}
-		cursor += pos + len(text)
-		matched = true
-	}
-	if !matched {
-		return false
-	}
-	return strings.TrimSpace(finalText[cursor:]) == ""
 }
 
 func cumulativeFinalNarrativeTimelineText(events []SubagentEvent, kind SubagentEventKind, finalText string, targetIdx int) string {

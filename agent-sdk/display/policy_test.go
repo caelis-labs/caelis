@@ -122,7 +122,7 @@ func TestDisplayTerminalIDUsesTerminalPanelToolTable(t *testing.T) {
 func TestCleanSubagentFinalOutput(t *testing.T) {
 	raw := "### Done\n- `hello.txt` **created**\n| File | State |\n| --- | --- |\n| `hello.txt` | **ok** |"
 	got := CleanSubagentFinalOutput(raw)
-	want := "Done\nhello.txt created\nFile  State\nhello.txt  ok"
+	want := raw
 	if got != want {
 		t.Fatalf("CleanSubagentFinalOutput() = %q, want %q", got, want)
 	}

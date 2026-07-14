@@ -810,6 +810,30 @@ func TestSubagentTaskToolMetaCarriesPhysicalTurnCursorAndSpawnParent(t *testing.
 	}
 }
 
+func TestSubagentTaskToolPayloadCarriesCanonicalFinalAndSpawnParent(t *testing.T) {
+	payload := taskToolPayload(task.Snapshot{
+		Kind:  task.KindSubagent,
+		State: task.StateCompleted,
+		Result: map[string]any{
+			"final_message": "## 完成\n\n- 保留格式",
+		},
+		Metadata: map[string]any{
+			"parent_call": "spawn-call-1",
+			"parent_tool": "SPAWN",
+		},
+	})
+
+	if got := taskStringValue(payload["final_message"]); got != "## 完成\n\n- 保留格式" {
+		t.Fatalf("final_message = %q, want exact canonical Final Message", got)
+	}
+	if got := taskStringValue(payload["target_kind"]); got != "subagent" {
+		t.Fatalf("target_kind = %q, want subagent", got)
+	}
+	if taskStringValue(payload["parent_call"]) != "spawn-call-1" || taskStringValue(payload["parent_tool"]) != "SPAWN" {
+		t.Fatalf("parent relation payload = %#v, want canonical Spawn relation", payload)
+	}
+}
+
 func TestSubagentStreamsAppendsIncrementalTerminalFrames(t *testing.T) {
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{

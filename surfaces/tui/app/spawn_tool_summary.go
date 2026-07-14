@@ -11,9 +11,9 @@ import (
 
 func summarizeSubagentTerminalPanelText(text string, final bool) string {
 	if final {
-		if cleaned := strings.TrimSpace(display.CleanSubagentFinalOutput(text)); cleaned != "" {
-			text = cleaned
-		}
+		// A completed Final Message is canonical Markdown, not a lifecycle
+		// preview. Do not filter blank lines, repeated text, fences, or rules.
+		return display.CleanSubagentFinalOutput(text)
 	}
 	lines := subagentTerminalSignalLines(text, final)
 	if len(lines) == 0 {

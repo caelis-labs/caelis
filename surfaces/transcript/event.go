@@ -81,6 +81,9 @@ type Event struct {
 	ToolTerminal        bool
 	ToolOutputSynthetic bool
 	ToolOutputTerminal  bool
+	// ToolOutputGapBefore is a render-only notice that exact terminal bytes
+	// before this event are unavailable. It is never part of ToolOutput.
+	ToolOutputGapBefore bool
 	ToolTaskID          string
 	ToolTaskAction      string
 	ToolTaskInput       string

@@ -55,6 +55,7 @@ type SubagentEvent struct {
 	Terminal                bool
 	OutputSynthetic         bool
 	OutputTerminal          bool
+	OutputGapBefore         bool
 	TaskID                  string
 	TaskAction              string
 	TaskInput               string
@@ -122,7 +123,7 @@ func appendNarrativeEventChunk(ev *SubagentEvent, kind SubagentEventKind, chunk 
 	if merge == nil {
 		merge = appendDeltaStreamChunk
 	}
-	text := collapseRepeatedNarrativeText(merge(ev.Text, chunk))
+	text := normalizeNarrativeLineEndings(merge(ev.Text, chunk))
 	ev.Kind = kind
 	ev.Text = text
 	if ev.ActiveBuffer == nil {
@@ -142,33 +143,21 @@ func replaceNarrativeEventFinal(ev *SubagentEvent, text string, at time.Time) {
 	if ev == nil {
 		return
 	}
-	ev.Text = collapseRepeatedNarrativeText(text)
+	ev.Text = normalizeNarrativeLineEndings(text)
 	ev.ActiveBuffer = nil
 	markNarrativeTiming(ev, at)
 }
 
-func mergeSubagentStreamChunk(existing string, incoming string) string {
-	incoming = normalizeSubagentChunkBoundary(existing, incoming)
+// ACP ingress owns transport framing and byte reassembly. Surface chunk merges
+// preserve all received runes, including U+FEFF and U+FFFD.
+func appendSubagentStreamDelta(existing string, incoming string) string {
 	if incoming == "" {
-		return existing
-	}
-	if existing == "" {
-		return incoming
-	}
-	if incoming == existing {
-		return existing
-	}
-	if strings.HasPrefix(incoming, existing) {
-		return incoming
-	}
-	if strings.HasPrefix(existing, incoming) {
 		return existing
 	}
 	return existing + incoming
 }
 
 func mergeSubagentNarrativeChunk(existing string, existingMessageID string, existingMessage string, incoming string, incomingMessageID string) (string, string) {
-	incoming = normalizeSubagentChunkBoundary(existing, incoming)
 	if incoming == "" {
 		return existing, existingMessage
 	}
@@ -207,7 +196,6 @@ func joinSubagentNarrativeMessages(existing string, incoming string) string {
 }
 
 func mergeCommandStreamChunk(existing string, incoming string) string {
-	incoming = normalizeSubagentChunkBoundary(existing, incoming)
 	if incoming == "" {
 		return existing
 	}
@@ -224,7 +212,6 @@ func mergeCommandStreamChunk(existing string, incoming string) string {
 }
 
 func mergeTerminalStreamChunk(existing string, incoming string) string {
-	incoming = normalizeSubagentChunkBoundary(existing, incoming)
 	if incoming == "" {
 		return existing
 	}
@@ -277,7 +264,6 @@ func commonPrefixBytes(left string, right string) int {
 }
 
 func appendDeltaStreamChunk(existing string, incoming string) string {
-	incoming = normalizeSubagentChunkBoundary(existing, incoming)
 	if incoming == "" {
 		return existing
 	}
@@ -307,20 +293,6 @@ func commandLineOverlap(existing string, incoming string) int {
 		}
 	}
 	return 0
-}
-
-func normalizeSubagentChunkBoundary(existing string, incoming string) string {
-	if incoming == "" {
-		return ""
-	}
-	if existing == "" {
-		return strings.TrimLeft(incoming, "\uFEFF")
-	}
-	// A BOM is transport framing, but U+FFFD may be legitimate content. UTF-8
-	// reassembly belongs at byte-stream ingress; the Surface must not guess at
-	// corruption by deleting visible replacement runes.
-	incoming = strings.TrimLeft(incoming, "\uFEFF")
-	return incoming
 }
 
 func narrativeEventActive(events []SubagentEvent, idx int, terminal bool) bool {

@@ -78,10 +78,7 @@ func (s *narrativeStreamState) replaceFinal(events []SubagentEvent, kind Subagen
 	if !renderableTextHasContent(chunk) {
 		return events
 	}
-	chunk = collapseRepeatedNarrativeText(chunk)
-	if cumulativeFinalNarrativeAlreadyRendered(events, kind, chunk) {
-		return events
-	}
+	chunk = normalizeNarrativeLineEndings(chunk)
 	if idx := latestNarrativeFinalTargetIndex(events, kind); idx >= 0 {
 		chunk = cumulativeFinalNarrativeTimelineText(events, kind, chunk, idx)
 		if !renderableTextHasContent(chunk) {
@@ -90,14 +87,9 @@ func (s *narrativeStreamState) replaceFinal(events []SubagentEvent, kind Subagen
 		replaceNarrativeEventFinal(&events[idx], chunk, at)
 		return pruneNarrativeEventsCoveredByFinal(events, idx, kind)
 	}
-	chunk = cumulativeFinalNarrativeTimelineText(events, kind, chunk, len(events))
-	if !renderableTextHasContent(chunk) {
-		return events
-	}
 	ev := SubagentEvent{Kind: kind, Text: chunk}
 	markNarrativeTiming(&ev, at)
-	events = append(events, ev)
-	return pruneNarrativeEventsCoveredByFinal(events, len(events)-1, kind)
+	return append(events, ev)
 }
 
 func (s *narrativeStreamState) clearPending() {

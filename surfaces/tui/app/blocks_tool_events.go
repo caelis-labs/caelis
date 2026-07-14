@@ -16,9 +16,13 @@ type ToolUpdateMeta struct {
 	MessageID       string
 	ToolStatus      string
 	OutputNarrative bool
-	Terminal        bool
-	OutputSynthetic bool
-	OutputTerminal  bool
+	// OutputAuthoritative marks a canonical semantic final that must replace a
+	// transient preview for the same physical task panel.
+	OutputAuthoritative bool
+	Terminal            bool
+	OutputSynthetic     bool
+	OutputTerminal      bool
+	OutputGapBefore     bool
 }
 
 type toolEventUpdate struct {
@@ -44,7 +48,7 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 	taskAction := strings.ToLower(strings.TrimSpace(update.Meta.TaskAction))
 	taskInput := strings.TrimSpace(update.Meta.TaskInput)
 	taskTargetKind := strings.ToLower(strings.TrimSpace(update.Meta.TaskTargetKind))
-	authoritativeFinal := toolFinalOutputAuthoritative(update.Err, update.Meta.ToolStatus)
+	authoritativeFinal := update.Meta.OutputAuthoritative || toolFinalOutputAuthoritative(update.Err, update.Meta.ToolStatus)
 	effectiveName, effectiveToolKind, openIdx := effectiveToolEventIdentity(out, update, toolIndex, name, toolKind)
 	semanticName := toolSemanticName(effectiveName, effectiveToolKind)
 	output := normalizeToolEventOutput(update.Output, effectiveName, effectiveToolKind, update.Meta.Terminal)
@@ -70,7 +74,7 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 	if !update.Final {
 		if i := openIdx; i >= 0 {
 			ev := &out[i]
-			mergeOpenToolEvent(ev, name, toolKind, args, fullArgs, output, messageID, taskID, taskAction, taskInput, taskTargetKind, semanticName, update.Meta.Terminal, update.Meta.OutputNarrative, update.Meta.OutputTerminal)
+			mergeOpenToolEvent(ev, name, toolKind, args, fullArgs, output, messageID, taskID, taskAction, taskInput, taskTargetKind, semanticName, update.Meta.Terminal, update.Meta.OutputNarrative, update.Meta.OutputTerminal, update.Meta.OutputGapBefore)
 			return out, true, false
 		}
 		out = append(out, SubagentEvent{
@@ -88,6 +92,7 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 			Terminal:        update.Meta.Terminal,
 			OutputSynthetic: update.Meta.OutputSynthetic,
 			OutputTerminal:  update.Meta.OutputTerminal,
+			OutputGapBefore: update.Meta.OutputGapBefore,
 			TaskID:          taskID,
 			TaskAction:      taskAction,
 			TaskInput:       taskInput,
@@ -111,6 +116,7 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 		Terminal:        update.Meta.Terminal,
 		OutputSynthetic: update.Meta.OutputSynthetic,
 		OutputTerminal:  update.Meta.OutputTerminal,
+		OutputGapBefore: update.Meta.OutputGapBefore,
 		Done:            true,
 		Err:             update.Err,
 		TaskID:          taskID,
@@ -228,7 +234,7 @@ func updateToolEventIndex(index map[string]int, events []SubagentEvent, callID s
 	delete(index, callID)
 }
 
-func mergeOpenToolEvent(ev *SubagentEvent, name, toolKind, args, fullArgs, output, messageID, taskID, taskAction, taskInput, taskTargetKind string, semanticName string, terminal bool, outputNarrative bool, outputTerminal bool) {
+func mergeOpenToolEvent(ev *SubagentEvent, name, toolKind, args, fullArgs, output, messageID, taskID, taskAction, taskInput, taskTargetKind string, semanticName string, terminal bool, outputNarrative bool, outputTerminal bool, outputGapBefore bool) {
 	if ev == nil {
 		return
 	}
@@ -259,6 +265,7 @@ func mergeOpenToolEvent(ev *SubagentEvent, name, toolKind, args, fullArgs, outpu
 	if terminal {
 		ev.Terminal = true
 	}
+	ev.OutputGapBefore = ev.OutputGapBefore || outputGapBefore
 	// Spawn keeps terminal-panel styling, but its live output is structured
 	// child narrative rather than terminal bytes and must retain message scope.
 	terminalOutput := isTerminalPanelToolEvent(*ev) && !strings.EqualFold(semanticName, "SPAWN")
@@ -378,6 +385,7 @@ func mergeFinalToolEvent(ev *SubagentEvent, finalEvent *SubagentEvent, authorita
 	mergeStartArgs(ev, finalEvent.StartArgs, finalEvent.Args)
 	ev.FullArgs = finalEvent.FullArgs
 	ev.Terminal = ev.Terminal || finalEvent.Terminal
+	ev.OutputGapBefore = ev.OutputGapBefore || finalEvent.OutputGapBefore
 	if finalToolOutputShouldReplace(*ev, *finalEvent, authoritativeFinal) {
 		ev.Output = finalEvent.Output
 		ev.OutputMessageID = finalEvent.OutputMessageID

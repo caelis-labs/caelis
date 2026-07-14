@@ -79,6 +79,12 @@ func (m *Model) markAnchoredSubagentNarrativeBoundary(event TranscriptEvent) {
 }
 
 func (m *Model) applyTranscriptToolToMain(event TranscriptEvent, mutation transcriptToolMutation) (tea.Model, tea.Cmd) {
+	if owner, consumed := m.absorbSubagentTaskResult(event, &mutation); consumed {
+		if owner != nil {
+			m.markViewportBlockDirty(owner.BlockID())
+		}
+		return m, m.requestStreamViewportSync()
+	}
 	if owner := m.absorbCommandTaskResult(&mutation); owner != nil {
 		m.markViewportBlockDirty(owner.BlockID())
 	}
@@ -92,6 +98,49 @@ func (m *Model) applyTranscriptToolToMain(event TranscriptEvent, mutation transc
 	block.UpdateToolWithMeta(mutation.callID, mutation.name, mutation.args, mutation.output, mutation.final, mutation.err, mutation.meta)
 	m.markViewportBlockDirty(block.BlockID())
 	return m, m.requestStreamViewportSync()
+}
+
+// absorbSubagentTaskResult routes one canonical TASK wait result to the exact
+// Spawn call identified by the typed Envelope parent relation. Successful
+// absorption consumes the observer result so the Surface does not create a
+// second physical TASK panel.
+func (m *Model) absorbSubagentTaskResult(event TranscriptEvent, mutation *transcriptToolMutation) (*MainACPTurnBlock, bool) {
+	if m == nil || m.doc == nil || mutation == nil || !mutation.final ||
+		!strings.EqualFold(toolSemanticName(mutation.name, mutation.meta.ToolKind), "TASK") ||
+		!strings.EqualFold(strings.TrimSpace(mutation.meta.TaskAction), "wait") ||
+		!strings.EqualFold(strings.TrimSpace(mutation.meta.TaskTargetKind), "subagent") {
+		return nil, false
+	}
+	parentCall := strings.TrimSpace(event.AnchorToolCallID)
+	parentTool := strings.TrimSpace(event.AnchorToolName)
+	if parentCall == "" || !strings.EqualFold(toolSemanticName(parentTool, ""), "SPAWN") {
+		return nil, false
+	}
+	blocks := m.doc.Blocks()
+	for i := len(blocks) - 1; i >= 0; i-- {
+		block, ok := blocks[i].(*MainACPTurnBlock)
+		if !ok {
+			continue
+		}
+		for j := len(block.Events) - 1; j >= 0; j-- {
+			owner := block.Events[j]
+			if owner.Kind != SEToolCall || strings.TrimSpace(owner.CallID) != parentCall ||
+				!strings.EqualFold(toolSemanticName(owner.Name, owner.ToolKind), "SPAWN") {
+				continue
+			}
+			ownerMeta := mutation.meta
+			ownerMeta.ToolKind = ""
+			ownerMeta.TaskAction = ""
+			ownerMeta.TaskInput = ""
+			ownerMeta.OutputNarrative = false
+			ownerMeta.OutputAuthoritative = true
+			ownerMeta.OutputTerminal = false
+			ownerMeta.OutputGapBefore = false
+			block.UpdateToolWithMeta(parentCall, parentTool, "", mutation.output, true, mutation.err, ownerMeta)
+			return block, true
+		}
+	}
+	return nil, false
 }
 
 // absorbCommandTaskResult uses the durable TASK wait snapshot only as a

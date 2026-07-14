@@ -356,8 +356,11 @@ func TestProjectACPEventToTranscriptEventsMarksUnavailableTerminalPrefix(t *test
 			Meta:          meta,
 		},
 	})
-	if len(events) != 1 || events[0].ToolOutput != "… earlier output unavailable …\nretained tail\n" {
-		t.Fatalf("events = %#v, want explicit truncation marker before retained bytes", events)
+	if len(events) != 1 || events[0].ToolOutput != "retained tail\n" {
+		t.Fatalf("events = %#v, want retained exact terminal bytes only", events)
+	}
+	if !events[0].ToolOutputGapBefore {
+		t.Fatal("ToolOutputGapBefore = false, want render-only truncation marker")
 	}
 }
 

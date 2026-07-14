@@ -152,7 +152,7 @@ func mergeLinkedSubagentOutput(ev *SubagentEvent, output string, messageID strin
 			ev.OutputMessageID = messageID
 		}
 	} else {
-		ev.Output = mergeSubagentStreamChunk(ev.Output, output)
+		ev.Output = appendSubagentStreamDelta(ev.Output, output)
 	}
 	ev.OutputNarrative = ev.OutputNarrative || outputNarrative
 	ev.OutputSynthetic = false
