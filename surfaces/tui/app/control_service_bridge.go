@@ -529,7 +529,15 @@ func executeLineViaControlServiceWithContextResult(ctx context.Context, service 
 
 func executeControlPromptResult(ctx context.Context, service control.Service, sender *ProgramSender, result controlprompt.Result) executeLineResult {
 	send := sender.sendFunc()
-	if result.ClearHistory && send != nil {
+	if result.Reconnect != nil {
+		defer result.Reconnect.Close()
+		if send != nil {
+			send(SessionReconnectMsg{State: result.Reconnect.State()})
+		}
+		if err := streamReconnectBackfill(ctx, result.Reconnect, send); err != nil {
+			return executeLineResult{completion: TaskResultMsg{Err: friendlyCommandError("resume session feed", err)}}
+		}
+	} else if result.ClearHistory && send != nil {
 		send(ClearHistoryMsg{})
 	}
 	if len(result.ReplayEvents) > 0 && send != nil {
@@ -557,6 +565,22 @@ func executeControlPromptResult(ctx context.Context, service control.Service, se
 	}
 	if result.RefreshCommands {
 		refreshAgentSlashCommandsViaSendWithContext(ctx, service, send)
+	}
+	if result.Reconnect != nil {
+		for _, event := range result.Reconnect.BootstrapEvents() {
+			if send == nil {
+				continue
+			}
+			send(event)
+			if req := approvalPayloadFromACPEvent(event); req != nil {
+				sendApprovalPrompt(ctx, result.Reconnect, req, send)
+			}
+		}
+		state := result.Reconnect.State()
+		if state.Run.Active || state.Approval.Active != nil {
+			return forwardTurnEventStream(ctx, result.Reconnect, sender)
+		}
+		return executeLineResult{completion: TaskResultMsg{SuppressTurnDivider: result.SuppressTurnDivider}}
 	}
 	if result.Turn != nil {
 		return runSubagentTurn(ctx, sender, result.Turn)

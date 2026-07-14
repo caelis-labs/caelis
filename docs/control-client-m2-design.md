@@ -231,23 +231,33 @@ Reader.
 Subscribe is one broker transaction:
 
 1. validate authorization and Cursor;
-2. register the subscriber paused;
-3. capture the broker high-water position;
-4. collect eligible ring and/or paged durable backfill through that high-water;
-5. deduplicate durable projections by monotonic durable position and transient
-   ring entries by their signed position token;
-6. splice queued live events strictly after the high-water;
-7. unpause delivery.
+2. enter the feed acceptance sequencer and obtain an atomic SDK event
+   checkpoint containing the durable Session,
+   source-sequence high-water, and last client-replay event;
+3. install that high-water directly for a cold broker, or publish only a warm
+   broker's missing durable suffix, then capture its acceptance watermark and
+   bounded ring before leaving the sequencer;
+4. preflight one bounded durable page, then return the typed feed cut;
+5. stream durable pages and the captured ring in acceptance order through the
+   fixed checkpoint without materializing the complete history;
+6. verify that the shared ring still contains every acceptance after the
+   watermark, install ordinary live fanout under the broker lock, and deliver
+   that suffix exactly once;
+7. if the suffix was overtaken, close with typed `FeedGapError` containing a
+   signed retry Cursor and `transient_gap=true`.
 
-Transient Publish may continue during durable I/O; durable Publish shares the
-same sequencer as Reader scanning and cannot advance beyond an unfilled durable
-gap. Live events queue behind the paused subscriber boundary. The subscriber
-receives each semantic Envelope once.
-Streaming consumers read the subscription channel;
-`FeedSubscription.BackfillDone` closes after its captured prefix has been
-delivered and before queued live splice delivery. Finite readers instead use
-the immutable `SubscribeResult.Backfill` snapshot and close the subscription;
-they must not consume both representations of the same prefix.
+Durable Publish shares the short checkpoint sequencer. Transient Publish may
+interleave while a warm broker catches up and remains ordered by its signed
+anchor in the captured ring. All Publish continues during the longer paged
+backfill phase. Prepared
+reconnects do not enter an ordinary subscriber queue; the shared bounded ring
+is their continuation buffer, so a slow history reader cannot self-disconnect
+before `Subscribe` returns merely because the default live queue is small.
+`FeedSubscription.Backfill` streams only the captured prefix and closes before
+`FeedSubscription.Events` exposes the live splice. `BackfillDone` mirrors that
+phase boundary. Finite readers collect the Backfill stream and then close the
+subscription. The production broker leaves the legacy in-process
+`SubscribeResult.Backfill` slice empty.
 
 Subscribe returns one of:
 
@@ -279,16 +289,20 @@ Bootstrap returns one typed `SessionState` containing:
 - `manage_loop_bootstrap_supported=false`.
 
 Capabilities include `client_managed_terminal=false` and
-`caelis_terminal_stream=true`. Bootstrap is consistent with one Session
-revision and one broker replay boundary. Control retries when either changes
-during assembly; after the bounded retry budget it returns a typed revision
-conflict rather than a mixed snapshot.
+`caelis_terminal_stream=true`. `Reconnect` returns `SessionState` and the
+continuation from the same event checkpoint/feed cut. Its resume mode,
+transient-gap flag, boundary position, and Cursor are copied from that cut.
+Runtime/approval state is sampled only after the continuation is prepared, so
+ordinary high-frequency Publish cannot starve bootstrap through repeated
+whole-Session optimistic retries; later changes arrive on that continuation.
 
-Before reading a boundary, Control incrementally scans the Session Reader from
-the last consumed durable Seq and publishes every newly discovered projection
-to existing subscribers. The same sequencer gap-fills a durable Publish before
-advancing high-water. This seeds a new process and closes the
-append-before-publish interval without reloading the full event log.
+Before reading a warm-broker boundary, Control incrementally scans the Session
+Reader from the last consumed durable Seq and publishes every newly discovered
+projection to existing subscribers. A cold broker installs the checkpoint
+high-water without replaying complete history into its ring. The same
+sequencer gap-fills a durable Publish before advancing high-water. This seeds a
+new process and closes the append-before-publish interval without reloading the
+full event log.
 
 Session ID is the only resource identity. Workspace key and CWD are optional
 list filters, display metadata, and authorization inputs; they never select a
@@ -458,8 +472,9 @@ SSE rules:
 - `Last-Event-ID` and `after` are accepted as Cursor inputs, but a mismatch is
   a bad request;
 - heartbeats are SSE comments only and never Envelopes or resumable events;
-- a slow-consumer close is visible as stream termination; recovery uses the
-  last delivered `id`.
+- a recoverable splice or slow-consumer gap emits a final named
+  `caelis.control.resume` event with `durable_fallback`,
+  `transient_gap=true`, and its signed retry Cursor before termination.
 
 The `caelis serve` product entry point defaults to a loopback listener. Starting
 on a non-loopback address without configured authentication fails closed; a

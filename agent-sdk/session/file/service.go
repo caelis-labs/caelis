@@ -63,6 +63,14 @@ func (s *Service) EventsPage(
 	return s.store.EventsPage(ctx, req)
 }
 
+// EventCheckpoint returns one atomic Session/event high-water cut.
+func (s *Service) EventCheckpoint(
+	ctx context.Context,
+	ref session.SessionRef,
+) (session.EventCheckpoint, error) {
+	return s.store.EventCheckpoint(ctx, ref)
+}
+
 func (s *Service) ListSessions(
 	ctx context.Context,
 	req session.ListSessionsRequest,

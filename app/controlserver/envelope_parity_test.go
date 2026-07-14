@@ -44,7 +44,7 @@ func TestInProcessAndHTTPSSEReceiveSameBrokerEnvelope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := receiveParityEnvelope(t, inProcess.Subscription.Events())
+	want := receiveParityEnvelope(t, inProcess.Subscription.Backfill())
 	_ = inProcess.Subscription.Close()
 
 	server, err := appserver.New(appserver.Config{

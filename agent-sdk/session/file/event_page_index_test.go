@@ -12,6 +12,47 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
+func TestEventCheckpointFindsReplayTailAndIgnoresIncompleteAppend(t *testing.T) {
+	t.Parallel()
+
+	store, active := newEventPageIndexFixture(t, 2)
+	if _, err := store.AppendEvent(context.Background(), active.SessionRef, &session.Event{
+		ID: "journal-0003", Type: session.EventTypeLifecycle, Visibility: session.VisibilityJournal,
+		Lifecycle: &session.EventLifecycle{Status: "prepared"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	assertCheckpoint := func() {
+		t.Helper()
+		checkpoint, err := store.EventCheckpoint(context.Background(), active.SessionRef)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if checkpoint.Session.SessionID != active.SessionID || checkpoint.ThroughSeq != 3 ||
+			checkpoint.LastClientReplayEvent == nil || checkpoint.LastClientReplayEvent.Seq != 2 {
+			t.Fatalf("checkpoint = %#v, want durable seq 3 and replay seq 2", checkpoint)
+		}
+	}
+	assertCheckpoint()
+
+	documentPath, err := store.resolveWritePath(active)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logFile, err := os.OpenFile(eventLogPath(documentPath), os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := logFile.WriteString(`{"schema":`); err != nil {
+		_ = logFile.Close()
+		t.Fatal(err)
+	}
+	if err := logFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+	assertCheckpoint()
+}
+
 func TestEventsPageCheckpointDoesNotRereadConsumedPrefix(t *testing.T) {
 	t.Parallel()
 

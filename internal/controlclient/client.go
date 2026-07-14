@@ -81,6 +81,18 @@ func (c *Client) InspectSession(ctx context.Context, principal controlport.Princ
 	return c.config.State.State(ctx, req)
 }
 
+// Reconnect authorizes and delegates the atomic state/feed bootstrap.
+func (c *Client) Reconnect(ctx context.Context, principal controlport.Principal, req controlport.ReconnectRequest) (controlport.ReconnectResult, error) {
+	if err := c.config.Authorizer.Authorize(ctx, principal, controlport.ActionSessionInspect, req.SessionID); err != nil {
+		return controlport.ReconnectResult{}, err
+	}
+	reconnect, ok := c.config.State.(controlport.ReconnectReader)
+	if !ok {
+		return controlport.ReconnectResult{}, errors.New("controlclient: reconnect service is unavailable")
+	}
+	return reconnect.Reconnect(ctx, req)
+}
+
 func (c *Client) Subscribe(ctx context.Context, principal controlport.Principal, req controlport.SubscribeRequest) (controlport.SubscribeResult, error) {
 	if err := c.config.Authorizer.Authorize(ctx, principal, controlport.ActionSessionInspect, req.SessionID); err != nil {
 		return controlport.SubscribeResult{}, err
@@ -99,10 +111,22 @@ func (c *Client) Events(ctx context.Context, principal controlport.Principal, re
 	}
 	defer result.Subscription.Close()
 	out := controlport.EventBatch{ResumeMode: result.Mode, TransientGap: result.TransientGap, BoundaryCursor: result.BoundaryCursor}
-	// Subscribe atomically captured Backfill through BoundaryCursor before it
-	// spliced queued live events into the subscription. Consuming that snapshot
-	// directly prevents a ready BackfillDone signal and ready live channel from
-	// racing a finite request beyond its advertised boundary.
-	out.Events = eventstream.CloneEnvelopes(result.Backfill)
-	return out, nil
+	if len(result.Backfill) > 0 {
+		out.Events = eventstream.CloneEnvelopes(result.Backfill)
+		return out, nil
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return controlport.EventBatch{}, ctx.Err()
+		case envelope, open := <-result.Subscription.Backfill():
+			if !open {
+				if err := result.Subscription.Err(); err != nil {
+					return controlport.EventBatch{}, err
+				}
+				return out, nil
+			}
+			out.Events = append(out.Events, eventstream.CloneEnvelope(envelope))
+		}
+	}
 }

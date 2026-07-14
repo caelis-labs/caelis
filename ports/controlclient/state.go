@@ -2,7 +2,6 @@ package controlclient
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -13,8 +12,6 @@ const (
 	EnvelopeVersion = "caelis.control.envelope/v1"
 	HTTPAPIVersion  = "v1"
 )
-
-var ErrStateRevisionConflict = errors.New("controlclient: session state changed during bootstrap")
 
 // ClientCapabilities declares presentation ownership and reserved bootstrap
 // capability slots without implying Runtime support.
@@ -94,4 +91,22 @@ type StateRequest struct {
 // StateReader returns consistent reconnect bootstrap state.
 type StateReader interface {
 	State(context.Context, StateRequest) (SessionState, error)
+}
+
+// ReconnectRequest atomically bootstraps one explicit Session from Cursor.
+type ReconnectRequest struct {
+	SessionID string `json:"session_id"`
+	Cursor    string `json:"cursor,omitempty"`
+}
+
+// ReconnectResult couples typed state to the exact feed cut and continuation
+// that produced its boundary metadata.
+type ReconnectResult struct {
+	State        SessionState     `json:"state"`
+	Subscription FeedSubscription `json:"-"`
+}
+
+// ReconnectReader owns the Control-layer bootstrap/splice transaction.
+type ReconnectReader interface {
+	Reconnect(context.Context, ReconnectRequest) (ReconnectResult, error)
 }

@@ -37,8 +37,9 @@ func NewRuntimeStackFromGatewayApp(stack *gatewayapp.Stack, adapters RuntimeStac
 	status := stack.Status()
 	plugins := stack.Plugins()
 	return &RuntimeStack{
-		Gateway:      gatewayDepsFromStack(stack),
-		ControlFeeds: stack.ControlClientFeeds(),
+		Gateway:          gatewayDepsFromStack(stack),
+		ControlFeeds:     stack.ControlClientFeeds(),
+		ControlReconnect: stack.ControlClientReconnect(),
 		Session: SessionRuntimeDeps{
 			Store:     stack.Sessions,
 			AppName:   stack.AppName,

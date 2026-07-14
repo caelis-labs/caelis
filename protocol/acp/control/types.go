@@ -122,6 +122,7 @@ type StatusRuntime struct {
 
 type SessionSnapshot struct {
 	SessionID string
+	Reconnect SessionReconnect
 }
 
 type SandboxSetupStatus struct {

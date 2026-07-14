@@ -105,8 +105,54 @@ func (a *RuntimeAgent) emitPromptRouterResult(ctx context.Context, activeSession
 			return err
 		}
 	}
+	if result.Reconnect != nil {
+		defer result.Reconnect.Close()
+		for backfill := result.Reconnect.Backfill(); backfill != nil; {
+			select {
+			case <-ctx.Done():
+				return context.Canceled
+			case env, ok := <-backfill:
+				if !ok {
+					backfill = nil
+					continue
+				}
+				if err := a.emitControlBackfillEnvelope(ctx, cb, sessionID, env, outboundFilter); err != nil {
+					return err
+				}
+			}
+		}
+		if err := result.Reconnect.Err(); err != nil {
+			return err
+		}
+		for _, env := range result.Reconnect.BootstrapEvents() {
+			if err := a.emitControlEnvelope(ctx, cb, sessionID, result.Reconnect, env, outboundFilter); err != nil {
+				return err
+			}
+		}
+	}
 	if err := a.emitPromptRouterSideEffects(ctx, cb, activeSession, result); err != nil {
 		return err
+	}
+	if result.Reconnect != nil {
+		state := result.Reconnect.State()
+		if !state.Run.Active && state.Approval.Active == nil {
+			return nil
+		}
+		for events := result.Reconnect.Events(); events != nil; {
+			select {
+			case <-ctx.Done():
+				return context.Canceled
+			case env, ok := <-events:
+				if !ok {
+					events = nil
+					continue
+				}
+				if err := a.emitControlEnvelope(ctx, cb, sessionID, result.Reconnect, env, outboundFilter); err != nil {
+					return err
+				}
+			}
+		}
+		return result.Reconnect.Err()
 	}
 	if result.Turn == nil {
 		return nil
@@ -132,6 +178,32 @@ func (a *RuntimeAgent) emitPromptRouterResult(ctx context.Context, activeSession
 		return closeErr
 	}
 	return nil
+}
+
+// emitControlBackfillEnvelope preserves transcript-bearing ACP updates without
+// re-running historical interaction semantics. In particular, only the typed
+// active approval bootstrap may call RequestPermission after reconnect.
+func (a *RuntimeAgent) emitControlBackfillEnvelope(
+	ctx context.Context,
+	cb acp.PromptCallbacks,
+	sessionID string,
+	env eventstream.Envelope,
+	outboundFilter *acpNarrativeFilter,
+) error {
+	switch env.Kind {
+	case eventstream.KindRequestPermission:
+		return nil
+	case eventstream.KindError:
+		text := strings.TrimSpace(env.Error)
+		if env.Err != nil {
+			text = strings.TrimSpace(env.Err.Error())
+		}
+		if text == "" {
+			return nil
+		}
+		env = eventstream.Envelope{Kind: eventstream.KindNotice, SessionID: sessionID, Notice: text}
+	}
+	return a.emitControlEnvelope(ctx, cb, sessionID, nil, env, outboundFilter)
 }
 
 func promptRouterResultSessionID(activeSession session.Session, result controlprompt.Result) string {

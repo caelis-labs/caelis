@@ -20,6 +20,30 @@ const (
 
 var ErrSlowConsumer = errors.New("controlclient: slow feed consumer")
 
+// FeedGapError reports a recoverable continuation loss together with the only
+// public token a caller needs to retry. It is used both for a splice whose
+// bounded ring was overtaken and for an ordinary live slow-consumer cutoff.
+type FeedGapError struct {
+	Cause        error
+	RetryCursor  string
+	Mode         ResumeMode
+	TransientGap bool
+}
+
+func (e *FeedGapError) Error() string {
+	if e == nil || e.Cause == nil {
+		return "controlclient: recoverable feed gap"
+	}
+	return e.Cause.Error()
+}
+
+func (e *FeedGapError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Cause
+}
+
 // SubscribeRequest requests one authorized Session feed. Cursor is the only
 // public resume identity; EventID and ProjectionID are never accepted here.
 type SubscribeRequest struct {
@@ -30,6 +54,10 @@ type SubscribeRequest struct {
 // FeedSubscription is an independent view of a Session feed. Closing it does
 // not cancel the underlying Runtime Turn or any child task.
 type FeedSubscription interface {
+	// Backfill streams the bounded-memory captured prefix. It closes before any
+	// Envelope becomes observable on Events.
+	Backfill() <-chan eventstream.Envelope
+	// Events is the live continuation after Backfill has closed.
 	Events() <-chan eventstream.Envelope
 	BackfillDone() <-chan struct{}
 	Close() error
@@ -44,8 +72,13 @@ type SubscribeResult struct {
 	Mode           ResumeMode       `json:"resume_mode"`
 	TransientGap   bool             `json:"transient_gap,omitempty"`
 	BoundaryCursor string           `json:"boundary_cursor,omitempty"`
+	// BoundaryPosition is the decoded in-process form of BoundaryCursor. The
+	// Cursor remains the sole public resume token.
+	BoundaryPosition *eventstream.FeedPosition `json:"-"`
 	// Backfill is the exact captured prefix ending at BoundaryCursor. It is an
-	// in-process handoff for finite readers and is never encoded on the wire.
+	// in-process compatibility handoff for finite test feeds and is never
+	// encoded on the wire. Production brokers stream through Subscription and
+	// close BackfillDone without materializing the full prefix here.
 	Backfill []eventstream.Envelope `json:"-"`
 }
 

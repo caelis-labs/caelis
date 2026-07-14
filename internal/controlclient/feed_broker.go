@@ -48,6 +48,7 @@ type feedRingItem struct {
 	envelope eventstream.Envelope
 	bytes    int
 	at       time.Time
+	acceptID uint64
 }
 
 // FeedBroker owns delivery state for one Session. It does not own Runtime or
@@ -76,6 +77,8 @@ type FeedBroker struct {
 	latestDurable eventstream.DurableFeedPosition
 	scannedSeq    uint64
 	transientSeq  uint64
+	acceptID      uint64
+	evictedAccept uint64
 	// terminalOutputCursors tracks the last byte accepted for one physical
 	// command stream. A later Turn may re-read that stream from zero; reconciling
 	// its absolute output cursor here prevents a replayed prefix from reaching
@@ -147,8 +150,9 @@ func NewFeedBroker(cfg FeedBrokerConfig) (*FeedBroker, error) {
 
 // Prime incrementally publishes every newly committed durable projection from
 // Session truth. The prime gate is the single durable sequencer: callers cannot
-// advance the durable high-water mark or fan out a later projection while a
-// storage gap is being filled.
+// advance the durable high-water mark or fan out a later durable projection
+// while a storage gap or reconnect checkpoint is being reconciled. Transient
+// frames may interleave and retain their broker acceptance order.
 func (b *FeedBroker) Prime(ctx context.Context) error {
 	if b == nil {
 		return errors.New("controlclient: nil feed broker")
@@ -400,7 +404,10 @@ func (b *FeedBroker) publishLocked(
 	if err != nil {
 		return false, eventstream.Envelope{}, fmt.Errorf("controlclient: encode feed envelope: %w", err)
 	}
-	item := feedRingItem{envelope: eventstream.CloneEnvelope(envelope), bytes: len(encoded), at: b.now()}
+	b.acceptID++
+	item := feedRingItem{
+		envelope: eventstream.CloneEnvelope(envelope), bytes: len(encoded), at: b.now(), acceptID: b.acceptID,
+	}
 	b.ring = append(b.ring, item)
 	b.ringByteCount += item.bytes
 	if isDurableFeedEnvelope(envelope) {
@@ -414,20 +421,15 @@ func (b *FeedBroker) publishLocked(
 	b.evictLocked()
 
 	for subscriber := range b.subscribers {
+		if isDurableFeedEnvelope(envelope) && envelope.Position.Durable.Seq <= subscriber.ignoreDurableThrough {
+			continue
+		}
 		if subscriber == skipTarget {
 			b.appendTargetPendingLocked(subscriber, envelope, len(encoded))
 			continue
 		}
 		if subscriber.targetHold {
 			b.appendTargetPendingLocked(subscriber, envelope, len(encoded))
-			continue
-		}
-		if subscriber.paused {
-			if len(subscriber.pending) >= b.queueSize {
-				b.stopSubscriberLocked(subscriber, controlport.ErrSlowConsumer)
-				continue
-			}
-			subscriber.pending = append(subscriber.pending, eventstream.CloneEnvelope(envelope))
 			continue
 		}
 		if !subscriber.tryReserve() {
@@ -697,95 +699,6 @@ func (b *FeedBroker) prepareEnvelopeLocked(envelope *eventstream.Envelope) error
 	return nil
 }
 
-// Subscribe atomically combines ring or durable backfill with live delivery.
-func (b *FeedBroker) Subscribe(ctx context.Context, req controlport.SubscribeRequest) (controlport.SubscribeResult, error) {
-	if b == nil {
-		return controlport.SubscribeResult{}, errors.New("controlclient: nil feed broker")
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if strings.TrimSpace(req.SessionID) != b.ref.SessionID {
-		return controlport.SubscribeResult{}, eventstream.ErrCursorSessionMismatch
-	}
-	if err := b.Prime(ctx); err != nil {
-		return controlport.SubscribeResult{}, err
-	}
-	var requested eventstream.FeedPosition
-	var err error
-	if strings.TrimSpace(req.Cursor) != "" {
-		requested, err = b.codec.Decode(b.ref.SessionID, req.Cursor)
-		if err != nil {
-			return controlport.SubscribeResult{}, err
-		}
-	}
-
-	subscriber := newFeedSubscription(b, b.queueSize)
-	b.mu.Lock()
-	if b.closed {
-		b.mu.Unlock()
-		return controlport.SubscribeResult{}, errors.New("controlclient: feed broker is closed")
-	}
-	b.evictLocked()
-	subscriber.paused = true
-	b.subscribers[subscriber] = struct{}{}
-	highWater := b.latestDurable
-	ring := cloneFeedRing(b.ring)
-	transientHistoryUnknown := b.transientHistoryUnknown
-	boundaryCursor := feedBoundaryCursor(ring)
-	if boundaryCursor == "" && highWater.Seq > 0 {
-		position := eventstream.FeedPosition{Durable: &eventstream.DurableFeedPosition{
-			Seq: highWater.Seq, ProjectionIndex: highWater.ProjectionIndex,
-		}}
-		boundaryCursor, _ = b.codec.Encode(b.ref.SessionID, position)
-	}
-	exactIndex := findRingCursor(ring, req.Cursor)
-	b.mu.Unlock()
-
-	mode := controlport.ResumeModeExact
-	transientGap := false
-	var initial []eventstream.Envelope
-	switch {
-	case strings.TrimSpace(req.Cursor) != "" && exactIndex >= 0:
-		initial = ringEnvelopes(ring[exactIndex+1:])
-	case strings.TrimSpace(req.Cursor) != "":
-		mode = controlport.ResumeModeDurableFallback
-		transientGap = true
-		initial, err = b.durableBackfill(ctx, requested, highWater)
-	default:
-		initial, err = b.durableBackfill(ctx, eventstream.FeedPosition{}, highWater)
-		initial = spliceDurableBackfillWithRing(initial, ring)
-		transientGap = transientHistoryUnknown
-	}
-	if err != nil {
-		_ = subscriber.Close()
-		return controlport.SubscribeResult{}, err
-	}
-
-	b.mu.Lock()
-	if _, exists := b.subscribers[subscriber]; !exists {
-		err := subscriber.errLocked()
-		b.mu.Unlock()
-		if err == nil {
-			err = errors.New("controlclient: subscription closed during backfill")
-		}
-		return controlport.SubscribeResult{}, err
-	}
-	initial = dedupeFeedEnvelopes(initial)
-	capturedBackfill := eventstream.CloneEnvelopes(initial)
-	subscriber.liveInitial = dedupeFeedEnvelopesAgainst(subscriber.pending, initial)
-	subscriber.pending = nil
-	subscriber.paused = false
-	subscriber.initial = initial
-	b.mu.Unlock()
-	subscriber.start()
-
-	return controlport.SubscribeResult{
-		Subscription: subscriber, Mode: mode, TransientGap: transientGap, BoundaryCursor: boundaryCursor,
-		Backfill: capturedBackfill,
-	}, nil
-}
-
 // SubscribeFromNow creates an internal Surface subscription without replaying
 // history. It is registered before BeginTurn and its ingress is attached only
 // after the Surface claims Events. Like every Session subscription, it has an
@@ -1043,61 +956,15 @@ func (b *FeedBroker) Close() error {
 	return nil
 }
 
-func (b *FeedBroker) durableBackfill(ctx context.Context, requested eventstream.FeedPosition, through eventstream.DurableFeedPosition) ([]eventstream.Envelope, error) {
-	if through.Seq == 0 {
-		return nil, nil
-	}
-	if b.reader == nil {
-		return nil, errors.New("controlclient: durable feed reader is unavailable")
-	}
-	anchor := requested.DurableAnchor()
-	afterSeq := anchor.Seq
-	if requested.Durable != nil && anchor.Seq > 0 {
-		afterSeq--
-	}
-	var out []eventstream.Envelope
-	for afterSeq < through.Seq {
-		page, err := b.reader.EventsPage(ctx, session.EventPageRequest{
-			SessionRef: b.ref, AfterSeq: afterSeq, ThroughSeq: through.Seq,
-			Visibility: session.EventPageClientReplay,
-		})
-		if err != nil {
-			return nil, err
-		}
-		for _, event := range page.Events {
-			base := acpprojector.EnvelopeBaseFromSessionEvent(b.ref, event, acpprojector.SessionEventTransport{})
-			for _, envelope := range acpprojector.ProjectSessionEventEnvelope(base, event) {
-				if envelope.Position == nil || envelope.Position.Durable == nil {
-					continue
-				}
-				if requested.Durable != nil && eventstream.CompareDurablePosition(*envelope.Position.Durable, *requested.Durable) <= 0 {
-					continue
-				}
-				cursor, err := b.codec.Encode(b.ref.SessionID, *envelope.Position)
-				if err != nil {
-					return nil, err
-				}
-				envelope.Cursor = cursor
-				out = append(out, envelope)
-			}
-		}
-		if page.NextSeq <= afterSeq {
-			break
-		}
-		afterSeq = page.NextSeq
-		if !page.HasMore && afterSeq >= through.Seq {
-			break
-		}
-	}
-	return out, nil
-}
-
 func (b *FeedBroker) evictLocked() {
 	cutoff := b.now().Add(-b.ringTTL)
 	for len(b.ring) > 0 && (len(b.ring) > b.ringEvents || b.ringByteCount > b.ringBytes || b.ring[0].at.Before(cutoff)) {
 		item := b.ring[0]
 		b.ring = b.ring[1:]
 		b.ringByteCount -= item.bytes
+		if item.acceptID > b.evictedAccept {
+			b.evictedAccept = item.acceptID
+		}
 		if !isDurableFeedEnvelope(item.envelope) {
 			b.transientHistoryUnknown = true
 			delete(b.seen, feedDedupeKey(item.envelope))
@@ -1113,6 +980,12 @@ func (b *FeedBroker) stopSubscriberLocked(subscriber *feedSubscription, err erro
 		return
 	}
 	delete(b.subscribers, subscriber)
+	if errors.Is(err, controlport.ErrSlowConsumer) {
+		err = &controlport.FeedGapError{
+			Cause: err, RetryCursor: subscriber.retryFrom(),
+			Mode: controlport.ResumeModeDurableFallback, TransientGap: true,
+		}
+	}
 	subscriber.targetHold = false
 	subscriber.targetPending = nil
 	subscriber.targetPendingBytes = 0
@@ -1124,32 +997,33 @@ type feedSubscription struct {
 	broker       *FeedBroker
 	input        chan eventstream.Envelope
 	slots        chan struct{}
+	backfillOut  chan eventstream.Envelope
 	out          chan eventstream.Envelope
 	stop         chan struct{}
 	done         chan struct{}
 	backfillDone chan struct{}
+	backfill     func(*feedSubscription) error
 
 	startOnce          sync.Once
 	stopOnce           sync.Once
 	backfillOnce       sync.Once
-	paused             bool
-	initial            []eventstream.Envelope
-	liveInitial        []eventstream.Envelope
-	pending            []eventstream.Envelope
 	targetHold         bool
 	targetPending      []eventstream.Envelope
 	targetPendingBytes int
 
-	stateMu    sync.RWMutex
-	err        error
-	lastCursor string
+	stateMu              sync.RWMutex
+	err                  error
+	lastCursor           string
+	retryCursor          string
+	ignoreDurableThrough uint64
 }
 
 func newFeedSubscription(broker *FeedBroker, queueSize int) *feedSubscription {
 	return &feedSubscription{
 		broker: broker, input: make(chan eventstream.Envelope, queueSize),
-		slots: make(chan struct{}, queueSize),
-		out:   make(chan eventstream.Envelope), stop: make(chan struct{}), done: make(chan struct{}),
+		slots:       make(chan struct{}, queueSize),
+		backfillOut: make(chan eventstream.Envelope),
+		out:         make(chan eventstream.Envelope), stop: make(chan struct{}), done: make(chan struct{}),
 		backfillDone: make(chan struct{}),
 	}
 }
@@ -1231,19 +1105,16 @@ func (s *feedSubscription) run() {
 	defer close(s.done)
 	defer close(s.out)
 	defer s.finishBackfill()
-	for _, envelope := range s.initial {
-		if !s.deliver(envelope) {
+	if s.backfill != nil {
+		if err := s.backfill(s); err != nil {
+			if !errors.Is(err, errFeedSubscriptionStopped) {
+				s.setErr(err)
+			}
 			return
 		}
+		s.backfill = nil
 	}
-	s.initial = nil
 	s.finishBackfill()
-	for _, envelope := range s.liveInitial {
-		if !s.deliver(envelope) {
-			return
-		}
-	}
-	s.liveInitial = nil
 	for {
 		select {
 		case <-s.stop:
@@ -1273,6 +1144,27 @@ func (s *feedSubscription) deliver(envelope eventstream.Envelope) bool {
 	}
 }
 
+func (s *feedSubscription) deliverBackfill(envelope eventstream.Envelope) bool {
+	select {
+	case <-s.stop:
+		return false
+	case s.backfillOut <- envelope:
+		s.stateMu.Lock()
+		s.lastCursor = envelope.Cursor
+		s.stateMu.Unlock()
+		return true
+	}
+}
+
+func (s *feedSubscription) Backfill() <-chan eventstream.Envelope {
+	if s == nil {
+		closed := make(chan eventstream.Envelope)
+		close(closed)
+		return closed
+	}
+	return s.backfillOut
+}
+
 func (s *feedSubscription) Events() <-chan eventstream.Envelope { return s.out }
 
 func (s *feedSubscription) BackfillDone() <-chan struct{} {
@@ -1285,7 +1177,10 @@ func (s *feedSubscription) BackfillDone() <-chan struct{} {
 }
 
 func (s *feedSubscription) finishBackfill() {
-	s.backfillOnce.Do(func() { close(s.backfillDone) })
+	s.backfillOnce.Do(func() {
+		close(s.backfillOut)
+		close(s.backfillDone)
+	})
 }
 
 func (s *feedSubscription) Close() error {
@@ -1293,7 +1188,11 @@ func (s *feedSubscription) Close() error {
 		return nil
 	}
 	s.broker.mu.Lock()
-	s.broker.stopSubscriberLocked(s, nil)
+	if _, active := s.broker.subscribers[s]; active {
+		s.broker.stopSubscriberLocked(s, nil)
+	} else {
+		s.stopOnce.Do(func() { close(s.stop) })
+	}
 	s.broker.mu.Unlock()
 	return nil
 }
@@ -1324,7 +1223,28 @@ func (s *feedSubscription) setErrLocked(err error) {
 	}
 }
 
-func (s *feedSubscription) errLocked() error { return s.Err() }
+func (s *feedSubscription) setErr(err error) {
+	if s == nil || err == nil {
+		return
+	}
+	s.stateMu.Lock()
+	if s.err == nil {
+		s.err = err
+	}
+	s.stateMu.Unlock()
+}
+
+func (s *feedSubscription) retryFrom() string {
+	if s == nil {
+		return ""
+	}
+	s.stateMu.RLock()
+	defer s.stateMu.RUnlock()
+	if strings.TrimSpace(s.lastCursor) != "" {
+		return s.lastCursor
+	}
+	return s.retryCursor
+}
 
 func feedDedupeKey(envelope eventstream.Envelope) string {
 	if id := strings.TrimSpace(envelope.ProjectionID); id != "" {
@@ -1352,91 +1272,6 @@ func findRingCursor(ring []feedRingItem, cursor string) int {
 		}
 	}
 	return -1
-}
-
-func ringEnvelopes(ring []feedRingItem) []eventstream.Envelope {
-	out := make([]eventstream.Envelope, 0, len(ring))
-	for _, item := range ring {
-		out = append(out, eventstream.CloneEnvelope(item.envelope))
-	}
-	return out
-}
-
-// spliceDurableBackfillWithRing returns the durable prefix that predates the
-// retained ring followed by the complete ring suffix. The ring is the broker's
-// exact global acceptance order, so retaining it whole preserves transient
-// terminal bytes that occurred between durable events instead of moving them
-// to the end of replay or dropping them behind the durable high-water mark.
-func spliceDurableBackfillWithRing(durable []eventstream.Envelope, ring []feedRingItem) []eventstream.Envelope {
-	if len(ring) == 0 {
-		return eventstream.CloneEnvelopes(durable)
-	}
-	firstPosition := ring[0].envelope.Position
-	if firstPosition == nil || (firstPosition.Durable == nil && firstPosition.Transient == nil) {
-		// prepareEnvelopeLocked guarantees positioned ring items. If corrupted
-		// in-memory state violates that invariant, preserve the known FIFO suffix
-		// instead of guessing an order against durable history.
-		return ringEnvelopes(ring)
-	}
-
-	prefix := make([]eventstream.Envelope, 0, len(durable)+len(ring))
-	for _, envelope := range durable {
-		if envelope.Position == nil || envelope.Position.Durable == nil {
-			continue
-		}
-		position := *envelope.Position.Durable
-		include := false
-		switch {
-		case firstPosition.Durable != nil:
-			include = eventstream.CompareDurablePosition(position, *firstPosition.Durable) < 0
-		case firstPosition.Transient != nil:
-			// A transient frame is accepted after its durable anchor, so retain
-			// the anchor itself before appending the exact ring suffix.
-			include = eventstream.CompareDurablePosition(position, firstPosition.Transient.Anchor) <= 0
-		}
-		if include {
-			prefix = append(prefix, eventstream.CloneEnvelope(envelope))
-		}
-	}
-	return append(prefix, ringEnvelopes(ring)...)
-}
-
-func feedBoundaryCursor(ring []feedRingItem) string {
-	if len(ring) == 0 {
-		return ""
-	}
-	return ring[len(ring)-1].envelope.Cursor
-}
-
-func dedupeFeedEnvelopes(in []eventstream.Envelope) []eventstream.Envelope {
-	seen := make(map[string]struct{}, len(in))
-	out := make([]eventstream.Envelope, 0, len(in))
-	for _, envelope := range in {
-		key := feedDedupeKey(envelope)
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		out = append(out, eventstream.CloneEnvelope(envelope))
-	}
-	return out
-}
-
-func dedupeFeedEnvelopesAgainst(in []eventstream.Envelope, previous []eventstream.Envelope) []eventstream.Envelope {
-	seen := make(map[string]struct{}, len(previous)+len(in))
-	for _, envelope := range previous {
-		seen[feedDedupeKey(envelope)] = struct{}{}
-	}
-	out := make([]eventstream.Envelope, 0, len(in))
-	for _, envelope := range in {
-		key := feedDedupeKey(envelope)
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		out = append(out, eventstream.CloneEnvelope(envelope))
-	}
-	return out
 }
 
 func randomFeedGeneration() string {

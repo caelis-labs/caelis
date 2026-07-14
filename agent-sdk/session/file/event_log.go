@@ -388,3 +388,114 @@ func (s *Store) readEventLogIDs(documentPath string) (map[string]bool, error) {
 func eventLogPath(documentPath string) string {
 	return strings.TrimSuffix(documentPath, ".json") + ".events.jsonl"
 }
+
+// readEventLogCheckpoint scans complete JSONL records from the tail. Memory is
+// bounded by one chunk plus the largest event line; ordinary checkpoints read
+// only the final durable record and the nearest client-replay record.
+func readEventLogCheckpoint(ctx context.Context, path string) (uint64, *session.Event, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil, nil
+		}
+		return 0, nil, err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return 0, nil, err
+	}
+	if info.Size() == 0 {
+		return 0, nil, nil
+	}
+
+	const chunkSize = 64 << 10
+	buf := make([]byte, chunkSize)
+	var suffix []byte
+	position := info.Size()
+	tailComplete := false
+	var lastByte [1]byte
+	if _, err := file.ReadAt(lastByte[:], info.Size()-1); err != nil {
+		return 0, nil, err
+	}
+	tailComplete = lastByte[0] == '\n'
+	firstRecord := true
+	var throughSeq uint64
+	var lastReplay *session.Event
+
+	consume := func(raw []byte) (bool, error) {
+		trimmed := bytes.TrimSpace(raw)
+		if len(trimmed) == 0 {
+			return false, nil
+		}
+		migrated, err := session.MigrateEventJSON(json.RawMessage(trimmed))
+		if err != nil {
+			if firstRecord && !tailComplete {
+				firstRecord = false
+				return false, nil
+			}
+			return false, fmt.Errorf("agent-sdk/session/file: migrate event checkpoint %s: %w", path, err)
+		}
+		var event session.Event
+		if err := json.Unmarshal(migrated, &event); err != nil {
+			if firstRecord && !tailComplete {
+				firstRecord = false
+				return false, nil
+			}
+			return false, fmt.Errorf("agent-sdk/session/file: decode event checkpoint %s: %w", path, err)
+		}
+		firstRecord = false
+		if err := session.ValidateDurableCoreEvent(&event); err != nil {
+			return false, fmt.Errorf("agent-sdk/session/file: invalid event checkpoint %s: %w", path, err)
+		}
+		if throughSeq == 0 {
+			throughSeq = event.Seq
+		}
+		if lastReplay == nil && session.IsClientReplayEvent(&event) {
+			lastReplay = session.CloneEvent(&event)
+		}
+		return throughSeq > 0 && lastReplay != nil, nil
+	}
+
+	for position > 0 {
+		if err := ctx.Err(); err != nil {
+			return 0, nil, err
+		}
+		readSize := int64(len(buf))
+		if position < readSize {
+			readSize = position
+		}
+		position -= readSize
+		chunk := buf[:readSize]
+		if _, err := file.ReadAt(chunk, position); err != nil && !errors.Is(err, io.EOF) {
+			return 0, nil, err
+		}
+		data := make([]byte, 0, len(chunk)+len(suffix))
+		data = append(data, chunk...)
+		data = append(data, suffix...)
+		end := len(data)
+		for index := len(data) - 1; index >= 0; index-- {
+			if data[index] != '\n' {
+				continue
+			}
+			stop, err := consume(data[index+1 : end])
+			if err != nil {
+				return 0, nil, err
+			}
+			if stop {
+				return throughSeq, lastReplay, nil
+			}
+			end = index
+		}
+		suffix = append(suffix[:0], data[:end]...)
+	}
+	if len(bytes.TrimSpace(suffix)) > 0 {
+		if _, err := consume(suffix); err != nil {
+			return 0, nil, err
+		}
+	}
+	return throughSeq, lastReplay, nil
+}

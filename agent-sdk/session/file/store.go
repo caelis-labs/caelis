@@ -532,6 +532,43 @@ func (s *Store) EventsPage(
 	return out, nil
 }
 
+// EventCheckpoint returns one Session/event high-water cut while the Store
+// and recovery locks exclude concurrent durable mutation.
+func (s *Store) EventCheckpoint(
+	ctx context.Context,
+	ref session.SessionRef,
+) (session.EventCheckpoint, error) {
+	if err := s.mu.LockContext(ctx); err != nil {
+		return session.EventCheckpoint{}, err
+	}
+	defer s.mu.Unlock()
+
+	var out session.EventCheckpoint
+	if err := s.withRootReadLockContext(ctx, func() error {
+		doc, err := s.readDocumentForRef(ref)
+		if err != nil {
+			return err
+		}
+		path, err := s.resolveWritePath(doc.Session)
+		if err != nil {
+			return err
+		}
+		throughSeq, lastReplay, err := readEventLogCheckpoint(ctx, eventLogPath(path))
+		if err != nil {
+			return err
+		}
+		out = session.EventCheckpoint{
+			Session:               session.CloneSession(doc.Session),
+			ThroughSeq:            throughSeq,
+			LastClientReplayEvent: lastReplay,
+		}
+		return nil
+	}); err != nil {
+		return session.EventCheckpoint{}, err
+	}
+	return out, nil
+}
+
 func (s *Store) BindController(
 	ctx context.Context,
 	ref session.SessionRef,

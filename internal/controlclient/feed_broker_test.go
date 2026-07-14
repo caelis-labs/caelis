@@ -3,6 +3,7 @@ package controlclient
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"sync"
@@ -55,9 +56,50 @@ func TestFeedBrokerDurableSequencerSerializesGapFillAndPublishesOnce(t *testing.
 	if result.Mode != controlport.ResumeModeDurableFallback || !result.TransientGap {
 		t.Fatalf("result = %#v, want durable fallback with transient gap", result)
 	}
-	got := receiveEnvelopes(t, result.Subscription.Events(), 2)
+	got := receiveEnvelopes(t, result.Subscription.Backfill(), 2)
 	if ids := []string{got[0].EventID, got[1].EventID}; !reflect.DeepEqual(ids, []string{"event-2", "event-3"}) {
 		t.Fatalf("event IDs = %v, want once and ordered", ids)
+	}
+}
+
+func TestFeedBrokerReconnectCheckpointRetainsConcurrentTransientPublish(t *testing.T) {
+	reader := &blockingCheckpointReader{
+		checkpointPageReader: checkpointPageReader{
+			events: []*session.Event{durableProtocolEvent(1, "durable history")},
+			active: session.Session{SessionRef: session.SessionRef{SessionID: "session-1"}, Revision: 1},
+		},
+		started: make(chan struct{}), release: make(chan struct{}),
+	}
+	broker, _ := newTestFeedBroker(t, reader, FeedBrokerConfig{RingEvents: 8, SubscriberQueue: 2})
+	resultCh := make(chan controlport.SubscribeResult, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		result, err := broker.Subscribe(context.Background(), controlport.SubscribeRequest{SessionID: "session-1"})
+		resultCh <- result
+		errCh <- err
+	}()
+	<-reader.started
+
+	published := make(chan error, 1)
+	go func() { published <- broker.Publish(terminalEnvelope("during checkpoint")) }()
+	select {
+	case err := <-published:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("transient Publish blocked on durable reconnect checkpoint")
+	}
+	close(reader.release)
+	result := <-resultCh
+	if err := <-errCh; err != nil {
+		t.Fatal(err)
+	}
+	defer result.Subscription.Close()
+	history := receiveEnvelopes(t, result.Subscription.Backfill(), 2)
+	if history[0].Delivery == nil || history[0].Delivery.Mode != eventstream.DeliveryTransient ||
+		history[1].EventID != "event-1" {
+		t.Fatalf("backfill = %#v, want concurrent transient then durable catch-up exactly once", history)
 	}
 }
 
@@ -236,12 +278,52 @@ func TestFeedBrokerExactReconnectPreservesTransientBytes(t *testing.T) {
 	if result.Mode != controlport.ResumeModeExact || result.TransientGap {
 		t.Fatalf("result = %#v, want exact", result)
 	}
-	got := receiveEnvelopes(t, result.Subscription.Events(), 1)[0]
+	got := receiveEnvelopes(t, result.Subscription.Backfill(), 1)[0]
 	if !reflect.DeepEqual(got.Meta, second.Meta) {
 		t.Fatalf("terminal payload = %#v, want %#v", got.Meta, second.Meta)
 	}
 	if got.Position == nil || got.Position.Transient == nil || got.Cursor == "" {
 		t.Fatalf("terminal delivery lacks transient position/cursor: %#v", got)
+	}
+}
+
+func TestFeedBrokerExactReconnectDeliversBashSpawnAndFinalExactlyOnce(t *testing.T) {
+	broker, _ := newTestFeedBroker(t, nil, FeedBrokerConfig{RingEvents: 16, SubscriberQueue: 2})
+	if err := broker.Publish(eventstream.Envelope{Kind: eventstream.KindNotice, Notice: "boundary"}); err != nil {
+		t.Fatal(err)
+	}
+	_, cursor := broker.Boundary()
+	result, err := broker.Subscribe(context.Background(), controlport.SubscribeRequest{SessionID: "session-1", Cursor: cursor})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer result.Subscription.Close()
+	for _, envelope := range []eventstream.Envelope{
+		{Kind: eventstream.KindSessionUpdate, Update: schema.ToolCallUpdate{SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "bash-1"}},
+		{Kind: eventstream.KindSessionUpdate, Update: schema.ToolCallUpdate{SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "spawn-1"}},
+		eventstream.TurnCompleted("handle-1", "run-1", "turn-1", time.Unix(20, 0)),
+	} {
+		if err := broker.Publish(envelope); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for range result.Subscription.Backfill() {
+		t.Fatal("exact boundary unexpectedly replayed history")
+	}
+	got := receiveEnvelopes(t, result.Subscription.Events(), 3)
+	seen := map[string]int{}
+	for _, envelope := range got {
+		switch update := envelope.Update.(type) {
+		case schema.ToolCallUpdate:
+			seen[update.ToolCallID]++
+		default:
+			if eventstream.IsTerminalLifecycle(envelope) {
+				seen["final"]++
+			}
+		}
+	}
+	if !reflect.DeepEqual(seen, map[string]int{"bash-1": 1, "spawn-1": 1, "final": 1}) {
+		t.Fatalf("reconnected live events = %#v", seen)
 	}
 }
 
@@ -267,7 +349,7 @@ func TestFeedBrokerEmptyCursorReplayPreservesRetainedTransientInterleaving(t *te
 	if result.Mode != controlport.ResumeModeExact || result.TransientGap {
 		t.Fatalf("result = %#v, want exact retained replay", result)
 	}
-	got := result.Backfill
+	got := receiveEnvelopes(t, result.Subscription.Backfill(), 3)
 	if len(got) != 3 {
 		t.Fatalf("backfill = %#v, want durable start, transient bytes, durable completion", got)
 	}
@@ -346,7 +428,7 @@ func TestFeedBrokerEmptyCursorReplaySignalsEvictedTransientGap(t *testing.T) {
 	if !result.TransientGap {
 		t.Fatalf("result = %#v, want explicit transient gap after ring eviction", result)
 	}
-	got := result.Backfill
+	got := receiveEnvelopes(t, result.Subscription.Backfill(), 3)
 	if len(got) != 3 || got[0].EventID != "event-1" || got[1].EventID != "event-2" || got[2].Meta["terminal_output"] != "retained tail" {
 		t.Fatalf("gap backfill = %#v, want durable history plus retained transient suffix", got)
 	}
@@ -371,7 +453,7 @@ func TestFeedBrokerEvictionFallsBackToDurableReplay(t *testing.T) {
 	if result.Mode != controlport.ResumeModeDurableFallback || !result.TransientGap {
 		t.Fatalf("result = %#v", result)
 	}
-	got := receiveEnvelopes(t, result.Subscription.Events(), 1)
+	got := receiveEnvelopes(t, result.Subscription.Backfill(), 1)
 	if got[0].EventID != "event-2" {
 		t.Fatalf("replayed event = %#v", got[0])
 	}
@@ -398,6 +480,117 @@ func TestFeedBrokerFallbackSignalsEmptyBackfill(t *testing.T) {
 	case <-result.Subscription.BackfillDone():
 	case <-time.After(time.Second):
 		t.Fatal("empty durable fallback did not signal backfill completion")
+	}
+}
+
+func TestFeedBrokerStreamingBackfillSplicesMoreThanSubscriberQueue(t *testing.T) {
+	events := make([]*session.Event, 0, 300)
+	for seq := uint64(1); seq <= 300; seq++ {
+		event := durableProtocolEvent(seq, fmt.Sprintf("history-%d", seq))
+		event.ID = fmt.Sprintf("event-%d", seq)
+		events = append(events, event)
+	}
+	reader := &checkpointPageReader{events: events, active: session.Session{
+		SessionRef: session.SessionRef{SessionID: "session-1"}, Revision: 300,
+	}}
+	broker, _ := newTestFeedBroker(t, reader, FeedBrokerConfig{
+		RingEvents: 600, SubscriberQueue: 1,
+	})
+	result, err := broker.Subscribe(context.Background(), controlport.SubscribeRequest{SessionID: "session-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer result.Subscription.Close()
+	for index := 0; index < 256; index++ {
+		if err := broker.Publish(terminalEnvelope(fmt.Sprintf("live-%03d", index))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	subscription := result.Subscription.(*feedSubscription)
+	broker.mu.Lock()
+	retained := len(broker.ring)
+	broker.mu.Unlock()
+	if retained > 600 || len(subscription.input) != 0 {
+		t.Fatalf("prepared memory ring=%d input=%d, want bounded ring with no copied history/live queue", retained, len(subscription.input))
+	}
+	history := receiveEnvelopes(t, result.Subscription.Backfill(), len(events))
+	if history[0].EventID != "event-1" || history[len(history)-1].EventID != "event-300" {
+		t.Fatalf("history endpoints = %q/%q", history[0].EventID, history[len(history)-1].EventID)
+	}
+	live := receiveEnvelopes(t, result.Subscription.Events(), 256)
+	seen := make(map[string]struct{}, len(live))
+	for _, envelope := range live {
+		if envelope.Cursor == "" {
+			t.Fatalf("live envelope lacks Cursor: %#v", envelope)
+		}
+		if _, duplicate := seen[envelope.Cursor]; duplicate {
+			t.Fatalf("duplicate live cursor %q", envelope.Cursor)
+		}
+		seen[envelope.Cursor] = struct{}{}
+	}
+	if err := result.Subscription.Err(); err != nil {
+		t.Fatalf("streaming splice error = %v", err)
+	}
+}
+
+func TestFeedBrokerStreamingBackfillReturnsTypedRetryCursorWhenRingOvertaken(t *testing.T) {
+	events := []*session.Event{durableProtocolEvent(1, "history")}
+	reader := &checkpointPageReader{events: events, active: session.Session{SessionRef: session.SessionRef{SessionID: "session-1"}}}
+	broker, codec := newTestFeedBroker(t, reader, FeedBrokerConfig{RingEvents: 4, SubscriberQueue: 1})
+	result, err := broker.Subscribe(context.Background(), controlport.SubscribeRequest{SessionID: "session-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer result.Subscription.Close()
+	for index := 0; index < 10; index++ {
+		if err := broker.Publish(terminalEnvelope(fmt.Sprintf("live-%d", index))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = receiveEnvelopes(t, result.Subscription.Backfill(), 1)
+	for range result.Subscription.Events() {
+	}
+	var gap *controlport.FeedGapError
+	if !errors.As(result.Subscription.Err(), &gap) || !gap.TransientGap || gap.RetryCursor == "" {
+		t.Fatalf("subscription error = %#v, want typed gap with retry cursor", result.Subscription.Err())
+	}
+	if _, err := codec.Decode("session-1", gap.RetryCursor); err != nil {
+		t.Fatalf("Decode(retry cursor) error = %v", err)
+	}
+}
+
+func TestFeedBrokerPreflightOvertakeReturnsSafeStartRetryCursor(t *testing.T) {
+	reader := &blockingCheckpointPageReader{
+		checkpointPageReader: checkpointPageReader{
+			events: []*session.Event{durableProtocolEvent(1, "history")},
+			active: session.Session{SessionRef: session.SessionRef{SessionID: "session-1"}},
+		},
+		started: make(chan struct{}), release: make(chan struct{}),
+	}
+	broker, codec := newTestFeedBroker(t, reader, FeedBrokerConfig{RingEvents: 4, SubscriberQueue: 1})
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := broker.Subscribe(context.Background(), controlport.SubscribeRequest{SessionID: "session-1"})
+		errCh <- err
+	}()
+	<-reader.started
+	for index := 0; index < 10; index++ {
+		if err := broker.Publish(terminalEnvelope(fmt.Sprintf("live-%d", index))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	close(reader.release)
+	err := <-errCh
+	var gap *controlport.FeedGapError
+	if !errors.As(err, &gap) || gap.RetryCursor == "" || !gap.TransientGap {
+		t.Fatalf("Subscribe error = %#v, want typed preflight gap with retry cursor", err)
+	}
+	position, err := codec.Decode("session-1", gap.RetryCursor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if position.Durable == nil || position.Durable.Seq != 0 {
+		t.Fatalf("retry position = %#v, want safe start cursor", position)
 	}
 }
 
@@ -450,12 +643,22 @@ func TestFeedBrokerDisconnectsSlowSubscriberWithoutBlockingPublish(t *testing.T)
 	}
 	subscription := result.Subscription
 	defer subscription.Close()
+	deadline := time.Now().Add(time.Second)
+	for {
+		broker.mu.Lock()
+		installed := len(broker.subscribers) == 1
+		broker.mu.Unlock()
+		if installed || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
 	for index := 0; index < 8; index++ {
 		if err := broker.Publish(terminalEnvelope(string(rune('a' + index)))); err != nil {
 			t.Fatal(err)
 		}
 	}
-	deadline := time.Now().Add(time.Second)
+	deadline = time.Now().Add(time.Second)
 	for !errors.Is(subscription.Err(), controlport.ErrSlowConsumer) && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}
@@ -1182,7 +1385,7 @@ func TestFeedBrokerRestartPrimesDurableBoundaryAndBootstrap(t *testing.T) {
 		t.Fatalf("Subscribe() error = %v", err)
 	}
 	defer result.Subscription.Close()
-	got := receiveEnvelopes(t, result.Subscription.Events(), 2)
+	got := receiveEnvelopes(t, result.Subscription.Backfill(), 2)
 	if got[0].Position == nil || got[0].Position.Durable == nil || got[0].Position.Durable.Seq != 1 ||
 		got[1].Position == nil || got[1].Position.Durable == nil || got[1].Position.Durable.Seq != 2 {
 		t.Fatalf("restart bootstrap positions = %#v", got)
@@ -1358,6 +1561,71 @@ type staticPageReader struct{ events []*session.Event }
 
 func (r staticPageReader) EventsPage(_ context.Context, req session.EventPageRequest) (session.EventPage, error) {
 	return session.PageEvents(r.events, req), nil
+}
+
+type checkpointPageReader struct {
+	events []*session.Event
+	active session.Session
+}
+
+type blockingCheckpointReader struct {
+	checkpointPageReader
+	once    sync.Once
+	started chan struct{}
+	release chan struct{}
+}
+
+func (r *blockingCheckpointReader) EventCheckpoint(ctx context.Context, ref session.SessionRef) (session.EventCheckpoint, error) {
+	r.once.Do(func() { close(r.started) })
+	select {
+	case <-ctx.Done():
+		return session.EventCheckpoint{}, ctx.Err()
+	case <-r.release:
+		return r.checkpointPageReader.EventCheckpoint(ctx, ref)
+	}
+}
+
+type blockingCheckpointPageReader struct {
+	checkpointPageReader
+	once    sync.Once
+	started chan struct{}
+	release chan struct{}
+}
+
+func (r *blockingCheckpointPageReader) EventsPage(ctx context.Context, req session.EventPageRequest) (session.EventPage, error) {
+	r.once.Do(func() { close(r.started) })
+	select {
+	case <-ctx.Done():
+		return session.EventPage{}, ctx.Err()
+	case <-r.release:
+		return r.checkpointPageReader.EventsPage(ctx, req)
+	}
+}
+
+func (r *checkpointPageReader) EventsPage(_ context.Context, req session.EventPageRequest) (session.EventPage, error) {
+	return session.PageEvents(r.events, req), nil
+}
+
+func (r *checkpointPageReader) EventCheckpoint(_ context.Context, ref session.SessionRef) (session.EventCheckpoint, error) {
+	active := session.CloneSession(r.active)
+	if active.SessionID == "" {
+		active.SessionRef = ref
+	}
+	checkpoint := session.EventCheckpoint{Session: active}
+	for index := len(r.events) - 1; index >= 0; index-- {
+		event := r.events[index]
+		if event == nil || session.IsTransient(event) {
+			continue
+		}
+		if checkpoint.ThroughSeq == 0 {
+			checkpoint.ThroughSeq = event.Seq
+		}
+		if session.IsClientReplayEvent(event) {
+			checkpoint.LastClientReplayEvent = session.CloneEvent(event)
+			break
+		}
+	}
+	return checkpoint, nil
 }
 
 type mutablePageReader struct{ events []*session.Event }

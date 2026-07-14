@@ -306,16 +306,17 @@ type CodeFreeAuthRequest struct {
 }
 
 type RuntimeStack struct {
-	Gateway      GatewayRuntimeDeps
-	ControlFeeds controlclientport.FeedRegistry
-	Session      SessionRuntimeDeps
-	Status       StatusRuntimeDeps
-	Agent        AgentRuntimeDeps
-	Model        ModelRuntimeDeps
-	Sandbox      SandboxRuntimeDeps
-	Skill        SkillRuntimeDeps
-	AgentProfile AgentProfileRuntimeDeps
-	Plugin       PluginRuntimeDeps
+	Gateway          GatewayRuntimeDeps
+	ControlFeeds     controlclientport.FeedRegistry
+	ControlReconnect controlclientport.ReconnectReader
+	Session          SessionRuntimeDeps
+	Status           StatusRuntimeDeps
+	Agent            AgentRuntimeDeps
+	Model            ModelRuntimeDeps
+	Sandbox          SandboxRuntimeDeps
+	Skill            SkillRuntimeDeps
+	AgentProfile     AgentProfileRuntimeDeps
+	Plugin           PluginRuntimeDeps
 }
 
 type RuntimeModelCatalog interface {

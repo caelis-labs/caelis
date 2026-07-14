@@ -2,6 +2,7 @@ package controlpromptrouter
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -190,12 +191,12 @@ func (r Router) dispatchResume(ctx context.Context, args string) (prompt.Result,
 		SuppressTurnDivider: true,
 		ActiveSessionID:     strings.TrimSpace(resumed.SessionID),
 		RefreshStatus:       true,
+		Reconnect:           resumed.Reconnect,
 	}
-	if events, err := r.service.ReplayEvents(ctx); err == nil {
-		result.ReplayEvents = events
-		result.Events = append(result.Events, notice(fmt.Sprintf("resumed session: %s", result.ActiveSessionID)))
-	} else {
-		result.Events = append(result.Events, notice(fmt.Sprintf("warning: replay failed: %v", err)))
+	if resumed.Reconnect == nil {
+		return prompt.Result{}, controlcommands.FriendlyCommandError(
+			"resume session", errors.New("control reconnect continuation is unavailable"),
+		)
 	}
 	return result, nil
 }

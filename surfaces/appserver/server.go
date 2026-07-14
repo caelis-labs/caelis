@@ -204,6 +204,8 @@ func (s *Server) streamSessionEvents(w http.ResponseWriter, r *http.Request) {
 	flusher.Flush()
 	heartbeat := time.NewTicker(s.config.Heartbeat)
 	defer heartbeat.Stop()
+	events := result.Subscription.Backfill()
+	backfill := true
 	for {
 		select {
 		case <-r.Context().Done():
@@ -211,8 +213,23 @@ func (s *Server) streamSessionEvents(w http.ResponseWriter, r *http.Request) {
 		case <-heartbeat.C:
 			_, _ = fmt.Fprint(w, ": heartbeat\n\n")
 			flusher.Flush()
-		case envelope, open := <-result.Subscription.Events():
+		case envelope, open := <-events:
 			if !open {
+				if backfill {
+					backfill = false
+					events = result.Subscription.Events()
+					continue
+				}
+				var gap *controlclient.FeedGapError
+				if errors.As(result.Subscription.Err(), &gap) {
+					retry, marshalErr := json.Marshal(resumeBoundary{
+						ResumeMode: gap.Mode, TransientGap: gap.TransientGap, BoundaryCursor: gap.RetryCursor,
+					})
+					if marshalErr == nil {
+						_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", resumeEventName, retry)
+						flusher.Flush()
+					}
+				}
 				return
 			}
 			data, err := json.Marshal(envelope)

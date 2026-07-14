@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	controlclient "github.com/caelis-labs/caelis/ports/controlclient"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -1238,6 +1239,45 @@ func TestSubmitLineUsesActiveTurnModeOnlyWhileRunning(t *testing.T) {
 	}
 	if got := submissions[1].Mode; got != SubmissionModeActiveTurn {
 		t.Fatalf("running submission mode = %q, want active_turn", got)
+	}
+}
+
+func TestReconnectStateRestoresActiveTurnSubmissionMode(t *testing.T) {
+	var submissions []Submission
+	model := NewModel(Config{
+		NoColor: true, NoAnimation: true,
+		ExecuteLine: func(submission Submission) TaskResultMsg {
+			submissions = append(submissions, submission)
+			return TaskResultMsg{SuppressTurnDivider: true}
+		},
+		CanSubmitRunningPrompt: func() bool { return true },
+	})
+	model.commitLine("old session transcript")
+	model.activePrompt = newPromptState(PromptRequestMsg{Prompt: "old approval", Response: make(chan PromptResponse, 1)})
+	model.applySessionReconnectState(controlclient.SessionState{Run: controlclient.RunState{
+		Active: true, HandleID: "handle-1", RunID: "run-1", TurnID: "turn-1", StartedAt: time.Unix(120, 0),
+	}})
+	if !model.turnRunning() || model.activePrompt != nil || len(model.doc.Blocks()) != 0 {
+		t.Fatalf("reconnect install running=%v prompt=%#v blocks=%d", model.turnRunning(), model.activePrompt, len(model.doc.Blocks()))
+	}
+	next, cmd := model.submitLine("steer resumed turn")
+	model = next.(*Model)
+	if cmd == nil || !findAndRunTaskResult(cmd(), model) {
+		t.Fatal("submitLine(resumed turn) did not execute")
+	}
+	if len(submissions) != 1 || submissions[0].Mode != SubmissionModeActiveTurn {
+		t.Fatalf("resumed submissions = %#v, want one active_turn", submissions)
+	}
+}
+
+func TestReconnectTransientGapUsesEphemeralHint(t *testing.T) {
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.applySessionReconnectState(controlclient.SessionState{TransientGap: true})
+	if model.hint != reconnectTransientGapWarning {
+		t.Fatalf("reconnect gap hint = %q, want %q", model.hint, reconnectTransientGapWarning)
+	}
+	if len(model.doc.Blocks()) != 0 {
+		t.Fatalf("reconnect gap persisted %d transcript blocks", len(model.doc.Blocks()))
 	}
 }
 

@@ -42,6 +42,22 @@ type PagedReader interface {
 	EventsPage(context.Context, EventPageRequest) (EventPage, error)
 }
 
+// EventCheckpoint is an atomic durable cut used by forward readers. Session
+// and ThroughSeq are observed under the same store lock. LastClientReplayEvent
+// is the last event at or before ThroughSeq that can project to a client feed;
+// it lets callers derive a boundary without scanning the complete history.
+type EventCheckpoint struct {
+	Session               Session `json:"session"`
+	ThroughSeq            uint64  `json:"through_seq,omitempty"`
+	LastClientReplayEvent *Event  `json:"last_client_replay_event,omitempty"`
+}
+
+// EventCheckpointReader returns one immutable Session/event high-water cut.
+// Implementations must not materialize the full event history to answer it.
+type EventCheckpointReader interface {
+	EventCheckpoint(context.Context, SessionRef) (EventCheckpoint, error)
+}
+
 // NormalizeEventPageRequest applies stable defaults for store implementations.
 func NormalizeEventPageRequest(req EventPageRequest) EventPageRequest {
 	req.SessionRef = NormalizeSessionRef(req.SessionRef)

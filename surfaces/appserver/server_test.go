@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -104,6 +106,38 @@ func TestSSEUsesCursorIDAndWholeEnvelopeData(t *testing.T) {
 	}
 }
 
+func TestSSEReportsTypedGapWithRetryCursor(t *testing.T) {
+	subscription := newTestSubscription()
+	subscription.err = &controlclient.FeedGapError{
+		Cause: errors.New("splice overtaken"), RetryCursor: "retry-cursor",
+		Mode: controlclient.ResumeModeDurableFallback, TransientGap: true,
+	}
+	server, err := New(Config{
+		Service:        &fakeService{subscription: subscription},
+		LocalPrincipal: controlclient.Principal{ID: "owner"}, Heartbeat: time.Hour,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(server)
+	defer httpServer.Close()
+	response, err := http.Get(httpServer.URL + apiPrefix + "/sessions/session-1/stream")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(body), "event: "+resumeEventName) != 2 ||
+		!strings.Contains(string(body), `"resume_mode":"durable_fallback"`) ||
+		!strings.Contains(string(body), `"transient_gap":true`) ||
+		!strings.Contains(string(body), `"boundary_cursor":"retry-cursor"`) {
+		t.Fatalf("SSE typed gap body = %q", body)
+	}
+}
+
 func TestSSERejectsMismatchedResumeInputsAndCredentialQuery(t *testing.T) {
 	server, err := New(Config{Service: &fakeService{}, LocalPrincipal: controlclient.Principal{ID: "owner"}})
 	if err != nil {
@@ -182,7 +216,10 @@ func (s *fakeService) Subscribe(context.Context, controlclient.Principal, contro
 	return controlclient.SubscribeResult{Subscription: s.subscription, Mode: controlclient.ResumeModeExact, BoundaryCursor: "signed-cursor-1"}, nil
 }
 
-type testSubscription struct{ events chan eventstream.Envelope }
+type testSubscription struct {
+	events chan eventstream.Envelope
+	err    error
+}
 
 func newTestSubscription(events ...eventstream.Envelope) *testSubscription {
 	channel := make(chan eventstream.Envelope, len(events))
@@ -193,11 +230,16 @@ func newTestSubscription(events ...eventstream.Envelope) *testSubscription {
 	return &testSubscription{events: channel}
 }
 func (s *testSubscription) Events() <-chan eventstream.Envelope { return s.events }
+func (*testSubscription) Backfill() <-chan eventstream.Envelope {
+	done := make(chan eventstream.Envelope)
+	close(done)
+	return done
+}
 func (*testSubscription) BackfillDone() <-chan struct{} {
 	done := make(chan struct{})
 	close(done)
 	return done
 }
 func (*testSubscription) Close() error       { return nil }
-func (*testSubscription) Err() error         { return nil }
+func (s *testSubscription) Err() error       { return s.err }
 func (*testSubscription) LastCursor() string { return "signed-cursor-1" }

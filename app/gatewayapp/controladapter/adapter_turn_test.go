@@ -266,6 +266,11 @@ type errorFeedSubscription struct {
 }
 
 func (s *errorFeedSubscription) Events() <-chan eventstream.Envelope { return s.events }
+func (*errorFeedSubscription) Backfill() <-chan eventstream.Envelope {
+	done := make(chan eventstream.Envelope)
+	close(done)
+	return done
+}
 func (*errorFeedSubscription) BackfillDone() <-chan struct{} {
 	done := make(chan struct{})
 	close(done)

@@ -2067,6 +2067,14 @@ package github.com/caelis-labs/caelis/agent-sdk/session
   type EventBatchStateService interface {
       AppendEventsAndUpdateState(context.Context, AppendEventsAndUpdateStateRequest) ([]*Event, error)
   }
+  type EventCheckpoint struct {
+      Session               Session `json:"session"`
+      ThroughSeq            uint64  `json:"through_seq,omitempty"`
+      LastClientReplayEvent *Event  `json:"last_client_replay_event,omitempty"`
+  }
+  type EventCheckpointReader interface {
+      EventCheckpoint(context.Context, SessionRef) (EventCheckpoint, error)
+  }
   type EventChildOrigin struct {
       Scope         EventChildScope `json:"scope,omitempty"`
       ScopeID       string          `json:"scope_id,omitempty"`

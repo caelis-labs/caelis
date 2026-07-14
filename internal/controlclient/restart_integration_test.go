@@ -89,7 +89,7 @@ func TestProcessRestartRebuildsDurableClientStateFromSessionTruth(t *testing.T) 
 		t.Fatal(err)
 	}
 	defer replayed.Subscription.Close()
-	events := receiveEnvelopes(t, replayed.Subscription.Events(), 3)
+	events := receiveEnvelopes(t, replayed.Subscription.Backfill(), 3)
 	if events[0].Delivery == nil || events[0].Delivery.Mode != eventstream.DeliveryCanonical ||
 		events[1].Delivery == nil || events[1].Delivery.Mode != eventstream.DeliveryMirror || events[1].ScopeID != "task-1" ||
 		events[2].Delivery == nil || events[2].Delivery.Mode != eventstream.DeliveryMirror || events[2].ScopeID != "task-1" {
