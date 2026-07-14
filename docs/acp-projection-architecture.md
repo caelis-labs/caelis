@@ -135,9 +135,22 @@ stream frames never emit a parent tool terminal/text copy of child activity,
 including when a runtime has materialized `Frame.Text` from a semantic child
 event. The parent receives one canonical status/result summary when the
 delegated stream closes. These are Caelis Envelope extensions, never custom
-fields in an ACP update payload root. Every Surface, including a future GUI,
-renders the same replayable scoped ACP payloads with the components used for a
-main Agent.
+fields in an ACP update payload root. Envelope-native Surfaces, including a
+future GUI, render the same replayable scoped ACP payloads with the components
+used for a main Agent.
+
+The standard ACP stdio `session/update` notification carries only `sessionId`
+and `update`; it cannot carry the surrounding Caelis Envelope `scope` or
+`parent_tool`. Forwarding a scoped child update unchanged would therefore
+flatten it into the main Agent transcript in Zed. At this presentation boundary
+only, the ACP bridge uses the typed Envelope relation to render child narrative,
+tool activity, plan, and nested terminal text as `_meta.terminal_output` updates
+for the already-mounted parent Spawn terminal. It suppresses the corresponding
+bare child update on that wire path. The child narrative `final` marker does not
+emit `terminal_exit`; the canonical parent Spawn status/result supplies the one
+terminal close. This lossy compatibility rendering is neither replay authority
+nor a second relation path: it never derives ownership from `_meta`, while the
+Control feed and durable child mirror retain the original structured semantics.
 
 A completed main-scope Task wait remains a model-visible canonical result even
 when the physical task panel belongs to an earlier Spawn call. Its canonical

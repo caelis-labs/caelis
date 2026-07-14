@@ -93,6 +93,39 @@ func TestRuntimeAgentPromptRouterKeepsSiblingTerminalOutputsWithSharedToolIDs(t 
 	}
 }
 
+func TestRuntimeAgentPromptRouterChildTerminalKeepsMessageIdentityDuringFinalReplay(t *testing.T) {
+	parentTool := &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "Spawn"}
+	first := scopedNarrativeEnvelope(eventstream.ScopeSubagent, "task-a", acp.UpdateAgentMessage, "message-a", "repeat", false)
+	first.ParentTool = parentTool
+	firstFinalReplay := scopedNarrativeEnvelope(eventstream.ScopeSubagent, "task-a", acp.UpdateAgentMessage, "message-a", "repeat", true)
+	firstFinalReplay.ParentTool = parentTool
+	second := scopedNarrativeEnvelope(eventstream.ScopeSubagent, "task-a", acp.UpdateAgentMessage, "message-b", "repeat", true)
+	second.ParentTool = parentTool
+	completed := acp.ToolStatusCompleted
+	turn := newTestControlTurn(first, firstFinalReplay, second, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "session-1",
+		Update: acp.ToolCallUpdate{
+			SessionUpdate: acp.UpdateToolCallInfo,
+			ToolCallID:    "spawn-1",
+			Status:        &completed,
+		},
+	})
+	runtimeAgent, sessionID := newPromptRouterAgentForScopeTest(t, turn)
+	cb := &recordingPromptCallbacks{}
+	promptRouterTurnForScopeTest(t, runtimeAgent, sessionID, cb)
+
+	if got := agentMessageChunks(cb.notifications); len(got) != 0 {
+		t.Fatalf("agent message chunks = %#v, want scoped child messages confined to the Spawn terminal", got)
+	}
+	if got, want := terminalOutputPayloads(cb.notifications, "spawn-1"), []string{"repeat", "repeat"}; strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("terminal outputs = %#v, want final replay suppressed without dropping a distinct repeated message %#v", got, want)
+	}
+	if !hasTerminalExitForTool(cb.notifications, "spawn-1") {
+		t.Fatalf("notifications = %#v, want parent terminal exit", cb.notifications)
+	}
+}
+
 func TestRuntimeAgentPromptDirectPathScopesNarrativesAndPermissionReset(t *testing.T) {
 	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
 	runtimeAgent, err := runtimeacp.New(runtimeacp.Config{

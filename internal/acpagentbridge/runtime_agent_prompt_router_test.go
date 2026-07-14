@@ -16,6 +16,7 @@ import (
 	"github.com/caelis-labs/caelis/protocol/acp"
 	"github.com/caelis-labs/caelis/protocol/acp/control"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
+	"github.com/caelis-labs/caelis/protocol/acp/metautil"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
 
@@ -699,13 +700,14 @@ func TestRuntimeAgentPromptRouterDeduplicatesFinalNarrativeReplay(t *testing.T) 
 	}
 }
 
-func TestRuntimeAgentPromptRouterTurnFeedForwardsChildSemanticUpdatesOnce(t *testing.T) {
+func TestRuntimeAgentPromptRouterProjectsChildSemanticsIntoParentSpawnTerminal(t *testing.T) {
 	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
 	runtime := &promptRouterRuntime{sessions: sessions}
 	status := acp.ToolStatusInProgress
 	completed := acp.ToolStatusCompleted
 	spawnKind := "SPAWN"
 	childTitle := "Apply child patch"
+	childCommandTitle := "Run child command"
 	line := 12
 	parentTool := &eventstream.ParentToolRelation{ToolCallID: "spawn-1", ToolName: "SPAWN"}
 	childDelivery := &eventstream.Delivery{Mode: eventstream.DeliveryTransient}
@@ -776,6 +778,25 @@ func TestRuntimeAgentPromptRouterTurnFeedForwardsChildSemanticUpdatesOnce(t *tes
 					Type:    "diff",
 					Path:    "child.txt",
 					NewText: "new child text\n",
+				}},
+			},
+		},
+		{
+			Kind:       eventstream.KindSessionUpdate,
+			SessionID:  "session-1",
+			Scope:      eventstream.ScopeSubagent,
+			ScopeID:    "task-1",
+			ParentTool: parentTool,
+			Delivery:   childDelivery,
+			Update: acp.ToolCallUpdate{
+				SessionUpdate: acp.UpdateToolCallInfo,
+				ToolCallID:    "child-command-1",
+				Title:         &childCommandTitle,
+				Status:        &status,
+				Content: []acp.ToolCallContent{{
+					Type:       "terminal",
+					TerminalID: "child-terminal-1",
+					Content:    acp.TextContent{Type: "text", Text: "nested output\n"},
 				}},
 			},
 		},
@@ -857,26 +878,30 @@ func TestRuntimeAgentPromptRouterTurnFeedForwardsChildSemanticUpdatesOnce(t *tes
 	if err != nil {
 		t.Fatalf("Prompt(/review) error = %v", err)
 	}
-	if got, want := agentMessageChunks(cb.notifications), []string{"child opening", "child final"}; strings.Join(got, "|") != strings.Join(want, "|") {
-		t.Fatalf("agent message chunks = %#v, want forwarded child messages %#v", got, want)
+	if got := agentMessageChunks(cb.notifications); len(got) != 0 {
+		t.Fatalf("agent message chunks = %#v, want no child narrative flattened into the main transcript", got)
 	}
-	if got, want := agentThoughtChunks(cb.notifications), []string{"child thought"}; strings.Join(got, "|") != strings.Join(want, "|") {
-		t.Fatalf("agent thought chunks = %#v, want forwarded child thought %#v", got, want)
+	if got := agentThoughtChunks(cb.notifications); len(got) != 0 {
+		t.Fatalf("agent thought chunks = %#v, want no child thought flattened into the main transcript", got)
 	}
-	if countToolCallNotifications(cb.notifications, "child-list-1") != 2 {
-		t.Fatalf("notifications = %#v, want one child tool call and one update", cb.notifications)
+	if countToolCallNotifications(cb.notifications, "child-list-1") != 0 || countToolCallNotifications(cb.notifications, "child-command-1") != 0 {
+		t.Fatalf("notifications = %#v, want no child tool call flattened into the main transcript", cb.notifications)
 	}
-	if !hasChildToolUpdateWithDiffAndLocation(cb.notifications, "child-list-1") {
-		t.Fatalf("notifications = %#v, want forwarded child diff and location", cb.notifications)
+	if countPlanNotifications(cb.notifications) != 0 {
+		t.Fatalf("notifications = %#v, want no child plan flattened into the main transcript", cb.notifications)
 	}
-	if countPlanNotifications(cb.notifications) != 1 {
-		t.Fatalf("notifications = %#v, want one forwarded child plan", cb.notifications)
+	outputs := terminalOutputPayloads(cb.notifications, "spawn-1")
+	if got, want := strings.Join(outputs, ""), "child opening\nchild thought\nApply child patch\nnested output\nPlan [in_progress]: inspect child output\nchild final"; got != want {
+		t.Fatalf("parent terminal output = %q (%#v), want %q", got, outputs, want)
 	}
-	if outputs := terminalOutputPayloads(cb.notifications, "spawn-1"); len(outputs) != 0 {
-		t.Fatalf("terminal outputs = %#v, want no parent terminal replay", outputs)
+	if !hasTerminalInfo(cb.notifications, "spawn-1", "spawn-1") || !hasToolUpdateContent(cb.notifications, "spawn-1") {
+		t.Fatalf("notifications = %#v, want the parent terminal id and terminal content anchor", cb.notifications)
 	}
 	if !hasCompletedToolUpdate(cb.notifications, "spawn-1") {
 		t.Fatalf("notifications = %#v, want parent final summary", cb.notifications)
+	}
+	if got := countTerminalExitsForTool(cb.notifications, "spawn-1"); got != 1 {
+		t.Fatalf("terminal exits = %d; notifications = %#v, want only the canonical parent Spawn close", got, cb.notifications)
 	}
 }
 
@@ -907,22 +932,6 @@ func countToolCallNotifications(notifications []acp.SessionNotification, toolCal
 	return count
 }
 
-func hasChildToolUpdateWithDiffAndLocation(notifications []acp.SessionNotification, toolCallID string) bool {
-	for _, notification := range notifications {
-		update, ok := notification.Update.(acp.ToolCallUpdate)
-		if !ok || strings.TrimSpace(update.ToolCallID) != toolCallID || update.Status == nil || *update.Status != acp.ToolStatusCompleted {
-			continue
-		}
-		if len(update.Locations) != 1 || update.Locations[0].Path != "child.txt" || len(update.Content) != 1 {
-			continue
-		}
-		if content := update.Content[0]; content.Type == "diff" && content.Path == "child.txt" && content.NewText == "new child text\n" {
-			return true
-		}
-	}
-	return false
-}
-
 func hasCompletedToolUpdate(notifications []acp.SessionNotification, toolCallID string) bool {
 	for _, notification := range notifications {
 		update, ok := notification.Update.(acp.ToolCallUpdate)
@@ -931,6 +940,24 @@ func hasCompletedToolUpdate(notifications []acp.SessionNotification, toolCallID 
 		}
 	}
 	return false
+}
+
+func hasTerminalExitForTool(notifications []acp.SessionNotification, toolCallID string) bool {
+	return countTerminalExitsForTool(notifications, toolCallID) > 0
+}
+
+func countTerminalExitsForTool(notifications []acp.SessionNotification, toolCallID string) int {
+	count := 0
+	for _, notification := range notifications {
+		update, ok := notification.Update.(acp.ToolCallUpdate)
+		if !ok || strings.TrimSpace(update.ToolCallID) != toolCallID {
+			continue
+		}
+		if exit, ok := metautil.TerminalExit(update.Meta); ok && exit.TerminalID == toolCallID {
+			count++
+		}
+	}
+	return count
 }
 
 type testPromptRouter struct {

@@ -327,7 +327,29 @@ func (a *RuntimeAgent) emitControlEnvelope(ctx context.Context, cb acp.PromptCal
 		if env.Update == nil {
 			return nil
 		}
-		return emitFilteredSessionUpdate(ctx, cb, acp.SessionNotification{SessionID: sessionID, Update: env.Update}, env.Final, source, outboundFilter)
+		if outboundFilter != nil && outboundFilter.childTerminal != nil && isACPChildTerminalEnvelope(env) {
+			outboundFilter.childTerminal.track(env, sessionID)
+			filtered, ok := outboundFilter.filterNotificationWithFinal(
+				acp.SessionNotification{SessionID: sessionID, Update: env.Update}, env.Final, source,
+			)
+			if !ok {
+				return nil
+			}
+			env.Update = filtered.Update
+			if notification, handled := outboundFilter.childTerminal.project(env, sessionID); handled {
+				if notification.Update == nil {
+					return nil
+				}
+				// A final child narrative chunk is not the parent Spawn terminal.
+				// Only the parent tool result below may close the mounted panel.
+				return cb.SessionUpdate(ctx, normalizeACPStdioTerminalExtension(notification))
+			}
+		}
+		notification := acp.SessionNotification{SessionID: sessionID, Update: env.Update}
+		if outboundFilter != nil && outboundFilter.childTerminal != nil {
+			notification = outboundFilter.childTerminal.normalizeParentClose(notification)
+		}
+		return emitFilteredSessionUpdate(ctx, cb, notification, env.Final, source, outboundFilter)
 	case eventstream.KindNotice:
 		text := strings.TrimSpace(env.Notice)
 		if text == "" {

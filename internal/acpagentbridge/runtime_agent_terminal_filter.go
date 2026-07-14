@@ -46,6 +46,7 @@ type acpNarrativeFilter struct {
 	mu               sync.Mutex
 	sent             map[acpNarrativeKey]string
 	terminalSent     map[acpTerminalOutputKey]acpTerminalOutputState
+	childTerminal    *acpChildTerminalProjector
 	suppressUserEcho bool
 }
 
@@ -53,6 +54,7 @@ func newACPNarrativeFilter(suppressUserEcho bool) *acpNarrativeFilter {
 	return &acpNarrativeFilter{
 		sent:             map[acpNarrativeKey]string{},
 		terminalSent:     map[acpTerminalOutputKey]acpTerminalOutputState{},
+		childTerminal:    newACPChildTerminalProjector(),
 		suppressUserEcho: suppressUserEcho,
 	}
 }
