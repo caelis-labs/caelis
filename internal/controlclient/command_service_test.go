@@ -242,6 +242,24 @@ func TestCommandServicePersistsKnownEffectResultAfterRequestCancellation(t *test
 	}
 }
 
+func TestCommandServicePersistsUnclassifiedBackendErrorAsUnknown(t *testing.T) {
+	backend := &recordingCommandBackend{err: errors.New("effect may have committed before transport failure")}
+	service := newTestCommandService(t, allowAuthorizer{}, NewMemoryOperationStore(), backend)
+	principal := controlport.Principal{ID: "owner"}
+	req := controlport.PromptRequest{
+		WriteBase: controlport.WriteBase{OperationID: "unclassified-error", SessionID: "session-1"},
+		Input:     "hello",
+	}
+	first, err := service.Prompt(context.Background(), principal, req)
+	if err == nil || first.Outcome != controlport.OutcomeUnknown || backend.calls != 1 {
+		t.Fatalf("Prompt() = %#v, %v, calls %d", first, err, backend.calls)
+	}
+	replayed, replayErr := service.Prompt(context.Background(), principal, req)
+	if replayErr != nil || replayed != first || backend.calls != 1 {
+		t.Fatalf("Prompt(retry) = %#v, %v, calls %d", replayed, replayErr, backend.calls)
+	}
+}
+
 type allowAuthorizer struct{}
 
 func (allowAuthorizer) Authorize(context.Context, controlport.Principal, controlport.Action, string) error {

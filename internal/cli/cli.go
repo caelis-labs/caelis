@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/app/controlserver"
@@ -105,12 +106,17 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 	}
 
 	var (
-		prompt           = fs.String("p", "", "Single-shot prompt text")
-		format           = fs.String("format", string(outputText), "Output format: text|json")
-		appName          = fs.String("app", envOr("CAELIS_APP_NAME", "caelis"), "App name")
-		userID           = fs.String("user", envOr("CAELIS_USER_ID", "local-user"), "User id")
-		sessionID        = fs.String("session", envOr("CAELIS_SESSION_ID", ""), "Session id")
-		storeDir         = fs.String("store-dir", envOr("CAELIS_STORE_DIR", defaultStoreDir(cwd)), "Store directory")
+		prompt             = fs.String("p", "", "Single-shot prompt text")
+		format             = fs.String("format", string(outputText), "Output format: text|json")
+		appName            = fs.String("app", envOr("CAELIS_APP_NAME", "caelis"), "App name")
+		userID             = fs.String("user", envOr("CAELIS_USER_ID", "local-user"), "User id")
+		sessionID          = fs.String("session", envOr("CAELIS_SESSION_ID", ""), "Session id")
+		storeDir           = fs.String("store-dir", envOr("CAELIS_STORE_DIR", defaultStoreDir(cwd)), "Store directory")
+		operationRetention = fs.String(
+			"control-operation-retention",
+			envOr("CAELIS_CONTROL_OPERATION_RETENTION", ""),
+			fmt.Sprintf("Terminal Control operation idempotency window (default %s)", gatewayapp.DefaultControlOperationRetention),
+		)
 		workspaceKey     = fs.String("workspace-key", envOr("CAELIS_WORKSPACE_KEY", defaultWorkspaceKey), "Workspace key")
 		workspaceCWD     = fs.String("workspace-cwd", envOr("CAELIS_WORKSPACE_CWD", cwd), "Workspace cwd")
 		systemPrompt     = fs.String("system-prompt", envOr("CAELIS_SYSTEM_PROMPT", ""), "Session override text to append into the assembled system prompt")
@@ -146,17 +152,22 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 	if len(fs.Args()) > 0 {
 		return fmt.Errorf("unknown arguments: %v", fs.Args())
 	}
+	controlOperationRetention, err := parseControlOperationRetention(*operationRetention)
+	if err != nil {
+		return err
+	}
 
 	cfg, err := normalizeConfig(gatewayapp.Config{
-		AppName:       *appName,
-		UserID:        *userID,
-		StoreDir:      *storeDir,
-		WorkspaceKey:  *workspaceKey,
-		WorkspaceCWD:  *workspaceCWD,
-		ApprovalMode:  *approvalMode,
-		PolicyProfile: *policyProfile,
-		ContextWindow: *contextWindow,
-		SystemPrompt:  *systemPrompt,
+		AppName:                   *appName,
+		UserID:                    *userID,
+		StoreDir:                  *storeDir,
+		ControlOperationRetention: controlOperationRetention,
+		WorkspaceKey:              *workspaceKey,
+		WorkspaceCWD:              *workspaceCWD,
+		ApprovalMode:              *approvalMode,
+		PolicyProfile:             *policyProfile,
+		ContextWindow:             *contextWindow,
+		SystemPrompt:              *systemPrompt,
 		Model: gatewayapp.ModelConfig{
 			Alias:        *modelAlias,
 			Provider:     *modelProvider,
@@ -601,6 +612,21 @@ func envInt(key string, fallback int) int {
 		}
 	}
 	return fallback
+}
+
+func parseControlOperationRetention(value string) (time.Duration, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0, nil
+	}
+	retention, err := time.ParseDuration(value)
+	if err != nil {
+		return 0, fmt.Errorf("invalid control operation retention %q: %w", value, err)
+	}
+	if retention <= 0 {
+		return 0, errors.New("control operation retention must be greater than zero")
+	}
+	return retention, nil
 }
 
 func normalizeConfig(cfg gatewayapp.Config) (gatewayapp.Config, error) {

@@ -33,6 +33,7 @@ type Config struct {
 	AppName                     string
 	UserID                      string
 	StoreDir                    string
+	ControlOperationRetention   time.Duration // Zero adopts an existing root policy; a fresh root uses the default.
 	WorkspaceKey                string
 	WorkspaceCWD                string
 	ApprovalMode                string
@@ -50,36 +51,42 @@ type ModelConfig = modelregistry.Config
 type ModelProfileConfig = modelregistry.ProfileConfig
 type ModelChoice = modelregistry.Choice
 
+// DefaultControlOperationRetention is the production replay guarantee for
+// proven terminal Control operations.
+const DefaultControlOperationRetention = internalcontrolclient.DefaultOperationTerminalRetention
+
 type GatewayRuntime interface {
 	gateway.Service
 	gateway.StreamProvider
 }
 
 type Stack struct {
-	Sessions         session.Service
-	AppName          string
-	UserID           string
-	Workspace        session.WorkspaceRef
-	lookup           *modelLookup
-	store            *appConfigStore
-	storeDir         string
-	leaseOwnerID     string
-	mu               sync.RWMutex
-	reconfigureMu    sync.Mutex
-	runtime          stackRuntimeConfig
-	sandbox          SandboxConfig
-	exec             sandbox.Runtime
-	engine           *runtime.Runtime
-	placement        controlplane.PlacementExecutor
-	acpControlPlane  *acpassembly.ControlPlane
-	taskStore        task.Store
-	controlFeeds     controlclientport.FeedRegistry
-	controlState     controlclientport.StateReader
-	controlCommands  controlclientport.CommandClient
-	controlClient    controlclientport.Service
-	approvalRecovery *internalcontrolclient.ApprovalRecoveryGate
-	gateway          *kernelimpl.Gateway
-	mcpMgr           *mcp.Manager
+	Sessions                  session.Service
+	AppName                   string
+	UserID                    string
+	Workspace                 session.WorkspaceRef
+	lookup                    *modelLookup
+	store                     *appConfigStore
+	storeDir                  string
+	controlOperationRetention time.Duration
+	leaseOwnerID              string
+	mu                        sync.RWMutex
+	reconfigureMu             sync.Mutex
+	runtime                   stackRuntimeConfig
+	sandbox                   SandboxConfig
+	exec                      sandbox.Runtime
+	engine                    *runtime.Runtime
+	placement                 controlplane.PlacementExecutor
+	acpControlPlane           *acpassembly.ControlPlane
+	taskStore                 task.Store
+	controlFeeds              controlclientport.FeedRegistry
+	controlState              controlclientport.StateReader
+	controlCommands           controlclientport.CommandClient
+	controlClient             controlclientport.Service
+	operations                *internalcontrolclient.FileOperationStore
+	approvalRecovery          *internalcontrolclient.ApprovalRecoveryGate
+	gateway                   *kernelimpl.Gateway
+	mcpMgr                    *mcp.Manager
 
 	// Optional test seam; nil uses the platform lifecycle runtime factory.
 	sandboxLifecycleFactory sandboxLifecycleRuntimeFactory
@@ -328,9 +335,25 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		return nil, err
 	}
 	stack.controlState = controlState
+	controlOperations, err := internalcontrolclient.NewFileOperationStoreWithConfig(
+		filepath.Join(storeDir, "control-operations"),
+		internalcontrolclient.OperationRetentionConfig{TerminalRetention: cfg.ControlOperationRetention},
+	)
+	if err != nil {
+		return nil, err
+	}
+	if err := controlOperations.Initialize(context.Background()); err != nil {
+		return nil, err
+	}
+	effectiveOperationRetention, err := controlOperations.EffectiveTerminalRetention(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	stack.controlOperationRetention = effectiveOperationRetention
+	stack.operations = controlOperations
 	controlCommands, err := internalcontrolclient.NewCommandService(internalcontrolclient.CommandServiceConfig{
 		Authorizer: internalcontrolclient.SessionAuthorizer{Sessions: sessions},
-		Operations: internalcontrolclient.NewFileOperationStore(filepath.Join(storeDir, "control-operations")),
+		Operations: controlOperations,
 		Backend:    stack,
 	})
 	if err != nil {
@@ -427,6 +450,8 @@ func (s *Stack) Close() error {
 	s.exec = nil
 	mcpMgr := s.mcpMgr
 	s.mcpMgr = nil
+	controlOperations := s.operations
+	s.operations = nil
 	s.mu.Unlock()
 
 	var errs []error
@@ -437,6 +462,11 @@ func (s *Stack) Close() error {
 	}
 	if mcpMgr != nil {
 		if err := mcpMgr.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if controlOperations != nil {
+		if err := controlOperations.Close(); err != nil {
 			errs = append(errs, err)
 		}
 	}

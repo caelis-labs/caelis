@@ -46,7 +46,7 @@ func TestClassifyControlBackendErrorAddsTypedHTTPCategories(t *testing.T) {
 		{
 			name:    "internal",
 			err:     &gateway.Error{Kind: gateway.KindInternal, Code: gateway.CodeInternal, Message: "private failure"},
-			outcome: controlport.OutcomeRejected,
+			outcome: controlport.OutcomeUnknown,
 			code:    errorcode.Unknown,
 		},
 	} {
@@ -57,6 +57,14 @@ func TestClassifyControlBackendErrorAddsTypedHTTPCategories(t *testing.T) {
 				t.Fatalf("classifyControlBackendError() = %v (outcome %#v, code %q)", err, outcomeErr, errorcode.CodeOf(err))
 			}
 		})
+	}
+}
+
+func TestClassifyControlBackendErrorTreatsUnclassifiedFailureAsUnknown(t *testing.T) {
+	err := classifyControlBackendError(errors.New("effect boundary failed without proof"))
+	var outcomeErr *controlport.OutcomeError
+	if !errors.As(err, &outcomeErr) || outcomeErr.Outcome != controlport.OutcomeUnknown {
+		t.Fatalf("classifyControlBackendError() = %v, want unknown outcome", err)
 	}
 }
 
