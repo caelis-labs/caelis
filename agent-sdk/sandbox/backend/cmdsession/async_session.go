@@ -65,6 +65,9 @@ type AsyncOutputChunk struct {
 	Stream    string // "stdout" or "stderr"
 	Data      []byte
 	Timestamp time.Time
+	// Final marks end-of-stream for this descriptor. Data remains raw bytes;
+	// text adapters use Final to flush any incomplete decoder suffix.
+	Final bool
 }
 
 // SessionInfo provides summary information about a session.
@@ -242,6 +245,11 @@ func (s *AsyncSession) readOutput(reader io.Reader, stream string, buffer *RingB
 	defer s.readersWg.Done()
 	if closer, ok := reader.(io.Closer); ok {
 		defer closer.Close()
+	}
+	if s.onOutput != nil {
+		defer func() {
+			s.onOutput(AsyncOutputChunk{Stream: stream, Timestamp: time.Now(), Final: true})
+		}()
 	}
 	buf := make([]byte, 8192)
 	for {

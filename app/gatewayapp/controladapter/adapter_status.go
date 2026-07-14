@@ -19,6 +19,9 @@ func (d *Adapter) status(ctx context.Context, includeDiagnostics bool) (StatusSn
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if err := ctx.Err(); err != nil {
+		return StatusSnapshot{}, err
+	}
 	modelText, sessionMode, sandboxType := d.defaultDisplays()
 	reasoningEffort := ""
 	if d.stack != nil && d.stack.Model.DefaultAliasFn != nil {
@@ -32,7 +35,7 @@ func (d *Adapter) status(ctx context.Context, includeDiagnostics bool) (StatusSn
 	}
 	activeSession, ok := d.currentSession()
 	if ok && d.stack != nil && d.stack.Status.RuntimeStateFn != nil {
-		if state, err := d.stack.Status.RuntimeStateFn(context.Background(), activeSession.SessionRef); err == nil {
+		if state, err := d.stack.Status.RuntimeStateFn(ctx, activeSession.SessionRef); err == nil {
 			if strings.TrimSpace(state.ModelAlias) != "" {
 				modelText = strings.TrimSpace(state.ModelAlias)
 			}
@@ -42,6 +45,8 @@ func (d *Adapter) status(ctx context.Context, includeDiagnostics bool) (StatusSn
 			if strings.TrimSpace(state.SessionMode) != "" {
 				sessionMode = strings.TrimSpace(state.SessionMode)
 			}
+		} else if ctx.Err() != nil {
+			return StatusSnapshot{}, ctx.Err()
 		}
 	}
 	acpStatus, activeACP, acpStatusErr := d.activeACPControllerStatus(ctx)
@@ -124,12 +129,14 @@ func (d *Adapter) status(ctx context.Context, includeDiagnostics bool) (StatusSn
 			req.SessionRef = activeSession.SessionRef
 		}
 		if includeDiagnostics && d.stack.Status.DoctorFn != nil {
-			if report, err := d.stack.Status.DoctorFn(context.Background(), req); err == nil {
+			if report, err := d.stack.Status.DoctorFn(ctx, req); err == nil {
 				applyDoctorStatus(&status, report)
 				if alias := strings.TrimSpace(report.ActiveModelAlias); alias != "" {
 					rawModelText = alias
 					status.ModelStatus.Display = formatReasoningModelDisplay(alias, status.ModelStatus.ReasoningEffort)
 				}
+			} else if ctx.Err() != nil {
+				return StatusSnapshot{}, ctx.Err()
 			}
 		}
 		if status.ModelStatus.ReasoningEffort == "" {
@@ -143,14 +150,16 @@ func (d *Adapter) status(ctx context.Context, includeDiagnostics bool) (StatusSn
 				}
 			}
 		}
-		if ok && !activeACP && d.stack.Model.SessionUsageSnapshotFn != nil {
-			if usage, err := d.stack.Model.SessionUsageSnapshotFn(context.Background(), activeSession.SessionRef, rawModelText); err == nil {
+		if includeDiagnostics && ok && !activeACP && d.stack.Model.SessionUsageSnapshotFn != nil {
+			if usage, err := d.stack.Model.SessionUsageSnapshotFn(ctx, activeSession.SessionRef, rawModelText); err == nil {
 				status.Usage.TotalTokens = usage.TotalTokens
 				status.Usage.ContextWindowTokens = usage.ContextWindowTokens
+			} else if ctx.Err() != nil {
+				return StatusSnapshot{}, ctx.Err()
 			}
 		}
-		if ok {
-			if usage, err := d.sessionTokenUsageBreakdown(context.Background(), activeSession.SessionRef); err == nil {
+		if includeDiagnostics && ok {
+			if usage, err := d.sessionTokenUsageBreakdown(ctx, activeSession.SessionRef); err == nil {
 				status.Usage.SessionUsageTotal = usageSnapshotFromKernel(usage.Total)
 				status.Usage.SessionUsageMain = usageSnapshotFromKernel(usage.Main)
 				status.Usage.SessionUsageSubagents = usageSnapshotFromKernel(usage.Subagents)
@@ -161,6 +170,8 @@ func (d *Adapter) status(ctx context.Context, includeDiagnostics bool) (StatusSn
 				status.Usage.SessionOutputTokens = usage.Total.CompletionTokens
 				status.Usage.SessionReasoningTokens = usage.Total.ReasoningTokens
 				status.Usage.SessionTotalTokens = usage.Total.TotalTokens
+			} else if ctx.Err() != nil {
+				return StatusSnapshot{}, ctx.Err()
 			}
 		}
 	}
@@ -200,6 +211,9 @@ func (d *Adapter) status(ctx context.Context, includeDiagnostics bool) (StatusSn
 		if kind, ok := activeTurnKindForSession(active, activeSession.SessionRef); ok {
 			status.Runtime.ActiveTurnKind = kind
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return StatusSnapshot{}, err
 	}
 	return status, nil
 }

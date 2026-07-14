@@ -161,7 +161,7 @@ func (s *Store) writeDocumentInternal(doc persistedDocument, injectFault bool, u
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(tmpName, path); err != nil {
+	if err := replaceFile(tmpName, path); err != nil {
 		return err
 	}
 	if err := os.Chmod(path, 0o600); err != nil {

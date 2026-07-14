@@ -47,6 +47,7 @@ type OverlayState struct {
 
 	resumeActive         bool
 	resumeQuery          string
+	resumeLoaded         bool
 	resumeCandidates     []ResumeCandidate
 	resumeIndex          int
 	resumeRequestSeq     uint64

@@ -24,7 +24,7 @@ func (s *Store) eventsForDocumentContext(ctx context.Context, doc persistedDocum
 	if err != nil {
 		return nil, err
 	}
-	return s.readEventLogContext(ctx, path)
+	return s.readCachedEventLogContext(ctx, path)
 }
 
 func (s *Store) appendEventLog(documentPath string, events []*session.Event) error {
@@ -186,21 +186,43 @@ func (s *Store) readEventLogPage(ctx context.Context, documentPath string, req s
 	file, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
+			s.invalidateEventPageIndex(path)
 			return session.EventPage{NextSeq: req.AfterSeq}, nil
 		}
 		return session.EventPage{}, err
 	}
 	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return session.EventPage{}, err
+	}
+	checkpoint, err := s.eventPageStartCheckpoint(ctx, file, path, info, req.AfterSeq)
+	if err != nil {
+		return session.EventPage{}, err
+	}
+	if checkpoint.Offset > 0 {
+		if _, err := file.Seek(checkpoint.Offset, io.SeekStart); err != nil {
+			s.invalidateEventPageIndex(path)
+			return session.EventPage{}, err
+		}
+	}
 
 	out := session.EventPage{NextSeq: req.AfterSeq}
 	reader := bufio.NewReader(file)
-	lineNo := 0
+	lineNo := checkpoint.LineNo
+	offset := checkpoint.Offset
+	lastConsumed := checkpoint
 	for {
 		if err := ctx.Err(); err != nil {
 			return session.EventPage{}, err
 		}
+		lineStart := offset
 		line, readErr := reader.ReadString('\n')
+		offset += int64(len(line))
 		lineNo++
+		if len(line) > 0 && s.eventPageLineRead != nil {
+			s.eventPageLineRead(path, lineNo, lineStart)
+		}
 		if readErr != nil && !errors.Is(readErr, io.EOF) {
 			return session.EventPage{}, readErr
 		}
@@ -218,7 +240,9 @@ func (s *Store) readEventLogPage(ctx context.Context, documentPath string, req s
 			// The cursor proves earlier records were already consumed. Parse only
 			// their sequence header instead of repeatedly migrating, validating,
 			// and cloning every payload on each forward page.
+			lineCheckpoint := newEventPageCheckpoint(header.Seq, lineStart, offset, lineNo, line)
 			if header.Seq > 0 && header.Seq <= req.AfterSeq {
+				lastConsumed = lineCheckpoint
 				if errors.Is(readErr, io.EOF) {
 					break
 				}
@@ -250,6 +274,7 @@ func (s *Store) readEventLogPage(ctx context.Context, documentPath string, req s
 					break
 				}
 				out.NextSeq = event.Seq
+				lastConsumed = lineCheckpoint
 				if session.EventMatchesPageVisibility(&event, req.Visibility) {
 					out.Events = append(out.Events, session.CanonicalizeEvent(&event))
 				}
@@ -259,6 +284,16 @@ func (s *Store) readEventLogPage(ctx context.Context, documentPath string, req s
 			break
 		}
 	}
+	endInfo, err := os.Stat(path)
+	if err != nil {
+		s.invalidateEventPageIndex(path)
+		return session.EventPage{}, err
+	}
+	if eventPageFileSnapshotChanged(info, endInfo) {
+		s.invalidateEventPageIndex(path)
+		return session.EventPage{}, fmt.Errorf("agent-sdk/session/file: event log %s changed during page read", path)
+	}
+	s.recordEventPageCheckpoint(path, lastConsumed)
 	return out, nil
 }
 

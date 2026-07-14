@@ -307,6 +307,7 @@ func newSubagentTaskFromSpawn(
 		metadata: map[string]any{
 			"source": firstNonEmpty(strings.TrimSpace(req.Source), "agent_spawn"), "participant_role": string(role),
 			"spawn_status": string(phase), "spawn_identity": spawnID, "spawn_request_digest": requestDigest,
+			"parent_call": strings.TrimSpace(req.ParentCall), "parent_tool": spawn.ToolName,
 		},
 	}
 	task.applyResult(result)

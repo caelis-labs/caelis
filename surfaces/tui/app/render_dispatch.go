@@ -48,7 +48,7 @@ func renderEventPolicyFor(msg tea.Msg) (renderEventPolicy, bool) {
 		return renderEventPolicy{lane: renderLaneParticipant, flushSmoothing: true, flushLogChunks: true}, true
 	case PlanUpdateMsg, SetHintMsg, UpdateCheckResultMsg, RunningActivityMsg,
 		SetStatusMsg, StatusRefreshResultMsg, SetCommandsMsg, AttachmentCountMsg,
-		RunningInterruptResultMsg, SandboxProgressMsg:
+		RunningInterruptResultMsg, SandboxProgressMsg, statusRefreshRequestMsg:
 		return renderEventPolicy{lane: renderLaneUIState}, true
 	case ClearHistoryMsg, UserMessageMsg, TaskResultMsg:
 		return renderEventPolicy{lane: renderLaneLifecycle, flushSmoothing: true, flushLogChunks: true, dismissHints: true}, true
@@ -243,6 +243,8 @@ func (m *Model) dispatchRenderEvent(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		return m.handleSetStatusMsg(typed), policyCmd, true
 	case StatusRefreshResultMsg:
 		return m.handleStatusRefreshResultMsg(typed), policyCmd, true
+	case statusRefreshRequestMsg:
+		return m, tea.Batch(policyCmd, m.beginStatusRefreshCmd()), true
 	case SetCommandsMsg:
 		return m.handleSetCommandsMsg(typed), policyCmd, true
 	case AttachmentCountMsg:
@@ -394,10 +396,16 @@ func (m *Model) handleStatusRefreshResultMsg(msg StatusRefreshResultMsg) tea.Mod
 		if nextModel != m.statusModel {
 			m.statusModel = nextModel
 		}
+	}
+	if msg.HasContext {
 		m.statusContext = strings.TrimSpace(msg.Context)
 	}
 	if msg.HasView {
-		m.statusView = msg.Status
+		nextStatus := msg.Status
+		if strings.TrimSpace(nextStatus.Tokens) == "" {
+			nextStatus.Tokens = firstNonEmpty(strings.TrimSpace(m.statusView.Tokens), strings.TrimSpace(m.statusContext))
+		}
+		m.statusView = nextStatus
 		m.normalizeStatusViewWorkspace()
 	}
 	if msg.HasModeLabel {
@@ -506,12 +514,19 @@ func (m *Model) handleBTWErrorMsg(msg BTWErrorMsg) tea.Model {
 
 func (m *Model) handleStatusTickMsg() (tea.Model, tea.Cmd) {
 	cmds := []tea.Cmd{tickStatusCmd()}
-	if !m.statusRefreshInFlight && m.hasStatusRefreshCallbacks() {
-		m.statusRefreshInFlight = true
-		m.observeControlStatusCall()
-		cmds = append(cmds, m.statusRefreshCmd())
+	if cmd := m.beginStatusRefreshCmd(); cmd != nil {
+		cmds = append(cmds, cmd)
 	}
 	return m, tea.Batch(cmds...)
+}
+
+func (m *Model) beginStatusRefreshCmd() tea.Cmd {
+	if m == nil || m.statusRefreshInFlight || !m.hasStatusRefreshCallbacks() {
+		return nil
+	}
+	m.statusRefreshInFlight = true
+	m.observeControlStatusCall()
+	return m.statusRefreshCmd()
 }
 
 func (m *Model) hasStatusRefreshCallbacks() bool {
@@ -536,6 +551,7 @@ func (m *Model) statusRefreshCmd() tea.Cmd {
 		if cfg.RefreshStatus != nil {
 			msg.Model, msg.Context = cfg.RefreshStatus()
 			msg.HasStatus = true
+			msg.HasContext = strings.TrimSpace(msg.Context) != ""
 		}
 		if cfg.RefreshStatusView != nil {
 			msg.Status = cfg.RefreshStatusView()

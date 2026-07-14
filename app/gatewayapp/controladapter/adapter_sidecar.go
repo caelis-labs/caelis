@@ -77,8 +77,15 @@ func (d *Adapter) startSidecarTurn(ctx context.Context, req startSidecarTurnRequ
 		startReq.DetachSource = "side_agent_complete"
 	}
 
+	feedSubscription, err := d.subscribeGatewayTurn(activeSession.SessionRef)
+	if err != nil {
+		return nil, fmt.Errorf("app/gatewayapp/controladapter: establish sidecar feed boundary: %w", err)
+	}
 	result, err := gw.StartParticipant(ctx, startReq)
 	if err != nil {
+		if feedSubscription != nil {
+			_ = feedSubscription.Close()
+		}
 		return nil, err
 	}
 	if !req.Transient && result.Session.SessionID != "" {
@@ -88,9 +95,12 @@ func (d *Adapter) startSidecarTurn(ctx context.Context, req startSidecarTurnRequ
 		d.mu.Unlock()
 	}
 	if result.Handle == nil {
+		if feedSubscription != nil {
+			_ = feedSubscription.Close()
+		}
 		return nil, nil
 	}
-	return d.newGatewayTurn(result.Handle), nil
+	return d.newGatewayTurnWithSubscription(result.Handle, feedSubscription, true, ctx), nil
 }
 
 func (d *Adapter) allocateSideAgentLabel(ctx context.Context, ref session.SessionRef, agent string) string {
@@ -130,6 +140,10 @@ func (d *Adapter) ContinueSubagent(ctx context.Context, handle string, prompt st
 	if err != nil {
 		return nil, err
 	}
+	feedSubscription, err := d.subscribeGatewayTurn(activeSession.SessionRef)
+	if err != nil {
+		return nil, fmt.Errorf("app/gatewayapp/controladapter: establish sidecar feed boundary: %w", err)
+	}
 	result, err := gw.PromptParticipant(ctx, gateway.PromptParticipantRequest{
 		SessionRef:    activeSession.SessionRef,
 		BindingKey:    d.bindingKey,
@@ -140,10 +154,16 @@ func (d *Adapter) ContinueSubagent(ctx context.Context, handle string, prompt st
 		Source:        "user_side_agent",
 	})
 	if err != nil {
+		if feedSubscription != nil {
+			_ = feedSubscription.Close()
+		}
 		return nil, err
 	}
 	if result.Handle == nil {
+		if feedSubscription != nil {
+			_ = feedSubscription.Close()
+		}
 		return nil, nil
 	}
-	return d.newGatewayTurn(result.Handle), nil
+	return d.newGatewayTurnWithSubscription(result.Handle, feedSubscription, true, ctx), nil
 }

@@ -29,17 +29,17 @@ func NewTaskStore(store *Store) *TaskStore {
 }
 
 func (s *TaskStore) Upsert(ctx context.Context, entry *taskapi.Entry) error {
-	_, err := s.put(entry, nil, session.RuntimeMutationGuard(ctx))
+	_, err := s.put(ctx, entry, nil, session.RuntimeMutationGuard(ctx))
 	return err
 }
 
 // Put conditionally persists one task state using task revision CAS.
 func (s *TaskStore) Put(ctx context.Context, req taskapi.PutRequest) (*taskapi.Entry, error) {
 	expected := req.ExpectedRevision
-	return s.put(req.Entry, &expected, session.RuntimeMutationGuard(ctx))
+	return s.put(ctx, req.Entry, &expected, session.RuntimeMutationGuard(ctx))
 }
 
-func (s *TaskStore) put(entry *taskapi.Entry, expected *uint64, guard session.MutationGuard) (*taskapi.Entry, error) {
+func (s *TaskStore) put(ctx context.Context, entry *taskapi.Entry, expected *uint64, guard session.MutationGuard) (*taskapi.Entry, error) {
 	if s == nil || s.store == nil {
 		return nil, fmt.Errorf("agent-sdk/session/file: task store is not initialized")
 	}
@@ -51,11 +51,13 @@ func (s *TaskStore) put(entry *taskapi.Entry, expected *uint64, guard session.Mu
 		return nil, fmt.Errorf("agent-sdk/session/file: task_id and session_id are required")
 	}
 
-	s.store.mu.Lock()
+	if err := s.store.mu.LockContext(ctx); err != nil {
+		return nil, err
+	}
 	defer s.store.mu.Unlock()
 
 	var out *taskapi.Entry
-	err := s.store.withRootWriteLock(func() error {
+	err := s.store.withRootWriteLockContext(ctx, func() error {
 		doc, err := s.store.readDocumentForRef(entry.Session)
 		if err == nil {
 			if err := validateFileMutationGuard(activeDocumentLease(doc), guard, s.store.now()); err != nil {
@@ -159,7 +161,7 @@ func validateTaskLeaseOwner(entry *taskapi.Entry, leaseID, ownerID string, expec
 	return nil
 }
 
-func (s *TaskStore) Get(_ context.Context, taskID string) (*taskapi.Entry, error) {
+func (s *TaskStore) Get(ctx context.Context, taskID string) (*taskapi.Entry, error) {
 	if s == nil || s.store == nil {
 		return nil, fmt.Errorf("agent-sdk/session/file: task %q not found", strings.TrimSpace(taskID))
 	}
@@ -168,11 +170,13 @@ func (s *TaskStore) Get(_ context.Context, taskID string) (*taskapi.Entry, error
 		return nil, fmt.Errorf("agent-sdk/session/file: task_id is required")
 	}
 
-	s.store.mu.Lock()
+	if err := s.store.mu.LockContext(ctx); err != nil {
+		return nil, err
+	}
 	defer s.store.mu.Unlock()
 
 	var out *taskapi.Entry
-	if err := s.store.withRootReadLock(func() error {
+	if err := s.store.withRootReadLockContext(ctx, func() error {
 		entry, err := s.store.getTaskIndex(taskID)
 		if err != nil {
 			return err
@@ -185,7 +189,7 @@ func (s *TaskStore) Get(_ context.Context, taskID string) (*taskapi.Entry, error
 	return out, nil
 }
 
-func (s *TaskStore) ListSession(_ context.Context, ref session.SessionRef) ([]*taskapi.Entry, error) {
+func (s *TaskStore) ListSession(ctx context.Context, ref session.SessionRef) ([]*taskapi.Entry, error) {
 	if s == nil || s.store == nil {
 		return nil, fmt.Errorf("agent-sdk/session/file: task store is not initialized")
 	}
@@ -194,11 +198,13 @@ func (s *TaskStore) ListSession(_ context.Context, ref session.SessionRef) ([]*t
 		return []*taskapi.Entry{}, nil
 	}
 
-	s.store.mu.Lock()
+	if err := s.store.mu.LockContext(ctx); err != nil {
+		return nil, err
+	}
 	defer s.store.mu.Unlock()
 
 	var out []*taskapi.Entry
-	if err := s.store.withRootReadLock(func() error {
+	if err := s.store.withRootReadLockContext(ctx, func() error {
 		entries, err := s.store.listTaskIndex(ref)
 		if err != nil {
 			return err
@@ -211,7 +217,7 @@ func (s *TaskStore) ListSession(_ context.Context, ref session.SessionRef) ([]*t
 	return out, nil
 }
 
-func (s *TaskStore) GetSessionTaskByHandle(_ context.Context, ref session.SessionRef, kind taskapi.Kind, handle string) (*taskapi.Entry, error) {
+func (s *TaskStore) GetSessionTaskByHandle(ctx context.Context, ref session.SessionRef, kind taskapi.Kind, handle string) (*taskapi.Entry, error) {
 	if s == nil || s.store == nil {
 		return nil, fmt.Errorf("agent-sdk/session/file: task handle %q not found", strings.TrimSpace(handle))
 	}
@@ -228,11 +234,13 @@ func (s *TaskStore) GetSessionTaskByHandle(_ context.Context, ref session.Sessio
 		return nil, fmt.Errorf("agent-sdk/session/file: task handle is required")
 	}
 
-	s.store.mu.Lock()
+	if err := s.store.mu.LockContext(ctx); err != nil {
+		return nil, err
+	}
 	defer s.store.mu.Unlock()
 
 	var out *taskapi.Entry
-	if err := s.store.withRootReadLock(func() error {
+	if err := s.store.withRootReadLockContext(ctx, func() error {
 		entry, err := s.store.getSessionTaskIndexByHandle(ref, kind, handle)
 		if err != nil {
 			return err

@@ -56,15 +56,32 @@ func TestMergeSubagentStreamChunkAcceptsCumulativeReplay(t *testing.T) {
 	}
 }
 
-func TestMergeSubagentNarrativeChunkScopesCumulativeDetectionToMessageID(t *testing.T) {
-	combined, current := mergeSubagentNarrativeChunk("", "", "", "same", "message-1")
-	combined, current = mergeSubagentNarrativeChunk(combined, "message-1", current, "same extended", "message-1")
-	if combined != "same extended" || current != "same extended" {
-		t.Fatalf("same-message cumulative merge = (%q, %q)", combined, current)
+func TestMergeSubagentNarrativeChunkPreservesACPDeltaAndMessageBoundary(t *testing.T) {
+	combined, current := mergeSubagentNarrativeChunk("", "", "", "ha", "message-1")
+	combined, current = mergeSubagentNarrativeChunk(combined, "message-1", current, "ha", "message-1")
+	if combined != "haha" || current != "haha" {
+		t.Fatalf("same-message delta merge = (%q, %q), want repeated bytes preserved", combined, current)
 	}
-	combined, current = mergeSubagentNarrativeChunk(combined, "message-1", current, "same extended", "message-2")
-	if combined != "same extendedsame extended" || current != "same extended" {
-		t.Fatalf("different-message prefix merge = (%q, %q), want both messages preserved", combined, current)
+	combined, current = mergeSubagentNarrativeChunk(combined, "message-1", current, "haha", "message-2")
+	if combined != "haha\n\nhaha" || current != "haha" {
+		t.Fatalf("different-message delta merge = (%q, %q), want a visible message boundary", combined, current)
+	}
+}
+
+func TestMergeSubagentNarrativeChunkKeepsMarkdownBlocksSeparate(t *testing.T) {
+	combined, current := mergeSubagentNarrativeChunk("", "", "", "> **任务 3 结果**：完成。\n---", "message-1")
+	combined, current = mergeSubagentNarrativeChunk(combined, "message-1", current, "### ✅ 任务 4：创建文件", "message-2")
+	if combined != "> **任务 3 结果**：完成。\n---\n\n### ✅ 任务 4：创建文件" || current != "### ✅ 任务 4：创建文件" {
+		t.Fatalf("different-message Markdown merge = (%q, %q), want separate blocks", combined, current)
+	}
+}
+
+func TestMergeSubagentNarrativeChunkAccumulatesBlankMessageID(t *testing.T) {
+	combined, current := mergeSubagentNarrativeChunk("", "", "", "当前", "")
+	combined, current = mergeSubagentNarrativeChunk(combined, "", current, "当前", "")
+	combined, current = mergeSubagentNarrativeChunk(combined, "", current, "。", "")
+	if combined != "当前当前。" || current != "当前当前。" {
+		t.Fatalf("blank-message delta merge = (%q, %q), want every chunk accumulated", combined, current)
 	}
 }
 

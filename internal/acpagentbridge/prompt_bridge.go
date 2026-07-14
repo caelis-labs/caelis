@@ -135,6 +135,9 @@ func (a *RuntimeAgent) emitPromptRouterResult(ctx context.Context, activeSession
 }
 
 func promptRouterResultSessionID(activeSession session.Session, result controlprompt.Result) string {
+	if sessionID := strings.TrimSpace(result.ActiveSessionID); sessionID != "" {
+		return sessionID
+	}
 	if result.StatusUpdate != nil {
 		if sessionID := strings.TrimSpace(result.StatusUpdate.Session.ID); sessionID != "" {
 			return sessionID
@@ -145,7 +148,7 @@ func promptRouterResultSessionID(activeSession session.Session, result controlpr
 
 func (a *RuntimeAgent) emitPromptRouterSideEffects(ctx context.Context, cb acp.PromptCallbacks, activeSession session.Session, result controlprompt.Result) error {
 	sessionID := promptRouterResultSessionID(activeSession, result)
-	if result.StatusUpdate != nil || result.ClearHistory {
+	if result.StatusUpdate != nil || result.ClearHistory || result.RefreshStatus {
 		if err := a.emitPromptRouterSessionState(ctx, cb, activeSession, sessionID, result.ClearHistory); err != nil {
 			return err
 		}

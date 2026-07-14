@@ -103,6 +103,131 @@ func TestGatewayTurnSubscriptionFailureEmitsErrorAndInterruptedTerminal(t *testi
 	assertAdapterLifecycleState(t, out[2], eventstream.LifecycleStateInterrupted)
 }
 
+func TestGatewayTurnAttachmentFailureEmitsFailedTerminal(t *testing.T) {
+	events := make(chan eventstream.Envelope)
+	attachment := make(chan error, 1)
+	attachment <- errors.New("feed publish rejected")
+	close(attachment)
+	turn := &gatewayTurn{
+		handle:       &testGatewayTurnHandle{},
+		subscription: &errorFeedSubscription{events: events},
+		attachment:   attachment,
+	}
+
+	out := collectAdapterTurnEvents(turn.Events())
+	if len(out) != 2 || out[0].Kind != eventstream.KindError {
+		t.Fatalf("attachment failure sequence = %#v, want error plus terminal", out)
+	}
+	assertAdapterLifecycleState(t, out[1], eventstream.LifecycleStateFailed)
+	if out[1].HandleID != "handle-1" || out[1].RunID != "run-1" || out[1].TurnID != "turn-1" {
+		t.Fatalf("attachment terminal identity = %#v", out[1])
+	}
+}
+
+func TestGatewayTurnHistoricalUnstampedTerminalCannotEndCurrentTurn(t *testing.T) {
+	events := make(chan eventstream.Envelope, 3)
+	old := eventstream.TurnCompleted("", "", "", time.Unix(1, 0))
+	old.Scope = eventstream.ScopeMain
+	events <- old
+	events <- eventstream.Envelope{
+		Kind: eventstream.KindNotice, SessionID: "session-1",
+		HandleID: "handle-1", RunID: "run-1", TurnID: "turn-1",
+		Scope: eventstream.ScopeMain, Notice: "current turn continued",
+	}
+	events <- eventstream.TurnCompleted("handle-1", "run-1", "turn-1", time.Unix(2, 0))
+	close(events)
+	turn := &gatewayTurn{
+		handle:       &testGatewayTurnHandle{},
+		subscription: &errorFeedSubscription{events: events},
+	}
+
+	out := collectAdapterTurnEvents(turn.Events())
+	if len(out) != 2 || out[0].Notice != "current turn continued" {
+		t.Fatalf("current turn was ended by historical terminal: %#v", out)
+	}
+	assertAdapterLifecycleState(t, out[1], eventstream.LifecycleStateCompleted)
+}
+
+func TestGatewayTurnCloseUnblocksUnreadSubscriptionDelivery(t *testing.T) {
+	input := make(chan eventstream.Envelope)
+	handle := newBrokerTestHandle(nil)
+	turn := &gatewayTurn{
+		handle:       handle,
+		subscription: &errorFeedSubscription{events: input},
+	}
+	out := turn.Events()
+	accepted := make(chan struct{})
+	go func() {
+		input <- eventstream.Envelope{Kind: eventstream.KindNotice, Notice: "unread"}
+		close(accepted)
+	}()
+	select {
+	case <-accepted:
+	case <-time.After(time.Second):
+		t.Fatal("subscription relay did not accept unread event")
+	}
+
+	closed := make(chan error, 1)
+	go func() { closed <- turn.Close() }()
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Close blocked behind unread output")
+	}
+	select {
+	case _, ok := <-out:
+		if ok {
+			t.Fatal("Close delivered an unread event")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Close did not terminate unread output")
+	}
+	if calls := handle.cancelCalls.Load(); calls != 0 {
+		t.Fatalf("Close cancelled Runtime %d times, want zero", calls)
+	}
+}
+
+func TestGatewayTurnCloseUnblocksHalfReadSubscriptionDelivery(t *testing.T) {
+	input := make(chan eventstream.Envelope, 2)
+	input <- eventstream.Envelope{Kind: eventstream.KindNotice, Notice: "first"}
+	input <- eventstream.Envelope{Kind: eventstream.KindNotice, Notice: "second"}
+	close(input)
+	handle := newBrokerTestHandle(nil)
+	turn := &gatewayTurn{
+		handle:       handle,
+		subscription: &errorFeedSubscription{events: input},
+	}
+	out := turn.Events()
+	if got := <-out; got.Notice != "first" {
+		t.Fatalf("first output = %#v", got)
+	}
+	deadline := time.Now().Add(time.Second)
+	for len(input) != 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if len(input) != 0 {
+		t.Fatal("relay did not enter blocked second delivery")
+	}
+
+	if err := turn.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case _, ok := <-out:
+		if ok {
+			t.Fatal("Close delivered the blocked second event")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Close did not terminate half-read output")
+	}
+	if calls := handle.cancelCalls.Load(); calls != 0 {
+		t.Fatalf("Close cancelled Runtime %d times, want zero", calls)
+	}
+}
+
 func TestGatewayTurnSubmitApprovalForwardsRequestID(t *testing.T) {
 	handle := &testGatewayTurnHandle{}
 	turn := newGatewayTurn(handle, nil)

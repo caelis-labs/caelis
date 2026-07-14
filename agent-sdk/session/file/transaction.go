@@ -2,6 +2,7 @@ package file
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -32,7 +33,94 @@ type persistedTransaction struct {
 
 func transactionPath(documentPath string) string { return documentPath + transactionSuffix }
 
+// writeRecoverableDocumentTransaction commits one document plus any canonical
+// events behind a durable WAL. Once the WAL rename succeeds, every later error
+// is a committed reporting error: recovery owns completing the document, index,
+// and WAL cleanup in that order.
+func (s *Store) writeRecoverableDocumentTransaction(doc persistedDocument, events []*session.Event) error {
+	if s.writeDocumentFault != nil {
+		if err := s.writeDocumentFault(); err != nil {
+			return err
+		}
+	}
+	path, err := s.resolveWritePath(doc.Session)
+	if err != nil {
+		return err
+	}
+	txnPath := transactionPath(path)
+	record := persistedTransaction{
+		Kind: transactionKind, Version: transactionVersion, Document: doc, Events: persistedEvents(events),
+	}
+	if err := s.writeTransaction(txnPath, record); err != nil {
+		return err
+	}
+	if err := s.injectTransactionFault("after_commit"); err != nil {
+		return committedDocumentWrite(err)
+	}
+	if err := s.applyTransaction(txnPath, record); err != nil {
+		return committedDocumentWrite(err)
+	}
+	if err := s.clearTransactionRecoveryMarker(); err != nil {
+		return committedDocumentWrite(err)
+	}
+	return nil
+}
+
+func (s *Store) transactionRecoveryMarkerPath() string {
+	return filepath.Join(s.normalizedRootDir(), transactionRecoveryMarkerFilename)
+}
+
+func (s *Store) transactionRecoveryPending() (bool, error) {
+	_, err := os.Stat(s.transactionRecoveryMarkerPath())
+	switch {
+	case err == nil:
+		return true, nil
+	case os.IsNotExist(err):
+		return false, nil
+	default:
+		return false, err
+	}
+}
+
+func (s *Store) markTransactionRecoveryPending() error {
+	root := s.normalizedRootDir()
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		return err
+	}
+	path := s.transactionRecoveryMarkerPath()
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := file.WriteString("pending\n"); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if err := file.Sync(); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	return syncDir(root)
+}
+
+func (s *Store) clearTransactionRecoveryMarker() error {
+	path := s.transactionRecoveryMarkerPath()
+	if err := os.Remove(path); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	return syncDir(filepath.Dir(path))
+}
+
 func (s *Store) writeTransaction(path string, record persistedTransaction) error {
+	if err := s.markTransactionRecoveryPending(); err != nil {
+		return err
+	}
 	record.Kind = transactionKind
 	record.Version = transactionVersion
 	record.Document.Session = session.CloneSession(record.Document.Session)
@@ -65,7 +153,7 @@ func (s *Store) writeTransaction(path string, record persistedTransaction) error
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(tmpName, path); err != nil {
+	if err := replaceFile(tmpName, path); err != nil {
 		return err
 	}
 	if err := os.Chmod(path, 0o600); err != nil {
@@ -78,6 +166,9 @@ func (s *Store) writeTransaction(path string, record persistedTransaction) error
 }
 
 func (s *Store) recoverTransactions() error {
+	if s != nil && s.transactionRecoveryScan != nil {
+		s.transactionRecoveryScan()
+	}
 	root := s.normalizedRootDir()
 	var paths []string
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
@@ -106,7 +197,7 @@ func (s *Store) recoverTransactions() error {
 			return err
 		}
 	}
-	return nil
+	return s.clearTransactionRecoveryMarker()
 }
 
 func decodePersistedTransaction(data []byte) (persistedTransaction, error) {
@@ -165,20 +256,31 @@ func (s *Store) applyTransaction(path string, record persistedTransaction) error
 	if err := s.injectTransactionFault("after_document"); err != nil {
 		return err
 	}
+	// The SQLite index is derived state, but it is the only lookup/listing
+	// path. Keep the committed WAL until the corresponding index entry is
+	// durable so a restart can repair an index failure without losing the
+	// Session or rebuilding the canonical event log.
+	if err := s.upsertSessionIndex(record.Document.Session, resolvedPath); err != nil {
+		return committedDocumentWrite(err)
+	}
+	if err := s.injectTransactionFault("after_index"); err != nil {
+		return err
+	}
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	if err := syncDir(filepath.Dir(path)); err != nil {
 		return err
 	}
-	if err := s.upsertSessionIndex(record.Document.Session, resolvedPath); err != nil {
-		return committedDocumentWrite(err)
-	}
 	return nil
 }
 
 func (s *Store) appendMissingTransactionEvents(documentPath string, events []*session.Event) error {
-	existing, err := s.readEventLog(documentPath)
+	// Normal writes already populated the bounded immutable cache while
+	// preparing idempotency. Reuse it here so WAL application does not perform a
+	// second full migration/validation pass; crash recovery naturally rebuilds
+	// once in a fresh Store.
+	existing, err := s.readCachedEventLogContext(context.Background(), documentPath)
 	if err != nil {
 		return err
 	}

@@ -300,6 +300,47 @@ func TestEnvelopeBaseFromSessionEventUsesDurableChildOrigin(t *testing.T) {
 	}
 }
 
+func TestEnvelopeBaseKeepsCanonicalizedDurableChildDeltaNonFinal(t *testing.T) {
+	message := model.MessageFromAssistantParts("。", "", nil)
+	event := session.CanonicalizeEvent(&session.Event{
+		ID:         "child-mirror-delta",
+		Seq:        18,
+		SessionID:  "parent-1",
+		Type:       session.EventTypeAssistant,
+		Visibility: session.VisibilityMirror,
+		Scope: &session.EventScope{ACP: session.ACPRef{
+			SessionID: "child-session-1",
+			EventType: string(session.ProtocolUpdateTypeAgentMessage),
+		}},
+		ChildOrigin: &session.EventChildOrigin{
+			Scope:      session.EventChildScopeSubagent,
+			ScopeID:    "task-1",
+			TaskID:     "task-1",
+			ParentTool: session.EventParentTool{CallID: "spawn-1", Name: "Spawn"},
+		},
+		Message: &message,
+		Protocol: &session.EventProtocol{Method: session.ProtocolMethodSessionUpdate, Update: &session.ProtocolUpdate{
+			SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage),
+			Content:       session.ProtocolTextContent("。"),
+		}},
+	})
+	if event.Protocol != nil {
+		t.Fatalf("CanonicalizeEvent() retained redundant protocol payload: %#v", event.Protocol)
+	}
+	base := EnvelopeBaseFromSessionEvent(session.SessionRef{SessionID: "parent-1"}, event, SessionEventTransport{})
+	if base.Final {
+		t.Fatal("canonicalized durable child delta was marked final")
+	}
+	events := ProjectSessionEventEnvelope(base, event)
+	if len(events) != 1 || events[0].Final {
+		t.Fatalf("ProjectSessionEventEnvelope() = %#v, want one non-final child delta", events)
+	}
+	chunk, ok := events[0].Update.(schema.ContentChunk)
+	if !ok || chunk.SessionUpdate != schema.UpdateAgentMessage || schema.ExtractTextValue(chunk.Content) != "。" {
+		t.Fatalf("projected child delta = %#v", events[0].Update)
+	}
+}
+
 func TestSessionEventFinalKeepsCanonicalAssistantBoundaryFinal(t *testing.T) {
 	event := &session.Event{
 		ID:         "assistant-1",

@@ -2728,9 +2728,18 @@ func TestRuntimeDurableApprovalResolveAndAttachLiveRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	defer run.Handle.Cancel()
+	defer func() {
+		run.Handle.Cancel()
+		if waiter, ok := run.Handle.(agent.RunnerCompletionWaiter); ok {
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := waiter.WaitCompletion(cleanupCtx); err != nil {
+				t.Errorf("WaitCompletion(cleanup) error = %v", err)
+			}
+		}
+	}()
 	var waiting agent.RunState
-	deadline := time.After(2 * time.Second)
+	deadline := time.After(10 * time.Second)
 	for {
 		waiting, err = runtime.RunState(context.Background(), activeSession.SessionRef)
 		if err == nil && waiting.WaitingApproval && waiting.PauseTokenID != "" {

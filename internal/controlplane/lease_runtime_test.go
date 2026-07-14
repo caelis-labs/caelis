@@ -219,6 +219,287 @@ func TestLeasedRuntimeHeartbeatWaitsThroughFileRootContentionWithinTTL(t *testin
 	}
 }
 
+func TestLeasedRuntimeHeartbeatDeadlineCancelsBeforeDurableExpiry(t *testing.T) {
+	root := t.TempDir()
+	primary := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{RootDir: root}))
+	contender := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{RootDir: root}))
+	active, err := primary.StartSession(context.Background(), session.StartSessionRequest{
+		AppName: "caelis", UserID: "user-1", PreferredSessionID: "leased-expiry-fence",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocker, err := primary.StartSession(context.Background(), session.StartSessionRequest{
+		AppName: "caelis", UserID: "user-1", PreferredSessionID: "expiry-fence-blocker",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const (
+		ttl      = 360 * time.Millisecond
+		interval = ttl / 3
+	)
+	leasing := &observedHeartbeatLeaseService{
+		SessionLeaseService: primary,
+		started:             make(chan time.Duration, 1),
+		completed:           make(chan observedHeartbeatResult, 1),
+	}
+	runner := newLeaseTestRunner("run-expiry-fence")
+	runtime := &leaseContextCaptureRuntime{runner: runner, contexts: make(chan context.Context, 1)}
+	wrapper, err := NewLeasedRuntime(LeasedRuntimeConfig{
+		Runtime: runtime, Leases: leasing, OwnerID: "host-a",
+		TTL: ttl, HeartbeatInterval: interval,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := wrapper.Run(context.Background(), agent.RunRequest{SessionRef: active.SessionRef})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runCtx := <-runtime.contexts
+	lease, err := primary.SessionLease(context.Background(), active.SessionRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	lockHeld := make(chan struct{})
+	releaseLock := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseLock) }) }
+	defer func() {
+		release()
+		runner.finish()
+		_ = run.Handle.Close()
+	}()
+	writeDone := make(chan error, 1)
+	go func() {
+		_, updateErr := contender.UpdateState(context.Background(), session.UpdateStateRequest{
+			SessionRef:    blocker.SessionRef,
+			MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeConfiguration),
+			Update: func(state map[string]any) (map[string]any, error) {
+				close(lockHeld)
+				<-releaseLock
+				return state, nil
+			},
+		})
+		writeDone <- updateErr
+	}()
+	select {
+	case <-lockHeld:
+	case <-time.After(time.Second):
+		t.Fatal("file root lock was not acquired")
+	}
+
+	var heartbeatBudget time.Duration
+	select {
+	case heartbeatBudget = <-leasing.started:
+	case <-time.After(time.Second):
+		t.Fatal("heartbeat did not start behind the file root lock")
+	}
+	if heartbeatBudget <= 0 || heartbeatBudget >= ttl-interval/2 {
+		t.Fatalf("heartbeat context budget = %v, want current-lease deadline rather than a fresh %v TTL", heartbeatBudget, ttl)
+	}
+
+	waitForExpiry := time.Until(lease.ExpiresAt)
+	if waitForExpiry <= 0 {
+		t.Fatalf("lease already expired before cancellation check: %#v", lease)
+	}
+	timer := time.NewTimer(waitForExpiry)
+	select {
+	case <-runner.complete:
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+		if !time.Now().Before(lease.ExpiresAt) {
+			t.Fatalf("producer cancellation reached at or after durable expiry %v", lease.ExpiresAt)
+		}
+	case <-timer.C:
+		t.Fatal("heartbeat waited through the durable lease expiry before cancelling the producer")
+	}
+	select {
+	case <-runCtx.Done():
+	default:
+		t.Fatal("Runtime context remained writable after heartbeat renewal deadline")
+	}
+	runner.mu.Lock()
+	cancelCalls := runner.cancel
+	runner.mu.Unlock()
+	if cancelCalls != 1 {
+		t.Fatalf("runner cancel calls = %d, want exactly 1", cancelCalls)
+	}
+
+	_, staleWriteErr := primary.AppendEvent(runCtx, session.AppendEventRequest{
+		SessionRef:    active.SessionRef,
+		MutationGuard: session.RuntimeMutationGuard(runCtx),
+		Event: &session.Event{
+			Type:       session.EventTypeLifecycle,
+			Visibility: session.VisibilityCanonical,
+			Lifecycle:  &session.EventLifecycle{Status: "completed", Reason: "stale-write-must-not-commit"},
+		},
+	})
+	if !errors.Is(staleWriteErr, context.Canceled) {
+		t.Fatalf("stale Runtime write error = %v, want context cancellation before Store fencing", staleWriteErr)
+	}
+
+	if wait := time.Until(lease.ExpiresAt.Add(20 * time.Millisecond)); wait > 0 {
+		timer = time.NewTimer(wait)
+		<-timer.C
+	}
+	release()
+	if err := <-writeDone; err != nil {
+		t.Fatalf("blocking file state update = %v", err)
+	}
+
+	var eventErr error
+	for _, nextErr := range run.Handle.Events() {
+		if nextErr != nil {
+			eventErr = errors.Join(eventErr, nextErr)
+		}
+	}
+	if !errors.Is(eventErr, errSessionLeaseRenewalDeadline) {
+		t.Fatalf("Events() error = %v, want renewal deadline", eventErr)
+	}
+	if strings.Contains(eventErr.Error(), "runtime lease is absent or expired") {
+		t.Fatalf("Events() leaked Store fencing detail to the ordinary Turn: %v", eventErr)
+	}
+	events, err := primary.Events(context.Background(), session.EventsRequest{
+		SessionRef: active.SessionRef, IncludeTransient: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range events {
+		if event != nil && event.Lifecycle != nil && event.Lifecycle.Reason == "stale-write-must-not-commit" {
+			t.Fatalf("stale Runtime write became durable: %#v", event)
+		}
+	}
+}
+
+func TestLeasedRuntimeCompletionCancelsHeartbeatBlockedOnFileRootLock(t *testing.T) {
+	root := t.TempDir()
+	primary := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{RootDir: root}))
+	contender := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{RootDir: root}))
+	active, err := primary.StartSession(context.Background(), session.StartSessionRequest{
+		AppName: "caelis", UserID: "user-1", PreferredSessionID: "leased-finish-contention",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocker, err := primary.StartSession(context.Background(), session.StartSessionRequest{
+		AppName: "caelis", UserID: "user-1", PreferredSessionID: "finish-root-lock-blocker",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const (
+		ttl      = 2 * time.Second
+		interval = 25 * time.Millisecond
+	)
+	leasing := &observedHeartbeatLeaseService{
+		SessionLeaseService: primary,
+		started:             make(chan time.Duration, 1),
+		completed:           make(chan observedHeartbeatResult, 1),
+	}
+	runner := newLeaseTestRunner("run-finish-contention")
+	wrapper, err := NewLeasedRuntime(LeasedRuntimeConfig{
+		Runtime: leaseTestRuntime{runner: runner}, Leases: leasing,
+		OwnerID: "host-a", TTL: ttl, HeartbeatInterval: interval,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := wrapper.Run(context.Background(), agent.RunRequest{SessionRef: active.SessionRef})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	lockHeld := make(chan struct{})
+	releaseLock := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseLock) }) }
+	defer func() {
+		release()
+		runner.finish()
+		_ = run.Handle.Close()
+	}()
+	writeDone := make(chan error, 1)
+	go func() {
+		_, updateErr := contender.UpdateState(context.Background(), session.UpdateStateRequest{
+			SessionRef:    blocker.SessionRef,
+			MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeConfiguration),
+			Update: func(state map[string]any) (map[string]any, error) {
+				close(lockHeld)
+				<-releaseLock
+				return state, nil
+			},
+		})
+		writeDone <- updateErr
+	}()
+	select {
+	case <-lockHeld:
+	case <-time.After(time.Second):
+		t.Fatal("file root lock was not acquired")
+	}
+	select {
+	case <-leasing.started:
+	case <-time.After(time.Second):
+		t.Fatal("heartbeat did not start behind the file root lock")
+	}
+
+	eventsDone := make(chan error, 1)
+	runner.finish()
+	go func() {
+		for _, eventErr := range run.Handle.Events() {
+			if eventErr != nil {
+				eventsDone <- eventErr
+				return
+			}
+		}
+		eventsDone <- nil
+	}()
+
+	select {
+	case result := <-leasing.completed:
+		if !errors.Is(result.err, context.Canceled) {
+			t.Fatalf("interrupted heartbeat error = %v, want context cancellation", result.err)
+		}
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("producer completion did not cancel the in-flight heartbeat")
+	}
+	runner.mu.Lock()
+	cancelCalls := runner.cancel
+	runner.mu.Unlock()
+	if cancelCalls != 0 {
+		t.Fatalf("runner cancel calls = %d, want intentional finish not treated as lease loss", cancelCalls)
+	}
+
+	release()
+	if err := <-writeDone; err != nil {
+		t.Fatalf("blocking file state update = %v", err)
+	}
+	select {
+	case err := <-eventsDone:
+		if err != nil {
+			t.Fatalf("Events() after interrupted heartbeat reconciliation = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Turn completion stayed blocked after root lock release")
+	}
+	durable, err := primary.SessionLease(context.Background(), active.SessionRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if durable.LeaseID != "" {
+		t.Fatalf("durable lease after completion = %#v, want released", durable)
+	}
+}
+
 func TestLeasedRunnerCloseRetainsLeaseUntilProducerQuiescent(t *testing.T) {
 	t.Parallel()
 
@@ -664,6 +945,17 @@ func (s *observedHeartbeatLeaseService) HeartbeatSessionLease(
 	return lease, err
 }
 
+func (s *observedHeartbeatLeaseService) SessionLease(
+	ctx context.Context,
+	ref session.SessionRef,
+) (session.SessionLease, error) {
+	reader, ok := s.SessionLeaseService.(session.SessionLeaseReader)
+	if !ok {
+		return session.SessionLease{}, errors.New("session lease reader is unavailable")
+	}
+	return reader.SessionLease(ctx, ref)
+}
+
 type releaseErrorLeaseService struct{ session.SessionLeaseService }
 
 func (s *releaseErrorLeaseService) ReleaseSessionLease(ctx context.Context, req session.ReleaseSessionLeaseRequest) error {
@@ -719,6 +1011,20 @@ func (r leaseTestRuntime) Run(context.Context, agent.RunRequest) (agent.RunResul
 }
 
 func (leaseTestRuntime) RunState(context.Context, session.SessionRef) (agent.RunState, error) {
+	return agent.RunState{}, nil
+}
+
+type leaseContextCaptureRuntime struct {
+	runner   agent.Runner
+	contexts chan context.Context
+}
+
+func (r *leaseContextCaptureRuntime) Run(ctx context.Context, _ agent.RunRequest) (agent.RunResult, error) {
+	r.contexts <- ctx
+	return agent.RunResult{Handle: r.runner}, nil
+}
+
+func (*leaseContextCaptureRuntime) RunState(context.Context, session.SessionRef) (agent.RunState, error) {
 	return agent.RunState{}, nil
 }
 

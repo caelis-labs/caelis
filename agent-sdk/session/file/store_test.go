@@ -1490,6 +1490,10 @@ func TestStoreAppendEventKeepsLogWhenDocumentWriteFailsAfterCommit(t *testing.T)
 	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "session index") {
 		t.Fatalf("AppendEvent() error = %v, want late session index failure", err)
 	}
+	// A committed transaction now retains its WAL until the derived index can
+	// be repaired. Restore the injected index failure before crossing the
+	// recovery barrier on the next read.
+	restoreSessionIndex(t, indexPath)
 
 	events, err := store.Events(ctx, session.EventsRequest{SessionRef: createdSession.SessionRef})
 	if err != nil {
@@ -1511,7 +1515,7 @@ func TestStoreAppendEventKeepsLogWhenDocumentWriteFailsAfterCommit(t *testing.T)
 }
 
 func TestStoreWALRecoversCommittedEventAndStateAfterCrashPoints(t *testing.T) {
-	for _, phase := range []string{"after_commit", "after_event_log"} {
+	for _, phase := range []string{"after_commit", "after_event_log", "after_document", "after_index"} {
 		t.Run(phase, func(t *testing.T) {
 			root := t.TempDir()
 			store := NewStore(Config{RootDir: root, SessionIDGenerator: func() string { return "sess-wal" }})

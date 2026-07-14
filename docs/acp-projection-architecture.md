@@ -68,12 +68,17 @@ participant/handoff protocol construction outside the SDK semantic owner.
 service, subscription lifecycle, ordering, and backpressure path. They do not
 share rendering semantics.
 
-Local command execution projects opaque terminal bytes through the documented
-Caelis extension:
+Local command execution projects valid UTF-8 terminal text deltas through the
+documented Caelis extension. Sandbox session storage keeps the underlying raw
+bytes; live text ingress reassembles split UTF-8 runes independently for stdout
+and stderr and replaces genuinely invalid byte sequences explicitly:
 
 - `_meta.terminal_info`: local terminal identity for a tool call;
-- `_meta.terminal_output`: exact output bytes in `data`;
+- `_meta.terminal_output`: the exact retained text delta in `data`, without
+  cumulative-snapshot overlap guessing;
 - `_meta.terminal_exit`: local terminal termination state when known.
+- `_meta.caelis.runtime.stream.truncated=true` plus `truncated_before`: the
+  requested byte cursor predates Runtime's bounded live buffer.
 
 The current empty `content[type="terminal"]` anchor is not an output transport;
 the Caelis metadata carries the bytes. This is a deliberate compatibility
@@ -118,6 +123,13 @@ The Control child recorder first persists semantic child events as
 `VisibilityMirror`; their published `delivery.mode=mirror` position is durable
 and replayable without entering parent model context. Exact task bytes and
 other events with no stored semantic source use `delivery.mode=transient`.
+Session canonicalization may remove a redundant `Protocol.Update` when the
+same narrative already exists in `Message`; the normalized
+`EventScope.ACP.EventType` remains the typed update identity. Durable
+projection must use that identity when deciding whether a message or thought
+is still streaming, so storage compaction cannot turn token deltas into final
+boundaries. A child narrative boundary never closes its parent Spawn panel;
+only the parent tool status/result closes that lifecycle.
 `parent_tool` records the delegated relationship in either lane. Spawn and Task
 stream frames never emit a parent tool terminal/text copy of child activity,
 including when a runtime has materialized `Frame.Text` from a semantic child
@@ -142,6 +154,25 @@ The main update is accepted before its task delivery starts; each task source
 retains its own cursor/event order; and a projected child semantic event remains
 before the one parent final status/result update when its source closes.
 
+One physical task stream has one stable source identity even when a Turn emits
+both the original `Spawn`/`RunCommand` update and later `Task wait` observers.
+A same-Turn observer never opens another reader. If a detached task is observed
+by a later Turn, that broker promotes the observer to the original typed parent
+tool/call identity and re-reads from a replay-safe zero cursor: Runtime's current
+cursor is not proof of what Control accepted. Durable child-origin idempotency
+suppresses the already recorded prefix and publishes only the missing suffix;
+the shared Session feed likewise reconciles RunCommand byte ranges by physical
+task/terminal identity and absolute output cursor, trimming only an already
+accepted replay prefix while preserving identical bytes at a later cursor.
+RunCommand therefore keeps retained terminal text, ANSI, UTF-8 boundaries,
+cursor, and exit state. If the bounded Runtime buffer has evicted an earlier
+prefix, the typed truncation boundary is projected and Surfaces show that gap
+explicitly.
+Repeated source-read failures are bounded. The broker cancels the owning
+Runtime handle once, continues draining its authoritative `ACPEvents` until the
+producer closes and releases its execution lease, then performs the final
+source barrier and publishes one typed main error plus `failed` terminal.
+
 The current running-task stream anchor is a private, transitional Control input
 parse of the source tool update's runtime task metadata. It is confined to
 live-delivery discovery; it does not restore metadata-based `ParentTool` or
@@ -160,6 +191,38 @@ other task runtime work. Task-runtime lifecycle remains owned by the
 Runtime/Control task plane. Scoped
 subagent/participant lifecycle envelopes close only their own displayed
 execution and cannot terminate the parent Turn.
+
+The first-party Session-feed boundary is registered before `BeginTurn`, but its
+Turn ingress is attached only after the Surface claims `Turn.Events`. This
+prevents fast startup output from being mistaken for a slow consumer during the
+period in which `Submit` has not yet returned a stream. Every Session subscriber,
+including this internal handoff, has an independent bounded queue and the same
+typed slow-consumer disconnect policy. Session publication never waits on a
+Surface queue: a paused or abandoned client therefore cannot stop sibling Turn
+ingress, durable sequencing, or terminal delivery. The handoff context closes
+its subscription, and a disconnected client can resume from its last Cursor.
+Once the Surface claims the Turn, `AttachTo` fences its prepared target while
+each ingress event and any durable storage gap enter the global Session
+sequence. Events accepted during that fence are collected for the target in
+their actual acceptance order under hard event and encoded-byte bounds. The
+broker releases its lock and durable sequencer before delivering that bounded
+batch; only this target delivery may wait, and only through the configured
+stall timeout. Expiry disconnects the target with the typed slow-consumer
+reason. Target or subscription teardown cancels a blocking target read or
+capacity wait, then detaches only that target: the same attachment continues as
+an untargeted Session publisher so sibling clients cannot lose the remaining
+ingress or terminal. Broker or Turn close releases the complete attachment.
+No Session-global lock or sequencer is held during target delivery.
+
+Cancellation does not bypass the Runtime producer barrier. The adapter records
+the typed requested outcome, closes the prepared subscription, and cancels the
+owning Runtime handle. `AttachTo` drops only its target delivery and continues
+publishing the same ingress through the shared Session feed until handle
+`ACPEvents` closes after producer and lease completion. Sibling TUI, SSE, and
+GUI subscriptions therefore receive the same single terminal state and Turn
+identity; the local Turn wrapper crosses that same attachment barrier before
+ending. An explicit `Close` remains delivery teardown rather than cancellation
+and emits no synthetic terminal.
 
 ### Child-scoped permission routing
 

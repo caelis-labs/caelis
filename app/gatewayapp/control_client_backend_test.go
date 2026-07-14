@@ -69,7 +69,7 @@ func TestAttachControlClientHandleUsesSharedTaskIngress(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	subscription, err := feed.SubscribeFromNow()
+	subscription, err := feed.SubscribeFromNow(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +159,7 @@ func TestControlClientClosePersistsGatePublishesLiveAndRejectsLaterPrompt(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	subscription, err := feed.SubscribeFromNow()
+	subscription, err := feed.SubscribeFromNow(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}

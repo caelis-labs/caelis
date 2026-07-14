@@ -106,25 +106,47 @@ func (d *Adapter) skillCompletionMetas(ctx context.Context) ([]skill.Meta, error
 
 func (d *Adapter) CompleteResume(ctx context.Context, query string, limit int) ([]ResumeCandidate, error) {
 	limit = normalizeCompletionLimit(limit)
-	all, err := d.ListSessions(ctx, limit)
+	query = strings.TrimSpace(strings.ToLower(query))
+	if query == "" {
+		return d.ListSessions(ctx, limit)
+	}
+	ctx, cancel := completionContext(ctx, resumeCompletionTimeout)
+	defer cancel()
+	gw, err := d.gatewaySessions()
 	if err != nil {
 		return nil, err
 	}
-	query = strings.TrimSpace(strings.ToLower(query))
-	if query == "" {
-		return all, nil
-	}
-	out := make([]ResumeCandidate, 0, min(limit, len(all)))
-	for _, item := range all {
-		if _, ok := scoreResumeCandidate(query, item); !ok {
-			continue
+	matched := make([]ResumeCandidate, 0, limit)
+	cursor := ""
+	for {
+		result, err := gw.ListSessions(ctx, gateway.ListSessionsRequest{
+			AppName: d.stack.Session.AppName, UserID: d.stack.Session.UserID,
+			WorkspaceKey: d.stack.Session.Workspace.Key,
+			Cursor:       cursor, Limit: clientProtocolSessionListLimit,
+		})
+		if err != nil {
+			return nil, err
 		}
-		out = append(out, item)
-		if len(out) >= limit {
+		for _, summary := range result.Sessions {
+			candidate := enrichResumeCandidate(ctx, d.stack.Session.Store, summary)
+			if strings.TrimSpace(candidate.Prompt) == "" && strings.TrimSpace(candidate.Title) == "" {
+				continue
+			}
+			if _, ok := scoreResumeCandidate(query, candidate); !ok {
+				continue
+			}
+			matched = append(matched, candidate)
+			if len(matched) >= limit {
+				return matched, nil
+			}
+		}
+		next := strings.TrimSpace(result.NextCursor)
+		if next == "" || next == cursor {
 			break
 		}
+		cursor = next
 	}
-	return out, nil
+	return matched, nil
 }
 
 func (d *Adapter) CompleteSlashArg(ctx context.Context, command string, query string, limit int) ([]SlashArgCandidate, error) {

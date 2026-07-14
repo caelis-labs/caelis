@@ -152,9 +152,8 @@ func (r Router) dispatchNew(ctx context.Context) (prompt.Result, error) {
 	}
 	result := r.noticeResult(fmt.Sprintf("new session: %s", session.SessionID))
 	result.ClearHistory = true
-	if status, err := r.service.Status(ctx); err == nil {
-		result.StatusUpdate = &status
-	}
+	result.ActiveSessionID = strings.TrimSpace(session.SessionID)
+	result.RefreshStatus = true
 	return result, nil
 }
 
@@ -181,17 +180,22 @@ func (r Router) dispatchResume(ctx context.Context, args string) (prompt.Result,
 		}
 		return r.noticeResult(strings.Join(lines, "\n")), nil
 	}
-	if _, err := r.service.ResumeSession(ctx, sessionID); err != nil {
+	resumed, err := r.service.ResumeSession(ctx, sessionID)
+	if err != nil {
 		return prompt.Result{}, controlcommands.FriendlyCommandError("resume session", err)
 	}
-	result := prompt.Result{Handled: true, ClearHistory: true, SuppressTurnDivider: true}
+	result := prompt.Result{
+		Handled:             true,
+		ClearHistory:        true,
+		SuppressTurnDivider: true,
+		ActiveSessionID:     strings.TrimSpace(resumed.SessionID),
+		RefreshStatus:       true,
+	}
 	if events, err := r.service.ReplayEvents(ctx); err == nil {
 		result.ReplayEvents = events
+		result.Events = append(result.Events, notice(fmt.Sprintf("resumed session: %s", result.ActiveSessionID)))
 	} else {
 		result.Events = append(result.Events, notice(fmt.Sprintf("warning: replay failed: %v", err)))
-	}
-	if status, err := r.service.Status(ctx); err == nil {
-		result.StatusUpdate = &status
 	}
 	return result, nil
 }

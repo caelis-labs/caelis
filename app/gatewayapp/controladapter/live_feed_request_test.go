@@ -3,6 +3,8 @@ package controladapter
 import (
 	"testing"
 
+	"github.com/caelis-labs/caelis/agent-sdk/task"
+	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 	"github.com/caelis-labs/caelis/protocol/acp/schema"
 )
@@ -43,8 +45,8 @@ func TestStreamRequestFromACPEventAcceptsInProgressTaskRefWithoutRunningFlag(t *
 	if req.Ref.SessionID != "session-1" || req.Ref.TaskID != "task-1" || req.Ref.TerminalID != "terminal-1" {
 		t.Fatalf("stream ref = %+v, want session/task/terminal ids", req.Ref)
 	}
-	if req.Cursor.Output != 12 {
-		t.Fatalf("cursor = %+v, want output=12", req.Cursor)
+	if req.Cursor != (stream.Cursor{}) {
+		t.Fatalf("cursor = %+v, want replay-safe zero because the running snapshot is not rendered", req.Cursor)
 	}
 	if req.CallID != "call-1" || req.ToolName != "RUN_COMMAND" {
 		t.Fatalf("request = %+v, want RUN_COMMAND call-1", req)
@@ -204,5 +206,66 @@ func TestStreamRequestFromACPEventTerminalIDPrecedence(t *testing.T) {
 				t.Fatalf("display terminal id = %q, want content terminal id %q", req.DisplayTerminalID, tt.contentTerminalID)
 			}
 		})
+	}
+}
+
+func TestStreamRequestFromACPEventSeparatesPhysicalChildSourceFromObserverCall(t *testing.T) {
+	t.Parallel()
+
+	spawn := brokerRunningSubagentEnvelope(
+		"SPAWN", "spawn-call-1", "", "task-1", "spawn-terminal-1", "task-1:1", 7,
+	)
+	wait := brokerRunningSubagentEnvelope(
+		"TASK", "task-wait-1", "wait", "task-1", "spawn-terminal-1", "task-1:1", 7,
+	)
+	write := brokerRunningSubagentEnvelope(
+		"TASK", "task-write-1", "write", "task-1", "spawn-terminal-1", "task-1:2", 3,
+	)
+
+	spawnRequest, ok := streamRequestFromACPEvent(spawn)
+	if !ok {
+		t.Fatal("Spawn stream request was not recognized")
+	}
+	waitRequest, ok := streamRequestFromACPEvent(wait)
+	if !ok {
+		t.Fatal("TASK wait stream request was not recognized")
+	}
+	writeRequest, ok := streamRequestFromACPEvent(write)
+	if !ok {
+		t.Fatal("TASK write stream request was not recognized")
+	}
+
+	if spawnRequest.Key() != waitRequest.Key() {
+		t.Fatalf("Spawn/TASK wait physical keys differ: %q != %q", spawnRequest.Key(), waitRequest.Key())
+	}
+	if !waitRequest.Observer || waitRequest.Cursor != (stream.Cursor{}) {
+		t.Fatalf("TASK wait request = %#v, want observer from replay-safe cursor zero", waitRequest)
+	}
+	if waitRequest.ParentCallID != "spawn-call-1" || waitRequest.ParentToolName != "SPAWN" {
+		t.Fatalf("TASK wait parent = (%q, %q), want canonical Spawn", waitRequest.ParentCallID, waitRequest.ParentToolName)
+	}
+	if spawnRequest.Observer || spawnRequest.Cursor.Events != 0 {
+		t.Fatalf("Spawn owner request = %#v, want source owner from event cursor zero", spawnRequest)
+	}
+	if writeRequest.Observer || writeRequest.Cursor.Events != 0 || writeRequest.Key() == spawnRequest.Key() {
+		t.Fatalf("TASK write request = %#v, want distinct continuation source from event cursor zero", writeRequest)
+	}
+}
+
+func TestStreamRequestFromACPEventRoutesCommandWaitToRunCommandSource(t *testing.T) {
+	t.Parallel()
+
+	wait := brokerRunningCommandWaitEnvelope(
+		"task-wait-1", "command-task-1", "command-terminal-1", "run-command-call-1", 37,
+	)
+	request, ok := streamRequestFromACPEvent(wait)
+	if !ok {
+		t.Fatal("command TASK wait stream request was not recognized")
+	}
+	if !request.Observer || request.TargetKind != task.KindCommand || request.Cursor != (stream.Cursor{}) {
+		t.Fatalf("command TASK wait = %#v, want command observer from replay-safe cursor zero", request)
+	}
+	if request.ParentCallID != "run-command-call-1" || request.ParentToolName != "RunCommand" {
+		t.Fatalf("command TASK wait parent = (%q, %q), want original RunCommand", request.ParentCallID, request.ParentToolName)
 	}
 }

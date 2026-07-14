@@ -334,6 +334,33 @@ func TestProjectACPEventToTranscriptEventsDisplaysTerminalStreamFrameOutput(t *t
 	}
 }
 
+func TestProjectACPEventToTranscriptEventsMarksUnavailableTerminalPrefix(t *testing.T) {
+	t.Parallel()
+
+	status := schema.ToolStatusInProgress
+	kind := schema.ToolKindExecute
+	meta := runningSnapshotTerminalMeta("RUN_COMMAND", "task-1", "terminal-1", "retained tail\n", "append")
+	meta = metautil.WithRuntimeSection(meta, metautil.RuntimeStream, map[string]any{
+		metautil.RuntimeStreamMode:      "append",
+		metautil.RuntimeStreamTruncated: true,
+		metautil.RuntimeStreamBefore:    int64(65539),
+	})
+	events := ProjectACPEventToTranscriptEvents(eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate,
+		Update: schema.ToolCallUpdate{
+			SessionUpdate: schema.UpdateToolCallInfo,
+			ToolCallID:    "call-1",
+			Title:         stringPtr("RUN_COMMAND long job"),
+			Kind:          &kind,
+			Status:        &status,
+			Meta:          meta,
+		},
+	})
+	if len(events) != 1 || events[0].ToolOutput != "… earlier output unavailable …\nretained tail\n" {
+		t.Fatalf("events = %#v, want explicit truncation marker before retained bytes", events)
+	}
+}
+
 func TestProjectACPEventToTranscriptEventsPreservesTerminalNewlineFrameOutput(t *testing.T) {
 	t.Parallel()
 

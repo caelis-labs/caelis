@@ -26,14 +26,15 @@ func FramesForSnapshot(snapshot Snapshot) []Frame {
 		closeText = snapshot.FinalText
 	}
 	frames = append(frames, Frame{
-		Ref:       NormalizeRef(snapshot.Ref),
-		Text:      closeText,
-		State:     closedState(snapshot),
-		Cursor:    CloneCursor(snapshot.Cursor),
-		Running:   false,
-		Closed:    true,
-		ExitCode:  cloneExitCode(snapshot.ExitCode),
-		UpdatedAt: snapshot.UpdatedAt,
+		Ref:             NormalizeRef(snapshot.Ref),
+		Text:            closeText,
+		State:           closedState(snapshot),
+		Cursor:          CloneCursor(snapshot.Cursor),
+		TruncatedBefore: snapshot.TruncatedBefore,
+		Running:         false,
+		Closed:          true,
+		ExitCode:        cloneExitCode(snapshot.ExitCode),
+		UpdatedAt:       snapshot.UpdatedAt,
 	})
 	return frames
 }
@@ -84,6 +85,9 @@ func normalizeClosedFrame(snapshot Snapshot, frame Frame) Frame {
 	}
 	if frame.UpdatedAt.IsZero() {
 		frame.UpdatedAt = snapshot.UpdatedAt
+	}
+	if frame.TruncatedBefore == 0 {
+		frame.TruncatedBefore = snapshot.TruncatedBefore
 	}
 	frame.Running = false
 	frame.Closed = true

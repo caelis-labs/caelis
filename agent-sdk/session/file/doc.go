@@ -3,4 +3,11 @@
 // and compound event/document updates use a fsynced write-ahead transaction
 // record recovered before any later read or write. SQLite stores secondary
 // session metadata and task control indexes.
+//
+// Forward JSONL paging uses bounded in-memory sequence checkpoints, and active
+// append preparation may reuse a bounded decoded-history cache. Both are
+// derived accelerators: a seek validates file identity and an anchor record,
+// while truncate, rollback, replacement, or an invalid anchor falls back to
+// canonical disk reconstruction. WAL and event-log files remain the only
+// recovery truth.
 package file

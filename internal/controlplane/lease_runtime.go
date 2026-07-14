@@ -203,19 +203,25 @@ func (r *LeasedRuntime) release(lease session.SessionLease) error {
 // sessionLeaseGuard is the single heartbeat/release machine used by both
 // synchronous placed operations and asynchronous leased runners.
 type sessionLeaseGuard struct {
-	leases   session.SessionLeaseService
-	ttl      time.Duration
-	interval time.Duration
-	onLoss   func()
+	leases          session.SessionLeaseService
+	ttl             time.Duration
+	interval        time.Duration
+	onLoss          func()
+	heartbeatCtx    context.Context
+	heartbeatCancel context.CancelFunc
 
-	mu           sync.Mutex
-	lease        session.SessionLease
-	heartbeatErr error
-	stop         chan struct{}
-	finishOnce   sync.Once
-	finishErr    error
-	wg           sync.WaitGroup
+	mu                   sync.Mutex
+	lease                session.SessionLease
+	heartbeatErr         error
+	stopping             bool
+	heartbeatInterrupted bool
+	stop                 chan struct{}
+	finishOnce           sync.Once
+	finishErr            error
+	wg                   sync.WaitGroup
 }
+
+var errSessionLeaseRenewalDeadline = errors.New("controlplane: session lease renewal did not complete before the expiry safety deadline")
 
 func startSessionLeaseGuard(
 	leases session.SessionLeaseService,
@@ -223,8 +229,10 @@ func startSessionLeaseGuard(
 	ttl, interval time.Duration,
 	onLoss func(),
 ) *sessionLeaseGuard {
+	heartbeatCtx, heartbeatCancel := context.WithCancel(context.Background())
 	guard := &sessionLeaseGuard{
-		leases: leases, lease: lease, ttl: ttl, interval: interval, onLoss: onLoss, stop: make(chan struct{}),
+		leases: leases, lease: lease, ttl: ttl, interval: interval, onLoss: onLoss,
+		heartbeatCtx: heartbeatCtx, heartbeatCancel: heartbeatCancel, stop: make(chan struct{}),
 	}
 	guard.wg.Add(1)
 	go guard.heartbeat()
@@ -242,6 +250,14 @@ func (g *sessionLeaseGuard) heartbeat() {
 		case <-ticker.C:
 			if err := g.heartbeatOnce(); err != nil {
 				g.mu.Lock()
+				if g.stopping && errors.Is(err, context.Canceled) {
+					// Finish cancelled a heartbeat that was waiting on durable
+					// storage. Its commit outcome is reconciled before release;
+					// an intentional shutdown is not lease loss.
+					g.heartbeatInterrupted = true
+					g.mu.Unlock()
+					return
+				}
 				g.heartbeatErr = err
 				onLoss := g.onLoss
 				g.mu.Unlock()
@@ -270,8 +286,16 @@ func (g *sessionLeaseGuard) setOnLoss(onLoss func()) {
 func (g *sessionLeaseGuard) heartbeatOnce() error {
 	g.mu.Lock()
 	lease := g.lease
+	heartbeatCtx := g.heartbeatCtx
 	g.mu.Unlock()
-	ctx, cancel := context.WithTimeout(context.Background(), g.ttl)
+	if heartbeatCtx == nil {
+		heartbeatCtx = context.Background()
+	}
+	deadline, err := sessionLeaseRenewalDeadline(lease, g.interval, time.Now())
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithDeadline(heartbeatCtx, deadline)
 	next, err := g.leases.HeartbeatSessionLease(ctx, session.HeartbeatSessionLeaseRequest{
 		SessionRef: lease.SessionRef, LeaseID: lease.LeaseID, OwnerID: lease.OwnerID,
 		ExpectedLeaseRevision: lease.Revision, TTL: g.ttl,
@@ -281,21 +305,64 @@ func (g *sessionLeaseGuard) heartbeatOnce() error {
 		if next.LeaseID == lease.LeaseID && next.Revision > lease.Revision {
 			err = nil
 		} else if reader, ok := g.leases.(session.SessionLeaseReader); ok {
-			ctx, cancel = context.WithTimeout(context.Background(), g.ttl)
+			ctx, cancel = context.WithDeadline(heartbeatCtx, deadline)
 			next, err = reader.SessionLease(ctx, lease.SessionRef)
 			cancel()
 		}
 	}
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return errSessionLeaseRenewalDeadline
+		}
+		if errors.Is(err, session.ErrLeaseConflict) {
+			return errors.New("controlplane: session lease ownership was lost during heartbeat")
+		}
 		return fmt.Errorf("controlplane: session lease heartbeat failed: %w", err)
 	}
-	if next.LeaseID != lease.LeaseID {
+	if next.LeaseID != lease.LeaseID || next.OwnerID != lease.OwnerID || next.FencingToken != lease.FencingToken {
 		return fmt.Errorf("controlplane: session lease identity changed during heartbeat")
+	}
+	if next.Revision <= lease.Revision {
+		return fmt.Errorf("controlplane: session lease revision did not advance during heartbeat")
+	}
+	if !next.ExpiresAt.After(time.Now()) {
+		return errSessionLeaseRenewalDeadline
 	}
 	g.mu.Lock()
 	g.lease = next
 	g.mu.Unlock()
 	return nil
+}
+
+// sessionLeaseRenewalDeadline leaves one heartbeat interval (or half of a
+// shorter remaining lifetime) for producer cancellation before the durable
+// fence expires. A heartbeat must never wait for a fresh full TTL: that would
+// let Runtime keep writing after the currently committed lease has expired.
+func sessionLeaseRenewalDeadline(
+	lease session.SessionLease,
+	interval time.Duration,
+	now time.Time,
+) (time.Time, error) {
+	expiresAt := lease.ExpiresAt
+	if expiresAt.IsZero() {
+		return time.Time{}, errSessionLeaseRenewalDeadline
+	}
+	remaining := expiresAt.Sub(now)
+	if remaining <= 0 {
+		return time.Time{}, errSessionLeaseRenewalDeadline
+	}
+	margin := interval
+	if margin <= 0 {
+		margin = remaining / 2
+	}
+	if margin >= remaining {
+		margin = remaining / 2
+	}
+	deadline := expiresAt.Add(-margin)
+	if !deadline.After(now) {
+		return time.Time{}, errSessionLeaseRenewalDeadline
+	}
+	return deadline, nil
 }
 
 func (g *sessionLeaseGuard) err() error {
@@ -306,11 +373,27 @@ func (g *sessionLeaseGuard) err() error {
 
 func (g *sessionLeaseGuard) finish() error {
 	g.finishOnce.Do(func() {
+		g.mu.Lock()
+		g.stopping = true
+		cancelHeartbeat := g.heartbeatCancel
+		g.mu.Unlock()
 		close(g.stop)
+		if cancelHeartbeat != nil {
+			cancelHeartbeat()
+		}
 		g.wg.Wait()
 		g.mu.Lock()
 		lease := g.lease
+		interrupted := g.heartbeatInterrupted
+		heartbeatErr := g.heartbeatErr
 		g.mu.Unlock()
+		if interrupted || heartbeatErr != nil {
+			var active bool
+			lease, active, g.finishErr = reconcileSessionLeaseForRelease(g.leases, lease, g.ttl)
+			if g.finishErr != nil || !active {
+				return
+			}
+		}
 		g.finishErr = releaseSessionLease(g.leases, lease, g.ttl)
 	})
 	return g.finishErr
@@ -331,6 +414,40 @@ func releaseSessionLease(leases session.SessionLeaseService, lease session.Sessi
 		return nil
 	}
 	return err
+}
+
+func reconcileSessionLeaseForRelease(
+	leases session.SessionLeaseService,
+	lease session.SessionLease,
+	ttl time.Duration,
+) (session.SessionLease, bool, error) {
+	reader, ok := leases.(session.SessionLeaseReader)
+	if !ok {
+		// A release with the last confirmed revision is safe even if an
+		// interrupted heartbeat committed: the store's revision CAS will reject
+		// that stale release rather than clear a newer fence.
+		return lease, true, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), min(ttl, 5*time.Second))
+	defer cancel()
+	durable, err := reader.SessionLease(ctx, lease.SessionRef)
+	if err != nil {
+		return session.SessionLease{}, false, fmt.Errorf("controlplane: reconcile interrupted session lease heartbeat: %w", err)
+	}
+	if strings.TrimSpace(durable.LeaseID) == "" {
+		return session.SessionLease{}, false, nil
+	}
+	if durable.LeaseID != lease.LeaseID || durable.OwnerID != lease.OwnerID || durable.FencingToken != lease.FencingToken {
+		return session.SessionLease{}, false, fmt.Errorf("controlplane: session lease identity changed before release")
+	}
+	if durable.Revision < lease.Revision {
+		return session.SessionLease{}, false, fmt.Errorf(
+			"controlplane: session lease revision moved backwards before release: durable=%d confirmed=%d",
+			durable.Revision,
+			lease.Revision,
+		)
+	}
+	return durable, true, nil
 }
 
 type leasedRunner struct {

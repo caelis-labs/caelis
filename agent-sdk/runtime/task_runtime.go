@@ -256,10 +256,13 @@ func taskToolMeta(snapshot taskapi.Snapshot) map[string]any {
 			taskMeta["output_cursor"] = int64(len([]byte(text)))
 		}
 	}
+	if snapshot.Kind == taskapi.KindSubagent && snapshot.EventCursor >= 0 {
+		taskMeta["event_cursor"] = snapshot.EventCursor
+	}
 	if terminalID := firstNonEmpty(strings.TrimSpace(snapshot.Terminal.TerminalID), strings.TrimSpace(snapshot.Ref.TerminalID), taskStringValue(snapshot.Metadata["terminal_id"])); terminalID != "" {
 		taskMeta["terminal_id"] = terminalID
 	}
-	for _, key := range []string{"source", "participant_role", "agent", "agent_id", "handle", "mention", "prompt", "turn_id", "turn_seq"} {
+	for _, key := range []string{"source", "participant_role", "agent", "agent_id", "handle", "mention", "prompt", "turn_id", "turn_seq", "parent_call", "parent_tool"} {
 		if value, ok := snapshot.Metadata[key]; ok {
 			taskMeta[key] = value
 		}

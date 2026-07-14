@@ -13,6 +13,10 @@ type bootstrapMsg struct {
 	err    error
 }
 
+// statusRefreshRequestMsg schedules status work through Bubble Tea instead of
+// running storage-backed callbacks on the caller's message path.
+type statusRefreshRequestMsg struct{}
+
 type clearHintMsg struct {
 	id uint64
 }

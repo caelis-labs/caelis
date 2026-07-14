@@ -2,6 +2,7 @@ package tuiapp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -208,14 +209,19 @@ func TestPluginMarketplaceListCompletionSubmitsPickerCommand(t *testing.T) {
 	}
 }
 
-func TestTypedResumeEnterOpensPickerBeforeAsyncCandidatesArrive(t *testing.T) {
+func TestTypedResumeEnterLoadsEmptyQueryAndSubmitsSelectedSession(t *testing.T) {
+	var (
+		submitted     string
+		completionCtx context.Context
+	)
 	model := NewModel(Config{
 		Commands: DefaultCommands(),
-		ResumeComplete: func(context.Context, string, int) ([]ResumeCandidate, error) {
+		ResumeComplete: func(ctx context.Context, _ string, _ int) ([]ResumeCandidate, error) {
+			completionCtx = ctx
 			return []ResumeCandidate{{SessionID: "session-1"}}, nil
 		},
-		ExecuteLine: func(Submission) TaskResultMsg {
-			t.Fatal("/resume without a selected Session must not be submitted")
+		ExecuteLine: func(submission Submission) TaskResultMsg {
+			submitted = submission.Text
 			return TaskResultMsg{}
 		},
 	})
@@ -229,6 +235,56 @@ func TestTypedResumeEnterOpensPickerBeforeAsyncCandidatesArrive(t *testing.T) {
 	}
 	if cmd == nil {
 		t.Fatal("opening typed /resume did not schedule asynchronous completion")
+	}
+	runCompletionCmd(t, model, cmd)
+	if len(model.resumeCandidates) != 1 || model.resumeCandidates[0].SessionID != "session-1" {
+		t.Fatalf("empty-query resume candidates = %#v, want session-1", model.resumeCandidates)
+	}
+	if completionCtx == nil {
+		t.Fatal("resume completion did not receive a request context")
+	}
+	if !errors.Is(completionCtx.Err(), context.Canceled) {
+		t.Fatalf("completed resume request context error = %v, want canceled", completionCtx.Err())
+	}
+
+	next, cmd = model.handleKey(keyPress("enter"))
+	model = next.(*Model)
+	if cmd == nil || !findAndRunTaskResult(cmd(), model) {
+		t.Fatal("selected resume candidate did not produce a submission command")
+	}
+	if submitted != "/resume session-1" {
+		t.Fatalf("submitted resume line = %q, want /resume session-1", submitted)
+	}
+}
+
+func TestResumeTabRetriesAfterTransientCompletionFailure(t *testing.T) {
+	attempts := 0
+	model := NewModel(Config{
+		Commands: DefaultCommands(),
+		ResumeComplete: func(context.Context, string, int) ([]ResumeCandidate, error) {
+			attempts++
+			if attempts == 1 {
+				return nil, errors.New("temporary list failure")
+			}
+			return []ResumeCandidate{{SessionID: "retry-session"}}, nil
+		},
+	})
+	model.setInputText("/resume retry")
+	model.syncTextareaFromInput()
+	model.syncSlashInputOverlays()
+	completeResumeCandidates(t, model)
+	if attempts != 1 || len(model.resumeCandidates) != 0 {
+		t.Fatalf("first completion attempts=%d candidates=%#v, want one failed attempt", attempts, model.resumeCandidates)
+	}
+
+	next, cmd := model.handleKey(keyPress("tab"))
+	model = next.(*Model)
+	if cmd == nil {
+		t.Fatal("Tab after completion failure did not schedule an asynchronous retry")
+	}
+	runCompletionCmd(t, model, cmd)
+	if attempts != 2 || len(model.resumeCandidates) != 1 || model.resumeCandidates[0].SessionID != "retry-session" {
+		t.Fatalf("retried completion attempts=%d candidates=%#v", attempts, model.resumeCandidates)
 	}
 }
 
@@ -955,7 +1011,7 @@ func TestResumeCompletionRefreshIsAsyncCancelableAndGenerationSafe(t *testing.T)
 	}
 }
 
-func TestClosingResumePickerRejectsLateCompletionAndAcceptDoesNotRefresh(t *testing.T) {
+func TestClosingResumePickerRejectsLateCompletionAndAcceptRetriesAsync(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
 	called := make(chan struct{}, 1)
@@ -972,8 +1028,9 @@ func TestClosingResumePickerRejectsLateCompletionAndAcceptDoesNotRefresh(t *test
 	model.setInputText("/resume late")
 	model.syncTextareaFromInput()
 	model.syncSlashInputOverlays()
-	if _, cmd := model.handleKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})); cmd != nil {
-		t.Fatal("accept with no candidates scheduled synchronous or backend work")
+	_, cmd := model.handleKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	if cmd == nil {
+		t.Fatal("accept with no candidates did not schedule an asynchronous retry")
 	}
 	select {
 	case <-called:
@@ -981,10 +1038,6 @@ func TestClosingResumePickerRejectsLateCompletionAndAcceptDoesNotRefresh(t *test
 	default:
 	}
 
-	cmd := model.updateResumeCandidates()
-	if cmd == nil {
-		t.Fatal("resume completion command = nil")
-	}
 	result := make(chan tea.Msg, 1)
 	go func() { result <- cmd() }()
 	select {
@@ -1988,10 +2041,11 @@ func runCompletionCmd(t *testing.T, model *Model, cmd tea.Cmd) {
 	case nil:
 		return
 	case completionRefreshMsg:
-		updated, _ := model.Update(typed)
+		updated, nextCmd := model.Update(typed)
 		if next, ok := updated.(*Model); ok && next != model {
 			*model = *next
 		}
+		runCompletionCmd(t, model, nextCmd)
 	case tea.BatchMsg:
 		for _, sub := range typed {
 			runCompletionCmd(t, model, sub)

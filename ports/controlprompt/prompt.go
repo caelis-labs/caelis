@@ -64,6 +64,9 @@ type PrivateSlashHandler func(context.Context, PrivateSlashRequest) (Result, boo
 // The boolean fields are semantic side effects, not UI instructions. TUI maps
 // ClearHistory to transcript clearing and StatusUpdate to its status bar; ACP
 // maps those same intents to standard session/update state refreshes.
+// ActiveSessionID identifies a session selected by a lifecycle command without
+// forcing the router to build a full status snapshot. RefreshStatus asks the
+// receiving surface to refresh status after it has applied preceding replay.
 // SlashResult carries structured command data; surfaces decide how to render it
 // or serialize it with control.FormatSlashResult for plain text. Events remain
 // available for additional non-redundant notices. Do not add wizard/modal
@@ -78,6 +81,8 @@ type Result struct {
 	ClearHistory        bool
 	ReplayEvents        []eventstream.Envelope
 	RefreshCommands     bool
+	ActiveSessionID     string
+	RefreshStatus       bool
 	StatusUpdate        *control.StatusSnapshot
 	SuppressTurnDivider bool
 	ContinueRunning     bool

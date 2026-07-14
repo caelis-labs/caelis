@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -1152,6 +1153,9 @@ func (t *commandTask) appendOutputLocked(text string) {
 	raw = append(raw, text...)
 	if commandLiveOutputBufferCapBytes > 0 && len(raw) > commandLiveOutputBufferCapBytes {
 		dropped := len(raw) - commandLiveOutputBufferCapBytes
+		for dropped < len(raw) && !utf8.RuneStart(raw[dropped]) {
+			dropped++
+		}
 		raw = raw[dropped:]
 		t.outputBase += int64(dropped)
 		if t.modelCursor < t.outputBase {

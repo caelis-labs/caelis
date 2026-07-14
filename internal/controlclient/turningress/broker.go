@@ -29,9 +29,10 @@ type Broker struct {
 	deliveryCtx    context.Context
 	deliveryCancel context.CancelFunc
 
-	events  chan eventstream.Envelope
-	batches chan []eventstream.Envelope
-	done    chan struct{}
+	events   chan eventstream.Envelope
+	batches  chan []eventstream.Envelope
+	failures chan error
+	done     chan struct{}
 
 	startOnce sync.Once
 	workers   sync.WaitGroup
@@ -39,14 +40,25 @@ type Broker struct {
 	mu              sync.Mutex
 	deliveryState   deliveryState
 	cancelRequested bool
+	stopState       string
+	stopReason      string
 	sources         map[string]*source
 	childRecorder   *internalcontrolclient.ChildRecorder
+	deliveryErr     error
+	producerCancel  sync.Once
+	finalMu         sync.RWMutex
+	finalError      *eventstream.Envelope
+	finalTerminal   *eventstream.Envelope
 }
 
 // The production stream subscription default is 100ms. The broker owns this
 // poll timer so a main terminal can interrupt the wait and request one final
 // Read without cancelling the task runtime.
-const sourcePollInterval = 100 * time.Millisecond
+const (
+	sourcePollInterval           = 100 * time.Millisecond
+	sourceReadTimeout            = 2 * time.Second
+	sourceMaxConsecutiveFailures = 3
+)
 
 type deliveryState uint8
 
@@ -104,6 +116,7 @@ func New(handle gateway.TurnHandle, streams func() stream.Service, recorders ...
 		deliveryCancel: deliveryCancel,
 		events:         make(chan eventstream.Envelope, 32),
 		batches:        make(chan []eventstream.Envelope, 32),
+		failures:       make(chan error, 1),
 		done:           make(chan struct{}),
 		sources:        map[string]*source{},
 	}
@@ -180,6 +193,13 @@ func (b *Broker) run() {
 				b.stopLiveDelivery()
 				return
 			}
+		case err := <-b.failures:
+			failureReason = errorText(err)
+			b.RequestStop(eventstream.LifecycleStateFailed, failureReason)
+			b.cancelOwningProducer()
+			// A task delivery failure is fatal, but it is not the Runtime
+			// producer-close barrier. Continue draining ACPEvents until close so
+			// the execution lease cannot outlive the failed terminal.
 		case env, ok := <-mainEvents:
 			if !ok {
 				b.finish(b.terminalForSourceEnd(failureReason, cancelled))
@@ -187,12 +207,18 @@ func (b *Broker) run() {
 			}
 			mainScope := isMainFeedScope(env)
 			if mainScope {
+				env = b.stampMainEnvelope(env)
 				if !b.identity.matches(env) {
 					// The handle is one Turn source. A known foreign main identity
 					// cannot enter this feed or become its terminal boundary.
 					continue
 				}
 				if eventstream.IsTerminalLifecycle(env) {
+					if b.deliveryFailure() != nil {
+						// Runtime may report cancellation before its producer exits.
+						// Preserve the source failure and wait for channel close.
+						continue
+					}
 					b.finish(env)
 					return
 				}
@@ -240,6 +266,14 @@ func (b *Broker) finish(terminal eventstream.Envelope) {
 					// broker-owned delivery now; this context does not own task
 					// runtime execution.
 					b.stopLiveSources()
+					if deliveryErr := b.deliveryFailure(); deliveryErr != nil {
+						failure := b.stampMainEnvelope(eventstream.Error(deliveryErr))
+						b.recordFinalError(failure)
+						b.emit(failure)
+						terminal = b.terminalForSourceEnd(deliveryErr.Error(), false)
+					}
+					terminal = b.stampMainEnvelope(terminal)
+					b.recordFinalTerminal(terminal)
 					b.emit(terminal)
 					return
 				}
@@ -271,6 +305,12 @@ func (b *Broker) startSource(env eventstream.Envelope) {
 		b.mu.Unlock()
 		return
 	}
+	// The first TASK wait seen by a later Turn is the new delivery owner for
+	// the already-running physical source. Preserve the original parent tool
+	// identity so child semantics close the Spawn panel and command bytes keep
+	// using the RunCommand terminal. A same-Turn observer never reaches this
+	// promotion because the stable source key above already exists.
+	req = promoteObserverSource(req)
 	source := newSource(req, streams)
 	b.sources[key] = source
 	b.workers.Add(1)
@@ -280,101 +320,154 @@ func (b *Broker) startSource(env eventstream.Envelope) {
 	go b.forwardSource(ctx, source)
 }
 
+func promoteObserverSource(req acpprojector.StreamRequest) acpprojector.StreamRequest {
+	if !req.Observer {
+		return req
+	}
+	parentTool := firstNonEmpty(strings.TrimSpace(req.ParentToolName), parentToolForTaskKind(req.TargetKind))
+	if parentTool == "" {
+		return req
+	}
+	parentCall := strings.TrimSpace(req.ParentCallID)
+	if parentCall == "" {
+		return req
+	}
+	req.CallID = parentCall
+	req.ToolName = parentTool
+	req.DisplayTerminalID = firstNonEmpty(parentCall, strings.TrimSpace(req.DisplayTerminalID))
+	req.Cursor = stream.Cursor{}
+	req.Observer = false
+	// TASK's action/wait input describes the observer call, not the physical
+	// Spawn or RunCommand source being projected.
+	req.RawInput = nil
+	return req
+}
+
 func (b *Broker) forwardSource(ctx context.Context, source *source) {
 	defer b.workers.Done()
 	cursor := stream.CloneCursor(source.request.Cursor)
+	consecutiveFailures := 0
 	for {
 		finalRead := source.finalReadRequested()
-		running, accepted, ok := b.readSourceSnapshot(ctx, source, &cursor)
-		if !ok {
-			return
+		running, accepted, err := b.readSourceSnapshot(ctx, source, &cursor)
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			consecutiveFailures++
+			if consecutiveFailures >= sourceMaxConsecutiveFailures {
+				b.reportDeliveryFailure(fmt.Errorf("task stream %q delivery failed after %d attempts: %w", source.request.Key(), consecutiveFailures, err))
+				return
+			}
+			if !waitSourcePoll(ctx, source, finalRead) {
+				return
+			}
+			continue
 		}
+		consecutiveFailures = 0
 		if accepted && (finalRead || !running) {
 			return
 		}
-
-		timer := time.NewTimer(sourcePollInterval)
-		if finalRead {
-			select {
-			case <-ctx.Done():
-				if !timer.Stop() {
-					<-timer.C
-				}
-				return
-			case <-timer.C:
-				continue
-			}
+		if !waitSourcePoll(ctx, source, finalRead) {
+			return
 		}
+	}
+}
+
+func waitSourcePoll(ctx context.Context, source *source, finalRead bool) bool {
+	timer := time.NewTimer(sourcePollInterval)
+	defer timer.Stop()
+	if finalRead {
 		select {
 		case <-ctx.Done():
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
-				}
-			}
-			return
-		case <-source.finalRead:
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
-				}
-			}
-			continue
+			return false
 		case <-timer.C:
+			return true
 		}
+	}
+	select {
+	case <-ctx.Done():
+		return false
+	case <-source.finalRead:
+		return true
+	case <-timer.C:
+		return true
 	}
 }
 
 // readSourceSnapshot accepts one complete runtime snapshot before advancing the
 // source cursor. A source batch is intentionally indivisible: it preserves the
 // source's raw frame order and ProjectStreamFrame's child-before-parent order.
-func (b *Broker) readSourceSnapshot(ctx context.Context, source *source, cursor *stream.Cursor) (bool, bool, bool) {
+func (b *Broker) readSourceSnapshot(ctx context.Context, source *source, cursor *stream.Cursor) (bool, bool, error) {
 	if b == nil || source == nil || source.service == nil || cursor == nil {
-		return false, false, false
+		return false, false, fmt.Errorf("turningress: task stream source is unavailable")
 	}
-	snapshot, err := source.service.Read(ctx, stream.ReadRequest{
+	readCtx, cancel := context.WithTimeout(ctx, sourceReadTimeout)
+	defer cancel()
+	snapshot, err := source.service.Read(readCtx, stream.ReadRequest{
 		Ref:    source.request.Ref,
 		Cursor: stream.CloneCursor(*cursor),
 	})
-	if err != nil || ctx.Err() != nil {
-		return false, false, false
+	if err != nil {
+		return false, false, err
 	}
-	if !b.acceptSourceSnapshot(ctx, source.request, snapshot, cursor.Events) {
-		return snapshot.Running, false, true
+	if ctx.Err() != nil {
+		return false, false, ctx.Err()
+	}
+	if err := b.acceptSourceSnapshot(ctx, source.request, snapshot, cursor.Events); err != nil {
+		return snapshot.Running, false, err
 	}
 	*cursor = stream.CloneCursor(snapshot.Cursor)
-	return snapshot.Running, true, true
+	return snapshot.Running, true, nil
 }
 
-func (b *Broker) acceptSourceSnapshot(ctx context.Context, request acpprojector.StreamRequest, snapshot stream.Snapshot, afterEvents int64) bool {
-	batch := make([]eventstream.Envelope, 0, len(snapshot.Frames)+1)
-	for index, frame := range stream.FramesForSnapshot(snapshot) {
+func (b *Broker) acceptSourceSnapshot(ctx context.Context, request acpprojector.StreamRequest, snapshot stream.Snapshot, afterEvents int64) error {
+	frames := stream.FramesForSnapshot(snapshot)
+	if b.childRecorder != nil {
+		records := make([]internalcontrolclient.ChildRecordRequest, 0, len(frames))
+		indexes := make([]int, 0, len(frames))
+		for index, frame := range frames {
+			if frame.Event == nil {
+				continue
+			}
+			sourceSeq := afterEvents + int64(index) + 1
+			records = append(records, internalcontrolclient.ChildRecordRequest{
+				SessionRef:            request.SessionRef,
+				Event:                 frame.Event,
+				Origin:                childOriginForStreamFrame(request, frame, sourceSeq),
+				FallbackSourceEventID: childFallbackSourceEventID(request, sourceSeq),
+			})
+			indexes = append(indexes, index)
+		}
+		if len(records) > 0 {
+			stored, err := b.childRecorder.RecordBatch(ctx, records)
+			if err != nil {
+				return err
+			}
+			if len(stored) != len(indexes) {
+				return fmt.Errorf("turningress: child recorder returned %d events for %d frames", len(stored), len(indexes))
+			}
+			for index, frameIndex := range indexes {
+				frames[frameIndex].Event = stored[index]
+			}
+		}
+	}
+
+	batch := make([]eventstream.Envelope, 0, len(frames))
+	for _, frame := range frames {
 		if frame.Text == "" && frame.Event == nil && !frame.Closed {
 			continue
-		}
-		if frame.Event != nil && b.childRecorder != nil {
-			stored, err := b.childRecorder.Record(ctx, internalcontrolclient.ChildRecordRequest{
-				SessionRef: request.SessionRef,
-				Event:      frame.Event,
-				Origin:     childOriginForStreamFrame(request, frame, afterEvents+int64(index)+1),
-			})
-			if err != nil {
-				return false
-			}
-			frame.Event = stored
 		}
 		batch = append(batch, acpprojector.ProjectStreamFrame(request, frame)...)
 	}
 	if len(batch) == 0 {
-		return true
+		return nil
 	}
 	select {
 	case b.batches <- batch:
-		return true
+		return nil
 	case <-ctx.Done():
-		return false
+		return ctx.Err()
 	}
 }
 
@@ -398,12 +491,34 @@ func childOriginForStreamFrame(request acpprojector.StreamRequest, frame stream.
 		DelegationID:  firstNonEmpty(taskID, scopeID),
 		ParticipantID: participantID,
 		ACPSessionID:  acpSessionID,
-		SourceEventID: fmt.Sprintf("%s:%d", request.Key(), sourceSeq),
+		// Keep the pre-physical-source identity as the primary durable key so
+		// mirrors written by released versions dedupe during upgrade replay.
+		// ChildRecorder switches to the physical-source fallback only when this
+		// legacy position collides with a genuinely different continuation.
+		SourceEventID: fmt.Sprintf("%s:%d", legacyChildSourceKey(request), sourceSeq),
 		ParentTool: session.EventParentTool{
-			CallID: strings.TrimSpace(request.CallID),
-			Name:   strings.TrimSpace(request.ToolName),
+			CallID: firstNonEmpty(strings.TrimSpace(request.ParentCallID), strings.TrimSpace(request.CallID)),
+			Name:   firstNonEmpty(strings.TrimSpace(request.ParentToolName), strings.TrimSpace(request.ToolName)),
 		},
 	}
+}
+
+func legacyChildSourceKey(request acpprojector.StreamRequest) string {
+	return strings.Join([]string{
+		strings.TrimSpace(request.SessionRef.SessionID),
+		strings.TrimSpace(request.Ref.TaskID),
+		strings.TrimSpace(request.Ref.TerminalID),
+		strings.TrimSpace(request.CallID),
+	}, "|")
+}
+
+func childFallbackSourceEventID(request acpprojector.StreamRequest, sourceSeq int64) string {
+	legacy := legacyChildSourceKey(request)
+	physical := request.Key()
+	if physical == "" || physical == legacy {
+		return ""
+	}
+	return fmt.Sprintf("%s:%d", physical, sourceSeq)
 }
 
 func (b *Broker) emitBatch(batch []eventstream.Envelope) bool {
@@ -427,13 +542,82 @@ func (b *Broker) emit(env eventstream.Envelope) bool {
 	}
 }
 
-func (b *Broker) Cancel() {
+func (b *Broker) reportDeliveryFailure(err error) {
+	if b == nil || err == nil {
+		return
+	}
+	b.mu.Lock()
+	first := false
+	if b.deliveryErr == nil {
+		b.deliveryErr = err
+		first = true
+	}
+	b.mu.Unlock()
+	if !first {
+		return
+	}
+	select {
+	case b.failures <- err:
+	case <-b.ctx.Done():
+	default:
+	}
+}
+
+func (b *Broker) deliveryFailure() error {
+	if b == nil {
+		return nil
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.deliveryErr
+}
+
+func (b *Broker) stampMainEnvelope(env eventstream.Envelope) eventstream.Envelope {
+	if b == nil || !isMainFeedScope(env) {
+		return env
+	}
+	env = eventstream.CloneEnvelope(env)
+	env.Scope = eventstream.ScopeMain
+	if b.handle != nil {
+		env.SessionID = firstNonEmpty(strings.TrimSpace(env.SessionID), strings.TrimSpace(b.handle.SessionRef().SessionID))
+		env.ScopeID = firstNonEmpty(strings.TrimSpace(env.ScopeID), strings.TrimSpace(b.handle.SessionRef().SessionID))
+	}
+	env.HandleID = firstNonEmpty(strings.TrimSpace(env.HandleID), b.identity.handleID)
+	env.RunID = firstNonEmpty(strings.TrimSpace(env.RunID), b.identity.runID)
+	env.TurnID = firstNonEmpty(strings.TrimSpace(env.TurnID), b.identity.turnID)
+	return env
+}
+
+// RequestCancel records the owning Turn's cancellation without stopping feed
+// delivery. The broker must continue draining its handle through the main
+// producer-close barrier before clients may observe the cancelled terminal.
+func (b *Broker) RequestCancel() {
+	b.RequestStop(eventstream.LifecycleStateCancelled, "")
+}
+
+// RequestStop records the terminal outcome to publish after the Runtime
+// producer-close and final-source barriers. It does not stop feed delivery or
+// own Runtime cancellation.
+func (b *Broker) RequestStop(state string, reason string) {
 	if b == nil {
 		return
 	}
 	b.mu.Lock()
-	b.cancelRequested = true
+	if b.stopState == "" {
+		b.stopState = strings.TrimSpace(state)
+		b.stopReason = strings.TrimSpace(reason)
+	}
+	b.cancelRequested = b.stopState == eventstream.LifecycleStateCancelled
 	b.mu.Unlock()
+}
+
+// Cancel records cancellation and stops only this broker's live delivery.
+// Prefer RequestCancel when a caller must retain the producer-close barrier.
+func (b *Broker) Cancel() {
+	if b == nil {
+		return
+	}
+	b.RequestCancel()
 	b.stopLiveDelivery()
 }
 
@@ -491,6 +675,18 @@ func (b *Broker) deliveryWorkersDone() <-chan struct{} {
 }
 
 func (b *Broker) terminalForSourceEnd(failureReason string, cancelled bool) eventstream.Envelope {
+	if deliveryErr := b.deliveryFailure(); deliveryErr != nil {
+		return eventstream.TurnFailed(b.identity.handleID, b.identity.runID, b.identity.turnID, deliveryErr.Error(), time.Now())
+	}
+	if state, reason := b.requestedStop(); state != "" {
+		if reason == "" {
+			reason = failureReason
+		}
+		return eventstream.TurnLifecycle(
+			b.identity.handleID, b.identity.runID, b.identity.turnID,
+			state, reason, "", time.Now(),
+		)
+	}
 	if b.cancelWasRequested() {
 		cancelled = true
 	}
@@ -504,6 +700,62 @@ func (b *Broker) terminalForSourceEnd(failureReason string, cancelled bool) even
 	}
 }
 
+func (b *Broker) requestedStop() (string, string) {
+	if b == nil {
+		return "", ""
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.stopState, b.stopReason
+}
+
+func (b *Broker) cancelOwningProducer() {
+	if b == nil || b.handle == nil {
+		return
+	}
+	b.producerCancel.Do(func() { _ = b.handle.Cancel() })
+}
+
+// CancelProducer idempotently cancels this Turn's owning Runtime handle. It is
+// shared by gateway cancellation and source-delivery failure so concurrent
+// stop causes cannot issue duplicate physical cancellation.
+func (b *Broker) CancelProducer() {
+	b.cancelOwningProducer()
+}
+
+// FinalEnvelopes returns the broker-authored terminal outcome after its
+// producer and final-source barriers. Callers normally use it after Events has
+// closed; before then it may return an empty slice.
+func (b *Broker) FinalEnvelopes() []eventstream.Envelope {
+	if b == nil {
+		return nil
+	}
+	b.finalMu.RLock()
+	defer b.finalMu.RUnlock()
+	result := make([]eventstream.Envelope, 0, 2)
+	if b.finalError != nil {
+		result = append(result, eventstream.CloneEnvelope(*b.finalError))
+	}
+	if b.finalTerminal != nil {
+		result = append(result, eventstream.CloneEnvelope(*b.finalTerminal))
+	}
+	return result
+}
+
+func (b *Broker) recordFinalError(envelope eventstream.Envelope) {
+	b.finalMu.Lock()
+	clone := eventstream.CloneEnvelope(envelope)
+	b.finalError = &clone
+	b.finalMu.Unlock()
+}
+
+func (b *Broker) recordFinalTerminal(envelope eventstream.Envelope) {
+	b.finalMu.Lock()
+	clone := eventstream.CloneEnvelope(envelope)
+	b.finalTerminal = &clone
+	b.finalMu.Unlock()
+}
+
 func (b *Broker) cancelWasRequested() bool {
 	if b == nil {
 		return false
@@ -513,10 +765,9 @@ func (b *Broker) cancelWasRequested() bool {
 	return b.cancelRequested
 }
 
-// turnIdentity owns the feed's one transport identity policy. An ID is
-// a mismatch only when both the handle and the source provide that ID and their
-// values differ. This preserves legacy source events that omit transport IDs
-// while rejecting a known foreign main-turn event.
+// turnIdentity owns the feed's one transport identity policy. Broker ingress
+// stamps missing IDs from its authoritative handle before matching; consumers
+// can therefore reject unstamped historical lifecycle frames strictly.
 type turnIdentity struct {
 	handleID string
 	runID    string
@@ -543,7 +794,7 @@ func (identity turnIdentity) matches(env eventstream.Envelope) bool {
 func (turnIdentity) matchesID(expected string, actual string) bool {
 	expected = strings.TrimSpace(expected)
 	actual = strings.TrimSpace(actual)
-	return expected == "" || actual == "" || expected == actual
+	return expected == "" || expected == actual
 }
 
 func isMainFeedScope(env eventstream.Envelope) bool {

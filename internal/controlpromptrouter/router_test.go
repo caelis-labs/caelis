@@ -53,6 +53,60 @@ func TestRouterStatusModelAndCompactCommands(t *testing.T) {
 	}
 }
 
+func TestRouterResumeDefersStatusUntilAfterReplay(t *testing.T) {
+	t.Parallel()
+
+	svc := &fakeService{
+		replayEvents: []eventstream.Envelope{{
+			Kind:      eventstream.KindLifecycle,
+			SessionID: "resumed-session",
+			Lifecycle: &eventstream.Lifecycle{State: "completed"},
+		}},
+	}
+	result, err := New(prompt.RouterConfig{Service: svc}).Route(context.Background(), prompt.Request{
+		Submission: control.Submission{Text: "/resume resumed-session"},
+	})
+	if err != nil {
+		t.Fatalf("Route(/resume) error = %v", err)
+	}
+	if !result.Handled || !result.ClearHistory || !result.RefreshStatus {
+		t.Fatalf("Route(/resume) = %#v, want replay with deferred status refresh", result)
+	}
+	if result.ActiveSessionID != "resumed-session" {
+		t.Fatalf("Route(/resume).ActiveSessionID = %q, want resumed-session", result.ActiveSessionID)
+	}
+	if result.StatusUpdate != nil || svc.statusCalls != 0 {
+		t.Fatalf("Route(/resume) status = %#v calls=%d, want no synchronous status read", result.StatusUpdate, svc.statusCalls)
+	}
+	if len(result.ReplayEvents) != 1 {
+		t.Fatalf("Route(/resume).ReplayEvents = %#v, want one event", result.ReplayEvents)
+	}
+	if got := firstNotice(result); got != "resumed session: resumed-session" {
+		t.Fatalf("Route(/resume) notice = %q, want visible success confirmation", got)
+	}
+}
+
+func TestRouterNewDefersStatusUntilAfterHistoryClear(t *testing.T) {
+	t.Parallel()
+
+	svc := &fakeService{}
+	result, err := New(prompt.RouterConfig{Service: svc}).Route(context.Background(), prompt.Request{
+		Submission: control.Submission{Text: "/new"},
+	})
+	if err != nil {
+		t.Fatalf("Route(/new) error = %v", err)
+	}
+	if !result.Handled || !result.ClearHistory || !result.RefreshStatus {
+		t.Fatalf("Route(/new) = %#v, want clear with deferred status refresh", result)
+	}
+	if result.ActiveSessionID != "new-session" {
+		t.Fatalf("Route(/new).ActiveSessionID = %q, want new-session", result.ActiveSessionID)
+	}
+	if result.StatusUpdate != nil || svc.statusCalls != 0 {
+		t.Fatalf("Route(/new) status = %#v calls=%d, want no synchronous status read", result.StatusUpdate, svc.statusCalls)
+	}
+}
+
 func TestRouterHelpAndSubagentListReturnStructuredPayloads(t *testing.T) {
 	svc := &fakeService{
 		profileStatus: control.AgentProfileStatusSnapshot{
@@ -304,6 +358,8 @@ func firstNotice(result prompt.Result) string {
 
 type fakeService struct {
 	status             control.StatusSnapshot
+	statusCalls        int
+	replayEvents       []eventstream.Envelope
 	agents             []control.AgentCandidate
 	turn               control.Turn
 	submitted          control.Submission
@@ -323,8 +379,11 @@ type fakeService struct {
 	profileStatus      control.AgentProfileStatusSnapshot
 }
 
-func (s *fakeService) Status(context.Context) (control.StatusSnapshot, error) { return s.status, nil }
-func (s *fakeService) WorkspaceDir() string                                   { return "" }
+func (s *fakeService) Status(context.Context) (control.StatusSnapshot, error) {
+	s.statusCalls++
+	return s.status, nil
+}
+func (s *fakeService) WorkspaceDir() string { return "" }
 func (s *fakeService) Submit(_ context.Context, sub control.Submission) (control.Turn, error) {
 	s.submitted = sub
 	return s.turn, nil
@@ -339,7 +398,9 @@ func (s *fakeService) ResumeSession(context.Context, string) (control.SessionSna
 func (s *fakeService) ListSessions(context.Context, int) ([]control.ResumeCandidate, error) {
 	return nil, nil
 }
-func (s *fakeService) ReplayEvents(context.Context) ([]eventstream.Envelope, error) { return nil, nil }
+func (s *fakeService) ReplayEvents(context.Context) ([]eventstream.Envelope, error) {
+	return append([]eventstream.Envelope(nil), s.replayEvents...), nil
+}
 func (s *fakeService) Compact(context.Context) error {
 	s.compacted = true
 	return nil

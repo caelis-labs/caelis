@@ -10,7 +10,7 @@ import (
 
 type narrativeAccumulator struct {
 	final              acpschema.FinalAssistantAccumulator
-	reasoningText      string
+	reasoning          acpschema.FinalAssistantAccumulator
 	lastNarrativeEvent *session.Event
 	lastAssistantEvent *session.Event
 }
@@ -23,8 +23,9 @@ func (a *narrativeAccumulator) normalize(event *session.Event) (*session.Event, 
 	raw := narrativeEventText(event, updateType)
 	a.lastNarrativeEvent = session.CloneEvent(event)
 	if updateType == string(session.ProtocolUpdateTypeAgentMessage) {
+		a.reasoning.Reset()
 		a.lastAssistantEvent = session.CloneEvent(event)
-		update := a.final.ObserveContentChunk(acpschema.UpdateAgentMessage, raw)
+		update := a.final.ObserveFrame(narrativeMessageID(event), raw)
 		if update.Text == "" && update.Delta == "" {
 			return nil, nil, true
 		}
@@ -38,18 +39,17 @@ func (a *narrativeAccumulator) normalize(event *session.Event) (*session.Event, 
 		return nil, live, true
 	}
 	a.final.Reset()
-	cumulative, delta := appendNarrativeText(a.reasoningText, raw)
-	a.reasoningText = cumulative
-	if cumulative == "" && delta == "" {
+	update := a.reasoning.ObserveFrame(narrativeMessageID(event), raw)
+	if update.Text == "" && update.Delta == "" {
 		return nil, nil, true
 	}
-	if delta == "" {
+	if update.Delta == "" {
 		return nil, nil, true
 	}
 	live := session.CloneEvent(event)
 	live.ID = ""
 	live.Visibility = session.VisibilityUIOnly
-	setNarrativeEventText(live, updateType, delta)
+	setNarrativeEventText(live, updateType, update.Delta)
 	return nil, live, true
 }
 
@@ -60,7 +60,15 @@ func (a *narrativeAccumulator) observeBarrier(event *session.Event) {
 	switch eventUpdateType(event) {
 	case string(session.ProtocolUpdateTypeToolCall), string(session.ProtocolUpdateTypeToolUpdate), string(session.ProtocolUpdateTypePlan):
 		a.final.Reset()
+		a.reasoning.Reset()
 	}
+}
+
+func narrativeMessageID(event *session.Event) string {
+	if event == nil || event.Protocol == nil || event.Protocol.Update == nil {
+		return ""
+	}
+	return strings.TrimSpace(event.Protocol.Update.MessageID)
 }
 
 func (a *narrativeAccumulator) finalAssistantEvent() *session.Event {

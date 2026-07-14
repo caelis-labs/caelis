@@ -215,18 +215,18 @@ func TestExecuteControlPromptResultBatchesResumeReplayAfterClear(t *testing.T) {
 	var got []tea.Msg
 	sender := &ProgramSender{Send: func(msg tea.Msg) { got = append(got, msg) }}
 	executeControlPromptResult(context.Background(), nil, sender, controlprompt.Result{
-		Handled: true, ClearHistory: true, ReplayEvents: replay,
+		Handled: true, ClearHistory: true, ReplayEvents: replay, RefreshStatus: true,
 	})
 
-	if len(got) != 4 {
-		t.Fatalf("sent messages = %d, want clear plus three replay batches", len(got))
+	if len(got) != 5 {
+		t.Fatalf("sent messages = %d, want clear, three replay batches, and deferred status", len(got))
 	}
 	if _, ok := got[0].(ClearHistoryMsg); !ok {
 		t.Fatalf("first message = %#v, want ClearHistoryMsg", got[0])
 	}
 	total := 0
 	var batched []TranscriptEvent
-	for i, raw := range got[1:] {
+	for i, raw := range got[1 : len(got)-1] {
 		batch, ok := raw.(TranscriptEventsMsg)
 		if !ok {
 			t.Fatalf("message %d = %#v, want TranscriptEventsMsg", i+1, raw)
@@ -242,6 +242,39 @@ func TestExecuteControlPromptResultBatchesResumeReplayAfterClear(t *testing.T) {
 	}
 	if want := projectResumeReplayEvents(replay); !reflect.DeepEqual(batched, want) {
 		t.Fatalf("batched replay differs from one-shot projection\nbatched: %#v\nwant:    %#v", batched, want)
+	}
+	if _, ok := got[len(got)-1].(statusRefreshRequestMsg); !ok {
+		t.Fatalf("last message = %#v, want deferred status refresh after replay", got[len(got)-1])
+	}
+}
+
+func TestExecuteControlPromptResultDefersNewSessionStatusAfterClearAndNotice(t *testing.T) {
+	t.Parallel()
+
+	var got []tea.Msg
+	sender := &ProgramSender{Send: func(msg tea.Msg) { got = append(got, msg) }}
+	executeControlPromptResult(context.Background(), nil, sender, controlprompt.Result{
+		Handled:      true,
+		ClearHistory: true,
+		Events: []eventstream.Envelope{{
+			Kind:   eventstream.KindNotice,
+			Notice: "new session: session-2",
+		}},
+		ActiveSessionID: "session-2",
+		RefreshStatus:   true,
+	})
+
+	if len(got) != 3 {
+		t.Fatalf("sent messages = %#v, want clear, notice, deferred status", got)
+	}
+	if _, ok := got[0].(ClearHistoryMsg); !ok {
+		t.Fatalf("first message = %#v, want ClearHistoryMsg", got[0])
+	}
+	if notice, ok := got[1].(eventstream.Envelope); !ok || notice.Notice != "new session: session-2" {
+		t.Fatalf("second message = %#v, want new-session notice", got[1])
+	}
+	if _, ok := got[2].(statusRefreshRequestMsg); !ok {
+		t.Fatalf("last message = %#v, want deferred status refresh", got[2])
 	}
 }
 

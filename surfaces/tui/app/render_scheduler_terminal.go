@@ -53,7 +53,10 @@ func mergeEventStreamTerminalEnvelope(dst *eventstream.Envelope, src eventstream
 	if srcUpdate, ok := src.Update.(schema.ToolCallUpdate); ok {
 		if text, terminalID := acpTerminalOutput(srcUpdate); text != "" {
 			existing, existingTerminalID := acpTerminalOutput(dstUpdate)
-			text = mergeTerminalStreamChunk(existing, text)
+			// ACP terminal_output contains exact incremental bytes. Scheduler
+			// batching may coalesce frames, but must never infer overlap or treat
+			// repeated log lines as cumulative snapshots.
+			text = existing + text
 			if terminalID == "" {
 				terminalID = existingTerminalID
 			}

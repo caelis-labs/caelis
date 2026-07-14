@@ -25,29 +25,35 @@ type Cursor struct {
 // Frame is one terminal text fragment delivered to one UI or adapter. Runtime
 // stdout/stderr/result details are normalized before entering this stream.
 type Frame struct {
-	Ref       Ref            `json:"ref,omitempty"`
-	Text      string         `json:"text,omitempty"`
-	State     string         `json:"state,omitempty"`
-	Cursor    Cursor         `json:"cursor,omitempty"`
-	Running   bool           `json:"running,omitempty"`
-	Closed    bool           `json:"closed,omitempty"`
-	ExitCode  *int           `json:"exit_code,omitempty"`
-	Event     *session.Event `json:"event,omitempty"`
-	UpdatedAt time.Time      `json:"updated_at,omitempty"`
+	Ref    Ref    `json:"ref,omitempty"`
+	Text   string `json:"text,omitempty"`
+	State  string `json:"state,omitempty"`
+	Cursor Cursor `json:"cursor,omitempty"`
+	// TruncatedBefore is the earliest absolute output byte still retained when
+	// the requested cursor predates a bounded live buffer.
+	TruncatedBefore int64          `json:"truncated_before,omitempty"`
+	Running         bool           `json:"running,omitempty"`
+	Closed          bool           `json:"closed,omitempty"`
+	ExitCode        *int           `json:"exit_code,omitempty"`
+	Event           *session.Event `json:"event,omitempty"`
+	UpdatedAt       time.Time      `json:"updated_at,omitempty"`
 }
 
 // Snapshot is one point-in-time stream read result.
 type Snapshot struct {
-	Ref           Ref       `json:"ref,omitempty"`
-	Cursor        Cursor    `json:"cursor,omitempty"`
-	Frames        []Frame   `json:"frames,omitempty"`
-	FinalText     string    `json:"final_text,omitempty"`
-	State         string    `json:"state,omitempty"`
-	Running       bool      `json:"running,omitempty"`
-	SupportsInput bool      `json:"supports_input,omitempty"`
-	ExitCode      *int      `json:"exit_code,omitempty"`
-	StartedAt     time.Time `json:"started_at,omitempty"`
-	UpdatedAt     time.Time `json:"updated_at,omitempty"`
+	Ref       Ref     `json:"ref,omitempty"`
+	Cursor    Cursor  `json:"cursor,omitempty"`
+	Frames    []Frame `json:"frames,omitempty"`
+	FinalText string  `json:"final_text,omitempty"`
+	State     string  `json:"state,omitempty"`
+	// TruncatedBefore is copied to delivered frames so consumers can make a
+	// missing prefix visible instead of treating a retained suffix as complete.
+	TruncatedBefore int64     `json:"truncated_before,omitempty"`
+	Running         bool      `json:"running,omitempty"`
+	SupportsInput   bool      `json:"supports_input,omitempty"`
+	ExitCode        *int      `json:"exit_code,omitempty"`
+	StartedAt       time.Time `json:"started_at,omitempty"`
+	UpdatedAt       time.Time `json:"updated_at,omitempty"`
 }
 
 // ReadRequest asks for one incremental stream read from one cursor.
@@ -110,6 +116,9 @@ func CloneFrame(in Frame) Frame {
 	out := in
 	out.Ref = NormalizeRef(in.Ref)
 	out.Cursor = CloneCursor(in.Cursor)
+	if out.TruncatedBefore < 0 {
+		out.TruncatedBefore = 0
+	}
 	if in.ExitCode != nil {
 		code := *in.ExitCode
 		out.ExitCode = &code
@@ -123,6 +132,9 @@ func CloneSnapshot(in Snapshot) Snapshot {
 	out := in
 	out.Ref = NormalizeRef(in.Ref)
 	out.Cursor = CloneCursor(in.Cursor)
+	if out.TruncatedBefore < 0 {
+		out.TruncatedBefore = 0
+	}
 	if in.ExitCode != nil {
 		code := *in.ExitCode
 		out.ExitCode = &code

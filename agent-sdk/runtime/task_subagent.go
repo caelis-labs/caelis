@@ -12,6 +12,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 )
 
 func subagentSpawnTaskID(ref session.SessionRef, spawnID string) (string, error) {
@@ -563,6 +564,15 @@ func (tm *taskRuntime) rehydrateSubagentTask(entry *taskapi.Entry) *subagentTask
 		turnSeq:   taskTurnSeqFromSpec(entry.Spec),
 		result:    result,
 		metadata:  session.CloneState(entry.Metadata),
+	}
+	if task.metadata == nil {
+		task.metadata = map[string]any{}
+	}
+	if _, ok := task.metadata["parent_call"]; !ok {
+		task.metadata["parent_call"] = taskSpecString(entry.Spec, "parent_call")
+	}
+	if strings.TrimSpace(taskStringValue(task.metadata["parent_call"])) != "" {
+		task.metadata["parent_tool"] = firstNonEmpty(taskStringValue(task.metadata["parent_tool"]), spawn.ToolName)
 	}
 	if task.turnSeq <= 0 {
 		task.turnSeq = taskTurnSeqFromSpec(entry.Metadata)

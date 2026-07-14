@@ -46,15 +46,21 @@ type SubagentEvent struct {
 	Output          string
 	OutputMessageID string
 	OutputMessage   string
-	Terminal        bool
-	OutputSynthetic bool
-	OutputTerminal  bool
-	TaskID          string
-	TaskAction      string
-	TaskInput       string
-	TaskTargetKind  string
-	Done            bool
-	Err             bool
+	// OutputNarrative marks text supplied by child ACP narrative chunks so a
+	// repeated parent result cannot truncate already rendered child output.
+	OutputNarrative bool
+	// OutputNarrativeBoundary separates the next child assistant segment after
+	// a child tool/plan barrier even when the optional ACP MessageID is absent.
+	OutputNarrativeBoundary bool
+	Terminal                bool
+	OutputSynthetic         bool
+	OutputTerminal          bool
+	TaskID                  string
+	TaskAction              string
+	TaskInput               string
+	TaskTargetKind          string
+	Done                    bool
+	Err                     bool
 	// Plan fields.
 	PlanEntries []planEntryState
 
@@ -162,19 +168,42 @@ func mergeSubagentStreamChunk(existing string, incoming string) string {
 }
 
 func mergeSubagentNarrativeChunk(existing string, existingMessageID string, existingMessage string, incoming string, incomingMessageID string) (string, string) {
+	incoming = normalizeSubagentChunkBoundary(existing, incoming)
+	if incoming == "" {
+		return existing, existingMessage
+	}
 	existingMessageID = strings.TrimSpace(existingMessageID)
 	incomingMessageID = strings.TrimSpace(incomingMessageID)
-	if existingMessageID == "" || incomingMessageID == "" {
-		return mergeSubagentStreamChunk(existing, incoming), incoming
+	if existingMessageID != "" && incomingMessageID != "" && existingMessageID != incomingMessageID {
+		return joinSubagentNarrativeMessages(existing, incoming), incoming
 	}
-	if existingMessageID != incomingMessageID {
-		return existing + incoming, incoming
+	// ACP content chunks are deltas after ingress normalization. Preserve every
+	// chunk, including identical adjacent deltas. Message identity only scopes
+	// the current-message accumulator used when reconciling the parent result;
+	// it must not turn the Surface into a second cumulative-stream normalizer.
+	return existing + incoming, existingMessage + incoming
+}
+
+// joinSubagentNarrativeMessages preserves the semantic boundary between two
+// distinct ACP assistant messages. Two line breaks keep Markdown blocks from
+// collapsing together while retaining any boundary already supplied upstream.
+func joinSubagentNarrativeMessages(existing string, incoming string) string {
+	if existing == "" {
+		return incoming
 	}
-	mergedMessage := mergeSubagentStreamChunk(existingMessage, incoming)
-	if existingMessage != "" && strings.HasSuffix(existing, existingMessage) {
-		return strings.TrimSuffix(existing, existingMessage) + mergedMessage, mergedMessage
+	if incoming == "" {
+		return existing
 	}
-	return mergeSubagentStreamChunk(existing, incoming), mergedMessage
+	suffixNewline := strings.HasSuffix(existing, "\n")
+	prefixNewline := strings.HasPrefix(incoming, "\n")
+	switch {
+	case suffixNewline && prefixNewline:
+		return existing + incoming
+	case suffixNewline || prefixNewline:
+		return existing + "\n" + incoming
+	default:
+		return existing + "\n\n" + incoming
+	}
 }
 
 func mergeCommandStreamChunk(existing string, incoming string) string {
@@ -287,10 +316,10 @@ func normalizeSubagentChunkBoundary(existing string, incoming string) string {
 	if existing == "" {
 		return strings.TrimLeft(incoming, "\uFEFF")
 	}
-	// Some upstream streaming paths occasionally surface a replacement-rune
-	// prefix at chunk boundaries when a multibyte rune was split mid-update.
-	// Keep the fix narrow: only trim leading U+FFFD/FEFF on continuation chunks.
-	incoming = strings.TrimLeft(incoming, "\uFFFD\uFEFF")
+	// A BOM is transport framing, but U+FFFD may be legitimate content. UTF-8
+	// reassembly belongs at byte-stream ingress; the Surface must not guess at
+	// corruption by deleting visible replacement runes.
+	incoming = strings.TrimLeft(incoming, "\uFEFF")
 	return incoming
 }
 

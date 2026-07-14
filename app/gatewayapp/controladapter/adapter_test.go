@@ -17,7 +17,9 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	"github.com/caelis-labs/caelis/agent-sdk/task/agenthandle"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
@@ -651,13 +653,22 @@ func TestAdapterLightweightStatusSkipsSandboxDiagnostics(t *testing.T) {
 	ctx := context.Background()
 	sandboxCalls := 0
 	doctorCalls := 0
-	driver, err := NewAdapter(ctx, &RuntimeStack{
+	usageCalls := 0
+	store := &countingEventsSessionService{
+		Service: inmemory.NewService(inmemory.NewStore(inmemory.Config{})),
+	}
+	stack := &RuntimeStack{
 		Session: SessionRuntimeDeps{
+			Store:     store,
 			Workspace: session.WorkspaceRef{Key: "ws", CWD: t.TempDir()},
 		},
 		Model: ModelRuntimeDeps{
 			DefaultAliasFn: func() string {
 				return "gpt-light"
+			},
+			SessionUsageSnapshotFn: func(context.Context, session.SessionRef, string) (compact.UsageSnapshot, error) {
+				usageCalls++
+				return compact.UsageSnapshot{}, nil
 			},
 		},
 		Sandbox: SandboxRuntimeDeps{
@@ -672,10 +683,13 @@ func TestAdapterLightweightStatusSkipsSandboxDiagnostics(t *testing.T) {
 				return DoctorReport{ActiveModelAlias: "doctor-model"}, nil
 			},
 		},
-	}, "", "surface", "")
-	if err != nil {
-		t.Fatalf("NewAdapter() error = %v", err)
 	}
+	driver := newAdapterForStack(stack, "surface", "")
+	driver.session = session.Session{
+		SessionRef: session.SessionRef{AppName: "caelis", UserID: "user-1", SessionID: "session-1", WorkspaceKey: "ws"},
+		CWD:        stack.Session.Workspace.CWD,
+	}
+	driver.hasSession = true
 	status, err := driver.LightweightStatus(ctx)
 	if err != nil {
 		t.Fatalf("LightweightStatus() error = %v", err)
@@ -688,6 +702,109 @@ func TestAdapterLightweightStatusSkipsSandboxDiagnostics(t *testing.T) {
 	}
 	if doctorCalls != 0 {
 		t.Fatalf("Doctor() calls = %d, want 0", doctorCalls)
+	}
+	if usageCalls != 0 || store.eventsCalls != 0 {
+		t.Fatalf("LightweightStatus() usage calls = %d, event scans = %d, want 0/0", usageCalls, store.eventsCalls)
+	}
+	if _, err := driver.Status(ctx); err != nil {
+		t.Fatalf("Status() error = %v", err)
+	}
+	if usageCalls != 1 || store.eventsCalls != 1 {
+		t.Fatalf("Status() usage calls = %d, event scans = %d, want 1/1", usageCalls, store.eventsCalls)
+	}
+}
+
+func TestAdapterLightweightStatusPropagatesCallerCancellation(t *testing.T) {
+	t.Parallel()
+
+	driver := newAdapterForStack(&RuntimeStack{
+		Status: StatusRuntimeDeps{
+			RuntimeStateFn: func(ctx context.Context, _ session.SessionRef) (SessionRuntimeState, error) {
+				<-ctx.Done()
+				return SessionRuntimeState{}, ctx.Err()
+			},
+		},
+	}, "surface", "")
+	driver.session = session.Session{SessionRef: session.SessionRef{SessionID: "session-1"}}
+	driver.hasSession = true
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	_, err := driver.LightweightStatus(ctx)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("LightweightStatus() error = %v, want deadline exceeded", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("LightweightStatus() ignored caller cancellation for %s", elapsed)
+	}
+}
+
+func TestAdapterLightweightStatusDoesNotWaitForBlockedEventReader(t *testing.T) {
+	t.Parallel()
+
+	store := &blockingEventsSessionService{
+		Service: inmemory.NewService(inmemory.NewStore(inmemory.Config{})),
+		entered: make(chan struct{}, 1),
+		release: make(chan struct{}),
+	}
+	driver := newAdapterForStack(&RuntimeStack{
+		Session: SessionRuntimeDeps{Store: store},
+	}, "surface", "")
+	driver.session = session.Session{SessionRef: session.SessionRef{SessionID: "session-1"}}
+	driver.hasSession = true
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := driver.LightweightStatus(ctx)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("LightweightStatus() error = %v", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		close(store.release)
+		t.Fatal("LightweightStatus() waited for the blocked event reader")
+	}
+	select {
+	case <-store.entered:
+		close(store.release)
+		t.Fatal("LightweightStatus() called the event reader")
+	default:
+		close(store.release)
+	}
+}
+
+type countingEventsSessionService struct {
+	session.Service
+	eventsCalls int
+}
+
+func (s *countingEventsSessionService) Events(ctx context.Context, req session.EventsRequest) ([]*session.Event, error) {
+	s.eventsCalls++
+	return s.Service.Events(ctx, req)
+}
+
+type blockingEventsSessionService struct {
+	session.Service
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (s *blockingEventsSessionService) Events(ctx context.Context, req session.EventsRequest) ([]*session.Event, error) {
+	select {
+	case s.entered <- struct{}{}:
+	default:
+	}
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-s.release:
+		return s.Service.Events(ctx, req)
 	}
 }
 

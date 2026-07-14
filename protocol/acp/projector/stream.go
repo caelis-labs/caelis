@@ -6,6 +6,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
@@ -17,12 +18,22 @@ import (
 // running tool update. The kernel extracts this request from runtime state;
 // projector owns the ACP envelope shape emitted for live clients.
 type StreamRequest struct {
-	HandleID          string
-	RunID             string
-	TurnID            string
-	SessionRef        session.SessionRef
-	CallID            string
-	ToolName          string
+	HandleID   string
+	RunID      string
+	TurnID     string
+	SessionRef session.SessionRef
+	// SourceID identifies the physical task stream independently from the
+	// tool call that happened to observe it. Subagent turns use their stable
+	// runtime turn ID; terminal-backed commands fall back to Ref.TerminalID.
+	SourceID       string
+	CallID         string
+	ToolName       string
+	ParentCallID   string
+	ParentToolName string
+	// TargetKind distinguishes the physical task family behind a TASK call.
+	TargetKind taskapi.Kind
+	// Observer marks a TASK wait that does not own a second physical stream.
+	Observer          bool
 	RawInput          map[string]any
 	Ref               stream.Ref
 	DisplayTerminalID string
@@ -47,11 +58,15 @@ type StreamOrigin struct {
 // Key returns one stable subscription identity for deduplicating live output
 // streams across repeated running snapshots.
 func (r StreamRequest) Key() string {
+	sourceID := firstNonEmpty(
+		strings.TrimSpace(r.SourceID),
+		strings.TrimSpace(r.Ref.TerminalID),
+		strings.TrimSpace(r.Ref.TaskID),
+	)
 	return strings.Join([]string{
 		strings.TrimSpace(r.SessionRef.SessionID),
 		strings.TrimSpace(r.Ref.TaskID),
-		strings.TrimSpace(r.Ref.TerminalID),
-		strings.TrimSpace(r.CallID),
+		sourceID,
 	}, "|")
 }
 
@@ -68,6 +83,12 @@ func ProjectStreamFrame(req StreamRequest, frame stream.Frame) []eventstream.Env
 
 func parentStreamFrameEvents(req StreamRequest, frame stream.Frame) []eventstream.Envelope {
 	if delegatedParentStream(req) {
+		// TASK wait is an observer of the Spawn-owned physical stream. Its own
+		// canonical tool result is already emitted by Runtime, so replaying a
+		// synthetic parent close here would duplicate or reorder that result.
+		if req.Observer {
+			return nil
+		}
 		if frame.Closed {
 			return []eventstream.Envelope{delegatedFinalFrameEvent(req, frame)}
 		}
@@ -95,7 +116,7 @@ func streamFinalFrameEvent(req StreamRequest, frame stream.Frame) eventstream.En
 	status, isErr := subagentFinalToolStatus(frame)
 	finalText := ""
 	if frame.Cursor.Output == 0 {
-		finalText = streamFinalTerminalText(frame.Text, frame.Cursor, status)
+		finalText = streamFinalTerminalText(frame.Text)
 	}
 	return streamToolUpdateEnvelope(req, frame, status, true, isErr, finalText, streamFrameMeta("final"), true)
 }
@@ -142,6 +163,12 @@ func streamTerminalExitID(req StreamRequest, frame stream.Frame) string {
 
 func streamToolUpdateEnvelope(req StreamRequest, frame stream.Frame, status string, includeStatus bool, isErr bool, terminalText string, meta map[string]any, includeDisplayTerminal bool) eventstream.Envelope {
 	terminalID := firstNonEmpty(frame.Ref.TerminalID, req.Ref.TerminalID)
+	if frame.TruncatedBefore > 0 {
+		meta = metautil.WithCompactRuntimeSection(meta, metautil.RuntimeStream, map[string]any{
+			metautil.RuntimeStreamTruncated: true,
+			metautil.RuntimeStreamBefore:    frame.TruncatedBefore,
+		})
+	}
 	metaOutput := map[string]any{
 		"task_id":       firstNonEmpty(frame.Ref.TaskID, req.Ref.TaskID),
 		"terminal_id":   terminalID,
@@ -233,24 +260,15 @@ func subagentFinalToolStatus(frame stream.Frame) (string, bool) {
 	return schema.ToolStatusCompleted, false
 }
 
-func streamFinalTerminalText(text string, cursor stream.Cursor, status string) string {
-	if terminalStreamTextHasContent(text) {
-		return text
+func streamFinalTerminalText(text string) string {
+	// terminal_output carries exact runtime bytes. The task stream's FinalText
+	// may contain this display-only placeholder when no byte was produced; keep
+	// that synthetic state out of the protocol and let each Surface render an
+	// empty-panel fallback after it has reconciled all earlier stream frames.
+	if strings.TrimSpace(text) == "(no output)" {
+		return ""
 	}
-	if cursor.Output == 0 && (status == schema.ToolStatusCompleted || status == schema.ToolStatusFailed) {
-		return "(no output)"
-	}
-	return ""
-}
-
-func terminalStreamTextHasContent(text string) bool {
-	text = strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n")
-	for _, line := range strings.Split(text, "\n") {
-		if strings.TrimSpace(line) != "" {
-			return true
-		}
-	}
-	return false
+	return text
 }
 
 func streamFrameToolMeta(meta map[string]any, input map[string]any, output map[string]any, action string, taskID string) map[string]any {
@@ -333,18 +351,18 @@ func streamFrameEmbeddedEvents(req StreamRequest, frame stream.Frame) []eventstr
 }
 
 func streamParentToolRelation(req StreamRequest) *eventstream.ParentToolRelation {
-	toolCallID := strings.TrimSpace(req.CallID)
+	toolCallID := firstNonEmpty(strings.TrimSpace(req.ParentCallID), strings.TrimSpace(req.CallID))
 	if toolCallID == "" {
 		return nil
 	}
 	return &eventstream.ParentToolRelation{
 		ToolCallID: toolCallID,
-		ToolName:   strings.TrimSpace(req.ToolName),
+		ToolName:   firstNonEmpty(strings.TrimSpace(req.ParentToolName), strings.TrimSpace(req.ToolName)),
 	}
 }
 
 func streamFrameSessionEventIsParentToolEcho(req StreamRequest, event *session.Event) bool {
-	parentCallID := strings.TrimSpace(req.CallID)
+	parentCallID := firstNonEmpty(strings.TrimSpace(req.ParentCallID), strings.TrimSpace(req.CallID))
 	if parentCallID == "" || event == nil {
 		return false
 	}
@@ -362,7 +380,7 @@ func streamFrameSessionEventIsParentToolEcho(req StreamRequest, event *session.E
 	if callID == "" || callID != parentCallID {
 		return false
 	}
-	parentTool := strings.TrimSpace(req.ToolName)
+	parentTool := firstNonEmpty(strings.TrimSpace(req.ParentToolName), strings.TrimSpace(req.ToolName))
 	return parentTool == "" || toolName == "" || strings.EqualFold(parentTool, toolName)
 }
 

@@ -100,6 +100,10 @@ derives and validates the final assembled model/tool/sandbox requirements.
   that task generation until close. It cannot switch to a reconstructed task
   during the terminal-result persistence window. Point-in-time stream `Read`
   resolves current durable state on each call.
+- Command live output is bounded. When a requested byte cursor predates the
+  retained UTF-8 suffix, `stream.Snapshot` and `stream.Frame` set
+  `TruncatedBefore` to the earliest available absolute byte position; clients
+  must display or otherwise account for the missing prefix.
 - Event publication applies backpressure when the bounded queue is full. A
   slow consumer therefore bounds memory at the cost of slowing the run.
 - Session mutations use revision compare-and-swap. Concurrent writers pass
@@ -169,6 +173,13 @@ derives and validates the final assembled model/tool/sandbox requirements.
 - A committed-but-reported approval resolution is confirmed with a bounded
   context detached from resolver cancellation. Matching idempotent retries
   redeliver the durable decision; conflicting decisions fail closed.
+- Restart recovery discovers candidates through
+  `session.ApprovalRecoveryReader` and settles them only through
+  `session.ApprovalRecoverySettler`. The Store compares the candidate Session
+  revision plus request event ID/sequence, validates the mutation guard, and
+  appends the lifecycle settlement in one atomic critical section. A request
+  resolved after discovery is an idempotent no-op, never a second recovery
+  settlement.
 
 ## Event ordering and replay contract
 

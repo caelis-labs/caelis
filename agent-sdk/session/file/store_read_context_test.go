@@ -25,6 +25,7 @@ func TestStoreReadPathsHonorContextWhileWaitingForStoreMutex(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	tasks := NewTaskStore(store)
 
 	operations := map[string]func(context.Context) error{
 		"get_or_create": func(ctx context.Context) error {
@@ -65,8 +66,53 @@ func TestStoreReadPathsHonorContextWhileWaitingForStoreMutex(t *testing.T) {
 			})
 			return err
 		},
+		"append_events": func(ctx context.Context) error {
+			_, err := store.AppendEvents(ctx, session.AppendEventsRequest{
+				SessionRef: active.SessionRef,
+				Events: []*session.Event{{
+					Type:       session.EventTypeLifecycle,
+					Visibility: session.VisibilityCanonical,
+					Lifecycle:  &session.EventLifecycle{Status: "completed", Reason: "batch-should-cancel"},
+				}},
+			})
+			return err
+		},
+		"append_events_and_state": func(ctx context.Context) error {
+			_, err := store.AppendEventsAndUpdateState(ctx, session.AppendEventsAndUpdateStateRequest{
+				SessionRef:     active.SessionRef,
+				TransactionID:  "cancelled-batch-state",
+				MutationDigest: "cancelled-batch-state-v1",
+				UpdateState: func(_ []*session.Event, state map[string]any) (map[string]any, error) {
+					return state, nil
+				},
+			})
+			return err
+		},
 		"pending_approvals": func(ctx context.Context) error {
 			_, err := store.PendingApprovals(ctx)
+			return err
+		},
+		"put_participant_with_event": func(ctx context.Context) error {
+			_, _, err := store.PutParticipantWithEvent(ctx, session.PutParticipantWithEventRequest{
+				SessionRef: active.SessionRef,
+				Binding:    session.ParticipantBinding{ID: "cancelled-participant"},
+				Event: &session.Event{
+					Type:       session.EventTypeLifecycle,
+					Visibility: session.VisibilityCanonical,
+					Lifecycle:  &session.EventLifecycle{Status: "completed", Reason: "participant-should-cancel"},
+				},
+			})
+			return err
+		},
+		"replace_state": func(ctx context.Context) error {
+			_, err := store.ReplaceState(ctx, session.ReplaceStateRequest{
+				SessionRef: active.SessionRef,
+				State:      map[string]any{"should": "cancel"},
+			})
+			return err
+		},
+		"task_get": func(ctx context.Context) error {
+			_, err := tasks.Get(ctx, "cancelled-task")
 			return err
 		},
 	}

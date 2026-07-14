@@ -17,18 +17,17 @@ func TestNarrativeAccumulatorMessageChunksEmitDeltasOnly(t *testing.T) {
 
 	acc := &narrativeAccumulator{}
 	deltas := applyNarrativeSequence(acc, []*session.Event{
-		acpNarrativeEvent(session.ProtocolUpdateTypeAgentMessage, "hel"),
-		acpNarrativeEvent(session.ProtocolUpdateTypeAgentMessage, "hello"),
-		acpNarrativeEvent(session.ProtocolUpdateTypeAgentMessage, "hello"),
+		acpNarrativeEvent(session.ProtocolUpdateTypeAgentMessage, "a"),
+		acpNarrativeEvent(session.ProtocolUpdateTypeAgentMessage, "ab"),
 	})
-	if want := []string{"hel", "lo"}; !reflect.DeepEqual(deltas, want) {
+	if want := []string{"a", "ab"}; !reflect.DeepEqual(deltas, want) {
 		t.Fatalf("live message deltas = %#v, want %#v", deltas, want)
 	}
 	final := acc.finalAssistantEvent()
 	if final == nil {
 		t.Fatal("finalAssistantEvent() = nil, want canonical assistant")
 	}
-	if got, want := session.EventText(final), "hello"; got != want {
+	if got, want := session.EventText(final), "aab"; got != want {
 		t.Fatalf("final assistant text = %q, want %q", got, want)
 	}
 	if final.Visibility != session.VisibilityCanonical {
@@ -74,6 +73,68 @@ func TestNarrativeAccumulatorThoughtChunksEmitDeltasAndResetFinal(t *testing.T) 
 	}
 }
 
+func TestNarrativeAccumulatorThoughtUsesExactACPDeltaSemantics(t *testing.T) {
+	t.Parallel()
+
+	t.Run("repeated deltas", func(t *testing.T) {
+		t.Parallel()
+
+		acc := &narrativeAccumulator{}
+		deltas := applyNarrativeSequence(acc, []*session.Event{
+			acpNarrativeEvent(session.ProtocolUpdateTypeAgentThought, "ha"),
+			acpNarrativeEvent(session.ProtocolUpdateTypeAgentThought, "ha"),
+		})
+		if want := []string{"ha", "ha"}; !reflect.DeepEqual(deltas, want) {
+			t.Fatalf("repeated thought deltas = %#v, want %#v", deltas, want)
+		}
+	})
+
+	t.Run("prefix growing deltas", func(t *testing.T) {
+		t.Parallel()
+
+		acc := &narrativeAccumulator{}
+		deltas := applyNarrativeSequence(acc, []*session.Event{
+			acpNarrativeEvent(session.ProtocolUpdateTypeAgentThought, "hel"),
+			acpNarrativeEvent(session.ProtocolUpdateTypeAgentThought, "hello"),
+			acpNarrativeEvent(session.ProtocolUpdateTypeAgentThought, "hello"),
+		})
+		if want := []string{"hel", "hello", "hello"}; !reflect.DeepEqual(deltas, want) {
+			t.Fatalf("prefix-growing thought deltas = %#v, want %#v", deltas, want)
+		}
+	})
+}
+
+func TestNarrativeAccumulatorResetsReasoningAtSegmentBarriers(t *testing.T) {
+	t.Parallel()
+
+	acc := &narrativeAccumulator{}
+	applyNarrativeSequence(acc, []*session.Event{
+		acpNarrativeEvent(session.ProtocolUpdateTypeAgentThought, "thinking"),
+	})
+	if got := acc.reasoning.FinalText(); got != "thinking" {
+		t.Fatalf("reasoning before assistant = %q, want thinking", got)
+	}
+	applyNarrativeSequence(acc, []*session.Event{
+		acpNarrativeEvent(session.ProtocolUpdateTypeAgentMessage, "answer"),
+	})
+	if got := acc.reasoning.FinalText(); got != "" {
+		t.Fatalf("reasoning after assistant = %q, want reset", got)
+	}
+
+	for _, barrier := range []session.ProtocolUpdateType{
+		session.ProtocolUpdateTypeToolCall,
+		session.ProtocolUpdateTypePlan,
+	} {
+		applyNarrativeSequence(acc, []*session.Event{
+			acpNarrativeEvent(session.ProtocolUpdateTypeAgentThought, "next thought"),
+			acpBarrierEvent(barrier),
+		})
+		if got := acc.reasoning.FinalText(); got != "" {
+			t.Fatalf("reasoning after %s barrier = %q, want reset", barrier, got)
+		}
+	}
+}
+
 func TestNarrativeAccumulatorToolBarrierResetsFinalAssistant(t *testing.T) {
 	t.Parallel()
 
@@ -116,40 +177,57 @@ func TestNarrativeAccumulatorPlanBarrierResetsFinalAssistant(t *testing.T) {
 	}
 }
 
-func TestAppendNarrativeTextKeepsTrueDeltaOverlap(t *testing.T) {
+func TestAppendNarrativeTextAppendsExactACPDeltas(t *testing.T) {
 	t.Parallel()
 
-	cumulative, delta := appendNarrativeText("hel", "lo")
-	if cumulative != "hello" || delta != "lo" {
-		t.Fatalf("append delta = (%q, %q), want (hello, lo)", cumulative, delta)
+	appended, delta := appendNarrativeText("hel", "lo")
+	if appended != "hello" || delta != "lo" {
+		t.Fatalf("append delta = (%q, %q), want (hello, lo)", appended, delta)
 	}
 
-	cumulative, delta = appendNarrativeText("hel", "hello")
-	if cumulative != "hello" || delta != "lo" {
-		t.Fatalf("append cumulative = (%q, %q), want (hello, lo)", cumulative, delta)
+	appended, delta = appendNarrativeText("hel", "hello")
+	if appended != "helhello" || delta != "hello" {
+		t.Fatalf("append prefix-growing delta = (%q, %q), want (helhello, hello)", appended, delta)
 	}
 
-	cumulative, delta = appendNarrativeText("hello", "hel")
-	if cumulative != "hello" || delta != "" {
-		t.Fatalf("append stale prefix = (%q, %q), want (hello, empty)", cumulative, delta)
+	appended, delta = appendNarrativeText("hello", "hel")
+	if appended != "hellohel" || delta != "hel" {
+		t.Fatalf("append short-prefix delta = (%q, %q), want (hellohel, hel)", appended, delta)
 	}
 }
 
-func TestNarrativeAccumulatorSkipsDuplicateCumulativeChunks(t *testing.T) {
+func TestNarrativeAccumulatorSeparatesAssistantMessageIDs(t *testing.T) {
+	t.Parallel()
+
+	first := acpNarrativeEvent(session.ProtocolUpdateTypeAgentMessage, "first")
+	first.Protocol.Update.MessageID = "m1"
+	second := acpNarrativeEvent(session.ProtocolUpdateTypeAgentMessage, "second")
+	second.Protocol.Update.MessageID = "m2"
+	acc := &narrativeAccumulator{}
+	deltas := applyNarrativeSequence(acc, []*session.Event{first, second})
+	if want := []string{"first", "second"}; !reflect.DeepEqual(deltas, want) {
+		t.Fatalf("message-id deltas = %#v, want %#v", deltas, want)
+	}
+	final := acc.finalAssistantEvent()
+	if final == nil || session.EventText(final) != "second" {
+		t.Fatalf("final assistant = %#v, want latest message-id segment", final)
+	}
+}
+
+func TestNarrativeAccumulatorPreservesRepeatedACPDeltaChunks(t *testing.T) {
 	t.Parallel()
 
 	acc := &narrativeAccumulator{}
-	first := applyNarrativeSequence(acc, []*session.Event{
+	deltas := applyNarrativeSequence(acc, []*session.Event{
+		acpNarrativeEvent(session.ProtocolUpdateTypeAgentMessage, "hello"),
 		acpNarrativeEvent(session.ProtocolUpdateTypeAgentMessage, "hello"),
 	})
-	if want := []string{"hello"}; !reflect.DeepEqual(first, want) {
-		t.Fatalf("first chunk deltas = %#v, want %#v", first, want)
+	if want := []string{"hello", "hello"}; !reflect.DeepEqual(deltas, want) {
+		t.Fatalf("repeated ACP chunk deltas = %#v, want %#v", deltas, want)
 	}
-	second := applyNarrativeSequence(acc, []*session.Event{
-		acpNarrativeEvent(session.ProtocolUpdateTypeAgentMessage, "hello"),
-	})
-	if len(second) != 0 {
-		t.Fatalf("duplicate cumulative chunk deltas = %#v, want none", second)
+	final := acc.finalAssistantEvent()
+	if final == nil || session.EventText(final) != "hellohello" {
+		t.Fatalf("final assistant = %#v, want exact repeated deltas", final)
 	}
 }
 

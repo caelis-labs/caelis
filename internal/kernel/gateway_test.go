@@ -3,7 +3,9 @@ package kernel
 import (
 	"context"
 	"errors"
+	"fmt"
 	"iter"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -224,6 +226,101 @@ func TestListSessionsHidesSystemManagedSessions(t *testing.T) {
 	}
 }
 
+func TestListSessionsFillsVisibleLimitAcrossHiddenRawPages(t *testing.T) {
+	t.Parallel()
+
+	visibleOne := session.SessionSummary{
+		SessionRef: session.SessionRef{AppName: "caelis", UserID: "u", SessionID: "visible-1", WorkspaceKey: "ws"},
+		Title:      "Visible one",
+	}
+	visibleTwo := session.SessionSummary{
+		SessionRef: session.SessionRef{AppName: "caelis", UserID: "u", SessionID: "visible-2", WorkspaceKey: "ws"},
+		Title:      "Visible two",
+	}
+	visibleThree := session.SessionSummary{
+		SessionRef: session.SessionRef{AppName: "caelis", UserID: "u", SessionID: "visible-3", WorkspaceKey: "ws"},
+		Title:      "Visible three",
+	}
+	hidden := session.SessionSummary{
+		SessionRef: session.SessionRef{AppName: "caelis", UserID: "u", SessionID: "guardian", WorkspaceKey: "ws"},
+		Title:      "Guardian approval review", Metadata: map[string]any{"system_managed_agent": "guardian"},
+	}
+	svc := &recordingSessionService{
+		listSessionsFn: func(req session.ListSessionsRequest) session.SessionList {
+			switch req.Cursor {
+			case "":
+				return session.SessionList{Sessions: []session.SessionSummary{hidden}, NextCursor: "raw-1"}
+			case "raw-1":
+				return session.SessionList{Sessions: []session.SessionSummary{visibleOne}, NextCursor: "raw-2"}
+			case "raw-2":
+				return session.SessionList{Sessions: []session.SessionSummary{visibleTwo}, NextCursor: "raw-3"}
+			case "raw-3":
+				return session.SessionList{Sessions: []session.SessionSummary{visibleThree}}
+			default:
+				return session.SessionList{}
+			}
+		},
+	}
+	gw, err := New(Config{Sessions: svc, Runtime: mockRuntime{}, Resolver: staticResolver{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	first, err := gw.ListSessions(context.Background(), ListSessionsRequest{
+		AppName: "caelis", UserID: "u", WorkspaceKey: "ws", Limit: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Sessions) != 2 {
+		t.Fatalf("first visible page = %#v, want two Sessions", first)
+	}
+	if got := []string{first.Sessions[0].SessionID, first.Sessions[1].SessionID}; !reflect.DeepEqual(got, []string{"visible-1", "visible-2"}) {
+		t.Fatalf("first visible page = %v", got)
+	}
+	if first.NextCursor != "raw-3" {
+		t.Fatalf("first visible page cursor = %q, want raw-3", first.NextCursor)
+	}
+	if len(svc.listRequests) != 3 || svc.listRequests[0].Limit != 2 || svc.listRequests[1].Limit != 2 || svc.listRequests[2].Limit != 1 {
+		t.Fatalf("raw page requests = %#v", svc.listRequests)
+	}
+
+	second, err := gw.ListSessions(context.Background(), ListSessionsRequest{
+		AppName: "caelis", UserID: "u", WorkspaceKey: "ws", Cursor: first.NextCursor, Limit: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(second.Sessions) != 1 || second.Sessions[0].SessionID != "visible-3" || second.NextCursor != "" {
+		t.Fatalf("second visible page = %#v", second)
+	}
+}
+
+func TestListSessionsDoesNotExposeLegacyGuardianWhenClassificationReadFails(t *testing.T) {
+	t.Parallel()
+
+	svc := &recordingSessionService{
+		listSessionsResult: session.SessionList{Sessions: []session.SessionSummary{{
+			SessionRef: session.SessionRef{AppName: "caelis", UserID: "u", SessionID: "legacy-approval-review", WorkspaceKey: "ws"},
+			Title:      "Guardian approval review",
+		}}},
+		sessionErr: context.DeadlineExceeded,
+	}
+	gw, err := New(Config{Sessions: svc, Runtime: mockRuntime{}, Resolver: staticResolver{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed, err := gw.ListSessions(context.Background(), ListSessionsRequest{
+		AppName: "caelis", UserID: "u", WorkspaceKey: "ws", Limit: 1,
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("ListSessions() = %#v, %v, want classification read deadline", listed, err)
+	}
+	if len(listed.Sessions) != 0 {
+		t.Fatalf("ListSessions() = %#v, want no fail-open Guardian Session", listed)
+	}
+}
+
 func TestResumeSessionUsesMostRecentExcludingCurrentBinding(t *testing.T) {
 	t.Parallel()
 
@@ -327,6 +424,48 @@ func TestResumeSessionResolvesUniquePrefix(t *testing.T) {
 	}
 	if svc.listReq.WorkspaceKey != "" {
 		t.Fatalf("listReq.WorkspaceKey = %q, want global SessionID lookup", svc.listReq.WorkspaceKey)
+	}
+}
+
+func TestResumeSessionResolvesUniquePrefixBeyondFirstTwoHundredSessions(t *testing.T) {
+	t.Parallel()
+
+	target := session.LoadedSession{Session: session.Session{SessionRef: session.SessionRef{
+		AppName: "caelis", UserID: "u", SessionID: "s-tail-unique-session", WorkspaceKey: "ws",
+	}}}
+	firstPage := make([]session.SessionSummary, 0, 200)
+	for i := 0; i < 200; i++ {
+		firstPage = append(firstPage, session.SessionSummary{SessionRef: session.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: fmt.Sprintf("s-recent-%03d", i), WorkspaceKey: "ws",
+		}})
+	}
+	svc := &recordingSessionService{
+		loadSessionResult: target,
+		listSessionsFn: func(req session.ListSessionsRequest) session.SessionList {
+			if req.Cursor == "" {
+				return session.SessionList{Sessions: firstPage, NextCursor: "page-2"}
+			}
+			if req.Cursor == "page-2" {
+				return session.SessionList{Sessions: []session.SessionSummary{{SessionRef: target.Session.SessionRef}}}
+			}
+			return session.SessionList{}
+		},
+	}
+	gw, err := New(Config{Sessions: svc, Runtime: mockRuntime{}, Resolver: staticResolver{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := gw.ResumeSession(context.Background(), ResumeSessionRequest{
+		AppName: "caelis", UserID: "u", SessionID: "s-tail-unique",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Session.SessionID != target.Session.SessionID || svc.loadReq.SessionRef.SessionID != target.Session.SessionID {
+		t.Fatalf("ResumeSession() = %#v, load request %#v", loaded, svc.loadReq)
+	}
+	if len(svc.listRequests) != 2 || svc.listRequests[1].Cursor != "page-2" {
+		t.Fatalf("ListSessions() requests = %#v, want second page", svc.listRequests)
 	}
 }
 
@@ -3040,6 +3179,7 @@ type recordingSessionService struct {
 	startSessionResult session.Session
 	loadSessionResult  session.LoadedSession
 	listSessionsResult session.SessionList
+	listSessionsFn     func(session.ListSessionsRequest) session.SessionList
 	sessionResult      session.Session
 	eventsResult       []*session.Event
 	snapshotErr        error
@@ -3050,6 +3190,7 @@ type recordingSessionService struct {
 	eventsErr          error
 	loadCalls          int
 	listCalls          int
+	listRequests       []session.ListSessionsRequest
 	sessionCalls       int
 }
 
@@ -3094,8 +3235,12 @@ func (s *recordingSessionService) Events(_ context.Context, req session.EventsRe
 func (s *recordingSessionService) ListSessions(_ context.Context, req session.ListSessionsRequest) (session.SessionList, error) {
 	s.listCalls++
 	s.listReq = req
+	s.listRequests = append(s.listRequests, req)
 	if s.listErr != nil {
 		return session.SessionList{}, s.listErr
+	}
+	if s.listSessionsFn != nil {
+		return s.listSessionsFn(req), nil
 	}
 	return s.listSessionsResult, nil
 }

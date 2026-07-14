@@ -156,11 +156,12 @@ func TestProjectStreamFrameBuildsStandardToolUpdateEnvelope(t *testing.T) {
 	}
 
 	events := ProjectStreamFrame(req, stream.Frame{
-		Ref:       req.Ref,
-		Text:      "ok\n",
-		Cursor:    stream.Cursor{Output: 3},
-		Running:   true,
-		UpdatedAt: time.Unix(100, 0),
+		Ref:             req.Ref,
+		Text:            "ok\n",
+		Cursor:          stream.Cursor{Output: 15},
+		TruncatedBefore: 12,
+		Running:         true,
+		UpdatedAt:       time.Unix(100, 0),
 	})
 	if len(events) != 1 {
 		t.Fatalf("ProjectStreamFrame() returned %d events: %#v", len(events), events)
@@ -188,6 +189,10 @@ func TestProjectStreamFrameBuildsStandardToolUpdateEnvelope(t *testing.T) {
 	}
 	if metautil.Bool(update.Meta, metautil.Root, metautil.Transient) {
 		t.Fatalf("update.Meta = %#v, want typed delivery without legacy transient shadow", update.Meta)
+	}
+	streamMeta := metautil.RuntimeSection(update.Meta, metautil.RuntimeStream)
+	if streamMeta[metautil.RuntimeStreamTruncated] != true || streamMeta[metautil.RuntimeStreamBefore] != int64(12) {
+		t.Fatalf("stream meta = %#v, want typed truncation boundary", streamMeta)
 	}
 	assertStreamDelivery(t, env, true)
 }
@@ -338,7 +343,7 @@ func TestProjectStreamFrameProjectsDelegatedTaskSemanticsWithoutParentText(t *te
 	}
 }
 
-func TestProjectStreamFrameUsesNoOutputPlaceholderForSilentCommandFailure(t *testing.T) {
+func TestProjectStreamFrameKeepsNoOutputPlaceholderOutOfTerminalBytes(t *testing.T) {
 	t.Parallel()
 
 	req := StreamRequest{
@@ -362,11 +367,8 @@ func TestProjectStreamFrameUsesNoOutputPlaceholderForSilentCommandFailure(t *tes
 	if stringPtrValue(update.Status) != schema.ToolStatusFailed {
 		t.Fatalf("update = %+v, want failed RUN_COMMAND result", update)
 	}
-	if strings.Contains(toolTerminalOutputText(t, update), "exit 1") {
-		t.Fatalf("meta = %#v, should not expose exit code as terminal output", update.Meta)
-	}
-	if got := toolTerminalOutputText(t, update); got != "(no output)" {
-		t.Fatalf("terminal output = %q, want no-output placeholder", got)
+	if output, ok := metautil.TerminalOutput(update.Meta); ok {
+		t.Fatalf("terminal output = %#v, want no synthetic bytes for silent failure", output)
 	}
 }
 

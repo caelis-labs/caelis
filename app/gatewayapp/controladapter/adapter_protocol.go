@@ -87,29 +87,20 @@ func (d *Adapter) replayControlFeed(ctx context.Context, sessionID string, req e
 	out := eventstream.ReplayResult{
 		SessionID: strings.TrimSpace(sessionID), NextCursor: strings.TrimSpace(subscribed.BoundaryCursor), Durable: true,
 	}
-	for {
-		select {
-		case <-ctx.Done():
-			return eventstream.ReplayResult{}, ctx.Err()
-		case <-subscribed.Subscription.BackfillDone():
+	for _, envelope := range subscribed.Backfill {
+		if err := ctx.Err(); err != nil {
+			return eventstream.ReplayResult{}, err
+		}
+		if !req.IncludeTransient && envelope.Delivery != nil && envelope.Delivery.Mode == eventstream.DeliveryTransient {
+			continue
+		}
+		out.Events = append(out.Events, eventstream.CloneEnvelope(envelope))
+		out.NextCursor = strings.TrimSpace(envelope.Cursor)
+		if req.Limit > 0 && len(out.Events) >= req.Limit {
 			return out, nil
-		case envelope, ok := <-subscribed.Subscription.Events():
-			if !ok {
-				if err := subscribed.Subscription.Err(); err != nil {
-					return eventstream.ReplayResult{}, err
-				}
-				return out, nil
-			}
-			if !req.IncludeTransient && envelope.Delivery != nil && envelope.Delivery.Mode == eventstream.DeliveryTransient {
-				continue
-			}
-			out.Events = append(out.Events, eventstream.CloneEnvelope(envelope))
-			out.NextCursor = strings.TrimSpace(envelope.Cursor)
-			if req.Limit > 0 && len(out.Events) >= req.Limit {
-				return out, nil
-			}
 		}
 	}
+	return out, nil
 }
 
 func (d *Adapter) RunState(ctx context.Context) (eventstream.RunState, error) {

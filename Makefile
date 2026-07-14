@@ -8,7 +8,8 @@ GOFILES_CMD = if command -v rg >/dev/null 2>&1; then rg --files -0 -g '*.go'; el
 GO_TEST_TIMEOUT ?= 5m
 EVAL_REGRESSION_SELECTOR ?= ^TestRegression
 TUI_GOLDEN_SELECTOR ?= ^TestRegressionACPEventstreamToolCallFrame120x32$$
-TUI_INTERACTION_SELECTOR ?= ^TestRegressionACPEventstreamWhitespaceOnlyAssistantChunkDoesNotRenderBeforeTool$$
+TUI_INTERACTION_SELECTOR ?= ^(TestRegressionACPEventstreamWhitespaceOnlyAssistantChunkDoesNotRenderBeforeTool|TestTypedResumeEnterLoadsEmptyQueryAndSubmitsSelectedSession|TestResumeTabRetriesAfterTransientCompletionFailure|TestHandleACPEventEnvelopeRendersSemanticSpawnEventsOnce|TestHandleACPEventEnvelopeScopedChildTerminalKeepsOneSpawnPanelAndMainTurnAlive)$$
+CONTROL_FEED_REGRESSION_SELECTOR ?= ^(TestLiveFeedBrokerFansInSpawnSemanticsInOrder|TestGatewayTurnDoesNotAttachPreparedFeedBeforeSurfaceClaimsEvents|TestLiveFeedBrokerSharesPhysicalSpawnStreamAcrossTaskWaitObservers|TestControlSessionFeedRecoversDetachedChildGapAcrossTurnBrokers|TestLiveFeedBrokerFailsTurnAfterBoundedPermanentRecorderErrors)$$
 COMMAND_REGRESSION_SELECTOR ?= ^TestRegression(Command(Status|Workspace|List|Agent|Parse|Connect|NewDriver)|Slash)
 COMMAND_EXECUTION_REGRESSION_SELECTOR ?= ^TestRegressionCommandExec
 CACHE_ROOT ?= $(CURDIR)/.tmp/cache
@@ -18,7 +19,7 @@ GOTMPDIR ?= $(CACHE_ROOT)/gotmp
 GOLANGCI_LINT_CACHE ?= $(CACHE_ROOT)/golangci-lint
 XDG_CACHE_HOME ?= $(CACHE_ROOT)/xdg
 export GOMODCACHE GOCACHE GOTMPDIR GOLANGCI_LINT_CACHE XDG_CACHE_HOME
-.PHONY: arch-lint build build-cli cache-dirs client-protocol-check client-protocol-generate command-regression command-execution-regression commit-check docs-links eval-smoke fmt fmt-check guardian-eval install lint quality regression sdk-api-compat sdk-boundary-check sdk-proxy-smoke sdk-race test tui-golden tui-interaction vet release-dry-run
+.PHONY: arch-lint build build-cli cache-dirs client-protocol-check client-protocol-generate command-regression command-execution-regression commit-check control-feed-regression docs-links eval-smoke fmt fmt-check guardian-eval install lint quality regression sdk-api-compat sdk-boundary-check sdk-proxy-smoke sdk-race test tui-golden tui-interaction vet release-dry-run
 
 cache-dirs:
 	mkdir -p "$(GOMODCACHE)" "$(GOCACHE)" "$(GOTMPDIR)" "$(GOLANGCI_LINT_CACHE)" "$(XDG_CACHE_HOME)"
@@ -73,7 +74,7 @@ quality: fmt-check lint arch-lint sdk-boundary-check client-protocol-check vet t
 
 commit-check: quality build
 
-regression: eval-smoke tui-golden tui-interaction command-regression command-execution-regression
+regression: eval-smoke tui-golden tui-interaction control-feed-regression command-regression command-execution-regression
 
 eval-smoke: cache-dirs
 	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./eval '$(EVAL_REGRESSION_SELECTOR)' eval-smoke
@@ -86,6 +87,9 @@ tui-golden: cache-dirs
 
 tui-interaction: cache-dirs
 	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./surfaces/tui/app '$(TUI_INTERACTION_SELECTOR)' tui-interaction
+
+control-feed-regression: cache-dirs
+	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./app/gatewayapp/controladapter '$(CONTROL_FEED_REGRESSION_SELECTOR)' control-feed-regression
 
 command-regression: cache-dirs
 	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) ./scripts/go_test_nonempty.sh ./app/gatewayapp/controladapter '$(COMMAND_REGRESSION_SELECTOR)' command-regression

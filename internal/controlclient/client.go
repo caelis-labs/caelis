@@ -7,6 +7,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	controlport "github.com/caelis-labs/caelis/ports/controlclient"
+	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
 )
 
 type ClientConfig struct {
@@ -98,23 +99,10 @@ func (c *Client) Events(ctx context.Context, principal controlport.Principal, re
 	}
 	defer result.Subscription.Close()
 	out := controlport.EventBatch{ResumeMode: result.Mode, TransientGap: result.TransientGap, BoundaryCursor: result.BoundaryCursor}
-	if strings.TrimSpace(req.Cursor) == strings.TrimSpace(result.BoundaryCursor) || result.BoundaryCursor == "" {
-		return out, nil
-	}
-	for {
-		select {
-		case <-ctx.Done():
-			return controlport.EventBatch{}, ctx.Err()
-		case <-result.Subscription.BackfillDone():
-			return out, nil
-		case envelope, ok := <-result.Subscription.Events():
-			if !ok {
-				if err := result.Subscription.Err(); err != nil {
-					return controlport.EventBatch{}, err
-				}
-				return out, nil
-			}
-			out.Events = append(out.Events, envelope)
-		}
-	}
+	// Subscribe atomically captured Backfill through BoundaryCursor before it
+	// spliced queued live events into the subscription. Consuming that snapshot
+	// directly prevents a ready BackfillDone signal and ready live channel from
+	// racing a finite request beyond its advertised boundary.
+	out.Events = eventstream.CloneEnvelopes(result.Backfill)
+	return out, nil
 }

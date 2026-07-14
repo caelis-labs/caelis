@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	controlport "github.com/caelis-labs/caelis/ports/controlclient"
 )
@@ -16,6 +17,8 @@ type CommandServiceConfig struct {
 }
 
 type CommandService struct{ config CommandServiceConfig }
+
+const operationCompletionTimeout = 5 * time.Second
 
 func NewCommandService(config CommandServiceConfig) (*CommandService, error) {
 	if config.Authorizer == nil || config.Operations == nil || config.Backend == nil {
@@ -89,8 +92,10 @@ func (s *CommandService) execute(ctx context.Context, principal controlport.Prin
 		if record.Result != nil {
 			return *record.Result, nil
 		}
+		// An intent without a result may still be executing in this or another
+		// process. Report the conservative outcome without claiming completion;
+		// only the creator may persist the eventual result.
 		unknown := commandFailure(operationID, sessionID, controlport.OutcomeUnknown, "operation intent exists without a provable result")
-		_, _ = s.config.Operations.Complete(ctx, intent, unknown)
 		return unknown, nil
 	}
 
@@ -104,10 +109,23 @@ func (s *CommandService) execute(ctx context.Context, principal controlport.Prin
 	} else if !result.Outcome.Valid() {
 		result.Outcome = controlport.OutcomeCommitted
 	}
-	if _, completeErr := s.config.Operations.Complete(ctx, intent, result); completeErr != nil {
+	completionCtx, cancelCompletion := operationCompletionContext(ctx)
+	defer cancelCompletion()
+	if _, completeErr := s.config.Operations.Complete(completionCtx, intent, result); completeErr != nil {
 		return commandFailure(operationID, result.SessionID, controlport.OutcomeUnknown, completeErr.Error()), completeErr
 	}
 	return result, dispatchErr
+}
+
+func operationCompletionContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	// Once Backend has returned, Control knows the exact effect result. Client
+	// cancellation must not strand the durable ledger at intent-only/unknown and
+	// make a later retry unable to distinguish a committed effect from one that
+	// never ran. Bound the detached write so a broken store still returns.
+	return context.WithTimeout(context.WithoutCancel(ctx), operationCompletionTimeout)
 }
 
 func resultForBackendError(result controlport.CommandResult, err error) controlport.CommandResult {

@@ -777,6 +777,39 @@ func TestTerminalServiceReadsRunningSubagentStreamByTaskID(t *testing.T) {
 	}
 }
 
+func TestSubagentTaskToolMetaCarriesPhysicalTurnCursorAndSpawnParent(t *testing.T) {
+	meta := taskToolMeta(task.Snapshot{
+		Kind:        task.KindSubagent,
+		EventCursor: 17,
+		Metadata: map[string]any{
+			"turn_id":     "task-1:2",
+			"parent_call": "spawn-call-1",
+			"parent_tool": "SPAWN",
+		},
+	})
+	caelisMeta, ok := meta["caelis"].(map[string]any)
+	if !ok {
+		t.Fatalf("caelis metadata = %#v, want object", meta["caelis"])
+	}
+	runtimeMeta, ok := caelisMeta["runtime"].(map[string]any)
+	if !ok {
+		t.Fatalf("runtime metadata = %#v, want object", caelisMeta["runtime"])
+	}
+	taskMeta, ok := runtimeMeta["task"].(map[string]any)
+	if !ok {
+		t.Fatalf("task metadata = %#v, want object", runtimeMeta["task"])
+	}
+	if got := taskStringValue(taskMeta["turn_id"]); got != "task-1:2" {
+		t.Fatalf("turn_id = %q, want task-1:2", got)
+	}
+	if got, ok := taskInt64Value(taskMeta["event_cursor"]); !ok || got != 17 {
+		t.Fatalf("event_cursor = %#v, want 17", taskMeta["event_cursor"])
+	}
+	if taskStringValue(taskMeta["parent_call"]) != "spawn-call-1" || taskStringValue(taskMeta["parent_tool"]) != "SPAWN" {
+		t.Fatalf("parent task metadata = %#v, want canonical Spawn relation", taskMeta)
+	}
+}
+
 func TestSubagentStreamsAppendsIncrementalTerminalFrames(t *testing.T) {
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{

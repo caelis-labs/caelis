@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
 	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 	"github.com/caelis-labs/caelis/ports/gateway"
@@ -42,6 +43,44 @@ func StreamRequestFromACPEvent(env eventstream.Envelope) (acpprojector.StreamReq
 	if taskID == "" && terminalID == "" {
 		return acpprojector.StreamRequest{}, false
 	}
+	toolAction := streamRequestMetaString(
+		meta,
+		gateway.EventMetaRoot,
+		gateway.EventMetaRuntime,
+		gateway.EventMetaRuntimeTool,
+		gateway.EventMetaRuntimeToolAction,
+	)
+	targetKind := streamRequestTargetKind(meta)
+	taskWait := strings.EqualFold(toolName, names.Task) && strings.EqualFold(toolAction, "wait")
+	if taskWait && targetKind == "" {
+		// A TASK wait without its typed target cannot safely claim a physical
+		// stream: command and subagent streams have different parent projection
+		// semantics. The canonical TASK update still reaches the client.
+		return acpprojector.StreamRequest{}, false
+	}
+	observer := taskWait
+	parentCallID := streamRequestMetaString(
+		meta,
+		gateway.EventMetaRoot,
+		gateway.EventMetaRuntime,
+		"task",
+		"parent_call",
+	)
+	parentToolName := streamRequestMetaString(
+		meta,
+		gateway.EventMetaRoot,
+		gateway.EventMetaRuntime,
+		"task",
+		"parent_tool",
+	)
+	if taskWait && parentCallID == "" {
+		// Without the original parent call, a later observer cannot update the
+		// existing Spawn/RunCommand panel without inventing a false identity.
+		return acpprojector.StreamRequest{}, false
+	}
+	if parentCallID != "" && parentToolName == "" {
+		parentToolName = parentToolForTaskKind(targetKind)
+	}
 	scope := env.Scope
 	if scope == "" {
 		scope = eventstream.ScopeMain
@@ -55,18 +94,24 @@ func StreamRequestFromACPEvent(env eventstream.Envelope) (acpprojector.StreamReq
 		RunID:      strings.TrimSpace(env.RunID),
 		TurnID:     strings.TrimSpace(env.TurnID),
 		SessionRef: session.SessionRef{SessionID: sessionID},
-		CallID:     strings.TrimSpace(update.ToolCallID),
-		ToolName:   toolName,
-		RawInput:   streamRequestRawInput(update.RawInput),
+		SourceID: firstNonEmpty(
+			streamRequestMetaString(meta, gateway.EventMetaRoot, gateway.EventMetaRuntime, "task", "turn_id"),
+			terminalID,
+		),
+		CallID:         strings.TrimSpace(update.ToolCallID),
+		ToolName:       toolName,
+		ParentCallID:   parentCallID,
+		ParentToolName: parentToolName,
+		TargetKind:     targetKind,
+		Observer:       observer,
+		RawInput:       streamRequestRawInput(update.RawInput),
 		Ref: stream.Ref{
 			SessionID:  sessionID,
 			TaskID:     taskID,
 			TerminalID: terminalID,
 		},
 		DisplayTerminalID: firstNonEmpty(displayTerminalID, strings.TrimSpace(update.ToolCallID)),
-		Cursor: stream.Cursor{
-			Output: streamRequestInt64(streamRequestMetaAny(meta, gateway.EventMetaRoot, gateway.EventMetaRuntime, "task", "output_cursor")),
-		},
+		Cursor:            streamRequestCursor(),
 		Origin: &acpprojector.StreamOrigin{
 			Scope:         scope,
 			ScopeID:       strings.TrimSpace(env.ScopeID),
@@ -81,6 +126,42 @@ func StreamRequestFromACPEvent(env eventstream.Envelope) (acpprojector.StreamReq
 		return acpprojector.StreamRequest{}, false
 	}
 	return req, true
+}
+
+func streamRequestTargetKind(meta map[string]any) taskapi.Kind {
+	value := firstNonEmpty(
+		streamRequestMetaString(meta, gateway.EventMetaRoot, gateway.EventMetaRuntime, gateway.EventMetaRuntimeTool, "target_kind"),
+		streamRequestMetaString(meta, gateway.EventMetaRoot, gateway.EventMetaRuntime, "task", "kind"),
+		streamRequestMetaString(meta, gateway.EventMetaRoot, gateway.EventMetaRuntime, "task", "task_kind"),
+	)
+	switch {
+	case strings.EqualFold(value, string(taskapi.KindSubagent)):
+		return taskapi.KindSubagent
+	case strings.EqualFold(value, string(taskapi.KindCommand)):
+		return taskapi.KindCommand
+	default:
+		return ""
+	}
+}
+
+func parentToolForTaskKind(kind taskapi.Kind) string {
+	switch kind {
+	case taskapi.KindSubagent:
+		return names.Spawn
+	case taskapi.KindCommand:
+		return names.RunCommand
+	default:
+		return ""
+	}
+}
+
+func streamRequestCursor() stream.Cursor {
+	// A running tool snapshot reports where Runtime is now, not what this
+	// Control feed already delivered. The snapshot output is intentionally not
+	// rendered by Surfaces, so the single stream owner must read from the
+	// replay-safe zero boundary. Stable source-key dedupe prevents later updates
+	// in the same broker from starting a second reader.
+	return stream.Cursor{}
 }
 
 func streamToolNameFromACPUpdate(meta map[string]any, update schema.ToolCallUpdate) string {
@@ -166,19 +247,6 @@ func streamRequestRawInput(value any) map[string]any {
 		return out
 	}
 	return nil
-}
-
-func streamRequestInt64(value any) int64 {
-	switch typed := value.(type) {
-	case int:
-		return int64(typed)
-	case int64:
-		return typed
-	case float64:
-		return int64(typed)
-	default:
-		return 0
-	}
 }
 
 func stringFromPtr(value *string) string {

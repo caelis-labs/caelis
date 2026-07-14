@@ -8,11 +8,12 @@ import (
 )
 
 const (
-	documentKind    = "caelis.sdk.session"
-	documentVersion = 1
-	indexVersion    = 3
-	indexFilename   = ".sessions.index.sqlite"
-	lockFilename    = ".sessions.lock"
+	documentKind                      = "caelis.sdk.session"
+	documentVersion                   = 1
+	indexVersion                      = 3
+	indexFilename                     = ".sessions.index.sqlite"
+	lockFilename                      = ".sessions.lock"
+	transactionRecoveryMarkerFilename = ".sessions.transactions.pending"
 )
 
 var storeRootLocks sync.Map
@@ -25,7 +26,8 @@ const (
 )
 
 type storeRootLock struct {
-	mu contextMutex
+	mu                  contextMutex
+	recoveryInitialized bool
 }
 
 // Config defines one single-file durable session store instance.
@@ -38,14 +40,29 @@ type Config struct {
 
 // Store is the file-backed implementation of session.Store.
 type Store struct {
-	mu                 contextMutex
-	rootDir            string
-	sessionIDGenerator func() string
-	eventIDGenerator   func() string
-	clock              func() time.Time
-	pathCache          map[string]string
-	writeDocumentFault func() error
-	transactionFault   func(string) error
+	mu                      contextMutex
+	rootDir                 string
+	sessionIDGenerator      func() string
+	eventIDGenerator        func() string
+	clock                   func() time.Time
+	pathCache               map[string]string
+	eventPageIndexes        map[string]*eventPageIndex
+	eventPageIndexClock     uint64
+	eventLogCaches          map[string]*eventLogCache
+	eventLogCacheBytes      int64
+	eventLogCacheClock      uint64
+	writeDocumentFault      func() error
+	transactionFault        func(string) error
+	transactionRecoveryScan func()
+	// approvalRecoverySessionDone is an optional test seam invoked after one
+	// Session recovery transaction has released all Store and root locks.
+	approvalRecoverySessionDone func(session.SessionRef)
+	// eventPageLineRead is an optional test seam for proving bounded physical
+	// paging without exposing checkpoint internals through the SDK contract.
+	eventPageLineRead func(path string, lineNo int, offset int64)
+	// eventLogLineRead is an optional test seam for measuring incremental
+	// cached history reads used by append preparation.
+	eventLogLineRead func(path string, lineNo int, offset int64)
 }
 
 // Service is the file-backed implementation of session.Service.

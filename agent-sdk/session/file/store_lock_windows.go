@@ -13,8 +13,18 @@ import (
 )
 
 func lockSessionStoreRoot(ctx context.Context, root string, mode storeRootLockMode) (*os.File, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	file, err := os.OpenFile(filepath.Join(root, lockFilename), os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		_ = file.Close()
 		return nil, err
 	}
 	flags := uint32(windows.LOCKFILE_FAIL_IMMEDIATELY)
@@ -22,9 +32,17 @@ func lockSessionStoreRoot(ctx context.Context, root string, mode storeRootLockMo
 		flags |= windows.LOCKFILE_EXCLUSIVE_LOCK
 	}
 	for {
+		if err := ctx.Err(); err != nil {
+			_ = file.Close()
+			return nil, err
+		}
 		var overlapped windows.Overlapped
 		err = windows.LockFileEx(windows.Handle(file.Fd()), flags, 0, 1, 0, &overlapped)
 		if err == nil {
+			if err := ctx.Err(); err != nil {
+				_ = unlockSessionStoreRoot(file)
+				return nil, err
+			}
 			return file, nil
 		}
 		if !errors.Is(err, windows.ERROR_LOCK_VIOLATION) {
@@ -35,7 +53,10 @@ func lockSessionStoreRoot(ctx context.Context, root string, mode storeRootLockMo
 		select {
 		case <-ctx.Done():
 			if !timer.Stop() {
-				<-timer.C
+				select {
+				case <-timer.C:
+				default:
+				}
 			}
 			file.Close()
 			return nil, ctx.Err()

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -521,6 +522,32 @@ func TestCommandLiveOutputBufferIsBoundedAndCursorStable(t *testing.T) {
 		t.Fatalf("outputFromCursorLocked(previous cursor) = %q, want appended tail", got)
 	}
 	task.mu.Unlock()
+}
+
+func TestCommandLiveOutputTruncationKeepsUTF8BoundaryAndSignalsGap(t *testing.T) {
+	t.Parallel()
+
+	task := &commandTask{
+		ref:            taskapi.Ref{TaskID: "task-1", SessionID: "term-session", TerminalID: "term-1"},
+		sessionRef:     session.SessionRef{SessionID: "session-1"},
+		session:        &liveOutputRaceSession{},
+		state:          taskapi.StateRunning,
+		running:        true,
+		createdAt:      time.Now(),
+		outputCallback: true,
+	}
+	task.appendOutput("中" + strings.Repeat("a", commandLiveOutputBufferCapBytes-2))
+
+	snap, err := (&streamService{}).readCommand(context.Background(), task, stream.Cursor{})
+	if err != nil {
+		t.Fatalf("readCommand() error = %v", err)
+	}
+	if snap.TruncatedBefore != int64(len([]byte("中"))) || len(snap.Frames) != 1 || snap.Frames[0].TruncatedBefore != snap.TruncatedBefore {
+		t.Fatalf("truncated snapshot = %#v, want typed gap at first complete rune", snap)
+	}
+	if !utf8.ValidString(snap.Frames[0].Text) || len([]byte(snap.Frames[0].Text)) != commandLiveOutputBufferCapBytes-2 {
+		t.Fatalf("retained frame bytes = %d valid=%v, want valid UTF-8 suffix", len([]byte(snap.Frames[0].Text)), utf8.ValidString(snap.Frames[0].Text))
+	}
 }
 
 func TestTerminalFinalTextPreservesNonBlankWhitespaceAndDropsBlankOnlyOutput(t *testing.T) {

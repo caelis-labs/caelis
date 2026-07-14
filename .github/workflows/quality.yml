@@ -51,6 +51,9 @@ jobs:
       - name: Agent SDK package boundary
         run: make sdk-boundary-check
 
+      - name: Control client protocol generation
+        run: make client-protocol-check
+
       - name: Documentation links
         run: make docs-links
 
@@ -70,3 +73,19 @@ jobs:
 
       - name: Build
         run: make build
+
+  windows-persistence:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Cross-compilation cannot catch Windows file-lock and durable-rename
+      # behavior. Keep the supported release target on a real Windows runner.
+      - name: Windows persistence runtime
+        run: go test -count=1 ./agent-sdk/session/file ./internal/controlclient

@@ -98,7 +98,7 @@ func TestExternalACPChildStreamsThroughRuntimeRecorderAndSessionFeedBeforeComple
 	if err != nil {
 		t.Fatal(err)
 	}
-	live, err := feed.SubscribeFromNow()
+	live, err := feed.SubscribeFromNow(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,23 +132,36 @@ func TestExternalACPChildStreamsThroughRuntimeRecorderAndSessionFeedBeforeComple
 	receiveLiveOutputSignal(t, parentWaiting, "parent model waiting after running Spawn result")
 
 	updates := []struct {
-		name       string
-		update     any
-		updateType string
-		messageID  string
-		text       string
-		toolCallID string
+		name                string
+		update              any
+		updateType          string
+		messageID           string
+		text                string
+		toolCallID          string
+		blankMessageIDDelta bool
+		narrativeSequence   string
 	}{
 		{name: "m1 first delta", update: liveOutputContentChunk(schema.UpdateAgentMessage, "m1", "first "), updateType: schema.UpdateAgentMessage, messageID: "m1", text: "first "},
-		{name: "m1 cumulative second chunk", update: liveOutputContentChunk(schema.UpdateAgentMessage, "m1", "first second"), updateType: schema.UpdateAgentMessage, messageID: "m1", text: "second"},
+		{name: "m1 second delta", update: liveOutputContentChunk(schema.UpdateAgentMessage, "m1", "second"), updateType: schema.UpdateAgentMessage, messageID: "m1", text: "second"},
 		{name: "thought", update: liveOutputContentChunk(schema.UpdateAgentThought, "thought-1", "reasoning"), updateType: schema.UpdateAgentThought, messageID: "thought-1", text: "reasoning"},
 		{name: "tool call", update: client.ToolCall{SessionUpdate: schema.UpdateToolCall, ToolCallID: "child-call-1", Kind: "execute", Title: "inspect", Status: "pending"}, updateType: schema.UpdateToolCall, toolCallID: "child-call-1"},
 		{name: "tool update running", update: client.ToolCallUpdate{SessionUpdate: schema.UpdateToolCallInfo, ToolCallID: "child-call-1", Kind: liveOutputString("execute"), Title: liveOutputString("inspect"), Status: liveOutputString("in_progress")}, updateType: schema.UpdateToolCallInfo, toolCallID: "child-call-1"},
 		{name: "tool update completed", update: client.ToolCallUpdate{SessionUpdate: client.UpdateToolCallState, ToolCallID: "child-call-1", Kind: liveOutputString("execute"), Title: liveOutputString("inspect"), Status: liveOutputString("completed")}, updateType: client.UpdateToolCallState, toolCallID: "child-call-1"},
 		{name: "plan", update: client.PlanUpdate{SessionUpdate: schema.UpdatePlan, Entries: []client.PlanEntry{{Content: "inspect", Status: "completed"}}}, updateType: schema.UpdatePlan},
-		{name: "m2 first delta", update: liveOutputContentChunk(schema.UpdateAgentMessage, "m2", "same"), updateType: schema.UpdateAgentMessage, messageID: "m2", text: "same"},
-		{name: "m2 cumulative second chunk", update: liveOutputContentChunk(schema.UpdateAgentMessage, "m2", "same extended"), updateType: schema.UpdateAgentMessage, messageID: "m2", text: " extended"},
+		{name: "repeated delta first chunk", update: liveOutputContentChunk(schema.UpdateAgentMessage, "repeat-1", "ha"), updateType: schema.UpdateAgentMessage, messageID: "repeat-1", text: "ha", narrativeSequence: "repeated delta"},
+		{name: "repeated delta identical chunk", update: liveOutputContentChunk(schema.UpdateAgentMessage, "repeat-1", "ha"), updateType: schema.UpdateAgentMessage, messageID: "repeat-1", text: "ha", narrativeSequence: "repeated delta"},
+		{name: "prefix-growing delta first chunk", update: liveOutputContentChunk(schema.UpdateAgentMessage, "m2", "a"), updateType: schema.UpdateAgentMessage, messageID: "m2", text: "a", narrativeSequence: "prefix-growing delta"},
+		{name: "prefix-growing delta second chunk", update: liveOutputContentChunk(schema.UpdateAgentMessage, "m2", "ab"), updateType: schema.UpdateAgentMessage, messageID: "m2", text: "ab", narrativeSequence: "prefix-growing delta"},
+		{name: "blank message id thought barrier", update: liveOutputContentChunk(schema.UpdateAgentThought, "thought-2", "prepare final answer"), updateType: schema.UpdateAgentThought, messageID: "thought-2", text: "prepare final answer"},
+		{name: "blank message id first delta", update: liveOutputContentChunk(schema.UpdateAgentMessage, "", "当前"), updateType: schema.UpdateAgentMessage, text: "当前", blankMessageIDDelta: true},
+		{name: "blank message id second delta", update: liveOutputContentChunk(schema.UpdateAgentMessage, "", "目录下共有 12 个文件"), updateType: schema.UpdateAgentMessage, text: "目录下共有 12 个文件", blankMessageIDDelta: true},
+		{name: "blank message id final punctuation delta", update: liveOutputContentChunk(schema.UpdateAgentMessage, "", "。"), updateType: schema.UpdateAgentMessage, text: "。", blankMessageIDDelta: true},
 	}
+	const blankMessageIDResult = "当前目录下共有 12 个文件。"
+	var blankMessageIDLive strings.Builder
+	blankMessageIDIndexes := make([]int, 0, 3)
+	narrativeSequenceIndexes := map[string][]int{}
+	narrativeSequenceLive := map[string]string{}
 	liveChildren := make([]eventstream.Envelope, 0, len(updates))
 	for _, one := range updates {
 		external.handleUpdate(child, client.UpdateEnvelope{SessionID: "external-child-session", Update: one.update})
@@ -156,7 +169,7 @@ func TestExternalACPChildStreamsThroughRuntimeRecorderAndSessionFeedBeforeComple
 			if env.Scope != eventstream.ScopeSubagent || eventstream.UpdateType(env.Update) != one.updateType {
 				return false
 			}
-			if one.messageID != "" {
+			if one.text != "" {
 				chunk, ok := env.Update.(schema.ContentChunk)
 				return ok && chunk.MessageID == one.messageID && schema.ExtractTextValue(chunk.Content) == one.text
 			}
@@ -169,7 +182,37 @@ func TestExternalACPChildStreamsThroughRuntimeRecorderAndSessionFeedBeforeComple
 		if !liveOutputChildRunning(child) {
 			t.Fatalf("child stopped before %s became visible", one.name)
 		}
+		if one.blankMessageIDDelta {
+			if envelope.Final {
+				t.Fatalf("%s live envelope Final = true, want an open narrative delta", one.name)
+			}
+			chunk, ok := envelope.Update.(schema.ContentChunk)
+			if !ok || chunk.MessageID != "" {
+				t.Fatalf("%s live update = %#v, want a blank-message-id content chunk", one.name, envelope.Update)
+			}
+			blankMessageIDIndexes = append(blankMessageIDIndexes, len(liveChildren))
+			blankMessageIDLive.WriteString(schema.ExtractTextValue(chunk.Content))
+		}
+		if one.narrativeSequence != "" {
+			chunk, ok := envelope.Update.(schema.ContentChunk)
+			if !ok {
+				t.Fatalf("%s live update = %#v, want narrative content chunk", one.name, envelope.Update)
+			}
+			narrativeSequenceIndexes[one.narrativeSequence] = append(narrativeSequenceIndexes[one.narrativeSequence], len(liveChildren))
+			narrativeSequenceLive[one.narrativeSequence] += schema.ExtractTextValue(chunk.Content)
+		}
 		liveChildren = append(liveChildren, envelope)
+	}
+	if got := blankMessageIDLive.String(); got != blankMessageIDResult {
+		t.Fatalf("blank-message-id live narrative = %q, want %q", got, blankMessageIDResult)
+	}
+	for name, want := range map[string]string{
+		"repeated delta":       "haha",
+		"prefix-growing delta": "aab",
+	} {
+		if got := narrativeSequenceLive[name]; got != want {
+			t.Fatalf("%s live narrative = %q, want %q", name, got, want)
+		}
 	}
 
 	close(parentRelease)
@@ -186,6 +229,43 @@ func TestExternalACPChildStreamsThroughRuntimeRecorderAndSessionFeedBeforeComple
 	replayedChildren := collectLiveOutputChildEnvelopes(t, replay.Subscription, len(liveChildren))
 	if got, want := liveOutputEnvelopeSignatures(replayedChildren), liveOutputEnvelopeSignatures(liveChildren); !reflect.DeepEqual(got, want) {
 		t.Fatalf("live/replay child envelopes differ:\nlive=%#v\nreplay=%#v", want, got)
+	}
+	var blankMessageIDReplay strings.Builder
+	for _, index := range blankMessageIDIndexes {
+		if index < 0 || index >= len(replayedChildren) {
+			t.Fatalf("blank-message-id replay index %d outside %d child envelopes", index, len(replayedChildren))
+		}
+		envelope := replayedChildren[index]
+		if envelope.Final {
+			t.Fatalf("blank-message-id replay envelope %d Final = true, want an open narrative delta", index)
+		}
+		chunk, ok := envelope.Update.(schema.ContentChunk)
+		if !ok || chunk.MessageID != "" {
+			t.Fatalf("blank-message-id replay update %d = %#v, want a blank-message-id content chunk", index, envelope.Update)
+		}
+		blankMessageIDReplay.WriteString(schema.ExtractTextValue(chunk.Content))
+	}
+	if got := blankMessageIDReplay.String(); got != blankMessageIDResult {
+		t.Fatalf("blank-message-id replay narrative = %q, want %q", got, blankMessageIDResult)
+	}
+	for name, want := range map[string]string{
+		"repeated delta":       "haha",
+		"prefix-growing delta": "aab",
+	} {
+		var replayed strings.Builder
+		for _, index := range narrativeSequenceIndexes[name] {
+			if index < 0 || index >= len(replayedChildren) {
+				t.Fatalf("%s replay index %d outside %d child envelopes", name, index, len(replayedChildren))
+			}
+			chunk, ok := replayedChildren[index].Update.(schema.ContentChunk)
+			if !ok {
+				t.Fatalf("%s replay update %d = %#v, want narrative content chunk", name, index, replayedChildren[index].Update)
+			}
+			replayed.WriteString(schema.ExtractTextValue(chunk.Content))
+		}
+		if got := replayed.String(); got != want {
+			t.Fatalf("%s replay narrative = %q, want %q", name, got, want)
+		}
 	}
 
 	page, err := sessions.EventsPage(ctx, session.EventPageRequest{
@@ -227,7 +307,7 @@ func TestExternalACPChildStreamsThroughRuntimeRecorderAndSessionFeedBeforeComple
 		}
 	}
 	modelContext := receiveLiveOutputValue(t, contextModel.requests, "reopened parent model context")
-	for _, childText := range []string{"first second", "reasoning", "same extended"} {
+	for _, childText := range []string{"first second", "reasoning", "haha", "aab"} {
 		if strings.Contains(modelContext, childText) {
 			t.Fatalf("durable child mirror leaked into parent model context: %q", modelContext)
 		}

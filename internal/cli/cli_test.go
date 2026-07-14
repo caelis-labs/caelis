@@ -321,6 +321,38 @@ func TestStreamHandleWritesAssistantTextAndDeniesApproval(t *testing.T) {
 	}
 }
 
+func TestStreamHandleAppendsPrefixGrowingACPMessageDeltasExactly(t *testing.T) {
+	handle := newFakeHandle([]eventstream.Envelope{
+		{
+			Kind: eventstream.KindSessionUpdate,
+			Update: schema.ContentChunk{
+				SessionUpdate: schema.UpdateAgentMessage,
+				MessageID:     "message-1",
+				Content:       schema.TextContent{Type: "text", Text: "a"},
+			},
+		},
+		{
+			Kind: eventstream.KindSessionUpdate,
+			Update: schema.ContentChunk{
+				SessionUpdate: schema.UpdateAgentMessage,
+				MessageID:     "message-1",
+				Content:       schema.TextContent{Type: "text", Text: "ab"},
+			},
+		},
+	})
+	var out bytes.Buffer
+	var errBuf bytes.Buffer
+	if err := streamHandle(context.Background(), handle, &out, &errBuf); err != nil {
+		t.Fatalf("streamHandle() error = %v", err)
+	}
+	if got, want := out.String(), "a\naab\n"; got != want {
+		t.Fatalf("stdout = %q, want cumulative render %q from exact ACP deltas", got, want)
+	}
+	if errBuf.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", errBuf.String())
+	}
+}
+
 func TestStreamHandleIgnoresAutomaticApprovalReviewEvents(t *testing.T) {
 	handle := newFakeHandle([]eventstream.Envelope{
 		{

@@ -29,6 +29,8 @@ const (
 
 	RuntimeStream             = "stream"
 	RuntimeStreamMode         = "mode"
+	RuntimeStreamTruncated    = "truncated"
+	RuntimeStreamBefore       = "truncated_before"
 	RuntimeStreamParentCallID = "parent_call_id"
 	RuntimeStreamParentTool   = "parent_tool"
 	RuntimeStreamParentTaskID = "parent_task_id"

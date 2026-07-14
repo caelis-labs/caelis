@@ -155,6 +155,13 @@ func isLiveStreamingNarrativeEvent(event *session.Event) bool {
 		return false
 	}
 	updateType := strings.TrimSpace(session.ProtocolSessionUpdateType(event))
+	if updateType == "" && event.Scope != nil {
+		// Canonical storage removes a redundant Protocol.Update when Message
+		// already carries the same text. Child ACP chunks still retain their
+		// normalized update identity on EventScope.ACP; use it so durable mirror
+		// replay does not turn every delta into a final transcript boundary.
+		updateType = strings.TrimSpace(event.Scope.ACP.EventType)
+	}
 	switch updateType {
 	case string(session.ProtocolUpdateTypeAgentMessage), string(session.ProtocolUpdateTypeAgentThought):
 		return true

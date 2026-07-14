@@ -43,13 +43,19 @@ func forwardTurnEventStream(ctx context.Context, turn control.Turn, sender *Prog
 	var batcher eventStreamNarrativeBatcher
 	failureReason := ""
 	cancelled := false
+	cancelSignal := ctx.Done()
+	cancelRequested := false
 	for events != nil {
 		select {
-		case <-ctx.Done():
+		case <-cancelSignal:
+			// Cancelling the TUI run context requests cancellation; it is not a
+			// completed Turn boundary. Keep consuming the authoritative stream so
+			// Control can cross its Runtime producer and lease-release barrier
+			// before the UI observes the one terminal lifecycle envelope.
+			cancelSignal = nil
+			cancelRequested = true
 			batcher.flush(send)
-			terminal := eventstream.TurnCancelled(turn.HandleID(), turn.RunID(), turn.TurnID(), ctx.Err().Error(), time.Now())
-			send(terminal)
-			return executeLineResult{queued: true}
+			turn.Cancel()
 		case <-ticker.C:
 			batcher.flush(send)
 		case env, ok := <-events:
@@ -79,7 +85,7 @@ func forwardTurnEventStream(ctx context.Context, turn control.Turn, sender *Prog
 	batcher.flush(send)
 	var terminal eventstream.Envelope
 	switch {
-	case cancelled:
+	case cancelled || cancelRequested:
 		terminal = eventstream.TurnCancelled(turn.HandleID(), turn.RunID(), turn.TurnID(), failureReason, time.Now())
 	case failureReason != "":
 		terminal = eventstream.TurnFailed(turn.HandleID(), turn.RunID(), turn.TurnID(), failureReason, time.Now())
@@ -218,10 +224,19 @@ func mergeEventStreamNarrativeEnvelope(dst *eventstream.Envelope, src eventstrea
 	if srcText == "" {
 		return
 	}
-	dst.Cursor = src.Cursor
-	dst.OccurredAt = src.OccurredAt
-	dstUpdate.Content = schema.TextContent{Type: "text", Text: dstText + srcText}
-	dst.Update = dstUpdate
+	// ACP content chunks are deltas. Coalescing is only a client-delivery
+	// optimization, so preserve every byte (including repeated chunks) while
+	// keeping the latest Envelope as the complete transport identity. Any
+	// cumulative-stream normalization belongs before the Surface boundary.
+	merged := dstText + srcText
+	latest := eventstream.CloneEnvelope(src)
+	latestUpdate, ok := latest.Update.(schema.ContentChunk)
+	if !ok {
+		return
+	}
+	latestUpdate.Content = schema.TextContent{Type: "text", Text: merged}
+	latest.Update = latestUpdate
+	*dst = latest
 }
 
 func rawString(values map[string]any, key string) string {

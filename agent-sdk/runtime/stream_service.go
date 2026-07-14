@@ -6,6 +6,7 @@ import (
 	"iter"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -90,6 +91,10 @@ func (s *streamService) readCommand(ctx context.Context, task *commandTask, curs
 		task.reconcileFinalOutputLocked(terminalOutputText(task.output, result.Stdout, result.Stderr))
 		outputCursor = task.outputCursorLocked()
 	}
+	truncatedBefore := int64(0)
+	if cursor.Output < task.outputBase {
+		truncatedBefore = task.outputBase
+	}
 	snap := stream.Snapshot{
 		Ref: stream.Ref{
 			SessionID:  strings.TrimSpace(task.sessionRef.SessionID),
@@ -99,11 +104,12 @@ func (s *streamService) readCommand(ctx context.Context, task *commandTask, curs
 		Cursor: stream.Cursor{
 			Output: outputCursor,
 		},
-		Running:       status.Running,
-		State:         string(state),
-		SupportsInput: status.SupportsInput,
-		StartedAt:     status.StartedAt,
-		UpdatedAt:     status.UpdatedAt,
+		TruncatedBefore: truncatedBefore,
+		Running:         status.Running,
+		State:           string(state),
+		SupportsInput:   status.SupportsInput,
+		StartedAt:       status.StartedAt,
+		UpdatedAt:       status.UpdatedAt,
 	}
 	if !status.Running {
 		exitCode := status.ExitCode
@@ -112,11 +118,12 @@ func (s *streamService) readCommand(ctx context.Context, task *commandTask, curs
 	}
 	if delta := task.outputFromCursorLocked(cursor.Output); delta != "" {
 		snap.Frames = append(snap.Frames, stream.Frame{
-			Ref:       snap.Ref,
-			Text:      delta,
-			Cursor:    snap.Cursor,
-			Running:   status.Running,
-			UpdatedAt: status.UpdatedAt,
+			Ref:             snap.Ref,
+			Text:            delta,
+			Cursor:          snap.Cursor,
+			TruncatedBefore: truncatedBefore,
+			Running:         status.Running,
+			UpdatedAt:       status.UpdatedAt,
 		})
 	}
 	task.mu.Unlock()
@@ -425,6 +432,9 @@ func sliceStringFromByteCursor(text string, cursor int64) string {
 	raw := []byte(text)
 	if cursor >= int64(len(raw)) {
 		return ""
+	}
+	for cursor < int64(len(raw)) && !utf8.RuneStart(raw[cursor]) {
+		cursor++
 	}
 	return string(raw[cursor:])
 }

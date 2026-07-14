@@ -164,14 +164,8 @@ func TestForwardControllerEventsPublishesNarrativeDeltasWithRepairedNativeACP(t 
 			}),
 		},
 		{
-			Canonical: acpNarrativeEvent(session.ProtocolUpdateTypeAgentMessage, "hello"),
-			ACP: acpNarrativeEnvelope("hello", map[string]any{
-				"vendor": "acp-test",
-			}),
-		},
-		{
-			Canonical: acpNarrativeEvent(session.ProtocolUpdateTypeAgentMessage, "hello"),
-			ACP: acpNarrativeEnvelope("hello", map[string]any{
+			Canonical: acpNarrativeEvent(session.ProtocolUpdateTypeAgentMessage, "lo"),
+			ACP: acpNarrativeEnvelope("lo", map[string]any{
 				"vendor": "acp-test",
 			}),
 		},

@@ -21,16 +21,22 @@ func TestRenderSchedulerPreservesSplitTerminalNewlineFrame(t *testing.T) {
 	assertRenderSchedulerTerminalMerge(t, terminalMetaStreamEnvelope, []string{"Step 1/2", "\n", "Step 2/2\n"}, "Step 1/2\nStep 2/2\n")
 }
 
-func TestRenderSchedulerMergesGenericTerminalOverlap(t *testing.T) {
+func TestRenderSchedulerPreservesRepeatedTerminalLines(t *testing.T) {
 	t.Parallel()
 
-	assertRenderSchedulerTerminalMerge(t, genericTerminalStreamEnvelope, []string{"line 1\nline 2\n", "line 2\nline 3\n"}, "line 1\nline 2\nline 3\n")
+	assertRenderSchedulerTerminalMerge(t, genericTerminalStreamEnvelope, []string{"line 1\nline 2\n", "line 2\nline 3\n"}, "line 1\nline 2\nline 2\nline 3\n")
 }
 
-func TestRenderSchedulerMergesGenericCumulativeTerminalLine(t *testing.T) {
+func TestRenderSchedulerPreservesPrefixLikeTerminalDeltas(t *testing.T) {
 	t.Parallel()
 
-	assertRenderSchedulerTerminalMerge(t, genericTerminalStreamEnvelope, []string{"abc", "abcd"}, "abcd")
+	assertRenderSchedulerTerminalMerge(t, genericTerminalStreamEnvelope, []string{"abc", "abcd"}, "abcabcd")
+}
+
+func TestRenderSchedulerPreservesIdenticalTerminalDeltas(t *testing.T) {
+	t.Parallel()
+
+	assertRenderSchedulerTerminalMerge(t, terminalMetaStreamEnvelope, []string{"tick\n", "tick\n"}, "tick\ntick\n")
 }
 
 func assertRenderSchedulerTerminalMerge(t *testing.T, envelope func(string, string) eventstream.Envelope, chunks []string, want string) {

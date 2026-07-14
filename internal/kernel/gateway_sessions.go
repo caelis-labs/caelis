@@ -114,16 +114,11 @@ func (g *Gateway) ResumeSession(ctx context.Context, req ResumeSessionRequest) (
 	if strings.TrimSpace(req.SessionID) != "" {
 		workspaceKey = ""
 	}
-	list, err := g.ListSessions(ctx, ListSessionsRequest{
-		AppName:      req.AppName,
-		UserID:       req.UserID,
-		WorkspaceKey: workspaceKey,
-		Limit:        200,
-	})
+	summaries, err := g.resumeTargetSummaries(ctx, req, workspaceKey)
 	if err != nil {
 		return session.LoadedSession{}, err
 	}
-	target, err := g.resolveResumeTarget(req, list.Sessions)
+	target, err := g.resolveResumeTarget(req, summaries)
 	if err != nil {
 		return session.LoadedSession{}, err
 	}
@@ -136,6 +131,41 @@ func (g *Gateway) ResumeSession(ctx context.Context, req ResumeSessionRequest) (
 	}
 	g.bind(req.BindingKey, loaded.Session.SessionRef, req.Binding)
 	return loaded, nil
+}
+
+func (g *Gateway) resumeTargetSummaries(ctx context.Context, req ResumeSessionRequest, workspaceKey string) ([]session.SessionSummary, error) {
+	targetID := strings.TrimSpace(req.SessionID)
+	cursor := ""
+	out := make([]session.SessionSummary, 0, 2)
+	for {
+		list, err := g.ListSessions(ctx, ListSessionsRequest{
+			AppName: req.AppName, UserID: req.UserID, WorkspaceKey: workspaceKey,
+			Cursor: cursor, Limit: 200,
+		})
+		if err != nil {
+			return nil, err
+		}
+		for _, summary := range list.Sessions {
+			if targetID != "" && !strings.HasPrefix(strings.TrimSpace(summary.SessionID), targetID) {
+				continue
+			}
+			out = append(out, summary)
+			// A prefix with two matches is already ambiguous. With no explicit
+			// target, only enough recent candidates to skip the current binding
+			// are needed.
+			if targetID != "" && len(out) >= 2 {
+				return session.CloneSessionSummaries(out), nil
+			}
+			if targetID == "" && len(out) >= 2 {
+				return session.CloneSessionSummaries(out), nil
+			}
+		}
+		next := strings.TrimSpace(list.NextCursor)
+		if next == "" || next == cursor {
+			return session.CloneSessionSummaries(out), nil
+		}
+		cursor = next
+	}
 }
 
 func (g *Gateway) loadResumeTarget(ctx context.Context, ref session.SessionRef, req ResumeSessionRequest, limit int) (session.LoadedSession, error) {
@@ -172,49 +202,96 @@ func resumeSessionNotFoundError() error {
 }
 
 func (g *Gateway) ListSessions(ctx context.Context, req ListSessionsRequest) (session.SessionList, error) {
+	if req.Limit <= 0 {
+		list, err := g.listSessionPage(ctx, req, req.Cursor, 0)
+		if err != nil {
+			return session.SessionList{}, err
+		}
+		list.Sessions, err = g.filterListedSessions(ctx, list.Sessions)
+		if err != nil {
+			return session.SessionList{}, err
+		}
+		return list, nil
+	}
+
+	visible := make([]session.SessionSummary, 0, req.Limit)
+	seen := make(map[string]struct{}, req.Limit)
+	cursor := strings.TrimSpace(req.Cursor)
+	for len(visible) < req.Limit {
+		page, err := g.listSessionPage(ctx, req, cursor, req.Limit-len(visible))
+		if err != nil {
+			return session.SessionList{}, err
+		}
+		filtered, err := g.filterListedSessions(ctx, page.Sessions)
+		if err != nil {
+			return session.SessionList{}, err
+		}
+		for _, summary := range filtered {
+			sessionID := strings.TrimSpace(summary.SessionID)
+			if _, ok := seen[sessionID]; ok {
+				continue
+			}
+			seen[sessionID] = struct{}{}
+			visible = append(visible, summary)
+		}
+		next := strings.TrimSpace(page.NextCursor)
+		if len(visible) >= req.Limit {
+			return session.SessionList{
+				Sessions: session.CloneSessionSummaries(visible[:req.Limit]), NextCursor: next,
+			}, nil
+		}
+		if next == "" || next == cursor {
+			return session.SessionList{Sessions: session.CloneSessionSummaries(visible)}, nil
+		}
+		cursor = next
+	}
+	return session.SessionList{Sessions: session.CloneSessionSummaries(visible)}, nil
+}
+
+func (g *Gateway) listSessionPage(ctx context.Context, req ListSessionsRequest, cursor string, limit int) (session.SessionList, error) {
 	list, err := g.sessions.ListSessions(ctx, session.ListSessionsRequest{
-		AppName:      req.AppName,
-		UserID:       req.UserID,
-		WorkspaceKey: req.WorkspaceKey,
-		Cursor:       req.Cursor,
-		Limit:        req.Limit,
+		AppName: req.AppName, UserID: req.UserID, WorkspaceKey: req.WorkspaceKey,
+		Cursor: cursor, Limit: limit,
 	})
 	if err != nil {
 		return session.SessionList{}, wrapSessionError(err)
 	}
-	list.Sessions = g.filterListedSessions(ctx, list.Sessions)
 	return list, nil
 }
 
-func (g *Gateway) filterListedSessions(ctx context.Context, summaries []session.SessionSummary) []session.SessionSummary {
+func (g *Gateway) filterListedSessions(ctx context.Context, summaries []session.SessionSummary) ([]session.SessionSummary, error) {
 	if len(summaries) == 0 {
-		return nil
+		return nil, nil
 	}
 	out := make([]session.SessionSummary, 0, len(summaries))
 	for _, summary := range summaries {
-		if g.isSystemManagedSessionSummary(ctx, summary) {
+		systemManaged, err := g.isSystemManagedSessionSummary(ctx, summary)
+		if err != nil {
+			return nil, wrapSessionError(err)
+		}
+		if systemManaged {
 			continue
 		}
 		out = append(out, summary)
 	}
-	return session.CloneSessionSummaries(out)
+	return session.CloneSessionSummaries(out), nil
 }
 
-func (g *Gateway) isSystemManagedSessionSummary(ctx context.Context, summary session.SessionSummary) bool {
+func (g *Gateway) isSystemManagedSessionSummary(ctx context.Context, summary session.SessionSummary) (bool, error) {
 	if metadataString(summary.Metadata, "system_managed_agent") != "" {
-		return true
+		return true, nil
 	}
 	if !looksLikeLegacySystemManagedSessionSummary(summary) {
-		return false
+		return false, nil
 	}
 	if g == nil || g.sessions == nil {
-		return false
+		return true, nil
 	}
 	loaded, err := g.sessions.Session(ctx, summary.SessionRef)
 	if err != nil {
-		return false
+		return false, err
 	}
-	return metadataString(loaded.Metadata, "system_managed_agent") != ""
+	return metadataString(loaded.Metadata, "system_managed_agent") != "", nil
 }
 
 func looksLikeLegacySystemManagedSessionSummary(summary session.SessionSummary) bool {

@@ -6,8 +6,8 @@ import (
 )
 
 // contextMutex is a zero-value mutex whose acquisition can be cancelled.
-// Ordinary Store operations use Lock; lease operations use LockContext so a
-// heartbeat deadline cannot be trapped behind unrelated local Store work.
+// Request-scoped Store operations use LockContext so callers, including lease
+// heartbeats, cannot be trapped behind unrelated local Store work.
 type contextMutex struct {
 	once  sync.Once
 	token chan struct{}
@@ -25,16 +25,26 @@ func (m *contextMutex) Lock() {
 }
 
 func (m *contextMutex) LockContext(ctx context.Context) error {
-	m.init()
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	m.init()
 	select {
 	case <-m.token:
-		return nil
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+	// A cancelled context and an available token are both selectable. Recheck
+	// after acquisition so a pre-cancelled request can never win that race and
+	// enter a durable Store mutation.
+	if err := ctx.Err(); err != nil {
+		m.token <- struct{}{}
+		return err
+	}
+	return nil
 }
 
 func (m *contextMutex) Unlock() {

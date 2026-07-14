@@ -3,7 +3,6 @@ package tuiapp
 import (
 	"strings"
 
-	"github.com/caelis-labs/caelis/agent-sdk/display"
 	names "github.com/caelis-labs/caelis/agent-sdk/tool/identity"
 	"github.com/caelis-labs/caelis/surfaces/transcript"
 )
@@ -92,18 +91,6 @@ func participantMentionFromHandle(handle string) string {
 		return handle
 	}
 	return "@" + handle
-}
-
-func taskControlResult(semanticName string, rawInput map[string]any, displayOutput map[string]any, meta map[string]any) bool {
-	if !strings.EqualFold(strings.TrimSpace(semanticName), "TASK") {
-		return false
-	}
-	switch strings.ToLower(strings.TrimSpace(display.ToolTaskAction(rawInput, displayOutput, meta))) {
-	case "wait", "cancel":
-		return true
-	default:
-		return false
-	}
 }
 
 func toolDisplayMetaOutput(toolName string, meta map[string]any) map[string]any {

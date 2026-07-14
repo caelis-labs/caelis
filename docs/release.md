@@ -91,6 +91,8 @@ Release gating should record, rather than merely assume, these results:
 
 - formatting, lint, vet, architecture lint, SDK boundary, tests, and build;
 - focused Agent SDK `-race` coverage;
+- native Windows Session/operation persistence tests, including file locks and
+  write-through atomic replacement;
 - regression suite;
 - documentation-link validation;
 - six-target release snapshot or equivalent build coverage;

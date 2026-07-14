@@ -567,26 +567,12 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if strings.TrimSpace(hint) == "" {
 			hint = "mode updated"
 		}
-		if m.cfg.RefreshWorkspace != nil {
-			if workspace := strings.TrimSpace(m.cfg.RefreshWorkspace()); workspace != "" {
-				m.setWorkspaceDisplay(workspace)
-			}
-		}
-		if m.cfg.RefreshStatus != nil {
-			modelText, contextText := m.cfg.RefreshStatus()
-			m.statusModel = normalizeStatusModel(modelText)
-			m.statusContext = strings.TrimSpace(contextText)
-		}
-		if m.cfg.RefreshStatusView != nil {
-			m.statusView = m.cfg.RefreshStatusView()
-			m.normalizeStatusViewWorkspace()
-		}
-		m.refreshModeLabelFromConfig()
-		return m, m.showHint(hint, hintOptions{
+		hintCmd := m.showHint(hint, hintOptions{
 			priority:       HintPriorityNormal,
 			clearOnMessage: true,
 			clearAfter:     copyHintDuration,
 		})
+		return m, tea.Batch(hintCmd, m.beginStatusRefreshCmd())
 	}
 
 	switch {

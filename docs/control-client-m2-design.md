@@ -156,8 +156,11 @@ client backfill.
 ## Session Feed Broker
 
 There is one broker per active or replayed Session and any number of
-subscribers. It is owned by Control and starts when a Turn is registered, before
-a Surface can subscribe. The existing Turn live-feed broker is narrowed to
+subscribers. It is owned by Control. The first-party adapter registers a
+`SubscribeFromNow` boundary before `BeginTurn`, then attaches Turn ingress only
+after the Surface claims `Turn.Events`; there is no interval in which a live
+Turn can overflow a subscription that the caller is not yet able to consume.
+The existing Turn live-feed broker is narrowed to
 Turn ingress and retains source `Read`, cursor commit, final-source barrier,
 drain/ack, and unique main-terminal behavior.
 
@@ -177,10 +180,46 @@ asynchronous Spawn.
 ### Bounds and slow consumers
 
 Broker configuration has independent positive bounds for ring event count,
-ring encoded bytes, and event TTL. Every subscriber has a separate bounded
-queue. Publication never blocks Control on subscriber I/O. A subscriber whose
-queue fills is closed with a typed slow-consumer reason and resumes from its
-last delivered Cursor.
+ring encoded bytes, event TTL, and subscriber queue size. Public resumable
+`Subscribe` consumers have independent bounded queues; a slow consumer is
+closed with a typed reason and resumes from its last delivered Cursor.
+
+`SubscribeFromNow` is the internal active-Turn handoff, not a remote replay
+subscription. It registers the no-history boundary before Turn start, binds the
+subscription lifetime to the caller context, and uses the same independent
+bounded slow-consumer disconnect as other subscriptions. Session publication
+never waits on subscriber I/O: an unclaimed or paused Surface therefore cannot
+stall a sibling ingress, durable sequencing, or terminal delivery. The adapter
+attaches the new Turn's own ingress lazily after the Surface claims the event
+stream, so a fast Turn cannot overflow an unconsumable pre-return subscription.
+If unrelated same-Session traffic exhausts the queue before handoff, the
+Surface receives the typed slow-consumer failure and can resume from its Cursor;
+the broker never silently truncates the feed or freezes the Session.
+After handoff, `AttachTo` fences the prepared target while the owning Turn event
+and any durable storage gap enter the global Session sequence. All Envelopes
+accepted during that fence are collected for the target in actual acceptance
+order under hard event and encoded-byte bounds. The broker releases its lock
+and durable sequencer before delivering the bounded target batch, so a slow
+first-party Surface can wait only on its own ingress delivery and only until the
+configured subscriber stall timeout. Expiry disconnects that target with the
+typed slow-consumer reason. Subscription context or Turn cancellation cancels
+a blocking target read/wait and detaches that delivery, while the same
+attachment continues untargeted Session publication for sibling subscribers.
+Broker or Turn close releases the complete attachment. Unrelated Session events
+retain non-blocking bounded fan-out and may trigger the target's typed
+slow-consumer failure immediately when its queue is full.
+
+Turn cancellation and delivery failure remain producer-barriered. The adapter
+records the typed requested outcome, closes the prepared subscription, and
+idempotently cancels the owning Runtime handle. `AttachTo` removes only target
+delivery and continues publishing that same ingress into the shared Session
+feed until handle `ACPEvents` closes after Runtime producer and lease
+completion. The Turn ingress broker records its single authoritative final
+error/terminal; the local wrapper and sibling TUI, SSE, or GUI subscribers use
+that same state and identity. Source-delivery failure likewise cancels once and
+waits for producer close before the final-source barrier and unique `failed`
+terminal. `Close` remains an explicit delivery teardown, emits no synthetic
+terminal, and is not a substitute for these barriers.
 
 The ring keeps cloned whole Envelopes. Byte accounting uses the encoded
 Envelope size used by the wire codec. Eviction preserves order and may remove
@@ -204,9 +243,11 @@ Transient Publish may continue during durable I/O; durable Publish shares the
 same sequencer as Reader scanning and cannot advance beyond an unfilled durable
 gap. Live events queue behind the paused subscriber boundary. The subscriber
 receives each semantic Envelope once.
-`FeedSubscription.BackfillDone` closes after the captured prefix has been
-delivered and before queued live splice delivery, so finite `/events` readers
-do not wait for an Envelope when a fallback prefix is empty.
+Streaming consumers read the subscription channel;
+`FeedSubscription.BackfillDone` closes after its captured prefix has been
+delivered and before queued live splice delivery. Finite readers instead use
+the immutable `SubscribeResult.Backfill` snapshot and close the subscription;
+they must not consume both representations of the same prefix.
 
 Subscribe returns one of:
 
@@ -265,7 +306,11 @@ Turn ownership supplies origin and cancellation, while a detached child may
 outlive its parent Turn without leaving the Session FIFO. Resolving the same
 active ID through a new subscription succeeds. Unknown, stale, duplicate, and
 queued IDs return conflict. Session close, owner abandonment, and startup
-recovery sweep settle abandoned durable approval mirrors. M2 does not restore a
+recovery sweep conditionally settle abandoned durable approval mirrors. The
+Store atomically rechecks the exact request event, Session revision, pending
+index, and lease guard before appending the recovery settlement; a concurrent
+real resolution therefore wins without a conflicting startup event. M2 does
+not restore a
 Runtime continuation after process restart: a persisted active approval with no
 matching live waiter becomes interrupted/cancelled and is never exposed as an
 actionable request.
@@ -281,6 +326,15 @@ Control, and stale-revision requests fail without changing state.
 `SnapshotState` is a pure read: a compatibility document with no `state` field
 is returned as an empty map without a write, revision change, or timestamp
 change. Any persistent document repair must use an explicit fenced mutation.
+
+The file Store keeps a transaction WAL through event-log, document, and Session
+index commit, deleting it only after the index upsert succeeds. Initial Session
+creation uses the same zero-event WAL boundary, so an index failure cannot
+orphan a valid document or allow the same Session ID to be recreated. Every
+process performs one legacy WAL scan per root and a durable pending marker
+requests later scans after a committed interruption. Unix replacement is
+followed by parent-directory sync; Windows document/WAL replacement uses
+`MOVEFILE_WRITE_THROUGH` and startup scanning does not rely on marker durability.
 
 ## Request-Scoped Control Commands
 
@@ -334,6 +388,11 @@ result; the same key with a changed action, target, or digest conflicts.
 The operation ID is also passed to downstream transaction/event/task
 idempotency identities. This closes the common window where a durable effect
 commits but the HTTP response is lost.
+
+After the backend returns, Control persists the now-known result with a short,
+Control-owned context detached from client cancellation. A disconnect after an
+effect commits cannot leave the ledger at intent-only `unknown`; a real ledger
+write failure remains bounded and is still reported as `unknown`.
 
 Caelis does not claim general exactly-once external effects. If Control cannot
 prove from the operation ledger or downstream reconciliation identity whether

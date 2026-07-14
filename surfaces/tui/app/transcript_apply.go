@@ -5,6 +5,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
+	"github.com/caelis-labs/caelis/surfaces/statusbar"
 	"github.com/caelis-labs/caelis/surfaces/transcript"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
@@ -45,10 +46,22 @@ func (m *Model) applyTranscriptEvent(event TranscriptEvent) (tea.Model, tea.Cmd)
 	case TranscriptEventLifecycle:
 		return m.applyTranscriptLifecycle(event)
 	case TranscriptEventUsage:
-		return m, nil
+		return m.applyTranscriptUsage(event), nil
 	default:
 		return m, nil
 	}
+}
+
+func (m *Model) applyTranscriptUsage(event TranscriptEvent) tea.Model {
+	if m == nil || event.Scope != ACPProjectionMain || event.Usage == nil {
+		return m
+	}
+	contextUsage := statusbar.FormatContextUsage(event.Usage.TotalTokens, event.Usage.ContextWindowTokens)
+	if strings.TrimSpace(contextUsage) != "" {
+		m.statusContext = contextUsage
+		m.statusView.Tokens = contextUsage
+	}
+	return m
 }
 
 func (m *Model) applyTranscriptNotice(event TranscriptEvent) (tea.Model, tea.Cmd) {
@@ -426,20 +439,60 @@ func (m *Model) applyAnchoredSubagentNarrativeToTool(event TranscriptEvent) (tea
 		return m, nil
 	}
 	toolName := strings.TrimSpace(event.AnchorToolName)
+	meta := ToolUpdateMeta{
+		ToolKind:        "execute",
+		TaskID:          strings.TrimSpace(event.ScopeID),
+		MessageID:       strings.TrimSpace(event.MessageID),
+		OutputNarrative: true,
+	}
+	// A later Turn may observe the same physical child through TASK write. Keep
+	// that continuation in the current panel instead of reopening the original
+	// completed Spawn panel solely because ParentTool still names its owner.
+	if block := m.activeMainTaskWriteBlock(meta.TaskID); block != nil {
+		block.UpdateToolWithMeta(callID, toolName, "", text, false, false, meta)
+		m.markViewportBlockDirty(block.BlockID())
+		return m, m.requestStreamViewportSync()
+	}
 	for _, docBlock := range m.doc.Blocks() {
 		block, ok := docBlock.(*MainACPTurnBlock)
 		if !ok || !mainACPBlockHasToolCall(block, callID) {
 			continue
 		}
-		block.UpdateToolWithMeta(callID, toolName, "", text, event.Final, false, ToolUpdateMeta{
-			ToolKind:  "execute",
-			TaskID:    strings.TrimSpace(event.ScopeID),
-			MessageID: strings.TrimSpace(event.MessageID),
-		})
+		// A child narrative finalizes only that ACP message segment. The parent
+		// Spawn lifecycle remains open until its own tool status/result arrives.
+		block.UpdateToolWithMeta(callID, toolName, "", text, false, false, meta)
 		m.markViewportBlockDirty(block.BlockID())
 		return m, m.requestStreamViewportSync()
 	}
 	return m, nil
+}
+
+func (m *Model) activeMainTaskWriteBlock(taskID string) *MainACPTurnBlock {
+	if m == nil || m.doc == nil {
+		return nil
+	}
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return nil
+	}
+	blockID := strings.TrimSpace(m.mainTimelineTailID)
+	if blockID == "" {
+		return nil
+	}
+	block, _ := m.doc.Find(blockID).(*MainACPTurnBlock)
+	if block == nil || !block.EndedAt.IsZero() {
+		return nil
+	}
+	for i := len(block.Events) - 1; i >= 0; i-- {
+		ev := block.Events[i]
+		if ev.Kind != SEToolCall || strings.TrimSpace(ev.TaskID) != taskID {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(ev.Name), "TASK") && taskEventAction(ev) == "write" {
+			return block
+		}
+	}
+	return nil
 }
 
 func (m *Model) applyTranscriptPlanToParticipantTurn(event TranscriptEvent, entries []planEntryState) (tea.Model, tea.Cmd) {
@@ -501,6 +554,7 @@ func transcriptToolUpdateMeta(event TranscriptEvent) ToolUpdateMeta {
 		TaskTargetKind:  event.ToolTaskTargetKind,
 		ToolKind:        event.ToolKind,
 		FullArgs:        event.ToolFullArgs,
+		ToolStatus:      event.ToolStatus,
 		Terminal:        event.ToolTerminal,
 		OutputSynthetic: event.ToolOutputSynthetic,
 		OutputTerminal:  event.ToolOutputTerminal,

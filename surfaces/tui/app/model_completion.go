@@ -499,6 +499,7 @@ func (m *Model) clearResume() {
 	m.cancelResumeRequest()
 	m.resumeActive = false
 	m.resumeQuery = ""
+	m.resumeLoaded = false
 	m.resumeCandidates = nil
 	m.resumeIndex = 0
 }
@@ -539,6 +540,7 @@ func (m *Model) updateResumeCandidates() tea.Cmd {
 		m.cancelResumeRequest()
 		m.resumeCandidates = nil
 		m.resumeQuery = ""
+		m.resumeLoaded = false
 		m.resumeIndex = 0
 		return nil
 	}
@@ -546,6 +548,7 @@ func (m *Model) updateResumeCandidates() tea.Cmd {
 	if len(m.mentionCandidates) > 0 || len(m.skillCandidates) > 0 || len(m.slashArgCandidates) > 0 {
 		m.cancelResumeRequest()
 		m.resumeCandidates = nil
+		m.resumeLoaded = false
 		return nil
 	}
 	query, ok := resumeQueryAtEnd([]rune(m.textarea.Value()))
@@ -553,13 +556,14 @@ func (m *Model) updateResumeCandidates() tea.Cmd {
 		m.cancelResumeRequest()
 		m.resumeCandidates = nil
 		m.resumeQuery = ""
+		m.resumeLoaded = false
 		m.resumeIndex = 0
 		return nil
 	}
 	if m.resumeRequestPending && query == m.resumeRequestQuery {
 		return nil
 	}
-	if !m.resumeRequestPending && query == m.resumeQuery {
+	if !m.resumeRequestPending && m.resumeLoaded && query == m.resumeQuery {
 		return nil
 	}
 	if m.resumeRequestCancel != nil {
@@ -576,6 +580,7 @@ func (m *Model) updateResumeCandidates() tea.Cmd {
 	m.resumeRequestPending = true
 	m.resumeRequestCancel = cancel
 	m.resumeCandidates = nil
+	m.resumeLoaded = false
 	complete := m.cfg.ResumeComplete
 	return func() tea.Msg {
 		started := time.Now()
@@ -591,7 +596,11 @@ func (m *Model) handleResumeCompletionResultMsg(msg resumeCompletionResultMsg) (
 		return m, nil
 	}
 	m.resumeRequestPending = false
+	cancel := m.resumeRequestCancel
 	m.resumeRequestCancel = nil
+	if cancel != nil {
+		cancel()
+	}
 	m.diag.LastResumeLatency = msg.latency
 	query, ok := resumeQueryAtEnd([]rune(m.textarea.Value()))
 	if !m.resumeActive || !ok || query != msg.query || m.turnRunning() {
@@ -600,6 +609,7 @@ func (m *Model) handleResumeCompletionResultMsg(msg resumeCompletionResultMsg) (
 	if msg.err != nil || len(msg.candidates) == 0 {
 		m.resumeCandidates = nil
 		m.resumeQuery = query
+		m.resumeLoaded = msg.err == nil
 		m.resumeIndex = 0
 		return m, nil
 	}
@@ -607,11 +617,13 @@ func (m *Model) handleResumeCompletionResultMsg(msg resumeCompletionResultMsg) (
 	if len(filtered) == 0 {
 		m.resumeCandidates = nil
 		m.resumeQuery = query
+		m.resumeLoaded = true
 		m.resumeIndex = 0
 		return m, nil
 	}
 	m.resumeIndex = normalizeFilteredSelection(m.resumeIndex, query, m.resumeQuery, len(filtered))
 	m.resumeQuery = query
+	m.resumeLoaded = true
 	m.resumeCandidates = filtered
 	return m, nil
 }
@@ -648,12 +660,20 @@ func (m *Model) handleResumeKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 		}
 		return true, nil
 	case key.Matches(msg, m.keys.Complete):
+		if len(m.resumeCandidates) == 0 {
+			m.resumeLoaded = false
+			return true, m.updateResumeCandidates()
+		}
 		m.applyResumeCompletion()
 		m.syncTextareaFromInput()
 		return true, nil
 	case key.Matches(msg, m.keys.Accept):
-		if m.turnRunning() || len(m.resumeCandidates) == 0 {
+		if m.turnRunning() {
 			return true, nil
+		}
+		if len(m.resumeCandidates) == 0 {
+			m.resumeLoaded = false
+			return true, m.updateResumeCandidates()
 		}
 		selected := strings.TrimSpace(m.resumeCandidates[m.resumeIndex].SessionID)
 		if selected == "" {

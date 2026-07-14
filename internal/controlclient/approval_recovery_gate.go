@@ -3,7 +3,10 @@ package controlclient
 import (
 	"context"
 	"sync"
+	"time"
 )
+
+const approvalRecoveryRetryFloor = 25 * time.Millisecond
 
 // ApprovalRecoveryGate lets presentation startup proceed while preserving the
 // invariant that no new Turn begins before abandoned durable approvals have
@@ -35,13 +38,42 @@ func (g *ApprovalRecoveryGate) Start(ctx context.Context) {
 	}
 	g.startOnce.Do(func() {
 		go func() {
-			err := SweepAbandonedApprovals(ctx, g.store)
+			result, err := sweepAbandonedApprovals(ctx, g.store)
 			g.mu.Lock()
 			g.err = err
 			g.mu.Unlock()
 			close(g.done)
+			if err == nil && !result.retryAt.IsZero() {
+				g.retryDeferred(ctx, result.retryAt)
+			}
 		}()
 	})
+}
+
+func (g *ApprovalRecoveryGate) retryDeferred(ctx context.Context, retryAt time.Time) {
+	for !retryAt.IsZero() {
+		delay := time.Until(retryAt)
+		if delay < approvalRecoveryRetryFloor {
+			delay = approvalRecoveryRetryFloor
+		}
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return
+		case <-timer.C:
+		}
+		result, err := sweepAbandonedApprovals(ctx, g.store)
+		if err != nil {
+			// The initial gate already completed successfully. Keep deferred
+			// cleanup retryable without retroactively wedging unrelated Turns.
+			retryAt = time.Now().Add(time.Second)
+			continue
+		}
+		retryAt = result.retryAt
+	}
 }
 
 // Wait blocks until recovery completes or ctx is canceled.

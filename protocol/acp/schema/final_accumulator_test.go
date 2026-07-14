@@ -55,15 +55,91 @@ func TestFinalAssistantAccumulatorIgnoresControlUpdates(t *testing.T) {
 	}
 }
 
-func TestFinalAssistantAccumulatorComputesDelta(t *testing.T) {
+func TestFinalAssistantAccumulatorAppendsEveryACPDelta(t *testing.T) {
 	t.Parallel()
 
 	var acc FinalAssistantAccumulator
 	first := acc.ObserveUpdate(ContentChunk{SessionUpdate: UpdateAgentMessage, Content: TextContent{Type: "text", Text: "hel"}})
 	second := acc.ObserveUpdate(ContentChunk{SessionUpdate: UpdateAgentMessage, Content: TextContent{Type: "text", Text: "hello"}})
 	third := acc.ObserveUpdate(ContentChunk{SessionUpdate: UpdateAgentMessage, Content: TextContent{Type: "text", Text: "lo"}})
-	if first.Delta != "hel" || second.Delta != "lo" || third.Delta != "lo" || acc.FinalText() != "hellolo" {
+	if first.Delta != "hel" || second.Delta != "hello" || third.Delta != "lo" || acc.FinalText() != "helhellolo" {
 		t.Fatalf("deltas = %q/%q/%q final = %q", first.Delta, second.Delta, third.Delta, acc.FinalText())
+	}
+}
+
+func TestFinalAssistantAccumulatorPreservesAllACPDeltaShapes(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		frames     []string
+		wantDeltas []string
+		wantFinal  string
+	}{
+		{
+			name:       "identical frames",
+			frames:     []string{"ha", "ha", "!"},
+			wantDeltas: []string{"ha", "ha", "!"},
+			wantFinal:  "haha!",
+		},
+		{
+			name:       "short prefix frame",
+			frames:     []string{"hello", "hel", "!"},
+			wantDeltas: []string{"hello", "hel", "!"},
+			wantFinal:  "hellohel!",
+		},
+		{
+			name:       "prefix growing frames",
+			frames:     []string{"a", "ab"},
+			wantDeltas: []string{"a", "ab"},
+			wantFinal:  "aab",
+		},
+		{
+			name:       "longer repeated prefix",
+			frames:     []string{"ha", "ha", "haha!"},
+			wantDeltas: []string{"ha", "ha", "haha!"},
+			wantFinal:  "hahahaha!",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var acc FinalAssistantAccumulator
+			for i, frame := range tt.frames {
+				got := acc.ObserveUpdate(ContentChunk{
+					SessionUpdate: UpdateAgentMessage,
+					MessageID:     "message-1",
+					Content:       TextContent{Type: "text", Text: frame},
+				})
+				if got.Delta != tt.wantDeltas[i] {
+					t.Fatalf("frame %d delta = %q, want %q", i, got.Delta, tt.wantDeltas[i])
+				}
+			}
+			if got := acc.FinalText(); got != tt.wantFinal {
+				t.Fatalf("FinalText() = %q, want %q", got, tt.wantFinal)
+			}
+		})
+	}
+}
+
+func TestFinalAssistantAccumulatorDoesNotInferCumulativeSnapshots(t *testing.T) {
+	t.Parallel()
+
+	var acc FinalAssistantAccumulator
+	frames := []string{"hel", "hello", "hello world"}
+	for i, frame := range frames {
+		got := acc.ObserveUpdate(ContentChunk{
+			SessionUpdate: UpdateAgentMessage,
+			MessageID:     "message-1",
+			Content:       TextContent{Type: "text", Text: frame},
+		})
+		if got.Delta != frame {
+			t.Fatalf("frame %d delta = %q, want exact %q", i, got.Delta, frame)
+		}
+	}
+	if got := acc.FinalText(); got != "helhellohello world" {
+		t.Fatalf("FinalText() = %q, want exact appended frames", got)
 	}
 }
 

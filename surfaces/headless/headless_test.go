@@ -44,6 +44,36 @@ func TestRunOnceDrainsAssistantOutput(t *testing.T) {
 	}
 }
 
+func TestRunOnceAppendsPrefixGrowingACPMessageDeltasExactly(t *testing.T) {
+	t.Parallel()
+
+	handle := newFakeACPHandle([]eventstream.Envelope{
+		{
+			Kind: eventstream.KindSessionUpdate,
+			Update: schema.ContentChunk{
+				SessionUpdate: schema.UpdateAgentMessage,
+				MessageID:     "message-1",
+				Content:       schema.TextContent{Type: "text", Text: "a"},
+			},
+		},
+		{
+			Kind: eventstream.KindSessionUpdate,
+			Update: schema.ContentChunk{
+				SessionUpdate: schema.UpdateAgentMessage,
+				MessageID:     "message-1",
+				Content:       schema.TextContent{Type: "text", Text: "ab"},
+			},
+		},
+	})
+	result, err := RunOnce(context.Background(), fakeStarter{turn: handle}, control.Submission{Text: "hello"}, Options{})
+	if err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if result.Output != "aab" {
+		t.Fatalf("RunOnce() output = %q, want exact ACP deltas aab", result.Output)
+	}
+}
+
 func TestRunOnceIgnoresScopedTraceOutput(t *testing.T) {
 	t.Parallel()
 

@@ -4,6 +4,8 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/caelis-labs/caelis/surfaces/transcript"
 )
 
 type transcriptToolMutation struct {
@@ -48,17 +50,144 @@ func (m *Model) applyTranscriptToolToParticipant(event TranscriptEvent, mutation
 
 func (m *Model) applyTranscriptToolToSubagent(event TranscriptEvent, mutation transcriptToolMutation) (tea.Model, tea.Cmd) {
 	if eventTargetsParentToolPanel(event) {
+		m.markAnchoredSubagentNarrativeBoundary(event)
 		return m, nil
 	}
 	return m.applyTranscriptToolToParticipant(event, mutation)
 }
 
+func (m *Model) markAnchoredSubagentNarrativeBoundary(event TranscriptEvent) {
+	if m == nil || m.doc == nil {
+		return
+	}
+	callID := strings.TrimSpace(event.AnchorToolCallID)
+	taskID := strings.TrimSpace(event.ScopeID)
+	if block := m.activeMainTaskWriteBlock(taskID); block != nil {
+		if block.markSubagentNarrativeBoundary(callID, taskID) {
+			return
+		}
+	}
+	for _, docBlock := range m.doc.Blocks() {
+		block, ok := docBlock.(*MainACPTurnBlock)
+		if !ok || !mainACPBlockHasToolCall(block, callID) {
+			continue
+		}
+		if block.markSubagentNarrativeBoundary(callID, taskID) {
+			return
+		}
+	}
+}
+
 func (m *Model) applyTranscriptToolToMain(event TranscriptEvent, mutation transcriptToolMutation) (tea.Model, tea.Cmd) {
-	block := m.mainBlockForAnchor(event, mainToolAnchor(mutation.callID))
+	if owner := m.absorbCommandTaskResult(&mutation); owner != nil {
+		m.markViewportBlockDirty(owner.BlockID())
+	}
+	block := m.mainBlockForStreamOwner(event, mutation)
+	if block == nil {
+		block = m.mainBlockForAnchor(event, mainToolAnchor(mutation.callID))
+	}
 	if block == nil {
 		return m, nil
 	}
 	block.UpdateToolWithMeta(mutation.callID, mutation.name, mutation.args, mutation.output, mutation.final, mutation.err, mutation.meta)
 	m.markViewportBlockDirty(block.BlockID())
 	return m, m.requestStreamViewportSync()
+}
+
+// absorbCommandTaskResult uses the durable TASK wait snapshot only as a
+// recovery fallback for an async command's transient terminal stream. If the
+// owner already has real bytes, the snapshot stays hidden to avoid duplicate
+// output; if those bytes were lost across restart/eviction, it fills the
+// original panel without pretending the snapshot is an exact byte delta.
+func (m *Model) absorbCommandTaskResult(mutation *transcriptToolMutation) *MainACPTurnBlock {
+	if m == nil || m.doc == nil || mutation == nil || mutation.err ||
+		!strings.EqualFold(toolSemanticName(mutation.name, mutation.meta.ToolKind), "TASK") ||
+		!strings.EqualFold(strings.TrimSpace(mutation.meta.TaskAction), "wait") ||
+		!commandTaskTargetKind(mutation.meta.TaskTargetKind) ||
+		!renderableTextHasContent(mutation.output) {
+		return nil
+	}
+	taskID := strings.TrimSpace(mutation.meta.TaskID)
+	if taskID == "" {
+		return nil
+	}
+	blocks := m.doc.Blocks()
+	for i := len(blocks) - 1; i >= 0; i-- {
+		block, ok := blocks[i].(*MainACPTurnBlock)
+		if !ok {
+			continue
+		}
+		for j := len(block.Events) - 1; j >= 0; j-- {
+			owner := &block.Events[j]
+			ownerName := toolSemanticName(owner.Name, owner.ToolKind)
+			if owner.Kind != SEToolCall || strings.TrimSpace(owner.TaskID) != taskID ||
+				!isTerminalPanelToolEvent(*owner) || strings.EqualFold(ownerName, "SPAWN") || strings.EqualFold(ownerName, "TASK") {
+				continue
+			}
+			if owner.OutputSynthetic || !renderableTextHasContent(owner.Output) {
+				owner.Output = mutation.output
+				owner.OutputSynthetic = false
+			}
+			mutation.output = ""
+			mutation.meta.OutputSynthetic = false
+			mutation.meta.OutputTerminal = false
+			return block
+		}
+	}
+	return nil
+}
+
+func commandTaskTargetKind(kind string) bool {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "command", "terminal":
+		return true
+	default:
+		return false
+	}
+}
+
+// mainBlockForStreamOwner lets a later TASK observer deliver bytes to the
+// original async tool panel. Cross-Turn routing is deliberately limited to
+// projector-owned stream frames and requires both physical task and call
+// identity, so an ordinary reused CallID still starts in the current Turn.
+func (m *Model) mainBlockForStreamOwner(event TranscriptEvent, mutation transcriptToolMutation) *MainACPTurnBlock {
+	if m == nil || m.doc == nil {
+		return nil
+	}
+	mode := strings.ToLower(transcript.MetaString(event.Meta, "caelis", "runtime", "stream", "mode"))
+	if mode != "append" && mode != "final" {
+		return nil
+	}
+	callID := strings.TrimSpace(mutation.callID)
+	taskID := strings.TrimSpace(mutation.meta.TaskID)
+	if callID == "" || taskID == "" {
+		return nil
+	}
+	blocks := m.doc.Blocks()
+	for i := len(blocks) - 1; i >= 0; i-- {
+		block, ok := blocks[i].(*MainACPTurnBlock)
+		if !ok || !mainACPBlockHasStreamOwner(block, callID, taskID, mutation.name) {
+			continue
+		}
+		return block
+	}
+	return nil
+}
+
+func mainACPBlockHasStreamOwner(block *MainACPTurnBlock, callID string, taskID string, toolName string) bool {
+	if block == nil {
+		return false
+	}
+	callID = strings.TrimSpace(callID)
+	taskID = strings.TrimSpace(taskID)
+	semanticName := toolSemanticName(toolName, "")
+	for i := len(block.Events) - 1; i >= 0; i-- {
+		event := block.Events[i]
+		if event.Kind != SEToolCall || strings.TrimSpace(event.CallID) != callID || strings.TrimSpace(event.TaskID) != taskID {
+			continue
+		}
+		eventName := toolSemanticName(event.Name, event.ToolKind)
+		return semanticName == "" || eventName == "" || strings.EqualFold(eventName, semanticName)
+	}
+	return false
 }

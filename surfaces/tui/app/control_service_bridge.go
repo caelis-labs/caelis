@@ -552,6 +552,9 @@ func executeControlPromptResult(ctx context.Context, service control.Service, se
 	if result.StatusUpdate != nil {
 		sendStatusUpdate(send, *result.StatusUpdate)
 	}
+	if result.RefreshStatus && send != nil {
+		send(statusRefreshRequestMsg{})
+	}
 	if result.RefreshCommands {
 		refreshAgentSlashCommandsViaSendWithContext(ctx, service, send)
 	}

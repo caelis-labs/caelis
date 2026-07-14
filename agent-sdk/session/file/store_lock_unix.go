@@ -12,8 +12,18 @@ import (
 )
 
 func lockSessionStoreRoot(ctx context.Context, root string, mode storeRootLockMode) (*os.File, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	file, err := os.OpenFile(filepath.Join(root, lockFilename), os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		_ = file.Close()
 		return nil, err
 	}
 	flag := syscall.LOCK_SH
@@ -21,8 +31,16 @@ func lockSessionStoreRoot(ctx context.Context, root string, mode storeRootLockMo
 		flag = syscall.LOCK_EX
 	}
 	for {
+		if err := ctx.Err(); err != nil {
+			_ = file.Close()
+			return nil, err
+		}
 		err = syscall.Flock(int(file.Fd()), flag|syscall.LOCK_NB)
 		if err == nil {
+			if err := ctx.Err(); err != nil {
+				_ = unlockSessionStoreRoot(file)
+				return nil, err
+			}
 			return file, nil
 		}
 		if !errors.Is(err, syscall.EWOULDBLOCK) {
@@ -33,7 +51,10 @@ func lockSessionStoreRoot(ctx context.Context, root string, mode storeRootLockMo
 		select {
 		case <-ctx.Done():
 			if !timer.Stop() {
-				<-timer.C
+				select {
+				case <-timer.C:
+				default:
+				}
 			}
 			file.Close()
 			return nil, ctx.Err()

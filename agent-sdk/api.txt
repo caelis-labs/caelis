@@ -1913,6 +1913,7 @@ package github.com/caelis-labs/caelis/agent-sdk/session
   func NormalizeUsageForDisplay(usage UsageSnapshot, provider string) UsageSnapshot
   func NoticeOf(event *Event) (EventNotice, bool)
   func PageEvents(events []*Event, req EventPageRequest) EventPage
+  func PendingApprovalMatches(current *Event, req SettlePendingApprovalRequest) bool
   func PlanPayloadOf(event *Event) *EventPlanPayload
   func PrepareAppendTransaction(req PrepareAppendTransactionRequest) (PreparedAppendTransaction, error)
   func PrepareEventsForAppend(req PrepareEventsForAppendRequest) (PreparedAppendEvents, error)
@@ -1942,6 +1943,7 @@ package github.com/caelis-labs/caelis/agent-sdk/session
   func ValidateExecutionTransition(previous ExecutionRecord, next ExecutionRecord) error
   func ValidateMetadata(metadata map[string]any) error
   func ValidatePauseTokenTransition(previous PauseToken, next PauseToken) error
+  func ValidateSettlePendingApprovalRequest(req SettlePendingApprovalRequest) error
   func ValidateState(state map[string]any) error
   func ValidateToolExecutionTransition(previous ToolExecution, next ToolExecution) error
   type ACPRef struct {
@@ -1985,6 +1987,13 @@ package github.com/caelis-labs/caelis/agent-sdk/session
   type AppendStateUpdate func([]*Event, map[string]any) (map[string]any, error)
   type ApprovalRecoveryReader interface {
       PendingApprovals(context.Context) ([]PendingApproval, error)
+  }
+  type ApprovalRecoveryService interface {
+      ApprovalRecoveryReader
+      ApprovalRecoverySettler
+  }
+  type ApprovalRecoverySettler interface {
+      SettlePendingApproval(context.Context, SettlePendingApprovalRequest) (SettlePendingApprovalResult, error)
   }
   type BindControllerRequest struct {
       SessionRef    SessionRef        `json:"session_ref"`
@@ -2317,7 +2326,9 @@ package github.com/caelis-labs/caelis/agent-sdk/session
   }
   type PendingApproval struct {
       SessionRef SessionRef
-      Request    *Event
+
+      Revision uint64
+      Request  *Event
   }
   type PrepareAppendTransactionRequest struct {
       Session                  Session
@@ -2541,6 +2552,19 @@ package github.com/caelis-labs/caelis/agent-sdk/session
       Title     string         `json:"title,omitempty"`
       Metadata  map[string]any `json:"metadata,omitempty"`
       UpdatedAt time.Time      `json:"updated_at,omitempty"`
+  }
+  type SettlePendingApprovalRequest struct {
+      SessionRef             SessionRef
+      ExpectedRevision       *uint64
+      MutationGuard          MutationGuard
+      ApprovalRequestID      string
+      ExpectedRequestEventID string
+      ExpectedRequestSeq     uint64
+      Settlement             *Event
+  }
+  type SettlePendingApprovalResult struct {
+      Settled bool
+      Event   *Event
   }
   type StartSessionRequest struct {
       AppName            string         `json:"app_name,omitempty"`
@@ -2967,15 +2991,17 @@ package github.com/caelis-labs/caelis/agent-sdk/task/stream
       Events int64 `json:"events,omitempty"`
   }
   type Frame struct {
-      Ref       Ref            `json:"ref,omitempty"`
-      Text      string         `json:"text,omitempty"`
-      State     string         `json:"state,omitempty"`
-      Cursor    Cursor         `json:"cursor,omitempty"`
-      Running   bool           `json:"running,omitempty"`
-      Closed    bool           `json:"closed,omitempty"`
-      ExitCode  *int           `json:"exit_code,omitempty"`
-      Event     *session.Event `json:"event,omitempty"`
-      UpdatedAt time.Time      `json:"updated_at,omitempty"`
+      Ref    Ref    `json:"ref,omitempty"`
+      Text   string `json:"text,omitempty"`
+      State  string `json:"state,omitempty"`
+      Cursor Cursor `json:"cursor,omitempty"`
+
+      TruncatedBefore int64          `json:"truncated_before,omitempty"`
+      Running         bool           `json:"running,omitempty"`
+      Closed          bool           `json:"closed,omitempty"`
+      ExitCode        *int           `json:"exit_code,omitempty"`
+      Event           *session.Event `json:"event,omitempty"`
+      UpdatedAt       time.Time      `json:"updated_at,omitempty"`
   }
   type ReadRequest struct {
       Ref    Ref    `json:"ref,omitempty"`
@@ -2994,16 +3020,18 @@ package github.com/caelis-labs/caelis/agent-sdk/task/stream
       PublishStream(Frame)
   }
   type Snapshot struct {
-      Ref           Ref       `json:"ref,omitempty"`
-      Cursor        Cursor    `json:"cursor,omitempty"`
-      Frames        []Frame   `json:"frames,omitempty"`
-      FinalText     string    `json:"final_text,omitempty"`
-      State         string    `json:"state,omitempty"`
-      Running       bool      `json:"running,omitempty"`
-      SupportsInput bool      `json:"supports_input,omitempty"`
-      ExitCode      *int      `json:"exit_code,omitempty"`
-      StartedAt     time.Time `json:"started_at,omitempty"`
-      UpdatedAt     time.Time `json:"updated_at,omitempty"`
+      Ref       Ref     `json:"ref,omitempty"`
+      Cursor    Cursor  `json:"cursor,omitempty"`
+      Frames    []Frame `json:"frames,omitempty"`
+      FinalText string  `json:"final_text,omitempty"`
+      State     string  `json:"state,omitempty"`
+
+      TruncatedBefore int64     `json:"truncated_before,omitempty"`
+      Running         bool      `json:"running,omitempty"`
+      SupportsInput   bool      `json:"supports_input,omitempty"`
+      ExitCode        *int      `json:"exit_code,omitempty"`
+      StartedAt       time.Time `json:"started_at,omitempty"`
+      UpdatedAt       time.Time `json:"updated_at,omitempty"`
   }
   type SubscribeRequest struct {
       Ref          Ref           `json:"ref,omitempty"`

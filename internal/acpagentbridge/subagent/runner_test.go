@@ -460,8 +460,8 @@ func TestRunnerHandleUpdateUsesAgentMessageDeltas(t *testing.T) {
 
 	runner.handleUpdate(run, contentUpdate(t, client.UpdateUserMessage, "ignored prompt"))
 	runner.handleUpdate(run, contentUpdate(t, client.UpdateAgentMessage, "我来按步骤"))
-	runner.handleUpdate(run, contentUpdate(t, client.UpdateAgentMessage, "我来按步骤执行"))
-	runner.handleUpdate(run, contentUpdate(t, client.UpdateAgentMessage, "我来按步骤执行这个任务。"))
+	runner.handleUpdate(run, contentUpdate(t, client.UpdateAgentMessage, "执行"))
+	runner.handleUpdate(run, contentUpdate(t, client.UpdateAgentMessage, "这个任务。"))
 
 	if got := len(sink.frames); got != 3 {
 		t.Fatalf("stream frames = %#v, want three agent delta updates", sink.frames)
@@ -484,6 +484,43 @@ func TestRunnerHandleUpdateUsesAgentMessageDeltas(t *testing.T) {
 	run.mu.RUnlock()
 	if result != "我来按步骤执行这个任务。" {
 		t.Fatalf("run.result = %q, want deduped final text", result)
+	}
+}
+
+func TestRunnerHandleUpdatePublishesRepeatedAgentMessageDeltas(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingStreams{}
+	run := &childRun{
+		anchor:  delegation.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "self", AgentID: "self-1"},
+		taskID:  "task-1",
+		sink:    sink,
+		state:   delegation.StateRunning,
+		running: true,
+	}
+	runner := &Runner{clock: time.Now}
+
+	runner.handleUpdate(run, contentUpdateWithMessageID(t, client.UpdateAgentMessage, "repeat-1", "ha"))
+	runner.handleUpdate(run, contentUpdateWithMessageID(t, client.UpdateAgentMessage, "repeat-1", "ha"))
+
+	if got := len(sink.frames); got != 2 {
+		t.Fatalf("stream frames = %#v, want both repeated ACP deltas", sink.frames)
+	}
+	var rendered string
+	for i, frame := range sink.frames {
+		if frame.Event == nil || frame.Event.Text != "ha" {
+			t.Fatalf("stream frame %d = %#v, want exact ha delta", i, frame)
+		}
+		rendered += frame.Event.Text
+	}
+	if rendered != "haha" {
+		t.Fatalf("rendered event stream = %q, want haha", rendered)
+	}
+	run.mu.RLock()
+	result := run.result
+	run.mu.RUnlock()
+	if result != "haha" {
+		t.Fatalf("run.result = %q, want exact repeated deltas", result)
 	}
 }
 
@@ -662,6 +699,17 @@ func TestRunnerAgentMessageDeltaMergeDoesNotUseOverlapHeuristic(t *testing.T) {
 	}
 	if run.result != "abcabcabcXYZ" {
 		t.Fatalf("run.result = %q, want exact appended chunks", run.result)
+	}
+
+	prefixGrowing := &childRun{}
+	if got := prefixGrowing.appendAgentMessageLocked("a"); got != "a" {
+		t.Fatalf("first prefix-growing delta = %q, want a", got)
+	}
+	if got := prefixGrowing.appendAgentMessageLocked("ab"); got != "ab" {
+		t.Fatalf("second prefix-growing delta = %q, want exact ab", got)
+	}
+	if prefixGrowing.result != "aab" {
+		t.Fatalf("prefix-growing run.result = %q, want aab", prefixGrowing.result)
 	}
 }
 

@@ -32,6 +32,8 @@ type Service struct {
 	store *Store
 }
 
+var _ session.ApprovalRecoveryService = (*Service)(nil)
+
 // NewStore constructs one new in-memory session store.
 func NewStore(cfg Config) *Store {
 	store := &Store{
@@ -202,6 +204,71 @@ func (s *Store) appendEventRequest(req session.AppendEventRequest) (*session.Eve
 	normalized := tx.Prepared.Events[0]
 	s.applyAppendTransactionToRecord(record, tx)
 	return session.CloneEvent(normalized), nil
+}
+
+// SettlePendingApproval appends one approval settlement only while the exact
+// request observed by recovery remains pending at the expected revision.
+func (s *Store) SettlePendingApproval(
+	_ context.Context,
+	req session.SettlePendingApprovalRequest,
+) (session.SettlePendingApprovalResult, error) {
+	if err := session.ValidateSettlePendingApprovalRequest(req); err != nil {
+		return session.SettlePendingApprovalResult{}, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	record, ok := s.lookupLocked(req.SessionRef)
+	if !ok {
+		return session.SettlePendingApprovalResult{}, session.ErrSessionNotFound
+	}
+	result := session.SettlePendingApprovalResult{}
+	current := pendingApprovalForEvents(record.events, req.ApprovalRequestID)
+	if !session.PendingApprovalMatches(current, req) {
+		return result, nil
+	}
+	if err := validateMutationGuard(record.lease, req.MutationGuard, s.now()); err != nil {
+		return result, err
+	}
+	if err := session.CheckExpectedRevision(record.session, req.ExpectedRevision); err != nil {
+		return result, err
+	}
+	tx, err := s.prepareAppendTransactionForRecord(
+		record,
+		[]*session.Event{req.Settlement},
+		nil,
+		nil,
+		req.ExpectedRevision,
+		"",
+		"",
+	)
+	if err != nil {
+		return result, err
+	}
+	s.applyAppendTransactionToRecord(record, tx)
+	result.Settled = tx.Changed
+	if len(tx.Prepared.Events) > 0 {
+		result.Event = session.CloneEvent(tx.Prepared.Events[0])
+	}
+	return result, nil
+}
+
+func pendingApprovalForEvents(events []*session.Event, approvalRequestID string) *session.Event {
+	requestID := strings.TrimSpace(approvalRequestID)
+	var pending *session.Event
+	for _, event := range events {
+		if event == nil || strings.TrimSpace(event.ApprovalRequestID) != requestID {
+			continue
+		}
+		switch {
+		case session.ProtocolPermissionOf(event) != nil:
+			pending = event
+		case event.Lifecycle != nil:
+			pending = nil
+		}
+	}
+	return pending
 }
 
 func (s *Store) prepareAppendTransactionForRecord(
@@ -656,6 +723,15 @@ func (s *Service) AppendEvent(
 	return s.store.appendEventRequest(req)
 }
 
+// SettlePendingApproval atomically settles one still-pending recovery
+// candidate.
+func (s *Service) SettlePendingApproval(
+	ctx context.Context,
+	req session.SettlePendingApprovalRequest,
+) (session.SettlePendingApprovalResult, error) {
+	return s.store.SettlePendingApproval(ctx, req)
+}
+
 func (s *Service) AppendEvents(
 	ctx context.Context,
 	req session.AppendEventsRequest,
@@ -707,6 +783,7 @@ func (s *Service) PendingApprovals(ctx context.Context) ([]session.PendingApprov
 		sessionID string
 		requestID string
 		ref       session.SessionRef
+		revision  uint64
 		request   *session.Event
 	}
 	keys := make([]pendingKey, 0)
@@ -730,7 +807,7 @@ func (s *Service) PendingApprovals(ctx context.Context) ([]session.PendingApprov
 		for requestID, request := range pending {
 			keys = append(keys, pendingKey{
 				sessionID: record.session.SessionID, requestID: requestID,
-				ref: record.session.SessionRef, request: request,
+				ref: record.session.SessionRef, request: request, revision: record.session.Revision,
 			})
 		}
 	}
@@ -742,7 +819,9 @@ func (s *Service) PendingApprovals(ctx context.Context) ([]session.PendingApprov
 	})
 	out := make([]session.PendingApproval, 0, len(keys))
 	for _, key := range keys {
-		out = append(out, session.PendingApproval{SessionRef: key.ref, Request: session.CloneEvent(key.request)})
+		out = append(out, session.PendingApproval{
+			SessionRef: key.ref, Revision: key.revision, Request: session.CloneEvent(key.request),
+		})
 	}
 	return out, nil
 }

@@ -177,6 +177,36 @@ func TestFileOperationStoreSurvivesRestartAndBindsPayload(t *testing.T) {
 	}
 }
 
+func TestCommandServicePersistsKnownEffectResultAfterRequestCancellation(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "operations")
+	ctx, cancel := context.WithCancel(context.Background())
+	backend := &cancelAfterCommitBackend{cancel: cancel}
+	service := newTestCommandService(t, allowAuthorizer{}, NewFileOperationStore(root), backend)
+	principal := controlport.Principal{ID: "owner"}
+	req := controlport.PromptRequest{
+		WriteBase: controlport.WriteBase{OperationID: "committed-before-cancel", SessionID: "session-1"},
+		Input:     "hello",
+	}
+
+	want, err := service.Prompt(ctx, principal, req)
+	if err != nil || want.Outcome != controlport.OutcomeCommitted || want.Revision != 11 {
+		t.Fatalf("Prompt() = %#v, %v; want known committed result", want, err)
+	}
+	if !errors.Is(ctx.Err(), context.Canceled) {
+		t.Fatalf("request context error = %v, want cancelled by committed backend", ctx.Err())
+	}
+
+	replayBackend := &recordingCommandBackend{}
+	reopened := newTestCommandService(t, allowAuthorizer{}, NewFileOperationStore(root), replayBackend)
+	got, err := reopened.Prompt(context.Background(), principal, req)
+	if err != nil || got != want {
+		t.Fatalf("Prompt(retry) = %#v, %v; want durable %#v", got, err, want)
+	}
+	if replayBackend.calls != 0 || backend.calls != 1 {
+		t.Fatalf("backend calls = original %d replay %d, want 1 and 0", backend.calls, replayBackend.calls)
+	}
+}
+
 type allowAuthorizer struct{}
 
 func (allowAuthorizer) Authorize(context.Context, controlport.Principal, controlport.Action, string) error {
@@ -192,6 +222,19 @@ func (denyAuthorizer) Authorize(context.Context, controlport.Principal, controlp
 type recordingCommandBackend struct {
 	calls int
 	err   error
+}
+
+type cancelAfterCommitBackend struct {
+	cancel context.CancelFunc
+	calls  int
+}
+
+func (b *cancelAfterCommitBackend) ExecuteControlCommand(_ context.Context, _ controlport.Principal, _ controlport.Action, _ any) (controlport.CommandResult, error) {
+	b.calls++
+	if b.cancel != nil {
+		b.cancel()
+	}
+	return controlport.CommandResult{Outcome: controlport.OutcomeCommitted, Revision: 11}, nil
 }
 
 func (b *recordingCommandBackend) ExecuteControlCommand(_ context.Context, _ controlport.Principal, _ controlport.Action, request any) (controlport.CommandResult, error) {

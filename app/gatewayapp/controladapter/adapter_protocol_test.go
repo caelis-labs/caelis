@@ -2,12 +2,15 @@ package controladapter
 
 import (
 	"context"
+	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/stream"
+	internalcontrolclient "github.com/caelis-labs/caelis/internal/controlclient"
 	controlclientport "github.com/caelis-labs/caelis/ports/controlclient"
 	"github.com/caelis-labs/caelis/ports/gateway"
 	"github.com/caelis-labs/caelis/protocol/acp/eventstream"
@@ -59,6 +62,123 @@ func TestAdapterReplayReturnsStableClientProtocol(t *testing.T) {
 	}
 	if result.RunState.Status != eventstream.RunStateWaitingApproval || !result.RunState.WaitingApproval || result.RunState.HandleID != "handle-1" || !result.RunState.StartedAt.Equal(startedAt) {
 		t.Fatalf("run state = %+v, want waiting approval with active handle", result.RunState)
+	}
+}
+
+func TestAdapterResumeReplayIncludesRetainedTransientTerminalOutput(t *testing.T) {
+	t.Parallel()
+
+	ref := session.SessionRef{AppName: "caelis", UserID: "user-1", WorkspaceKey: "ws", SessionID: "session-1"}
+	gw := &protocolGatewayService{feed: &protocolSessionFeed{
+		events: []eventstream.Envelope{
+			{
+				Kind:      eventstream.KindSessionUpdate,
+				SessionID: ref.SessionID,
+				Delivery:  &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
+				Meta:      map[string]any{"terminal_output": "步骤 1\n步骤 2\n"},
+			},
+			{
+				Kind:      eventstream.KindSessionUpdate,
+				SessionID: ref.SessionID,
+				EventID:   "event-final",
+				Delivery:  &eventstream.Delivery{Mode: eventstream.DeliveryCanonical},
+			},
+		},
+	}}
+	driver := newProtocolTestAdapter(t, gw, session.Session{SessionRef: ref})
+
+	got, err := driver.ReplayEvents(context.Background())
+	if err != nil {
+		t.Fatalf("ReplayEvents() error = %v", err)
+	}
+	if len(got) != 2 || got[0].Delivery == nil || got[0].Delivery.Mode != eventstream.DeliveryTransient || got[0].Meta["terminal_output"] != "步骤 1\n步骤 2\n" {
+		t.Fatalf("ReplayEvents() = %#v, want retained terminal bytes before durable final", got)
+	}
+}
+
+func TestAdapterReplayDoesNotCrossCapturedBoundaryDuringLiveSplice(t *testing.T) {
+	const iterations = 64
+	for iteration := range iterations {
+		ref := session.SessionRef{AppName: "caelis", UserID: "user-1", SessionID: "session-1"}
+		reader := &protocolBackfillSpliceReader{
+			events:  []*session.Event{protocolDurableEvent(1, "captured")},
+			blocked: make(chan struct{}),
+			release: make(chan struct{}),
+		}
+		codec, err := eventstream.NewCursorCodec(eventstream.CursorCodecConfig{
+			Secret: []byte("0123456789abcdef0123456789abcdef"),
+		})
+		if err != nil {
+			t.Fatalf("iteration %d: NewCursorCodec() error = %v", iteration, err)
+		}
+		feed, err := internalcontrolclient.NewFeedBroker(internalcontrolclient.FeedBrokerConfig{
+			SessionRef: ref, Reader: reader, CursorCodec: codec, SubscriberQueue: 8,
+		})
+		if err != nil {
+			t.Fatalf("iteration %d: NewFeedBroker() error = %v", iteration, err)
+		}
+		if err := feed.Prime(context.Background()); err != nil {
+			t.Fatalf("iteration %d: Prime() error = %v", iteration, err)
+		}
+
+		gatewayService := &protocolGatewayService{}
+		driver, err := NewAdapter(context.Background(), &RuntimeStack{
+			Gateway:      gatewayRuntimeDepsForTest(gatewayService),
+			ControlFeeds: protocolAnyFeedRegistry{feed: feed},
+			Session: SessionRuntimeDeps{
+				AppName: "caelis", UserID: "user-1",
+				StartFn: func(context.Context, string, string) (session.Session, error) {
+					return session.Session{SessionRef: ref}, nil
+				},
+			},
+		}, ref.SessionID, "gui", "")
+		if err != nil {
+			t.Fatalf("iteration %d: NewAdapter() error = %v", iteration, err)
+		}
+
+		type replayResult struct {
+			result eventstream.ReplayResult
+			err    error
+		}
+		replayed := make(chan replayResult, 1)
+		go func() {
+			result, err := driver.Replay(context.Background(), eventstream.ReplayRequest{SessionID: ref.SessionID})
+			replayed <- replayResult{result: result, err: err}
+		}()
+
+		select {
+		case <-reader.blocked:
+		case <-time.After(time.Second):
+			t.Fatalf("iteration %d: replay did not reach durable backfill", iteration)
+		}
+		if err := feed.Publish(eventstream.Envelope{
+			Kind: eventstream.KindNotice, SessionID: ref.SessionID,
+			Delivery: &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
+			Notice:   fmt.Sprintf("live-%d", iteration),
+		}); err != nil {
+			t.Fatalf("iteration %d: live Publish() error = %v", iteration, err)
+		}
+		_, liveCursor := feed.Boundary()
+		close(reader.release)
+
+		var got replayResult
+		select {
+		case got = <-replayed:
+		case <-time.After(time.Second):
+			t.Fatalf("iteration %d: Replay() did not return", iteration)
+		}
+		if got.err != nil {
+			t.Fatalf("iteration %d: Replay() error = %v", iteration, got.err)
+		}
+		if got.result.NextCursor == "" || got.result.NextCursor == liveCursor {
+			t.Fatalf("iteration %d: captured cursor = %q, live cursor = %q", iteration, got.result.NextCursor, liveCursor)
+		}
+		if len(got.result.Events) != 1 || got.result.Events[0].EventID != "event-1" || got.result.Events[0].Cursor != got.result.NextCursor {
+			t.Fatalf("iteration %d: replay result = %#v", iteration, got.result)
+		}
+		if err := feed.Close(); err != nil {
+			t.Fatalf("iteration %d: feed Close() error = %v", iteration, err)
+		}
 	}
 }
 
@@ -168,6 +288,12 @@ func (r protocolFeedRegistry) Session(session.SessionRef) (controlclientport.Ses
 	return r.feed, nil
 }
 
+type protocolAnyFeedRegistry struct{ feed controlclientport.SessionFeed }
+
+func (r protocolAnyFeedRegistry) Session(session.SessionRef) (controlclientport.SessionFeed, error) {
+	return r.feed, nil
+}
+
 type protocolSessionFeed struct {
 	request  controlclientport.SubscribeRequest
 	events   []eventstream.Envelope
@@ -176,7 +302,16 @@ type protocolSessionFeed struct {
 
 func (*protocolSessionFeed) Prime(context.Context) error        { return nil }
 func (*protocolSessionFeed) Publish(eventstream.Envelope) error { return nil }
-func (*protocolSessionFeed) Attach(<-chan eventstream.Envelope) {}
+func (*protocolSessionFeed) Attach(<-chan eventstream.Envelope) <-chan error {
+	done := make(chan error)
+	close(done)
+	return done
+}
+func (*protocolSessionFeed) AttachTo(controlclientport.FeedSubscription, <-chan eventstream.Envelope) <-chan error {
+	done := make(chan error)
+	close(done)
+	return done
+}
 func (f *protocolSessionFeed) Boundary() (*eventstream.FeedPosition, string) {
 	return nil, f.boundary
 }
@@ -186,9 +321,10 @@ func (f *protocolSessionFeed) Subscribe(_ context.Context, req controlclientport
 		Subscription:   newProtocolFeedSubscription(f.events),
 		Mode:           controlclientport.ResumeModeExact,
 		BoundaryCursor: f.boundary,
+		Backfill:       eventstream.CloneEnvelopes(f.events),
 	}, nil
 }
-func (f *protocolSessionFeed) SubscribeFromNow() (controlclientport.FeedSubscription, error) {
+func (f *protocolSessionFeed) SubscribeFromNow(context.Context) (controlclientport.FeedSubscription, error) {
 	return newProtocolFeedSubscription(f.events), nil
 }
 
@@ -198,15 +334,42 @@ type protocolFeedSubscription struct {
 }
 
 func newProtocolFeedSubscription(events []eventstream.Envelope) *protocolFeedSubscription {
-	subscription := &protocolFeedSubscription{events: make(chan eventstream.Envelope), done: make(chan struct{})}
-	go func() {
-		defer close(subscription.events)
-		for _, envelope := range events {
-			subscription.events <- eventstream.CloneEnvelope(envelope)
-		}
-		close(subscription.done)
-	}()
+	subscription := &protocolFeedSubscription{events: make(chan eventstream.Envelope, len(events)), done: make(chan struct{})}
+	for _, envelope := range events {
+		subscription.events <- eventstream.CloneEnvelope(envelope)
+	}
+	close(subscription.events)
+	close(subscription.done)
 	return subscription
+}
+
+type protocolBackfillSpliceReader struct {
+	calls   atomic.Int32
+	events  []*session.Event
+	blocked chan struct{}
+	release chan struct{}
+}
+
+func (r *protocolBackfillSpliceReader) EventsPage(ctx context.Context, req session.EventPageRequest) (session.EventPage, error) {
+	if r.calls.Add(1) == 3 {
+		close(r.blocked)
+		select {
+		case <-ctx.Done():
+			return session.EventPage{}, ctx.Err()
+		case <-r.release:
+		}
+	}
+	return session.PageEvents(r.events, req), nil
+}
+
+func protocolDurableEvent(seq uint64, text string) *session.Event {
+	return &session.Event{
+		ID: "event-1", SessionID: "session-1", Seq: seq,
+		Type: session.EventTypeAssistant, Visibility: session.VisibilityCanonical,
+		Protocol: &session.EventProtocol{Method: session.ProtocolMethodSessionUpdate, Update: &session.ProtocolUpdate{
+			SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage), Content: session.ProtocolTextContent(text),
+		}},
+	}
 }
 
 func (s *protocolFeedSubscription) Events() <-chan eventstream.Envelope { return s.events }

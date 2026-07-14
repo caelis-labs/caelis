@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
 )
 
 type blockingApprovalRecoveryStore struct {
@@ -25,8 +26,15 @@ func (*blockingApprovalRecoveryStore) EventsPage(context.Context, session.EventP
 	return session.EventPage{}, nil
 }
 
-func (*blockingApprovalRecoveryStore) AppendEvent(context.Context, session.AppendEventRequest) (*session.Event, error) {
-	return nil, nil
+func (*blockingApprovalRecoveryStore) Session(context.Context, session.SessionRef) (session.Session, error) {
+	return session.Session{}, nil
+}
+
+func (*blockingApprovalRecoveryStore) SettlePendingApproval(
+	context.Context,
+	session.SettlePendingApprovalRequest,
+) (session.SettlePendingApprovalResult, error) {
+	return session.SettlePendingApprovalResult{}, nil
 }
 
 func TestApprovalRecoveryGateBlocksTurnsWithoutBlockingStartup(t *testing.T) {
@@ -75,5 +83,67 @@ func TestApprovalRecoveryGateRetainsSweepFailure(t *testing.T) {
 	}
 	if err := gate.Wait(context.Background()); !errors.Is(err, want) {
 		t.Fatalf("second Wait() error = %v, want retained %v", err, want)
+	}
+}
+
+func TestApprovalRecoveryGateDefersForeignLeaseAndSettlesAfterExpiry(t *testing.T) {
+	store := inmemory.NewStore(inmemory.Config{SessionIDGenerator: func() string { return "deferred-recovery-session" }})
+	service := inmemory.NewService(store)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	active, err := service.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, err := service.AcquireSessionLease(ctx, session.AcquireSessionLeaseRequest{
+		SessionRef: active.SessionRef, OwnerID: "foreign-runtime", TTL: 80 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = service.AppendEvent(ctx, session.AppendEventRequest{
+		SessionRef: active.SessionRef,
+		MutationGuard: session.MutationGuard{
+			Authority: session.MutationAuthorityRuntime, LeaseID: lease.LeaseID,
+			OwnerID: lease.OwnerID, FencingToken: lease.FencingToken,
+		},
+		Event: &session.Event{
+			Type: session.EventTypeCustom, Visibility: session.VisibilityMirror, ApprovalRequestID: "approval-deferred",
+			Protocol: &session.EventProtocol{Method: session.ProtocolMethodRequestPermission, Permission: &session.ProtocolApproval{
+				ToolCall: session.ProtocolToolCall{ID: "call-deferred", Name: "WRITE"},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gate := NewApprovalRecoveryGate(service)
+	gate.Start(ctx)
+	if err := gate.Wait(ctx); err != nil {
+		t.Fatal(err)
+	}
+	page, err := service.EventsPage(ctx, session.EventPageRequest{
+		SessionRef: active.SessionRef, Visibility: session.EventPageClientReplay,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Events) != 1 {
+		t.Fatalf("events while foreign lease is live = %#v, want pending request only", page.Events)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for len(page.Events) != 2 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+		page, err = service.EventsPage(ctx, session.EventPageRequest{
+			SessionRef: active.SessionRef, Visibility: session.EventPageClientReplay,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(page.Events) != 2 || page.Events[1].Lifecycle == nil || page.Events[1].Lifecycle.Reason != "startup_recovery" {
+		t.Fatalf("events after foreign lease expiry = %#v, want one deferred settlement", page.Events)
 	}
 }

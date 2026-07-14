@@ -33,3 +33,34 @@ func TestSessionStoreRootLockHonorsContextCancellation(t *testing.T) {
 		t.Fatalf("cancelled lock wait took %v", elapsed)
 	}
 }
+
+func TestSessionStoreRootLockRejectsPreCancelledContextWhenFree(t *testing.T) {
+	root := t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	file, err := lockSessionStoreRoot(ctx, root, storeRootLockExclusive)
+	if file != nil {
+		_ = unlockSessionStoreRoot(file)
+		t.Fatal("pre-cancelled root lock returned an acquired file")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("pre-cancelled root lock error = %v, want context cancellation", err)
+	}
+}
+
+func TestContextMutexRejectsPreCancelledContextWhenFree(t *testing.T) {
+	var mutex contextMutex
+	for range 256 {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		err := mutex.LockContext(ctx)
+		if err == nil {
+			mutex.Unlock()
+			t.Fatal("pre-cancelled context acquired a free contextMutex")
+		}
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("pre-cancelled contextMutex error = %v, want context cancellation", err)
+		}
+	}
+}

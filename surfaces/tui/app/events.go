@@ -42,6 +42,7 @@ type StatusRefreshResultMsg struct {
 	Model        string
 	Context      string
 	HasStatus    bool
+	HasContext   bool
 	ModeLabel    string
 	HasModeLabel bool
 	Status       StatusViewModel

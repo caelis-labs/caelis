@@ -9,6 +9,8 @@ import (
 
 func (m *Model) resetConversationView() {
 	m.flushStream()
+	m.statusContext = ""
+	m.statusView.Tokens = ""
 	m.activeAssistantID = ""
 	m.activeReasoningID = ""
 	m.transientBlockID = ""

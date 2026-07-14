@@ -127,22 +127,6 @@ func NewModel(cfg Config) *Model {
 		m.setWorkspaceDisplay(workspace)
 	}
 
-	if cfg.RefreshStatus != nil {
-		m.observeControlStatusCall()
-		modelText, contextText := cfg.RefreshStatus()
-		m.statusModel = normalizeStatusModel(modelText)
-		m.statusContext = strings.TrimSpace(contextText)
-	}
-	if cfg.RefreshStatusView != nil {
-		m.statusView = cfg.RefreshStatusView()
-		m.normalizeStatusViewWorkspace()
-	}
-	m.refreshModeLabelFromConfig()
-	if cfg.RefreshWorkspace != nil {
-		if workspace := strings.TrimSpace(cfg.RefreshWorkspace()); workspace != "" {
-			m.setWorkspaceDisplay(workspace)
-		}
-	}
 	m.normalizeStatusViewWorkspace()
 	m.setCommands(cfg.Commands)
 	m.syncTextareaChrome()
@@ -200,6 +184,9 @@ func (m *Model) Init() tea.Cmd {
 	m.hasCommittedLine = m.doc.Len() > 0
 	m.syncViewportContent()
 	cmds := []tea.Cmd{tickStatusCmd(), m.spinner.Tick}
+	if cmd := m.beginStatusRefreshCmd(); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
 	if m.cfg.OnStart != nil {
 		cmds = append(cmds, func() tea.Msg {
 			m.cfg.OnStart()

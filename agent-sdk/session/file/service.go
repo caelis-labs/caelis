@@ -75,11 +75,20 @@ func (s *Service) PendingApprovals(ctx context.Context) ([]session.PendingApprov
 	return s.store.PendingApprovals(ctx)
 }
 
+// SettlePendingApproval atomically settles one still-pending recovery
+// candidate.
+func (s *Service) SettlePendingApproval(
+	ctx context.Context,
+	req session.SettlePendingApprovalRequest,
+) (session.SettlePendingApprovalResult, error) {
+	return s.store.SettlePendingApproval(ctx, req)
+}
+
 func (s *Service) BindController(
 	ctx context.Context,
 	req session.BindControllerRequest,
 ) (session.Session, error) {
-	return s.store.bindControllerRequest(req)
+	return s.store.bindControllerRequest(ctx, req)
 }
 
 func (s *Service) BindControllerWithEvent(
@@ -93,7 +102,7 @@ func (s *Service) PutParticipant(
 	ctx context.Context,
 	req session.PutParticipantRequest,
 ) (session.Session, error) {
-	return s.store.putParticipantRequest(req)
+	return s.store.putParticipantRequest(ctx, req)
 }
 
 func (s *Service) PutParticipantWithEvent(
@@ -107,7 +116,7 @@ func (s *Service) RemoveParticipant(
 	ctx context.Context,
 	req session.RemoveParticipantRequest,
 ) (session.Session, error) {
-	return s.store.removeParticipantRequest(req)
+	return s.store.removeParticipantRequest(ctx, req)
 }
 
 func (s *Service) RemoveParticipantWithEvent(

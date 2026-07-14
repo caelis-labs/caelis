@@ -23,7 +23,7 @@ func TestTurnIdentityMatchesKnownIDs(t *testing.T) {
 		{
 			name: "source omits identifiers",
 			env:  eventstream.Envelope{},
-			want: true,
+			want: false,
 		},
 		{
 			name: "foreign handle",

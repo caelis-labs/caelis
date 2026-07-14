@@ -76,8 +76,15 @@ func (s pagedRecoveryStore) EventsPage(ctx context.Context, req session.EventPag
 	return s.store.EventsPage(ctx, req)
 }
 
-func (s pagedRecoveryStore) AppendEvent(ctx context.Context, req session.AppendEventRequest) (*session.Event, error) {
-	return s.store.AppendEvent(ctx, req)
+func (s pagedRecoveryStore) Session(ctx context.Context, ref session.SessionRef) (session.Session, error) {
+	return s.store.Session(ctx, ref)
+}
+
+func (s pagedRecoveryStore) SettlePendingApproval(
+	ctx context.Context,
+	req session.SettlePendingApprovalRequest,
+) (session.SettlePendingApprovalResult, error) {
+	return s.store.SettlePendingApproval(ctx, req)
 }
 
 type recoveryBenchmarkService interface {

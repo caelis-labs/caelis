@@ -14,6 +14,8 @@ type ToolUpdateMeta struct {
 	ToolKind        string
 	FullArgs        string
 	MessageID       string
+	ToolStatus      string
+	OutputNarrative bool
 	Terminal        bool
 	OutputSynthetic bool
 	OutputTerminal  bool
@@ -42,6 +44,7 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 	taskAction := strings.ToLower(strings.TrimSpace(update.Meta.TaskAction))
 	taskInput := strings.TrimSpace(update.Meta.TaskInput)
 	taskTargetKind := strings.ToLower(strings.TrimSpace(update.Meta.TaskTargetKind))
+	authoritativeFinal := toolFinalOutputAuthoritative(update.Err, update.Meta.ToolStatus)
 	effectiveName, effectiveToolKind, openIdx := effectiveToolEventIdentity(out, update, toolIndex, name, toolKind)
 	semanticName := toolSemanticName(effectiveName, effectiveToolKind)
 	output := normalizeToolEventOutput(update.Output, effectiveName, effectiveToolKind, update.Meta.Terminal)
@@ -67,7 +70,7 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 	if !update.Final {
 		if i := openIdx; i >= 0 {
 			ev := &out[i]
-			mergeOpenToolEvent(ev, name, toolKind, args, fullArgs, output, messageID, taskID, taskAction, taskInput, taskTargetKind, semanticName, update.Meta.Terminal)
+			mergeOpenToolEvent(ev, name, toolKind, args, fullArgs, output, messageID, taskID, taskAction, taskInput, taskTargetKind, semanticName, update.Meta.Terminal, update.Meta.OutputNarrative, update.Meta.OutputTerminal)
 			return out, true, false
 		}
 		out = append(out, SubagentEvent{
@@ -81,6 +84,7 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 			Output:          output,
 			OutputMessageID: messageID,
 			OutputMessage:   output,
+			OutputNarrative: update.Meta.OutputNarrative,
 			Terminal:        update.Meta.Terminal,
 			OutputSynthetic: update.Meta.OutputSynthetic,
 			OutputTerminal:  update.Meta.OutputTerminal,
@@ -103,6 +107,7 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 		Output:          output,
 		OutputMessageID: messageID,
 		OutputMessage:   output,
+		OutputNarrative: update.Meta.OutputNarrative,
 		Terminal:        update.Meta.Terminal,
 		OutputSynthetic: update.Meta.OutputSynthetic,
 		OutputTerminal:  update.Meta.OutputTerminal,
@@ -116,7 +121,7 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 	if i := openToolEventIndexForUpdate(out, update, toolIndex); i >= 0 {
 		ev := &out[i]
 		if !ev.Done {
-			mergeOpenFinalToolEvent(ev, &finalEvent)
+			mergeOpenFinalToolEvent(ev, &finalEvent, authoritativeFinal)
 			if shouldDefaultCollapseToolEvent(finalEvent) {
 				collapse = true
 			}
@@ -129,8 +134,8 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 			continue
 		}
 		fillMissingFinalToolEventFromExisting(&finalEvent, *ev)
-		if shouldReplaceCompletedTerminalToolEvent(*ev, finalEvent) {
-			mergeFinalToolEvent(ev, &finalEvent)
+		if shouldReplaceCompletedTerminalToolEvent(*ev, finalEvent) || shouldReplaceCompletedSubagentToolEvent(*ev, finalEvent) {
+			mergeFinalToolEvent(ev, &finalEvent, authoritativeFinal)
 			if shouldDefaultCollapseToolEvent(finalEvent) {
 				collapse = true
 			}
@@ -146,6 +151,16 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 		collapse = true
 	}
 	return out, true, collapse
+}
+
+func shouldReplaceCompletedSubagentToolEvent(existing SubagentEvent, incoming SubagentEvent) bool {
+	if !existing.Done || !incoming.Done || strings.TrimSpace(existing.CallID) == "" || strings.TrimSpace(existing.CallID) != strings.TrimSpace(incoming.CallID) {
+		return false
+	}
+	existingName := toolSemanticName(existing.Name, existing.ToolKind)
+	incomingName := toolSemanticName(incoming.Name, incoming.ToolKind)
+	return strings.EqualFold(existingName, incomingName) &&
+		(strings.EqualFold(existingName, "SPAWN") || strings.EqualFold(existingName, "TASK"))
 }
 
 func effectiveToolEventIdentity(events []SubagentEvent, update toolEventUpdate, toolIndex map[string]int, name string, toolKind string) (string, string, int) {
@@ -213,7 +228,7 @@ func updateToolEventIndex(index map[string]int, events []SubagentEvent, callID s
 	delete(index, callID)
 }
 
-func mergeOpenToolEvent(ev *SubagentEvent, name, toolKind, args, fullArgs, output, messageID, taskID, taskAction, taskInput, taskTargetKind string, semanticName string, terminal bool) {
+func mergeOpenToolEvent(ev *SubagentEvent, name, toolKind, args, fullArgs, output, messageID, taskID, taskAction, taskInput, taskTargetKind string, semanticName string, terminal bool, outputNarrative bool, outputTerminal bool) {
 	if ev == nil {
 		return
 	}
@@ -244,17 +259,35 @@ func mergeOpenToolEvent(ev *SubagentEvent, name, toolKind, args, fullArgs, outpu
 	if terminal {
 		ev.Terminal = true
 	}
-	if shouldMergeOpenToolOutput(semanticName, output, isTerminalPanelToolEvent(*ev)) {
-		if isTerminalPanelToolEvent(*ev) {
-			ev.Output = mergeCommandStreamChunk(ev.Output, output)
+	// Spawn keeps terminal-panel styling, but its live output is structured
+	// child narrative rather than terminal bytes and must retain message scope.
+	terminalOutput := isTerminalPanelToolEvent(*ev) && !strings.EqualFold(semanticName, "SPAWN")
+	if shouldMergeOpenToolOutput(semanticName, output, terminalOutput) {
+		if terminalOutput {
+			if outputTerminal {
+				// ACP terminal_output is an exact byte delta. Repeated lines and
+				// prefix-like chunks are real output, not evidence of a cumulative
+				// snapshot, so append them without overlap guessing.
+				ev.Output += output
+			} else {
+				ev.Output = mergeCommandStreamChunk(ev.Output, output)
+			}
 		} else {
-			ev.Output, ev.OutputMessage = mergeSubagentNarrativeChunk(ev.Output, ev.OutputMessageID, ev.OutputMessage, output, messageID)
+			if outputNarrative && ev.OutputNarrativeBoundary {
+				ev.Output = joinSubagentNarrativeMessages(ev.Output, output)
+				ev.OutputMessage = output
+				ev.OutputMessageID = ""
+				ev.OutputNarrativeBoundary = false
+			} else {
+				ev.Output, ev.OutputMessage = mergeSubagentNarrativeChunk(ev.Output, ev.OutputMessageID, ev.OutputMessage, output, messageID)
+			}
 			if messageID != "" {
 				ev.OutputMessageID = messageID
 			}
 		}
+		ev.OutputNarrative = ev.OutputNarrative || outputNarrative
 		ev.OutputSynthetic = false
-		if isTerminalPanelToolEvent(*ev) {
+		if terminalOutput {
 			ev.OutputTerminal = true
 		}
 	}
@@ -334,7 +367,7 @@ func fillMissingFinalToolEventFromExisting(finalEvent *SubagentEvent, existing S
 	}
 }
 
-func mergeFinalToolEvent(ev *SubagentEvent, finalEvent *SubagentEvent) {
+func mergeFinalToolEvent(ev *SubagentEvent, finalEvent *SubagentEvent, authoritativeFinal bool) {
 	if ev == nil || finalEvent == nil {
 		return
 	}
@@ -345,13 +378,14 @@ func mergeFinalToolEvent(ev *SubagentEvent, finalEvent *SubagentEvent) {
 	mergeStartArgs(ev, finalEvent.StartArgs, finalEvent.Args)
 	ev.FullArgs = finalEvent.FullArgs
 	ev.Terminal = ev.Terminal || finalEvent.Terminal
-	if finalToolOutputShouldReplace(*ev, *finalEvent) {
+	if finalToolOutputShouldReplace(*ev, *finalEvent, authoritativeFinal) {
 		ev.Output = finalEvent.Output
 		ev.OutputMessageID = finalEvent.OutputMessageID
 		ev.OutputMessage = finalEvent.OutputMessage
 		ev.OutputSynthetic = finalEvent.OutputSynthetic
 		ev.OutputTerminal = finalEvent.OutputTerminal
 	}
+	ev.OutputNarrative = ev.OutputNarrative || finalEvent.OutputNarrative
 	ev.Done = true
 	ev.Err = finalEvent.Err
 	ev.TaskID = preferredDisplayTaskID(ev.TaskID, finalEvent.TaskID)
@@ -366,12 +400,12 @@ func mergeFinalToolEvent(ev *SubagentEvent, finalEvent *SubagentEvent) {
 	}
 }
 
-func mergeOpenFinalToolEvent(ev *SubagentEvent, finalEvent *SubagentEvent) {
+func mergeOpenFinalToolEvent(ev *SubagentEvent, finalEvent *SubagentEvent, authoritativeFinal bool) {
 	if ev == nil || finalEvent == nil {
 		return
 	}
 	fillFinalToolEventFromExisting(finalEvent, *ev)
-	mergeFinalToolEvent(ev, finalEvent)
+	mergeFinalToolEvent(ev, finalEvent, authoritativeFinal)
 }
 
 func mergeStartArgs(dst *SubagentEvent, candidates ...string) {
@@ -381,9 +415,28 @@ func mergeStartArgs(dst *SubagentEvent, candidates ...string) {
 	dst.StartArgs = firstTrimmed(candidates...)
 }
 
-func finalToolOutputShouldReplace(existing SubagentEvent, finalEvent SubagentEvent) bool {
+func finalToolOutputShouldReplace(existing SubagentEvent, finalEvent SubagentEvent, authoritativeFinal bool) bool {
+	semanticName := toolSemanticName(existing.Name, existing.ToolKind)
+	subagentTool := strings.EqualFold(semanticName, "SPAWN") || strings.EqualFold(semanticName, "TASK")
+	if authoritativeFinal && subagentTool && renderableTextHasContent(finalEvent.Output) {
+		return true
+	}
 	if finalEvent.OutputSynthetic && renderableTextHasContent(existing.Output) {
 		return false
+	}
+	if subagentTool && existing.OutputNarrative {
+		return subagentFinalOutputShouldReplace(existing.Output, finalEvent.Output)
+	}
+	// A terminal close/final frame may legitimately carry no bytes. Repeated
+	// canonical finals must never turn an already rendered command transcript
+	// into an empty panel merely because the first final marked it Done.
+	if isTerminalPanelToolEvent(existing) &&
+		renderableTextHasContent(existing.Output) &&
+		!renderableTextHasContent(finalEvent.Output) {
+		return false
+	}
+	if existing.Done {
+		return true
 	}
 	if !isTerminalPanelToolEvent(existing) {
 		return true
@@ -392,6 +445,40 @@ func finalToolOutputShouldReplace(existing SubagentEvent, finalEvent SubagentEve
 		return false
 	}
 	return renderableTextHasContent(finalEvent.Output)
+}
+
+func toolFinalOutputAuthoritative(isErr bool, status string) bool {
+	if isErr {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "failed", "cancelled", "canceled", "interrupted":
+		return true
+	default:
+		return false
+	}
+}
+
+// subagentFinalOutputShouldReplace keeps already rendered semantic child
+// narrative when the parent tool result only contains a truncated final
+// preview. A final value is authoritative when no live narrative was received
+// or when it contains the live value as a prefix and therefore demonstrably
+// completes it.
+func subagentFinalOutputShouldReplace(existing string, final string) bool {
+	existing = strings.TrimSpace(sanitizeRenderableText(existing))
+	final = strings.TrimSpace(sanitizeRenderableText(final))
+	switch {
+	case final == "":
+		return false
+	case existing == "":
+		return true
+	case final == existing:
+		return true
+	case strings.HasPrefix(final, existing):
+		return true
+	default:
+		return false
+	}
 }
 
 func shouldPreserveTerminalOutputFromNonTerminalFinal(existing SubagentEvent, finalEvent SubagentEvent) bool {

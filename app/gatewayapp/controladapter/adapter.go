@@ -267,6 +267,10 @@ func (d *Adapter) Submit(ctx context.Context, submission Submission) (Turn, erro
 		}
 		return nil, err
 	}
+	feedSubscription, err := d.subscribeGatewayTurn(activeSession.SessionRef)
+	if err != nil {
+		return nil, fmt.Errorf("app/gatewayapp/controladapter: establish turn feed boundary: %w", err)
+	}
 	result, err := gw.BeginTurn(ctx, gateway.BeginTurnRequest{
 		SessionRef:   activeSession.SessionRef,
 		Input:        rawInput,
@@ -278,6 +282,9 @@ func (d *Adapter) Submit(ctx context.Context, submission Submission) (Turn, erro
 		},
 	})
 	if err != nil {
+		if feedSubscription != nil {
+			_ = feedSubscription.Close()
+		}
 		return nil, err
 	}
 	d.mu.Lock()
@@ -285,9 +292,12 @@ func (d *Adapter) Submit(ctx context.Context, submission Submission) (Turn, erro
 	d.hasSession = true
 	d.mu.Unlock()
 	if result.Handle == nil {
+		if feedSubscription != nil {
+			_ = feedSubscription.Close()
+		}
 		return nil, nil
 	}
-	return d.newGatewayTurn(result.Handle), nil
+	return d.newGatewayTurnWithSubscription(result.Handle, feedSubscription, true, ctx), nil
 }
 
 func activeKernelTurnForSession(active []gateway.ActiveTurnState, ref session.SessionRef) bool {
@@ -472,7 +482,10 @@ func (d *Adapter) ReplayEvents(ctx context.Context) ([]eventstream.Envelope, err
 	if !ok {
 		return nil, fmt.Errorf("app/gatewayapp/controladapter: no active session")
 	}
-	result, err := d.replayControlFeed(ctx, activeSession.SessionID, eventstream.ReplayRequest{SessionID: activeSession.SessionID})
+	result, err := d.replayControlFeed(ctx, activeSession.SessionID, eventstream.ReplayRequest{
+		SessionID:        activeSession.SessionID,
+		IncludeTransient: true,
+	})
 	if err != nil {
 		return nil, err
 	}

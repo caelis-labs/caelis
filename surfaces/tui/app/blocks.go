@@ -273,6 +273,30 @@ func (b *MainACPTurnBlock) UpdateToolWithMeta(callID, name, args, output string,
 	}
 }
 
+func (b *MainACPTurnBlock) markSubagentNarrativeBoundary(callID string, taskID string) bool {
+	if b == nil {
+		return false
+	}
+	callID = strings.TrimSpace(callID)
+	taskID = strings.TrimSpace(taskID)
+	for index := len(b.Events) - 1; index >= 0; index-- {
+		event := &b.Events[index]
+		if event.Kind != SEToolCall {
+			continue
+		}
+		direct := callID != "" && strings.TrimSpace(event.CallID) == callID
+		linked := taskID != "" && strings.TrimSpace(event.TaskID) == taskID &&
+			(strings.EqualFold(toolSemanticName(event.Name, event.ToolKind), "SPAWN") ||
+				strings.EqualFold(toolSemanticName(event.Name, event.ToolKind), "TASK"))
+		if !direct && !linked {
+			continue
+		}
+		event.OutputNarrativeBoundary = true
+		return true
+	}
+	return false
+}
+
 func shouldReplaceSpawnDisplayArgs(existing string, incoming string) bool {
 	existing = sanitizeSpawnHeaderArgs(strings.TrimSpace(existing))
 	incoming = sanitizeSpawnHeaderArgs(strings.TrimSpace(incoming))

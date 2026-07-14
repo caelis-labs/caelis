@@ -2503,7 +2503,6 @@ func TestChunkEventFromStreamEventPreservesBoundaryWhitespace(t *testing.T) {
 	if reasoning == nil || reasoning.Text != "think " || reasoning.Message == nil || reasoning.Message.ReasoningText() != "think " {
 		t.Fatalf("reasoning chunk = %+v, want boundary whitespace preserved", reasoning)
 	}
-
 	space := chunkEventFromStreamEvent(&model.StreamEvent{
 		Type: model.StreamEventPartDelta,
 		PartDelta: &model.PartDelta{

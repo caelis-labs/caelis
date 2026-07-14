@@ -2,6 +2,8 @@ package schema
 
 import "strings"
 
+// FinalAssistantAccumulator retains the latest assistant message while
+// appending ACP narrative frames with exact delta semantics.
 type FinalAssistantAccumulator struct {
 	messageID string
 	text      string
@@ -41,6 +43,24 @@ func (a *FinalAssistantAccumulator) ObserveContentChunk(updateType string, conte
 	return a.observeContentChunk(updateType, content, "")
 }
 
+// ObserveFrame appends one ACP narrative text frame without applying an
+// update-type barrier. Content is always treated as an exact delta; adapters
+// for non-standard cumulative endpoints must normalize snapshots explicitly.
+func (a *FinalAssistantAccumulator) ObserveFrame(messageID string, text string) AssistantTextUpdate {
+	if a == nil {
+		return AssistantTextUpdate{}
+	}
+	messageID = strings.TrimSpace(messageID)
+	if messageID != "" {
+		if a.messageID != "" && a.messageID != messageID {
+			a.resetMessage()
+		}
+		a.messageID = messageID
+	}
+	delta := a.appendAssistantFrame(text)
+	return AssistantTextUpdate{Text: a.text, Delta: delta, Assistant: true}
+}
+
 func (a *FinalAssistantAccumulator) FinalText() string {
 	if a == nil {
 		return ""
@@ -58,17 +78,7 @@ func (a *FinalAssistantAccumulator) Reset() {
 func (a *FinalAssistantAccumulator) observeContentChunk(updateType string, content any, messageID string) AssistantTextUpdate {
 	switch strings.TrimSpace(updateType) {
 	case UpdateAgentMessage:
-		messageID = strings.TrimSpace(messageID)
-		if messageID != "" {
-			if a.messageID != "" && a.messageID != messageID {
-				a.text = ""
-			}
-			a.messageID = messageID
-		}
-		text := ExtractTextValue(content)
-		cumulative, delta := AppendAssistantText(a.text, text)
-		a.text = cumulative
-		return AssistantTextUpdate{Text: cumulative, Delta: delta, Assistant: true}
+		return a.ObserveFrame(messageID, ExtractTextValue(content))
 	case UpdateAgentThought:
 		a.Reset()
 		return AssistantTextUpdate{Barrier: true}
@@ -77,18 +87,22 @@ func (a *FinalAssistantAccumulator) observeContentChunk(updateType string, conte
 	}
 }
 
+func (a *FinalAssistantAccumulator) resetMessage() {
+	a.messageID = ""
+	a.text = ""
+}
+
+func (a *FinalAssistantAccumulator) appendAssistantFrame(incoming string) string {
+	if incoming == "" {
+		return ""
+	}
+	a.text += incoming
+	return incoming
+}
+
+// AppendAssistantText appends one exact ACP assistant delta.
 func AppendAssistantText(existing string, incoming string) (string, string) {
 	if incoming == "" {
-		return existing, ""
-	}
-	if existing == "" {
-		return incoming, incoming
-	}
-	if strings.HasPrefix(incoming, existing) {
-		delta := incoming[len(existing):]
-		return incoming, delta
-	}
-	if strings.HasPrefix(existing, incoming) {
 		return existing, ""
 	}
 	return existing + incoming, incoming

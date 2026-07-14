@@ -73,6 +73,12 @@ func (s *MemoryOperationStore) Complete(_ context.Context, intent OperationInten
 	if !ok || !sameOperationIntent(record.Intent, intent) {
 		return OperationRecord{}, ErrOperationConflict
 	}
+	if record.Result != nil {
+		if *record.Result != result {
+			return cloneOperationRecord(record), ErrOperationConflict
+		}
+		return cloneOperationRecord(record), nil
+	}
 	copyResult := result
 	record.Result = &copyResult
 	record.UpdatedAt = s.now()
@@ -82,57 +88,145 @@ func (s *MemoryOperationStore) Complete(_ context.Context, intent OperationInten
 
 type FileOperationStore struct {
 	root string
-	mu   sync.Mutex
 	now  func() time.Time
 }
 
+const operationStoreLockFilename = ".operations.lock"
+
+var operationStoreRootLocks sync.Map
+
+type operationStoreRootLock struct {
+	once  sync.Once
+	token chan struct{}
+}
+
+func (l *operationStoreRootLock) lock(ctx context.Context) error {
+	l.once.Do(func() {
+		l.token = make(chan struct{}, 1)
+		l.token <- struct{}{}
+	})
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	select {
+	case <-l.token:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (l *operationStoreRootLock) unlock() {
+	l.token <- struct{}{}
+}
+
 func NewFileOperationStore(root string) *FileOperationStore {
-	return &FileOperationStore{root: strings.TrimSpace(root), now: time.Now}
-}
-
-func (s *FileOperationStore) Begin(_ context.Context, intent OperationIntent) (OperationRecord, bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if err := os.MkdirAll(s.root, 0o700); err != nil {
-		return OperationRecord{}, false, err
-	}
-	path := s.path(intent)
-	record, err := readOperationRecord(path)
-	if err == nil {
-		if !sameOperationIntent(record.Intent, intent) {
-			return OperationRecord{}, false, ErrOperationConflict
+	root = strings.TrimSpace(root)
+	if root != "" {
+		if absolute, err := filepath.Abs(root); err == nil {
+			root = absolute
 		}
-		return record, false, nil
+		root = filepath.Clean(root)
 	}
-	if !errors.Is(err, os.ErrNotExist) {
-		return OperationRecord{}, false, err
-	}
-	intent.CreatedAt = s.now()
-	record = OperationRecord{Intent: intent, UpdatedAt: intent.CreatedAt}
-	if err := writeOperationRecord(path, record); err != nil {
-		return OperationRecord{}, false, err
-	}
-	return record, true, nil
+	return &FileOperationStore{root: root, now: time.Now}
 }
 
-func (s *FileOperationStore) Complete(_ context.Context, intent OperationIntent, result controlport.CommandResult) (OperationRecord, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	path := s.path(intent)
-	record, err := readOperationRecord(path)
+func (s *FileOperationStore) Begin(ctx context.Context, intent OperationIntent) (OperationRecord, bool, error) {
+	var record OperationRecord
+	var created bool
+	err := s.withRootLock(ctx, func() error {
+		path := s.path(intent)
+		persisted, err := readOperationRecord(path)
+		if err == nil {
+			if !sameOperationIntent(persisted.Intent, intent) {
+				return ErrOperationConflict
+			}
+			record = persisted
+			return nil
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		intent.CreatedAt = s.now()
+		record = OperationRecord{Intent: intent, UpdatedAt: intent.CreatedAt}
+		if err := writeOperationRecord(path, record); err != nil {
+			return err
+		}
+		created = true
+		return nil
+	})
 	if err != nil {
-		return OperationRecord{}, err
+		return OperationRecord{}, false, err
 	}
-	if !sameOperationIntent(record.Intent, intent) {
-		return OperationRecord{}, ErrOperationConflict
+	return cloneOperationRecord(record), created, nil
+}
+
+func (s *FileOperationStore) Complete(ctx context.Context, intent OperationIntent, result controlport.CommandResult) (OperationRecord, error) {
+	var record OperationRecord
+	err := s.withRootLock(ctx, func() error {
+		path := s.path(intent)
+		persisted, err := readOperationRecord(path)
+		if err != nil {
+			return err
+		}
+		if !sameOperationIntent(persisted.Intent, intent) {
+			return ErrOperationConflict
+		}
+		if persisted.Result != nil {
+			record = persisted
+			if *persisted.Result != result {
+				return ErrOperationConflict
+			}
+			return nil
+		}
+		copyResult := result
+		persisted.Result = &copyResult
+		persisted.UpdatedAt = s.now()
+		if err := writeOperationRecord(path, persisted); err != nil {
+			return err
+		}
+		record = persisted
+		return nil
+	})
+	if err != nil {
+		return cloneOperationRecord(record), err
 	}
-	copyResult := result
-	record.Result = &copyResult
-	record.UpdatedAt = s.now()
-	if err := writeOperationRecord(path, record); err != nil {
-		return OperationRecord{}, err
+	return cloneOperationRecord(record), nil
+}
+
+func (s *FileOperationStore) withRootLock(ctx context.Context, fn func() error) error {
+	if s == nil || strings.TrimSpace(s.root) == "" || s.root == "." {
+		return errors.New("controlclient: operation store root is required")
 	}
-	return record, nil
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	rootLockValue, _ := operationStoreRootLocks.LoadOrStore(s.root, &operationStoreRootLock{})
+	rootLock := rootLockValue.(*operationStoreRootLock)
+	if err := rootLock.lock(ctx); err != nil {
+		return err
+	}
+	defer rootLock.unlock()
+	if err := os.MkdirAll(s.root, 0o700); err != nil {
+		return err
+	}
+	if err := os.Chmod(s.root, 0o700); err != nil {
+		return err
+	}
+	file, err := lockOperationStoreRoot(ctx, s.root)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = unlockOperationStoreRoot(file)
+	}()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return fn()
 }
 
 func (s *FileOperationStore) path(intent OperationIntent) string {
@@ -178,15 +272,10 @@ func writeOperationRecord(path string, record OperationRecord) error {
 	if err := temp.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(tempPath, path); err != nil {
+	if err := replaceOperationStoreFile(tempPath, path); err != nil {
 		return err
 	}
-	directory, err := os.Open(filepath.Dir(path))
-	if err != nil {
-		return err
-	}
-	defer directory.Close()
-	return directory.Sync()
+	return syncOperationStoreDirectory(filepath.Dir(path))
 }
 
 func operationKey(principalID, operationID string) string {

@@ -44,6 +44,9 @@ type SubscribeResult struct {
 	Mode           ResumeMode       `json:"resume_mode"`
 	TransientGap   bool             `json:"transient_gap,omitempty"`
 	BoundaryCursor string           `json:"boundary_cursor,omitempty"`
+	// Backfill is the exact captured prefix ending at BoundaryCursor. It is an
+	// in-process handoff for finite readers and is never encoded on the wire.
+	Backfill []eventstream.Envelope `json:"-"`
 }
 
 // SessionFeed is the narrow Control-owned feed used by adapters and Surfaces.
@@ -51,8 +54,22 @@ type SessionFeed interface {
 	Prime(context.Context) error
 	Publish(eventstream.Envelope) error
 	Subscribe(context.Context, SubscribeRequest) (SubscribeResult, error)
-	SubscribeFromNow() (FeedSubscription, error)
-	Attach(<-chan eventstream.Envelope)
+	// SubscribeFromNow is the internal active-Turn handoff. Implementations
+	// register its no-history boundary before Turn start and bind its lifetime
+	// to the supplied context. Ordinary fanout retains the bounded
+	// slow-consumer disconnect policy: one paused Surface must never block the
+	// Session sequencer or a sibling ingress.
+	SubscribeFromNow(context.Context) (FeedSubscription, error)
+	// Attach publishes one finite ingress and reports an asynchronous delivery
+	// failure. A closed channel without a value means the ingress completed.
+	Attach(<-chan eventstream.Envelope) <-chan error
+	// AttachTo binds one finite Turn ingress to its prepared internal
+	// subscription. Globally accepted Envelopes are held for that target in
+	// sequence under event/byte bounds, then delivered without holding the
+	// Session sequencer. Only target delivery may wait, and only through the
+	// bounded stall timeout. Target teardown detaches its delivery while the
+	// attachment continues publishing the ingress untargeted for siblings.
+	AttachTo(FeedSubscription, <-chan eventstream.Envelope) <-chan error
 	Boundary() (*eventstream.FeedPosition, string)
 }
 

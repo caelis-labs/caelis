@@ -34,6 +34,7 @@ func projectTranscriptToolCall(input transcript.ToolProjectionInput) TranscriptE
 		ScopeID:            input.ScopeID,
 		Actor:              input.Actor,
 		OccurredAt:         input.OccurredAt,
+		Meta:               transcript.CloneAnyMap(input.Meta),
 		ToolCallID:         strings.TrimSpace(input.CallID),
 		ToolName:           toolName,
 		ToolKind:           strings.TrimSpace(input.ToolKind),
@@ -106,9 +107,8 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 			toolOutputSynthetic = strings.TrimSpace(toolOutput) != ""
 		}
 	}
-	if taskControlResult(semanticName, rawInput, displayOutput, input.Meta) {
-		toolOutput = ""
-		toolOutputSynthetic = false
+	if toolOutputHasTerminalData && transcript.MetaBool(input.Meta, "caelis", "runtime", "stream", "truncated") {
+		toolOutput = "… earlier output unavailable …\n" + toolOutput
 	}
 	if transcript.SuppressToolResultOutput(semanticName, input.ToolKind, toolOutput, toolOutputSynthetic, toolErr) {
 		toolOutput = ""
@@ -137,6 +137,7 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 		ScopeID:             input.ScopeID,
 		Actor:               input.Actor,
 		OccurredAt:          input.OccurredAt,
+		Meta:                transcript.CloneAnyMap(input.Meta),
 		ToolCallID:          strings.TrimSpace(input.CallID),
 		ToolName:            toolName,
 		ToolKind:            strings.TrimSpace(input.ToolKind),
